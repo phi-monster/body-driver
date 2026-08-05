@@ -56,7 +56,7 @@
  * ============================================================================================
  * VERSIONING
  * ============================================================================================
- * BL_ABI_VERSION is checked by `bl_open`.  A mismatch is a hard failure, never a best-effort
+ * BL_ABI_VERSION is checked by `bl_init`.  A mismatch is a hard failure, never a best-effort
  * degrade: a silently-degraded body layer is exactly the thing this layer exists to eliminate.
  */
 
@@ -115,7 +115,11 @@ typedef enum {
     BL_Q_COUNT             = 9
 } bl_quantity;
 
-#define BL_MAX_DIM   16   /* a measurement is a small vector, never an array of poses */
+/* 🔴 3 * BL_MAX_JOINTS, and that is not slack -- it is the smallest value that fits the image
+ * Jacobian (3 world axes x one column per joint).  An earlier draft used 16 "because a body
+ * quantity is a small vector"; an ordinary 6-joint arm needs 18, and a unit test caught it.
+ * A constant chosen because it felt about right is a constant nobody measured. */
+#define BL_MAX_DIM   48
 #define BL_MAX_DEPS   8
 #define BL_REASON_LEN 96
 
@@ -206,8 +210,22 @@ typedef struct bl_body bl_body;
 
 /* ------------------------------------------------------------------ the API */
 
-/* Open a body layer for one robot.  `abi_version` MUST be BL_ABI_VERSION. */
-bl_status bl_open(bl_body **out, uint32_t abi_version);
+/* Storage for one body.  THE CALLER ALLOCATES; this library never does.
+ *
+ * 🔴 A hard-real-time safety layer must not depend on an allocator, and a layer that cannot build
+ * for the target it has to run on is not a deliverable.  An earlier draft returned a heap handle;
+ * that one allocation dragged in a global allocator and made the crate unbuildable for exactly the
+ * targets it exists to serve.
+ */
+size_t bl_sizeof_body(void);
+size_t bl_alignof_body(void);
+
+/* Initialise a body layer in caller-supplied storage.  `abi_version` MUST be BL_ABI_VERSION;
+ * a mismatch is BL_EVERSION, never a best-effort degrade.  `storage` must be at least
+ * bl_sizeof_body() bytes, aligned to bl_alignof_body(), and must outlive every other call. */
+bl_status bl_init(void *storage, size_t len, uint32_t abi_version);
+
+/* Tear down.  The storage belongs to the caller and is not freed here. */
 void      bl_close(bl_body *b);
 
 /* Submit a measurement the robot made about ITSELF.  Rejects (BL_EINVAL) if uncertainty is
@@ -230,12 +248,35 @@ bl_status bl_get(const bl_body *b, uint32_t quantity, bl_measurement *out);
 bl_status bl_admit(const bl_body *b, const bl_world_ref *ref,
                    uint32_t *why, char detail[BL_REASON_LEN]);
 
+/* Per-body specification, read from the machine's rating -- never tuned to make a number look
+ * better.  Tuning `step_m` per task means the method failed; see the note on bl_policy_out. */
+typedef struct {
+    double   step_m;      /* metres per control period, from the machine's rating   */
+    uint32_t period_ms;   /* control period                                          */
+    double   damping;     /* least-squares damping, from the Jacobian's conditioning */
+    uint32_t n_joints;    /* joints this body actually has                           */
+} bl_spec;
+
+/* What bl_execute produced, or why it produced nothing.  🔴 BL_X_REFUSED and BL_X_HALTED are
+ * ANSWERS, not errors: "not permitted", "the fast face latched" and "ran and scored zero" are
+ * three different facts and must never be collapsed in a results table. */
+typedef enum {
+    BL_X_MOVE       = 0,  /* joint_cmd written and already admitted by the fast face */
+    BL_X_REFUSED    = 1,  /* the body layer refused; see bl_admit's reason           */
+    BL_X_HALTED     = 2,  /* the fast face latched; joint_cmd holds the SAFE HOLD    */
+    BL_X_BAD_INTENT = 3   /* the intent was malformed -- about the CALLER, not the body */
+} bl_exec_outcome;
+
 /* Execute one step.  Consumes the policy's world-frame intent, produces joint commands for THIS
- * body using THIS body's measurements.  Calls the fast face for limits before emitting anything.
- * `n_joints` in/out: capacity in, count written out.
+ * body using THIS body's measurements.  Order is admit -> solve -> scale -> fast face -> emit;
+ * there is no path around the fast face, which is the point.
+ *
+ * `joint_cmd` must have room for BL_MAX_JOINTS doubles.  On BL_X_HALTED it receives the safe
+ * hold -- the last admitted command -- and never zeros: zeros would be a MOVE, and "fail safe"
+ * cannot mean "fly to the origin".
  */
-bl_status bl_execute(bl_body *b, const bl_policy_out *intent,
-                     double *joint_cmd, uint32_t *n_joints);
+bl_status bl_execute(bl_body *b, const bl_policy_out *intent, const bl_spec *spec,
+                     uint32_t now_ms, double *joint_cmd, uint32_t *outcome);
 
 /* Run every registered self-test now and report.  `mask` bit i == quantity i passed.
  *
@@ -244,9 +285,20 @@ bl_status bl_execute(bl_body *b, const bl_policy_out *intent,
  */
 bl_status bl_selftest(const bl_body *b, uint64_t *mask);
 
-/* Serialize / restore the whole calibration set.  The format carries provenance, so a stored set
- * that outlives its validity window is refused on load rather than silently trusted.
+/* Serialize / restore the whole calibration set.
+ *
+ * The format carries the same provenance the in-memory measurement does, and records are written
+ * in DEPENDENCY ORDER so a single-pass reader can validate each one as it arrives.
+ *
+ * 🔴 bl_load puts every record back through the same door a fresh measurement uses.  A loader with
+ * its own private path is a loader that can admit what the live path refuses -- and then a stored
+ * file becomes a way to smuggle in a constant nobody measured, which is the hole this layer exists
+ * to close.  A truncated or altered file is refused, not partially applied.
+ *
+ * Buffer size: BL_SAVE_MAX_BYTES is a safe upper bound for any body.
  */
+#define BL_MAX_JOINTS 16
+size_t    bl_save_max_bytes(void);
 bl_status bl_save(const bl_body *b, uint8_t *buf, size_t cap, size_t *written);
 bl_status bl_load(bl_body *b, const uint8_t *buf, size_t len);
 

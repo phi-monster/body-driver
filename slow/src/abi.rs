@@ -27,9 +27,16 @@
 use core::ffi::{c_char, c_void};
 use core::mem::{align_of, size_of};
 
+use crate::execute::{execute, Intent, Outcome, Spec};
 use crate::measurement::{Measurement, Quantity, MAX_DEPS, MAX_DIM};
+use crate::persist;
 use crate::refuse::{Ask, Reason};
 use crate::Body;
+
+#[cfg(feature = "fast")]
+use crate::fast::Fast;
+#[cfg(not(feature = "fast"))]
+use crate::faststub::Fast;
 
 /// Must match `BL_ABI_VERSION` in the header.
 pub const BL_ABI_VERSION: u32 = 1;
@@ -382,5 +389,159 @@ fn write_detail(detail: *mut c_char, why: Reason, culprit: Option<Quantity>) {
     // `n < CAP` holds by construction above, so the NUL fits.
     unsafe {
         core::ptr::copy_nonoverlapping(buf.as_ptr(), detail as *mut u8, n + 1);
+    }
+}
+
+/// C mirror of `bl_policy_out`.
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct CPolicyOut {
+    /// unit vector; `|dir|` is checked, never silently normalised
+    pub dir: [f64; 3],
+    /// rotation increment about the tool frame, rad
+    pub drot: [f64; 3],
+    /// ABSOLUTE opening in [0,1], not a delta
+    pub grip: f64,
+    /// vx, vy, wz for a mobile base
+    pub base: [f64; 3],
+}
+
+/// C mirror of `bl_spec`.
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct CSpec {
+    /// metres per control period, from the machine's rating
+    pub step_m: f64,
+    /// control period, ms
+    pub period_ms: u32,
+    /// least-squares damping
+    pub damping: f64,
+    /// joints this body actually has
+    pub n_joints: u32,
+}
+
+/// Mirror of `bl_exec_outcome`.
+pub const BL_X_MOVE: u32 = 0;
+/// The body layer refused. An **answer**, not an error.
+pub const BL_X_REFUSED: u32 = 1;
+/// The fast face latched; `joint_cmd` holds the safe hold.
+pub const BL_X_HALTED: u32 = 2;
+/// The intent was malformed — about the caller, not the body.
+pub const BL_X_BAD_INTENT: u32 = 3;
+
+/// Execute one step. See the header for the ordering guarantee.
+///
+/// # Safety
+/// `b` must come from [`bl_init`]; `intent` and `spec` must be valid; `joint_cmd` must have room
+/// for `BL_MAX_JOINTS` doubles; `outcome` must be writable.
+#[no_mangle]
+pub unsafe extern "C" fn bl_execute(
+    b: *mut c_void,
+    intent: *const CPolicyOut,
+    spec: *const CSpec,
+    now_ms: u32,
+    joint_cmd: *mut f64,
+    outcome: *mut u32,
+) -> Status {
+    if b.is_null() || intent.is_null() || spec.is_null() || joint_cmd.is_null() || outcome.is_null()
+    {
+        return Status::Einval;
+    }
+    // SAFETY: all pointers checked non-null; provenance guaranteed by the caller.
+    let body = unsafe { &*(b as *const Body) };
+    // SAFETY: as above.
+    let (ci, cs) = unsafe { (*intent, *spec) };
+
+    let it = Intent {
+        dir: ci.dir,
+        drot: ci.drot,
+        grip: ci.grip,
+        base: ci.base,
+    };
+    let sp = Spec {
+        step_m: cs.step_m,
+        period_ms: cs.period_ms,
+        damping: cs.damping,
+        n_joints: cs.n_joints as usize,
+    };
+
+    let fast = fast_handle();
+    let (code, cmd) = match execute(body, &fast, &sp, &it, now_ms) {
+        Outcome::Move(c) => (BL_X_MOVE, Some(c)),
+        Outcome::Halted(c) => (BL_X_HALTED, Some(c)),
+        Outcome::Refused(_) => (BL_X_REFUSED, None),
+        Outcome::BadIntent(_) => (BL_X_BAD_INTENT, None),
+    };
+    if let Some(c) = cmd {
+        // SAFETY: the contract requires room for BL_MAX_JOINTS doubles.
+        unsafe { core::ptr::copy_nonoverlapping(c.as_ptr(), joint_cmd, c.len()) };
+    }
+    // SAFETY: `outcome` checked non-null.
+    unsafe { *outcome = code };
+    Status::Ok
+}
+
+#[cfg(feature = "fast")]
+fn fast_handle() -> Fast {
+    Fast
+}
+#[cfg(not(feature = "fast"))]
+fn fast_handle() -> Fast {
+    Fast
+}
+
+/// Upper bound on the bytes [`bl_save`] can write, for any body.
+#[no_mangle]
+pub extern "C" fn bl_save_max_bytes() -> usize {
+    persist::MAX_BYTES
+}
+
+/// Serialize the calibration set, records in dependency order.
+///
+/// # Safety
+/// `b` must come from [`bl_init`]; `buf` must be writable for `cap` bytes; `written` writable.
+#[no_mangle]
+pub unsafe extern "C" fn bl_save(
+    b: *const c_void,
+    buf: *mut u8,
+    cap: usize,
+    written: *mut usize,
+) -> Status {
+    if b.is_null() || buf.is_null() || written.is_null() {
+        return Status::Einval;
+    }
+    // SAFETY: checked non-null above.
+    let body = unsafe { &*(b as *const Body) };
+    // SAFETY: the caller promises `cap` writable bytes at `buf`.
+    let out = unsafe { core::slice::from_raw_parts_mut(buf, cap) };
+    match persist::save(body, out) {
+        Some(n) => {
+            // SAFETY: `written` checked non-null.
+            unsafe { *written = n };
+            Status::Ok
+        }
+        None => Status::Enospace,
+    }
+}
+
+/// Restore a calibration set. Every record goes through the same validation a live measurement
+/// faces — a stored file is not a back door.
+///
+/// # Safety
+/// `b` must come from [`bl_init`]; `buf` must be readable for `len` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn bl_load(b: *mut c_void, buf: *const u8, len: usize) -> Status {
+    if b.is_null() || buf.is_null() {
+        return Status::Einval;
+    }
+    // SAFETY: checked non-null above.
+    let body = unsafe { &mut *(b as *mut Body) };
+    // SAFETY: the caller promises `len` readable bytes at `buf`.
+    let src = unsafe { core::slice::from_raw_parts(buf, len) };
+    match persist::load(body, src) {
+        Ok(_) => Status::Ok,
+        // A malformed or corrupt file is a statement about the FILE, so it is Einval rather than
+        // Refuse: REFUSE means "this body cannot do that safely", which is a different fact.
+        Err(_) => Status::Einval,
     }
 }

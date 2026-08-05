@@ -72,6 +72,7 @@ pub mod fast;
 pub mod faststub;
 pub mod hand;
 pub mod measurement;
+pub mod persist;
 pub mod refuse;
 
 use measurement::{Malformed, Measurement, Quantity};
