@@ -11,20 +11,19 @@ package body Body_Layer_Fast is
    ---------------------------------------------------------------- Initial
 
    function Initial return State is
-      S : State;
    begin
-      --  The defaults in the private record already encode "refusing".  Naming it here so that
-      --  a future edit to the record cannot silently make the default permissive.
-      S.Is_Installed := False;
-      S.Is_Halted    := True;
-      S.Why          := Not_Installed;
-      S.N            := 0;
-      S.Cap          := 0.0;
-      S.Deadline     := 0;
-      S.Last_Ok      := 0;
-      S.Lim          := (others => (Lo => 0.0, Hi => 0.0));
-      S.Hold         := (others => 0.0);
-      return S;
+      --  Written out in full rather than relying on the record's defaults: a future edit to those
+      --  defaults must not be able to make the initial state permissive without touching this
+      --  function, where the intent is stated.
+      return (Is_Installed => False,
+              Is_Halted    => True,
+              Why          => Not_Installed,
+              N            => 0,
+              Lim          => [others => (Lo => 0.0, Hi => 0.0)],
+              Cap          => 0.0,
+              Deadline     => 0,
+              Last_Ok      => 0,
+              Hold         => [others => 0.0]);
    end Initial;
 
    --------------------------------------------------------- Install_Limits
@@ -33,34 +32,23 @@ package body Body_Layer_Fast is
      (S        : in out State;
       Lim      :        Limit_Array;
       N        :        Joint_Count;
+      Hold0    :        Joint_Array;
       Cap      :        Newton;
       Deadline :        Millis;
       Now      :        Millis)
    is
    begin
-      S.Lim          := Lim;
-      S.N            := N;
-      S.Cap          := Cap;
-      S.Deadline     := Deadline;
-      S.Last_Ok      := Now;
-      S.Is_Installed := True;
-      S.Is_Halted    := False;
-      S.Why          := None;
+      S := (S with delta
+              Lim          => Lim,
+              N            => N,
+              Hold         => Hold0,   --  where the arm is, supplied and checked, never invented
+              Cap          => Cap,
+              Deadline     => Deadline,
+              Last_Ok      => Now,
+              Is_Installed => True,
+              Is_Halted    => False,
+              Why          => None);
 
-      --  Hold starts at the midpoint of each installed range, which is inside the envelope by
-      --  construction.  It must NOT start at zero: zero is only inside the envelope by luck, and
-      --  a "safe hold" that sits outside the limits is the opposite of safe.
-      for I in Joint_Index loop
-         if Natural (I) <= N then
-            S.Hold (I) := (Lim (I).Lo + Lim (I).Hi) / 2.0;
-         else
-            S.Hold (I) := 0.0;
-         end if;
-         pragma Loop_Invariant
-           (for all K in Joint_Index'First .. I =>
-              (if Natural (K) <= N then
-                 S.Hold (K) >= Lim (K).Lo and then S.Hold (K) <= Lim (K).Hi));
-      end loop;
    end Install_Limits;
 
    ------------------------------------------------------------------ Admit
@@ -85,24 +73,25 @@ package body Body_Layer_Fast is
       end if;
 
       if not S.Is_Installed then
-         S.Is_Halted := True;
-         S.Why       := Not_Installed;
+         --  🔴 One delta aggregate, not two field assignments.  Between `Is_Halted := True` and
+         --  `Why := ...` the record's invariant (a halt always carries a reason) is momentarily
+         --  false, and the prover is right to object -- an interrupt landing there would observe
+         --  a state that must not exist.  Updating in one step removes the window.
+         S := (S with delta Is_Halted => True, Why => Not_Installed);
          Out_Cmd     := S.Hold;
          Ok          := False;
          return;
       end if;
 
       if Elapsed (S, Now) > S.Deadline then
-         S.Is_Halted := True;
-         S.Why       := Watchdog_Expired;
+         S := (S with delta Is_Halted => True, Why => Watchdog_Expired);
          Out_Cmd     := S.Hold;
          Ok          := False;
          return;
       end if;
 
       if Force > S.Cap then
-         S.Is_Halted := True;
-         S.Why       := Force_Exceeded;
+         S := (S with delta Is_Halted => True, Why => Force_Exceeded);
          Out_Cmd     := S.Hold;
          Ok          := False;
          return;
@@ -127,8 +116,7 @@ package body Body_Layer_Fast is
       end loop;
 
       if not Within then
-         S.Is_Halted := True;
-         S.Why       := Limit_Violation;
+         S := (S with delta Is_Halted => True, Why => Limit_Violation);
          Out_Cmd     := S.Hold;
          Ok          := False;
          return;
@@ -145,8 +133,7 @@ package body Body_Layer_Fast is
    procedure Tick (S : in out State; Now : Millis) is
    begin
       if not S.Is_Halted and then Elapsed (S, Now) > S.Deadline then
-         S.Is_Halted := True;
-         S.Why       := Watchdog_Expired;
+         S := (S with delta Is_Halted => True, Why => Watchdog_Expired);
       end if;
    end Tick;
 
@@ -154,8 +141,7 @@ package body Body_Layer_Fast is
 
    procedure Stop (S : in out State) is
    begin
-      S.Is_Halted := True;
-      S.Why       := External_Stop;
+      S := (S with delta Is_Halted => True, Why => External_Stop);
    end Stop;
 
    ------------------------------------------------------------------ Clear
@@ -171,9 +157,9 @@ package body Body_Layer_Fast is
       --  system halted has no business restarting it -- that is the entire content of this check,
       --  and it is why Clear takes an argument at all.
       if S.Is_Halted and then S.Why = Witness and then S.Is_Installed then
-         S.Is_Halted := False;
-         S.Why       := None;
-         S.Last_Ok   := Now;   --  restart the watchdog window, do not inherit a stale one
+         --  Restart the watchdog window in the same step; inheriting a stale one would halt again
+         --  immediately and read as "it will not clear" rather than "it cleared and timed out".
+         S := (S with delta Is_Halted => False, Why => None, Last_Ok => Now);
          Ok          := True;
       else
          Ok := False;

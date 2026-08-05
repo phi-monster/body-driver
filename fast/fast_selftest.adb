@@ -38,13 +38,13 @@ procedure Fast_Selftest is
    end Check;
 
    function Envelope return Limit_Array is
-      L : constant Limit_Array := (others => (Lo => -1.0, Hi => 1.0));
+      L : constant Limit_Array := [others => (Lo => -1.0, Hi => 1.0)];
    begin
       return L;
    end Envelope;
 
-   Good : constant Joint_Array := (others => 0.5);
-   Bad  : Joint_Array := (others => 0.5);
+   Good : constant Joint_Array := [others => 0.5];
+   Bad  : Joint_Array := [others => 0.5];
 
 begin
    Put_Line ("[fast_selftest] every case below MUST be refused");
@@ -67,7 +67,7 @@ begin
       Out_C : Joint_Array;
       Ok    : Boolean;
    begin
-      Install_Limits (S, Envelope, 6, 20.0, 100, 1_000);
+      Install_Limits (S, Envelope, 6, Good, 20.0, 100, 1_000);
       Bad := Good;
       Bad (3) := 1.5;   --  outside the installed envelope
       Admit (S, Bad, 0.0, 1_010, Out_C, Ok);
@@ -84,7 +84,7 @@ begin
       Out_C : Joint_Array;
       Ok    : Boolean;
    begin
-      Install_Limits (S, Envelope, 6, 20.0, 100, 1_000);
+      Install_Limits (S, Envelope, 6, Good, 20.0, 100, 1_000);
       Admit (S, Good, 25.0, 1_010, Out_C, Ok);   --  above the installed cap
       Check ("force above cap halts", not Ok and then Reason (S) = Force_Exceeded);
    end;
@@ -95,7 +95,7 @@ begin
       Out_C : Joint_Array;
       Ok    : Boolean;
    begin
-      Install_Limits (S, Envelope, 6, 20.0, 100, 1_000);
+      Install_Limits (S, Envelope, 6, Good, 20.0, 100, 1_000);
       Tick (S, 1_500);   --  deadline was 100 ms; 500 ms of silence
       Check ("watchdog expires on silence", Halted (S) and then Reason (S) = Watchdog_Expired);
       --  and a perfectly good command must NOT walk it out of the halt
@@ -108,7 +108,7 @@ begin
       S  : State := Initial;
       Ok : Boolean;
    begin
-      Install_Limits (S, Envelope, 6, 20.0, 100, 1_000);
+      Install_Limits (S, Envelope, 6, Good, 20.0, 100, 1_000);
       Stop (S);
       Clear (S, Watchdog_Expired, 1_100, Ok);   --  wrong witness
       Check ("clear with wrong witness refuses", not Ok and then Halted (S));
@@ -124,7 +124,7 @@ begin
    begin
       --  The one admitted case, kept LAST and kept small: without it a suite that refuses
       --  everything would also pass, and "refuses everything" is not a body layer either.
-      Install_Limits (S, Envelope, 6, 20.0, 100, 1_000);
+      Install_Limits (S, Envelope, 6, Good, 20.0, 100, 1_000);
       Admit (S, Good, 1.0, 1_050, Out_C, Ok);
       Check ("an in-envelope command IS admitted", Ok and then Out_C (1) = Good (1));
    end;

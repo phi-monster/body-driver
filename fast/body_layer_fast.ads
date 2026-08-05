@@ -95,14 +95,25 @@ package Body_Layer_Fast is
 
    --  Install the envelope this body was MEASURED to have.  N = 0 is rejected: a body with no
    --  joints cannot be commanded, and accepting it would let an unconfigured layer look configured.
+   --  🔴 `Hold0` is where the arm ACTUALLY IS right now, and it is an argument rather than
+   --  something this package computes.  An earlier version invented the midpoint of each range.
+   --  That is a fabricated body constant -- the exact thing this layer exists to abolish -- and
+   --  it is also wrong on its own terms: the safe place to hold an arm is where the arm is, not
+   --  the centre of its travel, which may be through the table.  The precondition makes "inside
+   --  the envelope" the caller's obligation, checked, rather than an assumption.
    procedure Install_Limits
      (S        : in out State;
       Lim      :        Limit_Array;
       N        :        Joint_Count;
+      Hold0    :        Joint_Array;
       Cap      :        Newton;
       Deadline :        Millis;
       Now      :        Millis)
-     with Pre  => N > 0 and then Deadline > 0,
+     with Pre  => N > 0 and then Deadline > 0
+                  and then (for all I in Joint_Index =>
+                              (if Natural (I) <= N then
+                                 Hold0 (I) >= Lim (I).Lo
+                                 and then Hold0 (I) <= Lim (I).Hi)),
           Post => Installed (S)
                   and then Joints (S) = N
                   and then Force_Cap (S) = Cap
@@ -149,8 +160,12 @@ package Body_Layer_Fast is
       Now     :        Millis;
       Ok      :    out Boolean)
      with Pre  => Witness /= None,
+          --  🔴 CORRECTED 2026-08-06, and the prover is what caught it.  The old text said the
+          --  failing branch leaves the state HALTED -- false when `Clear` is called on a state
+          --  that was never halted, which is a perfectly legal call.  The honest contract is
+          --  "on failure nothing changes", and that is also the stronger guarantee.
           Post => (if Ok then not Halted (S) and then Reason (S) = None
-                   else Halted (S) and then Reason (S) = Reason (S'Old));
+                   else S = S'Old);
 
    ------------------------------------------------- accessors used in contracts
 
@@ -162,17 +177,21 @@ package Body_Layer_Fast is
 
 private
 
+   --  🔴 The invariant the provers need, and that a reader needs just as much: a halt ALWAYS
+   --  carries a reason, and a running state never does.  Without writing it down, "if it refused
+   --  then Reason /= None" is unprovable -- not because it is false, but because nothing said so.
    type State is record
       Is_Installed : Boolean     := False;
       Is_Halted    : Boolean     := True;
       Why          : Halt_Reason := Not_Installed;
       N            : Joint_Count := 0;
-      Lim          : Limit_Array := (others => (Lo => 0.0, Hi => 0.0));
+      Lim          : Limit_Array := [others => (Lo => 0.0, Hi => 0.0)];
       Cap          : Newton      := 0.0;
       Deadline     : Millis      := 0;
       Last_Ok      : Millis      := 0;
-      Hold         : Joint_Array := (others => 0.0);
-   end record;
+      Hold         : Joint_Array := [others => 0.0];
+   end record
+     with Dynamic_Predicate => (State.Is_Halted = (State.Why /= None));
 
    function Installed   (S : State) return Boolean     is (S.Is_Installed);
    function Halted      (S : State) return Boolean     is (S.Is_Halted);

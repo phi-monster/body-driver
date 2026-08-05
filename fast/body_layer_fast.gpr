@@ -16,7 +16,9 @@ project Body_Layer_Fast is
 
    package Compiler is
       for Default_Switches ("Ada") use
-        ("-gnatwa",        --  all warnings
+        ("-gnat2022",      --  delta aggregates: a state change that preserves the record's
+                           --  invariant must be ONE step, and `with delta` is how you write that
+         "-gnatwa",        --  all warnings
          "-gnatwe",        --  warnings are errors: a warning nobody reads is a warning nobody has
          "-gnata",         --  assertions ON, including the pre/postconditions in the spec
          "-gnatVa",        --  all validity checks

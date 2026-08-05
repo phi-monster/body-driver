@@ -79,7 +79,7 @@ body layer 快面 ── 限位 · 力限 · 看门狗 · 急停               �
 |---|---|
 | [`abi/body_layer.h`](abi/body_layer.h) | **the contract.** Stable C ABI, so binding it does not require adopting our language |
 | [`slow/`](slow/) | Rust. Measure, store with provenance, judge expiry, refuse. **Zero dependencies, zero allocation.** |
-| [`fast/`](fast/) | Ada/SPARK. Limits, force cap, watchdog, e-stop, with machine-checked absence of runtime errors |
+| [`fast/`](fast/) | Ada/SPARK. Limits, force cap, watchdog, e-stop. **`gnatprove --level=2`: 40/40 checks proved, 0 unproved** (18 run-time, 7 functional contracts, 2 assertions, 3 initialization, 10 termination) |
 
 Both faces hold the **same** numbers; the fast face exists only because *a force limit checked once
 a second is not a safety limit*.
@@ -99,6 +99,25 @@ The commercial shape is selling compliance, so a kernel with a machine-checked p
 feature**, not engineering vanity.
 
 ---
+
+## What the prover found that review did not
+
+Three things, and they are the argument for doing this in SPARK on day one rather than later:
+
+1. **A contract that was simply wrong.** `Clear`'s postcondition claimed the failing branch leaves
+   the state halted. False whenever `Clear` is called on a state that was never halted — a legal
+   call. Corrected to "on failure nothing changes", which is also the stronger guarantee.
+2. **A window where the invariant did not hold.** Setting `Is_Halted := True` and then
+   `Why := <reason>` leaves one statement in between during which a halt carries no reason. An
+   interrupt landing there observes a state that must not exist. Fixed with one `with delta`
+   update per transition.
+3. 🔴 **An invented body constant, caught as an unprovable assertion.** `Install_Limits` used to
+   seat the safe hold at the midpoint of each joint's range. The prover could not discharge
+   `Lo + (Hi−Lo)/2 ≤ Hi` over floats — and chasing that proof would have been solving the wrong
+   problem, because *the midpoint of an arm's travel may be through the table*. The safe place to
+   hold an arm is **where the arm is**. It is now an argument with a precondition, checked, rather
+   than a number this package makes up. That is the same rule as the rest of the layer:
+   **nothing that describes the body may be invented.**
 
 ## The rule about guards
 
