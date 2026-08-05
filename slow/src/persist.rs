@@ -340,10 +340,8 @@ mod tests {
             dim: 1,
             value: [0.0; MAX_DIM],
             uncertainty: [0.01; MAX_DIM],
-            // Wide enough to contain every value these tests store.  The store rejects a value
-            // outside its own probed range -- which is how this fixture found its own bug twice.
-            valid_lo: [-2000.0; MAX_DIM],
-            valid_hi: [2000.0; MAX_DIM],
+            valid_lo: [-1.0; MAX_DIM],
+            valid_hi: [1.0; MAX_DIM],
             measured_at_ns: 1_234,
             valid_for_ns: 0,
             deps: [None; MAX_DEPS],

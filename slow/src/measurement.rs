@@ -19,11 +19,25 @@
 //!
 //! # The rule about `valid_lo/hi`
 //!
-//! They record the range **actually probed**, not the range someone hopes it extrapolates to.
-//! This distinction has been paid for: a gravity self-calibration's residual error turned out to
-//! be *entirely* interpolation error between sampled poses, so the honest description of its
-//! validity is "the poses I visited", and asking outside them must produce a REFUSE rather than a
-//! confident extrapolation.
+//! They record the **domain actually probed** — not the range someone hopes the value extrapolates
+//! to, and 🔴 **not the range of the value itself**. Those are different quantities, usually in
+//! different units:
+//!
+//! | quantity | `value` is | `valid_lo/hi` is |
+//! |---|---|---|
+//! | image Jacobian | image units per command unit | the **commands** actually issued |
+//! | arm weight | torque to hold | the **joint angles** actually visited |
+//! | hand pixel | a pixel | the frame — the same units, by coincidence |
+//!
+//! An earlier draft rejected any measurement whose `value` fell outside its own `valid_lo/hi`.
+//! That check reads as obviously correct and is obviously wrong: it is a units error that happens
+//! to be satisfied by the one quantity where domain and value share units. The end-to-end test
+//! caught it the first time a real Jacobian was submitted.
+//!
+//! The distinction has been paid for on the other side too: a gravity self-calibration's residual
+//! turned out to be *entirely* interpolation error between the poses it had sampled, so the honest
+//! statement of its validity is "the poses I visited", and asking outside them must produce a
+//! REFUSE rather than a confident extrapolation.
 
 use core::fmt;
 
@@ -121,8 +135,6 @@ pub enum Malformed {
     NegativeUncertainty,
     /// `valid_lo >= valid_hi` on some axis: an empty validity window.
     EmptyRange,
-    /// The measured value sits outside the range it claims to be valid over.
-    ValueOutsideOwnRange,
     /// It declares a dependency on a quantity that has never been measured on this body.
     UnmeasuredDependency,
     /// Its own self-test did not pass at submission time.
@@ -138,7 +150,6 @@ impl fmt::Display for Malformed {
             Malformed::NonFinite => "non-finite value/uncertainty/bound",
             Malformed::NegativeUncertainty => "negative uncertainty",
             Malformed::EmptyRange => "empty validity range (lo >= hi)",
-            Malformed::ValueOutsideOwnRange => "value lies outside its own validity range",
             Malformed::UnmeasuredDependency => "depends on a quantity never measured here",
             Malformed::SelfTestFailed => "self-test did not pass",
             Malformed::TooManyDeps => "too many dependencies",
@@ -207,9 +218,10 @@ impl Measurement {
             if lo >= hi {
                 return Err(Malformed::EmptyRange);
             }
-            if v < lo || v > hi {
-                return Err(Malformed::ValueOutsideOwnRange);
-            }
+            // 🔴 Deliberately NOT `lo <= v <= hi`. `valid_lo/hi` is the DOMAIN this quantity was
+            // probed over, and `value` is the quantity itself -- usually different units. See the
+            // table in the module docs.
+            let _ = v;
         }
         let n_deps = self.deps.iter().filter(|d| d.is_some()).count();
         if n_deps > MAX_DEPS {

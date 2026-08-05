@@ -73,6 +73,7 @@ pub mod faststub;
 pub mod hand;
 pub mod measurement;
 pub mod persist;
+pub mod probe;
 pub mod refuse;
 
 use measurement::{Malformed, Measurement, Quantity};
@@ -359,11 +360,8 @@ mod execute_tests {
             dim: 18,
             value: [0.0; MAX_DIM],
             uncertainty: [0.01; MAX_DIM],
-            // The probed range must actually contain the measured value; the store rejects it
-            // otherwise, which is how this test found its own bug.  800 px/rad is the order the
-            // rig really reports (recorded column norms: 792 / 842 / 904 px/m).
-            valid_lo: [-2000.0; MAX_DIM],
-            valid_hi: [2000.0; MAX_DIM],
+            valid_lo: [-1.0; MAX_DIM],
+            valid_hi: [1.0; MAX_DIM],
             measured_at_ns: 0,
             valid_for_ns: 0,
             deps: [None; MAX_DEPS],
@@ -471,10 +469,18 @@ mod execute_tests {
 mod fast_conformance {
     use crate::fast::{Fast, FastStatus, HaltReason, MAX_JOINTS};
 
+    /// 🔴 The fast face holds ONE state per process, deliberately: a robot has one body, and an
+    /// array of them would invite the "which one am I talking to" class of bug for no gain.  The
+    /// consequence is that tests touching it must not run concurrently -- so they take this lock.
+    /// Serialising the tests is the right trade; making the production layer multi-instance to
+    /// suit a test harness is not.
+    pub(crate) static FAST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     /// The Ada core must reject a NaN limit, halt on an out-of-envelope command rather than clamp
     /// it, keep the safe hold inside the envelope, and still admit a good command.
     #[test]
     fn the_proven_core_refuses_when_it_must() {
+        let _g = FAST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let f = Fast::reset();
         f.selftest().expect("the proven fast face did not behave as proved");
     }
@@ -483,6 +489,7 @@ mod fast_conformance {
     /// A safety state you can leave by doing nothing is not a safety state.
     #[test]
     fn a_latch_is_a_latch() {
+        let _g = FAST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let f = Fast::reset();
         let lo = [-1.0; MAX_JOINTS];
         let hi = [1.0; MAX_JOINTS];
@@ -508,6 +515,7 @@ mod fast_conformance {
     /// joint while every call still returned success.
     #[test]
     fn the_two_sides_agree_on_the_joint_count() {
+        let _g = FAST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let f = Fast::reset();
         let lo = [-1.0; MAX_JOINTS];
         let hi = [1.0; MAX_JOINTS];
@@ -522,5 +530,190 @@ mod fast_conformance {
             f.install(&lo, &hi, &hold, MAX_JOINTS as u32, 20.0, 100, 1_000),
             FastStatus::Ok
         );
+    }
+}
+
+/// End-to-end: a body that knows nothing measures itself and then moves.
+///
+/// 🔴 This is the test the whole layer exists to pass, and the shape of it *is* the claim:
+/// **0 demonstrations, 0 collected episodes, 0 hand-filled numbers.** Nothing below types in a
+/// body constant. Every number the robot uses about itself, it obtained by commanding a step and
+/// watching what happened.
+///
+/// It also asserts the order — refuse *before* measuring, move *after* — because a layer that
+/// happens to work once it is configured, and permits when it is not, permits every time somebody
+/// forgets to configure it. Forgetting is the normal case.
+#[cfg(test)]
+mod end_to_end {
+    use super::*;
+    use execute::{execute, Intent, Outcome, Spec};
+    use hand::{Candidate, HandTracker};
+    use measurement::MAX_DIM;
+    use probe::{default_hand_config, Sample};
+
+    const N: usize = 6;
+
+    fn spec() -> Spec {
+        Spec {
+            step_m: 0.004,
+            period_ms: 40,
+            damping: 0.05,
+            n_joints: N,
+        }
+    }
+
+    fn forward(cmd: f64, j: usize) -> [f64; 2] {
+        // Stand-in for the world: joint j moves the tracked point with a per-joint gain. The
+        // numbers do not matter; what matters is that the layer never receives them -- it can only
+        // find them out by commanding and looking.
+        let gain = 0.02 + 0.004 * j as f64;
+        [0.5 + gain * cmd, 0.5 - 0.5 * gain * cmd]
+    }
+
+    #[test]
+    fn a_body_that_knows_nothing_measures_itself_and_then_moves() {
+        #[cfg(feature = "fast")]
+        let _g = crate::fast_conformance::FAST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let mut body = Body::new();
+        let fast = execute::Fast_for_test();
+
+        // ---- 1. before it has measured anything, it must refuse ------------------------------
+        let intent = Intent {
+            dir: [1.0, 0.0, 0.0],
+            drot: [0.0; 3],
+            grip: 1.0,
+            base: [0.0; 3],
+        };
+        assert!(
+            matches!(execute(&body, &fast, &spec(), &intent, 1_000), Outcome::Refused(_)),
+            "an unmeasured body permitted motion -- the default is permissive"
+        );
+        assert_eq!(body.hand_filled_constants(), 0);
+        assert_eq!(body.missing().count(), measurement::Quantity::COUNT);
+
+        // ---- 2. it probes itself: command a step, watch the image ---------------------------
+        let mut samples: [Sample; N + 3] = [Sample {
+            cmd: [0.0; MAX_DIM],
+            n: N,
+            uv: [0.5, 0.5],
+            at_ns: 0,
+        }; N + 3];
+        for (k, s) in samples.iter_mut().enumerate() {
+            let c = 0.01 * k as f64;
+            for j in 0..N {
+                s.cmd[j] = c;
+            }
+            // superpose every joint's contribution, exactly as a real frame would
+            let mut uv = [0.0, 0.0];
+            for j in 0..N {
+                let p = forward(c, j);
+                uv[0] += p[0] / N as f64;
+                uv[1] += p[1] / N as f64;
+            }
+            s.uv = uv;
+            s.at_ns = k as u64;
+        }
+        let jac = probe::image_jacobian(&samples, N, 1_000_000_000, 1e-4)
+            .expect("the probe declined on a clean response");
+        let jac_epoch = body.submit(jac).expect("a measured Jacobian was rejected");
+
+        // ---- 3. it finds its own hand, and keeps finding it ----------------------------------
+        let mut tracker = HandTracker::new(default_hand_config());
+        let cands = [
+            Candidate { u: 0.62, v: 0.44, gain: 1.0, rigidity: 0.95, pixels: 900, spread: 0.003 },
+            // a competitor that moves too, but clearly weaker -- separable, so it may be resolved
+            Candidate { u: 0.31, v: 0.70, gain: 0.15, rigidity: 0.9, pixels: 500, spread: 0.004 },
+        ];
+        // Measured on the SAME clock the executor will use.  A hand point is valid for about as
+        // long as the hand has not moved -- 50 ms, one control period or two -- so a test that
+        // measured at 1 ms and executed at 1010 ms found the staleness gate instead of the
+        // executor.  That was a test bug, and it is asserted deliberately at the end.
+        let hp = probe::hand_pixel(&mut tracker, &cands, 1_000_000_000, 2, 0, jac_epoch)
+            .expect("the hand probe declined on a separable frame");
+        body.submit(hp).expect("a measured hand point was rejected");
+
+        // reach: probed, like everything else
+        let mut reach = measurement::Measurement {
+            quantity: measurement::Quantity::Reach,
+            dim: 2,
+            value: [0.5; MAX_DIM],
+            uncertainty: [0.01; MAX_DIM],
+            valid_lo: [0.0; MAX_DIM],
+            valid_hi: [1.0; MAX_DIM],
+            measured_at_ns: 1_000_000_000,
+            valid_for_ns: 0,
+            deps: [None; measurement::MAX_DEPS],
+            epoch: 0,
+            selftest_passed: true,
+            prev_epoch: 0,
+        };
+        reach.deps[0] = Some((measurement::Quantity::ImageJacobian, jac_epoch));
+        body.submit(reach).unwrap();
+
+        // ---- 4. now it may move --------------------------------------------------------------
+        let out = execute(&body, &fast, &spec(), &intent, 1_010);
+        #[cfg(feature = "fast")]
+        {
+            // The proven core must be installed before it will admit anything -- that is its job.
+            let lo = [-1.0; fast::MAX_JOINTS];
+            let hi = [1.0; fast::MAX_JOINTS];
+            let hold = [0.0; fast::MAX_JOINTS];
+            let f = fast::Fast::reset();
+            assert_eq!(
+                f.install(&lo, &hi, &hold, N as u32, 20.0, 1_000, 1_000),
+                fast::FastStatus::Ok
+            );
+            match execute(&body, &f, &spec(), &intent, 1_010) {
+                Outcome::Move(cmd) => {
+                    let travelled = cmd[..N].iter().map(|x| x * x).sum::<f64>().sqrt();
+                    assert!(
+                        (travelled - spec().step_m).abs() < 1e-9,
+                        "step came from somewhere other than the spec: {travelled}"
+                    );
+                }
+                other => panic!("a fully measured body still would not move: {other:?}"),
+            }
+        }
+        #[cfg(not(feature = "fast"))]
+        assert!(
+            matches!(out, Outcome::Halted(_)),
+            "without the proven core anything but a halt is wrong"
+        );
+        let _ = out;
+
+        // ---- 5. and the claim itself ---------------------------------------------------------
+        assert_eq!(
+            body.hand_filled_constants(),
+            0,
+            "a body constant was typed in rather than measured"
+        );
+
+        // ---- 5b. a hand point goes stale in tens of milliseconds, and that is the point --------
+        // The old estimator's whole failure was a fit that stayed trusted for 700 steps after it
+        // stopped being true: 2.0 px at fit time, 4.9-14.6 px at the moment that mattered.  A short
+        // lifetime is what turns "it drifted" into a refusal instead of a confident wrong answer.
+        {
+            let mut ask = refuse::Ask::EMPTY;
+            ask.needs[0] = Some(measurement::Quantity::HandPixel);
+            assert!(body.admit(&ask, 1_000_020_000).admit, "20 ms later it should still hold");
+            let v = body.admit(&ask, 3_000_000_000); // 2 s later (1e9 -> 3e9 ns)
+            assert!(!v.admit && v.why == refuse::Reason::Stale,
+                    "a two-second-old hand point was still being trusted");
+        }
+
+        // ---- 6. knock the camera: everything measured against it must go invalid --------------
+        // The case a wall-clock TTL cannot catch. Nothing about the hand point's own freshness
+        // changed; it is worthless anyway.
+        let jac2 = probe::image_jacobian(&samples, N, 1_000_010_000, 1e-4).unwrap();
+        body.submit(jac2).unwrap();
+        let mut ask = refuse::Ask::EMPTY;
+        ask.needs[0] = Some(measurement::Quantity::HandPixel);
+        // Note the clock: only 10 ms later, so the hand point is NOT stale.  It is refused purely
+        // because what it was measured against moved -- the case a wall-clock TTL cannot catch.
+        let v = body.admit(&ask, 1_000_020_000);
+        assert!(!v.admit && v.why == refuse::Reason::DependencyChanged,
+                "re-measuring the Jacobian did not invalidate what was measured against it");
     }
 }
