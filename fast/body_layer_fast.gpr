@@ -1,0 +1,44 @@
+--  GNAT project for the fast face.
+--
+--  Build:   gprbuild -P body_layer_fast.gpr
+--  Prove:   gnatprove -P body_layer_fast.gpr --level=2 --report=all
+--
+--  🔴 The proof is part of the deliverable, not a nice-to-have.  The commercial claim is
+--  compliance; "we ran some tests" is not the same product as "absence of runtime errors is
+--  machine-checked".  CI must fail if gnatprove reports any unproved check in Body_Layer_Fast.
+
+project Body_Layer_Fast is
+
+   for Languages use ("Ada");
+   for Source_Dirs use (".");
+   for Object_Dir use "obj";
+   for Main use ("fast_selftest.adb");
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        ("-gnatwa",        --  all warnings
+         "-gnatwe",        --  warnings are errors: a warning nobody reads is a warning nobody has
+         "-gnata",         --  assertions ON, including the pre/postconditions in the spec
+         "-gnatVa",        --  all validity checks
+         --  Style, so an open-source file everybody reads looks the same to everybody.  The
+         --  numeric indentation check is deliberately NOT in this set: it fights hard-wrapped
+         --  prose in comments, and a style rule that makes people delete explanations is a bad
+         --  trade.  Every SUBSTANTIVE check stays on, and -gnatwe keeps them fatal.
+         "-gnatyaAbcdefhiklmnprstux",
+         "-gnatyM110",
+         "-O2",
+         "-g");
+   end Compiler;
+
+   package Prove is
+      for Proof_Switches ("Ada") use
+        ("--level=2",
+         "--report=all",
+         "--checks-as-errors=on");   --  an unproved check fails the build, not a note in a log
+   end Prove;
+
+   package Builder is
+      for Default_Switches ("Ada") use ("-j0");
+   end Builder;
+
+end Body_Layer_Fast;

@@ -1,0 +1,386 @@
+//! The C ABI. `../../abi/body_layer.h` is the contract; this file implements it.
+//!
+//! # Why the ABI is the audit surface
+//!
+//! The claim is "anybody's mind + anybody's body". A leaderboard run, or anyone else's stack, must
+//! go **through** these functions rather than reaching around them, because reaching around is
+//! where cheating hides and nobody — including us — would know it had happened.
+//!
+//! So the ABI is built to make the cheat *unrepresentable* rather than *forbidden*:
+//!
+//! * [`bl_world_ref`] — everything any VLM or world model can say — is a normalised pixel, a verb,
+//!   and a coarse effort scalar. It has no `z`, no pose, no object id, no task id. **A pointer
+//!   that cannot express a pose cannot leak one.**
+//! * [`bl_policy_in`] — everything the action model sees — is an image plus that reference. No
+//!   joint angles, no link lengths, no camera matrix, no gripper span, no robot name. That absence
+//!   *is* the invariant separating this from a body-conditioned policy.
+//!
+//! An auditor checking for a privileged channel reads the struct definitions. If no member can
+//! carry it, no amount of downstream code can.
+//!
+//! # Safety
+//!
+//! Every entry point is `unsafe extern "C"` and validates its pointers before use. A null handle
+//! or a version mismatch is a hard status, never a best-effort continue: a silently degraded body
+//! layer is the exact thing this layer exists to eliminate.
+
+use core::ffi::{c_char, c_void};
+use core::mem::{align_of, size_of};
+
+use crate::measurement::{Measurement, Quantity, MAX_DEPS, MAX_DIM};
+use crate::refuse::{Ask, Reason};
+use crate::Body;
+
+/// Must match `BL_ABI_VERSION` in the header.
+pub const BL_ABI_VERSION: u32 = 1;
+
+/// Status codes; mirror of `bl_status`.
+#[repr(u32)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum Status {
+    /// Proceed.
+    Ok = 0,
+    /// A refusal. **An answer, not an error.**
+    Refuse = 1,
+    /// Bad argument.
+    Einval = 2,
+    /// ABI version mismatch — hard failure, never a degrade.
+    Eversion = 3,
+    /// Output buffer too small.
+    Enospace = 4,
+    /// Internal invariant broken.
+    Einternal = 5,
+}
+
+/// C-layout mirror of [`Measurement`]. Field order and types match the header exactly.
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct CMeasurement {
+    /// `bl_quantity`
+    pub quantity: u32,
+    /// used length of the arrays below
+    pub dim: u32,
+    /// measured value
+    pub value: [f64; MAX_DIM],
+    /// 1σ, same units as `value`
+    pub uncertainty: [f64; MAX_DIM],
+    /// low end of the range actually probed
+    pub valid_lo: [f64; MAX_DIM],
+    /// high end of the range actually probed
+    pub valid_hi: [f64; MAX_DIM],
+    /// monotonic ns
+    pub measured_at_ns: u64,
+    /// 0 == "until a dependency changes"
+    pub valid_for_ns: u64,
+    /// used length of `deps`
+    pub n_deps: u32,
+    /// quantities this was measured against
+    pub deps: [u32; MAX_DEPS],
+    /// their epoch at measurement time
+    pub dep_epoch: [u64; MAX_DEPS],
+    /// bumped on every re-measure
+    pub epoch: u64,
+    /// 0/1
+    pub selftest_passed: u32,
+    /// the epoch this replaced
+    pub prev_epoch: u64,
+}
+
+/// C-layout mirror of `bl_world_ref` — **the entire vocabulary any VLM/WM may use**.
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct CWorldRef {
+    /// normalised pixel
+    pub u: f64,
+    /// normalised pixel
+    pub v: f64,
+    /// 0 for a point; >0 = region radius
+    pub extent: f64,
+    /// `bl_verb`
+    pub verb: u32,
+    /// `[0,1]` coarse effort. Force is stiffness × deflection — physics, zero data.
+    pub manner: f64,
+    /// which frame this refers to
+    pub frame_id: u64,
+}
+
+impl CMeasurement {
+    fn to_native(self) -> Option<Measurement> {
+        let q = Quantity::from_u32(self.quantity)?;
+        if self.dim == 0 || self.dim as usize > MAX_DIM {
+            return None;
+        }
+        if self.n_deps as usize > MAX_DEPS {
+            return None;
+        }
+        let mut deps = [None; MAX_DEPS];
+        for i in 0..self.n_deps as usize {
+            deps[i] = Some((Quantity::from_u32(self.deps[i])?, self.dep_epoch[i]));
+        }
+        Some(Measurement {
+            quantity: q,
+            dim: self.dim as usize,
+            value: self.value,
+            uncertainty: self.uncertainty,
+            valid_lo: self.valid_lo,
+            valid_hi: self.valid_hi,
+            measured_at_ns: self.measured_at_ns,
+            valid_for_ns: self.valid_for_ns,
+            deps,
+            epoch: self.epoch,
+            selftest_passed: self.selftest_passed != 0,
+            prev_epoch: self.prev_epoch,
+        })
+    }
+
+    fn from_native(m: &Measurement) -> Self {
+        let mut deps = [0u32; MAX_DEPS];
+        let mut dep_epoch = [0u64; MAX_DEPS];
+        let mut n = 0usize;
+        for d in m.deps.iter().flatten() {
+            deps[n] = d.0 as u32;
+            dep_epoch[n] = d.1;
+            n += 1;
+        }
+        CMeasurement {
+            quantity: m.quantity as u32,
+            dim: m.dim as u32,
+            value: m.value,
+            uncertainty: m.uncertainty,
+            valid_lo: m.valid_lo,
+            valid_hi: m.valid_hi,
+            measured_at_ns: m.measured_at_ns,
+            valid_for_ns: m.valid_for_ns,
+            n_deps: n as u32,
+            deps,
+            dep_epoch,
+            epoch: m.epoch,
+            selftest_passed: u32::from(m.selftest_passed),
+            prev_epoch: m.prev_epoch,
+        }
+    }
+}
+
+/// Bytes of storage one body needs. The caller allocates; this crate never does.
+#[no_mangle]
+pub extern "C" fn bl_sizeof_body() -> usize {
+    size_of::<Body>()
+}
+
+/// Required alignment of that storage.
+#[no_mangle]
+pub extern "C" fn bl_alignof_body() -> usize {
+    align_of::<Body>()
+}
+
+/// Initialise a body layer in caller-supplied storage.
+///
+/// 🔴 There is no allocation anywhere in this crate, on purpose. A hard-real-time safety layer
+/// must not depend on an allocator, and a layer that cannot build for the target it has to run on
+/// is not a deliverable. `storage` must be at least [`bl_sizeof_body`] bytes with at least
+/// [`bl_alignof_body`] alignment, and must outlive every other call on this handle.
+///
+/// # Safety
+/// `storage` must satisfy the size and alignment above and must not alias another live body.
+#[no_mangle]
+pub unsafe extern "C" fn bl_init(storage: *mut c_void, len: usize, abi_version: u32) -> Status {
+    if storage.is_null() {
+        return Status::Einval;
+    }
+    // A mismatch is refused outright. Accepting a near-enough version is how two components end up
+    // disagreeing about what a struct means while both report success.
+    if abi_version != BL_ABI_VERSION {
+        return Status::Eversion;
+    }
+    if len < size_of::<Body>() {
+        return Status::Enospace;
+    }
+    if (storage as usize) % align_of::<Body>() != 0 {
+        return Status::Einval;
+    }
+    // SAFETY: size and alignment checked above; the caller promises exclusive ownership.
+    unsafe { core::ptr::write(storage as *mut Body, Body::new()) };
+    Status::Ok
+}
+
+/// Tear down a body layer. The storage itself belongs to the caller and is not freed here.
+///
+/// # Safety
+/// `b` must have been initialised by [`bl_init`] and must not be used afterwards.
+#[no_mangle]
+pub unsafe extern "C" fn bl_close(b: *mut c_void) {
+    if b.is_null() {
+        return;
+    }
+    // SAFETY: initialised by `bl_init` per the contract; dropped exactly once.
+    unsafe { core::ptr::drop_in_place(b as *mut Body) };
+}
+
+/// Submit a measurement the robot made about itself.
+///
+/// # Safety
+/// `b` must come from [`bl_open`]; `m` must point to a valid `bl_measurement`.
+#[no_mangle]
+pub unsafe extern "C" fn bl_measure(b: *mut c_void, m: *const CMeasurement) -> Status {
+    if b.is_null() || m.is_null() {
+        return Status::Einval;
+    }
+    // SAFETY: both checked non-null; the caller guarantees provenance and validity.
+    let body = unsafe { &mut *(b as *mut Body) };
+    // SAFETY: as above.
+    let cm = unsafe { *m };
+    let Some(native) = cm.to_native() else {
+        return Status::Einval;
+    };
+    match body.submit(native) {
+        Ok(_) => Status::Ok,
+        // Malformed is Einval and not Refuse on purpose: REFUSE is a statement about the *body*
+        // ("I cannot do this safely"), while a malformed submission is a statement about the
+        // *caller*. Merging them would let a caller bug read as a body limitation.
+        Err(_) => Status::Einval,
+    }
+}
+
+/// Read back the current measurement for a quantity.
+///
+/// # Safety
+/// `b` must come from [`bl_open`]; `out` must be writable.
+#[no_mangle]
+pub unsafe extern "C" fn bl_get(b: *const c_void, quantity: u32, out: *mut CMeasurement) -> Status {
+    if b.is_null() || out.is_null() {
+        return Status::Einval;
+    }
+    let Some(q) = Quantity::from_u32(quantity) else {
+        return Status::Einval;
+    };
+    // SAFETY: checked non-null; provenance guaranteed by the caller.
+    let body = unsafe { &*(b as *const Body) };
+    match body.get(q) {
+        Some(m) => {
+            // SAFETY: `out` checked non-null and the caller promises it is writable.
+            unsafe { *out = CMeasurement::from_native(&m) };
+            Status::Ok
+        }
+        None => Status::Refuse,
+    }
+}
+
+/// The gate: may this world reference be executed on this body right now?
+///
+/// # Safety
+/// `b` must come from [`bl_open`]; `refp` must be valid; `why` and `detail` must be writable, and
+/// `detail` must have room for `BL_REASON_LEN` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn bl_admit(
+    b: *const c_void,
+    refp: *const CWorldRef,
+    now_ns: u64,
+    why: *mut u32,
+    detail: *mut c_char,
+) -> Status {
+    if b.is_null() || refp.is_null() || why.is_null() {
+        return Status::Einval;
+    }
+    // SAFETY: checked non-null above.
+    let body = unsafe { &*(b as *const Body) };
+    // SAFETY: as above.
+    let r = unsafe { *refp };
+
+    let mut ask = Ask::EMPTY;
+    // Executing any reference at all means putting *this* hand on *that* pixel, which needs the
+    // hand point and the image Jacobian. Listing them here rather than deep in the servo is what
+    // makes the refusal mechanical instead of dependent on somebody remembering.
+    ask.needs[0] = Some(Quantity::HandPixel);
+    ask.needs[1] = Some(Quantity::ImageJacobian);
+    ask.needs[2] = Some(Quantity::Reach);
+    ask.image_point = Some((r.u, r.v));
+
+    let v = body.admit(&ask, now_ns);
+    // SAFETY: `why` checked non-null.
+    unsafe { *why = v.why as u32 };
+    if !detail.is_null() {
+        write_detail(detail, v.why, v.culprit);
+    }
+    if v.admit {
+        Status::Ok
+    } else {
+        Status::Refuse
+    }
+}
+
+/// Bitmask of quantities whose self-test currently passes.
+///
+/// # Safety
+/// `b` must come from [`bl_open`]; `mask` must be writable.
+#[no_mangle]
+pub unsafe extern "C" fn bl_selftest(b: *const c_void, mask: *mut u64) -> Status {
+    if b.is_null() || mask.is_null() {
+        return Status::Einval;
+    }
+    // SAFETY: checked non-null above.
+    let body = unsafe { &*(b as *const Body) };
+    // SAFETY: `mask` checked non-null.
+    unsafe { *mask = body.selftest_mask() };
+    Status::Ok
+}
+
+/// Stable human-readable reason. For logs and audit trails; never parsed.
+#[no_mangle]
+pub extern "C" fn bl_reason_str(why: u32) -> *const c_char {
+    let s: &'static str = match why {
+        x if x == Reason::None as u32 => "none\0",
+        x if x == Reason::NeverMeasured as u32 => "never_measured\0",
+        x if x == Reason::Stale as u32 => "stale\0",
+        x if x == Reason::OutOfRange as u32 => "out_of_range\0",
+        x if x == Reason::DependencyChanged as u32 => "dependency_changed\0",
+        x if x == Reason::SelfTestFailed as u32 => "selftest_failed\0",
+        x if x == Reason::UncertaintyTooHigh as u32 => "uncertainty_too_high\0",
+        x if x == Reason::Unreachable as u32 => "unreachable\0",
+        x if x == Reason::RateLimit as u32 => "rate_limit\0",
+        _ => "unknown\0",
+    };
+    s.as_ptr() as *const c_char
+}
+
+/// Stable human-readable quantity name.
+#[no_mangle]
+pub extern "C" fn bl_quantity_str(quantity: u32) -> *const c_char {
+    let s: &'static str = match Quantity::from_u32(quantity) {
+        Some(Quantity::HandPixel) => "hand_pixel\0",
+        Some(Quantity::ImageJacobian) => "image_jacobian\0",
+        Some(Quantity::GripperSpan) => "gripper_span\0",
+        Some(Quantity::ArmWeight) => "arm_weight\0",
+        Some(Quantity::Latency) => "latency\0",
+        Some(Quantity::Backlash) => "backlash\0",
+        Some(Quantity::Reach) => "reach\0",
+        Some(Quantity::ContactThreshold) => "contact_threshold\0",
+        Some(Quantity::SelfOcclusion) => "self_occlusion\0",
+        None => "unknown\0",
+    };
+    s.as_ptr() as *const c_char
+}
+
+/// Write `"<reason>:<quantity>"` into `detail`, NUL-terminated and truncated to fit.
+fn write_detail(detail: *mut c_char, why: Reason, culprit: Option<Quantity>) {
+    const CAP: usize = 96; // BL_REASON_LEN
+    let mut buf = [0u8; CAP];
+    let mut n = 0usize;
+    let mut put = |s: &str, n: &mut usize| {
+        for &byte in s.as_bytes() {
+            if *n + 1 < CAP {
+                buf[*n] = byte;
+                *n += 1;
+            }
+        }
+    };
+    put(why.as_str(), &mut n);
+    if let Some(q) = culprit {
+        put(":", &mut n);
+        put(q.as_str(), &mut n);
+    }
+    // SAFETY: `detail` was checked non-null by the caller and the contract promises CAP bytes;
+    // `n < CAP` holds by construction above, so the NUL fits.
+    unsafe {
+        core::ptr::copy_nonoverlapping(buf.as_ptr(), detail as *mut u8, n + 1);
+    }
+}

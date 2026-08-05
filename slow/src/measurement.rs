@@ -1,0 +1,243 @@
+//! A measured body quantity, with everything needed to refuse on it later.
+//!
+//! # Why seven fields and not one number
+//!
+//! The failure mode this layer exists to eliminate is not "the number is wrong". It is **the
+//! number is wrong and nothing in the loop can tell**. Recorded instances, all from this project:
+//!
+//! * the servo drove `|target − self-estimated hand|` to zero, so the bias in the self-estimate
+//!   landed entirely in the *result* and never in the *residual*. Its own visible error read
+//!   3.6 px while the true offset was 15.7 px. Algebra, not precision.
+//! * on another rig the same estimator settled on the robot's **elbow**, 167 px from the true
+//!   fingertip, and reported 0.04–9.3 px. It precisely aimed the wrong point at the mark.
+//! * a hand-filled gripper constant (`0.145`) whose provenance could not be traced at all — which
+//!   means it could not be re-measured on a new body, which means the new body was never zero-shot.
+//!
+//! A bare `f64` cannot be refused on. A value that carries its uncertainty, the range it was
+//! actually probed over, when it was taken, what it was taken *against*, and a self-test that can
+//! be re-run right now — can.
+//!
+//! # The rule about `valid_lo/hi`
+//!
+//! They record the range **actually probed**, not the range someone hopes it extrapolates to.
+//! This distinction has been paid for: a gravity self-calibration's residual error turned out to
+//! be *entirely* interpolation error between sampled poses, so the honest description of its
+//! validity is "the poses I visited", and asking outside them must produce a REFUSE rather than a
+//! confident extrapolation.
+
+use core::fmt;
+
+/// The body properties this layer knows how to hold.
+///
+/// These are things a robot can determine **by acting on itself**. They are deliberately not "the
+/// fields a URDF happens to contain": a URDF is written by a person, and a hand-written body
+/// constant is the same violation as a hand-fed demonstration — somebody touched the new machine.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[repr(u32)]
+pub enum Quantity {
+    /// Which pixels are my hand, in the frame I can see.
+    HandPixel = 0,
+    /// I move by δ → the image moves by this.
+    ImageJacobian = 1,
+    /// Full-open to full-closed, in metres, measured off my own jaws.
+    GripperSpan = 2,
+    /// What holding still against gravity costs.
+    ArmWeight = 3,
+    /// Command issued → pixels move, in control periods.
+    Latency = 4,
+    /// Push both ways; the dead band is the slop.
+    Backlash = 5,
+    /// Where this body can actually put its hand.
+    Reach = 6,
+    /// What "I touched something" reads like on this body.
+    ContactThreshold = 7,
+    /// Which parts of my own view I block.
+    SelfOcclusion = 8,
+}
+
+impl Quantity {
+    /// Total number of quantities; used to size the store.
+    pub const COUNT: usize = 9;
+
+    /// Reconstruct from the ABI's `u32`. Returns `None` for anything unknown — an unknown
+    /// quantity is refused, never coerced into a neighbouring one.
+    pub fn from_u32(v: u32) -> Option<Self> {
+        use Quantity::*;
+        Some(match v {
+            0 => HandPixel,
+            1 => ImageJacobian,
+            2 => GripperSpan,
+            3 => ArmWeight,
+            4 => Latency,
+            5 => Backlash,
+            6 => Reach,
+            7 => ContactThreshold,
+            8 => SelfOcclusion,
+            _ => return None,
+        })
+    }
+
+    /// Stable human-readable name. For logs and audit trails; never parsed.
+    pub fn as_str(self) -> &'static str {
+        use Quantity::*;
+        match self {
+            HandPixel => "hand_pixel",
+            ImageJacobian => "image_jacobian",
+            GripperSpan => "gripper_span",
+            ArmWeight => "arm_weight",
+            Latency => "latency",
+            Backlash => "backlash",
+            Reach => "reach",
+            ContactThreshold => "contact_threshold",
+            SelfOcclusion => "self_occlusion",
+        }
+    }
+}
+
+/// Maximum dimensionality of a measurement. A body quantity is a small vector; anything that wants
+/// to be an array of poses is not a body quantity and does not belong here.
+pub const MAX_DIM: usize = 16;
+/// Maximum number of quantities one measurement may declare a dependency on.
+pub const MAX_DEPS: usize = 8;
+
+/// Why a submitted measurement was rejected. Rejection happens at `submit` time, so a malformed
+/// measurement never enters the store and can never be read back as if it were fine.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum Malformed {
+    /// `dim` is 0 or above [`MAX_DIM`].
+    BadDim,
+    /// A value, uncertainty or bound is NaN or infinite.
+    NonFinite,
+    /// Uncertainty is negative.
+    NegativeUncertainty,
+    /// `valid_lo >= valid_hi` on some axis: an empty validity window.
+    EmptyRange,
+    /// The measured value sits outside the range it claims to be valid over.
+    ValueOutsideOwnRange,
+    /// It declares a dependency on a quantity that has never been measured on this body.
+    UnmeasuredDependency,
+    /// Its own self-test did not pass at submission time.
+    SelfTestFailed,
+    /// More dependencies than [`MAX_DEPS`].
+    TooManyDeps,
+}
+
+impl fmt::Display for Malformed {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            Malformed::BadDim => "dim out of range",
+            Malformed::NonFinite => "non-finite value/uncertainty/bound",
+            Malformed::NegativeUncertainty => "negative uncertainty",
+            Malformed::EmptyRange => "empty validity range (lo >= hi)",
+            Malformed::ValueOutsideOwnRange => "value lies outside its own validity range",
+            Malformed::UnmeasuredDependency => "depends on a quantity never measured here",
+            Malformed::SelfTestFailed => "self-test did not pass",
+            Malformed::TooManyDeps => "too many dependencies",
+        };
+        f.write_str(s)
+    }
+}
+
+/// One measured body quantity, with its provenance.
+#[derive(Copy, Clone, Debug)]
+pub struct Measurement {
+    /// Which quantity this is.
+    pub quantity: Quantity,
+    /// Used length of the fixed-size arrays below.
+    pub dim: usize,
+    /// The measured value.
+    pub value: [f64; MAX_DIM],
+    /// 1σ, in the **same units** as `value`.
+    pub uncertainty: [f64; MAX_DIM],
+    /// Low end of the range actually probed.
+    pub valid_lo: [f64; MAX_DIM],
+    /// High end of the range actually probed.
+    pub valid_hi: [f64; MAX_DIM],
+    /// Monotonic timestamp, nanoseconds, from the caller's clock.
+    pub measured_at_ns: u64,
+    /// How long this stays valid. `0` means "until a dependency changes" — **not** "forever".
+    pub valid_for_ns: u64,
+    /// Quantities this was measured *against*.
+    pub deps: [Option<(Quantity, u64)>; MAX_DEPS],
+    /// Bumped on every re-measure. Consumers compare it to detect that the ground moved.
+    pub epoch: u64,
+    /// Whether its own self-test passed at submission.
+    pub selftest_passed: bool,
+    /// The epoch this measurement replaced; `0` if it is the first.
+    pub prev_epoch: u64,
+}
+
+impl Measurement {
+    /// Validate everything that can be checked without looking at the rest of the store.
+    ///
+    /// `is_measured` answers "has this quantity ever been measured on this body", so that a
+    /// declared dependency on something that does not exist is caught here rather than surfacing
+    /// later as a confident answer computed against nothing.
+    pub fn validate(&self, is_measured: &dyn Fn(Quantity) -> bool) -> Result<(), Malformed> {
+        if self.dim == 0 || self.dim > MAX_DIM {
+            return Err(Malformed::BadDim);
+        }
+        if !self.selftest_passed {
+            // 🔴 There is no `force` flag anywhere in this API. A body layer that can be told to
+            // accept an unverified constant is a configuration file with extra steps.
+            return Err(Malformed::SelfTestFailed);
+        }
+        for i in 0..self.dim {
+            let (v, u, lo, hi) = (
+                self.value[i],
+                self.uncertainty[i],
+                self.valid_lo[i],
+                self.valid_hi[i],
+            );
+            if !v.is_finite() || !u.is_finite() || !lo.is_finite() || !hi.is_finite() {
+                return Err(Malformed::NonFinite);
+            }
+            if u < 0.0 {
+                return Err(Malformed::NegativeUncertainty);
+            }
+            if lo >= hi {
+                return Err(Malformed::EmptyRange);
+            }
+            if v < lo || v > hi {
+                return Err(Malformed::ValueOutsideOwnRange);
+            }
+        }
+        let n_deps = self.deps.iter().filter(|d| d.is_some()).count();
+        if n_deps > MAX_DEPS {
+            return Err(Malformed::TooManyDeps);
+        }
+        for d in self.deps.iter().flatten() {
+            if !is_measured(d.0) {
+                return Err(Malformed::UnmeasuredDependency);
+            }
+        }
+        Ok(())
+    }
+
+    /// Has this expired by wall-clock at `now_ns`?
+    ///
+    /// `valid_for_ns == 0` is **not** "never expires" — it means expiry is governed by dependency
+    /// epochs instead of by the clock. The two mechanisms are separate on purpose: a quantity can
+    /// be perfectly fresh in time and still invalid because the thing it was measured against
+    /// moved (the camera got knocked, the gripper was swapped, the arm now carries a payload).
+    pub fn is_stale(&self, now_ns: u64) -> bool {
+        if self.valid_for_ns == 0 {
+            return false;
+        }
+        now_ns.saturating_sub(self.measured_at_ns) > self.valid_for_ns
+    }
+
+    /// Is `x` inside the range this quantity was actually probed over, on axis `axis`?
+    pub fn covers(&self, axis: usize, x: f64) -> bool {
+        axis < self.dim && x >= self.valid_lo[axis] && x <= self.valid_hi[axis]
+    }
+
+    /// Largest 1σ across the used axes. Used by the admit gate to refuse an ask that needs more
+    /// precision than this body has actually established about itself.
+    pub fn worst_uncertainty(&self) -> f64 {
+        self.uncertainty[..self.dim]
+            .iter()
+            .copied()
+            .fold(0.0_f64, f64::max)
+    }
+}
