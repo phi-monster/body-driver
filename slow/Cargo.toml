@@ -15,6 +15,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]   # staticlib/cdylib so the C ABI i
 # code for an embedded target: this layer has to run on the robot, not only on a workstation.
 default = ["std"]
 std = []
+# `fast` links the PROVEN Ada core.  Off by default only so the pure-Rust tests run on a machine
+# without a GNAT toolchain -- it never substitutes a Rust reimplementation of the safety rules.
+fast = []
 
 [dependencies]
 # 🔴 none, on purpose.  This layer is what the whole field is invited to read and audit; every

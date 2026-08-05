@@ -94,9 +94,18 @@ impl Quantity {
     }
 }
 
-/// Maximum dimensionality of a measurement. A body quantity is a small vector; anything that wants
-/// to be an array of poses is not a body quantity and does not belong here.
-pub const MAX_DIM: usize = 16;
+/// Maximum dimensionality of a measurement.
+///
+/// 🔴 Sized as `3 × MAX_JOINTS`, and that is not slack — it is the smallest value that fits the
+/// image Jacobian, which is 3 world axes by one column per joint. An earlier draft used 16 "because
+/// a body quantity is a small vector", and a unit test caught it immediately: a perfectly ordinary
+/// 6-joint arm needs 18. The lesson is the one this layer keeps re-learning — **a constant chosen
+/// because it felt about right is a constant nobody measured**, and the fix is to derive it from
+/// the thing it has to hold.
+///
+/// Anything that wants to be an *array of poses* is still not a body quantity and does not belong
+/// here; the bound exists to keep that true while actually fitting a Jacobian.
+pub const MAX_DIM: usize = 48;
 /// Maximum number of quantities one measurement may declare a dependency on.
 pub const MAX_DEPS: usize = 8;
 

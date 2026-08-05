@@ -1,0 +1,48 @@
+--  Library build of the fast face, so the Rust slow face (and anyone else) can link the PROVEN
+--  core rather than re-implementing its checks.
+--
+--  🔴 Why this matters more than packaging convenience: if the slow face re-implemented the limit
+--  and watchdog logic in Rust "to avoid the FFI", there would be two copies of the rule and one
+--  proof, and the copy without the proof is the one that would drift.  One implementation, proven,
+--  called by everybody.
+--
+--  Build:  gprbuild -P body_layer_fast_lib.gpr
+--  Prove:  gnatprove -P body_layer_fast_lib.gpr --level=2
+
+project Body_Layer_Fast_Lib is
+
+   for Languages use ("Ada");
+   for Source_Dirs use (".");
+   for Source_Files use
+     ("body_layer_fast.ads", "body_layer_fast.adb",
+      "body_layer_fast_c.ads", "body_layer_fast_c.adb");
+
+   for Object_Dir use "objlib";
+   for Library_Name use "bodylayerfast";
+   for Library_Dir use "lib";
+   for Library_Kind use "static";
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        ("-gnat2022",
+         "-gnatwa",
+         "-gnatwe",
+         "-gnata",         --  assertions ON: the pre/postconditions are checked at run time too,
+                           --  not only proved.  Belt and braces is correct here: the proof covers
+                           --  this code, the assertions also catch a caller that violates a Pre.
+         "-gnatVa",
+         "-gnatyaAbcdefhiklmnprstux",
+         "-gnatyM110",
+         "-O2",
+         "-g");
+   end Compiler;
+
+   package Prove is
+      for Proof_Switches ("Ada") use
+        ("--level=2", "--report=all", "--checks-as-errors=on");
+      --  The C shim is SPARK_Mode Off by necessity (it needs handlers so no Ada exception can
+      --  cross into a foreign caller).  The proven core is unaffected.
+      for Exclude_Source_Files use ("body_layer_fast_c.adb");
+   end Prove;
+
+end Body_Layer_Fast_Lib;

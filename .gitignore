@@ -1,3 +1,4 @@
-# build products
 fast/obj/
+fast/objlib/
+fast/lib/
 slow/target/

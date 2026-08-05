@@ -65,6 +65,11 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 }
 
 pub mod abi;
+pub mod execute;
+#[cfg(feature = "fast")]
+pub mod fast;
+#[cfg(not(feature = "fast"))]
+pub mod faststub;
 pub mod hand;
 pub mod measurement;
 pub mod refuse;
@@ -320,5 +325,201 @@ mod tests {
         };
         let r = t.observe(&[c(0.3, 1.0), c(0.7, 0.2)]);
         assert_eq!(r, Ok((0.3, 0.5)));
+    }
+}
+
+#[cfg(test)]
+mod execute_tests {
+    use super::*;
+    use execute::{execute, Intent, Outcome, Spec};
+    use measurement::{MAX_DEPS, MAX_DIM};
+
+    fn spec() -> Spec {
+        Spec {
+            step_m: 0.004,      // the rig's own per-period travel, from its rating
+            period_ms: 40,
+            damping: 0.05,
+            n_joints: 6,
+        }
+    }
+
+    fn unit_x() -> Intent {
+        Intent {
+            dir: [1.0, 0.0, 0.0],
+            drot: [0.0; 3],
+            grip: 1.0,
+            base: [0.0; 3],
+        }
+    }
+
+    fn jacobian(epoch_of_hand: &mut u64, b: &mut Body) {
+        let mut j = Measurement {
+            quantity: Quantity::ImageJacobian,
+            dim: 18,
+            value: [0.0; MAX_DIM],
+            uncertainty: [0.01; MAX_DIM],
+            // The probed range must actually contain the measured value; the store rejects it
+            // otherwise, which is how this test found its own bug.  800 px/rad is the order the
+            // rig really reports (recorded column norms: 792 / 842 / 904 px/m).
+            valid_lo: [-2000.0; MAX_DIM],
+            valid_hi: [2000.0; MAX_DIM],
+            measured_at_ns: 0,
+            valid_for_ns: 0,
+            deps: [None; MAX_DEPS],
+            epoch: 0,
+            selftest_passed: true,
+            prev_epoch: 0,
+        };
+        for k in 0..18 {
+            j.value[k] = if k % 7 == 0 { 800.0 } else { 5.0 };
+        }
+        let e = b.submit(j).unwrap();
+        *epoch_of_hand = e;
+    }
+
+    fn simple(b: &mut Body, q: Quantity, jac_epoch: Option<u64>) {
+        let mut m = Measurement {
+            quantity: q,
+            dim: 2,
+            value: [0.5; MAX_DIM],
+            uncertainty: [0.002; MAX_DIM],
+            valid_lo: [0.0; MAX_DIM],
+            valid_hi: [1.0; MAX_DIM],
+            measured_at_ns: 0,
+            valid_for_ns: 0,
+            deps: [None; MAX_DEPS],
+            epoch: 0,
+            selftest_passed: true,
+            prev_epoch: 0,
+        };
+        if let Some(e) = jac_epoch {
+            m.deps[0] = Some((Quantity::ImageJacobian, e));
+        }
+        b.submit(m).unwrap();
+    }
+
+    /// A body that knows nothing must refuse to execute -- not move a little, not use a default.
+    #[test]
+    fn execute_on_an_unmeasured_body_refuses() {
+        let b = Body::new();
+        let f = execute::Fast_for_test();
+        match execute(&b, &f, &spec(), &unit_x(), 1_000) {
+            Outcome::Refused(v) => assert_eq!(v.why, refuse::Reason::NeverMeasured),
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+    }
+
+    /// 🔴 The shortcut guard. A policy must not be able to smuggle distance into the magnitude of
+    /// its direction vector; a non-unit vector is a malformed intent, never silently normalised.
+    #[test]
+    fn a_non_unit_direction_is_rejected_not_normalised() {
+        let mut b = Body::new();
+        let mut e = 0;
+        jacobian(&mut e, &mut b);
+        simple(&mut b, Quantity::HandPixel, Some(e));
+        simple(&mut b, Quantity::Reach, None);
+        let f = execute::Fast_for_test();
+        let mut i = unit_x();
+        i.dir = [3.0, 0.0, 0.0];
+        assert!(matches!(
+            execute(&b, &f, &spec(), &i, 1_000),
+            Outcome::BadIntent(_)
+        ));
+    }
+
+    /// Grip is an ABSOLUTE opening, so a value outside [0,1] is a contract violation, not a clamp.
+    #[test]
+    fn grip_outside_the_absolute_range_is_rejected() {
+        let b = Body::new();
+        let f = execute::Fast_for_test();
+        let mut i = unit_x();
+        i.grip = 1.7;
+        assert!(matches!(
+            execute(&b, &f, &spec(), &i, 1_000),
+            Outcome::BadIntent(_)
+        ));
+    }
+
+    /// 🔴 Without the proven fast face linked in, nothing may move. The stub refuses everything,
+    /// and this test asserts that -- a build that reached a robot without the proof must be inert,
+    /// not silently governed by a second, unproven copy of the rules.
+    #[cfg(not(feature = "fast"))]
+    #[test]
+    fn without_the_proven_core_nothing_moves() {
+        let mut b = Body::new();
+        let mut e = 0;
+        jacobian(&mut e, &mut b);
+        simple(&mut b, Quantity::HandPixel, Some(e));
+        simple(&mut b, Quantity::Reach, None);
+        let f = execute::Fast_for_test();
+        assert!(matches!(
+            execute(&b, &f, &spec(), &unit_x(), 1_000),
+            Outcome::Halted(_)
+        ));
+    }
+}
+
+/// The cross-language conformance run: prove the Rust side is talking to the **proven Ada core**
+/// and not to something that merely links.
+///
+/// 🔴 A binding exercised only on the happy path is a binding whose error codes have never been
+/// observed. If the far side were stubbed, misnamed, or resolved to a different symbol, every call
+/// would return `Ok` and nothing downstream would notice — which is the exact failure shape this
+/// whole layer exists to remove. So the check drives guaranteed **refusals** first.
+#[cfg(all(test, feature = "fast"))]
+mod fast_conformance {
+    use crate::fast::{Fast, FastStatus, HaltReason, MAX_JOINTS};
+
+    /// The Ada core must reject a NaN limit, halt on an out-of-envelope command rather than clamp
+    /// it, keep the safe hold inside the envelope, and still admit a good command.
+    #[test]
+    fn the_proven_core_refuses_when_it_must() {
+        let f = Fast::reset();
+        f.selftest().expect("the proven fast face did not behave as proved");
+    }
+
+    /// The watchdog must latch on silence, and a perfectly good command must NOT walk it back out.
+    /// A safety state you can leave by doing nothing is not a safety state.
+    #[test]
+    fn a_latch_is_a_latch() {
+        let f = Fast::reset();
+        let lo = [-1.0; MAX_JOINTS];
+        let hi = [1.0; MAX_JOINTS];
+        let hold = [0.0; MAX_JOINTS];
+        assert_eq!(f.install(&lo, &hi, &hold, 6, 20.0, 100, 1_000), FastStatus::Ok);
+
+        f.tick(1_500); // deadline was 100 ms; 500 ms of silence
+        assert!(f.halted());
+        assert_eq!(f.reason(), HaltReason::WatchdogExpired);
+
+        let good = [0.5; MAX_JOINTS];
+        assert_eq!(f.admit(&good, 0.0, 1_510).0, FastStatus::Refuse);
+        assert!(f.halted(), "a good command cleared a latch");
+
+        // The wrong witness must not open the door either.
+        assert_eq!(f.clear(HaltReason::ExternalStop, 1_600), FastStatus::Refuse);
+        assert!(f.halted());
+        assert_eq!(f.clear(HaltReason::WatchdogExpired, 1_600), FastStatus::Ok);
+        assert!(!f.halted());
+    }
+
+    /// `MAX_JOINTS` here must equal `Max_Joints` there. A silent disagreement would mis-index every
+    /// joint while every call still returned success.
+    #[test]
+    fn the_two_sides_agree_on_the_joint_count() {
+        let f = Fast::reset();
+        let lo = [-1.0; MAX_JOINTS];
+        let hi = [1.0; MAX_JOINTS];
+        let hold = [0.0; MAX_JOINTS];
+        // One past the shared bound must be rejected by the far side, which is only true if the
+        // far side's bound is the same number.
+        assert_eq!(
+            f.install(&lo, &hi, &hold, (MAX_JOINTS + 1) as u32, 20.0, 100, 1_000),
+            FastStatus::Einval
+        );
+        assert_eq!(
+            f.install(&lo, &hi, &hold, MAX_JOINTS as u32, 20.0, 100, 1_000),
+            FastStatus::Ok
+        );
     }
 }
