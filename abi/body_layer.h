@@ -112,7 +112,10 @@ typedef enum {
     BL_Q_REACH             = 6,  /* where this body can actually put its hand           */
     BL_Q_CONTACT_THRESHOLD = 7,  /* what "I touched something" reads like on this body  */
     BL_Q_SELF_OCCLUSION    = 8,  /* which parts of my own view I block                  */
-    BL_Q_COUNT             = 9
+    BL_Q_STEP_DELIVERY     = 9,  /* I command a step; this fraction of it arrives in    */
+                                 /* one control period.  NOT latency (dead time) and    */
+                                 /* NOT backlash (dead band at a reversal).             */
+    BL_Q_COUNT             = 10
 } bl_quantity;
 
 /* 🔴 3 * BL_MAX_JOINTS, and that is not slack -- it is the smallest value that fits the image

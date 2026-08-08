@@ -362,6 +362,7 @@ pub extern "C" fn bl_quantity_str(quantity: u32) -> *const c_char {
         Some(Quantity::Reach) => "reach\0",
         Some(Quantity::ContactThreshold) => "contact_threshold\0",
         Some(Quantity::SelfOcclusion) => "self_occlusion\0",
+        Some(Quantity::StepDelivery) => "step_delivery\0",
         None => "unknown\0",
     };
     s.as_ptr() as *const c_char

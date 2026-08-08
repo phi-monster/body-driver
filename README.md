@@ -137,6 +137,47 @@ said the guard was fine.**
 
 ---
 
+## How much of it exists — declared vs actually measurable
+
+Asked directly on 2026-08-09 ("is the self-calibration already done?"), and it was not written down
+anywhere, which is its own finding. **A named slot in an enum is not a probe.**
+
+| quantity | probe in [`slow/src/probe.rs`](slow/src/probe.rs) |
+|---|---|
+| `hand_pixel` | 🟢 |
+| `image_jacobian` | 🟢 |
+| `arm_weight` | 🟢 |
+| `latency` | 🟢 |
+| **`step_delivery`** | 🟢 **added 2026-08-09, from a measurement — see below** |
+| `gripper_span` · `backlash` · `reach` · `contact_threshold` · `self_occlusion` | 🔴 **name only, no estimator** |
+
+**5 of 10.** The store, the provenance, the expiry and the refusal cover all ten; the *measuring*
+half covers five. And nothing here has been connected to a robot yet — the LeKiwi pair is the
+first.
+
+### `step_delivery` is the first quantity added because a body demanded it
+
+Two arms on the same harness, same waypoint controller, same 45 mm commanded step: one delivered
+**0.76** of it per control period, the other **0.11**. The per-waypoint step budget had been set
+from the first arm, so the second could never reach a waypoint — **0.136 m of residual on every
+episode**, surfacing as *"the arm stopped short of the pre-grasp waypoint"*, which reads like a
+planner, reachability or wrist-convention fault. It was none of those, and every scalar in the log
+was ordinary.
+
+The instinct at that point was to open the simulator's actuator config and raise the second arm's
+stiffness until it kept up. That is wrong twice over: **it types a body constant** (the debt this
+layer exists to drive to zero) and **it is not portable** — a real robot has no config file to
+read. Worse, it changes the physics the demonstrations are collected under, so the data quietly
+becomes a different dataset.
+
+Measuring instead and sizing the budget from the arm's own progress: residual **0.136 m → 0.0058 m**
+— the first arm's own figure — with nothing about the robot changed.
+
+⇒ it is deliberately **not** `latency` (dead time; both arms answered 1 period) and **not**
+`backlash` (a dead band at a reversal; this is a shortfall on every step in one direction).
+⚠️ And it is still measured *in the experiment's own Python*, not through this ABI. **Named debt,
+not a solved problem.**
+
 ## What is actually hard here, and what is already done
 
 Recognising the hand is **done**: 1.7 cm → **0.62 cm**, reproduced across three independent

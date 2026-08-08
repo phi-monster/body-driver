@@ -67,11 +67,26 @@ pub enum Quantity {
     ContactThreshold = 7,
     /// Which parts of my own view I block.
     SelfOcclusion = 8,
+    /// I command a step of this size; this fraction of it actually arrives in one control period.
+    ///
+    /// 🔴 Added 2026-08-09 from a measurement, not from a design meeting. Two arms on the same
+    /// harness, same waypoint controller, same step command of 45 mm: one delivered **0.76** of it
+    /// per period, the other **0.11**. The step budget per waypoint had been set from the first
+    /// arm, so the second could never reach any waypoint — 0.136 m of residual, every episode,
+    /// while every scalar in the log looked ordinary.
+    ///
+    /// It is **not** [`Latency`]: that one is dead time, "how many periods until anything moves",
+    /// and both arms answered 1. A body can start moving immediately and still deliver a tenth of
+    /// what it was told.
+    ///
+    /// It is **not** [`Backlash`] either: backlash is a dead band around a reversal, this is a
+    /// first-order shortfall that applies to every step in the same direction.
+    StepDelivery = 9,
 }
 
 impl Quantity {
     /// Total number of quantities; used to size the store.
-    pub const COUNT: usize = 9;
+    pub const COUNT: usize = 10;
 
     /// Reconstruct from the ABI's `u32`. Returns `None` for anything unknown — an unknown
     /// quantity is refused, never coerced into a neighbouring one.
@@ -87,6 +102,7 @@ impl Quantity {
             6 => Reach,
             7 => ContactThreshold,
             8 => SelfOcclusion,
+            9 => StepDelivery,
             _ => return None,
         })
     }
@@ -104,6 +120,7 @@ impl Quantity {
             Reach => "reach",
             ContactThreshold => "contact_threshold",
             SelfOcclusion => "self_occlusion",
+            StepDelivery => "step_delivery",
         }
     }
 }

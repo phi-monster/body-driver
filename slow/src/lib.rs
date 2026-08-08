@@ -716,4 +716,68 @@ mod end_to_end {
         assert!(!v.admit && v.why == refuse::Reason::DependencyChanged,
                 "re-measuring the Jacobian did not invalidate what was measured against it");
     }
+
+    /// `step_delivery`: every case here is one the probe **must** refuse, except the last.
+    ///
+    /// The numbers are the two arms that produced the quantity: a 45 mm commanded step delivered
+    /// 0.76 of itself on one and 0.11 on the other, and the step budget had been carried over
+    /// from the first.
+    #[test]
+    fn step_delivery_refuses_what_it_cannot_answer() {
+        use probe::{step_delivery, Declined};
+        const T: u64 = 1_000_000_000;
+
+        // -- must refuse: not enough evidence to say anything ------------------------------
+        assert_eq!(step_delivery(&[(0.045, 0.034); 4], T).unwrap_err(),
+                   Declined::NotEnoughSamples);
+
+        // -- must refuse: a step nobody commanded carries no information about delivery, so
+        //    after dropping those there is nothing left. NOT "delivery is 0".
+        assert_eq!(step_delivery(&[(0.0, 0.001); 20], T).unwrap_err(),
+                   Declined::NotEnoughSamples);
+
+        // -- must refuse: commanded repeatedly, body never moved. A dead joint must not be
+        //    reported as a merely slow one -- that is the whole point of a separate reason.
+        let dead: Vec<(f64, f64)> =
+            (0..12).map(|i| (0.010 + 0.003 * f64::from(i), 0.0)).collect();
+        assert_eq!(step_delivery(&dead, T).unwrap_err(), Declined::NoResponse);
+
+        // -- must refuse: probed at exactly one magnitude. Delivery varies with step size, so a
+        //    single-point "range" would let the gate admit asks it has no basis for -- the same
+        //    rule arm_weight applies to a single pose.
+        assert_eq!(step_delivery(&[(0.045, 0.034); 20], T).unwrap_err(),
+                   Declined::Inconsistent);
+
+        // -- must refuse: NaN in, nothing usable out (they are dropped, not propagated).
+        assert_eq!(step_delivery(&[(f64::NAN, 0.03); 20], T).unwrap_err(),
+                   Declined::NotEnoughSamples);
+
+        // -- must be ADMITTED: the real reading. A layer that refuses everything is also not a
+        //    body layer.  Ratio 0.11 with a handful of contact steps mixed in; the median must
+        //    survive them, which a mean would not.
+        let mut s: Vec<(f64, f64)> =
+            (0..20).map(|i| { let c = 0.020 + 0.002 * f64::from(i); (c, 0.11 * c) }).collect();
+        s[3].1 = 0.0;   // hit the table
+        s[9].1 = 0.0;   // and again
+        let m = step_delivery(&s, T).expect("the real reading must be admitted");
+        assert!((m.value[0] - 0.11).abs() < 0.01,
+                "two contact steps moved the estimate: {} -- the median did not survive them",
+                m.value[0]);
+        // Tolerance, because `0.020 + 0.002*19` is 0.057999999999999996 and a bare `>= 0.058`
+        // fails on a probe that is behaving perfectly. Recorded rather than silently loosened:
+        // the first run of this assertion failed here, and the bug was in the assertion.
+        assert!(m.valid_lo[0] <= 0.0201 && m.valid_hi[0] >= 0.0579,
+                "the validity range must be the span of commanded magnitudes actually probed, \
+                 got [{}, {}]", m.valid_lo[0], m.valid_hi[0]);
+        assert!(m.uncertainty[0] >= 0.0 && m.uncertainty[0].is_finite());
+
+        // -- and the other arm, same code path, must come out different. Two bodies reading the
+        //    same number here would be the signature of a probe that is not measuring anything.
+        let s2: Vec<(f64, f64)> =
+            (0..20).map(|i| { let c = 0.020 + 0.002 * f64::from(i); (c, 0.76 * c) }).collect();
+        let m2 = step_delivery(&s2, T).unwrap();
+        assert!(m2.value[0] > 0.7 && m.value[0] < 0.2,
+                "the two arms read {} and {} -- a probe that cannot separate them is not a probe",
+                m.value[0], m2.value[0]);
+    }
 }

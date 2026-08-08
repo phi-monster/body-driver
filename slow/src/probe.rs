@@ -251,6 +251,104 @@ pub fn latency(
     Ok(m)
 }
 
+/// Measure **step delivery**: I command a step of this size; this fraction of it arrives in one
+/// control period.
+///
+/// # Why this probe exists, in one pair of numbers
+///
+/// Two arms, same harness, same waypoint controller, same 45 mm commanded step. One delivered
+/// **0.76** of it per period; the other **0.11**. The per-waypoint step budget had been set from
+/// the first arm, so the second could never reach a waypoint at all — 0.136 m of residual on every
+/// episode — and the failure surfaced as *"the arm stopped short of the pre-grasp waypoint"*, which
+/// reads like a planning fault, a reachability fault, or a broken wrist convention. It was none of
+/// those. Every scalar in the log was ordinary.
+///
+/// The lesson is the one behind this whole layer: **the budget was a hand-filled number carried
+/// over from a different body.** Measured instead, the second arm's residual fell to 0.0058 m —
+/// the first arm's own figure — with nothing about the robot changed.
+///
+/// # Why it is its own quantity and not one of the neighbours
+///
+/// * Not [`Quantity::Latency`]: that is dead time, "how many periods before anything moves".
+///   Both arms above answered **1**. A body can start moving at once and still deliver a tenth.
+/// * Not [`Quantity::Backlash`]: that is a dead band around a *reversal*. This shortfall applies
+///   to every step, including a long run in one direction.
+///
+/// # The validity range is the commanded step size, and it is load-bearing
+///
+/// Delivery is not one number for a body — a saturating actuator delivers a different fraction of
+/// a 1 mm step than of a 45 mm one. So `valid_lo/hi` is the span of commanded magnitudes actually
+/// probed, and an ask outside it is refused rather than extrapolated. Probing at one magnitude
+/// only is an [`Declined::Inconsistent`], for the same reason `arm_weight` refuses a single pose.
+///
+/// # The median, not the mean
+///
+/// One step that ends in contact delivers almost nothing and would drag a mean down; the estimate
+/// would then quietly describe a body that had bumped into the table. The median survives a
+/// minority of contact steps, and the spread is reported so a probe run that *was* mostly contact
+/// fails its own precision check downstream instead of being believed.
+pub fn step_delivery(
+    steps: &[(f64, f64)], // (commanded magnitude, achieved magnitude), same units
+    now_ns: u64,
+) -> Result<Measurement, Declined> {
+    if steps.len() < 5 {
+        return Err(Declined::NotEnoughSamples);
+    }
+    // A step nobody commanded carries no information about delivery; including it would push the
+    // ratio wherever the noise floor happens to sit.
+    let mut ratio = [0.0f64; 256];
+    let mut cmd_lo = f64::INFINITY;
+    let mut cmd_hi = f64::NEG_INFINITY;
+    let mut k = 0usize;
+    for &(c, a) in steps {
+        if !c.is_finite() || !a.is_finite() || c <= 0.0 {
+            continue;
+        }
+        if k == ratio.len() {
+            break;
+        }
+        ratio[k] = a / c;
+        k += 1;
+        cmd_lo = cmd_lo.min(c);
+        cmd_hi = cmd_hi.max(c);
+    }
+    if k < 5 {
+        return Err(Declined::NotEnoughSamples);
+    }
+    let r = &mut ratio[..k];
+    r.sort_by(|x, y| x.partial_cmp(y).unwrap());
+    let med = if k % 2 == 1 { r[k / 2] } else { 0.5 * (r[k / 2 - 1] + r[k / 2]) };
+    if med <= 0.0 {
+        // Commanded repeatedly and the body did not move. That is a different fault from "delivery
+        // is small", and reporting a near-zero ratio here would let a dead joint pass as a slow one.
+        return Err(Declined::NoResponse);
+    }
+    // Robust spread: median absolute deviation, scaled to the normal-consistent estimator so the
+    // number the admit gate compares against a precision ask means the same thing as a std-dev.
+    let mut dev = [0.0f64; 256];
+    for i in 0..k {
+        dev[i] = (r[i] - med).abs();
+    }
+    let d = &mut dev[..k];
+    d.sort_by(|x, y| x.partial_cmp(y).unwrap());
+    let mad = if k % 2 == 1 { d[k / 2] } else { 0.5 * (d[k / 2 - 1] + d[k / 2]) };
+
+    if !(cmd_lo < cmd_hi) {
+        // Every step at one magnitude: no basis for admitting an ask at any other magnitude, and
+        // delivery genuinely varies with it.
+        return Err(Declined::Inconsistent);
+    }
+    let mut m = blank(Quantity::StepDelivery, 1, now_ns);
+    m.value[0] = med;
+    m.uncertainty[0] = 1.4826 * mad;
+    m.valid_lo[0] = cmd_lo;
+    m.valid_hi[0] = cmd_hi;
+    // No wall-clock expiry: this is a property of the body, invalidated when the body changes.
+    m.valid_for_ns = 0;
+    m.selftest_passed = true;
+    Ok(m)
+}
+
 // ------------------------------------------------------------------ helpers
 
 fn blank(q: Quantity, dim: usize, now_ns: u64) -> Measurement {
