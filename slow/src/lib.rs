@@ -780,4 +780,80 @@ mod end_to_end {
                 "the two arms read {} and {} -- a probe that cannot separate them is not a probe",
                 m.value[0], m2.value[0]);
     }
+
+    /// `reach` must report a band only where both walls were actually straddled.
+    ///
+    /// The refusal in the middle of this test is the one that matters. A base-separation sweep run
+    /// at 0.75 m produced **no** sample inside the inner limit, so it carries no evidence about
+    /// where that limit sits -- and a fit that answered anyway would be indistinguishable
+    /// downstream from one that had measured it.
+    #[test]
+    fn reach_refuses_a_wall_it_never_touched() {
+        use probe::{reach, Declined};
+        const T: u64 = 1_000_000_000;
+        // Attained between 0.33 and 0.60 m from the base; failed outside. `n` samples spread
+        // linearly over [lo, hi].
+        let band = |lo: f64, hi: f64, n: usize| -> Vec<(f64, bool)> {
+            (0..n)
+                .map(|i| {
+                    let r = lo + (hi - lo) * (i as f64) / ((n - 1) as f64);
+                    (r, (0.33..=0.60).contains(&r))
+                })
+                .collect()
+        };
+
+        // -- must refuse: two edges cannot be located from a handful of points.
+        assert_eq!(reach(&band(0.10, 0.90, 8), T).unwrap_err(), Declined::NotEnoughSamples);
+
+        // -- must refuse: swept only the far half, so nothing was ever tried inside the inner
+        //    wall. This is the 0.75 m sweep, and the estimator must NOT invent its inner edge.
+        assert_eq!(reach(&band(0.40, 0.90, 30), T).unwrap_err(), Declined::Inconsistent);
+
+        // -- must refuse: the mirror case -- swept only the near half, outer wall never touched.
+        assert_eq!(reach(&band(0.05, 0.50, 30), T).unwrap_err(), Declined::Inconsistent);
+
+        // -- must refuse: attained nothing anywhere. A dead arm is not a narrow band.
+        let dead: Vec<(f64, bool)> =
+            (0..30).map(|i| (0.05 + 0.03 * f64::from(i), false)).collect();
+        assert_eq!(reach(&dead, T).unwrap_err(), Declined::NoResponse);
+
+        // -- must refuse: a FLAT curve. Attained ~85% everywhere, failures scattered rather than
+        //    massed at an edge -- the sweep never approached either limit, so it holds no evidence
+        //    about where they are. This is the case that actually occurred: 2174 real episodes ran
+        //    73–100% attainment with no trend in radius, and an earlier version of this estimator
+        //    answered them with crisp-looking bands that were slivers of noise. Left untested, the
+        //    probe's most common real input is the one it silently gets wrong.
+        let flat: Vec<(f64, bool)> = (0..80)
+            .map(|i| (0.10 + 0.008 * f64::from(i), i % 7 != 0))
+            .collect();
+        assert_eq!(reach(&flat, T).unwrap_err(), Declined::Inconsistent,
+                   "a flat attainment curve contains no wall; reporting one is the failure mode \
+                    that this probe exists to prevent");
+
+        // -- must be ADMITTED: a sweep that straddles both walls, with one unlucky interior
+        //    failure that must NOT truncate the band (a collision is not a wall).
+        let mut s = band(0.05, 0.95, 40);
+        let mid = s.iter().position(|&(r, _)| r > 0.45).unwrap();
+        s[mid].1 = false;
+        let m = reach(&s, T).expect("a sweep that straddles both walls must be admitted");
+        assert!((m.value[0] - 0.33).abs() < 0.05,
+                "inner wall read {} -- expected ~0.33", m.value[0]);
+        assert!((m.value[1] - 0.60).abs() < 0.05,
+                "outer wall read {} -- one interior failure truncated the band", m.value[1]);
+        assert!(m.valid_lo[0] <= 0.06 && m.valid_hi[0] >= 0.94,
+                "validity must be the radial span actually swept, got [{}, {}]",
+                m.valid_lo[0], m.valid_hi[0]);
+        assert!(m.uncertainty[0] > 0.0 && m.uncertainty[1] > 0.0,
+                "an edge bracketed by two samples has non-zero width; reporting 0 would claim \
+                 a precision the sweep does not have");
+
+        // -- two different mountings must not read the same. A probe that cannot separate them
+        //    is measuring the sweep, not the body.
+        let s2: Vec<(f64, bool)> = (0..40)
+            .map(|i| { let r = 0.05 + 0.9 * (i as f64) / 39.0; (r, (0.15..=0.40).contains(&r)) })
+            .collect();
+        let m2 = reach(&s2, T).unwrap();
+        assert!(m2.value[1] < m.value[1] - 0.1,
+                "the two mountings read outer walls {} and {}", m.value[1], m2.value[1]);
+    }
 }

@@ -351,6 +351,156 @@ pub fn step_delivery(
 
 // ------------------------------------------------------------------ helpers
 
+/// Measure **reach**: the radial band, from an arm's own base, in which that arm can actually
+/// attain a commanded pose.
+///
+/// # Why this is a band and not a radius
+///
+/// "Reach" is habitually written down as one number — how far the arm extends. A body that is
+/// mounted has *two* limits, and the inner one is the one that gets forgotten: an object close to
+/// the shoulder is unreachable for a different reason than one that is far, and no single radius
+/// separates them.
+///
+/// The measurement that forced this: sweeping one robot's two bases apart, task success ran
+/// 20% → 46% → 61% → 49% as the separation went 0.30 → 0.55 → 0.65 → 0.75 m, with objects fixed.
+/// Nothing about the arm changed; only where its base sat relative to the work. A single-radius
+/// reach cannot express that shape, and the separation had been chosen by hand — exactly the kind
+/// of number this layer exists to stop anyone from typing in.
+///
+/// # It refuses when the boundary was never probed — and that is the whole point
+///
+/// The estimate is only meaningful if the samples straddle both edges. In the 0.75 m sweep above,
+/// **zero** samples fell inside the inner limit, so that run contains no evidence about where the
+/// inner limit is — yet a naive fit would happily report one, and it would be believed, because a
+/// plausible number and a measured number are indistinguishable downstream.
+///
+/// So both edges must be bracketed by an observed failure, or this returns
+/// [`Declined::Inconsistent`]. A caller that wants the answer must probe wider; it may not have a
+/// guess dressed up as a measurement.
+///
+/// # The core is a maximum-subarray, not a threshold
+///
+/// Attainment is not monotone in radius — a single failure mid-band (a collision, an unlucky
+/// orientation) should not truncate the estimate. Scoring attained `+1` / failed `-1` and taking
+/// the maximum-sum contiguous run tolerates a minority of interior failures while still stopping at
+/// a genuine wall. A threshold on a local rate needs a window size, which is another hand-filled
+/// number.
+///
+/// `value` is `[r_inner, r_outer]`; `uncertainty` is how tightly each edge is bracketed — half the
+/// gap between the last failure outside and the first attained sample inside. `valid_lo/hi` is the
+/// radial span actually sampled, so an ask about a radius nobody probed is refused, not
+/// extrapolated.
+pub fn reach(
+    samples: &[(f64, bool)], // (radius from this arm's own base, did it attain the pose)
+    now_ns: u64,
+) -> Result<Measurement, Declined> {
+    let mut r = [0.0f64; 256];
+    let mut ok = [false; 256];
+    let mut k = 0usize;
+    for &(radius, attained) in samples {
+        if !radius.is_finite() || radius < 0.0 {
+            continue;
+        }
+        if k == r.len() {
+            break;
+        }
+        r[k] = radius;
+        ok[k] = attained;
+        k += 1;
+    }
+    // Two edges to locate; fewer than this and the "band" is whichever sample happened to land.
+    if k < 12 {
+        return Err(Declined::NotEnoughSamples);
+    }
+    // Sort by radius, carrying the outcome. Insertion sort: k <= 256 and no allocator here.
+    for i in 1..k {
+        let (rv, ov) = (r[i], ok[i]);
+        let mut j = i;
+        while j > 0 && r[j - 1] > rv {
+            r[j] = r[j - 1];
+            ok[j] = ok[j - 1];
+            j -= 1;
+        }
+        r[j] = rv;
+        ok[j] = ov;
+    }
+    if !ok[..k].iter().any(|&a| a) {
+        // Commanded across the whole span and attained nothing. That is a dead arm, not a narrow
+        // band, and reporting an empty band would let it pass as a reachability limit.
+        return Err(Declined::NoResponse);
+    }
+    // Maximum-sum contiguous run, scored against **this body's own attainment rate** rather than
+    // +1/-1. With a flat +/-1 score a body that attains most of what it is asked (0.89 on the real
+    // logs) makes the core swallow the whole sweep -- the walls are outvoted rather than found, and
+    // the probe then refuses a band it did have the evidence for. Centring on `p` makes the
+    // expected score of an arbitrary run zero, so the core stops exactly where attainment falls
+    // below what this body manages on average. No window, no threshold, nothing to fill in by hand.
+    let p = ok[..k].iter().filter(|&&a| a).count() as f64 / k as f64;
+    let (mut best, mut best_lo, mut best_hi) = (f64::NEG_INFINITY, 0usize, 0usize);
+    let (mut cur, mut cur_lo) = (0.0f64, 0usize);
+    for i in 0..k {
+        let w = if ok[i] { 1.0 - p } else { -p };
+        if cur <= 0.0 {
+            cur = w;
+            cur_lo = i;
+        } else {
+            cur += w;
+        }
+        if cur > best {
+            best = cur;
+            best_lo = cur_lo;
+            best_hi = i;
+        }
+    }
+    // Both edges must be bracketed by an observed failure, or the boundary is a guess.
+    let inner_probed = ok[..best_lo].iter().any(|&a| !a);
+    let outer_probed = ok[best_hi + 1..k].iter().any(|&a| !a);
+    if !inner_probed || !outer_probed {
+        return Err(Declined::Inconsistent);
+    }
+    // A core exists in any sample; that it exists is not evidence of a wall. Attainment outside it
+    // must be lower than inside by more than counting noise, or what has been located is a lucky
+    // stretch of a flat curve.
+    //
+    // This gate is not hypothetical. On 2174 real episodes attainment ran 73–100% with no trend in
+    // radius — the object placements never approach either limit — and without this check the probe
+    // reported crisp bands (ARX `[0.194, 0.294]`, Franka `[0.358, 0.506]`) that were slivers of
+    // noise. They were briefly believed, and read as "the two bodies reach different places". The
+    // honest answer to that sweep is that it contains no evidence about reach at all.
+    let n_in = best_hi - best_lo + 1;
+    let hit_in = ok[best_lo..=best_hi].iter().filter(|&&a| a).count();
+    let n_out = k - n_in;
+    let hit_out = ok[..k].iter().filter(|&&a| a).count() - hit_in;
+    if n_out == 0 {
+        return Err(Declined::Inconsistent);
+    }
+    let (p_in, p_out) = (hit_in as f64 / n_in as f64, hit_out as f64 / n_out as f64);
+    // Standard error of the difference of two proportions, under the null that they are equal.
+    let p_pool = (hit_in + hit_out) as f64 / k as f64;
+    let se = (p_pool * (1.0 - p_pool) * (1.0 / n_in as f64 + 1.0 / n_out as f64)).sqrt();
+    if !(se > 0.0) || (p_in - p_out) < 2.0 * se {
+        return Err(Declined::Inconsistent);
+    }
+
+    // Nearest observed failure outside each edge — that pair brackets the wall.
+    let lo_fail = (0..best_lo).rev().find(|&i| !ok[i]).unwrap();
+    let hi_fail = (best_hi + 1..k).find(|&i| !ok[i]).unwrap();
+
+    let mut m = blank(Quantity::Reach, 2, now_ns);
+    m.value[0] = 0.5 * (r[lo_fail] + r[best_lo]);
+    m.value[1] = 0.5 * (r[best_hi] + r[hi_fail]);
+    m.uncertainty[0] = 0.5 * (r[best_lo] - r[lo_fail]);
+    m.uncertainty[1] = 0.5 * (r[hi_fail] - r[best_hi]);
+    m.valid_lo[0] = r[0];
+    m.valid_hi[0] = r[k - 1];
+    m.valid_lo[1] = r[0];
+    m.valid_hi[1] = r[k - 1];
+    // A property of the body and its mounting, invalidated when either changes — not by the clock.
+    m.valid_for_ns = 0;
+    m.selftest_passed = true;
+    Ok(m)
+}
+
 fn blank(q: Quantity, dim: usize, now_ns: u64) -> Measurement {
     Measurement {
         quantity: q,
