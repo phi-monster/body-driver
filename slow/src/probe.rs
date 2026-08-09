@@ -467,18 +467,26 @@ pub fn reach(
     // reported crisp bands (ARX `[0.194, 0.294]`, Franka `[0.358, 0.506]`) that were slivers of
     // noise. They were briefly believed, and read as "the two bodies reach different places". The
     // honest answer to that sweep is that it contains no evidence about reach at all.
+    // Each wall is tested on its OWN side. Pooling the two sides lets a well-evidenced outer wall
+    // carry an inner wall that rests on two samples — and the reported band would then name an
+    // inner radius nothing established. Testing per side needs no minimum-sample constant: a side
+    // holding one or two points has a standard error too wide to separate, and is refused by the
+    // same arithmetic that admits a side holding fifty.
     let n_in = best_hi - best_lo + 1;
     let hit_in = ok[best_lo..=best_hi].iter().filter(|&&a| a).count();
-    let n_out = k - n_in;
-    let hit_out = ok[..k].iter().filter(|&&a| a).count() - hit_in;
-    if n_out == 0 {
-        return Err(Declined::Inconsistent);
-    }
-    let (p_in, p_out) = (hit_in as f64 / n_in as f64, hit_out as f64 / n_out as f64);
-    // Standard error of the difference of two proportions, under the null that they are equal.
-    let p_pool = (hit_in + hit_out) as f64 / k as f64;
-    let se = (p_pool * (1.0 - p_pool) * (1.0 / n_in as f64 + 1.0 / n_out as f64)).sqrt();
-    if !(se > 0.0) || (p_in - p_out) < 2.0 * se {
+    let p_in = hit_in as f64 / n_in as f64;
+    let separates = |lo: usize, hi: usize| -> bool {
+        let n_s = hi - lo;
+        if n_s == 0 {
+            return false;
+        }
+        let hit_s = ok[lo..hi].iter().filter(|&&a| a).count();
+        let p_s = hit_s as f64 / n_s as f64;
+        let p_pool = (hit_in + hit_s) as f64 / (n_in + n_s) as f64;
+        let se = (p_pool * (1.0 - p_pool) * (1.0 / n_in as f64 + 1.0 / n_s as f64)).sqrt();
+        se > 0.0 && (p_in - p_s) >= 2.0 * se
+    };
+    if !separates(0, best_lo) || !separates(best_hi + 1, k) {
         return Err(Declined::Inconsistent);
     }
 
