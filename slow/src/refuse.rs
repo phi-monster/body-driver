@@ -101,6 +101,19 @@ pub struct Ask {
     pub needs: [Option<Quantity>; 6],
     /// Best precision the ask can tolerate, in that quantity's own units. `None` = no requirement.
     pub tolerance: [Option<f64>; 6],
+    /// 🔴 Where in the corresponding quantity's **probed domain** this ask sits — a commanded step
+    /// magnitude for `step_delivery`, a commanded opening for `gripper_span`, a joint angle for
+    /// `arm_weight`, a pose for `self_occlusion`. Checked against `valid_lo/hi[0]`; outside it the
+    /// ask is [`Reason::OutOfRange`].
+    ///
+    /// This field exists because the refusal it implements was **documented and absent**. Three
+    /// probes state in their own docs that an ask outside the range they probed is refused rather
+    /// than extrapolated, and until this field there was no mechanism by which that could happen —
+    /// only `hand_pixel` was ever range-checked, through `image_point`. A promise in a docstring
+    /// that no code keeps is this repository's most expensive recurring bug: a module docstring
+    /// once advertised a `--ref` positive control the argument parser never implemented, and
+    /// everyone who read it, including its author, believed the control had run for weeks.
+    pub at: [Option<f64>; 6],
     /// A point the ask must be able to reach, in normalised image coordinates, if it has one.
     pub image_point: Option<(f64, f64)>,
 }
@@ -110,6 +123,7 @@ impl Ask {
     pub const EMPTY: Ask = Ask {
         needs: [None; 6],
         tolerance: [None; 6],
+        at: [None; 6],
         image_point: None,
     };
 }
@@ -158,6 +172,16 @@ pub fn admit(ask: &Ask, now_ns: u64, get: &dyn Fn(Quantity) -> Option<Measuremen
                 // residual turned out to be interpolation error between the poses it had actually
                 // visited, so "outside the probed range" is precisely where its number stops
                 // meaning anything.
+                return Verdict::refuse(Reason::OutOfRange, q);
+            }
+        }
+
+        if let Some(x) = ask.at[slot] {
+            if !m.covers(0, x) {
+                // The general form of the refusal above: this quantity was established over a
+                // domain, and the ask is outside it. `step_delivery` genuinely differs between a
+                // 1 mm and a 45 mm command; `gripper_span` swept from 0.4 to 0.8 says nothing about
+                // full open. Extrapolating either produces a number that is believed.
                 return Verdict::refuse(Reason::OutOfRange, q);
             }
         }

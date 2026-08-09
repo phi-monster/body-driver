@@ -115,7 +115,12 @@ typedef enum {
     BL_Q_STEP_DELIVERY     = 9,  /* I command a step; this fraction of it arrives in    */
                                  /* one control period.  NOT latency (dead time) and    */
                                  /* NOT backlash (dead band at a reversal).             */
-    BL_Q_COUNT             = 10
+    BL_Q_TOOL_OFFSET       = 10, /* how far my working point sits from the mount I    */
+                                 /* command, along the tool axis, in metres.  Typed  */
+                                 /* in at FOUR places in the live stack, with three  */
+                                 /* values for three bodies (0.145 / 0.102 / 0.1034) */
+                                 /* and a default that silently uses another robot's.*/
+    BL_Q_COUNT             = 11
 } bl_quantity;
 
 /* 🔴 3 * BL_MAX_JOINTS, and that is not slack -- it is the smallest value that fits the image
@@ -305,9 +310,57 @@ size_t    bl_save_max_bytes(void);
 bl_status bl_save(const bl_body *b, uint8_t *buf, size_t cap, size_t *written);
 bl_status bl_load(bl_body *b, const uint8_t *buf, size_t len);
 
+/* ------------------------------------------------- what this body still owes itself */
+
+/* Why a quantity is on the measurement plan.  Distinct facts, never merged: "I have never measured
+ * this" and "what I measured this against has moved" call for the same probe and mean very
+ * different things in an audit trail. */
+typedef enum {
+    BL_N_NEVER_MEASURED   = 0,
+    BL_N_STALE            = 1,
+    BL_N_DEPENDENCY_MOVED = 2,  /* including: it is ABOUT to move, because a prerequisite is  */
+                                /* itself on this plan.  Scheduled before it goes bad, not    */
+                                /* discovered afterwards by whoever happens to call bl_admit.  */
+    BL_N_SELFTEST_FAILED  = 3
+} bl_need;
+
+/* THE POWER-ON SCHEDULE.  Fills `quantities` / `needs` with what to measure now, dependencies
+ * first, and writes the count to *n.  *n == 0 means the measuring half has finished.
+ *
+ * Plugging in a new machine is: bl_measure_plan -> run the probes it names -> bl_measure each ->
+ * repeat until *n == 0.  Nothing about the order is typed in per robot.
+ *
+ * BL_ENOSPACE if cap is too small -- never a truncated plan, because a short list reads as a body
+ * that owes less than it does.
+ */
+bl_status bl_measure_plan(const bl_body *b, uint64_t now_ns,
+                          uint32_t *quantities, uint32_t *needs, size_t cap, size_t *n);
+
+/* 🔴 THE DEBT.  Read this next to the fact that nothing can enter bl_measure without a passing
+ * self-test -- which makes "hand-filled constants held by this body" a STRUCTURAL zero, true and
+ * misleading.  It counts what came through this API.  What never came near it is invisible to it.
+ *
+ * Measured 2026-08-09: a parameter search over the deployed teacher found its DOMINANT constant,
+ * `TEACH_HIGH_FRAC` -- 32/44 (73%) at <= 0.30 against 10/100 (10%) above it, Fisher p = 9.3e-14 --
+ * and this layer had no slot for it.  A census of the same two files found 45 environment knobs and
+ * a hardcoded camera matrix against ten declared quantities.
+ *
+ * So the layer publishes its own debt as a number it can be held to.  bl_debt_line() gives one row
+ * per constant: name, where it is set, what this layer can do about it, and what would discharge
+ * it.  `outstanding` counts the ones this layer could not supply even if it were wired in.
+ *
+ * ⚠️ "measured" in a row means A PROBE EXISTS, not that the constant has been replaced.  Nothing
+ * outside the body-layer tree reads this layer yet.  That gap is stated here rather than hidden
+ * inside a per-row status.
+ */
+uint32_t  bl_debt_total(void);
+uint32_t  bl_debt_outstanding(void);
+bl_status bl_debt_line(uint32_t i, char *buf, size_t cap);
+
 /* Human-readable, for logs and for the audit trail.  Never parsed. */
 const char *bl_reason_str(uint32_t why);
 const char *bl_quantity_str(uint32_t quantity);
+const char *bl_need_str(uint32_t need);
 
 #ifdef __cplusplus
 }

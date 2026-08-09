@@ -10,8 +10,15 @@
 //!   3.6 px while the true offset was 15.7 px. Algebra, not precision.
 //! * on another rig the same estimator settled on the robot's **elbow**, 167 px from the true
 //!   fingertip, and reported 0.04–9.3 px. It precisely aimed the wrong point at the mark.
-//! * a hand-filled gripper constant (`0.145`) whose provenance could not be traced at all — which
-//!   means it could not be re-measured on a new body, which means the new body was never zero-shot.
+//! * a hand-filled gripper constant, `0.145`. ⚠️ **Corrected 2026-08-09 by reading the deployed
+//!   source, and the truth is worse than the earlier note here** (which said its provenance could
+//!   not be traced at all). It is traceable, to a line a person writes: it is the tool-axis offset,
+//!   copied by hand out of `Assets/Robots/<body>/robot_config.yml`, and the comment beside it in the
+//!   running servo reads *"x5 = 0.145, franka = 0.102"* — **4.3 cm apart between two bodies, with
+//!   0.145 as the DEFAULT.** A new machine that does not remember to pass it does not fail; it
+//!   quietly executes with another robot's geometry. Traceable to a hand-written per-body file is
+//!   the same violation as untraceable, and it degrades more quietly. It is now
+//!   [`Quantity::ToolOffset`], with a probe.
 //!
 //! A bare `f64` cannot be refused on. A value that carries its uncertainty, the range it was
 //! actually probed over, when it was taken, what it was taken *against*, and a self-test that can
@@ -82,11 +89,31 @@ pub enum Quantity {
     /// It is **not** [`Backlash`] either: backlash is a dead band around a reversal, this is a
     /// first-order shortfall that applies to every step in the same direction.
     StepDelivery = 9,
+    /// How far my working point sits from the mount I command, along the tool axis, in metres.
+    ///
+    /// 🔴 Added 2026-08-09 from a **census of the live stack**, not from a design meeting. The same
+    /// number is typed in at four places in the deployed system, with three different values for
+    /// three bodies:
+    ///
+    /// * `L3_GRIPPER_BIAS`, default `0.145` — and the comment beside it reads
+    ///   *"x5 = 0.145, franka = 0.102 (4.3 cm apart)"*, with the value to be copied by hand from
+    ///   `Assets/Robots/<body>/robot_config.yml`. **A body that forgets to pass it silently runs on
+    ///   a different robot's number.** That is the quiet degradation this whole layer exists to
+    ///   make impossible, live, in production.
+    /// * the same `0.145` again, hardcoded in the teacher's `flange_for()`: `tcp = flange + 0.145·R`.
+    /// * the same `0.145` a third time, as the justification for a wrist-tilt ceiling — *"the flange
+    ///   sits 0.145 m back along the tool axis, so a 60° approach demands 0.126 m of extra lateral
+    ///   travel"*.
+    /// * and `tcp_off: 0.1034` on a third rig's harness.
+    ///
+    /// It is measurable by acting on itself: turn the wrist and the working point sweeps an arc
+    /// whose radius **is** the offset. See [`crate::probe::tool_offset`].
+    ToolOffset = 10,
 }
 
 impl Quantity {
     /// Total number of quantities; used to size the store.
-    pub const COUNT: usize = 10;
+    pub const COUNT: usize = 11;
 
     /// Reconstruct from the ABI's `u32`. Returns `None` for anything unknown — an unknown
     /// quantity is refused, never coerced into a neighbouring one.
@@ -103,6 +130,7 @@ impl Quantity {
             7 => ContactThreshold,
             8 => SelfOcclusion,
             9 => StepDelivery,
+            10 => ToolOffset,
             _ => return None,
         })
     }
@@ -121,6 +149,7 @@ impl Quantity {
             ContactThreshold => "contact_threshold",
             SelfOcclusion => "self_occlusion",
             StepDelivery => "step_delivery",
+            ToolOffset => "tool_offset",
         }
     }
 }

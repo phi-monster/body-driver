@@ -38,6 +38,18 @@
 //! pass: **change a hardware condition — add a weight, loosen a joint, knock the camera — and see
 //! whether the system NOTICES.** If it cannot notice, this layer does not exist in that system.
 
+// 🔴 MEASURED 2026-08-09, AND IT DOES NOT HOLD: `cargo build --no-default-features` FAILS, with 26
+// errors. It failed before this line was audited too -- `git show HEAD:slow/src/probe.rs` already
+// used `sort_by` (which lives in `alloc`) and `sqrt`/`hypot`/`powi` (which live in `std`, not
+// `core`). So the attribute below, the Cargo comment claiming this "builds the same code for an
+// embedded target", and the README's "a layer that cannot build for the target it has to run on is
+// not a deliverable" have all been describing something that has never compiled.
+//
+// It is recorded here, at the attribute, rather than in a note somebody has to find, because this
+// is the repository's most expensive recurring bug: a promise kept by a docstring and by no code,
+// indistinguishable in the output from a promise that is kept. Fixing it is a decision, not a
+// tidy-up -- the float methods need either a dependency (`libm`, against the zero-dependency rule
+// that is itself load-bearing here) or a hand-written shim that then needs its own proof.
 #![cfg_attr(not(feature = "std"), no_std)]
 #![deny(unsafe_op_in_unsafe_fn)]
 #![warn(missing_docs)]
@@ -65,6 +77,7 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 }
 
 pub mod abi;
+pub mod debt;
 pub mod execute;
 #[cfg(feature = "fast")]
 pub mod fast;
@@ -75,6 +88,7 @@ pub mod measurement;
 pub mod persist;
 pub mod probe;
 pub mod refuse;
+pub mod schedule;
 
 use measurement::{Malformed, Measurement, Quantity};
 use refuse::{Ask, Verdict};
@@ -171,11 +185,18 @@ impl Body {
         })
     }
 
-    /// How many hand-filled constants this body is carrying: **must be zero**.
+    /// How many hand-filled constants **entered through this API**: a structural zero.
     ///
-    /// Nothing can enter through [`Body::submit`] without a passing self-test, so the count is a
-    /// structural zero rather than a promise. It is exposed anyway, because the number that has to
-    /// be reported to an auditor is the number, not the argument for why it must be right.
+    /// 🔴 Read the scope, and never quote this number alone. Nothing can enter through
+    /// [`Body::submit`] without a passing self-test, so this counts a set that is empty by
+    /// construction. The constants that never came near this API are invisible to it — and on
+    /// 2026-08-09 a parameter search found that the single most influential constant on the
+    /// deployed stack (`TEACH_HIGH_FRAC`: 32/44 at ≤0.30 against 10/100 above it, p=9.3e-14) was
+    /// one this layer had never heard of, alongside 45 environment knobs and a hardcoded camera
+    /// matrix against ten declared quantities.
+    ///
+    /// The honest pair is this **and** [`crate::debt::outstanding`]. A zero here with no second
+    /// number is the shape of claim this layer exists to stop other people making.
     pub fn hand_filled_constants(&self) -> usize {
         self.slots
             .iter()
@@ -279,6 +300,32 @@ mod tests {
         let v = b.admit(&a, 0);
         assert!(!v.admit);
         assert_eq!(v.why, refuse::Reason::UncertaintyTooHigh);
+    }
+
+    /// 🔴 An ask outside the domain a quantity was actually probed over must be refused, not
+    /// extrapolated. Three probes documented this refusal and, until `Ask::at` existed, **nothing
+    /// implemented it** — only `hand_pixel` was ever range-checked. A promise kept by a docstring
+    /// and by no code is indistinguishable, in the output, from a promise that is kept.
+    #[test]
+    fn an_ask_outside_the_probed_domain_is_refused() {
+        let mut b = Body::new();
+        // step_delivery probed over commanded magnitudes 0.020 .. 0.058 m
+        let mut sd = m(Quantity::StepDelivery, 0.11, 0.01, 0);
+        sd.valid_lo[0] = 0.020;
+        sd.valid_hi[0] = 0.058;
+        b.submit(sd).unwrap();
+
+        let mut inside = ask_for(Quantity::StepDelivery);
+        inside.at[0] = Some(0.045);
+        assert!(b.admit(&inside, 0).admit, "a magnitude that was probed must be admitted");
+
+        let mut outside = ask_for(Quantity::StepDelivery);
+        outside.at[0] = Some(0.001); // a 1 mm step: a saturating actuator delivers a different
+                                     // fraction of it, and nobody probed there
+        let v = b.admit(&outside, 0);
+        assert!(!v.admit);
+        assert_eq!(v.why, refuse::Reason::OutOfRange);
+        assert_eq!(v.culprit, Some(Quantity::StepDelivery));
     }
 
     /// A body layer that refuses everything is also not a body layer. Kept last and kept small.
@@ -455,6 +502,312 @@ mod execute_tests {
             execute(&b, &f, &spec(), &unit_x(), 1_000),
             Outcome::Halted(_)
         ));
+    }
+}
+
+/// The power-on schedule, and the ledger of what it still does not cover.
+#[cfg(test)]
+mod schedule_and_debt {
+    use super::*;
+    use measurement::{MAX_DEPS, MAX_DIM};
+    use schedule::{is_ready, plan, prerequisites, Need};
+
+    fn m(q: Quantity, valid_for_ns: u64) -> Measurement {
+        let mut x = Measurement {
+            quantity: q,
+            dim: 1,
+            value: [1.0; MAX_DIM],
+            uncertainty: [0.01; MAX_DIM],
+            valid_lo: [0.0; MAX_DIM],
+            valid_hi: [2.0; MAX_DIM],
+            measured_at_ns: 1_000,
+            valid_for_ns,
+            deps: [None; MAX_DEPS],
+            epoch: 0,
+            selftest_passed: true,
+            prev_epoch: 0,
+        };
+        x.value[0] = 1.0;
+        x
+    }
+
+    /// A body that knows nothing owes everything, and the order must be runnable: no probe may be
+    /// scheduled before something it is measured against.
+    #[test]
+    fn a_fresh_body_owes_everything_in_a_runnable_order() {
+        let b = Body::new();
+        let p = plan(&b, 0);
+        assert_eq!(p.n, Quantity::COUNT, "a fresh body must owe every quantity");
+        assert!(!is_ready(&b, 0));
+
+        let mut seen = [false; Quantity::COUNT];
+        for (q, why) in p.steps() {
+            for pre in prerequisites(*q) {
+                assert!(
+                    seen[*pre as usize],
+                    "{} was scheduled before {}, which it is measured against",
+                    q.as_str(),
+                    pre.as_str()
+                );
+            }
+            assert_eq!(*why, Need::NeverMeasured);
+            seen[*q as usize] = true;
+        }
+    }
+
+    /// 🔴 The cascade. Re-measuring the Jacobian invalidates everything expressed in terms of it,
+    /// and the plan must say so **before** it happens rather than leaving somebody to remember.
+    #[test]
+    fn re_measuring_a_prerequisite_schedules_everything_built_on_it() {
+        let mut b = Body::new();
+        // A body that is complete except that the Jacobian has a 60 s life and has just expired.
+        let je = b.submit(m(Quantity::ImageJacobian, 60_000_000_000)).unwrap();
+        let aw = b.submit(m(Quantity::ArmWeight, 0)).unwrap();
+        for q in [
+            Quantity::HandPixel,
+            Quantity::GripperSpan,
+            Quantity::SelfOcclusion,
+            Quantity::ToolOffset,
+        ] {
+            let mut x = m(q, 0);
+            x.deps[0] = Some((Quantity::ImageJacobian, je));
+            b.submit(x).unwrap();
+        }
+        let mut ct = m(Quantity::ContactThreshold, 0);
+        ct.deps[0] = Some((Quantity::ArmWeight, aw));
+        b.submit(ct).unwrap();
+        for q in [
+            Quantity::Latency,
+            Quantity::Backlash,
+            Quantity::Reach,
+            Quantity::StepDelivery,
+        ] {
+            b.submit(m(q, 0)).unwrap();
+        }
+        assert!(is_ready(&b, 2_000), "a fully measured body must plan as ready");
+
+        // 61 s later only the Jacobian's own clock has run out. Everything measured against it is
+        // still fresh by its own clock and is about to be worthless.
+        let p = plan(&b, 61_500_000_000);
+        let names: Vec<&str> = p.steps().iter().map(|(q, _)| q.as_str()).collect();
+        assert_eq!(names[0], "image_jacobian", "the prerequisite must be first: {names:?}");
+        for q in ["hand_pixel", "gripper_span", "self_occlusion", "tool_offset"] {
+            assert!(names.contains(&q), "{q} was left off the plan: {names:?}");
+        }
+        assert!(
+            !names.contains(&"arm_weight") && !names.contains(&"contact_threshold"),
+            "quantities that answer to nothing the Jacobian touches were dragged in: {names:?}"
+        );
+        assert_eq!(p.steps()[0].1, Need::Stale);
+        assert_eq!(
+            p.steps().iter().find(|(q, _)| *q == Quantity::HandPixel).unwrap().1,
+            Need::DependencyMoved
+        );
+    }
+
+    /// 🔴 The correction this whole ledger exists for: the structural zero and the real debt are
+    /// two different numbers, and quoting the first alone is the claim this layer punishes.
+    #[test]
+    fn the_zero_hand_filled_count_is_not_the_debt() {
+        let b = Body::new();
+        assert_eq!(b.hand_filled_constants(), 0, "structural, by construction");
+        assert!(
+            debt::outstanding() > 0,
+            "the ledger reports no outstanding constants, which would mean the deployed teacher \
+             has none -- it has TEACH_HIGH_FRAC, measured at 32/44 against 10/100"
+        );
+        // The dominant constant must be in the ledger by name, or the ledger is decoration.
+        assert!(
+            debt::LEDGER.iter().any(|c| c.name == "TEACH_HIGH_FRAC"),
+            "the largest measured effect on the stack is not in the ledger"
+        );
+        // And this layer's own hand-set body constant must be in it too. A ledger that audits only
+        // other people's code is an advertisement.
+        assert!(
+            debt::LEDGER
+                .iter()
+                .any(|c| c.name == "bl_spec.step_m"
+                    && matches!(c.standing, debt::Standing::Outstanding)),
+            "the layer's own step_m is missing or is claiming to be measured"
+        );
+        assert!(debt::total() >= 45, "the census found 45 knobs; the ledger has {}", debt::total());
+    }
+
+    /// 🔴 "A named slot in an enum is not a probe." Every quantity must now have one, and this is
+    /// the mechanical statement of it -- the count was 5 when the question was first asked.
+    #[test]
+    fn no_quantity_is_a_name_without_a_probe() {
+        assert_eq!(
+            debt::declared_only(),
+            0,
+            "a quantity has a slot and no estimator; it reads as covered and is worth nothing"
+        );
+        // Every ledger row that names a quantity must name one this build knows.
+        for c in debt::LEDGER {
+            if let debt::Standing::Measured(q) | debt::Standing::DeclaredOnly(q) = c.standing {
+                assert!(
+                    Quantity::from_u32(q as u32).is_some(),
+                    "{} names a quantity this build does not have",
+                    c.name
+                );
+            }
+        }
+    }
+}
+
+/// The probes, run over **real episode logs** rather than over data a test author imagined.
+///
+/// 🔴 Why this is a test and not an example. `examples/reach_on_real_data.rs` was written to take a
+/// CSV path, and no such CSV was ever committed — so the one real-data check in this repository
+/// could not be re-run by anybody, including its author. A validation nobody can re-run is a
+/// validation nobody can contradict, which is the same shape as a guard that never fires. These
+/// inputs live in `realdata/`, regenerated by `realdata/extract.py`, and the assertions run in
+/// `cargo test`.
+///
+/// It has already earned its keep: the `backlash` control-ratio guard exists because this data
+/// produced a **1.01 rad** dead band on an arm that has none, and nothing else in that reading
+/// looked wrong.
+#[cfg(all(test, feature = "std"))]
+mod real_data {
+    use crate::probe::{backlash, contact_threshold, Declined};
+
+    fn read(name: &str) -> String {
+        let p = format!("{}/../realdata/{}", env!("CARGO_MANIFEST_DIR"), name);
+        std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("{p}: {e}"))
+    }
+
+    /// A staircase of press depths against a MEASURED touch height, with PhysX contact as ground
+    /// truth: 120 rows clear of the surface, 400 pressed into it.
+    #[test]
+    fn contact_threshold_on_real_press_logs() {
+        let text = read("contact_stair.csv");
+        let (mut free, mut touch) = (Vec::new(), Vec::new());
+        for line in text.lines().skip(1) {
+            let f: Vec<&str> = line.trim().split(',').collect();
+            if f.len() != 3 {
+                continue;
+            }
+            let (d, force) = (
+                f[0].parse::<f64>().expect("depth"),
+                f[1].parse::<f64>().expect("force"),
+            );
+            if d < 0.0 {
+                free.push(force);
+            } else if d > 0.0 {
+                touch.push(force);
+            }
+        }
+        assert_eq!((free.len(), touch.len()), (120, 400), "the log changed shape");
+
+        let m = contact_threshold(&free, &touch, 1_000_000_000, 3)
+            .expect("two physically distinct conditions must be measurable");
+        let hi_free = free.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        let lo_touch = touch.iter().copied().fold(f64::INFINITY, f64::min);
+        eprintln!(
+            "contact_threshold: {:.3} ± {:.3} N   free ≤ {:.3}, contact ≥ {:.3}",
+            m.value[0], m.uncertainty[0], hi_free, lo_touch
+        );
+        assert!(
+            m.value[0] > hi_free && m.value[0] < lo_touch,
+            "threshold {} sits on an observed sample instead of inside the gap [{hi_free}, {lo_touch}]",
+            m.value[0]
+        );
+        // 🔴 This rig's free-space channel reads exactly 0.000 on all 120 rows. Without the
+        // half-gap floor the propagated standard error is exactly zero, and the layer would claim
+        // the boundary is known perfectly while it could sit anywhere in a 37 N band.
+        assert!(
+            m.uncertainty[0] >= 0.5 * (lo_touch - hi_free) - 1e-9,
+            "sigma {} is tighter than the gap in which every choice is equally consistent",
+            m.uncertainty[0]
+        );
+
+        // -- must refuse, on the same real data: the two classes are the SAME condition. A probe
+        //    that answers this has not been shown to be measuring contact at all.
+        let (a, b) = free.split_at(60);
+        assert_eq!(
+            contact_threshold(a, b, 1_000_000_000, 3).unwrap_err(),
+            Declined::NoResponse
+        );
+
+        // -- must refuse: the classes swapped. Contact reading lower than free space is an inverted
+        //    convention, and a threshold fitted to it fires in free space and is silent on contact.
+        assert_eq!(
+            contact_threshold(&touch, &free, 1_000_000_000, 3).unwrap_err(),
+            Declined::Inconsistent
+        );
+    }
+
+    /// Per-step commanded vs achieved joint motion over three 300-step sweeps of the same arm: one
+    /// in free space, two with the leg pressed against a surface.
+    #[test]
+    fn backlash_on_real_sweep_logs() {
+        let text = read("reversals.csv");
+        let mut rows: Vec<(String, u32, f64, f64)> = Vec::new();
+        for line in text.lines().skip(1) {
+            let f: Vec<&str> = line.trim().split(',').collect();
+            if f.len() != 4 {
+                continue;
+            }
+            rows.push((
+                f[0].to_string(),
+                f[1].parse().expect("joint"),
+                f[2].parse().expect("cmd"),
+                f[3].parse().expect("act"),
+            ));
+        }
+        assert!(rows.len() > 5_000, "the log changed shape: {} rows", rows.len());
+
+        let mut hover_ok = 0usize;
+        for leg in ["hover", "near", "press"] {
+            for j in 0..7u32 {
+                let steps: Vec<(f64, f64)> = rows
+                    .iter()
+                    .filter(|r| r.0 == leg && r.1 == j)
+                    .map(|r| (r.2, r.3))
+                    .collect();
+                let out = backlash(&steps, 1_000_000_000);
+                match out {
+                    Ok(m) => {
+                        eprintln!(
+                            "{leg:<6} j{j}  n={:<4} backlash = {:+.3e} ± {:.1e} rad",
+                            steps.len(),
+                            m.value[0],
+                            m.uncertainty[0]
+                        );
+                        if leg == "hover" {
+                            hover_ok += 1;
+                            // A simulated Franka has no gear slop. Anything above a milliradian
+                            // here would be the probe inventing one.
+                            assert!(
+                                m.value[0].abs() < 1e-3,
+                                "{leg} j{j} read {:.6} rad of slop on an arm that has none",
+                                m.value[0]
+                            );
+                        }
+                    }
+                    Err(e) => eprintln!("{leg:<6} j{j}  n={:<4} refused: {e:?}", steps.len()),
+                }
+            }
+        }
+        assert!(
+            hover_ok >= 5,
+            "the free-space sweep was answered on only {hover_ok} of 7 joints -- the probe has \
+             become a refuser"
+        );
+
+        // 🔴 The reading this guard was written for. On the `near` leg, joint 5's same-direction
+        // ratios scatter around 0.00025 with a standard error of 0.279; the unguarded estimator
+        // divided by that and reported **1.01 rad** — about 58 degrees of slop. It must refuse.
+        let near5: Vec<(f64, f64)> = rows
+            .iter()
+            .filter(|r| r.0 == "near" && r.1 == 5)
+            .map(|r| (r.2, r.3))
+            .collect();
+        assert_eq!(
+            backlash(&near5, 1_000_000_000).unwrap_err(),
+            Declined::Inconsistent,
+            "the joint that produced a 1.01 rad dead band is being answered again"
+        );
     }
 }
 
@@ -779,6 +1132,447 @@ mod end_to_end {
         assert!(m2.value[0] > 0.7 && m.value[0] < 0.2,
                 "the two arms read {} and {} -- a probe that cannot separate them is not a probe",
                 m.value[0], m2.value[0]);
+    }
+
+    /// `gripper_span`: every case here is one the probe **must** refuse, except the last two.
+    ///
+    /// The constant this exists to abolish is real and is still running: `L3_GRIPPER_BIAS = 0.145`,
+    /// hand-set in the deployed servo, provenance untraceable. A number nobody can trace cannot be
+    /// re-measured on a new machine.
+    #[test]
+    fn gripper_span_refuses_what_it_cannot_answer() {
+        use probe::{gripper_span, Declined};
+        const T: u64 = 1_000_000_000;
+        const RULER: f64 = 800.0; // image units per metre; the rig's own column norms were 792–904
+        const JE: u64 = 7;
+
+        // A gripper whose jaws travel 0.10 m per unit of commanded opening, swept 0.2 -> 1.0.
+        let sweep = |slope: f64, n: usize| -> Vec<(f64, f64)> {
+            (0..n)
+                .map(|i| {
+                    let x = 0.2 + 0.8 * (i as f64) / ((n - 1) as f64);
+                    (x, RULER * slope * x)
+                })
+                .collect()
+        };
+
+        // -- must refuse: no metric reference. A span "in metres" without a ruler is a number in
+        //    image units wearing a unit label.
+        assert_eq!(
+            gripper_span(&sweep(0.10, 12), 0.0, 1.0, T, JE).unwrap_err(),
+            Declined::MissingDependency
+        );
+        assert_eq!(
+            gripper_span(&sweep(0.10, 12), f64::NAN, 1.0, T, JE).unwrap_err(),
+            Declined::MissingDependency
+        );
+
+        // -- must refuse: four points leave no residual, and a fit without a residual reports an
+        //    uncertainty of zero, which is a measurement that cannot be refused on.
+        assert_eq!(
+            gripper_span(&sweep(0.10, 4), RULER, 1.0, T, JE).unwrap_err(),
+            Declined::NotEnoughSamples
+        );
+
+        // -- must refuse: every sample at one opening. No range to be valid over.
+        assert_eq!(
+            gripper_span(&[(0.6, 48.0); 12], RULER, 1.0, T, JE).unwrap_err(),
+            Declined::Inconsistent
+        );
+
+        // -- must refuse: the jaws did not respond. A jammed gripper and jaws the camera cannot
+        //    resolve both land here, and neither may be reported as a very small gripper.
+        let stuck: Vec<(f64, f64)> = (0..12)
+            .map(|i| (0.2 + 0.8 * f64::from(i) / 11.0, 48.0))
+            .collect();
+        assert_eq!(
+            gripper_span(&stuck, RULER, 1.0, T, JE).unwrap_err(),
+            Declined::NoResponse
+        );
+
+        // -- must refuse: the jaws CLOSED as the opening was commanded up. Inverted convention, or
+        //    the tracked blobs are not the jaws. Taking |slope| would let both through looking well.
+        assert_eq!(
+            gripper_span(&sweep(-0.10, 12), RULER, 1.0, T, JE).unwrap_err(),
+            Declined::Inconsistent
+        );
+
+        // -- must be ADMITTED: 0.10 m per unit opening over a 0.8 sweep = 0.080 m of travel, which
+        //    is the jaw maximum the deployed teacher currently carries as a hand-set env knob.
+        let m = gripper_span(&sweep(0.10, 12), RULER, 1.0, T, JE).expect("a clean sweep must be admitted");
+        assert!(
+            (m.value[0] - 0.080).abs() < 1e-6,
+            "span read {} m, expected 0.080",
+            m.value[0]
+        );
+        assert_eq!(
+            (m.valid_lo[0], m.valid_hi[0]),
+            (0.2, 1.0),
+            "validity must be the openings actually commanded, not [0,1] by assumption"
+        );
+        assert_eq!(
+            m.deps[0].map(|d| d.0),
+            Some(measurement::Quantity::ImageJacobian),
+            "the ruler comes from the camera; knocking it must invalidate this"
+        );
+
+        // -- the ruler's own error must reach the answer. Quoting only the fit's error would make a
+        //    span measured with a bad ruler look as precise as one measured with a good one.
+        let sharp = gripper_span(&sweep(0.10, 12), RULER, 1.0, T, JE).unwrap();
+        let blunt = gripper_span(&sweep(0.10, 12), RULER, 80.0, T, JE).unwrap();
+        assert!(
+            blunt.uncertainty[0] > 10.0 * sharp.uncertainty[0],
+            "a 10% ruler and a 0.1% ruler produced {} and {}",
+            blunt.uncertainty[0],
+            sharp.uncertainty[0]
+        );
+
+        // -- and a partial sweep must describe the partial sweep, not extrapolate to full open.
+        let half: Vec<(f64, f64)> = (0..12)
+            .map(|i| {
+                let x = 0.4 + 0.4 * f64::from(i) / 11.0;
+                (x, RULER * 0.10 * x)
+            })
+            .collect();
+        let hm = gripper_span(&half, RULER, 1.0, T, JE).unwrap();
+        assert!(
+            (hm.value[0] - 0.040).abs() < 1e-6,
+            "a sweep of half the range reported {} m -- it extrapolated to jaws nobody opened",
+            hm.value[0]
+        );
+    }
+
+    /// `backlash`: the point of this probe is the **control**, and this test is mostly about that.
+    #[test]
+    fn backlash_refuses_what_it_cannot_answer() {
+        use probe::{backlash, Declined};
+        const T: u64 = 1_000_000_000;
+
+        // A body with delivery fraction `f` and dead band `d`: direction flips every two steps, so
+        // roughly half the steps are reversals and half are same-direction controls.
+        let body = |f: f64, d: f64, n: usize| -> Vec<(f64, f64)> {
+            let mut out = Vec::new();
+            let mut prev_sign = 1.0f64;
+            for i in 0..n {
+                let mag = 0.020 + 0.002 * f64::from(i as u32);
+                let sign = if (i / 2) % 2 == 0 { 1.0 } else { -1.0 };
+                let reversal = i > 0 && sign != prev_sign;
+                let eff = if reversal { (mag - d).max(0.0) } else { mag };
+                out.push((sign * mag, sign * f * eff));
+                prev_sign = sign;
+            }
+            out
+        };
+
+        // -- must refuse: too few steps to classify anything.
+        assert_eq!(backlash(&body(0.9, 0.0, 6), T).unwrap_err(), Declined::NotEnoughSamples);
+
+        // -- must refuse: never pushed both ways. A dead band at a reversal cannot be located from
+        //    motion in one direction -- the shape of refusal `reach` gives for an unstraddled wall.
+        let one_way: Vec<(f64, f64)> = (0..20)
+            .map(|i| {
+                let c = 0.020 + 0.002 * f64::from(i);
+                (c, 0.9 * c)
+            })
+            .collect();
+        assert_eq!(backlash(&one_way, T).unwrap_err(), Declined::Inconsistent);
+
+        // -- must refuse: NO same-direction control (it reverses every single step). Without a
+        //    control the post-reversal shortfall is exactly the confound this probe exists to
+        //    remove, and reporting it would manufacture a dead band on any slow body.
+        let all_rev: Vec<(f64, f64)> = (0..20)
+            .map(|i| {
+                let c = (0.020 + 0.002 * f64::from(i)) * if i % 2 == 0 { 1.0 } else { -1.0 };
+                (c, 0.9 * c)
+            })
+            .collect();
+        assert_eq!(backlash(&all_rev, T).unwrap_err(), Declined::Inconsistent);
+
+        // -- must refuse: reversals at ONE magnitude. A dead band and a reversal-specific delivery
+        //    deficit are perfectly confounded there; they separate only across magnitudes.
+        let one_mag: Vec<(f64, f64)> = (0..20)
+            .map(|i| {
+                let s = if (i / 2) % 2 == 0 { 1.0 } else { -1.0 };
+                (s * 0.045, s * 0.9 * 0.045)
+            })
+            .collect();
+        assert_eq!(backlash(&one_mag, T).unwrap_err(), Declined::Inconsistent);
+
+        // -- must refuse: commanded both ways and nothing moved. A dead joint is not a huge dead band.
+        let dead: Vec<(f64, f64)> = body(0.9, 0.0, 20).iter().map(|&(c, _)| (c, 0.0)).collect();
+        assert_eq!(backlash(&dead, T).unwrap_err(), Declined::NoResponse);
+
+        // -- 🔴 must refuse: a control ratio that is not established. THIS CASE CAME FROM REAL DATA.
+        //    A joint whose same-direction ratios scattered around 0.00025 with a standard error of
+        //    0.279 was divided into, and reported a dead band of 1.01 rad -- 58 degrees, on an arm
+        //    that has none. Everything else about the reading looked ordinary.
+        let mut scattered = body(0.9, 0.0, 20);
+        let mut c = 0usize;
+        for (i, s) in scattered.iter_mut().enumerate() {
+            let reversal = i > 0 && (i / 2) % 2 != ((i - 1) / 2) % 2;
+            if i > 0 && !reversal {
+                // Same-direction ratios that swing between 0.0002 and 3.0: a median near 1.5 whose
+                // own standard error is wider than itself. Dividing by that is what produced the
+                // 1.01 rad reading on the real logs.
+                s.1 = s.0 * if c % 2 == 0 { 0.0002 } else { 3.0 };
+                c += 1;
+            }
+        }
+        assert_eq!(backlash(&scattered, T).unwrap_err(), Declined::Inconsistent);
+
+        // -- 🔴 must be ADMITTED and read ~ZERO: a body that delivers 0.11 of every step and has no
+        //    slop at all. This is the whole design. The naive reading -- post-reversal shortfall
+        //    taken directly -- reports an enormous fictional dead band on exactly this body, and
+        //    the assertion below computes it so the comparison is on the record rather than claimed.
+        let slow_clean = body(0.11, 0.0, 24);
+        let m = backlash(&slow_clean, T).expect("a body with no slop must be measurable, not refused");
+        let naive: f64 = {
+            let mut v: Vec<f64> = slow_clean
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| *i > 0 && (i / 2) % 2 != ((i - 1) / 2) % 2)
+                .map(|(_, &(c, o))| c.abs() - o.abs())
+                .collect();
+            v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            v[v.len() / 2]
+        };
+        assert!(
+            m.value[0].abs() < 1e-9,
+            "a slop-free body read a dead band of {} -- the control is not doing its job",
+            m.value[0]
+        );
+        assert!(
+            naive > 0.02,
+            "the naive estimator was supposed to be badly wrong here; it read {naive}"
+        );
+
+        // -- must be ADMITTED and read the real dead band, on the SAME badly-delivering body.
+        let slow_sloppy = body(0.11, 0.004, 24);
+        let m2 = backlash(&slow_sloppy, T).expect("a real dead band must be measurable");
+        assert!(
+            (m2.value[0] - 0.004).abs() < 1e-9,
+            "dead band read {} on a body built with 0.004",
+            m2.value[0]
+        );
+        assert!(
+            m2.valid_lo[0] < m2.valid_hi[0],
+            "validity must be the span of reversal magnitudes actually probed"
+        );
+    }
+
+    /// `tool_offset`: the number that is typed in four times in the live stack, measured instead.
+    #[test]
+    fn tool_offset_refuses_what_it_cannot_answer() {
+        use probe::{tool_offset, Declined};
+        const T: u64 = 1_000_000_000;
+        const RULER: f64 = 800.0;
+        const JE: u64 = 5;
+
+        // A wrist turning through `span` radians with the working point `r_m` metres off the axis.
+        let arc = |r_m: f64, span: f64, n: usize| -> Vec<(f64, f64, f64)> {
+            (0..n)
+                .map(|i| {
+                    let a = span * (i as f64) / ((n - 1) as f64);
+                    (a, 0.5 + RULER * r_m * a.cos(), 0.5 + RULER * r_m * a.sin())
+                })
+                .collect()
+        };
+
+        // -- must refuse: no metric reference.
+        assert_eq!(
+            tool_offset(&arc(0.145, 2.0, 12), 0.0, 1.0, T, JE).unwrap_err(),
+            Declined::MissingDependency
+        );
+
+        // -- must refuse: three points fit a circle exactly and leave no residual, so there is no
+        //    uncertainty to report and nothing the gate could refuse on.
+        assert_eq!(
+            tool_offset(&arc(0.145, 2.0, 4), RULER, 1.0, T, JE).unwrap_err(),
+            Declined::NotEnoughSamples
+        );
+
+        // -- must refuse: the wrist never turned. Every point at one angle fits every circle, so
+        //    any radius could be reported and would be believed.
+        let held: Vec<(f64, f64, f64)> = (0..12).map(|_| (0.7, 0.6, 0.55)).collect();
+        assert_eq!(
+            tool_offset(&held, RULER, 1.0, T, JE).unwrap_err(),
+            Declined::Inconsistent
+        );
+
+        // -- must refuse: the observed points lie on a LINE. The algebraic fit is singular there,
+        //    and dividing by that determinant returns a radius made of rounding error.
+        let line: Vec<(f64, f64, f64)> = (0..12)
+            .map(|i| (0.1 * f64::from(i), 0.4 + 0.01 * f64::from(i), 0.5))
+            .collect();
+        assert_eq!(
+            tool_offset(&line, RULER, 1.0, T, JE).unwrap_err(),
+            Declined::Inconsistent
+        );
+
+        // -- 🔴 must be ADMITTED and read the offset. 0.145 m is the ARX x5 value that is currently
+        //    hardcoded in four places and defaults onto every other body that forgets to override.
+        let m = tool_offset(&arc(0.145, 2.0, 16), RULER, 1.0, T, JE)
+            .expect("a wrist that turned must be measurable");
+        assert!(
+            (m.value[0] - 0.145).abs() < 1e-6,
+            "offset read {} m, expected 0.145",
+            m.value[0]
+        );
+        assert_eq!(
+            m.deps[0].map(|d| d.0),
+            Some(measurement::Quantity::ImageJacobian),
+            "the arc is read in the camera's frame"
+        );
+        assert!(
+            m.deps.iter().flatten().all(|d| d.0 != measurement::Quantity::HandPixel),
+            "the hand point is re-measured every control step and bumps its epoch every time; \
+             depending on it would make this quantity invalid one step after it was taken"
+        );
+        assert!(
+            (m.valid_lo[0] - 0.0).abs() < 1e-12 && (m.valid_hi[0] - 2.0).abs() < 1e-12,
+            "validity must be the wrist travel actually swept"
+        );
+
+        // -- 🔴 and the two bodies must not read the same. 0.145 against Franka's 0.102 is the
+        //    4.3 cm gap that a forgotten environment variable currently hides.
+        let franka = tool_offset(&arc(0.102, 2.0, 16), RULER, 1.0, T, JE).unwrap();
+        assert!(
+            (m.value[0] - franka.value[0]).abs() > 0.04,
+            "two bodies 4.3 cm apart read {} and {} -- a probe that cannot separate them is not a \
+             probe",
+            m.value[0],
+            franka.value[0]
+        );
+    }
+
+    /// `contact_threshold`: it needs both classes and it refuses when they overlap.
+    #[test]
+    fn contact_threshold_refuses_what_it_cannot_answer() {
+        use probe::{contact_threshold, Declined};
+        const T: u64 = 1_000_000_000;
+        const AW: u64 = 3;
+        // Deterministic spreads: no RNG, so a failure here is always reproducible.
+        let cls = |centre: f64, n: usize| -> Vec<f64> {
+            (0..n).map(|i| centre + f64::from(i as u32 % 5) - 2.0).collect()
+        };
+
+        // -- must refuse: not enough of one class.
+        assert_eq!(
+            contact_threshold(&cls(10.0, 5), &cls(30.0, 20), T, AW).unwrap_err(),
+            Declined::NotEnoughSamples
+        );
+
+        // -- must refuse: the channel is stuck, not noiseless.
+        assert_eq!(
+            contact_threshold(&[7.0; 20], &[7.0; 20], T, AW).unwrap_err(),
+            Declined::NoResponse
+        );
+
+        // -- must refuse: contact reads LOWER than free space. The sets were swapped or the sign is
+        //    inverted, and a threshold fitted to that fires in free space and stays silent on
+        //    contact. Taking |mu_t - mu_f| would let both mistakes through looking healthy.
+        assert_eq!(
+            contact_threshold(&cls(30.0, 20), &cls(10.0, 20), T, AW).unwrap_err(),
+            Declined::Inconsistent
+        );
+
+        // -- must refuse: the two conditions read alike. There is no threshold to report, and
+        //    reporting one ships a detector that fires at a rate nobody measured.
+        assert_eq!(
+            contact_threshold(&cls(10.0, 20), &cls(10.5, 20), T, AW).unwrap_err(),
+            Declined::Inconsistent
+        );
+
+        // -- must be ADMITTED: cleanly separated, threshold inside the gap nobody observed.
+        let m = contact_threshold(&cls(10.0, 20), &cls(30.0, 20), T, AW)
+            .expect("two separated classes must be measurable");
+        assert!(
+            m.value[0] > 12.0 && m.value[0] < 28.0,
+            "threshold {} landed on an observed sample instead of in the gap",
+            m.value[0]
+        );
+        assert!(
+            m.uncertainty[0] >= 7.9,
+            "sigma {} is tighter than the gap in which every choice is equally consistent",
+            m.uncertainty[0]
+        );
+        assert_eq!(
+            m.deps[0].map(|d| d.0),
+            Some(measurement::Quantity::ArmWeight),
+            "any contact signal a joint produces carries the gravity load; pick up a payload and \
+             this must go invalid while its own clock still says fresh"
+        );
+    }
+
+    /// `self_occlusion`: the all-zero map is the case that matters.
+    #[test]
+    fn self_occlusion_refuses_what_it_cannot_answer() {
+        use probe::{self_occlusion, Declined, OCCLUSION_CELLS};
+        const T: u64 = 1_000_000_000;
+        const JE: u64 = 11;
+        let sweep = |n: usize, f: &dyn Fn(usize) -> u32| -> Vec<(f64, u32)> {
+            (0..n).map(|k| (0.1 * k as f64, f(k))).collect()
+        };
+
+        // -- must refuse: a frequency over eight poses is a coin flip with a decimal point on it.
+        assert_eq!(
+            self_occlusion(&sweep(8, &|k| 1u32 << (k % 20)), T, JE).unwrap_err(),
+            Declined::NotEnoughSamples
+        );
+
+        // -- must refuse: every sample at one pose. The map then describes a pose, not a body.
+        let still: Vec<(f64, u32)> = (0..30).map(|k| (0.5, 1u32 << (k % 20))).collect();
+        assert_eq!(self_occlusion(&still, T, JE).unwrap_err(), Declined::Inconsistent);
+
+        // -- 🔴 must refuse: nothing occluded anywhere. "No self-occlusion" and "the silhouette
+        //    detector never fired" produce the identical output, and the second is far more common.
+        //    This project has filed the absence of expected failures as a clean result before.
+        assert_eq!(
+            self_occlusion(&sweep(30, &|_| 0), T, JE).unwrap_err(),
+            Declined::NoResponse
+        );
+
+        // -- must refuse: everything occluded in every pose. A detector stuck on.
+        let full = (1u32 << OCCLUSION_CELLS) - 1;
+        assert_eq!(
+            self_occlusion(&sweep(30, &|_| full), T, JE).unwrap_err(),
+            Declined::NoResponse
+        );
+
+        // -- 🔴 must refuse: the covered region never moved. Whatever is blocking the view is not
+        //    moving with the arm -- a bracket, a smudge, a cable -- so it is not self-occlusion, and
+        //    attributing it to the body puts a dirty lens into every "can I see that pixel" answer.
+        assert_eq!(
+            self_occlusion(&sweep(30, &|_| 0b1010_1010), T, JE).unwrap_err(),
+            Declined::Inconsistent
+        );
+
+        // -- must be ADMITTED: a silhouette that sweeps across the frame.
+        let m = self_occlusion(&sweep(30, &|k| 1u32 << (k % 20)), T, JE)
+            .expect("a moving silhouette must be measurable");
+        assert_eq!(m.dim, OCCLUSION_CELLS);
+        assert!(
+            (m.value[0] - 2.0 / 30.0).abs() < 1e-12,
+            "cell 0 was covered on 2 of 30 poses, read {}",
+            m.value[0]
+        );
+        assert_eq!(m.value[20], 0.0, "cell 20 was never covered");
+        assert!(
+            m.uncertainty[20] > 0.0,
+            "a cell never seen occluded is not a cell KNOWN never to be occluded; a sigma of 0 \
+             there claims a certainty 30 observations cannot supply"
+        );
+        assert!(
+            m.valid_lo[0] < m.valid_hi[0] && m.valid_hi[0] > 2.8,
+            "validity must be the poses actually swept, got [{}, {}]",
+            m.valid_lo[0],
+            m.valid_hi[0]
+        );
+        assert_eq!(
+            m.deps[0].map(|d| d.0),
+            Some(measurement::Quantity::ImageJacobian),
+            "the map is in the camera's frame; knock the camera and every cell is wrong"
+        );
     }
 
     /// `reach` must report a band only where both walls were actually straddled.

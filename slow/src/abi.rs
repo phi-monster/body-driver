@@ -27,10 +27,12 @@
 use core::ffi::{c_char, c_void};
 use core::mem::{align_of, size_of};
 
+use crate::debt;
 use crate::execute::{execute, Intent, Outcome, Spec};
 use crate::measurement::{Measurement, Quantity, MAX_DEPS, MAX_DIM};
 use crate::persist;
 use crate::refuse::{Ask, Reason};
+use crate::schedule;
 use crate::Body;
 
 #[cfg(feature = "fast")]
@@ -363,9 +365,126 @@ pub extern "C" fn bl_quantity_str(quantity: u32) -> *const c_char {
         Some(Quantity::ContactThreshold) => "contact_threshold\0",
         Some(Quantity::SelfOcclusion) => "self_occlusion\0",
         Some(Quantity::StepDelivery) => "step_delivery\0",
+        Some(Quantity::ToolOffset) => "tool_offset\0",
         None => "unknown\0",
     };
     s.as_ptr() as *const c_char
+}
+
+/// Stable human-readable schedule reason.
+#[no_mangle]
+pub extern "C" fn bl_need_str(need: u32) -> *const c_char {
+    let s: &'static str = match need {
+        0 => "never_measured\0",
+        1 => "stale\0",
+        2 => "dependency_moved\0",
+        3 => "selftest_failed\0",
+        _ => "unknown\0",
+    };
+    s.as_ptr() as *const c_char
+}
+
+/// What this body still has to measure about itself, dependencies first.
+///
+/// `*n == 0` means every quantity this layer knows how to measure is currently valid. It does
+/// **not** mean the body carries no hand-set constants — see [`bl_debt_outstanding`].
+///
+/// # Safety
+/// `b` must come from [`bl_init`]; `quantities` and `needs` must each be writable for `cap`
+/// `uint32_t`; `n` must be writable.
+#[no_mangle]
+pub unsafe extern "C" fn bl_measure_plan(
+    b: *const c_void,
+    now_ns: u64,
+    quantities: *mut u32,
+    needs: *mut u32,
+    cap: usize,
+    n: *mut usize,
+) -> Status {
+    if b.is_null() || quantities.is_null() || needs.is_null() || n.is_null() {
+        return Status::Einval;
+    }
+    // SAFETY: checked non-null; provenance guaranteed by the caller.
+    let body = unsafe { &*(b as *const Body) };
+    let p = schedule::plan(body, now_ns);
+    if p.n > cap {
+        // Refusing rather than truncating: a plan cut short reads as a shorter list of things to
+        // measure, and the caller would then believe the body owes less than it does.
+        return Status::Enospace;
+    }
+    for (i, (q, why)) in p.steps().iter().enumerate() {
+        // SAFETY: `i < p.n <= cap`, and the caller promises `cap` writable slots in each array.
+        unsafe {
+            *quantities.add(i) = *q as u32;
+            *needs.add(i) = *why as u32;
+        }
+    }
+    // SAFETY: `n` checked non-null.
+    unsafe { *n = p.n };
+    Status::Ok
+}
+
+/// Rows in the hand-set-constant ledger.
+#[no_mangle]
+pub extern "C" fn bl_debt_total() -> u32 {
+    debt::total() as u32
+}
+
+/// Body constants this layer **cannot** supply today: no probe, or no slot at all.
+///
+/// 🔴 The honest counterpart to a body's structural zero. An auditor reading this header should be
+/// able to get both numbers without reading any Rust, because reporting only the flattering one is
+/// precisely the failure this layer exists to make impossible.
+#[no_mangle]
+pub extern "C" fn bl_debt_outstanding() -> u32 {
+    debt::outstanding() as u32
+}
+
+/// Write row `i` of the ledger as `"name\tsite\tstanding\tnote"`, NUL-terminated and truncated.
+///
+/// # Safety
+/// `buf` must be writable for `cap` bytes, `cap >= 1`.
+#[no_mangle]
+pub unsafe extern "C" fn bl_debt_line(i: u32, buf: *mut c_char, cap: usize) -> Status {
+    if buf.is_null() || cap == 0 {
+        return Status::Einval;
+    }
+    let Some(c) = debt::LEDGER.get(i as usize) else {
+        return Status::Einval;
+    };
+    let standing: &str = match c.standing {
+        debt::Standing::Measured(_) => "measured",
+        debt::Standing::DeclaredOnly(_) => "declared_only",
+        debt::Standing::Outstanding => "outstanding",
+        debt::Standing::NotABodyConstant => "not_a_body_constant",
+    };
+    let q: &str = match c.standing {
+        debt::Standing::Measured(q) | debt::Standing::DeclaredOnly(q) => q.as_str(),
+        _ => "-",
+    };
+    let mut at = 0usize;
+    // SAFETY of every write below: `at + 1 < cap` is checked before each byte, so the index and the
+    // final NUL are both inside the caller's buffer.
+    let put = |s: &str, at: &mut usize| {
+        for &byte in s.as_bytes() {
+            if *at + 1 < cap {
+                unsafe { *(buf as *mut u8).add(*at) = byte };
+                *at += 1;
+            }
+        }
+    };
+    put(c.name, &mut at);
+    put("\t", &mut at);
+    put(c.site, &mut at);
+    put("\t", &mut at);
+    put(standing, &mut at);
+    put(":", &mut at);
+    put(q, &mut at);
+    put("\t", &mut at);
+    put(c.note, &mut at);
+    // SAFETY: `at < cap` by construction above.
+    unsafe { *(buf as *mut u8).add(at) = 0 };
+    Status::Ok
 }
 
 /// Write `"<reason>:<quantity>"` into `detail`, NUL-terminated and truncated to fit.

@@ -349,8 +349,6 @@ pub fn step_delivery(
     Ok(m)
 }
 
-// ------------------------------------------------------------------ helpers
-
 /// Measure **reach**: the radial band, from an arm's own base, in which that arm can actually
 /// attain a commanded pose.
 ///
@@ -514,6 +512,750 @@ pub fn reach(
     m.valid_for_ns = 0;
     m.selftest_passed = true;
     Ok(m)
+}
+
+// --------------------------------------------------------------------- gripper span
+
+/// Measure **gripper span**: how far the jaws travel between the openings actually commanded, in
+/// metres.
+///
+/// # The constant this replaces has a name and a receipt
+///
+/// A hand-filled gripper constant — `0.145` — sat in this project's stack with **no traceable
+/// provenance at all**: nobody could say which body it came off. A constant that cannot be traced
+/// cannot be re-measured on a new machine, so the body running on it was never zero-shot. It was
+/// configured by hand and reported as zero-shot, which is the failure this whole layer exists to
+/// make impossible.
+///
+/// # It needs a ruler, and the ruler is where the remaining debt lives
+///
+/// Nothing in an image is in metres. This probe reads the jaw separation **in image units** across
+/// a commanded sweep of the opening, and divides by `units_per_m` — image units per metre —
+/// obtained by commanding a step of known metric size and watching the image. That ruler carries
+/// its own 1σ and it is propagated: a span quoted to the millimetre off a ruler good to the
+/// centimetre is a fabricated precision, and the admit gate must be able to refuse on it.
+///
+/// 🔴 The metric reference is the point where a spec-sheet number still enters this layer
+/// (`bl_spec.step_m`). It is not hidden — it is carried as a named outstanding item in
+/// [`crate::debt`], with the test that would discharge it.
+///
+/// # The value describes the sweep that was actually run
+///
+/// `value` is the jaw travel between the **lowest and highest openings actually commanded**, and
+/// `valid_lo/hi` is exactly that pair. A caller that swept `[0.4, 0.8]` gets the span of
+/// `[0.4, 0.8]`, and an ask at full open is refused by the gate. Multiplying the fitted slope by a
+/// full unit of opening would turn a partial sweep into a claim about jaws nobody opened — the same
+/// extrapolation `arm_weight` refuses between poses.
+///
+/// # What it refuses, and why each one is a distinct fact
+///
+/// * a ruler that is absent, zero or non-finite ⇒ [`Declined::MissingDependency`] — a span in
+///   metres without a metric reference is a number in image units wearing a unit label;
+/// * a sweep at one opening ⇒ [`Declined::Inconsistent`] — no range to be valid over;
+/// * a separation that does not respond to the command ⇒ [`Declined::NoResponse`] — a jammed
+///   gripper and jaws the camera cannot resolve both land here, and neither may be reported as a
+///   very small gripper;
+/// * jaws that *close* as the opening is commanded up ⇒ [`Declined::Inconsistent`] — the sign
+///   convention is inverted, or the tracked blobs are not the jaws. Taking `|slope|` would make
+///   both of those read as a healthy measurement.
+pub fn gripper_span(
+    samples: &[(f64, f64)], // (commanded opening in [0,1], observed jaw separation, image units)
+    units_per_m: f64,
+    units_per_m_sigma: f64,
+    now_ns: u64,
+    jac_epoch: u64,
+) -> Result<Measurement, Declined> {
+    if !units_per_m.is_finite() || units_per_m <= 0.0 || !units_per_m_sigma.is_finite() || units_per_m_sigma < 0.0 {
+        return Err(Declined::MissingDependency);
+    }
+    let (mut n, mut sx, mut sy, mut sxx, mut sxy) = (0.0f64, 0.0f64, 0.0f64, 0.0f64, 0.0f64);
+    let (mut x_lo, mut x_hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    let (mut y_lo, mut y_hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    for &(x, y) in samples {
+        if !x.is_finite() || !y.is_finite() || !(0.0..=1.0).contains(&x) {
+            continue;
+        }
+        n += 1.0;
+        sx += x;
+        sy += y;
+        sxx += x * x;
+        sxy += x * y;
+        x_lo = x_lo.min(x);
+        x_hi = x_hi.max(x);
+        y_lo = y_lo.min(y);
+        y_hi = y_hi.max(y);
+    }
+    // Three points fit a line and leave one degree of freedom for a residual; below that the "fit"
+    // has no residual and therefore no uncertainty, and a measurement without uncertainty cannot be
+    // refused on.
+    if n < 5.0 {
+        return Err(Declined::NotEnoughSamples);
+    }
+    let sxx_c = sxx - sx * sx / n;
+    if !(x_lo < x_hi) || sxx_c <= 0.0 {
+        return Err(Declined::Inconsistent);
+    }
+    // 🔴 Exact degeneracy first, before any fitting. FOUND BY THE TEST BELOW, and it is not a
+    // rounding nicety: on a perfectly stuck gripper every separation reading is the same number, so
+    // the true slope and the true residual are BOTH zero — and in floating point they come out as
+    // noise near 1e-14 each, in whatever order the summation happened to land. The statistical
+    // response test then becomes a coin flip, and on the losing side the **sign** test decides the
+    // outcome from the sign of a rounding error: a jammed gripper reported as "the jaws close as you
+    // command them open". Comparing the readings themselves has no such failure mode.
+    if !(y_lo < y_hi) {
+        return Err(Declined::NoResponse);
+    }
+    let slope = (sxy - sx * sy / n) / sxx_c;
+    let intercept = (sy - slope * sx) / n;
+    let mut ss = 0.0f64;
+    for &(x, y) in samples {
+        if !x.is_finite() || !y.is_finite() || !(0.0..=1.0).contains(&x) {
+            continue;
+        }
+        let r = y - (intercept + slope * x);
+        ss += r * r;
+    }
+    let resid = (ss / (n - 2.0)).sqrt();
+    let slope_sigma = resid / sxx_c.sqrt();
+    if !slope.is_finite() || !slope_sigma.is_finite() {
+        return Err(Declined::Inconsistent);
+    }
+    // A slope that its own fit cannot separate from zero is not a small gripper; it is no evidence.
+    if slope.abs() <= 2.0 * slope_sigma {
+        return Err(Declined::NoResponse);
+    }
+    if slope < 0.0 {
+        return Err(Declined::Inconsistent);
+    }
+
+    let span_units = slope * (x_hi - x_lo);
+    let span_m = span_units / units_per_m;
+    // Relative errors add in quadrature: the fit's and the ruler's. Quoting only the fit's would
+    // make a span measured with a bad ruler look as precise as one measured with a good one.
+    let rel = ((slope_sigma / slope).powi(2) + (units_per_m_sigma / units_per_m).powi(2)).sqrt();
+
+    let mut m = blank(Quantity::GripperSpan, 1, now_ns);
+    m.value[0] = span_m;
+    m.uncertainty[0] = span_m * rel;
+    m.valid_lo[0] = x_lo;
+    m.valid_hi[0] = x_hi;
+    // Measured against the camera, through the ruler: knock the camera and this is wrong even
+    // though the jaws never moved. That is the case a wall-clock TTL cannot catch.
+    m.deps[0] = Some((Quantity::ImageJacobian, jac_epoch));
+    m.valid_for_ns = 0;
+    m.selftest_passed = true;
+    Ok(m)
+}
+
+// ------------------------------------------------------------------------ backlash
+
+/// Measure **backlash**: the dead band a reversal has to cross before the body starts moving again,
+/// in command units.
+///
+/// # 🔴 It is measured as an EXCESS over a matched same-direction control, never as a raw shortfall
+///
+/// This is the whole design, and the reason is a body already in this repository. One arm delivered
+/// **0.11** of every commanded step (see [`step_delivery`]). Reading the post-reversal shortfall
+/// directly on that arm reports a dead band of ~0.89 of the commanded magnitude — an enormous,
+/// completely fictional backlash that is really just the arm's ordinary delivery. Same-direction
+/// steps are the control, and only the difference is attributable to a reversal.
+///
+/// So each reversal is scored against this body's own median continuation ratio `f`:
+/// `d_i = |cmd_i| · (1 − ratio_i / f)`. If the body has no dead band, `d_i` scatters around zero
+/// however badly it delivers.
+///
+/// # Why it demands reversals at more than one commanded magnitude
+///
+/// At a single magnitude `c`, a dead band `d` and a reversal-specific delivery deficit are
+/// **perfectly confounded** — every observation is consistent with both, and no arithmetic
+/// separates them. They separate only across magnitudes: a dead band is a constant number of
+/// command units, a delivery deficit is a constant fraction. A sweep at one magnitude is therefore
+/// refused, not answered.
+///
+/// # A zero reading is a measurement, not a refusal
+///
+/// A body with no slop is a real body. It gets `value ≈ 0` with an honest σ, and a caller that
+/// needs the number to a tolerance it does not support is refused by the admit gate's precision
+/// check — which is the mechanism that already exists for exactly this. Refusing every backlash-free
+/// body would make the probe unable to report the truth.
+pub fn backlash(
+    steps: &[(f64, f64)], // (SIGNED commanded delta, SIGNED observed delta), time-ordered, same units
+    now_ns: u64,
+) -> Result<Measurement, Declined> {
+    let mut cmd = [0.0f64; 256];
+    let mut obs = [0.0f64; 256];
+    let mut k = 0usize;
+    for &(c, o) in steps {
+        if !c.is_finite() || !o.is_finite() || c == 0.0 {
+            // A step nobody commanded says nothing about a dead band, and dividing by it would put
+            // the answer wherever the noise floor happens to sit.
+            continue;
+        }
+        if k == cmd.len() {
+            break;
+        }
+        cmd[k] = c;
+        obs[k] = o;
+        k += 1;
+    }
+    if k < 8 {
+        return Err(Declined::NotEnoughSamples);
+    }
+
+    let mut cont = [0.0f64; 256]; // delivery ratio on same-direction steps
+    let mut rev_ratio = [0.0f64; 256];
+    let mut rev_mag = [0.0f64; 256];
+    let (mut n_cont, mut n_rev) = (0usize, 0usize);
+    for i in 1..k {
+        let reversed = (cmd[i] > 0.0) != (cmd[i - 1] > 0.0);
+        let ratio = obs[i] / cmd[i]; // signed/signed: positive when it moved the way it was told
+        if reversed {
+            rev_ratio[n_rev] = ratio;
+            rev_mag[n_rev] = cmd[i].abs();
+            n_rev += 1;
+        } else {
+            cont[n_cont] = ratio;
+            n_cont += 1;
+        }
+    }
+    if n_rev == 0 {
+        // Never pushed both ways. A dead band at a reversal cannot be located from motion in one
+        // direction — the same shape of refusal `reach` gives for a wall no sample ever straddled.
+        return Err(Declined::Inconsistent);
+    }
+    if n_cont == 0 {
+        // 🔴 No control. Without same-direction steps the post-reversal shortfall is exactly the
+        // confound above, and reporting it would manufacture a dead band on any slow body.
+        return Err(Declined::Inconsistent);
+    }
+    if n_rev < 3 || n_cont < 3 {
+        return Err(Declined::NotEnoughSamples);
+    }
+
+    let f = median_in_place(&mut cont[..n_cont]);
+    if f <= 0.0 {
+        // Commanded both ways and the body did not move with the command. A dead joint, or a sign
+        // convention that is inverted — either way not "the dead band is very large".
+        return Err(Declined::NoResponse);
+    }
+    // 🔴 The control ratio must itself be established, not merely positive. FOUND BY REAL DATA, and
+    // it is the difference between a probe and a plausible-looking number.
+    //
+    // On 300-step sweep logs from a 7-joint arm, one joint's same-direction steps gave
+    // `f = 0.00025` with a standard error of **0.279** — the ratios were scattered, not small. The
+    // estimator divides by `f`, so that joint came back with a dead band of **1.01 rad**: about
+    // 58°, on a simulated arm that has none at all. Nothing else in the reading looked wrong.
+    //
+    // The guard is the same shape as `reach`'s: a quantity whose own spread does not separate it
+    // from zero cannot carry another quantity. It also refuses the right things for the right
+    // reason — on the two sweeps where the leg was pressed into a surface, the joints are fighting
+    // the contact and have no established free-motion ratio, so those are refused while the
+    // free-space sweep is admitted on all six joints that moved.
+    let mut cont_scratch = [0.0f64; 256];
+    let f_sigma = mad_sigma(&cont[..n_cont], f, &mut cont_scratch);
+    let f_se = 1.2533 * f_sigma / (n_cont as f64).sqrt();
+    if !(f > 2.0 * f_se) {
+        return Err(Declined::Inconsistent);
+    }
+
+    let (mut mag_lo, mut mag_hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    let mut d = [0.0f64; 256];
+    for i in 0..n_rev {
+        d[i] = rev_mag[i] * (1.0 - rev_ratio[i] / f);
+        mag_lo = mag_lo.min(rev_mag[i]);
+        mag_hi = mag_hi.max(rev_mag[i]);
+    }
+    if !(mag_lo < mag_hi) {
+        // Reversals at one magnitude only: a dead band and a reversal-specific delivery deficit are
+        // not separable here. See the note above; this is a refusal, not a small correction.
+        return Err(Declined::Inconsistent);
+    }
+
+    let med = median_in_place(&mut d[..n_rev]);
+    let mut scratch = [0.0f64; 256];
+    let sigma = mad_sigma(&d[..n_rev], med, &mut scratch);
+    // Standard error of a median: σ·1.2533/√n for normal spread. Both constants describe the
+    // ESTIMATOR (normal consistency, median efficiency), not this body — move to another robot and
+    // neither changes.
+    let se = 1.2533 * sigma / (n_rev as f64).sqrt();
+    if !med.is_finite() || !se.is_finite() {
+        return Err(Declined::Inconsistent);
+    }
+
+    let mut m = blank(Quantity::Backlash, 1, now_ns);
+    m.value[0] = med;
+    m.uncertainty[0] = se;
+    m.valid_lo[0] = mag_lo;
+    m.valid_hi[0] = mag_hi;
+    m.valid_for_ns = 0;
+    m.selftest_passed = true;
+    Ok(m)
+}
+
+// --------------------------------------------------------------- contact threshold
+
+/// Measure **contact threshold**: what "I touched something" reads like *on this body*, on whatever
+/// scalar this body actually has (joint current, wrist force, tracking error).
+///
+/// # It needs both classes, and it refuses when they overlap
+///
+/// A threshold is only meaningful if free space and contact are separable on this signal. Fitting
+/// one to a single class — "take the 99th percentile of free space" — always produces a number, and
+/// that number is a detector that fires at a rate nobody measured. This project has already shipped
+/// a grasp detector that closed on air and scored it as a grasp; the missing piece was exactly this,
+/// a threshold nobody had shown could tell the two conditions apart.
+///
+/// So the caller must supply both, and if the two do not separate by more than counting noise the
+/// answer is a refusal. On a body whose contact signal is genuinely uninformative that refusal is
+/// the correct output, and the caller's next move is a different signal, not a lower bar.
+///
+/// # Measured against the arm's own weight, on purpose
+///
+/// Any contact signal a joint can produce carries the gravity load in it. Pick up a payload and the
+/// free-space distribution moves, so the threshold measured before is wrong while its own clock
+/// still says fresh. Declaring [`Quantity::ArmWeight`] as a dependency is what makes the layer
+/// *notice* — and "add a weight and see whether the system notices" is the admission test for this
+/// whole category.
+///
+/// # Where the threshold is put between the two classes
+///
+/// At the point where both classes are the same number of their own standard deviations away:
+/// `t = (μ_free·σ_touch + μ_touch·σ_free) / (σ_free + σ_touch)`. A midpoint would sit too close to
+/// whichever class is noisier, and any weighting chosen by hand is a per-rig constant.
+pub fn contact_threshold(
+    free: &[f64],     // signal while moving in free space
+    touching: &[f64], // signal while pressed against something
+    now_ns: u64,
+    arm_weight_epoch: u64,
+) -> Result<Measurement, Declined> {
+    fn moments(x: &[f64]) -> (f64, f64, f64, f64, f64) {
+        let (mut n, mut s, mut lo, mut hi) = (0.0f64, 0.0f64, f64::INFINITY, f64::NEG_INFINITY);
+        for &v in x {
+            if !v.is_finite() {
+                continue;
+            }
+            n += 1.0;
+            s += v;
+            lo = lo.min(v);
+            hi = hi.max(v);
+        }
+        if n < 2.0 {
+            return (n, f64::NAN, f64::NAN, lo, hi);
+        }
+        let mean = s / n;
+        let mut ss = 0.0;
+        for &v in x {
+            if v.is_finite() {
+                ss += (v - mean) * (v - mean);
+            }
+        }
+        (n, mean, (ss / (n - 1.0)).sqrt(), lo, hi)
+    }
+    let (n_f, mu_f, sd_f, lo_f, hi_f) = moments(free);
+    let (n_t, mu_t, sd_t, lo_t, hi_t) = moments(touching);
+    // Eight of each: below that the standard error of the mean is wider than most of the gaps this
+    // is asked to resolve, and the separation test degenerates into "the two samples happened to
+    // differ".
+    if n_f < 8.0 || n_t < 8.0 {
+        return Err(Declined::NotEnoughSamples);
+    }
+    if !mu_f.is_finite() || !mu_t.is_finite() || !sd_f.is_finite() || !sd_t.is_finite() {
+        return Err(Declined::Inconsistent);
+    }
+    if sd_f == 0.0 && sd_t == 0.0 && mu_f == mu_t {
+        // Every reading identical in both conditions: the channel is stuck, not noiseless.
+        return Err(Declined::NoResponse);
+    }
+    // Contact must read HIGHER than free space. If it reads lower, the two sets were swapped or the
+    // sign convention is inverted, and a threshold fitted to that would fire in free space and stay
+    // silent on contact. Taking |μ_t − μ_f| would let both mistakes through looking healthy.
+    if mu_t <= mu_f {
+        return Err(Declined::Inconsistent);
+    }
+    let se = (sd_f * sd_f / n_f + sd_t * sd_t / n_t).sqrt();
+    if !(se > 0.0) || (mu_t - mu_f) < 2.0 * se {
+        // Free space and contact read alike on this body. There is no threshold to report, and
+        // reporting one would ship a detector that fires at a rate nobody measured.
+        return Err(Declined::Inconsistent);
+    }
+
+    // Propagated standard error of the boundary, whichever branch places it.
+    let denom = sd_f + sd_t;
+    let (w_f, w_t) = if denom > 0.0 {
+        (sd_t / denom, sd_f / denom)
+    } else {
+        (0.5, 0.5)
+    };
+    let se_prop = ((w_f * sd_f / n_f.sqrt()).powi(2) + (w_t * sd_t / n_t.sqrt()).powi(2)).sqrt();
+
+    let gap = lo_t - hi_f;
+    let (t, mut t_sigma) = if gap > 0.0 {
+        // 🔴 A clean gap. Every value inside it classifies every observed sample identically, so the
+        // middle is the maximum-margin choice and the only one with no free parameter — and half the
+        // gap is exactly how far the boundary could move without contradicting anything that was
+        // seen. Both facts are read off the data.
+        //
+        // This branch is not hypothetical tidiness. On the rig whose real logs this was checked
+        // against, the free-space channel reads **exactly 0.000** on all 120 samples: σ_free is 0,
+        // the weighted formula below collapses onto μ_free, and the threshold would land precisely
+        // on an observed free-space reading with a reported σ of **zero** — a boundary that fires on
+        // its own negative class while claiming perfect certainty about where it sits.
+        (hi_f + 0.5 * gap, 0.5 * gap)
+    } else {
+        // Overlap: put it where both classes are the same number of their own σ away. A midpoint
+        // would sit too close to whichever class is noisier, and any hand-chosen weighting is a
+        // per-rig constant.
+        let t = if denom > 0.0 {
+            (mu_f * sd_t + mu_t * sd_f) / denom
+        } else {
+            0.5 * (mu_f + mu_t)
+        };
+        (t, 0.0)
+    };
+    t_sigma = t_sigma.max(se_prop);
+    // Note what the floor does NOT do: it does not weaken the detector. A caller that only wants
+    // "did I touch" passes no tolerance and is admitted. Only a caller claiming the threshold is
+    // pinned tighter than the evidence pins it is refused, which is the correct outcome.
+    if !t.is_finite() || !t_sigma.is_finite() {
+        return Err(Declined::Inconsistent);
+    }
+
+    let mut m = blank(Quantity::ContactThreshold, 1, now_ns);
+    m.value[0] = t;
+    m.uncertainty[0] = t_sigma;
+    // The domain is the range of signal values actually seen in either condition. A reading far
+    // outside anything this body has ever produced is not a contact decision this measurement can
+    // support, and the gate refuses it rather than extrapolating the classifier.
+    m.valid_lo[0] = lo_f.min(lo_t);
+    m.valid_hi[0] = hi_f.max(hi_t);
+    m.deps[0] = Some((Quantity::ArmWeight, arm_weight_epoch));
+    m.valid_for_ns = 0;
+    m.selftest_passed = true;
+    Ok(m)
+}
+
+// ---------------------------------------------------------------- self occlusion
+
+/// Columns in the self-occlusion map.
+pub const OCCLUSION_COLS: usize = 6;
+/// Rows in the self-occlusion map.
+pub const OCCLUSION_ROWS: usize = 4;
+/// Cells in the self-occlusion map. Sized to fit a `u32` mask and to stay under `MAX_DIM`; the map
+/// is coarse on purpose, because a fine map invites treating it as a segmentation rather than as a
+/// frequency over poses.
+pub const OCCLUSION_CELLS: usize = OCCLUSION_COLS * OCCLUSION_ROWS;
+
+/// Measure **self-occlusion**: how often this body blocks each part of its own view, as it sweeps.
+///
+/// `value[i]` is the fraction of swept poses in which cell `i` was covered by the body's own
+/// silhouette; cells are row-major, [`OCCLUSION_ROWS`] × [`OCCLUSION_COLS`], and the caller passes
+/// one `u32` bitmask per pose.
+///
+/// # 🔴 An all-zero map is refused, and that is the point
+///
+/// "Zero self-occlusion everywhere" and "the silhouette detector never fired" produce the identical
+/// output, and the second is far more common. This repository's canonical version of that mistake
+/// read *"0 distraction artifacts"* off a pipeline whose camera was mis-aimed — the **absence** of
+/// the expected failures was itself the fingerprint, and it was filed as a clean result. So an
+/// all-zero sweep is [`Declined::NoResponse`], not a measurement. A camera that genuinely sees no
+/// self-occlusion is a real configuration, and the way to establish it is a positive control that
+/// makes the detector fire, not a map that cannot be told apart from a dead one. An all-**ones** map
+/// is refused for the mirror reason: a detector stuck on.
+///
+/// # And a map that does not move with the arm is not self-occlusion
+///
+/// If the covered cells are identical at every pose, whatever is blocking the view is **not moving
+/// with the body** — a bracket, a smudge, a fixed cable. Attributing it to the arm would let a
+/// permanently dirty lens be reported as this robot's silhouette, and every downstream decision
+/// about "can I see that pixel" would inherit it. This is the same shape as the elbow trap in
+/// `hand.rs`: a rule that attributes whatever it finds to the robot does not report an error when
+/// the thing it found is not the robot.
+pub fn self_occlusion(
+    sweep: &[(f64, u32)], // (pose coordinate, bitmask of cells covered by this body's silhouette)
+    now_ns: u64,
+    jac_epoch: u64,
+) -> Result<Measurement, Declined> {
+    const FULL: u32 = if OCCLUSION_CELLS >= 32 {
+        u32::MAX
+    } else {
+        (1u32 << OCCLUSION_CELLS) - 1
+    };
+    let mut count = [0u32; OCCLUSION_CELLS];
+    let (mut pose_lo, mut pose_hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    let mut n = 0u32;
+    let mut first_mask: Option<u32> = None;
+    let mut mask_varied = false;
+    let mut any_set = false;
+    let mut all_full = true;
+    for &(pose, mask) in sweep {
+        if !pose.is_finite() {
+            continue;
+        }
+        let mask = mask & FULL;
+        n += 1;
+        pose_lo = pose_lo.min(pose);
+        pose_hi = pose_hi.max(pose);
+        match first_mask {
+            None => first_mask = Some(mask),
+            Some(m0) if m0 != mask => mask_varied = true,
+            Some(_) => {}
+        }
+        if mask != 0 {
+            any_set = true;
+        }
+        if mask != FULL {
+            all_full = false;
+        }
+        for (i, c) in count.iter_mut().enumerate() {
+            if mask & (1u32 << i) != 0 {
+                *c += 1;
+            }
+        }
+    }
+    // Twelve poses: a frequency over fewer is a coin flip with a decimal point on it.
+    if n < 12 {
+        return Err(Declined::NotEnoughSamples);
+    }
+    if !(pose_lo < pose_hi) {
+        // Every sample at one pose. The map then describes a pose, not a body, and there is no
+        // domain for it to be valid over.
+        return Err(Declined::Inconsistent);
+    }
+    if !any_set {
+        return Err(Declined::NoResponse);
+    }
+    if all_full {
+        return Err(Declined::NoResponse);
+    }
+    if !mask_varied {
+        return Err(Declined::Inconsistent);
+    }
+
+    let mut m = blank(Quantity::SelfOcclusion, OCCLUSION_CELLS, now_ns);
+    let nf = f64::from(n);
+    for i in 0..OCCLUSION_CELLS {
+        let p = f64::from(count[i]) / nf;
+        m.value[i] = p;
+        // Jeffreys-smoothed binomial standard error. A cell never seen occluded is not a cell known
+        // never to be occluded, and a σ of 0 there would claim a certainty n observations cannot
+        // supply — which is precisely how a map with a few unlucky cells becomes a hard constraint.
+        let ps = (f64::from(count[i]) + 0.5) / (nf + 1.0);
+        m.uncertainty[i] = (ps * (1.0 - ps) / (nf + 1.0)).sqrt();
+        // Every cell was measured over the same sweep, so every cell carries the same domain: the
+        // poses actually visited. Asking about a pose outside them is refused, exactly as
+        // `arm_weight` refuses a joint angle it never held.
+        m.valid_lo[i] = pose_lo;
+        m.valid_hi[i] = pose_hi;
+    }
+    // The map is expressed in the camera's frame; knock the camera and every cell is wrong while
+    // the arm has not moved at all.
+    m.deps[0] = Some((Quantity::ImageJacobian, jac_epoch));
+    m.valid_for_ns = 0;
+    m.selftest_passed = true;
+    Ok(m)
+}
+
+// ------------------------------------------------------------------------ tool offset
+
+/// Measure **tool offset**: how far the working point sits from the mount that is actually
+/// commanded, along the tool axis, in metres.
+///
+/// # This probe exists because one number is typed in four times in the live stack
+///
+/// * `L3_GRIPPER_BIAS`, default **0.145**, with the comment beside it: *"x5 = 0.145,
+///   franka = 0.102"* — 4.3 cm apart between two bodies, to be copied by hand out of
+///   `Assets/Robots/<body>/robot_config.yml`. A machine that forgets to pass it does not fail; it
+///   executes with **another robot's geometry**.
+/// * the same 0.145 hardcoded in the teacher's flange↔TCP transform.
+/// * the same 0.145 a third time, as the arithmetic behind a wrist-tilt ceiling.
+/// * `tcp_off: 0.1034` on a third rig.
+///
+/// # How a body measures it on itself
+///
+/// Turn the wrist about the mount and hold everything else still. The working point sweeps an
+/// **arc**, and the radius of that arc *is* the offset. Nothing about the robot's kinematics is
+/// needed and no frame has to be declared — the geometry is in the picture.
+///
+/// A circle is fitted to the observed points (algebraic least squares, centred first for
+/// conditioning) and the radius is converted with the same `units_per_m` ruler
+/// [`gripper_span`] uses, with the ruler's own error propagated.
+///
+/// # 🔴 Why [`Quantity::HandPixel`] is deliberately NOT declared as a dependency
+///
+/// The points come from the hand tracker, so the reflex is to record it as a dependency. That would
+/// be wrong here, and the reason is a property of the tracker rather than of the tool: the hand
+/// point is **re-measured every control step** and bumps its epoch every time, so a quantity
+/// depending on it would be invalid one step after it was taken — permanently, on every body. The
+/// dependency that is real is the camera, through the ruler, and that is the one recorded.
+///
+/// The soundness this gives up is small and named: if the tracker had been wrong, the offset would
+/// be wrong. It does not answer when it is unsure — that is the whole of `hand.rs` — so the inputs
+/// are either right or absent, and a set that is not mutually consistent fails the fit test below.
+///
+/// # What it refuses
+///
+/// * no ruler ⇒ [`Declined::MissingDependency`];
+/// * the wrist never turned ⇒ [`Declined::Inconsistent`] — every point at one angle fits every
+///   circle, so any radius could be reported and would be believed;
+/// * points that lie on a line ⇒ [`Declined::Inconsistent`] — the fit is singular, and the
+///   determinant guard catches it before a division does;
+/// * a radius the fit cannot separate from zero ⇒ [`Declined::NoResponse`] — the working point did
+///   not trace anything distinguishable from a point. That is either a tool with no offset **or**
+///   a wrist that did not actually turn, and merging those two is how a body with a 14.5 cm tool
+///   comes to believe it has none.
+pub fn tool_offset(
+    arc: &[(f64, f64, f64)], // (wrist angle rad, u, v) with u,v in image units
+    units_per_m: f64,
+    units_per_m_sigma: f64,
+    now_ns: u64,
+    jac_epoch: u64,
+) -> Result<Measurement, Declined> {
+    if !units_per_m.is_finite()
+        || units_per_m <= 0.0
+        || !units_per_m_sigma.is_finite()
+        || units_per_m_sigma < 0.0
+    {
+        return Err(Declined::MissingDependency);
+    }
+    let mut u = [0.0f64; 256];
+    let mut v = [0.0f64; 256];
+    let (mut a_lo, mut a_hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    let mut k = 0usize;
+    for &(ang, uu, vv) in arc {
+        if !ang.is_finite() || !uu.is_finite() || !vv.is_finite() {
+            continue;
+        }
+        if k == u.len() {
+            break;
+        }
+        u[k] = uu;
+        v[k] = vv;
+        k += 1;
+        a_lo = a_lo.min(ang);
+        a_hi = a_hi.max(ang);
+    }
+    // Three points determine a circle exactly and leave no residual, so there is no uncertainty to
+    // report and nothing the admit gate could refuse on. Five is the smallest that leaves two.
+    if k < 5 {
+        return Err(Declined::NotEnoughSamples);
+    }
+    if !(a_lo < a_hi) {
+        return Err(Declined::Inconsistent);
+    }
+
+    // Centre first: the algebraic fit's normal equations are badly conditioned on data far from the
+    // origin, and normalised image coordinates sit around 0.5 with a radius of a few hundredths.
+    let n = k as f64;
+    let (mut cu, mut cv) = (0.0, 0.0);
+    for i in 0..k {
+        cu += u[i];
+        cv += v[i];
+    }
+    cu /= n;
+    cv /= n;
+
+    // Fit u^2 + v^2 = 2a·u + 2b·v + c by least squares on the centred points.
+    let (mut suu, mut suv, mut svv, mut su, mut sv) = (0.0, 0.0, 0.0, 0.0, 0.0);
+    let (mut szu, mut szv, mut sz) = (0.0, 0.0, 0.0);
+    for i in 0..k {
+        let (x, y) = (u[i] - cu, v[i] - cv);
+        let z = x * x + y * y;
+        suu += x * x;
+        suv += x * y;
+        svv += y * y;
+        su += x;
+        sv += y;
+        szu += z * x;
+        szv += z * y;
+        sz += z;
+    }
+    // Normal equations for [2a, 2b, c] with the centred design matrix [x, y, 1].
+    let m = [[suu, suv, su], [suv, svv, sv], [su, sv, n]];
+    let rhs = [szu, szv, sz];
+    let det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+        - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+        + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+    // Scale-free singularity test: compare the determinant against the product of the diagonal,
+    // which is what it would be for a well-spread set. Collinear points drive it to zero, and a
+    // division by it would return a radius of whatever the rounding error happened to be.
+    let scale = (suu * svv * n).abs();
+    if !det.is_finite() || scale <= 0.0 || det.abs() <= 1e-12 * scale {
+        return Err(Declined::Inconsistent);
+    }
+    let solve = |col: usize| -> f64 {
+        let mut t = m;
+        for (r, x) in t.iter_mut().enumerate() {
+            x[col] = rhs[r];
+        }
+        (t[0][0] * (t[1][1] * t[2][2] - t[1][2] * t[2][1])
+            - t[0][1] * (t[1][0] * t[2][2] - t[1][2] * t[2][0])
+            + t[0][2] * (t[1][0] * t[2][1] - t[1][1] * t[2][0]))
+            / det
+    };
+    let (a2, b2, c) = (solve(0), solve(1), solve(2));
+    let (ca, cb) = (0.5 * a2, 0.5 * b2);
+    let r2 = ca * ca + cb * cb + c;
+    if !r2.is_finite() || r2 <= 0.0 {
+        return Err(Declined::Inconsistent);
+    }
+    let radius = r2.sqrt();
+
+    // Residual: how far each point sits from the fitted circle. This is what the reported σ is made
+    // of, and it is what catches an arm that translated while the wrist turned.
+    let mut ss = 0.0;
+    for i in 0..k {
+        let (x, y) = (u[i] - cu, v[i] - cv);
+        let d = ((x - ca) * (x - ca) + (y - cb) * (y - cb)).sqrt() - radius;
+        ss += d * d;
+    }
+    let resid = (ss / (n - 3.0)).sqrt();
+    let r_sigma = resid / n.sqrt();
+    if !r_sigma.is_finite() {
+        return Err(Declined::Inconsistent);
+    }
+    if radius <= 2.0 * r_sigma {
+        return Err(Declined::NoResponse);
+    }
+
+    let offset_m = radius / units_per_m;
+    let rel = ((r_sigma / radius).powi(2) + (units_per_m_sigma / units_per_m).powi(2)).sqrt();
+
+    let mut out = blank(Quantity::ToolOffset, 1, now_ns);
+    out.value[0] = offset_m;
+    out.uncertainty[0] = offset_m * rel;
+    // The domain is the wrist travel actually swept. An offset read off a 20° arc says nothing
+    // about a tool that flexes at 90°, and the gate refuses that ask rather than extrapolating.
+    out.valid_lo[0] = a_lo;
+    out.valid_hi[0] = a_hi;
+    out.deps[0] = Some((Quantity::ImageJacobian, jac_epoch));
+    out.valid_for_ns = 0;
+    out.selftest_passed = true;
+    Ok(out)
+}
+
+// ------------------------------------------------------------------------- helpers
+
+/// Median of `x`, sorting it in place. `x` must be non-empty and free of NaN — every caller here
+/// filters non-finite input before arriving, because a NaN reaching the comparator is a panic, and
+/// a panic in this crate spins forever by design (see the panic handler in `lib.rs`).
+fn median_in_place(x: &mut [f64]) -> f64 {
+    x.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
+    let k = x.len();
+    if k % 2 == 1 {
+        x[k / 2]
+    } else {
+        0.5 * (x[k / 2 - 1] + x[k / 2])
+    }
+}
+
+/// Median absolute deviation about `med`, scaled by 1.4826 to the normal-consistent estimator so
+/// the number the admit gate compares against a precision ask means the same thing as a standard
+/// deviation. `dev` is scratch, at least `x.len()` long.
+fn mad_sigma(x: &[f64], med: f64, dev: &mut [f64]) -> f64 {
+    for (i, v) in x.iter().enumerate() {
+        dev[i] = (v - med).abs();
+    }
+    1.4826 * median_in_place(&mut dev[..x.len()])
 }
 
 fn blank(q: Quantity, dim: usize, now_ns: u64) -> Measurement {
