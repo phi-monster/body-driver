@@ -462,11 +462,18 @@ pub fn reach(
     // must be lower than inside by more than counting noise, or what has been located is a lucky
     // stretch of a flat curve.
     //
-    // This gate is not hypothetical. On 2174 real episodes attainment ran 73–100% with no trend in
-    // radius — the object placements never approach either limit — and without this check the probe
-    // reported crisp bands (ARX `[0.194, 0.294]`, Franka `[0.358, 0.506]`) that were slivers of
-    // noise. They were briefly believed, and read as "the two bodies reach different places". The
-    // honest answer to that sweep is that it contains no evidence about reach at all.
+    // This gate is not hypothetical. Fed 2174 real episodes whose attainment ran 73–100% with no
+    // trend in radius, an earlier version reported crisp bands (ARX `[0.194, 0.294]`, Franka
+    // `[0.358, 0.506]`) that were slivers of noise; they were briefly believed and read as "the two
+    // bodies reach different places".
+    //
+    // 🔴 The flat curve was itself an input bug, and that is the sharper lesson: `attained` had been
+    // derived from ONE failure label ("could not reach") while a second label ("stopped short of the
+    // pre-grasp waypoint") describes the same event — the hand never arrived — and was being counted
+    // as a success. Relabelled, the same episodes show a wall: attainment 12% at 0.15 m rising to
+    // 94% at 0.40 m, and it survives a within-configuration control (p=0.0004 at two independent
+    // base placements). So this gate must hold even when the caller's signal looks flat: a flat
+    // curve is evidence of nothing, and can equally mean the caller measured the wrong thing.
     // Each wall is tested on its OWN side. Pooling the two sides lets a well-evidenced outer wall
     // carry an inner wall that rests on two samples — and the reported band would then name an
     // inner radius nothing established. Testing per side needs no minimum-sample constant: a side
