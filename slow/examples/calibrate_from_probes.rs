@@ -443,7 +443,10 @@ fn main() {
         let samples: Vec<(f64, bool)> = rows
             .iter()
             .filter_map(|r| {
-                let rad = nums_after(r, "r_cmd");
+                // 🔴 `r_base` (radius from the MEASURED base), never `r_cmd` (the collector's
+                // sampling parameter).  Reading `r_cmd` produced a well-formed band 0.30 m wider
+                // than the arm's own span -- valid, precise, and in the wrong frame.
+                let rad = nums_after(r, "r_base");
                 if rad.is_empty() {
                     return None;
                 }
