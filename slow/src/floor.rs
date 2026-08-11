@@ -209,8 +209,9 @@ pub fn fit(
     Ok(m)
 }
 
-/// How low this body can get at `(x, y)`, and the band around it. Refuses outside the probed box.
-pub fn at(body: &Body, x: f64, y: f64) -> Result<(f64, f64), Verdict> {
+/// How low this body can get at `(x, y)`, the band around it, and whether the grid actually
+/// drove there. `false` = answered by extending the plane; the caller is told and decides.
+pub fn at(body: &Body, x: f64, y: f64) -> Result<(f64, f64, bool), Verdict> {
     let Some(f) = body.get(Quantity::Floor) else {
         return Err(Verdict::refuse(Reason::NeverMeasured, Quantity::Floor));
     };
@@ -220,14 +221,26 @@ pub fn at(body: &Body, x: f64, y: f64) -> Result<(f64, f64), Verdict> {
     if !(x.is_finite() && y.is_finite()) {
         return Err(Verdict::refuse(Reason::OutOfRange, Quantity::Floor));
     }
-    // The domain is the ground the grid actually drove on. A plane is a local model and this is
-    // where that gets enforced instead of assumed.
-    if x < f.valid_lo[0] || x > f.valid_hi[0] || y < f.valid_lo[1] || y > f.valid_hi[1] {
-        return Err(Verdict::refuse(Reason::OutOfRange, Quantity::Floor));
-    }
+    // 🔴 OUTSIDE THE PROBED BOX IS THE THIRD RUNG, NOT A REFUSAL.
+    //
+    // A hard refusal here was measured and it cascades: on the conveyor the hand works over 1.5 m
+    // of belt across two arms, a grid can only cover part of it, and refusing everything else
+    // meant 163 asks produced 160 refusals and the loop never acted at all -- while the belt was
+    // measured to be ONE plane over that whole span (0.9205-0.9219, 1.4 mm across both arms).
+    //
+    // "I have never driven here, and here is my best answer" is strictly more useful than silence,
+    // as long as the caller is told. `measurement::AxisKind` records the same lesson from the
+    // other direction: hard-refusing an unprobed axis collapsed everything downstream of one
+    // constant into unusable.
     let cx = 0.5 * (f.valid_lo[0] + f.valid_hi[0]);
     let cy = 0.5 * (f.valid_lo[1] + f.valid_hi[1]);
-    Ok((f.value[0] + f.value[1] * (x - cx) + f.value[2] * (y - cy), f.uncertainty[0]))
+    let z = f.value[0] + f.value[1] * (x - cx) + f.value[2] * (y - cy);
+    let outside =
+        x < f.valid_lo[0] || x > f.valid_hi[0] || y < f.valid_lo[1] || y > f.valid_hi[1];
+    if outside {
+        return Ok((z, f.uncertainty[0], false));
+    }
+    Ok((z, f.uncertainty[0], true))
 }
 
 /// 🔴 THE WHOLE QUESTION IN ONE CALL: *the hand stopped here — what stopped it?*
@@ -245,7 +258,7 @@ pub fn read_stop(body: &Body, x: f64, y: f64, stop_z: f64, band_sigmas: f64) -> 
     if !stop_z.is_finite() || !(band_sigmas.is_finite() && band_sigmas > 0.0) {
         return none(Verdict::refuse(Reason::OutOfRange, Quantity::Floor));
     }
-    let (z, sigma) = match at(body, x, y) {
+    let (z, sigma, verified) = match at(body, x, y) {
         Ok(v) => v,
         Err(v) => return none(v),
     };
@@ -266,7 +279,8 @@ pub fn read_stop(body: &Body, x: f64, y: f64, stop_z: f64, band_sigmas: f64) -> 
     };
     Reading {
         stop: Some(stop),
-        verdict: Verdict::OK,
+        // Answered by extending the plane past where the grid drove: admitted, and said so.
+        verdict: if verified { Verdict::OK } else { Verdict::unverified(Quantity::Floor) },
         floor_z: z,
         band,
     }
@@ -423,16 +437,19 @@ mod tests {
     /// 🔴 Off the probed box it REFUSES. A plane is a local model and extrapolating it is exactly
     /// how a body constant measured on a table came to be used on a conveyor.
     #[test]
-    fn outside_the_probed_box_refuses_instead_of_extrapolating() {
+    fn outside_the_probed_box_answers_but_says_nothing_verified_it() {
         let (xs, ys, mut zs) = grid(|_, _| 0.9190);
         for (k, z) in zs.iter_mut().enumerate() {
             *z += if k % 2 == 0 { 0.0010 } else { -0.0010 };
         }
         let b = body_with(fit(&xs, &ys, &zs, 0.01, 1, 1, 1).unwrap());
+        // 🔴 The third rung, not silence: it answers and says nothing verified it here.
         let r = read_stop(&b, 0.50, 0.0, 0.9190, 3.0);
-        assert!(r.stop.is_none());
-        assert_eq!(r.verdict.why, Reason::OutOfRange);
-        assert!(at(&b, 0.0, 0.50).is_err());
+        assert!(r.stop.is_some(), "refusing here cost 160 of 163 asks on the conveyor");
+        assert!(r.verdict.admit);
+        assert!(r.verdict.unverified);
+        assert_eq!(r.verdict.why, Reason::NoEvidence);
+        assert!(!at(&b, 0.0, 0.50).unwrap().2, "and `at` marks it unverified too");
     }
 
     /// Two surfaces in one grid is not a plane, and averaging them would be worse than nothing.

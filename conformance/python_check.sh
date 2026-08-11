@@ -165,8 +165,8 @@ check("a stop ABOVE it is an object", what, "on_something")
 check("...and its height comes back", 0.015 < h < 0.025, True)
 check("a stop BELOW it is the arm's own limit, NOT contact",
       bl.floor_read_stop(body, fxs[0], fys[0], 0.8475)[0], "arm_limit")
-check("off the probed box it refuses instead of extrapolating",
-      bl.floor_read_stop(body, 0.60, 0.0, 0.9190)[3], "out_of_range")
+check("off the probed box it ANSWERS and says nothing verified it",
+      bl.floor_read_stop(body, 0.60, 0.0, 0.9190)[3], "no_evidence")
 
 # ---------------------------------------------------------------- the debt is readable from here
 print("== debt ==")

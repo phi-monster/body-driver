@@ -349,10 +349,14 @@ int main(void)
     ok("...a stop BELOW it is the arm's own limit, NOT contact",
        st == BL_OK && what == BL_STOP_ARM_LIMIT && height > 0.05, buf);
 
+    /* 🔴 Off the probed box is the THIRD RUNG, not silence. Refusing here was measured: on the
+     * conveyor the hand works over 1.5 m of belt across two arms, and hard-refusing everything
+     * outside one grid turned 163 asks into 160 refusals -- the loop never acted at all, while
+     * the belt had been measured as ONE plane over that whole span (0.9205-0.9219). */
     why = 0;
     st = bl_floor_read_stop(storage, 0.60, 0.0, 0.9190, 3.0, &what, &floor_z, &height, &why, detail);
-    ok("...off the probed box it REFUSES instead of extrapolating",
-       st == BL_REFUSE && what == BL_STOP_UNKNOWN && why == BL_R_OUT_OF_RANGE, detail);
+    ok("...off the probed box it ANSWERS and says nothing verified it",
+       st == BL_OK && what != BL_STOP_UNKNOWN && why == BL_R_NO_EVIDENCE, detail);
 
     /* ---------------------------------------------------------------- the ledger */
     uint32_t total = bl_debt_total(), outstanding = bl_debt_outstanding();
