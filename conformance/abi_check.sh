@@ -57,7 +57,17 @@ if [ -n "${newest_src:-}" ] && [ "$newest_src" -nt "$LIB" ]; then
 fi
 
 # Declared: every `bl_*(` that appears at the start of a declaration line in the header.
-declared=$(grep -oE '\bbl_[a-z_]+\(' "$HDR" | tr -d '(' | sort -u)
+# 🔴 STRIP COMMENTS FIRST.  This grepped the raw header, so a `bl_predict()` mentioned inside a
+# comment -- explaining why that function deliberately does NOT exist -- was read as a promise, and
+# the check reported the library missing an entry point nobody ever declared.
+#
+# A conformance check that misfires on prose is worse than none: the first false alarm is
+# investigated, the third is ignored, and by the fifth nobody reads the output at all.  The header
+# is documentation AND contract in one file, so the contract has to be extracted from the parts that
+# are contract.
+declared=$(sed -E 's@/\*([^*]|\*+[^*/])*\*+/@@g' "$HDR" |
+           sed -E '\@^[[:space:]]*/?\*@d; \@^[[:space:]]*//@d' |
+           grep -oE '\bbl_[a-z_]+\(' | tr -d '(' | sort -u)
 
 # Exported: every `bl_*` symbol the archive actually defines (T = text, uppercase = defined).
 exported=$(nm -g "$LIB" 2>/dev/null | awk '$2 ~ /^[TDS]$/ {print $3}' \

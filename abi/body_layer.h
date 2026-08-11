@@ -479,6 +479,54 @@ bl_status bl_memory_stats(const void *m, uint64_t *observations, uint64_t *unrea
 bl_status bl_place_matches(const uint8_t *a, double a_confidence,
                            const uint8_t *b, double b_confidence, uint32_t *out);
 
+/* ==================================================== prediction ============================== */
+/* 🔴 WILL THAT STILL BE THE POINT WHEN I GET THERE?
+ *
+ * The measurement that forced this into the ABI.  Conveyor, four episodes, every stage healthy:
+ * image error converged to 7.2-7.9 px, contact landed within 9-28 mm of the object's own height,
+ * the descent drifted sideways by 1.8-6.9 mm, the tool offset audited to within 0.9-2.8 cm.  And
+ * the hand finished 17-30 CM from the object, obj_dz = 0.000.
+ *
+ * That distance is not error.  It is 44 control periods of close-and-lift times 4 mm of belt
+ * travel per period: the hand arrived exactly where the object HAD BEEN when it was last aimed.
+ * Every individual reading was correct and the grasp was lost before the descent started.  A layer
+ * that can only answer "can I reach that point" cannot see this.
+ *
+ * 🔴 THE BODY LAYER DOES NOT PREDICT.  Where a cup will be is a statement about the WORLD, and the
+ * world is learned.  What is MEASURED here is how long this body will be blind while it acts
+ * (bl_predict_horizon) and whether a prediction may be acted on (bl_predict_admit).  A
+ * bl_predict() that returned where the cup will be would put a learned quantity inside the
+ * measured layer, where nothing can refuse it and no probe can check it. */
+
+typedef struct {
+    double   u;                  /* normalised image coordinates AT at_period               */
+    double   v;
+    double   extent;             /* normalised region size                                  */
+    uint32_t at_period;          /* control periods from now; 0 == "right now", which is
+                                  * exactly what NOT predicting asserts                     */
+    double   sigma_uv;           /* 1-sigma of (u,v) at that horizon.  REQUIRED, no default:
+                                  * a prediction that cannot say how well it knows itself is
+                                  * the bare double this layer exists to abolish, in the
+                                  * future tense                                            */
+    uint32_t verified_periods;   /* largest horizon this model was ACTUALLY validated over.
+                                  * 0 == never validated -> admitted UNVERIFIED, not refused */
+} bl_predicted;
+
+/* 🔴 Note what is absent: no z, no pose, no object id -- the same vocabulary as bl_world_ref.
+ * This is the most natural place in the whole design for a 3-D pose to enter ("just tell me where
+ * it will BE"), and a prediction that could return one would be a leak with a respectable name. */
+
+bl_status bl_predict_horizon(const void *b, double distance_m, double tol_frac,
+                             uint32_t *out, uint32_t *why);
+bl_status bl_predict_admit(const bl_predicted *p, uint32_t need_periods,
+                           double tol_uv, uint32_t has_tol,
+                           uint32_t *why, char detail[BL_REASON_LEN]);
+/* The whole question in one call, so a caller cannot ask the gate without asking the horizon --
+ * which is precisely how the conveyor loop came to aim at a stale point while looking healthy. */
+bl_status bl_predict_admit_chase(const void *b, const bl_predicted *p, double distance_m,
+                                 double tol_frac, double tol_uv, uint32_t has_tol,
+                                 uint32_t *why, char detail[BL_REASON_LEN]);
+
 /* Human-readable, for logs and for the audit trail.  Never parsed. */
 const char *bl_reason_str(uint32_t why);
 const char *bl_quantity_str(uint32_t quantity);

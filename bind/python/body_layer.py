@@ -168,6 +168,16 @@ class BodyLayer:
         L.bl_close.argtypes = [ctypes.c_void_p]
         # the thin OS's memory -- the same caller-owned-storage discipline as the body
         u32p, u64p = ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint64)
+        L.bl_predict_horizon.argtypes = [ctypes.c_void_p, ctypes.c_double, ctypes.c_double,
+                                         u32p, u32p]
+        L.bl_predict_horizon.restype = ctypes.c_uint32
+        L.bl_predict_admit.argtypes = [ctypes.POINTER(Predicted), ctypes.c_uint32,
+                                       ctypes.c_double, ctypes.c_uint32, u32p, ctypes.c_char_p]
+        L.bl_predict_admit.restype = ctypes.c_uint32
+        L.bl_predict_admit_chase.argtypes = [ctypes.c_void_p, ctypes.POINTER(Predicted),
+                                            ctypes.c_double, ctypes.c_double, ctypes.c_double,
+                                            ctypes.c_uint32, u32p, ctypes.c_char_p]
+        L.bl_predict_admit_chase.restype = ctypes.c_uint32
         L.bl_memory_sizeof.restype = ctypes.c_size_t
         L.bl_memory_alignof.restype = ctypes.c_size_t
         L.bl_memory_init.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_uint32,
@@ -264,6 +274,34 @@ class BodyLayer:
     def new_body(self):
         return Body(self)
 
+    def predict_horizon(self, body, distance_m, tol_frac=0.01):
+        """-> (periods, reason).  How long THIS body is blind while it covers that distance.
+
+        From the body's own measured delivery, never from a guess — which is the half the conveyor
+        loop never asked for.
+        """
+        out, why = ctypes.c_uint32(0), ctypes.c_uint32(0)
+        st = self.lib.bl_predict_horizon(body._ptr, float(distance_m), float(tol_frac),
+                                         ctypes.byref(out), ctypes.byref(why))
+        if st != OK:
+            return None, Reason.NAMES.get(why.value, "unknown")
+        return out.value, "none"
+
+    def predict_admit_chase(self, body, predicted, distance_m, tol_frac=0.01, tol_uv=None):
+        """-> (ok, reason, detail).  May I chase this thing across that distance?
+
+        🔴 `ok` True with reason `no_evidence` is the THIRD rung: admitted, and nothing has
+        validated the model at this horizon.  A caller that reads only `ok` is acting on an
+        unvalidated prediction.
+        """
+        why = ctypes.c_uint32(0)
+        detail = ctypes.create_string_buffer(REASON_LEN)
+        st = self.lib.bl_predict_admit_chase(
+            body._ptr, ctypes.byref(predicted), float(distance_m), float(tol_frac),
+            ctypes.c_double(0.0 if tol_uv is None else float(tol_uv)),
+            ctypes.c_uint32(0 if tol_uv is None else 1), ctypes.byref(why), detail)
+        return st == OK, Reason.NAMES.get(why.value, "unknown"), detail.value.decode()
+
     def new_memory(self, scope="task"):
         return Memory(self, scope)
 
@@ -301,6 +339,33 @@ class BodyLayer:
 SLOT_BYTES = 64
 MAX_SLOTS = 8
 FINGERPRINT_BYTES = 16
+
+
+class Predicted(ctypes.Structure):
+    """Mirror of `bl_predicted`.  Where a learned model says a reference will be.
+
+    🔴 No z, no pose, no object id — the same vocabulary as `WorldRef`.  This is the most natural
+    place in the design for a 3-D pose to enter ("just tell me where it will BE"), and one that
+    could return a pose would be a leak with a respectable name.
+    """
+
+    _fields_ = [
+        ("u", ctypes.c_double),
+        ("v", ctypes.c_double),
+        ("extent", ctypes.c_double),
+        ("at_period", ctypes.c_uint32),
+        ("sigma_uv", ctypes.c_double),
+        ("verified_periods", ctypes.c_uint32),
+    ]
+
+    @staticmethod
+    def none_at(u, v, extent=0.1):
+        """What a loop with NO prediction is implicitly asserting: it will still be there.
+
+        Spelled out because that assertion is normally invisible — not predicting looks like not
+        doing anything.
+        """
+        return Predicted(u, v, extent, 0, 0.0, 0)
 
 
 class Memory:

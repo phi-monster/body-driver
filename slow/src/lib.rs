@@ -88,6 +88,7 @@ pub mod hand;
 pub mod measurement;
 pub mod memory;
 pub mod persist;
+pub mod predict;
 pub mod probe;
 pub mod refuse;
 pub mod schedule;

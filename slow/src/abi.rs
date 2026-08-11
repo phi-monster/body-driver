@@ -30,6 +30,7 @@ use core::mem::{align_of, size_of};
 use crate::debt;
 use crate::execute::{execute, Intent, Outcome, Spec};
 use crate::measurement::{AxisKind, Measurement, Quantity, MAX_DEPS, MAX_DIM};
+use crate::predict::{self, Predicted};
 use crate::memory::{
     Durability, Memory, Opens, PlaceKey, Recognised, Scope, FINGERPRINT_BYTES, SLOT_BYTES,
 };
@@ -1041,4 +1042,155 @@ pub unsafe extern "C" fn bl_place_matches(
         };
     }
     Status::Ok
+}
+
+/* ============================================================ prediction ====================== */
+
+/// What a learned model says about where a reference will be.
+///
+/// 🔴 Look at what is absent: no `z`, no pose, no object id. The same vocabulary as
+/// [`CWorldRef`], and for the same reason — this is the most natural place in the whole design for
+/// a 3-D pose to enter ("just tell me where it will BE"), and a prediction that could return one
+/// would be a leak with a respectable name.
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct CPredicted {
+    /// normalised image coordinates at `at_period`
+    pub u: f64,
+    pub v: f64,
+    /// normalised region size
+    pub extent: f64,
+    /// control periods from now; 0 == "right now", which is what NOT predicting asserts
+    pub at_period: u32,
+    /// 1σ of (u,v) at that horizon, normalised. Required; there is no default.
+    pub sigma_uv: f64,
+    /// largest horizon this model was ACTUALLY validated over; 0 == never validated
+    pub verified_periods: u32,
+}
+
+impl CPredicted {
+    fn to_native(self) -> Predicted {
+        Predicted {
+            u: self.u,
+            v: self.v,
+            extent: self.extent,
+            at_period: self.at_period,
+            sigma_uv: self.sigma_uv,
+            verified_periods: self.verified_periods,
+        }
+    }
+}
+
+/// How many control periods this body will be BLIND while it covers `distance_m`.
+///
+/// The horizon a caller must predict over, from this body's own measured delivery — not from a
+/// guess. Refuses when the body never measured what it needs.
+///
+/// # Safety
+/// `b` must come from [`bl_open`]; `out` and `why` must be writable.
+#[no_mangle]
+pub unsafe extern "C" fn bl_predict_horizon(
+    b: *const c_void,
+    distance_m: f64,
+    tol_frac: f64,
+    out: *mut u32,
+    why: *mut u32,
+) -> Status {
+    if b.is_null() || out.is_null() {
+        return Status::Einval;
+    }
+    // SAFETY: checked non-null; shared borrow only.
+    let body = unsafe { &*(b as *const Body) };
+    match predict::horizon(body, distance_m, tol_frac) {
+        Ok(n) => {
+            // SAFETY: checked non-null.
+            unsafe { *out = n };
+            Status::Ok
+        }
+        Err(v) => {
+            if !why.is_null() {
+                // SAFETY: checked non-null.
+                unsafe { *why = v.why as u32 };
+            }
+            Status::Refuse
+        }
+    }
+}
+
+/// May this prediction be acted on for a motion that leaves the loop blind `need_periods`?
+///
+/// `has_tol = 0` skips the precision requirement. `BL_OK` with `*why == BL_R_NO_EVIDENCE` is the
+/// third rung: admitted, and nothing has validated this model at this horizon.
+///
+/// # Safety
+/// `p` must be a valid `bl_predicted`; `why` must be writable.
+#[no_mangle]
+pub unsafe extern "C" fn bl_predict_admit(
+    p: *const CPredicted,
+    need_periods: u32,
+    tol_uv: f64,
+    has_tol: u32,
+    why: *mut u32,
+    detail: *mut c_char,
+) -> Status {
+    if p.is_null() || why.is_null() {
+        return Status::Einval;
+    }
+    // SAFETY: checked non-null.
+    let pred = unsafe { *p }.to_native();
+    let v = predict::admit(&pred, need_periods, if has_tol != 0 { Some(tol_uv) } else { None });
+    // SAFETY: checked non-null.
+    unsafe { *why = v.why as u32 };
+    if !detail.is_null() {
+        write_detail(detail, v.why, v.culprit);
+    }
+    if v.admit {
+        Status::Ok
+    } else {
+        Status::Refuse
+    }
+}
+
+/// 🔴 THE WHOLE QUESTION IN ONE CALL: *may I chase this thing across `distance_m`?*
+///
+/// Asks the body for its own blind horizon and then gates the prediction against it, so a caller
+/// cannot ask the second half without the first. That is exactly how a conveyor loop came to aim
+/// at a stale point while every reading in it looked healthy: image error 7.2–7.9 px, contact
+/// within 9–28 mm, descent drift 1.8–6.9 mm — and the hand 17–30 cm from the object, because
+/// close-and-lift took 44 periods and the belt moved 4 mm in each of them.
+///
+/// # Safety
+/// `b` must come from [`bl_open`]; `p` must be a valid `bl_predicted`; `why` must be writable.
+#[no_mangle]
+pub unsafe extern "C" fn bl_predict_admit_chase(
+    b: *const c_void,
+    p: *const CPredicted,
+    distance_m: f64,
+    tol_frac: f64,
+    tol_uv: f64,
+    has_tol: u32,
+    why: *mut u32,
+    detail: *mut c_char,
+) -> Status {
+    if b.is_null() || p.is_null() || why.is_null() {
+        return Status::Einval;
+    }
+    // SAFETY: checked non-null; shared borrow only.
+    let body = unsafe { &*(b as *const Body) };
+    // SAFETY: checked non-null.
+    let pred = unsafe { *p }.to_native();
+    let tol = if has_tol != 0 { Some(tol_uv) } else { None };
+    let v = match predict::admit_chase(body, &pred, distance_m, tol_frac, tol) {
+        Ok(v) | Err(v) => v,
+    };
+    // SAFETY: checked non-null.
+    unsafe { *why = v.why as u32 };
+    if !detail.is_null() {
+        write_detail(detail, v.why, v.culprit);
+    }
+    if v.admit {
+        Status::Ok
+    } else {
+        Status::Refuse
+    }
 }
