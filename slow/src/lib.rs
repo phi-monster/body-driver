@@ -270,6 +270,48 @@ mod tests {
         assert_eq!(v.why, refuse::Reason::Stale);
     }
 
+    /// 🔴 THE GRASP THAT WAS LOST BEFORE THE DESCENT STARTED, CAUGHT BEFORE IT RUNS.
+    ///
+    /// Conveyor, 4 episodes, every stage reading healthy: image error converged to 7.2–7.9 px,
+    /// contact landed within 9–28 mm of the object's own height, the descent drifted sideways by
+    /// 1.8–6.9 mm, the tool offset audited to 0.9–2.8 cm. And the hand finished 17–30 cm from the
+    /// object with `obj_dz = 0.000`.
+    ///
+    /// That gap is not error: it is the close-and-lift spent blind, multiplied by the belt. The
+    /// numbers below are that episode, and the assertion is that the layer says so **first**.
+    #[test]
+    fn a_grasp_lost_to_blind_time_is_refused_before_it_runs() {
+        use crate::derive;
+
+        let mut b = Body::new();
+        b.submit(m(Quantity::Latency, 0.0, 0.5, 0)).unwrap();
+        let mut sd = m(Quantity::StepDelivery, 0.9999, 0.00015, 0);
+        sd.valid_lo[0] = 0.005;
+        sd.valid_hi[0] = 0.01; // the descent commands 1 cm per period
+        b.submit(sd).unwrap();
+        let mut g = m(Quantity::GripperSpan, 0.0888, 0.001, 0); // measured off the URDF + STLs
+        g.valid_lo[0] = 0.0;
+        g.valid_hi[0] = 1.0;
+        b.submit(g).unwrap();
+
+        // A still object: the blind time costs nothing, and the drift is zero.
+        assert_eq!(derive::blind_drift_m(&b, 0.28, 0.01, 0.0).unwrap(), 0.0);
+
+        // The belt: 4 mm per control period, and a 0.28 m descent. This is the episode.
+        let v = derive::blind_drift_m(&b, 0.28, 0.01, 0.004).unwrap_err();
+        assert_eq!(
+            v.why,
+            refuse::Reason::NotYet,
+            "a drift wider than the jaws means the object cannot be between them when they close, \
+             and the layer must say so before the motion rather than after the episode"
+        );
+        assert_eq!(v.culprit, Some(Quantity::GripperSpan), "the jaws are the tolerance");
+
+        // A belt slow enough that the object is still between the jaws: admitted, with the number.
+        let drift = derive::blind_drift_m(&b, 0.28, 0.01, 0.0002).unwrap();
+        assert!(drift > 0.0 && drift < 0.0888, "admitted, and it hands back the drift: {drift}");
+    }
+
     /// 🔴 A `BlockedBy` ROW MUST BE BACKED BY A DERIVATION THAT ACTUALLY REFUSES.
     ///
     /// The standing exists so an integrator is told *"you cannot have this number yet, and here is

@@ -134,3 +134,56 @@ pub fn approach_clearance_m(body: &Body) -> Result<f64, Verdict> {
     // not a body one.
     Ok(span / 2.0)
 }
+
+
+/// How many control periods a motion of `distance_m` leaves the loop **open**.
+///
+/// Settle plus traverse: the periods spent waiting for the last command to land, plus the periods
+/// spent covering the distance. During all of them nothing is re-aimed.
+pub fn blind_periods(body: &Body, distance_m: f64, tol_frac: f64) -> Result<u32, Verdict> {
+    Ok(settle_periods(body, tol_frac)? + traverse_steps(body, distance_m)?)
+}
+
+/// 🔴 HOW FAR THE WORLD MOVES WHILE THIS BODY IS BLIND — and whether the grasp is already lost.
+///
+/// `ref_speed_m_per_period` is the caller's: how fast the thing it is chasing moves. Everything
+/// else is this body's. The product is the distance between where the hand is aimed and where the
+/// object will be when the hand arrives.
+///
+/// Returns `Err(NotYet)` when that drift exceeds what the jaws can span, because then the grasp
+/// **cannot** close on the object no matter how well the servo converges — and saying so before
+/// the motion costs one comparison, while finding out afterwards costs the episode and looks like
+/// a grasp fault.
+///
+/// # The measurement that produced this
+///
+/// Conveyor, 4 episodes: the image error converged to **7.2–7.9 px**, contact landed within
+/// **9–28 mm** of the object's own height, the descent drifted sideways by only **1.8–6.9 mm**, the
+/// tool offset audited to within **0.9–2.8 cm** — every stage read healthy. And the hand finished
+/// **17–30 cm** from the object with `obj_dz = 0.000`.
+///
+/// That distance is not error. It is 44 control periods of close-and-lift multiplied by 4 mm of
+/// belt travel per period: the hand arrived exactly where the object had been when it was last
+/// aimed. Every individual reading was correct and the grasp was lost before the descent started.
+/// A layer that can only answer "can I reach that point" cannot see this; the question it has to
+/// be able to answer is "will that still be the point when I get there".
+pub fn blind_drift_m(
+    body: &Body,
+    distance_m: f64,
+    tol_frac: f64,
+    ref_speed_m_per_period: f64,
+) -> Result<f64, Verdict> {
+    if !(ref_speed_m_per_period.is_finite() && ref_speed_m_per_period >= 0.0) {
+        return Err(Verdict::refuse(Reason::OutOfRange, Quantity::StepDelivery));
+    }
+    let drift = f64::from(blind_periods(body, distance_m, tol_frac)?) * ref_speed_m_per_period;
+
+    // The jaws are the tolerance. Without them there is no threshold to compare against, and the
+    // honest answer is the refusal the missing probe already implies rather than a drift number
+    // the caller would read as admissible.
+    let span = approach_clearance_m(body)? * 2.0;
+    if drift > span {
+        return Err(Verdict::refuse(Reason::NotYet, Quantity::GripperSpan));
+    }
+    Ok(drift)
+}
