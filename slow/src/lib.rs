@@ -86,6 +86,7 @@ pub mod fast;
 pub mod faststub;
 pub mod hand;
 pub mod measurement;
+pub mod memory;
 pub mod persist;
 pub mod probe;
 pub mod refuse;
@@ -310,6 +311,34 @@ mod tests {
         let v = b.admit(&a, 10_000_000);
         assert!(!v.admit, "the stale quantity must decide");
         assert_eq!(v.why, refuse::Reason::Stale);
+    }
+
+    /// 🔴 Every reason must have a name over the C ABI, and this test exists because two did not.
+    ///
+    /// `NotYet` was unnamed from the day it was added -- `bl_reason_str` held a second, hand-written
+    /// copy of the table that stopped at `RateLimit`. Callers in other languages read "unknown" for
+    /// the refusal the header documents most carefully, and the Python binding, which walks the enum
+    /// until the first "unknown", silently truncated its whole table at the gap.
+    #[test]
+    fn every_reason_has_a_name_over_the_abi() {
+        use refuse::Reason;
+        let mut n = 0;
+        for v in 0u32..64 {
+            let Some(r) = Reason::from_u32(v) else { continue };
+            n += 1;
+            let c = r.as_cstr();
+            assert!(c.ends_with('\0'), "{v}: the C form must be NUL-terminated");
+            assert_ne!(r.as_str(), "unknown", "reason {v} has no name");
+            assert_eq!(r.as_str(), &c[..c.len() - 1], "the two forms disagree for {v}");
+            // and the exported function must agree with the table it now delegates to
+            let p = abi::bl_reason_str(v);
+            let got = unsafe { core::ffi::CStr::from_ptr(p) }.to_str().unwrap();
+            assert_eq!(got, r.as_str(), "bl_reason_str disagrees for {v}");
+        }
+        assert!(n >= 11, "only {n} reasons round-tripped; from_u32 is behind the enum");
+        let p = abi::bl_reason_str(9999);
+        let got = unsafe { core::ffi::CStr::from_ptr(p) }.to_str().unwrap();
+        assert_eq!(got, "unknown", "an unknown code must say so, not land on a neighbour");
     }
 
     /// A fresh body must refuse. If this ever passes, the default became permissive.

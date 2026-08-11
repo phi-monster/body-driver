@@ -411,6 +411,74 @@ uint32_t  bl_debt_total(void);
 uint32_t  bl_debt_outstanding(void);
 bl_status bl_debt_line(uint32_t i, char *buf, size_t cap);
 
+/* ==================================================== the thin OS's memory ==================== */
+/* A COMPACTING CONTEXT, not a memory store.  Bounded by construction, no allocator, caller-owned
+ * storage -- the same discipline as the body itself, for the same reason.
+ *
+ * Memory is classified by HOW FAST IT GOES STALE, and each rung has an owner:
+ *
+ *   this frame  where the moving cup is now   dies next frame   NOT STORED -- look again
+ *   this task   what I am doing               task ends         here, BL_MEM_TASK
+ *   this place  the bin is in that corner     you leave         here, BL_MEM_PLACE
+ *   this body   fingertip 0.1451 m from flange tool changes     bl_measurement
+ *   the world   knives are held by the handle never             the weights
+ *
+ * 🔴 Rung 1 is about the OBJECT, not about positions.  "Never store a position" is right on a
+ * conveyor and BACKWARDS in a living room, where the sofa and the bin are the most durable facts
+ * in the task.  The question is whether the thing MOVES BY ITSELF -- that is bl_durability, and a
+ * perishable fact is REFUSED by bl_memory_write rather than merely discouraged. */
+
+typedef enum {
+    BL_MEM_TASK  = 0,  /* dies when the task ends; a door does not end it       */
+    BL_MEM_PLACE = 1   /* dies when you leave the place; a new errand does not  */
+} bl_memory_scope;
+
+typedef enum {
+    BL_PERISHABLE = 0, /* moves by itself -> REFUSED; look again instead        */
+    BL_DURABLE    = 1  /* does not move unless something moves it -> storable   */
+} bl_durability;
+
+/* What opens a NEW memory.  🔴 Three events, never a timer.  The stack this replaces collapsed all
+ * three into "one episode, wipe everything", which is why walking out of a room would also make
+ * the robot forget the errand. */
+typedef enum {
+    BL_OPENS_NEW_TASK           = 0,  /* keeps place memory + body calibration  */
+    BL_OPENS_UNRECOGNISED_PLACE = 1,  /* keeps task memory + body calibration   */
+    BL_OPENS_BODY_CHANGED       = 2   /* keeps both memories; the BODY re-measures */
+} bl_memory_event;
+
+/* Was this place recognised?  🔴 Three answers.  Misidentifying a place is worse than having no
+ * memory at all -- you would act on a map of somewhere else, confidently. */
+typedef enum {
+    BL_PLACE_SAME   = 0,
+    BL_PLACE_NEW    = 1,
+    BL_PLACE_UNSURE = 2   /* cannot tell, and this must not be coerced into either */
+} bl_place_match;
+
+#define BL_SLOT_BYTES        64
+#define BL_MAX_SLOTS          8
+#define BL_FINGERPRINT_BYTES 16
+
+size_t    bl_memory_sizeof(void);
+size_t    bl_memory_alignof(void);
+bl_status bl_memory_init(void *storage, size_t len, uint32_t scope, uint32_t abi_version);
+bl_status bl_memory_declare(void *m, const char *name, uint32_t pins, uint32_t *why);
+/* 🔴 Advance the observation counter.  Pinning runs on THIS, not on the model reporting a state
+ * change: the previous design pinned when the model left its "observing" phase, the model never
+ * updated that field, and the protection was decorative for as long as it was believed to work.
+ * A guard that only fires when the thing it guards against cooperates is not a guard. */
+bl_status bl_memory_observed(void *m);
+bl_status bl_memory_write(void *m, const char *name, const char *value,
+                          uint32_t durability, uint32_t *why);
+bl_status bl_memory_get(const void *m, const char *name, char *out, size_t cap, uint32_t *why);
+bl_status bl_memory_event(void *m, uint32_t event, uint32_t *cleared);
+/* `unreadable` is exposed because a channel failing quietly looks exactly like a world that is
+ * merely slow; only a count separates them. */
+bl_status bl_memory_stats(const void *m, uint64_t *observations, uint64_t *unreadable,
+                          uint64_t *refused_perishable, uint32_t *filled, uint32_t *declared);
+bl_status bl_place_matches(const uint8_t *a, double a_confidence,
+                           const uint8_t *b, double b_confidence, uint32_t *out);
+
 /* Human-readable, for logs and for the audit trail.  Never parsed. */
 const char *bl_reason_str(uint32_t why);
 const char *bl_quantity_str(uint32_t quantity);

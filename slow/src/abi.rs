@@ -30,6 +30,9 @@ use core::mem::{align_of, size_of};
 use crate::debt;
 use crate::execute::{execute, Intent, Outcome, Spec};
 use crate::measurement::{AxisKind, Measurement, Quantity, MAX_DEPS, MAX_DIM};
+use crate::memory::{
+    Durability, Memory, Opens, PlaceKey, Recognised, Scope, FINGERPRINT_BYTES, SLOT_BYTES,
+};
 use crate::persist;
 use crate::refuse::{Ask, Reason};
 use crate::schedule;
@@ -411,17 +414,11 @@ pub unsafe extern "C" fn bl_selftest(b: *const c_void, mask: *mut u64) -> Status
 /// Stable human-readable reason. For logs and audit trails; never parsed.
 #[no_mangle]
 pub extern "C" fn bl_reason_str(why: u32) -> *const c_char {
-    let s: &'static str = match why {
-        x if x == Reason::None as u32 => "none\0",
-        x if x == Reason::NeverMeasured as u32 => "never_measured\0",
-        x if x == Reason::Stale as u32 => "stale\0",
-        x if x == Reason::OutOfRange as u32 => "out_of_range\0",
-        x if x == Reason::DependencyChanged as u32 => "dependency_changed\0",
-        x if x == Reason::SelfTestFailed as u32 => "selftest_failed\0",
-        x if x == Reason::UncertaintyTooHigh as u32 => "uncertainty_too_high\0",
-        x if x == Reason::Unreachable as u32 => "unreachable\0",
-        x if x == Reason::RateLimit as u32 => "rate_limit\0",
-        _ => "unknown\0",
+    // Delegates. The hand-written second copy that used to live here fell behind by two reasons and
+    // nothing noticed for as long as nobody read a refusal from another language.
+    let s: &'static str = match Reason::from_u32(why) {
+        Some(r) => r.as_cstr(),
+        None => "unknown\0",
     };
     s.as_ptr() as *const c_char
 }
@@ -745,4 +742,303 @@ pub unsafe extern "C" fn bl_load(b: *mut c_void, buf: *const u8, len: usize) -> 
         // Refuse: REFUSE means "this body cannot do that safely", which is a different fact.
         Err(_) => Status::Einval,
     }
+}
+
+/* ============================================================ the thin OS's memory ============ */
+
+/// Bytes of storage one memory needs. The caller allocates; this crate never does.
+#[no_mangle]
+pub extern "C" fn bl_memory_sizeof() -> usize {
+    size_of::<Memory>()
+}
+
+/// Alignment one memory needs.
+#[no_mangle]
+pub extern "C" fn bl_memory_alignof() -> usize {
+    align_of::<Memory>()
+}
+
+/// Initialise a memory in caller-supplied storage. `scope`: 0 task, 1 place.
+///
+/// # Safety
+/// `storage` must be writable for `len` bytes and exclusively owned by the caller.
+#[no_mangle]
+pub unsafe extern "C" fn bl_memory_init(
+    storage: *mut c_void,
+    len: usize,
+    scope: u32,
+    abi_version: u32,
+) -> Status {
+    if storage.is_null() {
+        return Status::Einval;
+    }
+    if abi_version != BL_ABI_VERSION {
+        return Status::Eversion;
+    }
+    let scope = match scope {
+        0 => Scope::Task,
+        1 => Scope::Place,
+        _ => return Status::Einval,
+    };
+    if len < size_of::<Memory>() {
+        return Status::Enospace;
+    }
+    if (storage as usize) % align_of::<Memory>() != 0 {
+        return Status::Einval;
+    }
+    // SAFETY: size and alignment checked above; the caller promises exclusive ownership.
+    unsafe { core::ptr::write(storage as *mut Memory, Memory::new(scope)) };
+    Status::Ok
+}
+
+/// Read a NUL-terminated C string, bounded. `None` if null, unterminated within the bound, or not
+/// UTF-8 -- a name this layer cannot read is refused, never guessed at.
+unsafe fn cstr<'a>(p: *const c_char, max: usize) -> Option<&'a str> {
+    if p.is_null() {
+        return None;
+    }
+    let mut n = 0usize;
+    while n < max {
+        // SAFETY: bounded by `max`, which callers size from BL_SLOT_BYTES.
+        if unsafe { *p.add(n) } == 0 {
+            // SAFETY: `n` bytes were just walked and found in bounds.
+            let bytes = unsafe { core::slice::from_raw_parts(p as *const u8, n) };
+            return core::str::from_utf8(bytes).ok();
+        }
+        n += 1;
+    }
+    None
+}
+
+/// Declare a named slot. `pins != 0` freezes it one observation after it is first written.
+///
+/// # Safety
+/// `m` must come from [`bl_memory_init`]; `name` must be a NUL-terminated string.
+#[no_mangle]
+pub unsafe extern "C" fn bl_memory_declare(
+    m: *mut c_void,
+    name: *const c_char,
+    pins: u32,
+    why: *mut u32,
+) -> Status {
+    if m.is_null() {
+        return Status::Einval;
+    }
+    // SAFETY: checked non-null; the caller owns it.
+    let mem = unsafe { &mut *(m as *mut Memory) };
+    // SAFETY: bounded read of a caller-provided string.
+    let Some(name) = (unsafe { cstr(name, SLOT_BYTES + 1) }) else {
+        return Status::Einval;
+    };
+    match mem.declare(name, pins != 0) {
+        Ok(()) => Status::Ok,
+        Err(v) => {
+            if !why.is_null() {
+                // SAFETY: checked non-null.
+                unsafe { *why = v.why as u32 };
+            }
+            Status::Refuse
+        }
+    }
+}
+
+/// 🔴 Advance the observation counter. This is what makes pinning mechanical: nothing in the model
+/// can decline to do it, which is the whole reason the previous design's pin never engaged.
+///
+/// # Safety
+/// `m` must come from [`bl_memory_init`].
+#[no_mangle]
+pub unsafe extern "C" fn bl_memory_observed(m: *mut c_void) -> Status {
+    if m.is_null() {
+        return Status::Einval;
+    }
+    // SAFETY: checked non-null; the caller owns it.
+    unsafe { &mut *(m as *mut Memory) }.observed();
+    Status::Ok
+}
+
+/// Write a fact. `durability`: 0 perishable, 1 durable.
+///
+/// 🔴 A perishable fact is REFUSED, not stored — that is rung 1, and it is structural here rather
+/// than a rule somebody has to keep at 3am.
+///
+/// # Safety
+/// `m` must come from [`bl_memory_init`]; `name` and `value` must be NUL-terminated.
+#[no_mangle]
+pub unsafe extern "C" fn bl_memory_write(
+    m: *mut c_void,
+    name: *const c_char,
+    value: *const c_char,
+    durability: u32,
+    why: *mut u32,
+) -> Status {
+    if m.is_null() {
+        return Status::Einval;
+    }
+    // SAFETY: checked non-null; the caller owns it.
+    let mem = unsafe { &mut *(m as *mut Memory) };
+    // SAFETY: bounded reads of caller-provided strings.
+    let (Some(name), Some(value)) =
+        (unsafe { cstr(name, SLOT_BYTES + 1) }, unsafe { cstr(value, SLOT_BYTES + 1) })
+    else {
+        return Status::Einval;
+    };
+    let d = match durability {
+        0 => Durability::Perishable,
+        1 => Durability::Durable,
+        _ => return Status::Einval,
+    };
+    match mem.write(name, value, d) {
+        Ok(_) => Status::Ok,
+        Err(v) => {
+            if !why.is_null() {
+                // SAFETY: checked non-null.
+                unsafe { *why = v.why as u32 };
+            }
+            Status::Refuse
+        }
+    }
+}
+
+/// Read a slot into `out` (at least `BL_SLOT_BYTES + 1` bytes). `BL_REFUSE` when the slot does not
+/// exist or has never been written — which are two different facts, distinguished by `*why`.
+///
+/// # Safety
+/// `m` must come from [`bl_memory_init`]; `out` must be writable for `cap` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn bl_memory_get(
+    m: *const c_void,
+    name: *const c_char,
+    out: *mut c_char,
+    cap: usize,
+    why: *mut u32,
+) -> Status {
+    if m.is_null() || out.is_null() || cap == 0 {
+        return Status::Einval;
+    }
+    // SAFETY: checked non-null; shared borrow only.
+    let mem = unsafe { &*(m as *const Memory) };
+    // SAFETY: bounded read of a caller-provided string.
+    let Some(name) = (unsafe { cstr(name, SLOT_BYTES + 1) }) else {
+        return Status::Einval;
+    };
+    let Some(v) = mem.get(name) else {
+        if !why.is_null() {
+            // SAFETY: checked non-null.
+            unsafe { *why = Reason::NeverMeasured as u32 };
+        }
+        return Status::Refuse;
+    };
+    if v.len() + 1 > cap {
+        return Status::Enospace;
+    }
+    for (i, b) in v.as_bytes().iter().enumerate() {
+        // SAFETY: bounds checked immediately above.
+        unsafe { *out.add(i) = *b as c_char };
+    }
+    // SAFETY: `v.len() < cap` checked above.
+    unsafe { *out.add(v.len()) = 0 };
+    Status::Ok
+}
+
+/// Apply a memory-opening event. `event`: 0 new task, 1 unrecognised place, 2 body changed.
+/// `*cleared` receives 1 if this memory was cleared.
+///
+/// # Safety
+/// `m` must come from [`bl_memory_init`]; `cleared` must be writable.
+#[no_mangle]
+pub unsafe extern "C" fn bl_memory_event(m: *mut c_void, event: u32, cleared: *mut u32) -> Status {
+    if m.is_null() {
+        return Status::Einval;
+    }
+    let e = match event {
+        0 => Opens::NewTask,
+        1 => Opens::UnrecognisedPlace,
+        2 => Opens::BodyChanged,
+        _ => return Status::Einval,
+    };
+    // SAFETY: checked non-null; the caller owns it.
+    let was = unsafe { &mut *(m as *mut Memory) }.on_event(e);
+    if !cleared.is_null() {
+        // SAFETY: checked non-null.
+        unsafe { *cleared = u32::from(was) };
+    }
+    Status::Ok
+}
+
+/// Counters: observations, unreadable replies, refused perishable facts, filled slots, declared
+/// slots. Any pointer may be null.
+///
+/// `unreadable` is here because a channel failing quietly looks exactly like a world that is merely
+/// slow, and only a count separates them.
+///
+/// # Safety
+/// `m` must come from [`bl_memory_init`]; each non-null pointer must be writable.
+#[no_mangle]
+pub unsafe extern "C" fn bl_memory_stats(
+    m: *const c_void,
+    observations: *mut u64,
+    unreadable: *mut u64,
+    refused_perishable: *mut u64,
+    filled: *mut u32,
+    declared: *mut u32,
+) -> Status {
+    if m.is_null() {
+        return Status::Einval;
+    }
+    // SAFETY: checked non-null; shared borrow only.
+    let mem = unsafe { &*(m as *const Memory) };
+    // SAFETY: each pointer is checked before it is written.
+    unsafe {
+        if !observations.is_null() {
+            *observations = mem.observations;
+        }
+        if !unreadable.is_null() {
+            *unreadable = mem.unreadable;
+        }
+        if !refused_perishable.is_null() {
+            *refused_perishable = mem.refused_perishable;
+        }
+        if !filled.is_null() {
+            *filled = mem.filled() as u32;
+        }
+        if !declared.is_null() {
+            *declared = mem.declared() as u32;
+        }
+    }
+    Status::Ok
+}
+
+/// Is this the same place? Returns 0 same, 1 new, 2 **cannot tell**.
+///
+/// 🔴 The third answer is the point. Misidentifying a place is worse than having no memory at all —
+/// you would act on a map of somewhere else, confidently — so "unsure" must not be coerced into
+/// either of the others.
+///
+/// # Safety
+/// Both byte pointers must be readable for `BL_FINGERPRINT_BYTES` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn bl_place_matches(
+    a: *const u8,
+    a_confidence: f64,
+    b: *const u8,
+    b_confidence: f64,
+    out: *mut u32,
+) -> Status {
+    if a.is_null() || b.is_null() || out.is_null() {
+        return Status::Einval;
+    }
+    let mut ka = [0u8; FINGERPRINT_BYTES];
+    let mut kb = [0u8; FINGERPRINT_BYTES];
+    // SAFETY: the caller promises FINGERPRINT_BYTES readable at each pointer.
+    unsafe {
+        core::ptr::copy_nonoverlapping(a, ka.as_mut_ptr(), FINGERPRINT_BYTES);
+        core::ptr::copy_nonoverlapping(b, kb.as_mut_ptr(), FINGERPRINT_BYTES);
+        *out = match PlaceKey::new(ka, a_confidence).matches(&PlaceKey::new(kb, b_confidence)) {
+            Recognised::Same => 0,
+            Recognised::New => 1,
+            Recognised::Unsure => 2,
+        };
+    }
+    Status::Ok
 }

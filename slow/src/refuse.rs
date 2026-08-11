@@ -65,22 +65,57 @@ pub enum Reason {
 }
 
 impl Reason {
-    /// Stable human-readable name. For logs and audit trails; never parsed.
-    pub fn as_str(self) -> &'static str {
+    /// Reconstruct from the ABI's `u32`. `None` for anything unknown -- never coerced into a
+    /// neighbouring reason, for the same rule `Quantity::from_u32` follows.
+    pub fn from_u32(v: u32) -> Option<Self> {
+        use Reason::*;
+        Some(match v {
+            0 => None,
+            1 => NeverMeasured,
+            2 => Stale,
+            3 => OutOfRange,
+            4 => DependencyChanged,
+            5 => SelfTestFailed,
+            6 => UncertaintyTooHigh,
+            7 => Unreachable,
+            8 => RateLimit,
+            9 => NotYet,
+            10 => NoEvidence,
+            _ => return Option::None,
+        })
+    }
+
+    /// 🔴 THE ONE NAME TABLE, NUL-terminated so the C export can hand it out directly.
+    ///
+    /// There used to be two: this one, and a hand-written copy inside `bl_reason_str`. The copy
+    /// fell behind and nothing noticed, because nothing tested it -- `NotYet` had NO NAME over the
+    /// ABI from the day it was added, so every caller in every other language read "unknown" for
+    /// the one refusal the header documents at greatest length. Worse, the Python binding walks the
+    /// enum until the first "unknown", so a single gap truncated the whole table.
+    ///
+    /// One table now, and `every_reason_has_a_name_over_the_abi` fails if a variant is added
+    /// without one.
+    pub fn as_cstr(self) -> &'static str {
         use Reason::*;
         match self {
-            None => "none",
-            NeverMeasured => "never_measured",
-            Stale => "stale",
-            OutOfRange => "out_of_range",
-            NoEvidence => "no_evidence",
-            DependencyChanged => "dependency_changed",
-            SelfTestFailed => "selftest_failed",
-            UncertaintyTooHigh => "uncertainty_too_high",
-            Unreachable => "unreachable",
-            RateLimit => "rate_limit",
-            NotYet => "not_yet",
+            None => "none\0",
+            NeverMeasured => "never_measured\0",
+            Stale => "stale\0",
+            OutOfRange => "out_of_range\0",
+            NoEvidence => "no_evidence\0",
+            DependencyChanged => "dependency_changed\0",
+            SelfTestFailed => "selftest_failed\0",
+            UncertaintyTooHigh => "uncertainty_too_high\0",
+            Unreachable => "unreachable\0",
+            RateLimit => "rate_limit\0",
+            NotYet => "not_yet\0",
         }
+    }
+
+    /// Stable human-readable name. For logs and audit trails; never parsed.
+    pub fn as_str(self) -> &'static str {
+        let s = self.as_cstr();
+        &s[..s.len() - 1]
     }
 }
 

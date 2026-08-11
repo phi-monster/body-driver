@@ -166,6 +166,30 @@ class BodyLayer:
         L.bl_init.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_uint32]
         L.bl_init.restype = ctypes.c_uint32
         L.bl_close.argtypes = [ctypes.c_void_p]
+        # the thin OS's memory -- the same caller-owned-storage discipline as the body
+        u32p, u64p = ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint64)
+        L.bl_memory_sizeof.restype = ctypes.c_size_t
+        L.bl_memory_alignof.restype = ctypes.c_size_t
+        L.bl_memory_init.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_uint32,
+                                     ctypes.c_uint32]
+        L.bl_memory_init.restype = ctypes.c_uint32
+        L.bl_memory_declare.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint32, u32p]
+        L.bl_memory_declare.restype = ctypes.c_uint32
+        L.bl_memory_observed.argtypes = [ctypes.c_void_p]
+        L.bl_memory_observed.restype = ctypes.c_uint32
+        L.bl_memory_write.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p,
+                                      ctypes.c_uint32, u32p]
+        L.bl_memory_write.restype = ctypes.c_uint32
+        L.bl_memory_get.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p,
+                                    ctypes.c_size_t, u32p]
+        L.bl_memory_get.restype = ctypes.c_uint32
+        L.bl_memory_event.argtypes = [ctypes.c_void_p, ctypes.c_uint32, u32p]
+        L.bl_memory_event.restype = ctypes.c_uint32
+        L.bl_memory_stats.argtypes = [ctypes.c_void_p, u64p, u64p, u64p, u32p, u32p]
+        L.bl_memory_stats.restype = ctypes.c_uint32
+        L.bl_place_matches.argtypes = [ctypes.c_char_p, ctypes.c_double, ctypes.c_char_p,
+                                       ctypes.c_double, u32p]
+        L.bl_place_matches.restype = ctypes.c_uint32
         L.bl_measure.argtypes = [ctypes.c_void_p, ctypes.POINTER(Measurement)]
         L.bl_measure.restype = ctypes.c_uint32
         L.bl_get.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(Measurement)]
@@ -240,6 +264,19 @@ class BodyLayer:
     def new_body(self):
         return Body(self)
 
+    def new_memory(self, scope="task"):
+        return Memory(self, scope)
+
+    def place_matches(self, a, a_conf, b, b_conf):
+        """-> "same" | "new" | "unsure".  The third is the point: acting on a map of somewhere
+        else, confidently, is worse than having no map."""
+        out = ctypes.c_uint32(0)
+        st = self.lib.bl_place_matches(bytes(a), float(a_conf), bytes(b), float(b_conf),
+                                       ctypes.byref(out))
+        if st != OK:
+            raise RuntimeError("bl_place_matches = %s" % STATUS_NAMES.get(st, st))
+        return ("same", "new", "unsure")[out.value]
+
     def debt(self):
         """Every hand-set constant the ledger knows about: (name, site, standing, note)."""
         rows = []
@@ -259,6 +296,65 @@ class BodyLayer:
         shape of claim this layer exists to stop other people making.
         """
         return self.lib.bl_debt_outstanding()
+
+
+SLOT_BYTES = 64
+MAX_SLOTS = 8
+FINGERPRINT_BYTES = 16
+
+
+class Memory:
+    """One memory: a bounded, compacting context.  Storage is caller-owned, like the body's."""
+
+    SCOPES = {"task": 0, "place": 1}
+    EVENTS = {"new_task": 0, "unrecognised_place": 1, "body_changed": 2}
+
+    def __init__(self, bl, scope="task"):
+        self.bl = bl
+        n = bl.lib.bl_memory_sizeof()
+        self._storage = ctypes.create_string_buffer(n + bl.lib.bl_memory_alignof())
+        self._ptr = ctypes.cast(self._storage, ctypes.c_void_p)
+        st = bl.lib.bl_memory_init(self._ptr, n, Memory.SCOPES[scope], ABI_VERSION)
+        if st != OK:
+            raise RuntimeError("bl_memory_init = %s" % STATUS_NAMES.get(st, st))
+
+    def declare(self, name, pins=False):
+        why = ctypes.c_uint32(0)
+        st = self.bl.lib.bl_memory_declare(self._ptr, name.encode(), 1 if pins else 0,
+                                           ctypes.byref(why))
+        return st == OK, Reason.NAMES.get(why.value, "unknown")
+
+    def observed(self):
+        """🔴 The clock the mechanical pin runs on.  Nothing in the model can decline to tick it."""
+        self.bl.lib.bl_memory_observed(self._ptr)
+
+    def write(self, name, value, durable=True):
+        """-> (ok, reason).  A PERISHABLE fact is refused, not stored: rung 1 is look-again."""
+        why = ctypes.c_uint32(0)
+        st = self.bl.lib.bl_memory_write(self._ptr, name.encode(), value.encode(),
+                                         1 if durable else 0, ctypes.byref(why))
+        return st == OK, Reason.NAMES.get(why.value, "unknown")
+
+    def get(self, name):
+        """The stored value, or None -- which means never written, not written-empty."""
+        buf = ctypes.create_string_buffer(SLOT_BYTES + 1)
+        why = ctypes.c_uint32(0)
+        st = self.bl.lib.bl_memory_get(self._ptr, name.encode(), buf, len(buf), ctypes.byref(why))
+        return buf.value.decode() if st == OK else None
+
+    def event(self, kind):
+        """-> True if THIS memory was cleared.  A new errand does not clear the room."""
+        cleared = ctypes.c_uint32(0)
+        self.bl.lib.bl_memory_event(self._ptr, Memory.EVENTS[kind], ctypes.byref(cleared))
+        return bool(cleared.value)
+
+    def stats(self):
+        o, u, r = (ctypes.c_uint64(0) for _ in range(3))
+        f, d = ctypes.c_uint32(0), ctypes.c_uint32(0)
+        self.bl.lib.bl_memory_stats(self._ptr, ctypes.byref(o), ctypes.byref(u), ctypes.byref(r),
+                                    ctypes.byref(f), ctypes.byref(d))
+        return {"observations": o.value, "unreadable": u.value,
+                "refused_perishable": r.value, "filled": f.value, "declared": d.value}
 
 
 class Body:
