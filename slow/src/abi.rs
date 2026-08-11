@@ -1222,6 +1222,128 @@ fn decl(d: Declined) -> u32 {
 }
 
 /// Human-readable, for logs and audit trails. Never parsed.
+/// Fit the floor over a grid of "I pressed down here and stopped at this height" samples.
+///
+/// `tol_m` is the probe's own height resolution — the descent step it took. Two cells that stop
+/// within one step of each other are indistinguishable to the probe that produced them, so that is
+/// the width the robust trim uses; it is not a tuning knob.
+///
+/// # Safety
+/// `xs`, `ys`, `zs` must each have `n` readable doubles; `out` and `why` must be writable.
+#[no_mangle]
+pub unsafe extern "C" fn bl_floor_fit(
+    xs: *const f64,
+    ys: *const f64,
+    zs: *const f64,
+    n: usize,
+    tol_m: f64,
+    now_ns: u64,
+    thr_epoch: u64,
+    sd_epoch: u64,
+    out: *mut CMeasurement,
+    why: *mut u32,
+) -> Status {
+    if xs.is_null() || ys.is_null() || zs.is_null() || out.is_null() || why.is_null() {
+        return Status::Einval;
+    }
+    // SAFETY: caller guarantees n readable doubles in each.
+    let (x, y, z) = unsafe {
+        (
+            core::slice::from_raw_parts(xs, n),
+            core::slice::from_raw_parts(ys, n),
+            core::slice::from_raw_parts(zs, n),
+        )
+    };
+    match crate::floor::fit(x, y, z, tol_m, now_ns, thr_epoch, sd_epoch) {
+        Ok(m) => {
+            // SAFETY: checked non-null.
+            unsafe {
+                *out = CMeasurement::from_native(&m);
+                *why = 0;
+            }
+            Status::Ok
+        }
+        Err(d) => {
+            // SAFETY: checked non-null.
+            unsafe { *why = d as u32 };
+            Status::Refuse
+        }
+    }
+}
+
+/// 🔴 THE HAND STOPPED HERE — WHAT STOPPED IT?
+///
+/// The one call that separates *something is in the way* from *this arm has no solution here*,
+/// with no joint states, no force channel, and no extra command. `*stop` receives a `bl_stop`;
+/// `*height_m` receives how far above the floor (for `BL_STOP_ON_SOMETHING`, its height) or below
+/// it (`BL_STOP_ARM_LIMIT`).
+///
+/// `band_sigmas` is the caller's accuracy requirement — how many of the floor's own residual widths
+/// still count as "on it". A peg-in-hole wants it tight and a sweep wants it loose, so it is asked
+/// for rather than chosen here.
+///
+/// # Safety
+/// `b` must come from [`bl_init`]; `stop`, `why`, `floor_z`, `height_m` writable or null.
+#[no_mangle]
+pub unsafe extern "C" fn bl_floor_read_stop(
+    b: *const c_void,
+    x: f64,
+    y: f64,
+    stop_z: f64,
+    band_sigmas: f64,
+    stop: *mut u32,
+    floor_z: *mut f64,
+    height_m: *mut f64,
+    why: *mut u32,
+    detail: *mut c_char,
+) -> Status {
+    if b.is_null() || stop.is_null() || why.is_null() {
+        return Status::Einval;
+    }
+    // SAFETY: checked non-null; shared borrow only.
+    let body = unsafe { &*(b as *const Body) };
+    let r = crate::floor::read_stop(body, x, y, stop_z, band_sigmas);
+    let (code, h) = match r.stop {
+        None => (0u32, f64::NAN),
+        Some(crate::floor::Stop::OnFloor) => (1, 0.0),
+        Some(crate::floor::Stop::OnSomething(d)) => (2, d),
+        Some(crate::floor::Stop::ArmLimit(d)) => (3, d),
+    };
+    // SAFETY: checked non-null.
+    unsafe {
+        *stop = code;
+        *why = r.verdict.why as u32;
+    }
+    if !floor_z.is_null() {
+        // SAFETY: checked non-null.
+        unsafe { *floor_z = r.floor_z };
+    }
+    if !height_m.is_null() {
+        // SAFETY: checked non-null.
+        unsafe { *height_m = h };
+    }
+    if !detail.is_null() {
+        write_detail(detail, r.verdict.why, r.verdict.culprit);
+    }
+    if r.verdict.admit {
+        Status::Ok
+    } else {
+        Status::Refuse
+    }
+}
+
+/// Name for a `bl_stop`. One table in Rust; see [`bl_quantity_str`] for why that matters.
+#[no_mangle]
+pub extern "C" fn bl_stop_str(v: u32) -> *const c_char {
+    match v {
+        0 => c"unknown".as_ptr(),
+        1 => c"on_floor".as_ptr(),
+        2 => c"on_something".as_ptr(),
+        3 => c"arm_limit".as_ptr(),
+        _ => c"?".as_ptr(),
+    }
+}
+
 /// 🔴 AM I TOUCHING SOMETHING, OR HAVE I RUN OUT OF SOLUTION?
 ///
 /// The two look identical to a delivered-motion ruler, which only ever watches the one axis that

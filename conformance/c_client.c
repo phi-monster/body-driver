@@ -302,6 +302,58 @@ int main(void)
            bl_touch_str(t));
     }
 
+    /* ------------------------------------------------------------- THE FLOOR, FROM C
+     *
+     * Replayed from results/floormap_aug2026: a 3x3 grid on the belt with two cells where the arm
+     * ran out of solution 7-9 cm lower.  Those two must not drag the plane, and a stop at one of
+     * them must come back as an ARM LIMIT rather than as contact -- which is what the delivery
+     * ruler alone called it, on all nine conveyor episodes. */
+    double fx[9], fy[9], fz[9];
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++) {
+            int k = i * 3 + j;
+            fx[k] = -0.06 + 0.06 * i;
+            fy[k] = -0.06 + 0.06 * j;
+            fz[k] = 0.9190 + ((k % 2) ? -0.0012 : 0.0012);
+        }
+    }
+    fz[0] = 0.8475;   /* the arm ran out of solution here */
+    fz[1] = 0.8343;
+    bl_measurement fl;
+    why = 0;
+    st = bl_floor_fit(fx, fy, fz, 9, 0.01, 1, contact.epoch, delivery.epoch, &fl, &why);
+    snprintf(buf, sizeof buf, "plane %.4f, band %.4f", fl.value[0], fl.uncertainty[0]);
+    ok("FLOOR: a grid of stops becomes a plane", st == BL_OK, buf);
+    ok("...and the cells where the arm ran out did NOT drag it",
+       st == BL_OK && fl.value[0] > 0.914 && fl.value[0] < 0.924, buf);
+    bl_measure(storage, &fl);
+
+    uint32_t what = 99;
+    double floor_z = 0.0, height = 0.0;
+    why = 0;
+    st = bl_floor_read_stop(storage, 0.0, 0.0, 0.9190, 3.0, &what, &floor_z, &height, &why, detail);
+    ok("...a stop AT the floor is the working surface",
+       st == BL_OK && what == BL_STOP_ON_FLOOR, bl_stop_str(what));
+
+    why = 0;
+    st = bl_floor_read_stop(storage, 0.0, 0.0, 0.9190 + 0.02, 3.0, &what, &floor_z, &height, &why,
+                            detail);
+    snprintf(buf, sizeof buf, "%s, %.4f m tall", bl_stop_str(what), height);
+    ok("...a stop ABOVE it is an object, and its height comes back",
+       st == BL_OK && what == BL_STOP_ON_SOMETHING && height > 0.015 && height < 0.025, buf);
+
+    why = 0;
+    st = bl_floor_read_stop(storage, fx[0], fy[0], 0.8475, 3.0, &what, &floor_z, &height, &why,
+                            detail);
+    snprintf(buf, sizeof buf, "%s, %.4f m below", bl_stop_str(what), height);
+    ok("...a stop BELOW it is the arm's own limit, NOT contact",
+       st == BL_OK && what == BL_STOP_ARM_LIMIT && height > 0.05, buf);
+
+    why = 0;
+    st = bl_floor_read_stop(storage, 0.60, 0.0, 0.9190, 3.0, &what, &floor_z, &height, &why, detail);
+    ok("...off the probed box it REFUSES instead of extrapolating",
+       st == BL_REFUSE && what == BL_STOP_UNKNOWN && why == BL_R_OUT_OF_RANGE, detail);
+
     /* ---------------------------------------------------------------- the ledger */
     uint32_t total = bl_debt_total(), outstanding = bl_debt_outstanding();
     snprintf(buf, sizeof buf, "%u rows, %u outstanding", (unsigned)total, (unsigned)outstanding);
@@ -315,7 +367,7 @@ int main(void)
 
     printf("\nc_client: %d checks, %d failures\n", checks, failures);
     if (failures == 0) {
-        printf("c_client: PASS -- force, touch, memory and prediction all drive from C\n");
+        printf("c_client: PASS -- force, touch, floor, memory and prediction all drive from C\n");
     } else {
         printf("c_client: FAIL\n");
     }

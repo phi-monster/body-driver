@@ -661,6 +661,37 @@ bl_status bl_probe_hand_pixel(const double *u, const double *v, const double *ga
 bl_status bl_solve(const void *b, const bl_spec *spec, const double *dir,
                    double *out, uint32_t *why);
 
+/* 🔴 HOW LOW THIS BODY CAN GET, AS A MAP -- and therefore what stopped the hand.
+ *
+ * A body's limit is a property of the CONFIGURATION and moves with the arm; a surface is a
+ * property of the WORLD and stays put.  So press down across a grid ONCE and keep the plane;
+ * afterwards every stop is read against it, with no joint states, no force channel and no extra
+ * command per decision.
+ *
+ * Measured: on a flat conveyor nine downward probes stopped across 13.9 cm while the four
+ * genuinely on the belt agreed to 2.2 cm.  Every delivery reading was correct and the loop closed
+ * its jaws in mid-air on all nine episodes.
+ *
+ * bl_floor_fit's `tol_m` is the probe's own descent step -- two cells stopping within one step of
+ * each other are indistinguishable to the probe that produced them.  Not a tuning knob.
+ * bl_floor_read_stop's `band_sigmas` IS the caller's: how many of the floor's own residual widths
+ * still count as "on it" is a task accuracy requirement, not a body constant. */
+typedef enum {
+    BL_STOP_UNKNOWN      = 0,  /* no floor to compare against; `why` says what is missing */
+    BL_STOP_ON_FLOOR     = 1,  /* resting on the working surface; nothing on it here */
+    BL_STOP_ON_SOMETHING = 2,  /* something IS here; *height_m is how tall it is */
+    BL_STOP_ARM_LIMIT    = 3   /* below the surface => no surface here; the arm ran out of solution.
+                                * NOT contact, however much the delivery ruler looks like it. */
+} bl_stop;
+
+bl_status bl_floor_fit(const double *xs, const double *ys, const double *zs, size_t n,
+                       double tol_m, uint64_t now_ns, uint64_t thr_epoch, uint64_t sd_epoch,
+                       bl_measurement *out, uint32_t *why);
+bl_status bl_floor_read_stop(const void *b, double x, double y, double stop_z, double band_sigmas,
+                             uint32_t *stop, double *floor_z, double *height_m, uint32_t *why,
+                             char *detail);
+const char *bl_stop_str(uint32_t v);
+
 /* 🔴 AM I TOUCHING SOMETHING, OR HAVE I RUN OUT OF SOLUTION?
  *
  * On a body with no force channel, contact is read from the fraction of a commanded motion that
