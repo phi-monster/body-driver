@@ -31,6 +31,7 @@ use crate::debt;
 use crate::execute::{execute, Intent, Outcome, Spec};
 use crate::measurement::{AxisKind, Measurement, Quantity, MAX_DEPS, MAX_DIM};
 use crate::predict::{self, Predicted};
+use crate::hand;
 use crate::probe::{self, Declined, Polarity};
 use crate::memory::{
     Durability, Memory, Opens, PlaceKey, Recognised, Scope, FINGERPRINT_BYTES, SLOT_BYTES,
@@ -1245,6 +1246,8 @@ pub extern "C" fn bl_declined_str(d: u32) -> *const c_char {
 /// buffer. Bounded by `PROBE_MAX_SAMPLES`; a longer submission is refused rather than truncated,
 /// because a truncated sample set produces a confident measurement of the wrong thing.
 const PROBE_MAX_SAMPLES: usize = 4096;
+/// Stack budget for the Jacobian probe: each Sample is large, so this is smaller than the pair cap.
+const PROBE_SAMPLE_CAP: usize = 256;
 
 unsafe fn pairs(xs: *const f64, ys: *const f64, n: usize, into: &mut [(f64, f64)]) -> bool {
     if xs.is_null() || ys.is_null() || n == 0 || n > into.len() {
@@ -1514,6 +1517,118 @@ pub unsafe extern "C" fn bl_probe_tool_offset(
     }
     emit(
         probe::tool_offset(&buf[..n], units_per_m, units_per_m_sigma, now_ns, jac_epoch),
+        out,
+        why,
+    )
+}
+
+/// 🔴 THE PROBE THE UNIVERSAL LOOP CANNOT START WITHOUT: how this body's own commands move its own
+/// image.
+///
+/// `cmd` is `n_samples * n_axes`, row-major: the command issued at each sample, in each axis's own
+/// units. `uv` is `n_samples * 2`. `at_ns` is `n_samples`.
+///
+/// 🔴 `n_axes` IS THE ACTUATOR, AND THAT IS WHY THIS LAYER IS ACTUATOR-AGNOSTIC. Probe with six
+/// joint commands and the result maps joints to pixels; probe with three end-effector commands and
+/// it maps end-effector motion to pixels. `execute::solve` returns deltas in whatever axes were
+/// probed. The ONLY requirement is that the probe and the executor use the SAME axes -- which is
+/// exactly what the layout defect of 2026-08-11 violated, silently, in a place no test could reach.
+///
+/// This matters for the claim: RoboDojo and CALVIN take end-effector poses, others take joints. A
+/// layer that only spoke one of them would need a different body driver per benchmark.
+///
+/// # Safety
+/// `cmd` must be readable for `n_samples * n_axes` doubles, `uv` for `2 * n_samples`, `at_ns` for
+/// `n_samples`; `out` must be writable.
+#[no_mangle]
+pub unsafe extern "C" fn bl_probe_image_jacobian(
+    cmd: *const f64,
+    uv: *const f64,
+    at_ns: *const u64,
+    n_samples: usize,
+    n_axes: usize,
+    now_ns: u64,
+    min_response_px: f64,
+    out: *mut CMeasurement,
+    why: *mut u32,
+) -> Status {
+    if cmd.is_null() || uv.is_null() || at_ns.is_null() {
+        return Status::Einval;
+    }
+    if n_samples < 2 || n_samples > PROBE_MAX_SAMPLES || n_axes == 0 || n_axes > MAX_DIM {
+        return Status::Einval;
+    }
+    let mut samples = [probe::Sample { cmd: [0.0; MAX_DIM], n: 0, uv: [0.0; 2], at_ns: 0 };
+                       PROBE_SAMPLE_CAP];
+    if n_samples > PROBE_SAMPLE_CAP {
+        return Status::Enospace;
+    }
+    for (i, s) in samples.iter_mut().enumerate().take(n_samples) {
+        s.n = n_axes;
+        for a in 0..n_axes {
+            // SAFETY: the caller promises n_samples * n_axes readable doubles.
+            s.cmd[a] = unsafe { *cmd.add(i * n_axes + a) };
+        }
+        // SAFETY: the caller promises 2 * n_samples doubles and n_samples timestamps.
+        unsafe {
+            s.uv = [*uv.add(2 * i), *uv.add(2 * i + 1)];
+            s.at_ns = *at_ns.add(i);
+        }
+    }
+    emit(
+        probe::image_jacobian(&samples[..n_samples], n_axes, now_ns, min_response_px),
+        out,
+        why,
+    )
+}
+
+/// Which pixels are my hand: submit the candidates a detector found and let the tracker decide.
+///
+/// `u`, `v`, `gain`, `rigidity`, `pixels`, `spread` are parallel arrays of length `n`. The tracker
+/// is stateless across calls here -- one shot, from one set of candidates -- which is the form a
+/// caller starting up needs.
+///
+/// # Safety
+/// Every array must be readable for `n` elements; `out` must be writable.
+#[no_mangle]
+pub unsafe extern "C" fn bl_probe_hand_pixel(
+    u: *const f64,
+    v: *const f64,
+    gain: *const f64,
+    rigidity: *const f64,
+    pixels: *const u32,
+    spread: *const f64,
+    n: usize,
+    now_ns: u64,
+    epoch: u64,
+    prev_epoch: u64,
+    jac_epoch: u64,
+    out: *mut CMeasurement,
+    why: *mut u32,
+) -> Status {
+    if u.is_null() || v.is_null() || gain.is_null() || rigidity.is_null() || pixels.is_null()
+        || spread.is_null() || n == 0 || n > 64
+    {
+        return Status::Einval;
+    }
+    let mut cands = [hand::Candidate { u: 0.0, v: 0.0, gain: 0.0, rigidity: 0.0, pixels: 0,
+                                       spread: 0.0 }; 64];
+    for (i, c) in cands.iter_mut().enumerate().take(n) {
+        // SAFETY: the caller promises n readable elements in each array.
+        unsafe {
+            *c = hand::Candidate {
+                u: *u.add(i),
+                v: *v.add(i),
+                gain: *gain.add(i),
+                rigidity: *rigidity.add(i),
+                pixels: *pixels.add(i),
+                spread: *spread.add(i),
+            };
+        }
+    }
+    let mut tracker = hand::HandTracker::new(probe::default_hand_config());
+    emit(
+        probe::hand_pixel(&mut tracker, &cands[..n], now_ns, epoch, prev_epoch, jac_epoch),
         out,
         why,
     )

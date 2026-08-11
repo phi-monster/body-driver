@@ -542,10 +542,10 @@ bl_status bl_predict_admit_chase(const void *b, const bl_predicted *p, double di
  * be shorter and would encode "params[2] is the Jacobian epoch" as a positional convention nobody
  * can check -- a bug class this project has already paid for.
  *
- * ⚠️ STATED GAP: three probes are NOT here yet -- image_jacobian, hand_pixel and self_occlusion --
- * because their inputs are richer than parallel arrays (image candidate lists, a stateful tracker).
- * They exist in the implementation and are reachable only from Rust today.  Saying so is cheaper
- * than a caller discovering it. */
+ * ⚠️ STATED GAP, NOW ONE: `self_occlusion` is still Rust-only (its input is a bitmask sweep over
+ * poses).  `image_jacobian` and `hand_pixel` were in this list until 2026-08-11 and are exported
+ * below -- the universal loop cannot start without the first one, since a body that cannot measure
+ * how its own commands move its own image has nothing to servo on. */
 
 /* Why a PROBE declined.  Distinct from bl_reason on purpose: a probe declines to PRODUCE a
  * measurement, a gate refuses to ADMIT one.  One name for both would lose which half said no. */
@@ -618,6 +618,27 @@ bl_status bl_probe_tool_offset(const double *wrist_angle, const double *u, const
                                size_t n, double units_per_m, double units_per_m_sigma,
                                uint64_t now_ns, uint64_t jac_epoch,
                                bl_measurement *out, uint32_t *why);
+
+/* 🔴 HOW THIS BODY'S OWN COMMANDS MOVE ITS OWN IMAGE -- the probe the universal loop cannot start
+ * without.  `cmd` is n_samples * n_axes row-major; `uv` is n_samples * 2; `at_ns` is n_samples.
+ *
+ * 🔴 n_axes IS THE ACTUATOR, AND THAT IS WHY THIS LAYER IS ACTUATOR-AGNOSTIC.  Probe with six
+ * joint commands and the result maps joints to pixels; probe with three end-effector commands and
+ * it maps end-effector motion to pixels, and `solve` returns deltas in whatever axes were probed.
+ * The ONLY requirement is that the probe and the executor use the SAME axes.
+ *
+ * This is load-bearing for "one driver across benchmarks": RoboDojo and CALVIN take end-effector
+ * poses, others take joints.  A layer that spoke only one would need a different body driver per
+ * benchmark -- which is the thing this file exists to make unnecessary. */
+bl_status bl_probe_image_jacobian(const double *cmd, const double *uv, const uint64_t *at_ns,
+                                  size_t n_samples, size_t n_axes, uint64_t now_ns,
+                                  double min_response_px, bl_measurement *out, uint32_t *why);
+/* Which pixels are my hand.  Parallel candidate arrays of length n, from whatever detector the
+ * caller has; the tracker decides, and refuses when the field is not separable. */
+bl_status bl_probe_hand_pixel(const double *u, const double *v, const double *gain,
+                              const double *rigidity, const uint32_t *pixels, const double *spread,
+                              size_t n, uint64_t now_ns, uint64_t epoch, uint64_t prev_epoch,
+                              uint64_t jac_epoch, bl_measurement *out, uint32_t *why);
 
 /* Human-readable, for logs and for the audit trail.  Never parsed. */
 const char *bl_reason_str(uint32_t why);
