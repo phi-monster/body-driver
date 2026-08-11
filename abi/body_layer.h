@@ -265,6 +265,22 @@ bl_status bl_get(const bl_body *b, uint32_t quantity, bl_measurement *out);
 bl_status bl_admit(const bl_body *b, const bl_world_ref *ref,
                    uint32_t *why, char detail[BL_REASON_LEN]);
 
+/* 🔴 THE GATE, FOR ONE QUANTITY.
+ *
+ * `bl_admit` asks whether a whole world reference may be executed -- the right question for the
+ * servo and the wrong one for everybody else.  A caller that only wants "may I use the tool offset,
+ * and is it established over the range I am about to ask about" had no way to ask, so every such
+ * caller re-implemented never-measured / stale / out-of-range / self-test-failed on its own side.
+ * This project grew a Python copy of exactly those four checks, which is how one gate became two
+ * implementations that can drift apart, with the untested one deciding.
+ *
+ * `at` is where in the quantity's own probed domain the ask sits; `tol` is the precision it needs.
+ * Pass has_at = 0 / has_tol = 0 to skip either.  A REFUSE is an ANSWER. */
+bl_status bl_admit_quantity(const bl_body *b, uint32_t quantity,
+                            double at, uint32_t has_at,
+                            double tol, uint32_t has_tol,
+                            uint64_t now_ns, uint32_t *why, char detail[BL_REASON_LEN]);
+
 /* Per-body specification, read from the machine's rating -- never tuned to make a number look
  * better.  Tuning `step_m` per task means the method failed; see the note on bl_policy_out. */
 typedef struct {

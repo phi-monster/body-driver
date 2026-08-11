@@ -273,6 +273,61 @@ pub unsafe extern "C" fn bl_get(b: *const c_void, quantity: u32, out: *mut CMeas
         None => Status::Refuse,
     }
 }
+/// 🔴 THE GATE, FOR ONE QUANTITY.
+///
+/// `bl_admit` asks whether a whole world reference can be executed, which is the right question for
+/// the servo and the wrong one for everybody else: a caller that just wants *"may I use the tool
+/// offset, and is it established over the range I am about to ask about"* had no way to ask. So
+/// every such caller re-implemented never-measured / stale / out-of-range / self-test-failed on its
+/// own side — this project has a Python copy of exactly those four checks, which is how one gate
+/// became two implementations that can drift.
+///
+/// `at` / `tol` are optional: pass `has_at = 0` / `has_tol = 0` to skip. `at` is where in the
+/// quantity's own probed domain the ask sits; `tol` is the precision the ask needs.
+///
+/// Returns `BL_OK` to admit, or `BL_REFUSE` with `*why` and a line in `detail`. A REFUSE is an
+/// answer.
+#[no_mangle]
+pub unsafe extern "C" fn bl_admit_quantity(
+    b: *const c_void,
+    quantity: u32,
+    at: f64,
+    has_at: u32,
+    tol: f64,
+    has_tol: u32,
+    now_ns: u64,
+    why: *mut u32,
+    detail: *mut c_char,
+) -> Status {
+    if b.is_null() || why.is_null() {
+        return Status::Einval;
+    }
+    let Some(q) = Quantity::from_u32(quantity) else {
+        return Status::Einval;
+    };
+    // SAFETY: checked non-null above.
+    let body = unsafe { &*(b as *const Body) };
+    let mut ask = Ask::EMPTY;
+    ask.needs[0] = Some(q);
+    if has_at != 0 {
+        ask.at[0] = Some(at);
+    }
+    if has_tol != 0 {
+        ask.tolerance[0] = Some(tol);
+    }
+    let v = body.admit(&ask, now_ns);
+    // SAFETY: checked non-null above.
+    unsafe { *why = v.why as u32 };
+    if !detail.is_null() {
+        write_detail(detail, v.why, v.culprit);
+    }
+    if v.admit {
+        Status::Ok
+    } else {
+        Status::Refuse
+    }
+}
+
 
 /// The gate: may this world reference be executed on this body right now?
 ///

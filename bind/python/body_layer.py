@@ -293,6 +293,22 @@ class Body:
         st = self.bl.lib.bl_admit(self._ptr, ctypes.byref(ref), now_ns, ctypes.byref(why), detail)
         return st, Reason.NAMES.get(why.value, "unknown"), detail.value.decode()
 
+    def admit_quantity(self, quantity, at=None, tol=None, now_ns=0):
+        """The gate for ONE quantity: (ok, reason_name, detail).
+
+        This is what a caller asking "may I use this measurement, over this range" needs, and its
+        absence is why a second copy of these four checks grew in Python. Same verdict source as
+        `admit`, so the two can no longer disagree.
+        """
+        why = ctypes.c_uint32(0)
+        detail = ctypes.create_string_buffer(REASON_LEN)
+        st = self.bl.lib.bl_admit_quantity(
+            self._ptr, ctypes.c_uint32(quantity),
+            ctypes.c_double(0.0 if at is None else float(at)), ctypes.c_uint32(0 if at is None else 1),
+            ctypes.c_double(0.0 if tol is None else float(tol)), ctypes.c_uint32(0 if tol is None else 1),
+            ctypes.c_uint64(int(now_ns)), ctypes.byref(why), detail)
+        return st == OK, Reason.NAMES.get(why.value, "unknown"), detail.value.decode()
+
     def execute(self, intent, spec, now_ms):
         cmd = (ctypes.c_double * MAX_JOINTS)()
         outcome = ctypes.c_uint32(0)

@@ -23,14 +23,36 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 
 HDR=abi/body_layer.h
-LIB=slow/target/debug/libbody_layer.a
 
-if [ ! -f "$LIB" ]; then
-  LIB=slow/target/release/libbody_layer.a
+# 🔴 CHECK THE ARTIFACT THAT WAS ACTUALLY BUILT, AND SAY WHICH ONE.
+#
+# This preferred `target/debug` and fell back to `target/release`, so a stale debug archive left
+# over from an earlier build was validated in place of the one just produced -- and it reported a
+# missing symbol that the fresh library exported. A checker that inspects the wrong artifact can
+# fail for the wrong reason, and can just as easily PASS for the wrong reason, which is worse and
+# quieter. That is precisely the failure mode this script was written to catch, in the script
+# itself.
+#
+# Newest wins, the choice is printed, and an artifact older than the header or the sources is a
+# hard failure rather than something to validate.
+# The artifact that matters is the one a CONSUMER LOADS -- the cdylib, which is what
+# `bind/python/body_layer.py` opens with ctypes. The static archive was checked instead, and under
+# the release profile `nm` reports zero `bl_*` symbols from it, so the check silently graded a file
+# nobody links against. Prefer the shared object; fall back to the archive only if there is none.
+LIB=$(ls -t slow/target/*/libbody_layer.dylib slow/target/*/libbody_layer.so 2>/dev/null | head -1)
+if [ -z "${LIB:-}" ]; then
+  LIB=$(ls -t slow/target/*/libbody_layer.a 2>/dev/null | head -1)
 fi
-if [ ! -f "$LIB" ]; then
+if [ -z "${LIB:-}" ] || [ ! -f "$LIB" ]; then
   echo "FAIL: no built library found. Build it first:"
-  echo "  cd slow && cargo build --features fast"
+  echo "  cd slow && cargo build --release"
+  exit 2
+fi
+echo "abi_check: inspecting $LIB"
+newest_src=$(ls -t "$HDR" slow/src/*.rs 2>/dev/null | head -1)
+if [ -n "${newest_src:-}" ] && [ "$newest_src" -nt "$LIB" ]; then
+  echo "FAIL: $LIB is OLDER than $newest_src -- rebuild before checking."
+  echo "      Validating a stale artifact is the bug this script exists to prevent."
   exit 2
 fi
 
