@@ -44,6 +44,15 @@ pub enum Standing {
     /// A body constant with a slot in [`Quantity`] and no estimator behind it. A named slot in an
     /// enum is not a probe; this is the worst standing to be in, because it reads as covered.
     DeclaredOnly(Quantity),
+    /// 🔴 A derivation for this constant EXISTS in this crate, and it refuses on this body because
+    /// the quantity named here is unavailable. Distinct from [`Standing::DeclaredOnly`], which is
+    /// about a missing estimator, and distinct from [`Standing::Outstanding`], which is about a
+    /// constant this layer cannot address at all.
+    ///
+    /// This is the standing that makes the ledger useful to an integrator rather than to an
+    /// auditor: it answers *"you cannot have this number yet, and here is the one probe that would
+    /// give it to you"* instead of leaving them to discover the gap on their robot.
+    BlockedBy(Quantity),
     /// A body constant with no slot at all. Hand-set downstream and invisible to everything here.
     Outstanding,
     /// Not a body constant: it describes the task, the world, or the harness. Recorded anyway, and
@@ -118,12 +127,13 @@ pub const LEDGER: &[Constant] = &[
     Constant {
         name: "TEACH_TILT_MAX",
         site: TEACH,
-        value: "45",
-        standing: Standing::Outstanding,
-        note: "Degrees the approach may leave vertical. Its own comment derives it FROM the tool \
-               offset ('the flange sits 0.145 m back, so a 60 deg approach demands 0.126 m of \
-               extra lateral travel') -- i.e. it is a consequence of two measurable quantities \
-               (tool_offset, reach) that is currently typed in as a third. DISCHARGE: compute it.",
+        value: "hand-set; the arithmetic behind it is the 0.145 tool offset",
+        standing: Standing::BlockedBy(Quantity::ToolOffset),
+        note: "NOT DISCHARGED, and deliberately not invented. The ceiling is where a tilted tool axis swings\
+               the working point into a surface or out of the band, which needs the SURFACE as well as\
+               tool_offset -- and a surface is not a body constant. Writing a plausible formula here would be\
+               exactly the tuned-until-it-worked move this crate refuses. UNBLOCKED BY: stating the surface as\
+               a task input, after which the tilt ceiling is arithmetic on tool_offset.",
     },
     Constant {
         name: "tcp_off",
@@ -203,12 +213,11 @@ pub const LEDGER: &[Constant] = &[
     Constant {
         name: "TEACH_STEP_M",
         site: TEACH,
-        value: "0.045",
-        standing: Standing::Outstanding,
-        note: "The commanded step size in metres -- the same number as bl_spec.step_m. \
-               step_delivery measures what FRACTION of it arrives; the metric size itself is still \
-               typed in, and it is the metric reference gripper_span and tool_offset divide by. \
-               This is where a spec-sheet number enters the layer.",
+        value: "derive::step_m -> step_delivery.valid_hi[0]",
+        standing: Standing::Measured(Quantity::StepDelivery),
+        note: "DISCHARGED 2026-08-11. The top of the domain the probe actually swept: the largest magnitude\
+               this body is KNOWN to deliver. Past it the gate answers OutOfRange, so the step the caller takes\
+               and the step the gate admits are the same number by construction.",
     },
     Constant {
         name: "TEACH_STEP_M_HOLD",
@@ -220,26 +229,35 @@ pub const LEDGER: &[Constant] = &[
     Constant {
         name: "TEACH_STEP_DEG",
         site: TEACH,
-        value: "12",
+        value: "hand-set angular step",
         standing: Standing::Outstanding,
-        note: "The rotational step. step_delivery is written for a scalar magnitude and applies \
-               unchanged; nothing measures the rotational one today.",
+        note: "NOT DISCHARGED. step_delivery was swept over LINEAR magnitudes only; there is no angular\
+               equivalent, and reusing the linear number for degrees is a unit error that would still produce\
+               plausible motion. UNBLOCKED BY: an angular step_delivery probe -- the same motion program,\
+               commanded in rotation.",
     },
     Constant {
         name: "TEACH_SETTLE",
         site: TEACH,
-        value: "24",
-        standing: Standing::Outstanding,
-        note: "Control steps held at each waypoint = how long until a commanded pose actually \
-               arrives. DERIVABLE from latency + step_delivery, both measured here; the wiring is \
-               all that is missing. This is the cheapest item on the ledger to discharge.",
+        value: "derive::settle_periods -> latency + ln(tol)/ln(1-step_delivery)",
+        standing: Standing::Measured(Quantity::StepDelivery),
+        note: "DISCHARGED 2026-08-11. Latency periods pass before anything moves, then each period closes\
+               step_delivery of what remains, so the budget is ln(tol)/ln(1-f) periods on top -- all measured\
+               except the accuracy the TASK requires, which is not a body constant. This row is the one that\
+               proves the file: two arms on one harness delivered 0.76 and 0.11 of the same 45 mm command; a\
+               budget set from the first left the second 0.136 m short EVERY episode, and it read as a planner\
+               or reachability fault while every scalar in the log looked ordinary. Sized from the arm's own\
+               delivery: 0.136 m -> 0.0058 m, nothing about the robot changed.",
     },
     Constant {
         name: "TEACH_REHOME_STEPS",
         site: TEACH,
-        value: "90",
-        standing: Standing::Outstanding,
-        note: "Same family as TEACH_SETTLE, over a longer travel. Same discharge.",
+        value: "derive::traverse_steps -> distance / (step_m * delivered)",
+        standing: Standing::Measured(Quantity::StepDelivery),
+        note: "DISCHARGED 2026-08-11. Divided by what ARRIVES, not by what is commanded -- dividing by the\
+               commanded step is the 0.11-delivery bug in its other form: the step count is right, the arm\
+               stops short, and nothing reports an error. Same step_m the executor scales by, so a re-home and\
+               a servo step can no longer disagree about how far this arm moves in one period.",
     },
     // ---------------------------------------------------------------- reach
     Constant {
@@ -263,19 +281,23 @@ pub const LEDGER: &[Constant] = &[
     Constant {
         name: "TEACH_APPROACH_H",
         site: TEACH,
-        value: "0.12",
-        standing: Standing::Outstanding,
-        note: "Stand-off above the grasp point. Mixes a body clearance (how far the fingertips \
-               reach below the commanded mount = tool_offset) with a task margin; classified as a \
-               body constant because the body part is the larger of the two and is measurable.",
+        value: "derive::approach_clearance_m -> REFUSES: gripper_span NoResponse on this body",
+        standing: Standing::BlockedBy(Quantity::GripperSpan),
+        note: "NOT DISCHARGED, AND THE REFUSAL IS THE ANSWER. The derivation exists -- half the jaw span is the\
+               geometric minimum for the fingers to straddle an object -- and it refuses here because\
+               gripper_span came back NoResponse: the commanded opening did not move the observed signal. An\
+               approach height invented while the jaw span is unknown is the constant that silently decides\
+               whether a grasp closes on the object or on the table, and nothing else in the log would look\
+               wrong. UNBLOCKED BY: a gripper_span probe that responds on this gripper.",
     },
     Constant {
         name: "TEACH_APPROACH_XY",
         site: TEACH,
-        value: "0.045",
-        standing: Standing::Outstanding,
-        note: "Horizontal stand-off of the pre-grasp waypoint, sized to clear the jaws. Body part \
-               is the jaw footprint (gripper_span); nothing derives it.",
+        value: "same blocker as TEACH_APPROACH_H",
+        standing: Standing::BlockedBy(Quantity::GripperSpan),
+        note: "NOT DISCHARGED. Lateral standoff has the same blocker: without the jaw span there is no\
+               body-derived answer to how far to one side the fingers must start. UNBLOCKED BY: the same\
+               gripper_span probe.",
     },
     // ---------------------------------------------------------------- task / world / harness
     Constant {

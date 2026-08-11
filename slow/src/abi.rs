@@ -455,11 +455,16 @@ pub unsafe extern "C" fn bl_debt_line(i: u32, buf: *mut c_char, cap: usize) -> S
     let standing: &str = match c.standing {
         debt::Standing::Measured(_) => "measured",
         debt::Standing::DeclaredOnly(_) => "declared_only",
+        // An integrator reading this line needs to tell "nobody wrote the estimator" apart from
+        // "the estimator is here and this body cannot feed it" -- the second is one probe away.
+        debt::Standing::BlockedBy(_) => "blocked_by",
         debt::Standing::Outstanding => "outstanding",
         debt::Standing::NotABodyConstant => "not_a_body_constant",
     };
     let q: &str = match c.standing {
-        debt::Standing::Measured(q) | debt::Standing::DeclaredOnly(q) => q.as_str(),
+        debt::Standing::Measured(q) | debt::Standing::DeclaredOnly(q) | debt::Standing::BlockedBy(q) => {
+            q.as_str()
+        }
         _ => "-",
     };
     let mut at = 0usize;

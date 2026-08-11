@@ -78,6 +78,7 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 
 pub mod abi;
 pub mod debt;
+pub mod derive;
 pub mod execute;
 #[cfg(feature = "fast")]
 pub mod fast;
@@ -267,6 +268,111 @@ mod tests {
         let v = b.admit(&ask_for(Quantity::ArmWeight), 5_000);
         assert!(!v.admit);
         assert_eq!(v.why, refuse::Reason::Stale);
+    }
+
+    /// 🔴 A `BlockedBy` ROW MUST BE BACKED BY A DERIVATION THAT ACTUALLY REFUSES.
+    ///
+    /// The standing exists so an integrator is told *"you cannot have this number yet, and here is
+    /// the one probe that would give it to you"*. That is only worth anything if the derivation is
+    /// real and the named quantity is genuinely the thing it stops on — otherwise `BlockedBy` is a
+    /// nicer-sounding `Outstanding`, which is the class of decoration this file was written to
+    /// stop.
+    #[test]
+    fn blocked_by_rows_name_the_probe_that_actually_blocks_them() {
+        use crate::derive;
+
+        let blocked: Vec<_> = debt::LEDGER
+            .iter()
+            .filter_map(|c| match c.standing {
+                debt::Standing::BlockedBy(q) => Some((c.name, q)),
+                _ => None,
+            })
+            .collect();
+        assert!(!blocked.is_empty(), "no BlockedBy rows: either all discharged, or the standing \
+                                      stopped being used and the ledger got quieter than the body");
+
+        // A body with everything EXCEPT gripper_span: the approach derivation must stop on exactly
+        // that quantity, not on something incidental.
+        let mut b = Body::new();
+        b.submit(m(Quantity::Latency, 0.0, 0.5, 0)).unwrap();
+        let mut sd = m(Quantity::StepDelivery, 0.9999, 0.00015, 0);
+        sd.valid_lo[0] = 0.005;
+        sd.valid_hi[0] = 0.05;
+        b.submit(sd).unwrap();
+        let v = derive::approach_clearance_m(&b).unwrap_err();
+        assert_eq!(v.culprit, Some(Quantity::GripperSpan),
+                   "the approach rows blame gripper_span; the derivation must stop there too");
+
+        // And the same derivation must SUCCEED the moment that one probe reports, or the row is
+        // blaming a quantity that would not actually unblock it.
+        let mut g = m(Quantity::GripperSpan, 0.0888, 0.001, 0);
+        g.valid_lo[0] = 0.0;
+        g.valid_hi[0] = 1.0;
+        b.submit(g).unwrap();
+        let clearance = derive::approach_clearance_m(&b).expect("unblocked by the named probe");
+        assert!((clearance - 0.0444).abs() < 1e-9, "half the measured jaw span, got {clearance}");
+    }
+
+    /// 🔴 THE SETTLE BUDGET IS SIZED BY THE ARM, AND THE TWO REAL ARMS PROVE IT MATTERS.
+    ///
+    /// Measured on this project: same harness, same commanded 45 mm step, one arm delivered 0.76
+    /// per control period and the other 0.11. A budget set from the first left the second 0.136 m
+    /// short on every episode, reading as a planner or reachability fault. The numbers below are
+    /// those two arms.
+    #[test]
+    fn settle_is_sized_by_this_arms_own_delivery() {
+        use crate::derive;
+
+        let fast_arm = {
+            let mut b = Body::new();
+            b.submit(m(Quantity::Latency, 0.0, 0.5, 0)).unwrap();
+            let mut sd = m(Quantity::StepDelivery, 0.76, 0.01, 0);
+            sd.valid_lo[0] = 0.005;
+            sd.valid_hi[0] = 0.045;
+            b.submit(sd).unwrap();
+            derive::settle_periods(&b, 0.01).unwrap()
+        };
+        let slow_arm = {
+            let mut b = Body::new();
+            b.submit(m(Quantity::Latency, 0.0, 0.5, 0)).unwrap();
+            let mut sd = m(Quantity::StepDelivery, 0.11, 0.01, 0);
+            sd.valid_lo[0] = 0.005;
+            sd.valid_hi[0] = 0.045;
+            b.submit(sd).unwrap();
+            derive::settle_periods(&b, 0.01).unwrap()
+        };
+        assert!(
+            slow_arm > fast_arm * 5,
+            "the 0.11-delivery arm needs far longer to land ({slow_arm} vs {fast_arm}); if these              are close, the budget is being set by something other than the arm"
+        );
+
+        // And with nothing measured it refuses rather than guessing a budget that looks sensible.
+        let empty = Body::new();
+        assert_eq!(
+            derive::settle_periods(&empty, 0.01).unwrap_err().why,
+            refuse::Reason::NeverMeasured
+        );
+
+        // A traverse is divided by what ARRIVES, not by what is commanded -- the same bug wearing
+        // a different name.
+        let mut b = Body::new();
+        b.submit(m(Quantity::Latency, 0.0, 0.5, 0)).unwrap();
+        let mut sd = m(Quantity::StepDelivery, 0.5, 0.01, 0);
+        sd.valid_lo[0] = 0.005;
+        sd.valid_hi[0] = 0.04;
+        b.submit(sd).unwrap();
+        assert_eq!(
+            derive::traverse_steps(&b, 0.4).unwrap(),
+            20,
+            "0.4 m at 0.04 m commanded x 0.5 delivered is 20 steps, not the 10 a commanded-step              count would report"
+        );
+
+        // The jaw clearance refuses on a body whose gripper span was never established -- which is
+        // the state of the arm this project is running.
+        assert_eq!(
+            derive::approach_clearance_m(&b).unwrap_err().why,
+            refuse::Reason::NeverMeasured
+        );
     }
 
     /// 🔴 THE LAYER'S OWN TWO CONSTANTS COME FROM THE BODY, OR NOTHING COMES OUT.
