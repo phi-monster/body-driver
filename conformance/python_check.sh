@@ -137,6 +137,37 @@ intent2 = PolicyOut(); intent2.dir[0] = 1.0; intent2.grip = 1.0
 st, outcome, _ = body.execute(intent2, spec, 1000)
 check("an under-measured body refuses to execute", (st, outcome), (OK, X_REFUSED))
 
+# ------------------------------------------------------------------------------- the floor
+# 🔴 THE BINDING IS THE EDGE WITH NO COMPILER. The C client fails to BUILD when a signature
+# drifts; ctypes silently mis-marshals and keeps going -- which already happened once here, and
+# this file passed because it never called the function that drifted. So every ABI call the
+# binding exposes has to be exercised somewhere, and the floor's are exercised here.
+print("== floor ==")
+fxs, fys, fzs = [], [], []
+for i in range(3):
+    for j in range(3):
+        fxs.append(-0.06 + 0.06 * i)
+        fys.append(-0.06 + 0.06 * j)
+        fzs.append(0.9190 + (0.0012 if (i * 3 + j) % 2 == 0 else -0.0012))
+fzs[0], fzs[1] = 0.8475, 0.8343          # two cells where the arm ran out of solution
+fl, why = bl.floor_fit(fxs, fys, fzs, 0.01)
+check("a grid of stops becomes a plane", fl is not None, True)
+check("...and the arm-limited cells did NOT drag it", 0.914 < fl.value[0] < 0.924, True)
+for name, val in (("contact_threshold", 0.29383), ("step_delivery", 0.9999)):
+    r = Measurement(); r.quantity = Quantity.IDS[name]; r.dim = 1
+    r.value[0] = val; r.valid_hi[0] = 1.0; r.selftest_passed = True
+    body.measure(r)
+check("the floor merges once its rulers are present", body.measure(fl), OK)
+check("a stop AT it is the working surface",
+      bl.floor_read_stop(body, 0.0, 0.0, 0.9190)[0], "on_floor")
+what, h, _, _ = bl.floor_read_stop(body, 0.0, 0.0, 0.9190 + 0.02)
+check("a stop ABOVE it is an object", what, "on_something")
+check("...and its height comes back", 0.015 < h < 0.025, True)
+check("a stop BELOW it is the arm's own limit, NOT contact",
+      bl.floor_read_stop(body, fxs[0], fys[0], 0.8475)[0], "arm_limit")
+check("off the probed box it refuses instead of extrapolating",
+      bl.floor_read_stop(body, 0.60, 0.0, 0.9190)[3], "out_of_range")
+
 # ---------------------------------------------------------------- the debt is readable from here
 print("== debt ==")
 rows = bl.debt()

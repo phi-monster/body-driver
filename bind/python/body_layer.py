@@ -207,6 +207,19 @@ class BodyLayer:
         L.bl_predict_horizon.argtypes = [ctypes.c_void_p, ctypes.c_double, ctypes.c_double,
                                          u32p, u32p]
         L.bl_predict_horizon.restype = ctypes.c_uint32
+        # 🔴 The floor. Signatures mirror abi/body_layer.h exactly; conformance/python_check.sh
+        # exercises BOTH of these, because ctypes mis-marshals a drifted signature silently and a
+        # check that never calls a function cannot catch it -- which is exactly how a grown ABI
+        # parameter went unnoticed here once before.
+        L.bl_floor_fit.argtypes = [dp, dp, dp, ctypes.c_size_t, ctypes.c_double, ctypes.c_uint64,
+                                   ctypes.c_uint64, ctypes.c_uint64, mp, u32p]
+        L.bl_floor_fit.restype = ctypes.c_uint32
+        L.bl_floor_read_stop.argtypes = [ctypes.c_void_p, ctypes.c_double, ctypes.c_double,
+                                         ctypes.c_double, ctypes.c_double, u32p, dp, dp, u32p,
+                                         ctypes.c_char_p]
+        L.bl_floor_read_stop.restype = ctypes.c_uint32
+        L.bl_stop_str.argtypes = [ctypes.c_uint32]
+        L.bl_stop_str.restype = ctypes.c_char_p
         L.bl_predict_admit.argtypes = [ctypes.POINTER(Predicted), ctypes.c_uint32,
                                        ctypes.c_double, ctypes.c_uint32, u32p, ctypes.c_char_p]
         L.bl_predict_admit.restype = ctypes.c_uint32
@@ -430,6 +443,42 @@ class BodyLayer:
         if st != OK:
             return None, Reason.NAMES.get(why.value, "unknown")
         return out.value, "none"
+
+    def floor_fit(self, xs, ys, zs, tol_m, now_ns=1, thr_epoch=0, sd_epoch=0):
+        """-> (Measurement or None, reason). A grid of "I pressed here and stopped at this height"
+        becomes the plane this body can reach down to.
+
+        `tol_m` is the probe's own descent step: two cells stopping within one step of each other
+        are indistinguishable to the probe that produced them. Not a tuning knob.
+        """
+        n = len(xs)
+        arr = (ctypes.c_double * n)
+        out, why = Measurement(), ctypes.c_uint32(0)
+        st = self.lib.bl_floor_fit(arr(*[float(v) for v in xs]), arr(*[float(v) for v in ys]),
+                                   arr(*[float(v) for v in zs]), ctypes.c_size_t(n),
+                                   ctypes.c_double(float(tol_m)), ctypes.c_uint64(int(now_ns)),
+                                   ctypes.c_uint64(int(thr_epoch)), ctypes.c_uint64(int(sd_epoch)),
+                                   ctypes.byref(out), ctypes.byref(why))
+        if st != OK:
+            return None, self.lib.bl_declined_str(why.value).decode()
+        return out, None
+
+    def floor_read_stop(self, body, x, y, stop_z, band_sigmas=3.0):
+        """-> (what, height_m, floor_z, reason). The hand stopped here -- what stopped it?
+
+        `what` is on_floor / on_something / arm_limit / unknown. For `on_something` the height is
+        how tall the thing is; for `arm_limit` it is how far BELOW the surface the stop was, which
+        is the tell that there is no surface there at all.
+        """
+        what, fz = ctypes.c_uint32(0), ctypes.c_double(0.0)
+        h, why = ctypes.c_double(0.0), ctypes.c_uint32(0)
+        detail = ctypes.create_string_buffer(REASON_LEN)
+        self.lib.bl_floor_read_stop(body._ptr, ctypes.c_double(float(x)), ctypes.c_double(float(y)),
+                                    ctypes.c_double(float(stop_z)),
+                                    ctypes.c_double(float(band_sigmas)), ctypes.byref(what),
+                                    ctypes.byref(fz), ctypes.byref(h), ctypes.byref(why), detail)
+        return (self.lib.bl_stop_str(what.value).decode(), h.value, fz.value,
+                Reason.NAMES.get(why.value, "unknown"))
 
     def predict_admit(self, predicted, need_periods, tol_uv=None):
         """-> (ok, reason, detail). The gate on its own, when the caller already knows the horizon.
