@@ -129,7 +129,12 @@ typedef enum {
                                  /* in at FOUR places in the live stack, with three  */
                                  /* values for three bodies (0.145 / 0.102 / 0.1034) */
                                  /* and a default that silently uses another robot's.*/
-    BL_Q_COUNT             = 11
+    BL_Q_TOOL_AXIS_COLUMN  = 11, /* which column of R points along my tool, in {0,1,2}. */
+                                 /* Same motion as the offset: spin about each column  */
+                                 /* and the one the working point barely moves about   */
+                                 /* IS the tool axis.  Typed in per body as            */
+                                 /* L3_TOOL_COL (0 on one arm, 2 on another).          */
+    BL_Q_COUNT             = 12
 } bl_quantity;
 
 /* 🔴 3 * BL_MAX_JOINTS, and that is not slack -- it is the smallest value that fits the image

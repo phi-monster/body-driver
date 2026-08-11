@@ -421,6 +421,7 @@ pub extern "C" fn bl_quantity_str(quantity: u32) -> *const c_char {
         Some(Quantity::SelfOcclusion) => "self_occlusion\0",
         Some(Quantity::StepDelivery) => "step_delivery\0",
         Some(Quantity::ToolOffset) => "tool_offset\0",
+        Some(Quantity::ToolAxisColumn) => "tool_axis_column\0",
         None => "unknown\0",
     };
     s.as_ptr() as *const c_char

@@ -811,6 +811,7 @@ mod schedule_and_debt {
             Quantity::GripperSpan,
             Quantity::SelfOcclusion,
             Quantity::ToolOffset,
+            Quantity::ToolAxisColumn,
         ] {
             let mut x = m(q, 0);
             x.deps[0] = Some((Quantity::ImageJacobian, je));
@@ -834,7 +835,7 @@ mod schedule_and_debt {
         let p = plan(&b, 61_500_000_000);
         let names: Vec<&str> = p.steps().iter().map(|(q, _)| q.as_str()).collect();
         assert_eq!(names[0], "image_jacobian", "the prerequisite must be first: {names:?}");
-        for q in ["hand_pixel", "gripper_span", "self_occlusion", "tool_offset"] {
+        for q in ["hand_pixel", "gripper_span", "self_occlusion", "tool_offset", "tool_axis_column"] {
             assert!(names.contains(&q), "{q} was left off the plan: {names:?}");
         }
         assert!(

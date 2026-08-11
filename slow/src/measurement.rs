@@ -109,11 +109,30 @@ pub enum Quantity {
     /// It is measurable by acting on itself: turn the wrist and the working point sweeps an arc
     /// whose radius **is** the offset. See [`crate::probe::tool_offset`].
     ToolOffset = 10,
+    /// Which column of my orientation matrix points along my tool, as an index in `{0,1,2}`.
+    ///
+    /// 🔴 Added 2026-08-11 by MERGING THE SECOND IMPLEMENTATION, not by design. This layer had a C
+    /// ABI, 45 tests and no callers; a 224-line Python file with no tests was what every running
+    /// script on the box actually used. Collapsing them surfaced this immediately: the Python store
+    /// held a twelfth quantity this enum had never heard of, so the merged reader refused a
+    /// constant that had been correctly measured for days.
+    ///
+    /// It travels with [`Self::ToolOffset`] and comes out of the same motion: spin about each
+    /// column of R and watch the working point — the column it barely moves about IS the tool axis,
+    /// and the arc radius about either of the others is the offset. Two numbers, one probe.
+    ///
+    /// It is on this list for the same reason as the offset: it was typed in per body
+    /// (`L3_TOOL_COL`, `0` for one arm and `2` for another) and a body that forgets to pass it runs
+    /// with another robot's tool axis without failing.
+    ///
+    /// `value[0]` is the column index; `valid_lo/hi` is `[0, 2]`, the columns actually spun about —
+    /// here, unusually, the domain and the value do share units, as they do for `HandPixel`.
+    ToolAxisColumn = 11,
 }
 
 impl Quantity {
     /// Total number of quantities; used to size the store.
-    pub const COUNT: usize = 11;
+    pub const COUNT: usize = 12;
 
     /// Reconstruct from the ABI's `u32`. Returns `None` for anything unknown — an unknown
     /// quantity is refused, never coerced into a neighbouring one.
@@ -131,6 +150,7 @@ impl Quantity {
             8 => SelfOcclusion,
             9 => StepDelivery,
             10 => ToolOffset,
+            11 => ToolAxisColumn,
             _ => return None,
         })
     }
@@ -150,6 +170,7 @@ impl Quantity {
             SelfOcclusion => "self_occlusion",
             StepDelivery => "step_delivery",
             ToolOffset => "tool_offset",
+            ToolAxisColumn => "tool_axis_column",
         }
     }
 }

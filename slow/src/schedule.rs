@@ -78,7 +78,7 @@ pub fn prerequisites(q: Quantity) -> &'static [Quantity] {
         ContactThreshold => &[ArmWeight],
         // The arc the working point sweeps is read in the camera's frame and converted with the
         // same ruler the span uses.
-        ToolOffset => &[ImageJacobian],
+        ToolOffset | ToolAxisColumn => &[ImageJacobian],
         // The rest are measured directly off commanded motion and answer to nothing else.
         ImageJacobian | ArmWeight | Latency | Backlash | Reach | StepDelivery => &[],
     }
