@@ -168,6 +168,31 @@ class BodyLayer:
         L.bl_close.argtypes = [ctypes.c_void_p]
         # the thin OS's memory -- the same caller-owned-storage discipline as the body
         u32p, u64p = ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint64)
+        # probes -- the MEASURING half. Unreachable from any language but Rust until 2026-08-11.
+        dp, mp = ctypes.POINTER(ctypes.c_double), ctypes.POINTER(Measurement)
+        L.bl_declined_str.restype = ctypes.c_char_p
+        L.bl_probe_arm_weight.argtypes = [dp, dp, ctypes.c_size_t, ctypes.c_uint64, mp, u32p]
+        L.bl_probe_arm_weight.restype = ctypes.c_uint32
+        L.bl_probe_contact_threshold.argtypes = [dp, ctypes.c_size_t, dp, ctypes.c_size_t,
+                                                 ctypes.c_uint64, ctypes.c_uint64, mp, u32p]
+        L.bl_probe_contact_threshold.restype = ctypes.c_uint32
+        L.bl_probe_step_delivery.argtypes = [dp, dp, ctypes.c_size_t, ctypes.c_uint64, mp, u32p]
+        L.bl_probe_step_delivery.restype = ctypes.c_uint32
+        L.bl_probe_reach.argtypes = [dp, ctypes.POINTER(ctypes.c_uint32), ctypes.c_size_t,
+                                     ctypes.c_uint64, mp, u32p]
+        L.bl_probe_reach.restype = ctypes.c_uint32
+        L.bl_probe_latency.argtypes = [ctypes.c_int64, ctypes.c_uint32, ctypes.c_uint64, mp, u32p]
+        L.bl_probe_latency.restype = ctypes.c_uint32
+        L.bl_probe_backlash.argtypes = [dp, dp, ctypes.c_size_t, ctypes.c_uint64, mp, u32p]
+        L.bl_probe_backlash.restype = ctypes.c_uint32
+        L.bl_probe_gripper_span.argtypes = [dp, dp, ctypes.c_size_t, ctypes.c_double,
+                                            ctypes.c_double, ctypes.c_uint64, ctypes.c_uint64,
+                                            mp, u32p]
+        L.bl_probe_gripper_span.restype = ctypes.c_uint32
+        L.bl_probe_tool_offset.argtypes = [dp, dp, dp, ctypes.c_size_t, ctypes.c_double,
+                                           ctypes.c_double, ctypes.c_uint64, ctypes.c_uint64,
+                                           mp, u32p]
+        L.bl_probe_tool_offset.restype = ctypes.c_uint32
         L.bl_predict_horizon.argtypes = [ctypes.c_void_p, ctypes.c_double, ctypes.c_double,
                                          u32p, u32p]
         L.bl_predict_horizon.restype = ctypes.c_uint32
@@ -273,6 +298,64 @@ class BodyLayer:
 
     def new_body(self):
         return Body(self)
+
+    @staticmethod
+    def _arr(xs):
+        a = (ctypes.c_double * len(xs))()
+        for i, x in enumerate(xs):
+            a[i] = float(x)
+        return a
+
+    def _probe(self, call):
+        """-> (Measurement, None) or (None, why). A DECLINE is an answer: the probe ran and could
+        not say anything, which is different from a gate refusing to admit what it did say."""
+        out, why = Measurement(), ctypes.c_uint32(0)
+        st = call(ctypes.byref(out), ctypes.byref(why))
+        if st == OK:
+            return out, None
+        return None, self.lib.bl_declined_str(why.value).decode()
+
+    def probe_arm_weight(self, joint_angle, hold_torque, now_ns=0):
+        """🔴 What holding still against gravity costs. Its valid range is THE POSES ACTUALLY
+        VISITED -- a gravity self-calibration here once had its entire residual in interpolation
+        between them, so asking outside is where the number stops meaning anything."""
+        a, t = self._arr(joint_angle), self._arr(hold_torque)
+        return self._probe(lambda o, w: self.lib.bl_probe_arm_weight(a, t, len(a), now_ns, o, w))
+
+    def probe_contact_threshold(self, free, touching, now_ns=0, arm_weight_epoch=0):
+        f, t = self._arr(free), self._arr(touching)
+        return self._probe(lambda o, w: self.lib.bl_probe_contact_threshold(
+            f, len(f), t, len(t), now_ns, arm_weight_epoch, o, w))
+
+    def probe_step_delivery(self, commanded, achieved, now_ns=0):
+        c, a = self._arr(commanded), self._arr(achieved)
+        return self._probe(lambda o, w: self.lib.bl_probe_step_delivery(c, a, len(c), now_ns, o, w))
+
+    def probe_reach(self, radius, attained, now_ns=0):
+        r = self._arr(radius)
+        at = (ctypes.c_uint32 * len(attained))(*[1 if x else 0 for x in attained])
+        return self._probe(lambda o, w: self.lib.bl_probe_reach(r, at, len(r), now_ns, o, w))
+
+    def probe_latency(self, first_motion_step, steps_observed, now_ns=0):
+        """`first_motion_step < 0` = nothing moved. That is a refusal, not a latency."""
+        return self._probe(lambda o, w: self.lib.bl_probe_latency(
+            int(first_motion_step), int(steps_observed), now_ns, o, w))
+
+    def probe_backlash(self, commanded, observed, now_ns=0):
+        c, ob = self._arr(commanded), self._arr(observed)
+        return self._probe(lambda o, w: self.lib.bl_probe_backlash(c, ob, len(c), now_ns, o, w))
+
+    def probe_gripper_span(self, opening, separation, units_per_m, units_per_m_sigma=0.0,
+                           now_ns=0, jac_epoch=0):
+        op, sep = self._arr(opening), self._arr(separation)
+        return self._probe(lambda o, w: self.lib.bl_probe_gripper_span(
+            op, sep, len(op), units_per_m, units_per_m_sigma, now_ns, jac_epoch, o, w))
+
+    def probe_tool_offset(self, wrist_angle, u, v, units_per_m, units_per_m_sigma=0.0,
+                          now_ns=0, jac_epoch=0):
+        a, uu, vv = self._arr(wrist_angle), self._arr(u), self._arr(v)
+        return self._probe(lambda o, w: self.lib.bl_probe_tool_offset(
+            a, uu, vv, len(a), units_per_m, units_per_m_sigma, now_ns, jac_epoch, o, w))
 
     def predict_horizon(self, body, distance_m, tol_frac=0.01):
         """-> (periods, reason).  How long THIS body is blind while it covers that distance.

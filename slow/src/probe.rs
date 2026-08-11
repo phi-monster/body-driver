@@ -822,9 +822,25 @@ pub fn backlash(
 /// At the point where both classes are the same number of their own standard deviations away:
 /// `t = (μ_free·σ_touch + μ_touch·σ_free) / (σ_free + σ_touch)`. A midpoint would sit too close to
 /// whichever class is noisier, and any weighting chosen by hand is a per-rig constant.
+/// Which way this body's contact signal moves when it touches something.
+///
+/// 🔴 Not a default. A force channel reads higher on contact; a *did the commanded motion happen*
+/// channel reads LOWER, and this project's own validated detector is the second kind (0.18 free vs
+/// 0.0001 touching, 289 steps, zero overlap). Guessing costs a detector that fires in free space
+/// and stays silent on contact, which is the failure the direction check exists to catch.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[repr(u32)]
+pub enum Polarity {
+    /// Force, current, torque: pressing makes the number bigger.
+    HigherOnContact = 0,
+    /// Delivered-motion, achieved-step: pressing makes the number smaller.
+    LowerOnContact = 1,
+}
+
 pub fn contact_threshold(
     free: &[f64],     // signal while moving in free space
     touching: &[f64], // signal while pressed against something
+    polarity: Polarity,
     now_ns: u64,
     arm_weight_epoch: u64,
 ) -> Result<Measurement, Declined> {
@@ -866,14 +882,27 @@ pub fn contact_threshold(
         // Every reading identical in both conditions: the channel is stuck, not noiseless.
         return Err(Declined::NoResponse);
     }
-    // Contact must read HIGHER than free space. If it reads lower, the two sets were swapped or the
-    // sign convention is inverted, and a threshold fitted to that would fire in free space and stay
-    // silent on contact. Taking |μ_t − μ_f| would let both mistakes through looking healthy.
-    if mu_t <= mu_f {
+    // 🔴 The DIRECTION is checked, and the caller states which direction it expects.
+    //
+    // This used to hard-code "contact must read HIGHER than free space", which is right for a force
+    // channel and BACKWARDS for the ruler this project actually validated: *how much of the
+    // commanded downward motion actually happened*, which reads 0.18 in free space and 0.0001 on
+    // contact -- 289 steps, zero overlap. So the probe refused the one contact detector here that
+    // had been measured to work.
+    //
+    // Caught by the C client on its first run. Polarity is a property of the SIGNAL, not a law, and
+    // the fix is not to take |mu_t - mu_f|: that would let a swapped pair and an inverted sign
+    // through looking healthy, which is what the original comment correctly warned about. The
+    // caller says which way its signal goes, and a contradiction is still refused.
+    let (mu_lo, mu_hi) = match polarity {
+        Polarity::HigherOnContact => (mu_f, mu_t),
+        Polarity::LowerOnContact => (mu_t, mu_f),
+    };
+    if mu_hi <= mu_lo {
         return Err(Declined::Inconsistent);
     }
     let se = (sd_f * sd_f / n_f + sd_t * sd_t / n_t).sqrt();
-    if !(se > 0.0) || (mu_t - mu_f) < 2.0 * se {
+    if !(se > 0.0) || (mu_hi - mu_lo) < 2.0 * se {
         // Free space and contact read alike on this body. There is no threshold to report, and
         // reporting one would ship a detector that fires at a rate nobody measured.
         return Err(Declined::Inconsistent);

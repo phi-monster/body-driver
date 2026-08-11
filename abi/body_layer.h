@@ -445,7 +445,10 @@ typedef enum {
     BL_OPENS_NEW_TASK           = 0,  /* keeps place memory + body calibration  */
     BL_OPENS_UNRECOGNISED_PLACE = 1,  /* keeps task memory + body calibration   */
     BL_OPENS_BODY_CHANGED       = 2   /* keeps both memories; the BODY re-measures */
-} bl_memory_event;
+} bl_memory_open;  /* 🔴 NOT `bl_memory_event`: that is the FUNCTION's name, and in C a typedef
+                    * and a function share one namespace.  Caught by the C client on its first
+                    * compile -- a defect a ctypes binding cannot surface, because it never parses
+                    * this file. */
 
 /* Was this place recognised?  🔴 Three answers.  Misidentifying a place is worse than having no
  * memory at all -- you would act on a map of somewhere else, confidently. */
@@ -526,6 +529,95 @@ bl_status bl_predict_admit(const bl_predicted *p, uint32_t need_periods,
 bl_status bl_predict_admit_chase(const void *b, const bl_predicted *p, double distance_m,
                                  double tol_frac, double tol_uv, uint32_t has_tol,
                                  uint32_t *why, char detail[BL_REASON_LEN]);
+
+/* ==================================================== probes: the MEASURING half ============== */
+/* 🔴 UNREACHABLE FROM C UNTIL 2026-08-11, AND THAT WAS THE BIGGEST HOLE IN THIS ABI.
+ *
+ * Eleven probes existed in the implementation and `nm` reported ZERO probe symbols exported.  A
+ * caller in another language could READ a body constant and could ask whether it may be USED --
+ * and could not MEASURE one.  That is the half this whole layer is for: 世界靠学,身体靠量.
+ * A robot that can only be handed numbers is a robot with a config file.
+ *
+ * One function per probe, explicitly typed.  A single generic entry taking a params[] array would
+ * be shorter and would encode "params[2] is the Jacobian epoch" as a positional convention nobody
+ * can check -- a bug class this project has already paid for.
+ *
+ * ⚠️ STATED GAP: three probes are NOT here yet -- image_jacobian, hand_pixel and self_occlusion --
+ * because their inputs are richer than parallel arrays (image candidate lists, a stateful tracker).
+ * They exist in the implementation and are reachable only from Rust today.  Saying so is cheaper
+ * than a caller discovering it. */
+
+/* Why a PROBE declined.  Distinct from bl_reason on purpose: a probe declines to PRODUCE a
+ * measurement, a gate refuses to ADMIT one.  One name for both would lose which half said no. */
+typedef enum {
+    BL_D_NOT_ENOUGH_SAMPLES = 0,
+    BL_D_NO_RESPONSE        = 1,  /* the commanded motion did not move the observed signal */
+    BL_D_INCONSISTENT       = 2,
+    BL_D_MISSING_DEPENDENCY = 3
+} bl_declined;
+
+const char *bl_declined_str(uint32_t d);
+
+/* 🔴 THE FORCE PAIR.
+ *
+ * arm_weight: the arm parks at a pose, touches nothing, reports the torque needed to stay there.
+ * On one rig this turned 55-95 N of apparent load into 1.89 N.  Its validity range is THE SET OF
+ * POSES ACTUALLY VISITED, and that is load-bearing: a gravity self-calibration on this project had
+ * its ENTIRE residual in interpolation between sampled poses.
+ *
+ * contact_threshold depends on it: any contact signal a joint can produce has the gravity load in
+ * it, so measure the hold torque FIRST or the threshold is a statement about the arm's own weight.
+ * Pass arm_weight's epoch so re-measuring the weight invalidates the threshold automatically. */
+bl_status bl_probe_arm_weight(const double *joint_angle, const double *hold_torque, size_t n,
+                              uint64_t now_ns, bl_measurement *out, uint32_t *why);
+/* 🔴 `polarity` is NOT optional and has no default.  A force/current/torque channel reads HIGHER
+ * on contact; a "did the commanded motion actually happen" channel reads LOWER -- and this
+ * project's own validated detector is the second kind (0.18 free vs 0.0001 touching, 289 steps,
+ * zero overlap).  The probe hard-coded the first until 2026-08-11 and therefore REFUSED the one
+ * contact detector here that had been measured to work.  Guessing costs a detector that fires in
+ * free space and stays silent on contact. */
+typedef enum {
+    BL_CONTACT_HIGHER = 0,  /* force, current, torque: pressing makes the number bigger  */
+    BL_CONTACT_LOWER  = 1   /* delivered-motion: pressing makes the number smaller        */
+} bl_contact_polarity;
+
+bl_status bl_probe_contact_threshold(const double *free, size_t n_free,
+                                     const double *touching, size_t n_touching,
+                                     uint32_t polarity,
+                                     uint64_t now_ns, uint64_t arm_weight_epoch,
+                                     bl_measurement *out, uint32_t *why);
+
+/* How much of a commanded step actually arrives in one control period.  Two arms on one harness
+ * answered 0.76 and 0.11 to the same 45 mm command. */
+bl_status bl_probe_step_delivery(const double *commanded, const double *achieved, size_t n,
+                                 uint64_t now_ns, bl_measurement *out, uint32_t *why);
+/* Where this body can put its hand, as a RADIAL BAND from its own base -- the shape reach actually
+ * has.  A hand-typed axis-aligned box rejected a layout 0.409 m from the base while accepting four
+ * further ones. */
+bl_status bl_probe_reach(const double *radius, const uint32_t *attained, size_t n,
+                         uint64_t now_ns, bl_measurement *out, uint32_t *why);
+/* Dead time.  first_motion_step < 0 means nothing moved within steps_observed -- a refusal, NOT a
+ * latency equal to steps_observed. */
+bl_status bl_probe_latency(int64_t first_motion_step, uint32_t steps_observed,
+                           uint64_t now_ns, bl_measurement *out, uint32_t *why);
+/* The dead band around a reversal: push both ways, what fails to arrive is the slop.  The
+ * number-one accuracy killer on cheap hardware, measurable with no extra sensor. */
+bl_status bl_probe_backlash(const double *commanded, const double *observed, size_t n,
+                            uint64_t now_ns, bl_measurement *out, uint32_t *why);
+/* Full-open to full-closed off this body's own jaws.  Refuses BL_D_NO_RESPONSE when the commanded
+ * opening does not move the observed signal -- which is what one body in this project answers, and
+ * why an approach height cannot be derived on it. */
+bl_status bl_probe_gripper_span(const double *opening, const double *separation, size_t n,
+                                double units_per_m, double units_per_m_sigma,
+                                uint64_t now_ns, uint64_t jac_epoch,
+                                bl_measurement *out, uint32_t *why);
+/* Turn the wrist; the working point sweeps an arc whose RADIUS is the offset.  This is the
+ * constant that was typed in at four places in one live stack, with three values for three bodies
+ * and a default that silently used another robot's. */
+bl_status bl_probe_tool_offset(const double *wrist_angle, const double *u, const double *v,
+                               size_t n, double units_per_m, double units_per_m_sigma,
+                               uint64_t now_ns, uint64_t jac_epoch,
+                               bl_measurement *out, uint32_t *why);
 
 /* Human-readable, for logs and for the audit trail.  Never parsed. */
 const char *bl_reason_str(uint32_t why);

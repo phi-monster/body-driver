@@ -1039,7 +1039,7 @@ mod schedule_and_debt {
 /// looked wrong.
 #[cfg(all(test, feature = "std"))]
 mod real_data {
-    use crate::probe::{backlash, contact_threshold, Declined};
+    use crate::probe::{backlash, contact_threshold, Declined, Polarity};
 
     fn read(name: &str) -> String {
         let p = format!("{}/../realdata/{}", env!("CARGO_MANIFEST_DIR"), name);
@@ -1069,7 +1069,7 @@ mod real_data {
         }
         assert_eq!((free.len(), touch.len()), (120, 400), "the log changed shape");
 
-        let m = contact_threshold(&free, &touch, 1_000_000_000, 3)
+        let m = contact_threshold(&free, &touch, Polarity::HigherOnContact, 1_000_000_000, 3)
             .expect("two physically distinct conditions must be measurable");
         let hi_free = free.iter().copied().fold(f64::NEG_INFINITY, f64::max);
         let lo_touch = touch.iter().copied().fold(f64::INFINITY, f64::min);
@@ -1095,14 +1095,14 @@ mod real_data {
         //    that answers this has not been shown to be measuring contact at all.
         let (a, b) = free.split_at(60);
         assert_eq!(
-            contact_threshold(a, b, 1_000_000_000, 3).unwrap_err(),
+            contact_threshold(a, b, Polarity::HigherOnContact, 1_000_000_000, 3).unwrap_err(),
             Declined::NoResponse
         );
 
         // -- must refuse: the classes swapped. Contact reading lower than free space is an inverted
         //    convention, and a threshold fitted to it fires in free space and is silent on contact.
         assert_eq!(
-            contact_threshold(&touch, &free, 1_000_000_000, 3).unwrap_err(),
+            contact_threshold(&touch, &free, Polarity::HigherOnContact, 1_000_000_000, 3).unwrap_err(),
             Declined::Inconsistent
         );
     }
@@ -1269,6 +1269,7 @@ mod fast_conformance {
 #[cfg(test)]
 mod end_to_end {
     use super::*;
+    use crate::probe::Polarity;
     use measurement::AxisKind;
     use execute::{execute, Intent, Outcome, Spec};
     use hand::{Candidate, HandTracker};
@@ -1830,13 +1831,13 @@ mod end_to_end {
 
         // -- must refuse: not enough of one class.
         assert_eq!(
-            contact_threshold(&cls(10.0, 5), &cls(30.0, 20), T, AW).unwrap_err(),
+            contact_threshold(&cls(10.0, 5), &cls(30.0, 20), Polarity::HigherOnContact, T, AW).unwrap_err(),
             Declined::NotEnoughSamples
         );
 
         // -- must refuse: the channel is stuck, not noiseless.
         assert_eq!(
-            contact_threshold(&[7.0; 20], &[7.0; 20], T, AW).unwrap_err(),
+            contact_threshold(&[7.0; 20], &[7.0; 20], Polarity::HigherOnContact, T, AW).unwrap_err(),
             Declined::NoResponse
         );
 
@@ -1844,19 +1845,19 @@ mod end_to_end {
         //    inverted, and a threshold fitted to that fires in free space and stays silent on
         //    contact. Taking |mu_t - mu_f| would let both mistakes through looking healthy.
         assert_eq!(
-            contact_threshold(&cls(30.0, 20), &cls(10.0, 20), T, AW).unwrap_err(),
+            contact_threshold(&cls(30.0, 20), &cls(10.0, 20), Polarity::HigherOnContact, T, AW).unwrap_err(),
             Declined::Inconsistent
         );
 
         // -- must refuse: the two conditions read alike. There is no threshold to report, and
         //    reporting one ships a detector that fires at a rate nobody measured.
         assert_eq!(
-            contact_threshold(&cls(10.0, 20), &cls(10.5, 20), T, AW).unwrap_err(),
+            contact_threshold(&cls(10.0, 20), &cls(10.5, 20), Polarity::HigherOnContact, T, AW).unwrap_err(),
             Declined::Inconsistent
         );
 
         // -- must be ADMITTED: cleanly separated, threshold inside the gap nobody observed.
-        let m = contact_threshold(&cls(10.0, 20), &cls(30.0, 20), T, AW)
+        let m = contact_threshold(&cls(10.0, 20), &cls(30.0, 20), Polarity::HigherOnContact, T, AW)
             .expect("two separated classes must be measurable");
         assert!(
             m.value[0] > 12.0 && m.value[0] < 28.0,

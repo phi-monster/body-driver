@@ -31,6 +31,7 @@ use crate::debt;
 use crate::execute::{execute, Intent, Outcome, Spec};
 use crate::measurement::{AxisKind, Measurement, Quantity, MAX_DEPS, MAX_DIM};
 use crate::predict::{self, Predicted};
+use crate::probe::{self, Declined, Polarity};
 use crate::memory::{
     Durability, Memory, Opens, PlaceKey, Recognised, Scope, FINGERPRINT_BYTES, SLOT_BYTES,
 };
@@ -1193,4 +1194,327 @@ pub unsafe extern "C" fn bl_predict_admit_chase(
     } else {
         Status::Refuse
     }
+}
+
+/* ============================================================ probes ========================== */
+/* 🔴 THE MEASURING HALF, WHICH WAS UNREACHABLE FROM C UNTIL 2026-08-11.
+ *
+ * Eleven probes existed in Rust and `nm` reported ZERO probe symbols exported. So a caller in any
+ * other language could read a body constant and could ask whether it may be used -- and could not
+ * MEASURE ONE. That is the half this layer is for: *世界靠学,身体靠量*. A robot that can only be
+ * handed numbers is a robot with a config file.
+ *
+ * One function per probe, explicitly typed. A single generic entry taking `params[]` would be
+ * shorter and would encode "params[2] is the Jacobian epoch" as a positional convention nobody can
+ * check -- and unchecked positional conventions are, specifically, a bug class this repository has
+ * paid for. */
+
+/// Why a probe declined. Distinct from [`Reason`]: a probe declines to PRODUCE a measurement, a
+/// gate refuses to ADMIT one. Collapsing them would lose which half of the system said no.
+#[repr(u32)]
+pub enum CDeclined {
+    NotEnoughSamples = 0,
+    NoResponse = 1,
+    Inconsistent = 2,
+    MissingDependency = 3,
+}
+
+fn decl(d: Declined) -> u32 {
+    match d {
+        Declined::NotEnoughSamples => CDeclined::NotEnoughSamples as u32,
+        Declined::NoResponse => CDeclined::NoResponse as u32,
+        Declined::Inconsistent => CDeclined::Inconsistent as u32,
+        Declined::MissingDependency => CDeclined::MissingDependency as u32,
+    }
+}
+
+/// Human-readable, for logs and audit trails. Never parsed.
+#[no_mangle]
+pub extern "C" fn bl_declined_str(d: u32) -> *const c_char {
+    let s: &'static str = match d {
+        0 => "not_enough_samples\0",
+        1 => "no_response\0",
+        2 => "inconsistent\0",
+        3 => "missing_dependency\0",
+        _ => "unknown\0",
+    };
+    s.as_ptr() as *const c_char
+}
+
+/// SAFETY helper: a caller-owned pair of parallel arrays becomes a slice of tuples in a scratch
+/// buffer. Bounded by `PROBE_MAX_SAMPLES`; a longer submission is refused rather than truncated,
+/// because a truncated sample set produces a confident measurement of the wrong thing.
+const PROBE_MAX_SAMPLES: usize = 4096;
+
+unsafe fn pairs(xs: *const f64, ys: *const f64, n: usize, into: &mut [(f64, f64)]) -> bool {
+    if xs.is_null() || ys.is_null() || n == 0 || n > into.len() {
+        return false;
+    }
+    for i in 0..n {
+        // SAFETY: the caller promises `n` readable doubles at each pointer; `n <= into.len()`.
+        into[i] = unsafe { (*xs.add(i), *ys.add(i)) };
+    }
+    true
+}
+
+fn emit(r: Result<Measurement, Declined>, out: *mut CMeasurement, why: *mut u32) -> Status {
+    match r {
+        Ok(m) => {
+            if out.is_null() {
+                return Status::Einval;
+            }
+            // SAFETY: checked non-null; the caller owns `out`.
+            unsafe { *out = CMeasurement::from_native(&m) };
+            Status::Ok
+        }
+        Err(d) => {
+            if !why.is_null() {
+                // SAFETY: checked non-null.
+                unsafe { *why = decl(d) };
+            }
+            Status::Refuse
+        }
+    }
+}
+
+/// 🔴 WHAT HOLDING STILL AGAINST GRAVITY COSTS — the force probe.
+///
+/// `joint_angle[i]` / `hold_torque[i]`: the arm parks at a pose, touches nothing, and reports the
+/// torque needed to stay there. On one rig this turned 55–95 N of apparent load into **1.89 N**.
+///
+/// The validity range is the set of poses actually visited, and that is load-bearing: a gravity
+/// self-calibration on this project had its ENTIRE residual in interpolation between sampled
+/// poses, so asking outside them is exactly where the number stops meaning anything.
+///
+/// # Safety
+/// Both arrays must be readable for `n` doubles; `out` must be writable.
+#[no_mangle]
+pub unsafe extern "C" fn bl_probe_arm_weight(
+    joint_angle: *const f64,
+    hold_torque: *const f64,
+    n: usize,
+    now_ns: u64,
+    out: *mut CMeasurement,
+    why: *mut u32,
+) -> Status {
+    let mut buf = [(0.0f64, 0.0f64); PROBE_MAX_SAMPLES];
+    // SAFETY: bounded copy out of caller-owned arrays.
+    if !unsafe { pairs(joint_angle, hold_torque, n, &mut buf) } {
+        return Status::Einval;
+    }
+    emit(probe::arm_weight(&buf[..n], now_ns), out, why)
+}
+
+/// 🔴 WHAT "I TOUCHED SOMETHING" READS LIKE ON THIS BODY.
+///
+/// Two labelled populations of the same signal: `free` while moving through air, `touching` while
+/// pressed against something. Depends on [`bl_probe_arm_weight`]: any contact signal a joint can
+/// produce has the gravity load in it, so measure the hold torque first or the threshold is a
+/// statement about the arm's own weight. Pass its epoch so the layer can invalidate this the
+/// moment the weight is re-measured.
+///
+/// # Safety
+/// Both arrays must be readable for their lengths; `out` must be writable.
+#[no_mangle]
+pub unsafe extern "C" fn bl_probe_contact_threshold(
+    free: *const f64,
+    n_free: usize,
+    touching: *const f64,
+    n_touching: usize,
+    polarity: u32,
+    now_ns: u64,
+    arm_weight_epoch: u64,
+    out: *mut CMeasurement,
+    why: *mut u32,
+) -> Status {
+    let polarity = match polarity {
+        0 => Polarity::HigherOnContact,
+        1 => Polarity::LowerOnContact,
+        // Not defaulted. Guessing which way a body's contact signal moves is how a detector ends up
+        // firing in free space and staying silent on contact.
+        _ => return Status::Einval,
+    };
+    if free.is_null() || touching.is_null() || n_free == 0 || n_touching == 0 {
+        return Status::Einval;
+    }
+    if n_free > PROBE_MAX_SAMPLES || n_touching > PROBE_MAX_SAMPLES {
+        return Status::Enospace;
+    }
+    // SAFETY: non-null and bounded, checked immediately above.
+    let (f, t) = unsafe {
+        (
+            core::slice::from_raw_parts(free, n_free),
+            core::slice::from_raw_parts(touching, n_touching),
+        )
+    };
+    emit(probe::contact_threshold(f, t, polarity, now_ns, arm_weight_epoch), out, why)
+}
+
+/// How much of a commanded step actually arrives in one control period.
+///
+/// `commanded[i]` / `achieved[i]`, same units. Two arms on one harness answered **0.76** and
+/// **0.11** to the same 45 mm command; a budget set from the first left the second 0.136 m short on
+/// every episode while every scalar in its log looked ordinary.
+///
+/// # Safety
+/// Both arrays must be readable for `n` doubles; `out` must be writable.
+#[no_mangle]
+pub unsafe extern "C" fn bl_probe_step_delivery(
+    commanded: *const f64,
+    achieved: *const f64,
+    n: usize,
+    now_ns: u64,
+    out: *mut CMeasurement,
+    why: *mut u32,
+) -> Status {
+    let mut buf = [(0.0f64, 0.0f64); PROBE_MAX_SAMPLES];
+    // SAFETY: bounded copy out of caller-owned arrays.
+    if !unsafe { pairs(commanded, achieved, n, &mut buf) } {
+        return Status::Einval;
+    }
+    emit(probe::step_delivery(&buf[..n], now_ns), out, why)
+}
+
+/// Where this body can actually put its hand, as a radial band from its own base.
+///
+/// `radius[i]` / `attained[i] != 0`: did the arm reach a pose at that distance. A radial band is
+/// the shape reach actually has; a hand-typed axis-aligned box rejected a layout 0.409 m from the
+/// base while accepting four further ones.
+///
+/// # Safety
+/// Both arrays must be readable for `n` elements; `out` must be writable.
+#[no_mangle]
+pub unsafe extern "C" fn bl_probe_reach(
+    radius: *const f64,
+    attained: *const u32,
+    n: usize,
+    now_ns: u64,
+    out: *mut CMeasurement,
+    why: *mut u32,
+) -> Status {
+    if radius.is_null() || attained.is_null() || n == 0 || n > PROBE_MAX_SAMPLES {
+        return Status::Einval;
+    }
+    let mut buf = [(0.0f64, false); PROBE_MAX_SAMPLES];
+    for i in 0..n {
+        // SAFETY: non-null and bounded, checked above.
+        buf[i] = unsafe { (*radius.add(i), *attained.add(i) != 0) };
+    }
+    emit(probe::reach(&buf[..n], now_ns), out, why)
+}
+
+/// Dead time: how many control periods pass before anything moves.
+///
+/// `first_motion_step < 0` means nothing moved within `steps_observed` — which is a refusal, not a
+/// latency of `steps_observed`.
+///
+/// # Safety
+/// `out` must be writable.
+#[no_mangle]
+pub unsafe extern "C" fn bl_probe_latency(
+    first_motion_step: i64,
+    steps_observed: u32,
+    now_ns: u64,
+    out: *mut CMeasurement,
+    why: *mut u32,
+) -> Status {
+    let first = if first_motion_step < 0 {
+        None
+    } else {
+        Some(first_motion_step as u32)
+    };
+    emit(probe::latency(first, steps_observed, now_ns), out, why)
+}
+
+/// The dead band around a reversal.
+///
+/// `commanded[i]` / `observed[i]`, SIGNED, time-ordered. Push both ways; what does not arrive on
+/// the reversal is the slop. The number-one accuracy killer on cheap hardware, and measurable
+/// without any extra sensor.
+///
+/// # Safety
+/// Both arrays must be readable for `n` doubles; `out` must be writable.
+#[no_mangle]
+pub unsafe extern "C" fn bl_probe_backlash(
+    commanded: *const f64,
+    observed: *const f64,
+    n: usize,
+    now_ns: u64,
+    out: *mut CMeasurement,
+    why: *mut u32,
+) -> Status {
+    let mut buf = [(0.0f64, 0.0f64); PROBE_MAX_SAMPLES];
+    // SAFETY: bounded copy out of caller-owned arrays.
+    if !unsafe { pairs(commanded, observed, n, &mut buf) } {
+        return Status::Einval;
+    }
+    emit(probe::backlash(&buf[..n], now_ns), out, why)
+}
+
+/// Full-open to full-closed, in metres, measured off this body's own jaws.
+///
+/// `opening[i]` in `[0,1]` / `separation[i]` in image units, converted by `units_per_m`. Refuses
+/// `NoResponse` when the commanded opening does not move the observed signal — which is what this
+/// body answers today, and why an approach height cannot be derived on it.
+///
+/// # Safety
+/// Both arrays must be readable for `n` doubles; `out` must be writable.
+#[no_mangle]
+pub unsafe extern "C" fn bl_probe_gripper_span(
+    opening: *const f64,
+    separation: *const f64,
+    n: usize,
+    units_per_m: f64,
+    units_per_m_sigma: f64,
+    now_ns: u64,
+    jac_epoch: u64,
+    out: *mut CMeasurement,
+    why: *mut u32,
+) -> Status {
+    let mut buf = [(0.0f64, 0.0f64); PROBE_MAX_SAMPLES];
+    // SAFETY: bounded copy out of caller-owned arrays.
+    if !unsafe { pairs(opening, separation, n, &mut buf) } {
+        return Status::Einval;
+    }
+    emit(
+        probe::gripper_span(&buf[..n], units_per_m, units_per_m_sigma, now_ns, jac_epoch),
+        out,
+        why,
+    )
+}
+
+/// How far the working point sits from the mount, along the tool axis, in metres.
+///
+/// `wrist_angle[i]` / `u[i]` / `v[i]`: turn the wrist and the working point sweeps an arc whose
+/// radius IS the offset. This is the constant that was typed in at four places in one live stack,
+/// with three values for three bodies and a default that silently used another robot's.
+///
+/// # Safety
+/// All three arrays must be readable for `n` doubles; `out` must be writable.
+#[no_mangle]
+pub unsafe extern "C" fn bl_probe_tool_offset(
+    wrist_angle: *const f64,
+    u: *const f64,
+    v: *const f64,
+    n: usize,
+    units_per_m: f64,
+    units_per_m_sigma: f64,
+    now_ns: u64,
+    jac_epoch: u64,
+    out: *mut CMeasurement,
+    why: *mut u32,
+) -> Status {
+    if wrist_angle.is_null() || u.is_null() || v.is_null() || n == 0 || n > PROBE_MAX_SAMPLES {
+        return Status::Einval;
+    }
+    let mut buf = [(0.0f64, 0.0f64, 0.0f64); PROBE_MAX_SAMPLES];
+    for i in 0..n {
+        // SAFETY: non-null and bounded, checked above.
+        buf[i] = unsafe { (*wrist_angle.add(i), *u.add(i), *v.add(i)) };
+    }
+    emit(
+        probe::tool_offset(&buf[..n], units_per_m, units_per_m_sigma, now_ns, jac_epoch),
+        out,
+        why,
+    )
 }
