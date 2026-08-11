@@ -259,6 +259,49 @@ int main(void)
     ok("...past what was validated REFUSES, never extrapolates",
        st == BL_REFUSE && why == BL_R_OUT_OF_RANGE, detail);
 
+    /* ------------------------------------------------- TOUCHING, or out of solution?
+     *
+     * The two are indistinguishable to a delivered-motion ruler on its own.  Replayed here from
+     * results/stallwhat_aug2026: on a flat conveyor, two of nine probe points reported contact
+     * while the arm could not lift off.  A surface can block a direction; it can never block that
+     * direction's opposite. */
+    bl_measure(storage, &contact);
+    uint32_t touch = 99;
+    double free_bar = -1.0;
+    why = 0;
+    st = bl_touching(storage, 0.0, 1.0, 1, 0.99, 1, 1, &touch, &free_bar, &why, detail);
+    snprintf(buf, sizeof buf, "%s, reverse had to clear %.4f", bl_touch_str(touch), free_bar);
+    ok("TOUCH: blocked going in, free coming back out = contact",
+       st == BL_OK && touch == BL_TOUCH_CONTACT, buf);
+    ok("...and the bar came from this body, not from a constant",
+       free_bar > 0.0 && free_bar < 1.0, buf);
+
+    /* p0 on the belt probe: it reported contact and could not lift off. */
+    why = 0;
+    st = bl_touching(storage, 0.0, 0.299, 1, 0.698, 1, 1, &touch, &free_bar, &why, detail);
+    ok("...blocked BOTH ways is NOT contact -- it is no solution here",
+       st == BL_REFUSE && touch == BL_TOUCH_STUCK && why == BL_R_UNREACHABLE, detail);
+
+    /* p4: sideways nearly dead, reverse free.  Friction does that on a real surface. */
+    why = 0;
+    st = bl_touching(storage, 0.0, 0.972, 1, 0.090, 1, 1, &touch, &free_bar, &why, detail);
+    ok("...sideways must NOT decide (friction blocks it on a real surface)",
+       st == BL_OK && touch == BL_TOUCH_CONTACT, detail);
+
+    why = 0;
+    st = bl_touching(storage, 0.0, 0.0, 0, 0.0, 0, 1, &touch, &free_bar, &why, detail);
+    ok("...no reverse asked REFUSES rather than guessing",
+       st == BL_REFUSE && touch == BL_TOUCH_UNKNOWN && why == BL_R_NO_EVIDENCE, detail);
+
+    why = 0;
+    st = bl_touching(storage, 0.9, 1.0, 1, 0.0, 0, 1, &touch, &free_bar, &why, detail);
+    ok("...a command that arrived is free space", st == BL_OK && touch == BL_TOUCH_FREE, detail);
+
+    for (uint32_t t = 0; t <= 3; t++) {
+        ok("...every bl_touch has a name over the ABI", bl_touch_str(t)[0] != '?',
+           bl_touch_str(t));
+    }
+
     /* ---------------------------------------------------------------- the ledger */
     uint32_t total = bl_debt_total(), outstanding = bl_debt_outstanding();
     snprintf(buf, sizeof buf, "%u rows, %u outstanding", (unsigned)total, (unsigned)outstanding);
@@ -272,7 +315,7 @@ int main(void)
 
     printf("\nc_client: %d checks, %d failures\n", checks, failures);
     if (failures == 0) {
-        printf("c_client: PASS -- force, memory and prediction all drive from C\n");
+        printf("c_client: PASS -- force, touch, memory and prediction all drive from C\n");
     } else {
         printf("c_client: FAIL\n");
     }

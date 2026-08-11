@@ -655,6 +655,37 @@ bl_status bl_probe_hand_pixel(const double *u, const double *v, const double *ga
 bl_status bl_solve(const void *b, const bl_spec *spec, const double *dir,
                    double *out, uint32_t *why);
 
+/* 🔴 AM I TOUCHING SOMETHING, OR HAVE I RUN OUT OF SOLUTION?
+ *
+ * On a body with no force channel, contact is read from the fraction of a commanded motion that
+ * arrives.  That ruler cannot tell a surface from a pose with no IK solution, because it only ever
+ * watches the axis it commanded.  Measured on a flat conveyor: two of nine probe points reported
+ * contact while the arm could not lift off (0.299 and 0.572 of a command it delivers 0.9999 of in
+ * free space), stalling 7-9 cm below the plane the four true contacts agree on to within 2.2 cm.
+ *
+ * A surface can block a direction.  It can never block that direction's opposite.  So
+ * `delivered_reverse` must come from commanding the OPPOSITE direction at the SAME magnitude.
+ * has_reverse = 0 refuses with BL_R_NO_EVIDENCE rather than guessing.
+ *
+ * `sideways` is recorded and never decides -- friction blocks sideways motion on a real surface.
+ * `free_bar` receives the bar the reverse had to clear, built from this body's own step_delivery
+ * and contact_threshold, so a sluggish body is not called stuck for being sluggish.
+ *
+ * 🔴 The units are DELIVERED FRACTIONS, not newtons.  The quantity is named contact_threshold and
+ * a caller would reasonably assume force; it is a fraction of a commanded motion. */
+typedef enum {
+    BL_TOUCH_UNKNOWN = 0,   /* cannot answer: ruler unusable, or no reverse was asked */
+    BL_TOUCH_FREE    = 1,   /* the command arrived; nothing in the way */
+    BL_TOUCH_CONTACT = 2,   /* blocked going in, free coming back out */
+    BL_TOUCH_STUCK   = 3    /* blocked both ways -- NOT contact; no solution here */
+} bl_touch;
+
+bl_status bl_touching(const void *b, double delivered_along, double delivered_reverse,
+                      uint32_t has_reverse, double sideways, uint32_t has_sideways,
+                      uint64_t now_ns, uint32_t *touch, double *free_bar, uint32_t *why,
+                      char *detail);
+const char *bl_touch_str(uint32_t t);
+
 /* Human-readable, for logs and for the audit trail.  Never parsed. */
 const char *bl_reason_str(uint32_t why);
 const char *bl_quantity_str(uint32_t quantity);

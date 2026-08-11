@@ -1231,6 +1231,83 @@ fn decl(d: Declined) -> u32 {
 }
 
 /// Human-readable, for logs and audit trails. Never parsed.
+/// 🔴 AM I TOUCHING SOMETHING, OR HAVE I RUN OUT OF SOLUTION?
+///
+/// The two look identical to a delivered-motion ruler, which only ever watches the one axis that
+/// was commanded. Measured on a flat conveyor: two of nine probe points reported contact while the
+/// arm could not lift off — 0.299 and 0.572 of a command it delivers 0.9999 of in free space — and
+/// they stalled 7–9 cm below the plane the four true contacts agree on to within 2.2 cm.
+///
+/// `delivered_reverse` must come from commanding the OPPOSITE direction at the SAME magnitude.
+/// `has_reverse = 0` means it was not asked, and this refuses (`BL_R_NO_EVIDENCE`) rather than
+/// guessing — guessing is the bug. `sideways` is recorded and never decides: friction blocks
+/// sideways motion on a perfectly real surface.
+///
+/// `*touch` receives a `bl_touch`. `*free_bar` receives the bar the reverse had to clear, derived
+/// from this body's own `step_delivery` and `contact_threshold`.
+///
+/// # Safety
+/// `b` must come from [`bl_init`]; `touch`, `why` and `free_bar` must be writable or null.
+#[no_mangle]
+pub unsafe extern "C" fn bl_touching(
+    b: *const c_void,
+    delivered_along: f64,
+    delivered_reverse: f64,
+    has_reverse: u32,
+    sideways: f64,
+    has_sideways: u32,
+    now_ns: u64,
+    touch: *mut u32,
+    free_bar: *mut f64,
+    why: *mut u32,
+    detail: *mut c_char,
+) -> Status {
+    if b.is_null() || touch.is_null() || why.is_null() {
+        return Status::Einval;
+    }
+    // SAFETY: checked non-null; shared borrow only.
+    let body = unsafe { &*(b as *const Body) };
+    let r = crate::touch::touching(
+        body,
+        delivered_along,
+        if has_reverse != 0 { Some(delivered_reverse) } else { None },
+        if has_sideways != 0 { Some(sideways) } else { None },
+        now_ns,
+    );
+    // SAFETY: checked non-null.
+    unsafe {
+        *touch = r.touch as u32;
+        *why = r.verdict.why as u32;
+    }
+    if !free_bar.is_null() {
+        // SAFETY: checked non-null.
+        unsafe { *free_bar = r.free_bar };
+    }
+    if !detail.is_null() {
+        write_detail(detail, r.verdict.why, r.verdict.culprit);
+    }
+    if r.verdict.admit {
+        Status::Ok
+    } else {
+        Status::Refuse
+    }
+}
+
+/// Name for a `bl_touch`. One table in Rust, so a name cannot go missing the way `bl_reason_str`
+/// once did by being hand-mirrored.
+#[no_mangle]
+pub extern "C" fn bl_touch_str(t: u32) -> *const c_char {
+    match crate::touch::Touch::from_u32(t) {
+        Some(v) => match v {
+            crate::touch::Touch::Unknown => c"unknown".as_ptr(),
+            crate::touch::Touch::Free => c"free".as_ptr(),
+            crate::touch::Touch::Contact => c"contact".as_ptr(),
+            crate::touch::Touch::Stuck => c"stuck".as_ptr(),
+        },
+        None => c"?".as_ptr(),
+    }
+}
+
 #[no_mangle]
 pub extern "C" fn bl_declined_str(d: u32) -> *const c_char {
     let s: &'static str = match d {

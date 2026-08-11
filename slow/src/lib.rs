@@ -92,6 +92,7 @@ pub mod predict;
 pub mod probe;
 pub mod refuse;
 pub mod schedule;
+pub mod touch;
 
 use measurement::{Malformed, Measurement, Quantity};
 use refuse::{Ask, Verdict};
