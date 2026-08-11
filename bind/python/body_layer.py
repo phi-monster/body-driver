@@ -171,6 +171,16 @@ class BodyLayer:
         # probes -- the MEASURING half. Unreachable from any language but Rust until 2026-08-11.
         dp, mp = ctypes.POINTER(ctypes.c_double), ctypes.POINTER(Measurement)
         L.bl_declined_str.restype = ctypes.c_char_p
+        L.bl_solve.argtypes = [ctypes.c_void_p, ctypes.POINTER(Spec), dp, dp, u32p]
+        L.bl_solve.restype = ctypes.c_uint32
+        L.bl_probe_image_jacobian.argtypes = [dp, dp, ctypes.POINTER(ctypes.c_uint64),
+                                              ctypes.c_size_t, ctypes.c_size_t, ctypes.c_uint64,
+                                              ctypes.c_double, mp, u32p]
+        L.bl_probe_image_jacobian.restype = ctypes.c_uint32
+        L.bl_probe_hand_pixel.argtypes = [dp, dp, dp, dp, ctypes.POINTER(ctypes.c_uint32), dp,
+                                          ctypes.c_size_t, ctypes.c_uint64, ctypes.c_uint64,
+                                          ctypes.c_uint64, ctypes.c_uint64, mp, u32p]
+        L.bl_probe_hand_pixel.restype = ctypes.c_uint32
         L.bl_probe_arm_weight.argtypes = [dp, dp, ctypes.c_size_t, ctypes.c_uint64, mp, u32p]
         L.bl_probe_arm_weight.restype = ctypes.c_uint32
         L.bl_probe_contact_threshold.argtypes = [dp, ctypes.c_size_t, dp, ctypes.c_size_t,
@@ -314,6 +324,49 @@ class BodyLayer:
         if st == OK:
             return out, None
         return None, self.lib.bl_declined_str(why.value).decode()
+
+    def solve(self, body, dir_img, step_m, n_axes, period_ms=40, damping=0.01):
+        """-> (deltas, reason). Image direction in, actuator deltas out, scaled to the body's step.
+
+        The deltas are in whatever axes the Jacobian was probed over -- that is the whole of the
+        actuator-agnostic property.
+        """
+        sp = Spec(step_m=float(step_m), period_ms=int(period_ms), damping=float(damping),
+                  n_joints=int(n_axes))
+        d = (ctypes.c_double * 3)(*[float(x) for x in dir_img])
+        out = (ctypes.c_double * 16)()
+        why = ctypes.c_uint32(0)
+        st = self.lib.bl_solve(body._ptr, ctypes.byref(sp), d, out, ctypes.byref(why))
+        if st != OK:
+            return None, Reason.NAMES.get(why.value, "unknown")
+        return [out[i] for i in range(int(n_axes))], "none"
+
+    def probe_image_jacobian(self, cmds, uvs, at_ns, n_axes, now_ns=0, min_response_px=1e-4):
+        """🔴 How this body's own commands move its own image. `cmds` is [n_samples][n_axes].
+
+        `n_axes` IS the actuator: probe with joints and `solve` returns joint deltas; probe with
+        end-effector axes and it returns end-effector deltas. The one rule is that the probe and
+        the executor use the SAME axes.
+        """
+        flat = [x for row in cmds for x in row]
+        uvf = [x for p in uvs for x in p]
+        c, u = self._arr(flat), self._arr(uvf)
+        t = (ctypes.c_uint64 * len(at_ns))(*[int(x) for x in at_ns])
+        return self._probe(lambda o, w: self.lib.bl_probe_image_jacobian(
+            c, u, t, len(at_ns), int(n_axes), now_ns, float(min_response_px), o, w))
+
+    def probe_hand_pixel(self, cands, now_ns=0, epoch=1, prev_epoch=0, jac_epoch=0):
+        """`cands`: list of dicts with u, v, gain, rigidity, pixels, spread.
+
+        Refuses when the field is not separable -- the rule that exists because a selection tuned
+        for "the hand vs its shadow" silently picked the ELBOW, 167 px from the truth, while
+        reporting 0.04-9.3 px of error.
+        """
+        f = lambda k: self._arr([c[k] for c in cands])  # noqa: E731
+        u, v, g, r, sp = f("u"), f("v"), f("gain"), f("rigidity"), f("spread")
+        px = (ctypes.c_uint32 * len(cands))(*[int(c["pixels"]) for c in cands])
+        return self._probe(lambda o, w: self.lib.bl_probe_hand_pixel(
+            u, v, g, r, px, sp, len(cands), now_ns, epoch, prev_epoch, jac_epoch, o, w))
 
     def probe_arm_weight(self, joint_angle, hold_torque, now_ns=0):
         """🔴 What holding still against gravity costs. Its valid range is THE POSES ACTUALLY

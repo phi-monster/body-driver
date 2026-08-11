@@ -640,6 +640,21 @@ bl_status bl_probe_hand_pixel(const double *u, const double *v, const double *ga
                               size_t n, uint64_t now_ns, uint64_t epoch, uint64_t prev_epoch,
                               uint64_t jac_epoch, bl_measurement *out, uint32_t *why);
 
+/* 🔴 WHICH WAY TO MOVE.  An image-plane direction becomes actuator deltas, through this body's own
+ * measured Jacobian, scaled to its own step.
+ *
+ * `dir[0], dir[1]` are a direction in the frame the eye was shown; `dir[2]` is the tool-axis
+ * component the image cannot see.  `out` receives spec->n_joints deltas IN THE AXES THE JACOBIAN
+ * WAS PROBED OVER -- joints if you probed joints, end-effector translation if you probed that.
+ *
+ * Exposed separately from bl_execute because a stack whose actuator is end-effector poses
+ * (RoboDojo, CALVIN) cannot use the joint-command path at all, and would otherwise need its own
+ * body driver.  It also used to be reachable ONLY through bl_execute, behind the proven fast face
+ * -- so the default build could not reach it, and a layout defect living there had nowhere to
+ * fail. */
+bl_status bl_solve(const void *b, const bl_spec *spec, const double *dir,
+                   double *out, uint32_t *why);
+
 /* Human-readable, for logs and for the audit trail.  Never parsed. */
 const char *bl_reason_str(uint32_t why);
 const char *bl_quantity_str(uint32_t quantity);

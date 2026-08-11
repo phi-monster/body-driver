@@ -31,6 +31,7 @@ use crate::debt;
 use crate::execute::{execute, Intent, Outcome, Spec};
 use crate::measurement::{AxisKind, Measurement, Quantity, MAX_DEPS, MAX_DIM};
 use crate::predict::{self, Predicted};
+use crate::execute;
 use crate::hand;
 use crate::probe::{self, Declined, Polarity};
 use crate::memory::{
@@ -1632,4 +1633,64 @@ pub unsafe extern "C" fn bl_probe_hand_pixel(
         out,
         why,
     )
+}
+
+/// 🔴 WHICH WAY TO MOVE: an image-plane direction becomes actuator deltas, through the body's own
+/// measured Jacobian.
+///
+/// This is the step that used to live only inside `bl_execute`, behind the proven fast face -- so
+/// the default build could not reach it, and the layout defect it contained had nowhere to fail.
+/// Exposed on its own because a stack whose actuator is end-effector poses (RoboDojo, CALVIN)
+/// cannot use the joint-command path at all, and would otherwise need its own body driver.
+///
+/// `dir` is a direction in the frame the eye was shown: `dir[0], dir[1]` in the image,
+/// `dir[2]` the tool-axis component the image cannot see. `out` receives `spec->n_joints` deltas
+/// in **the axes the Jacobian was probed over**, scaled to `spec->step_m`.
+///
+/// # Safety
+/// `b` must come from [`bl_open`]; `out` must have room for `BL_MAX_JOINTS` doubles.
+#[no_mangle]
+pub unsafe extern "C" fn bl_solve(
+    b: *const c_void,
+    spec: *const CSpec,
+    dir: *const f64,
+    out: *mut f64,
+    why: *mut u32,
+) -> Status {
+    if b.is_null() || spec.is_null() || dir.is_null() || out.is_null() {
+        return Status::Einval;
+    }
+    // SAFETY: checked non-null; shared borrow only.
+    let body = unsafe { &*(b as *const Body) };
+    // SAFETY: checked non-null.
+    let sp = unsafe { *spec };
+    let Some(jac) = body.get(Quantity::ImageJacobian) else {
+        if !why.is_null() {
+            // SAFETY: checked non-null.
+            unsafe { *why = Reason::NeverMeasured as u32 };
+        }
+        return Status::Refuse;
+    };
+    let native = execute::Spec {
+        step_m: sp.step_m,
+        period_ms: sp.period_ms,
+        damping: sp.damping,
+        n_joints: sp.n_joints as usize,
+    };
+    // SAFETY: the caller promises three readable doubles.
+    let d = unsafe { [*dir, *dir.add(1), *dir.add(2)] };
+    let delta = execute::solve(&jac, &native, &d);
+    if sp.n_joints == 0 || sp.n_joints as usize > delta.len() {
+        return Status::Einval;
+    }
+    // scale to the body's own step, the same way `bl_execute` does -- distance is the body's
+    // business, never the caller's
+    let norm = delta[..native.n_joints].iter().map(|x| x * x).sum::<f64>().sqrt();
+    for i in 0..native.n_joints {
+        // SAFETY: `n_joints <= MAX_JOINTS` checked above, and `out` has room for MAX_JOINTS.
+        unsafe {
+            *out.add(i) = if norm > 0.0 { delta[i] / norm * native.step_m } else { 0.0 };
+        }
+    }
+    Status::Ok
 }
