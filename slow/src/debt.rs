@@ -70,7 +70,7 @@ pub struct Constant {
 /// Shorthand for the deployed teacher and executor, both loaded into the same process.
 const TEACH: &str = "shot1/scripts/rteach/teach_deploy.py";
 const EXEC: &str = "shot1/scripts/rl/uni_exec_deploy.py";
-const SELF: &str = "abi/body_layer.h";
+pub const SELF: &str = "abi/body_layer.h";
 
 /// Every hand-set constant found in the systems this layer is meant to replace, plus this layer's
 /// own. Complete on purpose: an incomplete ledger is a ledger whose total means nothing.
@@ -514,23 +514,31 @@ pub const LEDGER: &[Constant] = &[
     Constant {
         name: "bl_spec.step_m",
         site: SELF,
-        value: "caller-supplied, 'from the machine's rating'",
-        standing: Standing::Outstanding,
-        note: "🔴 THIS LAYER'S OWN HAND-SET BODY CONSTANT, in the middle of its execution path: \
-               every command is scaled by it, and no probe produces it. It is also the metric \
-               reference gripper_span and tool_offset divide by, so it silently sets the scale of \
-               two measured quantities. DISCHARGE: measure travel per period against a length the \
-               body can establish without a ruler -- until then this layer is not at zero either, \
-               and saying so is the point of this file.",
+        value: "Spec::from_body -> step_delivery.valid_hi[0]",
+        standing: Standing::Measured(Quantity::StepDelivery),
+        note: "DISCHARGED 2026-08-11. Was caller-supplied 'from the machine's rating', with every \
+               command scaled by it and no probe producing it. Now taken from the TOP OF THE \
+               DOMAIN step_delivery was actually swept over: the probe commanded a range of \
+               magnitudes and measured what came back, so the largest validated magnitude IS the \
+               largest step this body is known to deliver. Commanding past it is OutOfRange by \
+               this layer's own rule, so the scaler and the gate now agree by construction rather \
+               than by somebody keeping them in sync. Missing or domain-less => REFUSE, never a \
+               default: a default here would be the same hand-filled constant wearing a \
+               function's name.",
     },
     Constant {
         name: "bl_spec.damping",
         site: SELF,
-        value: "caller-supplied",
-        standing: Standing::Outstanding,
-        note: "Documented as 'from the measured Jacobian's own conditioning' and nothing computes \
-               it -- a promise kept by a comment. DISCHARGE: derive it from the Jacobian's singular \
-               values, which are already stored.",
+        value: "Spec::from_body -> image_jacobian.worst_uncertainty()",
+        standing: Standing::Measured(Quantity::ImageJacobian),
+        note: "DISCHARGED 2026-08-11. Was 'from the measured Jacobian's own conditioning' with \
+               nothing computing it -- a promise kept by a comment. Now the Jacobian's OWN WORST \
+               UNCERTAINTY: damped least squares trades tracking for stability, and the honest \
+               amount to trade is how badly the Jacobian is known -- damp lightly when it is \
+               sharp, heavily when it is not. A Jacobian reporting ZERO uncertainty is refused \
+               rather than believed: that is not a sharp Jacobian, it is one whose uncertainty was \
+               never established, and damping by zero is precisely the tuned-until-it-worked \
+               choice this struct's own doc comment forbids.",
     },
     Constant {
         name: "bl_spec.n_joints",

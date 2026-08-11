@@ -85,6 +85,67 @@ pub struct Spec {
     pub n_joints: usize,
 }
 
+impl Spec {
+    /// 🔴 DERIVE this body's two own constants from this body's own measurements.
+    ///
+    /// Until this existed, `step_m` and `damping` were **passed in by the caller** — and the
+    /// project's own ledger says exactly what that means:
+    ///
+    /// > `bl_spec.step_m` — this layer's own — **outstanding.** Every command is scaled by it, no
+    /// > probe produces it, and it is the metric ruler `gripper_span` and `tool_offset` divide by.
+    /// > `bl_spec.damping` — this layer's own — **outstanding.** Documented as *"from the measured
+    /// > Jacobian's own conditioning"*, and nothing computes it — a promise kept by a comment.
+    ///
+    /// A body layer whose caller chooses the step size and the damping is not a body layer; it is
+    /// a solver with two knobs, and the first thing an integrator asks is where those numbers came
+    /// from. Now the answer is: from this body, or it refuses.
+    ///
+    /// **`step_m` = the largest commanded magnitude `step_delivery` was actually established over**
+    /// (`valid_hi[0]`). Not a rating anyone typed: the probe swept commanded magnitudes and
+    /// measured what came back, so the top of that swept domain is precisely the largest step this
+    /// body is known to deliver. Commanding beyond it is `OutOfRange` by this layer's own rule, so
+    /// taking it as the step size makes the scaler and the gate agree by construction instead of by
+    /// somebody keeping them in sync.
+    ///
+    /// **`damping` = the Jacobian's own worst uncertainty.** Damped least squares trades tracking
+    /// for stability, and the honest amount to trade is how badly the Jacobian is known: damp
+    /// lightly when it is sharp, heavily when it is not. Every other choice is a number tuned until
+    /// an episode succeeded — which is the specific failure this struct's doc comment already
+    /// forbids ("never from what makes an episode succeed"), and which nothing enforced.
+    ///
+    /// Returns the refusal rather than a default. A default here would be a hand-filled constant
+    /// wearing this function's name.
+    pub fn from_body(body: &Body, period_ms: u32, n_joints: usize) -> Result<Spec, Verdict> {
+        let Some(sd) = body.get(Quantity::StepDelivery) else {
+            return Err(Verdict::refuse(Reason::NeverMeasured, Quantity::StepDelivery));
+        };
+        if !sd.selftest_passed {
+            return Err(Verdict::refuse(Reason::SelfTestFailed, Quantity::StepDelivery));
+        }
+        let step_m = sd.valid_hi[0];
+        if !(step_m.is_finite() && step_m > 0.0) {
+            // The probe ran but established no domain, so there is no largest validated step.
+            return Err(Verdict::refuse(Reason::OutOfRange, Quantity::StepDelivery));
+        }
+
+        let Some(jac) = body.get(Quantity::ImageJacobian) else {
+            return Err(Verdict::refuse(Reason::NeverMeasured, Quantity::ImageJacobian));
+        };
+        if !jac.selftest_passed {
+            return Err(Verdict::refuse(Reason::SelfTestFailed, Quantity::ImageJacobian));
+        }
+        let damping = jac.worst_uncertainty();
+        if !damping.is_finite() || damping <= 0.0 {
+            // A Jacobian reporting zero uncertainty is not a sharp Jacobian, it is one whose
+            // uncertainty was never established — and damping by zero is the tuned-to-succeed
+            // choice this refuses to make silently.
+            return Err(Verdict::refuse(Reason::UncertaintyTooHigh, Quantity::ImageJacobian));
+        }
+
+        Ok(Spec { step_m, period_ms, damping, n_joints })
+    }
+}
+
 /// Execute one step. See the module docs for why the order is admit → solve → scale → fast → emit.
 ///
 /// `now_ms` is the caller's monotonic clock; it drives both staleness and the watchdog, and

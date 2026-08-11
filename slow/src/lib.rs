@@ -269,6 +269,65 @@ mod tests {
         assert_eq!(v.why, refuse::Reason::Stale);
     }
 
+    /// 🔴 THE LAYER'S OWN TWO CONSTANTS COME FROM THE BODY, OR NOTHING COMES OUT.
+    ///
+    /// `step_m` and `damping` were passed in by the caller until now, which the ledger recorded as
+    /// outstanding debt in the middle of the execution path. A default here would have been a
+    /// hand-filled constant wearing a function's name, so the guards are tested by making each one
+    /// fire.
+    #[test]
+    fn spec_is_derived_from_measurements_or_refused() {
+        use crate::execute::Spec;
+
+        // nothing measured at all
+        let b = Body::new();
+        let v = Spec::from_body(&b, 20, 7).unwrap_err();
+        assert_eq!(v.why, refuse::Reason::NeverMeasured);
+
+        // A probe that established no domain cannot hand over a step size — and it turns out
+        // `submit` already refuses to store one, upstream of `from_body`. Asserted here so the
+        // two guards cannot drift apart: if `submit` ever loosens, this fails rather than letting
+        // `from_body` hand back a zero step.
+        let mut b = Body::new();
+        let mut sd = m(Quantity::StepDelivery, 0.9999, 0.00015, 0);
+        sd.valid_lo[0] = 0.0;
+        sd.valid_hi[0] = 0.0;
+        assert!(b.submit(sd).is_err(), "an empty probed range must not be storable");
+
+        // a real domain, but the Jacobian has not been measured
+        let mut b = Body::new();
+        let mut sd = m(Quantity::StepDelivery, 0.9999, 0.00015, 0);
+        sd.valid_lo[0] = 0.005;
+        sd.valid_hi[0] = 0.05;
+        b.submit(sd).unwrap();
+        assert_eq!(
+            Spec::from_body(&b, 20, 7).unwrap_err().why,
+            refuse::Reason::NeverMeasured
+        );
+
+        // both present: the values are the measurements, not anything typed in
+        let mut jac = m(Quantity::ImageJacobian, -2.18594, 0.26659, 0);
+        jac.valid_lo[0] = -0.02;
+        jac.valid_hi[0] = 0.02;
+        b.submit(jac).unwrap();
+        let spec = Spec::from_body(&b, 20, 7).expect("both measured");
+        assert_eq!(spec.step_m, 0.05, "the top of the swept domain, not a rating");
+        assert_eq!(spec.damping, 0.26659, "the Jacobian's own worst uncertainty");
+
+        // a Jacobian claiming zero uncertainty is not sharp, it is unestablished
+        let mut b2 = Body::new();
+        let mut sd2 = m(Quantity::StepDelivery, 0.9999, 0.00015, 0);
+        sd2.valid_lo[0] = 0.005;
+        sd2.valid_hi[0] = 0.05;
+        b2.submit(sd2).unwrap();
+        b2.submit(m(Quantity::ImageJacobian, -2.0, 0.0, 0)).unwrap();
+        assert_eq!(
+            Spec::from_body(&b2, 20, 7).unwrap_err().why,
+            refuse::Reason::UncertaintyTooHigh,
+            "damping by zero is the tuned-to-succeed choice, and it must not be silent"
+        );
+    }
+
     /// 🔴 A REACH REFUSAL MUST SAY "NOT YET", NOT "NEVER".
     ///
     /// The band establishes where this body can act right now. It establishes nothing about where
@@ -657,14 +716,34 @@ mod schedule_and_debt {
             debt::LEDGER.iter().any(|c| c.name == "TEACH_HIGH_FRAC"),
             "the largest measured effect on the stack is not in the ledger"
         );
-        // And this layer's own hand-set body constant must be in it too. A ledger that audits only
-        // other people's code is an advertisement.
+        // And this layer's own constants must be audited here too. A ledger that audits only other
+        // people's code is an advertisement.
+        //
+        // 2026-08-11: `bl_spec.step_m` and `bl_spec.damping` were DISCHARGED — `Spec::from_body`
+        // now derives both from measurements and refuses when they are absent. The guard is kept
+        // and inverted rather than deleted: it must still be true that this layer audits itself,
+        // so the rows must exist AND each must name the quantity that discharged it. A row that
+        // silently went from Outstanding to Measured with no source named is the shape of claim
+        // this file exists to punish.
+        for (row, by) in [
+            ("bl_spec.step_m", Quantity::StepDelivery),
+            ("bl_spec.damping", Quantity::ImageJacobian),
+        ] {
+            let c = debt::LEDGER
+                .iter()
+                .find(|c| c.name == row)
+                .unwrap_or_else(|| panic!("the layer's own {row} is not in its own ledger"));
+            assert!(
+                matches!(c.standing, debt::Standing::Measured(q) if q == by),
+                "{row} must name the quantity that discharged it, not merely claim Measured"
+            );
+        }
+        // And the layer must still be honest about what it has NOT discharged.
         assert!(
             debt::LEDGER
                 .iter()
-                .any(|c| c.name == "bl_spec.step_m"
-                    && matches!(c.standing, debt::Standing::Outstanding)),
-            "the layer's own step_m is missing or is claiming to be measured"
+                .any(|c| c.site == debt::SELF && matches!(c.standing, debt::Standing::Outstanding)),
+            "every one of this layer's own constants now claims to be measured -- if that is true,              say so deliberately; if it is not, the ledger has stopped auditing its author"
         );
         assert!(debt::total() >= 45, "the census found 45 knobs; the ledger has {}", debt::total());
     }
