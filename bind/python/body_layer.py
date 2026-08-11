@@ -184,7 +184,8 @@ class BodyLayer:
         L.bl_probe_arm_weight.argtypes = [dp, dp, ctypes.c_size_t, ctypes.c_uint64, mp, u32p]
         L.bl_probe_arm_weight.restype = ctypes.c_uint32
         L.bl_probe_contact_threshold.argtypes = [dp, ctypes.c_size_t, dp, ctypes.c_size_t,
-                                                 ctypes.c_uint64, ctypes.c_uint64, mp, u32p]
+                                                 ctypes.c_uint32, ctypes.c_uint64, ctypes.c_uint64,
+                                                 mp, u32p]
         L.bl_probe_contact_threshold.restype = ctypes.c_uint32
         L.bl_probe_step_delivery.argtypes = [dp, dp, ctypes.c_size_t, ctypes.c_uint64, mp, u32p]
         L.bl_probe_step_delivery.restype = ctypes.c_uint32
@@ -375,10 +376,17 @@ class BodyLayer:
         a, t = self._arr(joint_angle), self._arr(hold_torque)
         return self._probe(lambda o, w: self.lib.bl_probe_arm_weight(a, t, len(a), now_ns, o, w))
 
-    def probe_contact_threshold(self, free, touching, now_ns=0, arm_weight_epoch=0):
+    def probe_contact_threshold(self, free, touching, polarity, now_ns=0, arm_weight_epoch=0):
+        """`polarity` 0 = higher on contact (force/current/torque), 1 = LOWER (delivered motion).
+
+        🔴 Required, no default. This binding kept the OLD four-argument call for hours after the
+        ABI grew this parameter -- `python_check.sh` passed the whole time because it never
+        exercises this function, so the mirror drifted exactly the way the C client exists to
+        prevent on the other edge. Every argument after the missing one was silently shifted.
+        """
         f, t = self._arr(free), self._arr(touching)
         return self._probe(lambda o, w: self.lib.bl_probe_contact_threshold(
-            f, len(f), t, len(t), now_ns, arm_weight_epoch, o, w))
+            f, len(f), t, len(t), int(polarity), now_ns, arm_weight_epoch, o, w))
 
     def probe_step_delivery(self, commanded, achieved, now_ns=0):
         c, a = self._arr(commanded), self._arr(achieved)
