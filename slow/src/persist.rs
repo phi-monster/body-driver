@@ -21,15 +21,16 @@
 //! * **No allocation.** Same reason as the rest of the crate: this has to run where there is no
 //!   allocator.
 
-use crate::measurement::{Malformed, Measurement, Quantity, MAX_DEPS, MAX_DIM};
+use crate::measurement::{AxisKind, MAX_DEPS, MAX_DIM, Malformed, Measurement, Quantity};
 use crate::Body;
 
 /// Magic + version. Bumped whenever the layout changes; a mismatch is refused, never coerced.
-const MAGIC: [u8; 4] = *b"BLC1";
+const MAGIC: [u8; 4] = *b"BLC2";  // BLC1 -> BLC2: records carry AxisKind per axis
 
 /// Bytes per stored measurement. Derived, not written by hand, so it cannot drift from the layout.
 const REC: usize = 4          // quantity
     + 4                       // dim
+    + 4 * MAX_DIM             // axis_kind
     + 4 * 8 * MAX_DIM         // value, uncertainty, valid_lo, valid_hi
     + 8                       // measured_at_ns
     + 8                       // valid_for_ns
@@ -199,6 +200,9 @@ pub fn save(body: &Body, out: &mut [u8]) -> Option<usize> {
         c.put_u32(m.quantity as u32);
         c.put_u32(m.dim as u32);
         for k in 0..MAX_DIM {
+            c.put_u32(m.axis_kind[k] as u32);
+        }
+        for k in 0..MAX_DIM {
             c.put_f64(m.value[k]);
         }
         for k in 0..MAX_DIM {
@@ -279,8 +283,18 @@ pub fn load(body: &mut Body, buf: &[u8]) -> Result<usize, LoadError> {
             return Err(LoadError::UnknownQuantity(qraw));
         };
         let dim = r.u32() as usize;
+        let mut axis_kind = [AxisKind::Interval; MAX_DIM];
+        for k in axis_kind.iter_mut() {
+            *k = match r.u32() {
+                0 => AxisKind::Interval,
+                1 => AxisKind::Categorical,
+                2 => AxisKind::Unmeasured,
+                other => return Err(LoadError::UnknownQuantity(other)),
+            };
+        }
         let mut m = Measurement {
             quantity,
+            axis_kind,
             dim,
             value: [0.0; MAX_DIM],
             uncertainty: [0.0; MAX_DIM],
@@ -336,6 +350,7 @@ mod tests {
 
     fn m(q: Quantity, v: f64) -> Measurement {
         let mut x = Measurement {
+            axis_kind: [AxisKind::Interval; MAX_DIM],
             quantity: q,
             dim: 1,
             value: [0.0; MAX_DIM],

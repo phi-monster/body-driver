@@ -27,7 +27,7 @@
 //! these probes tries to win by collecting more; they win by *knowing when they cannot answer*.
 
 use crate::hand::{Candidate, Config, HandTracker};
-use crate::measurement::{Measurement, Quantity, MAX_DEPS, MAX_DIM};
+use crate::measurement::{AxisKind, MAX_DEPS, MAX_DIM, Measurement, Quantity};
 
 /// One commanded step and what the image did about it.
 #[derive(Copy, Clone, Debug)]
@@ -1260,6 +1260,7 @@ fn mad_sigma(x: &[f64], med: f64, dev: &mut [f64]) -> f64 {
 
 fn blank(q: Quantity, dim: usize, now_ns: u64) -> Measurement {
     Measurement {
+        axis_kind: [AxisKind::Interval; MAX_DIM],
         quantity: q,
         dim,
         value: [0.0; MAX_DIM],

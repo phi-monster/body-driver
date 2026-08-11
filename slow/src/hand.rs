@@ -33,7 +33,7 @@
 //! separable it returns `None` — a refusal — instead of the best of them. Abstaining is a
 //! legitimate answer and is counted separately from a wrong answer everywhere downstream.
 
-use crate::measurement::{Measurement, Quantity, MAX_DEPS, MAX_DIM};
+use crate::measurement::{AxisKind, MAX_DEPS, MAX_DIM, Measurement, Quantity};
 
 /// One rigid blob that responded to the commanded motion.
 #[derive(Copy, Clone, Debug)]
@@ -253,6 +253,7 @@ impl HandTracker {
             return None;
         }
         let mut m = Measurement {
+            axis_kind: [AxisKind::Interval; MAX_DIM],
             quantity: Quantity::HandPixel,
             dim: 2,
             value: [0.0; MAX_DIM],

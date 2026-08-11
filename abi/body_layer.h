@@ -70,7 +70,7 @@
 extern "C" {
 #endif
 
-#define BL_ABI_VERSION 1u
+#define BL_ABI_VERSION 2u
 
 /* ------------------------------------------------------------------ status */
 
@@ -102,7 +102,17 @@ typedef enum {
      * merely still on its way.  On a conveyor this distinction was hand-welded into an experiment
      * script three separate times in one night before it was noticed that all three were the same
      * missing concept. */
-    BL_R_NOT_YET              = 9
+    BL_R_NOT_YET              = 9,
+    /* 🔴 I COULD NOT CHECK -- as opposed to BL_R_SELF_TEST_FAILED, which is "I checked and it is
+     * wrong".  Merging the two was tried and is a measured mistake: the caller's response differs,
+     * re-probe versus abandon, so one name sends half of them the wrong way.
+     *
+     * CALLER CONTRACT: this reason arrives with BL_OK, not BL_REFUSE.  It is the third rung --
+     * proceed, but nothing has verified this number over the range you are using.  It is produced
+     * when an ask touches an axis of kind BL_AXIS_UNMEASURED.  Hard-refusing instead was tried:
+     * one constant with an entirely unmeasured domain made every constant downstream of it
+     * unusable, collapsing the three rungs back to two. */
+    BL_R_NO_EVIDENCE          = 10
 } bl_reason;
 
 /* ------------------------------------------------------- measured quantities */
@@ -149,9 +159,23 @@ typedef enum {
  * a validity window, or without a self-test cannot be refused on -- and a layer that cannot refuse
  * is not a body layer.  `bl_measure` REJECTS a submission missing any of them.
  */
+/* What one axis of valid_lo/hi MEANS.  Both non-default kinds come from a measured failure.
+ *
+ * BL_AXIS_INTERVAL is 0, so a caller that memsets its bl_measurement gets exactly the behaviour
+ * that existed before this field. */
+typedef enum {
+    BL_AXIS_INTERVAL    = 0,  /* probed continuously between valid_lo and valid_hi       */
+    BL_AXIS_CATEGORICAL = 1,  /* probed only at the integer labels in [valid_lo,valid_hi];
+                               * encoding a label as an interval SILENTLY ACCEPTS 0.5 --
+                               * two real artefacts hit this at once                     */
+    BL_AXIS_UNMEASURED  = 2   /* never probed on this axis: an ask touching it is admitted
+                               * UNVERIFIED (BL_OK + BL_R_NO_EVIDENCE), never refused     */
+} bl_axis_kind;
+
 typedef struct {
     uint32_t quantity;                 /* bl_quantity                                    */
     uint32_t dim;                      /* 1..BL_MAX_DIM                                  */
+    uint32_t axis_kind[BL_MAX_DIM];    /* bl_axis_kind per axis; 0 == the old behaviour  */
     double   value[BL_MAX_DIM];
     double   uncertainty[BL_MAX_DIM];  /* 1-sigma, SAME units as value. NaN is rejected. */
     double   valid_lo[BL_MAX_DIM];     /* the range over which it was actually probed --  */

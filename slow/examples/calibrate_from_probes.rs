@@ -20,7 +20,7 @@
 //! A calibration that silently omitted its refusals would make `bl_debt_outstanding` look better
 //! than the body is.
 
-use body_layer::measurement::{Measurement, Quantity, MAX_DEPS, MAX_DIM};
+use body_layer::measurement::{AxisKind, Measurement, Quantity, MAX_DEPS, MAX_DIM};
 use body_layer::probe::{self, Declined};
 
 // ---------------------------------------------------------------- tiny json field scanner
@@ -354,11 +354,19 @@ fn main() {
                 );
                 o.refuse("tool_offset", "tool axis column unresolved");
             } else {
-                // The column index has no enum slot of its own, on purpose: a named slot with no
-                // probe is worth nothing (body-layer/README).  It is carried on ToolOffset's slot
-                // because it comes out of the SAME motion and is meaningless without it.
+                // ⚠️ This used to read "the column index has no enum slot of its own, on
+                // purpose" and rode on ToolOffset's slot.  It has one as of 2026-08-11
+                // (Quantity::ToolAxisColumn), added when the Python store turned out to have been
+                // keeping it as a twelfth quantity all along -- the slot is no longer unprobed.
                 let col_m = Measurement {
-                    quantity: Quantity::ToolOffset,
+                    quantity: Quantity::ToolAxisColumn,
+                    // A column index is a LABEL, not a length: as an interval, [0,2] admits
+                    // "spin about column 0.5".
+                    axis_kind: {
+                        let mut k = [AxisKind::Interval; MAX_DIM];
+                        k[0] = AxisKind::Categorical;
+                        k
+                    },
                     dim: 1,
                     value: {
                         let mut v = [0.0; MAX_DIM];

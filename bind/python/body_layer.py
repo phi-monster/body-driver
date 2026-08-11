@@ -26,7 +26,7 @@ import ctypes
 import os
 import sys
 
-ABI_VERSION = 1
+ABI_VERSION = 2
 MAX_DIM = 48
 MAX_DEPS = 8
 MAX_JOINTS = 16
@@ -70,6 +70,9 @@ class Measurement(ctypes.Structure):
     _fields_ = [
         ("quantity", ctypes.c_uint32),
         ("dim", ctypes.c_uint32),
+        # bl_axis_kind per axis: 0 interval, 1 categorical, 2 unmeasured. Zero is what a
+        # zero-initialised struct gets, which is exactly the behaviour from before this field.
+        ("axis_kind", ctypes.c_uint32 * MAX_DIM),
         ("value", ctypes.c_double * MAX_DIM),
         ("uncertainty", ctypes.c_double * MAX_DIM),
         ("valid_lo", ctypes.c_double * MAX_DIM),

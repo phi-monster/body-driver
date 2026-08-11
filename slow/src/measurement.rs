@@ -225,6 +225,45 @@ impl fmt::Display for Malformed {
     }
 }
 
+/// What kind of thing an axis of `valid_lo/hi` is.
+///
+/// 🔴 Added 2026-08-11 by absorbing the second schema, and BOTH non-default kinds come from a
+/// measured failure rather than from a design meeting (`results/bodylayer_aug2026`):
+///
+/// * `Categorical` — encoding a label as `Interval(0, 1)` **silently accepts 0.5**. Two real
+///   artefacts hit this at once (`arm_id`, `body`). Live example in this repo: `tool_axis_column`
+///   is a column index in `{0,1,2}` and its stored domain is `[0, 2]`; as an interval, "spin about
+///   column 0.5" is admitted.
+/// * `Unmeasured` — an axis nobody probed. The obvious handling, hard-refuse, was tried and is
+///   wrong: backfilling a constant whose domain was entirely unmeasured made it unusable, which
+///   made everything downstream of it unusable, which collapsed a three-level trust scale back to
+///   two. The measured rule is asymmetric and this enum exists to express it: **crossing a probed
+///   axis is a hard refusal — you hold positive evidence the ask is outside; touching an unprobed
+///   axis is soft — you hold no evidence at all.**
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Default)]
+#[repr(u32)]
+pub enum AxisKind {
+    /// Probed continuously between `valid_lo` and `valid_hi`. The default, and what every
+    /// measurement taken before this enum existed is.
+    #[default]
+    Interval = 0,
+    /// Probed only at the integer labels in `[valid_lo, valid_hi]`; between them there is nothing.
+    Categorical = 1,
+    /// Never probed on this axis. An ask that touches it is admitted **unverified**, not refused.
+    Unmeasured = 2,
+}
+
+/// The answer to "was this ask inside what I actually probed".
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum Coverage {
+    /// Probed there.
+    Inside,
+    /// Probed, and the ask is outside it — positive evidence against.
+    Outside,
+    /// Never probed on this axis — no evidence either way.
+    Unknown,
+}
+
 /// One measured body quantity, with its provenance.
 #[derive(Copy, Clone, Debug)]
 pub struct Measurement {
@@ -232,6 +271,9 @@ pub struct Measurement {
     pub quantity: Quantity,
     /// Used length of the fixed-size arrays below.
     pub dim: usize,
+    /// What each axis of `valid_lo/hi` means. Defaults to [`AxisKind::Interval`] everywhere, which
+    /// is exactly the behaviour that existed before this field.
+    pub axis_kind: [AxisKind; MAX_DIM],
     /// The measured value.
     pub value: [f64; MAX_DIM],
     /// 1σ, in the **same units** as `value`.
@@ -282,8 +324,26 @@ impl Measurement {
             if u < 0.0 {
                 return Err(Malformed::NegativeUncertainty);
             }
-            if lo >= hi {
-                return Err(Malformed::EmptyRange);
+            match self.axis_kind[i] {
+                // Nothing was probed on this axis, so there is no range to be empty. Demanding
+                // `lo < hi` here would force whoever stores it to invent a domain, which is the
+                // hand-filled constant this layer exists to abolish, wearing a bounds field.
+                AxisKind::Unmeasured => {}
+                // Labels: `lo == hi` is a legitimate one-label axis, and a fractional bound means
+                // somebody is encoding a number as a category or the other way round.
+                AxisKind::Categorical => {
+                    if lo > hi
+                        || (lo - lo.round()).abs() > 1e-9
+                        || (hi - hi.round()).abs() > 1e-9
+                    {
+                        return Err(Malformed::EmptyRange);
+                    }
+                }
+                AxisKind::Interval => {
+                    if lo >= hi {
+                        return Err(Malformed::EmptyRange);
+                    }
+                }
             }
             // 🔴 Deliberately NOT `lo <= v <= hi`. `valid_lo/hi` is the DOMAIN this quantity was
             // probed over, and `value` is the quantity itself -- usually different units. See the
@@ -316,8 +376,34 @@ impl Measurement {
     }
 
     /// Is `x` inside the range this quantity was actually probed over, on axis `axis`?
-    pub fn covers(&self, axis: usize, x: f64) -> bool {
-        axis < self.dim && x >= self.valid_lo[axis] && x <= self.valid_hi[axis]
+    ///
+    /// 🔴 Three answers, not two — see [`Coverage`]. "I probed there" / "I probed elsewhere" /
+    /// "I never probed this axis at all" are three different facts, and collapsing the third into
+    /// either of the others was **measured** to be wrong (`bodylayer_aug2026`).
+    pub fn covers(&self, axis: usize, x: f64) -> Coverage {
+        if axis >= self.dim {
+            return Coverage::Outside;
+        }
+        let (lo, hi) = (self.valid_lo[axis], self.valid_hi[axis]);
+        match self.axis_kind[axis] {
+            AxisKind::Unmeasured => Coverage::Unknown,
+            AxisKind::Interval => {
+                if x >= lo && x <= hi {
+                    Coverage::Inside
+                } else {
+                    Coverage::Outside
+                }
+            }
+            AxisKind::Categorical => {
+                // Only the labels themselves were probed. The space between two of them was not
+                // visited and does not exist as a value of this quantity.
+                if x >= lo && x <= hi && (x - x.round()).abs() <= 1e-9 {
+                    Coverage::Inside
+                } else {
+                    Coverage::Outside
+                }
+            }
+        }
     }
 
     /// Largest 1σ across the used axes. Used by the admit gate to refuse an ask that needs more

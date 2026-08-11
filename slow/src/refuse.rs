@@ -16,7 +16,7 @@
 //! *not applicable* and *ran and scored zero* are three different things, and a results table in
 //! which they look alike is a results table that will be misread. This project has misread one.
 
-use crate::measurement::{Measurement, Quantity};
+use crate::measurement::{Coverage, Measurement, Quantity};
 
 /// Why an ask was refused. Every variant maps to a condition that can be *measured*, never to a
 /// judgement call.
@@ -55,6 +55,13 @@ pub enum Reason {
     /// 0.134–0.602 m). Three symptoms, one missing concept, and each patch was invisible to the
     /// next person. It belongs here, once.
     NotYet = 9,
+    /// 🔴 **I could not check** — as distinct from [`Self::SelfTestFailed`], which is *I checked
+    /// and it is wrong*. Merging the two was tried and is a measured mistake
+    /// (`results/bodylayer_aug2026`): the caller's response differs, re-probe versus abandon, so a
+    /// single name would send half of them the wrong way. In this crate it arises when an ask
+    /// touches an [`AxisKind::Unmeasured`] axis: the verdict ADMITS and carries this reason, which
+    /// is the "usable but unverified" rung that a two-state admit/refuse cannot express.
+    NoEvidence = 10,
 }
 
 impl Reason {
@@ -66,6 +73,7 @@ impl Reason {
             NeverMeasured => "never_measured",
             Stale => "stale",
             OutOfRange => "out_of_range",
+            NoEvidence => "no_evidence",
             DependencyChanged => "dependency_changed",
             SelfTestFailed => "selftest_failed",
             UncertaintyTooHigh => "uncertainty_too_high",
@@ -81,6 +89,13 @@ impl Reason {
 pub struct Verdict {
     /// `true` if the ask may proceed.
     pub admit: bool,
+    /// 🔴 Admitted, but an axis the ask touched was never probed — the third rung.
+    ///
+    /// A caller that reads only `admit` behaves exactly as before, which is deliberate: the
+    /// alternative was a hard refusal, and that was measured to collapse everything downstream of
+    /// one unprobed constant into unusable. But a caller that ignores this is proceeding on a
+    /// number nothing has verified over the range it is using, and `why` says so.
+    pub unverified: bool,
     /// Why not, when `admit` is false.
     pub why: Reason,
     /// Which quantity carried the refusal, when one did.
@@ -91,6 +106,7 @@ impl Verdict {
     /// An unconditional admit.
     pub const OK: Verdict = Verdict {
         admit: true,
+        unverified: false,
         why: Reason::None,
         culprit: None,
     };
@@ -99,7 +115,18 @@ impl Verdict {
     pub fn refuse(why: Reason, culprit: Quantity) -> Self {
         Verdict {
             admit: false,
+            unverified: false,
             why,
+            culprit: Some(culprit),
+        }
+    }
+
+    /// Admitted on a quantity with an axis nobody probed: proceed, but nothing verified this.
+    pub fn unverified(culprit: Quantity) -> Self {
+        Verdict {
+            admit: true,
+            unverified: true,
+            why: Reason::NoEvidence,
             culprit: Some(culprit),
         }
     }
@@ -158,6 +185,9 @@ impl Ask {
 /// range, then precision. Reordering this can make one failure hide behind another — and a hidden
 /// failure is exactly the class of bug this layer exists to eliminate.
 pub fn admit(ask: &Ask, now_ns: u64, get: &dyn Fn(Quantity) -> Option<Measurement>) -> Verdict {
+    // Set when some axis the ask touched was never probed. A refusal found later still wins: a
+    // hard "no" outranks "nobody checked".
+    let mut unverified: Option<Quantity> = None;
     for (slot, q) in ask.needs.iter().enumerate() {
         let Some(q) = *q else { continue };
 
@@ -190,7 +220,13 @@ pub fn admit(ask: &Ask, now_ns: u64, get: &dyn Fn(Quantity) -> Option<Measuremen
         }
 
         if let Some((u, v)) = ask.image_point {
-            if q == Quantity::HandPixel && !(m.covers(0, u) && m.covers(1, v)) {
+            if q == Quantity::HandPixel
+                && [m.covers(0, u), m.covers(1, v)].contains(&Coverage::Unknown)
+            {
+                unverified = Some(q);
+            } else if q == Quantity::HandPixel
+                && !(m.covers(0, u) == Coverage::Inside && m.covers(1, v) == Coverage::Inside)
+            {
                 // Refusing rather than extrapolating. Recorded reason: a self-calibration's whole
                 // residual turned out to be interpolation error between the poses it had actually
                 // visited, so "outside the probed range" is precisely where its number stops
@@ -200,7 +236,11 @@ pub fn admit(ask: &Ask, now_ns: u64, get: &dyn Fn(Quantity) -> Option<Measuremen
         }
 
         if let Some(x) = ask.at[slot] {
-            if !m.covers(0, x) {
+            if m.covers(0, x) == Coverage::Unknown {
+                // No evidence either way. Refusing here was tried and collapsed the scale; see
+                // `AxisKind::Unmeasured`. Admit, and carry the fact.
+                unverified = Some(q);
+            } else if m.covers(0, x) == Coverage::Outside {
                 // The general form of the refusal above: this quantity was established over a
                 // domain, and the ask is outside it. `step_delivery` genuinely differs between a
                 // 1 mm and a 45 mm command; `gripper_span` swept from 0.4 to 0.8 says nothing about
@@ -228,5 +268,8 @@ pub fn admit(ask: &Ask, now_ns: u64, get: &dyn Fn(Quantity) -> Option<Measuremen
             }
         }
     }
-    Verdict::OK
+    match unverified {
+        Some(q) => Verdict::unverified(q),
+        None => Verdict::OK,
+    }
 }

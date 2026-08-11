@@ -210,10 +210,11 @@ impl Body {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use measurement::{MAX_DEPS, MAX_DIM};
+    use measurement::{AxisKind, MAX_DEPS, MAX_DIM};
 
     fn m(q: Quantity, v: f64, sigma: f64, valid_for_ns: u64) -> Measurement {
         let mut x = Measurement {
+            axis_kind: [AxisKind::Interval; MAX_DIM],
             quantity: q,
             dim: 1,
             value: [0.0; MAX_DIM],
@@ -238,6 +239,77 @@ mod tests {
         let mut a = Ask::EMPTY;
         a.needs[0] = Some(q);
         a
+    }
+
+    /// 🔴 A column index is a LABEL. Encoding one as an interval admits the space between two
+    /// labels, and the two artefacts that hit this (`arm_id`, `body`) were both real.
+    #[test]
+    fn a_categorical_axis_refuses_between_its_labels() {
+        let mut b = Body::new();
+        let mut x = m(Quantity::ToolAxisColumn, 0.0, 0.0, 0);
+        x.axis_kind[0] = AxisKind::Categorical;
+        x.valid_lo[0] = 0.0;
+        x.valid_hi[0] = 2.0;
+        b.submit(x).unwrap();
+
+        let mut a = ask_for(Quantity::ToolAxisColumn);
+        for col in [0.0, 1.0, 2.0] {
+            a.at[0] = Some(col);
+            assert!(b.admit(&a, 0).admit, "column {col} was probed and must be admitted");
+        }
+        a.at[0] = Some(0.5);
+        let v = b.admit(&a, 0);
+        assert!(!v.admit, "there is no column 0.5, and an interval domain would have admitted it");
+        assert_eq!(v.why, refuse::Reason::OutOfRange);
+        a.at[0] = Some(3.0);
+        assert!(!b.admit(&a, 0).admit, "column 3 is outside the labels that were probed");
+    }
+
+    /// 🔴 The asymmetry, and it is measured (`results/bodylayer_aug2026`): crossing a PROBED axis
+    /// is a hard refusal, because positive evidence says the ask is outside. Touching an UNPROBED
+    /// axis is soft — there is no evidence either way, and hard-refusing it was tried: one
+    /// constant with an unmeasured domain made everything downstream unusable and collapsed a
+    /// three-level scale to two.
+    #[test]
+    fn an_unprobed_axis_admits_unverified_instead_of_refusing() {
+        let mut b = Body::new();
+        let mut x = m(Quantity::StepDelivery, 0.5, 0.0, 0);
+        x.axis_kind[0] = AxisKind::Unmeasured;
+        b.submit(x).unwrap();
+
+        let mut a = ask_for(Quantity::StepDelivery);
+        a.at[0] = Some(1e6); // absurdly far outside anything anyone would probe
+        let v = b.admit(&a, 0);
+        assert!(v.admit, "an unprobed axis must not hard-refuse");
+        assert!(v.unverified, "... but it must not pass silently either");
+        assert_eq!(v.why, refuse::Reason::NoEvidence);
+        assert_eq!(v.culprit, Some(Quantity::StepDelivery));
+    }
+
+    /// "I could not check" and "I checked and it is wrong" must not collapse into one name: the
+    /// caller's response differs, re-probe versus abandon.
+    #[test]
+    fn no_evidence_is_not_self_test_failed() {
+        assert_ne!(refuse::Reason::NoEvidence, refuse::Reason::SelfTestFailed);
+        assert_eq!(refuse::Reason::NoEvidence.as_str(), "no_evidence");
+    }
+
+    /// A real refusal outranks "nobody checked" — otherwise an ask that is BOTH unverified on one
+    /// quantity and stale on another would report the softer of the two.
+    #[test]
+    fn a_hard_refusal_outranks_an_unverified_axis() {
+        let mut b = Body::new();
+        let mut x = m(Quantity::StepDelivery, 0.5, 0.0, 0);
+        x.axis_kind[0] = AxisKind::Unmeasured;
+        b.submit(x).unwrap();
+        b.submit(m(Quantity::Latency, 1.0, 0.0, 60)).unwrap();
+
+        let mut a = ask_for(Quantity::StepDelivery);
+        a.at[0] = Some(1e6);
+        a.needs[1] = Some(Quantity::Latency); // fresh for 60 ns, asked about much later
+        let v = b.admit(&a, 10_000_000);
+        assert!(!v.admit, "the stale quantity must decide");
+        assert_eq!(v.why, refuse::Reason::Stale);
     }
 
     /// A fresh body must refuse. If this ever passes, the default became permissive.
@@ -281,7 +353,8 @@ mod tests {
     /// numbers below are that episode, and the assertion is that the layer says so **first**.
     #[test]
     fn a_grasp_lost_to_blind_time_is_refused_before_it_runs() {
-        use crate::derive;
+        use crate::measurement::{AxisKind, MAX_DIM};
+use crate::derive;
 
         let mut b = Body::new();
         b.submit(m(Quantity::Latency, 0.0, 0.5, 0)).unwrap();
@@ -624,7 +697,7 @@ mod tests {
 mod execute_tests {
     use super::*;
     use execute::{execute, Intent, Outcome, Spec};
-    use measurement::{MAX_DEPS, MAX_DIM};
+    use measurement::{AxisKind, MAX_DEPS, MAX_DIM};
 
     fn spec() -> Spec {
         Spec {
@@ -646,6 +719,7 @@ mod execute_tests {
 
     fn jacobian(epoch_of_hand: &mut u64, b: &mut Body) {
         let mut j = Measurement {
+            axis_kind: [AxisKind::Interval; MAX_DIM],
             quantity: Quantity::ImageJacobian,
             dim: 18,
             value: [0.0; MAX_DIM],
@@ -668,6 +742,7 @@ mod execute_tests {
 
     fn simple(b: &mut Body, q: Quantity, jac_epoch: Option<u64>) {
         let mut m = Measurement {
+            axis_kind: [AxisKind::Interval; MAX_DIM],
             quantity: q,
             dim: 2,
             value: [0.5; MAX_DIM],
@@ -752,11 +827,12 @@ mod execute_tests {
 #[cfg(test)]
 mod schedule_and_debt {
     use super::*;
-    use measurement::{MAX_DEPS, MAX_DIM};
+    use measurement::{AxisKind, MAX_DEPS, MAX_DIM};
     use schedule::{is_ready, plan, prerequisites, Need};
 
     fn m(q: Quantity, valid_for_ns: u64) -> Measurement {
         let mut x = Measurement {
+            axis_kind: [AxisKind::Interval; MAX_DIM],
             quantity: q,
             dim: 1,
             value: [1.0; MAX_DIM],
@@ -1163,6 +1239,7 @@ mod fast_conformance {
 #[cfg(test)]
 mod end_to_end {
     use super::*;
+    use measurement::AxisKind;
     use execute::{execute, Intent, Outcome, Spec};
     use hand::{Candidate, HandTracker};
     use measurement::MAX_DIM;
@@ -1253,6 +1330,7 @@ mod end_to_end {
 
         // reach: probed, like everything else
         let mut reach = measurement::Measurement {
+            axis_kind: [AxisKind::Interval; MAX_DIM],
             quantity: measurement::Quantity::Reach,
             dim: 2,
             value: [0.5; MAX_DIM],

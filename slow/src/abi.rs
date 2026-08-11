@@ -29,7 +29,7 @@ use core::mem::{align_of, size_of};
 
 use crate::debt;
 use crate::execute::{execute, Intent, Outcome, Spec};
-use crate::measurement::{Measurement, Quantity, MAX_DEPS, MAX_DIM};
+use crate::measurement::{AxisKind, Measurement, Quantity, MAX_DEPS, MAX_DIM};
 use crate::persist;
 use crate::refuse::{Ask, Reason};
 use crate::schedule;
@@ -41,7 +41,7 @@ use crate::fast::Fast;
 use crate::faststub::Fast;
 
 /// Must match `BL_ABI_VERSION` in the header.
-pub const BL_ABI_VERSION: u32 = 1;
+pub const BL_ABI_VERSION: u32 = 2;
 
 /// Status codes; mirror of `bl_status`.
 #[repr(u32)]
@@ -69,6 +69,9 @@ pub struct CMeasurement {
     pub quantity: u32,
     /// used length of the arrays below
     pub dim: u32,
+    /// `bl_axis_kind` per axis: 0 interval, 1 categorical, 2 unmeasured. Zero is the pre-existing
+    /// behaviour, so a caller that memsets its struct gets exactly what it got before this field.
+    pub axis_kind: [u32; MAX_DIM],
     /// measured value
     pub value: [f64; MAX_DIM],
     /// 1σ, same units as `value`
@@ -126,9 +129,21 @@ impl CMeasurement {
         for i in 0..self.n_deps as usize {
             deps[i] = Some((Quantity::from_u32(self.deps[i])?, self.dep_epoch[i]));
         }
+        let mut axis_kind = [AxisKind::Interval; MAX_DIM];
+        for (i, k) in axis_kind.iter_mut().enumerate() {
+            *k = match self.axis_kind[i] {
+                0 => AxisKind::Interval,
+                1 => AxisKind::Categorical,
+                2 => AxisKind::Unmeasured,
+                // An unknown kind is refused, never coerced into a neighbouring one -- the same
+                // rule `Quantity::from_u32` follows, for the same reason.
+                _ => return None,
+            };
+        }
         Some(Measurement {
             quantity: q,
             dim: self.dim as usize,
+            axis_kind,
             value: self.value,
             uncertainty: self.uncertainty,
             valid_lo: self.valid_lo,
@@ -151,9 +166,14 @@ impl CMeasurement {
             dep_epoch[n] = d.1;
             n += 1;
         }
+        let mut axis_kind = [0u32; MAX_DIM];
+        for (i, k) in m.axis_kind.iter().enumerate() {
+            axis_kind[i] = *k as u32;
+        }
         CMeasurement {
             quantity: m.quantity as u32,
             dim: m.dim as u32,
+            axis_kind,
             value: m.value,
             uncertainty: m.uncertainty,
             valid_lo: m.valid_lo,
