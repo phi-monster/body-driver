@@ -79,6 +79,10 @@ pub fn prerequisites(q: Quantity) -> &'static [Quantity] {
         // The arc the working point sweeps is read in the camera's frame and converted with the
         // same ruler the span uses.
         ToolOffset | ToolAxisColumn => &[ImageJacobian],
+        // 🔴 The floor is read as a stop in the delivered-motion signal, so it inherits that
+        // ruler's dependency chain -- re-measure the contact threshold and the floor map built on
+        // top of it is no longer trustworthy, automatically, without anyone remembering.
+        Floor => &[ContactThreshold, StepDelivery],
         // The rest are measured directly off commanded motion and answer to nothing else.
         ImageJacobian | ArmWeight | Latency | Backlash | Reach | StepDelivery => &[],
     }

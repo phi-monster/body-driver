@@ -128,11 +128,39 @@ pub enum Quantity {
     /// `value[0]` is the column index; `valid_lo/hi` is `[0, 2]`, the columns actually spun about —
     /// here, unusually, the domain and the value do share units, as they do for `HandPixel`.
     ToolAxisColumn = 11,
+    /// 🔴 **How low this body can get, as a function of where it is.** The plane a downward motion
+    /// stops on, over the region actually probed.
+    ///
+    /// This is the quantity that separates *"something is in the way"* from *"this arm has run out
+    /// of solution"*, and it does so without joint states, without a force sensor, and without
+    /// spending an extra command per decision.
+    ///
+    /// The reasoning is one line: **a body's limit is a property of the CONFIGURATION and moves
+    /// with the arm; a surface is a property of the WORLD and stays where it is.** So measure where
+    /// motion stops across a grid, once. Afterwards every stop is read against it:
+    ///
+    /// | where the hand stopped | what it means |
+    /// |---|---|
+    /// | at the floor | resting on the working surface — nothing on it here |
+    /// | **above** the floor | something IS here, and it is `stop - floor` tall |
+    /// | **below** the floor | there is no surface here; this is the arm's own limit |
+    ///
+    /// Measured cost of not having it: on a flat conveyor, nine downward probes stopped across
+    /// **13.9 cm** while the four that were genuinely on the belt agreed to **2.2 cm**. The
+    /// delivered-motion ruler called all nine "contact", every reading in the log was correct, and
+    /// the conveyor loop closed its jaws in mid-air on all nine episodes.
+    ///
+    /// 🔴 **THE DOMAIN AXES ARE NOT THE VALUE AXES HERE**, and that has bitten this repo twice in
+    /// one day, so it is spelled out: `value = [z0, dz/dx, dz/dy]` where `z0` is the height at the
+    /// centre of the probed box, while `valid_lo/hi[0]` and `[1]` are the **x and y ranges the grid
+    /// actually covered**. Axis 2 carries no domain and is marked [`AxisKind::Unmeasured`]. Asking
+    /// outside the box refuses rather than extrapolating a plane over ground nobody drove on.
+    Floor = 12,
 }
 
 impl Quantity {
     /// Total number of quantities; used to size the store.
-    pub const COUNT: usize = 12;
+    pub const COUNT: usize = 13;
 
     /// Reconstruct from the ABI's `u32`. Returns `None` for anything unknown — an unknown
     /// quantity is refused, never coerced into a neighbouring one.
@@ -151,6 +179,7 @@ impl Quantity {
             9 => StepDelivery,
             10 => ToolOffset,
             11 => ToolAxisColumn,
+            12 => Floor,
             _ => return None,
         })
     }
@@ -171,6 +200,28 @@ impl Quantity {
             StepDelivery => "step_delivery",
             ToolOffset => "tool_offset",
             ToolAxisColumn => "tool_axis_column",
+            Floor => "floor",
+        }
+    }
+
+    /// The same name, NUL-terminated for the C ABI. Beside `as_str` on purpose: a new variant that
+    /// forgets a name fails to compile here rather than being published as "unknown" forever.
+    pub fn name_c(self) -> &'static core::ffi::CStr {
+        use Quantity::*;
+        match self {
+            HandPixel => c"hand_pixel",
+            ImageJacobian => c"image_jacobian",
+            GripperSpan => c"gripper_span",
+            ArmWeight => c"arm_weight",
+            Latency => c"latency",
+            Backlash => c"backlash",
+            Reach => c"reach",
+            ContactThreshold => c"contact_threshold",
+            SelfOcclusion => c"self_occlusion",
+            StepDelivery => c"step_delivery",
+            ToolOffset => c"tool_offset",
+            ToolAxisColumn => c"tool_axis_column",
+            Floor => c"floor",
         }
     }
 }

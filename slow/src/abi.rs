@@ -430,22 +430,13 @@ pub extern "C" fn bl_reason_str(why: u32) -> *const c_char {
 /// Stable human-readable quantity name.
 #[no_mangle]
 pub extern "C" fn bl_quantity_str(quantity: u32) -> *const c_char {
-    let s: &'static str = match Quantity::from_u32(quantity) {
-        Some(Quantity::HandPixel) => "hand_pixel\0",
-        Some(Quantity::ImageJacobian) => "image_jacobian\0",
-        Some(Quantity::GripperSpan) => "gripper_span\0",
-        Some(Quantity::ArmWeight) => "arm_weight\0",
-        Some(Quantity::Latency) => "latency\0",
-        Some(Quantity::Backlash) => "backlash\0",
-        Some(Quantity::Reach) => "reach\0",
-        Some(Quantity::ContactThreshold) => "contact_threshold\0",
-        Some(Quantity::SelfOcclusion) => "self_occlusion\0",
-        Some(Quantity::StepDelivery) => "step_delivery\0",
-        Some(Quantity::ToolOffset) => "tool_offset\0",
-        Some(Quantity::ToolAxisColumn) => "tool_axis_column\0",
-        None => "unknown\0",
-    };
-    s.as_ptr() as *const c_char
+    // 🔴 ONE TABLE. This used to be a second hand-written match mirroring `Quantity::as_str`, and
+    // that is precisely the shape that left `bl_reason_str` publishing nine names for an eleven-
+    // variant enum -- a new variant is added in one place and the ABI keeps answering for the old
+    // set, silently. `name_c` lives next to the enum, so adding a variant without a name does not
+    // compile.
+    Quantity::from_u32(quantity)
+        .map_or(c"unknown".as_ptr(), |q| q.name_c().as_ptr())
 }
 
 /// Stable human-readable schedule reason.

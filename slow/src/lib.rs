@@ -80,6 +80,7 @@ pub mod abi;
 pub mod debt;
 pub mod derive;
 pub mod execute;
+pub mod floor;
 #[cfg(feature = "fast")]
 pub mod fast;
 #[cfg(not(feature = "fast"))]
@@ -1002,6 +1003,7 @@ mod schedule_and_debt {
             Quantity::Backlash,
             Quantity::Reach,
             Quantity::StepDelivery,
+            Quantity::Floor,
         ] {
             b.submit(m(q, 0)).unwrap();
         }

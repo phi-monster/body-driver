@@ -144,7 +144,13 @@ typedef enum {
                                  /* and the one the working point barely moves about   */
                                  /* IS the tool axis.  Typed in per body as            */
                                  /* L3_TOOL_COL (0 on one arm, 2 on another).          */
-    BL_Q_COUNT             = 12
+    BL_Q_FLOOR             = 12, /* how low this body can get, as a plane over the region probed.
+                                  * value = [z0, dz/dx, dz/dy] at the box centre; valid_lo/hi[0..1]
+                                  * are the x,y ranges the grid COVERED -- domain axes are not the
+                                  * value axes here.  Stop above it = something is there and it is
+                                  * (stop - floor) tall; stop below it = no surface here, this is
+                                  * the arm's own limit. */
+    BL_Q_COUNT             = 13
 } bl_quantity;
 
 /* 🔴 3 * BL_MAX_JOINTS, and that is not slack -- it is the smallest value that fits the image
