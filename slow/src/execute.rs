@@ -37,7 +37,7 @@
 use crate::fast::{Fast, FastStatus, Joints, MAX_JOINTS};
 #[cfg(not(feature = "fast"))]
 use crate::faststub::{Fast, FastStatus, Joints, MAX_JOINTS};
-use crate::measurement::Quantity;
+use crate::measurement::{Measurement, Quantity};
 use crate::refuse::{Ask, Reason, Verdict};
 use crate::Body;
 
@@ -151,6 +151,58 @@ impl Spec {
 /// `now_ms` is the caller's monotonic clock; it drives both staleness and the watchdog, and
 /// passing a clock that does not advance will (correctly) latch the watchdog rather than freeze
 /// the checks — a stalled clock is a fault, and a fault must be visible.
+/// The solve, on its own, so it can be tested without a proven fast face.
+///
+/// 🔴 Extracted 2026-08-11, and the extraction is part of the fix. The mis-indexing below lived
+/// inside `execute`, reachable only through a path that needs the Ada face installed -- which the
+/// default `cargo test` build does not have. A defect in code the standard test run cannot reach
+/// is a defect with nowhere to fail.
+pub fn solve(jac: &Measurement, spec: &Spec, dir: &[f64; 3]) -> Joints {
+    // 🔴 THE LAYOUT, AND A DEFECT THAT SURVIVED 66 TESTS BECAUSE OF WHAT THEY ASSERTED.
+    //
+    // This read `idx = axis * n_joints + j` for three axes -- "3 world axes × n_joints, row-major".
+    // The probe writes something else entirely: `value[2j] = du/dq_j`, `value[2j+1] = dv/dq_j`,
+    // i.e. TWO IMAGE axes, JOINT-major. Different count and different order, so on a 6-joint arm
+    // the executor fetched value[0], value[6], value[12] for joint 0 -- gradients belonging to
+    // other joints -- and every command it issued was built from mis-indexed numbers.
+    //
+    // Why nothing caught it. The end-to-end test does feed a PROBE-PRODUCED Jacobian through
+    // `execute`, and then asserts `|cmd| == spec.step_m`. The solve normalises to exactly that, so
+    // the assertion holds no matter which gradients went in: **the check was on the one quantity
+    // the bug cannot affect.** Direction was never asserted. (It also never fired in production
+    // because nothing outside this crate had ever called `bl_execute`.)
+    //
+    // 🔴 And the deeper half: `intent.dir` was declared to be a WORLD-frame unit vector, while the
+    // only Jacobian this body can measure is an IMAGE one. Those do not connect, and they cannot:
+    // a world direction needs link lengths, which this layer deliberately does not have. So the
+    // intent speaks the image's language -- `dir[0], dir[1]` are a direction in the frame the eye
+    // was shown, `dir[2]` is the tool-axis component the image cannot see. That is MORE
+    // body-agnostic, not less: a world frame is a shared fiction that a new camera mount or a
+    // mobile base breaks, and a pixel is not.
+    let lam2 = spec.damping * spec.damping;
+    let mut delta: Joints = [0.0; MAX_JOINTS];
+    for (j, d) in delta.iter_mut().enumerate().take(spec.n_joints) {
+        let mut acc = 0.0;
+        let mut gain2 = 0.0;
+        for axis in 0..2 {
+            let idx = 2 * j + axis;
+            if idx >= jac.dim {
+                continue;
+            }
+            let g = jac.value[idx];
+            acc += g * dir[axis];
+            gain2 += g * g;
+        }
+        *d = if gain2 + lam2 > 0.0 {
+            acc / (gain2 + lam2)
+        } else {
+            0.0
+        };
+    }
+
+    delta
+}
+
 pub fn execute(body: &Body, fast: &Fast, spec: &Spec, intent: &Intent, now_ms: u32) -> Outcome {
     // ---- 0. the intent must be well formed before anything is consulted -------------------
     let n2 = intent.dir.iter().map(|x| x * x).sum::<f64>();
@@ -189,31 +241,7 @@ pub fn execute(body: &Body, fast: &Fast, spec: &Spec, intent: &Intent, now_ms: u
         ));
     };
 
-    // `J` is stored row-major, 3 world axes × n_joints, in the measurement's value slots. Damped
-    // least squares on `Jᵀ(JJᵀ + λ²I)⁻¹` reduces here to a per-joint projection because the stored
-    // Jacobian is the *diagonal-dominant* form the power-on probe produces; a full solve lands in
-    // this same slot once the probe reports off-diagonal terms, and the shape of the call does not
-    // change.
-    let lam2 = spec.damping * spec.damping;
-    let mut delta: Joints = [0.0; MAX_JOINTS];
-    for (j, d) in delta.iter_mut().enumerate().take(spec.n_joints) {
-        let mut acc = 0.0;
-        let mut gain2 = 0.0;
-        for axis in 0..3 {
-            let idx = axis * spec.n_joints + j;
-            if idx >= jac.dim {
-                continue;
-            }
-            let g = jac.value[idx];
-            acc += g * intent.dir[axis];
-            gain2 += g * g;
-        }
-        *d = if gain2 + lam2 > 0.0 {
-            acc / (gain2 + lam2)
-        } else {
-            0.0
-        };
-    }
+    let mut delta = solve(&jac, spec, &intent.dir);
 
     // ---- 3. scale by the SPEC, never by the outcome ----------------------------------------
     let norm = delta[..spec.n_joints]

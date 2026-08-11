@@ -370,6 +370,20 @@ class BodyLayer:
             return None, Reason.NAMES.get(why.value, "unknown")
         return out.value, "none"
 
+    def predict_admit(self, predicted, need_periods, tol_uv=None):
+        """-> (ok, reason, detail). The gate on its own, when the caller already knows the horizon.
+
+        `ok` True with reason `no_evidence` is the THIRD rung: proceed, and nothing has validated
+        this model at this horizon.
+        """
+        why = ctypes.c_uint32(0)
+        detail = ctypes.create_string_buffer(REASON_LEN)
+        st = self.lib.bl_predict_admit(
+            ctypes.byref(predicted), ctypes.c_uint32(int(need_periods)),
+            ctypes.c_double(0.0 if tol_uv is None else float(tol_uv)),
+            ctypes.c_uint32(0 if tol_uv is None else 1), ctypes.byref(why), detail)
+        return st == OK, Reason.NAMES.get(why.value, "unknown"), detail.value.decode()
+
     def predict_admit_chase(self, body, predicted, distance_m, tol_frac=0.01, tol_uv=None):
         """-> (ok, reason, detail).  May I chase this thing across that distance?
 

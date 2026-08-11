@@ -314,6 +314,76 @@ mod tests {
         assert_eq!(v.why, refuse::Reason::Stale);
     }
 
+    /// 🔴 THE TEST THAT WOULD HAVE CAUGHT IT: assert the DIRECTION, not the magnitude.
+    ///
+    /// A probe-produced Jacobian was already fed through `execute` by the end-to-end test, which
+    /// then asserted `|cmd| == spec.step_m`. The solve normalises to exactly that, so the check
+    /// held no matter which gradients went in -- it was on the one quantity the bug could not
+    /// affect. Meanwhile the executor indexed `axis * n_joints + j` over three axes while the probe
+    /// writes `2j, 2j+1` over two: different count, different order, every command built from
+    /// another joint's numbers.
+    ///
+    /// This rig makes joint 0 move the image in +u ONLY and joint 1 in +v ONLY. Ask to go +u; if
+    /// the layout is right, joint 0 carries it and joint 1 stays put. Under the old indexing joint
+    /// 0 would have been driven by value[0], value[6], value[12] -- gradients of joints 3 and 6 --
+    /// and the assertion below fails.
+    #[test]
+    fn the_executor_reads_the_jacobian_the_probe_writes() {
+        use probe::Sample;
+        const NJ: usize = 6;
+        // 🔴 Every consecutive PAIR must differ in exactly one joint, because the probe reads
+        // finite differences between neighbours. A first version cycled j = k % NJ, so each window
+        // changed two joints at once and the probe -- correctly -- attributed part of the v-motion
+        // to joint 0. That was the test rig lying, not the probe.
+        let mut samples = Vec::new();
+        let mut uv = [0.5f64, 0.5];
+        let mut k = 0u64;
+        for round in 0..4 {
+            for j in 0..NJ {
+                // rest: all commands zero
+                samples.push(Sample { cmd: [0.0; MAX_DIM], n: NJ, uv, at_ns: k * 1_000_000 });
+                k += 1;
+                // one joint moves
+                let mut sm = Sample { cmd: [0.0; MAX_DIM], n: NJ, uv, at_ns: k * 1_000_000 };
+                sm.cmd[j] = 0.01;
+                if j == 0 {
+                    uv[0] += 0.02;
+                } else if j == 1 {
+                    uv[1] += 0.02;
+                }
+                let _ = round;
+                sm.uv = uv;
+                samples.push(sm);
+                k += 1;
+            }
+        }
+        let jac = probe::image_jacobian(&samples, NJ, 1_000_000_000, 1e-4)
+            .expect("the probe declined on a clean, separable response");
+        // The probe's own layout, asserted here so a future edit to either side breaks THIS test
+        // rather than silently re-opening the same gap.
+        assert!(jac.value[0].abs() > 0.5, "value[0] must be du/dq0: {:?}", &jac.value[..4]);
+        assert!(jac.value[3].abs() > 0.5, "value[3] must be dv/dq1: {:?}", &jac.value[..4]);
+
+        let mut body = Body::new();
+        body.submit(jac).unwrap();
+
+        let sp = execute::Spec { step_m: 0.004, period_ms: 40, damping: 0.01, n_joints: NJ };
+        // 🔴 The SOLVE is asserted directly. It used to be reachable only through `execute`,
+        // which needs the proven Ada face -- absent from the default build -- so the standard test
+        // run could not reach the code where the defect lived.
+        let sp = execute::Spec { step_m: 0.004, period_ms: 40, damping: 0.01, n_joints: NJ };
+        let jm = body.get(measurement::Quantity::ImageJacobian).unwrap();
+
+        for (want_axis, other) in [(0usize, 1usize), (1, 0)] {
+            let mut dir = [0.0; 3];
+            dir[want_axis] = 1.0;
+            let cmd = execute::solve(&jm, &sp, &dir);
+            assert!(cmd[want_axis].abs() > 10.0 * cmd[other].abs().max(1e-12),
+                    "axis {want_axis}: the wrong joint carried the motion: {:?}", &cmd[..NJ]);
+            assert!(cmd[want_axis] > 0.0, "axis {want_axis}: sign is inverted: {:?}", &cmd[..NJ]);
+        }
+    }
+
     /// 🔴 Every reason must have a name over the C ABI, and this test exists because two did not.
     ///
     /// `NotYet` was unnamed from the day it was added -- `bl_reason_str` held a second, hand-written
