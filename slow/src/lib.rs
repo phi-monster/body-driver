@@ -269,6 +269,42 @@ mod tests {
         assert_eq!(v.why, refuse::Reason::Stale);
     }
 
+    /// 🔴 A REACH REFUSAL MUST SAY "NOT YET", NOT "NEVER".
+    ///
+    /// The band establishes where this body can act right now. It establishes nothing about where
+    /// the world will put the ask a moment later, so answering `Unreachable` would be claiming a
+    /// future this measurement does not cover — and a caller that hears "unreachable" gives up on
+    /// an object that is merely still on its way. Measured instance: a conveyor object 1.3 m away
+    /// at t=0 that passes within 0.416 m by step ~320, band 0.134–0.602 m.
+    #[test]
+    fn outside_the_band_is_not_yet_and_never_unreachable() {
+        let mut b = Body::new();
+        let mut r = m(Quantity::Reach, 0.0, 0.01, 0);
+        r.dim = 2;
+        r.value[0] = 0.134;
+        r.value[1] = 0.602;
+        r.valid_lo[0] = 0.0;
+        r.valid_hi[0] = 1.0;
+        r.valid_lo[1] = 0.0;
+        r.valid_hi[1] = 1.0;
+        b.submit(r).unwrap();
+
+        let mut inside = ask_for(Quantity::Reach);
+        inside.reach_radius_m = Some(0.416);
+        assert!(b.admit(&inside, 1_000).admit, "0.416 m sits inside 0.134-0.602");
+
+        let mut far = ask_for(Quantity::Reach);
+        far.reach_radius_m = Some(1.334);
+        let v = b.admit(&far, 1_000);
+        assert!(!v.admit);
+        assert_eq!(v.why, refuse::Reason::NotYet, "a reach refusal may not claim `never`");
+        assert_ne!(v.why, refuse::Reason::Unreachable);
+
+        let mut near = ask_for(Quantity::Reach);
+        near.reach_radius_m = Some(0.05);
+        assert_eq!(b.admit(&near, 1_000).why, refuse::Reason::NotYet, "inside the inner wall too");
+    }
+
     /// 🔴 The case a wall-clock TTL cannot catch, and the reason `deps` exists: the quantity is
     /// perfectly fresh in time, and invalid anyway, because what it was measured against moved.
     #[test]

@@ -93,7 +93,16 @@ typedef enum {
     BL_R_SELFTEST_FAILED      = 5,  /* its own self-test does not pass right now    */
     BL_R_UNCERTAINTY_TOO_HIGH = 6,  /* measured, but not well enough for this ask   */
     BL_R_UNREACHABLE          = 7,  /* geometry says this body cannot get there     */
-    BL_R_RATE_LIMIT           = 8   /* the fast face declined: limit/watchdog        */
+    BL_R_RATE_LIMIT           = 8,  /* the fast face declined: limit/watchdog        */
+    /* 🔴 NOT NOW -- and nothing here says never.  The ask is outside what this body can do AT THIS
+     * INSTANT, and the refusal is about the state of the WORLD, not about the body.
+     *
+     * CALLER CONTRACT: let the world advance and ask again.  Do NOT abandon the task, and do NOT
+     * fold this into BL_R_UNREACHABLE -- that one tells a robot to give up on something that is
+     * merely still on its way.  On a conveyor this distinction was hand-welded into an experiment
+     * script three separate times in one night before it was noticed that all three were the same
+     * missing concept. */
+    BL_R_NOT_YET              = 9
 } bl_reason;
 
 /* ------------------------------------------------------- measured quantities */

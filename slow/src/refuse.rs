@@ -41,6 +41,20 @@ pub enum Reason {
     Unreachable = 7,
     /// The fast face declined: a limit, a force cap, or the watchdog.
     RateLimit = 8,
+    /// 🔴 **Not now — and nothing here says never.** The ask is outside what this body can do *at
+    /// this instant*, and the refusal is about the state of the WORLD rather than about the body.
+    ///
+    /// The caller contract is the whole point: the correct response is to let the world advance
+    /// and ask again, **not** to abandon the task. Folding this into [`Reason::Unreachable`] tells
+    /// a robot to give up on something that is simply still on its way.
+    ///
+    /// Recorded because it was learned expensively. On a conveyor task this distinction was
+    /// hand-welded into an experiment script **three separate times in one night** — a look budget
+    /// that ended before the object arrived, a timing gate that fired before it entered frame, and
+    /// a reach gate that judged at t=0 an object that would pass within 0.416 m at step ~320 (band
+    /// 0.134–0.602 m). Three symptoms, one missing concept, and each patch was invisible to the
+    /// next person. It belongs here, once.
+    NotYet = 9,
 }
 
 impl Reason {
@@ -57,6 +71,7 @@ impl Reason {
             UncertaintyTooHigh => "uncertainty_too_high",
             Unreachable => "unreachable",
             RateLimit => "rate_limit",
+            NotYet => "not_yet",
         }
     }
 }
@@ -116,6 +131,13 @@ pub struct Ask {
     pub at: [Option<f64>; 6],
     /// A point the ask must be able to reach, in normalised image coordinates, if it has one.
     pub image_point: Option<(f64, f64)>,
+    /// 🔴 How far from this arm's own measured base the ask wants to act, in metres.
+    ///
+    /// Checked against the measured `reach` band. Until this field existed **the band was measured
+    /// and never consulted** — `Reason::Unreachable` was declared here and produced by nothing, so
+    /// every caller that needed a reach check hand-welded one, which is exactly the failure mode
+    /// this module's header describes.
+    pub reach_radius_m: Option<f64>,
 }
 
 impl Ask {
@@ -125,6 +147,7 @@ impl Ask {
         tolerance: [None; 6],
         at: [None; 6],
         image_point: None,
+        reach_radius_m: None,
     };
 }
 
@@ -183,6 +206,19 @@ pub fn admit(ask: &Ask, now_ns: u64, get: &dyn Fn(Quantity) -> Option<Measuremen
                 // 1 mm and a 45 mm command; `gripper_span` swept from 0.4 to 0.8 says nothing about
                 // full open. Extrapolating either produces a number that is believed.
                 return Verdict::refuse(Reason::OutOfRange, q);
+            }
+        }
+
+        if let (Quantity::Reach, Some(r)) = (q, ask.reach_radius_m) {
+            let (lo, hi) = (m.value[0], m.value[1]);
+            if r < lo || r > hi {
+                // 🔴 NotYet, NOT Unreachable — and the difference is a claim about the future that
+                // this layer cannot make. The band says where this body can act; it says nothing
+                // about whether the world will bring the ask inside it a moment from now. Claiming
+                // "never" from a measurement that only establishes "not at this radius" is exactly
+                // the over-claim this layer exists to refuse. `Unreachable` stays reserved for
+                // statements that are actually established.
+                return Verdict::refuse(Reason::NotYet, q);
             }
         }
 
