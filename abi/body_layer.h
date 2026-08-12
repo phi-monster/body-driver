@@ -717,6 +717,16 @@ typedef enum {
     BL_TOUCH_STUCK   = 3    /* blocked both ways -- NOT contact; no solution here */
 } bl_touch;
 
+/* 动词层 (2026-08-12).  纯函数,无状态 —— 策略只能问,不能自己算。判据见 slow/src/verb.rs. */
+uint32_t bl_contact_seen(double commanded_m, double achieved_m, double contact_threshold,
+                         double object_moved_m, double object_move_eps);
+uint32_t bl_spannable(double section_width_m, double jaw_span_m, double margin_m);
+/* -> 0 AsPlanned | 1 ClosedOnAir | 2 WrongSection | 3 KnockedAway */
+uint32_t bl_grasp_check(double planned_w_m, double jaw_value, double jaw_span_m,
+                        double object_moved_m, double knock_eps_m, double tol_frac);
+/* -> 0 Proceed | 1 NextContact | 2 ChangeVerb(*out_verb) | 3 Relook | 255 bad input */
+uint32_t bl_after_check(uint32_t verb, uint32_t check, uint32_t *out_verb);
+
 bl_status bl_touching(const void *b, double delivered_along, double delivered_reverse,
                       uint32_t has_reverse, double sideways, uint32_t has_sideways,
                       uint64_t now_ns, uint32_t *touch, double *free_bar, uint32_t *why,

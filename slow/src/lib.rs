@@ -94,6 +94,9 @@ pub mod probe;
 pub mod refuse;
 pub mod schedule;
 pub mod touch;
+pub mod json;
+pub mod store;
+pub mod verb;
 
 use measurement::{Malformed, Measurement, Quantity};
 use refuse::{Ask, Verdict};

@@ -1361,6 +1361,77 @@ pub extern "C" fn bl_stop_str(v: u32) -> *const c_char {
 ///
 /// # Safety
 /// `b` must come from [`bl_init`]; `touch`, `why` and `free_bar` must be writable or null.
+/* ---- 动词层 (2026-08-12) --------------------------------------------------------------------
+ * 在此之前 `bl_world_ref.verb` 在驱动里一次都没被读过,所有招式逻辑住在策略的 Python 里。
+ * 这四个入口把它搬回来:策略只能【问】,不能自己算。每一条的判据都是实测换来的,见 verb.rs。
+ */
+
+/// "碰到了没有"。推得动的物体不会让手停下来 ⇒ 手停 **或** 世界看得见地动了。
+#[no_mangle]
+pub unsafe extern "C" fn bl_contact_seen(
+    commanded_m: f64,
+    achieved_m: f64,
+    contact_threshold: f64,
+    object_moved_m: f64,
+    object_move_eps: f64,
+) -> u32 {
+    crate::verb::contact_seen(
+        commanded_m, achieved_m, contact_threshold, object_moved_m, object_move_eps,
+    ) as u32
+}
+
+/// "这一段我夹不夹得下"。夹不下就不该试。
+#[no_mangle]
+pub unsafe extern "C" fn bl_spannable(
+    section_width_m: f64,
+    jaw_span_m: f64,
+    margin_m: f64,
+) -> u32 {
+    crate::verb::spannable(section_width_m, jaw_span_m, margin_m) as u32
+}
+
+/// 合完爪的自查:拿量出来的爪值反推实际夹住多宽,和打算夹的那一段比。
+#[no_mangle]
+pub unsafe extern "C" fn bl_grasp_check(
+    planned_w_m: f64,
+    jaw_value: f64,
+    jaw_span_m: f64,
+    object_moved_m: f64,
+    knock_eps_m: f64,
+    tol_frac: f64,
+) -> u32 {
+    crate::verb::classify(
+        planned_w_m, jaw_value, jaw_span_m, object_moved_m, knock_eps_m, tol_frac,
+    ) as u32
+}
+
+/// 自查之后该怎么办。合到底 ⇒ 换招式,不是换地方。
+#[no_mangle]
+pub unsafe extern "C" fn bl_after_check(verb: u32, check: u32, out_verb: *mut u32) -> u32 {
+    let v = match crate::verb::Verb::from_u32(verb) {
+        Some(v) => v,
+        None => return 255,
+    };
+    let c = match check {
+        0 => crate::verb::Check::AsPlanned,
+        1 => crate::verb::Check::ClosedOnAir,
+        2 => crate::verb::Check::WrongSection,
+        3 => crate::verb::Check::KnockedAway,
+        _ => return 255,
+    };
+    match crate::verb::decide(v, c) {
+        crate::verb::Next::Proceed => 0,
+        crate::verb::Next::NextContact => 1,
+        crate::verb::Next::ChangeVerb(nv) => {
+            if !out_verb.is_null() {
+                unsafe { *out_verb = nv as u32 };
+            }
+            2
+        }
+        crate::verb::Next::Relook => 3,
+    }
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn bl_touching(
     b: *const c_void,
