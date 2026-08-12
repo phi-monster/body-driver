@@ -25,6 +25,9 @@
 //!        两条轴都要给:绕工具轴 = 原地自转(拧),绕钳口轴 = 扳倒/倾倒。挑哪条由驱动定。
 //! jawcal <对子文件> [1σ]   每行 "爪停值 真实料厚(米)"
 //!                          -> val <米> sigma <米> valid <..> n <个数> | refused <理由>
+//! homecal <归位记录文件> [散布上限]  每行 "x y z qw qx qy qz"
+//!                          -> val <xyz> q <四元数> spread <米> n <次数> | refused <理由>
+//! athome <x> <y> <z> <几倍散布>  -> 1 | 0 | refused <理由>
 //! verbs                    -> <所有动词名>
 //! quit
 //! ```
@@ -37,8 +40,14 @@ use body_layer::verb::{
     classify, contact_seen, decide, demand, spannable, turn_before_lift, Axes, Check, Next, Verb,
 };
 use body_layer::measurement::Quantity;
-use body_layer::probe::gripper_span_by_stall;
+use body_layer::probe::{at_home, gripper_span_by_stall, home_pose};
 use std::io::{self, BufRead, Write};
+
+thread_local! {
+    /// 本次会话 `homecal` 量到的原位。`athome` 拿它当尺子。
+    static HOME: std::cell::RefCell<Option<body_layer::measurement::Measurement>> =
+        const { std::cell::RefCell::new(None) };
+}
 
 fn main() {
     let stdin = io::stdin();
@@ -187,6 +196,62 @@ fn handle(t: &[&str], store: &mut Option<Store>) -> String {
                     m.deps[0].map(|(q, _)| q as u32 == Quantity::ContactThreshold as u32)
                 ),
             }
+        }
+        // 原位:归位若干次 → 位形 + **重复性**。容差是量出来的,不是拍的。
+        "homecal" => {
+            let Some(path) = t.get(1) else {
+                return "err homecal 要 <归位记录文件> [散布上限 m]".into();
+            };
+            let cap: f64 = t.get(2).and_then(|x| x.parse().ok()).unwrap_or(0.02);
+            let src = match std::fs::read_to_string(path) {
+                Ok(s) => s,
+                Err(e) => return format!("err 读不了 {path}: {e}"),
+            };
+            let mut rows: Vec<[f64; 7]> = Vec::new();
+            for ln in src.lines() {
+                let f: Vec<&str> = ln.split_whitespace().collect();
+                if f.len() < 7 {
+                    continue;
+                }
+                let mut a = [0.0f64; 7];
+                let mut ok = true;
+                for i in 0..7 {
+                    match f[i].parse::<f64>() {
+                        Ok(v) => a[i] = v,
+                        Err(_) => ok = false,
+                    }
+                }
+                if ok {
+                    rows.push(a);
+                }
+            }
+            match home_pose(&rows, cap, 0) {
+                Err(d) => format!("refused {d:?} (n={})", rows.len()),
+                Ok(m) => {
+                    HOME.with(|h| *h.borrow_mut() = Some(m));
+                    format!(
+                        "val {:.5} {:.5} {:.5} q {:.5} {:.5} {:.5} {:.5} spread {:.5} n {}",
+                        m.value[0], m.value[1], m.value[2],
+                        m.value[3], m.value[4], m.value[5], m.value[6],
+                        m.uncertainty[0], rows.len()
+                    )
+                }
+            }
+        }
+        // 回到原位了没有。容差 = tol_k x 量出来的散布;tol_k < 1 一律拒绝回答。
+        "athome" => {
+            let Some(a) = nums(t, 4) else {
+                return "err athome 要 <x> <y> <z> <几倍散布>".into();
+            };
+            HOME.with(|h| match h.borrow().as_ref() {
+                None => "err 还没 homecal".to_string(),
+                Some(m) => match at_home(&[a[0], a[1], a[2]], m, a[3]) {
+                    // 🔴 拒绝回答 ≠ 判"没到位"。要求身体比自己的重复性还准,那永远判不过。
+                    None => "refused 容差比这具身体自己的重复性还紧".to_string(),
+                    Some(true) => "1".to_string(),
+                    Some(false) => "0".to_string(),
+                },
+            })
         }
         "verbs" => (0..13u32)
             .filter_map(Verb::from_u32)

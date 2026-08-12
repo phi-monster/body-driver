@@ -834,6 +834,156 @@ mod jaw_stall_tests {
     }
 }
 
+/// 这具身体的**原位** —— 归位若干次,把落点和它自己的抖动一起记下来。
+///
+/// # 为什么必须归位**多次**
+///
+/// 只归一次拿到的是一个位形,**没有容差**;而"回到原位没有"这个判断,容差是它的全部内容。
+/// 一次采样的量无法被拒绝,而这一层的意义就是能拒绝。
+/// ⇒ `uncertainty` 记的是**重复性**:同一条归位指令走若干遍,落点自己散多大。
+/// 🔴 **那个散布就是容差的下界** —— 比它还紧的容差是编出来的,而编出来的容差会让一具
+/// 完全正常的身体永远判"没回到位"。
+///
+/// # 它拒绝什么
+///
+/// * 少于 3 次归位 ⇒ [`Declined::NotEnoughSamples`]:两次给不出散布;
+/// * 任何一次的姿态四元数不是单位长度 ⇒ [`Declined::Inconsistent`]:那不是一个姿态;
+/// * 散布大过 `spread_cap_m` ⇒ [`Declined::Inconsistent`] —— **一个回不到同一处的身体
+///   没有"原位"可言**,把它平均一下报出来,等于给一个不存在的点。
+pub fn home_pose(
+    samples: &[[f64; 7]], // 每次归位后的 [x, y, z, qw, qx, qy, qz]
+    spread_cap_m: f64,
+    now_ns: u64,
+) -> Result<Measurement, Declined> {
+    if samples.len() < 3 {
+        return Err(Declined::NotEnoughSamples);
+    }
+    for v in samples {
+        if v.iter().any(|c| !c.is_finite()) {
+            return Err(Declined::Inconsistent);
+        }
+        let qn = (v[3] * v[3] + v[4] * v[4] + v[5] * v[5] + v[6] * v[6]).sqrt();
+        if (qn - 1.0).abs() > 1e-3 {
+            return Err(Declined::Inconsistent);
+        }
+    }
+    let n = samples.len() as f64;
+    let mut mean = [0.0f64; 7];
+    for v in samples {
+        for i in 0..7 {
+            mean[i] += v[i] / n;
+        }
+    }
+    // 姿态取平均之后要重新归一,否则它不再是一个姿态。
+    let qn = (mean[3] * mean[3] + mean[4] * mean[4] + mean[5] * mean[5] + mean[6] * mean[6]).sqrt();
+    if qn <= 1e-9 {
+        // 几次归位的姿态互相抵消 ⇒ 它们指向完全不同的方向,不是同一个原位。
+        return Err(Declined::Inconsistent);
+    }
+    for i in 3..7 {
+        mean[i] /= qn;
+    }
+    // 位置的散布:到均值的距离的 1σ。这一个数就是容差的下界。
+    let mut ss = 0.0f64;
+    let mut worst = 0.0f64;
+    for v in samples {
+        let d = ((v[0] - mean[0]).powi(2) + (v[1] - mean[1]).powi(2) + (v[2] - mean[2]).powi(2)).sqrt();
+        ss += d * d;
+        worst = worst.max(d);
+    }
+    let spread = (ss / n).sqrt();
+    if !(spread_cap_m > 0.0) || spread > spread_cap_m {
+        return Err(Declined::Inconsistent);
+    }
+    let mut m = blank(Quantity::HomePose, 7, now_ns);
+    for i in 0..7 {
+        m.value[i] = mean[i];
+        // 位置三轴带散布;姿态那四位的不确定度这里不给 —— 没量,就不许写一个数进去。
+        m.uncertainty[i] = if i < 3 { spread } else { 0.0 };
+        m.axis_kind[i] = if i < 3 { AxisKind::Interval } else { AxisKind::Unmeasured };
+    }
+    // 有效区间 = 真的散到过的范围。判"回没回到位"只能用这个,不能用一个更紧的数。
+    m.valid_lo[0] = 0.0;
+    m.valid_hi[0] = worst;
+    m.valid_for_ns = 0;
+    m.selftest_passed = true;
+    Ok(m)
+}
+
+/// **回到原位了没有** —— 拿量出来的散布当容差,不是拿一个拍出来的数。
+///
+/// 🔴 `tol_k` 是"几倍散布算到位",默认调用方给 3。**容差的下界是散布本身**:
+/// 传一个比 1 还小的 `tol_k`,等于要求身体比它自己的重复性还准,那永远判不过。
+pub fn at_home(now: &[f64; 3], home: &Measurement, tol_k: f64) -> Option<bool> {
+    if home.quantity as u32 != Quantity::HomePose as u32 || home.dim < 3 {
+        return None;
+    }
+    let spread = home.uncertainty[0];
+    if !(spread > 0.0) || !(tol_k >= 1.0) {
+        return None;
+    }
+    let d = ((now[0] - home.value[0]).powi(2)
+        + (now[1] - home.value[1]).powi(2)
+        + (now[2] - home.value[2]).powi(2))
+    .sqrt();
+    Some(d <= tol_k * spread)
+}
+
+#[cfg(test)]
+mod home_tests {
+    use super::*;
+
+    fn h(x: f64, y: f64, z: f64) -> [f64; 7] {
+        [x, y, z, 1.0, 0.0, 0.0, 0.0]
+    }
+
+    #[test]
+    fn one_homing_gives_a_pose_but_no_tolerance_so_it_is_refused() {
+        // 只归一次(或两次)拿到的是一个位形,**没有容差**;
+        // 而"回到原位没有"这个判断,容差就是它的全部内容。
+        assert_eq!(
+            home_pose(&[h(0.3, 0.0, 0.5), h(0.3, 0.0, 0.5)], 0.01, 1).unwrap_err(),
+            Declined::NotEnoughSamples
+        );
+    }
+
+    #[test]
+    fn a_body_that_cannot_return_to_the_same_place_has_no_home() {
+        // 三次归位落在相距十几厘米的地方 ⇒ 平均一下报出来,等于给一个**不存在的点**。
+        let far = [h(0.30, 0.0, 0.5), h(0.45, 0.0, 0.5), h(0.15, 0.0, 0.5)];
+        assert_eq!(home_pose(&far, 0.01, 1).unwrap_err(), Declined::Inconsistent);
+    }
+
+    #[test]
+    fn a_quaternion_that_is_not_a_rotation_is_refused() {
+        let bad = [
+            [0.3, 0.0, 0.5, 2.0, 0.0, 0.0, 0.0],
+            [0.3, 0.0, 0.5, 1.0, 0.0, 0.0, 0.0],
+            [0.3, 0.0, 0.5, 1.0, 0.0, 0.0, 0.0],
+        ];
+        assert_eq!(home_pose(&bad, 0.01, 1).unwrap_err(), Declined::Inconsistent);
+    }
+
+    #[test]
+    fn the_tolerance_is_the_measured_repeatability_not_a_number_i_picked() {
+        // 三次归位散布约 1 mm。
+        let ok = [h(0.300, 0.0, 0.5), h(0.301, 0.0, 0.5), h(0.299, 0.0, 0.5)];
+        let m = home_pose(&ok, 0.01, 1).expect("这具身体回得去同一处");
+        assert!((m.value[0] - 0.300).abs() < 1e-6);
+        let spread = m.uncertainty[0];
+        assert!(spread > 0.0 && spread < 0.002, "散布该是毫米量级,得到 {spread}");
+        // 姿态那四位没量不确定度 ⇒ 必须标成"没量",不许填 0 冒充"很准"。
+        assert_eq!(m.axis_kind[3], AxisKind::Unmeasured);
+
+        // 就在原位上 ⇒ 到位
+        assert_eq!(at_home(&[0.300, 0.0, 0.5], &m, 3.0), Some(true));
+        // 差出十倍散布 ⇒ 没到位
+        assert_eq!(at_home(&[0.300 + 10.0 * spread, 0.0, 0.5], &m, 3.0), Some(false));
+        // 🔴 要求身体比它自己的重复性还准 ⇒ 拒绝回答,而不是永远判"没到位"
+        assert_eq!(at_home(&[0.300, 0.0, 0.5], &m, 0.5), None);
+    }
+}
+
 // ------------------------------------------------------------------------ backlash
 
 /// Measure **backlash**: the dead band a reversal has to cross before the body starts moving again,

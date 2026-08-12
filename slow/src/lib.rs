@@ -1007,6 +1007,9 @@ mod schedule_and_debt {
             Quantity::Reach,
             Quantity::StepDelivery,
             Quantity::Floor,
+            // 🔴 2026-08-12 加的第 14 格。这条测试因此**先红了一次,而它红得对** ——
+            //    "一具完全量过的身体"的定义随着量表变长而变,漏一格就该判不 ready。
+            Quantity::HomePose,
         ] {
             b.submit(m(q, 0)).unwrap();
         }

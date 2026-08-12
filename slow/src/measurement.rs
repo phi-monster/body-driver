@@ -156,11 +156,30 @@ pub enum Quantity {
     /// actually covered**. Axis 2 carries no domain and is marked [`AxisKind::Unmeasured`]. Asking
     /// outside the box refuses rather than extrapolating a plane over ground nobody drove on.
     Floor = 12,
+    /// 这具身体的**原位** —— 每个动作结束时必须回到的那个已知且可重复的位形。
+    ///
+    /// # 它不是 benchmark 的怪癖,是动作可组合的前提
+    ///
+    /// `all_robot_back_to_origin` 出现在 RoboDojo **30/42** 个任务里且强制。但真正的理由与
+    /// 判据无关:**每个动作结束时身体必须回到一个已知且可重复的位形,否则下一个动作的起点是
+    /// 未知的**。真机上同样成立 —— 让开视野、让人能靠近、让下一次从同一处起步。
+    ///
+    /// # 为什么它是**身体量**而不是配置
+    ///
+    /// `LAB` 已记两条:*"home 四元数不通用"* 与 *"home 位形是资产文件写死的驱动目标"* ——
+    /// 每具身体各不相同,而且是**可以由身体自己测出来的**(上电归位后读一次自己的位形)。
+    /// 在此之前它住在策略里:开集时给状态拍个快照、结束时发回去。**能用,但那是土办法** ——
+    /// 换一具身体、换一个策略文件,它就跟着漂,而没有任何一处会报不一致。
+    ///
+    /// `value = [x, y, z, qw, qx, qy, qz]`(工作点位置 + 姿态),
+    /// `uncertainty` 是**重复性**:归位若干次,同一个位形自己抖多少。
+    /// 🔴 那个抖动就是"回到原位没有"的容差下界 —— **比它还紧的容差是编出来的**。
+    HomePose = 13,
 }
 
 impl Quantity {
     /// Total number of quantities; used to size the store.
-    pub const COUNT: usize = 13;
+    pub const COUNT: usize = 14;
 
     /// Reconstruct from the ABI's `u32`. Returns `None` for anything unknown — an unknown
     /// quantity is refused, never coerced into a neighbouring one.
@@ -180,6 +199,7 @@ impl Quantity {
             10 => ToolOffset,
             11 => ToolAxisColumn,
             12 => Floor,
+            13 => HomePose,
             _ => return None,
         })
     }
@@ -200,6 +220,7 @@ impl Quantity {
             StepDelivery => "step_delivery",
             ToolOffset => "tool_offset",
             ToolAxisColumn => "tool_axis_column",
+            HomePose => "home_pose",
             Floor => "floor",
         }
     }
@@ -222,6 +243,7 @@ impl Quantity {
             ToolOffset => c"tool_offset",
             ToolAxisColumn => c"tool_axis_column",
             Floor => c"floor",
+            HomePose => c"home_pose",
         }
     }
 }

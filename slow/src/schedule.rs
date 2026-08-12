@@ -66,6 +66,11 @@ impl Need {
 pub fn prerequisites(q: Quantity) -> &'static [Quantity] {
     use Quantity::*;
     match q {
+        // 原位是**这具身体自己**的一个位形:上电归位后读一次就有了。
+        // 🔴 它不需要相机、不需要力、不需要任何别的量 —— 空前置是**结论**,不是遗漏:
+        //    给它挂一个前置(比如 ImageJacobian),就等于说"没有相机就不知道自己在哪",
+        //    而那对一具有关节编码器的身体是假的,并且会让一台没相机的机器永远回不了家。
+        HomePose => &[],
         // A hand point is a pixel in the camera's frame; without the Jacobian there is no frame to
         // express it in and no way to tell a hand from an elbow by how it responds.
         HandPixel => &[ImageJacobian],
