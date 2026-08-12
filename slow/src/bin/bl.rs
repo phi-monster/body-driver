@@ -20,6 +20,8 @@
 //! span  <这段宽 m> <爪张开 m> <余量 m>                        -> 1 | 0
 //! check <打算夹 m> <爪值> <爪张开 m> <物体动了 m> <碰跑门槛> <容差比> -> asplanned|closedonair|wrongsection|knockedaway
 //! next  <动词> <自查结果>  -> proceed | nextcontact | changeverb <动词> | relook
+//! move  <动词> <轴 x y z> <方向 x y z> <多少>
+//!                          -> along <xyz> <米> about <xyz> <弧度> rotates <0|1>
 //! verbs                    -> <所有动词名>
 //! quit
 //! ```
@@ -28,7 +30,7 @@
 //! "没量到就说没量到"。
 
 use body_layer::store::{Answer, Store};
-use body_layer::verb::{classify, contact_seen, decide, spannable, Check, Next, Verb};
+use body_layer::verb::{classify, contact_seen, decide, demand, spannable, Check, Next, Verb};
 use std::io::{self, BufRead, Write};
 
 fn main() {
@@ -128,6 +130,22 @@ fn handle(t: &[&str], store: &mut Option<Store>) -> String {
                 Next::Relook => "relook".into(),
                 Next::ChangeVerb(nv) => format!("changeverb {}", verb_name(nv)),
             }
+        }
+        // 接触集的第三格:**物体**要怎么动。炮一的装置闸认的就是 rotates=1。
+        "move" => {
+            let Some(v) = t.get(1).and_then(|x| verb_of(x)) else {
+                return "err move 要 <动词> <轴xyz> <方向xyz> <多少>".into();
+            };
+            let Some(a) = nums(&t[1..], 7) else {
+                return "err move 要 <动词> <轴xyz> <方向xyz> <多少>".into();
+            };
+            let m = demand(v, [a[0], a[1], a[2]], [a[3], a[4], a[5]], a[6]);
+            format!(
+                "along {} {} {} {} about {} {} {} {} rotates {}",
+                m.along[0], m.along[1], m.along[2], m.dist_m,
+                m.about[0], m.about[1], m.about[2], m.turn_rad,
+                m.rotates() as u8
+            )
         }
         "verbs" => (0..13u32)
             .filter_map(Verb::from_u32)

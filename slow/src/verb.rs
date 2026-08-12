@@ -195,6 +195,72 @@ pub fn decide(v: Verb, c: Check) -> Next {
     }
 }
 
+/// **物体**要怎么动 —— 接触集的第三格(`ARCH.md §零`)。
+///
+/// 名字是 `Motion` 不是 `Twist`,因为动词表里已经有一个 `Verb::Twist`(拧),
+/// 两个 `Twist` 在同一个文件里读起来会骗人。
+///
+/// # 🔴 这一格就是旧接口结构上说不出的那句话
+///
+/// 旧接口一句话是「末端走到这个位姿,爪子合到 0.3」。要让物体转,只能靠腕关节自己转,
+/// 而**"转到多少度"这个目标不在那个控制律追的量里** —— 它追位置,转角是副产品。
+/// 实测:拧 **16 次成 0 次**,`LAB` 记的死因是"朝向不在控制律的不动点里"。
+///
+/// 这里把转角变成**被要求的量本身**。注意每一个分量说的都是**物体**,一个字不提机器人 ——
+/// 那正是它能跨机体的原因。
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Motion {
+    /// 物体要平移的方向(单位向量)。
+    pub along: [f64; 3],
+    /// 沿那个方向平移多少米。0 表示"不许平移"。
+    pub dist_m: f64,
+    /// 物体要绕的轴(单位向量,过接触集的中心)。
+    pub about: [f64; 3],
+    /// 绕那条轴转多少弧度。**符号承重**:正负是拧紧还是拧松,那是眼睛说的。
+    pub turn_rad: f64,
+}
+
+impl Motion {
+    /// 什么都不动。
+    pub const STILL: Motion = Motion {
+        along: [0.0; 3],
+        dist_m: 0.0,
+        about: [0.0, 0.0, 1.0],
+        turn_rad: 0.0,
+    };
+
+    /// 这条旋量里有没有**非零的转动分量**。
+    ///
+    /// 🔴 `ARCH.md §六` 炮一的**装置闸**:接触集里必须出现非零转动分量,出现了才算这一炮
+    /// 真的在测新接口 —— 否则跑的还是旧接口,只是换了个名字。
+    pub fn rotates(&self) -> bool {
+        self.turn_rad != 0.0 && self.about.iter().any(|c| *c != 0.0)
+    }
+}
+
+/// 一个动词 + 眼睛给的参数 → **物体**该怎么动。
+///
+/// `axis` 由 ②a 给(那一段截面的局部轴),`amount` 由眼睛给(转多少 / 推多远)。
+/// 这一层不认识"瓶子",只认识"绕这条轴转这么多"。
+pub fn demand(v: Verb, axis: [f64; 3], dir: [f64; 3], amount: f64) -> Motion {
+    match v {
+        // 物体在支撑面上平移
+        Verb::Push | Verb::Wipe => Motion { along: dir, dist_m: amount, ..Motion::STILL },
+        // 物体绕一条轴转 —— 这一类是新接口买回来的
+        Verb::Twist | Verb::Pour => Motion { about: axis, turn_rad: amount, ..Motion::STILL },
+        // 撬 / 翻:绕一条**边**转,轴由 ②a 给的边方向定
+        Verb::Pry | Verb::Flip => Motion { about: axis, turn_rad: amount, ..Motion::STILL },
+        // 沿一条轴往里走
+        Verb::Insert => Motion { along: axis, dist_m: amount, ..Motion::STILL },
+        // 抓 / 放 / 够 / 舀 / 松:物体跟着手走,方向由上层给
+        Verb::Grasp | Verb::Place | Verb::Reach | Verb::Scoop | Verb::Release => {
+            Motion { along: dir, dist_m: amount, ..Motion::STILL }
+        }
+        // 按 / 敲:物体不动,力才是重点
+        Verb::Press => Motion::STILL,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -255,6 +321,29 @@ mod tests {
         );
         // 推不合爪,这个判读对它不适用
         assert_eq!(decide(Verb::Push, Check::ClosedOnAir), Next::NextContact);
+    }
+
+    #[test]
+    fn twisting_a_cap_demands_a_real_rotation_of_the_object() {
+        // 🔴 炮一的装置闸:接触集里必须出现【非零转动分量】。
+        //    旧接口在同一套东西上 16 成 0,死因是"朝向不在控制律的不动点里" —— 它说不出这句话。
+        let t = demand(Verb::Twist, [0.0, 0.0, 1.0], [0.0; 3], -1.5708);
+        assert!(t.rotates(), "拧必须要求物体真的转");
+        assert_eq!(t.dist_m, 0.0, "拧不该顺带要求平移");
+        // 符号承重:拧紧和拧松是同一个动词的两个方向,那是眼睛说的,不是这里定的。
+        assert!(demand(Verb::Twist, [0.0, 0.0, 1.0], [0.0; 3], 1.5708).turn_rad > 0.0);
+    }
+
+    #[test]
+    fn pushing_demands_translation_and_no_rotation() {
+        let t = demand(Verb::Push, [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 0.12);
+        assert!(!t.rotates(), "推不该要求物体转");
+        assert_eq!(t.dist_m, 0.12);
+    }
+
+    #[test]
+    fn pressing_demands_the_object_stays_put() {
+        assert_eq!(demand(Verb::Press, [0.0, 0.0, 1.0], [0.0, 0.0, -1.0], 0.02), Motion::STILL);
     }
 
     #[test]
