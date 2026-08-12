@@ -23,6 +23,8 @@
 //! move  <动词> <工具轴 xyz> <钳口轴 xyz> <方向 xyz> <多少>
 //!        -> along <xyz> <米> about <xyz> <弧度> rotates <0|1> turnfirst <0|1>
 //!        两条轴都要给:绕工具轴 = 原地自转(拧),绕钳口轴 = 扳倒/倾倒。挑哪条由驱动定。
+//! jawcal <对子文件> [1σ]   每行 "爪停值 真实料厚(米)"
+//!                          -> val <米> sigma <米> valid <..> n <个数> | refused <理由>
 //! verbs                    -> <所有动词名>
 //! quit
 //! ```
@@ -34,6 +36,8 @@ use body_layer::store::{Answer, Store};
 use body_layer::verb::{
     classify, contact_seen, decide, demand, spannable, turn_before_lift, Axes, Check, Next, Verb,
 };
+use body_layer::measurement::Quantity;
+use body_layer::probe::gripper_span_by_stall;
 use std::io::{self, BufRead, Write};
 
 fn main() {
@@ -153,6 +157,36 @@ fn handle(t: &[&str], store: &mut Option<Store>) -> String {
                 m.rotates() as u8,
                 turn_before_lift(v) as u8
             )
+        }
+        // 爪张开度的第二条测法(不用相机):喂一份 "爪停值 真实料厚" 的表,驱动自己拟合。
+        // 🔴 拟合必须在驱动里做,不能在策略里做 —— 身体常数只有一个出口,这一条也不例外。
+        "jawcal" => {
+            let Some(path) = t.get(1) else {
+                return "err jawcal 要 <对子文件> [已知宽度的1σ]".into();
+            };
+            let sigma: f64 = t.get(2).and_then(|x| x.parse().ok()).unwrap_or(0.001);
+            let src = match std::fs::read_to_string(path) {
+                Ok(s) => s,
+                Err(e) => return format!("err 读不了 {path}: {e}"),
+            };
+            let mut pairs: Vec<(f64, f64)> = Vec::new();
+            for ln in src.lines() {
+                let f: Vec<&str> = ln.split_whitespace().collect();
+                if f.len() < 2 {
+                    continue;
+                }
+                if let (Ok(a), Ok(b)) = (f[0].parse::<f64>(), f[1].parse::<f64>()) {
+                    pairs.push((a, b));
+                }
+            }
+            match gripper_span_by_stall(&pairs, sigma, 0, 0) {
+                Err(d) => format!("refused {d:?} (n={})", pairs.len()),
+                Ok(m) => format!(
+                    "val {:.5} sigma {:.5} valid {:.5}..{:.5} n {} dep {:?}",
+                    m.value[0], m.uncertainty[0], m.valid_lo[0], m.valid_hi[0], pairs.len(),
+                    m.deps[0].map(|(q, _)| q as u32 == Quantity::ContactThreshold as u32)
+                ),
+            }
         }
         "verbs" => (0..13u32)
             .filter_map(Verb::from_u32)

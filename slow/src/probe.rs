@@ -647,6 +647,193 @@ pub fn gripper_span(
     Ok(m)
 }
 
+/// 爪能张多开 —— **不用相机的第二条测法**:拿合爪停在哪儿当尺子。
+///
+/// # 为什么要有第二条路
+///
+/// [`gripper_span`] 那条路是对的,但它要**爪尖在画面里的间距**,而那要一个爪尖检测器。
+/// 这具身体上那个检测器从没跑过 ⇒ 喂进去的间距一动不动 ⇒ 探针照规矩答 `NoResponse`,
+/// 于是 `GripperSpan` 至今是拒绝态,而 ②a 每一次"这段夹不夹得下"都踩在一个**手填的 0.088** 上。
+/// 手填的几何判据判错了,**没有任何一个环节会不一致** —— 这正是这一层存在的理由。
+///
+/// # 这条路用的是身体已经量到的东西
+///
+/// 驱动已经有 [`Quantity::ContactThreshold`](crate::measurement::Quantity::ContactThreshold):
+/// 命令走了多少 vs 实到走了多少。**把它用在爪子自己这条轴上** —— 合爪合到碰上东西就停,
+/// 停住时的**爪指令值**就是那个东西的宽度,只是还没换算成米。
+/// 拿几个**宽度已知**的东西各夹一次,就能把爪指令值拟成米。
+///
+/// 不要相机,不要爪尖检测器,真机上照样能做(一块已知厚度的标定块就够)。
+///
+/// # 它拒绝什么,每一条都是一件**不同**的事实
+///
+/// * 样本少于 5 个 ⇒ [`Declined::NotEnoughSamples`]:拟不出带残差的线,而没有不确定度的量无法被拒绝;
+/// * 每次都停在**同一个爪指令值** ⇒ [`Declined::NoResponse`]:爪子停住的位置由**限位**决定,
+///   不是由物体决定 —— 这不是"一个很小的夹爪",是根本没在量物体。
+///   🔴 **这是实测发生过的那一档**:一批离线数据里爪值逐位相同,当时差点被读成"量到了";
+/// * 物体越宽、爪子反而停得越紧 ⇒ [`Declined::Inconsistent`]:要么符号约定反了,要么停住的
+///   根本不是物体。**取 `|slope|` 会把这两种都读成一次健康的测量**;
+/// * 已知宽度本身没有不确定度 ⇒ [`Declined::MissingDependency`]:拿一把不知道多准的尺子
+///   量出来的毫米,是编造的精度。
+///
+/// 约定:爪指令 `0` = 完全合拢,`1` = 完全张开。所以**物体越宽,停住时的爪指令越大**。
+pub fn gripper_span_by_stall(
+    samples: &[(f64, f64)], // (合爪停住时的爪指令 ∈[0,1], 那个东西夹住处的宽度, 米)
+    width_sigma_m: f64,     // 已知宽度自己的 1σ,米
+    now_ns: u64,
+    contact_epoch: u64,
+) -> Result<Measurement, Declined> {
+    if !width_sigma_m.is_finite() || width_sigma_m < 0.0 {
+        return Err(Declined::MissingDependency);
+    }
+    let (mut n, mut sx, mut sy, mut sxx, mut sxy) = (0.0f64, 0.0f64, 0.0f64, 0.0f64, 0.0f64);
+    let (mut x_lo, mut x_hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    for &(x, y) in samples {
+        if !x.is_finite() || !y.is_finite() || !(0.0..=1.0).contains(&x) || y < 0.0 {
+            continue;
+        }
+        n += 1.0;
+        sx += x;
+        sy += y;
+        sxx += x * x;
+        sxy += x * y;
+        x_lo = x_lo.min(x);
+        x_hi = x_hi.max(x);
+    }
+    if n < 5.0 {
+        return Err(Declined::NotEnoughSamples);
+    }
+    // 🔴 先比读数本身,再拟合。爪子每次都停在限位上时,真斜率和真残差**都是零**,
+    //    浮点里它们各自落在 1e-14 附近、大小取决于求和顺序 ⇒ 统计检验变成掷硬币,
+    //    输的那一面会拿一个舍入误差的符号去判"物体越宽爪子停得越紧"。
+    if !(x_lo < x_hi) {
+        return Err(Declined::NoResponse);
+    }
+    let sxx_c = sxx - sx * sx / n;
+    if sxx_c <= 0.0 {
+        return Err(Declined::Inconsistent);
+    }
+    let slope = (sxy - sx * sy / n) / sxx_c;
+    let intercept = (sy - slope * sx) / n;
+    if !(slope > 0.0) {
+        // 物体越宽,爪子该停在越张开的地方。反过来 = 符号反了,或者停住的根本不是物体。
+        return Err(Declined::Inconsistent);
+    }
+    let mut ss = 0.0f64;
+    for &(x, y) in samples {
+        if !x.is_finite() || !y.is_finite() || !(0.0..=1.0).contains(&x) || y < 0.0 {
+            continue;
+        }
+        let r = y - (intercept + slope * x);
+        ss += r * r;
+    }
+    let resid = (ss / (n - 2.0)).sqrt();
+    let slope_sigma = resid / sxx_c.sqrt();
+    if !slope.is_finite() || !slope_sigma.is_finite() {
+        return Err(Declined::Inconsistent);
+    }
+    // 🔴 一条自己的拟合都分不开零的斜率,**不是一具很小的夹爪,是没有证据**。
+    //
+    // 这一档照抄 [`gripper_span`] 的同名检查 —— **我第一版漏了它**,于是在一批结构上无效的
+    // 对子上给出了 **0.0393 ± 0.0440**(2026-08-12 实测,误差比值本身还大)。
+    // 一个"看着像测量"的数比一次拒绝危险得多:没有任何下游环节会因为它而不一致。
+    if slope <= 2.0 * slope_sigma {
+        return Err(Declined::NoResponse);
+    }
+    // 全张开时的宽度 = 这条线在爪指令 1.0 处的值。
+    let span = intercept + slope;
+    if !(span > 0.0) {
+        return Err(Declined::Inconsistent);
+    }
+    // 两项不确定度:拟合自己的,和已知宽度那把尺子的。
+    let sigma = (slope_sigma * slope_sigma + width_sigma_m * width_sigma_m).sqrt();
+    let mut m = blank(Quantity::GripperSpan, 1, now_ns);
+    m.value[0] = span;
+    m.uncertainty[0] = sigma;
+    // 🔴 有效区间就是**真扫过的那一段**爪指令。全张开处的值是外推,
+    //    而外推成不成立由 admit 闸判,不由这里替它决定。
+    m.valid_lo[0] = intercept + slope * x_lo;
+    m.valid_hi[0] = intercept + slope * x_hi;
+    m.deps[0] = Some((Quantity::ContactThreshold, contact_epoch));
+    m.valid_for_ns = 0;
+    m.selftest_passed = true;
+    Ok(m)
+}
+
+#[cfg(test)]
+mod jaw_stall_tests {
+    use super::*;
+
+    #[test]
+    fn a_jaw_that_always_stops_at_the_same_place_is_a_refusal_not_a_tiny_gripper() {
+        // 🔴 实测发生过的那一档:一批离线数据里爪值**逐位相同**。
+        //    含义是"爪子停住的位置由限位决定,不是由物体决定" —— 它根本没在量物体。
+        //    读成"一个很小的夹爪"就等于凭空造出一个身体常数。
+        let same: Vec<(f64, f64)> = [0.02, 0.03, 0.04, 0.05, 0.06]
+            .iter()
+            .map(|w| (0.1281, *w))
+            .collect();
+        assert_eq!(
+            gripper_span_by_stall(&same, 0.001, 1, 1).unwrap_err(),
+            Declined::NoResponse
+        );
+    }
+
+    #[test]
+    fn wider_object_must_stall_the_jaw_further_open() {
+        // 反过来 = 符号约定反了,或者停住的根本不是物体。取绝对值会把这两种都读成健康测量。
+        let inverted: Vec<(f64, f64)> =
+            vec![(0.10, 0.06), (0.20, 0.05), (0.30, 0.04), (0.40, 0.03), (0.50, 0.02)];
+        assert_eq!(
+            gripper_span_by_stall(&inverted, 0.001, 1, 1).unwrap_err(),
+            Declined::Inconsistent
+        );
+    }
+
+    #[test]
+    fn four_samples_cannot_carry_an_uncertainty() {
+        let few: Vec<(f64, f64)> = vec![(0.1, 0.01), (0.2, 0.02), (0.3, 0.03), (0.4, 0.04)];
+        assert_eq!(
+            gripper_span_by_stall(&few, 0.001, 1, 1).unwrap_err(),
+            Declined::NotEnoughSamples
+        );
+    }
+
+    #[test]
+    fn a_span_its_own_fit_cannot_separate_from_zero_is_a_refusal() {
+        // 🔴 实测那一批(2026-08-12):对子结构上就是无效的(②a 报的是【打算夹的那一段】,
+        //    而爪子实际停在别处),拟合出来 0.0393 ± 0.0440 —— 误差比值还大。
+        //    第一版探针把它当成了一个测量结果。补上这一档之后它必须变成拒绝。
+        let noisy: Vec<(f64, f64)> = vec![
+            (0.0885, 0.0001), (0.1057, 0.0084), (0.1281, 0.0090), (0.1395, 0.0126),
+            (0.3005, 0.0048), (0.3017, 0.0351), (0.3020, 0.0048), (0.3020, 0.0048),
+        ];
+        assert_eq!(
+            gripper_span_by_stall(&noisy, 0.001, 1, 1).unwrap_err(),
+            Declined::NoResponse
+        );
+    }
+
+    #[test]
+    fn a_clean_sweep_recovers_the_span_and_keeps_the_ruler_error() {
+        // 造一具张开度 0.088 的爪子:爪指令 x 处夹得住 0.088x 宽的东西。
+        let clean: Vec<(f64, f64)> = (1..=8)
+            .map(|i| {
+                let x = i as f64 / 10.0;
+                (x, 0.088 * x)
+            })
+            .collect();
+        let m = gripper_span_by_stall(&clean, 0.002, 1, 7).unwrap();
+        assert!((m.value[0] - 0.088).abs() < 1e-6, "span={}", m.value[0]);
+        // 已知宽度那把尺子的误差必须留在里面 —— 只报拟合误差 = 编造的精度。
+        assert!(m.uncertainty[0] >= 0.002);
+        // 有效区间是**真扫过的那一段**,全张开处是外推,由 admit 闸判。
+        assert!(m.valid_hi[0] < m.value[0]);
+        // 这条测法建在接触判据上:接触判据一重测,这个数就该跟着过期。
+        assert_eq!(m.deps[0], Some((Quantity::ContactThreshold, 7)));
+    }
+}
+
 // ------------------------------------------------------------------------ backlash
 
 /// Measure **backlash**: the dead band a reversal has to cross before the body starts moving again,
