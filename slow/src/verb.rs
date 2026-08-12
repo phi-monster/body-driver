@@ -238,20 +238,40 @@ impl Motion {
     }
 }
 
+/// 手上有两条轴,**它们买到的东西完全不同**。这是本仓花了一晚上才分清的一件事。
+///
+/// 🔴 `LAB` "TWIST 判词反转":*"绕【工具轴】转买不到 `is_axis_up`(全榜第一需求,95 次)"*
+/// —— 俯抓时工具轴≈竖直,绕它转 = **把物体当转盘原地打转**;
+/// *"绕【钳口轴】(近水平)才买得到"*。实测:工具轴 90° 让 `axis_up` 79.84→83.66(几乎没动);
+/// 钳口轴 90° 让它 78.23→**13.36**(度,越小越正)。
+///
+/// ⇒ **「拧」和「扳倒」是两个不同的自由度,补上前者不等于补上后者。**
+#[derive(Clone, Copy, Debug)]
+pub struct Axes {
+    /// **工具轴** —— 俯抓时近乎竖直。绕它转 = 物体原地自转(拧盖、拧螺丝)。
+    pub tool: [f64; 3],
+    /// **钳口轴** —— 两片爪面分开的方向,近乎水平。绕它转 = 把物体**扳倒 / 立起来 / 倾倒**。
+    pub jaw: [f64; 3],
+}
+
 /// 一个动词 + 眼睛给的参数 → **物体**该怎么动。
 ///
-/// `axis` 由 ②a 给(那一段截面的局部轴),`amount` 由眼睛给(转多少 / 推多远)。
-/// 这一层不认识"瓶子",只认识"绕这条轴转这么多"。
-pub fn demand(v: Verb, axis: [f64; 3], dir: [f64; 3], amount: f64) -> Motion {
+/// 🔴 **两条轴一起传进来,由这里挑** —— 不是让调用方挑。
+/// 让调用方挑就等于把上面那条教训交还给"人记不记得",而它已经错过一次了。
+/// `amount` 由眼睛给(转多少 / 推多远)。这一层不认识"瓶子",只认识"绕这条轴转这么多"。
+pub fn demand(v: Verb, ax: Axes, dir: [f64; 3], amount: f64) -> Motion {
     match v {
         // 物体在支撑面上平移
         Verb::Push | Verb::Wipe => Motion { along: dir, dist_m: amount, ..Motion::STILL },
-        // 物体绕一条轴转 —— 这一类是新接口买回来的
-        Verb::Twist | Verb::Pour => Motion { about: axis, turn_rad: amount, ..Motion::STILL },
-        // 撬 / 翻:绕一条**边**转,轴由 ②a 给的边方向定
-        Verb::Pry | Verb::Flip => Motion { about: axis, turn_rad: amount, ..Motion::STILL },
-        // 沿一条轴往里走
-        Verb::Insert => Motion { along: axis, dist_m: amount, ..Motion::STILL },
+        // 拧:物体绕**它自己的轴**原地自转(瓶盖、螺丝)⇒ 工具轴
+        Verb::Twist => Motion { about: ax.tool, turn_rad: amount, ..Motion::STILL },
+        // 倒 / 翻 / 撬:把物体**扳过去**,改变它的朝向 ⇒ 钳口轴。
+        // 🔴 这三个写成工具轴是本仓犯过的错,`axis_up` 几乎没动。
+        Verb::Pour | Verb::Flip | Verb::Pry => {
+            Motion { about: ax.jaw, turn_rad: amount, ..Motion::STILL }
+        }
+        // 沿工具轴往里走
+        Verb::Insert => Motion { along: ax.tool, dist_m: amount, ..Motion::STILL },
         // 抓 / 放 / 够 / 舀 / 松:物体跟着手走,方向由上层给
         Verb::Grasp | Verb::Place | Verb::Reach | Verb::Scoop | Verb::Release => {
             Motion { along: dir, dist_m: amount, ..Motion::STILL }
@@ -259,6 +279,17 @@ pub fn demand(v: Verb, axis: [f64; 3], dir: [f64; 3], amount: f64) -> Motion {
         // 按 / 敲:物体不动,力才是重点
         Verb::Press => Motion::STILL,
     }
+}
+
+/// 转要在抬之前还是之后。
+///
+/// 🔴 `LAB` "TWIST 陷阱":*"θ=70 与 θ=90 的读数【逐位相同】⇒ 天花板不是手臂,是 benchmark 的
+/// 抬起判据"* —— 扳倒会把物体原点抬高 2.5 cm,而抬升相已经用掉 0.077(判据阈 0.10),
+/// 于是**台子在扭转中途就把这一集结束了**,而"被截断"和"手转不动"在记录里**完全同形**。
+/// 修法记在那一条里:*"把转挪到抬起之前拿回全部 10 cm 余量"*。
+pub fn turn_before_lift(v: Verb) -> bool {
+    // 会改变朝向的动词都要往前挪:它们本身就会顺带抬高物体。
+    matches!(v, Verb::Pour | Verb::Flip | Verb::Pry | Verb::Twist)
 }
 
 #[cfg(test)]
@@ -327,23 +358,52 @@ mod tests {
     fn twisting_a_cap_demands_a_real_rotation_of_the_object() {
         // 🔴 炮一的装置闸:接触集里必须出现【非零转动分量】。
         //    旧接口在同一套东西上 16 成 0,死因是"朝向不在控制律的不动点里" —— 它说不出这句话。
-        let t = demand(Verb::Twist, [0.0, 0.0, 1.0], [0.0; 3], -1.5708);
+        let ax = Axes { tool: [0.0, 0.0, 1.0], jaw: [1.0, 0.0, 0.0] };
+        let t = demand(Verb::Twist, ax, [0.0; 3], -1.5708);
         assert!(t.rotates(), "拧必须要求物体真的转");
         assert_eq!(t.dist_m, 0.0, "拧不该顺带要求平移");
         // 符号承重:拧紧和拧松是同一个动词的两个方向,那是眼睛说的,不是这里定的。
-        assert!(demand(Verb::Twist, [0.0, 0.0, 1.0], [0.0; 3], 1.5708).turn_rad > 0.0);
+        assert!(demand(Verb::Twist, ax, [0.0; 3], 1.5708).turn_rad > 0.0);
+        // 拧走【工具轴】:瓶盖绕它自己的轴自转
+        assert_eq!(t.about, ax.tool);
     }
 
     #[test]
     fn pushing_demands_translation_and_no_rotation() {
-        let t = demand(Verb::Push, [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 0.12);
+        let ax = Axes { tool: [0.0, 0.0, 1.0], jaw: [1.0, 0.0, 0.0] };
+        let t = demand(Verb::Push, ax, [1.0, 0.0, 0.0], 0.12);
         assert!(!t.rotates(), "推不该要求物体转");
         assert_eq!(t.dist_m, 0.12);
     }
 
     #[test]
     fn pressing_demands_the_object_stays_put() {
-        assert_eq!(demand(Verb::Press, [0.0, 0.0, 1.0], [0.0, 0.0, -1.0], 0.02), Motion::STILL);
+        let ax = Axes { tool: [0.0, 0.0, 1.0], jaw: [1.0, 0.0, 0.0] };
+        assert_eq!(demand(Verb::Press, ax, [0.0, 0.0, -1.0], 0.02), Motion::STILL);
+    }
+
+    #[test]
+    fn tipping_verbs_must_use_the_jaw_axis_not_the_tool_axis() {
+        // 🔴 LAB "TWIST 判词反转":绕工具轴转买不到 `is_axis_up`(全榜第一需求,95 次)——
+        //    俯抓时工具轴≈竖直,绕它转就是把物体当转盘原地打转。
+        //    实测 工具轴 90°: 79.84→83.66(几乎没动);钳口轴 90°: 78.23→13.36。
+        let ax = Axes { tool: [0.0, 0.0, 1.0], jaw: [1.0, 0.0, 0.0] };
+        for v in [Verb::Pour, Verb::Flip, Verb::Pry] {
+            let m = demand(v, ax, [0.0; 3], 1.5708);
+            assert_eq!(m.about, ax.jaw, "{v:?} 必须绕钳口轴,绕工具轴买不到朝向");
+        }
+        // 拧是另一个自由度:它要的就是原地自转
+        assert_eq!(demand(Verb::Twist, ax, [0.0; 3], 1.5708).about, ax.tool);
+    }
+
+    #[test]
+    fn turning_comes_before_lifting() {
+        // 🔴 LAB "TWIST 陷阱":扳倒会把物体抬高 2.5 cm,而抬升相已用掉 0.077(阈 0.10)⇒
+        //    台子在扭转【中途】结束本集,而"被截断"和"手转不动"在记录里完全同形。
+        for v in [Verb::Pour, Verb::Flip, Verb::Pry, Verb::Twist] {
+            assert!(turn_before_lift(v), "{v:?} 的转必须排在抬之前");
+        }
+        assert!(!turn_before_lift(Verb::Grasp));
     }
 
     #[test]
