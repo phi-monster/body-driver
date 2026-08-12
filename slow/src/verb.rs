@@ -292,6 +292,48 @@ pub fn turn_before_lift(v: Verb) -> bool {
     matches!(v, Verb::Pour | Verb::Flip | Verb::Pry | Verb::Twist)
 }
 
+/// 抬起之后,东西还在不在手里。
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Hold {
+    /// 还在。抬起过程里爪子几乎没再动。
+    Held,
+    /// **滑掉了** —— 抬的过程中爪子继续合拢,说明指间的东西走了。
+    Slipped,
+    /// 合爪时指间就是空的,谈不上滑。
+    WasEmpty,
+}
+
+/// **拿没拿住** —— 只用爪子自己的读数,不用物体位姿。
+///
+/// # 为什么这一格值钱
+///
+/// 在此之前,判"抓成没成"要看**物体的真实位姿**(仿真里的特权信息,真机上没有),
+/// 而且要把整个抬升动作做完(18 cm)才知道。这里只要**提一点点**,读一次爪子就够了。
+///
+/// # 判据是实测的,不是设计的(2026-08-12,50 次下手)
+///
+/// | | n | 抬升中爪子又合拢了多少 |
+/// |---|---|---|
+/// | **拿住了** | 3 | 中位 **0.0049**,最大 **0.0165** |
+/// | **没拿住** | 47 | 中位 **0.1755**,最大 **0.8000** |
+///
+/// 两组**量级差 36 倍且不重叠** —— 成功那组的最大值比失败组的中位还小一个量级。
+/// 机制上也讲得通:**东西还在指间,爪子就合不下去。**
+///
+/// ⚠️ **成功样本只有 3 个**。这条结论靠的是**两组分布不重叠 + 机制**,不是靠 n。
+/// ⚠️ `slip_eps`(合拢多少算滑)**是一个还没量到的身体量**,现在按参数传入。
+///    实测把它放在 0.02–0.15 之间都能把上面那两组切开,但**那个区间本身还没被量过**。
+pub fn holding(grip_at_close: f64, grip_after_lift: f64, air_eps: f64, slip_eps: f64) -> Hold {
+    if grip_at_close <= air_eps {
+        return Hold::WasEmpty;
+    }
+    if grip_at_close - grip_after_lift > slip_eps {
+        Hold::Slipped
+    } else {
+        Hold::Held
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -404,6 +446,18 @@ mod tests {
             assert!(turn_before_lift(v), "{v:?} 的转必须排在抬之前");
         }
         assert!(!turn_before_lift(Verb::Grasp));
+    }
+
+    #[test]
+    fn slipping_is_told_apart_by_the_jaw_alone_no_object_pose() {
+        // 实测那两组(2026-08-12):拿住了最大合拢 0.0165;没拿住中位 0.1755。
+        let (air, slip) = (0.005, 0.05);
+        assert_eq!(holding(0.30, 0.2951, air, slip), Hold::Held); // 合拢 0.0049
+        assert_eq!(holding(0.30, 0.2835, air, slip), Hold::Held); // 合拢 0.0165(成功组最大)
+        assert_eq!(holding(0.30, 0.1245, air, slip), Hold::Slipped); // 合拢 0.1755(失败组中位)
+        assert_eq!(holding(0.80, 0.0000, air, slip), Hold::Slipped); // 合到底
+        // 合爪时就是空的 ⇒ 谈不上滑
+        assert_eq!(holding(0.000, 0.0, air, slip), Hold::WasEmpty);
     }
 
     #[test]

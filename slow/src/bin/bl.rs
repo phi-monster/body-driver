@@ -30,6 +30,8 @@
 //! athome <x> <y> <z> <几倍散布>  -> 1 | 0 | refused <理由>
 //! submit <量名> <值[,值..]> <1σ> <有效下界> <有效上界> <单位文件> <出处文件>
 //!                          -> ok ... | err ...   「把一个量写进标定库,出处必填」
+//! holding <合爪时读数> <抬起后读数> <空爪门槛> <算滑的门槛>
+//!                          -> held | slipped | empty
 //! verbs                    -> <所有动词名>
 //! quit
 //! ```
@@ -39,7 +41,8 @@
 
 use body_layer::store::{Answer, Store};
 use body_layer::verb::{
-    classify, contact_seen, decide, demand, spannable, turn_before_lift, Axes, Check, Next, Verb,
+    classify, contact_seen, decide, demand, holding, spannable, turn_before_lift, Axes, Check, Hold,
+    Next, Verb,
 };
 use body_layer::measurement::Quantity;
 use body_layer::probe::{at_home, gripper_span_by_stall, home_pose};
@@ -307,6 +310,15 @@ fn handle(t: &[&str], store: &mut Option<Store>) -> String {
                 Ok(()) => format!("ok 写入 {name} = {value:?} +- {sigma} 到 {path}"),
             }
         }
+        // 拿没拿住 —— 只看爪子自己的读数,不用物体位姿,真机上照样能问。
+        "holding" => match nums(t, 4) {
+            None => "err holding 要 <合爪时读数> <抬起后读数> <空爪门槛> <算滑的门槛>".into(),
+            Some(a) => match holding(a[0], a[1], a[2], a[3]) {
+                Hold::Held => "held".into(),
+                Hold::Slipped => "slipped".into(),
+                Hold::WasEmpty => "empty".into(),
+            },
+        },
         "verbs" => (0..13u32)
             .filter_map(Verb::from_u32)
             .map(verb_name)
