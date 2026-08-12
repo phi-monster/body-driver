@@ -28,7 +28,7 @@
 //! homecal <归位记录文件> [散布上限]  每行 "x y z qw qx qy qz"
 //!                          -> val <xyz> q <四元数> spread <米> n <次数> | refused <理由>
 //! athome <x> <y> <z> <几倍散布>  -> 1 | 0 | refused <理由>
-//! submit <量名> <值[,值..]> <1σ> <单位文件> <出处文件>
+//! submit <量名> <值[,值..]> <1σ> <有效下界> <有效上界> <单位文件> <出处文件>
 //!                          -> ok ... | err ...   「把一个量写进标定库,出处必填」
 //! verbs                    -> <所有动词名>
 //! quit
@@ -264,11 +264,23 @@ fn handle(t: &[&str], store: &mut Option<Store>) -> String {
         // 🔴 出处是**必填**的,而且必须来自文件(命令行塞不下一段真出处)。
         //    没有出处的数就是手填的数,而手填的身体常数正是这一层要废掉的东西。
         "submit" => {
-            let (Some(name), Some(vs), Some(sig), Some(unit), Some(prov)) =
-                (t.get(1), t.get(2), t.get(3), t.get(4), t.get(5))
+            let (Some(name), Some(vs), Some(sig), Some(lo), Some(hi), Some(unit), Some(prov)) =
+                (t.get(1), t.get(2), t.get(3), t.get(4), t.get(5), t.get(6), t.get(7))
             else {
-                return "err submit 要 <量名> <值[,值..]> <1σ> <单位文件> <出处文件>".into();
+                return "err submit 要 <量名> <值[,值..]> <1σ> <有效下界> <有效上界> <单位文件> <出处文件>"
+                    .into();
             };
+            // 🔴 有效区间是**必填**的,而且这里就要挡住 —— 不然写进去的行会被准入闸拒绝,
+            //    于是"我提交了"和"它能被读到"分岔。**2026-08-12 实测踩过**:
+            //    第一版 submit 不收区间,写完之后 `get` 报
+            //    *"the body layer rejected the stored row ... most often valid_lo >= valid_hi"*,
+            //    而 `ask` 那条路读的是 JSON 不走闸,所以看起来像成功了。
+            let (Ok(lo_v), Ok(hi_v)) = (lo.parse::<f64>(), hi.parse::<f64>()) else {
+                return "err 有效区间读不出来".into();
+            };
+            if !(lo_v < hi_v) {
+                return format!("err 有效下界必须小于上界(收到 {lo_v} .. {hi_v})—— 准入闸会拒绝这样的行");
+            }
             let value: Vec<f64> = match vs.split(',').map(|x| x.parse::<f64>().ok()).collect() {
                 Some(v) => v,
                 None => return "err 值读不出来".into(),
@@ -287,7 +299,10 @@ fn handle(t: &[&str], store: &mut Option<Store>) -> String {
             let Some(path) = CAL.with(|c| c.borrow().clone()) else {
                 return "err 还没 load 标定".into();
             };
-            match write_quantity(&path, name, &value, sigma, unit_s.trim(), prov_s.trim()) {
+            if sigma < 0.0 {
+                return "err 1σ 不能是负的 —— 准入闸会拒绝".into();
+            }
+            match write_quantity(&path, name, &value, sigma, lo_v, hi_v, unit_s.trim(), prov_s.trim()) {
                 Err(e) => format!("err {e}"),
                 Ok(()) => format!("ok 写入 {name} = {value:?} +- {sigma} 到 {path}"),
             }
@@ -361,11 +376,14 @@ fn check_of(s: &str) -> Option<Check> {
 
 /// 把一个量写回标定文件。**先解析整份、只换那一格、再整份写回** ——
 /// 逐行改文本会在别的量上留下随机的格式差异,而标定文件的 diff 必须只反映真正变了的量。
+#[allow(clippy::too_many_arguments)]
 fn write_quantity(
     path: &str,
     name: &str,
     value: &[f64],
     sigma: f64,
+    lo: f64,
+    hi: f64,
     unit: &str,
     prov: &str,
 ) -> Result<(), String> {
@@ -382,6 +400,9 @@ fn write_quantity(
         "uncertainty".to_string(),
         Json::Arr(value.iter().map(|_| Json::Num(sigma)).collect()),
     );
+    q.insert("dim".to_string(), Json::Num(value.len() as f64));
+    q.insert("valid_lo".to_string(), Json::Arr(value.iter().map(|_| Json::Num(lo)).collect()));
+    q.insert("valid_hi".to_string(), Json::Arr(value.iter().map(|_| Json::Num(hi)).collect()));
     q.insert("unit".to_string(), Json::Str(unit.to_string()));
     q.insert("provenance".to_string(), Json::Str(prov.to_string()));
     q.insert("selftest_passed".to_string(), Json::Bool(true));
