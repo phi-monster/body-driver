@@ -16,5 +16,13 @@ for d in body-layer/slow/src contact-gen/src; do
     if [ -n "$hit" ]; then echo "🔴 $f"; echo "$hit"; bad=1; fi
   done < <(find "$ROOT/$d" -name '*.rs')
 done
-if [ "$bad" = 0 ]; then echo "🟢 驱动与 ②a 的**代码**里没有任何 benchmark 名字(注释引例不算)"; fi
+# 🔴 owner 2026-08-13:**驱动树里一行 Python 都不许有。**
+# `bl` 把驱动变成一个进程(一行一问一行一答)之后,那层 676 行的 ctypes 壳就没有存在理由了 ——
+# 而它一直躺在 `bind/python/` 里没删。壳住在驱动树里 = "驱动"这个词同时指一份 Rust 和一份跟着它漂的 Python。
+py=$(find "$ROOT/body-layer" "$ROOT/contact-gen" -name '*.py' -not -path '*/target/*' 2>/dev/null)
+if [ -n "$py" ]; then echo "🔴 驱动树里有 Python:"; echo "$py"; bad=1; fi
+
+if [ "$bad" = 0 ]; then
+  echo "🟢 驱动与 ②a:代码里没有 benchmark 名字(注释引例不算),树里零 Python"
+fi
 exit $bad
