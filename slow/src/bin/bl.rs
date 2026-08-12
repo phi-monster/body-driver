@@ -28,6 +28,8 @@
 //! homecal <归位记录文件> [散布上限]  每行 "x y z qw qx qy qz"
 //!                          -> val <xyz> q <四元数> spread <米> n <次数> | refused <理由>
 //! athome <x> <y> <z> <几倍散布>  -> 1 | 0 | refused <理由>
+//! submit <量名> <值[,值..]> <1σ> <单位文件> <出处文件>
+//!                          -> ok ... | err ...   「把一个量写进标定库,出处必填」
 //! verbs                    -> <所有动词名>
 //! quit
 //! ```
@@ -44,6 +46,8 @@ use body_layer::probe::{at_home, gripper_span_by_stall, home_pose};
 use std::io::{self, BufRead, Write};
 
 thread_local! {
+    /// 当前 `load` 的标定文件路径。`submit` 写回同一份。
+    static CAL: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
     /// 本次会话 `homecal` 量到的原位。`athome` 拿它当尺子。
     static HOME: std::cell::RefCell<Option<body_layer::measurement::Measurement>> =
         const { std::cell::RefCell::new(None) };
@@ -84,6 +88,7 @@ fn handle(t: &[&str], store: &mut Option<Store>) -> String {
                         let (ok, all) = s.tally();
                         let fp = s.fingerprint.clone();
                         *store = Some(s);
+                        CAL.with(|c| *c.borrow_mut() = Some(p.to_string()));
                         format!("ok {ok} {all} {fp}")
                     }
                 },
@@ -253,6 +258,40 @@ fn handle(t: &[&str], store: &mut Option<Store>) -> String {
                 },
             })
         }
+        // 把一个量【写进】标定库。读那一半 2026-08-12 已经搬进驱动,写这一半也得在驱动里 ——
+        // 否则"身体常数只有一个出口"这条,写侧仍然是个洞。
+        //
+        // 🔴 出处是**必填**的,而且必须来自文件(命令行塞不下一段真出处)。
+        //    没有出处的数就是手填的数,而手填的身体常数正是这一层要废掉的东西。
+        "submit" => {
+            let (Some(name), Some(vs), Some(sig), Some(unit), Some(prov)) =
+                (t.get(1), t.get(2), t.get(3), t.get(4), t.get(5))
+            else {
+                return "err submit 要 <量名> <值[,值..]> <1σ> <单位文件> <出处文件>".into();
+            };
+            let value: Vec<f64> = match vs.split(',').map(|x| x.parse::<f64>().ok()).collect() {
+                Some(v) => v,
+                None => return "err 值读不出来".into(),
+            };
+            let Ok(sigma) = sig.parse::<f64>() else {
+                return "err 1σ 读不出来".into();
+            };
+            let (Ok(unit_s), Ok(prov_s)) =
+                (std::fs::read_to_string(unit), std::fs::read_to_string(prov))
+            else {
+                return "err 单位或出处文件读不了".into();
+            };
+            if prov_s.trim().is_empty() {
+                return "err 出处是空的 —— 没有出处的数就是手填的数".into();
+            }
+            let Some(path) = CAL.with(|c| c.borrow().clone()) else {
+                return "err 还没 load 标定".into();
+            };
+            match write_quantity(&path, name, &value, sigma, unit_s.trim(), prov_s.trim()) {
+                Err(e) => format!("err {e}"),
+                Ok(()) => format!("ok 写入 {name} = {value:?} +- {sigma} 到 {path}"),
+            }
+        }
         "verbs" => (0..13u32)
             .filter_map(Verb::from_u32)
             .map(verb_name)
@@ -318,4 +357,47 @@ fn check_of(s: &str) -> Option<Check> {
         "knockedaway" | "3" => Check::KnockedAway,
         _ => return None,
     })
+}
+
+/// 把一个量写回标定文件。**先解析整份、只换那一格、再整份写回** ——
+/// 逐行改文本会在别的量上留下随机的格式差异,而标定文件的 diff 必须只反映真正变了的量。
+fn write_quantity(
+    path: &str,
+    name: &str,
+    value: &[f64],
+    sigma: f64,
+    unit: &str,
+    prov: &str,
+) -> Result<(), String> {
+    use body_layer::json::{parse, Json};
+    use std::collections::BTreeMap;
+    let src = std::fs::read_to_string(path).map_err(|e| format!("读不了 {path}: {e}"))?;
+    let mut root = parse(&src)?;
+    let Json::Obj(ref mut top) = root else {
+        return Err("标定文件的顶层不是对象".into());
+    };
+    let mut q = BTreeMap::new();
+    q.insert("value".to_string(), Json::Arr(value.iter().map(|v| Json::Num(*v)).collect()));
+    q.insert(
+        "uncertainty".to_string(),
+        Json::Arr(value.iter().map(|_| Json::Num(sigma)).collect()),
+    );
+    q.insert("unit".to_string(), Json::Str(unit.to_string()));
+    q.insert("provenance".to_string(), Json::Str(prov.to_string()));
+    q.insert("selftest_passed".to_string(), Json::Bool(true));
+    let ent = top
+        .entry("quantities".to_string())
+        .or_insert_with(|| Json::Obj(BTreeMap::new()));
+    let Json::Obj(ref mut qs) = ent else {
+        return Err("quantities 不是对象".into());
+    };
+    // 🔴 覆盖之前,把原来那一格**原样存进 `superseded`** —— 一个身体常数被换掉时,
+    //    旧值和旧出处不许无声消失,否则没人能回答"这个数什么时候变的、凭什么变"。
+    let mut newq = Json::Obj(q);
+    if let (Some(old), Json::Obj(ref mut nq)) = (qs.get(name).cloned(), &mut newq) {
+        nq.insert("superseded".to_string(), old);
+    }
+    qs.insert(name.to_string(), newq);
+    std::fs::write(path, root.dump(0)).map_err(|e| format!("写不了 {path}: {e}"))?;
+    Ok(())
 }

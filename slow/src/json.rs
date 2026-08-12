@@ -237,6 +237,62 @@ fn number(b: &[u8], i: &mut usize) -> Result<Json, String> {
         .ok_or_else(|| format!("偏移 {start} 处不是数"))
 }
 
+impl Json {
+    /// 写回 JSON 正文。**缩进两格、键有序**(`Obj` 用的是有序表)⇒ 同样的内容永远写出同样的字节,
+    /// 于是标定文件的 diff 只反映**真正变了的量**,而不是序列化顺序抖动。
+    pub fn dump(&self, indent: usize) -> String {
+        let pad = "  ".repeat(indent);
+        let pad1 = "  ".repeat(indent + 1);
+        match self {
+            Json::Null => "null".into(),
+            Json::Bool(b) => b.to_string(),
+            Json::Num(v) => {
+                if v.fract() == 0.0 && v.abs() < 1e15 {
+                    format!("{}", *v as i64)
+                } else {
+                    format!("{v}")
+                }
+            }
+            Json::Str(t) => quote(t),
+            Json::Arr(a) => {
+                if a.is_empty() {
+                    return "[]".into();
+                }
+                let body: Vec<String> = a.iter().map(|x| format!("{pad1}{}", x.dump(indent + 1))).collect();
+                format!("[\n{}\n{pad}]", body.join(",\n"))
+            }
+            Json::Obj(m) => {
+                if m.is_empty() {
+                    return "{}".into();
+                }
+                let body: Vec<String> = m
+                    .iter()
+                    .map(|(k, v)| format!("{pad1}{}: {}", quote(k), v.dump(indent + 1)))
+                    .collect();
+                format!("{{\n{}\n{pad}}}", body.join(",\n"))
+            }
+        }
+    }
+}
+
+fn quote(t: &str) -> String {
+    let mut s = String::with_capacity(t.len() + 2);
+    s.push('"');
+    for c in t.chars() {
+        match c {
+            '"' => s.push_str("\\\""),
+            '\\' => s.push_str("\\\\"),
+            '\n' => s.push_str("\\n"),
+            '\r' => s.push_str("\\r"),
+            '\t' => s.push_str("\\t"),
+            c if (c as u32) < 0x20 => s.push_str(&format!("\\u{:04x}", c as u32)),
+            c => s.push(c),
+        }
+    }
+    s.push('"');
+    s
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -262,6 +318,27 @@ mod tests {
     fn escapes_and_unicode_survive() {
         let j = parse(r#"{"a":"x\ny \"q\" µm"}"#).unwrap();
         assert_eq!(j.get("a").and_then(|x| x.text()), Some("x\ny \"q\" µm"));
+    }
+
+    #[test]
+    fn what_we_write_reads_back_identically() {
+        // 🔴 写标定文件这件事一旦失真,失真的是**身体常数**,而且没有任何下游会不一致。
+        //    所以往返必须逐字节稳定:写 → 读 → 再写,两次结果相同。
+        let src = r#"{"fingerprint":"abc","quantities":{"gripper_span":{"value":[0.0803],
+            "uncertainty":[0.0001],"selftest_passed":true,"unit":"metres between the jaws",
+            "provenance":"line1\nline2 with \"quotes\""}}}"#;
+        let a = parse(src).unwrap();
+        let once = a.dump(0);
+        let twice = parse(&once).unwrap().dump(0);
+        assert_eq!(once, twice, "写出来的东西读回去不一样");
+        // 内容也要在
+        let b = parse(&once).unwrap();
+        assert_eq!(
+            b.get("quantities").and_then(|x| x.get("gripper_span")).and_then(|x| x.get("value")).and_then(|x| x.num()),
+            Some(0.0803)
+        );
+        assert!(b.get("quantities").and_then(|x| x.get("gripper_span"))
+            .and_then(|x| x.get("provenance")).and_then(|x| x.text()).unwrap().contains("quotes"));
     }
 
     #[test]
