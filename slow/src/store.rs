@@ -30,6 +30,14 @@ pub enum Answer {
         provenance: String,
         /// 提交时它自己的自检过没过。
         selftest_passed: bool,
+        /// 🔴 **它是在哪一段范围上真的量过的**,按维排。问到范围外必须拒绝,而不是外推。
+        ///
+        /// 这两格 2026-08-13 之前**解析器读都不读**,于是一份存在磁盘上的标定
+        /// **还原不回一个 `Body`** —— 而 `Body` 才是准入闸住的地方。后果是消费方
+        /// 拿到的每一个身体量都绕过了闸:量到没量到看得见,**问出界了没有看不见**。
+        valid_lo: Vec<f64>,
+        /// 见 [`Self::Measured::valid_lo`]。
+        valid_hi: Vec<f64>,
     },
     /// 没量到,且理由被保留下来了。
     Refused {
@@ -94,6 +102,11 @@ fn read_one(v: &Json) -> Answer {
     }
     match v.get("value").map(|x| x.nums()) {
         Some(value) if !value.is_empty() => Answer::Measured {
+            // 🔴 有效区间以前**读都不读**,于是磁盘上的标定还原不成一个 `Body`,
+            //    而 `Body` 才是准入闸住的地方 —— 消费方拿到的每个数因此都绕过了闸。
+            //    (`submit` 的注释早写着 *"ask 那条路读的是 JSON 不走闸"*;这里补上读的那一半。)
+            valid_lo: v.get("valid_lo").map(|x| x.nums()).unwrap_or_default(),
+            valid_hi: v.get("valid_hi").map(|x| x.nums()).unwrap_or_default(),
             value,
             uncertainty: v.get("uncertainty").map(|x| x.nums()).unwrap_or_default(),
             unit: v.get("unit").and_then(|x| x.text()).unwrap_or("").to_string(),

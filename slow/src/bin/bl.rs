@@ -38,7 +38,14 @@
 //!
 //! 认不得的行答 `err unknown`。**任何一条都不会悄悄给默认值** —— 这一层的全部意义就是
 //! "没量到就说没量到"。
+//!
+//! ```text
+//! floorcal <下压停位文件:每行 x y z> [容差 m]   -> val z0 .. | refused <理由>
+//! floorat  <x> <y> <手停在的z> <几倍带宽>
+//!        -> onfloor | onsomething 高 <m> | armlimit 低于面 <m> | refused <理由>
+//! ```
 
+use body_layer::floor::{fit as floor_fit, read_stop, Stop};
 use body_layer::store::{Answer, Store};
 use body_layer::verb::{
     classify, contact_seen, decide, demand, holding, spannable, turn_before_lift, Axes, Check, Hold,
@@ -46,6 +53,7 @@ use body_layer::verb::{
 };
 use body_layer::measurement::Quantity;
 use body_layer::probe::{at_home, gripper_span_by_stall, home_pose};
+use body_layer::Body;
 use std::io::{self, BufRead, Write};
 
 thread_local! {
@@ -54,6 +62,8 @@ thread_local! {
     /// 本次会话 `homecal` 量到的原位。`athome` 拿它当尺子。
     static HOME: std::cell::RefCell<Option<body_layer::measurement::Measurement>> =
         const { std::cell::RefCell::new(None) };
+    /// 本次会话 `floorcal` 拟合出来的**能下到多低**。`floorat` 拿它判"手停在这儿是被什么停住的"。
+    static FLOOR: std::cell::RefCell<Option<Body>> = const { std::cell::RefCell::new(None) };
 }
 
 fn main() {
@@ -90,9 +100,12 @@ fn handle(t: &[&str], store: &mut Option<Store>) -> String {
                     Ok(s) => {
                         let (ok, all) = s.tally();
                         let fp = s.fingerprint.clone();
+                        // 顺手把它还原成一个身体 —— 后面所有"要过闸"的问答都靠这一份。
+                        let (b, admitted, rejected) = seed_body(&s);
+                        FLOOR.with(|f| *f.borrow_mut() = Some(b));
                         *store = Some(s);
                         CAL.with(|c| *c.borrow_mut() = Some(p.to_string()));
-                        format!("ok {ok} {all} {fp}")
+                        format!("ok {ok} {all} {fp} 过闸 {admitted} 闸拒 {rejected}")
                     }
                 },
             },
@@ -310,6 +323,88 @@ fn handle(t: &[&str], store: &mut Option<Store>) -> String {
                 Ok(()) => format!("ok 写入 {name} = {value:?} +- {sigma} 到 {path}"),
             }
         }
+        // 🔴 **我能下到多低** —— 一格网的下压停位拟合成一个面。
+        //
+        // 这一格(`Quantity::Floor`)的估计器 2026-08-09 就写好了,`bl_floor_fit` 也在 C ABI 里,
+        // **但 `bl` 进程从没把它暴露出来**;而 ctypes 那层已按规矩删掉 ⇒ 没有任何人能调到它。
+        // 「能被调用」不等于「被调用了」,这正是本层 README 自己写下的那条。
+        // 代价照记(2026-08-13,实测):策略层因此只能拿 `reach` 那个**水平圆环**判可达,
+        // 答不了"腕朝下、这个 xy、下到这个 z" —— 法兰残差与爪尖残差**完全相等 0.0482 m**
+        // (排除了工具偏置算错),每一次失败都落在这一格上。
+        "floorcal" => {
+            let Some(path) = t.get(1) else {
+                return "err floorcal 要 <下压停位文件:每行 x y z> [容差 m]".into();
+            };
+            let tol: f64 = t.get(2).and_then(|x| x.parse().ok()).unwrap_or(0.004);
+            let src = match std::fs::read_to_string(path) {
+                Ok(s) => s,
+                Err(e) => return format!("err 读不了 {path}: {e}"),
+            };
+            let (mut xs, mut ys, mut zs) = (Vec::new(), Vec::new(), Vec::new());
+            for ln in src.lines() {
+                let f: Vec<&str> = ln.split_whitespace().collect();
+                if f.len() < 3 {
+                    continue;
+                }
+                if let (Ok(a), Ok(b), Ok(c)) =
+                    (f[0].parse::<f64>(), f[1].parse::<f64>(), f[2].parse::<f64>())
+                {
+                    xs.push(a);
+                    ys.push(b);
+                    zs.push(c);
+                }
+            }
+            match floor_fit(&xs, &ys, &zs, tol, 0, 0, 0) {
+                Err(d) => format!("refused {d:?} (n={})", xs.len()),
+                Ok(m) => {
+                    // 提交进**已加载的那份标定还原出来的身体** —— floor 是拿"命令走了多少 vs
+                    // 实到多少"那把尺子量的,所以闸要求 contact_threshold / step_delivery
+                    // 已经在这具身体里。提交进一个空身体会被拒,而且拒得对(实测 2026-08-13:
+                    // `UnmeasuredDependency`)。
+                    FLOOR.with(|f| match f.borrow_mut().as_mut() {
+                        None => "err 还没 load 标定".to_string(),
+                        Some(b) => match b.submit(m) {
+                            Err(e) => format!("refused 准入闸: {e:?}"),
+                            Ok(_) => {
+                                let (v, s) = (m.value, m.uncertainty);
+                                format!(
+                                    "val z0 {:.5} dz/dx {:.5} dz/dy {:.5} sigma {:.5} \
+                                     x {:.4}..{:.4} y {:.4}..{:.4} n {}",
+                                    v[0], v[1], v[2], s[0],
+                                    m.valid_lo[0], m.valid_hi[0],
+                                    m.valid_lo[1], m.valid_hi[1],
+                                    xs.len()
+                                )
+                            }
+                        },
+                    })
+                }
+            }
+        }
+        // 手停在这儿 —— 是**停在面上** / **上面有东西** / 还是**这条胳膊没解了**。
+        // 🔴 第三种正是"够不到",而它和"碰到了"在命令-实到那把尺子上长得一模一样。
+        "floorat" => {
+            let Some(a) = nums(t, 4) else {
+                return "err floorat 要 <x> <y> <手停在的z> <几倍带宽>".into();
+            };
+            FLOOR.with(|f| match f.borrow().as_ref() {
+                None => "err 还没 floorcal".to_string(),
+                Some(b) => {
+                    let r = read_stop(b, a[0], a[1], a[2], a[3]);
+                    match (r.verdict.admit, r.stop) {
+                        (false, _) => format!("refused {:?}", r.verdict.why),
+                        (true, Some(Stop::OnFloor)) => format!("onfloor z {:.5}", r.floor_z),
+                        (true, Some(Stop::OnSomething(h))) => {
+                            format!("onsomething 高 {:.5} floor {:.5}", h, r.floor_z)
+                        }
+                        (true, Some(Stop::ArmLimit(d))) => {
+                            format!("armlimit 低于面 {:.5} floor {:.5}", d, r.floor_z)
+                        }
+                        (true, None) => "refused 没有读数".to_string(),
+                    }
+                }
+            })
+        }
         // 拿没拿住 —— 只看爪子自己的读数,不用物体位姿,真机上照样能问。
         "holding" => match nums(t, 4) {
             None => "err holding 要 <合爪时读数> <抬起后读数> <空爪门槛> <算滑的门槛>".into(),
@@ -326,6 +421,59 @@ fn handle(t: &[&str], store: &mut Option<Store>) -> String {
             .join(" "),
         _ => "err unknown".into(),
     }
+}
+
+/// 🔴 **把一份存在磁盘上的标定还原成一个 `Body`。**
+///
+/// 在这之前没有这条路:`ask` 直接读 JSON,**绕过准入闸**;而闸住在 `Body` 里。
+/// 后果是消费方"量到没量到"看得见,**"问出界了没有"看不见** —— 一具身体可以拿着一个
+/// 只在 0.13–0.60 m 上量过的数,去回答 0.90 m 处的问题,而没有任何一环会不一致。
+///
+/// 返回 (身体, 进闸的行数, 被闸拒的行数)。**被拒的那个数本身就是一条读数** ——
+/// 它说的是"这份标定里有几行,闸看了会不认"。
+fn seed_body(store: &Store) -> (Body, usize, usize) {
+    use body_layer::measurement::{AxisKind, Measurement, MAX_DEPS, MAX_DIM};
+    let mut b = Body::new();
+    let (mut ok, mut rejected) = (0usize, 0usize);
+    for qi in 0..Quantity::COUNT as u32 {
+        let Some(q) = Quantity::from_u32(qi) else { continue };
+        let Answer::Measured { value, uncertainty, valid_lo, valid_hi, selftest_passed, .. } =
+            store.ask(q.as_str())
+        else {
+            continue;
+        };
+        // 有效区间缺失 ⇒ 不许自己编一个。这一行就当它没进过闸。
+        if valid_lo.is_empty() || valid_hi.is_empty() {
+            rejected += 1;
+            continue;
+        }
+        let mut m = Measurement {
+            axis_kind: [AxisKind::Interval; MAX_DIM],
+            quantity: q,
+            dim: value.len().min(MAX_DIM),
+            value: [0.0; MAX_DIM],
+            uncertainty: [0.0; MAX_DIM],
+            valid_lo: [0.0; MAX_DIM],
+            valid_hi: [0.0; MAX_DIM],
+            measured_at_ns: 0,
+            valid_for_ns: 0,
+            deps: [None; MAX_DEPS],
+            epoch: 0,
+            selftest_passed,
+            prev_epoch: 0,
+        };
+        for i in 0..m.dim {
+            m.value[i] = value[i];
+            m.uncertainty[i] = *uncertainty.get(i).unwrap_or(&0.0);
+            m.valid_lo[i] = *valid_lo.get(i).unwrap_or(&valid_lo[0]);
+            m.valid_hi[i] = *valid_hi.get(i).unwrap_or(&valid_hi[0]);
+        }
+        match b.submit(m) {
+            Ok(_) => ok += 1,
+            Err(_) => rejected += 1,
+        }
+    }
+    (b, ok, rejected)
 }
 
 fn nums(t: &[&str], n: usize) -> Option<Vec<f64>> {
