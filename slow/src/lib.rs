@@ -118,6 +118,38 @@ impl Default for Body {
     }
 }
 
+/// 新的这一行是不是**每一项都比已存的差** —— 不确定度更大 **且** 量过的地更小。
+///
+/// 只在两者同时成立时为真。任一项更好都不算 —— 换了身体重标,覆盖的地通常仍可比,
+/// 而"又更不准、又量得更少"只有一种读法:这一次采得更差。
+fn worse_on_every_axis(new: &Measurement, old: &Measurement) -> bool {
+    let dim = new.dim.min(old.dim);
+    if dim == 0 {
+        return false;
+    }
+    let mut sigma_worse = false;
+    for i in 0..dim {
+        if new.uncertainty[i] < old.uncertainty[i] {
+            return false; // 有一维更准 ⇒ 不算全面更差
+        }
+        if new.uncertainty[i] > old.uncertainty[i] {
+            sigma_worse = true;
+        }
+    }
+    let mut box_smaller = false;
+    for i in 0..dim {
+        let (n_lo, n_hi) = (new.valid_lo[i], new.valid_hi[i]);
+        let (o_lo, o_hi) = (old.valid_lo[i], old.valid_hi[i]);
+        if n_lo < o_lo - 1e-12 || n_hi > o_hi + 1e-12 {
+            return false; // 有一维量得更宽 ⇒ 不算全面更差
+        }
+        if n_lo > o_lo + 1e-12 || n_hi < o_hi - 1e-12 {
+            box_smaller = true;
+        }
+    }
+    sigma_worse && box_smaller
+}
+
 impl Body {
     /// A body that knows nothing about itself yet.
     ///
@@ -148,6 +180,16 @@ impl Body {
         m.validate(&known)?;
 
         let idx = m.quantity as usize;
+        // 🔴 不许用一个【每一项都更差】的行覆盖已存的行。2026-08-13 实测发生过:
+        //    54 格 / 残差 0.26 mm / 域 x[-0.60,+0.60] 的地板,被一份 9 格 / 残差 7.5 mm /
+        //    域窄 0.3 m 的覆盖掉,全程无人反对;好的那份只能靠原始 rollout 还没删才重建回来。
+        //    换了身体当然该重标,但那种情况下**不会两项同时更差** —— 重标一条挪过位置的臂,
+        //    覆盖的地仍然可比。**又更不准、又量得更少**,只有一种读法:这一次采得更差。
+        if let Some(old) = self.slots[idx] {
+            if worse_on_every_axis(&m, &old) {
+                return Err(Malformed::WorseThanStored);
+            }
+        }
         m.prev_epoch = self.slots[idx].map_or(0, |old| old.epoch);
         m.epoch = self.next_epoch;
         self.next_epoch += 1;
@@ -240,6 +282,42 @@ mod tests {
         x.valid_lo[0] = v - 1.0;
         x.valid_hi[0] = v + 1.0;
         x
+    }
+
+    /// 🔴 **每一项都更差的行必须被拒。** 2026-08-13 实测发生过一次:
+    /// 54 格 / 残差 0.26 mm / 域 x[-0.60,+0.60] 的地板,被 9 格 / 残差 7.5 mm /
+    /// 域窄 0.3 m 的覆盖掉,全程无人反对。这个测试就是那次事故。
+    #[test]
+    fn worse_on_every_axis_is_refused() {
+        let mut b = Body::new();
+        let mut good = m(Quantity::Floor, 0.92, 0.00026, 0);
+        good.valid_lo[0] = -0.60;
+        good.valid_hi[0] = 0.60;
+        assert!(b.submit(good).is_ok());
+
+        let mut worse = m(Quantity::Floor, 0.93, 0.0075, 0); // 更不准
+        worse.valid_lo[0] = -0.60;
+        worse.valid_hi[0] = 0.30; // 而且量得更少
+        assert_eq!(b.submit(worse), Err(Malformed::WorseThanStored));
+        // 存着的仍然是好的那一份
+        assert_eq!(b.get(Quantity::Floor).unwrap().uncertainty[0], 0.00026);
+    }
+
+    /// 反面:**只要有一维更好就必须放行** —— 换了身体重标,常常是"没那么准但量得更宽",
+    /// 那是合法的重标,拒掉它会把这一层变成一个不能重新标定的层。
+    #[test]
+    fn worse_sigma_but_wider_box_is_admitted() {
+        let mut b = Body::new();
+        let mut narrow = m(Quantity::Floor, 0.92, 0.00026, 0);
+        narrow.valid_lo[0] = -0.10;
+        narrow.valid_hi[0] = 0.10;
+        assert!(b.submit(narrow).is_ok());
+
+        let mut wide = m(Quantity::Floor, 0.92, 0.0030, 0); // 更不准
+        wide.valid_lo[0] = -0.60;
+        wide.valid_hi[0] = 0.60; // 但量得更宽 ⇒ 放行
+        assert!(b.submit(wide).is_ok());
+        assert_eq!(b.get(Quantity::Floor).unwrap().uncertainty[0], 0.0030);
     }
 
     fn ask_for(q: Quantity) -> Ask {

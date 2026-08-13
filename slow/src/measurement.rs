@@ -281,6 +281,21 @@ pub enum Malformed {
     SelfTestFailed,
     /// More dependencies than [`MAX_DEPS`].
     TooManyDeps,
+    /// 🔴 It would replace a stored measurement that is **better on every axis** — wider uncertainty
+    /// *and* a strictly smaller probed box.
+    ///
+    /// Added 2026-08-13 because it happened: a floor measured over 54 cells (residual 0.26 mm, box
+    /// `x[-0.60,+0.60]`) was overwritten by one collected from 9 cells (residual **7.5 mm**, box
+    /// `x[-0.60,+0.30]` and a y range 0.3 m narrower). Nothing objected. The good one had to be
+    /// rebuilt from the original rollouts, and the only reason that was possible is that they had
+    /// not been deleted.
+    ///
+    /// A recalibration is legitimate when the body changed, and then it is normally *not* worse on
+    /// both axes at once — a fresh probe of a moved arm still covers a comparable box. Worse
+    /// uncertainty **and** less ground covered has one likely reading: this run collected less, and
+    /// the stored row was the better measurement. So this refuses, and the caller that really means
+    /// it clears the slot first.
+    WorseThanStored,
 }
 
 impl fmt::Display for Malformed {
@@ -293,6 +308,7 @@ impl fmt::Display for Malformed {
             Malformed::UnmeasuredDependency => "depends on a quantity never measured here",
             Malformed::SelfTestFailed => "self-test did not pass",
             Malformed::TooManyDeps => "too many dependencies",
+            Malformed::WorseThanStored => "worse than the stored row on every axis",
         };
         f.write_str(s)
     }
