@@ -335,6 +335,302 @@ returns a refusal instead of the better of them.
 
 ---
 
+---
+
+# What the layer above says to it: **the contact set**
+
+> Merged 2026-08-13 from `universal-grounding/ARCH.md` and `ARCH_NEW_TRY.md`, both now deleted.
+> One conclusion, in one place, latest version only.
+
+## The cut is fixed by mechanics, not taste
+
+```
+object side:  G · F_contact = F_object      G depends only on WHERE on the surface + the normal — body-independent
+body side:    J_hand(q) · q̇ = v_contact     J_hand depends only on the BODY — object-independent
+```
+
+The only quantities both sides share are **contact point / normal / relative direction at that point**.
+⇒ that is the unique place where *the layer above never names a body and the layer below never names
+an object, and the information is still sufficient.* One notch up (end-effector pose + a gripper
+scalar) has already assumed a two-fingered hand; one notch down (joint angles) has already assumed a
+DoF count. Murray–Li–Sastry ch.5.
+
+⚠️ **Correction on the record (owner, 2026-08-13):** the deleted `ARCH.md` framed this as *"the old
+interface was two-fingered"*. That is wrong about **this** architecture and was repeated in chat
+before being checked. The `bl_policy_in` port above has never carried a gripper span — the two-finger
+assumption lives in the **deployed RoboDojo/L3 action space** (`dx dy dz drx dry drz grip`), which is
+glue, not this contract. The contact set replaces *that*, and its argument is the mechanics above,
+not a flaw in this layer.
+
+## The contact set, stated once
+
+> ① which points on the object surface are touched · ② the normal at each and the **cone** of force
+> allowed there (direction, no magnitude) · ③ how the **object** must move (a twist) · ④ tolerance
+
+Thirteen verbs collapse into one template — *touch these points, push this way at each, and the
+object does this*:
+
+| verb | filled in as |
+|---|---|
+| push · sweep | one point (or edge), lateral force, object translates on its support |
+| press · tap | one point, normal force, object does not move (tap = with velocity) |
+| pry · flip · scoop | one point at an edge, up/side lever, object rotates about that edge |
+| grasp | ≥2 opposed points, inward force, object follows the hand |
+| pour · twist · insert | already held, object rotates/translates about an axis |
+
+⇒ what has to be learned is no longer *thirteen skills* but **how to fill this template's
+parameters** — half computed from geometry, half supplied by semantics.
+
+**Reach forbids two fingers by construction**: nothing in ①–④ mentions how many fingers exist. A
+suction cup fills the same table with one point and a normal-only cone.
+
+## Four producers, and what each is forbidden to name
+
+| layer | produces | from | 🔴 must never contain |
+|---|---|---|---|
+| **① body layer** (this directory) | constants of *this* body | **measurement** | any scene or task quantity |
+| **②a contact generator** — `contact-gen/`, its own crate, 11/11 tests | where this shape can be grasped (point · normal · jaw direction), filtered by ① | **computation** (geometry) | semantics, task |
+| **②b closed-form executor** | contact set + object twist → joint trajectory | **computation** | — |
+| **③ eye + weights** | which object · what to do · where it is **useful** to touch (not merely stable) | **VLM / learned** | metres, joint angles, DoF count, finger count, link geometry, gripper opening |
+
+`contact-gen` **does not read this layer**: body constants are passed in as arguments. The reverse
+dependency would destroy the mechanical guarantee that ②a is body-independent. It speaks the same
+process protocol as `bl` — `cg` with `body` / `grid` / `pts` / `gen` / `at`.
+
+### Rules ②a already encodes, each paid for by a measurement
+
+| rule | why |
+|---|---|
+| **height above the support is a THRESHOLD, not a maximise** | written as a maximise it dominates every later term and picks the topmost soft skin — a shoe's collar, the top face of a flat-lying hammer. Render-decided, and the only one of four revisions that raised the score: 26% → **34%** |
+| 🔴 **never delete a candidate for being "too wide"** | the one grasp-ability rule in this repo forbids using the jaw opening as a filter. Width enters the **ordering** only; segments that do not fit stay in the table, ranked last |
+| **a refusal must be able to state its reason** | `Refusal::{JawSpanUnknown, TooFewPoints, Flat, NoSection}` — never a silently empty list |
+| **jaw span unmeasured ⇒ the whole layer refuses** | `JawSpan::{Measured, Declared, Unknown}` |
+
+⚠️ **Measuring a width correctly is not grasping better.** Changing band thickness to the jaw face
+height *did* fix the measured width (a block stopped reading 0.0048 m) and cost **12 pp** — it also
+mixed two heights of material into one band, and *closed-on-nothing* went 21% → 33%.
+
+### Still owed by ②a
+
+| owed | status |
+|---|---|
+| **"can it be pinched"** | once measured locally, *"the jaws fit"* is almost always true for a convex solid ⇒ what actually decides is friction / depth / stability, which geometry alone cannot answer. **Slip is 41% of failures** |
+| surface normals · friction cones · centre-of-mass alignment | the current last-place sort key ("how deep the material is") is an invented proxy; no published grasp-quality metric is that |
+| jaw-face height | no slot in this layer; passed as a parameter today |
+
+## Body / world / semantics — the spine
+
+| | belongs to | obtained by | valid for |
+|---|---|---|---|
+| tool offset · jaw span · contact threshold · reach · home pose · **how much force a command produces** | **body** | **measured** (this layer) | one calibration, long-lived; new battery / worn part ⇒ measure again |
+| how heavy this thing is · where its centre is · whether it slips · how wide it is *there* | **world** | **measured by touching it** | asked per object, remembered once asked |
+| which object · what it should become · where it is **useful** to hold | **semantics** | VLM / learned | — |
+
+### 🔴 Force must be stored as two halves and never multiplied together
+
+> owner 2026-08-13: *"抓苹果这种任务做多了是不是就不用再碰了?但这个发力跟机体状态有关吗,满电/新旧都有差别。"*
+
+**How many newtons an apple needs** is a world property and can be remembered. **How many newtons a
+command produces** is a body property that drifts with charge, wear and temperature. Store the
+product — *"grasp apple at 0.37"* — and a battery swap invalidates it. Store the first, ask this
+layer for the second, every time.
+
+⇒ this is where measuring beats practising: a human cerebellum re-trained for a new arm takes months;
+re-measuring takes minutes.
+
+### Brain / cerebellum, and why the analogy earned its place
+
+Cortex = ③ the eye (decide what is wanted). Cerebellum = ① this layer + ②b (internal model + fast
+loop). The model a cerebellum holds of its own body **is** the set of measured body constants —
+a forward model.
+
+It predicted the observed symptoms before they were explained: cerebellar damage presents as *intent
+intact, but overshoot, mis-graded grip, jerky motion.* The robot: knows it wants the block, reaches
+roughly, knocks it away, cannot hold it, flings it 0.27 m in one step. Textbook.
+
+**One difference, and it is the advantage: theirs is trained, ours is measured.**
+
+## More constraints ⇒ a smaller answer set
+
+An unconstrained search is infinite; every **true** constraint collapses it by an order of magnitude.
+
+| constraint | removes | from |
+|---|---|---|
+| what my body can do | everything this body cannot execute | **① measured** |
+| only these points can be touched | every unreachable contact | **②a computed** |
+| what the world must become | every action irrelevant to the goal | **③ eye** |
+| physics | everything impossible | the world model |
+
+🔴 **Measured facts are HARD constraints (this arm simply cannot reach); learned facts are SOFT
+preferences. Hard constraints cut the space; soft ones cannot.**
+🔴 This is also why *refuse rather than invent* pays: an invented number is a **false** constraint —
+it removes the correct answer, and nothing downstream can tell.
+
+### Scenarios, and the constraint each one forces
+
+| scenario | constraint it forces |
+|---|---|
+| real robot (not sim) | must run in real time; **cannot see the far side** — no pretending a full model exists |
+| new body (6-axis → 7-axis → dual-arm → wheeled → humanoid) | the algorithm may not contain *"how many joints"* |
+| new end-effector (2-finger → 3 → 5 → suction) | may not contain *"how far open"* as a single scalar |
+| cheap hardware (LeKiwi) | no high-precision feedback, no force sensor |
+| grab a scurrying toy mouse | must be able to **re-plan at any instant**; latency dominates |
+| tidy a living room for 30 min | long tasks must decompose, and mistakes must be recoverable |
+| **dodge a punch** | 🔴 must be able to express **"do not touch"** — zero contact points plus a clearance |
+| a person nearby | no unpredictable large motions |
+
+🔴 **The dodge row is a real finding**: *wanting to touch* and *wanting to avoid* are the same
+constraint with opposite sign, so one solver covers grasping and evasion — not two.
+
+## Three solvers, one language
+
+| tier | rate | job |
+|---|---|---|
+| slow | s–min | what the world should become → a sequence of contact sets |
+| middle | 10–100 ms | given a contact set, how the joints move |
+| fast | ~1 ms | did it touch, did it slip → fix in place |
+
+All three speak contact sets. This layer answers *what this body is* alongside them, **and refuses
+when it does not know.**
+
+## Probing the world: three questions, all through channels that already exist
+
+No force sensor required.
+
+| question | how it is asked | which number is read |
+|---|---|---|
+| how wide is it there | close gently until it stops | jaw reading × jaw span |
+| how heavy | lift 3 cm | commanded travel vs achieved travel |
+| does it slip | same lift | **do the jaws keep closing** — measured: held median 0.0049 vs not-held 0.1755, zero overlap |
+| is the centre off | same lift | how much it rotated relative to the hand once lifted |
+
+**"Touch it first" is not a hard-coded step — it falls out of the arithmetic.** Roll the plan once
+with each unknown parameter at its pessimistic end; if the pessimistic roll cannot succeed, probing
+is worth its cost, otherwise act now. Second time the same object is seen, its table is still there
+and nothing is probed. *(This supersedes the earlier `+ λ·unknown` cost term, which needed a
+hand-picked λ.)*
+
+## Home pose belongs to ①, and not because a benchmark asks for it
+
+`all_robot_back_to_origin` is enforced in **30 of 42** RoboDojo tasks, but that is evidence, not the
+reason. The reason:
+
+> **Every action must end with the body in a known, repeatable configuration, or the next action
+> starts from an unknown one — this is the precondition for actions to compose at all.**
+
+Which arm's home it is → **①**. Whether it is home now → **①**. How to get back without sweeping
+things off the table → **②b** (lift straight up first; skimming the surface drags objects).
+
+**The tolerance is measured, never chosen**: homing once yields a pose with no spread, and *"am I
+home"* is entirely a question about spread. Refuse when asked for a tolerance tighter than the body's
+own repeatability, rather than answering "not home" forever. Measured here: repeatability **0.74 mm**
+on synthetic records; **0.000 mm spread over n=11** on this body (2026-08-13).
+
+## 🔴 A driver may not be written against a benchmark
+
+**This layer is going into the world, not onto a leaderboard.** It answers *what is this body like*,
+never *how does this benchmark score*.
+
+| | allowed | forbidden |
+|---|---|---|
+| comments | citing a benchmark as an **example** | citing *"this leaderboard requires X"* as the **reason** a quantity exists |
+| code | — | **any** benchmark / task / scene name |
+
+Second clause: **no Python anywhere in the driver tree.** Once `bl` is a process (one line in, one
+line out), the 725-line ctypes shell has no reason to exist and its presence made *"the driver"* mean
+one Rust program plus a Python file drifting behind it. Deleted.
+
+**A documentation rule only counts once it is a check that can fail** ⇒ `body-layer/check_purity.sh`,
+run before每次提交: ① no benchmark names in `body-layer/slow/src` or `contact-gen/src` after stripping
+comments; ② no `*.py` in the driver tree. Non-zero exit on either.
+
+## What must genuinely be learned (everything else is measured or computed)
+
+| item | why it is not computable | evidence |
+|---|---|---|
+| **scooping to a target mass** | a missing scalar, not insufficient precision: vision gives volume, volume→mass needs density, density needs force/weighing/acoustics | every work reporting gram-level accuracy reads it from a forbidden channel; pure-vision works report volume or fill fraction |
+| **in-hand manipulation with many fingers** | published solutions are RL-only and cover single-axis continuous rotation; *rotate to a specified angle* is unsolved. ⚠️ the premise matters: that claim holds **without a model, without touch, without depth** | — |
+| **deformables / granular / fluid** | no object frame and no finite contact set ⇒ the interface degenerates into a field, and the field's evolution is exactly what must be learned | folding has a closed form (G-fold, 50/50 on real towels); **flattening has only learned solutions** |
+| **semantics** | force closure says where it is stable, never where it is useful (do not grasp a blade; pour by the handle) | — |
+| **object priors** (μ / mass / fragility) | no direct measurement without force; geometry cannot imply them | initialised by the VLM, narrowed by interaction |
+
+🟢 **Two-finger regrasping is the most complete non-learned region** — using external contact or
+gravity to regrasp, flipping against a surface, putting down and re-taking — verified on real robots
+without force, depth or touch sensing. The one gap is local contact geometry, and the three routes to
+that are each published separately; **nobody has joined the two halves.**
+
+## Honest limits
+
+1. **Contact-set planning stops scaling as points multiply.** Classical results cover a few simple
+   geometries; a five-finger hand has many contacts.
+2. **Computed correct ≠ holds.** Force closure and ε-metrics destabilise within seconds when real
+   friction differs from the assumption or a lateral disturbance arrives, and ε predicts robustness
+   to pose error poorly.
+3. **Global physical parameters cannot be learned from feedback** (measured on real hardware) — the
+   signal is too weak. Feedback can adjust the moment of first contact, nothing more.
+4. **"What humans do" here is inferred, not measured** — the 76.03% teleoperation figure is from a
+   paper; it has never been run on this rig.
+5. **Nobody has reported 76% averaged over 42 tasks.**
+6. **Multi-step tasks multiply**: 38% per step ⇒ stacking (2 steps) 14%, packing (4 steps) 2%.
+   **Below ~90% per step, matching a human teleoperator is arithmetically impossible.**
+7. **Modularity's own cost**: six links at 0.7–0.9 each ⇒ 20–40% end to end. **"Retry on failure" is
+   therefore not optional** — it is the only thing that pulls the product back up.
+8. 🔴 **Covering 99% and minimising what is learned are in direct opposition.** Rigid bodies and
+   articulated objects are almost entirely computable; the remaining ~30% (cloth, powder, liquid) is
+   almost entirely learned. Engineering cannot dissolve this — one side has to be chosen.
+
+## Lessons paid for in GPU time (2026-08-13)
+
+Each of these produced a run that had to be thrown away.
+
+| lesson | fingerprint it showed | fix |
+|---|---|---|
+| 🔴 **an unavailable value must default to the UNFAVOURABLE side** | `held = jaw_width < 0.9·(thickness or 1e9)` ⇒ with no material `0.0803 < 9e8` is always true ⇒ believed it was holding from step one; `touched_any` **26/26 = 100%** while object displacement was **0.000 m** | never fall to the favourable side. This layer's *refuse* discipline held; the layer above broke it |
+| 🔴 **the same gate, second form** | closing to *a computed width* reached the command **exactly** (3.10 cm commanded, 3.10 cm reached) — i.e. it closed on air — and the old test still scored it as held: **10/11 by my record, 0/8 official** | **close until blocked and read where it stopped.** Independent of any width estimate and of the wrist convention |
+| **feed all four slots of the contact set, or the cost is flat** | cost from slot ③ alone ⇒ nothing before contact changes anything ⇒ every candidate ties: 12/12 steps hit the search cap, displacement all 0.0000, held 0/12 | — |
+| 🔴 **tolerance is per contact point, not per plan** (slot ④, defined and never used) | rendered frames show the jaws **already parked over the object, open, straddling it**, while the code re-planned forever because the *hover* waypoint was 5 cm off | millimetres where it touches; centimetres where it merely approaches |
+| 🔴 **ask this layer before measuring anything yourself** | a whole run spent measuring "cycles of dead time" (`latency` = **0**, already stored) and another measuring per-cycle travel (`step_delivery` = **0.9999**, already stored) | `bl list` first. 14 quantities are stored; the glue was asking for 6 |
+| 🔴 **do not rebuild what exists** | a Python grasp-candidate generator was written from scratch, re-deriving three rules `contact-gen` already encodes — and **violating** the *never delete a wide candidate* rule by truncating to the top 6 | `cg` is a process; call it |
+| **a silent fallback is worse than a crash** | an asset path with the wrong case, swallowed by `except: return None`, left the point cloud **empty for five consecutive runs** while the code silently used a degenerate fallback that looks exactly like a poorly-performing feature | log which branch was taken, every episode |
+| **ask the simulator for geometry; do not guess file paths** | as above | read the mesh from the live stage — it also removes the pose transform |
+
+## Two stored quantities that are not trustworthy today
+
+| quantity | reading | verdict |
+|---|---|---|
+| `backlash` | **refuses**: *"samples imply mutually inconsistent answers"* | 🟢 the refusal is correct — leave it refusing, do not invent a value |
+| `floor` | **0.9208** while `home` z is **0.9215** — 0.7 mm apart | 🔴 degenerate: the press-down probe never descended. Must be re-measured against an actual support surface before anything uses it |
+
+## What is missing and is blocking today
+
+**`reach` answers a radial band `[0.13425, 0.6019]`** — validated on 2174 real episodes, and still
+unable to answer *"wrist down, at this xy, descending to this z — can I hold that pose?"* Every
+failure in the 2026-08-13 runs landed there: the flange residual and the tool-point residual were
+**identical (0.0482 m)**, which rules out a tool-offset error and leaves *the pose is outside the
+workspace*. Until that slot exists, the layer above has to ask by acting — which is a measurement,
+not a hand-filled constant, but it belongs here.
+
+## Verification, fixed before the numbers exist
+
+Ordered by *cheapest thing that can kill the idea*, not by *most impressive*. Any shot that fails
+stops the sequence.
+
+| shot | question | target | 🟢 win | 🔴 lose |
+|---|---|---|---|---|
+| **1 · expressiveness** | can the new interface state an action the old one structurally cannot | twisting a bottle cap — **0/16** on the old interface, named cause *"orientation is not in the control law's fixed point"* | official **> 0/16**, no regression elsewhere | still 0 ⇒ the derivation is wrong; the cut is not there |
+| **2 · coverage** | is a whole class bought, or one task | the 18 RoboDojo tasks needing a final object **orientation**, now **1/14** | **≥7/18** | unchanged ⇒ expressiveness was not the bottleneck |
+| **3 · cross-body** | does a kinematically different body run with **not one byte** of upper-layer change | ARX X5 (6-axis) + Franka (7-axis), both already on the rig | Franka absolute successes **≥70%** of X5's | needs an upper-layer edit ⇒ name the body quantity still leaking through |
+
+**Instrumentation gates** (any one failing ⇒ the run does not count): `body_const_source` must read
+`body_layer(...)` · `contact_thr_from` must read `body_layer(contact_threshold)` · `touched_any` must
+contain a real True — **and must be read together with displacement**; held-without-movement is a
+false gate, by construction.
+
+**Accounting**: official `_result.json` `success` only · headline is **N attempts, M successes**,
+percentages descriptive only · a temporary drop during a rewrite is expected and is not a loss.
+
+---
+
 ## Acceptance: one long task, end to end, through this layer
 
 🔴 **The leaderboard runs go *through* this ABI. No stitching alongside it** — a stitched path is
