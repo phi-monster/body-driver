@@ -109,10 +109,26 @@ pub enum Check {
     AsPlanned,
     /// 合到底,指间空的
     ClosedOnAir,
-    /// 夹住了,但夹的是别的一段
+    /// 夹住了,但夹的是别的一段。
+    ///
+    /// ⚠️ **保留是为了不改 ABI 的既有编号**;新代码应当读下面劈开的两档 ——
+    /// 这一档把两件**修法相反**的事混在一起,见 [`Self::StoppedWide`] / [`Self::PinchedThinner`]。
     WrongSection,
     /// 还没夹到就把物体碰跑了
     KnockedAway,
+    /// 🔴 **钳口【没走到】那一段就停住了** —— 实夹宽度 ÷ 计划段宽 **> 1**。
+    ///
+    /// 判别量与分组来自实测(n=185):锤子 **2.50** · 扳手 **1.72**(这一档)
+    /// vs 钳子 **0.06** · 卷尺 **0.32**(另一档)—— **零重叠**,所以界就在 1,不是拍出来的。
+    ///
+    /// ⚠️ **这一档还有两种读法分不开,必须一起写**:那一处**确实更宽**,
+    /// vs **爪尖压在支撑面上被摩擦卡住**。分开只要一个探针 ——
+    /// **同一个 xy 抬高 3 cm 再合一次爪**。**该探针未做**,所以本档的建议只是**符号**。
+    StoppedWide,
+    /// 🔴 **钳口【走过头】,捏到了更细的一处** —— 实夹宽度 ÷ 计划段宽 **< 1**。
+    ///
+    /// 这一档才是"下手点选错了",换下一个候选有意义。
+    PinchedThinner,
 }
 
 /// "碰到了没有"。
@@ -157,9 +173,18 @@ pub fn classify(
     }
     let err = (held - planned_w_m).abs();
     if planned_w_m > 0.0 && err <= tol_frac * planned_w_m {
-        Check::AsPlanned
+        return Check::AsPlanned;
+    }
+    if planned_w_m <= 0.0 {
+        return Check::WrongSection; // 没有计划段宽 ⇒ 劈不开,如实报旧档
+    }
+    // 🔴 劈成两档:比值 = 实夹宽度 ÷ 计划段宽。**界在 1,不是拍的** ——
+    //    实测 n=185 两组零重叠:锤子 2.50 / 扳手 1.72 vs 钳子 0.06 / 卷尺 0.32。
+    //    两档的修法**相反**:前者该换动词(钳口没走到那一段),后者该换下手点(走过头捏细了)。
+    if held > planned_w_m {
+        Check::StoppedWide
     } else {
-        Check::WrongSection
+        Check::PinchedThinner
     }
 }
 
@@ -182,6 +207,16 @@ pub fn decide(v: Verb, c: Check) -> Next {
     match c {
         Check::AsPlanned => Next::Proceed,
         Check::WrongSection => Next::NextContact,
+        // 走过头捏了更细的一处 ⇒ 下手点选错了,换下一个候选。
+        Check::PinchedThinner => Next::NextContact,
+        // 钳口没走到那一段 ⇒ 换地方没用,该换招式(平躺薄件先撬起一边)。
+        Check::StoppedWide => {
+            if v.closes_jaw() {
+                Next::ChangeVerb(Verb::Pry)
+            } else {
+                Next::NextContact
+            }
+        }
         Check::KnockedAway => Next::Relook,
         // 合到底 = 指间空的。对要合爪的动词,这通常意味着物体平贴支撑面、爪子伸不到它下面
         // ⇒ 换成"先撬起一边"。对不合爪的动词,这个判读不适用。
@@ -369,11 +404,21 @@ mod tests {
             classify(0.009, 0.1281, 0.088, 0.0, 0.03, 0.5),
             Check::AsPlanned
         );
-        // 贝壳:打算夹 0.0287,实夹 0.0384 ⇒ 夹错了段
+        // 贝壳:打算夹 0.0287,实夹 0.0384 ⇒ 比值 1.34 > 1
+        // 🔴 2026-08-13 劈开之后,这一例落在【钳口没走到那一段】,该换动词而不是换下手点。
+        //    劈开依据是实测 n=185 两组零重叠:锤子 2.50 / 扳手 1.72 vs 钳子 0.06 / 卷尺 0.32。
         assert_eq!(
             classify(0.0287, 0.0384 / 0.088, 0.088, 0.0, 0.03, 0.2),
-            Check::WrongSection
+            Check::StoppedWide
         );
+        // 反面也必须有:走过头捏到更细的一处(钳子 0.06 那一档)⇒ 换下手点才有意义。
+        assert_eq!(
+            classify(0.0500, 0.0030 / 0.088, 0.088, 0.0, 0.03, 0.2),
+            Check::PinchedThinner
+        );
+        // 两档的下一步必须相反,否则劈开没有意义。
+        assert_eq!(decide(Verb::Grasp, Check::StoppedWide), Next::ChangeVerb(Verb::Pry));
+        assert_eq!(decide(Verb::Grasp, Check::PinchedThinner), Next::NextContact);
         // 铲子第二三次:爪值 0 ⇒ 合到底
         assert_eq!(
             classify(0.0835, 0.0, 0.088, 0.0, 0.03, 0.2),

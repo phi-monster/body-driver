@@ -1417,6 +1417,10 @@ pub unsafe extern "C" fn bl_after_check(verb: u32, check: u32, out_verb: *mut u3
         1 => crate::verb::Check::ClosedOnAir,
         2 => crate::verb::Check::WrongSection,
         3 => crate::verb::Check::KnockedAway,
+        // 劈开的两档:编号往后加,既有 0..3 不动 —— ABI 的既有编号一改,
+        // 所有已编译的调用方会静默换语义,而这正是本层存在的理由。
+        4 => crate::verb::Check::StoppedWide,
+        5 => crate::verb::Check::PinchedThinner,
         _ => return 255,
     };
     match crate::verb::decide(v, c) {

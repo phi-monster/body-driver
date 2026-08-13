@@ -521,6 +521,9 @@ fn check_name(c: Check) -> &'static str {
         Check::ClosedOnAir => "closedonair",
         Check::WrongSection => "wrongsection",
         Check::KnockedAway => "knockedaway",
+        // 劈开的两档:名字里就写清楚该往哪边修。
+        Check::StoppedWide => "stoppedwide",
+        Check::PinchedThinner => "pinchedthinner",
     }
 }
 
@@ -528,6 +531,8 @@ fn check_of(s: &str) -> Option<Check> {
     Some(match s {
         "asplanned" | "0" => Check::AsPlanned,
         "closedonair" | "1" => Check::ClosedOnAir,
+        "stoppedwide" | "4" => Check::StoppedWide,
+        "pinchedthinner" | "5" => Check::PinchedThinner,
         "wrongsection" | "2" => Check::WrongSection,
         "knockedaway" | "3" => Check::KnockedAway,
         _ => return None,
