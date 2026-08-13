@@ -284,3 +284,224 @@ mod loo_tests {
         assert!(dirty[4] > worst_clean + 0.05, "错点 {} 干净最差 {}", dirty[4], worst_clean);
     }
 }
+
+// ============================================================================================
+// 🔴 透视变换:一个平面被相机拍下来,数学上就是这个,仿射只是它的一阶近似
+// ============================================================================================
+//
+// # 为什么非换不可(不是调参,是把物理写对)
+//
+// 实测:仿射表在真机上**拟合残差 0.0059(约 4 px)看着没问题,而样本外误差平均 6.3 cm、最差
+// 24.8 cm**。而且失败的形状本身指出了根因 —— **误差集中在边缘点上**,中间那几个点很准。
+//
+// 这正是"用仿射去近似透视"的签名:相机成像有一步**除以深度**(近大远小),仿射把那一步丢了。
+// 在标定区中间丢得不明显,越往边上差得越多。加更多点救不了,因为**模型本身少了一项**。
+//
+// 透视有 8 个自由度(仿射 6 个),多出来的两个正是那一项。四个点恰定 —— 所以这里同样要求
+// **≥5 个点**才谈得上自检,理由与 `fit` 那条一模一样。
+
+/// 一张量出来的透视换算表。
+#[derive(Copy, Clone, Debug)]
+pub struct Homography {
+    /// `u = (h[0]x + h[1]y + h[2]) / (h[6]x + h[7]y + 1)`,
+    /// `v = (h[3]x + h[4]y + h[5]) / (h[6]x + h[7]y + 1)`
+    pub h: [f64; 8],
+    /// 拟合残差(归一化画面单位)。**同样不是精度** —— 精度看 [`loo_homography`]。
+    pub residual: f64,
+    /// 用了几个点。
+    pub n: usize,
+}
+
+/// 由若干组 `(世界x, 世界y, 画面u, 画面v)` 拟合透视变换。
+pub fn fit_homography(pts: &[(f64, f64, f64, f64)]) -> Result<Homography, Bad> {
+    if pts.len() < MIN_POINTS {
+        return Err(Bad::NotEnoughPoints);
+    }
+    if pts.iter().any(|p| ![p.0, p.1, p.2, p.3].iter().all(|v| v.is_finite())) {
+        return Err(Bad::NotFinite);
+    }
+    // 法方程 (AᵀA)h = Aᵀb。每个点两行:
+    //   [x y 1 0 0 0 −ux −uy] · h = u
+    //   [0 0 0 x y 1 −vx −vy] · h = v
+    let mut ata = [[0.0f64; 8]; 8];
+    let mut atb = [0.0f64; 8];
+    for p in pts {
+        let (x, y, u, v) = *p;
+        let rows = [
+            ([x, y, 1.0, 0.0, 0.0, 0.0, -u * x, -u * y], u),
+            ([0.0, 0.0, 0.0, x, y, 1.0, -v * x, -v * y], v),
+        ];
+        for (r, rhs) in rows {
+            for i in 0..8 {
+                atb[i] += r[i] * rhs;
+                for j in 0..8 {
+                    ata[i][j] += r[i] * r[j];
+                }
+            }
+        }
+    }
+    let h = solve8(&mut ata, &mut atb).ok_or(Bad::Degenerate)?;
+
+    let mut ss = 0.0;
+    for p in pts {
+        let (pu, pv) = apply(&h, p.0, p.1).ok_or(Bad::Degenerate)?;
+        ss += (pu - p.2).powi(2) + (pv - p.3).powi(2);
+    }
+    let dof = (2 * pts.len()).saturating_sub(8).max(1) as f64;
+    Ok(Homography { h, residual: (ss / dof).sqrt(), n: pts.len() })
+}
+
+/// 世界 → 画面。分母趋零(那条"地平线")时返回 `None`,不给一个爆掉的数。
+fn apply(h: &[f64; 8], x: f64, y: f64) -> Option<(f64, f64)> {
+    let w = h[6] * x + h[7] * y + 1.0;
+    if !w.is_finite() || w.abs() < 1e-9 {
+        return None;
+    }
+    Some(((h[0] * x + h[1] * y + h[2]) / w, (h[3] * x + h[4] * y + h[5]) / w))
+}
+
+impl Homography {
+    /// 世界 → 画面。
+    pub fn to_pixel(&self, x: f64, y: f64) -> Option<(f64, f64)> {
+        apply(&self.h, x, y)
+    }
+
+    /// 画面 → 世界。把两条方程整理成 2×2 直接解,退化时返回 `None`。
+    pub fn to_world(&self, u: f64, v: f64) -> Option<(f64, f64)> {
+        if !(u.is_finite() && v.is_finite()) {
+            return None;
+        }
+        let h = &self.h;
+        let (a11, a12, b1) = (h[0] - u * h[6], h[1] - u * h[7], u - h[2]);
+        let (a21, a22, b2) = (h[3] - v * h[6], h[4] - v * h[7], v - h[5]);
+        let det = a11 * a22 - a12 * a21;
+        if !det.is_finite() || det.abs() < 1e-12 {
+            return None;
+        }
+        Some(((b1 * a22 - b2 * a12) / det, (a11 * b2 - a21 * b1) / det))
+    }
+}
+
+/// 留一验证,透视版。理由与 [`leave_one_out`] 一字不差:残差衡量"这批点彼此多自洽",
+/// 样本外才是"到了没见过的地方多准"。
+pub fn loo_homography(pts: &[(f64, f64, f64, f64)]) -> Result<Vec<f64>, Bad> {
+    if pts.len() < MIN_POINTS + 1 {
+        return Err(Bad::NotEnoughPoints);
+    }
+    let mut out = Vec::with_capacity(pts.len());
+    for skip in 0..pts.len() {
+        let rest: Vec<(f64, f64, f64, f64)> =
+            pts.iter().enumerate().filter(|(i, _)| *i != skip).map(|(_, p)| *p).collect();
+        let m = fit_homography(&rest)?;
+        let (pu, pv) = m.to_pixel(pts[skip].0, pts[skip].1).ok_or(Bad::Degenerate)?;
+        out.push(((pu - pts[skip].2).powi(2) + (pv - pts[skip].3).powi(2)).sqrt());
+    }
+    Ok(out)
+}
+
+/// 8×8 高斯-约当,带部分主元。奇异就返回 `None`,不返回一个"看起来像解"的东西。
+fn solve8(a: &mut [[f64; 8]; 8], b: &mut [f64; 8]) -> Option<[f64; 8]> {
+    for c in 0..8 {
+        let mut piv = c;
+        for r in c + 1..8 {
+            if a[r][c].abs() > a[piv][c].abs() {
+                piv = r;
+            }
+        }
+        if !a[piv][c].is_finite() || a[piv][c].abs() < 1e-14 {
+            return None;
+        }
+        a.swap(c, piv);
+        b.swap(c, piv);
+        let d = a[c][c];
+        for j in c..8 {
+            a[c][j] /= d;
+        }
+        b[c] /= d;
+        for r in 0..8 {
+            if r == c {
+                continue;
+            }
+            let f = a[r][c];
+            if f == 0.0 {
+                continue;
+            }
+            for j in c..8 {
+                a[r][j] -= f * a[c][j];
+            }
+            b[r] -= f * b[c];
+        }
+    }
+    Some(*b)
+}
+
+#[cfg(test)]
+mod homography_tests {
+    use super::*;
+
+    /// 造一台**斜着看**的相机:世界平面上的点按真透视投影,分母随位置变化。
+    fn truth(x: f64, y: f64) -> (f64, f64) {
+        let w = 0.35 * x + 0.9 * y + 1.0;
+        ((0.90 * x - 0.30 * y + 0.43) / w, (-0.03 * x - 0.95 * y + 0.18) / w)
+    }
+
+    fn grid() -> Vec<(f64, f64, f64, f64)> {
+        let mut v = Vec::new();
+        for &x in &[0.10, 0.22, 0.35] {
+            for &y in &[-0.33, -0.22, -0.10] {
+                let (u, vv) = truth(x, y);
+                v.push((x, y, u, vv));
+            }
+        }
+        v
+    }
+
+    /// 🔴 **对照:同一批点,仿射输、透视赢。** 没有这一条,"换了模型好了"就可能只是碰巧。
+    #[test]
+    fn on_a_truly_perspective_camera_affine_loses_and_homography_wins() {
+        let pts = grid();
+        let aff = leave_one_out(&pts).expect("九个点够留一");
+        let hom = loo_homography(&pts).expect("九个点够留一");
+        let (wa, wh) = (
+            aff.iter().cloned().fold(0.0, f64::max),
+            hom.iter().cloned().fold(0.0, f64::max),
+        );
+        assert!(wh < wa / 10.0, "透视应当远好于仿射:仿射最差 {wa:.5} 透视最差 {wh:.5}");
+        assert!(wh < 1e-6, "点本来就来自一个透视相机,透视应当几乎精确:{wh}");
+    }
+
+    /// 回代还原:画面 → 世界 → 画面,要回到原处。
+    #[test]
+    fn round_trips_through_world_and_back() {
+        let pts = grid();
+        let m = fit_homography(&pts).expect("拟合得出");
+        for p in &pts {
+            let (x, y) = m.to_world(p.2, p.3).expect("逆变换存在");
+            assert!((x - p.0).abs() < 1e-6 && (y - p.1).abs() < 1e-6, "{x} {y} vs {} {}", p.0, p.1);
+        }
+    }
+
+    /// 四个点做不了留一(抽掉一个只剩三点,而透视要四点)—— 与仿射那条同一个道理。
+    #[test]
+    fn four_points_cannot_be_leave_one_out_checked() {
+        // 🔴 必须取**任意三点不共线**的四个点(这里取四角)。随手取前四个会有三点共线,
+        // 而共线的四点定不出透视 —— 上面那条 `Degenerate` 正是这么被自己的测试撞出来的。
+        let g = grid();
+        let pts = vec![g[0], g[2], g[6], g[8]];
+        assert!(fit_homography(&pts).is_ok());
+        assert_eq!(loo_homography(&pts).unwrap_err(), Bad::NotEnoughPoints);
+    }
+
+    /// 点共线 ⇒ 拒绝,而不是给一个沿线之外全靠编的解。
+    #[test]
+    fn collinear_points_are_refused() {
+        let pts: Vec<(f64, f64, f64, f64)> = (0..5)
+            .map(|i| {
+                let x = 0.10 + 0.05 * i as f64;
+                let (u, v) = truth(x, -0.22);
+                (x, -0.22, u, v)
+            })
+            .collect();
+        assert_eq!(fit_homography(&pts).unwrap_err(), Bad::Degenerate);
+    }
+}
