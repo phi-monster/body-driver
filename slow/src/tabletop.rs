@@ -109,6 +109,36 @@ pub fn fit(pts: &[(f64, f64, f64, f64)]) -> Result<Map, Bad> {
     Ok(Map { a, b, residual: (ss / dof).sqrt(), n: pts.len() })
 }
 
+/// 🔴 **留一验证:每个点都用【另外那些点】去预测它自己。**
+///
+/// 拟合残差有一个致命的诚实问题 —— 参数是**用同一批点算出来的**,所以残差衡量的是"这批点
+/// 彼此有多自洽",不是"这张表在一个没见过的地方有多准"。四个点、六个自由度时,那份残差只
+/// 剩两个自由度,几乎必然好看。
+///
+/// 留一给出的是**样本外**误差:抽掉一个点,用剩下的重新拟合,再去预测被抽掉那个。这就是这
+/// 张表将来面对一个新位置时的处境,所以它才是能拿去用的那个数。
+///
+/// 返回每个点的样本外误差(归一化画面单位)。少于 `MIN_POINTS + 1` 个点时留一之后就不够拟
+/// 合了,直接拒绝 —— 而不是返回一串好看的零。
+pub fn leave_one_out(pts: &[(f64, f64, f64, f64)]) -> Result<Vec<f64>, Bad> {
+    if pts.len() < MIN_POINTS + 1 {
+        return Err(Bad::NotEnoughPoints);
+    }
+    let mut out = Vec::with_capacity(pts.len());
+    for skip in 0..pts.len() {
+        let rest: Vec<(f64, f64, f64, f64)> = pts
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| *i != skip)
+            .map(|(_, p)| *p)
+            .collect();
+        let m = fit(&rest)?;
+        let (pu, pv) = m.to_pixel(pts[skip].0, pts[skip].1);
+        out.push(((pu - pts[skip].2).powi(2) + (pv - pts[skip].3).powi(2)).sqrt());
+    }
+    Ok(out)
+}
+
 impl Map {
     /// 画面上的一点 → 桌面上的一点。逆变换退化时返回 `None` 而不是一个编出来的坐标。
     pub fn to_world(&self, u: f64, v: f64) -> Option<(f64, f64)> {
@@ -209,5 +239,48 @@ mod tests {
             (f64::NAN, -0.18, 0.44, 0.232),
         ];
         assert_eq!(fit(&pts).unwrap_err(), Bad::NotFinite);
+    }
+}
+
+#[cfg(test)]
+mod loo_tests {
+    use super::*;
+
+    /// 🔴 今晚真机量到的**四个**对子(锁死朝向、同一套采样、15 cm 宽基线)。
+    ///
+    /// 四个点做留一之后只剩三个,而三点恰定 ⇒ 按本文件的规矩要拒绝。这条把"数据到手了但
+    /// 还不够验"钉成一条会失败的检查,而不是让它悄悄退化成一个好看的零。
+    #[test]
+    fn four_real_pairs_cannot_be_leave_one_out_checked() {
+        let four = [
+            (-0.2500, -0.2000, 0.27432, 0.29791),
+            (-0.1000, -0.2000, 0.43365, 0.31652),
+            (-0.2500, -0.0600, 0.30814, 0.17977),
+            (-0.1750, -0.1300, 0.36409, 0.23208),
+        ];
+        assert!(fit(&four).is_ok(), "四点足够拟合");
+        assert_eq!(
+            leave_one_out(&four).unwrap_err(),
+            Bad::NotEnoughPoints,
+            "但抽掉一个只剩三个,三点恰定 ⇒ 留一给不出诚实的样本外误差"
+        );
+    }
+
+    /// 五个点起,留一才有意义,而它必须**能大** —— 塞一个错点进去,那个点的样本外误差要跳。
+    #[test]
+    fn leave_one_out_catches_the_odd_point_out() {
+        let mut pts = vec![
+            (-0.2500, -0.2000, 0.27432, 0.29791),
+            (-0.1000, -0.2000, 0.43365, 0.31652),
+            (-0.2500, -0.0600, 0.30814, 0.17977),
+            (-0.1000, -0.0600, 0.46747, 0.19838),
+            (-0.1750, -0.1300, 0.37088, 0.24815),
+        ];
+        let clean = leave_one_out(&pts).expect("五个点够留一");
+        let worst_clean = clean.iter().cloned().fold(0.0, f64::max);
+
+        pts[4].2 += 0.10; // 把中间那个点在画面上挪 10% 的宽度
+        let dirty = leave_one_out(&pts).unwrap();
+        assert!(dirty[4] > worst_clean + 0.05, "错点 {} 干净最差 {}", dirty[4], worst_clean);
     }
 }
