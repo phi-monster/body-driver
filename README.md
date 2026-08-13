@@ -688,7 +688,7 @@ that says "read the root SYSTEM.md" is stale; the memory design lives here.
 |---|---|---|---|
 | **this frame** | where the moving cup is right now | next frame | **not stored** — look again |
 | **this task** | what I am doing, what I have done, what I am waiting for | the task ends | **thin OS** |
-| **this place** | the bin is in that corner; the sofa faces the window | you leave the place | **thin OS** |
+| **this place** | the bin is in that corner; the sofa faces the window | you leave the place | **thin OS — 任务记忆已建(`os_layer.py`,529 行,`ThinOS`+`SlotOS`);地点记忆全仓 grep 无实现** |
 | **this body** | the fingertip is 0.1451 m from the flange | the robot or tool changes | **body layer — built** |
 | **the world** | knives are held by the handle | never | **the weights** |
 
