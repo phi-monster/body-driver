@@ -323,6 +323,41 @@ fn handle(t: &[&str], store: &mut Option<Store>) -> String {
                 Ok(()) => format!("ok 写入 {name} = {value:?} +- {sigma} 到 {path}"),
             }
         }
+        // 🔴 **够得着多远 —— 带上腕姿重标。**
+        //
+        // 标定里那条 `reach=[0.134,0.602]` 是**不带腕姿约束**量出来的;而探针强制腕朝下时
+        // 工作区小得多(LAB 2026-08-12 已记,今晚又被整夜重撞:命令发出去手一步不动 =
+        // 控制器拒了那个位姿)。上层的「会算的世界」正是拿这个带去砍不可达的计划,
+        // 所以**这个数改对,上层一行都不用动**。
+        //
+        // 输入每行 `<离本臂臂根多远 m> <到位了吗 0|1>`,正是 floormap 每个格子已经落下的两个数。
+        "reachcal" => {
+            let Some(path) = t.get(1) else {
+                return "err reachcal 要 <文件:每行 半径m 到位0|1>".into();
+            };
+            let src = match std::fs::read_to_string(path) {
+                Ok(s) => s,
+                Err(e) => return format!("err 读不了 {path}: {e}"),
+            };
+            let mut samples: Vec<(f64, bool)> = Vec::new();
+            for ln in src.lines() {
+                let f: Vec<&str> = ln.split_whitespace().collect();
+                if f.len() < 2 {
+                    continue;
+                }
+                if let (Ok(r), Ok(a)) = (f[0].parse::<f64>(), f[1].parse::<f64>()) {
+                    samples.push((r, a >= 0.5));
+                }
+            }
+            match body_layer::probe::reach(&samples, 0) {
+                Err(d) => format!("refused {d:?} (n={})", samples.len()),
+                Ok(m) => format!(
+                    "val {:.5} {:.5} sigma {:.5} valid {:.5}..{:.5} n {}",
+                    m.value[0], m.value[1], m.uncertainty[0],
+                    m.valid_lo[0], m.valid_hi[0], samples.len()
+                ),
+            }
+        }
         // 🔴 **我能下到多低** —— 一格网的下压停位拟合成一个面。
         //
         // 这一格(`Quantity::Floor`)的估计器 2026-08-09 就写好了,`bl_floor_fit` 也在 C ABI 里,
