@@ -42,9 +42,13 @@
 //! separation test then compares a finger against a background that did not respond at all,
 //! instead of against another link that responded 1.11× less.
 //!
-//! It also lands the centroid where it is wanted. The pixels that respond are the fingertips, so
-//! the region's centre is **between the fingers** — the point that has to be put on the object, not
-//! some point on a wrist.
+//! What it does NOT do by itself is give one region. Two fingers closing are **two** regions of
+//! near-identical size and speed — precisely the case the estimator refuses. Ranking them is both
+//! hopeless and beside the point, because neither finger is the answer. So the pair is not
+//! resolved, it is **recognised**: two things that travel in opposite directions cancel, nothing
+//! else in a static scene does that, and the point between them is what has to be put on the
+//! object. See [`fold_opposed`] — and the disconfirming control beside it, where two things
+//! sliding the same way are left unfolded and the estimator abstains as it should.
 //!
 //! # The threshold is measured, never typed
 //!
@@ -93,6 +97,10 @@ pub struct Reading {
     /// Pixels that responded to **both** steps, before any size filter. The denominator for "how
     /// much of this frame is moving", which is how a camera knock shows up as obviously-not-a-hand.
     pub moved_px: u32,
+    /// How many opposed pairs were folded into one point (see [`fold_opposed`]). A jaw excitation
+    /// on a working gripper reads **1**; `0` with two candidates present means the two halves did
+    /// not cancel, so whatever moved was not a pair of jaws.
+    pub pairs: u32,
 }
 
 /// Read one excitation.
@@ -185,7 +193,7 @@ pub fn candidates(
     }
 
     let (fw, fh) = (w as f64, h as f64);
-    let mut cands: heapless::Vec = heapless::Vec::new();
+    let mut raw: Vec<(Candidate, f64, f64)> = Vec::new();
     for (k, m) in mom3.iter().enumerate() {
         if m.cnt < min_pixels {
             continue;
@@ -205,13 +213,16 @@ pub fn candidates(
         let rigidity = if ellipse > 0.0 { (f64::from(m.cnt) / ellipse).min(1.0) } else { 0.0 };
 
         // 🔴 A REAL DISPLACEMENT, not a ranking score: one command step of travel, per command unit.
-        let gain = if a1[k].cnt > 0 && a2[k].cnt > 0 {
+        // The vector is kept as well as its length — a parallel gripper is recognised by the fact
+        // that its two fingers travel in OPPOSITE directions, and a length cannot say that.
+        let (du, dv) = if a1[k].cnt > 0 && a2[k].cnt > 0 {
             let (ax, ay) = a1[k].centroid();
             let (bx, by) = a2[k].centroid();
-            (((bx - ax) / fw).hypot((by - ay) / fh)) / cmd
+            ((bx - ax) / fw, (by - ay) / fh)
         } else {
-            0.0
+            (0.0, 0.0)
         };
+        let gain = du.hypot(dv) / cmd;
 
         let cand = Candidate {
             u: mx / fw,
@@ -224,13 +235,92 @@ pub fn candidates(
             // derived it from the candidate count reported a third of the frame.
             spread: (0.5 * (vxx + vyy)).sqrt() / fw,
         };
-        if !cands.push(cand) {
+        if raw.len() >= MAX_REGIONS {
+            return Err(Bad::TooManyRegions);
+        }
+        raw.push((cand, du, dv));
+    }
+
+    let (folded, pairs) = fold_opposed(raw);
+    let mut cands: heapless::Vec = heapless::Vec::new();
+    for c in folded {
+        if !cands.push(c) {
             return Err(Bad::TooManyRegions);
         }
     }
-
     cands.sort_desc_by_pixels();
-    Ok(Reading { cands, floor, moved_px })
+    Ok(Reading { cands, floor, moved_px, pairs })
+}
+
+/// 🔴 **A GRIPPER IS TWO THINGS THAT TRAVEL TOWARDS EACH OTHER, AND ITS POINT IS BETWEEN THEM.**
+///
+/// The estimator downstream refuses when two candidates cannot be told apart — the anti-elbow rule,
+/// and it is right. But a parallel jaw closing presents exactly that: two regions of near-identical
+/// size and speed. Ranking them is hopeless *and beside the point*, because neither finger is the
+/// answer; the answer is the point between them, which is where the object has to end up.
+///
+/// So the pair is not resolved, it is **recognised**, by a signature nothing else in a static scene
+/// produces: the two travel in opposite directions, so their displacements cancel. The tolerance on
+/// "cancel" is not typed in — it is the two regions' own measured spreads, which is the accuracy
+/// with which their centres are known in the first place.
+///
+/// Two objects sliding the same way on a belt do **not** cancel, and are left as two candidates for
+/// the estimator to abstain on. That is the intended outcome: this recognises grippers, it does not
+/// merge whatever happens to be nearby.
+fn fold_opposed(raw: Vec<(Candidate, f64, f64)>) -> (Vec<Candidate>, u32) {
+    let n = raw.len();
+    let mut used = vec![false; n];
+    let mut out: Vec<Candidate> = Vec::new();
+    let mut pairs = 0u32;
+
+    for i in 0..n {
+        if used[i] {
+            continue;
+        }
+        let (ci, dui, dvi) = raw[i];
+        let mut best: Option<(usize, f64)> = None;
+        for (j, item) in raw.iter().enumerate().skip(i + 1) {
+            if used[j] {
+                continue;
+            }
+            let (cj, duj, dvj) = *item;
+            // Opposite directions, not merely different ones. Two regions that did not move have a
+            // dot product of zero and are excluded here rather than by a size threshold.
+            if dui * duj + dvi * dvj >= 0.0 {
+                continue;
+            }
+            let residual = (dui + duj).hypot(dvi + dvj);
+            let tol = ci.spread + cj.spread;
+            if residual <= tol {
+                if best.map(|(_, r)| residual < r).unwrap_or(true) {
+                    best = Some((j, residual));
+                }
+            }
+        }
+        match best {
+            None => out.push(ci),
+            Some((j, _)) => {
+                let (cj, _, _) = raw[j];
+                used[i] = true;
+                used[j] = true;
+                pairs += 1;
+                out.push(Candidate {
+                    u: 0.5 * (ci.u + cj.u),
+                    v: 0.5 * (ci.v + cj.v),
+                    // Both fingers travel at the same speed; report it once, not twice.
+                    gain: 0.5 * (ci.gain + cj.gain),
+                    // The weaker half governs: a pair is only as much "one thing" as its worse side.
+                    rigidity: ci.rigidity.min(cj.rigidity),
+                    pixels: ci.pixels + cj.pixels,
+                    // The midpoint of two symmetric lobes IS better localised than either — by
+                    // 1/sqrt(2) if their errors are independent, which is not established. So the
+                    // worse of the two is carried, and no improvement is claimed.
+                    spread: ci.spread.max(cj.spread),
+                });
+            }
+        }
+    }
+    (out, pairs)
 }
 
 /// 🔴 THE CROSS-CHECK, and the reason this pipeline is not another self-reported number.
@@ -484,6 +574,58 @@ mod tests {
         let quiet = blank();
         let r2 = candidates(&quiet, &quiet, &f0, &f1, &f2, W, H, 0.02, 20).unwrap();
         assert_eq!(r2.cands.len(), 1, "same frames, honest camera: it is a region");
+    }
+
+    /// 🔴 A CLOSING GRIPPER IS ONE POINT, NOT TWO CANDIDATES.
+    ///
+    /// Two fingers travelling towards each other are exactly the case `hand.rs` refuses to resolve
+    /// — near-identical size and speed. Recognising the pair by its cancelling displacement turns
+    /// what would be a permanent `NotSeparable` into the one thing actually wanted: the point
+    /// between the jaws.
+    #[test]
+    fn two_jaws_closing_fold_into_the_point_between_them() {
+        let (na, nb) = (blank(), blank());
+        let (mut f0, mut f1, mut f2) = (blank(), blank(), blank());
+        // left finger walks right, right finger walks left, by the same amount
+        for (fr, k) in [(&mut f0, 0i32), (&mut f1, 1), (&mut f2, 2)] {
+            rect(fr, (8 + 5 * k) as usize, 20, 4, 6, 200);
+            rect(fr, (44 - 5 * k) as usize, 20, 4, 6, 200);
+        }
+        let r = candidates(&na, &nb, &f0, &f1, &f2, W, H, 0.02, 20).unwrap();
+        assert_eq!(r.pairs, 1, "the two jaws must be recognised as one gripper");
+        assert_eq!(r.cands.len(), 1, "and reported as ONE point");
+        let c = r.cands.get(0).unwrap();
+        // middle frame: fingers at x = 13..17 and 39..43, centres 15 and 41, midpoint 28 of 64.
+        // (Fingers deliberately SMALL: a region cannot be localised better than its own extent, so
+        // a fat finger in a narrow frame is refused as TooUncertain — see the note in bl.rs.)
+        assert!((c.u - 28.0 / 64.0).abs() < 0.04, "u = {} must be BETWEEN the jaws", c.u);
+
+        let mut t = crate::hand::HandTracker::new(crate::hand::Config::default());
+        let arr = r.cands.dense();
+        assert!(
+            t.observe(&arr[..1]).is_ok(),
+            "one point, no rival: the estimator must now be able to accept it"
+        );
+    }
+
+    /// 🔴 THE DISCONFIRMING CONTROL. Two things sliding the SAME way are not a gripper, must not be
+    /// folded, and must leave the estimator abstaining. Without this the fold would merge any two
+    /// moving objects and manufacture a hand out of a conveyor.
+    #[test]
+    fn two_things_moving_the_same_way_are_not_folded() {
+        let (na, nb) = (blank(), blank());
+        let (mut f0, mut f1, mut f2) = (blank(), blank(), blank());
+        for y in [4usize, 30] {
+            rect(&mut f0, 4, y, 8, 8, 200);
+            rect(&mut f1, 14, y, 8, 8, 200);
+            rect(&mut f2, 24, y, 8, 8, 200);
+        }
+        let r = candidates(&na, &nb, &f0, &f1, &f2, W, H, 0.02, 20).unwrap();
+        assert_eq!(r.pairs, 0, "same direction is not a gripper");
+        assert_eq!(r.cands.len(), 2, "both survive, so the estimator can refuse");
+        let mut t = crate::hand::HandTracker::new(crate::hand::Config::default());
+        let arr = r.cands.dense();
+        assert!(t.observe(&arr[..2]).is_err(), "two rivals must still abstain");
     }
 
     /// Two things responded and neither dominates — the anti-elbow case, at the evidence layer.
