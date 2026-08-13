@@ -30,6 +30,11 @@ pub enum Answer {
         provenance: String,
         /// 提交时它自己的自检过没过。
         selftest_passed: bool,
+        /// 🔴 **每个轴是哪一种**,按维排。文件里一直记着,而读的那一半以前**丢掉了它** ——
+        /// 于是地面图这种「值轴与定义域轴不是同一组」的量(高度 0.92 m,定义域是 x 的 −0.6…+0.6)
+        /// 被当成普通区间还原,值落在自己的"有效范围"外,**被闸挡掉而且不报错**:那个量就此
+        /// 变成"从来没量过"。**文件里信息是全的,读的时候丢了一格** —— 本仓最贵的一类。
+        axis_kind: Vec<String>,
         /// 🔴 **它是在哪一段范围上真的量过的**,按维排。问到范围外必须拒绝,而不是外推。
         ///
         /// 这两格 2026-08-13 之前**解析器读都不读**,于是一份存在磁盘上的标定
@@ -105,6 +110,10 @@ fn read_one(v: &Json) -> Answer {
             // 🔴 有效区间以前**读都不读**,于是磁盘上的标定还原不成一个 `Body`,
             //    而 `Body` 才是准入闸住的地方 —— 消费方拿到的每个数因此都绕过了闸。
             //    (`submit` 的注释早写着 *"ask 那条路读的是 JSON 不走闸"*;这里补上读的那一半。)
+            axis_kind: match v.get("axis_kind") {
+                Some(Json::Arr(a)) => a.iter().filter_map(|x| x.text().map(|s| s.to_string())).collect(),
+                _ => Vec::new(),
+            },
             valid_lo: v.get("valid_lo").map(|x| x.nums()).unwrap_or_default(),
             valid_hi: v.get("valid_hi").map(|x| x.nums()).unwrap_or_default(),
             value,
@@ -190,7 +199,7 @@ impl Store {
         let (mut ok, mut rejected) = (0usize, 0usize);
         for qi in 0..Quantity::COUNT as u32 {
             let Some(q) = Quantity::from_u32(qi) else { continue };
-            let Answer::Measured { value, uncertainty, valid_lo, valid_hi, selftest_passed, .. } =
+            let Answer::Measured { value, uncertainty, valid_lo, valid_hi, selftest_passed, axis_kind, .. } =
                 self.ask(q.as_str())
             else {
                 continue;
@@ -200,7 +209,18 @@ impl Store {
                 continue;
             }
             let mut m = Measurement {
-                axis_kind: [AxisKind::Interval; MAX_DIM],
+                // 🔴 按文件里记的那一格还原,不再一律当区间。少这一句,地面图永远还原不出来。
+                axis_kind: {
+                    let mut k = [AxisKind::Interval; MAX_DIM];
+                    for (i, s) in axis_kind.iter().enumerate().take(MAX_DIM) {
+                        k[i] = match s.as_str() {
+                            "categorical" => AxisKind::Categorical,
+                            "unmeasured" => AxisKind::Unmeasured,
+                            _ => AxisKind::Interval,
+                        };
+                    }
+                    k
+                },
                 quantity: q,
                 dim: value.len().min(MAX_DIM),
                 value: [0.0; MAX_DIM],
@@ -226,5 +246,68 @@ impl Store {
             }
         }
         (b, ok, rejected)
+    }
+}
+
+#[cfg(test)]
+mod axis_kind_tests {
+    use super::*;
+    use crate::measurement::Quantity;
+
+    /// 🔴 **地面图必须能从磁盘上还原回来。**
+    ///
+    /// 它是本仓唯一一个「值轴与定义域轴不是同一组」的量:值是高度 0.92 m,而定义域是 x 的
+    /// −0.6…+0.6。读的时候把 `axis_kind` 丢掉、一律当成区间,它的值就落在自己的"有效范围"外,
+    /// **被准入闸挡掉,而且不报错** —— 那个量就此变成"从来没量过"。
+    ///
+    /// 实际后果:整条「按眼给的位置压下去,问问那儿有没有东西」的验收链,在最后一步答
+    /// `NeverMeasured`。文件里信息一直是全的,**丢的是读的那一半**。
+    #[test]
+    fn the_floor_survives_a_round_trip_through_the_store() {
+        let src = r#"{
+          "fingerprint": "t",
+          "quantities": {
+            "floor": {
+              "axis_kind": ["interval", "interval", "unmeasured"],
+              "value": [0.920787, 0.000189, 0.000401],
+              "uncertainty": [0.000257, 0.0, 0.0],
+              "valid_lo": [-0.5995, -0.2302, 0.0],
+              "valid_hi": [0.6005, -0.0225, 0.0],
+              "unit": "m",
+              "provenance": "按下去量的",
+              "selftest_passed": true
+            }
+          }
+        }"#;
+        let s = Store::from_str(src).expect("解析得开");
+        let (b, ok, rejected) = s.to_body();
+        assert_eq!((ok, rejected), (1, 0), "地面图必须过闸");
+        let m = b.get(Quantity::Floor).expect("身体里要有地面图");
+        assert!((m.value[0] - 0.920787).abs() < 1e-6);
+        assert_eq!(m.axis_kind[2], crate::measurement::AxisKind::Unmeasured, "第三轴是没量过");
+    }
+
+    /// 反证:把 `axis_kind` 从文件里拿掉(= 旧的读法),地面图就**还原不回来** —— 这条把
+    /// 「丢掉那一格会怎样」钉死,免得以后有人"顺手简化"又把它删了。
+    #[test]
+    fn without_axis_kind_the_floor_is_refused_and_that_is_the_bug_we_had() {
+        let src = r#"{
+          "fingerprint": "t",
+          "quantities": {
+            "floor": {
+              "value": [0.920787, 0.000189, 0.000401],
+              "uncertainty": [0.000257, 0.0, 0.0],
+              "valid_lo": [-0.5995, -0.2302, 0.0],
+              "valid_hi": [0.6005, -0.0225, 0.0],
+              "unit": "m",
+              "provenance": "按下去量的",
+              "selftest_passed": true
+            }
+          }
+        }"#;
+        let s = Store::from_str(src).expect("解析得开");
+        let (b, ok, rejected) = s.to_body();
+        assert_eq!((ok, rejected), (0, 1), "没有 axis_kind 就还原不出来");
+        assert!(b.get(Quantity::Floor).is_none());
     }
 }
