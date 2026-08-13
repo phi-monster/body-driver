@@ -77,6 +77,11 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 }
 
 pub mod abi;
+/// 🔴 `std` only, and that boundary is deliberate: reading frames needs a heap sized by the image,
+/// while everything a robot must run in its own control loop stays allocation-free. Vision runs on
+/// the compute unit; the refusals run on the arm.
+#[cfg(feature = "std")]
+pub mod blob;
 pub mod debt;
 pub mod derive;
 pub mod execute;
