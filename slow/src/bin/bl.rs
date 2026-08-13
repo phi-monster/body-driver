@@ -109,7 +109,7 @@ fn handle(t: &[&str], store: &mut Option<Store>) -> String {
                         let (ok, all) = s.tally();
                         let fp = s.fingerprint.clone();
                         // 顺手把它还原成一个身体 —— 后面所有"要过闸"的问答都靠这一份。
-                        let (b, admitted, rejected) = seed_body(&s);
+                        let (b, admitted, rejected) = s.to_body();
                         FLOOR.with(|f| *f.borrow_mut() = Some(b));
                         *store = Some(s);
                         CAL.with(|c| *c.borrow_mut() = Some(p.to_string()));
@@ -531,50 +531,6 @@ fn handle(t: &[&str], store: &mut Option<Store>) -> String {
 ///
 /// 返回 (身体, 进闸的行数, 被闸拒的行数)。**被拒的那个数本身就是一条读数** ——
 /// 它说的是"这份标定里有几行,闸看了会不认"。
-fn seed_body(store: &Store) -> (Body, usize, usize) {
-    use body_layer::measurement::{AxisKind, Measurement, MAX_DEPS, MAX_DIM};
-    let mut b = Body::new();
-    let (mut ok, mut rejected) = (0usize, 0usize);
-    for qi in 0..Quantity::COUNT as u32 {
-        let Some(q) = Quantity::from_u32(qi) else { continue };
-        let Answer::Measured { value, uncertainty, valid_lo, valid_hi, selftest_passed, .. } =
-            store.ask(q.as_str())
-        else {
-            continue;
-        };
-        // 有效区间缺失 ⇒ 不许自己编一个。这一行就当它没进过闸。
-        if valid_lo.is_empty() || valid_hi.is_empty() {
-            rejected += 1;
-            continue;
-        }
-        let mut m = Measurement {
-            axis_kind: [AxisKind::Interval; MAX_DIM],
-            quantity: q,
-            dim: value.len().min(MAX_DIM),
-            value: [0.0; MAX_DIM],
-            uncertainty: [0.0; MAX_DIM],
-            valid_lo: [0.0; MAX_DIM],
-            valid_hi: [0.0; MAX_DIM],
-            measured_at_ns: 0,
-            valid_for_ns: 0,
-            deps: [None; MAX_DEPS],
-            epoch: 0,
-            selftest_passed,
-            prev_epoch: 0,
-        };
-        for i in 0..m.dim {
-            m.value[i] = value[i];
-            m.uncertainty[i] = *uncertainty.get(i).unwrap_or(&0.0);
-            m.valid_lo[i] = *valid_lo.get(i).unwrap_or(&valid_lo[0]);
-            m.valid_hi[i] = *valid_hi.get(i).unwrap_or(&valid_hi[0]);
-        }
-        match b.submit(m) {
-            Ok(_) => ok += 1,
-            Err(_) => rejected += 1,
-        }
-    }
-    (b, ok, rejected)
-}
 
 fn nums(t: &[&str], n: usize) -> Option<Vec<f64>> {
     if t.len() < n + 1 {

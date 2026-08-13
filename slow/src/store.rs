@@ -172,3 +172,59 @@ mod tests {
         assert_eq!(s.tally(), (2, 4));
     }
 }
+
+impl Store {
+    /// 🔴 **把一份存下来的标定还原成一个能过闸的 [`crate::Body`]。**
+    ///
+    /// 存文件里是一行行数值,而下游每一个"这具身体能不能这么做"的问答都要一个 `Body` ——
+    /// 因为只有 `Body` 带着不确定度、量过的范围、依赖和自检,能被**拒绝**。以前这段逻辑住在
+    /// `bl` 这个二进制里,于是任何别的调用方(比如接线缆的那个进程)想用就得抄一遍,而抄出
+    /// 来的第二份迟早和第一份不一样 —— 那正是本仓最贵的一类事故:两处规矩看起来一样,行为
+    /// 不一样,而且都不报错。
+    ///
+    /// 返回 `(身体, 过闸几个, 被拒几个)`。**有效区间缺失的那些一律算被拒**:不许替它编一个,
+    /// 编出来的范围会让下游在从没量过的地方拿到一个看起来正常的答案。
+    pub fn to_body(&self) -> (crate::Body, usize, usize) {
+        use crate::measurement::{AxisKind, Measurement, Quantity, MAX_DEPS, MAX_DIM};
+        let mut b = crate::Body::new();
+        let (mut ok, mut rejected) = (0usize, 0usize);
+        for qi in 0..Quantity::COUNT as u32 {
+            let Some(q) = Quantity::from_u32(qi) else { continue };
+            let Answer::Measured { value, uncertainty, valid_lo, valid_hi, selftest_passed, .. } =
+                self.ask(q.as_str())
+            else {
+                continue;
+            };
+            if valid_lo.is_empty() || valid_hi.is_empty() {
+                rejected += 1;
+                continue;
+            }
+            let mut m = Measurement {
+                axis_kind: [AxisKind::Interval; MAX_DIM],
+                quantity: q,
+                dim: value.len().min(MAX_DIM),
+                value: [0.0; MAX_DIM],
+                uncertainty: [0.0; MAX_DIM],
+                valid_lo: [0.0; MAX_DIM],
+                valid_hi: [0.0; MAX_DIM],
+                measured_at_ns: 0,
+                valid_for_ns: 0,
+                deps: [None; MAX_DEPS],
+                epoch: 0,
+                selftest_passed,
+                prev_epoch: 0,
+            };
+            for i in 0..m.dim {
+                m.value[i] = value[i];
+                m.uncertainty[i] = *uncertainty.get(i).unwrap_or(&0.0);
+                m.valid_lo[i] = *valid_lo.get(i).unwrap_or(&valid_lo[0]);
+                m.valid_hi[i] = *valid_hi.get(i).unwrap_or(&valid_hi[0]);
+            }
+            match b.submit(m) {
+                Ok(_) => ok += 1,
+                Err(_) => rejected += 1,
+            }
+        }
+        (b, ok, rejected)
+    }
+}
