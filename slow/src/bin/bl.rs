@@ -43,9 +43,17 @@
 //! floorcal <下压停位文件:每行 x y z> [容差 m]   -> val z0 .. | refused <理由>
 //! floorat  <x> <y> <手停在的z> <几倍带宽>
 //!        -> onfloor | onsomething 高 <m> | armlimit 低于面 <m> | refused <理由>
+//! handcal <空拍a.pgm> <空拍b.pgm> <f0.pgm> <f1.pgm> <f2.pgm> <命令幅度>
+//!        -> val <u> <v> 候选 <n> 地板 <噪声> 双响像素 <n> gain <g> rigid <r> px <n>
+//!         | refused <NoCandidate|NotSeparable|TooUncertain> ...
+//!        「我的手在画面哪儿」—— 库里唯一还欠着的量,而 `execute()` 第一件事就要它。
+//!        前两张**不发命令**,用来量这台相机自己的噪声地板;后三张是**同一命令连发两次**,
+//!        取两次都变的像素 = 部件此刻所在(两帧法在这里被自己的测试判死,见 `blob.rs` 头)。
 //! ```
 
+use body_layer::blob;
 use body_layer::floor::{fit as floor_fit, read_stop, Stop};
+use body_layer::hand::{Config as HandConfig, HandTracker};
 use body_layer::store::{Answer, Store};
 use body_layer::verb::{
     classify, contact_seen, decide, demand, holding, spannable, turn_before_lift, Axes, Check, Hold,
@@ -440,6 +448,63 @@ fn handle(t: &[&str], store: &mut Option<Store>) -> String {
                 }
             })
         }
+        // 🔴 **我的手在画面的哪儿。** 库里 14 个量里唯一还欠着的那个,而 `execute()` 的
+        // `ask.needs[1]` 就是它 —— 所以驱动主入口至今一次都没过过闸,所有动作都是绕过去跑的。
+        //
+        // 五张图:两张**什么都不命令**的(量这台相机自己的噪声地板),三张**同一命令连发两次**的。
+        // 取两次都变的像素 ⇒ 那是部件此刻所在,不是它待过的地方(两帧法在这里被自己的测试判死,
+        // 见 `blob.rs` 文件头)。
+        //
+        // ⚠️ **激励用钳口开合时,已量的 `image_jacobian` 校验不上** —— 它描述的是"胳膊动→画面动",
+        // 钳口那个自由度不在里面。所以这条命令**不声称**做过雅可比交叉校验;它只报跟踪器接受了什么。
+        "handcal" => {
+            if t.len() < 7 {
+                return "err handcal 要 <空拍a.pgm> <空拍b.pgm> <f0.pgm> <f1.pgm> <f2.pgm> <命令幅度>"
+                    .into();
+            }
+            let Ok(cmd) = t[6].parse::<f64>() else {
+                return "err 命令幅度不是数".into();
+            };
+            let mut frames: Vec<(usize, usize, Vec<u8>)> = Vec::new();
+            for p in &t[1..6] {
+                match read_pgm(p) {
+                    Err(e) => return format!("err {e}"),
+                    Ok(f) => frames.push(f),
+                }
+            }
+            let (w, h) = (frames[0].0, frames[0].1);
+            if frames.iter().any(|f| f.0 != w || f.1 != h) {
+                return "err 五张图尺寸不一致".into();
+            }
+            let cfg = HandConfig::default();
+            let r = match blob::candidates(
+                &frames[0].2, &frames[1].2, &frames[2].2, &frames[3].2, &frames[4].2,
+                w, h, cmd, cfg.min_pixels,
+            ) {
+                Err(e) => return format!("refused 读不出候选 {e:?}"),
+                Ok(r) => r,
+            };
+            let dense = r.cands.dense();
+            let mut tracker = HandTracker::new(cfg);
+            match tracker.observe(&dense[..r.cands.len()]) {
+                Err(a) => format!(
+                    "refused {a:?} 候选 {} 地板 {} 双响像素 {}",
+                    r.cands.len(), r.floor, r.moved_px
+                ),
+                Ok((u, v)) => {
+                    let best = r.cands.get(0);
+                    format!(
+                        "val {u:.5} {v:.5} 候选 {} 地板 {} 双响像素 {} gain {:.4} rigid {:.3} px {}",
+                        r.cands.len(),
+                        r.floor,
+                        r.moved_px,
+                        best.map(|c| c.gain).unwrap_or(f64::NAN),
+                        best.map(|c| c.rigidity).unwrap_or(f64::NAN),
+                        best.map(|c| c.pixels).unwrap_or(0),
+                    )
+                }
+            }
+        }
         // 拿没拿住 —— 只看爪子自己的读数,不用物体位姿,真机上照样能问。
         "holding" => match nums(t, 4) {
             None => "err holding 要 <合爪时读数> <抬起后读数> <空爪门槛> <算滑的门槛>".into(),
@@ -520,6 +585,60 @@ fn nums(t: &[&str], n: usize) -> Option<Vec<f64>> {
 
 fn bit(b: bool) -> String {
     if b { "1".into() } else { "0".into() }
+}
+
+/// 读一张 8 位二进制 PGM(`P5`)。选它是因为**任何东西都写得出**,而驱动树里因此不必为了
+/// 看一眼画面就长出一个图像库依赖(`Cargo.toml` 的零依赖是刻意的:每多一个依赖,审计的人就
+/// 多读一份代码)。
+///
+/// 16 位的 PGM **拒读而不是截半** —— 悄悄把高位丢掉会得到一张看起来完全正常、噪声地板却全错的图。
+fn read_pgm(path: &str) -> Result<(usize, usize, Vec<u8>), String> {
+    let raw = std::fs::read(path).map_err(|e| format!("读不了 {path}: {e}"))?;
+    let mut i = 0usize;
+    let mut tok = |raw: &[u8], i: &mut usize| -> Option<String> {
+        loop {
+            while *i < raw.len() && raw[*i].is_ascii_whitespace() {
+                *i += 1;
+            }
+            if *i < raw.len() && raw[*i] == b'#' {
+                while *i < raw.len() && raw[*i] != b'\n' {
+                    *i += 1;
+                }
+            } else {
+                break;
+            }
+        }
+        if *i >= raw.len() {
+            return None;
+        }
+        let s = *i;
+        while *i < raw.len() && !raw[*i].is_ascii_whitespace() {
+            *i += 1;
+        }
+        Some(String::from_utf8_lossy(&raw[s..*i]).into_owned())
+    };
+    let magic = tok(&raw, &mut i).ok_or_else(|| format!("{path} 空文件"))?;
+    if magic != "P5" {
+        return Err(format!("{path} 不是二进制 PGM(头是 {magic},要 P5)"));
+    }
+    let mut num = |raw: &[u8], i: &mut usize, what: &str| -> Result<usize, String> {
+        tok(raw, i)
+            .ok_or_else(|| format!("{path} 头里缺{what}"))?
+            .parse::<usize>()
+            .map_err(|_| format!("{path} 的{what}不是数"))
+    };
+    let w = num(&raw, &mut i, "宽")?;
+    let h = num(&raw, &mut i, "高")?;
+    let maxv = num(&raw, &mut i, "最大值")?;
+    if maxv != 255 {
+        return Err(format!("{path} 最大值 {maxv},只收 255(8 位)"));
+    }
+    i += 1; // 头和数据之间恰好一个空白字节
+    let need = w.checked_mul(h).ok_or_else(|| format!("{path} 尺寸溢出"))?;
+    if raw.len() < i + need {
+        return Err(format!("{path} 数据短了:要 {need} 字节,只有 {}", raw.len() - i.min(raw.len())));
+    }
+    Ok((w, h, raw[i..i + need].to_vec()))
 }
 
 fn verb_name(v: Verb) -> &'static str {
@@ -621,4 +740,123 @@ fn write_quantity(
     qs.insert(name.to_string(), newq);
     std::fs::write(path, root.dump(0)).map_err(|e| format!("写不了 {path}: {e}"))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tmpdir(tag: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("bl_handcal_{tag}"));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn write_pgm(path: &std::path::Path, w: usize, h: usize, px: &[u8]) {
+        let mut b = format!("P5\n{w} {h}\n255\n").into_bytes();
+        b.extend_from_slice(px);
+        std::fs::write(path, b).unwrap();
+    }
+
+    fn frame(w: usize, h: usize, sq: Option<(usize, usize, usize)>) -> Vec<u8> {
+        let mut f = vec![30u8; w * h];
+        if let Some((x0, y0, side)) = sq {
+            for y in y0..(y0 + side).min(h) {
+                for x in x0..(x0 + side).min(w) {
+                    f[y * w + x] = 200;
+                }
+            }
+        }
+        f
+    }
+
+    /// 头解析对了,而且 16 位的**拒读不截半** —— 悄悄丢高位会得到一张看着正常、地板全错的图。
+    #[test]
+    fn pgm_reads_its_header_and_refuses_what_it_cannot_read() {
+        let d = tmpdir("hdr");
+        let p = d.join("a.pgm");
+        write_pgm(&p, 4, 3, &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+        let (w, h, px) = read_pgm(p.to_str().unwrap()).unwrap();
+        assert_eq!((w, h), (4, 3));
+        assert_eq!(px[5], 6);
+
+        let q = d.join("b.pgm");
+        std::fs::write(&q, b"P5\n4 3\n65535\n").unwrap();
+        assert!(read_pgm(q.to_str().unwrap()).unwrap_err().contains("只收 255"));
+
+        let r = d.join("c.pgm");
+        std::fs::write(&r, b"P2\n4 3\n255\n").unwrap();
+        assert!(read_pgm(r.to_str().unwrap()).unwrap_err().contains("P5"));
+
+        // 数据短了要报错,不能拿一张残图当完整的用
+        let s = d.join("d.pgm");
+        std::fs::write(&s, b"P5\n4 3\n255\n\x01\x02").unwrap();
+        assert!(read_pgm(s.to_str().unwrap()).unwrap_err().contains("数据短了"));
+    }
+
+    /// 🔴 端到端:一个部件连走两步,`handcal` 必须报出它**此刻**在哪(中间那一帧的位置),
+    /// 而不是它待过的地方。
+    #[test]
+    fn handcal_reports_where_the_part_is_now() {
+        let d = tmpdir("e2e");
+        let (w, h) = (128usize, 96usize);
+        let names = ["na", "nb", "f0", "f1", "f2"];
+        let pics = [
+            frame(w, h, None),
+            frame(w, h, None),
+            frame(w, h, Some((10, 20, 8))),
+            frame(w, h, Some((24, 20, 8))),
+            frame(w, h, Some((38, 20, 8))),
+        ];
+        let paths: Vec<String> = names
+            .iter()
+            .zip(pics.iter())
+            .map(|(n, p)| {
+                let f = d.join(format!("{n}.pgm"));
+                write_pgm(&f, w, h, p);
+                f.to_str().unwrap().to_string()
+            })
+            .collect();
+
+        let mut argv = vec!["handcal"];
+        argv.extend(paths.iter().map(|s| s.as_str()));
+        argv.push("0.02");
+        let mut store = None;
+        let out = handle(&argv, &mut store);
+        assert!(out.starts_with("val "), "应当读出手的位置,得到:{out}");
+        let f: Vec<&str> = out.split_whitespace().collect();
+        let u: f64 = f[1].parse().unwrap();
+        // 中间帧方块在 x=24..32,中心 28,占 128 的 0.219。🔴 画面必须放到 128 宽:跟踪器要求手点
+        // 定位到画面 3%% 以内,而块自身的展宽就是定位下限 —— 8px 块在 64 宽画面里展宽 0.036,
+        // 自己就超标。这条门槛的含义正是「手在画面里太大 = 不知道手在哪」。
+        assert!((u - 28.0 / 128.0).abs() < 0.03, "u={u} 应当是**当前**位置,得到:{out}");
+    }
+
+    /// 尺寸不一致必须当场说,不许拿两张不同大小的图去差分。
+    #[test]
+    fn handcal_refuses_frames_of_different_sizes() {
+        let d = tmpdir("size");
+        let a = d.join("a.pgm");
+        let b = d.join("b.pgm");
+        write_pgm(&a, 8, 8, &vec![30u8; 64]);
+        write_pgm(&b, 4, 4, &vec![30u8; 16]);
+        let (sa, sb) = (a.to_str().unwrap(), b.to_str().unwrap());
+        let mut store = None;
+        let out = handle(&["handcal", sa, sb, sa, sa, sa, "0.02"], &mut store);
+        assert!(out.contains("尺寸不一致"), "得到:{out}");
+    }
+
+    /// 什么都没动 ⇒ 弃权,并且把"为什么没有"报出来,不给默认点位。
+    #[test]
+    fn a_still_scene_abstains_instead_of_naming_a_point() {
+        let d = tmpdir("still");
+        let (w, h) = (32usize, 32usize);
+        let p = d.join("s.pgm");
+        write_pgm(&p, w, h, &frame(w, h, None));
+        let s = p.to_str().unwrap();
+        let mut store = None;
+        let out = handle(&["handcal", s, s, s, s, s, "0.02"], &mut store);
+        assert!(out.starts_with("refused NoCandidate"), "得到:{out}");
+    }
 }
