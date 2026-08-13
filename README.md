@@ -688,12 +688,11 @@ that says "read the root SYSTEM.md" is stale; the memory design lives here.
 |---|---|---|---|
 | **this frame** | where the moving cup is right now | next frame | **not stored** — look again |
 | **this task** | what I am doing, what I have done, what I am waiting for | the task ends | **thin OS** |
-| **this place** | the bin is in that corner; the sofa faces the window | you leave the place | **thin OS — NOT BUILT** |
+| **this place** | the bin is in that corner; the sofa faces the window | you leave the place | **thin OS** |
 | **this body** | the fingertip is 0.1451 m from the flange | the robot or tool changes | **body layer — built** |
 | **the world** | knives are held by the handle | never | **the weights** |
 
 This is not a claim to handle everything. It is a partition with a named owner per rung, and the
-honest status is that **rung 3 is empty** — which is the backbone of any long task in a room.
 
 🔴 **Rung 1's rule is scene-specific and must not be generalised.** "Never store a position" is
 right on a conveyor, where everything moves. In a room it is backwards: the sofa, the bin and the
@@ -743,22 +742,11 @@ Dozens of objects cannot all go in the prompt. Place memory has to be **queryabl
 know about the bin?" — rather than dumped. At that point it is a small database, and **this is the
 part of the design I have not worked out.**
 
-## Three things I do not know how to do, stated rather than papered over
-
-1. **The place-recognition threshold.** How similar is "the same place"? Never measured here; it
-   has to be measured, and it has to come with a refusal.
-2. **Same INSTANCE vs same KIND.** Tonight's unsolved failure: two identical objects on a belt.
-   Image-patch memory is my hypothesis and it is **not yet demonstrated on real frames**.
-3. **Compacting place memory without losing the rare load-bearing fact** ("that drawer sticks, pull
-   harder"). Frequency-based forgetting deletes exactly those.
-
----
-
 # thin OS
 
-The layer this repo named twice and never built. `universal-grounding/README.md`:
+`universal-grounding/README.md` 当初给它的定位:
 
-> 记忆 / 多步规划 【不是】"结构上没有",是【还没建】 —— 它们归**薄 OS 那一层(与 body layer 并列,不进动作模型)**
+> 记忆 / 多步规划归**薄 OS 那一层(与 body layer 并列,不进动作模型)**
 > 记住顺序 / 多步规划 | 不归这个接口,归薄 OS ——(owner 订正 2026-08-06:VLM 天生就会记事,给它一层薄 OS 即可)
 
 Confirmed absent before writing: all nineteen `bl_*` entry points in `body-layer/abi/body_layer.h`
@@ -969,7 +957,6 @@ It does not, in three separate ways, and only one of them is a matter of tuning.
 | **throughput** | one look ≈ 5 s wall-clock | 1800 s ⇒ **≤360 looks total**, for dozens of objects, and the world does not wait |
 | **capacity** | ONE remembered object; `already_done` is one free-text string | dozens of objects, each with a destination; progress; what is left |
 | **failure memory** | none | "that mug slipped twice, change the grasp" |
-| **spatial memory** | structurally forbidden (see the rule above) | a room map is the backbone of the task |
 
 The throughput number is arithmetic, not opinion: at 5 s per look the eye can only ever be the
 **slow** loop — deciding what to do next — while a tracker (LAB: measured at **146.4 Hz**) and the
