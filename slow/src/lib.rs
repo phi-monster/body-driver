@@ -101,6 +101,8 @@ pub mod schedule;
 pub mod touch;
 pub mod json;
 pub mod store;
+/// 画面一点 ↔ 桌面一点。机器人挥自己的手把自己的相机标了,不是填进去的相机参数。
+pub mod tabletop;
 pub mod verb;
 
 use measurement::{Malformed, Measurement, Quantity};

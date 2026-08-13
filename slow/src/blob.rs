@@ -101,6 +101,14 @@ pub struct Reading {
     /// on a working gripper reads **1**; `0` with two candidates present means the two halves did
     /// not cancel, so whatever moved was not a pair of jaws.
     pub pairs: u32,
+    /// 🔴 两步**各自**有多少像素越过地板。诊断用,而它区分的两件事要改的东西完全不同:
+    /// 一个是 0 ⇒ 那一步**根本看不见**(激励太小 / 被自己挡住 / 时序错位);两个都大而
+    /// `moved_px` 小 ⇒ 两步都看得见但**不重叠**(部件走得比自己还宽,或者三帧假设不成立)。
+    ///
+    /// 加这两个数,是因为"双响像素 0"这一个读数**同时**兼容这两种病,而它们南辕北辙。
+    pub m1_px: u32,
+    /// 见 [`Reading::m1_px`]。
+    pub m2_px: u32,
 }
 
 /// Read one excitation.
@@ -149,6 +157,8 @@ pub fn candidates(
     // 🔴 THE WHOLE IDEA IN ONE LINE: responded to the first step AND to the second ⇒ this is where
     // the part is at `f1`. Responded to only one ⇒ it is a place the part has been, or is going.
     let here: Vec<bool> = (0..n).map(|i| m1[i] && m2[i]).collect();
+    let m1_px = m1.iter().filter(|x| **x).count() as u32;
+    let m2_px = m2.iter().filter(|x| **x).count() as u32;
 
     let (_lab3, mom3) = label(&here, w, h);
     let moved_px = mom3.iter().map(|m| m.cnt).sum();
@@ -249,7 +259,7 @@ pub fn candidates(
         }
     }
     cands.sort_desc_by_pixels();
-    Ok(Reading { cands, floor, moved_px, pairs })
+    Ok(Reading { cands, floor, moved_px, pairs, m1_px, m2_px })
 }
 
 /// 🔴 **A GRIPPER IS TWO THINGS THAT TRAVEL TOWARDS EACH OTHER, AND ITS POINT IS BETWEEN THEM.**
