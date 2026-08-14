@@ -1,0 +1,15 @@
+[package]
+name    = "contact-gen"
+version = "0.1.0"
+edition = "2021"
+description = "2a -- given a surface and a measured body, which contact sets can THIS body use. Pure geometry, zero learning."
+license = "AGPL-3.0-or-later"
+
+# 🔴 依赖表是空的,和 body-layer 同一条理由:这一层是要被整个领域读和审的。
+# 🔴 也【不依赖 body-layer】—— 身体常数是参数,是传进来的,不是这里读出来的。
+#    ARCH.md §二 那堵墙:反向依赖一出现,"换机体不重训"就没有机制保证了。
+[dependencies]
+
+[profile.release]
+overflow-checks = true
+lto = true

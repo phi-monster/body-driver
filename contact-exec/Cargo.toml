@@ -1,0 +1,10 @@
+[package]
+name = "contact-exec"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+
+[[bin]]
+name = "cx"
+path = "src/bin/cx.rs"

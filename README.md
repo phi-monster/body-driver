@@ -389,8 +389,8 @@ suction cup fills the same table with one point and a normal-only cone.
 | layer | produces | from | 🔴 must never contain |
 |---|---|---|---|
 | **① body layer** (this directory) | constants of *this* body | **measurement** | any scene or task quantity |
-| **②a contact generator** — `contact-gen/`, its own crate, 11/11 tests | where this shape can be grasped (point · normal · jaw direction), filtered by ① | **computation** (geometry) | semantics, task |
-| **②b closed-form executor** | contact set + object twist → joint trajectory | **computation** | — |
+| **②a contact generator** — `contact-gen/`, its own crate, 13/13 tests | where this shape can be grasped (point · normal · jaw direction), filtered by ① | **computation** (geometry) | semantics, task |
+| **②b closed-form executor** — `contact-exec/`, its own crate, 5/5 tests | contact set + object twist → joint trajectory | **computation** | — |
 | **③ eye + weights** | which object · what to do · where it is **useful** to touch (not merely stable) | **VLM / learned** | metres, joint angles, DoF count, finger count, link geometry, gripper opening |
 
 `contact-gen` **does not read this layer**: body constants are passed in as arguments. The reverse
@@ -541,7 +541,7 @@ line out), the 725-line ctypes shell has no reason to exist and its presence mad
 one Rust program plus a Python file drifting behind it. Deleted.
 
 **A documentation rule only counts once it is a check that can fail** ⇒ `body-layer/check_purity.sh`,
-run before每次提交: ① no benchmark names in `body-layer/slow/src` or `contact-gen/src` after stripping
+run before每次提交: ① no benchmark names in `body-layer/slow/src`, `body-layer/contact-gen/src` or `body-layer/contact-exec/src` after stripping
 comments; ② no `*.py` in the driver tree. Non-zero exit on either.
 
 ## What must genuinely be learned (everything else is measured or computed)
