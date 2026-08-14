@@ -402,9 +402,12 @@ fn handle(t: &[&str], store: &mut Option<Store>) -> String {
                 Ok(m) => m,
                 Err(e) => return format!("err 拟合不了 {e:?}"),
             };
+            // 🔴 **把系数本身打出来**,不只打残差。下游(`link --map`)要的是这六个数,而
+            // 让人从日志里另找一处去抄,正是本仓"同一个数存在两处"那类事故的起点。
             let mut out = format!(
-                "caltable z≈{z:.4} 同类 {} 个(成对 {}) 残差 {:.5}\n",
-                rows.len(), if keep_paired { 1 } else { 0 }, m.residual
+                "caltable z≈{z:.4} 同类 {} 个(成对 {}) 残差 {:.5}\n  --map {:.5},{:.5},{:.5},{:.5},{:.5},{:.5}\n",
+                rows.len(), if keep_paired { 1 } else { 0 }, m.residual,
+                m.a[0], m.a[1], m.a[2], m.b[0], m.b[1], m.b[2]
             );
             for r in &rows {
                 let pu = m.a[0] * r.xyz[0] + m.a[1] * r.xyz[1] + m.a[2];
