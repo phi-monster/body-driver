@@ -44,11 +44,12 @@ pub fn ask(host: &str, port: u16, what: &str, rgb: &[u8], w: usize, h: usize) ->
     let bmp = bmp24(rgb, w, h);
     let b64 = base64(&bmp);
     let prompt = format!(
-        "Point to the {what}. Give its centre as normalised image coordinates \
+        "Is the {what} visible in this image? Set present=false if it is not there. \
+         If present, point to it: give its centre as normalised image coordinates \
          u (0=left,1=right) and v (0=top,1=bottom)."
     );
     let body = format!(
-        r#"{{"model":"eye","max_tokens":200,"temperature":0,"response_format":{{"type":"json_schema","json_schema":{{"name":"contact_ask","strict":true,"schema":{{"type":"object","additionalProperties":false,"required":["u","v","span_frac","verb","force"],"properties":{{"u":{{"type":"number","minimum":0,"maximum":1}},"v":{{"type":"number","minimum":0,"maximum":1}},"span_frac":{{"type":"number","minimum":0,"maximum":1}},"verb":{{"type":"string","enum":["grasp","push","place","pry","open","close"]}},"force":{{"type":"string","enum":["light","medium","firm"]}}}}}}}}}},"messages":[{{"role":"user","content":[{{"type":"image_url","image_url":{{"url":"data:image/bmp;base64,{b64}"}}}},{{"type":"text","text":"{prompt}"}}]}}]}}"#
+        r#"{{"model":"eye","max_tokens":200,"temperature":0,"response_format":{{"type":"json_schema","json_schema":{{"name":"contact_ask","strict":true,"schema":{{"type":"object","additionalProperties":false,"required":["present","u","v","span_frac","verb","force"],"properties":{{"present":{{"type":"boolean"}},"u":{{"type":"number","minimum":0,"maximum":1}},"v":{{"type":"number","minimum":0,"maximum":1}},"span_frac":{{"type":"number","minimum":0,"maximum":1}},"verb":{{"type":"string","enum":["grasp","push","place","pry","open","close"]}},"force":{{"type":"string","enum":["light","medium","firm"]}}}}}}}}}},"messages":[{{"role":"user","content":[{{"type":"image_url","image_url":{{"url":"data:image/bmp;base64,{b64}"}}}},{{"type":"text","text":"{prompt}"}}]}}]}}"#
     );
 
     let raw = post(host, port, "/v1/chat/completions", &body)?;
@@ -73,6 +74,13 @@ pub fn ask(host: &str, port: u16, what: &str, rgb: &[u8], w: usize, h: usize) ->
     let txt = |k: &str| -> String {
         j.get(k).and_then(|x| x.text()).unwrap_or("").to_string()
     };
+    // 🔴 **"看不见"必须是一个可以答的答案,否则它只能编。** 实测(2026-08-14,真帧):
+    // 问一个画面里根本没有的 `the red cube`,五格 schema 照样吐出一个像模像样的点 ——
+    // 而下游拿到的是一个**看起来完全正常**的像素,没有任何环节会不一致。
+    // 拒答走 `Err`,和"问不到"同一条路:调用方要么拿到一个点,要么拿到原因,没有第三种。
+    if matches!(j.get("present").and_then(|x| x.boolean()), Some(false)) {
+        return Err(format!("眼说画面里没有 {what}"));
+    }
     Ok(Look {
         u: num("u")?,
         v: num("v")?,

@@ -54,6 +54,15 @@ impl Json {
         }
     }
 
+    /// 当成真假看。**不认 `"true"` 这种字符串** —— 一个把字符串当真值读的取值器,会把
+    /// `"false"` 读成真,而那正是"看不见"这一格最不能出错的方向。
+    pub fn boolean(&self) -> Option<bool> {
+        match self {
+            Json::Bool(b) => Some(*b),
+            _ => None,
+        }
+    }
+
     /// 当成字符串看。
     pub fn text(&self) -> Option<&str> {
         match self {
