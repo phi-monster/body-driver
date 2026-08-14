@@ -43,10 +43,17 @@ pub fn ask(host: &str, port: u16, what: &str, rgb: &[u8], w: usize, h: usize) ->
     }
     let bmp = bmp24(rgb, w, h);
     let b64 = base64(&bmp);
+    // 🔴 **别在提示里给一条 schema 里不存在的退路。** 原文写着 `Set present=false if it is
+    // not visible`,而这张表里**根本没有 `present` 这一格**(`additionalProperties:false` +
+    // `strict:true`)⇒ 模型被要求走一条结构上走不通的门,只能照旧指一个点。
+    // 实测代价:一张**空桌子 + 两片爪子**的腕相机图,它指到 (0.93,0.83) = 右下角那片爪子上,
+    // 而 `span_frac` 写的是 **0.0000** —— 它其实"说"了看不见,只是说在另一格里。
+    // 🔴 **也不许在提示里提爪子/夹爪。** 真机那条线实测过:提示里写"底部黑三角=夹爪",
+    // 反而把那个词喂进去、让它照着指爪。要指的是世界,不是身体。
     let prompt = format!(
         "Task: {what}\\n\\nWhich single object in this image should the robot act on? \
-         Set present=false if it is not visible. If present, point to it: give its centre as \
-         normalised image coordinates u (0=left,1=right) and v (0=top,1=bottom)."
+         Give its centre as normalised image coordinates u (0=left,1=right) and \
+         v (0=top,1=bottom), and set span_frac to the fraction of the image width it covers."
     );
     let body = format!(
         r#"{{"model":"eye","max_tokens":600,"temperature":0,"response_format":{{"type":"json_schema","json_schema":{{"name":"contact_ask","strict":true,"schema":{{"type":"object","additionalProperties":false,"required":["u","v","span_frac","verb","force"],"properties":{{"u":{{"type":"number","minimum":0,"maximum":1}},"v":{{"type":"number","minimum":0,"maximum":1}},"span_frac":{{"type":"number","minimum":0,"maximum":1}},"verb":{{"type":"string","enum":["grasp","push","place","pry","open","close"]}},"force":{{"type":"string","enum":["light","medium","firm"]}}}}}}}}}},"messages":[{{"role":"user","content":[{{"type":"image_url","image_url":{{"url":"data:image/bmp;base64,{b64}"}}}},{{"type":"text","text":"{prompt}"}}]}}]}}"#
