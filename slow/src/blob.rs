@@ -101,6 +101,13 @@ pub struct Reading {
     /// on a working gripper reads **1**; `0` with two candidates present means the two halves did
     /// not cancel, so whatever moved was not a pair of jaws.
     pub pairs: u32,
+    /// 🔴 **合并的那一对,两瓣是沿哪个方向分开的**(归一化画面单位,从一瓣指向另一瓣)。
+    ///
+    /// 那就是**钳口张开的方向**,而它决定"要从哪一侧把物体送进两指之间"。合并那一步本来就
+    /// 知道这两瓣是谁,却只留下了中点 —— **方向被扔掉,于是下游只能猜**。实测代价
+    /// (2026-08-14):四种接近方式(上方压 / 沿 y 横进 / 沿 x 横进 / 工具轴 ±10 cm)全部失败,
+    /// 而它们的区别**只在这个方向上**。没有配对时是 `(0,0)`。
+    pub pair_dir: (f64, f64),
     /// 🔴 两步**各自**有多少像素越过地板。诊断用,而它区分的两件事要改的东西完全不同:
     /// 一个是 0 ⇒ 那一步**根本看不见**(激励太小 / 被自己挡住 / 时序错位);两个都大而
     /// `moved_px` 小 ⇒ 两步都看得见但**不重叠**(部件走得比自己还宽,或者三帧假设不成立)。
@@ -251,7 +258,7 @@ pub fn candidates(
         raw.push((cand, du, dv));
     }
 
-    let (folded, pairs) = fold_opposed(raw);
+    let (folded, pairs, pair_dir) = fold_opposed(raw);
     let mut cands: heapless::Vec = heapless::Vec::new();
     for c in folded {
         if !cands.push(c) {
@@ -259,7 +266,7 @@ pub fn candidates(
         }
     }
     cands.sort_desc_by_pixels();
-    Ok(Reading { cands, floor, moved_px, pairs, m1_px, m2_px })
+    Ok(Reading { cands, floor, moved_px, pairs, pair_dir, m1_px, m2_px })
 }
 
 /// 🔴 **A GRIPPER IS TWO THINGS THAT TRAVEL TOWARDS EACH OTHER, AND ITS POINT IS BETWEEN THEM.**
@@ -277,11 +284,12 @@ pub fn candidates(
 /// Two objects sliding the same way on a belt do **not** cancel, and are left as two candidates for
 /// the estimator to abstain on. That is the intended outcome: this recognises grippers, it does not
 /// merge whatever happens to be nearby.
-fn fold_opposed(raw: Vec<(Candidate, f64, f64)>) -> (Vec<Candidate>, u32) {
+fn fold_opposed(raw: Vec<(Candidate, f64, f64)>) -> (Vec<Candidate>, u32, (f64, f64)) {
     let n = raw.len();
     let mut used = vec![false; n];
     let mut out: Vec<Candidate> = Vec::new();
     let mut pairs = 0u32;
+    let mut pair_dir = (0.0f64, 0.0f64);
 
     for i in 0..n {
         if used[i] {
@@ -314,6 +322,9 @@ fn fold_opposed(raw: Vec<(Candidate, f64, f64)>) -> (Vec<Candidate>, u32) {
                 used[i] = true;
                 used[j] = true;
                 pairs += 1;
+                if pair_dir == (0.0, 0.0) {
+                    pair_dir = (cj.u - ci.u, cj.v - ci.v);
+                }
                 out.push(Candidate {
                     u: 0.5 * (ci.u + cj.u),
                     v: 0.5 * (ci.v + cj.v),
@@ -330,7 +341,7 @@ fn fold_opposed(raw: Vec<(Candidate, f64, f64)>) -> (Vec<Candidate>, u32) {
             }
         }
     }
-    (out, pairs)
+    (out, pairs, pair_dir)
 }
 
 /// 🔴 THE CROSS-CHECK, and the reason this pipeline is not another self-reported number.
