@@ -34,6 +34,105 @@ pub enum Bad {
     Degenerate,
     /// 有非有限的数。
     NotFinite,
+    /// 存盘的表里有一行读不成。**带行号**,因为"表短了"和"第七行坏了"要改的地方不一样。
+    BadLine(usize),
+}
+
+/// 存盘表里的一行。
+///
+/// # 这一格为什么存在
+///
+/// 一次仿真只跑得完两个点,而拟合要 ≥4、留一要 ≥5 ⇒ **标定必须跨集攒**。真机上本来也是这样:
+/// 中间可以停、可以换天、可以补点。
+///
+/// 🔴 而它更要紧的一半是**别把表只存在日志里**。实测过一次(2026-08-14):八个点的标定表只被
+/// `println!` 到 `link.log`,而每次启动都覆盖那个文件 —— 于是**在那张表上建的四层东西
+/// (拟合 / 留一 / 两把钥匙 / 跨集累积)全都没有原始记录可回溯**,想复查"当初那个点读的是多少"
+/// 已经查不到了。表必须落在一个**只追加**的文件里。
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct Row {
+    /// 手当时所在的世界位置。
+    pub xyz: [f64; 3],
+    pub u: f64,
+    pub v: f64,
+    /// 有没有认出那**一对**钳口。⚠️ 决定这一行的**含义**:认出来 = 两指中点,没认出来 = 那一根
+    /// 指头的中心,两者差半个钳口宽。**混着用过一次,算出来的比例整整偏了 60%。**
+    pub paired: bool,
+    /// 这一行自己报的噪声地板。地板高 = 读数器只抓到"越过极高门槛"的碎片,不是指尖。
+    pub floor: u8,
+}
+
+/// 读存盘的标定表。格式一行七个数:`x y z u v paired floor`。
+///
+/// 🔴 **读不成的行一律报错,不许跳过。** 追加写有可能在中途断电/被杀,留下半行;悄悄跳过它
+/// 会让表**静静地变短**,而"点不够"和"点坏了"在下游长得一模一样。
+pub fn parse_table(s: &str) -> Result<Vec<Row>, Bad> {
+    let mut out = Vec::new();
+    for (i, line) in s.lines().enumerate() {
+        let t = line.trim();
+        if t.is_empty() || t.starts_with('#') {
+            continue;
+        }
+        let f: Vec<&str> = t.split_whitespace().collect();
+        if f.len() != 7 {
+            return Err(Bad::BadLine(i + 1));
+        }
+        let mut n = [0f64; 5];
+        for k in 0..5 {
+            n[k] = f[k].parse().map_err(|_| Bad::BadLine(i + 1))?;
+        }
+        let paired: u8 = f[5].parse().map_err(|_| Bad::BadLine(i + 1))?;
+        let floor: u8 = f[6].parse().map_err(|_| Bad::BadLine(i + 1))?;
+        if !n.iter().all(|x| x.is_finite()) {
+            return Err(Bad::BadLine(i + 1));
+        }
+        out.push(Row { xyz: [n[0], n[1], n[2]], u: n[3], v: n[4], paired: paired != 0, floor });
+    }
+    Ok(out)
+}
+
+/// 表里有几个**互不相同**的世界点(1 mm 以内算同一个)。
+///
+/// 🔴 为什么要单独数这个:`fit` 要"≥4 个点"指的是**四个不同的位置**。同一个点重复量八次也是
+/// 八行,而它把两条轴一条都分不开 —— 那是 `Degenerate`,不是"够了"。重复行有它自己的用处
+/// (量复现度),但**不能拿来充数**。
+pub fn distinct_sites(rows: &[Row]) -> usize {
+    let mut sites: Vec<[f64; 3]> = Vec::new();
+    for r in rows {
+        if !sites.iter().any(|s| {
+            (s[0] - r.xyz[0]).abs() < 1e-3 && (s[1] - r.xyz[1]).abs() < 1e-3 && (s[2] - r.xyz[2]).abs() < 1e-3
+        }) {
+            sites.push(r.xyz);
+        }
+    }
+    sites.len()
+}
+
+/// 同一个世界位置被量了多次时,**同类**读数之间差多远(归一化画面单位)。这是标定的复现度,
+/// 也是这张表的误差下限 —— 表再准也准不过它自己的读数噪声。
+///
+/// 返回 `(最大差, 参与比较的对数)`。不同类(`paired` 不同)的**不比**,见 `Row::paired`。
+pub fn repeatability(rows: &[Row]) -> (f64, usize) {
+    let (mut worst, mut n) = (0f64, 0usize);
+    for i in 0..rows.len() {
+        for j in (i + 1)..rows.len() {
+            let (a, b) = (&rows[i], &rows[j]);
+            if a.paired != b.paired {
+                continue;
+            }
+            if (a.xyz[0] - b.xyz[0]).abs() < 1e-3
+                && (a.xyz[1] - b.xyz[1]).abs() < 1e-3
+                && (a.xyz[2] - b.xyz[2]).abs() < 1e-3
+            {
+                let d = ((a.u - b.u).powi(2) + (a.v - b.v).powi(2)).sqrt();
+                if d > worst {
+                    worst = d;
+                }
+                n += 1;
+            }
+        }
+    }
+    (worst, n)
 }
 
 /// 一张量出来的换算表,连同它自己的残差。
@@ -168,6 +267,44 @@ impl Map {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 🔴 今晚真的存盘内容(`/root/calpairs.txt`,同一个世界点量了三次)。
+    /// 它同时钉住三件事:读得出来 · **只有一个不同的位置** · 三次读数里只有两次可比。
+    #[test]
+    fn the_real_calfile_reads_back_and_says_it_is_only_one_site() {
+        let s = "0.22000 -0.22000 0.95000 0.68211 0.33785 1 15\n\
+                 0.22000 -0.22000 0.95000 0.68858 0.30155 0 14\n\
+                 0.22000 -0.22000 0.95000 0.68992 0.31153 0 51\n";
+        let rows = parse_table(s).expect("读得出来");
+        assert_eq!(rows.len(), 3);
+        assert!(rows[0].paired && !rows[1].paired);
+        // 🔴 三行,但**一个位置** ⇒ 拿去拟合是 Degenerate,不是"够了"。
+        assert_eq!(distinct_sites(&rows), 1, "三行都在同一个点上");
+        // 只有后两行同类,能比的只有那一对。
+        let (worst, n) = repeatability(&rows);
+        assert_eq!(n, 1, "跨类不许比 ⇒ 三行里只有一对可比");
+        assert!((worst - 0.010_08).abs() < 5e-4, "同类两次差 {worst:.5},约 4.9 px@640×480");
+    }
+
+    /// 🔴 半行必须**报错**,不许悄悄跳过 —— 追加写被杀会留下半行,而"表变短了"在下游长得
+    /// 跟"点还不够"一模一样。
+    #[test]
+    fn a_truncated_line_is_refused_with_its_line_number() {
+        let s = "0.22 -0.22 0.95 0.68 0.33 1 15\n0.30 -0.20 0.95 0.70\n";
+        assert_eq!(parse_table(s), Err(Bad::BadLine(2)));
+    }
+
+    /// 同一个位置重复量,**不能拿来充四个点**。
+    #[test]
+    fn repeats_of_one_site_do_not_count_as_four_points() {
+        let s = "0.22 -0.22 0.95 0.681 0.337 1 15\n0.22 -0.22 0.95 0.682 0.338 1 15\n\
+                 0.22 -0.22 0.95 0.683 0.339 1 15\n0.22 -0.22 0.95 0.684 0.340 1 15\n";
+        let rows = parse_table(s).unwrap();
+        assert_eq!(rows.len(), 4);
+        assert_eq!(distinct_sites(&rows), 1);
+        let pts: Vec<_> = rows.iter().map(|r| (r.xyz[0], r.xyz[1], r.u, r.v)).collect();
+        assert_eq!(fit(&pts).err(), Some(Bad::Degenerate), "四行同一点 ⇒ 两条轴一条都分不开");
+    }
 
     /// 🔴 今晚真机量到的三个对子 —— **它们必须被拒绝**,因为三个点的零残差不是证据。
     /// 这条和 `crate::floor::MIN_SAMPLES` 是同一条教训,写成两处会失败的检查。
