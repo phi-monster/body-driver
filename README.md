@@ -187,7 +187,7 @@ not be left to a person is the **cascade**: re-measuring the image Jacobian inva
 point, the gripper span, the occlusion map and the tool offset **while all four of their own clocks
 still read fresh**, so the plan schedules them before they go bad rather than after.
 
-⚠️ Still true: **nothing outside this directory reads this layer.** A grep on 2026-08-09 for who
+⚠️ **Stale as of 2026-08-15 — see [`DRIVER_GOAL.md`](DRIVER_GOAL.md).** The layer HAS been driven on a real robot: `phi-monster/lekiwi` records the full chain running on a Pi through the C ABI, with grounding / aiming / contact verified on hardware. The sentence below described 2026-08-09 and was never updated; it misled a reader on 2026-08-15 into reporting "never plugged into a real robot". Original text kept below for the audit trail. ⚠️ Still true *at that date*: **nothing outside this directory reads this layer.** A grep on 2026-08-09 for who
 consumes it returned **zero** — eight prose mentions, no imports. The running teacher is Python, so
 the first move against that is [`bind/python/body_layer.py`](bind/python/body_layer.py) (ctypes,
 no dependencies) and [`conformance/python_check.sh`](conformance/python_check.sh), which drives the
