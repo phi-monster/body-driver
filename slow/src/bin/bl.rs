@@ -374,6 +374,49 @@ fn handle(t: &[&str], store: &mut Option<Store>) -> String {
         // 代价照记(2026-08-13,实测):策略层因此只能拿 `reach` 那个**水平圆环**判可达,
         // 答不了"腕朝下、这个 xy、下到这个 z" —— 法兰残差与爪尖残差**完全相等 0.0482 m**
         // (排除了工具偏置算错),每一次失败都落在这一格上。
+        // 🔴 **零 GPU 地把标定表的偏差【形状】看出来。**
+        //
+        // 光看"样本外平均 2.0 cm"答不了下一步该修什么:同样是 2 cm,可能是**到处都抖**(读数
+        // 噪声,加点也没用),也可能是**分成两簇、相差一个常向量**(那就是"只看见一根指头"时
+        // 看见的**不总是同一根**,两个定义混在一起,差半个钳口宽)。这两种要改的地方完全不同,
+        // 而它们在那个平均数上长得一模一样。**逐点残差看得见,平均数看不见。**
+        "caltable" => {
+            let Some(path) = t.get(1) else {
+                return "err caltable 要 <标定表文件>".into();
+            };
+            let src = match std::fs::read_to_string(path) {
+                Ok(x) => x,
+                Err(e) => return format!("err 读不了 {path}: {e}"),
+            };
+            let rows = match body_layer::tabletop::parse_table(&src) {
+                Ok(r) => r,
+                Err(e) => return format!("err 表读不成 {e:?}"),
+            };
+            let (rows, z) = body_layer::tabletop::same_height(&rows, 0.02);
+            let paired_n = rows.iter().filter(|r| r.paired).count();
+            let keep_paired = paired_n * 2 >= rows.len();
+            let rows: Vec<_> = rows.into_iter().filter(|r| r.paired == keep_paired).collect();
+            let pts: Vec<(f64, f64, f64, f64)> =
+                rows.iter().map(|r| (r.xyz[0], r.xyz[1], r.u, r.v)).collect();
+            let m = match body_layer::tabletop::fit(&pts) {
+                Ok(m) => m,
+                Err(e) => return format!("err 拟合不了 {e:?}"),
+            };
+            let mut out = format!(
+                "caltable z≈{z:.4} 同类 {} 个(成对 {}) 残差 {:.5}\n",
+                rows.len(), if keep_paired { 1 } else { 0 }, m.residual
+            );
+            for r in &rows {
+                let pu = m.a[0] * r.xyz[0] + m.a[1] * r.xyz[1] + m.a[2];
+                let pv = m.b[0] * r.xyz[0] + m.b[1] * r.xyz[1] + m.b[2];
+                out.push_str(&format!(
+                    "  x {:.4} y {:.4} 残差 du {:+.5} dv {:+.5} |d| {:.5} 地板 {}\n",
+                    r.xyz[0], r.xyz[1], r.u - pu, r.v - pv,
+                    ((r.u - pu).powi(2) + (r.v - pv).powi(2)).sqrt(), r.floor
+                ));
+            }
+            out
+        }
         "floorcal" => {
             let Some(path) = t.get(1) else {
                 return "err floorcal 要 <下压停位文件:每行 x y z> [容差 m]".into();
