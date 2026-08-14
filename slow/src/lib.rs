@@ -91,6 +91,10 @@ pub mod fast;
 #[cfg(not(feature = "fast"))]
 pub mod faststub;
 pub mod hand;
+/// 问眼一句「那个名词在画面哪一点」。**眼只准回五个格子**(归一化 u/v · 区域占比 ·
+/// 动词 · 粗略力度),用结构化解码锁住 —— 裸问时它会把距离/位姿**编**出来,而编出来的
+/// 数在下游和量出来的完全无法区分。
+pub mod eye;
 pub mod measurement;
 pub mod memory;
 pub mod persist;
