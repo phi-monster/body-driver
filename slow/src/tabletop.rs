@@ -116,6 +116,60 @@ pub fn same_height(rows: &[Row], tol: f64) -> (Vec<Row>, f64) {
     (best, best_z)
 }
 
+/// 最小二乘定圆(Kåsa),返回 `(圆心x, 圆心y, 半径, 残差)`。
+///
+/// # 为什么不用三点定圆
+///
+/// **三点恰好定圆 ⇒ 零残差不是证据** —— 与本文件"少于四点直接拒绝"是同一条。实测
+/// (2026-08-14,量工具轴):同一批点用"每三点定一个圆"给出的半径 **0.045–0.143 m,散布 81%**,
+/// 而那既不是数据脏也不是没有圆,是**恰定拟合把噪声全吸进了半径**。最小二乘用上全部点,
+/// 多出来的自由度变成**残差**,而残差就是这批点到底在不在一个圆上的答案。
+pub fn circle_fit(pts: &[(f64, f64)]) -> Result<(f64, f64, f64, f64), Bad> {
+    if pts.len() < 4 {
+        return Err(Bad::NotEnoughPoints);
+    }
+    if pts.iter().any(|p| !p.0.is_finite() || !p.1.is_finite()) {
+        return Err(Bad::NotFinite);
+    }
+    // x²+y² = 2ax + 2by + c,对 (a,b,c) 线性。
+    let n = pts.len() as f64;
+    let (mut sx, mut sy, mut sxx, mut syy, mut sxy) = (0.0, 0.0, 0.0, 0.0, 0.0);
+    let (mut sz, mut sxz, mut syz) = (0.0, 0.0, 0.0);
+    for &(x, y) in pts {
+        let z = x * x + y * y;
+        sx += x; sy += y; sxx += x * x; syy += y * y; sxy += x * y;
+        sz += z; sxz += x * z; syz += y * z;
+    }
+    // 3×3 正规方程
+    let m = [[2.0 * sxx, 2.0 * sxy, sx], [2.0 * sxy, 2.0 * syy, sy], [2.0 * sx, 2.0 * sy, n]];
+    let r = [sxz, syz, sz];
+    let det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+        - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+        + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+    if !det.is_finite() || det.abs() < 1e-15 {
+        return Err(Bad::Degenerate);
+    }
+    let sub = |c: usize| -> f64 {
+        let mut q = m;
+        for i in 0..3 { q[i][c] = r[i]; }
+        q[0][0] * (q[1][1] * q[2][2] - q[1][2] * q[2][1])
+            - q[0][1] * (q[1][0] * q[2][2] - q[1][2] * q[2][0])
+            + q[0][2] * (q[1][0] * q[2][1] - q[1][1] * q[2][0])
+    };
+    let (a, b, c) = (sub(0) / det, sub(1) / det, sub(2) / det);
+    let rad2 = c + a * a + b * b;
+    if !(rad2 > 0.0) {
+        return Err(Bad::Degenerate);
+    }
+    let rad = rad2.sqrt();
+    let mut ss = 0.0;
+    for &(x, y) in pts {
+        let d = ((x - a).powi(2) + (y - b).powi(2)).sqrt() - rad;
+        ss += d * d;
+    }
+    Ok((a, b, rad, (ss / (n - 3.0).max(1.0)).sqrt()))
+}
+
 /// 表里有几个**互不相同**的世界点(1 mm 以内算同一个)。
 ///
 /// 🔴 为什么要单独数这个:`fit` 要"≥4 个点"指的是**四个不同的位置**。同一个点重复量八次也是
@@ -326,6 +380,28 @@ mod tests {
         // 🔴 高度差 7.3 cm 的那个点如果混进来,拟合照样给得出一张表 —— 这就是它危险的地方。
         let all: Vec<_> = rows.iter().map(|r| (r.xyz[0], r.xyz[1], r.u, r.v)).collect();
         assert!(fit(&all).is_ok(), "混着高度也拟合得出来 ⇒ 残差挡不住它 ⇒ 必须先按高度切");
+    }
+
+    /// 造一个已知半径的圆:拟合必须还原它,且残差应当很小。
+    #[test]
+    fn circle_fit_recovers_a_known_circle() {
+        let pts: Vec<(f64, f64)> = (0..8)
+            .map(|k| {
+                let a = k as f64 * std::f64::consts::PI / 4.0;
+                (0.30 + 0.145 * a.cos(), -0.35 + 0.145 * a.sin())
+            })
+            .collect();
+        let (cx, cy, r, res) = circle_fit(&pts).expect("拟合得出来");
+        assert!((cx - 0.30).abs() < 1e-6 && (cy + 0.35).abs() < 1e-6, "圆心 {cx} {cy}");
+        assert!((r - 0.145).abs() < 1e-6, "半径 {r}");
+        assert!(res < 1e-9, "干净的圆残差应当近零,得到 {res}");
+    }
+
+    /// 🔴 三个点**不许**当成证据 —— 与"少于四点直接拒绝"同一条。
+    #[test]
+    fn circle_fit_refuses_three_points() {
+        let three = [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0)];
+        assert_eq!(circle_fit(&three).err(), Some(Bad::NotEnoughPoints));
     }
 
     /// 🔴 半行必须**报错**,不许悄悄跳过 —— 追加写被杀会留下半行,而"表变短了"在下游长得
