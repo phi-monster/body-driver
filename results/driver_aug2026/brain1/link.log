@@ -1,0 +1,172 @@
+身体常数:雅可比 [-2.185937461789594, -0.8206275885242399, 0.2527054355572614, 3.2828025280302273, -0.2137450219514604, 14.547861412735339] 接触阈 0.29383 钳口 0.0803
+在听 9077;眼在 127.0.0.1:8077;要指的是 None
+接上了
+---- 新的一集,闭环状态清空(标定已收 0 次)----
+---- 新的一集,闭环状态清空(标定已收 0 次)----
+===== 观测结构 =====
+observation: 有 7 项
+  vision: 有 3 项
+    cam_head: 有 2 项
+      color: 数组 |u1 形状[480,640,3]
+      shape: 3 个数 [480.0000 640.0000 3.0000]
+    cam_left_wrist: 有 2 项
+      color: 数组 |u1 形状[480,640,3]
+      shape: 3 个数 [480.0000 640.0000 3.0000]
+    cam_right_wrist: 有 2 项
+      color: 数组 |u1 形状[480,640,3]
+      shape: 3 个数 [480.0000 640.0000 3.0000]
+  state: 有 6 项
+    left_arm_joint_state: 数组 <f4 形状[6]
+    left_ee_pose: 数组 <f4 形状[7]
+    right_arm_joint_state: 数组 <f4 形状[6]
+    right_ee_pose: 数组 <f4 形状[7]
+    left_ee_joint_state: 1 个数 [1.0000]
+    right_ee_joint_state: 1 个数 [1.0000]
+  action: 有 4 项
+    left_arm_joint_state: 数组 <f4 形状[6]
+    right_arm_joint_state: 数组 <f4 形状[6]
+    left_ee_joint_state: 1 个数 [1.0000]
+    right_ee_joint_state: 1 个数 [1.0000]
+  data_format_version: 字串 "v1.0"
+  additional_info: 有 1 项
+    frequency: 25
+  instruction: 字串 "Pick up the Great Dinos Triceratops Toy by 10 cm."
+  env_idx: 0
+===== 结构完 =====
+[高度] 横向移动一律钉在 z=1.0116
+[空转] 空转最大差 6 在 (132,456) · >20 的 0 · >50 的 0 · >100 的 0
+[手] 弃权:一对都没配上(候选 1 地板 6 双响 431 两步各 1260/1546)
+[空转] 空转最大差 3 在 (42,140) · >20 的 0 · >50 的 0 · >100 的 0
+[手] 弃权:一对都没配上(候选 4 地板 3 双响 791 两步各 1483/1893)
+---- 新的一集,闭环状态清空(标定已收 0 次)----
+---- 新的一集,闭环状态清空(标定已收 0 次)----
+===== 观测结构 =====
+observation: 有 7 项
+  vision: 有 3 项
+    cam_head: 有 2 项
+      color: 数组 |u1 形状[480,640,3]
+      shape: 3 个数 [480.0000 640.0000 3.0000]
+    cam_left_wrist: 有 2 项
+      color: 数组 |u1 形状[480,640,3]
+      shape: 3 个数 [480.0000 640.0000 3.0000]
+    cam_right_wrist: 有 2 项
+      color: 数组 |u1 形状[480,640,3]
+      shape: 3 个数 [480.0000 640.0000 3.0000]
+  state: 有 6 项
+    left_arm_joint_state: 数组 <f4 形状[6]
+    left_ee_pose: 数组 <f4 形状[7]
+    right_arm_joint_state: 数组 <f4 形状[6]
+    right_ee_pose: 数组 <f4 形状[7]
+    left_ee_joint_state: 1 个数 [1.0000]
+    right_ee_joint_state: 1 个数 [1.0000]
+  action: 有 4 项
+    left_arm_joint_state: 数组 <f4 形状[6]
+    right_arm_joint_state: 数组 <f4 形状[6]
+    left_ee_joint_state: 1 个数 [1.0000]
+    right_ee_joint_state: 1 个数 [1.0000]
+  data_format_version: 字串 "v1.0"
+  additional_info: 有 1 项
+    frequency: 25
+  instruction: 字串 "Pick up the Crayola Washable Fingerpaint, Red, Blue, Yellow "
+  env_idx: 0
+===== 结构完 =====
+[高度] 横向移动一律钉在 z=1.1429
+[空转] 空转最大差 8 在 (105,456) · >20 的 0 · >50 的 0 · >100 的 0
+  [候选0] (0.1518,0.3748) 像素 392 刚性 0.571 增益 0.0377 展布 0.0143
+  [候选1] (0.0954,0.3975) 像素 126 刚性 0.770 增益 0.0029 展布 0.0063
+[手] 形心 0.1381,0.3803(粗段)· 候选 2 地板 8 双响 626 配对 1 两步各 1492/2217 @ 末端 (-0.3001,-0.1741,1.1420)
+[小脑] 立锚点:位姿 (-0.3001,-0.1741,1.1420) ⇒ 手像素 (0.1381,0.3803)
+[眼] u=0.8100 v=0.4700 占比=0.0500 动词=grasp
+[走位] 第 0 轮 像素差 0.6740 ⇒ 走 0.1157,-0.0319 m
+[走到] 等了 2 步,离目标还差 0.0018 m
+[走位] 第 1 轮 像素差 0.5949 ⇒ 走 0.1157,-0.0320 m
+[走到] 等了 1 步,离目标还差 0.0079 m
+[走位] 第 2 轮 像素差 0.5163 ⇒ 走 0.1156,-0.0321 m
+[走到] 等了 26 步,离目标还差 0.1189 m
+[走位] 第 3 轮结束,像素差 0.5158
+[交接] 粗段完,换到 cam_left_wrist 重认手
+[空转] 空转最大差 7 在 (294,274) · >20 的 0 · >50 的 0 · >100 的 0
+[手] 弃权:一对都没配上(候选 3 地板 7 双响 34147 两步各 83161/52905)
+---- 新的一集,闭环状态清空(标定已收 0 次)----
+---- 新的一集,闭环状态清空(标定已收 0 次)----
+===== 观测结构 =====
+observation: 有 7 项
+  vision: 有 3 项
+    cam_head: 有 2 项
+      color: 数组 |u1 形状[480,640,3]
+      shape: 3 个数 [480.0000 640.0000 3.0000]
+    cam_left_wrist: 有 2 项
+      color: 数组 |u1 形状[480,640,3]
+      shape: 3 个数 [480.0000 640.0000 3.0000]
+    cam_right_wrist: 有 2 项
+      color: 数组 |u1 形状[480,640,3]
+      shape: 3 个数 [480.0000 640.0000 3.0000]
+  state: 有 6 项
+    left_arm_joint_state: 数组 <f4 形状[6]
+    left_ee_pose: 数组 <f4 形状[7]
+    right_arm_joint_state: 数组 <f4 形状[6]
+    right_ee_pose: 数组 <f4 形状[7]
+    left_ee_joint_state: 1 个数 [1.0000]
+    right_ee_joint_state: 1 个数 [1.0000]
+  action: 有 4 项
+    left_arm_joint_state: 数组 <f4 形状[6]
+    right_arm_joint_state: 数组 <f4 形状[6]
+    left_ee_joint_state: 1 个数 [1.0000]
+    right_ee_joint_state: 1 个数 [1.0000]
+  data_format_version: 字串 "v1.0"
+  additional_info: 有 1 项
+    frequency: 25
+  instruction: 字串 "Pick up the TABLEWARE SET by 10 cm."
+  env_idx: 0
+===== 结构完 =====
+[高度] 横向移动一律钉在 z=1.0219
+[空转] 空转最大差 5 在 (146,283) · >20 的 0 · >50 的 0 · >100 的 0
+[手] 弃权:一对都没配上(候选 3 地板 5 双响 850 两步各 1381/2123)
+[空转] 空转最大差 3 在 (63,54) · >20 的 0 · >50 的 0 · >100 的 0
+  [候选0] (0.2532,0.6225) 像素 644 刚性 0.339 增益 0.0325 展布 0.0135
+  [候选1] (0.2070,0.7296) 像素 240 刚性 0.941 增益 0.0014 展布 0.0075
+[手] 形心 0.2406,0.6516(粗段)· 候选 2 地板 3 双响 983 配对 1 两步各 1569/2253 @ 末端 (-0.2264,-0.3079,1.0224)
+[小脑] 立锚点:位姿 (-0.2264,-0.3079,1.0224) ⇒ 手像素 (0.2406,0.6516)
+[眼] u=0.5400 v=0.5200 占比=0.0300 动词=grasp
+[走位] 第 0 轮 像素差 0.3270 ⇒ 走 0.1192,0.0140 m
+[走到] 等了 1 步,离目标还差 0.0113 m
+[走位] 第 1 轮 像素差 0.2209 ⇒ 走 0.1192,0.0136 m
+[走到] 等了 2 步,离目标还差 0.0017 m
+[走位] 第 2 轮 像素差 0.1149 ⇒ 走 0.1192,0.0136 m
+[走到] 等了 3 步,离目标还差 0.0092 m
+[走位] 第 3 轮结束,像素差 0.0094
+[交接] 粗段完,换到 cam_left_wrist 重认手
+---- 新的一集,闭环状态清空(标定已收 0 次)----
+---- 新的一集,闭环状态清空(标定已收 0 次)----
+===== 观测结构 =====
+observation: 有 7 项
+  vision: 有 3 项
+    cam_head: 有 2 项
+      color: 数组 |u1 形状[480,640,3]
+      shape: 3 个数 [480.0000 640.0000 3.0000]
+    cam_left_wrist: 有 2 项
+      color: 数组 |u1 形状[480,640,3]
+      shape: 3 个数 [480.0000 640.0000 3.0000]
+    cam_right_wrist: 有 2 项
+      color: 数组 |u1 形状[480,640,3]
+      shape: 3 个数 [480.0000 640.0000 3.0000]
+  state: 有 6 项
+    left_arm_joint_state: 数组 <f4 形状[6]
+    left_ee_pose: 数组 <f4 形状[7]
+    right_arm_joint_state: 数组 <f4 形状[6]
+    right_ee_pose: 数组 <f4 形状[7]
+    left_ee_joint_state: 1 个数 [1.0000]
+    right_ee_joint_state: 1 个数 [1.0000]
+  action: 有 4 项
+    left_arm_joint_state: 数组 <f4 形状[6]
+    right_arm_joint_state: 数组 <f4 形状[6]
+    left_ee_joint_state: 1 个数 [1.0000]
+    right_ee_joint_state: 1 个数 [1.0000]
+  data_format_version: 字串 "v1.0"
+  additional_info: 有 1 项
+    frequency: 25
+  instruction: 字串 "Pick up the QH-Pomegranate by 10 cm."
+  env_idx: 0
+===== 结构完 =====
+[高度] 横向移动一律钉在 z=0.9229
+连接断了: WebSocket protocol error: Connection reset without closing handshake

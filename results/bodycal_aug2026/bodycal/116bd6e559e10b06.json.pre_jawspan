@@ -1,0 +1,241 @@
+{
+  "fingerprint": "116bd6e559e10b06",
+  "produced_by": "calibrate_from_probes",
+  "raw_dir": "/private/tmp/claude-501/-Users-gogogod-Project-phi-research/d8b43f0b-1a74-44c0-9960-0c96f297fac5/scratchpad/raw_near",
+  "n_measured": 6,
+  "n_refused": 6,
+  "quantities": {
+    "latency": {
+      "value": [
+        0
+      ],
+      "uncertainty": [
+        0.5
+      ],
+      "valid_lo": [
+        0
+      ],
+      "valid_hi": [
+        12
+      ],
+      "measured_at": 1786425312,
+      "valid_for_s": 0,
+      "selftest_passed": true,
+      "dim": 1
+    },
+    "step_delivery": {
+      "value": [
+        0.9998999999999999
+      ],
+      "uncertainty": [
+        0.00014826000000014826
+      ],
+      "valid_lo": [
+        0.005
+      ],
+      "valid_hi": [
+        0.05
+      ],
+      "measured_at": 1786425312,
+      "valid_for_s": 0,
+      "selftest_passed": true,
+      "dim": 1
+    },
+    "backlash": {
+      "refused": "Inconsistent: the samples imply mutually inconsistent answers",
+      "selftest_passed": false
+    },
+    "image_jacobian": {
+      "value": [
+        -2.185937461789594,
+        -0.8206275885242399,
+        0.2527054355572614,
+        3.2828025280302273,
+        -0.2137450219514604,
+        14.547861412735339
+      ],
+      "uncertainty": [
+        0.2665904922913692,
+        0.2665904922913692,
+        0.26128391091893344,
+        0.26128391091893344,
+        0.07269494449776034,
+        0.07269494449776034
+      ],
+      "valid_lo": [
+        -0.020029999999999992,
+        -0.020029999999999992,
+        -0.016759999999999997,
+        -0.016759999999999997,
+        -0.006979999999999986,
+        -0.006979999999999986
+      ],
+      "valid_hi": [
+        0.019970000000000043,
+        0.019970000000000043,
+        0.020000000000000018,
+        0.020000000000000018,
+        0.020000000000000018,
+        0.020000000000000018
+      ],
+      "measured_at": 1786425312,
+      "valid_for_s": 0,
+      "selftest_passed": true,
+      "dim": 6
+    },
+    "tool_axis_column": {
+      "value": [
+        0
+      ],
+      "uncertainty": [
+        0
+      ],
+      "valid_lo": [
+        0
+      ],
+      "valid_hi": [
+        2
+      ],
+      "measured_at": 1786425312,
+      "valid_for_s": 0,
+      "selftest_passed": true,
+      "dim": 1,
+      "axis_kind": [
+        "categorical"
+      ],
+      "domain_axis": "which column of R was spun about, a label in {0,1,2}",
+      "provenance": "; axis marked categorical 2026-08-11 -- as an interval its domain [0,2] admitted non-integer columns."
+    },
+    "tool_offset": {
+      "value": [
+        0.1451
+      ],
+      "uncertainty": [
+        0.0181
+      ],
+      "valid_lo": [
+        0.7715
+      ],
+      "valid_hi": [
+        0.8351
+      ],
+      "measured_at": 1786425312,
+      "valid_for_s": 0,
+      "selftest_passed": true,
+      "dim": 1,
+      "provenance": "in-loop contact: flange_z at stall minus surface_z, s2d_live ep0 g0, no camera; domain and uncertainty backfilled 2026-08-11 from 11 in-loop contact readings (4 legs x 3 layouts, s2d_live): implied offset median 0.1471, 1sigma 0.0181, contact surfaces z 0.7715-0.8351. Stored value 0.1451 left unchanged (0.0020 from the median, well inside 1sigma) so that any behaviour change after the gate merge is attributable to the gate.",
+      "superseded": {
+        "value": [
+          0.08115644957523517
+        ],
+        "why": "pixel pick biased toward the wrist"
+      },
+      "domain_axis": "surface height z (m) at which contact was observed"
+    },
+    "gripper_span": {
+      "refused": "NoResponse: the commanded motion did not move the signal",
+      "selftest_passed": false
+    },
+    "reach": {
+      "value": [
+        0.13425,
+        0.6019
+      ],
+      "uncertainty": [
+        0.009550000000000003,
+        0
+      ],
+      "valid_lo": [
+        0.0023,
+        0.0023
+      ],
+      "valid_hi": [
+        0.8414,
+        0.8414
+      ],
+      "measured_at": 1786425312,
+      "valid_for_s": 0,
+      "selftest_passed": true,
+      "dim": 2
+    },
+    "arm_weight": {
+      "refused": "no joint torque channel on this body's bus",
+      "selftest_passed": false
+    },
+    "contact_threshold": {
+      "selftest_passed": true,
+      "refused_reason_kept": "no force channel on this body's bus",
+      "value": [
+        0.29383
+      ],
+      "uncertainty": [
+        0.00039
+      ],
+      "valid_lo": [
+        0.0
+      ],
+      "valid_hi": [
+        1.0
+      ],
+      "axis_kind": [
+        "unmeasured"
+      ],
+      "unit": "fraction of commanded motion delivered in one control period -- NOT newtons",
+      "domain_axis": "delivered fraction",
+      "provenance": "measured 2026-08-11 with NO force sensor: free-space 26 samples median 0.9995 (min 0.9721) vs pressed-on-surface 40 samples median 0.0055 (max 0.0151) -- 181x apart, ZERO overlap; independently reproduces the LAB's 289-step zero-overlap ruler on this body. polarity LOWER-on-contact. THE ORIGINAL REFUSAL REASON REMAINS TRUE: this bus has no force channel, and this number is a delivered-motion fraction, not a force. PROBED AT ONE COMMAND ONLY (1cm pure-down); command axis UNMEASURED.",
+      "probed_at_command_m": 0.01
+    },
+    "self_occlusion": {
+      "refused": "no validated body-silhouette segmenter here",
+      "selftest_passed": false
+    },
+    "hand_pixel": {
+      "refused": "needs a tracker fed frame by frame, not a batch of excursions",
+      "selftest_passed": false
+    },
+    "floor": {
+      "value": [
+        0.9207630145789646,
+        0.00025684498363575883,
+        0.0005826238864139171
+      ],
+      "uncertainty": [
+        0.00025974141004514125,
+        0.0,
+        0.0
+      ],
+      "valid_lo": [
+        -0.5995,
+        -0.2281,
+        0.0
+      ],
+      "valid_hi": [
+        0.6005,
+        -0.0225,
+        0.0
+      ],
+      "axis_kind": [
+        "interval",
+        "interval",
+        "unmeasured"
+      ],
+      "dim": 3,
+      "domain_axis": "x,y over the grid actually pressed; axis 2 carries no domain",
+      "unit": "metres; value = [z0 at the box centre, dz/dx, dz/dy]",
+      "selftest_passed": true,
+      "epoch": 1,
+      "deps": [
+        [
+          "contact_threshold",
+          0
+        ],
+        [
+          "step_delivery",
+          0
+        ]
+      ],
+      "provenance": "measured 2026-08-11 by pressing down at 54 grid cells (arrival < 0.020 m and a real stop required; 6 cells dropped). Plane, band and box all come from bl_floor_fit; no coefficient in this row was typed. Reads: stop AT it = the working surface, ABOVE = something is there and (stop - floor) is its height, BELOW = no surface here, the arm ran out of solution."
+    }
+  },
+  "saved_at": 1786493189.4348524
+}

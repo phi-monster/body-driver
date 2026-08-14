@@ -1,0 +1,36 @@
+=== the probe's measured band (HORIZONTAL radius from the arm's OWN measured base) ===
+     [xcheck] max |r_base(logged) - recomputed| = 4.98e-05 m  (r_cmd is NOT used anywhere)
+  arm0  base_xy=[-0.3, -0.45002] (cfg [-0.3, -0.45], |d|=0.0000 m)
+     probe z=0.9215  dz above base=0.1565  ->  horizontal anchor sqrt(0.496^2-dz^2)=0.4707 m
+     attained 40/80   band = [0.0977, 0.6019] m   misses below/above = 3/19
+     BOTH WALLS CROSSED: 🟢 yes
+     [xcheck] max |r_base(logged) - recomputed| = 4.98e-05 m  (r_cmd is NOT used anywhere)
+  arm1  base_xy=[0.3, -0.45002] (cfg [0.3, -0.45], |d|=0.0000 m)
+     probe z=0.9215  dz above base=0.1565  ->  horizontal anchor sqrt(0.496^2-dz^2)=0.4707 m
+     attained 40/80   band = [0.0977, 0.6028] m   misses below/above = 3/18
+     BOTH WALLS CROSSED: 🟢 yes
+
+=== ⚠️ is the measured set even an ANNULUS?  (a band is only honest if it is) ===
+  arm0  points inside the radius band: 58, of which UNATTAINED: 18 (31%)
+        -> 🔴 NOT a clean annulus: reachability depends on DIRECTION too, not radius alone. An annulus is a better approximation than the box, still not the true reachable set.
+  arm1  points inside the radius band: 59, of which UNATTAINED: 19 (32%)
+        -> 🔴 NOT a clean annulus: reachability depends on DIRECTION too, not radius alone. An annulus is a better approximation than the box, still not the true reachable set.
+
+=== 主判:量出来的带 vs 手填盒(逐面报差,不报谁对) ===
+  arm0  box lo=[-0.7, -0.45, 0.7] hi=[0.0, 0.3, 1.3]
+     x: box reaches 0.400 m from base   band outer 0.602 m   diff -0.202 m
+     y: box reaches 0.750 m from base   band outer 0.602 m   diff +0.148 m
+     farthest box corner (horizontal) 0.850 m  vs band outer 0.602 m  -> box is 1.41x
+  arm1  box lo=[0.0, -0.45, 0.7] hi=[0.7, 0.3, 1.3]
+     x: box reaches 0.400 m from base   band outer 0.603 m   diff -0.203 m
+     y: box reaches 0.750 m from base   band outer 0.603 m   diff +0.147 m
+     farthest box corner (horizontal) 0.850 m  vs band outer 0.603 m  -> box is 1.41x
+
+=== 🔴 正控:那 16 集被跳过的目标必须仍在带外 ===
+  skipped=16  inside the measured band=0  -> 🟢 PASS (all still out of reach)
+
+=== 🔴 负控′:带必须夹住【该 z 上的】水平臂展 ===
+  arm0  band outer 0.6019  vs horizontal anchor 0.4707  -> 🟢 PASS (band reaches the independently measured span)
+        (v1 signature check: outer 0.602 vs v1's bogus 0.800 -> 🟢 not the v1 frame error)
+  arm1  band outer 0.6028  vs horizontal anchor 0.4707  -> 🟢 PASS (band reaches the independently measured span)
+        (v1 signature check: outer 0.603 vs v1's bogus 0.800 -> 🟢 not the v1 frame error)

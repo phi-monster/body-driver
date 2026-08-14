@@ -1,0 +1,147 @@
+{
+  "rd_root": "/root/RoboDojo",
+  "git_head": "83adf588d435497334a0919e10b4a32ff181034e",
+  "git_describe": "83adf58-dirty",
+  "git_status_short": " M env/robot_manager/robot_config/franka.py\n M env/robot_manager/robot_manager.py\n M env/scene_manager/layout_manager.py\n M env/scene_manager/objects/garment.py\n M env/scene_manager/objects/geometry.py\n M env/scene_manager/objects/table.py\n M env_cfg/robot/_robot_info.json\n M src/eval_client/eval_env.py\n M task/RoboDojo/tasks/general_pickup.py\n?? env/robot_manager/robot_class/_embody_registry.py\n?? env/robot_manager/robot_class/generic.py\n?? env/robot_manager/robot_config/agibot_a2d.py\n?? env/robot_manager/robot_config/allegro_hand.py\n?? env/robot_manager/robot_config/franka_panda.py\n?? env/robot_manager/robot_config/franka_robotiq.py\n?? env/robot_manager/robot_config/galbot_one_charlie.py\n?? env/robot_manager/robot_config/gr1t2.py\n?? env/robot_manager/robot_config/kinova_gen3n7.py\n?? env/robot_manager/robot_config/kinova_j2n6s300.py\n?? env/robot_manager/robot_config/kinova_j2n7s300.py\n?? env/robot_manager/robot_config/kuka_allegro.py\n?? env/robot_manager/robot_config/openarm_bi.py\n?? env/robot_manager/robot_config/openarm_uni.py\n?? env/robot_manager/robot_config/ridgeback_franka.py\n?? env/robot_manager/robot_config/sawyer.py\n?? env/robot_manager/robot_config/shadow_hand.py\n?? env/robot_manager/robot_config/ur10.py\n?? env/robot_manager/robot_config/ur10_long_suction.py\n?? env/robot_manager/robot_config/ur10_short_suction.py\n?? env/robot_manager/robot_manager.py.embody_bak\n?? env/robot_manager/robot_manager.py.embody_noee_bak\n?? env/scene_manager/layout_manager.py.bak_cpuonly\n?? env/scene_manager/objects/garment.py.bak_cpuonly\n?? env/scene_manager/objects/geometry.py.bak_cpuonly\n?? env_cfg/arx_m020.yml\n?? env_cfg/arx_m025.yml\n?? env_cfg/arx_m040.yml\n?? env_cfg/arx_m050.yml\n?? env_cfg/arx_multi.yml\n?? env_cfg/arx_one.yml\n?? env_cfg/arx_thick.yml\n?? env_cfg/arx_wide.yml\n?? env_cfg/arx_x5_cam.yml\n?? env_cfg/arx_x5_g10.yml\n?? env_cfg/arx_x5_g50.yml\n?? env_cfg/arx_x5_gfast.yml\n?? env_cfg/arx_x5_h1e1.yml\n?? env_cfg/arx_x5_h1e25.yml\n?? env_cfg/arx_x5_h1e50.yml\n?? env_cfg/arx_x5_head1.yml\n?? env_cfg/arx_x5_objgate.yml\n?? env_cfg/arx_x5_objlib.yml\n?? env_cfg/arx_x5_pose.yml\n?? env_cfg/arx_x5_rate.yml\n?? env_cfg/arx_x5_rgbd.yml\n?? env_cfg/arx_x5_shot1.yml\n?? env_cfg/arx_x5_shot1dbg.yml\n?? env_cfg/arx_x5_wide40.yml\n?? env_cfg/camera/camera_config_head1.yml\n?? env_cfg/camera/camera_config_rgbd.yml\n?? env_cfg/embody_agibot_a2d.yml\n?? env_cfg/embody_allegro_hand.yml\n?? env_cfg/embody_franka_panda.yml\n?? env_cfg/embody_franka_robotiq.yml\n?? env_cfg/embody_galbot_one_charlie.yml\n?? env_cfg/embody_gr1t2.yml\n?? env_cfg/embody_kinova_gen3n7.yml\n?? env_cfg/embody_kinova_j2n6s300.yml\n?? env_cfg/embody_kinova_j2n7s300.yml\n?? env_cfg/embody_kuka_allegro.yml\n?? env_cfg/embody_openarm_bi.yml\n?? env_cfg/embody_openarm_uni.yml\n?? env_cfg/embody_ridgeback_franka.yml\n?? env_cfg/embody_sawyer.yml\n?? env_cfg/embody_shadow_hand.yml\n?? env_cfg/embody_ur10.yml\n?? env_cfg/embody_ur10_long_suction.yml\n?? env_cfg/embody_ur10_short_suction.yml\n?? env_cfg/franka_m090.yml\n?? env_cfg/franka_m100.yml\n?? env_cfg/franka_m120.yml\n?? env_cfg/franka_m45.yml\n?? env_cfg/franka_m55.yml\n?? env_cfg/franka_m75.yml\n?? env_cfg/franka_shot1.yml\n?? env_cfg/franka_wide.yml\n?? env_cfg/robot/_robot_info.json.bak_m100\n?? env_cfg/robot/_robot_info.json.bak_wide\n?? env_cfg/robot/dual_franka.yml\n?? env_cfg/robot/dual_franka_m090.yml\n?? env_cfg/robot/dual_franka_m100.yml\n?? env_cfg/robot/dual_franka_m120.yml\n?? env_cfg/robot/dual_franka_m45.yml\n?? env_cfg/robot/dual_franka_m55.yml\n?? env_cfg/robot/dual_franka_m75.yml\n?? env_cfg/robot/dual_franka_wide.yml\n?? env_cfg/robot/dual_x5_m020.yml\n?? env_cfg/robot/dual_x5_m025.yml\n?? env_cfg/robot/dual_x5_m040.yml\n?? env_cfg/robot/dual_x5_m050.yml\n?? env_cfg/robot/dual_x5_wide.yml\n?? env_cfg/robot/embody_agibot_a2d.yml\n?? env_cfg/robot/embody_allegro_hand.yml\n?? env_cfg/robot/embody_franka_panda.yml\n?? env_cfg/robot/embody_franka_robotiq.yml\n?? env_cfg/robot/embody_galbot_one_charlie.yml\n?? env_cfg/robot/embody_gr1t2.yml\n?? env_cfg/robot/embody_kinova_gen3n7.yml\n?? env_cfg/robot/embody_kinova_j2n6s300.yml\n?? env_cfg/robot/embody_kinova_j2n7s300.yml\n?? env_cfg/robot/embody_kuka_allegro.yml\n?? env_cfg/robot/embody_openarm_bi.yml\n?? env_cfg/robot/embody_openarm_uni.yml\n?? env_cfg/robot/embody_ridgeback_franka.yml\n?? env_cfg/robot/embody_sawyer.yml\n?? env_cfg/robot/embody_shadow_hand.yml\n?? env_cfg/robot/embody_ur10.yml\n?? env_cfg/robot/embody_ur10_long_suction.yml\n?? env_cfg/robot/embody_ur10_short_suction.yml\n?? env_cfg/sim/sim_config_e1.yml\n?? env_cfg/sim/sim_config_e25.yml\n?? env_cfg/sim/sim_config_e50.yml\n?? env_cfg/sim/sim_config_g10.yml\n?? env_cfg/sim/sim_config_g50.yml\n?? env_cfg/sim/sim_config_gfast.yml\n?? env_cfg/sim/sim_config_rate.yml\n?? src/eval_client/eval_env.py.bak_fix\n?? src/eval_client/eval_env.py.bak_prestep",
+  "modified_tracked": [
+    "env/robot_manager/robot_config/franka.py",
+    "env/robot_manager/robot_manager.py",
+    "env/scene_manager/layout_manager.py",
+    "env/scene_manager/objects/garment.py",
+    "env/scene_manager/objects/geometry.py",
+    "env/scene_manager/objects/table.py",
+    "env_cfg/robot/_robot_info.json",
+    "src/eval_client/eval_env.py",
+    "task/RoboDojo/tasks/general_pickup.py"
+  ],
+  "modified_unexpected": [
+    "env/robot_manager/robot_manager.py"
+  ],
+  "modified_missing": [],
+  "file_sha256": {
+    "env/robot_manager/robot_config/franka.py": "704da6d8aace49c11e6979a11a8cc6fe036c990e592bcbcfd594f8c21be12bb4",
+    "env/robot_manager/robot_manager.py": "b61c5e568002e1fbf1b03e6e35d5021ffa1e1424ba08467672265de6d8ac159c",
+    "env/scene_manager/layout_manager.py": "74de56bf9c42dcbb5345036dfbbcec95196b3b39be22bdf2bea7ec15f9bef1be",
+    "env/scene_manager/objects/garment.py": "201545d90618cfa8ee44798ee123c755c0bedbe0e18a5f8a703ab22177d297dc",
+    "env/scene_manager/objects/geometry.py": "f2fd6d357384023451780639f98c12c3e4fc2ca69439954c9bfb6f3807a156af",
+    "env/scene_manager/objects/table.py": "bbf34fc0e8859243b5926d7a84060715044194e296c2d627bec2b75d0381c9b6",
+    "env_cfg/robot/_robot_info.json": "d1b1d67abd96fb65f7b1e6c717ed32dd5863ecbca2b3f72612d4c276fe83a6e8",
+    "src/eval_client/eval_env.py": "f2430b72897cd0ee49d030c93f28d3b51740257bb8ce41bf1d9afed67f47f3bb",
+    "task/RoboDojo/tasks/general_pickup.py": "475b753514852da5ff3d479da9ffb9d10a40f10e2bf8922635cf9917e9b4eb0c"
+  },
+  "diffstat": "XPolicyLab                               |   0\n env/robot_manager/robot_config/franka.py |  32 ++-\n env/robot_manager/robot_manager.py       |  19 ++\n env/scene_manager/layout_manager.py      |   7 +\n env/scene_manager/objects/garment.py     |   4 +\n env/scene_manager/objects/geometry.py    |   4 +\n env/scene_manager/objects/table.py       |   5 +-\n env_cfg/robot/_robot_info.json           | 326 ++++++++++++++++++++++++++++++-\n src/eval_client/eval_env.py              |  90 ++++++++-\n task/RoboDojo/tasks/general_pickup.py    |   4 +-\n 10 files changed, 473 insertions(+), 18 deletions(-)",
+  "switches_scanned_from_diff": [
+    "BPD_PROF2",
+    "L3_IN_PROCESS_POLICY",
+    "L3_TABLE_COLLIDER",
+    "RD_IK_BAND",
+    "RD_IK_CLAMP",
+    "RD_IK_KI",
+    "RD_IK_LEAK",
+    "RD_NO_VIDEO",
+    "RD_STEP_LIM"
+  ],
+  "non_scoring_present": {
+    "L3_IN_PROCESS_POLICY": "1",
+    "RD_NO_VIDEO": "1"
+  },
+  "bench_switches": {
+    "FR_ARM": {
+      "set": false,
+      "value": null,
+      "upstream_equivalent": "",
+      "off_default": false
+    },
+    "FR_FA_DAMP": {
+      "set": false,
+      "value": null,
+      "upstream_equivalent": "",
+      "off_default": false
+    },
+    "FR_FA_EFFORT": {
+      "set": false,
+      "value": null,
+      "upstream_equivalent": "",
+      "off_default": false
+    },
+    "FR_FA_STIFF": {
+      "set": false,
+      "value": null,
+      "upstream_equivalent": "",
+      "off_default": false
+    },
+    "FR_SH_DAMP": {
+      "set": false,
+      "value": null,
+      "upstream_equivalent": "",
+      "off_default": false
+    },
+    "FR_SH_EFFORT": {
+      "set": false,
+      "value": null,
+      "upstream_equivalent": "",
+      "off_default": false
+    },
+    "FR_SH_STIFF": {
+      "set": false,
+      "value": null,
+      "upstream_equivalent": "",
+      "off_default": false
+    },
+    "FR_VLIM": {
+      "set": false,
+      "value": null,
+      "upstream_equivalent": "",
+      "off_default": false
+    },
+    "L3_TABLE_COLLIDER": {
+      "set": false,
+      "value": null,
+      "upstream_equivalent": "",
+      "off_default": false
+    },
+    "RD_IK_BAND": {
+      "set": false,
+      "value": null,
+      "upstream_equivalent": "",
+      "off_default": false
+    },
+    "RD_IK_CLAMP": {
+      "set": false,
+      "value": null,
+      "upstream_equivalent": "",
+      "off_default": false
+    },
+    "RD_IK_KI": {
+      "set": false,
+      "value": null,
+      "upstream_equivalent": "",
+      "off_default": false
+    },
+    "RD_IK_LEAK": {
+      "set": false,
+      "value": null,
+      "upstream_equivalent": "",
+      "off_default": false
+    },
+    "RD_STEP_LIM": {
+      "set": true,
+      "value": "100000",
+      "upstream_equivalent": "200",
+      "off_default": true
+    }
+  },
+  "our_env": {
+    "BODY_CAL_ARM": "1",
+    "BODY_CAL_PHASES": "fingerprint,base_axis,reach",
+    "BODY_CAL_RAW": "/root/bodycal/raw/reach_a1_20260811",
+    "L3_IN_PROCESS_POLICY": "1",
+    "L3_MAX_STEPS": "100000",
+    "L3_RL_OUT": "/root/bodycal/run_reach_a1_20260811",
+    "RD_NO_VIDEO": "1"
+  },
+  "off_default": [
+    "RD_STEP_LIM"
+  ],
+  "benchmark_pristine": false
+}

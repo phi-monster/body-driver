@@ -1,0 +1,1 @@
+{"phases": {"fingerprint": {"ok": true, "s": 0.4, "steps": 0}, "reach": {"ok": true, "s": 344.5, "steps": 1440}, "backlash": {"ok": true, "s": 62.9, "steps": 1692}}, "arm": 0, "amp_m": 0.02, "settle": 6, "total_steps": 1692, "wall_s": 408.1, "fingerprint": "116bd6e559e10b06"}

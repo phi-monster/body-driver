@@ -1,0 +1,3 @@
+PREREG_reach.md  arm=0 gpu=5  2026-08-10T23:47:38Z
+body_probe md5=c5e03c8fa28a5616bb4440b09eb864fa
+phases=fingerprint,base_axis,reach

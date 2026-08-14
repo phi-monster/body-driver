@@ -1,0 +1,1 @@
+{"phases": {"fingerprint": {"ok": true, "s": 0.5, "steps": 0}, "hand_pixel": {"ok": true, "s": 23.9, "steps": 90}, "gripper_span2": {"ok": true, "s": 40.8, "steps": 246}}, "arm": 0, "amp_m": 0.02, "settle": 6, "total_steps": 246, "wall_s": 65.4, "fingerprint": "116bd6e559e10b06"}

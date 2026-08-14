@@ -1,0 +1,21 @@
+{
+  "fingerprint": "116bd6e559e10b06",
+  "produced_by": "calibrate_from_probes",
+  "raw_dir": "/private/tmp/claude-501/-Users-gogogod-Project-phi-research/d8b43f0b-1a74-44c0-9960-0c96f297fac5/scratchpad/bodycal_raw/arx_x5",
+  "n_measured": 3,
+  "n_refused": 9,
+  "quantities": {
+    "latency": {"value": [0], "uncertainty": [0.5], "valid_lo": [0], "valid_hi": [12], "measured_at": 1786333383, "valid_for_s": 0, "selftest_passed": true, "dim": 1},
+    "step_delivery": {"value": [0.9998999999999999], "uncertainty": [0.00014826000000014826], "valid_lo": [0.005], "valid_hi": [0.05], "measured_at": 1786333383, "valid_for_s": 0, "selftest_passed": true, "dim": 1},
+    "backlash": {"refused": "Inconsistent: the samples imply mutually inconsistent answers", "selftest_passed": false},
+    "image_jacobian": {"value": [-2.185937461789594, -0.8206275885242399, 0.2527054355572614, 3.2828025280302273, -0.2137450219514604, 14.547861412735339], "uncertainty": [0.2665904922913692, 0.2665904922913692, 0.26128391091893344, 0.26128391091893344, 0.07269494449776034, 0.07269494449776034], "valid_lo": [-0.020029999999999992, -0.020029999999999992, -0.016759999999999997, -0.016759999999999997, -0.006979999999999986, -0.006979999999999986], "valid_hi": [0.019970000000000043, 0.019970000000000043, 0.020000000000000018, 0.020000000000000018, 0.020000000000000018, 0.020000000000000018], "measured_at": 1786333383, "valid_for_s": 0, "selftest_passed": true, "dim": 6},
+    "tool_axis_column": {"refused": "top two columns within 1.5x of each other; not separable", "selftest_passed": false},
+    "tool_offset": {"refused": "tool axis column unresolved", "selftest_passed": false},
+    "gripper_span": {"refused": "NotEnoughSamples: fewer samples than the estimator needs", "selftest_passed": false},
+    "reach": {"refused": "Inconsistent: the samples imply mutually inconsistent answers", "selftest_passed": false},
+    "arm_weight": {"refused": "no joint torque channel on this body's bus", "selftest_passed": false},
+    "contact_threshold": {"refused": "no force channel on this body's bus", "selftest_passed": false},
+    "self_occlusion": {"refused": "no validated body-silhouette segmenter here", "selftest_passed": false},
+    "hand_pixel": {"refused": "needs a tracker fed frame by frame, not a batch of excursions", "selftest_passed": false}
+  }
+}

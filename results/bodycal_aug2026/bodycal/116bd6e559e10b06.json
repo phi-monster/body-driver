@@ -1,0 +1,369 @@
+{
+  "fingerprint": "116bd6e559e10b06",
+  "n_measured": 6,
+  "n_refused": 6,
+  "produced_by": "calibrate_from_probes",
+  "quantities": {
+    "arm_weight": {
+      "refused": "no joint torque channel on this body's bus",
+      "selftest_passed": false
+    },
+    "backlash": {
+      "refused": "Inconsistent: the samples imply mutually inconsistent answers",
+      "selftest_passed": false
+    },
+    "contact_threshold": {
+      "axis_kind": [
+        "unmeasured"
+      ],
+      "domain_axis": "delivered fraction",
+      "probed_at_command_m": 0.01,
+      "provenance": "measured 2026-08-11 with NO force sensor: free-space 26 samples median 0.9995 (min 0.9721) vs pressed-on-surface 40 samples median 0.0055 (max 0.0151) -- 181x apart, ZERO overlap; independently reproduces the LAB's 289-step zero-overlap ruler on this body. polarity LOWER-on-contact. THE ORIGINAL REFUSAL REASON REMAINS TRUE: this bus has no force channel, and this number is a delivered-motion fraction, not a force. PROBED AT ONE COMMAND ONLY (1cm pure-down); command axis UNMEASURED.",
+      "refused_reason_kept": "no force channel on this body's bus",
+      "selftest_passed": true,
+      "uncertainty": [
+        0.00039
+      ],
+      "unit": "fraction of commanded motion delivered in one control period -- NOT newtons",
+      "valid_hi": [
+        1
+      ],
+      "valid_lo": [
+        0
+      ],
+      "value": [
+        0.29383
+      ]
+    },
+    "floor": {
+      "axis_kind": [
+        "interval",
+        "interval",
+        "unmeasured"
+      ],
+      "deps": [
+        [
+          "contact_threshold",
+          0
+        ],
+        [
+          "step_delivery",
+          0
+        ]
+      ],
+      "dim": 3,
+      "domain_axis": "x,y over the grid actually pressed; axis 2 carries no domain",
+      "epoch": 1,
+      "provenance": "measured 2026-08-11 by pressing down at 121 grid cells (arrival < 0.020 m and a real stop required; 9 cells dropped). Plane, band and box all come from bl_floor_fit; no coefficient in this row was typed. Reads: stop AT it = the working surface, ABOVE = something is there and (stop - floor) is its height, BELOW = no surface here, the arm ran out of solution.",
+      "selftest_passed": true,
+      "uncertainty": [
+        0.00025683838767905033,
+        0,
+        0
+      ],
+      "unit": "metres; value = [z0 at the box centre, dz/dx, dz/dy]",
+      "valid_hi": [
+        0.6005,
+        -0.0225,
+        0
+      ],
+      "valid_lo": [
+        -0.5995,
+        -0.2302,
+        0
+      ],
+      "value": [
+        0.920787716393067,
+        0.00018937822203675457,
+        0.0004009037068032867
+      ]
+    },
+    "gripper_span": {
+      "dim": 1,
+      "provenance": "measured 2026-08-12. VALUE stands on ONE leg only; the second leg has been RETRACTED the same day.\n\n(1) STANDS -- LAB \"T. 抓不住\": trimodal terminal jaw separation over 122 latched episodes, no mass\nbetween the modes: closed-on-air 0.000-0.017 | real grasp 0.0498-0.0571 (66/68 within +-0.0002, on a\n5 cm object) | STUCK AT THE OPEN LIMIT 0.0802-0.0804. The open-limit band IS the full-open span.\nThat entry also states the terminal opening is itself the instrument for \"how wide a section was\nactually held\".\n\n(2) RETRACTED 2026-08-12 -- I had written: \"this box's same reading has a hard ceiling at 0.800 over\n1893 samples while the COMMAND is 1.0, therefore reading x 0.1 = metres.\" The mapping is NOT\nsupported. Calibrating it against 59 REAL grasps (object as the ruler: section width / reading) gives\na factor whose median is 0.0825 but whose range is 0.0011 .. 0.7516 -- nearly 700x. A factor that\nscatters that far is not a unit conversion; it means the section width 2a reports and the gap the\njaws actually span are DIFFERENT QUANTITIES. Worst single row: a solid block reported as a 0.0048 m\nsection while the jaws stopped at reading 0.30. Root cause under investigation: the finger-wide strip\ncan cut TANGENTIALLY along a face and read a thin skin -- a limitation I had wrongly documented as\naffecting only zero-thickness open shells.\n\nWHAT THIS MEANS FOR CONSUMERS: use 0.0803 m as the full-open span. Do NOT use it to convert a raw\ngripper reading into metres -- that conversion has no measured support on this body today.\n\nWHAT THIS REPLACES: a hand-filled 0.088 with no traceable provenance\n(robot_description(x5 joint7+joint8)=DECLARED_DEBT), 8 mm / 10% too large.\n\nSTILL OPEN: the camera route stays REFUSED and correctly so -- LAB \"夹爪张开\" 2026-08-11, five GPU\nruns; the jaws are black, at the frame edge, against a dark background, so the detector reads\n\"entering/leaving frame\", not \"opening/closing\".",
+      "selftest_passed": true,
+      "superseded": {
+        "dim": 1,
+        "provenance": "measured, two independent legs agreeing, 2026-08-12.\n(1) LAB \"T. 抓不住\" trimodal terminal jaw separation over 122 latched episodes, no mass between the modes: closed-on-air 0.000-0.017 | real grasp 0.0498-0.0571 (66/68 within +-0.0002, on a 5 cm object) | STUCK AT THE OPEN LIMIT 0.0802-0.0804. The open-limit band IS the span. That LAB entry also states the terminal opening is itself the instrument for \"how wide a section was actually held\".\n(2) this box, 1893 samples of the same reading across grasp/s2d rollouts: hard ceiling at 0.800, never exceeded, with a mode there (47 samples), while the COMMAND is 1.0 -> the reading saturates at the open limit.\nINFERENCE, stated as such: (2) is a normalised/x10 reading, not metres -- the driver's own measured reach band is [0.13425, 0.6019] m, so a jaw opening 0.8 m would exceed the whole arm's reach. Mapping reading -> metres is x0.1, from the ceiling correspondence 0.800 <-> 0.0802-0.0804.\nWHAT THIS REPLACES: a hand-filled 0.088 with no traceable provenance, carried in contact_gen.jaw_span as robot_description(x5 joint7+joint8)=DECLARED_DEBT. It is 8 mm (10%) too large; the shovel episodes (candidate sections 7.3/8.4/8.5 cm, three closes on air) are consistent with the smaller true span.\nSTILL OPEN: the camera route (measuring jaw-tip pixel separation) remains REFUSED and correctly so -- LAB \"夹爪张开\" 2026-08-11, five GPU runs, the jaws are black, at the frame edge, against a dark background, so the detector reads \"entering/leaving frame\", not \"opening/closing\".",
+        "selftest_passed": true,
+        "superseded": {
+          "refused": "NoResponse: the commanded motion did not move the signal",
+          "selftest_passed": false
+        },
+        "uncertainty": [
+          0.0001
+        ],
+        "unit": "metres between the jaws at full open -- NOT a normalised command value",
+        "valid_hi": [
+          0.0803
+        ],
+        "valid_lo": [
+          0
+        ],
+        "value": [
+          0.0803
+        ]
+      },
+      "uncertainty": [
+        0.0001
+      ],
+      "unit": "metres between the jaws at full open -- NOT a normalised command value",
+      "valid_hi": [
+        0.0803
+      ],
+      "valid_lo": [
+        0
+      ],
+      "value": [
+        0.0803
+      ]
+    },
+    "hand_pixel": {
+      "refused": "needs a tracker fed frame by frame, not a batch of excursions",
+      "selftest_passed": false
+    },
+    "home_pose": {
+      "dim": 14,
+      "provenance": "home_pose:两臂复位时的末端位姿(位置 m + 四元数 wxyz),由驱动 homecal 从 /root/homerec.txt 算出。\n记录来源:RoboDojo 四个任务(general_pickup / stack_blocks / classify_objects / organize_table)\n各若干集,在**每集下达任何指令之前**读一次 s20 的末端位姿 —— 纯读,不给机器人发指令。\n每臂 n=11,位置散布 0.000 mm、四元数散布 0.00000 ⇒ 复位是确定性的,逐位相同。\n用途:官方 all_robot_back_to_origin 拿的正是复位那一刻的末端位姿当尺子(容差 ±0.15 m / 20 deg)。\n存的是 14 个数:先左臂 xyz+wxyz,再右臂 xyz+wxyz。",
+      "selftest_passed": true,
+      "uncertainty": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "unit": "m",
+      "valid_hi": [
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "valid_lo": [
+        -2,
+        -2,
+        -2,
+        -2,
+        -2,
+        -2,
+        -2,
+        -2,
+        -2,
+        -2,
+        -2,
+        -2,
+        -2,
+        -2
+      ],
+      "value": [
+        -0.29953,
+        -0.3523,
+        0.9215,
+        0.707,
+        0,
+        0,
+        0.70721,
+        0.30047,
+        -0.3523,
+        0.9215,
+        0.707,
+        0,
+        0,
+        0.70721
+      ]
+    },
+    "image_jacobian": {
+      "dim": 6,
+      "measured_at": 1786425312,
+      "selftest_passed": true,
+      "uncertainty": [
+        0.2665904922913692,
+        0.2665904922913692,
+        0.26128391091893344,
+        0.26128391091893344,
+        0.07269494449776034,
+        0.07269494449776034
+      ],
+      "valid_for_s": 0,
+      "valid_hi": [
+        0.019970000000000043,
+        0.019970000000000043,
+        0.020000000000000018,
+        0.020000000000000018,
+        0.020000000000000018,
+        0.020000000000000018
+      ],
+      "valid_lo": [
+        -0.020029999999999992,
+        -0.020029999999999992,
+        -0.016759999999999997,
+        -0.016759999999999997,
+        -0.006979999999999986,
+        -0.006979999999999986
+      ],
+      "value": [
+        -2.185937461789594,
+        -0.8206275885242399,
+        0.2527054355572614,
+        3.2828025280302273,
+        -0.2137450219514604,
+        14.547861412735339
+      ]
+    },
+    "latency": {
+      "dim": 1,
+      "measured_at": 1786425312,
+      "selftest_passed": true,
+      "uncertainty": [
+        0.5
+      ],
+      "valid_for_s": 0,
+      "valid_hi": [
+        12
+      ],
+      "valid_lo": [
+        0
+      ],
+      "value": [
+        0
+      ]
+    },
+    "reach": {
+      "dim": 2,
+      "provenance": "measured 2026-08-13 from 165 wrist-down descent attempts already on disk (floormap cells, both arms, both grid halves): radius from this arm own base vs whether the commanded pose was attained (arrival error < 0.020 m). Band, walls and separation test all come from probe::reach; no coefficient here was typed in.\n🔴 It REPLACES a band measured WITHOUT the wrist constraint ([0.13425, 0.6019]). That band was correct for its own question and wrong for the way the stack uses it: every planner here forces the wrist down, and under that constraint the outer wall is 0.419 m, not 0.602 m. The 18 cm between them is where a whole night of \"the command went out and the hand did not move one step\" lived - the controller was refusing the pose, and nothing said so.",
+      "selftest_passed": true,
+      "superseded": {
+        "dim": 2,
+        "measured_at": 1786425312,
+        "selftest_passed": true,
+        "uncertainty": [
+          0.009550000000000003,
+          0
+        ],
+        "valid_for_s": 0,
+        "valid_hi": [
+          0.8414,
+          0.8414
+        ],
+        "valid_lo": [
+          0.0023,
+          0.0023
+        ],
+        "value": [
+          0.13425,
+          0.6019
+        ]
+      },
+      "uncertainty": [
+        0.00325,
+        0.00325
+      ],
+      "unit": "metres from this arm own base, measured with the wrist held pointing down",
+      "valid_hi": [
+        0.4455,
+        0.4455
+      ],
+      "valid_lo": [
+        0.0005,
+        0.0005
+      ],
+      "value": [
+        0.17369,
+        0.41855
+      ]
+    },
+    "self_occlusion": {
+      "refused": "no validated body-silhouette segmenter here",
+      "selftest_passed": false
+    },
+    "step_delivery": {
+      "dim": 1,
+      "measured_at": 1786425312,
+      "selftest_passed": true,
+      "uncertainty": [
+        0.00014826000000014826
+      ],
+      "valid_for_s": 0,
+      "valid_hi": [
+        0.05
+      ],
+      "valid_lo": [
+        0.005
+      ],
+      "value": [
+        0.9998999999999999
+      ]
+    },
+    "tool_axis_column": {
+      "axis_kind": [
+        "categorical"
+      ],
+      "dim": 1,
+      "domain_axis": "which column of R was spun about, a label in {0,1,2}",
+      "measured_at": 1786425312,
+      "provenance": "; axis marked categorical 2026-08-11 -- as an interval its domain [0,2] admitted non-integer columns.",
+      "selftest_passed": true,
+      "uncertainty": [
+        0
+      ],
+      "valid_for_s": 0,
+      "valid_hi": [
+        2
+      ],
+      "valid_lo": [
+        0
+      ],
+      "value": [
+        0
+      ]
+    },
+    "tool_offset": {
+      "dim": 1,
+      "domain_axis": "surface height z (m) at which contact was observed",
+      "measured_at": 1786425312,
+      "provenance": "in-loop contact: flange_z at stall minus surface_z, s2d_live ep0 g0, no camera; domain and uncertainty backfilled 2026-08-11 from 11 in-loop contact readings (4 legs x 3 layouts, s2d_live): implied offset median 0.1471, 1sigma 0.0181, contact surfaces z 0.7715-0.8351. Stored value 0.1451 left unchanged (0.0020 from the median, well inside 1sigma) so that any behaviour change after the gate merge is attributable to the gate.",
+      "selftest_passed": true,
+      "superseded": {
+        "value": [
+          0.08115644957523517
+        ],
+        "why": "pixel pick biased toward the wrist"
+      },
+      "uncertainty": [
+        0.0181
+      ],
+      "valid_for_s": 0,
+      "valid_hi": [
+        0.8351
+      ],
+      "valid_lo": [
+        0.7715
+      ],
+      "value": [
+        0.1451
+      ]
+    }
+  },
+  "raw_dir": "/private/tmp/claude-501/-Users-gogogod-Project-phi-research/d8b43f0b-1a74-44c0-9960-0c96f297fac5/scratchpad/raw_near",
+  "saved_at": 1786617808.1239216
+}
