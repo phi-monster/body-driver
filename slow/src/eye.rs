@@ -49,9 +49,12 @@ pub fn ask(host: &str, port: u16, what: &str, rgb: &[u8], w: usize, h: usize) ->
          normalised image coordinates u (0=left,1=right) and v (0=top,1=bottom)."
     );
     let body = format!(
-        r#"{{"model":"eye","max_tokens":200,"temperature":0,"response_format":{{"type":"json_schema","json_schema":{{"name":"contact_ask","strict":true,"schema":{{"type":"object","additionalProperties":false,"required":["u","v","span_frac","verb","force"],"properties":{{"u":{{"type":"number","minimum":0,"maximum":1}},"v":{{"type":"number","minimum":0,"maximum":1}},"span_frac":{{"type":"number","minimum":0,"maximum":1}},"verb":{{"type":"string","enum":["grasp","push","place","pry","open","close"]}},"force":{{"type":"string","enum":["light","medium","firm"]}}}}}}}}}},"messages":[{{"role":"user","content":[{{"type":"image_url","image_url":{{"url":"data:image/bmp;base64,{b64}"}}}},{{"type":"text","text":"{prompt}"}}]}}]}}"#
+        r#"{{"model":"eye","max_tokens":600,"temperature":0,"response_format":{{"type":"json_schema","json_schema":{{"name":"contact_ask","strict":true,"schema":{{"type":"object","additionalProperties":false,"required":["u","v","span_frac","verb","force"],"properties":{{"u":{{"type":"number","minimum":0,"maximum":1}},"v":{{"type":"number","minimum":0,"maximum":1}},"span_frac":{{"type":"number","minimum":0,"maximum":1}},"verb":{{"type":"string","enum":["grasp","push","place","pry","open","close"]}},"force":{{"type":"string","enum":["light","medium","firm"]}}}}}}}}}},"messages":[{{"role":"user","content":[{{"type":"image_url","image_url":{{"url":"data:image/bmp;base64,{b64}"}}}},{{"type":"text","text":"{prompt}"}}]}}]}}"#
     );
 
+    // 🔴 **上限 200 在腕相机的特写上会被顶到**(实测:偏移 635 处对象没收尾),
+    // 而"回包被截断"与"眼看不见"在下游完全同形。放到 600,并把截断当**错误**报出来 ——
+    // 一个半截 JSON 解析失败时,报的是"眼给的不是 JSON",读的人会去查眼而不是查长度。
     let raw = post(host, port, "/v1/chat/completions", &body)?;
     // 回包是 JSON 里嵌了一段 JSON 字符串;先取出那段,再解析它。
     let inner = extract_content(&raw).ok_or_else(|| {
