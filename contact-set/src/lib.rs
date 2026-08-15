@@ -115,6 +115,18 @@ pub struct Point {
     pub normal: V3,
     /// ② 那一点允许往哪使劲。
     pub cone: Cone,
+    /// ② **这个接触【拉】不拉得动**(能不能沿法向把物体往自己这边拽)。
+    ///
+    /// # 🔴 为什么必须有这一项(全链测试逼出来的,2026-08-16)
+    ///
+    /// 普通接触是**单向**的:只推得动,拉不动(手指一拉就离开表面了)。
+    /// 而**真空吸盘/电磁/胶带的全部意义就是能拉** —— 少了这一项,
+    /// **吸盘吸住了也抬不起任何东西**:判据会说"你只能往下压,却要求物体往上走" ⇒ `CannotDrive`。
+    /// 实测:点云 → 吸盘 → 抬起 5 cm 这条链就断在这儿。
+    ///
+    /// 🔴 它同样是**要量的身体属性**(能拉多少是真空度/磁力的事),
+    /// 但这里只记"能不能",不记"多大" —— 与"力只给方向不给大小"同一条。
+    pub pull: bool,
     /// ② **这个接触扭不扭得动**(能不能绕自己的法向传力矩)。
     ///
     /// # 🔴 为什么必须有这一项(测试逼出来的,2026-08-16)
@@ -411,6 +423,30 @@ impl ContactSet {
                 let t = cross(r, f);
                 gen.push([f[0], f[1], f[2], t[0] / l, t[1] / l, t[2] / l]);
             }
+            // 能拉的接触(真空/磁/胶):沿法向**反着**也使得上劲。把锥镜像过来。
+            if p.pull {
+                for k in 0..9 {
+                    let f = if k == 8 {
+                        [-n[0], -n[1], -n[2]]
+                    } else {
+                        let phi = core::f64::consts::TAU * (k as f64) / 8.0;
+                        let (cp, sp) = (phi.cos(), phi.sin());
+                        let t1 = {
+                            let a = if n[0].abs() < 0.9 { [1.0, 0.0, 0.0] } else { [0.0, 1.0, 0.0] };
+                            unit(cross(n, a)).unwrap_or([0.0, 1.0, 0.0])
+                        };
+                        let t2 = cross(n, t1);
+                        [
+                            -c * n[0] + s * (cp * t1[0] + sp * t2[0]),
+                            -c * n[1] + s * (cp * t1[1] + sp * t2[1]),
+                            -c * n[2] + s * (cp * t1[2] + sp * t2[2]),
+                        ]
+                    };
+                    let r = [p.at[0] - refp[0], p.at[1] - refp[1], p.at[2] - refp[2]];
+                    let t = cross(r, f);
+                    gen.push([f[0], f[1], f[2], t[0] / l, t[1] / l, t[2] / l]);
+                }
+            }
             // 面接触:还能绕自己的法向拧。**两个方向都给** —— 扭矩可正可负。
             if p.torsion {
                 gen.push([0.0, 0.0, 0.0, n[0] / l, n[1] / l, n[2] / l]);
@@ -495,7 +531,7 @@ mod 十三个动词填表 {
         Cone { axis, half_angle: half }
     }
     fn pt(at: V3, normal: V3, c: Cone, tol: f64) -> Point {
-        Point { by: Who::Hand, at, normal, cone: c, torsion: false, tol_m: tol }
+        Point { by: Who::Hand, at, normal, cone: c, pull: false, torsion: false, tol_m: tol }
     }
     /// 两个相对的点:抓的最小形状。物体在原点、宽 `w`。
     fn 对置两点(w: f64, half: f64) -> Vec<Point> {
@@ -542,6 +578,7 @@ mod 十三个动词填表 {
             at: pivot,
             normal: [0.0, 0.0, -1.0], // 物体朝下的那个面,法向朝外 = 朝下
             cone: cone([0.0, 0.0, 1.0], mu_atan), // 桌子只能往上顶
+            pull: false,
             torsion: false,
             tol_m: MM,
         }
@@ -736,7 +773,7 @@ mod 十三个动词填表 {
         // 🔴 `torsion: true` = **指腹是一片面**。兜起来那一下的转轴恰好就是两指连线,
         //    纯点接触在静力学上产生不出它 —— 见下面那条反例。
         let 握 = |at: V3| {
-            let pad = |p: Point| Point { torsion: true, ..p };
+            let pad = |p: Point| Point { pull: false, torsion: true, ..p };
             vec![
                 pad(pt([at[0], at[1] - 0.012, at[2]], [0.0, -1.0, 0.0], cone([0.0, 1.0, 0.0], 0.4636), MM)),
                 pad(pt([at[0], at[1] + 0.012, at[2]], [0.0, 1.0, 0.0], cone([0.0, -1.0, 0.0], 0.4636), MM)),
@@ -772,7 +809,7 @@ mod 十三个动词填表 {
     #[test]
     fn 兜起来_针尖判死_指腹放行() {
         let mk = |pad: bool| {
-            let f = |p: Point| Point { torsion: pad, ..p };
+            let f = |p: Point| Point { pull: false, torsion: pad, ..p };
             ContactSet {
                 points: vec![
                     f(pt([0.0, -0.012, 0.06], [0.0, -1.0, 0.0], cone([0.0, 1.0, 0.0], 0.4636), MM)),

@@ -32,6 +32,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod hands;
+
 /// 世界坐标里的一个点。
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct P3 {
@@ -146,6 +148,16 @@ pub struct Contact {
     /// 渲图 2026-08-13 拍到过:目标是剪刀,抓在**手柄圆环**上,而重量全在刀刃那头。
     /// 摩擦锥管"横着滑走",这一格管"转出去",**是两件事,都得算**。
     pub com_offset_m: f64,
+}
+
+/// 交接给接触集时,为什么交不出去。**拒绝要说得出理由。**
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum Handoff {
+    /// **μ 没给。** 摩擦系数是身体×世界的耦合,量得出来(拿指头在参考面上蹭一下测打滑门槛),
+    /// 但**没量过就不许瞎填一个** —— 填大了,一把会滑的抓取会被判成可行。
+    MuUnknown,
+    /// **这一把会横着滑走。** 两个夹持面歪了 `need_rad`,而摩擦锥只有 `have_rad`。
+    WouldSlip { need_rad: f64, have_rad: f64 },
 }
 
 /// 为什么一条候选都给不出来。**拒绝要说得出理由**,不许静默返回空表。
@@ -906,21 +918,48 @@ impl Contact {
     /// ⇒ 两个接触点 = 下手点 ± (宽/2) × 合爪方向。**这不是假设两根手指** ——
     /// 它是"沿这个方向、隔这么宽,有两个相对的面"这件几何事实;三指五指由别的生成器给更多点。
     ///
-    /// # 🔴 一笔说清楚的债:锥的半张角
+    /// # 🔴🔴 订正:这里原来把"要多大的锥"填进了"有多大的锥"那一格
     ///
-    /// 锥本该是**摩擦锥**,半张角 `atan(μ)`。而 **μ 在本仓从没量过**。
-    /// 几何唯一能给的是 `face_tilt_rad` —— *沿指头宽方向,近面/远面的深度随位置变化的斜率取反正切*,
-    /// 也就是**"面相对合爪方向斜了多少"**。这里就填它,并且明说:
-    /// **它是"要成立所需要的最小锥",不是"实际有多大的锥"**。谁量到 μ 谁来收窄它。
+    /// 上一版 `half_angle: self.face_tilt_rad`。**方向是反的,而且反得很危险**:
+    /// `face_tilt_rad` 是**这一把需要多大的摩擦锥才不滑**(越大 = 这一把越差),
+    /// 而 `Cone.half_angle` 被 `can_drive` 读成**实际允许往哪使劲**(越大 = 越使得上劲)。
+    /// ⇒ **一把越差的抓取,在判据里看起来越可行。** 没有任何一个环节会不一致。
+    ///
+    /// 正解就写在 `face_tilt_rad` 自己的注释里:*"条件等价于每个接触面的法向与合爪方向的夹角
+    /// < `atan(μ)`"*。⇒ **μ 必须由调用方给**(它是身体×世界的耦合,量得出来:
+    /// 拿指头在参考面上蹭一下测打滑门槛),`half_angle = atan(μ)`,
+    /// 而 `face_tilt_rad > atan(μ)` 时**当场拒绝并报出差多少**,不静默放行。
     ///
     /// `motion` 由调用方给 —— 第③格说的是**物体要怎么动**,而那是任务的事,不是几何的事。
     /// ②a 只知道"从哪儿下手"。
-    pub fn to_set(&self, motion: contact_set::Twist, tol_m: f64) -> contact_set::ContactSet {
+    pub fn to_set(
+        &self,
+        mu: f64,
+        motion: contact_set::Twist,
+        tol_m: f64,
+    ) -> Result<contact_set::ContactSet, Handoff> {
+        let have = mu.atan();
+        if !(mu.is_finite() && mu > 0.0) {
+            return Err(Handoff::MuUnknown);
+        }
+        if self.face_tilt_rad > have {
+            return Err(Handoff::WouldSlip { need_rad: self.face_tilt_rad, have_rad: have });
+        }
+        Ok(self.build(have, motion, tol_m))
+    }
+
+    fn build(
+        &self,
+        half_angle: f64,
+        motion: contact_set::Twist,
+        tol_m: f64,
+    ) -> contact_set::ContactSet {
         let (c, s) = (self.close_yaw.cos(), self.close_yaw.sin());
         let jaw = [c, s, 0.0]; // 合爪方向(水平面内)
         let half = self.width_m / 2.0;
         let mk = |sign: f64| contact_set::Point {
             by: contact_set::Who::Hand,
+            pull: false,
             torsion: false,
             at: [
                 self.point.x + jaw[0] * half * sign,
@@ -932,7 +971,7 @@ impl Contact {
             cone: contact_set::Cone {
                 // 允许的用力方向:朝里(把物体夹住)
                 axis: [-jaw[0] * sign, -jaw[1] * sign, 0.0],
-                half_angle: self.face_tilt_rad,
+                half_angle,
             },
             tol_m,
         };
@@ -990,8 +1029,9 @@ mod 产出接触集 {
         assert!(!cs.is_empty(), "候选不该是空的");
         let c = cs.iter().find(|c| c.reachable).unwrap_or(&cs[0]);
 
-        // 抓:物体不动 —— 四格自检必须过
-        let set = c.to_set(contact_set::Twist::still([c.point.x, c.point.y, c.point.z]), 0.002);
+        // 抓:物体不动 —— 四格自检必须过。**μ 必须由调用方给**(这里当作量过的 0.5)。
+        let 静 = contact_set::Twist::still([c.point.x, c.point.y, c.point.z]);
+        let set = c.to_set(0.5, 静, 0.002).expect("这条候选该交得出去");
         assert_eq!(set.points.len(), 2, "下手点 + 宽度 + 合爪方向 ⇒ 两个相对的接触点");
         assert_eq!(set.check(false), Ok(()), "②a 吐出来的接触集必须自检就过");
 
@@ -1009,5 +1049,46 @@ mod 产出接触集 {
         assert!(contact_set::dot(a0, a1) < -0.999, "对夹:两个锥必须相反");
         // 🔴 进场方向必须有 —— 没有它 ②b 只能拒绝(四格定不下这一个自由度)
         assert!(set.approach.is_some(), "②a 看得见空隙,进场方向该由它填");
+        // 🔴 锥就是**摩擦锥**,半张角 = atan(μ);不是 face_tilt(那是"需要多大",不是"有多大")
+        for p in &set.points {
+            assert!((p.cone.half_angle - 0.5f64.atan()).abs() < 1e-12);
+        }
+    }
+
+    /// 🔴🔴 **反例:歪得厉害的那一把,μ 小就必须交不出去。**
+    ///
+    /// 上一版把 `face_tilt_rad` 填进 `Cone.half_angle`,方向正好反了:
+    /// **越歪(越差)的抓取,在判据里锥越大、看起来越可行**。这条测试锁死那个方向。
+    #[test]
+    fn 歪得厉害的那一把_摩擦不够就必须拒绝() {
+        let 歪 = Contact {
+            point: P3 { x: 0.0, y: 0.0, z: 0.95 },
+            close_yaw: 0.0,
+            width_m: 0.04,
+            margin_m: 0.04,
+            above_support_m: 0.05,
+            reach_r: 0.4,
+            reachable: true,
+            jaw_declared: false,
+            within_jaw: true,
+            n_pts: 40,
+            depth_m: 0.03,
+            face_tilt_rad: 0.60, // 两个面歪了 34.4°
+            com_offset_m: 0.0,
+        };
+        let 静 = contact_set::Twist::still([0.0, 0.0, 0.95]);
+        // μ=0.5 ⇒ 摩擦锥只有 26.6° < 34.4° ⇒ 会滑,必须点名差多少
+        match 歪.to_set(0.5, 静, 0.002) {
+            Err(Handoff::WouldSlip { need_rad, have_rad }) => {
+                assert!((need_rad - 0.60).abs() < 1e-12);
+                assert!((have_rad - 0.5f64.atan()).abs() < 1e-12);
+                assert!(need_rad > have_rad);
+            }
+            other => panic!("会滑的那一把必须拒绝,实得 {other:?}"),
+        }
+        // μ=1.0 ⇒ 摩擦锥 45° > 34.4° ⇒ 同一把就交得出去了。**差别只在 μ,不在几何。**
+        assert!(歪.to_set(1.0, 静, 0.002).is_ok());
+        // μ 没量过就不许瞎填
+        assert_eq!(歪.to_set(0.0, 静, 0.002), Err(Handoff::MuUnknown));
     }
 }

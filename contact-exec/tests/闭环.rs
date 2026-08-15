@@ -19,7 +19,7 @@ fn body() -> Body {
     Body { standoff_m: 0.04, repeat_m: 0.001 }
 }
 fn pt(at: V3, normal: V3, axis: V3, half: f64) -> Point {
-    Point { by: Who::Hand, at, normal, cone: Cone { axis, half_angle: half }, torsion: false, tol_m: MM }
+    Point { by: Who::Hand, at, normal, cone: Cone { axis, half_angle: half }, pull: false, torsion: false, tol_m: MM }
 }
 /// 一对相对的钳口点(夹住 5 cm 宽的东西)。
 fn 对置两点() -> Vec<Point> {
@@ -152,6 +152,7 @@ fn 撬_填得满但验不了_必须由眼睛判() {
                 at: pivot,
                 normal: [0.0, 0.0, -1.0],
                 cone: Cone { axis: [0.0, 0.0, 1.0], half_angle: 0.46 },
+                pull: false,
                 torsion: false,
                 tol_m: MM,
             },
@@ -267,9 +268,9 @@ use contact_exec::set::many::Move;
 fn 握(at: V3, pad: bool) -> Vec<Point> {
     vec![
         Point { by: Who::Hand, at: [at[0], at[1] - 0.02, at[2]], normal: [0.0, -1.0, 0.0],
-                cone: Cone { axis: [0.0, 1.0, 0.0], half_angle: 0.4636 }, torsion: pad, tol_m: MM },
+                cone: Cone { axis: [0.0, 1.0, 0.0], half_angle: 0.4636 }, pull: false, torsion: pad, tol_m: MM },
         Point { by: Who::Hand, at: [at[0], at[1] + 0.02, at[2]], normal: [0.0, 1.0, 0.0],
-                cone: Cone { axis: [0.0, -1.0, 0.0], half_angle: 0.4636 }, torsion: pad, tol_m: MM },
+                cone: Cone { axis: [0.0, -1.0, 0.0], half_angle: 0.4636 }, pull: false, torsion: pad, tol_m: MM },
     ]
 }
 
@@ -329,7 +330,7 @@ fn 握着扣扳机_握的点全程不动_扳机自己走() {
         motion: Twist::still([0.0, 0.0, 0.10]), approach: Some([0.0, 0.0, -1.0]) });
     let 扣 = Move::One(ContactSet {
         points: vec![Point { by: Who::Hand, at: [0.03, 0.0, 0.10], normal: [1.0, 0.0, 0.0],
-                             cone: Cone { axis: [-1.0, 0.0, 0.0], half_angle: 0.4636 }, torsion: false, tol_m: MM }],
+                             cone: Cone { axis: [-1.0, 0.0, 0.0], half_angle: 0.4636 }, pull: false, torsion: false, tol_m: MM }],
         motion: Twist::slide([-0.012, 0.0, 0.0]), approach: Some([-1.0, 0.0, 0.0]) });
     let s = script(&Move::While(vec![握住, 扣]), &body(), true, 4).expect("并存要走得出来");
 

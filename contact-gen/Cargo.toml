@@ -16,3 +16,8 @@ contact-set = { path = "../contact-set" }
 overflow-checks = true
 lto = true
 
+
+# 🔴 **只在测试里**依赖 ②b。理由:那条"点云 → 接触集 → 航点 → 推演"的全链验收
+# 必须两边都在场才跑得起来。**运行期依赖仍然是空的** —— ②a 与 ②b 平级这堵墙没破。
+[dev-dependencies]
+contact-exec = { path = "../contact-exec" }
