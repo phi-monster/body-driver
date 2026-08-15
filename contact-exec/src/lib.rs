@@ -19,6 +19,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod plan;
 pub mod set;
 
 /// 一个三维点,米,世界坐标。

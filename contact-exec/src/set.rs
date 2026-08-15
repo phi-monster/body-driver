@@ -164,6 +164,26 @@ pub struct ContactSet {
     pub points: Vec<Point>,
     /// ③ 物体要怎么动。
     pub motion: Twist,
+    /// 🔴🔴 **四格【定不下来】的那一个自由度:手从哪个方向进场。**
+    ///
+    /// 这不是第五格,是四格的**补**。四格说的是"要发生什么",这一项说的是"手从哪儿来"。
+    ///
+    /// # 为什么四格定不下它(测试逼出来的,2026-08-16)
+    ///
+    /// - **单点接触**(推/压/吸盘):锥轴就是进场方向 ⇒ 四格**定得下**,这里填 `None` 即可。
+    /// - **对夹**(抓/三指/五指):两个锥正好相反、两个法向也正好相反 ⇒ **合成恰好为零**。
+    ///   剩下的约束只有"进场方向 ⊥ 接触点连线",而那是**一整圈**方向 —— 还剩一个自由度。
+    ///   实测:不填时 `plan::steps` 返回 `NoFrame`,而不是随便挑一个。
+    ///
+    /// # 🔴 由此要订正一句我自己说过的话
+    ///
+    /// 我把老接口的 `close_yaw` 骂成"只有一个标量所以窄"。**骂错了一半** ——
+    /// 它携带的恰好就是四格定不下来的**那一个**自由度,一个不多一个不少。
+    /// 它真正的毛病不是窄,是它**只有这一个** ⇒ 法向、锥、旋量、容差全没地方放。
+    ///
+    /// 谁来填:看得见空隙的那一层(②a 从点云里知道哪边伸得进去)。填不了就**拒绝**,
+    /// 不许在执行层里瞎挑一个 —— 挑错了物体会被爪子侧面撞飞,而没有任何一个环节会不一致。
+    pub approach: Option<V3>,
 }
 
 /// 一个接触集哪儿填不下去。**必须点名是哪一格,不许含糊。**
@@ -293,14 +313,14 @@ mod 十三个动词填表 {
 
     #[test]
     fn 抓_两个相对的点向内使劲() {
-        let cs = ContactSet { points: 对置两点(0.05, 0.5), motion: Twist::still([0.0, 0.0, 0.10]) };
+        let cs = ContactSet { points: 对置两点(0.05, 0.5), motion: Twist::still([0.0, 0.0, 0.10]) , approach: None };
         assert_eq!(cs.check(false), Ok(()));
         assert_eq!(cs.points.len(), 2);
     }
 
     #[test]
     fn 松_同样的点物体不动() {
-        let cs = ContactSet { points: 对置两点(0.05, 0.5), motion: Twist::still([0.0, 0.0, 0.10]) };
+        let cs = ContactSet { points: 对置两点(0.05, 0.5), motion: Twist::still([0.0, 0.0, 0.10]) , approach: None };
         assert_eq!(cs.check(false), Ok(()));
     }
 
@@ -308,8 +328,7 @@ mod 十三个动词填表 {
     fn 压_一个点沿法向使劲物体不动() {
         let cs = ContactSet {
             points: vec![pt([0.0, 0.0, 0.10], [0.0, 0.0, 1.0], cone([0.0, 0.0, -1.0], 0.2), MM)],
-            motion: Twist::still([0.0, 0.0, 0.10]),
-        };
+            motion: Twist::still([0.0, 0.0, 0.10]), approach: None };
         assert_eq!(cs.check(false), Ok(()), "压:物体不动是一个合法答案");
     }
 
@@ -317,8 +336,7 @@ mod 十三个动词填表 {
     fn 推_一个点横向力物体在支撑面上平移() {
         let cs = ContactSet {
             points: vec![pt([0.03, 0.0, 0.05], [1.0, 0.0, 0.0], cone([-1.0, 0.0, 0.0], 0.6), MM)],
-            motion: Twist::slide([-0.10, 0.0, 0.0]),
-        };
+            motion: Twist::slide([-0.10, 0.0, 0.0]), approach: None };
         assert_eq!(cs.check(true), Ok(()));
     }
 
@@ -327,7 +345,7 @@ mod 十三个动词填表 {
         let pivot = [0.05, 0.0, 0.0];
         let at = [-0.04, 0.0, 0.02];
         let m = Twist::turn([0.0, 1.0, 0.0], -0.4, pivot).expect("轴非零");
-        let cs = ContactSet { points: 跟着走(vec![pt(at, [0.0, 0.0, 1.0], cone([0.0, 0.0, 1.0], 0.5), MM)], &m), motion: m };
+        let cs = ContactSet { points: 跟着走(vec![pt(at, [0.0, 0.0, 1.0], cone([0.0, 0.0, 1.0], 0.5), MM)], &m), motion: m , approach: None };
         assert_eq!(cs.check(true), Ok(()));
         assert!(cs.motion.angle() > 0.0, "撬必须有转,而上一版的 Motion 说不出转");
     }
@@ -337,21 +355,21 @@ mod 十三个动词填表 {
         let pivot = [0.05, 0.0, 0.0];
         let at = [-0.04, 0.0, 0.02];
         let m = Twist::turn([0.0, 1.0, 0.0], -PI * 0.9, pivot).expect("轴非零");
-        let cs = ContactSet { points: 跟着走(vec![pt(at, [0.0, 0.0, 1.0], cone([0.0, 0.0, 1.0], 0.9), MM)], &m), motion: m };
+        let cs = ContactSet { points: 跟着走(vec![pt(at, [0.0, 0.0, 1.0], cone([0.0, 0.0, 1.0], 0.9), MM)], &m), motion: m , approach: None };
         assert_eq!(cs.check(true), Ok(()));
     }
 
     #[test]
     fn 倒_握着绕一条水平轴转() {
         let m = Twist::turn([0.0, 1.0, 0.0], 1.8, [0.0, 0.0, 0.10]).expect("轴非零");
-        let cs = ContactSet { points: 跟着走(对置两点(0.05, 0.5), &m), motion: m };
+        let cs = ContactSet { points: 跟着走(对置两点(0.05, 0.5), &m), motion: m , approach: None };
         assert_eq!(cs.check(true), Ok(()));
     }
 
     #[test]
     fn 拧_握着绕物体自己的轴转() {
         let m = Twist::turn([0.0, 0.0, 1.0], 1.5, [0.0, 0.0, 0.10]).expect("轴非零");
-        let cs = ContactSet { points: 跟着走(对置两点(0.05, 0.5), &m), motion: m };
+        let cs = ContactSet { points: 跟着走(对置两点(0.05, 0.5), &m), motion: m , approach: None };
         assert_eq!(cs.check(true), Ok(()));
         // 🔴 与"倒"的差别【只在第③格的轴】,四格结构一个字没变 —— 这就是"塌成一张模板"。
     }
@@ -359,14 +377,14 @@ mod 十三个动词填表 {
     #[test]
     fn 插_握着沿一条轴往里走() {
         let m = Twist::slide([0.0, 0.06, 0.0]);
-        let cs = ContactSet { points: 跟着走(对置两点(0.05, 0.5), &m), motion: m };
+        let cs = ContactSet { points: 跟着走(对置两点(0.05, 0.5), &m), motion: m , approach: None };
         assert_eq!(cs.check(true), Ok(()));
     }
 
     #[test]
     fn 放_握着搬到目标位姿() {
         let m = Twist::slide([0.20, 0.30, -0.10]);
-        let cs = ContactSet { points: 跟着走(对置两点(0.05, 0.5), &m), motion: m };
+        let cs = ContactSet { points: 跟着走(对置两点(0.05, 0.5), &m), motion: m , approach: None };
         assert_eq!(cs.check(true), Ok(()), "放 = 把物体搬过去;松手是【下一个】接触集");
     }
 
@@ -374,8 +392,7 @@ mod 十三个动词填表 {
     fn 吸盘_一个点加一个只允许法向的锥() {
         let cs = ContactSet {
             points: vec![pt([0.0, 0.0, 0.10], [0.0, 0.0, 1.0], cone([0.0, 0.0, 1.0], 0.0), MM)],
-            motion: Twist::slide([0.0, 0.0, 0.05]),
-        };
+            motion: Twist::slide([0.0, 0.0, 0.05]), approach: None };
         assert_eq!(cs.check(true), Ok(()));
         assert_eq!(cs.points.len(), 1, "吸盘 1 个点填同一张表");
     }
@@ -390,7 +407,7 @@ mod 十三个动词填表 {
                     pt([0.03 * c, 0.03 * s, 0.10], [c, s, 0.0], cone([-c, -s, 0.0], 0.5), MM)
                 })
                 .collect();
-            let cs = ContactSet { points: pts, motion: Twist::still([0.0, 0.0, 0.10]) };
+            let cs = ContactSet { points: pts, motion: Twist::still([0.0, 0.0, 0.10]) , approach: None };
             assert_eq!(cs.check(false), Ok(()), "{n} 指必须填得满同一张表");
             assert_eq!(cs.points.len(), n);
         }
@@ -400,33 +417,31 @@ mod 十三个动词填表 {
     fn 锥与物体运动矛盾时当场点名() {
         let cs = ContactSet {
             points: vec![pt([0.0, 0.0, 0.10], [0.0, 0.0, 1.0], cone([0.0, 0.0, -1.0], 0.1), MM)],
-            motion: Twist::slide([0.10, 0.0, 0.0]),
-        };
+            motion: Twist::slide([0.10, 0.0, 0.0]), approach: None };
         assert_eq!(cs.check(true), Err(Gap::ConeCannotDrive(0)));
     }
 
     #[test]
     fn 四格各自缺失都点得出名() {
         let good = pt([0.0, 0.0, 0.1], [0.0, 0.0, 1.0], cone([0.0, 0.0, -1.0], 0.3), MM);
-        assert_eq!(ContactSet { points: vec![], motion: Twist::still([0.0; 3]) }.check(false), Err(Gap::NoPoints));
+        assert_eq!(ContactSet { points: vec![], motion: Twist::still([0.0; 3]) , approach: None }.check(false), Err(Gap::NoPoints));
         assert_eq!(
-            ContactSet { points: vec![Point { normal: [0.0; 3], ..good }], motion: Twist::still([0.0; 3]) }.check(false),
+            ContactSet { points: vec![Point { normal: [0.0; 3], ..good }], motion: Twist::still([0.0; 3]) , approach: None }.check(false),
             Err(Gap::BadNormal(0))
         );
         assert_eq!(
-            ContactSet { points: vec![Point { cone: cone([0.0; 3], 0.3), ..good }], motion: Twist::still([0.0; 3]) }.check(false),
+            ContactSet { points: vec![Point { cone: cone([0.0; 3], 0.3), ..good }], motion: Twist::still([0.0; 3]) , approach: None }.check(false),
             Err(Gap::BadCone(0))
         );
         assert_eq!(
-            ContactSet { points: vec![Point { tol_m: 0.0, ..good }], motion: Twist::still([0.0; 3]) }.check(false),
+            ContactSet { points: vec![Point { tol_m: 0.0, ..good }], motion: Twist::still([0.0; 3]) , approach: None }.check(false),
             Err(Gap::BadTolerance(0))
         );
-        assert_eq!(ContactSet { points: vec![good], motion: Twist::still([0.0; 3]) }.check(true), Err(Gap::MotionStill));
+        assert_eq!(ContactSet { points: vec![good], motion: Twist::still([0.0; 3]) , approach: None }.check(true), Err(Gap::MotionStill));
         // ④ 容差是【每点】各一个:碰到的毫米级,路过的厘米级
         let mixed = ContactSet {
             points: vec![good, Point { at: [0.0, 0.0, 0.3], tol_m: CM, ..good }],
-            motion: Twist::still([0.0; 3]),
-        };
+            motion: Twist::still([0.0; 3]), approach: None };
         assert_eq!(mixed.check(false), Ok(()));
         assert!(mixed.points[0].tol_m < mixed.points[1].tol_m);
     }
@@ -447,11 +462,10 @@ mod 十三个动词填表 {
 
     #[test]
     fn 握着扣扳机_两件事同时成立() {
-        let 握 = ContactSet { points: 对置两点(0.06, 0.5), motion: Twist::still([0.0, 0.0, 0.1]) };
+        let 握 = ContactSet { points: 对置两点(0.06, 0.5), motion: Twist::still([0.0, 0.0, 0.1]) , approach: None };
         let 扣 = ContactSet {
             points: vec![pt([0.0, 0.02, 0.10], [0.0, 1.0, 0.0], cone([0.0, -1.0, 0.0], 0.3), MM)],
-            motion: Twist::slide([0.0, -0.01, 0.0]),
-        };
+            motion: Twist::slide([0.0, -0.01, 0.0]), approach: None };
         assert_eq!(握.check(false), Ok(()), "握:四格填得满");
         assert_eq!(扣.check(true), Ok(()), "扣扳机:四格也填得满");
         // 🔴 缺的**不是表达力**,是"同时落两个接触集" —— 点名在这里。
