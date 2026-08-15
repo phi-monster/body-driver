@@ -920,6 +920,7 @@ impl Contact {
         let jaw = [c, s, 0.0]; // 合爪方向(水平面内)
         let half = self.width_m / 2.0;
         let mk = |sign: f64| contact_set::Point {
+            by: contact_set::Who::Hand,
             at: [
                 self.point.x + jaw[0] * half * sign,
                 self.point.y + jaw[1] * half * sign,

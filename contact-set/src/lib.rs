@@ -1,3 +1,4 @@
+
 //! **接触集 —— 「脑子对身体说的那句话」本身,四格齐。**
 //!
 //! # 🔴 为什么它是一个独立的东西
@@ -26,6 +27,8 @@
 //!
 //! *"一个苹果要多少牛顿 = 世界属性,可以记住;我这条胳膊命令一下产出多少牛顿 = 身体属性,
 //! 随电量/磨损/温度漂。存成积一换电池就作废。"* ⇒ 第②格只有**锥**,没有牛顿。
+
+pub mod replay;
 
 /// 三维向量(米,或无量纲方向)。
 pub type V3 = [f64; 3];
@@ -81,9 +84,30 @@ impl Cone {
     }
 }
 
+/// **这个接触是谁跟物体之间的。**
+///
+/// # 🔴 为什么①必须记这一维(测试逼出来的,2026-08-16)
+///
+/// 撬:物体绕它压在桌面上的那条边转。手只有**一个**接触点,而单个接触力
+/// `F = f ≠ 0`,产生不出③要的**纯力矩** ⇒ 集合级判据当场判死 `CannotDrive`。
+/// 判得对 —— **少的那一个接触是桌子给的反力**,它一直都在,只是①没地方记。
+///
+/// 少了这一维,撬/翻/舀/靠着墙推**全都填不满**,而且会被判成"接触集自相矛盾",
+/// 把一条完全正确的接触集冤枉掉。
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Who {
+    /// 手(或吸盘/工具)给的接触 —— **执行层要去访问它**,它变成航点。
+    Hand,
+    /// 世界给的接触:桌面、墙、卡具、另一只手按住的地方。
+    /// **执行层不访问它**(手够不到桌子底下那条边),但它参与"能不能驱动"的计算。
+    World,
+}
+
 /// **①②④ 合起来:一个接触点。**
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct Point {
+    /// ① 这个接触是谁的。
+    pub by: Who,
     /// ① 碰物体表面的哪儿(世界系,米)。
     pub at: V3,
     /// ② 那一点的表面法向,**指向物体外侧**(单位向量)。
@@ -201,9 +225,11 @@ pub enum Gap {
     BadNormal(usize),
     /// ② 某一点的锥轴不是一个方向,或半张角不在 [0, π]。
     BadCone(usize),
-    /// ② 某一点**允许的用力方向里,没有一个能推动物体按③走** ——
+    /// ② **所有接触加在一起**都产生不出③要的那个力旋量 ——
     /// 接触集自相矛盾:你说只能这样使劲,又说物体要那样动。
-    ConeCannotDrive(usize),
+    ///
+    /// 🔴 判据在【集合】上,不在单点上(见 `can_drive` 的头注)。
+    CannotDrive,
     /// ③ 旋量既不平移也不转,而这个动词要求物体动。
     MotionStill,
     /// ③ 要转,但没说绕哪一点(pivot 落在物体外很远处通常是没填)。
@@ -260,27 +286,164 @@ impl ContactSet {
                 return Err(Gap::NoPivot);
             }
         }
-        // 🔴 **自洽性:每一点允许的用力方向里,至少要有一个能把物体往③推。**
-        // 这一条挡的是"你说只能沿法向压,又要求物体横着走"这种自相矛盾的接触集 ——
-        // 而那正是老接口无法表达、因此也无法自检的东西。
-        if moving {
-            for (i, p) in self.points.iter().enumerate() {
-                // 这一点被③带着走的方向
-                let after = self.motion.apply(p.at);
-                let want = [after[0] - p.at[0], after[1] - p.at[1], after[2] - p.at[2]];
-                match unit(want) {
-                    // 这一点恰好落在转轴上 ⇒ 它不动,不构成矛盾(拧的时候轴心那一点就是这样)
-                    None => continue,
-                    Some(w) => {
-                        if !p.cone.admits(w) {
-                            return Err(Gap::ConeCannotDrive(i));
-                        }
-                    }
-                }
-            }
+        // 🔴 **自洽性:所有接触【加在一起】,能不能产生③要的那个力旋量。**
+        // 这一条挡的是"你说只能这样使劲,又说物体要那样动"的自相矛盾接触集。
+        if moving && !self.can_drive() {
+            return Err(Gap::CannotDrive);
         }
         Ok(())
     }
+
+    /// **所有接触的摩擦锥张成的集合,包不包含③要的那个力旋量方向。**
+    ///
+    /// # 🔴 为什么判据必须在【集合】上,不在单点上
+    ///
+    /// §1.1 那条刀口写的是 `G · F接触 = F物体` —— 左边是**对所有接触求和**。
+    /// 逐点判"这一点自己能不能把物体推过去"是**错的层级**,而且会把对的接触集判死:
+    /// 两指捏着横向搬运,任何**单**指都做不到(切向力出了自己的摩擦锥),
+    /// 但两指**一起**可以 —— 内部的对夹力互相抵消,切向的摩擦力叠加。
+    /// 本仓实测:逐点判据把「放」「反例」两条合法接触集判成 `ConeCannotDrive`(2026-08-16)。
+    ///
+    /// # 建模假设(写明,不藏)
+    ///
+    /// - 准静态:阻力与运动方向相反 ⇒ 需要的力旋量方向 ∝ ③的旋量。
+    /// - 力与力矩单位不同,用**特征长度** L(各接触到参考点的平均距离)配平:
+    ///   `ŵ = (v, ω·L)`。L 是这个问题里真实存在的长度,不是调出来的常数。
+    /// - 只判**方向**在不在锥里,不判**大小** —— 大小是"捏多紧",归执行层。
+    pub fn can_drive(&self) -> bool {
+        // 🔴 **参考点取接触点质心(物体质心的代理),【不是】第③格的 pivot。**
+        //
+        // 我一开始拿 pivot 当参考点,于是"绕一个偏在下面的支点转"被写成了
+        // **纯力矩**的需求 —— 而纯力矩要求合力为零,两指对夹根本给不出
+        // (实测:握着绕下方 10 cm 的支点转,被判 `CannotDrive`,而这件事天天在做)。
+        // 错在**建模**:第③格的 pivot 说的是"转轴在哪",不是"反力作用在哪"。
+        // 拿着东西挥的时候,物体的合力**本来就不为零** —— 那个力是胳膊给的。
+        //
+        // 正确写法(牛顿-欧拉方向):参考点取质心,需求 = (质心的速度, 角速度)。
+        // 质心未知(世界属性,要学),这里用**接触点质心**当代理,并把这句话写在这儿。
+        let refp = {
+            let k = self.points.len() as f64;
+            [
+                self.points.iter().map(|p| p.at[0]).sum::<f64>() / k,
+                self.points.iter().map(|p| p.at[1]).sum::<f64>() / k,
+                self.points.iter().map(|p| p.at[2]).sum::<f64>() / k,
+            ]
+        };
+        let l: f64 = {
+            let k = self.points.len() as f64;
+            let s: f64 = self
+                .points
+                .iter()
+                .map(|p| norm([p.at[0] - refp[0], p.at[1] - refp[1], p.at[2] - refp[2]]))
+                .sum();
+            let m = s / k;
+            if m > 1e-9 {
+                m
+            } else {
+                1.0
+            }
+        };
+        // 想要的力旋量方向:力 ∝ **参考点自己的速度**(平移 + 绕支点转带出来的那一份),
+        // 力矩 ∝ 角速度。绕支点转会把质心也甩出去 —— 那一份必须算进来,不算就是要求纯力矩。
+        let m = self.motion;
+        let rp = [refp[0] - m.pivot[0], refp[1] - m.pivot[1], refp[2] - m.pivot[2]];
+        let vspin = cross(m.ang, rp);
+        let mut wd = [
+            m.lin[0] + vspin[0],
+            m.lin[1] + vspin[1],
+            m.lin[2] + vspin[2],
+            m.ang[0] * l,
+            m.ang[1] * l,
+            m.ang[2] * l,
+        ];
+        let nd = (wd.iter().map(|x| x * x).sum::<f64>()).sqrt();
+        if nd < 1e-12 {
+            return true;
+        }
+        for x in wd.iter_mut() {
+            *x /= nd;
+        }
+        // 每个接触的摩擦锥,取 8 条棱 + 轴心,各生成一条力旋量
+        let mut gen: Vec<[f64; 6]> = Vec::new();
+        for p in &self.points {
+            let n = match unit(p.cone.axis) {
+                Some(v) => v,
+                None => return false,
+            };
+            let t1 = {
+                let a = if n[0].abs() < 0.9 { [1.0, 0.0, 0.0] } else { [0.0, 1.0, 0.0] };
+                match unit(cross(n, a)) {
+                    Some(v) => v,
+                    None => return false,
+                }
+            };
+            let t2 = cross(n, t1);
+            let (c, s) = (p.cone.half_angle.cos(), p.cone.half_angle.sin());
+            for k in 0..9 {
+                let f = if k == 8 {
+                    n
+                } else {
+                    let phi = core::f64::consts::TAU * (k as f64) / 8.0;
+                    let (cp, sp) = (phi.cos(), phi.sin());
+                    [
+                        c * n[0] + s * (cp * t1[0] + sp * t2[0]),
+                        c * n[1] + s * (cp * t1[1] + sp * t2[1]),
+                        c * n[2] + s * (cp * t1[2] + sp * t2[2]),
+                    ]
+                };
+                let r = [p.at[0] - refp[0], p.at[1] - refp[1], p.at[2] - refp[2]];
+                let t = cross(r, f);
+                gen.push([f[0], f[1], f[2], t[0] / l, t[1] / l, t[2] / l]);
+            }
+        }
+        in_cone(&gen, wd)
+    }
+}
+
+/// `wd` 在不在 `gen` 张成的**凸锥**里 —— 非负最小二乘,投影梯度,零依赖。
+fn in_cone(gen: &[[f64; 6]], wd: [f64; 6]) -> bool {
+    let n = gen.len();
+    if n == 0 {
+        return false;
+    }
+    // 步长取 1/L(L = 最大特征值上界,用 Frobenius 范数代替,保守但稳)
+    let mut lip = 0.0f64;
+    for g in gen {
+        lip += g.iter().map(|x| x * x).sum::<f64>();
+    }
+    let step = if lip > 1e-12 { 1.0 / lip } else { 1.0 };
+    let mut a = vec![0.0f64; n];
+    let mut res;
+    for _ in 0..4000 {
+        // r = Σ a_j g_j − wd
+        let mut r = [0.0f64; 6];
+        for (j, g) in gen.iter().enumerate() {
+            for d in 0..6 {
+                r[d] += a[j] * g[d];
+            }
+        }
+        for d in 0..6 {
+            r[d] -= wd[d];
+        }
+        res = (r.iter().map(|x| x * x).sum::<f64>()).sqrt();
+        if res < 1e-7 {
+            return true;
+        }
+        for (j, g) in gen.iter().enumerate() {
+            let grad: f64 = (0..6).map(|d| g[d] * r[d]).sum();
+            a[j] = (a[j] - step * grad).max(0.0);
+        }
+    }
+    let mut r = [0.0f64; 6];
+    for (j, g) in gen.iter().enumerate() {
+        for d in 0..6 {
+            r[d] += a[j] * g[d];
+        }
+    }
+    for d in 0..6 {
+        r[d] -= wd[d];
+    }
+    (r.iter().map(|x| x * x).sum::<f64>()).sqrt() < 1e-3
 }
 
 #[cfg(test)]
@@ -295,7 +458,7 @@ mod 十三个动词填表 {
         Cone { axis, half_angle: half }
     }
     fn pt(at: V3, normal: V3, c: Cone, tol: f64) -> Point {
-        Point { at, normal, cone: c, tol_m: tol }
+        Point { by: Who::Hand, at, normal, cone: c, tol_m: tol }
     }
     /// 两个相对的点:抓的最小形状。物体在原点、宽 `w`。
     fn 对置两点(w: f64, half: f64) -> Vec<Point> {
@@ -305,17 +468,6 @@ mod 十三个动词填表 {
         ]
     }
     /// 握着的那几点跟物体刚性同动 ⇒ 锥取各自真实的位移方向。
-    fn 跟着走(pts: Vec<Point>, m: &Twist) -> Vec<Point> {
-        pts.into_iter()
-            .map(|p| {
-                let a = m.apply(p.at);
-                match unit([a[0] - p.at[0], a[1] - p.at[1], a[2] - p.at[2]]) {
-                    Some(d) => Point { cone: cone(d, FRAC_PI_2), ..p },
-                    None => p,
-                }
-            })
-            .collect()
-    }
 
     #[test]
     fn 抓_两个相对的点向内使劲() {
@@ -346,14 +498,43 @@ mod 十三个动词填表 {
         assert_eq!(cs.check(true), Ok(()));
     }
 
+    /// 桌子在支点那儿顶着物体的那个接触。**它一直都在,只是①以前没地方记。**
+    fn 桌子顶着(pivot: V3, mu_atan: f64) -> Point {
+        Point {
+            by: Who::World,
+            at: pivot,
+            normal: [0.0, 0.0, -1.0], // 物体朝下的那个面,法向朝外 = 朝下
+            cone: cone([0.0, 0.0, 1.0], mu_atan), // 桌子只能往上顶
+            tol_m: MM,
+        }
+    }
+
     #[test]
     fn 撬_边缘上一个点物体绕那条边转() {
         let pivot = [0.05, 0.0, 0.0];
         let at = [-0.04, 0.0, 0.02];
         let m = Twist::turn([0.0, 1.0, 0.0], -0.4, pivot).expect("轴非零");
-        let cs = ContactSet { points: 跟着走(vec![pt(at, [0.0, 0.0, 1.0], cone([0.0, 0.0, 1.0], 0.5), MM)], &m), motion: m , approach: None };
+        // 🔴 手一个点 + 桌子那条边。少了后者,`can_drive` 判 `CannotDrive` —— 而且判得对:
+        // 单个接触力产生不出③要的纯力矩,支反力本来就是这件事的一部分。
+        let mut pts = vec![pt(at, [0.0, 0.0, 1.0], cone([0.0, 0.0, -1.0], 0.4636), MM)];
+        pts.push(桌子顶着(pivot, 0.46));
+        let cs = ContactSet { points: pts, motion: m, approach: None };
         assert_eq!(cs.check(true), Ok(()));
         assert!(cs.motion.angle() > 0.0, "撬必须有转,而上一版的 Motion 说不出转");
+    }
+
+    #[test]
+    fn 撬_不给支反力就该判死() {
+        let pivot = [0.05, 0.0, 0.0];
+        let at = [-0.04, 0.0, 0.02];
+        let m = Twist::turn([0.0, 1.0, 0.0], -0.4, pivot).expect("轴非零");
+        let cs = ContactSet {
+            points: vec![pt(at, [0.0, 0.0, 1.0], cone([0.0, 0.0, -1.0], 0.4636), MM)],
+            motion: m,
+            approach: None,
+        };
+        // **反例:台子有没有牙。** 只有手那一个点时必须判死,否则集合级判据是摆设。
+        assert_eq!(cs.check(true), Err(Gap::CannotDrive));
     }
 
     #[test]
@@ -361,21 +542,23 @@ mod 十三个动词填表 {
         let pivot = [0.05, 0.0, 0.0];
         let at = [-0.04, 0.0, 0.02];
         let m = Twist::turn([0.0, 1.0, 0.0], -PI * 0.9, pivot).expect("轴非零");
-        let cs = ContactSet { points: 跟着走(vec![pt(at, [0.0, 0.0, 1.0], cone([0.0, 0.0, 1.0], 0.9), MM)], &m), motion: m , approach: None };
+        let mut pts = vec![pt(at, [0.0, 0.0, 1.0], cone([0.0, 0.0, -1.0], 0.4636), MM)];
+        pts.push(桌子顶着(pivot, 0.46));
+        let cs = ContactSet { points: pts, motion: m, approach: None };
         assert_eq!(cs.check(true), Ok(()));
     }
 
     #[test]
     fn 倒_握着绕一条水平轴转() {
         let m = Twist::turn([0.0, 1.0, 0.0], 1.8, [0.0, 0.0, 0.10]).expect("轴非零");
-        let cs = ContactSet { points: 跟着走(对置两点(0.05, 0.5), &m), motion: m , approach: None };
+        let cs = ContactSet { points: 对置两点(0.05, 0.4636), motion: m , approach: None };
         assert_eq!(cs.check(true), Ok(()));
     }
 
     #[test]
     fn 拧_握着绕物体自己的轴转() {
         let m = Twist::turn([0.0, 0.0, 1.0], 1.5, [0.0, 0.0, 0.10]).expect("轴非零");
-        let cs = ContactSet { points: 跟着走(对置两点(0.05, 0.5), &m), motion: m , approach: None };
+        let cs = ContactSet { points: 对置两点(0.05, 0.4636), motion: m , approach: None };
         assert_eq!(cs.check(true), Ok(()));
         // 🔴 与"倒"的差别【只在第③格的轴】,四格结构一个字没变 —— 这就是"塌成一张模板"。
     }
@@ -383,14 +566,14 @@ mod 十三个动词填表 {
     #[test]
     fn 插_握着沿一条轴往里走() {
         let m = Twist::slide([0.0, 0.06, 0.0]);
-        let cs = ContactSet { points: 跟着走(对置两点(0.05, 0.5), &m), motion: m , approach: None };
+        let cs = ContactSet { points: 对置两点(0.05, 0.4636), motion: m , approach: None };
         assert_eq!(cs.check(true), Ok(()));
     }
 
     #[test]
     fn 放_握着搬到目标位姿() {
         let m = Twist::slide([0.20, 0.30, -0.10]);
-        let cs = ContactSet { points: 跟着走(对置两点(0.05, 0.5), &m), motion: m , approach: None };
+        let cs = ContactSet { points: 对置两点(0.05, 0.4636), motion: m , approach: None };
         assert_eq!(cs.check(true), Ok(()), "放 = 把物体搬过去;松手是【下一个】接触集");
     }
 
@@ -424,7 +607,7 @@ mod 十三个动词填表 {
         let cs = ContactSet {
             points: vec![pt([0.0, 0.0, 0.10], [0.0, 0.0, 1.0], cone([0.0, 0.0, -1.0], 0.1), MM)],
             motion: Twist::slide([0.10, 0.0, 0.0]), approach: None };
-        assert_eq!(cs.check(true), Err(Gap::ConeCannotDrive(0)));
+        assert_eq!(cs.check(true), Err(Gap::CannotDrive));
     }
 
     #[test]

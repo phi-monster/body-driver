@@ -13,7 +13,7 @@
 //! **腕压死朝下时够得到 0.419 m,不压死是 0.602 m** —— 那 18 cm 里住着一整晚的
 //! "命令发出去而手一步没动"。姿态必须是**完整朝向**,不是一个角。
 
-use crate::set::{cross, dot, norm, unit, ContactSet, Gap, V3};
+use crate::set::{cross, dot, norm, unit, ContactSet, Gap, Point, Who, V3};
 
 /// 四元数 `(w,x,y,z)`。
 pub type Quat = [f64; 4];
@@ -62,6 +62,8 @@ pub enum NoPlan {
     TolTighterThanBody(usize),
     /// 那几个接触点**张不成一个朝向** —— 所有点共线且没有法向可用。
     NoFrame,
+    /// ① 里一个【手】的接触都没有,全是世界那一侧的约束 ⇒ 执行层无从下手。
+    NoHandContact,
 }
 
 /// 从"每点的法向 + 用力方向"算出**工具该怎么摆**。
@@ -83,7 +85,7 @@ pub fn frame_from(cs: &ContactSet) -> Option<Quat> {
         Some(a) => a,
         None => {
             let mut push = [0.0f64; 3];
-            for p in &cs.points {
+            for p in cs.points.iter().filter(|p| p.by == Who::Hand) {
                 if let Some(a) = unit(p.cone.axis) {
                     push = [push[0] + a[0], push[1] + a[1], push[2] + a[2]];
                 }
@@ -93,7 +95,7 @@ pub fn frame_from(cs: &ContactSet) -> Option<Quat> {
             // 挑错了物体会被爪子侧面撞飞,而没有任何一个环节会不一致。
             unit(push).or_else(|| {
                 let mut s = [0.0f64; 3];
-                for p in &cs.points {
+                for p in cs.points.iter().filter(|p| p.by == Who::Hand) {
                     if let Some(nn) = unit(p.normal) {
                         s = [s[0] - nn[0], s[1] - nn[1], s[2] - nn[2]];
                     }
@@ -105,12 +107,13 @@ pub fn frame_from(cs: &ContactSet) -> Option<Quat> {
     // 开合轴:取相距最远的一对点的连线(单点时另选)
     let mut x = None;
     let mut best = 0.0f64;
-    for i in 0..cs.points.len() {
-        for j in (i + 1)..cs.points.len() {
+    let hp: Vec<&Point> = cs.points.iter().filter(|p| p.by == Who::Hand).collect();
+    for i in 0..hp.len() {
+        for j in (i + 1)..hp.len() {
             let d = [
-                cs.points[j].at[0] - cs.points[i].at[0],
-                cs.points[j].at[1] - cs.points[i].at[1],
-                cs.points[j].at[2] - cs.points[i].at[2],
+                hp[j].at[0] - hp[i].at[0],
+                hp[j].at[1] - hp[i].at[1],
+                hp[j].at[2] - hp[i].at[2],
             ];
             let l = norm(d);
             if l > best {
@@ -171,14 +174,20 @@ pub fn steps(cs: &ContactSet, body: &Body, must_move: bool, arc: usize) -> Resul
         }
     }
     let q = frame_from(cs).ok_or(NoPlan::NoFrame)?;
-    let tol = cs.points.iter().map(|p| p.tol_m).fold(f64::MAX, f64::min);
+    // 🔴 **只有【手】的接触变成航点。** 世界那一侧的接触(桌面顶着的那条边、卡具、墙)
+    // 参与"能不能驱动"的计算,但手够不到它 —— 把它当航点发出去,机械臂会去戳桌子底下。
+    let hand: Vec<&Point> = cs.points.iter().filter(|p| p.by == Who::Hand).collect();
+    if hand.is_empty() {
+        return Err(NoPlan::NoHandContact);
+    }
+    let tol = hand.iter().map(|p| p.tol_m).fold(f64::MAX, f64::min);
     // 工具轴 = 四元数的第三列;悬停就是沿它往回退 standoff。
     let zc = [
         2.0 * (q[1] * q[3] + q[0] * q[2]),
         2.0 * (q[2] * q[3] - q[0] * q[1]),
         1.0 - 2.0 * (q[1] * q[1] + q[2] * q[2]),
     ];
-    let here: Vec<V3> = cs.points.iter().map(|p| p.at).collect();
+    let here: Vec<V3> = hand.iter().map(|p| p.at).collect();
     let back: Vec<V3> = here
         .iter()
         .map(|p| {
@@ -238,7 +247,7 @@ fn rotate_quat(q: Quat, ang: V3) -> Quat {
 #[cfg(test)]
 mod 航点级验收 {
     use super::*;
-    use crate::set::{Cone, ContactSet, Point, Twist};
+    use crate::set::{Cone, ContactSet, Point, Twist, Who};
     use core::f64::consts::{FRAC_PI_2, PI};
 
     const MM: f64 = 0.002;
@@ -247,24 +256,13 @@ mod 航点级验收 {
         Body { standoff_m: 0.04, repeat_m: 0.001 }
     }
     fn pt(at: V3, normal: V3, axis: V3, half: f64) -> Point {
-        Point { at, normal, cone: Cone { axis, half_angle: half }, tol_m: MM }
+        Point { by: Who::Hand, at, normal, cone: Cone { axis, half_angle: half }, tol_m: MM }
     }
     fn 对置两点() -> Vec<Point> {
         vec![
             pt([-0.025, 0.0, 0.10], [-1.0, 0.0, 0.0], [1.0, 0.0, 0.0], FRAC_PI_2),
             pt([0.025, 0.0, 0.10], [1.0, 0.0, 0.0], [-1.0, 0.0, 0.0], FRAC_PI_2),
         ]
-    }
-    fn 跟着走(pts: Vec<Point>, m: &Twist) -> Vec<Point> {
-        pts.into_iter()
-            .map(|p| {
-                let a = m.apply(p.at);
-                match unit([a[0] - p.at[0], a[1] - p.at[1], a[2] - p.at[2]]) {
-                    Some(d) => Point { cone: Cone { axis: d, half_angle: FRAC_PI_2 }, ..p },
-                    None => p,
-                }
-            })
-            .collect()
     }
     /// 四元数的第三列 = 工具轴。
     fn tool_axis(q: Quat) -> V3 {
@@ -316,10 +314,19 @@ mod 航点级验收 {
         let pivot = [0.05, 0.0, 0.0];
         let at = [-0.04, 0.0, 0.02];
         let m = Twist::turn([0.0, 1.0, 0.0], -0.8, pivot).expect("轴非零");
-        let cs = ContactSet {
-            points: 跟着走(vec![pt(at, [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], 0.9)], &m),
-            motion: m, approach: None };
+        // 🔴 手一个点 + **桌子在支点顶着的那个接触**(`Who::World`)。少了后者判 `CannotDrive`,
+        // 而且判得对 —— 单个接触力产生不出纯力矩。世界那一侧的接触**不进航点**,只进判据。
+        let mut pts = vec![pt(at, [0.0, 0.0, 1.0], [0.0, 0.0, -1.0], 0.4636)];
+        pts.push(Point {
+            by: Who::World,
+            at: pivot,
+            normal: [0.0, 0.0, -1.0],
+            cone: Cone { axis: [0.0, 0.0, 1.0], half_angle: 0.46 },
+            tol_m: MM,
+        });
+        let cs = ContactSet { points: pts, motion: m, approach: None };
         let s = steps(&cs, &body(), true, 8).expect("撬要出得来");
+        assert!(s.iter().all(|st| st.at.len() == 1), "航点里只该有【手】那一个点");
         assert_eq!(s.len(), 2 + 8, "悬停 + 贴上 + 8 段弧");
         // 🔴 中点必须离"首末连线"有距离 —— 那正是"走圆弧"与"走直线"的差别。
         let a = s[2].at[0];
@@ -346,7 +353,7 @@ mod 航点级验收 {
     #[test]
     fn 拧_手跟着物体一起转() {
         let m = Twist::turn([0.0, 0.0, 1.0], 1.2, [0.0, 0.0, 0.10]).expect("轴非零");
-        let cs = ContactSet { points: 跟着走(对置两点(), &m), motion: m , approach: Some([0.0, 0.0, -1.0]) };
+        let cs = ContactSet { points: 对置两点(), motion: m , approach: Some([0.0, 0.0, -1.0]) };
         let s = steps(&cs, &body(), true, 6).expect("拧要出得来");
         // 首末朝向之间的夹角,必须等于要转的角
         let q0 = s[1].quat;
