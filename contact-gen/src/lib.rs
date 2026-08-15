@@ -921,6 +921,7 @@ impl Contact {
         let half = self.width_m / 2.0;
         let mk = |sign: f64| contact_set::Point {
             by: contact_set::Who::Hand,
+            torsion: false,
             at: [
                 self.point.x + jaw[0] * half * sign,
                 self.point.y + jaw[1] * half * sign,

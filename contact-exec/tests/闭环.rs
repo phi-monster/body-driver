@@ -19,7 +19,7 @@ fn body() -> Body {
     Body { standoff_m: 0.04, repeat_m: 0.001 }
 }
 fn pt(at: V3, normal: V3, axis: V3, half: f64) -> Point {
-    Point { by: Who::Hand, at, normal, cone: Cone { axis, half_angle: half }, tol_m: MM }
+    Point { by: Who::Hand, at, normal, cone: Cone { axis, half_angle: half }, torsion: false, tol_m: MM }
 }
 /// 一对相对的钳口点(夹住 5 cm 宽的东西)。
 fn 对置两点() -> Vec<Point> {
@@ -152,6 +152,7 @@ fn 撬_填得满但验不了_必须由眼睛判() {
                 at: pivot,
                 normal: [0.0, 0.0, -1.0],
                 cone: Cone { axis: [0.0, 0.0, 1.0], half_angle: 0.46 },
+                torsion: false,
                 tol_m: MM,
             },
         ],
@@ -256,4 +257,96 @@ fn 反例_直线插值代替圆弧必须被判假() {
     println!("刚体间距偏差: 圆弧={:.6} 直线={:.6}", 圆弧最大偏差, 直线最大偏差);
     assert!(圆弧最大偏差 < 1e-9, "②b 出的航点必须处处保持刚体间距");
     assert!(直线最大偏差 > 1e-3, "直线插值必须被抓出来,否则台子没有牙");
+}
+
+// ───────────────── 一串 / 并存:执行层真的走得出来 ─────────────────
+
+use contact_exec::plan::script;
+use contact_exec::set::many::Move;
+
+fn 握(at: V3, pad: bool) -> Vec<Point> {
+    vec![
+        Point { by: Who::Hand, at: [at[0], at[1] - 0.02, at[2]], normal: [0.0, -1.0, 0.0],
+                cone: Cone { axis: [0.0, 1.0, 0.0], half_angle: 0.4636 }, torsion: pad, tol_m: MM },
+        Point { by: Who::Hand, at: [at[0], at[1] + 0.02, at[2]], normal: [0.0, 1.0, 0.0],
+                cone: Cone { axis: [0.0, -1.0, 0.0], half_angle: 0.4636 }, torsion: pad, tol_m: MM },
+    ]
+}
+
+/// 🔴 **擦:握着抹布走三道,中间【一次都不许松手】。**
+///
+/// 这一条验的是 `Keep` 与 `Then` 的差别是**真的**:`Then` 会在每道之间插一个
+/// "沿工具轴退开 4 cm"的悬停 —— 那是把抹布放下再拿起来。
+#[test]
+fn 擦_不松手的一串_中间没有退回悬停() {
+    let 一道 = |from: V3, d: V3| {
+        Move::One(ContactSet { points: 握(from, false), motion: Twist::slide(d), approach: Some([0.0, 0.0, -1.0]) })
+    };
+    let 道 = vec![
+        一道([0.0, 0.0, 0.02], [0.20, 0.0, 0.0]),
+        一道([0.20, 0.0, 0.02], [0.0, 0.05, 0.0]),
+        一道([0.20, 0.05, 0.02], [-0.20, 0.0, 0.0]),
+    ];
+    let 不松手 = script(&Move::Keep(道.clone()), &body(), true, 4).expect("擦要走得出来");
+    let 松手 = script(&Move::Then(道), &body(), true, 4).expect("同样的三道,按重新下手走");
+
+    let 悬停数 = |v: &Vec<contact_exec::plan::Step>| v.iter().filter(|s| s.note == "悬停").count();
+    assert_eq!(悬停数(&不松手), 1, "不松手:只有开头那一次悬停");
+    assert_eq!(悬停数(&松手), 3, "重新下手:每道之前都要退回悬停");
+    // 不松手的那条里,接触点必须**全程连续**(每步跳的距离不超过一段的长度)
+    let mut 最大跳 = 0.0f64;
+    for w in 不松手.windows(2) {
+        for (a, b) in w[0].at.iter().zip(&w[1].at) {
+            最大跳 = 最大跳.max(((a[0]-b[0]).powi(2) + (a[1]-b[1]).powi(2) + (a[2]-b[2]).powi(2)).sqrt());
+        }
+    }
+    assert!(最大跳 <= 0.20 / 4.0 + 1e-9, "不松手就不许有跳变,实得 {最大跳:.4} m");
+}
+
+/// 舀:插进去 → 兜起来 → 抬出来,全程不松手。**指腹版**(点接触兜不起来,见 contact-set 的反例)。
+#[test]
+fn 舀_三段一气呵成() {
+    let 插 = Move::One(ContactSet { points: 握([0.0, 0.0, 0.10], true),
+        motion: Twist::slide([0.0, 0.0, -0.04]), approach: Some([0.0, 0.0, -1.0]) });
+    let 兜 = Move::One(ContactSet { points: 握([0.0, 0.0, 0.06], true),
+        motion: Twist::turn([0.0, 1.0, 0.0], 0.7, [0.0, 0.0, 0.06]).unwrap(), approach: Some([0.0, 0.0, -1.0]) });
+    let 兜完 = 兜.end_points();
+    let 抬 = Move::One(ContactSet {
+        points: 握([0.0, 0.0, 0.06], true).into_iter().zip(&兜完).map(|(p, a)| Point { at: *a, ..p }).collect(),
+        motion: Twist::slide([0.0, 0.0, 0.08]), approach: Some([0.0, 0.0, -1.0]) });
+    let s = script(&Move::Keep(vec![插, 兜, 抬]), &body(), true, 6).expect("舀要走得出来");
+    assert_eq!(s.iter().filter(|x| x.note == "悬停").count(), 1);
+    // 兜那一段手腕必须真的转过 0.7 rad
+    let (q0, qn) = (s[1].quat, s.last().unwrap().quat);
+    let d = (q0[0]*qn[0] + q0[1]*qn[1] + q0[2]*qn[2] + q0[3]*qn[3]).abs().clamp(0.0, 1.0);
+    assert!((2.0 * d.acos() - 0.7).abs() < 1e-6, "手腕该跟着兜转 0.7 rad");
+}
+
+/// 🔴 **握着扣扳机:两件事同时成立,而且握着的那几个点【一步都不许动】。**
+#[test]
+fn 握着扣扳机_握的点全程不动_扳机自己走() {
+    let 握住 = Move::One(ContactSet { points: 握([0.0, 0.0, 0.10], true),
+        motion: Twist::still([0.0, 0.0, 0.10]), approach: Some([0.0, 0.0, -1.0]) });
+    let 扣 = Move::One(ContactSet {
+        points: vec![Point { by: Who::Hand, at: [0.03, 0.0, 0.10], normal: [1.0, 0.0, 0.0],
+                             cone: Cone { axis: [-1.0, 0.0, 0.0], half_angle: 0.4636 }, torsion: false, tol_m: MM }],
+        motion: Twist::slide([-0.012, 0.0, 0.0]), approach: Some([-1.0, 0.0, 0.0]) });
+    let s = script(&Move::While(vec![握住, 扣]), &body(), true, 4).expect("并存要走得出来");
+
+    // 前两步只有握的那两个点;之后每一步都是 2 + 1 = 3 个点
+    assert_eq!(s[0].at.len(), 2);
+    assert_eq!(s[1].at.len(), 2);
+    let 握点 = s[1].at.clone();
+    for st in &s[2..] {
+        assert_eq!(st.at.len(), 3, "并存:握的两个点 + 扳机那一个点");
+        for (a, b) in 握点.iter().zip(&st.at[..2]) {
+            let d = ((a[0]-b[0]).powi(2) + (a[1]-b[1]).powi(2) + (a[2]-b[2]).powi(2)).sqrt();
+            assert!(d < 1e-12, "🔴 握着的点一步都不许动,实得 {d}");
+        }
+        // 朝向由【维持】的那一段定,不跟着扳机走
+        assert_eq!(st.quat, s[1].quat, "扣扳机时手腕不许跟着扳机转");
+    }
+    // 从【贴上】那一步量起 —— s[2] 是扳机自己的悬停(手指还要先够到扳机)。
+    let 扳机走了 = s.last().unwrap().at[2][0] - s[3].at[2][0];
+    assert!((扳机走了 + 0.012).abs() < 1e-9, "扳机自己要走完那 12 mm,实得 {扳机走了:.5}");
 }

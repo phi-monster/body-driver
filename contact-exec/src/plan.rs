@@ -13,6 +13,7 @@
 //! **腕压死朝下时够得到 0.419 m,不压死是 0.602 m** —— 那 18 cm 里住着一整晚的
 //! "命令发出去而手一步没动"。姿态必须是**完整朝向**,不是一个角。
 
+use crate::set::many::{ManyGap, Move};
 use crate::set::{cross, dot, norm, unit, ContactSet, Gap, Point, Who, V3};
 
 /// 四元数 `(w,x,y,z)`。
@@ -52,7 +53,7 @@ pub struct Body {
 }
 
 /// 出不了航点时,**点名**是哪一格或哪一条。
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum NoPlan {
     /// 接触集自己就没填对 —— 转发那一格。
     Bad(Gap),
@@ -64,6 +65,8 @@ pub enum NoPlan {
     NoFrame,
     /// ① 里一个【手】的接触都没有,全是世界那一侧的约束 ⇒ 执行层无从下手。
     NoHandContact,
+    /// 一串/并存那一层就填不满 —— 转发是第几段的哪一格。
+    Many(ManyGap),
 }
 
 /// 从"每点的法向 + 用力方向"算出**工具该怎么摆**。
@@ -256,7 +259,7 @@ mod 航点级验收 {
         Body { standoff_m: 0.04, repeat_m: 0.001 }
     }
     fn pt(at: V3, normal: V3, axis: V3, half: f64) -> Point {
-        Point { by: Who::Hand, at, normal, cone: Cone { axis, half_angle: half }, tol_m: MM }
+        Point { by: Who::Hand, at, normal, cone: Cone { axis, half_angle: half }, torsion: false, tol_m: MM }
     }
     fn 对置两点() -> Vec<Point> {
         vec![
@@ -322,6 +325,7 @@ mod 航点级验收 {
             at: pivot,
             normal: [0.0, 0.0, -1.0],
             cone: Cone { axis: [0.0, 0.0, 1.0], half_angle: 0.46 },
+            torsion: false,
             tol_m: MM,
         });
         let cs = ContactSet { points: pts, motion: m, approach: None };
@@ -408,5 +412,110 @@ mod 航点级验收 {
     fn 接触集自己不合格时把那一格原样转发() {
         let cs = ContactSet { points: vec![], motion: Twist::still([0.0; 3]) , approach: None };
         assert_eq!(steps(&cs, &body(), false, 1), Err(NoPlan::Bad(Gap::NoPoints)));
+    }
+}
+
+/// **一串 / 并存 → 一串航点。** `Move` 的执行层入口。
+///
+/// # 🔴 `够`(Reach)在哪
+///
+/// **它不需要一个变体,因为每一段的第一个航点【就是】它** —— `steps` 给每段开头都放一个
+/// "悬停"(不接触、容差厘米级)。手从上一段末了走到下一段的悬停点,那一段路就是"够"。
+/// ⇒ 接口里没有 `够`,而它照样被执行,**这正是 §1.4 说的"执行层自己产生过渡"**。
+///
+/// # 🔴 没做的那一半,说清楚
+///
+/// **过渡的避障没做。** 绕开路上的东西需要"路上有什么"的几何 —— 那是**世界属性(学)**,
+/// 不是身体属性(量),不该在这一层里硬编。这一层只保证**退到悬停再走**,不保证不撞。
+pub fn script(m: &Move, body: &Body, must_move: bool, arc: usize) -> Result<Vec<Step>, NoPlan> {
+    m.check(must_move).map_err(NoPlan::Many)?;
+    lay(m, body, must_move, arc)
+}
+
+fn lay(m: &Move, body: &Body, must_move: bool, arc: usize) -> Result<Vec<Step>, NoPlan> {
+    match m {
+        Move::One(cs) => steps(cs, body, must_move, arc),
+        // 一串(重新下手):直接接起来。每段开头那个"悬停"就是段间的过渡。
+        Move::Then(items) => {
+            let mut out = Vec::new();
+            for it in items {
+                out.extend(lay(it, body, must_move, arc)?);
+            }
+            Ok(out)
+        }
+        // 🔴 一串(不松手):两件事都要做
+        // ① 除第一段外,**把每段开头那个"悬停"扔掉** —— 手已经握着东西在那儿了,
+        //    再退一次 standoff 就是把抹布放下再拿起来。
+        // ② **把前面几段已经转过的角带进来。** 不带的话下一段会从零重新算朝向,
+        //    于是手腕**悄悄转回去** —— 那正是"握着的东西被自己拧脱手"的形状。
+        //    实测(舀:插→兜→抬):不带时末了手腕的转角是 0 而不是 0.7 rad。
+        Move::Keep(items) => {
+            let mut out = Vec::new();
+            let mut carry: Quat = [1.0, 0.0, 0.0, 0.0];
+            for (i, it) in items.iter().enumerate() {
+                let seg = lay(it, body, must_move, arc)?;
+                let seg = seg.into_iter().filter(|s| i == 0 || s.note != "悬停");
+                for mut s in seg {
+                    s.quat = qmul(carry, s.quat);
+                    out.push(s);
+                }
+                carry = qmul(seg_rot(it), carry);
+            }
+            Ok(out)
+        }
+        // 并存:第一段维持,其余在它维持着的时候动。
+        Move::While(items) => {
+            let hold = lay(&items[0], body, false, arc)?;
+            // 维持段自己那两步照发(悬停 + 贴上),手先握住
+            let mut out = hold.clone();
+            let 握住 = hold.last().ok_or(NoPlan::NoHandContact)?;
+            let 握点 = 握住.at.clone();
+            for it in &items[1..] {
+                for s in lay(it, body, must_move, arc)? {
+                    // 🔴 **朝向由维持的那一段定**,不由动的那一段定 ——
+                    // 扣扳机的时候手腕不该跟着扳机走,那是"握着的东西被自己拧脱手"的形状。
+                    let mut at = 握点.clone();
+                    at.extend(s.at.iter().copied());
+                    out.push(Step {
+                        at,
+                        quat: 握住.quat,
+                        touching: s.touching,
+                        tol_m: s.tol_m.min(握住.tol_m),
+                        note: s.note,
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+}
+
+/// 四元数相乘(世界系左乘:先 `b` 后 `a`)。
+fn qmul(a: Quat, b: Quat) -> Quat {
+    [
+        a[0] * b[0] - a[1] * b[1] - a[2] * b[2] - a[3] * b[3],
+        a[0] * b[1] + a[1] * b[0] + a[2] * b[3] - a[3] * b[2],
+        a[0] * b[2] - a[1] * b[3] + a[2] * b[0] + a[3] * b[1],
+        a[0] * b[3] + a[1] * b[2] - a[2] * b[1] + a[3] * b[0],
+    ]
+}
+
+/// 这一段总共把物体转了多少(世界系四元数)。**`While` 取维持那一段的** —— 握着的没松。
+fn seg_rot(m: &Move) -> Quat {
+    match m {
+        Move::One(cs) => {
+            let th = cs.motion.angle();
+            if th < 1e-12 {
+                [1.0, 0.0, 0.0, 0.0]
+            } else {
+                let k = [cs.motion.ang[0] / th, cs.motion.ang[1] / th, cs.motion.ang[2] / th];
+                let (c, s) = ((th / 2.0).cos(), (th / 2.0).sin());
+                [c, k[0] * s, k[1] * s, k[2] * s]
+            }
+        }
+        Move::Then(items) | Move::Keep(items) => {
+            items.iter().fold([1.0, 0.0, 0.0, 0.0], |acc, it| qmul(seg_rot(it), acc))
+        }
+        Move::While(items) => items.first().map(seg_rot).unwrap_or([1.0, 0.0, 0.0, 0.0]),
     }
 }

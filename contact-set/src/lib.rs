@@ -28,6 +28,7 @@
 //! *"一个苹果要多少牛顿 = 世界属性,可以记住;我这条胳膊命令一下产出多少牛顿 = 身体属性,
 //! 随电量/磨损/温度漂。存成积一换电池就作废。"* ⇒ 第②格只有**锥**,没有牛顿。
 
+pub mod many;
 pub mod replay;
 
 /// 三维向量(米,或无量纲方向)。
@@ -114,6 +115,21 @@ pub struct Point {
     pub normal: V3,
     /// ② 那一点允许往哪使劲。
     pub cone: Cone,
+    /// ② **这个接触扭不扭得动**(能不能绕自己的法向传力矩)。
+    ///
+    /// # 🔴 为什么必须有这一项(测试逼出来的,2026-08-16)
+    ///
+    /// 纯**点**接触传不了扭矩。于是"两指捏着勺子把它翻过来""两指捏着螺丝刀拧"
+    /// 在静力学上**直接判死** —— 而那个转轴恰好就是两个接触点的连线,
+    /// 和 `replay` 说"绕连线的自转定不下来"**是同一件事的两面**(一个说产生不出,一个说测不出来)。
+    ///
+    /// 真手做得到,是因为**指腹是一片面,不是一个点**(Murray-Li-Sastry 的 soft-finger contact)。
+    /// ⇒ 这一项就是"这个接触是点还是面"。**吸盘 = true**(吸盘吸住了是拧得动的),
+    /// 硬钢针尖 = false。
+    ///
+    /// 🔴 它是**身体属性,要量**:指腹多软、贴片多大,决定了扭得动扭不动。
+    /// 现在没有任何一处量过它 —— 谁填谁负责,别默认 true 混过去。
+    pub torsion: bool,
     /// ④ **这一个点**的容差(米)。
     ///
     /// 🔴 容差是**每个接触点各一个**,不是每个计划一个 —— 原文:
@@ -395,6 +411,11 @@ impl ContactSet {
                 let t = cross(r, f);
                 gen.push([f[0], f[1], f[2], t[0] / l, t[1] / l, t[2] / l]);
             }
+            // 面接触:还能绕自己的法向拧。**两个方向都给** —— 扭矩可正可负。
+            if p.torsion {
+                gen.push([0.0, 0.0, 0.0, n[0] / l, n[1] / l, n[2] / l]);
+                gen.push([0.0, 0.0, 0.0, -n[0] / l, -n[1] / l, -n[2] / l]);
+            }
         }
         in_cone(&gen, wd)
     }
@@ -402,6 +423,21 @@ impl ContactSet {
 
 /// `wd` 在不在 `gen` 张成的**凸锥**里 —— 非负最小二乘,投影梯度,零依赖。
 fn in_cone(gen: &[[f64; 6]], wd: [f64; 6]) -> bool {
+    if gen.is_empty() {
+        return false;
+    }
+    // 🔴 **先把每条棱归一化。** 凸锥对每条棱各自的正倍数不变,所以这不改变答案,
+    // 但**不做就会算错**:力矩那三列除以特征长度 l,l 小到 1.2 cm 时棱的模差 ~80 倍,
+    // 投影梯度的步长被最大的那条棱锁死,4000 步都收敛不到 ⇒ **一条可行的接触集被判成不可行**。
+    // 实测:两指捏着勺子往下插(明明做得到)因此被判 `CannotDrive`。
+    let gen: Vec<[f64; 6]> = gen
+        .iter()
+        .filter_map(|g| {
+            let m = (g.iter().map(|x| x * x).sum::<f64>()).sqrt();
+            (m > 1e-12).then(|| [g[0] / m, g[1] / m, g[2] / m, g[3] / m, g[4] / m, g[5] / m])
+        })
+        .collect();
+    let gen = &gen[..];
     let n = gen.len();
     if n == 0 {
         return false;
@@ -449,6 +485,7 @@ fn in_cone(gen: &[[f64; 6]], wd: [f64; 6]) -> bool {
 #[cfg(test)]
 mod 十三个动词填表 {
     use super::*;
+    use crate::many::{ManyGap, Move};
     use core::f64::consts::{FRAC_PI_2, PI};
 
     const MM: f64 = 0.002; // 碰到的地方:毫米级
@@ -458,7 +495,7 @@ mod 十三个动词填表 {
         Cone { axis, half_angle: half }
     }
     fn pt(at: V3, normal: V3, c: Cone, tol: f64) -> Point {
-        Point { by: Who::Hand, at, normal, cone: c, tol_m: tol }
+        Point { by: Who::Hand, at, normal, cone: c, torsion: false, tol_m: tol }
     }
     /// 两个相对的点:抓的最小形状。物体在原点、宽 `w`。
     fn 对置两点(w: f64, half: f64) -> Vec<Point> {
@@ -505,6 +542,7 @@ mod 十三个动词填表 {
             at: pivot,
             normal: [0.0, 0.0, -1.0], // 物体朝下的那个面,法向朝外 = 朝下
             cone: cone([0.0, 0.0, 1.0], mu_atan), // 桌子只能往上顶
+            torsion: false,
             tol_m: MM,
         }
     }
@@ -638,26 +676,136 @@ mod 十三个动词填表 {
     #[test]
     fn 够_不作用在物体上() {
         // Reach:手要去某处,而**物体不参与** ⇒ 第①格无从填起。
-        // 它不是一个接触集,是两个接触集**之间的过渡**,由执行层自己产生。
-        assert_eq!(Gap::NotOneSet(WhyNotOneSet::NoObjectInvolved), Gap::NotOneSet(WhyNotOneSet::NoObjectInvolved));
+        // 🔴 这一条**在接口里没有条目**,而且是故意的:它由执行层在两段之间自己产生
+        //(每段开头那个"悬停"就是它)。这里验的是"一个接触点都没有时会点名",
+        //     而不是从前那句 `assert_eq!(X, X)` —— 那种断言**永远不可能失败**。
+        let 空 = ContactSet { points: vec![], motion: Twist::slide([0.1, 0.0, 0.0]), approach: None };
+        assert_eq!(空.check(true), Err(Gap::NoPoints));
+    }
+
+    /// 握着抹布来回擦 —— **一串,而且全程不松手**。
+    ///
+    /// 🔴 **订正我自己写过的一句话**:从前把这一格记成"没有刚体在动"。**错的** ——
+    /// 握着的抹布本身就是刚体、它的运动就是旋量,第③格填得满。
+    /// 真正说不出的是"那片地方擦干净了没有",而那是**任务的判据**,从来不是接触集的活。
+    fn 擦(道: &[(V3, V3)]) -> Move {
+        Move::Keep(
+            道.iter()
+                .map(|(from, d)| {
+                    let pts = vec![
+                        pt([from[0], from[1] - 0.02, from[2]], [0.0, -1.0, 0.0], cone([0.0, 1.0, 0.0], 0.4636), MM),
+                        pt([from[0], from[1] + 0.02, from[2]], [0.0, 1.0, 0.0], cone([0.0, -1.0, 0.0], 0.4636), MM),
+                    ];
+                    Move::One(ContactSet {
+                        points: pts,
+                        motion: Twist::slide(*d),
+                        approach: Some([0.0, 0.0, -1.0]),
+                    })
+                })
+                .collect(),
+        )
     }
 
     #[test]
-    fn 擦与舀_没有刚体在动() {
-        // Wipe / Scoop:被作用的是一片区域 / 一堆散料,没有一个有位姿的物体 ⇒ 第③格无从填起。
-        // ①②④ 都填得出来,唯独 ③ 不行 ⇒ 要的是**一串**接触集(闭式弓字形那一类),不是一个。
-        assert_eq!(Gap::NotOneSet(WhyNotOneSet::NoRigidObject), Gap::NotOneSet(WhyNotOneSet::NoRigidObject));
+    fn 擦_一串不松手的接触集_每段都填得满() {
+        let m = 擦(&[
+            ([0.0, 0.0, 0.02], [0.20, 0.0, 0.0]),
+            ([0.20, 0.0, 0.02], [0.0, 0.05, 0.0]),
+            ([0.20, 0.05, 0.02], [-0.20, 0.0, 0.0]),
+        ]);
+        assert_eq!(m.check(true), Ok(()));
+        assert_eq!(m.flatten().len(), 3);
+    }
+
+    #[test]
+    fn 擦_接不上的一串必须点名是第几段_差多少() {
+        // 第 0 段末了在 x=0.20,第 1 段却说从 x=0.30 开始 ⇒ 手上还握着东西却跳了 10 cm。
+        let m = 擦(&[([0.0, 0.0, 0.02], [0.20, 0.0, 0.0]), ([0.30, 0.0, 0.02], [0.0, 0.05, 0.0])]);
+        match m.check(true) {
+            Err(ManyGap::KeepBreaksContact(_, i, d)) => {
+                assert_eq!(i, 1);
+                assert!((d - 0.10).abs() < 1e-9, "差的就是那 10 cm,实得 {d}");
+            }
+            other => panic!("说了不松手却接不上,必须点名;实得 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn 舀_插进去_兜起来_抬出来() {
+        // 勺子是刚体:插进去(平移)→ 兜起来(绕勺口转)→ 抬出来(平移)。**全程不松手。**
+        // 🔴 `torsion: true` = **指腹是一片面**。兜起来那一下的转轴恰好就是两指连线,
+        //    纯点接触在静力学上产生不出它 —— 见下面那条反例。
+        let 握 = |at: V3| {
+            let pad = |p: Point| Point { torsion: true, ..p };
+            vec![
+                pad(pt([at[0], at[1] - 0.012, at[2]], [0.0, -1.0, 0.0], cone([0.0, 1.0, 0.0], 0.4636), MM)),
+                pad(pt([at[0], at[1] + 0.012, at[2]], [0.0, 1.0, 0.0], cone([0.0, -1.0, 0.0], 0.4636), MM)),
+            ]
+        };
+        let 插 = Move::One(ContactSet {
+            points: 握([0.0, 0.0, 0.10]),
+            motion: Twist::slide([0.0, 0.0, -0.04]),
+            approach: Some([0.0, 0.0, -1.0]),
+        });
+        let 兜 = Move::One(ContactSet {
+            points: 握([0.0, 0.0, 0.06]),
+            motion: Twist::turn([0.0, 1.0, 0.0], 0.7, [0.0, 0.0, 0.06]).expect("轴非零"),
+            approach: Some([0.0, 0.0, -1.0]),
+        });
+        let 兜完 = 兜.end_points();
+        let 抬 = Move::One(ContactSet {
+            points: 握([0.0, 0.0, 0.06])
+                .into_iter()
+                .zip(&兜完)
+                .map(|(p, a)| Point { at: *a, ..p })
+                .collect(),
+            motion: Twist::slide([0.0, 0.0, 0.08]),
+            approach: Some([0.0, 0.0, -1.0]),
+        });
+        assert_eq!(Move::Keep(vec![插, 兜, 抬]).check(true), Ok(()), "舀:三段,段段填得满且接得上");
+    }
+
+    /// 🔴 **反例:把指腹换成针尖(`torsion: false`),同一个"兜起来"必须判死。**
+    ///
+    /// 这条让 `torsion` 变成**承重的**而不是装饰:两指捏着的东西,绕两指连线的那一转
+    /// **纯点接触产生不出来**。可证伪的预测:*同一只两指爪,换硬尖端就兜不起勺子。*
+    #[test]
+    fn 兜起来_针尖判死_指腹放行() {
+        let mk = |pad: bool| {
+            let f = |p: Point| Point { torsion: pad, ..p };
+            ContactSet {
+                points: vec![
+                    f(pt([0.0, -0.012, 0.06], [0.0, -1.0, 0.0], cone([0.0, 1.0, 0.0], 0.4636), MM)),
+                    f(pt([0.0, 0.012, 0.06], [0.0, 1.0, 0.0], cone([0.0, -1.0, 0.0], 0.4636), MM)),
+                ],
+                motion: Twist::turn([0.0, 1.0, 0.0], 0.7, [0.0, 0.0, 0.06]).expect("轴非零"),
+                approach: Some([0.0, 0.0, -1.0]),
+            }
+        };
+        assert_eq!(mk(false).check(true), Err(Gap::CannotDrive), "针尖:绕连线的转产生不出来");
+        assert_eq!(mk(true).check(true), Ok(()), "指腹:面接触能传扭矩 ⇒ 兜得起来");
     }
 
     #[test]
     fn 握着扣扳机_两件事同时成立() {
-        let 握 = ContactSet { points: 对置两点(0.06, 0.5), motion: Twist::still([0.0, 0.0, 0.1]) , approach: None };
+        let 握 = ContactSet { points: 对置两点(0.06, 0.4636), motion: Twist::still([0.0, 0.0, 0.1]) , approach: Some([0.0, 0.0, -1.0]) };
         let 扣 = ContactSet {
             points: vec![pt([0.0, 0.02, 0.10], [0.0, 1.0, 0.0], cone([0.0, -1.0, 0.0], 0.3), MM)],
-            motion: Twist::slide([0.0, -0.01, 0.0]), approach: None };
+            motion: Twist::slide([0.0, -0.01, 0.0]), approach: Some([0.0, -1.0, 0.0]) };
         assert_eq!(握.check(false), Ok(()), "握:四格填得满");
         assert_eq!(扣.check(true), Ok(()), "扣扳机:四格也填得满");
-        // 🔴 缺的**不是表达力**,是"同时落两个接触集" —— 点名在这里。
-        assert_eq!(Gap::NotOneSet(WhyNotOneSet::Concurrent), Gap::NotOneSet(WhyNotOneSet::Concurrent));
+        // 🔴 从前这里是 `assert_eq!(X, X)` —— **永远不可能失败的断言**,等于没测。
+        // 现在真的把两件事同时落下去:
+        let 并 = Move::While(vec![Move::One(握.clone()), Move::One(扣.clone())]);
+        assert_eq!(并.check(true), Ok(()));
+
+        // 维持的那一段【必须不动】—— 拿在动的那个当维持,要当场点名
+        let 反 = Move::While(vec![Move::One(扣.clone()), Move::One(握.clone())]);
+        assert!(matches!(反.check(true), Err(ManyGap::HolderMoves(_))));
+        // 只有一段就不叫"并存"
+        assert!(matches!(
+            Move::While(vec![Move::One(握)]).check(false),
+            Err(ManyGap::NothingToPairWith(_))
+        ));
     }
 }
