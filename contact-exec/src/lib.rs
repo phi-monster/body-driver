@@ -20,7 +20,9 @@
 #![forbid(unsafe_code)]
 
 pub mod plan;
-pub mod set;
+
+/// 接触集的词汇表住在自己的 crate 里(②a 产出、②b 消费,两边平级)。这里原样再导出一次。
+pub use contact_set as set;
 
 /// 一个三维点,米,世界坐标。
 #[derive(Copy, Clone, Debug, PartialEq)]

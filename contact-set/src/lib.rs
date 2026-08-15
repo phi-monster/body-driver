@@ -1,4 +1,10 @@
-//! **接触集,四格全的那一版。**
+//! **接触集 —— 「脑子对身体说的那句话」本身,四格齐。**
+//!
+//! # 🔴 为什么它是一个独立的东西
+//!
+//! 它是 ②a(接触生成器)**产出**、②b(执行层)**消费**的那个词汇表。
+//! 放进任何一边,另一边就得依赖那一边 —— 而 ②a 与 ②b 是平级的两个生产者。
+//! 依赖表空着,和 `body-layer` 同一条理由:**这一层是要被整个领域读和审的**。
 //!
 //! `ARCH`/`DRIVER_GOAL` §1.2 原文:
 //!
@@ -24,11 +30,11 @@
 /// 三维向量(米,或无量纲方向)。
 pub type V3 = [f64; 3];
 
-pub(crate) fn norm(v: V3) -> f64 {
+pub fn norm(v: V3) -> f64 {
     (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()
 }
 
-pub(crate) fn unit(v: V3) -> Option<V3> {
+pub fn unit(v: V3) -> Option<V3> {
     let n = norm(v);
     if n.is_finite() && n > 1e-12 {
         Some([v[0] / n, v[1] / n, v[2] / n])
@@ -37,7 +43,7 @@ pub(crate) fn unit(v: V3) -> Option<V3> {
     }
 }
 
-pub(crate) fn cross(a: V3, b: V3) -> V3 {
+pub fn cross(a: V3, b: V3) -> V3 {
     [
         a[1] * b[2] - a[2] * b[1],
         a[2] * b[0] - a[0] * b[2],
@@ -45,7 +51,7 @@ pub(crate) fn cross(a: V3, b: V3) -> V3 {
     ]
 }
 
-pub(crate) fn dot(a: V3, b: V3) -> f64 {
+pub fn dot(a: V3, b: V3) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 

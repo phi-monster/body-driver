@@ -9,7 +9,10 @@ license = "AGPL-3.0-or-later"
 # 🔴 也【不依赖 body-layer】—— 身体常数是参数,是传进来的,不是这里读出来的。
 #    ARCH.md §二 那堵墙:反向依赖一出现,"换机体不重训"就没有机制保证了。
 [dependencies]
+# 🔴 接触集的词汇表 —— ②a 产出它,②b 消费它。它住在自己那儿,两边平级。
+contact-set = { path = "../contact-set" }
 
 [profile.release]
 overflow-checks = true
 lto = true
+

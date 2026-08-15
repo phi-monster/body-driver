@@ -887,3 +887,125 @@ mod tests {
         assert!(c.iter().any(|x| x.width_m < 0.02), "该找得到刃上那条窄段");
     }
 }
+
+// ────────────────────── ②a 的产出:一个真正的接触集 ──────────────────────
+
+impl Contact {
+    /// 把这条候选变成一个**接触集**(四格 + 进场方向),交给 ②b。
+    ///
+    /// # 🔴 为什么必须有这一步
+    ///
+    /// 这个结构里的 `close_yaw` / `width_m` / `face_tilt_rad` 是**几何算出来的三个标量**,
+    /// 而 ②b 要的是"碰哪几个点、每点法向与锥、物体怎么动、每点容差"。
+    /// 不做这一步,这三个标量在交接时被压掉 —— 而**丢掉的恰好是最贵的那部分**:
+    /// 法向没了 ⇒ 手腕只能压死朝下;进场方向没了 ⇒ ②b 只能 `NoFrame` 拒绝。
+    ///
+    /// # 两点从哪来
+    ///
+    /// `point` 是**下手点**(两指之间那个中点),`close_yaw` 是合爪方向,`width_m` 是那一段的宽。
+    /// ⇒ 两个接触点 = 下手点 ± (宽/2) × 合爪方向。**这不是假设两根手指** ——
+    /// 它是"沿这个方向、隔这么宽,有两个相对的面"这件几何事实;三指五指由别的生成器给更多点。
+    ///
+    /// # 🔴 一笔说清楚的债:锥的半张角
+    ///
+    /// 锥本该是**摩擦锥**,半张角 `atan(μ)`。而 **μ 在本仓从没量过**。
+    /// 几何唯一能给的是 `face_tilt_rad` —— *沿指头宽方向,近面/远面的深度随位置变化的斜率取反正切*,
+    /// 也就是**"面相对合爪方向斜了多少"**。这里就填它,并且明说:
+    /// **它是"要成立所需要的最小锥",不是"实际有多大的锥"**。谁量到 μ 谁来收窄它。
+    ///
+    /// `motion` 由调用方给 —— 第③格说的是**物体要怎么动**,而那是任务的事,不是几何的事。
+    /// ②a 只知道"从哪儿下手"。
+    pub fn to_set(&self, motion: contact_set::Twist, tol_m: f64) -> contact_set::ContactSet {
+        let (c, s) = (self.close_yaw.cos(), self.close_yaw.sin());
+        let jaw = [c, s, 0.0]; // 合爪方向(水平面内)
+        let half = self.width_m / 2.0;
+        let mk = |sign: f64| contact_set::Point {
+            at: [
+                self.point.x + jaw[0] * half * sign,
+                self.point.y + jaw[1] * half * sign,
+                self.point.z,
+            ],
+            // 法向指向物体外侧 = 从下手点指向这一侧
+            normal: [jaw[0] * sign, jaw[1] * sign, 0.0],
+            cone: contact_set::Cone {
+                // 允许的用力方向:朝里(把物体夹住)
+                axis: [-jaw[0] * sign, -jaw[1] * sign, 0.0],
+                half_angle: self.face_tilt_rad,
+            },
+            tol_m,
+        };
+        contact_set::ContactSet {
+            points: vec![mk(-1.0), mk(1.0)],
+            motion,
+            // 🔴 进场方向 = **支撑面法向的反向**。
+            // 这不是"世界 z 是特权方向",而是 ②a 本来就建立在"有一张支撑面"之上:
+            // 它按水平层切片、按 `min_above_m` 判"爪子伸不伸得进去"。支撑面朝上 ⇒ 从上面来。
+            // 换一台把支撑面立起来的机器,这一项跟着支撑面走,而不是跟着 z 走。
+            approach: Some([0.0, 0.0, -1.0]),
+        }
+    }
+}
+
+#[cfg(test)]
+mod 产出接触集 {
+    use super::*;
+
+    fn 一块方料() -> Vec<P3> {
+        let mut v = Vec::new();
+        for i in 0..12 {
+            for j in 0..12 {
+                for k in 0..6 {
+                    v.push(P3 {
+                        x: -0.03 + 0.06 * i as f64 / 11.0,
+                        y: -0.02 + 0.04 * j as f64 / 11.0,
+                        z: 0.90 + 0.05 * k as f64 / 5.0,
+                    });
+                }
+            }
+        }
+        v
+    }
+
+    #[test]
+    fn 生成器吐出来的东西_执行层直接吃得下() {
+        let body = Body {
+            jaw: JawSpan::Measured(0.08),
+            reach_lo: 0.05,
+            reach_hi: 1.0,
+            base_x: 0.0,
+            base_y: -0.4,
+        };
+        let grid = Grid {
+            bands: 4,
+            jaw_h_m: 0.02,
+            dirs: 12,
+            min_pts: 8,
+            min_above_m: 0.001,
+            finger_w_m: 0.02,
+            gap_m: 0.01,
+        };
+        let cs = candidates(&一块方料(), &body, 0.90, grid).expect("这块料该给得出候选");
+        assert!(!cs.is_empty(), "候选不该是空的");
+        let c = cs.iter().find(|c| c.reachable).unwrap_or(&cs[0]);
+
+        // 抓:物体不动 —— 四格自检必须过
+        let set = c.to_set(contact_set::Twist::still([c.point.x, c.point.y, c.point.z]), 0.002);
+        assert_eq!(set.points.len(), 2, "下手点 + 宽度 + 合爪方向 ⇒ 两个相对的接触点");
+        assert_eq!(set.check(false), Ok(()), "②a 吐出来的接触集必须自检就过");
+
+        // 两点之间的距离要等于那一段的宽
+        let d = contact_set::norm([
+            set.points[1].at[0] - set.points[0].at[0],
+            set.points[1].at[1] - set.points[0].at[1],
+            set.points[1].at[2] - set.points[0].at[2],
+        ]);
+        assert!((d - c.width_m).abs() < 1e-12, "两点间距 = 段宽 {:.4},实得 {d:.4}", c.width_m);
+
+        // 两个锥必须朝里、而且互相相反
+        let a0 = set.points[0].cone.axis;
+        let a1 = set.points[1].cone.axis;
+        assert!(contact_set::dot(a0, a1) < -0.999, "对夹:两个锥必须相反");
+        // 🔴 进场方向必须有 —— 没有它 ②b 只能拒绝(四格定不下这一个自由度)
+        assert!(set.approach.is_some(), "②a 看得见空隙,进场方向该由它填");
+    }
+}

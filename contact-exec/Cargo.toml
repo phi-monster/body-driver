@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+# 🔴 接触集的词汇表 —— ②a 与 ②b 共用,住在自己那儿(见 contact-set 的文件头)。
+contact-set = { path = "../contact-set" }
 
 [[bin]]
 name = "cx"
