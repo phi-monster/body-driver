@@ -960,3 +960,64 @@ pub fn sigma_stereo(距离_m: f64, 基线_m: f64, 焦距_px: f64, 像素误差: 
 fn norm3(v: [f64; 3]) -> f64 {
     (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// 把【支撑面】减掉 —— 剩下的才是物体
+// ─────────────────────────────────────────────────────────────────────
+
+/// **从一团点里拟出最大的那张平面(桌面),把落在它上面的点扔掉。**
+///
+/// # 🔴 它跟 LAB 判死的那条【不是】一回事
+///
+/// 判死的是*"深度比全画面 90 分位近 1 cm 的都算物体"* —— **拿一个深度【数】去卡**,
+/// 于是整张桌子都比背景近,掩膜吃掉 **72% 全帧**。
+/// 这一条是**拟一张【平面】出来减掉**:桌面在三维里是一张平面,而物体**凸出于它**。
+/// 相机斜着看时前者仍然成立,而"一个深度数"当场就废 ——
+/// 实测(2026-08-16 g5):斜看时,桌面上一块 10 cm 的区域自带 **60 mm** 高差,
+/// 深度筛子把整片桌面当成了物体,**掩膜是个规整的圆盘**,而那正是渲图抓出来的假象。
+///
+/// 做法:RANSAC(确定性采样,不引随机数)找内点最多的那张平面,再把内点扔掉。
+/// 返回 `(剩下的点, 平面法向, 平面上有多少点)`。
+pub fn drop_support_plane(pts: &[P3], tol_m: f64) -> (Vec<P3>, [f64; 3], usize) {
+    let n = pts.len();
+    if n < 16 {
+        return (pts.to_vec(), [0.0, 0.0, 1.0], 0);
+    }
+    let mut best = (0usize, [0.0f64, 0.0, 1.0], 0.0f64);
+    // 确定性地取若干三元组 —— 不引随机数(随机会让同一份数据两次给不同答案)
+    let step = (n / 17).max(1);
+    for a in (0..n).step_by(step) {
+        for b in ((a + step)..n).step_by(step.max(1) * 3) {
+            for c in ((b + step)..n).step_by(step.max(1) * 7) {
+                let (p, q, r) = (pts[a], pts[b], pts[c]);
+                let u = [q.x - p.x, q.y - p.y, q.z - p.z];
+                let v = [r.x - p.x, r.y - p.y, r.z - p.z];
+                let cr = cross3(u, v);
+                let ln = (cr[0] * cr[0] + cr[1] * cr[1] + cr[2] * cr[2]).sqrt();
+                let nv = match (ln > 1e-12).then(|| [cr[0] / ln, cr[1] / ln, cr[2] / ln]) {
+                    Some(x) => x,
+                    None => continue,
+                };
+                let d = nv[0] * p.x + nv[1] * p.y + nv[2] * p.z;
+                let cnt = pts
+                    .iter()
+                    .filter(|t| (nv[0] * t.x + nv[1] * t.y + nv[2] * t.z - d).abs() <= tol_m)
+                    .count();
+                if cnt > best.0 {
+                    best = (cnt, nv, d);
+                }
+            }
+        }
+    }
+    let (cnt, nv, d) = best;
+    let 剩 = pts
+        .iter()
+        .filter(|t| (nv[0] * t.x + nv[1] * t.y + nv[2] * t.z - d).abs() > tol_m)
+        .cloned()
+        .collect();
+    (剩, nv, cnt)
+}
+
+fn cross3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+}
