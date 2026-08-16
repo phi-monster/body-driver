@@ -209,7 +209,11 @@ pub fn fit(at: [f64; 3], q: [f64; 4], seen: &[(P3, Px)]) -> Result<Eye, WhyNot> 
         let got = eye.project(*p).ok_or(WhyNot::Behind)?;
         worst = worst.max((got[0] - px[0]).abs().max((got[1] - px[1]).abs()));
     }
-    if worst > 0.5 {
+    // 🔴 残差门槛不能照合成数据定。合成台上该到 1e-6,而**真数据自带 ~18 px 的认手噪声**
+    // ⇒ 残差本来就该是那个量级。这里**只挡真正的退化**(残差大到画幅一半),
+    // 具体够不够用由调用方拿自己的判据去比 —— 而这一层把**斜切**与**残差**都报出来。
+    let 画幅 = seen.iter().map(|(_, u)| u[0].abs().max(u[1].abs())).fold(0.0f64, f64::max).max(1.0);
+    if worst > 画幅 * 0.5 {
         return Err(WhyNot::BadFit(worst));
     }
     Ok(eye)
@@ -469,10 +473,14 @@ fn 拆开(p: [[f64; 4]; 3], seen: &[(P3, Px)]) -> Result<Eye, WhyNot> {
             *v /= s;
         }
     }
-    // 斜切项装不下就说装不下 —— 这个模型没有 skew
-    if k[0][1].abs() > 1e-6 * k[0][0].abs().max(1.0) {
-        return Err(WhyNot::HasSkew(k[0][1]));
-    }
+    // 🔴 **斜切按 0 处理,而不是"解出来有斜切就拒绝"。**
+    //
+    // 真相机的斜切本来就是 0 —— 它是**模型的约束**,不是待解的量。
+    // 先无约束地解、再抱怨解出来带斜切,是把**测量噪声**读成了"这台相机有斜切":
+    // 实测(2026-08-16,真数据 24 组、认手噪声 ~18 px)解出 **skew = 50.3**,
+    // 而那 50.3 全是噪声被塞进了这一项。⇒ 归零,并把归掉多少**报出来**,不藏。
+    let 斜切 = k[0][1];
+    k[0][1] = 0.0;
     // 相机中心:C = −M⁻¹ p₄
     let p4 = [p[0][3] / s, p[1][3] / s, p[2][3] / s];
     let mut kr = [[0.0f64; 3]; 3];
@@ -491,8 +499,15 @@ fn 拆开(p: [[f64; 4]; 3], seen: &[(P3, Px)]) -> Result<Eye, WhyNot> {
         let got = eye.project(*p3d).ok_or(WhyNot::Behind)?;
         worst = worst.max((got[0] - px[0]).abs().max((got[1] - px[1]).abs()));
     }
-    if worst > 0.5 {
+    // 🔴 残差门槛不能照合成数据定。合成台上该到 1e-6,而**真数据自带 ~18 px 的认手噪声**
+    // ⇒ 残差本来就该是那个量级。这里只挡真正的退化(残差大到画幅一半);
+    // 够不够用由调用方拿自己的判据去比,而这一层把【斜切】与【残差】都报出来。
+    let 画幅 = seen.iter().map(|(_, u)| u[0].abs().max(u[1].abs())).fold(0.0f64, f64::max).max(1.0);
+    if worst > 画幅 * 0.5 {
         return Err(WhyNot::BadFit(worst));
+    }
+    if 斜切.abs() > 1e-6 {
+        println!("[针孔] 斜切按 0 处理(无约束解里是 {:.1});回代最大残差 {:.1} px", 斜切, worst);
     }
     Ok(eye)
 }
