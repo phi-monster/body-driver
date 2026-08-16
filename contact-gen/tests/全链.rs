@@ -154,3 +154,63 @@ fn 反例_吸盘不抗剥离就翻不动() {
     set.motion = Twist::turn([0.0, 0.0, 1.0], 0.8, [0.0, 0.0, 0.98]).unwrap();
     assert_eq!(set.check(true), Ok(()), "绕自己法向拧 ⇒ 归 torsion,仍然行");
 }
+
+// ───────────────── 换一面支撑面:同一个物体贴在墙上 ─────────────────
+
+use contact_gen::support::{to_upright, Turn};
+
+/// 🔴🔴 **同一个物体、同一具身体,把"支撑面"从桌子换成墙 —— 结果必须只是转了过去。**
+///
+/// 这一条在修一句**文档说了而代码没做**的话:`to_set` 的注释写着
+/// *"换一台把支撑面立起来的机器,这一项跟着支撑面走"*,而代码里写死的是 `[0,0,-1]`。
+/// **读的人拿到的是承诺,跑的时候拿到的是那个常数,而两者不会不一致** —— 本仓最贵的那种病。
+#[test]
+fn 支撑面立起来_结果只是整体转过去() {
+    let 桌上 = 圆柱();
+    // 把整团点云绕轴转 90°:原来朝上的支撑面法向 (0,0,1) 变成 (1,0,0) —— 也就是"贴在墙上"
+    let 立 = Turn::between([0.0, 0.0, 1.0], [1.0, 0.0, 0.0]).unwrap();
+    let 墙上: Vec<contact_gen::P3> = 桌上.iter().map(|p| 立.point(*p)).collect();
+
+    let 抬 = Twist::slide([0.0, 0.0, 0.05]);
+    let 桌面上的 = suction(&桌上, 0.012, 0.001, MU, 抬, MM).expect("桌上吸得住");
+
+    // 墙上那一面:先转到"支撑面朝上"的系里算,再转回来
+    let (正过来, 转回去) = to_upright(&墙上, [1.0, 0.0, 0.0]).expect("支撑面法向非零");
+    let 算出来 = suction(&正过来, 0.012, 0.001, MU, 抬, MM).expect("墙上也该吸得住");
+    let 墙上的 = 转回去.set(&算出来);
+
+    // 🔴 判据:墙上那个接触集 = 桌上那个【整体转过去】。差一点都不行。
+    assert_eq!(墙上的.points.len(), 桌面上的.points.len());
+    for (a, b) in 墙上的.points.iter().zip(&桌面上的.points) {
+        let 期望 = 立.dir(b.at);
+        let d = norm([a.at[0] - 期望[0], a.at[1] - 期望[1], a.at[2] - 期望[2]]);
+        assert!(d < 1e-9, "接触点该就是转过去的那个,差 {d:.2e}");
+        let n期望 = 立.dir(b.normal);
+        let dn = norm([a.normal[0] - n期望[0], a.normal[1] - n期望[1], a.normal[2] - n期望[2]]);
+        assert!(dn < 1e-9, "法向也要跟着转,差 {dn:.2e}");
+    }
+    // 进场方向必须朝着墙,而不再是"朝下"
+    let ap = 墙上的.approach.expect("进场方向该有");
+    assert!(ap[0] < -0.99, "贴墙时手该从屋里往墙上进场,实得 {ap:?}");
+    assert!(ap[2].abs() < 1e-9, "不许还残留着'朝下'那一份");
+}
+
+/// 两指那条路也一样:把支撑面立起来,候选跟着转,而**不是**塌成空表。
+#[test]
+fn 支撑面立起来_两指候选也照样出得来() {
+    let 立 = Turn::between([0.0, 0.0, 1.0], [0.0, 1.0, 0.0]).unwrap();
+    let 墙上: Vec<contact_gen::P3> = 圆柱().iter().map(|p| 立.point(*p)).collect();
+    let (正过来, 转回去) = to_upright(&墙上, [0.0, 1.0, 0.0]).unwrap();
+
+    let body = Body { jaw: JawSpan::Measured(0.08), reach_lo: 0.02, reach_hi: 1.5, base_x: 0.0, base_y: -0.4 };
+    let grid = Grid { bands: 4, jaw_h_m: 0.02, dirs: 12, min_pts: 8, min_above_m: 0.001, finger_w_m: 0.02, gap_m: 0.01 };
+    let zmin = 正过来.iter().map(|p| p.z).fold(f64::MAX, f64::min);
+    let cs = candidates(&正过来, &body, zmin, grid).expect("立起来之后照样有候选");
+    let 抬 = Twist::slide([0.0, 0.0, 0.05]);
+    let set = cs.iter().find_map(|c| c.to_set(MU, 抬, MM).ok()).expect("总有一条交得出去");
+    let 墙上的 = 转回去.set(&set);
+    assert_eq!(墙上的.check(true), Ok(()), "转回来之后四格仍然自洽");
+    // 进场方向跟着支撑面走:支撑面朝 +y ⇒ 手从 +y 那侧压过来
+    let ap = 墙上的.approach.unwrap();
+    assert!(ap[1] < -0.99, "进场方向该跟着支撑面走,实得 {ap:?}");
+}

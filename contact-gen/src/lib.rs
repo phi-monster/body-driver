@@ -33,6 +33,7 @@
 #![forbid(unsafe_code)]
 
 pub mod hands;
+pub mod support;
 
 /// 世界坐标里的一个点。
 #[derive(Copy, Clone, Debug, PartialEq)]
