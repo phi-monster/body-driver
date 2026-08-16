@@ -193,6 +193,7 @@ fn 支撑接触(cloud: &[P3], 沿: V3) -> Vec<Point> {
             cone: contact_set::Cone { axis: [0.0, 0.0, 1.0], half_angle: MU.atan() },
             pull: false,
             torsion: false,
+            peel: false,
             tol_m: MM,
         });
     }
@@ -369,5 +370,31 @@ pub fn 跑一格(cloud: &[P3], hand: Hand, verb: &str, z: f64) -> Cell {
         Cell::DoneUnverifiable(w)
     } else {
         Cell::Wrong
+    }
+}
+
+/// 试一个旋量在这只手上驱不驱得动。
+pub fn 试(cloud: &[P3], hand: Hand, z: f64, m: Twist) -> bool {
+    match 抓点(cloud, hand, z) {
+        Err(_) => false,
+        Ok(cs) => 带上(cs, m).can_drive(),
+    }
+}
+
+/// **诊断:把一格的接触集摊开来看。** 用来分辨"真的做不到"和"我又写错了"。
+pub fn 看一格(cloud: &[P3], hand: Hand, z: f64) -> String {
+    match 抓点(cloud, hand, z) {
+        Err(e) => format!("① 出不来:{e}"),
+        Ok(cs) => {
+            let mut s = format!("{} 个接触点:\n", cs.points.len());
+            for (i, p) in cs.points.iter().enumerate() {
+                s += &format!(
+                    "  [{i}] at=({:+.4},{:+.4},{:+.4}) 法向=({:+.3},{:+.3},{:+.3}) 锥半角={:.3} 拉={} 扭={}\n",
+                    p.at[0], p.at[1], p.at[2], p.normal[0], p.normal[1], p.normal[2],
+                    p.cone.half_angle, p.pull, p.torsion
+                );
+            }
+            s
+        }
     }
 }

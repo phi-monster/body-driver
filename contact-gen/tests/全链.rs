@@ -130,3 +130,27 @@ fn 反例_吸盘不能拉就抬不起来() {
         "只推得动的接触抬不起东西 —— 这一条必须判死"
     );
 }
+
+/// 🔴 **反例:把"抗剥离"关掉,同一个吸盘就只转得动、翻不动。**
+///
+/// 让 `peel` 变成承重的而不是装饰。`torsion` 只管绕**自己法向**那一根轴;
+/// 少了 `peel`,一个吸盘吸在物体顶上 **撬/翻/倒/舀 全判死**(验收台实测九格)。
+/// 而真空吸盘搬面板时天天在把面板立起来 —— 密封面是一片有半径的面,扛得住剥离力矩。
+#[test]
+fn 反例_吸盘不抗剥离就翻不动() {
+    let 翻 = Twist::turn([0.0, 1.0, 0.0], 0.8, [0.0, 0.0, 0.98]).unwrap();
+    let mut set = suction(&圆柱(), 0.012, 0.001, MU, 翻, MM).expect("平顶面该吸得住");
+    assert!(set.points[0].peel, "吸盘默认就该抗剥离");
+    assert_eq!(set.check(true), Ok(()), "抗剥离 ⇒ 翻得动");
+    for p in set.points.iter_mut() {
+        p.peel = false; // 换成一根只能吸住、掰不动的细吸嘴
+    }
+    assert_eq!(
+        set.check(true),
+        Err(contact_set::Gap::CannotDrive),
+        "掰不动就翻不动 —— 这一条必须判死"
+    );
+    // 而绕它【自己法向】的转仍然做得到(那是 torsion 管的,两件事)
+    set.motion = Twist::turn([0.0, 0.0, 1.0], 0.8, [0.0, 0.0, 0.98]).unwrap();
+    assert_eq!(set.check(true), Ok(()), "绕自己法向拧 ⇒ 归 torsion,仍然行");
+}

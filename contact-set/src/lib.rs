@@ -142,6 +142,19 @@ pub struct Point {
     /// 🔴 它是**身体属性,要量**:指腹多软、贴片多大,决定了扭得动扭不动。
     /// 现在没有任何一处量过它 —— 谁填谁负责,别默认 true 混过去。
     pub torsion: bool,
+    /// ② **这个接触【掰】不掰得动**(能不能绕**切向**轴传力矩,也就是抗不抗"剥离")。
+    ///
+    /// # 🔴 为什么它和 `torsion` 是两件事(验收台逼出来的,2026-08-16)
+    ///
+    /// `torsion` 只管**绕自己法向**那一根轴。于是一个吸盘吸在物体顶上,
+    /// **只转得动、翻不动** —— 撬/翻/倒/舀 全判死(验收台上吸盘那九格就是它)。
+    /// 而真空吸盘搬面板时**天天在把面板立起来**:密封面是一片有半径的面,
+    /// 它扛得住剥离力矩(扛到多大是真空度 × 半径³的事)。
+    ///
+    /// ⇒ **点接触 false · 指尖 false · 吸盘/胶垫/大贴片 true。**
+    /// 与 `pull`、`torsion` 合起来才是第②格的真身:**这个接触能传哪几种东西**,
+    /// 而不是"一个锥"。今天连着三次在②里发现少一维,病根都是把②读窄了。
+    pub peel: bool,
     /// ④ **这一个点**的容差(米)。
     ///
     /// 🔴 容差是**每个接触点各一个**,不是每个计划一个 —— 原文:
@@ -447,6 +460,18 @@ impl ContactSet {
                     gen.push([f[0], f[1], f[2], t[0] / l, t[1] / l, t[2] / l]);
                 }
             }
+            // 抗剥离的接触(吸盘/胶垫):还能绕**切向**两根轴传力矩,四个方向都给。
+            if p.peel {
+                let t1 = {
+                    let a = if n[0].abs() < 0.9 { [1.0, 0.0, 0.0] } else { [0.0, 1.0, 0.0] };
+                    unit(cross(n, a)).unwrap_or([0.0, 1.0, 0.0])
+                };
+                let t2 = cross(n, t1);
+                for ax in [t1, t2] {
+                    gen.push([0.0, 0.0, 0.0, ax[0] / l, ax[1] / l, ax[2] / l]);
+                    gen.push([0.0, 0.0, 0.0, -ax[0] / l, -ax[1] / l, -ax[2] / l]);
+                }
+            }
             // 面接触:还能绕自己的法向拧。**两个方向都给** —— 扭矩可正可负。
             if p.torsion {
                 gen.push([0.0, 0.0, 0.0, n[0] / l, n[1] / l, n[2] / l]);
@@ -484,10 +509,17 @@ fn in_cone(gen: &[[f64; 6]], wd: [f64; 6]) -> bool {
         lip += g.iter().map(|x| x * x).sum::<f64>();
     }
     let step = if lip > 1e-12 { 1.0 / lip } else { 1.0 };
-    let mut a = vec![0.0f64; n];
-    let mut res;
-    for _ in 0..4000 {
-        // r = Σ a_j g_j − wd
+
+    // 🔴🔴 **加速(FISTA)+ 一条真的停机判据。**
+    //
+    // 上一版是定步长投影梯度,跑满 4000 步就下结论。**它会在还没算完的时候回答"做不到"** ——
+    // 而"做不到"是这条链上最重的一句话。实测(2026-08-16,验收台诊断):
+    // 薄板的三指/五指「绕 x 转」「绕 y 转」在 4000 步下判死;把步数放到 20 万,**全部变成可行**
+    // ⇒ 那几格根本不是物理上做不到,**是判据没算完就下了结论**,而且它长得和真结论一模一样。
+    //
+    // ⇒ 两条都要:① 加速,把收敛率从 O(1/k) 提到 O(1/k²);
+    //   ② **停机看"还在不在进步",不看跑了多少步** —— 进步停了才允许说"做不到"。
+    let 残差 = |a: &[f64]| -> ([f64; 6], f64) {
         let mut r = [0.0f64; 6];
         for (j, g) in gen.iter().enumerate() {
             for d in 0..6 {
@@ -497,25 +529,37 @@ fn in_cone(gen: &[[f64; 6]], wd: [f64; 6]) -> bool {
         for d in 0..6 {
             r[d] -= wd[d];
         }
-        res = (r.iter().map(|x| x * x).sum::<f64>()).sqrt();
+        (r, (r.iter().map(|x| x * x).sum::<f64>()).sqrt())
+    };
+    let mut a = vec![0.0f64; n];
+    let mut y = a.clone();
+    let mut t = 1.0f64;
+    let mut 上次 = f64::MAX;
+    for _ in 0..20000 {
+        let (r, _) = 残差(&y);
+        let mut next = vec![0.0f64; n];
+        for (j, g) in gen.iter().enumerate() {
+            let grad: f64 = (0..6).map(|d| g[d] * r[d]).sum();
+            next[j] = (y[j] - step * grad).max(0.0);
+        }
+        let t2 = (1.0 + (1.0 + 4.0 * t * t).sqrt()) / 2.0;
+        let w = (t - 1.0) / t2;
+        for j in 0..n {
+            y[j] = next[j] + w * (next[j] - a[j]);
+        }
+        a = next;
+        t = t2;
+        let res = 残差(&a).1;
         if res < 1e-7 {
             return true;
         }
-        for (j, g) in gen.iter().enumerate() {
-            let grad: f64 = (0..6).map(|d| g[d] * r[d]).sum();
-            a[j] = (a[j] - step * grad).max(0.0);
+        // 🔴 停机看进步,不看步数。还在往下掉就接着算,掉不动了才敢说"做不到"。
+        if (上次 - res).abs() < 1e-14 * 上次.max(1.0) {
+            break;
         }
+        上次 = res;
     }
-    let mut r = [0.0f64; 6];
-    for (j, g) in gen.iter().enumerate() {
-        for d in 0..6 {
-            r[d] += a[j] * g[d];
-        }
-    }
-    for d in 0..6 {
-        r[d] -= wd[d];
-    }
-    (r.iter().map(|x| x * x).sum::<f64>()).sqrt() < 1e-3
+    残差(&a).1 < 1e-4
 }
 
 #[cfg(test)]
@@ -531,7 +575,7 @@ mod 十三个动词填表 {
         Cone { axis, half_angle: half }
     }
     fn pt(at: V3, normal: V3, c: Cone, tol: f64) -> Point {
-        Point { by: Who::Hand, at, normal, cone: c, pull: false, torsion: false, tol_m: tol }
+        Point { by: Who::Hand, at, normal, cone: c, pull: false, torsion: false, peel: false, tol_m: tol }
     }
     /// 两个相对的点:抓的最小形状。物体在原点、宽 `w`。
     fn 对置两点(w: f64, half: f64) -> Vec<Point> {
@@ -580,6 +624,7 @@ mod 十三个动词填表 {
             cone: cone([0.0, 0.0, 1.0], mu_atan), // 桌子只能往上顶
             pull: false,
             torsion: false,
+            peel: false,
             tol_m: MM,
         }
     }
@@ -773,7 +818,7 @@ mod 十三个动词填表 {
         // 🔴 `torsion: true` = **指腹是一片面**。兜起来那一下的转轴恰好就是两指连线,
         //    纯点接触在静力学上产生不出它 —— 见下面那条反例。
         let 握 = |at: V3| {
-            let pad = |p: Point| Point { pull: false, torsion: true, ..p };
+            let pad = |p: Point| Point { pull: false, torsion: true, peel: false, ..p };
             vec![
                 pad(pt([at[0], at[1] - 0.012, at[2]], [0.0, -1.0, 0.0], cone([0.0, 1.0, 0.0], 0.4636), MM)),
                 pad(pt([at[0], at[1] + 0.012, at[2]], [0.0, 1.0, 0.0], cone([0.0, -1.0, 0.0], 0.4636), MM)),
@@ -809,7 +854,7 @@ mod 十三个动词填表 {
     #[test]
     fn 兜起来_针尖判死_指腹放行() {
         let mk = |pad: bool| {
-            let f = |p: Point| Point { pull: false, torsion: pad, ..p };
+            let f = |p: Point| Point { pull: false, torsion: pad, peel: false, ..p };
             ContactSet {
                 points: vec![
                     f(pt([0.0, -0.012, 0.06], [0.0, -1.0, 0.0], cone([0.0, 1.0, 0.0], 0.4636), MM)),

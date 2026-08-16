@@ -175,6 +175,9 @@ pub fn suction(
             pull: true,
             // 吸盘吸住了是**拧得动**的 —— 密封圈是一片面,不是一个点。
             torsion: true,
+            // 🔴 而且**掰得动**:密封面有半径,扛得住剥离力矩。少了这一项,
+            // 吸盘只转得动、翻不动 —— 撬/翻/倒/舀 九格全判死(验收台实测)。
+            peel: true,
             tol_m,
         }],
         motion,
@@ -257,7 +260,8 @@ pub fn ring(
             normal: *d,                                             // 由质心指向外 = 物体外侧
             cone: contact_set::Cone { axis: [-d[0], -d[1], -d[2]], half_angle: half }, // 朝里夹
             pull: false,
-            torsion: false, // 指尖当点接触;有指腹的把它改成 true(那是量出来的身体属性)
+            torsion: false,
+            peel: false, // 指尖当点接触;有指腹的把它改成 true(那是量出来的身体属性)
             tol_m,
         })
         .collect();

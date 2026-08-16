@@ -259,7 +259,7 @@ mod 航点级验收 {
         Body { standoff_m: 0.04, repeat_m: 0.001 }
     }
     fn pt(at: V3, normal: V3, axis: V3, half: f64) -> Point {
-        Point { by: Who::Hand, at, normal, cone: Cone { axis, half_angle: half }, pull: false, torsion: false, tol_m: MM }
+        Point { by: Who::Hand, at, normal, cone: Cone { axis, half_angle: half }, pull: false, torsion: false, peel: false, tol_m: MM }
     }
     fn 对置两点() -> Vec<Point> {
         vec![
@@ -327,6 +327,7 @@ mod 航点级验收 {
             cone: Cone { axis: [0.0, 0.0, 1.0], half_angle: 0.46 },
             pull: false,
             torsion: false,
+            peel: false,
             tol_m: MM,
         });
         let cs = ContactSet { points: pts, motion: m, approach: None };

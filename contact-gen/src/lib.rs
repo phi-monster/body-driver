@@ -961,6 +961,7 @@ impl Contact {
             by: contact_set::Who::Hand,
             pull: false,
             torsion: false,
+            peel: false,
             at: [
                 self.point.x + jaw[0] * half * sign,
                 self.point.y + jaw[1] * half * sign,
