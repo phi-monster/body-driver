@@ -43,11 +43,15 @@ pub fn suction(
     cloud: &[P3],
     cup_r_m: f64,
     flat_tol_m: f64,
+    mu: f64,
     motion: contact_set::Twist,
     tol_m: f64,
 ) -> Result<contact_set::ContactSet, NoHand> {
     if cloud.len() < 8 {
         return Err(NoHand::TooFewPoints);
+    }
+    if !(mu.is_finite() && mu > 0.0) {
+        return Err(NoHand::Handoff(Handoff::MuUnknown));
     }
     let 采样间距 = 采样间距(cloud);
     let mut best: Option<(f64, [f64; 3], [f64; 3])> = None; // (铺满程度, 点, 法向)
@@ -62,6 +66,51 @@ pub fn suction(
                 contact_set::norm(d) <= cup_r_m
             })
             .collect();
+        if near.len() < 6 {
+            continue;
+        }
+        let n0 = match 最小特征向量(&near) {
+            Some(v) => v,
+            None => continue,
+        };
+        // 🔴 **把"背面"和"弯曲"分开 —— 这两件事长得一样,处理方式完全相反。**
+        //
+        // 一张 4 mm 厚的板子,两个面都落在吸盘半径以内 ⇒ 拟出来的"平面"横跨两面,
+        // 法向是错的 ⇒ **一张又大又平的板子被判成吸不住**(实测:薄板整行 `found_r: 0.0`)。
+        // ⇒ 背面那一片要**筛掉**。
+        //
+        // ⚠️ 但一个**球**的邻居也一样偏离平面,而那是**真的不平**,必须**判死**。
+        // 只按"离平面远就筛掉"处理,等于**只挑最平的那一小块去拟**,
+        // 于是球也吸得住了 —— 实测那一版球从 1/13 跳到 10/13,**是假的**。
+        //
+        // 判别式:偏离量**跟不跟半径走**。
+        // - 背面:偏离量 ≈ 板厚,**与半径无关**(远近都是那个数)⇒ 是另一片面,筛掉。
+        // - 弯曲:偏离量 ≈ ρ²/2R,**随半径长大**(近处贴合、远处翘起)⇒ 是真的不平,判死。
+        let 偏 = |p: &[f64; 3]| {
+            let d = [p[0] - mid[0], p[1] - mid[1], p[2] - mid[2]];
+            let along = contact_set::dot(d, n0);
+            let flat = [d[0] - n0[0] * along, d[1] - n0[1] * along, d[2] - n0[2] * along];
+            (along, contact_set::norm(flat))
+        };
+        let 远: Vec<(f64, f64)> =
+            near.iter().map(&偏).filter(|(a, _)| a.abs() > flat_tol_m).collect();
+        if !远.is_empty() {
+            let (mut lo, mut hi) = (f64::MAX, f64::MIN);
+            let (mut ρ小, mut ρ大) = (f64::MAX, f64::MIN);
+            for (a, r) in &远 {
+                lo = lo.min(a.abs());
+                hi = hi.max(a.abs());
+                ρ小 = ρ小.min(*r);
+                ρ大 = ρ大.max(*r);
+            }
+            // 偏离量本身散得开(不是一个常数)⇒ 它跟着半径走 ⇒ 是弯的,不是背面。
+            let 像背面 = (hi - lo) <= flat_tol_m && ρ大 - ρ小 > cup_r_m / 2.0;
+            if !像背面 {
+                continue; // 真的不平 —— 这个种子点不算数
+            }
+        }
+        let near: Vec<[f64; 3]> =
+            near.into_iter().filter(|p| 偏(p).0.abs() <= flat_tol_m).collect();
         if near.len() < 6 {
             continue;
         }
@@ -114,9 +163,14 @@ pub fn suction(
             by: contact_set::Who::Hand,
             at,
             normal: n,
-            // 🔴 吸盘的锥:**只能沿法向吸,不能侧推** ⇒ 半张角 0(§1.2 原文那一句)。
-            // ⚠️ 真吸盘的密封面能扛一点侧向力,但那要量;没量过就按 0 走,**宁可窄不许宽**。
-            cone: contact_set::Cone { axis: [-n[0], -n[1], -n[2]], half_angle: 0.0 },
+            // 🔴 吸盘的锥 = **密封面与物体之间的摩擦锥**,半张角 `atan(μ)`。
+            //
+            // ⚠️ 我先写死成 **0**(只准沿法向吸),理由写的是"宁可窄不许宽"。
+            // **那一版把吸盘废掉了一半** —— 实测:验收台上吸盘的 推/放/擦/倒/撬/翻/舀
+            // **十四格全判死**,而真空吸盘搬箱子天天在做侧向移动。
+            // 0 不是保守,是**错的模型**:抗剪力真实存在,而且量得出来。
+            // ⇒ 与 `ring` 同一条规矩:**μ 由调用方给,没量过就别调这个函数**。
+            cone: contact_set::Cone { axis: [-n[0], -n[1], -n[2]], half_angle: mu.atan() },
             // 🔴 吸盘的全部意义:它【拉】得动。少了这一项,吸住了也抬不起任何东西。
             pull: true,
             // 吸盘吸住了是**拧得动**的 —— 密封圈是一片面,不是一个点。
@@ -344,12 +398,14 @@ mod 另外两种手 {
     #[test]
     fn 吸盘_从点云里真的找到那片平顶面() {
         let 静 = contact_set::Twist::still([0.0, 0.0, 0.94]);
-        let set = suction(&圆柱(), 0.012, 0.001, 静, 0.002).expect("顶面该吸得住");
+        let set = suction(&圆柱(), 0.012, 0.001, 0.5, 静, 0.002).expect("顶面该吸得住");
         assert_eq!(set.points.len(), 1, "吸盘就是一个点");
         let p = set.points[0];
         assert!((p.at[2] - 0.98).abs() < 1e-9, "该落在顶面上,实得 z={}", p.at[2]);
         assert!(p.normal[2] > 0.99, "顶面法向朝上,实得 {:?}", p.normal);
-        assert_eq!(p.cone.half_angle, 0.0, "只能沿法向吸,不能侧推");
+        // 锥 = 密封面的摩擦锥。**不是 0** —— 写死 0 会把吸盘的侧向能力整个抹掉,
+        // 而真空吸盘搬箱子天天在做侧移(实测:那一版验收台上吸盘十四格全判死)。
+        assert!((p.cone.half_angle - 0.5f64.atan()).abs() < 1e-12, "锥 = atan(μ)");
         assert!(p.torsion, "吸住了是拧得动的");
         assert_eq!(set.check(false), Ok(()), "吸盘那一套四格必须自检就过");
     }
@@ -357,7 +413,7 @@ mod 另外两种手 {
     #[test]
     fn 吸盘_吸盘比那片平面还大就必须拒绝_并报差多少() {
         // 顶面半径 3 cm;要一个 6 cm 半径的吸盘 ⇒ 铺不满
-        match suction(&圆柱(), 0.06, 0.001, contact_set::Twist::still([0.0; 3]), 0.002) {
+        match suction(&圆柱(), 0.06, 0.001, 0.5, contact_set::Twist::still([0.0; 3]), 0.002) {
             Err(NoHand::NoFlatPatch { found_r, need_r }) => {
                 assert!((need_r - 0.06).abs() < 1e-12);
                 assert!(found_r < 0.06, "报出来的最大平坦半径要小于要求的,实得 {found_r:.4}");

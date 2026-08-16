@@ -18,7 +18,7 @@
 //! —— 那正是"两指夹着的东西会自己转"的几何根源,不是我编的失败模式。
 //! 遇到定不下来,返回 `Underdetermined` 而**不是**挑一个看起来合理的解。
 
-use crate::{cross, dot, norm, unit, ContactSet, Twist, V3};
+use crate::{cross, dot, norm, unit, ContactSet, Point, Twist, V3};
 
 /// 刚体位姿:平移 + 四元数 `(w,x,y,z)`。
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -256,12 +256,20 @@ pub fn matches(cs: &ContactSet, got: Moved, tol_m: f64, tol_rad: f64) -> bool {
         }
     }
     // 平移:比"把接触点质心搬了多远"。**绕支点转也会搬动质心**,所以拿旋量自己算一遍再比。
+    //
+    // 🔴 只数【手】那些点。`drive` 看到的就是手的航点(世界那一侧的接触手够不到、不进航点),
+    // 两边算质心时口径必须一致 —— 不一致时**推演明明是对的,判据却说对不上**。
+    // 实测代价:三指/五指撬与翻,整整四格被冤枉成"③对不上"(2026-08-16 验收台)。
+    let 手: Vec<&Point> = cs.points.iter().filter(|p| p.by == crate::Who::Hand).collect();
+    if 手.is_empty() {
+        return false;
+    }
     let c = {
-        let k = cs.points.len() as f64;
+        let k = 手.len() as f64;
         [
-            cs.points.iter().map(|p| p.at[0]).sum::<f64>() / k,
-            cs.points.iter().map(|p| p.at[1]).sum::<f64>() / k,
-            cs.points.iter().map(|p| p.at[2]).sum::<f64>() / k,
+            手.iter().map(|p| p.at[0]).sum::<f64>() / k,
+            手.iter().map(|p| p.at[1]).sum::<f64>() / k,
+            手.iter().map(|p| p.at[2]).sum::<f64>() / k,
         ]
     };
     let after = want.apply(c);

@@ -1,0 +1,17 @@
+[package]
+name    = "battery"
+version = "0.1.0"
+edition = "2021"
+description = "task battery -- every verb x every hand x several shapes, end to end, absolute counts"
+license = "AGPL-3.0-or-later"
+
+# 🔴 它是**验收台**,不是产品件:三层都要在场才跑得起来。
+# 产品件之间的墙(②a 与 ②b 平级、都不依赖 body-layer)不受这里影响。
+[dependencies]
+contact-set  = { path = "../contact-set" }
+contact-gen  = { path = "../contact-gen" }
+contact-exec = { path = "../contact-exec" }
+
+[[bin]]
+name = "battery"
+path = "src/main.rs"

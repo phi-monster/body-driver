@@ -64,7 +64,7 @@ fn 两指_点云到航点到推演_抬起的五厘米是真的() {
 #[test]
 fn 吸盘_点云到航点_一个点也走得出来() {
     let 抬 = Twist::slide([0.0, 0.0, 0.05]);
-    let set = suction(&圆柱(), 0.012, 0.001, 抬, MM).expect("平顶面该吸得住");
+    let set = suction(&圆柱(), 0.012, 0.001, MU, 抬, MM).expect("平顶面该吸得住");
     let (got, _) = 跑(&set, true, 1);
     assert_eq!(set.points.len(), 1);
     assert!(matches(&set, got, 1e-6, 1e-6));
@@ -118,7 +118,7 @@ fn 三种手_同一团点云同一件事_各自走一遍() {
 #[test]
 fn 反例_吸盘不能拉就抬不起来() {
     let 抬 = Twist::slide([0.0, 0.0, 0.05]);
-    let mut set = suction(&圆柱(), 0.012, 0.001, 抬, MM).expect("平顶面该吸得住");
+    let mut set = suction(&圆柱(), 0.012, 0.001, MU, 抬, MM).expect("平顶面该吸得住");
     assert!(set.points[0].pull, "吸盘默认就该是能拉的");
     assert_eq!(set.check(true), Ok(()));
     for p in set.points.iter_mut() {
