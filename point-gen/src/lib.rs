@@ -87,6 +87,10 @@ pub enum WhyNot {
     Behind,
     /// 拟合之后残差仍然大 —— 模型装不下这组样本。带上最大残差(像素)。
     BadFit(f64),
+    /// 🔴 样本**共面**(含"全在一个高度")—— 一张平面上的点定不下一个完整投影矩阵。
+    Coplanar,
+    /// 解出来的内参有**斜切**,而这个模型没有这一项 ⇒ 装不下。带上斜切量。
+    HasSkew(f64),
 }
 
 fn qrot(q: [f64; 4], v: [f64; 3]) -> [f64; 3] {
@@ -285,4 +289,342 @@ pub fn from_pair(a: &Eye, b: &Eye, pairs: &[(Px, Px)], tol_m: f64) -> (Vec<P3>, 
         }
     }
     (out, 丢)
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// 完整自标定:连**相机在哪**一起解出来
+// ─────────────────────────────────────────────────────────────────────
+
+/// **看着自己的手,把"相机在哪 + 焦距多少"一起解出来。**
+///
+/// # 为什么必须连位姿一起解
+///
+/// `fit` 要调用方给相机位姿 —— **腕相机行**(拧在已知连杆上,本体感受免费给),
+/// **头相机不行**:它固定在世界里某处,那个位姿本身就是一个**没量过的身体常数**。
+/// 而这条链最需要的恰恰是头相机(开局只有它看得见物体)。
+///
+/// # 输入只有一样东西:手挪到哪儿、在画面的哪个像素
+///
+/// **没有标定板、没有配置文件、没有人手填的数。** 手在哪由本体感受免费给。
+/// 仿真器的确会在线缆里自报 `intrinsic_matrix` / `extrinsic_matrix`,
+/// 🔴 **但那是仿真的便利,真机上没人给你** —— 所以自报值只拿来**独立核对**,
+/// 永远不当来源。(这与 `debt.rs` 记的那笔"写死焦距"的债是同一条界。)
+///
+/// # 做法
+///
+/// 直接线性变换(DLT)解出 3×4 的投影矩阵,再拆成"内参 × 位姿"。
+/// 先按 Hartley 把三维点和像素各自归一化 —— **不归一化,条件数会烂到解不出来**。
+pub fn fit_full(seen: &[(P3, Px)]) -> Result<Eye, WhyNot> {
+    if seen.len() < 6 {
+        return Err(WhyNot::TooFewSamples(seen.len()));
+    }
+    // 🔴 共面就拒绝:一张平面上的点定不下一个完整投影矩阵(经典退化)。
+    // 判据用**最小主轴的伸展**:比最大主轴小 1000 倍就当共面。
+    if 共面(seen) {
+        return Err(WhyNot::Coplanar);
+    }
+    let (zlo, zhi) = seen.iter().fold((f64::MAX, f64::MIN), |(a, b), (p, _)| (a.min(p.z), b.max(p.z)));
+    let _ = (zlo, zhi); // 深度跨度那一条由共面判据覆盖(共面含"全在一个高度")
+
+    // Hartley 归一化
+    let n = seen.len() as f64;
+    let cx3 = [
+        seen.iter().map(|(p, _)| p.x).sum::<f64>() / n,
+        seen.iter().map(|(p, _)| p.y).sum::<f64>() / n,
+        seen.iter().map(|(p, _)| p.z).sum::<f64>() / n,
+    ];
+    let s3 = {
+        let d: f64 = seen
+            .iter()
+            .map(|(p, _)| ((p.x - cx3[0]).powi(2) + (p.y - cx3[1]).powi(2) + (p.z - cx3[2]).powi(2)).sqrt())
+            .sum();
+        if d > 1e-12 { n * 3f64.sqrt() / d } else { 1.0 }
+    };
+    let cp = [
+        seen.iter().map(|(_, q)| q[0]).sum::<f64>() / n,
+        seen.iter().map(|(_, q)| q[1]).sum::<f64>() / n,
+    ];
+    let sp = {
+        let d: f64 = seen
+            .iter()
+            .map(|(_, q)| ((q[0] - cp[0]).powi(2) + (q[1] - cp[1]).powi(2)).sqrt())
+            .sum();
+        if d > 1e-12 { n * 2f64.sqrt() / d } else { 1.0 }
+    };
+
+    let mut ata = vec![vec![0.0f64; 12]; 12];
+    for (p, q) in seen {
+        let x = [(p.x - cx3[0]) * s3, (p.y - cx3[1]) * s3, (p.z - cx3[2]) * s3, 1.0];
+        let (u, v) = ((q[0] - cp[0]) * sp, (q[1] - cp[1]) * sp);
+        let mut r1 = [0.0f64; 12];
+        let mut r2 = [0.0f64; 12];
+        for k in 0..4 {
+            r1[k] = -x[k];
+            r1[8 + k] = u * x[k];
+            r2[4 + k] = -x[k];
+            r2[8 + k] = v * x[k];
+        }
+        for i in 0..12 {
+            for j in 0..12 {
+                ata[i][j] += r1[i] * r1[j] + r2[i] * r2[j];
+            }
+        }
+    }
+    let p12 = 最小特征向量n(&mut ata);
+    // 反归一化:P = Tp⁻¹ · P̂ · T3
+    let mut pm = [[0.0f64; 4]; 3];
+    for r in 0..3 {
+        for c in 0..4 {
+            pm[r][c] = p12[r * 4 + c];
+        }
+    }
+    // T3:x' = s3(x − c3)  ⇒  P̂·T3 作用在原始齐次坐标上
+    let mut p2 = [[0.0f64; 4]; 3];
+    for r in 0..3 {
+        for c in 0..3 {
+            p2[r][c] = pm[r][c] * s3;
+        }
+        p2[r][3] = pm[r][3] - s3 * (pm[r][0] * cx3[0] + pm[r][1] * cx3[1] + pm[r][2] * cx3[2]);
+    }
+    // Tp⁻¹:u = u'/sp + cp
+    let mut p3 = [[0.0f64; 4]; 3];
+    for c in 0..4 {
+        p3[0][c] = p2[0][c] / sp + cp[0] * p2[2][c];
+        p3[1][c] = p2[1][c] / sp + cp[1] * p2[2][c];
+        p3[2][c] = p2[2][c];
+    }
+    拆开(p3, seen)
+}
+
+/// 这组点是不是**共面**(含"全在一个高度")。用协方差最小主轴的伸展判。
+fn 共面(seen: &[(P3, Px)]) -> bool {
+    let n = seen.len() as f64;
+    let m = [
+        seen.iter().map(|(p, _)| p.x).sum::<f64>() / n,
+        seen.iter().map(|(p, _)| p.y).sum::<f64>() / n,
+        seen.iter().map(|(p, _)| p.z).sum::<f64>() / n,
+    ];
+    let mut c = vec![vec![0.0f64; 3]; 3];
+    for (p, _) in seen {
+        let d = [p.x - m[0], p.y - m[1], p.z - m[2]];
+        for i in 0..3 {
+            for j in 0..3 {
+                c[i][j] += d[i] * d[j];
+            }
+        }
+    }
+    let mut cc = c.clone();
+    let _ = 最小特征向量n(&mut cc);
+    // 对角线上的特征值(Jacobi 之后 c 已被对角化)
+    let (mut lo, mut hi) = (f64::MAX, f64::MIN);
+    for i in 0..3 {
+        lo = lo.min(cc[i][i].abs());
+        hi = hi.max(cc[i][i].abs());
+    }
+    hi <= 0.0 || lo / hi < 1e-6
+}
+
+/// 把 3×4 的投影矩阵拆成"内参 × 位姿",并**回代核一遍**。
+fn 拆开(p: [[f64; 4]; 3], seen: &[(P3, Px)]) -> Result<Eye, WhyNot> {
+    // 🔴 DLT 解出来的投影矩阵**差一个整体符号**(零空间向量正负都行)。
+    // 符号错了,所有点都会算到相机背后去 —— 病相是 `Behind`,而根因只是一个正负号。
+    // 判法:拿样本点代进第三行,看深度是正是负;多数为负就整体翻号。
+    let 正 = seen
+        .iter()
+        .filter(|(x, _)| p[2][0] * x.x + p[2][1] * x.y + p[2][2] * x.z + p[2][3] > 0.0)
+        .count();
+    let p = if 正 * 2 < seen.len() {
+        let mut q = p;
+        for r in q.iter_mut() {
+            for v in r.iter_mut() {
+                *v = -*v;
+            }
+        }
+        q
+    } else {
+        p
+    };
+    let m = [[p[0][0], p[0][1], p[0][2]], [p[1][0], p[1][1], p[1][2]], [p[2][0], p[2][1], p[2][2]]];
+    let (k, r) = rq3(m);
+    // K 的对角要为正:负的就把那一列/行同时翻号(不改变 K·R)
+    let mut k = k;
+    let mut r = r;
+    for i in 0..3 {
+        if k[i][i] < 0.0 {
+            for j in 0..3 {
+                k[j][i] = -k[j][i];
+                r[i][j] = -r[i][j];
+            }
+        }
+    }
+    let s = k[2][2];
+    if s.abs() < 1e-15 {
+        return Err(WhyNot::BadFit(f64::INFINITY));
+    }
+    for row in k.iter_mut() {
+        for v in row.iter_mut() {
+            *v /= s;
+        }
+    }
+    // 斜切项装不下就说装不下 —— 这个模型没有 skew
+    if k[0][1].abs() > 1e-6 * k[0][0].abs().max(1.0) {
+        return Err(WhyNot::HasSkew(k[0][1]));
+    }
+    // 相机中心:C = −M⁻¹ p₄
+    let p4 = [p[0][3] / s, p[1][3] / s, p[2][3] / s];
+    let mut kr = [[0.0f64; 3]; 3];
+    for i in 0..3 {
+        for j in 0..3 {
+            kr[i][j] = m[i][j] / s;
+        }
+    }
+    let c = 解三元(kr, [-p4[0], -p4[1], -p4[2]]).ok_or(WhyNot::BadFit(f64::INFINITY))?;
+    // r 是 世界→相机;Eye.q 存的是 相机→世界 ⇒ 取转置
+    let q = 转成四元数([[r[0][0], r[1][0], r[2][0]], [r[0][1], r[1][1], r[2][1]], [r[0][2], r[1][2], r[2][2]]]);
+    let eye = Eye { fx: k[0][0], fy: k[1][1], cx: k[0][2], cy: k[1][2], at: c, q };
+    // 🔴 回代:装不下就报出来,不许把残差咽下去。
+    let mut worst = 0.0f64;
+    for (p3d, px) in seen {
+        let got = eye.project(*p3d).ok_or(WhyNot::Behind)?;
+        worst = worst.max((got[0] - px[0]).abs().max((got[1] - px[1]).abs()));
+    }
+    if worst > 0.5 {
+        return Err(WhyNot::BadFit(worst));
+    }
+    Ok(eye)
+}
+
+/// 3×3 的 RQ 分解(Givens),`m = k · r`,`k` 上三角、`r` 正交。零依赖。
+fn rq3(m: [[f64; 3]; 3]) -> ([[f64; 3]; 3], [[f64; 3]; 3]) {
+    let mut a = m;
+    let mut q = [[0.0f64; 3]; 3];
+    for i in 0..3 {
+        q[i][i] = 1.0;
+    }
+    fn give(a: &mut [[f64; 3]; 3], q: &mut [[f64; 3]; 3], i: usize, j: usize, x: f64, y: f64) {
+        let d = (x * x + y * y).sqrt();
+        if d < 1e-18 {
+            return;
+        }
+        let (c, s) = (x / d, y / d);
+        let mut g = [[0.0f64; 3]; 3];
+        for k in 0..3 {
+            g[k][k] = 1.0;
+        }
+        g[i][i] = c;
+        g[i][j] = -s;
+        g[j][i] = s;
+        g[j][j] = c;
+        let mut na = [[0.0f64; 3]; 3];
+        let mut nq = [[0.0f64; 3]; 3];
+        for r in 0..3 {
+            for cc in 0..3 {
+                na[r][cc] = (0..3).map(|k| a[r][k] * g[k][cc]).sum();
+                // q ← gᵀ · q
+                nq[r][cc] = (0..3).map(|k| g[k][r] * q[k][cc]).sum();
+            }
+        }
+        *a = na;
+        *q = nq;
+    }
+    let (x, y) = (a[2][2], -a[2][1]);
+    give(&mut a, &mut q, 1, 2, x, y);
+    let (x, y) = (a[2][2], -a[2][0]);
+    give(&mut a, &mut q, 0, 2, x, y);
+    let (x, y) = (a[1][1], -a[1][0]);
+    give(&mut a, &mut q, 0, 1, x, y);
+    (a, q)
+}
+
+fn 解三元(a: [[f64; 3]; 3], b: [f64; 3]) -> Option<[f64; 3]> {
+    let det = a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1])
+        - a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0])
+        + a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0]);
+    if det.abs() < 1e-18 {
+        return None;
+    }
+    let mut out = [0.0f64; 3];
+    for k in 0..3 {
+        let mut m = a;
+        for r in 0..3 {
+            m[r][k] = b[r];
+        }
+        let d = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+            - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+            + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+        out[k] = d / det;
+    }
+    Some(out)
+}
+
+fn 转成四元数(m: [[f64; 3]; 3]) -> [f64; 4] {
+    let tr = m[0][0] + m[1][1] + m[2][2];
+    let q = if tr > 0.0 {
+        let s = (tr + 1.0).sqrt() * 2.0;
+        [0.25 * s, (m[2][1] - m[1][2]) / s, (m[0][2] - m[2][0]) / s, (m[1][0] - m[0][1]) / s]
+    } else if m[0][0] > m[1][1] && m[0][0] > m[2][2] {
+        let s = (1.0 + m[0][0] - m[1][1] - m[2][2]).sqrt() * 2.0;
+        [(m[2][1] - m[1][2]) / s, 0.25 * s, (m[0][1] + m[1][0]) / s, (m[0][2] + m[2][0]) / s]
+    } else if m[1][1] > m[2][2] {
+        let s = (1.0 + m[1][1] - m[0][0] - m[2][2]).sqrt() * 2.0;
+        [(m[0][2] - m[2][0]) / s, (m[0][1] + m[1][0]) / s, 0.25 * s, (m[1][2] + m[2][1]) / s]
+    } else {
+        let s = (1.0 + m[2][2] - m[0][0] - m[1][1]).sqrt() * 2.0;
+        [(m[1][0] - m[0][1]) / s, (m[0][2] + m[2][0]) / s, (m[1][2] + m[2][1]) / s, 0.25 * s]
+    };
+    let n = (q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]).sqrt();
+    [q[0] / n, q[1] / n, q[2] / n, q[3] / n]
+}
+
+/// N×N 实对称阵的**最小**特征向量,循环 Jacobi;算完 `a` 已被对角化。零依赖。
+fn 最小特征向量n(a: &mut Vec<Vec<f64>>) -> Vec<f64> {
+    let n = a.len();
+    let mut v = vec![vec![0.0f64; n]; n];
+    for i in 0..n {
+        v[i][i] = 1.0;
+    }
+    for _ in 0..100 {
+        let mut off = 0.0;
+        for i in 0..n {
+            for j in (i + 1)..n {
+                off += a[i][j] * a[i][j];
+            }
+        }
+        if off < 1e-30 {
+            break;
+        }
+        for p in 0..n {
+            for q in (p + 1)..n {
+                if a[p][q].abs() < 1e-20 {
+                    continue;
+                }
+                let th = (a[q][q] - a[p][p]) / (2.0 * a[p][q]);
+                let t = th.signum() / (th.abs() + (th * th + 1.0).sqrt());
+                let c = 1.0 / (t * t + 1.0).sqrt();
+                let s = t * c;
+                for k in 0..n {
+                    let (kp, kq) = (a[k][p], a[k][q]);
+                    a[k][p] = c * kp - s * kq;
+                    a[k][q] = s * kp + c * kq;
+                }
+                for k in 0..n {
+                    let (pk, qk) = (a[p][k], a[q][k]);
+                    a[p][k] = c * pk - s * qk;
+                    a[q][k] = s * pk + c * qk;
+                }
+                for k in 0..n {
+                    let (kp, kq) = (v[k][p], v[k][q]);
+                    v[k][p] = c * kp - s * kq;
+                    v[k][q] = s * kp + c * kq;
+                }
+            }
+        }
+    }
+    let mut lo = 0usize;
+    for i in 1..n {
+        if a[i][i].abs() < a[lo][lo].abs() {
+            lo = i;
+        }
+    }
+    (0..n).map(|k| v[k][lo]).collect()
 }

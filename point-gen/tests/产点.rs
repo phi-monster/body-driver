@@ -267,3 +267,99 @@ fn 探针_抖动一皮米看结果动不动() {
         .fold(0.0f64, f64::max);
     println!("同序逐条比,宽的最大差 = {宽差:.3e} m");
 }
+
+// ───────────── 连"相机在哪"一起量出来(头相机那一格) ─────────────
+
+/// 造一只**斜着架**的相机,位姿和焦距都不是好猜的数。
+fn 斜相机() -> Eye {
+    // 绕 x 轴转 200°(往下看一点)、再绕 z 轴转 30° —— 手写一个四元数,别用好猜的值
+    let (a, b) = (200f64.to_radians() / 2.0, 30f64.to_radians() / 2.0);
+    let qa = [a.cos(), a.sin(), 0.0, 0.0];
+    let qb = [b.cos(), 0.0, 0.0, b.sin()];
+    let q = [
+        qb[0] * qa[0] - qb[3] * qa[3],
+        qb[0] * qa[1] + qb[3] * qa[2],
+        qb[0] * qa[2] - qb[3] * qa[1],
+        qb[0] * qa[3] + qb[3] * qa[0],
+    ];
+    Eye { fx: 517.3, fy: 502.9, cx: 331.2, cy: 246.8, at: [0.21, -0.47, 1.33], q }
+}
+
+/// 手挪到一堆位置(**要占一个体积,不能都在一个平面上**)。
+fn 手挪的位置() -> Vec<P3> {
+    let mut v = Vec::new();
+    for i in 0..3 {
+        for j in 0..3 {
+            for k in 0..3 {
+                v.push(P3 {
+                    x: -0.18 + 0.18 * i as f64,
+                    y: -0.14 + 0.14 * j as f64,
+                    z: 0.86 + 0.09 * k as f64,
+                });
+            }
+        }
+    }
+    v
+}
+
+/// 🔴🔴 **只看着自己的手,把相机在哪、焦距多少,一起解出来。**
+///
+/// 没有标定板、没有配置文件、没有人手填的数 —— 手在哪由本体感受免费给。
+/// 这一格是头相机的必需品:它固定在世界里,而那个位姿本身就是没量过的身体常数。
+#[test]
+fn 连相机在哪一起量出来() {
+    let 真 = 斜相机();
+    let seen: Vec<(P3, Px)> =
+        手挪的位置().into_iter().filter_map(|p| 真.project(p).map(|px| (p, px))).collect();
+    assert!(seen.len() >= 20, "样本要够,实得 {}", seen.len());
+    let 量 = fit_full(&seen).expect("这组样本该解得出来");
+
+    println!("焦距 真 {:.4}/{:.4} vs 量 {:.4}/{:.4}", 真.fx, 真.fy, 量.fx, 量.fy);
+    println!("主点 真 {:.4}/{:.4} vs 量 {:.4}/{:.4}", 真.cx, 真.cy, 量.cx, 量.cy);
+    println!("相机在 真 {:?} vs 量 {:?}", 真.at, 量.at.map(|v| (v * 1e6).round() / 1e6));
+    assert!((量.fx - 真.fx).abs() < 1e-6, "焦距 fx 差 {}", (量.fx - 真.fx).abs());
+    assert!((量.fy - 真.fy).abs() < 1e-6);
+    assert!((量.cx - 真.cx).abs() < 1e-6);
+    assert!((量.cy - 真.cy).abs() < 1e-6);
+    let d = ((量.at[0] - 真.at[0]).powi(2) + (量.at[1] - 真.at[1]).powi(2) + (量.at[2] - 真.at[2]).powi(2)).sqrt();
+    assert!(d < 1e-6, "相机位置差 {d:.2e} m");
+    // 朝向:拿它去投影,像素要对得上(四元数可能差一个整体符号,比像素才是真判据)
+    let mut worst = 0.0f64;
+    for (p, px) in &seen {
+        let g = 量.project(*p).unwrap();
+        worst = worst.max((g[0] - px[0]).abs().max((g[1] - px[1]).abs()));
+    }
+    assert!(worst < 1e-6, "回代最大差 {worst:.2e} 像素");
+}
+
+/// 🔴 反例:手全在**一个平面**上挪(比如只在桌面高度上来回) ⇒ 必须拒绝。
+///
+/// 一张平面上的点定不下一个完整的投影矩阵 —— 这是经典退化,不是数值问题。
+/// 硬解出来的相机位姿会是错的,而**它看起来完全正常**。
+#[test]
+fn 反例_手只在一个平面上挪必须拒绝() {
+    let 真 = 斜相机();
+    let mut seen = Vec::new();
+    for i in 0..5 {
+        for j in 0..5 {
+            let p = P3 { x: -0.18 + 0.09 * i as f64, y: -0.14 + 0.07 * j as f64, z: 0.90 };
+            if let Some(px) = 真.project(p) {
+                seen.push((p, px));
+            }
+        }
+    }
+    assert!(seen.len() >= 20);
+    assert_eq!(fit_full(&seen), Err(WhyNot::Coplanar), "共面必须拒绝,不许硬解");
+}
+
+/// 🔴 反例:样本太少 ⇒ 拒绝(11 个未知数,6 个点才够)。
+#[test]
+fn 反例_样本太少必须拒绝() {
+    let 真 = 斜相机();
+    let seen: Vec<(P3, Px)> = 手挪的位置()
+        .into_iter()
+        .take(4)
+        .filter_map(|p| 真.project(p).map(|px| (p, px)))
+        .collect();
+    assert!(matches!(fit_full(&seen), Err(WhyNot::TooFewSamples(_))));
+}
