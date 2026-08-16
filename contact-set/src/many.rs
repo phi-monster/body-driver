@@ -51,6 +51,30 @@ pub enum Move {
     /// 代价是一条**必须成立的接续条件**:下一段的接触点,就是上一段末了那些点。
     /// 对不上就是 `KeepBreaksContact` —— 手上还握着东西,你却说下一段从别处开始。
     Keep(Vec<Move>),
+    /// 🔴🔴 **"不要碰" —— 零接触点 + 一个净空。**
+    ///
+    /// # 为什么它必须是一个变体,而不是"一个接触集的特例"
+    ///
+    /// 接触集说的是*"碰这几个点"*,它说的是*"这几个地方【别】碰"*。
+    /// 前者要求 `points` 非空(空了报 `NoPoints`),后者**本质上就是零接触**。
+    /// 硬塞进接触集 = 让"碰"和"别碰"共用一个字段,读的人分不出来。
+    ///
+    /// 六条验收线的第 6 条(躲拳)原文:*"接口要能表达【不要碰】(零接触点 + 一个净空)"*。
+    ///
+    /// # ⚠️ 它只表达"躲",不表达"预判"
+    ///
+    /// 真正难的那一半不在这儿:*人反应 231 ms,而拳飞行只有 115–190 ms* ——
+    /// **人躲的是起手征兆,不是拳本身**。那是③(眼)的活,这一层只负责
+    /// *"给我这几个要躲开的地方 + 要留多宽,我把手挪开"*。**这条边界写在这里,不许含糊。**
+    Clear {
+        /// 要躲开的那些地方(世界系,米)。空的就没有意义 ⇒ 报 `NoKeepOut`。
+        keep_out: Vec<crate::V3>,
+        /// 至少要留多宽(米)。
+        by_m: f64,
+        /// 手上那些点**现在**在哪 —— 躲开是相对于"此刻在哪"说的。
+        /// 🔴 由调用方给:身体层知道手在哪,而这一层不知道,**也不该知道**。
+        from: Vec<crate::V3>,
+    },
     /// **同时成立。** 第一个是**维持**的(它的第③格必须是"不动"),其余在动。
     ///
     /// 🔴 为什么维持的那个必须"不动":并存的意义就是*"这个别撒手,那个去动"*。
@@ -74,6 +98,10 @@ pub enum ManyGap {
     KeepBreaksContact(Vec<usize>, usize, f64),
     /// `Keep` 前后两段的接触点**个数**都不一样 —— 不松手不可能换手指数。
     KeepChangesPointCount(Vec<usize>, usize),
+    /// `Clear` 一个要躲的地方都没给 ⇒ 这句话没有内容。
+    NoKeepOut(Vec<usize>),
+    /// `Clear` 的净空不是一个正数,或者"手现在在哪"没给。
+    BadClearance(Vec<usize>),
 }
 
 impl Move {
@@ -134,6 +162,15 @@ impl Move {
                 }
                 Ok(())
             }
+            Move::Clear { keep_out, by_m, from } => {
+                if keep_out.is_empty() {
+                    return Err(ManyGap::NoKeepOut(path.clone()));
+                }
+                if !(by_m.is_finite() && *by_m > 0.0) || from.is_empty() {
+                    return Err(ManyGap::BadClearance(path.clone()));
+                }
+                Ok(())
+            }
             Move::While(items) => {
                 if items.is_empty() {
                     return Err(ManyGap::Empty(path.clone()));
@@ -169,6 +206,8 @@ impl Move {
             Move::Then(items) | Move::Keep(items) | Move::While(items) => {
                 items.iter().any(|m| m.moves())
             }
+            // 躲开是**手**在动,不是**物体**在动。第③格说的是物体 ⇒ 这里是 false。
+            Move::Clear { .. } => false,
         }
     }
 
@@ -179,6 +218,7 @@ impl Move {
             Move::Then(items) | Move::Keep(items) | Move::While(items) => {
                 items.first().map(|m| m.start_points()).unwrap_or_default()
             }
+            Move::Clear { from, .. } => from.clone(),
         }
     }
 
@@ -189,6 +229,8 @@ impl Move {
             Move::Then(items) | Move::Keep(items) => {
                 items.last().map(|m| m.end_points()).unwrap_or_default()
             }
+            // 躲完手在哪由执行层算(它才知道往哪让);这一层只说"别碰那儿"。
+            Move::Clear { from, .. } => from.clone(),
             // 并存:末了停在**维持**的那一段上(动的那些做完就撤,握着的没松)
             Move::While(items) => items.first().map(|m| m.end_points()).unwrap_or_default(),
         }
@@ -210,6 +252,8 @@ impl Move {
                     m.collect(out);
                 }
             }
+            // 零接触点 ⇒ 摊平出来什么都没有,而那正是它的定义。
+            Move::Clear { .. } => {}
         }
     }
 }

@@ -67,6 +67,9 @@ pub enum NoPlan {
     NoHandContact,
     /// 一串/并存那一层就填不满 —— 转发是第几段的哪一格。
     Many(ManyGap),
+    /// **躲不开** —— 在有限的候选方向里,找不到一个同时离开所有要躲之处的位置。
+    /// 🔴 候选是有限的,所以这句话的准确含义是"我找不到",不是"不存在"。
+    CannotClear,
 }
 
 /// 从"每点的法向 + 用力方向"算出**工具该怎么摆**。
@@ -465,6 +468,29 @@ fn lay(m: &Move, body: &Body, must_move: bool, arc: usize) -> Result<Vec<Step>, 
             }
             Ok(out)
         }
+        // 🔴 **"不要碰":零接触点 + 一个净空。** 把每个点沿"离最近那个要躲的地方最远"的方向让开,
+        // 让到刚好够净空为止。**这一步永远 `touching: false`** —— 它的全部意义就是不接触。
+        //
+        // ⚠️ 朝向:躲的时候手腕**是自由的**(约束只有"别离那儿太近")。这里原样发单位四元数,
+        // 身体层看见 `note == "躲"` 应当**保持当前朝向**,而不是真去转成单位姿态。
+        // 这条边界写在这儿,不许含糊 —— 接口说得出"别碰",说不出"手该怎么摆才好看"。
+        Move::Clear { keep_out, by_m, from } => {
+            m.check(false).map_err(NoPlan::Many)?;
+            let mut at: Vec<V3> = Vec::with_capacity(from.len());
+            for p in from {
+                match 让开(*p, keep_out, *by_m) {
+                    Some(q) => at.push(q),
+                    None => return Err(NoPlan::CannotClear),
+                }
+            }
+            Ok(vec![Step {
+                at,
+                quat: [1.0, 0.0, 0.0, 0.0],
+                touching: false,
+                tol_m: *by_m,
+                note: "躲",
+            }])
+        }
         // 并存:第一段维持,其余在它维持着的时候动。
         Move::While(items) => {
             let hold = lay(&items[0], body, false, arc)?;
@@ -519,5 +545,75 @@ fn seg_rot(m: &Move) -> Quat {
             items.iter().fold([1.0, 0.0, 0.0, 0.0], |acc, it| qmul(seg_rot(it), acc))
         }
         Move::While(items) => items.first().map(seg_rot).unwrap_or([1.0, 0.0, 0.0, 0.0]),
+        // 躲开不转动物体 —— 物体压根没被碰。
+        Move::Clear { .. } => [1.0, 0.0, 0.0, 0.0],
     }
+}
+
+/// **把一个点让到"离每一个要躲的地方都至少 `by` 远"的位置,而且【走过去的路上】也不许穿过。**
+///
+/// # 🔴 为什么不是"从最近那个推开"
+///
+/// 推开最近那个,会把手推向另一个。实测(2026-08-16):两个要躲的地方隔 30 cm 夹着手、
+/// 净空要 20 cm ⇒ 沿 x 推开一个,离另一个就只剩 **10 cm**,而**上一版把它当成功返回了**。
+/// 逃生方向根本不在那条连线上 —— 往侧面让 13.2 cm 就同时满足两个。
+///
+/// # 做法与它的界限(写明,不藏)
+///
+/// 取一组**有限**的候选方向(六个轴向 + 各角点 + 每个要躲的地方的反方向),
+/// 每个方向上算出"走多远才彻底出了所有的球",取最短的那一个。
+/// 🔴 **候选是有限的 ⇒ 找不到不等于不存在。** 找不到就返回 `None`(上层报 `CannotClear`),
+/// **不许硬挑一个** —— 挑一个"差不多"的位置,就是拿"躲开了"当结论而其实没躲开。
+fn 让开(p: V3, keep_out: &[V3], by: f64) -> Option<V3> {
+    // 本来就够远:不动。
+    if keep_out
+        .iter()
+        .all(|k| norm([p[0] - k[0], p[1] - k[1], p[2] - k[2]]) >= by)
+    {
+        return Some(p);
+    }
+    let mut dirs: Vec<V3> = Vec::new();
+    for a in [-1.0f64, 0.0, 1.0] {
+        for b in [-1.0f64, 0.0, 1.0] {
+            for c in [-1.0f64, 0.0, 1.0] {
+                if let Some(u) = unit([a, b, c]) {
+                    dirs.push(u);
+                }
+            }
+        }
+    }
+    for k in keep_out {
+        if let Some(u) = unit([p[0] - k[0], p[1] - k[1], p[2] - k[2]]) {
+            dirs.push(u);
+        }
+    }
+    let mut best: Option<(f64, V3)> = None;
+    for u in dirs {
+        // 沿 u 走 t:对每个要躲的地方,|p − k + t u| ≥ by。
+        // 二次式 t² + 2t(d·u) + (|d|² − by²) ≥ 0,取"出了这个球"的那个根。
+        let mut t = 0.0f64;
+        for k in keep_out {
+            let d = [p[0] - k[0], p[1] - k[1], p[2] - k[2]];
+            let b = dot(d, u);
+            let c = dot(d, d) - by * by;
+            let disc = b * b - c;
+            if disc <= 0.0 {
+                continue; // 这条射线整条都在球外
+            }
+            t = t.max(-b + disc.sqrt());
+        }
+        if !t.is_finite() || t > by * 20.0 {
+            continue;
+        }
+        if best.map_or(true, |(bt, _)| t < bt) {
+            best = Some((t, u));
+        }
+    }
+    let (t, u) = best?;
+    let q = [p[0] + u[0] * t, p[1] + u[1] * t, p[2] + u[2] * t];
+    // 🔴 算完再核一遍。**判据自己也可能错**,而"躲开了"这句话不许只有一处来源。
+    keep_out
+        .iter()
+        .all(|k| norm([q[0] - k[0], q[1] - k[1], q[2] - k[2]]) >= by - 1e-9)
+        .then_some(q)
 }

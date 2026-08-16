@@ -352,3 +352,71 @@ fn 握着扣扳机_握的点全程不动_扳机自己走() {
     let 扳机走了 = s.last().unwrap().at[2][0] - s[3].at[2][0];
     assert!((扳机走了 + 0.012).abs() < 1e-9, "扳机自己要走完那 12 mm,实得 {扳机走了:.5}");
 }
+
+// ───────────────── "不要碰":零接触点 + 一个净空 ─────────────────
+
+/// 🔴🔴 **六条验收线的第 6 条:接口要能表达"不要碰"。**
+///
+/// 之前它**说不出来** —— 接触集要求至少一个接触点,空了报 `NoPoints`。
+/// 现在它是一个自己的形状:给几个要躲开的地方 + 要留多宽,执行层把手让开。
+#[test]
+fn 不要碰_真的让开到那个净空() {
+    let 拳 = [0.10, 0.0, 0.95];
+    let 手 = vec![[0.12, 0.0, 0.95], [0.14, 0.0, 0.95]];
+    let m = Move::Clear { keep_out: vec![拳], by_m: 0.25, from: 手.clone() };
+    assert_eq!(m.check(false), Ok(()));
+    let s = script(&m, &body(), false, 1).expect("躲要出得来");
+    assert_eq!(s.len(), 1, "躲就是一步");
+    assert_eq!(s[0].note, "躲");
+    assert!(!s[0].touching, "🔴 它的全部意义就是【不】接触");
+    for p in &s[0].at {
+        let d = ((p[0] - 拳[0]).powi(2) + (p[1] - 拳[1]).powi(2) + (p[2] - 拳[2]).powi(2)).sqrt();
+        assert!(d >= 0.25 - 1e-9, "让开之后必须真的有 25 cm,实得 {d:.4}");
+    }
+    // 本来就够远的点不该被无端挪动
+    let 远 = vec![[1.0, 0.0, 0.95]];
+    let s2 = script(
+        &Move::Clear { keep_out: vec![拳], by_m: 0.25, from: 远.clone() },
+        &body(), false, 1,
+    ).unwrap();
+    assert_eq!(s2[0].at, 远, "够远的点不许瞎挪");
+}
+
+/// 反例:躲开多个地方时,**每一个**都要满足净空,不能只躲最近那一个。
+#[test]
+fn 不要碰_多个要躲的地方全都要满足() {
+    // 🔴 两个要躲的地方**夹着**手,而且净空大到"躲开这个就撞上那个" ——
+    // 上一版这条测试里手本来就够远,**它什么都没验到**(太干净的读数先当假的验)。
+    let 险 = vec![[0.0, 0.0, 0.95], [0.30, 0.0, 0.95]];
+    let 手 = vec![[0.15, 0.0, 0.95]];
+    let by = 0.20;
+    let s = script(
+        &Move::Clear { keep_out: 险.clone(), by_m: by, from: 手 },
+        &body(), false, 1,
+    ).unwrap();
+    for p in &s[0].at {
+        for k in &险 {
+            let d = ((p[0] - k[0]).powi(2) + (p[1] - k[1]).powi(2) + (p[2] - k[2]).powi(2)).sqrt();
+            assert!(d >= by - 1e-9, "对 {k:?} 也要够 {by} m,实得 {d:.4}");
+        }
+    }
+}
+
+/// 空话要当场点名:一个要躲的地方都没给 / 净空不是正数。
+#[test]
+fn 不要碰_空话必须点名() {
+    use contact_exec::set::many::ManyGap;
+    let 手 = vec![[0.0, 0.0, 0.9]];
+    assert!(matches!(
+        Move::Clear { keep_out: vec![], by_m: 0.1, from: 手.clone() }.check(false),
+        Err(ManyGap::NoKeepOut(_))
+    ));
+    assert!(matches!(
+        Move::Clear { keep_out: vec![[0.0; 3]], by_m: 0.0, from: 手 }.check(false),
+        Err(ManyGap::BadClearance(_))
+    ));
+    assert!(matches!(
+        Move::Clear { keep_out: vec![[0.0; 3]], by_m: 0.1, from: vec![] }.check(false),
+        Err(ManyGap::BadClearance(_))
+    ));
+}
