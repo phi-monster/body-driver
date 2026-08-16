@@ -71,6 +71,9 @@ pub enum Hand {
     吸盘,
     三指,
     五指,
+    /// 🔴 双臂:两只手各自一个手腕。**验收台原来没有这一行**,而 owner 说过测试可能是人形 ——
+    /// 一个不覆盖"最可能被考到的那一格"的分数,是自己骗自己。
+    双臂,
 }
 
 impl Hand {
@@ -80,6 +83,7 @@ impl Hand {
             Hand::吸盘 => "吸盘",
             Hand::三指 => "三指",
             Hand::五指 => "五指",
+            Hand::双臂 => "双臂",
         }
     }
 }
@@ -228,6 +232,7 @@ fn 抓点(cloud: &[P3], hand: Hand, z: f64) -> Result<ContactSet, String> {
         Hand::吸盘 => suction(cloud, 0.012, 0.0015, MU, 静, MM).map_err(|e: NoHand| format!("{e:?}")),
         Hand::三指 => ring(cloud, z, 0.02, 3, MU, 静, MM).map_err(|e: NoHand| format!("{e:?}")),
         Hand::五指 => ring(cloud, z, 0.02, 5, MU, 静, MM).map_err(|e: NoHand| format!("{e:?}")),
+        Hand::双臂 => 双手抱(cloud, z, 静),
     }
 }
 
@@ -389,7 +394,8 @@ pub fn 看一格(cloud: &[P3], hand: Hand, z: f64) -> String {
             let mut s = format!("{} 个接触点:\n", cs.points.len());
             for (i, p) in cs.points.iter().enumerate() {
                 s += &format!(
-                    "  [{i}] at=({:+.4},{:+.4},{:+.4}) 法向=({:+.3},{:+.3},{:+.3}) 锥半角={:.3} 拉={} 扭={}\n",
+                    "  [{i}] 手{:?} at=({:+.4},{:+.4},{:+.4}) 法向=({:+.3},{:+.3},{:+.3}) 锥半角={:.3} 拉={} 扭={}\n",
+                    p.by,
                     p.at[0], p.at[1], p.at[2], p.normal[0], p.normal[1], p.normal[2],
                     p.cone.half_angle, p.pull, p.torsion
                 );
@@ -397,4 +403,94 @@ pub fn 看一格(cloud: &[P3], hand: Hand, z: f64) -> String {
             s
         }
     }
+}
+
+/// **双臂抱住:两只手,每只手在物体的一侧摸两个点。**
+///
+/// 🔴 点是**从点云里取的**,不是在包围盒上臆造的:在这一层里,沿 ±x 各取最外的那一条,
+/// 每条上取相距最远的两个点(一只手的两点不共线,那只手的朝向才定得下来)。
+/// 两只手各自 `Who::Hand(0)` / `Who::Hand(1)` —— **编号只说"归同一个执行器管"**。
+fn 双手抱(cloud: &[P3], z: f64, motion: Twist) -> Result<ContactSet, String> {
+    let band: Vec<&P3> = cloud.iter().filter(|p| (p.z - z).abs() <= 0.03).collect();
+    if band.len() < 8 {
+        return Err("这一层点太少,抱不住".into());
+    }
+    let mut pts = Vec::new();
+    for (side, id) in [(-1.0f64, 0u8), (1.0, 1u8)] {
+        let m = band.iter().map(|p| p.x * side).fold(f64::MIN, f64::max);
+        let 边: Vec<&&P3> = band.iter().filter(|p| m - p.x * side < 0.004).collect();
+        if 边.len() < 2 {
+            return Err(format!("{}侧摸不到两个点", if side < 0.0 { "左" } else { "右" }));
+        }
+        // 这一条上相距最远的两个点 —— 太近就等于共线,那只手的朝向会定不下来
+        let (mut a, mut b, mut best) = (边[0], 边[0], 0.0f64);
+        for i in &边 {
+            for j in &边 {
+                let d = contact_set::norm([i.x - j.x, i.y - j.y, i.z - j.z]);
+                if d > best {
+                    best = d;
+                    a = i;
+                    b = j;
+                }
+            }
+        }
+        if best < 0.01 {
+            return Err("这一侧摸到的两点太近,那只手的朝向定不下来".into());
+        }
+        let n = [side, 0.0, 0.0]; // 朝外的法向 = 这一侧的外侧
+        for p in [a, b] {
+            pts.push(Point {
+                by: Who::Hand(id),
+                at: [p.x, p.y, p.z],
+                normal: n,
+                cone: contact_set::Cone { axis: [-n[0], -n[1], -n[2]], half_angle: MU.atan() },
+                pull: false,
+                torsion: true, // 手掌是一片面
+                peel: false,
+                tol_m: MM,
+            });
+        }
+    }
+    Ok(ContactSet { points: pts, motion, approach: None })
+}
+
+/// 一个圆锥(底在下、尖在上)—— **没有一对平行面**,两指那条路该在这儿受考验。
+pub fn 圆锥(r: f64, h: f64, z0: f64) -> Vec<P3> {
+    let mut v = Vec::new();
+    for k in 0..21 {
+        let t = k as f64 / 20.0;
+        let rr = r * (1.0 - t);
+        let n = (12.0 + 36.0 * (1.0 - t)) as usize;
+        for i in 0..n.max(6) {
+            let a = core::f64::consts::TAU * i as f64 / n.max(6) as f64;
+            v.push(P3 { x: rr * a.cos(), y: rr * a.sin(), z: z0 + h * t });
+        }
+    }
+    for i in 0..11 {
+        for j in 0..11 {
+            let (x, y) = (-r + 2.0 * r * i as f64 / 10.0, -r + 2.0 * r * j as f64 / 10.0);
+            if x * x + y * y <= r * r {
+                v.push(P3 { x, y, z: z0 });
+            }
+        }
+    }
+    v
+}
+
+/// 一个 L 形角铁:两块板成直角 —— 环抓在这儿会摸到很不对称的一圈。
+pub fn L形(a: f64, b: f64, t: f64, h: f64, z0: f64) -> Vec<P3> {
+    let mut v = Vec::new();
+    let n = 15;
+    for i in 0..n {
+        for k in 0..n {
+            let (u, z) = (i as f64 / (n - 1) as f64, z0 + h * k as f64 / (n - 1) as f64);
+            // 沿 x 的那一块
+            v.push(P3 { x: a * u, y: 0.0, z });
+            v.push(P3 { x: a * u, y: t, z });
+            // 沿 y 的那一块
+            v.push(P3 { x: 0.0, y: b * u, z });
+            v.push(P3 { x: t, y: b * u, z });
+        }
+    }
+    v
 }
