@@ -667,3 +667,188 @@ fn 拿量过的钳口跨度当尺子_能不能抓出外参歪了() {
         );
     }
 }
+
+// ───────── 尺子:一道会自己响的闸 ─────────
+
+/// 造一对眼睛,可选把右眼拧歪 θ 度。
+fn 一对眼(θ度: f64) -> (Eye, Eye) {
+    let 左 = Eye { fx: 900.0, fy: 900.0, cx: 320.0, cy: 240.0, at: [-0.06, 0.0, 1.40], q: [0.0, 1.0, 0.0, 0.0] };
+    let 右真 = Eye { at: [0.06, 0.0, 1.40], ..左 };
+    let a = θ度.to_radians() / 2.0;
+    let dq = [a.cos(), 0.0, a.sin(), 0.0];
+    let q = 右真.q;
+    let 右 = Eye {
+        q: [
+            dq[0] * q[0] - dq[2] * q[2],
+            dq[0] * q[1] + dq[2] * q[3],
+            dq[0] * q[2] + dq[2] * q[0],
+            dq[0] * q[3] - dq[2] * q[1],
+        ],
+        ..右真
+    };
+    (左, 右真, ).0;
+    (左, 右)
+}
+
+/// 两个指尖在世界里的位置(张开 `跨度`,在 0.6 m 处)。
+fn 两个指尖(跨度: f64) -> (P3, P3) {
+    (P3 { x: -跨度 / 2.0, y: 0.0, z: 0.80 }, P3 { x: 跨度 / 2.0, y: 0.0, z: 0.80 })
+}
+
+#[test]
+fn 尺子_没飘的时候放行() {
+    let 跨度 = 0.0803f64;
+    let (左, 右) = 一对眼(0.0);
+    let (a1, a2) = 两个指尖(跨度);
+    let 端1 = (左.project(a1).unwrap(), 右.project(a1).unwrap());
+    let 端2 = (左.project(a2).unwrap(), 右.project(a2).unwrap());
+    let got = check_ruler(&左, &右, 端1, 端2, 跨度, 0.001).expect("没飘就该放行");
+    assert!((got - 跨度).abs() < 1e-9, "量出来该就是那个数,实得 {got:.6}");
+}
+
+/// 🔴🔴 **闸必须在"视线错开查不出来"的那种飘法上响** —— 那正是它存在的理由。
+#[test]
+fn 尺子_飘了就必须拦住_而视线错开查不出来() {
+    let 跨度 = 0.0803f64;
+    // 真值用没歪的右眼投影(模拟"世界没变,只是我以为的相机位姿歪了")
+    let (左, 右真) = 一对眼(0.0);
+    let (a1, a2) = 两个指尖(跨度);
+    let 端1 = (左.project(a1).unwrap(), 右真.project(a1).unwrap());
+    let 端2 = (左.project(a2).unwrap(), 右真.project(a2).unwrap());
+
+    for (θ, 该不该拦) in [(0.1f64, false), (0.3, true), (1.0, true)] {
+        let (_, 右歪) = 一对眼(θ);
+        // ① 视线错开这个信号(容差设成 0 就把错开量报出来)
+        let 错开 = match triangulate(&左, 端1.0, &右歪, 端1.1, 0.0) {
+            Err(WhyNot::RaysMiss(d)) => d,
+            _ => 0.0,
+        };
+        // ② 尺子
+        let r = check_ruler(&左, &右歪, 端1, 端2, 跨度, 0.0015);
+        match &r {
+            Err(Drift::Off { got_m, .. }) => println!(
+                "θ={θ:>4.1}° ⇒ 视线错开 {:.4} mm(查不出)· 尺子差 {:.3} mm ⇒ **拦住**",
+                错开 * 1000.0,
+                (got_m - 跨度).abs() * 1000.0
+            ),
+            Ok(g) => println!(
+                "θ={θ:>4.1}° ⇒ 视线错开 {:.4} mm · 尺子差 {:.3} mm ⇒ 放行",
+                错开 * 1000.0,
+                (g - 跨度).abs() * 1000.0
+            ),
+            Err(e) => println!("θ={θ:>4.1}° ⇒ {e:?}"),
+        }
+        assert!(错开 * 1000.0 < 0.02, "🔴 视线错开在这种飘法下几乎为零 —— 拿它当闸没用");
+        if 该不该拦 {
+            assert!(matches!(r, Err(Drift::Off { .. })), "θ={θ}° 该被拦住");
+        }
+    }
+}
+
+/// 尺子填错了(给了一个非正数)⇒ 说得出来。
+#[test]
+fn 尺子_填错了也要说得出来() {
+    let (左, 右) = 一对眼(0.0);
+    let (a1, a2) = 两个指尖(0.08);
+    let 端1 = (左.project(a1).unwrap(), 右.project(a1).unwrap());
+    let 端2 = (左.project(a2).unwrap(), 右.project(a2).unwrap());
+    assert_eq!(check_ruler(&左, &右, 端1, 端2, 0.0, 0.001), Err(Drift::BadRuler));
+}
+
+// ───────── 各种传感器怎么适配:出口只有一个 ─────────
+
+/// 🔴🔴 **一只普通相机 + 机器人自己挪一下 = 双目,而且用的是同一个三角化。**
+///
+/// 双目真正的难点从来不是"两条视线怎么交",是"两个视角之间差多少"。
+/// 别人靠标定板或 SLAM 去估它;**机器人自己挪了多远,本体感受直接给。**
+#[test]
+fn 单目加运动_就是双目_一行新几何都不用写() {
+    let 相机在左 = 俯视眼([-0.06, 0.0, 1.40]);
+    let 相机挪到右 = 俯视眼([0.06, 0.0, 1.40]); // 胳膊把它平移了 12 cm
+    let 真 = 圆柱();
+    let pairs: Vec<(Px, Px)> = 真
+        .iter()
+        .filter_map(|p| match (相机在左.project(*p), 相机挪到右.project(*p)) {
+            (Some(a), Some(b)) => Some((a, b)),
+            _ => None,
+        })
+        .collect();
+    let (点, 丢) = from_motion(&相机在左, &相机挪到右, &pairs, 0.5, 0.1, 1e-6).expect("挪够了就该成");
+    assert_eq!(丢, 0);
+    let mut worst = 0.0f64;
+    for (g, p) in 点.iter().zip(&真) {
+        worst = worst.max(((g.x - p.x).powi(2) + (g.y - p.y).powi(2) + (g.z - p.z).powi(2)).sqrt());
+    }
+    println!("单目挪 12 cm ⇒ {} 个点,最大误差 {:.2e} m", 点.len(), worst);
+    assert!(worst < 1e-9);
+}
+
+/// 🔴 反例:**挪得太少就必须拒绝** —— 三角形太扁,深度极度不敏感。
+#[test]
+fn 反例_挪得太少必须拒绝而不是给个烂点() {
+    let 前 = 俯视眼([0.0, 0.0, 1.40]);
+    let 后 = 俯视眼([0.004, 0.0, 1.40]); // 只挪了 4 mm
+    let 真 = 圆柱();
+    let pairs: Vec<(Px, Px)> = 真
+        .iter()
+        .filter_map(|p| match (前.project(*p), 后.project(*p)) {
+            (Some(a), Some(b)) => Some((a, b)),
+            _ => None,
+        })
+        .collect();
+    match from_motion(&前, &后, &pairs, 0.5, 0.1, 1e-6) {
+        Err(WhyNot::BaselineTooShort { got_m, need_m }) => {
+            println!("挪了 {:.1} mm,至少要 {:.1} mm ⇒ 拒绝", got_m * 1000.0, need_m * 1000.0);
+            assert!(got_m < need_m);
+        }
+        other => panic!("挪得太少必须拒绝;实得 {other:?}"),
+    }
+}
+
+/// **激光雷达 / 摸 —— 类型完全一样,`merge` 直接拌在一起。**
+#[test]
+fn 雷达和摸_跟相机产的点是同一个类型_能直接混() {
+    // 雷达在机器人身上某处,朝下扫;它出的点在自己的坐标系里
+    let 雷达点: Vec<[f64; 3]> = (0..50)
+        .map(|i| {
+            let a = core::f64::consts::TAU * i as f64 / 50.0;
+            [0.03 * a.cos(), 0.03 * a.sin(), 0.40]
+        })
+        .collect();
+    let 雷达出的 = from_sensor_frame(&雷达点, [0.0, 0.0, 1.35], [0.0, 1.0, 0.0, 0.0]);
+    // 摸到的两个点(碰一下拿到的,比看到的准,而且不怕反光/透明)
+    let 摸到的 = from_touch(&[[0.031, 0.0, 0.93], [-0.031, 0.0, 0.93]]);
+    // 相机产的点
+    let 眼 = 俯视眼([0.0, 0.0, 1.40]);
+    let 相机出的: Vec<P3> = 圆柱()
+        .iter()
+        .filter_map(|p| 眼.project(*p).map(|px| 眼.back_project(px, 眼.into_cam(*p)[2]).unwrap()))
+        .collect();
+
+    let 拌在一起 = merge(&[相机出的.clone(), 雷达出的.clone(), 摸到的.clone()]);
+    println!(
+        "相机 {} + 雷达 {} + 摸 {} = {} 个点,同一个类型,直接拌",
+        相机出的.len(), 雷达出的.len(), 摸到的.len(), 拌在一起.len()
+    );
+    assert_eq!(拌在一起.len(), 相机出的.len() + 雷达出的.len() + 摸到的.len());
+    // 雷达那圈点转到世界之后,该落在它该在的高度上(1.35 − 0.40 = 0.95)
+    for p in &雷达出的 {
+        assert!((p.z - 0.95).abs() < 1e-12, "雷达点该在 0.95 m,实得 {}", p.z);
+    }
+}
+
+/// 每个来源**自报有多准** —— 混着用时,上层才判断得了信谁。
+#[test]
+fn 每个来源自报有多准() {
+    println!("\n双目的误差(像素误差 0.5 px、焦距 900):");
+    for 基线 in [0.06f64, 0.12, 0.25] {
+        let mut 行 = format!("  基线 {:>4.0} cm:", 基线 * 100.0);
+        for 距 in [0.3f64, 0.6, 1.2] {
+            行 += &format!(" {:.0} m ⇒ {:>6.2}mm", 距, sigma_stereo(距, 基线, 900.0, 0.5) * 1000.0);
+        }
+        println!("{行}");
+    }
+    // 远处误差必须比近处大,基线大误差必须小 —— 这两条单调性是判据
+    assert!(sigma_stereo(1.2, 0.12, 900.0, 0.5) > sigma_stereo(0.3, 0.12, 900.0, 0.5));
+    assert!(sigma_stereo(0.6, 0.25, 900.0, 0.5) < sigma_stereo(0.6, 0.06, 900.0, 0.5));
+}
