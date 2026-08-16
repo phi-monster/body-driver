@@ -363,3 +363,182 @@ fn 反例_样本太少必须拒绝() {
         .collect();
     assert!(matches!(fit_full(&seen), Err(WhyNot::TooFewSamples(_))));
 }
+
+// ───────────── 圈物体:锚在眼睛指的那一点上 ─────────────
+
+/// 造一张深度图:一张大桌面(深 1.20 m)+ 桌上一个小物体(深 1.05 m)。
+/// **这正是 LAB 那次失败的场景形状** —— 全局规则会把整张桌子一起圈走。
+fn 一张桌子加一个物体(w: usize, h: usize) -> Vec<f64> {
+    let mut d = vec![1.20f64; w * h];
+    let (cx, cy, r) = (w as f64 * 0.5, h as f64 * 0.5, w as f64 * 0.05);
+    for y in 0..h {
+        for x in 0..w {
+            let (dx, dy) = (x as f64 - cx, y as f64 - cy);
+            if dx * dx + dy * dy <= r * r {
+                d[y * w + x] = 1.05;
+            }
+        }
+    }
+    d
+}
+
+#[test]
+fn 圈物体_只圈眼睛指的那一小块() {
+    let (w, h) = (320usize, 240usize);
+    let eye = 俯视眼([0.0, 0.0, 1.40]);
+    let d = 一张桌子加一个物体(w, h);
+    let mask = mask_around(&eye, &d, w, h, [160.0, 120.0], 0.10, 1.5).expect("该圈得出来");
+    let n = mask.iter().filter(|b| **b).count();
+    let 占 = n as f64 / (w * h) as f64;
+    println!("圈出来 {n} 个像素,占全帧 {:.1}%", 占 * 100.0);
+    assert!(n > 100, "物体那一片该有几百个像素,实得 {n}");
+    // 🔴 圈出来的**必须**都是那个物体(深 1.05),一个桌面像素都不许混进来
+    for (i, on) in mask.iter().enumerate() {
+        if *on {
+            assert!((d[i] - 1.05).abs() < 1e-9, "圈进来一个桌面像素,深度 {}", d[i]);
+        }
+    }
+    assert!(占 < 0.05, "只该圈一小块,实得 {:.1}%", 占 * 100.0);
+}
+
+/// 🔴🔴 **把 LAB 那次失败重放一遍:全局规则圈走了 72% 全帧,而这个闸必须响。**
+///
+/// LAB 原文:那条纯几何规则(比 90 分位近 1 cm)⇒ 掩膜占**全帧 72%**,
+/// 而手从 27 cm 逼近到 0.7 cm 时**物体像素宽 601→603 纹丝不动** —— 它圈的根本不是物体。
+#[test]
+fn 反例_圈得比眼睛说的大太多_必须当场拒绝() {
+    let (w, h) = (320usize, 240usize);
+    let eye = 俯视眼([0.0, 0.0, 1.40]);
+    // 整幅都差不多深(一张大桌面)⇒ 任何"贴着中心深度"的规则都会圈一大片
+    let d = vec![1.20f64; w * h];
+    match mask_around(&eye, &d, w, h, [160.0, 120.0], 0.10, 8.0) {
+        Err(NoMask::TooBig(实, 该)) => {
+            println!("挡下来了:实占 {:.1}% vs 该占 {:.1}%", 实 * 100.0, 该 * 100.0);
+            assert!(实 > 该);
+        }
+        other => panic!("圈了一大片桌面,必须当场拒绝;实得 {other:?}"),
+    }
+}
+
+/// 眼睛指到没有深度的地方 ⇒ 说得出来,不硬圈。
+#[test]
+fn 反例_指到没东西的地方() {
+    let (w, h) = (64usize, 48usize);
+    let eye = 俯视眼([0.0, 0.0, 1.40]);
+    let d = vec![f64::NAN; w * h];
+    assert_eq!(mask_around(&eye, &d, w, h, [32.0, 24.0], 0.2, 1.5), Err(NoMask::NothingThere));
+}
+
+/// 🔴 **全链:深度图 + 眼睛指的那一点 → 点云 → 抓取候选。** 接真机时就是这个形状。
+#[test]
+fn 全链_深度图加一个点_一直走到抓取候选() {
+    use contact_gen::{candidates, Body, Grid, JawSpan};
+    let (w, h) = (320usize, 240usize);
+    let eye = 俯视眼([0.0, 0.0, 1.40]);
+    let mut d = vec![1.20f64; w * h];
+    let (cx, cy) = (160.0f64, 120.0f64);
+    let 半宽 = (0.03 / 1.10 * eye.fx).round();
+    for y in 0..h {
+        for x in 0..w {
+            if (x as f64 - cx).abs() <= 半宽 && (y as f64 - cy).abs() <= 半宽 {
+                d[y * w + x] = 1.10;
+            }
+        }
+    }
+    let span = 2.0 * 半宽 / w as f64;
+    let mask = mask_around(&eye, &d, w, h, [cx, cy], span, 1.5).expect("该圈得出来");
+    let 点 = from_depth(&eye, &d, &mask, w, h);
+    println!("圈出 {} 个像素 ⇒ {} 个三维点", mask.iter().filter(|b| **b).count(), 点.len());
+    assert!(点.len() > 200, "点太少,实得 {}", 点.len());
+    let (zlo, zhi) = 点.iter().fold((f64::MAX, f64::MIN), |(a, b), p| (a.min(p.z), b.max(p.z)));
+    println!("点的高度范围 {zlo:.4}..{zhi:.4} m");
+    assert!((zlo - 0.30).abs() < 1e-9 && (zhi - 0.30).abs() < 1e-9, "顶面该是一个平面");
+
+    // 🔴 只有一个顶面(相机看不见侧面)时,②a 会说什么 —— 照实记,不修饰
+    let body = Body { jaw: JawSpan::Measured(0.09), reach_lo: 0.02, reach_hi: 1.5, base_x: 0.0, base_y: -0.4 };
+    let grid = Grid { bands: 4, jaw_h_m: 0.02, dirs: 12, min_pts: 8, min_above_m: 0.001, finger_w_m: 0.02, gap_m: 0.012 };
+    let 换: Vec<contact_gen::P3> = 点.iter().map(|p| contact_gen::P3 { x: p.x, y: p.y, z: p.z }).collect();
+    match candidates(&换, &body, 0.0, grid) {
+        Ok(cs) => println!("②a 给出候选 {} 条(只有一个顶面)", cs.len()),
+        Err(e) => println!("②a 拒绝:{e:?} —— 只有一层点,切不出层"),
+    }
+}
+
+// ───────── 一个俯视相机只看得见顶面:两条出路 ─────────
+
+/// 造一个立方体的**表面**点(顶面 + 四个侧面),再由某只眼睛去"看"它:
+/// 只有**朝着相机那一侧**的点会被看到(简化的可见性:法向朝着相机)。
+fn 看得见的那些点(眼: &Eye, 中心: [f64; 3], 半: f64) -> Vec<P3> {
+    let mut all: Vec<(P3, [f64; 3])> = Vec::new();
+    let n = 21;
+    for i in 0..n {
+        for j in 0..n {
+            let (a, b) = (
+                -半 + 2.0 * 半 * i as f64 / (n - 1) as f64,
+                -半 + 2.0 * 半 * j as f64 / (n - 1) as f64,
+            );
+            all.push((P3 { x: 中心[0] + a, y: 中心[1] + b, z: 中心[2] + 半 }, [0.0, 0.0, 1.0]));
+            all.push((P3 { x: 中心[0] + a, y: 中心[1] - 半, z: 中心[2] + b }, [0.0, -1.0, 0.0]));
+            all.push((P3 { x: 中心[0] + a, y: 中心[1] + 半, z: 中心[2] + b }, [0.0, 1.0, 0.0]));
+            all.push((P3 { x: 中心[0] - 半, y: 中心[1] + a, z: 中心[2] + b }, [-1.0, 0.0, 0.0]));
+            all.push((P3 { x: 中心[0] + 半, y: 中心[1] + a, z: 中心[2] + b }, [1.0, 0.0, 0.0]));
+        }
+    }
+    all.into_iter()
+        .filter(|(p, nrm)| {
+            let d = [眼.at[0] - p.x, 眼.at[1] - p.y, 眼.at[2] - p.z];
+            d[0] * nrm[0] + d[1] * nrm[1] + d[2] * nrm[2] > 0.0
+        })
+        .map(|(p, _)| p)
+        .collect()
+}
+
+fn 试着抓(点: &[P3]) -> Result<usize, String> {
+    use contact_gen::{candidates, Body, Grid, JawSpan};
+    let body = contact_gen::Body { jaw: JawSpan::Measured(0.09), reach_lo: 0.02, reach_hi: 1.5, base_x: 0.0, base_y: -0.4 };
+    let _ = std::mem::size_of::<Body>();
+    let grid = Grid { bands: 5, jaw_h_m: 0.015, dirs: 12, min_pts: 6, min_above_m: 0.001, finger_w_m: 0.02, gap_m: 0.015 };
+    let 换: Vec<contact_gen::P3> = 点.iter().map(|p| contact_gen::P3 { x: p.x, y: p.y, z: p.z }).collect();
+    let zmin = 换.iter().map(|p| p.z).fold(f64::MAX, f64::min);
+    candidates(&换, &body, zmin, grid).map(|c| c.len()).map_err(|e| format!("{e:?}"))
+}
+
+/// 🔴🔴 **一个俯视相机 → 抓不了;换个角度再看一眼 → 抓得了。**
+///
+/// 这一条是这一晚最值钱的读数之一:它是**合成单元测试给不出、而真机上立刻会撞到**的事。
+#[test]
+fn 一个俯视相机看不见侧面_换个角度就够了() {
+    let 中心 = [0.0, 0.0, 0.93];
+    let 顶上 = 俯视眼([0.0, 0.0, 1.40]);
+    let 只看顶面 = 看得见的那些点(&顶上, 中心, 0.03);
+    let (zlo, zhi) = 只看顶面.iter().fold((f64::MAX, f64::MIN), |(a, b), p| (a.min(p.z), b.max(p.z)));
+    println!("俯视:{} 个点,高度跨度 {:.4} m", 只看顶面.len(), zhi - zlo);
+    let 一个视角 = 试着抓(&只看顶面);
+    println!("只用俯视 ⇒ {:?}", 一个视角);
+    assert!(一个视角.is_err(), "一张平面切不出层,②a 该拒绝;实得 {:?}", 一个视角);
+
+    // 换一只斜着看的眼睛(相机在侧上方)—— 它看得见一个侧面
+    let 侧上 = Eye { fx: 600.0, fy: 600.0, cx: 320.0, cy: 240.0, at: [0.55, 0.0, 1.15], q: 俯视眼([0.0; 3]).q };
+    let 侧面 = 看得见的那些点(&侧上, 中心, 0.03);
+    let 合起来 = merge(&[只看顶面.clone(), 侧面.clone()]);
+    let (zlo2, zhi2) = 合起来.iter().fold((f64::MAX, f64::MIN), |(a, b), p| (a.min(p.z), b.max(p.z)));
+    println!("两个视角合起来:{} 个点,高度跨度 {:.4} m", 合起来.len(), zhi2 - zlo2);
+    let 两个视角 = 试着抓(&合起来);
+    println!("两个视角 ⇒ {:?}", 两个视角);
+    assert!(两个视角.is_ok(), "合了侧面之后该抓得出来;实得 {:?}", 两个视角);
+}
+
+/// 另一条出路:**只用一个俯视相机,但把顶面朝桌面拉下去** —— 这是【假设】,不是测量。
+#[test]
+fn 拉到支撑面_能救回来_但那是假设() {
+    let 中心 = [0.0, 0.0, 0.93];
+    let 顶上 = 俯视眼([0.0, 0.0, 1.40]);
+    let 只看顶面 = 看得见的那些点(&顶上, 中心, 0.03);
+    let 拉下来 = extrude_to_support(&只看顶面, 0.90, 0.004);
+    println!("拉到支撑面之后:{} 个点", 拉下来.len());
+    let r = 试着抓(&拉下来);
+    println!("拉下来之后 ⇒ {:?}", r);
+    assert!(r.is_ok(), "拉出侧面之后该抓得出来;实得 {:?}", r);
+    // 🔴 记准它的代价:拉出来的"侧面"是**假设**出来的。马克杯把手底下是空的,
+    // 拉下来就成了一堵不存在的墙,而爪子会合到空气上。首选仍然是换个角度再看一眼。
+}
