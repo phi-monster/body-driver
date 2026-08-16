@@ -1,0 +1,18 @@
+[package]
+name    = "point-gen"
+version = "0.1.0"
+edition = "2021"
+description = "produce the 3D surface points that contact-gen eats -- from depth, or from two plain cameras. zero learning."
+license = "AGPL-3.0-or-later"
+
+# 🔴 依赖表空着,与 body-layer 同一条理由:这一层是要被整个领域读和审的。
+[dependencies]
+
+[dev-dependencies]
+# 只在测试里:验"产出来的点喂给 ②a,抓的地方和拿真点算出来的一样"。
+contact-gen = { path = "../contact-gen" }
+contact-set = { path = "../contact-set" }
+
+[profile.release]
+overflow-checks = true
+lto = true
