@@ -19,7 +19,7 @@ fn body() -> Body {
     Body { standoff_m: 0.04, repeat_m: 0.001 }
 }
 fn pt(at: V3, normal: V3, axis: V3, half: f64) -> Point {
-    Point { by: Who::Hand, at, normal, cone: Cone { axis, half_angle: half }, pull: false, torsion: false, peel: false, tol_m: MM }
+    Point { by: Who::Hand(0), at, normal, cone: Cone { axis, half_angle: half }, pull: false, torsion: false, peel: false, tol_m: MM }
 }
 /// 一对相对的钳口点(夹住 5 cm 宽的东西)。
 fn 对置两点() -> Vec<Point> {
@@ -208,8 +208,8 @@ fn 反例_手不跟着转必须看得出来() {
     }
     let cs = ContactSet { points: pts, motion: m, approach: Some([0.0, 0.0, -1.0]) };
     let plan = steps(&cs, &body(), true, 12).unwrap();
-    let q0 = plan[1].quat;
-    let qn = plan.last().unwrap().quat;
+    let q0 = plan[1].quat[0];
+    let qn = plan.last().unwrap().quat[0];
     // 首末朝向的夹角必须 ≈ 0.8 rad —— 手腕真的跟着转了。为零就是"接触点转过去而手没转"。
     let d = (q0[0] * qn[0] + q0[1] * qn[1] + q0[2] * qn[2] + q0[3] * qn[3]).abs().clamp(0.0, 1.0);
     let 转过 = 2.0 * d.acos();
@@ -268,9 +268,9 @@ use contact_exec::set::many::Move;
 
 fn 握(at: V3, pad: bool) -> Vec<Point> {
     vec![
-        Point { by: Who::Hand, at: [at[0], at[1] - 0.02, at[2]], normal: [0.0, -1.0, 0.0],
+        Point { by: Who::Hand(0), at: [at[0], at[1] - 0.02, at[2]], normal: [0.0, -1.0, 0.0],
                 cone: Cone { axis: [0.0, 1.0, 0.0], half_angle: 0.4636 }, pull: false, torsion: pad, peel: false, tol_m: MM },
-        Point { by: Who::Hand, at: [at[0], at[1] + 0.02, at[2]], normal: [0.0, 1.0, 0.0],
+        Point { by: Who::Hand(0), at: [at[0], at[1] + 0.02, at[2]], normal: [0.0, 1.0, 0.0],
                 cone: Cone { axis: [0.0, -1.0, 0.0], half_angle: 0.4636 }, pull: false, torsion: pad, peel: false, tol_m: MM },
     ]
 }
@@ -319,7 +319,7 @@ fn 舀_三段一气呵成() {
     let s = script(&Move::Keep(vec![插, 兜, 抬]), &body(), true, 6).expect("舀要走得出来");
     assert_eq!(s.iter().filter(|x| x.note == "悬停").count(), 1);
     // 兜那一段手腕必须真的转过 0.7 rad
-    let (q0, qn) = (s[1].quat, s.last().unwrap().quat);
+    let (q0, qn) = (s[1].quat[0], s.last().unwrap().quat[0]);
     let d = (q0[0]*qn[0] + q0[1]*qn[1] + q0[2]*qn[2] + q0[3]*qn[3]).abs().clamp(0.0, 1.0);
     assert!((2.0 * d.acos() - 0.7).abs() < 1e-6, "手腕该跟着兜转 0.7 rad");
 }
@@ -330,7 +330,7 @@ fn 握着扣扳机_握的点全程不动_扳机自己走() {
     let 握住 = Move::One(ContactSet { points: 握([0.0, 0.0, 0.10], true),
         motion: Twist::still([0.0, 0.0, 0.10]), approach: Some([0.0, 0.0, -1.0]) });
     let 扣 = Move::One(ContactSet {
-        points: vec![Point { by: Who::Hand, at: [0.03, 0.0, 0.10], normal: [1.0, 0.0, 0.0],
+        points: vec![Point { by: Who::Hand(0), at: [0.03, 0.0, 0.10], normal: [1.0, 0.0, 0.0],
                              cone: Cone { axis: [-1.0, 0.0, 0.0], half_angle: 0.4636 }, pull: false, torsion: false, peel: false, tol_m: MM }],
         motion: Twist::slide([-0.012, 0.0, 0.0]), approach: Some([-1.0, 0.0, 0.0]) });
     let s = script(&Move::While(vec![握住, 扣]), &body(), true, 4).expect("并存要走得出来");
@@ -346,7 +346,7 @@ fn 握着扣扳机_握的点全程不动_扳机自己走() {
             assert!(d < 1e-12, "🔴 握着的点一步都不许动,实得 {d}");
         }
         // 朝向由【维持】的那一段定,不跟着扳机走
-        assert_eq!(st.quat, s[1].quat, "扣扳机时手腕不许跟着扳机转");
+        assert_eq!(st.quat[0], s[1].quat[0], "扣扳机时手腕不许跟着扳机转");
     }
     // 从【贴上】那一步量起 —— s[2] 是扳机自己的悬停(手指还要先够到扳机)。
     let 扳机走了 = s.last().unwrap().at[2][0] - s[3].at[2][0];
@@ -419,4 +419,72 @@ fn 不要碰_空话必须点名() {
         Move::Clear { keep_out: vec![[0.0; 3]], by_m: 0.1, from: vec![] }.check(false),
         Err(ManyGap::BadClearance(_))
     ));
+}
+
+// ───────────────── 人形:两只手 = 两个手腕 ─────────────────
+
+/// 🔴🔴 **双臂抱一个箱子:两只手各有各的朝向,而且【方向相反】。**
+///
+/// 上一版 `Step` 只有一个朝向,`frame_from` 拿①里全部手接触点算一个工具朝向 ——
+/// 一只五指手是对的(一个手腕),**双臂就是错的**。owner 说过测试可能是人形 ⇒ 这一格会被撞上。
+///
+/// 这条测试的判据很硬:**两只手的朝向点必须差 180°**(左手往右压、右手往左压),
+/// 合成一个朝向的话这个差就是 0 —— 一眼就分得出来。
+#[test]
+fn 双臂抱箱子_两只手各算各的朝向() {
+    let 左 = |at: V3| Point {
+        by: Who::Hand(0),
+        at,
+        normal: [-1.0, 0.0, 0.0],
+        cone: Cone { axis: [1.0, 0.0, 0.0], half_angle: 0.4636 },
+        pull: false,
+        torsion: true,
+        peel: false,
+        tol_m: MM,
+    };
+    let 右 = |at: V3| Point {
+        by: Who::Hand(1),
+        at,
+        normal: [1.0, 0.0, 0.0],
+        cone: Cone { axis: [-1.0, 0.0, 0.0], half_angle: 0.4636 },
+        pull: false,
+        torsion: true,
+        peel: false,
+        tol_m: MM,
+    };
+    // 一个 30 cm 宽的箱子,左右各两个接触点(每只手自己那两点不共线)
+    let cs = ContactSet {
+        points: vec![
+            左([-0.15, -0.04, 1.00]),
+            左([-0.15, 0.04, 1.02]),
+            右([0.15, -0.04, 1.00]),
+            右([0.15, 0.04, 1.02]),
+        ],
+        motion: Twist::slide([0.0, 0.0, 0.10]), // 一起抬起来 10 cm
+        approach: None,
+    };
+    let s = steps(&cs, &body(), true, 1).expect("双臂抱箱子该出得来");
+    for st in &s {
+        assert_eq!(st.at.len(), 4);
+        assert_eq!(st.quat.len(), 4, "朝向要跟接触点一一对应");
+        assert_eq!(st.hand, vec![0u8, 0, 1, 1], "点要认得出自己归哪只手");
+    }
+    // 🔴 两只手的工具轴必须**相反** —— 左手往 +x 压,右手往 −x 压。
+    let 轴 = |q: [f64; 4]| {
+        [
+            2.0 * (q[1] * q[3] + q[0] * q[2]),
+            2.0 * (q[2] * q[3] - q[0] * q[1]),
+            1.0 - 2.0 * (q[1] * q[1] + q[2] * q[2]),
+        ]
+    };
+    let (z左, z右) = (轴(s[1].quat[0]), 轴(s[1].quat[2]));
+    let d = z左[0] * z右[0] + z左[1] * z右[1] + z左[2] * z右[2];
+    assert!(d < -0.99, "🔴 两只手该对着压,工具轴要相反;实得点积 {d:.4}(合成一个朝向的话这里会是 +1)");
+    // 同一只手的两个点必须共用一个朝向
+    assert_eq!(s[1].quat[0], s[1].quat[1], "同一只手 = 同一个手腕");
+    assert_eq!(s[1].quat[2], s[1].quat[3]);
+    // 悬停时两只手**各自沿自己的工具轴**退开 —— 退的方向相反
+    let 退左 = s[0].at[0][0] - s[1].at[0][0];
+    let 退右 = s[0].at[2][0] - s[1].at[2][0];
+    assert!(退左 * 退右 < 0.0, "两只手退开的方向该相反,实得 {退左:.4} 与 {退右:.4}");
 }

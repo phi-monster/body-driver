@@ -28,11 +28,19 @@ pub struct Step {
     /// 🔴 **吸盘 1 个、五指 5 个,这里就是 1 个 / 5 个** —— 上一版只有一个 `tcp`,
     /// 于是多指手结构上没有地方放。
     pub at: Vec<V3>,
-    /// 工具坐标系这一刻的**完整朝向**。
+    /// 每个接触点**它那只手**这一刻的完整朝向,与 `at` 一一对应、等长。
     ///
     /// 🔴 不是一个偏角。接触集第②格给的是每点的法向与用力方向,
     /// 而"手该怎么摆"是从这些方向**算**出来的,不是人挑一个 yaw。
-    pub quat: Quat,
+    ///
+    /// 🔴🔴 **也不是一个朝向**(2026-08-16 补)。一只五指手的五个点共一个手腕、
+    /// 因而共一个朝向;而**双臂抱一个箱子是两个手腕**,把它们合成一个朝向没有意义 ——
+    /// **人形在上一版直接说不出口**。同一只手的那几个点在这里填的是同一个值(冗余但不用查表)。
+    pub quat: Vec<Quat>,
+    /// 每个接触点归**哪一只**手,与 `at` 一一对应、等长。
+    ///
+    /// 编号不带语义(0 不必是"左手")—— 它只说"这些点归同一个执行器管"。
+    pub hand: Vec<u8>,
     /// 这一刻算不算已经接触(true = 允许有力,false = 只是路过)。
     pub touching: bool,
     /// 这一步的容差(米)= 参与的那些接触点里**最严**的那一个。
@@ -91,7 +99,7 @@ pub fn frame_from(cs: &ContactSet) -> Option<Quat> {
         Some(a) => a,
         None => {
             let mut push = [0.0f64; 3];
-            for p in cs.points.iter().filter(|p| p.by == Who::Hand) {
+            for p in cs.points.iter().filter(|p| matches!(p.by, Who::Hand(_))) {
                 if let Some(a) = unit(p.cone.axis) {
                     push = [push[0] + a[0], push[1] + a[1], push[2] + a[2]];
                 }
@@ -101,7 +109,7 @@ pub fn frame_from(cs: &ContactSet) -> Option<Quat> {
             // 挑错了物体会被爪子侧面撞飞,而没有任何一个环节会不一致。
             unit(push).or_else(|| {
                 let mut s = [0.0f64; 3];
-                for p in cs.points.iter().filter(|p| p.by == Who::Hand) {
+                for p in cs.points.iter().filter(|p| matches!(p.by, Who::Hand(_))) {
                     if let Some(nn) = unit(p.normal) {
                         s = [s[0] - nn[0], s[1] - nn[1], s[2] - nn[2]];
                     }
@@ -113,7 +121,7 @@ pub fn frame_from(cs: &ContactSet) -> Option<Quat> {
     // 开合轴:取相距最远的一对点的连线(单点时另选)
     let mut x = None;
     let mut best = 0.0f64;
-    let hp: Vec<&Point> = cs.points.iter().filter(|p| p.by == Who::Hand).collect();
+    let hp: Vec<&Point> = cs.points.iter().filter(|p| matches!(p.by, Who::Hand(_))).collect();
     for i in 0..hp.len() {
         for j in (i + 1)..hp.len() {
             let d = [
@@ -179,24 +187,51 @@ pub fn steps(cs: &ContactSet, body: &Body, must_move: bool, arc: usize) -> Resul
             return Err(NoPlan::TolTighterThanBody(i));
         }
     }
-    let q = frame_from(cs).ok_or(NoPlan::NoFrame)?;
     // 🔴 **只有【手】的接触变成航点。** 世界那一侧的接触(桌面顶着的那条边、卡具、墙)
     // 参与"能不能驱动"的计算,但手够不到它 —— 把它当航点发出去,机械臂会去戳桌子底下。
-    let hand: Vec<&Point> = cs.points.iter().filter(|p| p.by == Who::Hand).collect();
+    let hand: Vec<&Point> = cs.points.iter().filter(|p| matches!(p.by, Who::Hand(_))).collect();
     if hand.is_empty() {
         return Err(NoPlan::NoHandContact);
     }
+    // 🔴🔴 **一只手一个朝向。** 上一版拿①里全部手接触点算**一个**工具朝向 ——
+    // 一只五指手是对的(一个手腕),**双臂抱一个箱子就是错的**:两个手腕各有各的朝向,
+    // 合成一个没有意义。这里按执行器编号分堆,**各算各的**。
+    let who: Vec<u8> = hand
+        .iter()
+        .map(|p| match p.by {
+            Who::Hand(i) => i,
+            Who::World => 0,
+        })
+        .collect();
+    let mut ids: Vec<u8> = who.clone();
+    ids.sort_unstable();
+    ids.dedup();
+    let mut 各手朝向: Vec<(u8, Quat)> = Vec::with_capacity(ids.len());
+    for id in &ids {
+        let 这只: Vec<Point> = cs
+            .points
+            .iter()
+            .filter(|p| p.by == Who::Hand(*id) || p.by == Who::World)
+            .copied()
+            .collect();
+        let 子 = ContactSet { points: 这只, motion: cs.motion, approach: cs.approach };
+        各手朝向.push((*id, frame_from(&子).ok_or(NoPlan::NoFrame)?));
+    }
+    let q_of = |i: u8| 各手朝向.iter().find(|(a, _)| *a == i).map(|(_, q)| *q).unwrap();
+    let quat: Vec<Quat> = who.iter().map(|i| q_of(*i)).collect();
+
     let tol = hand.iter().map(|p| p.tol_m).fold(f64::MAX, f64::min);
-    // 工具轴 = 四元数的第三列;悬停就是沿它往回退 standoff。
-    let zc = [
-        2.0 * (q[1] * q[3] + q[0] * q[2]),
-        2.0 * (q[2] * q[3] - q[0] * q[1]),
-        1.0 - 2.0 * (q[1] * q[1] + q[2] * q[2]),
-    ];
     let here: Vec<V3> = hand.iter().map(|p| p.at).collect();
+    // 悬停:**各自沿自己那只手的工具轴**往回退 standoff(两只手退的方向可以不一样)。
     let back: Vec<V3> = here
         .iter()
-        .map(|p| {
+        .zip(&quat)
+        .map(|(p, q)| {
+            let zc = [
+                2.0 * (q[1] * q[3] + q[0] * q[2]),
+                2.0 * (q[2] * q[3] - q[0] * q[1]),
+                1.0 - 2.0 * (q[1] * q[1] + q[2] * q[2]),
+            ];
             [
                 p[0] - zc[0] * body.standoff_m,
                 p[1] - zc[1] * body.standoff_m,
@@ -207,9 +242,23 @@ pub fn steps(cs: &ContactSet, body: &Body, must_move: bool, arc: usize) -> Resul
 
     let mut out = vec![
         // 悬停:还没接触,容差放宽到进场余量那一档(**路过的地方厘米级**,第④格原文)
-        Step { at: back, quat: q, touching: false, tol_m: body.standoff_m.max(tol), note: "悬停" },
+        Step {
+            at: back,
+            quat: quat.clone(),
+            hand: who.clone(),
+            touching: false,
+            tol_m: body.standoff_m.max(tol),
+            note: "悬停",
+        },
         // 贴上去:开始接触,容差用最严的那一个
-        Step { at: here.clone(), quat: q, touching: true, tol_m: tol, note: "贴上" },
+        Step {
+            at: here.clone(),
+            quat: quat.clone(),
+            hand: who.clone(),
+            touching: true,
+            tol_m: tol,
+            note: "贴上",
+        },
     ];
     // 按③把接触点一段一段搬过去。**不动的动词到这里就结束了** —— 那也是一个完整的计划。
     let steps_n = arc.max(1);
@@ -225,8 +274,16 @@ pub fn steps(cs: &ContactSet, body: &Body, must_move: bool, arc: usize) -> Resul
             let at: Vec<V3> = here.iter().map(|p| part.apply(*p)).collect();
             // 🔴 **手跟着物体转** —— 转的时候朝向也要跟着走,否则接触点转过去而手没转,
             // 那正是"握着的东西被拧脱手"的几何形状。
-            let qk = rotate_quat(q, part.ang);
-            out.push(Step { at, quat: qk, touching: true, tol_m: tol, note: "带着物体走" });
+            // **每只手各自跟着转** —— 同一个物体旋量,作用在各自的手腕上。
+            let qk: Vec<Quat> = quat.iter().map(|q| rotate_quat(*q, part.ang)).collect();
+            out.push(Step {
+                at,
+                quat: qk,
+                hand: who.clone(),
+                touching: true,
+                tol_m: tol,
+                note: "带着物体走",
+            });
         }
     }
     Ok(out)
@@ -262,7 +319,7 @@ mod 航点级验收 {
         Body { standoff_m: 0.04, repeat_m: 0.001 }
     }
     fn pt(at: V3, normal: V3, axis: V3, half: f64) -> Point {
-        Point { by: Who::Hand, at, normal, cone: Cone { axis, half_angle: half }, pull: false, torsion: false, peel: false, tol_m: MM }
+        Point { by: Who::Hand(0), at, normal, cone: Cone { axis, half_angle: half }, pull: false, torsion: false, peel: false, tol_m: MM }
     }
     fn 对置两点() -> Vec<Point> {
         vec![
@@ -286,7 +343,7 @@ mod 航点级验收 {
         assert_eq!(s.len(), 2, "不动的动词:悬停 + 贴上,就完了 —— 那也是一个完整的计划");
         assert!(!s[0].touching && s[1].touching);
         // 悬停必须沿**工具轴反方向**退开 standoff,而不是"往上退"(那是把 z 当特权方向)
-        let z = tool_axis(s[0].quat);
+        let z = tool_axis(s[0].quat[0]);
         for i in 0..2 {
             let d = [
                 cs.points[i].at[0] - s[0].at[i][0],
@@ -365,8 +422,8 @@ mod 航点级验收 {
         let cs = ContactSet { points: 对置两点(), motion: m , approach: Some([0.0, 0.0, -1.0]) };
         let s = steps(&cs, &body(), true, 6).expect("拧要出得来");
         // 首末朝向之间的夹角,必须等于要转的角
-        let q0 = s[1].quat;
-        let q1 = s.last().unwrap().quat;
+        let q0 = s[1].quat[0];
+        let q1 = s.last().unwrap().quat[0];
         let d = (q0[0] * q1[0] + q0[1] * q1[1] + q0[2] * q1[2] + q0[3] * q1[3]).abs().clamp(0.0, 1.0);
         let ang = 2.0 * d.acos();
         assert!((ang - 1.2).abs() < 1e-6, "手转过的角要等于物体转过的角,实得 {ang:.6}");
@@ -393,7 +450,7 @@ mod 航点级验收 {
             motion: Twist::slide([0.0, 0.0, 0.05]), approach: None };
         let s = steps(&cs, &body(), true, 1).expect("吸盘要出得来");
         assert_eq!(s[0].at.len(), 1, "一个点就是一个位置");
-        let z = tool_axis(s[0].quat);
+        let z = tool_axis(s[0].quat[0]);
         assert!(crate::set::dot(z, [0.0, 0.0, 1.0]) > 0.999, "只有一个锥时工具轴就是它");
     }
 
@@ -461,7 +518,9 @@ fn lay(m: &Move, body: &Body, must_move: bool, arc: usize) -> Result<Vec<Step>, 
                 let seg = lay(it, body, must_move, arc)?;
                 let seg = seg.into_iter().filter(|s| i == 0 || s.note != "悬停");
                 for mut s in seg {
-                    s.quat = qmul(carry, s.quat);
+                    for q in s.quat.iter_mut() {
+                        *q = qmul(carry, *q);
+                    }
                     out.push(s);
                 }
                 carry = qmul(seg_rot(it), carry);
@@ -483,9 +542,11 @@ fn lay(m: &Move, body: &Body, must_move: bool, arc: usize) -> Result<Vec<Step>, 
                     None => return Err(NoPlan::CannotClear),
                 }
             }
+            let n = at.len();
             Ok(vec![Step {
                 at,
-                quat: [1.0, 0.0, 0.0, 0.0],
+                quat: vec![[1.0, 0.0, 0.0, 0.0]; n],
+                hand: vec![0; n],
                 touching: false,
                 tol_m: *by_m,
                 note: "躲",
@@ -504,9 +565,14 @@ fn lay(m: &Move, body: &Body, must_move: bool, arc: usize) -> Result<Vec<Step>, 
                     // 扣扳机的时候手腕不该跟着扳机走,那是"握着的东西被自己拧脱手"的形状。
                     let mut at = 握点.clone();
                     at.extend(s.at.iter().copied());
+                    let mut quat = 握住.quat.clone();
+                    quat.extend(s.quat.iter().copied());
+                    let mut hand = 握住.hand.clone();
+                    hand.extend(s.hand.iter().copied());
                     out.push(Step {
                         at,
-                        quat: 握住.quat,
+                        quat,
+                        hand,
                         touching: s.touching,
                         tol_m: s.tol_m.min(握住.tol_m),
                         note: s.note,

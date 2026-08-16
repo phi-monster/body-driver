@@ -959,7 +959,7 @@ impl Contact {
         let jaw = [c, s, 0.0]; // 合爪方向(水平面内)
         let half = self.width_m / 2.0;
         let mk = |sign: f64| contact_set::Point {
-            by: contact_set::Who::Hand,
+            by: contact_set::Who::Hand(0),
             pull: false,
             torsion: false,
             peel: false,

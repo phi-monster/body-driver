@@ -245,7 +245,7 @@ fn 带上(mut cs: ContactSet, m: Twist) -> ContactSet {
 fn 搬(mut cs: ContactSet, m: &Twist) -> ContactSet {
     let 只转 = Twist { lin: [0.0; 3], ang: m.ang, pivot: [0.0; 3] };
     for p in cs.points.iter_mut() {
-        if p.by == Who::Hand {
+        if matches!(p.by, Who::Hand(_)) {
             p.at = m.apply(p.at);
             p.normal = 只转.apply(p.normal);
             p.cone.axis = 只转.apply(p.cone.axis);

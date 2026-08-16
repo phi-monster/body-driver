@@ -260,7 +260,7 @@ pub fn matches(cs: &ContactSet, got: Moved, tol_m: f64, tol_rad: f64) -> bool {
     // 🔴 只数【手】那些点。`drive` 看到的就是手的航点(世界那一侧的接触手够不到、不进航点),
     // 两边算质心时口径必须一致 —— 不一致时**推演明明是对的,判据却说对不上**。
     // 实测代价:三指/五指撬与翻,整整四格被冤枉成"③对不上"(2026-08-16 验收台)。
-    let 手: Vec<&Point> = cs.points.iter().filter(|p| p.by == crate::Who::Hand).collect();
+    let 手: Vec<&Point> = cs.points.iter().filter(|p| matches!(p.by, crate::Who::Hand(_))).collect();
     if 手.is_empty() {
         return false;
     }

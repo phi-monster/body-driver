@@ -98,7 +98,14 @@ impl Cone {
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Who {
     /// 手(或吸盘/工具)给的接触 —— **执行层要去访问它**,它变成航点。
-    Hand,
+    ///
+    /// 🔴 **带着"是【哪一只】"**(2026-08-16 补)。一只五指手的五个点都是同一只
+    /// ⇒ 同一个手腕、同一个朝向;而**双臂抱一个箱子是两只**,两个手腕各有各的朝向,
+    /// 合成一个没有意义。上一版这里没有编号,于是**人形直接说不出口**。
+    ///
+    /// 编号本身**不带语义**(0 不必是"左手")—— 它只说"这些点归同一个执行器管",
+    /// 谁是谁由身体层自己对号。**接口仍然不知道有几只手,只知道点分几堆。**
+    Hand(u8),
     /// 世界给的接触:桌面、墙、卡具、另一只手按住的地方。
     /// **执行层不访问它**(手够不到桌子底下那条边),但它参与"能不能驱动"的计算。
     World,
@@ -575,7 +582,7 @@ mod 十三个动词填表 {
         Cone { axis, half_angle: half }
     }
     fn pt(at: V3, normal: V3, c: Cone, tol: f64) -> Point {
-        Point { by: Who::Hand, at, normal, cone: c, pull: false, torsion: false, peel: false, tol_m: tol }
+        Point { by: Who::Hand(0), at, normal, cone: c, pull: false, torsion: false, peel: false, tol_m: tol }
     }
     /// 两个相对的点:抓的最小形状。物体在原点、宽 `w`。
     fn 对置两点(w: f64, half: f64) -> Vec<Point> {

@@ -26,7 +26,7 @@ use crate::{ContactSet, Gap, Who};
 
 /// 这个接触集里【手】那几个点在哪(世界接触不算 —— 手够不到桌子底下那条边)。
 fn hand_at(cs: &ContactSet) -> Vec<crate::V3> {
-    cs.points.iter().filter(|p| p.by == Who::Hand).map(|p| p.at).collect()
+    cs.points.iter().filter(|p| matches!(p.by, Who::Hand(_))).map(|p| p.at).collect()
 }
 
 /// **脑子对身体说的那句话 —— 完整形态。**

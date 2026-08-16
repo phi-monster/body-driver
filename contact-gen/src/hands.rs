@@ -160,7 +160,7 @@ pub fn suction(
     }
     let set = contact_set::ContactSet {
         points: vec![contact_set::Point {
-            by: contact_set::Who::Hand,
+            by: contact_set::Who::Hand(0),
             at,
             normal: n,
             // 🔴 吸盘的锥 = **密封面与物体之间的摩擦锥**,半张角 `atan(μ)`。
@@ -255,7 +255,7 @@ pub fn ring(
         .iter()
         .zip(&dirs)
         .map(|(at, d)| contact_set::Point {
-            by: contact_set::Who::Hand,
+            by: contact_set::Who::Hand(0),
             at: *at,
             normal: *d,                                             // 由质心指向外 = 物体外侧
             cone: contact_set::Cone { axis: [-d[0], -d[1], -d[2]], half_angle: half }, // 朝里夹
