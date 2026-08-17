@@ -136,6 +136,31 @@ impl<S: std::io::Read + std::io::Write> Robot for Plug<S> {
         for p in &self.lay.jaw {
             f.jaw.push(取(&o, p).map(|v| 数组(&v)).and_then(|a| a.first().copied()).unwrap_or(0.0));
         }
+        // 🔴 相机图以前**根本没填进来**,于是"晃钳口看什么跟着动"那一格永远没有素材,
+        // 而它是四格的前置 ⇒ 一个没填的字段卡住了五分之一的标定。
+        // 转成灰度是因为下游认块只看"哪些像素变了",颜色不参与。
+        for p in &self.lay.cams {
+            if let Some(v) = 取(&o, p) {
+                if let Some((w, h)) = discover::是图(&v) {
+                    if let Some(rmpv::Value::Binary(b)) = v.as_map().and_then(|m| {
+                        m.iter()
+                            .find(|(k, _)| {
+                                k.as_str().or_else(|| k.as_slice().and_then(|x| core::str::from_utf8(x).ok()))
+                                    == Some("data")
+                            })
+                            .map(|(_, x)| x.clone())
+                    }) {
+                        let g: Vec<u8> = b
+                            .chunks_exact(3)
+                            .map(|c| ((c[0] as u32 * 299 + c[1] as u32 * 587 + c[2] as u32 * 114) / 1000) as u8)
+                            .collect();
+                        if g.len() == w * h {
+                            f.cams.push((w, h, g));
+                        }
+                    }
+                }
+            }
+        }
         Some(f)
     }
 
@@ -359,7 +384,14 @@ fn main() {
             break;
         }
         println!("[量] 第 {轮} 轮:{} —— 因为 {:?}", q.as_str(), need);
-        let s = selfcal::跑一相(&mut plug, q, 0, 60);
+        // 🔴 相位长度按**这一格要多少证据**定,不是一刀切。接触阈要两簇各自够多才判得出界,
+        // 可达要把两边的墙都夹住;而晃钳口那一格一个循环就要六步。
+        let 步 = match q {
+            Quantity::ContactThreshold | Quantity::Floor | Quantity::Reach => 240,
+            Quantity::ImageJacobian | Quantity::HandPixel => 180,
+            _ => 90,
+        };
+        let s = selfcal::跑一相(&mut plug, q, 0, 步);
         // 🔴 **每一格都接到它自己的估计器上。** 接不上的那几格,拒绝的理由要是
         // `MissingDependency`(缺前置)而不是 `NotEnoughSamples`(没采够)——
         // 两者要做的下一步完全不同:前者去补前置,后者去多采几下。
@@ -372,10 +404,12 @@ fn main() {
             // 关节角与"保持不动要多少力矩"配成对。🔴 这具身体的观测里**没有力矩通道**,
             // 所以这一格只能拿"这一步挪了多少"当代理量 —— 而那不是力矩。
             // ⇒ 它会被估计器按自己的判据拒掉,而那正是对的:**代理量不是测量**。
-            Quantity::ArmWeight => probe::arm_weight(
-                &s.hold.iter().filter_map(|(j, m)| j.first().map(|a| (*a, *m))).collect::<Vec<_>>(),
-                now,
-            ),
+            // 🔴 **这具身体的观测里没有力矩通道。**
+            // 自重量的是"什么都不碰时保持不动要多少力矩",而我手上只有"这一步挪了多少" ——
+            // 那是一个**代理量,不是测量**。拿它去算,会得到一个看起来正常的数
+            // (实测 0.029),然后被当成量出来的东西一路用下去。
+            // ⇒ 老实报缺通道。**一条点名的拒绝,比一个漂亮的假数值钱。**
+            Quantity::ArmWeight => Err(probe::Declined::MissingDependency),
             // 🔴 接触阈要**两簇**:自由空间里的交付比例、压住时的交付比例。
             // 一路往下压,自然会先给出前者、碰到之后给出后者 —— 界由估计器去找,不由我切。
             Quantity::ContactThreshold => {

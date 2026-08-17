@@ -49,6 +49,8 @@ pub struct Samples {
     pub hold: Vec<(Vec<f64>, f64)>,
     /// (命令下降, 实到下降, 此刻高度) —— 接触阈与支撑面用。
     pub press: Vec<(f64, f64, f64)>,
+    /// (手在画面的 u, v, 当时的末端位姿) —— 像素每米与认手用。
+    pub seen: Vec<(f64, f64, [f64; 7])>,
 }
 
 /// 这一步该做什么动作 —— 由日程点的名决定,不是这里挑的。
@@ -102,11 +104,26 @@ fn 动作(q: Quantity, arm: usize, k: u32, home: &[f64; 3], now: &[f64; 3]) -> C
         // ── 一米等于多少像素:手臂走几步已知位移,看画面里自己挪了多少 ──
         //    🔴 六个方向都走,而不是只走一条轴:估计器要的是**位移之差**,
         //       两个方向近乎正交才解得开那个 2×3。
-        Quantity::ImageJacobian | Quantity::HandPixel => {
-            let d = [[探, 0.0, 0.0], [-探, 0.0, 0.0], [0.0, 探, 0.0],
-                     [0.0, -探, 0.0], [0.0, 0.0, 探], [0.0, 0.0, -探]][(k % 6) as usize];
-            Cmd::Ee { arm, at: [home[0] + d[0], home[1] + d[1], home[2] + d[2]], quat: 朝下(), jaw: 1.0 }
-        }
+        // ── 一米等于多少像素 / 我的手在画面哪一点 ──
+        //
+        // 🔴 **先认出"哪块是我的手",才谈得上"手挪了多少像素"。** 而认手不能靠
+        // "哪块动得最像我" —— 换一台机器,竞争者就变成同一条臂的不同连杆,肘部可能赢下
+        // 那条规则(档案实测:自报误差 0.04 px 而真误差 167 px)。
+        // ⇒ **只命令钳口**:手臂不动时肘部的位移**恰好是零**,那个候选根本不上场。
+        //
+        // 一个循环六拍:两拍空转(量这台相机自己的噪声地板)· 三拍晃钳口 · 一拍挪手臂。
+        // 空转那两拍是**判据的一部分**,不是浪费 —— 没有它,"什么都没动"和
+        // "噪声在动"分不开。
+        Quantity::ImageJacobian | Quantity::HandPixel => match k % 6 {
+            0 | 1 => Cmd::Ee { arm, at: *now, quat: 朝下(), jaw: 1.0 },
+            2 | 4 => Cmd::Ee { arm, at: *now, quat: 朝下(), jaw: 0.55 },
+            3 => Cmd::Ee { arm, at: *now, quat: 朝下(), jaw: 1.0 },
+            _ => {
+                let d = [[探, 0.0, 0.0], [0.0, 探, 0.0], [0.0, 0.0, 探],
+                         [-探, 0.0, 0.0], [0.0, -探, 0.0], [0.0, 0.0, -探]][((k / 6) % 6) as usize];
+                Cmd::Ee { arm, at: [now[0] + d[0], now[1] + d[1], now[2] + d[2]], quat: 朝下(), jaw: 1.0 }
+            }
+        },
         // ── 工具尖到法兰多长 / 哪一列是工具轴:绕每一列转腕,
         //    工作点扫出一段弧,弧的半径【就是】那个偏置;弧最小的那一列是工具轴 ──
         Quantity::ToolOffset | Quantity::ToolAxisColumn => Cmd::Ee {
@@ -180,6 +197,7 @@ pub fn 跑一相(r: &mut dyn Robot, q: Quantity, arm: usize, 步数: u32) -> Sam
     };
     let mut 上一帧: Option<Frame> = None;
     let (mut 正, mut 反) = (0.0f64, 0.0f64);
+    let mut 五帧: Vec<Vec<u8>> = Vec::new();
     for k in 0..步数 {
         let 此刻 = 上一帧
             .as_ref()
@@ -226,6 +244,36 @@ pub fn 跑一相(r: &mut dyn Robot, q: Quantity, arm: usize, 步数: u32) -> Sam
         }
         // 🔴 **延迟量的是"发出命令之后第几拍才动"** —— 所以要记的是"这一拍动了没有",
         //    而不是动了多少。命令发在 k%12==0 那一拍,之后逐拍看什么时候出现位移。
+        // 🔴 认手:两帧空转 + 三帧晃钳口,交给驱动自己的认块器 ——
+        // **不许在这儿重写一个**(今晚三次教训:已有的东西整段用,不要参照着重写)。
+        if matches!(q, Quantity::ImageJacobian | Quantity::HandPixel) {
+            if let Some((w, h, g)) = f.cams.first() {
+                五帧.push(g.clone());
+                if 五帧.len() == 5 {
+                    match body_layer::blob::candidates(
+                        &五帧[0], &五帧[1], &五帧[2], &五帧[3], &五帧[4], *w, *h, 0.45, 8,
+                    ) {
+                        Ok(r) => {
+                            if let Some(c) = r.cands.get(0) {
+                                s.seen.push((c.u, c.v, f.ee.get(arm).copied().unwrap_or([0.0; 7])));
+                                if s.seen.len() <= 6 {
+                                    println!("      [认手] 像素 ({:.4},{:.4}) · 双响 {} · 配对 {} · 地板 {}",
+                                        c.u, c.v, r.moved_px, r.pairs, r.floor);
+                                }
+                            } else if s.seen.is_empty() {
+                                println!("      [认手] 这一轮没有候选(双响 {} · 地板 {})", r.moved_px, r.floor);
+                            }
+                        }
+                        Err(e) => {
+                            if s.seen.is_empty() {
+                                println!("      [认手] 认块器拒绝:{e:?}");
+                            }
+                        }
+                    }
+                    五帧.clear();
+                }
+            }
+        }
         if matches!(q, Quantity::Latency) {
             if let (Some(prev), Some(now)) = (上一帧.as_ref().and_then(|p| p.ee.get(arm).copied()), f.ee.get(arm).copied()) {
                 let 挪 = ((now[0] - prev[0]).powi(2) + (now[1] - prev[1]).powi(2) + (now[2] - prev[2]).powi(2)).sqrt();
