@@ -80,7 +80,12 @@ pub fn prerequisites(q: Quantity) -> &'static [Quantity] {
         // express it in and no way to tell a hand from an elbow by how it responds.
         HandPixel => &[ImageJacobian],
         // The span is read off the image and converted with a ruler derived from the Jacobian.
-        GripperSpan => &[ImageJacobian],
+        // 🔴 而且**先得让钳口在画面里**。这一格的手臂全程不动(只有钳口在动),所以它停在
+        //    哪儿就一直在哪儿;而"哪儿"是上一相留下的位置,完全可能贴着画幅边缘。
+        //    实测(2026-08-17):`hand_pixel = (0.413, 0.990)` —— v=0.99 是画面**底边**,
+        //    两根手指半个在画外 ⇒ 双响 0、配对 0、整相零样本,而噪声地板只有 21(很干净)。
+        //    ⇒ 开采之前要把手挪到画幅中间,而那需要知道**手现在在画面哪一点**。
+        GripperSpan => &[ImageJacobian, HandPixel],
         // The occlusion map is a map of the camera's frame.
         SelfOcclusion => &[ImageJacobian],
         // 🔴 **这条依赖曾经写成 `&[ArmWeight]`,而那是给【力矩式】接触判据写的。**
