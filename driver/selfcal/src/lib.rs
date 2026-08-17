@@ -185,7 +185,13 @@ pub fn 跑一相(r: &mut dyn Robot, q: Quantity, arm: usize, 步数: u32) -> Sam
         if let (Some(prev), Some(now)) = (上一帧.as_ref().and_then(|p| p.ee.get(arm).copied()), f.ee.get(arm).copied()) {
             let 实到 = ((now[0] - prev[0]).powi(2) + (now[1] - prev[1]).powi(2) + (now[2] - prev[2]).powi(2)).sqrt();
             if 命令量 > 0.0 {
-                // 🔴 顺路就采到了:每一次移动同时是一次交付率样本,不用为它单开一个相位。
+                // 🔴 **原始的(命令, 实到)必须能看见。** 交付率是个比值,一个比值出了怪数
+                // (实测 8.4e-6:命令一米走 8 微米)时,**光看那个比值分不出是分子小还是分母大**。
+                // 前十几对原样打出来 —— 这是今晚反复付学费换来的规矩:先看原始量,再看导出量。
+                if s.steps.len() < 12 {
+                    println!("      [样] 命令 {:.5} m ⇒ 实到 {:.5} m(比 {:.3})", 命令量, 实到, 实到 / 命令量);
+                }
+                // 顺路就采到了:每一次移动同时是一次交付率样本,不用为它单开一个相位。
                 s.steps.push((命令量, 实到));
                 if matches!(q, Quantity::Reach) {
                     // 到没到:实到占命令的绝大部分才算到。这里不定门槛 —— 把两个数原样交上去,
