@@ -141,11 +141,38 @@ impl<S: std::io::Read + std::io::Write> Robot for Plug<S> {
 
     fn act(&mut self, c: &Cmd) -> bool {
         // 只记下要做什么;真正送出去在对方问"给我一个动作"的那一拍。
-        let (at, quat, jaw) = match c {
-            Cmd::Ee { at, quat, jaw, .. } => (*at, *quat, *jaw),
+        let (arm, at, quat, jaw) = match c {
+            Cmd::Ee { arm, at, quat, jaw } => (*arm, *at, *quat, *jaw),
             _ => return true,
         };
-        self.待发 = Some(wire::pose_action("left", &at, &quat, &[], &[], jaw, jaw));
+        // 🔴🔴 **另一条臂必须发它【当前】的位姿,不能发空。**
+        //
+        // 这条线缆按键名判断动作类型:出现关节键算一种、出现位姿键算另一种,**两种都出现整帧被拒**;
+        // 而只发一条臂、另一条留空,发出去的是 `left_ee_pose: []` —— 一条**形状不完整**的动作。
+        // 实测(2026-08-17)的后果:身体**一步都不动**,而两侧零报错。
+        // 它同时让自标定的 `step_delivery` 报 `NoResponse`(这具身体没响应)和任务那边
+        // 每一步 `实降 0.0 mm` —— **一个根因,两条线一起瘫,而病相各自看起来都像别的问题**。
+        // ⇒ "另一条臂待在原地"要**显式写出来**:发它此刻的位姿。
+        let 另一条 = self
+            .last
+            .as_ref()
+            .and_then(|o| {
+                let p = self.lay.ee.get(1 - arm.min(1))?;
+                取(o, p).map(|v| 数组(&v))
+            })
+            .unwrap_or_default();
+        let 另爪 = self
+            .last
+            .as_ref()
+            .and_then(|o| {
+                let p = self.lay.jaw.get(1 - arm.min(1))?;
+                取(o, p).map(|v| 数组(&v)).and_then(|a| a.first().copied())
+            })
+            .unwrap_or(1.0);
+        let 我 = if arm == 0 { "left" } else { "right" };
+        let (l, r) = if arm == 0 { (Vec::new(), 另一条) } else { (另一条, Vec::new()) };
+        let (lj, rj) = if arm == 0 { (jaw, 另爪) } else { (另爪, jaw) };
+        self.待发 = Some(wire::pose_action(我, &at, &quat, &l, &r, lj, rj));
         true
     }
 
@@ -333,11 +360,38 @@ fn main() {
         }
         println!("[量] 第 {轮} 轮:{} —— 因为 {:?}", q.as_str(), need);
         let s = selfcal::跑一相(&mut plug, q, 0, 60);
+        // 🔴 **每一格都接到它自己的估计器上。** 接不上的那几格,拒绝的理由要是
+        // `MissingDependency`(缺前置)而不是 `NotEnoughSamples`(没采够)——
+        // 两者要做的下一步完全不同:前者去补前置,后者去多采几下。
         let got = match q {
             Quantity::StepDelivery => probe::step_delivery(&s.steps, now),
             Quantity::Reach => probe::reach(&s.reach, now),
             Quantity::Friction => probe::friction(&s.tilt, now),
-            _ => Err(probe::Declined::NotEnoughSamples),
+            Quantity::Latency => probe::latency(s.latency.first().copied(), s.latency.len() as u32 + 12, now),
+            Quantity::Backlash => probe::backlash(&s.reversal, now),
+            // 关节角与"保持不动要多少力矩"配成对。🔴 这具身体的观测里**没有力矩通道**,
+            // 所以这一格只能拿"这一步挪了多少"当代理量 —— 而那不是力矩。
+            // ⇒ 它会被估计器按自己的判据拒掉,而那正是对的:**代理量不是测量**。
+            Quantity::ArmWeight => probe::arm_weight(
+                &s.hold.iter().filter_map(|(j, m)| j.first().map(|a| (*a, *m))).collect::<Vec<_>>(),
+                now,
+            ),
+            // 🔴 接触阈要**两簇**:自由空间里的交付比例、压住时的交付比例。
+            // 一路往下压,自然会先给出前者、碰到之后给出后者 —— 界由估计器去找,不由我切。
+            Quantity::ContactThreshold => {
+                let r: Vec<f64> = s.press.iter().filter(|(c, _, _)| *c > 0.0).map(|(c, a, _)| a / c).collect();
+                let (free, touch): (Vec<f64>, Vec<f64>) = r.iter().partition(|x| **x > 0.5);
+                probe::contact_threshold(&free, &touch, probe::Polarity::LowerOnContact, now, now)
+            }
+            // 这几格要一把「像素每米」的尺,而那一格本轮没量到 ⇒ 缺前置,不是没采够。
+            Quantity::ImageJacobian
+            | Quantity::HandPixel
+            | Quantity::GripperSpan
+            | Quantity::ToolOffset
+            | Quantity::ToolAxisColumn
+            | Quantity::SelfOcclusion
+            | Quantity::HomePose
+            | Quantity::Floor => Err(probe::Declined::MissingDependency),
         };
         match got {
             Ok(m) => {
