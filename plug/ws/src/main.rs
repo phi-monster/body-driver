@@ -196,15 +196,25 @@ fn main() {
         // 这一帧里带没带观测?带了就拿它认布局。
         // 🔴 观测的键**有两个可能**,而只认一个的后果是静默的:图每帧照收、每帧都当场
         // 说"里面没有观测",于是一步都没跑过,而两侧日志全绿。这一条是本仓付过学费的。
-        if let Some(o) = wire::get(&v, "payload")
+        let 观测 = wire::get(&v, "payload")
             .and_then(|p| wire::get(p, "obs").or_else(|| wire::get(p, "observation")))
-            .cloned()
-        {
-            let l2 = discover::认(&o);
+            .cloned();
+        if let Some(o) = &观测 {
+            let l2 = discover::认(o);
             if l2.够吗().is_ok() && first.is_none() {
                 lay = l2;
-                first = Some(o);
+                first = Some(o.clone());
+            } else if 听到 % 50 == 0 {
+                // 🔴 **拿到观测却认不出来,和【压根没拿到观测】是两件事** —— 要改的东西完全相反。
+                // 只报"还没认出"会把这两件混在一起,而混着看就只能靠推理。
+                println!("[装] 拿到观测了,但认不出来 ⇒ {}", l2.够吗().unwrap_err());
+                l2.说一遍();
+                if let Some(m) = o.as_map() {
+                    println!("[装] 观测顶层键:{:?}", m.iter().filter_map(|(k, _)| k.as_str()).collect::<Vec<_>>());
+                }
             }
+        } else if 听到 % 50 == 0 {
+            println!("[装] 这一帧【没有观测】(payload 里既没有 obs 也没有 observation)");
         }
         let r = wire::reply(&v, ack, Value::Map(vec![]));
         let mut buf = Vec::new();
