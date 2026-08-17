@@ -238,6 +238,13 @@ fn main() {
         }
         // 🔴 线上每一条都记类型 —— "没收到"和"收到了但回错了"只有这一行能分开,而它零成本。
         *计数.entry(kind.clone()).or_insert(0u32) += 1;
+        // 🔴 **头几十帧逐条打,不采样。** 每 50 帧打一次是在采样,而采样会把
+        // "交替出现的两种帧"看成"只有一种" —— 真实序列必须原样摆出来一次。
+        if 听到 < 30 {
+            let fk = wire::get(&v, "payload")
+                .and_then(|p| p.as_map().map(|m| m.iter().filter_map(|(k, _)| k.as_str()).collect::<Vec<_>>()));
+            println!("[线] #{听到} 收 {kind} · payload 键={fk:?}");
+        }
         if 听到 % 50 == 0 {
             let mut v: Vec<_> = 计数.iter().collect();
             v.sort();
