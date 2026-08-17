@@ -356,6 +356,8 @@ fn main() {
     let mut 成: Vec<&'static str> = Vec::new();
     let mut 跟踪 = body_layer::hand::HandTracker::new(body_layer::probe::default_hand_config());
     let mut 轮 = 0u32;
+    // 下压那一相实际用的命令幅度,存进接触阈那一格 —— 交付比例只在这个幅度上可比。
+    let mut 探幅 = 0.0f64;
     loop {
         let now = 轮 as u64 + 1;
         let 下一格 = (1..=40u64).find_map(|k| {
@@ -414,6 +416,7 @@ fn main() {
             // 🔴 接触阈要**两簇**:自由空间里的交付比例、压住时的交付比例。
             // 一路往下压,自然会先给出前者、碰到之后给出后者 —— 界由估计器去找,不由我切。
             Quantity::ContactThreshold => {
+                探幅 = s.press.iter().map(|(c, _, _)| *c).fold(0.0f64, f64::max);
                 let r: Vec<f64> = s.press.iter().filter(|(c, _, _)| *c > 0.0).map(|(c, a, _)| a / c).collect();
                 let (free, touch): (Vec<f64>, Vec<f64>) = r.iter().partition(|x| **x > 0.5);
                 probe::contact_threshold(&free, &touch, probe::Polarity::LowerOnContact, now, now)
@@ -424,8 +427,17 @@ fn main() {
             // 换一具吃关节角的身体,这个数由它自己报的关节数决定,仍然不是我填的。
             // 🔴 `hand_pixel` 有**它自己的**估计器,而且它要的是候选本身(带跟踪器的状态),
             // 不是候选的坐标。拿隔壁那一格的估计器去顶,得到的是一个形状对、含义错的数。
+            // 🔴 **纪元要从【存下来的那一份】上取,不能拿"现在第几轮"顶。**
+            // 我原来四个参数全传 `now`,而 `now` 每轮都变 ⇒ 认手每一轮都被判成
+            // "你依赖的那一格换版了,重来" (`DependencyMoved`),于是永远量不完。
+            // 病相是"反复在量",而真因是**我每轮都在宣称它的前置换了一版**。
             Quantity::HandPixel => {
-                probe::hand_pixel(&mut 跟踪, &s.cands, now, now, now.saturating_sub(1), now)
+                let jac = body
+                    .get(Quantity::ImageJacobian)
+                    .map(|m| m.epoch)
+                    .unwrap_or(0);
+                let 上一版 = body.get(Quantity::HandPixel).map(|m| m.epoch).unwrap_or(0);
+                probe::hand_pixel(&mut 跟踪, &s.cands, now, now, 上一版, jac)
             }
             Quantity::ImageJacobian => {
                 let mut sm: Vec<probe::Sample> = Vec::new();
@@ -473,6 +485,48 @@ fn main() {
             }
         }
     }
-    let _ = std::fs::write(&out, format!("{{\"note\":\"see bl_save for the binary form\"}}"));
-    println!("[装] 写到 {out}");
+    // 🔴🔴 **量到了必须存得下来,而且要存成【驱动自己读得回去】的那个形状。**
+    // 上一版这里写的是一句占位符 —— 也就是说,即使十五格全量到,产出也是空的:
+    // 整轮自标定白跑,而日志上一切正常。
+    //
+    // 存的每一格都带**来路**:是量出来的、量它时的幅度、有效区间、不确定度。
+    // 少了来路,下游就无法区分"这是量的"和"这是谁填的",而那个区分正是这一层存在的理由。
+    let mut j = String::from("{\n  \"fingerprint\": \"self-measured\",\n  \"quantities\": {\n");
+    let mut first_q = true;
+    for q in [
+        Quantity::ImageJacobian, Quantity::HandPixel, Quantity::GripperSpan, Quantity::ArmWeight,
+        Quantity::Latency, Quantity::Backlash, Quantity::Reach, Quantity::ContactThreshold,
+        Quantity::SelfOcclusion, Quantity::StepDelivery, Quantity::ToolOffset,
+        Quantity::ToolAxisColumn, Quantity::Floor, Quantity::HomePose, Quantity::Friction,
+    ] {
+        let Some(m) = body.get(q) else { continue };
+        let n = (m.dim as usize).min(body_layer::measurement::MAX_DIM);
+        let arr = |v: &[f64]| -> String {
+            v.iter().map(|x| format!("{x}")).collect::<Vec<_>>().join(", ")
+        };
+        if !first_q {
+            j.push_str(",\n");
+        }
+        first_q = false;
+        j.push_str(&format!(
+            "    \"{}\": {{\"value\": [{}], \"uncertainty\": [{}], \"valid_lo\": [{}], \"valid_hi\": [{}], \"selftest_passed\": {}, \"provenance\": \"measured by this body during power-on self-calibration\"{}}}",
+            q.as_str(),
+            arr(&m.value[..n]),
+            arr(&m.uncertainty[..n]),
+            arr(&m.valid_lo[..n]),
+            arr(&m.valid_hi[..n]),
+            m.selftest_passed,
+            // 接触阈只在量它的那个命令幅度上可比 —— 这一格没有它,下游就没法用。
+            if q == Quantity::ContactThreshold {
+                format!(", \"probed_at_command_m\": {}", 探幅)
+            } else {
+                String::new()
+            }
+        ));
+    }
+    j.push_str("\n  }\n}\n");
+    match std::fs::write(&out, &j) {
+        Ok(_) => println!("[装] 标定写到 {out}(量到 {} 格)", 成.len()),
+        Err(e) => println!("[装] 🔴 标定写不出去:{e} —— 这一轮的测量全丢了"),
+    }
 }
