@@ -44,7 +44,7 @@ struct Plug<S: std::io::Read + std::io::Write> {
 fn 取(v: &Value, path: &[String]) -> Option<Value> {
     let mut cur = v.clone();
     for k in path {
-        let m = cur.as_map()?.iter().find(|(kk, _)| kk.as_str() == Some(k.as_str()))?.1.clone();
+        let m = cur.as_map()?.iter().find(|(kk, _)| kk.as_str().or_else(|| kk.as_slice().and_then(|b| core::str::from_utf8(b).ok())) == Some(k.as_str()))?.1.clone();
         cur = m;
     }
     Some(cur)

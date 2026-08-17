@@ -44,11 +44,23 @@ pub struct Layout {
 /// 🔴 认不出这一点的后果是**静默的**:树遍历会一路钻进 `nd` / `type` / `data` / `shape`,
 /// 于是那一串数**从来没有以数的形式出现过**,布局永远认不出来,而帧一直在到、
 /// 两侧都不报错。实测:听满 250 帧、每 50 帧报一次"还没认出",顶层键完全正常。
+/// 🔴🔴 **键不一定是文本键。**
+///
+/// 同一个观测里,外层(`state` / `vision` / `left_arm_joint_state`)是文本键,而**数组自己那一层
+/// (`nd` / `type` / `data` / `shape`)是二进制键**。拿 `as_str()` 去比,那一层永远比不中 ⇒
+/// 数组映射认不出来 ⇒ 遍历钻进去 ⇒ 那串数从来没有以数的形式出现过。
+///
+/// 实测(2026-08-17)的病相:叶子清单里整整一屏
+/// `state.left_arm_joint_state.?=Boolean(true) | ?=String | ?=数组[1] | ?=字节[24]` ——
+/// **键名全打成 `?`**,而 24 字节正好是 6 个 f32。夹爪那一格因为是普通数组,反而认得出来,
+/// 于是"只有一格认出来"这个现象看起来像形状判据太严,其实是**键的读法错了**。
+fn 名(k: &Value) -> Option<&str> {
+    k.as_str().or_else(|| k.as_slice().and_then(|b| core::str::from_utf8(b).ok()))
+}
+
 fn 是数组映射(v: &Value) -> bool {
     v.as_map()
-        .map(|m| {
-            m.iter().any(|(k, val)| k.as_str() == Some("nd") && val.as_bool() == Some(true))
-        })
+        .map(|m| m.iter().any(|(k, val)| 名(k) == Some("nd") && val.as_bool() == Some(true)))
         .unwrap_or(false)
 }
 
@@ -61,7 +73,7 @@ fn 走(v: &Value, path: &mut Vec<String>, out: &mut Vec<(Vec<String>, Value)>) {
     match v {
         Value::Map(m) => {
             for (k, sub) in m {
-                let name = k.as_str().unwrap_or("?").to_string();
+                let name = 名(k).unwrap_or("?").to_string();
                 path.push(name);
                 走(sub, path, out);
                 path.pop();
@@ -72,7 +84,7 @@ fn 走(v: &Value, path: &mut Vec<String>, out: &mut Vec<(Vec<String>, Value)>) {
 }
 
 fn 键<'a>(v: &'a Value, k: &str) -> Option<&'a Value> {
-    v.as_map()?.iter().find(|(kk, _)| kk.as_str() == Some(k)).map(|(_, x)| x)
+    v.as_map()?.iter().find(|(kk, _)| 名(kk) == Some(k)).map(|(_, x)| x)
 }
 
 /// 这一格是不是一片图像:自报的 dtype 是字节,而 shape 是三维。
@@ -80,7 +92,7 @@ pub fn 是图(v: &Value) -> Option<(usize, usize)> {
     if !是数组映射(v) {
         return None;
     }
-    let ty = 键(v, "type")?.as_str()?;
+    let ty = 名(键(v, "type")?)?;
     if !(ty.ends_with("u1") || ty.ends_with("i1")) {
         return None;
     }
@@ -104,7 +116,7 @@ pub fn 浮点串(v: &Value) -> Option<Vec<f64>> {
     if !是数组映射(v) {
         return None;
     }
-    let ty = 键(v, "type")?.as_str()?;
+    let ty = 名(键(v, "type")?)?;
     let Value::Binary(d) = 键(v, "data")? else { return None };
     if ty.ends_with("f4") {
         Some(d.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]) as f64).collect())
