@@ -418,9 +418,24 @@ fn main() {
                 probe::contact_threshold(&free, &touch, probe::Polarity::LowerOnContact, now, now)
             }
             // 这几格要一把「像素每米」的尺,而那一格本轮没量到 ⇒ 缺前置,不是没采够。
-            Quantity::ImageJacobian
-            | Quantity::HandPixel
-            | Quantity::GripperSpan
+            // 🔴 认到手了就接估计器 —— 这一格是四格的前置,它一通,下游连锁解开。
+            // `n_joints` 这里是**这具身体接受命令的轴数**(它吃笛卡尔位姿 ⇒ 三个);
+            // 换一具吃关节角的身体,这个数由它自己报的关节数决定,仍然不是我填的。
+            Quantity::ImageJacobian | Quantity::HandPixel => {
+                let mut sm: Vec<probe::Sample> = Vec::new();
+                for (i, (u, v, _)) in s.seen.iter().enumerate() {
+                    if let Some(d) = s.cmd3.get(i) {
+                        let mut c = [0.0f64; body_layer::measurement::MAX_DIM];
+                        c[0] = d[0];
+                        c[1] = d[1];
+                        c[2] = d[2];
+                        sm.push(probe::Sample { cmd: c, n: 3, uv: [*u, *v], at_ns: now + i as u64 });
+                    }
+                }
+                println!("      [认手] 攒到 {} 个样本,交给估计器", sm.len());
+                probe::image_jacobian(&sm, 3, now, 0.0)
+            }
+            Quantity::GripperSpan
             | Quantity::ToolOffset
             | Quantity::ToolAxisColumn
             | Quantity::SelfOcclusion

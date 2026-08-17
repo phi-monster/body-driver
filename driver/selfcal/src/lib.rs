@@ -51,6 +51,8 @@ pub struct Samples {
     pub press: Vec<(f64, f64, f64)>,
     /// (手在画面的 u, v, 当时的末端位姿) —— 像素每米与认手用。
     pub seen: Vec<(f64, f64, [f64; 7])>,
+    /// 每个认手循环里,挪手臂那一拍**命令**的位移(三个笛卡尔轴)。
+    pub cmd3: Vec<[f64; 3]>,
 }
 
 /// 这一步该做什么动作 —— 由日程点的名决定,不是这里挑的。
@@ -218,6 +220,7 @@ pub fn 跑一相(r: &mut dyn Robot, q: Quantity, arm: usize, 步数: u32) -> Sam
         // 🔴 认手那一格用**闩住的**位姿(每六拍才更新一次);别的格用此刻的位姿。
         // 两者的区别就是"空转到底空不空"。
         let 认手 = matches!(q, Quantity::ImageJacobian | Quantity::HandPixel);
+        let 探 = 0.005 * (1 + k % 10) as f64;
         if 认手 && k % 8 == 0 {
             闩 = 上一帧
                 .as_ref()
@@ -288,6 +291,10 @@ pub fn 跑一相(r: &mut dyn Robot, q: Quantity, arm: usize, 步数: u32) -> Sam
                         Ok(r) => {
                             if let Some(c) = r.cands.get(0) {
                                 s.seen.push((c.u, c.v, f.ee.get(arm).copied().unwrap_or([0.0; 7])));
+                                // 这一循环之后要挪的那一步 —— 命令量在发之前就知道,不用回读去猜。
+                                let d = [[探, 0.0, 0.0], [0.0, 探, 0.0], [0.0, 0.0, 探],
+                                         [-探, 0.0, 0.0], [0.0, -探, 0.0], [0.0, 0.0, -探]][((k / 8) % 6) as usize];
+                                s.cmd3.push(d);
                                 if s.seen.len() <= 6 {
                                     println!("      [认手] 像素 ({:.4},{:.4}) · 双响 {} · 配对 {} · 地板 {}",
                                         c.u, c.v, r.moved_px, r.pairs, r.floor);
