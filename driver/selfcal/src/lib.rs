@@ -53,6 +53,8 @@ pub struct Samples {
     pub seen: Vec<(f64, f64, [f64; 7])>,
     /// 每个认手循环里,挪手臂那一拍**命令**的位移(三个笛卡尔轴)。
     pub cmd3: Vec<[f64; 3]>,
+    /// 认块器原样吐出来的候选 —— `hand_pixel` 那一格要的是它,不是它的坐标。
+    pub cands: Vec<body_layer::hand::Candidate>,
 }
 
 /// 这一步该做什么动作 —— 由日程点的名决定,不是这里挑的。
@@ -295,6 +297,7 @@ pub fn 跑一相(r: &mut dyn Robot, q: Quantity, arm: usize, 步数: u32) -> Sam
                                 let d = [[探, 0.0, 0.0], [0.0, 探, 0.0], [0.0, 0.0, 探],
                                          [-探, 0.0, 0.0], [0.0, -探, 0.0], [0.0, 0.0, -探]][((k / 8) % 6) as usize];
                                 s.cmd3.push(d);
+                                s.cands.push(*c);
                                 if s.seen.len() <= 6 {
                                     println!("      [认手] 像素 ({:.4},{:.4}) · 双响 {} · 配对 {} · 地板 {}",
                                         c.u, c.v, r.moved_px, r.pairs, r.floor);

@@ -354,6 +354,7 @@ fn main() {
     // ⇒ 拒过的记下来,下一轮问日程时把它跳过;**拒绝本身是输出,不是重试的理由**。
     let mut 拒过: std::collections::BTreeSet<&'static str> = Default::default();
     let mut 成: Vec<&'static str> = Vec::new();
+    let mut 跟踪 = body_layer::hand::HandTracker::new(body_layer::probe::default_hand_config());
     let mut 轮 = 0u32;
     loop {
         let now = 轮 as u64 + 1;
@@ -421,7 +422,12 @@ fn main() {
             // 🔴 认到手了就接估计器 —— 这一格是四格的前置,它一通,下游连锁解开。
             // `n_joints` 这里是**这具身体接受命令的轴数**(它吃笛卡尔位姿 ⇒ 三个);
             // 换一具吃关节角的身体,这个数由它自己报的关节数决定,仍然不是我填的。
-            Quantity::ImageJacobian | Quantity::HandPixel => {
+            // 🔴 `hand_pixel` 有**它自己的**估计器,而且它要的是候选本身(带跟踪器的状态),
+            // 不是候选的坐标。拿隔壁那一格的估计器去顶,得到的是一个形状对、含义错的数。
+            Quantity::HandPixel => {
+                probe::hand_pixel(&mut 跟踪, &s.cands, now, now, now.saturating_sub(1), now)
+            }
+            Quantity::ImageJacobian => {
                 let mut sm: Vec<probe::Sample> = Vec::new();
                 for (i, (u, v, _)) in s.seen.iter().enumerate() {
                     if let Some(d) = s.cmd3.get(i) {
@@ -444,9 +450,21 @@ fn main() {
         };
         match got {
             Ok(m) => {
-                println!("      🟢 量到:{:?}", &m.value[..(m.dim as usize).min(4)]);
-                成.push(q.as_str());
-                let _ = body.submit(m);
+                let v = format!("{:?}", &m.value[..(m.dim as usize).min(4)]);
+                // 🔴 **收不收得下,必须报出来。** 上一版写的是 `let _ = body.submit(m)` ——
+                // 于是"量到了"和"量到了但被拒收"长得一模一样,而日程会**一直重问同一格**
+                // (实测:`hand_pixel` 连着第 2/3/4/5 轮都在量,每轮的值还差得离谱)。
+                // 拒收本身是有意义的答案:`WorseThanStored` = 新的证据不如旧的,不该覆盖。
+                match body.submit(m) {
+                    Ok(_) => {
+                        println!("      🟢 量到:{v} —— 已收下");
+                        成.push(q.as_str());
+                    }
+                    Err(e) => {
+                        println!("      🟡 量到:{v} —— **被拒收**:{e:?}(这一格保留旧值)");
+                        拒过.insert(q.as_str());
+                    }
+                }
             }
             // 🔴 一条**点名的拒绝就是输出**。悄悄省掉它会让这具身体看起来比它真实的样子欠得少。
             Err(d) => {
