@@ -14,10 +14,15 @@
 //! # 🔴 The prerequisite table is not a per-robot constant
 //!
 //! [`prerequisites`] says *which quantity is defined against which* — the hand point is a pixel in
-//! the camera's frame, so it cannot be measured before the image Jacobian exists; a contact
-//! threshold on a joint signal carries the gravity load, so it cannot be measured before the arm's
-//! weight. Those are facts about the **quantities**, not about any body. The test is the one the
-//! rest of the layer uses: *move to another robot and not one line changes.*
+//! the camera's frame, so it cannot be measured before the image Jacobian exists; the arm's weight
+//! is a deficit that grows with the **lever arm**, so it cannot be measured before the base the
+//! lever arm is measured from. Those are facts about the **quantities**, not about any body. The
+//! test is the one the rest of the layer uses: *move to another robot and not one line changes.*
+//!
+//! 🔴 The example above used to read *"a contact threshold on a joint signal carries the gravity
+//! load, so it cannot be measured before the arm's weight"*. That is a **torque** judge's reason,
+//! and ours is a displacement ratio in which gravity cancels. Kept here as a warning, because the
+//! sentence was true-sounding, load-bearing, and wrong for two full days.
 //!
 //! # The cascade is the part that cannot be left to a person
 //!
@@ -104,8 +109,20 @@ pub fn prerequisites(q: Quantity) -> &'static [Quantity] {
         //    实际开度去读 —— 没有跨度这把尺,"夹住了"和"合到底了"读起来一模一样。
         //    它**不**依赖接触阈:倾到滑是几何,不是接触事件。
         Friction => &[GripperSpan],
-        // The rest are measured directly off commanded motion and answer to nothing else.
-        ImageJacobian | ArmWeight | Latency | Backlash | Reach | StepDelivery => &[],
+        // 🔴 手眼要靠"晃钳口,看什么跟着动"来认,而那要先分得开**动了**和**还没停**。
+        //    协议里那两拍空转量的是相机自己的噪声地板,只有在身体真静下来之后才成立;
+        //    "静下来要几拍"由延迟和交付率算(`derive::settle_periods`),所以这两条是
+        //    结构上的前置,不是保险。
+        //    代价照记(2026-08-17):静置写死 2 拍,而这具身体每拍交付 0.888 ⇒ 挪完一步
+        //    第 2 拍还剩那一步的 1.2%(5 cm 步 ⇒ 0.6 mm ⇒ 约半个像素),而噪声地板取的是
+        //    **逐像素最大差**,高对比边缘上半个像素就把它顶到 200/255 ⇒ 空转从来不空 ⇒
+        //    认块器每次都答"没有候选" ⇒ **认手/跨度/工具偏置/工具轴/自遮挡五格一起欠着**。
+        ImageJacobian => &[Latency, StepDelivery],
+        // 🔴 臂重是"往上走和往下走的交付比例之差,随**力臂**线性增长",而力臂 =
+        //    离基座多远;基座是 `reach` 那一格从"够不着的那几个点"反解出来的。
+        //    ⇒ 没有基座就没有力臂,而没有力臂时**重量和一个力臂无关的偏置完全共线**。
+        ArmWeight => &[Reach],
+        Latency | Backlash | Reach | StepDelivery => &[],
     }
 }
 

@@ -227,6 +227,72 @@ pub fn arm_weight(
 /// Named in the archive as the top unmeasured self-calibration and as the whole bottleneck of
 /// dynamic work: public systems fail at it by acting on a stale pose, and **nobody measures it
 /// per body**. It is also nearly free — every commanded step is already a probe.
+/// 反应延迟,**从原始逐拍位移上判**,而不是由调用方先挑好"第一拍动的是哪一拍"。
+///
+/// # 🔴 为什么要有这一版:上一版量到的是探针自己的结构
+///
+/// 从前调用方喂的是「第一次看到位移不为零的那一拍在周期里的下标」,**没有静止参照,
+/// 也不relative于命令发出的那一拍**。这具身体从不完全静止(每拍交付 0.888,永远在
+/// 逼近目标),于是"位移不为零"每一拍都成立,报回来的其实是**这一相最早拿到两帧连续
+/// 观测的那个下标**。
+///
+/// 实测代价(2026-08-17):它报 **6 拍**,而**同一相里打印的原始样本是
+/// `命令 0.0181 m ⇒ 实到 0.0161 m(比 0.887)`** —— 一拍就交付了 89%。
+/// **有 6 拍死区的身体不可能一拍交付 89%**,两个数互相否定,而两边都被收下了。
+/// 更贵的是下游:`derive::settle_periods` 拿延迟 + 交付率算"要等几拍才静得下来",
+/// 于是认块协议的空转段被算成 6+ 拍(实际只需 4 拍),或者反过来 —— 而认块的五格
+/// (认手 / 跨度 / 工具偏置 / 工具轴 / 自遮挡)**全部**踩在这一个数上。
+///
+/// # 判据
+///
+/// 命令发出**之前**那几拍的逐拍位移 = 这具身体自己的静止噪声。命令之后,第一拍
+/// 超过它两倍的偏移就是延迟。两倍不是门槛,是"分得开"的最低要求 —— 和这个文件里
+/// 其它地方的 2σ 是同一条约定。
+///
+/// # 它拒绝什么
+///
+/// * 两边任一少于 3 拍 ⇒ [`Declined::NotEnoughSamples`];
+/// * 🔴 **命令之前就没静下来**(后半段的静止噪声不比前半段小)⇒ [`Declined::Inconsistent`]:
+///   这时"第几拍才动"量的是身体自己的余振,不是它的响应延迟 —— **正是上一版栽的那一条**;
+/// * 命令之后没有任何一拍超过静止噪声的两倍 ⇒ [`Declined::NoResponse`]:
+///   命令了、没反应。这不是"延迟很大",是另一种故障,报一个大数字会把它盖住。
+pub fn latency_from_beats(
+    rest: &[f64],         // 命令发出【之前】那几拍的逐拍位移,按时间
+    after: &[(u32, f64)], // (相对命令那一拍的偏移, 这一拍的位移)
+    now_ns: u64,
+) -> Result<Measurement, Declined> {
+    let r: Vec<f64> = rest.iter().copied().filter(|x| x.is_finite() && *x >= 0.0).collect();
+    let a: Vec<(u32, f64)> = after.iter().copied().filter(|(_, x)| x.is_finite() && *x >= 0.0).collect();
+    if r.len() < 3 || a.len() < 3 {
+        return Err(Declined::NotEnoughSamples);
+    }
+    // 静止段自己要先静下来:后一半不比前一半安静,就说明命令发出时身体还在余振。
+    let 半 = r.len() / 2;
+    let 前 = r[..半].iter().copied().fold(0.0f64, f64::max);
+    let 后 = r[半..].iter().copied().fold(0.0f64, f64::max);
+    if !(后 <= 前) && 前 > 0.0 {
+        return Err(Declined::Inconsistent);
+    }
+    let 噪 = 后;
+    let mut 首: Option<u32> = None;
+    for &(off, d) in &a {
+        if d > 2.0 * 噪 && d > 0.0 {
+            首 = Some(首.map_or(off, |x: u32| x.min(off)));
+        }
+    }
+    let Some(k) = 首 else {
+        return Err(Declined::NoResponse);
+    };
+    let mut m = blank(Quantity::Latency, 1, now_ns);
+    m.value[0] = f64::from(k);
+    m.uncertainty[0] = 0.5;
+    m.valid_lo[0] = 0.0;
+    m.valid_hi[0] = a.iter().map(|(o, _)| *o).max().unwrap_or(k) as f64;
+    m.valid_for_ns = 0;
+    m.selftest_passed = true;
+    Ok(m)
+}
+
 pub fn latency(
     first_motion_step: Option<u32>,
     steps_observed: u32,
@@ -902,9 +968,27 @@ pub fn home_pose(
         m.uncertainty[i] = if i < 3 { spread } else { 0.0 };
         m.axis_kind[i] = if i < 3 { AxisKind::Interval } else { AxisKind::Unmeasured };
     }
-    // 有效区间 = 真的散到过的范围。判"回没回到位"只能用这个,不能用一个更紧的数。
-    m.valid_lo[0] = 0.0;
-    m.valid_hi[0] = worst;
+    // 有效区间 = 每一维**真的散到过的范围**。判"回没回到位"只能用这个,不能用一个更紧的数。
+    //
+    // 🔴 上一版只填了第 0 维,另外六维 `valid_lo == valid_hi == 0` ⇒ 提交那一步按
+    // `EmptyRange` 整条打回。病相是"量到了却收不下",而日志上值印得漂漂亮亮
+    // (实测 2026-08-17:原位量到 (-0.369,-0.148,1.177,0.712…),被拒收)。
+    // 某一维完全不动是**真实结果**(一具重复性极好的身体),但零宽的区间无法被判,
+    // 所以退化时用这具身体自己量到的散布当半宽 —— 那是手上唯一一个**量出来的**长度。
+    for i in 0..7 {
+        let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+        for v in samples {
+            lo = lo.min(v[i]);
+            hi = hi.max(v[i]);
+        }
+        if !(lo < hi) {
+            let w = if spread > 0.0 { spread } else { worst };
+            lo -= w;
+            hi += w;
+        }
+        m.valid_lo[i] = lo;
+        m.valid_hi[i] = hi;
+    }
     m.valid_for_ns = 0;
     m.selftest_passed = true;
     Ok(m)
@@ -1376,6 +1460,105 @@ pub fn floor(
     m.valid_lo[0] = lo;
     m.valid_hi[0] = free_hi;
     m.deps[0] = Some((Quantity::ContactThreshold, contact_epoch));
+    m.valid_for_ns = 0;
+    m.selftest_passed = true;
+    Ok(m)
+}
+
+// ---------------------------------------------------------------- 胳膊有多重(不用力矩通道)
+
+/// 胳膊有多重 —— **不要力矩传感器,也不要力矩通道**。用"往上走和往下走的交付比例之差"。
+///
+/// # 🔴 为什么会有第二条路(撤回记录,2026-08-18)
+///
+/// [`arm_weight`] 的入参是 `(关节角, 保持不动要多少力矩)`,而这具身体的观测里没有力矩。
+/// 我据此**连着三次**判"这台机器上臂重量不了,天花板 14/15"。**那是错的,而且错在
+/// 把一条路的入参当成了那个量的规格。**
+///
+/// 驱动自己的原则写在 `DRIVER_GOAL`:*"碰一下量(不用力传感器:轻轻合到停住 /
+/// 抬 3 cm 看命令 vs 实到)"*。这一层里凡是跟力有关的量,**全是从交付比例里读的** ——
+/// 接触阈是命令 vs 实到,摩擦是倾到滑的角度,"这东西多重"是抬一段看命令 vs 实到。
+/// 臂重没有任何理由例外。
+///
+/// # 判据
+///
+/// 同一处、同样幅度,**往上走顶着重力、往下走顺着重力**。两个方向的交付比例之差
+/// `(下 − 上)/2` 就是那一处的重力负载,单位是**交付比例**,不是牛顿米 —— 而下游要的
+/// 正是这个单位(接触阈就活在这个单位里)。
+///
+/// 再把手摆到不同的**力臂**上(离基座的水平距离)重复:重力力矩 = 重量 × 力臂,
+/// 所以这个差随力臂线性增长,斜率就是"这条胳膊有多重"。截距是与力臂无关的那一份
+/// (关节摩擦、控制器的不对称),**报出来而不是并进去** —— 把它算进重量会让一条
+/// 干净的胳膊显得更重,而那正是下游用来判"我碰到东西了没有"的量。
+///
+/// # 它拒绝什么
+///
+/// * 少于 5 个力臂 ⇒ [`Declined::NotEnoughSamples`]:拟不出带残差的线;
+/// * 所有采样点力臂相同 ⇒ [`Declined::Inconsistent`]:**在一个力臂上,重量和一个
+///   与力臂无关的偏置完全共线**,任何观测同时兼容两者,没有算术分得开它们;
+/// * 斜率与它自己的 1σ 分不开 ⇒ 这是**测量,不是拒绝**:一具重力补偿做得很好的胳膊
+///   斜率就是零。照 [`backlash`] 的先例收下,精度不够由准入闸去拒;
+/// * 🔴 斜率**为负**且超过 2σ ⇒ [`Declined::Inconsistent`]:那说明往上走反而比往下走
+///   交付得多。要么 z 的方向反了,要么这根本不是重力。**取绝对值会把这两种都读成
+///   一次健康的测量**,而其中一种意味着下游每一个"往下压"的判断都是反的。
+pub fn arm_weight_by_asymmetry(
+    samples: &[(f64, f64, f64)], // (离基座的水平力臂 m, 往上那一步的交付比例, 往下那一步的交付比例)
+    now_ns: u64,
+    reach_epoch: u64,
+) -> Result<Measurement, Declined> {
+    let (mut n, mut sx, mut sy, mut sxx, mut sxy) = (0.0f64, 0.0f64, 0.0f64, 0.0f64, 0.0f64);
+    let (mut x_lo, mut x_hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    for &(arm_m, up, down) in samples {
+        if !arm_m.is_finite() || !up.is_finite() || !down.is_finite() || arm_m < 0.0 {
+            continue;
+        }
+        let y = 0.5 * (down - up);
+        n += 1.0;
+        sx += arm_m;
+        sy += y;
+        sxx += arm_m * arm_m;
+        sxy += arm_m * y;
+        x_lo = x_lo.min(arm_m);
+        x_hi = x_hi.max(arm_m);
+    }
+    if n < 5.0 {
+        return Err(Declined::NotEnoughSamples);
+    }
+    let sxx_c = sxx - sx * sx / n;
+    if !(x_lo < x_hi) || sxx_c <= 0.0 {
+        return Err(Declined::Inconsistent);
+    }
+    let slope = (sxy - sx * sy / n) / sxx_c;
+    let intercept = (sy - slope * sx) / n;
+    let mut ss = 0.0f64;
+    for &(arm_m, up, down) in samples {
+        if !arm_m.is_finite() || !up.is_finite() || !down.is_finite() || arm_m < 0.0 {
+            continue;
+        }
+        let r = 0.5 * (down - up) - (intercept + slope * arm_m);
+        ss += r * r;
+    }
+    let resid = (ss / (n - 2.0)).sqrt();
+    let slope_sigma = resid / sxx_c.sqrt();
+    if !slope.is_finite() || !slope_sigma.is_finite() || !intercept.is_finite() {
+        return Err(Declined::Inconsistent);
+    }
+    if slope < -2.0 * slope_sigma {
+        return Err(Declined::Inconsistent);
+    }
+    let mut m = blank(Quantity::ArmWeight, 2, now_ns);
+    // [0] = 每米力臂上的交付比例亏损(= 这条胳膊有多重,在这个单位里)
+    // [1] = 与力臂无关的那一份(关节摩擦 / 控制器不对称),分开报,不并进重量
+    m.value[0] = slope;
+    m.value[1] = intercept;
+    m.uncertainty[0] = slope_sigma;
+    m.uncertainty[1] = resid / n.sqrt();
+    m.valid_lo[0] = x_lo;
+    m.valid_hi[0] = x_hi;
+    m.valid_lo[1] = x_lo;
+    m.valid_hi[1] = x_hi;
+    // 力臂是从基座算的,而基座是 `reach` 那一格反解出来的 —— 基座重标,这个数就该失效。
+    m.deps[0] = Some((Quantity::Reach, reach_epoch));
     m.valid_for_ns = 0;
     m.selftest_passed = true;
     Ok(m)
