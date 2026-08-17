@@ -1764,6 +1764,82 @@ pub fn image_to_plane(
     Ok((((dd * d.0 - b * d.1) / det, (-c * d.0 + a * d.1) / det), ns / nj))
 }
 
+/// **沿画面里某一个方向的尺 —— 只用正向映射,不求逆。**
+///
+/// # 🔴 为什么要有它:病态的手眼矩阵不该让一段长度变得不可测
+///
+/// [`image_to_plane`] / [`image_ruler_along`] 都要 `J_h⁻¹`,而这台机器上头相机的水平
+/// 2×2 行列式(实测 −0.208)与它自己的 1σ 分不开 ⇒ **求逆被正确地拒了** ⇒ 钳口跨度
+/// 采到的样本在换算那一步**全部被丢掉**(实测 2026-08-17:采到 1 个,换算后 0 个)。
+/// 而那条死路 `DRIVER_GOAL` 2026-08-15 就判过:*"头相机全局 2×3 换算表 —— 量出来了,
+/// 同时判死"*。
+///
+/// 但**我们要的从来不是逆**,只是"钳口张开那**一个**方向上,一米等于多少画面单位"。
+/// 那是**正向**的量:世界里沿单位方向 `u` 走一米,画面里挪 `J_h·u` —— 只用到已经量到的
+/// 两列。扫一圈 `u`,挑出画面位移与目标方向最平行的那个,它的模长就是那把尺。
+///
+/// **病态的意思是"某些方向被压扁了",而被压扁的方向照样有确定的模长** —— 逆之所以爆,
+/// 是因为它要求**同时**解出所有方向。
+///
+/// # 它拒绝什么
+///
+/// * 没有一个世界方向能把画面位移送到目标方向上(最好那个的垂直残差仍大过雅可比自己的
+///   1σ)⇒ [`Declined::Inconsistent`]:这个画面方向**不是这具身体在水平面里动得出来的**,
+///   多半说明配到的那两瓣不是钳口;
+/// * 最好那个方向的画面响应分不开零 ⇒ [`Declined::NoResponse`]。
+pub fn image_ruler_forward(
+    jac: &[f64],
+    jac_sigma: &[f64],
+    dir: (f64, f64),
+) -> Result<(f64, f64), Declined> {
+    if jac.len() < 4 || jac_sigma.len() < 4 {
+        return Err(Declined::MissingDependency);
+    }
+    let (a, c, b, d) = (jac[0], jac[1], jac[2], jac[3]);
+    if [a, b, c, d].iter().any(|x| !x.is_finite()) {
+        return Err(Declined::MissingDependency);
+    }
+    let len = dir.0.hypot(dir.1);
+    if !len.is_finite() || len <= 0.0 {
+        return Err(Declined::MissingDependency);
+    }
+    let (tu, tv) = (dir.0 / len, dir.1 / len);
+    // 扫一圈世界方向。720 份是**分辨率**,不是门槛:它只决定报出来的角度精度,
+    // 不决定收不收 —— 取多少份都不会把一个该拒的变成该收的。
+    let mut best: Option<(f64, f64)> = None; // (垂直残差, 响应模长)
+    for i in 0..720 {
+        let θ = std::f64::consts::TAU * (i as f64) / 720.0;
+        let (cx, sy) = (θ.cos(), θ.sin());
+        let (du, dv) = (a * cx + b * sy, c * cx + d * sy);
+        let m = du.hypot(dv);
+        if !(m > 0.0) {
+            continue;
+        }
+        // 与目标方向的垂直分量(归一化之后),越小越平行。
+        let perp = ((du / m) * tv - (dv / m) * tu).abs();
+        if best.map(|(p, _)| perp < p).unwrap_or(true) {
+            best = Some((perp, m));
+        }
+    }
+    let Some((perp, m)) = best else {
+        return Err(Declined::NoResponse);
+    };
+    let fro = |v: &[f64]| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2] + v[3] * v[3]).sqrt();
+    let (nj, ns) = (fro(&jac[..4]), fro(&jac_sigma[..4]));
+    if !(nj > 0.0) || !ns.is_finite() {
+        return Err(Declined::Inconsistent);
+    }
+    let rel = ns / nj;
+    // 对不齐得比雅可比自己的相对噪声还厉害 ⇒ 这个画面方向不是它动得出来的。
+    if perp > rel.max(1e-6) {
+        return Err(Declined::Inconsistent);
+    }
+    if m <= 2.0 * ns {
+        return Err(Declined::NoResponse);
+    }
+    Ok((m, m * rel))
+}
+
 pub fn image_ruler_along(
     jac: &[f64],       // 至少 4 个数:[du/dx, dv/dx, du/dy, dv/dy, ...]
     jac_sigma: &[f64], // 同长度的 1σ

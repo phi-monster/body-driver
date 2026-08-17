@@ -155,6 +155,16 @@ impl<S: std::io::Read + std::io::Write> Robot for Plug<S> {
                             .map(|c| ((c[0] as u32 * 299 + c[1] as u32 * 587 + c[2] as u32 * 114) / 1000) as u8)
                             .collect();
                         if g.len() == w * h {
+                            // 🔴 **落图开关。** 认块器答"没有候选 · 双响 0 · 地板 11" 时,
+                            // 数字说的是"画面很干净、什么都没动",而**"看不清"和"根本没东西可看"
+                            // 在这三个数上完全同形**。仓规:空间/视觉的毛病,第一件事是渲图去看。
+                            // 灰度直接写成 PGM(P5)—— 不引依赖,任何看图工具都认。
+                            if let Ok(d) = std::env::var("BL_DUMP") {
+                                let _ = std::fs::create_dir_all(&d);
+                                let mut buf = format!("P5\n{w} {h}\n255\n").into_bytes();
+                                buf.extend_from_slice(&g);
+                                let _ = std::fs::write(format!("{d}/cam{}.pgm", f.cams.len()), buf);
+                            }
                             f.cams.push((w, h, g));
                         }
                     }
@@ -367,7 +377,17 @@ fn main() {
                     // 之间相机完全可能被碰过。把它从文件里装回来,等于替这台相机担保
                     // 一件没人检查过的事。⇒ 它每次上电重量,而**它的下游(认手 / 跨度 /
                     // 工具偏置 / 工具轴 / 自遮挡)也因此跟着重量** —— 那是对的,依赖动了。
-                    if matches!(q, body_layer::measurement::Quantity::ImageJacobian) {
+                    // 🔴 **凡是(传递地)依赖它的,也一律不装回来。**
+                    // 装回去的测量丢掉了自己的依赖边(`blank_for` 不带 `deps`),于是
+                    // `DependencyMoved` 对它们**永远不会触发** —— 一个对着旧手眼量出来的
+                    // 手点,会安安静静地和新量的手眼一起被用下去,而两者根本不是一套。
+                    // 少装几格换"不许出现一份自己都不知道自己过期了的测量"。
+                    fn 依赖手眼(q: body_layer::measurement::Quantity) -> bool {
+                        use body_layer::measurement::Quantity::ImageJacobian;
+                        q == ImageJacobian
+                            || body_layer::schedule::prerequisites(q).iter().any(|d| 依赖手眼(*d))
+                    }
+                    if 依赖手眼(q) {
                         continue;
                     }
                     if let body_layer::store::Answer::Measured { value, uncertainty, valid_lo, valid_hi, selftest_passed, .. } = st.ask(q.as_str()) {
@@ -442,6 +462,8 @@ fn main() {
     let mut 探幅 = 0.0f64;
     // 基座是 `reach` 那一格顺手解出来的。臂重要拿它算力臂 —— 存下来,别丢。
     let mut 基座: Option<([f64; 3], u64)> = None;
+    // 跨度是从哪台相机读的 —— 它存的是画面单位,而画面单位只在同一台相机里可比。
+    let mut 跨度相机 = 0usize;
     // 把机器人交给我们时它所在的那个位姿。每个相位开跑前先回到这儿 —— 按定义它走得到,
     // 而上一个相位可能把手臂停在墙上(可达那一格的工作就是把它顶到走不动)。
     let mut 起点: Option<[f64; 3]> = None;
@@ -454,12 +476,21 @@ fn main() {
         });
         // 日程只回答"最先欠的那一格";它被拒过就手动往后找一格没拒过的。
         let 下一格 = 下一格.or_else(|| {
-            use body_layer::measurement::Quantity::*;
-            [ImageJacobian, StepDelivery, Latency, Backlash, Reach, GripperSpan, ToolOffset,
-             ToolAxisColumn, HandPixel, ArmWeight, ContactThreshold, Friction, Floor, HomePose,
-             SelfOcclusion]
+            // 🔴🔴 **后备的挑法不许写死顺序 —— 顺序由依赖表算。**
+            // 上一版这里是一张手打的清单,而它把 `ToolOffset` 排在 `ToolAxisColumn`
+            // **前面**;偏偏偏置依赖工具轴 ⇒ 它每一轮都在前置还没量到时被安排,
+            // **每一轮都拒 `MissingDependency`,而日程本身从来没错**。
+            // 一张与依赖表矛盾的手写顺序,读起来完全正常,却让一格永远轮不到。
+            // ⇒ 挑"前置都已经量到、且自己还欠着、且这一轮没被拒过"的第一格。
+            body_layer::measurement::Quantity::ALL
                 .into_iter()
-                .find(|q| !拒过.contains(q.as_str()) && body.get(*q).is_none())
+                .find(|q| {
+                    !拒过.contains(q.as_str())
+                        && body.get(*q).is_none()
+                        && body_layer::schedule::prerequisites(*q)
+                            .iter()
+                            .all(|d| body.get(*d).is_some())
+                })
                 .map(|q| (q, body_layer::schedule::Need::NeverMeasured))
         });
         let Some((q, need)) = 下一格 else {
@@ -479,7 +510,11 @@ fn main() {
         let 步 = match q {
             Quantity::ContactThreshold | Quantity::Floor | Quantity::Reach => 240,
             Quantity::ToolOffset | Quantity::ToolAxisColumn => 400,
-            Quantity::SelfOcclusion | Quantity::GripperSpan => 300,
+            Quantity::SelfOcclusion => 300,
+            // 🔴 跨度要跑得久一点:真配对的产出率实测约 **13%**(30 个循环出 4 个),
+            //    而估计器要 ≥5 个。砍掉单瓣兜底之后剩下的全是无假设的样本,
+            //    **该补的是循环数,不是判据** —— 这一格今晚每一次改判据都改错了。
+            Quantity::GripperSpan => 600,
             // 49 个位形 × 6 拍
             Quantity::ArmWeight => 300,
             Quantity::ImageJacobian | Quantity::HandPixel => 300,
@@ -508,15 +543,54 @@ fn main() {
         if selfcal::认块相(q) {
             println!("      [协议] 静置 {静置} 拍(由这具身体的延迟+交付率推出),周期 {} 拍", 静置 + 6);
         }
+        // 🔴🔴 **回位点要用【量到的原位】,不是"连上来时手臂在哪"。**
+        //
+        // "连上来时在哪"什么都不是 —— 上一相把手臂停在哪儿它就是哪儿,而可达那一格的
+        // 工作就是**把手臂顶到走不动为止**。连着跑几轮之后手臂一路漂,漂到爪子完全出画面。
+        // 实测(2026-08-17,calrunE):三台相机的双响读数 `[(0,0), (3,12080), (0,0)]` ——
+        // **头相机什么都看不见**,而估计器吃的正是它 ⇒ 全线拒绝,而每一条拒绝
+        // 单看都像"这一格自己的问题"。
+        // ⇒ `home_pose` 就是为这件事存在的:它是**量出来的身体常数**、存在文件里、
+        //   按定义回得去。它没量到时才退回"连上来时在哪"。
         if 起点.is_none() {
-            if let Some(f) = plug.sense() {
+            起点 = body.get(Quantity::HomePose).map(|m| [m.value[0], m.value[1], m.value[2]]);
+            if let Some(p) = 起点 {
+                println!("      [归位] 用**量到的原位** ({:.3},{:.3},{:.3}) —— 每相开跑前先回这儿", p[0], p[1], p[2]);
+            } else if let Some(f) = plug.sense() {
                 起点 = f.ee.get(0).map(|p| [p[0], p[1], p[2]]);
                 if let Some(p) = 起点 {
-                    println!("      [归位] 这次标定的起点记在 ({:.3},{:.3},{:.3}) —— 每相开跑前先回这儿", p[0], p[1], p[2]);
+                    println!("      [归位] 原位还没量到,暂用连上来时的位置 ({:.3},{:.3},{:.3})", p[0], p[1], p[2]);
                 }
             }
         }
-        let s = selfcal::跑一相(&mut plug, q, 0, 步, 静置, 起点);
+        // 🔴 钳口那一格的手臂全程不动 ⇒ 它停在哪儿就一直在哪儿。把它摆到**画幅中间**再开采:
+        //    位移由已经量到的两格算出来 —— 手现在在画面哪一点(`hand_pixel`),
+        //    以及画面里一段距离等于世界里多少米(`image_jacobian` 的水平 2×2 求逆)。
+        //    这是②算的那一半:量到的东西拿来**算**,不是再填一个"抬高多少"。
+        let 落点 = if matches!(q, Quantity::GripperSpan) {
+            match (平面尺(&body), body.get(Quantity::HandPixel), 起点) {
+                (Ok((jac, sig, _)), Some(hp), Some(p0)) => {
+                    match probe::image_to_plane(&jac, &sig, (0.5 - hp.value[0], 0.5 - hp.value[1])) {
+                        Ok(((dx, dy), _)) => {
+                            println!("      [摆位] 手现在在画面 ({:.3},{:.3}),把它挪到画幅中间 ⇒ world Δ=({:.3},{:.3}) m",
+                                hp.value[0], hp.value[1], dx, dy);
+                            Some([p0[0] + dx, p0[1] + dy, p0[2]])
+                        }
+                        Err(_) => 起点,
+                    }
+                }
+                _ => 起点,
+            }
+        } else {
+            起点
+        };
+        // 跨度那一相每档抬多高:用**量到的可达带宽度**的三分之一。量不到就不抬。
+        // 🔴 这不是"填一个 5 厘米",是"这具身体自己够得到多少,就在多少里面分档"。
+        let 抬一档 = body
+            .get(Quantity::Reach)
+            .map(|m| ((m.value[1] - m.value[0]).abs() / 3.0).min(0.25))
+            .unwrap_or(0.0);
+        let s = selfcal::跑一相(&mut plug, q, 0, 步, 静置, 落点, 抬一档);
         // 🔴 **每一格都接到它自己的估计器上。** 接不上的那几格,拒绝的理由要是
         // `MissingDependency`(缺前置)而不是 `NotEnoughSamples`(没采够)——
         // 两者要做的下一步完全不同:前者去补前置,后者去多采几下。
@@ -668,15 +742,36 @@ fn main() {
             Quantity::GripperSpan => match 平面尺(&body) {
                 Err(e) => Err(e),
                 Ok((jac, sig, jac_epoch)) => {
+                    // 🔴 **换算走【正向】那条,不求逆。**
+                    // 求逆那条(`image_to_plane`)在这台机器上被正确地拒了:头相机的水平
+                    // 2×2 行列式 −0.208 与自己的 1σ 分不开。而我们要的从来不是逆,只是
+                    // **钳口张开那一个方向上**的尺 —— 那是正向的量:世界里沿某个方向走一米,
+                    // 画面里挪 `J·u`,扫一圈挑出与 `pair_dir` 最平行的那个。
+                    // 实测代价(2026-08-17):走求逆那条,采到 1 个样本、换算后剩 **0 个**,
+                    // 判词是"采不够" —— 而真相是**换算把它丢了**,两件事要做的完全不同。
+                    // 🔴🔴 **跨度不换成米,就存画面单位。**
+                    //
+                    // 这不是权宜:`DRIVER_GOAL` 2026-08-17 已经写过 ——
+                    // *"先查下游到底需不需要米(…**夹不夹得下是「下手宽 vs 钳口跨度」同单位相比**)"*,
+                    // 而它挂在那条定理下面:**把整具机器人连同它顶的那个点一起放大 k 倍,
+                    // 每个关节角读数逐位相同** ⇒ 尺度本来就不可观测。
+                    //
+                    // 三组实测把别的路都堵死了:头相机+纯开合 **30 个循环 0 对**;
+                    // 头相机+晃腕 有 3–4 对但**读数与开度脱钩**(旋转让同一根手指的两端也互相抵消,
+                    // 配出来的不是两根手指);腕相机+纯开合信号最强,**但那台相机没有尺**
+                    // (手臂平移时爪子在腕相机里不动 ⇒ 量不出它的雅可比)。
+                    //
+                    // ⇒ 存画面单位,并把**是哪台相机**写进出处。下游比"这段夹不夹得下"时
+                    //   两边都从同一台相机的画面上量,**那把尺整个约掉**。
+                    //   🔴 唯一不许发生的是**被误读成米** —— 所以出处里写死单位,见写盘那一段。
                     let mut 米: Vec<(f64, f64)> = Vec::new();
                     let mut rel = 0.0f64;
                     for &(m, du, dv) in &s.jaw {
-                        if let Ok(((x, y), r)) = probe::image_to_plane(&jac, &sig, (du, dv)) {
-                            米.push((m, x.hypot(y)));
-                            rel = r;
-                        }
+                        米.push((m, du.hypot(dv)));
                     }
-                    println!("      [跨度] {} 个循环配上了对,换成米之后交给估计器", 米.len());
+                    let _ = (&jac, &sig);
+                    跨度相机 = s.jaw_cam;
+                    println!("      [跨度] 配上对 {} 个(第 {} 台相机)—— **按画面单位**交给估计器,不换米", 米.len(), s.jaw_cam);
                     probe::gripper_span(&米, 1.0, rel, now, jac_epoch)
                 }
             },
@@ -749,21 +844,44 @@ fn main() {
             }
             // 支撑面:被挡住的那些样本此刻的高度。**不是"走到过的最低点"** ——
             // 最低点是运动的终点,被挡住的位置才是那个面。
+            // 🔴🔴 **桌面用【这一相自己的】界,不搬别的相位量的阈。**
+            //
+            // 原来搬的是 `contact_threshold` 的值,而那是在**另一个相位**量的:
+            // 那一相压住时交付比例掉到 0.009–0.084,于是阈定在 0.126;而桌面这一相
+            // 压住时是 **0.218–0.235**(自由段 0.851–0.856,4 倍落差,一眼可分)。
+            // 拿 0.126 去卡,**两个压住的样本全被判成自由** ⇒ 一个被挡住的都没有 ⇒ 拒绝。
+            // 压得深浅本来就随相位不同,**把一个相位的阈搬到另一个相位的数据上不成立**。
+            // ⇒ 界取**这一相自己自由段的一半**(和接触阈那格分簇用的是同一条约定)。
+            //   接触阈仍然是前置 —— 它一重标,桌面就该跟着失效 —— 但**值由本相自己给**。
             Quantity::Floor => match body.get(Quantity::ContactThreshold) {
                 None => Err(probe::Declined::MissingDependency),
                 Some(ct) => {
+                    // 本相自己的自由段参照:交付比例的**中位数**,不是最大值。
+                    // 🔴 取最大值被实测否掉了(2026-08-18):下压探针的目标点按回读重算,
+                    // 手臂追赶时会**超**,于是出现 `实到/命令 = 4.0` 这种离群值。拿它当
+                    // "自由顶" ⇒ 界定在 2.011 ⇒ **138 个样本全判成"压住"、只剩 1 个"自由"**,
+                    // 而那个 0.977 只是所有下压样本高度的平均,不是桌面。
+                    // 它还**过了**估计器的守卫 —— 因为恰好剩的那 1 个自由样本在最高处。
+                    // 中位数对离群值免疫:正常下压 0.85、碰上 0.22,界落在 0.42,分得干净。
+                    let mut 比: Vec<f64> = s.press.iter().filter(|(c, _, _)| *c > 0.0)
+                        .map(|(c, a, _)| a / c).collect();
+                    比.sort_by(|x, y| x.partial_cmp(y).unwrap());
+                    let 中位 = if 比.is_empty() { 0.0 } else { 比[比.len() / 2] };
+                    let 界 = 中位 * 0.5;
+                    println!("      [桌面] 本相中位交付 {:.3} ⇒ 界 {:.3}(接触阈那格量的是 {:.3},不搬用)",
+                        中位, 界, ct.value[0]);
                     let mut 压 = (f64::INFINITY, f64::NEG_INFINITY, 0usize);
                     let mut 自 = (f64::INFINITY, f64::NEG_INFINITY, 0usize);
                     for &(c, a, z) in &s.press {
                         if c <= 0.0 { continue; }
-                        let t = if a / c < ct.value[0] { &mut 压 } else { &mut 自 };
+                        let t = if a / c < 界 { &mut 压 } else { &mut 自 };
                         t.0 = t.0.min(z);
                         t.1 = t.1.max(z);
                         t.2 += 1;
                     }
-                    println!("      [桌面] 压住 {} 个 z∈[{:.4},{:.4}] · 自由 {} 个 z∈[{:.4},{:.4}](接触阈 {:.4})",
-                        压.2, 压.0, 压.1, 自.2, 自.0, 自.1, ct.value[0]);
-                    probe::floor(&s.press, ct.value[0], now, ct.epoch)
+                    println!("      [桌面] 压住 {} 个 z∈[{:.4},{:.4}] · 自由 {} 个 z∈[{:.4},{:.4}]",
+                        压.2, 压.0, 压.1, 自.2, 自.0, 自.1);
+                    probe::floor(&s.press, 界, now, ct.epoch)
                 }
             },
         };
@@ -826,6 +944,13 @@ fn main() {
             // 接触阈只在量它的那个命令幅度上可比 —— 这一格没有它,下游就没法用。
             if q == Quantity::ContactThreshold {
                 format!(", \"probed_at_command_m\": {}", 探幅)
+            } else if q == Quantity::GripperSpan {
+                // 🔴🔴 **单位必须写在文件里。** 这一格存的是**画面单位**,不是米
+                // (尺度本来就不可观测 —— 把整具机器人放大 k 倍,每个关节角读数逐位相同)。
+                // 下游比"这段夹不夹得下"时两边都从**同一台相机**量,那把尺约掉;
+                // 而一旦有人把它当米用,算出来的宽度会**看起来完全正常**。
+                // ⇒ 单位 + 是哪台相机,一起写死在文件里,不靠谁记得。
+                format!(", \"unit\": \"image units of camera {}\", \"camera\": {}", 跨度相机, 跨度相机)
             } else {
                 String::new()
             }

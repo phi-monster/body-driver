@@ -2272,6 +2272,33 @@ mod end_to_end {
         assert_eq!(base_from_stalls(&两层, T).unwrap_err(), Declined::Inconsistent);
     }
 
+    /// `image_ruler_forward`:**病态的手眼矩阵不该让一段长度变得不可测。**
+    #[test]
+    fn a_ruler_that_needs_no_inverse_survives_a_degenerate_hand_eye() {
+        use probe::{image_ruler_forward, image_to_plane, Declined};
+        // 一副**近乎共线**的手眼:两列几乎指同一个画面方向 ⇒ 逆不成立。
+        // 实测这台机器的水平 2×2 行列式 −0.208 与自己的 1σ 分不开,正是这一档。
+        let 病 = [400.0, 200.0, 802.0, 401.0];
+        let sig = [4.0, 4.0, 4.0, 4.0];
+        // 求逆那条路必须拒 —— 而它拒得对。
+        assert_eq!(image_to_plane(&病, &sig, (1.0, 0.5)).unwrap_err(), Declined::Inconsistent);
+        // 正向那条路照样给得出尺:沿第一列那个方向,一米 = |(400,200)| = 447.2 画面单位。
+        let (r, s) = image_ruler_forward(&病, &sig, (400.0, 200.0)).expect("被压扁的方向照样有确定的模长");
+        assert!((r - 447.2135955).abs() < 0.5, "尺读成 {r}");
+        assert!(s > 0.0, "尺必须带自己的 1σ");
+
+        // —— 必须拒:要的画面方向**垂直于**这具身体在水平面里动得出来的那条线。
+        //    那说明配到的两瓣不是钳口。
+        assert_eq!(
+            image_ruler_forward(&病, &sig, (-200.0, 400.0)).unwrap_err(),
+            Declined::Inconsistent
+        );
+        // 良态的手眼上,两条路必须给出同一个数(锚点)。
+        let 好 = [400.0, 0.0, 0.0, 400.0];
+        let (rf, _) = image_ruler_forward(&好, &sig, (1.0, 0.0)).unwrap();
+        assert!((rf - 400.0).abs() < 1.0, "良态时正向读成 {rf},应当与求逆那条一致");
+    }
+
     /// `image_to_plane`:**斜着看的相机把圆压成椭圆,而一把标量尺读不出那个圆的半径。**
     #[test]
     fn image_to_plane_recovers_a_circle_a_scalar_ruler_would_distort() {
