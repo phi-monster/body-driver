@@ -114,10 +114,17 @@ fn 动作(q: Quantity, arm: usize, k: u32, home: &[f64; 3], now: &[f64; 3]) -> C
         // 一个循环六拍:两拍空转(量这台相机自己的噪声地板)· 三拍晃钳口 · 一拍挪手臂。
         // 空转那两拍是**判据的一部分**,不是浪费 —— 没有它,"什么都没动"和
         // "噪声在动"分不开。
+        // 🔴🔴 **这一整个循环必须发【同一个闩住的位姿】,不许每步回读再命令一遍。**
+        //
+        // 档案原文:*"每步把测到的位姿再命令一遍并不能保持它 —— 误差累积"*,而后果是
+        // **"空转"从来就不空**。实测(2026-08-17)这一版每拍都发 `at: 此刻` ⇒ 噪声地板
+        // 冲到 **137–246**(满量程 255)⇒ 任何真实位移都被淹掉,**十六个循环零候选**。
+        // 而这一格恰好是四格的前置。
+        // ⇒ `now` 这里传的是**闩住的那个位姿**(每六拍只在最后一拍更新一次),
+        //    循环内只有钳口在动 —— 认块的前提本来就是"每两帧之间只有一个东西变"。
         Quantity::ImageJacobian | Quantity::HandPixel => match k % 6 {
-            0 | 1 => Cmd::Ee { arm, at: *now, quat: 朝下(), jaw: 1.0 },
+            0 | 1 | 3 => Cmd::Ee { arm, at: *now, quat: 朝下(), jaw: 1.0 },
             2 | 4 => Cmd::Ee { arm, at: *now, quat: 朝下(), jaw: 0.55 },
-            3 => Cmd::Ee { arm, at: *now, quat: 朝下(), jaw: 1.0 },
             _ => {
                 let d = [[探, 0.0, 0.0], [0.0, 探, 0.0], [0.0, 0.0, 探],
                          [-探, 0.0, 0.0], [0.0, -探, 0.0], [0.0, 0.0, -探]][((k / 6) % 6) as usize];
@@ -198,11 +205,26 @@ pub fn 跑一相(r: &mut dyn Robot, q: Quantity, arm: usize, 步数: u32) -> Sam
     let mut 上一帧: Option<Frame> = None;
     let (mut 正, mut 反) = (0.0f64, 0.0f64);
     let mut 五帧: Vec<Vec<u8>> = Vec::new();
+    let mut 闩 = home;
+    let mut 空手 = 0u32;
     for k in 0..步数 {
-        let 此刻 = 上一帧
-            .as_ref()
-            .and_then(|f: &Frame| f.ee.get(arm).map(|p| [p[0], p[1], p[2]]))
-            .unwrap_or(home);
+        // 🔴 认手那一格用**闩住的**位姿(每六拍才更新一次);别的格用此刻的位姿。
+        // 两者的区别就是"空转到底空不空"。
+        let 认手 = matches!(q, Quantity::ImageJacobian | Quantity::HandPixel);
+        if 认手 && k % 6 == 0 {
+            闩 = 上一帧
+                .as_ref()
+                .and_then(|f: &Frame| f.ee.get(arm).map(|p| [p[0], p[1], p[2]]))
+                .unwrap_or(home);
+        }
+        let 此刻 = if 认手 {
+            闩
+        } else {
+            上一帧
+                .as_ref()
+                .and_then(|f: &Frame| f.ee.get(arm).map(|p| [p[0], p[1], p[2]]))
+                .unwrap_or(home)
+        };
         let c = 动作(q, arm, k, &home, &此刻);
         // 命令的幅度:发之前就知道,不用回读去猜。
         let 命令量 = match &c {
@@ -260,8 +282,13 @@ pub fn 跑一相(r: &mut dyn Robot, q: Quantity, arm: usize, 步数: u32) -> Sam
                                     println!("      [认手] 像素 ({:.4},{:.4}) · 双响 {} · 配对 {} · 地板 {}",
                                         c.u, c.v, r.moved_px, r.pairs, r.floor);
                                 }
-                            } else if s.seen.is_empty() {
-                                println!("      [认手] 这一轮没有候选(双响 {} · 地板 {})", r.moved_px, r.floor);
+                            } else if 空手 < 3 {
+                                空手 += 1;
+                                // 🔴 **地板是判据的一部分,不是背景信息。** 它接近满量程就说明
+                                // "空转"那两帧之间场景整个变了 —— 这时候任何候选都是假的,
+                                // 而认块器**拒绝**是对的。要修的是让空转真的空,不是放宽认块。
+                                println!("      [认手] 没有候选 · 双响 {} · **噪声地板 {}**(满量程 255;地板高 = 空转不空)",
+                                    r.moved_px, r.floor);
                             }
                         }
                         Err(e) => {
