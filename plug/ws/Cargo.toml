@@ -1,0 +1,19 @@
+[package]
+name = "bl-plug-ws"
+version = "0.1.0"
+edition = "2021"
+description = "A plug: talks to a robot that speaks msgpack over a WebSocket. Lives OUTSIDE the driver tree because it has dependencies."
+license = "AGPL-3.0-or-later"
+
+[[bin]]
+name = "bl-calibrate"
+path = "src/main.rs"
+
+[dependencies]
+tungstenite = { version = "0.24", default-features = false, features = ["handshake"] }
+rmpv        = "1"
+body-layer  = { path = "../../driver/core" }
+selfcal     = { path = "../../driver/selfcal" }
+
+[profile.release]
+overflow-checks = true

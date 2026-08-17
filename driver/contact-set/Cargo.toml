@@ -1,0 +1,10 @@
+[package]
+name    = "contact-set"
+version = "0.1.0"
+edition = "2021"
+description = "the vocabulary between 2a and 2b -- four slots: which points, each one's normal and force cone, how the OBJECT must move, per-point tolerance. Nothing about bodies."
+license = "AGPL-3.0-or-later"
+
+# 🔴 依赖表是空的,与 `body-layer` / `contact-gen` 同一条理由:
+# **这一层是要被整个领域读和审的** —— 它是"脑子对身体说的那句话"本身。
+[dependencies]
