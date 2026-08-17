@@ -1756,3 +1756,198 @@ mod tests {
         assert_eq!(m.uncertainty[0], 0.5);
     }
 }
+
+// --------------------------------------------------------------------- friction
+
+/// Measure **friction**: how slippery this body's own fingertips are, as a coefficient.
+///
+/// # Why this grid had to exist
+///
+/// It was the last load-bearing number still being typed in by a human. `contact_gen` reads it to
+/// decide whether a grasp slips, and — through the friction cones — **how many contact points are
+/// enough**. The caller was passing `0.5`. That is exactly the shape this layer exists to kill: a
+/// plausible number and a measured number are indistinguishable downstream, and the plausible one
+/// silently decides which grasps are declared impossible.
+///
+/// # No force sensor, and none needed
+///
+/// Hold something, tilt the wrist away from vertical, and the angle at which it starts to slide is
+/// `atan(mu)`. Both halves are already on this body: the jaws report their own opening, and "it is
+/// still in there" is the same readback that separates a held object from one closed on air.
+///
+/// # It refuses in three distinguishable ways, and they call for different next moves
+///
+/// * never held anything at any tilt ⇒ [`Declined::NoResponse`] — nothing was ever gripped, so this
+///   run contains no evidence about friction. Re-run with something the jaws can actually close on.
+/// * held at **every** tilt probed ⇒ [`Declined::Inconsistent`] — the slip angle is above the whole
+///   sweep. All that establishes is `mu > tan(theta_max)`, a bound, not a value. Probe steeper.
+///   🔴 Reporting `tan(theta_max)` here would be a floor dressed up as a measurement.
+/// * fewer than 8 samples ⇒ [`Declined::NotEnoughSamples`] — one boundary to locate, and with a
+///   handful of points the boundary is wherever the samples happened to land.
+///
+/// `value` is `mu`; `uncertainty` is half the bracketing gap carried through `tan`; `valid_lo/hi`
+/// is the `mu` range actually swept, so an ask about a grip steeper than anything probed is
+/// refused rather than extrapolated.
+pub fn friction(
+    samples: &[(f64, bool)], // (tilt from vertical in rad, did the object stay in the jaws)
+    now_ns: u64,
+) -> Result<Measurement, Declined> {
+    let mut th = [0.0f64; 256];
+    let mut held = [false; 256];
+    let mut k = 0usize;
+    for &(angle, stayed) in samples {
+        // A tilt outside a quarter turn is not a tilt; treating it as one would fold the tan branch.
+        if !angle.is_finite() || angle < 0.0 || angle >= core::f64::consts::FRAC_PI_2 {
+            continue;
+        }
+        if k == th.len() {
+            break;
+        }
+        th[k] = angle;
+        held[k] = stayed;
+        k += 1;
+    }
+    if k < 8 {
+        return Err(Declined::NotEnoughSamples);
+    }
+    // Sort by tilt, carrying the outcome. Insertion sort: k <= 256 and this crate has no allocator.
+    for i in 1..k {
+        let (tv, hv) = (th[i], held[i]);
+        let mut j = i;
+        while j > 0 && th[j - 1] > tv {
+            th[j] = th[j - 1];
+            held[j] = held[j - 1];
+            j -= 1;
+        }
+        th[j] = tv;
+        held[j] = hv;
+    }
+    if !held[..k].iter().any(|&h| h) {
+        return Err(Declined::NoResponse);
+    }
+    if held[..k].iter().all(|&h| h) {
+        return Err(Declined::Inconsistent);
+    }
+    // Where does holding stop? Scored against **this body's own hold rate** rather than +/-1, for
+    // the same reason `reach` does it: with a flat score a body that mostly holds has its wall
+    // outvoted rather than found. Centring on `p` makes the expected score of an arbitrary run
+    // zero, so the run ends exactly where holding falls below what this body manages on average.
+    // No window, no threshold, nothing to fill in by hand.
+    //
+    // Holding is monotone in tilt as physics, but not in one sweep's data — a single early slip
+    // (the object was seated badly) must not truncate the estimate, which is why this is a
+    // maximum-subarray and not a first-failure scan.
+    let p = held[..k].iter().filter(|&&h| h).count() as f64 / k as f64;
+    let (mut best, mut best_lo, mut best_hi) = (f64::NEG_INFINITY, 0usize, 0usize);
+    let (mut cur, mut cur_lo) = (0.0f64, 0usize);
+    for i in 0..k {
+        let w = if held[i] { 1.0 - p } else { -p };
+        if cur <= 0.0 {
+            cur = w;
+            cur_lo = i;
+        } else {
+            cur += w;
+        }
+        if cur > best {
+            best = cur;
+            best_lo = cur_lo;
+            best_hi = i;
+        }
+    }
+    // The slip edge must be bracketed by an observed slip **above** the holding run, or the
+    // boundary is a guess. (The lower side needs no bracketing: zero tilt always holds — that is
+    // gravity, not a measurement — so there is no wall down there to locate.)
+    let first_slip = match (best_hi + 1..k).find(|&i| !held[i]) {
+        Some(i) => i,
+        None => return Err(Declined::Inconsistent),
+    };
+    // Holding outside the run must be lower than inside by more than counting noise, or what has
+    // been located is a lucky stretch of a flat curve. Same arithmetic as `reach`, and it needs no
+    // minimum-sample constant: a side holding one or two points has a standard error too wide to
+    // separate and is refused by the same expression that admits a side holding fifty.
+    let n_in = best_hi - best_lo + 1;
+    let hit_in = held[best_lo..=best_hi].iter().filter(|&&h| h).count();
+    let p_in = hit_in as f64 / n_in as f64;
+    let n_out = k - (best_hi + 1);
+    if n_out == 0 {
+        return Err(Declined::Inconsistent);
+    }
+    let hit_out = held[best_hi + 1..k].iter().filter(|&&h| h).count();
+    let p_out = hit_out as f64 / n_out as f64;
+    let p_pool = (hit_in + hit_out) as f64 / (n_in + n_out) as f64;
+    let se = (p_pool * (1.0 - p_pool) * (1.0 / n_in as f64 + 1.0 / n_out as f64)).sqrt();
+    if !(se > 0.0 && (p_in - p_out) >= 2.0 * se) {
+        return Err(Declined::Inconsistent);
+    }
+    // The wall sits between the last tilt that held and the first that slipped.
+    let mu_lo = th[best_hi].tan();
+    let mu_hi = th[first_slip].tan();
+    let mut m = blank(Quantity::Friction, 1, now_ns);
+    m.value[0] = 0.5 * (mu_lo + mu_hi);
+    m.uncertainty[0] = 0.5 * (mu_hi - mu_lo);
+    m.valid_lo[0] = th[0].tan();
+    m.valid_hi[0] = th[k - 1].tan();
+    // A property of these fingertips and what they are holding — invalidated when either changes,
+    // not by the clock.
+    m.valid_for_ns = 0;
+    m.selftest_passed = true;
+    Ok(m)
+}
+
+#[cfg(test)]
+mod 摩擦 {
+    use super::*;
+
+    /// 造一组"倾到某个角度就滑"的样本。`真μ` 决定滑在哪儿。
+    fn 扫(真mu: f64, n: usize) -> Vec<(f64, bool)> {
+        let 滑角 = 真mu.atan();
+        (0..n)
+            .map(|i| {
+                let th = core::f64::consts::FRAC_PI_2 * (i as f64 + 0.5) / n as f64;
+                (th, th < 滑角)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn 量得出摩擦系数() {
+        let m = friction(&扫(0.6, 40), 1).expect("该给得出数");
+        assert!((m.value[0] - 0.6).abs() < 0.15, "μ 应≈0.6,实得 {}", m.value[0]);
+        assert!(m.uncertainty[0] > 0.0, "不确定度必须是正的,它是夹缝的一半");
+    }
+
+    /// 🔴 一根针尖 vs 一块指腹应该给出**不同**的数 —— 否则这一格没在量任何东西。
+    #[test]
+    fn 分得开滑的和不滑的() {
+        let 滑 = friction(&扫(0.2, 40), 1).unwrap().value[0];
+        let 涩 = friction(&扫(1.0, 40), 1).unwrap().value[0];
+        assert!(涩 > 滑 + 0.4, "涩的该明显大于滑的:{涩} vs {滑}");
+    }
+
+    /// 一次都没夹住 ⇒ 这一炮**不含任何关于摩擦的证据**,不许给数。
+    #[test]
+    fn 反例_从来没夹住过() {
+        let s: Vec<_> = (0..40).map(|i| (0.02 * i as f64, false)).collect();
+        assert_eq!(friction(&s, 1).err(), Some(Declined::NoResponse));
+    }
+
+    /// 🔴 全程都夹得住 ⇒ 只知道 **μ > tan(最大倾角)**,那是个下界不是一个值。
+    /// 把 tan(最大角) 当成答案报出去,就是把下界打扮成测量。
+    #[test]
+    fn 反例_全程都没滑_只给得出下界() {
+        let s: Vec<_> = (0..40).map(|i| (0.02 * i as f64, true)).collect();
+        assert_eq!(friction(&s, 1).err(), Some(Declined::Inconsistent));
+    }
+
+    #[test]
+    fn 反例_样本太少() {
+        assert_eq!(friction(&扫(0.6, 5), 1).err(), Some(Declined::NotEnoughSamples));
+    }
+
+    /// 🔴 平的曲线是**没有证据**,不是"边界在中间"。夹住与否跟倾角无关时必须拒绝。
+    #[test]
+    fn 反例_平曲线不许出边界() {
+        let s: Vec<_> = (0..40).map(|i| (0.03 * i as f64, i % 2 == 0)).collect();
+        assert_eq!(friction(&s, 1).err(), Some(Declined::Inconsistent));
+    }
+}

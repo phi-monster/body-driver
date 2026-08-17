@@ -88,6 +88,10 @@ pub fn prerequisites(q: Quantity) -> &'static [Quantity] {
         // ruler's dependency chain -- re-measure the contact threshold and the floor map built on
         // top of it is no longer trustworthy, automatically, without anyone remembering.
         Floor => &[ContactThreshold, StepDelivery],
+        // 🔴 摩擦要先能【夹住】再谈滑不滑:判据是"东西还在不在钳口里",而那要拿钳口的
+        //    实际开度去读 —— 没有跨度这把尺,"夹住了"和"合到底了"读起来一模一样。
+        //    它**不**依赖接触阈:倾到滑是几何,不是接触事件。
+        Friction => &[GripperSpan],
         // The rest are measured directly off commanded motion and answer to nothing else.
         ImageJacobian | ArmWeight | Latency | Backlash | Reach | StepDelivery => &[],
     }

@@ -109,6 +109,20 @@ pub enum Quantity {
     /// It is measurable by acting on itself: turn the wrist and the working point sweeps an arc
     /// whose radius **is** the offset. See [`crate::probe::tool_offset`].
     ToolOffset = 10,
+    /// 🔴 **How slippery my own fingertips are** — the friction coefficient of THIS gripper
+    /// against what it is holding.
+    ///
+    /// Added 2026-08-17 because it was the last load-bearing number still being typed in.
+    /// `contact_gen` needs it to decide whether a grasp slips and **how many contact points are
+    /// enough** (owner's counterexample: a person can fire a gun with two fingers — the count is
+    /// not the hand's finger count, it is whatever the friction cones can hold). It was being
+    /// passed as `0.5` by the caller, i.e. by a human, on every single grasp.
+    ///
+    /// It needs **no force sensor**: hold something, tilt, and the angle at which it slides is
+    /// `atan(mu)`. Both halves of that already exist on this body — the jaws report their own
+    /// opening, and "did it slip" is the same readback that already separates a held object from
+    /// a closed-on-air one.
+    Friction = 14,
     /// Which column of my orientation matrix points along my tool, as an index in `{0,1,2}`.
     ///
     /// 🔴 Added 2026-08-11 by MERGING THE SECOND IMPLEMENTATION, not by design. This layer had a C
@@ -222,6 +236,7 @@ impl Quantity {
             ToolAxisColumn => "tool_axis_column",
             HomePose => "home_pose",
             Floor => "floor",
+            Friction => "friction",
         }
     }
 
@@ -244,6 +259,7 @@ impl Quantity {
             ToolAxisColumn => c"tool_axis_column",
             Floor => c"floor",
             HomePose => c"home_pose",
+            Friction => c"friction",
         }
     }
 }
