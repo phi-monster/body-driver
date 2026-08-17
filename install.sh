@@ -12,6 +12,17 @@ for c in core contact-set contact-gen contact-exec point-gen selfcal; do
   ( cd "$ROOT/driver/$c" && cargo test --release --quiet )
 done
 
+# The fast face is Ada/SPARK. Building it needs GNAT; if that is not here we say so out loud
+# rather than skipping quietly -- a safety face that silently did not build is worse than absent.
+if command -v gprbuild >/dev/null; then
+  echo "== driver fast face (Ada/SPARK): build =="
+  ( cd "$ROOT/driver/fast" && gprbuild -q -P body_layer_fast_lib.gpr )
+  bash "$ROOT/driver/conformance/ada_check.sh" || echo "   (ada_check reported a mismatch above)"
+else
+  echo "== driver fast face (Ada/SPARK): SKIPPED -- no gprbuild on PATH =="
+  echo "   the limits/force-cap/watchdog/e-stop face is NOT built. Install GNAT to get it."
+fi
+
 echo "== plug: build =="
 ( cd "$ROOT/plug/ws" && cargo build --release --quiet )
 

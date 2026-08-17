@@ -31,6 +31,10 @@ This layer exists to make that impossible:
   outside the range I probed" are four different facts and are never merged into one.
 * **Zero dependencies, no allocator.** The driver builds for targets that have no allocator story.
   Anything needing a dependency (a WebSocket handshake, msgpack) lives in a *plug*, outside.
+* **Two faces, split by deadline, not by taste.** The slow face measures, stores and refuses, in
+  Rust. The fast face — joint limits, force cap, watchdog, e-stop — is Ada/SPARK 2014 and runs in
+  the control loop, because *a force limit that is checked once a second is not a safety limit*.
+  Both clamp the **same** numbers; the slow face is where they were measured.
 * **No robot names anywhere.** A mechanical check (`driver/check_purity.sh`) fails the build if the
   driver source mentions a specific robot, simulator, or benchmark. A rule that is only in a comment
   is not a rule.
@@ -119,7 +123,8 @@ A refusal is an output. Omitting it would make the body look like it owes less t
 
 ```
 driver/            zero dependencies, no allocator, no robot names
-  core/            measure · store with provenance · judge expiry · REFUSE
+  core/            measure · store with provenance · judge expiry · REFUSE   (Rust)
+  fast/            limits · force cap · watchdog · e-stop                    (Ada / SPARK 2014)
   selfcal/         the motions each quantity needs, and in what order
   contact-set/     what a task IS: which points to touch, which way to push, what the object does
   contact-gen/     given a point cloud and a body, where this shape can be taken hold of
