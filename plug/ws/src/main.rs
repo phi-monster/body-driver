@@ -86,11 +86,21 @@ impl<S: std::io::Read + std::io::Write> Plug<S> {
                 新 = true;
             }
             // 要动作的那一帧:把手里那条交出去。没有就交空的 —— 空也是一个诚实的回答。
+            // 🔴 **应答的形状是对方定的,不是我方便定的。** 少一个字段,对方的同步 RPC
+            // 就永远等不到,而表现是"它卡住了" —— 连接正常、场景建好、两侧不报错。
+            // 实测:握手回包少了 server / server_instance_id,客户端就停在握手之后
+            // **一直心跳**,2600 帧一个观测都没发过。
             let payload = if fname == "get_action" {
                 rmpv::Value::Map(vec![(
                     rmpv::Value::String("result".into()),
                     rmpv::Value::Array(self.待发.take().into_iter().collect()),
                 )])
+            } else if ack == "hello_ack" {
+                rmpv::Value::Map(vec![
+                    (rmpv::Value::String("ok".into()), rmpv::Value::Boolean(true)),
+                    (rmpv::Value::String("server".into()), rmpv::Value::String("xpolicylab_policy_server".into())),
+                    (rmpv::Value::String("server_instance_id".into()), rmpv::Value::String("bl-calibrate".into())),
+                ])
             } else {
                 rmpv::Value::Map(vec![(rmpv::Value::String("ok".into()), rmpv::Value::Boolean(true))])
             };
@@ -177,6 +187,7 @@ fn main() {
     let mut lay = discover::Layout::default();
     let mut first: Option<Value> = None;
     let mut 听到 = 0u32;
+    let mut 计数: std::collections::BTreeMap<String, u32> = Default::default();
     for _ in 0..4000 {
         let Ok(m) = ws.read() else { break };
         let tungstenite::Message::Binary(b) = m else { continue };
@@ -216,7 +227,23 @@ fn main() {
         } else if 听到 % 50 == 0 {
             println!("[装] 这一帧【没有观测】(payload 里既没有 obs 也没有 observation)");
         }
-        let r = wire::reply(&v, ack, Value::Map(vec![]));
+        // 🔴 线上每一条都记类型 —— "没收到"和"收到了但回错了"只有这一行能分开,而它零成本。
+        *计数.entry(kind.clone()).or_insert(0u32) += 1;
+        if 听到 % 50 == 0 {
+            let mut v: Vec<_> = 计数.iter().collect();
+            v.sort();
+            println!("[装] 收到过的消息类型:{v:?}");
+        }
+        let pl = if ack == "hello_ack" {
+            Value::Map(vec![
+                (Value::String("ok".into()), Value::Boolean(true)),
+                (Value::String("server".into()), Value::String("xpolicylab_policy_server".into())),
+                (Value::String("server_instance_id".into()), Value::String("bl-calibrate".into())),
+            ])
+        } else {
+            Value::Map(vec![(Value::String("ok".into()), Value::Boolean(true))])
+        };
+        let r = wire::reply(&v, ack, pl);
         let mut buf = Vec::new();
         if rmpv::encode::write_value(&mut buf, &r).is_ok() {
             let _ = ws.send(tungstenite::Message::Binary(buf));
