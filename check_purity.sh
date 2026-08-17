@@ -8,7 +8,7 @@ set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PAT='robodojo|isaac|libero|calvin|general_pickup|stack_blocks|pack_objects|store_tools|eval_result|_result\.json'
 bad=0
-for d in body-layer/slow/src body-layer/contact-gen/src body-layer/contact-exec/src; do
+for d in body-layer/slow/src body-layer/contact-gen/src body-layer/contact-exec/src body-layer/selfcal/src; do
   [ -d "$ROOT/$d" ] || continue
   # 去掉整行注释(// 和 ///)再查 —— 剩下的就是真代码
   while IFS= read -r f; do
