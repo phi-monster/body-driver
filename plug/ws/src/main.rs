@@ -23,6 +23,7 @@
 //! 的目标上。⇒ **插头在外面,身体在里面。** 换一种机器人 = 换一个插头。
 
 mod discover;
+mod wire;
 
 use body_layer::measurement::Quantity;
 use body_layer::probe;
@@ -108,16 +109,41 @@ fn main() {
     println!("[装] 接上了。先听一帧,认这台机器人报的东西长什么样。");
 
     // 认布局 —— 只看形状,不看名字。
+    //
+    // 🔴 握手要回。这一层**允许**知道自己的线缆(插头的全部职责就是它),而驱动树里不许有 ——
+    // 一条不回应答的连接会让对方的同步 RPC 永远等下去,两侧都不报错。
     let mut lay = discover::Layout::default();
     let mut first: Option<Value> = None;
-    for _ in 0..200 {
+    for _ in 0..4000 {
         let Ok(m) = ws.read() else { break };
         let tungstenite::Message::Binary(b) = m else { continue };
         let Ok(v) = rmpv::decode::read_value(&mut &b[..]) else { continue };
-        let l2 = discover::认(&v);
-        if l2.够吗().is_ok() {
-            lay = l2;
-            first = Some(v);
+        let kind = wire::get(&v, "message_type").and_then(|x| x.as_str().map(|s| s.to_string())).unwrap_or_default();
+        let ack = match kind.as_str() {
+            "hello" => "hello_ack",
+            "prepare_case" => "prepare_case_ack",
+            "reset" => "reset_result",
+            "call" => "call_result",
+            "infer" => "infer_result",
+            "trial_end" => "trial_end_ack",
+            "heartbeat" => "heartbeat_ack",
+            "close" => break,
+            _ => continue,
+        };
+        // 这一帧里带没带观测?带了就拿它认布局。
+        if let Some(o) = wire::get(&v, "payload").and_then(|p| wire::get(p, "observation")).cloned() {
+            let l2 = discover::认(&o);
+            if l2.够吗().is_ok() && first.is_none() {
+                lay = l2;
+                first = Some(o);
+            }
+        }
+        let r = wire::reply(&v, ack, Value::Map(vec![]));
+        let mut buf = Vec::new();
+        if rmpv::encode::write_value(&mut buf, &r).is_ok() {
+            let _ = ws.send(tungstenite::Message::Binary(buf));
+        }
+        if first.is_some() {
             break;
         }
     }
