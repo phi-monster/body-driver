@@ -188,6 +188,7 @@ fn main() {
     let mut first: Option<Value> = None;
     let mut 听到 = 0u32;
     let mut 计数: std::collections::BTreeMap<String, u32> = Default::default();
+    let mut 诊断 = 0u32;
     for _ in 0..4000 {
         let Ok(m) = ws.read() else { break };
         let tungstenite::Message::Binary(b) = m else { continue };
@@ -215,13 +216,24 @@ fn main() {
             if l2.够吗().is_ok() && first.is_none() {
                 lay = l2;
                 first = Some(o.clone());
-            } else if 听到 % 50 == 0 {
-                // 🔴 **拿到观测却认不出来,和【压根没拿到观测】是两件事** —— 要改的东西完全相反。
-                // 只报"还没认出"会把这两件混在一起,而混着看就只能靠推理。
+            } else if 诊断 < 3 {
+                // 🔴🔴 **诊断打印必须挂在【要诊断的那一帧】上,不能挂在"每 N 帧"上。**
+                // 实测(2026-08-17):这一条本来写成 `听到 % 50 == 0`,而带观测的帧全落在
+                // 奇数位 ⇒ 采样点一半落在**不带观测**的那一拍上,于是这一行**一次都没打过**,
+                // 而我据此得出了"观测帧从来没到过"这个**完全错误**的结论。
+                // ⚠️ 教训比这个 bug 值钱:**"插打印不要推理"里,打印本身也可能在骗人** ——
+                //    一个采样式的打印,会把交替出现的两种帧看成只有一种。
+                诊断 += 1;
                 println!("[装] 拿到观测了,但认不出来 ⇒ {}", l2.够吗().unwrap_err());
                 l2.说一遍();
                 if let Some(m) = o.as_map() {
                     println!("[装] 观测顶层键:{:?}", m.iter().filter_map(|(k, _)| k.as_str()).collect::<Vec<_>>());
+                    for (k, v) in m {
+                        if let Some(sub) = v.as_map() {
+                            println!("[装]   {:?} 里:{:?}", k.as_str(),
+                                sub.iter().filter_map(|(kk, _)| kk.as_str()).collect::<Vec<_>>());
+                        }
+                    }
                 }
             }
         } else if 听到 % 50 == 0 {
