@@ -295,11 +295,35 @@ fn main() {
     // 上电日程:问驱动还欠自己什么,做那几件事,交回去,再问一遍。
     let mut body = body_layer::Body::new();
     let mut plug = Plug { ws, lay, last: first, 待发: None };
+    // 🔴🔴 **一格拒绝之后必须往下走,不能原地重问。**
+    // 实测(2026-08-17):第 1~5 轮全是同一格 `image_jacobian`,因为日程永远回答
+    // "还欠这一格",而这一格这一轮量不出来 ⇒ **整轮自标定停在第一格上打转**,
+    // 而它每一轮都在正常打印,看起来像在推进。
+    // ⇒ 拒过的记下来,下一轮问日程时把它跳过;**拒绝本身是输出,不是重试的理由**。
+    let mut 拒过: std::collections::BTreeSet<&'static str> = Default::default();
+    let mut 成: Vec<&'static str> = Vec::new();
     let mut 轮 = 0u32;
     loop {
         let now = 轮 as u64 + 1;
-        let Some((q, need)) = body_layer::schedule::next(&body, now) else {
-            println!("[装] 🟢 不欠了 —— 自标定走完。");
+        let 下一格 = (1..=40u64).find_map(|k| {
+            body_layer::schedule::next(&body, now + k * 0).and_then(|(q, n)| {
+                if 拒过.contains(q.as_str()) { None } else { Some((q, n)) }
+            })
+        });
+        // 日程只回答"最先欠的那一格";它被拒过就手动往后找一格没拒过的。
+        let 下一格 = 下一格.or_else(|| {
+            use body_layer::measurement::Quantity::*;
+            [ImageJacobian, StepDelivery, Latency, Backlash, Reach, GripperSpan, ToolOffset,
+             ToolAxisColumn, HandPixel, ArmWeight, ContactThreshold, Friction, Floor, HomePose,
+             SelfOcclusion]
+                .into_iter()
+                .find(|q| !拒过.contains(q.as_str()) && body.get(*q).is_none())
+                .map(|q| (q, body_layer::schedule::Need::NeverMeasured))
+        });
+        let Some((q, need)) = 下一格 else {
+            println!("[装] 🟢 走完一轮:量到 {} 格,点名拒绝 {} 格。", 成.len(), 拒过.len());
+            println!("[装]    量到:{:?}", 成);
+            println!("[装]    还欠:{:?}", 拒过);
             break;
         };
         轮 += 1;
@@ -318,10 +342,14 @@ fn main() {
         match got {
             Ok(m) => {
                 println!("      🟢 量到:{:?}", &m.value[..(m.dim as usize).min(4)]);
+                成.push(q.as_str());
                 let _ = body.submit(m);
             }
             // 🔴 一条**点名的拒绝就是输出**。悄悄省掉它会让这具身体看起来比它真实的样子欠得少。
-            Err(d) => println!("      🔴 拒绝:{d:?} —— 这一格仍然欠着,而且现在有名字"),
+            Err(d) => {
+                println!("      🔴 拒绝:{d:?} —— 这一格仍然欠着,而且现在有名字");
+                拒过.insert(q.as_str());
+            }
         }
     }
     let _ = std::fs::write(&out, format!("{{\"note\":\"see bl_save for the binary form\"}}"));
