@@ -252,8 +252,15 @@ fn 动作(q: Quantity, arm: usize, k: u32, home: &[f64; 3], now: &[f64; 3], 静�
         // "每一个开度单位对应多少画面单位",再拿这个方向上的尺换成米。
         // 激励幅度 Δ 恒定 —— 幅度变了,双响的可见性也跟着变,那会把斜率和可见性混在一起。
         Quantity::GripperSpan => {
-            let m = 0.15 + 0.14 * ((k / 周期(q, 静置)) % 6) as f64;
-            Cmd::Ee { arm, at: *now, quat: 朝下(), jaw: 晃钳口(k, m - 0.15, m + 0.15, 静置) }
+            // 🔴 **摆幅要和"能认出手的那一格"一样大(0.45),不能为了扫开中心把它缩小。**
+            // 实测(2026-08-17,calrun7):我把摆幅从 0.45 缩到 0.30 去换中心的行程,结果
+            // 认块器**只认出 1 个候选、配不成对**,整相 0 个样本 —— 动得少,越过噪声地板的
+            // 像素就少,而配对的前提是**两瓣都得看得见**。中心扫 0.225→0.775 已经够拟斜率。
+            let m = 0.225 + 0.11 * ((k / 周期(q, 静置)) % 6) as f64;
+            // 🔴 位姿发**这一相开始时那个绝对点**,不发回读的闩。自遮挡那一格就是这么发的,
+            // 它的噪声地板 51–84;这一格发闩,地板 159–166 —— 闩每周期重读一次,读数噪声
+            // 让目标每周期都挪一点,于是"空转"每周期都从一小步运动开始。
+            Cmd::Ee { arm, at: *home, quat: 朝下(), jaw: 晃钳口(k, m - 0.225, m + 0.225, 静置) }
         }
         // ── 胳膊有多重:**同一处,往上走一步、往下走一步,比两次的交付比例** ──
         //
@@ -359,8 +366,39 @@ fn 绕轴(col: usize, θ: f64) -> [f64; 4] {
 }
 
 /// 跑一个相位:发动作、收样本。**不估计、不拒绝。**
-pub fn 跑一相(r: &mut dyn Robot, q: Quantity, arm: usize, 步数: u32, 静置: u32) -> Samples {
+pub fn 跑一相(r: &mut dyn Robot, q: Quantity, arm: usize, 步数: u32, 静置: u32, 回位: Option<[f64; 3]>) -> Samples {
     let mut s = Samples::default();
+    // 🔴🔴 **每一个相位都必须从一个【走得动】的位姿开始。**
+    //
+    // 探针不是都温和的:可达那一格的整个工作就是**把手臂顶到走不动为止**,臂重那一格
+    // 把它摆到水平面的边角上。上一个相位停在哪儿,下一个就从哪儿开始 —— 而那可能是墙上。
+    // 实测代价(2026-08-17,calrun6):可达跑完之后接着量交付率,原始样本
+    // `1.051 / 0.444 / 0.004 / 0.995 / 1.249 / 0.852 / 0.457 / 0.159 / 0.006 …`,
+    // 中位数 **0.00066**(真值 0.888)⇒ `settle_periods` 由它算出 **10499 拍**的静置,
+    // 比整个相位还长 ⇒ **后面五格连着塌**。而每一步单看都像"这具身体走不动"。
+    //
+    // ⇒ 先回到这次标定开始时那个位姿(那是把机器人交给我们时它所在的地方,按定义走得到),
+    //    **回到了再开始采样**。什么时候算回到了不设门槛:**离目标的距离不再缩短**就是到头了。
+    if let Some(p) = 回位 {
+        let mut 上次 = f64::INFINITY;
+        let mut 不再靠近 = 0u32;
+        // 120 拍是**急停**,不是判据:一具回不去的身体要在这里停下来,而不是永远退不出去。
+        for _ in 0..120 {
+            r.act(&Cmd::Ee { arm, at: p, quat: 朝下(), jaw: 1.0 });
+            let Some(f) = r.sense() else { continue };
+            let Some(e) = f.ee.get(arm) else { continue };
+            let d = ((e[0] - p[0]).powi(2) + (e[1] - p[1]).powi(2) + (e[2] - p[2]).powi(2)).sqrt();
+            if d >= 上次 {
+                不再靠近 += 1;
+                if 不再靠近 >= 3 {
+                    break;
+                }
+            } else {
+                不再靠近 = 0;
+            }
+            上次 = d;
+        }
+    }
     let home = match r.sense() {
         Some(f) if !f.ee.is_empty() => [f.ee[arm.min(f.ee.len() - 1)][0], f.ee[arm.min(f.ee.len() - 1)][1], f.ee[arm.min(f.ee.len() - 1)][2]],
         _ => return s,
@@ -487,7 +525,7 @@ pub fn 跑一相(r: &mut dyn Robot, q: Quantity, arm: usize, 步数: u32, 静置
                                     //    而拿一个非配对候选的位置去当"间距",量到的是别的东西。
                                     Quantity::GripperSpan => {
                                         if r.pairs > 0 {
-                                            let m = 0.15 + 0.14 * ((k / 周期(q, 静置)) % 6) as f64;
+                                            let m = 0.225 + 0.11 * ((k / 周期(q, 静置)) % 6) as f64;
                                             s.jaw.push((m, r.pair_dir.0, r.pair_dir.1));
                                             if s.jaw.len() <= 6 {
                                                 println!("      [跨度] 平均开度 {:.2} ⇒ 画面里两瓣相距 {:.5}(配对 {})",
@@ -614,7 +652,7 @@ mod 测 {
     #[test]
     fn 顺路就采到了交付率样本() {
         let mut b = 假臂 { p: [0.0; 7], jaw: 1.0 };
-        let s = 跑一相(&mut b, Quantity::StepDelivery, 0, 20, 4);
+        let s = 跑一相(&mut b, Quantity::StepDelivery, 0, 20, 4, None);
         assert!(s.steps.len() >= 10, "每一次移动都该是一次交付样本,实得 {}", s.steps.len());
     }
 
@@ -634,7 +672,7 @@ mod 测 {
                 vec![]
             }
         }
-        let s = 跑一相(&mut 死臂, Quantity::StepDelivery, 0, 20, 4);
+        let s = 跑一相(&mut 死臂, Quantity::StepDelivery, 0, 20, 4, None);
         assert!(!s.steps.is_empty(), "必须采到样本");
         assert!(s.steps.iter().all(|(_, a)| *a == 0.0), "一台不动的身体,实到必须全是 0");
     }
@@ -642,7 +680,7 @@ mod 测 {
     #[test]
     fn 可达采到了到与不到两种() {
         let mut b = 假臂 { p: [0.0; 7], jaw: 1.0 };
-        let s = 跑一相(&mut b, Quantity::Reach, 0, 240, 4);
+        let s = 跑一相(&mut b, Quantity::Reach, 0, 240, 4, None);
         assert!(s.reach.iter().any(|(_, _, ok)| *ok), "近处该到得了");
         assert!(s.reach.iter().any(|(_, _, ok)| !*ok), "远处该到不了 —— 两边都要有,墙才夹得住");
     }

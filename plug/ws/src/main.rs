@@ -209,12 +209,18 @@ impl<S: std::io::Read + std::io::Write> Robot for Plug<S> {
 
 fn main() {
     let mut listen: Option<u16> = None;
+    let mut 读回: Option<String> = None;
     let mut out = String::from("bodycal.json");
     let mut a = std::env::args().skip(1);
     while let Some(f) = a.next() {
         match f.as_str() {
             "--listen" => listen = a.next().and_then(|v| v.parse().ok()),
             "--out" => out = a.next().unwrap_or(out),
+            // 🔴 **读回上一次量到的东西 —— 这就是"机器越用越强"的那一半。**
+            // 没有它,每次上电都从零重标(实测这台 25 分钟),而**已经量到的格子会被
+            // 重新量一遍,新的那次不一定更好**。有了它:已知的先装进身体,日程只安排
+            // 还欠的那几格,而 `submit` 的 `WorseThanStored` 保证新证据不如旧的就不覆盖。
+            "--in" => 读回 = a.next(),
             other => eprintln!("不认识的开关:{other}"),
         }
     }
@@ -346,6 +352,41 @@ fn main() {
 
     // 上电日程:问驱动还欠自己什么,做那几件事,交回去,再问一遍。
     let mut body = body_layer::Body::new();
+    // 🔴 **先把上一次量到的装回身体,再问还欠什么。**
+    // 没有这一步,每次上电都从零重标(实测这台 25 分钟),而下面那个日程**看不出
+    // 哪些格其实已经有了**。装回去之后:日程只安排还欠的,已有的由 `submit` 的
+    // `WorseThanStored` 守着 —— 新证据不如旧的就不覆盖。**这就是"越用越强"的那一半。**
+    if let Some(path) = &读回 {
+        match std::fs::read_to_string(path).ok().and_then(|t| body_layer::store::Store::from_str(&t).ok()) {
+            None => println!("[装] 读不回 {path} —— 从零开始标"),
+            Some(st) => {
+                let mut 装 = 0usize;
+                for q in body_layer::measurement::Quantity::ALL {
+                    // 🔴 **带寿命的量不从磁盘装回来。**
+                    // 手眼那一格自己声明 60 秒有效期,理由是"一磕就不对了" —— 而两次上电
+                    // 之间相机完全可能被碰过。把它从文件里装回来,等于替这台相机担保
+                    // 一件没人检查过的事。⇒ 它每次上电重量,而**它的下游(认手 / 跨度 /
+                    // 工具偏置 / 工具轴 / 自遮挡)也因此跟着重量** —— 那是对的,依赖动了。
+                    if matches!(q, body_layer::measurement::Quantity::ImageJacobian) {
+                        continue;
+                    }
+                    if let body_layer::store::Answer::Measured { value, uncertainty, valid_lo, valid_hi, selftest_passed, .. } = st.ask(q.as_str()) {
+                        if value.is_empty() { continue; }
+                        let mut m = body_layer::measurement::Measurement::blank_for(q, value.len(), 1);
+                        for i in 0..value.len().min(body_layer::measurement::MAX_DIM) {
+                            m.value[i] = value[i];
+                            m.uncertainty[i] = uncertainty.get(i).copied().unwrap_or(0.0);
+                            m.valid_lo[i] = valid_lo.get(i).copied().unwrap_or(value[i]);
+                            m.valid_hi[i] = valid_hi.get(i).copied().unwrap_or(value[i]);
+                        }
+                        m.selftest_passed = selftest_passed;
+                        if body.submit(m).is_ok() { 装 += 1; }
+                    }
+                }
+                println!("[装] 从 {path} 装回 {装} 格 —— 日程只会安排还欠的那几格");
+            }
+        }
+    }
     let mut plug = Plug { ws, lay, last: first, 待发: None };
     // 🔴🔴 **一格拒绝之后必须往下走,不能原地重问。**
     // 实测(2026-08-17):第 1~5 轮全是同一格 `image_jacobian`,因为日程永远回答
@@ -401,6 +442,9 @@ fn main() {
     let mut 探幅 = 0.0f64;
     // 基座是 `reach` 那一格顺手解出来的。臂重要拿它算力臂 —— 存下来,别丢。
     let mut 基座: Option<([f64; 3], u64)> = None;
+    // 把机器人交给我们时它所在的那个位姿。每个相位开跑前先回到这儿 —— 按定义它走得到,
+    // 而上一个相位可能把手臂停在墙上(可达那一格的工作就是把它顶到走不动)。
+    let mut 起点: Option<[f64; 3]> = None;
     loop {
         let now = 轮 as u64 + 1;
         let 下一格 = (1..=40u64).find_map(|k| {
@@ -445,6 +489,14 @@ fn main() {
         //    要等到残余降到千分之一。写死 2 拍的后果实测过 —— 认块的五格全欠着。
         //    量不出来就不许跑认块那几格:那不是"少采几下",是**这一格的前置还没到**。
         let 静置 = match body_layer::derive::settle_periods(&body, 1e-3) {
+            // 🔴 静置比整个相位还长 ⇒ 它不是一个能执行的静置,是上游那一格坏了的**征状**。
+            //    实测:交付率被墙毒成 0.00066 ⇒ 静置算出 10499 拍 ⇒ 五格连着塌。
+            //    这里报缺前置而不是照跑,是为了让**病灶**具名,而不是让下游各自报"采不够"。
+            Ok(n) if n >= 步 => {
+                println!("      🔴 拒绝:MissingDependency —— 推出来的静置 {n} 拍比整相 {步} 拍还长,说明交付率/延迟那两格坏了");
+                拒过.insert(q.as_str());
+                continue;
+            }
             Ok(n) => n,
             Err(_) if selfcal::认块相(q) => {
                 println!("      🔴 拒绝:MissingDependency —— 静置拍数要由延迟+交付率推出来,而它们还没量到");
@@ -456,7 +508,15 @@ fn main() {
         if selfcal::认块相(q) {
             println!("      [协议] 静置 {静置} 拍(由这具身体的延迟+交付率推出),周期 {} 拍", 静置 + 6);
         }
-        let s = selfcal::跑一相(&mut plug, q, 0, 步, 静置);
+        if 起点.is_none() {
+            if let Some(f) = plug.sense() {
+                起点 = f.ee.get(0).map(|p| [p[0], p[1], p[2]]);
+                if let Some(p) = 起点 {
+                    println!("      [归位] 这次标定的起点记在 ({:.3},{:.3},{:.3}) —— 每相开跑前先回这儿", p[0], p[1], p[2]);
+                }
+            }
+        }
+        let s = selfcal::跑一相(&mut plug, q, 0, 步, 静置, 起点);
         // 🔴 **每一格都接到它自己的估计器上。** 接不上的那几格,拒绝的理由要是
         // `MissingDependency`(缺前置)而不是 `NotEnoughSamples`(没采够)——
         // 两者要做的下一步完全不同:前者去补前置,后者去多采几下。
