@@ -34,6 +34,8 @@ pub struct Layout {
     pub cams: Vec<Vec<String>>,
     /// 分不开的那些,原样报出来给人看。
     pub ambiguous: Vec<String>,
+    /// 遍历实际看到的叶子(路径=形状),认不出来时全靠它。
+    pub 叶子: Vec<String>,
 }
 
 /// 一台机器人报回来的数组,常常**不是**一个普通数组,而是一个自带 dtype 与 shape 的映射
@@ -118,6 +120,20 @@ pub fn 认(obs: &Value) -> Layout {
     let mut flat = Vec::new();
     走(obs, &mut Vec::new(), &mut flat);
     let mut l = Layout::default();
+    // 🔴 遍历**实际看到的叶子**原样记下来。认不出来时,只有这一份能分开
+    // "它没被当成叶子(钻进去了)" 和 "它是叶子但形状判错了" —— 而这两件修法相反。
+    l.叶子 = flat
+        .iter()
+        .map(|(p, v)| {
+            let 形 = match v {
+                Value::Array(a) => format!("数组[{}]", a.len()),
+                Value::Binary(b) => format!("字节[{}]", b.len()),
+                Value::Map(m) => format!("映射{{{}}}", m.iter().filter_map(|(k, _)| k.as_str()).collect::<Vec<_>>().join(",")),
+                o => format!("{o:?}").chars().take(18).collect(),
+            };
+            format!("{}={}", p.join("."), 形)
+        })
+        .collect();
     for (path, v) in &flat {
         // 相机:自报字节 dtype 且 shape 是三维。
         if 是图(v).is_some() {
@@ -184,6 +200,9 @@ impl Layout {
         println!("[认] 相机:{}", p(&self.cams));
         if !self.ambiguous.is_empty() {
             println!("[认] 🔴 分不开:{:?}", self.ambiguous);
+        }
+        for c in self.叶子.chunks(6) {
+            println!("[认] 叶子:{}", c.join(" | "));
         }
     }
 }
