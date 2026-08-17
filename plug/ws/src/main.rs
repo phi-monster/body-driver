@@ -114,6 +114,7 @@ fn main() {
     // 一条不回应答的连接会让对方的同步 RPC 永远等下去,两侧都不报错。
     let mut lay = discover::Layout::default();
     let mut first: Option<Value> = None;
+    let mut 听到 = 0u32;
     for _ in 0..4000 {
         let Ok(m) = ws.read() else { break };
         let tungstenite::Message::Binary(b) = m else { continue };
@@ -131,7 +132,12 @@ fn main() {
             _ => continue,
         };
         // 这一帧里带没带观测?带了就拿它认布局。
-        if let Some(o) = wire::get(&v, "payload").and_then(|p| wire::get(p, "observation")).cloned() {
+        // 🔴 观测的键**有两个可能**,而只认一个的后果是静默的:图每帧照收、每帧都当场
+        // 说"里面没有观测",于是一步都没跑过,而两侧日志全绿。这一条是本仓付过学费的。
+        if let Some(o) = wire::get(&v, "payload")
+            .and_then(|p| wire::get(p, "obs").or_else(|| wire::get(p, "observation")))
+            .cloned()
+        {
             let l2 = discover::认(&o);
             if l2.够吗().is_ok() && first.is_none() {
                 lay = l2;
@@ -145,6 +151,11 @@ fn main() {
         }
         if first.is_some() {
             break;
+        }
+        听到 += 1;
+        if 听到 % 50 == 0 {
+            println!("[装] 已听 {听到} 帧还没认出布局 —— 这几帧顶层的键是:{:?}",
+                v.as_map().map(|m| m.iter().filter_map(|(k, _)| k.as_str()).collect::<Vec<_>>()));
         }
     }
     lay.说一遍();
