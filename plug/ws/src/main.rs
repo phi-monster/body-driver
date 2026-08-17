@@ -399,6 +399,8 @@ fn main() {
     let mut 轮 = 0u32;
     // 下压那一相实际用的命令幅度,存进接触阈那一格 —— 交付比例只在这个幅度上可比。
     let mut 探幅 = 0.0f64;
+    // 基座是 `reach` 那一格顺手解出来的。臂重要拿它算力臂 —— 存下来,别丢。
+    let mut 基座: Option<([f64; 3], u64)> = None;
     loop {
         let now = 轮 as u64 + 1;
         let 下一格 = (1..=40u64).find_map(|k| {
@@ -434,6 +436,8 @@ fn main() {
             Quantity::ContactThreshold | Quantity::Floor | Quantity::Reach => 240,
             Quantity::ToolOffset | Quantity::ToolAxisColumn => 400,
             Quantity::SelfOcclusion | Quantity::GripperSpan => 300,
+            // 49 个位形 × 6 拍
+            Quantity::ArmWeight => 300,
             Quantity::ImageJacobian | Quantity::HandPixel => 300,
             _ => 90,
         };
@@ -480,6 +484,7 @@ fn main() {
                     Ok(b) => {
                         println!("      [可达] 基座解在 ({:.3},{:.3},{:.3})、半径 {:.3} m(残差 {:.4})",
                             b.value[0], b.value[1], b.value[2], b.value[3], b.uncertainty[0]);
+                        基座 = Some(([b.value[0], b.value[1], b.value[2]], now));
                         let 半径: Vec<(f64, bool)> = s
                             .reach
                             .iter()
@@ -511,7 +516,34 @@ fn main() {
             // 那是一个**代理量,不是测量**。拿它去算,会得到一个看起来正常的数
             // (实测 0.029),然后被当成量出来的东西一路用下去。
             // ⇒ 老实报缺通道。**一条点名的拒绝,比一个漂亮的假数值钱。**
-            Quantity::ArmWeight => Err(probe::Declined::MissingDependency),
+            // 🔴🔴 **臂重不要力矩通道。** 撤回记录见 `probe::arm_weight_by_asymmetry` 的文件头:
+            // 我连着三次判"这台没有力矩通道 ⇒ 量不了、天花板 14/15",而那是把
+            // `arm_weight` 的入参当成了那个量的规格。这一层里凡是跟力有关的量全从
+            // 交付比例里读 —— 臂重同理:往上顶着重力走、往下顺着重力走,两次交付之差
+            // 就是那一处的重力负载,随力臂线性增长。
+            Quantity::ArmWeight => match 基座 {
+                None => Err(probe::Declined::MissingDependency),
+                Some((b, ep)) => {
+                    // 把同一处的"往上"和"往下"配成对:相邻两条记录属于同一个位形。
+                    let mut 对: Vec<(f64, f64, f64)> = Vec::new();
+                    let mut 上: Option<(f64, f64)> = None; // (力臂, 交付比例)
+                    for &(p, 向上, cmd, got) in &s.hold {
+                        if cmd <= 0.0 { continue; }
+                        let 力臂 = ((p[0] - b[0]).powi(2) + (p[1] - b[1]).powi(2)).sqrt();
+                        let r = got / cmd;
+                        if 向上 {
+                            上 = Some((力臂, r));
+                        } else if let Some((l, ru)) = 上.take() {
+                            // 同一个位形的一对:力臂取两者平均(那两步只差 2 cm 的竖直位移)。
+                            对.push((0.5 * (l + 力臂), ru, r));
+                        }
+                    }
+                    println!("      [臂重] {} 对上下步,力臂 {:.3}–{:.3} m", 对.len(),
+                        对.iter().map(|x| x.0).fold(f64::INFINITY, f64::min),
+                        对.iter().map(|x| x.0).fold(0.0f64, f64::max));
+                    probe::arm_weight_by_asymmetry(&对, now, ep)
+                }
+            },
             // 🔴 接触阈要**两簇**:自由空间里的交付比例、压住时的交付比例。
             // 一路往下压,自然会先给出前者、碰到之后给出后者 —— 界由估计器去找,不由我切。
             Quantity::ContactThreshold => match body.get(Quantity::StepDelivery) {

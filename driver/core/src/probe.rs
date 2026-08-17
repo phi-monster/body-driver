@@ -1465,6 +1465,105 @@ pub fn floor(
     Ok(m)
 }
 
+// ---------------------------------------------------------------- 胳膊有多重(不用力矩通道)
+
+/// 胳膊有多重 —— **不要力矩传感器,也不要力矩通道**。用"往上走和往下走的交付比例之差"。
+///
+/// # 🔴 为什么会有第二条路(撤回记录,2026-08-18)
+///
+/// [`arm_weight`] 的入参是 `(关节角, 保持不动要多少力矩)`,而这具身体的观测里没有力矩。
+/// 我据此**连着三次**判"这台机器上臂重量不了,天花板 14/15"。**那是错的,而且错在
+/// 把一条路的入参当成了那个量的规格。**
+///
+/// 驱动自己的原则写在 `DRIVER_GOAL`:*"碰一下量(不用力传感器:轻轻合到停住 /
+/// 抬 3 cm 看命令 vs 实到)"*。这一层里凡是跟力有关的量,**全是从交付比例里读的** ——
+/// 接触阈是命令 vs 实到,摩擦是倾到滑的角度,"这东西多重"是抬一段看命令 vs 实到。
+/// 臂重没有任何理由例外。
+///
+/// # 判据
+///
+/// 同一处、同样幅度,**往上走顶着重力、往下走顺着重力**。两个方向的交付比例之差
+/// `(下 − 上)/2` 就是那一处的重力负载,单位是**交付比例**,不是牛顿米 —— 而下游要的
+/// 正是这个单位(接触阈就活在这个单位里)。
+///
+/// 再把手摆到不同的**力臂**上(离基座的水平距离)重复:重力力矩 = 重量 × 力臂,
+/// 所以这个差随力臂线性增长,斜率就是"这条胳膊有多重"。截距是与力臂无关的那一份
+/// (关节摩擦、控制器的不对称),**报出来而不是并进去** —— 把它算进重量会让一条
+/// 干净的胳膊显得更重,而那正是下游用来判"我碰到东西了没有"的量。
+///
+/// # 它拒绝什么
+///
+/// * 少于 5 个力臂 ⇒ [`Declined::NotEnoughSamples`]:拟不出带残差的线;
+/// * 所有采样点力臂相同 ⇒ [`Declined::Inconsistent`]:**在一个力臂上,重量和一个
+///   与力臂无关的偏置完全共线**,任何观测同时兼容两者,没有算术分得开它们;
+/// * 斜率与它自己的 1σ 分不开 ⇒ 这是**测量,不是拒绝**:一具重力补偿做得很好的胳膊
+///   斜率就是零。照 [`backlash`] 的先例收下,精度不够由准入闸去拒;
+/// * 🔴 斜率**为负**且超过 2σ ⇒ [`Declined::Inconsistent`]:那说明往上走反而比往下走
+///   交付得多。要么 z 的方向反了,要么这根本不是重力。**取绝对值会把这两种都读成
+///   一次健康的测量**,而其中一种意味着下游每一个"往下压"的判断都是反的。
+pub fn arm_weight_by_asymmetry(
+    samples: &[(f64, f64, f64)], // (离基座的水平力臂 m, 往上那一步的交付比例, 往下那一步的交付比例)
+    now_ns: u64,
+    reach_epoch: u64,
+) -> Result<Measurement, Declined> {
+    let (mut n, mut sx, mut sy, mut sxx, mut sxy) = (0.0f64, 0.0f64, 0.0f64, 0.0f64, 0.0f64);
+    let (mut x_lo, mut x_hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    for &(arm_m, up, down) in samples {
+        if !arm_m.is_finite() || !up.is_finite() || !down.is_finite() || arm_m < 0.0 {
+            continue;
+        }
+        let y = 0.5 * (down - up);
+        n += 1.0;
+        sx += arm_m;
+        sy += y;
+        sxx += arm_m * arm_m;
+        sxy += arm_m * y;
+        x_lo = x_lo.min(arm_m);
+        x_hi = x_hi.max(arm_m);
+    }
+    if n < 5.0 {
+        return Err(Declined::NotEnoughSamples);
+    }
+    let sxx_c = sxx - sx * sx / n;
+    if !(x_lo < x_hi) || sxx_c <= 0.0 {
+        return Err(Declined::Inconsistent);
+    }
+    let slope = (sxy - sx * sy / n) / sxx_c;
+    let intercept = (sy - slope * sx) / n;
+    let mut ss = 0.0f64;
+    for &(arm_m, up, down) in samples {
+        if !arm_m.is_finite() || !up.is_finite() || !down.is_finite() || arm_m < 0.0 {
+            continue;
+        }
+        let r = 0.5 * (down - up) - (intercept + slope * arm_m);
+        ss += r * r;
+    }
+    let resid = (ss / (n - 2.0)).sqrt();
+    let slope_sigma = resid / sxx_c.sqrt();
+    if !slope.is_finite() || !slope_sigma.is_finite() || !intercept.is_finite() {
+        return Err(Declined::Inconsistent);
+    }
+    if slope < -2.0 * slope_sigma {
+        return Err(Declined::Inconsistent);
+    }
+    let mut m = blank(Quantity::ArmWeight, 2, now_ns);
+    // [0] = 每米力臂上的交付比例亏损(= 这条胳膊有多重,在这个单位里)
+    // [1] = 与力臂无关的那一份(关节摩擦 / 控制器不对称),分开报,不并进重量
+    m.value[0] = slope;
+    m.value[1] = intercept;
+    m.uncertainty[0] = slope_sigma;
+    m.uncertainty[1] = resid / n.sqrt();
+    m.valid_lo[0] = x_lo;
+    m.valid_hi[0] = x_hi;
+    m.valid_lo[1] = x_lo;
+    m.valid_hi[1] = x_hi;
+    // 力臂是从基座算的,而基座是 `reach` 那一格反解出来的 —— 基座重标,这个数就该失效。
+    m.deps[0] = Some((Quantity::Reach, reach_epoch));
+    m.valid_for_ns = 0;
+    m.selftest_passed = true;
+    Ok(m)
+}
+
 // ---------------------------------------------------------------- 基座在哪
 
 /// **这条臂的基座在哪** —— 从它自己"够不着了"的那些点反解出来。

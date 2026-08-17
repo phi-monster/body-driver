@@ -2148,6 +2148,56 @@ mod end_to_end {
         );
     }
 
+    /// `arm_weight_by_asymmetry`:**没有力矩通道照样量得到胳膊有多重。**
+    ///
+    /// 撤回记录:我连着三次判"这台机器没有力矩通道 ⇒ 臂重量不了、天花板 14/15"。
+    /// 错在把 [`probe::arm_weight`] 的入参当成了那个量的规格。这一层里凡是跟力有关的
+    /// 量全从交付比例里读,臂重没有理由例外。
+    #[test]
+    fn arm_weight_needs_no_torque_channel() {
+        use probe::{arm_weight_by_asymmetry, Declined};
+        const T: u64 = 1_000_000_000;
+        const RE: u64 = 9;
+        // 一条"每米力臂亏 0.12 交付比例"的胳膊,外加 0.01 的力臂无关偏置。
+        // 上行交付 = 基准 − 亏损,下行 = 基准 + 亏损。
+        let 造 = |每米: f64, 偏置: f64, n: usize| -> Vec<(f64, f64, f64)> {
+            (0..n)
+                .map(|i| {
+                    let l = 0.10 + 0.30 * (i as f64) / ((n - 1) as f64);
+                    let g = 每米 * l + 偏置;
+                    (l, 0.89 - g, 0.89 + g)
+                })
+                .collect()
+        };
+        let m = arm_weight_by_asymmetry(&造(0.12, 0.01, 9), T, RE).expect("上下不对称就该量得出来");
+        assert!((m.value[0] - 0.12).abs() < 1e-9, "每米亏损读成 {}", m.value[0]);
+        assert!((m.value[1] - 0.01).abs() < 1e-9, "力臂无关那一份读成 {}", m.value[1]);
+        assert_eq!(m.deps[0].map(|d| d.0), Some(measurement::Quantity::Reach), "力臂从基座算,基座重标它就该失效");
+
+        // —— 必须收下、且是零:重力补偿做得好的胳膊斜率就是零,那是**测量不是拒绝**
+        //    (照 backlash 的先例)。
+        let z = arm_weight_by_asymmetry(&造(0.0, 0.0, 9), T, RE).expect("没有重力负载是一具真实的身体");
+        assert!(z.value[0].abs() < 1e-9, "补偿完好的胳膊读成 {}", z.value[0]);
+
+        // —— 必须拒:所有点在同一个力臂上。**重量和一个力臂无关的偏置在这里完全共线**,
+        //    任何观测同时兼容两者。
+        let 一个力臂: Vec<(f64, f64, f64)> = (0..9).map(|_| (0.25, 0.85, 0.93)).collect();
+        assert_eq!(arm_weight_by_asymmetry(&一个力臂, T, RE).unwrap_err(), Declined::Inconsistent);
+
+        // —— 必须拒:往上反而比往下交付得多。z 反了,或者这根本不是重力。
+        //    取绝对值会把它读成一次健康的测量,而它意味着下游每一个"往下压"都是反的。
+        assert_eq!(
+            arm_weight_by_asymmetry(&造(-0.12, 0.0, 9), T, RE).unwrap_err(),
+            Declined::Inconsistent
+        );
+
+        // —— 必须拒:样本不够。
+        assert_eq!(
+            arm_weight_by_asymmetry(&造(0.12, 0.0, 4), T, RE).unwrap_err(),
+            Declined::NotEnoughSamples
+        );
+    }
+
     /// `latency_from_beats`:**命令发出之前身体就没停住时,"第几拍才动"量的是余振。**
     #[test]
     fn latency_refuses_a_body_that_was_still_ringing() {
