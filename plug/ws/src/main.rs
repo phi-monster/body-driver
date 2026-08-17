@@ -225,7 +225,16 @@ fn main() {
                 }
             }
         } else if 听到 % 50 == 0 {
-            println!("[装] 这一帧【没有观测】(payload 里既没有 obs 也没有 observation)");
+            // 🔴 再往下一层:**payload 自己的键是什么、这一次调用叫什么名字**。
+            // "没有观测"有两种,修法相反:这一帧本来就不带(是取动作那一拍),
+            // 还是带了而我找错了键。只有把键原样印出来才分得开。
+            let pk = wire::get(&v, "payload")
+                .and_then(|p| p.as_map().map(|m| m.iter().filter_map(|(k, _)| k.as_str()).collect::<Vec<_>>()));
+            let fname = wire::get(&v, "payload")
+                .and_then(|p| wire::get(p, "func_name"))
+                .and_then(|x| x.as_str())
+                .unwrap_or("(没有 func_name)");
+            println!("[装] 这一帧没有观测 · func_name={fname} · payload 的键={pk:?}");
         }
         // 🔴 线上每一条都记类型 —— "没收到"和"收到了但回错了"只有这一行能分开,而它零成本。
         *计数.entry(kind.clone()).or_insert(0u32) += 1;
