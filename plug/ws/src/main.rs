@@ -352,6 +352,47 @@ fn main() {
     // "还欠这一格",而这一格这一轮量不出来 ⇒ **整轮自标定停在第一格上打转**,
     // 而它每一轮都在正常打印,看起来像在推进。
     // ⇒ 拒过的记下来,下一轮问日程时把它跳过;**拒绝本身是输出,不是重试的理由**。
+    // 手眼那一格取出来的东西:水平面那 2×2、它的 1σ、以及它的纪元。
+    // 🔴 纪元必须从**存下来的那一份**上取,不能拿"现在第几轮"顶 —— 否则下游每一轮
+    //    都被判成"你依赖的那一格换版了,重来",于是永远量不完(实测发生过)。
+    fn 平面尺(
+        body: &body_layer::Body,
+    ) -> Result<([f64; 4], [f64; 4], u64), probe::Declined> {
+        let m = body
+            .get(Quantity::ImageJacobian)
+            .ok_or(probe::Declined::MissingDependency)?;
+        if m.dim < 4 {
+            return Err(probe::Declined::MissingDependency);
+        }
+        Ok((
+            [m.value[0], m.value[1], m.value[2], m.value[3]],
+            [m.uncertainty[0], m.uncertainty[1], m.uncertainty[2], m.uncertainty[3]],
+            m.epoch,
+        ))
+    }
+    // 把弧上的每个点从画面单位换成水平面里的米。换不动的点原样丢掉 —— 补一个
+    // 猜出来的坐标,比少一个点糟得多。
+    fn 弧换米(
+        arc: &[(u32, f64, f64, f64)],
+        jac: &[f64; 4],
+        sig: &[f64; 4],
+    ) -> Vec<(u32, f64, f64, f64)> {
+        arc.iter()
+            .filter_map(|&(c, a, u, v)| {
+                probe::image_to_plane(jac, sig, (u, v)).ok().map(|((x, y), _)| (c, a, x, y))
+            })
+            .collect()
+    }
+    // 这个方向是第几条射线。方向由探针发出去时就定死,这里只是把它认回来。
+    fn 射线号(d: [f64; 3]) -> usize {
+        const D: [[f64; 3]; 6] = [
+            [1.0, 0.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 1.0, 0.0],
+            [0.0, -1.0, 0.0], [0.0, 0.0, 1.0], [0.577, 0.577, 0.577],
+        ];
+        D.iter()
+            .position(|e| (e[0] - d[0]).abs() + (e[1] - d[1]).abs() + (e[2] - d[2]).abs() < 1e-9)
+            .unwrap_or(usize::MAX)
+    }
     let mut 拒过: std::collections::BTreeSet<&'static str> = Default::default();
     let mut 成: Vec<&'static str> = Vec::new();
     let mut 跟踪 = body_layer::hand::HandTracker::new(body_layer::probe::default_hand_config());
@@ -391,6 +432,8 @@ fn main() {
         // 可达要把两边的墙都夹住;而晃钳口那一格一个循环就要六步。
         let 步 = match q {
             Quantity::ContactThreshold | Quantity::Floor | Quantity::Reach => 240,
+            Quantity::ToolOffset | Quantity::ToolAxisColumn => 240,
+            Quantity::SelfOcclusion | Quantity::GripperSpan => 180,
             Quantity::ImageJacobian | Quantity::HandPixel => 180,
             _ => 90,
         };
@@ -400,7 +443,42 @@ fn main() {
         // 两者要做的下一步完全不同:前者去补前置,后者去多采几下。
         let got = match q {
             Quantity::StepDelivery => probe::step_delivery(&s.steps, now),
-            Quantity::Reach => probe::reach(&s.reach, now),
+            // 🔴 可达要的是**离基座的半径**,而基座不在观测里。先从"每条射线上走不动的
+            //    那个点"反解出基座(它们落在同一个球面上),再把每个采样点换成半径。
+            //    上一版直接把**步长**塞进去当半径 —— 一个和半径毫无关系的数,于是每轮
+            //    都拒 `Inconsistent`,而那条拒绝读起来像是身体自相矛盾。
+            Quantity::Reach => {
+                // 每条射线上最后一个还走得动的点 = 那条射线的卡住点。
+                let mut 卡住: Vec<([f64; 3], [f64; 3])> = Vec::new();
+                for j in 0..6usize {
+                    let 本条: Vec<_> = s.reach.iter().filter(|(_, d, _)| 射线号(*d) == j).collect();
+                    if let Some(idx) = 本条.iter().rposition(|(_, _, ok)| *ok) {
+                        // 后面还有走不动的,才算真的撞到墙;一路都走得动 = 这条射线没探到边。
+                        if idx + 1 < 本条.len() {
+                            卡住.push((本条[idx].0, 本条[idx].1));
+                        }
+                    }
+                }
+                println!("      [可达] {} 条射线撞到了墙", 卡住.len());
+                match probe::base_from_stalls(&卡住, now) {
+                    Err(e) => Err(e),
+                    Ok(b) => {
+                        println!("      [可达] 基座解在 ({:.3},{:.3},{:.3})、半径 {:.3} m(残差 {:.4})",
+                            b.value[0], b.value[1], b.value[2], b.value[3], b.uncertainty[0]);
+                        let 半径: Vec<(f64, bool)> = s
+                            .reach
+                            .iter()
+                            .map(|(p, _, ok)| {
+                                let r = ((p[0] - b.value[0]).powi(2) + (p[1] - b.value[1]).powi(2)
+                                    + (p[2] - b.value[2]).powi(2))
+                                .sqrt();
+                                (r, *ok)
+                            })
+                            .collect();
+                        probe::reach(&半径, now)
+                    }
+                }
+            }
             Quantity::Friction => probe::friction(&s.tilt, now),
             Quantity::Latency => probe::latency(s.latency.first().copied(), s.latency.len() as u32 + 12, now),
             Quantity::Backlash => probe::backlash(&s.reversal, now),
@@ -415,12 +493,24 @@ fn main() {
             Quantity::ArmWeight => Err(probe::Declined::MissingDependency),
             // 🔴 接触阈要**两簇**:自由空间里的交付比例、压住时的交付比例。
             // 一路往下压,自然会先给出前者、碰到之后给出后者 —— 界由估计器去找,不由我切。
-            Quantity::ContactThreshold => {
-                探幅 = s.press.iter().map(|(c, _, _)| *c).fold(0.0f64, f64::max);
-                let r: Vec<f64> = s.press.iter().filter(|(c, _, _)| *c > 0.0).map(|(c, a, _)| a / c).collect();
-                let (free, touch): (Vec<f64>, Vec<f64>) = r.iter().partition(|x| **x > 0.5);
-                probe::contact_threshold(&free, &touch, probe::Polarity::LowerOnContact, now, now)
-            }
+            Quantity::ContactThreshold => match body.get(Quantity::StepDelivery) {
+                // 🔴 分两簇要有个参照,而**那个参照就是自由空间的交付率**,不是一个填的 0.5。
+                //    这里原来写死 `> 0.5` —— 换一具交付率只有 0.4 的身体(慢、软、增益低),
+                //    它**自由移动时的每一步都会被归进"压住"那一簇**,于是两簇变成一簇,
+                //    估计器答"你这两组读起来一样",而身体一切正常。
+                //    以交付率的一半为界:自由那簇围着 0.883,压住那簇趴在 0.01–0.26,
+                //    中间空得很宽,界落在哪儿都不敏感 —— 敏感的是它**跟着身体走**。
+                None => Err(probe::Declined::MissingDependency),
+                Some(sd) => {
+                    探幅 = s.press.iter().map(|(c, _, _)| *c).fold(0.0f64, f64::max);
+                    let 界 = sd.value[0] * 0.5;
+                    let r: Vec<f64> = s.press.iter().filter(|(c, _, _)| *c > 0.0).map(|(c, a, _)| a / c).collect();
+                    let (free, touch): (Vec<f64>, Vec<f64>) = r.iter().partition(|x| **x > 界);
+                    println!("      [接触] 自由 {} 个 / 压住 {} 个(界 = 交付率 {:.3} 的一半)",
+                        free.len(), touch.len(), sd.value[0]);
+                    probe::contact_threshold(&free, &touch, probe::Polarity::LowerOnContact, now, sd.epoch)
+                }
+            },
             // 这几格要一把「像素每米」的尺,而那一格本轮没量到 ⇒ 缺前置,不是没采够。
             // 🔴 认到手了就接估计器 —— 这一格是四格的前置,它一通,下游连锁解开。
             // `n_joints` 这里是**这具身体接受命令的轴数**(它吃笛卡尔位姿 ⇒ 三个);
@@ -453,12 +543,107 @@ fn main() {
                 println!("      [认手] 攒到 {} 个样本,交给估计器", sm.len());
                 probe::image_jacobian(&sm, 3, now, 0.0)
             }
-            Quantity::GripperSpan
-            | Quantity::ToolOffset
-            | Quantity::ToolAxisColumn
-            | Quantity::SelfOcclusion
-            | Quantity::HomePose
-            | Quantity::Floor => Err(probe::Declined::MissingDependency),
+            // 🔴🔴 **这六格从前在这里写着一句 `Err(MissingDependency)` 占位符。**
+            // 动作程序照跑、样本照采、还照样打印在日志上,然后**整批扔进那句 Err** ——
+            // 于是日志上出现的是六条**长得很体面的拒绝**,而真相是这一层根本没接线。
+            // 一条点名的拒绝值钱,前提是它真的是身体说的;冒充成拒绝的"我没写完"
+            // **比一个坏数值更难发现**,因为它读起来完全正常。
+            //
+            // 下面六格全部接到各自的估计器上。共用的一件事:**画面坐标先换成米,再进估计器**。
+            // 斜着看桌面的相机把水平面里的圆压成椭圆,一把标量尺读不出那个圆的半径;
+            // 先过 `image_to_plane`,圆还是圆。
+            Quantity::GripperSpan => match 平面尺(&body) {
+                Err(e) => Err(e),
+                Ok((jac, sig, jac_epoch)) => {
+                    let mut 米: Vec<(f64, f64)> = Vec::new();
+                    let mut rel = 0.0f64;
+                    for &(m, du, dv) in &s.jaw {
+                        if let Ok(((x, y), r)) = probe::image_to_plane(&jac, &sig, (du, dv)) {
+                            米.push((m, x.hypot(y)));
+                            rel = r;
+                        }
+                    }
+                    println!("      [跨度] {} 个循环配上了对,换成米之后交给估计器", 米.len());
+                    probe::gripper_span(&米, 1.0, rel, now, jac_epoch)
+                }
+            },
+            // 哪一列是工具轴:三列各扫一圈,**弧最小的那一列**就是它。
+            Quantity::ToolAxisColumn => match 平面尺(&body) {
+                Err(e) => Err(e),
+                Ok((jac, sig, jac_epoch)) => {
+                    let 米 = 弧换米(&s.arc, &jac, &sig);
+                    println!("      [工具] 三列共 {} 个弧点,换成米之后交给估计器", 米.len());
+                    probe::tool_axis_column(&米, now, jac_epoch)
+                }
+            },
+            // 工具尖到法兰多长:绕**垂直于工具轴**的那一列转,工作点扫出的弧半径就是它。
+            // 🔴 所以它必须先知道哪一列是工具轴 —— 绕工具轴自己转,弧半径是 0,
+            //    拿那一列去拟,量到的是"这具身体没有工具",而它明明有。
+            Quantity::ToolOffset => match (平面尺(&body), body.get(Quantity::ToolAxisColumn)) {
+                (Err(e), _) => Err(e),
+                (_, None) => Err(probe::Declined::MissingDependency),
+                (Ok((jac, sig, jac_epoch)), Some(轴)) => {
+                    let 轴列 = 轴.value[0].round() as u32;
+                    let 米 = 弧换米(&s.arc, &jac, &sig);
+                    // 垂直于工具轴的两列里,挑扫得**最开**的那一列:偏置沿工具轴,
+                    // 绕任一垂直轴转都扫出同样的半径,而扫得开的那一列信噪比最好。
+                    let mut 最好: Option<(u32, f64)> = None;
+                    for c in 0..3u32 {
+                        if c == 轴列 {
+                            continue;
+                        }
+                        let pts: Vec<_> = 米.iter().filter(|p| p.0 == c).collect();
+                        if pts.len() < 3 {
+                            continue;
+                        }
+                        let n = pts.len() as f64;
+                        let (cx, cy) = (pts.iter().map(|p| p.2).sum::<f64>() / n, pts.iter().map(|p| p.3).sum::<f64>() / n);
+                        let sp = (pts.iter().map(|p| (p.2 - cx).powi(2) + (p.3 - cy).powi(2)).sum::<f64>() / n).sqrt();
+                        if 最好.map(|(_, b)| sp > b).unwrap_or(true) {
+                            最好 = Some((c, sp));
+                        }
+                    }
+                    match 最好 {
+                        None => Err(probe::Declined::NotEnoughSamples),
+                        Some((c, _)) => {
+                            let arc: Vec<(f64, f64, f64)> =
+                                米.iter().filter(|p| p.0 == c).map(|p| (p.1, p.2, p.3)).collect();
+                            println!("      [工具] 工具轴是第 {轴列} 列,拿第 {c} 列的 {} 个弧点拟半径", arc.len());
+                            probe::tool_offset(&arc, 1.0, 0.0, now, jac_epoch)
+                        }
+                    }
+                }
+            },
+            // 自遮挡:一个位姿一张剪影掩膜,扫一圈就是"哪些地方经常被自己挡住"。
+            Quantity::SelfOcclusion => match 平面尺(&body) {
+                Err(e) => Err(e),
+                Ok((_, _, jac_epoch)) => {
+                    println!("      [遮挡] 攒到 {} 张掩膜", s.occ.len());
+                    probe::self_occlusion(&s.occ, now, jac_epoch)
+                }
+            },
+            // 原位:回同一个地方若干次,散布就是它自己的重复精度。
+            // 🔴 "散布多大算回不去"这条线**不是填的** —— 它是这一相里实际命令过的最大行程:
+            //    散布跟你让它走的那段路一样大,就等于它根本没在回去。
+            Quantity::HomePose => {
+                let 行程 = s.steps.iter().map(|(c, _)| *c).fold(0.0f64, f64::max);
+                println!("      [原位] {} 次归位,判据用这一相自己的最大行程 {:.4} m", s.home_seen.len(), 行程);
+                if 行程 > 0.0 {
+                    probe::home_pose(&s.home_seen, 行程, now)
+                } else {
+                    Err(probe::Declined::NoResponse)
+                }
+            }
+            // 支撑面:被挡住的那些样本此刻的高度。**不是"走到过的最低点"** ——
+            // 最低点是运动的终点,被挡住的位置才是那个面。
+            Quantity::Floor => match body.get(Quantity::ContactThreshold) {
+                None => Err(probe::Declined::MissingDependency),
+                Some(ct) => {
+                    let 压住 = s.press.iter().filter(|(c, a, _)| *c > 0.0 && a / c < ct.value[0]).count();
+                    println!("      [桌面] {} 个样本里 {} 个被挡住(接触阈 {:.4})", s.press.len(), 压住, ct.value[0]);
+                    probe::floor(&s.press, ct.value[0], now, ct.epoch)
+                }
+            },
         };
         match got {
             Ok(m) => {

@@ -78,12 +78,24 @@ pub fn prerequisites(q: Quantity) -> &'static [Quantity] {
         GripperSpan => &[ImageJacobian],
         // The occlusion map is a map of the camera's frame.
         SelfOcclusion => &[ImageJacobian],
-        // Any contact signal a joint can produce has the gravity load in it. Measure the hold
-        // torque first or the threshold is a statement about the arm's own weight.
-        ContactThreshold => &[ArmWeight],
+        // 🔴 **这条依赖曾经写成 `&[ArmWeight]`,而那是给【力矩式】接触判据写的。**
+        // 那句理由——"关节给得出的接触信号里含着重力负载"——对读关节力矩的判据成立;
+        // 我们的判据不读力矩,它读的是**交付比例**:命令降 10 mm、实到降 1.8 mm。重力
+        // 不进这个比值——分子分母是同一段位移的两端,它同增同减。而自由空间里因自重
+        // 造成的下垂,**已经整个落在 `StepDelivery` 那 0.883 里**:接触判据比的就是
+        // "现在这一步的交付,和自由空间的交付差多少"。
+        // 代价照记(2026-08-17):挂着 ArmWeight 时,接触阈**已经量出 0.117、曲线干净**
+        // (自由 4.5 / 碰上 1.8 / 抬起 3.9),却在 `submit` 被 `UnmeasuredDependency` 挡回;
+        // 而 ArmWeight 在没有力矩通道的机器上**永远量不到** ⇒ 这一格连同 `Floor` 被
+        // 一条写错的依赖永久锁死,日志上看起来却像身体自己说测不了。
+        ContactThreshold => &[StepDelivery],
         // The arc the working point sweeps is read in the camera's frame and converted with the
         // same ruler the span uses.
-        ToolOffset | ToolAxisColumn => &[ImageJacobian],
+        ToolAxisColumn => &[ImageJacobian],
+        // 🔴 偏置要绕**垂直于工具轴**的那一列去转才扫得出半径。绕工具轴自己转,工作点原地
+        //    不动、弧半径是 0 —— 拿那一列去拟,量到的是"这具身体没有工具",而它明明有,
+        //    并且那个 0 长得和一个真正没有偏置的工具一模一样。
+        ToolOffset => &[ImageJacobian, ToolAxisColumn],
         // 🔴 The floor is read as a stop in the delivered-motion signal, so it inherits that
         // ruler's dependency chain -- re-measure the contact threshold and the floor map built on
         // top of it is no longer trustworthy, automatically, without anyone remembering.

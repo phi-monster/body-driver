@@ -116,6 +116,15 @@ pub struct Reading {
     pub m1_px: u32,
     /// 见 [`Reading::m1_px`]。
     pub m2_px: u32,
+    /// 🔴 **这一刻这具身体自己占住了画面的哪几格**(粗网格,行优先,
+    /// [`crate::probe::OCCLUSION_ROWS`] × [`crate::probe::OCCLUSION_COLS`],每格一个 bit)。
+    ///
+    /// 双响像素就是"这个部件此刻在哪儿" —— 也就是**这具身体自己的剪影**。自遮挡那一格
+    /// 要的正是它:一个位姿一张掩膜,扫一圈就知道哪些地方经常被自己挡住。
+    ///
+    /// 这里给出来而不是让调用方重算,理由是这一整套判据(地板、双响、连通)已经在这儿
+    /// 跑过了 —— 在外面照着重写一个,就是本仓反复付过学费的那件事。
+    pub cells: u32,
 }
 
 /// Read one excitation.
@@ -169,6 +178,22 @@ pub fn candidates(
 
     let (_lab3, mom3) = label(&here, w, h);
     let moved_px = mom3.iter().map(|m| m.cnt).sum();
+
+    // 这一刻的剪影落在哪几格。用双响掩膜 `here`(= 部件此刻所在),不用 `m1`/`m2` ——
+    // 那两个各含一半"来过"和"要去"的地方,拿它们当剪影会把身体画得比它本身宽一步。
+    let mut cells: u32 = 0;
+    {
+        use crate::probe::{OCCLUSION_COLS, OCCLUSION_ROWS};
+        for (i, on) in here.iter().enumerate() {
+            if !*on {
+                continue;
+            }
+            let cx = (i % w) * OCCLUSION_COLS / w.max(1);
+            let cy = (i / w) * OCCLUSION_ROWS / h.max(1);
+            let idx = cy.min(OCCLUSION_ROWS - 1) * OCCLUSION_COLS + cx.min(OCCLUSION_COLS - 1);
+            cells |= 1u32 << idx;
+        }
+    }
 
     // 🔴 HOW FAR EACH PART TRAVELLED, and why it is not read off the regions of one difference.
     //
@@ -266,7 +291,7 @@ pub fn candidates(
         }
     }
     cands.sort_desc_by_pixels();
-    Ok(Reading { cands, floor, moved_px, pairs, pair_dir, m1_px, m2_px })
+    Ok(Reading { cands, floor, moved_px, pairs, pair_dir, m1_px, m2_px, cells })
 }
 
 /// 🔴 **A GRIPPER IS TWO THINGS THAT TRAVEL TOWARDS EACH OTHER, AND ITS POINT IS BETWEEN THEM.**

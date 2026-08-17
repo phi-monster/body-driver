@@ -2046,10 +2046,216 @@ mod end_to_end {
         );
         assert_eq!(
             m.deps[0].map(|d| d.0),
-            Some(measurement::Quantity::ArmWeight),
-            "any contact signal a joint produces carries the gravity load; pick up a payload and \
-             this must go invalid while its own clock still says fresh"
+            Some(measurement::Quantity::StepDelivery),
+            "这个判据读的是位移比,不是关节力矩 —— 它的参照是【自由空间的交付率】。\
+             重挂到 ArmWeight 上,就等于让一台没有力矩通道的机器永远量不到接触阈"
         );
+    }
+
+    /// `floor`:**"一次都没被挡住"和"支撑面很低"必须是两个不同的答案。**
+    #[test]
+    fn floor_refuses_what_it_cannot_answer() {
+        use probe::{floor, Declined};
+        const T: u64 = 1_000_000_000;
+        const CE: u64 = 5;
+        // 一次完整的"降到碰上、抬起来、再降":自由段交付 0.88,压住段交付 0.03。
+        let 一轮 = |底: f64, 起: f64| -> Vec<(f64, f64, f64)> {
+            let mut v = Vec::new();
+            let mut z = 起;
+            while z - 0.01 > 底 {
+                v.push((0.01, 0.0088, z));
+                z -= 0.0088;
+            }
+            for _ in 0..4 {
+                v.push((0.01, 0.0003, 底));
+            }
+            v
+        };
+
+        // —— 必须拒:整相都在空中。**这跟"支撑面在很低的地方"是两件事**,而"取最小 z"
+        //    会把两者读成同一个数,于是一次没碰到桌子的标定会报出一个像模像样的桌面高度。
+        let 空中: Vec<(f64, f64, f64)> = (0..30).map(|i| (0.01, 0.0088, 0.5 - 0.0088 * i as f64)).collect();
+        assert_eq!(floor(&空中, 0.3, T, CE).unwrap_err(), Declined::NoResponse);
+
+        // —— 必须拒:接触阈没量到。没有阈就没有"被挡住"这件事。
+        assert_eq!(floor(&一轮(0.10, 0.30), 0.0, T, CE).unwrap_err(), Declined::MissingDependency);
+        assert_eq!(floor(&一轮(0.10, 0.30), f64::NAN, T, CE).unwrap_err(), Declined::MissingDependency);
+
+        // —— 必须拒:只被挡住一两下,给不出散布。
+        let mut 少: Vec<(f64, f64, f64)> = 空中.clone();
+        少.push((0.01, 0.0003, 0.10));
+        少.push((0.01, 0.0003, 0.10));
+        assert_eq!(floor(&少, 0.3, T, CE).unwrap_err(), Declined::NotEnoughSamples);
+
+        // —— 必须拒:被挡住的位置比自由走过的最高点还高。探针一起步就顶着东西,或者
+        //    交付比例的分母不是这一步的命令 —— 而**平均一下照样给得出一个正常的高度**。
+        let 反常: Vec<(f64, f64, f64)> = (0..20)
+            .map(|i| if i % 2 == 0 { (0.01, 0.0003, 0.40) } else { (0.01, 0.0088, 0.20) })
+            .collect();
+        assert_eq!(floor(&反常, 0.3, T, CE).unwrap_err(), Declined::Inconsistent);
+
+        // —— 必须收下:三轮"降—抬—降",每轮都在 0.10 m 处被挡住。
+        let mut 三轮 = 一轮(0.10, 0.30);
+        三轮.extend(一轮(0.10, 0.30));
+        三轮.extend(一轮(0.10, 0.30));
+        let m = floor(&三轮, 0.3, T, CE).expect("反复撞到同一个面必须量得出来");
+        assert!((m.value[0] - 0.10).abs() < 1e-6, "支撑面读成 {},应当是 0.10", m.value[0]);
+        assert_eq!(m.deps[0].map(|d| d.0), Some(measurement::Quantity::ContactThreshold));
+
+        // —— 支撑面必须是**被挡住的位置**,不是**走到过的最低点**。让最后一轮多走一步:
+        //    最低点比真实台面低一个步长,而被挡住的那些样本仍然在台面上。
+        let mut 走过头 = 三轮.clone();
+        走过头.push((0.01, 0.0088, 0.09)); // 一步自由的、比台面还低的位置
+        let m2 = floor(&走过头, 0.3, T, CE).expect("多一个自由样本不该让它拒绝");
+        assert!(
+            (m2.value[0] - 0.10).abs() < 1e-6,
+            "支撑面被那个走过头的自由样本拉到了 {} —— 判据必须是【被挡住】,不是【最低】",
+            m2.value[0]
+        );
+    }
+
+    /// `image_ruler_along`:**塌成一条线的手眼必须拒绝,而求逆照样会给出一个数。**
+    #[test]
+    fn image_ruler_refuses_a_degenerate_hand_eye() {
+        use probe::{image_ruler_along, Declined};
+        // 一把干净的尺:x 走一米画面挪 400 单位(沿 u),y 走一米挪 400 单位(沿 v)。
+        let jac = [400.0, 0.0, 0.0, 400.0];
+        let sig = [4.0, 4.0, 4.0, 4.0];
+        let (r, s) = image_ruler_along(&jac, &sig, (1.0, 0.0)).expect("正交的手眼必须给得出尺");
+        assert!((r - 400.0).abs() < 1e-9, "沿 u 的尺读成 {r}");
+        assert!(s > 0.0, "尺必须带自己的 1σ,否则下游会把它当精确值");
+        // 斜 45° 方向上,尺仍然是 400(各向同性),这是这个函数的正确性锚点。
+        let (r45, _) = image_ruler_along(&jac, &sig, (1.0, 1.0)).unwrap();
+        assert!((r45 - 400.0).abs() < 1e-9, "45° 上读成 {r45}");
+
+        // 各向异性:x 走一米挪 400,y 走一米挪 100 ⇒ 沿 v 的尺必须是 100,不是 400。
+        // **随便挑一列当尺,这里就会错 4 倍,而两个数看起来同样正常。**
+        let 扁 = [400.0, 0.0, 0.0, 100.0];
+        let (ru, _) = image_ruler_along(&扁, &sig, (1.0, 0.0)).unwrap();
+        let (rv, _) = image_ruler_along(&扁, &sig, (0.0, 1.0)).unwrap();
+        assert!((ru - 400.0).abs() < 1e-9 && (rv - 100.0).abs() < 1e-9, "各向异性读成 {ru}/{rv}");
+
+        // —— 必须拒:两列共线 ⇒ 水平面在画面里塌成一条线,这个方向上的尺不存在。
+        let 共线 = [400.0, 200.0, 800.0, 400.0];
+        assert_eq!(
+            image_ruler_along(&共线, &sig, (1.0, 0.0)).unwrap_err(),
+            Declined::Inconsistent
+        );
+        // —— 必须拒:没有方向,就没有"这个方向上的尺"。
+        assert_eq!(
+            image_ruler_along(&jac, &sig, (0.0, 0.0)).unwrap_err(),
+            Declined::MissingDependency
+        );
+    }
+
+    /// `base_from_stalls`:**基座不在观测契约里,但它自己走不动的那几个地方把它交代了。**
+    #[test]
+    fn base_from_stalls_recovers_a_shoulder_nobody_reported() {
+        use probe::{base_from_stalls, Declined};
+        const T: u64 = 1_000_000_000;
+        let 真基座 = [0.31f64, -0.12, 0.47];
+        let 真半径 = 0.62f64;
+        // 六条方向不同的射线,各自在同一个球面上走不动。
+        let 方向 = [
+            [1.0f64, 0.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 1.0, 0.0],
+            [0.0, -1.0, 0.0], [0.0, 0.0, 1.0], [0.6, 0.8, 0.0],
+        ];
+        let 卡住: Vec<([f64; 3], [f64; 3])> = 方向
+            .iter()
+            .map(|d| {
+                let n = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+                let u = [d[0] / n, d[1] / n, d[2] / n];
+                ([真基座[0] + 真半径 * u[0], 真基座[1] + 真半径 * u[1], 真基座[2] + 真半径 * u[2]], u)
+            })
+            .collect();
+        let m = base_from_stalls(&卡住, T).expect("同一球面上的六个点必须解得出球心");
+        for i in 0..3 {
+            assert!((m.value[i] - 真基座[i]).abs() < 1e-6, "球心第 {i} 维读成 {}", m.value[i]);
+        }
+        assert!((m.value[3] - 真半径).abs() < 1e-6, "半径读成 {}", m.value[3]);
+
+        // —— 必须拒:三个点定不了球。
+        assert_eq!(base_from_stalls(&卡住[..3], T).unwrap_err(), Declined::NotEnoughSamples);
+        // —— 必须拒:四个点共面 ⇒ 球心不唯一,**而消元照样会给出一个坐标**。
+        let e = [0.0f64, 0.0, 1.0];
+        let 共面 = [
+            ([0.0, 0.0, 0.0], e), ([1.0, 0.0, 0.0], e), ([0.0, 1.0, 0.0], e),
+            ([1.0, 1.0, 0.0], e), ([0.5, 0.5, 0.0], e),
+        ];
+        assert_eq!(base_from_stalls(&共面, T).unwrap_err(), Declined::Inconsistent);
+        // —— 必须拒:内边界的点混进来了。它们是**朝着球心走的时候**卡住的
+        //    (自碰 / 关节限位),而外边界的定义是"再往外就够不着"。
+        //    残差检查放它们过去了:混进三个内点,拟出半径 0.498、残差 0.252,
+        //    `残差 < 半径` 照样成立 —— 所以判据必须是方向,不是残差大小。
+        let mut 两层 = 卡住.clone();
+        for i in 0..3usize {
+            let mut p = 真基座;
+            let mut d = [0.0f64; 3];
+            p[i] += 0.05;
+            d[i] = -1.0; // 朝着球心走
+            两层.push((p, d));
+        }
+        assert_eq!(base_from_stalls(&两层, T).unwrap_err(), Declined::Inconsistent);
+    }
+
+    /// `image_to_plane`:**斜着看的相机把圆压成椭圆,而一把标量尺读不出那个圆的半径。**
+    #[test]
+    fn image_to_plane_recovers_a_circle_a_scalar_ruler_would_distort() {
+        use probe::{image_ruler_along, image_to_plane};
+        // 一台斜着看桌面的相机:x 走一米挪 400 单位,y 走一米只挪 100(前后方向被压扁)。
+        let jac = [400.0, 0.0, 0.0, 100.0];
+        let sig = [4.0, 4.0, 4.0, 4.0];
+        // 水平面里一个半径 0.05 m 的圆,投影成 (0.05*400, 0.05*100) 的椭圆。
+        let 半径 = 0.05f64;
+        for i in 0..16 {
+            let a = std::f64::consts::TAU * i as f64 / 16.0;
+            let (uv_u, uv_v) = (半径 * a.cos() * 400.0, 半径 * a.sin() * 100.0);
+            let ((x, y), _) = image_to_plane(&jac, &sig, (uv_u, uv_v)).unwrap();
+            assert!(
+                (x.hypot(y) - 半径).abs() < 1e-9,
+                "换回米之后半径读成 {},应当处处是 {}",
+                x.hypot(y),
+                半径
+            );
+        }
+        // 而一把标量尺在这两个方向上差 4 倍 —— 这就是"先换米、再拟圆"存在的理由。
+        let (ru, _) = image_ruler_along(&jac, &sig, (1.0, 0.0)).unwrap();
+        let (rv, _) = image_ruler_along(&jac, &sig, (0.0, 1.0)).unwrap();
+        assert!(ru / rv > 3.9, "这个反例本身要成立:两个方向的尺必须真的差着倍数");
+    }
+
+    /// `tool_axis_column`:**腕根本没转的时候,"散布最小的那一根"是噪声的排序。**
+    #[test]
+    fn tool_axis_column_refuses_a_wrist_that_did_not_turn() {
+        use probe::{tool_axis_column, Declined};
+        const T: u64 = 1_000_000_000;
+        const JE: u64 = 7;
+        // 绕第 `axis` 列转时工作点不动;另外两列扫出半径 `r` 的弧。
+        let 弧 = |axis: usize, r: f64, 抖: f64| -> Vec<(u32, f64, f64, f64)> {
+            let mut v = Vec::new();
+            for c in 0..3usize {
+                for k in 0..8u32 {
+                    let a = 0.15 * k as f64;
+                    let rad = if c == axis { 抖 } else { r };
+                    v.push((c as u32, a, 0.5 + rad * a.cos(), 0.5 + rad * a.sin()));
+                }
+            }
+            v
+        };
+
+        // —— 必须拒:三列都不动 ⇒ 腕没转,或者工作点根本没被看见。
+        assert_eq!(tool_axis_column(&弧(0, 0.0, 0.0), T, JE).unwrap_err(), Declined::NoResponse);
+        // —— 必须拒:少一列。
+        let mut 缺一列 = 弧(1, 0.05, 0.0);
+        缺一列.retain(|s| s.0 != 2);
+        assert_eq!(tool_axis_column(&缺一列, T, JE).unwrap_err(), Declined::NotEnoughSamples);
+        // —— 必须拒:三列扫出的弧一样大 ⇒ 分不出哪一根是工具轴。**指错一根轴,
+        //    每一次"绕工具轴微调"都会把工具尖甩出去。**
+        assert_eq!(tool_axis_column(&弧(9, 0.05, 0.0), T, JE).unwrap_err(), Declined::Inconsistent);
+        // —— 必须收下:第 1 列不动,另外两列扫出明显的弧。
+        let m = tool_axis_column(&弧(1, 0.05, 0.0), T, JE).expect("一列明显不动必须指认得出来");
+        assert_eq!(m.value[0], 1.0, "工具轴指成了第 {} 列", m.value[0]);
+        assert!(m.uncertainty[0] > 0.0, "余量必须报出来 —— 勉强分开和干脆利落不是一回事");
     }
 
     /// `self_occlusion`: the all-zero map is the case that matters.
