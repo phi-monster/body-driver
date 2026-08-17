@@ -200,6 +200,7 @@ impl Quantity {
     // ⇒ 谁再加一个量,这里必须跟着改;`ALL` 那张表和这个数对不上时,
     //    下面那条断言会在测试里直接失败,不会拖到线上。
     pub const COUNT: usize = 15;
+
     /// 全部的量,一个不落。🔴 **加一个变体必须加进这里** —— 下面那条测试会核它与
     /// `COUNT` 是否一致,于是"加了量忘了加槽"在测试里就炸,不会拖到线上崩一整轮标定。
     pub const ALL: [Quantity; Quantity::COUNT] = [
@@ -432,6 +433,29 @@ pub struct Measurement {
 }
 
 impl Measurement {
+    /// 一个空的测量壳子:量、维数、时间戳。**给"把磁盘上的标定装回身体"用。**
+    ///
+    /// 探针内部那个同名私有构造只服务估计器;读回那条路在插头里,跨了 crate 边界,
+    /// 于是要么把这个构造公开,要么在外面照着重写一个 —— 而照着重写正是本仓反复付过
+    /// 学费的那件事(字段少填一个,还原出来的量就绕过了准入闸)。
+    pub fn blank_for(q: Quantity, dim: usize, now_ns: u64) -> Measurement {
+        Measurement {
+            axis_kind: [AxisKind::Interval; MAX_DIM],
+            quantity: q,
+            dim,
+            value: [0.0; MAX_DIM],
+            uncertainty: [0.0; MAX_DIM],
+            valid_lo: [0.0; MAX_DIM],
+            valid_hi: [0.0; MAX_DIM],
+            measured_at_ns: now_ns,
+            valid_for_ns: 0,
+            deps: [None; MAX_DEPS],
+            epoch: 0,
+            prev_epoch: 0,
+            selftest_passed: true,
+        }
+    }
+
     /// Validate everything that can be checked without looking at the rest of the store.
     ///
     /// `is_measured` answers "has this quantity ever been measured on this body", so that a

@@ -404,6 +404,18 @@ pub fn step_delivery(
         // delivery genuinely varies with it.
         return Err(Declined::Inconsistent);
     }
+    // 🔴 **散布和值一样大 ⇒ 这批样本并不同意一个交付率。**
+    //
+    // 中位数 + MAD 已经很稳,但稳的估计量在**一半以上的样本都是坏的**时候照样给出一个数,
+    // 而那个数看起来完全正常。实测(2026-08-17,calrun6):上一个相位把手臂顶在墙上,
+    // 这一相大半时间动不了 ⇒ 中位数 **0.00066**、被收下 ⇒ `settle_periods` 由它算出
+    // **10499 拍**静置 ⇒ 后面五格连着塌。**一个坏的交付率会毒死它下游的每一格**,
+    // 所以这一格必须自己会说"我这批证据自相矛盾"。
+    //
+    // 判据不含门槛:1σ 不小于中位数本身,就是"我说不出它是多少"。
+    if 1.4826 * mad >= med {
+        return Err(Declined::Inconsistent);
+    }
     let mut m = blank(Quantity::StepDelivery, 1, now_ns);
     m.value[0] = med;
     m.uncertainty[0] = 1.4826 * mad;
