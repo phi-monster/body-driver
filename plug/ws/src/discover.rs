@@ -36,7 +36,26 @@ pub struct Layout {
     pub ambiguous: Vec<String>,
 }
 
+/// 一台机器人报回来的数组,常常**不是**一个普通数组,而是一个自带 dtype 与 shape 的映射
+/// (`{nd: true, type: "<f4", data: <二进制>, shape: [...]}`)。
+///
+/// 🔴 认不出这一点的后果是**静默的**:树遍历会一路钻进 `nd` / `type` / `data` / `shape`,
+/// 于是那一串数**从来没有以数的形式出现过**,布局永远认不出来,而帧一直在到、
+/// 两侧都不报错。实测:听满 250 帧、每 50 帧报一次"还没认出",顶层键完全正常。
+fn 是数组映射(v: &Value) -> bool {
+    v.as_map()
+        .map(|m| {
+            m.iter().any(|(k, val)| k.as_str() == Some("nd") && val.as_bool() == Some(true))
+        })
+        .unwrap_or(false)
+}
+
 fn 走(v: &Value, path: &mut Vec<String>, out: &mut Vec<(Vec<String>, Value)>) {
+    if 是数组映射(v) {
+        // 叶子:它自己就是一串数,不许再往里钻。
+        out.push((path.clone(), v.clone()));
+        return;
+    }
     match v {
         Value::Map(m) => {
             for (k, sub) in m {
@@ -50,13 +69,48 @@ fn 走(v: &Value, path: &mut Vec<String>, out: &mut Vec<(Vec<String>, Value)>) {
     }
 }
 
-fn 浮点串(v: &Value) -> Option<Vec<f64>> {
-    let a = v.as_array()?;
-    let mut o = Vec::with_capacity(a.len());
-    for x in a {
-        o.push(x.as_f64()?);
+fn 键<'a>(v: &'a Value, k: &str) -> Option<&'a Value> {
+    v.as_map()?.iter().find(|(kk, _)| kk.as_str() == Some(k)).map(|(_, x)| x)
+}
+
+/// 这一格是不是一片图像:自报的 dtype 是字节,而 shape 是三维。
+pub fn 是图(v: &Value) -> Option<(usize, usize)> {
+    if !是数组映射(v) {
+        return None;
     }
-    Some(o)
+    let ty = 键(v, "type")?.as_str()?;
+    if !(ty.ends_with("u1") || ty.ends_with("i1")) {
+        return None;
+    }
+    let sh: Vec<usize> = 键(v, "shape")?.as_array()?.iter().filter_map(|x| x.as_u64().map(|n| n as usize)).collect();
+    if sh.len() == 3 && sh[2] == 3 {
+        Some((sh[1], sh[0]))
+    } else {
+        None
+    }
+}
+
+/// 把一格取成一串数 —— 普通数组、或者自带 dtype 的那种映射,两种都认。
+pub fn 浮点串(v: &Value) -> Option<Vec<f64>> {
+    if let Value::Array(a) = v {
+        let mut o = Vec::with_capacity(a.len());
+        for x in a {
+            o.push(x.as_f64()?);
+        }
+        return Some(o);
+    }
+    if !是数组映射(v) {
+        return None;
+    }
+    let ty = 键(v, "type")?.as_str()?;
+    let Value::Binary(d) = 键(v, "data")? else { return None };
+    if ty.ends_with("f4") {
+        Some(d.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]) as f64).collect())
+    } else if ty.ends_with("f8") {
+        Some(d.chunks_exact(8).map(|c| f64::from_le_bytes([c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7]])).collect())
+    } else {
+        None
+    }
 }
 
 /// 从一帧观测里认出布局。**只看形状与值域,不看名字。**
@@ -65,12 +119,10 @@ pub fn 认(obs: &Value) -> Layout {
     走(obs, &mut Vec::new(), &mut flat);
     let mut l = Layout::default();
     for (path, v) in &flat {
-        // 相机:一片 u8,而且长度分解得出 宽×高×3。
-        if let Value::Binary(b) = v {
-            if b.len() % 3 == 0 && b.len() >= 3 * 64 * 64 {
-                l.cams.push(path.clone());
-                continue;
-            }
+        // 相机:自报字节 dtype 且 shape 是三维。
+        if 是图(v).is_some() {
+            l.cams.push(path.clone());
+            continue;
         }
         let Some(xs) = 浮点串(v) else { continue };
         match xs.len() {

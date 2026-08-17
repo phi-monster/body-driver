@@ -51,7 +51,7 @@ fn 取(v: &Value, path: &[String]) -> Option<Value> {
 }
 
 fn 数组(v: &Value) -> Vec<f64> {
-    v.as_array().map(|a| a.iter().filter_map(|x| x.as_f64()).collect()).unwrap_or_default()
+    discover::浮点串(v).unwrap_or_default()
 }
 
 impl<S: std::io::Read + std::io::Write> Plug<S> {
