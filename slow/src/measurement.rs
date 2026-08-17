@@ -193,7 +193,33 @@ pub enum Quantity {
 
 impl Quantity {
     /// Total number of quantities; used to size the store.
-    pub const COUNT: usize = 14;
+    // 🔴🔴 **加一个量,这个数必须跟着加。**
+    // 实测(2026-08-17):加了 `Friction = 14` 而没有动它 ⇒ 存储只有 14 个槽,
+    // 一碰这一格就 `index out of bounds: len is 14 but the index is 14`,
+    // **整轮自标定当场崩,标定一个字都没写出来**,而前十轮的日志完全正常。
+    // ⇒ 谁再加一个量,这里必须跟着改;`ALL` 那张表和这个数对不上时,
+    //    下面那条断言会在测试里直接失败,不会拖到线上。
+    pub const COUNT: usize = 15;
+    /// 全部的量,一个不落。🔴 **加一个变体必须加进这里** —— 下面那条测试会核它与
+    /// `COUNT` 是否一致,于是"加了量忘了加槽"在测试里就炸,不会拖到线上崩一整轮标定。
+    pub const ALL: [Quantity; Quantity::COUNT] = [
+        Quantity::HandPixel,
+        Quantity::ImageJacobian,
+        Quantity::GripperSpan,
+        Quantity::ArmWeight,
+        Quantity::Latency,
+        Quantity::Backlash,
+        Quantity::Reach,
+        Quantity::ContactThreshold,
+        Quantity::SelfOcclusion,
+        Quantity::StepDelivery,
+        Quantity::ToolOffset,
+        Quantity::ToolAxisColumn,
+        Quantity::Floor,
+        Quantity::HomePose,
+        Quantity::Friction,
+    ];
+
 
     /// Reconstruct from the ABI's `u32`. Returns `None` for anything unknown — an unknown
     /// quantity is refused, never coerced into a neighbouring one.
@@ -214,6 +240,10 @@ impl Quantity {
             11 => ToolAxisColumn,
             12 => Floor,
             13 => HomePose,
+            // 🔴 加一个变体要改**三处**:枚举 · COUNT · 这里。漏了这一处的后果是
+            // `missing()` 报不出它 ⇒ 这一格**永远不会被排进上电日程**,
+            // 于是它"从来没被量过"这件事本身也看不见。
+            14 => Friction,
             _ => return None,
         })
     }
@@ -518,5 +548,34 @@ impl Measurement {
             .iter()
             .copied()
             .fold(0.0_f64, f64::max)
+    }
+}
+
+#[cfg(test)]
+mod 槽位 {
+    use super::*;
+
+    /// 🔴 **加一个量而忘了把存储加大 = 一碰那一格就越界。**
+    ///
+    /// 实测(2026-08-17):`Friction` 加进枚举、`COUNT` 没动 ⇒
+    /// `index out of bounds: the len is 14 but the index is 14`,
+    /// **整轮自标定当场崩,标定一个字没写出来**,而崩之前十轮的日志完全正常。
+    /// 这条测试就是那次事故的形状:**最后一个量的编号必须落在存储里**。
+    #[test]
+    fn 每一个量都必须有自己的槽() {
+        for q in Quantity::ALL {
+            assert!(
+                (q as usize) < Quantity::COUNT,
+                "{:?} 的编号是 {},而存储只有 {} 个槽 —— 加量必须同时加 COUNT",
+                q, q as usize, Quantity::COUNT
+            );
+        }
+    }
+
+    /// 反过来也要卡:`COUNT` 比实际的量多,会留下永远读不到的空槽,
+    /// 而"这一格没量过"和"这一格根本不存在"读起来一样。
+    #[test]
+    fn 槽位数不许多于量的个数() {
+        assert_eq!(Quantity::ALL.len(), Quantity::COUNT, "ALL 与 COUNT 必须一致");
     }
 }
