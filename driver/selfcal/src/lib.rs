@@ -52,8 +52,16 @@ pub struct Samples {
     /// 两瓣质心之间的位移。存向量而不是模长,是因为换算成米要用到方向 —— 斜着看的
     /// 相机在不同方向上尺不一样,只留模长就等于假设了各向同性。
     pub jaw: Vec<(f64, f64, f64)>,
-    /// 发出命令后第几帧才动 —— 延迟用。
-    pub latency: Vec<u32>,
+    /// 命令发出**之前**那几拍的逐拍位移 —— 延迟用的静止参照。
+    pub rest: Vec<f64>,
+    /// (相对命令那一拍的偏移, 这一拍的位移) —— 延迟用。
+    ///
+    /// 🔴 上一版这里存的是 `k % 12`(第一次看到位移不为零的那一拍在周期里的下标),
+    /// **既没有静止参照,也不 relative 于命令发出的那一拍**。这具身体从不完全静止
+    /// (每拍交付 0.888,永远在逼近),于是"位移不为零"每拍都成立,量到的是
+    /// **这一相最早拿到两帧连续观测的那个下标**。实测报 6 拍,而同一相里
+    /// 一拍就交付了 89% —— 两个数互相否定。
+    pub latency: Vec<(u32, f64)>,
     /// (**带符号**的命令位移, **带符号**的实到位移),按时间排好 —— 齿隙用。
     ///
     /// 🔴 上一版存的是 `(正向走了多少, 反向走了多少)` 两个正数 —— **符号被扔掉了**,
@@ -87,7 +95,39 @@ pub struct Samples {
 /// 🔴 **十五格全在这儿,一个不留。** 每一格只回答一句话:*这具身体要【做什么】,
 /// 才会产出这一格需要的样本*。估计器和拒绝规则都不在这儿 —— 它们在 `probe.rs`,
 /// 在被单测过的那个地方。
-fn 动作(q: Quantity, arm: usize, k: u32, home: &[f64; 3], now: &[f64; 3]) -> Cmd {
+/// 这一格要不要走认块器那套周期协议。
+pub fn 认块相(q: Quantity) -> bool {
+    matches!(
+        q,
+        Quantity::ImageJacobian
+            | Quantity::HandPixel
+            | Quantity::GripperSpan
+            | Quantity::ToolOffset
+            | Quantity::ToolAxisColumn
+            | Quantity::SelfOcclusion
+    )
+}
+
+/// 一个周期几拍。**静置段的长度由身体自己定** —— `静置` 是从这具身体量到的交付率和
+/// 延迟推出来的"要等几拍才停得下来"(`derive::settle_periods`),不是填的 2。
+///
+/// 🔴 上一版把静置段写死成 2 拍,而这具身体每拍只交付 0.888:挪完一步之后第 2 拍的
+/// 残余还有那一步的 1.2%(5 cm 的步 ⇒ 0.6 mm ⇒ 在这台相机上约半个像素)。而噪声地板
+/// 取的是**逐像素最大差**,高对比边缘上半个像素就够把它顶到 200/255 —— 于是"空转"
+/// 那两帧从来就不空,认块器每次都答"没有候选",**五格因此全欠着**
+/// (实测 2026-08-17:地板 123–245,双响 0,配对 0)。
+fn 周期(q: Quantity, 静置: u32) -> u32 {
+    if 认块相(q) {
+        // 静置 + 空转两拍 + 晃钳口三拍 + 挪手臂一拍
+        静置 + 6
+    } else if matches!(q, Quantity::Latency) {
+        24
+    } else {
+        1
+    }
+}
+
+fn 动作(q: Quantity, arm: usize, k: u32, home: &[f64; 3], now: &[f64; 3], 静置: u32) -> Cmd {
     // 探索幅度:一个量都还没有的时候,只能先用一串**由小到大**的幅度去试。
     // 🔴 它的**值本身不进任何结果** —— 交付率量的是"命令 vs 实到"的比,幅度会被约掉;
     //    它只决定"这一下够不够大到看得见"。而扫一串而不是定一个,正是为了让
@@ -110,9 +150,23 @@ fn 动作(q: Quantity, arm: usize, k: u32, home: &[f64; 3], now: &[f64; 3]) -> C
             quat: 朝下(),
             jaw: 1.0,
         },
-        // ── 从静止发一步,看第几拍才动 ──
+        // ── 从**真的静止**发一步,看第几拍才动 ──
+        //
+        // 🔴 前半个周期把**同一个绝对位姿**一拍一拍发下去 —— 不是 `Cmd::Hold`。
+        // Hold 发出去是一条空动作,而空动作在这条线缆上等于"没有动作",身体照旧
+        // 沿着上一条命令往前爬;于是"静止段"从来就不静,而延迟量到的是余振。
+        // 发同一个绝对点则相反:到了就不动了(误差按 (1−交付率)^n 收下去)。
+        // 后半个周期发那个点加一步,偏移由估计器从原始位移里自己找。
+        // 每个周期换一次方向,免得十个周期把手臂一路推到限位上。
         Quantity::Latency => {
-            if k % 12 == 0 { 竖(0.02) } else if k % 12 == 6 { 竖(0.0) } else { Cmd::Hold }
+            let 周 = k % 24;
+            let 向 = if (k / 24) % 2 == 0 { 1.0 } else { -1.0 };
+            let 基 = *now;
+            if 周 < 12 {
+                Cmd::Ee { arm, at: 基, quat: 朝下(), jaw: 1.0 }
+            } else {
+                Cmd::Ee { arm, at: [基[0], 基[1], 基[2] + 0.02 * 向], quat: 朝下(), jaw: 1.0 }
+            }
         }
         // ── 齿隙:同一条轴上正反各推一下,死区就是旷量 ──
         // 齿隙同理:死区要在**换方向的那一刻**才显出来,所以必须相对此刻往复,
@@ -161,15 +215,16 @@ fn 动作(q: Quantity, arm: usize, k: u32, home: &[f64; 3], now: &[f64; 3]) -> C
         // 🔴 而**取帧必须严格按拍对齐** —— 上一版每帧都收、满五帧就算一次,而循环是六拍
         //    ⇒ 从第二组起,"空转那两帧"根本不再落在空转那两拍上,**分组自己漂走了**,
         //    于是十几个循环里只偶然对上一次。
-        Quantity::ImageJacobian | Quantity::HandPixel => match k % 8 {
-            0 | 1 | 2 | 3 | 5 => Cmd::Ee { arm, at: *now, quat: 朝下(), jaw: 1.0 },
-            4 | 6 => Cmd::Ee { arm, at: *now, quat: 朝下(), jaw: 0.55 },
-            _ => {
+        Quantity::ImageJacobian | Quantity::HandPixel => {
+            let p = 周期(q, 静置);
+            if k % p == p - 1 {
                 let d = [[探, 0.0, 0.0], [0.0, 探, 0.0], [0.0, 0.0, 探],
-                         [-探, 0.0, 0.0], [0.0, -探, 0.0], [0.0, 0.0, -探]][((k / 8) % 6) as usize];
+                         [-探, 0.0, 0.0], [0.0, -探, 0.0], [0.0, 0.0, -探]][((k / p) % 6) as usize];
                 Cmd::Ee { arm, at: [now[0] + d[0], now[1] + d[1], now[2] + d[2]], quat: 朝下(), jaw: 1.0 }
+            } else {
+                Cmd::Ee { arm, at: *now, quat: 朝下(), jaw: 晃钳口(k, 0.55, 1.0, 静置) }
             }
-        },
+        }
         // ── 工具尖到法兰多长 / 哪一列是工具轴:绕每一列转腕,
         //    工作点扫出一段弧,弧的半径【就是】那个偏置;弧最小的那一列是工具轴 ──
         //
@@ -179,9 +234,9 @@ fn 动作(q: Quantity, arm: usize, k: u32, home: &[f64; 3], now: &[f64; 3]) -> C
         // 一直在动,双响掩膜里全是手臂本身,认不出工作点 —— 而它照样跑完、照样出数。
         // 一个循环 = 一个 (列, 腕角) 的采样点;24 个循环扫完 3 列 × 8 个角。
         Quantity::ToolOffset | Quantity::ToolAxisColumn => {
-            let 循环 = k / 8;
+            let 循环 = k / 周期(q, 静置);
             let q腕 = 绕轴((循环 / 8) as usize % 3, (循环 % 8) as f64 * 0.15);
-            Cmd::Ee { arm, at: *now, quat: q腕, jaw: 晃钳口(k, 0.55, 1.0) }
+            Cmd::Ee { arm, at: *now, quat: q腕, jaw: 晃钳口(k, 0.55, 1.0, 静置) }
         }
         // ── 钳口跨度:手臂按住不动,只动夹爪 ──
         //
@@ -192,8 +247,8 @@ fn 动作(q: Quantity, arm: usize, k: u32, home: &[f64; 3], now: &[f64; 3]) -> C
         // "每一个开度单位对应多少画面单位",再拿这个方向上的尺换成米。
         // 激励幅度 Δ 恒定 —— 幅度变了,双响的可见性也跟着变,那会把斜率和可见性混在一起。
         Quantity::GripperSpan => {
-            let m = 0.15 + 0.14 * ((k / 8) % 6) as f64;
-            Cmd::Ee { arm, at: *now, quat: 朝下(), jaw: 晃钳口(k, m - 0.15, m + 0.15) }
+            let m = 0.15 + 0.14 * ((k / 周期(q, 静置)) % 6) as f64;
+            Cmd::Ee { arm, at: *now, quat: 朝下(), jaw: 晃钳口(k, m - 0.15, m + 0.15, 静置) }
         }
         // ── 胳膊有多重:摆一圈姿势,记"什么都不碰时保持不动要多少力矩" ──
         //    🔴 每一个采样点都必须是**手在空中、什么都没碰**,否则量到的是接触力。
@@ -240,12 +295,12 @@ fn 动作(q: Quantity, arm: usize, k: u32, home: &[f64; 3], now: &[f64; 3]) -> C
         //    同样是一个循环一个位姿:位姿在循环里闩死,循环内只有钳口在动,
         //    双响掩膜落在哪几格 = 这具身体此刻的剪影。
         Quantity::SelfOcclusion => {
-            let c = (k / 8) % 7;
+            let c = (k / 周期(q, 静置)) % 7;
             Cmd::Ee {
                 arm,
                 at: [home[0] + 0.10 * (c as f64 - 3.0) / 3.0, home[1], home[2]],
                 quat: 朝下(),
-                jaw: 晃钳口(k, 0.55, 1.0),
+                jaw: 晃钳口(k, 0.55, 1.0, 静置),
             }
         }
     }
@@ -261,16 +316,14 @@ fn 射线(j: usize) -> [f64; 3] {
     D[j % 6]
 }
 
-/// 一个八拍循环里的钳口开度。**0,1 落定 · 2,3 空转 · 4,5,6 晃 · 7 收尾。**
+/// 一个周期里的钳口开度。**[0,静置) 落定 · 静置/静置+1 空转 · +2/+3/+4 晃 · +5 挪手臂。**
 ///
-/// 认块器要的三帧是 4,5,6:钳口在 `lo → hi → lo` 之间走两步,方向相反,于是两瓣的位移
-/// 互相抵消 —— 那个"抵消"正是认出一对钳口的签名。2,3 那两拍**不许有任何命令变化**,
+/// 认块器要的三帧是 +2,+3,+4:钳口在 `lo → hi → lo` 之间走两步,方向相反,于是两瓣的
+/// 位移互相抵消 —— 那个"抵消"正是认出一对钳口的签名。空转那两拍**不许有任何命令变化**,
 /// 它们量的是这台相机自己的噪声地板,而地板是判据的一部分,不是背景信息。
-fn 晃钳口(k: u32, lo: f64, hi: f64) -> f64 {
-    match k % 8 {
-        4 | 6 => lo,
-        _ => hi,
-    }
+fn 晃钳口(k: u32, lo: f64, hi: f64, 静置: u32) -> f64 {
+    let b = k % (静置 + 6);
+    if b == 静置 + 2 || b == 静置 + 4 { lo } else { hi }
 }
 
 /// 工具朝下 —— 这不是一个"标定值",是探针姿态的一个约定。
@@ -289,7 +342,7 @@ fn 绕轴(col: usize, θ: f64) -> [f64; 4] {
 }
 
 /// 跑一个相位:发动作、收样本。**不估计、不拒绝。**
-pub fn 跑一相(r: &mut dyn Robot, q: Quantity, arm: usize, 步数: u32) -> Samples {
+pub fn 跑一相(r: &mut dyn Robot, q: Quantity, arm: usize, 步数: u32, 静置: u32) -> Samples {
     let mut s = Samples::default();
     let home = match r.sense() {
         Some(f) if !f.ee.is_empty() => [f.ee[arm.min(f.ee.len() - 1)][0], f.ee[arm.min(f.ee.len() - 1)][1], f.ee[arm.min(f.ee.len() - 1)][2]],
@@ -300,27 +353,20 @@ pub fn 跑一相(r: &mut dyn Robot, q: Quantity, arm: usize, 步数: u32) -> Sam
     let mut 闩 = home;
     let mut 空手 = 0u32;
     for k in 0..步数 {
-        // 🔴 走认块器那几格用**闩住的**位姿(每八拍才更新一次);别的格用此刻的位姿。
+        // 🔴 走认块器那几格用**闩住的**位姿(一个周期才更新一次);别的格用此刻的位姿。
         // 两者的区别就是"空转到底空不空"。
-        // 🔴 **六格共用这一套八拍协议**,而不是各写一份:认块器的前提(两帧之间只有
+        // 🔴 **六格共用同一套周期协议**,而不是各写一份:认块器的前提(两帧之间只有
         //    一个东西变、地板由空转那两拍量出来)对六格是同一件事,分头重写就是分头踩坑。
-        let 认手 = matches!(
-            q,
-            Quantity::ImageJacobian
-                | Quantity::HandPixel
-                | Quantity::GripperSpan
-                | Quantity::ToolOffset
-                | Quantity::ToolAxisColumn
-                | Quantity::SelfOcclusion
-        );
+        // 延迟那一格也要闩:它的整个判据就是"命令之前身体是静的"。
+        let 认手 = 认块相(q);
         let 探 = 0.005 * (1 + k % 10) as f64;
-        if 认手 && k % 8 == 0 {
+        if (认手 || matches!(q, Quantity::Latency)) && k % 周期(q, 静置) == 0 {
             闩 = 上一帧
                 .as_ref()
                 .and_then(|f: &Frame| f.ee.get(arm).map(|p| [p[0], p[1], p[2]]))
                 .unwrap_or(home);
         }
-        let 此刻 = if 认手 {
+        let 此刻 = if 认手 || matches!(q, Quantity::Latency) {
             闩
         } else {
             上一帧
@@ -328,7 +374,7 @@ pub fn 跑一相(r: &mut dyn Robot, q: Quantity, arm: usize, 步数: u32) -> Sam
                 .and_then(|f: &Frame| f.ee.get(arm).map(|p| [p[0], p[1], p[2]]))
                 .unwrap_or(home)
         };
-        let c = 动作(q, arm, k, &home, &此刻);
+        let c = 动作(q, arm, k, &home, &此刻, 静置);
         // 命令的幅度:发之前就知道,不用回读去猜。
         let 命令量 = match &c {
             Cmd::Ee { at, .. } => {
@@ -384,10 +430,11 @@ pub fn 跑一相(r: &mut dyn Robot, q: Quantity, arm: usize, 步数: u32) -> Sam
         if 认手 {
             if let Some((w, h, g)) = f.cams.first() {
                 // 严格按拍收:2,3 是空转对,4,5,6 是晃钳口的三帧。别的拍一律不收。
-                if matches!(k % 8, 2..=6) {
+                let b = k % 周期(q, 静置);
+                if (静置..静置 + 5).contains(&b) {
                     五帧.push(g.clone());
                 }
-                if k % 8 == 6 && 五帧.len() == 5 {
+                if b == 静置 + 4 && 五帧.len() == 5 {
                     match body_layer::blob::candidates(
                         &五帧[0], &五帧[1], &五帧[2], &五帧[3], &五帧[4], *w, *h, 0.45, 8,
                     ) {
@@ -397,10 +444,10 @@ pub fn 跑一相(r: &mut dyn Robot, q: Quantity, arm: usize, 步数: u32) -> Sam
                             //    把它挂在"有候选"里面,等于让一次认不出手的循环
                             //    连带丢掉一张完全有效的剪影。
                             if matches!(q, Quantity::SelfOcclusion) {
-                                s.occ.push((((k / 8) % 7) as f64, r.cells));
+                                s.occ.push((((k / 周期(q, 静置)) % 7) as f64, r.cells));
                                 if s.occ.len() <= 4 {
                                     println!("      [遮挡] 位姿 {} · 格子掩膜 {:#08b} · 双响 {} · 地板 {}",
-                                        (k / 8) % 7, r.cells, r.moved_px, r.floor);
+                                        (k / 周期(q, 静置)) % 7, r.cells, r.moved_px, r.floor);
                                 }
                             }
                             if let Some(c) = r.cands.get(0) {
@@ -409,7 +456,7 @@ pub fn 跑一相(r: &mut dyn Robot, q: Quantity, arm: usize, 步数: u32) -> Sam
                                         s.seen.push((c.u, c.v, f.ee.get(arm).copied().unwrap_or([0.0; 7])));
                                         // 这一循环之后要挪的那一步 —— 命令量在发之前就知道,不用回读去猜。
                                         let d = [[探, 0.0, 0.0], [0.0, 探, 0.0], [0.0, 0.0, 探],
-                                                 [-探, 0.0, 0.0], [0.0, -探, 0.0], [0.0, 0.0, -探]][((k / 8) % 6) as usize];
+                                                 [-探, 0.0, 0.0], [0.0, -探, 0.0], [0.0, 0.0, -探]][((k / 周期(q, 静置)) % 6) as usize];
                                         s.cmd3.push(d);
                                         s.cands.push(*c);
                                         if s.seen.len() <= 6 {
@@ -423,7 +470,7 @@ pub fn 跑一相(r: &mut dyn Robot, q: Quantity, arm: usize, 步数: u32) -> Sam
                                     //    而拿一个非配对候选的位置去当"间距",量到的是别的东西。
                                     Quantity::GripperSpan => {
                                         if r.pairs > 0 {
-                                            let m = 0.15 + 0.14 * ((k / 8) % 6) as f64;
+                                            let m = 0.15 + 0.14 * ((k / 周期(q, 静置)) % 6) as f64;
                                             s.jaw.push((m, r.pair_dir.0, r.pair_dir.1));
                                             if s.jaw.len() <= 6 {
                                                 println!("      [跨度] 平均开度 {:.2} ⇒ 画面里两瓣相距 {:.5}(配对 {})",
@@ -436,7 +483,7 @@ pub fn 跑一相(r: &mut dyn Robot, q: Quantity, arm: usize, 步数: u32) -> Sam
                                         }
                                     }
                                     Quantity::ToolOffset | Quantity::ToolAxisColumn => {
-                                        let 循环 = k / 8;
+                                        let 循环 = k / 周期(q, 静置);
                                         let col = (循环 / 8) % 3;
                                         let ang = (循环 % 8) as f64 * 0.15;
                                         s.arc.push((col, ang, c.u, c.v));
@@ -463,7 +510,7 @@ pub fn 跑一相(r: &mut dyn Robot, q: Quantity, arm: usize, 步数: u32) -> Sam
                     }
                     五帧.clear();
                 }
-                if k % 8 == 7 {
+                if b == 周期(q, 静置) - 1 {
                     五帧.clear();
                 }
             }
@@ -471,8 +518,13 @@ pub fn 跑一相(r: &mut dyn Robot, q: Quantity, arm: usize, 步数: u32) -> Sam
         if matches!(q, Quantity::Latency) {
             if let (Some(prev), Some(now)) = (上一帧.as_ref().and_then(|p| p.ee.get(arm).copied()), f.ee.get(arm).copied()) {
                 let 挪 = ((now[0] - prev[0]).powi(2) + (now[1] - prev[1]).powi(2) + (now[2] - prev[2]).powi(2)).sqrt();
-                if 挪 > 0.0 {
-                    s.latency.push(k % 12);
+                let 周 = k % 24;
+                // 只收后半个周期里**最后几拍**当静止参照 —— 前面几拍身体还在收敛,
+                // 拿它当"静止"就等于把余振写进噪声。
+                if (6..12).contains(&周) {
+                    s.rest.push(挪);
+                } else if 周 >= 12 {
+                    s.latency.push((周 - 12, 挪));
                 }
             }
         }
@@ -545,7 +597,7 @@ mod 测 {
     #[test]
     fn 顺路就采到了交付率样本() {
         let mut b = 假臂 { p: [0.0; 7], jaw: 1.0 };
-        let s = 跑一相(&mut b, Quantity::StepDelivery, 0, 20);
+        let s = 跑一相(&mut b, Quantity::StepDelivery, 0, 20, 4);
         assert!(s.steps.len() >= 10, "每一次移动都该是一次交付样本,实得 {}", s.steps.len());
     }
 
@@ -565,7 +617,7 @@ mod 测 {
                 vec![]
             }
         }
-        let s = 跑一相(&mut 死臂, Quantity::StepDelivery, 0, 20);
+        let s = 跑一相(&mut 死臂, Quantity::StepDelivery, 0, 20, 4);
         assert!(!s.steps.is_empty(), "必须采到样本");
         assert!(s.steps.iter().all(|(_, a)| *a == 0.0), "一台不动的身体,实到必须全是 0");
     }
@@ -573,7 +625,7 @@ mod 测 {
     #[test]
     fn 可达采到了到与不到两种() {
         let mut b = 假臂 { p: [0.0; 7], jaw: 1.0 };
-        let s = 跑一相(&mut b, Quantity::Reach, 0, 40);
+        let s = 跑一相(&mut b, Quantity::Reach, 0, 240, 4);
         assert!(s.reach.iter().any(|(_, _, ok)| *ok), "近处该到得了");
         assert!(s.reach.iter().any(|(_, _, ok)| !*ok), "远处该到不了 —— 两边都要有,墙才夹得住");
     }

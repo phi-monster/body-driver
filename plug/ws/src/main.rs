@@ -432,12 +432,27 @@ fn main() {
         // 可达要把两边的墙都夹住;而晃钳口那一格一个循环就要六步。
         let 步 = match q {
             Quantity::ContactThreshold | Quantity::Floor | Quantity::Reach => 240,
-            Quantity::ToolOffset | Quantity::ToolAxisColumn => 240,
-            Quantity::SelfOcclusion | Quantity::GripperSpan => 180,
-            Quantity::ImageJacobian | Quantity::HandPixel => 180,
+            Quantity::ToolOffset | Quantity::ToolAxisColumn => 400,
+            Quantity::SelfOcclusion | Quantity::GripperSpan => 300,
+            Quantity::ImageJacobian | Quantity::HandPixel => 300,
             _ => 90,
         };
-        let s = selfcal::跑一相(&mut plug, q, 0, 步);
+        // 🔴 静置多少拍**由这具身体自己决定**:延迟 + 每拍收掉 `交付率` 的残余,
+        //    要等到残余降到千分之一。写死 2 拍的后果实测过 —— 认块的五格全欠着。
+        //    量不出来就不许跑认块那几格:那不是"少采几下",是**这一格的前置还没到**。
+        let 静置 = match body_layer::derive::settle_periods(&body, 1e-3) {
+            Ok(n) => n,
+            Err(_) if selfcal::认块相(q) => {
+                println!("      🔴 拒绝:MissingDependency —— 静置拍数要由延迟+交付率推出来,而它们还没量到");
+                拒过.insert(q.as_str());
+                continue;
+            }
+            Err(_) => 4,
+        };
+        if selfcal::认块相(q) {
+            println!("      [协议] 静置 {静置} 拍(由这具身体的延迟+交付率推出),周期 {} 拍", 静置 + 6);
+        }
+        let s = selfcal::跑一相(&mut plug, q, 0, 步, 静置);
         // 🔴 **每一格都接到它自己的估计器上。** 接不上的那几格,拒绝的理由要是
         // `MissingDependency`(缺前置)而不是 `NotEnoughSamples`(没采够)——
         // 两者要做的下一步完全不同:前者去补前置,后者去多采几下。
@@ -480,7 +495,13 @@ fn main() {
                 }
             }
             Quantity::Friction => probe::friction(&s.tilt, now),
-            Quantity::Latency => probe::latency(s.latency.first().copied(), s.latency.len() as u32 + 12, now),
+            // 🔴 延迟从**原始逐拍位移**上判,不由这一层先挑好"第一拍动的是哪一拍"。
+            //    上一版喂的是 `k % 12` 的第一个非零下标,没有静止参照 ⇒ 量到的是
+            //    这一相最早拿到两帧连续观测的那个下标(实测报 6,而同一相一拍交付 89%)。
+            Quantity::Latency => {
+                println!("      [延迟] 静止段 {} 拍 · 命令后 {} 拍", s.rest.len(), s.latency.len());
+                probe::latency_from_beats(&s.rest, &s.latency, now)
+            }
             Quantity::Backlash => probe::backlash(&s.reversal, now),
             // 关节角与"保持不动要多少力矩"配成对。🔴 这具身体的观测里**没有力矩通道**,
             // 所以这一格只能拿"这一步挪了多少"当代理量 —— 而那不是力矩。
@@ -639,8 +660,17 @@ fn main() {
             Quantity::Floor => match body.get(Quantity::ContactThreshold) {
                 None => Err(probe::Declined::MissingDependency),
                 Some(ct) => {
-                    let 压住 = s.press.iter().filter(|(c, a, _)| *c > 0.0 && a / c < ct.value[0]).count();
-                    println!("      [桌面] {} 个样本里 {} 个被挡住(接触阈 {:.4})", s.press.len(), 压住, ct.value[0]);
+                    let mut 压 = (f64::INFINITY, f64::NEG_INFINITY, 0usize);
+                    let mut 自 = (f64::INFINITY, f64::NEG_INFINITY, 0usize);
+                    for &(c, a, z) in &s.press {
+                        if c <= 0.0 { continue; }
+                        let t = if a / c < ct.value[0] { &mut 压 } else { &mut 自 };
+                        t.0 = t.0.min(z);
+                        t.1 = t.1.max(z);
+                        t.2 += 1;
+                    }
+                    println!("      [桌面] 压住 {} 个 z∈[{:.4},{:.4}] · 自由 {} 个 z∈[{:.4},{:.4}](接触阈 {:.4})",
+                        压.2, 压.0, 压.1, 自.2, 自.0, 自.1, ct.value[0]);
                     probe::floor(&s.press, ct.value[0], now, ct.epoch)
                 }
             },

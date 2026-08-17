@@ -227,6 +227,72 @@ pub fn arm_weight(
 /// Named in the archive as the top unmeasured self-calibration and as the whole bottleneck of
 /// dynamic work: public systems fail at it by acting on a stale pose, and **nobody measures it
 /// per body**. It is also nearly free — every commanded step is already a probe.
+/// 反应延迟,**从原始逐拍位移上判**,而不是由调用方先挑好"第一拍动的是哪一拍"。
+///
+/// # 🔴 为什么要有这一版:上一版量到的是探针自己的结构
+///
+/// 从前调用方喂的是「第一次看到位移不为零的那一拍在周期里的下标」,**没有静止参照,
+/// 也不relative于命令发出的那一拍**。这具身体从不完全静止(每拍交付 0.888,永远在
+/// 逼近目标),于是"位移不为零"每一拍都成立,报回来的其实是**这一相最早拿到两帧连续
+/// 观测的那个下标**。
+///
+/// 实测代价(2026-08-17):它报 **6 拍**,而**同一相里打印的原始样本是
+/// `命令 0.0181 m ⇒ 实到 0.0161 m(比 0.887)`** —— 一拍就交付了 89%。
+/// **有 6 拍死区的身体不可能一拍交付 89%**,两个数互相否定,而两边都被收下了。
+/// 更贵的是下游:`derive::settle_periods` 拿延迟 + 交付率算"要等几拍才静得下来",
+/// 于是认块协议的空转段被算成 6+ 拍(实际只需 4 拍),或者反过来 —— 而认块的五格
+/// (认手 / 跨度 / 工具偏置 / 工具轴 / 自遮挡)**全部**踩在这一个数上。
+///
+/// # 判据
+///
+/// 命令发出**之前**那几拍的逐拍位移 = 这具身体自己的静止噪声。命令之后,第一拍
+/// 超过它两倍的偏移就是延迟。两倍不是门槛,是"分得开"的最低要求 —— 和这个文件里
+/// 其它地方的 2σ 是同一条约定。
+///
+/// # 它拒绝什么
+///
+/// * 两边任一少于 3 拍 ⇒ [`Declined::NotEnoughSamples`];
+/// * 🔴 **命令之前就没静下来**(后半段的静止噪声不比前半段小)⇒ [`Declined::Inconsistent`]:
+///   这时"第几拍才动"量的是身体自己的余振,不是它的响应延迟 —— **正是上一版栽的那一条**;
+/// * 命令之后没有任何一拍超过静止噪声的两倍 ⇒ [`Declined::NoResponse`]:
+///   命令了、没反应。这不是"延迟很大",是另一种故障,报一个大数字会把它盖住。
+pub fn latency_from_beats(
+    rest: &[f64],         // 命令发出【之前】那几拍的逐拍位移,按时间
+    after: &[(u32, f64)], // (相对命令那一拍的偏移, 这一拍的位移)
+    now_ns: u64,
+) -> Result<Measurement, Declined> {
+    let r: Vec<f64> = rest.iter().copied().filter(|x| x.is_finite() && *x >= 0.0).collect();
+    let a: Vec<(u32, f64)> = after.iter().copied().filter(|(_, x)| x.is_finite() && *x >= 0.0).collect();
+    if r.len() < 3 || a.len() < 3 {
+        return Err(Declined::NotEnoughSamples);
+    }
+    // 静止段自己要先静下来:后一半不比前一半安静,就说明命令发出时身体还在余振。
+    let 半 = r.len() / 2;
+    let 前 = r[..半].iter().copied().fold(0.0f64, f64::max);
+    let 后 = r[半..].iter().copied().fold(0.0f64, f64::max);
+    if !(后 <= 前) && 前 > 0.0 {
+        return Err(Declined::Inconsistent);
+    }
+    let 噪 = 后;
+    let mut 首: Option<u32> = None;
+    for &(off, d) in &a {
+        if d > 2.0 * 噪 && d > 0.0 {
+            首 = Some(首.map_or(off, |x: u32| x.min(off)));
+        }
+    }
+    let Some(k) = 首 else {
+        return Err(Declined::NoResponse);
+    };
+    let mut m = blank(Quantity::Latency, 1, now_ns);
+    m.value[0] = f64::from(k);
+    m.uncertainty[0] = 0.5;
+    m.valid_lo[0] = 0.0;
+    m.valid_hi[0] = a.iter().map(|(o, _)| *o).max().unwrap_or(k) as f64;
+    m.valid_for_ns = 0;
+    m.selftest_passed = true;
+    Ok(m)
+}
+
 pub fn latency(
     first_motion_step: Option<u32>,
     steps_observed: u32,
@@ -902,9 +968,27 @@ pub fn home_pose(
         m.uncertainty[i] = if i < 3 { spread } else { 0.0 };
         m.axis_kind[i] = if i < 3 { AxisKind::Interval } else { AxisKind::Unmeasured };
     }
-    // 有效区间 = 真的散到过的范围。判"回没回到位"只能用这个,不能用一个更紧的数。
-    m.valid_lo[0] = 0.0;
-    m.valid_hi[0] = worst;
+    // 有效区间 = 每一维**真的散到过的范围**。判"回没回到位"只能用这个,不能用一个更紧的数。
+    //
+    // 🔴 上一版只填了第 0 维,另外六维 `valid_lo == valid_hi == 0` ⇒ 提交那一步按
+    // `EmptyRange` 整条打回。病相是"量到了却收不下",而日志上值印得漂漂亮亮
+    // (实测 2026-08-17:原位量到 (-0.369,-0.148,1.177,0.712…),被拒收)。
+    // 某一维完全不动是**真实结果**(一具重复性极好的身体),但零宽的区间无法被判,
+    // 所以退化时用这具身体自己量到的散布当半宽 —— 那是手上唯一一个**量出来的**长度。
+    for i in 0..7 {
+        let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+        for v in samples {
+            lo = lo.min(v[i]);
+            hi = hi.max(v[i]);
+        }
+        if !(lo < hi) {
+            let w = if spread > 0.0 { spread } else { worst };
+            lo -= w;
+            hi += w;
+        }
+        m.valid_lo[i] = lo;
+        m.valid_hi[i] = hi;
+    }
     m.valid_for_ns = 0;
     m.selftest_passed = true;
     Ok(m)

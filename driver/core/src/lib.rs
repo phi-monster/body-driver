@@ -2148,6 +2148,30 @@ mod end_to_end {
         );
     }
 
+    /// `latency_from_beats`:**命令发出之前身体就没停住时,"第几拍才动"量的是余振。**
+    #[test]
+    fn latency_refuses_a_body_that_was_still_ringing() {
+        use probe::{latency_from_beats, Declined};
+        const T: u64 = 1_000_000_000;
+        // 静下来了的身体:静止段逐拍衰减到噪声,命令后第 2 拍动。
+        let 静 = [0.004f64, 0.002, 0.001, 0.0002, 0.0001, 0.0001];
+        let 动: Vec<(u32, f64)> = vec![(0, 0.0001), (1, 0.0001), (2, 0.016), (3, 0.002), (4, 0.0003)];
+        let m = latency_from_beats(&静, &动, T).expect("静下来了就该量得出延迟");
+        assert_eq!(m.value[0], 2.0, "延迟读成 {}", m.value[0]);
+
+        // —— 必须拒:命令之前身体还在余振(静止段后一半反而更大)。
+        //    🔴 这正是实测那一条:报了 6 拍,而同一相里一拍交付 89%。
+        let 余振 = [0.0001f64, 0.0001, 0.0002, 0.003, 0.004, 0.005];
+        assert_eq!(latency_from_beats(&余振, &动, T).unwrap_err(), Declined::Inconsistent);
+
+        // —— 必须拒:命令了,什么都没超过静止噪声。这不是"延迟很大",是没反应。
+        let 没动: Vec<(u32, f64)> = vec![(0, 0.0001), (1, 0.0001), (2, 0.00012), (3, 0.0001)];
+        assert_eq!(latency_from_beats(&静, &没动, T).unwrap_err(), Declined::NoResponse);
+
+        // —— 必须拒:样本不够。
+        assert_eq!(latency_from_beats(&静[..2], &动, T).unwrap_err(), Declined::NotEnoughSamples);
+    }
+
     /// `base_from_stalls`:**基座不在观测契约里,但它自己走不动的那几个地方把它交代了。**
     #[test]
     fn base_from_stalls_recovers_a_shoulder_nobody_reported() {

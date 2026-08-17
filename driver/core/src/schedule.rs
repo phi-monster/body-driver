@@ -104,8 +104,16 @@ pub fn prerequisites(q: Quantity) -> &'static [Quantity] {
         //    实际开度去读 —— 没有跨度这把尺,"夹住了"和"合到底了"读起来一模一样。
         //    它**不**依赖接触阈:倾到滑是几何,不是接触事件。
         Friction => &[GripperSpan],
-        // The rest are measured directly off commanded motion and answer to nothing else.
-        ImageJacobian | ArmWeight | Latency | Backlash | Reach | StepDelivery => &[],
+        // 🔴 手眼要靠"晃钳口,看什么跟着动"来认,而那要先分得开**动了**和**还没停**。
+        //    协议里那两拍空转量的是相机自己的噪声地板,只有在身体真静下来之后才成立;
+        //    "静下来要几拍"由延迟和交付率算(`derive::settle_periods`),所以这两条是
+        //    结构上的前置,不是保险。
+        //    代价照记(2026-08-17):静置写死 2 拍,而这具身体每拍交付 0.888 ⇒ 挪完一步
+        //    第 2 拍还剩那一步的 1.2%(5 cm 步 ⇒ 0.6 mm ⇒ 约半个像素),而噪声地板取的是
+        //    **逐像素最大差**,高对比边缘上半个像素就把它顶到 200/255 ⇒ 空转从来不空 ⇒
+        //    认块器每次都答"没有候选" ⇒ **认手/跨度/工具偏置/工具轴/自遮挡五格一起欠着**。
+        ImageJacobian => &[Latency, StepDelivery],
+        ArmWeight | Latency | Backlash | Reach | StepDelivery => &[],
     }
 }
 
