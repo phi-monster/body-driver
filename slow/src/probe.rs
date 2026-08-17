@@ -1179,7 +1179,9 @@ pub fn contact_threshold(
     touching: &[f64], // signal while pressed against something
     polarity: Polarity,
     now_ns: u64,
-    arm_weight_epoch: u64,
+    // 🔴 前置是**交付率**,不是自重 —— 见 `schedule::prerequisites` 里那一段。这个判据读的是
+    // 位移比,不是关节力矩;重力在比值里同增同减,而自由空间的下垂已经整个落在交付率里。
+    free_delivery_epoch: u64,
 ) -> Result<Measurement, Declined> {
     fn moments(x: &[f64]) -> (f64, f64, f64, f64, f64) {
         let (mut n, mut s, mut lo, mut hi) = (0.0f64, 0.0f64, f64::INFINITY, f64::NEG_INFINITY);
@@ -1294,7 +1296,402 @@ pub fn contact_threshold(
     // support, and the gate refuses it rather than extrapolating the classifier.
     m.valid_lo[0] = lo_f.min(lo_t);
     m.valid_hi[0] = hi_f.max(hi_t);
-    m.deps[0] = Some((Quantity::ArmWeight, arm_weight_epoch));
+    m.deps[0] = Some((Quantity::StepDelivery, free_delivery_epoch));
+    m.valid_for_ns = 0;
+    m.selftest_passed = true;
+    Ok(m)
+}
+
+// ---------------------------------------------------------------- floor
+
+/// 支撑面在哪个高度 —— **从"压住了"的那些样本的高度里读出来,不是从几何里算出来的。**
+///
+/// 输入是下压相位的原始三元组 `(命令降幅, 实到降幅, 此刻高度)`,外加已经量到的接触阈。
+/// 一个样本的交付比例低于接触阈 ⇒ 它被挡住了 ⇒ 它此刻的高度就是**它撞上的那个面**。
+///
+/// # 为什么不能拿"最低到过哪儿"当支撑面
+///
+/// 最低点是**运动的终点**,不是**阻挡的位置**:一次自由下降走过头,最低点就比真实台面还低;
+/// 而被挡住的那些样本,高度**恰好**是被挡住的地方。所以判据必须是"被挡住"这件事,而不是
+/// "走到最低"。这两者在数字上分不开——两边都给出一个又小又稳的 z——**而它们差一整个步长**。
+///
+/// # 它拒绝什么,每一条都是**不同**的事实
+///
+/// * 一个被挡住的样本都没有 ⇒ [`Declined::NoResponse`]:这一相**从头到尾在空中**,
+///   没有支撑面可言。这跟"支撑面很低"完全不同,而"取最小 z"会把两者读成同一个数;
+/// * 被挡住的样本少于 3 个 ⇒ [`Declined::NotEnoughSamples`]:一两次撞击给不出散布,
+///   而没有散布的高度无法被下游拒绝;
+/// * 被挡住的最高点**高过**自由移动的最高点 ⇒ [`Declined::Inconsistent`]:你不可能在
+///   比自己自由走过的地方还高的位置被挡住。真出现,说明"被挡住"这件事读错了
+///   (探针一起步就顶着东西 / 交付比例的分母不是这一步的命令),而**平均一下照样能出一个
+///   长得很正常的高度**;
+/// * 接触阈本身不是有限正数 ⇒ [`Declined::MissingDependency`]。
+///
+/// 值 = 被挡住那些样本高度的均值;不确定度 = 它们的样本标准差(撞击点自己的散布,
+/// 不是编出来的)。
+pub fn floor(
+    press: &[(f64, f64, f64)], // (命令降幅 m, 实到降幅 m, 此刻高度 m)
+    contact: f64,              // 接触阈,交付比例单位
+    now_ns: u64,
+    contact_epoch: u64,
+) -> Result<Measurement, Declined> {
+    if !contact.is_finite() || contact <= 0.0 {
+        return Err(Declined::MissingDependency);
+    }
+    let mut blocked: Vec<f64> = Vec::new();
+    let mut free_hi = f64::NEG_INFINITY;
+    let mut seen = 0u32;
+    for &(cmd, got, z) in press {
+        if !cmd.is_finite() || !got.is_finite() || !z.is_finite() || cmd <= 0.0 {
+            continue;
+        }
+        seen += 1;
+        if got / cmd < contact {
+            blocked.push(z);
+        } else {
+            free_hi = free_hi.max(z);
+        }
+    }
+    if seen == 0 {
+        return Err(Declined::NotEnoughSamples);
+    }
+    if blocked.is_empty() {
+        return Err(Declined::NoResponse);
+    }
+    if blocked.len() < 3 {
+        return Err(Declined::NotEnoughSamples);
+    }
+    let n = blocked.len() as f64;
+    let mean = blocked.iter().sum::<f64>() / n;
+    let sd = (blocked.iter().map(|z| (z - mean) * (z - mean)).sum::<f64>() / (n - 1.0)).sqrt();
+    let (lo, hi) = blocked.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), z| (a.min(*z), b.max(*z)));
+    // 被挡住的最高点必须低于自由走过的最高点。没有任何自由样本时 `free_hi` 是 -inf,
+    // 这个测试自动不通过 —— 而那是对的:整相都在压着,说明起步就顶着东西。
+    if !(hi < free_hi) {
+        return Err(Declined::Inconsistent);
+    }
+    let mut m = blank(Quantity::Floor, 1, now_ns);
+    m.value[0] = mean;
+    m.uncertainty[0] = if sd.is_finite() { sd } else { 0.0 };
+    m.valid_lo[0] = lo;
+    m.valid_hi[0] = free_hi;
+    m.deps[0] = Some((Quantity::ContactThreshold, contact_epoch));
+    m.valid_for_ns = 0;
+    m.selftest_passed = true;
+    Ok(m)
+}
+
+// ---------------------------------------------------------------- 基座在哪
+
+/// **这条臂的基座在哪** —— 从它自己"够不着了"的那些点反解出来。
+///
+/// 可达那一格要的是**离基座的半径**,而基座**不在观测契约里**:这具身体报的是末端位姿、
+/// 关节角、钳口、相机,没有一个字说底座在哪。从前这一格喂进去的是**步长**
+/// (`命令 0.0169 m`)—— 一个和半径毫无关系的数,于是每次都拒 `Inconsistent`,
+/// 而拒绝的理由读起来像是"这具身体自相矛盾",真相是我喂错了量。
+///
+/// # 它怎么可能被量出来
+///
+/// 沿若干条**方向不同**的射线往外走,每条射线上都会在某处走不动 —— 那个点在**同一个
+/// 球面**上,因为球面就是"够得着"的边界。四个不共面的点唯一确定一个球:
+/// `|p|² = 2 b·p + c`,对 `(b, c)` 是线性的,最小二乘一解就出来。
+/// **没有里程计、没有 URDF、没有相机内参 —— 只用它自己走不动的那几个地方。**
+///
+/// # 它拒绝什么
+///
+/// * 少于 4 个卡住点 ⇒ [`Declined::NotEnoughSamples`]:三点定不了球心;
+/// * 那些点共面或共线 ⇒ [`Declined::Inconsistent`]:法方程奇异,**而求解照样会
+///   给出一个数**,并且那个数会是一个看起来完全正常的坐标;
+/// * 拟合残差和半径本身一样大 ⇒ [`Declined::Inconsistent`]:这些点**不在同一个球面上**;
+/// * 🔴 **任何一个卡住点是"朝着球心走的时候卡住的" ⇒ [`Declined::Inconsistent`]。**
+///   外边界的定义是"再往外就够不着了",所以卡住那一刻手必须在**离开**球心:
+///   `(p − b) · d > 0`。朝着球心走还卡住,那是**内边界**(自碰、关节限位),
+///   把它和外边界混在一个球里,拟出来的球心**哪一层都不在** —— 而残差检查放它过去了
+///   (实测:真半径 0.62 的六个点混进三个内点,拟出 0.498,残差 0.252,
+///   `残差 < 半径` 照样成立)。这一条不含任何门槛,它只是把"外"这个字写清楚。
+///
+/// `value` 是 `[bx, by, bz, R]`;不确定度是拟合残差。
+pub fn base_from_stalls(
+    stalls: &[([f64; 3], [f64; 3])], // (走不动的那个点, 这条射线的方向)
+    now_ns: u64,
+) -> Result<Measurement, Declined> {
+    let 全: Vec<([f64; 3], [f64; 3])> = stalls
+        .iter()
+        .filter(|(p, d)| p.iter().chain(d.iter()).all(|c| c.is_finite()))
+        .copied()
+        .collect();
+    let pts: Vec<[f64; 3]> = 全.iter().map(|(p, _)| *p).collect();
+    if pts.len() < 4 {
+        return Err(Declined::NotEnoughSamples);
+    }
+    // A x = y,A 的一行是 [2x, 2y, 2z, 1],y 是 |p|²。解 4×4 法方程。
+    let mut ata = [[0.0f64; 4]; 4];
+    let mut aty = [0.0f64; 4];
+    for p in &pts {
+        let row = [2.0 * p[0], 2.0 * p[1], 2.0 * p[2], 1.0];
+        let y = p[0] * p[0] + p[1] * p[1] + p[2] * p[2];
+        for i in 0..4 {
+            for j in 0..4 {
+                ata[i][j] += row[i] * row[j];
+            }
+            aty[i] += row[i] * y;
+        }
+    }
+    // 带部分主元的高斯消元。奇异 ⇒ 那些点共面,球心不唯一。
+    let mut a = ata;
+    let mut b = aty;
+    for c in 0..4 {
+        let mut piv = c;
+        for r in c + 1..4 {
+            if a[r][c].abs() > a[piv][c].abs() {
+                piv = r;
+            }
+        }
+        // 主元的量级要和这批点自己的量级比 —— 拿一个绝对小数当门槛,就是又一个填进来的常数。
+        let scale = (0..4).map(|r| a[r][c].abs()).fold(0.0f64, f64::max);
+        if !(a[piv][c].abs() > scale * 1e-9) || scale <= 0.0 {
+            return Err(Declined::Inconsistent);
+        }
+        a.swap(c, piv);
+        b.swap(c, piv);
+        for r in 0..4 {
+            if r == c {
+                continue;
+            }
+            let f = a[r][c] / a[c][c];
+            for k in c..4 {
+                a[r][k] -= f * a[c][k];
+            }
+            b[r] -= f * b[c];
+        }
+    }
+    let sol = [b[0] / a[0][0], b[1] / a[1][1], b[2] / a[2][2], b[3] / a[3][3]];
+    let centre = [sol[0], sol[1], sol[2]];
+    let r2 = sol[3] + centre[0] * centre[0] + centre[1] * centre[1] + centre[2] * centre[2];
+    if !r2.is_finite() || r2 <= 0.0 {
+        return Err(Declined::Inconsistent);
+    }
+    let radius = r2.sqrt();
+    let n = pts.len() as f64;
+    let resid = (pts
+        .iter()
+        .map(|p| {
+            let d = ((p[0] - centre[0]).powi(2) + (p[1] - centre[1]).powi(2) + (p[2] - centre[2]).powi(2)).sqrt();
+            (d - radius) * (d - radius)
+        })
+        .sum::<f64>()
+        / n)
+        .sqrt();
+    if !resid.is_finite() || resid >= radius {
+        return Err(Declined::Inconsistent);
+    }
+    // 每一个卡住点都必须是"往外走的时候走不动的"。
+    for (p, d) in &全 {
+        let dot = (p[0] - centre[0]) * d[0] + (p[1] - centre[1]) * d[1] + (p[2] - centre[2]) * d[2];
+        if !(dot > 0.0) {
+            return Err(Declined::Inconsistent);
+        }
+    }
+    let mut m = blank(Quantity::Reach, 4, now_ns);
+    m.value[..3].copy_from_slice(&centre);
+    m.value[3] = radius;
+    for i in 0..4 {
+        m.uncertainty[i] = resid;
+        m.valid_lo[i] = -radius;
+        m.valid_hi[i] = radius;
+    }
+    m.valid_for_ns = 0;
+    m.selftest_passed = true;
+    Ok(m)
+}
+
+// ---------------------------------------------------------------- 画面里的尺
+
+/// **沿画面里某一个方向**,一米等于多少画面单位。
+///
+/// 手眼那一格量到的是一个 2×3:第 `j` 根轴走一米,画面里挪 `(value[2j], value[2j+1])`。
+/// 那是**三把方向不同的尺**,不是一把。而"钳口张开了多宽""工具尖扫出多大的弧"这类量,
+/// 读到的是画面里**某一个方向上**的一段长度 —— 换算它需要的是**那个方向上**的尺。
+///
+/// # 为什么不能随便挑一列当尺
+///
+/// 挑一列、取范数、取最大奇异值,都是**在挑一个方向**,而挑错的代价不会报错:它会把
+/// 一个真实的 8 cm 跨度换算成 4 cm 或 16 cm,而两个数看起来同样正常。这一层存在的理由
+/// 就是不许出现这种"看起来正常"的数。
+///
+/// # 做法
+///
+/// 钳口张开、工具扫弧都发生在**水平面**里(探针姿态是工具朝下)。水平面那两列构成
+/// `J_h`(2×2)。给定画面方向 `d̂`(单位向量),那个方向对应的三维方向是 `J_h⁻¹ d̂`,
+/// 于是"一米在这个方向上占多少画面单位" = `1 / |J_h⁻¹ d̂|`。
+///
+/// # 它拒绝什么
+///
+/// * `J_h` 的行列式与它自己的 1σ 分不开 ⇒ [`Declined::Inconsistent`]:两列近乎共线,
+///   水平面在画面里塌成一条线,**这个方向上的尺不存在**(而求逆照样会给出一个数);
+/// * 方向向量是零 ⇒ [`Declined::MissingDependency`]:没有方向就没有"这个方向上的尺"。
+///
+/// 返回 `(尺, 尺的 1σ)`,单位是画面单位每米。
+/// 把**画面里的一段位移**换成**水平面里的一段位移**,单位米。
+///
+/// 🔴 这是比 [`image_ruler_along`] 更该用的那一个:一个标量尺只在各向同性时成立,
+/// 而斜着看桌面的相机把水平面里的**圆压成椭圆**。先把每个点换成米再去拟圆,圆还是圆;
+/// 拿一把标量尺去除一个椭圆的"半径",得到的是一个介于长短轴之间、**谁也说不清是什么**的数。
+///
+/// 返回 `((dx, dy), 相对 1σ)`。拒绝条件与 [`image_ruler_along`] 相同(两列共线 ⇒
+/// 水平面在画面里塌成一条线,逆不存在,而求逆照样会给出一个数)。
+pub fn image_to_plane(
+    jac: &[f64],
+    jac_sigma: &[f64],
+    d: (f64, f64), // 画面里的位移
+) -> Result<((f64, f64), f64), Declined> {
+    if jac.len() < 4 || jac_sigma.len() < 4 {
+        return Err(Declined::MissingDependency);
+    }
+    let (a, c, b, dd) = (jac[0], jac[1], jac[2], jac[3]); // J_h = [[a b],[c dd]]
+    if [a, b, c, dd].iter().any(|x| !x.is_finite()) || !d.0.is_finite() || !d.1.is_finite() {
+        return Err(Declined::MissingDependency);
+    }
+    let det = a * dd - b * c;
+    let sd = ((dd * jac_sigma[0]).powi(2)
+        + (b * jac_sigma[1]).powi(2)
+        + (c * jac_sigma[2]).powi(2)
+        + (a * jac_sigma[3]).powi(2))
+    .sqrt();
+    if !det.is_finite() || det.abs() <= 2.0 * sd {
+        return Err(Declined::Inconsistent);
+    }
+    let fro = |v: &[f64]| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2] + v[3] * v[3]).sqrt();
+    let (nj, ns) = (fro(&jac[..4]), fro(&jac_sigma[..4]));
+    if !(nj > 0.0) || !ns.is_finite() {
+        return Err(Declined::Inconsistent);
+    }
+    Ok((((dd * d.0 - b * d.1) / det, (-c * d.0 + a * d.1) / det), ns / nj))
+}
+
+pub fn image_ruler_along(
+    jac: &[f64],       // 至少 4 个数:[du/dx, dv/dx, du/dy, dv/dy, ...]
+    jac_sigma: &[f64], // 同长度的 1σ
+    dir: (f64, f64),   // 画面里的方向,不必归一
+) -> Result<(f64, f64), Declined> {
+    if jac.len() < 4 || jac_sigma.len() < 4 {
+        return Err(Declined::MissingDependency);
+    }
+    let (a, c, b, d) = (jac[0], jac[1], jac[2], jac[3]); // J_h = [[a b],[c d]]
+    if [a, b, c, d].iter().any(|x| !x.is_finite()) {
+        return Err(Declined::MissingDependency);
+    }
+    let len = dir.0.hypot(dir.1);
+    if !len.is_finite() || len <= 0.0 {
+        return Err(Declined::MissingDependency);
+    }
+    let (du, dv) = (dir.0 / len, dir.1 / len);
+    let det = a * d - b * c;
+    // 行列式的 1σ:四项各自的 1σ 按一阶传播。两列共线时 det 会缩到自己的噪声里,
+    // 而**求逆不会因此报错** —— 所以这个比较必须在求逆之前做。
+    let sd = ((d * jac_sigma[0]).powi(2)
+        + (b * jac_sigma[1]).powi(2)
+        + (c * jac_sigma[2]).powi(2)
+        + (a * jac_sigma[3]).powi(2))
+    .sqrt();
+    if !det.is_finite() || det.abs() <= 2.0 * sd {
+        return Err(Declined::Inconsistent);
+    }
+    // J_h⁻¹ d̂
+    let px = (d * du - b * dv) / det;
+    let py = (-c * du + a * dv) / det;
+    let pl = px.hypot(py);
+    if !pl.is_finite() || pl <= 0.0 {
+        return Err(Declined::Inconsistent);
+    }
+    let ruler = 1.0 / pl;
+    // 尺的相对误差:整个矩阵的相对扰动 ‖σ‖/‖J_h‖(都取 Frobenius 范数)。
+    // 🔴 **不许写成"四项里最大的相对 1σ"** —— 雅可比里出现 0 是完全合法的
+    // (那根轴在那个方向上不动),而逐项取相对误差会在那个 0 上除爆,于是一副
+    // **正交、干净、各向同性**的手眼被判成 `Inconsistent`。单测抓到过一次。
+    let fro = |v: &[f64]| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2] + v[3] * v[3]).sqrt();
+    let (nj, ns) = (fro(&jac[..4]), fro(&jac_sigma[..4]));
+    if !(nj > 0.0) || !ns.is_finite() {
+        return Err(Declined::Inconsistent);
+    }
+    let rel = ns / nj;
+    Ok((ruler, ruler * rel))
+}
+
+// ---------------------------------------------------------------- 哪一列是工具轴
+
+/// **哪一根轴是工具自己的轴** —— 绕它转,工具尖不动。
+///
+/// 输入是三根轴各自扫出的弧:`(第几根轴, 腕角, u, v)`,`u/v` 是**工作点在画面里的位置**。
+/// 绕工具轴自转时工作点原地不动,弧塌成一个点;绕另外两根轴转,工作点扫出一段弧。
+/// ⇒ **散布最小的那一根就是工具轴。**
+///
+/// # 它拒绝什么
+///
+/// * 少于三根轴、或任何一根不足 3 个点 ⇒ [`Declined::NotEnoughSamples`];
+/// * 三根轴的散布**全都**分不开零 ⇒ [`Declined::NoResponse`]:腕根本没转,或者工作点
+///   压根没被看见。这时"散布最小的那根"是**噪声的排序**,而它照样能给出一个 0/1/2;
+/// * 最小的那根与第二小的分不开(2σ)⇒ [`Declined::Inconsistent`]:证据不足以指认,
+///   而**指错一根轴会让每一次"绕工具轴微调"变成把工具尖甩出去**。
+///
+/// 值是列号(0/1/2);不确定度是最小与第二小散布之差,单位是画面单位 —— 它就是这次
+/// 指认的余量,余量小就是"勉强分开"。
+pub fn tool_axis_column(
+    arcs: &[(u32, f64, f64, f64)], // (列号, 腕角 rad, u, v)
+    now_ns: u64,
+    jac_epoch: u64,
+) -> Result<Measurement, Declined> {
+    let mut sum = [(0.0f64, 0.0f64, 0.0f64); 3]; // (n, Σu, Σv)
+    for &(col, ang, u, v) in arcs {
+        if col >= 3 || !ang.is_finite() || !u.is_finite() || !v.is_finite() {
+            continue;
+        }
+        let s = &mut sum[col as usize];
+        s.0 += 1.0;
+        s.1 += u;
+        s.2 += v;
+    }
+    if sum.iter().any(|s| s.0 < 3.0) {
+        return Err(Declined::NotEnoughSamples);
+    }
+    // 每一列的散布:到自己质心的均方根距离。
+    let mut spread = [0.0f64; 3];
+    for &(col, _, u, v) in arcs {
+        if col >= 3 || !u.is_finite() || !v.is_finite() {
+            continue;
+        }
+        let i = col as usize;
+        let (n, su, sv) = sum[i];
+        let (cu, cv) = (su / n, sv / n);
+        spread[i] += (u - cu).powi(2) + (v - cv).powi(2);
+    }
+    for i in 0..3 {
+        spread[i] = (spread[i] / sum[i].0).sqrt();
+        if !spread[i].is_finite() {
+            return Err(Declined::Inconsistent);
+        }
+    }
+    let mut order = [0usize, 1, 2];
+    order.sort_by(|&i, &j| spread[i].partial_cmp(&spread[j]).unwrap_or(std::cmp::Ordering::Equal));
+    let (best, second) = (order[0], order[1]);
+    // 每一列散布自己的抽样误差 ≈ spread / sqrt(2(n-1))。
+    let se = |i: usize| spread[i] / (2.0 * (sum[i].0 - 1.0)).sqrt();
+    // 三根全都是零散布 ⇒ 腕没转或工作点没看见。用最大的那根去判:它要是也分不开零,
+    // 那么这三个数排出来的顺序只是噪声的顺序。
+    let biggest = order[2];
+    if spread[biggest] <= 2.0 * se(biggest) || spread[biggest] <= 0.0 {
+        return Err(Declined::NoResponse);
+    }
+    let gap = spread[second] - spread[best];
+    if gap <= 2.0 * (se(best).powi(2) + se(second).powi(2)).sqrt() {
+        return Err(Declined::Inconsistent);
+    }
+    let mut m = blank(Quantity::ToolAxisColumn, 1, now_ns);
+    m.value[0] = best as f64;
+    m.uncertainty[0] = gap;
+    m.valid_lo[0] = 0.0;
+    m.valid_hi[0] = 2.0;
+    m.deps[0] = Some((Quantity::ImageJacobian, jac_epoch));
     m.valid_for_ns = 0;
     m.selftest_passed = true;
     Ok(m)
