@@ -122,12 +122,19 @@ fn 动作(q: Quantity, arm: usize, k: u32, home: &[f64; 3], now: &[f64; 3]) -> C
         // 而这一格恰好是四格的前置。
         // ⇒ `now` 这里传的是**闩住的那个位姿**(每六拍只在最后一拍更新一次),
         //    循环内只有钳口在动 —— 认块的前提本来就是"每两帧之间只有一个东西变"。
-        Quantity::ImageJacobian | Quantity::HandPixel => match k % 6 {
-            0 | 1 | 3 => Cmd::Ee { arm, at: *now, quat: 朝下(), jaw: 1.0 },
-            2 | 4 => Cmd::Ee { arm, at: *now, quat: 朝下(), jaw: 0.55 },
+        // 八拍一个循环:**0,1 落定 · 2,3 空转 · 4,5,6 晃钳口 · 7 挪手臂**。
+        //
+        // 🔴 落定那两拍是必须的:挪完手臂的下一拍**手还在稳**,把它当空转就等于
+        //    拿一段真运动去当噪声地板。实测地板 242/255 就有这一份。
+        // 🔴 而**取帧必须严格按拍对齐** —— 上一版每帧都收、满五帧就算一次,而循环是六拍
+        //    ⇒ 从第二组起,"空转那两帧"根本不再落在空转那两拍上,**分组自己漂走了**,
+        //    于是十几个循环里只偶然对上一次。
+        Quantity::ImageJacobian | Quantity::HandPixel => match k % 8 {
+            0 | 1 | 2 | 3 | 5 => Cmd::Ee { arm, at: *now, quat: 朝下(), jaw: 1.0 },
+            4 | 6 => Cmd::Ee { arm, at: *now, quat: 朝下(), jaw: 0.55 },
             _ => {
                 let d = [[探, 0.0, 0.0], [0.0, 探, 0.0], [0.0, 0.0, 探],
-                         [-探, 0.0, 0.0], [0.0, -探, 0.0], [0.0, 0.0, -探]][((k / 6) % 6) as usize];
+                         [-探, 0.0, 0.0], [0.0, -探, 0.0], [0.0, 0.0, -探]][((k / 8) % 6) as usize];
                 Cmd::Ee { arm, at: [now[0] + d[0], now[1] + d[1], now[2] + d[2]], quat: 朝下(), jaw: 1.0 }
             }
         },
@@ -211,7 +218,7 @@ pub fn 跑一相(r: &mut dyn Robot, q: Quantity, arm: usize, 步数: u32) -> Sam
         // 🔴 认手那一格用**闩住的**位姿(每六拍才更新一次);别的格用此刻的位姿。
         // 两者的区别就是"空转到底空不空"。
         let 认手 = matches!(q, Quantity::ImageJacobian | Quantity::HandPixel);
-        if 认手 && k % 6 == 0 {
+        if 认手 && k % 8 == 0 {
             闩 = 上一帧
                 .as_ref()
                 .and_then(|f: &Frame| f.ee.get(arm).map(|p| [p[0], p[1], p[2]]))
@@ -270,8 +277,11 @@ pub fn 跑一相(r: &mut dyn Robot, q: Quantity, arm: usize, 步数: u32) -> Sam
         // **不许在这儿重写一个**(今晚三次教训:已有的东西整段用,不要参照着重写)。
         if matches!(q, Quantity::ImageJacobian | Quantity::HandPixel) {
             if let Some((w, h, g)) = f.cams.first() {
-                五帧.push(g.clone());
-                if 五帧.len() == 5 {
+                // 严格按拍收:2,3 是空转对,4,5,6 是晃钳口的三帧。别的拍一律不收。
+                if matches!(k % 8, 2..=6) {
+                    五帧.push(g.clone());
+                }
+                if k % 8 == 6 && 五帧.len() == 5 {
                     match body_layer::blob::candidates(
                         &五帧[0], &五帧[1], &五帧[2], &五帧[3], &五帧[4], *w, *h, 0.45, 8,
                     ) {
@@ -297,6 +307,9 @@ pub fn 跑一相(r: &mut dyn Robot, q: Quantity, arm: usize, 步数: u32) -> Sam
                             }
                         }
                     }
+                    五帧.clear();
+                }
+                if k % 8 == 7 {
                     五帧.clear();
                 }
             }
