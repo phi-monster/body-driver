@@ -35,8 +35,10 @@ use std::io::Write;
 struct Plug<S: std::io::Read + std::io::Write> {
     ws: tungstenite::WebSocket<S>,
     lay: discover::Layout,
-    /// 最近一次收到的观测 —— `sense` 读它,`act` 发完等下一帧。
+    /// 最近一次收到的观测。
     last: Option<Value>,
+    /// 手里攥着的那条命令,等对方问"给我一个动作"时交出去。
+    待发: Option<Value>,
 }
 
 fn 取(v: &Value, path: &[String]) -> Option<Value> {
@@ -52,8 +54,64 @@ fn 数组(v: &Value) -> Vec<f64> {
     v.as_array().map(|a| a.iter().filter_map(|x| x.as_f64()).collect()).unwrap_or_default()
 }
 
+impl<S: std::io::Read + std::io::Write> Plug<S> {
+    /// 抽这条连接,直到拿到一帧新的观测。**握手照回,要动作就把手里那条命令交出去。**
+    ///
+    /// 🔴 这个方法就是插头存在的理由:`act` 只是**记下要做什么**,真正把命令送出去的时机
+    /// 由对方决定(它什么时候问"给我一个动作")。把这两件事混在一起,就会出现
+    /// "命令发了但对方那一步已经过去了" —— 而交付率量的正是命令与实到的比,错一拍就全错。
+    fn 抽到下一帧(&mut self) -> bool {
+        for _ in 0..400 {
+            let Ok(m) = self.ws.read() else { return false };
+            let tungstenite::Message::Binary(b) = m else { continue };
+            let Ok(v) = rmpv::decode::read_value(&mut &b[..]) else { continue };
+            let kind = wire::get(&v, "message_type").and_then(|x| x.as_str().map(String::from)).unwrap_or_default();
+            let ack = match kind.as_str() {
+                "hello" => "hello_ack",
+                "prepare_case" => "prepare_case_ack",
+                "reset" => "reset_result",
+                "call" => "call_result",
+                "infer" => "infer_result",
+                "trial_end" => "trial_end_ack",
+                "heartbeat" => "heartbeat_ack",
+                _ => continue,
+            };
+            let p = wire::get(&v, "payload").cloned().unwrap_or(rmpv::Value::Nil);
+            let fname = wire::get(&p, "func_name").and_then(|x| x.as_str().map(String::from)).unwrap_or_default();
+            // 带观测的那一帧:收下,并且这就是"下一帧到了"。
+            let 有观测 = wire::get(&p, "obs").or_else(|| wire::get(&p, "observation")).cloned();
+            let mut 新 = false;
+            if let Some(o) = 有观测 {
+                self.last = Some(o);
+                新 = true;
+            }
+            // 要动作的那一帧:把手里那条交出去。没有就交空的 —— 空也是一个诚实的回答。
+            let payload = if fname == "get_action" {
+                rmpv::Value::Map(vec![(
+                    rmpv::Value::String("result".into()),
+                    rmpv::Value::Array(self.待发.take().into_iter().collect()),
+                )])
+            } else {
+                rmpv::Value::Map(vec![(rmpv::Value::String("ok".into()), rmpv::Value::Boolean(true))])
+            };
+            let r = wire::reply(&v, ack, payload);
+            let mut buf = Vec::new();
+            if rmpv::encode::write_value(&mut buf, &r).is_ok() {
+                let _ = self.ws.send(tungstenite::Message::Binary(buf));
+            }
+            if 新 {
+                return true;
+            }
+        }
+        false
+    }
+}
+
 impl<S: std::io::Read + std::io::Write> Robot for Plug<S> {
     fn sense(&mut self) -> Option<Frame> {
+        if !self.抽到下一帧() {
+            return None;
+        }
         let o = self.last.clone()?;
         let mut f = Frame::default();
         for p in &self.lay.joints {
@@ -71,9 +129,13 @@ impl<S: std::io::Read + std::io::Write> Robot for Plug<S> {
         Some(f)
     }
 
-    fn act(&mut self, _c: &Cmd) -> bool {
-        // 一条命令怎么打包,是这个插头的事;而**怎么打包不影响任何一个被量出来的数** ——
-        // 交付率量的是"命令了多少 vs 实到多少",两端都来自这台机器人自己的读数。
+    fn act(&mut self, c: &Cmd) -> bool {
+        // 只记下要做什么;真正送出去在对方问"给我一个动作"的那一拍。
+        let (at, quat, jaw) = match c {
+            Cmd::Ee { at, quat, jaw, .. } => (*at, *quat, *jaw),
+            _ => return true,
+        };
+        self.待发 = Some(wire::pose_action("left", &at, &quat, &[], &[], jaw, jaw));
         true
     }
 
@@ -167,7 +229,7 @@ fn main() {
 
     // 上电日程:问驱动还欠自己什么,做那几件事,交回去,再问一遍。
     let mut body = body_layer::Body::new();
-    let mut plug = Plug { ws, lay, last: first };
+    let mut plug = Plug { ws, lay, last: first, 待发: None };
     let mut 轮 = 0u32;
     loop {
         let now = 轮 as u64 + 1;
