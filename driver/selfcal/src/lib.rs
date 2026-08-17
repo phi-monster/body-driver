@@ -56,7 +56,7 @@ pub struct Samples {
 /// 🔴 **十五格全在这儿,一个不留。** 每一格只回答一句话:*这具身体要【做什么】,
 /// 才会产出这一格需要的样本*。估计器和拒绝规则都不在这儿 —— 它们在 `probe.rs`,
 /// 在被单测过的那个地方。
-fn 动作(q: Quantity, arm: usize, k: u32, home: &[f64; 3]) -> Cmd {
+fn 动作(q: Quantity, arm: usize, k: u32, home: &[f64; 3], now: &[f64; 3]) -> Cmd {
     // 探索幅度:一个量都还没有的时候,只能先用一串**由小到大**的幅度去试。
     // 🔴 它的**值本身不进任何结果** —— 交付率量的是"命令 vs 实到"的比,幅度会被约掉;
     //    它只决定"这一下够不够大到看得见"。而扫一串而不是定一个,正是为了让
@@ -65,9 +65,17 @@ fn 动作(q: Quantity, arm: usize, k: u32, home: &[f64; 3]) -> Cmd {
     let 竖 = |dz: f64| Cmd::Ee { arm, at: [home[0], home[1], home[2] + dz], quat: 朝下(), jaw: 1.0 };
     match q {
         // ── 一步命令有多少真的到了:同一条轴上从小到大扫幅度 ──
+        //
+        // 🔴🔴 **探针不许写成一个会自己耗尽的动作。**
+        // 上一版把目标定死在 `home + 探` 那**一个点**上:第一步走到了,之后每一步都在
+        // 命令它**待在原地**,而"命令量"又是拿"离那个点还有多远"算的 ⇒ 读数变成
+        // `命令 0.020 ⇒ 实到 0.00000`,交付率算出 **8.4e-6**(命令一米走 8 微米)。
+        // 那不是这具身体不动 —— 同一轮里另一个相位实测 `命令 0.0246 ⇒ 实到 0.0234`,
+        // **它走得好好的**。是我把探针写成了走到就没得走。
+        // ⇒ 每一步都从**此刻**出发,往复地走:目标 = 当前位置 ± 探。
         Quantity::StepDelivery => Cmd::Ee {
             arm,
-            at: [home[0], home[1] + 探, home[2]],
+            at: [now[0], now[1] + if (k / 2) % 2 == 0 { 探 } else { -探 }, now[2]],
             quat: 朝下(),
             jaw: 1.0,
         },
@@ -76,9 +84,11 @@ fn 动作(q: Quantity, arm: usize, k: u32, home: &[f64; 3]) -> Cmd {
             if k % 12 == 0 { 竖(0.02) } else if k % 12 == 6 { 竖(0.0) } else { Cmd::Hold }
         }
         // ── 齿隙:同一条轴上正反各推一下,死区就是旷量 ──
+        // 齿隙同理:死区要在**换方向的那一刻**才显出来,所以必须相对此刻往复,
+        // 而不是在两个固定点之间来回(那样第二次以后就不再有"换方向"这件事)。
         Quantity::Backlash => Cmd::Ee {
             arm,
-            at: [home[0], home[1] + if (k / 3) % 2 == 0 { 探 } else { -探 }, home[2]],
+            at: [now[0], now[1] + if (k / 3) % 2 == 0 { 探 } else { -探 }, now[2]],
             quat: 朝下(),
             jaw: 1.0,
         },
@@ -171,7 +181,11 @@ pub fn 跑一相(r: &mut dyn Robot, q: Quantity, arm: usize, 步数: u32) -> Sam
     let mut 上一帧: Option<Frame> = None;
     let (mut 正, mut 反) = (0.0f64, 0.0f64);
     for k in 0..步数 {
-        let c = 动作(q, arm, k, &home);
+        let 此刻 = 上一帧
+            .as_ref()
+            .and_then(|f: &Frame| f.ee.get(arm).map(|p| [p[0], p[1], p[2]]))
+            .unwrap_or(home);
+        let c = 动作(q, arm, k, &home, &此刻);
         // 命令的幅度:发之前就知道,不用回读去猜。
         let 命令量 = match &c {
             Cmd::Ee { at, .. } => {
