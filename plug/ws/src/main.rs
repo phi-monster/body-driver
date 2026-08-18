@@ -855,6 +855,21 @@ fn main() {
                     // **读数与开度脱钩**(旋转让同一根手指的两端互相抵消,配出来的不是两根手指)。
                     // 新加的抬高档正是冲第一条去的:抬起来让两指衬在空背景上,再试配对。
                     let _ = (&jac, &sig);
+                    // 🔴🔴 **原始样本落盘 —— 每一次「换个拟合方式行不行」都不该再花一次 GPU 跑。**
+                    // 这一相要 1200 步,而这台机器上约 23 步/分 ⇒ **一个纯估计器问题要 40 分钟才有答案**,
+                    // 而仓规写死:代码时间是零、GPU 时间才是成本。落一次盘,之后离线几秒钟迭代一次。
+                    if let Ok(d) = std::env::var("BL_DUMP_SPAN") {
+                        let mut s0 = String::from("# jaw: cam tilt opening du dv\n");
+                        for &(c, θ, m, du, dv) in &s.jaw {
+                            s0.push_str(&format!("jaw {c} {θ} {m} {du} {dv}\n"));
+                        }
+                        s0.push_str("# shift: cam offx offy offz u v\n");
+                        for &(c, off, u, v) in &s.cam_shift {
+                            s0.push_str(&format!("shift {c} {} {} {} {u} {v}\n", off[0], off[1], off[2]));
+                        }
+                        let _ = std::fs::write(&d, s0);
+                        println!("      [跨度] 原始样本已落盘 ⇒ {d}(jaw {} 条 · shift {} 条)", s.jaw.len(), s.cam_shift.len());
+                    }
                     // 🔴 **挑相机挑在这里,不在采样时** —— 一台相机合不合用要同时满足两件:
                     //   ① 它真配得上对(看得见两瓣)· ② 它换得出米(手臂平移时手在它画面里挪得动)。
                     // ② 只有四档都采完才知道,所以采样时钉相机必然是**信息没齐就下判断**。
