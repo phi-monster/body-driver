@@ -1694,11 +1694,111 @@ pub fn base_from_stalls(
     if !resid.is_finite() || resid >= radius {
         return Err(Declined::Inconsistent);
     }
-    // 每一个卡住点都必须是"往外走的时候走不动的"。
-    for (p, d) in &全 {
-        let dot = (p[0] - centre[0]) * d[0] + (p[1] - centre[1]) * d[1] + (p[2] - centre[2]) * d[2];
-        if !(dot > 0.0) {
-            return Err(Declined::Inconsistent);
+    // 🔴🔴 **"往里走时停住"的点要【扔掉再重解】,而且要【迭代】。**(2026-08-18)
+    //
+    // 判据本身是对的:往里走停住,撞的是**别的东西**(自碰 / 关节限位 / 桌子),不是可达的
+    // 外壁,算进球里会污染它。**但它不是"这批数据自相矛盾"的证据** —— 它只说**这一个点不该参与**。
+    //
+    // 实测代价(2026-08-18,拿真机撞墙点离线复算,**零 GPU**):六个点的 `(点−球心)·方向`
+    // = `0.413 / 0.439 / 0.332 / 0.168 / 0.405 / **−0.024**` —— **只有一个负的,而整格被拒**;
+    // 这一格拒了之后连锁堵住画面尺(探针幅度退回 1–32 mm 的小盒子)、工具轴、工具偏置、臂重
+    // —— **一个点毁四格**。
+    //
+    // 🔴 **必须迭代**:第一次拟合本身是被污染的,拿它的球心去判"谁往里"会判错。
+    // 实测:单次剔除之后球心仍偏 **3 cm**(0.500 vs 真值 0.47);迭代之后收敛。
+    // ⚠️ 这个根因我**推理了四轮**都没找到(改射线数 / 方向 / 阶梯 / 撞墙判定),
+    //    而**插一条打印 + 离线算一次**就出来了。
+    let 解一次 = |pts: &[[f64; 3]]| -> Option<([f64; 3], f64, f64)> {
+        if pts.len() < 4 {
+            return None;
+        }
+        let mut ata = [[0.0f64; 4]; 4];
+        let mut aty = [0.0f64; 4];
+        for p in pts {
+            let row = [2.0 * p[0], 2.0 * p[1], 2.0 * p[2], 1.0];
+            let y = p[0] * p[0] + p[1] * p[1] + p[2] * p[2];
+            for i in 0..4 {
+                for j in 0..4 {
+                    ata[i][j] += row[i] * row[j];
+                }
+                aty[i] += row[i] * y;
+            }
+        }
+        let mut a = ata;
+        let mut b = aty;
+        for c in 0..4 {
+            let mut piv = c;
+            for r in c + 1..4 {
+                if a[r][c].abs() > a[piv][c].abs() {
+                    piv = r;
+                }
+            }
+            let scale = (0..4).map(|r| a[r][c].abs()).fold(0.0f64, f64::max);
+            if !(a[piv][c].abs() > scale * 1e-9) || scale <= 0.0 {
+                return None;
+            }
+            a.swap(c, piv);
+            b.swap(c, piv);
+            for r in 0..4 {
+                if r == c {
+                    continue;
+                }
+                let f = a[r][c] / a[c][c];
+                for k in c..4 {
+                    a[r][k] -= f * a[c][k];
+                }
+                b[r] -= f * b[c];
+            }
+        }
+        let sol = [b[0] / a[0][0], b[1] / a[1][1], b[2] / a[2][2], b[3] / a[3][3]];
+        let ct = [sol[0], sol[1], sol[2]];
+        let rr = sol[3] + ct[0] * ct[0] + ct[1] * ct[1] + ct[2] * ct[2];
+        if !rr.is_finite() || rr <= 0.0 {
+            return None;
+        }
+        let rad = rr.sqrt();
+        let n = pts.len() as f64;
+        let rs = (pts
+            .iter()
+            .map(|p| {
+                let d = ((p[0] - ct[0]).powi(2) + (p[1] - ct[1]).powi(2) + (p[2] - ct[2]).powi(2)).sqrt();
+                (d - rad) * (d - rad)
+            })
+            .sum::<f64>()
+            / n)
+            .sqrt();
+        if !rs.is_finite() || rs >= rad {
+            return None;
+        }
+        Some((ct, rad, rs))
+    };
+    let mut 留下: Vec<([f64; 3], [f64; 3])> = 全.clone();
+    let (mut centre, mut radius, mut resid) = (centre, radius, resid);
+    // 最多四轮:每一轮拿当前球心重新判谁往外,集合不再变就停。
+    for _ in 0..4 {
+        let 下一批: Vec<([f64; 3], [f64; 3])> = 留下
+            .iter()
+            .filter(|(p, d)| {
+                (p[0] - centre[0]) * d[0] + (p[1] - centre[1]) * d[1] + (p[2] - centre[2]) * d[2] > 0.0
+            })
+            .copied()
+            .collect();
+        if 下一批.len() < 4 {
+            return Err(Declined::NotEnoughSamples);
+        }
+        let 变了 = 下一批.len() != 留下.len();
+        留下 = 下一批;
+        let pts2: Vec<[f64; 3]> = 留下.iter().map(|(p, _)| *p).collect();
+        match 解一次(&pts2) {
+            None => return Err(Declined::Inconsistent),
+            Some((c2, r2, s2)) => {
+                centre = c2;
+                radius = r2;
+                resid = s2;
+            }
+        }
+        if !变了 {
+            break;
         }
     }
     let mut m = blank(Quantity::Reach, 4, now_ns);
