@@ -610,7 +610,7 @@ fn main() {
             //    **该补的是循环数,不是判据** —— 这一格今晚每一次改判据都改错了。
             // 🔴 分腕角拟合之后,**每个角度**都要够估计器的 5 个点。60 个循环 ÷ 3 个角度
             //    × 30% 配对产出率 ≈ 6 个 —— 擦边。翻倍到 1200 步(120 循环)才有余量。
-            Quantity::GripperSpan => 1200,
+            Quantity::GripperSpan => 2400,
             // 49 个位形 × 6 拍
             Quantity::ArmWeight => 300,
             Quantity::ImageJacobian | Quantity::HandPixel => 300,
@@ -704,7 +704,7 @@ fn main() {
         //   够不够得到不用猜 —— 尺是用**实到**位移算的(见 `cam_shift`),够不到会自己显出来。
         let (抬一档, 尺来源) = match std::env::var("BL_SPAN_STEP").ok().and_then(|v| v.parse::<f64>().ok()) {
             Some(v) if v > 0.0 => (v, "BL_SPAN_STEP 指定"),
-            _ => (0.06, "默认 6 cm(压过画面噪声)"),
+            _ => (0.10, "默认 10 cm(行列式 ∝ 两列激励之积;6 cm 时 |det|/σ 只有 0.70)"),
         };
         if matches!(q, Quantity::GripperSpan) {
             println!("      [跨度分档] 一档 {抬一档:.4} m —— {尺来源}");
