@@ -160,11 +160,34 @@ pub fn candidates(
 
     // 🔴 The floor, measured. Deliberately not a parameter: a caller that could pass it would
     // eventually pass a number somebody liked the look of.
-    let mut floor: u8 = 0;
+    //
+    // 🔴🔴 **取【分位】,不取最大值。**(2026-08-18,渲图 + 落点定案后改)
+    // 上一版是 `floor = max_i |null_a[i] - null_b[i]|` —— 全图最大。于是**画面里任何
+    // 一个闪动的像素**(阴影锯齿、高光、旁边那条没被命令的臂微微漂)都会把门槛顶到
+    // 200 上下,而 8 bit 灰度**再没有任何东西超得过它** ⇒ 整幅图判成"没动"。
+    // 实测代价(spanlook,6 个循环 × 3 台相机 = 18 次读数):**14 次 `moved_px = 0`**,
+    // 而同一副钳口一开一合在渲图里扫过 **6289 个像素**。病相是"这一格采不够样本",
+    // 而根因是**一个坏像素毒死整帧** —— 两者要改的东西完全不同。
+    //
+    // 新规矩仍然是量出来的:门槛取**让静止那一对里超标像素少于 `min_pixels` 的最小值**。
+    // 它直接兑现下游那条判据("一团 ≥min_pixels 的斑块不可能由静止噪声造出来"),
+    // 没有引入任何拍脑袋的数 —— `min_pixels` 本来就是调用方给的。
+    let mut 直方 = [0u32; 256];
     for i in 0..n {
-        let d = null_a[i].abs_diff(null_b[i]);
-        if d > floor {
-            floor = d;
+        直方[null_a[i].abs_diff(null_b[i]) as usize] += 1;
+    }
+    let mut 上面 = 0u32;
+    let mut floor: u8 = 255;
+    for d in (0..256).rev() {
+        // `上面` 此刻 = 静止那一对里差值 **> d** 的像素数。它 ≥ min_pixels ⇒ 门槛取 d 会
+        // 让静止噪声自己就能凑出一团 ⇒ 往上抬一级(上一轮已验过 d+1 是够的)。
+        if 上面 >= min_pixels {
+            floor = (d + 1).min(255) as u8;
+            break;
+        }
+        上面 += 直方[d];
+        if d == 0 {
+            floor = 0;
         }
     }
 
