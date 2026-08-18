@@ -441,13 +441,14 @@ fn main() {
     /// 每档取这台相机上所有样本的中位数(不是均值 —— 认错一次手就能把均值拽走)。
     /// 返回 `None` 的两种情形都当"这台相机换不出米":某一档没样本,或者画面响应小到
     /// 与不动分不开(**腕上的相机就长这样:手臂平移时手在它画面里根本不挪**)。
-    fn 本相尺(shift: &[(usize, [f64; 3], f64, f64)], cam: usize) -> Option<([f64; 4], [f64; 4])> {
+    fn 本相尺(shift: &[(usize, [f64; 3], [f64; 3], f64, f64)], cam: usize) -> Option<([f64; 4], [f64; 4])> {
         let 中位 = |v: &mut Vec<f64>| -> f64 { v.sort_by(|a, b| a.partial_cmp(b).unwrap()); v[v.len() / 2] };
         let mut 档: Vec<(Vec<f64>, Vec<f64>)> = (0..4).map(|_| (Vec::new(), Vec::new())).collect();
         let mut 一档 = 0.0f64;
-        for &(i, off, u, v) in shift {
+        let mut 实档: Vec<Vec<f64>> = (0..4).map(|_| Vec::new()).collect();
+        for &(i, cmd, got, u, v) in shift {
             if i != cam { continue; }
-            一档 = 一档.max(off[0].abs()).max(off[1].abs()).max(off[2].abs());
+            let off = cmd;
             let idx = match (off[0] != 0.0, off[1] != 0.0, off[2] != 0.0) {
                 (false, false, false) => 0,
                 (false, false, true) => 1,
@@ -457,7 +458,11 @@ fn main() {
             };
             档[idx].0.push(u);
             档[idx].1.push(v);
+            // 🔴 分母用**实到**的位移(命令 6 cm、身体每拍只交付 0.888,还可能够不到)。
+            // 拿命令当分母 ⇒ 尺被系统性低估 ⇒ 换出来的米偏大,而没有任何环节会不一致。
+            实档[idx].push((got[0] * got[0] + got[1] * got[1] + got[2] * got[2]).sqrt());
         }
+        for v in 实档.iter() { if let Some(&m) = v.iter().max_by(|a, b| a.partial_cmp(b).unwrap()) { 一档 = 一档.max(m); } }
         if 一档 <= 0.0 || 档.iter().any(|(u, _)| u.is_empty()) { return None; }
         // 🔴🔴 **每一档的散布要【量】出来,不许编。**
         //
@@ -663,12 +668,20 @@ fn main() {
         // 🔴 `BL_SPAN_STEP=<米>` 直接指定一档多大 —— 只为**并排比不同基线长度**:
         // 尺是"命令出去一档,画面里挪几个像素",一档太短则那几个像素淹在噪声里。
         // 不给就照常从量到的可达带推。
+        // 🔴🔴 **一档的大小由「画面位移要压过画面噪声」定,不由可达带定。**
+        //
+        // 上一版取 `可达带/3` = **2.2 cm**,而离线复核(span_samples.txt,2026-08-18)显示:
+        // 四档的画面位置差 ~0.005–0.010,而每一档自己的散布就有 ~0.005–0.008 ——
+        // **尺的基线和噪声同量级**。三种取法 (x,y)/(x,z)/(y,z) 的 |det|/σ = 0.50/0.38/0.09,
+        // **全部降秩**,后面每一步都是噪声放大(1.65 米那次就是这么来的)。
+        //
+        // 可达带说的是"离基座的**半径**能变多少"(这具身体 6.5 cm),
+        // **不是"手能横着挪多远"** —— 拿它去限制一个横向激励幅度,是把一个约束用错了地方。
+        // ⇒ 默认 6 cm:手在 640 宽的画面里挪十几个像素,压过 4 个像素的散布。
+        //   够不够得到不用猜 —— 尺是用**实到**位移算的(见 `cam_shift`),够不到会自己显出来。
         let (抬一档, 尺来源) = match std::env::var("BL_SPAN_STEP").ok().and_then(|v| v.parse::<f64>().ok()) {
             Some(v) if v > 0.0 => (v, "BL_SPAN_STEP 指定"),
-            _ => match body.get(Quantity::Reach) {
-                Some(m) => (((m.value[1] - m.value[0]).abs() / 3.0).clamp(0.02, 0.25), "可达带/3"),
-                None => (0.02, "退到探针幅度(可达没量到)"),
-            },
+            _ => (0.06, "默认 6 cm(压过画面噪声)"),
         };
         if matches!(q, Quantity::GripperSpan) {
             println!("      [跨度分档] 一档 {抬一档:.4} m —— {尺来源}");
@@ -863,9 +876,9 @@ fn main() {
                         for &(c, θ, m, du, dv) in &s.jaw {
                             s0.push_str(&format!("jaw {c} {θ} {m} {du} {dv}\n"));
                         }
-                        s0.push_str("# shift: cam offx offy offz u v\n");
-                        for &(c, off, u, v) in &s.cam_shift {
-                            s0.push_str(&format!("shift {c} {} {} {} {u} {v}\n", off[0], off[1], off[2]));
+                        s0.push_str("# shift: cam cmdx cmdy cmdz gotx goty gotz u v\n");
+                        for &(c, cmd, got, u, v) in &s.cam_shift {
+                            s0.push_str(&format!("shift {c} {} {} {} {} {} {} {u} {v}\n", cmd[0], cmd[1], cmd[2], got[0], got[1], got[2]));
                         }
                         let _ = std::fs::write(&d, s0);
                         println!("      [跨度] 原始样本已落盘 ⇒ {d}(jaw {} 条 · shift {} 条)", s.jaw.len(), s.cam_shift.len());
