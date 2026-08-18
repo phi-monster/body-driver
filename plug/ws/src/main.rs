@@ -727,7 +727,11 @@ fn main() {
         if matches!(q, Quantity::GripperSpan) {
             println!("      [跨度分档] 一档 {抬一档:.4} m —— {尺来源}");
         }
-        let s = selfcal::跑一相(&mut plug, q, 0, 步, 静置, 落点, 抬一档);
+        // 手在画面里的位置 —— 跨度那一相拿它来判"这一对是不是我的手"。
+        let 手在 = body.get(Quantity::HandPixel)
+            .filter(|m| m.dim >= 2)
+            .map(|m| (m.value[0], m.value[1]));
+        let s = selfcal::跑一相(&mut plug, q, 0, 步, 静置, 落点, 抬一档, 手在);
         // 🔴 **每一格都接到它自己的估计器上。** 接不上的那几格,拒绝的理由要是
         // `MissingDependency`(缺前置)而不是 `NotEnoughSamples`(没采够)——
         // 两者要做的下一步完全不同:前者去补前置,后者去多采几下。
