@@ -442,67 +442,84 @@ fn main() {
     /// 返回 `None` 的两种情形都当"这台相机换不出米":某一档没样本,或者画面响应小到
     /// 与不动分不开(**腕上的相机就长这样:手臂平移时手在它画面里根本不挪**)。
     fn 本相尺(shift: &[(usize, f64, [f64; 3], [f64; 3], f64, f64)], cam: usize) -> Option<([f64; 4], [f64; 4])> {
-        // 🔴🔴 **差分在【每个腕角内部】做,再把各腕角的差分平均。**
+        // 🔴🔴 **一次最小二乘吃掉全部样本,腕角当各自的截距;σ 从【残差】来。**
         //
-        // 腕角只改变那个中点在画面里的**偏移**,不改变尺本身(手腕转动不影响"手臂平移在画面里
-        // 挪多少")。而离线复核(span_samples_N.txt)显示:同一档里的 v **被 ~0.05 的大间隔劈成
-        // 两三簇**(三个腕角),而簇内散布只有 0.01–0.02 —— **簇间偏移比要量的档间位移大 3–5 倍**。
-        // 混着取中位数不是"多一点噪声",是**加进一个比信号还大的系统偏移**:
-        // 实测 u 的散布 ±0.0055、v 却 ±0.0148–0.0172,而档间位移本身才 0.01–0.02。
-        // ⇒ 每个腕角各出一份差分(偏移在差分里自动抵消),再把它们平均 —— 全部样本都用上,σ 再降 √n。
-        #[derive(Default, Clone)]
-        struct 桶 { u: Vec<f64>, v: Vec<f64>, d: Vec<f64> }
-        let mut 按角档: std::collections::BTreeMap<(u64, usize), 桶> = Default::default();
-        for &(i, θ, cmd, got, u, v) in shift {
+        // 上一版走的是"每档取中位数 → 差分 → 跨腕角求散布"这种**两级归约**,而实测(spanQ)
+        // 只凑出 **2 份**副本:行列式确实改好了(−0.015 → **+0.044**),σ 却炸到 **0.537** ——
+        // 拿 2 个数算标准差,自由度只有 1,那个 σ 本身就是噪声。合成测试里有 3 份、每份 5 个样本
+        // 才给出 0.0075,真机凑不出来。
+        // ⇒ 直接回归:`u = a·gx + b·gy + α_腕角`、`v = c·gx + d·gy + β_腕角`,
+        //   `(gx,gy)` 是**实到**的水平位移(命令 6 cm 而每拍只交付 0.888,还可能够不到)。
+        //   腕角只改变那个中点的**偏移**、不改变尺本身,所以它进截距;
+        //   σ 从残差和 (XᵀX)⁻¹ 来,自由度是"样本数 − 未知数",几十而不是 1。
+        let mut 角: Vec<u64> = shift.iter().filter(|r| r.0 == cam).map(|r| (r.1 * 100.0).round() as u64).collect();
+        角.sort_unstable(); 角.dedup();
+        if 角.is_empty() { return None; }
+        let k = 2 + 角.len(); // gx, gy, 每个腕角一个截距
+        if k > 8 { return None; }
+        let mut xs: Vec<Vec<f64>> = Vec::new();
+        let mut yu: Vec<f64> = Vec::new();
+        let mut yv: Vec<f64> = Vec::new();
+        for &(i, θ, _, got, u, v) in shift {
             if i != cam { continue; }
-            let idx = match (cmd[0] != 0.0, cmd[1] != 0.0, cmd[2] != 0.0) {
-                (false, false, false) => 0usize,
-                (false, false, true) => 1,
-                (true, false, true) => 2,
-                (false, true, true) => 3,
-                _ => continue,
-            };
-            let e = 按角档.entry(((θ * 100.0).round() as u64, idx)).or_default();
-            e.u.push(u);
-            e.v.push(v);
-            // 🔴 分母用**实到**位移:命令 6 cm,而这具身体每拍只交付 0.888、还可能够不到。
-            // 拿命令当分母 ⇒ 尺被系统性低估 ⇒ 换出来的米偏大,而没有任何环节会不一致。
-            e.d.push((got[0] * got[0] + got[1] * got[1] + got[2] * got[2]).sqrt());
+            let t = 角.iter().position(|&a| a == (θ * 100.0).round() as u64)?;
+            let mut row = vec![0.0; k];
+            row[0] = got[0];
+            row[1] = got[1];
+            row[2 + t] = 1.0;
+            xs.push(row); yu.push(u); yv.push(v);
         }
-        let 中位 = |v: &mut Vec<f64>| -> f64 { v.sort_by(|a, b| a.partial_cmp(b).unwrap()); v[v.len() / 2] };
-        // 每个腕角:1→2 给 +x 一档的画面响应,1→3 给 +y 一档的。两个都要有才算一份。
-        let mut 份: Vec<[f64; 4]> = Vec::new();
-        let 角集: Vec<u64> = { let mut a: Vec<u64> = 按角档.keys().map(|&(θ, _)| θ).collect(); a.dedup(); a };
-        for θ in 角集 {
-            let (Some(b1), Some(b2), Some(b3)) = (
-                按角档.get(&(θ, 1)).cloned(), 按角档.get(&(θ, 2)).cloned(), 按角档.get(&(θ, 3)).cloned(),
-            ) else { continue };
-            let mut b1 = b1; let mut b2 = b2; let mut b3 = b3;
-            let 步 = { let mut d = b2.d.clone(); d.extend(b3.d.iter()); 中位(&mut d) };
-            if !(步 > 0.0) { continue; }
-            let (u1, v1) = (中位(&mut b1.u), 中位(&mut b1.v));
-            份.push([(中位(&mut b2.u) - u1) / 步, (中位(&mut b3.u) - u1) / 步,
-                     (中位(&mut b2.v) - v1) / 步, (中位(&mut b3.v) - v1) / 步]);
+        let n = xs.len();
+        if n < k + 3 { return None; }
+        // 正规方程 XᵀX·β = Xᵀy,高斯消元;同时求 (XᵀX)⁻¹ 的对角线给 σ 用。
+        let mut a = vec![vec![0.0f64; k]; k];
+        for r in &xs { for p in 0..k { for q in 0..k { a[p][q] += r[p] * r[q]; } } }
+        let mut aug = vec![vec![0.0f64; 2 * k + 2]; k];
+        for p in 0..k {
+            for q in 0..k { aug[p][q] = a[p][q]; }
+            aug[p][k + p] = 1.0;                                   // 右边接单位阵 ⇒ 顺带求逆
+            for (idx, r) in xs.iter().enumerate() {
+                aug[p][2 * k] += r[p] * yu[idx];
+                aug[p][2 * k + 1] += r[p] * yv[idx];
+            }
         }
-        if 份.len() < 2 { return None; }
-        // 🔴 **σ 是各腕角之间的散布,量出来的** —— 上一版把它写成 `0.05×|J|`(编的 5%),
-        // 而 `image_to_plane` 里"行列式要与自己的 1σ 分得开"这条拒绝整个建立在这个 σ 上;
-        // σ 一编,判据就静默失效,于是 1.65 米的钳口跨度被当成一次干净的测量收下(spanI)。
-        let n = 份.len() as f64;
-        let mut j = [0.0f64; 4];
-        for f in &份 { for k in 0..4 { j[k] += f[k] / n; } }
-        let mut js = [0.0f64; 4];
-        for k in 0..4 {
-            let s2: f64 = 份.iter().map(|f| (f[k] - j[k]).powi(2)).sum();
-            js[k] = (s2 / (n - 1.0) / n).sqrt();
+        for c in 0..k {
+            let piv = (c..k).max_by(|&x, &y| aug[x][c].abs().partial_cmp(&aug[y][c].abs()).unwrap())?;
+            if aug[piv][c].abs() < 1e-12 { return None; }
+            aug.swap(c, piv);
+            let d = aug[c][c];
+            for q in 0..2 * k + 2 { aug[c][q] /= d; }
+            for r in 0..k {
+                if r == c { continue; }
+                let f = aug[r][c];
+                if f == 0.0 { continue; }
+                for q in 0..2 * k + 2 { aug[r][q] -= f * aug[c][q]; }
+            }
         }
-        if js.iter().any(|x| !x.is_finite()) { return None; }
+        let βu: Vec<f64> = (0..k).map(|p| aug[p][2 * k]).collect();
+        let βv: Vec<f64> = (0..k).map(|p| aug[p][2 * k + 1]).collect();
+        let 残 = |β: &Vec<f64>, y: &Vec<f64>| -> f64 {
+            let ss: f64 = xs.iter().zip(y).map(|(r, &t)| {
+                let f: f64 = r.iter().zip(β).map(|(x, b)| x * b).sum();
+                (t - f) * (t - f)
+            }).sum();
+            ss / (n - k) as f64
+        };
+        let (s2u, s2v) = (残(&βu, &yu), 残(&βv, &yv));
+        let (inv0, inv1) = (aug[0][k], aug[1][k + 1]); // (XᵀX)⁻¹ 的前两个对角元
+        if !(inv0 > 0.0 && inv1 > 0.0) { return None; }
+        let j = [βu[0], βu[1], βv[0], βv[1]];
+        let js = [(s2u * inv0).sqrt(), (s2u * inv1).sqrt(), (s2v * inv0).sqrt(), (s2v * inv1).sqrt()];
+        if j.iter().chain(js.iter()).any(|x| !x.is_finite()) { return None; }
         let det = j[0] * j[3] - j[1] * j[2];
         let det_σ = (j[3] * js[0]).hypot(j[0] * js[3]).hypot((j[2] * js[1]).hypot(j[1] * js[2]));
         if !det.is_finite() || !det_σ.is_finite() || det.abs() <= 2.0 * det_σ {
-            println!("      [跨度] 第 {cam} 台的尺**接近降秩**:行列式 {det:.5} vs 自己的 1σ {det_σ:.5}({} 个腕角各一份)—— 换出来的米会被放大任意倍,不用它", 份.len());
+            println!("      [跨度] 第 {cam} 台的尺**接近降秩**:行列式 {det:.5} vs 自己的 1σ {det_σ:.5}({n} 个样本 · {} 个腕角截距 · 自由度 {})—— 换出来的米会被放大任意倍,不用它",
+                角.len(), n - k);
             return None;
         }
+        println!("      [跨度] 第 {cam} 台的尺:J=[{:.4},{:.4},{:.4},{:.4}] · 行列式 {det:.5} vs 1σ {det_σ:.5}({n} 样本 · 自由度 {})",
+            j[0], j[1], j[2], j[3], n - k);
         Some((j, js))
     }
 
