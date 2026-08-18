@@ -706,6 +706,20 @@ pub fn gripper_span(
         return Err(Declined::Inconsistent);
     }
 
+    // 🔴🔴 **AT ZERO OPENING THE JAWS MUST BE TOGETHER.** A pair of jaws satisfies
+    // `separation(opening) ≈ span × opening`, so the fitted intercept must be near zero.
+    // An intercept that dwarfs the fitted change describes two things that sit far apart and
+    // merely drift a little as the command sweeps — not a pair of jaws.
+    //
+    // MEASURED (2026-08-18, spanS): this probe **passed** every other gate — ruler
+    // |det|/σ = 4.59, slope > 2σ, slope > 0 — and reported 0.126 m. The raw fit:
+    // intercept **+0.2295 m** against a fitted change of only 0.0531 m, and the *other*
+    // viewing angle gave a slope of the **opposite sign** (−0.0131 vs +0.1207).
+    // Two lobes 23 cm apart at zero opening cannot be a gripper's fingers.
+    // Nothing else in the log looked wrong: this is the gate that was missing.
+    if intercept.abs() > slope * (x_hi - x_lo) {
+        return Err(Declined::Inconsistent);
+    }
     let span_units = slope * (x_hi - x_lo);
     let span_m = span_units / units_per_m;
     // Relative errors add in quadrature: the fit's and the ruler's. Quoting only the fit's would
