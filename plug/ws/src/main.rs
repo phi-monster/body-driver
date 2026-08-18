@@ -635,9 +635,15 @@ fn main() {
         // 真正该做的是**去补前置**。静默退化成 0 比拒绝更贵:拒绝会把人送对方向。
         // ⇒ 量不到 `reach` 就退到探针自己的幅度(接触那一相一步 0.01 m,这里走两步),
         //   **永远不为零**,并且把用的是哪一条打出来 —— 日志里不许出现"看起来正常的 0"。
-        let (抬一档, 尺来源) = match body.get(Quantity::Reach) {
-            Some(m) => (((m.value[1] - m.value[0]).abs() / 3.0).clamp(0.02, 0.25), "可达带/3"),
-            None => (0.02, "退到探针幅度(可达没量到)"),
+        // 🔴 `BL_SPAN_STEP=<米>` 直接指定一档多大 —— 只为**并排比不同基线长度**:
+        // 尺是"命令出去一档,画面里挪几个像素",一档太短则那几个像素淹在噪声里。
+        // 不给就照常从量到的可达带推。
+        let (抬一档, 尺来源) = match std::env::var("BL_SPAN_STEP").ok().and_then(|v| v.parse::<f64>().ok()) {
+            Some(v) if v > 0.0 => (v, "BL_SPAN_STEP 指定"),
+            _ => match body.get(Quantity::Reach) {
+                Some(m) => (((m.value[1] - m.value[0]).abs() / 3.0).clamp(0.02, 0.25), "可达带/3"),
+                None => (0.02, "退到探针幅度(可达没量到)"),
+            },
         };
         if matches!(q, Quantity::GripperSpan) {
             println!("      [跨度分档] 一档 {抬一档:.4} m —— {尺来源}");
@@ -981,7 +987,19 @@ fn main() {
         };
         match got {
             Ok(m) => {
-                let v = format!("{:?}", &m.value[..(m.dim as usize).min(4)]);
+                // 🔴 **多维的量只印前四个数,读起来是"全零"。**
+                // 实测(2026-08-18):自遮挡 24 维,存盘里第 15 格 0.833、第 16 格 0.5,
+                // 而控制台四轮都印 `[0.0, 0.0, 0.0, 0.0]` —— 我据此怀疑估计器把信息扔了,
+                // 查到存盘才知道没有。**日志不该让人去查存盘才能知道自己没坏。**
+                // ⇒ 超过四维时,印维数 + 非零的那几格(第几格:多少)。
+                let d = (m.dim as usize).min(m.value.len());
+                let v = if d <= 4 {
+                    format!("{:?}", &m.value[..d])
+                } else {
+                    let 非零: Vec<String> = (0..d).filter(|&i| m.value[i] != 0.0)
+                        .map(|i| format!("{i}:{:.3}", m.value[i])).collect();
+                    format!("{d} 维 · 非零 {{{}}}", if 非零.is_empty() { "全零".into() } else { 非零.join(" ") })
+                };
                 // 🔴 **收不收得下,必须报出来。** 上一版写的是 `let _ = body.submit(m)` ——
                 // 于是"量到了"和"量到了但被拒收"长得一模一样,而日程会**一直重问同一格**
                 // (实测:`hand_pixel` 连着第 2/3/4/5 轮都在量,每轮的值还差得离谱)。
