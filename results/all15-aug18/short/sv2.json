@@ -1,0 +1,10 @@
+{
+  "fingerprint": "self-measured",
+  "quantities": {
+    "image_jacobian": {"value": [0.11568390888199356, 0.061246058434755835, 0.017608158700039594, 0.8995922354282869, 0.6917300855286117, -0.6375277360815728], "uncertainty": [0.0797279048811662, 0.0797279048811662, 0.0721740144176214, 0.0721740144176214, 0.0718616100775482, 0.0718616100775482], "valid_lo": [-0.045, -0.045, -0.045, -0.045, -0.045, -0.045], "valid_hi": [0.045, 0.045, 0.045, 0.045, 0.045, 0.045], "selftest_passed": true, "provenance": "measured by this body during power-on self-calibration"},
+    "hand_pixel": {"value": [0.15511515740090673, 0.6651907119427531], "uncertainty": [0.07573993423386026, 0.07573993423386026], "valid_lo": [0, 0], "valid_hi": [1, 1], "selftest_passed": true, "provenance": "measured by this body during power-on self-calibration"},
+    "latency": {"value": [0], "uncertainty": [0.5], "valid_lo": [0], "valid_hi": [11], "selftest_passed": true, "provenance": "measured by this body during power-on self-calibration"},
+    "step_delivery": {"value": [0.8876935554287092], "uncertainty": [0.001855212960766737], "valid_lo": [0.0050000000000000044], "valid_hi": [0.04999999999999999], "selftest_passed": true, "provenance": "measured by this body during power-on self-calibration"},
+    "home_pose": {"value": [-0.3269862817092375, -0.3150488571687179, 0.9252872629599138, 0.7070049244912103, -0.011880731649480806, 0.7070088343323458, 0.011890884604120222], "uncertainty": [0.0000040345457797766236, 0.0000040345457797766236, 0.0000040345457797766236, 0, 0, 0, 0], "valid_lo": [-0.32698675990104675, -0.3150653541088104, 0.9252855777740479, 0.6605564951896667, -0.25239297747612, 0.6605604887008667, 0.00011691448889905587], "valid_hi": [-0.3269805312156677, -0.31504786014556885, 0.9252907633781433, 0.7071049213409424, -0.00009797557140700519, 0.7071086764335632, 0.2522352635860443], "selftest_passed": true, "provenance": "measured by this body during power-on self-calibration"}
+  }
+}
