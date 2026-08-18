@@ -464,8 +464,10 @@ fn main() {
             if i != cam { continue; }
             let t = 角.iter().position(|&a| a == (θ * 100.0).round() as u64)?;
             let mut row = vec![0.0; k];
-            row[0] = got[0];
-            row[1] = got[1];
+            // 🔴 自变量是**实到的 y 与 z** —— 这具身体证明过这两个方向送得出去,
+            //    而 +x 在这个位形上命令 6 cm、实到 0.1 mm(见 `selfcal::档偏` 的实测表)。
+            row[0] = got[1];
+            row[1] = got[2];
             row[2 + t] = 1.0;
             xs.push(row); yu.push(u); yv.push(v);
         }
