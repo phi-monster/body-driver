@@ -191,8 +191,21 @@ pub fn candidates(
         }
     }
 
-    let m1: Vec<bool> = (0..n).map(|i| f0[i].abs_diff(f1[i]) > floor).collect();
-    let m2: Vec<bool> = (0..n).map(|i| f1[i].abs_diff(f2[i]) > floor).collect();
+    // 🔴🔴 **门槛必须是【逐像素】的,不能是全图一个标量。**(2026-08-18,第二层)
+    //
+    // 改成分位之后实测门槛仍然是 `[169, 227, 25]` —— 也就是说这台渲染器上,静止的
+    // 两帧之间真有上百个像素差了 170 个灰阶(RTX 去噪逐帧收敛,静止场景两帧也不一样),
+    // 而**噪声在画面里分布得极不均匀**:高光/边缘在闪,钳口那一片其实很安静。
+    // 一个全图标量只能二选一 —— 要么被高光顶到天上把钳口一起埋掉(就是上一版的病),
+    // 要么放低到把高光全收进来。**两种都错,因为它假设噪声是均匀的,而它不是。**
+    //
+    // ⇒ 一个像素算"动过",要同时满足:
+    //   ① 超过**它自己**在静止那一对里的变化(这一像素平时抖多少,量出来的);
+    //   ② 超过全图分位 `floor`(挡住"这一像素在静止那两帧里恰好没抖"的侥幸)。
+    // 两项都是量出来的,没有新常数。
+    let 门 = |i: usize| -> u8 { core::cmp::max(null_a[i].abs_diff(null_b[i]), floor) };
+    let m1: Vec<bool> = (0..n).map(|i| f0[i].abs_diff(f1[i]) > 门(i)).collect();
+    let m2: Vec<bool> = (0..n).map(|i| f1[i].abs_diff(f2[i]) > 门(i)).collect();
     // 🔴 THE WHOLE IDEA IN ONE LINE: responded to the first step AND to the second ⇒ this is where
     // the part is at `f1`. Responded to only one ⇒ it is a place the part has been, or is going.
     let here: Vec<bool> = (0..n).map(|i| m1[i] && m2[i]).collect();

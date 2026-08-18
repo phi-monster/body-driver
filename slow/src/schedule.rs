@@ -246,6 +246,45 @@ pub fn plan(body: &Body, now_ns: u64) -> Plan {
     Plan { order, n }
 }
 
+/// 🔴🔴 **闲着的时候该重量哪一格** —— "越用越强"的那一半,直到 2026-08-18 都不存在。
+///
+/// # 为什么之前不可能变强
+///
+/// [`plan`] 只排"还欠着的"格。一格量到之后,除非它过期([`Measurement::is_stale`])或者
+/// 前置换了版,**日程再也不会问它第二次** —— 而全仓除了 `image_jacobian` 之外
+/// **每一格的 `valid_for_ns` 都是 0(永不过期)**。于是 [`Body::submit`] 里那道
+/// `WorseThanStored` 闸**一次都不可能触发**:第二次测量根本不存在,没有东西可比。
+/// 机器"量一次定终身",不是"越用越强"。
+///
+/// # 排序的规矩:两项都是**量出来的**,没有新常数
+///
+/// ① **相对不确定度大的先重量** —— 那是这具身体对自己最没把握的一处。
+/// ② 并列时**最久没量的先** —— 保证每一格都轮得到,不会有一格永远排不上。
+///
+/// 安全性由 [`Body::submit`] 兜:重量出来的行**每一项都更差**就被挡回去,不会把好的覆盖掉。
+/// 所以这个函数**只需要挑得合理,不需要挑得对** —— 挑错了的代价是一次白跑,不是一次损坏。
+///
+/// 返回 `None` 只在这具身体一格都还没量到时。
+pub fn weakest(body: &Body) -> Option<Quantity> {
+    let mut best: Option<(Quantity, f64, u64)> = None;
+    for i in 0..Quantity::COUNT {
+        let Some(q) = Quantity::from_u32(i as u32) else { continue };
+        let Some(m) = body.get(q) else { continue };
+        // 相对不确定度:值为零时退回绝对值(否则会除出无穷,把一格顶到永远第一)。
+        let v = m.value[0].abs();
+        let u = m.uncertainty[0].abs();
+        let rel = if v > 1e-12 { u / v } else { u };
+        let better = match best {
+            None => true,
+            Some((_, r0, e0)) => rel > r0 || (rel == r0 && m.epoch < e0),
+        };
+        if better {
+            best = Some((q, rel, m.epoch));
+        }
+    }
+    best.map(|(q, _, _)| q)
+}
+
 /// The next single thing to measure, or `None` if this body is currently complete.
 pub fn next(body: &Body, now_ns: u64) -> Option<(Quantity, Need)> {
     let p = plan(body, now_ns);

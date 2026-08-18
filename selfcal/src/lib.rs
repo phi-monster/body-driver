@@ -772,6 +772,14 @@ pub fn 跑一相(
                                     let mut buf = format!("P5\n{w} {h}\n255\n").into_bytes();
                                     buf.extend_from_slice(g);
                                     let _ = std::fs::write(format!("{d}/sp{循环号}_cam{i}.pgm"), buf);
+                                    // 🔴 **五帧全落**,不只落最后一帧。认块器吃的就是这五帧
+                                    // (两帧静止 + 三帧晃钳口)⇒ 落全了才能**零 GPU 离线复算**:
+                                    // 换一条门槛规矩不必再租一次机器,拿这五帧重跑一遍就知道。
+                                    for (fi, fr) in 五帧[i].iter().enumerate() {
+                                        let mut b5 = format!("P5\n{w} {h}\n255\n").into_bytes();
+                                        b5.extend_from_slice(fr);
+                                        let _ = std::fs::write(format!("{d}/sp{循环号}_cam{i}_f{fi}.pgm"), b5);
+                                    }
                                     let mut t = String::new();
                                     if let Some(Some(r)) = 本轮.get(i) {
                                         t.push_str(&format!("pairs={} moved_px={} floor={} pair_dir=({:.5},{:.5})\n", r.pairs, r.moved_px, r.floor, r.pair_dir.0, r.pair_dir.1));
