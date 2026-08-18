@@ -918,15 +918,30 @@ fn main() {
                         }
                         println!("      [跨度] 第 {cam} 台:配对 {n} · 尺 J=[{:.4},{:.4},{:.4},{:.4}] · 分 {} 个腕角各拟一条",
                             j[0], j[1], j[2], j[3], 按角.len());
-                        let mut 这台 = Err(probe::Declined::NotEnoughSamples);
+                        // 🔴🔴 **通过的角度里取【跨度最大】的那个,不是第一个通过的。**
+                        //
+                        // 投影只会把张开方向压小,不会放大 ⇒ 各视角拟出的斜率是
+                        // `真斜率 × cos(那个视角的压缩)`,**最大的那个才是真的**。
+                        // 合成数据验过(真跨度 0.09/单位开度,三个视角注入压缩 0.3/0.7/1.0):
+                        // 拟出 0.0272 / 0.0632 / **0.0900** —— 逐位还原,且最大的那个正是真值。
+                        // 按"第一个通过就用"会在 0.5 那个角度先通过时**低估 3 倍**,
+                        // 而低估出来的数长得完全正常。
+                        let mut 这台: Result<body_layer::measurement::Measurement, probe::Declined> =
+                            Err(probe::Declined::NotEnoughSamples);
                         for (θ100, pts) in &按角 {
                             let r = probe::gripper_span(pts, 1.0, 0.0, now, jac_epoch);
                             println!("            腕角 {:.2} · {} 点 ⇒ {}",
                                 *θ100 as f64 / 100.0, pts.len(),
                                 match &r { Ok(m) => format!("🟢 {:.5} m", m.value[0]), Err(e) => format!("{e:?}") });
-                            let 先前是采不够 = matches!(这台, Err(probe::Declined::NotEnoughSamples));
-                            if r.is_ok() { 这台 = r; break; }
-                            if 先前是采不够 { 这台 = r; }
+                            match (&这台, &r) {
+                                // 已经有一个通过的 ⇒ 只有更大的才换(投影不会放大)
+                                (Ok(a), Ok(b)) if b.value[0] > a.value[0] => 这台 = r,
+                                (Ok(_), _) => {}
+                                // 还没有通过的 ⇒ 通过的当然收下;都没通过时,别让"采不够"盖住更具体的理由
+                                (_, Ok(_)) => 这台 = r,
+                                (Err(probe::Declined::NotEnoughSamples), Err(_)) => 这台 = r,
+                                _ => {}
+                            }
                         }
                         let 收下 = 这台.is_ok();
                         结果 = 这台;
