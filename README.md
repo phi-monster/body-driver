@@ -172,6 +172,26 @@ anywhere, which is its own finding. **A named slot in an enum is not a probe.** 
 | `gripper_span` · `backlash` · `contact_threshold` · `self_occlusion` | added 2026-08-09 |
 | **`tool_offset`** | added 2026-08-09 **from a census of the live stack** — see below |
 
+### 🔴🔴 "11 of 11" 说的是**代码在**,不是**量得出来** —— 别把这两件事读成一件
+
+上面那张表回答的是"每一格有没有估计器"。它**不回答**"这具身体上真的量到了没有",
+更不回答"量到的那个数是不是一个常数"。2026-08-18 用 **15 次从零开始的独立标定**把后两件事量了:
+
+| | 绝对数 |
+|---|---|
+| 一炮从零跑完能拿到几格 | **4–10 格**,多数停在 **7/15** |
+| 15 炮合起来有数的 | **12/15** |
+| **跨 15 炮真的对得上的(最大相对散布 <2%)** | **1 格**(`step_delivery`,散布 1.0%) |
+| 从没量到过的 | `friction` · `hand_pixel` · `gripper_span` |
+| 抓取成功 | **0 次** |
+
+散布(15 炮之间最大相对差):`contact_threshold` **1603%** · `image_jacobian` **564%** ·
+`arm_weight` **238%** · `home_pose` **1954%** · `backlash` **72%**。
+⇒ **"量到了"和"它是这具身体的一个常数"是两件事,而我们此前只验过前一件。**
+
+零 GPU 重跑这张表:`python3 results/all15-aug18/collect.py results/all15-aug18/json/*.json`。
+逐条 bug 与修法见 [`DRIVER_GOAL.md`](DRIVER_GOAL.md) §五(2026-08-18 那几行)。
+
 Two of them are checked against **real logs**, not only against synthetic cases a test author
 imagined — `contact_threshold` against 520 rows of a press-depth staircase with PhysX contact as
 ground truth, `backlash` against three 300-step sweeps of a 7-joint arm
