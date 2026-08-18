@@ -557,7 +557,9 @@ fn main() {
             // 🔴 跨度要跑得久一点:真配对的产出率实测约 **13%**(30 个循环出 4 个),
             //    而估计器要 ≥5 个。砍掉单瓣兜底之后剩下的全是无假设的样本,
             //    **该补的是循环数,不是判据** —— 这一格今晚每一次改判据都改错了。
-            Quantity::GripperSpan => 600,
+            // 🔴 分腕角拟合之后,**每个角度**都要够估计器的 5 个点。60 个循环 ÷ 3 个角度
+            //    × 30% 配对产出率 ≈ 6 个 —— 擦边。翻倍到 1200 步(120 循环)才有余量。
+            Quantity::GripperSpan => 1200,
             // 49 个位形 × 6 拍
             Quantity::ArmWeight => 300,
             Quantity::ImageJacobian | Quantity::HandPixel => 300,
@@ -858,19 +860,39 @@ fn main() {
                         println!("      [跨度] 没有一台相机**既配得上对、又换得出米** —— 拒绝,不把画面单位塞进米的槽里");
                     }
                     for (n, cam, (j, js)) in 可用 {
-                        let mut 米: Vec<(f64, f64)> = Vec::new();
-                        for &(c, m, du, dv) in &s.jaw {
+                        // 🔴🔴 **逐个腕角分别拟合,不把不同视角的读数混在一条回归里。**
+                        //
+                        // 实测(spanD):头相机 19 个配对、尺也建起来了,判词仍是 `NoResponse` ——
+                        // 因为**同一个开度的方差和整条趋势一样大**(0.56 读出 0.136 与 0.112;
+                        // 0.67 读出 0.118 与 0.126)。方差不是噪声,是**投影**:同一副张开的钳口
+                        // 在 86° 下看到全长、在 0° 下几乎看不到,而上一版把这些混进了同一条回归。
+                        //
+                        // ⇒ 腕角改成慢变(一个角度下把 6 个开度扫完),这里**按角度分组各拟一条**,
+                        //   谁先被估计器收下就用谁。这直接问的就是那个物理问题:
+                        //   *有没有哪个视角,两瓣间距真的跟着开度走*。
+                        // 这样也不需要"取最大"那种带偏置的归约 —— 每条曲线内部视角是固定的。
+                        let mut 按角: std::collections::BTreeMap<u64, Vec<(f64, f64)>> = Default::default();
+                        for &(c, θ, m, du, dv) in &s.jaw {
                             if c != cam { continue; }
                             if let Ok(((x, y), _)) = probe::image_to_plane(&j, &js, (du, dv)) {
-                                米.push((m, x.hypot(y)));
+                                按角.entry((θ * 100.0).round() as u64).or_default().push((m, x.hypot(y)));
                             }
                         }
-                        let r = probe::gripper_span(&米, 1.0, 0.0, now, jac_epoch);
-                        println!("      [跨度] 第 {cam} 台:配对 {n} → 换成米 {} 个 · 尺 J=[{:.4},{:.4},{:.4},{:.4}] · 判词 {}",
-                            米.len(), j[0], j[1], j[2], j[3],
-                            match &r { Ok(m) => format!("🟢 {:.5} m", m.value[0]), Err(e) => format!("{e:?}") });
-                        结果 = r;
-                        if 结果.is_ok() { 跨度相机 = cam; break; }
+                        println!("      [跨度] 第 {cam} 台:配对 {n} · 尺 J=[{:.4},{:.4},{:.4},{:.4}] · 分 {} 个腕角各拟一条",
+                            j[0], j[1], j[2], j[3], 按角.len());
+                        let mut 这台 = Err(probe::Declined::NotEnoughSamples);
+                        for (θ100, pts) in &按角 {
+                            let r = probe::gripper_span(pts, 1.0, 0.0, now, jac_epoch);
+                            println!("            腕角 {:.2} · {} 点 ⇒ {}",
+                                *θ100 as f64 / 100.0, pts.len(),
+                                match &r { Ok(m) => format!("🟢 {:.5} m", m.value[0]), Err(e) => format!("{e:?}") });
+                            let 先前是采不够 = matches!(这台, Err(probe::Declined::NotEnoughSamples));
+                            if r.is_ok() { 这台 = r; break; }
+                            if 先前是采不够 { 这台 = r; }
+                        }
+                        let 收下 = 这台.is_ok();
+                        结果 = 这台;
+                        if 收下 { 跨度相机 = cam; break; }
                     }
                     结果
                 }
