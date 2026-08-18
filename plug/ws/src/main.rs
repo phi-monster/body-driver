@@ -441,67 +441,71 @@ fn main() {
     /// 每档取这台相机上所有样本的中位数(不是均值 —— 认错一次手就能把均值拽走)。
     /// 返回 `None` 的两种情形都当"这台相机换不出米":某一档没样本,或者画面响应小到
     /// 与不动分不开(**腕上的相机就长这样:手臂平移时手在它画面里根本不挪**)。
-    fn 本相尺(shift: &[(usize, [f64; 3], [f64; 3], f64, f64)], cam: usize) -> Option<([f64; 4], [f64; 4])> {
-        let 中位 = |v: &mut Vec<f64>| -> f64 { v.sort_by(|a, b| a.partial_cmp(b).unwrap()); v[v.len() / 2] };
-        let mut 档: Vec<(Vec<f64>, Vec<f64>)> = (0..4).map(|_| (Vec::new(), Vec::new())).collect();
-        let mut 一档 = 0.0f64;
-        let mut 实档: Vec<Vec<f64>> = (0..4).map(|_| Vec::new()).collect();
-        for &(i, cmd, got, u, v) in shift {
+    fn 本相尺(shift: &[(usize, f64, [f64; 3], [f64; 3], f64, f64)], cam: usize) -> Option<([f64; 4], [f64; 4])> {
+        // 🔴🔴 **差分在【每个腕角内部】做,再把各腕角的差分平均。**
+        //
+        // 腕角只改变那个中点在画面里的**偏移**,不改变尺本身(手腕转动不影响"手臂平移在画面里
+        // 挪多少")。而离线复核(span_samples_N.txt)显示:同一档里的 v **被 ~0.05 的大间隔劈成
+        // 两三簇**(三个腕角),而簇内散布只有 0.01–0.02 —— **簇间偏移比要量的档间位移大 3–5 倍**。
+        // 混着取中位数不是"多一点噪声",是**加进一个比信号还大的系统偏移**:
+        // 实测 u 的散布 ±0.0055、v 却 ±0.0148–0.0172,而档间位移本身才 0.01–0.02。
+        // ⇒ 每个腕角各出一份差分(偏移在差分里自动抵消),再把它们平均 —— 全部样本都用上,σ 再降 √n。
+        #[derive(Default, Clone)]
+        struct 桶 { u: Vec<f64>, v: Vec<f64>, d: Vec<f64> }
+        let mut 按角档: std::collections::BTreeMap<(u64, usize), 桶> = Default::default();
+        for &(i, θ, cmd, got, u, v) in shift {
             if i != cam { continue; }
-            let off = cmd;
-            let idx = match (off[0] != 0.0, off[1] != 0.0, off[2] != 0.0) {
-                (false, false, false) => 0,
+            let idx = match (cmd[0] != 0.0, cmd[1] != 0.0, cmd[2] != 0.0) {
+                (false, false, false) => 0usize,
                 (false, false, true) => 1,
                 (true, false, true) => 2,
                 (false, true, true) => 3,
                 _ => continue,
             };
-            档[idx].0.push(u);
-            档[idx].1.push(v);
-            // 🔴 分母用**实到**的位移(命令 6 cm、身体每拍只交付 0.888,还可能够不到)。
+            let e = 按角档.entry(((θ * 100.0).round() as u64, idx)).or_default();
+            e.u.push(u);
+            e.v.push(v);
+            // 🔴 分母用**实到**位移:命令 6 cm,而这具身体每拍只交付 0.888、还可能够不到。
             // 拿命令当分母 ⇒ 尺被系统性低估 ⇒ 换出来的米偏大,而没有任何环节会不一致。
-            实档[idx].push((got[0] * got[0] + got[1] * got[1] + got[2] * got[2]).sqrt());
+            e.d.push((got[0] * got[0] + got[1] * got[1] + got[2] * got[2]).sqrt());
         }
-        for v in 实档.iter() { if let Some(&m) = v.iter().max_by(|a, b| a.partial_cmp(b).unwrap()) { 一档 = 一档.max(m); } }
-        if 一档 <= 0.0 || 档.iter().any(|(u, _)| u.is_empty()) { return None; }
-        // 🔴🔴 **每一档的散布要【量】出来,不许编。**
-        //
-        // 上一版把尺的 1σ 写成 `0.05 × |j|`(拍脑袋的 5%),而 `image_to_plane` 里
-        // "行列式要与自己的 1σ 分得开"这条拒绝**整个建立在这个 σ 上** ——
-        // σ 一旦是编的,那条判据就静默失效。实测代价(spanI,2026-08-18):
-        // 尺 J=[0.3050,0.3268,0.0780,0.0259],第二行小一个量级 ⇒ 行列式 −0.0176、接近降秩,
-        // 求逆把一点点像素放大成 **1.65 米的钳口跨度**,而估计器把它当成一次干净的测量收下了。
-        // ⇒ 同一档内多个样本的**标准误**就是那一档位置的 σ,一路传到 J 上。
-        let 标准误 = |v: &Vec<f64>| -> f64 {
-            let n = v.len() as f64;
-            if n < 2.0 { return f64::INFINITY; }
-            let μ = v.iter().sum::<f64>() / n;
-            (v.iter().map(|x| (x - μ).powi(2)).sum::<f64>() / (n - 1.0) / n).sqrt()
-        };
-        let σ: Vec<(f64, f64)> = 档.iter().map(|(u, v)| (标准误(u), 标准误(v))).collect();
-        let p: Vec<(f64, f64)> = 档.iter_mut().map(|(u, v)| (中位(u), 中位(v))).collect();
-        // 档 1 是共同起点:1→2 给 +x 一档的画面响应,1→3 给 +y 一档的。
-        let j = [(p[2].0 - p[1].0) / 一档, (p[3].0 - p[1].0) / 一档,
-                 (p[2].1 - p[1].1) / 一档, (p[3].1 - p[1].1) / 一档];
-        // 🔴 判"这台相机到底动没动"的地板:一档挪出去若在画面上不到千分之一,那和不动分不开。
-        // 这个阈值不是在挑相机,是在问"这次位移有没有越过观测噪声" —— 腕相机会在这里落选,
-        // 而落选的理由是**量出来的**,不是"腕相机不算数"这条规矩。
-        if j.iter().all(|x| x.abs() * 一档 < 1e-3) { return None; }
-        // 两档之差的 σ:两端各自的标准误按平方和相加,再除以那一档的长度。
-        let js = [(σ[2].0.hypot(σ[1].0)) / 一档, (σ[3].0.hypot(σ[1].0)) / 一档,
-                  (σ[2].1.hypot(σ[1].1)) / 一档, (σ[3].1.hypot(σ[1].1)) / 一档];
+        let 中位 = |v: &mut Vec<f64>| -> f64 { v.sort_by(|a, b| a.partial_cmp(b).unwrap()); v[v.len() / 2] };
+        // 每个腕角:1→2 给 +x 一档的画面响应,1→3 给 +y 一档的。两个都要有才算一份。
+        let mut 份: Vec<[f64; 4]> = Vec::new();
+        let 角集: Vec<u64> = { let mut a: Vec<u64> = 按角档.keys().map(|&(θ, _)| θ).collect(); a.dedup(); a };
+        for θ in 角集 {
+            let (Some(b1), Some(b2), Some(b3)) = (
+                按角档.get(&(θ, 1)).cloned(), 按角档.get(&(θ, 2)).cloned(), 按角档.get(&(θ, 3)).cloned(),
+            ) else { continue };
+            let mut b1 = b1; let mut b2 = b2; let mut b3 = b3;
+            let 步 = { let mut d = b2.d.clone(); d.extend(b3.d.iter()); 中位(&mut d) };
+            if !(步 > 0.0) { continue; }
+            let (u1, v1) = (中位(&mut b1.u), 中位(&mut b1.v));
+            份.push([(中位(&mut b2.u) - u1) / 步, (中位(&mut b3.u) - u1) / 步,
+                     (中位(&mut b2.v) - v1) / 步, (中位(&mut b3.v) - v1) / 步]);
+        }
+        if 份.len() < 2 { return None; }
+        // 🔴 **σ 是各腕角之间的散布,量出来的** —— 上一版把它写成 `0.05×|J|`(编的 5%),
+        // 而 `image_to_plane` 里"行列式要与自己的 1σ 分得开"这条拒绝整个建立在这个 σ 上;
+        // σ 一编,判据就静默失效,于是 1.65 米的钳口跨度被当成一次干净的测量收下(spanI)。
+        let n = 份.len() as f64;
+        let mut j = [0.0f64; 4];
+        for f in &份 { for k in 0..4 { j[k] += f[k] / n; } }
+        let mut js = [0.0f64; 4];
+        for k in 0..4 {
+            let s2: f64 = 份.iter().map(|f| (f[k] - j[k]).powi(2)).sum();
+            js[k] = (s2 / (n - 1.0) / n).sqrt();
+        }
         if js.iter().any(|x| !x.is_finite()) { return None; }
-        // 🔴 **行列式必须与它自己的 1σ 分得开** —— 这条本来就在 `image_to_plane` 里,
-        // 这里先自己判一次是为了**在日志里说清楚拒的是什么**:一个接近降秩的尺,
-        // 求逆之后会把任何一点像素放大成任意大的米数,而放大出来的数**长得完全正常**。
         let det = j[0] * j[3] - j[1] * j[2];
         let det_σ = (j[3] * js[0]).hypot(j[0] * js[3]).hypot((j[2] * js[1]).hypot(j[1] * js[2]));
         if !det.is_finite() || !det_σ.is_finite() || det.abs() <= 2.0 * det_σ {
-            println!("      [跨度] 第 {cam} 台的尺**接近降秩**:行列式 {det:.5} vs 自己的 1σ {det_σ:.5} —— 换出来的米会被放大任意倍,不用它");
+            println!("      [跨度] 第 {cam} 台的尺**接近降秩**:行列式 {det:.5} vs 自己的 1σ {det_σ:.5}({} 个腕角各一份)—— 换出来的米会被放大任意倍,不用它", 份.len());
             return None;
         }
         Some((j, js))
     }
+
     // 把弧上的每个点从画面单位换成水平面里的米。换不动的点原样丢掉 —— 补一个
     // 猜出来的坐标,比少一个点糟得多。
     fn 弧换米(
@@ -876,9 +880,9 @@ fn main() {
                         for &(c, θ, m, du, dv) in &s.jaw {
                             s0.push_str(&format!("jaw {c} {θ} {m} {du} {dv}\n"));
                         }
-                        s0.push_str("# shift: cam cmdx cmdy cmdz gotx goty gotz u v\n");
-                        for &(c, cmd, got, u, v) in &s.cam_shift {
-                            s0.push_str(&format!("shift {c} {} {} {} {} {} {} {u} {v}\n", cmd[0], cmd[1], cmd[2], got[0], got[1], got[2]));
+                        s0.push_str("# shift: cam tilt cmdx cmdy cmdz gotx goty gotz u v\n");
+                        for &(c, θ, cmd, got, u, v) in &s.cam_shift {
+                            s0.push_str(&format!("shift {c} {θ} {} {} {} {} {} {} {u} {v}\n", cmd[0], cmd[1], cmd[2], got[0], got[1], got[2]));
                         }
                         let _ = std::fs::write(&d, s0);
                         println!("      [跨度] 原始样本已落盘 ⇒ {d}(jaw {} 条 · shift {} 条)", s.jaw.len(), s.cam_shift.len());
@@ -887,14 +891,30 @@ fn main() {
                     //   ① 它真配得上对(看得见两瓣)· ② 它换得出米(手臂平移时手在它画面里挪得动)。
                     // ② 只有四档都采完才知道,所以采样时钉相机必然是**信息没齐就下判断**。
                     // 两个条件都满足的相机里,取配对样本最多的那台。
+                    // 🔴🔴 **尺必须在【同一个腕角】下量,不能把几个视角混着取中位数。**
+                    //
+                    // 离线复核(span_samples_N.txt,一档 6 cm)把这件事钉死了:
+                    // 头相机两个方向的画面响应 x=(−0.020,+0.108)、y=(+0.216,+0.081),**夹角 80°** ——
+                    // 几何上几乎正交,一点不退化。行列式小(−0.025)只是因为**响应本身小**
+                    // (手在头相机里就那么大),而 σ 高达 0.044 ⇒ 判不出来。
+                    // 而 σ 高的原因不是测量噪声:每一档的散布 u 是 ±0.0055、**v 却是 ±0.0148–0.0172**,
+                    // 差三倍 —— 因为同一档里混着**三个腕角、六个开度**的循环,而两者都会挪动那个中点。
+                    // **量到的"噪声"大半是腕角造成的真实变化。**
+                    // ⇒ 尺按 (相机, 腕角) 分组各量一把,和那个腕角下的钳口样本配成一套。
                     let 台数 = s.jaw.iter().map(|&(i, ..)| i).max().map(|m| m + 1).unwrap_or(0);
-                    let mut 可用: Vec<(usize, usize, ([f64; 4], [f64; 4]))> = Vec::new();
+                    let 腕角集: Vec<u64> = {
+                        let mut v: Vec<u64> = s.jaw.iter().map(|&(_, θ, ..)| (θ * 100.0).round() as u64).collect();
+                        v.sort_unstable(); v.dedup(); v
+                    };
+                    let mut 可用: Vec<(usize, usize, u64, ([f64; 4], [f64; 4]))> = Vec::new();
                     for i in 0..台数 {
-                        let n = s.jaw.iter().filter(|&&(c, ..)| c == i).count();
-                        match (n, 本相尺(&s.cam_shift, i)) {
-                            (0, _) => {}
-                            (n, Some(r)) => 可用.push((n, i, r)),
-                            (n, None) => println!("      [跨度] 第 {i} 台配上对 {n} 个,但**换不出米**(手臂平移时手在它画面里几乎不动 ⇒ 腕上的相机)—— 不用它"),
+                        // 尺是**整台相机共用一把**(各腕角的差分平均出来的);
+                        // 而钳口样本必须**按腕角分开拟**,因为投影压缩逐视角不同。
+                        let Some(r) = 本相尺(&s.cam_shift, i) else { continue };
+                        for &θ100 in &腕角集 {
+                            let θ = θ100 as f64 / 100.0;
+                            let n = s.jaw.iter().filter(|&&(c, t, ..)| c == i && (t - θ).abs() < 1e-6).count();
+                            if n > 0 { 可用.push((n, i, θ100, r)); }
                         }
                     }
                     // 🔴🔴 **一台一台交给估计器判,谁先被收下就是谁 —— 别提前钉死。**
@@ -906,59 +926,32 @@ fn main() {
                     // 外加"斜率与自己的 1σ 分不开 ⇒ NoResponse"),还被单测过。
                     // ⇒ 不另写一条新判据,**把每台相机的样本分别送进那个judge**,收下谁用谁。
                     可用.sort_by_key(|&(n, ..)| std::cmp::Reverse(n));
-                    let mut 结果 = Err(if s.jaw.is_empty() { probe::Declined::NoResponse } else { probe::Declined::MissingDependency });
+                    let mut 结果: Result<body_layer::measurement::Measurement, probe::Declined> =
+                        Err(if s.jaw.is_empty() { probe::Declined::NoResponse } else { probe::Declined::MissingDependency });
                     if 可用.is_empty() {
-                        println!("      [跨度] 没有一台相机**既配得上对、又换得出米** —— 拒绝,不把画面单位塞进米的槽里");
+                        println!("      [跨度] 没有一个(相机,腕角)组合**既配得上对、又换得出米** —— 拒绝,不把画面单位塞进米的槽里");
                     }
-                    for (n, cam, (j, js)) in 可用 {
-                        // 🔴🔴 **逐个腕角分别拟合,不把不同视角的读数混在一条回归里。**
-                        //
-                        // 实测(spanD):头相机 19 个配对、尺也建起来了,判词仍是 `NoResponse` ——
-                        // 因为**同一个开度的方差和整条趋势一样大**(0.56 读出 0.136 与 0.112;
-                        // 0.67 读出 0.118 与 0.126)。方差不是噪声,是**投影**:同一副张开的钳口
-                        // 在 86° 下看到全长、在 0° 下几乎看不到,而上一版把这些混进了同一条回归。
-                        //
-                        // ⇒ 腕角改成慢变(一个角度下把 6 个开度扫完),这里**按角度分组各拟一条**,
-                        //   谁先被估计器收下就用谁。这直接问的就是那个物理问题:
-                        //   *有没有哪个视角,两瓣间距真的跟着开度走*。
-                        // 这样也不需要"取最大"那种带偏置的归约 —— 每条曲线内部视角是固定的。
-                        let mut 按角: std::collections::BTreeMap<u64, Vec<(f64, f64)>> = Default::default();
-                        for &(c, θ, m, du, dv) in &s.jaw {
-                            if c != cam { continue; }
-                            if let Ok(((x, y), _)) = probe::image_to_plane(&j, &js, (du, dv)) {
-                                按角.entry((θ * 100.0).round() as u64).or_default().push((m, x.hypot(y)));
-                            }
+                    // 🔴 **通过的组合里取跨度最大的那个。** 投影只会把张开方向压小、不会放大
+                    // ⇒ 各视角拟出的斜率是 `真斜率 × cos(压缩)`,最大者为真。合成数据验过:
+                    // 真值 0.09/单位开度、三视角注入压缩 0.3/0.7/1.0 ⇒ 拟出 0.0272/0.0632/**0.0900**。
+                    // 按"第一个通过就用"会在压缩大的那个视角先通过时**低估三倍**,而低估出来的数长得完全正常。
+                    for (n, cam, θ100, (j, js)) in 可用 {
+                        let θ = θ100 as f64 / 100.0;
+                        let 点: Vec<(f64, f64)> = s.jaw.iter()
+                            .filter(|&&(c, t, ..)| c == cam && (t - θ).abs() < 1e-6)
+                            .filter_map(|&(_, _, m, du, dv)| probe::image_to_plane(&j, &js, (du, dv)).ok().map(|((x, y), _)| (m, x.hypot(y))))
+                            .collect();
+                        let r = probe::gripper_span(&点, 1.0, 0.0, now, jac_epoch);
+                        println!("      [跨度] 第 {cam} 台 · 腕角 {θ:.2} · 配对 {n} → 换成米 {} 个 · 尺 J=[{:.4},{:.4},{:.4},{:.4}] ⇒ {}",
+                            点.len(), j[0], j[1], j[2], j[3],
+                            match &r { Ok(m) => format!("🟢 {:.5} m", m.value[0]), Err(e) => format!("{e:?}") });
+                        match (&结果, &r) {
+                            (Ok(a), Ok(b)) if b.value[0] > a.value[0] => { 结果 = r; 跨度相机 = cam; }
+                            (Ok(_), _) => {}
+                            (_, Ok(_)) => { 结果 = r; 跨度相机 = cam; }
+                            (Err(probe::Declined::MissingDependency), Err(_)) | (Err(probe::Declined::NoResponse), Err(_)) => 结果 = r,
+                            _ => {}
                         }
-                        println!("      [跨度] 第 {cam} 台:配对 {n} · 尺 J=[{:.4},{:.4},{:.4},{:.4}] · 分 {} 个腕角各拟一条",
-                            j[0], j[1], j[2], j[3], 按角.len());
-                        // 🔴🔴 **通过的角度里取【跨度最大】的那个,不是第一个通过的。**
-                        //
-                        // 投影只会把张开方向压小,不会放大 ⇒ 各视角拟出的斜率是
-                        // `真斜率 × cos(那个视角的压缩)`,**最大的那个才是真的**。
-                        // 合成数据验过(真跨度 0.09/单位开度,三个视角注入压缩 0.3/0.7/1.0):
-                        // 拟出 0.0272 / 0.0632 / **0.0900** —— 逐位还原,且最大的那个正是真值。
-                        // 按"第一个通过就用"会在 0.5 那个角度先通过时**低估 3 倍**,
-                        // 而低估出来的数长得完全正常。
-                        let mut 这台: Result<body_layer::measurement::Measurement, probe::Declined> =
-                            Err(probe::Declined::NotEnoughSamples);
-                        for (θ100, pts) in &按角 {
-                            let r = probe::gripper_span(pts, 1.0, 0.0, now, jac_epoch);
-                            println!("            腕角 {:.2} · {} 点 ⇒ {}",
-                                *θ100 as f64 / 100.0, pts.len(),
-                                match &r { Ok(m) => format!("🟢 {:.5} m", m.value[0]), Err(e) => format!("{e:?}") });
-                            match (&这台, &r) {
-                                // 已经有一个通过的 ⇒ 只有更大的才换(投影不会放大)
-                                (Ok(a), Ok(b)) if b.value[0] > a.value[0] => 这台 = r,
-                                (Ok(_), _) => {}
-                                // 还没有通过的 ⇒ 通过的当然收下;都没通过时,别让"采不够"盖住更具体的理由
-                                (_, Ok(_)) => 这台 = r,
-                                (Err(probe::Declined::NotEnoughSamples), Err(_)) => 这台 = r,
-                                _ => {}
-                            }
-                        }
-                        let 收下 = 这台.is_ok();
-                        结果 = 这台;
-                        if 收下 { 跨度相机 = cam; break; }
                     }
                     结果
                 }
