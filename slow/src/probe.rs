@@ -2348,6 +2348,32 @@ pub fn default_hand_config() -> Config {
 mod tests {
     use super::*;
 
+    /// 🔴 **接触读数更低 + 两簇分得开 ⇒ 界必须落在两簇【中间】。**
+    ///
+    /// 这一条在 2026-08-18 之前**没有任何测试盖住**,而漏掉的代价是:`gap = lo_t - hi_f`
+    /// 只对 `HigherOnContact` 成立,对 `LowerOnContact` 恒为负 ⇒ 永远走"重叠"分支 ⇒
+    /// 界落到压住那一簇**底下**,`floor` 因此一个"压住"样本都判不出来,
+    /// 连锁卡死 `image_jacobian` 及其下游五格。
+    #[test]
+    fn 接触读数更低时界要落在两簇中间() {
+        // 自由空间:交付比例 ~0.90;压住:~0.10。中间是干净的缝。
+        let free: Vec<f64> = (0..12).map(|i| 0.88 + 0.004 * i as f64).collect();
+        let touch: Vec<f64> = (0..12).map(|i| 0.05 + 0.004 * i as f64).collect();
+        let m = contact_threshold(&free, &touch, Polarity::LowerOnContact, 1, 7)
+            .expect("两簇分得这么开,不该拒绝");
+        let hi_t = touch.iter().cloned().fold(f64::MIN, f64::max);
+        let lo_f = free.iter().cloned().fold(f64::MAX, f64::min);
+        assert!(
+            m.value[0] > hi_t && m.value[0] < lo_f,
+            "界 {} 必须落在压住簇最高 {} 与自由簇最低 {} 之间",
+            m.value[0], hi_t, lo_f
+        );
+        // 每一个观测到的样本都要被这条界分对 —— 界的意义就在这里。
+        assert!(touch.iter().all(|&x| x < m.value[0]), "压住的样本必须全在界下面");
+        assert!(free.iter().all(|&x| x > m.value[0]), "自由的样本必须全在界上面");
+    }
+
+
     fn s(cmd0: f64, u: f64, v: f64, t: u64) -> Sample {
         let mut c = [0.0; MAX_DIM];
         c[0] = cmd0;

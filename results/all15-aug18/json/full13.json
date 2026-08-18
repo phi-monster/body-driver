@@ -1,0 +1,9 @@
+{
+  "fingerprint": "self-measured",
+  "quantities": {
+    "latency": {"value": [0], "uncertainty": [0.5], "valid_lo": [0], "valid_hi": [11], "selftest_passed": true, "provenance": "measured by this body during power-on self-calibration"},
+    "backlash": {"value": [-0.00016285595370755482], "uncertainty": [0.000041774285141939564], "valid_lo": [0.0050000000000000044], "valid_hi": [0.04999999999999999], "selftest_passed": true, "provenance": "measured by this body during power-on self-calibration"},
+    "step_delivery": {"value": [0.8889654719908447], "uncertainty": [0.004904394611628609], "valid_lo": [0.0050000000000000044], "valid_hi": [0.04999999999999999], "selftest_passed": true, "provenance": "measured by this body during power-on self-calibration"},
+    "home_pose": {"value": [-0.10912985490127046, -0.6201915849338879, 0.6135208119045603, -0.013801621645188455, -0.4799996012898595, -0.5226756721760678, 0.7044288748460236], "uncertainty": [0.00000016377557128927962, 0.00000016377557128927962, 0.00000016377557128927962, 0, 0, 0, 0], "valid_lo": [-0.1091301441192627, -0.6201918125152588, 0.6135206818580627, -0.013801822438836098, -0.4799998104572296, -0.5226759314537048, 0.7044286727905273], "valid_hi": [-0.10912974178791046, -0.6201913952827454, 0.6135209202766418, -0.013801180757582188, -0.47999924421310425, -0.5226754546165466, 0.7044289112091064], "selftest_passed": true, "provenance": "measured by this body during power-on self-calibration"}
+  }
+}
