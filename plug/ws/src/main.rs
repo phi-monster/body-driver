@@ -455,7 +455,7 @@ fn main() {
         let mut 角: Vec<u64> = shift.iter().filter(|r| r.0 == cam).map(|r| (r.1 * 100.0).round() as u64).collect();
         角.sort_unstable(); 角.dedup();
         if 角.is_empty() { return None; }
-        let k = 2 + 角.len(); // gx, gy, 每个腕角一个截距
+        let k = 3 + 角.len(); // gx, gy, gz, 每个腕角一个截距
         if k > 8 { return None; }
         let mut xs: Vec<Vec<f64>> = Vec::new();
         let mut yu: Vec<f64> = Vec::new();
@@ -464,11 +464,13 @@ fn main() {
             if i != cam { continue; }
             let t = 角.iter().position(|&a| a == (θ * 100.0).round() as u64)?;
             let mut row = vec![0.0; k];
-            // 🔴 自变量是**实到的 y 与 z** —— 这具身体证明过这两个方向送得出去,
-            //    而 +x 在这个位形上命令 6 cm、实到 0.1 mm(见 `selfcal::档偏` 的实测表)。
-            row[0] = got[1];
-            row[1] = got[2];
-            row[2 + t] = 1.0;
+            // 🔴 自变量是**实到的三根轴** —— 哪两根独立由数据自己说,不由我挑。
+            // 实测三次撞墙:+x 走不动 · 12 cm 抬不到 · y 伸出去之后 z 抬不过 5 cm
+            // ⇒ 可达集把方向耦合在一起,手工挑必然反复撞墙。
+            row[0] = got[0];
+            row[1] = got[1];
+            row[2] = got[2];
+            row[3 + t] = 1.0;
             xs.push(row); yu.push(u); yv.push(v);
         }
         let n = xs.len();
@@ -508,20 +510,36 @@ fn main() {
             ss / (n - k) as f64
         };
         let (s2u, s2v) = (残(&βu, &yu), 残(&βv, &yv));
-        let (inv0, inv1) = (aug[0][k], aug[1][k + 1]); // (XᵀX)⁻¹ 的前两个对角元
-        if !(inv0 > 0.0 && inv1 > 0.0) { return None; }
-        let j = [βu[0], βu[1], βv[0], βv[1]];
-        let js = [(s2u * inv0).sqrt(), (s2u * inv1).sqrt(), (s2v * inv0).sqrt(), (s2v * inv1).sqrt()];
-        if j.iter().chain(js.iter()).any(|x| !x.is_finite()) { return None; }
-        let det = j[0] * j[3] - j[1] * j[2];
-        let det_σ = (j[3] * js[0]).hypot(j[0] * js[3]).hypot((j[2] * js[1]).hypot(j[1] * js[2]));
-        if !det.is_finite() || !det_σ.is_finite() || det.abs() <= 2.0 * det_σ {
-            println!("      [跨度] 第 {cam} 台的尺**接近降秩**:行列式 {det:.5} vs 自己的 1σ {det_σ:.5}({n} 个样本 · {} 个腕角截距 · 自由度 {})—— 换出来的米会被放大任意倍,不用它",
-                角.len(), n - k);
+        // 🔴🔴 **三根轴里挑条件最好的那一对 —— 由 |det|/σ 挑,不由我挑。**
+        // 可达集把方向耦合在一起(x 走不动 / y 伸出去之后 z 抬不动),手工指定必然反复撞墙;
+        // 而"哪两根轴在这个位形上真的独立"正是数据能回答的问题。
+        let inv: Vec<f64> = (0..3).map(|c| aug[c][k + c]).collect();
+        let 轴名 = ["x", "y", "z"];
+        let mut 最好: Option<(f64, [f64; 4], [f64; 4], usize, usize)> = None;
+        for (a, b) in [(0usize, 1usize), (0, 2), (1, 2)] {
+            if !(inv[a] > 0.0 && inv[b] > 0.0) { continue; }
+            let j = [βu[a], βu[b], βv[a], βv[b]];
+            let js = [(s2u * inv[a]).sqrt(), (s2u * inv[b]).sqrt(), (s2v * inv[a]).sqrt(), (s2v * inv[b]).sqrt()];
+            if j.iter().chain(js.iter()).any(|x| !x.is_finite()) { continue; }
+            let det = j[0] * j[3] - j[1] * j[2];
+            let det_σ = (j[3] * js[0]).hypot(j[0] * js[3]).hypot((j[2] * js[1]).hypot(j[1] * js[2]));
+            if !(det.is_finite() && det_σ.is_finite() && det_σ > 0.0) { continue; }
+            let 比 = det.abs() / det_σ;
+            println!("      [跨度] 第 {cam} 台 ({},{}) 这一对:行列式 {det:.5} vs 1σ {det_σ:.5} ⇒ |det|/σ = {比:.2}",
+                轴名[a], 轴名[b]);
+            if 最好.as_ref().map(|(t, ..)| 比 > *t).unwrap_or(true) { 最好 = Some((比, j, js, a, b)); }
+        }
+        let Some((比, j, js, a, b)) = 最好 else {
+            println!("      [跨度] 第 {cam} 台:三对轴没有一对算得出条件({n} 样本 · 自由度 {})—— 不用它", n - k);
+            return None;
+        };
+        if 比 <= 2.0 {
+            println!("      [跨度] 第 {cam} 台最好的一对是 ({},{}),|det|/σ 只有 {比:.2} —— **这个位形上给不出两个独立方向**,不用它",
+                轴名[a], 轴名[b]);
             return None;
         }
-        println!("      [跨度] 第 {cam} 台的尺:J=[{:.4},{:.4},{:.4},{:.4}] · 行列式 {det:.5} vs 1σ {det_σ:.5}({n} 样本 · 自由度 {})",
-            j[0], j[1], j[2], j[3], n - k);
+        println!("      [跨度] 第 {cam} 台的尺:用 ({},{}) · J=[{:.4},{:.4},{:.4},{:.4}] · |det|/σ = {比:.2}({n} 样本 · 自由度 {})",
+            轴名[a], 轴名[b], j[0], j[1], j[2], j[3], n - k);
         Some((j, js))
     }
 
@@ -704,7 +722,7 @@ fn main() {
         //   够不够得到不用猜 —— 尺是用**实到**位移算的(见 `cam_shift`),够不到会自己显出来。
         let (抬一档, 尺来源) = match std::env::var("BL_SPAN_STEP").ok().and_then(|v| v.parse::<f64>().ok()) {
             Some(v) if v > 0.0 => (v, "BL_SPAN_STEP 指定"),
-            _ => (0.10, "默认 10 cm(行列式 ∝ 两列激励之积;6 cm 时 |det|/σ 只有 0.70)"),
+            _ => (0.06, "默认 6 cm(y 与 z 都实测完整交付;10 cm 会让 y 与 z 被可达集绑成一维)"),
         };
         if matches!(q, Quantity::GripperSpan) {
             println!("      [跨度分档] 一档 {抬一档:.4} m —— {尺来源}");
