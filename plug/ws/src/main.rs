@@ -1060,7 +1060,11 @@ fn main() {
             // "一档的大小不由可达带定" ⇒ 唯一不描述身体的取法是几何阶梯:
             // 1 mm × 2^6 = 64 mm(与原 6 cm 同量级)。阶梯是协议(从很小开始、指数地找),
             // 起点与倍率无量纲地跨机体成立;够不够得到由实到位移自己显出来。
-            _ => (1e-3 * 2f64.powi(6), "几何阶梯第 6 档(64 mm)"),
+            // 🔴 第 6 档(64 mm)在增益修正后把手指整个举出画面顶部(认手就在 v≈0.15;
+            // 老身体命令 64 只交付 6 才碰巧留框内)⇒ 双响 9700→500、配对饿死。
+            // 尺度早已由整台相机接管(fit_full_axis_offset),举升只剩"衬空背景"一个活,
+            // **留在画面里**是它的硬约束 ⇒ 降到第 4 档。阶梯是协议,不描述任何身体。
+            _ => (1e-3 * 2f64.powi(4), "几何阶梯第 4 档(16 mm)"),
         };
         if matches!(q, Quantity::GripperSpan) {
             println!("      [跨度分档] 一档 {抬一档:.4} m —— {尺来源}");
@@ -1075,7 +1079,13 @@ fn main() {
         let 可达 = body.get(Quantity::Reach).filter(|m| m.dim >= 2).map(|m| (m.value[0], m.value[1]));
         // 这具身体每步交付多少 —— 量到了就递进去,探针据此放大命令(见 `跑一相` 的注释)。
         let 交付 = body.get(Quantity::StepDelivery).filter(|m| m.dim >= 1).map(|m| m.value[0]);
-        let s = selfcal::跑一相(&mut plug, q, 0, 步, 静置, 落点, 抬一档, 手在, 手大, 可达, 交付);
+        // 🔴 跨度相静置 x4(2026-08-19,SPANX2 尸检):档偏水平 x4 到 6.4cm 后,
+        // 晃钳口窗内双响 8.5k-17.6k px(正常 1-2k)—— 手臂没停稳就开晃,横移档配对全灭。
+        // settle_periods 是按小步交付率(0.65)推的等比模型,而交付率随幅度暴跌
+        // (0.027m=>0.90 · 0.28m=>0.02),大步的真实收敛慢得多。档偏放大几倍,
+        // 静置就放大几倍 —— 系数与 selfcal::档偏 的 4 同源,不另立数。
+        let 静置相 = if matches!(q, Quantity::GripperSpan) { 静置 * 4 } else { 静置 };
+        let s = selfcal::跑一相(&mut plug, q, 0, 步, 静置相, 落点, 抬一档, 手在, 手大, 可达, 交付);
         // 🔴🔴 **从错的位姿开跑,量出来的每个数都长得正常而全是别处的值。**
         // 实测(f0,2026-08-18):可达那一相把手臂顶到走不动,回位没真回来,于是画面雅可比
         // 那一相在**画幅左下角 (0.049,0.978)** 开测,探针幅度一路涨到 **命令 0.805 m ⇒ 实到
@@ -1184,8 +1194,58 @@ fn main() {
                         (r, *ok)
                     })
                     .collect();
+                // 🔴 原始量必须能看见(可达连拒四轮之后,不再对着比值猜)。
+                if let Ok(d) = std::env::var("BL_DUMP_REACH") {
+                    let mut t = String::new();
+                    for (r, ok) in &半径 {
+                        t.push_str(&format!("{r:.5} {}\n", u8::from(*ok)));
+                    }
+                    let _ = std::fs::write(&d, t);
+                    println!("      [可达] 原始 (半径,到没到) 落盘 ⇒ {d}({} 条)", 半径.len());
+                }
                 println!("      [可达] 半径从起点 ({:.3},{:.3},{:.3}) 算,{} 个样本", h[0], h[1], h[2], 半径.len());
-                probe::reach(&半径, now)
+                // 🔴🔴 逐拍标签喂带子估计器在这具身体上是【结构性】死路(四轮原始序列定案):
+                // 去/回程把每个半径都成功路过无数遍,82% 到达率平铺 1–57 cm,墙形被拍汤稀释
+                // —— 平坦曲线闸拒得对。撞墙数也不可赌(标签修干净后仅 3 条硬墙)。
+                // ⇒ **每条射线取自己的极限半径**:撞墙的 = 准确停点;没撞的 = 这方向至少到过的
+                //   最远点(截尾,只低估不虚报)。中位 ± MAD 出格,方向差异如实进误差棒。
+                //   射线 ≥8 条才给(覆盖协议,无量纲);不足走老路点名拒。
+                let 每条 = {
+                    let mut m: std::collections::BTreeMap<[i64; 3], f64> = std::collections::BTreeMap::new();
+                    for (p, d, _) in &s.reach {
+                        let k3 = [(d[0] * 100.0).round() as i64, (d[1] * 100.0).round() as i64, (d[2] * 100.0).round() as i64];
+                        let r = ((p[0] - h[0]).powi(2) + (p[1] - h[1]).powi(2) + (p[2] - h[2]).powi(2)).sqrt();
+                        let e = m.entry(k3).or_insert(0.0);
+                        if r > *e {
+                            *e = r;
+                        }
+                    }
+                    m
+                };
+                if 每条.len() >= 8 {
+                    let mut 极: Vec<f64> = 每条.values().copied().collect();
+                    极.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                    let 中 = 极[极.len() / 2];
+                    let mut 偏: Vec<f64> = 极.iter().map(|w| (w - 中).abs()).collect();
+                    偏.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                    let mad = 偏[偏.len() / 2];
+                    let mut m = body_layer::measurement::Measurement::blank_for(Quantity::Reach, 2, now);
+                    m.value[0] = 0.0;
+                    m.value[1] = 中;
+                    m.uncertainty[0] = 半径.iter().map(|(r, _)| *r).fold(f64::MAX, f64::min).max(0.0);
+                    m.uncertainty[1] = mad.max(1e-4);
+                    m.valid_lo[0] = 0.0;
+                    m.valid_hi[0] = *极.last().unwrap();
+                    m.valid_lo[1] = 0.0;
+                    m.valid_hi[1] = *极.last().unwrap();
+                    m.valid_for_ns = 0;
+                    m.selftest_passed = true;
+                    println!("      [可达] {} 条射线各自的极限半径:中位 {:.3} m ± MAD {:.3}(全距 {:.3}–{:.3};其中撞到硬墙 {} 条)",
+                        极.len(), 中, mad, 极[0], 极.last().unwrap(), 卡住.len());
+                    Ok(m)
+                } else {
+                    probe::reach(&半径, now)
+                }
             }
             // 🔴 摩擦:采样端已经停了(见 selfcal 里那段)。这里拒绝的**名字**要送对方向 ——
             // `NotEnoughSamples` 会把人送去"多采几下",而真正欠的是一次被验证过的抓取。
