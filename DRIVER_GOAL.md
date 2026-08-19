@@ -921,7 +921,7 @@ UP-OSI 把量出来的身体参数**喂进策略**;这里**只喂给执行层**�
 
 ### 6.1 已经解决、别再重做的(装机/管路)
 
-- **装机照 `link/bootstrap/`**:租机前置(驱动 **535–580** · `caps=all` 必须 create 时给 · Vulkan ICD 只留一份)+ 5 个脚本 + 14 个坑。**照它走 ≈25 分钟到 `INSTALL EXIT 0`**(第一次撞是 3 小时)。
+- **装机照 `bench/robodojo/bootstrap/`**(2026-08-19 从已删除的 link/ 迁出 —— 台架件不是胶水):租机前置(驱动 **535–580** · `caps=all` 必须 create 时给 · Vulkan ICD 只留一份)+ 5 个脚本 + 14 个坑。**照它走 ≈25 分钟到 `INSTALL EXIT 0`**(第一次撞是 3 小时)。
 - **装完必做三件**(缺任一都是"静默停住"):① `XPolicyLab/policy/l3_link/{deploy.py,deploy.yml,__init__.py}` ② `Assets/Robots/{x5,franka}/curobo_tmp.yml` 的 `${ASSETS_PATH}` 换成仓根 ⇒ 生成 `curobo.yml`(上游没有)③ `env_cfg/arx_x5_shot1w.yml`,`config_name` 必须是上游真有的 **`arx_x5`**。
 - **两个 apt 包**:缺 `libGLU.so.1` / `libXt.so.6` ⇒ 渲染器建不起来。⚠️ `libgl1-mesa-glx` 已改名,写它会让整条 apt **原子失败**。
 - **`pkill -f eval_policy` 杀不掉仿真** —— 真名 `src/eval_client/main.py`,僵尸各占 3–4 GB 显存并抢端口。
