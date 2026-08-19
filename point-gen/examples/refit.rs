@@ -12,11 +12,11 @@ fn main() {
         }
     }
     eprintln!("样本 {} 组(7 维)", seen.len());
-    match point_gen::fit_full_offset(&seen) {
+    match point_gen::fit_full_axis_offset(&seen) {
         Err(e) => eprintln!("拒绝:{e:?}"),
-        Ok((eye, d, med)) => eprintln!(
-            "🟢 fx={:.4} fy={:.4} 主点=({:.4},{:.4}) at=({:.3},{:.3},{:.3}) q=({:.3},{:.3},{:.3},{:.3}) · d=({:.4},{:.4},{:.4}) · 留出中位 {:.4}",
+        Ok((eye, k, t, med)) => eprintln!(
+            "🟢 fx={:.4} fy={:.4} 主点=({:.4},{:.4}) at=({:.3},{:.3},{:.3}) q=({:.3},{:.3},{:.3},{:.3}) · 轴={} t={:.4} · 留出中位 {:.4}",
             eye.fx, eye.fy, eye.cx, eye.cy, eye.at[0], eye.at[1], eye.at[2],
-            eye.q[0], eye.q[1], eye.q[2], eye.q[3], d[0], d[1], d[2], med),
+            eye.q[0], eye.q[1], eye.q[2], eye.q[3], k, t, med),
     }
 }

@@ -89,6 +89,9 @@ pub enum WhyNot {
     BadFit(f64),
     /// 🔴 样本**共面**(含"全在一个高度")—— 一张平面上的点定不下一个完整投影矩阵。
     Coplanar,
+    /// 🔴 三根轴的留出分不开(最好 vs 次好差距不足)—— 观测点在哪根轴上定不下来。
+    /// 硬挑一根就是把一次含糊变成一个看起来确定的数。带上 (次好/最好) 的比。
+    AxisAmbiguous(f64),
     /// 解出来的内参有**斜切**,而这个模型没有这一项 ⇒ 装不下。带上斜切量。
     HasSkew(f64),
     /// 🔴 **两个视角挨得太近** —— 三角形太扁,深度极度不敏感,误差爆炸。
@@ -410,6 +413,86 @@ fn 观测点(p: &[f64; 7], d: [f64; 3]) -> P3 {
     let q = [p[3], p[4], p[5], p[6]];
     let w = qrot(q, d);
     P3 { x: p[0] + w[0], y: p[1] + w[1], z: p[2] + w[2] }
+}
+
+/// **轴约束版联合解:偏置 d 只许沿法兰的某一根轴。**
+///
+/// # 为什么要这条约束(2026-08-19,两发对照逼出来的)
+///
+/// 自由 3 维的 d 与相机位置**部分互相顶账**:两发同一台相机,留出中位 0.0166 vs 0.0161
+/// (残差分不出),一发解在真盆(d≈纯 z、相机对真值 3–7 cm),一发解到假盆
+/// (d_x=0.29、相机 y 偏 26 cm、跨度跟着缩 39%)。**残差挑不出真假,只能靠物理约束砍自由度。**
+///
+/// 物理约束是免费的:认块认到的是指尖那一撮,而"指尖长在工具轴上"就是工具轴的定义
+/// (对夹的两指质心在轴上、吸盘在轴上、多指近似在轴上)。⇒ d = e_k · t,搜 3 根轴 × 一维 t。
+/// **顺手就把两格量了**:k 是 `tool_axis_column`,|t| 是 `tool_offset`(到指尖)。
+///
+/// 自检:最好的那根轴要**明显**好于次好(留出中位差 ≥20%,无量纲)—— 分不开就拒
+/// `AxisAmbiguous`,不许硬挑。
+pub fn fit_full_axis_offset(seen: &[([f64; 7], Px)]) -> Result<(Eye, usize, f64, f64), WhyNot> {
+    if seen.len() < 12 {
+        return Err(WhyNot::TooFewSamples(seen.len()));
+    }
+    let 评 = |d: [f64; 3]| -> Option<(Eye, f64)> {
+        let fit: Vec<(P3, Px)> = seen.iter().step_by(2).map(|(p, u)| (观测点(p, d), *u)).collect();
+        let eye = fit_full(&fit).ok()?;
+        let mut errs: Vec<f64> = Vec::new();
+        for (p, u) in seen.iter().skip(1).step_by(2) {
+            match eye.project(观测点(p, d)) {
+                Some(got) => errs.push(((got[0] - u[0]).powi(2) + (got[1] - u[1]).powi(2)).sqrt()),
+                None => errs.push(f64::INFINITY),
+            }
+        }
+        errs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        Some((eye, errs[errs.len() / 2]))
+    };
+    let mut 每轴: [Option<(f64, f64)>; 3] = [None, None, None]; // (t, 留出)
+    for k in 0..3 {
+        let mut c = 0.0f64;
+        let mut half = 0.30f64; // 覆盖任何合理的指尖偏置量级;搜索协议,无量纲跨机体
+        let mut step = 0.03f64;
+        let mut best: Option<(f64, f64)> = None;
+        for _ in 0..4 {
+            let n = (half / step).round() as i32;
+            for i in -n..=n {
+                let t = c + i as f64 * step;
+                let mut d = [0.0f64; 3];
+                d[k] = t;
+                if let Some((_, e)) = 评(d) {
+                    if best.map(|b| e < b.1).unwrap_or(true) {
+                        best = Some((t, e));
+                    }
+                }
+            }
+            if let Some(b) = best {
+                c = b.0;
+            }
+            half = step * 1.5;
+            step /= 3.0;
+        }
+        每轴[k] = best;
+    }
+    let mut 排: Vec<(usize, f64, f64)> = 每轴
+        .iter()
+        .enumerate()
+        .filter_map(|(k, o)| o.map(|(t, e)| (k, t, e)))
+        .collect();
+    if 排.is_empty() {
+        return Err(WhyNot::BadFit(f64::INFINITY));
+    }
+    排.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap());
+    if 排.len() >= 2 {
+        let 比 = 排[1].2 / 排[0].2.max(1e-12);
+        if 比 < 1.2 {
+            return Err(WhyNot::AxisAmbiguous(比));
+        }
+    }
+    let (k, t, med) = 排[0];
+    let mut d = [0.0f64; 3];
+    d[k] = t;
+    let 全: Vec<(P3, Px)> = seen.iter().map(|(p, u)| (观测点(p, d), *u)).collect();
+    let eye = fit_full(&全)?;
+    Ok((eye, k, t, med))
 }
 
 /// **带偏置的整台相机拟合**:联合解「观测点相对法兰的偏置 d」和整台相机。

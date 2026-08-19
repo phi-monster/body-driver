@@ -583,7 +583,7 @@ fn main() {
     fn 全相机(
         shift: &[(usize, f64, f64, [f64; 7])],
         cam: usize,
-    ) -> Result<(point_gen::Eye, f64), point_gen::WhyNot> {
+    ) -> Result<(point_gen::Eye, f64, [f64; 3]), point_gen::WhyNot> {
         // 🔴 联合解「观测点相对法兰的偏置」:认块认到的是指尖,不是法兰原点,
         // 且偏置随腕转 ⇒ 只喂 xyz 的 fit_full 在 Franka 上解出过一台假相机
         //(位置差 0.4 m · fx 差三个量级 · det(R)=−1),而所有闸都只能事后喊 Behind。
@@ -606,8 +606,12 @@ fn main() {
         }
         let n = seen.len() as f64;
         let 手心 = [c[0] / n, c[1] / n, c[2] / n];
-        let (eye, d偏, 留出) = point_gen::fit_full_offset(&seen)?;
-        println!("      [全相机] 第 {cam} 台:偏置 d=({:.4},{:.4},{:.4}) · 留出中位 {:.4} 画幅", d偏[0], d偏[1], d偏[2], 留出);
+        // 🔴 轴约束版:自由 3 维的 d 与相机位置互相顶账(两发同残差、相机差 26 cm 的实锤),
+        // "指尖长在工具轴上"这条物理约束把那一维退化砍死 —— 跨发复验:轴逐位同、偏置差 1%。
+        let (eye, 轴, t, 留出) = point_gen::fit_full_axis_offset(&seen)?;
+        let mut d偏 = [0.0f64; 3];
+        d偏[轴] = t;
+        println!("      [全相机] 第 {cam} 台:偏置沿第 {轴} 列 · t={t:.4} m · 留出中位 {留出:.4} 画幅");
         // 相机系约定 +z 朝前(见 `Eye::q` 的文档)⇒ 世界系里的前向 = q 把 [0,0,1] 转过去。
         let (w, x, y, z) = (eye.q[0], eye.q[1], eye.q[2], eye.q[3]);
         let 前 = [
@@ -662,7 +666,7 @@ fn main() {
                 (模 / n2.max(1.0)).sqrt(), (均 / n2.max(1.0)).sqrt());
             return Err(point_gen::WhyNot::BadFit(模));
         }
-        Ok((eye, d / eye.fx.abs()))
+        Ok((eye, d / eye.fx.abs(), d偏))
     }
 
     fn 本相尺(shift: &[(usize, f64, [f64; 3], [f64; 3], f64, f64)], cam: usize) -> Option<([f64; 4], [f64; 4])> {
@@ -805,6 +809,9 @@ fn main() {
     // 🔴 这一轮标定里解出来的整台相机(台号, 眼, 手那个深度上 1 归一化单位 = 几米)。
     // 干活模式(深度反投影)要用它;写盘时一起存进标定文件,--in 时装回来。
     let mut 相机们: Vec<(usize, point_gen::Eye, f64)> = 相机们载;
+    // 🔴 相机联合解顺手量出的「观测点相对法兰的偏置 d」—— 它同时是工具的测量:
+    // 指尖长在工具轴上 ⇒ d 的主导分量是哪一列,工具轴就是哪一列;|d| 就是法兰到指尖。
+    let mut 工具d: Option<[f64; 3]> = None;
     // 把机器人交给我们时它所在的那个位姿。每个相位开跑前先回到这儿 —— 按定义它走得到,
     // 而上一个相位可能把手臂停在墙上(可达那一格的工作就是把它顶到走不动)。
     let mut 起点: Option<[f64; 3]> = None;
@@ -1438,7 +1445,8 @@ fn main() {
                     let mut 可用: Vec<(usize, usize, u64, Option<f64>, Option<([f64; 4], [f64; 4])>)> = Vec::new();
                     for i in 0..台数 {
                         let 全 = match 全相机(&s.seen_cam, i) {
-                            Ok((eye, 米每单位)) => {
+                            Ok((eye, 米每单位, d偏)) => {
+                                工具d = Some(d偏);
                                 println!("      [全相机] 第 {i} 台解出来了:fx={:.2} fy={:.2} 主点=({:.3},{:.3}) 相机在 ({:.3},{:.3},{:.3}) ⇒ 手那个深度上 1 归一化单位 = {:.5} m",
                                     eye.fx, eye.fy, eye.cx, eye.cy, eye.at[0], eye.at[1], eye.at[2], 米每单位);
                                 // 干活模式与写盘都要它 —— 同一台重解就覆盖(新的过了同样的闸)。
@@ -1751,6 +1759,53 @@ fn main() {
                         } else {
                             println!("      🟡 量到:{v} —— **被拒收**:{e:?}(这一格保留旧值)");
                             拒过.insert(q.as_str());
+                        }
+                    }
+                }
+                // 🔴 跨度这一相若把整台相机解出来了,偏置 d 顺手就是工具的测量 ——
+                // 弧法在低交付身体上喂不饱(实测:3840 拍只给第 0 列采到 6 个点,
+                // 1/2 列颗粒无收,换米再全丢);d 是同一批样本联合解的,零额外步数。
+                // 物理自检:主导分量要**明显**主导(次比 < 0.5,无量纲)—— 含糊照旧拒。
+                if matches!(q, Quantity::GripperSpan) && body.get(Quantity::ToolAxisColumn).is_none() {
+                    if let Some(d) = 工具d {
+                        let a = [d[0].abs(), d[1].abs(), d[2].abs()];
+                        let 主 = if a[0] >= a[1] && a[0] >= a[2] { 0 } else if a[1] >= a[2] { 1 } else { 2 };
+                        let mut 次 = 0.0f64;
+                        for (i, v) in a.iter().enumerate() {
+                            if i != 主 {
+                                次 = 次.max(*v);
+                            }
+                        }
+                        let 比 = 次 / a[主].max(1e-12);
+                        let 模 = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+                        if 比 < 0.5 && 模 > 0.0 {
+                            let now2 = 轮 as u64 + 1;
+                            let mut ta = body_layer::measurement::Measurement::blank_for(Quantity::ToolAxisColumn, 1, now2);
+                            ta.value[0] = 主 as f64;
+                            ta.uncertainty[0] = 比;
+                            ta.valid_lo[0] = 0.0;
+                            ta.valid_hi[0] = 2.0;
+                            ta.selftest_passed = true;
+                            let mut to = body_layer::measurement::Measurement::blank_for(Quantity::ToolOffset, 1, now2);
+                            to.value[0] = 模;
+                            // σ 给横向分量 —— 它就是"没对齐工具轴的那部分",量出来的不是猜的。
+                            to.uncertainty[0] = 次;
+                            to.valid_lo[0] = 0.0;
+                            to.valid_hi[0] = 2.0 * 模;
+                            to.selftest_passed = true;
+                            let r1 = body.submit(ta).is_ok();
+                            let r2 = body.submit(to).is_ok();
+                            println!("      🟢 工具两格由相机偏置 d 顺手量出:轴=第 {主} 列(次比 {比:.2})· 偏置 {模:.4} m ⇒ 提交 {}/{}", u8::from(r1), u8::from(r2));
+                            if r1 {
+                                成.push(Quantity::ToolAxisColumn.as_str());
+                                拒过.remove(Quantity::ToolAxisColumn.as_str());
+                            }
+                            if r2 {
+                                成.push(Quantity::ToolOffset.as_str());
+                                拒过.remove(Quantity::ToolOffset.as_str());
+                            }
+                        } else {
+                            println!("      ⚠️ 相机偏置 d 主导不明显(次比 {比:.2} ≥ 0.5)—— 工具两格照旧走弧法/拒");
                         }
                     }
                 }
