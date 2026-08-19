@@ -1178,6 +1178,11 @@ fn main() {
             //    这一相最早拿到两帧连续观测的那个下标(实测报 6,而同一相一拍交付 89%)。
             Quantity::Latency => {
                 println!("      [延迟] 静止段 {} 拍 · 命令后 {} 拍", s.rest.len(), s.latency.len());
+                // 🔴 原始量必须能看见(仓规:先看原始量,再看导出量)——
+                // `Inconsistent` 只有一个来源(静止段后半比前半吵),数不摆出来就只能猜。
+                let 摆 = |v: &[f64]| v.iter().map(|x| format!("{:.5}", x)).collect::<Vec<_>>().join(" ");
+                println!("      [延迟] 静止逐拍: {}", 摆(&s.rest));
+                println!("      [延迟] 命令后逐拍: {}", s.latency.iter().map(|(o, d)| format!("{o}:{d:.5}")).collect::<Vec<_>>().join(" "));
                 probe::latency_from_beats(&s.rest, &s.latency, now)
             }
             Quantity::Backlash => probe::backlash(&s.reversal, now),
@@ -1615,7 +1620,23 @@ fn main() {
                     }
                     println!("      [桌面] 压住 {} 个 z∈[{:.4},{:.4}] · 自由 {} 个 z∈[{:.4},{:.4}]",
                         压.2, 压.0, 压.1, 自.2, 自.0, 自.1);
-                    probe::floor(&s.press, 界, now, ct.epoch)
+                    // 🔴🔴 **"塌"有两个同形来源:碰到支撑面 / 顶到关节限位。**
+                    // 实测(2026-08-19,Franka):压住 690 个,z 一直到 **1.40**(起点 0.97)——
+                    // 高处的全是限位塌,喂进去就把估计毒了(它拒得对,但永远量不到)。
+                    // ⇒ 通用一刀:**支撑面只可能在【相位起点】下方**(起点按定义是自由空间),
+                    //   高于「起点 − 一个相尺」的样本一律不喂。相尺 = 可达带/10,与探针同一把。
+                    let 尺f = body.get(Quantity::Reach).filter(|m| m.dim >= 2)
+                        .map(|m| (m.value[1] - m.value[0]) / 10.0)
+                        .unwrap_or(1e-3 * 2f64.powi(4)); // 量不到可达就走几何阶梯第 4 档(协议)
+                    let 起 = s.home[2];
+                    let 喂: Vec<(f64, f64, f64)> = s.press.iter().copied()
+                        .filter(|&(_, _, z)| z < 起 - 尺f)
+                        .collect();
+                    if 喂.len() < s.press.len() {
+                        println!("      [桌面] 扔掉 {} 个高于「起点 − 相尺」(z ≥ {:.3})的样本 —— 高处的塌是限位,不是桌子",
+                            s.press.len() - 喂.len(), 起 - 尺f);
+                    }
+                    probe::floor(&喂, 界, now, ct.epoch)
                 }
             },
         };
