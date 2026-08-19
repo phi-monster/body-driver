@@ -1,0 +1,25 @@
+[package]
+name = "bl-plug-ws"
+version = "0.1.0"
+edition = "2021"
+description = "A plug: talks to a robot that speaks msgpack over a WebSocket. Lives OUTSIDE the driver tree because it has dependencies."
+license = "AGPL-3.0-or-later"
+
+[[bin]]
+name = "bl-calibrate"
+path = "src/main.rs"
+
+[dependencies]
+tungstenite = { version = "0.24", default-features = false, features = ["handshake"] }
+rmpv        = "1"
+body-layer  = { path = "../../slow" }
+selfcal     = { path = "../../selfcal" }
+# 🔴 全相机模型:跨度那把尺不再用局部 2×2 近似(它只在量它的那个深度成立)。
+point-gen   = { path = "../../point-gen" }
+# 🔴 任务这一格搬进驱动本体(2026-08-19,胶水 link 整体删除):真图 → 点 → 候选 → 航点。
+contact-gen  = { path = "../../contact-gen" }
+contact-set  = { path = "../../contact-set" }
+contact-exec = { path = "../../contact-exec" }
+
+[profile.release]
+overflow-checks = true
