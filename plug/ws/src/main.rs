@@ -581,14 +581,17 @@ fn main() {
     /// 🔴 单位:`u,v` 存的是**归一化**画面坐标,所以解出来的 `fx` 也是归一化单位 ⇒
     ///    米/归一化单位 = 深度 / fx。跨度那边读的间距也是归一化单位,两者同单位。
     fn 全相机(
-        shift: &[(usize, f64, f64, [f64; 3])],
+        shift: &[(usize, f64, f64, [f64; 7])],
         cam: usize,
     ) -> Result<(point_gen::Eye, f64), point_gen::WhyNot> {
-        let mut seen: Vec<(point_gen::P3, point_gen::Px)> = Vec::new();
+        // 🔴 联合解「观测点相对法兰的偏置」:认块认到的是指尖,不是法兰原点,
+        // 且偏置随腕转 ⇒ 只喂 xyz 的 fit_full 在 Franka 上解出过一台假相机
+        //(位置差 0.4 m · fx 差三个量级 · det(R)=−1),而所有闸都只能事后喊 Behind。
+        let mut seen: Vec<([f64; 7], point_gen::Px)> = Vec::new();
         let mut c = [0.0f64; 3];
         for &(i, u, v, p) in shift {
             if i != cam { continue }
-            seen.push((point_gen::P3 { x: p[0], y: p[1], z: p[2] }, [u, v]));
+            seen.push((p, [u, v]));
             c[0] += p[0]; c[1] += p[1]; c[2] += p[2];
         }
         if seen.is_empty() { return Err(point_gen::WhyNot::TooFewSamples(0)) }
@@ -596,14 +599,15 @@ fn main() {
         // 还是**根本只去过三个点**(三点必然共面)。少了这个数就分不开,而两者要改的完全不同。
         {
             let mut 异: Vec<[i64; 3]> = seen.iter()
-                .map(|(p, _)| [(p.x * 1e5) as i64, (p.y * 1e5) as i64, (p.z * 1e5) as i64]).collect();
+                .map(|(p, _)| [(p[0] * 1e5) as i64, (p[1] * 1e5) as i64, (p[2] * 1e5) as i64]).collect();
             异.sort_unstable(); 异.dedup();
             println!("      [全相机] 第 {cam} 台:{} 个样本 · **{} 个不同的位置**(解一台完整相机至少要 6 个、且不共面)",
                 seen.len(), 异.len());
         }
         let n = seen.len() as f64;
         let 手心 = [c[0] / n, c[1] / n, c[2] / n];
-        let eye = point_gen::fit_full(&seen)?;
+        let (eye, d偏, 留出) = point_gen::fit_full_offset(&seen)?;
+        println!("      [全相机] 第 {cam} 台:偏置 d=({:.4},{:.4},{:.4}) · 留出中位 {:.4} 画幅", d偏[0], d偏[1], d偏[2], 留出);
         // 相机系约定 +z 朝前(见 `Eye::q` 的文档)⇒ 世界系里的前向 = q 把 [0,0,1] 转过去。
         let (w, x, y, z) = (eye.q[0], eye.q[1], eye.q[2], eye.q[3]);
         let 前 = [
@@ -636,7 +640,18 @@ fn main() {
             seen.iter().map(|(_, q)| q[1]).sum::<f64>() / seen.len() as f64,
         );
         for (p, q) in &seen {
-            if let Some(px) = eye.project(*p) {
+            // 投影的是**观测点**(法兰 + R·d,和拟合时同一个物理点),不是法兰原点。
+            let 转 = |qt: [f64; 4], v: [f64; 3]| -> [f64; 3] {
+                let (w, x, y, z) = (qt[0], qt[1], qt[2], qt[3]);
+                [
+                    (1.0 - 2.0 * (y * y + z * z)) * v[0] + 2.0 * (x * y - z * w) * v[1] + 2.0 * (x * z + y * w) * v[2],
+                    2.0 * (x * y + z * w) * v[0] + (1.0 - 2.0 * (x * x + z * z)) * v[1] + 2.0 * (y * z - x * w) * v[2],
+                    2.0 * (x * z - y * w) * v[0] + 2.0 * (y * z + x * w) * v[1] + (1.0 - 2.0 * (x * x + y * y)) * v[2],
+                ]
+            };
+            let w = 转([p[3], p[4], p[5], p[6]], d偏);
+            let 点 = point_gen::P3 { x: p[0] + w[0], y: p[1] + w[1], z: p[2] + w[2] };
+            if let Some(px) = eye.project(点) {
                 模 += (px[0] - q[0]).powi(2) + (px[1] - q[1]).powi(2);
                 均 += (mu - q[0]).powi(2) + (mv - q[1]).powi(2);
                 n2 += 1.0;
@@ -1378,7 +1393,7 @@ fn main() {
                         }
                         s0.push_str("# seen: cam u v x y z   ← 手在哪 + 手的像素,每循环都记(解相机模型用这份)\n");
                         for &(c, u, v, p) in &s.seen_cam {
-                            s0.push_str(&format!("seen {c} {u} {v} {} {} {}\n", p[0], p[1], p[2]));
+                            s0.push_str(&format!("seen {c} {u} {v} {} {} {} {} {} {} {}\n", p[0], p[1], p[2], p[3], p[4], p[5], p[6]));
                         }
                         s0.push_str("# shift: cam tilt cmdx cmdy cmdz gotx goty gotz u v\n");
                         for &(c, θ, cmd, got, u, v) in &s.cam_shift {

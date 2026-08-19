@@ -128,7 +128,9 @@ pub struct Samples {
     /// **手臂确实走到了**(命令 −0.060 ⇒ 实到 −0.060,交付 1.00),只是没配上对。
     /// ⇒ 相机模型不需要钳口配对,它只要"手在哪 + 手的像素"。这一份**每个循环都记**。
     /// `(相机号, u, v, 世界 xyz)`
-    pub seen_cam: Vec<(usize, f64, f64, [f64; 3])>,
+    /// (哪台相机, u, v, **完整 7 维位姿**)。带朝向 —— 相机拟合要联合解「观测点相对法兰的偏置」,
+    /// 而那个偏置随腕转;只存 xyz 的版本在 Franka 上解出过一台位置差 0.4 m 的假相机。
+    pub seen_cam: Vec<(usize, f64, f64, [f64; 7])>,
 }
 
 /// 这一步该做什么动作 —— 由日程点的名决定,不是这里挑的。
@@ -1158,7 +1160,7 @@ pub fn 跑一相(
                         if let Some(e) = f.ee.get(arm) {
                             for (i, r) in 本轮.iter().enumerate() {
                                 if let Some(c) = r.as_ref().and_then(|r| r.cands.get(0)) {
-                                    s.seen_cam.push((i, c.u, c.v, [e[0], e[1], e[2]]));
+                                    s.seen_cam.push((i, c.u, c.v, *e));
                                 }
                             }
                         }

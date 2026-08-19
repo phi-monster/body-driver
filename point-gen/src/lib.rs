@@ -403,6 +403,85 @@ pub fn fit_full(seen: &[(P3, Px)]) -> Result<Eye, WhyNot> {
     拆开(p3, seen)
 }
 
+
+/// 观测点 = 法兰原点 + R(朝向)·d —— 认块认到的是**指尖那一撮**,不是法兰原点,
+/// 而 d 随腕转(2026-08 实测:同一集一次纯平移后四元数整个变了,"走到 xyz"不保朝向)。
+fn 观测点(p: &[f64; 7], d: [f64; 3]) -> P3 {
+    let q = [p[3], p[4], p[5], p[6]];
+    let w = qrot(q, d);
+    P3 { x: p[0] + w[0], y: p[1] + w[1], z: p[2] + w[2] }
+}
+
+/// **带偏置的整台相机拟合**:联合解「观测点相对法兰的偏置 d」和整台相机。
+///
+/// # 为什么必须联合解(这条撤回过一次的教训,别再走回去)
+///
+/// `fit_full` 直接吃(法兰位置, 像素)在真数据上解出**垃圾**(2026-08-19,Franka,166 组:
+/// 相机位置差 0.4 m、fx 差三个量级、det(R)=−1 落镜像叶)——因为认块认的是**指尖**,
+/// 离法兰十几厘米还**随腕转**,针孔装不下这组对。胶水时代同一病:直接解留出中位 39 px,
+/// 联合解偏置后 8 px。删胶水时把这段**通用数学**错当机体件扔了,这里是它的正式归位。
+///
+/// # 怎么解
+///
+/// d 只有三个数;给定 d 后就是 `fit_full`(线性 DLT + 拆开 + 全部闸)。
+/// 对 d 做**粗网格 + 三轮细化**(±0.24 m 起步 —— 覆盖任何合理的工具偏置量级;
+/// 网格参数是搜索协议,无量纲地跨机体成立)。**用留出误差打分,不用拟合误差**:
+/// 拟合误差随自由度单调变好,留出不会。`Behind`/任何拒绝按"这枚 d 不行"处理,
+/// 镜像叶的候选在留出上自然死掉。
+///
+/// 返回 (眼, d, 留出中位像素误差)。样本 <12 拒绝(两半各 6 才够 fit_full 起步)。
+pub fn fit_full_offset(seen: &[([f64; 7], Px)]) -> Result<(Eye, [f64; 3], f64), WhyNot> {
+    if seen.len() < 12 {
+        return Err(WhyNot::TooFewSamples(seen.len()));
+    }
+    let 评 = |d: [f64; 3]| -> Option<(Eye, f64)> {
+        let fit: Vec<(P3, Px)> = seen.iter().step_by(2).map(|(p, u)| (观测点(p, d), *u)).collect();
+        let eye = fit_full(&fit).ok()?;
+        let mut errs: Vec<f64> = Vec::new();
+        for (p, u) in seen.iter().skip(1).step_by(2) {
+            let x = 观测点(p, d);
+            match eye.project(x) {
+                Some(got) => errs.push(((got[0] - u[0]).powi(2) + (got[1] - u[1]).powi(2)).sqrt()),
+                None => errs.push(f64::INFINITY),
+            }
+        }
+        if errs.is_empty() {
+            return None;
+        }
+        errs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        Some((eye, errs[errs.len() / 2]))
+    };
+    let mut best: Option<(Eye, [f64; 3], f64)> = None;
+    let mut step = 0.03f64;
+    let mut c = [0.0f64; 3];
+    let mut half = 0.24f64;
+    for _ in 0..4 {
+        let n = (half / step).round() as i32;
+        for i in -n..=n {
+            for j in -n..=n {
+                for k in -n..=n {
+                    let d = [c[0] + i as f64 * step, c[1] + j as f64 * step, c[2] + k as f64 * step];
+                    if let Some((eye, e)) = 评(d) {
+                        if best.as_ref().map(|b| e < b.2).unwrap_or(true) {
+                            best = Some((eye, d, e));
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(b) = &best {
+            c = b.1;
+        }
+        half = step * 1.5;
+        step /= 3.0;
+    }
+    let (_, d, e) = best.ok_or(WhyNot::BadFit(f64::INFINITY))?;
+    // 终拟:最好的那枚 d 上用【全部】样本再解一次(留出只用来挑 d,终解不浪费一半样本)。
+    let 全: Vec<(P3, Px)> = seen.iter().map(|(p, u)| (观测点(p, d), *u)).collect();
+    let eye = fit_full(&全)?;
+    Ok((eye, d, e))
+}
+
 /// 这组点是不是**共面**(含"全在一个高度")。用协方差最小主轴的伸展判。
 fn 共面(seen: &[(P3, Px)]) -> bool {
     let n = seen.len() as f64;
@@ -464,6 +543,41 @@ fn 拆开(p: [[f64; 4]; 3], seen: &[(P3, Px)]) -> Result<Eye, WhyNot> {
             }
         }
     }
+    // 🔴🔴 **K 对角翻正之后必须查 det(R) —— 反射不是旋转。**
+    // 每翻一次 K 的列就同时翻 R 的一行,翻奇数次 det(R) 就成了 −1;
+    // 而四元数**表示不了反射** ⇒ `转成四元数` 会安静地给出某个真旋转 ≠ R
+    // ⇒ 回代投影把点打到"背后",病相是 `Behind`,根因在这儿。
+    // det(R) = −1 说明拟出的 P 落在镜像叶上(弱透视/深度跨度薄时两叶都能拟)——
+    // 这一层能做的诚实动作是把它**点名**报出来,并把中间量打出来(env 门控)。
+    let det_r = r[0][0] * (r[1][1] * r[2][2] - r[1][2] * r[2][1])
+        - r[0][1] * (r[1][0] * r[2][2] - r[1][2] * r[2][0])
+        + r[0][2] * (r[1][0] * r[2][1] - r[1][1] * r[2][0]);
+    if std::env::var("BL_CAMDEBUG").is_ok() {
+        eprintln!("[拆开] det(R)={det_r:.6} · K diag=({:.4},{:.4},{:.4})", k[0][0], k[1][1], k[2][2]);
+    }
+    if det_r < 0.0 {
+        // 镜像叶:翻 R 第三行 + K 第三列(乘积不变),**然后把整套重新规范一遍** ——
+        // 第一版只翻不复位:s = K[2][2] 变了号,按 s 归一时 fx/fy 全被带成负 ⇒ 还是 Behind。
+        // 复位 = 再跑一次"K 对角为正"(这次只翻前两列,翻偶数次 det(R) 不再回到 −1)。
+        for j in 0..3 {
+            k[j][2] = -k[j][2];
+            r[2][j] = -r[2][j];
+        }
+        for i in 0..2 {
+            if k[i][i] < 0.0 {
+                for j in 0..3 {
+                    k[j][i] = -k[j][i];
+                    r[i][j] = -r[i][j];
+                }
+            }
+        }
+        if std::env::var("BL_CAMDEBUG").is_ok() {
+            let d2 = r[0][0] * (r[1][1] * r[2][2] - r[1][2] * r[2][1])
+                - r[0][1] * (r[1][0] * r[2][2] - r[1][2] * r[2][0])
+                + r[0][2] * (r[1][0] * r[2][1] - r[1][1] * r[2][0]);
+            eprintln!("[拆开] 镜像复位后 det(R)={d2:.6} · K diag=({:.4},{:.4},{:.4})", k[0][0], k[1][1], k[2][2]);
+        }
+    }
     let s = k[2][2];
     if s.abs() < 1e-15 {
         return Err(WhyNot::BadFit(f64::INFINITY));
@@ -496,7 +610,13 @@ fn 拆开(p: [[f64; 4]; 3], seen: &[(P3, Px)]) -> Result<Eye, WhyNot> {
     // 🔴 回代:装不下就报出来,不许把残差咽下去。
     let mut worst = 0.0f64;
     for (p3d, px) in seen {
-        let got = eye.project(*p3d).ok_or(WhyNot::Behind)?;
+        let Some(got) = eye.project(*p3d) else {
+            if std::env::var("BL_CAMDEBUG").is_ok() {
+                eprintln!("[拆开] 回代 Behind:样本 ({:.4},{:.4},{:.4}) · at=({:.3},{:.3},{:.3}) q=({:.3},{:.3},{:.3},{:.3})",
+                    p3d.x, p3d.y, p3d.z, eye.at[0], eye.at[1], eye.at[2], eye.q[0], eye.q[1], eye.q[2], eye.q[3]);
+            }
+            return Err(WhyNot::Behind);
+        };
         worst = worst.max((got[0] - px[0]).abs().max((got[1] - px[1]).abs()));
     }
     // 🔴 残差门槛不能照合成数据定。合成台上该到 1e-6,而**真数据自带 ~18 px 的认手噪声**
