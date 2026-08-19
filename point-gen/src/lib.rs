@@ -436,6 +436,13 @@ pub fn fit_full_axis_offset(seen: &[([f64; 7], Px)]) -> Result<(Eye, usize, f64,
     let 评 = |d: [f64; 3]| -> Option<(Eye, f64)> {
         let fit: Vec<(P3, Px)> = seen.iter().step_by(2).map(|(p, u)| (观测点(p, d), *u)).collect();
         let eye = fit_full(&fit).ok()?;
+        // 物理闸(2026-08-19,SPANX11):搜索只看留出误差时,选中 t=0.22 的一台
+        // "主点 (0.57,-0.26) 在画面外"的非物理解(留出 0.0239 反而最小)。
+        // 主点在画面内是"这是一台相机"的最低要求,不是机体参数 —— 非物理的 d
+        // 在搜索段就出局,别让它赢了留出、输了存在。
+        if !(0.0..=1.0).contains(&eye.cx) || !(0.0..=1.0).contains(&eye.cy) {
+            return None;
+        }
         let mut errs: Vec<f64> = Vec::new();
         for (p, u) in seen.iter().skip(1).step_by(2) {
             match eye.project(观测点(p, d)) {
@@ -491,7 +498,59 @@ pub fn fit_full_axis_offset(seen: &[([f64; 7], Px)]) -> Result<(Eye, usize, f64,
     let mut d = [0.0f64; 3];
     d[k] = t;
     let 全: Vec<(P3, Px)> = seen.iter().map(|(p, u)| (观测点(p, d), *u)).collect();
-    let eye = fit_full(&全)?;
+    // 终拟合带一轮剔离群(2026-08-19,SPANX6):648 样本里少数脏样本(认块认到
+    // 背景/臂)把 fit_full 的 worst 闸打爆 => BadFit(2.53 画幅)全盘拒,而搜索段的
+    // 中位留出早就说这枚 d 是好的。终盘也按中位来:先用偶集粗解给全样本算残差,
+    // 剔掉大于 max(10x中位, 0.05 画幅) 的,再终拟合。阈是量出来的,不是配额。
+    let eye = match fit_full(&全) {
+        Ok(e) => e,
+        Err(_) => {
+            let 偶: Vec<(P3, Px)> = 全.iter().step_by(2).cloned().collect();
+            // 偶集也可能过不了 worst 闸(SPANX11:0.568 直接从这里抛出,迭代剔
+            // 根本没跑)—— 奇集再试一次,两个粗解都死才放弃。
+            let 粗 = match fit_full(&偶) {
+                Ok(e) => e,
+                Err(_) => {
+                    let 奇: Vec<(P3, Px)> = 全.iter().skip(1).step_by(2).cloned().collect();
+                    fit_full(&奇)?
+                }
+            };
+            let mut 残: Vec<(usize, f64)> = Vec::new();
+            for (i, (p, u)) in 全.iter().enumerate() {
+                let e = match 粗.project(*p) {
+                    Some(g) => ((g[0] - u[0]).powi(2) + (g[1] - u[1]).powi(2)).sqrt(),
+                    None => f64::INFINITY,
+                };
+                残.push((i, e));
+            }
+            let mut 有限: Vec<f64> = 残.iter().map(|&(_, e)| e).filter(|e| e.is_finite()).collect();
+            有限.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            if 有限.is_empty() {
+                return Err(WhyNot::BadFit(f64::INFINITY));
+            }
+            // 迭代收紧(2026-08-19,SPANX8):剔一轮(10x中位)后 worst=0.509,
+            // 距 0.5 硬闸差 2% —— 一轮不够就按 10x/5x/3x 中位逐轮收紧,三轮全败才拒。
+            // 硬闸本身(半画幅)不动:那是挡真退化的安全线。
+            let 中位 = 有限[有限.len() / 2];
+            let mut 解: Option<Eye> = None;
+            for 倍 in [10.0, 5.0, 3.0] {
+                let 阈 = (中位 * 倍).max(0.02);
+                let 净: Vec<(P3, Px)> = 残.iter().filter(|&&(_, e)| e <= 阈).map(|&(i, _)| 全[i]).collect();
+                if 净.len() < 12 {
+                    break;
+                }
+                if let Ok(e) = fit_full(&净) {
+                    println!("      [全相机] 终拟合剔掉 {} 个离群样本(残差 > {:.4} 画幅)再解", 全.len() - 净.len(), 阈);
+                    解 = Some(e);
+                    break;
+                }
+            }
+            match 解 {
+                Some(e) => e,
+                None => return Err(WhyNot::BadFit(f64::INFINITY)),
+            }
+        }
+    };
     Ok((eye, k, t, med))
 }
 

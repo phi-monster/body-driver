@@ -806,6 +806,11 @@ fn main() {
     let mut 基座: Option<([f64; 3], u64)> = None;
     // 跨度是从哪台相机读的 —— 它存的是画面单位,而画面单位只在同一台相机里可比。
     let mut 跨度相机 = 0usize;
+    // 跨度相自量的那把 2×2 尺(det/σ 轮轮 7-20,J 对角主导且跨轮一致 0.81-0.87),
+    // 给同轮靠后的工具两格用 —— image_jacobian 格自己的探测(35 样本)det/σ 只有
+    // 0.5-1.6,轮轮被 image_to_plane 正确地拒,弧点因此恒 0。同一个量,谁量得好用谁。
+    // ⚠️ 债:这是会话内传递,没走账本正门(deps 记的仍是 jac 格)—— 正名待明日。
+    let mut 会话尺: Option<([f64; 4], [f64; 4])> = None;
     // 🔴 这一轮标定里解出来的整台相机(台号, 眼, 手那个深度上 1 归一化单位 = 几米)。
     // 干活模式(深度反投影)要用它;写盘时一起存进标定文件,--in 时装回来。
     let mut 相机们: Vec<(usize, point_gen::Eye, f64)> = 相机们载;
@@ -1075,6 +1080,11 @@ fn main() {
             .map(|m| (m.value[0], m.value[1]));
         // 这只手在画面里有多大 —— 取 `hand_pixel` 自己的 1σ,量出来的。
         let 手大 = body.get(Quantity::HandPixel).filter(|m| m.dim >= 2).map(|m| m.uncertainty[0].max(m.uncertainty[1]));
+        // 一米在画面里是多少 —— image_jacobian 各分量绝对值的最大(画幅/米)。
+        // 近手闸用它补偿"跨度相把手从 hand_pixel 相位的位置挪走了多少"。
+        let 像素每米 = body.get(Quantity::ImageJacobian)
+            .filter(|m| m.dim >= 1)
+            .map(|m| m.value.iter().take(m.dim).fold(0.0f64, |a, v| a.max(v.abs())));
         // 🔴 探针幅度按**量到的可达带**给。量不到就传 None,探针走几何阶梯(不带尺度假设)。
         let 可达 = body.get(Quantity::Reach).filter(|m| m.dim >= 2).map(|m| (m.value[0], m.value[1]));
         // 这具身体每步交付多少 —— 量到了就递进去,探针据此放大命令(见 `跑一相` 的注释)。
@@ -1085,7 +1095,7 @@ fn main() {
         // (0.027m=>0.90 · 0.28m=>0.02),大步的真实收敛慢得多。档偏放大几倍,
         // 静置就放大几倍 —— 系数与 selfcal::档偏 的 4 同源,不另立数。
         let 静置相 = if matches!(q, Quantity::GripperSpan) { 静置 * 4 } else { 静置 };
-        let s = selfcal::跑一相(&mut plug, q, 0, 步, 静置相, 落点, 抬一档, 手在, 手大, 可达, 交付);
+        let s = selfcal::跑一相(&mut plug, q, 0, 步, 静置相, 落点, 抬一档, 手在, 手大, 像素每米, 可达, 交付);
         // 🔴🔴 **从错的位姿开跑,量出来的每个数都长得正常而全是别处的值。**
         // 实测(f0,2026-08-18):可达那一相把手臂顶到走不动,回位没真回来,于是画面雅可比
         // 那一相在**画幅左下角 (0.049,0.978)** 开测,探针幅度一路涨到 **命令 0.805 m ⇒ 实到
@@ -1396,13 +1406,23 @@ fn main() {
             }
             Quantity::ImageJacobian => {
                 let mut sm: Vec<probe::Sample> = Vec::new();
-                for (i, (u, v, _)) in s.seen.iter().enumerate() {
-                    if let Some(d) = s.cmd3.get(i) {
-                        let mut c = [0.0f64; body_layer::measurement::MAX_DIM];
-                        c[0] = d[0];
-                        c[1] = d[1];
-                        c[2] = d[2];
-                        sm.push(probe::Sample { cmd: c, n: 3, uv: [*u, *v], at_ns: now + i as u64 });
+                for (i, (u, v, e)) in s.seen.iter().enumerate() {
+                    // 🔴 分母用【实到】不用命令(2026-08-19,SPANX8 尸检):命令当分母,
+                    // 交付率直接除进尺里 —— 这格量出 J=[0.196,…] det/σ=0.53(被
+                    // image_to_plane 正确拒 ⇒ 弧点 0、工具两格死),而跨度相用实到
+                    // 量的同一把尺 J=[0.806,…] det/σ=20.7,外核画幅 1.24m ≈ 桌 1.3m。
+                    // "头相机 2×2 det 与 σ 分不开"的老病根就是这行 —— 不是相机斜,
+                    // 是分母错。实到 = 下一循环 seen 的 ee 减本循环的(本体自报,
+                    // 与跨度 shift 的"存实到"同款);cmd3[i] 正是 seen[i]→seen[i+1]
+                    // 之间的那步命令,只在两条都在时才成一个样本。
+                    if s.cmd3.get(i).is_some() {
+                        if let Some((_, _, e2)) = s.seen.get(i + 1) {
+                            let mut c = [0.0f64; body_layer::measurement::MAX_DIM];
+                            c[0] = e2[0] - e[0];
+                            c[1] = e2[1] - e[1];
+                            c[2] = e2[2] - e[2];
+                            sm.push(probe::Sample { cmd: c, n: 3, uv: [*u, *v], at_ns: now + i as u64 });
+                        }
                     }
                 }
                 println!("      [认手] 攒到 {} 个样本,交给估计器", sm.len());
@@ -1556,12 +1576,15 @@ fn main() {
                                 本台.iter().map(|&(m, du, dv)| (m, du.hypot(dv) * k)).collect(),
                                 format!("全相机 · 1 单位 = {k:.5} m"),
                             ),
-                            (None, Some((j, js))) => (
-                                本台.iter()
-                                    .filter_map(|&(m, du, dv)| probe::image_to_plane(&j, &js, (du, dv)).ok().map(|((x, y), _)| (m, x.hypot(y))))
-                                    .collect(),
-                                format!("2×2 局部尺 J=[{:.4},{:.4},{:.4},{:.4}]", j[0], j[1], j[2], j[3]),
-                            ),
+                            (None, Some((j, js))) => {
+                                会话尺 = Some((j, js));
+                                (
+                                    本台.iter()
+                                        .filter_map(|&(m, du, dv)| probe::image_to_plane(&j, &js, (du, dv)).ok().map(|((x, y), _)| (m, x.hypot(y))))
+                                        .collect(),
+                                    format!("2×2 局部尺 J=[{:.4},{:.4},{:.4},{:.4}]", j[0], j[1], j[2], j[3]),
+                                )
+                            }
                             (None, None) => (Vec::new(), "没有尺".into()),
                         };
                         let r = probe::gripper_span(&点, 1.0, 0.0, now, jac_epoch);
@@ -1580,7 +1603,7 @@ fn main() {
                 }
             },
             // 哪一列是工具轴:三列各扫一圈,**弧最小的那一列**就是它。
-            Quantity::ToolAxisColumn => match 平面尺(&body) {
+            Quantity::ToolAxisColumn => match 会话尺.map(|(j, s)| (j, s, now)).map(Ok).unwrap_or_else(|| 平面尺(&body)) {
                 Err(e) => Err(e),
                 Ok((jac, sig, jac_epoch)) => {
                     let 米 = 弧换米(&s.arc, &jac, &sig);
@@ -1591,7 +1614,7 @@ fn main() {
             // 工具尖到法兰多长:绕**垂直于工具轴**的那一列转,工作点扫出的弧半径就是它。
             // 🔴 所以它必须先知道哪一列是工具轴 —— 绕工具轴自己转,弧半径是 0,
             //    拿那一列去拟,量到的是"这具身体没有工具",而它明明有。
-            Quantity::ToolOffset => match (平面尺(&body), body.get(Quantity::ToolAxisColumn)) {
+            Quantity::ToolOffset => match (会话尺.map(|(j, s)| (j, s, now)).map(Ok).unwrap_or_else(|| 平面尺(&body)), body.get(Quantity::ToolAxisColumn)) {
                 (Err(e), _) => Err(e),
                 (_, None) => Err(probe::Declined::MissingDependency),
                 (Ok((jac, sig, jac_epoch)), Some(轴)) => {

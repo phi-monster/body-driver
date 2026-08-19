@@ -535,7 +535,13 @@ pub fn reach(
         }
     }
     // Both edges must be bracketed by an observed failure, or the boundary is a guess.
-    let inner_probed = ok[..best_lo].iter().any(|&a| !a);
+    //
+    // 🔴 内侧独享一条豁免(2026-08-19,增益修好后被自己的闸拦出来的):半径是**从起点**算的,
+    // 而起点按定义可达(那是把机器人交给我们时它待的地方)。身体跟随性好时,近处**根本不该
+    // 有失败** —— 要求内侧也有失败夹住,等于要求一具健康的身体在自己家门口摔一跤才准报告。
+    // ⇒ 带子一路延伸到最小采样半径时,内边就是那个半径,不需要失败去证;
+    //   **外侧照旧必须有撞墙样本夹住** —— 外墙才是"够不着"那句硬话的来源。
+    let inner_probed = best_lo == 0 || ok[..best_lo].iter().any(|&a| !a);
     let outer_probed = ok[best_hi + 1..k].iter().any(|&a| !a);
     if !inner_probed || !outer_probed {
         return Err(Declined::Inconsistent);
@@ -575,18 +581,34 @@ pub fn reach(
         let se = (p_pool * (1.0 - p_pool) * (1.0 / n_in as f64 + 1.0 / n_s as f64)).sqrt();
         se > 0.0 && (p_in - p_s) >= 2.0 * se
     };
-    if !separates(0, best_lo) || !separates(best_hi + 1, k) {
+    // 🔴 内侧豁免要打穿到这一道(2026-08-19,第一道豁免后仍拒,拒在这儿):
+    // 带子一路铺到最小采样半径(best_lo == 0)时,内侧**本来就没有样本区**可做分离检验 ——
+    // 半径从起点算、起点按定义可达,健康身体在近处不该有失败。此时内墙 = 0(起点自身),
+    // 不做内侧检验;**外侧那道统计分离照旧一分不松**(外墙才是"够不着"的来源)。
+    // ⚠️ 光"带子贴到最小采样"不够 —— 只扫远半场时(r[0]=0.40、墙在 0.60)带子同样贴底,
+    // 而那次扫描对内墙一无所知(单测 `reach_refuses_a_wall_it_never_touched` 拦的就是它)。
+    // 豁免还要求:最小采样半径本身就在起点旁边(< 外缘的 1/10,无量纲比例)——
+    // "从起点出发"的采样天然含近零样本,只扫远处的不含。
+    let 内贴地 = best_lo == 0 && r[0] < 0.1 * r[best_hi].max(1e-12);
+    if (!内贴地 && !separates(0, best_lo)) || !separates(best_hi + 1, k) {
         return Err(Declined::Inconsistent);
     }
 
     // Nearest observed failure outside each edge — that pair brackets the wall.
-    let lo_fail = (0..best_lo).rev().find(|&i| !ok[i]).unwrap();
+    let lo_fail = if 内贴地 { None } else { (0..best_lo).rev().find(|&i| !ok[i]) };
     let hi_fail = (best_hi + 1..k).find(|&i| !ok[i]).unwrap();
 
     let mut m = blank(Quantity::Reach, 2, now_ns);
-    m.value[0] = 0.5 * (r[lo_fail] + r[best_lo]);
+    // 内贴地时内半径 = 0,σ = 到第一个采样点的距离(它就是"内边最多能藏多远"的实测上界)。
+    m.value[0] = match lo_fail {
+        Some(i) => 0.5 * (r[i] + r[best_lo]),
+        None => 0.0,
+    };
     m.value[1] = 0.5 * (r[best_hi] + r[hi_fail]);
-    m.uncertainty[0] = 0.5 * (r[best_lo] - r[lo_fail]);
+    m.uncertainty[0] = match lo_fail {
+        Some(i) => 0.5 * (r[best_lo] - r[i]),
+        None => r[best_lo].max(0.0),
+    };
     m.uncertainty[1] = 0.5 * (r[hi_fail] - r[best_hi]);
     m.valid_lo[0] = r[0];
     m.valid_hi[0] = r[k - 1];
@@ -2070,6 +2092,8 @@ pub fn tool_axis_column(
     // 三根全都是零散布 ⇒ 腕没转或工作点没看见。用最大的那根去判:它要是也分不开零,
     // 那么这三个数排出来的顺序只是噪声的顺序。
     let biggest = order[2];
+    println!("      [工具] 三列散布 = [{:.5},{:.5},{:.5}](点数 {:.0}/{:.0}/{:.0})· SE = [{:.5},{:.5},{:.5}]",
+        spread[0], spread[1], spread[2], sum[0].0, sum[1].0, sum[2].0, se(0), se(1), se(2));
     if spread[biggest] <= 2.0 * se(biggest) || spread[biggest] <= 0.0 {
         return Err(Declined::NoResponse);
     }
