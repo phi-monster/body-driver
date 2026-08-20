@@ -411,7 +411,7 @@ pub fn fit_full_at(seen: &[(P3, Px)], 查worst: bool) -> Result<Eye, WhyNot> {
         p3[1][c] = p2[1][c] / sp + cp[1] * p2[2][c];
         p3[2][c] = p2[2][c];
     }
-    拆开(p3, seen)
+    拆开(p3, seen, 查worst)
 }
 
 
@@ -540,6 +540,8 @@ pub fn fit_full_axis_offset(seen: &[([f64; 7], Px)]) -> Result<(Eye, usize, f64,
             // 距 0.5 硬闸差 2% —— 一轮不够就按 10x/5x/3x 中位逐轮收紧,三轮全败才拒。
             // 硬闸本身(半画幅)不动:那是挡真退化的安全线。
             let 中位 = 有限[有限.len() / 2];
+            println!("      [全相机] 粗解残差分布:中位 {:.4} · P90 {:.4} · 最坏 {:.4}(n={})",
+                中位, 有限[(有限.len() * 9) / 10], 有限[有限.len() - 1], 有限.len());
             let mut 解: Option<Eye> = None;
             for 倍 in [10.0, 5.0, 3.0] {
                 let 阈 = (中位 * 倍).max(0.02);
@@ -661,7 +663,7 @@ fn 共面(seen: &[(P3, Px)]) -> bool {
 }
 
 /// 把 3×4 的投影矩阵拆成"内参 × 位姿",并**回代核一遍**。
-fn 拆开(p: [[f64; 4]; 3], seen: &[(P3, Px)]) -> Result<Eye, WhyNot> {
+fn 拆开(p: [[f64; 4]; 3], seen: &[(P3, Px)], 查worst: bool) -> Result<Eye, WhyNot> {
     // 🔴 DLT 解出来的投影矩阵**差一个整体符号**(零空间向量正负都行)。
     // 符号错了,所有点都会算到相机背后去 —— 病相是 `Behind`,而根因只是一个正负号。
     // 判法:拿样本点代进第三行,看深度是正是负;多数为负就整体翻号。
@@ -773,7 +775,7 @@ fn 拆开(p: [[f64; 4]; 3], seen: &[(P3, Px)]) -> Result<Eye, WhyNot> {
     // ⇒ 残差本来就该是那个量级。这里只挡真正的退化(残差大到画幅一半);
     // 够不够用由调用方拿自己的判据去比,而这一层把【斜切】与【残差】都报出来。
     let 画幅 = seen.iter().map(|(_, u)| u[0].abs().max(u[1].abs())).fold(0.0f64, f64::max).max(1.0);
-    if worst > 画幅 * 0.5 {
+    if 查worst && worst > 画幅 * 0.5 {
         return Err(WhyNot::BadFit(worst));
     }
     if 斜切.abs() > 1e-6 {
