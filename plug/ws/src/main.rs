@@ -589,10 +589,35 @@ fn main() {
         //(位置差 0.4 m · fx 差三个量级 · det(R)=−1),而所有闸都只能事后喊 Behind。
         let mut seen: Vec<([f64; 7], point_gen::Px)> = Vec::new();
         let mut c = [0.0f64; 3];
-        for &(i, u, v, p) in shift {
-            if i != cam { continue }
-            seen.push((p, [u, v]));
-            c[0] += p[0]; c[1] += p[1]; c[2] += p[2];
+        // 🔴 按位置聚合、组内取像素中位附近的 3 条(2026-08-20,V3 两连判定案):
+        // 剔后残差中位 0.0113 而 RMS 0.109 —— 肥尾是【位置级坏点】(个别格点整格
+        // 认错,组内一致,单样本剔除拿它没辙)。中位滤掉组内认错的少数派;
+        // 每组只留 3 条防某一格样本数碾压其他格。分组键 = 位置量化 0.1mm。
+        {
+            use std::collections::BTreeMap;
+            let mut 组: BTreeMap<[i64; 3], Vec<([f64; 7], point_gen::Px)>> = BTreeMap::new();
+            for &(i, u, v, p) in shift {
+                if i != cam { continue }
+                let k = [(p[0] * 1e4) as i64, (p[1] * 1e4) as i64, (p[2] * 1e4) as i64];
+                组.entry(k).or_default().push((p, [u, v]));
+            }
+            for (_, mut v) in 组 {
+                let n = v.len();
+                let mut us: Vec<f64> = v.iter().map(|(_, q)| q[0]).collect();
+                let mut vs: Vec<f64> = v.iter().map(|(_, q)| q[1]).collect();
+                us.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                vs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                let (mu, mv) = (us[n / 2], vs[n / 2]);
+                v.sort_by(|(_, a), (_, b)| {
+                    let da = (a[0] - mu).powi(2) + (a[1] - mv).powi(2);
+                    let db = (b[0] - mu).powi(2) + (b[1] - mv).powi(2);
+                    da.partial_cmp(&db).unwrap()
+                });
+                for (p, q) in v.into_iter().take(3) {
+                    seen.push((p, q));
+                    c[0] += p[0]; c[1] += p[1]; c[2] += p[2];
+                }
+            }
         }
         if seen.is_empty() { return Err(point_gen::WhyNot::TooFewSamples(0)) }
         // 🔴 **拒绝要可读**:`Coplanar` 有两种来路 —— 真的走成了一张平面,
