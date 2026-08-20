@@ -443,7 +443,10 @@ pub fn fit_full_axis_offset(seen: &[([f64; 7], Px)]) -> Result<(Eye, usize, f64,
     }
     let 评 = |d: [f64; 3]| -> Option<(Eye, f64)> {
         let fit: Vec<(P3, Px)> = seen.iter().step_by(2).map(|(p, u)| (观测点(p, d), *u)).collect();
-        let eye = fit_full(&fit).ok()?;
+        // 搜索段用无闸拟合(2026-08-20,GRAB8:inf 无剔离群打印 ⇒ 走的是"排 empty"
+        // 那个出口 —— 单颗脏样本把每个 d 的带闸拟合都杀死,三轴全 None。搜索的把关
+        // 本来就是【留出中位 + 物理闸】,worst 闸在这里只会饿死搜索)。
+        let eye = fit_full_at(&fit, false).ok()?;
         // 物理闸(2026-08-19,SPANX11):搜索只看留出误差时,选中 t=0.22 的一台
         // "主点 (0.57,-0.26) 在画面外"的非物理解(留出 0.0239 反而最小)。
         // 主点在画面内是"这是一台相机"的最低要求,不是机体参数 —— 非物理的 d
