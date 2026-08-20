@@ -325,6 +325,14 @@ pub fn from_pair(a: &Eye, b: &Eye, pairs: &[(Px, Px)], tol_m: f64) -> (Vec<P3>, 
 /// 直接线性变换(DLT)解出 3×4 的投影矩阵,再拆成"内参 × 位姿"。
 /// 先按 Hartley 把三维点和像素各自归一化 —— **不归一化,条件数会烂到解不出来**。
 pub fn fit_full(seen: &[(P3, Px)]) -> Result<Eye, WhyNot> {
+    fit_full_at(seen, true)
+}
+
+/// 同 [`fit_full`],但可以关掉"最坏残差 > 半画幅"那道闸。
+/// 只给**剔离群的粗解**用:粗解的唯一用途是给残差排序,它自己不需要过质量闸 ——
+/// 池里混一颗脏样本时带闸粗解必死,迭代剔从来没通过电(GRAB3/5/6 三轮 BadFit(inf)
+/// 的真相)。终解仍走带闸的 fit_full,质量线一寸不让。
+pub fn fit_full_at(seen: &[(P3, Px)], 查worst: bool) -> Result<Eye, WhyNot> {
     if seen.len() < 6 {
         return Err(WhyNot::TooFewSamples(seen.len()));
     }
@@ -508,11 +516,11 @@ pub fn fit_full_axis_offset(seen: &[([f64; 7], Px)]) -> Result<(Eye, usize, f64,
             let 偶: Vec<(P3, Px)> = 全.iter().step_by(2).cloned().collect();
             // 偶集也可能过不了 worst 闸(SPANX11:0.568 直接从这里抛出,迭代剔
             // 根本没跑)—— 奇集再试一次,两个粗解都死才放弃。
-            let 粗 = match fit_full(&偶) {
+            let 粗 = match fit_full_at(&偶, false) {
                 Ok(e) => e,
                 Err(_) => {
                     let 奇: Vec<(P3, Px)> = 全.iter().skip(1).step_by(2).cloned().collect();
-                    fit_full(&奇)?
+                    fit_full_at(&奇, false)?
                 }
             };
             let mut 残: Vec<(usize, f64)> = Vec::new();

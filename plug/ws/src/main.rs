@@ -811,6 +811,11 @@ fn main() {
     // 0.5-1.6,轮轮被 image_to_plane 正确地拒,弧点因此恒 0。同一个量,谁量得好用谁。
     // ⚠️ 债:这是会话内传递,没走账本正门(deps 记的仍是 jac 格)—— 正名待明日。
     let mut 会话尺: Option<([f64; 4], [f64; 4])> = None;
+    // 相机原料的跨相位累计池(2026-08-20,GRAB5 尸检):Samples 每相独立,
+    // jac/hand_pixel 相灌进 s.seen_cam 的认手样本随相位结束被丢,全相机拟合
+    // 只读跨度相自己的 382 条 —— 灌注打印在、池子数没变的真相。相机是跨相位
+    // 的量,原料池也必须跨相位。
+    let mut 相机池: Vec<(usize, f64, f64, [f64; 7])> = Vec::new();
     // 🔴 这一轮标定里解出来的整台相机(台号, 眼, 手那个深度上 1 归一化单位 = 几米)。
     // 干活模式(深度反投影)要用它;写盘时一起存进标定文件,--in 时装回来。
     let mut 相机们: Vec<(usize, point_gen::Eye, f64)> = 相机们载;
@@ -1096,6 +1101,7 @@ fn main() {
         // 静置就放大几倍 —— 系数与 selfcal::档偏 的 4 同源,不另立数。
         let 静置相 = if matches!(q, Quantity::GripperSpan) { 静置 * 4 } else { 静置 };
         let s = selfcal::跑一相(&mut plug, q, 0, 步, 静置相, 落点, 抬一档, 手在, 手大, 像素每米, 可达, 交付);
+        相机池.extend_from_slice(&s.seen_cam);
         // 🔴🔴 **从错的位姿开跑,量出来的每个数都长得正常而全是别处的值。**
         // 实测(f0,2026-08-18):可达那一相把手臂顶到走不动,回位没真回来,于是画面雅可比
         // 那一相在**画幅左下角 (0.049,0.978)** 开测,探针幅度一路涨到 **命令 0.805 m ⇒ 实到
@@ -1479,7 +1485,7 @@ fn main() {
                             s0.push_str(&format!("jaw {c} {θ} {m} {du} {dv}\n"));
                         }
                         s0.push_str("# seen: cam u v x y z   ← 手在哪 + 手的像素,每循环都记(解相机模型用这份)\n");
-                        for &(c, u, v, p) in &s.seen_cam {
+                        for &(c, u, v, p) in &相机池 {
                             s0.push_str(&format!("seen {c} {u} {v} {} {} {} {} {} {} {}\n", p[0], p[1], p[2], p[3], p[4], p[5], p[6]));
                         }
                         s0.push_str("# shift: cam tilt cmdx cmdy cmdz gotx goty gotz u v\n");
@@ -1512,7 +1518,7 @@ fn main() {
                     //   第 1 台:14 个样本,**7 个不同位置**,第三主轴占最长轴 **37.8%** ⇒ 完全够解。
                     // 一个够用的数据集,因为遍历范围取错了地方而从没被试过。
                     let 台数 = s.jaw.iter().map(|&(i, ..)| i)
-                        .chain(s.seen_cam.iter().map(|&(i, ..)| i))
+                        .chain(相机池.iter().map(|&(i, ..)| i))
                         .max().map(|m| m + 1).unwrap_or(0);
                     let 腕角集: Vec<u64> = {
                         let mut v: Vec<u64> = s.jaw.iter().map(|&(_, θ, ..)| (θ * 100.0).round() as u64).collect();
@@ -1524,7 +1530,7 @@ fn main() {
                     // 全模型解出焦距+主点+相机位姿,换算对**任何深度**成立;解不出来会具名拒绝。
                     let mut 可用: Vec<(usize, usize, u64, Option<f64>, Option<([f64; 4], [f64; 4])>)> = Vec::new();
                     for i in 0..台数 {
-                        let 全 = match 全相机(&s.seen_cam, i) {
+                        let 全 = match 全相机(&相机池, i) {
                             Ok((eye, 米每单位, d偏)) => {
                                 工具d = Some(d偏);
                                 println!("      [全相机] 第 {i} 台解出来了:fx={:.2} fy={:.2} 主点=({:.3},{:.3}) 相机在 ({:.3},{:.3},{:.3}) ⇒ 手那个深度上 1 归一化单位 = {:.5} m",
