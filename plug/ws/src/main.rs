@@ -2347,7 +2347,15 @@ fn 服务<S: std::io::Read + std::io::Write>(
                             let js = [m.uncertainty[0], m.uncertainty[1], m.uncertainty[2], m.uncertainty[3]];
                             if p.对子.len() >= 4 {
                                 let s = (0.03 * 可达带[1]).max(探幅);
-                                let lam = s * s;
+                                // 岭权重自缩放(N13 仪表定案:对子几乎全在一根轴上时,弱轴
+                                // 回归把噪声放大成假增益 —— du/dy 被吹到 8.01(账本 0.96)且
+                                // 钉死,伺服照它解步必歪。先验重 = 对子自己的平均功率 ⇒
+                                // 弱轴自动留在账本,强轴 n 个一致对子 n:1 压过先验。零拍数)。
+                                let lam = {
+                                    let m: f64 = p.对子.iter().map(|(w, _)| w[0] * w[0] + w[1] * w[1]).sum::<f64>()
+                                        / (p.对子.len() as f64);
+                                    m.max(s * s)
+                                };
                                 // 拟一把:岭回归拉向账本(对子集合可指定跳过哪些)。
                                 let 拟 = |跳: &[bool]| -> [f64; 4] {
                                     let (mut g00, mut g01, mut g11) = (lam, 0.0, lam);
