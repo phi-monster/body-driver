@@ -2483,11 +2483,33 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     // 每 ~12 拍误杀一次好跟踪。对子认识论延到 z:z 主导拍配 (执行z, 像素挪),
                     // 过原点最小二乘 ≥6 对接管账本列;不随重锚清 —— 这是相机的物理尺,不是这门课的。)
                     let jz用 = if z对.len() >= 6 {
-                        let szz: f64 = z对.iter().map(|(z, _, _)| z * z).sum();
-                        if szz > 1e-9 {
-                            [z对.iter().map(|(z, u, _)| z * u).sum::<f64>() / szz,
-                             z对.iter().map(|(z, _, v)| z * v).sum::<f64>() / szz]
-                        } else { jz }
+                        // 🔴 与 xy 岭同配方(N47 定案:裸最小二乘被钉死追踪器的零对拉到 0,
+                        // 预测不下行 ⇒ 更钉死,自增强塌缩;跨计划持有把毒也持有)。
+                        // 先验重 = 对子自身平均功率(自缩放,零新常数);剔群 3×中位残差。
+                        let 拟z = |跳: &[bool]| -> [f64; 2] {
+                            let lam = {
+                                let m: f64 = z对.iter().map(|(z, _, _)| z * z).sum::<f64>() / (z对.len() as f64);
+                                m.max(1e-9)
+                            };
+                            let (mut g, mut bu, mut bv) = (lam, lam * jz[0], lam * jz[1]);
+                            for (i, (z, u, v)) in z对.iter().enumerate() {
+                                if 跳.get(i).copied().unwrap_or(false) { continue; }
+                                g += z * z; bu += z * u; bv += z * v;
+                            }
+                            [bu / g, bv / g]
+                        };
+                        let m0 = 拟z(&[]);
+                        let mut r: Vec<f64> = z对.iter().map(|(z, u, v)| {
+                            let (eu, ev) = (u - m0[0] * z, v - m0[1] * z);
+                            (eu * eu + ev * ev).sqrt()
+                        }).collect();
+                        let mut rs = r.clone();
+                        rs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
+                        let med = rs[rs.len() / 2];
+                        if med > 0.0 {
+                            let 跳: Vec<bool> = r.drain(..).map(|x| x > 3.0 * med).collect();
+                            if 跳.iter().any(|&b| b) { 拟z(&跳) } else { m0 }
+                        } else { m0 }
                     } else { jz };
                     // ── 在线局部手眼(owner 死命令:不许回原位迁就账本 —— 尺跟人走)──
                     // 对子 = (两次生实测之间手真挪的 xy, 爪像素真挪),全是白拿的实测。
