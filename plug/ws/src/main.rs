@@ -2550,7 +2550,14 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     };
                     let 物凸 = 凸起(p.物像素.0, p.物像素.1);
                     // 低频问眼校准(节流:量出的静置拍;VLM ~1s 一答,不堵环)。
-                    if p.对准等 == 0 && p.晃态 == 0 && !p.模板.is_empty() && p.验拍 >= 40 {
+                    // 🔴 末段(爪估离物 < 2×物跨)停问 VLM(N34 终线定案:追踪器正贴在物上,
+                    // VLM 答到腕上,离 0.14 触发争议、z 底争议=换点 ⇒ 7 个计划全死在终点线;
+                    // 档案原话"爪贴物后 VLM 只能证到 ±0.05-0.09,多等的每一答都可能框到手腕
+                    // 被劫持"。末段的裁判本来就是合爪自检+空爪重试,不是 VLM)。
+                    let 离物近 = p.预测爪.map(|(u, v)| {
+                        ((u - p.物像素.0).powi(2) + (v - p.物像素.1).powi(2)).sqrt() < 2.0 * p.物跨.max(0.05)
+                    }).unwrap_or(false);
+                    if p.对准等 == 0 && p.晃态 == 0 && !p.模板.is_empty() && p.验拍 >= 40 && !离物近 {
                         p.对准等 = body_layer::derive::settle_periods(&body, 1e-3).map(|n| n as u32).unwrap_or(8).max(4);
                         let 眼爪 = match plug.lay.cams.get(p.相机)
                             .and_then(|路| plug.last.as_ref().map(|o| (路.clone(), o.clone())))
