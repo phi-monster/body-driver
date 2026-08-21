@@ -57,7 +57,7 @@ pub fn 算一把(
     试过: &[[f64; 3]],
     // 🔴 这具身体的全部长度尺度 —— 量出来的,由调用方从标定里读了递进来。
     r: &尺,
-) -> Result<(usize, usize, f64, [f64; 3], [f64; 4]), NoGrasp> {
+) -> Result<(usize, usize, f64, [f64; 3], [f64; 4], f64), NoGrasp> {
     // ① 圈出物体:**锚在眼指的那一点上**,不对全画面用规则
     //(LAB:全局规则那次掩膜占了全帧 72%)
     let mask = point_gen::mask_around(eye, depth, w, h, at_px, span, 宽容)
@@ -445,6 +445,7 @@ pub fn 算一把(
         宽,
         [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0, 指尖z],
         q,
+        zfloor,
     ))
 }
 
