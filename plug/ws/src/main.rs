@@ -2334,7 +2334,11 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         }
                         if ring.is_empty() { return None }
                         ring.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
-                        Some(((c - ring[ring.len() / 2]).abs(), c))
+                        // 桌面在环的【远】侧 ⇒ 取远侧分位当"那里的桌面",凸起 = 比它近多少。
+                        // 环中位是错的(N4 实锤:手降低后在画面里变大,环落在手自己身上 ⇒
+                        // 中位=手深 ⇒ 凸起≈0 ⇒ 真爪连片被判"像影",而同一片像素高处刚被收过)。
+                        // 影 = 与远侧同深(平贴支撑面);爪/物 = 比远侧近。零新常数。
+                        Some((((ring[(ring.len() * 3) / 4] - c).max(0.0)), c))
                     };
                     let 物凸 = 凸起(p.物像素.0, p.物像素.1);
                     // 低频问眼校准(节流:量出的静置拍;VLM ~1s 一答,不堵环)。
