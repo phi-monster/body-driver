@@ -2242,6 +2242,10 @@ fn 服务<S: std::io::Read + std::io::Write>(
     }
     let mut 计划: Option<抓况> = None;
     let mut 试过: Vec<[f64; 3]> = Vec::new();
+    // 跨计划的爪估锚(N10 实锤:不回原位后,新计划的首捕获窗死盯标定位,
+    // 而爪停在上一计划的落点 —— 窗外 ⇒ 后续尝试全是空烧。爪不会瞬移,
+    // 上一次实测就是最好的锚)。
+    let mut 上帧爪: Option<(f64, f64)> = None;
     let mut 拍 = 0u64;
     let mut 帧 = match plug.sense() { Some(f) => f, None => return };
 
@@ -2426,7 +2430,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                                 // 窗心跟爪走(N0 实锤:J 外推在伺服姿态把窗推到画面右缘,
                                 // VLM 只能在窗内指臂身,差 0.47 钉死)。有爪估 ⇒ 窗心=爪估
                                 // (自跟踪);首捕获 ⇒ 标定位 + 窗放大(2/3 幅容住姿态差)。
-                                let hp = p.预测爪.unwrap_or_else(|| {
+                                let hp = p.预测爪.or(上帧爪).unwrap_or_else(|| {
                                     body.get(Quantity::HandPixel).filter(|m| m.dim >= 2)
                                         .map(|m| (m.value[0], m.value[1])).unwrap_or((0.5, 0.5))
                                 });
@@ -2493,7 +2497,9 @@ fn 服务<S: std::io::Read + std::io::Write>(
                             };
                             if 过 {
                                 // 方向自证(上轮期望 vs 实际挪,分轴,零常数)。
-                                if let Some((pu, pv)) = p.上爪 {
+                                if p.对子.len() < 4 { if let Some((pu, pv)) = p.上爪 {
+                                    // 翻号只在拟合尺【未激活】时用(N10 实锤:拟合尺自带正负号,
+                                    // 伺服号再乘一次 = 两套方向机构打架,可把对的方向翻错)。
                                     // 翻号要【连续两次】矛盾才翻(N5 实锤:VLM 单答抖 ±0.02-0.05
                                     // ≫ 0.005 门槛 ⇒ +1/−1 逐次打摆,u 轴随机走。双拍确认同一习语:
                                     // 噪声独立 ⇒ 连续两次同向矛盾概率平方级掉;真反向则两次必同向)。
@@ -2514,7 +2520,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                                             }
                                         }
                                     }
-                                }
+                                } }
                                 // 校准=与当前预测对半融合(MU 实锤:VLM 单次答案抖 ±0.1-0.3
                                 // 画幅——指尖/腕/臂随机框;全信单次答案 ⇒ 伺服被噪声驱动成
                                 // 随机游走,两试 900 拍超时。对半融合把单次噪声压一半)。
@@ -2524,6 +2530,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                                 };
                                 p.上爪 = Some(融);
                                 p.预测爪 = Some(融);
+                                上帧爪 = Some(融);
                                 p.预测龄 = 0;
                                 // 对子入账:两次生实测之间,手真挪 vs 爪像素真挪(在线局部手眼原料)。
                                 if let Some((lu, lv)) = p.上fix生 {
@@ -2564,7 +2571,9 @@ fn 服务<S: std::io::Read + std::io::Write>(
                             // 尺跟人走,手臂在哪儿方向就在哪儿量。
                             if let Some((j, js)) = j_use {
                                 if let Ok(((dx0, dy0), _)) = probe::image_to_plane_damped(&j, &js, d) {
-                                    let (dx, dy) = (dx0 * p.伺服号[0] * p.步率[0], dy0 * p.伺服号[1] * p.步率[1]);
+                                    // 拟合尺激活后自带正负号 ⇒ 伺服号退场(N10:两套方向机构不许打架)。
+                                    let (sx, sy) = if p.对子.len() >= 4 { (1.0, 1.0) } else { (p.伺服号[0], p.伺服号[1]) };
+                                    let (dx, dy) = (dx0 * sx * p.步率[0], dy0 * sy * p.步率[1]);
                                     let l = (dx * dx + dy * dy).sqrt();
                                     // 单拍步幅:0.1 个张开(每拍都在走,细步快频)。
                                     let cap = 0.1 * 张开;
