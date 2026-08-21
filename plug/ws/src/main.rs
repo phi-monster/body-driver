@@ -2733,7 +2733,11 @@ fn 服务<S: std::io::Read + std::io::Write>(
                                                 Ok(r) => {
                                                     println!("[服]   晃认:双响 {} · 配对 {} · 地板 {} · m1 {} m2 {}",
                                                         r.moved_px, r.pairs, r.floor, r.m1_px, r.m2_px);
-                                                    if let Some(c) = (r.pairs > 0).then(|| r.cands.get(0)).flatten() {
+                                                    // 🔴 配对是奢侈品,不是锚定的前提(N32 实测:竖腕朝下时两指
+                                                    // 端对相机前后叠死,配对恒 0 —— 档案原话"从这个角度两根本来
+                                                    // 就分不开";而【臂冻住只动钳口】的构造保证:任何双响块都是
+                                                    // 爪。有对用对的中点(更准),没对用最大双响块的形心。
+                                                    if let Some(c) = r.cands.get(0) {
                                                         let half = ((img.0 as f64) * 0.03) as usize;
                                                         if let Some(tp) = 截块(img.0, img.1, &img.2, c.u, c.v, half) {
                                                             p.模板 = tp; p.模板半 = half; p.验拍 = 0;
