@@ -2212,6 +2212,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
         // 问眼的像素),像素差经账本 image_jacobian 换成位移,收敛到爪窗以内才下探。
         // 文档判词的落地:"末段不许再推算,每轮重测手点,只用实测误差判到位"。
         物像素: (f64, f64),
+        物跨: f64, // 计划时物的自报跨度(画幅比例)—— 裁剪窗避物的余隙,自缩放
         对准帧: Vec<Vec<u8>>,
         对准次: u32,
         对准挪: [f64; 2],
@@ -2231,6 +2232,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
         段拍: u32,
         伺服目标: [f64; 3],
         收敛计: u32,
+        上爪读: Vec<f64>,
     }
     let mut 计划: Option<抓况> = None;
     let mut 试过: Vec<[f64; 3]> = Vec::new();
@@ -2351,16 +2353,47 @@ fn 服务<S: std::io::Read + std::io::Write>(
                                 // 裁剪中心 = 账本推算的爪当前像素:hand_pixel(标定位)+
                                 // J·(here − 原位)(MX 实锤:死用标定位,悬停姿态爪不在窗里,
                                 // 8 答全被闸拦 ⇒ 无爪源。全账本推算,零新常数)。
-                                let hp0 = body.get(Quantity::HandPixel).filter(|m| m.dim >= 2)
-                                    .map(|m| (m.value[0], m.value[1])).unwrap_or((0.5, 0.5));
-                                let hp = if let Some(m) = body.get(Quantity::ImageJacobian).filter(|m| m.dim >= 4) {
-                                    let (dx, dy) = (here[0] - 原位[0], here[1] - 原位[1]);
-                                    ((hp0.0 + m.value[0] * dx + m.value[2] * dy).clamp(0.0, 1.0),
-                                     (hp0.1 + m.value[1] * dx + m.value[3] * dy).clamp(0.0, 1.0))
-                                } else { hp0 };
-                                let cw = w2 / 2; let ch = h2 / 2;
-                                let x0 = (((hp.0 * w2 as f64) as usize).saturating_sub(cw / 2)).min(w2 - cw);
-                                let y0 = (((hp.1 * h2 as f64) as usize).saturating_sub(ch / 2)).min(h2 - ch);
+                                // 窗心跟爪走(N0 实锤:J 外推在伺服姿态把窗推到画面右缘,
+                                // VLM 只能在窗内指臂身,差 0.47 钉死)。有爪估 ⇒ 窗心=爪估
+                                // (自跟踪);首捕获 ⇒ 标定位 + 窗放大(2/3 幅容住姿态差)。
+                                let hp = p.预测爪.unwrap_or_else(|| {
+                                    body.get(Quantity::HandPixel).filter(|m| m.dim >= 2)
+                                        .map(|m| (m.value[0], m.value[1])).unwrap_or((0.5, 0.5))
+                                });
+                                let (mut cw, mut ch) = if p.预测爪.is_some() { (w2 / 2, h2 / 2) } else { (w2 * 2 / 3, h2 * 2 / 3) };
+                                let mut x0 = (((hp.0 * w2 as f64) as usize).saturating_sub(cw / 2)).min(w2 - cw);
+                                let mut y0 = (((hp.1 * h2 as f64) as usize).saturating_sub(ch / 2)).min(h2 - ch);
+                                // 窗里必须没有【问过的物】(N2 落图定案 2026-08-21:首捕获窗
+                                // 2/3 幅夹紧后方块仍在窗内 —— VLM 11/11 指物、被同一性闸拒
+                                // ⇒ 永远没爪源;裁剪问眼的全部理由就是"物被裁掉")。沿爪估↔物
+                                // 分得最开的那根轴,把窗在物那一侧的边切到「物 ± 物自报跨度」;
+                                // 两轴都分不开(末段爪已贴物)⇒ 不切,交给深度双闸。余隙自缩放,
+                                // 用的只有爪估/物像素/物跨 —— 零机体假设,5/20 指手同样成立。
+                                {
+                                    let (ou, ov) = p.物像素;
+                                    let m = p.物跨.max(0.05);
+                                    let (du, dv) = (hp.0 - ou, hp.1 - ov);
+                                    if du.abs() >= dv.abs() && du.abs() > m {
+                                        if du > 0.0 {
+                                            let nx = (((ou + m) * w2 as f64) as usize).min(w2 - 1);
+                                            if nx > x0 && nx < x0 + cw { cw -= nx - x0; x0 = nx; }
+                                        } else {
+                                            let nx = (((ou - m) * w2 as f64) as usize).max(1);
+                                            if nx > x0 && nx < x0 + cw { cw = nx - x0; }
+                                        }
+                                    } else if dv.abs() > m {
+                                        if dv > 0.0 {
+                                            let ny = (((ov + m) * h2 as f64) as usize).min(h2 - 1);
+                                            if ny > y0 && ny < y0 + ch { ch -= ny - y0; y0 = ny; }
+                                        } else {
+                                            let ny = (((ov - m) * h2 as f64) as usize).max(1);
+                                            if ny > y0 && ny < y0 + ch { ch = ny - y0; }
+                                        }
+                                    }
+                                    if 拍 % 25 == 1 {
+                                        println!("[服]   避物窗:物({:.2},{:.2}) 爪估({:.2},{:.2}) ⇒ 窗 [{}..{})×[{}..{})", ou, ov, hp.0, hp.1, x0, x0 + cw, y0, y0 + ch);
+                                    }
+                                }
                                 let mut sub = Vec::with_capacity(cw * ch * 3);
                                 for yy in y0..y0 + ch {
                                     let row = (yy * w2 + x0) * 3;
@@ -2480,13 +2513,37 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         p.段 = 8;
                     }
                 }
-                2 => { if p.合等 > 0 { p.合等 -= 1 } else { println!("[服] 合爪到位 ⇒ 抬"); p.段 = 3; p.卡 = 0; } }
+                2 => {
+                    // 通道无关的推进-饱和(终态配置,owner 验收 2026-08-21):合 = 全通道
+                    // 朝收拢推进;停 = 任一通道【被撑住】(读数与上拍差 < 撑阈 且 读数还在
+                    // 半途)或全通道读数到底(空合)。2/5/20 指同一段代码,零结构假设。
+                    let 撑阈 = 0.01; // 拍间读数不再走的判定(归一开合/拍;协议数,机体无关)
+                    let mut 有撑 = false;
+                    let mut 全到底 = !帧.jaw.is_empty();
+                    for (ci, g) in 帧.jaw.iter().enumerate() {
+                        let 上 = p.上爪读.get(ci).copied().unwrap_or(1.0);
+                        if (上 - g).abs() < 撑阈 && *g > 0.05 { 有撑 = true; }
+                        if *g > 0.05 { 全到底 = false; }
+                    }
+                    p.上爪读 = 帧.jaw.iter().copied().collect();
+                    if p.合等 > 0 { p.合等 -= 1 }
+                    if 有撑 && p.合等 < 100 {
+                        println!("[服] 有指通道被撑住(读数停在半途)⇒ 合完,抬");
+                        p.段 = 3; p.卡 = 0;
+                    } else if p.合等 == 0 {
+                        if 全到底 { println!("[服] 全通道收到底(没撑住任何东西)⇒ 仍按流程抬,由抬后自检兜底"); }
+                        println!("[服] 合爪到位 ⇒ 抬");
+                        p.段 = 3; p.卡 = 0;
+                    }
+                }
                 3 if 到 || p.卡 >= 15 => {
-                    let 实爪 = 帧.jaw.first().copied().unwrap_or(0.0);
-                    if 实爪 > 0.05 {
-                        if 拍 % 50 == 1 { println!("[服] 🟢 抬到位且钳口被撑住(实开度 {:.3} > 0.05)—— 像是夹住了,保持", 实爪); }
+                    // 夹住 = 【任一通道】被撑住(收拢命令下读数停在半途)。逐通道判,
+                    // 指数无关 —— 两爪 1 通道、五指 5 通道、廿指 20 通道同一行。
+                    let 撑住数 = 帧.jaw.iter().filter(|g| **g > 0.05).count();
+                    if 撑住数 > 0 {
+                        if 拍 % 50 == 1 { println!("[服] 🟢 抬到位且 {}/{} 指通道被撑住 —— 像是夹住了,保持", 撑住数, 帧.jaw.len()); }
                     } else {
-                        println!("[服] 抬到位但钳口空合(实开度 {:.3} ≤ 0.05)⇒ 空爪,弃这个计划换下手点重来", 实爪);
+                        println!("[服] 抬到位但全部 {} 个指通道空合到底 ⇒ 空爪,弃这个计划换下手点重来", 帧.jaw.len());
                         p.段 = 8; // 弃标:出了借用区再清计划
                     }
                 }
@@ -2580,8 +2637,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
                                     试过.push(指尖);
                                     计划 = Some(抓况 {
                                         指尖, q, 相机: cam, 段: 0, 卡: 0, 合等: 0,
-                                        物像素: (u, v), 对准帧: Vec::new(), 对准次: 0, 对准挪: [0.0, 0.0],
-                                        上位: None, 连塌: 0, 抬高, 对准锚: [0.0; 3], 下探锚: [0.0; 2], 对准等: 0, 上爪: None, 上期望: (0.0, 0.0), 伺服号: [1.0, 1.0], 步率: [1.0, 1.0], 预测爪: None, 预测龄: 0, 上降z: f64::MAX, 对准末差: f64::MAX, 交替次: 0, 段起z: f64::MAX, 段拍: 0, 伺服目标: [f64::NAN; 3], 收敛计: 0,
+                                        物像素: (u, v), 物跨: look.span_frac, 对准帧: Vec::new(), 对准次: 0, 对准挪: [0.0, 0.0],
+                                        上位: None, 连塌: 0, 抬高, 对准锚: [0.0; 3], 下探锚: [0.0; 2], 对准等: 0, 上爪: None, 上期望: (0.0, 0.0), 伺服号: [1.0, 1.0], 步率: [1.0, 1.0], 预测爪: None, 预测龄: 0, 上降z: f64::MAX, 对准末差: f64::MAX, 交替次: 0, 段起z: f64::MAX, 段拍: 0, 伺服目标: [f64::NAN; 3], 收敛计: 0, 上爪读: Vec::new(),
                                     });
                                     出 = 回声.clone();
                                 }

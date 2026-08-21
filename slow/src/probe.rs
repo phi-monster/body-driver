@@ -1906,6 +1906,48 @@ pub fn image_to_plane(
     Ok((((dd * d.0 - b * d.1) / det, (-c * d.0 + a * d.1) / det), ns / nj))
 }
 
+/// **像素差 → 平面位移,但病态时不瘫痪:阻尼最小二乘。**
+///
+/// [`image_to_plane`] 在 `|det| ≤ 2σ` 时拒逆 —— 对"量一段长度"那是对的(一个分不开
+/// 零的行列式给不出可信的长度)。但**伺服**要的不是可信的长度,是**下降方向**:走错
+/// 尺度有限幅兜着,走错方向才致命。阻尼最小二乘 `(JᵀJ + λI)⁻¹Jᵀ·d` 在 λ>0 时永远
+/// 可解;λ 取 [`image_to_plane`] 拒逆用的那个 σ(det 的 1σ,量纲同 JᵀJ 的特征值,
+/// (画面/米)²)—— 良态时 λ≪JᵀJ 结果≈精确逆,病态时自动退化成沿 Jᵀ 的小步。零新常数。
+pub fn image_to_plane_damped(
+    jac: &[f64],
+    jac_sigma: &[f64],
+    d: (f64, f64),
+) -> Result<((f64, f64), f64), Declined> {
+    if jac.len() < 4 || jac_sigma.len() < 4 {
+        return Err(Declined::MissingDependency);
+    }
+    let (a, c, b, dd) = (jac[0], jac[1], jac[2], jac[3]);
+    if [a, b, c, dd].iter().any(|x| !x.is_finite()) || !d.0.is_finite() || !d.1.is_finite() {
+        return Err(Declined::MissingDependency);
+    }
+    let sd = ((dd * jac_sigma[0]).powi(2)
+        + (b * jac_sigma[1]).powi(2)
+        + (c * jac_sigma[2]).powi(2)
+        + (a * jac_sigma[3]).powi(2))
+    .sqrt();
+    if !sd.is_finite() {
+        return Err(Declined::MissingDependency);
+    }
+    // JᵀJ + λI(λ = sd;σ 全 0 的完美账本 ⇒ λ=0 ⇒ 正规方程 = 精确逆)
+    let (g00, g01, g11) = (a * a + c * c + sd, a * b + c * dd, b * b + dd * dd + sd);
+    let det2 = g00 * g11 - g01 * g01;
+    if !(det2 > 0.0) {
+        return Err(Declined::Inconsistent);
+    }
+    let (t0, t1) = (a * d.0 + c * d.1, b * d.0 + dd * d.1); // Jᵀ·d
+    let fro = |v: &[f64]| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2] + v[3] * v[3]).sqrt();
+    let (nj, ns) = (fro(&jac[..4]), fro(&jac_sigma[..4]));
+    if !(nj > 0.0) {
+        return Err(Declined::Inconsistent);
+    }
+    Ok((((g11 * t0 - g01 * t1) / det2, (-g01 * t0 + g00 * t1) / det2), ns / nj))
+}
+
 /// **沿画面里某一个方向的尺 —— 只用正向映射,不求逆。**
 ///
 /// # 🔴 为什么要有它:病态的手眼矩阵不该让一段长度变得不可测
