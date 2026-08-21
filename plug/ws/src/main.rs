@@ -2160,6 +2160,45 @@ fn 字(v: &Value) -> Option<String> {
     v.as_str().map(String::from).or_else(|| v.as_slice().and_then(|b| core::str::from_utf8(b).ok().map(String::from)))
 }
 
+
+/// 快眼:从灰度图截方形模板(中心 cu,cv 画幅坐标;出界 None)。
+fn 截块(w: usize, h: usize, g: &[u8], cu: f64, cv: f64, half: usize) -> Option<Vec<u8>> {
+    let (cx, cy) = ((cu * w as f64) as i64, (cv * h as f64) as i64);
+    let hf = half as i64;
+    if cx - hf < 0 || cy - hf < 0 || cx + hf >= w as i64 || cy + hf >= h as i64 { return None; }
+    let mut out = Vec::with_capacity(((2 * hf + 1) * (2 * hf + 1)) as usize);
+    for y in (cy - hf)..=(cy + hf) {
+        for x in (cx - hf)..=(cx + hf) { out.push(g[(y as usize) * w + x as usize]); }
+    }
+    Some(out)
+}
+
+/// 快眼:在 (cu,cv) 附近 ±r 像素搜模板(SSD 最小),返回最佳中心(画幅坐标)。
+fn 找块(w: usize, h: usize, g: &[u8], tpl: &[u8], half: usize, cu: f64, cv: f64, r: usize) -> Option<(f64, f64)> {
+    let (cx, cy) = ((cu * w as f64) as i64, (cv * h as f64) as i64);
+    let hf = half as i64;
+    let mut best: (u64, i64, i64) = (u64::MAX, 0, 0);
+    for dy in -(r as i64)..=(r as i64) {
+        for dx in -(r as i64)..=(r as i64) {
+            let (nx, ny) = (cx + dx, cy + dy);
+            if nx - hf < 0 || ny - hf < 0 || nx + hf >= w as i64 || ny + hf >= h as i64 { continue; }
+            let mut ssd: u64 = 0;
+            let mut i = 0usize;
+            for y in (ny - hf)..=(ny + hf) {
+                let row = (y as usize) * w;
+                for x in (nx - hf)..=(nx + hf) {
+                    let d = g[row + x as usize] as i64 - tpl[i] as i64;
+                    ssd += (d * d) as u64;
+                    i += 1;
+                }
+            }
+            if ssd < best.0 { best = (ssd, nx, ny); }
+        }
+    }
+    if best.0 == u64::MAX { return None; }
+    Some((best.1 as f64 / w as f64, best.2 as f64 / h as f64))
+}
+
 fn 服务<S: std::io::Read + std::io::Write>(
     plug: &mut Plug<S>,
     body: &body_layer::Body,
@@ -2228,6 +2267,9 @@ fn 服务<S: std::io::Read + std::io::Write>(
         对Δw: [f64; 3],            // 自上次生实测以来手真挪的 xyz(在线局部手眼原料)
         近答: Vec<(f64, f64)>,     // 近 5 个已收生答(逐拍随实到位移平移)—— 取中位当爪估
         走到: Option<[f64; 3]>,    // 停-看-跳:跳段的落点(None = 在看)
+        模板: Vec<u8>,             // 快眼:爪的模板块(慢眼锚定时截;空 = 无)
+        模板半: usize,             // 模板半宽(像素,按画幅比例算)
+        验拍: u32,                 // 距上次慢眼身份复核的拍数
         对子: Vec<([f64; 2], (f64, f64))>, // (真挪 xy, 爪像素真挪)—— 尺跟人走
         上fix生: Option<(f64, f64)>, // 上一次生实测(未融合),配对用
         步率: [f64; 2],
@@ -2433,7 +2475,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     };
                     let 物凸 = 凸起(p.物像素.0, p.物像素.1);
                     // 低频问眼校准(节流:量出的静置拍;VLM ~1s 一答,不堵环)。
-                    if p.对准等 == 0 && p.走到.is_none() {
+                    if p.对准等 == 0 && p.走到.is_none() && (p.模板.is_empty() || p.验拍 >= 40) {
                         p.对准等 = body_layer::derive::settle_periods(&body, 1e-3).map(|n| n as u32).unwrap_or(8).max(4);
                         let 眼爪 = match plug.lay.cams.get(p.相机)
                             .and_then(|路| plug.last.as_ref().map(|o| (路.clone(), o.clone())))
@@ -2522,6 +2564,20 @@ fn 服务<S: std::io::Read + std::io::Write>(
                                 _ => true,
                             };
                             if 过 {
+                                if !p.模板.is_empty() {
+                                    // 跟段:慢眼只做【身份复核】,不掺位置(它抖 ±0.03-0.05;
+                                    // 位置归快眼)。复核失败 = 快眼可能跟丢/跟错 ⇒ 重锚。
+                                    let (tu, tv) = p.预测爪.unwrap_or((look.u, look.v));
+                                    let dd = ((look.u - tu).powi(2) + (look.v - tv).powi(2)).sqrt();
+                                    if dd > 2.0 * p.物跨.max(0.05) {
+                                        println!("[服]   身份复核失败(慢眼 ({:.3},{:.3}) vs 快眼 ({:.3},{:.3}) 离 {:.3})⇒ 重锚", look.u, look.v, tu, tv, dd);
+                                        p.模板.clear(); p.近答.clear(); p.预测爪 = None; p.预测龄 = 0; p.收敛计 = 0;
+                                    } else {
+                                        p.验拍 = 0;
+                                        println!("[服]   身份复核过(离 {:.3})", dd);
+                                    }
+                                } else {
+
                                 // 方向自证(上轮期望 vs 实际挪,分轴,零常数)。
                                 if let Some((pu, pv)) = p.上爪 { {
                                     // 翻号只在拟合尺【未激活】时用(N10 实锤:拟合尺自带正负号,
@@ -2587,6 +2643,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                                 p.对Δw = [0.0, 0.0, 0.0];
                                 let d实 = ((p.物像素.0 - 融.0).powi(2) + (p.物像素.1 - 融.1).powi(2)).sqrt();
                                 println!("[服]   校准:爪 ({:.3},{:.3}) 差 {:.4} · 收敛计 {}", 融.0, 融.1, d实, p.收敛计);
+                                }
                             } else if 拍 % 25 == 1 {
                                 println!("[服]   问眼答 ({:.3},{:.3}) 拒:{}(离物 {:.3})⇒ 弃", look.u, look.v,
                                     if !非物 { "指的是物" } else { "凸起像影" }, 离物);
@@ -2628,12 +2685,51 @@ fn 服务<S: std::io::Read + std::io::Write>(
                             let k = ((0.1 * 张开) / l).min(1.0);
                             p.伺服目标 = [here[0] + d2[0] * k, here[1] + d2[1] * k, here[2] - 降];
                         }
-                    } else if let Some((pu, pv)) = p.预测爪 {
+                    } else if let Some((pu0t, pv0t)) = p.预测爪 {
+                        // ── 快眼(档案原话:"the eye can only ever be the slow loop …
+                        //    while a tracker(146.4 Hz)and the body layer close the fast
+                        //    loop. That split is already the architecture")。模板只在慢眼
+                        //    锚定时刷新(档案:自动刷新会把跟踪点走离手);相关度自评不可信
+                        //    ⇒ 身份由慢眼定期复核。──
+                        let (pu, pv) = if !p.模板.is_empty() {
+                            if let Some(img) = 帧.cams.get(p.相机) {
+                                let r = ((img.0 as f64) * 0.06) as usize;
+                                if let Some((tu, tv)) = 找块(img.0, img.1, &img.2, &p.模板, p.模板半, pu0t, pv0t, r) {
+                                    p.预测爪 = Some((tu, tv));
+                                    p.预测龄 = 0;
+                                    (tu, tv)
+                                } else { (pu0t, pv0t) }
+                            } else { (pu0t, pv0t) }
+                        } else { (pu0t, pv0t) };
                         let d = (p.物像素.0 - pu, p.物像素.1 - pv);
                         let 差px = (d.0 * d.0 + d.1 * d.1).sqrt();
                         p.上期望 = d;
-                        // 看段:站住不动(走的事全归跳段)。
-                        p.伺服目标 = [here[0], here[1], here[2]];
+                        if !p.模板.is_empty() {
+                            // 跟段:快眼连续伺服(边走边看回来了 —— 眼是快的那只)。
+                            let mut 挪xy = [0.0f64, 0.0];
+                            if 差px > 0.015 {
+                                if let Some((j, js)) = j_use {
+                                    if let Ok(((dx0, dy0), _)) = probe::image_to_plane_damped(&j, &js, d) {
+                                        let (dx, dy) = (dx0 * p.伺服号[0], dy0 * p.伺服号[1]);
+                                        let l = (dx * dx + dy * dy).sqrt();
+                                        let cap = 0.1 * 张开;
+                                        let k = if l > cap { cap / l } else { 1.0 };
+                                        挪xy = [dx * k, dy * k];
+                                    }
+                                }
+                            }
+                            let 步z = (0.03 * 可达带[1]).max(探幅);
+                            let 降 = if p.连塌 >= 10 { 0.0 } else if 差px > 0.05 { 0.5 * 步z } else { 步z };
+                            if let Some((_, _, ez)) = 本拍挪 {
+                                if 降 > 0.0 && ez > -0.1 * 步z { p.连塌 += 1; }
+                                else if ez < -0.25 * 步z { p.连塌 = 0; }
+                            }
+                            p.伺服目标 = [here[0] + 挪xy[0], here[1] + 挪xy[1], here[2] - 降];
+                            p.验拍 += 1;
+                        } else {
+                            // 看段:站住不动,攒慢眼答案。
+                            p.伺服目标 = [here[0], here[1], here[2]];
+                        }
                         if p.段起z == f64::MAX { p.段起z = here[2]; }
                         // (z 的到底计数移进跳段 —— 看段不动 z,老的 15 拍净降窗在这里只会假钉。)
                         if 拍 % 25 == 1 {
@@ -2651,7 +2747,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         // 每一答都可能框到手腕被劫持。爪窗 80mm ≫ 方块 35mm,±3cm 合爪
                         // 兜得住;兜不住由空爪自检+换点接盘 —— 档案老链"末段交给几何与
                         // 接触"的同一形状。散布 = 近答 MAD(量出来的,零拍数)。
-                        let 线 = if p.近答.len() >= 3 {
+                        let 线 = if !p.模板.is_empty() { 0.015 } else if p.近答.len() >= 3 {
                             let med = |v: &mut Vec<f64>| {
                                 v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
                                 v[v.len() / 2]
@@ -2673,14 +2769,25 @@ fn 服务<S: std::io::Read + std::io::Write>(
                             p.段 = 2; p.卡 = 0;
                             let n = (0.05f64.ln() / (1.0 - 交付率).max(1e-6).ln()).ceil();
                             p.合等 = (n as u32).clamp(3, 120);
-                        } else if p.近答.len() >= 5 && 差px >= 线 {
-                            // 看定即跳:答满 5、没到线 ⇒ 账本尺解一整段,盲跳过去(停-看-跳)。
-                            if let Some((j, js)) = j_use {
-                                if let Ok(((dx0, dy0), _)) = probe::image_to_plane_damped(&j, &js, d) {
-                                    let (dx, dy) = (dx0 * p.伺服号[0], dy0 * p.伺服号[1]);
-                                    println!("[服]   看定:差 {:.3} 线 {:.3} ⇒ 跳 ({:+.3},{:+.3})", 差px, 线, dx, dy);
-                                    p.走到 = Some([here[0] + dx, here[1] + dy, here[2]]);
-                                    p.近答.clear(); p.预测爪 = None; p.预测龄 = 0; p.对子.clear();
+                        } else if p.模板.is_empty() && p.近答.len() >= 5 && 差px >= 线 {
+                            // 慢眼锚定完成 ⇒ 截模板交给快眼逐帧咬;截不到(近画缘)退盲跳。
+                            let mut 截到 = false;
+                            if let Some(img) = 帧.cams.get(p.相机) {
+                                let half = ((img.0 as f64) * 0.03) as usize;
+                                if let Some(tp) = 截块(img.0, img.1, &img.2, pu, pv, half) {
+                                    p.模板 = tp; p.模板半 = half; p.验拍 = 0;
+                                    println!("[服]   锚定:慢眼定爪 ({:.3},{:.3}) ⇒ 快眼开跟(半 {} px)", pu, pv, half);
+                                    截到 = true;
+                                }
+                            }
+                            if !截到 {
+                                if let Some((j, js)) = j_use {
+                                    if let Ok(((dx0, dy0), _)) = probe::image_to_plane_damped(&j, &js, d) {
+                                        let (dx, dy) = (dx0 * p.伺服号[0], dy0 * p.伺服号[1]);
+                                        println!("[服]   看定:差 {:.3} 线 {:.3} ⇒ 盲跳 ({:+.3},{:+.3})", 差px, 线, dx, dy);
+                                        p.走到 = Some([here[0] + dx, here[1] + dy, here[2]]);
+                                        p.近答.clear(); p.预测爪 = None; p.预测龄 = 0; p.对子.clear();
+                                    }
                                 }
                             }
                         }
@@ -2830,7 +2937,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                                     计划 = Some(抓况 {
                                         指尖, q, 相机: cam, 段: 0, 卡: 0, 合等: 0,
                                         物像素: (u, v), 物跨: look.span_frac, 对准帧: Vec::new(), 对准次: 0, 对准挪: [0.0, 0.0],
-                                        上位: None, 连塌: 0, 抬高, 对准锚: [0.0; 3], 下探锚: [0.0; 2], 对准等: 0, 上爪: None, 上期望: (0.0, 0.0), 伺服号: [1.0, 1.0], 翻候: [0, 0], 钉xy: [0.0, 0.0], 伺服上位: None, 对Δw: [0.0, 0.0, 0.0], 对子: Vec::new(), 近答: Vec::new(), 走到: None, 上fix生: None, 步率: [1.0, 1.0], 预测爪: None, 预测龄: 0, 上降z: f64::MAX, 对准末差: f64::MAX, 交替次: 0, 段起z: f64::MAX, 段拍: 0, 伺服目标: [f64::NAN; 3], 收敛计: 0, 上爪读: Vec::new(),
+                                        上位: None, 连塌: 0, 抬高, 对准锚: [0.0; 3], 下探锚: [0.0; 2], 对准等: 0, 上爪: None, 上期望: (0.0, 0.0), 伺服号: [1.0, 1.0], 翻候: [0, 0], 钉xy: [0.0, 0.0], 伺服上位: None, 对Δw: [0.0, 0.0, 0.0], 对子: Vec::new(), 近答: Vec::new(), 走到: None, 模板: Vec::new(), 模板半: 0, 验拍: 0, 上fix生: None, 步率: [1.0, 1.0], 预测爪: None, 预测龄: 0, 上降z: f64::MAX, 对准末差: f64::MAX, 交替次: 0, 段起z: f64::MAX, 段拍: 0, 伺服目标: [f64::NAN; 3], 收敛计: 0, 上爪读: Vec::new(),
                                     });
                                     出 = 回声.clone();
                                 }
