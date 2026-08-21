@@ -2344,19 +2344,39 @@ fn 服务<S: std::io::Read + std::io::Write>(
                             if p.对子.len() >= 4 {
                                 let s = (0.03 * 可达带[1]).max(探幅);
                                 let lam = s * s;
-                                let (mut g00, mut g01, mut g11) = (lam, 0.0, lam);
-                                // M = [[j0,j2],[j1,j3]]:du = M行0·Δw,dv = M行1·Δw
-                                let (mut b00, mut b01, mut b10, mut b11) =
-                                    (lam * jl[0], lam * jl[2], lam * jl[1], lam * jl[3]);
-                                for (w, px) in &p.对子 {
-                                    g00 += w[0] * w[0]; g01 += w[0] * w[1]; g11 += w[1] * w[1];
-                                    b00 += px.0 * w[0]; b01 += px.0 * w[1];
-                                    b10 += px.1 * w[0]; b11 += px.1 * w[1];
-                                }
-                                let det = g00 * g11 - g01 * g01; // lam>0 ⇒ 恒正
-                                let (i00, i01, i11) = (g11 / det, -g01 / det, g00 / det);
-                                ([b00 * i00 + b01 * i01, b10 * i00 + b11 * i01,
-                                  b00 * i01 + b01 * i11, b10 * i01 + b11 * i11], js)
+                                // 拟一把:岭回归拉向账本(对子集合可指定跳过哪些)。
+                                let 拟 = |跳: &[bool]| -> [f64; 4] {
+                                    let (mut g00, mut g01, mut g11) = (lam, 0.0, lam);
+                                    let (mut b00, mut b01, mut b10, mut b11) =
+                                        (lam * jl[0], lam * jl[2], lam * jl[1], lam * jl[3]);
+                                    for (i, (w, px)) in p.对子.iter().enumerate() {
+                                        if 跳.get(i).copied().unwrap_or(false) { continue; }
+                                        g00 += w[0] * w[0]; g01 += w[0] * w[1]; g11 += w[1] * w[1];
+                                        b00 += px.0 * w[0]; b01 += px.0 * w[1];
+                                        b10 += px.1 * w[0]; b11 += px.1 * w[1];
+                                    }
+                                    let det = g00 * g11 - g01 * g01; // lam>0 ⇒ 恒正
+                                    let (i00, i01, i11) = (g11 / det, -g01 / det, g00 / det);
+                                    [b00 * i00 + b01 * i01, b10 * i00 + b11 * i01,
+                                     b00 * i01 + b01 * i11, b10 * i01 + b11 * i11]
+                                };
+                                // 剔离群(N9 实锤:作废重捕获后 VLM 偶指臂身,一个幻影对子
+                                // 把当地尺转歪 ⇒ 逼近→丢失循环)。SPANX14 同配方:按残差
+                                // 3×中位剔一轮再拟 —— 倍数是仓里已验的协议数,零新常数。
+                                let m0 = 拟(&[]);
+                                let mut r: Vec<f64> = p.对子.iter().map(|(w, px)| {
+                                    let (eu, ev) = (px.0 - m0[0] * w[0] - m0[2] * w[1],
+                                                    px.1 - m0[1] * w[0] - m0[3] * w[1]);
+                                    (eu * eu + ev * ev).sqrt()
+                                }).collect();
+                                let mut rs = r.clone();
+                                rs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
+                                let med = rs[rs.len() / 2];
+                                let m1 = if med > 0.0 {
+                                    let 跳: Vec<bool> = r.drain(..).map(|x| x > 3.0 * med).collect();
+                                    if 跳.iter().any(|&b| b) { 拟(&跳) } else { m0 }
+                                } else { m0 };
+                                (m1, js)
                             } else {
                                 (jl, js)
                             }
