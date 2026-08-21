@@ -2773,17 +2773,33 @@ fn 服务<S: std::io::Read + std::io::Write>(
                                                     // 就分不开";而【臂冻住只动钳口】的构造保证:任何双响块都是
                                                     // 爪。有对用对的中点(更准),没对用最大双响块的形心。
                                                     if let Some(c) = r.cands.get(0) {
+                                                        // 🔴 指尖端锚(N45 定案:配对=0 时旧锚=双响形心,在指身中段 ——
+                                                        // 收敛把形心怼上物心,指尖越过物体,合爪咬边挤出;空合同签名
+                                                        // N35×3 + N40二集 + N45)。改:锚取包围盒沿 jz 图像方向(下降=
+                                                        // 朝指尖;方向 image_jacobian 探针直接量)那条边,主轴取端、
+                                                        // 侧轴留形心平均噪声。配对≥1 时对中点已是指尖级,不动。
+                                                        let (mut au, mut av) = (c.u, c.v);
+                                                        let jn = (jz[0] * jz[0] + jz[1] * jz[1]).sqrt();
+                                                        if r.pairs == 0 && jn > 1e-9 {
+                                                            let (du_, dv_) = (jz[0] / jn, jz[1] / jn);
+                                                            if dv_.abs() >= du_.abs() {
+                                                                av = if dv_ > 0.0 { c.ext[3] } else { c.ext[1] };
+                                                            } else {
+                                                                au = if du_ > 0.0 { c.ext[2] } else { c.ext[0] };
+                                                            }
+                                                            println!("[服]   指尖端锚:形心 ({:.3},{:.3}) → 端 ({:.3},{:.3})", c.u, c.v, au, av);
+                                                        }
                                                         let half = ((img.0 as f64) * 0.03) as usize;
-                                                        if let Some(tp) = 截块(img.0, img.1, &img.2, c.u, c.v, half) {
+                                                        if let Some(tp) = 截块(img.0, img.1, &img.2, au, av, half) {
                                                             p.模板 = tp; p.模板半 = half; p.验拍 = 0;
-                                                            p.预测爪 = Some((c.u, c.v)); p.预测龄 = 0;
-                                                            上帧爪 = Some((c.u, c.v));
-                                                            p.上fix生 = Some((c.u, c.v)); p.对Δw = [0.0, 0.0, 0.0];
+                                                            p.预测爪 = Some((au, av)); p.预测龄 = 0;
+                                                            上帧爪 = Some((au, av));
+                                                            p.上fix生 = Some((au, av)); p.对Δw = [0.0, 0.0, 0.0];
                                                             // 🔴 重锚 = 重开一门课:上一段跟错/漂移攒的对子与翻号是毒
                                                             // (N33 实测:重锚不清尺 ⇒ 新锚照旧毒尺继续反向漂)。
                                                             p.对子.clear(); p.伺服号 = [1.0, 1.0]; p.翻候 = [0, 0]; p.命累 = 0.0; p.应累 = 0.0;
                                                             锚好 = true;
-                                                            println!("[服]   晃爪认手:爪 ({:.3},{:.3}) ⇒ 快眼开跟(半 {} px)", c.u, c.v, half);
+                                                            println!("[服]   晃爪认手:爪 ({:.3},{:.3}) ⇒ 快眼开跟(半 {} px)", au, av, half);
                                                         }
                                                     }
                                                 }

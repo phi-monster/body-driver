@@ -1878,7 +1878,7 @@ pub unsafe extern "C" fn bl_probe_hand_pixel(
         return Status::Einval;
     }
     let mut cands = [hand::Candidate { u: 0.0, v: 0.0, gain: 0.0, rigidity: 0.0, pixels: 0,
-                                       spread: 0.0 }; 64];
+                                       spread: 0.0, ext: [0.0; 4] }; 64];
     for (i, c) in cands.iter_mut().enumerate().take(n) {
         // SAFETY: the caller promises n readable elements in each array.
         unsafe {
@@ -1889,6 +1889,9 @@ pub unsafe extern "C" fn bl_probe_hand_pixel(
                 rigidity: *rigidity.add(i),
                 pixels: *pixels.add(i),
                 spread: *spread.add(i),
+                // ABI 侧没有包围盒通道:退化为形心点(ext 收缩到 [u,v,u,v]),
+                // 指尖端锚在这条路上自然退回旧行为。
+                ext: [*u.add(i), *v.add(i), *u.add(i), *v.add(i)],
             };
         }
     }

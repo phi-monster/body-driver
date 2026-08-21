@@ -312,6 +312,7 @@ pub fn candidates(
             // are in it. `hand.rs` records what happens when this field is invented — a draft that
             // derived it from the candidate count reported a third of the frame.
             spread: (0.5 * (vxx + vyy)).sqrt() / fw,
+            ext: [m.xmin / fw, m.ymin / fh, m.xmax / fw, m.ymax / fh],
         };
         if raw.len() >= MAX_REGIONS {
             return Err(Bad::TooManyRegions);
@@ -398,6 +399,8 @@ fn fold_opposed(raw: Vec<(Candidate, f64, f64)>) -> (Vec<Candidate>, u32, (f64, 
                     // 1/sqrt(2) if their errors are independent, which is not established. So the
                     // worse of the two is carried, and no improvement is claimed.
                     spread: ci.spread.max(cj.spread),
+                    ext: [ci.ext[0].min(cj.ext[0]), ci.ext[1].min(cj.ext[1]),
+                          ci.ext[2].max(cj.ext[2]), ci.ext[3].max(cj.ext[3])],
                 });
             }
         }
@@ -438,10 +441,20 @@ struct Moments {
     sxx: f64,
     sxy: f64,
     syy: f64,
+    xmin: f64,
+    xmax: f64,
+    ymin: f64,
+    ymax: f64,
 }
 
 impl Moments {
     fn add(&mut self, x: f64, y: f64) {
+        if self.cnt == 0 {
+            self.xmin = x; self.xmax = x; self.ymin = y; self.ymax = y;
+        } else {
+            if x < self.xmin { self.xmin = x } if x > self.xmax { self.xmax = x }
+            if y < self.ymin { self.ymin = y } if y > self.ymax { self.ymax = y }
+        }
         self.cnt += 1;
         self.sx += x;
         self.sy += y;
@@ -571,7 +584,7 @@ pub mod heapless {
                 gain: 0.0,
                 rigidity: 0.0,
                 pixels: 0,
-                spread: 0.0,
+                spread: 0.0, ext: [0.0; 4],
             }; super::MAX_REGIONS];
             for i in 0..self.len {
                 if let Some(c) = self.buf[i] {
@@ -808,7 +821,7 @@ mod tests {
     /// confident the reader is about it.
     #[test]
     fn a_region_that_disagrees_with_the_measured_jacobian_is_not_believed() {
-        let c = Candidate { u: 0.5, v: 0.5, gain: 4.0, rigidity: 0.9, pixels: 200, spread: 0.01 };
+        let c = Candidate { u: 0.5, v: 0.5, gain: 4.0, rigidity: 0.9, pixels: 200, spread: 0.01, ext: [0.5; 4] };
         assert!(agrees_with_jacobian(&c, 4.10, 0.27, 3.0), "within 3 sigma is believable");
         assert!(!agrees_with_jacobian(&c, 9.00, 0.27, 3.0), "18 sigma out is a refusal");
         assert!(!agrees_with_jacobian(&c, 4.10, 0.0, 3.0), "a jacobian with no sigma adjudicates nothing");

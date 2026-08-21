@@ -861,6 +861,7 @@ use crate::derive;
             rigidity: 0.9,
             pixels: 500,
             spread: 0.004,
+            ext: [0.0; 4],
         };
         // gain ratio 1.11 -- exactly the fingertip/elbow depth ratio that fooled the old selector
         let r = t.observe(&[c(0.3, 1.0), c(0.7, 0.9)]);
@@ -881,6 +882,7 @@ use crate::derive;
             rigidity: 0.9,
             pixels: 500,
             spread: 0.004,
+            ext: [0.0; 4],
         };
         let r = t.observe(&[c(0.3, 1.0), c(0.7, 0.2)]);
         assert_eq!(r, Ok((0.3, 0.5)));
@@ -1522,9 +1524,9 @@ mod end_to_end {
         // ---- 3. it finds its own hand, and keeps finding it ----------------------------------
         let mut tracker = HandTracker::new(default_hand_config());
         let cands = [
-            Candidate { u: 0.62, v: 0.44, gain: 1.0, rigidity: 0.95, pixels: 900, spread: 0.003 },
+            Candidate { u: 0.62, v: 0.44, gain: 1.0, rigidity: 0.95, pixels: 900, spread: 0.003, ext: [0.62, 0.44, 0.62, 0.44] },
             // a competitor that moves too, but clearly weaker -- separable, so it may be resolved
-            Candidate { u: 0.31, v: 0.70, gain: 0.15, rigidity: 0.9, pixels: 500, spread: 0.004 },
+            Candidate { u: 0.31, v: 0.70, gain: 0.15, rigidity: 0.9, pixels: 500, spread: 0.004, ext: [0.31, 0.70, 0.31, 0.70] },
         ];
         // Measured on the SAME clock the executor will use.  A hand point is valid for about as
         // long as the hand has not moved -- 50 ms, one control period or two -- so a test that

@@ -55,6 +55,12 @@ pub struct Candidate {
     /// test caught it. A number invented to fill a field is exactly the hand-filled constant this
     /// whole layer exists to abolish; the caller measured the blob, so the caller reports how well.
     pub spread: f64,
+    /// 包围盒 [umin,vmin,umax,vmax],归一化画面单位;配对合并时取并集。
+    ///
+    /// 🔴 加它的理由(N45 定案):配对=0 时锚只有形心可用,而形心在指身中段 ——
+    /// 收敛把形心怼上物心,指尖越过物体,合爪咬边挤出。指尖端 = 包围盒沿
+    /// 下降图像方向那条边;方向由 image_jacobian 探针量,端点由这里量。
+    pub ext: [f64; 4],
 }
 
 /// Tunables. Every one is an **observability** threshold — "can this be read off this image at
@@ -307,6 +313,7 @@ mod heapless {
                     rigidity: 0.0,
                     pixels: 0,
                     spread: f64::INFINITY,
+                    ext: [0.0; 4],
                 }; CAP],
                 len: 0,
             }
