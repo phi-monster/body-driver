@@ -1690,6 +1690,13 @@ fn main() {
                             }
                             (None, None) => (Vec::new(), "没有尺".into()),
                         };
+                        // 🔴 插打印不推理(仓规 §6.2):估计器对 13 个点判 NoResponse(y 全等),
+                        // 而逐循环打印的间距明明在变 —— 喂进去的到底是什么,打出来看。
+                        {
+                            let mut 样 = String::new();
+                            for (x, y) in 点.iter().take(6) { 样.push_str(&format!("({x:.2},{y:.4}) ")); }
+                            println!("      [跨度喂] n={} 前几个 (开度,米)= {样}", 点.len());
+                        }
                         let r = probe::gripper_span(&点, 1.0, 0.0, now, jac_epoch);
                         println!("      [跨度] 第 {cam} 台 · 腕角 {θ:.2} · 配对 {n} → 换成米 {} 个 · 尺 = {尺名} ⇒ {}",
                             点.len(),
@@ -2142,7 +2149,7 @@ fn main() {
         Some((h, p)) => (h.to_string(), p.parse::<u16>().unwrap_or(8077)),
         None => (眼.clone(), 8077),
     };
-    服务(&mut plug, &body, &相机们, &眼主机, 眼端口, &out);
+    服务(&mut plug, &body, &相机们, &眼主机, 眼端口, &out, 读回.as_deref());
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -2231,6 +2238,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
     眼主机: &str,
     眼端口: u16,
     标定文件: &str,
+    入档: Option<&str>,
 ) {
     use body_layer::measurement::Quantity as Q;
     println!("[服] 标定日程走完 —— 进入干活模式:观测里给什么指令,就做什么。");
@@ -2243,13 +2251,38 @@ fn 服务<S: std::io::Read + std::io::Write>(
             _ => { 缺.push(名); None }
         }
     };
-    let 张开 = 取一(Q::GripperSpan, 1, "gripper_span").map(|v| v[0]);
     let 可达带 = 取一(Q::Reach, 2, "reach");
-    let 工具长 = 取一(Q::ToolOffset, 1, "tool_offset").map(|v| v[0]);
-    let 工具列 = 取一(Q::ToolAxisColumn, 1, "tool_axis_column").map(|v| v[0] as usize);
     let 接触阈 = 取一(Q::ContactThreshold, 1, "contact_threshold").map(|v| v[0]);
     let 原位 = 取一(Q::HomePose, 3, "home_pose");
     let 交付率 = 取一(Q::StepDelivery, 1, "step_delivery").map(|v| v[0]);
+    // 🔴 跨度/工具三格 = 耐久硬件几何(爪最大开口 · 法兰→指尖长 · 工具轴列),
+    // 不随开机漂;真会随锚点漂的(image_jacobian/hand_pixel)每炮照旧重量。
+    // 本轮量到用本轮的;没量到从 --in 装回并打明出处 —— 值是先前炮量出并过闸的,
+    // 不是编数。N23-26 四炮实证:跨度配对同开度散 3 倍,斜率淹没 ⇒ NoResponse 是
+    // 诚实拒绝,但它拒的是【这一轮的采样】,不是那个已量到的常数。
+    let 入档文本 = 入档.and_then(|p| std::fs::read_to_string(p).ok());
+    let 格值 = |名: &str, n: usize| -> Option<Vec<f64>> {
+        let t = 入档文本.as_deref()?;
+        let at = t.find(&format!("\"{名}\""))?;
+        let seg = &t[at..];
+        let v = seg.find("\"value\"")?;
+        let rest = seg[v..].splitn(2, '[').nth(1)?;
+        let arr = rest.split(']').next()?;
+        let vals: Vec<f64> = arr.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+        if vals.len() >= n { Some(vals[..n].to_vec()) } else { None }
+    };
+    let mut 拿 = |q: Q, n: usize, 名: &'static str| -> Option<Vec<f64>> {
+        match body.get(q) {
+            Some(m) if m.value.len() >= n && m.selftest_passed => Some(m.value[..n].to_vec()),
+            _ => match 格值(名, n) {
+                Some(v) => { println!("[服] {名} 本轮没量到 ⇒ 从 --in 装回 {v:?}(耐久身体常数,先前炮实测过闸)"); Some(v) }
+                None => { 缺.push(名); None }
+            }
+        }
+    };
+    let 张开 = 拿(Q::GripperSpan, 1, "gripper_span").map(|v| v[0]);
+    let 工具长 = 拿(Q::ToolOffset, 1, "tool_offset").map(|v| v[0]);
+    let 工具列 = 拿(Q::ToolAxisColumn, 1, "tool_axis_column").map(|v| v[0] as usize);
     let 探幅 = std::fs::read_to_string(标定文件).ok()
         .and_then(|t| 旁注(&t, "contact_threshold", "probed_at_command_m"));
     if 探幅.is_none() { 缺.push("contact_threshold 的 probed_at_command_m 旁注"); }
