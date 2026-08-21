@@ -2442,7 +2442,12 @@ fn 服务<S: std::io::Read + std::io::Write>(
                                     body.get(Quantity::HandPixel).filter(|m| m.dim >= 2)
                                         .map(|m| (m.value[0], m.value[1])).unwrap_or((0.5, 0.5))
                                 });
-                                let (mut cw, mut ch) = if p.预测爪.is_some() { (w2 / 2, h2 / 2) } else { (w2 * 2 / 3, h2 * 2 / 3) };
+                                // 首捕获隔次交替全幅(N14 实锤:旧爪锚 + 避物切割可把真爪
+                                // 正好切出窗外 ⇒ 350+ 拍零爪源。奇偶交替 = 两个假设轮流
+                                // 覆盖:锚窗(爪没走远)/ 全幅−物侧(爪在意外处),零计数器)。
+                                let 全幅 = p.预测爪.is_none() && (p.段拍 / 8) % 2 == 1;
+                                let (mut cw, mut ch) = if 全幅 { (w2, h2) }
+                                    else if p.预测爪.is_some() { (w2 / 2, h2 / 2) } else { (w2 * 2 / 3, h2 * 2 / 3) };
                                 let mut x0 = (((hp.0 * w2 as f64) as usize).saturating_sub(cw / 2)).min(w2 - cw);
                                 let mut y0 = (((hp.1 * h2 as f64) as usize).saturating_sub(ch / 2)).min(h2 - ch);
                                 // 窗里必须没有【问过的物】(N2 落图定案 2026-08-21:首捕获窗
