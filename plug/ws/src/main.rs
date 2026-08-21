@@ -2225,6 +2225,9 @@ fn 服务<S: std::io::Read + std::io::Write>(
         翻候: [u8; 2],  // 方向自证的连续矛盾计数(两次才翻,挡 VLM 单答噪声)
         钉xy: [f64; 2], // 钉 z 时的手 xy —— 挪出一个步z 就解钉重试下降
         伺服上位: Option<[f64; 3]>, // 上一拍手位(proprio)—— 推算用实到位移
+        对Δw: [f64; 2],            // 自上次生实测以来手真挪的 xy(在线局部手眼原料)
+        对子: Vec<([f64; 2], (f64, f64))>, // (真挪 xy, 爪像素真挪)—— 尺跟人走
+        上fix生: Option<(f64, f64)>, // 上一次生实测(未融合),配对用
         步率: [f64; 2],
         预测爪: Option<(f64, f64)>,
         预测龄: u32,
@@ -2287,20 +2290,10 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 }
                 2 => (法兰(p.指尖, 0.0), 合, "合爪"),
                 8 => {
-                    // 弃计划先【回原位】,到家才清(§1.8:动作必须以已知位形收尾。
-                    // N7 实锤:不回家,下一计划从上一次搁浅的位形起步 —— 手被留在
-                    // (0.82,·,1.41) 的鬼地方,伺服一出账本 J 量过的盒子方向全乱,
-                    // 一集内越攒越歪)。步长封顶步z(档案:一步跨 0.68m = 一步都不动)。
-                    let d = [原位[0] - here[0], 原位[1] - here[1], 原位[2] - here[2]];
-                    let l = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
-                    let 步z = (0.03 * 可达带[1]).max(探幅);
-                    if l < 2.0 * 步z || p.卡 >= 30 {
-                        p.段 = 10; // 到家(或卡死兜底)⇒ 外层清计划换点
-                        (here, 开, "到家换点")
-                    } else {
-                        let k = 步z / l;
-                        ([here[0] + d[0] * k, here[1] + d[1] * k, here[2] + d[2] * k], 开, "回家再换点")
-                    }
+                    // 弃计划:【不回原位】(owner 死命令 2026-08-21:真机边移动边工作,
+                    // 回原位迁就账本尺 = 拐棍)。手臂就地重来;尺跟人走靠在线局部手眼。
+                    p.段 = 10;
+                    (here, 开, "换点")
                 }
                 _ => {
                     // 抬:目标高度 = 指令要的位移 × 1.5(无量纲余量:交付有损耗,评分只看
@@ -2334,6 +2327,40 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     // ── V5 伺服接近:每拍一步。爪像素 = 低频问眼校准 + 拍间航位推算。
                     p.段拍 += 1;
                     if p.对准等 > 0 { p.对准等 -= 1; }
+                    // 每拍:实到位移(proprio 回声)入账 —— 推算 + 在线局部手眼共用。
+                    let 本拍挪 = p.伺服上位.map(|u| (here[0] - u[0], here[1] - u[1]));
+                    p.伺服上位 = Some(here);
+                    if let Some((ex, ey)) = 本拍挪 { p.对Δw[0] += ex; p.对Δw[1] += ey; }
+                    // ── 在线局部手眼(owner 死命令:不许回原位迁就账本 —— 尺跟人走)──
+                    // 对子 = (两次生实测之间手真挪的 xy, 爪像素真挪),全是白拿的实测。
+                    // 岭回归拉向账本 J:先验重 = 一步²(量出的步长),数据一多就接管;
+                    // 病态时自动退向账本。档案移动线同型(在线量方向,18/18 含接线反接)。
+                    let j_use: Option<([f64; 4], [f64; 4])> = body
+                        .get(Quantity::ImageJacobian)
+                        .filter(|m| m.dim >= 4)
+                        .map(|m| {
+                            let jl = [m.value[0], m.value[1], m.value[2], m.value[3]];
+                            let js = [m.uncertainty[0], m.uncertainty[1], m.uncertainty[2], m.uncertainty[3]];
+                            if p.对子.len() >= 4 {
+                                let s = (0.03 * 可达带[1]).max(探幅);
+                                let lam = s * s;
+                                let (mut g00, mut g01, mut g11) = (lam, 0.0, lam);
+                                // M = [[j0,j2],[j1,j3]]:du = M行0·Δw,dv = M行1·Δw
+                                let (mut b00, mut b01, mut b10, mut b11) =
+                                    (lam * jl[0], lam * jl[2], lam * jl[1], lam * jl[3]);
+                                for (w, px) in &p.对子 {
+                                    g00 += w[0] * w[0]; g01 += w[0] * w[1]; g11 += w[1] * w[1];
+                                    b00 += px.0 * w[0]; b01 += px.0 * w[1];
+                                    b10 += px.1 * w[0]; b11 += px.1 * w[1];
+                                }
+                                let det = g00 * g11 - g01 * g01; // lam>0 ⇒ 恒正
+                                let (i00, i01, i11) = (g11 / det, -g01 / det, g00 / det);
+                                ([b00 * i00 + b01 * i01, b10 * i00 + b11 * i01,
+                                  b00 * i01 + b01 * i11, b10 * i01 + b11 * i11], js)
+                            } else {
+                                (jl, js)
+                            }
+                        });
                     // 深度工具:候选凸起 + 中心深度(判影 + 物同一性,全量出)。
                     let 凸起 = |uu: f64, vv: f64| -> Option<(f64, f64)> {
                         let 路 = plug.lay.cams.get(p.相机)?;
@@ -2478,6 +2505,16 @@ fn 服务<S: std::io::Read + std::io::Write>(
                                 p.上爪 = Some(融);
                                 p.预测爪 = Some(融);
                                 p.预测龄 = 0;
+                                // 对子入账:两次生实测之间,手真挪 vs 爪像素真挪(在线局部手眼原料)。
+                                if let Some((lu, lv)) = p.上fix生 {
+                                    let w = p.对Δw;
+                                    if (w[0] * w[0] + w[1] * w[1]).sqrt() > 1e-4 {
+                                        p.对子.push((w, (look.u - lu, look.v - lv)));
+                                        if p.对子.len() > 32 { p.对子.remove(0); }
+                                    }
+                                }
+                                p.上fix生 = Some((look.u, look.v));
+                                p.对Δw = [0.0, 0.0];
                                 let d实 = ((p.物像素.0 - 融.0).powi(2) + (p.物像素.1 - 融.1).powi(2)).sqrt();
                                 println!("[服]   校准:爪 ({:.3},{:.3}) 差 {:.4} · 收敛计 {}", 融.0, 融.1, d实, p.收敛计);
                             } else if 拍 % 25 == 1 {
@@ -2491,14 +2528,9 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     // (N5 实锤:J 尺度偏小 ⇒ 限幅比 k=1 ⇒ 预测一拍瞬移到物上,
                     //  爪估差 0.0023 假收敛、最新实测差 0.1777、手臂高空怠速 ——
                     //  08-15 小脑那条"累加命令会漂,要用实到"的像素版退化)。
-                    if let Some((pu0, pv0)) = p.预测爪 {
-                        if let (Some(u), Some(m)) = (p.伺服上位, body.get(Quantity::ImageJacobian).filter(|m| m.dim >= 4)) {
-                            let (ex, ey) = (here[0] - u[0], here[1] - u[1]);
-                            p.预测爪 = Some((pu0 + m.value[0] * ex + m.value[2] * ey,
-                                             pv0 + m.value[1] * ex + m.value[3] * ey));
-                        }
+                    if let (Some((pu0, pv0)), Some((ex, ey)), Some((j, _))) = (p.预测爪, 本拍挪, j_use) {
+                        p.预测爪 = Some((pu0 + j[0] * ex + j[2] * ey, pv0 + j[1] * ex + j[3] * ey));
                     }
-                    p.伺服上位 = Some(here);
                     if let Some((pu, pv)) = p.预测爪 {
                         let d = (p.物像素.0 - pu, p.物像素.1 - pv);
                         let 差px = (d.0 * d.0 + d.1 * d.1).sqrt();
@@ -2508,9 +2540,9 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         p.上期望 = d;
                         let mut 挪xy = [0.0f64, 0.0];
                         if 差px > 0.015 {
-                            if let Some(m) = body.get(Quantity::ImageJacobian).filter(|m| m.dim >= 4) {
-                                let j = [m.value[0], m.value[1], m.value[2], m.value[3]];
-                                let js = [m.uncertainty[0], m.uncertainty[1], m.uncertainty[2], m.uncertainty[3]];
+                            // 走步用【在线局部手眼】(对子够 4 个就接管;不够退账本)——
+                            // 尺跟人走,手臂在哪儿方向就在哪儿量。
+                            if let Some((j, js)) = j_use {
                                 if let Ok(((dx0, dy0), _)) = probe::image_to_plane_damped(&j, &js, d) {
                                     let (dx, dy) = (dx0 * p.伺服号[0] * p.步率[0], dy0 * p.伺服号[1] * p.步率[1]);
                                     let l = (dx * dx + dy * dy).sqrt();
@@ -2709,7 +2741,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                                     计划 = Some(抓况 {
                                         指尖, q, 相机: cam, 段: 0, 卡: 0, 合等: 0,
                                         物像素: (u, v), 物跨: look.span_frac, 对准帧: Vec::new(), 对准次: 0, 对准挪: [0.0, 0.0],
-                                        上位: None, 连塌: 0, 抬高, 对准锚: [0.0; 3], 下探锚: [0.0; 2], 对准等: 0, 上爪: None, 上期望: (0.0, 0.0), 伺服号: [1.0, 1.0], 翻候: [0, 0], 钉xy: [0.0, 0.0], 伺服上位: None, 步率: [1.0, 1.0], 预测爪: None, 预测龄: 0, 上降z: f64::MAX, 对准末差: f64::MAX, 交替次: 0, 段起z: f64::MAX, 段拍: 0, 伺服目标: [f64::NAN; 3], 收敛计: 0, 上爪读: Vec::new(),
+                                        上位: None, 连塌: 0, 抬高, 对准锚: [0.0; 3], 下探锚: [0.0; 2], 对准等: 0, 上爪: None, 上期望: (0.0, 0.0), 伺服号: [1.0, 1.0], 翻候: [0, 0], 钉xy: [0.0, 0.0], 伺服上位: None, 对Δw: [0.0, 0.0], 对子: Vec::new(), 上fix生: None, 步率: [1.0, 1.0], 预测爪: None, 预测龄: 0, 上降z: f64::MAX, 对准末差: f64::MAX, 交替次: 0, 段起z: f64::MAX, 段拍: 0, 伺服目标: [f64::NAN; 3], 收敛计: 0, 上爪读: Vec::new(),
                                     });
                                     出 = 回声.clone();
                                 }
