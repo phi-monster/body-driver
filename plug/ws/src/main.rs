@@ -2396,7 +2396,11 @@ fn 服务<S: std::io::Read + std::io::Write>(
                                     let 跳: Vec<bool> = r.drain(..).map(|x| x > 3.0 * med).collect();
                                     if 跳.iter().any(|&b| b) { 拟(&跳) } else { m0 }
                                 } else { m0 };
-                                (m1, js)
+                                // 混合尺(N18 仪表定案:v 行喂不出激励,拟出的行列式在两次
+                                // 拟合间翻号 −0.24→+0.39 ⇒ 解步逐次反向,差钉 0.35 打摆)。
+                                // u 行在线拟(每炮都学得好);v 行冻结用账本,符号由双拍翻号
+                                // 纠(翻号判据现在吃中位融合估计,不再被单答噪声打摆)。
+                                ([m1[0], jl[1], m1[2], jl[3]], js)
                             } else {
                                 (jl, js)
                             }
@@ -2518,7 +2522,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                             };
                             if 过 {
                                 // 方向自证(上轮期望 vs 实际挪,分轴,零常数)。
-                                if p.对子.len() < 4 { if let Some((pu, pv)) = p.上爪 {
+                                if let Some((pu, pv)) = p.上爪 { {
                                     // 翻号只在拟合尺【未激活】时用(N10 实锤:拟合尺自带正负号,
                                     // 伺服号再乘一次 = 两套方向机构打架,可把对的方向翻错)。
                                     // 翻号要【连续两次】矛盾才翻(N5 实锤:VLM 单答抖 ±0.02-0.05
@@ -2526,6 +2530,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
                                     // 噪声独立 ⇒ 连续两次同向矛盾概率平方级掉;真反向则两次必同向)。
                                     let 实 = (look.u - pu, look.v - pv);
                                     for a in 0..2 {
+                                        // 混合尺:u 行(a=0)拟合活时号归拟合管,不翻;v 行照纠。
+                                        if a == 0 && p.对子.len() >= 4 { continue; }
                                         let (s, e) = if a == 0 { (实.0, p.上期望.0) } else { (实.1, p.上期望.1) };
                                         if s.abs() > 0.005 && e != 0.0 {
                                             if s * e < 0.0 {
@@ -2616,7 +2622,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
                             if let Some((j, js)) = j_use {
                                 if let Ok(((dx0, dy0), _)) = probe::image_to_plane_damped(&j, &js, d) {
                                     // 拟合尺激活后自带正负号 ⇒ 伺服号退场(N10:两套方向机构不许打架)。
-                                    let (sx, sy) = if p.对子.len() >= 4 { (1.0, 1.0) } else { (p.伺服号[0], p.伺服号[1]) };
+                                    // 混合尺:u 行拟合自带号 ⇒ sx=1;v 行是账本 ⇒ 伺服号照纠。
+                                    let (sx, sy) = if p.对子.len() >= 4 { (1.0, p.伺服号[1]) } else { (p.伺服号[0], p.伺服号[1]) };
                                     let (dx, dy) = (dx0 * sx * p.步率[0], dy0 * sy * p.步率[1]);
                                     // 仪表(仓规:驱动必须打印每条判断;N12 走飞时拟合尺全程无读数可查)。
                                     if 拍 % 25 == 1 {
