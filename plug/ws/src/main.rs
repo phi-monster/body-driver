@@ -2655,8 +2655,27 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         // 只认【校准拍】的达标(预测龄==0 = 本拍刚被 VLM 实测校准;MW 实锤:
                         // 推算拍把预测爪朝物前推,差自动缩到 0.0004"收敛"——推算自我实现,
                         // 三连假收敛空爪)。连续两次独立实测 <0.015 才是真对齐。
-                        if p.连塌 > 0 && 差px < 0.015 && p.预测龄 == 0 { p.收敛计 += 1; }
-                        else if 差px >= 0.03 { p.收敛计 = 0; } // 滞回:0.015-0.03 中间带不清(VLM 噪声偶发跳变不该抹掉已攒的确认)
+                        // 收敛线 = max(合爪窗, 仪器自身散布)(驱动的容差铁律"不许要求比
+                        // 自身重复性紧"用在这:N15/N16 实锤 —— 爪贴物后与物黏成一团,
+                        // VLM 只能证到 ±0.05-0.09,0.015 在末段是永远够不着的门,而多等的
+                        // 每一答都可能框到手腕被劫持。爪窗 80mm ≫ 方块 35mm,±3cm 合爪
+                        // 兜得住;兜不住由空爪自检+换点接盘 —— 档案老链"末段交给几何与
+                        // 接触"的同一形状。散布 = 近答 MAD(量出来的,零拍数)。
+                        let 线 = if p.近答.len() >= 3 {
+                            let med = |v: &mut Vec<f64>| {
+                                v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
+                                v[v.len() / 2]
+                            };
+                            let mut us: Vec<f64> = p.近答.iter().map(|a| a.0).collect();
+                            let mut vs: Vec<f64> = p.近答.iter().map(|a| a.1).collect();
+                            let (mu, mv) = (med(&mut us), med(&mut vs));
+                            let mut du: Vec<f64> = p.近答.iter().map(|a| (a.0 - mu).abs()).collect();
+                            let mut dv: Vec<f64> = p.近答.iter().map(|a| (a.1 - mv).abs()).collect();
+                            let (su, sv) = (med(&mut du), med(&mut dv));
+                            (su * su + sv * sv).sqrt().max(0.015)
+                        } else { 0.015 };
+                        if p.连塌 > 0 && 差px < 线 && p.预测龄 == 0 { p.收敛计 += 1; }
+                        else if 差px >= 2.0 * 线 { p.收敛计 = 0; } // 滞回随线走(原 0.015/0.03 的同一比例)
                         if p.收敛计 >= 2 {
                             let axc = task::列(&p.q, 工具列 % 3);
                             p.指尖 = [here[0] + axc[0] * 工具长, here[1] + axc[1] * 工具长, here[2] + axc[2] * 工具长];
