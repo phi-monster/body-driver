@@ -2378,6 +2378,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
     // 新计划云桌面偏离 > 张开 ⇒ 观测是毒的(答到了别的平面,多半是自己身子),按名拒。
     let mut 桌上z: Option<f64> = None;
     let mut 桌拒计 = 0u32;
+    // 合爪取证帧序号(空合的几何真相只有像素能判 —— §3.6)。
+    let mut 合序 = 0u32;
     // 跨计划的爪估锚(N10 实锤:不回原位后,新计划的首捕获窗死盯标定位,
     // 而爪停在上一计划的落点 —— 窗外 ⇒ 后续尝试全是空烧。爪不会瞬移,
     // 上一次实测就是最好的锚)。
@@ -3024,6 +3026,13 @@ fn 服务<S: std::io::Read + std::io::Write>(
                             let axc = task::列(&p.q, 工具列 % 3);
                             p.指尖 = [here[0] + axc[0] * 工具长, here[1] + axc[1] * 工具长, here[2] + axc[2] * 工具长];
                             println!("[服] 🟢 收敛(差 {:.4})且 z 到底 ⇒ 合爪", 差px);
+                            // 取证帧:合爪起点的指-物几何(空合第 6 次同签名,咬边/斜弹/错位只有图能分)。
+                            合序 += 1;
+                            if let (Ok(d), Some(img)) = (std::env::var("BL_DUMP"), 帧.cams.get(p.相机)) {
+                                let mut buf = format!("P5\n{} {}\n255\n", img.0, img.1).into_bytes();
+                                buf.extend_from_slice(&img.2);
+                                let _ = std::fs::write(format!("{d}/close{合序}.pgm"), buf);
+                            }
                             p.段 = 2; p.卡 = 0;
                             let n = (0.05f64.ln() / (1.0 - 交付率).max(1e-6).ln()).ceil();
                             p.合等 = (n as u32).clamp(3, 120);
@@ -3072,6 +3081,11 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     if p.合等 > 0 { p.合等 -= 1 }
                     if 有撑 && p.合等 < 100 {
                         println!("[服] 有指通道被撑住(读数停在半途)⇒ 合完,抬");
+                            if let (Ok(d), Some(img)) = (std::env::var("BL_DUMP"), 帧.cams.get(p.相机)) {
+                                let mut buf = format!("P5\n{} {}\n255\n", img.0, img.1).into_bytes();
+                                buf.extend_from_slice(&img.2);
+                                let _ = std::fs::write(format!("{d}/grip{合序}.pgm"), buf);
+                            }
                         p.段 = 3; p.卡 = 0;
                     } else if p.合等 == 0 {
                         if 全到底 { println!("[服] 全通道收到底(没撑住任何东西)⇒ 仍按流程抬,由抬后自检兜底"); }
