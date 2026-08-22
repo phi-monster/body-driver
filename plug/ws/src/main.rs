@@ -3167,13 +3167,25 @@ fn 服务<S: std::io::Read + std::io::Write>(
                                                                             println!("[服]   尺对+1(走 {:.3} m ⇒ 像素挪 ({:+.3},{:+.3}));在线对子 {}", dw, au - px0.0, av - px0.1, 对子.len());
                                                                         }
                                                                     }
-                                                                    // 方向自证:上一探命令的世界步 ⇒ 账本预期像素挪;与实测像素挪逐轴比号。
-                                                                    if let (Some((_, px0)), Some(st)) = (探锚, 上探步) {
+                                                                    // 🔴 方向自证(N103 修正口径):必须拿【实际走了多少米】比【像素实际挪了多少】。
+                                                                    // 上一版拿"我命令的那一小步"去比,而两次量爪之间手还下探+合爪+抬起回收
+                                                                    // (实测 0.247 m,命令只有 0.094 m)⇒ 苹果比橘子,判号不可信。
+                                                                    // 且改成【直接判定符号】而非来回翻转:尺真反时每探都判反,翻转会来回抖。
+                                                                    if let Some((w0, px0)) = 探锚 {
                                                                         if let Some(m) = body.get(Quantity::ImageJacobian).filter(|m| m.dim >= 4) {
-                                                                            let (eu, ev) = (m.value[0]*st[0] + m.value[1]*st[1], m.value[2]*st[0] + m.value[3]*st[1]);
+                                                                            let (dwx, dwy) = (here[0] - w0[0], here[1] - w0[1]);
+                                                                            let (eu, ev) = (m.value[0]*dwx + m.value[1]*dwy, m.value[2]*dwx + m.value[3]*dwy);
                                                                             let (du_, dv_) = (au - px0.0, av - px0.1);
-                                                                            if du_.abs() > 0.01 && eu * 探号[0] * du_ < 0.0 { 探号[0] = -探号[0]; println!("[服]   方向自证:横轴反了 ⇒ 翻号(预期 {:+.3} 实测 {:+.3})", eu * 探号[0] * -1.0, du_); }
-                                                                            if dv_.abs() > 0.01 && ev * 探号[1] * dv_ < 0.0 { 探号[1] = -探号[1]; println!("[服]   方向自证:纵轴反了 ⇒ 翻号(预期 {:+.3} 实测 {:+.3})", ev * 探号[1] * -1.0, dv_); }
+                                                                            if du_.abs() > 0.01 && eu.abs() > 0.01 {
+                                                                                let n = if eu * du_ < 0.0 { -1.0 } else { 1.0 };
+                                                                                if n != 探号[0] { println!("[服]   方向自证:横轴判 {:+.0}(账本预期 {:+.3} 实测 {:+.3})", n, eu, du_); }
+                                                                                探号[0] = n;
+                                                                            }
+                                                                            if dv_.abs() > 0.01 && ev.abs() > 0.01 {
+                                                                                let n = if ev * dv_ < 0.0 { -1.0 } else { 1.0 };
+                                                                                if n != 探号[1] { println!("[服]   方向自证:纵轴判 {:+.0}(账本预期 {:+.3} 实测 {:+.3})", n, ev, dv_); }
+                                                                                探号[1] = n;
+                                                                            }
                                                                         }
                                                                     }
                                                                     探锚 = Some((here, (au, av)));
