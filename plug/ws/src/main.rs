@@ -2626,6 +2626,15 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         ((u - p.物像素.0).powi(2) + (v - p.物像素.1).powi(2)).sqrt() < 2.0 * p.物跨.max(0.05)
                     }).unwrap_or(false);
                     if p.对准等 == 0 && p.晃态 == 0 && !p.模板.is_empty() && p.验拍 >= 40 && !离物近 {
+                        // 🔴 N51 帧+尺双证:白臂上模板会滑(爪已物理贴方块,模板滑到前臂
+                        // (0.787,0.425),伺服被假位置拖着绕圈,垃圾对子把拟合搅到符号乱翻)。
+                        // 身份到期不再问 VLM(它近场答手腕,z 底复核裂是 N34-N51 惯性死法)——
+                        // 改晃爪重锚:构造性身份,便宜(~15 拍)、不会认错。模板只准活 40 拍。
+                        println!("[服] 40 拍身份到期 ⇒ 晃爪重锚(白臂模板会滑,构造性身份代替 VLM 复核)");
+                        p.晃态 = 1; p.晃等 = 0; p.验拍 = 0;
+                    }
+                    #[allow(clippy::never_loop)]
+                    while false {
                         p.对准等 = body_layer::derive::settle_periods(&body, 1e-3).map(|n| n as u32).unwrap_or(8).max(4);
                         let 眼爪 = match plug.lay.cams.get(p.相机)
                             .and_then(|路| plug.last.as_ref().map(|o| (路.clone(), o.clone())))
