@@ -2376,6 +2376,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
     // 🔴 桌面一致性审(同一炮内支撑面不会瞬移):首个成功计划的云桌面为基准,
     // 新计划云桌面偏离 > 张开 ⇒ 观测是毒的(答到了别的平面,多半是自己身子),按名拒。
     let mut 桌上z: Option<f64> = None;
+    let mut 桌拒计 = 0u32;
     // 跨计划的爪估锚(N10 实锤:不回原位后,新计划的首捕获窗死盯标定位,
     // 而爪停在上一计划的落点 —— 窗外 ⇒ 后续尝试全是空烧。爪不会瞬移,
     // 上一次实测就是最好的锚)。
@@ -3180,12 +3181,19 @@ fn 服务<S: std::io::Read + std::io::Write>(
                                     if let Some(基) = 桌上z {
                                         if (桌面c - 基).abs() > 张开 {
                                             println!("[服] 🔴 桌面一致性拒:这计划的云桌面 {:.3} 离本炮基准 {:.3} 超一个张开 —— 答到了别的平面(多半是自己身子)⇒ 回位重看", 桌面c, 基);
+                                            // 🔴 自愈(反转陷阱:若基准本身是幻影,真计划会被连拒到死)。
+                                            // 连拒 2 次 ⇒ 承认基准可疑,清零重学。
+                                            桌拒计 += 1;
+                                            if 桌拒计 >= 2 {
+                                                println!("[服]   连拒 {} 次 ⇒ 基准可疑,清零重学", 桌拒计);
+                                                桌上z = None; 桌拒计 = 0;
+                                            }
                                             要回看 = true;
                                             出 = 回声.clone();
                                             plug.act(&出);
                                             match plug.sense() { Some(f) => { 帧 = f; continue } None => return }
                                         }
-                                    } else { 桌上z = Some(桌面c); }
+                                    } else { 桌上z = Some(桌面c); 桌拒计 = 0; }
                                     let mut 指尖 = 指尖0;
                                     if let Some(fl) = body.get(Quantity::Floor).filter(|m| m.dim >= 1).map(|m| m.value[0]) {
                                         let dz = fl - 桌面c;
