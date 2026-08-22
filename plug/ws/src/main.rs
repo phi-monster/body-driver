@@ -3182,13 +3182,17 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         // 手体则比指尖离相机近约一只钳口的量级,深度图一量穿帮。阈=张开
                         // (量出的);无深度通道拿不到就跳过,不改无深度机体的行为。)
                         if p.收敛计 >= 2 {
-                            if let (Some((_, c爪)), Some((_, c物))) = (凸起(pu, pv), 凸起(p.物像素.0, p.物像素.1)) {
+                            match (凸起(pu, pv), 凸起(p.物像素.0, p.物像素.1)) {
+                                (Some((_, c爪)), Some((_, c物))) => {
+                                println!("[服]   深度验锚:跟踪点深 {:.3} 物深 {:.3} 差 {:.3}(阈 张开 {:.3})", c爪, c物, (c爪 - c物).abs(), 张开);
                                 if (c爪 - c物).abs() > 张开 {
                                     println!("[服] 🔴 深度验锚不过:跟踪点深 {:.3} vs 物深 {:.3}(差 {:.3} > 张开 {:.3})⇒ 模板作废,晃爪重认", c爪, c物, (c爪 - c物).abs(), 张开);
                                     p.锚新 = false; p.收敛计 = 0; p.命累 = 0.0; p.应累 = 0.0;
                                     if p.底晃次 >= 2 { println!("[服]   z 底重晃预算用尽 ⇒ 弃这个计划换下手点"); p.段 = 8; }
                                     else { p.底晃次 += 1; p.晃态 = 1; p.晃等 = 0; p.预测龄 = 0; }
                                 }
+                                }
+                                _ => { println!("[服]   深度验锚:深度通道拿不到 ⇒ 跳过(闸未运行)"); }
                             }
                         }
                         if p.收敛计 >= 2 {
@@ -3202,6 +3206,19 @@ fn 服务<S: std::io::Read + std::io::Write>(
                                 let mut buf = format!("P5\n{} {}\n255\n", img.0, img.1).into_bytes();
                                 buf.extend_from_slice(&img.2);
                                 let _ = std::fs::write(format!("{d}/close{合序}.pgm"), buf);
+                                // 深度图同帧落盘(指尖双峰 vs 物峰的真实几何 —— 骑跨验证的设计粮)。
+                                if let Some(路) = plug.lay.cams.get(p.相机) {
+                                    let mut 深路 = 路.clone();
+                                    if let Some(last) = 深路.last_mut() { *last = "depth".to_string(); }
+                                    if let Some((dw, dh, dep)) = plug.last.as_ref().and_then(|o| 取(o, &深路)).and_then(|dv| wire::as_f32_grid(&dv).map(|(a,b,c)| (a,b,c.to_vec()))) {
+                                        let (mut lo, mut hi) = (f64::MAX, f64::MIN);
+                                        for &raw in &dep { let v = raw as f64; if v.is_finite() { if v < lo { lo = v; } if v > hi { hi = v; } } }
+                                        let s = if hi > lo { 255.0 / (hi - lo) } else { 0.0 };
+                                        let mut db = format!("P5\n{dw} {dh}\n255\n").into_bytes();
+                                        db.extend(dep.iter().map(|&raw| { let v = raw as f64; if v.is_finite() { ((v - lo) * s) as u8 } else { 0 } }));
+                                        let _ = std::fs::write(format!("{d}/depth{合序}.pgm"), db);
+                                    }
+                                }
                             }
                             p.段 = 2; p.卡 = 0;
                             let n = (0.05f64.ln() / (1.0 - 交付率).max(1e-6).ln()).ceil();
