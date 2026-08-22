@@ -2389,6 +2389,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
     // 某个画面轴上两者反号 ⇒ 那一轴的账本方向是反的,翻号。一探即纠,零常数。
     let mut 探号: [f64; 2] = [1.0, 1.0];
     let mut 上探步: Option<[f64; 2]> = None;
+    let mut 疑锚次: u8 = 0; // 连续认手不可信的次数(连 2 次仍不可信就先按它走,免得原地空转)
     // 🔴 问前回位(N49 帧定案:手臂死在上次尝试的位置、大半个身子横在场景里,
     // 眼把机器人底座 (0.500,0.911) 答成方块 —— N21 幻影病的物体版。每次计划死亡后
     // 先回量到的原位再问眼:从标定视角看世界,不让身子挡镜头。这不是被禁的账本尺
@@ -3157,11 +3158,32 @@ fn 服务<S: std::io::Read + std::io::Write>(
                                                                     let ax直 = task::列(&p.q, 工具列 % 3);
                                                                     p.补抓基 = [here[0] + ax直[0] * 工具长, here[1] + ax直[1] * 工具长, fl + ax直[2] * 工具长];
                                                                     p.补抓爪像素 = Some((au, av));
-                                                                    // 相邻两探成对喂在线拟合(只在 z 基本没变时,免得把 z 效应算进 xy)。
+                                                                    // 🔴 认手合理性闸(N104 实锤:两次量爪之间手只走 0.048 m,爪像素却跳
+                                                                    // 0.449 画幅 —— 物理上不可能 ⇒ 这两次里至少一次认错了东西。整条重量
+                                                                    // 闭环都架在"晃爪认出的就是我的爪"上,认错的锚必须当场识破,不能拿去
+                                                                    // 算步长、更不能拿去判尺的方向)。上限只用量出来的量:账本尺(含 3σ)
+                                                                    // 乘实测世界位移 = 这段路爪像素最多可能挪多少;超了就是认错。
+                                                                    let mut 锚可信 = true;
+                                                                    if let Some((w0, px0)) = 探锚 {
+                                                                        let (dwx, dwy) = (here[0] - w0[0], here[1] - w0[1]);
+                                                                        let dw = (dwx * dwx + dwy * dwy).sqrt();
+                                                                        let dpx = ((au - px0.0).powi(2) + (av - px0.1).powi(2)).sqrt();
+                                                                        if let Some(m) = body.get(Quantity::ImageJacobian).filter(|m| m.dim >= 4) {
+                                                                            let g = |a: f64, b: f64, sa: f64, sb: f64| ((a.abs() + 3.0 * sa).powi(2) + (b.abs() + 3.0 * sb).powi(2)).sqrt();
+                                                                            let 增益 = g(m.value[0], m.value[1], m.uncertainty[0], m.uncertainty[1])
+                                                                                .max(g(m.value[2], m.value[3], m.uncertainty[2], m.uncertainty[3]));
+                                                                            let 上限 = 增益 * dw + 0.06; // +一个认块半径的容差(半 19px ≈ 0.03 画幅,两端)
+                                                                            if dpx > 上限 {
+                                                                                锚可信 = false;
+                                                                                println!("[服]   🔴 认手不可信:走 {:.3} m 爪像素却挪 {:.3} 画幅(这段路上限 {:.3})⇒ 丢弃,重量", dw, dpx, 上限);
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                    // 相邻两探成对喂在线拟合(只在 z 基本没变、且锚可信时)。
                                                                     if let Some((w0, px0)) = 探锚 {
                                                                         let dz = (here[2] - w0[2]).abs();
                                                                         let dw = ((here[0]-w0[0]).powi(2) + (here[1]-w0[1]).powi(2)).sqrt();
-                                                                        if dz < 0.5 * 张开 && dw > 0.25 * 张开 {
+                                                                        if 锚可信 && dz < 0.5 * 张开 && dw > 0.25 * 张开 {
                                                                             对子.push(([here[0]-w0[0], here[1]-w0[1]], (au - px0.0, av - px0.1)));
                                                                             if 对子.len() > 32 { 对子.remove(0); }
                                                                             println!("[服]   尺对+1(走 {:.3} m ⇒ 像素挪 ({:+.3},{:+.3}));在线对子 {}", dw, au - px0.0, av - px0.1, 对子.len());
@@ -3171,7 +3193,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                                                                     // 上一版拿"我命令的那一小步"去比,而两次量爪之间手还下探+合爪+抬起回收
                                                                     // (实测 0.247 m,命令只有 0.094 m)⇒ 苹果比橘子,判号不可信。
                                                                     // 且改成【直接判定符号】而非来回翻转:尺真反时每探都判反,翻转会来回抖。
-                                                                    if let Some((w0, px0)) = 探锚 {
+                                                                    if let (true, Some((w0, px0))) = (锚可信, 探锚) {
                                                                         if let Some(m) = body.get(Quantity::ImageJacobian).filter(|m| m.dim >= 4) {
                                                                             let (dwx, dwy) = (here[0] - w0[0], here[1] - w0[1]);
                                                                             let (eu, ev) = (m.value[0]*dwx + m.value[1]*dwy, m.value[2]*dwx + m.value[3]*dwy);
@@ -3188,6 +3210,13 @@ fn 服务<S: std::io::Read + std::io::Write>(
                                                                             }
                                                                         }
                                                                     }
+                                                                    if !锚可信 && 疑锚次 < 2 {
+                                                                        疑锚次 += 1;
+                                                                        p.预测爪 = None; p.模板.clear(); p.模板半 = 0; p.验拍 = 0; p.预测龄 = 0;
+                                                                        p.晃态 = 1; p.晃等 = 0; p.晃次 = 0; p.晃帧.clear(); p.晃基 = None;
+                                                                        锚好 = false;
+                                                                    } else {
+                                                                    疑锚次 = 0;
                                                                     探锚 = Some((here, (au, av)));
                                                                     let j直 = j_use.or_else(|| body.get(Quantity::ImageJacobian).filter(|m| m.dim >= 4)
                                                                         .map(|m| ([m.value[0], m.value[1], m.value[2], m.value[3]],
@@ -3204,6 +3233,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                                                                         }
                                                                     }
                                                                     p.段 = 13; p.卡 = 0;
+                                                                    }
                                                                 }
                                                             }
                                                         }
