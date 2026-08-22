@@ -2785,6 +2785,14 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         } else if 拍 % 25 == 1 {
                             println!("[服]   去原位重认爪:还差 {:.3} m", d回);
                         }
+                        // 回家路上也会僵(N54 实测:差 0.281→0.282 跨百拍不动,等 900 拍太贵)。
+                        if 挪.map_or(false, |m| m < 卡阈) && d回 > 5.0 * 卡阈 {
+                            p.僵拍 += 1;
+                            if p.僵拍 >= 30 {
+                                println!("[服] 回原位路上僵住(连 {} 拍)⇒ 弃这个计划换下手点", p.僵拍);
+                                p.僵拍 = 0; p.段 = 8;
+                            }
+                        } else { p.僵拍 = 0; }
                     } else if p.晃态 > 0 {
                         p.伺服目标 = [here[0], here[1], here[2]];
                         let 静置 = body_layer::derive::settle_periods(&body, 1e-3).map(|n| n as u32).unwrap_or(8).max(4);
