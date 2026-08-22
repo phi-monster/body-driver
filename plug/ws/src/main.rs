@@ -2439,6 +2439,29 @@ fn 服务<S: std::io::Read + std::io::Write>(
             // 「间距随命令变大」时才收下(slope<0 ⇒ Inconsistent)⇒ 跨度量到了,
             // 就等于量到了"命令 1.0 = 张开"。合 = 0.0。零个新数。
             let (开, 合) = (1.0f64, 0.0f64);
+            // 凸起(全段可用版,值捕获相机号):睁眼踩峰在 段3 也要用。与 段1 内的同名
+            // 闭包同配方(远侧分位当桌面,凸起=比它近多少)。
+            let 相机i = p.相机;
+            let 凸起全 = |uu: f64, vv: f64| -> Option<(f64, f64)> {
+                let 路 = plug.lay.cams.get(相机i)?;
+                let mut 深路 = 路.clone();
+                if let Some(last) = 深路.last_mut() { *last = "depth".to_string(); }
+                let dv = plug.last.as_ref().and_then(|o| 取(o, &深路))?;
+                let (dw, dh, dep) = wire::as_f32_grid(&dv)?;
+                let (x, y) = (((uu * dw as f64) as usize).min(dw - 1), ((vv * dh as f64) as usize).min(dh - 1));
+                let c = f64::from(*dep.get(y * dw + x)?);
+                let r = (dw / 40).max(2) as i64;
+                let mut ring = Vec::new();
+                for (dx, dy) in [(r,0),(-r,0),(0,r),(0,-r),(r,r),(r,-r),(-r,r),(-r,-r)] {
+                    let (nx, ny) = (x as i64 + dx, y as i64 + dy);
+                    if nx >= 0 && ny >= 0 && (nx as usize) < dw && (ny as usize) < dh {
+                        ring.push(f64::from(dep[ny as usize * dw + nx as usize]));
+                    }
+                }
+                if ring.is_empty() { return None }
+                ring.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
+                Some((((ring[(ring.len() * 3) / 4] - c).max(0.0)), c))
+            };
             let (目标, mut jaw, 名) = match p.段 {
                 // ── V5 伺服接近(最终版,owner 令 2026-08-21):xy 伺服 + z 下降同拍进行,
                 //    目标由推进段每拍算好存在 伺服目标;jaw 常开。旧 悬停/对准/下探 三段合一。
@@ -3350,9 +3373,54 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         // 物理上看不见指尖 —— 最后一厘米只能靠触觉收官。视觉已把手送到
                         // 厘米级,绕收敛点 ±0.5×张开 的 8 邻域逐点"降-合-试",判据就是
                         // 现成的全通道撑住自检;环扫完才弃计划。工业插孔同款认识论。)
-                        if p.补抓次 < 24 && p.补抓基[0].is_finite() {
-                            // 三层环:0.5/1.0/2.0×张开(N82 实测:第一层 8/8 全空 ⇒ 视觉收敛
-                            // 误差是肘级(≥5cm)不是指级 —— 网要撒到肘级半径)。
+                        // 🔴 摸完睁眼(N86 照片带定案:空合抬起后手已让开、方块清晰可见,
+                        // 却卧在盲环两圈之间的网眼里 —— 8 辐条在 10cm 半径的网眼 4-5cm 宽,
+                        // 咬合容差只有 ±(张开−物)/2≈1.6cm,盲网几何上抓不住。改:抬手后用
+                        // 深度图找桌面凸起(空桌上唯一的峰=物),J 把像素差换算成世界步,
+                        // 下一探直接踩峰。全量出:凸起工具+拟合尺+伺服同款换算。)
+                        let 踩峰 = if p.补抓次 < 24 && p.补抓基[0].is_finite() {
+                            let mut 找到: Option<[f64; 2]> = None;
+                            let jL = body.get(Quantity::ImageJacobian).filter(|m| m.dim >= 4)
+                                .map(|m| ([m.value[0], m.value[1], m.value[2], m.value[3]],
+                                          [m.uncertainty[0], m.uncertainty[1], m.uncertainty[2], m.uncertainty[3]]));
+                            if let (Some((pu0, pv0)), Some((jj, js))) = (p.预测爪, jL) {
+                                // 以物像素为窗心扫 ±0.30 画幅、步距 12px 的粗网,凸起>1cm 记点。
+                                let (mut su, mut sv, mut n) = (0.0f64, 0.0f64, 0usize);
+                                let mut uu = (p.物像素.0 - 0.30).max(0.02);
+                                while uu < (p.物像素.0 + 0.30).min(0.98) {
+                                    let mut vv = (p.物像素.1 - 0.30).max(0.02);
+                                    while vv < (p.物像素.1 + 0.30).min(0.98) {
+                                        if let Some((凸, _)) = 凸起全(uu, vv) {
+                                            if 凸 > 0.010 {
+                                                // 排掉手自己(离死推爪估 5% 画幅内的凸不算物)。
+                                                let d手 = ((uu - pu0).powi(2) + (vv - pv0).powi(2)).sqrt();
+                                                if d手 > 0.05 { su += uu; sv += vv; n += 1; }
+                                            }
+                                        }
+                                        vv += 0.025;
+                                    }
+                                    uu += 0.025;
+                                }
+                                if n >= 2 {
+                                    let (bu, bv) = (su / n as f64, sv / n as f64);
+                                    let d = (bu - pu0, bv - pv0);
+                                    if let Ok(((dx, dy), _)) = probe::image_to_plane_damped(&jj, &js, d) {
+                                        let l = (dx * dx + dy * dy).sqrt();
+                                        let cap = 2.0 * 张开;
+                                        let k = if l > cap { cap / l } else { 1.0 };
+                                        找到 = Some([dx * k, dy * k]);
+                                        println!("[服]   睁眼:桌面峰 ({:.3},{:.3})·{} 点 ⇒ 世界步 ({:+.3},{:+.3}) m", bu, bv, n, dx * k, dy * k);
+                                    }
+                                }
+                            }
+                            找到
+                        } else { None };
+                        if let Some(步) = 踩峰 {
+                            p.指尖 = [here[0] + 步[0], here[1] + 步[1], p.补抓基[2]];
+                            p.补抓次 += 1;
+                            println!("[服] 空爪 ⇒ 睁眼踩峰补抓 {}/24", p.补抓次);
+                            p.段 = 13; p.卡 = 0;
+                        } else if p.补抓次 < 24 && p.补抓基[0].is_finite() {
                             let 倍: [f64; 3] = [0.5, 1.0, 2.0];
                             let r = 倍[(p.补抓次 / 8) as usize] * 张开;
                             let 环: [[f64; 2]; 8] = [[1.0,0.0],[-1.0,0.0],[0.0,1.0],[0.0,-1.0],[1.0,1.0],[1.0,-1.0],[-1.0,1.0],[-1.0,-1.0]];
@@ -3360,7 +3428,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                             let o = [e[0] * r, e[1] * r];
                             p.指尖 = [p.补抓基[0] + o[0], p.补抓基[1] + o[1], p.补抓基[2]];
                             p.补抓次 += 1;
-                            println!("[服] 空爪 ⇒ 就地补抓 {}/24:偏移 ({:+.3},{:+.3}) m", p.补抓次, o[0], o[1]);
+                            println!("[服] 空爪 ⇒ 就地补抓 {}/24:偏移 ({:+.3},{:+.3}) m(无峰可踩,盲环兜底)", p.补抓次, o[0], o[1]);
                             p.段 = 13; p.卡 = 0;
                         } else {
                             println!("[服] 抬到位但全部 {} 个指通道空合到底,补抓环也扫空 ⇒ 弃这个计划换下手点重来", 帧.jaw.len());
