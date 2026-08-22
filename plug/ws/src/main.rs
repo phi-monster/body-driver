@@ -2444,6 +2444,12 @@ fn 服务<S: std::io::Read + std::io::Write>(
             // 闭包同配方(远侧分位当桌面,凸起=比它近多少)。
             let 相机i = p.相机;
             let 凸起全 = |uu: f64, vv: f64| -> Option<(f64, f64)> {
+                // 🔴 与 段1 的 凸起 配方【故意不同】(N94 睁眼 519/625 格全亮实锤):
+                // 斜视角下平桌=深度斜坡,"远侧分位"在斜坡上恒正 ⇒ 全桌假凸 1-3cm。
+                // 扫描要的是"比【局部桌面】高",桌面用【对径点成对平均】估 —— 斜坡一阶
+                // 精确抵消(+r 与 −r 的深度平均回到中心),4 对取中位再抗一侧被臂占。
+                // 副作用是福利:环整个落在臂身上时 对中位≈臂深 ⇒ 凸≈0,臂格自抑。
+                // (段1 的 75 分位有 N4 影判承重 —— 那里手占环属常态,不许动。)
                 let 路 = plug.lay.cams.get(相机i)?;
                 let mut 深路 = 路.clone();
                 if let Some(last) = 深路.last_mut() { *last = "depth".to_string(); }
@@ -2452,16 +2458,20 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 let (x, y) = (((uu * dw as f64) as usize).min(dw - 1), ((vv * dh as f64) as usize).min(dh - 1));
                 let c = f64::from(*dep.get(y * dw + x)?);
                 let r = (dw / 40).max(2) as i64;
-                let mut ring = Vec::new();
-                for (dx, dy) in [(r,0),(-r,0),(0,r),(0,-r),(r,r),(r,-r),(-r,r),(-r,-r)] {
-                    let (nx, ny) = (x as i64 + dx, y as i64 + dy);
-                    if nx >= 0 && ny >= 0 && (nx as usize) < dw && (ny as usize) < dh {
-                        ring.push(f64::from(dep[ny as usize * dw + nx as usize]));
+                let mut 对: Vec<f64> = Vec::new();
+                for (dx, dy) in [(r, 0), (0, r), (r, r), (r, -r)] {
+                    let (ax, ay) = (x as i64 + dx, y as i64 + dy);
+                    let (bx, by) = (x as i64 - dx, y as i64 - dy);
+                    if ax >= 0 && ay >= 0 && (ax as usize) < dw && (ay as usize) < dh
+                        && bx >= 0 && by >= 0 && (bx as usize) < dw && (by as usize) < dh {
+                        对.push((f64::from(dep[ay as usize * dw + ax as usize])
+                               + f64::from(dep[by as usize * dw + bx as usize])) * 0.5);
                     }
                 }
-                if ring.is_empty() { return None }
-                ring.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
-                Some((((ring[(ring.len() * 3) / 4] - c).max(0.0)), c))
+                if 对.len() < 2 { return None }
+                对.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
+                let 桌 = 对[对.len() / 2];
+                Some((((桌 - c).max(0.0)), c))
             };
             let (目标, mut jaw, 名) = match p.段 {
                 // ── V5 伺服接近(最终版,owner 令 2026-08-21):xy 伺服 + z 下降同拍进行,
