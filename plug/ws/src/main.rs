@@ -3329,7 +3329,14 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     let n = (0.05f64.ln() / (1.0 - 交付率).max(1e-6).ln()).ceil();
                     p.合等 = (n as u32).clamp(3, 120);
                     p.上爪读 = 帧.jaw.iter().copied().collect();
-                    println!("[服] 补抓位到 ⇒ 合爪");
+                    println!("[服] 补抓位到(差 {:.3} m,卡 {})⇒ 合爪", 差, p.卡);
+                    // 逐探取证(N84 定案:48 连空,坐标推断到头 —— 只有照片带能说清指尖
+                    // 实际落点 vs 方块)。
+                    if let (Ok(dd), Some(img)) = (std::env::var("BL_DUMP"), 帧.cams.get(p.相机)) {
+                        let mut buf = format!("P5\n{} {}\n255\n", img.0, img.1).into_bytes();
+                        buf.extend_from_slice(&img.2);
+                        let _ = std::fs::write(format!("{dd}/补抓{}_{}.pgm", 合序, p.补抓次), buf);
+                    }
                     p.段 = 2; p.卡 = 0;
                 }
                 3 if 到 || p.卡 >= 15 => {
