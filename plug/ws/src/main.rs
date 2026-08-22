@@ -2379,6 +2379,16 @@ fn 服务<S: std::io::Read + std::io::Write>(
     // 三炮复发 u 反漂跑死。N33"重锚不清尺⇒毒尺继续漂"的前提已被四道防线取代:
     // 岭先验自缩放 + 3×中位剔群 + 锚保鲜(哨兵开火即脏)+ 响应自证失守闸。)
     let mut 对子: Vec<([f64; 2], (f64, f64))> = Vec::new();
+    // 探锚:上一探晃出的(本体位置, 爪像素)。直取每探都重量一次爪 ⇒ 相邻两探
+    // 天然成一对"走了多少米 ↔ 像素挪了多少",喂进在线拟合,尺自己纠方向和倍率。
+    // (N102 实锤:账本尺横轴方向是反的 —— 命令 +0.229m 手像素 u 从 0.844 跑到
+    // 0.930,而物在 0.500;直取绕开了伺服路径里那套方向自证,必须自带。)
+    let mut 探锚: Option<([f64; 3], (f64, f64))> = None;
+    // 探号:直取步长的方向自证(伺服路径里那套 MB 已验机制的直取版)。
+    // 每探都重量爪像素 ⇒ 上一探"命令走了多少"与"像素实际挪了多少"当场可比:
+    // 某个画面轴上两者反号 ⇒ 那一轴的账本方向是反的,翻号。一探即纠,零常数。
+    let mut 探号: [f64; 2] = [1.0, 1.0];
+    let mut 上探步: Option<[f64; 2]> = None;
     // 🔴 问前回位(N49 帧定案:手臂死在上次尝试的位置、大半个身子横在场景里,
     // 眼把机器人底座 (0.500,0.911) 答成方块 —— N21 幻影病的物体版。每次计划死亡后
     // 先回量到的原位再问眼:从标定视角看世界,不让身子挡镜头。这不是被禁的账本尺
@@ -2477,11 +2487,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
             // 睁扫:凸起带通 + 种子连通簇 ⇒ 基外世界步(N98 照片证:能把手从 10cm
             // 外带到物正上方)。段3 空判与「直取」劫持共用同一把刀;
             // 前置:锚对 (补抓基↔补抓爪像素) 已备好(同刻实测)。
-            let 睁扫 = |p: &mut 抓况| -> Option<[f64; 2]> {
+            let 睁扫 = |p: &mut 抓况, jL: Option<([f64; 4], [f64; 4])>, 号: [f64; 2]| -> Option<[f64; 2]> {
                             let mut 找到: Option<[f64; 2]> = None;
-                            let jL = body.get(Quantity::ImageJacobian).filter(|m| m.dim >= 4)
-                                .map(|m| ([m.value[0], m.value[1], m.value[2], m.value[3]],
-                                          [m.uncertainty[0], m.uncertainty[1], m.uncertainty[2], m.uncertainty[3]]));
                             if let (Some((au, av)), Some((jj, js))) = (p.补抓爪像素, jL) {
                                 // N93 照片二罪:①预测爪 烂账差 1/4 画幅 ⇒ 步长全废;②560/625 格全亮
                                 // (手臂塔+桌沿也算峰)⇒ 质心=窗心。改:步长锚到收敛锚对
@@ -2537,7 +2544,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                                     for i in 0..格.len() { if 簇[i] { su += 格[i].0; sv += 格[i].1; s凸 += 格[i].2; n += 1; } }
                                     let (bu, bv) = (su / n as f64, sv / n as f64);
                                     p.补抓凸 = s凸 / n as f64; // 量到的物高,段13 探针 z 抬 0.5×它
-                                    let d = (bu - au, bv - av);
+                                    let d = (号[0] * (bu - au), 号[1] * (bv - av));
                                     if let Ok(((dx, dy), _)) = probe::image_to_plane_damped(&jj, &js, d) {
                                         let l = (dx * dx + dy * dy).sqrt();
                                         let cap = 4.0 * 张开;
@@ -3150,10 +3157,34 @@ fn 服务<S: std::io::Read + std::io::Write>(
                                                                     let ax直 = task::列(&p.q, 工具列 % 3);
                                                                     p.补抓基 = [here[0] + ax直[0] * 工具长, here[1] + ax直[1] * 工具长, fl + ax直[2] * 工具长];
                                                                     p.补抓爪像素 = Some((au, av));
-                                                                    match 睁扫(p) {
+                                                                    // 相邻两探成对喂在线拟合(只在 z 基本没变时,免得把 z 效应算进 xy)。
+                                                                    if let Some((w0, px0)) = 探锚 {
+                                                                        let dz = (here[2] - w0[2]).abs();
+                                                                        let dw = ((here[0]-w0[0]).powi(2) + (here[1]-w0[1]).powi(2)).sqrt();
+                                                                        if dz < 0.5 * 张开 && dw > 0.25 * 张开 {
+                                                                            对子.push(([here[0]-w0[0], here[1]-w0[1]], (au - px0.0, av - px0.1)));
+                                                                            if 对子.len() > 32 { 对子.remove(0); }
+                                                                            println!("[服]   尺对+1(走 {:.3} m ⇒ 像素挪 ({:+.3},{:+.3}));在线对子 {}", dw, au - px0.0, av - px0.1, 对子.len());
+                                                                        }
+                                                                    }
+                                                                    // 方向自证:上一探命令的世界步 ⇒ 账本预期像素挪;与实测像素挪逐轴比号。
+                                                                    if let (Some((_, px0)), Some(st)) = (探锚, 上探步) {
+                                                                        if let Some(m) = body.get(Quantity::ImageJacobian).filter(|m| m.dim >= 4) {
+                                                                            let (eu, ev) = (m.value[0]*st[0] + m.value[1]*st[1], m.value[2]*st[0] + m.value[3]*st[1]);
+                                                                            let (du_, dv_) = (au - px0.0, av - px0.1);
+                                                                            if du_.abs() > 0.01 && eu * 探号[0] * du_ < 0.0 { 探号[0] = -探号[0]; println!("[服]   方向自证:横轴反了 ⇒ 翻号(预期 {:+.3} 实测 {:+.3})", eu * 探号[0] * -1.0, du_); }
+                                                                            if dv_.abs() > 0.01 && ev * 探号[1] * dv_ < 0.0 { 探号[1] = -探号[1]; println!("[服]   方向自证:纵轴反了 ⇒ 翻号(预期 {:+.3} 实测 {:+.3})", ev * 探号[1] * -1.0, dv_); }
+                                                                        }
+                                                                    }
+                                                                    探锚 = Some((here, (au, av)));
+                                                                    let j直 = j_use.or_else(|| body.get(Quantity::ImageJacobian).filter(|m| m.dim >= 4)
+                                                                        .map(|m| ([m.value[0], m.value[1], m.value[2], m.value[3]],
+                                                                                  [m.uncertainty[0], m.uncertainty[1], m.uncertainty[2], m.uncertainty[3]])));
+                                                                    match 睁扫(p, j直, 探号) {
                                                                         Some(步) => {
                                                                             p.指尖 = [p.补抓基[0] + 步[0], p.补抓基[1] + 步[1], p.补抓基[2]];
-                                                                            println!("[服] 直取:锚对现量 ⇒ 踩峰下探(免伺服)");
+                                                                            上探步 = Some(步);
+                                                                            println!("[服] 直取:锚对现量 ⇒ 踩峰下探(免伺服·号 {:+.0},{:+.0})", 探号[0], 探号[1]);
                                                                         }
                                                                         None => {
                                                                             p.指尖 = [p.指尖[0], p.指尖[1], p.补抓基[2]];
