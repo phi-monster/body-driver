@@ -2910,8 +2910,16 @@ fn 服务<S: std::io::Read + std::io::Write>(
                                                     // 反复种进光斑。死推的 预测爪 积分的是【命令】—— 上一锚就算是假
                                                     // 的,预测也朝真手该去的方向走;光斑不动,距离一比就输。只在
                                                     // 配对=0 的兜底路用;有对时对中点已是指尖级,不动。
+                                                    // 首锚兜底先验(N68 定案:首晃无预测 ⇒ 仍选最大块 ⇒ 光斑首锚免费赢,
+                                                    // 后续预测被它带偏)。晃认发生在手已被命令到计划指尖上方时(量出:
+                                                    // |here−指尖|xy < 2×张开),爪必然出现在物像素邻域 —— 这不是任务知识,
+                                                    // 是"驱动刚把手送去了哪"。有死推预测用死推,没有才用这条。
+                                                    let 预 = p.预测爪.or_else(|| {
+                                                        let dxy = ((here[0] - p.指尖[0]).powi(2) + (here[1] - p.指尖[1]).powi(2)).sqrt();
+                                                        if dxy < 2.0 * 张开 { Some(p.物像素) } else { None }
+                                                    });
                                                     let c选 = if r.pairs == 0 {
-                                                        if let Some((pu, pv)) = p.预测爪 {
+                                                        if let Some((pu, pv)) = 预 {
                                                             let (mut 好, mut 好d) = (None, f64::INFINITY);
                                                             let mut i = 0;
                                                             while let Some(a) = r.cands.get(i) {
