@@ -2474,6 +2474,81 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 let 桌 = 对[对.len() / 2];
                 Some((((桌 - c).max(0.0)), c))
             };
+            // 睁扫:凸起带通 + 种子连通簇 ⇒ 基外世界步(N98 照片证:能把手从 10cm
+            // 外带到物正上方)。段3 空判与「直取」劫持共用同一把刀;
+            // 前置:锚对 (补抓基↔补抓爪像素) 已备好(同刻实测)。
+            let 睁扫 = |p: &mut 抓况| -> Option<[f64; 2]> {
+                            let mut 找到: Option<[f64; 2]> = None;
+                            let jL = body.get(Quantity::ImageJacobian).filter(|m| m.dim >= 4)
+                                .map(|m| ([m.value[0], m.value[1], m.value[2], m.value[3]],
+                                          [m.uncertainty[0], m.uncertainty[1], m.uncertainty[2], m.uncertainty[3]]));
+                            if let (Some((au, av)), Some((jj, js))) = (p.补抓爪像素, jL) {
+                                // N93 照片二罪:①预测爪 烂账差 1/4 画幅 ⇒ 步长全废;②560/625 格全亮
+                                // (手臂塔+桌沿也算峰)⇒ 质心=窗心。改:步长锚到收敛锚对
+                                // (补抓基↔补抓爪像素),手此刻像素=锚px+本体位移经 J 逆映回(全链量出);
+                                // 凸起带通 ≤1.5×张开(臂塔高出带),种子=离物像素最近格,连通生长取簇心。
+                                let det = jj[0] * jj[3] - jj[1] * jj[2];
+                                let 手px = if det.abs() > 1e-9 {
+                                    let (wx, wy) = (here[0] - p.补抓基[0], here[1] - p.补抓基[1]);
+                                    Some((au + (jj[3] * wx - jj[1] * wy) / det,
+                                          av + (-jj[2] * wx + jj[0] * wy) / det))
+                                } else { None };
+                                // 手的排除半径:世界 1×张开 折成像素长(量出单位,夹 [0.03,0.15] 画幅防疯)。
+                                let r避 = if det.abs() > 1e-9 {
+                                    let ru = (jj[3] * 张开 / det).powi(2) + (jj[2] * 张开 / det).powi(2);
+                                    ru.sqrt().clamp(0.03, 0.15)
+                                } else { 0.06 };
+                                let mut 格: Vec<(f64, f64, f64)> = Vec::new();
+                                let mut uu = (p.物像素.0 - 0.30).max(0.02);
+                                while uu < (p.物像素.0 + 0.30).min(0.98) {
+                                    let mut vv = (p.物像素.1 - 0.30).max(0.02);
+                                    while vv < (p.物像素.1 + 0.30).min(0.98) {
+                                        if let Some((凸, _)) = 凸起全(uu, vv) {
+                                            if 凸 > 0.010 && 凸 <= 1.5 * 张开 {
+                                                let 避 = 手px.map_or(false, |(hu, hv)|
+                                                    ((uu - hu).powi(2) + (vv - hv).powi(2)).sqrt() < r避);
+                                                if !避 { 格.push((uu, vv, 凸)); }
+                                            }
+                                        }
+                                        vv += 0.025;
+                                    }
+                                    uu += 0.025;
+                                }
+                                if !格.is_empty() {
+                                    let mut 种 = 0usize; let mut 最 = f64::MAX;
+                                    for (i, g) in 格.iter().enumerate() {
+                                        let d = ((g.0 - p.物像素.0).powi(2) + (g.1 - p.物像素.1).powi(2)).sqrt();
+                                        if d < 最 { 最 = d; 种 = i; }
+                                    }
+                                    let mut 簇 = vec![false; 格.len()]; 簇[种] = true;
+                                    loop {
+                                        let mut 长 = false;
+                                        for i in 0..格.len() {
+                                            if 簇[i] { continue; }
+                                            let mut 邻 = false;
+                                            for j in 0..格.len() {
+                                                if 簇[j] && ((格[i].0 - 格[j].0).powi(2) + (格[i].1 - 格[j].1).powi(2)).sqrt() < 0.06 { 邻 = true; break; }
+                                            }
+                                            if 邻 { 簇[i] = true; 长 = true; }
+                                        }
+                                        if !长 { break; }
+                                    }
+                                    let (mut su, mut sv, mut s凸, mut n) = (0.0f64, 0.0f64, 0.0f64, 0usize);
+                                    for i in 0..格.len() { if 簇[i] { su += 格[i].0; sv += 格[i].1; s凸 += 格[i].2; n += 1; } }
+                                    let (bu, bv) = (su / n as f64, sv / n as f64);
+                                    p.补抓凸 = s凸 / n as f64; // 量到的物高,段13 探针 z 抬 0.5×它
+                                    let d = (bu - au, bv - av);
+                                    if let Ok(((dx, dy), _)) = probe::image_to_plane_damped(&jj, &js, d) {
+                                        let l = (dx * dx + dy * dy).sqrt();
+                                        let cap = 4.0 * 张开;
+                                        let k = if l > cap { cap / l } else { 1.0 };
+                                        找到 = Some([dx * k, dy * k]);
+                                        println!("[服]   睁眼:峰簇 ({:.3},{:.3})·{}格/带内{} ⇒ 基外步 ({:+.3},{:+.3}) m", bu, bv, n, 格.len(), dx * k, dy * k);
+                                    }
+                                }
+                            }
+                找到
+            };
             let (目标, mut jaw, 名) = match p.段 {
                 // ── V5 伺服接近(最终版,owner 令 2026-08-21):xy 伺服 + z 下降同拍进行,
                 //    目标由推进段每拍算好存在 伺服目标;jaw 常开。旧 悬停/对准/下探 三段合一。
@@ -3039,6 +3114,27 @@ fn 服务<S: std::io::Read + std::io::Write>(
                                                             p.伺服号 = [1.0, 1.0]; p.翻候 = [0, 0]; p.命累 = 0.0; p.应累 = 0.0;
                                                             锚好 = true;
                                                             println!("[服]   晃爪认手:爪 ({:.3},{:.3}) ⇒ 快眼开跟(半 {} px)", au, av, half);
+                                                            // 🔴 直取(owner 2026-08-23 死令:模板伺服的锚彩票退出生死路径)。
+                                                            // 晃到手的这一拍,(here↔au,av) 同刻实测 ⇒ 锚对全量出;
+                                                            // 直接扫凸起、段13 下探合爪。空了走既有睁眼补抓环(预算 24)。
+                                                            if p.段 != 2 && p.段 != 3 && p.段 != 13 {
+                                                                if let Some(fl) = body.get(Quantity::Floor).filter(|m| m.dim >= 1).map(|m| m.value[0]) {
+                                                                    let ax直 = task::列(&p.q, 工具列 % 3);
+                                                                    p.补抓基 = [here[0] + ax直[0] * 工具长, here[1] + ax直[1] * 工具长, fl + ax直[2] * 工具长];
+                                                                    p.补抓爪像素 = Some((au, av));
+                                                                    match 睁扫(p) {
+                                                                        Some(步) => {
+                                                                            p.指尖 = [p.补抓基[0] + 步[0], p.补抓基[1] + 步[1], p.补抓基[2]];
+                                                                            println!("[服] 直取:锚对现量 ⇒ 踩峰下探(免伺服)");
+                                                                        }
+                                                                        None => {
+                                                                            p.指尖 = [p.指尖[0], p.指尖[1], p.补抓基[2]];
+                                                                            println!("[服] 直取:扫无簇 ⇒ 按候选点下探(免伺服)");
+                                                                        }
+                                                                    }
+                                                                    p.段 = 13; p.卡 = 0;
+                                                                }
+                                                            }
                                                         }
                                                     }
                                                 }
@@ -3395,78 +3491,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         // 咬合容差只有 ±(张开−物)/2≈1.6cm,盲网几何上抓不住。改:抬手后用
                         // 深度图找桌面凸起(空桌上唯一的峰=物),J 把像素差换算成世界步,
                         // 下一探直接踩峰。全量出:凸起工具+拟合尺+伺服同款换算。)
-                        let 踩峰 = if p.补抓次 < 24 && p.补抓基[0].is_finite() {
-                            let mut 找到: Option<[f64; 2]> = None;
-                            let jL = body.get(Quantity::ImageJacobian).filter(|m| m.dim >= 4)
-                                .map(|m| ([m.value[0], m.value[1], m.value[2], m.value[3]],
-                                          [m.uncertainty[0], m.uncertainty[1], m.uncertainty[2], m.uncertainty[3]]));
-                            if let (Some((au, av)), Some((jj, js))) = (p.补抓爪像素, jL) {
-                                // N93 照片二罪:①预测爪 烂账差 1/4 画幅 ⇒ 步长全废;②560/625 格全亮
-                                // (手臂塔+桌沿也算峰)⇒ 质心=窗心。改:步长锚到收敛锚对
-                                // (补抓基↔补抓爪像素),手此刻像素=锚px+本体位移经 J 逆映回(全链量出);
-                                // 凸起带通 ≤1.5×张开(臂塔高出带),种子=离物像素最近格,连通生长取簇心。
-                                let det = jj[0] * jj[3] - jj[1] * jj[2];
-                                let 手px = if det.abs() > 1e-9 {
-                                    let (wx, wy) = (here[0] - p.补抓基[0], here[1] - p.补抓基[1]);
-                                    Some((au + (jj[3] * wx - jj[1] * wy) / det,
-                                          av + (-jj[2] * wx + jj[0] * wy) / det))
-                                } else { None };
-                                // 手的排除半径:世界 1×张开 折成像素长(量出单位,夹 [0.03,0.15] 画幅防疯)。
-                                let r避 = if det.abs() > 1e-9 {
-                                    let ru = (jj[3] * 张开 / det).powi(2) + (jj[2] * 张开 / det).powi(2);
-                                    ru.sqrt().clamp(0.03, 0.15)
-                                } else { 0.06 };
-                                let mut 格: Vec<(f64, f64, f64)> = Vec::new();
-                                let mut uu = (p.物像素.0 - 0.30).max(0.02);
-                                while uu < (p.物像素.0 + 0.30).min(0.98) {
-                                    let mut vv = (p.物像素.1 - 0.30).max(0.02);
-                                    while vv < (p.物像素.1 + 0.30).min(0.98) {
-                                        if let Some((凸, _)) = 凸起全(uu, vv) {
-                                            if 凸 > 0.010 && 凸 <= 1.5 * 张开 {
-                                                let 避 = 手px.map_or(false, |(hu, hv)|
-                                                    ((uu - hu).powi(2) + (vv - hv).powi(2)).sqrt() < r避);
-                                                if !避 { 格.push((uu, vv, 凸)); }
-                                            }
-                                        }
-                                        vv += 0.025;
-                                    }
-                                    uu += 0.025;
-                                }
-                                if !格.is_empty() {
-                                    let mut 种 = 0usize; let mut 最 = f64::MAX;
-                                    for (i, g) in 格.iter().enumerate() {
-                                        let d = ((g.0 - p.物像素.0).powi(2) + (g.1 - p.物像素.1).powi(2)).sqrt();
-                                        if d < 最 { 最 = d; 种 = i; }
-                                    }
-                                    let mut 簇 = vec![false; 格.len()]; 簇[种] = true;
-                                    loop {
-                                        let mut 长 = false;
-                                        for i in 0..格.len() {
-                                            if 簇[i] { continue; }
-                                            let mut 邻 = false;
-                                            for j in 0..格.len() {
-                                                if 簇[j] && ((格[i].0 - 格[j].0).powi(2) + (格[i].1 - 格[j].1).powi(2)).sqrt() < 0.06 { 邻 = true; break; }
-                                            }
-                                            if 邻 { 簇[i] = true; 长 = true; }
-                                        }
-                                        if !长 { break; }
-                                    }
-                                    let (mut su, mut sv, mut s凸, mut n) = (0.0f64, 0.0f64, 0.0f64, 0usize);
-                                    for i in 0..格.len() { if 簇[i] { su += 格[i].0; sv += 格[i].1; s凸 += 格[i].2; n += 1; } }
-                                    let (bu, bv) = (su / n as f64, sv / n as f64);
-                                    p.补抓凸 = s凸 / n as f64; // 量到的物高,段13 探针 z 抬 0.5×它
-                                    let d = (bu - au, bv - av);
-                                    if let Ok(((dx, dy), _)) = probe::image_to_plane_damped(&jj, &js, d) {
-                                        let l = (dx * dx + dy * dy).sqrt();
-                                        let cap = 4.0 * 张开;
-                                        let k = if l > cap { cap / l } else { 1.0 };
-                                        找到 = Some([dx * k, dy * k]);
-                                        println!("[服]   睁眼:峰簇 ({:.3},{:.3})·{}格/带内{} ⇒ 基外步 ({:+.3},{:+.3}) m", bu, bv, n, 格.len(), dx * k, dy * k);
-                                    }
-                                }
-                            }
-                            找到
-                        } else { None };
+                        let 踩峰 = if p.补抓次 < 24 && p.补抓基[0].is_finite() { 睁扫(p) } else { None };
                         if let Some(步) = 踩峰 {
                             p.指尖 = [p.补抓基[0] + 步[0], p.补抓基[1] + 步[1], p.补抓基[2]];
                             p.补抓次 += 1;
