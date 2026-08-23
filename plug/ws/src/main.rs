@@ -2518,11 +2518,21 @@ fn 服务<S: std::io::Read + std::io::Write>(
                                     let ru = (jj[3] * 张开 / det).powi(2) + (jj[2] * 张开 / det).powi(2);
                                     ru.sqrt().clamp(0.03, 0.15)
                                 } else { 0.06 };
+                                // 🔴 扫描的步距与窗口也按量出来的量定(不再是写死的画幅比例):
+                                // 步距 = 一个爪口在画面里的宽度(比这更细分辨不出来);
+                                // 窗口 = 量到的可达半径在画面里有多大(手够不到的地方不必扫)。
+                                let 增益j = {
+                                    let r0 = (jj[0]*jj[0] + jj[1]*jj[1]).sqrt();
+                                    let r1 = (jj[2]*jj[2] + jj[3]*jj[3]).sqrt();
+                                    r0.max(r1)
+                                };
+                                let 步距 = (张开 * 增益j).clamp(0.008, 0.05);
+                                let 窗 = (可达带[1] * 增益j).clamp(0.10, 0.45);
                                 let mut 格: Vec<(f64, f64, f64)> = Vec::new();
-                                let mut uu = (p.物像素.0 - 0.30).max(0.02);
-                                while uu < (p.物像素.0 + 0.30).min(0.98) {
-                                    let mut vv = (p.物像素.1 - 0.30).max(0.02);
-                                    while vv < (p.物像素.1 + 0.30).min(0.98) {
+                                let mut uu = (p.物像素.0 - 窗).max(0.02);
+                                while uu < (p.物像素.0 + 窗).min(0.98) {
+                                    let mut vv = (p.物像素.1 - 窗).max(0.02);
+                                    while vv < (p.物像素.1 + 窗).min(0.98) {
                                         if let Some((凸, _)) = 凸起全(uu, vv) {
                                             if 凸 > 0.010 && 凸 <= 1.5 * 张开 {
                                                 let 避 = 手px.map_or(false, |(hu, hv)|
@@ -2530,9 +2540,9 @@ fn 服务<S: std::io::Read + std::io::Write>(
                                                 if !避 { 格.push((uu, vv, 凸)); }
                                             }
                                         }
-                                        vv += 0.025;
+                                        vv += 步距;
                                     }
-                                    uu += 0.025;
+                                    uu += 步距;
                                 }
                                 if !格.is_empty() {
                                     let mut 种 = 0usize; let mut 最 = f64::MAX;
@@ -2547,7 +2557,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                                             if 簇[i] { continue; }
                                             let mut 邻 = false;
                                             for j in 0..格.len() {
-                                                if 簇[j] && ((格[i].0 - 格[j].0).powi(2) + (格[i].1 - 格[j].1).powi(2)).sqrt() < 0.06 { 邻 = true; break; }
+                                                if 簇[j] && ((格[i].0 - 格[j].0).powi(2) + (格[i].1 - 格[j].1).powi(2)).sqrt() < 2.0 * 步距 { 邻 = true; break; }
                                             }
                                             if 邻 { 簇[i] = true; 长 = true; }
                                         }
@@ -3148,7 +3158,18 @@ fn 服务<S: std::io::Read + std::io::Write>(
                                                             }
                                                             println!("[服]   指尖端锚:形心 ({:.3},{:.3}) → 端 ({:.3},{:.3})", c.u, c.v, au, av);
                                                         }
-                                                        let half = ((img.0 as f64) * 0.03) as usize;
+                                                        // 🔴 认块大小按量出来的量定(owner 2026-08-23 点名画幅常数是债):
+                                                        // 块 = 自己的爪口在画面里有多大 = 量到的张开 × 量到的换算增益。
+                                                        // 五指手爪口大,块自动变大;吸盘小,块自动变小。零机体假设。
+                                                        let half = {
+                                                            let g = body.get(Quantity::ImageJacobian).filter(|m| m.dim >= 4).map(|m| {
+                                                                let r0 = (m.value[0]*m.value[0] + m.value[1]*m.value[1]).sqrt();
+                                                                let r1 = (m.value[2]*m.value[2] + m.value[3]*m.value[3]).sqrt();
+                                                                r0.max(r1)
+                                                            }).unwrap_or(0.0);
+                                                            let 爪幅 = 张开 * g; // 爪口在画幅里的占比
+                                                            (((爪幅 * 0.5) * img.0 as f64) as usize).clamp(4, img.0 / 8)
+                                                        };
                                                         // 🔴 晃臂模式的模板从 晃帧[4](锚所在帧)剪 —— 结算首拍臂已
                                                         // 被拉回基点,live 帧里那块像素挪走了 13-50px,剪 live = 错块。
                                                         let 模板源: &Vec<u8> = if 晃臂 { &p.晃帧[4] } else { &img.2 };
@@ -3184,7 +3205,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
                                                                             let g = |a: f64, b: f64, sa: f64, sb: f64| ((a.abs() + 3.0 * sa).powi(2) + (b.abs() + 3.0 * sb).powi(2)).sqrt();
                                                                             let 增益 = g(m.value[0], m.value[1], m.uncertainty[0], m.uncertainty[1])
                                                                                 .max(g(m.value[2], m.value[3], m.uncertainty[2], m.uncertainty[3]));
-                                                                            let 上限 = 增益 * dw + 0.06; // +一个认块半径的容差(半 19px ≈ 0.03 画幅,两端)
+                                                                            let 半f = 帧.cams.get(p.相机).map(|i| p.模板半 as f64 / i.0 as f64).unwrap_or(0.03);
+                                                                            let 上限 = 增益 * dw + 2.0 * 半f; // 两端各一个量出来的认块半径
                                                                             if dpx > 上限 {
                                                                                 锚可信 = false;
                                                                                 println!("[服]   🔴 认手不可信:走 {:.3} m 爪像素却挪 {:.3} 画幅(这段路上限 {:.3})⇒ 丢弃,重量", dw, dpx, 上限);
@@ -3196,10 +3218,12 @@ fn 服务<S: std::io::Read + std::io::Write>(
                                                                         let dz = (here[2] - w0[2]).abs();
                                                                         let dw = ((here[0]-w0[0]).powi(2) + (here[1]-w0[1]).powi(2)).sqrt();
                                                                         let dpx2 = ((au - px0.0).powi(2) + (av - px0.1).powi(2)).sqrt();
+                                                                        // 分辨率 = 量出来的认块直径(不是写死的画幅比例)。
+                                                                        let 分辨 = 帧.cams.get(p.相机).map(|i| 2.0 * p.模板半 as f64 / i.0 as f64).unwrap_or(0.06);
                                                                         // 激励门:走得比自己一个爪口还短、或像素挪不过一个认块半径的两倍,
                                                                         // 就是噪声 —— 不喂尺、不判方向(N105 实锤:3cm/0.019 画幅的对子
                                                                         // 让方向判据来回横跳,步长跟着乱蹦)。
-                                                                        if 锚可信 && dz < 0.5 * 张开 && dw > 张开 && dpx2 > 0.06 {
+                                                                        if 锚可信 && dz < 0.5 * 张开 && dw > 张开 && dpx2 > 分辨 {
                                                                             对子.push(([here[0]-w0[0], here[1]-w0[1]], (au - px0.0, av - px0.1)));
                                                                             if 对子.len() > 32 { 对子.remove(0); }
                                                                             println!("[服]   尺对+1(走 {:.3} m ⇒ 像素挪 ({:+.3},{:+.3}));在线对子 {}", dw, au - px0.0, av - px0.1, 对子.len());
@@ -3212,17 +3236,18 @@ fn 服务<S: std::io::Read + std::io::Write>(
                                                                     if let (true, Some((w0, px0))) = (锚可信, 探锚) {
                                                                         if let Some(m) = body.get(Quantity::ImageJacobian).filter(|m| m.dim >= 4) {
                                                                             let (dwx, dwy) = (here[0] - w0[0], here[1] - w0[1]);
+                                                                            let 分辨2 = 帧.cams.get(p.相机).map(|i| 2.0 * p.模板半 as f64 / i.0 as f64).unwrap_or(0.06);
                                                                             let 激励 = (dwx*dwx + dwy*dwy).sqrt() > 张开
-                                                                                && ((au - px0.0).powi(2) + (av - px0.1).powi(2)).sqrt() > 0.06;
+                                                                                && ((au - px0.0).powi(2) + (av - px0.1).powi(2)).sqrt() > 分辨2;
                                                                             if 激励 {
                                                                             let (eu, ev) = (m.value[0]*dwx + m.value[1]*dwy, m.value[2]*dwx + m.value[3]*dwy);
                                                                             let (du_, dv_) = (au - px0.0, av - px0.1);
-                                                                            if du_.abs() > 0.01 && eu.abs() > 0.01 {
+                                                                            if du_.abs() > 0.5 * 分辨2 && eu.abs() > 0.5 * 分辨2 {
                                                                                 let n = if eu * du_ < 0.0 { -1.0 } else { 1.0 };
                                                                                 if n != 探号[0] { println!("[服]   方向自证:横轴判 {:+.0}(账本预期 {:+.3} 实测 {:+.3})", n, eu, du_); }
                                                                                 探号[0] = n;
                                                                             }
-                                                                            if dv_.abs() > 0.01 && ev.abs() > 0.01 {
+                                                                            if dv_.abs() > 0.5 * 分辨2 && ev.abs() > 0.5 * 分辨2 {
                                                                                 let n = if ev * dv_ < 0.0 { -1.0 } else { 1.0 };
                                                                                 if n != 探号[1] { println!("[服]   方向自证:纵轴判 {:+.0}(账本预期 {:+.3} 实测 {:+.3})", n, ev, dv_); }
                                                                                 探号[1] = n;
