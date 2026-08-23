@@ -3181,6 +3181,27 @@ fn 服务<S: std::io::Read + std::io::Write>(
                                                             好.and_then(|i| r.cands.get(i))
                                                         } else { r.cands.get(0) }
                                                     } else { r.cands.get(0) };
+                                                    // 🔴 响应块尺寸闸(N114 量出来的:晃爪两帧的差分块横跨 90% 画面
+                                                    // (u 0.09-1.00,v 0.40-1.00,2821 px)—— 那不是钳口,是整条手臂在动。
+                                                    // 拿这种巨块的形心当"爪像素",离真咬合中心差一个爪口量级,
+                                                    // 于是残差永远卡在 ~6cm(爪口 6.8cm)下不去。
+                                                    // 闸只用量出来的量:自己的爪口折成画幅 = 张开 × 换算增益;
+                                                    // 响应块任一边超过它的 3 倍 ⇒ 这不是我的爪,弃这个候选。
+                                                    let 爪幅闸 = body.get(Quantity::ImageJacobian).filter(|m| m.dim >= 4).map(|m| {
+                                                        let r0 = (m.value[0]*m.value[0] + m.value[1]*m.value[1]).sqrt();
+                                                        let r1 = (m.value[2]*m.value[2] + m.value[3]*m.value[3]).sqrt();
+                                                        3.0 * 张开 * r0.max(r1)
+                                                    });
+                                                    let c选 = c选.filter(|c| match 爪幅闸 {
+                                                        Some(lim) if lim > 0.0 => {
+                                                            let (wu, wv) = ((c.ext[2] - c.ext[0]).abs(), (c.ext[3] - c.ext[1]).abs());
+                                                            if wu > lim || wv > lim {
+                                                                println!("[服]   晃认:响应块 {:.3}×{:.3} 画幅 > 爪口的 3 倍({:.3})⇒ 整臂在动,不是爪,弃", wu, wv, lim);
+                                                                false
+                                                            } else { true }
+                                                        }
+                                                        _ => true,
+                                                    });
                                                     if let Some(c) = c选 {
                                                         // 🔴 指尖端锚(N45 定案:配对=0 时旧锚=双响形心,在指身中段 ——
                                                         // 收敛把形心怼上物心,指尖越过物体,合爪咬边挤出;空合同签名
