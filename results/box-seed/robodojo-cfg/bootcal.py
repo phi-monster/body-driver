@@ -15,7 +15,7 @@ class BootCalCommon:
     def __init__(self, config, app, **kwargs):
         super().__init__(config, app, **kwargs)
         self.reward_manager = RewardManager(self.num_envs)
-        self.step_lim = 20000
+        self.step_lim = 100000
 
     def _post_setup_scene(self, sim):
         super()._post_setup_scene(sim)

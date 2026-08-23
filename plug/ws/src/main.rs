@@ -332,6 +332,67 @@ impl<S: std::io::Read + std::io::Write> Robot for Plug<S> {
     }
 }
 
+
+/// 机体自报的相机标定:内参(每台 RGBD 相机出厂就带)+ 外参(装在哪)+ 手那个深度。
+///
+/// 🔴🔴 **读它不是机体假设** —— 和读关节角、读末端位姿是同一类事:机体发布什么就读什么。
+/// 自解整台相机是为"机体什么都不报"准备的后备;**报了还去自解,是拿一个估计量换掉一个已知量**。
+/// 实测代价(2026-08-23,N128):自解出 fx=0.09,而相机自报 0.450(**差 5 倍**),
+/// 于是尺算成「1 归一化单位 = 3.66 m」(真值约 1.18 m),
+/// 把一副 8 cm 的钳口量成 0.25 m —— 而这个数看起来完全正常,只有跟机体宽度对一下才露馅。
+/// 尺本身也只用自报的量:**手那一个像素上的深度 ÷ 焦距**,一个常数都不填。
+fn 自报相机(o: &rmpv::Value, 路: &[String], 手像素: Option<(f64, f64)>) -> Option<(point_gen::Eye, f64)> {
+    let 取键 = |k: &str| -> Option<rmpv::Value> {
+        let mut p = 路.to_vec();
+        if let Some(l) = p.last_mut() { *l = k.to_string(); }
+        取(o, &p)
+    };
+    let k = 取键("intrinsic_matrix").map(|v| 数组(&v))?;
+    let shape = 取键("shape").map(|v| 数组(&v))?;
+    if k.len() < 9 || shape.len() < 2 { return None; }
+    let (h, w) = (shape[0], shape[1]);
+    if !(w > 1.0 && h > 1.0) { return None; }
+    // 驱动内部一律用**画幅比例**,所以把像素单位的内参除以画幅。
+    let (fx, fy, cx, cy) = (k[0] / w, k[4] / h, k[2] / w, k[5] / h);
+    if !(fx.is_finite() && fy.is_finite() && fx > 0.0 && fy > 0.0) { return None; }
+    let e = 取键("extrinsic_matrix").map(|v| 数组(&v))?;
+    if e.len() < 16 { return None; }
+    let at = [e[3], e[7], e[11]];
+    // 相机→世界的旋转阵(行主序前三行前三列)转四元数 (w,x,y,z)。
+    let m = [[e[0], e[1], e[2]], [e[4], e[5], e[6]], [e[8], e[9], e[10]]];
+    let tr = m[0][0] + m[1][1] + m[2][2];
+    let q = if tr > 0.0 {
+        let sq = (tr + 1.0).sqrt() * 2.0;
+        [0.25 * sq, (m[2][1] - m[1][2]) / sq, (m[0][2] - m[2][0]) / sq, (m[1][0] - m[0][1]) / sq]
+    } else if m[0][0] > m[1][1] && m[0][0] > m[2][2] {
+        let sq = (1.0 + m[0][0] - m[1][1] - m[2][2]).sqrt() * 2.0;
+        [(m[2][1] - m[1][2]) / sq, 0.25 * sq, (m[0][1] + m[1][0]) / sq, (m[0][2] + m[2][0]) / sq]
+    } else if m[1][1] > m[2][2] {
+        let sq = (1.0 + m[1][1] - m[0][0] - m[2][2]).sqrt() * 2.0;
+        [(m[0][2] - m[2][0]) / sq, (m[0][1] + m[1][0]) / sq, 0.25 * sq, (m[1][2] + m[2][1]) / sq]
+    } else {
+        let sq = (1.0 + m[2][2] - m[0][0] - m[1][1]).sqrt() * 2.0;
+        [(m[1][0] - m[0][1]) / sq, (m[0][2] + m[2][0]) / sq, (m[1][2] + m[2][1]) / sq, 0.25 * sq]
+    };
+    // 尺:手那个像素上的深度 ÷ 焦距。取手周围一小片的中位数,免得单点噪声定尺。
+    let (hu, hv) = 手像素?;
+    let dv = 取键("depth")?;
+    let (dw, dh, dep) = wire::as_f32_grid(&dv)?;
+    let (cu, cv) = ((hu * dw as f64) as isize, (hv * dh as f64) as isize);
+    let r = (dw.min(dh) as isize / 40).max(2);
+    let mut 片: Vec<f64> = Vec::new();
+    for y in (cv - r).max(0)..(cv + r + 1).min(dh as isize) {
+        for x in (cu - r).max(0)..(cu + r + 1).min(dw as isize) {
+            let d = dep[y as usize * dw + x as usize];
+            if d.is_finite() && d > 0.0 { 片.push(d); }
+        }
+    }
+    if 片.is_empty() { return None; }
+    片.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let 深 = 片[片.len() / 2];
+    Some((point_gen::Eye { fx, fy, cx, cy, at, q }, 深 / fx))
+}
+
 /// 把此刻身体里量到的每一格写成驱动自己读得回去的那份 JSON,返回存了几格。
 ///
 /// 🔴🔴 **每量完一格就调一次,不要只在最后调。**
@@ -1779,6 +1840,23 @@ fn main() {
                     // 全模型解出焦距+主点+相机位姿,换算对**任何深度**成立;解不出来会具名拒绝。
                     let mut 可用: Vec<(usize, usize, u64, Option<f64>, Option<([f64; 4], [f64; 4])>)> = Vec::new();
                     for i in 0..台数 {
+                        // 🔴 机体自报的标定优先(见 `自报相机` 上面那段);报了才不用去解。
+                        let 自报 = plug.lay.cams.get(i).and_then(|路| {
+                            plug.last.as_ref().and_then(|o| {
+                                自报相机(o, 路, body.get(Quantity::HandPixel).filter(|m| m.dim >= 2).map(|m| (m.value[0], m.value[1])))
+                            })
+                        });
+                        if let Some((eye, 米每单位)) = 自报 {
+                            println!("      [自报相机] 第 {i} 台用**机体自己发布的**标定:fx={:.3} fy={:.3} 主点=({:.3},{:.3}) 相机在 ({:.3},{:.3},{:.3}) ⇒ 手那个深度上 1 归一化单位 = {:.5} m",
+                                eye.fx, eye.fy, eye.cx, eye.cy, eye.at[0], eye.at[1], eye.at[2], 米每单位);
+                            相机们.retain(|c| c.0 != i);
+                            相机们.push((i, eye, 米每单位));
+                            let 局 = 本相尺(&s.cam_shift, i);
+                            for &θ100 in &腕角集 {
+                                可用.push((腕角集.len(), i, θ100, Some(米每单位), 局));
+                            }
+                            continue;
+                        }
                         let 全 = match 全相机(&相机池, i) {
                             Ok((eye, 米每单位, d偏)) => {
                                 工具d = Some(d偏);

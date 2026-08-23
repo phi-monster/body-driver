@@ -13,7 +13,9 @@ LIVE=/root/cal_live.json
 IN=""
 [ -s "$LIVE" ] && IN="--in $LIVE"
 cd /root/body-layer
-BL_DUMP=/root/N$K/look BL_VID=/root/N$K/vid setsid nohup /root/.local/bin/bl-calibrate \
+# 🔴 钳口那一相加长:真配对产出率实测约 10%,而估计器**每个腕角**要 5 个点(4 个角 ⇒ 20 个)。
+# 它是一次性开机自检,量到就存进常驻文件,下次上电不用再量 —— 值得为它多花这一次。
+BL_SPAN_LEN=${BL_SPAN_LEN:-3000} BL_DUMP=/root/N$K/look BL_VID=/root/N$K/vid setsid nohup /root/.local/bin/bl-calibrate \
   --listen 9080 --out "$LIVE" $IN --eye 127.0.0.1:8077 \
   </dev/null >/root/N$K/cal.log 2>&1 &
 exit 0
