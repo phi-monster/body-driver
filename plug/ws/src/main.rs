@@ -3271,10 +3271,16 @@ fn 服务<S: std::io::Read + std::io::Write>(
                                                                         let (dwx, dwy) = (here[0] - w0[0], here[1] - w0[1]);
                                                                         let dw = (dwx * dwx + dwy * dwy).sqrt();
                                                                         let dpx = ((au - px0.0).powi(2) + (av - px0.1).powi(2)).sqrt();
-                                                                        if let Some(m) = body.get(Quantity::ImageJacobian).filter(|m| m.dim >= 4) {
+                                                                        // 🔴 合理性闸也换实测尺(N116:账本增益比实测小 4 倍 ⇒ 用账本算的上限小得离谱,闸形同虚设。
+                                                                        // 症状:实测对子说"走 +0.196 m ⇒ 像素挪 +0.146",下一次量到的爪像素反而离物更远,
+                                                                        // 步长 0.195→0.209→0.274 越算越大 —— 只有"这次量在爪上、下次量在臂上"能解释,闸没拦住。)
+                                                                        let 尺闸 = j_use.or_else(|| body.get(Quantity::ImageJacobian).filter(|m| m.dim >= 4)
+                                                                            .map(|m| ([m.value[0], m.value[1], m.value[2], m.value[3]],
+                                                                                      [m.uncertainty[0], m.uncertainty[1], m.uncertainty[2], m.uncertainty[3]])));
+                                                                        if let Some((jv, ju)) = 尺闸 {
                                                                             let g = |a: f64, b: f64, sa: f64, sb: f64| ((a.abs() + 3.0 * sa).powi(2) + (b.abs() + 3.0 * sb).powi(2)).sqrt();
-                                                                            let 增益 = g(m.value[0], m.value[1], m.uncertainty[0], m.uncertainty[1])
-                                                                                .max(g(m.value[2], m.value[3], m.uncertainty[2], m.uncertainty[3]));
+                                                                            let 增益 = g(jv[0], jv[1], ju[0], ju[1])
+                                                                                .max(g(jv[2], jv[3], ju[2], ju[3]));
                                                                             let 半f = 帧.cams.get(p.相机).map(|i| p.模板半 as f64 / i.0 as f64).unwrap_or(0.03);
                                                                             let 上限 = 增益 * dw + 2.0 * 半f; // 两端各一个量出来的认块半径
                                                                             if dpx > 上限 {
