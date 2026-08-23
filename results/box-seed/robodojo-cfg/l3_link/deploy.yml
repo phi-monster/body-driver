@@ -1,0 +1,13 @@
+# l3_link:驱动自己就是 ws 策略服务器,监听 9080;这里只声明协议和不分批。
+policy_name: l3_link
+protocol: ws
+host: 127.0.0.1
+port: 9080
+bench_name: null
+task_name: null
+env_cfg_type: null
+seed: null
+eval_batch: false
+
+action_type: joint
+result_dir: "./results/l3_link/"
