@@ -30,4 +30,11 @@ ssh vast5 "mkdir -p /root/N$K/look /root/N$K/vid && echo $NEW > /root/N$K/BUILD.
 sleep 5
 # sim 起在箱上写好的脚本里 —— 嵌套引号会把 setsid 那行悄悄吞掉(N107 实测:驱动起了、sim 没起)。
 ssh vast5 "bash /root/qisim.sh $K" || true
-echo "N$K 起了(指纹 $NEW,录像 /root/N$K/vid)"
+sleep 4
+SIMN=$(ssh vast5 'P=eval_pol; P="${P}icy"; pgrep -cf "$P" || true')
+HASLOG=$(ssh vast5 "test -f /root/N$K/sim.log && echo yes || echo no")
+if [ "$SIMN" != "1" ] || [ "$HASLOG" != "yes" ]; then
+  echo "🔴 起炮没成:sim 进程数=$SIMN(要 1)、sim.log 存在=$HASLOG(要 yes)。不算起成功,别去读日志。"
+  exit 5
+fi
+echo "N$K 起了(指纹 $NEW,录像 /root/N$K/vid,sim=1,sim.log 已建)"
