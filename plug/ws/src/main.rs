@@ -3620,7 +3620,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     let n = (0.05f64.ln() / (1.0 - 交付率).max(1e-6).ln()).ceil();
                     p.合等 = (n as u32).clamp(3, 120);
                     p.上爪读 = 帧.jaw.iter().copied().collect();
-                    println!("[服] 补抓位到(差 {:.3} m,卡 {})⇒ 合爪", 差, p.卡);
+                    println!("[服] 补抓位到(差 {:.3} m,卡 {})⇒ {}", 差, p.卡, if p.该合 { "合爪" } else { "就在这一点再量一次手" });
                     // 逐探取证(N84 定案:48 连空,坐标推断到头 —— 只有照片带能说清指尖
                     // 实际落点 vs 方块)。
                     if let (Ok(dd), Some(img)) = (std::env::var("BL_DUMP"), 帧.cams.get(p.相机)) {
@@ -3628,7 +3628,16 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         buf.extend_from_slice(&img.2);
                         let _ = std::fs::write(format!("{dd}/补抓{}_{}.pgm", 合序, p.补抓次), buf);
                     }
-                    p.段 = 2; p.卡 = 0;
+                    if p.该合 {
+                        p.段 = 2; p.卡 = 0;
+                    } else {
+                        // 不合:就在这个【将要下手的点】上重量一次手 —— 量的地方就是要动手的
+                        // 地方,两次量之间隔着一整步,对子激励足,判据才有信息量。
+                        p.预测爪 = None; p.模板.clear(); p.模板半 = 0; p.验拍 = 0; p.预测龄 = 0;
+                        p.晃态 = 1; p.晃等 = 0; p.晃次 = 0; p.晃帧.clear(); p.晃基 = None;
+                        p.伺服目标 = [f64::NAN; 3];
+                        p.段 = 0; p.卡 = 0;
+                    }
                 }
                 3 if 到 || p.卡 >= 15 => {
                     // 夹住 = 【任一通道】被撑住(收拢命令下读数停在半途)。逐通道判,
