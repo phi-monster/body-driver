@@ -3892,6 +3892,24 @@ fn 服务<S: std::io::Read + std::io::Write>(
                                 cx: eyeN.cx * w as f64, cy: eyeN.cy * h as f64,
                                 at: eyeN.at, q: eyeN.q,
                             };
+                            // 🔴 眼答到了我自己手上 ⇒ 这答案是毒的(N63 记过:手悬在场上重问,
+                            // 拿回 x=-1.096 的疯答案;N119 复发形态:裁剪框里混进胳膊 ——
+                            // "380 个三维点里 136 个比桌面高 12cm 以上(多半是自己的胳膊)",
+                            // 接触集随后交不出候选)。判据全是量出来的:眼指的像素离
+                            // 【我此刻的爪像素】比两个物跨还近 ⇒ 它指的是我,不是物。
+                            // 处置:不建计划,先让开视线再问一次(删复位键之后唯一合法的恢复动作)。
+                            let 爪此 = 上帧爪.or_else(|| body.get(Quantity::HandPixel)
+                                .filter(|m| m.value.len() >= 2).map(|m| (m.value[0], m.value[1])));
+                            if let Some((hu, hv)) = 爪此 {
+                                let d手 = ((u - hu).powi(2) + (v - hv).powi(2)).sqrt();
+                                if d手 < 2.0 * look.span_frac {
+                                    println!("[服] 🔴 眼答到了我自己手上(答 ({:.3},{:.3}) 离爪 ({:.3},{:.3}) 只有 {:.3} 画幅,不到两个物跨 {:.3})⇒ 让开视线再问", u, v, hu, hv, d手, 2.0 * look.span_frac);
+                                    要回看 = true;
+                                    出 = 回声.clone();
+                                    plug.act(&出);
+                                    match plug.sense() { Some(f) => { 帧 = f; continue } None => return }
+                                }
+                            }
                             let r = task::尺 {
                                 张开, 工具长, 可达内: 可达带[0], 可达: 可达带[1], 探幅, 工具列,
                             };
