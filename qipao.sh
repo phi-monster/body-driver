@@ -16,7 +16,14 @@ if [ "$PREV" != "none" ] && [ ! -f "$HOME/Downloads/N$((K-1)).SEEN" ]; then
   echo "🔴 拒绝起炮 N$K:上一炮 N$((K-1)) 的视频还没标记看过(缺 ~/Downloads/N$((K-1)).SEEN)。"
   exit 3
 fi
-echo "指纹 上一炮 $PREV → 本炮 $NEW(有改动,放行)"
+# 已有 sim 在跑就拒起(N119 实锤:上一炮的后台起炮任务延迟执行,起了一个 sim
+# 写着【上一炮的 sim.log】却连上这一炮的驱动 —— 这一炮真成功了也不会记在自己名下)。
+RUN=$(ssh vast5 'P=eval_pol; P="${P}icy"; pgrep -cf "$P"')
+if [ "$RUN" != "0" ]; then
+  echo "🔴 拒绝起炮 N$K:箱上还有 $RUN 个 sim 在跑。先清干净再起,免得这一炮的成绩记到别人账上。"
+  exit 4
+fi
+echo "指纹 上一炮 $PREV → 本炮 $NEW(有改动,放行);箱上无残留 sim"
 ssh vast5 "mkdir -p /root/N$K/look /root/N$K/vid && echo $NEW > /root/N$K/BUILD.md5 && cd /root/body-layer && BL_DUMP=/root/N$K/look BL_VID=/root/N$K/vid setsid nohup /root/.local/bin/bl-calibrate --listen 9080 --out /root/N$K/cal.json --in /root/M0/cal.json --eye 127.0.0.1:8077 </dev/null >/root/N$K/cal.log 2>&1 & exit 0" || true
 sleep 5
 # sim 起在箱上写好的脚本里 —— 嵌套引号会把 setsid 那行悄悄吞掉(N107 实测:驱动起了、sim 没起)。
