@@ -1,0 +1,14 @@
+# 官方 sim_config 的唯一改动:把 RTSubframes 提到 4。
+# 上游 background.py 自己写着 "`/omni/replicator/RTSubframes` must be > 3 to avoid blank textures
+# while randomizing dome light texture",然后**把它设成 3** —— 差一。
+# 实测(2026-08-23,N128):头相机整幅图最亮像素只有 61/255、均值 10.8,
+# 场景里桌子、机器人、物体一个都看不见,而自标定就在对着这张黑图认手 ⇒ 每次都"没有候选"。
+decimation: 1
+dt: 0.004
+render_interval: 10
+scene:
+  num_envs: 10
+  env_spacing: 7
+render:
+  carb_settings:
+    "/omni/replicator/RTSubframes": 4

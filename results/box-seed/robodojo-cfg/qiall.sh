@@ -9,6 +9,7 @@
 # ⚠️ 模式必须拆字面量写(`eval_pol` + `icy`),否则 pkill 会匹配到本脚本自己的命令行。
 set -u
 K="$1"
+TASK="${2:-general_pickup}"
 P1=eval_pol; P1="${P1}icy"
 P2=eval_cli; P2="${P2}ent"
 cnt() { echo $(( $(pgrep -cf "$P1" || true) + $(pgrep -cf "$P2" || true) )); }
@@ -22,8 +23,8 @@ if ss -ltn 2>/dev/null | grep -q ":9080 "; then echo "🔴 9080 还占着"; exit
 rm -rf "/root/N$K"
 bash /root/qidrv.sh "$K" || exit 3
 sleep 3
-bash /root/qisim.sh "$K"
+bash /root/qisim.sh "$K" "$TASK"
 sleep 25
 [ -f "/root/N$K/sim.log" ] && L=yes || L=no
-echo "起炮 N$K:sim 进程=$(cnt)(外层+python,要 2)· sim.log=$L(要 yes)· 驱动 $(wc -l < /root/N$K/cal.log) 行"
+echo "起炮 N$K($TASK):sim 进程=$(cnt)(外层+python,要 2)· sim.log=$L(要 yes)· 驱动 $(wc -l < /root/N$K/cal.log) 行"
 [ "$L" = "yes" ] || { echo "🔴 起炮没成"; exit 4; }

