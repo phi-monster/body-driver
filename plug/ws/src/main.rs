@@ -295,6 +295,80 @@ impl<S: std::io::Read + std::io::Write> Robot for Plug<S> {
     }
 }
 
+/// 把此刻身体里量到的每一格写成驱动自己读得回去的那份 JSON,返回存了几格。
+///
+/// 🔴🔴 **每量完一格就调一次,不要只在最后调。**
+/// 只在末尾存,等于赌"这一炮能跑到底"。实测(2026-08-23,N128):评测一共只给
+/// 55 集 × 200 步,而自校准要上千步 —— 集数先用完,进程被对面关掉,
+/// **整轮量到的东西一格都没落地**,下一炮又从零开始。
+/// 增量落盘把"越用越强"从一句设计变成一个事实:跑到哪存到哪,下一炮 `--in` 接着量。
+fn 存标定(
+    out: &str,
+    body: &body_layer::Body,
+    相机们: &[(usize, point_gen::Eye, f64)],
+    探幅: f64,
+    跨度相机: usize,
+) -> usize {
+    let mut j = String::from("{\n  \"fingerprint\": \"self-measured\",\n  \"quantities\": {\n");
+    let mut first_q = true;
+    for q in [
+        Quantity::ImageJacobian, Quantity::HandPixel, Quantity::GripperSpan, Quantity::ArmWeight,
+        Quantity::Latency, Quantity::Backlash, Quantity::Reach, Quantity::ContactThreshold,
+        Quantity::SelfOcclusion, Quantity::StepDelivery, Quantity::ToolOffset,
+        Quantity::ToolAxisColumn, Quantity::Floor, Quantity::HomePose, Quantity::Friction,
+    ] {
+        let Some(m) = body.get(q) else { continue };
+        let n = (m.dim as usize).min(body_layer::measurement::MAX_DIM);
+        let arr = |v: &[f64]| -> String {
+            v.iter().map(|x| format!("{x}")).collect::<Vec<_>>().join(", ")
+        };
+        if !first_q {
+            j.push_str(",\n");
+        }
+        first_q = false;
+        j.push_str(&format!(
+            "    \"{}\": {{\"value\": [{}], \"uncertainty\": [{}], \"valid_lo\": [{}], \"valid_hi\": [{}], \"selftest_passed\": {}, \"provenance\": \"measured by this body during power-on self-calibration\"{}}}",
+            q.as_str(),
+            arr(&m.value[..n]),
+            arr(&m.uncertainty[..n]),
+            arr(&m.valid_lo[..n]),
+            arr(&m.valid_hi[..n]),
+            m.selftest_passed,
+            // 接触阈只在量它的那个命令幅度上可比 —— 这一格没有它,下游就没法用。
+            if q == Quantity::ContactThreshold {
+                format!(", \"probed_at_command_m\": {}", 探幅)
+            } else if q == Quantity::GripperSpan {
+                // 🔴🔴 **单位必须写在文件里,不靠谁记得。** 这一格存**米** ——
+                // 消费者 `derive::approach_clearance_m` 读的就是米,不写死单位,
+                // 哪天换个人再改回画面单位,算出来的抓握余隙会**看起来完全正常**。
+                // 相机编号一起写:米是那台相机上自量的尺换出来的,出处要能追。
+                format!(", \"unit\": \"m\", \"camera\": {}", 跨度相机)
+            } else {
+                String::new()
+            }
+        ));
+    }
+    j.push_str("\n  }");
+    // 🔴 相机也是量出来的身体常数(这一格是头相机的必需品 —— 它固定在世界里,那个位姿
+    // 本身就是没量过的身体常数,DRIVER_GOAL §六早记了)。量到了就一起存,--in 时装回。
+    if !相机们.is_empty() {
+        j.push_str(",\n  \"cameras\": [");
+        for (k, (i, e, mpu)) in 相机们.iter().enumerate() {
+            if k > 0 { j.push_str(", "); }
+            j.push_str(&format!(
+                "{{\"cam\": {i}, \"fx\": {}, \"fy\": {}, \"cx\": {}, \"cy\": {}, \"at\": [{}, {}, {}], \"q\": [{}, {}, {}, {}], \"m_per_unit\": {}}}",
+                e.fx, e.fy, e.cx, e.cy, e.at[0], e.at[1], e.at[2], e.q[0], e.q[1], e.q[2], e.q[3], mpu));
+        }
+        j.push_str("]");
+    }
+    j.push_str("\n}\n");
+    let n格 = j.matches("\"provenance\"").count();
+    match std::fs::write(out, &j) {
+        Ok(_) => n格,
+        Err(e) => { println!("[装] 🔴 标定写不出去:{e} —— 这一轮的测量全丢了"); 0 }
+    }
+}
+
 fn main() {
     let mut listen: Option<u16> = None;
     let mut 读回: Option<String> = None;
@@ -2064,6 +2138,9 @@ fn main() {
                 拒过.insert(q.as_str());
             }
         }
+        // 🔴 每一轮结束就落一次盘 —— 见 `存标定` 上面那段:只在末尾存等于赌这一炮能跑到底。
+        let n格 = 存标定(&out, &body, &相机们, 探幅, 跨度相机);
+        println!("      [存] 已落盘 {n格} 格 ⇒ {out}");
     }
     // 🔴🔴 **量到了必须存得下来,而且要存成【驱动自己读得回去】的那个形状。**
     // 上一版这里写的是一句占位符 —— 也就是说,即使十五格全量到,产出也是空的:
@@ -2127,63 +2204,8 @@ fn main() {
             println!("[装]    {k:<20} {d:.4} m{}", if *d > 0.06 { "   ⚠️ 带偏" } else { "" });
         }
     }
-    let mut j = String::from("{\n  \"fingerprint\": \"self-measured\",\n  \"quantities\": {\n");
-    let mut first_q = true;
-    for q in [
-        Quantity::ImageJacobian, Quantity::HandPixel, Quantity::GripperSpan, Quantity::ArmWeight,
-        Quantity::Latency, Quantity::Backlash, Quantity::Reach, Quantity::ContactThreshold,
-        Quantity::SelfOcclusion, Quantity::StepDelivery, Quantity::ToolOffset,
-        Quantity::ToolAxisColumn, Quantity::Floor, Quantity::HomePose, Quantity::Friction,
-    ] {
-        let Some(m) = body.get(q) else { continue };
-        let n = (m.dim as usize).min(body_layer::measurement::MAX_DIM);
-        let arr = |v: &[f64]| -> String {
-            v.iter().map(|x| format!("{x}")).collect::<Vec<_>>().join(", ")
-        };
-        if !first_q {
-            j.push_str(",\n");
-        }
-        first_q = false;
-        j.push_str(&format!(
-            "    \"{}\": {{\"value\": [{}], \"uncertainty\": [{}], \"valid_lo\": [{}], \"valid_hi\": [{}], \"selftest_passed\": {}, \"provenance\": \"measured by this body during power-on self-calibration\"{}}}",
-            q.as_str(),
-            arr(&m.value[..n]),
-            arr(&m.uncertainty[..n]),
-            arr(&m.valid_lo[..n]),
-            arr(&m.valid_hi[..n]),
-            m.selftest_passed,
-            // 接触阈只在量它的那个命令幅度上可比 —— 这一格没有它,下游就没法用。
-            if q == Quantity::ContactThreshold {
-                format!(", \"probed_at_command_m\": {}", 探幅)
-            } else if q == Quantity::GripperSpan {
-                // 🔴🔴 **单位必须写在文件里,不靠谁记得。** 这一格存**米** ——
-                // 消费者 `derive::approach_clearance_m` 读的就是米,不写死单位,
-                // 哪天换个人再改回画面单位,算出来的抓握余隙会**看起来完全正常**。
-                // 相机编号一起写:米是那台相机上自量的尺换出来的,出处要能追。
-                format!(", \"unit\": \"m\", \"camera\": {}", 跨度相机)
-            } else {
-                String::new()
-            }
-        ));
-    }
-    j.push_str("\n  }");
-    // 🔴 相机也是量出来的身体常数(这一格是头相机的必需品 —— 它固定在世界里,那个位姿
-    // 本身就是没量过的身体常数,DRIVER_GOAL §六早记了)。量到了就一起存,--in 时装回。
-    if !相机们.is_empty() {
-        j.push_str(",\n  \"cameras\": [");
-        for (k, (i, e, mpu)) in 相机们.iter().enumerate() {
-            if k > 0 { j.push_str(", "); }
-            j.push_str(&format!(
-                "{{\"cam\": {i}, \"fx\": {}, \"fy\": {}, \"cx\": {}, \"cy\": {}, \"at\": [{}, {}, {}], \"q\": [{}, {}, {}, {}], \"m_per_unit\": {}}}",
-                e.fx, e.fy, e.cx, e.cy, e.at[0], e.at[1], e.at[2], e.q[0], e.q[1], e.q[2], e.q[3], mpu));
-        }
-        j.push_str("]");
-    }
-    j.push_str("\n}\n");
-    match std::fs::write(&out, &j) {
-        Ok(_) => println!("[装] 标定写到 {out}(量到 {} 格)", 成.len()),
-        Err(e) => println!("[装] 🔴 标定写不出去:{e} —— 这一轮的测量全丢了"),
-    }
+    let n格 = 存标定(&out, &body, &相机们, 探幅, 跨度相机);
+    println!("[装] 标定写到 {out}(量到 {n格} 格 · 本轮点名量到 {} 格)", 成.len());
 
     // ── 🔴🔴 标定完就是干活 —— 这就是"装上就能用"的后一半(owner 2026-08-19)。 ──
     // 观测里给什么指令,就做什么;缺哪一格,报哪一格的名字。没有任务名,没有机体名。

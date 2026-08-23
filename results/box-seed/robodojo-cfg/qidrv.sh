@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
-# 起驱动。不传 --in:旧种子标定是在 Franka 上量的,喂给 X5 是错的先验;
-# 从零自校准才是"观众点机体"的真实路径。
+# 起驱动。
+# 🔴 标定跨炮累积:常驻文件 /root/cal_live.json 既读又写。
+#    在这台箱子上从零量起(旧箱那份 M0/cal.json 是另一台机器上量的,不认)。
+#    驱动每量完一格就落一次盘 ⇒ 集数用完也不白跑,下一炮接着量。
 K="$1"
-# 端口占用闸:上一个驱动还活着就别起第二个 —— 第二个会 AddrInUse panic,
-# 而它的 > 重定向已经把 cal.log 截断了,活着那个的日志从此读不出来(实测一次)。
 if ss -ltn 2>/dev/null | grep -q ":9080 "; then
   echo "🔴 9080 已被占,先杀掉旧驱动再起"; exit 9
 fi
 mkdir -p /root/N$K/look /root/N$K/vid
 md5sum /root/.local/bin/bl-calibrate | cut -d' ' -f1 > /root/N$K/BUILD.md5
+LIVE=/root/cal_live.json
+IN=""
+[ -s "$LIVE" ] && IN="--in $LIVE"
 cd /root/body-layer
 BL_DUMP=/root/N$K/look BL_VID=/root/N$K/vid setsid nohup /root/.local/bin/bl-calibrate \
-  --listen 9080 --out /root/N$K/cal.json --eye 127.0.0.1:8077 \
+  --listen 9080 --out "$LIVE" $IN --eye 127.0.0.1:8077 \
   </dev/null >/root/N$K/cal.log 2>&1 &
 exit 0
