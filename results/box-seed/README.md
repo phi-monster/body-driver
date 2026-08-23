@@ -36,4 +36,13 @@
 | `camera_rgbd.yml` | `/root/RoboDojo/env_cfg/camera/` | 官方 `camera_config.yml` 把注释掉的 `distance_to_image_plane` 放开 |
 | `qisim.sh` | `/root/` | 起 sim(官方任务 + 官方机体) |
 | `qidrv.sh` | `/root/` | 起驱动。**不传 `--in`** —— 旧种子是 Franka 上量的,换机体就是错先验 |
+
+### 装完必跑的两步(漏了会在开场炸,报错完全不像缺步骤)
+1. **`/venv/RoboDojo/bin/python utils/update_embodiment_config_path.py`**(在 `/root/RoboDojo` 下跑)
+   把 `Assets/Robots/*/curobo_tmp.yml` 里的 `${ASSETS_PATH}` 换成绝对路径,生成 `curobo.yml`。
+   不跑 ⇒ `FileNotFoundError: .../Assets/Robots/x5/curobo.yml`。
+2. **自写的 env_cfg 里 `config_name` 必须写 `arx_x5`**,不能写文件名。
+   布局按 `Assets/Eval_Layout/RoboDojo/<config_name>/<seed>/` 查,官方只发 `arx_x5` 的那套;
+   写成别的 ⇒ `FileNotFoundError: .../Eval_Layout/RoboDojo/<你的名字>/0`。
+   `arx_x5/0/` 下 `general_pickup_*.json` 共 **55** 个 ⇒ **官方一轮 = 55 集**,这就是绝对分母。
 官方把深度注释掉了,而驱动靠深度找东西;Gemini_345Lg 本来就是 RGBD 相机,打开的是它已有的通道,不是加特权观测。

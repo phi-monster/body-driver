@@ -2,7 +2,7 @@
 # 官方把 distance_to_image_plane 注释掉了(只发 RGB),而本驱动是靠深度找东西的;
 # Gemini_345Lg 本身就是 RGBD 相机,打开的是它已有的通道,不是加特权观测。
 # 机体、场景、任务、判据全部沿用官方,不动。
-config_name: x5_grasp
+config_name: arx_x5   # 布局目录按 config_name 查(Eval_Layout/RoboDojo/<config_name>/<seed>/),官方只发 arx_x5 的
 
 config:
   sim: sim_config
