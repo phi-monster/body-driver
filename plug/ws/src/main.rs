@@ -3187,11 +3187,20 @@ fn 服务<S: std::io::Read + std::io::Write>(
                                                     // 于是残差永远卡在 ~6cm(爪口 6.8cm)下不去。
                                                     // 闸只用量出来的量:自己的爪口折成画幅 = 张开 × 换算增益;
                                                     // 响应块任一边超过它的 3 倍 ⇒ 这不是我的爪,弃这个候选。
-                                                    let 爪幅闸 = body.get(Quantity::ImageJacobian).filter(|m| m.dim >= 4).map(|m| {
+                                                    // 🔴 用【在线实测的尺】折爪幅,拿不到才退账本(N115 实锤:闸把真爪
+                                                    // 也误杀了 —— 被弃的块 0.052×0.017 画幅正是钳口量级,而闸门只给
+                                                    // 0.050。因为账本增益比实测小 4 倍:实测对子"走 0.153 m ⇒ 像素挪
+                                                    // 0.155"给出增益≈1.0,折出爪幅 0.068 画幅,正好对上观察到的真爪块;
+                                                    // 账本折出来只有 0.0167)。同一条纪律:能用实测就不用账本。
+                                                    let 爪幅闸 = j_use.map(|(jj, _)| {
+                                                        let r0 = (jj[0]*jj[0] + jj[1]*jj[1]).sqrt();
+                                                        let r1 = (jj[2]*jj[2] + jj[3]*jj[3]).sqrt();
+                                                        3.0 * 张开 * r0.max(r1)
+                                                    }).or_else(|| body.get(Quantity::ImageJacobian).filter(|m| m.dim >= 4).map(|m| {
                                                         let r0 = (m.value[0]*m.value[0] + m.value[1]*m.value[1]).sqrt();
                                                         let r1 = (m.value[2]*m.value[2] + m.value[3]*m.value[3]).sqrt();
                                                         3.0 * 张开 * r0.max(r1)
-                                                    });
+                                                    }));
                                                     let c选 = c选.filter(|c| match 爪幅闸 {
                                                         Some(lim) if lim > 0.0 => {
                                                             let (wu, wv) = ((c.ext[2] - c.ext[0]).abs(), (c.ext[3] - c.ext[1]).abs());
