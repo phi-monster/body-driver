@@ -18,7 +18,9 @@ if [ "$PREV" != "none" ] && [ ! -f "$HOME/Downloads/N$((K-1)).SEEN" ]; then
 fi
 # 已有 sim 在跑就拒起(N119 实锤:上一炮的后台起炮任务延迟执行,起了一个 sim
 # 写着【上一炮的 sim.log】却连上这一炮的驱动 —— 这一炮真成功了也不会记在自己名下)。
-RUN=$(ssh vast5 'P=eval_pol; P="${P}icy"; pgrep -cf "$P"')
+# ⚠️ pgrep -c 数到 0 会返回退出码 1,set -e 会把它当失败 ⇒ 脚本静默退出、什么都没起
+# (实测一次:EXIT=1、无输出、N120 目录都没建)。必须 || true 兜住。
+RUN=$(ssh vast5 'P=eval_pol; P="${P}icy"; pgrep -cf "$P" || true')
 if [ "$RUN" != "0" ]; then
   echo "🔴 拒绝起炮 N$K:箱上还有 $RUN 个 sim 在跑。先清干净再起,免得这一炮的成绩记到别人账上。"
   exit 4
