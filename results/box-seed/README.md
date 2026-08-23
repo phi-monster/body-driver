@@ -29,13 +29,17 @@
 上游 RoboDojo 已把 `cube_pickup` 改名 **`general_pickup`**(判据没变:抬 10 cm 算成、200 步),
 并且 **env_cfg 里没有任何 Franka 单臂配置** —— 之前 N1–N127 跑的 `franka_grasp.yml` + `cube_pickup.py`
 是我自己写的、**从没进过上游仓库也没进过本仓 git**,随旧箱一起没了。教训:场子定义属于实验的一部分,必须进 git。
-现在一律用官方双臂 ARX X5,配置在 `robodojo-cfg/`:
+跑的仍然是 **单臂 Franka**(重写版,已进 git);双臂 X5 那套留着备用。配置全在 `robodojo-cfg/`:
 | 文件 | 放到箱上哪 | 是什么 |
 |---|---|---|
 | `x5_grasp.yml` | `/root/RoboDojo/env_cfg/` | 官方 `arx_x5.yml` 的唯一改动:depth/intrinsic/extrinsic 打开 |
 | `camera_rgbd.yml` | `/root/RoboDojo/env_cfg/camera/` | 官方 `camera_config.yml` 把注释掉的 `distance_to_image_plane` 放开 |
 | `qisim.sh` | `/root/` | 起 sim(官方任务 + 官方机体) |
-| `qidrv.sh` | `/root/` | 起驱动。**不传 `--in`** —— 旧种子是 Franka 上量的,换机体就是错先验 |
+| `franka_grasp.yml` | `/root/RoboDojo/env_cfg/` | **在跑的场子**:单臂 Franka + 官方 `general_pickup` |
+| `franka_single.yml` | `/root/RoboDojo/env_cfg/robot/` | 一条居中的 Franka(官方那条 franka 是 `type: support`/`need_planner: False` 的配角,不能拿来抓) |
+| `camera_rgbd_franka.yml` | `/root/RoboDojo/env_cfg/camera/` | 只留头相机 + 打开深度(腕部相机挂在 X5 臂上,franka 没有) |
+| `x5_grasp.yml` / `camera_rgbd.yml` | 同上 | 双臂 X5 版,备用,**当前不跑** |
+| `qidrv.sh` | `/root/` | 起驱动。**不传 `--in`** —— 旧种子是 Franka 上量的,换机体才是错先验 |
 
 ### 装完必跑的两步(漏了会在开场炸,报错完全不像缺步骤)
 1. **`/venv/RoboDojo/bin/python utils/update_embodiment_config_path.py`**(在 `/root/RoboDojo` 下跑)

