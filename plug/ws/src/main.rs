@@ -3375,7 +3375,14 @@ fn 服务<S: std::io::Read + std::io::Write>(
                                                                     let j直 = j_use.or_else(|| body.get(Quantity::ImageJacobian).filter(|m| m.dim >= 4)
                                                                         .map(|m| ([m.value[0], m.value[1], m.value[2], m.value[3]],
                                                                                   [m.uncertainty[0], m.uncertainty[1], m.uncertainty[2], m.uncertainty[3]])));
-                                                                    match 睁扫(p, j直, 探号) {
+                                                                    // 🔴 在线尺一旦接管,就不许再在它外面乘自证符号(N123 实锤:峰簇
+                                                                    // 稳如磐石 (0.502,0.543)/(0.504,0.537)/(0.499,0.541) 6 格、下限闸也没
+                                                                    // 开火说明爪确实在动,可号还在 +1,+1 ↔ +1,-1 之间翻,步长跟着从
+                                                                    // 0.131 跳到 0.274)。原因是【双重纠正】:岭回归拟合出来的尺本身
+                                                                    // 已经把方向学对了,外面再乘一个独立判出来的符号 = 两套纠正互相打架。
+                                                                    // 自证符号只在退回账本尺时才有意义(账本方向是错的,N116 已实锤)。
+                                                                    let 用号 = if j_use.is_some() { [1.0, 1.0] } else { 探号 };
+                                                                    match 睁扫(p, j直, 用号) {
                                                                         Some(步) => {
                                                                             p.指尖 = [p.补抓基[0] + 步[0], p.补抓基[1] + 步[1], p.补抓基[2]];
                                                                             上探步 = Some(步);
