@@ -2624,23 +2624,59 @@ fn 服务<S: std::io::Read + std::io::Write>(
                                     // 且【不加排手圈】(排手圈的存在就是为了躲开爪,这一遍要的正是爪)。
                                     let mut 爪相对: Option<(f64, f64)> = None;
                                     if p.补抓凸.is_finite() && p.补抓凸 > 0.0 {
-                                        let (mut hu, mut hv, mut hn) = (0.0f64, 0.0f64, 0usize);
+                                        // 🔴 谁是爪,由【晃钳口】说了算;它在哪,由【深度形心】说了算。
+                                        // 文档 N21 记着:光靠"凸得比物高"分不出爪和胳膊 —— "臂身本就高于桌面",
+                                        // 手肘、底座立柱全会被算成爪,形心被拖到胳膊上(今晚 N109/N112 复现过)。
+                                        // 而晃钳口是唯一能【唯一识别】爪的信号:只有爪跟着开合动,胳膊不会。
+                                        // ⇒ 分工:晃出来的爪像素只当【种子】(粗决策,19 px 噪声足够选对块),
+                                        //   位置取那一块深度凸起的形心(细定位,与物同源、误差相消)。
+                                        let mut 高格: Vec<(f64, f64)> = Vec::new();
                                         let mut au2 = (p.物像素.0 - 窗).max(0.02);
                                         while au2 < (p.物像素.0 + 窗).min(0.98) {
                                             let mut av2 = (p.物像素.1 - 窗).max(0.02);
                                             while av2 < (p.物像素.1 + 窗).min(0.98) {
                                                 if let Some((凸h, _)) = 凸起全(au2, av2) {
-                                                    if 凸h > 3.0 * p.补抓凸 { hu += au2; hv += av2; hn += 1; }
+                                                    if 凸h > 3.0 * p.补抓凸 { 高格.push((au2, av2)); }
                                                 }
                                                 av2 += 步距;
                                             }
                                             au2 += 步距;
                                         }
+                                        // 以晃出来的爪像素为种子,连通生长取【那一块】,不是所有高格的形心。
+                                        let (mut hu, mut hv, mut hn) = (0.0f64, 0.0f64, 0usize);
+                                        if !高格.is_empty() {
+                                            let mut 种 = 0usize; let mut 最 = f64::MAX;
+                                            for (i, g) in 高格.iter().enumerate() {
+                                                let d = ((g.0 - au).powi(2) + (g.1 - av).powi(2)).sqrt();
+                                                if d < 最 { 最 = d; 种 = i; }
+                                            }
+                                            let mut 属: Vec<bool> = vec![false; 高格.len()]; 属[种] = true;
+                                            loop {
+                                                let mut 长 = false;
+                                                for i in 0..高格.len() {
+                                                    if 属[i] { continue; }
+                                                    let mut 邻 = false;
+                                                    for j in 0..高格.len() {
+                                                        if 属[j] && ((高格[i].0-高格[j].0).powi(2) + (高格[i].1-高格[j].1).powi(2)).sqrt() < 2.0*步距 { 邻 = true; break; }
+                                                    }
+                                                    if 邻 { 属[i] = true; 长 = true; }
+                                                }
+                                                if !长 { break; }
+                                            }
+                                            for i in 0..高格.len() { if 属[i] { hu += 高格[i].0; hv += 高格[i].1; hn += 1; } }
+                                        }
                                         if hn >= 2 {
-                                            爪相对 = Some((hu / hn as f64, hv / hn as f64));
-                                            println!("[服]   同源对准:爪格 {} 个 ⇒ 爪像素 ({:.3},{:.3}) · 物 ({:.3},{:.3}) · 相对差 {:.3} 画幅",
-                                                hn, hu / hn as f64, hv / hn as f64, bu, bv,
-                                                ((bu - hu / hn as f64).powi(2) + (bv - hv / hn as f64).powi(2)).sqrt());
+                                            let (cu, cv) = (hu / hn as f64, hv / hn as f64);
+                                            // 种子与形心差太远(超过一个物跨的四倍)⇒ 连通块把胳膊也吞了,不信。
+                                            let d种 = ((cu - au).powi(2) + (cv - av).powi(2)).sqrt();
+                                            if d种 <= 4.0 * p.物跨 {
+                                                爪相对 = Some((cu, cv));
+                                                println!("[服]   同源对准:爪块 {}/{} 格(种子 ({:.3},{:.3}))⇒ 爪 ({:.3},{:.3}) · 物 ({:.3},{:.3}) · 相对差 {:.4} 画幅",
+                                                    hn, 高格.len(), au, av, cu, cv, bu, bv,
+                                                    ((bu - cu).powi(2) + (bv - cv).powi(2)).sqrt());
+                                            } else {
+                                                println!("[服]   同源对准:爪块形心离种子 {:.3} 画幅(超 4 个物跨)⇒ 连通块吞进了胳膊,不信,退回锚对", d种);
+                                            }
                                         }
                                     }
                                     // 🔴 簇的身份闸(N112 实锤:峰簇在 (0.500,0.534) 稳了两轮后
