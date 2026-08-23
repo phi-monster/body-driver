@@ -2443,6 +2443,16 @@ fn 服务<S: std::io::Read + std::io::Write>(
             接触阈.unwrap(), 原位.clone().unwrap(), 交付率.unwrap(), 探幅.unwrap(),
         );
 
+        // 🔴 逐帧录像(owner 2026-08-23 死令:每炮存视频,人亲眼看完才准起下一炮)。
+        // BL_VID=<目录> ⇒ 每 4 拍落一帧(约 2 Hz,够看清动作又不撑爆盘),事后 ffmpeg 编片。
+        // 真相在像素里的时候看数字不算验证 —— 今晚三次定案全是照片给的。
+        if 拍 % 4 == 0 {
+            if let (Ok(vd), Some(img)) = (std::env::var("BL_VID"), 帧.cams.get(0)) {
+                let mut buf = format!("P5\n{} {}\n255\n", img.0, img.1).into_bytes();
+                buf.extend_from_slice(&img.2);
+                let _ = std::fs::write(format!("{vd}/{:06}.pgm", 拍 / 4), buf);
+            }
+        }
         let cmd = if let Some(p) = &mut 计划 {
             // ── 走航点 ────────────────────────────────────────────────
             let ax = task::列(&p.q, 工具列 % 3);
