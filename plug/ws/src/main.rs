@@ -97,9 +97,21 @@ impl<S: std::io::Read + std::io::Write> Plug<S> {
             // 实测:握手回包少了 server / server_instance_id,客户端就停在握手之后
             // **一直心跳**,2600 帧一个观测都没发过。
             let payload = if fname == "get_action" {
+                // 🔴🔴 **没有新命令时不许回空 —— 回"照现在这样保持"。**
+                // 空动作在线上是一句"我没意见",而评测循环把它读成"这一集到此为止":
+                // 实测(2026-08-23,N128)每一集都在第一拍结束,19 集全废,
+                // 而两侧零报错 —— 驱动在等下一帧观测,sim 在开下一集,谁都没错。
+                // 自标定的第一拍必然还没有命令(它要先看一帧才知道往哪走),
+                // 所以这一拍决定了**整个标定能不能开始**。
+                // 保持动作的每一个数都照抄机器人自己此刻报的:位姿、姿态、每个钳口通道。
+                // 读不到就还是回空 —— 那时候空是诚实的(我连它现在在哪都不知道)。
+                let 出 = match self.待发.take() {
+                    Some(a) => Some(a),
+                    None => self.保持(),
+                };
                 rmpv::Value::Map(vec![(
                     rmpv::Value::String("result".into()),
-                    rmpv::Value::Array(self.待发.take().into_iter().collect()),
+                    rmpv::Value::Array(出.into_iter().collect()),
                 )])
             } else if ack == "hello_ack" {
                 rmpv::Value::Map(vec![
@@ -120,6 +132,28 @@ impl<S: std::io::Read + std::io::Write> Plug<S> {
             }
         }
         false
+    }
+
+    /// 「照现在这样保持」:把机器人此刻报的位姿/姿态/每通道开合原样编成一条动作。
+    /// 它不是一个默认值,是一次**回声** —— 零机体假设,零常数。
+    fn 保持(&mut self) -> Option<rmpv::Value> {
+        let 位姿键: Vec<String> = self.lay.ee.iter().filter_map(|p| p.last().cloned()).collect();
+        let 钳口键: Vec<String> = self.lay.jaw.iter().filter_map(|p| p.last().cloned()).collect();
+        let n = 位姿键.len().min(钳口键.len());
+        if n == 0 { return None; }
+        let o = self.last.as_ref()?;
+        let mut 位姿: Vec<Vec<f64>> = Vec::with_capacity(n);
+        let mut 钳口: Vec<f64> = Vec::with_capacity(n);
+        for i in 0..n {
+            位姿.push(取(o, &self.lay.ee[i]).map(|v| 数组(&v)).unwrap_or_default());
+            钳口.push(取(o, &self.lay.jaw[i]).map(|v| 数组(&v)).and_then(|a| a.first().copied()).unwrap_or(1.0));
+        }
+        let 我 = 0usize;
+        let e = 位姿.get(我)?;
+        if e.len() < 7 { return None; }
+        let at = [e[0], e[1], e[2]];
+        let quat = [e[3], e[4], e[5], e[6]];
+        Some(wire::pose_action(&位姿键, &钳口键, 我, &at, &quat, &位姿, &钳口))
     }
 }
 
