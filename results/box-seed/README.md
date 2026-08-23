@@ -18,6 +18,15 @@
 5. `M0/cal.json` 放好(种子标定,省一次全量自校准)
 6. `qipao.sh <炮号>` 起炮
 
+### 🔴 渲染必装:`apt-get install -y libglu1-mesa`(缺它的症状完全不像缺库)
+少了 `libGLU.so.1`,`omni.iray.libs/bin/iray/libneuray.so` 加载失败 ⇒ 材质/着色器系统整片起不来 ⇒
+日志刷几十条 `Cannot load shader file 'rtx/raytracing/*.hlsl'` + `HydraEngine rtx failed creating scene renderer`,
+**相机返回空图**,而 IsaacSim 自己在两分钟后弹 `Kit appears to be hanging`(容器里没有 zenity,于是只留一行 `sh: 1: zenity: not found`)。
+表面看像"光追着色器没发布/驱动不对/箱子坏了",实际只差一个 6 MB 的系统包。
+**判定法**:`grep "libneuray" 日志` —— 有 `libGLU.so.1: cannot open shared object file` 就是它。
+**验证法**:跑 `rendertest.py`(最小场景 + 相机 30 步),要拿到非零图像;这一步把"渲染坏了"和"RoboDojo 配置错了"彻底分开。
+⚠️ 老箱能渲染是因为它碰巧装过这个包 —— 换箱后**必须先跑最小渲染测试再起炮**,否则会把渲染故障误判成驱动/任务的问题。
+
 ## 血账
 - 宿主 **133997**:8 张 GPU 全掉总线,stop+start 无效 —— 拉黑
 - 宿主 **113571**:镜像拉完卡在 loading 16 分钟不给端口 —— 拉黑
