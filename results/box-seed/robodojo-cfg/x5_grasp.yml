@@ -1,0 +1,23 @@
+# 官方 arx_x5 的唯一改动:把相机的深度/内参/外参打开。
+# 官方把 distance_to_image_plane 注释掉了(只发 RGB),而本驱动是靠深度找东西的;
+# Gemini_345Lg 本身就是 RGBD 相机,打开的是它已有的通道,不是加特权观测。
+# 机体、场景、任务、判据全部沿用官方,不动。
+config_name: x5_grasp
+
+config:
+  sim: sim_config
+  scene: default
+  robot: dual_x5
+  camera: camera_rgbd
+
+observation:
+  collect_freq: 25
+  robot:
+    joint_states: true
+    world_ee_state: true
+  vision:
+    approximate_depth: false
+    depth: true
+    intrinsic_matrix: true
+    extrinsic_matrix: true
+    shape: true

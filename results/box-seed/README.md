@@ -3,7 +3,8 @@
 ## 租机硬约束(选错就得重来一遍)
 | 项 | 要求 | 为什么 |
 |---|---|---|
-| 驱动版本 | **550 ≤ driver < 581** | 下界:vllm 0.27(眼)要 CUDA 12.8+,535.x 直接报 "NVIDIA driver too old (found 12020)";上界:≥581 的 Vulkan 回归让 IsaacSim 开场景段错误 |
+| 驱动版本 | **580.x**(窗口只有一个大版本宽) | 下界实测三次:535.247 报 "driver too old (found 12020)"、570.195 报 "too old (12080)" —— vllm 0.27 要 CUDA 13.0,只有 580 起才带;上界:≥581 的 Vulkan 回归让 IsaacSim 开场景段错误 |
+| 眼环境 Python | **3.12**,不能更低 | vllm 0.27 模块级 import flashinfer,而 flashinfer 在 3.10 崩 `type[...]`、3.11 崩 `array.array[...]`,3.12 才合法。卸掉 flashinfer ⇒ vllm ModuleNotFoundError;`--enforce-eager` 绕不开(是 import 期,不是运行期)。装法:`uv python install 3.12 && uv venv --python 3.12 /root/eyeenv3 && VIRTUAL_ENV=/root/eyeenv3 uv pip install vllm` |
 | GPU | ≥2 张(sim 一张、眼一张) | 眼和 sim 抢同一张卡会 OOM(旧箱实测:sim 占 7.8G 后 vllm 90% 配额起不来) |
 | 盘 | ≥200 GB | RoboDojo 39G + 眼模型 19G + 其余 |
 | 下行 | 越快越好(≥400 Mbps) | 要下 58 GB,带宽就是时间 |
@@ -21,4 +22,18 @@
 - 宿主 **133997**:8 张 GPU 全掉总线,stop+start 无效 —— 拉黑
 - 宿主 **113571**:镜像拉完卡在 loading 16 分钟不给端口 —— 拉黑
 - 宿主 **43488**:机器好,但驱动 535.247 太旧,vllm 起不来 —— 只适合纯 sim
-- 宿主 **24850**(驱动 570.195.03):当前在用
+- 宿主 **24850**:驱动 570.195.03,vllm 报 "too old (12080)" —— 拉黑
+- 宿主 **33061**(驱动 580.159.04 / CUDA 13.0,2×3090):当前在用,眼与 sim 同箱跑通
+
+## 场子(2026-08-23 换到官方配置)
+上游 RoboDojo 已把 `cube_pickup` 改名 **`general_pickup`**(判据没变:抬 10 cm 算成、200 步),
+并且 **env_cfg 里没有任何 Franka 单臂配置** —— 之前 N1–N127 跑的 `franka_grasp.yml` + `cube_pickup.py`
+是我自己写的、**从没进过上游仓库也没进过本仓 git**,随旧箱一起没了。教训:场子定义属于实验的一部分,必须进 git。
+现在一律用官方双臂 ARX X5,配置在 `robodojo-cfg/`:
+| 文件 | 放到箱上哪 | 是什么 |
+|---|---|---|
+| `x5_grasp.yml` | `/root/RoboDojo/env_cfg/` | 官方 `arx_x5.yml` 的唯一改动:depth/intrinsic/extrinsic 打开 |
+| `camera_rgbd.yml` | `/root/RoboDojo/env_cfg/camera/` | 官方 `camera_config.yml` 把注释掉的 `distance_to_image_plane` 放开 |
+| `qisim.sh` | `/root/` | 起 sim(官方任务 + 官方机体) |
+| `qidrv.sh` | `/root/` | 起驱动。**不传 `--in`** —— 旧种子是 Franka 上量的,换机体就是错先验 |
+官方把深度注释掉了,而驱动靠深度找东西;Gemini_345Lg 本来就是 RGBD 相机,打开的是它已有的通道,不是加特权观测。
