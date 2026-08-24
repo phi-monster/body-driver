@@ -636,12 +636,27 @@ fn main() {
                     // `DependencyMoved` 对它们**永远不会触发** —— 一个对着旧手眼量出来的
                     // 手点,会安安静静地和新量的手眼一起被用下去,而两者根本不是一套。
                     // 少装几格换"不许出现一份自己都不知道自己过期了的测量"。
-                    fn 依赖手眼(q: body_layer::measurement::Quantity) -> bool {
-                        use body_layer::measurement::Quantity::ImageJacobian;
-                        q == ImageJacobian
-                            || body_layer::schedule::prerequisites(q).iter().any(|d| 依赖手眼(*d))
+                    // 🔴🔴 **区分"用相机量出来的"和"值本身是相机坐标的"**(2026-08-24 owner 指出)。
+                    //
+                    // 上一版把**所有(传递地)依赖手眼的格**都不装回来,理由是"装回去的测量丢了依赖边,
+                    // `DependencyMoved` 永远不会对它们触发"。那条理由**只对【值本身写在相机坐标里】的格成立** ——
+                    // `hand_pixel` 是一个像素,相机一动它就不是同一件事了。
+                    //
+                    // 而 `gripper_span`(米)、`tool_offset`(米)、`tool_axis_column`(哪一列)、
+                    // `self_occlusion` 是**这只手自己的物理事实**:相机动了,手不会变长。
+                    // 它们被作废,只因为当初**是用相机量出来的** —— 那是**测量路径**,不是**物理依赖**。
+                    //
+                    // 🔴 对移动机体这条错误是致命的:人形的相机**每一秒都在动**,
+                    // 于是"每次上电重量手眼"在真机上等于"每一帧都要重量",下游五格永远立不住,
+                    // 驱动永远开不了工。实测(2026-08-23 N128):手眼重量一次 ⇒ 已经量到的
+                    // 爪宽 0.085 m、工具偏置、工具轴当场作废 ⇒ 抓取被自己挡在门外。
+                    //
+                    // ⇒ 只有**值写在相机坐标里**的两格不装回来;以米/以轴计的物理事实照常装回。
+                    fn 相机坐标里的(q: body_layer::measurement::Quantity) -> bool {
+                        use body_layer::measurement::Quantity::{HandPixel, ImageJacobian};
+                        q == ImageJacobian || q == HandPixel
                     }
-                    if 依赖手眼(q) {
+                    if 相机坐标里的(q) {
                         continue;
                     }
                     if let body_layer::store::Answer::Measured { value, uncertainty, valid_lo, valid_hi, selftest_passed, .. } = st.ask(q.as_str()) {
