@@ -2606,6 +2606,35 @@ fn 服务<S: std::io::Read + std::io::Write>(
     use body_layer::measurement::Quantity as Q;
     println!("[服] 标定日程走完 —— 进入干活模式:观测里给什么指令,就做什么。");
 
+    // 🔴🔴 **干活第一件事:回量到的原位。** 顺序很要紧 —— 解相机走的是
+    // 「把此刻的手投到画面上」,手不在原位时投影落在画幅外 ⇒ 解不出相机 ⇒ 整条瞎掉。
+    // 实测(2026-08-25,试跑 N9):不跑任何标定轮次时手停在上电位形,
+    // 两台相机都报「机体没自报可用的标定」,爪子也不在画面里(双响 0)。
+    // 回家之后同一份代码:到位差 **0.0001**,爪子双响 **108**。
+    let 回家点 = body.get(Q::HomePose).filter(|m| m.value.len() >= 3)
+        .map(|m| [m.value[0], m.value[1], m.value[2]]);
+    if let Some(h) = 回家点 {
+        if let Some(f0) = plug.sense() {
+            let q0 = f0.ee.first().map(|e| [e[3], e[4], e[5], e[6]]).unwrap_or([1.0, 0.0, 0.0, 0.0]);
+            let mut 上次: Option<[f64; 3]> = None;
+            let mut 稳 = 0u32;
+            let mut 末 = f0;
+            for _ in 0..400 {
+                plug.act(&Cmd::Ee { arm: 0, at: h, quat: q0, jaw: 1.0 });
+                match plug.sense() { Some(f) => 末 = f, None => break }
+                let 此 = 末.ee.first().map(|e| [e[0], e[1], e[2]]);
+                if 此.is_some() && 此 == 上次 { 稳 += 1; if 稳 >= 2 { break } } else { 稳 = 0 }
+                上次 = 此;
+            }
+            let 到 = 末.ee.first().map(|e| [e[0], e[1], e[2]]).unwrap_or(h);
+            println!("[服] 🏠 先回量到的原位 ({:.3},{:.3},{:.3}) ⇒ 到了 ({:.3},{:.3},{:.3}),差 {:.4}",
+                h[0], h[1], h[2], 到[0], 到[1], 到[2],
+                ((到[0]-h[0]).powi(2) + (到[1]-h[1]).powi(2) + (到[2]-h[2]).powi(2)).sqrt());
+        }
+    } else {
+        println!("[服] 🟡 没有量到的原位 ⇒ 就地开工(解相机与认爪都可能因此看不见)");
+    }
+
     // 🔴🔴 **解相机不许再当「量爪宽」那一相的副产品**(2026-08-25 实测定案)。
     //
     // 代价照记(炮1):`BL_ONLY` 跳过 `gripper_span` ⇒ **一台相机都没解出来** ⇒ 干活模式
@@ -2682,8 +2711,25 @@ fn 服务<S: std::io::Read + std::io::Write>(
         _ => 格值("gripper_span", 1).map(|v| v[0]),
     };
     if let Some(v) = 张开 { println!("[服] gripper_span 已有 {v:.4}(本轮量到或从 --in 装回)"); }
+    // 🔴🔴 **工具那两格也不再挡工**(2026-08-25,owner 死命令「删掉不量完不干活」)。
+    //
+    // `法兰 = 指尖 − 工具轴 × 工具长`。不知道工具长就当 **0** —— 而工具长是 0 的时候
+    // **工具轴乘什么都是 0**,于是「哪一列是工具轴」这个假设根本不需要做。
+    // ⇒ 这条降级**一个身体假设都不含**,不是"编了个数",是"少了一段已知的偏移"。
+    // 代价:手会比目标低一个指尖长,靠接触/堵转兜住 —— 缺东西的代价是**差**,不是**不能**。
+    //
+    // 炮1 实测(2026-08-25):`tool_axis_column` 给到 30 个循环、弧点稳定产出,
+    // 仍判 **0.0001 m**(≈0,读成"这具身体没有工具")⇒ 弧半径换米那一步还有账要查,
+    // 但它不该把**整个抓取**挡在门外。查它是下一轮的事,不是今晚不干活的理由。
     let 工具长 = 拿(Q::ToolOffset, 1, "tool_offset").map(|v| v[0]);
     let 工具列 = 拿(Q::ToolAxisColumn, 1, "tool_axis_column").map(|v| v[0] as usize);
+    缺.retain(|n| *n != "tool_offset" && *n != "tool_axis_column");
+    let 工具长 = 工具长.filter(|v| v.is_finite() && *v > 0.0).or_else(|| {
+        println!("[服] 🟡 不知道法兰到指尖有多长 ⇒ **当成 0**(工具长为 0 时工具轴乘什么都是 0,");
+        println!("[服]    所以「哪一列是工具轴」这个假设也不用做)。手会比目标低一个指尖长,靠接触/堵转兜住。");
+        Some(0.0)
+    });
+    let 工具列 = 工具列.or(Some(0));
     let 探幅 = std::fs::read_to_string(标定文件).ok()
         .and_then(|t| 旁注(&t, "contact_threshold", "probed_at_command_m"));
     if 探幅.is_none() { 缺.push("contact_threshold 的 probed_at_command_m 旁注"); }
@@ -2846,8 +2892,9 @@ fn 服务<S: std::io::Read + std::io::Write>(
         Some(v) => v,
         None => {
             println!("[服] 🔧 爪宽没量到 —— 不回声,当场看一眼自己的爪子(手臂冻住,只动钳口)");
-            let 冻 = 帧.ee.first().map(|e| [e[0], e[1], e[2]]).unwrap_or([0.0; 3]);
             let 冻q = 帧.ee.first().map(|e| [e[3], e[4], e[5], e[6]]).unwrap_or([1.0, 0.0, 0.0, 0.0]);
+            // 手已经在原位(干活入口第一件事就回了家,见上面 🏠 那一段)—— 就地冻住只动钳口。
+            let 冻 = 帧.ee.first().map(|e| [e[0], e[1], e[2]]).unwrap_or([0.0; 3]);
             // 合到读数不再变为止 —— 判据是「连着两拍读数一模一样」,没有任何阈值,
             // 也没有"几拍够了"这种拍脑袋的数(与 selfcal 量钳口落定用的是同一条)。
             let 落 = |plug: &mut Plug<S>, 帧: &mut Frame, j: f64, 上限: u32| {
