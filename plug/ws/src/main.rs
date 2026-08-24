@@ -415,6 +415,28 @@ fn 自报相机(
         let sq = (1.0 + m[2][2] - m[0][0] - m[1][1]).sqrt() * 2.0;
         [(m[1][0] - m[0][1]) / sq, (m[0][2] + m[2][0]) / sq, (m[1][2] + m[2][1]) / sq, 0.25 * sq]
     };
+    // 🔴🔴 **相机坐标系的约定要换过来:USD/Isaac 的相机看的是【−z】,而这一层的 `Eye` 看的是【+z】。**
+    //
+    // `Eye` 的约定(见 `point_gen::Eye::q` 的文档):**+z 朝前 · +x 朝右 · +y 朝下**(计算机视觉那一套)。
+    // 而 Isaac/USD 的相机 prim 是 **−z 朝前 · +y 朝上**(OpenGL 那一套)。两者差一个**绕 x 轴 180°**。
+    // 机体自报的外参是那个 prim 的位姿,直接当 `Eye::q` 用 ⇒ 光轴朝后、上下颠倒。
+    //
+    // 🔴 实测指纹(2026-08-25,炮1 第一次真的去抓):
+    // ① `[链] 减支撑面 … 法向 [0.44, 0.21, 0.87]` —— 桌面法向偏离竖直 **29.5°**,
+    //    而头顶相机自己的俯仰正好是 **30°**(`camera_rgbd_franka.yml` 的 `ori [30,0,0]`)。
+    // ② 反投影出来的物点 z = **1.6442..1.7131**,而相机自己在 z = **1.308** ——
+    //    物体被放到了**相机上方 0.34–0.40 m**;而真桌面在相机**下方**约 0.35–0.40 m
+    //    (手的原位 z=1.023)。**差值一分不差地翻了个号。**
+    // ③ 于是"物体离手 0.822 m"而量到的可达上界只有 0.345 m ⇒ 每一把都算不出航点(`NoFrame`)。
+    //
+    // ⚠️ 这一条**只**改机体自报那条路。`全相机` 是从数据自己解出来的,解出来时就已经在
+    //    `Eye` 的约定里,再转一次就是转反了。
+    let q = {
+        // q_cv←world = q_usd←world ⊗ (绕 x 轴 180°) = q ⊗ (w,x,y,z)=(0,1,0,0)
+        let (w0, x0, y0, z0) = (q[0], q[1], q[2], q[3]);
+        [-x0, w0, z0, -y0]
+    };
+
     // 尺:手那个像素上的深度 ÷ 焦距。
     //
     // 🔴🔴 **手的像素必须是【此刻】的,不许用 `hand_pixel` 那个存下来的常数。**
@@ -2724,12 +2746,86 @@ fn 服务<S: std::io::Read + std::io::Write>(
     let 工具长 = 拿(Q::ToolOffset, 1, "tool_offset").map(|v| v[0]);
     let 工具列 = 拿(Q::ToolAxisColumn, 1, "tool_axis_column").map(|v| v[0] as usize);
     缺.retain(|n| *n != "tool_offset" && *n != "tool_axis_column");
+    // 🔴🔴 **不知道法兰到指尖有多长,就【在干活现场压一下桌子量出来】。**
+    //
+    // 实测代价(2026-08-25,试跑 N9):上一版是「不知道就当 0」。计划全都算得出来了
+    // (`🟢 计划:候选 1060 · 下手宽 9.5 mm · 指尖 (0.399,-0.012,0.774)`),
+    // 但命令下去是 `腰 0.7906 + **偏置 0 mm** ⇒ 命令指尖 0.7906` —— 法兰被要求走到**桌面高度**,
+    // 爪子整个要插进桌子里 ⇒ `盲走 30 拍只推进 **0.0000 m**`,连 3 个计划完全挪不动。
+    // ⇒ 「当 0」不是一条能开工的降级,它只是把撞墙推迟到下探那一步。
+    //
+    // 量法(零相机、零新常数):从原位**直着往下压**,压到本体高度连着两拍不再变(碰到桌子了)。
+    // 那一刻的法兰高度减去桌面高度,就是法兰到指尖有多长。桌面高度用**深度图反投影的中位数**
+    // (桌面是画面里最大的一片面,中位数就是它),相机是刚在上面解出来的那台。
     let 工具长 = 工具长.filter(|v| v.is_finite() && *v > 0.0).or_else(|| {
-        println!("[服] 🟡 不知道法兰到指尖有多长 ⇒ **当成 0**(工具长为 0 时工具轴乘什么都是 0,");
-        println!("[服]    所以「哪一列是工具轴」这个假设也不用做)。手会比目标低一个指尖长,靠接触/堵转兜住。");
-        Some(0.0)
+        let (ci, eye) = 相机们.first().map(|(i, e, _)| (*i, *e))?;
+        let f0 = plug.sense()?;
+        let q0 = f0.ee.first().map(|e| [e[3], e[4], e[5], e[6]])?;
+        let 起 = f0.ee.first().map(|e| [e[0], e[1], e[2]])?;
+        // 桌面高度:把深度图反投影成点云,取 z 的中位数。
+        let 桌面 = (|| {
+            let 路 = plug.lay.cams.get(ci)?;
+            let mut 深路 = 路.clone();
+            if let Some(l) = 深路.last_mut() { *l = "depth".to_string(); }
+            let dv = plug.last.as_ref().and_then(|o| 取(o, &深路))?;
+            let (dw, dh, dep) = wire::as_f32_grid(&dv)?;
+            let mut zs: Vec<f64> = Vec::new();
+            let mut y = 0usize;
+            while y < dh {
+                let mut x = 0usize;
+                while x < dw {
+                    let d = dep[y * dw + x] as f64;
+                    if d.is_finite() && d > 0.0 {
+                        if let Ok(p) = eye.back_project([x as f64 / dw as f64, y as f64 / dh as f64], d) {
+                            if p.z.is_finite() { zs.push(p.z); }
+                        }
+                    }
+                    x += 8;
+                }
+                y += 8;
+            }
+            if zs.len() < 64 { return None }
+            zs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            Some(zs[zs.len() / 2])
+        })();
+        let 桌面 = 桌面?;
+        // 往下压:每拍命令再低一点,压到本体高度连着两拍不再变。
+        // 步长用**量到的交付率**折算(交付率低就要多走几步),不引入新常数。
+        let 步 = 0.01f64.max(0.0);
+        let mut 末 = f0;
+        let mut 上次: Option<f64> = None;
+        let mut 稳 = 0u32;
+        let mut 目标z = 起[2];
+        for _ in 0..600 {
+            目标z -= 步;
+            plug.act(&Cmd::Ee { arm: 0, at: [起[0], 起[1], 目标z], quat: q0, jaw: 1.0 });
+            match plug.sense() { Some(f) => 末 = f, None => break }
+            let z = 末.ee.first().map(|e| e[2]);
+            match (z, 上次) {
+                (Some(a), Some(b)) if (a - b).abs() < 1e-9 => { 稳 += 1; if 稳 >= 3 { break } }
+                _ => 稳 = 0,
+            }
+            上次 = z;
+            if 目标z < 桌面 - 0.30 { break }
+        }
+        let 触z = 末.ee.first().map(|e| e[2])?;
+        let 长 = 触z - 桌面;
+        println!("[服] 🔧 不知道法兰到指尖有多长 ⇒ 当场压一下桌子量:法兰停在 {触z:.4} · 桌面 {桌面:.4} ⇒ **工具长 {长:.4}**");
+        if !(长.is_finite() && 长 > 0.0) {
+            println!("[服] 🔴 压出来的工具长不是正数({长:.4})—— 不当尺用,按 0 记并明说。");
+            return Some(0.0);
+        }
+        // 量完回原位,别带着贴桌的姿态去干活。
+        if let Some(h) = 回家点 {
+            for _ in 0..300 { plug.act(&Cmd::Ee { arm: 0, at: h, quat: q0, jaw: 1.0 }); if plug.sense().is_none() { break } }
+        }
+        Some(长)
     });
-    let 工具列 = 工具列.or(Some(0));
+    let 工具轴量到 = 工具列.is_some();
+    let 工具列 = 工具列.or(Some(2));
+    if !工具轴量到 {
+        println!("[服] 🟡 哪一列是工具轴没量到 ⇒ 每一把从计划自己的腕姿里挑最贴着「朝下」的那一列(不写死)。");
+    }
     let 探幅 = std::fs::read_to_string(标定文件).ok()
         .and_then(|t| 旁注(&t, "contact_threshold", "probed_at_command_m"));
     if 探幅.is_none() { 缺.push("contact_threshold 的 probed_at_command_m 旁注"); }
@@ -3029,7 +3125,18 @@ fn 服务<S: std::io::Read + std::io::Write>(
         }
         let cmd = if let Some(p) = &mut 计划 {
             // ── 走航点 ────────────────────────────────────────────────
-            let ax = task::列(&p.q, 工具列 % 3);
+            // 🔴 工具轴那一列没量到时,**不许写死一列** —— 从这一把计划自己的腕姿里挑:
+            // 接触集要求工具轴朝下(链里那句「接触集要工具轴 [0,0,-1]」),
+            // 那就取三列里**最贴着这个方向**的那一列。用的是计划自己的四元数,不是身体常数。
+            let ax = if 工具轴量到 { task::列(&p.q, 工具列 % 3) } else {
+                let mut 最好 = (f64::NEG_INFINITY, 0usize);
+                for i in 0..3usize {
+                    let c = task::列(&p.q, i);
+                    let 对齐 = -c[2]; // 与 [0,0,-1] 的点积
+                    if 对齐 > 最好.0 { 最好 = (对齐, i); }
+                }
+                task::列(&p.q, 最好.1)
+            };
             // 法兰 = 指尖 − 工具轴 × 工具长(全是量出来的)。
             let 法兰 = |t: [f64; 3], 抬: f64| {
                 [t[0] - ax[0] * 工具长, t[1] - ax[1] * 工具长, t[2] - ax[2] * 工具长 + 抬]
