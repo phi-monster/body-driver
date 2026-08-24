@@ -1397,6 +1397,11 @@ fn main() {
             Quantity::GripperSpan => std::env::var("BL_SPAN_CYCLES").ok()
                 .and_then(|v| v.parse::<u32>().ok()).unwrap_or(40),
             Quantity::SelfOcclusion | Quantity::ArmWeight => 15,
+            // 🔴 工具轴/工具长 8 → 30(2026-08-25 炮1 实测):8 个循环只攒出
+            // **三列共 4 个弧点**,而估计器要每一列各拟一段弧 ⇒ 当场拒。
+            // 产出是「每个循环最多一个弧点、还要分摊到三列」,8 个循环从设计上就够不着 ——
+            // 与钳口那一格「6 档探针配 5 条门槛」是同一种病。
+            Quantity::ToolAxisColumn | Quantity::ToolOffset => 30,
             _ => 8,
         };
         // 🔴 周期由 selfcal 说了算(跨度那一相和别的不一样,见 `selfcal::周期`)——
@@ -2601,6 +2606,38 @@ fn 服务<S: std::io::Read + std::io::Write>(
     use body_layer::measurement::Quantity as Q;
     println!("[服] 标定日程走完 —— 进入干活模式:观测里给什么指令,就做什么。");
 
+    // 🔴🔴 **解相机不许再当「量爪宽」那一相的副产品**(2026-08-25 实测定案)。
+    //
+    // 代价照记(炮1):`BL_ONLY` 跳过 `gripper_span` ⇒ **一台相机都没解出来** ⇒ 干活模式
+    // 报「camera(标定里一台相机都没解出来)」⇒ 整个抓取开不了工。而**相机和爪宽毫无关系**:
+    // `自报相机` 走的是**机体自己发布的**内参 + 外参,只要一句「手在画面哪一点」就够
+    // (`hand_pixel`,已量到),它被写在跨度那一相里纯属历史。
+    // ⇒ 干活入口再试一次:机体自报了就直接用,不必先去量一个用不上的爪宽。
+    let mut 相机们: Vec<(usize, point_gen::Eye, f64)> = 相机们.to_vec();
+    if 相机们.is_empty() {
+        for i in 0..plug.lay.cams.len() {
+            let 报 = plug.lay.cams.get(i).and_then(|路| {
+                plug.last.as_ref().and_then(|o| {
+                    自报相机(
+                        o,
+                        路,
+                        body.get(Q::HandPixel).filter(|m| m.dim >= 2).map(|m| (m.value[0], m.value[1])),
+                        plug.lay.ee.first().map(|v| v.as_slice()),
+                    )
+                })
+            });
+            match 报 {
+                Some((eye, 米每单位)) => {
+                    println!("[服] 🟢 第 {i} 台相机用**机体自己发布的**标定:fx={:.3} 主点=({:.3},{:.3}) 相机在 ({:.3},{:.3},{:.3}) ⇒ 手那个深度上 1 单位 = {:.5}",
+                        eye.fx, eye.cx, eye.cy, eye.at[0], eye.at[1], eye.at[2], 米每单位);
+                    相机们.push((i, eye, 米每单位));
+                }
+                None => println!("[服]   第 {i} 台相机:机体没自报可用的标定"),
+            }
+        }
+    }
+    let 相机们: &[(usize, point_gen::Eye, f64)] = &相机们;
+
     // ── 这一件事(抓)要问的格。谁缺了报谁的名字。 ──────────────────────
     let mut 缺: Vec<&'static str> = Vec::new();
     let mut 取一 = |q: Q, n: usize, 名: &'static str| -> Option<Vec<f64>> {
@@ -2872,22 +2909,12 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 }
             }
             落(plug, &mut 帧, 1.0, 120); // 看完把爪子放回全开,别带着半合的姿态去干活
-            // 画幅 ⇒ 世界:那一点的深度 ÷ 焦距。两者都是量出来的(手眼那一格解出来的相机)。
+            // 画幅 ⇒ 世界:直接用**解相机时就算好的**「手那个深度上 1 归一化单位 = 多少」。
+            // 🔴 不在这里重算一遍深度÷焦距 —— 同一个量出现在两处,两处一定会分岔(仓规)。
             let 换算 = 最好.and_then(|(ci, 宽, _, _)| {
-                let eye = 相机们.iter().find(|(i, _, _)| *i == ci).map(|(_, e, _)| e)?;
-                let 路 = plug.lay.cams.get(ci)?;
-                let mut 深路 = 路.clone();
-                if let Some(last) = 深路.last_mut() { *last = "depth".to_string(); }
-                let dv = plug.last.as_ref().and_then(|o| 取(o, &深路))?;
-                let (dw, dh, dep) = wire::as_f32_grid(&dv)?;
-                // 近侧分位:手比背景近,取最近的那五分之一,别把桌子/墙的深度当成手的。
-                let mut 片: Vec<f64> = dep.iter().map(|z| *z as f64).filter(|z| z.is_finite() && *z > 0.0).collect();
-                if 片.is_empty() { return None }
-                片.sort_by(|a, b| a.partial_cmp(b).unwrap());
-                let 深 = 片[片.len() / 5];
-                let _ = (dw, dh);
-                if !(eye.fx.is_finite() && eye.fx.abs() > 1e-9) { return None }
-                Some(宽 * 深 / eye.fx)
+                let 米每单位 = 相机们.iter().find(|(i, _, _)| *i == ci).map(|(_, _, m)| *m)?;
+                if !(米每单位.is_finite() && 米每单位 > 0.0) { return None }
+                Some(宽 * 米每单位)
             });
             match 换算 {
                 Some(v) if v.is_finite() && v > 0.0 => {
@@ -2899,10 +2926,20 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 _ => {
                     // 看不出来也不许停工。退回到**另一个量出来的手部长度**(法兰到指尖),
                     // 并且**明说这是顶替、不是测量** —— 它只当长度尺用,合爪判据不受影响。
-                    let 顶 = 工具长.unwrap_or(f64::NAN);
-                    println!("[服] 🟡 这一眼没看出爪子(相机里它不够显眼)⇒ 长度尺**顶替**成量到的工具长 {顶:.4}");
-                    println!("[服]    这不是爪宽的测量值,是一把临时的尺;下一次晃爪看清了就换掉。");
-                    顶
+                    // 🔴 NaN 不许当尺:它会让下游**每一个比较都变成 false**,读起来像
+                    // 「什么都够不着」,而真相是「尺是坏的」—— 两件事要改的东西完全不同。
+                    match 工具长.filter(|v| v.is_finite() && *v > 0.0) {
+                        Some(v) => {
+                            println!("[服] 🟡 这一眼没看出爪子(相机里它不够显眼)⇒ 长度尺**顶替**成量到的工具长 {v:.4}");
+                            println!("[服]    这不是爪宽的测量值,是一把临时的尺;下一次晃爪看清了就换掉。");
+                            v
+                        }
+                        None => {
+                            println!("[服] 🔴 既没看出爪子、也没有量到的工具长 ⇒ **一把有限的长度尺都没有**。");
+                            println!("[服]    开不了工的原因是「尺不存在」,不是「够不着」—— 两者要改的东西不同。");
+                            f64::NAN
+                        }
+                    }
                 }
             }
         }
