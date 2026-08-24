@@ -44,6 +44,8 @@ struct Plug<S: std::io::Read + std::io::Write> {
     上次发出: Option<Value>,
     /// 对方刚发过 `reset`(= 新的一集开始了)。干活模式据此清掉上一集的计划与"试过"名单。
     复位过: bool,
+    /// 连拍计数(`BL_FILM`)。每炮都要有录像可看 —— 见 `sense` 里那段。
+    胶片: u64,
 }
 
 fn 取(v: &Value, path: &[String]) -> Option<Value> {
@@ -260,6 +262,27 @@ impl<S: std::io::Read + std::io::Write> Robot for Plug<S> {
                             f.cams.push((w, h, g));
                         }
                     }
+                }
+            }
+        }
+        // 🔴 **连拍(`BL_FILM=<目录>`)。** 死规矩:起下一炮之前要先看完这一炮的录像。
+        // 而这条线上一直没有录像 —— 事件式落图(`BL_DUMP`)只在"出事那一帧"存,
+        // 可**抓失败为什么失败**恰恰藏在没出事的那些帧里(手往哪偏、几时撞上、物体被推走)。
+        // 半分辨率 + 抽帧是为了让整炮装得下:原分辨率几千帧是几个 GB。
+        if let Ok(d) = std::env::var("BL_FILM") {
+            let 隔 = std::env::var("BL_FILM_STRIDE").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(6);
+            let 上限 = std::env::var("BL_FILM_MAX").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(6000);
+            let n = self.胶片;
+            self.胶片 += 1;
+            if 隔 > 0 && n % 隔 == 0 && n / 隔 < 上限 {
+                let _ = std::fs::create_dir_all(&d);
+                for (ci, (w, h, g)) in f.cams.iter().enumerate() {
+                    let (hw, hh) = (w / 2, h / 2);
+                    let mut buf = format!("P5\n{hw} {hh}\n255\n").into_bytes();
+                    for y in 0..hh {
+                        for x in 0..hw { buf.push(g[(y * 2) * w + x * 2]); }
+                    }
+                    let _ = std::fs::write(format!("{d}/c{ci}_{:06}.pgm", n / 隔), buf);
                 }
             }
         }
@@ -745,7 +768,7 @@ fn main() {
             }
         }
     }
-    let mut plug = Plug { ws, lay, last: first, 待发: None, 上次发出: None, 复位过: false };
+    let mut plug = Plug { ws, lay, last: first, 待发: None, 上次发出: None, 复位过: false, 胶片: 0 };
 
     // ── 🔴 看一眼钳口:BL_JAWLOOK=<目录> ────────────────────────────────
     // 为什么要有这个:跨度那一格的读数是「开度 0.34 与 0.45 量出同一个间距」,
