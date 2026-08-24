@@ -1556,7 +1556,7 @@ mod 测 {
     #[test]
     fn 顺路就采到了交付率样本() {
         let mut b = 假臂 { p: [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0], jaw: 1.0 };
-        let s = 跑一相(&mut b, Quantity::StepDelivery, 0, 20, 4, None, 0.0, None, None, None, None);
+        let s = 跑一相(&mut b, Quantity::StepDelivery, 0, 20, 4, None, 0.0, None, None, None, None, None);
         assert!(s.steps.len() >= 10, "每一次移动都该是一次交付样本,实得 {}", s.steps.len());
     }
 
@@ -1576,7 +1576,7 @@ mod 测 {
                 vec![]
             }
         }
-        let s = 跑一相(&mut 死臂, Quantity::StepDelivery, 0, 20, 4, None, 0.0, None, None, None, None);
+        let s = 跑一相(&mut 死臂, Quantity::StepDelivery, 0, 20, 4, None, 0.0, None, None, None, None, None);
         assert!(!s.steps.is_empty(), "必须采到样本");
         assert!(s.steps.iter().all(|(_, a)| *a == 0.0), "一台不动的身体,实到必须全是 0");
     }
@@ -1584,7 +1584,7 @@ mod 测 {
     #[test]
     fn 可达采到了到与不到两种() {
         let mut b = 假臂 { p: [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0], jaw: 1.0 };
-        let s = 跑一相(&mut b, Quantity::Reach, 0, 240, 4, None, 0.0, None, None, None, None);
+        let s = 跑一相(&mut b, Quantity::Reach, 0, 240, 4, None, 0.0, None, None, None, None, None);
         assert!(s.reach.iter().any(|(_, _, ok)| *ok), "近处该到得了");
         assert!(s.reach.iter().any(|(_, _, ok)| !*ok), "远处该到不了 —— 两边都要有,墙才夹得住");
     }
