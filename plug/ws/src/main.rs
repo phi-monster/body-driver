@@ -1325,19 +1325,11 @@ fn main() {
         // 一个循环 = 一次采样 = `静置 + 6` 拍。估计器要几个点,就给几个循环,乘出来就是预算。
         // 循环数按各自估计器的**最低门槛**给(跨度要每个腕角 ≥5 点 × 4 个角、产出率约 8 成 ⇒ 30)。
         // 少采的代价是常数更噪 —— 而噪到不能用时**闸会点名拒绝,不会编数**,这是能接受的失败方式。
-        // 🔴 开机只量【抓取真正要用的】。臂重和摩擦不在抓取的前置链上,
-        //    而且摩擦按设计要先有"一次被验证过的抓取"才谈得上量(它自己的拒绝理由就这么写)。
-        //    开机为它们烧预算 = 把时间花在不挡路的格上。它们留到干活时按需补。
-        if matches!(q, Quantity::ArmWeight | Quantity::Friction) {
-            println!("      [跳过] {} 不在抓取的前置链上,开机不量(留到干活时按需补)", q.as_str());
-            拒过.insert(q.as_str());
-            continue;
-        }
         let 循环数: u32 = match q {
-            Quantity::ImageJacobian | Quantity::HandPixel => 20,
-            Quantity::GripperSpan => 20,
-            Quantity::SelfOcclusion => 12,
-            _ => 5,
+            Quantity::ImageJacobian | Quantity::HandPixel => 30,
+            Quantity::GripperSpan => 30,
+            Quantity::SelfOcclusion | Quantity::ArmWeight => 15,
+            _ => 8,
         };
         let 步 = 循环数 * (静置 + 6);
         println!("      [预算] {} 个循环 × 周期 {} = {步} 拍(旧的固定预算是按 107 拍静置定的,早已过大)",
