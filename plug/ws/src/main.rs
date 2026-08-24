@@ -407,6 +407,29 @@ fn 存标定(
     探幅: f64,
     跨度相机: usize,
 ) -> usize {
+    // 🔴🔴 **落盘必须【合并】,不许用"此刻身体里有什么"改写整份文件。**
+    // 实测(2026-08-24):上一炮量到的爪宽 0.085 m 存在文件里,这一炮开机只装回 7 格,
+    // 第一次落盘就把文件从 11 格覆盖成 7 格 —— **一次成功的测量被一次不完整的开机抹掉**。
+    // 这让"跨炮累积"变成了"跨炮侵蚀":每次上电只要有一格没装回来,它就从磁盘上永久消失。
+    // ⇒ 先把磁盘上已有的读进来,身体里有的覆盖同名格,身体里没有的**原样留着**。
+    let 旧 = std::fs::read_to_string(out).unwrap_or_default();
+    let 旧格: Vec<(String, String)> = {
+        let mut v = Vec::new();
+        if let Some(i) = 旧.find("\"quantities\"") {
+            let 段 = &旧[i..];
+            // 每一格是 `    "名字": {...}` 一行(存标定自己就是这么写的)。
+            for 行 in 段.lines() {
+                let t = 行.trim();
+                if !t.starts_with('"') { continue }
+                let Some(j) = t[1..].find('"') else { continue };
+                let 名 = t[1..1 + j].to_string();
+                let Some(k) = t.find('{') else { continue };
+                let 体 = t[k..].trim_end_matches(',').to_string();
+                if 体.starts_with('{') && 体.ends_with('}') { v.push((名, 体)); }
+            }
+        }
+        v
+    };
     let mut j = String::from("{\n  \"fingerprint\": \"self-measured\",\n  \"quantities\": {\n");
     let mut first_q = true;
     for q in [
@@ -445,6 +468,15 @@ fn 存标定(
                 String::new()
             }
         ));
+    }
+    // 身体里没有、而磁盘上有的格,原样留着 —— 见函数头那段:不许把一次成功的测量抹掉。
+    for (名, 体) in &旧格 {
+        if body_layer::measurement::Quantity::ALL.iter().any(|q| q.as_str() == 名 && body.get(*q).is_some()) {
+            continue;
+        }
+        if !first_q { j.push_str(",\n"); }
+        first_q = false;
+        j.push_str(&format!("    \"{名}\": {体}"));
     }
     j.push_str("\n  }");
     // 🔴 相机也是量出来的身体常数(这一格是头相机的必需品 —— 它固定在世界里,那个位姿
@@ -669,7 +701,14 @@ fn main() {
                             m.valid_hi[i] = valid_hi.get(i).copied().unwrap_or(value[i]);
                         }
                         m.selftest_passed = selftest_passed;
-                        if body.submit(m).is_ok() { 装 += 1; }
+                        // 🔴 装不回来必须点名。实测(2026-08-24):11 格只装回 7 格,
+                        // 而**默默丢掉的那几格正好是最贵的**(爪宽 0.085 m 就这么没的),
+                        // 然后增量落盘按"此刻身体里有什么"改写文件,把它从磁盘上也抹了。
+                        // 一个 `.is_ok()` 吞掉的错误,让"越用越强"变成了"越用越少"。
+                        match body.submit(m) {
+                            Ok(_) => 装 += 1,
+                            Err(e) => println!("[装] 🔴 {} 装不回来:{e:?}", q.as_str()),
+                        }
                     }
                 }
                 println!("[装] 从 {path} 装回 {装} 格 —— 日程只会安排还欠的那几格");
