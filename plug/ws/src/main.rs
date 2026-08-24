@@ -1337,7 +1337,12 @@ fn main() {
         // 少采的代价是常数更噪 —— 而噪到不能用时**闸会点名拒绝,不会编数**,这是能接受的失败方式。
         let 循环数: u32 = match q {
             Quantity::ImageJacobian | Quantity::HandPixel => 30,
-            Quantity::GripperSpan => 30,
+            // 🔴 钳口要采够:估计器**按腕角分组**、每组要 ≥5 个点。
+            // 实测(2026-08-24,N128):30 个循环 ⇒ 腕角 0 那组 12 循环出 4 对(产出率够),
+            // 但**差一个点**被 NotEnoughSamples 拒 —— 纯粹是轮数不够,不是采法不对。
+            // 做成环境变量,免得为了调一个数重编一次。
+            Quantity::GripperSpan => std::env::var("BL_SPAN_CYCLES").ok()
+                .and_then(|v| v.parse::<u32>().ok()).unwrap_or(60),
             Quantity::SelfOcclusion | Quantity::ArmWeight => 15,
             _ => 8,
         };
