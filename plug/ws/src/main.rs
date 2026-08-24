@@ -377,7 +377,12 @@ impl<S: std::io::Read + std::io::Write> Robot for Plug<S> {
 /// 于是尺算成「1 归一化单位 = 3.66 m」(真值约 1.18 m),
 /// 把一副 8 cm 的钳口量成 0.25 m —— 而这个数看起来完全正常,只有跟机体宽度对一下才露馅。
 /// 尺本身也只用自报的量:**手那一个像素上的深度 ÷ 焦距**,一个常数都不填。
-fn 自报相机(o: &rmpv::Value, 路: &[String], 手像素: Option<(f64, f64)>) -> Option<(point_gen::Eye, f64)> {
+fn 自报相机(
+    o: &rmpv::Value,
+    路: &[String],
+    手像素: Option<(f64, f64)>,
+    ee路: Option<&[String]>,
+) -> Option<(point_gen::Eye, f64)> {
     let 取键 = |k: &str| -> Option<rmpv::Value> {
         let mut p = 路.to_vec();
         if let Some(l) = p.last_mut() { *l = k.to_string(); }
@@ -410,8 +415,26 @@ fn 自报相机(o: &rmpv::Value, 路: &[String], 手像素: Option<(f64, f64)>) 
         let sq = (1.0 + m[2][2] - m[0][0] - m[1][1]).sqrt() * 2.0;
         [(m[1][0] - m[0][1]) / sq, (m[0][2] + m[2][0]) / sq, (m[1][2] + m[2][1]) / sq, 0.25 * sq]
     };
-    // 尺:手那个像素上的深度 ÷ 焦距。取手周围一小片的中位数,免得单点噪声定尺。
-    let (hu, hv) = 手像素?;
+    // 尺:手那个像素上的深度 ÷ 焦距。
+    //
+    // 🔴🔴 **手的像素必须是【此刻】的,不许用 `hand_pixel` 那个存下来的常数。**
+    // 实测(2026-08-24,N128):`hand_pixel=(0.231,0.108)` 是认手那一相在 home 位形上量的,
+    // 而跨度相把手抬走、还绕腕转了四档 —— 那个像素此刻落在**手左边的远处背景**上。
+    // 深度图实测:手臂在 0.20–0.30 m,而那一点深 **1.84 m**(全图第 95 百分位)。
+    // 于是尺被放大约 6 倍(1 单位 = 5.06 m),**所有换算成米的量跟着放大 6 倍**,
+    // 而每一条读数单看都完全正常 —— 这正是"太干净的错"那一类。
+    // ⇒ 用**机体自己报的外参**把**此刻的末端位姿**投影到画面上,取那一点的深度。
+    //   投影用的全是机体发布的量(内参/外参)+ 本体感受,零手填数。
+    let eye0 = point_gen::Eye { fx, fy, cx, cy, at, q };
+    let 末端 = ee路
+        .and_then(|p| 取(o, p))
+        .map(|v| 数组(&v))
+        .filter(|a| a.len() >= 3)
+        .map(|a| [a[0], a[1], a[2]]);
+    let (hu, hv) = match 末端.and_then(|p| eye0.project(point_gen::P3 { x: p[0], y: p[1], z: p[2] })) {
+        Some(px) if (0.0..1.0).contains(&px[0]) && (0.0..1.0).contains(&px[1]) => (px[0], px[1]),
+        _ => 手像素?,
+    };
     let dv = 取键("depth")?;
     let (dw, dh, dep) = wire::as_f32_grid(&dv)?;
     let (cu, cv) = ((hu * dw as f64) as isize, (hv * dh as f64) as isize);
@@ -425,8 +448,12 @@ fn 自报相机(o: &rmpv::Value, 路: &[String], 手像素: Option<(f64, f64)>) 
     }
     if 片.is_empty() { return None; }
     片.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    let 深 = 片[片.len() / 2];
-    Some((point_gen::Eye { fx, fy, cx, cy, at, q }, 深 / fx))
+    // 🔴 取**近侧**分位(20%),不取中位。窗口跨在手的轮廓边上时,一半像素是手、
+    // 一半是它后面的远景,而中位数会滑到远景那一半去 —— 前景物体的深度是近侧那一支。
+    let 深 = 片[片.len() / 5];
+    println!("      [尺] 手投影到 ({hu:.3},{hv:.3}) · 该处近侧深度 {深:.3} m · 窗内 {} 点(最近 {:.3} / 最远 {:.3})",
+        片.len(), 片[0], 片[片.len() - 1]);
+    Some((eye0, 深 / fx))
 }
 
 /// 把此刻身体里量到的每一格写成驱动自己读得回去的那份 JSON,返回存了几格。
@@ -1981,7 +2008,12 @@ fn main() {
                         // 🔴 机体自报的标定优先(见 `自报相机` 上面那段);报了才不用去解。
                         let 自报 = plug.lay.cams.get(i).and_then(|路| {
                             plug.last.as_ref().and_then(|o| {
-                                自报相机(o, 路, body.get(Quantity::HandPixel).filter(|m| m.dim >= 2).map(|m| (m.value[0], m.value[1])))
+                                自报相机(
+                                    o,
+                                    路,
+                                    body.get(Quantity::HandPixel).filter(|m| m.dim >= 2).map(|m| (m.value[0], m.value[1])),
+                                    plug.lay.ee.first().map(|v| v.as_slice()),
+                                )
                             })
                         });
                         if let Some((eye, 米每单位)) = 自报 {
