@@ -1378,7 +1378,7 @@ fn main() {
             Err(_) => 4,
         };
         if selfcal::认块相(q) {
-            println!("      [协议] 静置 {静置} 拍(由这具身体的延迟+交付率推出),周期 {} 拍", 静置 + 6);
+            println!("      [协议] 静置 {静置} 拍(由这具身体的延迟+交付率推出),这一格周期 {} 拍", selfcal::周期(q, 静置));
         }
         // 🔴🔴 **步数预算按【要采几个循环】给,不是按固定拍数给。**(2026-08-24,owner 死线:自检十分钟)
         //
@@ -1390,18 +1390,27 @@ fn main() {
         // 少采的代价是常数更噪 —— 而噪到不能用时**闸会点名拒绝,不会编数**,这是能接受的失败方式。
         let 循环数: u32 = match q {
             Quantity::ImageJacobian | Quantity::HandPixel => 30,
-            // 🔴 钳口要采够:估计器**按腕角分组**、每组要 ≥5 个点。
-            // 实测(2026-08-24,N128):30 个循环 ⇒ 腕角 0 那组 12 循环出 4 对(产出率够),
-            // 但**差一个点**被 NotEnoughSamples 拒 —— 纯粹是轮数不够,不是采法不对。
-            // 做成环境变量,免得为了调一个数重编一次。
+            // 🔴 钳口:一个循环 = 一个开度档,一个腕角走满 `钳口窗数`(10)档,四个腕角 ⇒ 40。
+            // ⚠️ **撤回"再多给几十个循环就够了"**(2026-08-24 上午写的 60):产出率低不是
+            // 轮数问题 —— 是钳口每一档只给一拍、爪子只走了 4% 行程(见 `selfcal::周期`)。
+            // 波形改成每档保持 `静置` 拍之后,一档就是一个真样本,40 个循环刚好走满一遍。
             Quantity::GripperSpan => std::env::var("BL_SPAN_CYCLES").ok()
-                .and_then(|v| v.parse::<u32>().ok()).unwrap_or(60),
+                .and_then(|v| v.parse::<u32>().ok()).unwrap_or(40),
             Quantity::SelfOcclusion | Quantity::ArmWeight => 15,
             _ => 8,
         };
-        let 步 = 循环数 * (静置 + 6);
-        println!("      [预算] {} 个循环 × 周期 {} = {步} 拍(旧的固定预算是按 107 拍静置定的,早已过大)",
-            循环数, 静置 + 6);
+        // 🔴 周期由 selfcal 说了算(跨度那一相和别的不一样,见 `selfcal::周期`)——
+        // 在这里再写一次 `静置 + 6` 就是"同一个量出现在两处",而两处一定会分岔。
+        // 🔴🔴 **预算要取【周期】和【静置+6】里大的那个,不能直接用周期。**
+        // 实测(2026-08-24,N142,我自己当天下午改出来的回退):`周期()` 对**不走认块器**的格
+        // 返回 **1**(它们没有"空转两拍+晃钳口三拍"那套协议),于是预算 `循环数 × 周期`
+        // 从原来的 8×68=544 拍**塌成 8 拍** —— 采两个样本就被判 `NotEnoughSamples`。
+        // 后果:原位/齿隙/可达/臂重/接触阈/地板/摩擦**七格全线退化**,当天早上还能量到 8 格,
+        // 改完只剩 5 格,而**掉的每一格都是不走相机的那一类**,病相看起来像"这具身体变差了"。
+        // ⇒ 跨度那一相保留它加长后的周期(112 拍),其余格拿回 `静置 + 6` 的预算。
+        let 周期 = selfcal::周期(q, 静置).max(静置 + 6);
+        let 步 = 循环数 * 周期;
+        println!("      [预算] {} 个循环 × 周期 {周期} = {步} 拍", 循环数);
         // 🔴🔴 **回位点要用【量到的原位】,不是"连上来时手臂在哪"。**
         //
         // "连上来时在哪"什么都不是 —— 上一相把手臂停在哪儿它就是哪儿,而可达那一格的
@@ -2629,7 +2638,13 @@ fn 服务<S: std::io::Read + std::io::Write>(
             }
         }
     };
-    let 张开 = 拿(Q::GripperSpan, 1, "gripper_span").map(|v| v[0]);
+    // 🔴 爪宽**不进「缺」清单**:它缺了不挡开工(下面进循环前当场看一眼)。
+    // 把它留在清单里,就等于把那条已经删掉的「不量完不干活」偷偷留了一半。
+    let 张开 = match body.get(Q::GripperSpan) {
+        Some(m) if !m.value.is_empty() && m.selftest_passed => Some(m.value[0]),
+        _ => 格值("gripper_span", 1).map(|v| v[0]),
+    };
+    if let Some(v) = 张开 { println!("[服] gripper_span 已有 {v:.4}(本轮量到或从 --in 装回)"); }
     let 工具长 = 拿(Q::ToolOffset, 1, "tool_offset").map(|v| v[0]);
     let 工具列 = 拿(Q::ToolAxisColumn, 1, "tool_axis_column").map(|v| v[0] as usize);
     let 探幅 = std::fs::read_to_string(标定文件).ok()
@@ -2777,6 +2792,122 @@ fn 服务<S: std::io::Read + std::io::Write>(
     let mut 拍 = 0u64;
     let mut 帧 = match plug.sense() { Some(f) => f, None => return };
 
+    // ── 🔴🔴 「不量完不干活」这条规矩已删(owner 2026-08-25 死命令)────────────────
+    //
+    // 代价照记:从 N128 到 N143 一共 **14 炮,进入干活模式的次数是 0**。一次都没伸过手。
+    // 全部卡在开机自标定的一格上,而那一格(爪子张多开)**抓东西根本不需要它的绝对值** ——
+    // 合爪的判据是「每根手指的读数都停在半途 ⇒ 夹住了」,零尺度。它只被当成**长度尺**用。
+    //
+    // ⇒ 缺了它不许再回声不动。就在**干活现场**自己看一眼:
+    //   手臂冻住、只动钳口 ⇒ 画面里会动的那一块**按构造**就是钳口(这条构造性身份
+    //   本仓 2026-08-10 / 08-14 两次验通),那一块有多宽,就是这只爪子有多宽。
+    //   换算用**已经量到的**手眼账本 + 那一点的深度,不引入任何新常数。
+    //
+    // 这就是「自标定融进任务」的第一块:**先动起来,缺什么当场看一眼补上**,
+    // 而不是站着量四十分钟、量不出来就宣布干不了。
+    let 张开 = match 张开 {
+        Some(v) => v,
+        None => {
+            println!("[服] 🔧 爪宽没量到 —— 不回声,当场看一眼自己的爪子(手臂冻住,只动钳口)");
+            let 冻 = 帧.ee.first().map(|e| [e[0], e[1], e[2]]).unwrap_or([0.0; 3]);
+            let 冻q = 帧.ee.first().map(|e| [e[3], e[4], e[5], e[6]]).unwrap_or([1.0, 0.0, 0.0, 0.0]);
+            // 合到读数不再变为止 —— 判据是「连着两拍读数一模一样」,没有任何阈值,
+            // 也没有"几拍够了"这种拍脑袋的数(与 selfcal 量钳口落定用的是同一条)。
+            let 落 = |plug: &mut Plug<S>, 帧: &mut Frame, j: f64, 上限: u32| {
+                let mut 上次: Option<Vec<f64>> = None;
+                for _ in 0..上限 {
+                    plug.act(&Cmd::Ee { arm: 0, at: 冻, quat: 冻q, jaw: j });
+                    match plug.sense() { Some(f) => *帧 = f, None => return }
+                    let 此: Vec<f64> = 帧.jaw.iter().copied().collect();
+                    if 上次.as_ref() == Some(&此) && !此.is_empty() { return }
+                    上次 = Some(此);
+                }
+            };
+            // 五帧合同:两帧不动(量这台相机自己的噪声地板)+ 三帧等步长合爪。
+            // 步长取全行程的三分之一 —— 这是**协议选择**(要三步等距),不是身体常数。
+            let 步长 = 1.0 / 3.0;
+            let mut 五帧: Vec<Vec<Vec<u8>>> = vec![Vec::new(); 帧.cams.len().max(1)];
+            let 收 = |帧: &Frame, 五帧: &mut Vec<Vec<Vec<u8>>>| {
+                for (ci, img) in 帧.cams.iter().enumerate() {
+                    if ci < 五帧.len() { 五帧[ci].push(img.2.clone()); }
+                }
+            };
+            落(plug, &mut 帧, 1.0, 120);
+            收(&帧, &mut 五帧);                       // null_a
+            落(plug, &mut 帧, 1.0, 2);
+            收(&帧, &mut 五帧);                       // null_b(命令没变 ⇒ 地板)
+            for k in 1..=3u32 {
+                落(plug, &mut 帧, 1.0 - 步长 * k as f64, 120);
+                收(&帧, &mut 五帧);                   // f0 f1 f2,每两帧之间同一个命令步长
+            }
+            // 每台相机各读一遍,挑双响最强、且真读出块的那台。相机好不好是量出来的。
+            let mut 最好: Option<(usize, f64, u32, u32)> = None; // (相机, 画面里的宽, 双响, 配对)
+            for (ci, fr) in 五帧.iter().enumerate() {
+                let Some(img) = 帧.cams.get(ci) else { continue };
+                if fr.len() != 5 { continue }
+                match body_layer::blob::candidates(
+                    &fr[0], &fr[1], &fr[2], &fr[3], &fr[4],
+                    img.0, img.1, 步长, selfcal::最少像素(img.0, img.1),
+                ) {
+                    Err(e) => println!("[服]   第 {ci} 台:认块器拒绝 {e:?}"),
+                    Ok(r) => {
+                        let Some(c) = r.cands.get(0) else {
+                            println!("[服]   第 {ci} 台:双响 {} 但一块都没连起来", r.moved_px);
+                            continue
+                        };
+                        // 会动的那一块沿**开合方向**有多宽。配对给了方向就用配对的方向
+                        // (那是量出来的开合方向);没配对就取包围盒的长边 —— 两指并排,
+                        // 长边就是开合那一维。两条都不含任何身体常数。
+                        let (w箱, h箱) = (c.ext[2] - c.ext[0], c.ext[3] - c.ext[1]);
+                        let 宽 = if r.pairs > 0 && (r.pair_dir.0.abs() + r.pair_dir.1.abs()) > 1e-9 {
+                            let n = r.pair_dir.0.hypot(r.pair_dir.1);
+                            (w箱 * r.pair_dir.0.abs() + h箱 * r.pair_dir.1.abs()) / n
+                        } else { w箱.max(h箱) };
+                        println!("[服]   第 {ci} 台:双响 {} · 配对 {} · 包围盒 {:.4}×{:.4} 画幅 ⇒ 开合那一维 {:.4}",
+                            r.moved_px, r.pairs, w箱, h箱, 宽);
+                        if 最好.map(|(_, _, m, _)| r.moved_px > m).unwrap_or(true) {
+                            最好 = Some((ci, 宽, r.moved_px, r.pairs));
+                        }
+                    }
+                }
+            }
+            落(plug, &mut 帧, 1.0, 120); // 看完把爪子放回全开,别带着半合的姿态去干活
+            // 画幅 ⇒ 世界:那一点的深度 ÷ 焦距。两者都是量出来的(手眼那一格解出来的相机)。
+            let 换算 = 最好.and_then(|(ci, 宽, _, _)| {
+                let eye = 相机们.iter().find(|(i, _, _)| *i == ci).map(|(_, e, _)| e)?;
+                let 路 = plug.lay.cams.get(ci)?;
+                let mut 深路 = 路.clone();
+                if let Some(last) = 深路.last_mut() { *last = "depth".to_string(); }
+                let dv = plug.last.as_ref().and_then(|o| 取(o, &深路))?;
+                let (dw, dh, dep) = wire::as_f32_grid(&dv)?;
+                // 近侧分位:手比背景近,取最近的那五分之一,别把桌子/墙的深度当成手的。
+                let mut 片: Vec<f64> = dep.iter().map(|z| *z as f64).filter(|z| z.is_finite() && *z > 0.0).collect();
+                if 片.is_empty() { return None }
+                片.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                let 深 = 片[片.len() / 5];
+                let _ = (dw, dh);
+                if !(eye.fx.is_finite() && eye.fx.abs() > 1e-9) { return None }
+                Some(宽 * 深 / eye.fx)
+            });
+            match 换算 {
+                Some(v) if v.is_finite() && v > 0.0 => {
+                    println!("[服] 🟢 当场看出爪宽 = {v:.4}(用会动的那一块的宽 × 那一点的深度 ÷ 焦距,全是量出来的)");
+                    println!("[服]    ⚠️ 这是**上界**:会动的那一块含两根手指的身子,比「两指之间能塞多宽」大一点。");
+                    println!("[服]    抓不抓得住不看它 —— 合爪的判据是「手指读数停在半途」,跟这个尺无关。");
+                    v
+                }
+                _ => {
+                    // 看不出来也不许停工。退回到**另一个量出来的手部长度**(法兰到指尖),
+                    // 并且**明说这是顶替、不是测量** —— 它只当长度尺用,合爪判据不受影响。
+                    let 顶 = 工具长.unwrap_or(f64::NAN);
+                    println!("[服] 🟡 这一眼没看出爪子(相机里它不够显眼)⇒ 长度尺**顶替**成量到的工具长 {顶:.4}");
+                    println!("[服]    这不是爪宽的测量值,是一把临时的尺;下一次晃爪看清了就换掉。");
+                    顶
+                }
+            }
+        }
+    };
+
     loop {
         拍 += 1;
         if plug.复位过 {
@@ -2797,8 +2928,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
             plug.act(&回声);
             match plug.sense() { Some(f) => { 帧 = f; continue } None => return }
         }
-        let (张开, 可达带, 工具长, 工具列, 接触阈, 原位, 交付率, 探幅) = (
-            张开.unwrap(), 可达带.clone().unwrap(), 工具长.unwrap(), 工具列.unwrap(),
+        let (可达带, 工具长, 工具列, 接触阈, 原位, 交付率, 探幅) = (
+            可达带.clone().unwrap(), 工具长.unwrap(), 工具列.unwrap(),
             接触阈.unwrap(), 原位.clone().unwrap(), 交付率.unwrap(), 探幅.unwrap(),
         );
 
