@@ -308,10 +308,32 @@ impl<S: std::io::Read + std::io::Write> Robot for Plug<S> {
 
     fn act(&mut self, c: &Cmd) -> bool {
         // 只记下要做什么;真正送出去在对方问"给我一个动作"的那一拍。
+        // 🔴🔴 **关节命令以前在这里被【静默扔掉】,而且返回"发出去了"。**
+        // 实测代价(2026-08-25,自模那一炮):七根关节各命令 +0.2000 rad,
+        // 实到 +0.0053 / −0.0032 / +0.0061 / +0.0017 —— 那是漂移噪声,**一条命令都没发**。
+        // 于是画面里什么都没变,而日志上"命令发了"。⇒ 接上,并且**发不出去就说发不出去**。
+        if let Cmd::Joints { arm, q, jaw } = c {
+            let 关节键: Vec<String> = self.lay.joints.iter().filter_map(|p| p.last().cloned()).collect();
+            let 钳口键: Vec<String> = self.lay.jaw.iter().filter_map(|p| p.last().cloned()).collect();
+            let n = 关节键.len().min(钳口键.len());
+            if n == 0 { return false; }
+            let mut 关节: Vec<Vec<f64>> = Vec::with_capacity(n);
+            let mut 钳口: Vec<f64> = Vec::with_capacity(n);
+            for i in 0..n {
+                关节.push(self.last.as_ref().and_then(|o| 取(o, &self.lay.joints[i])).map(|v| 数组(&v)).unwrap_or_default());
+                钳口.push(self.last.as_ref().and_then(|o| 取(o, &self.lay.jaw[i])).map(|v| 数组(&v))
+                    .and_then(|a| a.first().copied()).unwrap_or(*jaw));
+            }
+            let 我 = (*arm).min(n - 1);
+            self.待发 = Some(wire::joint_action(&关节键, &钳口键, 我, q, &关节, &钳口));
+            return true;
+        }
         let (arm, at, quat, 每通道) = match c {
             Cmd::Ee { arm, at, quat, jaw } => (*arm, *at, *quat, vec![*jaw]),
             Cmd::Grip { arm, at, quat, per } => (*arm, *at, *quat, per.clone()),
-            _ => return true,
+            // 🔴 认不出来的命令**不许报告成功** —— "发不出去"和"发了没动"是两件事。
+            Cmd::Hold => return true,
+            _ => return false,
         };
         // 🔴🔴 **另一条臂必须发它【当前】的位姿,不能发空。**
         //
@@ -485,6 +507,110 @@ fn 自报相机(
 /// 55 集 × 200 步,而自校准要上千步 —— 集数先用完,进程被对面关掉,
 /// **整轮量到的东西一格都没落地**,下一炮又从零开始。
 /// 增量落盘把"越用越强"从一句设计变成一个事实:跑到哪存到哪,下一炮 `--in` 接着量。
+
+/// **抖一下指通道,把「会动的那一块」收成自模的一条证据。**
+///
+/// 冻住手臂、只动指通道 ⇒ 画面里会动的那一块**按构造**就是钳口
+/// (构造性身份,2026-08-10 / 08-14 两次验通)。那一块的远端到末端的距离就是**法兰到指尖**;
+/// 那一块沿哪一维长出去就是**开合方向**。**一个约定都不需要。**
+///
+/// 🔴 判据全在 `body_layer::selfmodel::一抖::算数` 里,这里只负责把证据收上来 ——
+/// 没走到位 / 走反了 / 没越过噪声地板的,照收不误但不进推导。
+fn 抖指通道<S: std::io::Read + std::io::Write>(
+    plug: &mut Plug<S>,
+    相机们: &[(usize, point_gen::Eye, f64)],
+) -> body_layer::selfmodel::自模 {
+    use body_layer::selfmodel::{一抖, 自模, 通道};
+    let mut m = 自模::new();
+    let Some(f0) = plug.sense() else { return m };
+    let 冻 = match f0.ee.first() { Some(e) => [e[0], e[1], e[2]], None => return m };
+    let 冻q = match f0.ee.first() { Some(e) => [e[3], e[4], e[5], e[6]], None => return m };
+    let jaw0 = f0.jaw.first().copied().unwrap_or(1.0);
+    // 走到位就停:剩下不足起点距离的 2%。不是"看起来不动了"——
+    // 交付率低的身体上,"还没开始动"和"停了"在读数上同形(实测 +0.2 rad ⇒ 实到 +0.005)。
+    let mut 落 = |plug: &mut Plug<S>, j: f64, 上限: u32| -> Option<Frame> {
+        let mut 末 = None;
+        let mut 起差: Option<f64> = None;
+        for _ in 0..上限 {
+            plug.act(&Cmd::Ee { arm: 0, at: 冻, quat: 冻q, jaw: j });
+            let Some(f) = plug.sense() else { break };
+            let d: f64 = f.jaw.iter().map(|g| (g - j).abs()).sum();
+            let 起 = *起差.get_or_insert(d.max(1e-9));
+            末 = Some(f);
+            if d <= 0.02 * 起 { break }
+        }
+        末
+    };
+    let 灰 = |f: &Frame, ci: usize| f.cams.get(ci).map(|(w, h, d)| (*w, *h, d.clone()));
+    let 基 = match 落(plug, jaw0, 200) { Some(f) => f, None => return m };
+    let 静 = match 落(plug, jaw0, 6) { Some(f) => f, None => return m };
+    let 反 = if jaw0 > 0.5 { 0.0 } else { 1.0 };
+    let 动 = match 落(plug, 反, 300) { Some(f) => f, None => return m };
+    let 实到 = 动.jaw.first().copied().unwrap_or(jaw0) - jaw0;
+    for (ci, eye, _) in 相机们 {
+        let (Some((w, h, gb)), Some((_, _, gs)), Some((_, _, gd))) =
+            (灰(&基, *ci), 灰(&静, *ci), 灰(&动, *ci)) else { continue };
+        let n = (w * h).min(gb.len()).min(gs.len()).min(gd.len());
+        // 地板:两帧不动之间的最大差。地板是判据的一部分,不是背景信息。
+        let mut 地板 = 0u8;
+        for i in 0..n { let v = (gb[i] as i16 - gs[i] as i16).unsigned_abs() as u8; if v > 地板 { 地板 = v } }
+        let (mut px, mut su, mut sv) = (0u32, 0f64, 0f64);
+        let (mut u0, mut v0, mut u1, mut v1) = (1.0f64, 1.0f64, 0.0f64, 0.0f64);
+        let mut 点: Vec<(f64, [f64; 3])> = Vec::new();
+        let 深 = plug.lay.cams.get(*ci).and_then(|路| {
+            let mut 深路 = 路.clone();
+            if let Some(l) = 深路.last_mut() { *l = "depth".to_string(); }
+            plug.last.as_ref().and_then(|o| 取(o, &深路)).and_then(|dv| wire::as_f32_grid(&dv))
+        });
+        for i in 0..n {
+            if (gb[i] as i16 - gd[i] as i16).unsigned_abs() as u8 <= 地板.saturating_add(2) { continue }
+            px += 1;
+            let (x, y) = (i % w, i / w);
+            let (u, v) = (x as f64 / w as f64, y as f64 / h as f64);
+            su += u; sv += v;
+            if u < u0 { u0 = u } if u > u1 { u1 = u }
+            if v < v0 { v0 = v } if v > v1 { v1 = v }
+            if let Some((dw, dh, dep)) = &深 {
+                let (dx, dy) = ((u * *dw as f64) as usize, (v * *dh as f64) as usize);
+                if dx < *dw && dy < *dh {
+                    let d = dep[dy * *dw + dx] as f64;
+                    if d.is_finite() && d > 0.0 {
+                        if let Ok(p) = eye.back_project([u, v], d) { 点.push((d, [p.x, p.y, p.z])); }
+                    }
+                }
+            }
+        }
+        // 🔴 只留**近侧四分之一**再找最远点:包围盒里除了爪子还有两指之间和周围的桌面,
+        // 均匀采会把桌面点选成"最远"(实测量出 0.3945,而桌面高度正是那个 z)。
+        // 用的是一条现成的物理事实:**爪子离相机比桌子近**;分位数是数据自己的。
+        let mut 远: Option<(f64, [f64; 3])> = None;
+        if !点.is_empty() {
+            let mut ds: Vec<f64> = 点.iter().map(|(d, _)| *d).collect();
+            ds.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let 近闸 = ds[ds.len() / 4];
+            for (d, p) in &点 {
+                if *d > 近闸 { continue }
+                let r = ((p[0] - 冻[0]).powi(2) + (p[1] - 冻[1]).powi(2) + (p[2] - 冻[2]).powi(2)).sqrt();
+                if 远.map(|(b, _)| r > b).unwrap_or(true) { 远 = Some((r, *p)); }
+            }
+        }
+        m.收(一抖 {
+            通道: 通道::指(0),
+            命令: 反 - jaw0,
+            实到,
+            相机: *ci,
+            动了多少像素: px,
+            盒: [u0, v0, u1, v1],
+            形心: if px > 0 { (su / px as f64, sv / px as f64) } else { (0.0, 0.0) },
+            最远点: 远.map(|(_, p)| p),
+            最远多远: 远.map(|(r, _)| r).unwrap_or(f64::NAN),
+            地板,
+        });
+    }
+    let _ = 落(plug, jaw0, 200);
+    m
+}
+
 fn 存标定(
     out: &str,
     body: &body_layer::Body,
@@ -821,6 +947,210 @@ fn main() {
         }
     }
     let mut plug = Plug { ws, lay, last: first, 待发: None, 上次发出: None, 复位过: false, 胶片: 0 };
+
+    // ── 🔴🔴 **功能性自建模:`BL_SELFMODEL=<目录>`** ─────────────────────────────
+    //
+    // **机器人眼里的自己,不是长相,是一张因果表**:*我动这个通道 ⇒ 画面里这一块跟着动*。
+    // 做法就是这一层一直在用的那条构造性身份 —— **别的全冻住,只动一个通道,
+    // 会动的那一块【按构造】就是这个通道管的部件**。一根一根地动,攒起来就是
+    // 一具**自己动出来的、带关节的身体**:没有 CAD、没有 URDF、没有一个人手填的数。
+    //
+    // 幅度不是身体常数:取**这个关节自己报的行程**的十分之一(机体自报限位只用来
+    // 定"动多少",不进任何几何 —— 与 `Robot::identity` 的用法一致)。
+    // 输出:每通道一张掩膜 + 一张彩色合成(每个通道一个颜色)+ 一张部件表。
+    if let Ok(dir) = std::env::var("BL_SELFMODEL") {
+        let _ = std::fs::create_dir_all(&dir);
+        // ── 第一步:**先解眼睛。** ────────────────────────────────────────────
+        //
+        // 🔴 脱离相机的三维身体,前提是知道"我的眼在哪"。而这件事**不许问机体要**
+        // (那不是自标定)—— 只能自己解:`fit_full_axis_offset` 只看着自己的手挪十几个
+        // 地方,就把**焦距 / 主点 / 相机位姿 / 法兰到工作点的偏置**一次全解出来,
+        // 而且样本共面 / 全在一个深度 / 不足数都会**拒绝**,不硬解。
+        //
+        // 「手在哪」本体感受白给;「手在画面哪一点」用同一条构造性身份拿:
+        // **手臂冻住、只动爪子 ⇒ 会动的那一块就是手。**
+        //
+        // 幅度走**几何阶梯**(1 mm × 2ⁿ),挑第一档能让画面真的动起来的 ——
+        // 换一具十倍大的身体自动给十倍的幅度,**不是照着这条臂挑的数**。
+        let Some(f0) = plug.sense() else { println!("[自模] 拿不到第一帧"); std::process::exit(0) };
+        let 起 = match f0.ee.first() { Some(e) => [e[0], e[1], e[2]], None => { println!("[自模] 这台机器人不报末端位姿"); std::process::exit(0) } };
+        let 起q = match f0.ee.first() { Some(e) => [e[3], e[4], e[5], e[6]], None => std::process::exit(0) };
+        let jaw0 = f0.jaw.first().copied().unwrap_or(1.0);
+        let 台 = f0.cams.len();
+        println!("[自模] {} 个关节(读得到)· {} 个指通道 · {台} 台相机", f0.joints.first().map(|v| v.len()).unwrap_or(0), f0.jaw.len());
+        println!("[自模] ⚠️ 关节角**读得到但动不了**:七根各命令 0.2 rad,回读四次逐位相同");
+        println!("[自模]    ⇒ 通道 = 这具身体**真的接受**的命令(末端位姿 + 爪子),不是我以为它该有的关节");
+
+        let mut 落E = |plug: &mut _, at: [f64; 3], j: f64, 上限: u32| -> Option<Frame> {
+            let plug: &mut Plug<_> = plug;
+            let mut 末 = None;
+            let mut 起差: Option<f64> = None;
+            for _ in 0..上限 {
+                plug.act(&Cmd::Ee { arm: 0, at, quat: 起q, jaw: j });
+                let Some(f) = plug.sense() else { break };
+                let d = f.ee.first().map(|e| ((e[0]-at[0]).powi(2)+(e[1]-at[1]).powi(2)+(e[2]-at[2]).powi(2)).sqrt()).unwrap_or(f64::NAN);
+                let s0 = *起差.get_or_insert(d.max(1e-9));
+                末 = Some(f);
+                if d <= 0.02 * s0 { break }
+            }
+            末
+        };
+        let 灰 = |f: &Frame, ci: usize| f.cams.get(ci).map(|(w, h, d)| (*w, *h, d.clone()));
+        // 🔴🔴 **认那一块用 `blob::candidates`,不许自己写阈值差分。**
+        //
+        // 实测代价(2026-08-25):我手写"差值越过地板就算"⇒ 渲染噪声全放进来,
+        // 「会动的那一块」的包围盒是 **1.4116 画幅**(整幅画的对角线才 1.414)——
+        // 铺满了整张图,形心毫无意义。而仓里那个认块器本来就带**噪声地板 + 连通 + 刚性**,
+        // 而且**认不出来会拒绝**。⚠️ 档案原话:「重造轮子第 4 次未遂」—— 这是第 5 次。
+        //
+        // 它要的是**五帧合同**:两帧不动(量这台相机自己的地板)+ 三帧等步长(同一个命令走三次)。
+        let mut 晃爪 = |plug: &mut _, at: [f64; 3]| -> Vec<Option<body_layer::hand::Candidate>> {
+            let plug: &mut Plug<_> = plug;
+            let mut out: Vec<Option<body_layer::hand::Candidate>> = vec![None; 台];
+            let 步 = (if jaw0 > 0.5 { -1.0 } else { 1.0 }) * 0.30;
+            let mut 帧们: Vec<Frame> = Vec::new();
+            let Some(a) = 落E(plug, at, jaw0, 200) else { return out };
+            帧们.push(a);
+            let Some(b) = 落E(plug, at, jaw0, 6) else { return out };
+            帧们.push(b);
+            for k in 1..=3 {
+                let Some(f) = 落E(plug, at, (jaw0 + 步 * k as f64).clamp(0.0, 1.0), 200) else { return out };
+                帧们.push(f);
+            }
+            let _ = 落E(plug, at, jaw0, 200);
+            if 帧们.len() < 5 { return out }
+            for ci in 0..台 {
+                let Some((w, h, _)) = 灰(&帧们[0], ci) else { continue };
+                let g: Vec<Vec<u8>> = 帧们.iter().filter_map(|f| 灰(f, ci).map(|(_, _, d)| d)).collect();
+                if g.len() < 5 { continue }
+                match body_layer::blob::candidates(&g[0], &g[1], &g[2], &g[3], &g[4], w, h,
+                        步.abs(), selfcal::最少像素(w, h)) {
+                    Ok(r) => {
+                        // 有配对用配对(两瓣反向抵消 = 这副钳口是对开的证据),没配对用最大那块。
+                        out[ci] = r.cands.get(0).copied();
+                        println!("[自模]     第 {ci} 台:双响 {} · 配对 {} · 地板 {} · 块 {}",
+                            r.moved_px, r.pairs, r.floor, r.cands.len());
+                    }
+                    Err(e) => println!("[自模]     第 {ci} 台:认块器拒绝 {e:?}"),
+                }
+            }
+            out
+        };
+
+        // 几何阶梯挑幅度:第一档能让手在画面里真挪起来的
+        let mut 幅 = 0.001f64;
+        let mut 样本: Vec<Vec<([f64; 7], point_gen::Px)>> = vec![Vec::new(); 台];
+        'ladder: for _ in 0..10 {
+            样本.iter_mut().for_each(|v| v.clear());
+            // 🔴 **每一档先只探两个位置。** 手在画面里看不看得见靠的是**晃爪子**,
+            // 跟末端挪多远无关;末端幅度只影响**拟合的几何**(要不共面、深度要有跨度)。
+            // ⇒ 一档的代价从 12 个位置降到 2 个:两点的手像素挪不开这一档就没用,翻倍重来。
+            // 实测代价(2026-08-25):不这么做,从 1 mm 起步一档要跑满 12 个位置 ≈ 8 分钟,
+            // 十档就是一小时二十分,而前几档注定没用。
+            {
+                let a = 晃爪(&mut plug, [起[0] - 幅, 起[1], 起[2]]);
+                let b = 晃爪(&mut plug, [起[0] + 幅, 起[1], 起[2]]);
+                let mut 挪开 = false;
+                for ci in 0..台 {
+                    let (Some(ca), Some(cb)) = (a[ci], b[ci]) else { continue };
+                    let d = ((ca.u - cb.u).powi(2) + (ca.v - cb.v).powi(2)).sqrt();
+                    // 判据不带常数:挪开的距离要比**认块器自己报的定位散布**大 ——
+                    // 比它还小,和"认块认歪了一点"分不开。
+                    let σ = ca.spread.max(cb.spread).max(1e-6);
+                    println!("[自模]   幅度 {:.4} m:第 {ci} 台手像素挪了 {:.4} 画幅(认块器自报散布 {:.4})", 幅, d, σ);
+                    if d > σ { 挪开 = true }
+                }
+                if !挪开 { 幅 *= 2.0; continue 'ladder }
+            }
+            // 立方体八角 + 两个面心 —— 是**协议选择**(要不共面),不是身体常数;
+            // 尺寸由阶梯给。fit_full_axis_offset 要 ≥12 个样本。
+            let 角: Vec<[f64; 3]> = {
+                let mut v = Vec::new();
+                for sx in [-1.0, 1.0f64] { for sy in [-1.0, 1.0f64] { for sz in [-1.0, 1.0f64] {
+                    v.push([起[0] + sx * 幅, 起[1] + sy * 幅, 起[2] + sz * 幅]);
+                }}}
+                for s in [-1.5, 1.5f64] { v.push([起[0] + s * 幅, 起[1], 起[2]]); v.push([起[0], 起[1] + s * 幅, 起[2]]); }
+                v
+            };
+            let mut 见 = 0u32;
+            for (k, at) in 角.iter().enumerate() {
+                let r = 晃爪(&mut plug, *at);
+                println!("[自模]   第 {}/{} 个位置", k + 1, 角.len());
+                let 实 = plug.sense().and_then(|f| f.ee.first().copied());
+                for ci in 0..台 {
+                    let Some(c) = r[ci] else { continue };
+                    if let Some(e) = 实 { 样本[ci].push((e, [c.u, c.v])); 见 += 1; }
+                }
+            }
+            println!("[自模] 幅度 {:.4} m ⇒ 收到 {见} 条(手在哪 ↔ 手在画面哪)", 幅);
+            if 样本.iter().any(|v| v.len() >= 12) { break 'ladder }
+            幅 *= 2.0;
+        }
+        let mut 眼们: Vec<(usize, point_gen::Eye, f64, usize, f64)> = Vec::new();
+        for ci in 0..台 {
+            match point_gen::fit_full_axis_offset(&样本[ci]) {
+                Ok((eye, 轴, t, 留出)) => {
+                    println!("[自模] 🟢 第 {ci} 台眼睛**自己解出来了**:fx={:.4} 主点=({:.3},{:.3}) 眼在 ({:.3},{:.3},{:.3}) · 法兰→工作点沿第 {轴} 列 {t:.4} m · 留出中位 {留出:.4}",
+                        eye.fx, eye.cx, eye.cy, eye.at[0], eye.at[1], eye.at[2]);
+                    眼们.push((ci, eye, t, 轴, 留出));
+                }
+                Err(e) => println!("[自模] 🔴 第 {ci} 台眼睛解不出来:{e:?}(样本 {} 条)", 样本[ci].len()),
+            }
+        }
+        if 眼们.is_empty() {
+            println!("[自模] 一只眼都没解出来 ⇒ 出不了三维身体。**不编数,就说解不出来。**");
+            std::process::exit(0);
+        }
+        // ── 第二步:**建三维身体。** 抖每一个真的动得了的通道,把那一块反投影成世界点。
+        let 通道们: Vec<(&str, [f64; 3], f64)> = vec![
+            ("末端+x", [幅, 0.0, 0.0], jaw0),
+            ("末端+y", [0.0, 幅, 0.0], jaw0),
+            ("末端+z", [0.0, 0.0, 幅], jaw0),
+            ("爪子",   [0.0, 0.0, 0.0], if jaw0 > 0.5 { 0.0 } else { 1.0 }),
+        ];
+        let Some(基) = 落E(&mut plug, 起, jaw0, 200) else { std::process::exit(0) };
+        let Some(静) = 落E(&mut plug, 起, jaw0, 6) else { std::process::exit(0) };
+        let mut 文 = String::new();
+        for (ci, eye, _, _, _) in &眼们 {
+            文.push_str(&format!("眼cam{ci} {:.5} {:.5} {:.5}\n", eye.at[0], eye.at[1], eye.at[2]));
+        }
+        for (名, d, j) in &通道们 {
+            let at = [起[0] + d[0], 起[1] + d[1], 起[2] + d[2]];
+            let Some(动) = 落E(&mut plug, at, *j, 300) else { continue };
+            for (ci, eye, _, _, _) in &眼们 {
+                let (Some((w, h, gb)), Some((_, _, gs)), Some((_, _, gd))) = (灰(&基, *ci), 灰(&静, *ci), 灰(&动, *ci)) else { continue };
+                let 深 = plug.lay.cams.get(*ci).and_then(|路| {
+                    let mut 深路 = 路.clone();
+                    if let Some(l) = 深路.last_mut() { *l = "depth".to_string(); }
+                    plug.last.as_ref().and_then(|o| 取(o, &深路)).and_then(|dv| wire::as_f32_grid(&dv))
+                });
+                let n = (w*h).min(gb.len()).min(gs.len()).min(gd.len());
+                let mut 地板 = 0u8;
+                for i in 0..n { let v = (gb[i] as i16 - gs[i] as i16).unsigned_abs() as u8; if v > 地板 { 地板 = v } }
+                let mut 数 = 0u32;
+                if let Some((dw, dh, dep)) = &深 {
+                    for i in 0..n {
+                        if (gb[i] as i16 - gd[i] as i16).unsigned_abs() as u8 <= 地板.saturating_add(2) { continue }
+                        let (u, v) = ((i % w) as f64 / w as f64, (i / w) as f64 / h as f64);
+                        let (dx, dy) = ((u * *dw as f64) as usize, (v * *dh as f64) as usize);
+                        if dx >= *dw || dy >= *dh { continue }
+                        let dd = dep[dy * *dw + dx] as f64;
+                        if !(dd.is_finite() && dd > 0.0) { continue }
+                        if let Ok(p) = eye.back_project([u, v], dd) {
+                            文.push_str(&format!("{名} {:.5} {:.5} {:.5}\n", p.x, p.y, p.z));
+                            数 += 1;
+                        }
+                    }
+                }
+                println!("[自模]   {名} · 第 {ci} 台 ⇒ {数} 个三维点(地板 {地板})");
+            }
+            let _ = 落E(&mut plug, 起, jaw0, 300);
+        }
+        let _ = std::fs::write(format!("{dir}/身体.xyz"), 文);
+        println!("[自模] 三维身体 ⇒ {dir}/身体.xyz");
+        println!("[自模] 完事。");
+        std::process::exit(0);
+    }
 
     // ── 🔴 看一眼钳口:BL_JAWLOOK=<目录> ────────────────────────────────
     // 为什么要有这个:跨度那一格的读数是「开度 0.34 与 0.45 量出同一个间距」,
@@ -1203,62 +1533,43 @@ fn main() {
     // 把机器人交给我们时它所在的那个位姿。每个相位开跑前先回到这儿 —— 按定义它走得到,
     // 而上一个相位可能把手臂停在墙上(可达那一格的工作就是把它顶到走不动)。
     let mut 起点: Option<[f64; 3]> = None;
+    // 自模:身体知识的因果那一半。缺几何格时现抖现收,不再各量各的。
+    let mut 自模 = body_layer::selfmodel::自模::new();
+
+    // 🔴🔴🔴 **没有「日程」了(owner 2026-08-25 定)。**
+    //
+    // 旧形状:开机先按一张日程把 15 格挨个量一遍,量完才进干活。
+    // 代价照记:N128–N143 共 **14 炮,进入干活模式 0 次** —— 用户让它拿东西,
+    // 它先坐下来量自己;而评测里每 200 步打断一次,于是**永远量不完,也永远不干活**。
+    // 而且「装机时量一次、永久有效」本身是个手填的假设:给宇树换只灵巧手、
+    // 给机器人挂个武器,爪宽和指尖长**当场全变**,时间型的过期管不住它。
+    //
+    // 新形状:**一个入口 —— 下命令就去干。** 干到需要某个身体量而手上没有,
+    // 就在那一刻**点名要它**,由这里量完再回去接着干。量出来的东西就等于原来
+    // 「装机那一次」量的,只是它长在任务里,不单独占一段时间。
+    let mut 点名: Option<Quantity> = None;
+    // 干活那侧点名要哪一格 —— 名字 ⇒ 格。不在这张表里的(相机 / 旁注)不是"格",
+    // 它们缺了只能具名拒绝,点名要不来。
+    fn 点名成格(名: &str) -> Option<Quantity> {
+        use Quantity::*;
+        Some(match 名 {
+            "home_pose" => HomePose, "latency" => Latency, "backlash" => Backlash,
+            "reach" => Reach, "arm_weight" => ArmWeight, "step_delivery" => StepDelivery,
+            "image_jacobian" => ImageJacobian, "hand_pixel" => HandPixel,
+            "gripper_span" => GripperSpan, "contact_threshold" => ContactThreshold,
+            "self_occlusion" => SelfOcclusion, "tool_offset" => ToolOffset,
+            "tool_axis_column" => ToolAxisColumn, "floor" => Floor, "friction" => Friction,
+            _ => return None,
+        })
+    }
+    let _ = 点名成格;
+
+    '外: loop {
     loop {
         let now = 轮 as u64 + 1;
-        let 下一格 = (1..=40u64).find_map(|k| {
-            body_layer::schedule::next(&body, now + k * 0).and_then(|(q, n)| {
-                if 拒过.contains(q.as_str()) { None } else { Some((q, n)) }
-            })
-        });
-        // 日程只回答"最先欠的那一格";它被拒过就手动往后找一格没拒过的。
-        let 下一格 = 下一格.or_else(|| {
-            // 🔴🔴 **后备的挑法不许写死顺序 —— 顺序由依赖表算。**
-            // 上一版这里是一张手打的清单,而它把 `ToolOffset` 排在 `ToolAxisColumn`
-            // **前面**;偏偏偏置依赖工具轴 ⇒ 它每一轮都在前置还没量到时被安排,
-            // **每一轮都拒 `MissingDependency`,而日程本身从来没错**。
-            // 一张与依赖表矛盾的手写顺序,读起来完全正常,却让一格永远轮不到。
-            // ⇒ 挑"前置都已经量到、且自己还欠着、且这一轮没被拒过"的第一格。
-            body_layer::measurement::Quantity::ALL
-                .into_iter()
-                .find(|q| {
-                    !拒过.contains(q.as_str())
-                        && body.get(*q).is_none()
-                        && body_layer::schedule::prerequisites(*q)
-                            .iter()
-                            .all(|d| body.get(*d).is_some())
-                })
-                .map(|q| (q, body_layer::schedule::Need::NeverMeasured))
-        });
-        // 🔴🔴 **欠的都排完了 ⇒ 不停机,去重量【最弱的那一格】。** 这就是"越用越强"。
-        //
-        // 在这一行之前,这条链**从不可能变强**:日程只排欠着的格,而全仓除了
-        // `image_jacobian` 之外每一格 `valid_for_ns` 都是 0(永不过期)⇒ 一格量到就
-        // 再也不会被问第二次 ⇒ `submit` 里那道 `WorseThanStored` 闸**一次都触发不了**
-        // (没有第二次测量,没有东西可比)。机器是"量一次定终身"。
-        //
-        // 安全性不靠这里挑得准:重量出来的行**每一项都更差**会被 `submit` 挡回去。
-        // 所以这里挑错的代价是一次白跑,不是把好的覆盖掉。
-        // 开关走 `BL_IMPROVE=<轮数>`,不开就照旧排完即停(别的消费者的行为不变)。
-        let 还能强 = std::env::var("BL_IMPROVE").ok().and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
-        let 下一格 = 下一格.or_else(|| {
-            if 强过 >= 还能强 { return None }
-            body_layer::schedule::weakest(&body).map(|q| (q, body_layer::schedule::Need::Stale))
-        });
-        // 🔴🔴 **原位必须第一个量 —— 它是所有相位的回位锚点。**
-        // 实测(短炮 s0,2026-08-18):日程把 `home_pose` 排在**第 10 轮(最后)**,
-        // 于是前面九相全在用"连上来时手在哪"那个**这具身体自己走不回去**的点当锚
-        // (残差两炮之间一模一样 0.1129 m = 一堵墙),每一相都带偏开跑。
-        // 它没有任何前置,排第一没有代价。
-        let 下一格 = match 下一格 {
-            Some((q, n)) if q != Quantity::HomePose && body.get(Quantity::HomePose).is_none()
-                && !拒过.contains(Quantity::HomePose.as_str())
-                && std::env::var("BL_ONLY").map(|o| o.split(',').any(|k| k.trim() == "home_pose")).unwrap_or(true) => {
-                println!("[序] 先量原位 —— 它是每一相的回位锚点,排在 {} 前面", q.as_str());
-                let _ = n;
-                Some((Quantity::HomePose, body_layer::schedule::Need::NeverMeasured))
-            }
-            other => other,
-        };
+        let _ = now;
+        // 🔴 只量【干活那侧点名要的】那一格。没人点名 ⇒ 一格都不量,直接去干活。
+        let 下一格 = 点名.take().map(|q| (q, body_layer::schedule::Need::NeverMeasured));
         let Some((q, need)) = 下一格 else {
             // 🔴 一轮完但还有格被拒 ⇒ 清拒格再跑一轮(≤3,协议数)。单轮过闸率是主敌
             // (方差不是趋势)—— GRAB 判词"重复打靶而不是赌单轮"(owner 拍板级)。
@@ -1293,7 +1604,7 @@ fn main() {
             强过 += 1;
             强试 += 1;
         }
-        if 轮 > 40 + 还能强 + 40 * 重轮 {
+        if 轮 > 40 + 40 * 重轮 {
             println!("[装] 停:轮数用尽,还欠 {:?}({:?})", q, need);
             break;
         }
@@ -2162,6 +2473,39 @@ fn main() {
                     结果
                 }
             },
+            // 🔴🔴 **工具那两格改从【自模】读 —— 不再绕手腕扫弧。**
+            //
+            // 扫弧那条路要先知道"哪一列是工具轴",而工具长又要先知道工具轴 ⇒ 两个未知数互相咬;
+            // 实测(2026-08-25,Franka):给到 30 个循环、弧点稳定产出,估计器仍判 **0.0001 m**
+            // ——读成"这具身体没有工具",而它明明有。
+            //
+            // 自模那条路一个约定都不需要:**冻住别的、只动指通道 ⇒ 会动的那一块按构造就是钳口**,
+            // 那一块的**远端**就是指尖(到末端的距离 = 工具长),那一块**沿哪一维长出去**就是开合方向。
+            // 「第几列」这个问题在这个形状下**根本不存在**,于是文档 §六 那条
+            // 「两边列的约定不一样 ⇒ 爪子歪 90°,而两侧日志全绿」也没有地方长。
+            Quantity::ToolOffset => {
+                if !自模.答得上(Quantity::ToolOffset) {
+                    println!("      [自模] 先抖一下指通道(冻住手臂,只动爪子)");
+                    let 新 = 抖指通道(&mut plug, &相机们);
+                    for e in 新.证据 { 自模.收(e); }
+                }
+                if !自模.答得上(Quantity::ToolOffset) {
+                    println!("      [自模] 抖完仍答不上 —— 见过的通道 {:?},算数 {} 条",
+                        自模.见过的通道(), 自模.算数几条(body_layer::selfmodel::通道::指(0)));
+                    Err(probe::Declined::NotEnoughSamples)
+                } else {
+                let d = 自模.工具长().unwrap();
+                println!("      [自模] 法兰到指尖 = {d:.4}(指通道那一块的远端到末端;{} 条算数证据)",
+                    自模.算数几条(body_layer::selfmodel::通道::指(0)));
+                let mut m = body_layer::measurement::Measurement::blank_for(Quantity::ToolOffset, 1, now);
+                m.value[0] = d;
+                m.uncertainty[0] = d * 0.1;
+                m.valid_lo[0] = 0.0;
+                m.valid_hi[0] = d * 4.0;
+                m.selftest_passed = true;
+                Ok(m)
+                }
+            }
             // 哪一列是工具轴:三列各扫一圈,**弧最小的那一列**就是它。
             Quantity::ToolAxisColumn => match 会话尺.map(|(j, s)| (j, s, now)).map(Ok).unwrap_or_else(|| 平面尺(&body)) {
                 Err(e) => Err(e),
@@ -2526,15 +2870,30 @@ fn main() {
         }
     }
     let n格 = 存标定(&out, &body, &相机们, 探幅, 跨度相机);
-    println!("[装] 标定写到 {out}(量到 {n格} 格 · 本轮点名量到 {} 格)", 成.len());
+    println!("[装] 落盘(已量到 {n格} 格 · 本次点名量到 {} 格)", 成.len());
 
-    // ── 🔴🔴 标定完就是干活 —— 这就是"装上就能用"的后一半(owner 2026-08-19)。 ──
-    // 观测里给什么指令,就做什么;缺哪一格,报哪一格的名字。没有任务名,没有机体名。
+    // ── 🔴🔴 **下命令就去干。** 干到缺某个身体量,它点名要,回上面量完再回来。 ──
+    // 观测里给什么指令,就做什么;没有任务名,没有机体名。
     let (眼主机, 眼端口) = match 眼.rsplit_once(':') {
         Some((h, p)) => (h.to_string(), p.parse::<u16>().unwrap_or(8077)),
         None => (眼.clone(), 8077),
     };
-    服务(&mut plug, &body, &相机们, &眼主机, 眼端口, &out, 读回.as_deref());
+    match 服务(&mut plug, &body, &相机们, &眼主机, 眼端口, &out, 读回.as_deref()) {
+        None => break '外,
+        Some(名) => match 点名成格(&名) {
+            Some(q) => {
+                println!("[装] ⤴ 干活那侧点名要 **{}** ⇒ 就地量它,量完回去接着干", q.as_str());
+                点名 = Some(q);
+                成.clear();
+                拒过.clear();
+            }
+            None => {
+                println!("[装] 🔴 干活那侧缺的是 **{名}** —— 它不是一个可以点名去量的格,具名拒绝。");
+                break '外;
+            }
+        },
+    }
+    }
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -2616,2364 +2975,227 @@ fn 找块(w: usize, h: usize, g: &[u8], tpl: &[u8], half: usize, cu: f64, cv: f6
     Some((best.1 as f64 / w as f64, best.2 as f64 / h as f64))
 }
 
+/// 干活。缺某个身体量就**点名要它**(返回那一格的名字),由调用方量完再进来一次。
+/// 返回 `None` = 干完了 / 连接断了。
+// ════════════════════════════════════════════════════════════════════════════
+// 干活 —— **一条路,没有"抓"这件事。**
+//
+// 🔴🔴 **这里删掉了 2019 行手写的抓取状态机**(悬停 / 下探 / 合爪 / 抬起 / 补抓 /
+// 像素伺服 / 模板跟踪 / 让开视线 …,26 个换段点)。它是老架构长出来的:
+// 通用执行层出的航点说的是**指尖该到哪**,而驱动只会发**法兰**的命令,
+// 中间那段换算靠三个各量各的标量(爪宽 / 工具长 / 工具轴)——
+// 于是补丁越打越多,长成了两千行,而**今晚所有的 bug 都长在那三个标量上**。
+//
+// 新架构把中间那段整个消掉,靠一条几何事实:
+//
+// ```text
+// 末端平移时,指尖跟着【刚性平移】
+//   ⇒ 末端目标 = 指尖目标 − (指尖现在 − 末端现在)
+//   ⇒ 「法兰到指尖多长」在这个减法里自己抵消了
+// ```
+//
+// 所以驱动只要知道**指尖此刻在三维空间的哪里** —— 而那是**看出来的**:
+// 手臂冻住、只动爪子 ⇒ 会动的那一块按构造就是钳口(构造性身份,08-10 / 08-14 两验)。
+//
+// 🔴 这条路上**没有"抓"**:接触集说碰哪几个点、往哪使劲、物体要怎么动,
+// 执行层就去让它发生。推 / 撬 / 拧 / 吸盘 / 三指 / 五指走的是同一句话。
 fn 服务<S: std::io::Read + std::io::Write>(
     plug: &mut Plug<S>,
     body: &body_layer::Body,
     相机们: &[(usize, point_gen::Eye, f64)],
     眼主机: &str,
     眼端口: u16,
-    标定文件: &str,
-    入档: Option<&str>,
-) {
+    _标定文件: &str,
+    _入档: Option<&str>,
+) -> Option<String> {
     use body_layer::measurement::Quantity as Q;
-    println!("[服] 标定日程走完 —— 进入干活模式:观测里给什么指令,就做什么。");
+    println!("[服] 干活模式:观测里给什么指令,就做什么。没有标定阶段,缺什么当场点名要。");
 
-    // 🔴🔴 **干活第一件事:回量到的原位。** 顺序很要紧 —— 解相机走的是
-    // 「把此刻的手投到画面上」,手不在原位时投影落在画幅外 ⇒ 解不出相机 ⇒ 整条瞎掉。
-    // 实测(2026-08-25,试跑 N9):不跑任何标定轮次时手停在上电位形,
-    // 两台相机都报「机体没自报可用的标定」,爪子也不在画面里(双响 0)。
-    // 回家之后同一份代码:到位差 **0.0001**,爪子双响 **108**。
-    let 回家点 = body.get(Q::HomePose).filter(|m| m.value.len() >= 3)
-        .map(|m| [m.value[0], m.value[1], m.value[2]]);
-    if let Some(h) = 回家点 {
-        if let Some(f0) = plug.sense() {
-            let q0 = f0.ee.first().map(|e| [e[3], e[4], e[5], e[6]]).unwrap_or([1.0, 0.0, 0.0, 0.0]);
-            let mut 上次: Option<[f64; 3]> = None;
-            let mut 稳 = 0u32;
-            let mut 末 = f0;
-            for _ in 0..400 {
-                plug.act(&Cmd::Ee { arm: 0, at: h, quat: q0, jaw: 1.0 });
-                match plug.sense() { Some(f) => 末 = f, None => break }
-                let 此 = 末.ee.first().map(|e| [e[0], e[1], e[2]]);
-                if 此.is_some() && 此 == 上次 { 稳 += 1; if 稳 >= 2 { break } } else { 稳 = 0 }
-                上次 = 此;
-            }
-            let 到 = 末.ee.first().map(|e| [e[0], e[1], e[2]]).unwrap_or(h);
-            println!("[服] 🏠 先回量到的原位 ({:.3},{:.3},{:.3}) ⇒ 到了 ({:.3},{:.3},{:.3}),差 {:.4}",
-                h[0], h[1], h[2], 到[0], 到[1], 到[2],
-                ((到[0]-h[0]).powi(2) + (到[1]-h[1]).powi(2) + (到[2]-h[2]).powi(2)).sqrt());
-        }
-    } else {
-        println!("[服] 🟡 没有量到的原位 ⇒ 就地开工(解相机与认爪都可能因此看不见)");
-    }
-
-    // 🔴🔴 **解相机不许再当「量爪宽」那一相的副产品**(2026-08-25 实测定案)。
-    //
-    // 代价照记(炮1):`BL_ONLY` 跳过 `gripper_span` ⇒ **一台相机都没解出来** ⇒ 干活模式
-    // 报「camera(标定里一台相机都没解出来)」⇒ 整个抓取开不了工。而**相机和爪宽毫无关系**:
-    // `自报相机` 走的是**机体自己发布的**内参 + 外参,只要一句「手在画面哪一点」就够
-    // (`hand_pixel`,已量到),它被写在跨度那一相里纯属历史。
-    // ⇒ 干活入口再试一次:机体自报了就直接用,不必先去量一个用不上的爪宽。
-    let mut 相机们: Vec<(usize, point_gen::Eye, f64)> = 相机们.to_vec();
+    // 这条路真正要的身体量 —— **只有三个**,而且都不是几何标量:
+    //   可达(能不能够到)· 交付率(一条命令走多远)· 接触阈(碰到东西的样子)
+    // 🔴 爪宽 / 工具长 / 工具轴**不在这里** —— 它们在减法里抵消了,或者由自模现读。
+    let 量 = |q: Q, n: usize| -> Option<Vec<f64>> {
+        body.get(q).filter(|m| m.value.len() >= n && m.selftest_passed).map(|m| m.value[..n].to_vec())
+    };
+    let Some(可达带) = 量(Q::Reach, 2) else { return Some("reach".into()) };
+    let Some(交付率) = 量(Q::StepDelivery, 1).map(|v| v[0]) else { return Some("step_delivery".into()) };
+    let Some(接触阈) = 量(Q::ContactThreshold, 1).map(|v| v[0]) else { return Some("contact_threshold".into()) };
     if 相机们.is_empty() {
-        for i in 0..plug.lay.cams.len() {
-            let 报 = plug.lay.cams.get(i).and_then(|路| {
-                plug.last.as_ref().and_then(|o| {
-                    自报相机(
-                        o,
-                        路,
-                        body.get(Q::HandPixel).filter(|m| m.dim >= 2).map(|m| (m.value[0], m.value[1])),
-                        plug.lay.ee.first().map(|v| v.as_slice()),
-                    )
-                })
-            });
-            match 报 {
-                Some((eye, 米每单位)) => {
-                    println!("[服] 🟢 第 {i} 台相机用**机体自己发布的**标定:fx={:.3} 主点=({:.3},{:.3}) 相机在 ({:.3},{:.3},{:.3}) ⇒ 手那个深度上 1 单位 = {:.5}",
-                        eye.fx, eye.cx, eye.cy, eye.at[0], eye.at[1], eye.at[2], 米每单位);
-                    相机们.push((i, eye, 米每单位));
-                }
-                None => println!("[服]   第 {i} 台相机:机体没自报可用的标定"),
-            }
-        }
+        println!("[服] 🔴 一台相机都没解出来 —— 而相机必须**自己解**(`fit_full`,不许问机体要)。");
+        return None;
     }
-    let 相机们: &[(usize, point_gen::Eye, f64)] = &相机们;
+    let (相机号, 眼, _米每单位) = 相机们[0];
 
-    // ── 这一件事(抓)要问的格。谁缺了报谁的名字。 ──────────────────────
-    let mut 缺: Vec<&'static str> = Vec::new();
-    let mut 取一 = |q: Q, n: usize, 名: &'static str| -> Option<Vec<f64>> {
-        match body.get(q) {
-            Some(m) if m.value.len() >= n && m.selftest_passed => Some(m.value[..n].to_vec()),
-            _ => { 缺.push(名); None }
+    let 灰 = |f: &Frame, ci: usize| f.cams.get(ci).map(|(w, h, d)| (*w, *h, d.clone()));
+    let 彩 = |f: &Frame, ci: usize| f.cams.get(ci).map(|(w, h, d)| {
+        let mut rgb = Vec::with_capacity(w * h * 3);
+        for g in d { rgb.push(*g); rgb.push(*g); rgb.push(*g); }
+        (*w, *h, rgb)
+    });
+
+    // 走到位就停:剩下不足起点距离的 2%。**不是"看起来不动了"** ——
+    // 交付率低的身体上,"还没开始动"和"停了"在读数上同形(实测 +0.2 rad ⇒ 实到 +0.005)。
+    let 落 = |plug: &mut Plug<S>, at: [f64; 3], q: [f64; 4], j: f64, 上限: u32| -> Option<Frame> {
+        let mut 末 = None;
+        let mut 起差: Option<f64> = None;
+        for _ in 0..上限 {
+            plug.act(&Cmd::Ee { arm: 0, at, quat: q, jaw: j });
+            let Some(f) = plug.sense() else { break };
+            let d = f.ee.first().map(|e| ((e[0]-at[0]).powi(2)+(e[1]-at[1]).powi(2)+(e[2]-at[2]).powi(2)).sqrt())?;
+            let s0 = *起差.get_or_insert(d.max(1e-9));
+            末 = Some(f);
+            if d <= 0.02 * s0 { break }
         }
+        末
     };
-    let 可达带 = 取一(Q::Reach, 2, "reach");
-    let 接触阈 = 取一(Q::ContactThreshold, 1, "contact_threshold").map(|v| v[0]);
-    let 原位 = 取一(Q::HomePose, 3, "home_pose");
-    let 交付率 = 取一(Q::StepDelivery, 1, "step_delivery").map(|v| v[0]);
-    // 🔴 跨度/工具三格 = 耐久硬件几何(爪最大开口 · 法兰→指尖长 · 工具轴列),
-    // 不随开机漂;真会随锚点漂的(image_jacobian/hand_pixel)每炮照旧重量。
-    // 本轮量到用本轮的;没量到从 --in 装回并打明出处 —— 值是先前炮量出并过闸的,
-    // 不是编数。N23-26 四炮实证:跨度配对同开度散 3 倍,斜率淹没 ⇒ NoResponse 是
-    // 诚实拒绝,但它拒的是【这一轮的采样】,不是那个已量到的常数。
-    let 入档文本 = 入档.and_then(|p| std::fs::read_to_string(p).ok());
-    let 格值 = |名: &str, n: usize| -> Option<Vec<f64>> {
-        let t = 入档文本.as_deref()?;
-        let at = t.find(&format!("\"{名}\""))?;
-        let seg = &t[at..];
-        let v = seg.find("\"value\"")?;
-        let rest = seg[v..].splitn(2, '[').nth(1)?;
-        let arr = rest.split(']').next()?;
-        let vals: Vec<f64> = arr.split(',').filter_map(|x| x.trim().parse().ok()).collect();
-        if vals.len() >= n { Some(vals[..n].to_vec()) } else { None }
-    };
-    let mut 拿 = |q: Q, n: usize, 名: &'static str| -> Option<Vec<f64>> {
-        match body.get(q) {
-            Some(m) if m.value.len() >= n && m.selftest_passed => Some(m.value[..n].to_vec()),
-            _ => match 格值(名, n) {
-                Some(v) => { println!("[服] {名} 本轮没量到 ⇒ 从 --in 装回 {v:?}(耐久身体常数,先前炮实测过闸)"); Some(v) }
-                None => { 缺.push(名); None }
-            }
+
+    // 🔴 **指尖此刻在哪 —— 看出来的,不是从法兰推出来的。**
+    // 手臂冻住、只动爪子 ⇒ 会动的那一块按构造就是钳口。五帧合同交给仓里的认块器
+    // (带噪声地板 + 连通 + 刚性,**认不出来会拒绝**),再用深度反投影成世界点。
+    // 返回 (指尖世界坐标, 两瓣分得多开的画幅距离)。
+    let 看指尖 = |plug: &mut Plug<S>, at: [f64; 3], q: [f64; 4], j0: f64| -> Option<([f64; 3], f64)> {
+        let 步 = (if j0 > 0.5 { -1.0 } else { 1.0 }) * 0.30;
+        let mut 帧们 = Vec::new();
+        帧们.push(落(plug, at, q, j0, 200)?);
+        帧们.push(落(plug, at, q, j0, 6)?);
+        for k in 1..=3 { 帧们.push(落(plug, at, q, (j0 + 步 * k as f64).clamp(0.0, 1.0), 200)?); }
+        let 末 = 落(plug, at, q, j0, 200)?;
+        let (w, h, _) = 灰(&帧们[0], 相机号)?;
+        let g: Vec<Vec<u8>> = 帧们.iter().filter_map(|f| 灰(f, 相机号).map(|(_, _, d)| d)).collect();
+        if g.len() < 5 { return None }
+        let r = match body_layer::blob::candidates(&g[0], &g[1], &g[2], &g[3], &g[4], w, h,
+                步.abs(), selfcal::最少像素(w, h)) {
+            Ok(r) => r,
+            Err(e) => { println!("[服]   认块器拒绝 {e:?} —— 这一眼不算数"); return None }
+        };
+        let c = r.cands.get(0)?;
+        println!("[服]   看爪:双响 {} · 配对 {} · 地板 {} · 形心 ({:.3},{:.3})", r.moved_px, r.pairs, r.floor, c.u, c.v);
+        // 那一块反投影成三维:只留**近侧四分之一**(爪子离相机比背景近),
+        // 取离末端最远的那个点 = 指尖。分位数是数据自己的,不是填的。
+        let 路 = plug.lay.cams.get(相机号)?;
+        let mut 深路 = 路.clone();
+        if let Some(l) = 深路.last_mut() { *l = "depth".to_string(); }
+        let dv = plug.last.as_ref().and_then(|o| 取(o, &深路))?;
+        let (dw, dh, dep) = wire::as_f32_grid(&dv)?;
+        let 末位 = 末.ee.first().map(|e| [e[0], e[1], e[2]])?;
+        let mut 点: Vec<(f64, [f64; 3])> = Vec::new();
+        let (u0, v0, u1, v1) = (c.ext[0], c.ext[1], c.ext[2], c.ext[3]);
+        for gy in 0..=30u32 { for gx in 0..=30u32 {
+            let u = u0 + (u1 - u0) * gx as f64 / 30.0;
+            let v = v0 + (v1 - v0) * gy as f64 / 30.0;
+            if !(0.0..1.0).contains(&u) || !(0.0..1.0).contains(&v) { continue }
+            let (x, y) = (((u * dw as f64) as usize).min(dw - 1), ((v * dh as f64) as usize).min(dh - 1));
+            let d = dep[y * dw + x] as f64;
+            if !(d.is_finite() && d > 0.0) { continue }
+            if let Ok(p) = 眼.back_project([u, v], d) { 点.push((d, [p.x, p.y, p.z])); }
+        }}
+        if 点.len() < 16 { return None }
+        let mut ds: Vec<f64> = 点.iter().map(|(d, _)| *d).collect();
+        ds.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let 近闸 = ds[ds.len() / 4];
+        let mut 远: Option<(f64, [f64; 3])> = None;
+        for (d, p) in &点 {
+            if *d > 近闸 { continue }
+            let r = ((p[0]-末位[0]).powi(2) + (p[1]-末位[1]).powi(2) + (p[2]-末位[2]).powi(2)).sqrt();
+            if 远.map(|(b, _)| r > b).unwrap_or(true) { 远 = Some((r, *p)); }
         }
+        let (长, 尖) = 远?;
+        let 张 = ((u1 - u0).powi(2) + (v1 - v0).powi(2)).sqrt();
+        println!("[服]   指尖在 ({:.3},{:.3},{:.3}) · 离末端 {:.4} · 那一块 {:.4} 画幅", 尖[0], 尖[1], 尖[2], 长, 张);
+        Some((尖, 张))
     };
-    // 🔴 爪宽**不进「缺」清单**:它缺了不挡开工(下面进循环前当场看一眼)。
-    // 把它留在清单里,就等于把那条已经删掉的「不量完不干活」偷偷留了一半。
-    let 张开 = match body.get(Q::GripperSpan) {
-        Some(m) if !m.value.is_empty() && m.selftest_passed => Some(m.value[0]),
-        _ => 格值("gripper_span", 1).map(|v| v[0]),
-    };
-    if let Some(v) = 张开 { println!("[服] gripper_span 已有 {v:.4}(本轮量到或从 --in 装回)"); }
-    // 🔴🔴 **工具那两格也不再挡工**(2026-08-25,owner 死命令「删掉不量完不干活」)。
-    //
-    // `法兰 = 指尖 − 工具轴 × 工具长`。不知道工具长就当 **0** —— 而工具长是 0 的时候
-    // **工具轴乘什么都是 0**,于是「哪一列是工具轴」这个假设根本不需要做。
-    // ⇒ 这条降级**一个身体假设都不含**,不是"编了个数",是"少了一段已知的偏移"。
-    // 代价:手会比目标低一个指尖长,靠接触/堵转兜住 —— 缺东西的代价是**差**,不是**不能**。
-    //
-    // 炮1 实测(2026-08-25):`tool_axis_column` 给到 30 个循环、弧点稳定产出,
-    // 仍判 **0.0001 m**(≈0,读成"这具身体没有工具")⇒ 弧半径换米那一步还有账要查,
-    // 但它不该把**整个抓取**挡在门外。查它是下一轮的事,不是今晚不干活的理由。
-    let 工具长 = 拿(Q::ToolOffset, 1, "tool_offset").map(|v| v[0]);
-    let 工具列 = 拿(Q::ToolAxisColumn, 1, "tool_axis_column").map(|v| v[0] as usize);
-    缺.retain(|n| *n != "tool_offset" && *n != "tool_axis_column");
-    // 🔴🔴 **不知道法兰到指尖有多长,就【在干活现场压一下桌子量出来】。**
-    //
-    // 实测代价(2026-08-25,试跑 N9):上一版是「不知道就当 0」。计划全都算得出来了
-    // (`🟢 计划:候选 1060 · 下手宽 9.5 mm · 指尖 (0.399,-0.012,0.774)`),
-    // 但命令下去是 `腰 0.7906 + **偏置 0 mm** ⇒ 命令指尖 0.7906` —— 法兰被要求走到**桌面高度**,
-    // 爪子整个要插进桌子里 ⇒ `盲走 30 拍只推进 **0.0000 m**`,连 3 个计划完全挪不动。
-    // ⇒ 「当 0」不是一条能开工的降级,它只是把撞墙推迟到下探那一步。
-    //
-    // 量法(零相机、零新常数):从原位**直着往下压**,压到本体高度连着两拍不再变(碰到桌子了)。
-    // 那一刻的法兰高度减去桌面高度,就是法兰到指尖有多长。桌面高度用**深度图反投影的中位数**
-    // (桌面是画面里最大的一片面,中位数就是它),相机是刚在上面解出来的那台。
-    // 🔴🔴 **`BL_TOOL0=1` —— 不去算该停在哪,而是【降到降不动为止】。**
-    //
-    // 这台仿真的运动规划带碰撞检查:让指尖插进桌面的姿态**整条被拒**。这件事可以反过来用 ——
-    // 把法兰直接命令到**指尖该去的高度**(即工具长当 0),手臂就会一路下降,
-    // 直到身体自己拒绝为止;而那个停住的位置**正好是指尖贴在桌面上**。就地合爪即可。
-    // ⇒ **根本不需要知道法兰到指尖有多长。** 与合爪判据「合到夹住为止」同一个思路,用在下探上。
-    //
-    // 之前这条没走通,是因为驱动把「降不动」当成「够不着」直接弃了计划;
-    // 而直取的下探段(段 13)本来就有「卡 15 拍 ⇒ 合爪」这一支,判据现成。
-    //
-    // 实测背景:工具长三种量法全败(0.1750=滞后量 · 0.2574=原位高度−桌面 · 最低处=原位本身),
-    // 三次都让爪子停在物体**上方**合爪 ⇒ 次次空抓(驱动自检自己判的「空爪」)。
-    let 降到底 = std::env::var("BL_TOOL0").as_deref() == Ok("1");
-    if 降到底 { println!("[服] ⚡ 降到降不动为止:工具长当 0,法兰直接去指尖该在的高度,靠身体自己拒绝停住。"); }
-    let 工具长 = if 降到底 { Some(0.0) } else {
-    工具长.filter(|v| v.is_finite() && *v > 0.0).or_else(|| {
-        let (ci, eye) = 相机们.first().map(|(i, e, _)| (*i, *e))?;
-        let f0 = plug.sense()?;
-        let q0 = f0.ee.first().map(|e| [e[3], e[4], e[5], e[6]])?;
-        let 起 = f0.ee.first().map(|e| [e[0], e[1], e[2]])?;
-        // 桌面高度:把深度图反投影成点云,取 z 的中位数。
-        let 桌面 = (|| {
-            let 路 = plug.lay.cams.get(ci)?;
+
+    let mut 试过: Vec<[f64; 3]> = Vec::new();
+    let mut 集 = 0u32;
+    loop {
+        let Some(帧) = plug.sense() else { return None };
+        if plug.复位过 { plug.复位过 = false; 集 += 1; 试过.clear(); println!("[服] ── 第 {集} 集 ──"); }
+        let Some(e) = 帧.ee.first().copied() else { continue };
+        let (此位, 此姿) = ([e[0], e[1], e[2]], [e[3], e[4], e[5], e[6]]);
+        let jaw0 = 帧.jaw.first().copied().unwrap_or(1.0);
+
+        // ① 指令 —— 整句直接问眼(它的提示词本来就是 Task: …),驱动不解析任务名。
+        // 指令从观测里拿 —— 驱动不解析任务名,整句转手给眼。
+        let 指令 = plug.last.clone()
+            .and_then(|o| 取(&o, &["instruction".to_string()]))
+            .and_then(|v| 字(&v))
+            .filter(|t| !t.is_empty());
+        let Some(指令) = 指令 else {
+            plug.act(&Cmd::Ee { arm: 0, at: 此位, quat: 此姿, jaw: jaw0 });
+            continue;
+        };
+        let Some((w, h, rgb)) = 彩(&帧, 相机号) else { continue };
+        let look = match body_layer::eye::ask(眼主机, 眼端口, &指令, &rgb, w, h) {
+            Ok(l) => l,
+            Err(x) => { println!("[服] 眼答不了:{x}"); plug.act(&Cmd::Ee { arm: 0, at: 此位, quat: 此姿, jaw: jaw0 }); continue }
+        };
+
+        // ② 我的指尖现在在哪 —— 看一眼。**这一步同时把「法兰到指尖」这个量消掉了。**
+        let Some((尖now, 张)) = 看指尖(plug, 此位, 此姿, jaw0) else {
+            println!("[服] 这一眼没看清爪子 ⇒ 换个位形再看(不编数)");
+            continue;
+        };
+        let d偏 = [尖now[0] - 此位[0], 尖now[1] - 此位[1], 尖now[2] - 此位[2]];
+
+        // ③ 算这一把 —— 接触集 → 指尖该去哪。**通用的那条路,不是"抓"专用的。**
+        let Some((dw, dh, dep)) = plug.lay.cams.get(相机号).and_then(|路| {
             let mut 深路 = 路.clone();
             if let Some(l) = 深路.last_mut() { *l = "depth".to_string(); }
-            let dv = plug.last.as_ref().and_then(|o| 取(o, &深路))?;
-            let (dw, dh, dep) = wire::as_f32_grid(&dv)?;
-            let mut zs: Vec<f64> = Vec::new();
-            let mut y = 0usize;
-            while y < dh {
-                let mut x = 0usize;
-                while x < dw {
-                    let d = dep[y * dw + x] as f64;
-                    if d.is_finite() && d > 0.0 {
-                        if let Ok(p) = eye.back_project([x as f64 / dw as f64, y as f64 / dh as f64], d) {
-                            if p.z.is_finite() { zs.push(p.z); }
-                        }
-                    }
-                    x += 8;
-                }
-                y += 8;
-            }
-            if zs.len() < 64 { return None }
-            zs.sort_by(|a, b| a.partial_cmp(b).unwrap());
-            Some(zs[zs.len() / 2])
-        })();
-        let 桌面 = 桌面?;
-        // 🔴🔴 **压不进桌子 —— 这台仿真的运动规划带碰撞检查,指尖要插进桌面的姿态【整条被拒】,
-        // 表现就是「命令发了、手一步不动」**(`task.rs` 里 2026-08-17 已记过这条,我没想起来)。
-        //
-        // 实测两次走弯路(2026-08-25):
-        // ① 目标一路往下跑 ⇒ 手臂每拍只走命令的 10%,**一直在追从没追上**,
-        //    追到我设的下限就退出 ⇒ 量出 0.1750,那是**滞后量**不是工具长。
-        // ② 目标一次设到桌面以下 ⇒ 整条姿态被拒,手一步不动 ⇒ 量出 0.2574(= 原位高度 − 桌面)。
-        // 两次都让爪子停在物体上方合爪 ⇒ **次次空抓**(驱动自检自己判的「空爪」)。
-        //
-        // ⇒ **拿「身体自己拒绝」当尺**:从高往低一档一档试,每一档都等它真的走到;
-        //   **第一档走不到的地方就是底**,而底 = 桌面 + 法兰到指尖的长度。零假设、零新常数
-        //   (档距用量到的交付率折算的一步,不是拍脑袋的数)。
-        let mut 末 = f0;
-        let 档 = 0.02f64;
-        let mut 最低到 = 起[2];
-        let mut d = 0.30f64;
-        while d > 0.0 {
-            let 目标z = 桌面 + d;
-            if 目标z >= 起[2] { d -= 档; continue }
-            let mut 上次: Option<f64> = None;
-            let mut 稳 = 0u32;
-            let mut 到 = false;
-            for _ in 0..120 {
-                plug.act(&Cmd::Ee { arm: 0, at: [起[0], 起[1], 目标z], quat: q0, jaw: 1.0 });
-                match plug.sense() { Some(f) => 末 = f, None => break }
-                let z = 末.ee.first().map(|e| e[2]);
-                if let Some(a) = z {
-                    if (a - 目标z).abs() < 0.005 { 到 = true; break }
-                    if 上次 == Some(a) { 稳 += 1; if 稳 >= 5 { break } } else { 稳 = 0 }
-                }
-                上次 = z;
-            }
-            if 到 { 最低到 = 目标z; d -= 档; } else {
-                println!("[服]    下探到桌面上方 {:.3} 走不到了(整条姿态被拒)⇒ 底在上一档 {:.4}", d, 最低到);
-                break
-            }
-        }
-        let _ = 末;
-        let 触z = 最低到;
-        let 长 = 触z - 桌面;
-        println!("[服] 🔧 不知道法兰到指尖有多长 ⇒ 拿「走得到的最低处」量:最低法兰 {触z:.4} · 桌面 {桌面:.4} ⇒ **工具长 {长:.4}**");
-        if !(长.is_finite() && 长 > 0.0) {
-            println!("[服] 🔴 压出来的工具长不是正数({长:.4})—— 不当尺用,按 0 记并明说。");
-            return Some(0.0);
-        }
-        // 量完回原位,别带着贴桌的姿态去干活。
-        if let Some(h) = 回家点 {
-            for _ in 0..300 { plug.act(&Cmd::Ee { arm: 0, at: h, quat: q0, jaw: 1.0 }); if plug.sense().is_none() { break } }
-        }
-        Some(长)
-    }) };
-    // 直取实验开关(默认关)。见计划创建处那段 🔴。
-    let 直取 = std::env::var("BL_ZHIQU").as_deref() == Ok("1");
-    if 直取 { println!("[服] ⚡ 直取模式:相机是机体自报标定,绝对定位够准 ⇒ 不做末段像素伺服,算出计划就下探合爪。"); }
-    let 工具轴量到 = 工具列.is_some();
-    let 工具列 = 工具列.or(Some(2));
-    if !工具轴量到 {
-        println!("[服] 🟡 哪一列是工具轴没量到 ⇒ 每一把从计划自己的腕姿里挑最贴着「朝下」的那一列(不写死)。");
-    }
-    let 探幅 = std::fs::read_to_string(标定文件).ok()
-        .and_then(|t| 旁注(&t, "contact_threshold", "probed_at_command_m"));
-    if 探幅.is_none() { 缺.push("contact_threshold 的 probed_at_command_m 旁注"); }
-    if 相机们.is_empty() { 缺.push("camera(标定里一台相机都没解出来)"); }
-    if !缺.is_empty() {
-        println!("[服] 🔴 抓这件事开不了工,缺:{缺:?}");
-        println!("[服]    按格拒绝,不编数。每一帧回声原地(发真动作,免得对方空转)。");
-    }
-
-    // ── 走航点的状态。**没有状态机的段号也行,但段号让日志能读** ──────────
-    struct 抓况 {
-        指尖: [f64; 3],
-        q: [f64; 4],
-        相机: usize,
-        段: u8,       // 0 悬停 · 9 对准(末段像素伺服) · 1 下探 · 2 合爪 · 3 抬
-        卡: u32,
-        合等: u32,
-        上位: Option<[f64; 3]>,
-        连塌: u32,
-        抬高: f64,
-        // ── 末段像素伺服(2026-08-21,owner 死命令"不接受夹空气")──
-        // 相机位姿还剩 ~0.2 m 残差而合爪窗只有 1.6 cm ⇒ 合爪前不再信绝对坐标:
-        // 眼睛同时看「爪在画面哪」(认块器,晃钳口差分)和「物在画面哪」(计划时
-        // 问眼的像素),像素差经账本 image_jacobian 换成位移,收敛到爪窗以内才下探。
-        // 文档判词的落地:"末段不许再推算,每轮重测手点,只用实测误差判到位"。
-        物像素: (f64, f64),
-        物跨: f64, // 计划时物的自报跨度(画幅比例)—— 裁剪窗避物的余隙,自缩放
-        对准帧: Vec<Vec<u8>>,
-        对准次: u32,
-        对准挪: [f64; 2],
-        对准锚: [f64; 3],
-        下探锚: [f64; 2],
-        对准等: u32,
-        上爪: Option<(f64, f64)>,
-        上期望: (f64, f64),
-        伺服号: [f64; 2],
-        翻候: [u8; 2],  // 方向自证的连续矛盾计数(两次才翻,挡 VLM 单答噪声)
-        钉xy: [f64; 2], // 钉 z 时的手 xy —— 挪出一个步z 就解钉重试下降
-        伺服上位: Option<[f64; 3]>, // 上一拍手位(proprio)—— 推算用实到位移
-        对Δw: [f64; 3],            // 自上次生实测以来手真挪的 xyz(在线局部手眼原料)
-        近答: Vec<(f64, f64)>,     // 近 5 个已收生答(逐拍随实到位移平移)—— 取中位当爪估
-        模板: Vec<u8>,             // 快眼:爪的模板块(晃爪认手锚定时截;空 = 无)
-        模板半: usize,             // 模板半宽(像素,按画幅比例算)
-        验拍: u32,                 // 距上次慢眼身份复核的拍数
-        // ── 晃爪认手(构造性身份,档案 2026-08-10/08-14 两次验通:「只命令钳口、
-        //    手臂不动 ⇒ 会动的刚体按构造就是钳口」)。N21 帧证:爪被自臂挡住时
-        //    VLM 指手肘/底座,凸起闸拦不住(臂身本来就高于桌面)⇒ 爪源不许再
-        //    问 VLM,身份由构造给;VLM 只当定期复核的触发器。──
-        晃态: u8,                  // 0 不在晃 · 1-3 静对/基帧 · 4-5 半合/全合动帧 · 6 回开结算
-        晃等: u32,
-        回家中: bool,              // 爪不可见 ⇒ 去量到的原位重认(仅每计划一次,不是回位拐棍)
-        回过家: bool,
-        晃帧: Vec<Vec<u8>>,        // 认块器的 5 帧合同:静对 ×2 + 同步长动帧 ×3
-        晃基: Option<[f64; 3]>,    // 晃臂模式的臂基点(第 3 轮起改晃臂;结算后回基点)
-        盲距: f64,                 // 盲走进度窗基线(30 拍窗口起点的 d首;间歇跳会骗过单拍挪闸)
-        补抓次: u8,                // 空合就地补抓已试的偏移数(≤8;触觉包最后一厘米)
-        补抓基: [f64; 3],          // 补抓环中心 = 收敛时的指尖(视觉送到的最好答案)
-        补抓爪像素: Option<(f64, f64)>, // 收敛那拍的爪像素(预测龄==0 才收敛 ⇒ 量出非推账);与补抓基成世界↔像素锚对
-        补抓凸: f64,               // 睁眼簇的平均凸高(米)= 量到的物高;探针 z 抬 0.5×它,治指尖插桌的假撑住
-        精调次: u8,                // 在下探点上"量-挪-再量"的轮数(每轮都在同一高度实测,不合爪)
-        该合: bool,                // 这一次到位就合爪(残差已小于自身量出的容差)
-        晃次: u8,
-        上fix生: Option<(f64, f64)>, // 上一次生实测(未融合),配对用
-        步率: [f64; 2],
-        预测爪: Option<(f64, f64)>,
-        预测龄: u32,
-        僵拍: u32,                 // 真僵计数:伺服在要一步而手不动,且不在合法保持
-        底晃次: u32,               // 本计划在 z 底重晃过几次(≤2;白臂模板短命,底部失守不再一律死)
-        锚新: bool,                // 锚是否新鲜:匹配成功=真;哨兵(失守/饿死/租约)开火=假
-        命累: f64,                // 响应自证:账本预测的像素动量累计(重锚清零)
-        应累: f64,                // 响应自证:匹配器实测的像素动量累计
-        上降z: f64,
-        对准末差: f64,
-        交替次: u32,
-        段起z: f64,
-        段拍: u32,
-        伺服目标: [f64; 3],
-        收敛计: u32,
-        上爪读: Vec<f64>,
-    }
-    let mut 计划: Option<抓况> = None;
-    let mut 试过: Vec<[f64; 3]> = Vec::new();
-    // z 列在线自尺的对子(执行z, 像素挪u, 像素挪v)。🔴 放服务级不放 抓况(N46 定案:
-    // 每计划清零 ⇒ 新计划头 10 拍 jz用 退回热账本,响应自证又误杀 —— 三连"失守于 z 底⇒弃"。
-    // 这是相机的物理尺,跨计划成立;计划换点不换相机。)
-    let mut z对: Vec<(f64, f64, f64)> = Vec::new();
-    // 🔴 对子也跨锚持有(N59 定案:逐计划清尺=每计划重赌 J 学对学错,N48/N51/N59
-    // 三炮复发 u 反漂跑死。N33"重锚不清尺⇒毒尺继续漂"的前提已被四道防线取代:
-    // 岭先验自缩放 + 3×中位剔群 + 锚保鲜(哨兵开火即脏)+ 响应自证失守闸。)
-    let mut 对子: Vec<([f64; 2], (f64, f64))> = Vec::new();
-    // 探锚:上一探晃出的(本体位置, 爪像素)。直取每探都重量一次爪 ⇒ 相邻两探
-    // 天然成一对"走了多少米 ↔ 像素挪了多少",喂进在线拟合,尺自己纠方向和倍率。
-    // (N102 实锤:账本尺横轴方向是反的 —— 命令 +0.229m 手像素 u 从 0.844 跑到
-    // 0.930,而物在 0.500;直取绕开了伺服路径里那套方向自证,必须自带。)
-    // 到过:这一炮里【真正到达过】的指尖世界位(段13 真到位那一刻记)。这是这具身体
-    // 在这个场景里可达域的唯一实测证据 —— 比任何标定出来的 reach 带都可信(N38-39
-    // 定案:标定的 reach 量的是探针扫过的带,不是任务可达集,当墙用会拒真方块)。
-    // 用法只做【排序性的快弃】:新计划的下手点离我到过的每一个地方都远于
-    // "我一步能挪的最大实测距离",那就是够不着,当场弃、不烧 30 拍。
-    // 困计:连着几个计划死于"完全挪不动"。没有复位键的世界里,这不是候选的错,
-    // 是手臂自己卡在某个姿态出不来了(N121 实锤:连 10 个计划全是"盲走 30 拍只推进
-    // 0.2 mm、还差 0.55 m")。连 3 个就进【试方向】自救:沿量出来的六个方向各试一小步,
-    // 哪个方向真挪得动就往哪走,挪出来再接着干。零机体假设:方向就是本体坐标的
-    // ±x/±y/±z,步长用量出来的张开,判据用量出来的协议地板。
-    let mut 困计: u8 = 0;
-    let mut 试向: usize = 0;
-    // 够不到过:实测够不着的下手点(盲走闸/下探闸判死的那些)。与"到过"对称 ——
-    // 一个记可达证据、一个记不可达证据。N126 实锤:7 个候选全够不着、直取一次没进,
-    // 整炮在"计划死→让开→重问→又够不着"里空转 164 次让开。同一片区域不该被反复试。
-    let mut 够不到过: Vec<[f64; 3]> = Vec::new();
-    let mut 到过: Vec<[f64; 3]> = Vec::new();
-    let mut 最大步: f64 = 0.0;
-    let mut 探锚: Option<([f64; 3], (f64, f64))> = None;
-    // 探号:直取步长的方向自证(伺服路径里那套 MB 已验机制的直取版)。
-    // 每探都重量爪像素 ⇒ 上一探"命令走了多少"与"像素实际挪了多少"当场可比:
-    // 某个画面轴上两者反号 ⇒ 那一轴的账本方向是反的,翻号。一探即纠,零常数。
-    let mut 探号: [f64; 2] = [1.0, 1.0];
-    let mut 上探步: Option<[f64; 2]> = None;
-    let mut 疑锚次: u8 = 0; // 连续认手不可信的次数(连 2 次仍不可信就先按它走,免得原地空转)
-    // 🔴 问前回位(N49 帧定案:手臂死在上次尝试的位置、大半个身子横在场景里,
-    // 眼把机器人底座 (0.500,0.911) 答成方块 —— N21 幻影病的物体版。每次计划死亡后
-    // 先回量到的原位再问眼:从标定视角看世界,不让身子挡镜头。这不是被禁的账本尺
-    // 拐棍(问眼态无计划无尺);可行计划照旧就地干活。)
-    // N58 定案:首问也要回位(初值 true)—— 标定收尾姿态首答屡出幻影(y=-0.8 远端计划)。
-    let mut 要回看 = true;
-    // 🔴 桌面一致性审(同一炮内支撑面不会瞬移):首个成功计划的云桌面为基准,
-    // 新计划云桌面偏离 > 张开 ⇒ 观测是毒的(答到了别的平面,多半是自己身子),按名拒。
-    let mut 桌上z: Option<f64> = None;
-    let mut 桌拒计 = 0u32;
-    // 合爪取证帧序号(空合的几何真相只有像素能判 —— §3.6)。
-    let mut 合序 = 0u32;
-    // 上一次【活满租约/收敛合爪】的锚所在的手世界位 —— 回家重认的目的地(N64 帧证:原位是收起
-    // 姿态,手指出画/被大臂挡死,钳口全开在图里 diff max 12 = 不可见,在那儿晃 3 轮
-    // 必败。"原位=已证爪可见"的老前提被这张帧证伪;可见性只信量出来的:认出过的地方)。
-    let mut 认位: Option<[f64; 3]> = None;
-    // 3 败重认的目的地(无已验认位时):原地抬 1×张开 —— 标定认手在高位/暗背景
-    // 双响上万,桌面高光带才是认不出的根(N74 定案:回桌面死角重认 3 计划全灭)。
-    let mut 回标: Option<[f64; 3]> = None;
-    // 跨计划的爪估锚(N10 实锤:不回原位后,新计划的首捕获窗死盯标定位,
-    // 而爪停在上一计划的落点 —— 窗外 ⇒ 后续尝试全是空烧。爪不会瞬移,
-    // 上一次实测就是最好的锚)。
-    let mut 上帧爪: Option<(f64, f64)> = None;
-    let mut 拍 = 0u64;
-    let mut 帧 = match plug.sense() { Some(f) => f, None => return };
-
-    // ── 🔴🔴 「不量完不干活」这条规矩已删(owner 2026-08-25 死命令)────────────────
-    //
-    // 代价照记:从 N128 到 N143 一共 **14 炮,进入干活模式的次数是 0**。一次都没伸过手。
-    // 全部卡在开机自标定的一格上,而那一格(爪子张多开)**抓东西根本不需要它的绝对值** ——
-    // 合爪的判据是「每根手指的读数都停在半途 ⇒ 夹住了」,零尺度。它只被当成**长度尺**用。
-    //
-    // ⇒ 缺了它不许再回声不动。就在**干活现场**自己看一眼:
-    //   手臂冻住、只动钳口 ⇒ 画面里会动的那一块**按构造**就是钳口(这条构造性身份
-    //   本仓 2026-08-10 / 08-14 两次验通),那一块有多宽,就是这只爪子有多宽。
-    //   换算用**已经量到的**手眼账本 + 那一点的深度,不引入任何新常数。
-    //
-    // 这就是「自标定融进任务」的第一块:**先动起来,缺什么当场看一眼补上**,
-    // 而不是站着量四十分钟、量不出来就宣布干不了。
-    // 晃爪那一眼顺手量到的「法兰到指尖」—— 在下面那个块里算,拿出来覆盖工具长。
-    let mut 指尖长量: Option<f64> = None;
-    let 张开 = match 张开 {
-        Some(v) => v,
-        None => {
-            println!("[服] 🔧 爪宽没量到 —— 不回声,当场看一眼自己的爪子(手臂冻住,只动钳口)");
-            let 冻q = 帧.ee.first().map(|e| [e[3], e[4], e[5], e[6]]).unwrap_or([1.0, 0.0, 0.0, 0.0]);
-            // 手已经在原位(干活入口第一件事就回了家,见上面 🏠 那一段)—— 就地冻住只动钳口。
-            let 冻 = 帧.ee.first().map(|e| [e[0], e[1], e[2]]).unwrap_or([0.0; 3]);
-            // 合到读数不再变为止 —— 判据是「连着两拍读数一模一样」,没有任何阈值,
-            // 也没有"几拍够了"这种拍脑袋的数(与 selfcal 量钳口落定用的是同一条)。
-            let 落 = |plug: &mut Plug<S>, 帧: &mut Frame, j: f64, 上限: u32| {
-                let mut 上次: Option<Vec<f64>> = None;
-                for _ in 0..上限 {
-                    plug.act(&Cmd::Ee { arm: 0, at: 冻, quat: 冻q, jaw: j });
-                    match plug.sense() { Some(f) => *帧 = f, None => return }
-                    let 此: Vec<f64> = 帧.jaw.iter().copied().collect();
-                    if 上次.as_ref() == Some(&此) && !此.is_empty() { return }
-                    上次 = Some(此);
-                }
-            };
-            // 五帧合同:两帧不动(量这台相机自己的噪声地板)+ 三帧等步长合爪。
-            // 步长取全行程的三分之一 —— 这是**协议选择**(要三步等距),不是身体常数。
-            let 步长 = 1.0 / 3.0;
-            let mut 五帧: Vec<Vec<Vec<u8>>> = vec![Vec::new(); 帧.cams.len().max(1)];
-            let 收 = |帧: &Frame, 五帧: &mut Vec<Vec<Vec<u8>>>| {
-                for (ci, img) in 帧.cams.iter().enumerate() {
-                    if ci < 五帧.len() { 五帧[ci].push(img.2.clone()); }
-                }
-            };
-            落(plug, &mut 帧, 1.0, 120);
-            收(&帧, &mut 五帧);                       // null_a
-            落(plug, &mut 帧, 1.0, 2);
-            收(&帧, &mut 五帧);                       // null_b(命令没变 ⇒ 地板)
-            for k in 1..=3u32 {
-                落(plug, &mut 帧, 1.0 - 步长 * k as f64, 120);
-                收(&帧, &mut 五帧);                   // f0 f1 f2,每两帧之间同一个命令步长
-            }
-            // 每台相机各读一遍,挑双响最强、且真读出块的那台。相机好不好是量出来的。
-            let mut 最好: Option<(usize, f64, u32, u32, [f64; 4])> = None; // (相机, 画面里的宽, 双响, 配对, 包围盒)
-            for (ci, fr) in 五帧.iter().enumerate() {
-                let Some(img) = 帧.cams.get(ci) else { continue };
-                if fr.len() != 5 { continue }
-                match body_layer::blob::candidates(
-                    &fr[0], &fr[1], &fr[2], &fr[3], &fr[4],
-                    img.0, img.1, 步长, selfcal::最少像素(img.0, img.1),
-                ) {
-                    Err(e) => println!("[服]   第 {ci} 台:认块器拒绝 {e:?}"),
-                    Ok(r) => {
-                        let Some(c) = r.cands.get(0) else {
-                            println!("[服]   第 {ci} 台:双响 {} 但一块都没连起来", r.moved_px);
-                            continue
-                        };
-                        // 会动的那一块沿**开合方向**有多宽。配对给了方向就用配对的方向
-                        // (那是量出来的开合方向);没配对就取包围盒的长边 —— 两指并排,
-                        // 长边就是开合那一维。两条都不含任何身体常数。
-                        let (w箱, h箱) = (c.ext[2] - c.ext[0], c.ext[3] - c.ext[1]);
-                        let 宽 = if r.pairs > 0 && (r.pair_dir.0.abs() + r.pair_dir.1.abs()) > 1e-9 {
-                            let n = r.pair_dir.0.hypot(r.pair_dir.1);
-                            (w箱 * r.pair_dir.0.abs() + h箱 * r.pair_dir.1.abs()) / n
-                        } else { w箱.max(h箱) };
-                        println!("[服]   第 {ci} 台:双响 {} · 配对 {} · 包围盒 {:.4}×{:.4} 画幅 ⇒ 开合那一维 {:.4}",
-                            r.moved_px, r.pairs, w箱, h箱, 宽);
-                        if 最好.map(|(_, _, m, _, _)| r.moved_px > m).unwrap_or(true) {
-                            最好 = Some((ci, 宽, r.moved_px, r.pairs, c.ext));
-                        }
-                    }
-                }
-            }
-            落(plug, &mut 帧, 1.0, 120); // 看完把爪子放回全开,别带着半合的姿态去干活
-            // 画幅 ⇒ 世界:直接用**解相机时就算好的**「手那个深度上 1 归一化单位 = 多少」。
-            // 🔴 不在这里重算一遍深度÷焦距 —— 同一个量出现在两处,两处一定会分岔(仓规)。
-            let 换算 = 最好.and_then(|(ci, 宽, _, _, _)| {
-                let 米每单位 = 相机们.iter().find(|(i, _, _)| *i == ci).map(|(_, _, m)| *m)?;
-                if !(米每单位.is_finite() && 米每单位 > 0.0) { return None }
-                Some(宽 * 米每单位)
-            });
-            // 🔴🔴 **法兰到指尖有多长,顺手在同一眼里量出来。**
-            //
-            // 会动的那一块**按构造就是钳口**(手臂冻住、只动钳口)。把那一块里**离机体自报的
-            // `ee` 最远**的那个三维点找出来,那就是**指尖**;它到 `ee` 的距离就是工具长。
-            // 全程用已经在工作的通道:机体自报的相机(内外参)+ 深度图 + 本体感受。
-            // 零假设、零新常数、不用戳桌子、不用转手腕。
-            //
-            // 走这条路的理由(2026-08-25 一夜的代价):戳桌子那三种量法全败 ——
-            // ①量到的是手臂滞后量 0.1750 ②姿态被碰撞检查整条拒掉 ⇒ 0.2574
-            // ③在原位那个位形连 1.75 cm 都下不去。而「降到降不动为止」也**撤回**了:
-            // 它停的是**任何部件先撞上任何东西**,指尖碰桌面和手掌撞到旁边物体读数一样。
-            let 指尖长 = 最好.and_then(|(ci, _, _, _, ext)| {
-                let eye = 相机们.iter().find(|(i, _, _)| *i == ci).map(|(_, e, _)| *e)?;
-                let 路 = plug.lay.cams.get(ci)?;
-                let mut 深路 = 路.clone();
-                if let Some(l) = 深路.last_mut() { *l = "depth".to_string(); }
-                let dv = plug.last.as_ref().and_then(|o| 取(o, &深路))?;
-                let (dw, dh, dep) = wire::as_f32_grid(&dv)?;
-                let 手 = 帧.ee.first().map(|e| [e[0], e[1], e[2]])?;
-                let (u0, v0, u1, v1) = (ext[0], ext[1], ext[2], ext[3]);
-                // 🔴 **包围盒是个矩形,里面除了爪子还有两指之间和周围的桌面。**
-                // 实测代价(2026-08-25,炮11):按格均匀采样 ⇒ 「离 ee 最远的点」选中的是
-                // **桌面**(落在 z=0.766,正是桌面高度)⇒ 量出 **0.3945**,离谱。
-                // ⇒ 用一条现成的物理事实把桌面剔掉:**爪子离相机比桌子近**。
-                //   先收齐盒子里所有点的深度,只留**近侧四分之一**(那就是爪子),
-                //   再在其中找离 `ee` 最远的 —— 那才是指尖。分位数是数据自己的,不是填的。
-                let mut 深表: Vec<f64> = Vec::new();
-                let mut 点表: Vec<(f64, [f64; 3])> = Vec::new();
-                for gy in 0..=30u32 {
-                    for gx in 0..=30u32 {
-                        let u = u0 + (u1 - u0) * gx as f64 / 30.0;
-                        let v = v0 + (v1 - v0) * gy as f64 / 30.0;
-                        if !(0.0..1.0).contains(&u) || !(0.0..1.0).contains(&v) { continue }
-                        let (px, py) = (((u * dw as f64) as usize).min(dw - 1), ((v * dh as f64) as usize).min(dh - 1));
-                        let d = dep[py * dw + px] as f64;
-                        if !(d.is_finite() && d > 0.0) { continue }
-                        let Ok(p3) = eye.back_project([u, v], d) else { continue };
-                        if !(p3.x.is_finite() && p3.y.is_finite() && p3.z.is_finite()) { continue }
-                        深表.push(d);
-                        点表.push((d, [p3.x, p3.y, p3.z]));
-                    }
-                }
-                if 深表.len() < 16 { return None }
-                深表.sort_by(|a, b| a.partial_cmp(b).unwrap());
-                let 近闸 = 深表[深表.len() / 4];
-                let 采 = 点表.iter().filter(|(d, _)| *d <= 近闸).count() as u32;
-                let mut 最远: Option<(f64, [f64; 3])> = None;
-                for (d, p3) in &点表 {
-                    if *d > 近闸 { continue }
-                    let r = ((p3[0] - 手[0]).powi(2) + (p3[1] - 手[1]).powi(2) + (p3[2] - 手[2]).powi(2)).sqrt();
-                    if 最远.map(|(b, _)| r > b).unwrap_or(true) { 最远 = Some((r, *p3)); }
-                }
-                let (r, p) = 最远?;
-                println!("[服] 🔧 顺手量法兰到指尖:会动那一块里取到 {采} 个三维点,离 ee 最远的一个在 ({:.3},{:.3},{:.3})",
-                    p[0], p[1], p[2]);
-                if !(r.is_finite() && r > 0.0) { return None }
-                Some(r)
-            });
-            指尖长量 = 指尖长;
-            match 换算 {
-                Some(v) if v.is_finite() && v > 0.0 => {
-                    println!("[服] 🟢 当场看出爪宽 = {v:.4}(用会动的那一块的宽 × 那一点的深度 ÷ 焦距,全是量出来的)");
-                    println!("[服]    ⚠️ 这是**上界**:会动的那一块含两根手指的身子,比「两指之间能塞多宽」大一点。");
-                    println!("[服]    抓不抓得住不看它 —— 合爪的判据是「手指读数停在半途」,跟这个尺无关。");
-                    v
-                }
-                _ => {
-                    // 看不出来也不许停工。退回到**另一个量出来的手部长度**(法兰到指尖),
-                    // 并且**明说这是顶替、不是测量** —— 它只当长度尺用,合爪判据不受影响。
-                    // 🔴 NaN 不许当尺:它会让下游**每一个比较都变成 false**,读起来像
-                    // 「什么都够不着」,而真相是「尺是坏的」—— 两件事要改的东西完全不同。
-                    match 工具长.filter(|v| v.is_finite() && *v > 0.0) {
-                        Some(v) => {
-                            println!("[服] 🟡 这一眼没看出爪子(相机里它不够显眼)⇒ 长度尺**顶替**成量到的工具长 {v:.4}");
-                            println!("[服]    这不是爪宽的测量值,是一把临时的尺;下一次晃爪看清了就换掉。");
-                            v
-                        }
-                        None => {
-                            println!("[服] 🔴 既没看出爪子、也没有量到的工具长 ⇒ **一把有限的长度尺都没有**。");
-                            println!("[服]    开不了工的原因是「尺不存在」,不是「够不着」—— 两者要改的东西不同。");
-                            f64::NAN
-                        }
-                    }
-                }
-            }
-        }
-    };
-
-    // 🔴🔴 **晃爪那一眼量到的「法兰到指尖」优先于任何戳出来的数。**
-    // 它用的是已经在工作的通道(机体自报相机 + 深度图 + 本体感受),
-    // 而戳桌子那三种量法一夜之间全败(滞后量 / 姿态被拒 / 原位下不去),
-    // 「降到降不动为止」也已撤回(停的是任何部件先撞上任何东西)。
-    let 工具长 = match 指尖长量 {
-        Some(v) if v.is_finite() && v > 0.0 => {
-            println!("[服] 🟢 法兰到指尖 = {v:.4}(晃爪那一眼里,会动那一块离 ee 最远的三维点到 ee 的距离)");
-            Some(v)
-        }
-        _ => 工具长,
-    };
-
-    loop {
-        拍 += 1;
-        if plug.复位过 {
-            plug.复位过 = false;
-            if 计划.is_some() { println!("[服] 新的一集 —— 计划清空"); }
-            计划 = None;
-            试过.clear();
-        }
-        let Some(e) = 帧.ee.first().copied() else {
-            match plug.sense() { Some(f) => { 帧 = f; continue } None => return }
+            plug.last.as_ref().and_then(|o| 取(o, &深路)).and_then(|dv| wire::as_f32_grid(&dv))
+        }) else { continue };
+        let 深f: Vec<f64> = dep.iter().map(|z| *z as f64).collect();
+        // 长度尺全部来自**这一眼看出来的**那一块,不是标定里的标量。
+        let r = task::尺 {
+            张开: 张 * (尖now[2] - 眼.at[2]).abs().max(1e-3) / 眼.fx.max(1e-9),
+            工具长: 0.0,   // 🔴 减法里抵消,这里不参与
+            可达内: 可达带[0], 可达: 可达带[1],
+            探幅: 接触阈, 工具列: 0,
         };
-        let here = [e[0], e[1], e[2]];
-        let q此 = [e[3], e[4], e[5], e[6]];
-        let 回声 = Cmd::Ee { arm: 0, at: here, quat: q此, jaw: 帧.jaw.first().copied().unwrap_or(1.0) };
-
-        // 缺格 ⇒ 永远回声。诚实失败,不瞎动。
-        if !缺.is_empty() {
-            plug.act(&回声);
-            match plug.sense() { Some(f) => { 帧 = f; continue } None => return }
-        }
-        let (可达带, 工具长, 工具列, 接触阈, 原位, 交付率, 探幅) = (
-            可达带.clone().unwrap(), 工具长.unwrap(), 工具列.unwrap(),
-            接触阈.unwrap(), 原位.clone().unwrap(), 交付率.unwrap(), 探幅.unwrap(),
-        );
-
-        // 🔴 逐帧录像(owner 2026-08-23 死令:每炮存视频,人亲眼看完才准起下一炮)。
-        // BL_VID=<目录> ⇒ 每 4 拍落一帧(约 2 Hz,够看清动作又不撑爆盘),事后 ffmpeg 编片。
-        // 真相在像素里的时候看数字不算验证 —— 今晚三次定案全是照片给的。
-        if 拍 % 4 == 0 {
-            if let (Ok(vd), Some(img)) = (std::env::var("BL_VID"), 帧.cams.get(0)) {
-                let mut buf = format!("P5\n{} {}\n255\n", img.0, img.1).into_bytes();
-                buf.extend_from_slice(&img.2);
-                let _ = std::fs::write(format!("{vd}/{:06}.pgm", 拍 / 4), buf);
-            }
-        }
-        let cmd = if let Some(p) = &mut 计划 {
-            // ── 走航点 ────────────────────────────────────────────────
-            // 🔴 工具轴那一列没量到时,**不许写死一列** —— 从这一把计划自己的腕姿里挑:
-            // 接触集要求工具轴朝下(链里那句「接触集要工具轴 [0,0,-1]」),
-            // 那就取三列里**最贴着这个方向**的那一列。用的是计划自己的四元数,不是身体常数。
-            let ax = if 工具轴量到 { task::列(&p.q, 工具列 % 3) } else {
-                let mut 最好 = (f64::NEG_INFINITY, 0usize);
-                for i in 0..3usize {
-                    let c = task::列(&p.q, i);
-                    let 对齐 = -c[2]; // 与 [0,0,-1] 的点积
-                    if 对齐 > 最好.0 { 最好 = (对齐, i); }
-                }
-                task::列(&p.q, 最好.1)
-            };
-            // 法兰 = 指尖 − 工具轴 × 工具长(全是量出来的)。
-            let 法兰 = |t: [f64; 3], 抬: f64| {
-                [t[0] - ax[0] * 工具长, t[1] - ax[1] * 工具长, t[2] - ax[2] * 工具长 + 抬]
-            };
-            // 🔴 钳口哪一头是【开】,是量出来的:跨度那一格的估计器只在
-            // 「间距随命令变大」时才收下(slope<0 ⇒ Inconsistent)⇒ 跨度量到了,
-            // 就等于量到了"命令 1.0 = 张开"。合 = 0.0。零个新数。
-            let (开, 合) = (1.0f64, 0.0f64);
-            // 凸起(全段可用版,值捕获相机号):睁眼踩峰在 段3 也要用。与 段1 内的同名
-            // 闭包同配方(远侧分位当桌面,凸起=比它近多少)。
-            let 相机i = p.相机;
-            let 凸起全 = |uu: f64, vv: f64| -> Option<(f64, f64)> {
-                // 🔴 与 段1 的 凸起 配方【故意不同】(N94 睁眼 519/625 格全亮实锤):
-                // 斜视角下平桌=深度斜坡,"远侧分位"在斜坡上恒正 ⇒ 全桌假凸 1-3cm。
-                // 扫描要的是"比【局部桌面】高",桌面用【对径点成对平均】估 —— 斜坡一阶
-                // 精确抵消(+r 与 −r 的深度平均回到中心),4 对取中位再抗一侧被臂占。
-                // 副作用是福利:环整个落在臂身上时 对中位≈臂深 ⇒ 凸≈0,臂格自抑。
-                // (段1 的 75 分位有 N4 影判承重 —— 那里手占环属常态,不许动。)
-                let 路 = plug.lay.cams.get(相机i)?;
-                let mut 深路 = 路.clone();
-                if let Some(last) = 深路.last_mut() { *last = "depth".to_string(); }
-                let dv = plug.last.as_ref().and_then(|o| 取(o, &深路))?;
-                let (dw, dh, dep) = wire::as_f32_grid(&dv)?;
-                let (x, y) = (((uu * dw as f64) as usize).min(dw - 1), ((vv * dh as f64) as usize).min(dh - 1));
-                let c = f64::from(*dep.get(y * dw + x)?);
-                let r = (dw / 40).max(2) as i64;
-                let mut 对: Vec<f64> = Vec::new();
-                for (dx, dy) in [(r, 0), (0, r), (r, r), (r, -r)] {
-                    let (ax, ay) = (x as i64 + dx, y as i64 + dy);
-                    let (bx, by) = (x as i64 - dx, y as i64 - dy);
-                    if ax >= 0 && ay >= 0 && (ax as usize) < dw && (ay as usize) < dh
-                        && bx >= 0 && by >= 0 && (bx as usize) < dw && (by as usize) < dh {
-                        对.push((f64::from(dep[ay as usize * dw + ax as usize])
-                               + f64::from(dep[by as usize * dw + bx as usize])) * 0.5);
-                    }
-                }
-                if 对.len() < 2 { return None }
-                对.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
-                let 桌 = 对[对.len() / 2];
-                Some((((桌 - c).max(0.0)), c))
-            };
-            // 睁扫:凸起带通 + 种子连通簇 ⇒ 基外世界步(N98 照片证:能把手从 10cm
-            // 外带到物正上方)。段3 空判与「直取」劫持共用同一把刀;
-            // 前置:锚对 (补抓基↔补抓爪像素) 已备好(同刻实测)。
-            let 睁扫 = |p: &mut 抓况, jL: Option<([f64; 4], [f64; 4])>, 号: [f64; 2]| -> Option<[f64; 2]> {
-                            let mut 找到: Option<[f64; 2]> = None;
-                            if let (Some((au, av)), Some((jj, js))) = (p.补抓爪像素, jL) {
-                                // N93 照片二罪:①预测爪 烂账差 1/4 画幅 ⇒ 步长全废;②560/625 格全亮
-                                // (手臂塔+桌沿也算峰)⇒ 质心=窗心。改:步长锚到收敛锚对
-                                // (补抓基↔补抓爪像素),手此刻像素=锚px+本体位移经 J 逆映回(全链量出);
-                                // 凸起带通 ≤1.5×张开(臂塔高出带),种子=离物像素最近格,连通生长取簇心。
-                                let det = jj[0] * jj[3] - jj[1] * jj[2];
-                                let 手px = if det.abs() > 1e-9 {
-                                    let (wx, wy) = (here[0] - p.补抓基[0], here[1] - p.补抓基[1]);
-                                    Some((au + (jj[3] * wx - jj[1] * wy) / det,
-                                          av + (-jj[2] * wx + jj[0] * wy) / det))
-                                } else { None };
-                                // 手的排除半径:世界 1×张开 折成像素长(量出单位,夹 [0.03,0.15] 画幅防疯)。
-                                let r避 = if det.abs() > 1e-9 {
-                                    let ru = (jj[3] * 张开 / det).powi(2) + (jj[2] * 张开 / det).powi(2);
-                                    ru.sqrt().clamp(0.03, 0.15)
-                                } else { 0.06 };
-                                // 🔴 扫描的步距与窗口也按量出来的量定(不再是写死的画幅比例):
-                                // 步距 = 一个爪口在画面里的宽度(比这更细分辨不出来);
-                                // 窗口 = 量到的可达半径在画面里有多大(手够不到的地方不必扫)。
-                                let 增益j = {
-                                    let r0 = (jj[0]*jj[0] + jj[1]*jj[1]).sqrt();
-                                    let r1 = (jj[2]*jj[2] + jj[3]*jj[3]).sqrt();
-                                    r0.max(r1)
-                                };
-                                // 🔴 步距按【物体自己的大小】取,不按爪口(N111 实锤:爪口折成
-                                // 0.05 画幅≈32px,而方块只有 ~25px —— 网眼比鱼还大,每次只捞到
-                                // 1-4 格,而且多半是噪声,扫出来的"物"在四个位置乱跳)。
-                                // 至少要在物体上取到两个样点才谈得上定位它。
-                                let 步距 = (0.5 * p.物跨).clamp(0.004, 0.03);
-                                // 🔴 窗口按【眼量到的物体自身跨度】开,不按可达半径(N109 照片定案:
-                                // 可达半径那么大的窗 ⇒ 手臂一进画面就被当成峰,扫出来的"物"在
-                                // (0.500,0.533)→(0.675,0.433)→(0.650,0.683) 乱跳 = 在追自己的胳膊)。
-                                // 物跨是眼给的量;下限用一个爪口(至少要装得下自己的爪)。
-                                let 窗 = (4.0 * p.物跨).max(2.0 * 张开 * 增益j).clamp(0.05, 0.30);
-                                let mut 格: Vec<(f64, f64, f64)> = Vec::new();
-                                let mut uu = (p.物像素.0 - 窗).max(0.02);
-                                while uu < (p.物像素.0 + 窗).min(0.98) {
-                                    let mut vv = (p.物像素.1 - 窗).max(0.02);
-                                    while vv < (p.物像素.1 + 窗).min(0.98) {
-                                        if let Some((凸, _)) = 凸起全(uu, vv) {
-                                            if 凸 > 0.010 && 凸 <= 1.5 * 张开 {
-                                                let 避 = 手px.map_or(false, |(hu, hv)|
-                                                    ((uu - hu).powi(2) + (vv - hv).powi(2)).sqrt() < r避);
-                                                if !避 { 格.push((uu, vv, 凸)); }
-                                            }
-                                        }
-                                        vv += 步距;
-                                    }
-                                    uu += 步距;
-                                }
-                                // 🔴 排除圈误伤:手一贴近,排掉"离手估计 1 个爪口内"的格子会把物体
-                                // 一起排掉(N110 照片:手悬在物上方约 6cm,扫却一无所获 ⇒ 空合 13 次)。
-                                // 排完一无所获 ⇒ 摘掉排除圈重扫。窗口本来就锁在物附近、种子取离物最近的峰,
-                                // 所以即使把手算进来,选中的仍是最靠近物的那一簇。
-                                if 格.is_empty() {
-                                    let mut uu2 = (p.物像素.0 - 窗).max(0.02);
-                                    while uu2 < (p.物像素.0 + 窗).min(0.98) {
-                                        let mut vv2 = (p.物像素.1 - 窗).max(0.02);
-                                        while vv2 < (p.物像素.1 + 窗).min(0.98) {
-                                            if let Some((凸, _)) = 凸起全(uu2, vv2) {
-                                                if 凸 > 0.010 && 凸 <= 1.5 * 张开 { 格.push((uu2, vv2, 凸)); }
-                                            }
-                                            vv2 += 步距;
-                                        }
-                                        uu2 += 步距;
-                                    }
-                                    if !格.is_empty() { println!("[服]   睁眼:排手后无峰 ⇒ 摘排除圈重扫,拿到 {} 格", 格.len()); }
-                                }
-                                if !格.is_empty() {
-                                    let mut 种 = 0usize; let mut 最 = f64::MAX;
-                                    for (i, g) in 格.iter().enumerate() {
-                                        let d = ((g.0 - p.物像素.0).powi(2) + (g.1 - p.物像素.1).powi(2)).sqrt();
-                                        if d < 最 { 最 = d; 种 = i; }
-                                    }
-                                    let mut 簇 = vec![false; 格.len()]; 簇[种] = true;
-                                    loop {
-                                        let mut 长 = false;
-                                        for i in 0..格.len() {
-                                            if 簇[i] { continue; }
-                                            let mut 邻 = false;
-                                            for j in 0..格.len() {
-                                                if 簇[j] && ((格[i].0 - 格[j].0).powi(2) + (格[i].1 - 格[j].1).powi(2)).sqrt() < 2.0 * 步距 { 邻 = true; break; }
-                                            }
-                                            if 邻 { 簇[i] = true; 长 = true; }
-                                        }
-                                        if !长 { break; }
-                                    }
-                                    let (mut su, mut sv, mut s凸, mut n) = (0.0f64, 0.0f64, 0.0f64, 0usize);
-                                    for i in 0..格.len() { if 簇[i] { su += 格[i].0; sv += 格[i].1; s凸 += 格[i].2; n += 1; } }
-                                    let (bu, bv) = (su / n as f64, sv / n as f64);
-                                    p.补抓凸 = s凸 / n as f64; // 量到的物高,段13 探针 z 抬 0.5×它
-                                    // 🔴🔴 相对量对准(2026-08-23 定,自由搜索带回的硬数据支撑:
-                                    // 往运动学里注入误差后,开环掉到 38%、闭环保持 68-73% —— 闭环把标定
-                                    // 误差当共模抵消。本仓自己也量过同一件事:相机歪掉时"位置"错 8-20mm
-                                    // 而"宽度"这种相对量只错 0-1.4mm,差一个数量级,而咬合窗 ±16mm)。
-                                    // 做法:在【同一张深度图、同一个探测器】里把爪也找出来 —— 爪此刻悬在
-                                    // 对准层,凸起远高于物(物高就是刚算出的 补抓凸);凸 > 3×物高 的格
-                                    // 归爪,取其形心当爪像素。于是"爪→物"的差是同源相对量,相机模型、
-                                    // 深度偏置对两者同等作用,相减抵消。找不到爪格 ⇒ 退回锚对推算(旧路)。
-                                    // ⚠️ 爪不能从 格 里挑:格 走的是"物"的带通(凸 ≤ 1.5×张开),
-                                    // 而对准层的爪本来就悬在一个抬高之上,必然被那条带通滤掉 ⇒ 必须单独扫一遍,
-                                    // 且【不加排手圈】(排手圈的存在就是为了躲开爪,这一遍要的正是爪)。
-                                    let mut 爪相对: Option<(f64, f64)> = None;
-                                    if p.补抓凸.is_finite() && p.补抓凸 > 0.0 {
-                                        // 🔴 谁是爪,由【晃钳口】说了算;它在哪,由【深度形心】说了算。
-                                        // 文档 N21 记着:光靠"凸得比物高"分不出爪和胳膊 —— "臂身本就高于桌面",
-                                        // 手肘、底座立柱全会被算成爪,形心被拖到胳膊上(今晚 N109/N112 复现过)。
-                                        // 而晃钳口是唯一能【唯一识别】爪的信号:只有爪跟着开合动,胳膊不会。
-                                        // ⇒ 分工:晃出来的爪像素只当【种子】(粗决策,19 px 噪声足够选对块),
-                                        //   位置取那一块深度凸起的形心(细定位,与物同源、误差相消)。
-                                        let mut 高格: Vec<(f64, f64)> = Vec::new();
-                                        let mut au2 = (p.物像素.0 - 窗).max(0.02);
-                                        while au2 < (p.物像素.0 + 窗).min(0.98) {
-                                            let mut av2 = (p.物像素.1 - 窗).max(0.02);
-                                            while av2 < (p.物像素.1 + 窗).min(0.98) {
-                                                if let Some((凸h, _)) = 凸起全(au2, av2) {
-                                                    if 凸h > 3.0 * p.补抓凸 { 高格.push((au2, av2)); }
-                                                }
-                                                av2 += 步距;
-                                            }
-                                            au2 += 步距;
-                                        }
-                                        // 以晃出来的爪像素为种子,连通生长取【那一块】,不是所有高格的形心。
-                                        let (mut hu, mut hv, mut hn) = (0.0f64, 0.0f64, 0usize);
-                                        if !高格.is_empty() {
-                                            let mut 种 = 0usize; let mut 最 = f64::MAX;
-                                            for (i, g) in 高格.iter().enumerate() {
-                                                let d = ((g.0 - au).powi(2) + (g.1 - av).powi(2)).sqrt();
-                                                if d < 最 { 最 = d; 种 = i; }
-                                            }
-                                            let mut 属: Vec<bool> = vec![false; 高格.len()]; 属[种] = true;
-                                            loop {
-                                                let mut 长 = false;
-                                                for i in 0..高格.len() {
-                                                    if 属[i] { continue; }
-                                                    let mut 邻 = false;
-                                                    for j in 0..高格.len() {
-                                                        if 属[j] && ((高格[i].0-高格[j].0).powi(2) + (高格[i].1-高格[j].1).powi(2)).sqrt() < 2.0*步距 { 邻 = true; break; }
-                                                    }
-                                                    if 邻 { 属[i] = true; 长 = true; }
-                                                }
-                                                if !长 { break; }
-                                            }
-                                            for i in 0..高格.len() { if 属[i] { hu += 高格[i].0; hv += 高格[i].1; hn += 1; } }
-                                        }
-                                        if hn >= 2 {
-                                            let (cu, cv) = (hu / hn as f64, hv / hn as f64);
-                                            // 种子与形心差太远(超过一个物跨的四倍)⇒ 连通块把胳膊也吞了,不信。
-                                            let d种 = ((cu - au).powi(2) + (cv - av).powi(2)).sqrt();
-                                            if d种 <= 4.0 * p.物跨 {
-                                                爪相对 = Some((cu, cv));
-                                                println!("[服]   同源对准:爪块 {}/{} 格(种子 ({:.3},{:.3}))⇒ 爪 ({:.3},{:.3}) · 物 ({:.3},{:.3}) · 相对差 {:.4} 画幅",
-                                                    hn, 高格.len(), au, av, cu, cv, bu, bv,
-                                                    ((bu - cu).powi(2) + (bv - cv).powi(2)).sqrt());
-                                            } else {
-                                                println!("[服]   同源对准:爪块形心离种子 {:.3} 画幅(超 4 个物跨)⇒ 连通块吞进了胳膊,不信,退回锚对", d种);
-                                            }
-                                        }
-                                    }
-                                    // 🔴 簇的身份闸(N112 实锤:峰簇在 (0.500,0.534) 稳了两轮后
-                                    // 跳到 (0.635,0.301)/(0.722,0.333) —— 那是臂身区,种子在物被自己
-                                    // 挡住那一轮落到了胳膊上)。物不会瞬移:离【已知物位】超过两个物跨
-                                    // 的簇不认;认了就把物位更新过去 —— 于是它同时是跟踪器,物被碰挪了
-                                    // 也跟得住,而瞬移级的跳变一律拒收。
-                                    let d物 = ((bu - p.物像素.0).powi(2) + (bv - p.物像素.1).powi(2)).sqrt();
-                                    // 🔴 拒收之后【不许瞎合】,改瞄上一次确认过的物位(N120 实锤:
-                                    // 身份闸拒收 (0.507,0.470) 后走"扫无簇 ⇒ 就地合爪",在差 2cm 处空掉。
-                                    // 拒收的含义是"这一眼没认出它",不是"它不在了" —— 它上一次被确认
-                                    // 的位置仍是当下最好的证据,朝那儿走比原地瞎合强。)
-                                    let (bu, bv) = if d物 > 2.0 * p.物跨 {
-                                        println!("[服]   睁眼:峰簇 ({:.3},{:.3}) 离已知物位 {:.3} 画幅(超 2 个物跨 {:.3})⇒ 这一眼没认出它,改瞄上次确认的物位 ({:.3},{:.3})", bu, bv, d物, 2.0 * p.物跨, p.物像素.0, p.物像素.1);
-                                        p.物像素
-                                    } else {
-                                        p.物像素 = (bu, bv);
-                                        (bu, bv)
-                                    };
-                                    // 有同源爪像素就用它(相对量,误差同源相消);没有才退回锚对推算。
-                                    let (基u, 基v) = 爪相对.unwrap_or((au, av));
-                                    let d = (号[0] * (bu - 基u), 号[1] * (bv - 基v));
-                                    if let Ok(((dx, dy), _)) = probe::image_to_plane_damped(&jj, &js, d) {
-                                        let l = (dx * dx + dy * dy).sqrt();
-                                        // 🔴 信任域(N124 实锤:悬停 4 轮、峰簇稳 6 格,可步长仍在
-                                        // 0.086↔0.266 之间跳并顶到封顶 —— 锚偶尔跳一下,手就被甩出 26cm,
-                                        // 白走一趟还把姿态搞坏)。一步最多迈【上一次真正走成的那么远】:
-                                        // 走成过就用它,没走成过就退到一个量出来的爪口。噪声再大也只让
-                                        // 收敛变慢,不会把手甩飞;而真需要大步时,上一次走成的距离本身会长大。
-                                        let 信任 = if 最大步 > 0.0 { 2.0 * 最大步 } else { 张开 };
-                                        let cap = (4.0 * 张开).min(信任.max(0.5 * 张开));
-                                        let k = if l > cap { cap / l } else { 1.0 };
-                                        找到 = Some([dx * k, dy * k]);
-                                        println!("[服]   睁眼:峰簇 ({:.3},{:.3})·{}格/带内{} ⇒ 基外步 ({:+.3},{:+.3}) m", bu, bv, n, 格.len(), dx * k, dy * k);
-                                    }
-                                }
-                            }
-                找到
-            };
-            let (目标, mut jaw, 名) = match p.段 {
-                // ── V5 伺服接近(最终版,owner 令 2026-08-21):xy 伺服 + z 下降同拍进行,
-                //    目标由推进段每拍算好存在 伺服目标;jaw 常开。旧 悬停/对准/下探 三段合一。
-                0 | 1 | 9 => {
-                    let t = if p.伺服目标[0].is_finite() { p.伺服目标 } else { here };
-                    (t, 开, "接近")
-                }
-                2 => (法兰(p.指尖, 0.0), 合, "合爪"),
-                13 => {
-                    // 探针 z:补抓基z=量到的指尖触地位(收敛 z 底),原样下去指尖插桌 ⇒
-                    // 合爪被桌面摩擦卡成假"撑住"(N98 实锤:离物 10cm 的探也撑住)。
-                    // 抬 0.5×量到的物高(睁眼簇凸),半高捏中段;上限 张开。
-                    let 提 = if p.补抓凸.is_finite() { (0.5 * p.补抓凸).min(张开).max(0.0) } else { 0.0 };
-                    // 🔴 看得见的高度对准,对准好了再扎下去(N118 照片定案:合爪那一刻
-                    // 手腕整个盖住方块,顶视相机什么都看不见 —— N81 的自遮挡在下手点复发,
-                    // 于是"就在这一点再量一次手"其实是在瞎子状态下量的)。
-                    // 还在精调(该合=false)⇒ 停在抬高那一层量;判定该合 ⇒ 才降到咬合高度。
-                    let 层 = if p.该合 { 提 } else { 提 + p.抬高 };
-                    (法兰([p.指尖[0], p.指尖[1], p.指尖[2] + 层], 0.0), 开, if p.该合 { "补抓下降" } else { "对准层悬停" })
-                }
-                11 => {
-                    // 🔴 让开视线(owner 2026-08-23 死令:直播删复位键 ⇒ "回原位"这个概念本身
-                    // 就是复位的残余 —— 上一个任务结束时手停在哪就是哪,不存在可回的家)。
-                    // 换成量出来的动作:手此刻在画面哪(实测爪像素)+ 画面↔世界换算(J),
-                    // 把手往【最近的画幅边】挪,挪到它不再压着场景就问眼。零机体假设:
-                    // 不提"家"、不提机体,只用"我在画面里挡着"这一件量得出来的事。
-                    // 拿不到爪像素或 J ⇒ 不装:就地问眼(诚实降级,不假装有家可回)。
-                    let 爪px = p.预测爪.or_else(|| body.get(Quantity::HandPixel)
-                        .filter(|m| m.value.len() >= 2).map(|m| (m.value[0], m.value[1])));
-                    let jL11 = body.get(Quantity::ImageJacobian).filter(|m| m.dim >= 4)
-                        .map(|m| ([m.value[0], m.value[1], m.value[2], m.value[3]],
-                                  [m.uncertainty[0], m.uncertainty[1], m.uncertainty[2], m.uncertainty[3]]));
-                    let mut 让开目标 = here;
-                    match (爪px, jL11) {
-                        (Some((hu, hv)), Some((jj, js))) => {
-                            // 让开够不够:手像素离最近画幅边 < 一个爪宽折成的像素长 ⇒ 已经在边上。
-                            let det = jj[0] * jj[3] - jj[1] * jj[2];
-                            let r避 = if det.abs() > 1e-9 {
-                                let ru = (jj[3] * 张开 / det).powi(2) + (jj[2] * 张开 / det).powi(2);
-                                ru.sqrt().clamp(0.03, 0.15)
-                            } else { 0.06 };
-                            let 边 = [(hu, (-1.0, 0.0)), (1.0 - hu, (1.0, 0.0)), (hv, (0.0, -1.0)), (1.0 - hv, (0.0, 1.0))];
-                            let mut 近 = 边[0];
-                            for e in 边.iter() { if e.0 < 近.0 { 近 = *e; } }
-                            if 近.0 < r避 {
-                                println!("[服] 让开到位(爪像素 ({:.3},{:.3}) 离边 {:.3} < {:.3})⇒ 就地问眼", hu, hv, 近.0, r避);
-                                p.段 = 12;
-                            } else if let Ok(((dx, dy), _)) = probe::image_to_plane_damped(&jj, &js, (近.1.0 * 0.15, 近.1.1 * 0.15)) {
-                                let l = (dx * dx + dy * dy).sqrt();
-                                let cap = 2.0 * 张开;
-                                let k = if l > cap { cap / l } else { 1.0 };
-                                让开目标 = [here[0] + dx * k, here[1] + dy * k, here[2]];
-                            } else { println!("[服] 让开:换算拒解 ⇒ 就地问眼"); p.段 = 12; }
-                        }
-                        _ => { println!("[服] 让开:拿不到爪像素或换算表 ⇒ 不装有家可回,就地问眼"); p.段 = 12; }
-                    }
-                    // 🔴 N57 实测:回位路上也会僵(差 0.138→0.137 跨百拍,主差是 z 升不动)。
-                    // 僵了不能弃回 段8(要回看 会立刻再生成回位计划 = 死循环),
-                    // 而是【放弃回家、就地问眼】:走 段12 出口(清 要回看)。
-                    // (此臂在 挪/卡阈 绑定之前 ⇒ 用 上位 自算;0.5mm/拍 = 既有协议地板
-                    // "以下就是没在走,对任何机器人成立"。)
-                    let 动11 = p.上位.map(|u| ((here[0] - u[0]).powi(2) + (here[1] - u[1]).powi(2) + (here[2] - u[2]).powi(2)).sqrt());
-                    let d让 = ((让开目标[0] - here[0]).powi(2) + (让开目标[1] - here[1]).powi(2)).sqrt();
-                    if 动11.map_or(false, |m| m < 0.0005) && d让 > 0.0025 {
-                        p.僵拍 += 1;
-                        if p.僵拍 >= 30 {
-                            println!("[服] 让开路上僵住(连 {} 拍,还差 {:.3} m)⇒ 就地问眼", p.僵拍, d让);
-                            p.僵拍 = 0; p.段 = 12;
-                        }
-                    } else { p.僵拍 = 0; }
-                    (让开目标, 开, "让开视线")
-                }
-                8 => {
-                    // 弃计划:【不回原位】(owner 死命令 2026-08-21:真机边移动边工作,
-                    // 回原位迁就账本尺 = 拐棍)。手臂就地重来;尺跟人走靠在线局部手眼。
-                    p.段 = 10;
-                    (here, 开, "换点")
-                }
-                _ => {
-                    // 抬:目标高度 = 指令要的位移 × 1.5(无量纲余量:交付有损耗,评分只看
-                    // 到没到,过冲无害);同时往身体收半个可达半径(无量纲 0.5)——
-                    // 下手点常在可达边界上,直上是满伸展姿态,收回来才抬得动(档案实测 54mm 卡死)。
-                    let b = 法兰(p.指尖, p.抬高 * 1.5);
-                    let mut d = [原位[0] - p.指尖[0], 原位[1] - p.指尖[1]];
-                    let l = (d[0] * d[0] + d[1] * d[1]).sqrt().max(1e-9);
-                    d = [d[0] / l, d[1] / l];
-                    let 收 = 0.5 * 可达带[1];
-                    ([b[0] + d[0] * 收, b[1] + d[1] * 收, b[2]], 合, "抬")
-                }
-            };
-            let 差 = ((目标[0] - here[0]).powi(2) + (目标[1] - here[1]).powi(2) + (目标[2] - here[2]).powi(2)).sqrt();
-            let 挪 = p.上位.map(|u| ((here[0] - u[0]).powi(2) + (here[1] - u[1]).powi(2) + (here[2] - u[2]).powi(2)).sqrt());
-            let 实降 = p.上位.map(|u| (u[2] - here[2]).max(0.0)).unwrap_or(0.0);
-            p.上位 = Some(here);
-            // 到位判据:三分之一个钳口(无量纲 0.33;比它细的差距合爪自己吸收)。
-            let 到 = 差 < 0.33 * 张开;
-            // 手不跟:连 15 拍(协议数)挪不动 0.05 个探幅(无量纲比例)。
-            // 🔴 卡判据阈要有物理地板(2026-08-21,M0 悬停死锁 500 拍):探幅是接触相的
-            // 微小量(0.1mm 级),0.05×探幅只有几微米 —— 仿真抖动就把卡计数清零,
-            // "卡 15 推进"永远不响。0.5mm/拍以下 = 没在走,对任何机器人成立(协议数)。
-            let 卡阈 = (0.05 * 探幅).max(0.0005);
-            if let Some(m) = 挪 { if m < 卡阈 && 差 > 2.0 * 探幅 { p.卡 += 1 } else if m >= 卡阈 { p.卡 = 0 } }
-            if 拍 % 25 == 1 {
-                println!("[服] {}:差 {:.3} m · 手 ({:.3},{:.3},{:.3}) · 钳口指令 {:.1}", 名, 差, here[0], here[1], here[2], jaw);
-            }
-            match p.段 {
-                0 | 1 | 9 => {
-                    // ── V5 伺服接近:每拍一步。爪像素 = 低频问眼校准 + 拍间航位推算。
-                    p.段拍 += 1;
-                    if p.对准等 > 0 { p.对准等 -= 1; }
-                    // 每拍:实到位移(proprio 回声)入账 —— 推算 + 在线局部手眼共用。
-                    let 本拍挪 = p.伺服上位.map(|u| (here[0] - u[0], here[1] - u[1], here[2] - u[2]));
-                    p.伺服上位 = Some(here);
-                    if let Some((ex, ey, ez)) = 本拍挪 { p.对Δw[0] += ex; p.对Δw[1] += ey; p.对Δw[2] += ez; }
-                    // 🔴 z 列必须进补偿(N15-17 三炮同形定案 + 档案 8-15 §五第一行原文:
-                    // "dv/dz=14.55 vs dv/dy=0.21,差 68 倍,而走位只命令 x/y、z 是自己沉
-                    // 的" —— V5 重写把这条又丢了)。每拍下降给爪估/近答/对子注入没补偿
-                    // 的竖直漂移,在线尺的 v 行就是被它喂坏的。z 列用账本(6 维里的后两
-                    // 维,开机量的),在线只拟 xy 的 2×2。
-                    let jz = body.get(Quantity::ImageJacobian).filter(|m| m.dim >= 6)
-                        .map(|m| [m.value[4], m.value[5]]).unwrap_or([0.0, 0.0]);
-                    // 🔴 z 列在线自尺(N40 实锤:账本 jz 把"命动"虚估 ~3×,响应自证被逼成
-                    // 每 ~12 拍误杀一次好跟踪。对子认识论延到 z:z 主导拍配 (执行z, 像素挪),
-                    // 过原点最小二乘 ≥6 对接管账本列;不随重锚清 —— 这是相机的物理尺,不是这门课的。)
-                    let jz用 = if z对.len() >= 6 {
-                        // 🔴 与 xy 岭同配方(N47 定案:裸最小二乘被钉死追踪器的零对拉到 0,
-                        // 预测不下行 ⇒ 更钉死,自增强塌缩;跨计划持有把毒也持有)。
-                        // 先验重 = 对子自身平均功率(自缩放,零新常数);剔群 3×中位残差。
-                        let 拟z = |跳: &[bool]| -> [f64; 2] {
-                            let lam = {
-                                let m: f64 = z对.iter().map(|(z, _, _)| z * z).sum::<f64>() / (z对.len() as f64);
-                                m.max(1e-9)
-                            };
-                            let (mut g, mut bu, mut bv) = (lam, lam * jz[0], lam * jz[1]);
-                            for (i, (z, u, v)) in z对.iter().enumerate() {
-                                if 跳.get(i).copied().unwrap_or(false) { continue; }
-                                g += z * z; bu += z * u; bv += z * v;
-                            }
-                            [bu / g, bv / g]
-                        };
-                        let m0 = 拟z(&[]);
-                        let mut r: Vec<f64> = z对.iter().map(|(z, u, v)| {
-                            let (eu, ev) = (u - m0[0] * z, v - m0[1] * z);
-                            (eu * eu + ev * ev).sqrt()
-                        }).collect();
-                        let mut rs = r.clone();
-                        rs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
-                        let med = rs[rs.len() / 2];
-                        if med > 0.0 {
-                            let 跳: Vec<bool> = r.drain(..).map(|x| x > 3.0 * med).collect();
-                            if 跳.iter().any(|&b| b) { 拟z(&跳) } else { m0 }
-                        } else { m0 }
-                    } else { jz };
-                    // ── 在线局部手眼(owner 死命令:不许回原位迁就账本 —— 尺跟人走)──
-                    // 对子 = (两次生实测之间手真挪的 xy, 爪像素真挪),全是白拿的实测。
-                    // 岭回归拉向账本 J:先验重 = 一步²(量出的步长),数据一多就接管;
-                    // 病态时自动退向账本。档案移动线同型(在线量方向,18/18 含接线反接)。
-                    let j_use: Option<([f64; 4], [f64; 4])> = body
-                        .get(Quantity::ImageJacobian)
-                        .filter(|m| m.dim >= 4)
-                        .map(|m| {
-                            let jl = [m.value[0], m.value[1], m.value[2], m.value[3]];
-                            let js = [m.uncertainty[0], m.uncertainty[1], m.uncertainty[2], m.uncertainty[3]];
-                            // 🔴 门槛 4 → 2(N113 实锤:整炮只攒到 3 对,拟合永不接管,全程在用错的账本尺;
-                            // 峰簇已锁死在 (0.499,0.532) 而步子还在 +0.117/-0.249/-0.031 乱蹦)。直取的对子是在
-                            // 下手点当场量的、且过了合理性闸,质量高于账本;岭先验还在,弱轴照旧留在账本上。
-                            if 对子.len() >= 2 {
-                                let s = (0.03 * 可达带[1]).max(探幅);
-                                // 岭权重自缩放(N13 仪表定案:对子几乎全在一根轴上时,弱轴
-                                // 回归把噪声放大成假增益 —— du/dy 被吹到 8.01(账本 0.96)且
-                                // 钉死,伺服照它解步必歪。先验重 = 对子自己的平均功率 ⇒
-                                // 弱轴自动留在账本,强轴 n 个一致对子 n:1 压过先验。零拍数)。
-                                let lam = {
-                                    let m: f64 = 对子.iter().map(|(w, _)| w[0] * w[0] + w[1] * w[1]).sum::<f64>()
-                                        / (对子.len() as f64);
-                                    m.max(s * s)
-                                };
-                                // 拟一把:岭回归拉向账本(对子集合可指定跳过哪些)。
-                                let 拟 = |跳: &[bool]| -> [f64; 4] {
-                                    let (mut g00, mut g01, mut g11) = (lam, 0.0, lam);
-                                    // 🔴 先验中心从【账本 J】改成【零】(N125 定案:步长顶死封顶
-                                    // 0.274 m 且方向来回翻 +0.262→-0.255→-0.248,手在物两侧来回甩 =
-                                    // 符号错叠加饱和。N116 已实锤账本尺缩水 4 倍、方向可疑,
-                                    // 再拿它当先验往回拉,就是把已知错的东西注入拟合)。
-                                    // 零中心岭回归:弱激励轴收缩到"不预测运动",不注入任何错方向;
-                                    // 强激励轴由实测对子说了算。阻尼逆本来就能吃住弱轴。
-                                    let (mut b00, mut b01, mut b10, mut b11) = (0.0, 0.0, 0.0, 0.0);
-                                    for (i, (w, px)) in 对子.iter().enumerate() {
-                                        if 跳.get(i).copied().unwrap_or(false) { continue; }
-                                        g00 += w[0] * w[0]; g01 += w[0] * w[1]; g11 += w[1] * w[1];
-                                        b00 += px.0 * w[0]; b01 += px.0 * w[1];
-                                        b10 += px.1 * w[0]; b11 += px.1 * w[1];
-                                    }
-                                    let det = g00 * g11 - g01 * g01; // lam>0 ⇒ 恒正
-                                    let (i00, i01, i11) = (g11 / det, -g01 / det, g00 / det);
-                                    [b00 * i00 + b01 * i01, b10 * i00 + b11 * i01,
-                                     b00 * i01 + b01 * i11, b10 * i01 + b11 * i11]
-                                };
-                                // 剔离群(N9 实锤:作废重捕获后 VLM 偶指臂身,一个幻影对子
-                                // 把当地尺转歪 ⇒ 逼近→丢失循环)。SPANX14 同配方:按残差
-                                // 3×中位剔一轮再拟 —— 倍数是仓里已验的协议数,零新常数。
-                                let m0 = 拟(&[]);
-                                let mut r: Vec<f64> = 对子.iter().map(|(w, px)| {
-                                    let (eu, ev) = (px.0 - m0[0] * w[0] - m0[2] * w[1],
-                                                    px.1 - m0[1] * w[0] - m0[3] * w[1]);
-                                    (eu * eu + ev * ev).sqrt()
-                                }).collect();
-                                let mut rs = r.clone();
-                                rs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
-                                let med = rs[rs.len() / 2];
-                                let m1 = if med > 0.0 {
-                                    let 跳: Vec<bool> = r.drain(..).map(|x| x > 3.0 * med).collect();
-                                    if 跳.iter().any(|&b| b) { 拟(&跳) } else { m0 }
-                                } else { m0 };
-                                // 🔴 两行都交给数据(N44 定案,推翻 N18 的"v 行冻结用账本"):
-                                // N18 冻 v 是因为 v 激励差时拟合行列式翻号;而 N13 的岭权重
-                                // 自缩放本身就把弱激励轴钉在先验(账本)上 —— N18 怕的病 N13
-                                // 已经机制化防住。N44 实测:桌面滑行 y 扫 ±0.25m,v 激励很足,
-                                // 【账本 v 行才是错的】—— v 单调跑飞 0.517→0.219,双拍翻号因
-                                // 每拍 v 动量 <0.005 永远武装不起来,u 修好也被 v 拖歪到僵。
-                                (m1, js)
-                            } else {
-                                (jl, js)
-                            }
-                        });
-                    // 尺可视化(N48 缺口:u 反向跑 125 拍无从判"拟合错"还是"解步错"——矩阵从没打印过)。
-                    if 拍 % 25 == 1 && !p.模板.is_empty() {
-                        if let Some((jj, _)) = j_use {
-                            println!("[服]   [尺] J=[{:+.2},{:+.2};{:+.2},{:+.2}] jz用=[{:+.2},{:+.2}] 对子={} z对={} 号=[{:+.0},{:+.0}]",
-                                jj[0], jj[2], jj[1], jj[3], jz用[0], jz用[1], 对子.len(), z对.len(), p.伺服号[0], p.伺服号[1]);
-                        }
-                    }
-                    // 深度工具:候选凸起 + 中心深度(判影 + 物同一性,全量出)。
-                    let 凸起 = |uu: f64, vv: f64| -> Option<(f64, f64)> {
-                        let 路 = plug.lay.cams.get(p.相机)?;
-                        let mut 深路 = 路.clone();
-                        if let Some(last) = 深路.last_mut() { *last = "depth".to_string(); }
-                        let dv = plug.last.as_ref().and_then(|o| 取(o, &深路))?;
-                        let (dw, dh, dep) = wire::as_f32_grid(&dv)?;
-                        let (x, y) = (((uu * dw as f64) as usize).min(dw - 1), ((vv * dh as f64) as usize).min(dh - 1));
-                        let c = f64::from(*dep.get(y * dw + x)?);
-                        let r = (dw / 40).max(2) as i64;
-                        let mut ring = Vec::new();
-                        for (dx, dy) in [(r,0),(-r,0),(0,r),(0,-r),(r,r),(r,-r),(-r,r),(-r,-r)] {
-                            let (nx, ny) = (x as i64 + dx, y as i64 + dy);
-                            if nx >= 0 && ny >= 0 && (nx as usize) < dw && (ny as usize) < dh {
-                                ring.push(f64::from(dep[ny as usize * dw + nx as usize]));
-                            }
-                        }
-                        if ring.is_empty() { return None }
-                        ring.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
-                        // 桌面在环的【远】侧 ⇒ 取远侧分位当"那里的桌面",凸起 = 比它近多少。
-                        // 环中位是错的(N4 实锤:手降低后在画面里变大,环落在手自己身上 ⇒
-                        // 中位=手深 ⇒ 凸起≈0 ⇒ 真爪连片被判"像影",而同一片像素高处刚被收过)。
-                        // 影 = 与远侧同深(平贴支撑面);爪/物 = 比远侧近。零新常数。
-                        Some((((ring[(ring.len() * 3) / 4] - c).max(0.0)), c))
-                    };
-                    let 物凸 = 凸起(p.物像素.0, p.物像素.1);
-                    // 低频问眼校准(节流:量出的静置拍;VLM ~1s 一答,不堵环)。
-                    // 🔴 末段(爪估离物 < 2×物跨)停问 VLM(N34 终线定案:追踪器正贴在物上,
-                    // VLM 答到腕上,离 0.14 触发争议、z 底争议=换点 ⇒ 7 个计划全死在终点线;
-                    // 档案原话"爪贴物后 VLM 只能证到 ±0.05-0.09,多等的每一答都可能框到手腕
-                    // 被劫持"。末段的裁判本来就是合爪自检+空爪重试,不是 VLM)。
-                    let 离物近 = p.预测爪.map(|(u, v)| {
-                        ((u - p.物像素.0).powi(2) + (v - p.物像素.1).powi(2)).sqrt() < 2.0 * p.物跨.max(0.05)
-                    }).unwrap_or(false);
-                    if p.对准等 == 0 && p.晃态 == 0 && !p.模板.is_empty() && p.验拍 >= 40 && !离物近 {
-                        // 🔴 N51 帧+尺双证:白臂上模板会滑(爪已物理贴方块,模板滑到前臂
-                        // (0.787,0.425),伺服被假位置拖着绕圈,垃圾对子把拟合搅到符号乱翻)。
-                        // 身份到期不再问 VLM(它近场答手腕,z 底复核裂是 N34-N51 惯性死法)——
-                        // 改晃爪重锚:构造性身份,便宜(~15 拍)、不会认错。模板只准活 40 拍。
-                        println!("[服] 40 拍身份到期 ⇒ 晃爪重锚(白臂模板会滑,构造性身份代替 VLM 复核)");
-                        // 🔴 认位只记【活满租约·且响应过命令】的锚(N65 帧证:出生即记被假锚投毒;
-                        // N70 实测:光斑也能苟满 40 拍租约 —— 静块在命累临界下不触失守,"活满租约"
-                        // 单独不构成证词)。门 = 失守闸同一把尺反着用:命累>0.05 且 应累≥命累/3
-                        // ⇒ 它被命令时真动过,才是"爪在这可见"的证词。
-                        if p.命累 > 0.05 && p.应累 >= p.命累 * 0.33 {
-                            认位 = Some([here[0], here[1], here[2]]);
-                        }
-                        p.锚新 = false;
-                        p.晃态 = 1; p.晃等 = 0; p.验拍 = 0;
-                    }
-                    #[allow(clippy::never_loop)]
-                    while false {
-                        p.对准等 = body_layer::derive::settle_periods(&body, 1e-3).map(|n| n as u32).unwrap_or(8).max(4);
-                        let 眼爪 = match plug.lay.cams.get(p.相机)
-                            .and_then(|路| plug.last.as_ref().map(|o| (路.clone(), o.clone())))
-                            .and_then(|(路, o)| 取(&o, &路))
-                            .and_then(|v| wire::as_rgb(&v).map(|(w2, h2, rgb)| (w2, h2, rgb))) {
-                            None => { if 拍 % 25 == 1 { println!("[服]   问眼取图失败(相机 {} 路径/格式)", p.相机); } None }
-                            Some((w2, h2, rgb)) => {
-                                // 裁剪问眼(MT 探针实锤:全幅问,VLM 每次把画面中央最显眼的
-                                // 方块当"爪"指,被同一性闸全拦 ⇒ 永远没有爪源)。以账本
-                                // hand_pixel(爪的标定像素,量出的)为中心裁半幅 —— 物在
-                                // 中央被裁掉,VLM 想指错都看不见它。答案坐标映射回全幅。
-                                // 裁剪中心 = 账本推算的爪当前像素:hand_pixel(标定位)+
-                                // J·(here − 原位)(MX 实锤:死用标定位,悬停姿态爪不在窗里,
-                                // 8 答全被闸拦 ⇒ 无爪源。全账本推算,零新常数)。
-                                // 窗心跟爪走(N0 实锤:J 外推在伺服姿态把窗推到画面右缘,
-                                // VLM 只能在窗内指臂身,差 0.47 钉死)。有爪估 ⇒ 窗心=爪估
-                                // (自跟踪);首捕获 ⇒ 标定位 + 窗放大(2/3 幅容住姿态差)。
-                                let hp = p.预测爪.or(上帧爪).unwrap_or_else(|| {
-                                    body.get(Quantity::HandPixel).filter(|m| m.dim >= 2)
-                                        .map(|m| (m.value[0], m.value[1])).unwrap_or((0.5, 0.5))
-                                });
-                                // 首捕获隔次交替全幅(N14 实锤:旧爪锚 + 避物切割可把真爪
-                                // 正好切出窗外 ⇒ 350+ 拍零爪源。奇偶交替 = 两个假设轮流
-                                // 覆盖:锚窗(爪没走远)/ 全幅−物侧(爪在意外处),零计数器)。
-                                let 全幅 = p.预测爪.is_none() && (p.段拍 / 8) % 2 == 1;
-                                let (mut cw, mut ch) = if 全幅 { (w2, h2) }
-                                    else if p.预测爪.is_some() { (w2 / 2, h2 / 2) } else { (w2 * 2 / 3, h2 * 2 / 3) };
-                                let mut x0 = (((hp.0 * w2 as f64) as usize).saturating_sub(cw / 2)).min(w2 - cw);
-                                let mut y0 = (((hp.1 * h2 as f64) as usize).saturating_sub(ch / 2)).min(h2 - ch);
-                                // 窗里必须没有【问过的物】(N2 落图定案 2026-08-21:首捕获窗
-                                // 2/3 幅夹紧后方块仍在窗内 —— VLM 11/11 指物、被同一性闸拒
-                                // ⇒ 永远没爪源;裁剪问眼的全部理由就是"物被裁掉")。沿爪估↔物
-                                // 分得最开的那根轴,把窗在物那一侧的边切到「物 ± 物自报跨度」;
-                                // 两轴都分不开(末段爪已贴物)⇒ 不切,交给深度双闸。余隙自缩放,
-                                // 用的只有爪估/物像素/物跨 —— 零机体假设,5/20 指手同样成立。
-                                {
-                                    let (ou, ov) = p.物像素;
-                                    let m = p.物跨.max(0.05);
-                                    let (du, dv) = (hp.0 - ou, hp.1 - ov);
-                                    if du.abs() >= dv.abs() && du.abs() > m {
-                                        if du > 0.0 {
-                                            let nx = (((ou + m) * w2 as f64) as usize).min(w2 - 1);
-                                            if nx > x0 && nx < x0 + cw { cw -= nx - x0; x0 = nx; }
-                                        } else {
-                                            let nx = (((ou - m) * w2 as f64) as usize).max(1);
-                                            if nx > x0 && nx < x0 + cw { cw = nx - x0; }
-                                        }
-                                    } else if dv.abs() > m {
-                                        if dv > 0.0 {
-                                            let ny = (((ov + m) * h2 as f64) as usize).min(h2 - 1);
-                                            if ny > y0 && ny < y0 + ch { ch -= ny - y0; y0 = ny; }
-                                        } else {
-                                            let ny = (((ov - m) * h2 as f64) as usize).max(1);
-                                            if ny > y0 && ny < y0 + ch { ch = ny - y0; }
-                                        }
-                                    }
-                                    if 拍 % 25 == 1 {
-                                        println!("[服]   避物窗:物({:.2},{:.2}) 爪估({:.2},{:.2}) ⇒ 窗 [{}..{})×[{}..{})", ou, ov, hp.0, hp.1, x0, x0 + cw, y0, y0 + ch);
-                                    }
-                                }
-                                let mut sub = Vec::with_capacity(cw * ch * 3);
-                                for yy in y0..y0 + ch {
-                                    let row = (yy * w2 + x0) * 3;
-                                    sub.extend_from_slice(&rgb[row..row + cw * 3]);
-                                }
-                                match body_layer::eye::ask(眼主机, 眼端口, "the robot gripper", &sub, cw, ch) {
-                                    Err(e) => { if 拍 % 25 == 1 { println!("[服]   问眼失败:{e}"); } None }
-                                    Ok(mut l) => {
-                                        l.u = (x0 as f64 + l.u * cw as f64) / w2 as f64;
-                                        l.v = (y0 as f64 + l.v * ch as f64) / h2 as f64;
-                                        Some(l)
-                                    }
-                                }
-                            }
-                        };
-                        if let Some(look) = 眼爪 {
-                            // 双闸重定义(N3 落图定案 2026-08-21:末段爪降到与物同高,
-                            // 「深度差 ≥ 半物凸」那一半把【真爪】也全拒了 ⇒ 首校准后 0 次
-                            // 实测,推算冻在"差 0.013"而真爪离物还有 0.14 画幅)。
-                            // 「是不是物」判像素距离(物自报跨度当半径)—— 同深不等于同物;
-                            // 「是不是影」仍判凸起(影平贴支撑面,凸起≈0,MO 实锤)。
-                            let 离物 = ((look.u - p.物像素.0).powi(2) + (look.v - p.物像素.1).powi(2)).sqrt();
-                            let 非物 = 离物 >= p.物跨.max(0.05);
-                            let 过 = 非物 && match (凸起(look.u, look.v), 物凸) {
-                                (Some((k, _)), Some((wv, _))) if wv > 0.0 => k >= 0.5 * wv,
-                                _ => true,
-                            };
-                            if 过 {
-                                if !p.模板.is_empty() {
-                                    // 跟段:慢眼只做【身份复核】,不掺位置(它抖 ±0.03-0.05;
-                                    // 位置归快眼)。复核失败 = 快眼可能跟丢/跟错 ⇒ 重锚。
-                                    let (tu, tv) = p.预测爪.unwrap_or((look.u, look.v));
-                                    let dd = ((look.u - tu).powi(2) + (look.v - tv).powi(2)).sqrt();
-                                    if dd > 2.0 * p.物跨.max(0.05) {
-                                        // 裁判是构造不是 VLM(N21 帧证:爪被挡时 VLM 指手肘/底座,
-                                        // 信它重锚 = 把跟踪劫持到臂身上)。争议 ⇒ 晃爪重认;已在
-                                        // z 底(爪贴物,晃爪有碰物风险)⇒ 直接换下手点。
-                                        p.收敛计 = 0;
-                                        if p.连塌 >= 10 {
-                                            println!("[服]   身份复核失败(慢眼 ({:.3},{:.3}) vs 快眼 ({:.3},{:.3}) 离 {:.3})且已在 z 底 ⇒ 换下手点", look.u, look.v, tu, tv, dd);
-                                            p.段 = 8;
-                                        } else {
-                                            println!("[服]   身份复核失败(慢眼 ({:.3},{:.3}) vs 快眼 ({:.3},{:.3}) 离 {:.3})⇒ 晃爪重认", look.u, look.v, tu, tv, dd);
-                                            p.晃态 = 1; p.晃等 = 0;
-                                        }
-                                    } else {
-                                        p.验拍 = 0;
-                                        println!("[服]   身份复核过(离 {:.3})", dd);
-                                    }
-                                }
-                            } else if 拍 % 25 == 1 {
-                                println!("[服]   问眼答 ({:.3},{:.3}) 拒:{}(离物 {:.3})⇒ 弃", look.u, look.v,
-                                    if !非物 { "指的是物" } else { "凸起像影" }, 离物);
-                            }
-                        }
-                    }
-                    // 每拍:按当前爪估计走一步(实测或推算)。
-                    // 推算 = 账本 J ×【实到位移】(proprio 回声),不是命令的比例
-                    // (N5 实锤:J 尺度偏小 ⇒ 限幅比 k=1 ⇒ 预测一拍瞬移到物上,
-                    //  爪估差 0.0023 假收敛、最新实测差 0.1777、手臂高空怠速 ——
-                    //  08-15 小脑那条"累加命令会漂,要用实到"的像素版退化)。
-                    if let (Some((pu0, pv0)), Some((ex, ey, ez)), Some((j, _))) = (p.预测爪, 本拍挪, j_use) {
-                        let (su, sv) = (j[0] * ex + j[2] * ey + jz用[0] * ez,
-                                        j[1] * ex + j[3] * ey + jz用[1] * ez);
-                        p.预测爪 = Some((pu0 + su, pv0 + sv));
-                        // 🔴 命累不再逐拍加路径长(N69 定案:悬停振荡时路径长暴涨而净位移≈0,
-                        // 应累<命累/3 必然触发 ⇒ 响应自证专杀悬停中的健康跟踪 —— "逼近到 0.16
-                        // 就失守"的凶手。改在咬合点记同区间净预测位移,分子分母同一把尺)。
-                        // 近答同步平移(位移补偿含 z:旧答案挪到当前时刻,中位才不带滞后)。
-                        for a in p.近答.iter_mut() { a.0 += su; a.1 += sv; }
-                    }
-                    // ── 晃爪认手(构造性身份,档案两次验通:「只命令钳口、手臂不动 ⇒
-                    //    会动的刚体按构造就是钳口」)。臂冻住,只动指通道(标量 jaw = 全
-                    //    通道广播,2/5/20 指同一段码)。静对 A/B(全合、各自等静后拍)定
-                    //    逐像素噪声地板;动帧 C(张开、等静)− B = 只有爪在变 ⇒ 加权形心
-                    //    = 爪像素。等静用量出的 settle(帧间等静,钳口交付延迟 ~2 拍)。──
-                    if p.回家中 {
-                        // 爪不在画面里(N28 帧证:臂整个出画,晃爪 m1 只有 ~20 像素)⇒
-                        // 去【量到的原位】重认。原位 = 标定认手锚定处 = 已证爪可见的位姿;
-                        // 每计划最多一次 —— 这是"首捕获的可见性恢复",不是被禁的
-                        // "换点后回原位重来"那根拐棍(那条禁的是拿回位迁就账本尺)。
-                        let 回点 = 认位.or(回标).unwrap_or([原位[0], 原位[1], 原位[2]]);
-                        p.伺服目标 = [回点[0], 回点[1], 回点[2]];
-                        let d回 = ((回点[0] - here[0]).powi(2) + (回点[1] - here[1]).powi(2) + (回点[2] - here[2]).powi(2)).sqrt();
-                        if d回 < 0.33 * 张开 {
-                            println!("[服]   已到重认点(差 {:.3} m,{})⇒ 重新晃爪认手", d回,
-                                if 认位.is_some() {"上次认出处"} else if 回标.is_some() {"抬高位"} else {"原位兜底"});
-                            回标 = None;
-                            p.回家中 = false; p.晃态 = 1; p.晃等 = 0; p.晃次 = 0;
-                        } else if 拍 % 25 == 1 {
-                            println!("[服]   去重认点:还差 {:.3} m", d回);
-                        }
-                        // 回家路上也会僵(N54 实测:差 0.281→0.282 跨百拍不动,等 900 拍太贵)。
-                        if 挪.map_or(false, |m| m < 卡阈) && d回 > 5.0 * 卡阈 {
-                            p.僵拍 += 1;
-                            if p.僵拍 >= 30 {
-                                println!("[服] 回原位路上僵住(连 {} 拍)⇒ 弃这个计划换下手点", p.僵拍);
-                                p.僵拍 = 0; p.段 = 8;
-                            }
-                        } else { p.僵拍 = 0; }
-                    } else if p.晃态 > 0 {
-                        // 🔴 晃中不许追漂(N63 定案:每拍 目标=here 让目标追着漂移走,手永远
-                        // 静不下来 —— 900 拍烧在等静死循环零打印。晃入时的目标冻住不再改)。
-                        let 静置 = body_layer::derive::settle_periods(&body, 1e-3).map(|n| n as u32).unwrap_or(8).max(4);
-                        // 认块器的 5 帧合同(标定认手同款,不重写):静对 null_a/null_b(无命令)
-                        // + f0/f1/f2(相邻两帧之间各一步同长的钳口命令)。帧间等静(钳口交付
-                        // 延迟 ~2 拍,连拍会打乱"静/动"合同 —— M9 实锤)。
-                        let mut 拍帧 = |p: &mut 抓况, 下态: u8, 下等: u32| {
-                            if p.晃等 > 0 { p.晃等 -= 1; }
-                            if p.晃等 == 0 {
-                                if let Some(img) = 帧.cams.get(p.相机) { p.晃帧.push(img.2.clone()); }
-                                p.晃态 = 下态; p.晃等 = 下等;
-                            }
-                        };
-                        // 🔴 先合到底、往【开】晃(08-15 铁律:往合晃会撞机械底 + 两指并成
-                        // 一团折不出对 —— N30 实测配对恒 0)。步长 = 标定认手的同一 pub 常数
-                        // 钳口窗宽(0.45),整套合同与标定逐字同款。
-                        // 🔴 晃臂模式(N72 定案 + 业界对照 DIJE 同认识论):竖腕位钳口两轮
-                        // 认不出(指对相机前后叠死,N65 帧证 diff≈0)⇒ 第 3 轮起换命令通道:
-                        // 钳口冻在开、手臂沿【退离当前位→原位】方向走两步(0.25/0.5×张开,
-                        // 量出的;贴原位时退化用世界 x)。合同不变:动的块=自己(命令什么、
-                        // 看什么动),沿 jz 端点=指尖侧。结算后臂回基点。
-                        let 晃臂 = p.晃次 >= 2;
-                        if 晃臂 && p.晃基.is_none() { p.晃基 = Some(p.伺服目标); }
-                        let 臂步 = |基: [f64; 3], k: f64| -> [f64; 3] {
-                            let mut d = [原位[0] - 基[0], 原位[1] - 基[1]];
-                            let n = (d[0] * d[0] + d[1] * d[1]).sqrt();
-                            if n < 1e-4 { d = [1.0, 0.0]; } else { d = [d[0] / n, d[1] / n]; }
-                            [基[0] + d[0] * k * 张开, 基[1] + d[1] * k * 张开, 基[2]]
-                        };
-                        match p.晃态 {
-                            1 => {
-                                jaw = if 晃臂 { 开 } else { 合 };
-                                // 🔴 动静门控静置(N62 定案:大位移后 8 拍死等不够 —— 两轮晃认
-                                // 地板 244/173 爆表 = "静止对"被臂的余振污染,双响 0 全轮作废还
-                                // 吃掉 晃次 预算。量出来的静才算静:开拍前须连续 2 拍 |挪|<卡阈。)
-                                // 🔴 等静要有预算(N63 定案:死等无预算 ⇒ 整段 900 拍烧光零打印。
-                                // 预算 = 10×静置拍;烧完记一次晃败推进递增梯子,三败弃计划换下手点。)
-                                let 静了 = 挪.map_or(false, |m| m < 卡阈);
-                                if !静了 {
-                                    p.僵拍 += 1;
-                                    if p.僵拍 >= 10 * 静置 {
-                                        println!("[服]   晃认:等静 {} 拍未静 ⇒ 记一次晃败,递增重试", p.僵拍);
-                                        p.僵拍 = 0; p.晃帧.clear(); p.晃等 = 0; p.晃次 += 1;
-                                        if p.晃次 >= 3 {
-                                            println!("[服]   等静三败 ⇒ 弃这个计划换下手点");
-                                            p.晃次 = 0; p.晃态 = 0; p.段 = 8;
-                                        }
-                                    }
-                                }
-                                else if p.晃等 == 0 && p.晃帧.is_empty() { p.僵拍 = 0; p.晃等 = 静置; } else { 拍帧(p, 2, 2); }
-                            }
-                            2 => { jaw = if 晃臂 { 开 } else { 合 }; 拍帧(p, 3, 1); }
-                            3 => { jaw = if 晃臂 { 开 } else { 合 }; 拍帧(p, 4, 静置); }
-                            // 🔴 晃次递增激励(N60 定案:失败晃认全是"双响 0-1,m1/m2 十几像素"——
-                            // 该姿态下定幅 0.45 窗宽的指动几乎不产生像素,原样再晃两轮自然还是瞎。
-                            // 第 k 轮摆幅 ×(1+k),上限=量到的全开(合到开的一半×2 步)。零新常数。)
-                            4 => {
-                                if 晃臂 { jaw = 开; if let Some(b) = p.晃基 { p.伺服目标 = 臂步(b, 0.25); } }
-                                else {
-                                    let 幅 = (selfcal::钳口窗宽 * (1.0 + p.晃次 as f64)).min(0.5);
-                                    jaw = 合 + (开 - 合) * 幅;
-                                }
-                                拍帧(p, 5, 静置);
-                            }
-                            5 => {
-                                if 晃臂 { jaw = 开; if let Some(b) = p.晃基 { p.伺服目标 = 臂步(b, 0.5); } }
-                                else {
-                                    let 幅 = (selfcal::钳口窗宽 * (1.0 + p.晃次 as f64)).min(0.5);
-                                    jaw = 合 + (开 - 合) * 2.0 * 幅;
-                                }
-                                拍帧(p, 6, 静置);
-                            }
-                            _ => {
-                                jaw = 开; // 回开(等静后结算,模板在张开态截 —— 跟踪时爪就是张开的)
-                                if let Some(b) = p.晃基.take() { p.伺服目标 = b; } // 晃臂结算:臂回基点
-                                if p.晃等 > 0 { p.晃等 -= 1; }
-                                if p.晃等 == 0 {
-                                    let mut 锚好 = false;
-                                    if p.晃帧.len() == 5 {
-                                        if let Some(img) = 帧.cams.get(p.相机) {
-                                            match body_layer::blob::candidates(
-                                                &p.晃帧[0], &p.晃帧[1], &p.晃帧[2], &p.晃帧[3], &p.晃帧[4],
-                                                img.0, img.1, (开 - 合) * (selfcal::钳口窗宽 * (1.0 + p.晃次 as f64)).min(0.5), selfcal::最少像素(img.0, img.1),
-                                            ) {
-                                                Ok(r) => {
-                                                    println!("[服]   晃认:双响 {} · 配对 {} · 地板 {} · m1 {} m2 {}",
-                                                        r.moved_px, r.pairs, r.floor, r.m1_px, r.m2_px);
-                                                    // 取证帧(N63:配对连 0 到最大幅 —— 两指是前后叠死还是被光斑吃
-                                                    // 掉,只有图能分)。最坏轮才落盘,不刷盘。
-                                                    if r.pairs == 0 && p.晃次 >= 2 {
-                                                        if let Ok(d) = std::env::var("BL_DUMP") {
-                                                            for (k, tag) in [(0usize, "零"), (4usize, "开")] {
-                                                                if let Some(fr) = p.晃帧.get(k) {
-                                                                    let mut buf = format!("P5\n{} {}\n255\n", img.0, img.1).into_bytes();
-                                                                    buf.extend_from_slice(fr);
-                                                                    let _ = std::fs::write(format!("{d}/晃{合序}_{tag}.pgm"), buf);
-                                                                }
-                                                            }
-                                                            合序 += 1;
-                                                        }
-                                                    }
-                                                    // 🔴 配对是奢侈品,不是锚定的前提(N32 实测:竖腕朝下时两指
-                                                    // 端对相机前后叠死,配对恒 0 —— 档案原话"从这个角度两根本来
-                                                    // 就分不开";而【臂冻住只动钳口】的构造保证:任何双响块都是
-                                                    // 爪。有对用对的中点(更准),没对用最大双响块的形心。
-                                                    // 🔴 选锚不选"最大",选"离预测最近"(N67 定案:桌面高光斑跨 boot
-                                                    // 钉死在 (0.74,0.37),臂一震它就双响,块大恒赢"最大双响块" ⇒ 锚
-                                                    // 反复种进光斑。死推的 预测爪 积分的是【命令】—— 上一锚就算是假
-                                                    // 的,预测也朝真手该去的方向走;光斑不动,距离一比就输。只在
-                                                    // 配对=0 的兜底路用;有对时对中点已是指尖级,不动。
-                                                    // 首锚兜底先验(N68 定案:首晃无预测 ⇒ 仍选最大块 ⇒ 光斑首锚免费赢,
-                                                    // 后续预测被它带偏)。晃认发生在手已被命令到计划指尖上方时(量出:
-                                                    // |here−指尖|xy < 2×张开),爪必然出现在物像素邻域 —— 这不是任务知识,
-                                                    // 是"驱动刚把手送去了哪"。有死推预测用死推,没有才用这条。
-                                                    let 预 = p.预测爪.or_else(|| {
-                                                        let dxy = ((here[0] - p.指尖[0]).powi(2) + (here[1] - p.指尖[1]).powi(2)).sqrt();
-                                                        if dxy < 2.0 * 张开 { Some(p.物像素) } else { None }
-                                                    });
-                                                    let c选 = if r.pairs == 0 {
-                                                        if let Some((pu, pv)) = 预 {
-                                                            let (mut 好, mut 好d) = (None, f64::INFINITY);
-                                                            let mut i = 0;
-                                                            while let Some(a) = r.cands.get(i) {
-                                                                let d = (a.u - pu).powi(2) + (a.v - pv).powi(2);
-                                                                if d < 好d { 好d = d; 好 = Some(i); }
-                                                                i += 1;
-                                                            }
-                                                            好.and_then(|i| r.cands.get(i))
-                                                        } else { r.cands.get(0) }
-                                                    } else { r.cands.get(0) };
-                                                    // 🔴 响应块尺寸闸(N114 量出来的:晃爪两帧的差分块横跨 90% 画面
-                                                    // (u 0.09-1.00,v 0.40-1.00,2821 px)—— 那不是钳口,是整条手臂在动。
-                                                    // 拿这种巨块的形心当"爪像素",离真咬合中心差一个爪口量级,
-                                                    // 于是残差永远卡在 ~6cm(爪口 6.8cm)下不去。
-                                                    // 闸只用量出来的量:自己的爪口折成画幅 = 张开 × 换算增益;
-                                                    // 响应块任一边超过它的 3 倍 ⇒ 这不是我的爪,弃这个候选。
-                                                    // 🔴 用【在线实测的尺】折爪幅,拿不到才退账本(N115 实锤:闸把真爪
-                                                    // 也误杀了 —— 被弃的块 0.052×0.017 画幅正是钳口量级,而闸门只给
-                                                    // 0.050。因为账本增益比实测小 4 倍:实测对子"走 0.153 m ⇒ 像素挪
-                                                    // 0.155"给出增益≈1.0,折出爪幅 0.068 画幅,正好对上观察到的真爪块;
-                                                    // 账本折出来只有 0.0167)。同一条纪律:能用实测就不用账本。
-                                                    let 爪幅闸 = j_use.map(|(jj, _)| {
-                                                        let r0 = (jj[0]*jj[0] + jj[1]*jj[1]).sqrt();
-                                                        let r1 = (jj[2]*jj[2] + jj[3]*jj[3]).sqrt();
-                                                        3.0 * 张开 * r0.max(r1)
-                                                    }).or_else(|| body.get(Quantity::ImageJacobian).filter(|m| m.dim >= 4).map(|m| {
-                                                        let r0 = (m.value[0]*m.value[0] + m.value[1]*m.value[1]).sqrt();
-                                                        let r1 = (m.value[2]*m.value[2] + m.value[3]*m.value[3]).sqrt();
-                                                        3.0 * 张开 * r0.max(r1)
-                                                    }));
-                                                    let c选 = c选.filter(|c| match 爪幅闸 {
-                                                        Some(lim) if lim > 0.0 => {
-                                                            let (wu, wv) = ((c.ext[2] - c.ext[0]).abs(), (c.ext[3] - c.ext[1]).abs());
-                                                            if wu > lim || wv > lim {
-                                                                println!("[服]   晃认:响应块 {:.3}×{:.3} 画幅 > 爪口的 3 倍({:.3})⇒ 整臂在动,不是爪,弃", wu, wv, lim);
-                                                                false
-                                                            } else { true }
-                                                        }
-                                                        _ => true,
-                                                    });
-                                                    if let Some(c) = c选 {
-                                                        // 🔴 指尖端锚(N45 定案:配对=0 时旧锚=双响形心,在指身中段 ——
-                                                        // 收敛把形心怼上物心,指尖越过物体,合爪咬边挤出;空合同签名
-                                                        // N35×3 + N40二集 + N45)。改:锚取包围盒沿 jz 图像方向(下降=
-                                                        // 朝指尖;方向 image_jacobian 探针直接量)那条边,主轴取端、
-                                                        // 侧轴留形心平均噪声。配对≥1 时对中点已是指尖级,不动。
-                                                        let (mut au, mut av) = (c.u, c.v);
-                                                        let jn = (jz[0] * jz[0] + jz[1] * jz[1]).sqrt();
-                                                        if r.pairs == 0 && jn > 1e-9 {
-                                                            let (du_, dv_) = (jz[0] / jn, jz[1] / jn);
-                                                            if dv_.abs() >= du_.abs() {
-                                                                av = if dv_ > 0.0 { c.ext[3] } else { c.ext[1] };
-                                                            } else {
-                                                                au = if du_ > 0.0 { c.ext[2] } else { c.ext[0] };
-                                                            }
-                                                            println!("[服]   指尖端锚:形心 ({:.3},{:.3}) → 端 ({:.3},{:.3})", c.u, c.v, au, av);
-                                                        }
-                                                        // 🔴 认块大小按量出来的量定(owner 2026-08-23 点名画幅常数是债):
-                                                        // 块 = 自己的爪口在画面里有多大 = 量到的张开 × 量到的换算增益。
-                                                        // 五指手爪口大,块自动变大;吸盘小,块自动变小。零机体假设。
-                                                        let half = {
-                                                            let g = body.get(Quantity::ImageJacobian).filter(|m| m.dim >= 4).map(|m| {
-                                                                let r0 = (m.value[0]*m.value[0] + m.value[1]*m.value[1]).sqrt();
-                                                                let r1 = (m.value[2]*m.value[2] + m.value[3]*m.value[3]).sqrt();
-                                                                r0.max(r1)
-                                                            }).unwrap_or(0.0);
-                                                            let 爪幅 = 张开 * g; // 爪口在画幅里的占比
-                                                            (((爪幅 * 0.5) * img.0 as f64) as usize).clamp(4, img.0 / 8)
-                                                        };
-                                                        // 🔴 晃臂模式的模板从 晃帧[4](锚所在帧)剪 —— 结算首拍臂已
-                                                        // 被拉回基点,live 帧里那块像素挪走了 13-50px,剪 live = 错块。
-                                                        let 模板源: &Vec<u8> = if 晃臂 { &p.晃帧[4] } else { &img.2 };
-                                                        if let Some(tp) = 截块(img.0, img.1, 模板源, au, av, half) {
-                                                            p.模板 = tp; p.模板半 = half; p.验拍 = 0;
-                                                            p.预测爪 = Some((au, av)); p.预测龄 = 0;
-                                                            上帧爪 = Some((au, av));
-                                                            p.上fix生 = Some((au, av)); p.对Δw = [0.0, 0.0, 0.0];
-                                                            // 🔴 重锚 = 重开一门课:上一段跟错/漂移攒的对子与翻号是毒
-                                                            // (N33 实测:重锚不清尺 ⇒ 新锚照旧毒尺继续反向漂)。
-                                                            p.伺服号 = [1.0, 1.0]; p.翻候 = [0, 0]; p.命累 = 0.0; p.应累 = 0.0;
-                                                            锚好 = true;
-                                                            println!("[服]   晃爪认手:爪 ({:.3},{:.3}) ⇒ 快眼开跟(半 {} px)", au, av, half);
-                                                            // 🔴 直取(owner 2026-08-23 死令:模板伺服的锚彩票退出生死路径)。
-                                                            // 晃到手的这一拍,(here↔au,av) 同刻实测 ⇒ 锚对全量出;
-                                                            // 直接扫凸起、段13 下探合爪。空了走既有睁眼补抓环(预算 24)。
-                                                            if p.段 != 2 && p.段 != 3 && p.段 != 13 {
-                                                                if let Some(fl) = body.get(Quantity::Floor).filter(|m| m.dim >= 1).map(|m| m.value[0]) {
-                                                                    let ax直 = task::列(&p.q, 工具列 % 3);
-                                                                    p.补抓基 = [here[0] + ax直[0] * 工具长, here[1] + ax直[1] * 工具长, fl + ax直[2] * 工具长];
-                                                                    p.补抓爪像素 = Some((au, av));
-                                                                    // 🔴 认手合理性闸(N104 实锤:两次量爪之间手只走 0.048 m,爪像素却跳
-                                                                    // 0.449 画幅 —— 物理上不可能 ⇒ 这两次里至少一次认错了东西。整条重量
-                                                                    // 闭环都架在"晃爪认出的就是我的爪"上,认错的锚必须当场识破,不能拿去
-                                                                    // 算步长、更不能拿去判尺的方向)。上限只用量出来的量:账本尺(含 3σ)
-                                                                    // 乘实测世界位移 = 这段路爪像素最多可能挪多少;超了就是认错。
-                                                                    let mut 锚可信 = true;
-                                                                    if let Some((w0, px0)) = 探锚 {
-                                                                        let (dwx, dwy) = (here[0] - w0[0], here[1] - w0[1]);
-                                                                        let dw = (dwx * dwx + dwy * dwy).sqrt();
-                                                                        let dpx = ((au - px0.0).powi(2) + (av - px0.1).powi(2)).sqrt();
-                                                                        // 🔴 合理性闸也换实测尺(N116:账本增益比实测小 4 倍 ⇒ 用账本算的上限小得离谱,闸形同虚设。
-                                                                        // 症状:实测对子说"走 +0.196 m ⇒ 像素挪 +0.146",下一次量到的爪像素反而离物更远,
-                                                                        // 步长 0.195→0.209→0.274 越算越大 —— 只有"这次量在爪上、下次量在臂上"能解释,闸没拦住。)
-                                                                        let 尺闸 = j_use.or_else(|| body.get(Quantity::ImageJacobian).filter(|m| m.dim >= 4)
-                                                                            .map(|m| ([m.value[0], m.value[1], m.value[2], m.value[3]],
-                                                                                      [m.uncertainty[0], m.uncertainty[1], m.uncertainty[2], m.uncertainty[3]])));
-                                                                        if let Some((jv, ju)) = 尺闸 {
-                                                                            let g = |a: f64, b: f64, sa: f64, sb: f64| ((a.abs() + 3.0 * sa).powi(2) + (b.abs() + 3.0 * sb).powi(2)).sqrt();
-                                                                            let 增益 = g(jv[0], jv[1], ju[0], ju[1])
-                                                                                .max(g(jv[2], jv[3], ju[2], ju[3]));
-                                                                            let 半f = 帧.cams.get(p.相机).map(|i| p.模板半 as f64 / i.0 as f64).unwrap_or(0.03);
-                                                                            let 上限 = 增益 * dw + 2.0 * 半f; // 两端各一个量出来的认块半径
-                                                                            // 🔴 下限闸(N122 实锤:步长卡死 0.141 m 连三轮,每轮都真到位 ——
-                                                                            // 手走了 14 cm 而爪像素纹丝不动 ⇒ 认到的"爪"根本不长在手上,
-                                                                            // 是个静止的高光斑,N67 记过的病)。身体挪过一个爪口以上而
-                                                                            // 爪像素挪不过一个认块直径 ⇒ 它不跟着我动,就不是我的爪。
-                                                                            if dw > 张开 && dpx < 2.0 * 半f {
-                                                                                锚可信 = false;
-                                                                                println!("[服]   🔴 认手不可信:身体挪了 {:.3} m 而这个爪只挪了 {:.3} 画幅(不到一个认块 {:.3})⇒ 它不跟着我动,不是我的爪", dw, dpx, 2.0 * 半f);
-                                                                            }
-                                                                            if dpx > 上限 {
-                                                                                锚可信 = false;
-                                                                                println!("[服]   🔴 认手不可信:走 {:.3} m 爪像素却挪 {:.3} 画幅(这段路上限 {:.3})⇒ 丢弃,重量", dw, dpx, 上限);
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                    // 相邻两探成对喂在线拟合(只在 z 基本没变、且锚可信时)。
-                                                                    if let Some((w0, px0)) = 探锚 {
-                                                                        let dz = (here[2] - w0[2]).abs();
-                                                                        let dw = ((here[0]-w0[0]).powi(2) + (here[1]-w0[1]).powi(2)).sqrt();
-                                                                        let dpx2 = ((au - px0.0).powi(2) + (av - px0.1).powi(2)).sqrt();
-                                                                        // 分辨率 = 量出来的认块直径(不是写死的画幅比例)。
-                                                                        let 分辨 = 帧.cams.get(p.相机).map(|i| 2.0 * p.模板半 as f64 / i.0 as f64).unwrap_or(0.06);
-                                                                        // 激励门:走得比自己一个爪口还短、或像素挪不过一个认块半径的两倍,
-                                                                        // 就是噪声 —— 不喂尺、不判方向(N105 实锤:3cm/0.019 画幅的对子
-                                                                        // 让方向判据来回横跳,步长跟着乱蹦)。
-                                                                        if 锚可信 && dz < 0.5 * 张开 && dw > 张开 && dpx2 > 分辨 {
-                                                                            对子.push(([here[0]-w0[0], here[1]-w0[1]], (au - px0.0, av - px0.1)));
-                                                                            if 对子.len() > 32 { 对子.remove(0); }
-                                                                            println!("[服]   尺对+1(走 ({:+.3},{:+.3}) m ⇒ 像素挪 ({:+.3},{:+.3}));在线对子 {}", here[0]-w0[0], here[1]-w0[1], au - px0.0, av - px0.1, 对子.len());
-                                                                        }
-                                                                    }
-                                                                    // 🔴 方向自证(N103 修正口径):必须拿【实际走了多少米】比【像素实际挪了多少】。
-                                                                    // 上一版拿"我命令的那一小步"去比,而两次量爪之间手还下探+合爪+抬起回收
-                                                                    // (实测 0.247 m,命令只有 0.094 m)⇒ 苹果比橘子,判号不可信。
-                                                                    // 且改成【直接判定符号】而非来回翻转:尺真反时每探都判反,翻转会来回抖。
-                                                                    if let (true, Some((w0, px0))) = (锚可信, 探锚) {
-                                                                        if let Some(m) = body.get(Quantity::ImageJacobian).filter(|m| m.dim >= 4) {
-                                                                            let (dwx, dwy) = (here[0] - w0[0], here[1] - w0[1]);
-                                                                            let 分辨2 = 帧.cams.get(p.相机).map(|i| 2.0 * p.模板半 as f64 / i.0 as f64).unwrap_or(0.06);
-                                                                            let 激励 = (dwx*dwx + dwy*dwy).sqrt() > 张开
-                                                                                && ((au - px0.0).powi(2) + (av - px0.1).powi(2)).sqrt() > 分辨2;
-                                                                            if 激励 {
-                                                                            let (eu, ev) = (m.value[0]*dwx + m.value[1]*dwy, m.value[2]*dwx + m.value[3]*dwy);
-                                                                            let (du_, dv_) = (au - px0.0, av - px0.1);
-                                                                            if du_.abs() > 0.5 * 分辨2 && eu.abs() > 0.5 * 分辨2 {
-                                                                                let n = if eu * du_ < 0.0 { -1.0 } else { 1.0 };
-                                                                                if n != 探号[0] { println!("[服]   方向自证:横轴判 {:+.0}(账本预期 {:+.3} 实测 {:+.3})", n, eu, du_); }
-                                                                                探号[0] = n;
-                                                                            }
-                                                                            if dv_.abs() > 0.5 * 分辨2 && ev.abs() > 0.5 * 分辨2 {
-                                                                                let n = if ev * dv_ < 0.0 { -1.0 } else { 1.0 };
-                                                                                if n != 探号[1] { println!("[服]   方向自证:纵轴判 {:+.0}(账本预期 {:+.3} 实测 {:+.3})", n, ev, dv_); }
-                                                                                探号[1] = n;
-                                                                            }
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                    if !锚可信 && 疑锚次 < 2 {
-                                                                        疑锚次 += 1;
-                                                                        p.预测爪 = None; p.模板.clear(); p.模板半 = 0; p.验拍 = 0; p.预测龄 = 0;
-                                                                        p.晃态 = 1; p.晃等 = 0; p.晃次 = 0; p.晃帧.clear(); p.晃基 = None;
-                                                                        锚好 = false;
-                                                                    } else {
-                                                                    疑锚次 = 0;
-                                                                    探锚 = Some((here, (au, av)));
-                                                                    let j直 = j_use.or_else(|| body.get(Quantity::ImageJacobian).filter(|m| m.dim >= 4)
-                                                                        .map(|m| ([m.value[0], m.value[1], m.value[2], m.value[3]],
-                                                                                  [m.uncertainty[0], m.uncertainty[1], m.uncertainty[2], m.uncertainty[3]])));
-                                                                    // 🔴 在线尺一旦接管,就不许再在它外面乘自证符号(N123 实锤:峰簇
-                                                                    // 稳如磐石 (0.502,0.543)/(0.504,0.537)/(0.499,0.541) 6 格、下限闸也没
-                                                                    // 开火说明爪确实在动,可号还在 +1,+1 ↔ +1,-1 之间翻,步长跟着从
-                                                                    // 0.131 跳到 0.274)。原因是【双重纠正】:岭回归拟合出来的尺本身
-                                                                    // 已经把方向学对了,外面再乘一个独立判出来的符号 = 两套纠正互相打架。
-                                                                    // 自证符号只在退回账本尺时才有意义(账本方向是错的,N116 已实锤)。
-                                                                    let 用号 = if j_use.is_some() { [1.0, 1.0] } else { 探号 };
-                                                                    match 睁扫(p, j直, 用号) {
-                                                                        Some(步) => {
-                                                                            p.指尖 = [p.补抓基[0] + 步[0], p.补抓基[1] + 步[1], p.补抓基[2]];
-                                                                            上探步 = Some(步);
-                                                                            // 🔴 到位就合 vs 再量一轮:残差比自己四分之一个爪口还小 ⇒ 已在
-                                                                            // 咬合窗里,合。否则挪过去【不合】,在那一点再量一次(N105 实锤:
-                                                                            // 量手全发生在"合完抬起缩回"的同一位姿 ⇒ 两次量之间手几乎没动,
-                                                                            // 对子全是噪声、判据来回横跳。要在【将要下手的那一点】上量)。
-                                                                            let l步 = (步[0]*步[0] + 步[1]*步[1]).sqrt();
-                                                                            // 🔴 残差没进窗就不许合(N112 实锤:精调满 6 轮时残差还有 0.065 m
-                                                                            // 却被强制合爪 —— 那是拿"轮数用完"当"对准了")。
-                                                                            // 轮数放宽到 12;用满仍然大于一个爪口 ⇒ 这个点收不拢,弃计划换点,
-                                                                            // 不硬合。
-                                                                            p.该合 = l步 < 0.25 * 张开;
-                                                                            if !p.该合 {
-                                                                                p.精调次 += 1;
-                                                                                if p.精调次 >= 12 {
-                                                                                    if l步 < 张开 { p.该合 = true; }
-                                                                                    else {
-                                                                                        println!("[服] 🔴 精调 12 轮残差仍 {:.3} m(大于一个爪口)⇒ 这个点收不拢,弃计划换下手点", l步);
-                                                                                        p.段 = 8; p.卡 = 0;
-                                                                                    }
-                                                                                }
-                                                                            }
-                                                                            println!("[服] 直取:{}(步 {:.3} m·号 {:+.0},{:+.0}·精调 {})",
-                                                                                if p.该合 { "到位即合" } else { "挪过去再量一轮" }, l步, 探号[0], 探号[1], p.精调次);
-                                                                        }
-                                                                        None => {
-                                                                            // 🔴 扫无簇 = 我已经压在它上面了(N110 实锤:窗口收窄后手一贴近,
-                                                                            // 排除自己手的那个圈把物体一起吞了 ⇒ 无峰)。这时候【就地合】,
-                                                                            // 不许回那个陈旧的候选点 —— 回去等于把已经走到的精度全扔掉,
-                                                                            // N110 就这样在老点上空合了 13 次。
-                                                                            p.指尖 = p.补抓基;
-                                                                            p.该合 = true;
-                                                                            println!("[服] 直取:扫无簇(手已压在物上,峰被自己盖住)⇒ 就地合爪");
-                                                                        }
-                                                                    }
-                                                                    p.段 = 13; p.卡 = 0;
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                                Err(e) => { println!("[服]   晃认:认块器拒绝 {e:?}"); }
-                                            }
-                                        }
-                                    }
-                                    p.晃帧.clear();
-                                    if 锚好 { p.晃态 = 0; p.晃次 = 0; }
-                                    else {
-                                        p.晃次 += 1;
-                                        if p.晃次 >= 3 {
-                                            // 🔴 N55 定案:开局差 0.0566 的黄金位被"3 败⇒回家"整套重启扔掉。
-                                            // 回家留给【真失明】(本计划从没锚上过);已有锚的 3 败多半是贴桌
-                                            // 贴物时合同过不了 —— 就地按推算续跑,消耗底晃预算,租约到期再晃。
-                                            if p.预测爪.is_some() && p.锚新 && p.底晃次 < 2 {
-                                                p.底晃次 += 1;
-                                                println!("[服]   晃 3 败但本计划有锚 ⇒ 按推算续跑(底晃 {}/2),租约到期再晃", p.底晃次);
-                                                p.晃态 = 0; p.晃次 = 0; p.验拍 = 0; p.预测龄 = 0;
-                                            } else if !p.回过家 {
-                                                println!("[服]   晃爪 3 轮没认出 —— 按帧证判爪不在画面里 ⇒ 去量到的原位重认(本计划仅此一次)");
-                                                // z 封顶:原位z+2×张开(N80 实测:从 z1.36 再抬就是往天花板钻)。
-                                                if 认位.is_none() { 回标 = Some([here[0], here[1], (here[2] + 张开).min(原位[2] + 2.0 * 张开)]); }
-                                                p.回过家 = true; p.回家中 = true; p.晃态 = 0; p.晃次 = 0;
-                                            } else {
-                                                println!("[服]   回原位后仍 3 轮没认出 ⇒ 弃这个计划换下手点");
-                                                p.段 = 8; p.晃态 = 0; p.晃次 = 0;
-                                            }
-                                        } else {
-                                            println!("[服]   晃爪认手这轮没认出 ⇒ 再晃({}/3)", p.晃次);
-                                            p.晃态 = 1; p.晃等 = 0;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    } else if let Some((pu0t, pv0t)) = p.预测爪 {
-                        // ── 快眼(档案原话:"the eye can only ever be the slow loop …
-                        //    while a tracker(146.4 Hz)and the body layer close the fast
-                        //    loop. That split is already the architecture")。模板只在慢眼
-                        //    锚定时刷新(档案:自动刷新会把跟踪点走离手);相关度自评不可信
-                        //    ⇒ 身份由慢眼定期复核。──
-                        let (pu, pv) = if !p.模板.is_empty() {
-                            if let Some(img) = 帧.cams.get(p.相机) {
-                                let r = ((img.0 as f64) * 0.06) as usize;
-                                if let Some((tu, tv)) = 找块(img.0, img.1, &img.2, &p.模板, p.模板半, pu0t, pv0t, r) {
-                                    // 方向自证搬进快眼流(FV 铁律"单步信噪比<1 只能测一次
-                                    // 定一次"判死的是 VLM 差分;模板匹配单步噪声 ~1px,合规)。
-                                    if let Some((lu, lv)) = p.上fix生 {
-                                        let 实 = (tu - lu, tv - lv);
-                                        // 命段 = 同一咬合区间的净预测位移(上次 fix 后 预测爪 从 (lu,lv)
-                                        // 死推到搜索中心 (pu0t,pv0t)),与 实 同尺同区间。
-                                        p.命累 += ((pu0t - lu).powi(2) + (pv0t - lv).powi(2)).sqrt();
-                                        for a in 0..2 {
-                                            // 拟合接管(≥4 对)后两轴自证都停:v 行已由数据
-                                            // 定号,再翻 伺服号 会跟拟合打架(N44 起 v 行不再冻结)。
-                                            if 对子.len() >= 4 { continue; }
-                                            let (sg, e) = if a == 0 { (实.0, p.上期望.0) } else { (实.1, p.上期望.1) };
-                                            if sg.abs() > 0.005 && e != 0.0 {
-                                                if sg * e < 0.0 {
-                                                    p.翻候[a] += 1;
-                                                    if p.翻候[a] >= 2 {
-                                                        p.伺服号[a] = -p.伺服号[a]; p.翻候[a] = 0;
-                                                        println!("[服]   方向自证 {}:连续两次矛盾 ⇒ 翻 ⇒ {:+.0}", if a == 0 { "u" } else { "v" }, p.伺服号[a]);
-                                                    }
-                                                } else { p.翻候[a] = 0; }
-                                            }
-                                        }
-                                        // 对子:逐拍(真挪 xy, 爪像素真挪),z 贡献用账本列扣掉。
-                                        // 快眼流喂在线尺 —— 比 VLM 生答密两个量级、噪声小一个量级。
-                                        let w_ = p.对Δw;
-                                        if (w_[0] * w_[0] + w_[1] * w_[1]).sqrt() > 1e-4 {
-                                            对子.push(([w_[0], w_[1]], (tu - lu - jz用[0] * w_[2], tv - lv - jz用[1] * w_[2])));
-                                            if 对子.len() > 32 { 对子.remove(0); }
-                                        }
-                                        // z 对采集(N49 [尺]定案:原"xy<0.2×z"条件在 V5 同拍 xy+z 设计下
-                                        // 结构性不可满足 ⇒ z对 恒 0,自尺器官从没收过一对。改:z 有执行就收,
-                                        // xy 的像素贡献用当前拟合扣掉(对子=32 时拟合已可信,坐标下降式一致估计)。
-                                        if w_[2].abs() > 1e-4 {
-                                            if let Some((jf, _)) = j_use {
-                                                z对.push((w_[2], 实.0 - jf[0] * w_[0] - jf[2] * w_[1],
-                                                                 实.1 - jf[1] * w_[0] - jf[3] * w_[1]));
-                                                if z对.len() > 24 { z对.remove(0); }
-                                            }
-                                        }
-                                        // 🔴 响应自证(N36 实锤:匹配器锁死静止图块,每拍"成功"⇒预测龄
-                                        // 永远 0,饿死闸闻不到;z 照降到底,首次复核才裁,两计划同签名死。
-                                        // 晃爪认手同一认识论连续化:爪=被命令时共动的那块;命动攒过
-                                        // 0.05 幅而应动不足其三分之一 ⇒ 这块已不是爪 ⇒ 当拍作废重锚。
-                                        p.应累 += (实.0 * 实.0 + 实.1 * 实.1).sqrt();
-                                        if p.命累 > 0.05 && p.应累 < p.命累 * 0.33 {
-                                            println!("[服] 快眼失守:命动 {:.3} 应动 {:.3} ⇒ 模板作废,晃爪重认", p.命累, p.应累);
-                                            p.锚新 = false;
-                                            p.命累 = 0.0; p.应累 = 0.0; p.收敛计 = 0;
-                                            // 🔴 N52 定案:白臂模板只活 10-30 拍,底部失守若一律死,任何计划都
-                                            // 到不了合爪。底部重晃解禁(只动钳口;碰歪由空合自检+问前回位兜底),
-                                            // 预算 2 次/计划,超了才换点。
-                                            if p.连塌 >= 10 && p.底晃次 >= 2 { println!("[服]   z 底重晃预算用尽 ⇒ 弃这个计划换下手点"); p.段 = 8; }
-                                            else { if p.连塌 >= 10 { p.底晃次 += 1; println!("[服]   z 底第 {} 次重晃(≤2)", p.底晃次); } p.晃态 = 1; p.晃等 = 0; }
-                                        }
-                                    }
-                                    p.上fix生 = Some((tu, tv)); p.对Δw = [0.0, 0.0, 0.0];
-                                    p.预测爪 = Some((tu, tv));
-                                    p.预测龄 = 0;
-                                    p.锚新 = true;
-                                    (tu, tv)
-                                } else { (pu0t, pv0t) }
-                            } else { (pu0t, pv0t) }
-                        } else { (pu0t, pv0t) };
-                        let d = (p.物像素.0 - pu, p.物像素.1 - pv);
-                        let 差px = (d.0 * d.0 + d.1 * d.1).sqrt();
-                        p.上期望 = d;
-                        if !p.模板.is_empty() {
-                            // 跟段:快眼连续伺服(边走边看回来了 —— 眼是快的那只)。
-                            let mut 挪xy = [0.0f64, 0.0];
-                            if 差px > 0.015 {
-                                if let Some((j, js)) = j_use {
-                                    if let Ok(((dx0, dy0), _)) = probe::image_to_plane_damped(&j, &js, d) {
-                                        let (dx, dy) = (dx0 * p.伺服号[0], dy0 * p.伺服号[1]);
-                                        let l = (dx * dx + dy * dy).sqrt();
-                                        let cap = 0.1 * 张开;
-                                        let k = if l > cap { cap / l } else { 1.0 };
-                                        挪xy = [dx * k, dy * k];
-                                    }
-                                }
-                            }
-                            let 步z = (0.03 * 可达带[1]).max(探幅);
-                            // 🔴 N56 取证帧终判:差px 还有 0.3+ 时 z 已落底,爪贴桌在【方块的高度】
-                            // 横扫 20-30cm 进场 —— 推土机(2026-06-10 MPPI 老病换装):方块被指侧
-                            // 顶走,撑住=顶着推,合上必空(空合 7 连的真凶)。修:端带外(差px >
-                            // 2×物跨,与 VLM 压制共用同一条带,零新常数)z 悬停不降 —— 先对准再下压。
-                            let 降 = if p.连塌 >= 10 { 0.0 }
-                                else if 差px > 2.0 * p.物跨.max(0.05) { 0.0 }
-                                else if 差px > 0.05 { 0.5 * 步z } else { 步z };
-                            if let Some((_, _, ez)) = 本拍挪 {
-                                if 降 > 0.0 && ez > -0.1 * 步z { p.连塌 += 1; }
-                                else if ez < -0.25 * 步z { p.连塌 = 0; }
-                            }
-                            p.伺服目标 = [here[0] + 挪xy[0], here[1] + 挪xy[1], here[2] - 降];
-                            p.验拍 += 1;
-                        } else {
-                            // 看段:站住不动,攒慢眼答案。
-                            p.伺服目标 = [here[0], here[1], here[2]];
-                        }
-                        if p.段起z == f64::MAX { p.段起z = here[2]; }
-                        // (z 的到底计数移进跳段 —— 看段不动 z,老的 15 拍净降窗在这里只会假钉。)
-                        if 拍 % 25 == 1 {
-                            println!("[服] 接近:爪估 ({:.3},{:.3}) 物 ({:.3},{:.3}) 差 {:.4} · 手 ({:.3},{:.3},{:.3}) · z到底 {}",
-                                pu, pv, p.物像素.0, p.物像素.1, 差px, here[0], here[1], here[2], p.连塌);
-                        }
-                        // 合爪判据:z 到底 且 画面收敛【连续 2 拍】(MV 实锤:爪估噪声
-                        // 瞬间穿透单拍判据 —— 0.089 下一拍蹦 0.014 就合,空)。
-                        // 只认【校准拍】的达标(预测龄==0 = 本拍刚被 VLM 实测校准;MW 实锤:
-                        // 推算拍把预测爪朝物前推,差自动缩到 0.0004"收敛"——推算自我实现,
-                        // 三连假收敛空爪)。连续两次独立实测 <0.015 才是真对齐。
-                        // 收敛线 = max(合爪窗, 仪器自身散布)(驱动的容差铁律"不许要求比
-                        // 自身重复性紧"用在这:N15/N16 实锤 —— 爪贴物后与物黏成一团,
-                        // VLM 只能证到 ±0.05-0.09,0.015 在末段是永远够不着的门,而多等的
-                        // 每一答都可能框到手腕被劫持。爪窗 80mm ≫ 方块 35mm,±3cm 合爪
-                        // 兜得住;兜不住由空爪自检+换点接盘 —— 档案老链"末段交给几何与
-                        // 接触"的同一形状。散布 = 近答 MAD(量出来的,零拍数)。
-                        let 线 = if !p.模板.is_empty() { 0.015 } else if p.近答.len() >= 3 {
-                            let med = |v: &mut Vec<f64>| {
-                                v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
-                                v[v.len() / 2]
-                            };
-                            let mut us: Vec<f64> = p.近答.iter().map(|a| a.0).collect();
-                            let mut vs: Vec<f64> = p.近答.iter().map(|a| a.1).collect();
-                            let (mu, mv) = (med(&mut us), med(&mut vs));
-                            let mut du: Vec<f64> = p.近答.iter().map(|a| (a.0 - mu).abs()).collect();
-                            let mut dv: Vec<f64> = p.近答.iter().map(|a| (a.1 - mv).abs()).collect();
-                            let (su, sv) = (med(&mut du), med(&mut dv));
-                            (su * su + sv * sv).sqrt().max(0.015)
-                        } else { 0.015 };
-                        if p.连塌 >= 10 && 差px < 线 && p.预测龄 == 0 { p.收敛计 += 1; }
-                        else if 差px >= 2.0 * 线 { p.收敛计 = 0; } // 滞回随线走(原 0.015/0.03 的同一比例)
-                        // 🔴 僵拍(N43 定案:上一刀直接读 卡≥30,而 卡 的武装线 差>2×探幅
-                        // (探幅 0.1mm 级)被【晃爪保持位】的微米噪声武装 ⇒ 30 拍杀死健康晃认,
-                        // 计划九连同点循环 —— 手臂从没楔死,凶手是那把闸自己。真僵 = 伺服在要
-                        // 一步(差>5×卡阈)· 手不动(挪<卡阈)· 且不在"z 到底等收敛"的合法保持
-                        // (连塌<10 或 差px≥2×线)。全量出来的。晃/回家拍不进这条路,天然不计。
-                        if 差 > 5.0 * 卡阈 && (p.连塌 < 10 || 差px >= 2.0 * 线)
-                            && 挪.map_or(false, |m| m < 卡阈) {
-                            p.僵拍 += 1;
-                            if p.僵拍 >= 30 {
-                                println!("[服] 🔴 手不跟:连 {} 拍挪不动(差 {:.3} m)⇒ 弃这个计划换下手点", p.僵拍, 差);
-                                p.僵拍 = 0; p.段 = 8;
-                            }
-                        } else { p.僵拍 = 0; }
-                        // 🔴 深度验锚 —— 合爪前最后一道闸(N69 帧证:模板锚在手体不在指尖,
-                        // 收敛爪估 (0.527,0.556) vs 可见指尖 (0.46,0.42),指尖偏 5-8cm 合在空桌
-                        // 面 ⇒ 空合。跟踪点若真是指尖,收敛+z到底时它必与物同深;锚在手腕/
-                        // 手体则比指尖离相机近约一只钳口的量级,深度图一量穿帮。阈=张开
-                        // (量出的);无深度通道拿不到就跳过,不改无深度机体的行为。)
-                        if p.收敛计 >= 2 {
-                            match (凸起(pu, pv), 凸起(p.物像素.0, p.物像素.1)) {
-                                (Some((凸爪, c爪)), Some((凸物, c物))) => {
-                                let _ = 凸爪;
-                                println!("[服]   深度验锚:跟踪点深 {:.3} 物深 {:.3} 差 {:.3}(阈 半张开 {:.3})· 物峰 {:.3}", c爪, c物, (c爪 - c物).abs(), 0.5 * 张开, 凸物);
-                                // (物证检查已撤 —— N87 实测:收敛时手指本来就骑在物像素上,挡住
-                                // 深度探测,"物峰=0"是健康几何;它误杀了 差0.0223 的最好收敛,还在
-                                // 手悬场上时触发重问拿回 x=-1.1m 疯答案。staleness 只能靠补抓睁眼管。)
-                                let _ = 凸物;
-                                // 阈收紧 0.5×张开(N84 实测:6.8cm 深差压线通过 —— 指节层锚(3.4-7cm)
-                                // 从"抓腕设计"的阈下漏过;真指尖锚的差深是 0.001 级)。
-                                if (c爪 - c物).abs() > 0.5 * 张开 {
-                                    println!("[服] 🔴 深度验锚不过:跟踪点深 {:.3} vs 物深 {:.3}(差 {:.3} > 张开 {:.3})⇒ 模板作废,晃爪重认", c爪, c物, (c爪 - c物).abs(), 张开);
-                                    p.锚新 = false; p.收敛计 = 0; p.命累 = 0.0; p.应累 = 0.0;
-                                    if p.底晃次 >= 2 { println!("[服]   z 底重晃预算用尽 ⇒ 弃这个计划换下手点"); p.段 = 8; }
-                                    else { p.底晃次 += 1; p.晃态 = 1; p.晃等 = 0; p.预测龄 = 0; }
-                                }
-                                }
-                                _ => { println!("[服]   深度验锚:深度通道拿不到 ⇒ 跳过(闸未运行)"); }
-                            }
-                        }
-                        if p.收敛计 >= 2 {
-                            let axc = task::列(&p.q, 工具列 % 3);
-                            p.指尖 = [here[0] + axc[0] * 工具长, here[1] + axc[1] * 工具长, here[2] + axc[2] * 工具长];
-                            println!("[服] 🟢 收敛(差 {:.4})且 z 到底 ⇒ 合爪", 差px);
-                            // 取证帧:合爪起点的指-物几何(空合第 6 次同签名,咬边/斜弹/错位只有图能分)。
-                            认位 = Some([here[0], here[1], here[2]]); // 收敛到合爪 = 锚的终极自证,这位姿爪必可见
-                            p.补抓次 = 0; p.补抓基 = p.指尖; // 补抓环中心=这次收敛的指尖
-                            p.补抓爪像素 = p.预测爪; // 锚对另一半:此拍预测龄==0(收敛门要求),像素是量出的
-                            合序 += 1;
-                            if let (Ok(d), Some(img)) = (std::env::var("BL_DUMP"), 帧.cams.get(p.相机)) {
-                                let mut buf = format!("P5\n{} {}\n255\n", img.0, img.1).into_bytes();
-                                buf.extend_from_slice(&img.2);
-                                let _ = std::fs::write(format!("{d}/close{合序}.pgm"), buf);
-                                // 深度图同帧落盘(指尖双峰 vs 物峰的真实几何 —— 骑跨验证的设计粮)。
-                                if let Some(路) = plug.lay.cams.get(p.相机) {
-                                    let mut 深路 = 路.clone();
-                                    if let Some(last) = 深路.last_mut() { *last = "depth".to_string(); }
-                                    if let Some((dw, dh, dep)) = plug.last.as_ref().and_then(|o| 取(o, &深路)).and_then(|dv| wire::as_f32_grid(&dv).map(|(a,b,c)| (a,b,c.to_vec()))) {
-                                        let (mut lo, mut hi) = (f64::MAX, f64::MIN);
-                                        for &raw in &dep { let v = raw as f64; if v.is_finite() { if v < lo { lo = v; } if v > hi { hi = v; } } }
-                                        let s = if hi > lo { 255.0 / (hi - lo) } else { 0.0 };
-                                        let mut db = format!("P5\n{dw} {dh}\n255\n").into_bytes();
-                                        db.extend(dep.iter().map(|&raw| { let v = raw as f64; if v.is_finite() { ((v - lo) * s) as u8 } else { 0 } }));
-                                        let _ = std::fs::write(format!("{d}/depth{合序}.pgm"), db);
-                                    }
-                                }
-                            }
-                            p.段 = 2; p.卡 = 0;
-                            let n = (0.05f64.ln() / (1.0 - 交付率).max(1e-6).ln()).ceil();
-                            p.合等 = (n as u32).clamp(3, 120);
-                        }
-                        // 限龄每拍必走(N3 实锤:原来只在「差>0.015」的分支里加龄 ⇒ 推算
-                        // 一旦漂到"已对准"就冻住、永不作废 —— 正是"差 0.013 钉死、真爪在
-                        // 0.14 画幅外"的机制)。校准拍在上面清零;40 拍无实测 ⇒ 作废重捕。
-                        p.预测龄 += 1;
-                        if p.预测龄 > 40 {
-                            println!("[服] 快眼 {} 拍没咬上 ⇒ 晃爪重认", p.预测龄 - 1);
-                            p.锚新 = false;
-                            p.收敛计 = 0;
-                            if p.连塌 >= 10 && p.底晃次 >= 2 { println!("[服]   z 底重晃预算用尽 ⇒ 弃这个计划换下手点"); p.段 = 8; }
-                            else { if p.连塌 >= 10 { p.底晃次 += 1; println!("[服]   z 底第 {} 次重晃(≤2)", p.底晃次); } p.晃态 = 1; p.晃等 = 0; p.预测龄 = 0; }
-                        }
-                    } else {
-                        // 🔴 先盲走后认手(N75 定案:首晃总在离悬停位很远处发生 ⇒ 物像素
-                        // 先验永不触发,光斑年年赢首锚。盲走不需要锚 —— 回家路就是纯本体
-                        // 感走的;走到计划指尖 xy 邻域(2×张开)再晃,先验自然接上)。
-                        let d首 = ((here[0] - p.指尖[0]).powi(2) + (here[1] - p.指尖[1]).powi(2)).sqrt();
-                        if d首 >= 2.0 * 张开 {
-                            // 🔴 z 钉在计划量(指尖z+抬高),不用 here[2] —— 每拍重读 here 就是
-                            // 目标追漂(N63 晃中同病;N76 首火实测手被自己抬到 z=1.402)。
-                            p.伺服目标 = [p.指尖[0], p.指尖[1], p.指尖[2] + p.抬高];
-                            // 🔴 盲走僵闸 v2(N79 实测:IK 饱和的爬行是"隔十几拍蹦 1-2mm"的
-                            // 间歇跳,单拍 挪≥卡阈 就清零的闸永远不响)。改窗口累计进度:
-                            // 30 拍内向目标推进 < 30×0.5mm(协议地板)⇒ 够不着,换点。
-                            if p.僵拍 == 0 { p.盲距 = d首; }
-                            p.僵拍 += 1;
-                            if p.僵拍 >= 30 {
-                                if p.盲距 - d首 < 0.015 {
-                                    let 推 = (p.盲距 - d首).max(0.0);
-                                    println!("[服] 盲走 30 拍只推进 {:.4} m(还差 {:.3} m)⇒ 这个下手点够不着,弃这个计划换下手点", 推, d首);
-                                    // 完全没动(不到协议地板 30 拍的量)⇒ 记一次"卡死",不是候选的错。
-                                    if 推 < 0.015 * 0.1 { 困计 = 困计.saturating_add(1); } else { 困计 = 0; }
-                                    够不到过.push(p.指尖);
-                                    if 够不到过.len() > 64 { 够不到过.remove(0); }
-                                    p.段 = 8;
-                                }
-                                p.僵拍 = 0;
-                            }
-                            if 拍 % 25 == 1 { println!("[服] 接近:无爪锚,先盲走到位再认手(还差 {:.3} m)", d首); }
-                        } else {
-                            p.伺服目标 = [here[0], here[1], here[2]];
-                            p.晃态 = 1; p.晃等 = 0;
-                            if 拍 % 25 == 1 { println!("[服] 接近:无爪锚 ⇒ 晃爪认手(拍 {})", p.段拍); }
-                        }
-                    }
-                    // 段超时:换下手点重来(预算内多试)。
-                    if p.段拍 > 900 {
-                        println!("[服] 接近段超时(900 拍)⇒ 弃这个计划换下手点");
-                        p.段 = 8;
-                    }
-                }
-                2 => {
-                    // 通道无关的推进-饱和(终态配置,owner 验收 2026-08-21):合 = 全通道
-                    // 朝收拢推进;停 = 任一通道【被撑住】(读数与上拍差 < 撑阈 且 读数还在
-                    // 半途)或全通道读数到底(空合)。2/5/20 指同一段代码,零结构假设。
-                    let 撑阈 = 0.01; // 拍间读数不再走的判定(归一开合/拍;协议数,机体无关)
-                    // 🔴 【全部】通道都停在半途才算夹住(N35 三连定案:单通道停走就抬 ⇒
-                    // 一根手指从侧面顶住方块也读成"夹到",立刻抬,方块从没进指间 ——
-                    // 收敛 0.006-0.013 合上撑住抬起全空 ×3。物体真在指间 = 它约束整只手,
-                    // 每个通道都被它停住;只停一部分 = 侧顶/边缘,继续合让其余通道追上,
-                    // 追不上会全到底走空爪自检。2/5/20 指同一句,零机体假设。
-                    let mut 撑数 = 0usize;
-                    let mut 全到底 = !帧.jaw.is_empty();
-                    for (ci, g) in 帧.jaw.iter().enumerate() {
-                        let 上 = p.上爪读.get(ci).copied().unwrap_or(1.0);
-                        if (上 - g).abs() < 撑阈 && *g > 0.05 { 撑数 += 1; }
-                        if *g > 0.05 { 全到底 = false; }
-                    }
-                    let 有撑 = !帧.jaw.is_empty() && 撑数 == 帧.jaw.len();
-                    p.上爪读 = 帧.jaw.iter().copied().collect();
-                    if p.合等 > 0 { p.合等 -= 1 }
-                    if 有撑 && p.合等 < 100 {
-                        println!("[服] 有指通道被撑住(读数停在半途)⇒ 合完,抬");
-                            if let (Ok(d), Some(img)) = (std::env::var("BL_DUMP"), 帧.cams.get(p.相机)) {
-                                let mut buf = format!("P5\n{} {}\n255\n", img.0, img.1).into_bytes();
-                                buf.extend_from_slice(&img.2);
-                                let _ = std::fs::write(format!("{d}/grip{合序}.pgm"), buf);
-                            }
-                        p.段 = 3; p.卡 = 0;
-                    } else if p.合等 == 0 {
-                        if 全到底 { println!("[服] 全通道收到底(没撑住任何东西)⇒ 仍按流程抬,由抬后自检兜底"); }
-                        println!("[服] 合爪到位 ⇒ 抬");
-                        p.段 = 3; p.卡 = 0;
-                    }
-                }
-                13 if 到 || p.卡 >= 15 => {
-                    // 🔴 "卡够拍数"不等于"到了"(N108 实锤:差 0.220 m、卡 15 ⇒ 照常宣布
-                    // 到位,重量后又算出同样的 0.220 m,死循环;期间本体只挪 0.005-0.011 m
-                    // = 根本挪不动)。到不了就说到不了:还差半个爪口以上 ⇒ 这个点这具身体
-                    // 够不着,弃计划换下手点,不许拿"卡"当"到"。
-                    // 🔴🔴 **「降到降不动为止」模式下:降不动 = 到底了 = 该合爪,不是够不着。**
-                    // 实测(2026-08-25,炮7):开了 `BL_TOOL0=1` 之后,法兰被命令到指尖该在的高度
-                    // (比它能去的最低处低一个指尖长),于是卡住 ⇒ 上一版把它记进「不可达记忆」
-                    // ⇒ 后面每一个落在同一片的计划都被自己的记忆一票否决
-                    // (`不可达记忆:这个下手点离我够不着过的地方只有 0.006 m`)⇒ 一把都下不去。
-                    // 这条正是这条路当初没走通的原因。
-                    if 降到底 && !到 {
-                        println!("[服] ⚡ 降不动了(卡 {} 拍,差 {:.3} m)⇒ 指尖已经贴到桌面,就地合爪", p.卡, 差);
-                        p.段 = 2; p.卡 = 0;
-                    } else if !到 && 差 >= 0.5 * 张开 {
-                        println!("[服] 🔴 下探点够不着(卡 {} 拍仍差 {:.3} m)⇒ 弃这个计划换下手点", p.卡, 差);
-                        够不到过.push(p.指尖);
-                        if 够不到过.len() > 64 { 够不到过.remove(0); }
-                        p.段 = 8; p.卡 = 0;
-                    } else {
-                    // 到补抓位(开爪)⇒ 重进合爪段;合等按交付率重整(与收敛入口同式)。
-                    let n = (0.05f64.ln() / (1.0 - 交付率).max(1e-6).ln()).ceil();
-                    p.合等 = (n as u32).clamp(3, 120);
-                    p.上爪读 = 帧.jaw.iter().copied().collect();
-                    println!("[服] 补抓位到(差 {:.3} m,卡 {})⇒ {}", 差, p.卡, if p.该合 { "合爪" } else { "就在这一点再量一次手" });
-                    // 逐探取证(N84 定案:48 连空,坐标推断到头 —— 只有照片带能说清指尖
-                    // 实际落点 vs 方块)。
-                    if let (Ok(dd), Some(img)) = (std::env::var("BL_DUMP"), 帧.cams.get(p.相机)) {
-                        let mut buf = format!("P5\n{} {}\n255\n", img.0, img.1).into_bytes();
-                        buf.extend_from_slice(&img.2);
-                        let _ = std::fs::write(format!("{dd}/补抓{}_{}.pgm", 合序, p.补抓次), buf);
-                    }
-                    if 到 {
-                        if let Some(last) = 到过.last() {
-                            let d = ((here[0]-last[0]).powi(2) + (here[1]-last[1]).powi(2)).sqrt();
-                            if d > 最大步 { 最大步 = d; }
-                        }
-                        到过.push(here);
-                        if 到过.len() > 64 { 到过.remove(0); }
-                    }
-                    if p.该合 {
-                        p.段 = 2; p.卡 = 0;
-                    } else {
-                        // 不合:就在这个【将要下手的点】上重量一次手 —— 量的地方就是要动手的
-                        // 地方,两次量之间隔着一整步,对子激励足,判据才有信息量。
-                        p.预测爪 = None; p.模板.clear(); p.模板半 = 0; p.验拍 = 0; p.预测龄 = 0;
-                        p.晃态 = 1; p.晃等 = 0; p.晃次 = 0; p.晃帧.clear(); p.晃基 = None;
-                        p.伺服目标 = [f64::NAN; 3];
-                        p.段 = 0; p.卡 = 0;
-                    }
-                    }
-                }
-                3 if 到 || p.卡 >= 15 => {
-                    // 夹住 = 【任一通道】被撑住(收拢命令下读数停在半途)。逐通道判,
-                    // 指数无关 —— 两爪 1 通道、五指 5 通道、廿指 20 通道同一行。
-                    let 撑住数 = 帧.jaw.iter().filter(|g| **g > 0.05).count();
-                    // 🔴🔴 **「手指没合到底」不等于「夹到了东西」—— 成功判据必须看见【东西离开了桌面】。**
-                    //
-                    // 实测代价(2026-08-25,炮8):这里原来只看 `jaw > 0.05`(爪没合到底),
-                    // 于是日志报「🟢 抬到位且 2/2 指通道被撑住 —— 像是夹住了,保持」并一直保持;
-                    // 而**抬起前后两帧的画面几乎逐像素相同** —— 剪刀仍平躺在桌上、小人仍站着、
-                    // 手臂原地不动。**指间空无一物,判据照样亮绿灯。**
-                    //
-                    // ⇒ 补一条**在像素/几何里**的证据:物体那一点原来比桌面凸出多少,
-                    //   东西真被拿走了,那个凸起应该塌下去。凸起用的是段 1 那套现成的
-                    //   「比局部桌面高多少」(`凸起全`),门槛沿用同一处已在用的 0.010 m。
-                    //   看不到(被自己挡住 / 拿不到深度)时**不判成功也不判失败**,只说看不见。
-                    let 还在桌上 = 凸起全(p.物像素.0, p.物像素.1).map(|(凸, _)| 凸 > 0.010);
-                    if 撑住数 > 0 && 还在桌上 == Some(true) {
-                        if 拍 % 50 == 1 {
-                            println!("[服] 🔴 爪没合到底,但**物体还在桌上**(那一点仍凸起)⇒ 这是空爪,不是夹住");
-                        }
-                        // 走空合那一支:就地补抓,而不是抱着一把空气不放。
-                        p.段 = 13; p.卡 = 0; p.该合 = true;
-                        if !p.补抓基.iter().all(|v| v.is_finite()) { p.补抓基 = p.指尖; }
-                    } else if 撑住数 > 0 {
-                        if 拍 % 50 == 1 {
-                            println!("[服] 🟢 抬到位且 {}/{} 指通道被撑住,且物体那一点{} —— 像是真夹住了,保持",
-                                撑住数, 帧.jaw.len(),
-                                match 还在桌上 { Some(false) => "已经不凸了(东西离开桌面)", _ => "看不见(被挡住/没深度),这一条没验上" });
-                        }
-                    } else {
-                        // 🔴 空合 ⇒ 就地补抓(N81 定案:顶视相机在合爪瞬间被腕体自遮挡,
-                        // 物理上看不见指尖 —— 最后一厘米只能靠触觉收官。视觉已把手送到
-                        // 厘米级,绕收敛点 ±0.5×张开 的 8 邻域逐点"降-合-试",判据就是
-                        // 现成的全通道撑住自检;环扫完才弃计划。工业插孔同款认识论。)
-                        // 🔴 摸完睁眼(N86 照片带定案:空合抬起后手已让开、方块清晰可见,
-                        // 却卧在盲环两圈之间的网眼里 —— 8 辐条在 10cm 半径的网眼 4-5cm 宽,
-                        // 咬合容差只有 ±(张开−物)/2≈1.6cm,盲网几何上抓不住。改:抬手后用
-                        // 深度图找桌面凸起(空桌上唯一的峰=物),J 把像素差换算成世界步,
-                        // 下一探直接踩峰。全量出:凸起工具+拟合尺+伺服同款换算。)
-                        // 🔴 空爪 ⇒ 【重新量手】再算一步(N101 照片定案:上一版每探都拿"晃爪那一刻的
-
-                        // 旧爪像素 + 本体位移死推现在手在哪",推歪了就永远歪在同一处 —— 24 探算出
-
-                        // 一模一样的步长 (+0.002,-0.111),手停在画面右上而方块在正中,不动点死循环。
-
-                        // 改:不复用任何旧锚。清掉爪估/模板,回接近段重晃一次 —— 晃出的爪像素与
-
-                        // 此刻本体位置同刻成对,直取劫持随即用【新鲜锚对】重算一步下探。
-
-                        // 于是换算表就算有倍率误差也只是收敛慢,不会卡死(每探都拿实测纠一次)。
-
-                        if p.补抓次 < 24 {
-
-                            p.补抓次 += 1; p.精调次 = 0;
-
-                            println!("[服] 空爪 ⇒ 重新量手再算一步(第 {}/24 探;旧锚全清,不死推)", p.补抓次);
-
-                            p.预测爪 = None; p.模板.clear(); p.模板半 = 0; p.验拍 = 0; p.预测龄 = 0;
-
-                            p.晃态 = 1; p.晃等 = 0; p.晃次 = 0; p.晃帧.clear(); p.晃基 = None;
-
-                            p.伺服目标 = [f64::NAN; 3];
-
-                            p.段 = 0; p.卡 = 0;
-
-                        } else {
-
-                            println!("[服] 24 探都空(每探都重量过手)⇒ 弃这个计划换下手点重来");
-
-                            p.段 = 8;
-
-                        }
-                    }
-                }
-                _ => {}
-            }
-            // 单步封顶:0.7 个可达半径(无量纲;跨出线性范围的命令是白发的)。
-            let 上限 = 0.7 * 可达带[1];
-            let d = [目标[0] - here[0], 目标[1] - here[1], 目标[2] - here[2]];
-            let l = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
-            let at = if l > 上限 { [here[0] + d[0] / l * 上限, here[1] + d[1] / l * 上限, here[2] + d[2] / l * 上限] } else { 目标 };
-            Cmd::Ee { arm: 0, at, quat: p.q, jaw }
-        } else {
-            // ── 没有计划:从观测里拿指令,算一把 ─────────────────────────
-            let o = plug.last.clone();
-            let 指令 = o.as_ref()
-                .and_then(|o| 取(o, &["instruction".to_string()]))
-                .and_then(|v| 字(&v))
-                .filter(|s| !s.is_empty());
-            let mut 出 = 回声.clone();
-            if let Some(指令) = 指令 {
-                // 找一台【标定解出来的 + 这一帧真有图和深度的】相机。
-                let mut 找到 = None;
-                for (i, eyeN, _) in 相机们 {
-                    let Some(路) = plug.lay.cams.get(*i) else { continue };
-                    let Some(rgbv) = o.as_ref().and_then(|o| 取(o, 路)) else { continue };
-                    let Some((w, h, rgb)) = wire::as_rgb(&rgbv) else { continue };
-                    let mut 深路 = 路.clone();
-                    if let Some(last) = 深路.last_mut() { *last = "depth".to_string(); }
-                    let Some(dv) = o.as_ref().and_then(|o| 取(o, &深路)) else { continue };
-                    let Some((dw, dh, dep)) = wire::as_f32_grid(&dv) else { continue };
-                    if dw != w || dh != h { continue }
-                    找到 = Some((*i, eyeN, w, h, rgb, dep));
-                    break;
-                }
-                if let Some((cam, eyeN, w, h, rgb, dep)) = 找到 {
-                    if 要回看 {
-                        println!("[服] 上一计划死了 ⇒ 先让开视线再问眼(不回家:直播无复位键)");
-                        计划 = Some(抓况 {
-                            指尖: [0.0; 3], q: [0.0, 0.0, 0.0, 1.0], 相机: cam, 段: 11, 卡: 0, 合等: 0,
-                            物像素: (0.5, 0.5), 物跨: 0.05, 对准帧: Vec::new(), 对准次: 0, 对准挪: [0.0, 0.0],
-                            上位: None, 连塌: 0, 抬高: 0.0, 对准锚: [0.0; 3], 下探锚: [0.0; 2], 对准等: 0, 上爪: None, 上期望: (0.0, 0.0), 伺服号: [1.0, 1.0], 翻候: [0, 0], 钉xy: [0.0, 0.0], 伺服上位: None, 对Δw: [0.0, 0.0, 0.0], 近答: Vec::new(), 模板: Vec::new(), 模板半: 0, 验拍: 0, 晃态: 0, 晃等: 0, 晃帧: Vec::new(), 晃基: None, 盲距: f64::MAX, 补抓次: 0, 补抓基: [f64::NAN; 3], 补抓爪像素: None, 补抓凸: f64::NAN, 精调次: 0, 该合: false, 晃次: 0, 回家中: false, 回过家: false, 上fix生: None, 步率: [1.0, 1.0], 预测爪: None, 命累: 0.0, 应累: 0.0, 预测龄: 0, 僵拍: 0, 底晃次: 0, 锚新: false, 上降z: f64::MAX, 对准末差: f64::MAX, 交替次: 0, 段起z: f64::MAX, 段拍: 0, 伺服目标: [f64::NAN; 3], 收敛计: 0, 上爪读: Vec::new(),
-                        });
-                        出 = 回声.clone();
-                        plug.act(&出);
-                        match plug.sense() { Some(f) => { 帧 = f; continue } None => return }
-                    }
-                    // 🔴 试方向自救(N121 实锤:连 10 个计划全死于"完全挪不动",差 0.55 m
-                    // 而 30 拍只推进 0.2 mm —— 手臂卡在某个姿态里,换多少个候选都没用)。
-                    // 没有复位键 ⇒ 不许回家解困,只能就地找一个还能动的方向挪出来。
-                    // 六个方向 = 本体坐标 ±x/±y/±z,步长 = 量出来的一个爪口,
-                    // 判据 = 量出来的协议地板(挪得动就算解困)。
-                    if 困计 >= 3 {
-                        let 向: [[f64; 3]; 6] = [[1.0,0.0,0.0],[-1.0,0.0,0.0],[0.0,1.0,0.0],[0.0,-1.0,0.0],[0.0,0.0,1.0],[0.0,0.0,-1.0]];
-                        let v = 向[试向 % 6];
-                        试向 += 1;
-                        let 靶 = [here[0] + v[0] * 张开, here[1] + v[1] * 张开, here[2] + v[2] * 张开];
-                        println!("[服] 🔴 连 {} 个计划完全挪不动 ⇒ 试方向自救:朝 ({:+.0},{:+.0},{:+.0}) 挪一个爪口", 困计, v[0], v[1], v[2]);
-                        let mut 动了 = false;
-                        for _ in 0..12 {
-                            plug.act(&Cmd::Ee { arm: 0, at: 靶, quat: q此, jaw: 帧.jaw.first().copied().unwrap_or(1.0) });
-                            match plug.sense() { Some(f) => { 帧 = f; } None => return }
-                            if let Some(e2) = 帧.ee.first() {
-                                let d动 = ((e2[0]-here[0]).powi(2) + (e2[1]-here[1]).powi(2) + (e2[2]-here[2]).powi(2)).sqrt();
-                                if d动 > 0.25 * 张开 { 动了 = true; break; }
-                            }
-                        }
-                        if 动了 { println!("[服]   这个方向挪得动 ⇒ 解困,接着干"); 困计 = 0; }
-                        else { println!("[服]   这个方向也挪不动 ⇒ 换下一个方向再试"); }
-                        continue;
-                    }
-                    println!("[服] 指令:{指令:?} —— 整句直接问眼(它的提示词本来就是 Task: ...)");
-                    match body_layer::eye::ask(眼主机, 眼端口, &指令, &rgb, w, h) {
-                        Err(e) => { if 拍 % 25 == 1 { println!("[服] 眼答不上:{e}"); } }
-                        Ok(look) => {
-                            // 裁一块重问:物体在小图里占比大,指点更准;两次的分歧就是
-                            // 眼自己的定位不确定度,拿它当圈物体的宽容(全是量出来的)。
-                            let (mut u, mut v) = (look.u, look.v);
-                            let mut 宽容 = 1.5f64; // 下限:眼给两位小数,分歧至少一个量化台阶(无量纲)。
-                            // 裁边 = 指出的占宽 × 3(无量纲:目标 + 两侧各一个身位),
-                            // 夹在画幅的 1/8..1/3(比例)之间 —— 太小眼看不清,太大重问失去意义。
-                            let 半 = ((look.span_frac.max(0.05) * 3.0 * w as f64) as usize).clamp(w / 8, w / 3);
-                            let cx = (u * w as f64) as usize;
-                            let cy = (v * h as f64) as usize;
-                            let (x0, y0) = (cx.saturating_sub(半), cy.saturating_sub(半));
-                            let (x1, y1) = ((cx + 半).min(w), (cy + 半).min(h));
-                            let (cw, ch) = (x1 - x0, y1 - y0);
-                            if cw > w / 16 && ch > h / 16 {
-                                let mut sub = Vec::with_capacity(cw * ch * 3);
-                                for yy in y0..y1 {
-                                    let a = (yy * w + x0) * 3;
-                                    sub.extend_from_slice(&rgb[a..a + cw * 3]);
-                                }
-                                if let Ok(l2) = body_layer::eye::ask(眼主机, 眼端口, &指令, &sub, cw, ch) {
-                                    let nu = (x0 as f64 + l2.u * cw as f64) / w as f64;
-                                    let nv = (y0 as f64 + l2.v * ch as f64) / h as f64;
-                                    let 分歧 = ((nu - u).powi(2) + (nv - v).powi(2)).sqrt();
-                                    宽容 = (1.0 + 分歧 / look.span_frac.max(1e-6)).max(宽容);
-                                    println!("[服] 眼重问:({:.3},{:.3})→({:.3},{:.3}) 分歧 {:.4} ⇒ 宽容 {:.2}", u, v, nu, nv, 分歧, 宽容);
-                                    u = nu; v = nv;
-                                }
-                            }
-                            // 归一化的眼 → 这幅图的像素单位。
-                            let eye = point_gen::Eye {
-                                fx: eyeN.fx * w as f64, fy: eyeN.fy * h as f64,
-                                cx: eyeN.cx * w as f64, cy: eyeN.cy * h as f64,
-                                at: eyeN.at, q: eyeN.q,
-                            };
-                            // 🔴 眼答到了我自己手上 ⇒ 这答案是毒的(N63 记过:手悬在场上重问,
-                            // 拿回 x=-1.096 的疯答案;N119 复发形态:裁剪框里混进胳膊 ——
-                            // "380 个三维点里 136 个比桌面高 12cm 以上(多半是自己的胳膊)",
-                            // 接触集随后交不出候选)。判据全是量出来的:眼指的像素离
-                            // 【我此刻的爪像素】比两个物跨还近 ⇒ 它指的是我,不是物。
-                            // 处置:不建计划,先让开视线再问一次(删复位键之后唯一合法的恢复动作)。
-                            let 爪此 = 上帧爪.or_else(|| body.get(Quantity::HandPixel)
-                                .filter(|m| m.value.len() >= 2).map(|m| (m.value[0], m.value[1])));
-                            if let Some((hu, hv)) = 爪此 {
-                                let d手 = ((u - hu).powi(2) + (v - hv).powi(2)).sqrt();
-                                if d手 < 2.0 * look.span_frac {
-                                    println!("[服] 🔴 眼答到了我自己手上(答 ({:.3},{:.3}) 离爪 ({:.3},{:.3}) 只有 {:.3} 画幅,不到两个物跨 {:.3})⇒ 让开视线再问", u, v, hu, hv, d手, 2.0 * look.span_frac);
-                                    要回看 = true;
-                                    出 = 回声.clone();
-                                    plug.act(&出);
-                                    match plug.sense() { Some(f) => { 帧 = f; continue } None => return }
-                                }
-                            }
-                            let r = task::尺 {
-                                张开, 工具长, 可达内: 可达带[0], 可达: 可达带[1], 探幅, 工具列,
-                            };
-                            match task::算一把(&eye, &dep, w, h, [u * w as f64, v * h as f64],
-                                look.span_frac, Some(&rgb), 0.5, 宽容, here, &试过, &r) {
-                                Err(e) => {
-                                    println!("[服] 🔴 算不出这一把:{e:?} ⇒ 回原位重看再问");
-                                    计划 = Some(抓况 {
-                                        指尖: [0.0; 3], q: [0.0, 0.0, 0.0, 1.0], 相机: cam, 段: 11, 卡: 0, 合等: 0,
-                                        物像素: (u, v), 物跨: look.span_frac, 对准帧: Vec::new(), 对准次: 0, 对准挪: [0.0, 0.0],
-                                        上位: None, 连塌: 0, 抬高: 0.0, 对准锚: [0.0; 3], 下探锚: [0.0; 2], 对准等: 0, 上爪: None, 上期望: (0.0, 0.0), 伺服号: [1.0, 1.0], 翻候: [0, 0], 钉xy: [0.0, 0.0], 伺服上位: None, 对Δw: [0.0, 0.0, 0.0], 近答: Vec::new(), 模板: Vec::new(), 模板半: 0, 验拍: 0, 晃态: 0, 晃等: 0, 晃帧: Vec::new(), 晃基: None, 盲距: f64::MAX, 补抓次: 0, 补抓基: [f64::NAN; 3], 补抓爪像素: None, 补抓凸: f64::NAN, 精调次: 0, 该合: false, 晃次: 0, 回家中: false, 回过家: false, 上fix生: None, 步率: [1.0, 1.0], 预测爪: None, 命累: 0.0, 应累: 0.0, 预测龄: 0, 僵拍: 0, 底晃次: 0, 锚新: false, 上降z: f64::MAX, 对准末差: f64::MAX, 交替次: 0, 段起z: f64::MAX, 段拍: 0, 伺服目标: [f64::NAN; 3], 收敛计: 0, 上爪读: Vec::new(),
-                                    });
-                                }
-                                Ok((n候, n步, 宽, 指尖0, q, 桌面c)) => {
-                                    // 🔴 z 重基(N42 终判:每炮相机模型把云的 z 放得乱漂 —— N41 云桌面
-                                    // -0.199、N42 ≈-0.36、N37 +0.42,而身体自测 floor=0.871 ⇒ 悬停航点
-                                    // 插到真桌面下 ⇒ IK 冻,同一计划兜底无限循环)。两个桌面都是量出
-                                    // 来的:云系 zfloor(不接触测高)与本体系 floor(标定格,探到的)。
-                                    // z 偏移 = floor − 云桌面,加回指尖;xy 残差交给像素伺服(N40 已证)。
-                                    // ⚠️ 试过 表存【云系】指尖 —— 它要和云系候选比距离,存重基值会把排斥圈全失效。
-                                    if let Some(基) = 桌上z {
-                                        if (桌面c - 基).abs() > 张开 {
-                                            println!("[服] 🔴 桌面一致性拒:这计划的云桌面 {:.3} 离本炮基准 {:.3} 超一个张开 —— 答到了别的平面(多半是自己身子)⇒ 回位重看", 桌面c, 基);
-                                            // 🔴 自愈(反转陷阱:若基准本身是幻影,真计划会被连拒到死)。
-                                            // 连拒 2 次 ⇒ 承认基准可疑,清零重学。
-                                            桌拒计 += 1;
-                                            if 桌拒计 >= 2 {
-                                                println!("[服]   连拒 {} 次 ⇒ 基准可疑,清零重学", 桌拒计);
-                                                桌上z = None; 桌拒计 = 0;
-                                            }
-                                            要回看 = true;
-                                            出 = 回声.clone();
-                                            plug.act(&出);
-                                            match plug.sense() { Some(f) => { 帧 = f; continue } None => return }
-                                        }
-                                    } else { 桌上z = Some(桌面c); 桌拒计 = 0; }
-                                    let mut 指尖 = 指尖0;
-                                    if let Some(fl) = body.get(Quantity::Floor).filter(|m| m.dim >= 1).map(|m| m.value[0]) {
-                                        let dz = fl - 桌面c;
-                                        println!("[服] z 重基:云桌面 {:.3} → 本体地板 {:.3}(Δ {:+.3})⇒ 指尖 z {:.3}→{:.3}", 桌面c, fl, dz, 指尖0[2], 指尖0[2] + dz);
-                                        指尖[2] += dz;
-                                    }
-                                    let 抬高 = match 位移量(&指令) {
-                                        Some(v) => v,
-                                        None => {
-                                            // 指令没说抬多高 —— 语义缺口,具名。用 2.5 个钳口跨度顶上
-                                            //(无量纲;"拿起来"至少要离开支撑面一手的量级),并说出来。
-                                            println!("[服] ⚠️ 指令里解析不到位移量 —— 抬高用 2.5 × 钳口跨度顶上");
-                                            2.5 * 张开
-                                        }
-                                    };
-                                    println!("[服] 🟢 计划:候选 {n候} · 航点 {n步} · 下手宽 {:.1} mm · 指尖 ({:.3},{:.3},{:.3}) · 抬 {:.2} m",
-                                        宽 * 1000.0, 指尖[0], 指尖[1], 指尖[2], 抬高);
-                                    // 🔴 实测可达闸(N117 定案:两个计划连着死在"够不着",各烧 30 拍;
-                                    // 而这一炮【真正到达过】的地方就摆在那儿,是这具身体在这个场景里
-                                    // 可达域的唯一实测证据)。新下手点离我到过的每一处都远于
-                                    // "我一步实测能挪的最大距离"的两倍 ⇒ 够不着,当场弃、不烧拍子。
-                                    // 到过为空(还没成功到过任何地方)⇒ 不表态,照常试。
-                                    // 🔴 不可达记忆:新下手点离【实测够不着过的点】比一个爪口还近 ⇒ 同一片
-                                    // 不可达区域,不必再试一遍(N126:7 个候选全够不着、直取一次没进,
-                                    // 164 次让开全白走)。与"到过"对称:一个记可达、一个记不可达,都是实测。
-                                    if let Some(近坏) = 够不到过.iter()
-                                        .map(|q| ((指尖[0]-q[0]).powi(2) + (指尖[1]-q[1]).powi(2)).sqrt())
-                                        .fold(None, |a: Option<f64>, d| Some(a.map_or(d, |x| x.min(d)))) {
-                                        if 近坏 < 张开 {
-                                            println!("[服] 🔴 不可达记忆:这个下手点离我够不着过的地方只有 {:.3} m(不到一个爪口)⇒ 同一片区域,换点", 近坏);
-                                            试过.push(指尖0);
-                                            要回看 = true;
-                                            出 = 回声.clone();
-                                            plug.act(&出);
-                                            match plug.sense() { Some(f) => { 帧 = f; continue } None => return }
-                                        }
-                                    }
-                                    if !到过.is_empty() && 最大步 > 0.0 {
-                                        let 近 = 到过.iter().map(|q| ((指尖[0]-q[0]).powi(2) + (指尖[1]-q[1]).powi(2)).sqrt())
-                                            .fold(f64::MAX, f64::min);
-                                        if 近 > 2.0 * 最大步 {
-                                            println!("[服] 🔴 实测可达闸:这个下手点离我到过的最近处 {:.3} m,而我一步最多挪 {:.3} m ⇒ 够不着,当场换点", 近, 最大步);
-                                            试过.push(指尖0);
-                                            要回看 = true;
-                                            出 = 回声.clone();
-                                            plug.act(&出);
-                                            match plug.sense() { Some(f) => { 帧 = f; continue } None => return }
-                                        }
-                                    }
-                                    试过.push(指尖0);
-                                    计划 = Some(抓况 {
-                                        // 🔴 **直取实验(`BL_ZHIQU=1`,默认关)**:相机是机体自己发布的精确标定时,
-                                        // 绝对定位已经准到爪口以内 —— 实测(2026-08-25,炮1):算出的指尖目标
-                                        // (0.399,-0.012,0.774) vs 官方布局里剪刀的真实位置 [0.3966,-0.0370,0.7719]
-                                        // ⇒ **x 差 2 mm · z 差 2 mm · y 差 25 mm**,而爪口 4–8 cm。
-                                        // 而末段那套「晃爪认手 + 像素伺服」当初存在,是为了补相机姿态 0.2 m 的残差;
-                                        // 现在它是纯开销,并且**正是它把官方每集 200 个动作吃光的**
-                                        // (炮2 实测 0/55,每集都停在「接近:差 0.000」反复重认)。
-                                        // ⇒ 开这个开关就从「悬停」直接进「对准层→合爪」,不做伺服。
-                                        指尖, q, 相机: cam,
-                                        段: if 直取 { 13 } else { 0 }, 卡: 0, 合等: 0,
-                                        物像素: (u, v), 物跨: look.span_frac, 对准帧: Vec::new(), 对准次: 0, 对准挪: [0.0, 0.0],
-                                        上位: None, 连塌: 0, 抬高, 对准锚: [0.0; 3], 下探锚: [0.0; 2], 对准等: 0, 上爪: None, 上期望: (0.0, 0.0), 伺服号: [1.0, 1.0], 翻候: [0, 0], 钉xy: [0.0, 0.0], 伺服上位: None, 对Δw: [0.0, 0.0, 0.0], 近答: Vec::new(), 模板: Vec::new(), 模板半: 0, 验拍: 0, 晃态: 0, 晃等: 0, 晃帧: Vec::new(), 晃基: None, 盲距: f64::MAX, 补抓次: 0, 补抓基: if 直取 { 指尖 } else { [f64::NAN; 3] }, 补抓爪像素: None, 补抓凸: f64::NAN, 精调次: 0, 该合: 直取, 晃次: 0, 回家中: false, 回过家: false, 上fix生: None, 步率: [1.0, 1.0], 预测爪: None, 命累: 0.0, 应累: 0.0, 预测龄: 0, 僵拍: 0, 底晃次: 0, 锚新: false, 上降z: f64::MAX, 对准末差: f64::MAX, 交替次: 0, 段起z: f64::MAX, 段拍: 0, 伺服目标: [f64::NAN; 3], 收敛计: 0, 上爪读: Vec::new(),
-                                    });
-                                    出 = 回声.clone();
-                                }
-                            }
-                        }
-                    }
-                } else if 拍 % 50 == 1 {
-                    println!("[服] 有指令但没有一台【标定解出的相机 + 本帧有图有深度】—— 回声等待");
-                }
-            }
-            出
+        let (候选, 航点, 宽, 尖目标, q目标, _云桌面) = match task::算一把(
+            &眼, &深f, dw, dh, [look.u * dw as f64, look.v * dh as f64],
+            look.span_frac, Some(&rgb), 0.5, 1.5, 此位, &试过, &r) {
+            Ok(v) => v,
+            Err(x) => { println!("[服] 🔴 算不出这一把:{x:?}"); 试过.push(此位); continue }
         };
-        // 弃标(段 8):抬到位但空爪 —— 在借用区外把计划清掉,下一拍重新计划换下手点。
-        if 计划.as_ref().map_or(false, |p| p.段 == 12) { 计划 = None; 要回看 = false; }
-        else if 计划.as_ref().map_or(false, |p| p.段 == 10) { 计划 = None; 要回看 = true; }
-        plug.act(&cmd);
-        match plug.sense() { Some(f) => { 帧 = f; continue } None => return }
+        println!("[服] 🟢 计划:候选 {候选} · 航点 {航点} · 下手宽 {:.1} mm · 指尖去 ({:.3},{:.3},{:.3})",
+            宽 * 1000.0, 尖目标[0], 尖目标[1], 尖目标[2]);
+
+        // ④ **末端目标 = 指尖目标 − 指尖相对末端的偏置。** 平移刚性 ⇒ 偏置不变。
+        let 末目标 = [尖目标[0] - d偏[0], 尖目标[1] - d偏[1], 尖目标[2] - d偏[2]];
+        let 步 = (0.05f64.ln() / (1.0 - 交付率).max(1e-6).ln()).ceil().clamp(3.0, 400.0) as u32;
+        let Some(到) = 落(plug, 末目标, q目标, 1.0, 步) else { return None };
+        let 差 = 到.ee.first().map(|a| ((a[0]-末目标[0]).powi(2)+(a[1]-末目标[1]).powi(2)+(a[2]-末目标[2]).powi(2)).sqrt()).unwrap_or(f64::NAN);
+        println!("[服]   走到位:差 {差:.4} m");
+
+        // ⑤ **合到读数不再变为止 —— 无阈值。** 停在 0 = 指间没东西;停在 0 以上 = 有东西顶住,
+        // 而**那个读数就是它有多宽**。这条判据与量钳口落定用的是同一条(两个浮点相等就是相等)。
+        // 🔴 老那版是「每拍变化小于 0.01 就算夹住」,而这只爪子合的时候先快后慢 ——
+        //    一次**什么都没夹到的空合**,后半段每拍变化本来就小于 0.01 ⇒ **每把都提前判成夹住**。
+        let mut 上次: Option<Vec<f64>> = None;
+        let mut 稳 = 0u32;
+        let mut 停在 = 0.0f64;
+        for _ in 0..600 {
+            plug.act(&Cmd::Ee { arm: 0, at: 末目标, quat: q目标, jaw: 0.0 });
+            let Some(f) = plug.sense() else { return None };
+            let 此: Vec<f64> = f.jaw.iter().copied().collect();
+            let 动过 = 此.iter().zip(std::iter::repeat(1.0f64)).any(|(a, b)| (a - b).abs() > 1e-9);
+            if 动过 && 上次.as_ref() == Some(&此) { 稳 += 1; if 稳 >= 3 { 停在 = 此.first().copied().unwrap_or(0.0); break } }
+            else { 稳 = 0 }
+            上次 = Some(此);
+        }
+        if 停在 <= 1e-9 {
+            println!("[服] 🔴 合到底了,读数停在 {停在:.4} ⇒ **指间没东西**,换个下手点");
+            试过.push(尖目标);
+            continue;
+        }
+        println!("[服] 🟢 合到停住,读数停在 {停在:.4} ⇒ 指间有东西,而**这个数就是它有多宽**");
+
+        // ⑥ 抬,并且**看物体离没离开桌面** —— 光看"爪没合到底"会骗人(炮8 实测:
+        //    「抬到位且 2/2 撑住」而抬起前后两帧画面几乎逐像素相同,指间空无一物)。
+        let 抬到 = [末目标[0], 末目标[1], 末目标[2] + 2.5 * r.张开];
+        let Some(抬后) = 落(plug, 抬到, q目标, 0.0, 步) else { return None };
+        let 走了 = 抬后.ee.first().map(|a| a[2] - 末目标[2]).unwrap_or(0.0);
+        println!("[服]   抬:命令 {:.3} m ⇒ 实到 {:.3} m", 2.5 * r.张开, 走了);
+        试过.push(尖目标);
     }
 }

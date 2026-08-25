@@ -102,6 +102,7 @@ pub mod predict;
 pub mod probe;
 pub mod refuse;
 pub mod schedule;
+pub mod selfmodel;
 pub mod touch;
 pub mod json;
 pub mod store;

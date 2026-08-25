@@ -255,6 +255,23 @@ pub fn describe(v: &Value, name: &str, depth: usize) {
         other => println!("{pad}{name}: {other}"),
     }
 }
+
+/// **一条【关节】动作。** 与 [`pose_action`] 互斥 —— 这条线缆按键名判断动作类型,
+/// 关节键与位姿键**同时出现整帧被拒**(`Multiple action types found`)。
+///
+/// 🔴 键名同样**不是拼的**,是认布局时看到的那个(`discover.rs` 认路径,最后一节就是键名)。
+pub fn joint_action(关节键: &[String], 钳口键: &[String], 我: usize, q: &[f64], 关节: &[Vec<f64>], 钳口: &[f64]) -> Value {
+    let arr = |v: &[f64]| Value::Array(v.iter().map(|x| Value::F64(*x)).collect());
+    let n = 关节键.len().min(钳口键.len());
+    let mut m = Vec::with_capacity(n * 2);
+    for i in 0..n {
+        let qi = if i == 我 { q.to_vec() } else { 关节.get(i).cloned().unwrap_or_default() };
+        m.push((Value::String(关节键[i].as_str().into()), arr(&qi)));
+        m.push((Value::String(钳口键[i].as_str().into()), arr(&[jaw_raw(*钳口.get(i).unwrap_or(&1.0))])));
+    }
+    Value::Map(m)
+}
+
 pub fn pose_action(
     位姿键: &[String],
     钳口键: &[String],
