@@ -246,14 +246,18 @@ ground truth, `backlash` against three 300-step sweeps of a 7-joint arm
 ([`realdata/`](realdata/), asserted in `cargo test`). The real data earned its keep immediately: see
 *"what real data found that the unit tests did not"* below.
 
-### And there is now a schedule
+### ~~And there is now a schedule~~ ⛔ **日程已删除(2026-08-25,owner 定)**
 
-[`slow/src/schedule.rs`](slow/src/schedule.rs). Plugging in a new machine is `plan()` → run the
-probes it names → `submit()` each → repeat until `is_ready()`; the order comes from what each
-quantity is *expressed in terms of*, and nothing about it is typed in per robot. The part that could
-not be left to a person is the **cascade**: re-measuring the image Jacobian invalidates the hand
-point, the gripper span, the occlusion map and the tool offset **while all four of their own clocks
-still read fresh**, so the plan schedules them before they go bad rather than after.
+**装上就下命令,没有第二步。** 干到需要某个身体量而手上没有 ⇒ **它自己动一下去问**,
+量完接着干。旧版是开机先按一张表把 15 个量挨个量完才准干活。
+
+🔴 **代价照记:N128–N143 共 14 炮,进入干活模式 0 次。** 用户让它拿东西,它先坐下来量自己
+四十分钟;而评测里每 200 步打断一次 ⇒ **永远量不完,也永远不干活**。
+而「装机量一次、永久有效」本身是个手填的假设:换只手、挂个武器,爪宽和指尖长**当场全变**,
+时间型的过期管不住它 ⇒ 改成**用到就核对,对不上就重量**。
+
+依赖表([`slow/src/schedule.rs`](slow/src/schedule.rs) 的 `prerequisites`)**留着**,
+但它现在的用法是「要 X 而 X 要先有 Y」的**按需解析**,不是开机日程。
 
 ⚠️ **Stale as of 2026-08-15 — see [`DRIVER_GOAL.md`](DRIVER_GOAL.md).** The layer HAS been driven on a real robot: `phi-monster/lekiwi` records the full chain running on a Pi through the C ABI, with grounding / aiming / contact verified on hardware. The sentence below described 2026-08-09 and was never updated; it misled a reader on 2026-08-15 into reporting "never plugged into a real robot". Original text kept below for the audit trail. ⚠️ Still true *at that date*: **nothing outside this directory reads this layer.** A grep on 2026-08-09 for who
 consumes it returned **zero** — eight prose mentions, no imports. The running teacher is Python, so
@@ -719,7 +723,8 @@ Acceptance is not "it scored". It is all of:
 4. 🔴 **both** constant counts are reported, never the flattering one alone —
    `hand_filled_constants() == 0` (structural, counts only what came through this API) **and**
    `bl_debt_outstanding()`, which is **12** and is the number that describes the robot;
-5. the arm returns to origin, because the task's own scorer requires it;
+5. ~~the arm returns to origin~~ ⛔ **删除(owner 2026-08-23 死命令):直播删复位键 ⇒
+   「回原位」这个概念本身就是复位的残余,上一个任务停在哪就是哪,**不存在可回的家**;**
 6. and the numbers are reported as **N attempts, M successes** — absolute counts, never a
    percentage alone.
 
