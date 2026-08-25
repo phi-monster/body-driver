@@ -3021,6 +3021,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
     //
     // 这就是「自标定融进任务」的第一块:**先动起来,缺什么当场看一眼补上**,
     // 而不是站着量四十分钟、量不出来就宣布干不了。
+    // 晃爪那一眼顺手量到的「法兰到指尖」—— 在下面那个块里算,拿出来覆盖工具长。
+    let mut 指尖长量: Option<f64> = None;
     let 张开 = match 张开 {
         Some(v) => v,
         None => {
@@ -3058,7 +3060,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 收(&帧, &mut 五帧);                   // f0 f1 f2,每两帧之间同一个命令步长
             }
             // 每台相机各读一遍,挑双响最强、且真读出块的那台。相机好不好是量出来的。
-            let mut 最好: Option<(usize, f64, u32, u32)> = None; // (相机, 画面里的宽, 双响, 配对)
+            let mut 最好: Option<(usize, f64, u32, u32, [f64; 4])> = None; // (相机, 画面里的宽, 双响, 配对, 包围盒)
             for (ci, fr) in 五帧.iter().enumerate() {
                 let Some(img) = 帧.cams.get(ci) else { continue };
                 if fr.len() != 5 { continue }
@@ -3082,8 +3084,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         } else { w箱.max(h箱) };
                         println!("[服]   第 {ci} 台:双响 {} · 配对 {} · 包围盒 {:.4}×{:.4} 画幅 ⇒ 开合那一维 {:.4}",
                             r.moved_px, r.pairs, w箱, h箱, 宽);
-                        if 最好.map(|(_, _, m, _)| r.moved_px > m).unwrap_or(true) {
-                            最好 = Some((ci, 宽, r.moved_px, r.pairs));
+                        if 最好.map(|(_, _, m, _, _)| r.moved_px > m).unwrap_or(true) {
+                            最好 = Some((ci, 宽, r.moved_px, r.pairs, c.ext));
                         }
                     }
                 }
@@ -3091,11 +3093,70 @@ fn 服务<S: std::io::Read + std::io::Write>(
             落(plug, &mut 帧, 1.0, 120); // 看完把爪子放回全开,别带着半合的姿态去干活
             // 画幅 ⇒ 世界:直接用**解相机时就算好的**「手那个深度上 1 归一化单位 = 多少」。
             // 🔴 不在这里重算一遍深度÷焦距 —— 同一个量出现在两处,两处一定会分岔(仓规)。
-            let 换算 = 最好.and_then(|(ci, 宽, _, _)| {
+            let 换算 = 最好.and_then(|(ci, 宽, _, _, _)| {
                 let 米每单位 = 相机们.iter().find(|(i, _, _)| *i == ci).map(|(_, _, m)| *m)?;
                 if !(米每单位.is_finite() && 米每单位 > 0.0) { return None }
                 Some(宽 * 米每单位)
             });
+            // 🔴🔴 **法兰到指尖有多长,顺手在同一眼里量出来。**
+            //
+            // 会动的那一块**按构造就是钳口**(手臂冻住、只动钳口)。把那一块里**离机体自报的
+            // `ee` 最远**的那个三维点找出来,那就是**指尖**;它到 `ee` 的距离就是工具长。
+            // 全程用已经在工作的通道:机体自报的相机(内外参)+ 深度图 + 本体感受。
+            // 零假设、零新常数、不用戳桌子、不用转手腕。
+            //
+            // 走这条路的理由(2026-08-25 一夜的代价):戳桌子那三种量法全败 ——
+            // ①量到的是手臂滞后量 0.1750 ②姿态被碰撞检查整条拒掉 ⇒ 0.2574
+            // ③在原位那个位形连 1.75 cm 都下不去。而「降到降不动为止」也**撤回**了:
+            // 它停的是**任何部件先撞上任何东西**,指尖碰桌面和手掌撞到旁边物体读数一样。
+            let 指尖长 = 最好.and_then(|(ci, _, _, _, ext)| {
+                let eye = 相机们.iter().find(|(i, _, _)| *i == ci).map(|(_, e, _)| *e)?;
+                let 路 = plug.lay.cams.get(ci)?;
+                let mut 深路 = 路.clone();
+                if let Some(l) = 深路.last_mut() { *l = "depth".to_string(); }
+                let dv = plug.last.as_ref().and_then(|o| 取(o, &深路))?;
+                let (dw, dh, dep) = wire::as_f32_grid(&dv)?;
+                let 手 = 帧.ee.first().map(|e| [e[0], e[1], e[2]])?;
+                let (u0, v0, u1, v1) = (ext[0], ext[1], ext[2], ext[3]);
+                // 🔴 **包围盒是个矩形,里面除了爪子还有两指之间和周围的桌面。**
+                // 实测代价(2026-08-25,炮11):按格均匀采样 ⇒ 「离 ee 最远的点」选中的是
+                // **桌面**(落在 z=0.766,正是桌面高度)⇒ 量出 **0.3945**,离谱。
+                // ⇒ 用一条现成的物理事实把桌面剔掉:**爪子离相机比桌子近**。
+                //   先收齐盒子里所有点的深度,只留**近侧四分之一**(那就是爪子),
+                //   再在其中找离 `ee` 最远的 —— 那才是指尖。分位数是数据自己的,不是填的。
+                let mut 深表: Vec<f64> = Vec::new();
+                let mut 点表: Vec<(f64, [f64; 3])> = Vec::new();
+                for gy in 0..=30u32 {
+                    for gx in 0..=30u32 {
+                        let u = u0 + (u1 - u0) * gx as f64 / 30.0;
+                        let v = v0 + (v1 - v0) * gy as f64 / 30.0;
+                        if !(0.0..1.0).contains(&u) || !(0.0..1.0).contains(&v) { continue }
+                        let (px, py) = (((u * dw as f64) as usize).min(dw - 1), ((v * dh as f64) as usize).min(dh - 1));
+                        let d = dep[py * dw + px] as f64;
+                        if !(d.is_finite() && d > 0.0) { continue }
+                        let Ok(p3) = eye.back_project([u, v], d) else { continue };
+                        if !(p3.x.is_finite() && p3.y.is_finite() && p3.z.is_finite()) { continue }
+                        深表.push(d);
+                        点表.push((d, [p3.x, p3.y, p3.z]));
+                    }
+                }
+                if 深表.len() < 16 { return None }
+                深表.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                let 近闸 = 深表[深表.len() / 4];
+                let 采 = 点表.iter().filter(|(d, _)| *d <= 近闸).count() as u32;
+                let mut 最远: Option<(f64, [f64; 3])> = None;
+                for (d, p3) in &点表 {
+                    if *d > 近闸 { continue }
+                    let r = ((p3[0] - 手[0]).powi(2) + (p3[1] - 手[1]).powi(2) + (p3[2] - 手[2]).powi(2)).sqrt();
+                    if 最远.map(|(b, _)| r > b).unwrap_or(true) { 最远 = Some((r, *p3)); }
+                }
+                let (r, p) = 最远?;
+                println!("[服] 🔧 顺手量法兰到指尖:会动那一块里取到 {采} 个三维点,离 ee 最远的一个在 ({:.3},{:.3},{:.3})",
+                    p[0], p[1], p[2]);
+                if !(r.is_finite() && r > 0.0) { return None }
+                Some(r)
+            });
+            指尖长量 = 指尖长;
             match 换算 {
                 Some(v) if v.is_finite() && v > 0.0 => {
                     println!("[服] 🟢 当场看出爪宽 = {v:.4}(用会动的那一块的宽 × 那一点的深度 ÷ 焦距,全是量出来的)");
@@ -3123,6 +3184,18 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 }
             }
         }
+    };
+
+    // 🔴🔴 **晃爪那一眼量到的「法兰到指尖」优先于任何戳出来的数。**
+    // 它用的是已经在工作的通道(机体自报相机 + 深度图 + 本体感受),
+    // 而戳桌子那三种量法一夜之间全败(滞后量 / 姿态被拒 / 原位下不去),
+    // 「降到降不动为止」也已撤回(停的是任何部件先撞上任何东西)。
+    let 工具长 = match 指尖长量 {
+        Some(v) if v.is_finite() && v > 0.0 => {
+            println!("[服] 🟢 法兰到指尖 = {v:.4}(晃爪那一眼里,会动那一块离 ee 最远的三维点到 ee 的距离)");
+            Some(v)
+        }
+        _ => 工具长,
     };
 
     loop {
