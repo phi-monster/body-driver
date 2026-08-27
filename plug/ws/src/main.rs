@@ -3972,6 +3972,94 @@ fn 服务<S: std::io::Read + std::io::Write>(
         // "变化超过跟踪器自己的噪声",而噪声是量出来的(同一位形连拍两帧的抖动)。
         let 关节数 = 帧.joints.first().map(|v| v.len()).unwrap_or(0);
         if 关节数 == 0 { println!("[服] 🔴 这具身体没报关节 ⇒ 通道表量不了。**具名缺口,不编数。**"); continue }
+        // 🔴🔴 **"我的两个接触面在哪" —— 只在这一处回答。**
+        // 此前有两处各答一遍:建表那一段用认块器的长轴两端,追那一段用张合相减。
+        // 两处只有一处有自检 ⇒ 表照样是拿没验过的点建的。**一个问题只允许有一处答案。**
+        let 认接触面 = |plug: &mut Plug<S>, 是关节: bool| -> Option<[(f64, f64); 2]> {
+            // 🔴🔴🔴 **"我的两个接触面在哪"必须【能自己判错】,否则它出错时会返回一条完全正常的读数。**
+            //
+            // 旧写法:把张合前后变了的像素框起来,沿长轴取两端。**任何一块整体平移的东西都能骗过它** ——
+            // 它没有任何一条判据能说"我认错了",于是错误的两个点一路往下游走,
+            // 在第五段(追不动)才爆出来。**这是"bug 修不完"的机制本身。**(owner 2026-08-27)
+            //
+            // 通用判据只有一句,而且就是抓握通道的**定义**:
+            //   **抓握通道改变的是【我的接触面之间的距离】。**
+            // ⇒ 两个候选点,从张到底到合到底,**间距必须真的变**;只是一起平移、间距不变的,
+            //   就不是钳口的两瓣 —— 具名拒绝,不编造。
+            // 这一条对两指/五指/吸盘/无人机同样成立(认不出来就说认不出来,不是硬给两个点)。
+                抓握(plug, 1.0, 是关节);
+                定爪(plug, 等拍 * 8);
+                let Some((aw, ah, 开帧)) = plug.sense().and_then(|f| 灰(&f, 相机号)) else { return None };
+                let Some((_, _, 开帧2)) = plug.sense().and_then(|f| 灰(&f, 相机号)) else { return None };
+                抓握(plug, 0.0, 是关节);
+                定爪(plug, 等拍 * 8);
+                let Some((_, _, 合帧)) = plug.sense().and_then(|f| 灰(&f, 相机号)) else { return None };
+                // 变了多少才算变:**用这两帧自己的差分中位数当地板**,不是我填的阈值。
+                let 差值: Vec<u8> = 开帧.iter().zip(合帧.iter()).map(|(a, b)| a.abs_diff(*b)).collect();
+                let 地板 = { let mut v = 差值.clone(); v.sort_unstable(); v[v.len() / 2] };
+                // 🔴🔴 **取"变化最强的那一批",而且用【分位数】框,不用最大最小。**
+                // 实测代价(G0):拿"所有超过门槛的像素"的外接框 ⇒ 散落全画面的**噪声像素**
+                // 把框撑成 **565×479 px**(画面才 640×480)⇒ 两个"接触面"被放到画面两个角上,
+                // 跟的全是背景 ⇒ 追了 16 步误差**一个数都没变**(0.6475 到底)。
+                let mut 强: Vec<(u8, usize, usize)> = Vec::new();
+                for y in 0..ah { for x in 0..aw {
+                    let dv = 差值[y * aw + x];
+                    if dv > 地板 { 强.push((dv, x, y)); }
+                }}
+                if 强.len() < 32 { println!("[服]   张合两帧相减只有 {} 个像素变了 ⇒ 看不出接触面,这一拍不下手", 强.len()); return None }
+                强.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+                let 取 = (强.len() / 4).max(32).min(强.len());
+                let mut xs: Vec<usize> = 强[..取].iter().map(|k| k.1).collect();
+                let mut ys: Vec<usize> = 强[..取].iter().map(|k| k.2).collect();
+                xs.sort_unstable(); ys.sort_unstable();
+                let (x1, x2) = (xs[取 / 10] as f64, xs[取 * 9 / 10] as f64);
+                let (y1, y2) = (ys[取 / 10] as f64, ys[取 * 9 / 10] as f64);
+                let (宽px, 高px) = (x2 - x1, y2 - y1);
+                if 宽px.max(高px) > aw as f64 * 0.5 {
+                    println!("[服]   变化区 {宽px:.0}×{高px:.0} px 大得不像接触面(超过半幅画面)⇒ 这一拍不下手");
+                    return None;
+                }
+                // 沿长轴一分为二,**每一半取它自己的中位点** —— 中位点落在那一瓣身上,
+                // 而"长轴两端"落在扫过区域的边界上(任何单帧里那儿多半是背景)。
+                let 沿横 = 宽px >= 高px;
+                let mut 投: Vec<(f64, usize, usize)> = 强[..取].iter()
+                    .map(|k| (if 沿横 { k.1 as f64 } else { k.2 as f64 }, k.1, k.2)).collect();
+                投.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+                let 半数 = 投.len() / 2;
+                let 中点 = |v: &[(f64, usize, usize)]| -> (f64, f64) {
+                    let mut a: Vec<usize> = v.iter().map(|k| k.1).collect();
+                    let mut b: Vec<usize> = v.iter().map(|k| k.2).collect();
+                    a.sort_unstable(); b.sort_unstable();
+                    (a[a.len() / 2] as f64, b[b.len() / 2] as f64)
+                };
+                let (ax, ay) = 中点(&投[..半数]);
+                let (bx, by) = 中点(&投[半数..]);
+                let 甲 = (ax / aw as f64, ay / ah as f64);
+                let 乙 = (bx / aw as f64, by / ah as f64);
+                // ── 构造性自检:合上去之后,这两块之间的距离必须真的变了 ──
+                let 半试 = (((ax - bx).powi(2) + (ay - by).powi(2)).sqrt() * 0.5) as usize;
+                let 半试 = 半试.max(3);
+                let (Some(ta), Some(tb)) = (截块(aw, ah, &开帧, 甲.0, 甲.1, 半试),
+                                            截块(aw, ah, &开帧, 乙.0, 乙.1, 半试)) else {
+                    println!("[服]   两个候选接触面靠边了,切不出模板 ⇒ 这一拍不下手"); return None };
+                let 距 = |p: ((f64,f64),(f64,f64))| -> f64 {
+                    (((p.0.0 - p.1.0) * aw as f64).powi(2) + ((p.0.1 - p.1.1) * ah as f64).powi(2)).sqrt() };
+                let (Some(开对), Some(合对)) = (找两块(aw, ah, &开帧2, &ta, &tb, 半试),
+                                               找两块(aw, ah, &合帧, &ta, &tb, 半试)) else {
+                    println!("[服]   两个候选接触面跟不住 ⇒ 这一拍不下手"); return None };
+                // 噪声:**同一个爪子状态**的两帧之间,这个距离本来就会飘多少。门槛由它给。
+                let 距噪 = (距(开对) - ((ax - bx).powi(2) + (ay - by).powi(2)).sqrt()).abs();
+                let 变距 = (距(合对) - 距(开对)).abs();
+                println!("[服]   张合相减:{取} 个像素变了(地板 {地板})· 变化区 {宽px:.0}×{高px:.0} px");
+                println!("[服]   两个候选接触面 ({:.3},{:.3}) / ({:.3},{:.3}) ⇒ 合上去之后间距变了 {变距:.1} px(同状态两帧自己飘 {距噪:.1} px)",
+                    甲.0, 甲.1, 乙.0, 乙.1);
+                if !(变距 > 距噪) {
+                    println!("[服]   🔴 **抓握通道没有改变这两块之间的距离** ⇒ 它们不是我的两个接触面(只是一起平移的同一块东西)。具名缺口,不编造,这一拍不下手");
+                    return None;
+                }
+                Some([甲, 乙])
+        };
+
         if 雅载.is_none() {
             println!("[服]   还没有通道表 ⇒ 逐通道量({关节数} 个关节通道 + {} 个指通道)", 帧.jaw.len());
             // 跟踪用的模板:此刻那一块(认块器刚认出来的)。
@@ -3983,8 +4071,9 @@ fn 服务<S: std::io::Read + std::io::Write>(
             // 只跟一块 ⇒ 每个通道只给三个数 ⇒ 最小二乘只能把**两面的中点**送到两点的中点,
             // **朝向根本没有被控制**(姿态还是继承来的)。要让姿态"长出来",
             // 每个通道必须给**六个数**(两个面各三个),六个方程才真正约束住朝向。
-            if 面们.len() < 2 { println!("[服]   只认出一个接触面 ⇒ 这一拍不下手"); continue }
-            let 面初 = [面们[0], 面们[1]];
+            // 建表用的两个接触面,走**同一处**的认法(带构造性自检),不再用认块器的长轴两端。
+            let _ = &面们;
+            let Some(面初) = 认接触面(plug, *通道是关节) else { continue };
             // 🔴🔴 **模板多大,由【两个接触面自己隔多远】定 —— 切到刚好不重叠。**
             // 实测代价(NV5,2026-08-27):两个面只隔 38 px,而我给它们各切了 49 px 宽的模板 ⇒
             // 两块模板有一大半是同一片图像,跟踪器根本分不清谁是谁,
@@ -4516,90 +4605,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
         // 张到底拍一帧、合到底拍一帧,**两帧相减** ⇒ 变了的像素就是那些面;
         // 在**张到底那一帧**上、沿变化区域的长轴取两端切模板 —— 切到的是**真的接触面**。
         // 这条对任何机体成立,而且比晃五帧更省。
-        // 🔴🔴🔴 **"我的两个接触面在哪"必须【能自己判错】,否则它出错时会返回一条完全正常的读数。**
-        //
-        // 旧写法:把张合前后变了的像素框起来,沿长轴取两端。**任何一块整体平移的东西都能骗过它** ——
-        // 它没有任何一条判据能说"我认错了",于是错误的两个点一路往下游走,
-        // 在第五段(追不动)才爆出来。**这是"bug 修不完"的机制本身。**(owner 2026-08-27)
-        //
-        // 通用判据只有一句,而且就是抓握通道的**定义**:
-        //   **抓握通道改变的是【我的接触面之间的距离】。**
-        // ⇒ 两个候选点,从张到底到合到底,**间距必须真的变**;只是一起平移、间距不变的,
-        //   就不是钳口的两瓣 —— 具名拒绝,不编造。
-        // 这一条对两指/五指/吸盘/无人机同样成立(认不出来就说认不出来,不是硬给两个点)。
-        let 面点 = {
-            抓握(plug, 1.0, *通道是关节);
-            定爪(plug, 等拍 * 8);
-            let Some((aw, ah, 开帧)) = plug.sense().and_then(|f| 灰(&f, 相机号)) else { continue };
-            let Some((_, _, 开帧2)) = plug.sense().and_then(|f| 灰(&f, 相机号)) else { continue };
-            抓握(plug, 0.0, *通道是关节);
-            定爪(plug, 等拍 * 8);
-            let Some((_, _, 合帧)) = plug.sense().and_then(|f| 灰(&f, 相机号)) else { continue };
-            // 变了多少才算变:**用这两帧自己的差分中位数当地板**,不是我填的阈值。
-            let 差值: Vec<u8> = 开帧.iter().zip(合帧.iter()).map(|(a, b)| a.abs_diff(*b)).collect();
-            let 地板 = { let mut v = 差值.clone(); v.sort_unstable(); v[v.len() / 2] };
-            // 🔴🔴 **取"变化最强的那一批",而且用【分位数】框,不用最大最小。**
-            // 实测代价(G0):拿"所有超过门槛的像素"的外接框 ⇒ 散落全画面的**噪声像素**
-            // 把框撑成 **565×479 px**(画面才 640×480)⇒ 两个"接触面"被放到画面两个角上,
-            // 跟的全是背景 ⇒ 追了 16 步误差**一个数都没变**(0.6475 到底)。
-            let mut 强: Vec<(u8, usize, usize)> = Vec::new();
-            for y in 0..ah { for x in 0..aw {
-                let dv = 差值[y * aw + x];
-                if dv > 地板 { 强.push((dv, x, y)); }
-            }}
-            if 强.len() < 32 { println!("[服]   张合两帧相减只有 {} 个像素变了 ⇒ 看不出接触面,这一拍不下手", 强.len()); continue }
-            强.sort_unstable_by(|a, b| b.0.cmp(&a.0));
-            let 取 = (强.len() / 4).max(32).min(强.len());
-            let mut xs: Vec<usize> = 强[..取].iter().map(|k| k.1).collect();
-            let mut ys: Vec<usize> = 强[..取].iter().map(|k| k.2).collect();
-            xs.sort_unstable(); ys.sort_unstable();
-            let (x1, x2) = (xs[取 / 10] as f64, xs[取 * 9 / 10] as f64);
-            let (y1, y2) = (ys[取 / 10] as f64, ys[取 * 9 / 10] as f64);
-            let (宽px, 高px) = (x2 - x1, y2 - y1);
-            if 宽px.max(高px) > aw as f64 * 0.5 {
-                println!("[服]   变化区 {宽px:.0}×{高px:.0} px 大得不像接触面(超过半幅画面)⇒ 这一拍不下手");
-                continue;
-            }
-            // 沿长轴一分为二,**每一半取它自己的中位点** —— 中位点落在那一瓣身上,
-            // 而"长轴两端"落在扫过区域的边界上(任何单帧里那儿多半是背景)。
-            let 沿横 = 宽px >= 高px;
-            let mut 投: Vec<(f64, usize, usize)> = 强[..取].iter()
-                .map(|k| (if 沿横 { k.1 as f64 } else { k.2 as f64 }, k.1, k.2)).collect();
-            投.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-            let 半数 = 投.len() / 2;
-            let 中点 = |v: &[(f64, usize, usize)]| -> (f64, f64) {
-                let mut a: Vec<usize> = v.iter().map(|k| k.1).collect();
-                let mut b: Vec<usize> = v.iter().map(|k| k.2).collect();
-                a.sort_unstable(); b.sort_unstable();
-                (a[a.len() / 2] as f64, b[b.len() / 2] as f64)
-            };
-            let (ax, ay) = 中点(&投[..半数]);
-            let (bx, by) = 中点(&投[半数..]);
-            let 甲 = (ax / aw as f64, ay / ah as f64);
-            let 乙 = (bx / aw as f64, by / ah as f64);
-            // ── 构造性自检:合上去之后,这两块之间的距离必须真的变了 ──
-            let 半试 = (((ax - bx).powi(2) + (ay - by).powi(2)).sqrt() * 0.5) as usize;
-            let 半试 = 半试.max(3);
-            let (Some(ta), Some(tb)) = (截块(aw, ah, &开帧, 甲.0, 甲.1, 半试),
-                                        截块(aw, ah, &开帧, 乙.0, 乙.1, 半试)) else {
-                println!("[服]   两个候选接触面靠边了,切不出模板 ⇒ 这一拍不下手"); continue };
-            let 距 = |p: ((f64,f64),(f64,f64))| -> f64 {
-                (((p.0.0 - p.1.0) * aw as f64).powi(2) + ((p.0.1 - p.1.1) * ah as f64).powi(2)).sqrt() };
-            let (Some(开对), Some(合对)) = (找两块(aw, ah, &开帧2, &ta, &tb, 半试),
-                                           找两块(aw, ah, &合帧, &ta, &tb, 半试)) else {
-                println!("[服]   两个候选接触面跟不住 ⇒ 这一拍不下手"); continue };
-            // 噪声:**同一个爪子状态**的两帧之间,这个距离本来就会飘多少。门槛由它给。
-            let 距噪 = (距(开对) - ((ax - bx).powi(2) + (ay - by).powi(2)).sqrt()).abs();
-            let 变距 = (距(合对) - 距(开对)).abs();
-            println!("[服]   张合相减:{取} 个像素变了(地板 {地板})· 变化区 {宽px:.0}×{高px:.0} px");
-            println!("[服]   两个候选接触面 ({:.3},{:.3}) / ({:.3},{:.3}) ⇒ 合上去之后间距变了 {变距:.1} px(同状态两帧自己飘 {距噪:.1} px)",
-                甲.0, 甲.1, 乙.0, 乙.1);
-            if !(变距 > 距噪) {
-                println!("[服]   🔴 **抓握通道没有改变这两块之间的距离** ⇒ 它们不是我的两个接触面(只是一起平移的同一块东西)。具名缺口,不编造,这一拍不下手");
-                continue;
-            }
-            [甲, 乙]
-        };
+        let Some(面点) = 认接触面(plug, *通道是关节) else { continue };
         // 🔴🔴 **切模板那一帧的爪子状态,必须和【追的时候】一样。**
         // 上面那段相减把爪子留在了**合到底**,而追的全程爪子是 `jaw0`(张开)——
         // 同一根手指在张和合两种状态下在画面里长得不一样,拿合的模板去跟张开的手指,
