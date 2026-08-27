@@ -4013,7 +4013,15 @@ fn 服务<S: std::io::Read + std::io::Write>(
             // 🔴 每一条退出都要说明理由 —— 静默失败是本仓最贵的一类。
             //    (NV7 实测:六列全打印"翻到 0.0306 都看不见它动",而真相是**第一次读接触面就断了**,
             //     根本没走到"加倍再看"那一步;那行日志把真实死因盖住了。)
-            let 读面 = |plug: &mut Plug<S>| -> Option<([(f64, f64); 2], [f64; 2], (f64, f64), f64)> {
+            // 🔴🔴 **眼指的那一点,不许是【我自己】。**
+            // 这一段此前**一条自检都没有**:眼指错了就返回一个完全正常的坐标,
+            // 而失败要到第五段(追不动 / 合到空气)才爆出来。档案里记过它指到机器人手肘和底座上。
+            // 通用判据:**头部这台相机不动 ⇒ 我一动,画面里跟着我动的就是我。**
+            // 拿眼指那一点切个模板,搭在**本来就要走**的探针上一起跟 —— 不多花一次动作。
+            // 它跑得和我的接触面一样 ⇒ 它长在我身上,具名拒绝并重看。
+            let 模眼 = 截块(fw0, fh0, &g00, look.u, look.v, 半);
+            let mut 眼是我 = false;
+            let 读面 = |plug: &mut Plug<S>| -> Option<([(f64, f64); 2], [f64; 2], (f64, f64), f64, Option<(f64, f64)>)> {
                 let Some((_, _, g)) = plug.sense().and_then(|f| 灰(&f, 相机号)) else {
                     println!("[服]     读接触面:这一帧没有第 {相机号} 台的图"); return None };
                 let Some((甲, 乙)) = 找两块(fw0, fh0, &g, &模2[0], &模2[1], 半) else {
@@ -4037,7 +4045,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     println!("[服]     读接触面:中间那一块匹配不上"); return None };
                 let Some(md) = 近侧深(plug, mu, mv, 块 * 0.5) else {
                     println!("[服]     读接触面:中间那一块在 ({mu:.3},{mv:.3}) 读不到深度"); return None };
-                Some((位, 深, (mu, mv), md))
+                let 眼块 = 模眼.as_ref().and_then(|t| 找块(fw0, fh0, &g, t, 半));
+                Some((位, 深, (mu, mv), md, 眼块))
             };
             // 🔴🔴🔴 **通道 = 这具身体【接受并且真的响应】的命令自由度 —— 是哪一种,试出来。**
             //
@@ -4080,7 +4089,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 let mut 这中 = [0.0f64; 3];
                 let mut 成 = false;
                 for _ in 0..5 {
-                    let Some((面0, 深0, 中0, 中深0)) = 读面(plug) else { break };
+                    let Some((面0, 深0, 中0, 中深0, 眼0)) = 读面(plug) else { break };
                     let Some(f0) = plug.sense() else { return None };
                     let Some(q0) = f0.joints.first().cloned() else { break };
                     if q0.len() <= k { break }
@@ -4104,10 +4113,10 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         break;
                     };
                     let 实去 = q1.get(k).copied().unwrap_or(0.0) - q0.get(k).copied().unwrap_or(0.0);
-                    let Some((面1, 深1, 中1, 中深1)) = 读面(plug) else { 幅 *= 2.0; continue };
+                    let Some((面1, 深1, 中1, 中深1, 眼1)) = 读面(plug) else { 幅 *= 2.0; continue };
                     let Some(q2) = 迈(plug, -幅) else { break };
                     let 实回 = q2.get(k).copied().unwrap_or(0.0) - q1.get(k).copied().unwrap_or(0.0);
-                    let Some((面2, 深2, 中2, 中深2)) = 读面(plug) else { 幅 *= 2.0; continue };
+                    let Some((面2, 深2, 中2, 中深2, _)) = 读面(plug) else { 幅 *= 2.0; continue };
                     let 挪像 = ((中1.0 - 中0.0).powi(2) + (中1.1 - 中0.1).powi(2)).sqrt();
                     // 关节通道的单位是弧度,而一根关节转 θ 最多让手也转 θ(腕关节就是这种情形)
                     // ⇒ 刚体上限取 1×两面间距,这是**安全上界**;深度那一条(米比米)对它不成立,跳过。
@@ -4145,6 +4154,15 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     if !(面分 <= 界) {
                         println!("[服]     通道 关节{k}:两个接触面没一起动(差 {面分:.3} > 刚体上限 {界:.3})⇒ 锁错图案了,减半重探");
                         幅 *= 0.5; continue
+                    }
+                    // 🔴 眼指的那一点跟着我一起跑 ⇒ 它长在我身上,不是世界里的东西。
+                    if let (Some(e0), Some(e1)) = (眼0, 眼1) {
+                        let 眼跑 = [(e1.0 - e0.0) / 实去, (e1.1 - e0.1) / 实去];
+                        let 差我 = ((眼跑[0] - 甲[0]).powi(2) + (眼跑[1] - 甲[1]).powi(2)).sqrt();
+                        if 差我 <= 界 {
+                            println!("[服]   🔴 **眼指的那一点跟着我一起动**(它跑的和我的接触面差 {差我:.3} ≤ 刚体上限 {界:.3})⇒ 眼指到了我自己身上,不是世界里的东西");
+                            眼是我 = true;
+                        }
                     }
                     // 🔴 物理闸二:**长在我身上的东西不可能跑得比我自己还远。**
                     // 深度和位移同是米,直接比。容差用**来回之后没回到原深**那点残差 —— 深度读数
@@ -4193,7 +4211,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     let mut 这中 = [0.0f64; 3];
                     let mut 成 = false;
                     for _ in 0..5 {
-                        let Some((面0, 深0, 中0, 中深0)) = 读面(plug) else { break };
+                        let Some((面0, 深0, 中0, 中深0, 眼0)) = 读面(plug) else { break };
                         let Some(f0) = plug.sense() else { return None };
                         let Some(e0) = f0.ee.first().copied() else { break };
                         // 前三个是平移,后三个是绕手腕自己的三根轴转 —— 都是"这具身体接受的自由度",
@@ -4234,13 +4252,13 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         let Some((f1, _, _)) = 落(plug, 至位, 至姿, jaw0, 等拍) else { return None };
                         let Some(e1) = f1.ee.first().copied() else { break };
                         let 实去 = 实动(e0, e1);
-                        let Some((面1, 深1, 中1, 中深1)) = 读面(plug) else { 幅 *= 2.0; continue };
+                        let Some((面1, 深1, 中1, 中深1, 眼1)) = 读面(plug) else { 幅 *= 2.0; continue };
                         // 走回来 —— **按同样的量反着走一格**,不是回到某个记住的位姿。
                         let (回位, 回姿) = 走(e1, -幅);
                         let Some((f2, _, _)) = 落(plug, 回位, 回姿, jaw0, 等拍) else { return None };
                         let Some(e2) = f2.ee.first().copied() else { break };
                         let 实回 = 实动(e1, e2);
-                        let Some((面2, 深2, 中2, 中深2)) = 读面(plug) else { 幅 *= 2.0; continue };
+                        let Some((面2, 深2, 中2, 中深2, _)) = 读面(plug) else { 幅 *= 2.0; continue };
                         let 挪像 = ((中1.0 - 中0.0).powi(2) + (中1.1 - 中0.1).powi(2)).sqrt();
                         let 是转 = k >= 3;   // 末端后三个自由度是绕手腕自己的轴转,单位是弧度
                         if 挪像 <= 噪 * 2.0 || 实去.abs() < 1e-6 || 实回.abs() < 1e-6 { 幅 *= 2.0; continue }
@@ -4276,6 +4294,15 @@ fn 服务<S: std::io::Read + std::io::Write>(
                             println!("[服]     通道 末端{k}:两个接触面没一起动(差 {面分:.3} > 刚体上限 {界:.3})⇒ 锁错图案了,减半重探");
                             幅 *= 0.5; continue
                         }
+                        // 🔴 眼指的那一点跟着我一起跑 ⇒ 它长在我身上,不是世界里的东西。
+                        if let (Some(e0), Some(e1)) = (眼0, 眼1) {
+                            let 眼跑 = [(e1.0 - e0.0) / 实去, (e1.1 - e0.1) / 实去];
+                            let 差我 = ((眼跑[0] - 甲[0]).powi(2) + (眼跑[1] - 甲[1]).powi(2)).sqrt();
+                            if 差我 <= 界 {
+                                println!("[服]   🔴 **眼指的那一点跟着我一起动**(它跑的和我的接触面差 {差我:.3} ≤ 刚体上限 {界:.3})⇒ 眼指到了我自己身上,不是世界里的东西");
+                                眼是我 = true;
+                            }
+                        }
                         // 🔴 物理闸二:**长在我身上的东西不可能跑得比我自己还远。**
                         // 深度和位移同是米,直接比。容差用**来回之后没回到原深**那点残差 —— 深度读数
                         // 自己的抖动,量出来的。实测(NV5):末端实到 0.0296 m,而"面A 深度跑了 0.1565 m"(5.3×)。
@@ -4302,8 +4329,12 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     列.push(这列);
                 }
                 // 来回净零 ⇒ 身体还在原处;中间那一块此刻在哪,**现读一遍**,不从任何一列的终点推。
-                if let Some((_, _, 中末, 中末深)) = 读面(plug) { cu = 中末.0; cv = 中末.1; cd = 中末深; }
+                if let Some((_, _, 中末, 中末深, _)) = 读面(plug) { cu = 中末.0; cv = 中末.1; cd = 中末深; }
                 println!("[服]   通道表(末端那六个自由度):6 列里量到 {好列} 列");
+            }
+            if 眼是我 {
+                println!("[服]   ⇒ 这一拍不下手,重新看一眼(**具名拒绝,不拿一个指着自己的点往下走**)");
+                上眼 = None; continue
             }
             if 好列 < 3 { println!("[服]   能看见的通道不足三个 ⇒ 解不出三维,换个位形重量。**不硬解。**"); continue }
             // 表的真正形状:**6 行(两个面 × 三个数)× 通道数列**。通道数由这具身体报,不设上限。
@@ -4485,28 +4516,37 @@ fn 服务<S: std::io::Read + std::io::Write>(
         // 张到底拍一帧、合到底拍一帧,**两帧相减** ⇒ 变了的像素就是那些面;
         // 在**张到底那一帧**上、沿变化区域的长轴取两端切模板 —— 切到的是**真的接触面**。
         // 这条对任何机体成立,而且比晃五帧更省。
+        // 🔴🔴🔴 **"我的两个接触面在哪"必须【能自己判错】,否则它出错时会返回一条完全正常的读数。**
+        //
+        // 旧写法:把张合前后变了的像素框起来,沿长轴取两端。**任何一块整体平移的东西都能骗过它** ——
+        // 它没有任何一条判据能说"我认错了",于是错误的两个点一路往下游走,
+        // 在第五段(追不动)才爆出来。**这是"bug 修不完"的机制本身。**(owner 2026-08-27)
+        //
+        // 通用判据只有一句,而且就是抓握通道的**定义**:
+        //   **抓握通道改变的是【我的接触面之间的距离】。**
+        // ⇒ 两个候选点,从张到底到合到底,**间距必须真的变**;只是一起平移、间距不变的,
+        //   就不是钳口的两瓣 —— 具名拒绝,不编造。
+        // 这一条对两指/五指/吸盘/无人机同样成立(认不出来就说认不出来,不是硬给两个点)。
         let 面点 = {
             抓握(plug, 1.0, *通道是关节);
             定爪(plug, 等拍 * 8);
             let Some((aw, ah, 开帧)) = plug.sense().and_then(|f| 灰(&f, 相机号)) else { continue };
+            let Some((_, _, 开帧2)) = plug.sense().and_then(|f| 灰(&f, 相机号)) else { continue };
             抓握(plug, 0.0, *通道是关节);
             定爪(plug, 等拍 * 8);
             let Some((_, _, 合帧)) = plug.sense().and_then(|f| 灰(&f, 相机号)) else { continue };
-            // 变了多少才算变:用**这两帧自己**的差分中位数当地板,不是我填的阈值。
-            let mut 差值: Vec<u8> = 开帧.iter().zip(合帧.iter()).map(|(a, b)| a.abs_diff(*b)).collect();
+            // 变了多少才算变:**用这两帧自己的差分中位数当地板**,不是我填的阈值。
+            let 差值: Vec<u8> = 开帧.iter().zip(合帧.iter()).map(|(a, b)| a.abs_diff(*b)).collect();
+            let 地板 = { let mut v = 差值.clone(); v.sort_unstable(); v[v.len() / 2] };
             // 🔴🔴 **取"变化最强的那一批",而且用【分位数】框,不用最大最小。**
-            //
-            // 实测代价(G0):我拿"所有超过门槛的像素"的外接框 ⇒ 散落全画面的**噪声像素**
+            // 实测代价(G0):拿"所有超过门槛的像素"的外接框 ⇒ 散落全画面的**噪声像素**
             // 把框撑成 **565×479 px**(画面才 640×480)⇒ 两个"接触面"被放到画面两个角上,
-            // 跟的全是背景 ⇒ 追了 16 步误差**一个数都没变**(0.6475 到底),手臂怎么动它都不动。
-            // 手指是画面里**变化最强**的东西(它整个挪走了),噪声只是弱变化;
-            // 而分位数框天然免疫散落的离群点。两条都不含任何身体/场景假设。
+            // 跟的全是背景 ⇒ 追了 16 步误差**一个数都没变**(0.6475 到底)。
             let mut 强: Vec<(u8, usize, usize)> = Vec::new();
             for y in 0..ah { for x in 0..aw {
                 let dv = 差值[y * aw + x];
-                if dv > 3 { 强.push((dv, x, y)); }
+                if dv > 地板 { 强.push((dv, x, y)); }
             }}
-            差值.clear();
             if 强.len() < 32 { println!("[服]   张合两帧相减只有 {} 个像素变了 ⇒ 看不出接触面,这一拍不下手", 强.len()); continue }
             强.sort_unstable_by(|a, b| b.0.cmp(&a.0));
             let 取 = (强.len() / 4).max(32).min(强.len());
@@ -4515,18 +4555,50 @@ fn 服务<S: std::io::Read + std::io::Write>(
             xs.sort_unstable(); ys.sort_unstable();
             let (x1, x2) = (xs[取 / 10] as f64, xs[取 * 9 / 10] as f64);
             let (y1, y2) = (ys[取 / 10] as f64, ys[取 * 9 / 10] as f64);
-            let 数 = 取;
             let (宽px, 高px) = (x2 - x1, y2 - y1);
-            let (cx, cy) = ((x1 + x2) * 0.5, (y1 + y2) * 0.5);
             if 宽px.max(高px) > aw as f64 * 0.5 {
                 println!("[服]   变化区 {宽px:.0}×{高px:.0} px 大得不像接触面(超过半幅画面)⇒ 这一拍不下手");
                 continue;
             }
-            let (dx, dy, 长) = if 宽px >= 高px { (1.0, 0.0, 宽px) } else { (0.0, 1.0, 高px) };
-            let 半 = 长 * 0.35;
-            println!("[服]   张合相减:{数} 个像素变了 · 变化区 {宽px:.0}×{高px:.0} px ⇒ 沿长轴取两端当接触面");
-            [((cx - dx * 半) / aw as f64, (cy - dy * 半) / ah as f64),
-             ((cx + dx * 半) / aw as f64, (cy + dy * 半) / ah as f64)]
+            // 沿长轴一分为二,**每一半取它自己的中位点** —— 中位点落在那一瓣身上,
+            // 而"长轴两端"落在扫过区域的边界上(任何单帧里那儿多半是背景)。
+            let 沿横 = 宽px >= 高px;
+            let mut 投: Vec<(f64, usize, usize)> = 强[..取].iter()
+                .map(|k| (if 沿横 { k.1 as f64 } else { k.2 as f64 }, k.1, k.2)).collect();
+            投.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+            let 半数 = 投.len() / 2;
+            let 中点 = |v: &[(f64, usize, usize)]| -> (f64, f64) {
+                let mut a: Vec<usize> = v.iter().map(|k| k.1).collect();
+                let mut b: Vec<usize> = v.iter().map(|k| k.2).collect();
+                a.sort_unstable(); b.sort_unstable();
+                (a[a.len() / 2] as f64, b[b.len() / 2] as f64)
+            };
+            let (ax, ay) = 中点(&投[..半数]);
+            let (bx, by) = 中点(&投[半数..]);
+            let 甲 = (ax / aw as f64, ay / ah as f64);
+            let 乙 = (bx / aw as f64, by / ah as f64);
+            // ── 构造性自检:合上去之后,这两块之间的距离必须真的变了 ──
+            let 半试 = (((ax - bx).powi(2) + (ay - by).powi(2)).sqrt() * 0.5) as usize;
+            let 半试 = 半试.max(3);
+            let (Some(ta), Some(tb)) = (截块(aw, ah, &开帧, 甲.0, 甲.1, 半试),
+                                        截块(aw, ah, &开帧, 乙.0, 乙.1, 半试)) else {
+                println!("[服]   两个候选接触面靠边了,切不出模板 ⇒ 这一拍不下手"); continue };
+            let 距 = |p: ((f64,f64),(f64,f64))| -> f64 {
+                (((p.0.0 - p.1.0) * aw as f64).powi(2) + ((p.0.1 - p.1.1) * ah as f64).powi(2)).sqrt() };
+            let (Some(开对), Some(合对)) = (找两块(aw, ah, &开帧2, &ta, &tb, 半试),
+                                           找两块(aw, ah, &合帧, &ta, &tb, 半试)) else {
+                println!("[服]   两个候选接触面跟不住 ⇒ 这一拍不下手"); continue };
+            // 噪声:**同一个爪子状态**的两帧之间,这个距离本来就会飘多少。门槛由它给。
+            let 距噪 = (距(开对) - ((ax - bx).powi(2) + (ay - by).powi(2)).sqrt()).abs();
+            let 变距 = (距(合对) - 距(开对)).abs();
+            println!("[服]   张合相减:{取} 个像素变了(地板 {地板})· 变化区 {宽px:.0}×{高px:.0} px");
+            println!("[服]   两个候选接触面 ({:.3},{:.3}) / ({:.3},{:.3}) ⇒ 合上去之后间距变了 {变距:.1} px(同状态两帧自己飘 {距噪:.1} px)",
+                甲.0, 甲.1, 乙.0, 乙.1);
+            if !(变距 > 距噪) {
+                println!("[服]   🔴 **抓握通道没有改变这两块之间的距离** ⇒ 它们不是我的两个接触面(只是一起平移的同一块东西)。具名缺口,不编造,这一拍不下手");
+                continue;
+            }
+            [甲, 乙]
         };
         // 🔴🔴 **切模板那一帧的爪子状态,必须和【追的时候】一样。**
         // 上面那段相减把爪子留在了**合到底**,而追的全程爪子是 `jaw0`(张开)——
