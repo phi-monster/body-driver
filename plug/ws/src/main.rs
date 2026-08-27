@@ -3086,6 +3086,35 @@ fn 找块(w: usize, h: usize, g: &[u8], tpl: &[u8], half: usize) -> Option<(f64,
     Some((best.1 as f64 / w as f64, best.2 as f64 / h as f64))
 }
 
+/// 快眼:在**给定的一小片**里搜模板(SSD 最小)。窗口中心必须是**推出来的位置**,
+/// 不是"上次在哪"—— 后者正是当初那个会静默锁错的小窗(见 `找块` 的注释)。
+fn 找块窗(w: usize, h: usize, g: &[u8], tpl: &[u8], half: usize, cu: f64, cv: f64, r: usize)
+    -> Option<(f64, f64)> {
+    let hf = half as i64;
+    let n = (2 * hf + 1) as usize;
+    if tpl.len() != n * n || w < n || h < n { return None }
+    let (cx, cy) = ((cu * w as f64) as i64, (cv * h as f64) as i64);
+    let mut best: (u64, i64, i64) = (u64::MAX, -1, -1);
+    for ny in (cy - r as i64).max(hf)..=(cy + r as i64).min(h as i64 - hf - 1) {
+        for nx in (cx - r as i64).max(hf)..=(cx + r as i64).min(w as i64 - hf - 1) {
+            let mut ssd: u64 = 0;
+            let mut i = 0usize;
+            let mut 弃 = false;
+            for y in (ny - hf)..=(ny + hf) {
+                let row = (y as usize) * w;
+                for x in (nx - hf)..=(nx + hf) {
+                    let d = g[row + x as usize] as i64 - tpl[i] as i64;
+                    ssd += (d * d) as u64;
+                    i += 1;
+                }
+                if ssd >= best.0 { 弃 = true; break }
+            }
+            if !弃 && ssd < best.0 { best = (ssd, nx, ny); }
+        }
+    }
+    if best.1 < 0 { None } else { Some((best.1 as f64 / w as f64, best.2 as f64 / h as f64)) }
+}
+
 /// 快眼:**一次找两块,而且不许落在同一处。**
 ///
 /// 🔴🔴 两根接触面在画面里长得几乎一样(同一只手的两根手指)⇒ 全画面搜的时候
@@ -4215,30 +4244,50 @@ fn 服务<S: std::io::Read + std::io::Write>(
             // 它跑得和我的接触面一样 ⇒ 它长在我身上,具名拒绝并重看。
             let 模眼 = 截块(fw0, fh0, &g00, look.u, look.v, 半);
             let mut 眼是我 = false;
-            let 读面 = |plug: &mut Plug<S>| -> Option<([(f64, f64); 2], [f64; 2], (f64, f64), f64, Option<(f64, f64)>)> {
+            // 🔴🔴🔴 **整只手全画面找;两根手指只在"上次位置 + 手这一步挪了多少"附近找。**
+            //
+            // 渲图看出来的(NVL,2026-08-27):在头部这台相机里,两根接触面只隔十来个像素、
+            // 而且长得一模一样 ⇒ 拿十来像素的模板做**全画面**搜,必然锁到别处
+            //(刚体闸报"差 4.787 > 上限 0.674",一列都建不成)。
+            // 这不是 bug,是**视角的物理事实**:那只爪子又远又侧对着看。
+            // 而我手上有一个**能看清**的东西 —— **整只手那一块**(认块器给的,四十来像素、独一无二)。
+            // 手指长在手上 ⇒ 手挪了多少,手指就挪了多少(差一个 ω×r,很小)。
+            // ⇒ 手:全画面找(它不会和别的东西混)。手指:窗口**中心是推出来的**、
+            //   大小就是模板自己的宽。**这不是回到当初那个拍脑袋的小窗** —— 那个窗的中心是
+            //   "上次在哪",目标一旦跑得比窗远就静默锁错;这个窗的中心已经补掉了整只手的位移。
+            let 半手 = ((块 * fw0 as f64 * 0.5) as usize).max(半);
+            let 模手 = 截块(fw0, fh0, &g00, u, v, 半手);
+            // "上一次它们在哪" —— 预测窗的锚。来回探完净位移为零,所以这两个值一直有效。
+            let mut 上手 = (u, v);
+            let mut 上面 = 面初;
+            let 读面 = |plug: &mut Plug<S>, 上手: (f64, f64), 上面: [(f64, f64); 2]|
+                -> Option<([(f64, f64); 2], [f64; 2], (f64, f64), f64, Option<(f64, f64)>)> {
                 let Some((_, _, g)) = plug.sense().and_then(|f| 灰(&f, 相机号)) else {
                     println!("[服]     读接触面:这一帧没有第 {相机号} 台的图"); return None };
-                let Some((甲, 乙)) = 找两块(fw0, fh0, &g, &模2[0], &模2[1], 半) else {
-                    println!("[服]     读接触面:两块模板在整幅画面里都匹配不上(模板半径 {半})"); return None };
-                let 位 = [甲, 乙];
+                let Some(t手) = 模手.as_ref() else {
+                    println!("[服]     读接触面:切不出【整只手】那一块的模板"); return None };
+                let Some((mu, mv)) = 找块(fw0, fh0, &g, t手, 半手) else {
+                    println!("[服]     读接触面:整只手那一块在整幅画面里都匹配不上"); return None };
+                let (du, dv) = (mu - 上手.0, mv - 上手.1);
+                let mut 位 = [(0.0f64, 0.0f64); 2];
                 let mut 深 = [0.0f64; 2];
                 for i in 0..2 {
-                    let Some(z) = 近侧深(plug, 位[i].0, 位[i].1, 块 * 0.5) else {
-                        println!("[服]     读接触面:第 {i} 块在 ({:.3},{:.3}) 读不到深度", 位[i].0, 位[i].1); return None };
+                    let (pu, pv) = (上面[i].0 + du, 上面[i].1 + dv);
+                    let Some(p) = 找块窗(fw0, fh0, &g, &模2[i], 半, pu, pv, 半 * 2) else {
+                        println!("[服]     读接触面:第 {i} 块在预测位置附近匹配不上"); return None };
+                    位[i] = p;
+                    let Some(z) = 近侧深(plug, p.0, p.1, 块 * 0.5) else {
+                        println!("[服]     读接触面:第 {i} 块在 ({:.3},{:.3}) 读不到深度", p.0, p.1); return None };
                     深[i] = z;
                 }
-                // 🔴 全画面搜之后多了一种跟丢:**两根接触面长得几乎一样**,A 有可能锁到 B 身上
-                //(原来那个小搜索窗恰好挡住了这件事,现在窗没了就得明写)。判据是**比例**、不是填的数:
-                // 两个面落得比模板自己还近 ⇒ 它俩指的是同一块图案。
-                let 隔 = ((位[0].0 - 位[1].0) * fw0 as f64).powi(2) + ((位[0].1 - 位[1].1) * fh0 as f64).powi(2);
-                if 隔.sqrt() < 半 as f64 {
-                    println!("[服]     读接触面:两块只隔 {:.0} px,比模板半径 {半} 还近 ⇒ 锁到同一块图案上了", 隔.sqrt());
+                // 两块落得比模板自己还近 ⇒ 锁到同一块图案上了(**比例**判据,不是填的数)。
+                let 隔 = (((位[0].0 - 位[1].0) * fw0 as f64).powi(2) + ((位[0].1 - 位[1].1) * fh0 as f64).powi(2)).sqrt();
+                if 隔 < 半 as f64 {
+                    println!("[服]     读接触面:两块只隔 {隔:.0} px,比模板半径 {半} 还近 ⇒ 锁到同一块图案上了");
                     return None
                 }
-                let Some((mu, mv)) = 找块(fw0, fh0, &g, &模, 半) else {
-                    println!("[服]     读接触面:中间那一块匹配不上"); return None };
                 let Some(md) = 近侧深(plug, mu, mv, 块 * 0.5) else {
-                    println!("[服]     读接触面:中间那一块在 ({mu:.3},{mv:.3}) 读不到深度"); return None };
+                    println!("[服]     读接触面:整只手那一块在 ({mu:.3},{mv:.3}) 读不到深度"); return None };
                 let 眼块 = 模眼.as_ref().and_then(|t| 找块(fw0, fh0, &g, t, 半));
                 Some((位, 深, (mu, mv), md, 眼块))
             };
@@ -4283,7 +4332,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 let mut 这中 = [0.0f64; 3];
                 let mut 成 = false;
                 for _ in 0..5 {
-                    let Some((面0, 深0, 中0, 中深0, 眼0)) = 读面(plug) else { break };
+                    let Some((面0, 深0, 中0, 中深0, 眼0)) = 读面(plug, 上手, 上面) else { break };
                     let Some(f0) = plug.sense() else { return None };
                     let Some(q0) = f0.joints.first().cloned() else { break };
                     if q0.len() <= k { break }
@@ -4307,10 +4356,10 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         break;
                     };
                     let 实去 = q1.get(k).copied().unwrap_or(0.0) - q0.get(k).copied().unwrap_or(0.0);
-                    let Some((面1, 深1, 中1, 中深1, 眼1)) = 读面(plug) else { 幅 *= 2.0; continue };
+                    let Some((面1, 深1, 中1, 中深1, 眼1)) = 读面(plug, 中0, 面0) else { 幅 *= 2.0; continue };
                     let Some(q2) = 迈(plug, -幅) else { break };
                     let 实回 = q2.get(k).copied().unwrap_or(0.0) - q1.get(k).copied().unwrap_or(0.0);
-                    let Some((面2, 深2, 中2, 中深2, _)) = 读面(plug) else { 幅 *= 2.0; continue };
+                    let Some((面2, 深2, 中2, 中深2, _)) = 读面(plug, 中1, 面1) else { 幅 *= 2.0; continue };
                     let 挪像 = ((中1.0 - 中0.0).powi(2) + (中1.1 - 中0.1).powi(2)).sqrt();
                     // 关节通道的单位是弧度,而一根关节转 θ 最多让手也转 θ(腕关节就是这种情形)
                     // ⇒ 刚体上限取 1×两面间距,这是**安全上界**;深度那一条(米比米)对它不成立,跳过。
@@ -4369,6 +4418,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         println!("[服]     通道 关节{k}:接触面深度跑得比我自己还远 ⇒ 锁错图案了,减半重探");
                         幅 *= 0.5; continue
                     }
+                    上手 = 中2; 上面 = 面2;   // 锚推进到这一列走完之后的位置
                     for i in 0..6 { 这列[i] = (去[i] + 回[i]) * 0.5 }
                     这中 = [((中1.0-中0.0)/实去 + (中2.0-中1.0)/实回) * 0.5,
                             ((中1.1-中0.1)/实去 + (中2.1-中1.1)/实回) * 0.5,
@@ -4405,7 +4455,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     let mut 这中 = [0.0f64; 3];
                     let mut 成 = false;
                     for _ in 0..5 {
-                        let Some((面0, 深0, 中0, 中深0, 眼0)) = 读面(plug) else { break };
+                        let Some((面0, 深0, 中0, 中深0, 眼0)) = 读面(plug, 上手, 上面) else { break };
                         let Some(f0) = plug.sense() else { return None };
                         let Some(e0) = f0.ee.first().copied() else { break };
                         // 前三个是平移,后三个是绕手腕自己的三根轴转 —— 都是"这具身体接受的自由度",
@@ -4446,13 +4496,13 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         let Some((f1, _, _)) = 落(plug, 至位, 至姿, jaw0, 等拍) else { return None };
                         let Some(e1) = f1.ee.first().copied() else { break };
                         let 实去 = 实动(e0, e1);
-                        let Some((面1, 深1, 中1, 中深1, 眼1)) = 读面(plug) else { 幅 *= 2.0; continue };
+                        let Some((面1, 深1, 中1, 中深1, 眼1)) = 读面(plug, 中0, 面0) else { 幅 *= 2.0; continue };
                         // 走回来 —— **按同样的量反着走一格**,不是回到某个记住的位姿。
                         let (回位, 回姿) = 走(e1, -幅);
                         let Some((f2, _, _)) = 落(plug, 回位, 回姿, jaw0, 等拍) else { return None };
                         let Some(e2) = f2.ee.first().copied() else { break };
                         let 实回 = 实动(e1, e2);
-                        let Some((面2, 深2, 中2, 中深2, _)) = 读面(plug) else { 幅 *= 2.0; continue };
+                        let Some((面2, 深2, 中2, 中深2, _)) = 读面(plug, 中1, 面1) else { 幅 *= 2.0; continue };
                         let 挪像 = ((中1.0 - 中0.0).powi(2) + (中1.1 - 中0.1).powi(2)).sqrt();
                         let 是转 = k >= 3;   // 末端后三个自由度是绕手腕自己的轴转,单位是弧度
                         if 挪像 <= 噪 * 2.0 || 实去.abs() < 1e-6 || 实回.abs() < 1e-6 { 幅 *= 2.0; continue }
@@ -4508,6 +4558,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                             println!("[服]     通道 末端{k}:接触面深度跑得比我自己还远 ⇒ 锁错图案了,减半重探");
                             幅 *= 0.5; continue
                         }
+                        上手 = 中2; 上面 = 面2;   // 锚推进到这一列走完之后的位置
                         for i in 0..6 { 这列[i] = (去[i] + 回[i]) * 0.5 }
                         这中 = [((中1.0-中0.0)/实去 + (中2.0-中1.0)/实回) * 0.5,
                                 ((中1.1-中0.1)/实去 + (中2.1-中1.1)/实回) * 0.5,
@@ -4523,7 +4574,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     列.push(这列);
                 }
                 // 来回净零 ⇒ 身体还在原处;中间那一块此刻在哪,**现读一遍**,不从任何一列的终点推。
-                if let Some((_, _, 中末, 中末深, _)) = 读面(plug) { cu = 中末.0; cv = 中末.1; cd = 中末深; }
+                if let Some((_, _, 中末, 中末深, _)) = 读面(plug, 上手, 上面) { cu = 中末.0; cv = 中末.1; cd = 中末深; }
                 println!("[服]   通道表(末端那六个自由度):6 列里量到 {好列} 列");
             }
             if 眼是我 {
