@@ -4687,43 +4687,76 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 let 模2 = 截块(w2, h2, &g2, 看2.u, 看2.v, ((看2.span_frac * w2 as f64 * 0.5) as usize).clamp(3, 40))?;
                 let 半2 = ((看2.span_frac * w2 as f64 * 0.5) as usize).clamp(3, 40);
                 let mut 表2: Vec<[f64; 3]> = Vec::new();
-                let (mut ou, mut ov) = (看2.u, 看2.v);
-                let mut od = 近侧深2(plug, 腕机, ou, ov, 窗2)?;
-                let 基 = plug.sense()?.ee.first().copied()?;
+                // 🔴 这一段原来也是"每列之前先回到记住的那个位姿" —— 同一个复位键,一并删掉。
+                // 改成**来回**:+δ 再 −δ(相对命令),两遍各除以自己的实到 ⇒ 应当相等,
+                // `分歧 < 共识` 才收;净位移为零,不需要记住任何位姿。
                 for k in 0..3usize {
-                    落(plug, [基[0], 基[1], 基[2]], [基[3], 基[4], 基[5], 基[6]], jaw0, 等拍);
-                    let mut p = [基[0], 基[1], 基[2]]; p[k] += 探幅 / 2.0;
-                    let (f1, _, _) = 落(plug, p, [基[3], 基[4], 基[5], 基[6]], jaw0, 等拍)?;
-                    let e1 = f1.ee.first().copied()?;
-                    let 实 = ((e1[0]-基[0]).powi(2)+(e1[1]-基[1]).powi(2)+(e1[2]-基[2]).powi(2)).sqrt()
-                        * if (e1[k] - 基[k]) >= 0.0 { 1.0 } else { -1.0 };
-                    if 实.abs() < 1e-4 { 表2.push([0.0; 3]); continue }
-                    let (_, _, gg) = 灰(&f1, 腕机)?;
-                    let (nu, nv) = 找块(w2, h2, &gg, &模2, 半2)?;
-                    let nd = 近侧深2(plug, 腕机, nu, nv, 窗2)?;
-                    表2.push([(nu - ou) / 实, (nv - ov) / 实, (nd - od) / 实]);
-                    println!("[服]   [收尾] 通道 {k}:实到 {实:+.4} ⇒ 物体在手上那台里跑 ({:+.4},{:+.4}) 深 {:+.4}",
-                        nu - ou, nv - ov, nd - od);
-                    ou = nu; ov = nv; od = nd;
+                    let 读 = |plug: &mut Plug<S>| -> Option<(f64, f64, f64)> {
+                        let (_, _, gg) = plug.sense().and_then(|f| 灰(&f, 腕机))?;
+                        let (a, b) = 找块(w2, h2, &gg, &模2, 半2)?;
+                        let dd = 近侧深2(plug, 腕机, a, b, 窗2)?;
+                        Some((a, b, dd))
+                    };
+                    let 迈 = |plug: &mut Plug<S>, d: f64| -> Option<f64> {
+                        let e0 = plug.sense()?.ee.first().copied()?;
+                        let mut p = [e0[0], e0[1], e0[2]]; p[k] += d;
+                        let (f1, _, _) = 落(plug, p, [e0[3], e0[4], e0[5], e0[6]], jaw0, 等拍)?;
+                        let e1 = f1.ee.first().copied()?;
+                        Some(e1[k] - e0[k])
+                    };
+                    let Some(甲) = 读(plug) else { 表2.push([0.0; 3]); continue };
+                    let Some(去实) = 迈(plug, 探幅 / 2.0) else { 表2.push([0.0; 3]); continue };
+                    let Some(乙) = 读(plug) else { 表2.push([0.0; 3]); continue };
+                    let Some(回实) = 迈(plug, -探幅 / 2.0) else { 表2.push([0.0; 3]); continue };
+                    let Some(丙) = 读(plug) else { 表2.push([0.0; 3]); continue };
+                    if 去实.abs() < 1e-4 || 回实.abs() < 1e-4 { 表2.push([0.0; 3]); continue }
+                    let 去 = [(乙.0-甲.0)/去实, (乙.1-甲.1)/去实, (乙.2-甲.2)/去实];
+                    let 回 = [(丙.0-乙.0)/回实, (丙.1-乙.1)/回实, (丙.2-乙.2)/回实];
+                    let 分 = (0..3).map(|i| (去[i]-回[i]).powi(2)).sum::<f64>().sqrt();
+                    let 共 = (0..3).map(|i| (去[i]+回[i]).powi(2)).sum::<f64>().sqrt();
+                    if !(分 < 共) {
+                        println!("[服]   [收尾] 通道 {k}:去和回对不上(分歧 {分:.3} ≥ 共识 {共:.3})⇒ 跟丢了,这一列空着");
+                        表2.push([0.0; 3]); continue
+                    }
+                    // 🔴 物体的深度变化不许超过我自己实际动的距离(容差 = 来回之后没回到原深那点残差)。
+                    if (乙.2 - 甲.2).abs() > 去实.abs() + (丙.2 - 甲.2).abs() {
+                        println!("[服]   [收尾] 通道 {k}:物体深度跑得比我自己还远 ⇒ 锁错图案了,这一列空着");
+                        表2.push([0.0; 3]); continue
+                    }
+                    表2.push([(去[0]+回[0])*0.5, (去[1]+回[1])*0.5, (去[2]+回[2])*0.5]);
+                    println!("[服]   [收尾] 通道 {k}:去 {去实:+.4} 回 {回实:+.4} ⇒ 物体在手上那台里跑 ({:+.4},{:+.4}) 深 {:+.4} · 两遍分歧 {:.0}%",
+                        乙.0-甲.0, 乙.1-甲.1, 乙.2-甲.2, 100.0 * 分 / 共.max(1e-12));
                 }
-                落(plug, [基[0], 基[1], 基[2]], [基[3], 基[4], 基[5], 基[6]], jaw0, 等拍);
                 if 表2.iter().filter(|c| c.iter().any(|x| x.abs() > 0.0)).count() < 3 {
                     println!("[服]   [收尾] 这台相机里量不齐三列 ⇒ 收尾降级,直接合"); return None;
                 }
                 let mut m2 = [[0.0f64; 3]; 3];
                 for c in 0..3 { for r in 0..3 { m2[r][c] = 表2[c][r]; } }
-                // 追:把物体挪到两指中间,深度压到碰不动为止。
-                let (mut cu2, mut cv2) = (ou, ov);
+                // 追:把物体挪到两指中间,**并且压到手指自己所在的那个深度**。
+                //
+                // 🔴🔴 这里原来写的是 `误 = [c0-nu, c1-nv, **0.0**]` —— 深度那一项恒为零 ⇒
+                // 它只会把物体在画面里左右上下对准两指中间,**永远不往下压**。
+                // 手指对得再准,离物体还差一截,合下去仍然是空的。这是"合到底读数停在 0"的一条直接原因。
+                // 目标深度不需要任何身体词:**这台相机长在手上,手指在它画面里不动,
+                // 所以"手指那一点有多深"直接读一次就是目标** —— 把物体压到那个深度,它就在指间。
+                let 指深 = 近侧深2(plug, 腕机, c[0], c[1], 窗2);
+                // 深度读数自己抖多少:同一点再读一次,差多少就是多少。门槛由它给,不是我填。
+                let 深抖 = match (指深, 近侧深2(plug, 腕机, c[0], c[1], 窗2)) {
+                    (Some(a), Some(b)) => (a - b).abs(), _ => 0.0 };
+                match 指深 {
+                    Some(z) => println!("[服]   [收尾] 手指那一点自己有多深:{z:.3} m(抖 {深抖:.4})⇒ 把物体压到这个深度"),
+                    None => println!("[服]   [收尾] 读不到手指那一点的深度 ⇒ 深度那一项只能留空,靠碰到东西停"),
+                }
                 for 轮 in 0..12u32 {
                     if plug.复位过 { break }
                     let (_, _, gg) = plug.sense().and_then(|f| 灰(&f, 腕机))?;
                     let (nu, nv) = 找块(w2, h2, &gg, &模2, 半2)?;
                     let nd = 近侧深2(plug, 腕机, nu, nv, 窗2)?;
-                    cu2 = nu; cv2 = nv;
-                    let 误 = [c[0] - nu, c[1] - nv, 0.0];
+                    let 深误 = 指深.map(|z| z - nd).unwrap_or(0.0);
+                    let 误 = [c[0] - nu, c[1] - nv, 深误];
                     let 差 = (误[0].powi(2) + 误[1].powi(2)).sqrt();
-                    if 轮 % 3 == 0 { println!("[服]   [收尾] 追 {轮}:物体在 ({nu:.3},{nv:.3}) 深 {nd:.3} · 两指中间在 ({:.3},{:.3}) ⇒ 差 {差:.4}", c[0], c[1]); }
-                    if 差 <= 看2.span_frac * 0.5 { println!("[服]   [收尾] 🟢 物体已经在两指中间"); break }
+                    if 轮 % 3 == 0 { println!("[服]   [收尾] 追 {轮}:物体在 ({nu:.3},{nv:.3}) 深 {nd:.3} · 两指中间在 ({:.3},{:.3}) ⇒ 横纵差 {差:.4} 深度差 {深误:+.4}", c[0], c[1]); }
+                    if 差 <= 看2.span_frac * 0.5 && 深误.abs() <= 深抖 { println!("[服]   [收尾] 🟢 物体已经在两指中间,深度也压到手指那一层了"); break }
                     let dp = 解3(m2, 误)?;
                     let 长 = (dp[0].powi(2)+dp[1].powi(2)+dp[2].powi(2)).sqrt();
                     if !(长 > 1e-9) { break }
