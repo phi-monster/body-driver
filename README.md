@@ -260,7 +260,7 @@ anywhere, which is its own finding. **A named slot in an enum is not a probe.** 
 ⇒ **"量到了"和"它是这具身体的一个常数"是两件事,而我们此前只验过前一件。**
 
 零 GPU 重跑这张表:`python3 results/all15-aug18/collect.py results/all15-aug18/json/*.json`。
-逐条 bug 与修法见 [`DRIVER_GOAL.md`](DRIVER_GOAL.md) §五(2026-08-18 那几行)。
+逐条 bug 与修法见 [`LAB.md`](LAB.md)(原 DRIVER_GOAL 已整篇并入) §五(2026-08-18 那几行)。
 
 Two of them are checked against **real logs**, not only against synthetic cases a test author
 imagined — `contact_threshold` against 520 rows of a press-depth staircase with PhysX contact as
@@ -281,7 +281,7 @@ ground truth, `backlash` against three 300-step sweeps of a 7-joint arm
 依赖表([`slow/src/schedule.rs`](slow/src/schedule.rs) 的 `prerequisites`)**留着**,
 但它现在的用法是「要 X 而 X 要先有 Y」的**按需解析**,不是开机日程。
 
-⚠️ **Stale as of 2026-08-15 — see [`DRIVER_GOAL.md`](DRIVER_GOAL.md).** The layer HAS been driven on a real robot: `phi-monster/lekiwi` records the full chain running on a Pi through the C ABI, with grounding / aiming / contact verified on hardware. The sentence below described 2026-08-09 and was never updated; it misled a reader on 2026-08-15 into reporting "never plugged into a real robot". Original text kept below for the audit trail. ⚠️ Still true *at that date*: **nothing outside this directory reads this layer.** A grep on 2026-08-09 for who
+⚠️ **Stale as of 2026-08-15 — see [`LAB.md`](LAB.md)(原 DRIVER_GOAL 已整篇并入).** The layer HAS been driven on a real robot: `phi-monster/lekiwi` records the full chain running on a Pi through the C ABI, with grounding / aiming / contact verified on hardware. The sentence below described 2026-08-09 and was never updated; it misled a reader on 2026-08-15 into reporting "never plugged into a real robot". Original text kept below for the audit trail. ⚠️ Still true *at that date*: **nothing outside this directory reads this layer.** A grep on 2026-08-09 for who
 consumes it returned **zero** — eight prose mentions, no imports. The running teacher is Python, so
 the first move against that is [`bind/python/body_layer.py`](bind/python/body_layer.py) (ctypes,
 no dependencies) and [`conformance/python_check.sh`](conformance/python_check.sh), which drives the
