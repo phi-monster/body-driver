@@ -3352,6 +3352,65 @@ fn 服务<S: std::io::Read + std::io::Write>(
     let 等拍 = (0.05f64.ln() / (1.0 - 交付率).max(1e-6).ln()).ceil().clamp(3.0, 120.0) as u32;
     println!("[服] 一拍交付 {:.3} ⇒ 走掉 95% 要 {等拍} 拍(推出来的,不是填的)", 交付率);
 
+    // 🔴🔴🔴 **把"该动多少"变成这具身体的命令 —— 只允许有【一处】派发。**
+    // 关节还是末端那六个自由度,由**量出来的结论**(通道是关节)决定,不由写代码的人决定。
+    // 实测代价:同一个 bug 已经咬过三处 ——
+    //   ① 开合爪走 `Cmd::Joints`(F6)⇒ 爪子永远合不上 + "接触面最远分开多少"量成 0;
+    //   ② 追那一段写死关节 ⇒ 换了通道种类就动不了;
+    //   ③ **退回那一段仍然写死 `Cmd::Joints`**(2026-08-27 查出)⇒ 这具机体一个关节命令都不响应,
+    //      于是**就算夹住了也退不回去**,东西永远离不开原位,官方判定必然不算成功。
+    // 返回:(实际走了多远, 各通道实际动了多少, 路上有没有被挡住)。
+    // 「各通道实际动了多少」的量纲与通道表**同一套**(平移取轴上分量、转动取相对四元数矢部 ×2),
+    // 因为干活时那条边干边长的修正要拿它做除数;两处不一致会把好表越修越坏。
+    let 迈通道 = |plug: &mut Plug<S>, 动: &[f64], 比: f64, jaw: f64, 是关节: bool| -> Option<(f64, Vec<f64>, bool)> {
+        let f0 = plug.sense()?;
+        if 是关节 {
+            let q0 = f0.joints.first().cloned()?;
+            let mut q = q0.clone();
+            for (i, dq) in 动.iter().enumerate() { if i < q.len() { q[i] += dq * 比 } }
+            if !plug.act(&Cmd::Joints { arm: 0, q, jaw }) { return None }
+            let mut 上 = None; let mut 稳 = 0u32; let mut 末 = None;
+            for _ in 0..(等拍 * 2) {
+                let f = plug.sense()?;
+                let 此 = f.joints.first().cloned().unwrap_or_default();
+                末 = Some(此.clone());
+                if 上.as_ref() == Some(&此) { 稳 += 1; if 稳 >= 2 { break } } else { 稳 = 0 }
+                上 = Some(此);
+            }
+            let q1 = 末.unwrap_or_else(|| q0.clone());
+            let 动实: Vec<f64> = q1.iter().zip(q0.iter()).map(|(a, b)| a - b).collect();
+            Some((动实.iter().map(|x| x * x).sum::<f64>().sqrt(), 动实, false))
+        } else {
+            let e0 = f0.ee.first().copied()?;
+            let (p0, q0) = ([e0[0], e0[1], e0[2]], [e0[3], e0[4], e0[5], e0[6]]);
+            let mut p = p0;
+            for k in 0..3 { if k < 动.len() { p[k] += 动[k] * 比 } }
+            let mut qq = q0;
+            for k in 3..6 {
+                if k >= 动.len() { break }
+                let a = 动[k] * 比 * 0.5;
+                let mut ax = [0.0; 3]; ax[k - 3] = 1.0;
+                let r = [a.cos(), a.sin()*ax[0], a.sin()*ax[1], a.sin()*ax[2]];
+                let (w1, x1, y1, z1) = (qq[0], qq[1], qq[2], qq[3]);
+                let (w2, x2, y2, z2) = (r[0], r[1], r[2], r[3]);
+                qq = [w1*w2 - x1*x2 - y1*y2 - z1*z2,
+                      w1*x2 + x1*w2 + y1*z2 - z1*y2,
+                      w1*y2 - x1*z2 + y1*w2 + z1*x2,
+                      w1*z2 + x1*y2 - y1*x2 + z1*w2];
+            }
+            let (f2, 挡, _) = 落(plug, p, qq, jaw, 等拍)?;
+            let e2 = f2.ee.first().copied().unwrap_or(e0);
+            let 走 = ((e2[0]-p0[0]).powi(2)+(e2[1]-p0[1]).powi(2)+(e2[2]-p0[2]).powi(2)).sqrt();
+            let (w1, x1, y1, z1) = (q0[0], -q0[1], -q0[2], -q0[3]);
+            let (w2, x2, y2, z2) = (e2[3], e2[4], e2[5], e2[6]);
+            let 相对 = [w1*x2 + x1*w2 + y1*z2 - z1*y2,
+                        w1*y2 - x1*z2 + y1*w2 + z1*x2,
+                        w1*z2 + x1*y2 - y1*x2 + z1*w2];
+            Some((走, vec![e2[0]-p0[0], e2[1]-p0[1], e2[2]-p0[2],
+                           2.0*相对[0], 2.0*相对[1], 2.0*相对[2]], 挡))
+        }
+    };
+
     // **只认"会动的那一块在画面哪一点" —— 不需要相机模型。**
     // 解相机要的原料就是它:手在哪(本体感受)↔ 手在画面哪(这里)。
     let 看爪像素 = |plug: &mut Plug<S>, at: [f64; 3], q: [f64; 4], j0: f64| -> Vec<Option<body_layer::hand::Candidate>> {
@@ -3916,6 +3975,9 @@ fn 服务<S: std::io::Read + std::io::Write>(
             // 实测代价(V2,2026-08-27):旧写法回了基准、却拿**上一列探完停的地方**当起点相减 ⇒
             // 差值里混进整段回程,第 2 列往后全废:末端实际只挪 0.0296 m,表里写着
             // "接触面深度跑了 0.2552 m"(差 8.6 倍,物理上不可能)。那张表就是最后一两厘米的方向盘。
+            // 关节读数有没有**自己**动过(哪怕画面没动)。命令下去而读数纹丝不动 = 命令被扔掉,
+            // 这是比"画面没动"强得多的证据,而且一个通道就够 —— 不必把七个各试一遍(每个约 120 帧)。
+            let mut 报动过 = false;
             for k in 0..(if 用关节 { 关节数 } else { 0 }) {
                 let mut 幅 = 探幅 / 8.0;          // 起点小,看不见就翻倍 —— 幅度是试出来的
                 let mut 这列 = [0.0f64; 6];
@@ -3951,6 +4013,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     let 实回 = q2.get(k).copied().unwrap_or(0.0) - q1.get(k).copied().unwrap_or(0.0);
                     let Some((面2, 深2, 中2, 中深2)) = 读面(plug) else { 幅 *= 2.0; continue };
                     let 挪像 = ((中1.0 - 中0.0).powi(2) + (中1.1 - 中0.1).powi(2)).sqrt();
+                    if 实去.abs() > 幅.abs() / 10.0 { 报动过 = true }
                     if 挪像 <= 噪 * 2.0 || 实去.abs() < 幅.abs() / 10.0 || 实回.abs() < 幅.abs() / 10.0 { 幅 *= 2.0; continue }
                     let 去 = [(面1[0].0-面0[0].0)/实去, (面1[0].1-面0[0].1)/实去, (深1[0]-深0[0])/实去,
                               (面1[1].0-面0[1].0)/实去, (面1[1].1-面0[1].1)/实去, (深1[1]-深0[1])/实去];
@@ -3976,6 +4039,10 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 else { 好列 += 1 }
                 中列.push(这中);
                 列.push(这列);
+                if !成 && !报动过 {
+                    println!("[服]     命令下去了,**关节读数自己都没动** ⇒ 这具身体不接受关节命令,剩下的不逐个试了");
+                    break;
+                }
             }
             if 用关节 { println!("[服]   通道表:{关节数} 列里量到 {好列} 列"); }
             if 好列 == 0 {
@@ -4439,58 +4506,11 @@ fn 服务<S: std::io::Read + std::io::Write>(
             if !(步长 > 1e-9) { break }
             // 一步不超过探针那一档 —— 表只在它那一小片邻域成立。
             let 比 = (探幅 / 步长).min(1.0);
-            let Some(f0) = plug.sense() else { return None };
-            let (走, 动实) = if *通道是关节 {
-                let Some(q0) = f0.joints.first().cloned() else { break };
-                let mut q = q0.clone();
-                for (i, dq) in 动.iter().enumerate() { if i < q.len() { q[i] += dq * 比 } }
-                if !plug.act(&Cmd::Joints { arm: 0, q, jaw: jaw0 }) { println!("[服]   关节命令发不出去 ⇒ 停"); break }
-                let mut 上 = None; let mut 稳 = 0u32; let mut 末 = None;
-                for _ in 0..(等拍 * 2) {
-                    let Some(f) = plug.sense() else { return None };
-                    let 此 = f.joints.first().cloned().unwrap_or_default();
-                    末 = Some(f);
-                    if 上.as_ref() == Some(&此) { 稳 += 1; if 稳 >= 2 { break } } else { 稳 = 0 }
-                    上 = Some(此);
-                }
-                let q1 = 末.and_then(|f| f.joints.first().cloned()).unwrap_or_else(|| q0.clone());
-                let 动实: Vec<f64> = q1.iter().zip(q0.iter()).map(|(a, b)| a - b).collect();
-                (动实.iter().map(|x| x * x).sum::<f64>().sqrt(), 动实)
-            } else {
-                // 末端那六个自由度:前三平移、后三绕手腕自己的轴转。**接口里本来就有这六个。**
-                let Some(e0) = f0.ee.first().copied() else { break };
-                let (p0, q0) = ([e0[0], e0[1], e0[2]], [e0[3], e0[4], e0[5], e0[6]]);
-                let mut p = p0;
-                for k in 0..3 { if k < 动.len() { p[k] += 动[k] * 比 } }
-                let mut qq = q0;
-                for k in 3..6 {
-                    if k >= 动.len() { break }
-                    let a = 动[k] * 比 * 0.5;
-                    let mut ax = [0.0; 3]; ax[k - 3] = 1.0;
-                    let r = [a.cos(), a.sin()*ax[0], a.sin()*ax[1], a.sin()*ax[2]];
-                    let (w1,x1,y1,z1) = (qq[0], qq[1], qq[2], qq[3]);
-                    let (w2,x2,y2,z2) = (r[0], r[1], r[2], r[3]);
-                    qq = [w1*w2 - x1*x2 - y1*y2 - z1*z2,
-                          w1*x2 + x1*w2 + y1*z2 - z1*y2,
-                          w1*y2 - x1*z2 + y1*w2 + z1*x2,
-                          w1*z2 + x1*y2 - y1*x2 + z1*w2];
-                }
-                let Some((f2, 挡, _)) = 落(plug, p, qq, jaw0, 等拍) else { return None };
-                let 到 = f2.ee.first().map(|e| [e[0], e[1], e[2]]).unwrap_or(p0);
-                位 = 到;
-                let 走 = ((到[0]-p0[0]).powi(2)+(到[1]-p0[1]).powi(2)+(到[2]-p0[2]).powi(2)).sqrt();
-                if 挡 && 走 >= 探步 * 0.3 { println!("[服]   🟢 追的路上**碰到东西了**(走了 {走:.4} m 才停)⇒ 就地合"); 碰上 = true; break }
-                // 这一步**实际**各通道动了多少:前三是位移(米),后三是绕手腕自己三根轴转过的角
-                //(相对四元数 conj(q0)⊗q1 的矢部 ×2 —— 小角下就是转角)。**命令和实到是两件事。**
-                let e2 = f2.ee.first().copied().unwrap_or(e0);
-                let (w1, x1, y1, z1) = (q0[0], -q0[1], -q0[2], -q0[3]);
-                let (w2, x2, y2, z2) = (e2[3], e2[4], e2[5], e2[6]);
-                let 相对 = [w1*x2 + x1*w2 + y1*z2 - z1*y2,
-                            w1*y2 - x1*z2 + y1*w2 + z1*x2,
-                            w1*z2 + x1*y2 - y1*x2 + z1*w2];
-                (走, vec![到[0]-p0[0], 到[1]-p0[1], 到[2]-p0[2],
-                          2.0*相对[0], 2.0*相对[1], 2.0*相对[2]])
+            let Some((走, 动实, 挡)) = 迈通道(plug, &动, 比, jaw0, *通道是关节) else {
+                println!("[服]   命令发不出去 ⇒ 停"); break
             };
+            if let Some(ee) = plug.sense().and_then(|f| f.ee.first().copied()) { 位 = [ee[0], ee[1], ee[2]]; }
+            if 挡 && 走 >= 探步 * 0.3 { println!("[服]   🟢 追的路上**碰到东西了**(走了 {走:.4} m 才停)⇒ 就地合"); 碰上 = true; break }
             if 走 < 1e-5 { println!("[服]   追:这一步一动没动 ⇒ 这个位形过不去"); break }
             上拍 = Some((现6, 动实));
         }
@@ -4644,7 +4664,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
         // ⑥ **合到读数不再变为止 —— 无阈值。** 停在 0 = 指间没东西;停在 0 以上 = 有东西顶住,
         // 而那个读数就是它有多宽。老那版是「每拍变化小于 0.01 就算夹住」,而这只爪子合的时候
         // 先快后慢 ⇒ 一次**什么都没夹到的空合**后半段每拍变化本来就小于 0.01 ⇒ 每把都提前判成夹住。
-        // 🔴 合的命令走 `Cmd::Joints`(关节按住不动 + 抓握通道合上)—— **不再需要一个末端位姿**。
+        // 🔴 合的命令走 `抓握`(**唯一那处**按量出来的通道种类派发)—— 不再需要一个末端位姿,
+        //    也不再写死是关节还是末端(F6 那次就是写死关节,而这具机体不响应关节 ⇒ 爪子永远合不上)。
         let mut 上次: Option<Vec<f64>> = None;
         let mut 稳 = 0u32;
         let mut 停在 = 0.0f64;
@@ -4696,17 +4717,10 @@ fn 服务<S: std::io::Read + std::io::Write>(
             let 步长 = 动.iter().map(|x| x * x).sum::<f64>().sqrt();
             if !(步长 > 1e-9) { break }
             let 比 = (探幅 / 步长).min(1.0);
-            let Some(q0) = plug.sense().and_then(|f| f.joints.first().cloned()) else { break };
-            let mut q = q0.clone();
-            for (i, dq) in 动.iter().enumerate() { if i < q.len() { q[i] += dq * 比 } }
-            plug.act(&Cmd::Joints { arm: 0, q, jaw: 0.0 });
-            let mut 上 = None; let mut 稳2 = 0u32;
-            for _ in 0..(等拍 * 2) {
-                let Some(f) = plug.sense() else { return None };
-                let 此 = f.joints.first().cloned().unwrap_or_default();
-                if 上.as_ref() == Some(&此) { 稳2 += 1; if 稳2 >= 2 { break } } else { 稳2 = 0 }
-                上 = Some(此);
-            }
+            // 🔴 这里曾经写死 `Cmd::Joints` —— 而这具机体一个关节命令都不响应,
+            //    于是**夹住了也退不回去**,东西永远离不开原位。走同一处派发。
+            //    合着的爪子在退回全程要一直合着 ⇒ jaw 传 0.0。
+            if 迈通道(plug, &动, 比, 0.0, *通道是关节).is_none() { println!("[服]   退回:命令发不出去 ⇒ 停"); break }
             if 退 == 15 { println!("[服]   退回没走完(还差 {差:.4})"); }
         }
         let _ = 退成;
