@@ -36,9 +36,18 @@ for d in $DIRS; do
         if (line ~ /println!|format!|eprintln!/) next
         # 找带小数点的字面量
         s=line
+        off=0
         while (match(s, /[0-9]+\.[0-9]+/)) {
           v=substr(s, RSTART, RLENGTH)
+          abs=off+RSTART
+          off=abs+RLENGTH-1
           s=substr(s, RSTART+RLENGTH)
+          # 🔴 元组取字段不是常数,是**变量名 + 字段号**:`中1.1` / `t0.2` / `面0.0`。
+          # 这条脚本此前把它们全算成了写死的身体常数(仅 main.rs 一处就虚报几十个),
+          # 于是棘轮量的根本不是它要管的东西。判据:字面量只能**紧跟在运算符或分隔符后面**;
+          # 左边是别的(字母 / 汉字 / 下划线)⇒ 它是字段访问。`.` 保留在允许集里,宁可多算不少算。
+          prev = (abs>1) ? substr(line, abs-1, 1) : " "
+          if (prev !~ /^[ \t()\[\]{},=+*\/<>!&|:;?.^%-]$/) continue
           x=v+0
           if (x<0.0001) continue
           if (v=="0.0"||v=="1.0"||v=="2.0"||v=="3.0"||v=="4.0"||v=="0.5"||v=="100.0"||v=="180.0"||v=="360.0") continue
