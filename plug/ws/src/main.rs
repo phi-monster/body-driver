@@ -4005,30 +4005,59 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 // ⚠️ 我先写成"整幅差分的中位数",**已实测撤回**:静止画面的中位数是 0 ⇒
                 // 全画面的渲染噪声都被算成变化,变化区撑到 475×90 px,当场被"超过半幅画面"拒掉。
                 // (更早还写过 `dv > 3` —— 那是手填的数。)
-                // **逐像素**减掉这一点自己的噪声:这一点因为张合变了多少 − 它在同一状态下本来就飘多少。
-                // 剩下大于零的,才是抓握通道真的动了的地方。没有任何一个手填的门槛,也不用挑分位数。
-                // ⚠️ 三条已实测撤回:`dv > 3`(手填);"整幅差分的中位数"(静止画面是 0 ⇒ 全画面噪声
-                // 都算成变化,变化区 475×90 px);"噪声的最大值"(极值太保守 ⇒ 只剩 6 个像素)。
-                let 差值: Vec<u8> = 开帧.iter().zip(合帧.iter()).zip(开帧2.iter())
-                    .map(|((a, b), c)| a.abs_diff(*b).saturating_sub(a.abs_diff(*c))).collect();
-                let 地板 = 0u8;
-                // 🔴🔴 **取"变化最强的那一批",而且用【分位数】框,不用最大最小。**
-                // 实测代价(G0):拿"所有超过门槛的像素"的外接框 ⇒ 散落全画面的**噪声像素**
-                // 把框撑成 **565×479 px**(画面才 640×480)⇒ 两个"接触面"被放到画面两个角上,
-                // 跟的全是背景 ⇒ 追了 16 步误差**一个数都没变**(0.6475 到底)。
-                let mut 强: Vec<(u8, usize, usize)> = Vec::new();
-                for y in 0..ah { for x in 0..aw {
-                    let dv = 差值[y * aw + x];
-                    if dv > 地板 { 强.push((dv, x, y)); }
-                }}
-                if 强.len() < 32 { println!("[服]   张合两帧相减只有 {} 个像素变了 ⇒ 看不出接触面,这一拍不下手", 强.len()); return None }
-                强.sort_unstable_by(|a, b| b.0.cmp(&a.0));
-                let 取 = (强.len() / 4).max(32).min(强.len());
-                let mut xs: Vec<usize> = 强[..取].iter().map(|k| k.1).collect();
-                let mut ys: Vec<usize> = 强[..取].iter().map(|k| k.2).collect();
+                // 🔴🔴🔴 **噪声不是靠"挑分位数"去掉的,是靠【形状】去掉的:手指连成一片,噪声是散点。**
+                //
+                // 实测代价(NVF,2026-08-27,渲图当场看出来):张合那一下画面里真正变的只有约 **176 个像素**
+                // (确实在爪子上),而我"取变化最强的四分之一" —— 逐像素减噪之后还剩几万个值为 1–2 的散点,
+                // 四分之一里绝大多数是它们,外接框因此撑到 **465×81 px**,当场被"超过半幅画面"拒掉。
+                // 之前三条门槛(`dv>3` / 整幅中位数 / 噪声最大值)都是在这条错路上调参数。
+                //
+                // 正确形:**连通块**。而"多大的一块才算不是噪声"也不用我填 ——
+                // **空对照(同一条命令再发一次)里最大的那一块噪声有多大,量一次就知道**,比它大的才是信号。
+                let 掩 = |x: &Vec<u8>, y: &Vec<u8>| -> Vec<bool> {
+                    x.iter().zip(y.iter()).map(|(a, b)| a != b).collect()
+                };
+                // 连通块(八邻域),返回每一块的像素表,按大小降序。
+                let 连通 = |m: &Vec<bool>, w: usize, h: usize| -> Vec<Vec<(usize, usize)>> {
+                    let mut 走过 = vec![false; m.len()];
+                    let mut 出: Vec<Vec<(usize, usize)>> = Vec::new();
+                    for y0 in 0..h { for x0 in 0..w {
+                        let i0 = y0 * w + x0;
+                        if !m[i0] || 走过[i0] { continue }
+                        let mut 栈 = vec![(x0, y0)];
+                        走过[i0] = true;
+                        let mut 块 = Vec::new();
+                        while let Some((x, y)) = 栈.pop() {
+                            块.push((x, y));
+                            for dy in -1i64..=1 { for dx in -1i64..=1 {
+                                let (nx, ny) = (x as i64 + dx, y as i64 + dy);
+                                if nx < 0 || ny < 0 || nx >= w as i64 || ny >= h as i64 { continue }
+                                let i = ny as usize * w + nx as usize;
+                                if m[i] && !走过[i] { 走过[i] = true; 栈.push((nx as usize, ny as usize)); }
+                            }}
+                        }
+                        出.push(块);
+                    }}
+                    出.sort_by(|a, b| b.len().cmp(&a.len()));
+                    出
+                };
+                let 噪块 = 连通(&掩(&开帧, &开帧2), aw, ah);
+                let 噪上限 = 噪块.first().map(|b| b.len()).unwrap_or(0);
+                let 信块 = 连通(&掩(&开帧, &合帧), aw, ah);
+                let 强: Vec<(u8, usize, usize)> = 信块.iter().filter(|b| b.len() > 噪上限)
+                    .flat_map(|b| b.iter().map(|&(x, y)| (255u8, x, y))).collect();
+                println!("[服]   张合相减:空对照里最大的一块噪声 {噪上限} 个像素 ⇒ 比它大的算信号;剩下 {} 个像素,{} 块",
+                    强.len(), 信块.iter().filter(|b| b.len() > 噪上限).count());
+                if 强.len() < 32 {
+                    println!("[服]   🔴 抓握通道动过之后,画面里**没有比噪声更大的一块**在动 ⇒ 认不出我的接触面。具名缺口,不编造");
+                    return None;
+                }
+                let 取 = 强.len();
+                let mut xs: Vec<usize> = 强.iter().map(|k| k.1).collect();
+                let mut ys: Vec<usize> = 强.iter().map(|k| k.2).collect();
                 xs.sort_unstable(); ys.sort_unstable();
-                let (x1, x2) = (xs[取 / 10] as f64, xs[取 * 9 / 10] as f64);
-                let (y1, y2) = (ys[取 / 10] as f64, ys[取 * 9 / 10] as f64);
+                let (x1, x2) = (xs[0] as f64, xs[取 - 1] as f64);
+                let (y1, y2) = (ys[0] as f64, ys[取 - 1] as f64);
                 let (宽px, 高px) = (x2 - x1, y2 - y1);
                 if 宽px.max(高px) > aw as f64 * 0.5 {
                     println!("[服]   变化区 {宽px:.0}×{高px:.0} px 大得不像接触面(超过半幅画面)⇒ 这一拍不下手");
@@ -4065,7 +4094,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 // 噪声:**同一个爪子状态**的两帧之间,这个距离本来就会飘多少。门槛由它给。
                 let 距噪 = (距(开对) - ((ax - bx).powi(2) + (ay - by).powi(2)).sqrt()).abs();
                 let 变距 = (距(合对) - 距(开对)).abs();
-                println!("[服]   张合相减:{取} 个像素变了(地板 {地板})· 变化区 {宽px:.0}×{高px:.0} px");
+                println!("[服]   变化区 {宽px:.0}×{高px:.0} px");
                 println!("[服]   两个候选接触面 ({:.3},{:.3}) / ({:.3},{:.3}) ⇒ 合上去之后间距变了 {变距:.1} px(同状态两帧自己飘 {距噪:.1} px)",
                     甲.0, 甲.1, 乙.0, 乙.1);
                 if !(变距 > 距噪) {
