@@ -3106,7 +3106,11 @@ fn 找两块(w: usize, h: usize, g: &[u8], a: &[u8], b: &[u8], half: usize)
         for ny in hf..(h as i64 - hf) {
             for nx in hf..(w as i64 - hf) {
                 if let Some((ax, ay)) = 避 {
-                    if (nx - ax).abs() < 2 * hf && (ny - ay).abs() < 2 * hf { continue }
+                    // 🔴 排除半径必须和"算不算撞在一起"用**同一把尺**(一个模板半径)。
+                    // 实测代价(NV9):我按两个模板宽去排除,而两块模板是**紧挨着切的**
+                    //(半径 = 两面间距的一半)⇒ 另一块的真实位置恰好就在两个模板宽处,
+                    // 被我连正确答案一起排掉,于是它跑到画面别处,刚体闸报 差 25.046。
+                    if (nx - ax).abs() < hf && (ny - ay).abs() < hf { continue }
                 }
                 let mut ssd: u64 = 0;
                 let mut i = 0usize;
