@@ -4026,8 +4026,15 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 //
                 // 正确形:**连通块**。而"多大的一块才算不是噪声"也不用我填 ——
                 // **空对照(同一条命令再发一次)里最大的那一块噪声有多大,量一次就知道**,比它大的才是信号。
+                // 🔴🔴 **"变了"要看【幅度】,不能只看"不一样"。**
+                // 渲图看出来的(NVK):渲染抖动让**每一条边缘**都 ±1~2 级灰度地闪 ⇒
+                // 用 `a != b` 时整条手臂 + 风扇的轮廓全部入选、连成一大块,而**真正动的那一小撮
+                // 手指**(几十级灰度的明暗翻转、只有十几个像素宽)反而被淹没在里面。
+                // 门槛不是我填的:**空对照(同一条命令再发一次)里幅度最大的那一跳有多大,量一次就知道**,
+                // 比它大的才算真的动了。
+                let 噪幅 = 开帧.iter().zip(开帧2.iter()).map(|(a, b)| a.abs_diff(*b)).max().unwrap_or(0);
                 let 掩 = |x: &Vec<u8>, y: &Vec<u8>| -> Vec<bool> {
-                    x.iter().zip(y.iter()).map(|(a, b)| a != b).collect()
+                    x.iter().zip(y.iter()).map(|(a, b)| a.abs_diff(*b) > 噪幅).collect()
                 };
                 // 连通块(八邻域),返回每一块的像素表,按大小降序。
                 let 连通 = |m: &Vec<bool>, w: usize, h: usize| -> Vec<Vec<(usize, usize)>> {
@@ -4058,7 +4065,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 let 信块 = 连通(&掩(&开帧, &合帧), aw, ah);
                 let 强: Vec<(u8, usize, usize)> = 信块.iter().filter(|b| b.len() > 噪上限)
                     .flat_map(|b| b.iter().map(|&(x, y)| (255u8, x, y))).collect();
-                println!("[服]   张合相减:空对照里最大的一块噪声 {噪上限} 个像素 ⇒ 比它大的算信号;剩下 {} 个像素,{} 块",
+                println!("[服]   张合相减:空对照的幅度上限 {噪幅} 级、最大一块 {噪上限} 像素 ⇒ 剩下 {} 个像素,{} 块",
                     强.len(), 信块.iter().filter(|b| b.len() > 噪上限).count());
                 if 强.len() < 32 {
                     println!("[服]   🔴 抓握通道动过之后,画面里**没有比噪声更大的一块**在动 ⇒ 认不出我的接触面。具名缺口,不编造");
@@ -4105,6 +4112,35 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 let (bx, by) = 外半(&投[半数..], true);
                 let 甲 = (ax / aw as f64, ay / ah as f64);
                 let 乙 = (bx / aw as f64, by / ah as f64);
+                // 🔴🔴 **把这一步【自己看到的】三张图存下来** —— 张开 / 合上 / 掩码(候选点画成十字)。
+                // owner 2026-08-27 死命令:任何改动都要亲眼看视频,不许只看数字。
+                // 之前我靠"在一堆帧里找差最大的一对"去猜驱动当时看的是哪两帧,猜错过好几次;
+                // 而这三张图是**它当时真正拿来判断的那三张**,没有中间人。
+                if let Ok(存路) = std::env::var("BL_VID") {
+                    let _ = std::fs::create_dir_all(&存路);
+                    let 掩图: Vec<u8> = {
+                        let mut v = vec![0u8; aw * ah];
+                        for b in 信块.iter().filter(|b| b.len() > 噪上限) {
+                            for &(x, y) in b.iter() { v[y * aw + x] = 255; }
+                        }
+                        for (px, py) in [(ax, ay), (bx, by)] {
+                            for d in -6i64..=6 {
+                                for (qx, qy) in [(px as i64 + d, py as i64), (px as i64, py as i64 + d)] {
+                                    if qx >= 0 && qy >= 0 && (qx as usize) < aw && (qy as usize) < ah {
+                                        v[qy as usize * aw + qx as usize] = 128;
+                                    }
+                                }
+                            }
+                        }
+                        v
+                    };
+                    for (名, 图) in [("kai", &开帧), ("he", &合帧), ("mask", &掩图)] {
+                        let mut buf = format!("P5\n{aw} {ah}\n255\n").into_bytes();
+                        buf.extend_from_slice(图);
+                        let _ = std::fs::write(format!("{存路}/renmian_{名}.pgm"), buf);
+                    }
+                }
+
                 // ── 构造性自检:合上去之后,这两块之间的距离必须真的变了 ──
                 let 半试 = (((ax - bx).powi(2) + (ay - by).powi(2)).sqrt() * 0.5) as usize;
                 let 半试 = 半试.max(3);
