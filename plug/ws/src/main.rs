@@ -3086,6 +3086,55 @@ fn 找块(w: usize, h: usize, g: &[u8], tpl: &[u8], half: usize) -> Option<(f64,
     Some((best.1 as f64 / w as f64, best.2 as f64 / h as f64))
 }
 
+/// 快眼:**一次找两块,而且不许落在同一处。**
+///
+/// 🔴🔴 两根接触面在画面里长得几乎一样(同一只手的两根手指)⇒ 全画面搜的时候
+/// **两块模板会同时锁到其中一根上**(SSD 几乎相等,谁先扫到谁赢)。
+/// 原来那个"只搜 ±r 像素"的小窗恰好挡住过这件事,删窗口时我只挡了一半 ——
+/// 判得出来(两块隔得比模板还近就拒),却没有救。实测代价(NV8,2026-08-27):
+/// 六列全空,日志印"两块只隔 11 px,比模板半径 16 还近"。
+///
+/// 做法:先各自全画面找一次;撞在一起就以**匹配得更好**的那一块为准,
+/// 另一块在"离它至少一个模板宽"之外重找。判据是**比例**(模板自己的宽),不是填的数。
+fn 找两块(w: usize, h: usize, g: &[u8], a: &[u8], b: &[u8], half: usize)
+    -> Option<((f64, f64), (f64, f64))> {
+    let 扫 = |tpl: &[u8], 避: Option<(i64, i64)>| -> Option<(u64, i64, i64)> {
+        let hf = half as i64;
+        let n = (2 * hf + 1) as usize;
+        if tpl.len() != n * n || w < n || h < n { return None }
+        let mut best: (u64, i64, i64) = (u64::MAX, -1, -1);
+        for ny in hf..(h as i64 - hf) {
+            for nx in hf..(w as i64 - hf) {
+                if let Some((ax, ay)) = 避 {
+                    if (nx - ax).abs() < 2 * hf && (ny - ay).abs() < 2 * hf { continue }
+                }
+                let mut ssd: u64 = 0;
+                let mut i = 0usize;
+                let mut 弃 = false;
+                for y in (ny - hf)..=(ny + hf) {
+                    let row = (y as usize) * w;
+                    for x in (nx - hf)..=(nx + hf) {
+                        let d = g[row + x as usize] as i64 - tpl[i] as i64;
+                        ssd += (d * d) as u64;
+                        i += 1;
+                    }
+                    if ssd >= best.0 { 弃 = true; break }
+                }
+                if !弃 && ssd < best.0 { best = (ssd, nx, ny); }
+            }
+        }
+        if best.1 < 0 { None } else { Some(best) }
+    };
+    let pa = 扫(a, None)?;
+    let pb = 扫(b, None)?;
+    let 撞 = (pa.1 - pb.1).abs() < half as i64 && (pa.2 - pb.2).abs() < half as i64;
+    let (qa, qb) = if !撞 { (pa, pb) }
+        else if pa.0 <= pb.0 { (pa, 扫(b, Some((pa.1, pa.2)))?) }
+        else { (扫(a, Some((pb.1, pb.2)))?, pb) };
+    Some(((qa.1 as f64 / w as f64, qa.2 as f64 / h as f64),
+          (qb.1 as f64 / w as f64, qb.2 as f64 / h as f64)))
+}
+
 /// 干活。缺某个身体量就**点名要它**(返回那一格的名字),由调用方量完再进来一次。
 /// 返回 `None` = 干完了 / 连接断了。
 // ════════════════════════════════════════════════════════════════════════════
@@ -3963,14 +4012,13 @@ fn 服务<S: std::io::Read + std::io::Write>(
             let 读面 = |plug: &mut Plug<S>| -> Option<([(f64, f64); 2], [f64; 2], (f64, f64), f64)> {
                 let Some((_, _, g)) = plug.sense().and_then(|f| 灰(&f, 相机号)) else {
                     println!("[服]     读接触面:这一帧没有第 {相机号} 台的图"); return None };
-                let mut 位 = [(0.0f64, 0.0f64); 2];
+                let Some((甲, 乙)) = 找两块(fw0, fh0, &g, &模2[0], &模2[1], 半) else {
+                    println!("[服]     读接触面:两块模板在整幅画面里都匹配不上(模板半径 {半})"); return None };
+                let 位 = [甲, 乙];
                 let mut 深 = [0.0f64; 2];
                 for i in 0..2 {
-                    let Some((a, b)) = 找块(fw0, fh0, &g, &模2[i], 半) else {
-                        println!("[服]     读接触面:第 {i} 块模板在整幅画面里都匹配不上(模板半径 {半})"); return None };
-                    位[i] = (a, b);
-                    let Some(z) = 近侧深(plug, a, b, 块 * 0.5) else {
-                        println!("[服]     读接触面:第 {i} 块在 ({a:.3},{b:.3}) 读不到深度"); return None };
+                    let Some(z) = 近侧深(plug, 位[i].0, 位[i].1, 块 * 0.5) else {
+                        println!("[服]     读接触面:第 {i} 块在 ({:.3},{:.3}) 读不到深度", 位[i].0, 位[i].1); return None };
                     深[i] = z;
                 }
                 // 🔴 全画面搜之后多了一种跟丢:**两根接触面长得几乎一样**,A 有可能锁到 B 身上
@@ -4528,12 +4576,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
         let 噪追 = {
             let mut 读 = |plug: &mut Plug<S>| -> Option<[f64; 4]> {
                 let (_, _, g) = plug.sense().and_then(|f| 灰(&f, 相机号))?;
-                let mut o = [0.0f64; 4];
-                for i in 0..2 {
-                    let (a, b) = 找块(fw, fh, &g, &模[i], 半)?;
-                    o[i*2] = a; o[i*2+1] = b;
-                }
-                Some(o)
+                let (甲, 乙) = 找两块(fw, fh, &g, &模[0], &模[1], 半)?;
+                Some([甲.0, 甲.1, 乙.0, 乙.1])
             };
             match (读(plug), 读(plug), 读(plug)) {
                 (Some(a), Some(b), Some(c)) => {
@@ -4554,17 +4598,17 @@ fn 服务<S: std::io::Read + std::io::Write>(
             let Some((_, _, g)) = plug.sense().and_then(|f| 灰(&f, 相机号)) else { break };
             let mut 现 = [(0.0f64, 0.0f64, 0.0f64); 2];
             let mut 全看见 = true;
-            for i in 0..2 {
-                match 找块(fw, fh, &g, &模[i], 半) {
-                    Some((nu, nv)) => {
-                        面[i] = (nu, nv);
-                        match 近侧深(plug, nu, nv, 块 * 0.5) {
-                            Some(nd) => 现[i] = (nu, nv, nd),
+            match 找两块(fw, fh, &g, &模[0], &模[1], 半) {
+                Some((甲, 乙)) => {
+                    for (i, p) in [甲, 乙].into_iter().enumerate() {
+                        面[i] = p;
+                        match 近侧深(plug, p.0, p.1, 块 * 0.5) {
+                            Some(nd) => 现[i] = (p.0, p.1, nd),
                             None => { 全看见 = false; }
                         }
                     }
-                    None => { 全看见 = false; }
                 }
+                None => { 全看见 = false; }
             }
             // 同上:两个面落得比模板自己还近 ⇒ 锁到同一块图案上了(**比例**判据,不是填的数)。
             if 全看见 && ((现[0].0 - 现[1].0) * fw as f64).hypot((现[0].1 - 现[1].1) * fh as f64) < 半 as f64 {
@@ -4905,12 +4949,12 @@ fn 服务<S: std::io::Read + std::io::Write>(
             let Some((_, _, g)) = plug.sense().and_then(|f| 灰(&f, 相机号)) else { break };
             let mut 现 = [(0.0f64, 0.0f64, 0.0f64); 2];
             let mut 齐 = true;
-            for i in 0..2 {
-                match 找块(fw, fh, &g, &模[i], 半) {
-                    Some((nu, nv)) => { 面[i] = (nu, nv);
-                        match 近侧深(plug, nu, nv, 块 * 0.5) { Some(nd) => 现[i] = (nu, nv, nd), None => 齐 = false } }
-                    None => 齐 = false,
-                }
+            match 找两块(fw, fh, &g, &模[0], &模[1], 半) {
+                Some((甲, 乙)) => for (i, p) in [甲, 乙].into_iter().enumerate() {
+                    面[i] = p;
+                    match 近侧深(plug, p.0, p.1, 块 * 0.5) { Some(nd) => 现[i] = (p.0, p.1, nd), None => 齐 = false }
+                },
+                None => 齐 = false,
             }
             if !齐 { break }
             let 深换 = 眼.fx / (fw as f64 * 面深初[0].max(1e-6));
