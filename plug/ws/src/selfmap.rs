@@ -37,7 +37,11 @@
 /// 一个格子记的东西。
 #[derive(Clone)]
 struct 格 {
-    /// 这个格子的"命令 ⇒ 画面跑多少":两行(横、纵)× 通道数。
+    /// 这个格子的"命令 ⇒ 跑多少":**三行**(横、纵、深)× 通道数。
+    ///
+    /// 🔴 第三行是**深度**。没有它,伺服只能把手在画面上对准,却下不去 ——
+    /// 而抓东西恰恰是"对准之后压下去"。深度这一行和前两行同一条判据、同一次观测,
+    /// 只是量的是那个格子的中位深度变了多少(米),不是像素。
     表: Vec<f64>,
     /// 累计:实际跑的 与 表预测的 差多少(滑动平均,像素)。
     残: f64,
@@ -67,7 +71,7 @@ impl 自图 {
             边,
             通道数,
             格们: vec![
-                格 { 表: vec![0.0; 2 * 通道数], 残: 0.0, 动: 0.0, 次: 0 };
+                格 { 表: vec![0.0; 3 * 通道数], 残: 0.0, 动: 0.0, 次: 0 };
                 列 * 行
             ],
         }
@@ -83,7 +87,11 @@ impl 自图 {
     /// 然后拿这一对 (命令, 跑了多少) 递推地修自己的表,并记下没被表解释掉的那部分。
     ///
     /// 🔴 **不需要知道命令的物理含义** —— 关节角、末端位移、桨速,对这里一律只是一串数。
-    pub fn 喂(&mut self, 前: &[u8], 后: &[u8], w: usize, h: usize, 命令: &[f64], 搜: usize) {
+    ///
+    /// `前深`/`后深` 给了就顺带学**深度那一行**(米);给不了(没有深度图)就只学前两行,
+    /// 第三行留零 —— 那时伺服只能在画面上对准、下不去,而这件事会被日志说出来。
+    pub fn 喂(&mut self, 前: &[u8], 后: &[u8], 前深: Option<&[f64]>, 后深: Option<&[f64]>,
+              w: usize, h: usize, 命令: &[f64], 搜: usize) {
         if 前.len() < w * h || 后.len() < w * h || 命令.len() < self.通道数 {
             return;
         }
@@ -110,16 +118,28 @@ impl 自图 {
                 let i = gy * self.列 + gx;
                 let g = &mut self.格们[i];
                 // 表预测这一下会跑多少
-                let (mut pu, mut pv) = (0.0f64, 0.0f64);
+                let (mut pu, mut pv, mut pz) = (0.0f64, 0.0f64, 0.0f64);
                 for k in 0..self.通道数 {
                     pu += g.表[k] * 命令[k];
                     pv += g.表[self.通道数 + k] * 命令[k];
+                    pz += g.表[2 * self.通道数 + k] * 命令[k];
                 }
                 let (eu, ev) = (du - pu, dv - pv);
                 // 递推最小二乘(Broyden 那一步):表 += 误差 ⊗ 命令 / |命令|²
                 for k in 0..self.通道数 {
                     g.表[k] += eu * 命令[k] / 模2;
                     g.表[self.通道数 + k] += ev * 命令[k] / 模2;
+                }
+                // 深度那一行:这个格子(跟着它一起挪过去之后)的中位深度变了多少。
+                if let (Some(z0), Some(z1)) = (前深, 后深) {
+                    let a = 中位深(z0, w, h, x0, y0, self.边);
+                    let b = 中位深(z1, w, h, (x0 as i64 + du as i64) as usize, (y0 as i64 + dv as i64) as usize, self.边);
+                    if let (Some(a), Some(b)) = (a, b) {
+                        let ez = (b - a) - pz;
+                        for k in 0..self.通道数 {
+                            g.表[2 * self.通道数 + k] += ez * 命令[k] / 模2;
+                        }
+                    }
                 }
                 // 滑动平均:0.2 是**无量纲**的遗忘率(新的一次占两成),不是长度也不是时间。
                 let a = 0.2;
@@ -189,6 +209,19 @@ impl 自图 {
         for gy in 0..self.行 { for gx in 0..self.列 { if self.是我(gx, gy, 至少问几次, 解释率) { n += 1 } } }
         n
     }
+}
+
+/// 一个格子里的中位深度(米)。取中位而不是均值:格子边上会切到背景,均值会被拖走。
+fn 中位深(z: &[f64], w: usize, h: usize, x0: usize, y0: usize, 边: usize) -> Option<f64> {
+    if x0 + 边 > w || y0 + 边 > h { return None }
+    let mut v: Vec<f64> = Vec::with_capacity(边 * 边);
+    for y in y0..y0 + 边 { for x in x0..x0 + 边 {
+        let d = z[y * w + x];
+        if d.is_finite() && d > 1e-6 { v.push(d) }
+    }}
+    if v.len() * 2 < 边 * 边 { return None }
+    v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
+    Some(v[v.len() / 2])
 }
 
 /// 一个格子在下一帧里跑到哪 —— 块匹配(SSD 最小),返回 (横跑了, 纵跑了, 这个格子有多少花纹)。
@@ -262,7 +295,7 @@ mod tests {
             let c = if k % 2 == 0 { 1.0 } else { -1.0 };
             x += (3.0 * c) as i64;
             let 后 = 画(x, 40);
-            自.喂(&前, &后, w, h, &[c], 5);
+            自.喂(&前, &后, None, None, w, h, &[c], 5);
             前 = 后;
         }
         // 方块中心那一格该是"我"
@@ -300,7 +333,7 @@ mod tests {
             let c = if k % 2 == 0 { 1.0 } else { -1.0 };
             x += 3;
             let 后 = 画(x);
-            自.喂(&前, &后, w, h, &[c], 5);
+            自.喂(&前, &后, None, None, w, h, &[c], 5);
             前 = 后;
         }
         let (gx, gy) = ((x as usize + 8) / 8, 48 / 8);
