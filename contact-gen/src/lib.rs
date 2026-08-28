@@ -345,124 +345,152 @@ pub fn candidates(
                 }
                 let fw = grid.finger_w_m.max(1e-4);
                 let n_strip = (((t_hi - t_lo) / fw).ceil() as i64).max(1);
+                // 🔴🔴🔴 **量的是"料的一段有多厚",不是"最左到最右有多远"。**
+                //
+                // 旧写法沿合爪方向只取 `min`/`max` ⇒ 它默认**这一条里的料是实心的一整块**,
+                // 于是**看不见中间的空隙**。拿去量一个甜甜圈,它会说"这个甜甜圈厚 10 厘米" ——
+                // 而真实情况是 2 cm 的圈边 + 6 cm 的洞 + 2 cm 的圈边。
+                //
+                // 实测代价(W3,2026-08-28,渲图 + 日志):目标是剪刀,**156 条候选全部被判"比钳口宽"**,
+                // 排名前 5 全是**沿剪刀长轴横跨 20 cm** 的那种。原因就是这一行:
+                // 指环是个圈,量出来是**外径 3 cm**,而人夹的是那 **3 mm 的环壁**——
+                // **"夹环壁"这个候选在池子里根本不存在**,再怎么改排序也挑不出来。
+                //
+                // 改法:沿合爪方向扫一遍,按有料/没料切成**连续段**(空隙用 `gap_m`,
+                // 和分块用的是同一把尺,不引新常数),**每一段各出一条候选**。
+                //   指环 ⇒ 切出两段环壁,各 ~3 mm ⇒ "夹住环壁"出现了
+                //   剪刀 ⇒ 切出每一片刀身 ⇒ "夹住一片刀"出现了
+                //   实心的瓶子 ⇒ 只有一段,和以前完全一样 ⇒ 不影响已经能用的
+                let 间隙 = grid.gap_m.max(1e-4);
+                // 扫一条带子里的所有连续料段。返回 (最近端, 最远端, x和, y和, u和, 点数)。
+                let 扫段 = |a: f64, b: f64| -> Vec<(f64, f64, f64, f64, f64, u32)> {
+                    let mut v: Vec<(f64, f64, f64, f64)> = Vec::new(); // (q, u, x, y)
+                    for &i in &cl {
+                        let u = band[i].x * tx + band[i].y * ty;
+                        if u < a || u > b { continue }
+                        let q = band[i].x * nx + band[i].y * ny;
+                        v.push((q, u, band[i].x, band[i].y));
+                    }
+                    v.sort_by(|p, r| p.0.partial_cmp(&r.0).unwrap_or(core::cmp::Ordering::Equal));
+                    let mut out: Vec<(f64, f64, f64, f64, f64, u32)> = Vec::new();
+                    let mut i0 = 0usize;
+                    for i in 1..=v.len() {
+                        let 断 = i == v.len() || (v[i].0 - v[i - 1].0) > 间隙;
+                        if !断 { continue }
+                        let seg = &v[i0..i];
+                        i0 = i;
+                        if seg.is_empty() { continue }
+                        let (mut sx, mut sy, mut su) = (0.0f64, 0.0f64, 0.0f64);
+                        for p in seg { sx += p.2; sy += p.3; su += p.1 }
+                        out.push((seg[0].0, seg[seg.len() - 1].0, sx, sy, su, seg.len() as u32));
+                    }
+                    out
+                };
                 for si in 0..n_strip {
                     let (a, b) = (t_lo + fw * si as f64, t_lo + fw * (si + 1) as f64);
-                    let (mut mn, mut mx) = (f64::MAX, f64::MIN);
-                    let (mut sx2, mut sy2, mut k) = (0.0f64, 0.0f64, 0u32);
-                    for &i in &cl {
-                        let u = band[i].x * tx + band[i].y * ty;
-                        if u < a || u > b {
-                            continue;
-                        }
-                        let q = band[i].x * nx + band[i].y * ny;
-                        mn = mn.min(q);
-                        mx = mx.max(q);
-                        sx2 += band[i].x;
-                        sy2 += band[i].y;
-                        k += 1;
-                    }
-                    if k < grid.min_pts {
-                        continue;
-                    }
-                    let width = mx - mn;
-                    if width <= 0.0 {
-                        continue;
-                    }
-                    // 🔴🔴 **这里【不许】因为"太宽"而丢掉一条候选。**
-                    //
-                    // 仓里唯一那条关于可抓性的规矩(`PRIMITIVE_DATA` §物体库):
-                    //   *"可抓性只能【看图】判,不许从任何数字判"*;
-                    //   明确点名禁止 *"拿【钳口能张多少】当阈值去筛物体"*。
-                    //   同一个错本仓犯过三次(按尺寸判 17.9% 夹不住 · 按张开度报"可用率 8%" ·
-                    //   按外接盒判 21 集"物理上不可能"),三次都是同一句话:
-                    //   **把工具的边界当成世界的边界。**
-                    //
-                    // 而**合法的用法写在 `README`**:*"它只读一件事:钳口下面那一小段沿闭合方向
-                    // 有多宽,然后把腕转到窄的方向去夹"* —— **宽度用来【排序】,不是用来【否决】。**
-                    //
-                    // 我 2026-08-12 把 `width >= span => continue` 写了进来,那正是被作废的那条,
-                    // 而同一天仓里刚有一个提交在删文档里所有这类诱因。已删。
-                    // 🔴 深度:向两侧数,厚度还在同一档(±25%)的邻条能连多长。
-                    //    尖端的厚度一条一个样,连不起来;一根杆 / 一条边则连很长。
-                    let mut depth = fw;
-                    for dir in [-1i64, 1i64] {
-                        let mut j = si + dir;
-                        while j >= 0 && j < n_strip {
-                            let (a2, b2) = (t_lo + fw * j as f64, t_lo + fw * (j + 1) as f64);
-                            let (mut n2, mut x2) = (f64::MAX, f64::MIN);
-                            let mut c2 = 0u32;
-                            for &i in &cl {
-                                let u = band[i].x * tx + band[i].y * ty;
-                                if u < a2 || u > b2 {
-                                    continue;
-                                }
-                                let q = band[i].x * nx + band[i].y * ny;
-                                n2 = n2.min(q);
-                                x2 = x2.max(q);
-                                c2 += 1;
-                            }
-                            if c2 < grid.min_pts {
-                                break;
-                            }
-                            let w2 = x2 - n2;
-                            if w2 <= 0.0 || (w2 - width).abs() > 0.25 * width {
-                                break;
-                            }
-                            depth += fw;
-                            j += dir;
-                        }
-                    }
-                    // 🔴 **两个夹持面歪多少** —— 摩擦锥那一条,写成不需要 μ 的形式。
-                    //    沿指头宽方向把这一条再切两半,看近面/远面的深度差多少:
-                    //    面正对着爪 ⇒ 两半的深度一样 ⇒ 斜率 0;面是个楔子/尖端 ⇒ 斜率大。
-                    //    夹角 = atan(斜率),而**排序只需要"谁更小",所以一个 μ 都不用引**。
                     let half = 0.5 * (a + b);
-                    let (mut n_lo, mut x_lo, mut c_lo) = (f64::MAX, f64::MIN, 0u32);
-                    let (mut n_hi, mut x_hi, mut c_hi) = (f64::MAX, f64::MIN, 0u32);
-                    for &i in &cl {
-                        let u = band[i].x * tx + band[i].y * ty;
-                        if u < a || u > b {
-                            continue;
-                        }
-                        let q = band[i].x * nx + band[i].y * ny;
-                        if u < half {
-                            n_lo = n_lo.min(q);
-                            x_lo = x_lo.max(q);
-                            c_lo += 1;
-                        } else {
-                            n_hi = n_hi.min(q);
-                            x_hi = x_hi.max(q);
-                            c_hi += 1;
+                    let 段 = 扫段(a, b);
+                    // 🔴🔴🔴 **一条带子里不止一种夹法 —— 料和洞排成一串,配对有三种。**
+                    //
+                    // 沿合爪方向扫出来长这样(剪刀的两个环):
+                    //   料① · 洞A · 料③ · 洞B · 料⑤
+                    // 手指能落的地方就是那些**洞**,而顶住的是洞两边料的**面**:
+                    //   ① 夹住一块料      两个接触点 = 同一段料的两侧            ⇒ 拿起来
+                    //   ② 从外面捏拢      = 料i 的外面 ~ 料j 的外面              ⇒ 把中间的东西捏住
+                    //   ③ **从里面撑开**  = 料i 的里面 ~ 料j 的里面(手指在洞里)⇒ **驱动机构**
+                    //
+                    // ③ 就是"手指伸进两个环、往外撑把剪刀张开"那一下,而 ①/② 是拿起来那一下。
+                    // 旧代码只会算 ② 的一个退化版(第一段的外面 ~ 最后一段的外面 = 把整个物体捏住),
+                    // 所以剪刀上 156 条候选全部"比钳口宽" —— 能用的那几种**根本没被生成**。
+                    // ⚠️ 三种在 `Contact` 里长得一模一样(一个中心 + 一个宽度 + 一个合爪方向),
+                    //    区别只在**接触集那一栏的运动方向**,所以这里只管把它们都生出来。
+                    let mut 配对: Vec<(f64, f64, f64, f64, u32)> = Vec::new();  // (近端, 远端, x和, y和, 点数)
+                    for i in 0..段.len() {
+                        for j in i..段.len() {
+                            let (li, hi_, sxi, syi, _, ki) = 段[i];
+                            let (lj, hj, sxj, syj, _, kj) = 段[j];
+                            // ② 从外面:i 的外面 ~ j 的外面(i==j 时就是 ①,夹住这一段料本身)
+                            配对.push((li, hj, sxi + if i == j { 0.0 } else { sxj },
+                                       syi + if i == j { 0.0 } else { syj },
+                                       ki + if i == j { 0 } else { kj }));
+                            // ③ 从里面:i 的里面 ~ j 的里面(中间必须真的有洞)
+                            if j > i && lj > hi_ {
+                                配对.push((hi_, lj, sxi + sxj, syi + syj, ki + kj));
+                            }
                         }
                     }
-                    let tilt = if c_lo == 0 || c_hi == 0 {
-                        // 半条上没有点 ⇒ 量不出斜率。**不许当成 0(那是"完美正对")** ——
-                        // 拿不到值必须倒向不利的那一边,给一个直角。
-                        core::f64::consts::FRAC_PI_2
-                    } else {
-                        let run = 0.5 * fw;
-                        let d_near = ((n_hi - n_lo) / run).atan().abs();
-                        let d_far = ((x_hi - x_lo) / run).atan().abs();
-                        d_near.max(d_far)
-                    };
-                    let (px, py) = (sx2 / k as f64, sy2 / k as f64);
-                    let r = ((px - body.base_x).powi(2) + (py - body.base_y).powi(2)).sqrt();
-                    out.push(Contact {
-                        point: P3 { x: px, y: py, z: 0.5 * (lo + hi) },
-                        // 爪面垂直于合爪方向
-                        close_yaw: th + core::f64::consts::FRAC_PI_2,
-                        width_m: width,
-                        margin_m: span - width,
-                        above_support_m: lo.max(z0) - support_z,
-                        reach_r: r,
-                        reachable: r >= body.reach_lo && r <= body.reach_hi,
-                        jaw_declared: body.jaw.declared(),
-                        within_jaw: width < span,
-                        n_pts: k,
-                        depth_m: depth,
-                        face_tilt_rad: tilt,
-                        com_offset_m: ((px - com_x).powi(2) + (py - com_y).powi(2)).sqrt(),
-                    });
+                    for (mn, mx, sx2, sy2, k) in 配对 {
+                        if k < grid.min_pts { continue }
+                        let width = mx - mn;
+                        if width <= 0.0 { continue }
+                        // 🔴🔴 **这里【不许】因为"太宽"而丢掉一条候选。**
+                        // 仓里唯一那条可抓性规矩禁止*"拿钳口能张多少当阈值去筛物体"*;
+                        // 宽度**只排序,不否决**(见 `Contact::within_jaw` 的注释)。
+                        //
+                        // 🔴 深度:向两侧数,**同一段料**(中心最接近的那一段)厚度还在同一档(±25%)的
+                        //    邻条能连多长。⚠️ 必须按**段**去比,不能再按整条的最小最大比 ——
+                        //    否则一个圈的"深度"会是外径的连续性,和这一段环壁毫无关系。
+                        let 中q = 0.5 * (mn + mx);
+                        let mut depth = fw;
+                        for dir in [-1i64, 1i64] {
+                            let mut j = si as i64 + dir;
+                            while j >= 0 && j < n_strip {
+                                let (a2, b2) = (t_lo + fw * j as f64, t_lo + fw * (j + 1) as f64);
+                                let 邻 = 扫段(a2, b2);
+                                let mut 最近: Option<(f64, f64)> = None;
+                                let mut 差 = f64::MAX;
+                                for (m2, x2, _, _, _, c2) in 邻.iter() {
+                                    if *c2 < grid.min_pts { continue }
+                                    let d = (0.5 * (m2 + x2) - 中q).abs();
+                                    if d < 差 { 差 = d; 最近 = Some((*m2, *x2)) }
+                                }
+                                let Some((m2, x2)) = 最近 else { break };
+                                let w2 = x2 - m2;
+                                if w2 <= 0.0 || (w2 - width).abs() > 0.25 * width { break }
+                                depth += fw;
+                                j += dir;
+                            }
+                        }
+                        // 🔴 **两个夹持面歪多少** —— 摩擦锥那一条,写成不需要 μ 的形式。
+                        //    沿指头宽方向把**这一段**再切两半,看近面/远面的深度差多少。
+                        let (mut n_lo, mut x_lo, mut c_lo) = (f64::MAX, f64::MIN, 0u32);
+                        let (mut n_hi, mut x_hi, mut c_hi) = (f64::MAX, f64::MIN, 0u32);
+                        for &i in &cl {
+                            let u = band[i].x * tx + band[i].y * ty;
+                            if u < a || u > b { continue }
+                            let q = band[i].x * nx + band[i].y * ny;
+                            if q < mn - 间隙 || q > mx + 间隙 { continue }   // 只看这一段的点
+                            if u < half { n_lo = n_lo.min(q); x_lo = x_lo.max(q); c_lo += 1; }
+                            else { n_hi = n_hi.min(q); x_hi = x_hi.max(q); c_hi += 1; }
+                        }
+                        let tilt = if c_lo == 0 || c_hi == 0 {
+                            // 半条上没有点 ⇒ 量不出斜率。**不许当成 0(那是"完美正对")** ——
+                            // 拿不到值必须倒向不利的那一边,给一个直角。
+                            core::f64::consts::FRAC_PI_2
+                        } else {
+                            let run = 0.5 * fw;
+                            let d_near = ((n_hi - n_lo) / run).atan().abs();
+                            let d_far = ((x_hi - x_lo) / run).atan().abs();
+                            d_near.max(d_far)
+                        };
+                        let (px, py) = (sx2 / k as f64, sy2 / k as f64);
+                        let r = ((px - body.base_x).powi(2) + (py - body.base_y).powi(2)).sqrt();
+                        out.push(Contact {
+                            point: P3 { x: px, y: py, z: 0.5 * (lo + hi) },
+                            close_yaw: th + core::f64::consts::FRAC_PI_2,
+                            width_m: width,
+                            margin_m: span - width,
+                            above_support_m: lo.max(z0) - support_z,
+                            reach_r: r,
+                            reachable: r >= body.reach_lo && r <= body.reach_hi,
+                            jaw_declared: body.jaw.declared(),
+                            within_jaw: width < span,
+                            n_pts: k,
+                            depth_m: depth,
+                            face_tilt_rad: tilt,
+                            com_offset_m: ((px - com_x).powi(2) + (py - com_y).powi(2)).sqrt(),
+                        });
+                    }
                 }
             }
         }
