@@ -796,6 +796,46 @@ fn 存标定(
     if let Some(v) = 空合读数 {
         j.push_str(&format!(",\n  \"jaw_closed_on_nothing\": {v}"));
     }
+    // 🔴🔴🔴 **顶层键也要【合并】,不许用"这次没量到"把上一炮量到的抹掉。**
+    //
+    // 上面那段已经把 `quantities` 合并了(2026-08-24 的教训:"跨炮累积"变成"跨炮侵蚀"),
+    // **而顶层键漏了同一条**。实测代价(XA,2026-08-28):开机那次落盘走的是
+    // `存标定(…, None, None, None, None, None, None, None)`,于是上一炮辛苦量到并存下的
+    // **通道表 / 命令类型 / 手上相机 三样,在开机第一次落盘时被整片抹掉** ——
+    // 而这三样正是"越用越强"的全部家当。病相还特别温和:日志里先印
+    // `[装] 通道表装回:6 个通道`(装回来了,是真的),几行之后
+    // `[装] 落盘(已量到 2 格)`(把文件写回去了,也是真的),**没有任何一行看起来不对**。
+    // ⇒ 凡是这次没给值的顶层键,**原样从旧文件里抄回来**。
+    for 键 in ["image_jacobian", "channel_table", "channels_are_joints",
+               "camera_on_hand", "jaw_span_m", "jaw_closed_on_nothing", "hand"] {
+        if j.contains(&format!("\"{键}\"")) { continue }
+        let 找 = format!("\"{键}\"");
+        let Some(k0) = 旧.find(&找) else { continue };
+        // 从键名后面的冒号开始,抄到**同一层**的下一个逗号或收尾大括号为止。
+        let 之后 = &旧[k0 + 找.len()..];
+        let Some(c0) = 之后.find(':') else { continue };
+        let 值段 = &之后[c0 + 1..];
+        let (mut 深, mut 串, mut 转) = (0i32, false, false);
+        let mut 终 = 值段.len();
+        for (i, ch) in 值段.char_indices() {
+            if 转 { 转 = false; continue }
+            match ch {
+                '\\' if 串 => 转 = true,
+                '"' => 串 = !串,
+                '[' | '{' if !串 => 深 += 1,
+                ']' | '}' if !串 => {
+                    if 深 == 0 { 终 = i; break }
+                    深 -= 1;
+                }
+                ',' if !串 && 深 == 0 => { 终 = i; break }
+                _ => {}
+            }
+        }
+        let 值 = 值段[..终].trim();
+        if 值.is_empty() { continue }
+        println!("[装] 顶层键 \"{键}\" 这次没量到 ⇒ **从旧文件原样抄回**(不许把上一炮的抹掉)");
+        j.push_str(&format!(",\n  \"{键}\": {值}"));
+    }
     j.push_str("\n}\n");
     let n格 = j.matches("\"provenance\"").count();
     match std::fs::write(out, &j) {
