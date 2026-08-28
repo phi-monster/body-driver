@@ -137,8 +137,18 @@ impl 自图 {
                 }
                 // 深度那一行:这个格子(跟着它一起挪过去之后)的中位深度变了多少。
                 if let (Some(z0), Some(z1)) = (前深, 后深) {
+                    // 🔴 **负位移不许直接 `as usize`** —— 它会绕成一个巨大的数,
+                    //    下一行 `x0 + 边` 当场整数溢出崩溃。
+                    //    实测代价(XZ,2026-08-29):驱动**直接 panic 退出**
+                    //    (`attempt to add with overflow`),于是自图一次都没被喂过 ⇒
+                    //    日志上是"自图才认出 0 格",读起来像"还没学到",而真相是**它死了**。
+                    //    ⚠️ 这一条和今晚那三条"日志全绿而世界没发生"同族:
+                    //       崩溃发生在另一个进程/另一段输出里,主线日志看不出异常。
+                    let (nx, ny) = ((x0 as i64 + du.round() as i64), (y0 as i64 + dv.round() as i64));
                     let a = 中位深(z0, w, h, x0, y0, self.边);
-                    let b = 中位深(z1, w, h, (x0 as i64 + du as i64) as usize, (y0 as i64 + dv as i64) as usize, self.边);
+                    let b = if nx >= 0 && ny >= 0 {
+                        中位深(z1, w, h, nx as usize, ny as usize, self.边)
+                    } else { None };
                     if let (Some(a), Some(b)) = (a, b) {
                         let ez = (b - a) - pz;
                         for k in 0..self.通道数 {
@@ -244,7 +254,8 @@ impl 自图 {
 
 /// 一个格子里的中位深度(米)。取中位而不是均值:格子边上会切到背景,均值会被拖走。
 fn 中位深(z: &[f64], w: usize, h: usize, x0: usize, y0: usize, 边: usize) -> Option<f64> {
-    if x0 + 边 > w || y0 + 边 > h { return None }
+    // 用减法比,不用加法 —— 加法在 x0 是个巨大的数时会溢出(XZ 实测崩过一次)。
+    if x0 > w.saturating_sub(边) || y0 > h.saturating_sub(边) { return None }
     let mut v: Vec<f64> = Vec::with_capacity(边 * 边);
     for y in y0..y0 + 边 { for x in x0..x0 + 边 {
         let d = z[y * w + x];
