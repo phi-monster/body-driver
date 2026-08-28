@@ -23,6 +23,7 @@
 //! 的目标上。⇒ **插头在外面,身体在里面。** 换一种机器人 = 换一个插头。
 
 mod discover;
+mod selfmap;
 mod task;
 mod wire;
 
