@@ -3706,7 +3706,15 @@ fn 服务<S: std::io::Read + std::io::Write>(
     // 返回:(实际走了多远, 各通道实际动了多少, 路上有没有被挡住)。
     // 「各通道实际动了多少」的量纲与通道表**同一套**(平移取轴上分量、转动取相对四元数矢部 ×2),
     // 因为干活时那条边干边长的修正要拿它做除数;两处不一致会把好表越修越坏。
-    let 迈通道 = |plug: &mut Plug<S>, 动: &[f64], 比: f64, jaw: f64, 是关节: bool| -> Option<(f64, Vec<f64>, bool)> {
+    // 🔴🔴🔴 **搬运不许等停 —— 一集只有 200 个仿真步。**(XK 实测,2026-08-28)
+    //
+    // `迈通道` 每走一步要等手臂读数稳住(`等拍 * 2` 拍)。量表和追要这个,因为它们**要读**
+    // 这一步的结果;而**把手从桌子这头搬到那头不需要读中间过程**。
+    // 实测代价(XK):要走 0.5058 m、算出要 264 步,而每步吃掉约 20 个仿真步 ⇒
+    // 一集只够走 **10 步**,第 0 步刚打印完就被换集打断,然后合了一把空气。
+    // 日志里既没有"走到了"也没有"过不去" —— 它是被 `复位过` 静默切走的。
+    // ⇒ 搬运走 `稳拍 = 1`:发一次命令、读一帧就进下一步,一步只花约 2 个仿真步。
+    let 迈通道稳 = |plug: &mut Plug<S>, 动: &[f64], 比: f64, jaw: f64, 是关节: bool, 稳拍: u32| -> Option<(f64, Vec<f64>, bool)> {
         let f0 = plug.sense()?;
         if 是关节 {
             let q0 = f0.joints.first().cloned()?;
@@ -3714,7 +3722,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
             for (i, dq) in 动.iter().enumerate() { if i < q.len() { q[i] += dq * 比 } }
             if !plug.act(&Cmd::Joints { arm: 0, q, jaw }) { return None }
             let mut 上 = None; let mut 稳 = 0u32; let mut 末 = None;
-            for _ in 0..(等拍 * 2) {
+            for _ in 0..稳拍.max(1) {
                 let f = plug.sense()?;
                 let 此 = f.joints.first().cloned().unwrap_or_default();
                 末 = Some(此.clone());
@@ -3881,6 +3889,11 @@ fn 服务<S: std::io::Read + std::io::Write>(
     };
     *手上相机载 = 手上相机;
     let _ = &相机们;
+
+    /// 老名字:等手臂停稳再返回。量表、追、退回都要它 —— 它们要读这一步的结果。
+    let 迈通道 = |plug: &mut Plug<S>, 动: &[f64], 比: f64, jaw: f64, 是关节: bool| -> Option<(f64, Vec<f64>, bool)> {
+        迈通道稳(plug, 动, 比, jaw, 是关节, 等拍 * 2)
+    };
 
     /// 一个像素周围那一小窗里的**近侧**深度。窗里一半是物体、一半是它后面的桌面,
     /// 中位会滑到桌面那一半去 ⇒ 取近侧四分之一。分位数是数据自己的,不是填的。
@@ -5665,9 +5678,12 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 let mut 没动 = 0u32;
                 let mut 起位 = 位;
                 if let Some(e0) = plug.sense().and_then(|f| f.ee.first().copied()) { 起位 = [e0[0], e0[1], e0[2]]; }
+                let mut 被切走 = false;
                 for k in 0..步数 {
-                    if plug.复位过 { break }
-                    let Some(e) = plug.sense().and_then(|f| f.ee.first().copied()) else { break };
+                    // 🔴 换集把搬运切断了要**说出来** —— XK 实测它被静默切走,
+                    //    日志里既没有"走到了"也没有"过不去",读起来像"走完了没碰到"。
+                    if plug.复位过 { println!("[服]      🔴 搬到第 {k}/{步数} 步换集了 ⇒ 这一集的步数不够搬这么远"); 被切走 = true; break }
+                    let Some(e) = plug.sense().and_then(|f| f.ee.first().copied()) else { println!("[服]      读不到帧 ⇒ 停"); break };
                     // 还要走多少:目标 − (指尖起点 + 末端已经挪过的量)。
                     let 剩 = [尖目标[0] - 尖0[0] - (e[0] - 起位[0]),
                               尖目标[1] - 尖0[1] - (e[1] - 起位[1]),
@@ -5680,7 +5696,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     let mut 动 = vec![0.0f64; 通道数];
                     let 比 = (探步 / 剩长).min(1.0);
                     for i in 0..3 { 动[i] = 剩[i] * 比 }
-                    let Some((走, _, 挡)) = 迈通道(plug, &动, 1.0, jaw0, *通道是关节) else {
+                    // 🔴 搬运不等停(见 `迈通道稳` 头注):一集只有 200 个仿真步,等停版一集只够走 10 步。
+                    let Some((走, _, 挡)) = 迈通道稳(plug, &动, 1.0, jaw0, *通道是关节, 1) else {
                         println!("[服]      命令发不出去 ⇒ 停在这儿合"); break };
                     if 挡 {
                         println!("[服]      🟢 第 {k}/{步数} 步被挡住了(还剩 {剩长:.4} m)⇒ **就地合**");
@@ -5696,6 +5713,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         println!("[服]      搬:第 {k}/{步数} 步 · 末端在 ({:.3},{:.3},{:.3}) · 还剩 {剩长:.4} m", e[0], e[1], e[2]);
                     }
                 }
+                if 被切走 { continue }
                 if !碰上了 { println!("[服]      没被挡住就走完了 ⇒ 照样合,结果照实报"); }
                 // 交给下面同一段合爪 + 退回 —— 不另写一套。
                 已就位 = true;
