@@ -672,6 +672,10 @@ fn 存标定(
     // 以前写死的是"停在 0 就是空的",而 **0 是这具 Franka 的约定,不是所有身体的**
     // (下一步就要零改动换 ARX 双臂)。量一次存住,换身体自动重量。
     空合读数: Option<f64>,
+    // 🔴🔴 **"这台相机看不见我的钳口张合"** —— 一条量出来的身体事实。
+    // XN 实测:一集 200 拍里约 180 拍花在"量自己",而认接触面在这台相机上**物理上不可能成功**
+    //(张合只让 0–4 个像素变),却每一拍都试一次、每次 40 拍。量到了就存住,下一炮直接跳过。
+    认不出接触面: Option<bool>,
     // 干活时量到的**画面雅可比**:Δ(画面横, 画面纵, 那一点的深) = 雅 · Δ(世界 x,y,z)。
     雅: Option<[[f64; 3]; 3]>,
 ) -> usize {
@@ -796,6 +800,9 @@ fn 存标定(
     if let Some(v) = 空合读数 {
         j.push_str(&format!(",\n  \"jaw_closed_on_nothing\": {v}"));
     }
+    if let Some(b) = 认不出接触面 {
+        j.push_str(&format!(",\n  \"jaw_motion_invisible\": {b}"));
+    }
     // 🔴🔴🔴 **顶层键也要【合并】,不许用"这次没量到"把上一炮量到的抹掉。**
     //
     // 上面那段已经把 `quantities` 合并了(2026-08-24 的教训:"跨炮累积"变成"跨炮侵蚀"),
@@ -807,7 +814,7 @@ fn 存标定(
     // `[装] 落盘(已量到 2 格)`(把文件写回去了,也是真的),**没有任何一行看起来不对**。
     // ⇒ 凡是这次没给值的顶层键,**原样从旧文件里抄回来**。
     for 键 in ["image_jacobian", "channel_table", "channels_are_joints",
-               "camera_on_hand", "jaw_span_m", "jaw_closed_on_nothing", "hand"] {
+               "camera_on_hand", "jaw_span_m", "jaw_closed_on_nothing", "jaw_motion_invisible", "hand"] {
         if j.contains(&format!("\"{键}\"")) { continue }
         let 找 = format!("\"{键}\"");
         let Some(k0) = 旧.find(&找) else { continue };
@@ -1005,6 +1012,7 @@ fn main() {
     let mut 手上相机装回: Option<usize> = None;
     let mut 张开装回: Option<f64> = None;
     let mut 空合装回: Option<f64> = None;
+    let mut 认面装回 = false;
     // 这具身体的通道是哪一种 —— 关节,还是末端那六个自由度。**试出来的,不是假设的。**
     let mut 通道是关节 = true;
     if let Some(path) = &读回 {
@@ -1135,6 +1143,12 @@ fn main() {
                             空合装回 = Some(x);
                             println!("[装] 空手合到底的读数装回:{x:.4} —— 判「指间有没有东西」拿它当零点");
                         }
+                    }
+                }
+                if let Some(v) = j.get("jaw_motion_invisible") {
+                    if v.text() == Some("true") || v.num() == Some(1.0) {
+                        认面装回 = true;
+                        println!("[装] 上一炮量到:**这台相机看不见我的钳口张合** —— 直接走搬过去,那 40 拍留给走路");
                     }
                 }
                 if let Some(c) = j.get("camera_on_hand") {
@@ -3032,7 +3046,7 @@ fn main() {
             }
         }
         // 🔴 每一轮结束就落一次盘 —— 见 `存标定` 上面那段:只在末尾存等于赌这一炮能跑到底。
-        let n格 = 存标定(&out, &body, &相机们, 探幅, 跨度相机, None, None, None, None, None, None, None);
+        let n格 = 存标定(&out, &body, &相机们, 探幅, 跨度相机, None, None, None, None, None, None, None, None);
         println!("      [存] 已落盘 {n格} 格 ⇒ {out}");
     }
     // 🔴🔴 **量到了必须存得下来,而且要存成【驱动自己读得回去】的那个形状。**
@@ -3099,7 +3113,7 @@ fn main() {
             println!("[装]    {k:<20} {d:.4} m{}", if *d > 0.06 { "   ⚠️ 带偏" } else { "" });
         }
     }
-    let n格 = 存标定(&out, &body, &相机们, 探幅, 跨度相机, None, None, None, None, None, None, None);
+    let n格 = 存标定(&out, &body, &相机们, 探幅, 跨度相机, None, None, None, None, None, None, None, None);
     println!("[装] 落盘(已量到 {n格} 格 · 本次点名量到 {} 格)", 成.len());
 
     // ── 🔴🔴 **下命令就去干。** 干到缺某个身体量,它点名要,回上面量完再回来。 ──
@@ -3108,7 +3122,7 @@ fn main() {
         Some((h, p)) => (h.to_string(), p.parse::<u16>().unwrap_or(8077)),
         None => (眼.clone(), 8077),
     };
-    match 服务(&mut plug, &body, &相机们, &眼主机, 眼端口, &out, 读回.as_deref(), &给不出, &mut 手载, &mut 雅载, &mut 通道表, &mut 通道是关节, &mut 手上相机装回, &mut 张开装回, &mut 空合装回) {
+    match 服务(&mut plug, &body, &相机们, &眼主机, 眼端口, &out, 读回.as_deref(), &给不出, &mut 手载, &mut 雅载, &mut 通道表, &mut 通道是关节, &mut 手上相机装回, &mut 张开装回, &mut 空合装回, &mut 认面装回) {
         None => break '外,
         Some(名) => match 点名成格(&名) {
             Some(q) => {
@@ -3486,6 +3500,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
     张开载: &mut Option<f64>,
     // 🔴 空手合到底时机体报的读数 —— "指间有没有东西"的零点。量一次存住。
     空合载: &mut Option<f64>,
+    // 🔴 "这台相机看不见我的钳口张合" —— 装回来就直接跳过那一步,把拍数留给走路。
+    认面载: &mut bool,
 ) -> Option<String> {
     use body_layer::measurement::Quantity as Q;
     println!("[服] 干活模式:观测里给什么指令,就做什么。没有标定阶段,缺什么当场点名要。");
@@ -4277,7 +4293,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
     let mut 试过: Vec<[f64; 3]> = Vec::new();
     let mut 静 = 0u32;   // 连着看不清时换方向用的计数
     // 🔴 连着几次认不出接触面 —— 到三次就当成"这台相机看不见我的钳口张合"这条身体事实。
-    let mut 认面失败 = 0u32;
+    let mut 认面失败 = if *认面载 { 3 } else { 0 };
     let mut 上眼: Option<(f64, f64)> = None;   // 上一次看到爪子在画面哪儿(跟踪用)
     // 🔴🔴🔴 **接触面只认一次,之后靠【跟踪】。**(WL 实测,2026-08-28)
     // `看爪` 认爪子靠"晃钳口 + 前后帧做差",认不出来时还会加大幅度反复重试 ——
@@ -5253,7 +5269,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 // ⚠️ 这些量是**身体的属性,与任务无关** —— 抓棒球量到的,抓剪刀/擦桌子照样用。
                 {
                     let n格 = 存标定(标定文件, body, 相机们, 探步, 0, *手载,
-                        通道表.as_deref(), Some(*通道是关节), 手上相机, *张开载, *空合载, *雅载);
+                        通道表.as_deref(), Some(*通道是关节), 手上相机, *张开载, *空合载, Some(*认面载), *雅载);
                     println!("[服]   💾 量到的存进 {标定文件}:这一次落了 {n格} 格(下一炮 --in 装回来,不用重量)");
                 }
             }
@@ -5637,7 +5653,13 @@ fn 服务<S: std::io::Read + std::io::Write>(
             None
         } else {
             let r = 认接触面(plug, *通道是关节);
-            if r.is_none() { 认面失败 += 1 } else { 认面失败 = 0 }
+            if r.is_none() {
+                认面失败 += 1;
+                if 认面失败 >= 3 && !*认面载 {
+                    *认面载 = true;
+                    println!("[服]   💾 记住这条身体事实:**这台相机看不见我的钳口张合**(连着 {认面失败} 次)⇒ 存进身体文件,下一炮开机就跳过");
+                }
+            } else { 认面失败 = 0; *认面载 = false }
             r
         };
         let 面点 = match 面点 {
