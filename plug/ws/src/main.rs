@@ -4274,34 +4274,36 @@ fn 服务<S: std::io::Read + std::io::Write>(
         let 前 = 见(plug)?;
         let mut 动 = vec![0.0; 通道数];
         动[j] = 探幅;
-        迈通道(plug, &动, 1.0, jaw0, 是关节)?;
+        // 🔴 喂自图的必须是**实际动了多少**,不是命令(见伺服那一段的头注:
+        //    这具身体一拍只执行掉约 10%,而且比例每步都变 ⇒ 拿命令去学是学不出来的)。
+        let (_, 实1, _) = 迈通道(plug, &动, 1.0, jaw0, 是关节)?;
         等停(plug, 等拍 * 2);
         let 后1 = 见(plug)?;
         // 🔴 **这一步也是自图的一次观测。** 挪进画面是驱动本来就在做的、幅度最大的动作,
         //    白扔掉太亏 —— 自图冷启动慢正是 XV 那一炮的病(只认出 2 格,而且是底座)。
         if let Some((gw2, gh2, _)) = plug.sense().and_then(|f| 灰(&f, 相机号)) {
             let 图 = 图.get_or_insert_with(|| crate::selfmap::自图::新(gw2, gh2, 16, 通道数));
-            图.喂(&前, &后1, None, None, gw2, gh2, &动, 12);
+            图.喂(&前, &后1, None, None, gw2, gh2, &实1, 12);
         }
         let 正 = 变数(&前, &后1);
         // 往回走两步 = 落在起点的另一边,和正向那一步等距、可比。
         动[j] = -探幅 * 2.0;
-        迈通道(plug, &动, 1.0, jaw0, 是关节)?;
+        let (_, 实2, _) = 迈通道(plug, &动, 1.0, jaw0, 是关节)?;
         等停(plug, 等拍 * 2);
         let 后2 = 见(plug)?;
         if let Some((gw2, gh2, _)) = plug.sense().and_then(|f| 灰(&f, 相机号)) {
             let 图 = 图.get_or_insert_with(|| crate::selfmap::自图::新(gw2, gh2, 16, 通道数));
-            图.喂(&后1, &后2, None, None, gw2, gh2, &动, 12);
+            图.喂(&后1, &后2, None, None, gw2, gh2, &实2, 12);
         }
         let 反 = 变数(&前, &后2);
         if 正 >= 反 {
             动[j] = 探幅 * 2.0;
-            迈通道(plug, &动, 1.0, jaw0, 是关节)?;
+            let (_, 实3, _) = 迈通道(plug, &动, 1.0, jaw0, 是关节)?;
             等停(plug, 等拍 * 2);
             if let Some(后3) = 见(plug) {
                 if let Some((gw2, gh2, _)) = plug.sense().and_then(|f| 灰(&f, 相机号)) {
                     let 图 = 图.get_or_insert_with(|| crate::selfmap::自图::新(gw2, gh2, 16, 通道数));
-                    图.喂(&后2, &后3, None, None, gw2, gh2, &动, 12);
+                    图.喂(&后2, &后3, None, None, gw2, gh2, &实3, 12);
                 }
             }
         }
@@ -5889,14 +5891,20 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     let 前深图 = 深图(plug, 相机号);
                     let Some((_, _, 前帧)) = plug.sense().and_then(|f| 灰(&f, 相机号)) else {
                         println!("[服]      拍不到前帧 ⇒ 停"); break };
-                    let Some((走, _, 挡)) = 迈通道稳(plug, &动0, 比, jaw0, *通道是关节, 1) else {
+                    let Some((走, 动实, 挡)) = 迈通道稳(plug, &动0, 比, jaw0, *通道是关节, 1) else {
                         println!("[服]      命令发不出去 ⇒ 停"); break };
                     if let Some(后帧) = plug.sense().and_then(|f| 灰(&f, 相机号)).map(|(_, _, x)| x) {
-                        let 图 = 自图.get_or_insert_with(|| crate::selfmap::自图::新(gw, gh, 16, 动0.len()));
-                        // 命令乘上这一步真正用的比例 —— 喂进去的必须是**这一步实际下的命令**。
-                        let 这一下: Vec<f64> = 动0.iter().map(|x| x * 比).collect();
+                        let 图 = 自图.get_or_insert_with(|| crate::selfmap::自图::新(gw, gh, 16, 动实.len().max(1)));
+                        // 🔴🔴🔴 **喂"实际动了多少",不是"我下了什么命令"。**
+                        //
+                        // 实测代价(YB,2026-08-29):前帧修好之后"动得够多"的格子从 0 变成 8–13,
+                        // 但**"解释得掉的"仍然是 0**。原因是这具身体**一拍只执行掉命令的约 10%,
+                        // 而且这个比例每步都在变**(命令越大比例越小,离目标越近走得越慢)——
+                        // 于是"命令 → 画面跑多少"这个关系**本来就不是常数**,再多观测也学不出来。
+                        // 而"**胳膊实际动了多少** → 画面跑多少"才是一个真正的雅可比,它是稳定的。
+                        // `迈通道稳` 一直把实际动了多少返回着,我却用 `_` 扔掉了。
                         let 后深图 = 深图(plug, 相机号);
-                        图.喂(&前帧, &后帧, 前深图.as_deref(), 后深图.as_deref(), gw, gh, &这一下, 12);
+                        图.喂(&前帧, &后帧, 前深图.as_deref(), 后深图.as_deref(), gw, gh, &动实, 12);
                     }
                     // 🔴🔴 **不等停的时候 `挡` 是假阳性,不许信它。**
                     //
