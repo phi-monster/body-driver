@@ -4031,9 +4031,14 @@ fn 服务<S: std::io::Read + std::io::Write>(
         let jaw0 = 帧.jaw.first().copied().unwrap_or(1.0);
 
         // ① 指令 —— 整句直接问眼,驱动不解析任务名。
-        let 指令 = plug.last.clone()
-            .and_then(|o| 取(&o, &["instruction".to_string()]))
-            .and_then(|v| 字(&v))
+        // 🔴 **客户可以直接下单。** 环境自带的 `instruction` 是"这一集的任务",
+        //    而 driver 本来就该听得懂**当场给的一句话**(现场改需求是常态,不是特例)。
+        //    `BL_ORDER` 有内容就用它,没有就照旧用观测里那句。
+        //    通用:它不认识任何任务名/物体名/机体名,整句原样交给眼。
+        let 指令 = std::env::var("BL_ORDER").ok().filter(|t| !t.trim().is_empty())
+            .or_else(|| plug.last.clone()
+                .and_then(|o| 取(&o, &["instruction".to_string()]))
+                .and_then(|v| 字(&v)))
             .filter(|t| !t.is_empty());
         let Some(指令) = 指令 else {
             plug.act(&Cmd::Hold);
@@ -4055,6 +4060,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
         };
         // 🔴 指令原文要进日志 —— 眼指错了地方和手够不着,在数字上都表现为"伺服收敛不了",
         // 而修法完全相反。不印指令就分不开这两件事。
+        println!("[服] 🎯 眼给的框(归一化):x {:.3}..{:.3} · y {:.3}..{:.3}",
+            look.box01[0], look.box01[2], look.box01[1], look.box01[3]);
         println!("[服] 🎯 指令「{}」⇒ 眼指 ({:.3},{:.3}) · 占画幅 {:.3} · 那一点深 {:.3} m",
             指令.chars().take(80).collect::<String>(), look.u, look.v, look.span_frac, d星);
 
@@ -5496,6 +5503,12 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         .max((yw[取w * 9 / 10] - yw[取w / 10]) as f64 / h2 as f64).max(0.01),
                     verb: look.verb.clone(),
                     force: look.force,
+                    // 这一路不是眼给的框,是**从"手一动、哪些像素属于世界"里量出来的**;
+                    // 用同一批像素的十分位当框边,和上面 u/v/span 出自同一份证据。
+                    box01: [
+                        xw[取w / 10] as f64 / w2 as f64, yw[取w / 10] as f64 / h2 as f64,
+                        xw[取w * 9 / 10] as f64 / w2 as f64, yw[取w * 9 / 10] as f64 / h2 as f64,
+                    ],
                 };
                 println!("[服]   [收尾] 手一动 ⇒ {} 个像素属于**世界**;离两指中间最近的那撮在 ({:.3},{:.3}) 占画幅 {:.3}",
                     世界.len(), 看2.u, 看2.v, 看2.span_frac);

@@ -31,6 +31,9 @@ pub struct Look {
     pub verb: String,
     /// 粗略力度。
     pub force: String,
+    /// 🔴 眼给的框,归一化 `[x0, y0, x1, y1]`(0=左/上,1=右/下)。
+    /// `u`/`v`/`span_frac` 都是从它算出来的 —— 留原始框是为了下游能画出来核对。
+    pub box01: [f64; 4],
 }
 
 /// 问一句。`what` 是要指的名词;`rgb` 是 `h*w*3` 的原始像素。
@@ -50,13 +53,32 @@ pub fn ask(host: &str, port: u16, what: &str, rgb: &[u8], w: usize, h: usize) ->
     // 而 `span_frac` 写的是 **0.0000** —— 它其实"说"了看不见,只是说在另一格里。
     // 🔴 **也不许在提示里提爪子/夹爪。** 真机那条线实测过:提示里写"底部黑三角=夹爪",
     // 反而把那个词喂进去、让它照着指爪。要指的是世界,不是身体。
+    // 🔴🔴🔴 **问【框】,不问【点】。**(2026-08-28 改;隔壁 universal-grounding 早就量过)
+    //
+    // `universal-grounding/README "眼给框 + 闭式弓字形路径"` 原文:
+    //   **眼给框 ⇒ 10 次成 9(n=34 时 23/34);而眼给点 ⇒ 0/10**。
+    // 同一份文档 §3.6 给了病因,而且是量出来的:同一批模型做四选一,
+    //   **"选哪条轨迹" 0.916(超人类)· "选哪个抓取点" 0.403 ≈ 随机**
+    //   ⇒ *"所有模型在需要空间精度的那问上都塌到随机 ⇒ 病因是【问法】,不是模型弱。"*
+    // 我们这边一直在问点,正是被点名的那个问法。
+    //
+    // 本仓实测(W8,棒球,同一帧):球的真实中心 (440,183)、半径 ~15 px。
+    //   · 问点  ⇒ (454,168):**偏右 14 px、偏上 15 px ⇒ 落在球外面**(球顶 y=169);
+    //     且 `span_frac` 给 0.030 = 直径 19 px,而球真实 ~30 px ⇒ **小四成**。
+    //   · 问框  ⇒ (426,168)-(455,190):**压在球上**,宽度对得上。
+    // 位置偏一个半径 + 尺寸小四成,两件事叠加 ⇒ `mask_around` 的种子点落到桌面上
+    //   ⇒ 那一点的深度 = 桌面深度 ⇒ **掩膜整片长成桌面**,下游在空桌面上规划抓取
+    //   (`one1.pgm`:两个接触点一个在球的边缘、一个在空桌面上)。
+    // ⇒ 框把**种子点**和**半径**同时修对,不需要任何新模型、不碰那三个被判死的检测器。
     let prompt = format!(
         "Task: {what}\\n\\nWhich single object in this image should the robot act on? \
-         Give its centre as normalised image coordinates u (0=left,1=right) and \
-         v (0=top,1=bottom), and set span_frac to the fraction of the image width it covers."
+         Output its tight bounding box as normalised image coordinates: \
+         x0,y0 = top-left corner and x1,y1 = bottom-right corner, \
+         where x is 0 at the left edge and 1 at the right edge, \
+         and y is 0 at the top edge and 1 at the bottom edge."
     );
     let body = format!(
-        r#"{{"model":"eye","max_tokens":600,"temperature":0,"chat_template_kwargs":{{"enable_thinking":false}},"response_format":{{"type":"json_schema","json_schema":{{"name":"contact_ask","strict":true,"schema":{{"type":"object","additionalProperties":false,"required":["u","v","span_frac","verb","force"],"properties":{{"u":{{"type":"number","minimum":0,"maximum":1}},"v":{{"type":"number","minimum":0,"maximum":1}},"span_frac":{{"type":"number","minimum":0,"maximum":1}},"verb":{{"type":"string","enum":["grasp","push","place","pry","open","close"]}},"force":{{"type":"string","enum":["light","medium","firm"]}}}}}}}}}},"messages":[{{"role":"user","content":[{{"type":"image_url","image_url":{{"url":"data:image/bmp;base64,{b64}"}}}},{{"type":"text","text":"{prompt}"}}]}}]}}"#
+        r#"{{"model":"eye","max_tokens":600,"temperature":0,"chat_template_kwargs":{{"enable_thinking":false}},"response_format":{{"type":"json_schema","json_schema":{{"name":"contact_ask","strict":true,"schema":{{"type":"object","additionalProperties":false,"required":["x0","y0","x1","y1","verb","force"],"properties":{{"x0":{{"type":"number","minimum":0,"maximum":1}},"y0":{{"type":"number","minimum":0,"maximum":1}},"x1":{{"type":"number","minimum":0,"maximum":1}},"y1":{{"type":"number","minimum":0,"maximum":1}},"verb":{{"type":"string","enum":["grasp","push","place","pry","open","close"]}},"force":{{"type":"string","enum":["light","medium","firm"]}}}}}}}}}},"messages":[{{"role":"user","content":[{{"type":"image_url","image_url":{{"url":"data:image/bmp;base64,{b64}"}}}},{{"type":"text","text":"{prompt}"}}]}}]}}"#
     );
 
     // 🔴 **上限 200 在腕相机的特写上会被顶到**(实测:偏移 635 处对象没收尾),
@@ -89,12 +111,26 @@ pub fn ask(host: &str, port: u16, what: &str, rgb: &[u8], w: usize, h: usize) ->
     // 自回归解码让它在看到 u/v 之前就得先盖章 —— 三问全答弃权,而同一次里 u/v 写的是对的。
     // ⚠️ 「让眼自己说看不见」这条路本仓已判过:加弃权选项 / 调字段序 / 先列后选,三种都没治住。
     //    弃权要靠**几何自证**(拿它给的像素去看那处到底有没有东西),不靠它的自述。
+    // 框 → 中心 + 尺寸。**中心和半径都来自框自己,不再由模型另外估一个"占画幅"。**
+    // 顺序不许假设:有的回答会把两角写反,取 min/max。
+    let (bx0, bx1) = { let (a, b) = (num("x0")?, num("x1")?); (a.min(b), a.max(b)) };
+    let (by0, by1) = { let (a, b) = (num("y0")?, num("y1")?); (a.min(b), a.max(b)) };
+    let 宽f = (bx1 - bx0).max(0.0);
+    let 高f = (by1 - by0).max(0.0);
+    if !(宽f > 0.0 && 高f > 0.0) {
+        return Err(format!("眼给的框是空的:x {bx0:.3}..{bx1:.3} · y {by0:.3}..{by1:.3}"));
+    }
+    // `span_frac` 的下游语义是"**占画面宽度**的几分之几",`mask_around` 拿它同时定
+    // 圈的半径和深度厚度。取框的**长边**换算到画宽上 —— 短边会让圈盖不住细长物体,
+    // 而盖不住的病相是"掩膜只长出一小截",比圈大一点更难查。
+    let 长边f = 宽f.max(高f * h as f64 / w as f64);
     Ok(Look {
-        u: num("u")?,
-        v: num("v")?,
-        span_frac: num("span_frac").unwrap_or(f64::NAN),
+        u: (bx0 + bx1) * 0.5,
+        v: (by0 + by1) * 0.5,
+        span_frac: 长边f,
         verb: txt("verb"),
         force: txt("force"),
+        box01: [bx0, by0, bx1, by1],
     })
 }
 
