@@ -32,6 +32,12 @@ pub struct Layout {
     pub ee: Vec<Vec<String>>,
     pub jaw: Vec<Vec<String>>,
     pub cams: Vec<Vec<String>>,
+    /// 🔴 **深度图也靠形状认,不许写死键名。**(owner 2026-08-28 定"减法①")
+    // 驱动里曾经三处写着 `*last = "depth"` —— 把彩色相机的路径最后一段换成字面量 `depth`。
+    // 那是**这一台机器的名字**:换一台把它叫 `depth_image` / `range` 的就断了,而
+    // 本文件头明令「一旦驱动里写着某个具体键名,『装上就能用』这句话立刻不成立」。
+    // 判据同样只看形状:**自报浮点 dtype、shape 是二维**(高 × 宽)。
+    pub depth: Vec<Vec<String>>,
     /// 分不开的那些,原样报出来给人看。
     pub ambiguous: Vec<String>,
     /// 遍历实际看到的叶子(路径=形状),认不出来时全靠它。
@@ -104,6 +110,16 @@ pub fn 是图(v: &Value) -> Option<(usize, usize)> {
     }
 }
 
+/// 这一格是不是一片深度图:自报的 dtype 是浮点,而 shape 是**二维**。
+/// (彩色是三维且最后一维 = 3;深度是二维 —— 两者靠形状就分得开,不需要名字。)
+pub fn 是深度(v: &Value) -> Option<(usize, usize)> {
+    if !是数组映射(v) { return None }
+    let ty = 名(键(v, "type")?)?;
+    if !(ty.ends_with("f4") || ty.ends_with("f8")) { return None }
+    let sh: Vec<usize> = 键(v, "shape")?.as_array()?.iter().filter_map(|x| x.as_u64().map(|n| n as usize)).collect();
+    if sh.len() == 2 { Some((sh[1], sh[0])) } else { None }
+}
+
 /// 把一格取成一串数 —— 普通数组、或者自带 dtype 的那种映射,两种都认。
 pub fn 浮点串(v: &Value) -> Option<Vec<f64>> {
     if let Value::Array(a) = v {
@@ -150,6 +166,11 @@ pub fn 认(obs: &Value) -> Layout {
         // 相机:自报字节 dtype 且 shape 是三维。
         if 是图(v).is_some() {
             l.cams.push(path.clone());
+            continue;
+        }
+        // 深度图:同样只看形状(浮点 + 二维),不看名字。
+        if 是深度(v).is_some() {
+            l.depth.push(path.clone());
             continue;
         }
         let Some(xs) = 浮点串(v) else { continue };
@@ -212,6 +233,7 @@ impl Layout {
         println!("[认] 末端位姿:{}", p(&self.ee));
         println!("[认] 夹爪:{}", p(&self.jaw));
         println!("[认] 相机:{}", p(&self.cams));
+        println!("[认] 深度:{}", p(&self.depth));
         if !self.ambiguous.is_empty() {
             println!("[认] 🔴 分不开:{:?}", self.ambiguous);
         }

@@ -241,7 +241,9 @@ impl<S: std::io::Read + std::io::Write> Robot for Plug<S> {
                                 // 实测(2026-08-23,N128):彩色图最亮 61/255、均值 10.8,
                                 // 光靠它我只能猜;这一张图是用来终结猜测的。
                                 let mut 深路 = p.clone();
-                                if let Some(last) = 深路.last_mut() { *last = "depth".to_string(); }
+                                // 🔴 **深度图的路径由 `discover` 认出来,不许把彩色路径的最后一段换成字面量 `depth`。**
+                                // 那是这一台机器的名字;换一台叫 `depth_image` / `range` 的就断了(owner 2026-08-28「减法①」)。
+                                if let Some(dp) = self.lay.depth.get(f.cams.len()).or_else(|| self.lay.depth.first()) { 深路 = dp.clone(); }
                                 if let Some((dw, dh, dep)) = 取(&o, &深路).and_then(|dv| wire::as_f32_grid(&dv).map(|(a, b, c)| (a, b, c.to_vec()))) {
                                     let 有限: Vec<f64> = dep.iter().copied().filter(|x| x.is_finite() && *x > 0.0).collect();
                                     let (lo, hi) = 有限.iter().fold((f64::MAX, f64::MIN), |(a, b), x| (a.min(*x), b.max(*x)));
@@ -419,6 +421,8 @@ fn 自报相机(
     路: &[String],
     手像素: Option<(f64, f64)>,
     ee路: Option<&[String]>,
+    // 🔴 深度那一路由 `discover` 靠形状认出来传进来(减法①);认不出才退回按名字取。
+    深路: Option<&[String]>,
 ) -> Option<(point_gen::Eye, f64)> {
     let 取键 = |k: &str| -> Option<rmpv::Value> {
         let mut p = 路.to_vec();
@@ -497,7 +501,10 @@ fn 自报相机(
         Some(px) if (0.0..1.0).contains(&px[0]) && (0.0..1.0).contains(&px[1]) => (px[0], px[1]),
         _ => 手像素?,
     };
-    let dv = 取键("depth")?;
+    // 🔴 **深度那一路不许按名字取。**(减法①,owner 2026-08-28)
+    // `取键("depth")` 是把彩色路径的最后一段换成字面量 `depth` —— 那是**这一台机器的名字**。
+    // 现在 `discover` 靠形状认得出深度(自报浮点 dtype + 二维 shape),用它给的路径。
+    let dv = match 深路 { Some(p) => 取(o, p), None => 取键("depth") }?;
     let (dw, dh, dep) = wire::as_f32_grid(&dv)?;
     let (cu, cv) = ((hu * dw as f64) as isize, (hv * dh as f64) as isize);
     let r = (dw.min(dh) as isize / 40).max(2);
@@ -578,7 +585,9 @@ fn 抖指通道<S: std::io::Read + std::io::Write>(
         let mut 点: Vec<(f64, [f64; 3])> = Vec::new();
         let 深 = plug.lay.cams.get(*ci).and_then(|路| {
             let mut 深路 = 路.clone();
-            if let Some(l) = 深路.last_mut() { *l = "depth".to_string(); }
+            // 🔴 **深度图的路径由 `discover` 认出来,不许把彩色路径的最后一段换成字面量 `depth`。**
+            // 那是这一台机器的名字;换一台叫 `depth_image` / `range` 的就断了(owner 2026-08-28「减法①」)。
+            if let Some(dp) = plug.lay.depth.get(*ci).or_else(|| plug.lay.depth.first()) { 深路 = dp.clone(); }
             plug.last.as_ref().and_then(|o| 取(o, &深路)).and_then(|dv| wire::as_f32_grid(&dv))
         });
         for i in 0..n {
@@ -1194,7 +1203,9 @@ fn main() {
                 let (Some((w, h, gb)), Some((_, _, gs)), Some((_, _, gd))) = (灰(&基, *ci), 灰(&静, *ci), 灰(&动, *ci)) else { continue };
                 let 深 = plug.lay.cams.get(*ci).and_then(|路| {
                     let mut 深路 = 路.clone();
-                    if let Some(l) = 深路.last_mut() { *l = "depth".to_string(); }
+                    // 🔴 **深度图的路径由 `discover` 认出来,不许把彩色路径的最后一段换成字面量 `depth`。**
+        // 那是这一台机器的名字;换一台叫 `depth_image` / `range` 的就断了(owner 2026-08-28「减法①」)。
+        if let Some(dp) = plug.lay.depth.get(*ci).or_else(|| plug.lay.depth.first()) { 深路 = dp.clone(); }
                     plug.last.as_ref().and_then(|o| 取(o, &深路)).and_then(|dv| wire::as_f32_grid(&dv))
                 });
                 let n = (w*h).min(gb.len()).min(gs.len()).min(gd.len());
@@ -2441,6 +2452,7 @@ fn main() {
                                     路,
                                     body.get(Quantity::HandPixel).filter(|m| m.dim >= 2).map(|m| (m.value[0], m.value[1])),
                                     plug.lay.ee.first().map(|v| v.as_slice()),
+                                    plug.lay.depth.get(i).or_else(|| plug.lay.depth.first()).map(|v| v.as_slice()),
                                 )
                             })
                         });
@@ -3628,7 +3640,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
     let 近侧深 = |plug: &mut Plug<S>, u: f64, v: f64, 窗: f64| -> Option<f64> {
         let 路 = plug.lay.cams.get(相机号)?;
         let mut 深路 = 路.clone();
-        if let Some(l) = 深路.last_mut() { *l = "depth".to_string(); }
+        // 🔴 深度路径由 `discover` 靠形状认出来,不许把彩色路径末段换成字面量 `depth`(减法①)。
+        if let Some(dp) = plug.lay.depth.get(相机号).or_else(|| plug.lay.depth.first()) { 深路 = dp.clone(); }
         let dv = plug.last.as_ref().and_then(|o| 取(o, &深路))?;
         let (dw, dh, dep) = wire::as_f32_grid(&dv)?;
         let x0 = (((u - 窗) * dw as f64).floor().max(0.0)) as usize;
@@ -3648,7 +3661,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
     let 近侧深2 = |plug: &mut Plug<S>, ci: usize, u: f64, v: f64, 窗: f64| -> Option<f64> {
         let 路 = plug.lay.cams.get(ci)?;
         let mut 深路 = 路.clone();
-        if let Some(l) = 深路.last_mut() { *l = "depth".to_string(); }
+        // 🔴 深度路径由 `discover` 靠形状认出来,不许把彩色路径末段换成字面量 `depth`(减法①)。
+        if let Some(dp) = plug.lay.depth.get(ci).or_else(|| plug.lay.depth.first()) { 深路 = dp.clone(); }
         let dv = plug.last.as_ref().and_then(|o| 取(o, &深路))?;
         let (dw, dh, dep) = wire::as_f32_grid(&dv)?;
         let x0 = (((u - 窗) * dw as f64).floor().max(0.0)) as usize;
@@ -4813,7 +4827,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
         // 有了它,**被绕过去的那一层(接触集)就能装回来** —— 深度图反投影成点云喂给它。
         let (dw, dh, dep) = match plug.lay.cams.get(相机号).and_then(|路| {
             let mut 深路 = 路.clone();
-            if let Some(last) = 深路.last_mut() { *last = "depth".to_string(); }
+            // 🔴 深度路径由 `discover` 靠形状认出来(减法①)。
+            if let Some(dp) = plug.lay.depth.get(相机号).or_else(|| plug.lay.depth.first()) { 深路 = dp.clone(); }
             plug.last.as_ref().and_then(|o| 取(o, &深路)).and_then(|dv| wire::as_f32_grid(&dv))
         }) { Some(v) => v, None => continue };
         // 🔴 **单位要对齐**:表的前两行是"画幅比例/米",而相机的主点焦距用**像素**。

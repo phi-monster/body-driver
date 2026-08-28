@@ -99,33 +99,16 @@ pub fn as_nums(v: &Value) -> Option<Vec<f64>> {
     Some(out)
 }
 
-/// 一条动作:**两条臂的关节都原样送回**(所以胳膊不动),只改标定那条臂的钳口。
-///
-/// 🔴 必须带上关节键:`eval_env.py::get_action_type` 是**靠键名**判断动作类型的,只发钳口那
-/// 一个键会得到 "Cannot infer action type"。
-///
-/// 🔴🔴 **而且两条臂都必须给全,尽管校验说可以不给。** 实测:`validate_action_dict` 明写
-/// "缺的键跳过",可 `take_action_batch` 紧接着**对每一台 target 机器人硬取** `action[key_name]`
-/// ⇒ 只发左臂得到 `KeyError: 'right_arm_joint_state'`。**一个说"可以少给"、一个说"少给就崩",
-/// 以校验为准会当场炸。**
-/// 走位用的一条动作:标定臂给**绝对末端位姿**(xyz + 原来的朝向),另一条臂关节原样不动。
-///
-/// 姿态原样带回而不是自己编一个 —— 起手朝向是这台机器人自己选的,换掉它等于顺手改了一个
-/// 没人量过的量。
-pub fn hold_action(
-    left_j: &[f64],
-    right_j: &[f64],
-    left_jaw: f64,
-    right_jaw: f64,
-) -> Value {
-    let arr = |v: &[f64]| Value::Array(v.iter().map(|x| Value::F64(*x)).collect());
-    Value::Map(vec![
-        (Value::String("left_arm_joint_state".into()), arr(left_j)),
-        (Value::String("right_arm_joint_state".into()), arr(right_j)),
-        (Value::String("left_ee_joint_state".into()), arr(&[jaw_raw(left_jaw)])),
-        (Value::String("right_ee_joint_state".into()), arr(&[jaw_raw(right_jaw)])),
-    ])
-}
+// 🔴🔴🔴 **`hold_action` 已删(2026-08-28)—— 它是驱动里最后一处写死的机器人键名。**
+//
+// 它把 `left_arm_joint_state` / `right_arm_joint_state` / `left_ee_joint_state` /
+// `right_ee_joint_state` 四个名字直接写在代码里,而这正是 `discover.rs` 文件头明令禁止的:
+//   *"一旦驱动里写着 `left_arm_joint_state`,它就只对报这个名字的机器有效,
+//     而『装上就能用』这句话立刻不成立。"*
+// 观测那一头早就不看名字了(靠形状认:6–7 个 ±2π 的浮点 = 关节角、7 个且后 4 个模长≈1
+// = 位姿、单个 [0,1] = 夹爪、宽×高×3 的字节 = 相机),而命令这一头留了这么一块。
+// 幸好它**一个调用者都没有**(全仓仅此定义)—— 真正在用的 `joint_action` / `pose_action`
+// 都是**吃发现出来的路径**、不认名字的。⇒ 整段删除,并加一条机械检查让它回不来。
 
 /// 钳口**发出去就是 0–1 归一化**,这里不做任何换算 —— 保留这个函数只为把下面那条**已撤回**的
 /// 判断连同它的证据一起留在原地,免得下一个人再推一遍同样的错。
