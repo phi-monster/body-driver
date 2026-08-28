@@ -955,3 +955,67 @@ fn 减掉桌面_只剩物体() {
         assert!((p.z - (0.90 + k * p.x + 0.04)).abs() < 1e-9, "剩下的必须都在物体上");
     }
 }
+
+/// 🔴 **姿态不变时,指尖偏置和相机位置在数学上分不开 —— 必须拒绝。**
+///
+/// `观测点 = p + R·d`,R 恒定 ⇒ R·d 是常数偏移,**和把相机整体挪一段完全等价**。
+/// 实测(这条测试):真值 d=0,而解出偏置 **-0.1300**、留出残差 **2.5e-16**(完美拟合),
+/// 相机位置因此错 **13 cm** —— 拿去抓必然抓空,而所有数看起来都是绿的。
+/// ⇒ 这一格只能靠**采样期间手腕真的转过**来解,松闸就是放进一个会毁掉抓取的解。
+#[test]
+fn 姿态不变时偏置解不出来_必须拒绝() {
+    let 斜 = 斜相机();
+    let 真 = Eye { fx: 1.083, fy: 1.047, cx: 0.517, cy: 0.482, at: 斜.at, q: 斜.q };
+    let seen: Vec<([f64; 7], Px)> = 手挪的位置()
+        .into_iter()
+        .filter_map(|p| 真.project(p).map(|px| ([p.x, p.y, p.z, 1.0, 0.0, 0.0, 0.0], px)))
+        .collect();
+    assert!(seen.len() >= 12, "样本要够,实得 {}", seen.len());
+    match fit_full_axis_offset(&seen) {
+        Err(WhyNot::AxisAmbiguous(比)) => println!("按预期拒了:三根轴留出比 {比:.4}"),
+        Err(e) => panic!("拒的理由不对,该是 AxisAmbiguous:{e:?}"),
+        Ok((_, k, t, med)) => panic!("姿态不变时不该解得出来,却给了轴 {k} 偏置 {t:.4}(留出 {med:.2e})"),
+    }
+}
+
+/// 🔴 **从导数把整台相机解回来 —— 造一台已知的,算它的导数,再解回去,必须一模一样。**
+///
+/// 这条路和 `fit_full` 是**两种东西**:那条要全局拟合,会被点共面 / 全在一个深度 / 姿态不变
+/// 这些退化打死(实测连着六炮解不出来);这条**不拟合**,只用一点上的导数,闭式。
+#[test]
+fn 从导数把整台相机解回来() {
+    let 真 = 斜相机(); // fx/fy/cx/cy 用像素单位,at/q 是它自己的位姿
+    let 手 = P3 { x: 0.07, y: -0.11, z: 0.93 };
+    // 数值求导:P ↦ (u, v, 沿光轴的深)
+    let 深 = |p: P3| 真.into_cam(p)[2];
+    let mut j = [[0.0f64; 3]; 3];
+    let e = 1e-6;
+    for k in 0..3 {
+        let mut a = 手; let mut b = 手;
+        match k { 0 => { a.x -= e; b.x += e } 1 => { a.y -= e; b.y += e } _ => { a.z -= e; b.z += e } }
+        let (pa, pb) = (真.project(a).unwrap(), 真.project(b).unwrap());
+        j[0][k] = (pb[0] - pa[0]) / (2.0 * e);
+        j[1][k] = (pb[1] - pa[1]) / (2.0 * e);
+        j[2][k] = (深(b) - 深(a)) / (2.0 * e);
+    }
+    let px = 真.project(手).unwrap();
+    let 量 = eye_from_jacobian(j, px[0], px[1], 深(手), [手.x, 手.y, 手.z])
+        .expect("导数是准的,这台相机该解得出来");
+    println!("焦距 真 {:.3}/{:.3} vs 量 {:.3}/{:.3}", 真.fx, 真.fy, 量.fx, 量.fy);
+    println!("主点 真 {:.3}/{:.3} vs 量 {:.3}/{:.3}", 真.cx, 真.cy, 量.cx, 量.cy);
+    println!("相机在 真 {:?} vs 量 {:?}", 真.at, 量.at.map(|v| (v * 1e4).round() / 1e4));
+    assert!((量.fx - 真.fx).abs() < 1e-3, "fx 差 {}", (量.fx - 真.fx).abs());
+    assert!((量.fy - 真.fy).abs() < 1e-3, "fy 差 {}", (量.fy - 真.fy).abs());
+    assert!((量.cx - 真.cx).abs() < 1e-3, "cx 差 {}", (量.cx - 真.cx).abs());
+    assert!((量.cy - 真.cy).abs() < 1e-3, "cy 差 {}", (量.cy - 真.cy).abs());
+    let d = ((量.at[0]-真.at[0]).powi(2) + (量.at[1]-真.at[1]).powi(2) + (量.at[2]-真.at[2]).powi(2)).sqrt();
+    assert!(d < 1e-4, "相机位置差 {d:.2e} m");
+    // 朝向:拿它去投影一批点,像素要对得上(四元数可能差整体符号,比像素才是真判据)
+    let mut worst = 0.0f64;
+    for p in 手挪的位置() {
+        if let (Some(a), Some(b)) = (真.project(p), 量.project(p)) {
+            worst = worst.max((a[0]-b[0]).abs().max((a[1]-b[1]).abs()));
+        }
+    }
+    assert!(worst < 1e-3, "回代最大差 {worst:.2e} 像素");
+}
