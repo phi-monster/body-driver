@@ -48,6 +48,10 @@ pub struct 自图 {
     /// 对角协方差,长度 `w*h*nj`(横纵共用,式 6)。
     p: Vec<f32>,
     q过程: f32,
+    /// 观测噪声方差 —— **每帧从这幅图自己的光流里量**,不是抄来的数。
+    /// 论文里它是一个固定值 0.034(他们那台相机、那个场景上的),而抄一个别人机器上的数
+    /// 正是本仓最不许有的东西:换一台相机、换一个分辨率、换一个帧率,它就错了。
+    /// 这里取**全图光流平方的中位数** —— 画面绝大多数是没动的背景,它们的光流就是噪声本身。
     r观测: f32,
     /// 最近一帧的光流(供"跟着身体跑的点"用)。
     上流: Option<crate::flow::流>,
@@ -83,7 +87,7 @@ impl 自图 {
             j: vec![0.0; w * h * 2 * nj],
             p: vec![1.0; w * h * nj],
             q过程: 1e-3,
-            r观测: 0.034,   // 论文实验用的观测噪声方差
+            r观测: 1.0,   // 开机占位,第一帧就会被量到的值替掉
             上流: None,
             簇心: Vec::new(),
             簇评: Vec::new(),
@@ -121,6 +125,14 @@ impl 自图 {
         if w != self.w || h != self.h { return }
         let Some(u) = crate::flow::算(&a, &b, w, h, 4, 40) else { return };
         if u.w != w || u.h != h { return }
+        // 🔴 观测噪声**现量**:全图光流平方的中位数(绝大多数像素是没动的背景 ⇒ 那就是噪声底)。
+        {
+            let mut m: Vec<f32> = (0..w * h).step_by(7).map(|i| u.u[i] * u.u[i] + u.v[i] * u.v[i]).collect();
+            if !m.is_empty() {
+                m.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
+                self.r观测 = m[m.len() / 2].max(1e-4);
+            }
+        }
         let qd: Vec<f32> = qd[..self.nj].iter().map(|v| *v as f32).collect();
         let n = 2 * self.nj;
 
@@ -219,7 +231,9 @@ impl 自图 {
                 }
                 let 距 = best.0.sqrt();
                 let 模: f32 = 心[c].iter().map(|v| v * v).sum::<f32>().sqrt().max(1e-6);
-                // 论文:Consistency = 1/sqrt(‖dist‖/‖Center‖ + 0.1)
+                // 论文:Consistency = 1/sqrt(‖dist‖/‖Center‖ + 0.1)。
+                // 括号里那个 0.1 只是防止除零的**无量纲**小量(距离已经除以了簇心自己的模,
+                // 所以整个式子是尺度无关的);外面那个 0.1 是评分的**学习率**,也是无量纲。
                 let 一致 = 1.0 / (距 / 模 + 0.1).sqrt();
                 let 上 = 旧评.get(best.1).copied().unwrap_or(1.0);
                 // 论文:Eval ← Eval × 0.1(Consistency − 1) + 1
