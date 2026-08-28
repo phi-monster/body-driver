@@ -261,6 +261,23 @@ impl 自图 {
         self.自簇.get(c).copied().unwrap_or(false)
     }
 
+    /// **每一簇各是什么情况** —— 是我 / 评分 / 簇心的模 / 占了多少像素。
+    ///
+    /// 🔴 "爪子那一簇被刷掉了"和"整只手都没认出来"在日志上长得一样,不打出来只能猜
+    /// (今晚已经猜错五次)。YE 实测:身体认出 10593 个像素、渲图确认形状全对,
+    /// **而爪子那一头没进去** —— 于是"离目标最近的那一点"落在前臂上,伺服把前臂往球上开。
+    pub fn 逐簇(&self) -> Vec<(bool, f32, f32, usize)> {
+        let mut 数 = vec![0usize; self.簇心.len()];
+        for i in 0..self.w * self.h {
+            let c = self.标[i] as usize;
+            if c < 数.len() { 数[c] += 1 }
+        }
+        (0..self.簇心.len()).map(|c| {
+            let 模: f32 = self.簇心[c].iter().map(|v| v * v).sum::<f32>().sqrt();
+            (self.自簇.get(c).copied().unwrap_or(false), self.簇评.get(c).copied().unwrap_or(0.0), 模, 数[c])
+        }).collect()
+    }
+
     /// 有多少像素被判成"是我"。
     pub fn 我有几个(&self) -> usize {
         (0..self.w * self.h)
