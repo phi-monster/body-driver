@@ -265,13 +265,13 @@ pub fn 算一把(
     let 够得着 = r.可达;
     let mut 最近 = f64::MAX;
     let mut 宽超 = 0usize;
-    let mut 最好: Option<(u8, f64, f64, f64)> = None;
+    let mut 最好: Option<(f64, f64, f64, f64)> = None;
     let mut 兜底: Option<contact_set::ContactSet> = None;
     let mut 选中: Option<(contact_set::ContactSet, f64, [f64; 3])> = None;
     // 🔴 **把所有候选画出来看** —— 接触集是一个【集合】,不是一条。
     // 存下来:每条候选的两个接触点(投到画面上)+ 它被判成什么。owner 2026-08-27:
     // "既然是接触集那么肯定不只有一种夹法" —— 那就让这句话可以用眼睛核。
-    let mut 候选画: Vec<([f64; 2], [f64; 2], u8)> = Vec::new();   // (点A, 点B, 0=选中 1=宽超 2=上下夹 3=其它)
+    let mut 候选画: Vec<([f64; 2], [f64; 2], u8, f64, f64)> = Vec::new();   // (点A, 点B, 判定, **算法给的分**, 量出来的宽)
     for c in cs.iter() {
         // 接触点容差 = 二十分之一个钳口(无量纲比例)。
         let Ok(s) = c.to_set(mu, 静, 0.05 * r.张开) else { continue };
@@ -295,7 +295,7 @@ pub fn 算一把(
         {
             let pa = eye.project(point_gen::P3 { x: s.points[0].at[0], y: s.points[0].at[1], z: s.points[0].at[2] });
             let pb = eye.project(point_gen::P3 { x: s.points[1].at[0], y: s.points[1].at[1], z: s.points[1].at[2] });
-            if let (Some(a), Some(b)) = (pa, pb) { 候选画.push(([a[0], a[1]], [b[0], b[1]], 3)); }
+            if let (Some(a), Some(b)) = (pa, pb) { 候选画.push(([a[0], a[1]], [b[0], b[1]], 3, f64::NEG_INFINITY, 宽c)); }
         }
         // 🔴🔴 **宽度只用来【排序】,永远不用来【否决】。**(生成器注释 + README 明写)
         //   *"它只读一件事:钳口下面那一小段沿闭合方向有多宽,然后把腕转到窄的方向去夹"*
@@ -371,12 +371,41 @@ pub fn 算一把(
         //
         // ⚠️ 这里**没有一条提到"抓"** —— 换成扣扳机/砍/吸,同一套排序照样成立:
         //    能不能放得下、贴不贴得稳、伸不伸得进去、够不够得着。
+        // 🔴🔴 **不许按 `margin_m` 排** —— 那正是仓里明写"已经被替掉"的那一条:
+        //   *"旧排序按 margin_m 从大到小 ⇒ **最窄的边角条排最前**,而捏一个物体最尖的角
+        //     恰恰最容易滑脱。实测(2026-08-12):抓取率 19/48 → 26/96"*
+        //   我 2026-08-27 又按它排了一次,当场排出 **7.7 mm 的薄片**,和那句话预言的一模一样。
+        //
+        // 生成器给了三个各管一件事的量,而且都写着怎么用:
+        //   `depth_m`       这块料有多深 —— **又深又匀才咬得住**(尖端接触面积趋零)。越大越好。
+        //   `face_tilt_rad` 两个夹持面歪多少 —— **摩擦锥那一条,写成不需要 μ 的形式**。越小越好。
+        //   `com_offset_m`  下手点离重心多远 —— **管"转出去"**(抓在剪刀环上而重量在刀刃那头)。越小越好。
+        // 摩擦锥管横着滑走,重心偏移管转出去,**是两件事,都得算**。
+        // 排序:先放得下的;再按 深 − 歪 − 偏心 的合成排(三者都归一到"这一段自己的宽度"上,无量纲)。
+        // ⚠️ 我先写成 `depth/宽 − 歪 − 偏心/宽`,**已实测撤回**:除以宽度之后,
+        //    1.4 mm 的薄片 depth/宽 反而最大 ⇒ **又把"最尖的角排最前"变回来了**,
+        //    正是 `depth_m` 那段注释要替掉的东西。深度就按**绝对值**排,不许归一化。
+        // 次序(字典序,不加权、不引任何常数):放得下 → 深 → 歪得小 → 离重心近。
+        // 🔴🔴 第一个键**不许写成 0/1 的"放得下"** —— 那是一个会在最需要它的时候
+        //    **整个塌掉**的键(W4 实锤,2026-08-28,看候选图 + 日志才看出来):
+        //    剪刀那一集 `132 条里 132 条放不下` ⇒ 这一位对所有候选都是 0(常数)⇒
+        //    排序**整体降级成按 `depth_m` 排**,而"深"随跨度增长 ⇒ **最宽的那条排第一**
+        //    (选中 110.9 mm 塞进量出来的 61.5 mm 钳口)。**恰好是反的。**
+        //    改成连续量:**超出钳口多少**(米,越小越好)。
+        //    - 放得下的全部并列 0 ⇒ 后面三键照旧决定 ⇒ **能夹的情形一点没变**;
+        //    - 全都放不下时,挑**最接近塞得进去**的那条,而不是最宽的那条。
+        //    零机体假设:`宽c` 是生成器量的,`r.张开` 是本体自己晃出来的。
+        let 超出 = (宽c - r.张开).max(0.0);
         let 分 = (
-            if c.within_jaw { 1u8 } else { 0u8 },
-            c.margin_m,
-            c.above_support_m,
-            -离,
+            -超出,
+            c.depth_m,
+            -c.face_tilt_rad,
+            -c.com_offset_m,
         );
+        // 把**算法给的分**记进画图表 —— 排名由它决定,不由我挑。
+        if let Some(l) = 候选画.last_mut() {
+            l.3 = -超出 * 1e6 + c.depth_m * 1e3 - c.face_tilt_rad * 10.0 - c.com_offset_m * 1e2;
+        }
         let 更好 = match 最好 {
             None => true,
             Some((w0, m0, h0, d0)) => (分.0, 分.1, 分.2, 分.3) > (w0, m0, h0, d0),
@@ -391,42 +420,97 @@ pub fn 算一把(
     // 🔴 哨兵值不许当成读数印出来。`最近` 的初值是 f64::MAX;一条都没选中时旧写法会印
     // "选中的那条离手 179769313486231570814527423731704356798...000 m" —— 一个**看起来是测量值**
     // 的数。这类值一旦流进下游就是无声的毒(NV7 实测)。没选中就说没选中。
-    // 画:每条候选一条线段(两个接触点之间),按判定上色。灰度图,值就是颜色。
+    // 画两张图,**排名完全由算法给的分决定,不由人挑**:
+    //   `cands.pgm` 全部候选(按判定上色)· `top5.pgm` **只画前 5 名 + 其余压暗**
     if let (Ok(存路), Some(rgb)) = (std::env::var("BL_VID"), 彩图) {
         if rgb.len() >= w * h * 3 {
-            let mut g: Vec<u8> = rgb.chunks_exact(3)
+            let 底: Vec<u8> = rgb.chunks_exact(3)
                 .map(|c| ((c[0] as u32 * 299 + c[1] as u32 * 587 + c[2] as u32 * 114) / 1000) as u8)
                 .collect();
-            let mut 点 = |x: i64, y: i64, v: u8| {
-                if x >= 0 && y >= 0 && (x as usize) < w && (y as usize) < h { g[y as usize * w + x as usize] = v }
+            let 线 = |g: &mut Vec<u8>, a: &[f64; 2], b: &[f64; 2], v: u8, 粗: i64| {
+                let (x0, y0, x1, y1) = (a[0] as i64, a[1] as i64, b[0] as i64, b[1] as i64);
+                let n = ((x1 - x0).abs().max((y1 - y0).abs())).max(1);
+                for t in 0..=n {
+                    let (px, py) = (x0 + (x1 - x0) * t / n, y0 + (y1 - y0) * t / n);
+                    for dx in -粗..=粗 { for dy in -粗..=粗 {
+                        let (qx, qy) = (px + dx, py + dy);
+                        if qx >= 0 && qy >= 0 && (qx as usize) < w && (qy as usize) < h { g[qy as usize * w + qx as usize] = v }
+                    }}
+                }
             };
-            // 先画被拒的(暗),再画通过的(亮),最后画选中的(白 + 端点方块)
-            for pass in [1u8, 2, 3, 0] {
-                for (a, b, k) in 候选画.iter() {
-                    if *k != pass { continue }
-                    let v: u8 = match pass { 0 => 255, 3 => 200, 2 => 90, _ => 40 };
-                    let (x0, y0, x1, y1) = (a[0] as i64, a[1] as i64, b[0] as i64, b[1] as i64);
-                    let n = ((x1 - x0).abs().max((y1 - y0).abs())).max(1);
-                    for t in 0..=n {
-                        点(x0 + (x1 - x0) * t / n, y0 + (y1 - y0) * t / n, v);
-                    }
-                    if pass == 0 {
-                        for d in -4i64..=4 { for e in -4i64..=4 { 点(x0 + d, y0 + e, 255); 点(x1 + d, y1 + e, 255); } }
+            // ① 全部候选
+            {
+                let mut g = 底.clone();
+                for pass in [1u8, 2, 3, 0] {
+                    for (a, b, k, _, _) in 候选画.iter() {
+                        if *k != pass { continue }
+                        let v: u8 = match pass { 0 => 255, 3 => 200, 2 => 90, _ => 40 };
+                        线(&mut g, a, b, v, if pass == 0 { 1 } else { 0 });
                     }
                 }
+                let mut buf = format!("P5\n{w} {h}\n255\n").into_bytes();
+                buf.extend_from_slice(&g);
+                let _ = std::fs::write(format!("{存路}/cands.pgm"), buf);
             }
-            let mut buf = format!("P5\n{w} {h}\n255\n").into_bytes();
-            buf.extend_from_slice(&g);
-            let _ = std::fs::write(format!("{存路}/cands.pgm"), buf);
-            println!("[链] 候选图已存(共 {} 条:白=选中 · 亮灰=通过没选上 · 中灰=上下夹 · 暗=宽超钳口)", 候选画.len());
+            // ② **只看前 5 名** —— 排序是算法的,画图只是把它显出来
+            {
+                let mut 序: Vec<usize> = (0..候选画.len()).collect();
+                序.sort_by(|&x, &y| 候选画[y].3.partial_cmp(&候选画[x].3).unwrap_or(core::cmp::Ordering::Equal));
+                let mut g: Vec<u8> = 底.iter().map(|v| (*v as u32 * 55 / 100) as u8).collect();  // 底压暗,前 5 名才亮
+                for (rank, &idx) in 序.iter().take(5).enumerate() {
+                    let (a, b, _, _, _) = &候选画[idx];
+                    let v: u8 = [255u8, 215, 175, 135, 100][rank.min(4)];
+                    线(&mut g, a, b, v, if rank == 0 { 2 } else { 1 });
+                    // 名次用端点方块大小表示:第 1 名方块最大
+                    let r = (6 - rank as i64).max(2);
+                    for (px, py) in [(a[0] as i64, a[1] as i64), (b[0] as i64, b[1] as i64)] {
+                        for dx in -r..=r { for dy in -r..=r {
+                            let (qx, qy) = (px + dx, py + dy);
+                            if qx >= 0 && qy >= 0 && (qx as usize) < w && (qy as usize) < h { g[qy as usize * w + qx as usize] = v }
+                        }}
+                    }
+                }
+                let mut buf = format!("P5\n{w} {h}\n255\n").into_bytes();
+                buf.extend_from_slice(&g);
+                let 号 = unsafe { static mut K: u32 = 0; K += 1; K };
+                let _ = std::fs::write(format!("{存路}/top5_{:03}.pgm", 号), buf);
+                let _ = std::fs::write(format!("{存路}/top5.pgm"), std::fs::read(format!("{存路}/top5_{:03}.pgm", 号)).unwrap_or_default());
+                println!("[链] 前 5 名已画(算法排的,第 {号} 张):{}", 序.iter().take(5)
+                    .map(|&i| format!("{:.3}", 候选画[i].3)).collect::<Vec<_>>().join(" "));
+            }
+            // ③ **一条一张大图** —— 五张挤在一起看不出谁是谁(owner 2026-08-28:"我根本看不懂")。
+            //    每张只画一条:两个大方块 = 两根手指会碰到的两个点,中间一条粗线 = 合拢方向。
+            //    宽度打进日志,图和数对得上。
+            {
+                let mut 序: Vec<usize> = (0..候选画.len()).collect();
+                序.sort_by(|&x, &y| 候选画[y].3.partial_cmp(&候选画[x].3).unwrap_or(core::cmp::Ordering::Equal));
+                for (rank, &idx) in 序.iter().take(5).enumerate() {
+                    let (a, b, _, _, 宽这条) = &候选画[idx];
+                    let mut g: Vec<u8> = 底.iter().map(|v| (*v as u32 * 45 / 100) as u8).collect();
+                    线(&mut g, a, b, 255, 1);
+                    for (px, py) in [(a[0] as i64, a[1] as i64), (b[0] as i64, b[1] as i64)] {
+                        for dx in -5..=5i64 { for dy in -5..=5i64 {
+                            let (qx, qy) = (px + dx, py + dy);
+                            if qx >= 0 && qy >= 0 && (qx as usize) < w && (qy as usize) < h {
+                                g[qy as usize * w + qx as usize] = if dx.abs() == 5 || dy.abs() == 5 { 255 } else { 0 };
+                            }
+                        }}
+                    }
+                    let mut buf = format!("P5\n{w} {h}\n255\n").into_bytes();
+                    buf.extend_from_slice(&g);
+                    let _ = std::fs::write(format!("{存路}/one{}.pgm", rank + 1), buf);
+                    println!("[链] 第 {} 名:两点相距 {:.1} mm(钳口量出来能张 {:.1} mm)⇒ one{}.pgm",
+                        rank + 1, 宽这条 * 1000.0, r.张开 * 1000.0, rank + 1);
+                }
+            }
         }
     }
     match 选中 {
-        Some(_) => println!("[链] 候选排序:{} 条里 {} 条放不下(**只降权,不删**);选中的那条 放得下={} · 余量 {:.4} m · 离支撑面 {:.4} m · 离手 {:.3} m",
+        Some(_) => println!("[链] 候选排序:{} 条里 {} 条放不下(**只降权,不删**);选中的那条 放得下={} · 深 {:.4} m · 歪 {:.3} rad · 离手 {:.3} m",
             候选画.len(), 宽超,
-            最好.map(|x| x.0 == 1).unwrap_or(false),
+            最好.map(|x| x.0 >= 0.0).unwrap_or(false),
             最好.map(|x| x.1).unwrap_or(0.0),
-            最好.map(|x| x.2).unwrap_or(0.0), 最近),
+            -最好.map(|x| x.2).unwrap_or(0.0), 最近),
         None => println!("[链] 候选排序:{} 条里 {} 条放不下;**一条都没选中**", 候选画.len(), 宽超),
     }
     let (mut set, 倾) = match 选中 {
