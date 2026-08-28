@@ -35,6 +35,12 @@ done
 # rather than skipping quietly -- a safety face that silently did not build is worse than absent.
 if command -v gprbuild >/dev/null; then
   echo "== driver fast face (Ada/SPARK): build =="
+  # 🔴 `gprbuild` **不会自己建** `.gpr` 里声明的输出目录:缺 `lib/` 时它直接
+  # `library directory "…/fast/lib/" does not exist` 然后失败 —— 而 `set -e` 让整个安装挂掉。
+  # 这两个目录是构建产物、不进 git,所以**一台干净的机器上必然缺**。
+  # 实测(2026-08-28):mac 上没有 gprbuild ⇒ 这一步被跳过、从没暴露;
+  # 箱上装了 GNAT ⇒ 官方安装流程**在真正的目标机器上装不上**。
+  mkdir -p "$ROOT/fast/lib" "$ROOT/fast/objlib"
   ( cd "$ROOT/fast" && gprbuild -q -P body_layer_fast_lib.gpr )
   bash "$ROOT/conformance/ada_check.sh" || echo "   (ada_check reported a mismatch above)"
 else
