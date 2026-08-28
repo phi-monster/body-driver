@@ -43,6 +43,7 @@ pub struct 流 {
 fn 缩(src: &[f32], w: usize, h: usize) -> (Vec<f32>, usize, usize) {
     let (nw, nh) = (w / 2, h / 2);
     let mut out = vec![0.0f32; nw * nh];
+    // 0.25 = 四个像素取平均。**无量纲**的权重,不是长度。
     for y in 0..nh {
         for x in 0..nw {
             let (a, b) = (2 * x, 2 * y);
@@ -100,7 +101,9 @@ fn 一层(i1: &[f32], i2: &[f32], w: usize, h: usize, du: &mut [f32], dv: &mut [
     let mut au = vec![0.0f32; w * h];
     let mut av = vec![0.0f32; w * h];
     for _ in 0..轮 {
-        // 邻域平均(四邻 1/6 + 对角 1/12,Horn–Schunck 原文的那个核)
+        // 邻域平均(四邻 1/6 + 对角 1/12,Horn–Schunck 原文的那个拉普拉斯核)。
+        // 这几个权重是**无量纲**的纯数学系数(加起来正好是 1),和图像的量纲、
+        // 相机的分辨率、身体的尺寸都无关 —— 换任何东西都不用改。
         for y in 1..h.saturating_sub(1) {
             for x in 1..w.saturating_sub(1) {
                 let i = y * w + x;
