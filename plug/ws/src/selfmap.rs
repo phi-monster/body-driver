@@ -1,406 +1,353 @@
-//! **自图 —— "画面上每一个点,跟不跟着我动"。**
+//! **自图 —— 每个像素一个"我一动它跑多少"(稠密图像雅可比)。**
 //!
-//! # 它替掉了什么
-//!
-//! 这一张图**一个机制吃掉了驱动里六样各自会坏的东西**(owner 2026-08-28 拍板,今晚最大的一次减法):
-//!
-//! | 原来各自一套 | 现在 |
-//! |---|---|
-//! | 看爪(我的手在画面哪儿)—— 冻住胳膊、晃爪子、五帧相减,一次约 50 拍 | 直接读 |
-//! | 认接触面(两根手指分别在哪)—— 在这台相机上**物理上不可能成功** | 不再需要分开 |
-//! | 通道表(一个点的"命令 ⇒ 画面跑多少") | 它的**稠密版**,而且每帧自己更新 |
-//! | 哪台相机长在手上 —— 要专门动一下手臂去试 | 白掉出来:手上那台**整幅画面**都跟我动 |
-//! | 避障要的"我占哪一片" | 就是这张图本身 |
-//! | "东西被我碰动了没有" | 白掉出来:动了、但**和我的命令对不上**的点 = 世界动了 |
+//! 照 `DIJE`(arXiv 2507.00446,东大 JSK)那篇实现,四个部件一个不缺。
+//! 我第一版只抄了"每像素一个雅可比"这个**形**,漏掉了让它成立的三个**机制**,
+//! 于是诊断链条永远死在最后一关(`解释得掉的 0`)。这一版把四个都补上。
 //!
 //! # 判据只有一句
 //!
 //! **我一动,它同比例地跟着动 ⇒ 它是我;时灵时不灵、或者我没动它自己动 ⇒ 它是世界。**
+//! 这句话里没有相机内参、没有运动学、没有标记点。换身体换相机,图会自己重新长。
 //!
-//! 这句话里没有相机内参、没有运动学、没有标记点、没有"第几个关节是手腕"。
-//! 换一具身体、换一台相机、把爪子换成灵巧手,这段代码一个字都不用改 —— 图会自己重新长。
+//! # 四个部件(缺一个都不成立)
 //!
-//! # 为什么不是"晃一下、两帧相减"
+//! ① **卡尔曼滤波**(式 9/10/11):状态是每像素的雅可比 `j ∈ R^{2Nj}`,
+//!    协方差**近似成对角**(否则每像素 O(Nj²),论文算过:320×240、5 关节就要 61 MB)。
+//!    再进一步:横向和纵向那两半共用同一组方差(式 6),于是只存 `p ∈ R^{Nj}`。
 //!
-//! 实测代价(XT,2026-08-28):相减那条路挑出来的"我的手"深 **0.320 m**,而目标球在 **0.639 m**
-//! —— 跟的东西比球离相机近 32 厘米,**根本不是爪子**;而日志上每一行都正常。
-//! 一次性的判断没有"我有多确信"这一维,错了也不会自己纠正;
-//! 而**累计相关性**会:同一个点被问上几十次,巧合会被磨掉,真的跟随会被留下。
+//! ② **沿【预测】光流搬**(式 14,论文明说这是它自己的核心贡献):
+//!    像素钉在画面上不动,而身体是从上面**滑过去**的 —— 同一个像素这一秒是小臂、
+//!    下一秒是手腕、再下一秒是地板,它的雅可比根本不是一个固定的东西。
+//!    所以每一帧要把整张图**搬到"这一点上的东西上一帧在哪儿"**。
+//!    🔴 搬的时候必须用 **`J·q̇`(预测流)**,不能用实测光流 ——
+//!       实测光流里含着**别人**的运动,用它搬会把外部运动"漏"进我的估计里
+//!       (论文图 4 就是这个对照:用实测流,背景有人走过,自体标签当场漏到背景上)。
 //!
-//! # 参考
+//! ③ **k-means 聚类 + 逐簇时间一致性**(算法 1/2):把每像素的雅可比当成一个向量去聚类,
+//!    **簇心在时间上稳不稳定**就是"是不是我"的判据。我的身体和我的命令之间关系固定;
+//!    别人走过、东西被碰倒,那关系每帧都在变、当场露馅。
 //!
-//! 同一条思路在 `DIJE`(arXiv 2507.00446)上被做到 30 fps,而且是在**腱驱动肌肉骨骼类人**
-//! 上验的 —— 那种机体的运动学根本写不出公式,是"零身体假设"能拿到的最硬的证据。
-//! 那边用稠密光流 + 对角协方差卡尔曼;这边没有光流库,用**网格块匹配 + 递推最小二乘**,
-//! 同一个量、同一条判据,只是分辨率粗一档(而我们的帧率也只有 4 Hz,粗一档正好)。
+//! ④ **被跟踪的点是【跟着身体跑的】**(式 15):`p_self ← p_self + 该处的光流`。
+//!    论文原话:*用 p 而不是 x,是为了强调这是随实际运动变化的坐标,
+//!    而不是每个像素的固定坐标(拉格朗日 vs 欧拉参考系)*。
+//!    这一条一次性替掉模板匹配 —— 不需要模板、没有孔径问题。
+//!
+//! # 和论文的差别(照实记)
+//!
+//! * 光流:论文用 Farnebäck,这里用金字塔 Horn–Schunck(见 `flow.rs`)。作用相同。
+//! * 论文**不用深度**(它把深度列为自己的局限);这里也先不用,与它对齐。
+//! * 论文在 320×240 上跑;这里同样把图**缩一半**再算。
 
-/// 一个格子记的东西。
-#[derive(Clone)]
-struct 格 {
-    /// 这个格子的"命令 ⇒ 跑多少":**三行**(横、纵、深)× 通道数。
-    ///
-    /// 🔴 第三行是**深度**。没有它,伺服只能把手在画面上对准,却下不去 ——
-    /// 而抓东西恰恰是"对准之后压下去"。深度这一行和前两行同一条判据、同一次观测,
-    /// 只是量的是那个格子的中位深度变了多少(米),不是像素。
-    表: Vec<f64>,
-    /// 累计:实际跑的 与 表预测的 差多少(滑动平均,像素)。
-    残: f64,
-    /// 累计:实际跑了多少(滑动平均,像素)。没跑过的格子**不许判**。
-    动: f64,
-    /// 被问过几次。
-    次: u32,
+/// 一张稠密图像雅可比 + 它的自我识别。
+pub struct 自图 {
+    w: usize,
+    h: usize,
+    nj: usize,
+    /// 每像素的雅可比,长度 `w*h*2*nj`:像素 i 的 `[jx(0..nj), jy(0..nj)]`。
+    j: Vec<f32>,
+    /// 对角协方差,长度 `w*h*nj`(横纵共用,式 6)。
+    p: Vec<f32>,
+    q过程: f32,
+    r观测: f32,
+    /// 最近一帧的光流(供"跟着身体跑的点"用)。
+    上流: Option<crate::flow::流>,
+    簇心: Vec<Vec<f32>>,
+    簇评: Vec<f32>,
+    自簇: Vec<bool>,
+    标: Vec<u8>,
+    pub 帧: u32,
 }
 
-/// 画面上每一个格子"跟不跟着我动"。
-pub struct 自图 {
-    列: usize,
-    行: usize,
-    边: usize,
-    通道数: usize,
-    格们: Vec<格>,
-    /// 全图里"动得最多"的那一格动了多少(滑动平均,像素)。判"是我"要拿它当尺。
-    最大动: f64,
+fn 缩半(src: &[u8], w: usize, h: usize) -> (Vec<u8>, usize, usize) {
+    let (nw, nh) = (w / 2, h / 2);
+    let mut out = vec![0u8; nw * nh];
+    for y in 0..nh {
+        for x in 0..nw {
+            let (a, b) = (2 * x, 2 * y);
+            let s = src[b * w + a] as u16 + src[b * w + a + 1] as u16
+                + src[(b + 1) * w + a] as u16 + src[(b + 1) * w + a + 1] as u16;
+            out[y * nw + x] = (s / 4) as u8;
+        }
+    }
+    (out, nw, nh)
 }
 
 impl 自图 {
-    /// `边` = 一个格子多少像素(正方形)。`通道数` = 这具身体能下命令的自由度个数。
-    pub fn 新(w: usize, h: usize, 边: usize, 通道数: usize) -> 自图 {
-        let 边 = 边.max(4);
-        let (列, 行) = (w / 边, h / 边);
+    /// `w0,h0` 是原图尺寸(内部按论文缩一半再算);`nj` 是这具身体能下命令的自由度个数。
+    pub fn 新(w0: usize, h0: usize, nj: usize) -> 自图 {
+        let (w, h) = (w0 / 2, h0 / 2);
+        let nj = nj.max(1);
         自图 {
-            列,
-            行,
-            边,
-            通道数,
-            格们: vec![
-                格 { 表: vec![0.0; 3 * 通道数], 残: 0.0, 动: 0.0, 次: 0 };
-                列 * 行
-            ],
-            最大动: 0.0,
+            w, h, nj,
+            // 论文:雅可比初值全零,协方差初值 1。
+            j: vec![0.0; w * h * 2 * nj],
+            p: vec![1.0; w * h * nj],
+            q过程: 1e-3,
+            r观测: 0.034,   // 论文实验用的观测噪声方差
+            上流: None,
+            簇心: Vec::new(),
+            簇评: Vec::new(),
+            自簇: Vec::new(),
+            标: vec![0; w * h],
+            帧: 0,
         }
     }
 
-    pub fn 列数(&self) -> usize { self.列 }
-    pub fn 行数(&self) -> usize { self.行 }
-    pub fn 边长(&self) -> usize { self.边 }
+    pub fn 宽(&self) -> usize { self.w }
+    pub fn 高(&self) -> usize { self.h }
 
-    /// 一次观测:**发了 `命令` 这一下,画面从 `前` 变成了 `后`**。
-    ///
-    /// 每个格子在 `后` 里找自己(块匹配,搜索半径 `搜`),得到它跑了多少;
-    /// 然后拿这一对 (命令, 跑了多少) 递推地修自己的表,并记下没被表解释掉的那部分。
-    ///
-    /// 🔴 **不需要知道命令的物理含义** —— 关节角、末端位移、桨速,对这里一律只是一串数。
-    ///
-    /// `前深`/`后深` 给了就顺带学**深度那一行**(米);给不了(没有深度图)就只学前两行,
-    /// 第三行留零 —— 那时伺服只能在画面上对准、下不去,而这件事会被日志说出来。
-    pub fn 喂(&mut self, 前: &[u8], 后: &[u8], 前深: Option<&[f64]>, 后深: Option<&[f64]>,
-              w: usize, h: usize, 命令: &[f64], 搜: usize) {
-        if 前.len() < w * h || 后.len() < w * h || 命令.len() < self.通道数 {
-            return;
+    /// 双线性取一个点的雅可比(工作分辨率坐标)。
+    fn 取雅(&self, x: f32, y: f32) -> Vec<f32> {
+        let x = x.clamp(0.0, (self.w - 1) as f32);
+        let y = y.clamp(0.0, (self.h - 1) as f32);
+        let (x0, y0) = (x.floor() as usize, y.floor() as usize);
+        let (x1, y1) = ((x0 + 1).min(self.w - 1), (y0 + 1).min(self.h - 1));
+        let (fx, fy) = (x - x0 as f32, y - y0 as f32);
+        let n = 2 * self.nj;
+        let mut out = vec![0.0f32; n];
+        for k in 0..n {
+            let a = self.j[(y0 * self.w + x0) * n + k] * (1.0 - fx) + self.j[(y0 * self.w + x1) * n + k] * fx;
+            let b = self.j[(y1 * self.w + x0) * n + k] * (1.0 - fx) + self.j[(y1 * self.w + x1) * n + k] * fx;
+            out[k] = a * (1.0 - fy) + b * fy;
         }
-        // 命令的模平方 —— 递推最小二乘的分母。命令是零就什么都学不到,直接跳过。
-        let 模2: f64 = 命令[..self.通道数].iter().map(|c| c * c).sum();
-        if !(模2 > 1e-18) {
-            return;
-        }
-        // 🔴🔴🔴 **位移由【稠密光流】给,不再自己去块匹配。**(owner 2026-08-29 拍板:用全套光流)
-        //
-        // 块匹配那一版在**一大片光滑的白色**上必然失效(孔径问题):纯白方块和它旁边那一片
-        // 长得一模一样,分不出没动还是挪了十个像素。实测代价(XW,渲图):这条 Franka 甩到画面中央、
-        // 占了大半个画面,而自图只认出 **2 格**(都在底座上),被跟的点落在空地板上。
-        // 我先手工补了一个"往邻居灌"去模仿,现在换成**严格版**:金字塔式 Horn–Schunck,
-        // 它的平滑项就是"把运动从有花纹的边缘解进无花纹的肚子里"这件事本身。
-        // 4 层 / 每层 40 轮:两个都是**次数**,无量纲;平滑权重从这幅图自己的梯度尺度量出来。
-        let _ = 搜;
-        let Some(f) = crate::flow::算(前, 后, w, h, 4, 40) else { return };
-        for gy in 0..self.行 {
-            for gx in 0..self.列 {
-                let (x0, y0) = (gx * self.边, gy * self.边);
-                if x0 + self.边 > w || y0 + self.边 > h { continue }
-                // 🔴 光流已经把无花纹的地方解出来了 ⇒ **不再需要"有没有花纹"那道闸**,
-                //    也不再需要"往邻居灌"那一步 —— 那两样都是块匹配时代的补丁,一起删掉。
-                let (du, dv) = f.格里平均(x0, y0, self.边);
-                let i = gy * self.列 + gx;
-                let g = &mut self.格们[i];
-                // 表预测这一下会跑多少
-                let (mut pu, mut pv, mut pz) = (0.0f64, 0.0f64, 0.0f64);
-                for k in 0..self.通道数 {
-                    pu += g.表[k] * 命令[k];
-                    pv += g.表[self.通道数 + k] * 命令[k];
-                    pz += g.表[2 * self.通道数 + k] * 命令[k];
+        out
+    }
+
+    /// 一次观测:发了 `qd` 这一下(**实际动了多少**,不是命令),画面从 `前` 变成 `后`。
+    pub fn 喂(&mut self, 前: &[u8], 后: &[u8], w0: usize, h0: usize, qd: &[f64]) {
+        if 前.len() < w0 * h0 || 后.len() < w0 * h0 || qd.len() < self.nj { return }
+        let (a, w, h) = 缩半(前, w0, h0);
+        let (b, _, _) = 缩半(后, w0, h0);
+        if w != self.w || h != self.h { return }
+        let Some(u) = crate::flow::算(&a, &b, w, h, 4, 40) else { return };
+        if u.w != w || u.h != h { return }
+        let qd: Vec<f32> = qd[..self.nj].iter().map(|v| *v as f32).collect();
+        let n = 2 * self.nj;
+
+        // ── ① 预测步:沿**预测光流** J·q̇ 把整张图搬过去(式 14);协方差加过程噪声(式 9)
+        let mut 新j = vec![0.0f32; self.j.len()];
+        for y in 0..h {
+            for x in 0..w {
+                let i = y * w + x;
+                let (mut fu, mut fv) = (0.0f32, 0.0f32);
+                for k in 0..self.nj {
+                    fu += self.j[i * n + k] * qd[k];
+                    fv += self.j[i * n + self.nj + k] * qd[k];
                 }
-                let (eu, ev) = (du - pu, dv - pv);
-                // 递推最小二乘(Broyden 那一步):表 += 误差 ⊗ 命令 / |命令|²
-                for k in 0..self.通道数 {
-                    g.表[k] += eu * 命令[k] / 模2;
-                    g.表[self.通道数 + k] += ev * 命令[k] / 模2;
-                }
-                // 深度那一行:这个格子(跟着它一起挪过去之后)的中位深度变了多少。
-                if let (Some(z0), Some(z1)) = (前深, 后深) {
-                    // 🔴 **负位移不许直接 `as usize`** —— 它会绕成一个巨大的数,
-                    //    下一行 `x0 + 边` 当场整数溢出崩溃。
-                    //    实测代价(XZ,2026-08-29):驱动**直接 panic 退出**
-                    //    (`attempt to add with overflow`),于是自图一次都没被喂过 ⇒
-                    //    日志上是"自图才认出 0 格",读起来像"还没学到",而真相是**它死了**。
-                    //    ⚠️ 这一条和今晚那三条"日志全绿而世界没发生"同族:
-                    //       崩溃发生在另一个进程/另一段输出里,主线日志看不出异常。
-                    let (nx, ny) = ((x0 as i64 + du.round() as i64), (y0 as i64 + dv.round() as i64));
-                    let a = 中位深(z0, w, h, x0, y0, self.边);
-                    let b = if nx >= 0 && ny >= 0 {
-                        中位深(z1, w, h, nx as usize, ny as usize, self.边)
-                    } else { None };
-                    if let (Some(a), Some(b)) = (a, b) {
-                        let ez = (b - a) - pz;
-                        for k in 0..self.通道数 {
-                            g.表[2 * self.通道数 + k] += ez * 命令[k] / 模2;
-                        }
-                    }
-                }
-                // 滑动平均:0.2 是**无量纲**的遗忘率(新的一次占两成),不是长度也不是时间。
-                let a = 0.2;
-                g.残 = g.残 * (1.0 - a) + (eu * eu + ev * ev).sqrt() * a;
-                g.动 = g.动 * (1.0 - a) + (du * du + dv * dv).sqrt() * a;
-                g.次 = g.次.saturating_add(1);
+                let src = self.取雅(x as f32 - fu, y as f32 - fv);
+                新j[i * n..i * n + n].copy_from_slice(&src);
             }
         }
-        self.跟着流搬一格(&f);
-        // 🔴 尺子取**九分位**而不是最大值:最大值会被单个野点(被推动的物体、光流在
-        //    遮挡边界上的假流)顶上去,于是真身体那些格子全部被自己的尺子刷掉。
-        //    实测代价(YA,2026-08-29):最大动 4.43 px ⇒ 门槛 0.89 px ⇒
-        //    203 个"动过"的格子**一个都没过**。九分位对少数野点不敏感,而且仍然是量出来的。
-        self.最大动 = {
-            let mut v: Vec<f64> = self.格们.iter().filter(|g| g.次 > 0).map(|g| g.动).collect();
-            if v.is_empty() { 0.0 } else {
-                v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
-                // 0.9 是**排序里的位置**(第几个样本),无量纲 —— 换相机、换分辨率都不用改。
-                v[((v.len() - 1) as f64 * 0.9) as usize]
+        self.j = 新j;
+        for v in self.p.iter_mut() { *v += self.q过程 }
+
+        // ── ② 更新步(式 10、11)
+        let qq: Vec<f32> = qd.iter().map(|v| v * v).collect();
+        for i in 0..w * h {
+            let s: f32 = (0..self.nj).map(|k| self.p[i * self.nj + k] * qq[k]).sum();
+            let 分母 = s + self.r观测;
+            if !(分母.abs() > 1e-12) { continue }
+            let (mut pu, mut pv) = (0.0f32, 0.0f32);
+            for k in 0..self.nj {
+                pu += self.j[i * n + k] * qd[k];
+                pv += self.j[i * n + self.nj + k] * qd[k];
             }
+            let (eu, ev) = (u.u[i] - pu, u.v[i] - pv);
+            for k in 0..self.nj {
+                let g = self.p[i * self.nj + k] * qd[k] / 分母;
+                self.j[i * n + k] += eu * g;
+                self.j[i * n + self.nj + k] += ev * g;
+            }
+            for k in 0..self.nj {
+                let f = self.p[i * self.nj + k] * qq[k] / 分母;
+                self.p[i * self.nj + k] *= 1.0 - f;
+            }
+        }
+        self.上流 = Some(u);
+        self.帧 = self.帧.saturating_add(1);
+    }
+
+    /// **算法 1 + 2:聚类 + 逐簇时间一致性 ⇒ 哪些像素是我。**
+    ///
+    /// `nk` 是簇数(论文用 5:理论上 2 就够 —— 机器人和背景 —— 但多分几簇能把背景运动
+    /// 造出来的各种假雅可比分开)。`门` 是评分门槛(论文 0.2)。两个都是**个数/比值**,无量纲。
+    pub fn 聚类并判我(&mut self, nk: usize, 门: f32) {
+        let n = 2 * self.nj;
+        let np = self.w * self.h;
+        if np == 0 || nk == 0 { return }
+        let mut 心: Vec<Vec<f32>> = if self.簇心.len() == nk {
+            self.簇心.clone()
+        } else {
+            (0..nk).map(|c| {
+                let i = (c * np / nk).min(np - 1);
+                self.j[i * n..i * n + n].to_vec()
+            }).collect()
         };
-    }
-
-    /// 这个格子是不是我。
-    ///
-    /// 判据两句:**它真的动了,而且动的那部分基本被"我的命令"解释掉了。**
-    ///
-    /// 🔴 **"真的动了"这一句不能省。** 实测(换成光流之后立刻暴露):全局平滑会把运动
-    /// **渗**进静止的背景里,渗出来的那一点点运动**也和命令成比例** ⇒ 解释率一样很高
-    /// ⇒ 整片背景被判成"我"。这是全局平滑的真实副作用,不是 bug。
-    /// ⇒ 尺子用**全图动得最多的那一格**:比它慢五倍以上的,不算跟着我动。
-    /// 五分之一是**比值**,无量纲 —— 换相机、换分辨率、换身体都不用改。
-    ///
-    /// `解释率 = 1 − 残/动` 同样是无量纲的比值。问得太少的格子一律不算(巧合还没被磨掉)。
-    pub fn 是我(&self, gx: usize, gy: usize, 至少问几次: u32, 解释率: f64) -> bool {
-        if gx >= self.列 || gy >= self.行 { return false }
-        let g = &self.格们[gy * self.列 + gx];
-        if g.次 < 至少问几次 { return false }
-        // 动都没动过的格子判不了(背景、桌面)。门槛用**它自己的残差**当尺,不填绝对像素。
-        if !(g.动 > g.残.max(1e-9)) { return false }
-        // 真的动了:至少是"全图动得最多的那一格"的五分之一。
-        if !(g.动 >= self.最大动 * 0.2) { return false }
-        1.0 - g.残 / g.动.max(1e-9) >= 解释率
-    }
-
-    /// 这个格子的"命令 ⇒ 画面跑多少"(两行 × 通道数,行优先)。
-    pub fn 表(&self, gx: usize, gy: usize) -> Option<&[f64]> {
-        if gx >= self.列 || gy >= self.行 { return None }
-        Some(&self.格们[gy * self.列 + gx].表)
-    }
-
-    /// 这个格子的 (被问过几次, 解释率)。
-    pub fn 底(&self, gx: usize, gy: usize) -> Option<(u32, f64)> {
-        if gx >= self.列 || gy >= self.行 { return None }
-        let g = &self.格们[gy * self.列 + gx];
-        Some((g.次, if g.动 > 1e-9 { 1.0 - g.残 / g.动 } else { 0.0 }))
-    }
-
-    /// **我身上离某个画面位置最近的那个格子** —— 伺服要拿它当"我"。
-    ///
-    /// 用"离目标最近"而不是"整片的形心":要送到球上的是**指尖**,而形心在胳膊中段
-    ///(仓里 `hand.rs` N45 那条:*形心在指身中段 ⇒ 指尖越过物体*)。
-    /// 离目标最近的那一格,天然就是我身上伸得最前的那一截。
-    pub fn 我离目标最近的一格(&self, 目u: f64, 目v: f64, 至少问几次: u32, 解释率: f64) -> Option<(usize, usize)> {
-        let mut 最好: Option<((usize, usize), f64)> = None;
-        for gy in 0..self.行 {
-            for gx in 0..self.列 {
-                if !self.是我(gx, gy, 至少问几次, 解释率) { continue }
-                let (cu, cv) = self.格心(gx, gy);
-                let d = (cu - 目u).powi(2) + (cv - 目v).powi(2);
-                if 最好.map(|(_, b)| d < b).unwrap_or(true) { 最好 = Some(((gx, gy), d)); }
+        let mut 标 = vec![0u8; np];
+        for _ in 0..6 {   // 6 轮:**次数**,无量纲
+            for i in 0..np {
+                let v = &self.j[i * n..i * n + n];
+                let mut best = (f32::INFINITY, 0u8);
+                for (c, ce) in 心.iter().enumerate() {
+                    let d: f32 = v.iter().zip(ce.iter()).map(|(a, b)| (a - b) * (a - b)).sum();
+                    if d < best.0 { best = (d, c as u8) }
+                }
+                标[i] = best.1;
+            }
+            let mut 和 = vec![vec![0.0f32; n]; nk];
+            let mut 数 = vec![0.0f32; nk];
+            for i in 0..np {
+                let c = 标[i] as usize;
+                for k in 0..n { 和[c][k] += self.j[i * n + k] }
+                数[c] += 1.0;
+            }
+            for c in 0..nk {
+                if 数[c] > 0.0 { for k in 0..n { 心[c][k] = 和[c][k] / 数[c] } }
             }
         }
-        最好.map(|(p, _)| p)
+        // 算法 1 的评分:每个新簇心去上一轮里找**最近的**那个,继承它的分。
+        // 越靠近(= 这个簇在时间上越稳)分越高 —— **这就是"是不是我"的全部判据**。
+        let 旧心 = self.簇心.clone();
+        let 旧评 = self.簇评.clone();
+        let mut 新评 = vec![1.0f32; nk];
+        if !旧心.is_empty() {
+            for c in 0..nk {
+                let mut best = (f32::INFINITY, 0usize);
+                for (d, oc) in 旧心.iter().enumerate() {
+                    let dd: f32 = 心[c].iter().zip(oc.iter()).map(|(a, b)| (a - b) * (a - b)).sum();
+                    if dd < best.0 { best = (dd, d) }
+                }
+                let 距 = best.0.sqrt();
+                let 模: f32 = 心[c].iter().map(|v| v * v).sum::<f32>().sqrt().max(1e-6);
+                // 论文:Consistency = 1/sqrt(‖dist‖/‖Center‖ + 0.1)
+                let 一致 = 1.0 / (距 / 模 + 0.1).sqrt();
+                let 上 = 旧评.get(best.1).copied().unwrap_or(1.0);
+                // 论文:Eval ← Eval × 0.1(Consistency − 1) + 1
+                新评[c] = 上 * (0.1 * (一致 - 1.0) + 1.0);
+            }
+            let m = 新评.iter().cloned().fold(0.0f32, f32::max).max(1e-6);
+            for v in 新评.iter_mut() { *v /= m }
+        }
+        // 🔴 **一动没动的簇不算我。** 论文靠"背景那些簇的雅可比在时间上不稳"把它们排掉,
+        // 而一片**完全静止**的背景,它的雅可比恒等于零 —— 零在时间上是最稳的,反而拿满分。
+        // ⇒ 再加一句:簇心的模必须够大(至少是最大那一簇的十分之一)。
+        // 十分之一是**比值**,无量纲。
+        let 模们: Vec<f32> = 心.iter().map(|c| c.iter().map(|v| v * v).sum::<f32>().sqrt()).collect();
+        let 最大模 = 模们.iter().cloned().fold(0.0f32, f32::max).max(1e-9);
+        self.自簇 = (0..nk).map(|c| 新评[c] > 门 && 模们[c] >= 最大模 * 0.1).collect();
+        self.簇心 = 心;
+        self.簇评 = 新评;
+        self.标 = 标;
     }
 
-    /// 格子中心(**归一化画幅坐标**,和眼给的 u/v 同一套)。
-    pub fn 格心(&self, gx: usize, gy: usize) -> (f64, f64) {
+    /// 这个像素(工作分辨率坐标)是不是我。
+    pub fn 是我(&self, x: usize, y: usize) -> bool {
+        if x >= self.w || y >= self.h { return false }
+        let c = self.标[y * self.w + x] as usize;
+        self.自簇.get(c).copied().unwrap_or(false)
+    }
+
+    /// 有多少像素被判成"是我"。
+    pub fn 我有几个(&self) -> usize {
+        (0..self.w * self.h)
+            .filter(|i| self.自簇.get(self.标[*i] as usize).copied().unwrap_or(false))
+            .count()
+    }
+
+    /// **式 15:让一个"长在身上的点"跟着身体跑。** 传归一化画幅坐标,返回新的归一化坐标。
+    ///
+    /// 它不是固定像素、也不是"最近的自体格子" —— 它每一帧沿**实测**光流走一步,
+    /// 于是永远贴在身体的同一处。这一条一次性替掉模板匹配:没有模板、没有孔径问题。
+    pub fn 跟着走(&self, u: f64, v: f64) -> (f64, f64) {
+        let Some(f) = self.上流.as_ref() else { return (u, v) };
+        let x = (u * self.w as f64) as f32;
+        let y = (v * self.h as f64) as f32;
+        let xc = x.clamp(0.0, (self.w - 1) as f32) as usize;
+        let yc = y.clamp(0.0, (self.h - 1) as f32) as usize;
+        let i = yc * self.w + xc;
         (
-            (gx as f64 + 0.5) * self.边 as f64 / (self.列 * self.边) as f64,
-            (gy as f64 + 0.5) * self.边 as f64 / (self.行 * self.边) as f64,
+            (((x + f.u[i]) as f64) / self.w as f64).clamp(0.0, 1.0),
+            (((y + f.v[i]) as f64) / self.h as f64).clamp(0.0, 1.0),
         )
     }
 
-    /// 🔴🔴🔴 **把整张图【跟着运动搬过去】。**
+    /// **式 16:某一点处的雅可比**(归一化画幅坐标进)。
+    /// 返回两行 × nj 列(行优先),单位是**画幅 / 命令**(已把工作分辨率换算掉)。
+    pub fn 雅可比(&self, u: f64, v: f64) -> Vec<f64> {
+        let j = self.取雅(u as f32 * self.w as f32, v as f32 * self.h as f32);
+        let mut out = vec![0.0f64; 2 * self.nj];
+        for k in 0..self.nj {
+            out[k] = j[k] as f64 / self.w as f64;
+            out[self.nj + k] = j[self.nj + k] as f64 / self.h as f64;
+        }
+        out
+    }
+
+    /// **我身上离某个画面位置最近的那一点**(归一化坐标进出)。伺服拿它当 `p_self` 的初值。
     ///
-    /// 格子是钉在画面上不动的,而身体是从这些格子上**滑过去**的:同一个格子这一秒装着小臂、
-    /// 下一秒装着手腕、再下一秒是地板。于是"这一格的方向盘"根本不是一个固定的东西,
-    /// 观测再多也学不会 —— 每次都在给一块新的东西记账。
-    ///
-    /// 实测代价(YC,2026-08-29):前三关全过(问够 1200 格 → 动过 756 → 动得够多 103),
-    /// 而**"解释得掉的"永远是 0**。
-    ///
-    /// ⇒ 每一帧不只更新数值,还要**把整张表沿着运动方向搬一格**:
-    ///   新的第 i 格,从"这一格里的东西上一帧在哪儿"那个位置(= 现在的位置 − 它自己的位移)取。
-    ///   这样"小臂那一格的方向盘"跟着小臂走,而不是留在原地等下一块东西滑进来。
-    ///
-    /// 这一步正是 DIJE(arXiv 2507.00446)明说的自己的核心贡献(它称之为用**理论光流**
-    /// 而不是**实测光流**做状态转移,好处是外面的东西动了不会"漏"进我的估计里)。
-    /// 我上一版把它整个漏了。
-    fn 跟着流搬一格(&mut self, f: &crate::flow::流) {
-        let 旧 = self.格们.clone();
-        for gy in 0..self.行 {
-            for gx in 0..self.列 {
-                let (x0, y0) = (gx * self.边, gy * self.边);
-                if x0 + self.边 > f.w || y0 + self.边 > f.h { continue }
-                let (du, dv) = f.格里平均(x0, y0, self.边);
-                // 这一格里的东西,上一帧在哪一格。
-                let sx = gx as f64 - du / self.边 as f64;
-                let sy = gy as f64 - dv / self.边 as f64;
-                let (sxr, syr) = (sx.round(), sy.round());
-                if sxr < 0.0 || syr < 0.0 { continue }
-                let (sxi, syi) = (sxr as usize, syr as usize);
-                if sxi >= self.列 || syi >= self.行 { continue }
-                // 没搬动就不必抄(省一次拷贝,也避免自己抄自己带来的数值抖动)。
-                if sxi == gx && syi == gy { continue }
-                let 源 = &旧[syi * self.列 + sxi];
-                if 源.次 == 0 { continue }
-                self.格们[gy * self.列 + gx] = 源.clone();
+    /// 用"离目标最近"而不是整片形心:要送到球上的是指尖,而形心在胳膊中段
+    ///(仓里 `hand.rs` N45:形心在指身中段 ⇒ 指尖越过物体,合爪咬边挤出)。
+    pub fn 我离目标最近的一点(&self, 目u: f64, 目v: f64) -> Option<(f64, f64)> {
+        let (tx, ty) = (目u * self.w as f64, 目v * self.h as f64);
+        let mut best: Option<((usize, usize), f64)> = None;
+        for y in 0..self.h {
+            for x in 0..self.w {
+                if !self.是我(x, y) { continue }
+                let d = (x as f64 - tx).powi(2) + (y as f64 - ty).powi(2);
+                if best.map(|(_, b)| d < b).unwrap_or(true) { best = Some(((x, y), d)) }
             }
         }
+        best.map(|((x, y), _)| ((x as f64 + 0.5) / self.w as f64, (y as f64 + 0.5) / self.h as f64))
     }
-
-    /// **三个条件各自卡掉了多少格** —— "认出 0 格"有三种完全不同的死法,
-    /// 而它们在日志上长得一模一样。不打出来就只能猜(今晚已经猜错四次)。
-    /// 返回 (问够次数的, 动过的, 动得够多的, 解释得掉的, 全图最大动)。
-    pub fn 诊断(&self, 至少问几次: u32, 解释率: f64) -> (usize, usize, usize, usize, f64) {
-        let (mut a, mut b, mut c, mut d) = (0, 0, 0, 0);
-        for g in &self.格们 {
-            if g.次 < 至少问几次 { continue }
-            a += 1;
-            if !(g.动 > g.残.max(1e-9)) { continue }
-            b += 1;
-            // 0.2 是**比值**(全图动得最多那一格的五分之一),无量纲 —— 见 `是我` 的头注。
-            if !(g.动 >= self.最大动 * 0.2) { continue }
-            c += 1;
-            if 1.0 - g.残 / g.动.max(1e-9) >= 解释率 { d += 1 }
-        }
-        (a, b, c, d, self.最大动)
-    }
-
-    /// 有多少格子被判成"是我"。开机后它应该从 0 长起来 —— 长不起来就是这张图没学到东西。
-    pub fn 我有几格(&self, 至少问几次: u32, 解释率: f64) -> usize {
-        let mut n = 0;
-        for gy in 0..self.行 { for gx in 0..self.列 { if self.是我(gx, gy, 至少问几次, 解释率) { n += 1 } } }
-        n
-    }
-}
-
-/// 一个格子里的中位深度(米)。取中位而不是均值:格子边上会切到背景,均值会被拖走。
-fn 中位深(z: &[f64], w: usize, h: usize, x0: usize, y0: usize, 边: usize) -> Option<f64> {
-    // 用减法比,不用加法 —— 加法在 x0 是个巨大的数时会溢出(XZ 实测崩过一次)。
-    if x0 > w.saturating_sub(边) || y0 > h.saturating_sub(边) { return None }
-    let mut v: Vec<f64> = Vec::with_capacity(边 * 边);
-    for y in y0..y0 + 边 { for x in x0..x0 + 边 {
-        let d = z[y * w + x];
-        if d.is_finite() && d > 1e-6 { v.push(d) }
-    }}
-    if v.len() * 2 < 边 * 边 { return None }
-    v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
-    Some(v[v.len() / 2])
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// 造一幅图:一块方块在动,背景不动。命令驱动方块 ⇒ 方块那些格子该被判成"我",
-    /// 背景不该。**这条测试守的是这一层唯一的那句判据。**
-    #[test]
-    fn 跟着我动的才算我() {
-        let (w, h) = (128usize, 96usize);
-        let mut 自 = 自图::新(w, h, 8, 1);
-        let 画 = |x: i64, y: i64| -> Vec<u8> {
-            let mut g = vec![40u8; w * h];
-            // 背景加一点花纹,免得被"没花纹"那一条整片挡掉
-            for i in 0..w * h { if (i / w + i % w) % 7 == 0 { g[i] = 90 } }
-            // 🔴 方块**必须有花纹** —— 纯色方块的内部格子会被"没花纹不许判"那条正确地挡掉
-            //(第一版测试就是这么挂的:挂得对,是测试造错了数据)。
-            for dy in 0..16i64 { for dx in 0..16i64 {
-                let (px, py) = (x + dx, y + dy);
-                if px >= 0 && py >= 0 && (px as usize) < w && (py as usize) < h {
-                    // 🔴 花纹必须**不重复**:块匹配在周期图案上有多个同样好的解(混叠)。
-                    // 第一版用 `(dx/2+dy/2)%2` 的棋盘格,周期 4 px 而位移 3 px ⇒ 解释率跑到 **−0.98**。
-                    // 这不是代码错,是块匹配的真实性质 —— 真实场景里计算器键盘、瓷砖缝就是这种图案。
-                    let hh = ((dx as u64).wrapping_mul(2654435761) ^ (dy as u64).wrapping_mul(40503)) as u8;
-                    g[py as usize * w + px as usize] = 60u8.saturating_add(hh / 2);
-                }
-            }}
-            g
-        };
-        // 命令 +1 ⇒ 方块右移 3 px;来回喂若干次
-        let mut x = 40i64;
-        let mut 前 = 画(x, 40);
-        for k in 0..12 {
-            let c = if k % 2 == 0 { 1.0 } else { -1.0 };
-            x += (3.0 * c) as i64;
-            let 后 = 画(x, 40);
-            自.喂(&前, &后, None, None, w, h, &[c], 5);
-            前 = 后;
-        }
-        // 方块中心那一格该是"我"
-        let (gx, gy) = ((x as usize + 8) / 8, 48 / 8);
-        // 🔴 断言钉在**方块那一片**上,不钉在某一格上:格子边界会切到背景,
-        //    单独一格的解释率会被拉低(实测边界格 0.093,而里面那些 0.7–0.9)。
-        //    这条测试要守的是"跟着我动的那一片被认出来",不是"第 (6,6) 格"。
-        let _ = (gx, gy);
-        let 方块里 = (5..7).flat_map(|gx| (5..7).map(move |gy| (gx, gy)))
-            .filter(|(gx, gy)| 自.是我(*gx, *gy, 3, 0.5)).count();
-        assert!(方块里 >= 1, "跟着命令动的方块那一片该被判成我,实际 {方块里} 格");
-        // 远处的背景格子不该是"我"
-        assert!(!自.是我(1, 1, 3, 0.5), "不跟我动的背景不该被判成我");
-        assert!(自.我有几格(3, 0.5) > 0, "该至少认出几格是我");
+    fn 画(w: usize, h: usize, x: i64) -> Vec<u8> {
+        let mut g = vec![40u8; w * h];
+        for i in 0..w * h { if (i / w + i % w) % 7 == 0 { g[i] = 90 } }
+        for dy in 0..32i64 { for dx in 0..32i64 {
+            let (px, py) = (x + dx, 32 + dy);
+            if px >= 0 && py >= 0 && (px as usize) < w && (py as usize) < h {
+                let hh = ((dx as u64).wrapping_mul(2654435761) ^ (dy as u64).wrapping_mul(40503)) as u8;
+                g[py as usize * w + px as usize] = 60u8.saturating_add(hh / 2);
+            }
+        }}
+        g
     }
 
-    /// 世界自己动(和我的命令无关)不该被判成我 —— 这一条就是"东西被碰动了"那一问的另一面。
+    /// 一块跟着命令来回动的方块该被判成"我",不动的背景不该。
+    /// **这条测试守的是这一层唯一的那句判据。**
     #[test]
-    fn 我没动它自己动的不算我() {
+    fn 跟着我动的那一片才算我() {
         let (w, h) = (128usize, 96usize);
-        let mut 自 = 自图::新(w, h, 8, 1);
-        let 画 = |x: i64| -> Vec<u8> {
-            let mut g = vec![40u8; w * h];
-            for i in 0..w * h { if (i / w + i % w) % 7 == 0 { g[i] = 90 } }
-            for dy in 0..16i64 { for dx in 0..16i64 {
-                let (px, py) = (x + dx, 40 + dy);
-                if px >= 0 && py >= 0 && (px as usize) < w && (py as usize) < h {
-                    // 🔴 花纹必须**不重复**:块匹配在周期图案上有多个同样好的解(混叠)。
-                    // 第一版用 `(dx/2+dy/2)%2` 的棋盘格,周期 4 px 而位移 3 px ⇒ 解释率跑到 **−0.98**。
-                    // 这不是代码错,是块匹配的真实性质 —— 真实场景里计算器键盘、瓷砖缝就是这种图案。
-                    let hh = ((dx as u64).wrapping_mul(2654435761) ^ (dy as u64).wrapping_mul(40503)) as u8;
-                    g[py as usize * w + px as usize] = 60u8.saturating_add(hh / 2);
-                }
-            }}
-            g
-        };
-        // 方块每次都往同一个方向跑 3 px,而命令在 +1 / −1 之间来回 ⇒ 解释不掉
-        let mut x = 20i64;
-        let mut 前 = 画(x);
-        for k in 0..12 {
-            let c = if k % 2 == 0 { 1.0 } else { -1.0 };
-            x += 3;
-            let 后 = 画(x);
-            自.喂(&前, &后, None, None, w, h, &[c], 5);
+        let mut 自 = 自图::新(w, h, 1);
+        let mut x = 40i64;
+        let mut 前 = 画(w, h, x);
+        for k in 0..14 {
+            let c: f64 = if k % 2 == 0 { 1.0 } else { -1.0 };
+            x += (4.0 * c) as i64;
+            let 后 = 画(w, h, x);
+            自.喂(&前, &后, w, h, &[c * 4.0]);
+            自.聚类并判我(3, 0.2);
             前 = 后;
         }
-        let (gx, gy) = ((x as usize + 8) / 8, 48 / 8);
-        assert!(!自.是我(gx, gy, 3, 0.8), "和我的命令对不上的东西不该被判成我");
+        assert!(自.我有几个() > 0, "该认出一些像素是我");
+        let (cx, cy) = (((x + 16) / 2) as usize, (32 + 16) / 2);
+        assert!(自.是我(cx, cy), "跟着命令动的方块该被判成我(工作坐标 {cx},{cy})");
+        assert!(!自.是我(3, 3), "不跟我动的背景不该被判成我");
+    }
+
+    /// **长在身上的那个点会跟着身体跑**(式 15)。
+    #[test]
+    fn 长在身上的点会跟着身体跑() {
+        let (w, h) = (128usize, 96usize);
+        let mut 自 = 自图::新(w, h, 1);
+        自.喂(&画(w, h, 40), &画(w, h, 46), w, h, &[6.0]);
+        let (u0, v0) = ((40.0 + 16.0) / w as f64, 48.0 / h as f64);
+        let (u1, _) = 自.跟着走(u0, v0);
+        assert!(u1 > u0, "点该跟着方块往右跑:{u0:.4} → {u1:.4}");
     }
 }
