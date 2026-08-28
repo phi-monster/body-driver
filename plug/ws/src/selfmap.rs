@@ -163,7 +163,18 @@ impl 自图 {
                 g.次 = g.次.saturating_add(1);
             }
         }
-        self.最大动 = self.格们.iter().map(|g| g.动).fold(0.0f64, f64::max);
+        // 🔴 尺子取**九分位**而不是最大值:最大值会被单个野点(被推动的物体、光流在
+        //    遮挡边界上的假流)顶上去,于是真身体那些格子全部被自己的尺子刷掉。
+        //    实测代价(YA,2026-08-29):最大动 4.43 px ⇒ 门槛 0.89 px ⇒
+        //    203 个"动过"的格子**一个都没过**。九分位对少数野点不敏感,而且仍然是量出来的。
+        self.最大动 = {
+            let mut v: Vec<f64> = self.格们.iter().filter(|g| g.次 > 0).map(|g| g.动).collect();
+            if v.is_empty() { 0.0 } else {
+                v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
+                // 0.9 是**排序里的位置**(第几个样本),无量纲 —— 换相机、换分辨率都不用改。
+                v[((v.len() - 1) as f64 * 0.9) as usize]
+            }
+        };
     }
 
     /// 这个格子是不是我。
