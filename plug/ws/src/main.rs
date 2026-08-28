@@ -23,6 +23,7 @@
 //! 的目标上。⇒ **插头在外面,身体在里面。** 换一种机器人 = 换一个插头。
 
 mod discover;
+mod flow;
 mod selfmap;
 mod task;
 mod wire;
@@ -5800,7 +5801,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         let 爪像素 = (块 * gw as f64) * (块 * gw as f64);
                         let 格像素 = (图.边长() * 图.边长()) as f64;
                         ((爪像素 / 格像素.max(1.0)) * 0.5).ceil().max(2.0) as usize
-                    }).unwrap_or(usize::MAX);
+                    }).unwrap_or(1);   // 图还没建 ⇒ 门槛给 1,反正 `我几格` 也是 0,照样进不去
                     let 我几格 = 自图.as_ref().map(|图| 图.我有几格(3, 0.5)).unwrap_or(0);
                     let 自认格 = if 我几格 >= 够几格 {
                         自图.as_ref().and_then(|图| 图.我离目标最近的一格(目u, 目v, 3, 0.5))
