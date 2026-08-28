@@ -5775,6 +5775,26 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     }
                     if k % 10 == 0 {
                         println!("[服]      画面追:第 {k}/{上限} 步 · 我在 ({现u:.3},{现v:.3}) 深 {现深:.3} · 横纵差 {差像:.4} 深差 {:+.4}", 目深 - 现深);
+                        // 🔴🔴 **把"被跟踪的那一块"和"目标"一起画出来存下来。**
+                        //
+                        // 画面闭环绕过的只是"换算成三维时的偏差";如果**被跟的那块根本不在爪子上**
+                        //(比如跟的是一块地板),那把它挪到球上、爪子也不在球上。
+                        // 这一条不看图就没法判 —— 而不看图往下走,又是"日志全绿而世界没发生"。
+                        // 方框 = 我在跟的那一块 · 十字 = 目标那个像素。
+                        if let Ok(存路) = std::env::var("BL_VID") {
+                            let mut 图 = g.clone();
+                            let mut 点 = |x: i64, y: i64, v: u8| {
+                                if x >= 0 && y >= 0 && (x as usize) < gw && (y as usize) < gh { 图[y as usize * gw + x as usize] = v; }
+                            };
+                            let (bx, by) = ((现u * gw as f64) as i64, (现v * gh as f64) as i64);
+                            let r = 半跟 as i64;
+                            for t in -r..=r { 点(bx + t, by - r, 255); 点(bx + t, by + r, 255); 点(bx - r, by + t, 255); 点(bx + r, by + t, 255); }
+                            let (tx, ty) = ((目u * gw as f64) as i64, (目v * gh as f64) as i64);
+                            for t in -14i64..=14 { 点(tx + t, ty, 0); 点(tx, ty + t, 0); }
+                            let mut buf = format!("P5\n{gw} {gh}\n255\n").into_bytes();
+                            buf.extend_from_slice(&图);
+                            let _ = std::fs::write(format!("{存路}/track{:03}_{k:04}.pgm", 集), buf);
+                        }
                     }
                 }
                 if 被切走 { continue }
