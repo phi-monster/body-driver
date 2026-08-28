@@ -101,6 +101,8 @@ impl 自图 {
             return;
         }
         let 搜 = 搜.max(1);
+        // 哪些格子这一轮**真的量到了**位移(有花纹、匹配得上)。没量到的等下从邻居那儿灌。
+        let mut 有数 = vec![false; self.列 * self.行];
         for gy in 0..self.行 {
             for gx in 0..self.列 {
                 let (x0, y0) = (gx * self.边, gy * self.边);
@@ -115,6 +117,7 @@ impl 自图 {
                 if 明 < 8 {
                     continue;
                 }
+                有数[gy * self.列 + gx] = true;
                 let i = gy * self.列 + gx;
                 let g = &mut self.格们[i];
                 // 表预测这一下会跑多少
@@ -146,6 +149,52 @@ impl 自图 {
                 g.残 = g.残 * (1.0 - a) + (eu * eu + ev * ev).sqrt() * a;
                 g.动 = g.动 * (1.0 - a) + (du * du + dv * dv).sqrt() * a;
                 g.次 = g.次.saturating_add(1);
+            }
+        }
+        self.往没纹理的地方灌(&有数);
+    }
+
+    /// 🔴🔴🔴 **把边缘上量到的方向盘,灌进它旁边【没有纹理】的格子里。**
+    ///
+    /// 实测代价(XW,2026-08-28,**渲图看出来的**):胳膊甩到画面中央、占了大半个画面,
+    /// 而自图只认出 **2 格**(都在底座上)。原因不是"没数据",是**这条胳膊是一大片光滑的白色** ——
+    /// 16×16 的格子落在它内部,块匹配无从判断它往哪跑。这是**孔径问题**:
+    /// 一片均匀的区域自己不携带位移信息,位移只能从**边界**上读出来。
+    ///
+    /// ⚠️ 我为此还错过一次:先在一张**胳膊很小**的帧上数花纹,得出"花纹不是瓶颈",
+    /// 而在**胳膊占满画面**的那一帧上恰恰相反。**同一个量在不同帧上答案相反 —— 要在【出问题的那一帧】上量。**
+    ///
+    /// DIJE 用稠密光流不会有这个问题:光流自带正则化,会**从边缘往无纹理区域里灌**。
+    /// 这里没有光流库,就把那一步显式做出来:没量到的格子,取**量到了的邻居**的平均。
+    /// 灌几轮就是"从边界往里渗几格",轮数是**格数**(无量纲),不是长度。
+    fn 往没纹理的地方灌(&mut self, 有数: &[bool]) {
+        let mut 有 = 有数.to_vec();
+        for _ in 0..3 {
+            let 上一轮 = 有.clone();
+            for gy in 0..self.行 {
+                for gx in 0..self.列 {
+                    let i = gy * self.列 + gx;
+                    if 上一轮[i] { continue }
+                    let mut 和 = vec![0.0f64; 3 * self.通道数];
+                    let (mut 残和, mut 动和, mut 数) = (0.0f64, 0.0f64, 0u32);
+                    for (nx, ny) in [(gx.wrapping_sub(1), gy), (gx + 1, gy), (gx, gy.wrapping_sub(1)), (gx, gy + 1)] {
+                        if nx >= self.列 || ny >= self.行 { continue }
+                        let j = ny * self.列 + nx;
+                        if !上一轮[j] { continue }
+                        for k in 0..3 * self.通道数 { 和[k] += self.格们[j].表[k] }
+                        残和 += self.格们[j].残;
+                        动和 += self.格们[j].动;
+                        数 += 1;
+                    }
+                    // 至少两个邻居量到了才灌 —— 一个邻居可能是边界上的假值。
+                    if 数 < 2 { continue }
+                    let g = &mut self.格们[i];
+                    for k in 0..3 * self.通道数 { g.表[k] = 和[k] / 数 as f64 }
+                    g.残 = 残和 / 数 as f64;
+                    g.动 = 动和 / 数 as f64;
+                    g.次 = g.次.saturating_add(1);
+                    有[i] = true;
+                }
             }
         }
     }
