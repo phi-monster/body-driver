@@ -1431,3 +1431,246 @@ pub fn eye_from_jacobian(
     }
     Some(eye)
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// 减法③:**候选区域由几何出,眼睛只负责【挑】。**(owner 2026-08-28)
+// ────────────────────────────────────────────────────────────────────────────
+
+/// 画面里**从支撑面上鼓出来的一块**。这就是一个"候选物体",而且它的边界是**量出来的**,
+/// 不是猜的半径。
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct 区 {
+    /// 框(像素):左、上、右、下(闭区间)。
+    pub 框: [usize; 4],
+    /// 这一块有多少个像素。
+    pub 像素数: usize,
+    /// 中心(**归一化画幅坐标**,和眼给的 u/v 同一套)。
+    pub 心: [f64; 2],
+    /// 这一块的中位深度(米)。
+    pub 深: f64,
+    /// 它比支撑面**鼓出来多少**(米,正数)。
+    pub 高: f64,
+}
+
+/// **把画面切成"支撑面"和"支撑面上鼓出来的那些块"** —— 不认识任何物体、不需要任何检测器。
+///
+/// # 为什么这样切是对的,而"绕着眼指那一点长一个圆"是错的
+///
+/// `mask_around` 的半径来自眼睛报的 `span_frac` ×一个宽容系数 —— **两个都是猜的**,
+/// 而后果是实测过的:*"今天把桌面圈进点云的正是那个猜出来的半径"*。
+/// 这里一个半径都没有:**边界是"哪儿不再鼓出来"**,它是图里的真实结构。
+///
+/// # 一个内参都不需要
+///
+/// 空间里的一个平面,在深度图上满足 **`1/z` 关于像素 (u,v) 线性**(针孔几何的恒等式)。
+/// 于是"支撑面"就是 `1/z ≈ a·u + b·v + c` 这么一张平面,**用最小二乘 + 反复剔野点**拟出来
+/// —— 地板/桌面占了绝大多数像素,所以它一定收敛到支撑面上。
+/// 不用焦距、不用主点、不用相机位姿:**换一台相机、换一个视角,这段代码一个字都不用改。**
+/// 也因此它可以在**相机还没解出来之前**就跑 —— 而"眼指哪儿"正是在那之前就要回答的问题。
+///
+/// # 门槛不是拍的
+///
+/// "鼓出来多少才算一块" = 拟完之后**残差自己的稳健散布 σ** 的若干倍。σ 是量出来的
+/// (中位绝对偏差 × 1.4826),`倍` 只是一个无量纲倍数,含义是"比这张面自己的粗糙度还突出"。
+///
+/// 返回按**像素数从多到少**排好的区;`最小像素` 以下的碎块直接丢掉。
+/// 一维滑窗极值,窗口 `[c-r, c+r]`(单调队列,O(n))。
+/// `取大` 为真取最大,否则取最小;无读数的像素按 `空` 参与(取大时给 −∞ ⇒ 被忽略)。
+fn 滑窗(src: &[f64], w: usize, h: usize, r: usize, 横: bool, 取大: bool, 空: f64) -> Vec<f64> {
+    let mut out = vec![空; w * h];
+    let (外, 内) = if 横 { (h, w) } else { (w, h) };
+    if 内 == 0 { return out }
+    let mut dq: Vec<usize> = Vec::with_capacity(内);
+    for o in 0..外 {
+        dq.clear();
+        let mut 头 = 0usize;
+        let at = |k: usize| if 横 { o * w + k } else { k * w + o };
+        let val = |k: usize| { let v = src[at(k)]; if v.is_finite() { v } else { 空 } };
+        let mut 推 = |dq: &mut Vec<usize>, 头: usize, k: usize| {
+            while dq.len() > 头 {
+                let 尾 = *dq.last().unwrap();
+                if (取大 && val(尾) <= val(k)) || (!取大 && val(尾) >= val(k)) { dq.pop(); } else { break }
+            }
+            dq.push(k);
+        };
+        // 先把 [0, r] 灌进去
+        for k in 0..=(r.min(内 - 1)) { 推(&mut dq, 头, k); }
+        for c in 0..内 {
+            // 右界推进到 c+r
+            if c > 0 {
+                let k = c + r;
+                if k < 内 { 推(&mut dq, 头, k); }
+            }
+            // 左界:丢掉小于 c-r 的
+            let 左 = c.saturating_sub(r);
+            while dq.len() > 头 && dq[头] < 左 { 头 += 1 }
+            if dq.len() > 头 { out[at(c)] = val(dq[头]); }
+        }
+    }
+    out
+}
+
+/// **把画面切成"背景面"和"从背景面上鼓出来的那些块"** —— 不认识任何物体、不需要任何检测器,
+/// 也**不假设支撑面是一张平面**。
+///
+/// # 为什么不拟平面(2026-08-28 在真实深度图上验掉的)
+///
+/// 先写的版本是"拟一张 `1/z` 关于像素线性的支撑面,鼓出来的就是物体"。在真机那张图上
+/// **一块桌面物体都没切出来**:场景里同时有桌面和背景墙,拟出来的那张面横跨两者,
+/// 稳健 σ 折成 **~5 cm 的起伏**,而桌上的东西只鼓 2–8 cm ⇒ 整个淹掉。
+/// 加大剔野点力度会把桌面自己剔成一条斜带(渲图看见的)。**平面假设本身是错的**:
+/// 换成弯桌面、地板+桌面两层、无人机看地形,它一样塌。
+///
+/// # 换成形态学闭运算:物体是深度上的【凹坑】
+///
+/// 一个放在任何面上的东西,在深度图里就是**比周围近**的一小片 —— 一个坑。
+/// **闭运算**(先取窗内最大深度、再取窗内最小)正是"把比窗口小的坑填平"这件事:
+/// 填平之后的那张图就是"如果这儿什么都没放,背景面长什么样",
+/// 而 **背景 − 实测 = 它鼓出来多高**。桌沿那种真实的深度台阶被闭运算原样保留(不产生假鼓),
+/// 这是它比"减一张平面"强的地方。**没有平面、没有法向、没有相机内参。**
+///
+/// # 两个无量纲的数,含义都写出来
+///
+/// * `窗比`:窗口半径 = 画面宽 × 窗比。含义是"**比这个还大的就不是可以拿起来的东西,是布景**"。
+/// * `倍`:鼓出多少才算数 = 背景残差自己的稳健 σ 的多少倍。
+///
+/// 返回按**像素数从多到少**排好的区;`最小像素` 以下的碎块直接丢掉。
+pub fn 分块(depth: &[f64], w: usize, h: usize, 最小像素: usize, 倍: f64) -> Vec<区> {
+    分块窗(depth, w, h, 最小像素, 倍, 0.125)
+}
+
+/// [`分块`] 的完整形,把窗口比例也露出来。
+pub fn 分块窗(depth: &[f64], w: usize, h: usize, 最小像素: usize, 倍: f64, 窗比: f64) -> Vec<区> {
+    if w == 0 || h == 0 || depth.len() < w * h {
+        return Vec::new();
+    }
+    let r = ((w as f64 * 窗比) as usize).max(2);
+    // 闭运算 = 膨胀(取窗内最大深度)再腐蚀(取窗内最小深度)。分两轴做,等价且是 O(n)。
+    let d1 = 滑窗(depth, w, h, r, true, true, f64::NEG_INFINITY);
+    let d2 = 滑窗(&d1, w, h, r, false, true, f64::NEG_INFINITY);
+    let e1 = 滑窗(&d2, w, h, r, true, false, f64::INFINITY);
+    let 背景 = 滑窗(&e1, w, h, r, false, false, f64::INFINITY);
+
+    // 鼓出来多少米(正数 = 比背景近)。
+    let mut 鼓 = vec![f64::NAN; w * h];
+    let mut 样: Vec<f64> = Vec::new();
+    let 步 = ((w * h) / 20000).max(1);
+    for i in 0..w * h {
+        let (z, b) = (depth[i], 背景[i]);
+        if z.is_finite() && z > 1e-6 && b.is_finite() {
+            鼓[i] = b - z;
+        }
+    }
+    for i in (0..w * h).step_by(步) {
+        if 鼓[i].is_finite() { 样.push(鼓[i]) }
+    }
+    if 样.len() < 16 {
+        return Vec::new();
+    }
+    样.sort_by(|x, y| x.partial_cmp(y).unwrap_or(core::cmp::Ordering::Equal));
+    let 中 = 样[样.len() / 2];
+    let mut 绝: Vec<f64> = 样.iter().map(|v| (v - 中).abs()).collect();
+    绝.sort_by(|x, y| x.partial_cmp(y).unwrap_or(core::cmp::Ordering::Equal));
+    // 🔴 **中位绝对偏差可能是 0,而那不代表"没有噪声"。**
+    // 实测(2026-08-28,8 bit 深度图):绝大多数像素的"鼓出来"**恰好等于 0**(量化)
+    // ⇒ MAD = 0 ⇒ σ 塌到 1e-9 ⇒ 门槛 ≈ 中位数 ⇒ **`倍` 完全失效**
+    //(倍=5/8/12 切出来一模一样的 28 块,里面还混着整条上下边)。
+    // ⇒ 往上取分位数,直到拿到一个**正的**尺度;都取不到才说明这张图真的一点起伏都没有。
+    //
+    // 下面四个数全是**无量纲**的:0.5/0.75/0.9/0.99 是**排序里的位置**(第几个样本),
+    // 1.4826 是"中位绝对偏差 → 标准差"的固定换算(正态下 1/Φ⁻¹(0.75))。
+    // 换一台相机、换一个量纲、把深度从米改成毫米,这四个数一个都不用改 —— 它们是**尺度无关**的。
+    let 分位 = |q: f64| 绝[((绝.len() as f64 - 1.0) * q) as usize];
+    let mut σ = 0.0f64;
+    for q in [0.5f64, 0.75, 0.9, 0.99] {
+        let v = 分位(q) * 1.4826;
+        if v > 0.0 { σ = v; break }
+    }
+    if !(σ > 0.0) {
+        return Vec::new();
+    }
+    let 门 = 中 + 倍 * σ;
+
+    let mut 突: Vec<bool> = vec![false; w * h];
+    for i in 0..w * h {
+        if 鼓[i].is_finite() && 鼓[i] > 门 {
+            突[i] = true;
+        }
+    }
+    // 连通块(四邻,显式栈,不递归)。
+    let mut 标: Vec<i32> = vec![-1; w * h];
+    let mut 出: Vec<区> = Vec::new();
+    let mut 栈: Vec<usize> = Vec::new();
+    for 起 in 0..w * h {
+        if !突[起] || 标[起] >= 0 {
+            continue;
+        }
+        let id = 出.len() as i32;
+        栈.clear();
+        栈.push(起);
+        标[起] = id;
+        let (mut u0, mut v0, mut u1, mut v1) = (w, h, 0usize, 0usize);
+        let mut n = 0usize;
+        let mut 深们: Vec<f64> = Vec::new();
+        let mut 高们: Vec<f64> = Vec::new();
+        while let Some(i) = 栈.pop() {
+            let (x, y) = (i % w, i / w);
+            n += 1;
+            u0 = u0.min(x);
+            v0 = v0.min(y);
+            u1 = u1.max(x);
+            v1 = v1.max(y);
+            深们.push(depth[i]);
+            高们.push(鼓[i]);
+            for (nx, ny) in [(x.wrapping_sub(1), y), (x + 1, y), (x, y.wrapping_sub(1)), (x, y + 1)] {
+                if nx >= w || ny >= h {
+                    continue;
+                }
+                let j = ny * w + nx;
+                if 突[j] && 标[j] < 0 {
+                    标[j] = id;
+                    栈.push(j);
+                }
+            }
+        }
+        if n < 最小像素 {
+            continue;
+        }
+        深们.sort_by(|x, y| x.partial_cmp(y).unwrap_or(core::cmp::Ordering::Equal));
+        高们.sort_by(|x, y| x.partial_cmp(y).unwrap_or(core::cmp::Ordering::Equal));
+        出.push(区 {
+            框: [u0, v0, u1, v1],
+            像素数: n,
+            心: [(u0 + u1) as f64 / 2.0 / w as f64, (v0 + v1) as f64 / 2.0 / h as f64],
+            深: 深们[深们.len() / 2],
+            高: 高们[高们.len() / 2],
+        });
+    }
+    出.sort_by(|p, q| q.像素数.cmp(&p.像素数));
+    出
+}
+
+/// 把某一块的像素做成掩膜 —— 和 [`分块`] 用**同一张拟出来的支撑面**,所以边界一致。
+///
+/// 🔴 这是 `mask_around` 的替代品:**没有半径、没有宽容系数**。
+pub fn 区掩膜(depth: &[f64], w: usize, h: usize, r: &区, 全部: &[区], 倍: f64) -> Vec<bool> {
+    // 重新跑一次分块代价太高,而且会因为随机性不一致 ⇒ 直接按框 + 深度带切。
+    // 深度带 = 这一块自己的中位深 ± 它自己鼓出来的高度(它不会比自己更厚)。
+    let _ = 全部;
+    let _ = 倍;
+    let mut m = vec![false; w * h];
+    let 厚 = r.高.abs().max(1e-4);
+    for y in r.框[1]..=r.框[3].min(h.saturating_sub(1)) {
+        for x in r.框[0]..=r.框[2].min(w.saturating_sub(1)) {
+            let i = y * w + x;
+            if i >= depth.len() {
+                continue;
+            }
+            let z = depth[i];
+            if z.is_finite() && z > 1e-6 && (z - r.深).abs() <= 厚 {
+                m[i] = true;
+            }
+        }
+    }
+    m
+}

@@ -277,3 +277,72 @@ mod tests {
         assert!(e.contains("画面短了"), "得到 {e}");
     }
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// 减法③:**候选由几何出,眼只负责【挑】。**(owner 2026-08-28)
+// ────────────────────────────────────────────────────────────────────────────
+
+/// 让眼从**已经画在图上的编号框**里挑一个,返回编号(1 起)。
+///
+/// # 为什么这一步比问框还值
+///
+/// 同一批模型、同一份文档 §3.6 的实测:**"选哪条轨迹" 0.916(超人类)· "选哪个抓取点"
+/// 0.403 ≈ 随机**。问框已经把"位置偏一个半径"治掉了(见 `ask` 头注 W8 那一组读数),
+/// 但框的**边界仍然是模型脑补的**;而候选框是从深度图上量出来的真实结构 ⇒
+/// ① 边界是对的(不用再猜半径,而"猜出来的半径"正是把桌面圈进点云的那一个);
+/// ② **挑错了当场看得见** —— 编号 3 是不是那个棒球,渲一张图就能判;
+///    而脑补出来的坐标,对的和错的长得一模一样。
+///
+/// # 挑不出来要说"没有",不许硬挑
+///
+/// 实测代价(WZ,2026-08-28):`general_pickup` **每一集换一张桌子**,而我把指令写死成
+/// 一句 "Pick up the baseball",于是 8 集里有 7 集在**根本没有棒球**的桌上找棒球 ——
+/// 眼只能挑一个最圆的东西交差。⇒ 这里给 `0` 这个出口:**一个都不是,就答 0**。
+/// (这与"让眼自己说看不见"那条判死不同:那条问的是"你看不看得见一个点",
+///  是自述;这里问的是**在这几个已经存在的框里选**,是选择题,而选择题它做得很好。)
+pub fn pick(
+    host: &str,
+    port: u16,
+    what: &str,
+    rgb: &[u8],
+    w: usize,
+    h: usize,
+    n: usize,
+) -> Result<usize, String> {
+    if n == 0 {
+        return Err("没有候选框可挑".into());
+    }
+    if rgb.len() < w * h * 3 {
+        return Err(format!("画面短了:要 {} 字节,只有 {}", w * h * 3, rgb.len()));
+    }
+    let bmp = bmp24(rgb, w, h);
+    let b64 = base64(&bmp);
+    let prompt = format!(
+        "Task: {what}\\n\\nThe image has {n} numbered boxes drawn on it. \
+         Each box outlines one physical object on the surface. \
+         Which numbered box is the object the task refers to? \
+         Answer with that number. If none of the boxes is that object, answer 0."
+    );
+    let body = format!(
+        r#"{{"model":"eye","max_tokens":200,"temperature":0,"chat_template_kwargs":{{"enable_thinking":false}},"response_format":{{"type":"json_schema","json_schema":{{"name":"pick_region","strict":true,"schema":{{"type":"object","additionalProperties":false,"required":["region"],"properties":{{"region":{{"type":"integer","minimum":0,"maximum":{n}}}}}}}}}}},"messages":[{{"role":"user","content":[{{"type":"image_url","image_url":{{"url":"data:image/bmp;base64,{b64}"}}}},{{"type":"text","text":"{prompt}"}}]}}]}}"#
+    );
+    let raw = post(host, port, "/v1/chat/completions", &body)?;
+    let inner = extract_content(&raw).ok_or_else(|| {
+        format!("回包里没有 content(前 200 字:{})", &raw[..raw.len().min(200)])
+    })?;
+    let j = crate::json::parse(&inner).map_err(|e| {
+        format!(
+            "眼给的不是 JSON: {e} ‖ 挖出来的前 200 字:{} ‖ 回包前 200 字:{}",
+            &inner[..inner.len().min(200)],
+            &raw[..raw.len().min(200)]
+        )
+    })?;
+    let r = j
+        .get("region")
+        .and_then(|x| x.num())
+        .ok_or_else(|| "眼没给 region".to_string())?;
+    if !(r.is_finite() && r >= 0.0) {
+        return Err(format!("眼给的 region 不合法:{r}"));
+    }
+    Ok(r.round() as usize)
+}
