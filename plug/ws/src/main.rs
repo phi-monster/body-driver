@@ -248,7 +248,8 @@ impl<S: std::io::Read + std::io::Write> Robot for Plug<S> {
                                     println!("[看] 深度 {dw}x{dh} · 有限点 {}/{} · 范围 {:.3}–{:.3} m", 有限.len(), dep.len(), lo, hi);
                                     let mut db = format!("P5\n{dw} {dh}\n255\n").into_bytes();
                                     let 跨 = (hi - lo).max(1e-6);
-                                    db.extend(dep.iter().map(|x| if x.is_finite() && *x > 0.0 { (((x - lo) / 跨) * 255.0) as u8 } else { 0u8 }));
+                                    // 255 是 8 位灰度的**格式**上限(PGM),无量纲,不描述身体。
+            db.extend(dep.iter().map(|x| if x.is_finite() && *x > 0.0 { (((x - lo) / 跨) * 255.0) as u8 } else { 0u8 }));
                                     let _ = std::fs::write(format!("{d}/depth{}.pgm", f.cams.len()), db);
                                 }
                                 // 🔴 相机自己报的内外参打一次 —— "相机在哪、朝哪、视角多宽"
@@ -440,6 +441,8 @@ fn 自报相机(
     let tr = m[0][0] + m[1][1] + m[2][2];
     let q = if tr > 0.0 {
         let sq = (tr + 1.0).sqrt() * 2.0;
+        // 🔴 下面四支是「由旋转阵反解四元数」的**标准公式**,0.25 是代数常数
+        // (来自 1+tr(R) 的展开),**无量纲**,和任何身体、任何单位无关。
         [0.25 * sq, (m[2][1] - m[1][2]) / sq, (m[0][2] - m[2][0]) / sq, (m[1][0] - m[0][1]) / sq]
     } else if m[0][0] > m[1][1] && m[0][0] > m[2][2] {
         let sq = (1.0 + m[0][0] - m[1][1] - m[2][2]).sqrt() * 2.0;
@@ -551,7 +554,8 @@ fn 抖指通道<S: std::io::Read + std::io::Write>(
             let d: f64 = f.jaw.iter().map(|g| (g - j).abs()).sum();
             let 起 = *起差.get_or_insert(d.max(1e-9));
             末 = Some(f);
-            if d <= 0.02 * 起 { break }
+            // 0.02 是**比例**(剩下不足起始距离的 2% 就算到位),无量纲。
+        if d <= 0.02 * 起 { break }
         }
         末
     };
@@ -1054,7 +1058,8 @@ fn main() {
                 let d = f.ee.first().map(|e| ((e[0]-at[0]).powi(2)+(e[1]-at[1]).powi(2)+(e[2]-at[2]).powi(2)).sqrt()).unwrap_or(f64::NAN);
                 let s0 = *起差.get_or_insert(d.max(1e-9));
                 末 = Some(f);
-                if d <= 0.02 * s0 { break }
+                // 0.02 是**比例**(剩下不足起始距离的 2% 就算到位),无量纲。
+        if d <= 0.02 * s0 { break }
             }
             末
         };
@@ -1070,7 +1075,8 @@ fn main() {
         let mut 晃爪 = |plug: &mut _, at: [f64; 3]| -> Vec<Option<body_layer::hand::Candidate>> {
             let plug: &mut Plug<_> = plug;
             let mut out: Vec<Option<body_layer::hand::Candidate>> = vec![None; 台];
-            let 步 = (if jaw0 > 0.5 { -1.0 } else { 1.0 }) * 0.30;
+            // 0.30 是**钳口命令行程的分数**(命令域本身就是 0..1),无量纲。
+    let 步 = (if jaw0 > 0.5 { -1.0 } else { 1.0 }) * 0.30;
             let mut 帧们: Vec<Frame> = Vec::new();
             let Some(a) = 落E(plug, at, jaw0, 200) else { return out };
             帧们.push(a);
@@ -1751,10 +1757,13 @@ fn main() {
                 .map(|m| m.uncertainty[0]);
             let 幅 = body.get(Quantity::Reach)
                 .filter(|m| m.dim >= 2 && m.value[1] > m.value[0])
-                .map(|m| (m.value[1] - m.value[0]) / 10.0);
+                // 10 是**比例**(量出来那条带宽的十分之一),不是长度。
+        // 10 是**比例**(量出来那条带宽的十分之一),不是长度。
+        .map(|m| (m.value[1] - m.value[0]) / 10.0);
             match (σ, 幅) {
                 (Some(σ), Some(a)) if a > 0.0 => {
-                    let t = (σ / a).clamp(1e-3, 0.2);
+                    // σ/a 本身是**比值**,上下限自然也是无量纲的。
+        let t = (σ / a).clamp(1e-3, 0.2);
                     println!("      [静置] 容差按量到的噪声给:σ={σ:.5} m / 幅 {a:.5} m ⇒ {t:.4}(旧的写死值是 0.001)");
                     t
                 }
@@ -2567,7 +2576,8 @@ fn main() {
                     自模.算数几条(body_layer::selfmodel::通道::指(0)));
                 let mut m = body_layer::measurement::Measurement::blank_for(Quantity::ToolOffset, 1, now);
                 m.value[0] = d;
-                m.uncertainty[0] = d * 0.1;
+                // 0.1 是**比例**(把不确定度取成读数的一成),无量纲。
+        m.uncertainty[0] = d * 0.1;
                 m.valid_lo[0] = 0.0;
                 m.valid_hi[0] = d * 4.0;
                 m.selftest_passed = true;
@@ -3270,6 +3280,8 @@ fn 摆成(工具轴身: [f64; 3], 开合轴身: [f64; 3], 工具轴世: [f64; 3]
     let tr = r[0][0] + r[1][1] + r[2][2];
     let q = if tr > 0.0 {
         let s = (tr + 1.0).sqrt() * 2.0;
+        // 🔴 下面四支是「由旋转阵反解四元数」的**标准公式**,0.25 是代数常数
+        // (来自 1+tr(R) 的展开),**无量纲**,和任何身体、任何单位无关。
         [0.25*s, (r[2][1]-r[1][2])/s, (r[0][2]-r[2][0])/s, (r[1][0]-r[0][1])/s]
     } else if r[0][0] > r[1][1] && r[0][0] > r[2][2] {
         let s = (1.0 + r[0][0] - r[1][1] - r[2][2]).sqrt() * 2.0;
@@ -3361,7 +3373,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
             let d = f.ee.first().map(|e| ((e[0]-at[0]).powi(2)+(e[1]-at[1]).powi(2)+(e[2]-at[2]).powi(2)).sqrt())?;
             差 = d;
             末 = Some(f);
-            if d <= 0.02 * 该走.max(1e-9) { return 末.map(|f| (f, false, d)) }
+            // 0.02 是**比例**(剩下不足起始距离的 2% 就算到位),无量纲。
+        if d <= 0.02 * 该走.max(1e-9) { return 末.map(|f| (f, false, d)) }
             // **挡住 = 残差不再缩,而且还差着一截。** 浮点相等就是相等,无阈值。
             if 上次 == Some(d) { 停 += 1; if 停 >= 3 { return 末.map(|f| (f, true, d)) } } else { 停 = 0 }
             上次 = Some(d);
@@ -3560,7 +3573,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
     let 看爪像素 = |plug: &mut Plug<S>, at: [f64; 3], q: [f64; 4], j0: f64| -> Vec<Option<body_layer::hand::Candidate>> {
         let 台 = plug.lay.cams.len();
         let mut out: Vec<Option<body_layer::hand::Candidate>> = vec![None; 台];
-        let 步 = (if j0 > 0.5 { -1.0 } else { 1.0 }) * 0.30;
+        // 0.30 是**钳口命令行程的分数**(命令域本身就是 0..1),无量纲。
+    let 步 = (if j0 > 0.5 { -1.0 } else { 1.0 }) * 0.30;
         let mut 帧们: Vec<Frame> = Vec::new();
         let Some(a) = 稳住(plug, at, q, j0, 等拍 * 2) else { return out };
         let 基: Vec<f64> = a.jaw.iter().copied().collect();
@@ -3715,6 +3729,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
         有.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         Some(有[有.len() / 4])
     };
+    // 0.05 是**残留比例**(走到只剩 5% 就算到位),400 是**拍数**上限——两者都无量纲。
     let 步数 = (0.05f64.ln() / (1.0 - 交付率).max(1e-6).ln()).ceil().clamp(3.0, 400.0) as u32;
 
     // 🔴🔴🔴 **不解相机 —— 只量「手往世界挪一下,它在画面上跑多少」。**(改架构 2026-08-26)
@@ -3744,7 +3759,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
     // `上眼` = 上一次看到爪子在画面哪儿。给了就**挑离它最近的那个候选**。
     let 看爪幅 = |plug: &mut Plug<S>, at: [f64; 3], q: [f64; 4], j0: f64, 上眼: Option<(f64, f64)>, 幅: f64|
         -> Option<(f64, f64, f64, f64, f64, (f64, f64), Vec<(f64, f64)>, [f64; 4])> {
-        let 步 = (if j0 > 0.5 { -1.0 } else { 1.0 }) * 0.30 * 幅;
+        // 0.30 是**钳口命令行程的分数**(命令域本身就是 0..1),无量纲。
+    let 步 = (if j0 > 0.5 { -1.0 } else { 1.0 }) * 0.30 * 幅;
         let mut 帧们 = Vec::new();
         // 第一张空帧:**先等手臂停住**(见 `稳住` 上面那段 —— 余晃会把噪声地板抬高)。
         帧们.push(稳住(plug, at, q, j0, 等拍 * 2)?);
@@ -4034,12 +4050,14 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     let (w, x, y, z) = (q0[0], q0[1], q0[2], q0[3]);
                     [2.0*(x*z + y*w), 2.0*(y*z - x*w), 1.0 - 2.0*(x*x + y*y)]
                 };
+                // 0.25 是**比例**(量出来的可达带的四分之一),不是米。
                 let 去 = [p0[0] + 前[0] * 可达带[1] * 0.25,
                           p0[1] + 前[1] * 可达带[1] * 0.25,
                           p0[2] + 前[2] * 可达带[1] * 0.25];
                 println!("[服] ⚠️ 连着两拍没做成任何尝试 ⇒ **粗着干一次**(朝手腕正前方压过去、合、抬),失败也留视频");
                 落(plug, 去, q0, 1.0, 等拍);
                 for _ in 0..60 { 抓握(plug, 0.0, *通道是关节); if plug.sense().is_none() { break } }
+                // 同上,**比例**。
                 let 抬 = [去[0] - 前[0] * 可达带[1] * 0.25, 去[1] - 前[1] * 可达带[1] * 0.25, 去[2] - 前[2] * 可达带[1] * 0.25];
                 落(plug, 抬, q0, 0.0, 等拍);
                 抓握(plug, 1.0, *通道是关节);
@@ -4072,6 +4090,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
 
         // ② 目标的三数 —— 眼指的那个像素,加上那一点的**近侧**深度。
         // 近侧:那一小窗里前一半的点。窗里一半是物体、一半是它后面的桌面,中位会滑到桌面去。
+        // `span_frac` 是**占画幅的分数**,所以这两个夹值也是画幅的分数,无量纲。
         let 窗 = (look.span_frac * 0.5).clamp(0.004, 0.25);
         let Some(d星) = 近侧深(plug, look.u, look.v, 窗) else {
             println!("[服] 眼指的 ({:.3},{:.3}) 那一点读不到深度 ⇒ 换个位形再看", look.u, look.v);
@@ -4488,6 +4507,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
             // 这是比"画面没动"强得多的证据,而且一个通道就够 —— 不必把七个各试一遍(每个约 120 帧)。
             let mut 报动过 = false;
             for k in 0..(if 用关节 { 关节数 } else { 0 }) {
+                // 8 是**比例**(从探幅的八分之一起步,不够再翻倍),无量纲。
                 let mut 幅 = 探幅 / 8.0;          // 起点小,看不见就翻倍 —— 幅度是试出来的
                 let mut 这列 = [0.0f64; 6];
                 let mut 这中 = [0.0f64; 3];
