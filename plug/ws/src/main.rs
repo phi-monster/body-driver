@@ -3412,6 +3412,24 @@ fn 服务<S: std::io::Read + std::io::Write>(
     println!("[服] 一拍交付 {:.3} ⇒ 走掉一个时间常数(63%)要 {等拍} 拍(推出来的,不是填的;不等它走完,实到照量)", 交付率);
 
     // 只动爪子的时候,等的是**爪子读数不再变** —— 和手臂那条等法无关,也不吃 `等拍`。
+    // 🔴🔴 **等手臂真停下来。**(WJ 实测,2026-08-28)
+    // `看爪` 认爪子靠"晃一下钳口、前后帧做差",它要求那几帧里**手臂是静止的**。
+    // 而伺服每一拍都在动手臂 ⇒ 日志连着出现
+    //   `认块器没给出候选(双响 0 · 配对 0 · 地板 137)—— 地板高:空帧那会儿手臂还在晃`
+    // ⇒ **它一动就看不见自己的手,看不见就算不出误差。** 伺服与观测互相打架。
+    // `定爪` 只等钳口的读数稳,不等手臂 ⇒ 另立一个:发 Hold、等**末端位姿读数**连着两拍不变。
+    // "连着两拍"是**计数**,无量纲;上限由量出来的 `等拍` 给。
+    let 等停 = |plug: &mut Plug<S>, 上限: u32| {
+        let mut 上: Option<Vec<u64>> = None; let mut 稳 = 0u32;
+        for _ in 0..上限 {
+            plug.act(&Cmd::Hold);
+            let Some(f) = plug.sense() else { break };
+            let 此: Vec<u64> = f.ee.first().map(|e| e.iter().map(|x| x.to_bits()).collect()).unwrap_or_default();
+            if 此.is_empty() { break }
+            if 上.as_ref() == Some(&此) { 稳 += 1; if 稳 >= 2 { break } } else { 稳 = 0 }
+            上 = Some(此);
+        }
+    };
     let 定爪 = |plug: &mut Plug<S>, 上限: u32| {
         let mut 上 = None; let mut 稳 = 0u32;
         for _ in 0..上限 {
@@ -5043,6 +5061,9 @@ fn 服务<S: std::io::Read + std::io::Write>(
             let mut 认不出 = 0u32;
             let mut 退因 = "拍数用完";
             for 拍 in 0..伺服拍 {
+                // 先等手臂真停下来,再去认自己的爪子 —— 否则"空帧"里手臂还在晃,认块器的
+                // 噪声地板被顶高,一个候选都出不来(WJ 实测:地板 104–137,双响恒 0)。
+                等停(plug, 等拍 * 4);
                 let 看 = 看爪(plug, 此位, 此姿, jaw0, 上眼);
                 let 面们 = match &看 { Some(t) => t.6.clone(), None => Vec::new() };
                 let mut 深们: Vec<f64> = Vec::new();
