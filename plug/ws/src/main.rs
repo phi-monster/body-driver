@@ -649,6 +649,16 @@ fn 存标定(
     跨度相机: usize,
     // 干活时量到的手的几何(腕系):(指尖偏移, 开合方向, 那一块占画幅多宽)。
     手: Option<([f64; 3], [f64; 3], f64)>,
+    // 🔴🔴🔴 **干活时量到的这三样也要存 —— 它们是身体的属性,与任务无关。**(owner 2026-08-28)
+    //
+    // 查出来的断点:往身体里存东西的唯一入口是 `body.submit(...)`,而**干活模式一次都没调过它**
+    //(全仓三个调用点:一个在读回时、两个在标定模式里)。于是干活时量到的东西全落在局部变量里,
+    // 而本函数遍历 15 个格子时每一格都是"身体里没有就跳过" ⇒ 只写得出很早以前标定模式存的两格。
+    // `image_jacobian` 之所以活下来,是因为它被当成**单独的顶层键**、绕开了 `body`。
+    // ⇒ 这三样同样不是定长的"量",也走顶层键。
+    通道表: Option<&[[f64; 6]]>,
+    通道是关节: Option<bool>,
+    手上相机: Option<usize>,
     // 干活时量到的**画面雅可比**:Δ(画面横, 画面纵, 那一点的深) = 雅 · Δ(世界 x,y,z)。
     雅: Option<[[f64; 3]; 3]>,
 ) -> usize {
@@ -753,6 +763,19 @@ fn 存标定(
             // 存成**九个数一行**(行优先)。嵌套数组用 `nums()` 读只会拿到第一列 —— 踩过。
             ",\n  \"image_jacobian\": [{}, {}, {}, {}, {}, {}, {}, {}, {}]",
             m[0][0], m[0][1], m[0][2], m[1][0], m[1][1], m[1][2], m[2][0], m[2][1], m[2][2]));
+    }
+    if let Some(t) = 通道表 {
+        // 一行一个通道,每行六个数(两个接触面 × 横/纵/深)。行优先,和读回时一致。
+        // 🔴 **存成一维、行优先** —— 仓里那条教训:*"嵌套数组用 `nums()` 读只会拿到第一列 —— 踩过"*。
+        // 通道数 = 长度 ÷ 6,读回时自己算得出来,不用另存一个数。
+        let 平: Vec<String> = t.iter().flat_map(|c| c.iter().map(|x| format!("{x}"))).collect();
+        j.push_str(&format!(",\n  \"channel_table\": [{}]", 平.join(", ")));
+    }
+    if let Some(b) = 通道是关节 {
+        j.push_str(&format!(",\n  \"channels_are_joints\": {b}"));
+    }
+    if let Some(c) = 手上相机 {
+        j.push_str(&format!(",\n  \"camera_on_hand\": {c}"));
     }
     j.push_str("\n}\n");
     let n格 = j.matches("\"provenance\"").count();
@@ -919,6 +942,8 @@ fn main() {
     let mut 雅载: Option<[[f64; 3]; 3]> = None;
     // 🔴 **通道表:6 行(两个接触面 × 三个数)× 通道数列。** 通道数由这具身体报,不设上限形状。
     let mut 通道表: Option<Vec<[f64; 6]>> = None;
+    // 装回来的"哪台相机长在手上" —— 探一次要动一下手臂,存住就不用重探。
+    let mut 手上相机装回: Option<usize> = None;
     // 这具身体的通道是哪一种 —— 关节,还是末端那六个自由度。**试出来的,不是假设的。**
     let mut 通道是关节 = true;
     if let Some(path) = &读回 {
@@ -1008,6 +1033,37 @@ fn main() {
                     if r.len() >= 9 && r.iter().all(|x| x.is_finite()) {
                         雅载 = Some([[r[0], r[1], r[2]], [r[3], r[4], r[5]], [r[6], r[7], r[8]]]);
                         println!("[装] 画面雅可比装回:世界往 +x 走 1 m ⇒ 画面 ({:+.3},{:+.3}) · 深 {:+.3}", r[0], r[3], r[6]);
+                    }
+                }
+                // 🔴🔴🔴 **通道表 / 认哪种命令 / 哪台相机在手上,也装回来。**(owner 2026-08-28)
+                // 这三样是**身体的属性、与任务无关**,而在此之前它们每炮都要从零重做:
+                // 试七条关节命令才发现"一个都不响应"、重探"哪台长在手上"、重量整张通道表。
+                // 存不进去的根因是干活模式从没调过 `body.submit`,而它们又不是定长的"量" ——
+                // 所以和 `image_jacobian` 一样走顶层键。
+                if let Some(a) = j.get("channel_table") {
+                    // 存的是一行一个通道、每行六个数(两个接触面 × 横/纵/深),行优先。
+                    let v = a.nums();
+                    let mut t: Vec<[f64; 6]> = Vec::new();
+                    let ok = v.len() >= 6 && v.len() % 6 == 0 && v.iter().all(|x| x.is_finite());
+                    if ok {
+                        for c in v.chunks_exact(6) { t.push([c[0], c[1], c[2], c[3], c[4], c[5]]); }
+                    }
+                    if ok && !t.is_empty() {
+                        println!("[装] 通道表装回:{} 个通道 × 六行(两个接触面 × 横/纵/深)—— 不用重量", t.len());
+                        通道表 = Some(t);
+                    }
+                }
+                if let Some(b) = j.get("channels_are_joints") {
+                    if let Some(v) = b.boolean() {
+                        通道是关节 = v;
+                        println!("[装] 这具机体认哪种命令:{} —— 不用再拿命令去撞一遍",
+                            if v { "关节" } else { "末端那六个自由度" });
+                    }
+                }
+                if let Some(c) = j.get("camera_on_hand") {
+                    if let Some(v) = c.num() {
+                        手上相机装回 = Some(v as usize);
+                        println!("[装] 长在手上的是第 {} 台相机 —— 不用重探", v as usize);
                     }
                 }
                 if let Some(h) = j.get("hand") {
@@ -2899,7 +2955,7 @@ fn main() {
             }
         }
         // 🔴 每一轮结束就落一次盘 —— 见 `存标定` 上面那段:只在末尾存等于赌这一炮能跑到底。
-        let n格 = 存标定(&out, &body, &相机们, 探幅, 跨度相机, None, None);
+        let n格 = 存标定(&out, &body, &相机们, 探幅, 跨度相机, None, None, None, None, None);
         println!("      [存] 已落盘 {n格} 格 ⇒ {out}");
     }
     // 🔴🔴 **量到了必须存得下来,而且要存成【驱动自己读得回去】的那个形状。**
@@ -2966,7 +3022,7 @@ fn main() {
             println!("[装]    {k:<20} {d:.4} m{}", if *d > 0.06 { "   ⚠️ 带偏" } else { "" });
         }
     }
-    let n格 = 存标定(&out, &body, &相机们, 探幅, 跨度相机, None, None);
+    let n格 = 存标定(&out, &body, &相机们, 探幅, 跨度相机, None, None, None, None, None);
     println!("[装] 落盘(已量到 {n格} 格 · 本次点名量到 {} 格)", 成.len());
 
     // ── 🔴🔴 **下命令就去干。** 干到缺某个身体量,它点名要,回上面量完再回来。 ──
@@ -2975,7 +3031,7 @@ fn main() {
         Some((h, p)) => (h.to_string(), p.parse::<u16>().unwrap_or(8077)),
         None => (眼.clone(), 8077),
     };
-    match 服务(&mut plug, &body, &相机们, &眼主机, 眼端口, &out, 读回.as_deref(), &给不出, &mut 手载, &mut 雅载, &mut 通道表, &mut 通道是关节) {
+    match 服务(&mut plug, &body, &相机们, &眼主机, 眼端口, &out, 读回.as_deref(), &给不出, &mut 手载, &mut 雅载, &mut 通道表, &mut 通道是关节, &mut 手上相机装回) {
         None => break '外,
         Some(名) => match 点名成格(&名) {
             Some(q) => {
@@ -3243,6 +3299,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
     通道表: &mut Option<Vec<[f64; 6]>>,
     // 通道是关节,还是末端那六个自由度。**试出来的**(这具机体七个关节命令全零响应)。
     通道是关节: &mut bool,
+    // 🔴 哪台相机长在手上 —— 探一次要动一下手臂,装回来就不重探(owner 2026-08-28)。
+    手上相机载: &mut Option<usize>,
 ) -> Option<String> {
     use body_layer::measurement::Quantity as Q;
     println!("[服] 干活模式:观测里给什么指令,就做什么。没有标定阶段,缺什么当场点名要。");
@@ -3595,7 +3653,10 @@ fn 服务<S: std::io::Read + std::io::Write>(
     //   正是"全局 + 操作部相机"那个结构,两台各用在自己准的那一段。
     // 哪一台长在手上,是**试出来的**:命令手动一下,**画面整体跟着动的那台**就是它
     //(长在世界里的那台,画面里只有手那一小块在动)。
-    let 手上相机 = {
+    let 手上相机 = if let Some(c) = *手上相机载 {
+        println!("[服] 长在手上的是第 {c} 台(装回来的,不重探)");
+        Some(c)
+    } else {
         let 台 = plug.lay.cams.len();
         let mut 挑: Option<usize> = None;
         if 台 >= 2 {
@@ -3633,6 +3694,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
         }
         挑
     };
+    *手上相机载 = 手上相机;
     let _ = &相机们;
 
     /// 一个像素周围那一小窗里的**近侧**深度。窗里一半是物体、一半是它后面的桌面,
@@ -4805,7 +4867,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 // *"每量完一格就调一次,不要只在最后调"*。
                 // ⚠️ 这些量是**身体的属性,与任务无关** —— 抓棒球量到的,抓剪刀/擦桌子照样用。
                 {
-                    let n格 = 存标定(标定文件, body, 相机们, 探步, 0, *手载, *雅载);
+                    let n格 = 存标定(标定文件, body, 相机们, 探步, 0, *手载,
+                        通道表.as_deref(), Some(*通道是关节), 手上相机, *雅载);
                     println!("[服]   💾 量到的存进 {标定文件}:这一次落了 {n格} 格(下一炮 --in 装回来,不用重量)");
                 }
             }
