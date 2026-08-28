@@ -5456,10 +5456,19 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 // 🔴 这一段原来也是"每列之前先回到记住的那个位姿" —— 同一个复位键,一并删掉。
                 // 改成**来回**:+δ 再 −δ(相对命令),两遍各除以自己的实到 ⇒ 应当相等,
                 // `分歧 < 共识` 才收;净位移为零,不需要记住任何位姿。
+                // 🔴🔴🔴 **腕相机里追物体也不许全画面搜。**(WX 实证,2026-08-28)
+                //
+                // 上一版这里是 `找块`(全画面)。头相机上同一个写法让它**锁到了肘部**;
+                // 腕相机视野更近、纹理更少,更容易锁到别的一块 —— 于是深度一跳,
+                // 那道"物体深度跑得比我自己还远"的闸就响,整列空掉。
+                // WX 实测:通道 1、2 **都**因此空掉 ⇒ `量不齐三列 ⇒ 收尾降级,直接合` ⇒ 合了个空。
+                // ⇒ 改成**只在上次位置附近搜**:物体是静的、相机一步只挪半个探幅,不可能瞬移。
+                //   搜索半径由模板自己的大小给(量出来的),不是我挑的长度。
+                let mut 上物 = (看2.u, 看2.v);
                 for k in 0..3usize {
-                    let 读 = |plug: &mut Plug<S>| -> Option<(f64, f64, f64)> {
+                    let mut 读 = |plug: &mut Plug<S>, 上: (f64, f64)| -> Option<(f64, f64, f64)> {
                         let (_, _, gg) = plug.sense().and_then(|f| 灰(&f, 腕机))?;
-                        let (a, b) = 找块(w2, h2, &gg, &模2, 半2)?;
+                        let (a, b) = 找块窗(w2, h2, &gg, &模2, 半2, 上.0, 上.1, 半2 * 3)?;
                         let dd = 近侧深2(plug, 腕机, a, b, 窗2)?;
                         Some((a, b, dd))
                     };
@@ -5470,11 +5479,14 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         let e1 = f1.ee.first().copied()?;
                         Some(e1[k] - e0[k])
                     };
-                    let Some(甲) = 读(plug) else { 表2.push([0.0; 3]); continue };
+                    let Some(甲) = 读(plug, 上物) else { 表2.push([0.0; 3]); continue };
+                    上物 = (甲.0, 甲.1);
                     let Some(去实) = 迈(plug, 探幅 / 2.0) else { 表2.push([0.0; 3]); continue };
-                    let Some(乙) = 读(plug) else { 表2.push([0.0; 3]); continue };
+                    let Some(乙) = 读(plug, 上物) else { 表2.push([0.0; 3]); continue };
+                    上物 = (乙.0, 乙.1);
                     let Some(回实) = 迈(plug, -探幅 / 2.0) else { 表2.push([0.0; 3]); continue };
-                    let Some(丙) = 读(plug) else { 表2.push([0.0; 3]); continue };
+                    let Some(丙) = 读(plug, 上物) else { 表2.push([0.0; 3]); continue };
+                    上物 = (丙.0, 丙.1);
                     if 去实.abs() < 1e-4 || 回实.abs() < 1e-4 { 表2.push([0.0; 3]); continue }
                     let 去 = [(乙.0-甲.0)/去实, (乙.1-甲.1)/去实, (乙.2-甲.2)/去实];
                     let 回 = [(丙.0-乙.0)/回实, (丙.1-乙.1)/回实, (丙.2-乙.2)/回实];
