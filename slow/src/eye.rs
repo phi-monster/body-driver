@@ -300,6 +300,19 @@ mod tests {
 /// 眼只能挑一个最圆的东西交差。⇒ 这里给 `0` 这个出口:**一个都不是,就答 0**。
 /// (这与"让眼自己说看不见"那条判死不同:那条问的是"你看不看得见一个点",
 ///  是自述;这里问的是**在这几个已经存在的框里选**,是选择题,而选择题它做得很好。)
+pub struct Pick {
+    /// 挑中的编号(1 起);`0` = 一块都不是。
+    pub region: usize,
+    /// 要做什么(和 `ask` 同一张词表)。
+    pub verb: String,
+    /// 要多用力:`light|medium|firm`。
+    ///
+    /// 🔴 这一格以前**全仓只有一处引用,而那一处只是把它抄进另一个结构体** ——
+    /// 眼每一拍都在答这个问题,答案被原样扔掉(`fast::admit` 的力参数从头到尾传 `0.0`)。
+    /// 减法②把它接上了:它变成"这具身体自己那把尺上的位置",而尺的两端是量出来的。
+    pub force: String,
+}
+
 pub fn pick(
     host: &str,
     port: u16,
@@ -308,7 +321,7 @@ pub fn pick(
     w: usize,
     h: usize,
     n: usize,
-) -> Result<usize, String> {
+) -> Result<Pick, String> {
     if n == 0 {
         return Err("没有候选框可挑".into());
     }
@@ -321,10 +334,11 @@ pub fn pick(
         "Task: {what}\\n\\nThe image has {n} numbered boxes drawn on it. \
          Each box outlines one physical object on the surface. \
          Which numbered box is the object the task refers to? \
-         Answer with that number. If none of the boxes is that object, answer 0."
+         Answer with that number. If none of the boxes is that object, answer 0. \
+         Also say what to do to it and how hard."
     );
     let body = format!(
-        r#"{{"model":"eye","max_tokens":200,"temperature":0,"chat_template_kwargs":{{"enable_thinking":false}},"response_format":{{"type":"json_schema","json_schema":{{"name":"pick_region","strict":true,"schema":{{"type":"object","additionalProperties":false,"required":["region"],"properties":{{"region":{{"type":"integer","minimum":0,"maximum":{n}}}}}}}}}}},"messages":[{{"role":"user","content":[{{"type":"image_url","image_url":{{"url":"data:image/bmp;base64,{b64}"}}}},{{"type":"text","text":"{prompt}"}}]}}]}}"#
+        r#"{{"model":"eye","max_tokens":200,"temperature":0,"chat_template_kwargs":{{"enable_thinking":false}},"response_format":{{"type":"json_schema","json_schema":{{"name":"pick_region","strict":true,"schema":{{"type":"object","additionalProperties":false,"required":["region","verb","force"],"properties":{{"region":{{"type":"integer","minimum":0,"maximum":{n}}},"verb":{{"type":"string","enum":["grasp","push","place","pry","open","close"]}},"force":{{"type":"string","enum":["light","medium","firm"]}}}}}}}}}},"messages":[{{"role":"user","content":[{{"type":"image_url","image_url":{{"url":"data:image/bmp;base64,{b64}"}}}},{{"type":"text","text":"{prompt}"}}]}}]}}"#
     );
     let raw = post(host, port, "/v1/chat/completions", &body)?;
     let inner = extract_content(&raw).ok_or_else(|| {
@@ -344,5 +358,6 @@ pub fn pick(
     if !(r.is_finite() && r >= 0.0) {
         return Err(format!("眼给的 region 不合法:{r}"));
     }
-    Ok(r.round() as usize)
+    let t = |k: &str| j.get(k).and_then(|x| x.text()).unwrap_or("").to_string();
+    Ok(Pick { region: r.round() as usize, verb: t("verb"), force: t("force") })
 }

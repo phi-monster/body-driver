@@ -46,6 +46,11 @@ struct Plug<S: std::io::Read + std::io::Write> {
     复位过: bool,
     /// 连拍计数(`BL_FILM`)。每炮都要有录像可看 —— 见 `sense` 里那段。
     胶片: u64,
+    /// 🔴 **量出来的帧时(秒/帧)** —— 减法②的"持续时间"这一维靠它换成拍数。
+    /// 以前它只被打印(`[计时] 等帧 xxx ms/帧`),**没有任何地方读得到** ⇒
+    /// "按住 N 秒"在驱动里无法表达,于是擦/按/拧只能写成"走够多少距离"。
+    /// 走的是滑动平均,开机第一拍还没有值时按 0 处理(调用方退回按拍数)。
+    帧时秒: f64,
 }
 
 fn 取(v: &Value, path: &[String]) -> Option<Value> {
@@ -315,8 +320,10 @@ impl<S: std::io::Read + std::io::Write> Robot for Plug<S> {
             等 += t_等.as_micros();
             解 += t1.elapsed().as_micros();
             if N % 50 == 0 {
-                println!("      [计时] 近 50 帧:等帧 {:.1} ms/帧 · 解图 {:.1} ms/帧 · 相机 {} 台",
-                    等 as f64 / 50_000.0, 解 as f64 / 50_000.0, f.cams.len());
+                // 🔴 一并**存下来**:等帧 + 解图 = 一拍真正花掉的时间。减法②的"按住 N 秒"用它。
+                self.帧时秒 = (等 + 解) as f64 / 50e6;
+                println!("      [计时] 近 50 帧:等帧 {:.1} ms/帧 · 解图 {:.1} ms/帧 · 一拍 {:.3} s · 相机 {} 台",
+                    等 as f64 / 50_000.0, 解 as f64 / 50_000.0, self.帧时秒, f.cams.len());
                 等 = 0; 解 = 0;
             }
         }
@@ -1109,7 +1116,7 @@ fn main() {
             }
         }
     }
-    let mut plug = Plug { ws, lay, last: first, 待发: None, 上次发出: None, 复位过: false, 胶片: 0 };
+    let mut plug = Plug { ws, lay, last: first, 待发: None, 上次发出: None, 复位过: false, 胶片: 0, 帧时秒: 0.0 };
 
     // ── 🔴🔴 **功能性自建模:`BL_SELFMODEL=<目录>`** ─────────────────────────────
     //
@@ -4256,8 +4263,9 @@ fn 服务<S: std::io::Read + std::io::Write>(
         let mut 选中掩膜: Option<Vec<bool>> = None;
         if 取几 > 0 {
             match body_layer::eye::pick(眼主机, 眼端口, &指令, &标图, w, h, 取几) {
-                Ok(0) => println!("[服] 🎯 几何切出 {取几} 块,眼说**一块都不是**(这张桌上没有它要的东西)⇒ 退回问框"),
-                Ok(k) if k <= 取几 => {
+                Ok(p) if p.region == 0 => println!("[服] 🎯 几何切出 {取几} 块,眼说**一块都不是**(这张桌上没有它要的东西)⇒ 退回问框"),
+                Ok(p) if p.region <= 取几 => {
+                    let k = p.region;
                     let r = 区们[k - 1];
                     let (x0, y0, x1, y1) = (r.框[0] as f64 / w as f64, r.框[1] as f64 / h as f64,
                                             r.框[2] as f64 / w as f64, r.框[3] as f64 / h as f64);
@@ -4271,7 +4279,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     }
                     look = Some(body_layer::eye::Look {
                         u: (x0 + x1) * 0.5, v: (y0 + y1) * 0.5, span_frac: 长边,
-                        verb: String::new(), force: String::new(), box01: [x0, y0, x1, y1],
+                        verb: p.verb.clone(), force: p.force.clone(), box01: [x0, y0, x1, y1],
                     });
                     // 掩膜按**这一块自己的深度带**切:一个物体不会比自己更厚,
                     // 而"多厚"是量出来的(它鼓出背景多高),不是一个宽容系数。
@@ -4281,7 +4289,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         plug.last.as_ref().and_then(|o| 取(o, &深路)).and_then(|dv| wire::as_f32_grid(&dv))
                     }).map(|(dw0, dh0, dep0)| point_gen::区掩膜(&dep0, dw0, dh0, &r, &区们, 3.0));
                 }
-                Ok(k) => println!("[服] 眼挑了第 {k} 块,而只有 {取几} 块 ⇒ 退回问框"),
+                Ok(p) => println!("[服] 眼挑了第 {} 块,而只有 {取几} 块 ⇒ 退回问框", p.region),
                 Err(x) => println!("[服] 眼挑不出来:{x} ⇒ 退回问框"),
             }
         } else {
@@ -5864,7 +5872,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         // 0.01 是**占画幅的分数**下限(无量纲),不是米。
                         .max((yw[取w * 9 / 10] - yw[取w / 10]) as f64 / h2 as f64).max(0.01),
                     verb: look.verb.clone(),
-                    force: look.force,
+                    force: look.force.clone(),
                     // 这一路不是眼给的框,是**从"手一动、哪些像素属于世界"里量出来的**;
                     // 用同一批像素的十分位当框边,和上面 u/v/span 出自同一份证据。
                     box01: [
@@ -5997,6 +6005,44 @@ fn 服务<S: std::io::Read + std::io::Write>(
         //   ② "停在 0 就是指间没东西" —— 改成和**量出来的空合读数**比。
         // 病相为什么阴:这具 Franka 空合确实报 0.0000,所以写死的判据在这具身体上**一直是对的**;
         // 换一具报 0.02 的身体,它会把**每一次空抓都判成成功**,而日志上全是绿的。
+        // 🔴🔴🔴 **减法②:这一步的"要顶多硬 / 按住多久 / 什么时候算完"来自【动词】,不再写死。**
+        //
+        // `demand_with` 是全仓第一次被**驱动**调用 —— 在此之前它只有 CLI 和它自己的测试在调,
+        // 于是那张 13 行的动词表在真正干活的这条路上**一行都没生效过**。
+        // 现在它交出的是一个点:(走多少, 转多少, **顶多硬**, **按住多久**, **什么时候算完**)。
+        // 三个新维度都不是我拍的:
+        //   · 顶多硬 —— 眼说的 light/medium/firm,映到**这具身体自己那把尺**上 ∈[0,1];
+        //     以前这个词全仓只有一处引用,而那一处只是把它抄进另一个结构体,**没人读**。
+        //   · 按住多久 —— 秒,用**量出来的帧时**换成拍数(以前帧时只被打印,读不到)。
+        //   · 什么时候算完 —— `Resist`(合到读数不再变)。这条驱动早就在做,只是没有名字,
+        //     因此调用方点不到它,擦/按/拧也就只能写成"走够多少距离"。
+        let 这一下 = {
+            let 动 = look.verb.trim().to_ascii_lowercase();
+            let v = match 动.as_str() {
+                "push" => body_layer::verb::Verb::Push,
+                "place" => body_layer::verb::Verb::Place,
+                "pry" => body_layer::verb::Verb::Pry,
+                "open" | "close" => body_layer::verb::Verb::Twist,
+                // 眼没说 / 说了不认识 ⇒ 按抓。**不许因为一个词没见过就不动。**
+                _ => body_layer::verb::Verb::Grasp,
+            };
+            // 轴:这一层不认识"工具轴/钳口轴",给单位轴占位 —— 合爪这一步只用到
+            // press/hold/until 三样,方向由上面接触集那一层已经解完了。
+            let ax = body_layer::verb::Axes { tool: [0.0, 0.0, 1.0], jaw: [1.0, 0.0, 0.0] };
+            body_layer::verb::demand_with(v, ax, [0.0; 3], 0.0,
+                body_layer::verb::press_from_word(&look.force), 0.0)
+        };
+        println!("[服] 这一下:眼说「{}·{}」⇒ 顶到 {:.2}(0=刚够认出碰上, 1=顶到读数不再变)· 按住 {:.2} s · {}",
+            if look.verb.is_empty() { "(没说)" } else { &look.verb },
+            if look.force.is_empty() { "(没说)" } else { &look.force },
+            这一下.press, 这一下.hold_s,
+            match 这一下.until {
+                body_layer::verb::Until::Amount => "走完就停",
+                body_layer::verb::Until::Contact => "直到碰上",
+                body_layer::verb::Until::Resist => "直到推不动",
+                body_layer::verb::Until::Slip => "直到东西不再跟着我",
+                body_layer::verb::Until::Settle => "直到画面不再变",
+            });
         let 开着读数 = plug.sense().and_then(|f| f.jaw.first().copied());
         let mut 上次: Option<Vec<f64>> = None;
         let mut 稳 = 0u32;
@@ -6031,6 +6077,32 @@ fn 服务<S: std::io::Read + std::io::Write>(
         match 空零 {
             Some(z) => println!("[服] 🟢 合到停住,读数停在 {停在:.4}(空手合到底是 {z:.4},差 {:.4})⇒ **指间有东西**", (停在 - z).abs()),
             None => println!("[服] 🟢 合到停住,读数停在 {停在:.4} ⇒ 指间有东西,而**这个数就是它有多宽**"),
+        }
+
+        // 🔴 **减法②的力和时间在这里真的发出去。**
+        //
+        // 这具身体的爪子是**位置命令**的(七个关节命令全零响应,只有末端认),没有力通道 ——
+        // 所以"更用力"在它身上唯一能表达的就是**停住之后继续发合的命令**:
+        // 位置环把误差积起来,顶得更死。顶多久由 `press` 定,而 `press` 的两个端点是量出来的:
+        //   0 = 刚停住就走(轻)· 1 = 一直发到读数在**更长的窗口里**也不再变(顶到底)。
+        // "更长的窗口"取这具身体自己的稳态判据 `等拍` 的倍数 —— 不是一个拍出来的秒数。
+        // ⚠️ 软的东西会在这一段里被继续压扁,读数还会往下走 —— 那正是"顶得更硬"的证据,
+        //    所以这里**重新读一次停住的位置**,而不是沿用上面那个。
+        let 顶拍 = ((这一下.press * (等拍 * 4) as f64).round() as u32).min(等拍 * 4);
+        if 顶拍 > 0 {
+            for _ in 0..顶拍 { 抓握(plug, 0.0, *通道是关节); if plug.sense().is_none() { break } }
+            let 顶后 = plug.sense().and_then(|f| f.jaw.first().copied()).unwrap_or(停在);
+            println!("[服]   顶了 {顶拍} 拍(press={:.2})⇒ 读数 {停在:.4} → {顶后:.4}(还在往下走 = 东西被压实了)", 这一下.press);
+        }
+        // 按住多久:秒 → 拍,用**量出来的帧时**换算;帧时还没量到(开机头 50 拍)就跳过并说明。
+        if 这一下.hold_s > 0.0 {
+            if plug.帧时秒 > 1e-6 {
+                let 拍 = (这一下.hold_s / plug.帧时秒).round() as u32;
+                println!("[服]   按住 {:.2} s = {拍} 拍(帧时 {:.3} s,量出来的)", 这一下.hold_s, plug.帧时秒);
+                for _ in 0..拍 { 抓握(plug, 0.0, *通道是关节); if plug.sense().is_none() { break } }
+            } else {
+                println!("[服]   要按住 {:.2} s,但**帧时还没量到**(开机头 50 拍)⇒ 这一下不按住,照实报", 这一下.hold_s);
+            }
         }
 
         // ⑦ **原路退回去 = 把两个接触面送回它们下手之前在画面上的位置。**

@@ -344,24 +344,67 @@ pub struct Axes {
 /// 让调用方挑就等于把上面那条教训交还给"人记不记得",而它已经错过一次了。
 /// `amount` 由眼睛给(转多少 / 推多远)。这一层不认识"瓶子",只认识"绕这条轴转这么多"。
 pub fn demand(v: Verb, ax: Axes, dir: [f64; 3], amount: f64) -> Motion {
+    demand_with(v, ax, dir, amount, 0.5, 0.0)
+}
+
+/// [`demand`] 的完整形:再带上**要顶多硬**和**按住多久**。
+///
+/// 🔴🔴 **减法②:这三个新维度(力 · 持续时间 · 直到什么条件)就是动词表【自己掉下来】的路。**
+///
+/// 表里 13 行,以前只在 `(along, dist, about, turn)` 四个数上互相区别 —— 而
+/// **擦桌子是覆盖、按压是力、裸绞是持续力+时间**,这三样在四个数里**没地方表达**,
+/// 于是它们只能靠"动词"这个名字来区分,表也就删不掉。
+/// 加宽之后,每一个动词只是这个空间里的**一个点**:
+///
+/// | 动词 | 走 | 转 | 顶 | 按住 | 什么时候算完 |
+/// |---|---|---|---|---|---|
+/// | Push/Wipe | 沿 dir | — | 中等 | — | 走完 / 擦到底 |
+/// | Press | — | — | **满** | **要** | **顶不动** |
+/// | Twist | — | 绕工具轴 | 中等 | — | **拧不动** |
+/// | Pry/Flip/Pour | — | 绕钳口轴 | 中等 | — | 转完 |
+/// | Insert | 沿工具轴 | — | 轻 | — | **插不动** |
+/// | Grasp | 沿 dir | — | 按眼说的 | — | **夹住了** |
+///
+/// ⚠️ **加宽之后才准删表**(owner 2026-08-28 的刹车):
+/// "删掉一个中间概念"和"什么都不做"在代码上长得一模一样,在行为上差十万八千里。
+pub fn demand_with(v: Verb, ax: Axes, dir: [f64; 3], amount: f64, press: f64, hold_s: f64) -> Motion {
+    let p = press.clamp(0.0, 1.0);
     match v {
-        // 物体在支撑面上平移
-        Verb::Push | Verb::Wipe => Motion { along: dir, dist_m: amount, ..Motion::STILL },
-        // 拧:物体绕**它自己的轴**原地自转(瓶盖、螺丝)⇒ 工具轴
-        Verb::Twist => Motion { about: ax.tool, turn_rad: amount, ..Motion::STILL },
+        // 推 / 擦:物体在支撑面上平移。擦要**一直贴着**走完,推走完就算。
+        Verb::Push => Motion { along: dir, dist_m: amount, press: p, hold_s, until: Until::Amount, ..Motion::STILL },
+        Verb::Wipe => Motion { along: dir, dist_m: amount, press: p, hold_s, until: Until::Resist, ..Motion::STILL },
+        // 拧:物体绕**它自己的轴**原地自转(瓶盖、螺丝)⇒ 工具轴。**拧到拧不动**才算完 ——
+        // 这正是"裸绞/拧盖"以前没法表达的那一半:它不是转够多少度,是转到转不动。
+        Verb::Twist => Motion { about: ax.tool, turn_rad: amount, press: p, hold_s, until: Until::Resist, ..Motion::STILL },
         // 倒 / 翻 / 撬:把物体**扳过去**,改变它的朝向 ⇒ 钳口轴。
         // 🔴 这三个写成工具轴是本仓犯过的错,`axis_up` 几乎没动。
         Verb::Pour | Verb::Flip | Verb::Pry => {
-            Motion { about: ax.jaw, turn_rad: amount, ..Motion::STILL }
+            Motion { about: ax.jaw, turn_rad: amount, press: p, hold_s, until: Until::Amount, ..Motion::STILL }
         }
-        // 沿工具轴往里走
-        Verb::Insert => Motion { along: ax.tool, dist_m: amount, ..Motion::STILL },
-        // 抓 / 放 / 够 / 舀 / 松:物体跟着手走,方向由上层给
-        Verb::Grasp | Verb::Place | Verb::Reach | Verb::Scoop | Verb::Release => {
-            Motion { along: dir, dist_m: amount, ..Motion::STILL }
+        // 插:沿工具轴往里走,**插到插不动**;力要轻(硬顶会别住)。
+        Verb::Insert => Motion { along: ax.tool, dist_m: amount, press: p * 0.5, hold_s, until: Until::Resist, ..Motion::STILL },
+        // 抓:物体跟着手走。**合到夹住**为止 —— 这条驱动里早就在做,只是以前没有名字。
+        Verb::Grasp => Motion { along: dir, dist_m: amount, press: p, hold_s, until: Until::Resist, ..Motion::STILL },
+        // 放 / 够 / 舀 / 松:走完就算。
+        Verb::Place | Verb::Reach | Verb::Scoop | Verb::Release => {
+            Motion { along: dir, dist_m: amount, press: 0.0, hold_s, until: Until::Amount, ..Motion::STILL }
         }
-        // 按 / 敲:物体不动,力才是重点
-        Verb::Press => Motion::STILL,
+        // 按 / 敲:**物体不动,力和时间才是全部**。以前这一格返回 `STILL` —— 一个"什么都不做",
+        // 而按压恰恰是这一层唯一真正要表达的东西。现在它是"顶到顶不动、并按住 hold_s"。
+        Verb::Press => Motion { press: p.max(1.0), hold_s, until: Until::Resist, ..Motion::STILL },
+    }
+}
+
+/// 眼说的 `light|medium|firm` → 这具身体自己那把尺上的位置 ∈[0,1]。
+///
+/// 🔴 **不是牛顿。** 两个端点都是量出来的:`0` = 刚好能被认出"碰上了"那一档
+/// (`probe::contact_threshold` 量的就是它),`1` = 命令还在发而读数不再变那一档。
+/// 认不出来的词按中档走 —— **驱动不许因为一个词没见过就不动**。
+pub fn press_from_word(w: &str) -> f64 {
+    match w.trim().to_ascii_lowercase().as_str() {
+        "light" => 0.0,
+        "firm" => 1.0,
+        _ => 0.5,
     }
 }
 
@@ -515,7 +558,37 @@ mod tests {
     #[test]
     fn pressing_demands_the_object_stays_put() {
         let ax = Axes { tool: [0.0, 0.0, 1.0], jaw: [1.0, 0.0, 0.0] };
-        assert_eq!(demand(Verb::Press, ax, [0.0, 0.0, -1.0], 0.02), Motion::STILL);
+        let m = demand(Verb::Press, ax, [0.0, 0.0, -1.0], 0.02);
+        // 按压**不让物体动** —— 这才是这条测试要守的东西。
+        assert_eq!(m.dist_m, 0.0, "按压不该要求物体平移");
+        assert!(!m.rotates(), "按压不该要求物体转");
+        // 🔴 但它**不再等于"什么都不做"**(减法②,2026-08-28):按压的全部内容就是
+        // **力和时间**,而这两样以前在 `Motion` 里没地方放 ⇒ 这一格只能返回 `STILL`,
+        // 也就是"按压 = 不动" —— 一个把动词的意思整个丢掉的表达。
+        assert!(m.press >= 1.0, "按压必须顶到这具身体的上限那一档");
+        assert_eq!(m.until, Until::Resist, "按压算完的条件是顶不动,不是走够距离");
+    }
+
+    #[test]
+    fn 三个新维度必须真的把动词区分开() {
+        // 减法②的验收:**加宽之后,动词之间的区别要落在数上,而不只落在名字上**。
+        // 这条测试是那句"动词表会自己掉下来"的前提 —— 掉不下来,说明维度没加够。
+        let ax = Axes { tool: [0.0, 0.0, 1.0], jaw: [1.0, 0.0, 0.0] };
+        let 抓 = demand(Verb::Grasp, ax, [1.0, 0.0, 0.0], 0.1);
+        let 推 = demand(Verb::Push, ax, [1.0, 0.0, 0.0], 0.1);
+        let 擦 = demand(Verb::Wipe, ax, [1.0, 0.0, 0.0], 0.1);
+        // 推和擦以前**逐位相同**(同一行代码返回),现在靠"什么时候算完"分开:
+        // 推走完就停,擦要一直贴着走。
+        assert_eq!(推.until, Until::Amount);
+        assert_eq!(擦.until, Until::Resist);
+        assert_ne!(推.until, 擦.until, "推和擦以前完全无法区分");
+        // 抓的结束条件是"夹住了",不是"走够了"。
+        assert_eq!(抓.until, Until::Resist);
+        // 力的档位来自眼说的词,不是写死的。
+        assert_eq!(press_from_word("light"), 0.0);
+        assert_eq!(press_from_word("firm"), 1.0);
+        assert_eq!(press_from_word("medium"), 0.5);
+        assert_eq!(press_from_word("没见过的词"), 0.5, "没见过的词按中档走,不许因此不动");
     }
 
     #[test]
