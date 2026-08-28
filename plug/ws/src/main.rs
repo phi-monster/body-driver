@@ -3236,16 +3236,43 @@ fn 画编号框(rgb: &mut [u8], w: usize, h: usize, 框: [usize; 4], 号: usize,
             put(rgb, x1.saturating_sub(t), y);
         }
     }
-    // 编号写在框的左上角外侧;放大倍数跟着框走,小框也看得清。
-    let 放 = (((x1 - x0).max(y1 - y0) / 12).max(2)).min(6);
+    // 🔴🔴 **编号画在框【里面】,字号跟【画面】走而不是跟框走,并且带底色。**
+    //
+    // 实测代价(XD,2026-08-28,渲图看出来的):上一版把数字画在框**外**、字号取
+    // `框长边/12`(小框上只有 2 像素一格)⇒ 棒球那个框(约 25 px)的"7"只有 6×10 像素、
+    // 而且悬在框上方、离邻框比离自己还近。结果:几何把 9 件东西**一物一框切得干干净净、
+    // 棒球就是第 7 号**,而眼挑了第 1 号(那条牛仔裤)。**切对了、读错了号。**
+    // ⇒ 字号 = 画宽的 1/160(640 宽 ⇒ 一格 4 px ⇒ 数字 12×20),画在框内左上角,
+    //   先铺一块深底再写亮字 —— 底色让数字在任何背景上都读得出来。
+    let 放 = (w / 160).max(3);
     let 数: Vec<usize> = { let mut v = Vec::new(); let mut n = 号; if n == 0 { v.push(0) } else { while n > 0 { v.push(n % 10); n /= 10 } } v.reverse(); v };
-    let mut 笔 = x0;
+    let (字w, 字h) = (数.len() * 4 * 放, 5 * 放);
+    let (底w, 底h) = (字w + 2 * 放, 字h + 2 * 放);
+    // 🔴 **底块贴在框【外面】** —— 画在框里会把小东西整个糊掉。
+    // 实测(XD 重渲):放进框里之后,棒球那个 25 px 的框被自己的编号盖掉大半,
+    // 眼看到的是一块黑方块而不是球。⇒ 优先贴框上方;上方放不下就贴下方;都放不下才退回框内。
+    let 底y = if y0 >= 底h { y0 - 底h } else if y1 + 底h < h { y1 + 1 } else { y0 };
+    let 底x = x0.min(w.saturating_sub(底w));
+    for dy in 0..底h {
+        for dx in 0..底w {
+            let (x, y) = (底x + dx, 底y + dy);
+            if x < w && y < h {
+                let i = (y * w + x) * 3;
+                if i + 2 < rgb.len() { rgb[i] = 0; rgb[i + 1] = 0; rgb[i + 2] = 0; }
+            }
+        }
+    }
+    let mut 笔 = 底x + 放;
     for d in 数 {
         for (r, 行) in 字模[d.min(9)].iter().enumerate() {
             for c in 0..3usize {
                 if 行 >> (2 - c) & 1 == 1 {
                     for dy in 0..放 { for dx in 0..放 {
-                        put(rgb, 笔 + c * 放 + dx, y0.saturating_sub((5 - r) * 放) + dy);
+                        let (x, y) = (笔 + c * 放 + dx, 底y + 放 + r * 放 + dy);
+                        if x < w && y < h {
+                            let i = (y * w + x) * 3;
+                            if i + 2 < rgb.len() { rgb[i] = 255; rgb[i + 1] = 255; rgb[i + 2] = 255; }
+                        }
                     }}
                 }
             }
