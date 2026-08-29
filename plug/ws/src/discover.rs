@@ -205,6 +205,41 @@ pub fn 认(obs: &Value) -> Layout {
             _ => {}
         }
     }
+    // 🔴🔴🔴 **深度图要和某台相机【同尺寸】,并且按【路径】跟那台配对 —— 不许按序号。**
+    //(ZF 实测 2026-08-29,腕相机收尾三列全空的真凶)
+    //
+    // `是深度` 的判据是"浮点 + 二维形状",而 **3×3 的内参矩阵和 4×4 的外参矩阵都满足** ——
+    // 于是 `l.depth` 收进了 6 项(每台相机各:深度图 + 内参 + 外参)。
+    // 下游是拿**相机编号**去索引它的:
+    //   相机 0(头)⇒ depth[0] = cam_head.depth        ✅ 碰巧对
+    //   相机 1(腕)⇒ depth[1] = cam_head.intrinsic     ❌ 一个 3×3 矩阵
+    // 拿 3×3 矩阵当深度图查像素 ⇒ 永远读不出深度。头相机一直没事,只因为它恰好排第 0。
+    // ZF 日志:`读:跟到 (0.294,0.585) 但那一点读不出深度` × 三个通道,一步没走。
+    //
+    // 两条修法都**不引入任何名字和写死的数**:
+    //   ① 深度图必须和**某台已认出的相机**画面同尺寸(尺寸是量出来的,不是填的);
+    //   ② 配对按**最长公共路径前缀** —— 同一台相机的各路读数天然挂在同一个前缀下,
+    //      这是结构,不是厂商命名。序号对齐在"每台相机路数不同"时必然错位。
+    {
+        let 相机尺: Vec<(usize, usize)> = l.cams.iter()
+            .filter_map(|c| flat.iter().find(|(p, _)| p == c).and_then(|(_, v)| 是图(v)))
+            .collect();
+        let 真深: Vec<Vec<String>> = l.depth.iter().filter(|d| {
+            match flat.iter().find(|(p, _)| p == *d).and_then(|(_, v)| 是深度(v)) {
+                Some(wh) => 相机尺.iter().any(|c| *c == wh),
+                None => false,
+            }
+        }).cloned().collect();
+        // 按最长公共前缀,把每台相机配上它自己那张深度图;配不上的留空(下游会照实说)。
+        let 前缀长 = |a: &Vec<String>, b: &Vec<String>| a.iter().zip(b.iter()).take_while(|(x, y)| x == y).count();
+        let mut 排好: Vec<Vec<String>> = Vec::with_capacity(l.cams.len());
+        for c in &l.cams {
+            if let Some(best) = 真深.iter().max_by_key(|d| 前缀长(c, d)) {
+                排好.push(best.clone());
+            }
+        }
+        if !排好.is_empty() { l.depth = 排好; } else { l.depth = 真深; }
+    }
     l
 }
 
