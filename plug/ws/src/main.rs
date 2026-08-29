@@ -4367,10 +4367,16 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 //   搜索半径由模板自己的大小给(量出来的),不是我挑的长度。
                 let mut 上物 = (看2.u, 看2.v);
                 for k in 0..3usize {
+                    // 🔴🔴 **这三步原来是静默 `?` —— 三列全空而【一个字都不打印】。**(ZC 实测 2026-08-29)
+                    // 日志只剩一句"量不齐三列",查不出是跟丢了、还是读不到深度、还是压根没帧。
+                    // **静默失败是本仓最贵的一类**(这一句注释在收尾段开头就写着,而我又犯了一次)。
                     let mut 读 = |plug: &mut Plug<S>, 上: (f64, f64)| -> Option<(f64, f64, f64)> {
-                        let (_, _, gg) = plug.sense().and_then(|f| 灰(&f, 腕机))?;
-                        let (a, b) = 找块窗(w2, h2, &gg, &模2, 半2, 上.0, 上.1, 半2 * 3)?;
-                        let dd = 近侧深2(plug, 腕机, a, b, 窗2)?;
+                        let Some((_, _, gg)) = plug.sense().and_then(|f| 灰(&f, 腕机)) else {
+                            println!("[服]   [收尾]   读:这一帧没有第 {腕机} 台的图"); return None };
+                        let Some((a, b)) = 找块窗(w2, h2, &gg, &模2, 半2, 上.0, 上.1, 半2 * 3) else {
+                            println!("[服]   [收尾]   读:在 ({:.3},{:.3}) 附近 {} px 窗里跟丢了模板", 上.0, 上.1, 半2 * 3); return None };
+                        let Some(dd) = 近侧深2(plug, 腕机, a, b, 窗2) else {
+                            println!("[服]   [收尾]   读:跟到 ({a:.3},{b:.3}) 但那一点读不出深度"); return None };
                         Some((a, b, dd))
                     };
                     let 迈 = |plug: &mut Plug<S>, d: f64| -> Option<f64> {
@@ -4380,15 +4386,15 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         let e1 = f1.ee.first().copied()?;
                         Some(e1[k] - e0[k])
                     };
-                    let Some(甲) = 读(plug, 上物) else { 表2.push([0.0; 3]); continue };
+                    let Some(甲) = 读(plug, 上物) else { println!("[服]   [收尾] 通道 {k}:第一次读就没读到 ⇒ 这一列空着"); 表2.push([0.0; 3]); continue };
                     上物 = (甲.0, 甲.1);
-                    let Some(去实) = 迈(plug, 探幅 / 2.0) else { 表2.push([0.0; 3]); continue };
-                    let Some(乙) = 读(plug, 上物) else { 表2.push([0.0; 3]); continue };
+                    let Some(去实) = 迈(plug, 探幅 / 2.0) else { println!("[服]   [收尾] 通道 {k}:去那一步的命令发不出去 ⇒ 这一列空着"); 表2.push([0.0; 3]); continue };
+                    let Some(乙) = 读(plug, 上物) else { println!("[服]   [收尾] 通道 {k}:去完之后读不到 ⇒ 这一列空着"); 表2.push([0.0; 3]); continue };
                     上物 = (乙.0, 乙.1);
-                    let Some(回实) = 迈(plug, -探幅 / 2.0) else { 表2.push([0.0; 3]); continue };
-                    let Some(丙) = 读(plug, 上物) else { 表2.push([0.0; 3]); continue };
+                    let Some(回实) = 迈(plug, -探幅 / 2.0) else { println!("[服]   [收尾] 通道 {k}:回那一步的命令发不出去 ⇒ 这一列空着"); 表2.push([0.0; 3]); continue };
+                    let Some(丙) = 读(plug, 上物) else { println!("[服]   [收尾] 通道 {k}:回完之后读不到 ⇒ 这一列空着"); 表2.push([0.0; 3]); continue };
                     上物 = (丙.0, 丙.1);
-                    if 去实.abs() < 1e-4 || 回实.abs() < 1e-4 { 表2.push([0.0; 3]); continue }
+                    if 去实.abs() < 1e-4 || 回实.abs() < 1e-4 { println!("[服]   [收尾] 通道 {k}:命令发了但身体没动(去 {去实:+.5} 回 {回实:+.5})⇒ 这一列空着"); 表2.push([0.0; 3]); continue }
                     let 去 = [(乙.0-甲.0)/去实, (乙.1-甲.1)/去实, (乙.2-甲.2)/去实];
                     let 回 = [(丙.0-乙.0)/回实, (丙.1-乙.1)/回实, (丙.2-乙.2)/回实];
                     let 分 = (0..3).map(|i| (去[i]-回[i]).powi(2)).sum::<f64>().sqrt();
