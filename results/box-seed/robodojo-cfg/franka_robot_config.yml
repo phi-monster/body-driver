@@ -1,0 +1,43 @@
+urdf_path: "./panda.urdf"
+srdf_path: "./panda.srdf"
+ee_joints: "panda_hand_joint"
+ee_link: "panda_hand"
+ee_type: "gripper"
+arm_joints_name: ['panda_joint1', 'panda_joint2', 'panda_joint3', 'panda_joint4', 'panda_joint5', 'panda_joint6', 'panda_joint7']
+gripper_joints_name: ['panda_finger_joint1', 'panda_finger_joint2']
+gripper_move:
+    base: "panda_finger_joint1"
+    sign: 1.0
+    mimic: ["panda_finger_joint2", 1., 0.]
+gripper_bias: 0.102
+gripper_scale: [-0.01, 0.04]
+delta_matrix: [[0,0,1],[0,-1,0],[1,0,0]]
+global_trans_matrix: [[1,0,0],[0,-1,0],[0,0,-1]]
+dual_arm: False
+base_link: "panda_link0"
+grasp_camera_reference_axis: [1, 0, 0] # in base_link frame
+rotate_lim: [0.0, 0.8]
+
+# 🔴 腕部相机(2026-08-24)。官方双臂 X5 的 robot_config.yml 里就有一个(挂在腕上),
+# 而 franka 这份没有 —— 于是爪子只能靠头相机看,而头相机在正上方、手朝正下方时
+# 两指是**端着看**的、前后重叠,张开方向被投影压扁到近零(文档已记过这条),
+# 钳口那一格因此四次量不出来(双响恒 0)。腕相机看爪子天然侧视,不存在这个死角。
+# 格式照抄 x5/robot_config.yml 的 camera 段,link 换成 franka 的手部 link。
+camera:
+  -
+    link: "panda_hand"
+    name: "cam_wrist"
+    type: d435
+    mesh: pinhole
+    # 🔴🔴🔴 **这一组是【渲图验过】的,不是算出来的。**(2026-08-29)
+    # 老那版 pos [0,-0.12,-0.04] / ori [140,0,0] 的注释写着"朝向按几何算" —— 算了没看,
+    # 结果是:相机架在手指张开的那条轴(±Y)上、离手掌只有 7 cm ⇒ 整幅画面被手掌外壳糊满,
+    # **一根手指都拍不到**(24 帧接触表里那块白每帧一模一样;深度最小 0.019 m = 贴在自己身上)。
+    # 而驱动那句"长在手上的是第 1 台"照样通过 —— 因为胳膊一动整幅都变,判据分不出"看见手"和"贴着手"。
+    #
+    # 定这一组的办法:一次挂 4 台探针相机(两个符号 × 两个角度),同一帧渲出来四宫格看。
+    # 结论:相机的"正前方"是 **+Z**(在指尖前方 25cm、零朝向 ⇒ 看的是天花板而不是爪子),
+    # 绕 Y **正角**才转向 +X。83° = 从 (-0.25,0,0.05) 指向指尖 (0,0,0.09)。
+    # 验过的画面:白色手掌居中偏右、**左下角两个小凸起就是两根手指**,背景深色木地板,对比度好。
+    pos: [-0.25, 0, 0.05]
+    ori: [0, 83, 0]
