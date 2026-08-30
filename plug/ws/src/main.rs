@@ -3877,21 +3877,47 @@ fn 服务<S: std::io::Read + std::io::Write>(
         let 台 = plug.lay.cams.len();
         if 台 == 0 { println!("[服] 🔴 一台相机都没认出来 ⇒ 干不了。**不编数。**"); return None }
         if 台 == 1 { (0usize, vec![0.0f64]) } else {
+            // 🔴🔴🔴 **"不跟着我动"要对【每一条胳膊】都成立。**(AJ 实测 2026-08-30)
+            //
+            // 我上一版只动了一条胳膊就下结论 ⇒ **长在【另一条】胳膊上的相机也几乎不变**,
+            // 于是"最不动的那台"选成了右腕相机(实测 AJ:主眼 = 第 2 台 = 右腕)。
+            // 单臂上"动一下"和"动所有臂"是一回事,双臂上不是 —— 这是同一个形状的第三次:
+            // **在只有一个的身体上碰巧成立的写法,换成有两个就错。**
+            // ⇒ 每条胳膊各动一下,取每台相机**在所有胳膊上的最大变化**;
+            //   长在世界里的那台 = **对谁都不怎么变**的那个;长在手上的 = 对某一条臂整幅都变。
             let Some(f0) = plug.sense() else { return None };
-            let Some(e0) = f0.ee.first().copied() else { return None };
-            let 前: Vec<Option<Vec<u8>>> = (0..台).map(|c| 灰(&f0, c).map(|(_, _, g)| g)).collect();
+            let 臂数 = f0.joints.len().max(1);
+            let mut 变: Vec<f64> = vec![0.0; 台];
             // 10 是**比例**(量出来的可达带的十分之一),不是米。
             let 步 = 可达带[1] / 10.0;
-            let Some((f1, _, _)) = 落(plug, [e0[0] + 步, e0[1], e0[2]], [e0[3], e0[4], e0[5], e0[6]], 1.0, 等拍) else { return None };
-            let mut 变: Vec<f64> = Vec::new();
-            for c in 0..台 {
-                let (a, b) = (前[c].clone(), 灰(&f1, c).map(|(_, _, g)| g));
-                // 8 是灰度差的噪声底(和认接触面那一处同一个来源),无量纲。
-                变.push(match (a, b) {
-                    (Some(x), Some(y)) if x.len() == y.len() && !x.is_empty() =>
-                        x.iter().zip(y.iter()).filter(|(p, q)| p.abs_diff(**q) > 8).count() as f64 / x.len() as f64,
-                    _ => 1.0,
-                });
+            for a in 0..臂数 {
+                let Some(fa) = plug.sense() else { break };
+                let 前: Vec<Option<Vec<u8>>> = (0..台).map(|c| 灰(&fa, c).map(|(_, _, g)| g)).collect();
+                let Some(q0) = fa.joints.get(a).cloned() else { continue };
+                if q0.is_empty() { continue }
+                let mut q = q0.clone();
+                // 只推第一个关节:它带动整条臂,是"这条臂动了没有"最省的一问。
+                q[0] += 步;
+                let j0 = fa.jaw.first().copied().unwrap_or(1.0);
+                if !plug.act(&Cmd::Joints { arm: a, q, jaw: j0 }) { continue }
+                定爪(plug, 等拍);
+                let Some(f1) = plug.sense() else { break };
+                for c in 0..台 {
+                    let (x0, y0) = (前[c].clone(), 灰(&f1, c).map(|(_, _, g)| g));
+                    // 8 是灰度差的噪声底(和认接触面那一处同一个来源),无量纲。
+                    let v = match (x0, y0) {
+                        (Some(x), Some(y)) if x.len() == y.len() && !x.is_empty() =>
+                            x.iter().zip(y.iter()).filter(|(p, q)| p.abs_diff(**q) > 8).count() as f64 / x.len() as f64,
+                        _ => 1.0,
+                    };
+                    if v > 变[c] { 变[c] = v }
+                }
+                // 推回去,不留净位移(这一层不许有"回原位"的概念,所以是相对推回)。
+                let mut qb = q0.clone();
+                if let Some(fb) = plug.sense() { if let Some(qn) = fb.joints.get(a) { qb = qn.clone(); } }
+                qb[0] -= 步;
+                let _ = plug.act(&Cmd::Joints { arm: a, q: qb, jaw: j0 });
+                定爪(plug, 等拍);
             }
             let (i, _) = 变.iter().enumerate().fold((0usize, f64::INFINITY), |a, (i, v)| if *v < a.1 { (i, *v) } else { a });
             println!("[服] 手动一下,各台画面变了多大一片:{:?}", 变.iter().map(|v| (v * 1000.0).round() / 1000.0).collect::<Vec<_>>());
