@@ -4660,12 +4660,44 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 let mut 上物2 = (看2.u, 看2.v);
                 // 12 / 4000 是**轮数**上下限(计数,无量纲);2 是余量倍数,3 是搜索窗的模板倍数,都无量纲。
                 let 收尾轮 = ((可达带[1] / (探步 * 交付率).max(1e-9)) * 2.0).ceil().clamp(12.0, 4000.0) as u32;
+                // 🔴🔴🔴 **每一帧【重新切】,不再靠模板一路跟。**(2026-08-31)
+                //
+                // 今天所有"跟丢"都出在模板追踪上:跟到肘、跟到肩、跟到天花板梁(横向恒为 0)、
+                // 锁到背景墙(AN 实测:物体深度从 0.688 m 跳到 2.13 m,之后三拍一字不差地钉在墙上)。
+                // 而**几何重认从没错过**(头相机上找球 13/13)。
+                // 追踪会漂、会锁错、有孔径问题;**重认没有状态,错一帧下一帧就自己回来**。
+                // 代价只是"这一块和上一帧是不是同一块" —— 而两指附近只有一块凸起时,那是白送的。
+                // ⚠️ 这不是加一道闸,是**换一种拿读数的办法**:它永远给得出一个位置。
+                let 重切 = |plug: &mut Plug<S>, 上: (f64, f64)| -> Option<(f64, f64, f64)> {
+                    let 深路 = plug.lay.depth.get(腕机).or_else(|| plug.lay.depth.first())?.clone();
+                    let dv = plug.last.as_ref().and_then(|o| 取(o, &深路))?;
+                    let (dw, dh, dep) = wire::as_f32_grid(&dv)?;
+                    let depf: Vec<f64> = dep.iter().map(|x| *x as f64).collect();
+                    let mut v = point_gen::分块(&depf, dw, dh, selfcal::最少像素(dw, dh) as usize, 3.0);
+                    v.retain(|r| r.框[0] > 0 && r.框[1] > 0 && r.框[2] + 1 < dw && r.框[3] + 1 < dh);
+                    if v.is_empty() { return None }
+                    // 同一块 = 离上一帧那个位置最近的一块。物体是静的、一步只挪半个探幅,不可能瞬移。
+                    v.sort_by(|a, b| {
+                        let da = (a.心[0] - 上.0).hypot(a.心[1] - 上.1);
+                        let db = (b.心[0] - 上.0).hypot(b.心[1] - 上.1);
+                        da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                    Some((v[0].心[0], v[0].心[1], v[0].深))
+                };
                 for 轮 in 0..收尾轮 {
                     if plug.复位过 { break }
-                    let (_, _, gg) = plug.sense().and_then(|f| 灰(&f, 腕机))?;
-                    let (nu, nv) = 找块窗(w2, h2, &gg, &模2, 半2, 上物2.0, 上物2.1, 半2 * 3)?;
+                    let _ = plug.sense()?;
+                    let (nu, nv, nd) = match 重切(plug, 上物2) {
+                        Some(t) => t,
+                        None => {
+                            // 重切不出来(这一帧只有平面)⇒ 退回模板跟一帧,**仍然不停手**。
+                            let (_, _, gg) = plug.sense().and_then(|f| 灰(&f, 腕机))?;
+                            let (a, b) = 找块窗(w2, h2, &gg, &模2, 半2, 上物2.0, 上物2.1, 半2 * 3)?;
+                            let d = 近侧深2(plug, 腕机, a, b, 窗2)?;
+                            (a, b, d)
+                        }
+                    };
                     上物2 = (nu, nv);
-                    let nd = 近侧深2(plug, 腕机, nu, nv, 窗2)?;
                     let 深误 = 指深.map(|z| z - nd).unwrap_or(0.0);
                     let 误 = [c[0] - nu, c[1] - nv, 深误];
                     let 差 = (误[0].powi(2) + 误[1].powi(2)).sqrt();
