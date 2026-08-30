@@ -4803,18 +4803,28 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     let mut 变: Vec<f64> = dep0.iter().zip(pd.iter())
                         .map(|(a, b)| if a.is_finite() && b.is_finite() { (a - b).abs() } else { 0.0 })
                         .collect();
-                    let mut 排 = 变.clone();
-                    排.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-                    let 中 = 排[排.len() / 2];
-                    let 界 = (中 * 5.0).max(1e-6);
-                    let mut 挖 = 0usize;
-                    for i in 0..dep0.len() {
-                        if 变[i] > 界 { dep0[i] = f64::NAN; 挖 += 1; }
+                    // 🔴🔴 **中位数只取"变过的那些像素" —— 否则它会塌成 0。**(AF 实测 2026-08-30)
+                    // 画面大部分像素完全没变时,全图中位是 **0.0000**,乘 5 还是 0
+                    // ⇒ 门槛塌到零,**凡是有一丁点变化的像素全被挖掉**,连球身上的传感器噪声也挖了
+                    //(实测那一拍挖了 81480 个像素,随后眼挑到了 11 px 的伪影)。
+                    // 只对"真的变过"的那些取中位,它就永远是一个**真实的噪声尺度**,不会塌。
+                    // 一个都没变过 ⇒ 这一拍不挖,不编数。
+                    let mut 排: Vec<f64> = 变.iter().copied().filter(|x| *x > 0.0).collect();
+                    if 排.is_empty() {
+                        println!("[服] 🎯 这一拍深度图一个像素都没变 ⇒ 不挖(不编数)");
+                    } else {
+                        排.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                        let 中 = 排[排.len() / 2];
+                        let 界 = 中 * 5.0;
+                        let mut 挖 = 0usize;
+                        for i in 0..dep0.len() {
+                            if 变[i] > 界 { dep0[i] = f64::NAN; 挖 += 1; }
+                        }
+                        if 挖 > 0 {
+                            println!("[服] 🎯 算支撑面前挖掉「我自己」:{挖} 个像素这一拍动过(界 {界:.4} m = **变过的那些**的中位 {中:.4} × 5)");
+                        }
                     }
                     变.clear();
-                    if 挖 > 0 {
-                        println!("[服] 🎯 算支撑面前挖掉「我自己」:{挖} 个像素这一拍动过(界 {界:.4} m = 全图中位 {中:.4} × 5)");
-                    }
                 }
             }
             上深 = Some((dw0, dh0, dep0.iter().map(|x| *x).collect::<Vec<f64>>()));
