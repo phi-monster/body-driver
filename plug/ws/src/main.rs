@@ -3744,14 +3744,38 @@ fn 服务<S: std::io::Read + std::io::Write>(
     let 迈通道稳 = |plug: &mut Plug<S>, 动: &[f64], 比: f64, jaw: f64, 是关节: bool, 稳拍: u32| -> Option<(f64, Vec<f64>, bool)> {
         let f0 = plug.sense()?;
         if 是关节 {
-            let q0 = f0.joints.first().cloned()?;
-            let mut q = q0.clone();
-            for (i, dq) in 动.iter().enumerate() { if i < q.len() { q[i] += dq * 比 } }
-            if !plug.act(&Cmd::Joints { arm: 0, q, jaw }) { return None }
-            let mut 上 = None; let mut 稳 = 0u32; let mut 末 = None;
+            // 🔴🔴🔴 **通道横跨【这具身体报出来的所有关节组】,不是第一组。**(2026-08-30,ARX 双臂逼出来)
+            //
+            // 仓里自己的设计原话:*"通道 = 观测里报出来的【每一个】能下命令的自由度
+            //(关节/手指/桨/轮/舵),数量由布局给"*。而代码一直写 `joints.first()` ——
+            // 单臂上碰巧等价,换成 ARX 双臂就**把 12 个臂关节当成 6 个**,右手的关节从没上过桌。
+            // 实测(AD):`通道表装回:6 个通道`,而这具身体报的是 left_arm + right_arm 两组。
+            //
+            // 🔴 **"用哪只手"不该由我写死,也不需要一条规则** —— 把所有自由度摆上桌,
+            // 最小二乘自己解:被跟的那两个接触面长在哪只手上,另一只手的关节对它的系数就是零,
+            // 解出来自然只动该动的那只。一个"左""右"都不出现,换三条胳膊/五指手同样成立。
+            //
+            // ⚠️ 这条线缆一次只换一条臂的值(其余臂发它此刻的值,见 `Cmd::Joints` 那段注释),
+            //    所以这一步发**位移最大的那条臂**;要两条臂同时动,下一步再发另一条。
+            //    这是线缆的形状,不是判据 —— 照实写出来,不假装同时动了。
+            let 各臂: Vec<Vec<f64>> = f0.joints.clone();
+            if 各臂.is_empty() { return None }
+            let 长: Vec<usize> = 各臂.iter().map(|v| v.len()).collect();
+            let q0: Vec<f64> = 各臂.concat();
+            let (mut 起, mut 臂, mut 最大) = (0usize, 0usize, -1.0f64);
+            for (a, l) in 长.iter().enumerate() {
+                let s: f64 = (0..*l).map(|i| 动.get(起 + i).copied().unwrap_or(0.0).abs()).sum();
+                if s > 最大 { 最大 = s; 臂 = a; }
+                起 += l;
+            }
+            let 偏: usize = 长[..臂].iter().sum();
+            let mut q = 各臂[臂].clone();
+            for i in 0..q.len() { q[i] += 动.get(偏 + i).copied().unwrap_or(0.0) * 比 }
+            if !plug.act(&Cmd::Joints { arm: 臂, q, jaw }) { return None }
+            let mut 上: Option<Vec<f64>> = None; let mut 稳 = 0u32; let mut 末 = None;
             for _ in 0..稳拍.max(1) {
                 let f = plug.sense()?;
-                let 此 = f.joints.first().cloned().unwrap_or_default();
+                let 此: Vec<f64> = f.joints.concat();
                 末 = Some(此.clone());
                 if 上.as_ref() == Some(&此) { 稳 += 1; if 稳 >= 2 { break } } else { 稳 = 0 }
                 上 = Some(此);
@@ -4590,7 +4614,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
     // XA 实测:只修了前一处,后一处每集照样报"认不出我的接触面"然后站着 —— 同一个病两个入口。
     let 挪进画面 = |plug: &mut Plug<S>, 轮: u32, jaw0: f64, 是关节: bool,
                     图: &mut Option<crate::selfmap::自图>| -> Option<bool> {
-        let 关节数 = plug.sense()?.joints.first().map(|v| v.len()).unwrap_or(0);
+        // 所有关节组之和 —— 双臂就是两条臂的关节都算通道(见 `迈通道稳` 那段注释)。
+        let 关节数 = plug.sense()?.joints.iter().map(|v| v.len()).sum::<usize>();
         let 通道数 = if 是关节 { 关节数 } else { 6 };
         if 通道数 == 0 { return None }
         let 见 = |plug: &mut Plug<S>| -> Option<Vec<u8>> { plug.sense().and_then(|f| 灰(&f, 相机号)).map(|(_, _, g)| g) };
@@ -4968,7 +4993,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
         //
         // 幅度也不写死:**从小往上翻倍,直到画面上真的看得见它动** —— 看得见的判据是
         // "变化超过跟踪器自己的噪声",而噪声是量出来的(同一位形连拍两帧的抖动)。
-        let 关节数 = 帧.joints.first().map(|v| v.len()).unwrap_or(0);
+        let 关节数 = 帧.joints.iter().map(|v| v.len()).sum::<usize>();
         if 关节数 == 0 { println!("[服] 🔴 这具身体没报关节 ⇒ 通道表量不了。**具名缺口,不编数。**"); continue }
         // 🔴🔴 **"我的两个接触面在哪" —— 只在这一处回答。**
         // 此前有两处各答一遍:建表那一段用认块器的长轴两端,追那一段用张合相减。
