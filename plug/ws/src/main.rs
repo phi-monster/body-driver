@@ -3741,6 +3741,31 @@ fn 服务<S: std::io::Read + std::io::Write>(
     // 一集只够走 **10 步**,第 0 步刚打印完就被换集打断,然后合了一把空气。
     // 日志里既没有"走到了"也没有"过不去" —— 它是被 `复位过` 静默切走的。
     // ⇒ 搬运走 `稳拍 = 1`:发一次命令、读一帧就进下一步,一步只花约 2 个仿真步。
+    // 🔴🔴🔴 **同一条胳膊会被报两遍 —— 状态一遍、命令回声一遍。量出来去重,不看键名。**
+    //(AL 实测 2026-08-30)
+    //
+    // 这具身体报的关节是四组:`state.left_arm · state.right_arm · action.left_arm · action.right_arm`。
+    // 后两组是**我发出去的命令的回声**,不是多出来的两条胳膊。我把它们当成了额外自由度 ⇒
+    // "推通道 12~23"实际是往命令回声里写数,**身体一动不动** ⇒ 实测 `通道表:24 列里量到 0 列`。
+    // ⚠️ 由此撤回我说过的"通道从 6 涨到 24 是零改动换体的证据" —— 真实自由度是 **12**。
+    //
+    // 去重判据不看 `state`/`action` 这些字眼(那是**这台机器的名字**,减法①禁止):
+    // **两组值在同一帧里逐位相同 ⇒ 它们是同一条胳膊被报了两遍**,只留第一组。
+    // 命令回声在稳态下必然等于状态;真的两条胳膊逐位相同的概率是零。
+    let 真臂 = |f: &Frame| -> Vec<usize> {
+        let mut 留: Vec<usize> = Vec::new();
+        for (i, v) in f.joints.iter().enumerate() {
+            if v.is_empty() { continue }
+            let 重 = 留.iter().any(|&j| {
+                let w = &f.joints[j];
+                w.len() == v.len() && w.iter().zip(v.iter()).all(|(a, b)| (a - b).abs() < 1e-9)
+            });
+            if !重 { 留.push(i) }
+        }
+        if 留.is_empty() && !f.joints.is_empty() { 留.push(0) }
+        留
+    };
+
     let 迈通道稳 = |plug: &mut Plug<S>, 动: &[f64], 比: f64, jaw: f64, 是关节: bool, 稳拍: u32| -> Option<(f64, Vec<f64>, bool)> {
         let f0 = plug.sense()?;
         if 是关节 {
@@ -3758,7 +3783,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
             // ⚠️ 这条线缆一次只换一条臂的值(其余臂发它此刻的值,见 `Cmd::Joints` 那段注释),
             //    所以这一步发**位移最大的那条臂**;要两条臂同时动,下一步再发另一条。
             //    这是线缆的形状,不是判据 —— 照实写出来,不假装同时动了。
-            let 各臂: Vec<Vec<f64>> = f0.joints.clone();
+            let 号 = 真臂(&f0);
+            let 各臂: Vec<Vec<f64>> = 号.iter().map(|&i| f0.joints[i].clone()).collect();
             if 各臂.is_empty() { return None }
             let 长: Vec<usize> = 各臂.iter().map(|v| v.len()).collect();
             let q0: Vec<f64> = 各臂.concat();
@@ -3771,11 +3797,11 @@ fn 服务<S: std::io::Read + std::io::Write>(
             let 偏: usize = 长[..臂].iter().sum();
             let mut q = 各臂[臂].clone();
             for i in 0..q.len() { q[i] += 动.get(偏 + i).copied().unwrap_or(0.0) * 比 }
-            if !plug.act(&Cmd::Joints { arm: 臂, q, jaw }) { return None }
+            if !plug.act(&Cmd::Joints { arm: 号[臂], q, jaw }) { return None }
             let mut 上: Option<Vec<f64>> = None; let mut 稳 = 0u32; let mut 末 = None;
             for _ in 0..稳拍.max(1) {
                 let f = plug.sense()?;
-                let 此: Vec<f64> = f.joints.concat();
+                let 此: Vec<f64> = 真臂(&f).iter().map(|&i| f.joints[i].clone()).collect::<Vec<_>>().concat();
                 末 = Some(此.clone());
                 if 上.as_ref() == Some(&此) { 稳 += 1; if 稳 >= 2 { break } } else { 稳 = 0 }
                 上 = Some(此);
@@ -3886,20 +3912,28 @@ fn 服务<S: std::io::Read + std::io::Write>(
             // ⇒ 每条胳膊各动一下,取每台相机**在所有胳膊上的最大变化**;
             //   长在世界里的那台 = **对谁都不怎么变**的那个;长在手上的 = 对某一条臂整幅都变。
             let Some(f0) = plug.sense() else { return None };
-            let 臂数 = f0.joints.len().max(1);
+            // 同一条胳膊会被报两遍(状态 + 命令回声)⇒ 逐位相同的只算一条(见 `真臂`)。
+            let mut 号: Vec<usize> = Vec::new();
+            for (i, v) in f0.joints.iter().enumerate() {
+                if v.is_empty() { continue }
+                if !号.iter().any(|&j| { let w = &f0.joints[j];
+                    w.len() == v.len() && w.iter().zip(v.iter()).all(|(a, b)| (a - b).abs() < 1e-9) }) { 号.push(i) }
+            }
+            if 号.is_empty() { 号.push(0) }
+            let 臂数 = 号.len();
             let mut 变: Vec<f64> = vec![0.0; 台];
             // 10 是**比例**(量出来的可达带的十分之一),不是米。
             let 步 = 可达带[1] / 10.0;
             for a in 0..臂数 {
                 let Some(fa) = plug.sense() else { break };
                 let 前: Vec<Option<Vec<u8>>> = (0..台).map(|c| 灰(&fa, c).map(|(_, _, g)| g)).collect();
-                let Some(q0) = fa.joints.get(a).cloned() else { continue };
+                let Some(q0) = fa.joints.get(号[a]).cloned() else { continue };
                 if q0.is_empty() { continue }
                 let mut q = q0.clone();
                 // 只推第一个关节:它带动整条臂,是"这条臂动了没有"最省的一问。
                 q[0] += 步;
                 let j0 = fa.jaw.first().copied().unwrap_or(1.0);
-                if !plug.act(&Cmd::Joints { arm: a, q, jaw: j0 }) { continue }
+                if !plug.act(&Cmd::Joints { arm: 号[a], q, jaw: j0 }) { continue }
                 定爪(plug, 等拍);
                 let Some(f1) = plug.sense() else { break };
                 for c in 0..台 {
@@ -3914,9 +3948,9 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 }
                 // 推回去,不留净位移(这一层不许有"回原位"的概念,所以是相对推回)。
                 let mut qb = q0.clone();
-                if let Some(fb) = plug.sense() { if let Some(qn) = fb.joints.get(a) { qb = qn.clone(); } }
+                if let Some(fb) = plug.sense() { if let Some(qn) = fb.joints.get(号[a]) { qb = qn.clone(); } }
                 qb[0] -= 步;
-                let _ = plug.act(&Cmd::Joints { arm: a, q: qb, jaw: j0 });
+                let _ = plug.act(&Cmd::Joints { arm: 号[a], q: qb, jaw: j0 });
                 定爪(plug, 等拍);
             }
             let (i, _) = 变.iter().enumerate().fold((0usize, f64::INFINITY), |a, (i, v)| if *v < a.1 { (i, *v) } else { a });
@@ -4701,7 +4735,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
     let 挪进画面 = |plug: &mut Plug<S>, 轮: u32, jaw0: f64, 是关节: bool,
                     图: &mut Option<crate::selfmap::自图>| -> Option<bool> {
         // 所有关节组之和 —— 双臂就是两条臂的关节都算通道(见 `迈通道稳` 那段注释)。
-        let 关节数 = plug.sense()?.joints.iter().map(|v| v.len()).sum::<usize>();
+        let 关节数 = { let f = plug.sense()?; 真臂(&f).iter().map(|&i| f.joints[i].len()).sum::<usize>() };
         let 通道数 = if 是关节 { 关节数 } else { 6 };
         if 通道数 == 0 { return None }
         let 见 = |plug: &mut Plug<S>| -> Option<Vec<u8>> { plug.sense().and_then(|f| 灰(&f, 相机号)).map(|(_, _, g)| g) };
@@ -5184,7 +5218,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
         //
         // 幅度也不写死:**从小往上翻倍,直到画面上真的看得见它动** —— 看得见的判据是
         // "变化超过跟踪器自己的噪声",而噪声是量出来的(同一位形连拍两帧的抖动)。
-        let 关节数 = 帧.joints.iter().map(|v| v.len()).sum::<usize>();
+        let 关节数 = 真臂(&帧).iter().map(|&i| 帧.joints[i].len()).sum::<usize>();
         if 关节数 == 0 { println!("[服] 🔴 这具身体没报关节 ⇒ 通道表量不了。**具名缺口,不编数。**"); continue }
         // 🔴🔴 **"我的两个接触面在哪" —— 只在这一处回答。**
         // 此前有两处各答一遍:建表那一段用认块器的长轴两端,追那一段用张合相减。
