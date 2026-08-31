@@ -4912,7 +4912,12 @@ fn 服务<S: std::io::Read + std::io::Write>(
 
     /// 合到读数不再变为止,返回停在几。**唯一一处**回答"合爪合到哪儿了"。
     let 合到停住 = |plug: &mut Plug<S>, 通道是关节: bool| -> Option<f64> {
-        let 开着读数 = plug.sense().and_then(|f| f.jaw.first().copied());
+        // 🔴🔴🔴 **盯的必须是【这一炮在用的那只手】的钳口读数,不是第 0 只。**(AY 实测 2026-08-31)
+        // AY 选中了 1 号末端,而这里写的是 `jaw.first()` ⇒ 盯着一只**根本没在合**的爪子,
+        // "动过"永远为假 ⇒ 600 拍空转、一行日志不打(整整 2700 行只有 `[看]`/`[计时]`)。
+        // 同一类:写死的下标在换手之后静默失效。
+        let 我爪 = |f: &Frame| f.jaw.get(手号.get()).or_else(|| f.jaw.get(手号.get()).or_else(|| f.jaw.first())).copied();
+        let 开着读数 = plug.sense().and_then(|f| 我爪(&f));
         let mut 上次: Option<Vec<f64>> = None;
         let mut 稳 = 0u32;
         let mut 停在 = f64::NAN;
@@ -4920,9 +4925,10 @@ fn 服务<S: std::io::Read + std::io::Write>(
             抓握(plug, 0.0, 通道是关节);
             let Some(f) = plug.sense() else { return None };
             let 此: Vec<f64> = f.jaw.iter().copied().collect();
+            let 此我 = 我爪(&f);
             // "动过" = 和**合之前**那个读数不一样了(不假设开着时是几)。
-            let 动过 = match (开着读数, 此.first().copied()) { (Some(a), Some(b)) => (a - b).abs() > 1e-9, _ => false };
-            if 动过 && 上次.as_ref() == Some(&此) { 稳 += 1; if 稳 >= 3 { 停在 = 此.first().copied().unwrap_or(f64::NAN); break } }
+            let 动过 = match (开着读数, 此我) { (Some(a), Some(b)) => (a - b).abs() > 1e-9, _ => false };
+            if 动过 && 上次.as_ref() == Some(&此) { 稳 += 1; if 稳 >= 3 { 停在 = 此我.unwrap_or(f64::NAN); break } }
             else { 稳 = 0 }
             上次 = Some(此);
         }
@@ -5097,7 +5103,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
         }
         let Some(e) = 帧.ee.get(手号.get()).copied() else { continue };
         let (此位, 此姿) = ([e[0], e[1], e[2]], [e[3], e[4], e[5], e[6]]);
-        let jaw0 = 帧.jaw.first().copied().unwrap_or(1.0);
+        let jaw0 = 帧.jaw.get(手号.get()).or_else(|| 帧.jaw.first()).copied().unwrap_or(1.0);
 
         // ① 指令 —— 整句直接问眼,驱动不解析任务名。
         // 🔴 **客户可以直接下单。** 环境自带的 `instruction` 是"这一集的任务",
@@ -6510,7 +6516,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     抓握(plug, 0.0, *通道是关节);
                     定爪(plug, 等拍 * 4);
                     if let Some(f) = plug.sense() {
-                        if let Some(x) = f.jaw.first().copied() {
+                        if let Some(x) = f.jaw.get(手号.get()).or_else(|| f.jaw.first()).copied() {
                             println!("[服]   🟢 **空手合到底,这具机体报 {x:.4}** ⇒ 以后「指间有没有东西」拿它当零点");
                             *空合载 = Some(x);
                         }
@@ -7502,7 +7508,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
         let 顶拍 = ((这一下.press * (等拍 * 4) as f64).round() as u32).min(等拍 * 4);
         if 顶拍 > 0 {
             for _ in 0..顶拍 { 抓握(plug, 0.0, *通道是关节); if plug.sense().is_none() { break } }
-            let 顶后 = plug.sense().and_then(|f| f.jaw.first().copied()).unwrap_or(停在);
+            let 顶后 = plug.sense().and_then(|f| f.jaw.get(手号.get()).or_else(|| f.jaw.first()).copied()).unwrap_or(停在);
             println!("[服]   顶了 {顶拍} 拍(press={:.2})⇒ 读数 {停在:.4} → {顶后:.4}(还在往下走 = 东西被压实了)", 这一下.press);
         }
         // 按住多久:秒 → 拍,用**量出来的帧时**换算;帧时还没量到(开机头 50 拍)就跳过并说明。
