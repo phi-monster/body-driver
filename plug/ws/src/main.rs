@@ -3927,60 +3927,69 @@ fn 服务<S: std::io::Read + std::io::Write>(
     //   ② **这条臂在主眼画面里占哪一片** —— 变化像素的重心;
     //      等眼指出目标之后,离目标最近的那条臂就是该用的手
     let (臂心, 臂末, 臂关) = {
+        // 🔴🔴🔴 **探测必须用【这具机体真正认的那种命令】,否则它一下都不会动。**
+        //(AW 实测 2026-08-31)
+        // 上一版发的是 `Cmd::Joints`,而日志第 22 行就写着
+        // `[装] 这具机体认哪种命令:末端那六个自由度` —— **它不吃关节命令**。
+        // 后果:两条臂一下都没动 ⇒ 两个末端位移都是 0 ⇒ argmax 默认落回 0 ⇒
+        // **两条臂都判成"末端号 0"**,而主控路发的正是末端命令 ⇒ 右臂照样一次不动。
+        // 两条臂量出来的画面重心 (0.202,0.561) / (0.211,0.552) 也是这个 —— 那是噪声,不是胳膊。
+        //
+        // 改成:**逐个末端**发它认的那种命令推一小步,看谁真的走了、画面里动的是哪一片。
+        // 这样连"臂↔末端"的映射都不用猜 —— 末端号就是命令号。
+        // 顺带把关节组也认出来:哪一组关节跟着变得最多,就是长着这个末端的那条臂。
         let Some(f0) = plug.sense() else { return None };
-        let 号 = 真臂(&f0);
-        let 臂数 = 号.len();
-        let mut 臂心: Vec<Option<(f64, f64)>> = vec![None; 臂数];
-        let mut 臂末: Vec<Option<usize>> = vec![None; 臂数];
+        let 末数 = f0.ee.len().max(1);
+        let 组号 = 真臂(&f0);
+        let mut 臂心: Vec<Option<(f64, f64)>> = vec![None; 末数];
+        let mut 臂末: Vec<Option<usize>> = vec![None; 末数];
+        let mut 臂关: Vec<usize> = vec![0; 末数];
         // 10 是**比例**(量出来的可达带的十分之一),不是米。
         let 步 = 可达带[1] / 10.0;
-        for a in 0..臂数 {
+        for i in 0..末数 {
             let Some(fa) = plug.sense() else { break };
             let Some((w, h, 前灰)) = 灰(&fa, 相机号) else { continue };
-            let 前末: Vec<[f64; 7]> = fa.ee.clone();
-            let Some(q0) = fa.joints.get(号[a]).cloned() else { continue };
-            if q0.is_empty() { continue }
-            let mut q = q0.clone();
-            // 只推第一个关节:它带动整条臂,是"这条臂动了没有"最省的一问。
-            q[0] += 步;
-            let j0 = fa.jaw.first().copied().unwrap_or(1.0);
-            if !plug.act(&Cmd::Joints { arm: 号[a], q, jaw: j0 }) { continue }
+            let Some(e0) = fa.ee.get(i).cloned() else { continue };
+            if e0.len() < 7 { continue }
+            let 前组: Vec<Vec<f64>> = fa.joints.clone();
+            let j0 = fa.jaw.get(i).or_else(|| fa.jaw.first()).copied().unwrap_or(1.0);
+            let q0 = [e0[3], e0[4], e0[5], e0[6]];
+            // 三根轴各推一次太贵;推一根就够回答"你动不动、动在画面哪儿"。
+            plug.act(&Cmd::Ee { arm: i, at: [e0[0] + 步, e0[1], e0[2]], quat: q0, jaw: j0 });
             for _ in 0..等拍 { if plug.sense().is_none() { break } }
             let Some(f1) = plug.sense() else { break };
-            for (i, e) in f1.ee.iter().enumerate() {
-                if let (Some(pp), true) = (前末.get(i), e.len() >= 3) {
-                    if pp.len() < 3 { continue }
-                    let d = ((e[0]-pp[0]).powi(2)+(e[1]-pp[1]).powi(2)+(e[2]-pp[2]).powi(2)).sqrt();
-                    if 臂末[a].map(|_| false).unwrap_or(true) || d > 0.0 {
-                        // 取位移最大的那个
-                        let 旧 = 臂末[a].and_then(|k| 前末.get(k).zip(f1.ee.get(k)).map(|(p, e2)|
-                            ((e2[0]-p[0]).powi(2)+(e2[1]-p[1]).powi(2)+(e2[2]-p[2]).powi(2)).sqrt())).unwrap_or(-1.0);
-                        if d > 旧 { 臂末[a] = Some(i) }
-                    }
-                }
+            let 实到 = f1.ee.get(i).map(|e|
+                ((e[0]-e0[0]).powi(2)+(e[1]-e0[1]).powi(2)+(e[2]-e0[2]).powi(2)).sqrt()).unwrap_or(0.0);
+            // 哪一组关节跟着变得最多 ⇒ 长着这个末端的就是那条臂(不看键名,只看数)
+            let mut 最组 = (0usize, -1.0f64);
+            for &g in 组号.iter() {
+                let (Some(a0), Some(a1)) = (前组.get(g), f1.joints.get(g)) else { continue };
+                if a0.len() != a1.len() || a0.is_empty() { continue }
+                let d: f64 = a0.iter().zip(a1.iter()).map(|(x, y)| (x - y).abs()).sum();
+                if d > 最组.1 { 最组 = (g, d) }
             }
+            if 实到 > 0.0 { 臂末[i] = Some(i); 臂关[i] = 最组.0; }
             if let Some((_, _, 后灰)) = 灰(&f1, 相机号) {
                 if 后灰.len() == 前灰.len() && !前灰.is_empty() {
                     let mut n = 0usize; let (mut su, mut sv) = (0.0f64, 0.0f64);
-                    for i in 0..前灰.len() {
+                    for k in 0..前灰.len() {
                         // 8 是灰度差的噪声底(和认接触面那一处同一个来源),无量纲。
-                        if 前灰[i].abs_diff(后灰[i]) > 8 {
-                            n += 1; su += (i % w) as f64 / w as f64; sv += (i / w) as f64 / h as f64;
+                        if 前灰[k].abs_diff(后灰[k]) > 8 {
+                            n += 1; su += (k % w) as f64 / w as f64; sv += (k / w) as f64 / h as f64;
                         }
                     }
-                    if n > 0 { 臂心[a] = Some((su / n as f64, sv / n as f64)); }
+                    // 🔴 **动的像素太少 = 它其实没动** —— 这一片是噪声,不许当成"这条臂在这儿"。
+                    // 千分之一画幅是灰度噪声底下的量级;低于它就不给这条臂任何位置。
+                    if n as f64 / 前灰.len() as f64 > 0.001 { 臂心[i] = Some((su / n as f64, sv / n as f64)); }
                 }
             }
-            // 推回去,不留净位移(这一层不许有"回原位"的概念,所以是相对推回)。
-            let mut qb = q0.clone();
-            if let Some(fb) = plug.sense() { if let Some(qn) = fb.joints.get(号[a]) { qb = qn.clone(); } }
-            qb[0] -= 步;
-            let _ = plug.act(&Cmd::Joints { arm: 号[a], q: qb, jaw: j0 });
+            // 推回去,不留净位移。
+            plug.act(&Cmd::Ee { arm: i, at: [e0[0], e0[1], e0[2]], quat: q0, jaw: j0 });
             for _ in 0..等拍 { if plug.sense().is_none() { break } }
-            println!("[服] 第 {a} 条臂(关节组 {})⇒ 末端号 {:?} · 在主眼里占的那一片中心 {:?}",
-                号[a], 臂末[a], 臂心[a].map(|(u, v)| ((u*1000.0).round()/1000.0, (v*1000.0).round()/1000.0)));
+            println!("[服] 第 {i} 个末端:命令走 {步:.4} m,**实到 {实到:.4} m** · 跟着变最多的关节组 {} · 在主眼里占的那一片中心 {:?}",
+                最组.0, 臂心[i].map(|(u, v)| ((u*1000.0).round()/1000.0, (v*1000.0).round()/1000.0)));
         }
-        (臂心, 臂末, 号)
+        (臂心, 臂末, 臂关)
     };
 
     // 🔴🔴🔴 **最后一两厘米交给【长在手上】的那台相机。**(owner 2026-08-27 定)
@@ -4608,14 +4617,14 @@ fn 服务<S: std::io::Read + std::io::Write>(
             for a in 0..臂心.len() {
                 let Some((cu, cv)) = 臂心[a] else { continue };
                 let d = (cu - look.u).hypot(cv - look.v);
-                println!("[服]   挑手:第 {a} 条臂占的那片中心 ({cu:.3},{cv:.3}),离目标 ({:.3},{:.3}) 差 {d:.3} 画幅", look.u, look.v);
+                println!("[服]   挑手:第 {a} 个末端占的那片中心 ({cu:.3},{cv:.3}),离目标 ({:.3},{:.3}) 差 {d:.3} 画幅", look.u, look.v);
                 if 最近.map(|(_, b)| d < b).unwrap_or(true) { 最近 = Some((a, d)) }
             }
             match 最近 {
                 Some((a, d)) => {
                     if let Some(e) = 臂末[a] { 手号.set(e) }
                     if let Some(&j) = 臂关.get(a) { 臂号.set(j) }
-                    println!("[服] ⇒ **这一炮用第 {a} 条臂**(离目标最近,差 {d:.3} 画幅)⇒ 末端号 {} · 关节组 {}", 手号.get(), 臂号.get());
+                    println!("[服] ⇒ **这一炮用第 {a} 个末端**(离目标最近,差 {d:.3} 画幅)⇒ 末端号 {} · 关节组 {}", 手号.get(), 臂号.get());
                 }
                 None => println!("[服] ⚠️ 逐臂推那一步没量到任何一条臂占的片 ⇒ 手号留在 {},结果照实报", 手号.get()),
             }
