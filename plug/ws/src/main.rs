@@ -559,25 +559,29 @@ fn 自报相机(
 ///
 /// 🔴 判据全在 `body_layer::selfmodel::一抖::算数` 里,这里只负责把证据收上来 ——
 /// 没走到位 / 走反了 / 没越过噪声地板的,照收不误但不进推导。
+/// 冻住手臂、只抖第 `手` 个末端的指通道。
+/// 🔴 **哪个末端不写死** —— 由调用方逐个试(owner 2026-08-31:driver 不许有任何写死的东西)。
 fn 抖指通道<S: std::io::Read + std::io::Write>(
     plug: &mut Plug<S>,
     相机们: &[(usize, point_gen::Eye, f64)],
+    手: usize,
 ) -> body_layer::selfmodel::自模 {
     use body_layer::selfmodel::{一抖, 自模, 通道};
     let mut m = 自模::new();
     let Some(f0) = plug.sense() else { return m };
-    let 冻 = match f0.ee.first() { Some(e) => [e[0], e[1], e[2]], None => return m };
-    let 冻q = match f0.ee.first() { Some(e) => [e[3], e[4], e[5], e[6]], None => return m };
-    let jaw0 = f0.jaw.first().copied().unwrap_or(1.0);
+    let 冻 = match f0.ee.get(手) { Some(e) => [e[0], e[1], e[2]], None => return m };
+    let 冻q = match f0.ee.get(手) { Some(e) => [e[3], e[4], e[5], e[6]], None => return m };
+    let jaw0 = f0.jaw.get(手).or_else(|| f0.jaw.first()).copied().unwrap_or(1.0);
     // 走到位就停:剩下不足起点距离的 2%。不是"看起来不动了"——
     // 交付率低的身体上,"还没开始动"和"停了"在读数上同形(实测 +0.2 rad ⇒ 实到 +0.005)。
     let mut 落 = |plug: &mut Plug<S>, j: f64, 上限: u32| -> Option<Frame> {
         let mut 末 = None;
         let mut 起差: Option<f64> = None;
         for _ in 0..上限 {
-            plug.act(&Cmd::Ee { arm: 0, at: 冻, quat: 冻q, jaw: j });
+            plug.act(&Cmd::Ee { arm: 手, at: 冻, quat: 冻q, jaw: j });
             let Some(f) = plug.sense() else { break };
-            let d: f64 = f.jaw.iter().map(|g| (g - j).abs()).sum();
+            // 🔴 只看**这一只手**的指通道:双手身体上把两只都加起来,另一只永远不动 ⇒ 差永远不收敛。
+            let d: f64 = f.jaw.get(手).or_else(|| f.jaw.first()).map(|g| (g - j).abs()).unwrap_or(0.0);
             let 起 = *起差.get_or_insert(d.max(1e-9));
             末 = Some(f);
             // 0.02 是**比例**(剩下不足起始距离的 2% 就算到位),无量纲。
@@ -590,7 +594,7 @@ fn 抖指通道<S: std::io::Read + std::io::Write>(
     let 静 = match 落(plug, jaw0, 6) { Some(f) => f, None => return m };
     let 反 = if jaw0 > 0.5 { 0.0 } else { 1.0 };
     let 动 = match 落(plug, 反, 300) { Some(f) => f, None => return m };
-    let 实到 = 动.jaw.first().copied().unwrap_or(jaw0) - jaw0;
+    let 实到 = 动.jaw.get(手).or_else(|| 动.jaw.first()).copied().unwrap_or(jaw0) - jaw0;
     for (ci, eye, _) in 相机们 {
         let (Some((w, h, gb)), Some((_, _, gs)), Some((_, _, gd))) =
             (灰(&基, *ci), 灰(&静, *ci), 灰(&动, *ci)) else { continue };
@@ -1208,9 +1212,37 @@ fn main() {
         // 幅度走**几何阶梯**(1 mm × 2ⁿ),挑第一档能让画面真的动起来的 ——
         // 换一具十倍大的身体自动给十倍的幅度,**不是照着这条臂挑的数**。
         let Some(f0) = plug.sense() else { println!("[自模] 拿不到第一帧"); std::process::exit(0) };
-        let 起 = match f0.ee.first() { Some(e) => [e[0], e[1], e[2]], None => { println!("[自模] 这台机器人不报末端位姿"); std::process::exit(0) } };
-        let 起q = match f0.ee.first() { Some(e) => [e[3], e[4], e[5], e[6]], None => std::process::exit(0) };
-        let jaw0 = f0.jaw.first().copied().unwrap_or(1.0);
+        // 🔴🔴🔴 **用哪个末端不许写死 —— 推一下,认这条命令的那个就是它。**
+        //(owner 2026-08-31 死命令:"driver 不能有任何写死的东西,适用于所有奇形怪状的硬件")
+        // 判据是**命令 vs 实到**:给每个末端发一个同样小的位移,谁真的走了谁就是能用的那只。
+        // 单末端身体上这个循环只跑一次、必然选中它,行为不变。
+        let 手 = {
+            let n = f0.ee.len().max(1);
+            let 步 = 0.01f64;   // 只用来问"你认不认这条命令",不做任何测量
+            let mut 最 = (0usize, -1.0f64);
+            for i in 0..n {
+                let Some(e0) = f0.ee.get(i).cloned() else { continue };
+                if e0.len() < 7 { continue }
+                let j = plug.sense().and_then(|f| f.jaw.get(i).copied()).unwrap_or(1.0);
+                plug.act(&Cmd::Ee { arm: i, at: [e0[0] + 步, e0[1], e0[2]],
+                                    quat: [e0[3], e0[4], e0[5], e0[6]], jaw: j });
+                for _ in 0..40 { if plug.sense().is_none() { break } }
+                let d = plug.sense().and_then(|f| f.ee.get(i).cloned())
+                    .map(|e| ((e[0]-e0[0]).powi(2)+(e[1]-e0[1]).powi(2)+(e[2]-e0[2]).powi(2)).sqrt())
+                    .unwrap_or(0.0);
+                println!("[自模] 第 {i} 个末端:命令走 {步:.4} m,实到 {d:.4} m");
+                plug.act(&Cmd::Ee { arm: i, at: [e0[0], e0[1], e0[2]],
+                                    quat: [e0[3], e0[4], e0[5], e0[6]], jaw: j });
+                for _ in 0..40 { if plug.sense().is_none() { break } }
+                if d > 最.1 { 最 = (i, d) }
+            }
+            println!("[自模] ⇒ **用第 {} 个末端**(它最认这条命令,实到 {:.4} m)", 最.0, 最.1);
+            最.0
+        };
+        let Some(f0) = plug.sense() else { println!("[自模] 拿不到第一帧"); std::process::exit(0) };
+        let 起 = match f0.ee.get(手) { Some(e) => [e[0], e[1], e[2]], None => { println!("[自模] 这台机器人不报末端位姿"); std::process::exit(0) } };
+        let 起q = match f0.ee.get(手) { Some(e) => [e[3], e[4], e[5], e[6]], None => std::process::exit(0) };
+        let jaw0 = f0.jaw.get(手).or_else(|| f0.jaw.first()).copied().unwrap_or(1.0);
         let 台 = f0.cams.len();
         println!("[自模] {} 个关节(读得到)· {} 个指通道 · {台} 台相机", f0.joints.first().map(|v| v.len()).unwrap_or(0), f0.jaw.len());
         println!("[自模] ⚠️ 关节角**读得到但动不了**:七根各命令 0.2 rad,回读四次逐位相同");
@@ -1221,9 +1253,9 @@ fn main() {
             let mut 末 = None;
             let mut 起差: Option<f64> = None;
             for _ in 0..上限 {
-                plug.act(&Cmd::Ee { arm: 0, at, quat: 起q, jaw: j });
+                plug.act(&Cmd::Ee { arm: 手, at, quat: 起q, jaw: j });
                 let Some(f) = plug.sense() else { break };
-                let d = f.ee.first().map(|e| ((e[0]-at[0]).powi(2)+(e[1]-at[1]).powi(2)+(e[2]-at[2]).powi(2)).sqrt()).unwrap_or(f64::NAN);
+                let d = f.ee.get(手).map(|e| ((e[0]-at[0]).powi(2)+(e[1]-at[1]).powi(2)+(e[2]-at[2]).powi(2)).sqrt()).unwrap_or(f64::NAN);
                 let s0 = *起差.get_or_insert(d.max(1e-9));
                 末 = Some(f);
                 // 0.02 是**比例**(剩下不足起始距离的 2% 就算到位),无量纲。
@@ -1304,7 +1336,7 @@ fn main() {
                     // 🔴 **到不了就别再翻。**(同 AS 那条毁桌梯子的病:命令越顶不动、越使劲推)
                     // 命令走 `幅` 而实际连一半都没走到 ⇒ 这个方向已经顶住了(够不着 / 撞上了),
                     // 再翻倍只是把整条胳膊往那个方向甩得更远。命令 vs 实到,两个都是量出来的。
-                    let 到了 = plug.sense().and_then(|f| f.ee.first().copied())
+                    let 到了 = plug.sense().and_then(|f| f.ee.get(手).copied())
                         .map(|e| ((e[0]-起[0]).powi(2)+(e[1]-起[1]).powi(2)+(e[2]-起[2]).powi(2)).sqrt())
                         .unwrap_or(幅);
                     if 到了 < 幅 * 0.5 {
@@ -1328,7 +1360,7 @@ fn main() {
             for (k, at) in 角.iter().enumerate() {
                 let r = 晃爪(&mut plug, *at);
                 println!("[自模]   第 {}/{} 个位置", k + 1, 角.len());
-                let 实 = plug.sense().and_then(|f| f.ee.first().copied());
+                let 实 = plug.sense().and_then(|f| f.ee.get(手).copied());
                 for ci in 0..台 {
                     let Some(c) = r[ci] else { continue };
                     if let Some(e) = 实 { 样本[ci].push((e, [c.u, c.v])); 见 += 1; }
@@ -1414,6 +1446,30 @@ fn main() {
     // 手臂全程不动,只扫开度;每一档停稳后把每台相机各落一张 PGM。
     if let Ok(dir) = std::env::var("BL_JAWLOOK") {
         let _ = std::fs::create_dir_all(&dir);
+        // 🔴 **用哪个末端不写死** —— 同上:发一个同样小的位移,谁真的走了就是谁。
+        //(owner 2026-08-31 死命令。单末端身体上必然选中那一个,行为不变。)
+        let 手 = {
+            let n = plug.sense().map(|f| f.ee.len()).unwrap_or(1).max(1);
+            let mut 最 = (0usize, -1.0f64);
+            for i in 0..n {
+                let Some(e0) = plug.sense().and_then(|f| f.ee.get(i).cloned()) else { continue };
+                if e0.len() < 7 { continue }
+                let j = plug.sense().and_then(|f| f.jaw.get(i).copied()).unwrap_or(1.0);
+                plug.act(&Cmd::Ee { arm: i, at: [e0[0] + 0.01, e0[1], e0[2]],
+                                    quat: [e0[3], e0[4], e0[5], e0[6]], jaw: j });
+                for _ in 0..40 { if plug.sense().is_none() { break } }
+                let d = plug.sense().and_then(|f| f.ee.get(i).cloned())
+                    .map(|e| ((e[0]-e0[0]).powi(2)+(e[1]-e0[1]).powi(2)+(e[2]-e0[2]).powi(2)).sqrt())
+                    .unwrap_or(0.0);
+                plug.act(&Cmd::Ee { arm: i, at: [e0[0], e0[1], e0[2]],
+                                    quat: [e0[3], e0[4], e0[5], e0[6]], jaw: j });
+                for _ in 0..40 { if plug.sense().is_none() { break } }
+                println!("[看钳口] 第 {i} 个末端:命令走 0.0100 m,实到 {d:.4} m");
+                if d > 最.1 { 最 = (i, d) }
+            }
+            println!("[看钳口] ⇒ **用第 {} 个末端**(它最认这条命令)", 最.0);
+            最.0
+        };
         // 🔴 **必须在【存档里那个原位】上看,不是"连上来时手在哪"。**
         // `hand_pixel` 是在原位上量的;换个位姿去核它,核的是另一件事(已踩过一次:
         // 在 (-0.300,-0.352,0.922) 上渲图,而存档原位是 (0.120,-0.261,1.030))。
@@ -1425,9 +1481,9 @@ fn main() {
             let mut 上次 = f64::INFINITY; let mut 不再靠近 = 0u32;
             // 🔴 姿态回声身体自己此刻报的 —— 原来这里写死了 ARX 的"腕朝下"四元数,
             // 而那是一句关于法兰坐标系的断言,换一具身体(Franka)当场是错的。
-            let mut q回 = plug.sense().and_then(|f| f.ee.first().map(|e| [e[3], e[4], e[5], e[6]])).unwrap_or([1.0, 0.0, 0.0, 0.0]);
+            let mut q回 = plug.sense().and_then(|f| f.ee.get(手).map(|e| [e[3], e[4], e[5], e[6]])).unwrap_or([1.0, 0.0, 0.0, 0.0]);
             for _ in 0..200 {
-                plug.act(&Cmd::Ee { arm: 0, at: p, quat: q回, jaw: 1.0 });
+                plug.act(&Cmd::Ee { arm: 手, at: p, quat: q回, jaw: 1.0 });
                 let Some(f) = plug.sense() else { continue };
                 let Some(e) = f.ee.get(0) else { continue };
                 q回 = [e[3], e[4], e[5], e[6]];
@@ -1440,7 +1496,7 @@ fn main() {
             println!("[看钳口] 存档里没有原位,就地看");
         }
         let home = match plug.sense() {
-            Some(f) if !f.ee.is_empty() => [f.ee[0][0], f.ee[0][1], f.ee[0][2]],
+            Some(f) if !f.ee.is_empty() => [f.ee[手][0], f.ee[手][1], f.ee[手][2]],
             _ => { println!("[看钳口] 连上来就读不到末端位姿,放弃"); return; }
         };
         if let Some(m) = body.get(Quantity::HandPixel).filter(|m| m.value.len() >= 2) {
@@ -1453,8 +1509,8 @@ fn main() {
             // 每档 30 拍:交付率 0.888 ⇒ 30 拍后残余 < 1e-30,足够停稳。
             for _ in 0..30 {
             // 🔴 姿态回声此刻身体自己报的(原来写死 ARX 腕朝下 —— 换机体就是错的)。
-            let q回2 = plug.sense().and_then(|f| f.ee.first().map(|e| [e[3], e[4], e[5], e[6]])).unwrap_or([1.0, 0.0, 0.0, 0.0]);
-            plug.act(&Cmd::Ee { arm: 0, at: home, quat: q回2, jaw: 1.0 });
+            let q回2 = plug.sense().and_then(|f| f.ee.get(手).map(|e| [e[3], e[4], e[5], e[6]])).unwrap_or([1.0, 0.0, 0.0, 0.0]);
+            plug.act(&Cmd::Ee { arm: 手, at: home, quat: q回2, jaw: 1.0 });
                 if let Some(f) = plug.sense() { 末 = Some(f); }
             }
             let Some(f) = 末 else { continue };
@@ -2748,9 +2804,17 @@ fn main() {
             // 「两边列的约定不一样 ⇒ 爪子歪 90°,而两侧日志全绿」也没有地方长。
             Quantity::ToolOffset => {
                 if !自模.答得上(Quantity::ToolOffset) {
-                    println!("      [自模] 先抖一下指通道(冻住手臂,只动爪子)");
-                    let 新 = 抖指通道(&mut plug, &相机们);
-                    for e in 新.证据 { 自模.收(e); }
+                    // 🔴 **抖哪一只手不写死:身体报几个末端就逐个抖,哪个抖出通道就用哪个。**
+                    //(owner 2026-08-31 死命令。单手身体上这个循环只跑一次,行为不变。)
+                    let 手数 = plug.sense().map(|f| f.ee.len()).unwrap_or(1).max(1);
+                    println!("      [自模] 先抖一下指通道(冻住手臂,只动爪子)—— 这具身体报了 {手数} 个末端,逐个试");
+                    for 手 in 0..手数 {
+                        let 新 = 抖指通道(&mut plug, &相机们, 手);
+                        let 条 = 新.证据.len();
+                        for e in 新.证据 { 自模.收(e); }
+                        println!("      [自模]   第 {手} 个末端抖出 {条} 条证据");
+                        if 自模.答得上(Quantity::ToolOffset) { break }
+                    }
                 }
                 if !自模.答得上(Quantity::ToolOffset) {
                     println!("      [自模] 抖完仍答不上 —— 见过的通道 {:?},算数 {} 条",
@@ -3562,6 +3626,17 @@ fn 服务<S: std::io::Read + std::io::Write>(
     // 🔴 「挡住了」的判据不带任何常数:**残差连着三拍一模一样,而且还差着一截**。
     //    浮点数相等就是相等。这与"走得比平时少"完全不同 —— 后者把"碰到了"和"还没走完"
     //    压成了同一个读数,而这具身体在空中本来就走不满(命令越大交付比例越低)。
+    // 🔴🔴🔴 **用哪只手 / 哪个末端,全程读这两个格子,代码里一个数字都不许写死。**
+    //(owner 2026-08-31 死命令:"driver 不能有任何写死的东西,所有都要 driver 自己决定,
+    //  适用于所有奇形怪状的硬件")
+    //
+    // 它们的值在**眼指出目标之后**由测量填进去(见下面「挑手」那一段):
+    // 上面那次逐臂推一下已经量到了「哪个末端属于哪条臂」和「这条臂在主眼里占哪一片」,
+    // 目标一到就取**离目标最近的那条臂**。在那之前是 0,只是个占位 ——
+    // 而**填之前不会有任何朝目标的动作**,所以占位不会把手选错。
+    // 用 `Cell` 是因为下面这一大片闭包都要读它,而它要在闭包定义之后才被填。
+    let 手号 = std::cell::Cell::new(0usize);   // 第几个末端(`f.ee` 的下标 = `Cmd::Ee{arm}`)
+    let 臂号 = std::cell::Cell::new(0usize);   // 第几个关节组(`Cmd::Joints{arm}`)
     let 落 = |plug: &mut Plug<S>, at: [f64; 3], q: [f64; 4], j: f64, 上限: u32| -> Option<(Frame, bool, f64)> {
         // 🔴🔴 **"到没到"的分母是【这次命令要走多远】,不是【第一拍量到的残差】。**
         //
@@ -3569,16 +3644,16 @@ fn 服务<S: std::io::Read + std::io::Write>(
         // 而判据写成"缩到起始残差的 2%"就等于要它缩到一个比噪声还小的数 ⇒ **每次晃爪都跑满
         // 200 拍**。12 个位置 × 5 次晃 × 200 = **12000 拍**,一档就是六十集,整炮卡死在解相机上。
         // ⇒ 末端没让它走(该走≈0)时**立刻算到位**;让它走了才按比例判。
-        let 起位 = plug.sense().and_then(|f| f.ee.first().map(|e| [e[0], e[1], e[2]]))?;
+        let 起位 = plug.sense().and_then(|f| f.ee.get(手号.get()).map(|e| [e[0], e[1], e[2]]))?;
         let 该走 = ((at[0]-起位[0]).powi(2) + (at[1]-起位[1]).powi(2) + (at[2]-起位[2]).powi(2)).sqrt();
         let mut 末: Option<Frame> = None;
         let mut 上次: Option<f64> = None;
         let mut 停 = 0u32;
         let mut 差 = f64::NAN;
         for _ in 0..上限 {
-            plug.act(&Cmd::Ee { arm: 0, at, quat: q, jaw: j });
+            plug.act(&Cmd::Ee { arm: 手号.get(), at, quat: q, jaw: j });
             let Some(f) = plug.sense() else { break };
-            let d = f.ee.first().map(|e| ((e[0]-at[0]).powi(2)+(e[1]-at[1]).powi(2)+(e[2]-at[2]).powi(2)).sqrt())?;
+            let d = f.ee.get(手号.get()).map(|e| ((e[0]-at[0]).powi(2)+(e[1]-at[1]).powi(2)+(e[2]-at[2]).powi(2)).sqrt())?;
             差 = d;
             末 = Some(f);
             // 0.02 是**比例**(剩下不足起始距离的 2% 就算到位),无量纲。
@@ -3622,9 +3697,9 @@ fn 服务<S: std::io::Read + std::io::Write>(
         let mut 稳 = 0u32;
         let mut 末: Option<Frame> = None;
         for _ in 0..上限 {
-            plug.act(&Cmd::Ee { arm: 0, at, quat: q, jaw: j });
+            plug.act(&Cmd::Ee { arm: 手号.get(), at, quat: q, jaw: j });
             let Some(f) = plug.sense() else { break };
-            let 此: Vec<f64> = f.ee.first().map(|e| e[..3].to_vec()).unwrap_or_default();
+            let 此: Vec<f64> = f.ee.get(手号.get()).map(|e| e[..3].to_vec()).unwrap_or_default();
             末 = Some(f);
             if 上次.as_ref() == Some(&此) { 稳 += 1; if 稳 >= 2 { break } } else { 稳 = 0 }
             上次 = Some(此);
@@ -3638,7 +3713,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
         let mut 动过 = false;
         let mut 末: Option<Frame> = None;
         for 拍 in 0..上限 {
-            plug.act(&Cmd::Ee { arm: 0, at, quat: q, jaw: j });
+            plug.act(&Cmd::Ee { arm: 手号.get(), at, quat: q, jaw: j });
             let Some(f) = plug.sense() else { break };
             let 此: Vec<f64> = f.jaw.iter().copied().collect();
             末 = Some(f);
@@ -3664,7 +3739,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
     // 返回 (最后位置, 到边了没有, 实际走了多远)。
     let 滑 = |plug: &mut Plug<S>, 向: [f64; 3], 总距: f64, q: [f64; 4], j: f64, 跳: f64, 上限: u32|
         -> Option<([f64; 3], bool, f64)> {
-        let mut 位 = plug.sense().and_then(|f| f.ee.first().map(|e| [e[0], e[1], e[2]]))?;
+        let mut 位 = plug.sense().and_then(|f| f.ee.get(手号.get()).map(|e| [e[0], e[1], e[2]]))?;
         let 起 = 位;
         let mut 停 = 0u32;
         for _ in 0..上限 {
@@ -3672,9 +3747,9 @@ fn 服务<S: std::io::Read + std::io::Write>(
             if 走过 >= 总距 { return Some((位, false, 走过)) }
             let 剩 = (总距 - 走过).min(跳);
             let 目标 = [位[0] + 向[0]*剩, 位[1] + 向[1]*剩, 位[2] + 向[2]*剩];
-            plug.act(&Cmd::Ee { arm: 0, at: 目标, quat: q, jaw: j });
+            plug.act(&Cmd::Ee { arm: 手号.get(), at: 目标, quat: q, jaw: j });
             let Some(f) = plug.sense() else { break };
-            let Some(e) = f.ee.first().copied() else { break };
+            let Some(e) = f.ee.get(手号.get()).copied() else { break };
             let 新 = [e[0], e[1], e[2]];
             let 这拍 = ((新[0]-位[0]).powi(2) + (新[1]-位[1]).powi(2) + (新[2]-位[2]).powi(2)).sqrt();
             位 = 新;
@@ -3718,7 +3793,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
         for _ in 0..上限 {
             plug.act(&Cmd::Hold);
             let Some(f) = plug.sense() else { break };
-            let 此: Vec<u64> = f.ee.first().map(|e| e.iter().map(|x| x.to_bits()).collect()).unwrap_or_default();
+            let 此: Vec<u64> = f.ee.get(手号.get()).map(|e| e.iter().map(|x| x.to_bits()).collect()).unwrap_or_default();
             if 此.is_empty() { break }
             if 上.as_ref() == Some(&此) { 稳 += 1; if 稳 >= 2 { break } } else { 稳 = 0 }
             上 = Some(此);
@@ -3822,7 +3897,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
             let 动实: Vec<f64> = q1.iter().zip(q0.iter()).map(|(a, b)| a - b).collect();
             Some((动实.iter().map(|x| x * x).sum::<f64>().sqrt(), 动实, false))
         } else {
-            let e0 = f0.ee.first().copied()?;
+            let e0 = f0.ee.get(手号.get()).copied()?;
             let (p0, q0) = ([e0[0], e0[1], e0[2]], [e0[3], e0[4], e0[5], e0[6]]);
             let mut p = p0;
             for k in 0..3 { if k < 动.len() { p[k] += 动[k] * 比 } }
@@ -3840,7 +3915,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                       w1*z2 + x1*y2 - y1*x2 + z1*w2];
             }
             let (f2, 挡, _) = 落(plug, p, qq, jaw, 等拍)?;
-            let e2 = f2.ee.first().copied().unwrap_or(e0);
+            let e2 = f2.ee.get(手号.get()).copied().unwrap_or(e0);
             let 走 = ((e2[0]-p0[0]).powi(2)+(e2[1]-p0[1]).powi(2)+(e2[2]-p0[2]).powi(2)).sqrt();
             let (w1, x1, y1, z1) = (q0[0], -q0[1], -q0[2], -q0[3]);
             let (w2, x2, y2, z2) = (e2[3], e2[4], e2[5], e2[6]);
@@ -3911,65 +3986,90 @@ fn 服务<S: std::io::Read + std::io::Write>(
     // 只是量完只用来挑"收尾那台",没用来挑主眼。
     // ⇒ 主眼 = 变化最小的那台(长在世界里);收尾那台 = 变化最大的那台(长在手上)。
     // 认爪子在主眼里失败时,本来就有"立刻交给腕相机"那条路(`看爪` 失败分支)。
-    let (相机号, 各台变) = {
+    // 🔴🔴🔴 **"用哪只手"必须是量出来的,不许写死。**(owner 2026-08-31,死命令)
+    //
+    // 代价照记:末端探针和整条伺服路上写的是 `Cmd::Ee { arm: 0 }` / `f.ee.get(手号.get())` ——
+    // 一个写死的手号就是一句身体断言。AS 实测后果:**右臂全程一次没动**,
+    // 而左臂被那个没上界的梯子甩出去,横扫时**多次撞上右臂**(owner 看视频指出)。
+    // "自己选手"此前只落在挑主眼和关节表挑哪条臂动两处,**没落到末端和伺服**,而那才是全程在跑的。
+    //
+    // 这一段同时量出三件事,一次动作全拿到,换几条胳膊、几只末端都成立:
+    //   ① 每台相机跟着哪条臂动 ⇒ 主眼 = 对谁都不怎么变的那台(长在世界里)
+    //   ② **哪个末端属于哪条臂** —— 推这条臂时位移最大的那个末端就是它的,
+    //      不假设"第 a 条臂配第 a 个末端"(那又是一句身体断言)
+    //   ③ **这条臂在主眼画面里占哪一片** —— 变化像素的重心;
+    //      等眼指出目标之后,离目标最近的那条臂就是该用的手
+    let (相机号, 各台变, 臂心, 臂末, 臂关) = {
         let 台 = plug.lay.cams.len();
         if 台 == 0 { println!("[服] 🔴 一台相机都没认出来 ⇒ 干不了。**不编数。**"); return None }
-        if 台 == 1 { (0usize, vec![0.0f64]) } else {
-            // 🔴🔴🔴 **"不跟着我动"要对【每一条胳膊】都成立。**(AJ 实测 2026-08-30)
-            //
-            // 我上一版只动了一条胳膊就下结论 ⇒ **长在【另一条】胳膊上的相机也几乎不变**,
-            // 于是"最不动的那台"选成了右腕相机(实测 AJ:主眼 = 第 2 台 = 右腕)。
-            // 单臂上"动一下"和"动所有臂"是一回事,双臂上不是 —— 这是同一个形状的第三次:
-            // **在只有一个的身体上碰巧成立的写法,换成有两个就错。**
-            // ⇒ 每条胳膊各动一下,取每台相机**在所有胳膊上的最大变化**;
-            //   长在世界里的那台 = **对谁都不怎么变**的那个;长在手上的 = 对某一条臂整幅都变。
-            let Some(f0) = plug.sense() else { return None };
-            // 同一条胳膊会被报两遍(状态 + 命令回声)⇒ 逐位相同的只算一条(见 `真臂`)。
-            let mut 号: Vec<usize> = Vec::new();
-            for (i, v) in f0.joints.iter().enumerate() {
-                if v.is_empty() { continue }
-                if !号.iter().any(|&j| { let w = &f0.joints[j];
-                    w.len() == v.len() && w.iter().zip(v.iter()).all(|(a, b)| (a - b).abs() < 1e-9) }) { 号.push(i) }
-            }
-            if 号.is_empty() { 号.push(0) }
-            let 臂数 = 号.len();
-            let mut 变: Vec<f64> = vec![0.0; 台];
-            // 10 是**比例**(量出来的可达带的十分之一),不是米。
-            let 步 = 可达带[1] / 10.0;
-            for a in 0..臂数 {
-                let Some(fa) = plug.sense() else { break };
-                let 前: Vec<Option<Vec<u8>>> = (0..台).map(|c| 灰(&fa, c).map(|(_, _, g)| g)).collect();
-                let Some(q0) = fa.joints.get(号[a]).cloned() else { continue };
-                if q0.is_empty() { continue }
-                let mut q = q0.clone();
-                // 只推第一个关节:它带动整条臂,是"这条臂动了没有"最省的一问。
-                q[0] += 步;
-                let j0 = fa.jaw.first().copied().unwrap_or(1.0);
-                if !plug.act(&Cmd::Joints { arm: 号[a], q, jaw: j0 }) { continue }
-                定爪(plug, 等拍);
-                let Some(f1) = plug.sense() else { break };
-                for c in 0..台 {
-                    let (x0, y0) = (前[c].clone(), 灰(&f1, c).map(|(_, _, g)| g));
-                    // 8 是灰度差的噪声底(和认接触面那一处同一个来源),无量纲。
-                    let v = match (x0, y0) {
-                        (Some(x), Some(y)) if x.len() == y.len() && !x.is_empty() =>
-                            x.iter().zip(y.iter()).filter(|(p, q)| p.abs_diff(**q) > 8).count() as f64 / x.len() as f64,
-                        _ => 1.0,
-                    };
-                    if v > 变[c] { 变[c] = v }
+        let Some(f0) = plug.sense() else { return None };
+        let 号 = 真臂(&f0);
+        let 臂数 = 号.len();
+        let mut 变: Vec<f64> = vec![0.0; 台];
+        let mut 臂心: Vec<Vec<Option<(f64, f64)>>> = vec![vec![None; 台]; 臂数];
+        let mut 臂末: Vec<Option<usize>> = vec![None; 臂数];
+        // 10 是**比例**(量出来的可达带的十分之一),不是米。
+        let 步 = 可达带[1] / 10.0;
+        for a in 0..臂数 {
+            let Some(fa) = plug.sense() else { break };
+            let 前: Vec<Option<(usize, usize, Vec<u8>)>> = (0..台).map(|c| 灰(&fa, c)).collect();
+            let 前末: Vec<[f64; 7]> = fa.ee.clone();
+            let Some(q0) = fa.joints.get(号[a]).cloned() else { continue };
+            if q0.is_empty() { continue }
+            let mut q = q0.clone();
+            // 只推第一个关节:它带动整条臂,是"这条臂动了没有"最省的一问。
+            q[0] += 步;
+            let j0 = fa.jaw.first().copied().unwrap_or(1.0);
+            if !plug.act(&Cmd::Joints { arm: 号[a], q, jaw: j0 }) { continue }
+            定爪(plug, 等拍);
+            let Some(f1) = plug.sense() else { break };
+            // ② 哪个末端跟着这条臂动了 —— **量出来的对应关系**
+            let mut 最动 = (0usize, -1.0f64);
+            for (i, e) in f1.ee.iter().enumerate() {
+                if let Some(pp) = 前末.get(i) {
+                    if pp.len() < 3 || e.len() < 3 { continue }
+                    let d = ((e[0]-pp[0]).powi(2)+(e[1]-pp[1]).powi(2)+(e[2]-pp[2]).powi(2)).sqrt();
+                    if d > 最动.1 { 最动 = (i, d) }
                 }
-                // 推回去,不留净位移(这一层不许有"回原位"的概念,所以是相对推回)。
-                let mut qb = q0.clone();
-                if let Some(fb) = plug.sense() { if let Some(qn) = fb.joints.get(号[a]) { qb = qn.clone(); } }
-                qb[0] -= 步;
-                let _ = plug.act(&Cmd::Joints { arm: 号[a], q: qb, jaw: j0 });
-                定爪(plug, 等拍);
             }
-            let (i, _) = 变.iter().enumerate().fold((0usize, f64::INFINITY), |a, (i, v)| if *v < a.1 { (i, *v) } else { a });
-            println!("[服] 手动一下,各台画面变了多大一片:{:?}", 变.iter().map(|v| (v * 1000.0).round() / 1000.0).collect::<Vec<_>>());
-            println!("[服] ⇒ **主眼用第 {i} 台**(它变得最少 = 长在世界里,看得见工作区);认爪子若在它上面失败,立刻交给长在手上那台");
-            (i, 变)
+            if 最动.1 > 0.0 { 臂末[a] = Some(最动.0) }
+            for c in 0..台 {
+                let (x0, y0) = (前[c].clone(), 灰(&f1, c));
+                // 8 是灰度差的噪声底(和认接触面那一处同一个来源),无量纲。
+                match (x0, y0) {
+                    (Some((w, h, x)), Some((_, _, y))) if x.len() == y.len() && !x.is_empty() => {
+                        let mut n = 0usize; let (mut su, mut sv) = (0.0f64, 0.0f64);
+                        for i in 0..x.len() {
+                            if x[i].abs_diff(y[i]) > 8 {
+                                n += 1; su += (i % w) as f64 / w as f64; sv += (i / w) as f64 / h as f64;
+                            }
+                        }
+                        let v = n as f64 / x.len() as f64;
+                        if v > 变[c] { 变[c] = v }
+                        // ③ 这条臂在这台相机里占哪一片 —— 变化像素的重心
+                        if n > 0 { 臂心[a][c] = Some((su / n as f64, sv / n as f64)); }
+                    }
+                    _ => { 变[c] = 变[c].max(1.0); }
+                }
+            }
+            // 推回去,不留净位移(这一层不许有"回原位"的概念,所以是相对推回)。
+            let mut qb = q0.clone();
+            if let Some(fb) = plug.sense() { if let Some(qn) = fb.joints.get(号[a]) { qb = qn.clone(); } }
+            qb[0] -= 步;
+            let _ = plug.act(&Cmd::Joints { arm: 号[a], q: qb, jaw: j0 });
+            定爪(plug, 等拍);
         }
+        let i = if 台 == 1 { 0usize } else {
+            变.iter().enumerate().fold((0usize, f64::INFINITY), |a, (i, v)| if *v < a.1 { (i, *v) } else { a }).0
+        };
+        println!("[服] 手动一下,各台画面变了多大一片:{:?}", 变.iter().map(|v| (v * 1000.0).round() / 1000.0).collect::<Vec<_>>());
+        println!("[服] ⇒ **主眼用第 {i} 台**(它变得最少 = 长在世界里,看得见工作区);认爪子若在它上面失败,立刻交给长在手上那台");
+        for a in 0..臂数 {
+            println!("[服]   第 {a} 条臂(关节组 {})⇒ 末端号 {:?} · 在主眼里占的那一片中心 {:?}",
+                号[a], 臂末[a],
+                臂心[a].get(i).and_then(|o| *o).map(|(u, v)| ((u * 1000.0).round() / 1000.0, (v * 1000.0).round() / 1000.0)));
+        }
+        (i, 变, 臂心, 臂末, 号)
     };
     // 🔴🔴🔴 **最后一两厘米交给【长在手上】的那台相机。**(owner 2026-08-27 定)
     //
@@ -3992,7 +4092,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
         let mut 挑: Option<usize> = None;
         if 台 >= 2 {
             let Some(f0) = plug.sense() else { return None };
-            let Some(e0) = f0.ee.first().copied() else { return None };
+            let Some(e0) = f0.ee.get(手号.get()).copied() else { return None };
             let 前: Vec<Option<Vec<u8>>> = (0..台).map(|c| 灰(&f0, c).map(|(_, _, g)| g)).collect();
             // 10 是**比例**(量出来的可达带的十分之一),不是米。
             let 步 = 可达带[1] / 10.0;
@@ -4133,7 +4233,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
         // 的十分之一(`探步 × 交付率 × 0.1`),否则这一眼不算数。
         {
             let 位们: Vec<[f64; 3]> = 帧们.iter()
-                .filter_map(|f| f.ee.first().map(|e| [e[0], e[1], e[2]])).collect();
+                .filter_map(|f| f.ee.get(手号.get()).map(|e| [e[0], e[1], e[2]])).collect();
             if 位们.len() >= 2 {
                 let mut 漂 = 0.0f64;
                 for a in &位们 { for b in &位们 {
@@ -4393,10 +4493,10 @@ fn 服务<S: std::io::Read + std::io::Write>(
     let 抓握 = |plug: &mut Plug<S>, 开度: f64, _用关节: bool| {
         let Some(f) = plug.sense() else { return };
         let q = f.joints.first().cloned().unwrap_or_default();
-        if !q.is_empty() { plug.act(&Cmd::Joints { arm: 0, q, jaw: 开度 }); }
+        if !q.is_empty() { plug.act(&Cmd::Joints { arm: 臂号.get(), q, jaw: 开度 }); }
         let Some(f2) = plug.sense() else { return };
-        if let Some(e) = f2.ee.first().copied() {
-            plug.act(&Cmd::Ee { arm: 0, at: [e[0], e[1], e[2]], quat: [e[3], e[4], e[5], e[6]], jaw: 开度 });
+        if let Some(e) = f2.ee.get(手号.get()).copied() {
+            plug.act(&Cmd::Ee { arm: 手号.get(), at: [e[0], e[1], e[2]], quat: [e[3], e[4], e[5], e[6]], jaw: 开度 });
         }
     };
     // 🔴 **不许有「最小一步不得小于 X 米」这种下限**(owner 2026-08-28:影响自主性的写死的东西全删)。
@@ -4423,7 +4523,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                   look: &body_layer::eye::Look, 位: &mut [f64; 3]| -> Option<()> {
                 // 两个接触面在这台相机里的位置 —— 手不动,所以量一次就够。
                 let f0 = plug.sense()?;
-                let e0 = f0.ee.first().copied()?;
+                let e0 = f0.ee.get(手号.get()).copied()?;
                 let (位0, 姿0) = ([e0[0], e0[1], e0[2]], [e0[3], e0[4], e0[5], e0[6]]);
                 // 🔴🔴 **这一步不需要认块器 —— 手上那台相机里手是不动的、又大,张合两帧相减就够。**
                 // 实测代价(W2):我用"晃爪子认块"去找腕相机里的手,而认块器在那台里认不出来
@@ -4444,14 +4544,14 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 抓握(plug, 1.0, 通道是关节);
                 定爪(plug, 等拍 * 8);
                 let (w2, h2, 开2) = plug.sense().and_then(|f| 灰(&f, 腕机))?;
-                let ee开 = plug.sense().and_then(|f| f.ee.first().copied());
+                let ee开 = plug.sense().and_then(|f| f.ee.get(手号.get()).copied());
                 抓握(plug, 0.0, 通道是关节);
                 定爪(plug, 等拍 * 8);
                 let (_, _, 合2) = plug.sense().and_then(|f| 灰(&f, 腕机))?;
                 抓握(plug, 1.0, 通道是关节);
                 定爪(plug, 等拍 * 8);
                 let (_, _, 开b) = plug.sense().and_then(|f| 灰(&f, 腕机))?;
-                let ee开b = plug.sense().and_then(|f| f.ee.first().copied());
+                let ee开b = plug.sense().and_then(|f| f.ee.get(手号.get()).copied());
                 if let (Some(a), Some(b)) = (ee开, ee开b) {
                     let 漂 = ((a[0]-b[0]).powi(2)+(a[1]-b[1]).powi(2)+(a[2]-b[2]).powi(2)).sqrt();
                     println!("[服]   [收尾] 这三帧之间手掌自己漂了 {漂:.4} m —— 越大,张合相减越脏(照实报,不拦)");
@@ -4653,10 +4753,10 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         Some((a, b, dd))
                     };
                     let 迈 = |plug: &mut Plug<S>, d: f64| -> Option<f64> {
-                        let e0 = plug.sense()?.ee.first().copied()?;
+                        let e0 = plug.sense()?.ee.get(手号.get()).copied()?;
                         let mut p = [e0[0], e0[1], e0[2]]; p[k] += d;
                         let (f1, _, _) = 落(plug, p, [e0[3], e0[4], e0[5], e0[6]], jaw0, 等拍)?;
-                        let e1 = f1.ee.first().copied()?;
+                        let e1 = f1.ee.get(手号.get()).copied()?;
                         Some(e1[k] - e0[k])
                     };
                     let Some(甲) = 读(plug, 上物) else { println!("[服]   [收尾] 通道 {k}:第一次读就没读到 ⇒ 这一列空着"); 表2.push([0.0; 3]); continue };
@@ -4791,10 +4891,10 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     let 长 = (dp[0].powi(2)+dp[1].powi(2)+dp[2].powi(2)).sqrt();
                     if !(长 > 1e-9) { break }
                     let 比 = (探步 / 长).min(1.0);
-                    let e = plug.sense()?.ee.first().copied()?;
+                    let e = plug.sense()?.ee.get(手号.get()).copied()?;
                     let (f2, 挡, _) = 落(plug, [e[0]+dp[0]*比, e[1]+dp[1]*比, e[2]+dp[2]*比],
                         [e[3], e[4], e[5], e[6]], jaw0, 等拍)?;
-                    if let Some(ee) = f2.ee.first().copied() { *位 = [ee[0], ee[1], ee[2]]; }
+                    if let Some(ee) = f2.ee.get(手号.get()).copied() { *位 = [ee[0], ee[1], ee[2]]; }
                     if 挡 { println!("[服]   [收尾] 碰到东西了 ⇒ 就地合"); break }
                 }
                 Some(())
@@ -4973,6 +5073,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
     // 而这一炮的任务是**把球抓起来**:球是圆的,腕子朝哪根本不影响能不能夹住它。
     // ⇒ 六方程试一次;拿不到三列就**从此改走单面**,别再拿朝向去换"一步都走不了"。
     let mut 表败 = 0u32;
+    let mut 挑过手 = false;
     loop {
         let Some(帧) = plug.sense() else { return None };
         if plug.复位过 { plug.复位过 = false; 集 += 1; 试过.clear(); 白转 = 0; println!("[服] ── 第 {集} 集 ──"); }
@@ -4981,7 +5082,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
             // 连着两拍什么都没干成 ⇒ **粗着干一次**,别站着。
             白转 = 0;
             let 帧0 = plug.sense();
-            if let Some(e0) = 帧0.and_then(|f| f.ee.first().copied()) {
+            if let Some(e0) = 帧0.and_then(|f| f.ee.get(手号.get()).copied()) {
                 let (p0, q0) = ([e0[0], e0[1], e0[2]], [e0[3], e0[4], e0[5], e0[6]]);
                 let 前 = {
                     let (w, x, y, z) = (q0[0], q0[1], q0[2], q0[3]);
@@ -5001,7 +5102,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
             }
             continue;
         }
-        let Some(e) = 帧.ee.first().copied() else { continue };
+        let Some(e) = 帧.ee.get(手号.get()).copied() else { continue };
         let (此位, 此姿) = ([e[0], e[1], e[2]], [e[3], e[4], e[5], e[6]]);
         let jaw0 = 帧.jaw.first().copied().unwrap_or(1.0);
 
@@ -5159,6 +5260,34 @@ fn 服务<S: std::io::Read + std::io::Write>(
             }
         };
 
+        // 🔴🔴🔴 **挑手:目标一确定,就用量出来的那两样选出该用的手。**(owner 2026-08-31 死命令)
+        //
+        // 开机时逐臂推了一下,量到了两件事:①哪个末端属于哪条臂 ②这条臂在主眼画面里占哪一片。
+        // 现在眼指出了目标在画面哪个像素 ⇒ **离目标最近的那条臂就是该用的手**。
+        // 判据只用画面里的距离,不用三维、不用相机模型、不认识"左/右",
+        // 换三条胳膊、五指手、一条臂都同样成立;只有一条臂时它必然选中那一条。
+        // ⚠️ 这不是"每拍重选" —— 选定就固定,免得两条臂来回抢;
+        //    真选错了,下游会以"合到底指间没东西"暴露,那才是能验证的判据。
+        if !挑过手 {
+            let mut 最近: Option<(usize, f64)> = None;
+            for a in 0..臂心.len() {
+                let Some((cu, cv)) = 臂心[a].get(相机号).and_then(|o| *o) else { continue };
+                let d = (cu - look.u).hypot(cv - look.v);
+                println!("[服]   挑手:第 {a} 条臂在主眼里占的那片中心 ({cu:.3},{cv:.3}),离目标 ({:.3},{:.3}) 差 {d:.3} 画幅",
+                    look.u, look.v);
+                if 最近.map(|(_, b)| d < b).unwrap_or(true) { 最近 = Some((a, d)) }
+            }
+            match 最近 {
+                Some((a, d)) => {
+                    if let Some(e) = 臂末[a] { 手号.set(e) }
+                    if let Some(&j) = 臂关.get(a) { 臂号.set(j) }
+                    println!("[服] ⇒ **这一炮用第 {a} 条臂**(离目标最近,差 {d:.3} 画幅)⇒ 末端号 {} · 关节组 {}",
+                        手号.get(), 臂号.get());
+                }
+                None => println!("[服] ⚠️ 逐臂推那一步没量到任何一条臂在主眼里占的片 ⇒ 手号留在 {} ,结果照实报", 手号.get()),
+            }
+            挑过手 = true;
+        }
 
         // ② 目标的三数 —— 眼指的那个像素,加上那一点的**近侧**深度。
         // 近侧:那一小窗里前一半的点。窗里一半是物体、一半是它后面的桌面,中位会滑到桌面去。
@@ -5217,7 +5346,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 let mut q = q0.clone();
                 // 10 是**比例**(量出来的可达带的十分之一),不是米。
                 q[0] += 可达带[1] / 10.0;
-                if !plug.act(&Cmd::Joints { arm: 0, q, jaw: jaw0 }) { return None }
+                if !plug.act(&Cmd::Joints { arm: 臂号.get(), q, jaw: jaw0 }) { return None }
                 定爪(plug, 等拍);
                 let f1 = plug.sense()?;
                 let (_, _, g1) = 灰(&f1, 相机号)?;
@@ -5291,7 +5420,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
             // ⇒ 头相机这道闸赢不了的时候,把这份活整个交给腕相机,而不是继续挪。
             // (原来写 `静 % 8 == 1` 是怕张合那一下的代价;而现在它是**唯一**走得通的路,不该省。)
             if let Some(腕机) = 手上相机 {
-                let 起EE = plug.sense().and_then(|f| f.ee.first().copied());
+                let 起EE = plug.sense().and_then(|f| f.ee.get(手号.get()).copied());
                 let mut 位收 = 此位;
                 println!("[服] ⇒ 第 {相机号} 台里连着 {静} 次认不出爪子 ⇒ **改走第 {腕机} 台(长在手上那台)**");
                 if 收尾腕(plug, 腕机, jaw0, *通道是关节, &look, &mut 位收).is_some() {
@@ -5307,7 +5436,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     }
                     // 抬 = 回到**下手之前**那个位置。这里没有"往上"这种方向断言:
                     // 下手是从哪儿来的,就回哪儿去,方向由身体自己刚才走过的路给。
-                    if let (Some(e0), Some(e)) = (起EE, plug.sense().and_then(|f| f.ee.first().copied())) {
+                    if let (Some(e0), Some(e)) = (起EE, plug.sense().and_then(|f| f.ee.get(手号.get()).copied())) {
                         let _ = 落(plug, [e0[0], e0[1], e0[2]], [e[3], e[4], e[5], e[6]], 0.0, 等拍);
                         println!("[服] ⇒ 提回下手前那个位置(净位移 {:.4} m)",
                             ((e[0]-e0[0]).powi(2)+(e[1]-e0[1]).powi(2)+(e[2]-e0[2]).powi(2)).sqrt());
@@ -5855,7 +5984,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     let mut 迈 = |plug: &mut Plug<S>, d: f64| -> Option<Vec<f64>> {
                         let 起 = plug.sense()?.joints.first().cloned()?;
                         let mut q = 起.clone(); q[k] += d;
-                        if !plug.act(&Cmd::Joints { arm: 0, q, jaw: jaw0 }) { return None }
+                        if !plug.act(&Cmd::Joints { arm: 臂号.get(), q, jaw: jaw0 }) { return None }
                         let mut 上 = None; let mut 稳 = 0u32; let mut 末 = None;
                         for _ in 0..(等拍 * 2) {
                             let f = plug.sense()?;
@@ -6007,7 +6136,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     for _ in 0..5 {
                         let Some((面0, 深0, 中0, 中深0, 眼0)) = 读面(plug, 上手, 上面) else { 读断 = true; break };
                         let Some(f0) = plug.sense() else { return None };
-                        let Some(e0) = f0.ee.first().copied() else { break };
+                        let Some(e0) = f0.ee.get(手号.get()).copied() else { break };
                         // 前三个是平移,后三个是绕手腕自己的三根轴转 —— 都是"这具身体接受的自由度",
                         // 不是我给它安的概念:接口里本来就有这六个。
                         let 走 = |e: [f64; 7], d: f64| -> ([f64; 3], [f64; 4]) {
@@ -6048,7 +6177,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         // **顶着一件东西越推越狠**,那正是整炮渲图里把桌子推平的动作。
                         // 碰上了就当场停这一列:碰上本身是一次测量,而继续推只会把世界改掉。
                         let Some((f1, 撞去, _)) = 落(plug, 至位, 至姿, jaw0, 等拍) else { return None };
-                        let Some(e1) = f1.ee.first().copied() else { break };
+                        let Some(e1) = f1.ee.get(手号.get()).copied() else { break };
                         let 实去 = 实动(e0, e1);
                         if 撞去 {
                             println!("[服]     通道 末端{k}:探到一半**碰上东西了**(命令 {幅:.4},实到 {实去:.4})⇒ 立刻退回,不再加大 ⇒ 这一列空着");
@@ -6060,7 +6189,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         // 走回来 —— **按同样的量反着走一格**,不是回到某个记住的位姿。
                         let (回位, 回姿) = 走(e1, -幅);
                         let Some((f2, _, _)) = 落(plug, 回位, 回姿, jaw0, 等拍) else { return None };
-                        let Some(e2) = f2.ee.first().copied() else { break };
+                        let Some(e2) = f2.ee.get(手号.get()).copied() else { break };
                         let 实回 = 实动(e1, e2);
                         let Some((面2, 深2, 中2, 中深2, _)) = 读面(plug, 中1, 面1) else { 幅 = (幅 * 2.0).min(幅顶); continue };
                         // 🔴🔴🔴 **"动没动"必须把【深度】也算进去。**(WT 实证,2026-08-28)
@@ -6666,7 +6795,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 if let Some(腕机) = 手上相机 {
                     let 走 = [尖目标[0] - 尖0[0], 尖目标[1] - 尖0[1], 尖目标[2] - 尖0[2]];
                     let 总长 = (走[0] * 走[0] + 走[1] * 走[1] + 走[2] * 走[2]).sqrt();
-                    if let Some(e0) = plug.sense().and_then(|f| f.ee.first().copied()) {
+                    if let Some(e0) = plug.sense().and_then(|f| f.ee.get(手号.get()).copied()) {
                         let 末目标 = [e0[0] + 走[0], e0[1] + 走[1], e0[2] + 走[2]];
                         // 🔴🔴🔴 **这里【曾经】有一道"走之前先比可达"的闸,已撤回 —— 它比错了量。**
                         //(ZE 实测 2026-08-29,加上去不到一小时就自己打脸)
@@ -6688,7 +6817,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         let mut 最好余 = f64::INFINITY;
                         for k in 0..粗上限 {
                             if plug.复位过 { println!("[服]      ①粗对准第 {k} 步换集了"); break }
-                            let Some(e) = plug.sense().and_then(|f| f.ee.first().copied()) else { break };
+                            let Some(e) = plug.sense().and_then(|f| f.ee.get(手号.get()).copied()) else { break };
                             let 余 = [末目标[0] - e[0], 末目标[1] - e[1], 末目标[2] - e[2]];
                             let 余长 = (余[0] * 余[0] + 余[1] * 余[1] + 余[2] * 余[2]).sqrt();
                             if 余长 < 探步 { println!("[服]      ①走完了(还差 {余长:.4} m)"); break }
@@ -7347,7 +7476,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
             let Some((走, 动实, 挡)) = 迈通道(plug, &动, 比, jaw0, *通道是关节) else {
                 println!("[服]   命令发不出去 ⇒ 停"); break
             };
-            if let Some(ee) = plug.sense().and_then(|f| f.ee.first().copied()) { 位 = [ee[0], ee[1], ee[2]]; }
+            if let Some(ee) = plug.sense().and_then(|f| f.ee.get(手号.get()).copied()) { 位 = [ee[0], ee[1], ee[2]]; }
             // 🔴🔴🔴 **"被挡住"不等于"我到了" —— 必须先问:挡我的是【目标】还是【别的东西】。**
             //(owner 2026-08-28;外部审阅也点到同一处)
             //
