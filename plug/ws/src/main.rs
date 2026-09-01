@@ -5013,7 +5013,45 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     // 🔴🔴 **这三步原来是静默 `?` —— 三列全空而【一个字都不打印】。**(ZC 实测 2026-08-29)
                     // 日志只剩一句"量不齐三列",查不出是跟丢了、还是读不到深度、还是压根没帧。
                     // **静默失败是本仓最贵的一类**(这一句注释在收尾段开头就写着,而我又犯了一次)。
+                    // 🔴🔴🔴 **别再拿灰度模板去跟一个光滑的球。**(BW 定案 2026-09-02)
+                    //
+                    // BW:11 次"这一列空着"里 **9 次**是同一条 ——
+                    // `通道 k:物体深度跑得比我自己还远 ⇒ 锁错图案了`。那道闸判得对,
+                    // **跟丢是真的**:棒球是个几乎没有花纹的白色圆球,**球面上每一个位置看起来都一样**,
+                    // 块匹配在它上面**物理性地不成立**(仓里记过同族:一根黑梁的直边,"孔径问题的指纹")。
+                    // 跟丢 ⇒ 列空 ⇒ 三列剩不到两列 ⇒ `方向盘缺秩` ⇒ 只能"往大概管得着的方向使劲" ⇒ 乱抡。
+                    //
+                    // ⇒ 每一步**重新用深度切块**,挑「鼓出来多高」跟眼选中那块最像的。
+                    //   深度块不怕没花纹:球再光滑,**它鼓出桌面 6 厘米**这件事不会变;
+                    //   而"鼓多高"正是交接那一刻已经在用的同一个身份键,这里只是每一步都用它。
+                    //   眼没给这个数时才退回模板(并且上面那道闸照旧会拦住跟丢)。
                     let mut 读 = |plug: &mut Plug<S>, 上: (f64, f64)| -> Option<(f64, f64, f64)> {
+                        if let Some(h0) = 眼鼓.filter(|x| *x > 0.0) {
+                            let 现深: Option<Vec<f64>> = plug.lay.depth.get(腕机).or_else(|| plug.lay.depth.first()).cloned()
+                                .and_then(|路| plug.last.as_ref().and_then(|o| 取(o, &路)))
+                                .and_then(|dv| wire::as_f32_grid(&dv))
+                                .map(|(_, _, g)| g.iter().map(|x| *x as f64).collect());
+                            if let Some(dv) = 现深 {
+                                let mut 块 = point_gen::分块(&dv, dw2, dh2, selfcal::最少像素(dw2, dh2) as usize, 3.0);
+                                块.retain(|r| r.框[0] > 0 && r.框[1] > 0 && r.框[2] + 1 < dw2 && r.框[3] + 1 < dh2);
+                                if !块.is_empty() {
+                                    // 主键:鼓多高像不像。同样像的里面,取离上一次最近的那个(物体是静的,不会瞬移)。
+                                    块.sort_by(|a, b| {
+                                        let ka = (a.高 / h0).max(h0 / a.高.max(1e-9));
+                                        let kb = (b.高 / h0).max(h0 / b.高.max(1e-9));
+                                        ka.partial_cmp(&kb).unwrap_or(std::cmp::Ordering::Equal)
+                                            .then_with(|| {
+                                                let da = (a.心[0] - 上.0).hypot(a.心[1] - 上.1);
+                                                let db = (b.心[0] - 上.0).hypot(b.心[1] - 上.1);
+                                                da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+                                            })
+                                    });
+                                    let r = &块[0];
+                                    return Some((r.心[0], r.心[1], r.深));
+                                }
+                            }
+                            println!("[服]   [收尾]   读:这一帧在第 {腕机} 台里一块鼓出来的都没切到 ⇒ 退回模板");
+                        }
                         let Some((_, _, gg)) = plug.sense().and_then(|f| 灰(&f, 腕机)) else {
                             println!("[服]   [收尾]   读:这一帧没有第 {腕机} 台的图"); return None };
                         let Some((a, b)) = 找块窗(w2, h2, &gg, &模2, 半2, 上.0, 上.1, 半2 * 3) else {
@@ -7778,8 +7816,10 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         let 腕常 = { let n = if *通道是关节 { plug.sense().map(|f| 真臂(&f).iter().map(|&i| f.joints[i].len()).sum::<usize>()).unwrap_or(0) } else { 6 }; 腕爪常数(&部件图, 腕机, n) };
                 let 指厚传 = 指厚常数.get();
                 let 眼鼓 = 目标区.as_ref().map(|r| r.高);
-                if 收尾腕(plug, 腕机, jaw0, *通道是关节, 腕常, 指厚传, 眼鼓, &look, &mut 位).is_some() {
-                            println!("[服]   🟢 两段交接走通了 ⇒ 交给下面同一段合爪");
+                到位了.set(false);
+                let _走通 = 收尾腕(plug, 腕机, jaw0, *通道是关节, 腕常, 指厚传, 眼鼓, &look, &mut 位).is_some();
+                if _走通 && 到位了.get() {
+                            println!("[服]   🟢 两段交接走通了,**而且拿到了「东西在两指之间」的正面证据** ⇒ 交给下面同一段合爪");
                             已就位 = true;
                         } else {
                             println!("[服]   ⇒ 第 {腕机} 台那一段没走通(理由在上面)⇒ 退回【画面里闭环】");
@@ -8432,6 +8472,20 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 }
         }
 
+        // 🔴🔴🔴 **合爪之前的最后一道闸:没有「东西在两指之间」的正面证据,一律不合。**
+        //(BW 实测 2026-09-02:上一版把这道闸放在收尾那个 `if` 里面,而**另有一条路**——
+        //  前面判过"已就位"就整段跳过收尾、直接来合 ⇒ **8 次空合全从那条路走的**,闸一次没响。)
+        // 一道只挡住其中一条路的闸,和没有这道闸,在日志上长得一模一样。
+        if !到位了.get() {
+            println!("[服]   🔴 **没有「东西在两指之间」的正面证据 ⇒ 这一拍不合爪**(合了必空)。这个下手点记下试过了,原样交给模型");
+            试过.push(尖目标);
+            手里有.set(false);
+            抓握(plug, 1.0, *通道是关节);
+            上一段汇报 = "the body got close but never got positive evidence that the thing was between my fingers, so it did NOT close - closing there closes on air. That grasp point is now marked as tried. Decide what to do next.".into();
+            plug.act(&Cmd::Hold);
+            continue;
+        }
+
         // ⑥ **合到读数不再变为止 —— 无阈值。** 停在 0 = 指间没东西;停在 0 以上 = 有东西顶住,
         // 而那个读数就是它有多宽。老那版是「每拍变化小于 0.01 就算夹住」,而这只爪子合的时候
         // 先快后慢 ⇒ 一次**什么都没夹到的空合**后半段每拍变化本来就小于 0.01 ⇒ 每把都提前判成夹住。
@@ -8470,6 +8524,10 @@ fn 服务<S: std::io::Read + std::io::Write>(
             试过.push(尖目标);
             手里有.set(false);
             抓握(plug, 1.0, *通道是关节);
+            // 🔴 **合完的结果必须回来汇报** —— 上一版这一支一个字都没写进汇报,
+            // 于是模型下一段还在旧那句话上做决定(*"循环只闭了一半"* 的又一例)。
+            上一段汇报 = format!(
+                "you had me close on it. The gripper closed all the way to {停在:.4}, which is the same as closing on nothing, so THERE WAS NOTHING between my fingers. That grasp point is now marked as tried. Decide what to do next.");
             continue;
         }
         match 空零 {
