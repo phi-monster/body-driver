@@ -4679,12 +4679,25 @@ fn 服务<S: std::io::Read + std::io::Write>(
     // ⇒ 量表用**可达带的三分之一**(约 12 cm),信噪比翻三倍;走路仍用十分之一那一档。
     let 探幅 = 可达带[1] / 3.0;
 
+    // 🔴🔴🔴 **"物体真的在两指之间"这件事,必须是【正面证据】才准合爪。**(BV 实测 2026-09-02)
+    //
+    // BV 日志:`[收尾] 这台相机的深度图里**一块鼓出来的东西都没有**(只有平面)⇒ 目标不在视野里`
+    // 紧接着 `⇒ 直接合,结果照实报` ⇒ **合了一把空气**。整炮 4 次空合全是这么来的。
+    // 手上那台看得见自己(接触面占 11.3%、是个常数),而**球早就不在它画面里了** ——
+    // 那正是 README 点名的头号阻塞,这一炮第一次量到它发生的**那一拍**。
+    //
+    // ⇒ 看不见就**不许合**。合一把空气不是"照实报",它是**用掉一次机会去确认一件已经知道的事**;
+    //   而把这句话原样交给模型,它才有得决定(退回去 / 换个下手点 / 换只手,都由它解)。
+    // 仓里已有半条:*"看不见【自己】的时候要说出来"* —— 这里补上另一半:**看不见【要抓的东西】。**
+    let 到位了 = std::cell::Cell::new(false);
+
     // 🔴🔴🔴 **腕相机收尾:提成具名闭包,因为它现在有【两个】入口。**(2026-08-29)
     // 原来它内联在"追完之后",而追要先过 `看爪` 那道闸 —— 头相机上那道闸赢不了
     // (YF 实测 344 连败,这一段 0 次被执行)。提出来之后,`看爪` 失败的分支也能直接进。
     let 收尾腕 = |plug: &mut Plug<S>, 腕机: usize, jaw0: f64, 通道是关节: bool,
                   部件图常数: Option<(f64, f64, f64)>,
                   指厚常数: Option<f64>,
+                  眼鼓: Option<f64>,
                   look: &body_layer::eye::Look, 位: &mut [f64; 3]| -> Option<()> {
                 // 两个接触面在这台相机里的位置 —— 手不动,所以量一次就够。
                 let f0 = plug.sense()?;
@@ -4859,12 +4872,39 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     println!("[服]      ⇒ **换主眼接着干**(退回画面里闭环,不是停手)");
                     return None;
                 }
-                // 要抓的那一块 = 离两指中间最近的那一块。语义在头相机那一段已经定完了。
-                区2.sort_by(|a, b| {
-                    let da = (a.心[0] - c[0]).hypot(a.心[1] - c[1]);
-                    let db = (b.心[0] - c[0]).hypot(b.心[1] - c[1]);
-                    da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
-                });
+                // 🔴🔴🔴 **要抓的那一块,必须是【眼挑中的那一块】,不是离爪子最近的那一块。**
+                //(BV 渲图 + 日志定案 2026-09-02)
+                //
+                // 上一版这里写的是"离两指中间最近的那一块",注释说*"语义在头相机那一段已经定完了"*——
+                // **那句话是错的:过了这道交接门,「眼挑中的是哪个东西」什么都没带过去。**
+                // 后果是一个**越走越错的正反馈**,BV 的视频逐帧看得见:
+                //   眼正确挑中球 → 手往那边走 → 半路乐高小人离爪子更近 → 收尾改追小人
+                //   → 手朝小人走 → 离球更远 → 小人更近 → 更咬定是小人 → 最后走到电子琴那边
+                // 日志对得上:`追 6:物体在 (0.366,0.243) 深 **0.242**`,而球离头相机 0.645 m ——
+                // 那 24 厘米处的东西是它面前的乐高。之前几炮"碰倒了乐高小人"是同一条。
+                //
+                // ⇒ 排序键换成**跟眼挑中那块「鼓出来多高」最像**。那个高度是头相机当场量的
+                //   (球 `鼓出 0.062 m`),乐高/牛仔裤/电子琴各不相同。**换一个键,不加一个常数**;
+                //   眼没给这个数时才退回"离爪子最近"那条老路,并且说出来。
+                match 眼鼓 {
+                    Some(h0) if h0 > 0.0 => {
+                        区2.sort_by(|a, b| {
+                            let ka = (a.高 / h0).max(h0 / a.高.max(1e-9));
+                            let kb = (b.高 / h0).max(h0 / b.高.max(1e-9));
+                            ka.partial_cmp(&kb).unwrap_or(std::cmp::Ordering::Equal)
+                        });
+                        println!("[服]   [收尾] 按「跟眼挑中那块一样鼓」排(眼量到 {h0:.4} m);最像的那块鼓 {:.4} m,差 {:.2} 倍",
+                            区2[0].高, (区2[0].高 / h0).max(h0 / 区2[0].高.max(1e-9)));
+                    }
+                    _ => {
+                        println!("[服]   [收尾] ⚠️ 眼没给「那块鼓多高」⇒ 退回按「离爪子最近」排(**这条会把身边任何东西当成目标**,照实说)");
+                        区2.sort_by(|a, b| {
+                            let da = (a.心[0] - c[0]).hypot(a.心[1] - c[1]);
+                            let db = (b.心[0] - c[0]).hypot(b.心[1] - c[1]);
+                            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+                        });
+                    }
+                }
                 let 块2 = 区2[0].clone();
                 let 看2 = body_layer::eye::Look {
                     u: 块2.心[0],
@@ -5124,7 +5164,11 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     // 正确的容差是量出来的:**手指自己在深度上有多厚**。物体落在这个厚度里,
                     // 才是真的在两指之间。手指那一片的范围部件图已经给了,现在读一次深度就能算。
                     let 容深 = 指厚.unwrap_or(深抖).max(深抖);
-                    if 差 <= 看2.span_frac * 0.5 && 深误.abs() <= 容深 { println!("[服]   [收尾] 🟢 物体已经在两指中间,深度也压到手指那一层了(容差 {容深:.4} m = 手指自己有多厚)"); break }
+                    if 差 <= 看2.span_frac * 0.5 && 深误.abs() <= 容深 {
+                        println!("[服]   [收尾] 🟢 物体已经在两指中间,深度也压到手指那一层了(容差 {容深:.4} m = 手指自己有多厚)");
+                        到位了.set(true);            // ← 唯一一处置真:合爪的**正面证据**
+                        break
+                    }
                     let dp = 解3(m2, 误)?;
                     let 长 = (dp[0].powi(2)+dp[1].powi(2)+dp[2].powi(2)).sqrt();
                     if !(长 > 1e-9) { break }
@@ -6141,7 +6185,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 println!("[服] ⇒ 第 {相机号} 台里连着 {静} 次认不出爪子 ⇒ **改走第 {腕机} 台(长在手上那台)**");
                 let 腕常 = { let n = if *通道是关节 { plug.sense().map(|f| 真臂(&f).iter().map(|&i| f.joints[i].len()).sum::<usize>()).unwrap_or(0) } else { 6 }; 腕爪常数(&部件图, 腕机, n) };
                 let 指厚传 = 指厚常数.get();
-                if 收尾腕(plug, 腕机, jaw0, *通道是关节, 腕常, 指厚传, &look, &mut 位收).is_some() {
+                let 眼鼓 = 目标区.as_ref().map(|r| r.高);
+                if 收尾腕(plug, 腕机, jaw0, *通道是关节, 腕常, 指厚传, 眼鼓, &look, &mut 位收).is_some() {
                     let 停在 = 合到停住(plug, *通道是关节).unwrap_or(f64::NAN);
                     match (停在.is_finite(), *空合载) {
                         (true, Some(z)) if (停在 - z).abs() > 1e-9 =>
@@ -7660,7 +7705,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         println!("[服]   🟢 **两段交接②交给第 {腕机} 台(长在手上那台)收尾**");
                         let 腕常 = { let n = if *通道是关节 { plug.sense().map(|f| 真臂(&f).iter().map(|&i| f.joints[i].len()).sum::<usize>()).unwrap_or(0) } else { 6 }; 腕爪常数(&部件图, 腕机, n) };
                 let 指厚传 = 指厚常数.get();
-                if 收尾腕(plug, 腕机, jaw0, *通道是关节, 腕常, 指厚传, &look, &mut 位).is_some() {
+                let 眼鼓 = 目标区.as_ref().map(|r| r.高);
+                if 收尾腕(plug, 腕机, jaw0, *通道是关节, 腕常, 指厚传, 眼鼓, &look, &mut 位).is_some() {
                             println!("[服]   🟢 两段交接走通了 ⇒ 交给下面同一段合爪");
                             已就位 = true;
                         } else {
@@ -8302,9 +8348,16 @@ fn 服务<S: std::io::Read + std::io::Write>(
         if let (Some(腕机), false) = (手上相机.get(), 已就位) {
             let 腕常 = { let n = if *通道是关节 { plug.sense().map(|f| 真臂(&f).iter().map(|&i| f.joints[i].len()).sum::<usize>()).unwrap_or(0) } else { 6 }; 腕爪常数(&部件图, 腕机, n) };
                 let 指厚传 = 指厚常数.get();
-                if 收尾腕(plug, 腕机, jaw0, *通道是关节, 腕常, 指厚传, &look, &mut 位).is_none() {
-                println!("[服]   [收尾] 这一段没走完(上面已经说明理由)⇒ 直接合,结果照实报");
-            }
+                let 眼鼓 = 目标区.as_ref().map(|r| r.高);
+                到位了.set(false);
+                let _ = 收尾腕(plug, 腕机, jaw0, *通道是关节, 腕常, 指厚传, 眼鼓, &look, &mut 位);
+                if !到位了.get() {
+                    // 见 `到位了` 头注:没有"物体在两指之间"的正面证据 ⇒ **不合**,把这句话交给模型。
+                    println!("[服]   🔴 手上那台相机里**没有把要抓的东西送进两指之间的证据** ⇒ **这一拍不合爪**(合了必空),原样交给模型决定");
+                    上一段汇报 = "the camera on my hand could not put the thing between my fingers - it saw no object in front of the gripper at all. I did NOT close, because closing there closes on air. The camera fixed in the world can still see the thing. Decide what to do next.".into();
+                    plug.act(&Cmd::Hold);
+                    continue;
+                }
         }
 
         // ⑥ **合到读数不再变为止 —— 无阈值。** 停在 0 = 指间没东西;停在 0 以上 = 有东西顶住,
