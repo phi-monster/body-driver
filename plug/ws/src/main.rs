@@ -5160,7 +5160,113 @@ fn 服务<S: std::io::Read + std::io::Write>(
     // 而这一炮的任务是**把球抓起来**:球是圆的,腕子朝哪根本不影响能不能夹住它。
     // ⇒ 六方程试一次;拿不到三列就**从此改走单面**,别再拿朝向去换"一步都走不了"。
     let mut 表败 = 0u32;
+    // ══════════════════════════════════════════════════════════════════════════════
+    // 🔴🔴🔴 **部件图:冻住别的、一次只动一个通道,记下每台相机里【哪一片跟着动】。**
+    //(owner 2026-09-01 定"三条一次做完")
+    //
+    // **这是"机器人怎么知道自己是机器人"这篇论文的主贡献那一块。**
+    // 自由授权搜索(2026-09-01,结论写在 README)扫完之后:
+    //   · 「机器人自己量出自己的身体」那条线(Lipson 2019/2022 · π-graphs · AutoURDF · MAVRIC · DIJE)
+    //     **一个大模型都没有**,而且每换一具身体都要重训一次;
+    //   · 「大模型当机器人的脑子」那条线(HumanCLAW · Butter-Bench · Anthropic · FAEA)
+    //     **从来不去量自己的身体** —— HumanCLAW 原话:*"No current VLM perceives its own body …
+    //     it behaves like a ghost: it holds no instinctive model of which pixels are its own limbs,
+    //     and it never tries to infer where they are."*
+    //   · **没有任何工作把这两半接起来。零篇。**
+    //
+    // 这一段就是那半:**因果地**指认自己。判据是这一层通篇在用的那条构造性身份 ——
+    // **别的全冻住,只动一个通道,会动的那一块【按构造】就是这个通道管的部件。**
+    // 不认识"手臂""爪子""关节",不读 URDF,不看 CAD,一个人手填的数都没有。
+    //
+    // 🔴 **通道是这具机体【真正接受】的那些**(`通道是关节` 是试出来的),
+    //    加上它报出来的每一个指通道。换五指手就是五个指通道,换吸盘就是一个,
+    //    换轮式就是轮子的那几个 —— 同一段代码。
+    //
+    // 🔴 **"跟着动"用【来回】判,不用单向差**:出去一趟、回来一趟,
+    //    某个像素只有**两次都变、方向相反、而且回得来**才算数。
+    //    单向的漂移(上一条命令还没走完、光照变化、别的东西被碰动)**自己被筛掉**。
+    //    这条和张合相减那一处同一个来源(AP 实测:单向差让 34% 的画面被判成"手指")。
+    //
+    // 输出:每个(通道 × 相机)一张**粗掩膜** + 框 + 占画幅。粗到 1/4 分辨率就够 ——
+    // 它要回答的是"哪一片",不是"哪一个像素"。
+    struct 一件 { 掩: Vec<u8>, mw: usize, mh: usize, 框: [f64; 4], 占: f64 }
+    let 量部件图 = |plug: &mut Plug<S>, 通道数: usize, 是关节: bool, 指数: usize|
+        -> Vec<Vec<Option<一件>>> {
+        let 台 = plug.lay.cams.len();
+        let mut 出: Vec<Vec<Option<一件>>> = Vec::new();
+        // 一次只动一个通道:先是身体那几个,再是每一个指通道。
+        for k in 0..(通道数 + 指数) {
+            let 是指 = k >= 通道数;
+            let 前: Vec<Option<(usize, usize, Vec<u8>)>> =
+                (0..台).map(|c| plug.sense().and_then(|f| 灰(&f, c))).collect();
+            let j0 = plug.sense().and_then(|f| f.jaw.get(手号.get()).copied()).unwrap_or(1.0);
+            // 幅度:身体通道用量出来的探幅(上界也是它,见梯子那一段);
+            // 指通道用它自己的命令域两端(0..1 是命令域,不是米)。
+            if 是指 { 抓握(plug, if j0 > 0.5 { 0.0 } else { 1.0 }, 是关节); 定爪(plug, 等拍 * 4); }
+            else {
+                let mut 动 = vec![0.0; 通道数]; 动[k] = 探幅;
+                let _ = 迈通道(plug, &动, 1.0, j0, 是关节);
+                等停(plug, 等拍 * 2);
+            }
+            let 中: Vec<Option<(usize, usize, Vec<u8>)>> =
+                (0..台).map(|c| plug.sense().and_then(|f| 灰(&f, c))).collect();
+            // 回来
+            if 是指 { 抓握(plug, j0, 是关节); 定爪(plug, 等拍 * 4); }
+            else {
+                let mut 动 = vec![0.0; 通道数]; 动[k] = -探幅;
+                let _ = 迈通道(plug, &动, 1.0, j0, 是关节);
+                等停(plug, 等拍 * 2);
+            }
+            let 后: Vec<Option<(usize, usize, Vec<u8>)>> =
+                (0..台).map(|c| plug.sense().and_then(|f| 灰(&f, c))).collect();
+            let mut 这件: Vec<Option<一件>> = Vec::new();
+            for c in 0..台 {
+                let (Some((w, h, a)), Some((_, _, b)), Some((_, _, d))) =
+                    (前[c].clone(), 中[c].clone(), 后[c].clone()) else { 这件.push(None); continue };
+                if a.len() != b.len() || b.len() != d.len() || a.is_empty() { 这件.push(None); continue }
+                // 粗到 1/4:一格 4×4 像素,格里过半的像素满足条件就算这一格动过。
+                let (mw, mh) = ((w / 4).max(1), (h / 4).max(1));
+                let mut 掩 = vec![0u8; mw * mh];
+                let (mut x0, mut y0, mut x1, mut y1) = (1.0f64, 1.0f64, 0.0f64, 0.0f64);
+                let mut 计 = 0usize;
+                for gy in 0..mh { for gx in 0..mw {
+                    let mut n = 0usize; let mut 总 = 0usize;
+                    for dy in 0..4 { for dx in 0..4 {
+                        let (px, py) = (gx * 4 + dx, gy * 4 + dy);
+                        if px >= w || py >= h { continue }
+                        let i = py * w + px; 总 += 1;
+                        let d1 = b[i] as i32 - a[i] as i32;   // 出去
+                        let d2 = b[i] as i32 - d[i] as i32;   // 回来(相对中间)
+                        // 8 是灰度差的噪声底(和别处同一个来源),无量纲。
+                        if d1.abs() <= 8 || d2.abs() <= 8 { continue }
+                        if d1.signum() != d2.signum() { continue }   // 单向漂,不是我
+                        let 回 = (a[i] as i32 - d[i] as i32).abs();
+                        if 回 >= d1.abs().min(d2.abs()) { continue } // 没回来,不是我
+                        n += 1;
+                    }}
+                    if 总 > 0 && n * 2 > 总 {
+                        掩[gy * mw + gx] = 255; 计 += 1;
+                        let (u, v) = (gx as f64 / mw as f64, gy as f64 / mh as f64);
+                        if u < x0 { x0 = u } if v < y0 { y0 = v }
+                        if u > x1 { x1 = u } if v > y1 { y1 = v }
+                    }
+                }}
+                let 占 = 计 as f64 / (mw * mh) as f64;
+                这件.push(if 计 > 0 { Some(一件 { 掩, mw, mh, 框: [x0, y0, x1, y1], 占 }) } else { None });
+            }
+            for (c, it) in 这件.iter().enumerate() {
+                match it {
+                    Some(x) => println!("[身] 通道 {k}{} 在第 {c} 台里动的那一片:占画幅 {:.4} · 框 ({:.2},{:.2})-({:.2},{:.2})",
+                        if 是指 { "(指)" } else { "" }, x.占, x.框[0], x.框[1], x.框[2], x.框[3]),
+                    None => println!("[身] 通道 {k}{} 在第 {c} 台里**一格都没动**", if 是指 { "(指)" } else { "" }),
+                }
+            }
+            出.push(这件);
+        }
+        出
+    };
     let mut 挑过手 = false;
+    let mut 部件图: Option<Vec<Vec<Option<一件>>>> = None;
     loop {
         let Some(帧) = plug.sense() else { return None };
         if plug.复位过 { plug.复位过 = false; 集 += 1; 试过.clear(); 白转 = 0; println!("[服] ── 第 {集} 集 ──"); }
@@ -5386,6 +5492,72 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 None => println!("[服] ⚠️ 逐臂推那一步没量到任何一条臂在主眼里占的片 ⇒ 手号留在 {} ,结果照实报", 手号.get()),
             }
             挑过手 = true;
+            // 🔴🔴🔴 **手挑定了,立刻量一次部件图 —— 这一炮只量一次,量完存着用。**
+            //(见 `量部件图` 头注:这是"机器人怎么知道自己是机器人"的那一半)
+            if 部件图.is_none() {
+                let 指数 = 帧.jaw.len();
+                let 通道数 = if *通道是关节 {
+                    plug.sense().map(|f| 真臂(&f).iter().map(|&i| f.joints[i].len()).sum::<usize>()).unwrap_or(0)
+                } else { 6 };
+                println!("[身] ── 量部件图:{通道数} 个身体通道 + {指数} 个指通道,一次只动一个 ──");
+                let 图 = 量部件图(plug, 通道数, *通道是关节, 指数);
+                // ── 从因果表里【推】出结构,一个名字都不用 ──
+                // ① 这台相机长在哪个通道的下游:那个通道一动,它**整幅**都在变。
+                // ② 哪些通道是接触面:指通道动的那一片(按构造就是钳口/吸盘/手指)。
+                // ③ 谁在谁下游:A 动的那一片**包含** B 动的那一片 ⇒ B 挂在 A 下面。
+                for c in 0..plug.lay.cams.len() {
+                    let mut 最 = (usize::MAX, 0.0f64);
+                    for (k, 件们) in 图.iter().enumerate() {
+                        if let Some(Some(x)) = 件们.get(c) { if x.占 > 最.1 { 最 = (k, x.占) } }
+                    }
+                    if 最.0 != usize::MAX {
+                        println!("[身] 第 {c} 台相机:第 {} 号通道一动它变了 **{:.0}%** 的画面{}",
+                            最.0, 最.1 * 100.0,
+                            if 最.1 > 0.5 { " ⇒ **它长在这个通道的下游**" } else { "" });
+                    }
+                }
+                for k in 通道数..(通道数 + 指数) {
+                    if let Some(件们) = 图.get(k) {
+                        for (c, it) in 件们.iter().enumerate() {
+                            if let Some(x) = it {
+                                println!("[身] **接触面**(第 {k} 号指通道)在第 {c} 台里:占画幅 {:.4} · 中心 ({:.3},{:.3})",
+                                    x.占, (x.框[0] + x.框[2]) * 0.5, (x.框[1] + x.框[3]) * 0.5);
+                            }
+                        }
+                    }
+                }
+                // ── 渲成彩色图:每个通道一个颜色,叠在主眼那张真实画面上 ──
+                // 这张图有两个用户:**我们肉眼验它对不对**,以及**交给眼去命名**。
+                if let Ok(dir) = std::env::var("BL_DUMP") {
+                    for c in 0..plug.lay.cams.len() {
+                        let Some((cw, ch, crgb)) = plug.sense().and_then(|f| 彩(&f, c)) else { continue };
+                        let mut 图片 = crgb.to_vec();
+                        for (k, 件们) in 图.iter().enumerate() {
+                            let Some(Some(x)) = 件们.get(c) else { continue };
+                            // 颜色只是编号的可视化,不含任何语义:按通道号在色环上取。
+                            let 相 = k as f64 * 2.399963;   // 黄金角,通道多也不撞色
+                            let col = [((相.sin() * 0.5 + 0.5) * 255.0) as u8,
+                                       (((相 + 2.094).sin() * 0.5 + 0.5) * 255.0) as u8,
+                                       (((相 + 4.189).sin() * 0.5 + 0.5) * 255.0) as u8];
+                            for gy in 0..x.mh { for gx in 0..x.mw {
+                                if x.掩[gy * x.mw + gx] == 0 { continue }
+                                for dy in 0..4 { for dx in 0..4 {
+                                    let (px, py) = (gx * 4 + dx, gy * 4 + dy);
+                                    if px >= cw || py >= ch { continue }
+                                    let i = (py * cw + px) * 3;
+                                    if i + 2 >= 图片.len() { continue }
+                                    // 半透明叠色:底下的真实画面还看得见,方便肉眼核对。
+                                    for t in 0..3 { 图片[i + t] = ((图片[i + t] as u16 + col[t] as u16) / 2) as u8; }
+                                }}
+                            }}
+                        }
+                        let 路 = format!("{dir}/身体_第{c}台.bmp");
+                        let _ = std::fs::write(&路, task::bmp24(&图片, cw, ch));
+                        println!("[身] 🖼 部件图渲好了 ⇒ {路}(每个通道一个颜色,叠在真实画面上)");
+                    }
+                }
+                部件图 = Some(图);
+            }
         }
 
         // ② 目标的三数 —— 眼指的那个像素,加上那一点的**近侧**深度。
@@ -7054,6 +7226,20 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 // 🔴 论文式 15 的 `p_self`:一个**长在身上、跟着身体跑**的点(归一化画幅坐标)。
                 let mut 跟点: Option<(f64, f64)> = None;
                 let 半跟 = ((块 * dw as f64 * 0.5) as usize).clamp(3, 40);
+                // 跟踪器自己抖多少:同一帧上把同一块再找一次,差多少就是多少。
+                // 下面"被惊到才叫醒模型"那一条的门槛由它给,不是填的。
+                let 跟噪 = {
+                    let a = plug.sense().and_then(|f| 灰(&f, 相机号));
+                    match a {
+                        Some((gw0, gh0, g0)) => 截块(gw0, gh0, &g0, u, v, 半跟)
+                            .and_then(|t| 找块窗(gw0, gh0, &g0, &t, 半跟, u, v, 半跟 * 2))
+                            .map(|(a, b)| (a - u).hypot(b - v)).unwrap_or(0.0),
+                        None => 0.0,
+                    }
+                };
+                // 伺服起点 —— "退回我来的路"要用它(不是"回原位",是回到这一段开始的地方)。
+                let 伺起 = plug.sense().and_then(|f| f.ee.get(手号.get()).copied())
+                    .map(|e| [e[0], e[1], e[2]]).unwrap_or([0.0; 3]);
                 for k in 0..上限 {
                     if plug.复位过 { println!("[服]      🔴 搬到第 {k} 步换集了"); 被切走 = true; break }
                     let Some((gw, gh, g)) = plug.sense().and_then(|f| 灰(&f, 相机号)) else { println!("[服]      读不到帧 ⇒ 停"); break };
@@ -7157,6 +7343,67 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     // ⇒ 这一段只信**真的一动没动**(走 < 1e-5,下面那一条),它不依赖等停。
                     let _ = 挡;
                     上走 = 走;
+                    // ══════════════════════════════════════════════════════════════════
+                    // 🔴🔴🔴 **不定时问模型,【被惊到】才问。**(owner 2026-09-01 定)
+                    //
+                    // 方向盘本身就是一个**预测器**:它说"发这个命令,画面该跑这么多"。
+                    // 于是"叫醒模型"的时机不需要任何时间表 —— **实际和预测对不上,就是出事了**。
+                    // 平时一切如预期,模型一次都不问(日志量过:问一次眼 ≈ 10 个仿真步,
+                    // 每步都问在官方 200 步的一集里根本买不起)。
+                    //
+                    // 🔴 **而"发现事情不对"这件事,本来就是自我意识的那一半** ——
+                    //    所以这一条同时买到了效率和意识,不是折中,是同一个机制。
+                    //    对照:Butter-Bench 量过 **"察觉东西不在" 所有模型 0% / 人类 100%**;
+                    //    我们不靠模型去察觉,靠**它自己身体的预测残差**去察觉,再把模型叫来判断。
+                    //
+                    // 门槛不新增常数:用跟踪器自己的噪声 `噪`(量出来的)乘上别处同一个倍数 2。
+                    let 实动 = (现u - 上处.0).hypot(现v - 上处.1);
+                    let 该动 = 预测 * 比;
+                    if 部件图.is_some() && (实动 - 该动).abs() > 跟噪 * 2.0 && k > 0 {
+                        let 身体 = {
+                            let mut t = String::new();
+                            if let Some(图) = 部件图.as_ref() {
+                                for (kk, 件们) in 图.iter().enumerate() {
+                                    if let Some(Some(x)) = 件们.get(相机号) {
+                                        t.push_str(&format!(
+                                            "- channel {kk}: when you move it, the part of the picture that follows is centred at ({:.2},{:.2}) and covers {:.1}% of the frame\n",
+                                            (x.框[0] + x.框[2]) * 0.5, (x.框[1] + x.框[3]) * 0.5, x.占 * 100.0));
+                                    }
+                                }
+                            }
+                            t.push_str(&format!("- the part you are trying to bring to the target is at ({现u:.2},{现v:.2}) in this picture\n"));
+                            t.push_str(&format!("- the target is at ({目u:.2},{目v:.2}) in this picture\n"));
+                            t
+                        };
+                        let 刚才 = format!(
+                            "you commanded a move that your own body-model said would shift the picture by {该动:.4} of a frame;                              it actually shifted by {实动:.4}. your hand physically moved {走:.5} m.                              the gap between the part you are moving and the target is {差像:.4} of a frame."
+                        );
+                        match body_layer::eye::问身体(眼主机, 眼端口, &指令, &身体, &刚才, &g, gw, gh) {
+                            Ok(断) => {
+                                println!("[身] ⚡ 预测 {该动:.4} / 实际 {实动:.4}(跟踪噪声 {跟噪:.4})⇒ **叫醒模型**");
+                                println!("[身]    它说:**{}** —— {}", 断.做什么, 断.为什么);
+                                match 断.做什么.as_str() {
+                                    "carry_on" => {}
+                                    "already_holding" => { println!("[身]    ⇒ 它认为已经夹住了 ⇒ 就地合,让读数去核"); 碰上了 = true; break }
+                                    "cannot_see_target" => { println!("[身]    ⇒ 它看不见目标 ⇒ 挪一步让相机多看见我一点"); 白转 = 白转.wrapping_add(1); break }
+                                    "new_grasp_point" => { println!("[身]    ⇒ 换个下手点"); break }
+                                    "switch_hand" => { println!("[身]    ⇒ 换只手 ⇒ 下一轮重挑"); 挑过手 = false; break }
+                                    "retreat" | "part_in_the_way" => {
+                                        println!("[身]    ⇒ 退回我来的路(不是停手)");
+                                        if let Some(e) = plug.sense().and_then(|f| f.ee.get(手号.get()).copied()) {
+                                            let _ = 落(plug, [e[0] - (e[0] - 伺起[0]) * 0.5,
+                                                              e[1] - (e[1] - 伺起[1]) * 0.5,
+                                                              e[2] - (e[2] - 伺起[2]) * 0.5],
+                                                       [e[3], e[4], e[5], e[6]], jaw0, 等拍);
+                                        }
+                                        break
+                                    }
+                                    其他 => println!("[身]    ⚠️ 不认识的答复「{其他}」⇒ 当没说,照常走"),
+                                }
+                            }
+                            Err(e) => println!("[身] ⚡ 想叫醒模型但没问成:{e} ⇒ 照常走,结果照实报"),
+                        }
+                    }
                     if 走 < 1e-5 { 没动 += 1 } else { 没动 = 0 }
                     if 没动 >= 5 {
                         减 += 1; 没动 = 0;

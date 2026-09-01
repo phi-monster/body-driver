@@ -361,3 +361,78 @@ pub fn pick(
     let t = |k: &str| j.get(k).and_then(|x| x.text()).unwrap_or("").to_string();
     Ok(Pick { region: r.round() as usize, verb: t("verb"), force: t("force") })
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 🔴🔴🔴 **把模型从"指哪个是球的工具"改成【这具身体的主体】。**(owner 2026-09-01 定)
+//
+// 依据是自由授权搜索扫出来的那道缝(结论在 `README` 的论文那一节):
+//   · 「自己量身体」那条线里**一个大模型都没有**;
+//   · 「大模型当脑子」那条线**从来不去量身体** —— HumanCLAW 原话:
+//     *"No current VLM perceives its own body … it behaves like a ghost: it holds no
+//      instinctive model of which pixels are its own limbs, and it never tries to infer
+//      where they are."*(最好的模型在"找→走→坐"上只有 **16.8%**)
+//   · **没有任何工作把这两半接起来。**
+//
+// 这个函数就是接口:给它的不再是"这几个框里哪个是球",而是
+//   **我看见什么 · 我能下什么命令(它自己量出来的身体)· 我刚才干了什么、结果如何 · 我要什么**。
+//
+// 🔴 **三条硬约束,写在这里免得以后被绕过:**
+//  ① 给它的身体描述**全部来自这台机器人当场量出来的**(部件图 / 命令 vs 实到),
+//     **不许出现任何写死的身体常数**,也不许出现 URDF/CAD 里的东西。
+//     换一具机体,这段描述整个变 ⇒ 它就是另一具身体上的它。**这不是"参数进策略",
+//     因为什么都没训过、装机就是新生**(owner 2026-09-01:"换机体就是一个新生命")。
+//  ② 它的输出**只允许是驱动真的能执行的那几件事**,而且**一个身体词、一个世界轴都不许有**
+//     (不许"往上抬 5 厘米" —— 那既是米、又是世界的上)。
+//     文献量过:VLM 在定性关系上强、**在定量几何上弱**(RoboVista 最好 56.5%,
+//     30.2% 是把东西认错),所以只问它"怎么办",不问它"走多少"。
+//  ③ 它答什么都**不许承重到控制**:走多少永远由量出来的方向盘算。它只改**做什么**。
+//
+/// 它对当前局面的判断。`做什么` 是一个封闭集合 —— 驱动对每一项都有对应动作。
+pub struct 断 {
+    /// 只能是这几个之一(见 `问身体` 的 schema):
+    /// `carry_on` 继续 · `retreat` 退回我来的路 · `switch_hand` 换只手 ·
+    /// `new_grasp_point` 换个下手点 · `cannot_see_target` 我看不见目标了 ·
+    /// `already_holding` 已经夹住了 · `part_in_the_way` 我身上有别的地方挡着/压着东西
+    pub 做什么: String,
+    /// 它自己的理由(只进日志、只给人看,**不进任何判据**)。
+    pub 为什么: String,
+}
+
+/// 问它:**你现在这具身体、这个局面,该怎么办。**
+///
+/// `身体` 是调用方从**部件图**拼出来的一段话(第几号通道一动、画面里哪一片跟着动、
+/// 哪几个是接触面、哪台相机长在哪儿)。`刚才` 是"我下了什么命令、实际发生了什么"。
+/// 两段都必须是**量出来的**,调用方不许往里塞任何常数。
+pub fn 问身体(
+    host: &str,
+    port: u16,
+    任务: &str,
+    身体: &str,
+    刚才: &str,
+    rgb: &[u8],
+    w: usize,
+    h: usize,
+) -> Result<断, String> {
+    if rgb.len() < w * h * 3 {
+        return Err(format!("画面短了:要 {} 字节,只有 {}", w * h * 3, rgb.len()));
+    }
+    let bmp = bmp24(rgb, w, h);
+    let b64 = base64(&bmp);
+    let esc = |t: &str| t.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n");
+    let prompt = format!(
+        "You are not a model looking at a picture. You ARE this robot.          This image is what you see right now.\n\n         YOUR BODY (you measured this yourself just now, by moving one channel at a time          and watching which part of the picture followed):\n{}\n\n         WHAT YOU JUST DID AND WHAT HAPPENED:\n{}\n\n         WHAT YOU ARE TRYING TO DO: {}\n\n         Something did not go as your own body-model predicted, which is why you are being asked.          Look at the picture and decide what to do next.          Do NOT give distances, angles or any numbers - you are bad at those and the body          already computes them. Only decide WHAT to do.",
+        esc(身体), esc(刚才), esc(任务)
+    );
+    let body = format!(
+        r#"{{"model":"eye","max_tokens":300,"temperature":0,"chat_template_kwargs":{{"enable_thinking":false}},"response_format":{{"type":"json_schema","json_schema":{{"name":"body_decision","strict":true,"schema":{{"type":"object","additionalProperties":false,"required":["do","why"],"properties":{{"do":{{"type":"string","enum":["carry_on","retreat","switch_hand","new_grasp_point","cannot_see_target","already_holding","part_in_the_way"]}},"why":{{"type":"string"}}}}}}}}}},"messages":[{{"role":"user","content":[{{"type":"image_url","image_url":{{"url":"data:image/bmp;base64,{b64}"}}}},{{"type":"text","text":"{prompt}"}}]}}]}}"#
+    );
+    let raw = post(host, port, "/v1/chat/completions", &body)?;
+    let inner = extract_content(&raw)
+        .ok_or_else(|| format!("回包里没有 content(前 200 字:{})", &raw[..raw.len().min(200)]))?;
+    let j = crate::json::parse(&inner)
+        .map_err(|e| format!("眼给的不是 JSON: {e} ‖ 前 200 字:{}", &inner[..inner.len().min(200)]))?;
+    let t = |k: &str| j.get(k).and_then(|x| x.text()).unwrap_or("").to_string();
+    let d = t("do");
+    if d.is_empty() { return Err("眼没给 do".into()) }
+    Ok(断 { 做什么: d, 为什么: t("why") })
+}
