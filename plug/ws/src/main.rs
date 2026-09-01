@@ -7532,6 +7532,9 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 // 伺服起点 —— "退回我来的路"要用它(不是"回原位",是回到这一段开始的地方)。
                 let 伺起 = plug.sense().and_then(|f| f.ee.get(手号.get()).copied())
                     .map(|e| [e[0], e[1], e[2]]).unwrap_or([0.0; 3]);
+                // 这一段结束之后要汇报给模型的读数(见下面"这一段干完了要回来汇报")。
+                let (mut 末差像, mut 末深差) = (f64::NAN, f64::NAN);
+                let (mut 末我u, mut 末我v) = (f64::NAN, f64::NAN);
                 for k in 0..上限 {
                     if plug.复位过 { println!("[服]      🔴 搬到第 {k} 步换集了"); 被切走 = true; break }
                     let Some((gw, gh, g)) = plug.sense().and_then(|f| 灰(&f, 相机号)) else { println!("[服]      读不到帧 ⇒ 停"); break };
@@ -7562,6 +7565,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     let 现深 = 近侧深(plug, 现u, 现v, 块 * 0.5).unwrap_or(d);
                     let 误 = vec![目u - 现u, 目v - 现v, (目深 - 现深) * 深换];
                     let 差像 = (误[0] * 误[0] + 误[1] * 误[1]).sqrt();
+                    末差像 = 差像; 末深差 = 目深 - 现深; 末我u = 现u; 末我v = 现v;
                     // 到位:画面上比我自己那一块还近(块是量出来的,不是填的阈值)。
                     if 差像 <= 块 * 0.5 && (目深 - 现深).abs() <= 块 / 深换.max(1e-9) {
                         println!("[服]      🟢 画面上到位了(第 {k} 步:横纵差 {差像:.4} 画幅 ≤ {:.4} · 深差 {:+.4} m)", 块 * 0.5, 目深 - 现深);
@@ -7673,8 +7677,20 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 //    迭代磨不掉偏差(XS 实测:走到差 4.5 mm、照样合空)。
                 if !碰上了 {
                     println!("[服]      画面上还没到位 ⇒ **不合**,回去重看一眼再走");
+                    // 🔴🔴🔴 **这一段干完了要回来汇报 —— 否则循环只闭了一半。**
+                    //(BL 实测 2026-09-02:模型连着 **11 段**说同一句 `approach until contact`,
+                    // 因为 `approach` 这一支**从来没更新过汇报**,它每次拿到的都是
+                    // *"this is the first segment; nothing has been tried yet"* ⇒ **它在盲决策。**
+                    // 我给别的支都写了汇报,唯独把主路那支漏了。)
+                    上一段汇报 = format!(
+                        "you asked to approach until {}. the body moved its contact surface toward the target but did not reach it: in the picture the gap is still {末差像:.3} of a frame (it needs to be under {:.3}), and the depth difference is {末深差:+.3} m. your contact surface is at ({末我u:.2},{末我v:.2}) and the target is at ({目u:.2},{目v:.2}).",
+                        这一段.as_ref().map(|d| d.到什么为止.clone()).unwrap_or_else(|| "amount".into()),
+                        块 * 0.5);
                     continue
                 }
+                上一段汇报 = format!(
+                    "you asked to approach until {}. the body reached the target in the picture: the gap is now {末差像:.3} of a frame and the depth difference is {末深差:+.3} m. it is about to close on it.",
+                    这一段.as_ref().map(|d| d.到什么为止.clone()).unwrap_or_else(|| "amount".into()));
                 // 交给下面同一段合爪 + 退回 —— 不另写一套。
                 已就位 = true;
                 [(u, v), (u, v)]
