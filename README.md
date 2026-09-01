@@ -19,6 +19,85 @@ layer's own. Read it before the claim below: [what this layer still owes](#what-
 
 ---
 
+## 📄 论文:**《机器人怎么知道自己是机器人》**
+
+**主贡献 = 这个 driver 本身。** 主目标 = RoboDojo 官方分逼近人类遥操(≥42/55 = 76.03%)。
+
+### 这条路上世界有什么、没有什么(自由授权搜索,2026-09-01)
+
+🔴 **一句话:这条路被劈成两半,两半各自有人做,而【没有任何人把它们接起来】。**
+
+| 半 | 谁在做 | 缺的那一半 |
+|---|---|---|
+| **机器人自己动一动、量出自己的身体** | Lipson 组(Science Robotics 2019 / 2022)· π-graphs(SciRob 2023)· AutoURDF(CVPR 2025)· **MAVRIC**(RA-L 2020,Levine)· DIJE(2507.00446) | **这一整条线里一个大模型都没有**,而且**每换一具身体都要重训一次** |
+| **通用大模型当机器人的脑子** | HumanCLAW · Butter-Bench · Anthropic robotics · FAEA · Prompt2Walk | **这些模型完全不去量自己的身体** |
+
+**测到那道缝的那篇是 HumanCLAW(2607.27180)**,原文两句:
+> **"No current VLM perceives its own body."**
+> **"it behaves like a ghost: it holds no instinctive model of which pixels are its own limbs, and it never tries to infer where they are."**
+
+### 前沿真实的数(论文里的,不是宣传)
+
+| 出处 | 任务 | 数 |
+|---|---|---|
+| HumanCLAW | VLM 指挥人形 找→走→坐 | **最好 Gemini-3.1 16.8%**(找到 64.9 / 走到 42.4 / 坐上 16.8)· GPT-5.5 **3.4%** · 腿脚 **28–45% 的步子在撞** · 交互失败 **58% 是坐进空气里** |
+| Butter-Bench | LLM 开 TurtleBot4 | 最好 **40%** vs 人类 **95%**;**"察觉东西不在" 所有模型 0% / 人类 100%**;"直接朝目标画直线,**完全不管墙**" |
+| Anthropic | 直接给力矩 | 整任务 **0–5.5%**;Go2 平衡 **"nearly two full seconds"**;**给指南针工具效果远好于其他** ⇒ 反证模型缺自我朝向感 |
+| LAP-3B(2602.10556) | 没见过的机体 | 自己 3 机体 6 任务平均 >50%;**"all open-sourced VLAs collapse to zero success rate"** |
+| RoboInspector(2508.21378) | LLM 写控制代码 | 216 组;主导失败是 **Badpose(末端姿态错)** |
+| RoboVista(2607.04610) | VLM 空间量测 | 最好 **56.5%**(随机 20%);**30.2% 是把东西认错**;**思维链让场景理解掉最多 12%** |
+| TRI(2507.05331) | 大行为模型 | **"Pretrained LBM is statistically indistinguishable from single-task"**;某任务微调后 **0.335 < 单任务基线** |
+
+⚠️ **这三条直接打在我们身上,不许当成"接上 VLM 就好了"**:VLM 自己就是那个不知道身体在哪的鬼魂(16.8%)· LLM 写控制代码主要死在末端姿态(= 我们"转手腕被整条拒掉"那条)· VLM 空间量测 56.5% / 30% 认错东西(= 本仓 `"问眼睛 246.9"` 那条负面前科的同族)。
+
+### 口号 vs 证据
+
+| 谁 | 说的 | 实际 |
+|---|---|---|
+| **Skild AI**(融资 $1.4B) | "omni-bodied""**even without knowing its exact body**""换全新身体不重训" | **博客里一个数字都没有** · 无论文 · 无技术报告 · 无权重 · 无消融 |
+| **Generalist GEN-0/1.5** | "works on different robots by design" | 只说测过 6/7/16+ DoF,**没有任何"训练里没见过的机体"的说法,也没有分机体数字** |
+| **π 0.7** | "zero-shot cross-embodiment" | **那台机器在训练数据里**,只是任务没见过 |
+| **Gemini Robotics 1.5** | 三种机体"无需 robot-specific post-training" | **三台都在多机体预训练集里** |
+| **NVIDIA GR00T** | "cross-embodiment model" | 🟢 **最诚实的一家**:官方文档明写新机体要采演示 + 微调 embodiment-specific encoder |
+| **波士顿动力 ZEST** | "Zero-shot Embodied Skill Transfer" | 那个 zero-shot 指 **sim-to-real**,不是换身体。术语撞车 |
+
+### 🔴 地图上的空白 —— 我们站的位置
+
+多种措辞搜过,**找不到任何工作报告过**:
+
+1. **没有人把"自己量身体"和"大模型当主体"接起来。零篇。**
+2. **没有人在运行时发现"我有几个自由度"** —— 跨形态方法全都把动作维度当已知(MetaMorph/AnyMorph/GET-Zero/AnyBody 吃形态图 · XMoP/Mirage 吃 URDF · Cloak 吃 known geometry · CrossFormer 明写不支持变自由度)
+3. **没有人从观测里判断"我是吸盘 / 两指 / 五指"**(GET-Zero 明写 >16 关节预期失败)
+4. **没有一套发现流程同时管 臂 + 腿 + 轮**(Lipson 组自己是分开的:4-DoF 臂 / 12-DoF 腿 / 纯本体感觉拓扑)
+5. **没有人给"量身体"定过【一集里花几步】的预算** —— 别人报的是 7,888 点 / 300–500 张图 / "about a day on a single GPU";唯一例外是 MAVRIC 的"约 20 秒 / 约 100 个动作"(**2019 年**)
+6. **没有人量过"完全不给 URDF,代价是多少"**(只有边角消融:XMoP 去掉 SE(3) 本体感觉 ⇒ **0%**)
+7. **没有任何基准带"换身体、不改代码"这条轴**(AnyBody 最接近,但把形态向量喂给策略;RoboTwin-XE 的跨机体初始位姿 **"aligned via IK"** ⇒ 运动学已知)
+8. **没有人让大模型自己设计"怎么量自己"的流程**(最接近的 ICWM 探测动作是**写死的**,模型还专门训过)
+9. **没有人用自己量出来的身体做"不许碰到"**(Lipson 96.84% 避障是单台 4-DoF + 全标定 + 训一天;XMoP 77 台但读 URDF)
+10. **自模型本身不迁移** —— **不存在"自建模的基础模型"**
+11. **没有人报过"量身体阶段的大模型调用预算"**(分层 VLA 摊薄的是**任务**调用:规划器每 ~100 步一次、~2 Hz)
+12. **"在图像里认出自己"这个原语,2019 年的 MAVRIC 至今仍是最好结果**,没人用现代基础模型重做过;唯一近期后继是 **DIJE** —— 就是本仓自图那篇
+
+**相邻立场论文**(2606.06556 *Robots Need More Than VLAs & World Models*)撞在同一点上:
+> *"The embodiment gap … is not how to copy human motion, but how to **preserve the task-relevant physical effect** of that motion when executed by a different body."*
+
+它主张机器人要对自己的形态/运动学做**显式推理**,但给的方案仍是**人给的**结构化重定向,**没有走到"自己量出来"这一步**。
+
+⇒ **本仓的位置:第 1 条那道缝里,而且第 5/6/7/11 条正好是这一层天生要回答的问题(预算按集内步数、零 URDF、换体不改代码)。**
+
+<details><summary>出处(点开)</summary>
+
+自模型/身体发现:[SciRob 2019](https://www.science.org/doi/10.1126/scirobotics.aau9354) · [Full-Body Visual Self-Modeling](https://ar5iv.labs.arxiv.org/html/2111.06389) · [Egocentric Self-Modeling](https://arxiv.org/abs/2207.03386) · [π-graphs](https://www.science.org/doi/10.1126/scirobotics.adh0972) · [AutoURDF](https://arxiv.org/abs/2412.05507) · [MAVRIC](https://ar5iv.labs.arxiv.org/html/1912.13360) · [DIJE](https://arxiv.org/pdf/2507.00446) · [Body Discovery of Embodied AI](https://arxiv.org/abs/2503.19941) · [Sensorimotor Self-Recognition in MLLM Robots](https://arxiv.org/html/2505.19237v2)
+
+跨形态:[LAP](https://arxiv.org/html/2602.10556v1) · [Cloak](https://arxiv.org/abs/2606.22836) · [Mirage](https://arxiv.org/html/2402.19249v2) · [XMoP](https://arxiv.org/html/2409.15585) · [CrossFormer](https://arxiv.org/html/2402.19432v1) · [GET-Zero](https://arxiv.org/html/2407.15002v1) · [Embodiment Scaling Laws](https://arxiv.org/html/2505.05753v2) · [AnyBody](https://arxiv.org/html/2505.14986v1) · [ICWM](https://www.alphaxiv.org/abs/2606.26025v2)
+
+负结果:[HumanCLAW](https://arxiv.org/html/2607.27180) · [Butter-Bench](https://arxiv.org/html/2510.21860v1) · [Anthropic](https://www.anthropic.com/research/claude-plays-robotics) · [RoboInspector](https://arxiv.org/html/2508.21378v2) · [RoboVista](https://arxiv.org/html/2607.04610) · [TRI LBM](https://arxiv.org/html/2507.05331v1)
+
+产业:[Skild](https://www.skild.ai/blogs/building-the-general-purpose-robotic-brain) · [Generalist GEN-0](https://generalistai.com/blog/gen-0) · [π0.7](https://www.pi.website/blog/pi07) · [Gemini Robotics 1.5](https://arxiv.org/abs/2510.03342) · [GR00T new-embodiment docs](https://github.com/NVIDIA/Isaac-GR00T/blob/main/getting_started/3_0_new_embodiment_finetuning.md) · [ZEST](https://arxiv.org/abs/2602.00401)
+</details>
+
+---
+
 ## 🔴 三条减法(owner 2026-08-28,别人给的建议 + 我方判断)
 
 **减法的意思**:删掉一个"人为了方便而发明、但世界本身不需要"的中间概念。
@@ -38,17 +117,41 @@ layer's own. Read it before the claim below: [what this layer still owes](#what-
 **"删掉一个中间概念"和"什么都不做"在代码上长得一模一样,在行为上差十万八千里。**
 
 
-## 现在在哪(2026-08-30,一屏读完)
+## 现在在哪(2026-09-01,一屏读完)
 
-🔴 **官方 `general_pickup` 55 集:0 / 55。至今没有抓起来过任何一个东西。**
-目标 **≥42/55**(超人类遥操 76.03%)。这一栏是唯一算数的成绩,不许拿中间指标替代。
+🔴 **官方 `general_pickup`:0 / 55。至今没有抓起来过任何一个东西。** 目标 **≥42/55**(超人类遥操 76.03%)。
+这一栏是唯一算数的成绩,不许拿中间指标替代。
 
-| 项 | 绝对数 |
-|---|---|
-| **官方 55 集成绩** | **0 / 55** |
-| 一夜(08-26→27)跑了多少炮 | 20 余炮,**全部 0 次抓起** |
-| 最近一炮(YF,08-29) | **没有成绩** —— `Success 0, Fail 0, Unstable 0` 三个全 0 = **一集都没跑完**(盘被落图写满,IsaacSim 崩)。不是"跑完得 0 分" |
-| 诊断炮的步数上限 | `general_pickup.py` 的 `step_lim` 现为 **100000**(owner 定:无上限)。**这些数不是官方成绩**;官方那一栏必须在 200 步原配置下重跑(备份 `/root/general_pickup.py.OFFICIAL`) |
+**机体**:RoboDojo 官方 `arx_x5` 双臂(自写的 Franka 场子已弃用)。**这具机体只吃末端命令,不吃关节命令**(`[装] 这具机体认哪种命令:末端那六个自由度`)。
+
+**这一轮(08-31 → 09-01)第一次拿到的绝对数**:
+
+| 环节 | 状态 | 数 |
+|---|---|---|
+| 眼找球 | 🟢 | 单炮内 **6/6 · 13/13** 逐位相同(`742 px · 深 0.645 · 鼓出 0.062`) |
+| 逐末端探测(用哪只手) | 🟢 | `命令 0.0680 ⇒ **实到 0.0664**` ×2,两只手都真动 |
+| 挑手 | 🟢 | 第一次选中**非 0 号**:`⇒ 用第 1 条臂(离目标 0.355 画幅)` |
+| 腕相机↔手 的对应 | 🟢 | `手0→第1台 0.54` / `手1→第2台 0.46`(量出来的) |
+| 方向盘(通道表) | 🟢 | **6 列量到 6 列**,来回两遍**分歧 0%**,**已存进 `/root/cal.json`** |
+| 走过去 | 🟢 | `差 0.4808 m ⇒ ①走完了(还差 **0.0114 m**)` —— 48 厘米走完剩 1.1 厘米 |
+| 合爪 | 🟢 跑通 | `合到底,读数停在 0.0000 ⇒ **指间没东西**` —— **诚实报空,零假绿灯** |
+| 桌面完整性 | 🟢/🔴 | AY 整炮 6 件全在;BD 后半**被整条手臂摊平犁走**(见下) |
+| **抓起来** | 🔴 | **0 次** |
+
+**现在具名的阻塞(按证据排序)**:
+
+1. 🔴 **爪子和球从来没有在同一帧里同时看得清。** 头相机看球 6/6、看爪子只有几个像素(`看爪:配对 0` 整晚);腕相机看爪子清楚、**走两步就把球丢了**(BA 渲图:前 99 帧球在正中,之后 1200 帧只剩桌沿)。**而"爪子离球多远"是抓取唯一需要的量。** 其余多数病是这一条的下游。
+2. 🔴 **不知道自己的胳膊压在桌上。** BD 后半整条臂摊平横躺,把桌上东西犁走 —— 驱动只瞄一个点(指尖该到哪),对其余连杆在哪**没有任何表示**。
+3. 🟡 **每一集都要从零重量七样**(可达/交付 · 挑手 · 主眼 · 腕机 · 看爪 · 方向盘 · 空合零点),而抓起来要求**同一集内七样全成**。存盘 08-31 才第一次打通。
+
+**09-01 修完并已装机的四条**(每条都有渲图/日志证据,见 `LAB.md`):
+交接不许触发在自己手指上 · **不许在米和弧度上取同一个模**(这是"命令了却零位移"的真因)· 爪宽没真拟出来就不许拿它排序 · 认爪子不许认到别的手。
+**明确划掉一条**:"够不着就不许放行" **不做** —— LAB 记着这道闸加过并一小时内自撤,重加即重跑死杠杆。
+
+**下一步(判据先写死)**:
+- **下一炮**:带上那四条修,答一个问题 —— **光把数值层修干净,能不能抓起来。** 赢 = `合到停住…⇒ 指间有东西` 且渲图看到球在两指之间。
+- **再下一炮**:开 `BL_SELFMODEL`(**至今一次没跑过**,日志里 `自模` 出现 0 次),只为拿"每根关节管哪一片"那张图。它同时踩中地图空白第 1/3/12 条。
+- 之后:把 VLM 从"指哪个是球的工具"改成**主体**(上下文 = 它自己量出来的身体 + 刚才干了什么 + 结果),并且**不定时问、被惊到才问**(方向盘本身是预测器,预测对不上就叫醒)。
 
 ### 🔴🔴 架构上的定论(owner 2026-08-27,已落地)
 
