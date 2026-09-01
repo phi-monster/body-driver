@@ -881,7 +881,7 @@ fn main() {
         let 身体 = "- channel 6: the part that follows is at (0.81,0.56), 0.4% of frame\n                    - channel 2: moves 45% of your wrist camera\n";
         let 刚才 = "you commanded a move your body-model said would shift the picture by 0.0200 of a frame;                     it actually shifted by 0.0000. your hand physically moved 0.00000 m.";
         match body_layer::eye::问身体(h, port, "Pick up the baseball by 10 cm.", 身体, 刚才, &rgb, w, hh) {
-            Ok(d) => println!("[自检] 🟢 问身体通了 ⇒ 做什么=**{}** · 为什么={}", d.做什么, d.为什么),
+            Ok(d) => println!("[自检] 🟢 问身体通了 ⇒ 做什么=**{}** · 做到**{}**为止 · 为什么={}", d.做什么, d.到什么为止, d.为什么),
             Err(e) => println!("[自检] 🔴 问身体没通:{e}"),
         }
         return;
@@ -5325,6 +5325,10 @@ fn 服务<S: std::io::Read + std::io::Write>(
         出
     };
     let mut 挑过手 = false;
+    // 上一段干完之后要汇报给模型的那句话(它下一次的输入)。
+    let mut 上一段汇报: String = "this is the first segment; nothing has been tried yet.".into();
+    // 上一次朝哪个方向走的(单位向量)—— "退回我来的路"用它,不用任何记住的位姿。
+    let mut 退向: (f64, f64, f64) = (0.0, 0.0, 0.0);
     let 爪图号 = std::cell::Cell::new(0u32);
     let mut 部件图: Option<Vec<Vec<Option<一件>>>> = None;
     loop {
@@ -5350,48 +5354,6 @@ fn 服务<S: std::io::Read + std::io::Write>(
             //    而且每走一步都在给"我在画面哪"攒证据。**不站着,也不砸东西。**
             白转 = 0;
             // ══════════════════════════════════════════════════════════════════════
-            // 🔴🔴🔴 **第二个叫醒触发器:什么都没干成的时候,也要问一句"我是不是姿势不对"。**
-            //(owner 看 BH 视频定案 2026-09-02,原话:*"姿势极其怪异地看向天花板,
-            //  看到天花板后就再也回不来了,一直对着天花板自标定到结束 —— 主相机看不出来
-            //  这个机器出了问题吗?"*)
-            //
-            // **看得出来,而驱动里没有任何东西去问这个问题。**
-            // 我原来那个"被惊到才叫醒"**只装在伺服环里**,触发条件是"方向盘的预测和实际对不上";
-            // 而它对着天花板空转的时候**伺服根本没在跑**,所以那个触发**永远不会响** ——
-            // 于是它一直标定到结束,而头相机整段都拍着这个荒唐的姿势。
-            //
-            // ⇒ 第二个触发器用**外层本来就有的那个计数**:`白转`(连着几拍什么都没干成)。
-            //   **"连着干不成事"本身就是"出事了"**,不需要再发明一个信号。
-            //   给它头相机这一帧 + 它自己量出来的身体,让它说哪儿不对。
-            if 部件图.is_some() {
-                if let Some((cw3, ch3, crgb3)) = 彩(&帧, 相机号) {
-                    let 身体 = {
-                        let mut t = String::new();
-                        if let Some(图) = 部件图.as_ref() {
-                            for (kk, 件们) in 图.iter().enumerate() {
-                                if let Some(Some(x)) = 件们.get(相机号) {
-                                    t.push_str(&format!(
-                                        "- channel {kk}: when you move it, the part of the picture that follows is centred at ({:.2},{:.2}) and covers {:.1}% of the frame\n",
-                                        (x.框[0] + x.框[2]) * 0.5, (x.框[1] + x.框[3]) * 0.5, x.占 * 100.0));
-                                }
-                            }
-                        }
-                        t
-                    };
-                    let 刚才 = "you have tried several times in a row and achieved nothing at all.                                 this image is from the camera that is fixed in the world and can see your whole workspace.                                 look at it and say what is wrong with the situation you are in.";
-                    let 这句 = std::env::var("BL_ORDER").ok().filter(|t| !t.trim().is_empty())
-                        .or_else(|| plug.last.clone().and_then(|o| 取(&o, &["instruction".to_string()])).and_then(|v| 字(&v)))
-                        .unwrap_or_else(|| "do the task".into());
-                    match body_layer::eye::问身体(眼主机, 眼端口, &这句, &身体, 刚才, &crgb3, cw3, ch3) {
-                        Ok(断) => {
-                            println!("[身] ⚡ 连着几拍什么都没干成 ⇒ **叫醒模型问「我是不是姿势不对」**");
-                            println!("[身]    它说:**{}** —— {}", 断.做什么, 断.为什么);
-                            if 断.做什么 == "switch_hand" { 挑过手 = false; println!("[身]    ⇒ 下一轮重挑手"); }
-                        }
-                        Err(e) => println!("[身] ⚡ 想问但没问成:{e}"),
-                    }
-                }
-            }
             println!("[服] ⚠️ 连着两拍没做成任何尝试 ⇒ **挪一步让相机多看见我一点**(不盲合、不盲推)");
             let _ = 挪进画面(plug, 白转.wrapping_add(1), 帧.jaw.get(手号.get()).or_else(|| 帧.jaw.first()).copied().unwrap_or(1.0), *通道是关节);
             continue;
@@ -5660,6 +5622,108 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     }
                 }
                 部件图 = Some(图);
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════════════════════
+        // 🔴🔴🔴 **循环归模型。每一段开始先问它:做什么 + 做到什么条件为止再来找我。**
+        //(owner 2026-09-02 定,原话:*"为什么这个触发器需要你主动去设计?一个抓取任务
+        //  就要你设计这么多,那后面的机器人死斗、无人机任务你设计得完吗?你把 vlm 当成傻瓜了。"*)
+        //
+        // **我原来手写的那两个触发器已经删掉**(伺服预测对不上叫一次 · 空转几拍叫一次)——
+        // 它们和这个仓删掉的那 2019 行手写状态机是同一种病,只是换了个位置长出来:
+        // **任务有多少种,我就得写多少条触发器,而我永远写不完。**
+        //
+        // 现在的形状:**模型跑外层循环,驱动只负责"感觉"和"动作",每段结束回来汇报。**
+        //   · **做什么** 只能是驱动真的会执行的那几件(approach/close/open/retreat/
+        //     look_around/new_grasp_point/switch_hand/done)
+        //   · **到什么为止** 是它自己说的,而那五个词**仓里早就定好了**(`verb::Until`)、
+        //     **驱动本来就在量**:走完 / 碰上 / 推不动 / 东西不再跟着我 / 画面不再变
+        //
+        // ⇒ 成本自己就控制住了:它说"碰上再叫我",中间几十拍一次都不问。
+        // ⇒ 换任务不用改代码:格斗时它会说"直到对方的手碰到我",无人机时"直到高度不再变"。
+        // ⇒ **"什么时候思考"不再是我设计的东西。**
+        //
+        // ⚠️ 它答什么都**不承重到控制**:走多少永远由量出来的方向盘算,它只改**做什么**。
+        //    问不通 ⇒ 照常往下走(按 `approach` 办),并把理由说出来 —— **不许因为模型不答就停手**。
+        let 这一段 = if 部件图.is_some() {
+            match 彩(&帧, 相机号) {
+                Some((cw4, ch4, crgb4)) => {
+                    let 身体 = {
+                        let mut t = String::new();
+                        if let Some(图) = 部件图.as_ref() {
+                            for (kk, 件们) in 图.iter().enumerate() {
+                                if let Some(Some(x)) = 件们.get(相机号) {
+                                    t.push_str(&format!(
+                                        "- channel {kk}: when you move it, the part of the picture that follows is centred at ({:.2},{:.2}) and covers {:.1}% of the frame\n",
+                                        (x.框[0] + x.框[2]) * 0.5, (x.框[1] + x.框[3]) * 0.5, x.占 * 100.0));
+                                }
+                            }
+                        }
+                        t.push_str(&format!("- the target you were told to act on is at ({:.2},{:.2}) in this picture\n", look.u, look.v));
+                        t
+                    };
+                    let 刚才 = 上一段汇报.clone();
+                    match body_layer::eye::问身体(眼主机, 眼端口, &指令, &身体, &刚才, &crgb4, cw4, ch4) {
+                        Ok(d) => {
+                            println!("[身] 🧠 **这一段由模型定**:做什么=**{}** · 做到**{}**为止 —— {}",
+                                d.做什么, d.到什么为止, d.为什么);
+                            Some(d)
+                        }
+                        Err(e) => { println!("[身] 🧠 问不通({e})⇒ 按 approach 往下走,结果照实报"); None }
+                    }
+                }
+                None => None,
+            }
+        } else { None };
+        if let Some(d) = 这一段.as_ref() {
+            let j现 = 帧.jaw.get(手号.get()).or_else(|| 帧.jaw.first()).copied().unwrap_or(1.0);
+            match d.做什么.as_str() {
+                "look_around" => {
+                    let 挪了 = 挪进画面(plug, 白转.wrapping_add(1), j现, *通道是关节);
+                    上一段汇报 = format!("you asked to look_around until {}. the body moved one channel and reports: {}",
+                        d.到什么为止, if 挪了.unwrap_or(false) { "the picture changed" } else { "the picture barely changed" });
+                    continue;
+                }
+                "switch_hand" => {
+                    挑过手 = false;
+                    上一段汇报 = "you asked to switch_hand. the body will re-pick which end effector to use from its own measurements.".into();
+                    continue;
+                }
+                "open" => {
+                    抓握(plug, 1.0, *通道是关节); 定爪(plug, 等拍 * 4);
+                    let 读 = plug.sense().and_then(|f| f.jaw.get(手号.get()).copied()).unwrap_or(f64::NAN);
+                    上一段汇报 = format!("you asked to open until {}. the gripper reading is now {读:.4}.", d.到什么为止);
+                    println!("[身]    ⇒ 张开了,读数 {读:.4}");
+                    continue;
+                }
+                "close" => {
+                    let 停在 = 合到停住(plug, *通道是关节).unwrap_or(f64::NAN);
+                    let 有 = match *空合载 { Some(z) => (停在 - z).abs() > 1e-9, None => 停在 > 1e-9 };
+                    println!("[身]    ⇒ 合到停住,读数停在 {停在:.4} ⇒ **{}**", if 有 { "指间有东西" } else { "指间没东西" });
+                    上一段汇报 = format!("you asked to close until {}. the gripper stopped at {停在:.4}, which means {}.",
+                        d.到什么为止, if 有 { "something IS between the fingers" } else { "there is NOTHING between the fingers" });
+                    continue;
+                }
+                "retreat" => {
+                    if let Some(e) = plug.sense().and_then(|f| f.ee.get(手号.get()).copied()) {
+                        // "退回我来的路":沿着刚才走过来的方向退一个量出来的步子,不是回任何记住的点。
+                        let 退 = [e[0] - 退向.0 * 探步, e[1] - 退向.1 * 探步, e[2] - 退向.2 * 探步];
+                        let _ = 落(plug, 退, [e[3], e[4], e[5], e[6]], j现, 等拍);
+                    }
+                    上一段汇报 = format!("you asked to retreat until {}. the body backed off one step along the way it came.", d.到什么为止);
+                    continue;
+                }
+                "done" => {
+                    println!("[身]    ⇒ 它认为干完了 ⇒ 这一拍不再动手,下一拍重看");
+                    上一段汇报 = "you said done. the body did nothing and is looking again.".into();
+                    plug.act(&Cmd::Hold); continue;
+                }
+                "new_grasp_point" => {
+                    上一段汇报 = "you asked for a new grasp point. the body will look again and plan a different one.".into();
+                    continue;
+                }
+                _ => {}   // approach:落到下面那条本来就有的路
             }
         }
 
@@ -7571,72 +7635,6 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     // ⇒ 这一段只信**真的一动没动**(走 < 1e-5,下面那一条),它不依赖等停。
                     let _ = 挡;
                     上走 = 走;
-                    // ══════════════════════════════════════════════════════════════════
-                    // 🔴🔴🔴 **不定时问模型,【被惊到】才问。**(owner 2026-09-01 定)
-                    //
-                    // 方向盘本身就是一个**预测器**:它说"发这个命令,画面该跑这么多"。
-                    // 于是"叫醒模型"的时机不需要任何时间表 —— **实际和预测对不上,就是出事了**。
-                    // 平时一切如预期,模型一次都不问(日志量过:问一次眼 ≈ 10 个仿真步,
-                    // 每步都问在官方 200 步的一集里根本买不起)。
-                    //
-                    // 🔴 **而"发现事情不对"这件事,本来就是自我意识的那一半** ——
-                    //    所以这一条同时买到了效率和意识,不是折中,是同一个机制。
-                    //    对照:Butter-Bench 量过 **"察觉东西不在" 所有模型 0% / 人类 100%**;
-                    //    我们不靠模型去察觉,靠**它自己身体的预测残差**去察觉,再把模型叫来判断。
-                    //
-                    // 门槛不新增常数:用跟踪器自己的噪声 `噪`(量出来的)乘上别处同一个倍数 2。
-                    let 实动 = (现u - 上处.0).hypot(现v - 上处.1);
-                    let 该动 = 预测 * 比;
-                    if 部件图.is_some() && (实动 - 该动).abs() > 跟噪 * 2.0 && k > 0 {
-                        let 身体 = {
-                            let mut t = String::new();
-                            if let Some(图) = 部件图.as_ref() {
-                                for (kk, 件们) in 图.iter().enumerate() {
-                                    if let Some(Some(x)) = 件们.get(相机号) {
-                                        t.push_str(&format!(
-                                            "- channel {kk}: when you move it, the part of the picture that follows is centred at ({:.2},{:.2}) and covers {:.1}% of the frame\n",
-                                            (x.框[0] + x.框[2]) * 0.5, (x.框[1] + x.框[3]) * 0.5, x.占 * 100.0));
-                                    }
-                                }
-                            }
-                            t.push_str(&format!("- the part you are trying to bring to the target is at ({现u:.2},{现v:.2}) in this picture\n"));
-                            t.push_str(&format!("- the target is at ({目u:.2},{目v:.2}) in this picture\n"));
-                            t
-                        };
-                        let 刚才 = format!(
-                            "you commanded a move that your own body-model said would shift the picture by {该动:.4} of a frame;                              it actually shifted by {实动:.4}. your hand physically moved {走:.5} m.                              the gap between the part you are moving and the target is {差像:.4} of a frame."
-                        );
-                        // 🔴 这里要的是**彩色**帧(BE 实测:传灰度 ⇒ `画面短了:要 921600,只有 307200`,
-                        //    14 次全部没问成,主体那一块等于没上线)。
-                        let 彩帧 = plug.sense().and_then(|f| 彩(&f, 相机号));
-                        let Some((cw2, ch2, crgb2)) = 彩帧 else {
-                            println!("[身] ⚡ 想叫醒模型但这一拍没有彩色帧 ⇒ 照常走"); continue };
-                        match body_layer::eye::问身体(眼主机, 眼端口, &指令, &身体, &刚才, &crgb2, cw2, ch2) {
-                            Ok(断) => {
-                                println!("[身] ⚡ 预测 {该动:.4} / 实际 {实动:.4}(跟踪噪声 {跟噪:.4})⇒ **叫醒模型**");
-                                println!("[身]    它说:**{}** —— {}", 断.做什么, 断.为什么);
-                                match 断.做什么.as_str() {
-                                    "carry_on" => {}
-                                    "already_holding" => { println!("[身]    ⇒ 它认为已经夹住了 ⇒ 就地合,让读数去核"); 碰上了 = true; break }
-                                    "cannot_see_target" => { println!("[身]    ⇒ 它看不见目标 ⇒ 挪一步让相机多看见我一点"); 白转 = 白转.wrapping_add(1); break }
-                                    "new_grasp_point" => { println!("[身]    ⇒ 换个下手点"); break }
-                                    "switch_hand" => { println!("[身]    ⇒ 换只手 ⇒ 下一轮重挑"); 挑过手 = false; break }
-                                    "retreat" | "part_in_the_way" => {
-                                        println!("[身]    ⇒ 退回我来的路(不是停手)");
-                                        if let Some(e) = plug.sense().and_then(|f| f.ee.get(手号.get()).copied()) {
-                                            let _ = 落(plug, [e[0] - (e[0] - 伺起[0]) * 0.5,
-                                                              e[1] - (e[1] - 伺起[1]) * 0.5,
-                                                              e[2] - (e[2] - 伺起[2]) * 0.5],
-                                                       [e[3], e[4], e[5], e[6]], jaw0, 等拍);
-                                        }
-                                        break
-                                    }
-                                    其他 => println!("[身]    ⚠️ 不认识的答复「{其他}」⇒ 当没说,照常走"),
-                                }
-                            }
-                            Err(e) => println!("[身] ⚡ 想叫醒模型但没问成:{e} ⇒ 照常走,结果照实报"),
-                        }
-                    }
                     if 走 < 1e-5 { 没动 += 1 } else { 没动 = 0 }
                     if 没动 >= 5 {
                         减 += 1; 没动 = 0;

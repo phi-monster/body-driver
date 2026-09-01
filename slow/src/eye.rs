@@ -389,11 +389,26 @@ pub fn pick(
 //
 /// 它对当前局面的判断。`做什么` 是一个封闭集合 —— 驱动对每一项都有对应动作。
 pub struct 断 {
-    /// 只能是这几个之一(见 `问身体` 的 schema):
-    /// `carry_on` 继续 · `retreat` 退回我来的路 · `switch_hand` 换只手 ·
-    /// `new_grasp_point` 换个下手点 · `cannot_see_target` 我看不见目标了 ·
-    /// `already_holding` 已经夹住了 · `part_in_the_way` 我身上有别的地方挡着/压着东西
+    /// **做什么** —— 只能是驱动真的会执行的那几件:
+    /// `approach` 把我的接触面朝目标挪 · `close` 合 · `open` 张 · `retreat` 退回我来的路 ·
+    /// `look_around` 挪一步让相机多看见 · `new_grasp_point` 换个下手点 ·
+    /// `switch_hand` 换只手 · `done` 干完了
     pub 做什么: String,
+    /// 🔴🔴🔴 **做到什么条件为止再来找我 —— 这一格是它自己说的,不是任何人写死的触发器。**
+    ///(owner 2026-09-02:*"为什么这个触发器需要你主动去设计?一个抓取任务就要你设计这么多,
+    ///  那后面的机器人死斗、无人机任务你设计得完吗?你把 vlm 当成傻瓜了。"*)
+    ///
+    /// 之前是**我手写**"什么时候该问模型"(伺服预测对不上叫一次、空转几拍叫一次)——
+    /// 那和这个仓删掉的那 2019 行手写状态机是同一种病,只是换了个位置长出来:
+    /// **任务有多少种我就得写多少条触发器,而我永远写不完。**
+    ///
+    /// 现在反过来:**模型每次自己说它什么时候回来**,驱动照它说的执行、条件成立就回来汇报。
+    /// 换成格斗它会说"直到对方的手碰到我",换成无人机它会说"直到高度不再变" ——
+    /// **同一套机制,一行代码都不用改。**
+    ///
+    /// 这五个词**仓里早就定好了**(`verb::Until`),而且**驱动本来就在量它们**:
+    /// `amount` 走完 · `contact` 碰上 · `resist` 推不动 · `slip` 东西不再跟着我走 · `settle` 画面不再变。
+    pub 到什么为止: String,
     /// 它自己的理由(只进日志、只给人看,**不进任何判据**)。
     pub 为什么: String,
 }
@@ -420,11 +435,11 @@ pub fn 问身体(
     let b64 = base64(&bmp);
     let esc = |t: &str| t.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n");
     let prompt = format!(
-        "You are not a model looking at a picture. You ARE this robot. This image is what you see right now.\\n\\nYOUR BODY (you measured this yourself just now, by moving one channel at a time and watching which part of the picture followed):\\n{}\\n\\nWHAT YOU JUST DID AND WHAT HAPPENED:\\n{}\\n\\nWHAT YOU ARE TRYING TO DO: {}\\n\\nSomething did not go as your own body-model predicted, which is why you are being asked. Look at the picture and decide what to do next. Do NOT give distances, angles or any numbers - you are bad at those and the body already computes them. Only decide WHAT to do.",
+        "You are not a model looking at a picture. You ARE this robot. This image is what you see right now.\\n\\nYOUR BODY (you measured this yourself just now, by moving one channel at a time and watching which part of the picture followed):\\n{}\\n\\nWHAT YOU JUST DID AND WHAT HAPPENED:\\n{}\\n\\nWHAT YOU ARE TRYING TO DO: {}\\n\\nYou are in charge of the loop: the body only executes what you say and reports back. Decide the NEXT SEGMENT of work - WHAT to do, and UNTIL WHEN to do it before you are called again.\\n\\nWHAT you can do: approach (move your own contact surface toward the target in the picture) / close / open / retreat (back off the way you came) / look_around (move so the cameras see more of you and the target) / new_grasp_point / switch_hand / done.\\nUNTIL when (the body measures every one of these itself): amount (the move is finished) / contact (something is touched) / resist (it will not move any further) / slip (the thing stops following me) / settle (the picture stops changing).\\n\\nDo NOT give distances, angles or any numbers - you are bad at those and the body already computes them. Only decide WHAT and UNTIL WHEN.",
         esc(身体), esc(刚才), esc(任务)
     );
     let body = format!(
-        r#"{{"model":"eye","max_tokens":300,"temperature":0,"chat_template_kwargs":{{"enable_thinking":false}},"response_format":{{"type":"json_schema","json_schema":{{"name":"body_decision","strict":true,"schema":{{"type":"object","additionalProperties":false,"required":["do","why"],"properties":{{"do":{{"type":"string","enum":["carry_on","retreat","switch_hand","new_grasp_point","cannot_see_target","already_holding","part_in_the_way"]}},"why":{{"type":"string"}}}}}}}}}},"messages":[{{"role":"user","content":[{{"type":"image_url","image_url":{{"url":"data:image/bmp;base64,{b64}"}}}},{{"type":"text","text":"{prompt}"}}]}}]}}"#
+        r#"{{"model":"eye","max_tokens":300,"temperature":0,"chat_template_kwargs":{{"enable_thinking":false}},"response_format":{{"type":"json_schema","json_schema":{{"name":"body_decision","strict":true,"schema":{{"type":"object","additionalProperties":false,"required":["do","until","why"],"properties":{{"do":{{"type":"string","enum":["approach","close","open","retreat","look_around","new_grasp_point","switch_hand","done"]}},"until":{{"type":"string","enum":["amount","contact","resist","slip","settle"]}},"why":{{"type":"string"}}}}}}}}}},"messages":[{{"role":"user","content":[{{"type":"image_url","image_url":{{"url":"data:image/bmp;base64,{b64}"}}}},{{"type":"text","text":"{prompt}"}}]}}]}}"#
     );
     let raw = post(host, port, "/v1/chat/completions", &body)?;
     let inner = extract_content(&raw)
@@ -434,5 +449,7 @@ pub fn 问身体(
     let t = |k: &str| j.get(k).and_then(|x| x.text()).unwrap_or("").to_string();
     let d = t("do");
     if d.is_empty() { return Err("眼没给 do".into()) }
-    Ok(断 { 做什么: d, 为什么: t("why") })
+    let u = t("until");
+    if u.is_empty() { return Err("眼没给 until".into()) }
+    Ok(断 { 做什么: d, 到什么为止: u, 为什么: t("why") })
 }
