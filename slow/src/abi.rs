@@ -115,8 +115,11 @@ pub struct CWorldRef {
     pub v: f64,
     /// 0 for a point; >0 = region radius
     pub extent: f64,
-    /// `bl_verb`
-    pub verb: u32,
+    /// 🔴 **原来这里是 `verb`(`bl_verb` 那张 5 词表),2026-09-02 删除。**
+    /// 换成:**那个东西最后要落到画面上编号网格的第几格**(1 起;0 = 说不上来)。
+    /// 动词是语言的分类,力学只认"物体最后什么样";而"第几格"正是接触集第③格
+    /// (物体要怎么动)在画面里的说法,换什么机体、什么任务都成立。
+    pub goal_cell: u32,
     /// `[0,1]` coarse effort. Force is stiffness × deflection — physics, zero data.
     pub manner: f64,
     /// which frame this refers to
@@ -1405,36 +1408,9 @@ pub unsafe extern "C" fn bl_grasp_check(
     ) as u32
 }
 
-/// 自查之后该怎么办。合到底 ⇒ 换招式,不是换地方。
-#[no_mangle]
-pub unsafe extern "C" fn bl_after_check(verb: u32, check: u32, out_verb: *mut u32) -> u32 {
-    let v = match crate::verb::Verb::from_u32(verb) {
-        Some(v) => v,
-        None => return 255,
-    };
-    let c = match check {
-        0 => crate::verb::Check::AsPlanned,
-        1 => crate::verb::Check::ClosedOnAir,
-        2 => crate::verb::Check::WrongSection,
-        3 => crate::verb::Check::KnockedAway,
-        // 劈开的两档:编号往后加,既有 0..3 不动 —— ABI 的既有编号一改,
-        // 所有已编译的调用方会静默换语义,而这正是本层存在的理由。
-        4 => crate::verb::Check::StoppedWide,
-        5 => crate::verb::Check::PinchedThinner,
-        _ => return 255,
-    };
-    match crate::verb::decide(v, c) {
-        crate::verb::Next::Proceed => 0,
-        crate::verb::Next::NextContact => 1,
-        crate::verb::Next::ChangeVerb(nv) => {
-            if !out_verb.is_null() {
-                unsafe { *out_verb = nv as u32 };
-            }
-            2
-        }
-        crate::verb::Next::Relook => 3,
-    }
-}
+// 🔴🔴🔴 **`bl_after_check` 已删(owner 2026-09-02:动词表必须现在删,不然算作弊)。**
+// 它是一张【按动词查下一步】的表(合到空气 ⇒ 换成撬),而"下一步做什么"现在整个归模型:
+// 模型只说**那个东西最后要落到第几格**,中间步骤由驱动从量出来的东西自己解。
 
 #[no_mangle]
 pub unsafe extern "C" fn bl_touching(

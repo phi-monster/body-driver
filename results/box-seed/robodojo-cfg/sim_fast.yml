@@ -1,0 +1,27 @@
+# 🔴🔴 这一份是为"自检必须十分钟内跑完"改的(owner 2026-08-24 死线),
+#     而且**记分炮必须用同一份** —— 否则自标定量到的交付率和任务跑的不是同一件事。
+#
+# 根因:官方默认一个动作 = 10 个控制帧 × decimation(1) × dt(0.004) = **40 毫秒**。
+# 这条 Franka 在 40 毫秒里追不到 IK 目标 ⇒ 实测每拍只交付 **6.3%**。
+# 而这个 6.3% 同时放大两件事:静置要等 75 拍;每一相的步数被 ×(1/交付) 补偿(封顶 ×10)。
+# ⇒ 自检 ≈ 3.3 万拍 ≈ 100 分钟。
+#
+# decimation: 100  ⇒ 一个动作给手臂 400 毫秒,交付率应跳到 0.5 以上
+#                   ⇒ 静置 ~7 拍、步数乘子 ~×2 ⇒ 总拍数掉约一个量级。
+# render_interval: 1000 ⇒ 仍然**每个动作只渲一帧**(100 物理步 = 1 个动作),渲染开销不涨。
+#   实测依据:渲染画质(203ms vs 195ms)和物理设备(182ms vs 195ms)都不是瓶颈
+#   ⇒ 每帧那 ~180ms 是**每个动作的固定开销** ⇒ 动作数少 10 倍,墙上时间就少 10 倍。
+device: cuda
+decimation: 100
+dt: 0.004
+render_interval: 100
+scene:
+  num_envs: 10
+  env_spacing: 7
+render:
+  rendering_mode: performance
+  enable_global_illumination: false
+  enable_reflections: false
+  enable_translucency: false
+  antialiasing_mode: "FXAA"
+  dlss_mode: 0

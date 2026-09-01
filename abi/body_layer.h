@@ -29,8 +29,9 @@
  *   - `bl_policy_in` has no field through which a body parameter, a camera intrinsic/extrinsic, a
  *     joint angle, a link length, a true object pose, or a task identifier can arrive.  Not
  *     "should not" -- CANNOT.  There is no such member.
- *   - `bl_world_ref` (what any VLM/WM emits) is a normalised PIXEL plus a verb plus a coarse
- *     manner scalar.  It cannot carry 3-D.  A pointer that cannot express a pose cannot leak one.
+ *   - `bl_world_ref` (what any VLM/WM emits) is a normalised PIXEL plus WHICH NUMBERED CELL the
+ *     thing must end up in.  It cannot carry 3-D.  A pointer that cannot express a pose cannot
+ *     leak one.  (The verb + manner words that used to sit here were deleted 2026-09-02.)
  *   - Everything a body needs to turn that reference into joint commands lives behind
  *     `bl_execute`, on this side of the measure/learn line.
  *
@@ -204,26 +205,25 @@ typedef struct {
  * no object id, no task id.  The eye earns WHERE from pixels; a noun tells it WHAT, and a noun
  * carries no position information -- a person saying "pick up the scissors" transfers none.
  *
- * `verb` and `manner` are the whole of the intent channel.  Widening this struct is the one change
+ * `goal_cell` is the whole of the intent channel -- where the thing must end up.  Widening this struct is the one change
  * that can quietly destroy the embodiment-agnostic property, because "a point" means the same
  * thing on every body while "a whole-body trajectory" does not.  Any proposal to add a field must
  * state, in the same breath, what it costs in body-independence.
  */
-typedef enum {
-    BL_V_REACH   = 0,
-    BL_V_GRASP   = 1,
-    BL_V_RELEASE = 2,
-    BL_V_PRESS   = 3,
-    BL_V_WIPE    = 4,   /* the reference is a region; see bl_world_ref.extent      */
-    BL_V_COUNT   = 5
-} bl_verb;
+/* 🔴🔴🔴 The verb table `bl_verb` was DELETED on 2026-09-02 (owner: "delete the verb table
+ * now, otherwise it counts as cheating").  A verb is a category of LANGUAGE; mechanics only
+ * knows WHICH POINTS ARE TOUCHED, WHICH WAY EACH IS PUSHED, AND WHAT THE OBJECT ENDS UP LIKE.
+ * Thirteen verbs collapse into that one template (see contact-set/), so the eye no longer picks
+ * a word out of a list somebody wrote down.  It says one thing about the world instead:
+ * WHICH NUMBERED CELL THE THING MUST END UP IN -- the contact set's slot 3 (how the object must
+ * move), stated in the picture.  Reaching, opening, closing, backing off, switching hands are
+ * not "things" any more; the body works them out from what it measured. */
 
 typedef struct {
     double   u, v;        /* normalised pixel in the frame the eye was shown          */
     double   extent;      /* 0 for a point; >0 = radius of a region, same units as u,v*/
-    uint32_t verb;        /* bl_verb                                                  */
-    double   manner;      /* [0,1] coarse effort: the eye says light/medium/firm.     */
-                          /* Force is stiffness x deflection -- physics, zero data.   */
+    uint32_t goal_cell;   /* which numbered grid cell the thing must END UP in (1..N; */
+                          /* 0 = cannot say).  Replaced `verb` -- see the note above.  */
     uint64_t frame_id;    /* which frame this refers to; staleness is checkable       */
 } bl_world_ref;
 
@@ -717,15 +717,15 @@ typedef enum {
     BL_TOUCH_STUCK   = 3    /* blocked both ways -- NOT contact; no solution here */
 } bl_touch;
 
-/* 动词层 (2026-08-12).  纯函数,无状态 —— 策略只能问,不能自己算。判据见 slow/src/verb.rs. */
+/* 自查层 (2026-08-12;动词那部分 2026-09-02 删除).  纯函数,无状态 —— 策略只能问,不能自己算。判据见 slow/src/verb.rs. */
 uint32_t bl_contact_seen(double commanded_m, double achieved_m, double contact_threshold,
                          double object_moved_m, double object_move_eps);
 uint32_t bl_spannable(double section_width_m, double jaw_span_m, double margin_m);
 /* -> 0 AsPlanned | 1 ClosedOnAir | 2 WrongSection | 3 KnockedAway */
 uint32_t bl_grasp_check(double planned_w_m, double jaw_value, double jaw_span_m,
                         double object_moved_m, double knock_eps_m, double tol_frac);
-/* -> 0 Proceed | 1 NextContact | 2 ChangeVerb(*out_verb) | 3 Relook | 255 bad input */
-uint32_t bl_after_check(uint32_t verb, uint32_t check, uint32_t *out_verb);
+/* `bl_after_check` DELETED 2026-09-02 with the verb table: it was a "look up the next step by
+ * verb" table, and what to do next now belongs entirely to the model. */
 
 bl_status bl_touching(const void *b, double delivered_along, double delivered_reverse,
                       uint32_t has_reverse, double sideways, uint32_t has_sideways,

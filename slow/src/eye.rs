@@ -27,10 +27,6 @@ pub struct Look {
     pub v: f64,
     /// 那一块占画面宽度的几分之几。
     pub span_frac: f64,
-    /// 动词。
-    pub verb: String,
-    /// 粗略力度。
-    pub force: String,
     /// 🔴 眼给的框,归一化 `[x0, y0, x1, y1]`(0=左/上,1=右/下)。
     /// `u`/`v`/`span_frac` 都是从它算出来的 —— 留原始框是为了下游能画出来核对。
     pub box01: [f64; 4],
@@ -78,7 +74,7 @@ pub fn ask(host: &str, port: u16, what: &str, rgb: &[u8], w: usize, h: usize) ->
          and y is 0 at the top edge and 1 at the bottom edge."
     );
     let body = format!(
-        r#"{{"model":"eye","max_tokens":600,"temperature":0,"chat_template_kwargs":{{"enable_thinking":false}},"response_format":{{"type":"json_schema","json_schema":{{"name":"contact_ask","strict":true,"schema":{{"type":"object","additionalProperties":false,"required":["x0","y0","x1","y1","verb","force"],"properties":{{"x0":{{"type":"number","minimum":0,"maximum":1}},"y0":{{"type":"number","minimum":0,"maximum":1}},"x1":{{"type":"number","minimum":0,"maximum":1}},"y1":{{"type":"number","minimum":0,"maximum":1}},"verb":{{"type":"string","enum":["grasp","push","place","pry","open","close"]}},"force":{{"type":"string","enum":["light","medium","firm"]}}}}}}}}}},"messages":[{{"role":"user","content":[{{"type":"image_url","image_url":{{"url":"data:image/bmp;base64,{b64}"}}}},{{"type":"text","text":"{prompt}"}}]}}]}}"#
+        r#"{{"model":"eye","max_tokens":600,"temperature":0,"chat_template_kwargs":{{"enable_thinking":false}},"response_format":{{"type":"json_schema","json_schema":{{"name":"contact_ask","strict":true,"schema":{{"type":"object","additionalProperties":false,"required":["x0","y0","x1","y1"],"properties":{{"x0":{{"type":"number","minimum":0,"maximum":1}},"y0":{{"type":"number","minimum":0,"maximum":1}},"x1":{{"type":"number","minimum":0,"maximum":1}},"y1":{{"type":"number","minimum":0,"maximum":1}}}}}}}}}},"messages":[{{"role":"user","content":[{{"type":"image_url","image_url":{{"url":"data:image/bmp;base64,{b64}"}}}},{{"type":"text","text":"{prompt}"}}]}}]}}"#
     );
 
     // 🔴 **上限 200 在腕相机的特写上会被顶到**(实测:偏移 635 处对象没收尾),
@@ -103,9 +99,6 @@ pub fn ask(host: &str, port: u16, what: &str, rgb: &[u8], w: usize, h: usize) ->
             .and_then(|x| x.num())
             .ok_or_else(|| format!("眼没给 {k}"))
     };
-    let txt = |k: &str| -> String {
-        j.get(k).and_then(|x| x.text()).unwrap_or("").to_string()
-    };
     // 🔴 **不要往这张表里加格子,也不要把结论放在证据前面。** 两条都是实测:
     // 五格稳,加到九格时点位退化成 `1,1`;而把 `status` 这类结论放在第一个字段时,
     // 自回归解码让它在看到 u/v 之前就得先盖章 —— 三问全答弃权,而同一次里 u/v 写的是对的。
@@ -128,8 +121,6 @@ pub fn ask(host: &str, port: u16, what: &str, rgb: &[u8], w: usize, h: usize) ->
         u: (bx0 + bx1) * 0.5,
         v: (by0 + by1) * 0.5,
         span_frac: 长边f,
-        verb: txt("verb"),
-        force: txt("force"),
         box01: [bx0, by0, bx1, by1],
     })
 }
@@ -303,14 +294,6 @@ mod tests {
 pub struct Pick {
     /// 挑中的编号(1 起);`0` = 一块都不是。
     pub region: usize,
-    /// 要做什么(和 `ask` 同一张词表)。
-    pub verb: String,
-    /// 要多用力:`light|medium|firm`。
-    ///
-    /// 🔴 这一格以前**全仓只有一处引用,而那一处只是把它抄进另一个结构体** ——
-    /// 眼每一拍都在答这个问题,答案被原样扔掉(`fast::admit` 的力参数从头到尾传 `0.0`)。
-    /// 减法②把它接上了:它变成"这具身体自己那把尺上的位置",而尺的两端是量出来的。
-    pub force: String,
 }
 
 pub fn pick(
@@ -334,11 +317,10 @@ pub fn pick(
         "Task: {what}\\n\\nThe image has {n} numbered boxes drawn on it. \
          Each box outlines one physical object on the surface. \
          Which numbered box is the object the task refers to? \
-         Answer with that number. If none of the boxes is that object, answer 0. \
-         Also say what to do to it and how hard."
+         Answer with that number. If none of the boxes is that object, answer 0."
     );
     let body = format!(
-        r#"{{"model":"eye","max_tokens":200,"temperature":0,"chat_template_kwargs":{{"enable_thinking":false}},"response_format":{{"type":"json_schema","json_schema":{{"name":"pick_region","strict":true,"schema":{{"type":"object","additionalProperties":false,"required":["region","verb","force"],"properties":{{"region":{{"type":"integer","minimum":0,"maximum":{n}}},"verb":{{"type":"string","enum":["grasp","push","place","pry","open","close"]}},"force":{{"type":"string","enum":["light","medium","firm"]}}}}}}}}}},"messages":[{{"role":"user","content":[{{"type":"image_url","image_url":{{"url":"data:image/bmp;base64,{b64}"}}}},{{"type":"text","text":"{prompt}"}}]}}]}}"#
+        r#"{{"model":"eye","max_tokens":200,"temperature":0,"chat_template_kwargs":{{"enable_thinking":false}},"response_format":{{"type":"json_schema","json_schema":{{"name":"pick_region","strict":true,"schema":{{"type":"object","additionalProperties":false,"required":["region"],"properties":{{"region":{{"type":"integer","minimum":0,"maximum":{n}}}}}}}}}}},"messages":[{{"role":"user","content":[{{"type":"image_url","image_url":{{"url":"data:image/bmp;base64,{b64}"}}}},{{"type":"text","text":"{prompt}"}}]}}]}}"#
     );
     let raw = post(host, port, "/v1/chat/completions", &body)?;
     let inner = extract_content(&raw).ok_or_else(|| {
@@ -359,7 +341,7 @@ pub fn pick(
         return Err(format!("眼给的 region 不合法:{r}"));
     }
     let t = |k: &str| j.get(k).and_then(|x| x.text()).unwrap_or("").to_string();
-    Ok(Pick { region: r.round() as usize, verb: t("verb"), force: t("force") })
+    Ok(Pick { region: r.round() as usize })
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -388,58 +370,71 @@ pub fn pick(
 //  ③ 它答什么都**不许承重到控制**:走多少永远由量出来的方向盘算。它只改**做什么**。
 //
 /// 它对当前局面的判断。`做什么` 是一个封闭集合 —— 驱动对每一项都有对应动作。
-pub struct 断 {
-    /// **做什么** —— 只能是驱动真的会执行的那几件:
-    /// `approach` 把我的接触面朝目标挪 · `close` 合 · `open` 张 · `retreat` 退回我来的路 ·
-    /// `look_around` 挪一步让相机多看见 · `new_grasp_point` 换个下手点 ·
-    /// `switch_hand` 换只手 · `done` 干完了
-    pub 做什么: String,
+/// 它对当前局面的判断。**里面没有一个动词。**
+///
+/// 🔴🔴🔴 **动词表在 2026-09-02 被 owner 下令整片删除**(原话:*"动词表必须现在删,不然算作弊"*)。
+/// 删掉的是三张:这里的 8 个(approach/close/open/retreat/look_around/new_grasp_point/
+/// switch_hand/done)· `pick` 的 6 个(grasp/push/place/pry/open/close)· `ask` 的同一份,
+/// 外加 3 档力度(light/medium/firm)。
+///
+/// **替代品不是我发明的,是仓里早就建好并测过的那句话** —— 接触集第③格:
+/// *"① 碰哪几个点 · ② 每点的法向和锥 · ③ **物体要怎么动** · ④ 容差"*。
+/// 十三个动词本来就塌进这一张表(80 个单元测试;吸盘一个点、三指三个点、五指五个点填同一张)。
+/// 这里把第③格说成**画面里的一格**:*"这个东西最后要落到第几格。"*
+///
+/// - **抓起来 10 厘米** = 球要落到它上方那一格
+/// - **拿球砸小人** = 球要落到小人所在的那一格
+/// - **换只手 / 换个下手点 / 退回去 / 张开** —— 全都不再是"一件事",
+///   它们是驱动为了把东西送到那一格而自己解出来的中间步骤。
+///
+/// ⚠️ **为什么是"第几格"而不是坐标**:VLM 定量几何弱(RoboVista 最好 56.5%、30.2% 认错东西),
+/// 但**选择题做得好**(同批模型选轨迹 0.916)。仓里挑物体已经是"第几块"这个形状,这里照抄。
+pub struct 段 {
+    /// **这个东西最后要落到第几格**(1 起;0 = 我说不上来,你自己按上一段接着干)。
+    pub 到哪一格: usize,
     /// 🔴🔴🔴 **做到什么条件为止再来找我 —— 这一格是它自己说的,不是任何人写死的触发器。**
     ///(owner 2026-09-02:*"为什么这个触发器需要你主动去设计?一个抓取任务就要你设计这么多,
     ///  那后面的机器人死斗、无人机任务你设计得完吗?你把 vlm 当成傻瓜了。"*)
     ///
-    /// 之前是**我手写**"什么时候该问模型"(伺服预测对不上叫一次、空转几拍叫一次)——
-    /// 那和这个仓删掉的那 2019 行手写状态机是同一种病,只是换了个位置长出来:
-    /// **任务有多少种我就得写多少条触发器,而我永远写不完。**
-    ///
-    /// 现在反过来:**模型每次自己说它什么时候回来**,驱动照它说的执行、条件成立就回来汇报。
-    /// 换成格斗它会说"直到对方的手碰到我",换成无人机它会说"直到高度不再变" ——
-    /// **同一套机制,一行代码都不用改。**
-    ///
-    /// 这五个词**仓里早就定好了**(`verb::Until`),而且**驱动本来就在量它们**:
-    /// `amount` 走完 · `contact` 碰上 · `resist` 推不动 · `slip` 东西不再跟着我走 · `settle` 画面不再变。
+    /// 这五个**是【事件】不是动词** —— 任何传感器都认得出来,换什么机器、什么任务都成立:
+    /// `amount` 走完 · `contact` 碰上 · `resist` 推不动 · `slip` 东西不再跟着我 · `settle` 画面不再变。
+    /// 而且**驱动本来就在量它们**(`verb::Until`)。
     pub 到什么为止: String,
+    /// 它认为整件事已经做完了。
+    pub 完了: bool,
     /// 它自己的理由(只进日志、只给人看,**不进任何判据**)。
     pub 为什么: String,
 }
 
-/// 问它:**你现在这具身体、这个局面,该怎么办。**
+/// 问它:**你现在这具身体、这个局面,那个东西该落到哪一格。**
 ///
-/// `身体` 是调用方从**部件图**拼出来的一段话(第几号通道一动、画面里哪一片跟着动、
-/// 哪几个是接触面、哪台相机长在哪儿)。`刚才` 是"我下了什么命令、实际发生了什么"。
-/// 两段都必须是**量出来的**,调用方不许往里塞任何常数。
-pub fn 问身体(
+/// `身体` 是调用方从**部件图**拼出来的一段话(第几号通道一动、画面里哪一片跟着动)。
+/// `刚才` 是"我下了什么命令、实际发生了什么"。两段都必须是**量出来的**,
+/// 调用方不许往里塞任何常数。`格数` 是画面上画了几格。
+pub fn 问段(
     host: &str,
     port: u16,
     任务: &str,
     身体: &str,
     刚才: &str,
+    格数: usize,
     rgb: &[u8],
     w: usize,
     h: usize,
-) -> Result<断, String> {
+) -> Result<段, String> {
     if rgb.len() < w * h * 3 {
         return Err(format!("画面短了:要 {} 字节,只有 {}", w * h * 3, rgb.len()));
     }
+    if 格数 == 0 { return Err("画面上一格都没画".into()) }
     let bmp = bmp24(rgb, w, h);
     let b64 = base64(&bmp);
     let esc = |t: &str| t.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n");
     let prompt = format!(
-        "You are not a model looking at a picture. You ARE this robot. This image is what you see right now.\\n\\nYOUR BODY (you measured this yourself just now, by moving one channel at a time and watching which part of the picture followed):\\n{}\\n\\nWHAT YOU JUST DID AND WHAT HAPPENED:\\n{}\\n\\nWHAT YOU ARE TRYING TO DO: {}\\n\\nYou are in charge of the loop: the body only executes what you say and reports back. Decide the NEXT SEGMENT of work - WHAT to do, and UNTIL WHEN to do it before you are called again.\\n\\nWHAT you can do: approach (move your own contact surface toward the target in the picture) / close / open / retreat (back off the way you came) / look_around (move so the cameras see more of you and the target) / new_grasp_point / switch_hand / done.\\nUNTIL when (the body measures every one of these itself): amount (the move is finished) / contact (something is touched) / resist (it will not move any further) / slip (the thing stops following me) / settle (the picture stops changing).\\n\\nDo NOT give distances, angles or any numbers - you are bad at those and the body already computes them. Only decide WHAT and UNTIL WHEN.",
+        "You are not a model looking at a picture. You ARE this robot. This image is what you see right now, with a numbered grid drawn over it (cells 1..{格数}).\\n\\nYOUR BODY (you measured this yourself just now, by moving one channel at a time and watching which part of the picture followed):\\n{}\\n\\nWHAT YOU JUST DID AND WHAT HAPPENED:\\n{}\\n\\nWHAT YOU ARE TRYING TO DO: {}\\n\\nYou are in charge of the loop. There are NO action words - none exist. You say only ONE thing about the world: WHICH NUMBERED CELL THE THING YOU ARE ACTING ON MUST END UP IN. Reaching, opening, closing, backing off, using the other hand - the body works all of that out by itself from what it measured; you never name any of it.\\n\\nAlso say WHEN to call you back. These are EVENTS the body measures, not actions: amount (the move is finished) / contact (something is touched) / resist (it will not move any further) / slip (the thing stops following me) / settle (the picture stops changing).\\n\\nSet done=true only when the thing has ALREADY ended up where the task wants it.\\n\\nDo NOT give distances, angles, speeds or any numbers - you are bad at those and the body already measures them.",
         esc(身体), esc(刚才), esc(任务)
     );
     let body = format!(
-        r#"{{"model":"eye","max_tokens":300,"temperature":0,"chat_template_kwargs":{{"enable_thinking":false}},"response_format":{{"type":"json_schema","json_schema":{{"name":"body_decision","strict":true,"schema":{{"type":"object","additionalProperties":false,"required":["do","until","why"],"properties":{{"do":{{"type":"string","enum":["approach","close","open","retreat","look_around","new_grasp_point","switch_hand","done"]}},"until":{{"type":"string","enum":["amount","contact","resist","slip","settle"]}},"why":{{"type":"string"}}}}}}}}}},"messages":[{{"role":"user","content":[{{"type":"image_url","image_url":{{"url":"data:image/bmp;base64,{b64}"}}}},{{"type":"text","text":"{prompt}"}}]}}]}}"#
+        r#"{{"model":"eye","max_tokens":300,"temperature":0,"chat_template_kwargs":{{"enable_thinking":false}},"response_format":{{"type":"json_schema","json_schema":{{"name":"where_it_must_end_up","strict":true,"schema":{{"type":"object","additionalProperties":false,"required":["goal_cell","until","done","why"],"properties":{{"goal_cell":{{"type":"integer","minimum":0,"maximum":{格数}}},"until":{{"type":"string","enum":["amount","contact","resist","slip","settle"]}},"done":{{"type":"boolean"}},"why":{{"type":"string"}}}}}}}}}},"messages":[{{"role":"user","content":[{{"type":"image_url","image_url":{{"url":"data:image/bmp;base64,{b64}"}}}},{{"type":"text","text":"{prompt}"}}]}}]}}"#
     );
     let raw = post(host, port, "/v1/chat/completions", &body)?;
     let inner = extract_content(&raw)
@@ -447,9 +442,12 @@ pub fn 问身体(
     let j = crate::json::parse(&inner)
         .map_err(|e| format!("眼给的不是 JSON: {e} ‖ 前 200 字:{}", &inner[..inner.len().min(200)]))?;
     let t = |k: &str| j.get(k).and_then(|x| x.text()).unwrap_or("").to_string();
-    let d = t("do");
-    if d.is_empty() { return Err("眼没给 do".into()) }
     let u = t("until");
     if u.is_empty() { return Err("眼没给 until".into()) }
-    Ok(断 { 做什么: d, 到什么为止: u, 为什么: t("why") })
+    let g = j.get("goal_cell").and_then(|x| x.num()).ok_or_else(|| "眼没给 goal_cell".to_string())?;
+    if !(g.is_finite() && g >= 0.0 && g <= 格数 as f64) {
+        return Err(format!("眼给的格号不合法:{g}(只有 {格数} 格)"));
+    }
+    let d = j.get("done").and_then(|x| x.boolean()).unwrap_or(false);
+    Ok(段 { 到哪一格: g.round() as usize, 到什么为止: u, 完了: d, 为什么: t("why") })
 }

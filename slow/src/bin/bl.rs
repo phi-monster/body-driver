@@ -56,8 +56,7 @@ use body_layer::floor::{fit as floor_fit, read_stop, Stop};
 use body_layer::hand::{Config as HandConfig, HandTracker};
 use body_layer::store::{Answer, Store};
 use body_layer::verb::{
-    classify, contact_seen, decide, demand, holding, spannable, turn_before_lift, Axes, Check, Hold,
-    Next, Verb,
+    classify, contact_seen, holding, spannable, Check, Hold,
 };
 use body_layer::measurement::Quantity;
 use body_layer::probe::{at_home, gripper_span_by_stall, home_pose};
@@ -164,38 +163,10 @@ fn handle(t: &[&str], store: &mut Option<Store>) -> String {
             None => "err check 要 6 个数".into(),
             Some(a) => check_name(classify(a[0], a[1], a[2], a[3], a[4], a[5])).into(),
         },
-        "next" => {
-            let (Some(v), Some(c)) = (t.get(1).and_then(|x| verb_of(x)), t.get(2).and_then(|x| check_of(x)))
-            else {
-                return "err next 要 <动词> <自查结果>".into();
-            };
-            match decide(v, c) {
-                Next::Proceed => "proceed".into(),
-                Next::NextContact => "nextcontact".into(),
-                Next::Relook => "relook".into(),
-                Next::ChangeVerb(nv) => format!("changeverb {}", verb_name(nv)),
-            }
-        }
-        // 接触集的第三格:**物体**要怎么动。炮一的装置闸认的就是 rotates=1。
-        "move" => {
-            let Some(v) = t.get(1).and_then(|x| verb_of(x)) else {
-                return "err move 要 <动词> <轴xyz> <方向xyz> <多少>".into();
-            };
-            let Some(a) = nums(&t[1..], 10) else {
-                return "err move 要 <动词> <工具轴xyz> <钳口轴xyz> <方向xyz> <多少>".into();
-            };
-            // 🔴 两条轴都要给,由驱动挑 —— 让调用方挑就是把 LAB "TWIST 判词反转" 那条教训
-            //    交还给"人记不记得",而它已经错过一次了。
-            let ax = Axes { tool: [a[0], a[1], a[2]], jaw: [a[3], a[4], a[5]] };
-            let m = demand(v, ax, [a[6], a[7], a[8]], a[9]);
-            format!(
-                "along {} {} {} {} about {} {} {} {} rotates {} turnfirst {}",
-                m.along[0], m.along[1], m.along[2], m.dist_m,
-                m.about[0], m.about[1], m.about[2], m.turn_rad,
-                m.rotates() as u8,
-                turn_before_lift(v) as u8
-            )
-        }
+        // 🔴🔴🔴 **`next` 和 `move` 两条命令已删(owner 2026-09-02:动词表必须现在删,
+        // 不然算作弊)。** 两条都吃一个动词:`next` 是"按动词查下一步"那张表,
+        // `move` 是"动词+参数→物体怎么动"。现在这两件事都归模型,而模型只说
+        // **那个东西最后要落到第几格** —— 中间步骤由驱动从量出来的东西自己解。
         // 爪张开度的第二条测法(不用相机):喂一份 "爪停值 真实料厚" 的表,驱动自己拟合。
         // 🔴 拟合必须在驱动里做,不能在策略里做 —— 身体常数只有一个出口,这一条也不例外。
         "jawcal" => {
@@ -560,11 +531,6 @@ fn handle(t: &[&str], store: &mut Option<Store>) -> String {
                 Hold::WasEmpty => "empty".into(),
             },
         },
-        "verbs" => (0..13u32)
-            .filter_map(Verb::from_u32)
-            .map(verb_name)
-            .collect::<Vec<_>>()
-            .join(" "),
         _ => "err unknown".into(),
     }
 }
@@ -643,33 +609,6 @@ fn read_pgm(path: &str) -> Result<(usize, usize, Vec<u8>), String> {
     Ok((w, h, raw[i..i + need].to_vec()))
 }
 
-fn verb_name(v: Verb) -> &'static str {
-    match v {
-        Verb::Reach => "reach",
-        Verb::Grasp => "grasp",
-        Verb::Release => "release",
-        Verb::Press => "press",
-        Verb::Wipe => "wipe",
-        Verb::Push => "push",
-        Verb::Pry => "pry",
-        Verb::Flip => "flip",
-        Verb::Pour => "pour",
-        Verb::Twist => "twist",
-        Verb::Insert => "insert",
-        Verb::Scoop => "scoop",
-        Verb::Place => "place",
-    }
-}
-
-fn verb_of(s: &str) -> Option<Verb> {
-    // 数字也收 —— 眼睛那一侧递过来的就是 `bl_world_ref.verb` 里的那个整数。
-    if let Ok(n) = s.parse::<u32>() {
-        return Verb::from_u32(n);
-    }
-    (0..13u32)
-        .filter_map(Verb::from_u32)
-        .find(|v| verb_name(*v) == s)
-}
 
 fn check_name(c: Check) -> &'static str {
     match c {

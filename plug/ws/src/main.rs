@@ -880,9 +880,9 @@ fn main() {
         let rgb = vec![90u8; w * hh * 3];
         let 身体 = "- channel 6: the part that follows is at (0.81,0.56), 0.4% of frame\n                    - channel 2: moves 45% of your wrist camera\n";
         let 刚才 = "you commanded a move your body-model said would shift the picture by 0.0200 of a frame;                     it actually shifted by 0.0000. your hand physically moved 0.00000 m.";
-        match body_layer::eye::问身体(h, port, "Pick up the baseball by 10 cm.", 身体, 刚才, &rgb, w, hh) {
-            Ok(d) => println!("[自检] 🟢 问身体通了 ⇒ 做什么=**{}** · 做到**{}**为止 · 为什么={}", d.做什么, d.到什么为止, d.为什么),
-            Err(e) => println!("[自检] 🔴 问身体没通:{e}"),
+        match body_layer::eye::问段(h, port, "Pick up the baseball by 10 cm.", 身体, 刚才, 24, &rgb, w, hh) {
+            Ok(d) => println!("[自检] 🟢 问段通了 ⇒ 那个东西要落到**第 {} 格** · 做到**{}**为止 · 完了={} · 为什么={}", d.到哪一格, d.到什么为止, d.完了, d.为什么),
+            Err(e) => println!("[自检] 🔴 问段没通:{e}"),
         }
         return;
     }
@@ -3338,6 +3338,25 @@ const 字模: [[u8; 5]; 10] = [
 ];
 
 /// 在 RGB 图上画一个框 + 它的编号。**这张图就是眼看到的那张** —— 挑错了当场看得见。
+/// 🔴🔴🔴 **在画面上画一张编号网格 —— 动词表删掉之后,模型说的那一句就落在这里。**
+///
+/// 模型只答"**那个东西最后要落到第几格**"(接触集第③格,见 `eye::段` 头注)。
+/// 用格号而不是坐标,是因为本仓已经量过:VLM 定量几何弱、**选择题强** ——
+/// 挑物体那一步早就是"第几块"这个形状,这里照抄。
+/// 交回每一格的中心(归一化),驱动拿它当伺服目标。
+fn 画网格(rgb: &mut [u8], w: usize, h: usize, 列: usize, 行: usize) -> Vec<(f64, f64)> {
+    let mut 心 = Vec::with_capacity(列 * 行);
+    for r in 0..行 { for c in 0..列 {
+        let x0 = c * w / 列;
+        let x1 = ((c + 1) * w / 列).saturating_sub(1).max(x0);
+        let y0 = r * h / 行;
+        let y1 = ((r + 1) * h / 行).saturating_sub(1).max(y0);
+        画编号框(rgb, w, h, [x0, y0, x1, y1], r * 列 + c + 1, [64, 200, 255], 1);
+        心.push(((x0 + x1) as f64 * 0.5 / w as f64, (y0 + y1) as f64 * 0.5 / h as f64));
+    }}
+    心
+}
+
 fn 画编号框(rgb: &mut [u8], w: usize, h: usize, 框: [usize; 4], 号: usize, 色: [u8; 3], 粗: usize) {
     let put = |v: &mut [u8], x: usize, y: usize| {
         if x < w && y < h {
@@ -4853,8 +4872,6 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     // 0.01 是占画幅的分数下限(无量纲),不是米。
                     span_frac: (((块2.框[2] - 块2.框[0]) as f64 / dw2 as f64)
                         .max((块2.框[3] - 块2.框[1]) as f64 / dh2 as f64)).max(0.01),
-                    verb: look.verb.clone(),
-                    force: look.force.clone(),
                     box01: [
                         块2.框[0] as f64 / dw2 as f64, 块2.框[1] as f64 / dh2 as f64,
                         块2.框[2] as f64 / dw2 as f64, 块2.框[3] as f64 / dh2 as f64,
@@ -5424,6 +5441,10 @@ fn 服务<S: std::io::Read + std::io::Write>(
     let mut 部件图: Option<Vec<Vec<Option<一件>>>> = None;
     // 手指自己在深度上有多厚(腕相机里是常数)—— "物体算不算在两指之间"的容差。
     let 指厚常数 = std::cell::Cell::new(None::<f64>);
+    // 🔴 **"东西现在在不在我手里"** —— 动词表删掉之后,"这一段是去够它还是带着它走"
+    // 由**这个量出来的事实**决定,不由任何一个词决定。判据是合到停住的读数离
+    // "空手合到底"有多远(零尺度,换什么爪子都成立)。
+    let 手里有 = std::cell::Cell::new(false);
     // 🔴 **腕相机里"我的接触面在哪" —— 从部件图里取那个常数。**
     // 取的是**指通道**(只开合爪子那几个)在**长在手上那台**里动的那一片的中心。
     // 那台相机长在手上 ⇒ 这个位置不随姿势变 ⇒ 量一次就够(见 `收尾腕` 里的头注)。
@@ -5603,7 +5624,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     }
                     look = Some(body_layer::eye::Look {
                         u: (x0 + x1) * 0.5, v: (y0 + y1) * 0.5, span_frac: 长边,
-                        verb: p.verb.clone(), force: p.force.clone(), box01: [x0, y0, x1, y1],
+                        box01: [x0, y0, x1, y1],
                     });
                     // 掩膜按**这一块自己的深度带**切:一个物体不会比自己更厚,
                     // 而"多厚"是量出来的(它鼓出背景多高),不是一个宽容系数。
@@ -5620,7 +5641,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
             println!("[服] 🎯 几何一块都没切出来(支撑面上没有鼓出来的东西)⇒ 退回问框");
         }
         // 🔴 **退回问框,不许退回"不干"。** 几何切不出/眼挑不中时,老那条路照样能走。
-        let look = match look {
+        let mut look = match look {
             Some(l) => l,
             None => match body_layer::eye::ask(眼主机, 眼端口, &指令, &rgb, w, h) {
                 Ok(l) => l,
@@ -5773,104 +5794,85 @@ fn 服务<S: std::io::Read + std::io::Write>(
         }
 
         // ══════════════════════════════════════════════════════════════════════════
-        // 🔴🔴🔴 **循环归模型。每一段开始先问它:做什么 + 做到什么条件为止再来找我。**
-        //(owner 2026-09-02 定,原话:*"为什么这个触发器需要你主动去设计?一个抓取任务
-        //  就要你设计这么多,那后面的机器人死斗、无人机任务你设计得完吗?你把 vlm 当成傻瓜了。"*)
+        // 🔴🔴🔴 **动词表在这里被整片删掉。**(owner 2026-09-02 死命令:*"动词表必须现在删,
+        //  不然算作弊"*。我提过"等替代品跑起来再删"的刹车,已被驳回,照删。)
         //
-        // **我原来手写的那两个触发器已经删掉**(伺服预测对不上叫一次 · 空转几拍叫一次)——
-        // 它们和这个仓删掉的那 2019 行手写状态机是同一种病,只是换了个位置长出来:
-        // **任务有多少种,我就得写多少条触发器,而我永远写不完。**
+        // 删掉的是三张:这里的 8 个(approach/close/open/retreat/look_around/
+        // new_grasp_point/switch_hand/done)· `eye::pick` 的 6 个(grasp/push/place/pry/
+        // open/close)· `eye::ask` 的同一份,外加 3 档力度(light/medium/firm)。
         //
-        // 现在的形状:**模型跑外层循环,驱动只负责"感觉"和"动作",每段结束回来汇报。**
-        //   · **做什么** 只能是驱动真的会执行的那几件(approach/close/open/retreat/
-        //     look_around/new_grasp_point/switch_hand/done)
-        //   · **到什么为止** 是它自己说的,而那五个词**仓里早就定好了**(`verb::Until`)、
-        //     **驱动本来就在量**:走完 / 碰上 / 推不动 / 东西不再跟着我 / 画面不再变
+        // **替代品不是新发明的,是仓里早就建好并测过的那句话** —— 接触集第③格
+        //(`contact-set`,80 个单元测试,十三个动词本来就塌进这一张表):
+        //   *"① 碰哪几个点 · ② 每点的法向和锥 · ③ **物体要怎么动** · ④ 容差"*
+        // 这里把第③格说成**画面里的一格**:**"那个东西最后要落到第几格。"**
         //
-        // ⇒ 成本自己就控制住了:它说"碰上再叫我",中间几十拍一次都不问。
-        // ⇒ 换任务不用改代码:格斗时它会说"直到对方的手碰到我",无人机时"直到高度不再变"。
-        // ⇒ **"什么时候思考"不再是我设计的东西。**
+        //   · 抓起来 10 厘米 = 球要落到它上方那一格
+        //   · 拿球砸小人     = 球要落到小人所在的那一格
+        //   · 换手 / 换下手点 / 退回去 / 张开合上 —— **全都不再是"一件事"**,
+        //     它们是驱动为了把东西送到那一格而自己解出来的中间步骤。
         //
-        // ⚠️ 它答什么都**不承重到控制**:走多少永远由量出来的方向盘算,它只改**做什么**。
-        //    问不通 ⇒ 照常往下走(按 `approach` 办),并把理由说出来 —— **不许因为模型不答就停手**。
-        let 这一段 = if 部件图.is_some() {
-            match 彩(&帧, 相机号) {
-                Some((cw4, ch4, crgb4)) => {
-                    let 身体 = {
-                        let mut t = String::new();
-                        if let Some(图) = 部件图.as_ref() {
-                            for (kk, 件们) in 图.iter().enumerate() {
-                                if let Some(Some(x)) = 件们.get(相机号) {
-                                    t.push_str(&format!(
-                                        "- channel {kk}: when you move it, the part of the picture that follows is centred at ({:.2},{:.2}) and covers {:.1}% of the frame\n",
-                                        (x.框[0] + x.框[2]) * 0.5, (x.框[1] + x.框[3]) * 0.5, x.占 * 100.0));
-                                }
+        // 🔴 **为什么是"第几格"而不是坐标**:VLM 定量几何弱(RoboVista 最好 56.5%、
+        // 30.2% 认错东西),**而选择题强**(同批模型选轨迹 0.916)。挑物体那一步早就是
+        // "第几块"这个形状,这里照抄。owner 原话:*"vlm 指的很不准的,而且这还是个两指手,
+        // 后面换个 20 指手你就指去吧"* —— **它一次都不用指自己**。
+        //
+        // 🔴 **到什么为止**那五个仍然由它自己说,而**那五个不是动词,是【事件】**
+        //(`verb::Until`,驱动本来就在量):走完 / 碰上 / 推不动 / 东西不再跟着我 / 画面不再变。
+        // 换成格斗它会说"直到对方的手碰到我",无人机"直到高度不再变",**一行代码都不用改**。
+        //
+        // ⚠️ 它答什么都**不承重到控制**:走多少永远由量出来的方向盘算。
+        //    问不通 ⇒ 照常往下走,并把理由说出来 —— **不许因为模型不答就停手**。
+        let (mut 格心, mut 这一段) = (Vec::new(), None);
+        if 部件图.is_some() {
+            if let Some((cw4, ch4, crgb4)) = 彩(&帧, 相机号) {
+                let mut 网图 = crgb4.clone();
+                格心 = 画网格(&mut 网图, cw4, ch4, 6, 4);
+                if let Ok(dir) = std::env::var("BL_DUMP") {
+                    let _ = std::fs::write(format!("{dir}/grid.bmp"), task::bmp24(&网图, cw4, ch4));
+                }
+                let 身体 = {
+                    let mut t = String::new();
+                    if let Some(图) = 部件图.as_ref() {
+                        for (kk, 件们) in 图.iter().enumerate() {
+                            if let Some(Some(x)) = 件们.get(相机号) {
+                                t.push_str(&format!(
+                                    "- channel {kk}: when you move it, the part of the picture that follows is centred at ({:.2},{:.2}) and covers {:.1}% of the frame\n",
+                                    (x.框[0] + x.框[2]) * 0.5, (x.框[1] + x.框[3]) * 0.5, x.占 * 100.0));
                             }
                         }
-                        t.push_str(&format!("- the target you were told to act on is at ({:.2},{:.2}) in this picture\n", look.u, look.v));
-                        t
-                    };
-                    let 刚才 = 上一段汇报.clone();
-                    match body_layer::eye::问身体(眼主机, 眼端口, &指令, &身体, &刚才, &crgb4, cw4, ch4) {
-                        Ok(d) => {
-                            println!("[身] 🧠 **这一段由模型定**:做什么=**{}** · 做到**{}**为止 —— {}",
-                                d.做什么, d.到什么为止, d.为什么);
-                            Some(d)
-                        }
-                        Err(e) => { println!("[身] 🧠 问不通({e})⇒ 按 approach 往下走,结果照实报"); None }
                     }
+                    t.push_str(&format!("- the thing you were told to act on is at ({:.2},{:.2}) in this picture\n", look.u, look.v));
+                    t.push_str(&format!("- it is {} between your fingers right now\n", if 手里有.get() { "ALREADY held" } else { "NOT" }));
+                    t
+                };
+                let 刚才 = 上一段汇报.clone();
+                match body_layer::eye::问段(眼主机, 眼端口, &指令, &身体, &刚才, 格心.len(), &网图, cw4, ch4) {
+                    Ok(d) => {
+                        println!("[身] 🧠 **这一段由模型定**:那个东西最后要落到**第 {} 格** · 做到**{}**为止{} —— {}",
+                            d.到哪一格, d.到什么为止, if d.完了 { " · 它说已经做完了" } else { "" }, d.为什么);
+                        这一段 = Some(d);
+                    }
+                    Err(e) => println!("[身] 🧠 问不通({e})⇒ 照上一段接着走,结果照实报"),
                 }
-                None => None,
             }
-        } else { None };
+        }
         if let Some(d) = 这一段.as_ref() {
-            let j现 = 帧.jaw.get(手号.get()).or_else(|| 帧.jaw.first()).copied().unwrap_or(1.0);
-            match d.做什么.as_str() {
-                "look_around" => {
-                    let 挪了 = 挪进画面(plug, 白转.wrapping_add(1), j现, *通道是关节);
-                    上一段汇报 = format!("you asked to look_around until {}. the body moved one channel and reports: {}",
-                        d.到什么为止, if 挪了.unwrap_or(false) { "the picture changed" } else { "the picture barely changed" });
-                    continue;
+            if d.完了 {
+                println!("[身]    ⇒ 它说做完了 ⇒ 这一拍不动手,下一拍重看(**做没做完由官方判据说了算,不由它说了算**)");
+                上一段汇报 = "you said it is already done. the body did nothing and is looking again.".into();
+                plug.act(&Cmd::Hold);
+                continue;
+            }
+            // 🔴 **它说的那一格,就是"这个东西最后要落到哪儿"。**
+            // 东西还没在手里 ⇒ 先得让它跟着我走,所以伺服目标仍然是**东西本身**;
+            // 东西已经在手里 ⇒ 伺服目标换成**那一格** —— 于是"搬过去""砸过去"是同一段代码,
+            // 差别只在 `到什么为止`(settle 是放下,slip 是脱手)。**没有"抛"这个词。**
+            if let Some(&(gu, gv)) = d.到哪一格.checked_sub(1).and_then(|k| 格心.get(k)) {
+                if 手里有.get() {
+                    println!("[服]   手里有东西 ⇒ 这一段把**它**送到第 {} 格 ({gu:.3},{gv:.3});伺服目标从物体换成那一格", d.到哪一格);
+                    look.u = gu; look.v = gv;
+                    look.span_frac = look.span_frac.max(1.0 / 6.0);
                 }
-                "switch_hand" => {
-                    挑过手 = false;
-                    上一段汇报 = "you asked to switch_hand. the body will re-pick which end effector to use from its own measurements.".into();
-                    continue;
-                }
-                "open" => {
-                    抓握(plug, 1.0, *通道是关节); 定爪(plug, 等拍 * 4);
-                    let 读 = plug.sense().and_then(|f| f.jaw.get(手号.get()).copied()).unwrap_or(f64::NAN);
-                    上一段汇报 = format!("you asked to open until {}. the gripper reading is now {读:.4}.", d.到什么为止);
-                    println!("[身]    ⇒ 张开了,读数 {读:.4}");
-                    continue;
-                }
-                "close" => {
-                    let 停在 = 合到停住(plug, *通道是关节).unwrap_or(f64::NAN);
-                    let 有 = match *空合载 { Some(z) => (停在 - z).abs() > 1e-9, None => 停在 > 1e-9 };
-                    println!("[身]    ⇒ 合到停住,读数停在 {停在:.4} ⇒ **{}**", if 有 { "指间有东西" } else { "指间没东西" });
-                    上一段汇报 = format!("you asked to close until {}. the gripper stopped at {停在:.4}, which means {}.",
-                        d.到什么为止, if 有 { "something IS between the fingers" } else { "there is NOTHING between the fingers" });
-                    continue;
-                }
-                "retreat" => {
-                    if let Some(e) = plug.sense().and_then(|f| f.ee.get(手号.get()).copied()) {
-                        // "退回我来的路":沿着刚才走过来的方向退一个量出来的步子,不是回任何记住的点。
-                        let 退 = [e[0] - 退向.0 * 探步, e[1] - 退向.1 * 探步, e[2] - 退向.2 * 探步];
-                        let _ = 落(plug, 退, [e[3], e[4], e[5], e[6]], j现, 等拍);
-                    }
-                    上一段汇报 = format!("you asked to retreat until {}. the body backed off one step along the way it came.", d.到什么为止);
-                    continue;
-                }
-                "done" => {
-                    println!("[身]    ⇒ 它认为干完了 ⇒ 这一拍不再动手,下一拍重看");
-                    上一段汇报 = "you said done. the body did nothing and is looking again.".into();
-                    plug.act(&Cmd::Hold); continue;
-                }
-                "new_grasp_point" => {
-                    上一段汇报 = "you asked for a new grasp point. the body will look again and plan a different one.".into();
-                    continue;
-                }
-                _ => {}   // approach:落到下面那条本来就有的路
             }
         }
 
@@ -8295,42 +8297,14 @@ fn 服务<S: std::io::Read + std::io::Write>(
         // 换一具报 0.02 的身体,它会把**每一次空抓都判成成功**,而日志上全是绿的。
         // 🔴🔴🔴 **减法②:这一步的"要顶多硬 / 按住多久 / 什么时候算完"来自【动词】,不再写死。**
         //
-        // `demand_with` 是全仓第一次被**驱动**调用 —— 在此之前它只有 CLI 和它自己的测试在调,
-        // 于是那张 13 行的动词表在真正干活的这条路上**一行都没生效过**。
-        // 现在它交出的是一个点:(走多少, 转多少, **顶多硬**, **按住多久**, **什么时候算完**)。
-        // 三个新维度都不是我拍的:
-        //   · 顶多硬 —— 眼说的 light/medium/firm,映到**这具身体自己那把尺**上 ∈[0,1];
-        //     以前这个词全仓只有一处引用,而那一处只是把它抄进另一个结构体,**没人读**。
-        //   · 按住多久 —— 秒,用**量出来的帧时**换成拍数(以前帧时只被打印,读不到)。
-        //   · 什么时候算完 —— `Resist`(合到读数不再变)。这条驱动早就在做,只是没有名字,
-        //     因此调用方点不到它,擦/按/拧也就只能写成"走够多少距离"。
-        let 这一下 = {
-            let 动 = look.verb.trim().to_ascii_lowercase();
-            let v = match 动.as_str() {
-                "push" => body_layer::verb::Verb::Push,
-                "place" => body_layer::verb::Verb::Place,
-                "pry" => body_layer::verb::Verb::Pry,
-                "open" | "close" => body_layer::verb::Verb::Twist,
-                // 眼没说 / 说了不认识 ⇒ 按抓。**不许因为一个词没见过就不动。**
-                _ => body_layer::verb::Verb::Grasp,
-            };
-            // 轴:这一层不认识"工具轴/钳口轴",给单位轴占位 —— 合爪这一步只用到
-            // press/hold/until 三样,方向由上面接触集那一层已经解完了。
-            let ax = body_layer::verb::Axes { tool: [0.0, 0.0, 1.0], jaw: [1.0, 0.0, 0.0] };
-            body_layer::verb::demand_with(v, ax, [0.0; 3], 0.0,
-                body_layer::verb::press_from_word(&look.force), 0.0)
-        };
-        println!("[服] 这一下:眼说「{}·{}」⇒ 顶到 {:.2}(0=刚够认出碰上, 1=顶到读数不再变)· 按住 {:.2} s · {}",
-            if look.verb.is_empty() { "(没说)" } else { &look.verb },
-            if look.force.is_empty() { "(没说)" } else { &look.force },
-            这一下.press, 这一下.hold_s,
-            match 这一下.until {
-                body_layer::verb::Until::Amount => "走完就停",
-                body_layer::verb::Until::Contact => "直到碰上",
-                body_layer::verb::Until::Resist => "直到推不动",
-                body_layer::verb::Until::Slip => "直到东西不再跟着我",
-                body_layer::verb::Until::Settle => "直到画面不再变",
-            });
+        // 🔴🔴🔴 **"这一下用多大力"那张 3 档词表(light/medium/firm)已随动词表一起删除**
+        //(owner 2026-09-02:*"动词表必须现在删,不然算作弊"*)。
+        //
+        // 删掉它不是少了一样东西 —— 是**换成读数自己说**。这具身体的爪子是位置命令的
+        //(七个关节命令全零响应,只有末端认),没有力通道 ⇒ "更用力"在它身上唯一能表达的
+        // 就是**停住之后继续发合的命令**,位置环把误差积起来顶得更死。
+        // 顶多久?**顶到读数自己不再动为止** —— 软的东西被继续压扁、读数还往下走;
+        // 硬的东西一下就不动了。**零尺度、无词表、换什么爪子都成立。**
         let 停在 = 合到停住(plug, *通道是关节)?;
         // 指间有没有东西 = 停住的位置**离"空手合到底"有多远**。零点是量出来的;
         // 没量到就照实说,并退回这具身体上唯一还站得住的弱判据(合过、而且没合到最紧那一档)。
@@ -8346,6 +8320,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 None => println!("[服] 🔴 合到底了,读数停在 {停在:.4} ⇒ **指间没东西**,换个下手点"),
             }
             试过.push(尖目标);
+            手里有.set(false);
             抓握(plug, 1.0, *通道是关节);
             continue;
         }
@@ -8353,31 +8328,22 @@ fn 服务<S: std::io::Read + std::io::Write>(
             Some(z) => println!("[服] 🟢 合到停住,读数停在 {停在:.4}(空手合到底是 {z:.4},差 {:.4})⇒ **指间有东西**", (停在 - z).abs()),
             None => println!("[服] 🟢 合到停住,读数停在 {停在:.4} ⇒ 指间有东西,而**这个数就是它有多宽**"),
         }
+        手里有.set(true);
 
-        // 🔴 **减法②的力和时间在这里真的发出去。**
-        //
-        // 这具身体的爪子是**位置命令**的(七个关节命令全零响应,只有末端认),没有力通道 ——
-        // 所以"更用力"在它身上唯一能表达的就是**停住之后继续发合的命令**:
-        // 位置环把误差积起来,顶得更死。顶多久由 `press` 定,而 `press` 的两个端点是量出来的:
-        //   0 = 刚停住就走(轻)· 1 = 一直发到读数在**更长的窗口里**也不再变(顶到底)。
-        // "更长的窗口"取这具身体自己的稳态判据 `等拍` 的倍数 —— 不是一个拍出来的秒数。
-        // ⚠️ 软的东西会在这一段里被继续压扁,读数还会往下走 —— 那正是"顶得更硬"的证据,
-        //    所以这里**重新读一次停住的位置**,而不是沿用上面那个。
-        let 顶拍 = ((这一下.press * (等拍 * 4) as f64).round() as u32).min(等拍 * 4);
-        if 顶拍 > 0 {
-            for _ in 0..顶拍 { 抓握(plug, 0.0, *通道是关节); if plug.sense().is_none() { break } }
-            let 顶后 = plug.sense().and_then(|f| f.jaw.get(手号.get()).or_else(|| f.jaw.first()).copied()).unwrap_or(停在);
-            println!("[服]   顶了 {顶拍} 拍(press={:.2})⇒ 读数 {停在:.4} → {顶后:.4}(还在往下走 = 东西被压实了)", 这一下.press);
+        // 顶到读数自己不再动为止(见上面那段头注)。
+        let mut 上读 = 停在;
+        let mut 稳 = 0u32;
+        let mut 顶了 = 0u32;
+        while 顶了 < 等拍 * 4 {
+            抓握(plug, 0.0, *通道是关节);
+            let Some(f) = plug.sense() else { break };
+            let 现 = f.jaw.get(手号.get()).or_else(|| f.jaw.first()).copied().unwrap_or(上读);
+            顶了 += 1;
+            if (现 - 上读).abs() <= 1e-9 { 稳 += 1; if 稳 >= 等拍 { break } } else { 稳 = 0 }
+            上读 = 现;
         }
-        // 按住多久:秒 → 拍,用**量出来的帧时**换算;帧时还没量到(开机头 50 拍)就跳过并说明。
-        if 这一下.hold_s > 0.0 {
-            if plug.帧时秒 > 1e-6 {
-                let 拍 = (这一下.hold_s / plug.帧时秒).round() as u32;
-                println!("[服]   按住 {:.2} s = {拍} 拍(帧时 {:.3} s,量出来的)", 这一下.hold_s, plug.帧时秒);
-                for _ in 0..拍 { 抓握(plug, 0.0, *通道是关节); if plug.sense().is_none() { break } }
-            } else {
-                println!("[服]   要按住 {:.2} s,但**帧时还没量到**(开机头 50 拍)⇒ 这一下不按住,照实报", 这一下.hold_s);
-            }
+        if 顶了 > 0 {
+            println!("[服]   停住之后接着顶了 {顶了} 拍,读数 {停在:.4} → {上读:.4} —— 顶到它自己不再动为止(**没有「用多大力」这个词**)");
         }
 
         // ⑦ **原路退回去 = 把两个接触面送回它们下手之前在画面上的位置。**
