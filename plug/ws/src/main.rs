@@ -5661,7 +5661,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
             for c in 0..台 {
                 let b = (k * 台 + c) * 5;
                 let f = [平[b], 平[b + 1], 平[b + 2], 平[b + 3]];
-                if f.iter().any(|x| !x.is_finite()) { 行.push(None); continue }
+                if f.iter().any(|x| !x.is_finite() || *x < 0.0) { 行.push(None); continue }
                 行.push(Some(一件 { 掩: Vec::new(), mw: 0, mh: 0, 框: f, 占: 平[b + 4] }));
             }
             出.push(行);
@@ -6038,7 +6038,10 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         for c in 0..台 {
                             match 件们.get(c).and_then(|x| x.as_ref()) {
                                 Some(x) => { for q in x.框 { 平.push(format!("{q}")) } 平.push(format!("{}", x.占)); }
-                                None => { for _ in 0..5 { 平.push("NaN".into()) } }
+                                // 🔴 空格写 -1,**不许写 NaN**:NaN 不是合法 JSON,零依赖解析器会拒收**整份文件**
+                                //(CB 实测 2026-09-02:`[装] 读不回 /root/cal.json —— 从零开始标`,通道表/相机/部件图全部重量,
+                                //  "越用越强"整个归零)。框坐标都在 0–1 之间,-1 一眼就是"没有"。
+                                None => { for _ in 0..5 { 平.push("-1".into()) } }
                             }
                         }
                     }
