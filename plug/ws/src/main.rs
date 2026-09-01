@@ -898,8 +898,8 @@ fn main() {
         let rgb = vec![90u8; w * hh * 3];
         let 身体 = "- channel 6: the part that follows is at (0.81,0.56), 0.4% of frame\n                    - channel 2: moves 45% of your wrist camera\n";
         let 刚才 = "you commanded a move your body-model said would shift the picture by 0.0200 of a frame;                     it actually shifted by 0.0000. your hand physically moved 0.00000 m.";
-        match body_layer::eye::问段(h, port, "Pick up the baseball by 10 cm.", 身体, 刚才, 6, 4, &rgb, w, hh) {
-            Ok(d) => println!("[自检] 🟢 问段通了 ⇒ 那个东西要落到**第 {} 格** · 做到**{}**为止 · 完了={} · 为什么={}", d.到哪一格, d.到什么为止, d.完了, d.为什么),
+        match body_layer::eye::问段(h, port, "Pick up the baseball by 10 cm.", 身体, 刚才, 6, 4, 3, &rgb, w, hh) {
+            Ok(d) => println!("[自检] 🟢 问段通了 ⇒ 动第 {} 号 → 落到**第 {} 格** · 做到**{}**为止 · 完了={} · 为什么={}", d.动第几号, d.到哪一格, d.到什么为止, d.完了, d.为什么),
             Err(e) => println!("[自检] 🔴 问段没通:{e}"),
         }
         return;
@@ -4735,16 +4735,6 @@ fn 服务<S: std::io::Read + std::io::Write>(
     // 而不是我再手写一条兜底规则(那是永远写不完的那条路)。
     // 换成无人机、格斗同样成立:跟丢了就抬头看一眼。
     let 跟丢了 = std::cell::Cell::new(false);
-    // 🔴🔴🔴 **"够不着"是量出来的事实,必须喂回"挑哪只手"。**(BY 定案 2026-09-02)
-    //
-    // BY:`①粗对准:差 0.6836 m` → `连着 5 步还差多少不再缩(卡在 0.2346 m)⇒ 这个位形过不去`。
-    // **这条胳膊够不着球,差 23 厘米。** 后面所有的"跟丢""追错东西"全是它的下游 ——
-    // 手根本没到球跟前,腕相机里当然没有球。
-    // 而挑手用的判据是**"在画面里离目标最近的那条臂"**(第 0 条 0.656 画幅 / 第 1 条 0.355)——
-    // 按那个判据选第 1 条是对的,**可它就是够不着,而没有任何一步问过这件事**。
-    // ⇒ 走不动的那条臂当场记下来,重挑时跳过它;所有臂都跳过了 ⇒ 照实告诉模型。
-    // 无常数、无手数假设:一条臂时它必然报"我够不着",二十条臂时它挨个试。
-    let 够不着的手 = std::cell::RefCell::new(std::collections::BTreeSet::<usize>::new());
 
     // 🔴🔴🔴 **腕相机收尾:提成具名闭包,因为它现在有【两个】入口。**(2026-08-29)
     // 原来它内联在"追完之后",而追要先过 `看爪` 那道闸 —— 头相机上那道闸赢不了
@@ -5374,6 +5364,62 @@ fn 服务<S: std::io::Read + std::io::Write>(
             正, 反, if 正 >= 反 { "正" } else { "反" });
         Some(正.max(反) > 0.0)
     };
+    // 🔴🔴🔴 **「把我身上的第 k 块挪到第几格」—— 模型说,身体做。**(owner 2026-09-02:
+    //  *"把你手写的规则全部删掉,让 vlm 彻底成为主角"*)
+    //
+    // 这一个函数**替掉了我手写的三个触发器**,它们原来都长成同一句话
+    //(*"某某失败了 ⇒ 【我】决定挪一步"*):
+    //   ① `白转 >= 3`(空转两拍就挪)—— 那个 3 是我拍的
+    //   ② 认不出爪子第 N 次就挪
+    //   ③ 认不出接触面就挪
+    // 现在这三处一律改成:**照实报给模型,由它说下一段动哪一块、去哪一格。**
+    //
+    // 做法本身零常数:部件图是**按通道**索引的 ⇒ "我身上第 k 块"就是"第 k 号通道管的那一块"
+    // ⇒ **挪它 = 推那个通道**。正反各推一步,看那一块在画面里**离目标格是近了还是远了**,
+    // 留下近的那一边。判据是"离得近不近",不是"画面变得多不多" —— 后者是我原来那个,
+    // 它只保证"动了",不保证"往对的方向动"。
+    let 挪块到格 = |plug: &mut Plug<S>, 通道: usize, 目标: (f64, f64), jaw0: f64, 是关节: bool| -> Option<bool> {
+        let 关节数 = { let f = plug.sense()?; 真臂(&f).iter().map(|&i| f.joints[i].len()).sum::<usize>() };
+        let 通道数 = if 是关节 { 关节数 } else { 6 };
+        if 通道数 == 0 || 通道 >= 通道数 { return None }
+        let 见 = |plug: &mut Plug<S>| -> Option<(usize, usize, Vec<u8>)> { plug.sense().and_then(|f| 灰(&f, 相机号)) };
+        // 动了的那一片的**重心**(归一化)。它就是"这一块现在在画面哪儿"的量,不用跟踪器。
+        let 动心 = |a: &(usize, usize, Vec<u8>), b: &(usize, usize, Vec<u8>)| -> Option<(f64, f64)> {
+            if a.2.len() != b.2.len() || a.2.is_empty() { return None }
+            let (w, h) = (a.0, a.1);
+            let (mut sx, mut sy, mut n) = (0.0f64, 0.0f64, 0usize);
+            for i in 0..a.2.len() {
+                if a.2[i].abs_diff(b.2[i]) > 8 { sx += (i % w) as f64; sy += (i / w) as f64; n += 1 }
+            }
+            if n == 0 { return None }
+            Some((sx / n as f64 / w as f64, sy / n as f64 / h as f64))
+        };
+        let 前 = 见(plug)?;
+        let mut 动 = vec![0.0; 通道数];
+        动[通道] = 探幅;
+        let _ = 迈通道(plug, &动, 1.0, jaw0, 是关节)?;
+        等停(plug, 等拍 * 2);
+        let 后1 = 见(plug)?;
+        let 正近 = 动心(&前, &后1).map(|(u, v)| (u - 目标.0).hypot(v - 目标.1));
+        动[通道] = -探幅 * 2.0;
+        let _ = 迈通道(plug, &动, 1.0, jaw0, 是关节)?;
+        等停(plug, 等拍 * 2);
+        let 后2 = 见(plug)?;
+        let 反近 = 动心(&前, &后2).map(|(u, v)| (u - 目标.0).hypot(v - 目标.1));
+        let 留正 = match (正近, 反近) { (Some(a), Some(b)) => a <= b, (Some(_), None) => true, (None, Some(_)) => false, _ => false };
+        if 留正 {
+            动[通道] = 探幅 * 2.0;
+            let _ = 迈通道(plug, &动, 1.0, jaw0, 是关节)?;
+            等停(plug, 等拍 * 2);
+        }
+        println!("[服]   挪第 {通道} 号通道管的那一块 → 第 ({:.2},{:.2}) 格:正着走离目标 {} · 反着走 {} ⇒ 停在**{}**那一边",
+            目标.0, 目标.1,
+            正近.map(|x| format!("{x:.3}")).unwrap_or_else(|| "(没动)".into()),
+            反近.map(|x| format!("{x:.3}")).unwrap_or_else(|| "(没动)".into()),
+            if 留正 { "正" } else { "反" });
+        Some(正近.is_some() || 反近.is_some())
+    };
+
     println!("[服] 干活:不解相机,只量画面雅可比(量表迈 {:.4} m = 可达带 {:.3} 的三分之一;走路一截 {:.4} m)",
         探幅, 可达带[1], 探步);
 
@@ -5651,9 +5697,12 @@ fn 服务<S: std::io::Read + std::io::Write>(
             //    画面里变得多的那一边留下。它不假设任何方向、不碰任何东西、
             //    而且每走一步都在给"我在画面哪"攒证据。**不站着,也不砸东西。**
             白转 = 0;
-            // ══════════════════════════════════════════════════════════════════════
-            println!("[服] ⚠️ 连着两拍没做成任何尝试 ⇒ **挪一步让相机多看见我一点**(不盲合、不盲推)");
-            let _ = 挪进画面(plug, 白转.wrapping_add(1), 帧.jaw.get(手号.get()).or_else(|| 帧.jaw.first()).copied().unwrap_or(1.0), *通道是关节);
+            // 🔴🔴🔴 **这里原来是我手写的触发器:"空转三拍 ⇒ 我决定挪一步"。那个 3 是我拍的。**
+            //(owner 2026-09-02:*"把你手写的规则全部删掉,让 vlm 彻底成为主角"*)
+            // 现在:**照实报给模型,由它说下一段动哪一块、去哪一格。**
+            println!("[服] ⚠️ 连着两拍没做成任何尝试 ⇒ **照实报给模型,由它决定下一段**(不再由我决定挪哪一步)");
+            上一段汇报 = "I have gone two rounds without managing to do anything at all. Look at the picture and tell me which numbered item to move and which cell it must end up in - moving a piece of myself is how I get a camera to see more.".into();
+            plug.act(&Cmd::Hold);
             continue;
         }
         let Some(e) = 帧.ee.get(手号.get()).copied() else { continue };
@@ -5824,13 +5873,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
         //    真选错了,下游会以"合到底指间没东西"暴露,那才是能验证的判据。
         if !挑过手 {
             let mut 最近: Option<(usize, f64)> = None;
-            let 跳过 = 够不着的手.borrow().clone();
             for a in 0..臂心.len() {
-                // 量到过"这条臂到不了" ⇒ 这一集不再选它(见 `够不着的手` 头注)。
-                if 臂末.get(a).and_then(|x| *x).map(|e| 跳过.contains(&e)).unwrap_or(false) {
-                    println!("[服]   挑手:第 {a} 条臂**已经量到到不了这儿**,跳过");
-                    continue;
-                }
                 let Some((cu, cv)) = 臂心[a].get(相机号).and_then(|o| *o) else { continue };
                 let d = (cu - look.u).hypot(cv - look.v);
                 println!("[服]   挑手:第 {a} 条臂在主眼里占的那片中心 ({cu:.3},{cv:.3}),离目标 ({:.3},{:.3}) 差 {d:.3} 画幅",
@@ -5857,15 +5900,6 @@ fn 服务<S: std::io::Read + std::io::Write>(
                             *手上相机载 = Some(best);
                         }
                     }
-                }
-                None if !跳过.is_empty() => {
-                    // 所有臂都量到过"到不了" ⇒ 这不是 bug,是一条**量出来的硬结论**,交给模型。
-                    println!("[服] 🔴 **我这几条胳膊没有一条到得了那儿**(每一条都量到过「这个位形过不去」)⇒ 照实告诉模型");
-                    上一段汇报 = "I tried, and NONE of my arms can reach that thing from where I am standing - each one ran out of travel with a gap still left. That is measured, not a guess. Pick something else, or tell me where it must end up so I can move differently.".into();
-                    够不着的手.borrow_mut().clear();
-                    挑过手 = false;
-                    plug.act(&Cmd::Hold);
-                    continue;
                 }
                 None => println!("[服] ⚠️ 逐臂推那一步没量到任何一条臂在主眼里占的片 ⇒ 手号留在 {} ,结果照实报", 手号.get()),
             }
@@ -6028,6 +6062,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
         // 网格多粗:一格竖着大约是"抬起来"那一步的量级。6×4 在这台相机上一格约 12 cm。
         let (网列, 网行) = (6usize, 4usize);
         let (mut 格心, mut 这一段) = (Vec::new(), None);
+        // 这一拍交给模型的编号表:(是不是我身上的, 通道号/区号, 画面位置)
+        let mut 条目: Vec<(bool, usize, (f64, f64))> = Vec::new();
         if 部件图.is_some() {
             if let Some((cw4, ch4, crgb4)) = 彩(&帧, 相机号) {
                 let mut 网图 = crgb4.clone();
@@ -6035,30 +6071,46 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 if let Ok(dir) = std::env::var("BL_DUMP") {
                     let _ = std::fs::write(format!("{dir}/grid.bmp"), task::bmp24(&网图, cw4, ch4));
                 }
-                let 身体 = {
-                    let mut t = String::new();
-                    if let Some(图) = 部件图.as_ref() {
-                        for (kk, 件们) in 图.iter().enumerate() {
-                            if let Some(Some(x)) = 件们.get(相机号) {
-                                t.push_str(&format!(
-                                    "- channel {kk}: when you move it, the part of the picture that follows is centred at ({:.2},{:.2}) and covers {:.1}% of the frame\n",
-                                    (x.框[0] + x.框[2]) * 0.5, (x.框[1] + x.框[3]) * 0.5, x.占 * 100.0));
-                            }
+                // 🔴🔴🔴 **一张编号表:先是我身上的每一块,再是世界里切出来的每一块。**
+                // 模型只答两个号:**动第几号 → 到第几格**。
+                // 这一格拓宽之后,我手写的三个触发器(空转就挪 / 认不出爪子就挪 / 认不出接触面就挪)
+                // 全部消失 —— 它们都变成了模型能自己说出口的一句话。
+                // 表里**没有一个身体参数**(不出现关节角、自由度、几根手指、多长多宽),全是画面语言。
+                let 格于 = |u: f64, v: f64| -> usize {
+                    let c = (u * 网列 as f64).floor().clamp(0.0, 网列 as f64 - 1.0) as usize;
+                    let r = (v * 网行 as f64).floor().clamp(0.0, 网行 as f64 - 1.0) as usize;
+                    r * 网列 + c + 1
+                };
+                // 条目:(是不是我身上的, 通道号 or 区号, 画面位置)
+                条目.clear();
+                let mut t = String::new();
+                t.push_str("PIECES OF YOURSELF (measured just now: you moved one channel at a time and watched which part of the picture followed):\n");
+                if let Some(图) = 部件图.as_ref() {
+                    for (kk, 件们) in 图.iter().enumerate() {
+                        if let Some(Some(x)) = 件们.get(相机号) {
+                            let (cu, cv) = ((x.框[0] + x.框[2]) * 0.5, (x.框[1] + x.框[3]) * 0.5);
+                            条目.push((true, kk, (cu, cv)));
+                            t.push_str(&format!("  item {}: a piece of you, now in cell {} (covers {:.1}% of the frame)\n",
+                                条目.len(), 格于(cu, cv), x.占 * 100.0));
                         }
                     }
-                    t.push_str(&format!("- the thing you were told to act on is at ({:.2},{:.2}) in this picture\n", look.u, look.v));
-                    t.push_str(&format!("- it is {} between your fingers right now\n", if 手里有.get() { "ALREADY held" } else { "NOT" }));
-                    {
-                        let c = (look.u * 网列 as f64).floor().clamp(0.0, 网列 as f64 - 1.0) as usize;
-                        let r = (look.v * 网行 as f64).floor().clamp(0.0, 网行 as f64 - 1.0) as usize;
-                        t.push_str(&format!("- right now it is sitting in cell {}\n", r * 网列 + c + 1));
-                    }
-                    t
-                };
+                }
+                t.push_str("THINGS OUT IN THE WORLD (cut out of the depth picture; you do not know what they are called):\n");
+                for (ri, r) in 区们.iter().enumerate() {
+                    let (cu, cv) = (r.心[0], r.心[1]);
+                    条目.push((false, ri, (cu, cv)));
+                    t.push_str(&format!("  item {}: a thing, now in cell {} ({} px, standing {:.3} out of the surface)\n",
+                        条目.len(), 格于(cu, cv), r.像素数, r.高));
+                }
+                t.push_str(&format!("- the one you settled on last time is in cell {}\n", 格于(look.u, look.v)));
+                t.push_str(&format!("- there is {} between your fingers right now\n", if 手里有.get() { "ALREADY something" } else { "NOTHING" }));
+                let 身体 = t;
                 let 刚才 = 上一段汇报.clone();
-                match body_layer::eye::问段(眼主机, 眼端口, &指令, &身体, &刚才, 网列, 网行, &网图, cw4, ch4) {
+                match body_layer::eye::问段(眼主机, 眼端口, &指令, &身体, &刚才, 网列, 网行, 条目.len(), &网图, cw4, ch4) {
                     Ok(d) => {
-                        println!("[身] 🧠 **这一段由模型定**:那个东西最后要落到**第 {} 格** · 做到**{}**为止{} —— {}",
+                        println!("[身] 🧠 **这一段由模型定**:动**第 {} 号**({})→ 落到**第 {} 格** · 做到**{}**为止{} —— {}",
+                            d.动第几号,
+                            match 条目.get(d.动第几号.wrapping_sub(1)) { Some((true, k, _)) => format!("我身上第 {k} 号通道管的那一块"), Some((false, _, _)) => "世界里的一块".into(), None => "(号不对)".into() },
                             d.到哪一格, d.到什么为止, if d.完了 { " · 它说已经做完了" } else { "" }, d.为什么);
                         这一段 = Some(d);
                     }
@@ -6092,6 +6144,34 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     d.到哪一格);
                 plug.act(&Cmd::Hold);
                 continue;
+            }
+            // 🔴🔴🔴 **动的是"我身上的一块"⇒ 推那个通道,朝它说的那一格挪。**
+            // 这一支替掉了我手写的三个触发器 —— 挪不挪、往哪挪,现在全是它说的。
+            if let Some(&(是我, 号, _)) = 条目.get(d.动第几号.wrapping_sub(1)) {
+                if 是我 {
+                    let Some(&(gu, gv)) = d.到哪一格.checked_sub(1).and_then(|k| 格心.get(k)) else {
+                        上一段汇报 = "you asked me to move a piece of myself but did not name a cell for it to end up in.".into();
+                        plug.act(&Cmd::Hold); continue;
+                    };
+                    let j现 = 帧.jaw.get(手号.get()).or_else(|| 帧.jaw.first()).copied().unwrap_or(1.0);
+                    let 动了 = 挪块到格(plug, 号, (gu, gv), j现, *通道是关节);
+                    上一段汇报 = match 动了 {
+                        Some(true) => format!("you asked me to move item {} (a piece of me) into cell {}. I pushed that channel both ways and kept the side that got it closer.", d.动第几号, d.到哪一格),
+                        _ => format!("you asked me to move item {} (a piece of me) into cell {}, but pushing that channel changed nothing in the picture at all - that piece is not visible to this camera, or that channel does not move it.", d.动第几号, d.到哪一格),
+                    };
+                    continue;
+                }
+                // 动的是世界里的一块 ⇒ **目标就是它**(挑目标这件事现在也归模型了)。
+                if let Some(r) = 区们.get(号) {
+                    let (x0, y0, x1, y1) = (r.框[0] as f64 / w as f64, r.框[1] as f64 / h as f64,
+                                            r.框[2] as f64 / w as f64, r.框[3] as f64 / h as f64);
+                    let 长边 = (x1 - x0).max((y1 - y0) * h as f64 / w as f64).max(1.0 / w as f64);
+                    if (look.u - r.心[0]).abs() > 1e-9 || (look.v - r.心[1]).abs() > 1e-9 {
+                        println!("[身]    ⇒ 它要动的是世界里第 {号} 块,和上一拍挑的不是同一块 ⇒ **目标换成它说的那一块**");
+                    }
+                    look.u = r.心[0]; look.v = r.心[1]; look.span_frac = 长边;
+                    look.box01 = [x0, y0, x1, y1];
+                }
             }
             if let Some(&(gu, gv)) = d.到哪一格.checked_sub(1).and_then(|k| 格心.get(k)) {
                 if 手里有.get() {
@@ -6369,15 +6449,11 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 println!("[服] ⇒ 第 {腕机} 台那一段也没走通(理由在上面)⇒ 接着挪");
             }
             静 = 静.wrapping_add(1);
-            let 挪了 = 挪进画面(plug, 静, jaw0, *通道是关节);
-            match 挪了 {
-                Some(true) => println!("[服] 这一眼没看清爪子(连着第 {静} 次)⇒ 已经**挪了一步让相机多看见我一点**,下一拍再认"),
-                _ => {
-                    // 连"我动了画面也不变"都发生了 ⇒ 这台相机里我根本不在画面上。
-                    // 照样不许站着:换下一个通道接着挪,下一拍再认。
-                    println!("[服] 这一眼没看清爪子(连着第 {静} 次)⇒ 挪了一步但这台相机里**一个像素都没变**(我不在它画面上)⇒ 继续挪");
-                }
-            }
+            // 🔴 原来这里是我写的:"认不出爪子 ⇒ 我决定挪一步"。现在照实报,由模型说动哪一块。
+            println!("[服] 这一眼没看清爪子(连着第 {静} 次)⇒ **照实报给模型,由它决定动哪一块**");
+            上一段汇报 = format!("I looked and could NOT make out my own contact surface in the camera fixed in the world ({静} times in a row now). Tell me which numbered item to move and into which cell - moving a piece of myself is how I get a camera to see me.");
+            plug.act(&Cmd::Hold);
+            continue;
             continue;
         };
         静 = 0;
@@ -7727,8 +7803,10 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 // 而"认不出接触面 ⇒ continue"一个动作都不会做。**先有第一次抓起来,再谈精度。**
                 白转 = 白转.wrapping_add(1);
                 let Some(尖0) = 尖此刻 else {
-                    println!("[服]   认不出接触面,而指尖此刻在哪也没量到 ⇒ 挪一步让相机多看见我一点");
-                    let _ = 挪进画面(plug, 白转, jaw0, *通道是关节);
+                    // 🔴 原来这里是我写的:"认不出接触面 ⇒ 我决定挪一步"。现在照实报。
+                    println!("[服]   认不出接触面,指尖此刻在哪也没量到 ⇒ **照实报给模型,由它决定动哪一块**");
+                    上一段汇报 = "I cannot make out my own contact surface, and I do not know where my fingertip is right now either. Tell me which numbered item to move and into which cell.".into();
+                    plug.act(&Cmd::Hold);
                     continue
                 };
                 // 🔴🔴🔴 **两段交接:先粗对准把球送进腕相机的视野,再交给腕相机收尾。**
@@ -7858,10 +7936,15 @@ fn 服务<S: std::io::Read + std::io::Write>(
                                 停原地 += 1;
                                 if 停原地 >= 5 {
                                     println!("[服]      🔴 ①连着 {停原地} 步**还差多少不再缩**(卡在 {余长:.4} m,一步本该缩 {:.4} m)⇒ **这个位形过不去**,不再空推", 探步 * 交付率);
-                                    // 见 `够不着的手` 头注:这是**量出来的**"这条臂到不了那儿",记下来别再选它。
-                                    够不着的手.borrow_mut().insert(手号.get());
-                                    挑过手 = false;
-                                    println!("[服]      ⇒ **记下第 {} 条臂(末端 {})到不了这儿** —— 下一拍重挑手时跳过它", 臂号.get(), 手号.get());
+                                    // 🔴🔴 **撤回**:我先前把这一行读成"这条臂够不着",据此把它拉黑 —— **读错了**。
+                                    // 这句话的真实定义只是"**残差连着 5 步不再缩**",而那有好几种原因
+                                    //(位姿被运动规划整条拒掉 / 方向盘缺秩往错方向推 / 目标三维算错),
+                                    // **够不着只是其中一种,而且多半不是**。
+                                    // 铁证在同一份日志里:`指尖 (-0.421,0.099,1.116) → 目标 (-0.418,0.080,0.926) · 差 0.1913 m`
+                                    // —— **手就悬在球正上方 19 厘米,横向差 3 毫米。它够到了。**
+                                    // 之后手被拉到 x=-0.963(离球 54 厘米),那是**收尾锁错了东西**把它带走的。
+                                    // ⇒ 不拉黑任何一条臂。**照实报给模型,由它决定下一段。**
+                                    上一段汇报 = format!("I moved toward it and then stopped making progress with {余长:.3} m of gap still left - each further step shrank it by less than it should. That is NOT proof I cannot reach; it can also mean the pose was refused, or I was pushing the wrong way. Tell me which numbered item to move and into which cell.");
                                     break
                                 }
                             }
