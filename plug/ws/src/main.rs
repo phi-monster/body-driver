@@ -880,7 +880,7 @@ fn main() {
         let rgb = vec![90u8; w * hh * 3];
         let 身体 = "- channel 6: the part that follows is at (0.81,0.56), 0.4% of frame\n                    - channel 2: moves 45% of your wrist camera\n";
         let 刚才 = "you commanded a move your body-model said would shift the picture by 0.0200 of a frame;                     it actually shifted by 0.0000. your hand physically moved 0.00000 m.";
-        match body_layer::eye::问段(h, port, "Pick up the baseball by 10 cm.", 身体, 刚才, 24, &rgb, w, hh) {
+        match body_layer::eye::问段(h, port, "Pick up the baseball by 10 cm.", 身体, 刚才, 6, 4, &rgb, w, hh) {
             Ok(d) => println!("[自检] 🟢 问段通了 ⇒ 那个东西要落到**第 {} 格** · 做到**{}**为止 · 完了={} · 为什么={}", d.到哪一格, d.到什么为止, d.完了, d.为什么),
             Err(e) => println!("[自检] 🔴 问段没通:{e}"),
         }
@@ -5822,11 +5822,13 @@ fn 服务<S: std::io::Read + std::io::Write>(
         //
         // ⚠️ 它答什么都**不承重到控制**:走多少永远由量出来的方向盘算。
         //    问不通 ⇒ 照常往下走,并把理由说出来 —— **不许因为模型不答就停手**。
+        // 网格多粗:一格竖着大约是"抬起来"那一步的量级。6×4 在这台相机上一格约 12 cm。
+        let (网列, 网行) = (6usize, 4usize);
         let (mut 格心, mut 这一段) = (Vec::new(), None);
         if 部件图.is_some() {
             if let Some((cw4, ch4, crgb4)) = 彩(&帧, 相机号) {
                 let mut 网图 = crgb4.clone();
-                格心 = 画网格(&mut 网图, cw4, ch4, 6, 4);
+                格心 = 画网格(&mut 网图, cw4, ch4, 网列, 网行);
                 if let Ok(dir) = std::env::var("BL_DUMP") {
                     let _ = std::fs::write(format!("{dir}/grid.bmp"), task::bmp24(&网图, cw4, ch4));
                 }
@@ -5843,10 +5845,15 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     }
                     t.push_str(&format!("- the thing you were told to act on is at ({:.2},{:.2}) in this picture\n", look.u, look.v));
                     t.push_str(&format!("- it is {} between your fingers right now\n", if 手里有.get() { "ALREADY held" } else { "NOT" }));
+                    {
+                        let c = (look.u * 网列 as f64).floor().clamp(0.0, 网列 as f64 - 1.0) as usize;
+                        let r = (look.v * 网行 as f64).floor().clamp(0.0, 网行 as f64 - 1.0) as usize;
+                        t.push_str(&format!("- right now it is sitting in cell {}\n", r * 网列 + c + 1));
+                    }
                     t
                 };
                 let 刚才 = 上一段汇报.clone();
-                match body_layer::eye::问段(眼主机, 眼端口, &指令, &身体, &刚才, 格心.len(), &网图, cw4, ch4) {
+                match body_layer::eye::问段(眼主机, 眼端口, &指令, &身体, &刚才, 网列, 网行, &网图, cw4, ch4) {
                     Ok(d) => {
                         println!("[身] 🧠 **这一段由模型定**:那个东西最后要落到**第 {} 格** · 做到**{}**为止{} —— {}",
                             d.到哪一格, d.到什么为止, if d.完了 { " · 它说已经做完了" } else { "" }, d.为什么);
@@ -5867,6 +5874,22 @@ fn 服务<S: std::io::Read + std::io::Write>(
             // 东西还没在手里 ⇒ 先得让它跟着我走,所以伺服目标仍然是**东西本身**;
             // 东西已经在手里 ⇒ 伺服目标换成**那一格** —— 于是"搬过去""砸过去"是同一段代码,
             // 差别只在 `到什么为止`(settle 是放下,slip 是脱手)。**没有"抛"这个词。**
+            // 🔴 **它指了东西已经在的那一格 = 它说"什么都别做"。** 驱动必须**照实回报**,
+            // 否则它下一段还这么答(BU 实测:6 段里 6 段都指了球所在的那一格,整炮零推进)。
+            let 现格 = 格心.iter().enumerate()
+                .min_by(|a, b| {
+                    let d1 = (a.1.0 - look.u).hypot(a.1.1 - look.v);
+                    let d2 = (b.1.0 - look.u).hypot(b.1.1 - look.v);
+                    d1.partial_cmp(&d2).unwrap_or(std::cmp::Ordering::Equal)
+                }).map(|(k, _)| k + 1);
+            if d.到哪一格 >= 1 && Some(d.到哪一格) == 现格 {
+                println!("[身]    ⚠️ 它指的第 {} 格,正是那个东西**现在就在**的那一格 ⇒ 这等于「什么都别做」。一步不动,照实回报。", d.到哪一格);
+                上一段汇报 = format!(
+                    "you named cell {}, which is the cell the thing is ALREADY in, so that meant do nothing and the body did nothing. If the task wants the thing somewhere else, name a DIFFERENT cell - to raise it off the surface that is the cell directly above it.",
+                    d.到哪一格);
+                plug.act(&Cmd::Hold);
+                continue;
+            }
             if let Some(&(gu, gv)) = d.到哪一格.checked_sub(1).and_then(|k| 格心.get(k)) {
                 if 手里有.get() {
                     println!("[服]   手里有东西 ⇒ 这一段把**它**送到第 {} 格 ({gu:.3},{gv:.3});伺服目标从物体换成那一格", d.到哪一格);

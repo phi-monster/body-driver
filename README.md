@@ -106,7 +106,7 @@ layer's own. Read it before the claim below: [what this layer still owes](#what-
 | # | 减什么 | 状态 | 判断 |
 |---|---|---|---|
 | ① | **plug**(换一台机器人要手写的那一层) | 🟢 **本轮做掉大半** | 观测端本来就靠**形状**认(不看键名);命令端删掉了最后一处写死的机器人字段名(`hold_action` 的 `left_arm_joint_state` 等四个,当时是**死代码零调用**),深度通道改成**靠形状认**(浮点 dtype + 二维 shape),不再把彩色路径末段换成字面量 `depth`(原来 6 处)。加了机械检查 `check_purity.sh`(棘轮) |
-| ② | **13 个动词表** | 🟢 **输出空间已加宽(2026-08-28)** | 方向对:动词是**语言的分类**,力学只认"碰哪些点 / 往哪推 / 物体最后什么样"。**三个维度已加上并接到驱动合爪那一步**:力(眼说的 light/medium/firm → 这具身体自己那把尺 ∈[0,1],两端量出来)· 持续时间(秒,用量出来的帧时换成拍数)· 直到什么条件(Amount/Contact/Resist/Slip/Settle,每条都对应驱动已经在算的量)。查出的断点:**`demand()` 驱动一次都没调过**,所以只加字段等于什么都不做。表还没删 —— 按刹车,等任务逼出来 |
+| ② | **13 个动词表** | 🟢🟢 **2026-09-02 整片删除**(owner:*"必须现在删,不然算作弊"*) | 删掉四处:`问身体` 8 词 · `pick` 6 词 + 3 档力度 · `ask` 同一份 · `verb.rs` 的 `Verb` 枚举/`decide`/`demand`,以及 C 接口的 `bl_verb`、`bl_world_ref.verb`、`.manner`、`bl_after_check`。替代品 = 接触集第③格**在画面里的说法**:**"那个东西最后要落到第几格。"** 抓 = 落到它上方那格;砸 = 落到小人那格;合爪/换手/退回全变成驱动自己解的中间步骤。"用多大力"换成**顶到读数自己不再动为止** |
 | ③ | **VLM 给的像素坐标 u,v** | 🟢 **换了生产者(2026-08-28)** | **已做**:候选由 `point_gen::分块` 从深度图切(形态学闭运算 —— 物体是深度上的坑,闭运算填平,差就是鼓多高)⇒ **不认识任何物体、不用任何检测器、不用相机内参**,所以那三个被判死的检测器一个都没碰。眼只负责从画了编号框的图里挑一个,并且有 `0`("一块都不是")这个出口。挑中那块的**掩膜**直接交给 `算一把`,那个猜出来的半径彻底删掉。真实深度图上验过:立方体/球/钞票/小车四件全中,三个伪影(背景 · 细缝 · **我自己的胳膊**)靠"贴画面边的丢掉"一次清干净 |
 
 ### ⚠️ 给这三条配的刹车(2026-08-28 用一整天换来的)
@@ -117,41 +117,38 @@ layer's own. Read it before the claim below: [what this layer still owes](#what-
 **"删掉一个中间概念"和"什么都不做"在代码上长得一模一样,在行为上差十万八千里。**
 
 
-## 现在在哪(2026-09-01,一屏读完)
+## 现在在哪(2026-09-02,一屏读完)
 
 🔴 **官方 `general_pickup`:0 / 55。至今没有抓起来过任何一个东西。** 目标 **≥42/55**(超人类遥操 76.03%)。
 这一栏是唯一算数的成绩,不许拿中间指标替代。
 
-**机体**:RoboDojo 官方 `arx_x5` 双臂(自写的 Franka 场子已弃用)。**这具机体只吃末端命令,不吃关节命令**(`[装] 这具机体认哪种命令:末端那六个自由度`)。
-
-**这一轮(08-31 → 09-01)第一次拿到的绝对数**:
+**机体**:RoboDojo 官方 `arx_x5` 双臂。**它只吃末端命令,不吃关节命令。**
 
 | 环节 | 状态 | 数 |
 |---|---|---|
 | 眼找球 | 🟢 | 单炮内 **6/6 · 13/13** 逐位相同(`742 px · 深 0.645 · 鼓出 0.062`) |
-| 逐末端探测(用哪只手) | 🟢 | `命令 0.0680 ⇒ **实到 0.0664**` ×2,两只手都真动 |
-| 挑手 | 🟢 | 第一次选中**非 0 号**:`⇒ 用第 1 条臂(离目标 0.355 画幅)` |
-| 腕相机↔手 的对应 | 🟢 | `手0→第1台 0.54` / `手1→第2台 0.46`(量出来的) |
-| 方向盘(通道表) | 🟢 | **6 列量到 6 列**,来回两遍**分歧 0%**,**已存进 `/root/cal.json`** |
-| 走过去 | 🟢 | `差 0.4808 m ⇒ ①走完了(还差 **0.0114 m**)` —— 48 厘米走完剩 1.1 厘米 |
-| 合爪 | 🟢 跑通 | `合到底,读数停在 0.0000 ⇒ **指间没东西**` —— **诚实报空,零假绿灯** |
-| 桌面完整性 | 🟢/🔴 | AY 整炮 6 件全在;BD 后半**被整条手臂摊平犁走**(见下) |
+| 挑手(离目标最近的那条臂) | 🟢 | 第一次选中**非 0 号**:`⇒ 用第 1 条臂(差 0.355 画幅)` |
+| 方向盘(通道表) | 🟢 | **6 列量到 6 列**,来回两遍**分歧 0%**,已存盘 |
+| 走过去 | 🟢 | 48 厘米走完剩 **1.1 厘米** |
+| 相机自己解出来 | 🟢 | `焦距 198.1/183.5 · 主点 (456.6,331.3) · 反投影差 0.000 画幅` |
+| 部件图(自己量出自己的身体) | 🟢 | 用**深度**把"我"和"我挡住过的东西"分开;手指自己在深度上厚 **0.0107 m**(只在掩膜上读) |
+| 合爪 | 🟢 跑通 | `合到底,读数停在 0.0000 ⇒ 指间没东西` —— **诚实报空,零假绿灯** |
 | **抓起来** | 🔴 | **0 次** |
+
+**09-02 改的两件大的**:
+- 🔴🔴 **动词表整片删除**(三张词表 + C 接口那一格)。模型每段只说一句话:**"那个东西最后要落到第几格"**,而"到什么为止"由它自己从五种**事件**里挑。合爪/换手/退回/张开全变成驱动自己解的中间步骤。详见减法②那一行。
+- **手指有多厚**必须在**掩膜**上读深度:在外接框里读量出 **0.3740 m**(把背景算进去了),在掩膜上读是 **0.0107 m**。
 
 **现在具名的阻塞(按证据排序)**:
 
-1. 🔴 **爪子和球从来没有在同一帧里同时看得清。** 头相机看球 6/6、看爪子只有几个像素(`看爪:配对 0` 整晚);腕相机看爪子清楚、**走两步就把球丢了**(BA 渲图:前 99 帧球在正中,之后 1200 帧只剩桌沿)。**而"爪子离球多远"是抓取唯一需要的量。** 其余多数病是这一条的下游。
-2. 🔴 **不知道自己的胳膊压在桌上。** BD 后半整条臂摊平横躺,把桌上东西犁走 —— 驱动只瞄一个点(指尖该到哪),对其余连杆在哪**没有任何表示**。
-3. 🟡 **每一集都要从零重量七样**(可达/交付 · 挑手 · 主眼 · 腕机 · 看爪 · 方向盘 · 空合零点),而抓起来要求**同一集内七样全成**。存盘 08-31 才第一次打通。
-
-**09-01 修完并已装机的四条**(每条都有渲图/日志证据,见 `LAB.md`):
-交接不许触发在自己手指上 · **不许在米和弧度上取同一个模**(这是"命令了却零位移"的真因)· 爪宽没真拟出来就不许拿它排序 · 认爪子不许认到别的手。
-**明确划掉一条**:"够不着就不许放行" **不做** —— LAB 记着这道闸加过并一小时内自撤,重加即重跑死杠杆。
+1. 🔴 **爪子和球从来没有在同一帧里同时看得清。** 头相机看球 6/6、看爪子只占 **0.43% 画幅**且被自己挡住(30 段里 28 段是瞎的);腕相机里接触面占 **11.3%** 而且是个常数,可是走两步球就出画。**而"爪子离球多远"是抓取唯一需要的量。**
+2. 🔴 **不知道自己的胳膊压在桌上。** 整条臂摊平横躺把东西犁走 —— 驱动只瞄一个点,对其余连杆在哪**没有任何表示**。
+3. 🔴 **记忆层没接上。** 模型每段只看得见**上一段那一句话**,于是一遍遍说"再靠近一次"。`slow/src/memory.rs` 早建好了(567 行 9 测试),而驱动调用它 **0 次**。
+4. 🟡 **网格太粗**:6×4 一格竖着≈12 cm,而任务是"抬起 10 cm" ⇒ **"抬一点点"说不出口**,模型只能答"它已经在的那一格"。
 
 **下一步(判据先写死)**:
-- **下一炮**:带上那四条修,答一个问题 —— **光把数值层修干净,能不能抓起来。** 赢 = `合到停住…⇒ 指间有东西` 且渲图看到球在两指之间。
-- **再下一炮**:开 `BL_SELFMODEL`(**至今一次没跑过**,日志里 `自模` 出现 0 次),只为拿"每根关节管哪一片"那张图。它同时踩中地图空白第 1/3/12 条。
-- 之后:把 VLM 从"指哪个是球的工具"改成**主体**(上下文 = 它自己量出来的身体 + 刚才干了什么 + 结果),并且**不定时问、被惊到才问**(方向盘本身是预测器,预测对不上就叫醒)。
+- **BU**(在跑):第一炮完全没有动词的驱动。赢 = `合到停住 ⇒ 指间有东西` 且渲图看到球在两指之间。**输的形态要盯住**:原来那 8 个词里有"张开""退回去"两个明确出口,现在驱动得自己解 —— 解不出来会比带动词时更差。
+- 之后:把 `memory.rs` 接进模型循环(阻塞 3)· 网格加密(阻塞 4)。
 
 ### 🔴🔴 架构上的定论(owner 2026-08-27,已落地)
 
@@ -174,29 +171,6 @@ layer's own. Read it before the claim below: [what this layer still owes](#what-
 **通道 = 观测里报出来的每一个能下命令的自由度**(关节 / 手指 / 桨 / 轮 / 舵),数量由布局给。
 两指两个面、五指五个面、吸盘一个面加法向、无人机把桨当通道 —— **同一段代码**。
 姿态是**解出来的**(每列六个数才约束得住朝向),不是被指定的。
-
-### 现在具名的阻塞(2026-08-30,已换官方 ARX X5 双臂)
-
-**机体已从自写的 Franka 场子换成 RoboDojo 官方 `arx_x5` 双臂**,驱动**零改动**认出新身体:
-`24 个关节通道 + 4 个指通道 · 三台相机 · 深度一一对齐 · 而且真的响应关节命令`
-(自写的 Franka 场子一个关节命令都不响应,只吃末端位姿)。
-
-| 环节 | 状态 |
-|---|---|
-| 腕相机看得见**两根手指 + 两指之间的东西** | 🟢 **ARX 上第一次成立**(官方相机,渲图验过) |
-| 通道横跨双臂,"用哪只手"交给最小二乘自己解 | 🟢 一个"左""右"都不出现 |
-| **头相机找到球** | 🔴 **卡在这** |
-| 走过去 / 合爪 / 抬起 | 还没轮到 |
-
-**卡住的机制**:找东西靠"拟合支撑面、比它鼓出来的连通块才算物体"。
-**双臂又大又近,占了头相机下半幅,把支撑面拟合拧歪** ⇒ 要么 `几何一块都没切出来`,
-要么切出来的就是胳膊自己。修法方向是"算支撑面前先把我自己挖掉"(判据用仓里那条
-*我一动、跟着动的就是我*),但**门槛的形式还没想清楚** —— 见 `LAB "同一个门槛我写错三版"`。
-
-**下一炮的赢/输判据**(owner 认可,不许改口):
-- **赢** = `合到停住,读数停在 0.0xxx ⇒ 指间有东西`,且渲图看到球在两指之间
-- **半赢** = 眼挑中的那块 `鼓出 0.0x m · 深 0.6x m`(是球不是伪影)
-- **输** = 连着两拍挑到伪影(几十像素 / 鼓出 <0.02 m)
 
 ### 🔴 架构上的另一条定论(owner 2026-08-27):**驱动里不许有复位键**
 
@@ -242,7 +216,7 @@ So the enforcement is **structural, not procedural**. Read [`abi/body_layer.h`](
 
 | port | what may pass | what **cannot be expressed** |
 |---|---|---|
-| `bl_world_ref` — any VLM / WM | normalised pixel `u,v`, region `extent`, verb, coarse effort | no `z`, no pose, no object id, no task id |
+| `bl_world_ref` — any VLM / WM | normalised pixel `u,v`, region `extent`, **which numbered cell the thing must end up in** | no `z`, no pose, no object id, no task id, **no verb** |
 | `bl_policy_in` — the action model | image + that reference | no joint angles, no link lengths, no camera matrix, no gripper span, no payload, no robot name |
 | `bl_execute` — this layer | everything measured about *this* body | — |
 
@@ -403,27 +377,11 @@ ground truth, `backlash` against three 300-step sweeps of a 7-joint arm
 ([`realdata/`](realdata/), asserted in `cargo test`). The real data earned its keep immediately: see
 *"what real data found that the unit tests did not"* below.
 
-### ~~And there is now a schedule~~ ⛔ **日程已删除(2026-08-25,owner 定)**
+### ⛔ 开机日程已删除(2026-08-25,owner 定)
 
-**装上就下命令,没有第二步。** 干到需要某个身体量而手上没有 ⇒ **它自己动一下去问**,
-量完接着干。旧版是开机先按一张表把 15 个量挨个量完才准干活。
-
-🔴 **代价照记:N128–N143 共 14 炮,进入干活模式 0 次。** 用户让它拿东西,它先坐下来量自己
-四十分钟;而评测里每 200 步打断一次 ⇒ **永远量不完,也永远不干活**。
-而「装机量一次、永久有效」本身是个手填的假设:换只手、挂个武器,爪宽和指尖长**当场全变**,
-时间型的过期管不住它 ⇒ 改成**用到就核对,对不上就重量**。
-
-依赖表([`slow/src/schedule.rs`](slow/src/schedule.rs) 的 `prerequisites`)**留着**,
-但它现在的用法是「要 X 而 X 要先有 Y」的**按需解析**,不是开机日程。
-
-⚠️ **Stale as of 2026-08-15 — see [`LAB.md`](LAB.md)(原 DRIVER_GOAL 已整篇并入).** The layer HAS been driven on a real robot: `phi-monster/lekiwi` records the full chain running on a Pi through the C ABI, with grounding / aiming / contact verified on hardware. The sentence below described 2026-08-09 and was never updated; it misled a reader on 2026-08-15 into reporting "never plugged into a real robot". Original text kept below for the audit trail. ⚠️ Still true *at that date*: **nothing outside this directory reads this layer.** A grep on 2026-08-09 for who
-consumes it returned **zero** — eight prose mentions, no imports. The running teacher is Python, so
-the first move against that is [`bind/python/body_layer.py`](bind/python/body_layer.py) (ctypes,
-no dependencies) and [`conformance/python_check.sh`](conformance/python_check.sh), which drives the
-ABI from Python **refusals first** and cross-checks the header's enum against the built library —
-something `abi_check.sh` cannot do, because a quantity added on one side and forgotten on the other
-leaves every symbol unchanged and every call returning success. Being callable is not being called;
-wiring it into the teacher is the next thing, not a done thing.
+**装上就下命令,没有第二步。** 干到需要某个身体量而手上没有 ⇒ 它自己动一下去量,量完接着干。
+🔴 **代价照记:旧版 N128–N143 共 14 炮,进入干活模式 0 次** —— 用户让它拿东西,它先量自己四十分钟。
+而「装机量一次、永久有效」本身是个手填假设:换只手、挂个武器,爪宽和指尖长当场全变。
 
 ### `step_delivery` is the first quantity added because a body demanded it
 
@@ -739,22 +697,6 @@ is worth its cost, otherwise act now. Second time the same object is seen, its t
 and nothing is probed. *(This supersedes the earlier `+ λ·unknown` cost term, which needed a
 hand-picked λ.)*
 
-## Home pose belongs to ①, and not because a benchmark asks for it
-
-`all_robot_back_to_origin` is enforced in **30 of 42** RoboDojo tasks, but that is evidence, not the
-reason. The reason:
-
-> **Every action must end with the body in a known, repeatable configuration, or the next action
-> starts from an unknown one — this is the precondition for actions to compose at all.**
-
-Which arm's home it is → **①**. Whether it is home now → **①**. How to get back without sweeping
-things off the table → **②b** (lift straight up first; skimming the surface drags objects).
-
-**The tolerance is measured, never chosen**: homing once yields a pose with no spread, and *"am I
-home"* is entirely a question about spread. Refuse when asked for a tolerance tighter than the body's
-own repeatability, rather than answering "not home" forever. Measured here: repeatability **0.74 mm**
-on synthetic records; **0.000 mm spread over n=11** on this body (2026-08-13).
-
 ## 🔴 A driver may not be written against a benchmark
 
 **This layer is going into the world, not onto a leaderboard.** It answers *what is this body like*,
@@ -823,22 +765,6 @@ Each of these produced a run that had to be thrown away.
 | **a silent fallback is worse than a crash** | an asset path with the wrong case, swallowed by `except: return None`, left the point cloud **empty for five consecutive runs** while the code silently used a degenerate fallback that looks exactly like a poorly-performing feature | log which branch was taken, every episode |
 | **ask the simulator for geometry; do not guess file paths** | as above | read the mesh from the live stage — it also removes the pose transform |
 
-## Two stored quantities that are not trustworthy today
-
-| quantity | reading | verdict |
-|---|---|---|
-| `backlash` | **refuses**: *"samples imply mutually inconsistent answers"* | 🟢 the refusal is correct — leave it refusing, do not invent a value |
-| `floor` | **0.9208** while `home` z is **0.9215** — 0.7 mm apart | 🔴 degenerate: the press-down probe never descended. Must be re-measured against an actual support surface before anything uses it |
-
-## What is missing and is blocking today
-
-**`reach` answers a radial band `[0.13425, 0.6019]`** — validated on 2174 real episodes, and still
-unable to answer *"wrist down, at this xy, descending to this z — can I hold that pose?"* Every
-failure in the 2026-08-13 runs landed there: the flange residual and the tool-point residual were
-**identical (0.0482 m)**, which rules out a tool-offset error and leaves *the pose is outside the
-workspace*. Until that slot exists, the layer above has to ask by acting — which is a measurement,
-not a hand-filled constant, but it belongs here.
-
 ## Verification, fixed before the numbers exist
 
 Ordered by *cheapest thing that can kill the idea*, not by *most impressive*. Any shot that fails
@@ -899,301 +825,52 @@ grace period).
 
 ---
 
-# thin OS — memory
+# 记忆 —— 已经在驱动里,而驱动一次没调过
 
-Merged in here (owner 2026-08-11: *"os layer 不要独立成项目,合并进 body driver 的文件夹"*). It is a
-sibling of the body layer in the architecture and a subdirectory of it on disk.
+**实现:[`slow/src/memory.rs`](slow/src/memory.rs)(567 行,9 个测试),走 `bl_memory_*` 出接口。**
+2026-08-11 从 Python 搬进 Rust(owner:*"我们整个 body driver 里面为什么会有任何一行 python"*)。
+设计规则不再写在文档里 —— 它们**在那份代码里是结构性的**,读那个文件。
 
-⚠️ **`SYSTEM.md` no longer exists.** It was deleted by `eebd68fd` *"删除 SYSTEM.md 与
-EMBODIMENTS.md(owner 指令)"* from `universal-grounding/results/system_aug2026/`. Any instruction
-that says "read the root SYSTEM.md" is stale; the memory design lives here.
+🔴 **而 `plug/ws/src/main.rs` 调用它 0 次。** 能被调用不等于被调用了 —— 这是本仓的老病。
+代价看得见:模型每一段拿到的"历史"只有**上一段那一句话**,于是它一遍遍说
+*"上次没够着,再靠近一次"*,而驱动手里那张"试过哪些下手点"的表从没告诉过它。
 
----
+**记忆按【多快过期】分层,每一层已经有主:**
 
-# THE DESIGN, stated once
-
-## Memory is classified by HOW FAST IT GOES STALE, and each rung already has an owner
-
-| rung | example | dies when | owner |
+| 层 | 例子 | 什么时候死 | 归谁 |
 |---|---|---|---|
-| **this frame** | where the moving cup is right now | next frame | **not stored** — look again |
-| **this task** | what I am doing, what I have done, what I am waiting for | the task ends | **thin OS** |
-| **this place** | the bin is in that corner; the sofa faces the window | you leave the place | **thin OS — 任务记忆已建(`os_layer.py`,529 行,`ThinOS`+`SlotOS`);地点记忆全仓 grep 无实现** |
-| **this body** | the fingertip is 0.1451 m from the flange | the robot or tool changes | **body layer — built** |
-| **the world** | knives are held by the handle | never | **the weights** |
+| 这一帧 | 那个杯子此刻在哪 | 下一帧 | **不存** —— 再看一眼 |
+| 这个任务 | 我在干什么、干过什么、在等什么 | 任务结束 | `memory.rs`(`Scope::Task`) |
+| 这个地方 | 垃圾桶在那个角 | 离开这个地方 | `memory.rs`(`Scope::Place` + `PlaceKey`,**会弃权**) |
+| 这具身体 | 指尖离法兰多远 | 换机器或换工具 | 身体层 |
+| 这个世界 | 刀要握把手 | 永不 | 权重 |
 
-This is not a claim to handle everything. It is a partition with a named owner per rung, and the
+🔴 **第一层那条("会自己动的东西不许存")是场景相关的,不许照抄到客厅** ——
+传送带上写下的位置几秒后就错;而沙发、垃圾桶、桌子的位置是任务里**最耐久**的事实。
+一般形式是**按"它会不会自己动"分类**,不是"位置一律不许存"。
 
-🔴 **Rung 1's rule is scene-specific and must not be generalised.** "Never store a position" is
-right on a conveyor, where everything moves. In a room it is backwards: the sofa, the bin and the
-table do not move, and their positions are the most durable facts in the task. The general form is
-**classify by whether the thing moves by itself**, not "positions are forbidden".
+## 为什么"弃权"是全部的重点
 
-## What starts a NEW memory: three independent events, never a timer
+实测(RoboDojo 传送带,5 集 / 4 腿 / 4 名词 / 4 布局,一致):名词→像素那个接口
+**离【同类的错的那一个】22.8–50.5 px,离对的那一个 732–996 px**,而画幅只有 640 px ——
+指称物根本不在画面里,**而接口没有办法说出这件事**。每一个答案都很自信。
+⇒ **一个不会弃权的接口,会把"我看不见它"变成"它在那边"。** 模型再强也治不了。
 
-| event | opens | keeps |
+## LeKiwi 测试(owner 2026-08-11 定的配方,原话不许转述)
+
+1. 让它移动到某个物体上 2. 打乱物体 3. 说 **"移动到上次的物体上"**
+
+🔴 **这句话要一字不改地给。** 换成"移动到红杯子"就什么都没测到,而且看起来还是过了。
+三步共用**同一个**记忆实例;记录逐帧的格子内容当证据。
+
+## 还够不到的(直接问过,owner 2026-08-11:半小时一次性收拾大客厅)
+
+| | 今天 | 半小时收拾 |
 |---|---|---|
-| a new task is given | a new TASK memory | place memory (same room) · body |
-| the place is not recognised | a new PLACE memory | task memory (walking through a door does not change the goal) · body |
-| the body or tool changes | a new body calibration | both of the above |
-
-The current implementation collapses all three into "one episode, wipe everything", which is why
-walking out of a room would also forget the errand.
-
-## 🔴 The place key is to a room what the body fingerprint is to a robot
-
-`bl_body` already solved this exact problem: *one calibration per BODY, stored under a fingerprint
-computed from what the body itself reports, containing no benchmark name and no task name.*
-
-Place memory takes the same shape: **one memory per PLACE, keyed by a fingerprint computed from
-what the place itself looks like.**
-
-- return to the same room → the key matches → carry on with the map you had
-- a room never seen → no match → open an empty one and fill it as you go
-- outdoors, everything new → every place is a new key → no history, which is correct
-
-🔴 **And it must be able to refuse.** *"I do not know whether I have been here"* is a legitimate
-third answer, and **misidentifying a place is worse than having no memory at all** — you would go
-looking for a bin in a corner that has none. Same discipline as the body layer: measure, and refuse
-when the measurement does not separate.
-
-## Every stored fact carries WHEN IT WAS LAST CONFIRMED
-
-Maps go stale — somebody moves the bin. So each `(what, where)` records the last time it was seen
-with one's own eyes, and:
-
-- the longer since confirmation, the more it must be re-checked before being acted on
-- checked and wrong ⇒ rewrite in place **and record that this spot changes**, so it is re-checked
-  more often thereafter
-
-## Retrieval, not recitation
-
-Dozens of objects cannot all go in the prompt. Place memory has to be **queryable** — "what do I
-know about the bin?" — rather than dumped. At that point it is a small database, and **this is the
-part of the design I have not worked out.**
-
-# thin OS
-
-`universal-grounding/README.md` 当初给它的定位:
-
-> 记忆 / 多步规划归**薄 OS 那一层(与 body layer 并列,不进动作模型)**
-> 记住顺序 / 多步规划 | 不归这个接口,归薄 OS ——(owner 订正 2026-08-06:VLM 天生就会记事,给它一层薄 OS 即可)
-
-Confirmed absent before writing: all nineteen `bl_*` entry points in `body-layer/abi/body_layer.h`
-are measurement, execution or debt. `bl_save`/`bl_load` serialise a CALIBRATION, not an episode.
-Nothing in the body layer remembers anything that happened.
-
-| layer | owns | does NOT own |
-|---|---|---|
-| **thin OS** (here) | memory · which one · when · multi-step order | anything about the robot |
-| body layer | measured body constants, refusals | anything that happened |
-| weights | **primitives only** | memory, timing, referent choice |
-
-## What it is
-
-A **compacting context**, not a memory store (owner 2026-08-11: *"我们的记忆不是长期记忆吧,是类似
-于 claude code 的上下文 compact 这种"*). Shape taken from `claude-code/src/services/compact/`:
-
-- `microCompact.ts` → old turns keep their one-line note and lose their raw reply. No model call.
-- `compact.ts` + `autoCompact.ts` → at a threshold, one model call rewrites the notes into a fixed
-  brief and the notes are dropped.
-
-🔴 **The mechanism transfers; the REASON does not, and that changes what to keep.** Claude Code
-compacts because the window fills, and text does not expire — a file read 200 turns ago is probably
-still true. Here an episode is 10–40 frames and never fills anything, while *"frame 3: a green
-object is on the belt"* was true when written and describes something that has since driven away.
-**We compact for freshness, they compact for size.** Two consequences, both live in the code:
-
-1. Our memory holds two kinds of thing and they must not be treated alike — **perishable** (where
-   something is right now: never remember it, look again) and **durable** (what the first object
-   looked like; whether we have already grasped; which phase we are in: never expires within an
-   episode).
-2. **Our forgetting is unrecoverable.** Claude Code can re-read the file; we cannot re-see an
-   object that has left the frame. Anything durable has to survive compaction by name, not by a
-   summariser's judgement.
-
-*(Both of those consequences are why the **slot** strategy below is the default: it is the same
-idea with the durable facts pinned by name and the perishable ones given nowhere to live. `notes`
-is kept so the two can be compared on identical episodes rather than argued about.)*
-
-## Why abstention is the whole point
-
-Measured on RoboDojo `match_and_pick_from_conveyor`, 5 episodes / 4 legs / 4 nouns / 4 layouts,
-unanimous: the old noun→pixel interface answered **22.8–50.5 px from the WRONG same-category
-instance** and **732–996 px from the right one**, in a 640 px frame — the referent was off-screen
-and the interface had no way to say so. Every one of those answers was confident.
-
-**An interface that cannot abstain turns "I cannot see it" into "it is over there."** No model
-quality fixes that. So `/ask` exists and `NOT_YET` is a first-class reply.
-
-Welded consequences of that, in `os_layer.py`:
-
-- an abstention **may not carry a point** — `/ask` runs the point parser on every reply, so a
-  NOT_YET that happens to contain a bracketed pair still arrives with a `uv` (observed:
-  `status=NOT_YET, uv=[0.0, 0.0]`). The status decides; the discarded point is kept in
-  `server_uv_ignored` rather than dropped silently.
-- **"unreadable reply" and "not yet" are counted separately.** One says the world is not ready, the
-  other says the instrument is not, and they have opposite next moves.
-- a compaction that fails to parse **does not drop the notes it was meant to replace** — that would
-  lose the memory and read as the eye having forgotten.
-- 🔴 this layer never reads a pose. It sees frames and its own notes. Ground truth in here would be
-  an oracle wearing a memory's clothes and the measurement would be circular.
-
-## Install
-
-`os_layer.py` talks to an eye server over `POST /ask` (free-form prompt + frame → reply). Add that
-endpoint to an existing `eye_server.py` with:
-
-```
-python patch_eye_ask.py          # idempotent; /point is untouched
-```
-
-Then restart the server **by port owner, not by pidfile** — a pidfile-based restart silently left
-the old code serving while `/health` looked fine, and the only symptom was a 404 on the new route:
-
-```
-pid=$(ss -lptnH "sport = :48611" | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2); kill -9 $pid
-```
-
-## Use
-
-```python
-import os_layer
-OS = os_layer.make_os(task_sentence)        # L3_OS_KIND=slot (default) | notes
-ans = OS.observe(rgb, k)                    # once per look
-if ans["ready"]:
-    drive_to_pixel(ans["uv"])               # uv is in PIXELS of this frame
-else:
-    step_the_world()                        # ans["why"] in {not_yet, no_point, unparsed}
-```
-
-`OS.summary()` → `os_kind` · `os_calls` · `os_log`, plus per-strategy: slot →
-`os_slots` / `os_pinned` / `os_changes`; notes → `os_compactions` / `os_turns_live` / `os_brief`.
-
-Env: `L3_EYE_URL` · `L3_OS_KEEP_RAW` (turns keeping raw text, default 3) · `L3_OS_COMPACT_AT`
-(turns before a rewrite, default 10).
-
-## 🔴 Scope: per-episode vs per-session
-
-An OS instance holds ONE episode. On a benchmark, carrying memory across episodes is a leak that looks
-like skill, so the caller constructs a new one per episode.
-
-**On a real robot the opposite is wanted** — "the object from last time" spans commands. Keep one
-instance alive for the whole session and call `observe()` across commands. Nothing in the class
-needs to change; it is the caller's choice, and it must be a deliberate one.
-
-## LeKiwi test (owner's recipe, 2026-08-11)
-
-1. tell it to move to an object
-2. shuffle the objects
-3. say **"移动到上次的物体上"**
-
-🔴 **Give that sentence verbatim.** Do not let a coding assistant paraphrase it into "move to the
-red cup" — the whole thing being tested is whether the layer resolves *"上次的"* from its own
-memory. A translated instruction tests nothing, and it will still look like it passed.
-
-Keep ONE OS instance across all three steps (per the scope note above), and record `os_log` — the
-per-frame notes are the evidence for what it actually remembered, as distinct from what it guessed.
-
-## Two strategies, same contract
-
-`make_os()` returns one of two, both exposing the same `observe()`, so they can be A/B'd on
-identical episodes instead of argued about. `L3_OS_KIND=slot` (default) or `notes`.
-
-### `notes` — the Claude Code shape
-
-Keep a note per frame; at a threshold spend one model call rewriting them into a brief. Correct
-when the reason to compress is SIZE.
-
-### `slot` — recommended here
-
-Five named slots the eye rewrites every frame, riding the observation:
-
-| slot | |
-|---|---|
-| `first_object` | what was seen first, described well enough to recognise again. **Write-once.** |
-| `phase` | `observing` / `waiting` / `target_visible` / `done` |
-| `already_done` | what has been accomplished or missed |
-| `other` | escape hatch for a fact we did not name |
-| `status` + `point_2d` | this frame only — **never stored** |
-
-Three properties the notes shape cannot give:
-
-1. **No blind window.** Compaction costs one 5 s inference during which the robot is not looking;
-   on a 10–40 frame episode that is a large fraction of the episode. The slot rewrite is free.
-2. **Durable facts are pinned by name**, not by whether a summariser happened to carry them. Our
-   forgetting is unrecoverable — the object has left the frame.
-3. 🔴 **Perishable facts have nowhere to be written.** There is no slot for "where it is now". A
-   position exists only as `point_2d` for the current frame and is consumed immediately. Driving on
-   a stale position stops being a rule to obey and becomes unrepresentable.
-
-🔴🔴 **AND THAT THIRD RULE IS SCENE-SPECIFIC, NOT UNIVERSAL — do not copy it forward.** It is right
-here because a conveyor moves everything: a position written down is wrong seconds later. In a room
-it is **backwards**. The sofa does not move, the bin does not move, the table does not move, and
-their positions are the most durable facts in the task — a design that structurally forbids storing
-them cannot tidy a living room. The correct general form is not "never store positions" but
-**"classify memory by whether the thing moves by itself"**: a belt object's position is perishable,
-a fixture's position is durable, and the robot's own pose is somewhere in between (durable for
-seconds, re-measurable on demand). Written down because the next build will be tempted to reuse
-this file's rule verbatim, and it is exactly the shape of mistake this repo keeps paying for — a
-lesson derived from one setting, applied where its premise does not hold.
-
-Cost, stated: fixed slots are less general than prose. `other` is the seam to watch if this ever
-loses to `notes`.
-
-### 🔴 The pin rule, and the version of it that was wrong
-
-`first_object` pins on the frame AFTER it is first written — mechanical, and nothing the model does
-can affect it. By then the eye has seen a different picture, "the first one" is history, and any
-later edit would be overwriting a memory it can no longer check against the world.
-
-The first version pinned when `phase` left `observing`. The smoke test showed **the model never
-updates `phase`** (it answered `TARGET_VISIBLE` with `phase` still `observing`), so `pinned` stayed
-empty for the whole run: **a guard that only fires when the thing it guards against cooperates is
-not a guard.** Recorded because the failure was invisible — every other field looked right.
-
-### Smoke test (3 synthetic frames: red → green → red)
-
-```
-k=0  status=NOT_YET         first_object='red square'   pinned=[]
-k=1  status=NOT_YET         first_object='red square'   pinned=['first_object']
-k=2  status=TARGET_VISIBLE  first_object='red square'   pinned=['first_object']
-```
-
-It recorded the first object, abstained while a different one passed, and answered only when the
-match returned — from its own memory, with no ground truth anywhere in the path. A refused
-overwrite of a pinned slot is recorded in `os_changes` as `REFUSED`, never dropped silently.
-
-## Measured, first readings
-
-- `NOT_YET` on **11 of 83** asks on real conveyor frames (13%). Before abstention existed this rate
-  was structurally 0%.
-- On frame 1 of an episode the `notes` version still answered `TARGET_VISIBLE` and pointed at the
-  first object, where the task wants "not yet, I am still remembering". That is this layer's own
-  error rate, now countable, and it is the first thing the `slot` A/B should move.
-
-## Still open
-
-**Slot A/B on real episodes.** The smoke test is synthetic. `notes` vs `slot` on the same conveyor
-layouts, comparing abstention rate, wrong-instance rate and official score, is not run yet.
-
-## Scale: what this does NOT reach yet
-
-Asked directly (owner, 2026-08-11) whether this supports a **30-minute one-shot living-room tidy**.
-It does not, in three separate ways, and only one of them is a matter of tuning.
-
-| | this layer today | a 30-min tidy |
-|---|---|---|
-| **throughput** | one look ≈ 5 s wall-clock | 1800 s ⇒ **≤360 looks total**, for dozens of objects, and the world does not wait |
-| **capacity** | ONE remembered object; `already_done` is one free-text string | dozens of objects, each with a destination; progress; what is left |
-| **failure memory** | none | "that mug slipped twice, change the grasp" |
-
-The throughput number is arithmetic, not opinion: at 5 s per look the eye can only ever be the
-**slow** loop — deciding what to do next — while a tracker (LAB: measured at **146.4 Hz**) and the
-body layer close the fast loop. That split is already the architecture; it has never been run on a
-long task.
-
-What does carry over: the **abstention contract** (a long task needs "I have not been to that room
-yet" and "I cannot reach that" far more than a short one), **pinning by name** (over 30 minutes the
-commonest failure is a later observation quietly overwriting an earlier one), and **look-rate
-follows the world** (which is what makes real-time possible at all).
+| 吞吐 | 看一眼 ≈ 5 秒 | 1800 秒 ⇒ **最多 360 次**,而世界不等你 |
+| 容量 | 8 个格子 | 几十个物体,各有去处 |
+| 失败记忆 | 无 | "那个杯子滑了两次,换个抓法" |
+| 检索 | 全量塞进提示词 | 得能**被查询** —— **这一段设计我没想清楚** |
+
+5 秒/次这个数是算术不是意见:眼只能当**慢**环(决定下一步做什么),
+快环归跟踪器(实测 146.4 Hz)和身体层。**这个分工就是架构,而它从没在长任务上跑过。**

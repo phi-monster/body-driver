@@ -408,6 +408,11 @@ pub struct 段 {
 
 /// 问它:**你现在这具身体、这个局面,那个东西该落到哪一格。**
 ///
+/// 🔴🔴 **`why` 必须排在 `goal_cell` 【前面】。** 自检实测(2026-09-02):`goal_cell` 在前时,
+/// 它写 *"I must move it to the cell directly above it, which is cell 6"* 而 `goal_cell` 填的是
+/// **12**(球现在那一格)—— **理由和答案自相矛盾**,因为自回归解码逼它先盖章、后讲理。
+/// 仓里早写过同一条:*"把结论放在证据前面 ⇒ 三问全答弃权,而同一次里 u/v 写的是对的。"*
+///
 /// `身体` 是调用方从**部件图**拼出来的一段话(第几号通道一动、画面里哪一片跟着动)。
 /// `刚才` 是"我下了什么命令、实际发生了什么"。两段都必须是**量出来的**,
 /// 调用方不许往里塞任何常数。`格数` 是画面上画了几格。
@@ -417,7 +422,8 @@ pub fn 问段(
     任务: &str,
     身体: &str,
     刚才: &str,
-    格数: usize,
+    列: usize,
+    行: usize,
     rgb: &[u8],
     w: usize,
     h: usize,
@@ -425,16 +431,17 @@ pub fn 问段(
     if rgb.len() < w * h * 3 {
         return Err(format!("画面短了:要 {} 字节,只有 {}", w * h * 3, rgb.len()));
     }
+    let 格数 = 列 * 行;
     if 格数 == 0 { return Err("画面上一格都没画".into()) }
     let bmp = bmp24(rgb, w, h);
     let b64 = base64(&bmp);
     let esc = |t: &str| t.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n");
     let prompt = format!(
-        "You are not a model looking at a picture. You ARE this robot. This image is what you see right now, with a numbered grid drawn over it (cells 1..{格数}).\\n\\nYOUR BODY (you measured this yourself just now, by moving one channel at a time and watching which part of the picture followed):\\n{}\\n\\nWHAT YOU JUST DID AND WHAT HAPPENED:\\n{}\\n\\nWHAT YOU ARE TRYING TO DO: {}\\n\\nYou are in charge of the loop. There are NO action words - none exist. You say only ONE thing about the world: WHICH NUMBERED CELL THE THING YOU ARE ACTING ON MUST END UP IN. Reaching, opening, closing, backing off, using the other hand - the body works all of that out by itself from what it measured; you never name any of it.\\n\\nAlso say WHEN to call you back. These are EVENTS the body measures, not actions: amount (the move is finished) / contact (something is touched) / resist (it will not move any further) / slip (the thing stops following me) / settle (the picture stops changing).\\n\\nSet done=true only when the thing has ALREADY ended up where the task wants it.\\n\\nDo NOT give distances, angles, speeds or any numbers - you are bad at those and the body already measures them.",
+        "You are not a model looking at a picture. You ARE this robot. This image is what you see right now, with a numbered grid drawn over it: {列} columns x {行} rows, numbered 1..{格数} left to right then top to bottom, so cell n-{列} is DIRECTLY ABOVE cell n and cell n+1 is directly to its right.\\n\\nYOUR BODY (you measured this yourself just now, by moving one channel at a time and watching which part of the picture followed):\\n{}\\n\\nWHAT YOU JUST DID AND WHAT HAPPENED:\\n{}\\n\\nWHAT YOU ARE TRYING TO DO: {}\\n\\nYou are in charge of the loop. There are NO action words - none exist. You say only ONE thing about the world: WHICH NUMBERED CELL THE THING YOU ARE ACTING ON MUST END UP IN. Reaching, opening, closing, backing off, using the other hand - the body works all of that out by itself from what it measured; you never name any of it.\\n\\n🔴 NAMING THE CELL THE THING IS ALREADY IN MEANS DO NOTHING. If the task wants the thing somewhere else, name a DIFFERENT cell - the one it must be in when the task is done. To raise something off the surface, that is the cell directly above it.\\n\\nAlso say WHEN to call you back. These are EVENTS the body measures, not actions: amount (the body finished the move it worked out) / contact (something is touched) / resist (it will not move any further) / slip (the thing stops following me) / settle (the picture stops changing). Pick the event that actually ends THIS piece of work - settle only means the world went quiet, which is not the same as the work being done.\\n\\nSet done=true only when the thing has ALREADY ended up where the task wants it.\\n\\nDo NOT give distances, angles, speeds or any numbers - you are bad at those and the body already measures them.",
         esc(身体), esc(刚才), esc(任务)
     );
     let body = format!(
-        r#"{{"model":"eye","max_tokens":300,"temperature":0,"chat_template_kwargs":{{"enable_thinking":false}},"response_format":{{"type":"json_schema","json_schema":{{"name":"where_it_must_end_up","strict":true,"schema":{{"type":"object","additionalProperties":false,"required":["goal_cell","until","done","why"],"properties":{{"goal_cell":{{"type":"integer","minimum":0,"maximum":{格数}}},"until":{{"type":"string","enum":["amount","contact","resist","slip","settle"]}},"done":{{"type":"boolean"}},"why":{{"type":"string"}}}}}}}}}},"messages":[{{"role":"user","content":[{{"type":"image_url","image_url":{{"url":"data:image/bmp;base64,{b64}"}}}},{{"type":"text","text":"{prompt}"}}]}}]}}"#
+        r#"{{"model":"eye","max_tokens":300,"temperature":0,"chat_template_kwargs":{{"enable_thinking":false}},"response_format":{{"type":"json_schema","json_schema":{{"name":"where_it_must_end_up","strict":true,"schema":{{"type":"object","additionalProperties":false,"required":["why","goal_cell","until","done"],"properties":{{"why":{{"type":"string"}},"goal_cell":{{"type":"integer","minimum":0,"maximum":{格数}}},"until":{{"type":"string","enum":["amount","contact","resist","slip","settle"]}},"done":{{"type":"boolean"}}}}}}}}}},"messages":[{{"role":"user","content":[{{"type":"image_url","image_url":{{"url":"data:image/bmp;base64,{b64}"}}}},{{"type":"text","text":"{prompt}"}}]}}]}}"#
     );
     let raw = post(host, port, "/v1/chat/completions", &body)?;
     let inner = extract_content(&raw)
