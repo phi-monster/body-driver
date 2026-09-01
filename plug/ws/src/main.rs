@@ -5327,6 +5327,9 @@ fn 服务<S: std::io::Read + std::io::Write>(
     let mut 挑过手 = false;
     // 上一段干完之后要汇报给模型的那句话(它下一次的输入)。
     let mut 上一段汇报: String = "this is the first segment; nothing has been tried yet.".into();
+    // 上一次"我在画面哪"是**真量到的**,还是**看不见、拿别的办法顶上的**?
+    // 这一格进汇报 —— 看不见自己的时候必须说出来(见 `量爪位` 那一段的头注)。
+    let 爪位可信 = std::cell::Cell::new(false);
     // 上一次朝哪个方向走的(单位向量)—— "退回我来的路"用它,不用任何记住的位姿。
     let mut 退向: (f64, f64, f64) = (0.0, 0.0, 0.0);
     let 爪图号 = std::cell::Cell::new(0u32);
@@ -5864,7 +5867,19 @@ fn 服务<S: std::io::Read + std::io::Write>(
             }
             Some((cu, cv, dd, 跨))
         };
-        let 看到 = 量爪位(plug).map(|(cu, cv, dd, 跨)|
+        // 🔴🔴🔴 **看不见自己的时候,要【说出来】,不许悄悄换一个错答案顶上。**
+        //(BM 实测 2026-09-02:模型定了 30 段,而 `量爪位` **成功 2 次、看不见 28 次**。
+        // 那 28 次它不吭声地退回老办法,而老办法指到**另一只手**上 ——
+        // 于是汇报给模型的是 `my contact surface is at (0.19,…)`,而选中的手在 0.62。
+        // **模型据此做的 28 个决定,全建立在一句假话上。**
+        // 日志里的样子:`画面追:第 0/15 步 我在 (0.191,0.565) 横纵差 0.5267`、
+        // `第 10/15 步` **逐位相同** —— 它在使劲挪一个根本不是自己手的点。)
+        //
+        // ⇒ 不新增任何规则:只是把"我在这台相机里看不见我自己"这个**已经发生的事实**
+        //   写进给模型的汇报里,让它自己决定(它看到这句自然会说 look_around)。
+        let 量到了 = 量爪位(plug);
+        爪位可信.set(量到了.is_some());
+        let 看到 = 量到了.map(|(cu, cv, dd, 跨)|
             (cu, cv, dd, 跨, 跨, (cu, cv), vec![(cu, cv), (cu, cv)],
              [cu - 跨 * 0.5, cv - 跨 * 0.5, cu + 跨 * 0.5, cv + 跨 * 0.5]))
             .or_else(|| 看爪(plug, 此位, 此姿, jaw0, 上眼));
@@ -7683,7 +7698,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     // *"this is the first segment; nothing has been tried yet"* ⇒ **它在盲决策。**
                     // 我给别的支都写了汇报,唯独把主路那支漏了。)
                     上一段汇报 = format!(
-                        "you asked to approach until {}. the body moved its contact surface toward the target but did not reach it: in the picture the gap is still {末差像:.3} of a frame (it needs to be under {:.3}), and the depth difference is {末深差:+.3} m. your contact surface is at ({末我u:.2},{末我v:.2}) and the target is at ({目u:.2},{目v:.2}).",
+                        "{}you asked to approach until {}. the body moved its contact surface toward the target but did not reach it: in the picture the gap is still {末差像:.3} of a frame (it needs to be under {:.3}), and the depth difference is {末深差:+.3} m. your contact surface is at ({末我u:.2},{末我v:.2}) and the target is at ({目u:.2},{目v:.2}).",
+                        if 爪位可信.get() { "" } else { "WARNING: in this camera you could NOT see your own contact surface at all, so the position below is a guess from a fallback method and may be a different part of your body. " },
                         这一段.as_ref().map(|d| d.到什么为止.clone()).unwrap_or_else(|| "amount".into()),
                         块 * 0.5);
                     continue
