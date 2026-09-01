@@ -3656,6 +3656,21 @@ fn 服务<S: std::io::Read + std::io::Write>(
     // 用 `Cell` 是因为下面这一大片闭包都要读它,而它要在闭包定义之后才被填。
     let 手号 = std::cell::Cell::new(0usize);   // 第几个末端(`f.ee` 的下标 = `Cmd::Ee{arm}`)
     let 臂号 = std::cell::Cell::new(0usize);   // 第几个关节组(`Cmd::Joints{arm}`)
+    /// **拿解出来的相机把手投回画面,看落点对不对。** 一台好相机必然过,一台歪相机必然不过。
+    /// 手在世界哪儿:本体感受白给。手在画面哪儿:刚量的。容差:手自己在画面上有多大(也是量的)。
+    /// 三个输入全是量出来的,没有一个填的数。
+    fn 眼投自检(e: &point_gen::Eye, 手世界: [f64; 3], 手u: f64, 手v: f64,
+                dw: usize, dh: usize, 块: f64) -> Option<bool> {
+        let px = e.project(point_gen::P3 { x: 手世界[0], y: 手世界[1], z: 手世界[2] })?;
+        let (pu, pv) = (px[0] / dw as f64, px[1] / dh as f64);
+        let 差 = (pu - 手u).hypot(pv - 手v);
+        // 容差取"手那一块自己有多大" —— 投到它自己身上就算对得上。
+        let 容 = 块.max(0.02);
+        println!("[服]   相机自检:手在世界 ({:.3},{:.3},{:.3}) ⇒ 投到画面 ({pu:.3},{pv:.3});手实际在 ({手u:.3},{手v:.3}) ⇒ 差 {差:.3} 画幅(容 {容:.3})",
+            手世界[0], 手世界[1], 手世界[2]);
+        Some(差 <= 容)
+    }
+
     let 落 = |plug: &mut Plug<S>, at: [f64; 3], q: [f64; 4], j: f64, 上限: u32| -> Option<(Frame, bool, f64)> {
         // 🔴🔴 **"到没到"的分母是【这次命令要走多远】,不是【第一拍量到的残差】。**
         //
@@ -5310,6 +5325,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
         出
     };
     let mut 挑过手 = false;
+    let 爪图号 = std::cell::Cell::new(0u32);
     let mut 部件图: Option<Vec<Vec<Option<一件>>>> = None;
     loop {
         let Some(帧) = plug.sense() else { return None };
@@ -5333,6 +5349,49 @@ fn 服务<S: std::io::Read + std::io::Write>(
             //    画面里变得多的那一边留下。它不假设任何方向、不碰任何东西、
             //    而且每走一步都在给"我在画面哪"攒证据。**不站着,也不砸东西。**
             白转 = 0;
+            // ══════════════════════════════════════════════════════════════════════
+            // 🔴🔴🔴 **第二个叫醒触发器:什么都没干成的时候,也要问一句"我是不是姿势不对"。**
+            //(owner 看 BH 视频定案 2026-09-02,原话:*"姿势极其怪异地看向天花板,
+            //  看到天花板后就再也回不来了,一直对着天花板自标定到结束 —— 主相机看不出来
+            //  这个机器出了问题吗?"*)
+            //
+            // **看得出来,而驱动里没有任何东西去问这个问题。**
+            // 我原来那个"被惊到才叫醒"**只装在伺服环里**,触发条件是"方向盘的预测和实际对不上";
+            // 而它对着天花板空转的时候**伺服根本没在跑**,所以那个触发**永远不会响** ——
+            // 于是它一直标定到结束,而头相机整段都拍着这个荒唐的姿势。
+            //
+            // ⇒ 第二个触发器用**外层本来就有的那个计数**:`白转`(连着几拍什么都没干成)。
+            //   **"连着干不成事"本身就是"出事了"**,不需要再发明一个信号。
+            //   给它头相机这一帧 + 它自己量出来的身体,让它说哪儿不对。
+            if 部件图.is_some() {
+                if let Some((cw3, ch3, crgb3)) = 彩(&帧, 相机号) {
+                    let 身体 = {
+                        let mut t = String::new();
+                        if let Some(图) = 部件图.as_ref() {
+                            for (kk, 件们) in 图.iter().enumerate() {
+                                if let Some(Some(x)) = 件们.get(相机号) {
+                                    t.push_str(&format!(
+                                        "- channel {kk}: when you move it, the part of the picture that follows is centred at ({:.2},{:.2}) and covers {:.1}% of the frame\n",
+                                        (x.框[0] + x.框[2]) * 0.5, (x.框[1] + x.框[3]) * 0.5, x.占 * 100.0));
+                                }
+                            }
+                        }
+                        t
+                    };
+                    let 刚才 = "you have tried several times in a row and achieved nothing at all.                                 this image is from the camera that is fixed in the world and can see your whole workspace.                                 look at it and say what is wrong with the situation you are in.";
+                    let 这句 = std::env::var("BL_ORDER").ok().filter(|t| !t.trim().is_empty())
+                        .or_else(|| plug.last.clone().and_then(|o| 取(&o, &["instruction".to_string()])).and_then(|v| 字(&v)))
+                        .unwrap_or_else(|| "do the task".into());
+                    match body_layer::eye::问身体(眼主机, 眼端口, &这句, &身体, 刚才, &crgb3, cw3, ch3) {
+                        Ok(断) => {
+                            println!("[身] ⚡ 连着几拍什么都没干成 ⇒ **叫醒模型问「我是不是姿势不对」**");
+                            println!("[身]    它说:**{}** —— {}", 断.做什么, 断.为什么);
+                            if 断.做什么 == "switch_hand" { 挑过手 = false; println!("[身]    ⇒ 下一轮重挑手"); }
+                        }
+                        Err(e) => println!("[身] ⚡ 想问但没问成:{e}"),
+                    }
+                }
+            }
             println!("[服] ⚠️ 连着两拍没做成任何尝试 ⇒ **挪一步让相机多看见我一点**(不盲合、不盲推)");
             let _ = 挪进画面(plug, 白转.wrapping_add(1), 帧.jaw.get(手号.get()).or_else(|| 帧.jaw.first()).copied().unwrap_or(1.0), *通道是关节);
             continue;
@@ -5650,7 +5709,101 @@ fn 服务<S: std::io::Read + std::io::Write>(
         //   画面里跟着动的那一片按定义就是**我**,取它的形心当被跟的点。
         //   这个点是**有偏的**(可能落在小臂)—— 照实说出来,但它足够把手带到球跟前;
         //   到了跟前,腕相机收尾和"碰上"会把偏差纠正回来。**碰一下本身就是测量。**
-        let 看到 = 看爪(plug, 此位, 此姿, jaw0, 上眼);
+        // ══════════════════════════════════════════════════════════════════════════
+        // 🔴🔴🔴 **"我在画面哪"改用【只晃手指】量,手臂纹丝不动。**(owner 2026-09-02 令"把线接上")
+        //
+        // 这就是部件图里那条判据,搬到干活的每一拍上。BF/BG 实测它在**头相机**里成立:
+        //   `**接触面**(指通道)在第 0 台里:占画幅 0.0043 · 中心 (0.809,0.562)`(两炮逐位相同)
+        // 而同一台相机同一时刻,老的 `看爪`(认块器配对)整晚 `配对 0` —— **拿不到任何数**。
+        //
+        // 为什么它成立而老办法不成立:
+        //   · 老办法要"把两瓣配成一对",而头相机里两指只有几个像素、长得一样 ⇒ 配不上
+        //   · 这条只问"哪些像素跟着指通道动",不要求配对
+        //   · 再用**深度**把"我"和"我挡住过的东西"分开(我挡在别人前面:我走开 ⇒ 那一点变远)
+        //
+        // 🔴 **代价极低,所以可以每一拍重做**:指通道只开合爪子,**手臂一动不动** ——
+        //    不像量方向盘要甩胳膊。于是"我在哪"不再是量一次就过期的东西。
+        //
+        // ⚠️ 它换掉的那条老退路,注释自己写着 *"这个点有偏(可能落在小臂)"* ——
+        //    而 `LAB "迭代磨得掉噪声,磨不掉偏差"` 说的就是这个偏差:
+        //    每一轮用同一个有偏的方法重测自己,收敛到同一个错地方。**换掉它才是治本。**
+        let 量爪位 = |plug: &mut Plug<S>| -> Option<(f64, f64, f64, f64)> {
+            let (gw, gh, 前) = plug.sense().and_then(|f| 灰(&f, 相机号))?;
+            let 前深 = 深图(plug, 相机号);
+            let j0 = plug.sense().and_then(|f| f.jaw.get(手号.get()).copied()).unwrap_or(1.0);
+            抓握(plug, if j0 > 0.5 { 0.0 } else { 1.0 }, *通道是关节);
+            定爪(plug, 等拍 * 4);
+            let (_, _, 中) = plug.sense().and_then(|f| 灰(&f, 相机号))?;
+            let 中深 = 深图(plug, 相机号);
+            抓握(plug, j0, *通道是关节);
+            定爪(plug, 等拍 * 4);
+            let (_, _, 后) = plug.sense().and_then(|f| 灰(&f, 相机号))?;
+            let 后深 = 深图(plug, 相机号);
+            if 中.len() != 前.len() || 后.len() != 前.len() || 前.is_empty() { return None }
+            let (mut xs, mut ys): (Vec<usize>, Vec<usize>) = (Vec::new(), Vec::new());
+            for i in 0..前.len() {
+                let d1 = 中[i] as i32 - 前[i] as i32;
+                let d2 = 中[i] as i32 - 后[i] as i32;
+                // 8 是灰度差的噪声底(和别处同一个来源),无量纲。
+                if d1.abs() <= 8 || d2.abs() <= 8 { continue }
+                if d1.signum() != d2.signum() { continue }
+                let 回 = (前[i] as i32 - 后[i] as i32).abs();
+                if 回 >= d1.abs().min(d2.abs()) { continue }
+                if let (Some(za), Some(zb), Some(zd)) = (前深.as_ref(), 中深.as_ref(), 后深.as_ref()) {
+                    if za.len() > i && zb.len() > i && zd.len() > i {
+                        let (fa, fb, fd) = (za[i], zb[i], zd[i]);
+                        if fa.is_finite() && fb.is_finite() && fd.is_finite() {
+                            let 抖 = (fa - fd).abs();
+                            if !(fb > fa + 抖 && fb > fd + 抖) { continue }
+                        }
+                    }
+                }
+                xs.push(i % gw); ys.push(i / gw);
+            }
+            if xs.len() < 32 {
+                println!("[服]   量爪位:只有 {} 个像素跟着指通道动 ⇒ 这台相机里看不见我的接触面", xs.len());
+                return None
+            }
+            let n = xs.len();
+            // 渲图要的是**原始**坐标对;下面统计要排序,所以先留一份。
+            let (原x, 原y) = (xs.clone(), ys.clone());
+            xs.sort_unstable(); ys.sort_unstable();
+            let (cu, cv) = (xs[n / 2] as f64 / gw as f64, ys[n / 2] as f64 / gh as f64);
+            let 跨 = ((xs[n * 9 / 10] - xs[n / 10]) as f64 / gw as f64)
+                .max((ys[n * 9 / 10] - ys[n / 10]) as f64 / gh as f64).max(0.01);
+            let dd = 近侧深(plug, cu, cv, 跨 * 0.5)?;
+            println!("[服]   🟢 **量爪位**(只晃手指、手臂不动、深度去遮挡):{n} 个像素 ⇒ 我的接触面在 ({cu:.3},{cv:.3}) 深 {dd:.3} m · 占画幅 {跨:.4}");
+            // 🔴🔴 **把它认定的那些像素涂出来存下来 —— 不许只看坐标。**(owner 骂过五次)
+            //(BH 实测:连着八次量出 `(0.916, **0.006**)` —— v=0.006 是画面最上沿,
+            // 爪子不可能在那儿。只有渲图能说清它到底圈住了什么。)
+            if let Ok(dir) = std::env::var("BL_VID") {
+                if let Some((cw, chh, crgb)) = plug.sense().and_then(|f| 彩(&f, 相机号)) {
+                    let mut 图 = crgb.to_vec();
+                    for t in 0..n {
+                        let (px, py) = (原x[t], 原y[t]);
+                        if px >= cw || py >= chh { continue }
+                        let i = (py * cw + px) * 3;
+                        if i + 2 < 图.len() { 图[i] = 255; 图[i + 1] = 40; 图[i + 2] = 40; }
+                    }
+                    // 十字画在它算出来的形心上
+                    let (bx, by) = ((cu * cw as f64) as i64, (cv * chh as f64) as i64);
+                    for t in -12i64..=12 {
+                        for (x, y) in [(bx + t, by), (bx, by + t)] {
+                            if x < 0 || y < 0 || x as usize >= cw || y as usize >= chh { continue }
+                            let i = (y as usize * cw + x as usize) * 3;
+                            if i + 2 < 图.len() { 图[i] = 40; 图[i + 1] = 255; 图[i + 2] = 40; }
+                        }
+                    }
+                    爪图号.set(爪图号.get() + 1);
+                    let _ = std::fs::write(format!("{dir}/爪位{:04}.bmp", 爪图号.get()), task::bmp24(&图, cw, chh));
+                }
+            }
+            Some((cu, cv, dd, 跨))
+        };
+        let 看到 = 量爪位(plug).map(|(cu, cv, dd, 跨)|
+            (cu, cv, dd, 跨, 跨, (cu, cv), vec![(cu, cv), (cu, cv)],
+             [cu - 跨 * 0.5, cv - 跨 * 0.5, cu + 跨 * 0.5, cv + 跨 * 0.5]))
+            .or_else(|| 看爪(plug, 此位, 此姿, jaw0, 上眼));
         let 看到 = match 看到 {
             Some(t) => Some(t),
             None => (|| -> Option<(f64, f64, f64, f64, f64, (f64, f64), Vec<(f64, f64)>, [f64; 4])> {
@@ -6711,7 +6864,38 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     println!("[服]   从表解相机没解出来(自检没通过)⇒ 重量一次");
                     *雅载 = None; continue;
                 };
-                println!("[服]   🟢 相机从表里解出来了:焦距 {:.1}/{:.1} · 主点 ({:.1},{:.1}) · 相机在 ({:.3},{:.3},{:.3}) —— **留着用,不每拍重解**",
+                // 🔴🔴🔴 **解出来的相机必须过两条【物理】检查,不许打了绿灯就收下。**
+                //(BH 实测 2026-09-02,owner 看视频问"主相机看不出来这机器出问题了吗")
+                //
+                // BH 那一炮它打了 🟢 并且"留着用":
+                //   `焦距 566.7/**164.8** · 主点 **(7192.1,1475.7)** · 相机在 (3.304,-4.007,-2.105)`
+                // 画面是 640×480。**主点是光轴打在传感器上的那一点,它必须落在画面里** ——
+                // 7192 是画宽的 **11 倍**。焦距两个方向差 3.4 倍。**这台相机是垃圾。**
+                //
+                // 后果是整段"看天花板":球的像素用这台相机反投影 ⇒ 落在 **2.40–2.87 m 高**
+                // (桌子 0.75 m)⇒ 伸手去够天花板 ⇒ 那个高度上算不出接触集 ⇒ 诚实拒绝 ⇒
+                // 回去重看 ⇒ 再算一遍 ⇒ **死循环到一集结束**,而每一行日志单看都正常。
+                //
+                // 两条检查都**不含任何填出来的常数**:
+                //  ① **主点必须在画面里** —— 画幅大小是这台相机自己报的,不是我填的。
+                //  ② **拿它把手投回去,要落在手真的在的地方** —— 手在世界哪儿是本体感受白给的,
+                //     手在画面哪儿是 `量爪位` 刚量的;容差用**手自己在画面上有多大**(也是量的)。
+                //     这一条是闭环自检:一台好相机必然过,一台歪相机必然不过。
+                let 主点在画里 = e.cx >= 0.0 && e.cy >= 0.0
+                    && e.cx <= dw as f64 && e.cy <= dh as f64;
+                let 投回得上 = match 眼投自检(&e, 此位, u, v, dw, dh, 块) {
+                    Some(good) => good,
+                    None => true,   // 量不到就不拦(照实报,不硬拒)
+                };
+                if !主点在画里 || !投回得上 {
+                    println!("[服]   🔴 **解出来的相机不合格,拒收**:焦距 {:.1}/{:.1} · 主点 ({:.1},{:.1})(画幅 {dw}×{dh})· 相机在 ({:.3},{:.3},{:.3})",
+                        e.fx, e.fy, e.cx, e.cy, e.at[0], e.at[1], e.at[2]);
+                    if !主点在画里 { println!("[服]      ⇒ **主点落在画面外** —— 光轴打在传感器上的那一点不可能在传感器外"); }
+                    if !投回得上 { println!("[服]      ⇒ **拿它把手投回去,落点离手实际在画面的位置太远**"); }
+                    println!("[服]      ⇒ 不用它反投影(用了会把桌上的球算到天花板上)⇒ 重量一次表");
+                    *雅载 = None; continue;
+                }
+                println!("[服]   🟢 相机从表里解出来了并且**过了两条物理检查**:焦距 {:.1}/{:.1} · 主点 ({:.1},{:.1}) · 相机在 ({:.3},{:.3},{:.3}) —— 留着用",
                     e.fx, e.fy, e.cx, e.cy, e.at[0], e.at[1], e.at[2]);
                 眼稳 = Some(e);
                 e
