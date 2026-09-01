@@ -5381,7 +5381,12 @@ fn 服务<S: std::io::Read + std::io::Write>(
     let 挪块到格 = |plug: &mut Plug<S>, 通道: usize, 目标: (f64, f64), jaw0: f64, 是关节: bool| -> Option<bool> {
         let 关节数 = { let f = plug.sense()?; 真臂(&f).iter().map(|&i| f.joints[i].len()).sum::<usize>() };
         let 通道数 = if 是关节 { 关节数 } else { 6 };
-        if 通道数 == 0 || 通道 >= 通道数 { return None }
+        if 通道数 == 0 { return None }
+        // 🔴 这一块的通道号 ≥ 手臂通道数 ⇒ 它是**指通道**(手指长在手上)。
+        //(CA 实测 2026-09-02:模型说"动我身上第 1 号那一块 → 第 11 格",那一块是第 12 号通道 = 一根手指,
+        //  上一版直接 `return None`,于是模型的第一次自主决定被静默丢掉。)
+        // 手指要过去,得推手臂 ⇒ 逐个手臂通道试正反两步,留下让画面里动的那一片离目标最近的那一个。
+        let 候选: Vec<usize> = if 通道 < 通道数 { vec![通道] } else { (0..通道数).collect() };
         let 见 = |plug: &mut Plug<S>| -> Option<(usize, usize, Vec<u8>)> { plug.sense().and_then(|f| 灰(&f, 相机号)) };
         // 动了的那一片的**重心**(归一化)。它就是"这一块现在在画面哪儿"的量,不用跟踪器。
         let 动心 = |a: &(usize, usize, Vec<u8>), b: &(usize, usize, Vec<u8>)| -> Option<(f64, f64)> {
@@ -5394,30 +5399,45 @@ fn 服务<S: std::io::Read + std::io::Write>(
             if n == 0 { return None }
             Some((sx / n as f64 / w as f64, sy / n as f64 / h as f64))
         };
-        let 前 = 见(plug)?;
-        let mut 动 = vec![0.0; 通道数];
-        动[通道] = 探幅;
-        let _ = 迈通道(plug, &动, 1.0, jaw0, 是关节)?;
-        等停(plug, 等拍 * 2);
-        let 后1 = 见(plug)?;
-        let 正近 = 动心(&前, &后1).map(|(u, v)| (u - 目标.0).hypot(v - 目标.1));
-        动[通道] = -探幅 * 2.0;
-        let _ = 迈通道(plug, &动, 1.0, jaw0, 是关节)?;
-        等停(plug, 等拍 * 2);
-        let 后2 = 见(plug)?;
-        let 反近 = 动心(&前, &后2).map(|(u, v)| (u - 目标.0).hypot(v - 目标.1));
-        let 留正 = match (正近, 反近) { (Some(a), Some(b)) => a <= b, (Some(_), None) => true, (None, Some(_)) => false, _ => false };
-        if 留正 {
-            动[通道] = 探幅 * 2.0;
+        // 每个候选通道:+δ 看一眼,再 −2δ 看一眼(落在起点另一边,等距可比),然后回到起点。
+        // 记下"哪个通道、哪个方向"让那一片离目标最近;最后只朝最好的那一个走一步。
+        let mut 最好: Option<(usize, f64, f64)> = None;   // (通道, 符号, 离目标)
+        let mut 动过 = false;
+        for &k in &候选 {
+            let 前 = 见(plug)?;
+            let mut 动 = vec![0.0; 通道数];
+            动[k] = 探幅;
             let _ = 迈通道(plug, &动, 1.0, jaw0, 是关节)?;
             等停(plug, 等拍 * 2);
+            let 后1 = 见(plug)?;
+            let 正近 = 动心(&前, &后1).map(|(u, v)| (u - 目标.0).hypot(v - 目标.1));
+            动[k] = -探幅 * 2.0;
+            let _ = 迈通道(plug, &动, 1.0, jaw0, 是关节)?;
+            等停(plug, 等拍 * 2);
+            let 后2 = 见(plug)?;
+            let 反近 = 动心(&前, &后2).map(|(u, v)| (u - 目标.0).hypot(v - 目标.1));
+            动[k] = 探幅;   // 回到起点
+            let _ = 迈通道(plug, &动, 1.0, jaw0, 是关节)?;
+            等停(plug, 等拍 * 2);
+            动过 |= 正近.is_some() || 反近.is_some();
+            for (sgn, d) in [(1.0f64, 正近), (-1.0f64, 反近)] {
+                if let Some(d) = d { if 最好.map(|b| d < b.2).unwrap_or(true) { 最好 = Some((k, sgn, d)); } }
+            }
+            println!("[服]   试第 {k} 号通道:正着走那一片离目标 {} · 反着走 {}",
+                正近.map(|x| format!("{x:.3}")).unwrap_or_else(|| "(没动)".into()),
+                反近.map(|x| format!("{x:.3}")).unwrap_or_else(|| "(没动)".into()));
         }
-        println!("[服]   挪第 {通道} 号通道管的那一块 → 第 ({:.2},{:.2}) 格:正着走离目标 {} · 反着走 {} ⇒ 停在**{}**那一边",
-            目标.0, 目标.1,
-            正近.map(|x| format!("{x:.3}")).unwrap_or_else(|| "(没动)".into()),
-            反近.map(|x| format!("{x:.3}")).unwrap_or_else(|| "(没动)".into()),
-            if 留正 { "正" } else { "反" });
-        Some(正近.is_some() || 反近.is_some())
+        if let Some((k, sgn, d)) = 最好 {
+            let mut 动 = vec![0.0; 通道数];
+            动[k] = sgn * 探幅;
+            let _ = 迈通道(plug, &动, 1.0, jaw0, 是关节)?;
+            等停(plug, 等拍 * 2);
+            println!("[服]   挪第 {通道} 号通道管的那一块 → 第 ({:.2},{:.2}) 格:最好的是第 {k} 号通道往**{}**(离目标 {d:.3})⇒ 走了一步",
+                目标.0, 目标.1, if sgn > 0.0 { "正" } else { "反" });
+        } else {
+            println!("[服]   挪第 {通道} 号通道管的那一块 → 第 ({:.2},{:.2}) 格:试了 {} 个通道,画面里一片都没动", 目标.0, 目标.1, 候选.len());
+        }
+        Some(动过)
     };
 
     println!("[服] 干活:不解相机,只量画面雅可比(量表迈 {:.4} m = 可达带 {:.3} 的三分之一;走路一截 {:.4} m)",
@@ -5975,20 +5995,26 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 //
                 // 腕相机长在手上 ⇒ 手指相对它不动 ⇒ **这个厚度也是个常数**,在这里算一次存着。
                 if let Some(腕) = 手上相机.get() {
-                    let 深 = 深图(plug, 腕);
+                    // 🔴 每个条件分开打(LAB:"诊断要把每个条件分开打");这一帧没带深度就再拍一帧重读一次
+                    //(CA 实测:同一段代码 BT 量到 0.0107,CA 报"读不到" —— 间歇性,最像是那一瞬没深度)。
+                    let mut 深 = 深图(plug, 腕);
+                    if 深.is_none() { let _ = plug.sense(); 深 = 深图(plug, 腕); println!("[身]   (手指厚度)第一帧没有第 {腕} 台的深度 ⇒ 重拍一帧再读:{}", if 深.is_some() { "有了" } else { "还是没有" }); }
                     let mut 有: Vec<f64> = Vec::new();
+                    let mut 掩点 = 0usize; let mut 无效 = 0usize;
                     if let Some(d) = 深.as_ref() {
                         if let Some((cw5, ch5, _)) = plug.sense().and_then(|f| 灰(&f, 腕)) {
+                            if d.len() != cw5 * ch5 { println!("[身]   ⚠️ 深度图 {} 个点 ≠ 灰度图 {cw5}×{ch5} —— 尺寸不一致,掩膜对不上", d.len()); }
                             for (k, 件们) in 图.iter().enumerate() {
                                 if k < 通道数 { continue }              // 只看指通道
                                 let Some(Some(x)) = 件们.get(腕) else { continue };
                                 for gy in 0..x.mh { for gx in 0..x.mw {
                                     if x.掩[gy * x.mw + gx] == 0 { continue }
+                                    掩点 += 1;
                                     for dy in 0..4 { for dx in 0..4 {
                                         let (px, py) = (gx * 4 + dx, gy * 4 + dy);
                                         if px >= cw5 || py >= ch5 { continue }
                                         let i = py * cw5 + px;
-                                        if i < d.len() && d[i].is_finite() && d[i] > 0.0 { 有.push(d[i]) }
+                                        if i < d.len() && d[i].is_finite() && d[i] > 0.0 { 有.push(d[i]) } else { 无效 += 1 }
                                     }}
                                 }}
                             }
@@ -6000,7 +6026,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         println!("[身] **手指自己在深度上厚 {t:.4} m**(只在手指那些像素上读,不含背景)⇒ 这就是「到位」的容差");
                         指厚常数.set(Some(t));
                     } else {
-                        println!("[身] ⚠️ 手指那些像素上读不到足够的深度 ⇒ 没有厚度这个数,容差退回读数自己的抖");
+                        println!("[身] ⚠️ 手指那些像素上读不到足够的深度 ⇒ 没有厚度这个数,容差退回读数自己的抖(深度图 {} · 掩膜格 {掩点} · 读到 {} 有效 / {无效} 无效)",
+                            if 深.is_some() { "有" } else { "无" }, 有.len());
                     }
                 }
                 // 拍平存起来:通道 × 相机 × 5(框四个数 + 占),空的写 NaN。
@@ -6068,9 +6095,6 @@ fn 服务<S: std::io::Read + std::io::Write>(
             if let Some((cw4, ch4, crgb4)) = 彩(&帧, 相机号) {
                 let mut 网图 = crgb4.clone();
                 格心 = 画网格(&mut 网图, cw4, ch4, 网列, 网行);
-                if let Ok(dir) = std::env::var("BL_DUMP") {
-                    let _ = std::fs::write(format!("{dir}/grid.bmp"), task::bmp24(&网图, cw4, ch4));
-                }
                 // 🔴🔴🔴 **一张编号表:先是我身上的每一块,再是世界里切出来的每一块。**
                 // 模型只答两个号:**动第几号 → 到第几格**。
                 // 这一格拓宽之后,我手写的三个触发器(空转就挪 / 认不出爪子就挪 / 认不出接触面就挪)
@@ -6084,27 +6108,38 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 // 条目:(是不是我身上的, 通道号 or 区号, 画面位置)
                 条目.clear();
                 let mut t = String::new();
-                t.push_str("PIECES OF YOURSELF (measured just now: you moved one channel at a time and watched which part of the picture followed):\n");
+                t.push_str("PIECES OF YOURSELF (measured just now: you moved one channel at a time and watched which part of the picture followed). Each is boxed and NUMBERED on the picture in orange:\n");
                 if let Some(图) = 部件图.as_ref() {
                     for (kk, 件们) in 图.iter().enumerate() {
                         if let Some(Some(x)) = 件们.get(相机号) {
                             let (cu, cv) = ((x.框[0] + x.框[2]) * 0.5, (x.框[1] + x.框[3]) * 0.5);
                             条目.push((true, kk, (cu, cv)));
+                            let 框px = [(x.框[0] * cw4 as f64) as usize, (x.框[1] * ch4 as f64) as usize,
+                                        (x.框[2] * cw4 as f64) as usize, (x.框[3] * ch4 as f64) as usize];
+                            画编号框(&mut 网图, cw4, ch4, 框px, 条目.len(), [255, 160, 32], 2);
                             t.push_str(&format!("  item {}: a piece of you, now in cell {} (covers {:.1}% of the frame)\n",
                                 条目.len(), 格于(cu, cv), x.占 * 100.0));
                         }
                     }
                 }
-                t.push_str("THINGS OUT IN THE WORLD (cut out of the depth picture; you do not know what they are called):\n");
+                t.push_str("THINGS OUT IN THE WORLD (cut out of the depth picture; you do not know what they are called). Each is boxed and NUMBERED on the picture in green:\n");
                 for (ri, r) in 区们.iter().enumerate() {
                     let (cu, cv) = (r.心[0], r.心[1]);
                     条目.push((false, ri, (cu, cv)));
+                    // 🔴 **编号必须画在它看的那张图上。**(CA 实测 2026-09-02:球和剪刀都在第 11 格,
+                    // 文字里两个都是 "a thing in cell 11",而图上只画了网格号没画物体号 ⇒ 它把剪刀当成了球。)
+                    画编号框(&mut 网图, cw4, ch4, r.框, 条目.len(), [32, 255, 32], 2);
                     t.push_str(&format!("  item {}: a thing, now in cell {} ({} px, standing {:.3} out of the surface)\n",
                         条目.len(), 格于(cu, cv), r.像素数, r.高));
                 }
+                // 编号表进日志 —— 不然事后查不出"第 10 号到底是什么"
+                for line in t.lines() { println!("[身]   {line}"); }
                 t.push_str(&format!("- the one you settled on last time is in cell {}\n", 格于(look.u, look.v)));
                 t.push_str(&format!("- there is {} between your fingers right now\n", if 手里有.get() { "ALREADY something" } else { "NOTHING" }));
                 let 身体 = t;
+                if let Ok(dir) = std::env::var("BL_DUMP") {
+                    let _ = std::fs::write(format!("{dir}/grid.bmp"), task::bmp24(&网图, cw4, ch4));
+                }
                 let 刚才 = 上一段汇报.clone();
                 match body_layer::eye::问段(眼主机, 眼端口, &指令, &身体, &刚才, 网列, 网行, 条目.len(), &网图, cw4, ch4) {
                     Ok(d) => {
