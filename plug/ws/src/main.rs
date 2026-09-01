@@ -4725,6 +4725,16 @@ fn 服务<S: std::io::Read + std::io::Write>(
     //   而把这句话原样交给模型,它才有得决定(退回去 / 换个下手点 / 换只手,都由它解)。
     // 仓里已有半条:*"看不见【自己】的时候要说出来"* —— 这里补上另一半:**看不见【要抓的东西】。**
     let 到位了 = std::cell::Cell::new(false);
+    // 🔴🔴🔴 **跟丢了不是"再写一条找回来的规则",是【一个把模型叫醒的事件】。**
+    //(owner 2026-09-02:*"机器人的脑子就是 vlm … vlm 必须是我们 driver 的绝对主角"*)
+    //
+    // "哪个是刚才那个"这个身份**本来就是模型给的**(它从编号块里挑的那一块)。
+    // 中间那些步不能每步都问它(看一眼 5 秒,而收尾一次走十几步、探三个通道,
+    // 全问它一次抓取要四分钟,而官方一集只给 200 步)⇒ 中间由量出来的连续性扛着走。
+    // **扛不住的那一刻,唯一正确的动作是把画面递回去让它重挑** ——
+    // 而不是我再手写一条兜底规则(那是永远写不完的那条路)。
+    // 换成无人机、格斗同样成立:跟丢了就抬头看一眼。
+    let 跟丢了 = std::cell::Cell::new(false);
 
     // 🔴🔴🔴 **腕相机收尾:提成具名闭包,因为它现在有【两个】入口。**(2026-08-29)
     // 原来它内联在"追完之后",而追要先过 `看爪` 那道闸 —— 头相机上那道闸赢不了
@@ -5116,6 +5126,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     // 🔴 物体的深度变化不许超过我自己实际动的距离(容差 = 来回之后没回到原深那点残差)。
                     if (乙.2 - 甲.2).abs() > 去实.abs() + (丙.2 - 甲.2).abs() {
                         println!("[服]   [收尾] 通道 {k}:物体深度跑得比我自己还远 ⇒ 锁错图案了,这一列空着");
+                        跟丢了.set(true);
                         表2.push([0.0; 3]); continue
                     }
                     表2.push([(去[0]+回[0])*0.5, (去[1]+回[1])*0.5, (去[2]+回[2])*0.5]);
@@ -5188,7 +5199,12 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     // 所以到一个静止物体的深度也最多变那么多(再加上深度读数自己的抖)。
                     // 这个界是量出来的(探步是我自己下的命令,深抖是同点两读之差),不是填的。
                     if 上深.is_finite() { v.retain(|r| (r.深 - 上深).abs() <= 探步 + 深抖); }
-                    if v.is_empty() { return None }
+                    if v.is_empty() {
+                        // 见 `跟丢了` 头注:这一刻不许自己编一个位置,交回给模型。
+                        跟丢了.set(true);
+                        println!("[服]   [收尾] 🔴 这一帧切不出一块跟上一帧连得上的(离爪子够近、够得着、深度没跳)⇒ **跟丢了**,叫醒模型重挑");
+                        return None
+                    }
                     // 同一块 = 离上一帧那个位置最近的一块。物体是静的、一步只挪半个探幅,不可能瞬移。
                     v.sort_by(|a, b| {
                         let da = (a.心[0] - 上.0).hypot(a.心[1] - 上.1);
@@ -8481,7 +8497,13 @@ fn 服务<S: std::io::Read + std::io::Write>(
             试过.push(尖目标);
             手里有.set(false);
             抓握(plug, 1.0, *通道是关节);
-            上一段汇报 = "the body got close but never got positive evidence that the thing was between my fingers, so it did NOT close - closing there closes on air. That grasp point is now marked as tried. Decide what to do next.".into();
+            上一段汇报 = if 跟丢了.get() {
+                跟丢了.set(false);
+                // 🔴 跟丢是**模型的活**,不是我的兜底规则:把画面递回去让它重挑那一块。
+                "while moving in close, I LOST TRACK of which thing I was going for - nothing in front of my fingers matched what I was following any more. I did not close. Look at the picture again and tell me which numbered patch is the thing, and where it must end up.".into()
+            } else {
+                "the body got close but never got positive evidence that the thing was between my fingers, so it did NOT close - closing there closes on air. That grasp point is now marked as tried. Decide what to do next.".into()
+            };
             plug.act(&Cmd::Hold);
             continue;
         }
