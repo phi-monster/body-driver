@@ -692,6 +692,9 @@ fn 存标定(
     认不出接触面: Option<bool>,
     // 干活时量到的**画面雅可比**:Δ(画面横, 画面纵, 那一点的深) = 雅 · Δ(世界 x,y,z)。
     雅: Option<[[f64; 3]; 3]>,
+    // 部件图(已拍平成一行数)+ 手指自己在深度上有多厚。**加在最末尾**,免得动到位置参数。
+    部件图存: Option<&str>,
+    指厚: Option<f64>,
 ) -> usize {
     // 🔴🔴 **落盘必须【合并】,不许用"此刻身体里有什么"改写整份文件。**
     // 实测(2026-08-24):上一炮量到的爪宽 0.085 m 存在文件里,这一炮开机只装回 7 格,
@@ -817,6 +820,20 @@ fn 存标定(
     if let Some(b) = 认不出接触面 {
         j.push_str(&format!(",\n  \"jaw_motion_invisible\": {b}"));
     }
+    // 🔴🔴🔴 **部件图也要存 —— 它是"我身上每一块在画面哪儿"的答案,是身体的属性。**
+    //(BV 数出来的 2026-09-02:量它占了开场 **970 行日志**,而且**每一集从头做一遍** ——
+    //  身上 10 个通道一个一个推一遍、再推回来,那 4 个指通道就是 owner 在视频里看到的
+    //  "爪子开合几十次"。README 上它是第 3 号阻塞:*"每一集都要从零重量七样"*。)
+    //
+    // 存的只是**下游真的会读的那部分**:每个通道在每台相机里的框 + 占画幅多少。
+    // 掩膜不存 —— 全仓只有量它的那一段自己读掩膜(算"手指有多厚"),而那个已经化成一个标量。
+    // 一维、行优先(通道 × 相机 × 5),空的那格写 NaN;相机数装回时自己数得出来。
+    if let Some(pm) = 部件图存 {
+        j.push_str(&format!(",\n  \"parts_map\": [{}]", pm));
+    }
+    if let Some(v) = 指厚 {
+        j.push_str(&format!(",\n  \"finger_thickness_m\": {v}"));
+    }
     // 🔴🔴🔴 **顶层键也要【合并】,不许用"这次没量到"把上一炮量到的抹掉。**
     //
     // 上面那段已经把 `quantities` 合并了(2026-08-24 的教训:"跨炮累积"变成"跨炮侵蚀"),
@@ -828,7 +845,8 @@ fn 存标定(
     // `[装] 落盘(已量到 2 格)`(把文件写回去了,也是真的),**没有任何一行看起来不对**。
     // ⇒ 凡是这次没给值的顶层键,**原样从旧文件里抄回来**。
     for 键 in ["image_jacobian", "channel_table", "channels_are_joints",
-               "camera_on_hand", "jaw_span_m", "jaw_closed_on_nothing", "jaw_motion_invisible", "hand"] {
+               "camera_on_hand", "jaw_span_m", "jaw_closed_on_nothing", "jaw_motion_invisible", "hand",
+               "parts_map", "finger_thickness_m"] {
         if j.contains(&format!("\"{键}\"")) { continue }
         let 找 = format!("\"{键}\"");
         let Some(k0) = 旧.find(&找) else { continue };
@@ -1044,6 +1062,9 @@ fn main() {
     let mut 通道表: Option<Vec<[f64; 6]>> = None;
     // 装回来的"哪台相机长在手上" —— 探一次要动一下手臂,存住就不用重探。
     let mut 手上相机装回: Option<usize> = None;
+    // 部件图(拍平)+ 手指厚度 —— 装回来就不用每集把身上每个通道推一遍。
+    let mut 部件图装回: Option<Vec<f64>> = None;
+    let mut 指厚装回: Option<f64> = None;
     let mut 张开装回: Option<f64> = None;
     let mut 空合装回: Option<f64> = None;
     let mut 认面装回 = false;
@@ -1184,6 +1205,13 @@ fn main() {
                         认面装回 = true;
                         println!("[装] 上一炮量到:**这台相机看不见我的钳口张合** —— 直接走搬过去,那 40 拍留给走路");
                     }
+                }
+                if let Some(v) = j.get("parts_map") {
+                    let a = v.nums();
+                    if a.len() >= 5 { 部件图装回 = Some(a); }
+                }
+                if let Some(v) = j.get("finger_thickness_m") {
+                    if let Some(x) = v.num() { if x.is_finite() && x > 0.0 { 指厚装回 = Some(x); } }
                 }
                 if let Some(c) = j.get("camera_on_hand") {
                     if let Some(v) = c.num() {
@@ -3152,7 +3180,7 @@ fn main() {
             }
         }
         // 🔴 每一轮结束就落一次盘 —— 见 `存标定` 上面那段:只在末尾存等于赌这一炮能跑到底。
-        let n格 = 存标定(&out, &body, &相机们, 探幅, 跨度相机, None, None, None, None, None, None, None, None);
+        let n格 = 存标定(&out, &body, &相机们, 探幅, 跨度相机, None, None, None, None, None, None, None, None, None, None);
         println!("      [存] 已落盘 {n格} 格 ⇒ {out}");
     }
     // 🔴🔴 **量到了必须存得下来,而且要存成【驱动自己读得回去】的那个形状。**
@@ -3219,7 +3247,7 @@ fn main() {
             println!("[装]    {k:<20} {d:.4} m{}", if *d > 0.06 { "   ⚠️ 带偏" } else { "" });
         }
     }
-    let n格 = 存标定(&out, &body, &相机们, 探幅, 跨度相机, None, None, None, None, None, None, None, None);
+    let n格 = 存标定(&out, &body, &相机们, 探幅, 跨度相机, None, None, None, None, None, None, None, None, None, None);
     println!("[装] 落盘(已量到 {n格} 格 · 本次点名量到 {} 格)", 成.len());
 
     // ── 🔴🔴 **下命令就去干。** 干到缺某个身体量,它点名要,回上面量完再回来。 ──
@@ -3228,7 +3256,7 @@ fn main() {
         Some((h, p)) => (h.to_string(), p.parse::<u16>().unwrap_or(8077)),
         None => (眼.clone(), 8077),
     };
-    match 服务(&mut plug, &body, &相机们, &眼主机, 眼端口, &out, 读回.as_deref(), &给不出, &mut 手载, &mut 雅载, &mut 通道表, &mut 通道是关节, &mut 手上相机装回, &mut 张开装回, &mut 空合装回, &mut 认面装回) {
+    match 服务(&mut plug, &body, &相机们, &眼主机, 眼端口, &out, 读回.as_deref(), &给不出, &mut 手载, &mut 雅载, &mut 通道表, &mut 通道是关节, &mut 部件图装回, &mut 指厚装回, &mut 手上相机装回, &mut 张开装回, &mut 空合装回, &mut 认面装回) {
         None => break '外,
         Some(名) => match 点名成格(&名) {
             Some(q) => {
@@ -3619,6 +3647,13 @@ fn 服务<S: std::io::Read + std::io::Write>(
     通道表: &mut Option<Vec<[f64; 6]>>,
     // 通道是关节,还是末端那六个自由度。**试出来的**(这具机体七个关节命令全零响应)。
     通道是关节: &mut bool,
+    // 🔴🔴🔴 **部件图:装回来就不用每集重量一遍。**(BV 数出来的 2026-09-02)
+    // 量它占开场 **970 行日志**,身上 10 个通道一个一个推一遍再推回来 ——
+    // 那 4 个指通道就是视频里"爪子开合几十次"。存的是拍平的一行数(通道 × 相机 × 5:
+    // 框四个数 + 占画幅),掩膜不存(只有量它的那一段自己读掩膜,而那已经化成一个标量)。
+    部件图载: &mut Option<Vec<f64>>,
+    // 手指自己在深度上有多厚 —— 「物体算不算在两指之间」的容差(掩膜上量的)。
+    指厚载: &mut Option<f64>,
     // 🔴 哪台相机长在手上 —— 探一次要动一下手臂,装回来就不重探(owner 2026-08-28)。
     手上相机载: &mut Option<usize>,
     // 🔴 钳口张开(拟出来的那个,不是"含面宽"的上界)—— 量一次存住,下一炮装回。
@@ -5482,9 +5517,31 @@ fn 服务<S: std::io::Read + std::io::Write>(
     // 上一次朝哪个方向走的(单位向量)—— "退回我来的路"用它,不用任何记住的位姿。
     let mut 退向: (f64, f64, f64) = (0.0, 0.0, 0.0);
     let 爪图号 = std::cell::Cell::new(0u32);
-    let mut 部件图: Option<Vec<Vec<Option<一件>>>> = None;
     // 手指自己在深度上有多厚(腕相机里是常数)—— "物体算不算在两指之间"的容差。
-    let 指厚常数 = std::cell::Cell::new(None::<f64>);
+    let 指厚常数 = std::cell::Cell::new(*指厚载);
+    // 部件图拍平之后的那一行字,落盘时原样写进去。
+    let 部件图串 = std::cell::RefCell::new(None::<String>);
+    // 🔴 装回来的部件图:框 + 占,掩膜是空的(下游不读掩膜,见 `部件图载` 头注)。
+    let mut 部件图: Option<Vec<Vec<Option<一件>>>> = 部件图载.as_ref().and_then(|平| {
+        let 台 = plug.lay.cams.len();
+        if 台 == 0 || 平.len() % (台 * 5) != 0 { return None }
+        let mut 出: Vec<Vec<Option<一件>>> = Vec::new();
+        for k in 0..(平.len() / (台 * 5)) {
+            let mut 行 = Vec::with_capacity(台);
+            for c in 0..台 {
+                let b = (k * 台 + c) * 5;
+                let f = [平[b], 平[b + 1], 平[b + 2], 平[b + 3]];
+                if f.iter().any(|x| !x.is_finite()) { 行.push(None); continue }
+                行.push(Some(一件 { 掩: Vec::new(), mw: 0, mh: 0, 框: f, 占: 平[b + 4] }));
+            }
+            出.push(行);
+        }
+        println!("[装] 部件图装回:{} 个通道 × {台} 台相机 —— **不用再把身上每个通道推一遍**(那是开场 970 行的来源)", 出.len());
+        if let Some(t) = 指厚常数.get() { println!("[装] 手指自己在深度上厚 {t:.4} m(装回来的)—— 「到位」的容差直接用它"); }
+        Some(出)
+    });
+    // 手指自己在深度上有多厚(腕相机里是常数)—— "物体算不算在两指之间"的容差。
+
     // 🔴 **"东西现在在不在我手里"** —— 动词表删掉之后,"这一段是去够它还是带着它走"
     // 由**这个量出来的事实**决定,不由任何一个词决定。判据是合到停住的读数离
     // "空手合到底"有多远(零尺度,换什么爪子都成立)。
@@ -5832,6 +5889,20 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     } else {
                         println!("[身] ⚠️ 手指那些像素上读不到足够的深度 ⇒ 没有厚度这个数,容差退回读数自己的抖");
                     }
+                }
+                // 拍平存起来:通道 × 相机 × 5(框四个数 + 占),空的写 NaN。
+                {
+                    let 台 = plug.lay.cams.len();
+                    let mut 平: Vec<String> = Vec::new();
+                    for 件们 in 图.iter() {
+                        for c in 0..台 {
+                            match 件们.get(c).and_then(|x| x.as_ref()) {
+                                Some(x) => { for q in x.框 { 平.push(format!("{q}")) } 平.push(format!("{}", x.占)); }
+                                None => { for _ in 0..5 { 平.push("NaN".into()) } }
+                            }
+                        }
+                    }
+                    *部件图串.borrow_mut() = Some(平.join(", "));
                 }
                 部件图 = Some(图);
             }
@@ -7112,7 +7183,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 // ⚠️ 这些量是**身体的属性,与任务无关** —— 抓棒球量到的,抓剪刀/擦桌子照样用。
                 {
                     let n格 = 存标定(标定文件, body, 相机们, 探步, 0, *手载,
-                        通道表.as_deref(), Some(*通道是关节), 手上相机.get(), *张开载, *空合载, Some(*认面载), *雅载);
+                        通道表.as_deref(), Some(*通道是关节), 手上相机.get(), *张开载, *空合载, Some(*认面载), *雅载,
+                        部件图串.borrow().as_deref(), 指厚常数.get());
                     println!("[服]   💾 量到的存进 {标定文件}:这一次落了 {n格} 格(下一炮 --in 装回来,不用重量)");
                 }
             }
