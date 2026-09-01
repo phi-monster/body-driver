@@ -4643,6 +4643,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
     // 原来它内联在"追完之后",而追要先过 `看爪` 那道闸 —— 头相机上那道闸赢不了
     // (YF 实测 344 连败,这一段 0 次被执行)。提出来之后,`看爪` 失败的分支也能直接进。
     let 收尾腕 = |plug: &mut Plug<S>, 腕机: usize, jaw0: f64, 通道是关节: bool,
+                  部件图常数: Option<(f64, f64)>,
                   look: &body_layer::eye::Look, 位: &mut [f64; 3]| -> Option<()> {
                 // 两个接触面在这台相机里的位置 —— 手不动,所以量一次就够。
                 let f0 = plug.sense()?;
@@ -4704,9 +4705,31 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 xs2.sort_unstable(); ys2.sort_unstable();
                 // **两指中间** = 变化区的中位点 —— 张合时两指对称地离开/靠拢,中位点就是它们中间。
                 let c = (xs2[取2 / 2] as f64 / w2 as f64, ys2[取2 / 2] as f64 / h2 as f64);
-                let c = point_gen::Px::from([c.0, c.1]);
+                // 🔴🔴🔴 **腕相机里"我的接触面在哪"是个【常数】,量一次就够,不用每次现张合。**
+                //(owner 2026-09-02 令"重新开完美炮";BM 实测把这件事逼出来了)
+                //
+                // BM:在**头相机**里量"我的接触面在哪",30 段里 **28 段是 0 个像素** ——
+                // 爪子在头相机里只占 **0.43%** 画幅,伸手够桌子时又被自己的小臂挡住。
+                // **那不是精度问题,是问错了相机。**
+                //
+                // 而部件图同一次测量的另一行是:`接触面在第 2 台里:占画幅 **0.1132**` —— **大 26 倍**。
+                // 更要紧的是:**那台相机长在手上,爪子相对它不动** ⇒
+                // **"我的爪子在这台相机的哪儿"根本不需要每拍去量,它是个常数。**
+                // 部件图已经量到了(中心 (0.497,0.762)),量一次,之后一直有效,除非换只手。
+                //
+                // ⇒ 有部件图就用部件图那个常数;没有(第一炮/换了手)才退回现张合。
+                //   两条都不含身体词:一个是"指通道一动、跟着动的那一片"的中心,另一个也是。
+                let c = match 部件图常数 {
+                    Some((pu, pv)) => {
+                        println!("[服]   [收尾] **两指中间**用部件图量到的常数:({pu:.3},{pv:.3}) —— 这台相机长在手上,它不随姿势变");
+                        point_gen::Px::from([pu, pv])
+                    }
+                    None => {
+                        println!("[服]   [收尾] 手上那台里:张合 {} 个像素变了 ⇒ **两指中间**在 ({:.3},{:.3})(部件图还没有,这一次现量)", 强2.len(), c.0, c.1);
+                        point_gen::Px::from([c.0, c.1])
+                    }
+                };
                 let (_, _, g2) = plug.sense().and_then(|f| 灰(&f, 腕机))?;
-                println!("[服]   [收尾] 手上那台里:张合 {} 个像素变了 ⇒ **两指中间**在 ({:.3},{:.3})", 强2.len(), c[0], c[1]);
                 // 🔴🔴🔴 **物体用【几何切块】从这台相机自己的深度图里长出来,不再用"最近的会动的像素"。**
                 //(owner 2026-08-30 令"彻底修好";ZG/ZL 三炮的共同死因)
                 //
@@ -5334,6 +5357,20 @@ fn 服务<S: std::io::Read + std::io::Write>(
     let mut 退向: (f64, f64, f64) = (0.0, 0.0, 0.0);
     let 爪图号 = std::cell::Cell::new(0u32);
     let mut 部件图: Option<Vec<Vec<Option<一件>>>> = None;
+    // 🔴 **腕相机里"我的接触面在哪" —— 从部件图里取那个常数。**
+    // 取的是**指通道**(只开合爪子那几个)在**长在手上那台**里动的那一片的中心。
+    // 那台相机长在手上 ⇒ 这个位置不随姿势变 ⇒ 量一次就够(见 `收尾腕` 里的头注)。
+    let 腕爪常数 = |图: &Option<Vec<Vec<Option<一件>>>>, 腕机: usize, 通道数: usize| -> Option<(f64, f64)> {
+        let 图 = 图.as_ref()?;
+        let (mut su, mut sv, mut n) = (0.0f64, 0.0f64, 0usize);
+        for (k, 件们) in 图.iter().enumerate() {
+            if k < 通道数 { continue }          // 只看指通道
+            if let Some(Some(x)) = 件们.get(腕机) {
+                su += (x.框[0] + x.框[2]) * 0.5; sv += (x.框[1] + x.框[3]) * 0.5; n += 1;
+            }
+        }
+        if n == 0 { None } else { Some((su / n as f64, sv / n as f64)) }
+    };
     loop {
         let Some(帧) = plug.sense() else { return None };
         if plug.复位过 { plug.复位过 = false; 集 += 1; 试过.clear(); 白转 = 0; println!("[服] ── 第 {集} 集 ──"); }
@@ -5970,7 +6007,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 let 起EE = plug.sense().and_then(|f| f.ee.get(手号.get()).copied());
                 let mut 位收 = 此位;
                 println!("[服] ⇒ 第 {相机号} 台里连着 {静} 次认不出爪子 ⇒ **改走第 {腕机} 台(长在手上那台)**");
-                if 收尾腕(plug, 腕机, jaw0, *通道是关节, &look, &mut 位收).is_some() {
+                let 腕常 = { let n = if *通道是关节 { plug.sense().map(|f| 真臂(&f).iter().map(|&i| f.joints[i].len()).sum::<usize>()).unwrap_or(0) } else { 6 }; 腕爪常数(&部件图, 腕机, n) };
+                if 收尾腕(plug, 腕机, jaw0, *通道是关节, 腕常, &look, &mut 位收).is_some() {
                     let 停在 = 合到停住(plug, *通道是关节).unwrap_or(f64::NAN);
                     match (停在.is_finite(), *空合载) {
                         (true, Some(z)) if (停在 - z).abs() > 1e-9 =>
@@ -7487,7 +7525,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
                             }
                         }
                         println!("[服]   🟢 **两段交接②交给第 {腕机} 台(长在手上那台)收尾**");
-                        if 收尾腕(plug, 腕机, jaw0, *通道是关节, &look, &mut 位).is_some() {
+                        let 腕常 = { let n = if *通道是关节 { plug.sense().map(|f| 真臂(&f).iter().map(|&i| f.joints[i].len()).sum::<usize>()).unwrap_or(0) } else { 6 }; 腕爪常数(&部件图, 腕机, n) };
+                if 收尾腕(plug, 腕机, jaw0, *通道是关节, 腕常, &look, &mut 位).is_some() {
                             println!("[服]   🟢 两段交接走通了 ⇒ 交给下面同一段合爪");
                             已就位 = true;
                         } else {
@@ -8127,7 +8166,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
         // 而它正是今晚一半 bug 的来源。要做的只剩一件:**把物体挪到两指中间、挪到碰上的距离。**
         // 判据仍然全是量出来的:两指中间在哪(晃一下爪子看哪块动)· 碰上没有(压不动了)。
         if let (Some(腕机), false) = (手上相机.get(), 已就位) {
-            if 收尾腕(plug, 腕机, jaw0, *通道是关节, &look, &mut 位).is_none() {
+            let 腕常 = { let n = if *通道是关节 { plug.sense().map(|f| 真臂(&f).iter().map(|&i| f.joints[i].len()).sum::<usize>()).unwrap_or(0) } else { 6 }; 腕爪常数(&部件图, 腕机, n) };
+                if 收尾腕(plug, 腕机, jaw0, *通道是关节, 腕常, &look, &mut 位).is_none() {
                 println!("[服]   [收尾] 这一段没走完(上面已经说明理由)⇒ 直接合,结果照实报");
             }
         }
