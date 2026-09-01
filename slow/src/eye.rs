@@ -420,7 +420,7 @@ pub fn 问身体(
     let b64 = base64(&bmp);
     let esc = |t: &str| t.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n");
     let prompt = format!(
-        "You are not a model looking at a picture. You ARE this robot.          This image is what you see right now.\n\n         YOUR BODY (you measured this yourself just now, by moving one channel at a time          and watching which part of the picture followed):\n{}\n\n         WHAT YOU JUST DID AND WHAT HAPPENED:\n{}\n\n         WHAT YOU ARE TRYING TO DO: {}\n\n         Something did not go as your own body-model predicted, which is why you are being asked.          Look at the picture and decide what to do next.          Do NOT give distances, angles or any numbers - you are bad at those and the body          already computes them. Only decide WHAT to do.",
+        "You are not a model looking at a picture. You ARE this robot. This image is what you see right now.\\n\\nYOUR BODY (you measured this yourself just now, by moving one channel at a time and watching which part of the picture followed):\\n{}\\n\\nWHAT YOU JUST DID AND WHAT HAPPENED:\\n{}\\n\\nWHAT YOU ARE TRYING TO DO: {}\\n\\nSomething did not go as your own body-model predicted, which is why you are being asked. Look at the picture and decide what to do next. Do NOT give distances, angles or any numbers - you are bad at those and the body already computes them. Only decide WHAT to do.",
         esc(身体), esc(刚才), esc(任务)
     );
     let body = format!(

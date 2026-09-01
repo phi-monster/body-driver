@@ -866,6 +866,26 @@ fn 存标定(
 }
 
 fn main() {
+    // 🔴🔴🔴 **自检开关:`BL_TESTEYE=1` ⇒ 只打一发"问身体",打印结果,退出。**
+    //(owner 2026-09-01:"编译过了就当做完了"已经害我白烧两炮 ——
+    //  第一次传错图像格式 14 次全废,第二次拼出来的 JSON 是坏的 98 次全废,
+    //  **两次都是"编译通过"就上箱**。这个开关的存在就是为了不再有第三次:
+    //  **要看见它真的回一句话,才准说这一块做完了。**)
+    if std::env::var("BL_TESTEYE").is_ok() {
+        let 眼 = std::env::var("BL_EYE").unwrap_or_else(|_| "127.0.0.1:8077".into());
+        let (h, p) = 眼.split_once(':').unwrap_or(("127.0.0.1", "8077"));
+        let port: u16 = p.parse().unwrap_or(8077);
+        // 一张纯色小图就够 —— 这一发验的是**请求体拼得对不对**,不是它看得准不准。
+        let (w, hh) = (64usize, 48usize);
+        let rgb = vec![90u8; w * hh * 3];
+        let 身体 = "- channel 6: the part that follows is at (0.81,0.56), 0.4% of frame\n                    - channel 2: moves 45% of your wrist camera\n";
+        let 刚才 = "you commanded a move your body-model said would shift the picture by 0.0200 of a frame;                     it actually shifted by 0.0000. your hand physically moved 0.00000 m.";
+        match body_layer::eye::问身体(h, port, "Pick up the baseball by 10 cm.", 身体, 刚才, &rgb, w, hh) {
+            Ok(d) => println!("[自检] 🟢 问身体通了 ⇒ 做什么=**{}** · 为什么={}", d.做什么, d.为什么),
+            Err(e) => println!("[自检] 🔴 问身体没通:{e}"),
+        }
+        return;
+    }
     let mut listen: Option<u16> = None;
     let mut 读回: Option<String> = None;
     let mut out = String::from("bodycal.json");
