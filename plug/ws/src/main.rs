@@ -6175,7 +6175,11 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     let d2 = (b.1.0 - look.u).hypot(b.1.1 - look.v);
                     d1.partial_cmp(&d2).unwrap_or(std::cmp::Ordering::Equal)
                 }).map(|(k, _)| k + 1);
-            if d.到哪一格 >= 1 && Some(d.到哪一格) == 现格 {
+            // 🔴 这道"指到它已经在的格子 = 什么都别做"只对【动的是那个东西本身】成立。
+            //(CC 实测 2026-09-02:模型说"动我身上第 1 号那一块 → 第 11 格"= 把手伸到球那儿,
+            //  正是最有价值的那句话,却被这道检查当成废话拦掉。)动的是我身上的一块 ⇒ 跳过这道检查。
+            let 动的是我 = 条目.get(d.动第几号.wrapping_sub(1)).map(|x| x.0).unwrap_or(false);
+            if !动的是我 && d.到哪一格 >= 1 && Some(d.到哪一格) == 现格 {
                 println!("[身]    ⚠️ 它指的第 {} 格,正是那个东西**现在就在**的那一格 ⇒ 这等于「什么都别做」。一步不动,照实回报。", d.到哪一格);
                 上一段汇报 = format!(
                     "you named cell {}, which is the cell the thing is ALREADY in, so that meant do nothing and the body did nothing. If the task wants the thing somewhere else, name a DIFFERENT cell - to raise it off the surface that is the cell directly above it.",
