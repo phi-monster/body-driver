@@ -4665,6 +4665,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
     // (YF 实测 344 连败,这一段 0 次被执行)。提出来之后,`看爪` 失败的分支也能直接进。
     let 收尾腕 = |plug: &mut Plug<S>, 腕机: usize, jaw0: f64, 通道是关节: bool,
                   部件图常数: Option<(f64, f64, f64)>,
+                  指厚常数: Option<f64>,
                   look: &body_layer::eye::Look, 位: &mut [f64; 3]| -> Option<()> {
                 // 两个接触面在这台相机里的位置 —— 手不动,所以量一次就够。
                 let f0 = plug.sense()?;
@@ -5011,11 +5012,10 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 // 所以"手指那一点有多深"直接读一次就是目标** —— 把物体压到那个深度,它就在指间。
                 // **手指自己在深度上有多厚** —— 拿部件图给的那一片当窗,读"最近的四分之一"和
                 // "最远的四分之一"之差。没有部件图就没有这个数,那时退回读数自己的抖。
-                let 指厚 = 部件图常数.and_then(|(pu, pv, 片)| {
-                    let t = 片厚2(plug, 腕机, pu, pv, 片 * 0.5)?;
-                    println!("[服]   [收尾] 手指那一片自己在深度上厚 {t:.4} m ⇒ 这就是「到位」的容差(量出来的,不是填的)");
-                    if t.is_finite() && t > 0.0 { Some(t) } else { None }
-                });
+                // "手指自己有多厚" —— 部件图那一步已经在**掩膜**上算好了(见那一段的头注:
+                // 在外接框里读会把背景算进来,BR 实测量出 0.3740 m)。腕相机里它是常数。
+                let 指厚 = 指厚常数;
+                if let Some(t) = 指厚 { println!("[服]   [收尾] 「到位」的深度容差用手指自己的厚度:{t:.4} m(部件图在掩膜上量的)"); }
                 let 指深 = 近侧深2(plug, 腕机, c[0], c[1], 窗2);
                 // 深度读数自己抖多少:同一点再读一次,差多少就是多少。门槛由它给,不是我填。
                 let 深抖 = match (指深, 近侧深2(plug, 腕机, c[0], c[1], 窗2)) {
@@ -5422,6 +5422,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
     let mut 退向: (f64, f64, f64) = (0.0, 0.0, 0.0);
     let 爪图号 = std::cell::Cell::new(0u32);
     let mut 部件图: Option<Vec<Vec<Option<一件>>>> = None;
+    // 手指自己在深度上有多厚(腕相机里是常数)—— "物体算不算在两指之间"的容差。
+    let 指厚常数 = std::cell::Cell::new(None::<f64>);
     // 🔴 **腕相机里"我的接触面在哪" —— 从部件图里取那个常数。**
     // 取的是**指通道**(只开合爪子那几个)在**长在手上那台**里动的那一片的中心。
     // 那台相机长在手上 ⇒ 这个位置不随姿势变 ⇒ 量一次就够(见 `收尾腕` 里的头注)。
@@ -5729,6 +5731,41 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         let 路 = format!("{dir}/身体_第{c}台.bmp");
                         let _ = std::fs::write(&路, task::bmp24(&图片, cw, ch));
                         println!("[身] 🖼 部件图渲好了 ⇒ {路}(每个通道一个颜色,叠在真实画面上)");
+                    }
+                }
+                // 🔴🔴🔴 **"手指自己有多厚"必须在【掩膜】上读深度,不能在外接框里读。**
+                //(BR 实测 2026-09-02:在框里读量出 **0.3740 m** —— 37 厘米,
+                // 因为框里除了手指还包着背后的桌面和地板,量到的是"手指到背景的距离"。
+                // 容差反而比之前那个 0.068 更松。**同一类错,而且是我刚写的那一版。**)
+                //
+                // 腕相机长在手上 ⇒ 手指相对它不动 ⇒ **这个厚度也是个常数**,在这里算一次存着。
+                if let Some(腕) = 手上相机.get() {
+                    let 深 = 深图(plug, 腕);
+                    let mut 有: Vec<f64> = Vec::new();
+                    if let Some(d) = 深.as_ref() {
+                        if let Some((cw5, ch5, _)) = plug.sense().and_then(|f| 灰(&f, 腕)) {
+                            for (k, 件们) in 图.iter().enumerate() {
+                                if k < 通道数 { continue }              // 只看指通道
+                                let Some(Some(x)) = 件们.get(腕) else { continue };
+                                for gy in 0..x.mh { for gx in 0..x.mw {
+                                    if x.掩[gy * x.mw + gx] == 0 { continue }
+                                    for dy in 0..4 { for dx in 0..4 {
+                                        let (px, py) = (gx * 4 + dx, gy * 4 + dy);
+                                        if px >= cw5 || py >= ch5 { continue }
+                                        let i = py * cw5 + px;
+                                        if i < d.len() && d[i].is_finite() && d[i] > 0.0 { 有.push(d[i]) }
+                                    }}
+                                }}
+                            }
+                        }
+                    }
+                    if 有.len() >= 4 {
+                        有.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                        let t = 有[有.len() * 3 / 4] - 有[有.len() / 4];
+                        println!("[身] **手指自己在深度上厚 {t:.4} m**(只在手指那些像素上读,不含背景)⇒ 这就是「到位」的容差");
+                        指厚常数.set(Some(t));
+                    } else {
+                        println!("[身] ⚠️ 手指那些像素上读不到足够的深度 ⇒ 没有厚度这个数,容差退回读数自己的抖");
                     }
                 }
                 部件图 = Some(图);
@@ -6078,7 +6115,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 let mut 位收 = 此位;
                 println!("[服] ⇒ 第 {相机号} 台里连着 {静} 次认不出爪子 ⇒ **改走第 {腕机} 台(长在手上那台)**");
                 let 腕常 = { let n = if *通道是关节 { plug.sense().map(|f| 真臂(&f).iter().map(|&i| f.joints[i].len()).sum::<usize>()).unwrap_or(0) } else { 6 }; 腕爪常数(&部件图, 腕机, n) };
-                if 收尾腕(plug, 腕机, jaw0, *通道是关节, 腕常, &look, &mut 位收).is_some() {
+                let 指厚传 = 指厚常数.get();
+                if 收尾腕(plug, 腕机, jaw0, *通道是关节, 腕常, 指厚传, &look, &mut 位收).is_some() {
                     let 停在 = 合到停住(plug, *通道是关节).unwrap_or(f64::NAN);
                     match (停在.is_finite(), *空合载) {
                         (true, Some(z)) if (停在 - z).abs() > 1e-9 =>
@@ -7596,7 +7634,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         }
                         println!("[服]   🟢 **两段交接②交给第 {腕机} 台(长在手上那台)收尾**");
                         let 腕常 = { let n = if *通道是关节 { plug.sense().map(|f| 真臂(&f).iter().map(|&i| f.joints[i].len()).sum::<usize>()).unwrap_or(0) } else { 6 }; 腕爪常数(&部件图, 腕机, n) };
-                if 收尾腕(plug, 腕机, jaw0, *通道是关节, 腕常, &look, &mut 位).is_some() {
+                let 指厚传 = 指厚常数.get();
+                if 收尾腕(plug, 腕机, jaw0, *通道是关节, 腕常, 指厚传, &look, &mut 位).is_some() {
                             println!("[服]   🟢 两段交接走通了 ⇒ 交给下面同一段合爪");
                             已就位 = true;
                         } else {
@@ -8237,7 +8276,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
         // 判据仍然全是量出来的:两指中间在哪(晃一下爪子看哪块动)· 碰上没有(压不动了)。
         if let (Some(腕机), false) = (手上相机.get(), 已就位) {
             let 腕常 = { let n = if *通道是关节 { plug.sense().map(|f| 真臂(&f).iter().map(|&i| f.joints[i].len()).sum::<usize>()).unwrap_or(0) } else { 6 }; 腕爪常数(&部件图, 腕机, n) };
-                if 收尾腕(plug, 腕机, jaw0, *通道是关节, 腕常, &look, &mut 位).is_none() {
+                let 指厚传 = 指厚常数.get();
+                if 收尾腕(plug, 腕机, jaw0, *通道是关节, 腕常, 指厚传, &look, &mut 位).is_none() {
                 println!("[服]   [收尾] 这一段没走完(上面已经说明理由)⇒ 直接合,结果照实报");
             }
         }
