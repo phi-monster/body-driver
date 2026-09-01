@@ -6192,28 +6192,9 @@ fn 服务<S: std::io::Read + std::io::Write>(
             // 东西还没在手里 ⇒ 先得让它跟着我走,所以伺服目标仍然是**东西本身**;
             // 东西已经在手里 ⇒ 伺服目标换成**那一格** —— 于是"搬过去""砸过去"是同一段代码,
             // 差别只在 `到什么为止`(settle 是放下,slip 是脱手)。**没有"抛"这个词。**
-            // 🔴 **它指了东西已经在的那一格 = 它说"什么都别做"。** 驱动必须**照实回报**,
-            // 否则它下一段还这么答(BU 实测:6 段里 6 段都指了球所在的那一格,整炮零推进)。
-            let 现格 = 格心.iter().enumerate()
-                .min_by(|a, b| {
-                    let d1 = (a.1.0 - look.u).hypot(a.1.1 - look.v);
-                    let d2 = (b.1.0 - look.u).hypot(b.1.1 - look.v);
-                    d1.partial_cmp(&d2).unwrap_or(std::cmp::Ordering::Equal)
-                }).map(|(k, _)| k + 1);
-            // 🔴 这道"指到它已经在的格子 = 什么都别做"只对【动的是那个东西本身】成立。
-            //(CC 实测 2026-09-02:模型说"动我身上第 1 号那一块 → 第 11 格"= 把手伸到球那儿,
-            //  正是最有价值的那句话,却被这道检查当成废话拦掉。)动的是我身上的一块 ⇒ 跳过这道检查。
-            let 动的是我 = 条目.get(d.动第几号.wrapping_sub(1)).map(|x| x.0).unwrap_or(false);
-            if !动的是我 && d.到哪一格 >= 1 && Some(d.到哪一格) == 现格 {
-                println!("[身]    ⚠️ 它指的第 {} 格,正是那个东西**现在就在**的那一格 ⇒ 这等于「什么都别做」。一步不动,照实回报。", d.到哪一格);
-                上一段汇报 = format!(
-                    "you named cell {}, which is the cell the thing is ALREADY in, so that meant do nothing and the body did nothing. If the task wants the thing somewhere else, name a DIFFERENT cell - to raise it off the surface that is the cell directly above it.",
-                    d.到哪一格);
-                plug.act(&Cmd::Hold);
-                continue;
-            }
-            // 🔴🔴🔴 **动的是"我身上的一块"⇒ 推那个通道,朝它说的那一格挪。**
-            // 这一支替掉了我手写的三个触发器 —— 挪不挪、往哪挪,现在全是它说的。
+            // 🔴 原来这里有一条我写的规则:"指到东西已经在的那一格 = 什么都别做"。**删了。**
+            // 它建立在一个错的世界假设上 —— 头相机是俯视的,东西抬起来仍在同一格,只是离相机更近;
+            // "球要留在原格"对"抓起来"恰恰是对的,抬高由驱动自己的"原路退回"完成。
             if let Some(&(是我, 号, _)) = 条目.get(d.动第几号.wrapping_sub(1)) {
                 if 是我 {
                     let Some(&(gu, gv)) = d.到哪一格.checked_sub(1).and_then(|k| 格心.get(k)) else {

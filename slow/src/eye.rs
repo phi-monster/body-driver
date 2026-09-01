@@ -390,7 +390,24 @@ pub fn pick(
 /// ⚠️ **为什么是"第几格"而不是坐标**:VLM 定量几何弱(RoboVista 最好 56.5%、30.2% 认错东西),
 /// 但**选择题做得好**(同批模型选轨迹 0.916)。仓里挑物体已经是"第几块"这个形状,这里照抄。
 pub struct 段 {
-    /// **这个东西最后要落到第几格**(1 起;0 = 我说不上来,你自己按上一段接着干)。
+    /// 🔴🔴🔴 **要动的是第几号东西**(1 起;0 = 我说不上来)。
+    ///
+    /// 编号表由调用方拼:**先是"我身上的每一块"**(部件图量出来的,全是画面语言 ——
+    /// 一动它跟着动的那一片在画面哪儿、占多大),**再是"世界里切出来的每一块"**。
+    /// 里面**没有一个身体参数**(不出现关节、自由度、几根手指、多长多宽),
+    /// 所以 §1.7 那条"策略的输入里不出现任何身体参数"仍然成立。
+    ///
+    /// **这一格拓宽之后,原来那三个【我手写的触发器】全部消失**(owner 2026-09-02:
+    /// *"把你手写的规则全部删掉,让 vlm 彻底成为主角"*):
+    /// - 靠近 = **我的接触面** → 目标所在那一格
+    /// - **挪一步让相机多看见我** = **我的接触面** → 一个看得见的格子(原来是我写的"空转三拍就挪")
+    /// - 合爪 = **我的一根手指** → **另一根手指**那一格
+    /// - 抓起来 = **那个物体** → 它上方那一格
+    /// - 砸过去 = **那个物体** → 目标那一格,**快**
+    ///
+    /// **一句话,五件事,零动词、零身体参数。**
+    pub 动第几号: usize,
+    /// **它最后要落到第几格**(1 起;0 = 我说不上来,你自己按上一段接着干)。
     pub 到哪一格: usize,
     /// 🔴🔴🔴 **做到什么条件为止再来找我 —— 这一格是它自己说的,不是任何人写死的触发器。**
     ///(owner 2026-09-02:*"为什么这个触发器需要你主动去设计?一个抓取任务就要你设计这么多,
@@ -424,6 +441,7 @@ pub fn 问段(
     刚才: &str,
     列: usize,
     行: usize,
+    条数: usize,
     rgb: &[u8],
     w: usize,
     h: usize,
@@ -437,11 +455,11 @@ pub fn 问段(
     let b64 = base64(&bmp);
     let esc = |t: &str| t.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n");
     let prompt = format!(
-        "You are not a model looking at a picture. You ARE this robot. This image is what you see right now, with a numbered grid drawn over it: {列} columns x {行} rows, numbered 1..{格数} left to right then top to bottom, so cell n-{列} is DIRECTLY ABOVE cell n and cell n+1 is directly to its right.\\n\\nYOUR BODY (you measured this yourself just now, by moving one channel at a time and watching which part of the picture followed):\\n{}\\n\\nWHAT YOU JUST DID AND WHAT HAPPENED:\\n{}\\n\\nWHAT YOU ARE TRYING TO DO: {}\\n\\nYou are in charge of the loop. There are NO action words - none exist. You say only ONE thing about the world: WHICH NUMBERED CELL THE THING YOU ARE ACTING ON MUST END UP IN. Reaching, opening, closing, backing off, using the other hand - the body works all of that out by itself from what it measured; you never name any of it.\\n\\n🔴 NAMING THE CELL THE THING IS ALREADY IN MEANS DO NOTHING. If the task wants the thing somewhere else, name a DIFFERENT cell - the one it must be in when the task is done. To raise something off the surface, that is the cell directly above it.\\n\\nAlso say WHEN to call you back. These are EVENTS the body measures, not actions: amount (the body finished the move it worked out) / contact (something is touched) / resist (it will not move any further) / slip (the thing stops following me) / settle (the picture stops changing). Pick the event that actually ends THIS piece of work - settle only means the world went quiet, which is not the same as the work being done.\\n\\nSet done=true only when the thing has ALREADY ended up where the task wants it.\\n\\nDo NOT give distances, angles, speeds or any numbers - you are bad at those and the body already measures them.",
+        "You are not a model looking at a picture. You ARE this robot. This image is what you see right now, with a numbered grid drawn over it: {列} columns x {行} rows, numbered 1..{格数} left to right then top to bottom, so cell n-{列} is DIRECTLY ABOVE cell n and cell n+1 is directly to its right.\\n\\nYOUR BODY (you measured this yourself just now, by moving one channel at a time and watching which part of the picture followed):\\n{}\\n\\nWHAT YOU JUST DID AND WHAT HAPPENED:\\n{}\\n\\nWHAT YOU ARE TRYING TO DO: {}\\n\\nYou are in charge of the loop. There are NO action words - none exist. You say TWO numbers: WHICH NUMBERED ITEM must move, and WHICH NUMBERED CELL it must end up in. The numbered items are listed under YOUR BODY above - first the pieces of yourself (measured just now by moving one channel at a time and watching which part of the picture followed), then the things out in the world. Moving a piece of yourself to a cell is how you reach, how you get a camera to see you better, and how you bring one finger to another. Moving a thing in the world to a cell is how you pick it up, put it down, or send it somewhere. There are no action words and none exist; the body works out which channels to push from what it measured.\\n\\nThe grid lies flat over the picture. A thing that is lifted toward the camera stays in the SAME cell (it only gets nearer); so to pick something up, name the cell it is already in - the body lifts it once it is held. Name a DIFFERENT cell only when the thing must end up somewhere else in the picture.\\n\\nAlso say WHEN to call you back. These are EVENTS the body measures, not actions: amount (the body finished the move it worked out) / contact (something is touched) / resist (it will not move any further) / slip (the thing stops following me) / settle (the picture stops changing). Pick the event that actually ends THIS piece of work - settle only means the world went quiet, which is not the same as the work being done.\\n\\nSet done=true only when the thing has ALREADY ended up where the task wants it.\\n\\nDo NOT give distances, angles, speeds or any numbers - you are bad at those and the body already measures them.",
         esc(身体), esc(刚才), esc(任务)
     );
     let body = format!(
-        r#"{{"model":"eye","max_tokens":300,"temperature":0,"chat_template_kwargs":{{"enable_thinking":false}},"response_format":{{"type":"json_schema","json_schema":{{"name":"where_it_must_end_up","strict":true,"schema":{{"type":"object","additionalProperties":false,"required":["why","goal_cell","until","done"],"properties":{{"why":{{"type":"string"}},"goal_cell":{{"type":"integer","minimum":0,"maximum":{格数}}},"until":{{"type":"string","enum":["amount","contact","resist","slip","settle"]}},"done":{{"type":"boolean"}}}}}}}}}},"messages":[{{"role":"user","content":[{{"type":"image_url","image_url":{{"url":"data:image/bmp;base64,{b64}"}}}},{{"type":"text","text":"{prompt}"}}]}}]}}"#
+        r#"{{"model":"eye","max_tokens":300,"temperature":0,"chat_template_kwargs":{{"enable_thinking":false}},"response_format":{{"type":"json_schema","json_schema":{{"name":"where_it_must_end_up","strict":true,"schema":{{"type":"object","additionalProperties":false,"required":["why","move_item","goal_cell","until","done"],"properties":{{"why":{{"type":"string"}},"move_item":{{"type":"integer","minimum":0,"maximum":{条数}}},"goal_cell":{{"type":"integer","minimum":0,"maximum":{格数}}},"until":{{"type":"string","enum":["amount","contact","resist","slip","settle"]}},"done":{{"type":"boolean"}}}}}}}}}},"messages":[{{"role":"user","content":[{{"type":"image_url","image_url":{{"url":"data:image/bmp;base64,{b64}"}}}},{{"type":"text","text":"{prompt}"}}]}}]}}"#
     );
     let raw = post(host, port, "/v1/chat/completions", &body)?;
     let inner = extract_content(&raw)
@@ -451,10 +469,14 @@ pub fn 问段(
     let t = |k: &str| j.get(k).and_then(|x| x.text()).unwrap_or("").to_string();
     let u = t("until");
     if u.is_empty() { return Err("眼没给 until".into()) }
+    let mv = j.get("move_item").and_then(|x| x.num()).ok_or_else(|| "眼没给 move_item".to_string())?;
+    if !(mv.is_finite() && mv >= 0.0 && mv <= 条数 as f64) {
+        return Err(format!("眼给的条号不合法:{mv}(只有 {条数} 条)"));
+    }
     let g = j.get("goal_cell").and_then(|x| x.num()).ok_or_else(|| "眼没给 goal_cell".to_string())?;
     if !(g.is_finite() && g >= 0.0 && g <= 格数 as f64) {
         return Err(format!("眼给的格号不合法:{g}(只有 {格数} 格)"));
     }
     let d = j.get("done").and_then(|x| x.boolean()).unwrap_or(false);
-    Ok(段 { 到哪一格: g.round() as usize, 到什么为止: u, 完了: d, 为什么: t("why") })
+    Ok(段 { 动第几号: mv.round() as usize, 到哪一格: g.round() as usize, 到什么为止: u, 完了: d, 为什么: t("why") })
 }
