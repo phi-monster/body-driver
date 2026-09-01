@@ -4259,6 +4259,27 @@ fn 服务<S: std::io::Read + std::io::Write>(
         有.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         Some(有[有.len() / 4])
     };
+    /// **一小片区域自己在深度上有多厚** —— 远四分位减近四分位。
+    /// 用来回答"手指自己有多厚",而那正是"物体算不算在两指之间"的容差(见 `收尾腕` 头注)。
+    let 片厚2 = |plug: &mut Plug<S>, ci: usize, u: f64, v: f64, 窗: f64| -> Option<f64> {
+        let 路 = plug.lay.cams.get(ci)?;
+        let mut 深路 = 路.clone();
+        if let Some(dp) = plug.lay.depth.get(ci).or_else(|| plug.lay.depth.first()) { 深路 = dp.clone(); }
+        let dv = plug.last.as_ref().and_then(|o| 取(o, &深路))?;
+        let (dw, dh, dep) = wire::as_f32_grid(&dv)?;
+        let x0 = (((u - 窗) * dw as f64).floor().max(0.0)) as usize;
+        let x1 = (((u + 窗) * dw as f64).ceil().min(dw as f64 - 1.0)).max(0.0) as usize;
+        let y0 = (((v - 窗) * dh as f64).floor().max(0.0)) as usize;
+        let y1 = (((v + 窗) * dh as f64).ceil().min(dh as f64 - 1.0)).max(0.0) as usize;
+        let mut 有: Vec<f64> = Vec::new();
+        for y in y0..=y1.min(dh - 1) { for x in x0..=x1.min(dw - 1) {
+            let d = dep[y * dw + x] as f64;
+            if d.is_finite() && d > 0.0 { 有.push(d) }
+        }}
+        if 有.len() < 4 { return None }
+        有.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        Some(有[有.len() * 3 / 4] - 有[有.len() / 4])
+    };
     // 0.05 是**残留比例**(走到只剩 5% 就算到位),400 是**拍数**上限——两者都无量纲。
     let 步数 = (0.05f64.ln() / (1.0 - 交付率).max(1e-6).ln()).ceil().clamp(3.0, 400.0) as u32;
 
@@ -4643,7 +4664,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
     // 原来它内联在"追完之后",而追要先过 `看爪` 那道闸 —— 头相机上那道闸赢不了
     // (YF 实测 344 连败,这一段 0 次被执行)。提出来之后,`看爪` 失败的分支也能直接进。
     let 收尾腕 = |plug: &mut Plug<S>, 腕机: usize, jaw0: f64, 通道是关节: bool,
-                  部件图常数: Option<(f64, f64)>,
+                  部件图常数: Option<(f64, f64, f64)>,
                   look: &body_layer::eye::Look, 位: &mut [f64; 3]| -> Option<()> {
                 // 两个接触面在这台相机里的位置 —— 手不动,所以量一次就够。
                 let f0 = plug.sense()?;
@@ -4720,7 +4741,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 // ⇒ 有部件图就用部件图那个常数;没有(第一炮/换了手)才退回现张合。
                 //   两条都不含身体词:一个是"指通道一动、跟着动的那一片"的中心,另一个也是。
                 let c = match 部件图常数 {
-                    Some((pu, pv)) => {
+                    Some((pu, pv, _)) => {
                         println!("[服]   [收尾] **两指中间**用部件图量到的常数:({pu:.3},{pv:.3}) —— 这台相机长在手上,它不随姿势变");
                         point_gen::Px::from([pu, pv])
                     }
@@ -4988,6 +5009,13 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 // 手指对得再准,离物体还差一截,合下去仍然是空的。这是"合到底读数停在 0"的一条直接原因。
                 // 目标深度不需要任何身体词:**这台相机长在手上,手指在它画面里不动,
                 // 所以"手指那一点有多深"直接读一次就是目标** —— 把物体压到那个深度,它就在指间。
+                // **手指自己在深度上有多厚** —— 拿部件图给的那一片当窗,读"最近的四分之一"和
+                // "最远的四分之一"之差。没有部件图就没有这个数,那时退回读数自己的抖。
+                let 指厚 = 部件图常数.and_then(|(pu, pv, 片)| {
+                    let t = 片厚2(plug, 腕机, pu, pv, 片 * 0.5)?;
+                    println!("[服]   [收尾] 手指那一片自己在深度上厚 {t:.4} m ⇒ 这就是「到位」的容差(量出来的,不是填的)");
+                    if t.is_finite() && t > 0.0 { Some(t) } else { None }
+                });
                 let 指深 = 近侧深2(plug, 腕机, c[0], c[1], 窗2);
                 // 深度读数自己抖多少:同一点再读一次,差多少就是多少。门槛由它给,不是我填。
                 let 深抖 = match (指深, 近侧深2(plug, 腕机, c[0], c[1], 窗2)) {
@@ -5067,11 +5095,19 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     let 误 = [c[0] - nu, c[1] - nv, 深误];
                     let 差 = (误[0].powi(2) + 误[1].powi(2)).sqrt();
                     if 轮 % 3 == 0 { println!("[服]   [收尾] 追 {轮}:物体在 ({nu:.3},{nv:.3}) 深 {nd:.3} · 两指中间在 ({:.3},{:.3}) ⇒ 横纵差 {差:.4} 深度差 {深误:+.4}", c[0], c[1]); }
-                    // 🔴 深度那一项的容差:`深抖`(读数自己的抖)在确定性的仿真深度图上可以**恰好是 0**,
-                    // 于是 `深误.abs() <= 0` 永远不成立 ⇒ **这条成功判据一次都不会响**,只能靠碰上。
-                    // 容差取 `max(深抖, 探步)`:**探步是我一步能走的距离,深度也不可能伺服得比它更细**。
-                    // 两个都是量出来的,不是填的。
-                    if 差 <= 看2.span_frac * 0.5 && 深误.abs() <= 深抖.max(探步) { println!("[服]   [收尾] 🟢 物体已经在两指中间,深度也压到手指那一层了(容差 {:.4} m)", 深抖.max(探步)); break }
+                    // 🔴🔴🔴 **深度那一项的容差必须是"手指自己有多厚",不是"我一步能走多远"。**
+                    //(BQ 实测 2026-09-02)
+                    //
+                    // 我前天填的是 `max(深抖, 探步)` —— 理由是深抖在确定性仿真里可能恰好为 0、
+                    // 判据永远不响。但 **`探步` 是"走一步多远",不是"对准的容差"**:
+                    // BQ 里它等于 **0.0680 m**,而棒球本身才 7 厘米 ⇒
+                    // `🟢 物体已经在两指中间,深度也压到手指那一层了(容差 **0.0680 m**)` ⇒ 合一把空气。
+                    // **单位对、意思不对** —— 正是 LAB 记过的那类病(`"像素塞进米的槽"`),我又犯一次。
+                    //
+                    // 正确的容差是量出来的:**手指自己在深度上有多厚**。物体落在这个厚度里,
+                    // 才是真的在两指之间。手指那一片的范围部件图已经给了,现在读一次深度就能算。
+                    let 容深 = 指厚.unwrap_or(深抖).max(深抖);
+                    if 差 <= 看2.span_frac * 0.5 && 深误.abs() <= 容深 { println!("[服]   [收尾] 🟢 物体已经在两指中间,深度也压到手指那一层了(容差 {容深:.4} m = 手指自己有多厚)"); break }
                     let dp = 解3(m2, 误)?;
                     let 长 = (dp[0].powi(2)+dp[1].powi(2)+dp[2].powi(2)).sqrt();
                     if !(长 > 1e-9) { break }
@@ -5389,16 +5425,21 @@ fn 服务<S: std::io::Read + std::io::Write>(
     // 🔴 **腕相机里"我的接触面在哪" —— 从部件图里取那个常数。**
     // 取的是**指通道**(只开合爪子那几个)在**长在手上那台**里动的那一片的中心。
     // 那台相机长在手上 ⇒ 这个位置不随姿势变 ⇒ 量一次就够(见 `收尾腕` 里的头注)。
-    let 腕爪常数 = |图: &Option<Vec<Vec<Option<一件>>>>, 腕机: usize, 通道数: usize| -> Option<(f64, f64)> {
+    let 腕爪常数 = |图: &Option<Vec<Vec<Option<一件>>>>, 腕机: usize, 通道数: usize| -> Option<(f64, f64, f64)> {
         let 图 = 图.as_ref()?;
         let (mut su, mut sv, mut n) = (0.0f64, 0.0f64, 0usize);
+        let (mut x0, mut y0, mut x1, mut y1) = (1.0f64, 1.0f64, 0.0f64, 0.0f64);
         for (k, 件们) in 图.iter().enumerate() {
             if k < 通道数 { continue }          // 只看指通道
             if let Some(Some(x)) = 件们.get(腕机) {
                 su += (x.框[0] + x.框[2]) * 0.5; sv += (x.框[1] + x.框[3]) * 0.5; n += 1;
+                if x.框[0] < x0 { x0 = x.框[0] } if x.框[1] < y0 { y0 = x.框[1] }
+                if x.框[2] > x1 { x1 = x.框[2] } if x.框[3] > y1 { y1 = x.框[3] }
             }
         }
-        if n == 0 { None } else { Some((su / n as f64, sv / n as f64)) }
+        // 第三个数:**手指那一片在画面上有多大**(占画幅)—— 下面拿它当读深度的窗,
+        // 算出"手指自己在深度上有多厚",那才是"到位"的容差(见 `收尾腕` 里那段头注)。
+        if n == 0 { None } else { Some((su / n as f64, sv / n as f64, (x1 - x0).max(y1 - y0).max(0.01))) }
     };
     loop {
         let Some(帧) = plug.sense() else { return None };
