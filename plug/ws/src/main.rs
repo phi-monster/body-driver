@@ -5199,6 +5199,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
             let 是指 = k >= 通道数;
             let 前: Vec<Option<(usize, usize, Vec<u8>)>> =
                 (0..台).map(|c| plug.sense().and_then(|f| 灰(&f, c))).collect();
+            let 前深: Vec<Option<Vec<f64>>> = (0..台).map(|c| 深图(plug, c)).collect();
             let j0 = plug.sense().and_then(|f| f.jaw.get(手号.get()).copied()).unwrap_or(1.0);
             // 幅度:身体通道用量出来的探幅(上界也是它,见梯子那一段);
             // 指通道用它自己的命令域两端(0..1 是命令域,不是米)。
@@ -5210,6 +5211,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
             }
             let 中: Vec<Option<(usize, usize, Vec<u8>)>> =
                 (0..台).map(|c| plug.sense().and_then(|f| 灰(&f, c))).collect();
+            let 中深: Vec<Option<Vec<f64>>> = (0..台).map(|c| 深图(plug, c)).collect();
             // 回来
             if 是指 { 抓握(plug, j0, 是关节); 定爪(plug, 等拍 * 4); }
             else {
@@ -5219,11 +5221,13 @@ fn 服务<S: std::io::Read + std::io::Write>(
             }
             let 后: Vec<Option<(usize, usize, Vec<u8>)>> =
                 (0..台).map(|c| plug.sense().and_then(|f| 灰(&f, c))).collect();
+            let 后深: Vec<Option<Vec<f64>>> = (0..台).map(|c| 深图(plug, c)).collect();
             let mut 这件: Vec<Option<一件>> = Vec::new();
             for c in 0..台 {
                 let (Some((w, h, a)), Some((_, _, b)), Some((_, _, d))) =
                     (前[c].clone(), 中[c].clone(), 后[c].clone()) else { 这件.push(None); continue };
                 if a.len() != b.len() || b.len() != d.len() || a.is_empty() { 这件.push(None); continue }
+                let (深前, 深中, 深后) = (前深[c].clone(), 中深[c].clone(), 后深[c].clone());
                 // 粗到 1/4:一格 4×4 像素,格里过半的像素满足条件就算这一格动过。
                 let (mw, mh) = ((w / 4).max(1), (h / 4).max(1));
                 let mut 掩 = vec![0u8; mw * mh];
@@ -5242,6 +5246,26 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         if d1.signum() != d2.signum() { continue }   // 单向漂,不是我
                         let 回 = (a[i] as i32 - d[i] as i32).abs();
                         if 回 >= d1.abs().min(d2.abs()) { continue } // 没回来,不是我
+                        // 🔴🔴🔴 **"动一下再回来"分不出【我】和【我挡住过的东西】。**(BE 渲图定案 2026-09-01)
+                        //
+                        // 胳膊扫过桌面时,被它盖住的那些桌面像素**也是"变了又变回来"** ——
+                        // 判据对它们同样成立。BE 那张部件图里一大片彩色**盖在桌面上**、压到剪刀和球附近,
+                        // 一眼就看得出来。这是"靠运动认自己"这条路的真缺陷,不是实现 bug。
+                        //
+                        // 用**深度**分开,判据是物理的:**我挡在别人前面**。
+                        //   · 是我:起点/回来那两帧我在这儿(近),中间那帧我走开了(**变远**,露出后面的东西)
+                        //   · 被我挡过的桌面:反过来 —— 中间那帧我盖在它上面(**变近**)
+                        // ⇒ 只留"中间比两头**远**"的那些格。一个身体词都没有。
+                        if let (Some(za), Some(zb), Some(zd)) = (深前.as_ref(), 深中.as_ref(), 深后.as_ref()) {
+                            if za.len() > i && zb.len() > i && zd.len() > i {
+                                let (fa, fb, fd) = (za[i], zb[i], zd[i]);
+                                if fa.is_finite() && fb.is_finite() && fd.is_finite() {
+                                    // 门槛用这台深度图自己的抖:起点和回来这两帧同一点的差。
+                                    let 抖 = (fa - fd).abs();
+                                    if !(fb > fa + 抖 && fb > fd + 抖) { continue }
+                                }
+                            }
+                        }
                         n += 1;
                     }}
                     if 总 > 0 && n * 2 > 总 {
@@ -7378,7 +7402,12 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         let 刚才 = format!(
                             "you commanded a move that your own body-model said would shift the picture by {该动:.4} of a frame;                              it actually shifted by {实动:.4}. your hand physically moved {走:.5} m.                              the gap between the part you are moving and the target is {差像:.4} of a frame."
                         );
-                        match body_layer::eye::问身体(眼主机, 眼端口, &指令, &身体, &刚才, &g, gw, gh) {
+                        // 🔴 这里要的是**彩色**帧(BE 实测:传灰度 ⇒ `画面短了:要 921600,只有 307200`,
+                        //    14 次全部没问成,主体那一块等于没上线)。
+                        let 彩帧 = plug.sense().and_then(|f| 彩(&f, 相机号));
+                        let Some((cw2, ch2, crgb2)) = 彩帧 else {
+                            println!("[身] ⚡ 想叫醒模型但这一拍没有彩色帧 ⇒ 照常走"); continue };
+                        match body_layer::eye::问身体(眼主机, 眼端口, &指令, &身体, &刚才, &crgb2, cw2, ch2) {
                             Ok(断) => {
                                 println!("[身] ⚡ 预测 {该动:.4} / 实际 {实动:.4}(跟踪噪声 {跟噪:.4})⇒ **叫醒模型**");
                                 println!("[身]    它说:**{}** —— {}", 断.做什么, 断.为什么);
