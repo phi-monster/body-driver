@@ -4735,6 +4735,16 @@ fn 服务<S: std::io::Read + std::io::Write>(
     // 而不是我再手写一条兜底规则(那是永远写不完的那条路)。
     // 换成无人机、格斗同样成立:跟丢了就抬头看一眼。
     let 跟丢了 = std::cell::Cell::new(false);
+    // 🔴🔴🔴 **"够不着"是量出来的事实,必须喂回"挑哪只手"。**(BY 定案 2026-09-02)
+    //
+    // BY:`①粗对准:差 0.6836 m` → `连着 5 步还差多少不再缩(卡在 0.2346 m)⇒ 这个位形过不去`。
+    // **这条胳膊够不着球,差 23 厘米。** 后面所有的"跟丢""追错东西"全是它的下游 ——
+    // 手根本没到球跟前,腕相机里当然没有球。
+    // 而挑手用的判据是**"在画面里离目标最近的那条臂"**(第 0 条 0.656 画幅 / 第 1 条 0.355)——
+    // 按那个判据选第 1 条是对的,**可它就是够不着,而没有任何一步问过这件事**。
+    // ⇒ 走不动的那条臂当场记下来,重挑时跳过它;所有臂都跳过了 ⇒ 照实告诉模型。
+    // 无常数、无手数假设:一条臂时它必然报"我够不着",二十条臂时它挨个试。
+    let 够不着的手 = std::cell::RefCell::new(std::collections::BTreeSet::<usize>::new());
 
     // 🔴🔴🔴 **腕相机收尾:提成具名闭包,因为它现在有【两个】入口。**(2026-08-29)
     // 原来它内联在"追完之后",而追要先过 `看爪` 那道闸 —— 头相机上那道闸赢不了
@@ -5814,7 +5824,13 @@ fn 服务<S: std::io::Read + std::io::Write>(
         //    真选错了,下游会以"合到底指间没东西"暴露,那才是能验证的判据。
         if !挑过手 {
             let mut 最近: Option<(usize, f64)> = None;
+            let 跳过 = 够不着的手.borrow().clone();
             for a in 0..臂心.len() {
+                // 量到过"这条臂到不了" ⇒ 这一集不再选它(见 `够不着的手` 头注)。
+                if 臂末.get(a).and_then(|x| *x).map(|e| 跳过.contains(&e)).unwrap_or(false) {
+                    println!("[服]   挑手:第 {a} 条臂**已经量到到不了这儿**,跳过");
+                    continue;
+                }
                 let Some((cu, cv)) = 臂心[a].get(相机号).and_then(|o| *o) else { continue };
                 let d = (cu - look.u).hypot(cv - look.v);
                 println!("[服]   挑手:第 {a} 条臂在主眼里占的那片中心 ({cu:.3},{cv:.3}),离目标 ({:.3},{:.3}) 差 {d:.3} 画幅",
@@ -5841,6 +5857,15 @@ fn 服务<S: std::io::Read + std::io::Write>(
                             *手上相机载 = Some(best);
                         }
                     }
+                }
+                None if !跳过.is_empty() => {
+                    // 所有臂都量到过"到不了" ⇒ 这不是 bug,是一条**量出来的硬结论**,交给模型。
+                    println!("[服] 🔴 **我这几条胳膊没有一条到得了那儿**(每一条都量到过「这个位形过不去」)⇒ 照实告诉模型");
+                    上一段汇报 = "I tried, and NONE of my arms can reach that thing from where I am standing - each one ran out of travel with a gap still left. That is measured, not a guess. Pick something else, or tell me where it must end up so I can move differently.".into();
+                    够不着的手.borrow_mut().clear();
+                    挑过手 = false;
+                    plug.act(&Cmd::Hold);
+                    continue;
                 }
                 None => println!("[服] ⚠️ 逐臂推那一步没量到任何一条臂在主眼里占的片 ⇒ 手号留在 {} ,结果照实报", 手号.get()),
             }
@@ -5957,6 +5982,15 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         }
                     }
                     *部件图串.borrow_mut() = Some(平.join(", "));
+                }
+                // 🔴 **量完就立刻落盘。** 上一版把这一行挂在解相机那条分支里,而干活模式
+                // 装回了相机就不走那条 ⇒ `cal.json` 里**根本没有 parts_map**(BY 实测)。
+                // 仓里那句"每量完一格就调一次,不要只在最后调"说的正是这件事。
+                {
+                    let n格 = 存标定(标定文件, body, 相机们, 探步, 0, *手载,
+                        通道表.as_deref(), Some(*通道是关节), 手上相机.get(), *张开载, *空合载, Some(*认面载), *雅载,
+                        部件图串.borrow().as_deref(), 指厚常数.get());
+                    println!("[身] 💾 部件图 + 手指厚度存进 {标定文件}(落了 {n格} 格)⇒ **下一炮装回来,开场那 970 行不用重做**");
                 }
                 部件图 = Some(图);
             }
@@ -7824,6 +7858,10 @@ fn 服务<S: std::io::Read + std::io::Write>(
                                 停原地 += 1;
                                 if 停原地 >= 5 {
                                     println!("[服]      🔴 ①连着 {停原地} 步**还差多少不再缩**(卡在 {余长:.4} m,一步本该缩 {:.4} m)⇒ **这个位形过不去**,不再空推", 探步 * 交付率);
+                                    // 见 `够不着的手` 头注:这是**量出来的**"这条臂到不了那儿",记下来别再选它。
+                                    够不着的手.borrow_mut().insert(手号.get());
+                                    挑过手 = false;
+                                    println!("[服]      ⇒ **记下第 {} 条臂(末端 {})到不了这儿** —— 下一拍重挑手时跳过它", 臂号.get(), 手号.get());
                                     break
                                 }
                             }
