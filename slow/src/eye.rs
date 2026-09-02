@@ -426,6 +426,27 @@ pub struct 段 {
     pub 别碰: Vec<usize>,
     /// 它自己的理由(只进日志、只给人看,**不进任何判据**)。
     pub 为什么: String,
+    /// 🔴🔴 **这一段的全部条目(1–4 条,一起解)。** 第 0 条就是上面的 `动第几号 → 到哪一格`。
+    /// 朝向就从"几条一起解"里来:同一段说"手指贴着球、手掌在球上面",姿势只能朝下 —— 不需要"转手腕"这个词。
+    pub 条: Vec<目标>,
+    /// 它看的是第几台相机的格子(1 起;现在只列了它正在看的这一台)。
+    pub 相机: usize,
+}
+
+/// 一条目标:**第几号东西 → 去哪**。"哪"有三种说法:一个格子 / 相对另一号的方位 / 别动。
+#[derive(Clone, Debug, PartialEq)]
+pub struct 目标 {
+    /// 要动的第几号(1 起)。
+    pub 号: usize,
+    /// 落到第几格(1 起;0 = 没说格子)。
+    pub 格: usize,
+    /// 相对方位:`""`(没说)/ `at` 贴着 / `above` 上面 / `below` 下面 / `left` / `right` / `front`(离相机更近)/ `back`。
+    /// 上下按量出来的支撑面方向,左右前后按那台相机的画面方向 —— 都是量的,不是身体词。
+    pub 方位: String,
+    /// 方位相对第几号(1 起;0 = 没说)。
+    pub 相对: usize,
+    /// **别动**:这一号必须留在原地(握着的东西、护脸的手、无人机的高度)。
+    pub 保持: bool,
 }
 
 /// 问它:**你现在这具身体、这个局面,那个东西该落到哪一格。**
@@ -460,11 +481,11 @@ pub fn 问段(
     let b64 = base64(&bmp);
     let esc = |t: &str| t.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n");
     let prompt = format!(
-        "You are not a model looking at a picture. You ARE this robot. This image is what you see right now, with a numbered grid drawn over it: {列} columns x {行} rows, numbered 1..{格数} left to right then top to bottom, so cell n-{列} is DIRECTLY ABOVE cell n and cell n+1 is directly to its right.\\n\\nYOUR BODY (you measured this yourself just now, by moving one channel at a time and watching which part of the picture followed):\\n{}\\n\\nWHAT YOU JUST DID AND WHAT HAPPENED:\\n{}\\n\\nWHAT YOU ARE TRYING TO DO: {}\\n\\nYou are in charge of the loop. There are NO action words - none exist. You say TWO numbers: WHICH NUMBERED ITEM must move, and WHICH NUMBERED CELL it must end up in. Also say whether to go FAST (fast = full steps without pausing; if you are holding something and say fast until slip, the hand lets go while moving - that is how you throw or strike) and list any numbered items that must NOT be touched (avoid_items, may be empty). The numbered items are listed under YOUR BODY above - first the pieces of yourself (measured just now by moving one channel at a time and watching which part of the picture followed), then the things out in the world. Moving a piece of yourself to a cell is how you reach, how you get a camera to see you better, and how you bring one finger to another. Moving a thing in the world to a cell is how you pick it up, put it down, or send it somewhere. There are no action words and none exist; the body works out which channels to push from what it measured.\\n\\nThe grid lies flat over the picture. A thing that is lifted toward the camera stays in the SAME cell (it only gets nearer); so to pick something up, name the cell it is already in - the body lifts it once it is held. Name a DIFFERENT cell only when the thing must end up somewhere else in the picture.\\n\\nAlso say WHEN to call you back. These are EVENTS the body measures, not actions: amount (the body finished the move it worked out) / contact (something is touched) / resist (it will not move any further) / slip (the thing stops following me) / settle (the picture stops changing). Pick the event that actually ends THIS piece of work - settle only means the world went quiet, which is not the same as the work being done.\\n\\nSet done=true only when the thing has ALREADY ended up where the task wants it.\\n\\nDo NOT give distances, angles, speeds or any numbers - you are bad at those and the body already measures them.",
+        "You are not a model looking at a picture. You ARE this robot. This image is what you see right now, with a numbered grid drawn over it: {列} columns x {行} rows, numbered 1..{格数} left to right then top to bottom, so cell n-{列} is DIRECTLY ABOVE cell n and cell n+1 is directly to its right.\\n\\nYOUR BODY (you measured this yourself just now, by moving one channel at a time and watching which part of the picture followed):\\n{}\\n\\nWHAT YOU JUST DID AND WHAT HAPPENED:\\n{}\\n\\nWHAT YOU ARE TRYING TO DO: {}\\n\\nYou are in charge of the loop. There are NO action words - none exist. You give 1 to 4 GOALS, and the body solves them TOGETHER. Each goal names WHICH NUMBERED ITEM moves and WHERE: either a numbered CELL, or a RELATION to another numbered item (rel = at: touching it / above / below / left / right / front: nearer the camera / back: farther, with of = that item's number), or keep = true (this item must stay where it is). Giving two pieces of yourself two places is how you control how a part of you is oriented - e.g. to take a thing from above: goal 1 your fingers at it, goal 2 your palm above it. To close on something: one finger at the other finger, until resist. To lift a held thing: the thing to the cell it is in. Most turns need ONE goal; add more only when needed. Also say whether to go FAST (fast = full steps without pausing; if you are holding something and say fast until slip, the hand lets go while moving - that is how you throw or strike) and list any numbered items that must NOT be touched (avoid_items, may be empty). The numbered items are listed under YOUR BODY above - first the pieces of yourself (measured just now by moving one channel at a time and watching which part of the picture followed), then the things out in the world. Moving a piece of yourself to a cell is how you reach, how you get a camera to see you better, and how you bring one finger to another. Moving a thing in the world to a cell is how you pick it up, put it down, or send it somewhere. There are no action words and none exist; the body works out which channels to push from what it measured.\\n\\nThe grid lies flat over the picture. A thing that is lifted toward the camera stays in the SAME cell (it only gets nearer); so to pick something up, name the cell it is already in - the body lifts it once it is held. Name a DIFFERENT cell only when the thing must end up somewhere else in the picture.\\n\\nAlso say WHEN to call you back. These are EVENTS the body measures, not actions: amount (the body finished the move it worked out) / contact (something is touched) / resist (it will not move any further) / slip (the thing stops following me) / settle (the picture stops changing). Pick the event that actually ends THIS piece of work - settle only means the world went quiet, which is not the same as the work being done.\\n\\nSet done=true only when the thing has ALREADY ended up where the task wants it. camera is the grid you are answering about (1 = the one you see here).\\n\\nDo NOT give distances, angles, speeds or any numbers - you are bad at those and the body already measures them.",
         esc(身体), esc(刚才), esc(任务)
     );
     let body = format!(
-        r#"{{"model":"eye","max_tokens":300,"temperature":0,"chat_template_kwargs":{{"enable_thinking":false}},"response_format":{{"type":"json_schema","json_schema":{{"name":"where_it_must_end_up","strict":true,"schema":{{"type":"object","additionalProperties":false,"required":["why","move_item","goal_cell","until","fast","avoid_items","done"],"properties":{{"why":{{"type":"string"}},"move_item":{{"type":"integer","minimum":0,"maximum":{条数}}},"goal_cell":{{"type":"integer","minimum":0,"maximum":{格数}}},"until":{{"type":"string","enum":["amount","contact","resist","slip","settle"]}},"fast":{{"type":"boolean"}},"avoid_items":{{"type":"array","maxItems":4,"items":{{"type":"integer","minimum":1,"maximum":{条数}}}}},"done":{{"type":"boolean"}}}}}}}}}},"messages":[{{"role":"user","content":[{{"type":"image_url","image_url":{{"url":"data:image/bmp;base64,{b64}"}}}},{{"type":"text","text":"{prompt}"}}]}}]}}"#
+        r#"{{"model":"eye","max_tokens":300,"temperature":0,"chat_template_kwargs":{{"enable_thinking":false}},"response_format":{{"type":"json_schema","json_schema":{{"name":"where_it_must_end_up","strict":true,"schema":{{"type":"object","additionalProperties":false,"required":["why","goals","until","fast","avoid_items","done","camera"],"properties":{{"why":{{"type":"string"}},"goals":{{"type":"array","minItems":1,"maxItems":4,"items":{{"type":"object","additionalProperties":false,"required":["item","cell","rel","of","keep"],"properties":{{"item":{{"type":"integer","minimum":1,"maximum":{条数}}},"cell":{{"type":"integer","minimum":0,"maximum":{格数}}},"rel":{{"type":"string","enum":["none","at","above","below","left","right","front","back"]}},"of":{{"type":"integer","minimum":0,"maximum":{条数}}},"keep":{{"type":"boolean"}}}}}}}},"camera":{{"type":"integer","minimum":1,"maximum":1}},"until":{{"type":"string","enum":["amount","contact","resist","slip","settle"]}},"fast":{{"type":"boolean"}},"avoid_items":{{"type":"array","maxItems":4,"items":{{"type":"integer","minimum":1,"maximum":{条数}}}}},"done":{{"type":"boolean"}}}}}}}}}},"messages":[{{"role":"user","content":[{{"type":"image_url","image_url":{{"url":"data:image/bmp;base64,{b64}"}}}},{{"type":"text","text":"{prompt}"}}]}}]}}"#
     );
     let raw = post(host, port, "/v1/chat/completions", &body)?;
     let inner = extract_content(&raw)
@@ -474,18 +495,32 @@ pub fn 问段(
     let t = |k: &str| j.get(k).and_then(|x| x.text()).unwrap_or("").to_string();
     let u = t("until");
     if u.is_empty() { return Err("眼没给 until".into()) }
-    let mv = j.get("move_item").and_then(|x| x.num()).ok_or_else(|| "眼没给 move_item".to_string())?;
-    if !(mv.is_finite() && mv >= 0.0 && mv <= 条数 as f64) {
-        return Err(format!("眼给的条号不合法:{mv}(只有 {条数} 条)"));
+    let 整 = |x: &crate::json::Json, k: &str, 上: usize| -> Result<usize, String> {
+        let v = x.get(k).and_then(|y| y.num()).ok_or_else(|| format!("眼没给 {k}"))?;
+        if !(v.is_finite() && v >= 0.0 && v <= 上 as f64) { return Err(format!("眼给的 {k} 不合法:{v}(上限 {上})")) }
+        Ok(v.round() as usize)
+    };
+    let mut 条: Vec<目标> = Vec::new();
+    if let Some(crate::json::Json::Arr(arr)) = j.get("goals") {
+        for g in arr.iter().take(4) {
+            let 方位 = g.get("rel").and_then(|x| x.text()).unwrap_or("none").to_string();
+            let 方位 = if 方位 == "none" { String::new() } else { 方位 };
+            条.push(目标 { 号: 整(g, "item", 条数)?, 格: 整(g, "cell", 格数)?, 方位, 相对: 整(g, "of", 条数)?,
+                          保持: g.get("keep").and_then(|x| x.boolean()).unwrap_or(false) });
+        }
     }
-    let g = j.get("goal_cell").and_then(|x| x.num()).ok_or_else(|| "眼没给 goal_cell".to_string())?;
-    if !(g.is_finite() && g >= 0.0 && g <= 格数 as f64) {
-        return Err(format!("眼给的格号不合法:{g}(只有 {格数} 格)"));
+    if 条.is_empty() { return Err("眼一条目标都没给".into()) }
+    for (i, c) in 条.iter().enumerate() {
+        if c.号 == 0 { return Err(format!("第 {} 条目标没说动第几号", i + 1)) }
+        if !c.保持 && c.格 == 0 && (c.方位.is_empty() || c.相对 == 0) {
+            return Err(format!("第 {} 条目标既没说格子、也没说相对哪一号的方位、也没说别动", i + 1));
+        }
     }
     let d = j.get("done").and_then(|x| x.boolean()).unwrap_or(false);
     let 快 = j.get("fast").and_then(|x| x.boolean()).unwrap_or(false);
     let 别碰: Vec<usize> = j.get("avoid_items").map(|a| a.nums().into_iter().filter(|x| x.is_finite() && *x >= 1.0).map(|x| x.round() as usize).collect()).unwrap_or_default();
-    Ok(段 { 动第几号: mv.round() as usize, 到哪一格: g.round() as usize, 快, 别碰, 到什么为止: u, 完了: d, 为什么: t("why") })
+    let 相机 = j.get("camera").and_then(|x| x.num()).map(|x| x.round() as usize).unwrap_or(1).max(1);
+    Ok(段 { 动第几号: 条[0].号, 到哪一格: 条[0].格, 快, 别碰, 到什么为止: u, 完了: d, 为什么: t("why"), 条, 相机 })
 }
 
 
