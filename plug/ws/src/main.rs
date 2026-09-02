@@ -6315,9 +6315,21 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     continue
                 }
                 // 同一格但还没合 ⇒ 往下压一个探步(头相机俯视:朝桌面 = 深度加)
+                // 🔴 三行各除以自己的模再解。(CI 渲图定案 2026-09-03:横纵两行是画幅、深度一行是米,
+                //  混着解时"深度别变"这条几乎没重量,于是解出来的是**把手臂抬向相机**——透视上手也会往画面上方挪。
+                //  视频里手臂直挺挺竖起来就是这么来的。行归一之后三条约束同等重要,不引入任何单位换算。)
+                let 归一 = |行: &Vec<Vec<f64>>, 目: &Vec<f64>| -> (Vec<Vec<f64>>, Vec<f64>) {
+                    let mut 行2 = 行.clone(); let mut 目2 = 目.clone();
+                    for r in 0..行2.len() {
+                        let n = 行2[r].iter().map(|x| x * x).sum::<f64>().sqrt();
+                        if n > 1e-12 { for x in 行2[r].iter_mut() { *x /= n } 目2[r] /= n }
+                    }
+                    (行2, 目2)
+                };
                 let Some(表) = 通道表.as_ref() else { plug.act(&Cmd::Hold); continue };
                 let 行3: Vec<Vec<f64>> = (0..3).map(|r| 表.iter().map(|c| c[r]).collect()).collect();
-                let Some(动0) = 最小二乘(&行3, &vec![0.0, 0.0, 探步]) else { plug.act(&Cmd::Hold); continue };
+                let (行n, 目n) = 归一(&行3, &vec![0.0, 0.0, 探步]);
+                let Some(动0) = 最小二乘(&行n, &目n) else { plug.act(&Cmd::Hold); continue };
                 let 最大 = 动0.iter().map(|x| x.abs()).fold(0.0, f64::max);
                 let 比 = if 最大 > 探幅 { 探幅 / 最大 } else { 1.0 };
                 match 迈通道(plug, &动0, 比, j现, *通道是关节) {
@@ -6335,9 +6347,21 @@ fn 服务<S: std::io::Read + std::io::Write>(
             let 一格 = 1.0 / 网列 as f64;
             let 步 = 距.min(一格);
             let (eu, ev) = (du / 距 * 步, dv / 距 * 步);
+            // 🔴 三行各除以自己的模再解。(CI 渲图定案 2026-09-03:横纵两行是画幅、深度一行是米,
+            //  混着解时"深度别变"这条几乎没重量,于是解出来的是**把手臂抬向相机**——透视上手也会往画面上方挪。
+            //  视频里手臂直挺挺竖起来就是这么来的。行归一之后三条约束同等重要,不引入任何单位换算。)
+            let 归一 = |行: &Vec<Vec<f64>>, 目: &Vec<f64>| -> (Vec<Vec<f64>>, Vec<f64>) {
+                let mut 行2 = 行.clone(); let mut 目2 = 目.clone();
+                for r in 0..行2.len() {
+                    let n = 行2[r].iter().map(|x| x * x).sum::<f64>().sqrt();
+                    if n > 1e-12 { for x in 行2[r].iter_mut() { *x /= n } 目2[r] /= n }
+                }
+                (行2, 目2)
+            };
             let Some(表) = 通道表.as_ref() else { plug.act(&Cmd::Hold); continue };
             let 行3: Vec<Vec<f64>> = (0..3).map(|r| 表.iter().map(|c| c[r]).collect()).collect();
-            let Some(动0) = 最小二乘(&行3, &vec![eu, ev, 0.0]) else { plug.act(&Cmd::Hold); continue };
+            let (行n, 目n) = 归一(&行3, &vec![eu, ev, 0.0]);
+            let Some(动0) = 最小二乘(&行n, &目n) else { plug.act(&Cmd::Hold); continue };
             let 最大 = 动0.iter().map(|x| x.abs()).fold(0.0, f64::max);
             let 比 = if 最大 > 探幅 { 探幅 / 最大 } else { 1.0 };
             let 前灰 = plug.sense().and_then(|f| 灰(&f, 相机号));
