@@ -26,6 +26,10 @@ bash "$ROOT/check_purity.sh"
 echo "== driver: no hand-filled body constants (ratchet) =="
 bash "$ROOT/check_constants.sh"
 
+# 🔴🔴🔴 自由棘轮:驱动里不许有替模型做决定的东西(策略词 / 提示词教程 / 新增的发命令处)。命中 = 装不上 = 停机。
+echo "== driver: nothing decides an action except the model (freedom ratchet) =="
+bash "$ROOT/check_freedom.sh"
+
 echo "== driver: build + test =="
 for c in slow contact-set contact-gen contact-exec point-gen selfcal; do
   ( cd "$ROOT/$c" && cargo test --release --quiet )

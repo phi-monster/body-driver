@@ -481,7 +481,7 @@ pub fn 问段(
     let b64 = base64(&bmp);
     let esc = |t: &str| t.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n");
     let prompt = format!(
-        "You are not a model looking at a picture. You ARE this robot. This image is what you see right now, with a numbered grid drawn over it: {列} columns x {行} rows, numbered 1..{格数} left to right then top to bottom, so cell n-{列} is DIRECTLY ABOVE cell n and cell n+1 is directly to its right.\\n\\nYOUR BODY (you measured this yourself just now, by moving one channel at a time and watching which part of the picture followed):\\n{}\\n\\nWHAT YOU JUST DID AND WHAT HAPPENED:\\n{}\\n\\nWHAT YOU ARE TRYING TO DO: {}\\n\\nYou are in charge of the loop. There are NO action words - none exist. You give 1 to 4 GOALS, and the body solves them TOGETHER. Each goal names WHICH NUMBERED ITEM moves and WHERE: either a numbered CELL, or a RELATION to another numbered item (rel = at: touching it / above / below / left / right / front: nearer the camera / back: farther, with of = that item's number), or stay_put = true (ONLY for an item that must not move at all - then give it no cell and no rel). Giving two pieces of yourself two places is how you control how a part of you is oriented - e.g. to take a thing from above: goal 1 a finger at it, goal 2 your palm above it (both in ONE turn, until contact). To close on something: one finger at the other finger, until resist. To lift a held thing: the thing to the cell it is in. Most turns need ONE goal; add more only when needed. Also say whether to go FAST (fast = full steps without pausing; if you are holding something and say fast until slip, the hand lets go while moving - that is how you throw or strike) and list any numbered items that must NOT be touched (avoid_items, may be empty). The numbered items are listed under YOUR BODY above - first the pieces of yourself (measured just now by moving one channel at a time and watching which part of the picture followed), then the things out in the world. Moving a piece of yourself to a cell is how you reach, how you get a camera to see you better, and how you bring one finger to another. Moving a thing in the world to a cell is how you pick it up, put it down, or send it somewhere. There are no action words and none exist; the body works out which channels to push from what it measured.\\n\\nThe grid lies flat over the picture. A thing that is lifted toward the camera stays in the SAME cell (it only gets nearer); so to pick something up, name the cell it is already in - the body lifts it once it is held. Name a DIFFERENT cell only when the thing must end up somewhere else in the picture.\\n\\nAlso say WHEN to call you back. These are EVENTS the body measures, not actions: amount (the body finished the move it worked out) / contact (something is touched) / resist (it will not move any further) / slip (the thing stops following me) / settle (the picture stops changing). Pick the event that actually ends THIS piece of work - settle only means the world went quiet, which is not the same as the work being done.\\n\\nSet done=true only when the thing has ALREADY ended up where the task wants it. camera is the grid you are answering about (1 = the one you see here).\\n\\nDo NOT give distances, angles, speeds or any numbers - you are bad at those and the body already measures them. Keep why to ONE short sentence.",
+        "You are not a model looking at a picture. You ARE this robot. This image is what you see right now, with a numbered grid drawn over it: {列} columns x {行} rows, numbered 1..{格数} left to right then top to bottom, so cell n-{列} is DIRECTLY ABOVE cell n and cell n+1 is directly to its right.\\n\\nYOUR BODY (you measured this yourself just now, by moving one channel at a time and watching which part of the picture followed):\\n{}\\n\\nWHAT YOU JUST DID AND WHAT HAPPENED:\\n{}\\n\\nWHAT YOU ARE TRYING TO DO: {}\\n\\nYou are in charge of the loop. There are NO action words - none exist. You give 1 to 4 GOALS, and the body solves them TOGETHER. Each goal names WHICH NUMBERED ITEM moves and WHERE: either a numbered CELL, or a RELATION to another numbered item (rel = at: touching it / above / below / left / right / front: nearer the camera / back: farther, with of = that item's number), or stay_put = true (ONLY for an item that must not move at all - then give it no cell and no rel). The numbered items are listed under YOUR BODY above - first the pieces of yourself, then the things out in the world; you may name either kind. The body works out which channels to push from what it measured.\\n\\nThe grid lies flat over the picture: moving nearer to or farther from the camera does not change the cell - say front/back (relative to an item) for that.\\n\\nAlso say whether to go FAST (fast = full steps without pausing; holding something and going fast until slip lets it go while moving) and list any numbered items that must NOT be touched (avoid_items, may be empty).\\n\\nAlso say WHEN to call you back. These are EVENTS the body measures, not actions: amount (the body finished the move it worked out) / contact (something is touched) / resist (it will not move any further) / slip (the thing stops following me) / settle (the picture stops changing). Pick the event that actually ends THIS piece of work - settle only means the world went quiet, which is not the same as the work being done.\\n\\nSet done=true only when the thing has ALREADY ended up where the task wants it. camera is the grid you are answering about (1 = the one you see here).\\n\\nDo NOT give distances, angles, speeds or any numbers - you are bad at those and the body already measures them. Keep why to ONE short sentence.",
         esc(身体), esc(刚才), esc(任务)
     );
     let body = format!(
@@ -527,110 +527,4 @@ pub fn 问段(
     let 相机 = j.get("camera").and_then(|x| x.num()).map(|x| x.round() as usize).unwrap_or(1).max(1);
     Ok(段 { 动第几号: 条[0].号, 到哪一格: 条[0].格, 快, 别碰, 到什么为止: u, 完了: d, 为什么: t("why"), 条, 相机 })
 }
-
-
-/// 🔴🔴🔴 **飞行员模式:每帧一张白纸,问一个方向。**(owner 2026-09-03 定)
-///
-/// 离线验证(CG 的 10 帧,方向画到帧上逐帧看过):
-/// - 带上下文、每帧只吐 1 个字 ⇒ N/IN 交替,**跟画面无关**
-/// - 带上下文、每帧一句短理由 ⇒ **编故事**:手臂缩回去了它还说"我已经在球正下方"
-/// - **每帧独立问、不带历史、意图用文字带进去 ⇒ 10/10 方向粗略正确**,0.77 s/帧
-/// ⇒ **这个模型一带上历史就相信自己讲过的话、不看画面;连续反馈必须每帧一张白纸。**
-///
-/// 输出是 12 个画面语言的码:8 个罗盘方向(N = 画面上方)· IN(朝桌面下)· OUT(离桌面)·
-/// STOP · CLOSE。**里面没有身体参数**;把它变成推哪几个通道,是驱动拿量出来的通道表解的。
-pub struct 方向 {
-    /// 12 码之一。
-    pub 码: String,
-    /// 它认为自己的爪子在画面哪儿(只进日志)。
-    pub 爪在: String,
-    /// 它认为目标在画面哪儿(只进日志)。
-    pub 目标在: String,
-}
-
-pub fn 问方向(
-    host: &str,
-    port: u16,
-    任务: &str,
-    刚才: &str,
-    rgb: &[u8],
-    w: usize,
-    h: usize,
-) -> Result<方向, String> {
-    if rgb.len() < w * h * 3 {
-        return Err(format!("画面短了:要 {} 字节,只有 {}", w * h * 3, rgb.len()));
-    }
-    let bmp = bmp24(rgb, w, h);
-    let b64 = base64(&bmp);
-    let esc = |t: &str| t.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n");
-    let prompt = format!(
-        "You ARE this robot arm; this picture is what you see right now from a camera fixed above the table. Task: {}\\n\\nWhat happened just before: {}\\n\\nLook at THIS frame only. In a few words say where your gripper (the two-finger hand) is in the picture and where the thing you must act on is. Then ONE code for the direction the gripper must move next: N NE E SE S SW W NW are directions in the picture (N = toward the top of the picture); IN = down toward the table; OUT = up away from the table; STOP = hold still; CLOSE = close the fingers now (only when the thing is between them). No distances, no numbers.",
-        esc(任务), esc(刚才)
-    );
-    let body = format!(
-        r#"{{"model":"eye","max_tokens":90,"temperature":0,"chat_template_kwargs":{{"enable_thinking":false}},"response_format":{{"type":"json_schema","json_schema":{{"name":"dir","strict":true,"schema":{{"type":"object","additionalProperties":false,"required":["gripper","thing","d"],"properties":{{"gripper":{{"type":"string","maxLength":60}},"thing":{{"type":"string","maxLength":60}},"d":{{"type":"string","enum":["N","NE","E","SE","S","SW","W","NW","IN","OUT","STOP","CLOSE"]}}}}}}}}}},"messages":[{{"role":"user","content":[{{"type":"image_url","image_url":{{"url":"data:image/bmp;base64,{b64}"}}}},{{"type":"text","text":"{prompt}"}}]}}]}}"#
-    );
-    let raw = post(host, port, "/v1/chat/completions", &body)?;
-    let inner = extract_content(&raw)
-        .ok_or_else(|| format!("回包里没有 content(前 200 字:{})", &raw[..raw.len().min(200)]))?;
-    let j = crate::json::parse(&inner)
-        .map_err(|e| format!("眼给的不是 JSON: {e} ‖ 前 200 字:{}", &inner[..inner.len().min(200)]))?;
-    let t = |k: &str| j.get(k).and_then(|x| x.text()).unwrap_or("").to_string();
-    let d = t("d");
-    if d.is_empty() { return Err("眼没给 d".into()) }
-    Ok(方向 { 码: d, 爪在: t("gripper"), 目标在: t("thing") })
-}
-
-
-/// 🔴 **飞行员模式第二版:问两个格号,方向和步数由驱动算。**(owner 2026-09-03:"试试")
-///
-/// CH 实测:问"爪子在哪、球在哪、往哪走",它答 "center / center / IN",一压压在牛仔裤上 ——
-/// 爪子在画面中部偏下、球在中部偏右上,**按"中间"这个粗度两者是一回事**。问得粗,答得就粗。
-/// 改成数格子(图上画着编号网格,它选择题做得准):**指尖在第几格、目标在第几格**;
-/// 往哪走、走几步是两个格号一减,**驱动算**,于是不会走过头。
-pub struct 两格 {
-    pub 指尖格: usize,
-    pub 目标格: usize,
-    /// 多快(同 `段::快`)。
-    pub 快: bool,
-    /// 只有指尖格 == 目标格 且身体顶住时才有意义。
-    pub 合: bool,
-    pub 看到: String,
-}
-
-pub fn 问格(
-    host: &str,
-    port: u16,
-    任务: &str,
-    刚才: &str,
-    列: usize,
-    行: usize,
-    rgb: &[u8],
-    w: usize,
-    h: usize,
-) -> Result<两格, String> {
-    if rgb.len() < w * h * 3 {
-        return Err(format!("画面短了:要 {} 字节,只有 {}", w * h * 3, rgb.len()));
-    }
-    let 格数 = 列 * 行;
-    let bmp = bmp24(rgb, w, h);
-    let b64 = base64(&bmp);
-    let esc = |t: &str| t.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n");
-    let prompt = format!(
-        "You ARE this robot arm; this picture is what you see right now from a camera fixed above the table. A numbered grid is drawn over it: {列} columns x {行} rows, cells 1..{格数}, left to right then top to bottom. Task: {}\\n\\nWhat happened just before: {}\\n\\nLook at THIS frame only. Your FINGERTIPS are the two small dark wedges at the very end of the arm (not the big pale wrist casing). Answer: which cell the fingertips are in, and which cell the thing you must act on is in. Set close=true ONLY if the fingertips are in the same cell as the thing AND the body reported it is touching something. Set fast=true when the hand is far from the thing and should take full steps; false when close. No distances, no numbers other than cell numbers.",
-        esc(任务), esc(刚才)
-    );
-    let body = format!(
-        r#"{{"model":"eye","max_tokens":120,"temperature":0,"chat_template_kwargs":{{"enable_thinking":false}},"response_format":{{"type":"json_schema","json_schema":{{"name":"cells","strict":true,"schema":{{"type":"object","additionalProperties":false,"required":["look","fingers_cell","thing_cell","close","fast"],"properties":{{"look":{{"type":"string","maxLength":80}},"fingers_cell":{{"type":"integer","minimum":1,"maximum":{格数}}},"thing_cell":{{"type":"integer","minimum":1,"maximum":{格数}}},"close":{{"type":"boolean"}},"fast":{{"type":"boolean"}}}}}}}}}},"messages":[{{"role":"user","content":[{{"type":"image_url","image_url":{{"url":"data:image/bmp;base64,{b64}"}}}},{{"type":"text","text":"{prompt}"}}]}}]}}"#
-    );
-    let raw = post(host, port, "/v1/chat/completions", &body)?;
-    let inner = extract_content(&raw)
-        .ok_or_else(|| format!("回包里没有 content(前 200 字:{})", &raw[..raw.len().min(200)]))?;
-    let j = crate::json::parse(&inner)
-        .map_err(|e| format!("眼给的不是 JSON: {e} ‖ 前 200 字:{}", &inner[..inner.len().min(200)]))?;
-    let n = |k: &str| j.get(k).and_then(|x| x.num()).map(|v| v.round() as usize);
-    let (Some(f), Some(t)) = (n("fingers_cell"), n("thing_cell")) else { return Err("眼没给格号".into()) };
-    if f == 0 || f > 格数 || t == 0 || t > 格数 { return Err(format!("格号不合法:{f}/{t}")) }
-    Ok(两格 { 指尖格: f, 目标格: t, 快: j.get("fast").and_then(|x| x.boolean()).unwrap_or(false), 合: j.get("close").and_then(|x| x.boolean()).unwrap_or(false),
-             看到: j.get("look").and_then(|x| x.text()).unwrap_or("").to_string() })
-}
+// (飞行员模式的两套提示词 问方向/问格 已删:它们是我手写的动作循环 —— owner 2026-09-03 令删光)
