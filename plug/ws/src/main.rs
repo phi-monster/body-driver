@@ -6216,7 +6216,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                             // 通道号 ≥ 手臂通道数 ⇒ 抓握那一侧的通道(量出来的分界,不是身体词)。
                             let 抓侧 = kk >= 臂通道数;
                             t.push_str(&format!("  item {}: a piece of you{}, now in cell {} (covers {:.1}% of the frame)\n",
-                                条目.len(), if 抓侧 { " that moves when your grasp channel moves" } else { "" }, 格于(cu, cv), x.占 * 100.0));
+                                条目.len(), if 抓侧 { " that moves when your grasp channel moves (call it a finger)" } else { "" }, 格于(cu, cv), x.占 * 100.0));
                         }
                     }
                 }
@@ -6231,7 +6231,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                             let s = (cw4 / 40).max(2);   // 只是画框的大小(四十分之一画幅),不参与任何判据
                             let (cx, cy) = ((u * cw4 as f64) as usize, (v * ch4 as f64) as usize);
                             画编号框(&mut 网图, cw4, ch4, [cx.saturating_sub(s), cy.saturating_sub(s), (cx + s).min(cw4 - 1), (cy + s).min(ch4 - 1)], 条目.len(), [255, 160, 32], 2);
-                            t.push_str(&format!("  item {}: a piece of you - the end of your arm that the grasp parts hang from (your body reports where it is), now in cell {}\n",
+                            t.push_str(&format!("  item {}: a piece of you - the end of your arm that the fingers hang from (call it your palm; your body reports where it is), now in cell {}\n",
                                 条目.len(), 格于(u, v)));
                         }
                     }
@@ -6493,6 +6493,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
             let mut 上差 = 差于(&误于(&项们));
             let 上限 = ((上差 / (探幅 * 交付率).max(1e-9)) * 4.0).ceil().clamp(2.0, 400.0) as u32;
             let (mut 不缩, mut 走了, mut 静) = (0u32, 0u32, 0u32);
+            // 顶住先减半重试(最多三轮),排除"整条姿态被拒 / 一步给太大"之后才算碰上 —— 和追那一段同一条规矩。
+            let (mut 缩, mut 减半次) = (1.0f64, 0u32);
             let mut 事件 = String::from("ran out of the measured step budget");
             let 稳拍 = if 快 { 1 } else { 等拍 * 2 };
             let mut 上帧: Option<Vec<u8>> = None;
@@ -6510,6 +6512,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 if 爪步.abs() > 1e-9 { 比 = 比.min(爪幅 / 爪步.abs()); }
                 // 解出来要走的比一个探针步的十分之一还小 ⇒ 已经在那儿了(不是"顶住")。比例判据,无手填量。
                 if 幅 * 比 < 探幅 * 0.1 && 爪步.abs() * 比 < 爪幅 * 0.1 { 事件 = "amount: already there (the solve asks for less than a tenth of a step)".into(); break }
+                比 *= 缩;
                 // 别碰:预测每一块这一步落到哪,压进不许碰的框就减半步子,最多四次。
                 let mut 撞死 = None;
                 {
@@ -6532,7 +6535,10 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 if let Some(bi) = 撞死 { 事件 = format!("stopped: every step would push me onto a thing you said not to touch (avoid box {})", bi + 1); break }
                 let 臂: Vec<f64> = 动.iter().take(通道数).copied().collect();
                 let jaw目 = (jaw + 爪步 * 比).clamp(0.0, 1.0);
-                let Some((_, 实到, _)) = 迈通道稳(plug, &臂, 比, jaw目, 是关节, 稳拍) else { 事件 = "the body refused the command".into(); break };
+                let Some((_, 实到, 挡)) = 迈通道稳(plug, &臂, 比, jaw目, 是关节, 稳拍) else { 事件 = "the body refused the command".into(); break };
+                println!("[身]     步 {}:误 {:.3} · 解 [{}] × {:.3} · 实到 [{}] · 挡={}",
+                    走了 + 1, 差于(&误), 动.iter().map(|x| format!("{x:+.3}")).collect::<Vec<_>>().join(" "), 比,
+                    实到.iter().map(|x| format!("{x:+.4}")).collect::<Vec<_>>().join(" "), 挡);
                 let 实j = plug.sense().and_then(|f| f.jaw.get(手号.get()).or_else(|| f.jaw.first()).copied()).unwrap_or(jaw目);
                 let 爪实 = 实j - jaw; jaw = 实j;
                 走了 += 1;
@@ -6561,8 +6567,13 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         }
                     }
                 }
-                let 顶住 = 实到.iter().take(通道数).map(|x| x.abs()).fold(0.0, f64::max) < 探幅 * 比 * 0.1
-                    && (爪步.abs() < 1e-9 || 爪实.abs() < 爪幅 * 比 * 0.1);
+                let 顶住 = 挡 || (实到.iter().take(通道数).map(|x| x.abs()).fold(0.0, f64::max) < 幅 * 比 * 0.1
+                    && (爪步.abs() < 1e-9 || 爪实.abs() < 爪幅 * 比 * 0.1));
+                if 顶住 && 减半次 < 3 {
+                    缩 *= 0.5; 减半次 += 1;
+                    println!("[身]     顶住 ⇒ 步子减半重试({减半次}/3)");
+                    continue;
+                }
                 let 新差 = 差于(&误于(&项们));
                 if 新差 < 上差 { 上差 = 新差; 不缩 = 0; } else { 不缩 += 1; }
                 // 8 = 灰度差的噪声底,和别处同一个来源(无量纲)。
