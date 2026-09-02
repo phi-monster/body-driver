@@ -4937,8 +4937,15 @@ fn 服务<S: std::io::Read + std::io::Write>(
         let 台 = plug.lay.cams.len();
         let mut 出: Vec<Vec<Option<一件>>> = Vec::new();
         // 一次只动一个通道:先是身体那几个,再是每一个指通道。
+        // 🔴 每个通道晃它自己那只手(CN 实测 2026-09-03:原来四个手指通道全晃当前选中的那只手,"第 1 只手的手指"其实是第 2 只手的像素)。
+        //    末端模式:通道 k ⇒ 第 k/末端维 只手的第 k%末端维 个自由度;手指通道 k ⇒ 第 (k−通道数)×臂数/指数 只手的抓握。
+        let 臂数 = 臂末.len().max(1);
+        let (原手, 原臂) = (手号.get(), 臂号.get());
         for k in 0..(通道数 + 指数) {
             let 是指 = k >= 通道数;
+            let a = if 是指 { ((k - 通道数) * 臂数 / 指数.max(1)).min(臂数 - 1) } else if 是关节 { 0 } else { (k / 末端维).min(臂数 - 1) };
+            if let Some(Some(e)) = 臂末.get(a) { 手号.set(*e); }
+            if let Some(&j) = 臂关.get(a) { 臂号.set(j); }
             let 前: Vec<Option<(usize, usize, Vec<u8>)>> =
                 (0..台).map(|c| plug.sense().and_then(|f| 灰(&f, c))).collect();
             let 前深: Vec<Option<Vec<f64>>> = (0..台).map(|c| 深图(plug, c)).collect();
@@ -4947,7 +4954,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
             // 指通道用它自己的命令域两端(0..1 是命令域,不是米)。
             if 是指 { 抓握(plug, if j0 > 0.5 { 0.0 } else { 1.0 }, 是关节); 定爪(plug, 等拍 * 4); }
             else {
-                let mut 动 = vec![0.0; 通道数]; 动[k] = 探幅;
+                let 长 = if 是关节 { 通道数 } else { 末端维 };
+                let mut 动 = vec![0.0; 长]; 动[if 是关节 { k } else { k % 末端维 }] = 探幅;
                 let _ = 迈通道(plug, &动, 1.0, j0, 是关节);
                 等停(plug, 等拍 * 2);
             }
@@ -4957,7 +4965,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
             // 回来
             if 是指 { 抓握(plug, j0, 是关节); 定爪(plug, 等拍 * 4); }
             else {
-                let mut 动 = vec![0.0; 通道数]; 动[k] = -探幅;
+                let 长 = if 是关节 { 通道数 } else { 末端维 };
+                let mut 动 = vec![0.0; 长]; 动[if 是关节 { k } else { k % 末端维 }] = -探幅;
                 let _ = 迈通道(plug, &动, 1.0, j0, 是关节);
                 等停(plug, 等拍 * 2);
             }
@@ -5029,6 +5038,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
             }
             出.push(这件);
         }
+        手号.set(原手); 臂号.set(原臂);
         出
     };
     let mut 挑过手 = false;
@@ -5306,7 +5316,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 let 指数 = 帧.jaw.len();
                 let 通道数 = if *通道是关节 {
                     plug.sense().map(|f| 真臂(&f).iter().map(|&i| f.joints[i].len()).sum::<usize>()).unwrap_or(0)
-                } else { 末端维 };
+                } else { 臂末.len().max(1) * 末端维 };
                 println!("[身] ── 量部件图:{通道数} 个身体通道 + {指数} 个指通道,一次只动一个 ──");
                 let 图 = 量部件图(plug, 通道数, *通道是关节, 指数);
                 // ── 从因果表里【推】出结构,一个名字都不用 ──
@@ -5486,7 +5496,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 };
                 // 条目:(是不是我身上的, 通道号 or 区号, 画面位置);通道号 usize::MAX = 手腕(末端投影)。
                 条目.clear();
-                let 臂通道数 = 真臂(&帧).iter().map(|&i| 帧.joints[i].len()).sum::<usize>();
+                let 臂通道数 = if *通道是关节 { 真臂(&帧).iter().map(|&i| 帧.joints[i].len()).sum::<usize>() } else { 帧.ee.len().max(1) * 末端维 };
                 let 哪手0 = |kk: usize| -> usize { let (臂数, 指数) = (帧.ee.len().max(1), 帧.jaw.len().max(1)); if kk >= 臂通道数 { ((kk - 臂通道数) * 臂数 / 指数).min(臂数 - 1) } else { 手号.get() } };
                 let mut t = String::new();
                 t.push_str("PIECES OF YOURSELF (measured just now: you moved one channel at a time and watched which part of the picture followed). Each is boxed and NUMBERED on the picture in orange:\n");
@@ -5621,7 +5631,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
             };
             let 列数 = 通道数;   // 抓握通道不进解算:它对"块在画面哪儿"几乎没有影响,由"抓握"这一号直接驱动
             // 编码:手腕 = usize::MAX − 2a,抓握 = usize::MAX − 2a − 1。
-            let 臂通道数 = 真臂(&f).iter().map(|&i| f.joints[i].len()).sum::<usize>();
+            let 臂通道数 = if 是关节 { 真臂(&f).iter().map(|&i| f.joints[i].len()).sum::<usize>() } else { 臂数0 * 末端维 };
             let (臂数, 指数) = (臂数0, f.jaw.len().max(1));
             let 手于 = |kk: usize| -> Option<usize> {
                 if kk >= usize::MAX - 200 { Some((usize::MAX - kk) / 2) }
