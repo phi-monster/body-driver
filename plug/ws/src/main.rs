@@ -5529,6 +5529,12 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     let r = (v * 网行 as f64).floor().clamp(0.0, 网行 as f64 - 1.0) as usize;
                     r * 网列 + c + 1
                 };
+                // 人一眼看到的"哪只手离目标近",模型从格子号里心算不出来(CS–CU 三炮都挑了够不着的那只手)⇒ 量出来写进去:
+                // 离上次定的目标多少格、在画面左半还是右半。这是量,不是策略 —— 挑哪只仍由它定。
+                let 离目标 = |u: f64, v: f64| -> String {
+                    let d = ((u - look.u) * 网列 as f64).hypot((v - look.v) * 网行 as f64);
+                    format!(", {:.1} cells from the thing you settled on, in the {} half of the picture", d, if u < 0.5 { "LEFT" } else { "RIGHT" })
+                };
                 // 条目:(是不是我身上的, 通道号 or 区号, 画面位置);通道号 usize::MAX = 手腕(末端投影)。
                 条目.clear();
                 let 臂通道数 = if *通道是关节 { 真臂(&帧).iter().map(|&i| 帧.joints[i].len()).sum::<usize>() } else { 帧.ee.len().max(1) * 末端维 };
@@ -5575,8 +5581,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
                             画编号框(&mut 网图, cw4, ch4, 框px, 条目.len(), [255, 160, 32], 2);
                             // 通道号 ≥ 手臂通道数 ⇒ 抓握那一侧的通道(量出来的分界,不是身体词)。
                             let 抓侧 = kk >= 臂通道数;
-                            t.push_str(&format!("  item {}: a piece of you{}, now in cell {} (covers {:.1}% of the frame)\n",
-                                条目.len(), if 抓侧 { format!(" that moves when a grasp channel of arm {} moves (call it a finger of arm {})", 哪手0(kk) + 1, 哪手0(kk) + 1) } else { String::new() }, 格于(cu, cv), x.占 * 100.0));
+                            t.push_str(&format!("  item {}: a piece of you{}, now in cell {}{} (covers {:.1}% of the frame)\n",
+                                条目.len(), if 抓侧 { format!(" that moves when a grasp channel of arm {} moves (call it a finger of arm {})", 哪手0(kk) + 1, 哪手0(kk) + 1) } else { String::new() }, 格于(cu, cv), 离目标(cu, cv), x.占 * 100.0));
                         }
                     }
                 }
@@ -5601,8 +5607,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
                             let s = (cw4 / 40).max(2);   // 只是画框的大小(四十分之一画幅),不参与任何判据
                             let (cx, cy) = ((u * cw4 as f64) as usize, (v * ch4 as f64) as usize);
                             画编号框(&mut 网图, cw4, ch4, [cx.saturating_sub(s), cy.saturating_sub(s), (cx + s).min(cw4 - 1), (cy + s).min(ch4 - 1)], 条目.len(), [255, 160, 32], 2);
-                            t.push_str(&format!("  item {}: a piece of you - the end of arm {} that its fingers hang from (call it palm {}; your body reports where it is), now in cell {}\n",
-                                条目.len(), a + 1, a + 1, 格于(u, v)));
+                            t.push_str(&format!("  item {}: a piece of you - the end of arm {} that its fingers hang from (call it palm {}; your body reports where it is), now in cell {}{}\n",
+                                条目.len(), a + 1, a + 1, 格于(u, v), 离目标(u, v)));
                         }
                         None => {
                             条目.push((true, usize::MAX - 2 * a, (-1.0, -1.0)));
@@ -5617,8 +5623,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
                             let 框px = [(框[0] * cw4 as f64) as usize, (框[1] * ch4 as f64) as usize,
                                         (框[2] * cw4 as f64) as usize, (框[3] * ch4 as f64) as usize];
                             画编号框(&mut 网图, cw4, ch4, 框px, 条目.len(), [255, 64, 200], 2);
-                            t.push_str(&format!("  item {}: grip {} - the channel that closes the fingers of arm {} (moving it AT a thing = closing on that thing until resist; moving it BACK from a thing = opening), now in cell {}\n",
-                                条目.len(), a + 1, a + 1, 格于(心.0, 心.1)));
+                            t.push_str(&format!("  item {}: grip {} - the channel that closes the fingers of arm {} (moving it AT a thing = closing on that thing until resist; moving it BACK from a thing = opening), now in cell {}{}\n",
+                                条目.len(), a + 1, a + 1, 格于(心.0, 心.1), 离目标(心.0, 心.1)));
                         }
                         None => {
                             条目.push((true, usize::MAX - 2 * a - 1, (-1.0, -1.0)));
