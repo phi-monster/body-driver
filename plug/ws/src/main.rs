@@ -5581,30 +5581,44 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 let 臂数 = 帧.ee.len().max(1);
                 let 指数 = 帧.jaw.len().max(1);
                 let 哪手 = |kk: usize| -> usize { if kk >= 臂通道数 { ((kk - 臂通道数) * 臂数 / 指数).min(臂数 - 1) } else { 手号.get() } };
+                // 每只手固定两个槽(手腕、抓握),不管这一轮看不看得见 —— 槽位固定,后面世界块的号才不会跟着漂(CS 实测:相机一解出来,球的号从 22 变 24)。
                 for a in 0..臂数 {
+                    let mut 腕 = None;
                     if let (Some(e), Some(ee)) = (眼稳.as_ref(), 帧.ee.get(a)) {
                         let q = point_gen::P3 { x: ee[0], y: ee[1], z: ee[2] };
                         if let Some(px) = e.project(q) {
                             let (u, v) = (px[0] / cw4 as f64, px[1] / ch4 as f64);
-                            if u > 0.0 && u < 1.0 && v > 0.0 && v < 1.0 {
-                                条目.push((true, usize::MAX - 2 * a, (u, v)));
-                                let s = (cw4 / 40).max(2);   // 只是画框的大小(四十分之一画幅),不参与任何判据
-                                let (cx, cy) = ((u * cw4 as f64) as usize, (v * ch4 as f64) as usize);
-                                画编号框(&mut 网图, cw4, ch4, [cx.saturating_sub(s), cy.saturating_sub(s), (cx + s).min(cw4 - 1), (cy + s).min(ch4 - 1)], 条目.len(), [255, 160, 32], 2);
-                                t.push_str(&format!("  item {}: a piece of you - the end of arm {} that its fingers hang from (call it palm {}; your body reports where it is), now in cell {}\n",
-                                    条目.len(), a + 1, a + 1, 格于(u, v)));
-                            }
+                            if u > 0.0 && u < 1.0 && v > 0.0 && v < 1.0 { 腕 = Some((u, v)); }
                         }
                     }
-                    if let Some(&(_, kk, 心)) = 条目.iter().find(|&&(我, kk, _)| 我 && kk < usize::MAX - 200 && kk >= 臂通道数 && 哪手(kk) == a) {
-                        if let Some(Some(x)) = 部件图.as_ref().and_then(|图| 图.get(kk)).and_then(|件们|件们.get(工作相机.get())) {
-                            let 框 = 身位.borrow().get(&a).copied().unwrap_or(x.框);
+                    match 腕 {
+                        Some((u, v)) => {
+                            条目.push((true, usize::MAX - 2 * a, (u, v)));
+                            let s = (cw4 / 40).max(2);   // 只是画框的大小(四十分之一画幅),不参与任何判据
+                            let (cx, cy) = ((u * cw4 as f64) as usize, (v * ch4 as f64) as usize);
+                            画编号框(&mut 网图, cw4, ch4, [cx.saturating_sub(s), cy.saturating_sub(s), (cx + s).min(cw4 - 1), (cy + s).min(ch4 - 1)], 条目.len(), [255, 160, 32], 2);
+                            t.push_str(&format!("  item {}: a piece of you - the end of arm {} that its fingers hang from (call it palm {}; your body reports where it is), now in cell {}\n",
+                                条目.len(), a + 1, a + 1, 格于(u, v)));
+                        }
+                        None => {
+                            条目.push((true, usize::MAX - 2 * a, (-1.0, -1.0)));
+                            t.push_str(&format!("  item {}: palm {} (the end of arm {}) - NOT locatable in this picture right now, do not name it\n", 条目.len(), a + 1, a + 1));
+                        }
+                    }
+                    let 指 = 条目.iter().find(|&&(我, kk, _)| 我 && kk < usize::MAX - 200 && kk >= 臂通道数 && 哪手(kk) == a).copied();
+                    match 指.and_then(|(_, kk, 心)| 部件图.as_ref().and_then(|图| 图.get(kk)).and_then(|件们| 件们.get(工作相机.get())).and_then(|x| x.as_ref()).map(|x| (心, x.框))) {
+                        Some((心, 框0)) => {
+                            let 框 = 身位.borrow().get(&a).copied().unwrap_or(框0);
                             条目.push((true, usize::MAX - 2 * a - 1, 心));
                             let 框px = [(框[0] * cw4 as f64) as usize, (框[1] * ch4 as f64) as usize,
                                         (框[2] * cw4 as f64) as usize, (框[3] * ch4 as f64) as usize];
                             画编号框(&mut 网图, cw4, ch4, 框px, 条目.len(), [255, 64, 200], 2);
                             t.push_str(&format!("  item {}: grip {} - the channel that closes the fingers of arm {} (moving it AT a thing = closing on that thing until resist; moving it BACK from a thing = opening), now in cell {}\n",
                                 条目.len(), a + 1, a + 1, 格于(心.0, 心.1)));
+                        }
+                        None => {
+                            条目.push((true, usize::MAX - 2 * a - 1, (-1.0, -1.0)));
+                            t.push_str(&format!("  item {}: grip {} (closes the fingers of arm {}) - its fingers are not locatable in this picture right now\n", 条目.len(), a + 1, a + 1));
                         }
                     }
                 }
@@ -5799,6 +5813,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
             let 眼 = 眼稳.as_ref();
             let mut 备注: Vec<String> = Vec::new();
             for (i, c) in 条.iter().enumerate() {
+                if matches!(条目.get(c.号.wrapping_sub(1)), Some(&(_, _, (u, _))) if u < 0.0) { return format!("goal {}: item {} is not locatable in this picture right now.", i + 1, c.号) }
+                if c.相对 > 0 && matches!(条目.get(c.相对.wrapping_sub(1)), Some(&(_, _, (u, _))) if u < 0.0) { return format!("goal {}: item {} (the one it is relative to) is not locatable in this picture right now.", i + 1, c.相对) }
                 let Some((框, 心)) = 框于(c.号) else { return format!("goal {}: item {} is not on my list right now.", i + 1, c.号) };
                 let 是我 = matches!(条目.get(c.号.wrapping_sub(1)), Some((true, _, _)));
                 let 投影 = matches!(条目.get(c.号.wrapping_sub(1)), Some((true, k, _)) if 是手腕(*k));
@@ -5979,8 +5995,11 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     let mut 动 = vec![0.0; 通道数];
                     动[c] = 幅;
                     let Some((r1, _)) = 发(plug, &动, 1.0, 等拍 * 2) else { break };
-                    if r1.get(c).map(|x| x.abs() <= 实到噪).unwrap_or(true) {
-                        if 试 < 8 && 幅 * 0.5 > 实到噪 { 缩p *= 0.5; 试 += 1; continue } else { 备注.push(format!("channel {c} refused every probe down to {幅:.4}")); println!("[身]     探通道 {c}:幅 {幅:.4} 一步没走(被拒),不再缩"); break }
+                    // 走了不到要求的一半 ⇒ 这个幅度身体吃不下(被拒或只交付一小截),减半再探:探针要落在"命令多少走多少"那一段里,列才是真的。
+                    let 到 = r1.get(c).copied().unwrap_or(0.0).abs();
+                    if 到 <= 实到噪 || 到 < 幅 * 0.5 {
+                        if 试 < 8 && 幅 * 0.5 > 实到噪 { 缩p *= 0.5; 试 += 1; 动[c] = -到 * r1.get(c).copied().unwrap_or(0.0).signum(); let _ = 发(plug, &动, 1.0, 等拍 * 2); continue }
+                        else { 备注.push(format!("channel {c} never delivered half of what I asked, down to {幅:.4}")); println!("[身]     探通道 {c}:幅 {幅:.4} 只走了 {到:.4},不再缩"); break }
                     }
                     let _ = 读所有(plug, &mut 项们);
                     let 中: Vec<(f64, f64, f64)> = 项们.iter().map(|p| p.现).collect();
@@ -5992,10 +6011,14 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     let _ = 发(plug, &动, 1.0, 等拍 * 2);
                     let _ = 读所有(plug, &mut 项们);
                     let 净 = r2.get(c).copied().unwrap_or(0.0);
-                    if 净.abs() > 实到噪 {
+                    // 只有这个通道真的走了探针的一大半,它的列才算数:除以一个接近零的"实到"会把列撑到几十画幅/单位,
+                    // 预测和解算全被它带飞(CS 实测:预测位移 −5.3 画幅、解出的相机焦距 0)。
+                    if 净.abs() > 实到噪 && 净.abs() >= 幅 {
                         for pi in 0..点数 {
                             表[c][3 * pi] = (后[pi].0 - 中[pi].0) / 净; 表[c][3 * pi + 1] = (后[pi].1 - 中[pi].1) / 净; 表[c][3 * pi + 2] = (后[pi].2 - 中[pi].2) / 净;
                         }
+                    } else if 净.abs() > 实到噪 {
+                        备注.push(format!("channel {c} delivered only {:.3} of the {:.3} I asked on the way back; not trusting that column", 净.abs(), 幅 * 2.0));
                     }
                     println!("[身]     探通道 {c}:幅 {幅:.4} · 实到 {:+.4} / {:+.4} · 各块跑了 {}", r1.get(c).copied().unwrap_or(0.0), 净,
                         (0..点数).map(|pi| format!("({:+.3},{:+.3},{:+.3})", 后[pi].0 - 中[pi].0, 后[pi].1 - 中[pi].1, 后[pi].2 - 中[pi].2)).collect::<Vec<_>>().join(" "));
@@ -6016,12 +6039,14 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         j[0][k] = 表[c][3 * pi] * fw as f64; j[1][k] = 表[c][3 * pi + 1] * fh as f64; j[2][k] = 表[c][3 * pi + 2];
                         if j[0][k].abs() + j[1][k].abs() + j[2][k].abs() < 1e-9 { 全有 = false; } }
                     if !全有 { continue }
+                    let 尺px = ((p.框[2] - p.框[0]) * fw as f64).max((p.框[3] - p.框[1]) * fh as f64).max(1.0);
                     match point_gen::eye_from_jacobian(j, p.现.0 * fw as f64, p.现.1 * fh as f64, p.现.2, [ee[0], ee[1], ee[2]]) {
-                        Some(e2) if e2.cx >= 0.0 && e2.cy >= 0.0 && e2.cx <= fw as f64 && e2.cy <= fh as f64 => {
+                        Some(e2) if e2.fx > 1.0 && e2.fy > 1.0 && e2.cx >= 0.0 && e2.cy >= 0.0 && e2.cx <= fw as f64 && e2.cy <= fh as f64
+                            && e2.project(point_gen::P3 { x: ee[0], y: ee[1], z: ee[2] }).map(|q| (q[0] - p.现.0 * fw as f64).hypot(q[1] - p.现.1 * fh as f64) <= 尺px).unwrap_or(false) => {
                             println!("[身]     从表里解出相机:焦距 {:.1}/{:.1} · 主点 ({:.1},{:.1}) · 相机在 ({:.2},{:.2},{:.2})(用第 {} 只手的手指块)", e2.fx, e2.fy, e2.cx, e2.cy, e2.at[0], e2.at[1], e2.at[2], a + 1);
                             *新眼.borrow_mut() = Some(e2); break
                         }
-                        Some(e2) => println!("[身]     从表里解出的相机主点在画面外 ({:.0},{:.0}),不收", e2.cx, e2.cy),
+                        Some(e2) => println!("[身]     从表里解出的相机不合格(焦距 {:.1}/{:.1} · 主点 ({:.0},{:.0})· 手投回去落不到那一块上),不收", e2.fx, e2.fy, e2.cx, e2.cy),
                         None => {}
                     }
                 }
@@ -6108,6 +6133,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         let du: f64 = (0..列数).map(|c| 表[c][3 * pi] * 命[c]).sum();
                         let dv: f64 = (0..列数).map(|c| 表[c][3 * pi + 1] * 命[c]).sum();
                         let dz: f64 = (0..列数).map(|c| 表[c][3 * pi + 2] * 命[c]).sum();
+                        let (du, dv) = (du.clamp(-1.0, 1.0), dv.clamp(-1.0, 1.0));   // 一步不可能跑出一幅画面
                         let 窗r = (((du * fw as f64).powi(2) + (dv * fh as f64).powi(2)).sqrt() as usize) + 半 * 3;
                         let 容 = if 无深 { f64::INFINITY } else { 尺m.max(dz.abs()) + 深噪 };
                         let 模 = 项们[pi].模.clone();
