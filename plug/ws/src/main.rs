@@ -6208,8 +6208,13 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 if 到什么为止 == "slip" && 手里有.get() && 爪读 - 空 <= 读数噪 { 事件 = "slip: what I was holding has left my fingers".into(); break }
                 if 合.is_some() && 爪停 >= 2 && 到什么为止 == "resist" && 条.iter().all(|c| c.保持) { 事件 = format!("resist: my grip stopped at reading {爪读:.3}"); break }
                 if 不缩 >= 2 {
-                    事件 = if 要碰 { format!("{到什么为止}: I keep pushing but stop getting closer (remaining {新差:.3} of a frame) - something is holding me there") }
-                           else { format!("amount: stopped getting closer (remaining {新差:.3} of a frame)") };
+                    // 说清是哪只手、还有哪只手 ——"推不动"在够不着的时候是误导(CU 实测:左手够不着,模型连着五段不换手)。
+                    let 手们: Vec<String> = 项们.iter().filter(|p| p.是我).filter_map(|p| 手于(p.通道)).map(|a| format!("arm {}", a + 1)).collect::<std::collections::BTreeSet<_>>().into_iter().collect();
+                    let 别的: Vec<String> = (0..臂数).filter(|a| !手们.contains(&format!("arm {}", a + 1))).map(|a| format!("arm {}", a + 1)).collect();
+                    let 谁 = if 手们.is_empty() { String::new() } else { format!(" with {}", 手们.join(" and ")) };
+                    let 另 = if 别的.is_empty() { String::new() } else { format!(" You also have {} (its pieces are on the list).", 别的.join(" and ")) };
+                    事件 = if 要碰 { format!("{到什么为止}: I keep pushing{谁} but stop getting closer (remaining {新差:.3} of a frame) - either something holds me or that hand cannot reach farther from here.{另}") }
+                           else { format!("amount: stopped getting closer{谁} (remaining {新差:.3} of a frame).{另}") };
                     break
                 }
                 if 走了 >= 安全上限 { break }
