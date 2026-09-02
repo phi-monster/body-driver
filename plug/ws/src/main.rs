@@ -5549,10 +5549,14 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         // 框的大小沿用开机部件图里这只手抓握侧那块的大小;只有中心是新认的。
                         let 尺 = 部件图.as_ref().and_then(|图| (臂通道数..图.len()).find(|&kk| 哪手0(kk) == a).and_then(|kk| 图[kk].get(工作相机.get()).and_then(|o| o.as_ref())))
                             .map(|x| ((x.框[2] - x.框[0]) * 0.5, (x.框[3] - x.框[1]) * 0.5)).unwrap_or((1.0 / 40.0, 1.0 / 30.0));
+                        // 至少要有开机部件图里那块手指一半的像素,才算认出来(19 px 的散点不算,CT 实测)。
+                        let 该有 = 部件图.as_ref().and_then(|图| (臂通道数..图.len()).find(|&kk| 哪手0(kk) == a).and_then(|kk| 图[kk].get(工作相机.get()).and_then(|o| o.as_ref())))
+                            .map(|x| (x.占 * cw4 as f64 * ch4 as f64 * 0.5) as u32).unwrap_or(1);
                         match 得 {
-                            Some(c) if c.pixels > 0 => { println!("[身]    第 {} 只手上次跟丢了 ⇒ 抖一下它的抓握重认手指:中心 ({:.3},{:.3}),{} px,刚性 {:.2}", a + 1, c.u, c.v, c.pixels, c.rigidity);
+                            Some(c) if c.pixels >= 该有 => { println!("[身]    第 {} 只手上次跟丢了 ⇒ 抖一下它的抓握重认手指:中心 ({:.3},{:.3}),{} px,刚性 {:.2}", a + 1, c.u, c.v, c.pixels, c.rigidity);
                                 身位.borrow_mut().insert(a, [c.u - 尺.0, c.v - 尺.1, c.u + 尺.0, c.v + 尺.1]); }
-                            _ => { println!("[身]    第 {} 只手抖了抓握,这台相机里认不出一块跟着动 ⇒ 它的手指现在不在画面里", a + 1); 身位.borrow_mut().remove(&a); }
+                            Some(c) => { println!("[身]    第 {} 只手抖了抓握,只有 {} px 跟着动(要 {该有})⇒ 它的手指现在不在画面里", a + 1, c.pixels); 身位.borrow_mut().remove(&a); }
+                            None => { println!("[身]    第 {} 只手抖了抓握,这台相机里认不出一块跟着动 ⇒ 它的手指现在不在画面里", a + 1); 身位.borrow_mut().remove(&a); }
                         }
                     }
                     需抖.borrow_mut().clear();
@@ -5984,6 +5988,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
             // 一步多大:从量到的可达带整个开始,被拒就减半(最多三轮),接受的比例跨段带走、连成三步放大回去。没有"三分之一"。
             let 幅0 = 可达带[1].max(1e-6);
             let (mut 缩, mut 减半次) = (步缩.get().clamp(1.0 / 64.0, 1.0), 0u32);
+            let mut 缩探 = 缩;   // 探针实际接受的比例(走了至少一半的那一档),步子从它起
             // ── 没有存表的通道:现场来回探一遍(读的是所有点)。被拒的幅度减半再探。──
             let 探列: Vec<usize> = if 有初值 || 条.is_empty() { Vec::new() } else { (0..通道数).collect() };
             if !探列.is_empty() { println!("[身]     身上 {} 块还没有响应表 ⇒ 探 {} 个通道(探过就记住,下一段不再探)", 缺.iter().filter(|x| **x).count(), 探列.len()); }
@@ -5998,7 +6003,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     // 走了不到要求的一半 ⇒ 这个幅度身体吃不下(被拒或只交付一小截),减半再探:探针要落在"命令多少走多少"那一段里,列才是真的。
                     let 到 = r1.get(c).copied().unwrap_or(0.0).abs();
                     if 到 <= 实到噪 || 到 < 幅 * 0.5 {
-                        if 试 < 8 && 幅 * 0.5 > 实到噪 { 缩p *= 0.5; 试 += 1; 动[c] = -到 * r1.get(c).copied().unwrap_or(0.0).signum(); let _ = 发(plug, &动, 1.0, 等拍 * 2); continue }
+                        if 试 < 8 && 幅 * 0.5 > 实到噪 { 缩p *= 0.5; 缩探 = 缩探.min(缩p); 试 += 1; 动[c] = -到 * r1.get(c).copied().unwrap_or(0.0).signum(); let _ = 发(plug, &动, 1.0, 等拍 * 2); continue }
                         else { 备注.push(format!("channel {c} never delivered half of what I asked, down to {幅:.4}")); println!("[身]     探通道 {c}:幅 {幅:.4} 只走了 {到:.4},不再缩"); break }
                     }
                     let _ = 读所有(plug, &mut 项们);
@@ -6041,7 +6046,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     if !全有 { continue }
                     let 尺px = ((p.框[2] - p.框[0]) * fw as f64).max((p.框[3] - p.框[1]) * fh as f64).max(1.0);
                     match point_gen::eye_from_jacobian(j, p.现.0 * fw as f64, p.现.1 * fh as f64, p.现.2, [ee[0], ee[1], ee[2]]) {
-                        Some(e2) if e2.fx > 1.0 && e2.fy > 1.0 && e2.cx >= 0.0 && e2.cy >= 0.0 && e2.cx <= fw as f64 && e2.cy <= fh as f64
+                        Some(e2) if e2.fx > 1.0 && e2.fy > 1.0 && (e2.fx / e2.fy).max(e2.fy / e2.fx) <= 2.0 && e2.cx >= 0.0 && e2.cy >= 0.0 && e2.cx <= fw as f64 && e2.cy <= fh as f64
                             && e2.project(point_gen::P3 { x: ee[0], y: ee[1], z: ee[2] }).map(|q| (q[0] - p.现.0 * fw as f64).hypot(q[1] - p.现.1 * fh as f64) <= 尺px).unwrap_or(false) => {
                             println!("[身]     从表里解出相机:焦距 {:.1}/{:.1} · 主点 ({:.1},{:.1}) · 相机在 ({:.2},{:.2},{:.2})(用第 {} 只手的手指块)", e2.fx, e2.fy, e2.cx, e2.cy, e2.at[0], e2.at[1], e2.at[2], a + 1);
                             *新眼.borrow_mut() = Some(e2); break
@@ -6051,6 +6056,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     }
                 }
             }
+            缩 = 缩.min(缩探);   // 探针都得减到这一档身体才走得动,步子没理由从更大的起(CT 实测:0.68 m 的步子连拒 13 次)
             let mut 上差 = 差于(&误于(&项们));
             let (mut 不缩, mut 走了, mut 静, mut 连成) = (0u32, 0u32, 0u32, 0u32);
             let mut 事件 = String::from("hit the safety cap on steps");
@@ -6171,9 +6177,9 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 }
                 let 实最大 = 实到.iter().take(通道数).map(|x| x.abs()).fold(0.0, f64::max);
                 let 被拒 = 挡 || 实最大 <= 实到噪;    // 一步都没走(在本体自己的噪声以内)
-                if 被拒 && 减半次 < 3 {
+                if 被拒 && 减半次 < 8 && 幅0 * 缩 * 0.5 > 实到噪 {
                     缩 *= 0.5; 减半次 += 1;
-                    println!("[身]     一步没走(被拒)⇒ 步子减半重试({减半次}/3)");
+                    println!("[身]     一步没走(被拒)⇒ 步子减半重试({减半次}/8,现在 {:.4})", 幅0 * 缩);
                     continue;
                 }
                 走了 += 1;
@@ -6189,7 +6195,14 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 let 画静 = match 上帧.as_ref() { Some(f) if f.len() == g.len() => f.iter().zip(g.iter()).map(|(a, b)| a.abs_diff(*b)).max().unwrap_or(0) <= 静噪, _ => false };
                 上帧 = Some(g.clone());
                 if 画静 { 静 += 1 } else { 静 = 0 }
-                if 被拒 { 事件 = "resist: the body refuses every step toward there (a pose it will not go to) - not a contact".into(); break }
+                if 被拒 {
+                    let 手们: Vec<String> = 项们.iter().filter(|p| p.是我).filter_map(|p| 手于(p.通道)).map(|a| format!("arm {}", a + 1)).collect::<std::collections::BTreeSet<_>>().into_iter().collect();
+                    let 别的: Vec<String> = (0..臂数).filter(|a| !手们.contains(&format!("arm {}", a + 1))).map(|a| format!("arm {}", a + 1)).collect();
+                    事件 = format!("resist: the body refuses every step toward there with {} (a pose it will not go to from here) - not a contact.{}",
+                        if 手们.is_empty() { "this hand".to_string() } else { 手们.join(" and ") },
+                        if 别的.is_empty() { String::new() } else { format!(" You also have {} (its pieces are on the list).", 别的.join(" and ")) });
+                    break
+                }
                 if 到什么为止 == "settle" && 静 >= 2 { 事件 = "settle: the picture stopped changing (within its own noise)".into(); break }
                 // slip:握着的东西不再跟着我 —— 抓握读数掉回空合那一层(东西离开了指间)。
                 if 到什么为止 == "slip" && 手里有.get() && 爪读 - 空 <= 读数噪 { 事件 = "slip: what I was holding has left my fingers".into(); break }
