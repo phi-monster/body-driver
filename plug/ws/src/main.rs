@@ -6782,6 +6782,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 抓握(plug, 1.0, 是关节);
                 定爪(plug, 等拍 * 8);
                 let Some((aw, ah, 开帧)) = plug.sense().and_then(|f| 灰(&f, 相机号)) else { return None };
+                let 开深 = 深图(plug, 相机号);
                 // 🔴 噪声参照必须是**同一条命令再发一次**(空对照),不是"什么都不做的下一帧"。
                 // 合爪那一下伺服会把整条臂带动一点点 ⇒ 只拿静止两帧当参照,这份抖动会被
                 // 当成"抓握通道动的那一块",变化区因此撑到 452×87 px(NVE 实测)。
@@ -6789,9 +6790,11 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 抓握(plug, 1.0, 是关节);
                 定爪(plug, 等拍 * 8);
                 let Some((_, _, 开帧2)) = plug.sense().and_then(|f| 灰(&f, 相机号)) else { return None };
+                let 开深2 = 深图(plug, 相机号);
                 抓握(plug, 0.0, 是关节);
                 定爪(plug, 等拍 * 8);
                 let Some((_, _, 合帧)) = plug.sense().and_then(|f| 灰(&f, 相机号)) else { return None };
+                let 合深 = 深图(plug, 相机号);
                 // 变了多少才算变:**参照就在手边 —— 同一个爪子状态的两帧之间的差,
                 // 就是"什么都不做时这幅画面自己会变多少"。** 超过它才算我真的动了那一块。
                 // ⚠️ 我先写成"整幅差分的中位数",**已实测撤回**:静止画面的中位数是 0 ⇒
@@ -6813,8 +6816,24 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 // 门槛不是我填的:**空对照(同一条命令再发一次)里幅度最大的那一跳有多大,量一次就知道**,
                 // 比它大的才算真的动了。
                 let 噪幅 = 开帧.iter().zip(开帧2.iter()).map(|(a, b)| a.abs_diff(*b)).max().unwrap_or(0);
-                let 掩 = |x: &Vec<u8>, y: &Vec<u8>| -> Vec<bool> {
-                    x.iter().zip(y.iter()).map(|(a, b)| a.abs_diff(*b) > 噪幅).collect()
+                // 🔴🔴 第二道门:**深度也得变**。灰度只闪、深度不变的像素(渲染抖动的散点、影子)不是我的手指。
+                // 门槛同样是量的:静止两帧之间深度自己会飘多少,超过它才算那一点真的换了东西。
+                // 实测代价(CJ,2026-09-03,离线重算 + 渲图为证):钳口本身是一块干净的 **2605 px(110×60)**,
+                // 而**左臂上几个 1–3 px 的灰度散点**把外接框撑到 **514 px 宽** ⇒ "超过半幅画面" ⇒ 整步被拒、六行机器一次没跑。
+                let 深噪 = match (&开深, &开深2) {
+                    (Some(a), Some(b)) => Some(a.iter().zip(b.iter()).filter(|(x, y)| x.is_finite() && y.is_finite())
+                                              .map(|(x, y)| (x - y).abs()).fold(0.0f64, f64::max)),
+                    _ => None,
+                };
+                if 深噪.is_none() { println!("[服]   张合相减:这台相机没有深度 ⇒ 只有灰度一道门(散点会把外接框撑大,照实报)"); }
+                let 掩 = |x: &Vec<u8>, y: &Vec<u8>, zx: &Option<Vec<f64>>, zy: &Option<Vec<f64>>| -> Vec<bool> {
+                    (0..x.len()).map(|i| {
+                        if x[i].abs_diff(y[i]) <= 噪幅 { return false }
+                        match (深噪, zx.as_ref().and_then(|a| a.get(i)), zy.as_ref().and_then(|b| b.get(i))) {
+                            (Some(n), Some(a), Some(b)) if a.is_finite() && b.is_finite() => (a - b).abs() > n,
+                            _ => true,   // 没有深度可比(没深度 / 这一点是空洞)⇒ 灰度那道门说了算
+                        }
+                    }).collect()
                 };
                 // 连通块(八邻域),返回每一块的像素表,按大小降序。
                 let 连通 = |m: &Vec<bool>, w: usize, h: usize| -> Vec<Vec<(usize, usize)>> {
@@ -6840,13 +6859,24 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     出.sort_by(|a, b| b.len().cmp(&a.len()));
                     出
                 };
-                let 噪块 = 连通(&掩(&开帧, &开帧2), aw, ah);
+                let 噪块 = 连通(&掩(&开帧, &开帧2, &开深, &开深2), aw, ah);
                 let 噪上限 = 噪块.first().map(|b| b.len()).unwrap_or(0);
-                let 信块 = 连通(&掩(&开帧, &合帧), aw, ah);
+                let 信块 = 连通(&掩(&开帧, &合帧, &开深, &合深), aw, ah);
                 let 强: Vec<(u8, usize, usize)> = 信块.iter().filter(|b| b.len() > 噪上限)
                     .flat_map(|b| b.iter().map(|&(x, y)| (255u8, x, y))).collect();
-                println!("[服]   张合相减:空对照的幅度上限 {噪幅} 级、最大一块 {噪上限} 像素 ⇒ 剩下 {} 个像素,{} 块",
+                println!("[服]   张合相减:空对照的幅度上限 {噪幅} 级、深度门 {} · 最大一块 {噪上限} 像素 ⇒ 剩下 {} 个像素,{} 块",
+                    match 深噪 { Some(n) => format!("{n:.4} m"), None => "无".into() },
                     强.len(), 信块.iter().filter(|b| b.len() > 噪上限).count());
+                if let Ok(dir) = std::env::var("BL_DUMP") {
+                    // 渲图落盘:张 / 合 两帧 + 差分块(红)。"变化区大得不像接触面"到底是什么,看图定,不猜
+                    //(CJ 实测:575×61 px、23 块,而日志上分不出那是影子、桌沿还是手臂在漂)。
+                    let pgm = |g: &Vec<u8>| { let mut v = format!("P5\n{aw} {ah}\n255\n").into_bytes(); v.extend_from_slice(g); v };
+                    let _ = std::fs::write(format!("{dir}/张合_开.pgm"), pgm(&开帧));
+                    let _ = std::fs::write(format!("{dir}/张合_合.pgm"), pgm(&合帧));
+                    let mut 图: Vec<u8> = 合帧.iter().flat_map(|&g| [g, g, g]).collect();
+                    for &(_, x, y) in &强 { let i = (y * aw + x) * 3; if i + 2 < 图.len() { 图[i] = 255; 图[i + 1] = 32; 图[i + 2] = 32; } }
+                    let _ = std::fs::write(format!("{dir}/张合_差.bmp"), task::bmp24(&图, aw, ah));
+                }
                 if 强.len() < 32 {
                     println!("[服]   🔴 抓握通道动过之后,画面里**没有比噪声更大的一块**在动 ⇒ 认不出我的接触面。具名缺口,不编造");
                     return None;
