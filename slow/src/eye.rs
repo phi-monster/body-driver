@@ -419,6 +419,11 @@ pub struct 段 {
     pub 到什么为止: String,
     /// 它认为整件事已经做完了。
     pub 完了: bool,
+    /// **多快**:快 = 步长用满、步间不等停;握着东西 + 快 + 直到脱手 ⇒ 边动边松(抛/砸)。
+    /// 人抛球不知道球速,只知道"比上次狠一点";这里只有快/慢两档,倍数是量出来的探幅。
+    pub 快: bool,
+    /// **别碰**:编号表里不许碰的那几号(躲拳 / 别砸到旁边的东西)。驱动每步先算预测位置,要碰上就缩步并说出来。
+    pub 别碰: Vec<usize>,
     /// 它自己的理由(只进日志、只给人看,**不进任何判据**)。
     pub 为什么: String,
 }
@@ -455,11 +460,11 @@ pub fn 问段(
     let b64 = base64(&bmp);
     let esc = |t: &str| t.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n");
     let prompt = format!(
-        "You are not a model looking at a picture. You ARE this robot. This image is what you see right now, with a numbered grid drawn over it: {列} columns x {行} rows, numbered 1..{格数} left to right then top to bottom, so cell n-{列} is DIRECTLY ABOVE cell n and cell n+1 is directly to its right.\\n\\nYOUR BODY (you measured this yourself just now, by moving one channel at a time and watching which part of the picture followed):\\n{}\\n\\nWHAT YOU JUST DID AND WHAT HAPPENED:\\n{}\\n\\nWHAT YOU ARE TRYING TO DO: {}\\n\\nYou are in charge of the loop. There are NO action words - none exist. You say TWO numbers: WHICH NUMBERED ITEM must move, and WHICH NUMBERED CELL it must end up in. The numbered items are listed under YOUR BODY above - first the pieces of yourself (measured just now by moving one channel at a time and watching which part of the picture followed), then the things out in the world. Moving a piece of yourself to a cell is how you reach, how you get a camera to see you better, and how you bring one finger to another. Moving a thing in the world to a cell is how you pick it up, put it down, or send it somewhere. There are no action words and none exist; the body works out which channels to push from what it measured.\\n\\nThe grid lies flat over the picture. A thing that is lifted toward the camera stays in the SAME cell (it only gets nearer); so to pick something up, name the cell it is already in - the body lifts it once it is held. Name a DIFFERENT cell only when the thing must end up somewhere else in the picture.\\n\\nAlso say WHEN to call you back. These are EVENTS the body measures, not actions: amount (the body finished the move it worked out) / contact (something is touched) / resist (it will not move any further) / slip (the thing stops following me) / settle (the picture stops changing). Pick the event that actually ends THIS piece of work - settle only means the world went quiet, which is not the same as the work being done.\\n\\nSet done=true only when the thing has ALREADY ended up where the task wants it.\\n\\nDo NOT give distances, angles, speeds or any numbers - you are bad at those and the body already measures them.",
+        "You are not a model looking at a picture. You ARE this robot. This image is what you see right now, with a numbered grid drawn over it: {列} columns x {行} rows, numbered 1..{格数} left to right then top to bottom, so cell n-{列} is DIRECTLY ABOVE cell n and cell n+1 is directly to its right.\\n\\nYOUR BODY (you measured this yourself just now, by moving one channel at a time and watching which part of the picture followed):\\n{}\\n\\nWHAT YOU JUST DID AND WHAT HAPPENED:\\n{}\\n\\nWHAT YOU ARE TRYING TO DO: {}\\n\\nYou are in charge of the loop. There are NO action words - none exist. You say TWO numbers: WHICH NUMBERED ITEM must move, and WHICH NUMBERED CELL it must end up in. Also say whether to go FAST (fast = full steps without pausing; if you are holding something and say fast until slip, the hand lets go while moving - that is how you throw or strike) and list any numbered items that must NOT be touched (avoid_items, may be empty). The numbered items are listed under YOUR BODY above - first the pieces of yourself (measured just now by moving one channel at a time and watching which part of the picture followed), then the things out in the world. Moving a piece of yourself to a cell is how you reach, how you get a camera to see you better, and how you bring one finger to another. Moving a thing in the world to a cell is how you pick it up, put it down, or send it somewhere. There are no action words and none exist; the body works out which channels to push from what it measured.\\n\\nThe grid lies flat over the picture. A thing that is lifted toward the camera stays in the SAME cell (it only gets nearer); so to pick something up, name the cell it is already in - the body lifts it once it is held. Name a DIFFERENT cell only when the thing must end up somewhere else in the picture.\\n\\nAlso say WHEN to call you back. These are EVENTS the body measures, not actions: amount (the body finished the move it worked out) / contact (something is touched) / resist (it will not move any further) / slip (the thing stops following me) / settle (the picture stops changing). Pick the event that actually ends THIS piece of work - settle only means the world went quiet, which is not the same as the work being done.\\n\\nSet done=true only when the thing has ALREADY ended up where the task wants it.\\n\\nDo NOT give distances, angles, speeds or any numbers - you are bad at those and the body already measures them.",
         esc(身体), esc(刚才), esc(任务)
     );
     let body = format!(
-        r#"{{"model":"eye","max_tokens":300,"temperature":0,"chat_template_kwargs":{{"enable_thinking":false}},"response_format":{{"type":"json_schema","json_schema":{{"name":"where_it_must_end_up","strict":true,"schema":{{"type":"object","additionalProperties":false,"required":["why","move_item","goal_cell","until","done"],"properties":{{"why":{{"type":"string"}},"move_item":{{"type":"integer","minimum":0,"maximum":{条数}}},"goal_cell":{{"type":"integer","minimum":0,"maximum":{格数}}},"until":{{"type":"string","enum":["amount","contact","resist","slip","settle"]}},"done":{{"type":"boolean"}}}}}}}}}},"messages":[{{"role":"user","content":[{{"type":"image_url","image_url":{{"url":"data:image/bmp;base64,{b64}"}}}},{{"type":"text","text":"{prompt}"}}]}}]}}"#
+        r#"{{"model":"eye","max_tokens":300,"temperature":0,"chat_template_kwargs":{{"enable_thinking":false}},"response_format":{{"type":"json_schema","json_schema":{{"name":"where_it_must_end_up","strict":true,"schema":{{"type":"object","additionalProperties":false,"required":["why","move_item","goal_cell","until","fast","avoid_items","done"],"properties":{{"why":{{"type":"string"}},"move_item":{{"type":"integer","minimum":0,"maximum":{条数}}},"goal_cell":{{"type":"integer","minimum":0,"maximum":{格数}}},"until":{{"type":"string","enum":["amount","contact","resist","slip","settle"]}},"fast":{{"type":"boolean"}},"avoid_items":{{"type":"array","maxItems":4,"items":{{"type":"integer","minimum":1,"maximum":{条数}}}}},"done":{{"type":"boolean"}}}}}}}}}},"messages":[{{"role":"user","content":[{{"type":"image_url","image_url":{{"url":"data:image/bmp;base64,{b64}"}}}},{{"type":"text","text":"{prompt}"}}]}}]}}"#
     );
     let raw = post(host, port, "/v1/chat/completions", &body)?;
     let inner = extract_content(&raw)
@@ -478,7 +483,9 @@ pub fn 问段(
         return Err(format!("眼给的格号不合法:{g}(只有 {格数} 格)"));
     }
     let d = j.get("done").and_then(|x| x.boolean()).unwrap_or(false);
-    Ok(段 { 动第几号: mv.round() as usize, 到哪一格: g.round() as usize, 到什么为止: u, 完了: d, 为什么: t("why") })
+    let 快 = j.get("fast").and_then(|x| x.boolean()).unwrap_or(false);
+    let 别碰: Vec<usize> = j.get("avoid_items").map(|a| a.nums().into_iter().filter(|x| x.is_finite() && *x >= 1.0).map(|x| x.round() as usize).collect()).unwrap_or_default();
+    Ok(段 { 动第几号: mv.round() as usize, 到哪一格: g.round() as usize, 快, 别碰, 到什么为止: u, 完了: d, 为什么: t("why") })
 }
 
 
@@ -544,6 +551,8 @@ pub fn 问方向(
 pub struct 两格 {
     pub 指尖格: usize,
     pub 目标格: usize,
+    /// 多快(同 `段::快`)。
+    pub 快: bool,
     /// 只有指尖格 == 目标格 且身体顶住时才有意义。
     pub 合: bool,
     pub 看到: String,
@@ -568,11 +577,11 @@ pub fn 问格(
     let b64 = base64(&bmp);
     let esc = |t: &str| t.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n");
     let prompt = format!(
-        "You ARE this robot arm; this picture is what you see right now from a camera fixed above the table. A numbered grid is drawn over it: {列} columns x {行} rows, cells 1..{格数}, left to right then top to bottom. Task: {}\\n\\nWhat happened just before: {}\\n\\nLook at THIS frame only. Your FINGERTIPS are the two small dark wedges at the very end of the arm (not the big pale wrist casing). Answer: which cell the fingertips are in, and which cell the thing you must act on is in. Set close=true ONLY if the fingertips are in the same cell as the thing AND the body reported it is touching something. No distances, no numbers other than cell numbers.",
+        "You ARE this robot arm; this picture is what you see right now from a camera fixed above the table. A numbered grid is drawn over it: {列} columns x {行} rows, cells 1..{格数}, left to right then top to bottom. Task: {}\\n\\nWhat happened just before: {}\\n\\nLook at THIS frame only. Your FINGERTIPS are the two small dark wedges at the very end of the arm (not the big pale wrist casing). Answer: which cell the fingertips are in, and which cell the thing you must act on is in. Set close=true ONLY if the fingertips are in the same cell as the thing AND the body reported it is touching something. Set fast=true when the hand is far from the thing and should take full steps; false when close. No distances, no numbers other than cell numbers.",
         esc(任务), esc(刚才)
     );
     let body = format!(
-        r#"{{"model":"eye","max_tokens":120,"temperature":0,"chat_template_kwargs":{{"enable_thinking":false}},"response_format":{{"type":"json_schema","json_schema":{{"name":"cells","strict":true,"schema":{{"type":"object","additionalProperties":false,"required":["look","fingers_cell","thing_cell","close"],"properties":{{"look":{{"type":"string","maxLength":80}},"fingers_cell":{{"type":"integer","minimum":1,"maximum":{格数}}},"thing_cell":{{"type":"integer","minimum":1,"maximum":{格数}}},"close":{{"type":"boolean"}}}}}}}}}},"messages":[{{"role":"user","content":[{{"type":"image_url","image_url":{{"url":"data:image/bmp;base64,{b64}"}}}},{{"type":"text","text":"{prompt}"}}]}}]}}"#
+        r#"{{"model":"eye","max_tokens":120,"temperature":0,"chat_template_kwargs":{{"enable_thinking":false}},"response_format":{{"type":"json_schema","json_schema":{{"name":"cells","strict":true,"schema":{{"type":"object","additionalProperties":false,"required":["look","fingers_cell","thing_cell","close","fast"],"properties":{{"look":{{"type":"string","maxLength":80}},"fingers_cell":{{"type":"integer","minimum":1,"maximum":{格数}}},"thing_cell":{{"type":"integer","minimum":1,"maximum":{格数}}},"close":{{"type":"boolean"}},"fast":{{"type":"boolean"}}}}}}}}}},"messages":[{{"role":"user","content":[{{"type":"image_url","image_url":{{"url":"data:image/bmp;base64,{b64}"}}}},{{"type":"text","text":"{prompt}"}}]}}]}}"#
     );
     let raw = post(host, port, "/v1/chat/completions", &body)?;
     let inner = extract_content(&raw)
@@ -582,6 +591,6 @@ pub fn 问格(
     let n = |k: &str| j.get(k).and_then(|x| x.num()).map(|v| v.round() as usize);
     let (Some(f), Some(t)) = (n("fingers_cell"), n("thing_cell")) else { return Err("眼没给格号".into()) };
     if f == 0 || f > 格数 || t == 0 || t > 格数 { return Err(format!("格号不合法:{f}/{t}")) }
-    Ok(两格 { 指尖格: f, 目标格: t, 合: j.get("close").and_then(|x| x.boolean()).unwrap_or(false),
+    Ok(两格 { 指尖格: f, 目标格: t, 快: j.get("fast").and_then(|x| x.boolean()).unwrap_or(false), 合: j.get("close").and_then(|x| x.boolean()).unwrap_or(false),
              看到: j.get("look").and_then(|x| x.text()).unwrap_or("").to_string() })
 }
