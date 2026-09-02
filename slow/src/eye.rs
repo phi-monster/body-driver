@@ -480,3 +480,56 @@ pub fn 问段(
     let d = j.get("done").and_then(|x| x.boolean()).unwrap_or(false);
     Ok(段 { 动第几号: mv.round() as usize, 到哪一格: g.round() as usize, 到什么为止: u, 完了: d, 为什么: t("why") })
 }
+
+
+/// 🔴🔴🔴 **飞行员模式:每帧一张白纸,问一个方向。**(owner 2026-09-03 定)
+///
+/// 离线验证(CG 的 10 帧,方向画到帧上逐帧看过):
+/// - 带上下文、每帧只吐 1 个字 ⇒ N/IN 交替,**跟画面无关**
+/// - 带上下文、每帧一句短理由 ⇒ **编故事**:手臂缩回去了它还说"我已经在球正下方"
+/// - **每帧独立问、不带历史、意图用文字带进去 ⇒ 10/10 方向粗略正确**,0.77 s/帧
+/// ⇒ **这个模型一带上历史就相信自己讲过的话、不看画面;连续反馈必须每帧一张白纸。**
+///
+/// 输出是 12 个画面语言的码:8 个罗盘方向(N = 画面上方)· IN(朝桌面下)· OUT(离桌面)·
+/// STOP · CLOSE。**里面没有身体参数**;把它变成推哪几个通道,是驱动拿量出来的通道表解的。
+pub struct 方向 {
+    /// 12 码之一。
+    pub 码: String,
+    /// 它认为自己的爪子在画面哪儿(只进日志)。
+    pub 爪在: String,
+    /// 它认为目标在画面哪儿(只进日志)。
+    pub 目标在: String,
+}
+
+pub fn 问方向(
+    host: &str,
+    port: u16,
+    任务: &str,
+    刚才: &str,
+    rgb: &[u8],
+    w: usize,
+    h: usize,
+) -> Result<方向, String> {
+    if rgb.len() < w * h * 3 {
+        return Err(format!("画面短了:要 {} 字节,只有 {}", w * h * 3, rgb.len()));
+    }
+    let bmp = bmp24(rgb, w, h);
+    let b64 = base64(&bmp);
+    let esc = |t: &str| t.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n");
+    let prompt = format!(
+        "You ARE this robot arm; this picture is what you see right now from a camera fixed above the table. Task: {}\\n\\nWhat happened just before: {}\\n\\nLook at THIS frame only. In a few words say where your gripper (the two-finger hand) is in the picture and where the thing you must act on is. Then ONE code for the direction the gripper must move next: N NE E SE S SW W NW are directions in the picture (N = toward the top of the picture); IN = down toward the table; OUT = up away from the table; STOP = hold still; CLOSE = close the fingers now (only when the thing is between them). No distances, no numbers.",
+        esc(任务), esc(刚才)
+    );
+    let body = format!(
+        r#"{{"model":"eye","max_tokens":90,"temperature":0,"chat_template_kwargs":{{"enable_thinking":false}},"response_format":{{"type":"json_schema","json_schema":{{"name":"dir","strict":true,"schema":{{"type":"object","additionalProperties":false,"required":["gripper","thing","d"],"properties":{{"gripper":{{"type":"string","maxLength":60}},"thing":{{"type":"string","maxLength":60}},"d":{{"type":"string","enum":["N","NE","E","SE","S","SW","W","NW","IN","OUT","STOP","CLOSE"]}}}}}}}}}},"messages":[{{"role":"user","content":[{{"type":"image_url","image_url":{{"url":"data:image/bmp;base64,{b64}"}}}},{{"type":"text","text":"{prompt}"}}]}}]}}"#
+    );
+    let raw = post(host, port, "/v1/chat/completions", &body)?;
+    let inner = extract_content(&raw)
+        .ok_or_else(|| format!("回包里没有 content(前 200 字:{})", &raw[..raw.len().min(200)]))?;
+    let j = crate::json::parse(&inner)
+        .map_err(|e| format!("眼给的不是 JSON: {e} ‖ 前 200 字:{}", &inner[..inner.len().min(200)]))?;
+    let t = |k: &str| j.get(k).and_then(|x| x.text()).unwrap_or("").to_string();
+    let d = t("d");
+    if d.is_empty() { return Err("眼没给 d".into()) }
+    Ok(方向 { 码: d, 爪在: t("gripper"), 目标在: t("thing") })
+}

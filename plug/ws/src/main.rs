@@ -4735,6 +4735,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
     // 而不是我再手写一条兜底规则(那是永远写不完的那条路)。
     // 换成无人机、格斗同样成立:跟丢了就抬头看一眼。
     let 跟丢了 = std::cell::Cell::new(false);
+    // 上一次"挪块到格"的结果,原样进给模型的汇报(它说"直到碰上",身体碰上了就得告诉它)。
+    let 挪块结果 = std::cell::RefCell::new(String::new());
 
     // 🔴🔴🔴 **腕相机收尾:提成具名闭包,因为它现在有【两个】入口。**(2026-08-29)
     // 原来它内联在"追完之后",而追要先过 `看爪` 那道闸 —— 头相机上那道闸赢不了
@@ -5459,6 +5461,16 @@ fn 服务<S: std::io::Read + std::io::Write>(
             }
             println!("[服]   挪第 {通道} 号通道管的那一块 → 第 ({:.2},{:.2}) 格:最好的是第 {k} 号通道往**{}**,沿着它走了 {走了} 步,离目标 {d:.3} → {上距:.3},停因:{为何停}",
                 目标.0, 目标.1, if sgn > 0.0 { "正" } else { "反" });
+            *挪块结果.borrow_mut() = format!(
+                "I pushed channel {k} {} for {走了} step(s); that piece went from {d:.3} to {} of a frame away from the cell; it stopped because: {}.",
+                if sgn > 0.0 { "forward" } else { "backward" },
+                if 上距.is_finite() { format!("{上距:.3}") } else { "(unknown)".into() },
+                match 为何停 {
+                    "身体顶住了(实到不到命令的十分之一)= 碰上了" => "the body could not move any further - I am TOUCHING something (contact)",
+                    "走到那一块不再靠近" => "that piece stopped getting closer",
+                    "那一片不再动(画面没变)" => "the picture stopped changing",
+                    _ => "I walked the measured limit",
+                });
         } else {
             println!("[服]   挪第 {通道} 号通道管的那一块 → 第 ({:.2},{:.2}) 格:试了 {} 个通道,画面里一片都没动", 目标.0, 目标.1, 候选.len());
         }
@@ -5701,6 +5713,10 @@ fn 服务<S: std::io::Read + std::io::Write>(
     // 由**这个量出来的事实**决定,不由任何一个词决定。判据是合到停住的读数离
     // "空手合到底"有多远(零尺度,换什么爪子都成立)。
     let 手里有 = std::cell::Cell::new(false);
+    // 🔴🔴🔴 **飞行员模式**(`BL_PILOT=1`,owner 2026-09-03 定):每帧一张白纸问一个方向,身体走一步,回来再问。
+    // 没有收尾伺服、没有交接、没有我的任何流程 —— 每一步都是模型自己的一个字。
+    let 飞行员 = std::env::var("BL_PILOT").map(|v| v == "1").unwrap_or(false);
+    if 飞行员 { println!("[服] ✈️ 飞行员模式:每帧问一个方向(N/NE/E/SE/S/SW/W/NW/IN/OUT/STOP/CLOSE),走一步,再问"); }
     // 🔴 **腕相机里"我的接触面在哪" —— 从部件图里取那个常数。**
     // 取的是**指通道**(只开合爪子那几个)在**长在手上那台**里动的那一片的中心。
     // 那台相机长在手上 ⇒ 这个位置不随姿势变 ⇒ 量一次就够(见 `收尾腕` 里的头注)。
@@ -6119,7 +6135,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
         let (mut 格心, mut 这一段) = (Vec::new(), None);
         // 这一拍交给模型的编号表:(是不是我身上的, 通道号/区号, 画面位置)
         let mut 条目: Vec<(bool, usize, (f64, f64))> = Vec::new();
-        if 部件图.is_some() {
+        if 部件图.is_some() && !飞行员 {
             if let Some((cw4, ch4, crgb4)) = 彩(&帧, 相机号) {
                 let mut 网图 = crgb4.clone();
                 格心 = 画网格(&mut 网图, cw4, ch4, 网列, 网行);
@@ -6204,7 +6220,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     let j现 = 帧.jaw.get(手号.get()).or_else(|| 帧.jaw.first()).copied().unwrap_or(1.0);
                     let 动了 = 挪块到格(plug, 号, (gu, gv), j现, *通道是关节);
                     上一段汇报 = match 动了 {
-                        Some(true) => format!("you asked me to move item {} (a piece of me) into cell {}. I pushed that channel both ways and kept the side that got it closer.", d.动第几号, d.到哪一格),
+                        Some(true) => format!("you asked me to move item {} (a piece of me) into cell {} until {}. {}", d.动第几号, d.到哪一格, d.到什么为止, 挪块结果.borrow()),
                         _ => format!("you asked me to move item {} (a piece of me) into cell {}, but pushing that channel changed nothing in the picture at all - that piece is not visible to this camera, or that channel does not move it.", d.动第几号, d.到哪一格),
                     };
                     continue;
@@ -6245,6 +6261,57 @@ fn 服务<S: std::io::Read + std::io::Write>(
             look.box01[0], look.box01[2], look.box01[1], look.box01[3]);
         println!("[服] 🎯 指令「{}」⇒ 眼指 ({:.3},{:.3}) · 占画幅 {:.3} · 那一点深 {:.3} m",
             指令.chars().take(80).collect::<String>(), look.u, look.v, look.span_frac, d星);
+        if 飞行员 {
+            // ── 每帧一张白纸 ──
+            let Some((pw, ph, prgb)) = 彩(&帧, 相机号) else { plug.act(&Cmd::Hold); continue };
+            let 刚才 = 上一段汇报.clone();
+            let 答 = match body_layer::eye::问方向(眼主机, 眼端口, &指令, &刚才, &prgb, pw, ph) {
+                Ok(a) => a,
+                Err(e) => { println!("[✈️] 问不通({e})⇒ 这一拍不动"); plug.act(&Cmd::Hold); continue }
+            };
+            println!("[✈️] 🧠 {} —— 爪:{} · 目标:{}", 答.码, 答.爪在, 答.目标在);
+            let j现 = 帧.jaw.get(手号.get()).or_else(|| 帧.jaw.first()).copied().unwrap_or(1.0);
+            match 答.码.as_str() {
+                "STOP" => { plug.act(&Cmd::Hold); 上一段汇报 = "you said STOP; I held still.".into(); continue }
+                "CLOSE" => {
+                    let 停在 = 合到停住(plug, *通道是关节).unwrap_or(f64::NAN);
+                    let 有 = match *空合载 { Some(z) => (停在 - z).abs() > 1e-9, None => 停在 > 1e-9 };
+                    手里有.set(有);
+                    println!("[✈️]    合到停住 {停在:.4} ⇒ **{}**", if 有 { "指间有东西" } else { "指间没东西" });
+                    上一段汇报 = if 有 { format!("you said CLOSE; the fingers stopped at {停在:.4} - there IS something between them.") }
+                                else { 抓握(plug, 1.0, *通道是关节); format!("you said CLOSE; the fingers closed all the way to {停在:.4} - NOTHING was between them, so I opened again.") };
+                    continue
+                }
+                码 => {
+                    let Some(表) = 通道表.as_ref() else { println!("[✈️]    还没有通道表 ⇒ 不动"); plug.act(&Cmd::Hold); continue };
+                    // 罗盘 = 画面里的单位方向(N = 画面上方 = v 减小);IN/OUT = 深度(头相机俯视:朝桌面 = 更远 = 深度加)
+                    let (du, dv, dd) = match 码 {
+                        "N" => (0.0, -1.0, 0.0), "S" => (0.0, 1.0, 0.0), "E" => (1.0, 0.0, 0.0), "W" => (-1.0, 0.0, 0.0),
+                        "NE" => (0.7071, -0.7071, 0.0), "NW" => (-0.7071, -0.7071, 0.0), "SE" => (0.7071, 0.7071, 0.0), "SW" => (-0.7071, 0.7071, 0.0),
+                        "IN" => (0.0, 0.0, 1.0), "OUT" => (0.0, 0.0, -1.0), _ => (0.0, 0.0, 0.0),
+                    };
+                    // 一步多大,全是量出来的:画面里走目标自己的一半(和"到位"判据同一个量);深度走一个探步。
+                    let 步画 = (look.span_frac * 0.5).max(1.0 / pw as f64);
+                    let 误3 = vec![du * 步画, dv * 步画, dd * 探步];
+                    let 行: Vec<Vec<f64>> = (0..3).map(|r| 表.iter().map(|c| c[r]).collect()).collect();
+                    let Some(动0) = 最小二乘(&行, &误3) else { println!("[✈️]    解不出该推哪几个通道 ⇒ 不动"); plug.act(&Cmd::Hold); continue };
+                    // 单个通道不许超过量出来的探幅(方向盘近奇异时解会爆)
+                    let 最大 = 动0.iter().map(|x| x.abs()).fold(0.0, f64::max);
+                    let 比 = if 最大 > 探幅 { 探幅 / 最大 } else { 1.0 };
+                    match 迈通道(plug, &动0, 比, j现, *通道是关节) {
+                        Some((走, _, 挡)) => {
+                            let 命 = 最大 * 比;
+                            let 顶住 = 走.abs() < 命 * 0.1;
+                            println!("[✈️]    走 {码}:命令幅 {命:.4} · 实到 {走:.4}{}", if 顶住 { " ⇒ **顶住了(碰上)**" } else if 挡 { " ⇒ 被挡" } else { "" });
+                            上一段汇报 = format!("you said {码}; I moved one step that way. The body delivered {:.0}% of the commanded step{}.",
+                                if 命 > 1e-9 { 走.abs() / 命 * 100.0 } else { 0.0 }, if 顶住 { " - it could not move further, I am touching something" } else { "" });
+                        }
+                        None => { println!("[✈️]    这一步没发出去"); 上一段汇报 = format!("you said {码}; the step could not be sent."); }
+                    }
+                    continue
+                }
+            }
+        }
 
         // ③ 我的三数。看不清就换个位形,不编数。
         // 🔴🔴🔴 **认手之前,手臂必须【真的停住】。**(WP 看数看出来的,2026-08-28)
