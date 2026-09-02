@@ -5715,7 +5715,10 @@ fn 服务<S: std::io::Read + std::io::Write>(
     let 手里有 = std::cell::Cell::new(false);
     // 🔴🔴🔴 **飞行员模式**(`BL_PILOT=1`,owner 2026-09-03 定):每帧一张白纸问一个方向,身体走一步,回来再问。
     // 没有收尾伺服、没有交接、没有我的任何流程 —— 每一步都是模型自己的一个字。
-    let 飞行员 = std::env::var("BL_PILOT").map(|v| v == "1" || v == "2").unwrap_or(false);
+    let 飞行员 = std::env::var("BL_PILOT").map(|v| v == "1" || v == "2" || v == "3").unwrap_or(false);
+    // `BL_PILOT=3`:**完整的机器**(两根手指各去自己那一点、六行一起解、朝向解出来)+ **每一步先问模型**
+    //(owner 2026-09-03:"图省事让任务没完成" —— v1/v2 只瞄一个点、只用三行,把朝向整个删了,横着的爪子永远抓不起球)
+    let 机器 = std::env::var("BL_PILOT").map(|v| v == "3").unwrap_or(false);
     // `BL_PILOT=2`:问两个格号,方向/步数驱动算(第二版);`=1`:问一个方向码(第一版,CH)
     let 数格 = std::env::var("BL_PILOT").map(|v| v == "2").unwrap_or(false);
     // 🔴 指尖在画面哪儿,**驱动自己量**,不问模型。(CI 实测:它一路说指尖在第 47/48 格 = 底座那一角,
@@ -6382,7 +6385,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
             }
             continue
         }
-        if 飞行员 {
+        if 飞行员 && !数格 && !机器 {
             // ── 每帧一张白纸 ──
             let Some((pw, ph, prgb)) = 彩(&帧, 相机号) else { plug.act(&Cmd::Hold); continue };
             let 刚才 = 上一段汇报.clone();
@@ -8594,6 +8597,36 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 println!("[服]   追:两个接触面锁到同一块图案上了 ⇒ 停在这儿"); 全看见 = false;
             }
             if !全看见 { println!("[服]   追:跟丢了接触面 ⇒ 停在这儿"); break }
+            // ✈️ 飞行员(完整机器版):**每一步先问模型** —— 这一帧一张白纸,画上网格,问它目标在第几格、要不要合。
+            // 它说合 ⇒ 交给下面同一段合爪(它是飞行员,合不合它定;结果照实报);它说目标不在驱动量到的那一格 ⇒ 说出来但仍以量到的为准。
+            if 机器 {
+                if let Some((pw, ph, prgb0)) = 彩(&帧, 相机号) {
+                    let (网列, 网行) = (8usize, 6usize);
+                    let mut 网图 = prgb0.clone();
+                    let _ = 画网格(&mut 网图, pw, ph, 网列, 网行);
+                    let 格于 = |u: f64, v: f64| -> usize {
+                        let c = (u * 网列 as f64).floor().clamp(0.0, 网列 as f64 - 1.0) as usize;
+                        let r = (v * 网行 as f64).floor().clamp(0.0, 网行 as f64 - 1.0) as usize;
+                        r * 网列 + c + 1
+                    };
+                    let 刚才 = format!("{} My two fingertips are now in cells {} and {} (measured); the thing is in cell {} (measured).",
+                        上一段汇报, 格于(现[0].0, 现[0].1), 格于(现[1].0, 现[1].1), 格于(look.u, look.v));
+                    match body_layer::eye::问格(眼主机, 眼端口, &指令, &刚才, 网列, 网行, &网图, pw, ph) {
+                        Ok(a) => {
+                            println!("[✈️] 🧠 第 {追} 步:它说指尖在第 {} 格(量到 {}/{})· 目标第 {} 格(量到 {})· close={} —— {}",
+                                a.指尖格, 格于(现[0].0, 现[0].1), 格于(现[1].0, 现[1].1), a.目标格, 格于(look.u, look.v), a.合, a.看到);
+                            if a.合 {
+                                println!("[✈️]    它说合 ⇒ 交给合爪那一段(它是飞行员)");
+                                到位了.set(true);
+                                上一段汇报 = "you said close.".into();
+                                break;
+                            }
+                            上一段汇报 = format!("step {追}: you said not yet; I took one more measured step toward the thing.", );
+                        }
+                        Err(e) => { println!("[✈️] 问不通({e})⇒ 这一步照走"); }
+                    }
+                }
+            }
             // 🔴🔴🔴 **表边干边长 —— 没有"量身体阶段"这回事。**
             // 上一拍我下了什么命令、接触面跟着跑了多少,现在都知道了,当场记回表里:
             //   表 ← 表 + (**实际跑的** − **表预测会跑的**) ⊗ 上一拍**实际动了多少** ÷ |实际动了多少|²
