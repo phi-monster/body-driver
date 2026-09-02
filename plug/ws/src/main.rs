@@ -5718,6 +5718,10 @@ fn 服务<S: std::io::Read + std::io::Write>(
     let 飞行员 = std::env::var("BL_PILOT").map(|v| v == "1" || v == "2").unwrap_or(false);
     // `BL_PILOT=2`:问两个格号,方向/步数驱动算(第二版);`=1`:问一个方向码(第一版,CH)
     let 数格 = std::env::var("BL_PILOT").map(|v| v == "2").unwrap_or(false);
+    // 🔴 指尖在画面哪儿,**驱动自己量**,不问模型。(CI 实测:它一路说指尖在第 47/48 格 = 底座那一角,
+    //  手臂伸到桌子中间了还说 48;它认的是粗腕管/底座,不是末端两片小黑楔。)
+    // 量法就是部件图那条判据逐步用:我一动,画面里跟着动的那一片的重心 = 我的手现在在哪。
+    let 手在画面 = std::cell::Cell::new(None::<(f64, f64)>);
     if 飞行员 { println!("[服] ✈️ 飞行员模式:每帧问一个方向(N/NE/E/SE/S/SW/W/NW/IN/OUT/STOP/CLOSE),走一步,再问"); }
     // 🔴 **腕相机里"我的接触面在哪" —— 从部件图里取那个常数。**
     // 取的是**指通道**(只开合爪子那几个)在**长在手上那台**里动的那一片的中心。
@@ -6285,12 +6289,21 @@ fn 服务<S: std::io::Read + std::io::Write>(
             println!("[✈️] 🧠 指尖在第 {} 格 · 它说目标在第 {} 格(驱动量到目标在第 {量格} 格{}) · close={} —— {}",
                 答.指尖格, 答.目标格, if 答.目标格 == 量格 { ",一致" } else { ",**不一致,以量到的为准**" }, 答.合, 答.看到);
             let j现 = 帧.jaw.get(手号.get()).or_else(|| 帧.jaw.first()).copied().unwrap_or(1.0);
-            let Some(&(fu, fv)) = 格心.get(答.指尖格 - 1) else { plug.act(&Cmd::Hold); continue };
-            // 目标点用**量到的**球中心(比格心准);指尖点用它说的那一格的中心
+            // 指尖在哪:优先用**上一步量到的**(动过的那一片的重心);还没动过 ⇒ 用部件图里指通道那一片的中心;
+            // 都没有才退回它说的那一格。它说的那一格永远只做对照打印。
+            let 量指 = 手在画面.get().or_else(|| {
+                let 图 = 部件图.as_ref()?;
+                let 通道数 = if *通道是关节 { plug.sense().map(|f| 真臂(&f).iter().map(|&i| f.joints[i].len()).sum::<usize>()).unwrap_or(0) } else { 6 };
+                图.iter().enumerate().filter(|(k, _)| *k >= 通道数)
+                    .filter_map(|(_, 件们)| 件们.get(相机号).and_then(|x| x.as_ref()))
+                    .map(|x| ((x.框[0] + x.框[2]) * 0.5, (x.框[1] + x.框[3]) * 0.5)).next()
+            });
+            let (fu, fv) = match 量指 { Some(p) => p, None => match 格心.get(答.指尖格 - 1) { Some(&p) => p, None => { plug.act(&Cmd::Hold); continue } } };
+            println!("[✈️]    指尖(量到的)在 ({fu:.3},{fv:.3}) = 第 {} 格;它说的是第 {} 格{}", 格于(fu, fv), 答.指尖格, if 格于(fu, fv) == 答.指尖格 { "(一致)" } else { "(**不一致,以量到的为准**)" });
             let (tu, tv) = (look.u, look.v);
             let (du, dv) = (tu - fu, tv - fv);
             let 距 = du.hypot(dv);
-            let 同格 = 答.指尖格 == 量格;
+            let 同格 = 格于(fu, fv) == 量格;
             if 同格 {
                 if 答.合 {
                     let 停在 = 合到停住(plug, *通道是关节).unwrap_or(f64::NAN);
@@ -6327,10 +6340,19 @@ fn 服务<S: std::io::Read + std::io::Write>(
             let Some(动0) = 最小二乘(&行3, &vec![eu, ev, 0.0]) else { plug.act(&Cmd::Hold); continue };
             let 最大 = 动0.iter().map(|x| x.abs()).fold(0.0, f64::max);
             let 比 = if 最大 > 探幅 { 探幅 / 最大 } else { 1.0 };
+            let 前灰 = plug.sense().and_then(|f| 灰(&f, 相机号));
             match 迈通道(plug, &动0, 比, j现, *通道是关节) {
                 Some((走, _, _)) => {
-                    println!("[✈️]    第 {} 格 → 第 {量格} 格:还差 {距:.3} 画幅,这一步走 {步:.3} 画幅(方向 ({eu:+.3},{ev:+.3}))· 命令幅 {:.4} · 实到 {走:.4}", 答.指尖格, 最大 * 比);
-                    上一段汇报 = format!("fingertips were in cell {}, the thing in cell {量格}; I moved one step toward it ({:.0}% delivered).", 答.指尖格, if 最大 * 比 > 1e-9 { 走.abs() / (最大 * 比) * 100.0 } else { 0.0 });
+                    等停(plug, 等拍 * 2);
+                    // 我一动,跟着动的那一片的重心 = 我的手现在在哪(量出来的,不问模型)
+                    if let (Some((w0, h0, a)), Some((_, _, b))) = (前灰.as_ref(), plug.sense().and_then(|f| 灰(&f, 相机号))) {
+                        let (mut sx, mut sy, mut n) = (0.0f64, 0.0f64, 0usize);
+                        for i in 0..a.len().min(b.len()) { if a[i].abs_diff(b[i]) > 8 { sx += (i % w0) as f64; sy += (i / w0) as f64; n += 1 } }
+                        if n > 0 { 手在画面.set(Some((sx / n as f64 / *w0 as f64, sy / n as f64 / *h0 as f64))); }
+                    }
+                    let 顶住 = 走.abs() < 最大 * 比 * 0.1;
+                    println!("[✈️]    ({fu:.3},{fv:.3}) → 第 {量格} 格:还差 {距:.3} 画幅,这一步走 {步:.3} 画幅(方向 ({eu:+.3},{ev:+.3}))· 命令幅 {:.4} · 实到 {走:.4}{}", 最大 * 比, if 顶住 { " ⇒ **走不动**" } else { "" });
+                    上一段汇报 = format!("I moved one step toward the thing ({:.0}% delivered{}).", if 最大 * 比 > 1e-9 { 走.abs() / (最大 * 比) * 100.0 } else { 0.0 }, if 顶住 { "; the body could not move that way - blocked" } else { "" });
                 }
                 None => { 上一段汇报 = "the step could not be sent.".into(); }
             }
