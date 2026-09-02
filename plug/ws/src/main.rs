@@ -5506,13 +5506,21 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     let 要抖: Vec<usize> = 需抖.borrow().iter().copied().collect();
                     for a in 要抖 {
                         let Some(e) = 臂末.get(a).copied().flatten() else { continue };
-                        let 相机表: Vec<(usize, point_gen::Eye, f64)> = if 相机们.is_empty() {
-                            (0..plug.lay.cams.len()).map(|ci| (ci, point_gen::Eye { fx: 1.0, fy: 1.0, cx: 0.0, cy: 0.0, at: [0.0; 3], q: [1.0, 0.0, 0.0, 0.0] }, 1.0)).collect()
-                        } else { 相机们.iter().map(|(i, e, s)| (*i, point_gen::Eye { fx: e.fx, fy: e.fy, cx: e.cx, cy: e.cy, at: e.at, q: e.q }, *s)).collect() };
-                        let 新 = 抖指通道(&mut *plug, &相机表, e);
-                        match 新.证据.iter().find(|d| d.相机 == 相机号 && d.动了多少像素 > 0) {
-                            Some(d) => { println!("[身]    第 {} 只手上次跟丢了 ⇒ 抖一下它的抓握重认手指:框 ({:.3},{:.3})-({:.3},{:.3}),{} px", a + 1, d.盒[0], d.盒[1], d.盒[2], d.盒[3], d.动了多少像素); 身位.borrow_mut().insert(a, d.盒); }
-                            None => { println!("[身]    第 {} 只手抖了抓握,这台相机里没有一片跟着动 ⇒ 它的手指现在不在画面里", a + 1); 身位.borrow_mut().remove(&a); }
+                        // 认块器(连通 + 刚性 + 配对),不是散点外接框(CQ 实测:71 个散点把框撑成整幅画面)。
+                        let (原手, 原臂) = (手号.get(), 臂号.get());
+                        手号.set(e); if let Some(&j) = 臂关.get(a) { 臂号.set(j); }
+                        let 得 = plug.sense().and_then(|f| {
+                            let ee = f.ee.get(e).copied()?; let j0 = f.jaw.get(e).copied().unwrap_or(1.0);
+                            看爪像素(plug, [ee[0], ee[1], ee[2]], [ee[3], ee[4], ee[5], ee[6]], j0).get(相机号).cloned().flatten()
+                        });
+                        手号.set(原手); 臂号.set(原臂);
+                        // 框的大小沿用开机部件图里这只手抓握侧那块的大小;只有中心是新认的。
+                        let 尺 = 部件图.as_ref().and_then(|图| (臂通道数..图.len()).find(|&kk| 哪手0(kk) == a).and_then(|kk| 图[kk].get(相机号).and_then(|o| o.as_ref())))
+                            .map(|x| ((x.框[2] - x.框[0]) * 0.5, (x.框[3] - x.框[1]) * 0.5)).unwrap_or((1.0 / 40.0, 1.0 / 30.0));
+                        match 得 {
+                            Some(c) if c.pixels > 0 => { println!("[身]    第 {} 只手上次跟丢了 ⇒ 抖一下它的抓握重认手指:中心 ({:.3},{:.3}),{} px,刚性 {:.2}", a + 1, c.u, c.v, c.pixels, c.rigidity);
+                                身位.borrow_mut().insert(a, [c.u - 尺.0, c.v - 尺.1, c.u + 尺.0, c.v + 尺.1]); }
+                            _ => { println!("[身]    第 {} 只手抖了抓握,这台相机里认不出一块跟着动 ⇒ 它的手指现在不在画面里", a + 1); 身位.borrow_mut().remove(&a); }
                         }
                     }
                     需抖.borrow_mut().clear();
@@ -5878,7 +5886,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     动[c] = 幅;
                     let Some((r1, _)) = 发(plug, &动, 1.0, 等拍 * 2) else { break };
                     if r1.get(c).map(|x| x.abs() <= 实到噪).unwrap_or(true) {
-                        if 试 < 3 { 缩p *= 0.5; 试 += 1; continue } else { 备注.push(format!("channel {c} refused every probe")); break }
+                        if 试 < 8 && 幅 * 0.5 > 实到噪 { 缩p *= 0.5; 试 += 1; continue } else { 备注.push(format!("channel {c} refused every probe down to {幅:.4}")); println!("[身]     探通道 {c}:幅 {幅:.4} 一步没走(被拒),不再缩"); break }
                     }
                     let _ = 读所有(plug, &mut 项们);
                     let 中: Vec<(f64, f64, f64)> = 项们.iter().map(|p| p.现).collect();
@@ -5895,6 +5903,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
                             表[c][3 * pi] = (后[pi].0 - 中[pi].0) / 净; 表[c][3 * pi + 1] = (后[pi].1 - 中[pi].1) / 净; 表[c][3 * pi + 2] = (后[pi].2 - 中[pi].2) / 净;
                         }
                     }
+                    println!("[身]     探通道 {c}:幅 {幅:.4} · 实到 {:+.4} / {:+.4} · 各块跑了 {}", r1.get(c).copied().unwrap_or(0.0), 净,
+                        (0..点数).map(|pi| format!("({:+.3},{:+.3},{:+.3})", 后[pi].0 - 中[pi].0, 后[pi].1 - 中[pi].1, 后[pi].2 - 中[pi].2)).collect::<Vec<_>>().join(" "));
                     break;
                 }
             }
@@ -5979,14 +5989,16 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         let 容 = 尺m.max(dz.abs()) + 深噪;
                         let 模 = 项们[pi].模.clone();
                         let mut 得 = None;
+                        let mut 看过: Vec<String> = Vec::new();
                         if let Some((u, v)) = 找块窗(fw, fh, &g, &模, 半, 现.0 + du, 现.1 + dv, 窗r) {
-                            if let Some(z) = 近侧深(plug, u, v, 窗) { if (z - (现.2 + dz)).abs() <= 容 { 得 = Some((u, v, z)); } }
+                            match 近侧深(plug, u, v, 窗) { Some(z) => { if (z - (现.2 + dz)).abs() <= 容 { 得 = Some((u, v, z)); } else { 看过.push(format!("窗内 ({u:.3},{v:.3}) 深 {z:.3}")); } } None => 看过.push(format!("窗内 ({u:.3},{v:.3}) 无深")) }
                         }
                         if 得.is_none() {
                             if let Some((u, v)) = 找块(fw, fh, &g, &模, 半) {
-                                if let Some(z) = 近侧深(plug, u, v, 窗) { if (z - (现.2 + dz)).abs() <= 容 { 得 = Some((u, v, z)); } }
+                                match 近侧深(plug, u, v, 窗) { Some(z) => { if (z - (现.2 + dz)).abs() <= 容 { 得 = Some((u, v, z)); } else { 看过.push(format!("全画面 ({u:.3},{v:.3}) 深 {z:.3}")); } } None => 看过.push(format!("全画面 ({u:.3},{v:.3}) 无深")) }
                             }
                         }
+                        if 得.is_none() { println!("[身]     跟丢第 {} 号:预测在 ({:.3},{:.3}) 深 {:.3}(容差 {容:.3});候选 {}", 项们[pi].号, 现.0 + du, 现.1 + dv, 现.2 + dz, 看过.join(" · ")); }
                         得
                     };
                     match 读 { Some(x) => 项们[pi].现 = x, None => { 丢 = Some(项们[pi].号); } }
