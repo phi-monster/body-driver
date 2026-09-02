@@ -243,6 +243,15 @@ pub fn describe(v: &Value, name: &str, depth: usize) {
 /// 关节键与位姿键**同时出现整帧被拒**(`Multiple action types found`)。
 ///
 /// 🔴 键名同样**不是拼的**,是认布局时看到的那个(`discover.rs` 认路径,最后一节就是键名)。
+/// 速度通道(底盘 / 腿 / 桨):一条路径 ⇒ 整个向量;多条路径 ⇒ 每条一个数。⚠️ 尚无身体验过这个形状。
+pub fn base_action(键: &[String], v: &[f64]) -> Value {
+    let arr = |v: &[f64]| Value::Array(v.iter().map(|x| Value::F64(*x)).collect());
+    let mut m = Vec::with_capacity(键.len());
+    if 键.len() == 1 { m.push((Value::String(键[0].as_str().into()), arr(v))); }
+    else { for (i, k) in 键.iter().enumerate() { m.push((Value::String(k.as_str().into()), Value::F64(v.get(i).copied().unwrap_or(0.0)))); } }
+    Value::Map(m)
+}
+
 pub fn joint_action(关节键: &[String], 钳口键: &[String], 我: usize, q: &[f64], 关节: &[Vec<f64>], 钳口: &[f64]) -> Value {
     let arr = |v: &[f64]| Value::Array(v.iter().map(|x| Value::F64(*x)).collect());
     let n = 关节键.len().min(钳口键.len());
