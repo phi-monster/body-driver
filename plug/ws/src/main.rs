@@ -5871,13 +5871,14 @@ fn 服务<S: std::io::Read + std::io::Write>(
             let 探列: Vec<usize> = if 有初值 || 条.is_empty() { Vec::new() } else { (0..通道数).collect() };
             for &c in &探列 {
                 let mut 试 = 0u32;
+                let mut 缩p = 缩;   // 探针自己的比例:被拒就减半,不动步子那一个
                 loop {
-                    let 幅 = 幅0 * 缩;
+                    let 幅 = 幅0 * 缩p;
                     let mut 动 = vec![0.0; 通道数];
                     动[c] = 幅;
                     let Some((r1, _)) = 发(plug, &动, 1.0, 等拍 * 2) else { break };
                     if r1.get(c).map(|x| x.abs() <= 实到噪).unwrap_or(true) {
-                        if 试 < 3 { 缩 *= 0.5; 试 += 1; continue } else { 备注.push(format!("channel {c} refused every probe")); break }
+                        if 试 < 3 { 缩p *= 0.5; 试 += 1; continue } else { 备注.push(format!("channel {c} refused every probe")); break }
                     }
                     let _ = 读所有(plug, &mut 项们);
                     let 中: Vec<(f64, f64, f64)> = 项们.iter().map(|p| p.现).collect();
@@ -5929,9 +5930,12 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     (0..列数).map(|c| 表[c][r] * k).collect()
                 }).collect();
                 let Some(动) = 最小二乘(&行, &误) else { 事件 = "could not solve which channels to push".into(); break };
+                // 每个通道各自封顶在 幅0×缩(不整体按最大那个通道缩:CP 实测转动通道解出 5 rad,整体缩到千分之四,平移通道等于没动)。
+                let 顶 = 幅0 * 缩;
+                let 动: Vec<f64> = 动.iter().map(|x| x.clamp(-顶, 顶)).collect();
                 let 幅 = 动.iter().take(通道数).map(|x| x.abs()).fold(0.0, f64::max);
-                let mut 比 = (幅0 / 幅.max(1e-9)).min(1.0) * 缩;
-                if 幅 * 比 <= 实到噪 { 事件 = "amount: already there (what is left to push is within my own noise)".into(); break }
+                let mut 比 = 1.0f64;
+                if 幅 <= 实到噪 { 事件 = "amount: already there (what is left to push is within my own noise)".into(); break }
                 // 别碰:只有模型点名的那几块(CN 实测:把所有块都当障碍,把手臂自己那块也算进去,一步都走不了)。预测每一块这一步落到哪,压进就减半步子,最多四次。
                 let mut 撞死 = None;
                 {
@@ -6012,7 +6016,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     continue;
                 }
                 走了 += 1;
-                if !被拒 { 连成 += 1; if 连成 >= 3 { 缩 = (缩 * 1.5).min(1.0); 连成 = 0; } } else { 连成 = 0 }
+                if !被拒 { 缩 = (缩 * 1.5).min(1.0); } 连成 = 0;
                 let 新差 = 差于(&误于(&项们));
                 // "更近了"要超过各块自己的抖动才算;连着两步(= 量噪声用的两次读)没更近 ⇒ 停。
                 if 上差 - 新差 > 跟踪噪 { 上差 = 新差; 不缩 = 0; } else { 不缩 += 1; }
