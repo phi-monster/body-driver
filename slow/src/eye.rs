@@ -533,3 +533,55 @@ pub fn 问方向(
     if d.is_empty() { return Err("眼没给 d".into()) }
     Ok(方向 { 码: d, 爪在: t("gripper"), 目标在: t("thing") })
 }
+
+
+/// 🔴 **飞行员模式第二版:问两个格号,方向和步数由驱动算。**(owner 2026-09-03:"试试")
+///
+/// CH 实测:问"爪子在哪、球在哪、往哪走",它答 "center / center / IN",一压压在牛仔裤上 ——
+/// 爪子在画面中部偏下、球在中部偏右上,**按"中间"这个粗度两者是一回事**。问得粗,答得就粗。
+/// 改成数格子(图上画着编号网格,它选择题做得准):**指尖在第几格、目标在第几格**;
+/// 往哪走、走几步是两个格号一减,**驱动算**,于是不会走过头。
+pub struct 两格 {
+    pub 指尖格: usize,
+    pub 目标格: usize,
+    /// 只有指尖格 == 目标格 且身体顶住时才有意义。
+    pub 合: bool,
+    pub 看到: String,
+}
+
+pub fn 问格(
+    host: &str,
+    port: u16,
+    任务: &str,
+    刚才: &str,
+    列: usize,
+    行: usize,
+    rgb: &[u8],
+    w: usize,
+    h: usize,
+) -> Result<两格, String> {
+    if rgb.len() < w * h * 3 {
+        return Err(format!("画面短了:要 {} 字节,只有 {}", w * h * 3, rgb.len()));
+    }
+    let 格数 = 列 * 行;
+    let bmp = bmp24(rgb, w, h);
+    let b64 = base64(&bmp);
+    let esc = |t: &str| t.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n");
+    let prompt = format!(
+        "You ARE this robot arm; this picture is what you see right now from a camera fixed above the table. A numbered grid is drawn over it: {列} columns x {行} rows, cells 1..{格数}, left to right then top to bottom. Task: {}\\n\\nWhat happened just before: {}\\n\\nLook at THIS frame only. Your FINGERTIPS are the two small dark wedges at the very end of the arm (not the big pale wrist casing). Answer: which cell the fingertips are in, and which cell the thing you must act on is in. Set close=true ONLY if the fingertips are in the same cell as the thing AND the body reported it is touching something. No distances, no numbers other than cell numbers.",
+        esc(任务), esc(刚才)
+    );
+    let body = format!(
+        r#"{{"model":"eye","max_tokens":120,"temperature":0,"chat_template_kwargs":{{"enable_thinking":false}},"response_format":{{"type":"json_schema","json_schema":{{"name":"cells","strict":true,"schema":{{"type":"object","additionalProperties":false,"required":["look","fingers_cell","thing_cell","close"],"properties":{{"look":{{"type":"string","maxLength":80}},"fingers_cell":{{"type":"integer","minimum":1,"maximum":{格数}}},"thing_cell":{{"type":"integer","minimum":1,"maximum":{格数}}},"close":{{"type":"boolean"}}}}}}}}}},"messages":[{{"role":"user","content":[{{"type":"image_url","image_url":{{"url":"data:image/bmp;base64,{b64}"}}}},{{"type":"text","text":"{prompt}"}}]}}]}}"#
+    );
+    let raw = post(host, port, "/v1/chat/completions", &body)?;
+    let inner = extract_content(&raw)
+        .ok_or_else(|| format!("回包里没有 content(前 200 字:{})", &raw[..raw.len().min(200)]))?;
+    let j = crate::json::parse(&inner)
+        .map_err(|e| format!("眼给的不是 JSON: {e} ‖ 前 200 字:{}", &inner[..inner.len().min(200)]))?;
+    let n = |k: &str| j.get(k).and_then(|x| x.num()).map(|v| v.round() as usize);
+    let (Some(f), Some(t)) = (n("fingers_cell"), n("thing_cell")) else { return Err("眼没给格号".into()) };
+    if f == 0 || f > 格数 || t == 0 || t > 格数 { return Err(format!("格号不合法:{f}/{t}")) }
+    Ok(两格 { 指尖格: f, 目标格: t, 合: j.get("close").and_then(|x| x.boolean()).unwrap_or(false),
+             看到: j.get("look").and_then(|x| x.text()).unwrap_or("").to_string() })
+}

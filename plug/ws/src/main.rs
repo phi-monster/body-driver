@@ -5715,7 +5715,9 @@ fn 服务<S: std::io::Read + std::io::Write>(
     let 手里有 = std::cell::Cell::new(false);
     // 🔴🔴🔴 **飞行员模式**(`BL_PILOT=1`,owner 2026-09-03 定):每帧一张白纸问一个方向,身体走一步,回来再问。
     // 没有收尾伺服、没有交接、没有我的任何流程 —— 每一步都是模型自己的一个字。
-    let 飞行员 = std::env::var("BL_PILOT").map(|v| v == "1").unwrap_or(false);
+    let 飞行员 = std::env::var("BL_PILOT").map(|v| v == "1" || v == "2").unwrap_or(false);
+    // `BL_PILOT=2`:问两个格号,方向/步数驱动算(第二版);`=1`:问一个方向码(第一版,CH)
+    let 数格 = std::env::var("BL_PILOT").map(|v| v == "2").unwrap_or(false);
     if 飞行员 { println!("[服] ✈️ 飞行员模式:每帧问一个方向(N/NE/E/SE/S/SW/W/NW/IN/OUT/STOP/CLOSE),走一步,再问"); }
     // 🔴 **腕相机里"我的接触面在哪" —— 从部件图里取那个常数。**
     // 取的是**指通道**(只开合爪子那几个)在**长在手上那台**里动的那一片的中心。
@@ -6261,6 +6263,79 @@ fn 服务<S: std::io::Read + std::io::Write>(
             look.box01[0], look.box01[2], look.box01[1], look.box01[3]);
         println!("[服] 🎯 指令「{}」⇒ 眼指 ({:.3},{:.3}) · 占画幅 {:.3} · 那一点深 {:.3} m",
             指令.chars().take(80).collect::<String>(), look.u, look.v, look.span_frac, d星);
+        if 飞行员 && 数格 {
+            // ── 第二版:问两个格号,方向和步数驱动算 ──(见 `eye::问格` 头注)
+            let Some((pw, ph, prgb0)) = 彩(&帧, 相机号) else { plug.act(&Cmd::Hold); continue };
+            let (网列, 网行) = (8usize, 6usize);   // 比第一版细一档:一格竖着约 8 cm
+            let mut 网图 = prgb0.clone();
+            let 格心 = 画网格(&mut 网图, pw, ph, 网列, 网行);
+            if let Ok(dir) = std::env::var("BL_DUMP") { let _ = std::fs::write(format!("{dir}/pilot_grid.bmp"), task::bmp24(&网图, pw, ph)); }
+            let 刚才 = 上一段汇报.clone();
+            let 答 = match body_layer::eye::问格(眼主机, 眼端口, &指令, &刚才, 网列, 网行, &网图, pw, ph) {
+                Ok(a) => a,
+                Err(e) => { println!("[✈️] 问不通({e})⇒ 这一拍不动"); plug.act(&Cmd::Hold); continue }
+            };
+            // 驱动自己量到的球在第几格(眼挑的块中心)—— 和模型说的比,不一致以量到的为准并说出来
+            let 格于 = |u: f64, v: f64| -> usize {
+                let c = (u * 网列 as f64).floor().clamp(0.0, 网列 as f64 - 1.0) as usize;
+                let r = (v * 网行 as f64).floor().clamp(0.0, 网行 as f64 - 1.0) as usize;
+                r * 网列 + c + 1
+            };
+            let 量格 = 格于(look.u, look.v);
+            println!("[✈️] 🧠 指尖在第 {} 格 · 它说目标在第 {} 格(驱动量到目标在第 {量格} 格{}) · close={} —— {}",
+                答.指尖格, 答.目标格, if 答.目标格 == 量格 { ",一致" } else { ",**不一致,以量到的为准**" }, 答.合, 答.看到);
+            let j现 = 帧.jaw.get(手号.get()).or_else(|| 帧.jaw.first()).copied().unwrap_or(1.0);
+            let Some(&(fu, fv)) = 格心.get(答.指尖格 - 1) else { plug.act(&Cmd::Hold); continue };
+            // 目标点用**量到的**球中心(比格心准);指尖点用它说的那一格的中心
+            let (tu, tv) = (look.u, look.v);
+            let (du, dv) = (tu - fu, tv - fv);
+            let 距 = du.hypot(dv);
+            let 同格 = 答.指尖格 == 量格;
+            if 同格 {
+                if 答.合 {
+                    let 停在 = 合到停住(plug, *通道是关节).unwrap_or(f64::NAN);
+                    let 有 = match *空合载 { Some(z) => (停在 - z).abs() > 1e-9, None => 停在 > 1e-9 };
+                    手里有.set(有);
+                    println!("[✈️]    合到停住 {停在:.4} ⇒ **{}**", if 有 { "指间有东西" } else { "指间没东西" });
+                    上一段汇报 = if 有 { format!("you said close; the fingers stopped at {停在:.4} - there IS something between them.") }
+                                else { 抓握(plug, 1.0, *通道是关节); format!("you said close; the fingers closed all the way to {停在:.4} - NOTHING was between them, so I opened again.") };
+                    continue
+                }
+                // 同一格但还没合 ⇒ 往下压一个探步(头相机俯视:朝桌面 = 深度加)
+                let Some(表) = 通道表.as_ref() else { plug.act(&Cmd::Hold); continue };
+                let 行3: Vec<Vec<f64>> = (0..3).map(|r| 表.iter().map(|c| c[r]).collect()).collect();
+                let Some(动0) = 最小二乘(&行3, &vec![0.0, 0.0, 探步]) else { plug.act(&Cmd::Hold); continue };
+                let 最大 = 动0.iter().map(|x| x.abs()).fold(0.0, f64::max);
+                let 比 = if 最大 > 探幅 { 探幅 / 最大 } else { 1.0 };
+                match 迈通道(plug, &动0, 比, j现, *通道是关节) {
+                    Some((走, _, _)) => {
+                        let 顶住 = 走.abs() < 最大 * 比 * 0.1;
+                        println!("[✈️]    同一格 ⇒ 往下压:命令幅 {:.4} · 实到 {走:.4}{}", 最大 * 比, if 顶住 { " ⇒ **顶住了(碰上)**" } else { "" });
+                        上一段汇报 = format!("fingertips and the thing are in the same cell, so I pressed down one step; the body delivered {:.0}%{}.",
+                            if 最大 * 比 > 1e-9 { 走.abs() / (最大 * 比) * 100.0 } else { 0.0 }, if 顶住 { " - it could not go further, I AM TOUCHING SOMETHING; if the thing is between the fingertips, say close" } else { "" });
+                    }
+                    None => { 上一段汇报 = "the press-down step could not be sent.".into(); }
+                }
+                continue
+            }
+            // 不同格 ⇒ 朝目标走一步,步长 = min(还差多远, 一格)。不会走过头。
+            let 一格 = 1.0 / 网列 as f64;
+            let 步 = 距.min(一格);
+            let (eu, ev) = (du / 距 * 步, dv / 距 * 步);
+            let Some(表) = 通道表.as_ref() else { plug.act(&Cmd::Hold); continue };
+            let 行3: Vec<Vec<f64>> = (0..3).map(|r| 表.iter().map(|c| c[r]).collect()).collect();
+            let Some(动0) = 最小二乘(&行3, &vec![eu, ev, 0.0]) else { plug.act(&Cmd::Hold); continue };
+            let 最大 = 动0.iter().map(|x| x.abs()).fold(0.0, f64::max);
+            let 比 = if 最大 > 探幅 { 探幅 / 最大 } else { 1.0 };
+            match 迈通道(plug, &动0, 比, j现, *通道是关节) {
+                Some((走, _, _)) => {
+                    println!("[✈️]    第 {} 格 → 第 {量格} 格:还差 {距:.3} 画幅,这一步走 {步:.3} 画幅(方向 ({eu:+.3},{ev:+.3}))· 命令幅 {:.4} · 实到 {走:.4}", 答.指尖格, 最大 * 比);
+                    上一段汇报 = format!("fingertips were in cell {}, the thing in cell {量格}; I moved one step toward it ({:.0}% delivered).", 答.指尖格, if 最大 * 比 > 1e-9 { 走.abs() / (最大 * 比) * 100.0 } else { 0.0 });
+                }
+                None => { 上一段汇报 = "the step could not be sent.".into(); }
+            }
+            continue
+        }
         if 飞行员 {
             // ── 每帧一张白纸 ──
             let Some((pw, ph, prgb)) = 彩(&帧, 相机号) else { plug.act(&Cmd::Hold); continue };
