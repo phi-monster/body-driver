@@ -4077,7 +4077,10 @@ fn 服务<S: std::io::Read + std::io::Write>(
             if g.len() < 5 { continue }
             match body_layer::blob::candidates(&g[0], &g[1], &g[2], &g[3], &g[4], w, h,
                     步.abs(), selfcal::最少像素(w, h)) {
-                Ok(r) => out[ci] = r.cands.get(0).copied().map(|c| (c, r.halves)),
+                Ok(r) => {
+                    println!("[身]     抖认(第 {ci} 台):地板 {} · 双响 {} px · 两步各 {}/{} px · 配对 {} · 候选 {}", r.floor, r.moved_px, r.m1_px, r.m2_px, r.pairs, r.cands.len());
+                    out[ci] = r.cands.get(0).copied().map(|c| (c, r.halves))
+                }
                 Err(_) => {}
             }
         }
@@ -6109,7 +6112,9 @@ fn 服务<S: std::io::Read + std::io::Write>(
             if !探列.is_empty() { println!("[身]     身上 {} 块还没有响应表 ⇒ 探 {} 个通道(探过就记住,下一段不再探)", 缺.iter().filter(|x| **x).count(), 探列.len()); }
             for &c in &探列 {
                 let mut 试 = 0u32;
-                let mut 缩p = 缩;   // 探针自己的比例:被拒就减半,不动步子那一个
+                // 探针自己的比例:起步 = 量到的可达带的十分之一(记录原话;比例,无量纲),被拒 / 跟丢就减半,不动步子那一个。
+                // DB 实测:从 0.17 m 起探,第一步就把左手推出画面左边,之后每一次抖认都失败。
+                let mut 缩p = 缩.min(0.1);
                 loop {
                     let 幅 = 幅0 * 缩p;
                     let mut 动 = vec![0.0; 通道数];
