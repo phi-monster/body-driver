@@ -4640,6 +4640,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
     let 桌面法向: std::cell::Cell<Option<[f64; 3]>> = std::cell::Cell::new(None);
     // 执行器上一段最后接受的步子比例(这具身体一步吃得下多少是量出来的,跨段带着走)。
     let 步缩: std::cell::Cell<f64> = std::cell::Cell::new(1.0);
+    // 装回来的画面雅可比(这台相机上"世界挪一米画面跑多远",早先量的):没探过的手指块拿它当响应表初值,免掉一轮探针。
+    let 雅初: Option<[[f64; 3]; 3]> = *雅载;
     let 问段次: std::cell::Cell<u32> = std::cell::Cell::new(0);
     // 每只手的手指此刻在画面哪儿(框,归一化):执行器每一步跟着更新;跟丢了就记到 需抖,下一轮抖一下那只手的抓握重新认。
     let 身位: std::cell::RefCell<std::collections::HashMap<usize, [f64; 4]>> = std::cell::RefCell::new(std::collections::HashMap::new());
@@ -5773,6 +5775,18 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     }
                 }
             }
+            // 没有响应表的手指块:用装回来的画面雅可比当初值(平移三列;转动列 0)。
+            // 一轮探针 = 12 通道 × 每步抖认 ≈ 25 分钟(DI 实测:25 分钟还在探,左手飘到画面边)。初值粗没关系:每一步 Broyden 修表。
+            let mut 种了 = false;
+            if let Some(j) = 雅初 { if !是关节 {
+                for (pi, p) in 项们.iter().enumerate() {
+                    if !缺[pi] || !p.是我 || p.投影 || p.通道 < 臂通道数 { continue }
+                    let Some(a) = 手于(p.通道) else { continue };
+                    for k in 0..3 { let c = a * 每臂 + k; if c < 列数 { for r in 0..3 { 表[c][3 * pi + r] = j[r][k]; } } }
+                    缺[pi] = false; 种了 = true;
+                }
+                if 种了 { println!("[身]     手指块的响应表用装回来的画面雅可比当初值(平移三列),不探;每步修表"); 备注.push("response table seeded from the stored image jacobian (translation only), refined every step".into()); }
+            } }
             let 有初值 = !缺.iter().any(|x| *x);
             // 手腕(末端投影)在末端模式下的响应可以直接算:平移通道 = 相机投影对那根世界轴的导数;转动通道绕末端自己转,末端不动 ⇒ 0。
             // 这不是假设:探针量到的"实到"就是末端沿那根轴走了多少(`后[k]−前[k]`)。关节模式没有这条,沿用初值再让修表去纠。
@@ -5874,6 +5888,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
             // 一步多大:从量到的可达带整个开始,被拒就减半(最多三轮),接受的比例跨段带走、连成三步放大回去。没有"三分之一"。
             let 幅0 = 可达带[1].max(1e-6);
             let (mut 缩, mut 减半次) = (步缩.get().clamp(1.0 / 64.0, 1.0), 0u32);
+            // 表是初值、不是探出来的 ⇒ 步子从可达带的十分之一起(和探针一样的比例),不从整个可达带起(CT:0.68 m 连拒 13 步)。
+            if 种了 { 缩 = 缩.min(0.1); }
             let mut 缩探 = 缩;   // 探针实际接受的比例(走了至少一半的那一档),步子从它起
             // ── 没有存表的通道:现场来回探一遍(读的是所有点)。被拒的幅度减半再探。──
             // 只探点名的块所在那几只手的通道(别的手对这些块的系数本来就是零);速度通道照探。
