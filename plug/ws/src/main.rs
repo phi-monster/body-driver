@@ -5911,9 +5911,12 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     let 半 = 合用半(fw, fh, &[心m], 半);
                     let Some(模) = (if 半 > 0 { 截块(fw, fh, &g, 心m.0, 心m.1, 半) } else { None }) else {
                         return format!("goal {}: item {} sits at the edge of the picture, I cannot cut a template to track it.", i + 1, c.号) };
-                    let Some(z) = 读深(plug, 心.0, 心.1, 窗) else { return format!("goal {}: item {} has no depth reading.", i + 1, c.号) };
+                    // 瓣的深度在"合起来那一块"的中心、按模板半径读:瓣中心贴着指边,四分位一会儿读到手指一会儿读到桌面,跳 0.15 m(DC 实测)。
+                    let (zu, zv, z窗) = if 是瓣 { (心m.0, 心m.1, (半 as f64 / fw as f64).max(1.0 / fw as f64)) } else { (心.0, 心.1, 窗) };
+                    let Some(z) = 读深(plug, zu, zv, z窗) else { return format!("goal {}: item {} has no depth reading.", i + 1, c.号) };
                     (模, 半, (心.0, 心.1, z))
                 };
+                let 窗 = if 是瓣 { (半 as f64 / fw as f64).max(1.0 / fw as f64) } else { 窗 };
                 let z = 现.2;
                 let 米 = |px: f64, z: f64| -> f64 { match 眼 { Some(e) => px * z / e.fx.max(1e-9), None => px * z / fw as f64 } };
                 let 尺m = 米(短, z).max(1e-3);
@@ -6039,8 +6042,21 @@ fn 服务<S: std::io::Read + std::io::Write>(
             // 有一块认不出 ⇒ 整批不更新、报 None。🔴 不许全画面找模板:另一只手的钳口一模一样(CZ 六列全 0)。
             let 读所有 = |plug: &mut Plug<S>, 项们: &mut Vec<项>, 容z: f64, 用抖: bool| -> Option<()> {
                 let mut 新: Vec<Option<(f64, f64, f64)>> = vec![None; 项们.len()];
+                // ① 每一块先在上次位置附近找模板(瓣共用"合起来那一块"的模板,深度在那一块的中心读),深度要和上次对得上。
+                {
+                    let f = plug.sense()?;
+                    let (_, _, g) = 灰(&f, 工作相机.get())?;
+                    for (i, p) in 项们.iter().enumerate() {
+                        if p.投影 { 新[i] = Some(投影自(&f, 眼, p.末)?); continue }
+                        let Some((u0, v0)) = 找块窗(fw, fh, &g, &p.模, p.半, p.现.0 - p.偏.0, p.现.1 - p.偏.1, p.半 * 3) else { continue };
+                        let Some(z) = 读深(plug, u0, v0, p.窗) else { continue };
+                        if !无深 && (z - p.现.2).abs() > 容z + p.尺m { continue }
+                        新[i] = Some((u0 + p.偏.0, v0 + p.偏.1, z));
+                    }
+                }
+                // ② 模板跟不住的瓣:抖那只手的抓握重认(构造性身份,任何位形都成立)。🔴 不许全画面找模板:另一只手的钳口一模一样(CZ 六列全 0)。
                 if 用抖 {
-                    let 臂集: std::collections::BTreeSet<usize> = 项们.iter().filter(|p| p.是瓣).filter_map(|p| 手于(p.通道)).collect();
+                    let 臂集: std::collections::BTreeSet<usize> = (0..项们.len()).filter(|&i| 新[i].is_none() && 项们[i].是瓣).filter_map(|i| 手于(项们[i].通道)).collect();
                     for a in 臂集 {
                         let Some(e) = 臂末.get(a).copied().flatten() else { return None };
                         let (原手, 原臂) = (手号.get(), 臂号.get());
@@ -6052,26 +6068,15 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         let mut 序: Vec<usize> = (0..项们.len()).filter(|&i| 项们[i].是瓣 && 手于(项们[i].通道) == Some(a)).collect();
                         序.sort_by(|&x, &y| 项们[x].偏.0.partial_cmp(&项们[y].偏.0).unwrap_or(std::cmp::Ordering::Equal));
                         let 位: Vec<(f64, f64)> = match 瓣 { Some((p, q)) => vec![(p.u, p.v), (q.u, q.v)], None => vec![(c.u, c.v)] };
+                        let z = 读深(plug, c.u, c.v, 项们[序[0]].窗)?;
                         for (k, &i) in 序.iter().enumerate() {
                             let (u, v) = 位[k.min(位.len() - 1)];
-                            let z = 读深(plug, u, v, 项们[i].窗)?;
                             新[i] = Some((u, v, z));
                         }
+                        println!("[身]     模板跟不住 ⇒ 抖第 {} 只手重认:瓣在 {}", a + 1, 位.iter().map(|(u, v)| format!("({u:.3},{v:.3})")).collect::<Vec<_>>().join(" "));
                     }
                 }
-                let f = plug.sense()?;
-                let (_, _, g) = 灰(&f, 工作相机.get())?;
-                for (i, p) in 项们.iter().enumerate() {
-                    if 新[i].is_some() { continue }
-                    if p.投影 { 新[i] = Some(投影自(&f, 眼, p.末)?); continue }
-                    let 合格 = |plug: &mut Plug<S>, u: f64, v: f64| -> Option<(f64, f64, f64)> {
-                        let z = 读深(plug, u, v, p.窗)?;
-                        if !无深 && (z - p.现.2).abs() > 容z + p.尺m { return None }
-                        Some((u, v, z))
-                    };
-                    let 得 = 找块窗(fw, fh, &g, &p.模, p.半, p.现.0 - p.偏.0, p.现.1 - p.偏.1, p.半 * 3).map(|(u, v)| (u + p.偏.0, v + p.偏.1)).and_then(|(u, v)| 合格(plug, u, v));
-                    新[i] = Some(得?);
-                }
+                if 新.iter().any(|x| x.is_none()) { return None }
                 for (p, x) in 项们.iter_mut().zip(新) { p.现 = x?; }
                 Some(())
             };
@@ -6405,12 +6410,12 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         let mut 得 = None;
                         let mut 看过: Vec<String> = Vec::new();
                         if let Some((u, v)) = 找块窗(fw, fh, &g, &模, 半, 现.0 + du - 偏.0, 现.1 + dv - 偏.1, 窗r).map(|(u, v)| (u + 偏.0, v + 偏.1)) {
-                            match 读深(plug, u, v, 窗) { Some(z) => { if (z - (现.2 + dz)).abs() <= 容 { 得 = Some((u, v, z)); } else { 看过.push(format!("窗内 ({u:.3},{v:.3}) 深 {z:.3}")); } } None => 看过.push(format!("窗内 ({u:.3},{v:.3}) 无深")) }
+                            match 读深(plug, u - 偏.0, v - 偏.1, 窗) { Some(z) => { if (z - (现.2 + dz)).abs() <= 容 { 得 = Some((u, v, z)); } else { 看过.push(format!("窗内 ({u:.3},{v:.3}) 深 {z:.3}")); } } None => 看过.push(format!("窗内 ({u:.3},{v:.3}) 无深")) }
                         }
                         if 得.is_none() {
                             // 兜底不许全画面(另一只手的钳口一模一样),只在预测位置四分之一画幅(比例,无量纲)以内再找一次。
                             if let Some((u, v)) = 找块窗(fw, fh, &g, &模, 半, 现.0 + du - 偏.0, 现.1 + dv - 偏.1, fw / 4).map(|(u, v)| (u + 偏.0, v + 偏.1)) {
-                                match 读深(plug, u, v, 窗) { Some(z) => { if (z - (现.2 + dz)).abs() <= 容 { 得 = Some((u, v, z)); } else { 看过.push(format!("全画面 ({u:.3},{v:.3}) 深 {z:.3}")); } } None => 看过.push(format!("全画面 ({u:.3},{v:.3}) 无深")) }
+                                match 读深(plug, u - 偏.0, v - 偏.1, 窗) { Some(z) => { if (z - (现.2 + dz)).abs() <= 容 { 得 = Some((u, v, z)); } else { 看过.push(format!("全画面 ({u:.3},{v:.3}) 深 {z:.3}")); } } None => 看过.push(format!("全画面 ({u:.3},{v:.3}) 无深")) }
                             }
                         }
                         if 得.is_none() { println!("[身]     跟丢第 {} 号:预测在 ({:.3},{:.3}) 深 {:.3}(容差 {容:.3});候选 {}", 项们[pi].号, 现.0 + du, 现.1 + dv, 现.2 + dz, 看过.join(" · ")); }
