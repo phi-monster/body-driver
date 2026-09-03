@@ -6048,6 +6048,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     let (_, _, g) = 灰(&f, 工作相机.get())?;
                     for (i, p) in 项们.iter().enumerate() {
                         if p.投影 { 新[i] = Some(投影自(&f, 眼, p.末)?); continue }
+                        // 探针里瓣一律抖认:黑钳口挪到黑臂上,模板在原地照样"找到"、深度也过门(DD 实测:左手六列全 0);抖认同一位形重复到 ±5 px(DD 右手九次)。
+                        if 用抖 && p.是瓣 { continue }
                         let Some((u0, v0)) = 找块窗(fw, fh, &g, &p.模, p.半, p.现.0 - p.偏.0, p.现.1 - p.偏.1, p.半 * 3) else { continue };
                         let Some(z) = 读深(plug, u0, v0, p.窗) else { continue };
                         if !无深 && (z - p.现.2).abs() > 容z + p.尺m { continue }
@@ -6143,8 +6145,9 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     let 净0 = r2.get(c).copied().unwrap_or(0.0).abs();
                     let 回跟住 = 读所有(plug, &mut 项们, 净0 + 深噪, true).is_some();
                     let 后: Vec<(f64, f64, f64)> = 项们.iter().map(|p| p.现).collect();
-                    动[c] = 幅;
-                    let _ = 发(plug, &动, 1.0, 等拍 * 2);
+                    // 回到起点:按实到的净位移补,不按命令算(DD 通道 7:去 +0.055、回 −0.000,再"回" +幅就越走越远)。
+                    let mut 累 = r1.get(c).copied().unwrap_or(0.0) + r2.get(c).copied().unwrap_or(0.0);
+                    for _ in 0..3 { if 累.abs() <= 实到噪 { break } 动[c] = -累; match 发(plug, &动, 1.0, 等拍 * 2) { Some((r3, _)) => { 累 += r3.get(c).copied().unwrap_or(0.0); } None => break } }
                     let _ = 读所有(plug, &mut 项们, 净0 + 深噪, true);
                     if !回跟住 { 备注.push(format!("channel {c}: lost track of my pieces on the way back; not trusting that column")); println!("[身]     探通道 {c}:回程跟丢 ⇒ 这一列不记"); break }
                     let 净 = r2.get(c).copied().unwrap_or(0.0);
