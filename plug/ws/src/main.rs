@@ -4065,11 +4065,12 @@ fn 服务<S: std::io::Read + std::io::Write>(
         帧们.push(a);
         let Some(b) = 晃(plug, at, q, j0, &基, false, 等拍) else { return out };
         帧们.push(b);
+        // 每一步给钳口 3 倍的拍数去动(钳口交付延迟 ~2 拍,记录 M6→MB;DF 实测 3 拍里读数一次没变 ⇒ 五帧合同里没有运动 ⇒ 认出垃圾)。倍数是比例,无量纲。
         for k in 1..=3 {
-            let Some(f) = 晃(plug, at, q, (j0 + 步 * k as f64).clamp(0.0, 1.0), &基, true, 等拍) else { return out };
+            let Some(f) = 晃(plug, at, q, (j0 + 步 * k as f64).clamp(0.0, 1.0), &基, true, 等拍 * 3) else { return out };
             帧们.push(f);
         }
-        let _ = 晃(plug, at, q, j0, &基, true, 等拍);
+        let _ = 晃(plug, at, q, j0, &基, true, 等拍 * 3);
         if 帧们.len() < 5 { return out }
         for ci in 0..台 {
             let Some((w, h, _)) = 灰(&帧们[0], ci) else { continue };
@@ -6126,7 +6127,10 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     let 幅 = 幅0 * 缩p;
                     let mut 动 = vec![0.0; 通道数];
                     动[c] = 幅;
-                    let Some((r1, _)) = 发(plug, &动, 1.0, 等拍 * 2) else { break };
+                    let 末前 = plug.sense().and_then(|f| f.ee.get(手号.get()).map(|e| [e[0], e[1], e[2]]));
+                    let Some((r1, 挡1)) = 发(plug, &动, 1.0, 等拍 * 2) else { break };
+                    let 末后 = plug.sense().and_then(|f| f.ee.get(手号.get()).map(|e| [e[0], e[1], e[2]]));
+                    println!("[身]     探 {c} 去:命令 {幅:+.4} · 实到 {:+.4} · 挡 {挡1} · 末端 {:?} → {:?}", r1.get(c).copied().unwrap_or(0.0), 末前.map(|e| [(e[0]*1000.0).round()/1000.0, (e[1]*1000.0).round()/1000.0, (e[2]*1000.0).round()/1000.0]), 末后.map(|e| [(e[0]*1000.0).round()/1000.0, (e[1]*1000.0).round()/1000.0, (e[2]*1000.0).round()/1000.0]));
                     // 走了不到要求的一半 ⇒ 这个幅度身体吃不下(被拒或只交付一小截),减半再探:探针要落在"命令多少走多少"那一段里,列才是真的。
                     let 到 = r1.get(c).copied().unwrap_or(0.0).abs();
                     if 到 <= 实到噪 || 到 < 幅 * 0.5 {
@@ -6141,13 +6145,15 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     }
                     let 中: Vec<(f64, f64, f64)> = 项们.iter().map(|p| p.现).collect();
                     动[c] = -幅 * 2.0;
-                    let Some((r2, _)) = 发(plug, &动, 1.0, 等拍 * 2) else { break };
+                    let Some((r2, 挡2)) = 发(plug, &动, 1.0, 等拍 * 2) else { break };
+                    let 末回 = plug.sense().and_then(|f| f.ee.get(手号.get()).map(|e| [e[0], e[1], e[2]]));
+                    println!("[身]     探 {c} 回:命令 {:+.4} · 实到 {:+.4} · 挡 {挡2} · 末端 {:?}", -幅 * 2.0, r2.get(c).copied().unwrap_or(0.0), 末回.map(|e| [(e[0]*1000.0).round()/1000.0, (e[1]*1000.0).round()/1000.0, (e[2]*1000.0).round()/1000.0]));
                     let 净0 = r2.get(c).copied().unwrap_or(0.0).abs();
                     let 回跟住 = 读所有(plug, &mut 项们, 净0 + 深噪, true).is_some();
                     let 后: Vec<(f64, f64, f64)> = 项们.iter().map(|p| p.现).collect();
                     // 回到起点:按实到的净位移补,不按命令算(DD 通道 7:去 +0.055、回 −0.000,再"回" +幅就越走越远)。
                     let mut 累 = r1.get(c).copied().unwrap_or(0.0) + r2.get(c).copied().unwrap_or(0.0);
-                    for _ in 0..3 { if 累.abs() <= 实到噪 { break } 动[c] = -累; match 发(plug, &动, 1.0, 等拍 * 2) { Some((r3, _)) => { 累 += r3.get(c).copied().unwrap_or(0.0); } None => break } }
+                    for _ in 0..3 { if 累.abs() <= 实到噪 { break } 动[c] = -累; match 发(plug, &动, 1.0, 等拍 * 2) { Some((r3, 挡3)) => { println!("[身]     探 {c} 补:命令 {:+.4} · 实到 {:+.4} · 挡 {挡3}", -累, r3.get(c).copied().unwrap_or(0.0)); 累 += r3.get(c).copied().unwrap_or(0.0); } None => break } }
                     let _ = 读所有(plug, &mut 项们, 净0 + 深噪, true);
                     if !回跟住 { 备注.push(format!("channel {c}: lost track of my pieces on the way back; not trusting that column")); println!("[身]     探通道 {c}:回程跟丢 ⇒ 这一列不记"); break }
                     let 净 = r2.get(c).copied().unwrap_or(0.0);
