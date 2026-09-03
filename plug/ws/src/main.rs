@@ -5872,7 +5872,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     Some(([r.框[0] as f64 / fw as f64, r.框[1] as f64 / fh as f64, r.框[2] as f64 / fw as f64, r.框[3] as f64 / fh as f64], 心))
                 }
             };
-            struct 项 { 号: usize, 是我: bool, 投影: bool, 末: usize, 通道: usize, 框: [f64; 4], 尺m: f64, 模: Vec<u8>, 半: usize, 窗: f64, 现: (f64, f64, f64), 该: (f64, f64, f64), 深权: f64, 说: String, 该2: Option<(f64, f64, f64)>, 待接触: Option<usize> }
+            struct 项 { 号: usize, 是我: bool, 投影: bool, 末: usize, 通道: usize, 框: [f64; 4], 尺m: f64, 模: Vec<u8>, 半: usize, 窗: f64, 现: (f64, f64, f64), 该: (f64, f64, f64), 深权: f64, 说: String, 该2: Option<(f64, f64, f64)>, 待接触: Option<usize>, 偏: (f64, f64) }
             let mut 项们: Vec<项> = Vec::new();
             let 眼 = 眼稳.as_ref();
             let mut 备注: Vec<String> = Vec::new();
@@ -5886,13 +5886,22 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 // 模板半径 = 这一块短边的四分之一(切在它自己身上)。3 px 是匹配器的下限、八分之一画幅是算力上限 —— 都不是身体量。
                 let 短 = ((框[2] - 框[0]) * fw as f64).min((框[3] - 框[1]) * fh as f64).max(0.0);
                 let 窗 = (短 / fw as f64 * 0.5).max(1.0 / fw as f64);
+                // 🔴 两瓣长得几乎一样、只隔几十像素,各切各的模板必然互锁(CW 实测:什么都没动,两瓣的位置就跳了 0.30 画幅)。
+                //    ⇒ 一只手的几瓣**共用"合起来那一块"的模板**跟踪(块大、独一无二),各瓣 = 那一块的位置 + 抖时量到的偏移;深度各读各的。
+                //    转手腕时偏移会变 —— 转动通道现在量不到(模板跟不上转过的手指),先接受。
+                let 通道k = match 条目.get(c.号.wrapping_sub(1)) { Some(&(true, k, _)) => k, _ => usize::MAX };
+                let 瓣主: Option<([f64; 4], (f64, f64))> = if 是我 && !投影 && 通道k >= 臂通道数 && 通道k < usize::MAX - 200 {
+                    手于(通道k).and_then(|a| if 瓣位.borrow().contains_key(&a) { 身位.borrow().get(&a).copied() } else { None }).map(|b| (b, ((b[0] + b[2]) * 0.5, (b[1] + b[3]) * 0.5)))
+                } else { None };
+                let (心m, 短m) = match 瓣主 { Some((b, cm)) => (cm, ((b[2] - b[0]) * fw as f64).min((b[3] - b[1]) * fh as f64).max(0.0)), None => (心, 短) };
+                let 偏 = (心.0 - 心m.0, 心.1 - 心m.1);
                 let (模, 半, 现) = if 投影 {
                     let Some(x) = 投影自(&f, 眼, 末) else { return format!("goal {}: item {} (the end of my arm) cannot be placed in this picture right now.", i + 1, c.号) };
                     (Vec::new(), 0usize, x)
                 } else {
-                    let 半 = ((短 * 0.25) as usize).clamp(3, (fw / 8).max(3));
-                    let 半 = 合用半(fw, fh, &[心], 半);
-                    let Some(模) = (if 半 > 0 { 截块(fw, fh, &g, 心.0, 心.1, 半) } else { None }) else {
+                    let 半 = ((短m * 0.25) as usize).clamp(3, (fw / 8).max(3));
+                    let 半 = 合用半(fw, fh, &[心m], 半);
+                    let Some(模) = (if 半 > 0 { 截块(fw, fh, &g, 心m.0, 心m.1, 半) } else { None }) else {
                         return format!("goal {}: item {} sits at the edge of the picture, I cannot cut a template to track it.", i + 1, c.号) };
                     let Some(z) = 读深(plug, 心.0, 心.1, 窗) else { return format!("goal {}: item {} has no depth reading.", i + 1, c.号) };
                     (模, 半, (心.0, 心.1, z))
@@ -5972,7 +5981,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     return format!("goal {}: names no place.", i + 1);
                 };
                 let 深权 = if 无深 { 0.0 } else { 深权 };
-                项们.push(项 { 号: c.号, 是我, 投影, 末, 通道, 框, 尺m, 模, 半, 窗, 现, 该, 深权, 说, 该2, 待接触 });
+                项们.push(项 { 号: c.号, 是我, 投影, 末, 通道, 框, 尺m, 模, 半, 窗, 现, 该, 深权, 说, 该2, 待接触, 偏 });
             }
             let 点数 = 项们.len();
             let 维 = 3 * 点数;
@@ -6020,7 +6029,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 let (_, _, g) = 灰(&f, 工作相机.get())?;
                 for p in 项们.iter_mut() {
                     if p.投影 { p.现 = 投影自(&f, 眼, p.末)?; continue }
-                    let (u, v) = 找块窗(fw, fh, &g, &p.模, p.半, p.现.0, p.现.1, p.半 * 3)?;
+                    let (u, v) = 找块窗(fw, fh, &g, &p.模, p.半, p.现.0 - p.偏.0, p.现.1 - p.偏.1, p.半 * 3)?;
+                    let (u, v) = (u + p.偏.0, v + p.偏.1);
                     let z = 读深(plug, u, v, p.窗)?;
                     p.现 = (u, v, z);
                 }
@@ -6057,7 +6067,9 @@ fn 服务<S: std::io::Read + std::io::Write>(
             let (mut 缩, mut 减半次) = (步缩.get().clamp(1.0 / 64.0, 1.0), 0u32);
             let mut 缩探 = 缩;   // 探针实际接受的比例(走了至少一半的那一档),步子从它起
             // ── 没有存表的通道:现场来回探一遍(读的是所有点)。被拒的幅度减半再探。──
-            let 探列: Vec<usize> = if 有初值 || 条.is_empty() { Vec::new() } else { (0..通道数).collect() };
+            // 只探点名的块所在那几只手的通道(别的手对这些块的系数本来就是零);速度通道照探。
+            let 臂们: std::collections::HashSet<usize> = 项们.iter().filter(|p| p.是我).filter_map(|p| 手于(p.通道)).collect();
+            let 探列: Vec<usize> = if 有初值 || 条.is_empty() { Vec::new() } else { (0..通道数).filter(|&c| c >= 臂通道总 || 臂们.contains(&(c / 每臂))).collect() };
             if !探列.is_empty() { println!("[身]     身上 {} 块还没有响应表 ⇒ 探 {} 个通道(探过就记住,下一段不再探)", 缺.iter().filter(|x| **x).count(), 探列.len()); }
             for &c in &探列 {
                 let mut 试 = 0u32;
@@ -6330,7 +6342,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 let Some((_, _, g)) = 灰(&f, 工作相机.get()) else { 事件 = "lost the picture".into(); break };
                 let mut 丢 = None;
                 for pi in 0..项们.len() {
-                    let (投影, 末, 半, 窗, 现, 尺m) = (项们[pi].投影, 项们[pi].末, 项们[pi].半, 项们[pi].窗, 项们[pi].现, 项们[pi].尺m);
+                    let (投影, 末, 半, 窗, 现, 尺m, 偏) = (项们[pi].投影, 项们[pi].末, 项们[pi].半, 项们[pi].窗, 项们[pi].现, 项们[pi].尺m, 项们[pi].偏);
                     let 读 = if 投影 { 投影自(&f, 眼, 末) } else {
                         // 表 × 这一步实际走的 = 预测这一块跑到哪;在那儿附近找,窗口 = 预测位移 + 三个模板半径。
                         // 找到的那一点深度必须和预测对得上(容差 = 这一块自己的尺寸或预测的深度变化,加深度噪声)——
@@ -6344,11 +6356,11 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         let 模 = 项们[pi].模.clone();
                         let mut 得 = None;
                         let mut 看过: Vec<String> = Vec::new();
-                        if let Some((u, v)) = 找块窗(fw, fh, &g, &模, 半, 现.0 + du, 现.1 + dv, 窗r) {
+                        if let Some((u, v)) = 找块窗(fw, fh, &g, &模, 半, 现.0 + du - 偏.0, 现.1 + dv - 偏.1, 窗r).map(|(u, v)| (u + 偏.0, v + 偏.1)) {
                             match 读深(plug, u, v, 窗) { Some(z) => { if (z - (现.2 + dz)).abs() <= 容 { 得 = Some((u, v, z)); } else { 看过.push(format!("窗内 ({u:.3},{v:.3}) 深 {z:.3}")); } } None => 看过.push(format!("窗内 ({u:.3},{v:.3}) 无深")) }
                         }
                         if 得.is_none() {
-                            if let Some((u, v)) = 找块(fw, fh, &g, &模, 半) {
+                            if let Some((u, v)) = 找块(fw, fh, &g, &模, 半).map(|(u, v)| (u + 偏.0, v + 偏.1)) {
                                 match 读深(plug, u, v, 窗) { Some(z) => { if (z - (现.2 + dz)).abs() <= 容 { 得 = Some((u, v, z)); } else { 看过.push(format!("全画面 ({u:.3},{v:.3}) 深 {z:.3}")); } } None => 看过.push(format!("全画面 ({u:.3},{v:.3}) 无深")) }
                             }
                         }
