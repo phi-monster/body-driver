@@ -3766,66 +3766,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
         末.map(|f| (f, false, 差))
     };
 
-    // 🔴🔴 **只动爪子、手臂按住不动的那种等法 —— 等的是【爪子读数不再变】。**
-    //
-    // 实测代价(S1,2026-08-26):看爪要 6 次 `落`,而 `落` 等的是**手臂走到位**;
-    // 晃爪子时手臂目标压根没变,"走到位"那条判据(残差 ≤ 该走的 2%,而该走≈0)**永远触发不了**
-    // ⇒ 每次白等满 28 拍 ⇒ 一次看爪 **168 拍**,而一集只有 **200 拍** ⇒ 一集只够看一次爪。
-    // 伺服要"看爪→挪→再看爪"闭环,这个预算下根本转不起来。
-    // ⇒ 手臂不动的那几拍,判据换成**爪子读数连着两拍一模一样**(浮点相等就是相等,无阈值),
-    //   一次看爪掉到 ~40 拍。这和合爪、落位用的是同一条规矩。
-    // 🔴🔴 **"还没开始动"和"已经停了"在读数上是同一个样子 —— 必须先看见它离开起点。**
-    //
-    // 实测代价(S7,2026-08-26):第一版写成"读数连着两拍一样就算停了",于是爪子还没启动
-    // 就被判成停了,三拍退出 ⇒ 五帧合同里那三帧**爪子一动没动** ⇒ 认块器 `双响 0`
-    // (画面上一个像素都没超过噪声地板)⇒ 连着整集"这一眼没看清爪子"。
-    // 这条坑仓里对**手臂**早就写过(见 `落` 上面那段:交付率低时两者同形),我在**爪子**上又踩一遍。
-    // ⇒ `要动=true` 时:先等它**离开起点**,再等它**停下**;两条都满足才算数。
-    //   `要动=false`(空帧,本来就不该动)走另一条:等两拍就够,不然白等满上限。
-    // 🔴 **基线由调用方给,这里【不许】自己再 `sense` 一次** —— `sense` 是**阻塞读下一帧**,
-    // 而这时通常没有待读的帧(上一次 `落`/`晃` 刚把它读完)⇒ 它会卡住、返回空。
-    // 实测代价(S8):开机挑相机那一步整个空掉,打出"没有一台相机认得出这只手"直接退出,
-    // 而**手和相机都好好的**。
-    // 🔴🔴 **拍空帧之前必须先等【手臂】真的停住 —— 否则噪声地板被余晃抬高,手指那点动静全被埋掉。**
-    //
-    // 认块器的噪声地板是拿**两张本该完全一样的空帧**算出来的。我为了省拍数把空帧改成"等两拍就拍",
-    // 而那时手臂还在余晃 ⇒ 两张空帧不一样 ⇒ 地板被抬得老高。
-    // 实测(D2):地板在 **4 到 158** 之间乱跳,高的时候(93/146/158)`双响 0` —— 一个像素都没超过它,
-    // 于是"看不清爪子" 18 次、看清只有 5 次,整集出不来。
-    // 判据无阈值:**位置连着两拍一模一样**(浮点相等就是相等),和落位、合爪同一条。
-    let 稳住 = |plug: &mut Plug<S>, at: [f64; 3], q: [f64; 4], j: f64, 上限: u32| -> Option<Frame> {
-        let mut 上次: Option<Vec<f64>> = None;
-        let mut 稳 = 0u32;
-        let mut 末: Option<Frame> = None;
-        for _ in 0..上限 {
-            plug.act(&Cmd::Ee { arm: 手号.get(), at, quat: q, jaw: j });
-            let Some(f) = plug.sense() else { break };
-            let 此: Vec<f64> = f.ee.get(手号.get()).map(|e| e[..3].to_vec()).unwrap_or_default();
-            末 = Some(f);
-            if 上次.as_ref() == Some(&此) { 稳 += 1; if 稳 >= 2 { break } } else { 稳 = 0 }
-            上次 = Some(此);
-        }
-        末
-    };
 
-    let 晃 = |plug: &mut Plug<S>, at: [f64; 3], q: [f64; 4], j: f64, 起: &[f64], 要动: bool, 上限: u32| -> Option<Frame> {
-        let mut 上次: Option<Vec<f64>> = None;
-        let mut 稳 = 0u32;
-        let mut 动过 = false;
-        let mut 末: Option<Frame> = None;
-        for 拍 in 0..上限 {
-            plug.act(&Cmd::Ee { arm: 手号.get(), at, quat: q, jaw: j });
-            let Some(f) = plug.sense() else { break };
-            let 此: Vec<f64> = f.jaw.iter().copied().collect();
-            末 = Some(f);
-            if !要动 { if 拍 >= 1 { break } continue }
-            if 此.as_slice() != 起 { 动过 = true }
-            if 动过 && 上次.as_ref() == Some(&此) { 稳 += 1; if 稳 >= 2 { break } } else { 稳 = 0 }
-            上次 = Some(此);
-        }
-        if 要动 && !动过 { println!("[服]   ⚠️ 让爪子走到 {j:.2},{上限} 拍里读数**一次都没变过** —— 爪子没动"); }
-        末
-    };
 
     // 🔴🔴🔴 **长距离要【滑行】,不是"下一条命令→等它停稳→再下一条"。**
     //
@@ -4054,23 +3995,61 @@ fn 服务<S: std::io::Read + std::io::Write>(
     // **只认"会动的那一块在画面哪一点" —— 不需要相机模型。**
     // 解相机要的原料就是它:手在哪(本体感受)↔ 手在画面哪(这里)。
     // 交出来的是 (合起来那一块, 两瓣各自):两瓣要分别送到两个接触点上,只有中点不够用。
-    let 看爪像素 = |plug: &mut Plug<S>, at: [f64; 3], q: [f64; 4], j0: f64| -> Vec<Option<(body_layer::hand::Candidate, Option<(body_layer::hand::Candidate, body_layer::hand::Candidate)>)>> {
+    let 看爪像素 = |plug: &mut Plug<S>, at: [f64; 3], q: [f64; 4], j0: f64, 用关节: bool| -> Vec<Option<(body_layer::hand::Candidate, Option<(body_layer::hand::Candidate, body_layer::hand::Candidate)>)>> {
         let 台 = plug.lay.cams.len();
         let mut out: Vec<Option<(body_layer::hand::Candidate, Option<(body_layer::hand::Candidate, body_layer::hand::Candidate)>)>> = vec![None; 台];
         // 0.30 是**钳口命令行程的分数**(命令域本身就是 0..1),无量纲。
-    let 步 = (if j0 > 0.5 { -1.0 } else { 1.0 }) * 0.30;
+        let 步 = (if j0 > 0.5 { -1.0 } else { 1.0 }) * 0.30;
+        // 保持手臂不动、只动钳口:关节模式下发**当前关节角**(不重解 IK,肘部不会换姿);末端模式下发当前位姿。
+        let 发保 = |plug: &mut Plug<S>, j: f64| -> bool {
+            if 用关节 {
+                let Some(f) = plug.sense() else { return false };
+                let g = 臂号.get();
+                let Some(qj) = f.joints.get(g).cloned() else { return false };
+                plug.act(&Cmd::Joints { arm: g, q: qj, jaw: j })
+            } else { plug.act(&Cmd::Ee { arm: 手号.get(), at, quat: q, jaw: j }) }
+        };
+        let 读稳 = |f: &Frame| -> Vec<u64> {
+            if 用关节 { 真臂(f).iter().flat_map(|&i| f.joints[i].iter().map(|x| x.to_bits())).collect() }
+            else { f.ee.get(手号.get()).map(|e| e[..3].iter().map(|x| x.to_bits()).collect()).unwrap_or_default() }
+        };
+        let 稳 = |plug: &mut Plug<S>, j: f64, 上限: u32| -> Option<Frame> {
+            let mut 上次: Option<Vec<u64>> = None; let mut n = 0u32; let mut 末: Option<Frame> = None;
+            for _ in 0..上限 {
+                if !发保(plug, j) { break }
+                let Some(f) = plug.sense() else { break };
+                let 此 = 读稳(&f); 末 = Some(f);
+                if 上次.as_ref() == Some(&此) { n += 1; if n >= 2 { break } } else { n = 0 }
+                上次 = Some(此);
+            }
+            末
+        };
+        let 晃j = |plug: &mut Plug<S>, j: f64, 起: &[f64], 要动: bool, 上限: u32| -> Option<Frame> {
+            let mut 上次: Option<Vec<f64>> = None; let mut n = 0u32; let mut 动过 = false; let mut 末: Option<Frame> = None;
+            for 拍 in 0..上限 {
+                if !发保(plug, j) { break }
+                let Some(f) = plug.sense() else { break };
+                let 此: Vec<f64> = f.jaw.iter().copied().collect(); 末 = Some(f);
+                if !要动 { if 拍 >= 1 { break } continue }
+                if 此.as_slice() != 起 { 动过 = true }
+                if 动过 && 上次.as_ref() == Some(&此) { n += 1; if n >= 2 { break } } else { n = 0 }
+                上次 = Some(此);
+            }
+            if 要动 && !动过 { println!("[服]   ⚠️ 让爪子走到 {j:.2},{上限} 拍里读数**一次都没变过** —— 爪子没动"); }
+            末
+        };
         let mut 帧们: Vec<Frame> = Vec::new();
-        let Some(a) = 稳住(plug, at, q, j0, 等拍 * 2) else { return out };
+        let Some(a) = 稳(plug, j0, 等拍 * 2) else { return out };
         let 基: Vec<f64> = a.jaw.iter().copied().collect();
         帧们.push(a);
-        let Some(b) = 晃(plug, at, q, j0, &基, false, 等拍) else { return out };
+        let Some(b) = 晃j(plug, j0, &基, false, 等拍) else { return out };
         帧们.push(b);
         // 每一步给钳口 3 倍的拍数去动(钳口交付延迟 ~2 拍,记录 M6→MB;DF 实测 3 拍里读数一次没变 ⇒ 五帧合同里没有运动 ⇒ 认出垃圾)。倍数是比例,无量纲。
         for k in 1..=3 {
-            let Some(f) = 晃(plug, at, q, (j0 + 步 * k as f64).clamp(0.0, 1.0), &基, true, 等拍 * 3) else { return out };
+            let Some(f) = 晃j(plug, (j0 + 步 * k as f64).clamp(0.0, 1.0), &基, true, 等拍 * 3) else { return out };
             帧们.push(f);
         }
-        let _ = 晃(plug, at, q, j0, &基, true, 等拍 * 3);
+        let _ = 晃j(plug, j0, &基, true, 等拍 * 3);
         if 帧们.len() < 5 { return out }
         for ci in 0..台 {
             let Some((w, h, _)) = 灰(&帧们[0], ci) else { continue };
@@ -4376,218 +4355,6 @@ fn 服务<S: std::io::Read + std::io::Write>(
     //      ⇒ 爪子有多宽、该抬多高,全部从它现读,不需要焦距。
     // 代价照记:它只在量它的那一小片邻域成立 ⇒ **必须闭环迭代**,不能一步到位。
 
-    /// 爪子此刻在画面的哪儿。返回 (横, 纵, 那一点的深, 那一块占画幅多宽, 开合方向的画面向量)。
-    /// 手臂冻住、只动爪子 ⇒ 会动的那一块按构造就是钳口(五帧合同交给仓里的认块器,认不出会拒)。
-    /// **反投影没有了,相机模型也没有了** —— 留在画面里。
-    // `上眼` = 上一次看到爪子在画面哪儿。给了就**挑离它最近的那个候选**。
-    let 看爪幅 = |plug: &mut Plug<S>, at: [f64; 3], q: [f64; 4], j0: f64, 上眼: Option<(f64, f64)>, 幅: f64|
-        -> Option<(f64, f64, f64, f64, f64, (f64, f64), Vec<(f64, f64)>, [f64; 4])> {
-        // 0.30 是**钳口命令行程的分数**(命令域本身就是 0..1),无量纲。
-    let 步 = (if j0 > 0.5 { -1.0 } else { 1.0 }) * 0.30 * 幅;
-        let mut 帧们 = Vec::new();
-        // 第一张空帧:**先等手臂停住**(见 `稳住` 上面那段 —— 余晃会把噪声地板抬高)。
-        帧们.push(稳住(plug, at, q, j0, 等拍 * 2)?);
-        let 基: Vec<f64> = 帧们[0].jaw.iter().copied().collect();
-        帧们.push(晃(plug, at, q, j0, &基, false, 等拍)?);
-        for k in 1..=3 { 帧们.push(晃(plug, at, q, (j0 + 步 * k as f64).clamp(0.0, 1.0), &基, true, 等拍)?); }
-        // 🔴 末尾那一次"把爪子放回原位"删掉 —— 调用方下一条命令本来就会重设爪子,
-        // 而它要等爪子走完,白烧十来拍。一集只有 200 拍,这是省得起的十分之一。
-        // 🔴🔴🔴 **五帧之间胳膊必须【真的没动】—— 动过就作废重来,不许拿脏样本认爪。**
-        //(ZK 渲图定案 2026-08-30)
-        //
-        // 这个办法的全部前提是:*锁死胳膊、只张合手指 ⇒ 画面里动的按定义就是手指*,
-        // 而**大臂的位移精确为零、根本没机会参赛**(`LAB "认手不许靠「哪块动得最像我」"`)。
-        // 前提一破,又大又亮的大臂就赢下这一票。
-        // ZK 实证:`配对 4 · 占画幅 0.046` 读起来完全正常,而渲图显示那个点**画在大臂上**,
-        // 真正的爪子当时已经开到棒球正旁边(`ZK_方框落在哪.png`)。
-        // 机制:`晃` 每一帧都重发同一个位姿,而这具身体**一拍只交付约 10%** ⇒
-        // 五帧之间胳膊一直在往那个位姿爬 —— 日志早就警告过 `空帧那会儿手臂还在晃`。
-        //
-        // 对策仓里有现成的,只是装错了地方:`LAB` 2026-08-16 的重复性实验里
-        // *"朝向变过 0.5° 就把已攒的作废重来"*,当时**连响 8 次**,证明污染是真的。
-        // 这里照搬:门槛由量出来的东西给 —— 五帧之间的漂移必须**小于一步真正走得动的距离**
-        // 的十分之一(`探步 × 交付率 × 0.1`),否则这一眼不算数。
-        {
-            let 位们: Vec<[f64; 3]> = 帧们.iter()
-                .filter_map(|f| f.ee.get(手号.get()).map(|e| [e[0], e[1], e[2]])).collect();
-            if 位们.len() >= 2 {
-                let mut 漂 = 0.0f64;
-                for a in &位们 { for b in &位们 {
-                    漂 = 漂.max(((a[0]-b[0]).powi(2) + (a[1]-b[1]).powi(2) + (a[2]-b[2]).powi(2)).sqrt());
-                }}
-                // 10 是"可达带的十分之一 = 一步"(和 `探步` 同一个来源,它在这一段之后才定义);
-                // 0.1 是余量比例。两个都是无量纲的,底下的量全是量出来的。
-                let 界 = 可达带[1] / 10.0 * 交付率 * 0.1;
-                if 漂 > 界 {
-                    // 🔴 **改成标脏,不再作废。**(owner 2026-08-31)
-                    // 前提("只动手指")确实破了 —— 但**作废一次就是一拍不干活**,而这具身体
-                    // 交付只有约 10%,漂移几乎每次都超界 ⇒ 等于永远不干。
-                    // ⇒ 照实说这一眼可能混进了大臂,**照样用**;下游有"占画幅太大"和碰撞去纠它。
-                    println!("[服]   看爪:⚠️ 这五帧之间胳膊动了 {漂:.4} m(界 {界:.4} m)⇒ 可能混进大臂;**照样用**,结果照实报");
-                }
-            }
-        }
-        let (w, h, _) = 灰(&帧们[0], 相机号)?;
-        let g: Vec<Vec<u8>> = 帧们.iter().filter_map(|f| 灰(f, 相机号).map(|(_, _, d)| d)).collect();
-        if g.len() < 5 { println!("[服]   看爪:只拿到 {} 帧(要 5 帧)", g.len()); return None }
-        let r = match body_layer::blob::candidates(&g[0], &g[1], &g[2], &g[3], &g[4], w, h,
-                步.abs(), selfcal::最少像素(w, h)) {
-            Ok(r) => r,
-            Err(e) => { println!("[服]   看爪:认块器拒绝 {e:?} —— 这一眼不算数"); return None }
-        };
-        // 🔴🔴 **认块器给的是一堆候选,不许闭眼取第一个。**
-        //
-        // 实测代价(S9):第三下探针取到的那一块**占了 35% 的画面**(平时 5%)、双响 6110 ——
-        // 那不是爪子,是**整条手臂**:手臂刚走完还在晃,晃爪子那五帧里整条臂都在动。
-        // 于是那一列的画面响应量成 -3.9(x 那一列只有 0.68),雅可比的第三列整根废掉。
-        // ⇒ 挑**离上一次看到的位置最近的那个** —— 手一步只挪几厘米,爪子在画面上不可能瞬移。
-        //   这是跟踪(用已经量到的连续性),不是猜。第一次没有上一眼时才取第一个。
-        if r.cands.is_empty() {
-            // 🔴 诊断句不许一句话套两种病。地板**高** = 空帧那会儿手臂还在晃(噪声把信号淹了);
-            // 地板**低**而双响还是 0 = 手指真的没在画面上动(多半被腕部挡住了,只有转手腕有用)。
-            // 印错的诊断比不印更贵 —— 会把人往错的方向修。
-            println!("[服]   看爪:认块器没给出候选(双响 {} · 配对 {} · 地板 {})—— {}",
-                r.moved_px, r.pairs, r.floor,
-                if r.floor > 40 { "**地板高**:空帧那会儿手臂还在晃,信号被噪声淹了" }
-                else { "**地板低但一样没动**:手指真的没在画面上张合,多半被腕部挡住" });
-            return None
-        }
-        let 头 = *r.cands.get(0)?;
-        // 🔴🔴🔴 **没有"上一眼"时,锚点用【逐末端探针量到的这只手在画面哪一片】。**
-        //(BA 实测 2026-08-31;LAB 原话:*"场景里不止一个'像手的东西'时,
-        //  要用一个【已经量到的、指向本体】的量去锚定它"*)
-        //
-        // BA:挑手选了**手 1**(探针量到它在主眼里占 (0.621,0.732)),而伺服跟的那一点是
-        // **(0.233,0.565)** —— 那是**手 0** 那一片(探针量到 (0.134,0.739))。
-        // 于是它在把**另一只手**往球上送,`横纵差 0.4261` 十步一个数字都不变。
-        // 双臂身体上"最强的那个候选"本来就可能是另一只手,这不是噪声,是场景里真有两只手。
-        // 🔴🔴🔴 **候选必须离【我这只手】比离任何别的手都近 —— 而且每一拍都要这么挑,不只第一拍。**
-        //(BD 实测 2026-09-01)
-        // 上一版只在"没有上一眼"时才拿这只手的那一片当锚;而一旦第一眼锁到了另一只手上,
-        // 之后每一拍都"离上一眼最近" ⇒ **一路跟着错的那只手走到底**。
-        // BD:挑手选了手 1(量到它在 (0.621,0.732)),伺服跟的却是 (0.217,0.565) = 手 0 那一片,
-        // `横纵差 0.4397` 十步不变 —— 它在把另一只手往球上送。
-        //
-        // 判据不含任何阈值:**离我这只手的那一片,比离任何别的手的那一片更近**。
-        // 逐末端探针已经把每只手在这台相机里占哪一片量出来了(它们相隔约半个画幅)。
-        // 一只手的身体上这条恒真(没有"别的手"),N 只手同样成立。
-        let 我片 = 臂心.get(手号.get()).and_then(|行| 行.get(相机号)).and_then(|o| *o);
-        let 别的片: Vec<(f64, f64)> = 臂心.iter().enumerate()
-            .filter(|(i, _)| *i != 手号.get())
-            .filter_map(|(_, 行)| 行.get(相机号).and_then(|o| *o)).collect();
-        let 是我的 = |u: f64, v: f64| -> bool {
-            match 我片 {
-                None => true,
-                Some((mu, mv)) => {
-                    let d我 = (u - mu).hypot(v - mv);
-                    别的片.iter().all(|(bu, bv)| d我 <= (u - bu).hypot(v - bv))
-                }
-            }
-        };
-        let 锚 = 上眼.or(我片);
-        let c = match 锚 {
-            None => 头,
-            Some((pu, pv)) => {
-                let (mut best, mut bd) = (头, f64::MAX);
-                let mut 剔 = 0usize;
-                for i in 0..r.cands.len() {
-                    let Some(k) = r.cands.get(i) else { continue };
-                    // 落在别人手那一片上的,直接不算候选(见上面头注)。
-                    if !是我的(k.u, k.v) { 剔 += 1; continue }
-                    let d = ((k.u - pu).powi(2) + (k.v - pv).powi(2)).sqrt();
-                    if d < bd { bd = d; best = *k }
-                }
-                if 剔 > 0 { println!("[服]   看爪:{剔} 个候选落在**别的手**那一片上,剔掉"); }
-                if bd == f64::MAX {
-                    println!("[服]   看爪:所有候选都落在别的手上 ⇒ 这一眼不算数");
-                    return None
-                }
-                if r.cands.len() > 1 {
-                    println!("[服]   看爪:{} 个候选,挑离**这只手量到的那一片**({pu:.3},{pv:.3}) 最近的那个(差 {bd:.3} 画幅)", r.cands.len());
-                }
-                best
-            }
-        };
-        let c = &c;
-        let (u0, v0, u1, v1) = (c.ext[0], c.ext[1], c.ext[2], c.ext[3]);
-        let (du, dv) = if r.pairs > 0 && (r.pair_dir.0.abs() + r.pair_dir.1.abs()) > 1e-9 {
-            r.pair_dir
-        } else if (u1 - u0) >= (v1 - v0) { (1.0, 0.0) } else { (0.0, 1.0) };
-        // 🔴🔴 **"那一块有多宽"要沿【开合方向】量,不许用外接框的对角线。**
-        //
-        // 会动的那一块 = 晃爪子时所有动了的像素,里面还含着腕部;**对角线把"手指有多长"
-        // 和"腕子有多大"一起算了进去**,而钳口只沿开合方向张。
-        // 实测代价(G1):爪子宽算成 **0.187 m**(Franka 实际约 0.08),连带
-        // "凸出桌面多少才算物体"的门槛被抬到 1.87 cm,把一把几毫米厚的剪刀整个减掉。
-        // 沿开合方向取投影,垂直那一维(手指长度 / 腕子)自然不进来。
-        // 🔴🔴 **"钳口能张多开"取外接框的【长边】,不取对角线、也不取沿配对方向的投影。**
-        //
-        // · 对角线 = √(长²+短²) ⇒ 把"手指有多长 / 腕子有多大"一起算进来
-        //   ⇒ 实测(G1)爪子宽算成 **0.187 m**(Franka 实际约 0.08),连带"凸出桌面多少算物体"
-        //   的门槛被抬到 1.87 cm,把几毫米厚的剪刀整个减掉。
-        // · 沿配对方向投影 ⇒ 方向取错时**塌到 0.002 个画幅**(G5 实测),爪子宽算成 0,候选全被拒。
-        // · 长边:平行爪张开时,会动的那一片**本来就沿张开方向拉长** ⇒ 长边就是它,而且**永远不会塌**。
-        // ⚠️ 仍然欠一条更正的:**全开时的两指间距 − 全合时的两指间距**(差值天生免疫"多认了半个腕子")。
-        let 张 = (u1 - u0).abs().max((v1 - v0).abs()).max(1e-6);
-        // 🔴🔴 **这一块【整体】有多大,和【沿开合方向】有多宽,是两件事,不许混用。**
-        // 实测代价(G3):我把开合方向的投影同时当成了"读深度的取样窗",而投影会塌到
-        // **0.001 个画幅** ⇒ 窗小到一个像素 ⇒ 读到的是**背景 2.442 m**,整条链全污染。
-        // 窗要用**整块**的大小(外接框对角线),爪子宽才用开合方向的投影。
-        let 块 = ((u1 - u0).powi(2) + (v1 - v0).powi(2)).sqrt().max(1e-3);
-        // 🔴🔴 **这一块【整体】有多大,和【沿开合方向】有多宽,是两件事,不许混用。**
-        // 实测代价(G3):我把开合方向的投影同时当成了"读深度的取样窗",而投影会塌到
-        // **0.001 个画幅** ⇒ 窗小到一个像素 ⇒ 读到的是**背景 2.442 m**,整条链全污染。
-        // 窗要用**整块**的大小(外接框对角线),爪子宽才用开合方向的投影。
-        let 块 = ((u1 - u0).powi(2) + (v1 - v0).powi(2)).sqrt().max(1e-3);
-        let Some(深) = 近侧深(plug, c.u, c.v, 块 * 0.5) else {
-            println!("[服]   看爪:认出那一块在 ({:.3},{:.3}),但那儿读不到深度", c.u, c.v);
-            return None
-        };
-        println!("[服]   看爪:双响 {} · 配对 {} · 在画面 ({:.3},{:.3}) · 深 {:.3} m · 占画幅 {:.3}",
-            r.moved_px, r.pairs, c.u, c.v, 深, 张);
-        // 🔴🔴🔴 **两个接触面 = 认块器给出的【最大的两块】,不是我拿偏移凑的两个patch。**
-        //
-        // 实测代价(F7):我拿"那一块的中心 ± 四分之一长度"切两个模板,跟踪器跟的是**图像纹理**
-        // 而不是手指 ⇒ "接触面最远能分开多少"量出 **2.9 mm**(Franka 实际约 80 mm),
-        // 而且"合到底 0.0306 比张到底 0.0277 还大" —— **方向都反了**。
-        // 认块器本来就在做这件事:晃抓握通道时**往相反方向动的那两块**就是两根手指
-        // (它连 `pairs` 都数出来了),我却只取了 `cands[0]`,第二个自己编。
-        // ⇒ 直接取**最大的两块**。一块 = 吸盘(单点接触集)、两块 = 两指、五块 = 五指,同一段代码。
-        let mut 块们: Vec<(f64, f64, u32)> = Vec::new();
-        for i in 0..r.cands.len() {
-            if let Some(k) = r.cands.get(i) { 块们.push((k.u, k.v, k.pixels)); }
-        }
-        块们.sort_by(|a, b| b.2.cmp(&a.2));
-        let mut 面们: Vec<(f64, f64)> = 块们.iter().take(2).map(|k| (k.0, k.1)).collect();
-        // 🔴🔴🔴 **认块器说没认出一对钳口,就是没认出。不许在这里编第二个点。**
-        //
-        // `fold_opposed` 的注释写得很清楚:一对钳口不是"解"出来的,是**认**出来的 ——
-        // 两瓣朝**相反方向**走、位移互相抵消,而"抵消"的容差**不是填的**,是这两块自己量到的散布。
-        // `pairs == 1` ⇒ 输出的那个候选就是**两指中点**,`pair_dir` 就是**钳口轴**,
-        // 于是两个接触面 = 中点 ∓ pair_dir/2,**全是量出来的**。
-        //
-        // 实测代价(2026-08-27 通宵):`pairs == 0` 时我沿"外接框的长边"取两端编了两个点 ——
-        // 而那一片是 **93×127**(竖着更长),于是编出来的两个点是这一片的**上端和下端**,
-        // 可放大看,两根手指是**左右**分开的。**编出来的答案连轴都是错的**,
-        // 后面所有的跟丢、锁错、闸门误判全长在它上面,我为此手写了掩码/连通块/预测窗一整套,
-        // 全是在给一个编造的输入打补丁。**仓里那个读数器整晚都在日志里说 `配对 0`,我没听。**
-        if r.pairs > 0 && (r.pair_dir.0.abs() + r.pair_dir.1.abs()) > 1e-9 {
-            let (hu, hv) = (r.pair_dir.0 * 0.5, r.pair_dir.1 * 0.5);
-            面们 = vec![(c.u - hu, c.v - hv), (c.u + hu, c.v + hv)];
-            println!("[服]   认出一对钳口 ⇒ 两个接触面 = 中点 ∓ 钳口轴/2 = ({:.3},{:.3}) / ({:.3},{:.3})",
-                面们[0].0, 面们[0].1, 面们[1].0, 面们[1].1);
-        } else if 面们.len() < 2 {
-            println!("[服]   🔴 认块器**没认出一对钳口**(配对 {} · 候选 {})⇒ 这台相机里我分不出自己的两瓣。\
-                     **不编造** —— 这一眼只交出一个接触面,由调用方决定降级怎么走", r.pairs, r.cands.len());
-        }
-        if 面们.len() >= 2 {
-            println!("[服]   认出 {} 块 ⇒ 两个接触面在 ({:.3},{:.3}) 和 ({:.3},{:.3})",
-                r.cands.len(), 面们[0].0, 面们[0].1, 面们[1].0, 面们[1].1);
-        } else {
-            println!("[服]   只认出 {} 块 ⇒ 这具手只有一个接触面(吸盘那一类)", r.cands.len());
-        }
-        Some((c.u, c.v, 深, 张, 块, (du, dv), 面们, [u0, v0, u1, v1]))
-    };
 
     /// 3×3 求逆。奇异就拒(不硬解)。
     let 逆3 = |m: [[f64; 3]; 3]| -> Option<[[f64; 3]; 3]> {
@@ -4601,8 +4368,6 @@ fn 服务<S: std::io::Read + std::io::Write>(
             [(m[1][0]*m[2][1]-m[1][1]*m[2][0])/det, (m[0][1]*m[2][0]-m[0][0]*m[2][1])/det, (m[0][0]*m[1][1]-m[0][1]*m[1][0])/det],
         ])
     };
-    let 看爪 = |plug: &mut Plug<S>, at: [f64; 3], q: [f64; 4], j0: f64, 上眼: Option<(f64, f64)>|
-        -> Option<(f64, f64, f64, f64, f64, (f64, f64), Vec<(f64, f64)>, [f64; 4])> { 看爪幅(plug, at, q, j0, 上眼, 1.0) };
 
     /// **超定最小二乘:`A x ≈ b`,A 是 m×n(m 个方程、n 个通道)。**
     /// 正规方程 `(AᵀA + λI) x = Aᵀb`,高斯消元。λ 只用来在通道多于约束时挑**最小动作**那一解
@@ -5563,7 +5328,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         手号.set(e); if let Some(&j) = 臂关.get(a) { 臂号.set(j); }
                         let 得 = plug.sense().and_then(|f| {
                             let ee = f.ee.get(e).copied()?; let j0 = f.jaw.get(e).copied().unwrap_or(1.0);
-                            看爪像素(plug, [ee[0], ee[1], ee[2]], [ee[3], ee[4], ee[5], ee[6]], j0).get(工作相机.get()).cloned().flatten()
+                            看爪像素(plug, [ee[0], ee[1], ee[2]], [ee[3], ee[4], ee[5], ee[6]], j0, *通道是关节).get(工作相机.get()).cloned().flatten()
                         });
                         手号.set(原手); 臂号.set(原臂);
                         // 框的大小沿用开机部件图里这只手抓握侧那块的大小;只有中心是新认的。
@@ -6065,7 +5830,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         let (原手, 原臂) = (手号.get(), 臂号.get());
                         手号.set(e); if let Some(&j) = 臂关.get(a) { 臂号.set(j); }
                         let 得 = plug.sense().and_then(|f| { let ee = f.ee.get(e).copied()?; let j0 = f.jaw.get(e).copied().unwrap_or(1.0);
-                            看爪像素(plug, [ee[0], ee[1], ee[2]], [ee[3], ee[4], ee[5], ee[6]], j0).get(工作相机.get()).cloned().flatten() });
+                            看爪像素(plug, [ee[0], ee[1], ee[2]], [ee[3], ee[4], ee[5], ee[6]], j0, 是关节).get(工作相机.get()).cloned().flatten() });
                         手号.set(原手); 臂号.set(原臂);
                         let Some((c, 瓣)) = 得 else { println!("[身]     抖第 {} 只手的抓握没认出它的瓣", a + 1); return None };
                         let mut 序: Vec<usize> = (0..项们.len()).filter(|&i| 项们[i].是瓣 && 手于(项们[i].通道) == Some(a)).collect();
@@ -6116,7 +5881,16 @@ fn 服务<S: std::io::Read + std::io::Write>(
             // ── 没有存表的通道:现场来回探一遍(读的是所有点)。被拒的幅度减半再探。──
             // 只探点名的块所在那几只手的通道(别的手对这些块的系数本来就是零);速度通道照探。
             let 臂们: std::collections::HashSet<usize> = 项们.iter().filter(|p| p.是我).filter_map(|p| 手于(p.通道)).collect();
-            let 探列: Vec<usize> = if 有初值 || 条.is_empty() { Vec::new() } else { (0..通道数).filter(|&c| c >= 臂通道总 || 臂们.contains(&(c / 每臂))).collect() };
+            // 通道 c 是哪只手的:末端模式 = c / 每臂;关节模式 = 它落在哪个关节组里(组 ⇒ 手:`臂关[a]` 是第 a 只手跟着变最多的组)。
+            let 臂于通道 = |c: usize| -> usize {
+                if !是关节 { return c / 每臂 }
+                let 号 = 真臂(&f); let mut 起 = 0usize;
+                for (gi, &i) in 号.iter().enumerate() { let l = f.joints.get(i).map(|v| v.len()).unwrap_or(0); if c < 起 + l { return 臂关.iter().position(|&g| g == gi).unwrap_or(gi) } 起 += l; }
+                0
+            };
+            let 探列: Vec<usize> = if 有初值 || 条.is_empty() { Vec::new() } else { (0..通道数).filter(|&c| c >= 臂通道总 || 臂们.contains(&臂于通道(c))).collect() };
+            // 探针里每一步"手在世界哪儿 ↔ 各块在画面哪儿"的样本 —— 解相机用真实的末端位移(含横向漂),不假设它沿着通道轴走。
+            let mut 样: Vec<([f64; 3], Vec<(f64, f64, f64)>)> = Vec::new();
             if !探列.is_empty() { println!("[身]     身上 {} 块还没有响应表 ⇒ 探 {} 个通道(探过就记住,下一段不再探)", 缺.iter().filter(|x| **x).count(), 探列.len()); }
             for &c in &探列 {
                 let mut 试 = 0u32;
@@ -6127,9 +5901,10 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     let 幅 = 幅0 * 缩p;
                     let mut 动 = vec![0.0; 通道数];
                     动[c] = 幅;
-                    let 末前 = plug.sense().and_then(|f| f.ee.get(手号.get()).map(|e| [e[0], e[1], e[2]]));
+                    let e手 = 臂末.get(臂于通道(c)).copied().flatten().unwrap_or(手号.get());
+                    let 末前 = plug.sense().and_then(|f| f.ee.get(e手).map(|e| [e[0], e[1], e[2]]));
                     let Some((r1, 挡1)) = 发(plug, &动, 1.0, 等拍 * 2) else { break };
-                    let 末后 = plug.sense().and_then(|f| f.ee.get(手号.get()).map(|e| [e[0], e[1], e[2]]));
+                    let 末后 = plug.sense().and_then(|f| f.ee.get(e手).map(|e| [e[0], e[1], e[2]]));
                     println!("[身]     探 {c} 去:命令 {幅:+.4} · 实到 {:+.4} · 挡 {挡1} · 末端 {:?} → {:?}", r1.get(c).copied().unwrap_or(0.0), 末前.map(|e| [(e[0]*1000.0).round()/1000.0, (e[1]*1000.0).round()/1000.0, (e[2]*1000.0).round()/1000.0]), 末后.map(|e| [(e[0]*1000.0).round()/1000.0, (e[1]*1000.0).round()/1000.0, (e[2]*1000.0).round()/1000.0]));
                     // 走了不到要求的一半 ⇒ 这个幅度身体吃不下(被拒或只交付一小截),减半再探:探针要落在"命令多少走多少"那一段里,列才是真的。
                     let 到 = r1.get(c).copied().unwrap_or(0.0).abs();
@@ -6146,7 +5921,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     let 中: Vec<(f64, f64, f64)> = 项们.iter().map(|p| p.现).collect();
                     动[c] = -幅 * 2.0;
                     let Some((r2, 挡2)) = 发(plug, &动, 1.0, 等拍 * 2) else { break };
-                    let 末回 = plug.sense().and_then(|f| f.ee.get(手号.get()).map(|e| [e[0], e[1], e[2]]));
+                    let 末回 = plug.sense().and_then(|f| f.ee.get(e手).map(|e| [e[0], e[1], e[2]]));
                     println!("[身]     探 {c} 回:命令 {:+.4} · 实到 {:+.4} · 挡 {挡2} · 末端 {:?}", -幅 * 2.0, r2.get(c).copied().unwrap_or(0.0), 末回.map(|e| [(e[0]*1000.0).round()/1000.0, (e[1]*1000.0).round()/1000.0, (e[2]*1000.0).round()/1000.0]));
                     let 净0 = r2.get(c).copied().unwrap_or(0.0).abs();
                     let 回跟住 = 读所有(plug, &mut 项们, 净0 + 深噪, true).is_some();
@@ -6156,6 +5931,10 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     for _ in 0..3 { if 累.abs() <= 实到噪 { break } 动[c] = -累; match 发(plug, &动, 1.0, 等拍 * 2) { Some((r3, 挡3)) => { println!("[身]     探 {c} 补:命令 {:+.4} · 实到 {:+.4} · 挡 {挡3}", -累, r3.get(c).copied().unwrap_or(0.0)); 累 += r3.get(c).copied().unwrap_or(0.0); } None => break } }
                     let _ = 读所有(plug, &mut 项们, 净0 + 深噪, true);
                     if !回跟住 { 备注.push(format!("channel {c}: lost track of my pieces on the way back; not trusting that column")); println!("[身]     探通道 {c}:回程跟丢 ⇒ 这一列不记"); break }
+                    if let (Some(e1), Some(e2)) = (末后, 末回) {
+                        let d = [e2[0] - e1[0], e2[1] - e1[1], e2[2] - e1[2]];
+                        if d.iter().map(|x| x * x).sum::<f64>().sqrt() > 实到噪 { 样.push((d, (0..点数).map(|pi| (后[pi].0 - 中[pi].0, 后[pi].1 - 中[pi].1, 后[pi].2 - 中[pi].2)).collect())); }
+                    }
                     let 净 = r2.get(c).copied().unwrap_or(0.0);
                     // 只有这个通道真的走了探针的一大半,它的列才算数:除以一个接近零的"实到"会把列撑到几十画幅/单位,
                     // 预测和解算全被它带飞(CS 实测:预测位移 −5.3 画幅、解出的相机焦距 0)。
@@ -6173,7 +5952,38 @@ fn 服务<S: std::io::Read + std::io::Write>(
             }
             // 相机:还没有的话,从这张表里解 —— 某只手的手指块对那只手三个平移通道的响应(像素/米、深/米)+ 它此刻的像素、深度、手在世界哪儿。
             // 闭式、不拟合、解不出就 None(point_gen::eye_from_jacobian 头注)。解出来下一段就有"手掌"那一号和真的"上/下"。
-            if 眼.is_none() && !是关节 {
+            if 眼.is_none() && 样.len() >= 3 {
+                for (pi, p) in 项们.iter().enumerate() {
+                    if !p.是我 || p.投影 || p.通道 < 臂通道数 { continue }
+                    let Some(a) = 手于(p.通道) else { continue };
+                    let Some(e) = 臂末.get(a).copied().flatten() else { continue };
+                    let Some(ee) = f.ee.get(e) else { continue };
+                    // J·d = Δpx 的最小二乘:A = Σ d dᵀ,B = Σ Δpx dᵀ,J = B A⁻¹
+                    let mut aa = [[0.0f64; 3]; 3]; let mut bb = [[0.0f64; 3]; 3];
+                    for (d, px) in 样.iter() { let (du, dv, dz) = px.get(pi).copied().unwrap_or((0.0, 0.0, 0.0)); let o = [du * fw as f64, dv * fh as f64, dz];
+                        for r in 0..3 { for k in 0..3 { aa[r][k] += d[r] * d[k]; bb[r][k] += o[r] * d[k]; } } }
+                    let det = aa[0][0] * (aa[1][1] * aa[2][2] - aa[1][2] * aa[2][1]) - aa[0][1] * (aa[1][0] * aa[2][2] - aa[1][2] * aa[2][0]) + aa[0][2] * (aa[1][0] * aa[2][1] - aa[1][1] * aa[2][0]);
+                    if !(det.abs() > 1e-12) { println!("[身]     解相机:{} 个样本的末端位移共面(行列式 {det:.2e}),解不了", 样.len()); continue }
+                    let inv = |m: [[f64; 3]; 3], d: f64| -> [[f64; 3]; 3] { [
+                        [(m[1][1] * m[2][2] - m[1][2] * m[2][1]) / d, (m[0][2] * m[2][1] - m[0][1] * m[2][2]) / d, (m[0][1] * m[1][2] - m[0][2] * m[1][1]) / d],
+                        [(m[1][2] * m[2][0] - m[1][0] * m[2][2]) / d, (m[0][0] * m[2][2] - m[0][2] * m[2][0]) / d, (m[0][2] * m[1][0] - m[0][0] * m[1][2]) / d],
+                        [(m[1][0] * m[2][1] - m[1][1] * m[2][0]) / d, (m[0][1] * m[2][0] - m[0][0] * m[2][1]) / d, (m[0][0] * m[1][1] - m[0][1] * m[1][0]) / d] ] };
+                    let ai = inv(aa, det);
+                    let mut j = [[0.0f64; 3]; 3];
+                    for r in 0..3 { for k in 0..3 { j[r][k] = (0..3).map(|m| bb[r][m] * ai[m][k]).sum(); } }
+                    let 尺px = ((p.框[2] - p.框[0]) * fw as f64).max((p.框[3] - p.框[1]) * fh as f64).max(1.0);
+                    match point_gen::eye_from_jacobian(j, p.现.0 * fw as f64, p.现.1 * fh as f64, p.现.2, [ee[0], ee[1], ee[2]]) {
+                        Some(e2) if e2.fx > 1.0 && e2.fy > 1.0 && (e2.fx / e2.fy).max(e2.fy / e2.fx) <= 2.0 && e2.cx >= 0.0 && e2.cy >= 0.0 && e2.cx <= fw as f64 && e2.cy <= fh as f64
+                            && e2.project(point_gen::P3 { x: ee[0], y: ee[1], z: ee[2] }).map(|q| (q[0] - p.现.0 * fw as f64).hypot(q[1] - p.现.1 * fh as f64) <= 尺px).unwrap_or(false) => {
+                            println!("[身]     从 {} 个样本解出相机:焦距 {:.1}/{:.1} · 主点 ({:.1},{:.1}) · 相机在 ({:.2},{:.2},{:.2})(用第 {} 只手的瓣 {})", 样.len(), e2.fx, e2.fy, e2.cx, e2.cy, e2.at[0], e2.at[1], e2.at[2], a + 1, p.号);
+                            *新眼.borrow_mut() = Some(e2); break
+                        }
+                        Some(e2) => println!("[身]     从样本解出的相机不合格(焦距 {:.1}/{:.1} · 主点 ({:.0},{:.0})),不收", e2.fx, e2.fy, e2.cx, e2.cy),
+                        None => println!("[身]     从样本解相机:几何退化,解不出"),
+                    }
+                }
+            }
+            if 眼.is_none() && 新眼.borrow().is_none() && !是关节 {
                 for (pi, p) in 项们.iter().enumerate() {
                     if !p.是我 || p.投影 || p.通道 < 臂通道数 { continue }
                     let Some(a) = 手于(p.通道) else { continue };
