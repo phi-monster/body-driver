@@ -6039,8 +6039,9 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         if !无深 && (z - p.现.2).abs() > 容z + p.尺m { return None }
                         Some((u, v, z))
                     };
-                    let 窗内 = 找块窗(fw, fh, &g, &p.模, p.半, p.现.0 - p.偏.0, p.现.1 - p.偏.1, p.半 * 3).map(|(u, v)| (u + p.偏.0, v + p.偏.1)).and_then(|(u, v)| 合格(plug, u, v));
-                    let 得 = match 窗内 { Some(x) => Some(x), None => 找块(fw, fh, &g, &p.模, p.半).map(|(u, v)| (u + p.偏.0, v + p.偏.1)).and_then(|(u, v)| 合格(plug, u, v)) };
+                    // 🔴 只在窗里找,**不许全画面找**:另一只手的钳口长得一模一样、深度也差不多,全画面一找就锁到它身上,
+                    //    之后每一步"位移"都是 0(CZ 实测:六个通道的列全是 0.000)。窗里找不到 = 跟丢,由调用方减半再探。
+                    let 得 = 找块窗(fw, fh, &g, &p.模, p.半, p.现.0 - p.偏.0, p.现.1 - p.偏.1, p.半 * 3).map(|(u, v)| (u + p.偏.0, v + p.偏.1)).and_then(|(u, v)| 合格(plug, u, v));
                     新.push(得?);
                 }
                 for (p, x) in 项们.iter_mut().zip(新) { p.现 = x; }
@@ -6377,7 +6378,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
                             match 读深(plug, u, v, 窗) { Some(z) => { if (z - (现.2 + dz)).abs() <= 容 { 得 = Some((u, v, z)); } else { 看过.push(format!("窗内 ({u:.3},{v:.3}) 深 {z:.3}")); } } None => 看过.push(format!("窗内 ({u:.3},{v:.3}) 无深")) }
                         }
                         if 得.is_none() {
-                            if let Some((u, v)) = 找块(fw, fh, &g, &模, 半).map(|(u, v)| (u + 偏.0, v + 偏.1)) {
+                            // 兜底不许全画面(另一只手的钳口一模一样),只在预测位置四分之一画幅(比例,无量纲)以内再找一次。
+                            if let Some((u, v)) = 找块窗(fw, fh, &g, &模, 半, 现.0 + du - 偏.0, 现.1 + dv - 偏.1, fw / 4).map(|(u, v)| (u + 偏.0, v + 偏.1)) {
                                 match 读深(plug, u, v, 窗) { Some(z) => { if (z - (现.2 + dz)).abs() <= 容 { 得 = Some((u, v, z)); } else { 看过.push(format!("全画面 ({u:.3},{v:.3}) 深 {z:.3}")); } } None => 看过.push(format!("全画面 ({u:.3},{v:.3}) 无深")) }
                             }
                         }
