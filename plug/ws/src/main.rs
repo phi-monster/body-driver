@@ -5703,12 +5703,9 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     // 这样从哪个方向进,手指都夹在它中间;贴着我自己的一块 = 就是那一点。
                     let 中段 = match 条目.get(c.相对.wrapping_sub(1)) { Some(&(false, ri, _)) => 世界槽.borrow().get(ri).copied().flatten().map(|r| if r.高.is_finite() { r.高 * 0.5 } else { 0.0 }).unwrap_or(0.0), _ => 0.0 };
                     match c.方位.as_str() {
-                        "at" => {
-                            // 我的瓣去世界里的一块:目标 = 那块的接触点,要等探完通道、解出相机(焦距量到了)再算;先记下来。
-                            let 是瓣 = matches!(条目.get(c.号.wrapping_sub(1)), Some(&(true, k, _)) if k >= 臂通道数 && k < usize::MAX - 200);
-                            if 是瓣 { 待接触 = Some(c.相对); (现, 1.0, format!("item {} to the contact points on item {} (computed after the probe)", c.号, c.相对)) }
-                            else { ((心o.0, 心o.1, zo + 中段), 1.0, format!("item {} at item {}", c.号, c.相对)) }
-                        }
+                        // 🔴 "at" 就是画面里的目标(那块的像素 + 近侧深度 + 它鼓起的一半),不算三维接触点、不解相机(解相机记录判死,9-4/5 又烧了 8 炮)。
+                        //    从哪边进由模型自己说(front = 离相机近一截 = 沿视线停在外面;above = 沿量到的支撑面法向)。驱动不替它定。
+                        "at" => { let _ = &mut 待接触; ((心o.0, 心o.1, zo + 中段), 1.0, format!("item {} at item {}", c.号, c.相对)) }
                         "left" | "right" => {
                             let s = if c.方位 == "left" { -1.0 } else { 1.0 };
                             ((心o.0 + s * (框[2] - 框[0]).max(1.0 / fw as f64), 心o.1, zo), 1.0, format!("item {} {} of item {}", c.号, c.方位, c.相对))
@@ -6306,7 +6303,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
             }
             // 抓握 at X:瓣到了接触点(或再也近不了、或顶住)才合 —— 合到读数不再变。跟丢 / 拒绝 / 撞 / 解不出的那几种结局不合。
             if let Some((a, _)) = 合后 {
-                let 可合 = 段 >= 2 && !(事件.starts_with("lost sight") || 事件.starts_with("stopped:") || 事件.starts_with("the body refused") || 事件.starts_with("could not solve") || 事件.starts_with("resist: the body refuses"));
+                let 可合 = !(事件.starts_with("lost sight") || 事件.starts_with("stopped:") || 事件.starts_with("the body refused") || 事件.starts_with("could not solve") || 事件.starts_with("resist: the body refuses") || 事件.starts_with("hit the safety cap") || 事件.starts_with("(look only)"));
+                let _ = 段;
                 if 可合 {
                     爪令.set(Some((a, 0.0)));
                     let (mut 停, mut n) = (0u32, 0u32);
