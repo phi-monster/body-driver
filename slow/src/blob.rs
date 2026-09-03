@@ -393,7 +393,9 @@ fn fold_opposed(raw: Vec<(Candidate, f64, f64)>) -> (Vec<Candidate>, u32, (f64, 
                 if pair_dir == (0.0, 0.0) {
                     pair_dir = (cj.u - ci.u, cj.v - ci.v);
                 }
-                if halves.is_none() {
+                // 几对都配得上时,记像素最多的那一对(CX 实测:第一对是两条边带,方向竖着;真钳口那对更大)。
+                let 这对 = ci.pixels + cj.pixels;
+                if halves.map(|(a, b)| a.pixels + b.pixels < 这对).unwrap_or(true) {
                     halves = Some(if ci.u <= cj.u { (ci, cj) } else { (cj, ci) });
                 }
                 out.push(Candidate {
