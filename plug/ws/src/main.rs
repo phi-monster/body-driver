@@ -6506,6 +6506,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
             }
             步缩.set(缩);
             爪令.set(None);
+            // 只看不动时抓握也没发过 ⇒ 不许拿"张开的读数比空合高"报成"指间有东西"(DF 实测:模型据此以为已经夹住了)。
+            let 合 = if 算不出.is_none() && !事件.starts_with("(look only)") { 合 } else { None };
             if let Some((_, s)) = 合 {
                 jaw = 爪读;
                 if s < 0.0 {
