@@ -6032,11 +6032,16 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 let mut 新: Vec<(f64, f64, f64)> = Vec::new();
                 for p in 项们.iter() {
                     if p.投影 { 新.push(投影自(&f, 眼, p.末)?); continue }
-                    let (u, v) = 找块窗(fw, fh, &g, &p.模, p.半, p.现.0 - p.偏.0, p.现.1 - p.偏.1, p.半 * 3)?;
-                    let (u, v) = (u + p.偏.0, v + p.偏.1);
-                    let z = 读深(plug, u, v, p.窗)?;
-                    if !无深 && (z - p.现.2).abs() > 容z + p.尺m { return None }
-                    新.push((u, v, z));
+                    // 先在上次位置附近找;找到的那一点深度要对得上(容差 = 这一步允许的深度变化 + 块自己的尺寸)。
+                    // 对不上就全画面再找一遍(块被甩出了窗);还对不上 = 跟丢(CY 实测:窗里锁到别的东西,深度差 0.3 m 照样收)。
+                    let 合格 = |plug: &mut Plug<S>, u: f64, v: f64| -> Option<(f64, f64, f64)> {
+                        let z = 读深(plug, u, v, p.窗)?;
+                        if !无深 && (z - p.现.2).abs() > 容z + p.尺m { return None }
+                        Some((u, v, z))
+                    };
+                    let 窗内 = 找块窗(fw, fh, &g, &p.模, p.半, p.现.0 - p.偏.0, p.现.1 - p.偏.1, p.半 * 3).map(|(u, v)| (u + p.偏.0, v + p.偏.1)).and_then(|(u, v)| 合格(plug, u, v));
+                    let 得 = match 窗内 { Some(x) => Some(x), None => 找块(fw, fh, &g, &p.模, p.半).map(|(u, v)| (u + p.偏.0, v + p.偏.1)).and_then(|(u, v)| 合格(plug, u, v)) };
+                    新.push(得?);
                 }
                 for (p, x) in 项们.iter_mut().zip(新) { p.现 = x; }
                 Some(())
@@ -6091,19 +6096,20 @@ fn 服务<S: std::io::Read + std::io::Write>(
                         else { 备注.push(format!("channel {c} never delivered half of what I asked, down to {幅:.4}")); println!("[身]     探通道 {c}:幅 {幅:.4} 只走了 {到:.4},不再缩"); break }
                     }
                     // 走完这一步还得跟得住每一块(在搜索窗里、深度对得上);跟丢了 = 这一档太大 ⇒ 退回去、减半再探。探针要落在"跟得住"的那一档里。
-                    if 读所有(plug, &mut 项们, 幅 * 2.0).is_none() {
-                        动[c] = -到 * r1.get(c).copied().unwrap_or(0.0).signum(); let _ = 发(plug, &动, 1.0, 等拍 * 2); let _ = 读所有(plug, &mut 项们, 幅 * 2.0);
+                    if 读所有(plug, &mut 项们, 到 + 深噪).is_none() {
+                        动[c] = -到 * r1.get(c).copied().unwrap_or(0.0).signum(); let _ = 发(plug, &动, 1.0, 等拍 * 2); let _ = 读所有(plug, &mut 项们, 到 + 深噪);
                         if 试 < 8 && 幅 * 0.5 > 实到噪 { 缩p *= 0.5; 缩探 = 缩探.min(缩p); 试 += 1; println!("[身]     探通道 {c}:幅 {幅:.4} 走完跟丢了块 ⇒ 退回,减半再探"); continue }
                         else { 备注.push(format!("channel {c}: I lose track of my pieces at any probe size")); println!("[身]     探通道 {c}:幅 {幅:.4} 跟丢,不再缩"); break }
                     }
                     let 中: Vec<(f64, f64, f64)> = 项们.iter().map(|p| p.现).collect();
                     动[c] = -幅 * 2.0;
                     let Some((r2, _)) = 发(plug, &动, 1.0, 等拍 * 2) else { break };
-                    let 回跟住 = 读所有(plug, &mut 项们, 幅 * 3.0).is_some();
+                    let 净0 = r2.get(c).copied().unwrap_or(0.0).abs();
+                    let 回跟住 = 读所有(plug, &mut 项们, 净0 + 深噪).is_some();
                     let 后: Vec<(f64, f64, f64)> = 项们.iter().map(|p| p.现).collect();
                     动[c] = 幅;
                     let _ = 发(plug, &动, 1.0, 等拍 * 2);
-                    let _ = 读所有(plug, &mut 项们, 幅 * 3.0);
+                    let _ = 读所有(plug, &mut 项们, 净0 + 深噪);
                     if !回跟住 { 备注.push(format!("channel {c}: lost track of my pieces on the way back; not trusting that column")); println!("[身]     探通道 {c}:回程跟丢 ⇒ 这一列不记"); break }
                     let 净 = r2.get(c).copied().unwrap_or(0.0);
                     // 只有这个通道真的走了探针的一大半,它的列才算数:除以一个接近零的"实到"会把列撑到几十画幅/单位,
