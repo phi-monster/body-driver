@@ -6192,6 +6192,19 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 let 动: Vec<f64> = 动.iter().map(|x| x.clamp(-顶, 顶)).collect();
                 let 幅 = 动.iter().take(通道数).map(|x| x.abs()).fold(0.0, f64::max);
                 let mut 比 = 1.0f64;
+                // 🔴 步子不许比"这一步还跟得住"大:预计每一块在画面里跑的距离 ≤ 模板搜索半径(3 个模板半径,和跟踪用的同一个窗);超了整体按比例缩。
+                //    走成了就 ×1.5 放大、没有上限 ⇒ 手指一认错就越走越大、横扫全桌(owner:"发疯摧毁桌面",近百炮)。上限是跟踪器自己的窗,不是拍的数。
+                {
+                    let mut 最 = 1.0f64;
+                    for (pi, p) in 项们.iter().enumerate() {
+                        if p.投影 { continue }
+                        let du: f64 = (0..列数).map(|c| 表[c][3 * pi] * 动[c]).sum::<f64>() * fw as f64;
+                        let dv: f64 = (0..列数).map(|c| 表[c][3 * pi + 1] * 动[c]).sum::<f64>() * fh as f64;
+                        let d = du.hypot(dv); let 窗 = (p.半 * 3) as f64;
+                        if d > 窗 && d > 0.0 { 最 = 最.min(窗 / d); }
+                    }
+                    if 最 < 1.0 { 比 *= 最; }
+                }
                 if 幅 <= 实到噪 {
                     if 换段(&mut 项们) { 上差 = 差于(&误于(&项们)); 不缩 = 0; 减半次 = 0; 静 = 0; 段 += 1; println!("[身]     到了接触点外面那一点 ⇒ 第二段:沿空隙那一侧进到接触点"); continue }
                     事件 = "amount: already there (what is left to push is within my own noise)".into(); break
