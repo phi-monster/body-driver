@@ -6197,8 +6197,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 {
                     let mut 最 = 1.0f64;
                     for (pi, p) in 项们.iter().enumerate() {
-                        if p.投影 { continue }
                         let du: f64 = (0..列数).map(|c| 表[c][3 * pi] * 动[c]).sum::<f64>() * fw as f64;
+                        let _ = p.投影;
                         let dv: f64 = (0..列数).map(|c| 表[c][3 * pi + 1] * 动[c]).sum::<f64>() * fh as f64;
                         let d = du.hypot(dv); let 窗 = (p.半 * 3) as f64;
                         if d > 窗 && d > 0.0 { 最 = 最.min(窗 / d); }
@@ -6235,7 +6235,9 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     走了 + 1, 差于(&误), 动.iter().map(|x| format!("{x:+.3}")).collect::<Vec<_>>().join(" "), 比,
                     实到.iter().map(|x| format!("{x:+.4}")).collect::<Vec<_>>().join(" "), 挡);
                 let 前: Vec<(f64, f64, f64)> = 项们.iter().map(|p| p.现).collect();
-                let 命: Vec<f64> = (0..列数).map(|c| 实到.get(c).copied().unwrap_or(0.0)).collect();
+                // 修表只算我命令过的通道:没命令它却动了的(DK:只发平移,转动通道自己跑 0.5 rad)是身体自己的事,不是我的杠杆 ——
+                // 记到它们头上,下一步解算就会去拧那些通道,越拧越乱(DK 末段 12 个通道全 ±0.26,横扫)。
+                let 命: Vec<f64> = (0..列数).map(|c| if 动.get(c).map(|x| x.abs() > 1e-12).unwrap_or(false) { 实到.get(c).copied().unwrap_or(0.0) } else { 0.0 }).collect();
                 let Some(f) = plug.sense() else { 事件 = "lost the picture".into(); break };
                 let Some((_, _, g)) = 灰(&f, 工作相机.get()) else { 事件 = "lost the picture".into(); break };
                 let mut 丢 = None;
@@ -6286,7 +6288,12 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     }
                 }
                 let 实最大 = 实到.iter().take(通道数).map(|x| x.abs()).fold(0.0, f64::max);
-                let 被拒 = 挡 || 实最大 <= 实到噪;    // 一步都没走(在本体自己的噪声以内)
+                // 没命令的通道动得比命令的还多 = 身体没照我说的做(仿真 IK 换支,手腕自转)⇒ 当被拒处理:步子减半再来。量出来的比较,没有阈值。
+                let 正 = (0..通道数).filter(|&c| 动.get(c).map(|x| x.abs() > 1e-12).unwrap_or(false)).map(|c| 实到.get(c).copied().unwrap_or(0.0).abs()).fold(0.0, f64::max);
+                let 乱 = (0..通道数).filter(|&c| !动.get(c).map(|x| x.abs() > 1e-12).unwrap_or(false)).map(|c| 实到.get(c).copied().unwrap_or(0.0).abs()).fold(0.0, f64::max);
+                let 乱动 = 乱 > 实到噪 && 乱 > 正;
+                if 乱动 { println!("[身]     没命令的通道动了 {乱:.3},比命令的 {正:.3} 还多 ⇒ 身体没照做,当被拒"); }
+                let 被拒 = 挡 || 实最大 <= 实到噪 || 乱动;    // 一步都没走(在本体自己的噪声以内)/ 身体自己乱动
                 if 被拒 && 减半次 < 8 && 幅0 * 缩 * 0.5 > 实到噪 {
                     缩 *= 0.5; 减半次 += 1;
                     println!("[身]     一步没走(被拒)⇒ 步子减半重试({减半次}/8,现在 {:.4})", 幅0 * 缩);
