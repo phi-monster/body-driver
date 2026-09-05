@@ -5714,11 +5714,11 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     let Some(模) = (if 半 > 0 { 截块(fw, fh, &g, 心m.0, 心m.1, 半) } else { None }) else {
                         return format!("goal {}: item {} sits at the edge of the picture, I cannot cut a template to track it.", i + 1, c.号) };
                     // 瓣的深度在"合起来那一块"的中心、按模板半径读:瓣中心贴着指边,四分位一会儿读到手指一会儿读到桌面,跳 0.15 m(DC 实测)。
-                    let (zu, zv, z窗) = if 是瓣 { (心m.0, 心m.1, (半 as f64 / fw as f64).max(1.0 / fw as f64)) } else { (心.0, 心.1, 窗) };
+                    let (zu, zv, z窗) = if 是瓣 { (心m.0, 心m.1, (半 as f64 * 0.5 / fw as f64).max(1.0 / fw as f64)) } else { (心.0, 心.1, 窗) };
                     let Some(z) = 读深(plug, zu, zv, z窗) else { return format!("goal {}: item {} has no depth reading.", i + 1, c.号) };
                     (模, 半, (心.0, 心.1, z))
                 };
-                let 窗 = if 是瓣 { (半 as f64 / fw as f64).max(1.0 / fw as f64) } else { 窗 };
+                let 窗 = if 是瓣 { (半 as f64 * 0.5 / fw as f64).max(1.0 / fw as f64) } else { 窗 };
                 let z = 现.2;
                 let 米 = |px: f64, z: f64| -> f64 { match 眼 { Some(e) => px * z / e.fx.max(1e-9), None => px * z / fw as f64 } };
                 let 尺m = 米(短, z).max(1e-3);
@@ -6344,9 +6344,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 // 没命令的通道动得比命令的还多 = 身体没照我说的做(仿真 IK 换支,手腕自转)⇒ 当被拒处理:步子减半再来。量出来的比较,没有阈值。
                 let 正 = (0..通道数).filter(|&c| 动.get(c).map(|x| x.abs() > 1e-12).unwrap_or(false)).map(|c| 实到.get(c).copied().unwrap_or(0.0).abs()).fold(0.0, f64::max);
                 let 乱 = (0..通道数).filter(|&c| !动.get(c).map(|x| x.abs() > 1e-12).unwrap_or(false)).map(|c| 实到.get(c).copied().unwrap_or(0.0).abs()).fold(0.0, f64::max);
-                let 乱动 = 乱 > 实到噪 && 乱 > 正;
-                if 乱动 { println!("[身]     没命令的通道动了 {乱:.3},比命令的 {正:.3} 还多 ⇒ 身体没照做,当被拒"); }
-                let 被拒 = 挡 || 实最大 <= 实到噪 || 乱动;    // 一步都没走(在本体自己的噪声以内)/ 身体自己乱动
+                let _ = (正, 乱);   // 乱动只在上面记账、报给模型;不当被拒(弧度和米比不到一块,DN 实测又把步子减到 0.1 mm)
+                let 被拒 = 挡 || 实最大 <= 实到噪;    // 一步都没走(在本体自己的噪声以内)
                 if 被拒 && 减半次 < 8 && 幅0 * 缩 * 0.5 > 实到噪 {
                     缩 *= 0.5; 减半次 += 1;
                     println!("[身]     一步没走(被拒)⇒ 步子减半重试({减半次}/8,现在 {:.4})", 幅0 * 缩);
