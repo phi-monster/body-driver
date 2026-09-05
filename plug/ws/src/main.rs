@@ -5923,7 +5923,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
             let 幅0 = 可达带[1].max(1e-6);
             let (mut 缩, mut 减半次) = (步缩.get().clamp(1.0 / 64.0, 1.0), 0u32);
             // 表是初值、不是探出来的 ⇒ 步子从可达带的十分之一起(和探针一样的比例),不从整个可达带起(CT:0.68 m 连拒 13 步)。
-            if 种了 { 缩 = 缩.min(0.1); }
+            // 记录 8-15:"一步跨 0.68 m = 一步都不动;封顶 2 cm ⇒ 实走 41 cm";DK:0.068 m 的步手腕翻 0.65 rad、0.034 m 只有 0.03–0.09。比例,无量纲。
+            if 种了 { 缩 = 缩.min(1.0 / 32.0); }
             let mut 缩探 = 缩;   // 探针实际接受的比例(走了至少一半的那一档),步子从它起
             // ── 没有存表的通道:现场来回探一遍(读的是所有点)。被拒的幅度减半再探。──
             // 只探点名的块所在那几只手的通道(别的手对这些块的系数本来就是零);速度通道照探。
@@ -6265,6 +6266,17 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 if let Some(bi) = 撞死 { 事件 = format!("stopped: every step would push me onto a thing I must not touch (box {})", bi + 1); break }
                 let 臂: Vec<f64> = 动.iter().take(通道数).copied().collect();
                 let Some((实到, 挡)) = 发(plug, &臂, 比, 稳拍) else { 事件 = "the body refused the command".into(); break };
+                // 🔴 没命令的通道动得比命令的还多(仿真手腕自转)⇒ 先减半、抖认把瓣找回来,再走;不能等到跟丢再判(DL:同一条命令每次同样翻 0.65 rad,一步就丢)。
+                {
+                    let 正 = (0..通道数).filter(|&c| 动.get(c).map(|x| x.abs() > 1e-12).unwrap_or(false)).map(|c| 实到.get(c).copied().unwrap_or(0.0).abs()).fold(0.0, f64::max);
+                    let 乱 = (0..通道数).filter(|&c| !动.get(c).map(|x| x.abs() > 1e-12).unwrap_or(false)).map(|c| 实到.get(c).copied().unwrap_or(0.0).abs()).fold(0.0, f64::max);
+                    if 乱 > 实到噪 && 乱 > 正 && 减半次 < 8 && 幅0 * 缩 * 0.5 > 实到噪 {
+                        缩 *= 0.5; 减半次 += 1;
+                        println!("[身]     没命令的通道动了 {乱:.3},比命令的 {正:.3} 还多 ⇒ 身体没照做,步子减半({减半次}/8,现在 {:.4}),抖认找回瓣再走", 幅0 * 缩);
+                        if 读所有(plug, &mut 项们, f64::INFINITY, true).is_none() { 事件 = "lost sight of my pieces after the body moved on its own (I will re-find that hand by moving its grip next turn)".into(); for p in 项们.iter() { if p.是我 && !p.投影 { if let Some(a) = 手于(p.通道) { 需抖.borrow_mut().insert(a); 身位.borrow_mut().remove(&a); } } } break }
+                        continue;
+                    }
+                }
                 println!("[身]     步 {}:误 {:.3} · 解 [{}] × {:.3} · 实到 [{}] · 挡={}",
                     走了 + 1, 差于(&误), 动.iter().map(|x| format!("{x:+.3}")).collect::<Vec<_>>().join(" "), 比,
                     实到.iter().map(|x| format!("{x:+.4}")).collect::<Vec<_>>().join(" "), 挡);
