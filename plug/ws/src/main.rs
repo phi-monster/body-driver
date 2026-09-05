@@ -6184,6 +6184,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
             let mut 上差 = 差于(&误于(&项们));
             let (mut 不缩, mut 走了, mut 静, mut 连成) = (0u32, 0u32, 0u32, 0u32);
             let mut 事件 = String::from("hit the safety cap on steps");
+            // 身体自己动了多少(没命令的通道):量出来的事实,回话里要说 —— 模型才知道"身体没照做",不是只听到"跟丢了"。
+            let (mut 乱最, mut 乱次) = (0.0f64, 0u32);
             // 第二段:外面那一点到了(或不再靠近)⇒ 把目标换成接触点本身,沿空隙那一侧进去。
             let 换段 = |项们: &mut Vec<项>| -> bool { let mut 换 = false; for p in 项们.iter_mut() { if let Some(t) = p.该2.take() { p.该 = t; 换 = true; } } 换 };
             let mut 段 = 1u32;
@@ -6270,6 +6272,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 {
                     let 正 = (0..通道数).filter(|&c| 动.get(c).map(|x| x.abs() > 1e-12).unwrap_or(false)).map(|c| 实到.get(c).copied().unwrap_or(0.0).abs()).fold(0.0, f64::max);
                     let 乱 = (0..通道数).filter(|&c| !动.get(c).map(|x| x.abs() > 1e-12).unwrap_or(false)).map(|c| 实到.get(c).copied().unwrap_or(0.0).abs()).fold(0.0, f64::max);
+                    if 乱 > 实到噪 && 乱 > 正 { 乱最 = 乱最.max(乱); 乱次 += 1; }
                     if 乱 > 实到噪 && 乱 > 正 && 减半次 < 8 && 幅0 * 缩 * 0.5 > 实到噪 {
                         缩 *= 0.5; 减半次 += 1;
                         println!("[身]     没命令的通道动了 {乱:.3},比命令的 {正:.3} 还多 ⇒ 身体没照做,步子减半({减半次}/8,现在 {:.4}),抖认找回瓣再走", 幅0 * 缩);
@@ -6441,6 +6444,7 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 if 抓法数 > 0 { format!(" (contact-point approach: ended in phase {段} of 2)") } else { String::new() }, 末,
                 项们.iter().map(|p| format!("item {} now at ({:.2},{:.2}) depth {:.2}", p.号, p.现.0, p.现.1, p.现.2)).collect::<Vec<_>>().join(", "),
                 if 备注.is_empty() { String::new() } else { format!(" note: {}", 备注.join("; ")) }, 握);
+            let 报 = if 乱次 > 0 { format!("{报} My body also moved channels I did not command ({乱次} times, up to {乱最:.2} per step): the hand turned on its own while I pushed; I halved my steps each time.") } else { 报 };
             println!("[身]   ⇒ {报}");
             报
         };
