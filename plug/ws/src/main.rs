@@ -4660,6 +4660,8 @@ fn 服务<S: std::io::Read + std::io::Write>(
     let 爪令: std::cell::Cell<Option<(usize, f64)>> = std::cell::Cell::new(None);
     // 世界里的块跨轮对号:槽位就是它的号,同一块下一轮还是同一个号;不见了槽位留空(不列),新块占新槽。
     let 世界槽: std::cell::RefCell<Vec<Option<point_gen::区>>> = std::cell::RefCell::new(Vec::new());
+    // 每个槽上次看见的块(影子):槽空了(被胳膊挡住 / 切块没切出来)也记着它在哪,块回来就落回原槽,不开新号(DK 实测:球的号 24→50→56→60,模型追着号跑)。
+    let 世界影: std::cell::RefCell<Vec<Option<point_gen::区>>> = std::cell::RefCell::new(Vec::new());
     // 这一轮在哪台相机里列块、问模型、执行(模型可点名换相机;换了下一轮生效)。
     let 工作相机: std::cell::Cell<usize> = std::cell::Cell::new(相机号);
     // 🔴 连着几次认不出接触面 —— 到三次就当成"这台相机看不见我的钳口张合"这条身体事实。
@@ -5441,9 +5443,12 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 // 块跨轮对号:老槽里的块在新块里找"离得最近且在它自己半个框以内"的那一个 ⇒ 同号;没对上的老槽留空;剩下的新块占新槽。
                 {
                     let mut 槽 = 世界槽.borrow_mut();
+                    let mut 影 = 世界影.borrow_mut();
+                    while 影.len() < 槽.len() { 影.push(None); }
                     let mut 用过 = vec![false; 区们.len()];
-                    for s in 槽.iter_mut() {
-                        let Some(o) = *s else { continue };
+                    for (si, s) in 槽.iter_mut().enumerate() {
+                        // 对号的参照:槽里现在的块;槽空了就用它的影子(上次看见的位置)。
+                        let Some(o) = s.or(影[si]) else { continue };
                         let (ou, ov) = (o.心[0], o.心[1]);
                         let 容 = (((o.框[2] - o.框[0]) as f64 / cw4 as f64).max((o.框[3] - o.框[1]) as f64 / ch4 as f64) * 0.5).max(1.0 / cw4 as f64);
                         let mut 最 = None;
@@ -5452,9 +5457,9 @@ fn 服务<S: std::io::Read + std::io::Write>(
                             let d = (r.心[0] - ou).hypot(r.心[1] - ov);
                             if d <= 容 && 最.map(|(_, b)| d < b).unwrap_or(true) { 最 = Some((ri, d)); }
                         }
-                        match 最 { Some((ri, _)) => { 用过[ri] = true; *s = Some(区们[ri]); } None => { *s = None; } }
+                        match 最 { Some((ri, _)) => { 用过[ri] = true; *s = Some(区们[ri]); 影[si] = Some(区们[ri]); } None => { *s = None; } }
                     }
-                    for (ri, r) in 区们.iter().enumerate() { if !用过[ri] { 槽.push(Some(*r)); } }
+                    for (ri, r) in 区们.iter().enumerate() { if !用过[ri] { 槽.push(Some(*r)); 影.push(Some(*r)); } }
                 }
                 for (si, s) in 世界槽.borrow().iter().enumerate() {
                     let Some(r) = s else { 条目.push((false, si, (-1.0, -1.0))); continue };
@@ -5471,11 +5476,40 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 // 相机表:1 = 这张图;其余按序号列,长在手上的说明一下(量出来的:那只手一动整幅画都变)。
                 {
                     let 台 = plug.lay.cams.len();
+                    // 每只手长着的那台相机(量出来的:这只手一动,哪台相机整幅都变)里,任务要的那东西在不在 ——
+                    // 让眼自己看那台相机的画面在切出来的块里挑(0 = 一块都不是)。这是表里固定的一列,任何任务都有,不是为哪一炮加的话。
+                    let mut 手相机行: Vec<String> = Vec::new();
+                    for a in 0..帧.ee.len().max(1) {
+                        let Some(变) = 台变.get(a) else { continue };
+                        let mut 最 = None::<(usize, f64)>;
+                        for (c, v) in 变.iter().enumerate() { if c == 工作相机.get() { continue } if 最.map(|(_, b)| *v > b).unwrap_or(true) { 最 = Some((c, *v)); } }
+                        let Some((c, v)) = 最 else { continue };
+                        if !(v > 变.get(工作相机.get()).copied().unwrap_or(0.0)) { continue }   // 没有一台比世界相机变得更多 ⇒ 这只手上没相机
+                        let 答 = (|| -> Option<bool> {
+                            let (cw, ch, rgbc) = 彩(&帧, c)?;
+                            let dep = 深图(plug, c)?;
+                            if dep.len() != cw * ch { return None }
+                            let mut v = point_gen::分块(&dep, cw, ch, selfcal::最少像素(cw, ch) as usize, 3.0);
+                            v.retain(|r| r.框[0] > 0 && r.框[1] > 0 && r.框[2] + 1 < cw && r.框[3] + 1 < ch);
+                            let 取几 = v.len().min(12);
+                            if 取几 == 0 { return Some(false) }
+                            let mut 图 = rgbc.to_vec();
+                            for (i, r) in v.iter().take(取几).enumerate() { 画编号框(&mut 图, cw, ch, r.框, i + 1, [255, 32, 32], 2); }
+                            match body_layer::eye::pick(眼主机, 眼端口, &指令, &图, cw, ch, 取几) { Ok(p) => Some(p.region >= 1 && p.region <= 取几), Err(_) => None }
+                        })();
+                        let mut k = 2; let mut 号k = 0; for ci in 0..plug.lay.cams.len() { if ci == 工作相机.get() { continue } if ci == c { 号k = k; } k += 1; }
+                        手相机行.push(match 答 {
+                            Some(true) => format!("- the camera riding on arm {} (camera {}) DOES show the thing the task refers to (you looked through it and picked it out)", a + 1, 号k),
+                            Some(false) => format!("- the camera riding on arm {} (camera {}) does NOT show the thing the task refers to (you looked through it: none of its things is it)", a + 1, 号k),
+                            None => format!("- the camera riding on arm {} (camera {}) could not be checked this turn", a + 1, 号k),
+                        });
+                    }
                     let mut 行 = format!("CAMERAS (say camera = k to answer about that camera's picture next turn): 1 = this picture (camera index {})", 工作相机.get());
                     let mut k = 2;
                     for ci in 0..台 { if ci == 工作相机.get() { continue }
                         行.push_str(&format!("; {} = camera index {}{}", k, ci, if 手上相机.get() == Some(ci) { " (rides on a hand)" } else { "" })); k += 1; }
                     t.push_str(&行); t.push('\n');
+                    for l in 手相机行.iter() { t.push_str(l); t.push('\n'); }
                 }
                 // 它上次定的那块是第几号(量的:哪个世界块的框套着那一点,几个套着就取中心最近的)—— CV 实测:只说格子,它把隔壁的 24 号当成了 25 号。
                 let 定号 = {
