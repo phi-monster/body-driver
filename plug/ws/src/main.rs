@@ -6234,8 +6234,9 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 {
                     let mut 最 = 1.0f64;
                     for (pi, p) in 项们.iter().enumerate() {
+                        // 投影的块(手腕)没有模板、半径 0 ⇒ 没有"跟得住"这回事,不拿它封顶(DM 实测:封成 ×0.000,每步都成"一步没走")。
+                        if p.投影 || p.半 == 0 { continue }
                         let du: f64 = (0..列数).map(|c| 表[c][3 * pi] * 动[c]).sum::<f64>() * fw as f64;
-                        let _ = p.投影;
                         let dv: f64 = (0..列数).map(|c| 表[c][3 * pi + 1] * 动[c]).sum::<f64>() * fh as f64;
                         let d = du.hypot(dv); let 窗 = (p.半 * 3) as f64;
                         if d > 窗 && d > 0.0 { 最 = 最.min(窗 / d); }
@@ -6272,13 +6273,9 @@ fn 服务<S: std::io::Read + std::io::Write>(
                 {
                     let 正 = (0..通道数).filter(|&c| 动.get(c).map(|x| x.abs() > 1e-12).unwrap_or(false)).map(|c| 实到.get(c).copied().unwrap_or(0.0).abs()).fold(0.0, f64::max);
                     let 乱 = (0..通道数).filter(|&c| !动.get(c).map(|x| x.abs() > 1e-12).unwrap_or(false)).map(|c| 实到.get(c).copied().unwrap_or(0.0).abs()).fold(0.0, f64::max);
-                    if 乱 > 实到噪 && 乱 > 正 { 乱最 = 乱最.max(乱); 乱次 += 1; }
-                    if 乱 > 实到噪 && 乱 > 正 && 减半次 < 8 && 幅0 * 缩 * 0.5 > 实到噪 {
-                        缩 *= 0.5; 减半次 += 1;
-                        println!("[身]     没命令的通道动了 {乱:.3},比命令的 {正:.3} 还多 ⇒ 身体没照做,步子减半({减半次}/8,现在 {:.4}),抖认找回瓣再走", 幅0 * 缩);
-                        if 读所有(plug, &mut 项们, f64::INFINITY, true).is_none() { 事件 = "lost sight of my pieces after the body moved on its own (I will re-find that hand by moving its grip next turn)".into(); for p in 项们.iter() { if p.是我 && !p.投影 { if let Some(a) = 手于(p.通道) { 需抖.borrow_mut().insert(a); 身位.borrow_mut().remove(&a); } } } break }
-                        continue;
-                    }
+                    // 只记、只报,不拿它减半:转动(弧度)和平移(米)比不到一块去 —— DM 实测 2 cm 的步配 0.04 rad 的手腕小晃就被一路减到 0.13 cm,什么都走不了。
+                    // 该不该减半由"手指还跟不跟得住"说了算(下面跟丢那一支)。
+                    if 乱 > 实到噪 && 乱 > 正 { 乱最 = 乱最.max(乱); 乱次 += 1; println!("[身]     没命令的通道动了 {乱:.3}(命令的 {正:.3})—— 记着,报给模型"); }
                 }
                 println!("[身]     步 {}:误 {:.3} · 解 [{}] × {:.3} · 实到 [{}] · 挡={}",
                     走了 + 1, 差于(&误), 动.iter().map(|x| format!("{x:+.3}")).collect::<Vec<_>>().join(" "), 比,
@@ -6320,6 +6317,13 @@ fn 服务<S: std::io::Read + std::io::Write>(
                     match 读 { Some(x) => 项们[pi].现 = x, None => { 丢 = Some(项们[pi].号); } }
                 }
                 if let Some(k) = 丢 {
+                    // 跟丢 = 这一步大到跟不住(手腕翻了 / 甩出窗口)⇒ 步子减半、抖认把瓣找回来、接着走;减半用尽或找不回来,才结束这一段。
+                    let 是瓣丢 = 项们.iter().any(|p| p.号 == k && p.是瓣);
+                    if 是瓣丢 && 减半次 < 8 && 幅0 * 缩 * 0.5 > 实到噪 && 读所有(plug, &mut 项们, f64::INFINITY, true).is_some() {
+                        缩 *= 0.5; 减半次 += 1;
+                        println!("[身]     跟丢第 {k} 号 ⇒ 抖认找回来了,步子减半({减半次}/8,现在 {:.4}),接着走", 幅0 * 缩);
+                        continue;
+                    }
                     // 跟丢的是哪只手的手指 ⇒ 记下来,下一轮抖它的抓握重新认。
                     for p in 项们.iter() { if p.号 == k && p.是我 && !p.投影 { if let Some(a) = 手于(p.通道) { 需抖.borrow_mut().insert(a); 身位.borrow_mut().remove(&a); } } }
                     事件 = format!("lost sight of item {k} while moving (I will re-find that hand by moving its grip next turn)"); break
