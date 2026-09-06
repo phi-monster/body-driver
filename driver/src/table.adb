@@ -131,7 +131,7 @@ package body Table is
       return S / Long_Float (E.N);
    end Spread;
 
-   procedure Solve (Terms : Term_Vectors.Vector; N : Natural; Cap : Vec; Active : Mask; Mu : Long_Float;
+   procedure Solve (Terms : Term_Vectors.Vector; N : Natural; Cap : Vec; Active : Mask; Damp : Vec;
                     A : out Vec; Ok : out Boolean) is
       Nn : constant Natural := Natural'Min (N, Max_Ch);
       G : Cov := [others => [others => 0.0]];
@@ -160,7 +160,7 @@ package body Table is
          end loop;
       end loop;
       for I in 0 .. Nn - 1 loop
-         G (I, I) := G (I, I) + Mu;
+         G (I, I) := G (I, I) + Damp (I);
          if not Active (I) then
             Fixed (I) := True;
             A (I) := 0.0;

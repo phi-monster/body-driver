@@ -32,6 +32,7 @@ package Act is
       Arm, Cam : Natural := 0;
       Kind : Track_Kind := Zone_Pt;
       E : Table.Effect;
+      Trust : Table.Mask := [others => True];   --  探针时这个点真跑过地板的通道
    end record;
    package Effect_Vectors is new Ada.Containers.Vectors (Natural, Stored_Effect);
    type Zone_Track is record

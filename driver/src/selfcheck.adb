@@ -149,10 +149,10 @@ begin
       T.E := E; T.Err := [0.1, 0.05, 0.0]; T.W := [1.0, 1.0, 0.0];
       Terms.Append (T);
       Cap (0) := 1.0; Cap (1) := 1.0; Act (0) := True; Act (1) := True;
-      Table.Solve (Terms, 2, Cap, Act, 1.0e-9, A, Ok);
+      Table.Solve (Terms, 2, Cap, Act, [others => 1.0e-9], A, Ok);
       Check (Ok and then abs (A (0) - 0.2) < 1.0e-3 and then abs (A (1) - 0.2) < 1.0e-3, "解算:" & Codec.Fmt (A (0), 3) & " " & Codec.Fmt (A (1), 3));
       Cap (0) := 0.1;
-      Table.Solve (Terms, 2, Cap, Act, 1.0e-9, A, Ok);
+      Table.Solve (Terms, 2, Cap, Act, [others => 1.0e-9], A, Ok);
       Check (Ok and then abs (A (0) - 0.1) < 1.0e-6 and then abs (A (1) - 0.2) < 1.0e-3, "解算夹到上限:" & Codec.Fmt (A (0), 3));
       --  递推重估:真表是 [1,0,0],初值全零,推几步后预测该接近真值
       Table.Reset (E, 2, 1.0e6);

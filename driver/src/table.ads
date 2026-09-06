@@ -42,6 +42,7 @@ package Table is
    end record;
    package Term_Vectors is new Ada.Containers.Vectors (Natural, Term);
    --  最小化 Σ w·|B a − e|² + μ|a|²,|a_k| ≤ cap_k,只动 Active 的通道。解不出来 Ok = False。
-   procedure Solve (Terms : Term_Vectors.Vector; N : Natural; Cap : Vec; Active : Mask; Mu : Long_Float;
+   --  Damp (k) = 这一通道每单位命令的阻尼(按它的探针幅度归一:μ/幅²,所有通道都以"几个探针幅度"计价)
+   procedure Solve (Terms : Term_Vectors.Vector; N : Natural; Cap : Vec; Active : Mask; Damp : Vec;
                     A : out Vec; Ok : out Boolean);
 end Table;
