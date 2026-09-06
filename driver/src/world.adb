@@ -1,0 +1,82 @@
+with Ada.Numerics.Long_Elementary_Functions; use Ada.Numerics.Long_Elementary_Functions;
+package body World is
+   type Bool_Array is array (Natural range <>) of Boolean;
+   procedure Init (S : in out State; N_Cams : Natural) is
+   begin
+      S.Cams.Clear;
+      for I in 1 .. N_Cams loop
+         S.Cams.Append (Cam_State'(others => <>));
+      end loop;
+      S.Holding := False; S.Held_Arm := -1; S.Held_Cam := -1; S.Held_Slot := -1;
+   end Init;
+
+   procedure Reset_All (S : in out State) is
+      N : constant Natural := Natural (S.Cams.Length);
+   begin
+      Init (S, N);
+   end Reset_All;
+
+   procedure Observe (S : in out State; Cam : Natural; Regs : Picture.Regions; W, H : Natural) is
+   begin
+      if Cam >= Natural (S.Cams.Length) then
+         return;
+      end if;
+      declare
+         Cs : Cam_State := S.Cams (Cam);
+         Used : Bool_Array (0 .. Natural'Max (0, Natural (Regs.Length) - 1)) := [others => False];
+      begin
+         for Si in 0 .. Natural (Cs.Slots.Length) - 1 loop
+            declare
+               Sl : Slot := Cs.Slots (Si);
+               Ref : constant Picture.Region := (if Sl.Present then Sl.R else Sl.Shadow);
+               Tol : constant Long_Float := Long_Float'Max (
+                  Long_Float'Max (Long_Float (Ref.X1 - Ref.X0) / Long_Float (W), Long_Float (Ref.Y1 - Ref.Y0) / Long_Float (H)) * 0.5,
+                  1.0 / Long_Float (W));
+               Best : Integer := -1;
+               Bd : Long_Float := 1.0e9;
+            begin
+               for Ri in 0 .. Natural (Regs.Length) - 1 loop
+                  if not Used (Ri) then
+                     declare
+                        D : constant Long_Float := Sqrt ((Regs (Ri).Cu - Ref.Cu) ** 2 + (Regs (Ri).Cv - Ref.Cv) ** 2);
+                     begin
+                        if D <= Tol and then D < Bd then
+                           Bd := D; Best := Ri;
+                        end if;
+                     end;
+                  end if;
+               end loop;
+               if Best >= 0 then
+                  Used (Best) := True;
+                  Sl.Present := True; Sl.R := Regs (Best); Sl.Shadow := Regs (Best); Sl.Seen := True;
+               else
+                  Sl.Present := False;
+               end if;
+               Cs.Slots.Replace_Element (Si, Sl);
+            end;
+         end loop;
+         for Ri in 0 .. Natural (Regs.Length) - 1 loop
+            if not Used (Ri) then
+               Cs.Slots.Append (Slot'(Present => True, R => Regs (Ri), Seen => True, Shadow => Regs (Ri)));
+            end if;
+         end loop;
+         S.Cams.Replace_Element (Cam, Cs);
+      end;
+   end Observe;
+
+   function Count (S : State; Cam : Natural) return Natural is
+     (if Cam < Natural (S.Cams.Length) then Natural (S.Cams (Cam).Slots.Length) else 0);
+
+   function Get (S : State; Cam : Natural; I : Natural) return Slot is
+     (if Cam < Natural (S.Cams.Length) and then I < Natural (S.Cams (Cam).Slots.Length) then S.Cams (Cam).Slots (I) else (others => <>));
+
+   function Vanished (Regs : Picture.Regions; Origin : Picture.Region; W, H : Natural) return Boolean is
+   begin
+      for R of Regs loop
+         if R.Count * 2 >= Origin.Count and then Picture.Inside (Origin, R.Cu, R.Cv, W, H, 0.5) then
+            return False;
+         end if;
+      end loop;
+      return True;
+   end Vanished;
+end World;

@@ -1,0 +1,9 @@
+name = "body_driver"
+description = "Body layer: a robot measures itself; a brain that only speaks drives it"
+version = "0.1.0"
+authors = ["phi-monster"]
+maintainers = ["phi-monster <research@phi-monster.invalid>"]
+maintainers-logins = ["phi-monster"]
+licenses = "MIT"
+project-files = ["body_driver.gpr"]
+executables = ["body_driver"]

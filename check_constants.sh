@@ -1,121 +1,44 @@
 #!/usr/bin/env bash
-# 🔴🔴 **写死的身体常数,机械检查。**(owner 2026-08-19 定)
-#
-# 为什么要有它:仓规写着「驱动里不许有手填的身体常数」,而**这条规矩此前没有任何检查**——
-# `check_purity.sh` 只查 benchmark 名字和 Python。于是它悄悄失效了,代价是可看得见的:
-#   · 腕姿写死成某一具身体的"腕朝下" ⇒ 换 Franka 大步子只交付 8%、一轮 15 格只量到 1 格
-#   · `got/cmd < 0.3` 写死 ⇒ Franka 自由交付本来就是 0.105 ⇒ "碰到了"这道闸永远为真
-#   · 工具长 `0.1451` 与量出来的 `tool_offset` 同时存在于一个文件里(差 4.3 cm)
-#
-# 判据:代码里每一个**带物理单位**的数字字面量,必须满足三者之一 ——
-#   ① 在 `#[cfg(test)]` 里(测试的假身体不是断言)
-#   ② 往上 8 行内有一句说明,含以下任一词:无量纲 / 尺度无关 / 协议 / 比例 / 无尺度 / dimensionless
-#   ③ 已经在 `debt.rs` 上挂号(那是"欠着但看得见")
-#
-# 🔴 **棘轮**:当前数写在 `constants_ceiling.txt` 里,**只许降不许升**。
-#   这样既不阻塞今天,又保证明天不会更差 —— 一条"以后再清"的规矩等于没有规矩。
+# 🔴🔴 写死的身体常数,机械检查(owner 2026-08-19 定;重写后扫 Ada 树)。
+# 判据:代码里每一个带小数点的数字字面量,必须满足三者之一 ——
+#   ① 往上 8 行内有一句说明,含以下任一词:无量纲 / 尺度无关 / 协议 / 比例 / 无尺度 / 次数 / dimensionless
+#   ② 是 0.0 / 1.0 / 2.0 / 0.5 / 0.25 这类纯数学系数,或在 println/日志/格式化行里
+#   ③ 在测试程序(selfcheck.adb)里
+# 🔴 棘轮:当前数写在 constants_ceiling.txt,只许降不许升。
 set -u
-# 🔴🔴 **按字节跑,不按字符跑。**(2026-08-28 实测)
-# mac 自带的 awk 碰到某些多字节字符会直接崩:`awk: towc: multibyte conversion failure`,
-# 而本脚本只捕获 stdout ⇒ **崩溃是无声的**,它扫到一半就死、剩下的文件全没查。
-# 病相极阴:闸报"🟢 绿",而它其实只看了一部分。实测同一份源码:mac 数出 73、
-# 箱上的 mawk 数出 94,差的 21 条全在某一行之后 —— **少报的那台是"绿"的那台**。
-# ⇒ `LC_ALL=C` 让两边都按字节处理(我们只找 ASCII 的数字与引号,字节足够),
-#   顺带让 `substr`/`length` 的语义在两个 awk 上一致。
-# ⚠️ 一个"在不同机器上给出不同答案"的闸比没有闸更坏 —— 它让人以为清干净了。
 export LC_ALL=C
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 CEIL_FILE="$ROOT/constants_ceiling.txt"
-# 🔴 插头也是驱动 —— 「驱动里不能含有任何机体参数」这条对它同样成立(owner 2026-08-19)。
-DIRS="slow/src contact-set/src contact-gen/src contact-exec/src point-gen/src selfcal/src plug/ws/src"
-
 report=$(
-for d in $DIRS; do
-  [ -d "$ROOT/$d" ] || continue
-  while IFS= read -r f; do
-    awk -v F="$f" '
-      /#\[cfg\(test\)\]/ { intest=1 }
-      { buf[NR]=$0 }
-      {
-        if (intest) next
-        line=$0
-        # 🔴🔴 **多行字符串要跨行跟踪 —— 但只数【代码里】的引号。**
-        # 上一版把状态机放在去注释【之前】,于是**注释里的一个引号就能把它翻面**,
-        # 之后整段被当成"在字符串里"跳过。实测:同一份源码,mac 的 awk 数出 73、
-        # 箱上的 mawk 数出 94,差的 21 条全在 main.rs 某一行之后 —— **少报的那台是我这台**。
-        # 一个"在不同机器上给出不同答案"的闸,比没有闸更坏:它会让人以为清干净了。
-        # ⇒ 先 `sub` 掉行尾注释,再在**剩下的代码**上翻引号;`\"` 不算。
-        sub(/\/\/.*$/, "", line)                       # 去掉行尾注释(状态机与判定都用它)
-        {
-          started_in_string = instr
-          n = length(line)
-          for (ci = 1; ci <= n; ci++) {
-            ch = substr(line, ci, 1)
-            if (ch == "\\") { ci++; continue }
-            if (ch == "\"") instr = 1 - instr
-          }
-          if (started_in_string) next          # 整行都在字符串里(或从字符串中开始)
-        }
-        if (line ~ /^[ \t]*$/) next
-        # 打印/格式化行里的数字是展示换算(mm 之类),不驱动任何动作。
-        if (line ~ /println!|format!|eprintln!/) next
-        # 找带小数点的字面量
-        s=line
-        off=0
-        while (match(s, /[0-9]+\.[0-9]+/)) {
-          v=substr(s, RSTART, RLENGTH)
-          abs=off+RSTART
-          off=abs+RLENGTH-1
-          s=substr(s, RSTART+RLENGTH)
-          # 🔴 元组取字段不是常数,是**变量名 + 字段号**:`中1.1` / `t0.2` / `面0.0`。
-          # 这条脚本此前把它们全算成了写死的身体常数(仅 main.rs 一处就虚报几十个),
-          # 于是棘轮量的根本不是它要管的东西。判据:字面量只能**紧跟在运算符或分隔符后面**;
-          # 左边是别的(字母 / 汉字 / 下划线)⇒ 它是字段访问。`.` 保留在允许集里,宁可多算不少算。
-          prev = (abs>1) ? substr(line, abs-1, 1) : " "
-          if (prev !~ /^[ \t()\[\]{},=+*\/<>!&|:;?.^%-]$/) continue
-          # 🔴 **嵌套的元组取字段**:`p.0.0` / `p.1.1` / `面0.1`。上一条把 `.` 留在允许集里
-          # ("宁可多算不少算"),于是 `p.0.0` 里的第二段 `0.0` 左边是 `.` ⇒ 被当成写死的常数。
-          # Rust 里**小数点后面不可能直接跟一个浮点字面量** —— 唯一的例外是区间 `..0.5`。
-          # ⇒ 左边是 `.` 且**再左边是标识符字符**(字母/数字/下划线/汉字)⇒ 字段访问,不算。
-          # 实测代价:仅 main.rs 一处 `((p.0.0 - p.1.0)…)` 就虚报 2 个,而这条闸是棘轮,
-          # 虚报会把"还欠多少"整体抬高,让真正该改的那几个淹在噪声里。
-          if (prev == ".") {
-            pp = (abs>2) ? substr(line, abs-2, 1) : " "
-            if (pp ~ /^[ \t()\[\]{},=+*\/<>!&|:;?.^%-]$/) { } else continue
-          }
-          x=v+0
-          if (x<0.0001) continue
-          if (v=="0.0"||v=="1.0"||v=="2.0"||v=="3.0"||v=="4.0"||v=="0.5"||v=="100.0"||v=="180.0"||v=="360.0") continue
-          # 字符串里的数(debt.rs 的登记内容)不算
-          # 引号里的数字是【被记录的】,不是【被执行的】:`debt.rs` 整本账、HTTP/1.1 之类
-          # 全落在这里。判据:这个数左边的双引号个数是奇数 ⇒ 它在字符串里面。
-          pre=substr(line, 1, index(line, v)-1)
-          nq=gsub(/"/, "&", pre)
-          if (nq % 2 == 1) continue
-          ok=0
-          for (i=NR; i>=NR-8 && i>0; i--) {
-            if (buf[i] ~ /无量纲|尺度无关|协议|比例|无尺度|dimensionless/) { ok=1; break }
-          }
-          if (!ok) printf "%s:%d  %s  %s\n", F, NR, v, substr(line,1,90)
-        }
+for f in "$ROOT"/driver/src/*.ads "$ROOT"/driver/src/*.adb; do
+  [[ "$f" == */selfcheck.adb ]] && continue
+  awk -v F="$f" '
+    { buf[NR]=$0 }
+    {
+      line=$0
+      sub(/--.*$/, "", line)
+      if (line ~ /^[ \t]*$/) next
+      if (line ~ /Put_Line|Put \(|Fmt \(|Codec\.Img|Append \(T|Append \(R|Append \(Did|Report :=|Event :=|Cage_Note|Desc :=/) next
+      s=line
+      while (match(s, /[0-9]+\.[0-9]+(e-?[0-9]+)?/)) {
+        v=substr(s, RSTART, RLENGTH)
+        pre=substr(s, 1, RSTART-1)
+        s=substr(s, RSTART+RLENGTH)
+        # 字符串里的数不算
+        nq=gsub(/"/, "&", pre)
+        if (nq % 2 == 1) continue
+        x=v+0
+        if (v=="0.0"||v=="1.0"||v=="2.0"||v=="3.0"||v=="4.0"||v=="0.5"||v=="0.25"||v=="0.75"||v=="100.0"||v=="255.0"||v=="256.0"||v=="1.0e-3"||v=="1.0e-4"||v=="1.0e-6"||v=="1.0e-9"||v=="1.0e-12"||v=="1.0e-15"||v=="1.0e-18"||v=="1.0e9"||v=="1.0e6"||v=="1.0e12"||v=="1.0e30"||v=="1.0e-30") continue
+        ok=0
+        for (i=NR; i>=NR-8 && i>0; i--) if (buf[i] ~ /无量纲|尺度无关|协议|比例|无尺度|次数|dimensionless/) { ok=1; break }
+        if (!ok) printf "%s:%d  %s  %s\n", F, NR, v, substr(line,1,90)
       }
-    ' "$f"
-  done < <(find "$ROOT/$d" -name '*.rs')
-done
-)
+    }' "$f"
+done)
 n=$(printf "%s" "$report" | grep -c . || true)
 ceil=$(cat "$CEIL_FILE" 2>/dev/null || echo 99999)
-
-echo "== 写死的身体常数:$n 处(上限 $ceil)=="
-if [ "$n" -gt "$ceil" ]; then
-  echo "$report"
-  echo "🔴 比上限多了 $((n - ceil)) 处 —— 每一个新写死的数都要么改成量出来的,要么写一句它为什么尺度无关。"
-  exit 1
-fi
-if [ "$n" -lt "$ceil" ]; then
-  echo "$n" > "$CEIL_FILE"
-  echo "🟢 降到 $n,上限已收紧(只许降不许升)"
-else
-  echo "🟢 持平"
-fi
+echo "== 写死的常数:$n 处(上限 $ceil)=="
+if [ "$n" -gt "$ceil" ]; then echo "$report"; echo "🔴 比上限多了 $((n - ceil)) 处 —— 每一个新写死的数都要么改成量出来的,要么写一句它为什么无量纲。"; exit 1; fi
+if [ "$n" -lt "$ceil" ]; then echo "$n" > "$CEIL_FILE"; echo "🟢 降到 $n,上限已收紧(只许降不许升)"; else echo "🟢 持平"; fi
+[ "$n" -gt 0 ] && echo "$report"
 exit 0

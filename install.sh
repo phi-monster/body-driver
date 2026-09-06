@@ -1,62 +1,23 @@
 #!/usr/bin/env bash
-# 官方安装:构建驱动、跑完全部自证、把它放上 PATH。不碰任何机器人。
-#
-# 🔴🔴 **装完只有一个用法,没有第二步**(owner 2026-08-25 定):
-#
-#   bl-calibrate --listen <端口> --out 身体.json [--eye host:port]
-#
-# **下命令就去干。** 观测里给什么指令,就做什么。
-# 干到需要某个身体量而手上没有 ⇒ **它自己动一下去问**,量完接着干,你看不见这一步。
-#
-# 🔴 **没有"自标定阶段"了。** 旧版是开机先按一张表把 15 个量挨个量完才准干活;
-# 代价照记:N128–N143 共 **14 炮,进入干活模式 0 次** —— 用户让它拿东西,
-# 它先坐下来量自己四十分钟;而评测里每 200 步打断一次,于是**永远量不完,也永远不干活**。
-# 而且「装机量一次、永久有效」本身是个手填的假设:换只手、挂个武器,
-# 爪宽和指尖长**当场全变**,时间型的过期管不住它。
-#
-# ⇒ 缺什么当场量,量完存进 `身体.json`;下次开机装回来,**用到就核对,对不上就重量**。
-set -euo pipefail
+# 装驱动:三道棘轮 → 离线自检 → 证明监视器/备份 → 编译 → 装到 ~/.local/bin/bl-calibrate(名字沿用,箱上脚本不用改)。
+set -eu
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-command -v cargo >/dev/null || { echo "need a Rust toolchain: https://rustup.rs"; exit 1; }
-
-echo "== driver: no robot names, no Python in the tree =="
 bash "$ROOT/check_purity.sh"
-
-# 🔴 写死的身体常数 —— 棘轮式,只许降不许升。见该脚本文件头记的三条代价。
-echo "== driver: no hand-filled body constants (ratchet) =="
 bash "$ROOT/check_constants.sh"
-
-# 🔴🔴🔴 自由棘轮:驱动里不许有替模型做决定的东西(策略词 / 提示词教程 / 新增的发命令处)。命中 = 装不上 = 停机。
-echo "== driver: nothing decides an action except the model (freedom ratchet) =="
 bash "$ROOT/check_freedom.sh"
-
-echo "== driver: build + test =="
-for c in slow contact-set contact-gen contact-exec point-gen selfcal; do
-  ( cd "$ROOT/$c" && cargo test --release --quiet )
-done
-
-# The fast face is Ada/SPARK. Building it needs GNAT; if that is not here we say so out loud
-# rather than skipping quietly -- a safety face that silently did not build is worse than absent.
-if command -v gprbuild >/dev/null; then
-  echo "== driver fast face (Ada/SPARK): build =="
-  # 🔴 `gprbuild` **不会自己建** `.gpr` 里声明的输出目录:缺 `lib/` 时它直接
-  # `library directory "…/fast/lib/" does not exist` 然后失败 —— 而 `set -e` 让整个安装挂掉。
-  # 这两个目录是构建产物、不进 git,所以**一台干净的机器上必然缺**。
-  # 实测(2026-08-28):mac 上没有 gprbuild ⇒ 这一步被跳过、从没暴露;
-  # 箱上装了 GNAT ⇒ 官方安装流程**在真正的目标机器上装不上**。
-  mkdir -p "$ROOT/fast/lib" "$ROOT/fast/objlib"
-  ( cd "$ROOT/fast" && gprbuild -q -P body_layer_fast_lib.gpr )
-  bash "$ROOT/conformance/ada_check.sh" || echo "   (ada_check reported a mismatch above)"
+cd "$ROOT/driver"
+command -v alr >/dev/null || export PATH="$HOME/.alire/bin:$HOME/alire/bin:/root/alire/bin:$PATH"
+command -v alr >/dev/null || { echo "need Alire (alr) with gnat_native + gprbuild: https://alire.ada.dev"; exit 1; }
+alr -n build
+./bin/selfcheck
+if alr -n exec -- which gnatprove >/dev/null 2>&1 && alr -n exec -- gnatprove --version >/dev/null 2>&1; then
+  echo "== SPARK: proving monitor + backup =="
+  alr -n exec -- gnatprove -P body_driver.gpr --level=2 -j8 -u monitor.adb -u backup.adb --report=fail || { echo "🔴 proof failed"; exit 1; }
+  grep -E "^Total" obj/gnatprove/gnatprove.out || true
 else
-  echo "== driver fast face (Ada/SPARK): SKIPPED -- no gprbuild on PATH =="
-  echo "   the limits/force-cap/watchdog/e-stop face is NOT built. Install GNAT to get it."
+  echo "== SPARK: gnatprove not runnable here (prove on a machine that has it) =="
 fi
-
-echo "== plug: build + test =="
-( cd "$ROOT/plug/ws" && cargo test --release --quiet && cargo build --release --quiet )
-
 mkdir -p "$HOME/.local/bin"
-cp "$ROOT/plug/ws/target/release/bl-calibrate" "$HOME/.local/bin/"
-echo
-echo "installed: $HOME/.local/bin/bl-calibrate"
-echo "next, with your robot's controller running:   bl-calibrate --listen 9077 --out cal.json"
+rm -f "$HOME/.local/bin/bl-calibrate"
+cp bin/body_driver "$HOME/.local/bin/bl-calibrate"
+echo "== installed: $HOME/.local/bin/bl-calibrate ($(md5sum "$HOME/.local/bin/bl-calibrate" 2>/dev/null | cut -c1-12 || md5 -q "$HOME/.local/bin/bl-calibrate" | cut -c1-12)) =="

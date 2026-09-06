@@ -1,0 +1,462 @@
+with Ada.Numerics.Long_Elementary_Functions; use Ada.Numerics.Long_Elementary_Functions;
+with Ada.Unchecked_Conversion;
+with Interfaces;
+package body Picture is
+   function To_LF is new Ada.Unchecked_Conversion (Interfaces.Unsigned_64, Long_Float);
+   NaN : constant Long_Float := To_LF (16#7FF8000000000000#);
+
+   function Is_Nan (X : Long_Float) return Boolean is (X /= X);
+
+   function Min_Pixels (W, H : Natural) return Natural is
+      --  3e-5 是画幅的比例(无量纲):比这还小的斑块读不出形状
+      V : constant Long_Float := Long_Float (W * H) * 3.0e-5;
+   begin
+      return Natural'Max (4, Natural (Long_Float'Ceiling (V)));
+   end Min_Pixels;
+
+   function Quantile (F : in out Floats; Q : Long_Float) return Long_Float is
+      N : constant Natural := Natural (F.Length);
+   begin
+      if N = 0 then
+         return NaN;
+      end if;
+      --  简单选择:插入排序对小串;大串用 nth_element 的粗版(全排序,O(n log n) 足够)
+      declare
+         package Sorter is new F64_Vectors.Generic_Sorting;
+         Idx : Natural;
+      begin
+         Sorter.Sort (F);
+         Idx := Natural (Long_Float (N - 1) * Long_Float'Max (0.0, Long_Float'Min (1.0, Q)));
+         return F.Element (Idx);
+      end;
+   end Quantile;
+
+   --  一维滑窗极值(单调队列),窗口 [c-r, c+r];无读数按 Empty 参与。
+   procedure Slide (Src : Floats; W, H, R : Natural; Horizontal, Take_Max : Boolean; Empty : Long_Float; Dst : in out Floats) is
+      Outer : constant Natural := (if Horizontal then H else W);
+      Inner : constant Natural := (if Horizontal then W else H);
+      Dq : array (0 .. Inner) of Natural;
+      Head, Tail : Natural;
+      function At_Idx (O, K : Natural) return Natural is (if Horizontal then O * W + K else K * W + O);
+      function Val (O, K : Natural) return Long_Float is
+         V : constant Long_Float := Src.Element (At_Idx (O, K));
+      begin
+         return (if Is_Nan (V) then Empty else V);
+      end Val;
+      procedure Push (O, K : Natural) is
+      begin
+         while Tail > Head loop
+            declare
+               Last : constant Natural := Dq (Tail - 1);
+            begin
+               if (Take_Max and then Val (O, Last) <= Val (O, K)) or else (not Take_Max and then Val (O, Last) >= Val (O, K)) then
+                  Tail := Tail - 1;
+               else
+                  exit;
+               end if;
+            end;
+         end loop;
+         Dq (Tail) := K;
+         Tail := Tail + 1;
+      end Push;
+   begin
+      if Inner = 0 then
+         return;
+      end if;
+      for O in 0 .. Outer - 1 loop
+         Head := 0; Tail := 0;
+         for K in 0 .. Natural'Min (R, Inner - 1) loop
+            Push (O, K);
+         end loop;
+         for C in 0 .. Inner - 1 loop
+            if C > 0 and then C + R < Inner then
+               Push (O, C + R);
+            end if;
+            declare
+               Left : constant Natural := (if C > R then C - R else 0);
+            begin
+               while Tail > Head and then Dq (Head) < Left loop
+                  Head := Head + 1;
+               end loop;
+            end;
+            if Tail > Head then
+               Dst.Replace_Element (At_Idx (O, C), Val (O, Dq (Head)));
+            end if;
+         end loop;
+      end loop;
+   end Slide;
+
+   function Cut (Depth : Floats; W, H : Natural; Win_Frac, Sigma_Mult : Long_Float) return Regions is
+      Out_R : Regions;
+      N : constant Natural := W * H;
+   begin
+      if W = 0 or else H = 0 or else Natural (Depth.Length) < N then
+         return Out_R;
+      end if;
+      declare
+         R : constant Natural := Natural'Max (2, Natural (Long_Float (W) * Win_Frac));
+         Big : constant Long_Float := 1.0e30;
+         D1, D2, E1, Back, Bump : Floats := Filled (N, NaN);
+         Samples : Floats;
+         Step : constant Natural := Natural'Max (1, N / 20000);
+         Mid, Sigma, Gate : Long_Float;
+      begin
+         --  闭运算 = 膨胀(窗内最大深度)再腐蚀(窗内最小深度):把比窗口小的坑填平 = 没放东西时的背景面
+         Slide (Depth, W, H, R, True, True, -Big, D1);
+         Slide (D1, W, H, R, False, True, -Big, D2);
+         Slide (D2, W, H, R, True, False, Big, E1);
+         Slide (E1, W, H, R, False, False, Big, Back);
+         for I in 0 .. N - 1 loop
+            declare
+               Z : constant Long_Float := Depth.Element (I);
+               B : constant Long_Float := Back.Element (I);
+            begin
+               if not Is_Nan (Z) and then Z > 1.0e-6 and then not Is_Nan (B) and then abs B < Big then
+                  Bump.Replace_Element (I, B - Z);
+               end if;
+            end;
+         end loop;
+         declare
+            I : Natural := 0;
+         begin
+            while I < N loop
+               if not Is_Nan (Bump.Element (I)) then
+                  Samples.Append (Bump.Element (I));
+               end if;
+               I := I + Step;
+            end loop;
+         end;
+         if Natural (Samples.Length) < 16 then
+            return Out_R;
+         end if;
+         Mid := Quantile (Samples, 0.5);
+         declare
+            Absd : Floats;
+            --  排序里的位置(分位,无量纲)
+            Quantiles : constant array (1 .. 4) of Long_Float := [0.5, 0.75, 0.9, 0.99];
+         begin
+            for V of Samples loop
+               Absd.Append (abs (V - Mid));
+            end loop;
+            --  中位绝对偏差可能是 0(量化)⇒ 往上取分位数直到拿到正的尺度;1.4826 = MAD→σ 的固定换算,无量纲
+            Sigma := 0.0;
+            for Q of Quantiles loop
+               declare
+                  V : constant Long_Float := Quantile (Absd, Q) * 1.4826;
+               begin
+                  if V > 0.0 then
+                     Sigma := V;
+                     exit;
+                  end if;
+               end;
+            end loop;
+         end;
+         if not (Sigma > 0.0) then
+            return Out_R;
+         end if;
+         Gate := Mid + Sigma_Mult * Sigma;
+         declare
+            Mask : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (N));
+            Comps : Regions;
+         begin
+            for I in 0 .. N - 1 loop
+               if not Is_Nan (Bump.Element (I)) and then Bump.Element (I) > Gate then
+                  Mask.Replace_Element (I, True);
+               end if;
+            end loop;
+            Comps := Components (Mask, W, H, Min_Pixels (W, H));
+            for C of Comps loop
+               declare
+                  Rg : Region := C;
+                  Ds, Hs : Floats;
+               begin
+                  --  贴着画面边的块丢掉:整条背景带、细缝、我自己的胳膊都贴边;能拿的东西完整地在画面里
+                  if Rg.X0 > 0 and then Rg.Y0 > 0 and then Rg.X1 + 1 < W and then Rg.Y1 + 1 < H then
+                     for Y in Rg.Y0 .. Rg.Y1 loop
+                        for X in Rg.X0 .. Rg.X1 loop
+                           if Mask.Element (Y * W + X) then
+                              Ds.Append (Depth.Element (Y * W + X));
+                              Hs.Append (Bump.Element (Y * W + X));
+                           end if;
+                        end loop;
+                     end loop;
+                     Rg.Depth := Quantile (Ds, 0.5);
+                     Rg.Height := Quantile (Hs, 0.5);
+                     Out_R.Append (Rg);
+                  end if;
+               end;
+            end loop;
+         end;
+      end;
+      --  按像素数从多到少
+      declare
+         function Bigger (A, B : Region) return Boolean is (A.Count > B.Count);
+         package Sorter is new Region_Vectors.Generic_Sorting (Bigger);
+      begin
+         Sorter.Sort (Out_R);
+      end;
+      return Out_R;
+   end Cut;
+
+   function Region_Mask (Depth : Floats; W, H : Natural; R : Region) return Bools is
+      M : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (W * H));
+      Thick : constant Long_Float := Long_Float'Max (1.0e-4, abs R.Height);
+   begin
+      for Y in R.Y0 .. Natural'Min (R.Y1, H - 1) loop
+         for X in R.X0 .. Natural'Min (R.X1, W - 1) loop
+            declare
+               I : constant Natural := Y * W + X;
+               Z : constant Long_Float := (if I < Natural (Depth.Length) then Depth.Element (I) else NaN);
+            begin
+               if not Is_Nan (Z) and then Z > 1.0e-6 and then abs (Z - R.Depth) <= Thick then
+                  M.Replace_Element (I, True);
+               end if;
+            end;
+         end loop;
+      end loop;
+      return M;
+   end Region_Mask;
+
+   function Near_Depth (Depth : Floats; W, H : Natural; U, V, Win_Frac : Long_Float) return Long_Float is
+      Rw : constant Natural := Natural'Max (1, Natural (Long_Float (W) * Win_Frac));
+      Cx : constant Integer := Integer (U * Long_Float (W));
+      Cy : constant Integer := Integer (V * Long_Float (H));
+      Vals : Floats;
+   begin
+      for Y in Cy - Integer (Rw) .. Cy + Integer (Rw) loop
+         for X in Cx - Integer (Rw) .. Cx + Integer (Rw) loop
+            if X >= 0 and then Y >= 0 and then X < W and then Y < H then
+               declare
+                  Z : constant Long_Float := Depth.Element (Y * W + X);
+               begin
+                  if not Is_Nan (Z) and then Z > 1.0e-6 then
+                     Vals.Append (Z);
+                  end if;
+               end;
+            end if;
+         end loop;
+      end loop;
+      if Vals.Is_Empty then
+         return NaN;
+      end if;
+      return Quantile (Vals, 0.25);     --  近侧:四分位里靠近的那一档(块的顶面,不是它旁边的桌面)
+   end Near_Depth;
+
+   function Null_Floor (A, B : Buf; W, H : Natural; Min_Px : Natural) return Floor_Map is
+      F : Floor_Map;
+      Hist : array (0 .. 255) of Natural := [others => 0];
+      N : constant Natural := W * H;
+      Above : Natural := 0;
+   begin
+      F.W := W; F.H := H;
+      F.Per_Pixel.Reserve_Capacity (Ada.Containers.Count_Type (N));
+      for I in 0 .. N - 1 loop
+         declare
+            D : constant Natural := abs (Integer (A.Element (I)) - Integer (B.Element (I)));
+         begin
+            F.Per_Pixel.Append (U8 (D));
+            Hist (D) := Hist (D) + 1;
+         end;
+      end loop;
+      --  全图门槛:静止那一对里超过它的像素少于最少像素数(一团 ≥ 最少像素的斑块不可能由静止噪声造出来)
+      F.Global := 0;
+      for D in reverse 0 .. 255 loop
+         if Above >= Min_Px then
+            F.Global := U8 (Natural'Min (255, D + 1));
+            exit;
+         end if;
+         Above := Above + Hist (D);
+      end loop;
+      return F;
+   end Null_Floor;
+
+   function Moved (A, B : Buf; F : Floor_Map) return Bools is
+      N : constant Natural := Natural'Min (Natural (A.Length), Natural (B.Length));
+      M : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (N));
+   begin
+      for I in 0 .. N - 1 loop
+         declare
+            D : constant Natural := abs (Integer (A.Element (I)) - Integer (B.Element (I)));
+            Gate : constant Natural := Natural'Max (Natural (F.Global), (if I < Natural (F.Per_Pixel.Length) then Natural (F.Per_Pixel.Element (I)) else 0));
+         begin
+            M.Replace_Element (I, D > Gate);
+         end;
+      end loop;
+      return M;
+   end Moved;
+
+   function Both (M1, M2 : Bools) return Bools is
+      N : constant Natural := Natural'Min (Natural (M1.Length), Natural (M2.Length));
+      M : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (N));
+   begin
+      for I in 0 .. N - 1 loop
+         M.Replace_Element (I, M1.Element (I) and then M2.Element (I));
+      end loop;
+      return M;
+   end Both;
+
+   function Either (M1, M2 : Bools) return Bools is
+      N : constant Natural := Natural'Min (Natural (M1.Length), Natural (M2.Length));
+      M : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (N));
+   begin
+      for I in 0 .. N - 1 loop
+         M.Replace_Element (I, M1.Element (I) or else M2.Element (I));
+      end loop;
+      return M;
+   end Either;
+
+   function Fraction (Mask : Bools) return Long_Float is
+      C : Natural := 0;
+   begin
+      for B of Mask loop
+         if B then
+            C := C + 1;
+         end if;
+      end loop;
+      if Mask.Is_Empty then
+         return 0.0;
+      end if;
+      return Long_Float (C) / Long_Float (Mask.Length);
+   end Fraction;
+
+   function Max_Diff (A, B : Buf) return Natural is
+      N : constant Natural := Natural'Min (Natural (A.Length), Natural (B.Length));
+      M : Natural := 0;
+   begin
+      for I in 0 .. N - 1 loop
+         M := Natural'Max (M, abs (Integer (A.Element (I)) - Integer (B.Element (I))));
+      end loop;
+      return M;
+   end Max_Diff;
+
+   function Components (Mask : Bools; W, H : Natural; Min_Count : Natural) return Regions is
+      N : constant Natural := W * H;
+      Label : Ints := Int_Vectors.To_Vector (-1, Ada.Containers.Count_Type (N));
+      Stack : Ints;
+      Out_R : Regions;
+   begin
+      if Natural (Mask.Length) < N then
+         return Out_R;
+      end if;
+      for Start in 0 .. N - 1 loop
+         if Mask.Element (Start) and then Label.Element (Start) < 0 then
+            declare
+               Id : constant Integer := Integer (Out_R.Length);
+               Cnt : Natural := 0;
+               Sx, Sy, Sxx, Syy, Sxy : Long_Float := 0.0;
+               X0 : Natural := W; Y0 : Natural := H; X1 : Natural := 0; Y1 : Natural := 0;
+            begin
+               Stack.Clear;
+               Stack.Append (Start);
+               Label.Replace_Element (Start, Id);
+               while not Stack.Is_Empty loop
+                  declare
+                     I : constant Natural := Stack.Last_Element;
+                     X : constant Natural := I mod W;
+                     Y : constant Natural := I / W;
+                     procedure Visit (J : Natural) is
+                     begin
+                        if Mask.Element (J) and then Label.Element (J) < 0 then
+                           Label.Replace_Element (J, Id);
+                           Stack.Append (J);
+                        end if;
+                     end Visit;
+                  begin
+                     Stack.Delete_Last;
+                     Cnt := Cnt + 1;
+                     Sx := Sx + Long_Float (X); Sy := Sy + Long_Float (Y);
+                     Sxx := Sxx + Long_Float (X) * Long_Float (X);
+                     Syy := Syy + Long_Float (Y) * Long_Float (Y);
+                     Sxy := Sxy + Long_Float (X) * Long_Float (Y);
+                     X0 := Natural'Min (X0, X); X1 := Natural'Max (X1, X);
+                     Y0 := Natural'Min (Y0, Y); Y1 := Natural'Max (Y1, Y);
+                     if X > 0 then
+                        Visit (I - 1);
+                     end if;
+                     if X + 1 < W then
+                        Visit (I + 1);
+                     end if;
+                     if Y > 0 then
+                        Visit (I - W);
+                     end if;
+                     if Y + 1 < H then
+                        Visit (I + W);
+                     end if;
+                  end;
+               end loop;
+               if Cnt >= Natural'Max (1, Min_Count) then
+                  declare
+                     R : Region;
+                     C : constant Long_Float := Long_Float (Cnt);
+                     Mx : constant Long_Float := Sx / C;
+                     My : constant Long_Float := Sy / C;
+                     Vxx : constant Long_Float := Long_Float'Max (0.0, Sxx / C - Mx * Mx);
+                     Vyy : constant Long_Float := Long_Float'Max (0.0, Syy / C - My * My);
+                     Vxy : constant Long_Float := Sxy / C - Mx * My;
+                     Tr : constant Long_Float := Vxx + Vyy;
+                     Det : constant Long_Float := Long_Float'Max (0.0, Vxx * Vyy - Vxy * Vxy);
+                     Disc : constant Long_Float := Long_Float'Max (0.0, 0.25 * Tr * Tr - Det);
+                     L1 : constant Long_Float := 0.5 * Tr + Sqrt (Disc);
+                     L2 : constant Long_Float := Long_Float'Max (0.0, 0.5 * Tr - Sqrt (Disc));
+                     Ax, Ay : Long_Float;
+                  begin
+                     R.X0 := X0; R.Y0 := Y0; R.X1 := X1; R.Y1 := Y1;
+                     R.Count := Cnt;
+                     R.Cu := Mx / Long_Float (W);
+                     R.Cv := My / Long_Float (H);
+                     R.Sig_U := Sqrt (Vxx) / Long_Float (W);
+                     R.Sig_V := Sqrt (Vyy) / Long_Float (H);
+                     --  主轴 = 协方差最大特征值的特征向量
+                     if abs Vxy > 1.0e-12 then
+                        Ax := L1 - Vyy; Ay := Vxy;
+                     elsif Vxx >= Vyy then
+                        Ax := 1.0; Ay := 0.0;
+                     else
+                        Ax := 0.0; Ay := 1.0;
+                     end if;
+                     declare
+                        Ln : constant Long_Float := Sqrt (Ax * Ax + Ay * Ay);
+                     begin
+                        if Ln > 0.0 then
+                           R.Au := Ax / Ln; R.Av := Ay / Ln;
+                        else
+                           R.Au := 1.0; R.Av := 0.0;
+                        end if;
+                     end;
+                     --  短轴为零时伸长比记成一个大数(无量纲)
+                     R.Elong := (if L2 > 1.0e-9 then Sqrt (L1 / L2) else 1.0e3);
+                     Out_R.Append (R);
+                  end;
+               end if;
+            end;
+         end if;
+      end loop;
+      return Out_R;
+   end Components;
+
+   function Region_Depth (Depth : Floats; W, H : Natural; Mask : Bools; Q : Long_Float) return Long_Float is
+      Vals : Floats;
+      N : constant Natural := Natural'Min (W * H, Natural'Min (Natural (Depth.Length), Natural (Mask.Length)));
+   begin
+      for I in 0 .. N - 1 loop
+         if Mask.Element (I) and then not Is_Nan (Depth.Element (I)) and then Depth.Element (I) > 1.0e-6 then
+            Vals.Append (Depth.Element (I));
+         end if;
+      end loop;
+      if Vals.Is_Empty then
+         return NaN;
+      end if;
+      return Quantile (Vals, Q);
+   end Region_Depth;
+
+   function Inside (R : Region; U, V : Long_Float; W, H : Natural; Grow : Long_Float) return Boolean is
+      X0 : constant Long_Float := Long_Float (R.X0) / Long_Float (W);
+      X1 : constant Long_Float := Long_Float (R.X1 + 1) / Long_Float (W);
+      Y0 : constant Long_Float := Long_Float (R.Y0) / Long_Float (H);
+      Y1 : constant Long_Float := Long_Float (R.Y1 + 1) / Long_Float (H);
+      Gw : constant Long_Float := (X1 - X0) * Grow;
+      Gh : constant Long_Float := (Y1 - Y0) * Grow;
+   begin
+      return U >= X0 - Gw and then U <= X1 + Gw and then V >= Y0 - Gh and then V <= Y1 + Gh;
+   end Inside;
+end Picture;
