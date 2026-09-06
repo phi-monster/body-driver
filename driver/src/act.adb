@@ -9,7 +9,7 @@ with Backup;
 package body Act is
    Sigma_Mult : constant Long_Float := 3.0;   --  鼓出来超过背景自己稳健 σ 的几倍才算一块(在真实深度图上验过:3 中,5 杀光);无量纲
    Track_Win : constant Long_Float := 0.10;   --  一步里任何被跟踪的点在画面里最多跑十分之一画幅(跟踪窗,比例,无量纲)
-   Cap_Mult : constant Long_Float := 8.0;     --  一步命令上限 = 看得见的探针幅度的几倍(倍数,无量纲)
+   Cap_Mult : constant Long_Float := 2.0;     --  一步命令上限 = 探针幅度(点在画面里跑过地板的那一档)的几倍(倍数,无量纲;EH:8 倍让阻尼当家,步子反而只剩探针的一倍)
    Step_Cap : constant := 60;                 --  一段最多几步(安全上限,不是策略)
 
    function S (X : String) return Unbounded_String renames To_Unbounded_String;
@@ -475,8 +475,9 @@ package body Act is
          end;
       end if;
       Ok := True;
-      Put_Line ("[身]   这些点还没有响应表 ⇒ 六个通道各推一下量列(幅度从开机看得见的那一档起翻倍,到点真的动过地板为止)");
-      for K in 0 .. Chan.Per_Arm - 1 loop
+      Put_Line ("[身]   这些点还没有响应表 ⇒ 位置通道各推一下量列(幅度从开机看得见的那一档起翻倍,到点真的动过地板为止;朝向通道不管位置)");
+      --  位置和深度只由位置通道解(末端位姿的前三个数);朝向通道只在有朝向目标时才量、才用(EG/EH 实测:让转动去凑深度 ⇒ 手腕一路前倾 31°)
+      for K in 0 .. Chan.Pos_Channels - 1 loop
          declare
             Chn : constant Natural := Arm * Chan.Per_Arm + K;
             Amp : Long_Float := C.Map.Amp (Chn);
@@ -625,6 +626,7 @@ package body Act is
       Jaw : Floats;
       Last_Err : Long_Float := 0.0;
       Ok : Boolean;
+      Cmd_Floor : Long_Float := 0.0;   --  最小探针幅度:比它一半还小的命令说明不了"顶住"
    begin
       Event := S ("hit the safety cap on steps");
       Steps_Taken := 0;
@@ -704,7 +706,8 @@ package body Act is
             declare
                Damp : Table.Vec := Table.Zero_Vec;
             begin
-               for K in 0 .. Chan.Per_Arm - 1 loop
+               Cmd_Floor := 0.0;
+               for K in 0 .. Chan.Pos_Channels - 1 loop
                   declare
                      Ch : constant Natural := Arm * Chan.Per_Arm + K;
                      Am : constant Long_Float := Long_Float'Max (1.0e-6, C.Map.Amp (Ch));
@@ -718,9 +721,10 @@ package body Act is
                      if C.Map.Seen (Ch) and then All_Trust then
                         Active (K) := True;
                         Cap (K) := Am * Cap_Mult * Amount;
+                        Cmd_Floor := (if Cmd_Floor <= 0.0 then Am else Long_Float'Min (Cmd_Floor, Am));
                      end if;
-                     --  阻尼 = 1e-3 / 幅²:每个通道都以"几个探针幅度"计价(无量纲),转动不再比平移便宜
-                     Damp (K) := 1.0e-3 / (Am * Am);
+                     --  阻尼 = 1e-4 / 幅²:每个通道都以"几个探针幅度"计价(无量纲),小到让上限当家而不是阻尼当家
+                     Damp (K) := 1.0e-4 / (Am * Am);
                   end;
                end loop;
                Table.Solve (Terms, Chan.Per_Arm, Cap, Active, Damp, A, Solved);
@@ -810,7 +814,7 @@ package body Act is
                      Retrack (C, F, Cam, Before, P, Was_U + Pr (0), Was_V + Pr (1), Moved, (if Was_Z > 0.0 then Was_Z + Pr (2) else -1.0));
                      Dy (0) := P.Cu - Was_U; Dy (1) := P.Cv - Was_V;
                      Dy (2) := (if P.Z > 0.0 and then Was_Z > 0.0 then P.Z - Was_Z else 0.0);
-                     Table.Update (E, Deliv, Dy, Fl.Track * 2.0, C.Map.EE_Noise);
+                     Table.Update (E, Deliv, Dy, Fl.Track * 2.0, Long_Float'Max (C.Map.EE_Noise, 0.5 * Cmd_Floor));
                      if Table.Blocked (E) then
                         Any_Blocked := True;
                      end if;
@@ -1062,7 +1066,7 @@ package body Act is
          Step_Limit : constant Natural := (if Say.Until_Kind = "steps" then Natural'Max (1, Say.Steps) else 0);
          Avoid : Item_Vectors.Vector;
          Pts : Point_Vectors.Vector;
-         Amount : Long_Float := 0.5;
+         Amount : Long_Float := 1.0;   --  没说 amount 时用满(比例);说了按它的
          Event : Unbounded_String;
          Steps_Taken : Natural := 0;
          Blocked : Boolean;
