@@ -455,6 +455,7 @@ package body Act is
             Ok2 : Boolean;
          begin
             for I in 0 .. Natural (Pts.Length) - 1 loop
+               --  读深窗口 = 张幅的四分之一,再小也有半个百分点的画幅(比例,无量纲)
                Z1 (I) := Picture.Near_Depth (F.Cams (Cam).Depth, Cw, Ch, Pts (I).Cu, Pts (I).Cv, Long_Float'Max (0.005, Z.Span * 0.25));
             end loop;
             Selfmap.Idle (L, F, 1, Ok2);
