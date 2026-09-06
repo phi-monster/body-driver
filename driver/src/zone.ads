@@ -34,6 +34,9 @@ package Zone is
    package Hand_Vectors is new Ada.Containers.Vectors (Natural, Hand);
 
    procedure Measure (L : in out Plug.Link; M : Selfmap.Body_Map; Arm : Natural; F : in out Plug.Frame; H : out Hand; Ok : out Boolean);
+   --  从"合空扫过的像素 + 张开时的深度 + 合上时的深度"算出握区(纯函数,可离线测):
+   --  近的那一拨(张开时就在近处)= 手指;扫过但张开时是远处 = 手指合拢时要盖过的地方 = 能装东西的区。
+   function From_Sweep (Swept : Bools; Depth_Open, Depth_Closed : Floats; Has_Depth : Boolean; W, Hh : Natural) return Hand_Zone;
    --  把手指像素从深度切块结果里剔掉(块心落在手指框或区框里 = 我自己)
    function Is_Self (Z : Hand_Zone; R : Picture.Region; W, Hh : Natural) return Boolean;
 end Zone;

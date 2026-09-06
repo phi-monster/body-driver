@@ -26,13 +26,22 @@ package body Selfmap is
    function Pictures_Still (M : Body_Map; Before, After : Plug.Cam_Vectors.Vector) return Boolean is
    begin
       for C in 0 .. Natural'Min (Natural (Before.Length), Natural (After.Length)) - 1 loop
-         declare
-            Floor : constant Natural := (if C < Natural (M.Pic_Floor.Length) then M.Pic_Floor (C) else 0);
-         begin
-            if Picture.Max_Diff (Before (C).Gray, After (C).Gray) > Floor then
-               return False;
-            end if;
-         end;
+         if C < Natural (M.Floors.Length) then
+            declare
+               --  静止 = 超过各自噪声地板的像素凑不成一团(最少像素数的几倍,倍数无量纲;去噪闪烁是撒开的单点)
+               Mv : constant Bools := Picture.Moved (Before (C).Gray, After (C).Gray, M.Floors (C));
+               Cnt : Natural := 0;
+            begin
+               for B of Mv loop
+                  if B then
+                     Cnt := Cnt + 1;
+                  end if;
+               end loop;
+               if Cnt > 4 * Picture.Min_Pixels (Before (C).W, Before (C).H) then
+                  return False;
+               end if;
+            end;
+         end if;
       end loop;
       return True;
    end Pictures_Still;
@@ -158,6 +167,9 @@ package body Selfmap is
       M.Amp := Zeros (M.Channels); M.Delivered := Zeros (M.Channels);
       M.Seen := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (M.Channels));
       M.Cam_On_Arm := Int_Vectors.To_Vector (-1, Ada.Containers.Count_Type (Arms));
+      declare
+         Last_Trans, Last_Rot : Long_Float := 0.0;
+      begin
       for A in 0 .. Arms - 1 loop
          for K in 0 .. Chan.Per_Arm - 1 loop
             declare
@@ -165,7 +177,8 @@ package body Selfmap is
                P0 : constant Plug.Arm_Pose := F.EE (A);
                F0 : constant Plug.Cam_Vectors.Vector := F.Cams;
                Noise : constant Long_Float := (if K < 3 then M.EE_Noise else M.Rot_Noise);
-               Amp : Long_Float := Long_Float'Max (Start_Amp, 4.0 * Noise);
+               --  起点:同类通道(平移/转动)上一次被接受的幅度的一半(协议:从已知能走的档往下试一档),没有就从极小起
+               Amp : Long_Float := Long_Float'Max (Start_Amp, Long_Float'Max (4.0 * Noise, (if K < 3 then Last_Trans else Last_Rot) * 0.5));
                Accepted : Boolean := False;
                Jaw0 : Floats;
             begin
@@ -229,6 +242,11 @@ package body Selfmap is
                         M.Amp.Replace_Element (Ch, Amp);
                         M.Delivered.Replace_Element (Ch, Got);
                         M.Seen.Replace_Element (Ch, True);
+                        if K < 3 then
+                           Last_Trans := Amp;
+                        else
+                           Last_Rot := Amp;
+                        end if;
                         Put_Line ("[身]   通道" & Natural'Image (Ch) & "(第" & Natural'Image (A + 1) & " 只手第" & Natural'Image (K) &
                                   " 轴):命令 " & Codec.Fmt (Amp, 4) & " 实到 " & Codec.Fmt (Got, 4) & " · " & Natural'Image (Frames) & " 拍稳 · 画面里看见了");
                         exit;
@@ -244,6 +262,7 @@ package body Selfmap is
             end;
          end loop;
       end loop;
+      end;
       --  ③ 哪台相机长在哪只手上:这只手一动它整幅都变,而且比第二名多一倍(倍数,无量纲);世界相机 = 变得最少的
       for A in 0 .. Arms - 1 loop
          declare

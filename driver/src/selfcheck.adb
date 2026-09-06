@@ -11,6 +11,8 @@ with Monitor;
 with Backup;
 with Flow;
 with GNAT.SHA1;
+with Zone;
+with Ada.Containers;
 with Interfaces; use type Interfaces.Unsigned_8;
 procedure Selfcheck is
    Fails : Natural := 0;
@@ -217,6 +219,36 @@ begin
       Check (Du * Long_Float (W) > 1.0, "光流:方块中心横向位移 " & Codec.Fmt (Du * Long_Float (W), 2) & " px(该 ≈ 4)");
       Flow.Sample (Fl, 110.0 / 128.0, 10.0 / 96.0, 0.03, Du, Dv);
       Check (abs Du * Long_Float (W) < 1.0, "光流:背景不动");
+   end;
+   --  握区:手上相机的合成图。桌面深 0.5;两瓣(深 0.2)张开时在下沿左右两角,合上时在下沿中间相遇;
+   --  扫过的并集 = 两瓣走过的整条带。期望:两瓣、区心在下沿正中、张幅 ≈ 两瓣内沿之间的距离、手指深 ≈ 0.2。
+   declare
+      W : constant := 64;
+      H : constant := 48;
+      Dopen, Dclosed : Floats := Filled (W * H, 0.5);
+      Swept : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (W * H));
+      Z : Zone.Hand_Zone;
+   begin
+      for Y in 36 .. 47 loop
+         for X in 0 .. 63 loop
+            --  张开:瓣在 x 4..11 与 52..59;合上:瓣在 x 26..33 与 30..37(相遇);扫过 = 4..37 与 26..59
+            if X in 4 .. 11 or else X in 52 .. 59 then
+               Dopen.Replace_Element (Y * W + X, 0.2);
+            end if;
+            if X in 26 .. 37 then
+               Dclosed.Replace_Element (Y * W + X, 0.2);
+            end if;
+            if X in 4 .. 59 then
+               Swept.Replace_Element (Y * W + X, True);
+            end if;
+         end loop;
+      end loop;
+      Z := Zone.From_Sweep (Swept, Dopen, Dclosed, True, W, H);
+      Check (Z.Valid and then Z.N_Lobes = 2, "握区:认出两瓣(" & Natural'Image (Z.N_Lobes) & ")");
+      Check (abs (Z.Cu - 32.0 / 64.0) < 0.05 and then Z.Cv > 0.7, "握区:区心在下沿正中 (" & Codec.Fmt (Z.Cu, 2) & "," & Codec.Fmt (Z.Cv, 2) & ")");
+      Check (abs (Z.Span - 40.0 / 64.0) < 0.06, "握区:张幅 " & Codec.Fmt (Z.Span, 3) & "(该 ≈ 0.625)");
+      Check (abs (Z.Depth - 0.2) < 1.0e-6, "握区:手指深 " & Codec.Fmt (Z.Depth, 3));
+      Check (Z.X0 >= 10 and then Z.X1 <= 53, "握区:区框在两瓣之间 " & Codec.Img (Z.X0) & ".." & Codec.Img (Z.X1));
    end;
    --  BMP 头
    declare

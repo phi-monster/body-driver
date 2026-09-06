@@ -449,6 +449,79 @@ package body Picture is
       return Quantile (Vals, Q);
    end Region_Depth;
 
+   function Split (F : Floats) return Long_Float is
+      N : constant Natural := Natural (F.Length);
+      Lo : Long_Float := 1.0e30;
+      Hi : Long_Float := -1.0e30;
+      Bins : constant := 64;      --  直方图格数(次数,无量纲)
+      H : array (0 .. Bins - 1) of Long_Float := [others => 0.0];
+      Best_T : Long_Float := NaN;
+      Best_Var : Long_Float := -1.0;
+      Total : Long_Float := 0.0;
+      Sum_All : Long_Float := 0.0;
+   begin
+      if N < 16 then
+         return NaN;
+      end if;
+      for X of F loop
+         if not Is_Nan (X) then
+            Lo := Long_Float'Min (Lo, X);
+            Hi := Long_Float'Max (Hi, X);
+         end if;
+      end loop;
+      if not (Hi > Lo) then
+         return NaN;
+      end if;
+      for X of F loop
+         if not Is_Nan (X) then
+            declare
+               B : constant Natural := Natural'Min (Bins - 1, Natural (Long_Float'Floor ((X - Lo) / (Hi - Lo) * Long_Float (Bins))));
+            begin
+               H (B) := H (B) + 1.0;
+               Total := Total + 1.0;
+               Sum_All := Sum_All + Long_Float (B);
+            end;
+         end if;
+      end loop;
+      declare
+         W0, Sum0 : Long_Float := 0.0;
+      begin
+         for B in 0 .. Bins - 2 loop
+            W0 := W0 + H (B);
+            Sum0 := Sum0 + H (B) * Long_Float (B);
+            declare
+               W1 : constant Long_Float := Total - W0;
+            begin
+               if W0 > 0.0 and then W1 > 0.0 then
+                  declare
+                     M0 : constant Long_Float := Sum0 / W0;
+                     M1 : constant Long_Float := (Sum_All - Sum0) / W1;
+                     Var : constant Long_Float := W0 * W1 * (M0 - M1) * (M0 - M1);
+                  begin
+                     if Var > Best_Var then
+                        Best_Var := Var;
+                        Best_T := Lo + (Long_Float (B) + 1.0) / Long_Float (Bins) * (Hi - Lo);
+                     end if;
+                  end;
+               end if;
+            end;
+         end loop;
+      end;
+      --  两拨要真的分得开:类间方差得占总方差的大头(比例,无量纲),否则是单峰
+      declare
+         Mean : constant Long_Float := Sum_All / Total;
+         Tot_Var : Long_Float := 0.0;
+      begin
+         for B in 0 .. Bins - 1 loop
+            Tot_Var := Tot_Var + H (B) * (Long_Float (B) - Mean) ** 2;
+         end loop;
+         if Tot_Var <= 0.0 or else Best_Var / Total < 0.5 * Tot_Var then
+            return NaN;
+         end if;
+      end;
+      return Best_T;
+   end Split;
+
    function Inside (R : Region; U, V : Long_Float; W, H : Natural; Grow : Long_Float) return Boolean is
       X0 : constant Long_Float := Long_Float (R.X0) / Long_Float (W);
       X1 : constant Long_Float := Long_Float (R.X1 + 1) / Long_Float (W);

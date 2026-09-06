@@ -37,4 +37,6 @@ package Picture is
    function Region_Depth (Depth : Floats; W, H : Natural; Mask : Bools; Q : Long_Float) return Long_Float;  --  掩膜上的深度分位;NaN = 无
    function Inside (R : Region; U, V : Long_Float; W, H : Natural; Grow : Long_Float) return Boolean;
    function Is_Nan (X : Long_Float) return Boolean;
+   --  一堆数分成两拨(Otsu):返回分界;分不开(单峰)返回 NaN
+   function Split (F : Floats) return Long_Float;
 end Picture;
