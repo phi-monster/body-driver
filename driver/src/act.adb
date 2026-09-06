@@ -464,6 +464,7 @@ package body Act is
                   Z2 : constant Long_Float := Picture.Near_Depth (F.Cams (Cam).Depth, Cw, Ch, Pts (I).Cu, Pts (I).Cv, Long_Float'Max (0.005, Z.Span * 0.25));
                   Zr : constant Long_Float := (if Pts (I).Z > 0.0 then Pts (I).Z else 1.0);
                begin
+                  --  地板 = 两拍读深抖动的 4 倍(倍数,无量纲),再小也有距离的百分之一(比例,无量纲)
                   if not Picture.Is_Nan (Z1 (I)) and then not Picture.Is_Nan (Z2) then
                      Floor_Z (I) := Long_Float'Max (4.0 * abs (Z1 (I) - Z2), 0.01 * Zr);
                   else
@@ -589,6 +590,7 @@ package body Act is
                      Q.Cu := P.Cu + Ou; Q.Cv := P.Cv + Ov;
                      Q.Tu := P.Tu + Ou; Q.Tv := P.Tv + Ov;
                      if F.Cams (Cam).Has_Depth then
+                        --  读深窗口 = 张幅的四分之一,再小也有半个百分点的画幅(比例,无量纲)
                         Zd := Picture.Near_Depth (F.Cams (Cam).Depth, Cw, Ch, Q.Cu, Q.Cv, Long_Float'Max (0.005, Z.Span * 0.25));
                         if Picture.Is_Nan (Zd) then
                            Zd := P.Z;
@@ -873,6 +875,7 @@ package body Act is
             Tr : Zone_Track := C.Zones (Idx);
          begin
             Tr.Cu := Su / N; Tr.Cv := Sv / N;
+            --  1e29 = "没读到"的哨兵(无量纲)
             if Zmin < 1.0e29 then
                Tr.Z := Zmin;
             end if;
@@ -1277,6 +1280,7 @@ package body Act is
                      end loop;
                      if Found and then Pin.Kind = Zone_Pt and then Nz > 0.0 then
                         Pin.Cu := Pin.Cu / Nz; Pin.Cv := Pin.Cv / Nz;
+                        --  1e29 = "没读到"的哨兵(无量纲)
                         if Pin.Z >= 1.0e29 then
                            Pin.Z := 0.0;
                         end if;
