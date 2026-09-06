@@ -5,6 +5,7 @@ with Plug;
 with Picture;
 with Table;
 with Ada.Containers.Vectors;
+with Ada.Strings.Unbounded;
 package Selfmap is
    type Part is record
       Valid : Boolean := False;
@@ -33,7 +34,16 @@ package Selfmap is
       Floors : Floor_Vectors.Vector;       --  每台相机的静止噪声地板
       Pic_Floor : Ints;                    --  每台相机:整幅画静止时最大灰度差
       Settle : Natural := 2;               --  一条命令发出后读数稳下来要几拍(量出来的)
+      --  越用越强:历次量到的幅度/实到(现值取中位数),量过几次
+      Amp_Hist : Plug.Floats_Vectors.Vector;
+      Deliv_Hist : Plug.Floats_Vectors.Vector;
+      Measured_Times : Natural := 0;
    end record;
+   --  快速核对:每只手推一个通道(存的幅度),实到和存的差一半以内且画面里看得见 ⇒ 身体没变
+   type String_Note is record
+      Text : Ada.Strings.Unbounded.Unbounded_String;
+   end record;
+   procedure Verify (L : in out Plug.Link; M : Body_Map; F : in out Plug.Frame; Ok_Body, Ok_Link : out Boolean; Note : out String_Note);
 
    --  发一条位姿命令并等它稳:返回实际交付(按通道)与用掉的拍数。F 更新到最后一帧。
    procedure Go (L : in out Plug.Link; M : Body_Map; Arm : Natural; Target : Plug.Arm_Pose; Jaw : Floats;

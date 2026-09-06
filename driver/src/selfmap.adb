@@ -108,6 +108,70 @@ package body Selfmap is
       end if;
    end Go;
 
+   procedure Verify (L : in out Plug.Link; M : Body_Map; F : in out Plug.Frame; Ok_Body, Ok_Link : out Boolean; Note : out String_Note) is
+      use Ada.Strings.Unbounded;
+      T : Unbounded_String;
+   begin
+      Ok_Body := True; Ok_Link := True;
+      for A in 0 .. M.Arms - 1 loop
+         declare
+            K : constant Natural := 0;          --  第一个平移通道
+            Ch : constant Natural := A * Chan.Per_Arm + K;
+            P0 : constant Plug.Arm_Pose := F.EE (A);
+            F0 : constant Plug.Cam_Vectors.Vector := F.Cams;
+            A_Cmd : Table.Vec := Table.Zero_Vec;
+            Deliv, Back : Table.Vec;
+            Frames : Natural;
+            Ok2 : Boolean;
+            Jaw0 : Floats;
+            Visible : Boolean := False;
+         begin
+            if Ch >= Natural (M.Amp.Length) or else not M.Seen (Ch) then
+               Append (T, "第" & Natural'Image (A + 1) & " 只手没有可核的通道;");
+               Ok_Body := False;
+            else
+               Jaw0.Append (Jaw_Of (F, A));
+               A_Cmd (K) := M.Amp (Ch);
+               Go (L, M, A, Chan.Compose (P0, A_Cmd), Jaw0, F, Deliv, Frames, Ok2);
+               if not Ok2 then
+                  Ok_Link := False;
+                  return;
+               end if;
+               for C in 0 .. Natural (F.Cams.Length) - 1 loop
+                  if C < Natural (M.Floors.Length) then
+                     declare
+                        Mv : constant Bools := Picture.Moved (F0 (C).Gray, F.Cams (C).Gray, M.Floors (C));
+                        Comps : constant Picture.Regions := Picture.Components (Mv, F.Cams (C).W, F.Cams (C).H, Picture.Min_Pixels (F.Cams (C).W, F.Cams (C).H));
+                     begin
+                        if not Comps.Is_Empty then
+                           Visible := True;
+                        end if;
+                     end;
+                  end if;
+               end loop;
+               Go (L, M, A, P0, Jaw0, F, Back, Frames, Ok2);
+               if not Ok2 then
+                  Ok_Link := False;
+                  return;
+               end if;
+               declare
+                  Expect : constant Long_Float := M.Delivered (Ch);
+                  Got : constant Long_Float := Deliv (K);
+               begin
+                  --  差一半以内(比例,无量纲)算同一具身体
+                  if abs (Got - Expect) <= 0.5 * abs Expect + M.EE_Noise and then Visible then
+                     Append (T, "第" & Natural'Image (A + 1) & " 只手:命令 " & Codec.Fmt (M.Amp (Ch), 4) & " 实到 " & Codec.Fmt (Got, 4) & "(存的 " & Codec.Fmt (Expect, 4) & ")对得上;");
+                  else
+                     Append (T, "第" & Natural'Image (A + 1) & " 只手:实到 " & Codec.Fmt (Got, 4) & " 和存的 " & Codec.Fmt (Expect, 4) & " 对不上" & (if Visible then "" else "(画面里也没看见)") & ";");
+                     Ok_Body := False;
+                  end if;
+               end;
+            end if;
+         end;
+      end loop;
+      Note.Text := T;
+   end Verify;
+
    procedure Measure (L : in out Plug.Link; F : in out Plug.Frame; M : out Body_Map; Ok : out Boolean) is
       N_Cams : constant Natural := Natural (F.Cams.Length);
       Arms : constant Natural := Natural (F.EE.Length);
