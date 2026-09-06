@@ -134,10 +134,9 @@ package body Plug is
                Put_Line ("[链] 没等到 ⇒ 取不到画面");
                return False;
             end if;
-            L.Reset_Flag := True;
             L.Has_Pending := False;
             L.Has_Last := False;
-            Put_Line ("[链] 重新接上了 ⇒ 当作新的一集");
+            Put_Line ("[链] 重新接上了(不当作新的一集:对方明说 reset 才算)");
          elsif Kind = Websocket.Op_Binary then
             declare
                D : Doc;

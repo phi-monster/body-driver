@@ -31,6 +31,7 @@ package Act is
    type Stored_Effect is record
       Arm, Cam : Natural := 0;
       Kind : Track_Kind := Zone_Pt;
+      Lobe : Integer := -1;      --  握区的哪一瓣(-1 = 整个/世界块)
       E : Table.Effect;
       Trust : Table.Mask := [others => True];   --  探针时这个点真跑过地板的通道
    end record;

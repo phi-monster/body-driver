@@ -285,6 +285,7 @@ package body Act is
       Kind : Track_Kind := Zone_Pt;
       Slot : Integer := -1;
       Item_No : Natural := 0;
+      Lobe : Integer := -1;      --  握区的哪一瓣(两瓣时一瓣一个点:两指各自到位,歪了就有一瓣不到位 —— 倾斜自然被罚)
       Cu, Cv, Z : Long_Float := 0.0;
       Tu, Tv, Tz : Long_Float := 0.0;
       Wz : Long_Float := 0.0;
@@ -297,6 +298,7 @@ package body Act is
       Err0 : Long_Float := 0.0;
    end record;
    package Point_Vectors is new Ada.Containers.Vectors (Natural, Point);
+   type Effect_Array is array (Natural range <>) of Table.Effect;
 
    function Err_Of (P : Point) return Long_Float is
       Dz : constant Long_Float := (if P.Wz > 0.0 and then P.Z > 0.0 then (P.Tz - P.Z) / P.Z else 0.0);
@@ -304,19 +306,19 @@ package body Act is
       return Sqrt ((P.Tu - P.Cu) ** 2 + (P.Tv - P.Cv) ** 2 + Dz * Dz);
    end Err_Of;
 
-   function Find_Effect (C : Context; Arm, Cam : Natural; Kind : Track_Kind) return Integer is
+   function Find_Effect (C : Context; Arm, Cam : Natural; Kind : Track_Kind; Lobe : Integer := -1) return Integer is
    begin
       for I in 0 .. Natural (C.Tables.Length) - 1 loop
-         if C.Tables (I).Arm = Arm and then C.Tables (I).Cam = Cam and then C.Tables (I).Kind = Kind then
+         if C.Tables (I).Arm = Arm and then C.Tables (I).Cam = Cam and then C.Tables (I).Kind = Kind and then C.Tables (I).Lobe = Lobe then
             return I;
          end if;
       end loop;
       return -1;
    end Find_Effect;
 
-   procedure Store_Effect (C : in out Context; Arm, Cam : Natural; Kind : Track_Kind; E : Table.Effect; Trust : Table.Mask) is
-      I : constant Integer := Find_Effect (C, Arm, Cam, Kind);
-      Se : constant Stored_Effect := (Arm, Cam, Kind, E, Trust);
+   procedure Store_Effect (C : in out Context; Arm, Cam : Natural; Kind : Track_Kind; Lobe : Integer; E : Table.Effect; Trust : Table.Mask) is
+      I : constant Integer := Find_Effect (C, Arm, Cam, Kind, Lobe);
+      Se : constant Stored_Effect := (Arm, Cam, Kind, Lobe, E, Trust);
    begin
       if I >= 0 then
          C.Tables.Replace_Element (Natural (I), Se);
@@ -336,15 +338,14 @@ package body Act is
                return;    --  自己的手上相机:握区是固定像素
             end if;
             declare
-               --  半分辨率算光流(3 层 30 轮:次数),在区心一小片取平均位移
+               --  半分辨率算光流(3 层 30 轮:次数),在这一点一小片取平均位移
                Hw : constant Natural := Cw / 2;
                Hh : constant Natural := Ch / 2;
                A, B : Buf;
                Fl : Flow.Field;
                Du, Dv : Long_Float;
-               Idx : constant Natural := Track_Idx (C, P.Arm, Cam);
-               Tr : Zone_Track := C.Zones (Idx);
                Z : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, Cam);
+               Old_Z : constant Long_Float := P.Z;
             begin
                A.Reserve_Capacity (Ada.Containers.Count_Type (Hw * Hh));
                B.Reserve_Capacity (Ada.Containers.Count_Type (Hw * Hh));
@@ -358,56 +359,27 @@ package body Act is
                --  取平均的那一片 = 张幅的四分之一(比例,无量纲),再小也有一个像素百分比
                Flow.Sample (Fl, P.Cu, P.Cv, Long_Float'Max (0.01, Z.Span * 0.25), Du, Dv);
                if Moved_Arm and then Sqrt (Du * Du + Dv * Dv) * Long_Float (Cw) < 0.5 then
-                  Tr.Stale := Tr.Stale + 1;      --  手臂动了,区心那儿画面却没流:跟丢的迹象
-                  P.Cu := Pred_U; P.Cv := Pred_V;
+                  P.Cu := Pred_U; P.Cv := Pred_V;      --  手臂动了,这儿画面却没流:跟丢的迹象,用预测
                else
-                  Tr.Stale := 0;
                   P.Cu := Long_Float'Max (0.0, Long_Float'Min (1.0, P.Cu + Du));
                   P.Cv := Long_Float'Max (0.0, Long_Float'Min (1.0, P.Cv + Dv));
                end if;
                if F.Cams (Cam).Has_Depth then
                   declare
-                     --  深度读在两瓣上(区心是两指之间的空,读到的是桌面;EF 实测区心读出 0.588 = 桌面,手指其实在 0.414),
-                     --  瓣的位置 = 区心 + 量握区时瓣相对区心的偏移(刚性);窗口 = 张幅的四分之一(比例,无量纲)
+                     --  深度读在这一瓣自己的位置上(区心是两指之间的空,读到的是桌面);窗口 = 张幅的四分之一(比例,无量纲)
                      Win : constant Long_Float := Long_Float'Max (0.005, Z.Span * 0.25);
-                     Zs : Floats;
-                     Old_Z : constant Long_Float := P.Z;
+                     Zd : constant Long_Float := Picture.Near_Depth (F.Cams (Cam).Depth, Cw, Ch, P.Cu, P.Cv, Win);
                   begin
-                     if Z.A.Valid then
-                        declare
-                           D : constant Long_Float := Picture.Near_Depth (F.Cams (Cam).Depth, Cw, Ch, P.Cu + (Z.A.Cu - Z.Cu), P.Cv + (Z.A.Cv - Z.Cv), Win);
-                        begin
-                           if not Picture.Is_Nan (D) then
-                              Zs.Append (D);
-                           end if;
-                        end;
-                     end if;
-                     if Z.B.Valid then
-                        declare
-                           D : constant Long_Float := Picture.Near_Depth (F.Cams (Cam).Depth, Cw, Ch, P.Cu + (Z.B.Cu - Z.Cu), P.Cv + (Z.B.Cv - Z.Cv), Win);
-                        begin
-                           if not Picture.Is_Nan (D) then
-                              Zs.Append (D);
-                           end if;
-                        end;
-                     end if;
-                     if not Zs.Is_Empty then
-                        declare
-                           Zd : constant Long_Float := Picture.Quantile (Zs, 0.5);
-                        begin
-                           --  一步之内深度跳了超过"预测的变化 + 距离的一成"(比例,无量纲)⇒ 读到的不是我的手指,留预测
-                           if Old_Z <= 0.0 or else abs (Zd - Pred_Z) <= abs (Pred_Z - Old_Z) + 0.1 * Old_Z then
-                              P.Z := Zd;
-                           else
-                              P.Z := Pred_Z;
-                              Tr.Stale := Tr.Stale + 1;
-                           end if;
-                        end;
+                     if not Picture.Is_Nan (Zd) then
+                        --  一步之内深度跳了超过"预测的变化 + 距离的一成"(比例,无量纲)⇒ 读到的不是我的手指,留预测
+                        if Old_Z <= 0.0 or else Pred_Z <= 0.0 or else abs (Zd - Pred_Z) <= abs (Pred_Z - Old_Z) + 0.1 * Old_Z then
+                           P.Z := Zd;
+                        else
+                           P.Z := Pred_Z;
+                        end if;
                      end if;
                   end;
                end if;
-               Tr.Cu := P.Cu; Tr.Cv := P.Cv; Tr.Z := P.Z; Tr.Valid := True;
-               C.Zones.Replace_Element (Idx, Tr);
             end;
          when Thing_Pt =>
             declare
@@ -450,48 +422,77 @@ package body Act is
       Selfmap.Go (L, C.Map, Arm, Chan.Compose (P0, A), Jaw, F, Delivered, Frames, Ok);
    end Step_Arm;
 
-   --  没有表的点:每个通道推一下量一列。幅度从开机看得见的那一档起,翻倍到这个点在画面里跑过 4 个跟踪地板为止
-   --  (倍数,无量纲;EF 实测:最小可见幅度量出来的列全是噪声,解算据此拧手腕 0.1 rad 把握区甩到了臂上);
-   --  翻到上限还跑不过地板的通道,这一段不用它(Trust 为假)。推完推回起点。
-   procedure Probe_Effect (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Cam : Natural; P : in out Point; E : in out Table.Effect;
-                           Trust : out Table.Mask; Ok : out Boolean) is
-      Arm : constant Natural := P.Arm;
+   --  没有表的点(同一只手的几个点一起):每个通道推一下量一列。幅度从开机看得见的那一档起,翻倍到每个点在画面里
+   --  跑过 4 个跟踪地板、或深度变过深度地板为止(倍数,无量纲;EF 实测:最小可见幅度量出的列全是噪声,解算据此拧手腕);
+   --  深度地板 = 这一点连着两拍读深度抖多少的 4 倍,再小也有距离的百分之一(比例,无量纲);翻到上限还看不出动的通道,这一段不用它。推完推回起点。
+   procedure Probe_Effects (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Cam : Natural; Pts : in out Point_Vectors.Vector;
+                            Effs : in out Effect_Array; Trust : out Table.Mask; Ok : out Boolean) is
+      Arm : constant Natural := Pts (0).Arm;
       P0 : constant Plug.Arm_Pose := F.EE (Arm);
       Jaw : Floats;
       Cw : constant Natural := F.Cams (Cam).W;
+      Ch : constant Natural := F.Cams (Cam).H;
       Floor_Px : constant Long_Float := 4.0 / Long_Float (Cw);   --  跟踪地板:4 个像素(倍数,无量纲)
+      Floor_Z : array (0 .. Natural (Pts.Length) - 1) of Long_Float := [others => 0.0];
+      Z : constant Zone.Hand_Zone := Zone_Of (C, Arm, Cam);
    begin
       Trust := [others => False];
       Jaw.Append (Selfmap.Jaw_Of (F, Arm));
-      Table.Reset (E, Chan.Per_Arm, 1.0);
-      --  先验不确定度按每个通道的探针幅度定:P0 = 100/幅²(倍数,无量纲)⇒ 头几步就能把探出来的列修正过来
-      for K in 0 .. Chan.Per_Arm - 1 loop
-         declare
-            Am : constant Long_Float := Long_Float'Max (1.0e-6, C.Map.Amp (Arm * Chan.Per_Arm + K));
-         begin
-            Table.Set_Prior (E, K, 100.0 / (Am * Am));
-         end;
+      for I in 0 .. Natural (Pts.Length) - 1 loop
+         Table.Reset (Effs (I), Chan.Per_Arm, 1.0);
+         for K in 0 .. Chan.Per_Arm - 1 loop
+            declare
+               Am : constant Long_Float := Long_Float'Max (1.0e-6, C.Map.Amp (Arm * Chan.Per_Arm + K));
+            begin
+               Table.Set_Prior (Effs (I), K, 100.0 / (Am * Am));   --  先验按探针幅度定(倍数,无量纲)
+            end;
+         end loop;
       end loop;
+      --  深度读数地板:什么都不做,连着两拍在各点读深度
+      if F.Cams (Cam).Has_Depth then
+         declare
+            Z1 : array (0 .. Natural (Pts.Length) - 1) of Long_Float := [others => -1.0];
+            Ok2 : Boolean;
+         begin
+            for I in 0 .. Natural (Pts.Length) - 1 loop
+               Z1 (I) := Picture.Near_Depth (F.Cams (Cam).Depth, Cw, Ch, Pts (I).Cu, Pts (I).Cv, Long_Float'Max (0.005, Z.Span * 0.25));
+            end loop;
+            Selfmap.Idle (L, F, 1, Ok2);
+            for I in 0 .. Natural (Pts.Length) - 1 loop
+               declare
+                  Z2 : constant Long_Float := Picture.Near_Depth (F.Cams (Cam).Depth, Cw, Ch, Pts (I).Cu, Pts (I).Cv, Long_Float'Max (0.005, Z.Span * 0.25));
+                  Zr : constant Long_Float := (if Pts (I).Z > 0.0 then Pts (I).Z else 1.0);
+               begin
+                  if not Picture.Is_Nan (Z1 (I)) and then not Picture.Is_Nan (Z2) then
+                     Floor_Z (I) := Long_Float'Max (4.0 * abs (Z1 (I) - Z2), 0.01 * Zr);
+                  else
+                     Floor_Z (I) := 0.01 * Zr;
+                  end if;
+               end;
+            end loop;
+         end;
+      end if;
       Ok := True;
-      Put_Line ("[身]   这个点还没有响应表 ⇒ 六个通道各推一下量一列(幅度 = 开机看得见的那一档)");
+      Put_Line ("[身]   这些点还没有响应表 ⇒ 六个通道各推一下量列(幅度从开机看得见的那一档起翻倍,到点真的动过地板为止)");
       for K in 0 .. Chan.Per_Arm - 1 loop
          declare
-            Ch : constant Natural := Arm * Chan.Per_Arm + K;
-            Amp : Long_Float := C.Map.Amp (Ch);
-            Cap_Amp : constant Long_Float := C.Map.Amp (Ch) * Cap_Mult;
+            Chn : constant Natural := Arm * Chan.Per_Arm + K;
+            Amp : Long_Float := C.Map.Amp (Chn);
+            Cap_Amp : constant Long_Float := C.Map.Amp (Chn) * Cap_Mult;
          begin
-            if not C.Map.Seen (Ch) or else Amp <= 0.0 then
-               Put_Line ("[身]     通道" & Natural'Image (Ch) & " 开机时没看见它动,这一列留零");
+            if not C.Map.Seen (Chn) or else Amp <= 0.0 then
+               Put_Line ("[身]     通道" & Natural'Image (Chn) & " 开机时没看见它动,这一列留零");
             else
                loop
                   declare
                      A : Table.Vec := Table.Zero_Vec;
                      Before : constant Buf := F.Cams (Cam).Gray;
-                     Was : constant Point := P;
+                     Was : constant Point_Vectors.Vector := Pts;
                      Deliv, Back : Table.Vec;
                      Ok2 : Boolean;
                      Frames : Natural;
-                     Ran : Long_Float := 0.0;
+                     Seen_Enough : Boolean := True;
+                     Ran_Max : Long_Float := 0.0;
                   begin
                      A (K) := Amp;
                      Step_Arm (L, C, F, Arm, A, Jaw, Deliv, Ok2);
@@ -499,37 +500,57 @@ package body Act is
                         Ok := False;
                         return;
                      end if;
-                     Retrack (C, F, Cam, Before, P, Was.Cu, Was.Cv, True);
-                     Ran := Sqrt ((P.Cu - Was.Cu) ** 2 + (P.Cv - Was.Cv) ** 2);
-                     if abs Deliv (K) > C.Map.EE_Noise and then Ran >= Floor_Px then
+                     for I in 0 .. Natural (Pts.Length) - 1 loop
                         declare
-                           Col : Table.Vec3;
+                           P : Point := Pts (I);
+                           W0 : constant Point := Was (I);
+                           Ran, Dz : Long_Float;
                         begin
-                           Col (0) := (P.Cu - Was.Cu) / Deliv (K);
-                           Col (1) := (P.Cv - Was.Cv) / Deliv (K);
-                           Col (2) := (if P.Z > 0.0 and then Was.Z > 0.0 then (P.Z - Was.Z) / Deliv (K) else 0.0);
-                           Table.Set_Col (E, K, Col);
-                           Trust (K) := True;
-                           Put_Line ("[身]     通道" & Natural'Image (Ch) & ":命令 " & Codec.Fmt (Amp, 4) & " 实到 " & Codec.Fmt (Deliv (K), 4) & " ⇒ 点跑了 (" &
-                                     Codec.Fmt (P.Cu - Was.Cu, 4) & "," & Codec.Fmt (P.Cv - Was.Cv, 4) & ", 深 " & Codec.Fmt (P.Z - Was.Z, 4) & ")");
+                           Retrack (C, F, Cam, Before, P, W0.Cu, W0.Cv, True);
+                           Ran := Sqrt ((P.Cu - W0.Cu) ** 2 + (P.Cv - W0.Cv) ** 2);
+                           Dz := (if P.Z > 0.0 and then W0.Z > 0.0 then abs (P.Z - W0.Z) else 0.0);
+                           Ran_Max := Long_Float'Max (Ran_Max, Ran);
+                           if abs Deliv (K) > C.Map.EE_Noise and then (Ran >= Floor_Px or else Dz >= Floor_Z (I)) then
+                              declare
+                                 Col : Table.Vec3;
+                              begin
+                                 Col (0) := (P.Cu - W0.Cu) / Deliv (K);
+                                 Col (1) := (P.Cv - W0.Cv) / Deliv (K);
+                                 Col (2) := (if P.Z > 0.0 and then W0.Z > 0.0 then (P.Z - W0.Z) / Deliv (K) else 0.0);
+                                 Table.Set_Col (Effs (I), K, Col);
+                              end;
+                           else
+                              Seen_Enough := False;
+                           end if;
+                           Pts.Replace_Element (I, P);
                         end;
+                     end loop;
+                     if Seen_Enough then
+                        Trust (K) := True;
+                        Put_Line ("[身]     通道" & Natural'Image (Chn) & ":命令 " & Codec.Fmt (Amp, 4) & " 实到 " & Codec.Fmt (Deliv (K), 4) & " ⇒ 点跑了 " &
+                                  Codec.Fmt (Ran_Max, 4) & " 画幅,深度变 " & Codec.Fmt ((if Pts (0).Z > 0.0 and then Was (0).Z > 0.0 then Pts (0).Z - Was (0).Z else 0.0), 4));
                      end if;
                      declare
                         Before2 : constant Buf := F.Cams (Cam).Gray;
-                        Pu : constant Long_Float := Was.Cu;
-                        Pv : constant Long_Float := Was.Cv;
                      begin
                         Selfmap.Go (L, C.Map, Arm, P0, Jaw, F, Back, Frames, Ok2);
                         if not Ok2 then
                            Ok := False;
                            return;
                         end if;
-                        Retrack (C, F, Cam, Before2, P, Pu, Pv, True);
-                        P.Cu := Was.Cu; P.Cv := Was.Cv; P.Z := Was.Z;   --  推回起点了:点回到原处(比光流往返的累积误差可信)
+                        for I in 0 .. Natural (Pts.Length) - 1 loop
+                           declare
+                              P : Point := Pts (I);
+                           begin
+                              Retrack (C, F, Cam, Before2, P, Was (I).Cu, Was (I).Cv, True);
+                              P.Cu := Was (I).Cu; P.Cv := Was (I).Cv; P.Z := Was (I).Z;   --  推回起点了:点回到原处(比光流往返的累积误差可信)
+                              Pts.Replace_Element (I, P);
+                           end;
+                        end loop;
                      end;
                      exit when Trust (K);
                      if Amp * 2.0 > Cap_Amp then
-                        Put_Line ("[身]     通道" & Natural'Image (Ch) & ":到 " & Codec.Fmt (Amp, 4) & " 点还只跑了 " & Codec.Fmt (Ran, 4) & " 画幅(地板 " & Codec.Fmt (Floor_Px, 4) & ")⇒ 这一段不用它");
+                        Put_Line ("[身]     通道" & Natural'Image (Chn) & ":到 " & Codec.Fmt (Amp, 4) & " 点还没动过地板(跑 " & Codec.Fmt (Ran_Max, 4) & " 画幅,地板 " & Codec.Fmt (Floor_Px, 4) & ")⇒ 这一段不用它");
                         exit;
                      end if;
                      Amp := Amp * 2.0;
@@ -538,17 +559,61 @@ package body Act is
             end if;
          end;
       end loop;
-   end Probe_Effect;
+   end Probe_Effects;
 
    function Amount_Factor (A : Unbounded_String) return Long_Float is
      (if A = "small" then 0.25 elsif A = "large" then 1.0 else 0.5);   --  探针上限的几分之几(比例,无量纲)
+
+
+   --  握区的点展开成瓣点(两瓣时):每一瓣各自到位,目标 = 区目标 + 这一瓣相对区心的偏移(保持此刻的开合朝向);
+   --  歪了就有一瓣不到位,倾斜不用规则自然被罚。自己的手上相机里握区是固定像素,不展开。
+   procedure Expand_Lobes (C : Context; F : Plug.Frame; Cam : Natural; Pts : in out Point_Vectors.Vector) is
+      Out_P : Point_Vectors.Vector;
+      Cw : constant Natural := F.Cams (Cam).W;
+      Ch : constant Natural := F.Cams (Cam).H;
+   begin
+      for P of Pts loop
+         declare
+            Z : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, Cam);
+         begin
+            if P.Kind = Zone_Pt and then Cam_Arm (C, Cam) /= Integer (P.Arm) and then Z.Valid and then Z.N_Lobes = 2 then
+               for Lb in 0 .. 1 loop
+                  declare
+                     Q : Point := P;
+                     Ou : constant Long_Float := (if Lb = 0 then Z.A.Cu else Z.B.Cu) - Z.Cu;
+                     Ov : constant Long_Float := (if Lb = 0 then Z.A.Cv else Z.B.Cv) - Z.Cv;
+                     Zd : Long_Float := P.Z;
+                  begin
+                     Q.Lobe := Lb;
+                     Q.Cu := P.Cu + Ou; Q.Cv := P.Cv + Ov;
+                     Q.Tu := P.Tu + Ou; Q.Tv := P.Tv + Ov;
+                     if F.Cams (Cam).Has_Depth then
+                        Zd := Picture.Near_Depth (F.Cams (Cam).Depth, Cw, Ch, Q.Cu, Q.Cv, Long_Float'Max (0.005, Z.Span * 0.25));
+                        if Picture.Is_Nan (Zd) then
+                           Zd := P.Z;
+                        end if;
+                     end if;
+                     Q.Z := Zd;
+                     if Lb = 1 then
+                        Q.Desc := Null_Unbounded_String;
+                     end if;
+                     Out_P.Append (Q);
+                  end;
+               end loop;
+            else
+               Out_P.Append (P);
+            end if;
+         end;
+      end loop;
+      Pts := Out_P;
+   end Expand_Lobes;
 
    --  ── 一段:把这些点推到各自的目标,直到事件 ──
    procedure Run_Segment (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Cam : Natural; Pts : in out Point_Vectors.Vector;
                           Until_Kind : Monitor.Until_Kind; Step_Limit : Natural; Amount : Long_Float; Avoid : Item_Vectors.Vector;
                           Event : out Unbounded_String; Steps_Taken : out Natural; Blocked_Out : out Boolean) is
       Arm : constant Natural := Pts (0).Arm;
-      Effs : array (0 .. Natural (Pts.Length) - 1) of Table.Effect;
+      Effs : Effect_Array (0 .. Natural (Pts.Length) - 1);
       Trusts : array (0 .. Natural (Pts.Length) - 1) of Table.Mask := [others => [others => True]];
       W : Monitor.Watch;
       Fl : Monitor.Floors;
@@ -567,25 +632,37 @@ package body Act is
       Fl.Reading := C.Map.Jaw_Noise;
       Fl.Delivery := C.Map.EE_Noise;
       Backup.Clear (Ring);
-      for I in 0 .. Natural (Pts.Length) - 1 loop
-         declare
-            Idx : constant Integer := Find_Effect (C, Arm, Cam, Pts (I).Kind);
-            P : Point := Pts (I);
-         begin
-            if Idx >= 0 then
-               Effs (I) := C.Tables (Natural (Idx)).E;
-               Trusts (I) := C.Tables (Natural (Idx)).Trust;
-            else
-               Probe_Effect (L, C, F, Cam, P, Effs (I), Trusts (I), Ok);
-               Pts.Replace_Element (I, P);
+      declare
+         Need : Boolean := False;
+      begin
+         for I in 0 .. Natural (Pts.Length) - 1 loop
+            declare
+               Idx : constant Integer := Find_Effect (C, Arm, Cam, Pts (I).Kind, Pts (I).Lobe);
+            begin
+               if Idx >= 0 then
+                  Effs (I) := C.Tables (Natural (Idx)).E;
+                  Trusts (I) := C.Tables (Natural (Idx)).Trust;
+               else
+                  Need := True;
+               end if;
+            end;
+         end loop;
+         if Need then
+            declare
+               Trust : Table.Mask;
+            begin
+               Probe_Effects (L, C, F, Cam, Pts, Effs, Trust, Ok);
                if not Ok then
                   Event := S ("the body stopped answering while I measured my response table");
                   return;
                end if;
-               Store_Effect (C, Arm, Cam, P.Kind, Effs (I), Trusts (I));
-            end if;
-         end;
-      end loop;
+               for I in 0 .. Natural (Pts.Length) - 1 loop
+                  Trusts (I) := Trust;
+                  Store_Effect (C, Arm, Cam, Pts (I).Kind, Pts (I).Lobe, Effs (I), Trust);
+               end loop;
+            end;
+         end if;
+      end;
       for I in 0 .. Natural (Pts.Length) - 1 loop
          Last_Err := Last_Err + Err_Of (Pts (I));
       end loop;
@@ -773,6 +850,36 @@ package body Act is
       end loop;
       Event := S ("steps: hit the step cap (" & Codec.Img (Steps_Taken) & ")");
    end Run_Segment;
+
+   --  一段走完:握区的跟踪位置 = 这只手各瓣点的均值(区心),深度取最近的那一瓣
+   procedure Sync_Zone_Track (C : in out Context; Cam : Natural; Pts : Point_Vectors.Vector) is
+      Su, Sv, N : Long_Float := 0.0;
+      Zmin : Long_Float := 1.0e30;
+      Arm : Integer := -1;
+   begin
+      for P of Pts loop
+         if P.Kind = Zone_Pt then
+            Arm := Integer (P.Arm);
+            Su := Su + P.Cu; Sv := Sv + P.Cv; N := N + 1.0;
+            if P.Z > 0.0 then
+               Zmin := Long_Float'Min (Zmin, P.Z);
+            end if;
+         end if;
+      end loop;
+      if Arm >= 0 and then N > 0.0 and then Cam_Arm (C, Cam) /= Arm then
+         declare
+            Idx : constant Natural := Track_Idx (C, Natural (Arm), Cam);
+            Tr : Zone_Track := C.Zones (Idx);
+         begin
+            Tr.Cu := Su / N; Tr.Cv := Sv / N;
+            if Zmin < 1.0e29 then
+               Tr.Z := Zmin;
+            end if;
+            Tr.Valid := True;
+            C.Zones.Replace_Element (Idx, Tr);
+         end;
+      end if;
+   end Sync_Zone_Track;
 
    --  合/张到读数不再变
    procedure Move_Jaw (L : in out Plug.Link; C : Context; F : in out Plug.Frame; Arm : Natural; Target : Long_Float; Steps : out Natural; Reading : out Long_Float) is
@@ -1112,15 +1219,21 @@ package body Act is
             end;
          end if;
          if not Pts.Is_Empty then
+            Expand_Lobes (C, F, Cam, Pts);
             for P of Pts loop
-               Append (Desc, (if Desc = "" then "" else " and ") & To_String (P.Desc));
+               if P.Desc /= "" then
+                  Append (Desc, (if Desc = "" then "" else " and ") & To_String (P.Desc));
+               end if;
             end loop;
             Put_Line ("[身] ⚙ 一起解" & Natural'Image (Natural (Pts.Length)) & " 条:" & To_String (Desc));
             Run_Segment (L, C, F, Cam, Pts, Until_K, Step_Limit, Amount, Avoid, Event, Steps_Taken, Blocked);
+            Sync_Zone_Track (C, Cam, Pts);
             Report := Report & "you asked " & Desc & ": " & Event & ". I took " & Codec.Img (Steps_Taken) & " steps; ";
             for P of Pts loop
-               Report := Report & "item " & Codec.Img (P.Item_No) & " now at (" & Codec.Fmt (P.Cu, 2) & "," & Codec.Fmt (P.Cv, 2) & ") depth " & Codec.Fmt (P.Z, 2) &
-                         ", remaining error " & Codec.Fmt (Err_Of (P), 3) & " of a frame; ";
+               if P.Lobe <= 0 then
+                  Report := Report & "item " & Codec.Img (P.Item_No) & (if P.Lobe = 0 then " (finger A)" else "") & " now at (" & Codec.Fmt (P.Cu, 2) & "," & Codec.Fmt (P.Cv, 2) &
+                            ") depth " & Codec.Fmt (P.Z, 2) & ", remaining error " & Codec.Fmt (Err_Of (P), 3) & " of a frame; ";
+               end if;
             end loop;
          elsif Say.Moves.Is_Empty and then Say.Grip = "none" then
             Report := S ((if Say.See = "not_here" then "you said the thing is not in that picture; the body did not move. "
@@ -1142,12 +1255,31 @@ package body Act is
                   declare
                      Pin : Point;
                      Found : Boolean := False;
+                     Nz : Long_Float := 0.0;
                   begin
                      for P of Pts loop
                         if P.Item_No = Say.Grip_On then
-                           Pin := P; Found := True;
+                           if P.Kind = Zone_Pt then
+                              --  瓣点取均值 = 区心;深度取最近的那一瓣
+                              if not Found then
+                                 Pin := P; Pin.Cu := 0.0; Pin.Cv := 0.0; Pin.Z := 1.0e30;
+                              end if;
+                              Pin.Cu := Pin.Cu + P.Cu; Pin.Cv := Pin.Cv + P.Cv; Nz := Nz + 1.0;
+                              if P.Z > 0.0 then
+                                 Pin.Z := Long_Float'Min (Pin.Z, P.Z);
+                              end if;
+                           else
+                              Pin := P;
+                           end if;
+                           Found := True;
                         end if;
                      end loop;
+                     if Found and then Pin.Kind = Zone_Pt and then Nz > 0.0 then
+                        Pin.Cu := Pin.Cu / Nz; Pin.Cv := Pin.Cv / Nz;
+                        if Pin.Z >= 1.0e29 then
+                           Pin.Z := 0.0;
+                        end if;
+                     end if;
                      if Found and then Pin.Kind = Thing_Pt and then Hz.Valid then
                         declare
                            Inside : constant Boolean := Pin.Cu * Long_Float (Cw) >= Long_Float (Hz.X0) and then Pin.Cu * Long_Float (Cw) <= Long_Float (Hz.X1)
