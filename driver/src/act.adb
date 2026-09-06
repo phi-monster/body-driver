@@ -475,9 +475,10 @@ package body Act is
          end;
       end if;
       Ok := True;
-      Put_Line ("[身]   这些点还没有响应表 ⇒ 位置通道各推一下量列(幅度从开机看得见的那一档起翻倍,到点真的动过地板为止;朝向通道不管位置)");
-      --  位置和深度只由位置通道解(末端位姿的前三个数);朝向通道只在有朝向目标时才量、才用(EG/EH 实测:让转动去凑深度 ⇒ 手腕一路前倾 31°)
-      for K in 0 .. Chan.Pos_Channels - 1 loop
+      Put_Line ("[身]   这些点还没有响应表 ⇒ 六个通道各推一下量列(幅度从开机看得见的那一档起翻倍,到点真的动过地板为止)");
+      --  六个通道一起解:转动不禁(owner 2026-09-07:禁了就永远和桌面平行,格斗全成直线)。让转动有对错的是"两根手指各自到位":
+      --  转歪了必有一指不到位;让转动不比平移便宜的是按各自探针幅度计价。
+      for K in 0 .. Chan.Per_Arm - 1 loop
          declare
             Chn : constant Natural := Arm * Chan.Per_Arm + K;
             Amp : Long_Float := C.Map.Amp (Chn);
@@ -707,7 +708,7 @@ package body Act is
                Damp : Table.Vec := Table.Zero_Vec;
             begin
                Cmd_Floor := 0.0;
-               for K in 0 .. Chan.Pos_Channels - 1 loop
+               for K in 0 .. Chan.Per_Arm - 1 loop
                   declare
                      Ch : constant Natural := Arm * Chan.Per_Arm + K;
                      Am : constant Long_Float := Long_Float'Max (1.0e-6, C.Map.Amp (Ch));
