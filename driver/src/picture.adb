@@ -431,6 +431,14 @@ package body Picture is
             end;
          end if;
       end loop;
+      --  按像素数从多到少(和 Cut 一样)。🔴 以前不排:调用方全都拿 (0) 当"最大的一块",实际拿到的是扫描线里最先碰到的那块
+      --  ⇒ EL:合空时一个 4×4 的碎点被当成一根手指,握区中心算到画面左中,球被推去了错地方
+      declare
+         function Bigger (A, B : Region) return Boolean is (A.Count > B.Count);
+         package Sorter is new Region_Vectors.Generic_Sorting (Bigger);
+      begin
+         Sorter.Sort (Out_R);
+      end;
       return Out_R;
    end Components;
 

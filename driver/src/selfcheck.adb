@@ -253,6 +253,27 @@ begin
       Check (abs (Z.Depth - 0.2) < 1.0e-6, "握区:手指深 " & Codec.Fmt (Z.Depth, 3));
       Check (Z.X0 >= 10 and then Z.X1 <= 53, "握区:区框在两瓣之间 " & Codec.Img (Z.X0) & ".." & Codec.Img (Z.X1));
    end;
+   --  连通块按大小排序:先扫到的小碎点不许排在大块前面(EL:4x4 碎点被当成一根手指)
+   declare
+      W : constant Natural := 40;
+      H : constant Natural := 40;
+      M : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (W * H));
+      Rs : Picture.Regions;
+   begin
+      for Y in 2 .. 4 loop          --  上方一个 3x3 的小点(扫描线先碰到)
+         for X in 2 .. 4 loop
+            M.Replace_Element (Y * W + X, True);
+         end loop;
+      end loop;
+      for Y in 20 .. 34 loop        --  下方一个 15x15 的大块
+         for X in 20 .. 34 loop
+            M.Replace_Element (Y * W + X, True);
+         end loop;
+      end loop;
+      Rs := Picture.Components (M, W, H, 4);
+      Check (Natural (Rs.Length) = 2 and then Rs (0).Count = 225 and then Rs (1).Count = 9,
+             "连通块:大的排前面(" & Codec.Img (Rs (0).Count) & " 然后 " & Codec.Img (Rs (1).Count) & ")");
+   end;
    --  身体图:最近样本按探针幅度归一;同位姿(噪声内)再看一次 = 顶替不是新增
    declare
       M : Schema.Map;
