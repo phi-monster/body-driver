@@ -345,17 +345,31 @@ package body Act is
       Has_Meas : Boolean := False;              --  眼睛(光流)另外量到的位置,只用来修表
       Meas_U, Meas_V, Meas_Z : Long_Float := 0.0;
       Known : Boolean := True;                  --  这个位置是真看过的/离真看过的样本不超过一步 ⇒ 不是,走之前先看一眼
+      Steps_Err : Long_Float := 0.0;            --  上一步算出来的"还差几步"(三样都除以推一步能改多少之后的总和)
       Par_Tu, Par_Tv : Long_Float := 0.0;       --  两团展开时,整块的目标(看清各团真实位置后按它重算各团目标)
    end record;
    package Point_Vectors is new Ada.Containers.Vectors (Natural, Point);
    type Effect_Array is array (Natural range <>) of Table.Effect;
    procedure Refind_Pieces (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Cam : Natural; Pts : in out Point_Vectors.Vector);
 
+   --  还差多少:只算画面上的距离(画幅)。远近不混进来 —— 混着求和是错的判据(LAB 2026-08-17)
    function Err_Of (P : Point) return Long_Float is
-      Dz : constant Long_Float := (if P.Wz > 0.0 and then P.Z > 0.0 then (P.Tz - P.Z) / P.Z else 0.0);
    begin
-      return Sqrt ((P.Tu - P.Cu) ** 2 + (P.Tv - P.Cv) ** 2 + Dz * Dz);
+      return Sqrt ((P.Tu - P.Cu) ** 2 + (P.Tv - P.Cv) ** 2);
    end Err_Of;
+
+   --  到位了没:画面上进了跟踪噪声,且远近的差不超过这块东西自己的尺寸(全是量出来的,没有写死的容差)
+   function Reached (P : Point; Track_Floor : Long_Float) return Boolean is
+      Tol : constant Long_Float := Long_Float'Max (P.Height, Long_Float'Max (P.Box_W, P.Box_H) * P.Z);
+   begin
+      if Err_Of (P) > Track_Floor then
+         return False;
+      end if;
+      if P.Wz > 0.0 and then P.Z > 0.0 and then not Picture.Is_Nan (P.Tz) then
+         return abs (P.Tz - P.Z) <= Long_Float'Max (Tol, 1.0e-9);
+      end if;
+      return True;
+   end Reached;
 
    function Find_Effect (C : Context; Arm, Cam : Natural; Kind : Track_Kind; Chan_K : Natural; Blob : Integer := -1) return Integer is
    begin
@@ -862,9 +876,7 @@ package body Act is
             end;
          end if;
       end;
-      for I in 0 .. Natural (Pts.Length) - 1 loop
-         Last_Err := Last_Err + Err_Of (Pts (I));
-      end loop;
+      Last_Err := 0.0;   --  第一步之前还没算过"还差几步";第一步之后才有得比
       for Step in 1 .. Natural'Min (Step_Cap, (if Step_Limit > 0 then Step_Limit else Step_Cap)) loop
          declare
             Terms : Table.Term_Vectors.Vector;
@@ -884,17 +896,42 @@ package body Act is
                   T.Err (0) := P.Tu - P.Cu;
                   T.Err (1) := P.Tv - P.Cv;
                   T.W (0) := 1.0; T.W (1) := 1.0;
-                  --  画面位置和远近一起要(owner:不许替它定"先对准再靠近"的顺序 —— 那等于叫它先扭脖子;两件一起要,往前走一步两件都变好,扭脖子只改一件)
+                  --  画面位置和远近一起要(owner:不许替它定"先对准再靠近"的顺序 —— 那等于叫它先扭脖子)
                   if P.Wz > 0.0 and then P.Z > 0.0 and then not Picture.Is_Nan (P.Tz) then
-                     T.Err (2) := (P.Tz - P.Z) / P.Z;
+                     T.Err (2) := P.Tz - P.Z;
                      T.W (2) := 1.0;
-                     --  深度那一行的表也按 1/z 缩,和误差同一尺度
-                     for K in 0 .. Chan.Per_Arm - 1 loop
-                        T.E.B (K, 2) := T.E.B (K, 2) / P.Z;
-                     end loop;
                   else
                      T.Err (2) := 0.0; T.W (2) := 0.0;
                   end if;
+                  --  🔴 三样误差单位不同(画幅 / 画幅 / 米),混着求和就是错的判据(LAB 2026-08-17)。
+                  --  不换算成米(owner 2026-08-25 判死米制:"爪子和物体在同一张深度图里直接比,中间那道厘米不需要存在"),
+                  --  改成【只比较】:每一样都除以"身体推一步最多能把它改多少"(各通道上限 × 该行响应,取最大),
+                  --  三样都变成"还差几步"(无量纲),本来就可比。扭手腕改不了远近 ⇒ 它在"远近还差几步"上拿不到分,偷不了便宜。
+                  for R in 0 .. 2 loop
+                     declare
+                        Per_Step : Long_Float := 0.0;
+                     begin
+                        for K in 0 .. Chan.Per_Arm - 1 loop
+                           if C.Map.Seen (Arm * Chan.Per_Arm + K) and then Trusts (I) (K) then
+                              Per_Step := Long_Float'Max (Per_Step, abs (T.E.B (K, R)) * Long_Float'Max (1.0e-9, C.Map.Amp (Arm * Chan.Per_Arm + K)));
+                           end if;
+                        end loop;
+                        if Per_Step > 0.0 then
+                           T.Err (R) := T.Err (R) / Per_Step;
+                           for K in 0 .. Chan.Per_Arm - 1 loop
+                              T.E.B (K, R) := T.E.B (K, R) / Per_Step;
+                           end loop;
+                        else
+                           T.W (R) := 0.0;   --  这一行一个通道都改不动 ⇒ 这一步不管它
+                        end if;
+                     end;
+                  end loop;
+                  declare
+                     Q : Point := P;
+                  begin
+                     Q.Steps_Err := Sqrt ((T.Err (0) * T.W (0)) ** 2 + (T.Err (1) * T.W (1)) ** 2 + (T.Err (2) * T.W (2)) ** 2);
+                     Pts.Replace_Element (I, Q);
+                  end;
                   Terms.Append (T);
                end;
             end loop;
@@ -1127,7 +1164,7 @@ package body Act is
                         end if;
                         Effs (I) := E;
                         Store_Effect (C, Arm, Cam, P.Kind, P.Chan_K, P.Blob, E, Trusts (I), Reach);
-                        Err_Now := Err_Now + Err_Of (P);
+                        Err_Now := Err_Now + P.Steps_Err;
                      end;
                   end loop;
                   --  身体没照做:命令过的通道实到差过一半,或没命令的通道自己动了两个探针幅度以上 ⇒ 这一步不算数,那个通道减半(EI:0.236 rad 的命令实到 -0.055,腕转到别处)
@@ -1186,7 +1223,7 @@ package body Act is
                end;
                Monitor.Step (W, Monitor.Floor (Long_Float'Max (0.0, Pic_Delta)), Monitor.Bounded (Last_Err), Monitor.Bounded (Err_Now),
                              Monitor.Floor (Long_Float'Max (0.0, Table.Norm (Deliv, Chan.Per_Arm))), Fl);
-               Put_Line ("[身]     步" & Natural'Image (Steps_Taken) & (if Jump then "(大步)" else "") & ":误 " & Codec.Fmt (Last_Err, 3) & " → " & Codec.Fmt (Err_Now, 3) & " · 步幅 ×[" & Codec.Fmt (Reach (0), 0) & " " & Codec.Fmt (Reach (1), 0) & " " & Codec.Fmt (Reach (2), 0) & " " & Codec.Fmt (Reach (3), 0) & " " & Codec.Fmt (Reach (4), 0) & " " & Codec.Fmt (Reach (5), 0) & "] · 拍 " & Codec.Img (Beats) &
+               Put_Line ("[身]     步" & Natural'Image (Steps_Taken) & (if Jump then "(大步)" else "") & ":误 " & Codec.Fmt (Last_Err, 3) & " → " & Codec.Fmt (Err_Now, 3) & " · 步幅 ×[" & Codec.Fmt (Reach (0), 0) & " " & Codec.Fmt (Reach (1), 0) & " " & Codec.Fmt (Reach (2), 0) & " " & Codec.Fmt (Reach (3), 0) & " " & Codec.Fmt (Reach (4), 0) & " " & Codec.Fmt (Reach (5), 0) & "] · 还差 " & Codec.Fmt (Err_Now, 1) & " 步 · 拍 " & Codec.Img (Beats) &
                          " · 命令 [" & Codec.Fmt (A (0), 3) & " " & Codec.Fmt (A (1), 3) & " " & Codec.Fmt (A (2), 3) & " " & Codec.Fmt (A (3), 3) & " " & Codec.Fmt (A (4), 3) & " " & Codec.Fmt (A (5), 3) &
                          "] · 实到 [" & Codec.Fmt (Deliv (0), 4) & " " & Codec.Fmt (Deliv (1), 4) & " " & Codec.Fmt (Deliv (2), 4) & " " & Codec.Fmt (Deliv (3), 3) & " " & Codec.Fmt (Deliv (4), 3) & " " & Codec.Fmt (Deliv (5), 3) &
                          "] · 点 (" & Codec.Fmt (Pts (0).Cu, 3) & "," & Codec.Fmt (Pts (0).Cv, 3) & ") 深 " & Codec.Fmt (Pts (0).Z, 3) & (if Any_Blocked then " · 零表更准(顶住?)" else ""));
@@ -1205,12 +1242,21 @@ package body Act is
                               when Monitor.U_Settle => S ("settle: the picture stopped changing"));
                   return;
                end if;
-               if Err_Now <= Fl.Track * 2.0 then
-                  Event := S ("amount: arrived (remaining error within tracking noise)");
-                  return;
-               end if;
-               if Monitor.Stalled (W) then
-                  Event := S ("amount: stopped getting closer (remaining " & Codec.Fmt (Err_Now, 3) & " of a frame) - either something holds me or this arm cannot reach farther from here");
+               declare
+                  All_There : Boolean := True;
+               begin
+                  for P of Pts loop
+                     if not Reached (P, Fl.Track * 2.0) then
+                        All_There := False;
+                     end if;
+                  end loop;
+                  if All_There then
+                     Event := S ("amount: arrived (in the picture and at the same distance as my fingers)");
+                     return;
+                  end if;
+               end;
+               if Steps_Taken > 1 and then Monitor.Stalled (W) then
+                  Event := S ("amount: stopped getting closer (still about " & Codec.Fmt (Err_Now, 1) & " pushes away) - either something holds me or this arm cannot reach farther from here");
                   return;
                end if;
             end;
@@ -1816,7 +1862,7 @@ package body Act is
                for P of Pts loop
                   if P.Blob <= 0 then
                      Report := Report & "item " & Codec.Img (P.Item_No) & (if P.Blob = 0 then " (finger A)" else "") & " now at (" & Codec.Fmt (P.Cu, 2) & "," & Codec.Fmt (P.Cv, 2) &
-                               ") depth " & Codec.Fmt (P.Z, 2) & ", remaining error " & Codec.Fmt (Err_Of (P), 3) & " of a frame; ";
+                               ") depth " & Codec.Fmt (P.Z, 2) & ", still " & Codec.Fmt (P.Steps_Err, 1) & " pushes away; ";
                   end if;
                end loop;
             else
