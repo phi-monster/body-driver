@@ -346,6 +346,7 @@ package body Act is
       Meas_U, Meas_V, Meas_Z : Long_Float := 0.0;
       Known : Boolean := True;                  --  这个位置是真看过的/离真看过的样本不超过一步 ⇒ 不是,走之前先看一眼
       Steps_Err : Long_Float := 0.0;            --  上一步算出来的"还差几步"(三样都除以推一步能改多少之后的总和)
+      Err_U, Err_V, Err_Z : Long_Float := 0.0;  --  拆开的三样(左右 / 上下 / 远近),单位都是"还差几步"
       Par_Tu, Par_Tv : Long_Float := 0.0;       --  两团展开时,整块的目标(看清各团真实位置后按它重算各团目标)
    end record;
    package Point_Vectors is new Ada.Containers.Vectors (Natural, Point);
@@ -930,6 +931,7 @@ package body Act is
                      Q : Point := P;
                   begin
                      Q.Steps_Err := Sqrt ((T.Err (0) * T.W (0)) ** 2 + (T.Err (1) * T.W (1)) ** 2 + (T.Err (2) * T.W (2)) ** 2);
+                     Q.Err_U := T.Err (0) * T.W (0); Q.Err_V := T.Err (1) * T.W (1); Q.Err_Z := T.Err (2) * T.W (2);
                      Pts.Replace_Element (I, Q);
                   end;
                   Terms.Append (T);
@@ -1238,7 +1240,7 @@ package body Act is
                end;
                Monitor.Step (W, Monitor.Floor (Long_Float'Max (0.0, Pic_Delta)), Monitor.Bounded (Last_Err), Monitor.Bounded (Err_Now),
                              Monitor.Floor (Long_Float'Max (0.0, Table.Norm (Deliv, Chan.Per_Arm))), Fl);
-               Put_Line ("[身]     步" & Natural'Image (Steps_Taken) & (if Jump then "(大步)" else "") & ":误 " & Codec.Fmt (Last_Err, 3) & " → " & Codec.Fmt (Err_Now, 3) & " · 步幅 ×[" & Codec.Fmt (Reach (0), 0) & " " & Codec.Fmt (Reach (1), 0) & " " & Codec.Fmt (Reach (2), 0) & " " & Codec.Fmt (Reach (3), 0) & " " & Codec.Fmt (Reach (4), 0) & " " & Codec.Fmt (Reach (5), 0) & "] · 还差 " & Codec.Fmt (Err_Now, 1) & " 步 · 拍 " & Codec.Img (Beats) &
+               Put_Line ("[身]     步" & Natural'Image (Steps_Taken) & (if Jump then "(大步)" else "") & ":误 " & Codec.Fmt (Last_Err, 3) & " → " & Codec.Fmt (Err_Now, 3) & " · 步幅 ×[" & Codec.Fmt (Reach (0), 0) & " " & Codec.Fmt (Reach (1), 0) & " " & Codec.Fmt (Reach (2), 0) & " " & Codec.Fmt (Reach (3), 0) & " " & Codec.Fmt (Reach (4), 0) & " " & Codec.Fmt (Reach (5), 0) & "] · 还差 " & Codec.Fmt (Err_Now, 1) & " 步(左右 " & Codec.Fmt (Pts (0).Err_U, 1) & " 上下 " & Codec.Fmt (Pts (0).Err_V, 1) & " 远近 " & Codec.Fmt (Pts (0).Err_Z, 1) & ")· 拍 " & Codec.Img (Beats) &
                          " · 命令 [" & Codec.Fmt (A (0), 3) & " " & Codec.Fmt (A (1), 3) & " " & Codec.Fmt (A (2), 3) & " " & Codec.Fmt (A (3), 3) & " " & Codec.Fmt (A (4), 3) & " " & Codec.Fmt (A (5), 3) &
                          "] · 实到 [" & Codec.Fmt (Deliv (0), 4) & " " & Codec.Fmt (Deliv (1), 4) & " " & Codec.Fmt (Deliv (2), 4) & " " & Codec.Fmt (Deliv (3), 3) & " " & Codec.Fmt (Deliv (4), 3) & " " & Codec.Fmt (Deliv (5), 3) &
                          "] · 点 (" & Codec.Fmt (Pts (0).Cu, 3) & "," & Codec.Fmt (Pts (0).Cv, 3) & ") 深 " & Codec.Fmt (Pts (0).Z, 3) & (if Any_Blocked then " · 零表更准(顶住?)" else ""));
