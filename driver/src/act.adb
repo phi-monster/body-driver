@@ -802,7 +802,8 @@ package body Act is
             declare
                Idx : constant Integer := Find_Effect (C, Arm, Cam, Pts (I).Kind, Pts (I).Chan_K, Pts (I).Blob);
             begin
-               if Idx >= 0 then
+               --  存的表若一列都信不过(EI:在按关节推错的位置量的,六列全空)⇒ 当没有,重量
+               if Idx >= 0 and then (for some K in 0 .. Chan.Per_Arm - 1 => C.Tables (Natural (Idx)).Trust (K)) then
                   Effs (I) := C.Tables (Natural (Idx)).E;
                   Trusts (I) := C.Tables (Natural (Idx)).Trust;
                   for K in 0 .. Chan.Per_Arm - 1 loop
