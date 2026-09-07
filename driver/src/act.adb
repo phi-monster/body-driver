@@ -928,17 +928,21 @@ package body Act is
                Event := S ("could not solve which channels to push");
                return;
             end if;
-            --  步子不再按跟踪窗缩(那是小碎步的根子):跑过一个跟踪窗就记成"大步",走完靠抖手指认自己;要压进"别碰"框的才缩
+            --  求稳不求快(owner 2026-09-08:方法不重要,做对才重要):一步里任何被跟的点在画面里最多跑一个跟踪窗,眼睛每一步都跟得住;
+            --  步数压进 200 靠不重量身体,不靠大步。缩不下来(表说一步就跑过窗)才记成"大步",走完抖手指认自己
             for I in 0 .. Natural (Pts.Length) - 1 loop
                declare
                   Pr : constant Table.Vec3 := Table.Predict (Effs (I), A);
                   D : constant Long_Float := Sqrt (Pr (0) ** 2 + Pr (1) ** 2);
                begin
                   if D > Track_Win then
-                     Jump := True;
+                     Scale := Long_Float'Min (Scale, Track_Win / D);
                   end if;
                end;
             end loop;
+            if Scale < 1.0e-3 then
+               Jump := True;   --  缩到千分之一还不够(比例,无量纲)= 表已经不可信,按大步处理
+            end if;
             for Round in 1 .. 4 loop
                declare
                   Hit : Boolean := False;
