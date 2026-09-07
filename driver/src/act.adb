@@ -981,7 +981,10 @@ package body Act is
                               Px := Long_Float'Max (Px, Sqrt (Effs (I).B (K, 0) ** 2 + Effs (I).B (K, 1) ** 2));
                            end loop;
                            Active (K) := True;
-                           Cap (K) := Long_Float'Max (Am * Cap_Mult, (if Px > 0.0 then Track_Win / Px else Am * Cap_Mult)) * Amount * Reach (K);
+                           --  两条上限取小:① 眼睛跟得住的那么多(表说走多少画面跑满一个跟踪窗)② 这个通道自己那一档 × 核实过的倍数。
+                           --  只有 ① 会让"在画面里几乎不动"的通道拿到无限额度(ER:2 rad 的甩腕命令,深度读到 94 m)
+                           Cap (K) := Long_Float'Min ((if Px > 0.0 then Track_Win / Px else Am * Cap_Mult * Reach (K)),
+                                                      Am * Cap_Mult * Reach (K)) * Amount;
                         end;
                         Cmd_Floor := (if Cmd_Floor <= 0.0 then Am else Long_Float'Min (Cmd_Floor, Am));
                      end if;
