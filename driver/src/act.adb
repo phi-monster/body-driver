@@ -971,8 +971,18 @@ package body Act is
                         end if;
                      end loop;
                      if C.Map.Seen (Ch) and then All_Trust then
-                        Active (K) := True;
-                        Cap (K) := Am * Cap_Mult * Amount * Reach (K);
+                        --  一步的上限 = 眼睛跟得住的那么多:按表算,这个通道走多少会让被跟的点在画面里跑满一个跟踪窗。
+                        --  探针那一档只是【量得出来】的下限,不是上限(EQ:限在两个探针幅度 = 1.3 cm,一步只改深度 5 mm,
+                        --  而深度读数自己就抖 5 mm ⇒ 学不到响应,数字乱跳)。Reach 只再放宽,不再收紧。
+                        declare
+                           Px : Long_Float := 0.0;
+                        begin
+                           for I in 0 .. Natural (Pts.Length) - 1 loop
+                              Px := Long_Float'Max (Px, Sqrt (Effs (I).B (K, 0) ** 2 + Effs (I).B (K, 1) ** 2));
+                           end loop;
+                           Active (K) := True;
+                           Cap (K) := Long_Float'Max (Am * Cap_Mult, (if Px > 0.0 then Track_Win / Px else Am * Cap_Mult)) * Amount * Reach (K);
+                        end;
                         Cmd_Floor := (if Cmd_Floor <= 0.0 then Am else Long_Float'Min (Cmd_Floor, Am));
                      end if;
                      --  阻尼 = 1e-4 / 幅²:每个通道都以"几个探针幅度"计价(无量纲),小到让上限当家而不是阻尼当家
