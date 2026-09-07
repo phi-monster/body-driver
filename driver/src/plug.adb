@@ -18,6 +18,8 @@ package body Plug is
 
    function Joint_Mode (L : Link) return Boolean is (L.Lay.EE.Is_Empty);
 
+   function Steps (L : Link) return Natural is (if L.Seq >= L.Ep_Seq0 then L.Seq - L.Ep_Seq0 else L.Seq);
+
    function Take_Reset (L : in out Link) return Boolean is
       R : constant Boolean := L.Reset_Flag;
    begin
@@ -165,6 +167,7 @@ package body Plug is
                      end if;
                      if MT = "reset" then
                         L.Reset_Flag := True;
+                        L.Ep_Seq0 := L.Seq;   --  新的一集从零数拍
                      end if;
                      if Ack /= "" then
                         if Obs < 0 then

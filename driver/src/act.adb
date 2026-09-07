@@ -296,9 +296,11 @@ package body Act is
       Count : Natural := 0;
       Height : Long_Float := 0.0;
       Err0 : Long_Float := 0.0;
+      Lost : Boolean := False;   --  这一步没在画面里认出它,位置是按表猜的
    end record;
    package Point_Vectors is new Ada.Containers.Vectors (Natural, Point);
    type Effect_Array is array (Natural range <>) of Table.Effect;
+   procedure Refind_Fingers (L : in out Plug.Link; C : Context; F : in out Plug.Frame; Cam : Natural; Pts : in out Point_Vectors.Vector);
 
    function Err_Of (P : Point) return Long_Float is
       Dz : constant Long_Float := (if P.Wz > 0.0 and then P.Z > 0.0 then (P.Tz - P.Z) / P.Z else 0.0);
@@ -316,9 +318,9 @@ package body Act is
       return -1;
    end Find_Effect;
 
-   procedure Store_Effect (C : in out Context; Arm, Cam : Natural; Kind : Track_Kind; Lobe : Integer; E : Table.Effect; Trust : Table.Mask) is
+   procedure Store_Effect (C : in out Context; Arm, Cam : Natural; Kind : Track_Kind; Lobe : Integer; E : Table.Effect; Trust : Table.Mask; Reach : Long_Float := 1.0) is
       I : constant Integer := Find_Effect (C, Arm, Cam, Kind, Lobe);
-      Se : constant Stored_Effect := (Arm, Cam, Kind, Lobe, E, Trust);
+      Se : constant Stored_Effect := (Arm, Cam, Kind, Lobe, E, Trust, Reach);
    begin
       if I >= 0 then
          C.Tables.Replace_Element (Natural (I), Se);
@@ -332,6 +334,7 @@ package body Act is
       Cw : constant Natural := F.Cams (Cam).W;
       Ch : constant Natural := F.Cams (Cam).H;
    begin
+      P.Lost := False;
       case P.Kind is
          when Zone_Pt =>
             if Cam_Arm (C, Cam) = Integer (P.Arm) then
@@ -359,7 +362,7 @@ package body Act is
                --  取平均的那一片 = 张幅的四分之一(比例,无量纲),再小也有一个像素百分比
                Flow.Sample (Fl, P.Cu, P.Cv, Long_Float'Max (0.01, Z.Span * 0.25), Du, Dv);
                if Moved_Arm and then Sqrt (Du * Du + Dv * Dv) * Long_Float (Cw) < 0.5 then
-                  P.Cu := Pred_U; P.Cv := Pred_V;      --  手臂动了,这儿画面却没流:跟丢的迹象,用预测
+                  P.Cu := Pred_U; P.Cv := Pred_V; P.Lost := True;      --  手臂动了,这儿画面却没流:跟丢的迹象,用预测
                else
                   P.Cu := Long_Float'Max (0.0, Long_Float'Min (1.0, P.Cu + Du));
                   P.Cv := Long_Float'Max (0.0, Long_Float'Min (1.0, P.Cv + Dv));
@@ -407,7 +410,7 @@ package body Act is
                      P.Box_H := Long_Float (R.Y1 - R.Y0) / Long_Float (Ch);
                   end;
                else
-                  P.Cu := Pred_U; P.Cv := Pred_V;
+                  P.Cu := Pred_U; P.Cv := Pred_V; P.Lost := True;
                end if;
             end;
       end case;
@@ -415,11 +418,11 @@ package body Act is
 
    --  发一步并等稳;返回实到(通道)
    procedure Step_Arm (L : in out Plug.Link; C : Context; F : in out Plug.Frame; Arm : Natural; A : Table.Vec; Jaw : Floats;
-                       Delivered : out Table.Vec; Ok : out Boolean) is
+                       Delivered : out Table.Vec; Ok : out Boolean; Quick : Boolean := False) is
       P0 : constant Plug.Arm_Pose := F.EE (Arm);
       Frames : Natural;
    begin
-      Selfmap.Go (L, C.Map, Arm, Chan.Compose (P0, A), Jaw, F, Delivered, Frames, Ok);
+      Selfmap.Go (L, C.Map, Arm, Chan.Compose (P0, A), Jaw, F, Delivered, Frames, Ok, Quick);
    end Step_Arm;
 
    --  没有表的点(同一只手的几个点一起):每个通道推一下量一列。幅度从开机看得见的那一档起,翻倍到每个点在画面里
@@ -616,8 +619,10 @@ package body Act is
    --  ── 一段:把这些点推到各自的目标,直到事件 ──
    procedure Run_Segment (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Cam : Natural; Pts : in out Point_Vectors.Vector;
                           Until_Kind : Monitor.Until_Kind; Step_Limit : Natural; Amount : Long_Float; Avoid : Item_Vectors.Vector;
-                          Event : out Unbounded_String; Steps_Taken : out Natural; Blocked_Out : out Boolean) is
+                          Event : out Unbounded_String; Steps_Taken : out Natural; Blocked_Out : out Boolean; Beats : out Natural) is
       Arm : constant Natural := Pts (0).Arm;
+      Beats0 : constant Natural := Plug.Steps (L);
+      Reach : Long_Float := 1.0;   --  核实过的步幅倍数(存在表里,越用越强):表这一步报准了就翻倍,报错/认丢了就减半(翻倍协议,次数)
       Effs : Effect_Array (0 .. Natural (Pts.Length) - 1);
       Trusts : array (0 .. Natural (Pts.Length) - 1) of Table.Mask := [others => [others => True]];
       W : Monitor.Watch;
@@ -631,6 +636,7 @@ package body Act is
    begin
       Event := S ("hit the safety cap on steps");
       Steps_Taken := 0;
+      Beats := 0;
       Blocked_Out := False;
       Jaw.Append (Selfmap.Jaw_Of (F, Arm));
       Fl.Track := Long_Float'Max (1.0 / Long_Float (Cw), 0.0);
@@ -648,6 +654,7 @@ package body Act is
                if Idx >= 0 then
                   Effs (I) := C.Tables (Natural (Idx)).E;
                   Trusts (I) := C.Tables (Natural (Idx)).Trust;
+                  Reach := Long_Float'Max (1.0, C.Tables (Natural (Idx)).Reach);
                else
                   Need := True;
                end if;
@@ -680,6 +687,7 @@ package body Act is
             A : Table.Vec;
             Solved : Boolean;
             Scale : Long_Float := 1.0;
+            Jump : Boolean := False;   --  这一步预计有点在画面里跑过一个跟踪窗:光流跟不住 ⇒ 走完抖手指重新认自己
          begin
             for I in 0 .. Natural (Pts.Length) - 1 loop
                declare
@@ -721,7 +729,7 @@ package body Act is
                      end loop;
                      if C.Map.Seen (Ch) and then All_Trust then
                         Active (K) := True;
-                        Cap (K) := Am * Cap_Mult * Amount;
+                        Cap (K) := Am * Cap_Mult * Amount * Reach;
                         Cmd_Floor := (if Cmd_Floor <= 0.0 then Am else Long_Float'Min (Cmd_Floor, Am));
                      end if;
                      --  阻尼 = 1e-4 / 幅²:每个通道都以"几个探针幅度"计价(无量纲),小到让上限当家而不是阻尼当家
@@ -734,14 +742,14 @@ package body Act is
                Event := S ("could not solve which channels to push");
                return;
             end if;
-            --  一步里任何点在画面里最多跑一个跟踪窗;要压进"别碰"框的就缩
+            --  步子不再按跟踪窗缩(那是小碎步的根子):跑过一个跟踪窗就记成"大步",走完靠抖手指认自己;要压进"别碰"框的才缩
             for I in 0 .. Natural (Pts.Length) - 1 loop
                declare
                   Pr : constant Table.Vec3 := Table.Predict (Effs (I), A);
                   D : constant Long_Float := Sqrt (Pr (0) ** 2 + Pr (1) ** 2);
                begin
                   if D > Track_Win then
-                     Scale := Long_Float'Min (Scale, Track_Win / D);
+                     Jump := True;
                   end if;
                end;
             end loop;
@@ -787,7 +795,8 @@ package body Act is
                Any_Blocked : Boolean := False;
                Moved : constant Boolean := True;
             begin
-               Step_Arm (L, C, F, Arm, A, Jaw, Deliv, Ok);
+               Step_Arm (L, C, F, Arm, A, Jaw, Deliv, Ok, C.Fast);
+               Beats := Plug.Steps (L) - Beats0;
                if not Ok then
                   Event := S ("the body refused the command");
                   return;
@@ -802,31 +811,79 @@ package body Act is
                   Backup.Remember (Ring, Sv);
                end;
                Pic_Delta := Long_Float (Picture.Max_Diff (Before, F.Cams (Cam).Gray));
-               for I in 0 .. Natural (Pts.Length) - 1 loop
-                  declare
-                     P : Point := Pts (I);
-                     Pr : constant Table.Vec3 := Table.Predict (Effs (I), Deliv);
-                     Was_U : constant Long_Float := P.Cu;
-                     Was_V : constant Long_Float := P.Cv;
-                     Was_Z : constant Long_Float := P.Z;
-                     Dy : Table.Vec3;
-                     E : Table.Effect := Effs (I);
-                  begin
-                     Retrack (C, F, Cam, Before, P, Was_U + Pr (0), Was_V + Pr (1), Moved, (if Was_Z > 0.0 then Was_Z + Pr (2) else -1.0));
-                     Dy (0) := P.Cu - Was_U; Dy (1) := P.Cv - Was_V;
-                     Dy (2) := (if P.Z > 0.0 and then Was_Z > 0.0 then P.Z - Was_Z else 0.0);
-                     Table.Update (E, Deliv, Dy, Fl.Track * 2.0, Long_Float'Max (C.Map.EE_Noise, 0.5 * Cmd_Floor));
-                     if Table.Blocked (E) then
-                        Any_Blocked := True;
-                     end if;
-                     Effs (I) := E;
-                     Pts.Replace_Element (I, P);
-                     Err_Now := Err_Now + Err_Of (P);
-                  end;
-               end loop;
+               declare
+                  Was : constant Point_Vectors.Vector := Pts;
+                  Need_Refind : Boolean := False;
+                  All_Verified : Boolean := True;
+                  Any_Wrong : Boolean := False;
+               begin
+                  --  ① 认位置:小步靠光流/重切;大步里世界相机的握区点先按表放到预测处,再抖手指认
+                  for I in 0 .. Natural (Pts.Length) - 1 loop
+                     declare
+                        P : Point := Pts (I);
+                        Pr : constant Table.Vec3 := Table.Predict (Effs (I), Deliv);
+                        W0 : constant Point := Was (I);
+                     begin
+                        if Jump and then P.Kind = Zone_Pt and then Cam_Arm (C, Cam) /= Integer (P.Arm) then
+                           P.Cu := Long_Float'Max (0.0, Long_Float'Min (1.0, W0.Cu + Pr (0)));
+                           P.Cv := Long_Float'Max (0.0, Long_Float'Min (1.0, W0.Cv + Pr (1)));
+                           if W0.Z > 0.0 then
+                              P.Z := W0.Z + Pr (2);
+                           end if;
+                           P.Lost := True;
+                           Need_Refind := True;
+                        else
+                           Retrack (C, F, Cam, Before, P, W0.Cu + Pr (0), W0.Cv + Pr (1), Moved, (if W0.Z > 0.0 then W0.Z + Pr (2) else -1.0));
+                        end if;
+                        Pts.Replace_Element (I, P);
+                     end;
+                  end loop;
+                  if Need_Refind then
+                     Refind_Fingers (L, C, F, Cam, Pts);
+                     Beats := Plug.Steps (L) - Beats0;
+                  end if;
+                  --  ② 修表:只用真认到的点(按表猜的位置不许再喂回表);表比零表准 = 核实,反之 = 报错
+                  for I in 0 .. Natural (Pts.Length) - 1 loop
+                     declare
+                        P : constant Point := Pts (I);
+                        W0 : constant Point := Was (I);
+                        Dy : Table.Vec3;
+                        E : Table.Effect := Effs (I);
+                     begin
+                        if P.Lost then
+                           All_Verified := False;
+                           Any_Wrong := True;
+                        else
+                           Dy (0) := P.Cu - W0.Cu; Dy (1) := P.Cv - W0.Cv;
+                           Dy (2) := (if P.Z > 0.0 and then W0.Z > 0.0 then P.Z - W0.Z else 0.0);
+                           Table.Update (E, Deliv, Dy, Fl.Track * 2.0, Long_Float'Max (C.Map.EE_Noise, 0.5 * Cmd_Floor));
+                           if Table.Blocked (E) then
+                              Any_Blocked := True;
+                           end if;
+                           if not (E.Null_Res > Fl.Track * 2.0 and then E.Free_Res < E.Null_Res) then
+                              All_Verified := False;
+                           end if;
+                           if E.Free_Res > Fl.Track * 2.0 and then E.Free_Res >= E.Null_Res then
+                              Any_Wrong := True;
+                           end if;
+                        end if;
+                        Effs (I) := E;
+                        Store_Effect (C, Arm, Cam, P.Kind, P.Lobe, E, Trusts (I), Reach);
+                        Err_Now := Err_Now + Err_Of (P);
+                     end;
+                  end loop;
+                  if All_Verified then
+                     Reach := Reach * 2.0;
+                  elsif Any_Wrong then
+                     Reach := Long_Float'Max (1.0, Reach * 0.5);
+                  end if;
+                  for I in 0 .. Natural (Pts.Length) - 1 loop
+                     Store_Effect (C, Arm, Cam, Pts (I).Kind, Pts (I).Lobe, Effs (I), Trusts (I), Reach);
+                  end loop;
+               end;
                Monitor.Step (W, Monitor.Floor (Long_Float'Max (0.0, Pic_Delta)), Monitor.Bounded (Last_Err), Monitor.Bounded (Err_Now),
                              Monitor.Floor (Long_Float'Max (0.0, Table.Norm (Deliv, Chan.Per_Arm))), Fl);
-               Put_Line ("[身]     步" & Natural'Image (Steps_Taken) & ":误 " & Codec.Fmt (Last_Err, 3) & " → " & Codec.Fmt (Err_Now, 3) &
+               Put_Line ("[身]     步" & Natural'Image (Steps_Taken) & (if Jump then "(大步)" else "") & ":误 " & Codec.Fmt (Last_Err, 3) & " → " & Codec.Fmt (Err_Now, 3) & " · 步幅 ×" & Codec.Fmt (Reach, 1) & " · 拍 " & Codec.Img (Beats) &
                          " · 命令 [" & Codec.Fmt (A (0), 3) & " " & Codec.Fmt (A (1), 3) & " " & Codec.Fmt (A (2), 3) & " " & Codec.Fmt (A (3), 3) & " " & Codec.Fmt (A (4), 3) & " " & Codec.Fmt (A (5), 3) &
                          "] · 实到 [" & Codec.Fmt (Deliv (0), 4) & " " & Codec.Fmt (Deliv (1), 4) & " " & Codec.Fmt (Deliv (2), 4) & " " & Codec.Fmt (Deliv (3), 3) & " " & Codec.Fmt (Deliv (4), 3) & " " & Codec.Fmt (Deliv (5), 3) &
                          "] · 点 (" & Codec.Fmt (Pts (0).Cu, 3) & "," & Codec.Fmt (Pts (0).Cv, 3) & ") 深 " & Codec.Fmt (Pts (0).Z, 3) & (if Any_Blocked then " · 零表更准(顶住?)" else ""));
@@ -890,8 +947,9 @@ package body Act is
       end if;
    end Sync_Zone_Track;
 
-   --  合/张到读数不再变
-   procedure Move_Jaw (L : in out Plug.Link; C : Context; F : in out Plug.Frame; Arm : Natural; Target : Long_Float; Steps : out Natural; Reading : out Long_Float) is
+   --  合/张:最多 Max_Iter 拍,或到画面不再变;Sweep_Cam >= 0 时把那台相机里动过的像素累进 Sweep(手指自己扫过的地方)
+   procedure Jaw_Sweep (L : in out Plug.Link; C : Context; F : in out Plug.Frame; Arm : Natural; Target : Long_Float; Max_Iter : Natural;
+                        Sweep_Cam : Integer; Sweep : in out Bools; Steps : out Natural; Reading : out Long_Float) is
       Jaw : Floats;
       Prev : Long_Float := Selfmap.Jaw_Of (F, Arm);
       Prev_Cams : Plug.Cam_Vectors.Vector := F.Cams;
@@ -902,11 +960,14 @@ package body Act is
       Steps := 0;
       Reading := Prev;
       --  读数是命令的回声,"停住"只认画面:每台相机连着两拍不变
-      for I in 1 .. 40 loop
+      for I in 1 .. Max_Iter loop
          Cm.Kind := Plug.Ee; Cm.Arm := Arm; Cm.Pose := F.EE (Arm); Cm.Jaw := Jaw;
          exit when not Plug.Act (L, Cm) or else not Plug.Sense (L, F);
          Steps := I;
          Reading := Selfmap.Jaw_Of (F, Arm);
+         if Sweep_Cam >= 0 and then Natural (Sweep_Cam) < Natural (F.Cams.Length) and then Natural (Sweep_Cam) < Natural (C.Map.Floors.Length) then
+            Sweep := Picture.Either (Sweep, Picture.Moved (Prev_Cams (Natural (Sweep_Cam)).Gray, F.Cams (Natural (Sweep_Cam)).Gray, C.Map.Floors (Natural (Sweep_Cam))));
+         end if;
          if abs (Reading - Prev) <= C.Map.Jaw_Noise and then Selfmap.Pictures_Still (C.Map, Prev_Cams, F.Cams) then
             Still := Still + 1;
          else
@@ -916,7 +977,75 @@ package body Act is
          Prev_Cams := F.Cams;
          exit when Still >= 2 and then I >= 3;
       end loop;
+   end Jaw_Sweep;
+
+   --  合/张到读数不再变
+   procedure Move_Jaw (L : in out Plug.Link; C : Context; F : in out Plug.Frame; Arm : Natural; Target : Long_Float; Steps : out Natural; Reading : out Long_Float) is
+      None : Bools;
+   begin
+      Jaw_Sweep (L, C, F, Arm, Target, 40, -1, None, Steps, Reading);
    end Move_Jaw;
+
+   --  大步之后在世界相机里重新找到自己的手指:手指抖一下(合几拍再张回来),动过的像素就是手指;每一瓣认离预测最近的那团。
+   --  抖的幅度不是常数:合"量出来的稳定拍数"那么久,再张回原读数。认不到的瓣留预测、记 Lost。
+   procedure Refind_Fingers (L : in out Plug.Link; C : Context; F : in out Plug.Frame; Cam : Natural; Pts : in out Point_Vectors.Vector) is
+      Arm : constant Natural := Pts (0).Arm;
+      Cw : constant Natural := F.Cams (Cam).W;
+      Ch : constant Natural := F.Cams (Cam).H;
+      Z : constant Zone.Hand_Zone := Zone_Of (C, Arm, Cam);
+      J0 : constant Long_Float := Selfmap.Jaw_Of (F, Arm);
+      Sweep : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (Cw * Ch));
+      Steps_J : Natural;
+      Reading : Long_Float;
+      Regs : Picture.Regions;
+      Taken : Bools;
+      Tol : constant Long_Float := Long_Float'Max (Z.Span, Track_Win);   --  认领半径:一个张幅,再小也有一个跟踪窗(画幅比例,无量纲)
+   begin
+      Jaw_Sweep (L, C, F, Arm, 0.0, C.Map.Settle + 1, Integer (Cam), Sweep, Steps_J, Reading);
+      Jaw_Sweep (L, C, F, Arm, J0, C.Map.Settle + 1, Integer (Cam), Sweep, Steps_J, Reading);
+      Regs := Picture.Components (Sweep, Cw, Ch, Picture.Min_Pixels (Cw, Ch));
+      Taken := Bool_Vectors.To_Vector (False, Regs.Length);
+      for I in 0 .. Natural (Pts.Length) - 1 loop
+         declare
+            P : Point := Pts (I);
+            Best : Integer := -1;
+            Bd : Long_Float := 1.0e9;
+         begin
+            if P.Kind = Zone_Pt then
+               for R in 0 .. Natural (Regs.Length) - 1 loop
+                  declare
+                     D : constant Long_Float := Sqrt ((Regs (R).Cu - P.Cu) ** 2 + (Regs (R).Cv - P.Cv) ** 2);
+                  begin
+                     if not Taken (R) and then D <= Tol and then D < Bd then
+                        Bd := D; Best := R;
+                     end if;
+                  end;
+               end loop;
+               if Best >= 0 then
+                  Taken.Replace_Element (Natural (Best), True);
+                  declare
+                     Old_Z : constant Long_Float := P.Z;
+                     Zd : Long_Float;
+                  begin
+                     P.Cu := Regs (Best).Cu; P.Cv := Regs (Best).Cv; P.Lost := False;
+                     if F.Cams (Cam).Has_Depth then
+                        --  读深窗口 = 张幅的四分之一,再小也有半个百分点的画幅(比例,无量纲);深度一步跳过"距离的一成"就是读到别的东西了
+                        Zd := Picture.Near_Depth (F.Cams (Cam).Depth, Cw, Ch, P.Cu, P.Cv, Long_Float'Max (0.005, Z.Span * 0.25));
+                        if not Picture.Is_Nan (Zd) and then (Old_Z <= 0.0 or else abs (Zd - Old_Z) <= 0.1 * Old_Z) then
+                           P.Z := Zd;
+                        end if;
+                     end if;
+                  end;
+               else
+                  P.Lost := True;
+               end if;
+               Pts.Replace_Element (I, P);
+            end if;
+         end;
+      end loop;
+      Put_Line ("[身]     大步之后抖手指认自己:动过的像素成" & Natural'Image (Natural (Regs.Length)) & " 团 ⇒ " &
+                (if Pts (0).Lost then "没认到,按表猜" else "认到了 (" & Codec.Fmt (Pts (0).Cu, 3) & "," & Codec.Fmt (Pts (0).Cv, 3) & ") 深 " & Codec.Fmt (Pts (0).Z, 3)));
+   end Refind_Fingers;
 
    --  握住了没:抬一小截,看东西跟不跟我走。手上相机里 = 它的块还在握区框里;世界相机里 = 它原来那块地方空了。读数不算数(回声)。
    procedure Held_Test (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Arm : Natural; Cam : Natural; Origin : Picture.Region;
@@ -991,13 +1120,15 @@ package body Act is
       World.Observe (C.Wld, Cam, Cut_Things (C, F, Cam), Cw, Ch);
       Draw.Grid (RGB, Cw, Ch, C.Cols, C.Rows, C.Cells_U, C.Cells_V);
       Build_Listing (C, F, Cam, RGB, Listing);
-      Put_Line ("[身] ── 第" & Natural'Image (C.Round_N) & " 轮(第" & Natural'Image (Cam) & " 台相机)──");
+      Put_Line ("[身] ── 第" & Natural'Image (C.Round_N) & " 轮(第" & Natural'Image (Cam) & " 台相机)── 这一集已用 " & Codec.Img (Plug.Steps (L)) & " 拍(开机量身体 " & Codec.Img (C.Boot_Steps) & " 拍)");
       Put (To_String (Listing));
       if C.Dump_Dir /= "" then
          Codec.Write_BMP (To_String (C.Dump_Dir) & "/grid_" & Codec.Pad6 (C.Round_N) & ".bmp", RGB, Cw, Ch);
       end if;
       declare
-         Recent : constant String := Memory.Text (C.Mem) & To_String (C.Recent);
+         Clock : constant String := "CLOCK: " & Codec.Img (Plug.Steps (L)) & " beats of my own clock have passed in this episode (one beat = one picture I received; " &
+           Codec.Img (C.Boot_Steps) & " of them went to measuring my body before the first question). I only count; nothing stops on its own." & ASCII.LF;
+         Recent : constant String := Memory.Text (C.Mem) & Clock & To_String (C.Recent);
       begin
          if not Brain.Ask (To_String (C.Eye_Host), C.Eye_Port, To_String (C.Task_Text), To_String (Listing), Recent,
                            C.Cols, C.Rows, Natural (C.Items.Length), C.Map.N_Cams, C.Map.Arms, RGB, Cw, Ch, Say, Err)
@@ -1070,6 +1201,7 @@ package body Act is
          Amount : Long_Float := 1.0;   --  没说 amount 时用满(比例);说了按它的
          Event : Unbounded_String;
          Steps_Taken : Natural := 0;
+         Beats : Natural := 0;
          Blocked : Boolean;
          Desc : Unbounded_String;
          Grip_Arm : constant Integer := (if Say.Grip_Arm >= 1 and then Say.Grip_Arm <= C.Map.Arms then Integer (Say.Grip_Arm) - 1 else -1);
@@ -1235,9 +1367,9 @@ package body Act is
                end if;
             end loop;
             Put_Line ("[身] ⚙ 一起解" & Natural'Image (Natural (Pts.Length)) & " 条:" & To_String (Desc));
-            Run_Segment (L, C, F, Cam, Pts, Until_K, Step_Limit, Amount, Avoid, Event, Steps_Taken, Blocked);
+            Run_Segment (L, C, F, Cam, Pts, Until_K, Step_Limit, Amount, Avoid, Event, Steps_Taken, Blocked, Beats);
             Sync_Zone_Track (C, Cam, Pts);
-            Report := Report & "you asked " & Desc & ": " & Event & ". I took " & Codec.Img (Steps_Taken) & " steps; ";
+            Report := Report & "you asked " & Desc & ": " & Event & ". I took " & Codec.Img (Steps_Taken) & " pushes (" & Codec.Img (Beats) & " beats of my clock); ";
             for P of Pts loop
                if P.Lobe <= 0 then
                   Report := Report & "item " & Codec.Img (P.Item_No) & (if P.Lobe = 0 then " (finger A)" else "") & " now at (" & Codec.Fmt (P.Cu, 2) & "," & Codec.Fmt (P.Cv, 2) &

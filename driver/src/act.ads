@@ -34,6 +34,7 @@ package Act is
       Lobe : Integer := -1;      --  握区的哪一瓣(-1 = 整个/世界块)
       E : Table.Effect;
       Trust : Table.Mask := [others => True];   --  探针时这个点真跑过地板的通道
+      Reach : Long_Float := 1.0;   --  这张表被核实过的步幅(探针上限的倍数):表比零表准就翻倍,不准就减半;存进身体文件,越用越强
    end record;
    package Effect_Vectors is new Ada.Containers.Vectors (Natural, Stored_Effect);
    type Zone_Track is record
@@ -63,6 +64,7 @@ package Act is
       Dump_Dir : Unbounded_String;
       Round_N : Natural := 0;
       Fast : Boolean := False;
+      Boot_Steps : Natural := 0;   --  开机量身体用掉的拍数(记账,不是上限)
    end record;
 
    procedure Init_Tracks (C : in out Context);

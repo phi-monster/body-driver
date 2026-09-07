@@ -130,7 +130,7 @@ package body Bodyfile is
             for K in 0 .. T.E.N - 1 loop
                Append (B, (if K > 0 then "," else "") & (if T.Trust (K) then "1" else "0"));
             end loop;
-            Append (B, "]}");
+            Append (B, "],""reach"":" & Codec.Fmt (T.Reach, 3) & "}");
          end;
       end loop;
       Append (B, "]}");
@@ -295,6 +295,9 @@ package body Bodyfile is
                   T.Cam := Natural (Json.Num (D, Json.Get (D, Tn, "cam")));
                   T.Kind := Act.Track_Kind'Val (Integer (Json.Num (D, Json.Get (D, Tn, "kind"))));
                   T.Lobe := Integer (Json.Num (D, Json.Get (D, Tn, "lobe")));
+                  if Json.Get (D, Tn, "reach") >= 0 then
+                     T.Reach := Long_Float'Max (1.0, Json.Num (D, Json.Get (D, Tn, "reach")));
+                  end if;
                   Table.Reset (T.E, N, 1.0);
                   for K in 0 .. N - 1 loop
                      if 3 * K + 2 < Natural (Bv.Length) then

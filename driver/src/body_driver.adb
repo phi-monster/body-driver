@@ -182,6 +182,8 @@ begin
          Put_Line ("[装] 身体写进 " & To_String (Body_Path) & "(量过 " & Codec.Img (C.Map.Measured_Times) & " 次)");
       end if;
    end;
+   C.Boot_Steps := Plug.Steps (L);
+   Put_Line ("[装] 开机量身体一共用了 " & Codec.Img (C.Boot_Steps) & " 拍(一拍 = 对方走一步;只记账)");
    Act.Init_Tracks (C);
    World.Init (C.Wld, C.Map.N_Cams);
    for A in 0 .. C.Map.Arms - 1 loop

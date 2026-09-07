@@ -48,6 +48,7 @@ package Plug is
       Has_Last : Boolean := False;
       Reset_Flag : Boolean := False;
       Seq : Natural := 0;
+      Ep_Seq0 : Natural := 0;           --  这一集开始时的帧号(对方说 reset 时记下)⇒ 本集用了几拍 = Seq - Ep_Seq0
       Vid_N : Natural := 0;
       Film_N : Natural := 0;
       Wait_Us, Parse_Us : Long_Float := 0.0;
@@ -58,6 +59,7 @@ package Plug is
    function Sense (L : in out Link; F : out Frame) return Boolean;
    function Act (L : in out Link; C : Cmd) return Boolean;
    function Take_Reset (L : in out Link) return Boolean;
+   function Steps (L : Link) return Natural;            --  这一集到现在收了几拍画面(一拍 = 对方走一步;只数,不停)
    function Arms (L : Link) return Natural;
    function Joint_Mode (L : Link) return Boolean;     --  没有末端位姿、只有关节角
 end Plug;

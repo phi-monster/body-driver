@@ -69,7 +69,7 @@ package body Selfmap is
    end Wait_Still;
 
    procedure Go (L : in out Plug.Link; M : Body_Map; Arm : Natural; Target : Plug.Arm_Pose; Jaw : Floats;
-                 F : in out Plug.Frame; Delivered : out Table.Vec; Frames : out Natural; Ok : out Boolean) is
+                 F : in out Plug.Frame; Delivered : out Table.Vec; Frames : out Natural; Ok : out Boolean; Quick : Boolean := False) is
       C : Plug.Cmd;
       P0 : constant Plug.Arm_Pose := (if Arm < Natural (F.EE.Length) then F.EE (Arm) else [others => 0.0]);
       Prev : Plug.Arm_Pose := P0;
@@ -101,7 +101,7 @@ package body Selfmap is
             end if;
             Prev := F.EE (Arm);
          end;
-         exit when (Still >= 2 and then Frames >= M.Settle) or else Frames >= 12 + M.Settle;
+         exit when (Still >= 2 and then Frames >= M.Settle) or else Frames >= 12 + M.Settle or else (Quick and then Frames >= M.Settle);
       end loop;
       if Arm < Natural (F.EE.Length) then
          Delivered := Chan.Delivered (P0, F.EE (Arm));
