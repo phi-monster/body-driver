@@ -1242,12 +1242,18 @@ package body Act is
                                  Draw.Numbered_Box (RGB, Cw2, Ch2, R.X0, R.Y0, R.X1, R.Y1, N, Draw.Green, 2);
                               end loop;
                               for P of Pts loop
-                                 Draw.Numbered_Box (RGB, Cw2, Ch2,
-                                                    Natural (Long_Float'Max (0.0, (P.Cu - 0.02) * Long_Float (Cw2))),
-                                                    Natural (Long_Float'Max (0.0, (P.Cv - 0.02) * Long_Float (Ch2))),
-                                                    Natural (Long_Float'Min (Long_Float (Cw2 - 1), (P.Cu + 0.02) * Long_Float (Cw2))),
-                                                    Natural (Long_Float'Min (Long_Float (Ch2 - 1), (P.Cv + 0.02) * Long_Float (Ch2))),
-                                                    0, Draw.Pink, 2);
+                                 --  标记框 = 这个点自己的框(没有就用一个跟踪窗),只为落图看得见(比例,无量纲)
+                                 declare
+                                    Hw : constant Long_Float := Long_Float'Max (P.Box_W, Track_Win) * 0.5;
+                                    Hh2 : constant Long_Float := Long_Float'Max (P.Box_H, Track_Win) * 0.5;
+                                 begin
+                                    Draw.Numbered_Box (RGB, Cw2, Ch2,
+                                                       Natural (Long_Float'Max (0.0, (P.Cu - Hw) * Long_Float (Cw2))),
+                                                       Natural (Long_Float'Max (0.0, (P.Cv - Hh2) * Long_Float (Ch2))),
+                                                       Natural (Long_Float'Min (Long_Float (Cw2 - 1), (P.Cu + Hw) * Long_Float (Cw2))),
+                                                       Natural (Long_Float'Min (Long_Float (Ch2 - 1), (P.Cv + Hh2) * Long_Float (Ch2))),
+                                                       0, Draw.Pink, 2);
+                                 end;
                               end loop;
                               Codec.Write_BMP (To_String (C.Dump_Dir) & "/lost_" & Codec.Pad6 (C.Round_N) & "_" & Codec.Pad6 (Steps_Taken) & ".bmp", RGB, Cw2, Ch2);
                               Put_Line ("[身]     全丢了:这一拍的画面和切出来的" & Natural'Image (N) & " 块落图 lost_" & Codec.Pad6 (C.Round_N) & "_" & Codec.Pad6 (Steps_Taken) & ".bmp");
