@@ -136,9 +136,9 @@ package body Plug is
                Put_Line ("[链] 没等到 ⇒ 取不到画面");
                return False;
             end if;
-            L.Has_Pending := False;
+            --  攥着的命令留着:它是给此刻这个世界下的,断线重连不改变世界(EJ:脑答得慢 ⇒ 每问一次断一次线,重连时把刚下的命令丢了 ⇒ 第一步实到 0,"没照做"回脑,死循环)
             L.Has_Last := False;
-            Put_Line ("[链] 重新接上了(不当作新的一集:对方明说 reset 才算)");
+            Put_Line ("[链] 重新接上了(不当作新的一集:对方明说 reset 才算;攥着的命令照发)");
          elsif Kind = Websocket.Op_Binary then
             declare
                D : Doc;
