@@ -93,26 +93,33 @@ package body Bodyfile is
          Append (B, "]");
       end loop;
       Append (B, "],""measured_times"":" & Codec.Img (M.Measured_Times) & ",");
-      --  手:空合读数、张开读数;手上相机里的握区(固定像素,是身体);别的相机里的不存(随位姿变)
+      --  手:空合读数、张开读数、合空时的位姿;每台相机里的握区都存(手上相机里的是固定像素;别的相机里的只在同一位姿下成立 —— 开机位姿一样就不用再合空)
       Append (B, """hands"":[");
       for A in 0 .. Natural (Hands.Length) - 1 loop
          declare
             H : constant Zone.Hand := Hands (A);
-            Hc : constant Integer := (if A < Natural (M.Cam_On_Arm.Length) then M.Cam_On_Arm (A) else -1);
+            First : Boolean := True;
          begin
-            Append (B, (if A > 0 then "," else "") & "{""empty_close"":" & Codec.Fmt (H.Empty_Close, 6) & ",""open"":" & Codec.Fmt (H.Open_Reading, 6));
-            if Hc >= 0 and then Natural (Hc) < Natural (H.Zones.Length) and then H.Zones (Natural (Hc)).Valid then
-               declare
-                  Z : constant Zone.Hand_Zone := H.Zones (Natural (Hc));
-               begin
-                  Append (B, ",""own_cam"":" & Codec.Img (Natural (Hc)) & ",""zone"":{""cu"":" & Codec.Fmt (Z.Cu, 5) & ",""cv"":" & Codec.Fmt (Z.Cv, 5) &
-                          ",""au"":" & Codec.Fmt (Z.Au, 5) & ",""av"":" & Codec.Fmt (Z.Av, 5) & ",""span"":" & Codec.Fmt (Z.Span, 5) & ",""depth"":" & Codec.Fmt (Z.Depth, 5) &
-                          ",""n_lobes"":" & Codec.Img (Z.N_Lobes) & ",""box"":[" & Codec.Img (Z.X0) & "," & Codec.Img (Z.Y0) & "," & Codec.Img (Z.X1) & "," & Codec.Img (Z.Y1) & "]" &
-                          ",""a"":[" & Codec.Img (Z.A.X0) & "," & Codec.Img (Z.A.Y0) & "," & Codec.Img (Z.A.X1) & "," & Codec.Img (Z.A.Y1) & "," & Codec.Fmt (Z.A.Cu, 5) & "," & Codec.Fmt (Z.A.Cv, 5) & "," & Codec.Img (Z.A.Count) & "]" &
-                          ",""b"":[" & Codec.Img (Z.B.X0) & "," & Codec.Img (Z.B.Y0) & "," & Codec.Img (Z.B.X1) & "," & Codec.Img (Z.B.Y1) & "," & Codec.Fmt (Z.B.Cu, 5) & "," & Codec.Fmt (Z.B.Cv, 5) & "," & Codec.Img (Z.B.Count) & "]}");
-               end;
-            end if;
-            Append (B, "}");
+            Append (B, (if A > 0 then "," else "") & "{""empty_close"":" & Codec.Fmt (H.Empty_Close, 6) & ",""open"":" & Codec.Fmt (H.Open_Reading, 6) & ",""pose"":[");
+            for K in 0 .. 6 loop
+               Append (B, (if K > 0 then "," else "") & Codec.Fmt (H.Pose (K), 6));
+            end loop;
+            Append (B, "],""zones"":[");
+            for Cm in 0 .. Natural (H.Zones.Length) - 1 loop
+               if H.Zones (Cm).Valid then
+                  declare
+                     Z : constant Zone.Hand_Zone := H.Zones (Cm);
+                  begin
+                     Append (B, (if First then "" else ",") & "{""cam"":" & Codec.Img (Cm) & ",""cu"":" & Codec.Fmt (Z.Cu, 5) & ",""cv"":" & Codec.Fmt (Z.Cv, 5) &
+                             ",""au"":" & Codec.Fmt (Z.Au, 5) & ",""av"":" & Codec.Fmt (Z.Av, 5) & ",""span"":" & Codec.Fmt (Z.Span, 5) & ",""depth"":" & Codec.Fmt (Z.Depth, 5) &
+                             ",""n_lobes"":" & Codec.Img (Z.N_Lobes) & ",""box"":[" & Codec.Img (Z.X0) & "," & Codec.Img (Z.Y0) & "," & Codec.Img (Z.X1) & "," & Codec.Img (Z.Y1) & "]" &
+                             ",""a"":[" & Codec.Img (Z.A.X0) & "," & Codec.Img (Z.A.Y0) & "," & Codec.Img (Z.A.X1) & "," & Codec.Img (Z.A.Y1) & "," & Codec.Fmt (Z.A.Cu, 5) & "," & Codec.Fmt (Z.A.Cv, 5) & "," & Codec.Img (Z.A.Count) & "]" &
+                             ",""b"":[" & Codec.Img (Z.B.X0) & "," & Codec.Img (Z.B.Y0) & "," & Codec.Img (Z.B.X1) & "," & Codec.Img (Z.B.Y1) & "," & Codec.Fmt (Z.B.Cu, 5) & "," & Codec.Fmt (Z.B.Cv, 5) & "," & Codec.Img (Z.B.Count) & "]}");
+                     First := False;
+                  end;
+               end if;
+            end loop;
+            Append (B, "]}");
          end;
       end loop;
       Append (B, "],""tables"":[");
@@ -278,9 +285,17 @@ package body Bodyfile is
                   for C in 0 .. M.N_Cams - 1 loop
                      H.Zones.Append (Zone.Hand_Zone'(others => <>));
                   end loop;
-                  if Zn >= 0 then
-                     declare
-                        Own : constant Natural := Natural (Json.Num (D, Json.Get (D, Hn, "own_cam")));
+                  declare
+                     Pv : constant Floats := Arr (Json.Get (D, Hn, "pose"));
+                  begin
+                     if Natural (Pv.Length) = 7 then
+                        for K in 0 .. 6 loop
+                           H.Pose (K) := Pv (K);
+                        end loop;
+                     end if;
+                  end;
+                  declare
+                     procedure Read_Zone (Zn : Integer; Cm : Natural) is
                         Z : Zone.Hand_Zone;
                         Bx : constant Floats := Arr (Json.Get (D, Zn, "box"));
                         Aa : constant Floats := Arr (Json.Get (D, Zn, "a"));
@@ -300,11 +315,25 @@ package body Bodyfile is
                         if Natural (Bb.Length) = 7 and then Z.N_Lobes = 2 then
                            Z.B := (True, Natural (Bb (0)), Natural (Bb (1)), Natural (Bb (2)), Natural (Bb (3)), Bb (4), Bb (5), Natural (Bb (6)));
                         end if;
-                        if Own < Natural (H.Zones.Length) then
-                           H.Zones.Replace_Element (Own, Z);
+                        if Cm < Natural (H.Zones.Length) then
+                           H.Zones.Replace_Element (Cm, Z);
                         end if;
-                     end;
-                  end if;
+                     end Read_Zone;
+                     Zs : constant Integer := Json.Get (D, Hn, "zones");
+                     Zn : constant Integer := Json.Get (D, Hn, "zone");
+                  begin
+                     if Zs >= 0 then
+                        for J in 0 .. Json.Count (D, Zs) - 1 loop
+                           declare
+                              Zj : constant Integer := Json.Child (D, Zs, J);
+                           begin
+                              Read_Zone (Zj, Natural (Long_Float'Max (0.0, Json.Num (D, Json.Get (D, Zj, "cam")))));
+                           end;
+                        end loop;
+                     elsif Zn >= 0 then
+                        Read_Zone (Zn, Natural (Json.Num (D, Json.Get (D, Hn, "own_cam"))));
+                     end if;
+                  end;
                   Hands.Append (H);
                end;
             end loop;

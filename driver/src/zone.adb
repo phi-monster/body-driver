@@ -216,6 +216,7 @@ package body Zone is
       H := (others => <>);
       H.Arm := Arm;
       H.Open_Reading := J0;
+      H.Pose := Pose;
       Ok := False;
       if N_Cams = 0 or else Arm >= Natural (F.EE.Length) then
          return;

@@ -30,6 +30,7 @@ package Zone is
       Empty_Close : Long_Float := 0.0; --  合空时的读数
       Open_Reading : Long_Float := 1.0;
       Close_Steps : Natural := 0;
+      Pose : Plug.Arm_Pose := [others => 0.0];   --  合空时这只手的位姿(别的相机里的握区只在这个位姿下成立)
    end record;
    package Hand_Vectors is new Ada.Containers.Vectors (Natural, Hand);
 

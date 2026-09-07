@@ -16,6 +16,7 @@ with Bytes;
 with Picture;
 with Schema;
 with Chan;
+with Table;
 procedure Body_Driver is
    Port : Natural := 0;
    Body_Path : Unbounded_String;   --  身体文件(--in/--out;同一具身体越用越强)
@@ -152,16 +153,41 @@ begin
             end loop;
          end if;
       end if;
-      --  握区:合空每次开机都做(它同时量空合读数,也把世界相机里此刻的握区位置量出来);手上相机里的握区和存的比一眼
+      --  握区:存的这只手若是在【同一个位姿】下合空量的(每通道差不过一个探针幅度),身体又核对没变 ⇒ 照用,不再合空;否则合空一次
       for A in 0 .. C.Map.Arms - 1 loop
          declare
             H : Zone.Hand;
+            Reuse : Boolean := False;
          begin
-            Zone.Measure (L, C.Map, A, F, H, Ok);
-            if not Ok then
-               Put_Line ("[身] 第" & Natural'Image (A + 1) & " 只手的握区量不了");
+            if Use_Stored and then A < Natural (Stored_Hands.Length) and then A < Natural (F.EE.Length) then
+               declare
+                  Dv : constant Table.Vec := Chan.Delivered (Stored_Hands (A).Pose, F.EE (A));
+                  Any_Zone : Boolean := False;
+               begin
+                  Reuse := True;
+                  for K in 0 .. Chan.Per_Arm - 1 loop
+                     if abs Dv (K) > Long_Float'Max (1.0e-6, C.Map.Amp (A * Chan.Per_Arm + K)) then
+                        Reuse := False;
+                     end if;
+                  end loop;
+                  for Zc of Stored_Hands (A).Zones loop
+                     if Zc.Valid then
+                        Any_Zone := True;
+                     end if;
+                  end loop;
+                  Reuse := Reuse and then Any_Zone;
+               end;
             end if;
-            if Use_Stored and then A < Natural (Stored_Hands.Length) then
+            if Reuse then
+               H := Stored_Hands (A);
+               Put_Line ("[装] 第" & Natural'Image (A + 1) & " 只手:开机位姿和存的合空位姿一样 ⇒ 握区照用,不合空");
+            else
+               Zone.Measure (L, C.Map, A, F, H, Ok);
+               if not Ok then
+                  Put_Line ("[身] 第" & Natural'Image (A + 1) & " 只手的握区量不了");
+               end if;
+            end if;
+            if (not Reuse) and then Use_Stored and then A < Natural (Stored_Hands.Length) then
                declare
                   Hc : constant Integer := (if A < Natural (C.Map.Cam_On_Arm.Length) then C.Map.Cam_On_Arm (A) else -1);
                begin
