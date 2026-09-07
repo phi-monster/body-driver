@@ -1167,24 +1167,32 @@ package body Act is
                         Err_Now := Err_Now + P.Steps_Err;
                      end;
                   end loop;
-                  --  身体没照做:命令过的通道实到差过一半,或没命令的通道自己动了两个探针幅度以上 ⇒ 这一步不算数,那个通道减半(EI:0.236 rad 的命令实到 -0.055,腕转到别处)
-                  for K in 0 .. Chan.Per_Arm - 1 loop
-                     if Active (K) then
-                        declare
-                           Am : constant Long_Float := Long_Float'Max (1.0e-6, C.Map.Amp (Arm * Chan.Per_Arm + K));
-                           Asked : constant Boolean := abs A (K) > Long_Float'Max (Cmd_Floor, C.Map.EE_Noise);
-                        begin
-                           if Asked and then (not Halted) and then abs (Deliv (K) - A (K)) > 0.5 * abs A (K) then
-                              Any_Wrong := True; All_Verified := False; Not_Followed := True;
-                              Reach (K) := Long_Float'Max (1.0, Reach (K) * 0.5);
-                              Put_Line ("[身]     通道" & Natural'Image (Arm * Chan.Per_Arm + K) & " 没照做:命令 " & Codec.Fmt (A (K), 3) & " 实到 " & Codec.Fmt (Deliv (K), 3) & " ⇒ 它的步幅缩回上一档");
-                           elsif (not Asked) and then (not Halted) and then abs Deliv (K) > 2.0 * Am then
-                              Any_Wrong := True; All_Verified := False; Not_Followed := True;
-                              Put_Line ("[身]     通道" & Natural'Image (Arm * Chan.Per_Arm + K) & " 没命令却动了 " & Codec.Fmt (Deliv (K), 3));
-                           end if;
-                        end;
-                     end if;
-                  end loop;
+                  --  身体没照做:看【整步】而不是逐个通道(EN:要一个通道退 3 mm 它走了 4 mm 就停,一轮一步)。
+                  --  各通道按自己的探针幅度归一之后,实到与命令差过一半 ⇒ 这一步不算数,用到的通道步幅都缩回上一档(EI:0.236 rad 实到 -0.055)
+                  if not Halted then
+                     declare
+                        Dn, An : Long_Float := 0.0;
+                     begin
+                        for K in 0 .. Chan.Per_Arm - 1 loop
+                           declare
+                              Am : constant Long_Float := Long_Float'Max (1.0e-6, C.Map.Amp (Arm * Chan.Per_Arm + K));
+                           begin
+                              Dn := Dn + ((Deliv (K) - A (K)) / Am) ** 2;
+                              An := An + (A (K) / Am) ** 2;
+                           end;
+                        end loop;
+                        Dn := Sqrt (Dn); An := Sqrt (An);
+                        if An > 1.0 and then Dn > 0.5 * An then
+                           Any_Wrong := True; All_Verified := False; Not_Followed := True;
+                           for K in 0 .. Chan.Per_Arm - 1 loop
+                              if Active (K) then
+                                 Reach (K) := Long_Float'Max (1.0, Reach (K) * 0.5);
+                              end if;
+                           end loop;
+                           Put_Line ("[身]     整步没照做:要走的和实际走的差了 " & Codec.Fmt (Dn / Long_Float'Max (1.0e-9, An) * 100.0, 0) & "%(按各通道自己的探针幅度算)⇒ 步幅缩回上一档");
+                        end if;
+                     end;
+                  end if;
                   --  步幅按通道各自翻倍/减半:这一步用到它上限一半以上、且表报准了,它才翻倍(EI:靠平移走对了 4 步就把转动放到 16 倍,一转就把球转出视野)
                   for K in 0 .. Chan.Per_Arm - 1 loop
                      if Active (K) then
