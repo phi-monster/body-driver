@@ -13,8 +13,9 @@ with Picture;
 with Table;
 with Memory;
 with Schema;
+with Chan;
 package Act is
-   type Item_Kind is (Finger, Grip, Thing, Thing_Remembered, Thing_Held);
+   type Item_Kind is (Finger, Grip, Piece, Thing, Thing_Remembered, Thing_Held);   --  Piece = 我身上某个通道带的一块(Which = 通道号)
    type Item is record
       Kind : Item_Kind := Thing;
       Arm : Natural := 0;
@@ -28,7 +29,7 @@ package Act is
    end record;
    package Item_Vectors is new Ada.Containers.Vectors (Natural, Item);
 
-   type Track_Kind is (Zone_Pt, Thing_Pt);
+   type Track_Kind is (Zone_Pt, Thing_Pt, Part_Pt);   --  Part_Pt:我身上的零件点(Lobe 字段 = 通道号)
    type Stored_Effect is record
       Arm, Cam : Natural := 0;
       Kind : Track_Kind := Zone_Pt;
@@ -38,6 +39,7 @@ package Act is
       Reach : Long_Float := 1.0;   --  这张表被核实过的步幅(探针上限的倍数):表比零表准就翻倍,不准就减半;存进身体文件,越用越强
    end record;
    package Effect_Vectors is new Ada.Containers.Vectors (Natural, Stored_Effect);
+   type Known_Array is array (0 .. Chan.Per_Arm - 1) of Boolean;
    type Zone_Track is record
       Valid : Boolean := False;
       Cu, Cv, Z : Long_Float := 0.0;
@@ -45,6 +47,8 @@ package Act is
       Au, Av, Bu, Bv : Long_Float := 0.0;   --  两瓣各自的位置(从身体图按此刻位姿算出)
       Has_Lobes : Boolean := False;
       Known : Boolean := False;             --  此刻位姿离某个真看过的样本不超过一步核实过的步幅 ⇒ 不用看就知道
+      Pieces : Schema.Part_Array;           --  这只手每个通道带的零件此刻在这台相机里的位置(按位姿从身体图算)
+      Pieces_Known : Known_Array := [others => False];
    end record;
    package Zone_Track_Vectors is new Ada.Containers.Vectors (Natural, Zone_Track);
 

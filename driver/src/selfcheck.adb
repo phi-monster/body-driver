@@ -14,7 +14,6 @@ with GNAT.SHA1;
 with Zone;
 with Schema;
 with Plug;
-with Table;
 with Ada.Containers;
 with Interfaces; use type Interfaces.Unsigned_8;
 procedure Selfcheck is
@@ -265,7 +264,7 @@ begin
       for I in 1 .. 6 loop
          Amp.Append (0.01);
       end loop;
-      X.Arm := 0; X.Cam := 0; X.Pose := [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]; X.N_Lobes := 2; X.Au := 0.3; X.Av := 0.5;
+      X.Arm := 0; X.Cam := 0; X.Pose := [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]; X.N_Lobes := 2; X.Au := 0.3; X.Av := 0.5; X.Lobes_Valid := True;
       Schema.Add (M, X, 1.0e-3, 1.0e-3);
       X.Pose (0) := 0.1; X.Au := 0.5;
       Schema.Add (M, X, 1.0e-3, 1.0e-3);

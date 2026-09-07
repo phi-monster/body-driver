@@ -1,5 +1,6 @@
 with Ada.Text_IO;
 with Ada.Directories;
+with Chan;
 with Bytes; use Bytes;
 with Codec;
 with Json;
@@ -143,8 +144,20 @@ package body Bodyfile is
             for K in 0 .. 6 loop
                Append (B, (if K > 0 then "," else "") & Codec.Fmt (X.Pose (K), 6));
             end loop;
-            Append (B, "],""n"":" & Codec.Img (X.N_Lobes) & ",""a"":[" & Codec.Fmt (X.Au, 5) & "," & Codec.Fmt (X.Av, 5) & "],""b"":[" & Codec.Fmt (X.Bu, 5) & "," & Codec.Fmt (X.Bv, 5) &
-                    "],""c"":[" & Codec.Fmt (X.Cu, 5) & "," & Codec.Fmt (X.Cv, 5) & "],""z"":" & Codec.Fmt (X.Z, 5) & "}");
+            Append (B, "],""lobes"":" & (if X.Lobes_Valid then "1" else "0") & ",""n"":" & Codec.Img (X.N_Lobes) & ",""a"":[" & Codec.Fmt (X.Au, 5) & "," & Codec.Fmt (X.Av, 5) & "],""b"":[" & Codec.Fmt (X.Bu, 5) & "," & Codec.Fmt (X.Bv, 5) &
+                    "],""c"":[" & Codec.Fmt (X.Cu, 5) & "," & Codec.Fmt (X.Cv, 5) & "],""z"":" & Codec.Fmt (X.Z, 5) & ",""parts"":[");
+            declare
+               First : Boolean := True;
+            begin
+               for K in Schema.Part_Array'Range loop
+                  if X.Parts (K).Valid then
+                     Append (B, (if First then "" else ",") & "[" & Codec.Img (K) & "," & Codec.Fmt (X.Parts (K).Cu, 5) & "," & Codec.Fmt (X.Parts (K).Cv, 5) & "," & Codec.Fmt (X.Parts (K).Z, 5) & "," &
+                             Codec.Img (X.Parts (K).X0) & "," & Codec.Img (X.Parts (K).Y0) & "," & Codec.Img (X.Parts (K).X1) & "," & Codec.Img (X.Parts (K).Y1) & "]");
+                     First := False;
+                  end if;
+               end loop;
+            end;
+            Append (B, "]}");
          end;
       end loop;
       Append (B, "]}");
@@ -342,6 +355,22 @@ package body Bodyfile is
                      X.Cam := Natural (Json.Num (D, Json.Get (D, Sn, "cam")));
                      X.N_Lobes := Natural (Json.Num (D, Json.Get (D, Sn, "n")));
                      X.Z := Json.Num (D, Json.Get (D, Sn, "z"));
+                     X.Lobes_Valid := Json.Get (D, Sn, "lobes") < 0 or else Json.Num (D, Json.Get (D, Sn, "lobes")) > 0.5;
+                     declare
+                        Ps : constant Integer := Json.Get (D, Sn, "parts");
+                     begin
+                        if Ps >= 0 then
+                           for J in 0 .. Json.Count (D, Ps) - 1 loop
+                              declare
+                                 Pv2 : constant Floats := Arr (Json.Child (D, Ps, J));
+                              begin
+                                 if Natural (Pv2.Length) = 8 and then Pv2 (0) >= 0.0 and then Integer (Pv2 (0)) < Chan.Per_Arm then
+                                    X.Parts (Integer (Pv2 (0))) := (True, Pv2 (1), Pv2 (2), Pv2 (3), Natural (Pv2 (4)), Natural (Pv2 (5)), Natural (Pv2 (6)), Natural (Pv2 (7)));
+                                 end if;
+                              end;
+                           end loop;
+                        end if;
+                     end;
                      if Natural (Pv.Length) = 7 and then Natural (Av.Length) = 2 and then Natural (Bv.Length) = 2 and then Natural (Cv.Length) = 2 then
                         for K in 0 .. 6 loop
                            X.Pose (K) := Pv (K);

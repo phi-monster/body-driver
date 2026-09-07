@@ -15,6 +15,7 @@ with Bodyfile;
 with Bytes;
 with Picture;
 with Schema;
+with Chan;
 procedure Body_Driver is
    Port : Natural := 0;
    Body_Path : Unbounded_String;   --  身体文件(--in/--out;同一具身体越用越强)
@@ -184,9 +185,34 @@ begin
                      Z : constant Zone.Hand_Zone := H.Zones (Cm);
                      X : Schema.Sample;
                   begin
-                     X.Arm := A; X.Cam := Cm; X.Pose := F.EE (A); X.N_Lobes := Z.N_Lobes;
+                     X.Arm := A; X.Cam := Cm; X.Pose := F.EE (A); X.N_Lobes := Z.N_Lobes; X.Lobes_Valid := True;
                      X.Au := Z.A.Cu; X.Av := Z.A.Cv; X.Bu := Z.B.Cu; X.Bv := Z.B.Cv; X.Cu := Z.Cu; X.Cv := Z.Cv;
                      X.Z := (if Picture.Is_Nan (Z.Depth) then 0.0 else Z.Depth);
+                     --  全身:开机每个通道推过一下,跟着动的那块 = 这个通道带的零件(只在从零量的这次有;装回的身体图里已经带着)
+                     if not Use_Stored then
+                        for K in 0 .. Chan.Per_Arm - 1 loop
+                           declare
+                              Pi : constant Natural := (A * Chan.Per_Arm + K) * C.Map.N_Cams + Cm;
+                           begin
+                              if Pi < Natural (C.Map.Parts.Length) and then C.Map.Parts (Pi).Valid then
+                                 declare
+                                    P : constant Selfmap.Part := C.Map.Parts (Pi);
+                                    Zp : Long_Float := 0.0;
+                                 begin
+                                    if F.Cams (Cm).Has_Depth then
+                                       --  读深窗口 = 框的四分之一(比例,无量纲)
+                                       Zp := Picture.Near_Depth (F.Cams (Cm).Depth, F.Cams (Cm).W, F.Cams (Cm).H, P.Cu, P.Cv,
+                                                                 Long_Float'Max (0.005, Long_Float (P.X1 - P.X0) / Long_Float (F.Cams (Cm).W) * 0.25));
+                                       if Picture.Is_Nan (Zp) then
+                                          Zp := 0.0;
+                                       end if;
+                                    end if;
+                                    X.Parts (K) := (True, P.Cu, P.Cv, Zp, P.X0, P.Y0, P.X1, P.Y1);
+                                 end;
+                              end if;
+                           end;
+                        end loop;
+                     end if;
                      Schema.Add (C.Sch, X, C.Map.EE_Noise, C.Map.Rot_Noise);
                   end;
                end if;

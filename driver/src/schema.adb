@@ -1,5 +1,4 @@
 with Ada.Numerics.Long_Elementary_Functions; use Ada.Numerics.Long_Elementary_Functions;
-with Chan;
 package body Schema is
    function Count (M : Map; Arm, Cam : Natural) return Natural is
       N : Natural := 0;
@@ -25,7 +24,21 @@ package body Schema is
                   Dr : constant Long_Float := D (3) ** 2 + D (4) ** 2 + D (5) ** 2;
                begin
                   if Dp <= EE_Noise and then Dr <= Rot_Noise * Rot_Noise then
-                     M.S.Replace_Element (I, X);
+                     declare
+                        Mg : Sample := Y;
+                     begin
+                        Mg.Pose := X.Pose;
+                        if X.Lobes_Valid then
+                           Mg.Lobes_Valid := True; Mg.N_Lobes := X.N_Lobes;
+                           Mg.Au := X.Au; Mg.Av := X.Av; Mg.Bu := X.Bu; Mg.Bv := X.Bv; Mg.Cu := X.Cu; Mg.Cv := X.Cv; Mg.Z := X.Z;
+                        end if;
+                        for K in Part_Array'Range loop
+                           if X.Parts (K).Valid then
+                              Mg.Parts (K) := X.Parts (K);
+                           end if;
+                        end loop;
+                        M.S.Replace_Element (I, Mg);
+                     end;
                      return;
                   end if;
                end;
