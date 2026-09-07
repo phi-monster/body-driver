@@ -38,6 +38,8 @@ package Act is
       E : Table.Effect;
       Trust : Table.Mask := [others => True];   --  探针时这个点真跑过地板的通道
       Reach : Table.Vec := [others => 1.0];   --  每个通道各自被核实过的步幅(探针上限的倍数):那个通道用到上限一半以上且表报准了才翻倍;报错/没照做/认丢了减半;存进身体文件
+      Pose : Plug.Arm_Pose := [others => 0.0];   --  这张表是在哪个位姿下量的:表是【就地】的,离得远了不成立(EP:远近那一列小了 7 倍,是别处量的)
+      Has_Pose : Boolean := False;
    end record;
    package Effect_Vectors is new Ada.Containers.Vectors (Natural, Stored_Effect);
    type Known_Array is array (0 .. Chan.Per_Arm) of Boolean;

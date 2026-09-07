@@ -138,7 +138,11 @@ package body Bodyfile is
             for K in 0 .. T.E.N - 1 loop
                Append (B, (if K > 0 then "," else "") & (if T.Trust (K) then "1" else "0"));
             end loop;
-            Append (B, "],""reach"":[");
+            Append (B, "],""tpose"":[");
+            for K in 0 .. 6 loop
+               Append (B, (if K > 0 then "," else "") & Codec.Fmt (T.Pose (K), 6));
+            end loop;
+            Append (B, "],""has_pose"":" & (if T.Has_Pose then "1" else "0") & ",""reach"":[");
             for K in 0 .. T.E.N - 1 loop
                Append (B, (if K > 0 then "," else "") & Codec.Fmt (T.Reach (K), 3));
             end loop;
@@ -361,6 +365,16 @@ package body Bodyfile is
                   T.Kind := Act.Track_Kind'Val (Integer (Json.Num (D, Json.Get (D, Tn, "kind"))));
                   T.Chan_K := Natural (Long_Float'Max (0.0, Json.Num (D, Json.Get (D, Tn, "chan"))));
                   T.Blob := Integer (Json.Num (D, Json.Get (D, Tn, "blob")));
+                  declare
+                     Tp : constant Floats := Arr (Json.Get (D, Tn, "tpose"));
+                  begin
+                     if Natural (Tp.Length) = 7 then
+                        for K in 0 .. 6 loop
+                           T.Pose (K) := Tp (K);
+                        end loop;
+                        T.Has_Pose := Json.Num (D, Json.Get (D, Tn, "has_pose")) > 0.5;
+                     end if;
+                  end;
                   declare
                      Rn : constant Integer := Json.Get (D, Tn, "reach");
                   begin

@@ -382,10 +382,16 @@ package body Act is
       return -1;
    end Find_Effect;
 
-   procedure Store_Effect (C : in out Context; Arm, Cam : Natural; Kind : Track_Kind; Chan_K : Natural; Blob : Integer; E : Table.Effect; Trust : Table.Mask; Reach : Table.Vec := Unit_Reach) is
+   procedure Store_Effect (C : in out Context; Arm, Cam : Natural; Kind : Track_Kind; Chan_K : Natural; Blob : Integer; E : Table.Effect; Trust : Table.Mask; Reach : Table.Vec := Unit_Reach;
+                           Pose : Plug.Arm_Pose := [others => 0.0]; Has_Pose : Boolean := False) is
       I : constant Integer := Find_Effect (C, Arm, Cam, Kind, Chan_K, Blob);
-      Se : constant Stored_Effect := (Arm, Cam, Kind, Chan_K, Blob, E, Trust, Reach);
+      Old : constant Integer := I;
+      Se : Stored_Effect := (Arm, Cam, Kind, Chan_K, Blob, E, Trust, Reach, Pose, Has_Pose);
    begin
+      if not Has_Pose and then Old >= 0 then
+         Se.Pose := C.Tables (Natural (Old)).Pose;      --  没带位姿的更新:沿用这张表原来量的位姿
+         Se.Has_Pose := C.Tables (Natural (Old)).Has_Pose;
+      end if;
       if I >= 0 then
          C.Tables.Replace_Element (Natural (I), Se);
       else
@@ -849,8 +855,13 @@ package body Act is
             declare
                Idx : constant Integer := Find_Effect (C, Arm, Cam, Pts (I).Kind, Pts (I).Chan_K, Pts (I).Blob);
             begin
-               --  存的表若一列都信不过(EI:在按关节推错的位置量的,六列全空)⇒ 当没有,重量
-               if Idx >= 0 and then (for some K in 0 .. Chan.Per_Arm - 1 => C.Tables (Natural (Idx)).Trust (K)) then
+               --  存的表:一列都信不过(EI:在错位置量的,六列全空)⇒ 当没有;量它时的位姿离现在太远也当没有 —— 表是就地的(EP:远近那一列小了 7 倍)
+               if Idx >= 0 and then (for some K in 0 .. Chan.Per_Arm - 1 => C.Tables (Natural (Idx)).Trust (K))
+                 and then (C.Tables (Natural (Idx)).Has_Pose
+                           and then (for all K in 0 .. Chan.Per_Arm - 1 =>
+                                       abs Chan.Delivered (C.Tables (Natural (Idx)).Pose, F.EE (Arm)) (K)
+                                       <= Long_Float'Max (1.0e-6, C.Map.Amp (Arm * Chan.Per_Arm + K)) * Cap_Mult * C.Tables (Natural (Idx)).Reach (K)))
+               then
                   Effs (I) := C.Tables (Natural (Idx)).E;
                   Trusts (I) := C.Tables (Natural (Idx)).Trust;
                   for K in 0 .. Chan.Per_Arm - 1 loop
@@ -872,7 +883,7 @@ package body Act is
                end if;
                for I in 0 .. Natural (Pts.Length) - 1 loop
                   Trusts (I) := Trust;
-                  Store_Effect (C, Arm, Cam, Pts (I).Kind, Pts (I).Chan_K, Pts (I).Blob, Effs (I), Trust);
+                  Store_Effect (C, Arm, Cam, Pts (I).Kind, Pts (I).Chan_K, Pts (I).Blob, Effs (I), Trust, Unit_Reach, F.EE (Arm), True);
                end loop;
             end;
          end if;
