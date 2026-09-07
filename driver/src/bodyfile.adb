@@ -3,7 +3,7 @@ with Ada.Directories;
 with Chan;
 with Bytes; use Bytes;
 with Codec;
-with Json;
+with Json; use type Json.Kind;
 with Layout;
 with Picture;
 with Table;
@@ -131,7 +131,11 @@ package body Bodyfile is
             for K in 0 .. T.E.N - 1 loop
                Append (B, (if K > 0 then "," else "") & (if T.Trust (K) then "1" else "0"));
             end loop;
-            Append (B, "],""reach"":" & Codec.Fmt (T.Reach, 3) & "}");
+            Append (B, "],""reach"":[");
+            for K in 0 .. T.E.N - 1 loop
+               Append (B, (if K > 0 then "," else "") & Codec.Fmt (T.Reach (K), 3));
+            end loop;
+            Append (B, "]}");
          end;
       end loop;
       --  身体图:只存真看见过的样本(位姿 + 瓣位置 + 深度)
@@ -323,9 +327,21 @@ package body Bodyfile is
                   T.Kind := Act.Track_Kind'Val (Integer (Json.Num (D, Json.Get (D, Tn, "kind"))));
                   T.Chan_K := Natural (Long_Float'Max (0.0, Json.Num (D, Json.Get (D, Tn, "chan"))));
                   T.Blob := Integer (Json.Num (D, Json.Get (D, Tn, "blob")));
-                  if Json.Get (D, Tn, "reach") >= 0 then
-                     T.Reach := Long_Float'Max (1.0, Json.Num (D, Json.Get (D, Tn, "reach")));
-                  end if;
+                  declare
+                     Rn : constant Integer := Json.Get (D, Tn, "reach");
+                  begin
+                     if Rn >= 0 and then Json.Kind_Of (D, Rn) = Json.J_Arr then
+                        declare
+                           Rv : constant Floats := Arr (Rn);
+                        begin
+                           for K in 0 .. Natural'Min (N, Natural (Rv.Length)) - 1 loop
+                              T.Reach (K) := Long_Float'Max (1.0, Rv (K));
+                           end loop;
+                        end;
+                     elsif Rn >= 0 then
+                        T.Reach := [others => Long_Float'Max (1.0, Json.Num (D, Rn))];
+                     end if;
+                  end;
                   Table.Reset (T.E, N, 1.0);
                   for K in 0 .. N - 1 loop
                      if 3 * K + 2 < Natural (Bv.Length) then

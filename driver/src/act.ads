@@ -37,7 +37,7 @@ package Act is
       Blob : Integer := -1;      --  这块的第几团(-1 = 整块;手指 0/1 = 两指各自)
       E : Table.Effect;
       Trust : Table.Mask := [others => True];   --  探针时这个点真跑过地板的通道
-      Reach : Long_Float := 1.0;   --  这张表被核实过的步幅(探针上限的倍数):表比零表准就翻倍,不准就减半;存进身体文件,越用越强
+      Reach : Table.Vec := [others => 1.0];   --  每个通道各自被核实过的步幅(探针上限的倍数):那个通道用到上限一半以上且表报准了才翻倍;报错/没照做/认丢了减半;存进身体文件
    end record;
    package Effect_Vectors is new Ada.Containers.Vectors (Natural, Stored_Effect);
    type Known_Array is array (0 .. Chan.Per_Arm) of Boolean;
