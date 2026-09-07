@@ -17,4 +17,7 @@ package Bodyfile is
    --  把新量到的一次合进 M(通道幅度/实到取历次中位数;噪声地板取历次最大 —— 只放大不缩小)
    procedure Merge (Stored, Fresh : Selfmap.Body_Map; Merged : out Selfmap.Body_Map; Replaced, Kept : out Natural);
    History_Depth : constant := 7;    --  每格留几次(次数,无量纲)
+   --  量法版本:量身体/量握区的代码一改就 +1,存的东西版本对不上就重量(协议,无量纲)
+   --  2 = 连通块按大小排序之后;1 及以前量的握区不可信(碎点被当成手指)
+   Method_Ver : constant := 2;
 end Bodyfile;

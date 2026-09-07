@@ -58,7 +58,7 @@ package body Bodyfile is
       B : Unbounded_String;
       Seen : Ints;
    begin
-      Append (B, "{""key"":""" & Json.Escape (Key) & """,");
+      Append (B, "{""key"":""" & Json.Escape (Key) & """,""method_ver"":" & Codec.Img (Method_Ver) & ",");
       Append (B, """arms"":" & Codec.Img (M.Arms) & ",""cams"":" & Codec.Img (M.N_Cams) & ",""per_arm"":" & Codec.Img (M.Per_Arm) & ",");
       Append (B, """ee_noise"":" & Codec.Fmt (M.EE_Noise, 6) & ",""rot_noise"":" & Codec.Fmt (M.Rot_Noise, 6) & ",""jaw_noise"":" & Codec.Fmt (M.Jaw_Noise, 6) & ",""settle"":" & Codec.Img (M.Settle) & ",");
       Put_Floats (B, "amp", M.Amp); Append (B, ",");
@@ -268,8 +268,13 @@ package body Bodyfile is
             Note := To_Unbounded_String ("身体文件残缺 ⇒ 从零量");
             return False;
          end if;
-         --  手
+         --  手:量法版本对不上 ⇒ 握区不装回(重新合空量一次;通道幅度那些不受影响)
          Hands.Clear;
+         if Integer (Json.Num (D, Json.Get (D, 0, "method_ver"))) /= Method_Ver then
+            Note := To_Unbounded_String ("身体文件是老量法(存的版本 " & Codec.Img (Integer (Json.Num (D, Json.Get (D, 0, "method_ver")))) &
+                                         ",现在 " & Codec.Img (Method_Ver) & ")⇒ 握区重量,其余照用");
+            return True;
+         end if;
          declare
             Hs : constant Integer := Json.Get (D, 0, "hands");
          begin
