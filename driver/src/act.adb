@@ -563,11 +563,11 @@ package body Act is
 
    --  发一步并等稳;返回实到(通道)
    procedure Step_Arm (L : in out Plug.Link; C : Context; F : in out Plug.Frame; Arm : Natural; A : Table.Vec; Jaw : Floats;
-                       Delivered : out Table.Vec; Ok : out Boolean; Quick : Boolean := False) is
+                       Delivered : out Table.Vec; Ok : out Boolean; Quick : Boolean := False; Watch : Selfmap.Watcher := null) is
       P0 : constant Plug.Arm_Pose := F.EE (Arm);
       Frames : Natural;
    begin
-      Selfmap.Go (L, C.Map, Arm, Chan.Compose (P0, A), Jaw, F, Delivered, Frames, Ok, Quick);
+      Selfmap.Go (L, C.Map, Arm, Chan.Compose (P0, A), Jaw, F, Delivered, Frames, Ok, Quick, Watch);
    end Step_Arm;
 
    --  没有表的点(同一只手的几个点一起):每个通道推一下量一列。幅度从开机看得见的那一档起,翻倍到每个点在画面里
@@ -772,6 +772,40 @@ package body Act is
       Beats0 : constant Natural := Plug.Steps (L);
       Reach : Table.Vec := Unit_Reach;   --  每通道核实过的步幅倍数(存在表里,越用越强):用到上限一半以上且表报准才翻倍,报错/没照做/认丢减半(翻倍协议,次数)
       Lost_Streak : Natural := 0;        --  连着几步没在画面里认出被跟的点
+      Halted : Boolean := False;         --  这一步途中被眼睛叫停了
+      --  走的途中每一拍看:被跟的世界块还找得到吗、离画面边够不够远(owner:转一点点就该知道不对劲 —— 眼睛长在身体上,不用等脑)
+      function Watch_Things (Fr : Plug.Frame) return Boolean is
+         Regs : Picture.Regions;
+         Have : Boolean := False;
+      begin
+         for P of Pts loop
+            if P.Kind = Thing_Pt then
+               if not Have then
+                  Regs := Cut_Things (C, Fr, Cam);
+                  Have := True;
+               end if;
+               declare
+                  Found : Boolean := False;
+                  Tol : constant Long_Float := Long_Float'Max (P.Box_W, P.Box_H) * 0.75 + Track_Win;   --  和 Retrack 同一个认领半径(比例,无量纲)
+               begin
+                  for R of Regs loop
+                     if R.Count * 3 >= P.Count and then R.Count <= P.Count * 3 and then Sqrt ((R.Cu - P.Cu) ** 2 + (R.Cv - P.Cv) ** 2) <= Tol then
+                        Found := True;
+                        if R.Cu < Track_Win or else R.Cu > 1.0 - Track_Win or else R.Cv < Track_Win or else R.Cv > 1.0 - Track_Win then
+                           Halted := True;
+                           return True;   --  快出画面了 ⇒ 停
+                        end if;
+                     end if;
+                  end loop;
+                  if not Found then
+                     Halted := True;
+                     return True;         --  看不见了 ⇒ 停
+                  end if;
+               end;
+            end if;
+         end loop;
+         return False;
+      end Watch_Things;
       Effs : Effect_Array (0 .. Natural (Pts.Length) - 1);
       Trusts : array (0 .. Natural (Pts.Length) - 1) of Table.Mask := [others => [others => True]];
       W : Monitor.Watch;
@@ -951,8 +985,12 @@ package body Act is
                Any_Blocked : Boolean := False;
                Moved : constant Boolean := True;
             begin
-               Step_Arm (L, C, F, Arm, A, Jaw, Deliv, Ok, C.Fast);
+               Halted := False;
+               Step_Arm (L, C, F, Arm, A, Jaw, Deliv, Ok, C.Fast, Watch_Things'Unrestricted_Access);
                Beats := Plug.Steps (L) - Beats0;
+               if Halted then
+                  Put_Line ("[身]     途中眼睛叫停:被跟的东西快出画面或看不见了,这一步没走完");
+               end if;
                if not Ok then
                   Event := S ("the body refused the command");
                   return;
@@ -1095,11 +1133,11 @@ package body Act is
                            Am : constant Long_Float := Long_Float'Max (1.0e-6, C.Map.Amp (Arm * Chan.Per_Arm + K));
                            Asked : constant Boolean := abs A (K) > Long_Float'Max (Cmd_Floor, C.Map.EE_Noise);
                         begin
-                           if Asked and then abs (Deliv (K) - A (K)) > 0.5 * abs A (K) then
+                           if Asked and then (not Halted) and then abs (Deliv (K) - A (K)) > 0.5 * abs A (K) then
                               Any_Wrong := True; All_Verified := False; Not_Followed := True;
                               Reach (K) := Long_Float'Max (1.0, Reach (K) * 0.5);
                               Put_Line ("[身]     通道" & Natural'Image (Arm * Chan.Per_Arm + K) & " 没照做:命令 " & Codec.Fmt (A (K), 3) & " 实到 " & Codec.Fmt (Deliv (K), 3) & " ⇒ 它的步幅缩回上一档");
-                           elsif (not Asked) and then abs Deliv (K) > 2.0 * Am then
+                           elsif (not Asked) and then (not Halted) and then abs Deliv (K) > 2.0 * Am then
                               Any_Wrong := True; All_Verified := False; Not_Followed := True;
                               Put_Line ("[身]     通道" & Natural'Image (Arm * Chan.Per_Arm + K) & " 没命令却动了 " & Codec.Fmt (Deliv (K), 3));
                            end if;
@@ -1109,7 +1147,7 @@ package body Act is
                   --  步幅按通道各自翻倍/减半:这一步用到它上限一半以上、且表报准了,它才翻倍(EI:靠平移走对了 4 步就把转动放到 16 倍,一转就把球转出视野)
                   for K in 0 .. Chan.Per_Arm - 1 loop
                      if Active (K) then
-                        if All_Verified and then abs Deliv (K) >= 0.5 * Cap (K) then
+                        if All_Verified and then (not Halted) and then abs Deliv (K) >= 0.5 * Cap (K) then
                            Reach (K) := Reach (K) * 2.0;
                         elsif Any_Wrong and then abs A (K) > Long_Float'Max (Cmd_Floor, C.Map.EE_Noise) then
                            Reach (K) := Long_Float'Max (1.0, Reach (K) * 0.5);

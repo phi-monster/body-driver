@@ -69,26 +69,39 @@ package body Selfmap is
    end Wait_Still;
 
    procedure Go (L : in out Plug.Link; M : Body_Map; Arm : Natural; Target : Plug.Arm_Pose; Jaw : Floats;
-                 F : in out Plug.Frame; Delivered : out Table.Vec; Frames : out Natural; Ok : out Boolean; Quick : Boolean := False) is
+                 F : in out Plug.Frame; Delivered : out Table.Vec; Frames : out Natural; Ok : out Boolean; Quick : Boolean := False;
+                 Watch : Watcher := null) is
       C : Plug.Cmd;
       P0 : constant Plug.Arm_Pose := (if Arm < Natural (F.EE.Length) then F.EE (Arm) else [others => 0.0]);
       Prev : Plug.Arm_Pose := P0;
       Still : Natural := 0;
+      Send : Boolean := True;
+      Halted : Boolean := False;
    begin
       Delivered := Table.Zero_Vec;
       Frames := 0;
       C.Kind := Plug.Ee; C.Arm := Arm; C.Pose := Target; C.Jaw := Jaw;
-      Ok := Plug.Act (L, C);
-      if not Ok then
-         return;
-      end if;
       loop
+         if Send then
+            Ok := Plug.Act (L, C);
+            if not Ok then
+               return;
+            end if;
+            Send := False;
+         end if;
          if not Plug.Sense (L, F) then
             Ok := False;
             return;
          end if;
          Frames := Frames + 1;
          exit when Arm >= Natural (F.EE.Length);
+         --  途中每一拍看一眼:出事就把目标改成"停在此刻的位姿",同一条发命令的路再发一次
+         if Watch /= null and then not Halted and then Watch (F) then
+            Halted := True;
+            C.Pose := F.EE (Arm);
+            Send := True;
+            Still := 0;
+         end if;
          declare
             D : constant Table.Vec := Chan.Delivered (Prev, F.EE (Arm));
             Moved_P : constant Long_Float := Table.Norm (D, 3);
