@@ -1215,26 +1215,52 @@ package body Act is
                   for I in 0 .. Natural (Pts.Length) - 1 loop
                      Store_Effect (C, Arm, Cam, Pts (I).Kind, Pts (I).Chan_K, Pts (I).Blob, Effs (I), Trusts (I), Reach);
                   end loop;
-                  --  出事立刻回去问脑(owner:脑说一句"去做,直到做成或出事",身体不许闭眼走,也不许让脑数步):认不到被跟的点 / 身体没照做
+                  --  出事只报不打断(owner 2026-09-08:八炮里"朝球靠近"没有一次连着跑过 4 下,全被这些保险掐掉,
+                  --  于是后面合手/抬起来那一整段从没执行过)。真看不见了才停 —— 连着两步全部认不到,再走就是闭眼走。
                   declare
                      All_Lost : Boolean := True;
                   begin
-                     --  一块东西有两团(两根手指),被挡住一团是常事 ⇒ 全部认不到才算看不见(EM:认出一根仍被判"看不见",每轮只走一步)
+                     --  一块东西有两团(两根手指),被挡住一团是常事 ⇒ 全部认不到才算看不见
                      for P of Pts loop
                         if not P.Lost then
                            All_Lost := False;
                         end if;
                      end loop;
                      Lost_Streak := (if All_Lost then Lost_Streak + 1 else 0);
-                     if Lost_Streak >= 1 then
-                        Event := S ("lost sight: I could not find what I am tracking in this picture after this step (it left my view or is hidden); I stopped rather than move blind");
+                     if Lost_Streak = 1 then
+                        --  第一次全丢:把这一拍的画面和切出来的块落图,好看清它是被当成了我自己、还是并成了一团
+                        if C.Dump_Dir /= "" then
+                           declare
+                              RGB : Buf := F.Cams (Cam).RGB;
+                              Cw2 : constant Natural := F.Cams (Cam).W;
+                              Ch2 : constant Natural := F.Cams (Cam).H;
+                              Regs : constant Picture.Regions := Cut_Things (C, F, Cam);
+                              N : Natural := 0;
+                           begin
+                              for R of Regs loop
+                                 N := N + 1;
+                                 Draw.Numbered_Box (RGB, Cw2, Ch2, R.X0, R.Y0, R.X1, R.Y1, N, Draw.Green, 2);
+                              end loop;
+                              for P of Pts loop
+                                 Draw.Numbered_Box (RGB, Cw2, Ch2,
+                                                    Natural (Long_Float'Max (0.0, (P.Cu - 0.02) * Long_Float (Cw2))),
+                                                    Natural (Long_Float'Max (0.0, (P.Cv - 0.02) * Long_Float (Ch2))),
+                                                    Natural (Long_Float'Min (Long_Float (Cw2 - 1), (P.Cu + 0.02) * Long_Float (Cw2))),
+                                                    Natural (Long_Float'Min (Long_Float (Ch2 - 1), (P.Cv + 0.02) * Long_Float (Ch2))),
+                                                    0, Draw.Pink, 2);
+                              end loop;
+                              Codec.Write_BMP (To_String (C.Dump_Dir) & "/lost_" & Codec.Pad6 (C.Round_N) & "_" & Codec.Pad6 (Steps_Taken) & ".bmp", RGB, Cw2, Ch2);
+                              Put_Line ("[身]     全丢了:这一拍的画面和切出来的" & Natural'Image (N) & " 块落图 lost_" & Codec.Pad6 (C.Round_N) & "_" & Codec.Pad6 (Steps_Taken) & ".bmp");
+                           end;
+                        end if;
+                     end if;
+                     if Lost_Streak >= 2 then
+                        Event := S ("lost sight: two steps in a row I could not find what I am tracking in this picture; I stopped rather than move blind");
                         Beats := Plug.Steps (L) - Beats0;
                         return;
                      end if;
                      if Not_Followed then
-                        Event := S ("not followed: the body did not do what I commanded on this step (asked one thing, got another); I stopped with a smaller stride ready");
-                        Beats := Plug.Steps (L) - Beats0;
-                        return;
+                        Put_Line ("[身]     没照做这一步不算数,步幅已缩回;接着走");
                      end if;
                   end;
                end;
