@@ -6,13 +6,14 @@ with Selfmap;
 with Zone;
 with Act;
 with Plug;
+with Schema;
 package Bodyfile is
    function Fingerprint (L : Plug.Link; F : Plug.Frame) return String;
    --  读回:钥匙对得上才装;返回是否装上了。装回的 M 里 History 带着历次读数(取中位数当现值)。
    function Load (Path : String; Key : String; M : in out Selfmap.Body_Map; Hands : in out Zone.Hand_Vectors.Vector;
-                  Tables : in out Act.Effect_Vectors.Vector; Note : out Unbounded_String) return Boolean;
+                  Tables : in out Act.Effect_Vectors.Vector; Sch : in out Schema.Map; Note : out Unbounded_String) return Boolean;
    --  写盘:把这一次量到的合进历史再写(每格最多留 History_Depth 次)。
-   procedure Save (Path : String; Key : String; M : Selfmap.Body_Map; Hands : Zone.Hand_Vectors.Vector; Tables : Act.Effect_Vectors.Vector);
+   procedure Save (Path : String; Key : String; M : Selfmap.Body_Map; Hands : Zone.Hand_Vectors.Vector; Tables : Act.Effect_Vectors.Vector; Sch : Schema.Map);
    --  把新量到的一次合进 M(通道幅度/实到取历次中位数;噪声地板取历次最大 —— 只放大不缩小)
    procedure Merge (Stored, Fresh : Selfmap.Body_Map; Merged : out Selfmap.Body_Map; Replaced, Kept : out Natural);
    History_Depth : constant := 7;    --  每格留几次(次数,无量纲)

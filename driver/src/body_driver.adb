@@ -14,6 +14,7 @@ with Act;
 with Bodyfile;
 with Bytes;
 with Picture;
+with Schema;
 procedure Body_Driver is
    Port : Natural := 0;
    Body_Path : Unbounded_String;   --  身体文件(--in/--out;同一具身体越用越强)
@@ -84,12 +85,13 @@ begin
       Stored : Selfmap.Body_Map;
       Stored_Hands : Zone.Hand_Vectors.Vector;
       Stored_Tables : Act.Effect_Vectors.Vector;
+      Stored_Sch : Schema.Map;
       Note : Unbounded_String;
       Loaded : Boolean := False;
       Use_Stored : Boolean := False;
    begin
       if Body_Path /= "" then
-         Loaded := Bodyfile.Load (To_String (Body_Path), Key, Stored, Stored_Hands, Stored_Tables, Note);
+         Loaded := Bodyfile.Load (To_String (Body_Path), Key, Stored, Stored_Hands, Stored_Tables, Stored_Sch, Note);
          Put_Line ("[装] " & To_String (Note));
       end if;
       if Loaded then
@@ -121,6 +123,7 @@ begin
       if Use_Stored then
          C.Map := Stored;
          C.Tables := Stored_Tables;
+         C.Sch := Stored_Sch;   --  身体没变 ⇒ 身体图照用(位姿 → 手指在画面哪儿)
       else
          Selfmap.Measure (L, F, C.Map, Ok);
          if not Ok then
@@ -174,11 +177,26 @@ begin
                   end if;
                end;
             end if;
+            --  合空那一下真看见了手指 ⇒ 记进身体图:这个位姿下,这只手在每台(不长在它上面的)相机里在哪
+            for Cm in 0 .. Natural (H.Zones.Length) - 1 loop
+               if A < Natural (C.Map.Cam_On_Arm.Length) and then C.Map.Cam_On_Arm (A) /= Integer (Cm) and then H.Zones (Cm).Valid and then A < Natural (F.EE.Length) then
+                  declare
+                     Z : constant Zone.Hand_Zone := H.Zones (Cm);
+                     X : Schema.Sample;
+                  begin
+                     X.Arm := A; X.Cam := Cm; X.Pose := F.EE (A); X.N_Lobes := Z.N_Lobes;
+                     X.Au := Z.A.Cu; X.Av := Z.A.Cv; X.Bu := Z.B.Cu; X.Bv := Z.B.Cv; X.Cu := Z.Cu; X.Cv := Z.Cv;
+                     X.Z := (if Picture.Is_Nan (Z.Depth) then 0.0 else Z.Depth);
+                     Schema.Add (C.Sch, X, C.Map.EE_Noise, C.Map.Rot_Noise);
+                  end;
+               end if;
+            end loop;
             C.Hands.Append (H);
          end;
       end loop;
+      Put_Line ("[装] 身体图:" & Codec.Img (Natural (C.Sch.S.Length)) & " 个样本(位姿 → 手指在画面哪儿;只存真看见过的)");
       if Body_Path /= "" then
-         Bodyfile.Save (To_String (Body_Path), Key, C.Map, C.Hands, C.Tables);
+         Bodyfile.Save (To_String (Body_Path), Key, C.Map, C.Hands, C.Tables, C.Sch);
          Put_Line ("[装] 身体写进 " & To_String (Body_Path) & "(量过 " & Codec.Img (C.Map.Measured_Times) & " 次)");
       end if;
    end;
@@ -221,7 +239,7 @@ begin
       else
          Act.Round (L, F, C);
          if Body_Path /= "" then
-            Bodyfile.Save (To_String (Body_Path), Bodyfile.Fingerprint (L, F), C.Map, C.Hands, C.Tables);
+            Bodyfile.Save (To_String (Body_Path), Bodyfile.Fingerprint (L, F), C.Map, C.Hands, C.Tables, C.Sch);
          end if;
       end if;
    end loop;

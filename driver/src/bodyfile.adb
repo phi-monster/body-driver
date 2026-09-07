@@ -53,7 +53,7 @@ package body Bodyfile is
       return Picture.Quantile (C, 0.5);
    end Median;
 
-   procedure Save (Path : String; Key : String; M : Selfmap.Body_Map; Hands : Zone.Hand_Vectors.Vector; Tables : Act.Effect_Vectors.Vector) is
+   procedure Save (Path : String; Key : String; M : Selfmap.Body_Map; Hands : Zone.Hand_Vectors.Vector; Tables : Act.Effect_Vectors.Vector; Sch : Schema.Map) is
       B : Unbounded_String;
       Seen : Ints;
    begin
@@ -133,6 +133,20 @@ package body Bodyfile is
             Append (B, "],""reach"":" & Codec.Fmt (T.Reach, 3) & "}");
          end;
       end loop;
+      --  身体图:只存真看见过的样本(位姿 + 瓣位置 + 深度)
+      Append (B, "],""schema"":[");
+      for I in 0 .. Natural (Sch.S.Length) - 1 loop
+         declare
+            X : constant Schema.Sample := Sch.S (I);
+         begin
+            Append (B, (if I > 0 then "," else "") & "{""arm"":" & Codec.Img (X.Arm) & ",""cam"":" & Codec.Img (X.Cam) & ",""pose"":[");
+            for K in 0 .. 6 loop
+               Append (B, (if K > 0 then "," else "") & Codec.Fmt (X.Pose (K), 6));
+            end loop;
+            Append (B, "],""n"":" & Codec.Img (X.N_Lobes) & ",""a"":[" & Codec.Fmt (X.Au, 5) & "," & Codec.Fmt (X.Av, 5) & "],""b"":[" & Codec.Fmt (X.Bu, 5) & "," & Codec.Fmt (X.Bv, 5) &
+                    "],""c"":[" & Codec.Fmt (X.Cu, 5) & "," & Codec.Fmt (X.Cv, 5) & "],""z"":" & Codec.Fmt (X.Z, 5) & "}");
+         end;
+      end loop;
       Append (B, "]}");
       declare
          Dir : constant String := Ada.Directories.Containing_Directory (Path);
@@ -148,7 +162,7 @@ package body Bodyfile is
 
    --  ── 读 ──
    function Load (Path : String; Key : String; M : in out Selfmap.Body_Map; Hands : in out Zone.Hand_Vectors.Vector;
-                  Tables : in out Act.Effect_Vectors.Vector; Note : out Unbounded_String) return Boolean is
+                  Tables : in out Act.Effect_Vectors.Vector; Sch : in out Schema.Map; Note : out Unbounded_String) return Boolean is
       D : Json.Doc;
       Err : Unbounded_String;
       Text : Unbounded_String;
@@ -309,8 +323,38 @@ package body Bodyfile is
                end;
             end loop;
          end;
+         --  身体图(旧文件没有这一节 ⇒ 空)
+         Sch.S.Clear;
+         declare
+            Ss : constant Integer := Json.Get (D, 0, "schema");
+         begin
+            if Ss >= 0 then
+               for I in 0 .. Json.Count (D, Ss) - 1 loop
+                  declare
+                     Sn : constant Integer := Json.Child (D, Ss, I);
+                     X : Schema.Sample;
+                     Pv : constant Floats := Arr (Json.Get (D, Sn, "pose"));
+                     Av : constant Floats := Arr (Json.Get (D, Sn, "a"));
+                     Bv : constant Floats := Arr (Json.Get (D, Sn, "b"));
+                     Cv : constant Floats := Arr (Json.Get (D, Sn, "c"));
+                  begin
+                     X.Arm := Natural (Json.Num (D, Json.Get (D, Sn, "arm")));
+                     X.Cam := Natural (Json.Num (D, Json.Get (D, Sn, "cam")));
+                     X.N_Lobes := Natural (Json.Num (D, Json.Get (D, Sn, "n")));
+                     X.Z := Json.Num (D, Json.Get (D, Sn, "z"));
+                     if Natural (Pv.Length) = 7 and then Natural (Av.Length) = 2 and then Natural (Bv.Length) = 2 and then Natural (Cv.Length) = 2 then
+                        for K in 0 .. 6 loop
+                           X.Pose (K) := Pv (K);
+                        end loop;
+                        X.Au := Av (0); X.Av := Av (1); X.Bu := Bv (0); X.Bv := Bv (1); X.Cu := Cv (0); X.Cv := Cv (1);
+                        Sch.S.Append (X);
+                     end if;
+                  end;
+               end loop;
+            end if;
+         end;
       end;
-      Note := To_Unbounded_String ("装回身体文件(量过 " & Codec.Img (M.Measured_Times) & " 次)");
+      Note := To_Unbounded_String ("装回身体文件(量过 " & Codec.Img (M.Measured_Times) & " 次,身体图 " & Codec.Img (Natural (Sch.S.Length)) & " 个样本)");
       return True;
    exception
       when others =>

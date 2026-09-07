@@ -45,6 +45,9 @@ package body Act is
             begin
                T.Valid := Z.Valid;
                T.Cu := Z.Cu; T.Cv := Z.Cv; T.Z := Z.Depth;
+               T.Au := Z.A.Cu; T.Av := Z.A.Cv; T.Bu := Z.B.Cu; T.Bv := Z.B.Cv;
+               T.Has_Lobes := Z.Valid and then Z.N_Lobes >= 1;
+               T.Known := Z.Valid;
                C.Zones.Append (T);
             end;
          end loop;
@@ -171,18 +174,22 @@ package body Act is
             Dv : constant Long_Float := (if Own_Cam then 0.0 else Tr.Cv - Z.Cv);
             procedure Finger (Lb : Zone.Lobe; Which : Natural) is
                It : Item;
+               --  这一瓣挪了多少:身体图给了各瓣位置就按瓣,否则整区平移
+               Lu : constant Long_Float := (if Own_Cam then 0.0 elsif Tr.Has_Lobes then (if Which = 0 then Tr.Au else Tr.Bu) - Lb.Cu else Du);
+               Lv : constant Long_Float := (if Own_Cam then 0.0 elsif Tr.Has_Lobes then (if Which = 0 then Tr.Av else Tr.Bv) - Lb.Cv else Dv);
             begin
                It.Kind := Finger; It.Arm := A; It.Which := Which;
                if Z.Valid and then Lb.Valid and then Tr.Valid then
                   It.Located := True;
-                  It.Cu := Lb.Cu + Du; It.Cv := Lb.Cv + Dv;
-                  It.X0 := Natural (Long_Float'Max (0.0, Long_Float (Lb.X0) + Du * Long_Float (Cw)));
-                  It.X1 := Natural (Long_Float'Max (0.0, Long_Float'Min (Long_Float (Cw - 1), Long_Float (Lb.X1) + Du * Long_Float (Cw))));
-                  It.Y0 := Natural (Long_Float'Max (0.0, Long_Float (Lb.Y0) + Dv * Long_Float (Ch)));
-                  It.Y1 := Natural (Long_Float'Max (0.0, Long_Float'Min (Long_Float (Ch - 1), Long_Float (Lb.Y1) + Dv * Long_Float (Ch))));
+                  It.Cu := Lb.Cu + Lu; It.Cv := Lb.Cv + Lv;
+                  It.X0 := Natural (Long_Float'Max (0.0, Long_Float (Lb.X0) + Lu * Long_Float (Cw)));
+                  It.X1 := Natural (Long_Float'Max (0.0, Long_Float'Min (Long_Float (Cw - 1), Long_Float (Lb.X1) + Lu * Long_Float (Cw))));
+                  It.Y0 := Natural (Long_Float'Max (0.0, Long_Float (Lb.Y0) + Lv * Long_Float (Ch)));
+                  It.Y1 := Natural (Long_Float'Max (0.0, Long_Float'Min (Long_Float (Ch - 1), Long_Float (Lb.Y1) + Lv * Long_Float (Ch))));
                   It.Depth := Tr.Z; It.Count := Lb.Count;
                   Push (It, "a finger of arm " & Codec.Img (A + 1) & " (it moves when that arm's grip channel moves), now in cell " &
-                        Codec.Img (Cell_Of (C, It.Cu, It.Cv)) & Rel (It.Cu, It.Cv), Draw.Orange, 2);
+                        Codec.Img (Cell_Of (C, It.Cu, It.Cv)) & Rel (It.Cu, It.Cv) &
+                        (if Own_Cam or else Tr.Known then "" else " (placed from my joints; I have not yet looked at my hand here)"), Draw.Orange, 2);
                else
                   Push (It, "a finger of arm " & Codec.Img (A + 1) & " - NOT locatable in this picture right now, do not name it", Draw.Orange, 0);
                end if;
@@ -297,10 +304,12 @@ package body Act is
       Height : Long_Float := 0.0;
       Err0 : Long_Float := 0.0;
       Lost : Boolean := False;   --  这一步没在画面里认出它,位置是按表猜的
+      Has_Meas : Boolean := False;              --  眼睛(光流)另外量到的位置,只用来修表
+      Meas_U, Meas_V, Meas_Z : Long_Float := 0.0;
    end record;
    package Point_Vectors is new Ada.Containers.Vectors (Natural, Point);
    type Effect_Array is array (Natural range <>) of Table.Effect;
-   procedure Refind_Fingers (L : in out Plug.Link; C : Context; F : in out Plug.Frame; Cam : Natural; Pts : in out Point_Vectors.Vector);
+   procedure Refind_Fingers (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Cam : Natural; Pts : in out Point_Vectors.Vector);
 
    function Err_Of (P : Point) return Long_Float is
       Dz : constant Long_Float := (if P.Wz > 0.0 and then P.Z > 0.0 then (P.Tz - P.Z) / P.Z else 0.0);
@@ -328,6 +337,66 @@ package body Act is
          C.Tables.Append (Se);
       end if;
    end Store_Effect;
+
+   --  感觉:按此刻的位姿,从身体图算出每只手在每台(不长在它上面的)相机里的两瓣位置 —— 不看画面。
+   --  Known = 离最近的真看过的样本不超过一步核实过的步幅;超了就是生地,走过去要看一眼(抖手指)。
+   procedure Feel (C : in out Context; F : Plug.Frame) is
+      function Clamp (X : Long_Float) return Long_Float is (Long_Float'Max (0.0, Long_Float'Min (1.0, X)));
+   begin
+      for A in 0 .. C.Map.Arms - 1 loop
+         for Cm in 0 .. C.Map.N_Cams - 1 loop
+            if Cam_Arm (C, Cm) /= Integer (A) and then A < Natural (F.EE.Length) and then Track_Idx (C, A, Cm) < Natural (C.Zones.Length) then
+               declare
+                  Diff : Table.Vec;
+                  Dist : Long_Float;
+                  Si : constant Integer := Schema.Nearest (C.Sch, A, Cm, F.EE (A), C.Map.Amp, Chan.Per_Arm, Diff, Dist);
+               begin
+                  if Si >= 0 then
+                     declare
+                        Sm : constant Schema.Sample := C.Sch.S (Natural (Si));
+                        Tr : Zone_Track := C.Zones (Track_Idx (C, A, Cm));
+                        Reach : Long_Float := 1.0;
+                        function Shift (Lobe : Integer) return Table.Vec3 is
+                           Idx : Integer := Find_Effect (C, A, Cm, Zone_Pt, Lobe);
+                        begin
+                           if Idx < 0 then
+                              Idx := Find_Effect (C, A, Cm, Zone_Pt, -1);
+                           end if;
+                           if Idx >= 0 then
+                              Reach := Long_Float'Max (Reach, C.Tables (Natural (Idx)).Reach);
+                              return Table.Predict (C.Tables (Natural (Idx)).E, Diff);
+                           end if;
+                           return Table.Zero3;
+                        end Shift;
+                        Sa : constant Table.Vec3 := Shift (0);
+                        Sb : constant Table.Vec3 := Shift (1);
+                     begin
+                        Tr.Valid := True;
+                        Tr.Au := Clamp (Sm.Au + Sa (0)); Tr.Av := Clamp (Sm.Av + Sa (1));
+                        Tr.Bu := Clamp (Sm.Bu + Sb (0)); Tr.Bv := Clamp (Sm.Bv + Sb (1));
+                        Tr.Has_Lobes := Sm.N_Lobes >= 1;
+                        if Sm.N_Lobes >= 2 then
+                           Tr.Cu := (Tr.Au + Tr.Bu) / 2.0; Tr.Cv := (Tr.Av + Tr.Bv) / 2.0;
+                        else
+                           Tr.Cu := Tr.Au; Tr.Cv := Tr.Av;
+                        end if;
+                        if Sm.Z > 0.0 then
+                           Tr.Z := Sm.Z + (if Sm.N_Lobes >= 2 then (Sa (2) + Sb (2)) / 2.0 else Sa (2));
+                        end if;
+                        Tr.Known := True;
+                        for K in 0 .. Chan.Per_Arm - 1 loop
+                           if abs Diff (K) > Long_Float'Max (1.0e-6, C.Map.Amp (A * Chan.Per_Arm + K)) * Cap_Mult * Reach then
+                              Tr.Known := False;
+                           end if;
+                        end loop;
+                        C.Zones.Replace_Element (Track_Idx (C, A, Cm), Tr);
+                     end;
+                  end if;
+               end;
+            end if;
+         end loop;
+      end loop;
+   end Feel;
 
    --  重新定位一个点:握区靠光流平流(世界相机)/固定(自己的手上相机);世界块重切后就近对上
    procedure Retrack (C : in out Context; F : Plug.Frame; Cam : Natural; Before : Buf; P : in out Point; Pred_U, Pred_V : Long_Float; Moved_Arm : Boolean; Pred_Z : Long_Float := -1.0) is
@@ -587,8 +656,10 @@ package body Act is
                for Lb in 0 .. 1 loop
                   declare
                      Q : Point := P;
-                     Ou : constant Long_Float := (if Lb = 0 then Z.A.Cu else Z.B.Cu) - Z.Cu;
-                     Ov : constant Long_Float := (if Lb = 0 then Z.A.Cv else Z.B.Cv) - Z.Cv;
+                     Tr : constant Zone_Track := C.Zones (Track_Idx (C, P.Arm, Cam));
+                     --  瓣相对区心的偏移:身体图给了此刻各瓣位置就用它(转过的手瓣也跟着转),否则用开机量的
+                     Ou : constant Long_Float := (if Tr.Has_Lobes then (if Lb = 0 then Tr.Au else Tr.Bu) - Tr.Cu else (if Lb = 0 then Z.A.Cu else Z.B.Cu) - Z.Cu);
+                     Ov : constant Long_Float := (if Tr.Has_Lobes then (if Lb = 0 then Tr.Av else Tr.Bv) - Tr.Cv else (if Lb = 0 then Z.A.Cv else Z.B.Cv) - Z.Cv);
                      Zd : Long_Float := P.Z;
                   begin
                      Q.Lobe := Lb;
@@ -817,21 +888,68 @@ package body Act is
                   All_Verified : Boolean := True;
                   Any_Wrong : Boolean := False;
                begin
-                  --  ① 认位置:小步靠光流/重切;大步里世界相机的握区点先按表放到预测处,再抖手指认
+                  --  ① 认位置。我的手指(世界相机里):先"感觉"—— 按此刻位姿从身体图算;熟地只让眼睛核对一下(光流),
+                  --     生地或大步就去看(抖手指,看完记进图)。世界里的块:每步重切就近对上。
                   for I in 0 .. Natural (Pts.Length) - 1 loop
                      declare
                         P : Point := Pts (I);
                         Pr : constant Table.Vec3 := Table.Predict (Effs (I), Deliv);
                         W0 : constant Point := Was (I);
                      begin
-                        if Jump and then P.Kind = Zone_Pt and then Cam_Arm (C, Cam) /= Integer (P.Arm) then
-                           P.Cu := Long_Float'Max (0.0, Long_Float'Min (1.0, W0.Cu + Pr (0)));
-                           P.Cv := Long_Float'Max (0.0, Long_Float'Min (1.0, W0.Cv + Pr (1)));
-                           if W0.Z > 0.0 then
-                              P.Z := W0.Z + Pr (2);
-                           end if;
-                           P.Lost := True;
-                           Need_Refind := True;
+                        P.Has_Meas := False;
+                        if P.Kind = Zone_Pt and then Cam_Arm (C, Cam) /= Integer (P.Arm) then
+                           declare
+                              Diff : Table.Vec;
+                              Dist : Long_Float;
+                              Si : constant Integer := Schema.Nearest (C.Sch, P.Arm, Cam, F.EE (P.Arm), C.Map.Amp, Chan.Per_Arm, Diff, Dist);
+                              Familiar : Boolean := False;
+                           begin
+                              if Si >= 0 then
+                                 declare
+                                    Sm : constant Schema.Sample := C.Sch.S (Natural (Si));
+                                    Pm : constant Table.Vec3 := Table.Predict (Effs (I), Diff);
+                                    Su : constant Long_Float := (if P.Lobe = 1 then Sm.Bu elsif P.Lobe = 0 then Sm.Au else Sm.Cu);
+                                    Sv : constant Long_Float := (if P.Lobe = 1 then Sm.Bv elsif P.Lobe = 0 then Sm.Av else Sm.Cv);
+                                 begin
+                                    P.Cu := Long_Float'Max (0.0, Long_Float'Min (1.0, Su + Pm (0)));
+                                    P.Cv := Long_Float'Max (0.0, Long_Float'Min (1.0, Sv + Pm (1)));
+                                    if Sm.Z > 0.0 then
+                                       P.Z := Sm.Z + Pm (2);
+                                    end if;
+                                    Familiar := True;
+                                    for K in 0 .. Chan.Per_Arm - 1 loop
+                                       if abs Diff (K) > Long_Float'Max (1.0e-6, C.Map.Amp (P.Arm * Chan.Per_Arm + K)) * Cap_Mult * Reach then
+                                          Familiar := False;
+                                       end if;
+                                    end loop;
+                                 end;
+                              else
+                                 P.Cu := Long_Float'Max (0.0, Long_Float'Min (1.0, W0.Cu + Pr (0)));
+                                 P.Cv := Long_Float'Max (0.0, Long_Float'Min (1.0, W0.Cv + Pr (1)));
+                                 if W0.Z > 0.0 then
+                                    P.Z := W0.Z + Pr (2);
+                                 end if;
+                              end if;
+                              if Jump or else not Familiar then
+                                 P.Lost := True;
+                                 Need_Refind := True;
+                              else
+                                 declare
+                                    Q : Point := W0;
+                                    Z : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, Cam);
+                                 begin
+                                    Retrack (C, F, Cam, Before, Q, W0.Cu + Pr (0), W0.Cv + Pr (1), Moved, (if W0.Z > 0.0 then W0.Z + Pr (2) else -1.0));
+                                    --  眼睛和图对不上(差过张幅的四分之一,比例,无量纲;再小也有两个跟踪地板)⇒ 去看
+                                    if Q.Lost or else Sqrt ((Q.Cu - P.Cu) ** 2 + (Q.Cv - P.Cv) ** 2) > Long_Float'Max (Z.Span * 0.25, Fl.Track * 2.0) then
+                                       P.Lost := True;
+                                       Need_Refind := True;
+                                    else
+                                       P.Lost := False;
+                                       P.Has_Meas := True; P.Meas_U := Q.Cu; P.Meas_V := Q.Cv; P.Meas_Z := Q.Z;
+                                    end if;
+                                 end;
+                              end if;
+                           end;
                         else
                            Retrack (C, F, Cam, Before, P, W0.Cu + Pr (0), W0.Cv + Pr (1), Moved, (if W0.Z > 0.0 then W0.Z + Pr (2) else -1.0));
                         end if;
@@ -854,8 +972,10 @@ package body Act is
                            All_Verified := False;
                            Any_Wrong := True;
                         else
-                           Dy (0) := P.Cu - W0.Cu; Dy (1) := P.Cv - W0.Cv;
-                           Dy (2) := (if P.Z > 0.0 and then W0.Z > 0.0 then P.Z - W0.Z else 0.0);
+                           --  修表只用眼睛量到的(光流核对值或抖手指认到的),按图猜的位置不喂回表
+                           Dy (0) := (if P.Has_Meas then P.Meas_U else P.Cu) - W0.Cu; Dy (1) := (if P.Has_Meas then P.Meas_V else P.Cv) - W0.Cv;
+                           Dy (2) := (if P.Has_Meas then (if P.Meas_Z > 0.0 and then W0.Z > 0.0 then P.Meas_Z - W0.Z else 0.0)
+                                      elsif P.Z > 0.0 and then W0.Z > 0.0 then P.Z - W0.Z else 0.0);
                            Table.Update (E, Deliv, Dy, Fl.Track * 2.0, Long_Float'Max (C.Map.EE_Noise, 0.5 * Cmd_Floor));
                            if Table.Blocked (E) then
                               Any_Blocked := True;
@@ -916,37 +1036,6 @@ package body Act is
       Event := S ("steps: hit the step cap (" & Codec.Img (Steps_Taken) & ")");
    end Run_Segment;
 
-   --  一段走完:握区的跟踪位置 = 这只手各瓣点的均值(区心),深度取最近的那一瓣
-   procedure Sync_Zone_Track (C : in out Context; Cam : Natural; Pts : Point_Vectors.Vector) is
-      Su, Sv, N : Long_Float := 0.0;
-      Zmin : Long_Float := 1.0e30;
-      Arm : Integer := -1;
-   begin
-      for P of Pts loop
-         if P.Kind = Zone_Pt then
-            Arm := Integer (P.Arm);
-            Su := Su + P.Cu; Sv := Sv + P.Cv; N := N + 1.0;
-            if P.Z > 0.0 then
-               Zmin := Long_Float'Min (Zmin, P.Z);
-            end if;
-         end if;
-      end loop;
-      if Arm >= 0 and then N > 0.0 and then Cam_Arm (C, Cam) /= Arm then
-         declare
-            Idx : constant Natural := Track_Idx (C, Natural (Arm), Cam);
-            Tr : Zone_Track := C.Zones (Idx);
-         begin
-            Tr.Cu := Su / N; Tr.Cv := Sv / N;
-            --  1e29 = "没读到"的哨兵(无量纲)
-            if Zmin < 1.0e29 then
-               Tr.Z := Zmin;
-            end if;
-            Tr.Valid := True;
-            C.Zones.Replace_Element (Idx, Tr);
-         end;
-      end if;
-   end Sync_Zone_Track;
-
    --  合/张:最多 Max_Iter 拍,或到画面不再变;Sweep_Cam >= 0 时把那台相机里动过的像素累进 Sweep(手指自己扫过的地方)
    procedure Jaw_Sweep (L : in out Plug.Link; C : Context; F : in out Plug.Frame; Arm : Natural; Target : Long_Float; Max_Iter : Natural;
                         Sweep_Cam : Integer; Sweep : in out Bools; Steps : out Natural; Reading : out Long_Float) is
@@ -988,7 +1077,7 @@ package body Act is
 
    --  大步之后在世界相机里重新找到自己的手指:手指抖一下(合几拍再张回来),动过的像素就是手指;每一瓣认离预测最近的那团。
    --  抖的幅度不是常数:合"量出来的稳定拍数"那么久,再张回原读数。认不到的瓣留预测、记 Lost。
-   procedure Refind_Fingers (L : in out Plug.Link; C : Context; F : in out Plug.Frame; Cam : Natural; Pts : in out Point_Vectors.Vector) is
+   procedure Refind_Fingers (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Cam : Natural; Pts : in out Point_Vectors.Vector) is
       Arm : constant Natural := Pts (0).Arm;
       Cw : constant Natural := F.Cams (Cam).W;
       Ch : constant Natural := F.Cams (Cam).H;
@@ -1043,8 +1132,41 @@ package body Act is
             end if;
          end;
       end loop;
-      Put_Line ("[身]     大步之后抖手指认自己:动过的像素成" & Natural'Image (Natural (Regs.Length)) & " 团 ⇒ " &
-                (if Pts (0).Lost then "没认到,按表猜" else "认到了 (" & Codec.Fmt (Pts (0).Cu, 3) & "," & Codec.Fmt (Pts (0).Cv, 3) & ") 深 " & Codec.Fmt (Pts (0).Z, 3)));
+      --  全认到了 ⇒ 记进身体图:这个位姿下手指在这台相机里就在这儿(下次到这附近不用看)
+      declare
+         X : Schema.Sample;
+         All_Found : Boolean := True;
+         N, Nz : Natural := 0;
+         Zmin : Long_Float := 1.0e30;   --  哨兵(无量纲)
+      begin
+         X.Arm := Arm; X.Cam := Cam; X.Pose := F.EE (Arm);
+         for P of Pts loop
+            if P.Kind = Zone_Pt then
+               if P.Lost then
+                  All_Found := False;
+               end if;
+               N := N + 1;
+               X.Cu := X.Cu + P.Cu; X.Cv := X.Cv + P.Cv;
+               if P.Lobe = 1 then
+                  X.Bu := P.Cu; X.Bv := P.Cv;
+               else
+                  X.Au := P.Cu; X.Av := P.Cv;
+               end if;
+               if P.Z > 0.0 then
+                  Zmin := Long_Float'Min (Zmin, P.Z); Nz := Nz + 1;
+               end if;
+            end if;
+         end loop;
+         if All_Found and then N > 0 then
+            X.Cu := X.Cu / Long_Float (N); X.Cv := X.Cv / Long_Float (N);
+            X.N_Lobes := N;
+            X.Z := (if Nz > 0 then Zmin else 0.0);
+            Schema.Add (C.Sch, X, C.Map.EE_Noise, C.Map.Rot_Noise);
+         end if;
+      end;
+      Put_Line ("[身]     生地/大步之后抖手指认自己:动过的像素成" & Natural'Image (Natural (Regs.Length)) & " 团 ⇒ " &
+                (if Pts (0).Lost then "没认到,按图猜" else "认到了 (" & Codec.Fmt (Pts (0).Cu, 3) & "," & Codec.Fmt (Pts (0).Cv, 3) & ") 深 " & Codec.Fmt (Pts (0).Z, 3) &
+                 ",记进身体图(这台相机里这只手已有 " & Codec.Img (Schema.Count (C.Sch, Arm, Cam)) & " 个样本)"));
    end Refind_Fingers;
 
    --  握住了没:抬一小截,看东西跟不跟我走。手上相机里 = 它的块还在握区框里;世界相机里 = 它原来那块地方空了。读数不算数(回声)。
@@ -1116,6 +1238,7 @@ package body Act is
    begin
       C.Round_N := C.Round_N + 1;
       C.Cam := Cam;
+      Feel (C, F);   --  先感觉手在哪(按位姿查身体图),不看
       --  切块 → 世界槽
       World.Observe (C.Wld, Cam, Cut_Things (C, F, Cam), Cw, Ch);
       Draw.Grid (RGB, Cw, Ch, C.Cols, C.Rows, C.Cells_U, C.Cells_V);
@@ -1367,7 +1490,7 @@ package body Act is
             end loop;
             Put_Line ("[身] ⚙ 一起解" & Natural'Image (Natural (Pts.Length)) & " 条:" & To_String (Desc));
             Run_Segment (L, C, F, Cam, Pts, Until_K, Step_Limit, Amount, Avoid, Event, Steps_Taken, Blocked, Beats);
-            Sync_Zone_Track (C, Cam, Pts);
+            Feel (C, F);
             Report := Report & "you asked " & Desc & ": " & Event & ". I took " & Codec.Img (Steps_Taken) & " pushes; ";
             Put_Line ("[身]   这一段:" & Codec.Img (Steps_Taken) & " 推 · " & Codec.Img (Beats) & " 拍 · 这一集累计 " & Codec.Img (Plug.Steps (L)) & " 拍");
             for P of Pts loop

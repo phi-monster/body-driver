@@ -12,6 +12,9 @@ with Backup;
 with Flow;
 with GNAT.SHA1;
 with Zone;
+with Schema;
+with Plug;
+with Table;
 with Ada.Containers;
 with Interfaces; use type Interfaces.Unsigned_8;
 procedure Selfcheck is
@@ -249,6 +252,30 @@ begin
       Check (abs (Z.Span - 40.0 / 64.0) < 0.06, "握区:张幅 " & Codec.Fmt (Z.Span, 3) & "(该 ≈ 0.625)");
       Check (abs (Z.Depth - 0.2) < 1.0e-6, "握区:手指深 " & Codec.Fmt (Z.Depth, 3));
       Check (Z.X0 >= 10 and then Z.X1 <= 53, "握区:区框在两瓣之间 " & Codec.Img (Z.X0) & ".." & Codec.Img (Z.X1));
+   end;
+   --  身体图:最近样本按探针幅度归一;同位姿(噪声内)再看一次 = 顶替不是新增
+   declare
+      M : Schema.Map;
+      X : Schema.Sample;
+      Amp : Floats;
+      Diff : Table.Vec;
+      Dist : Long_Float;
+      N : Integer;
+   begin
+      for I in 1 .. 6 loop
+         Amp.Append (0.01);
+      end loop;
+      X.Arm := 0; X.Cam := 0; X.Pose := [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]; X.N_Lobes := 2; X.Au := 0.3; X.Av := 0.5;
+      Schema.Add (M, X, 1.0e-3, 1.0e-3);
+      X.Pose (0) := 0.1; X.Au := 0.5;
+      Schema.Add (M, X, 1.0e-3, 1.0e-3);
+      N := Schema.Nearest (M, 0, 0, [0.09, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0], Amp, 6, Diff, Dist);
+      Check (N = 1 and then abs (Diff (0) + 0.01) < 1.0e-9 and then abs (Dist - 1.0) < 1.0e-6, "身体图:最近样本是 x=0.1 那个,差 -0.01 = 一个探针幅度(" & Codec.Fmt (Dist, 3) & ")");
+      X.Pose (0) := 0.1 + 1.0e-5; X.Au := 0.51;
+      Schema.Add (M, X, 1.0e-3, 1.0e-3);
+      Check (Schema.Count (M, 0, 0) = 2 and then abs (M.S (1).Au - 0.51) < 1.0e-9, "身体图:同位姿再看一次 = 顶替(仍 2 个样本,新值 0.51)");
+      N := Schema.Nearest (M, 1, 0, [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0], Amp, 6, Diff, Dist);
+      Check (N = -1, "身体图:别的手没有样本 ⇒ -1");
    end;
    --  BMP 头
    declare

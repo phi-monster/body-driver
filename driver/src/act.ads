@@ -12,6 +12,7 @@ with Brain;
 with Picture;
 with Table;
 with Memory;
+with Schema;
 package Act is
    type Item_Kind is (Finger, Grip, Thing, Thing_Remembered, Thing_Held);
    type Item is record
@@ -41,6 +42,9 @@ package Act is
       Valid : Boolean := False;
       Cu, Cv, Z : Long_Float := 0.0;
       Stale : Natural := 0;
+      Au, Av, Bu, Bv : Long_Float := 0.0;   --  两瓣各自的位置(从身体图按此刻位姿算出)
+      Has_Lobes : Boolean := False;
+      Known : Boolean := False;             --  此刻位姿离某个真看过的样本不超过一步核实过的步幅 ⇒ 不用看就知道
    end record;
    package Zone_Track_Vectors is new Ada.Containers.Vectors (Natural, Zone_Track);
 
@@ -65,6 +69,7 @@ package Act is
       Round_N : Natural := 0;
       Fast : Boolean := False;
       Boot_Steps : Natural := 0;   --  开机量身体用掉的拍数(记账,不是上限)
+      Sch : Schema.Map;            --  身体图:位姿 → 手指在各相机画面里的位置(只存真看见过的)
    end record;
 
    procedure Init_Tracks (C : in out Context);
