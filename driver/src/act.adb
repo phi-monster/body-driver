@@ -876,7 +876,7 @@ package body Act is
             end;
          end if;
       end;
-      Last_Err := 0.0;   --  第一步之前还没算过"还差几步";第一步之后才有得比
+      Last_Err := -1.0;   --  -1 = 还没算过"还差几步";第一步的目标项算完就填上(哨兵,无量纲)
       for Step in 1 .. Natural'Min (Step_Cap, (if Step_Limit > 0 then Step_Limit else Step_Cap)) loop
          declare
             Terms : Table.Term_Vectors.Vector;
@@ -935,6 +935,13 @@ package body Act is
                   Terms.Append (T);
                end;
             end loop;
+            if Last_Err < 0.0 then
+               --  第一步之前的"还差几步"(不算成没进步)
+               Last_Err := 0.0;
+               for P of Pts loop
+                  Last_Err := Last_Err + P.Steps_Err;
+               end loop;
+            end if;
             declare
                Damp : Table.Vec := Table.Zero_Vec;
             begin
