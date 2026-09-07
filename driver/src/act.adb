@@ -1126,9 +1126,8 @@ package body Act is
          Codec.Write_BMP (To_String (C.Dump_Dir) & "/grid_" & Codec.Pad6 (C.Round_N) & ".bmp", RGB, Cw, Ch);
       end if;
       declare
-         Clock : constant String := "CLOCK: " & Codec.Img (Plug.Steps (L)) & " beats of my own clock have passed in this episode (one beat = one picture I received; " &
-           Codec.Img (C.Boot_Steps) & " of them went to measuring my body before the first question). I only count; nothing stops on its own." & ASCII.LF;
-         Recent : constant String := Memory.Text (C.Mem) & Clock & To_String (C.Recent);
+         --  拍数只进日志(我们自己记账),不进问脑的话:真实世界没有"步",脑只看画面
+         Recent : constant String := Memory.Text (C.Mem) & To_String (C.Recent);
       begin
          if not Brain.Ask (To_String (C.Eye_Host), C.Eye_Port, To_String (C.Task_Text), To_String (Listing), Recent,
                            C.Cols, C.Rows, Natural (C.Items.Length), C.Map.N_Cams, C.Map.Arms, RGB, Cw, Ch, Say, Err)
@@ -1369,7 +1368,8 @@ package body Act is
             Put_Line ("[身] ⚙ 一起解" & Natural'Image (Natural (Pts.Length)) & " 条:" & To_String (Desc));
             Run_Segment (L, C, F, Cam, Pts, Until_K, Step_Limit, Amount, Avoid, Event, Steps_Taken, Blocked, Beats);
             Sync_Zone_Track (C, Cam, Pts);
-            Report := Report & "you asked " & Desc & ": " & Event & ". I took " & Codec.Img (Steps_Taken) & " pushes (" & Codec.Img (Beats) & " beats of my clock); ";
+            Report := Report & "you asked " & Desc & ": " & Event & ". I took " & Codec.Img (Steps_Taken) & " pushes; ";
+            Put_Line ("[身]   这一段:" & Codec.Img (Steps_Taken) & " 推 · " & Codec.Img (Beats) & " 拍 · 这一集累计 " & Codec.Img (Plug.Steps (L)) & " 拍");
             for P of Pts loop
                if P.Lobe <= 0 then
                   Report := Report & "item " & Codec.Img (P.Item_No) & (if P.Lobe = 0 then " (finger A)" else "") & " now at (" & Codec.Fmt (P.Cu, 2) & "," & Codec.Fmt (P.Cv, 2) &
