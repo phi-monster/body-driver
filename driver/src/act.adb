@@ -336,8 +336,6 @@ package body Act is
       Cu, Cv, Z : Long_Float := 0.0;
       Tu, Tv, Tz : Long_Float := 0.0;
       Wz : Long_Float := 0.0;
-      Lateral_First : Boolean := False;
-      Lat_Tol : Long_Float := 0.0;
       Desc : Unbounded_String;
       Box_W, Box_H : Long_Float := 0.0;
       Count : Natural := 0;
@@ -847,13 +845,13 @@ package body Act is
                declare
                   P : constant Point := Pts (I);
                   T : Table.Term;
-                  Lat : constant Long_Float := Sqrt ((P.Tu - P.Cu) ** 2 + (P.Tv - P.Cv) ** 2);
                begin
                   T.E := Effs (I);
                   T.Err (0) := P.Tu - P.Cu;
                   T.Err (1) := P.Tv - P.Cv;
                   T.W (0) := 1.0; T.W (1) := 1.0;
-                  if P.Wz > 0.0 and then P.Z > 0.0 and then not Picture.Is_Nan (P.Tz) and then not (P.Lateral_First and then Lat > P.Lat_Tol) then
+                  --  画面位置和远近一起要(owner:不许替它定"先对准再靠近"的顺序 —— 那等于叫它先扭脖子;两件一起要,往前走一步两件都变好,扭脖子只改一件)
+                  if P.Wz > 0.0 and then P.Z > 0.0 and then not Picture.Is_Nan (P.Tz) then
                      T.Err (2) := (P.Tz - P.Z) / P.Z;
                      T.W (2) := 1.0;
                      --  深度那一行的表也按 1/z 缩,和误差同一尺度
@@ -974,6 +972,7 @@ package body Act is
                   Need_Refind : Boolean := False;
                   All_Verified : Boolean := True;
                   Any_Wrong : Boolean := False;
+                  Not_Followed : Boolean := False;
                begin
                   --  ① 认位置。我的手指(世界相机里):先"感觉"—— 按此刻位姿从身体图算;熟地只让眼睛核对一下(光流),
                   --     生地或大步就去看(抖手指,看完记进图)。世界里的块:每步重切就近对上。
@@ -1097,11 +1096,11 @@ package body Act is
                            Asked : constant Boolean := abs A (K) > Long_Float'Max (Cmd_Floor, C.Map.EE_Noise);
                         begin
                            if Asked and then abs (Deliv (K) - A (K)) > 0.5 * abs A (K) then
-                              Any_Wrong := True; All_Verified := False;
+                              Any_Wrong := True; All_Verified := False; Not_Followed := True;
                               Reach (K) := Long_Float'Max (1.0, Reach (K) * 0.5);
                               Put_Line ("[身]     通道" & Natural'Image (Arm * Chan.Per_Arm + K) & " 没照做:命令 " & Codec.Fmt (A (K), 3) & " 实到 " & Codec.Fmt (Deliv (K), 3) & " ⇒ 它的步幅缩回上一档");
                            elsif (not Asked) and then abs Deliv (K) > 2.0 * Am then
-                              Any_Wrong := True; All_Verified := False;
+                              Any_Wrong := True; All_Verified := False; Not_Followed := True;
                               Put_Line ("[身]     通道" & Natural'Image (Arm * Chan.Per_Arm + K) & " 没命令却动了 " & Codec.Fmt (Deliv (K), 3));
                            end if;
                         end;
@@ -1120,7 +1119,7 @@ package body Act is
                   for I in 0 .. Natural (Pts.Length) - 1 loop
                      Store_Effect (C, Arm, Cam, Pts (I).Kind, Pts (I).Chan_K, Pts (I).Blob, Effs (I), Trusts (I), Reach);
                   end loop;
-                  --  连着两步没在画面里认出被跟的点 ⇒ 停下报告,不闭着眼按表猜着走(EI:猜了 8 步,误差纹丝不动)
+                  --  出事立刻回去问脑(owner:脑说一句"去做,直到做成或出事",身体不许闭眼走,也不许让脑数步):认不到被跟的点 / 身体没照做
                   declare
                      Any_Lost : Boolean := False;
                   begin
@@ -1130,8 +1129,13 @@ package body Act is
                         end if;
                      end loop;
                      Lost_Streak := (if Any_Lost then Lost_Streak + 1 else 0);
-                     if Lost_Streak >= 2 then
-                        Event := S ("lost sight: for two steps in a row I could not find what I am tracking in this picture (it left my view or is hidden); I stopped rather than move blind");
+                     if Lost_Streak >= 1 then
+                        Event := S ("lost sight: I could not find what I am tracking in this picture after this step (it left my view or is hidden); I stopped rather than move blind");
+                        Beats := Plug.Steps (L) - Beats0;
+                        return;
+                     end if;
+                     if Not_Followed then
+                        Event := S ("not followed: the body did not do what I commanded on this step (asked one thing, got another); I stopped with a smaller stride ready");
                         Beats := Plug.Steps (L) - Beats0;
                         return;
                      end if;
@@ -1624,7 +1628,6 @@ package body Act is
                                        Z : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, Cam);
                                     begin
                                        P.Tu := Z.Cu; P.Tv := Z.Cv; P.Tz := Z.Depth; P.Wz := (if Picture.Is_Nan (Z.Depth) then 0.0 else 1.0);
-                                       P.Lateral_First := True; P.Lat_Tol := Long_Float'Max (Z.Span * 0.25, Track_Win * 0.5);
                                     end;
                                  elsif P.Kind = Piece_Pt and then O.Kind in Thing | Thing_Remembered then
                                     P.Tz := O.Depth + O.Height * 0.5; P.Wz := (if O.Depth > 0.0 then 1.0 else 0.0);   --  指尖到它的半腰(顶面深 + 鼓起的一半,都是量的)
@@ -1690,7 +1693,6 @@ package body Act is
                      P.Kind := Thing_Pt; P.Slot := O.Slot; P.Cu := O.Cu; P.Cv := O.Cv; P.Z := O.Depth; P.Height := O.Height; P.Count := O.Count;
                      P.Box_W := Long_Float (O.X1 - O.X0) / Long_Float (Cw); P.Box_H := Long_Float (O.Y1 - O.Y0) / Long_Float (Ch);
                      P.Tu := Z.Cu; P.Tv := Z.Cv; P.Tz := Z.Depth; P.Wz := (if Picture.Is_Nan (Z.Depth) then 0.0 else 1.0);
-                     P.Lateral_First := True; P.Lat_Tol := Long_Float'Max (Z.Span * 0.25, Track_Win * 0.5);
                      P.Desc := S ("item " & Codec.Img (Say.Grip_On) & " into grip " & Codec.Img (A + 1) & " (this hand camera)");
                   else
                      declare
