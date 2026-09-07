@@ -185,11 +185,11 @@ begin
                      Z : constant Zone.Hand_Zone := H.Zones (Cm);
                      X : Schema.Sample;
                   begin
-                     X.Arm := A; X.Cam := Cm; X.Pose := F.EE (A); X.N_Lobes := Z.N_Lobes; X.Lobes_Valid := True;
-                     X.Au := Z.A.Cu; X.Av := Z.A.Cv; X.Bu := Z.B.Cu; X.Bv := Z.B.Cv; X.Cu := Z.Cu; X.Cv := Z.Cv;
-                     X.Z := (if Picture.Is_Nan (Z.Depth) then 0.0 else Z.Depth);
-                     --  全身:开机每个通道推过一下,跟着动的那块 = 这个通道带的零件(只在从零量的这次有;装回的身体图里已经带着)
-                     if not Use_Stored then
+                     X.Arm := A; X.Cam := Cm; X.Pose := F.EE (A);
+                     --  握合通道带的那块 = 手指:合空时看见的两团 + 区心 + 手指深
+                     X.Parts (Chan.Per_Arm) := (True, Z.Cu, Z.Cv, (if Picture.Is_Nan (Z.Depth) then 0.0 else Z.Depth), Z.X0, Z.Y0, Z.X1, Z.Y1, Z.N_Lobes, Z.A.Cu, Z.A.Cv, Z.B.Cu, Z.B.Cv);
+                     --  别的通道带的零件:开机每个通道推过一下,跟着动的那块(从零量的这次才有;装回的身体图里已经带着)
+                     begin
                         for K in 0 .. Chan.Per_Arm - 1 loop
                            declare
                               Pi : constant Natural := (A * Chan.Per_Arm + K) * C.Map.N_Cams + Cm;
@@ -207,12 +207,12 @@ begin
                                           Zp := 0.0;
                                        end if;
                                     end if;
-                                    X.Parts (K) := (True, P.Cu, P.Cv, Zp, P.X0, P.Y0, P.X1, P.Y1);
+                                    X.Parts (K) := (True, P.Cu, P.Cv, Zp, P.X0, P.Y0, P.X1, P.Y1, 1, P.Cu, P.Cv, 0.0, 0.0);
                                  end;
                               end if;
                            end;
                         end loop;
-                     end if;
+                     end;
                      Schema.Add (C.Sch, X, C.Map.EE_Noise, C.Map.Rot_Noise);
                   end;
                end if;

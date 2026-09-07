@@ -28,10 +28,6 @@ package body Schema is
                         Mg : Sample := Y;
                      begin
                         Mg.Pose := X.Pose;
-                        if X.Lobes_Valid then
-                           Mg.Lobes_Valid := True; Mg.N_Lobes := X.N_Lobes;
-                           Mg.Au := X.Au; Mg.Av := X.Av; Mg.Bu := X.Bu; Mg.Bv := X.Bv; Mg.Cu := X.Cu; Mg.Cv := X.Cv; Mg.Z := X.Z;
-                        end if;
                         for K in Part_Array'Range loop
                            if X.Parts (K).Valid then
                               Mg.Parts (K) := X.Parts (K);

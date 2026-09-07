@@ -29,17 +29,18 @@ package Act is
    end record;
    package Item_Vectors is new Ada.Containers.Vectors (Natural, Item);
 
-   type Track_Kind is (Zone_Pt, Thing_Pt, Part_Pt);   --  Part_Pt:我身上的零件点(Lobe 字段 = 通道号)
+   type Track_Kind is (Piece_Pt, Thing_Pt);   --  Piece_Pt:我身上的一块零件(Chan_K = 带它的通道;握合通道 = Chan.Per_Arm,那块就是手指)
    type Stored_Effect is record
       Arm, Cam : Natural := 0;
-      Kind : Track_Kind := Zone_Pt;
-      Lobe : Integer := -1;      --  握区的哪一瓣(-1 = 整个/世界块)
+      Kind : Track_Kind := Piece_Pt;
+      Chan_K : Natural := 0;     --  带这块的通道(Chan.Per_Arm = 握合通道)
+      Blob : Integer := -1;      --  这块的第几团(-1 = 整块;手指 0/1 = 两指各自)
       E : Table.Effect;
       Trust : Table.Mask := [others => True];   --  探针时这个点真跑过地板的通道
       Reach : Long_Float := 1.0;   --  这张表被核实过的步幅(探针上限的倍数):表比零表准就翻倍,不准就减半;存进身体文件,越用越强
    end record;
    package Effect_Vectors is new Ada.Containers.Vectors (Natural, Stored_Effect);
-   type Known_Array is array (0 .. Chan.Per_Arm - 1) of Boolean;
+   type Known_Array is array (0 .. Chan.Per_Arm) of Boolean;
    type Zone_Track is record
       Valid : Boolean := False;
       Cu, Cv, Z : Long_Float := 0.0;

@@ -47,6 +47,10 @@ package body Act is
                T.Au := Z.A.Cu; T.Av := Z.A.Cv; T.Bu := Z.B.Cu; T.Bv := Z.B.Cv;
                T.Has_Lobes := Z.Valid and then Z.N_Lobes >= 1;
                T.Known := Z.Valid;
+               if Z.Valid then
+                  T.Pieces (Chan.Per_Arm) := (True, Z.Cu, Z.Cv, (if Picture.Is_Nan (Z.Depth) then 0.0 else Z.Depth), Z.X0, Z.Y0, Z.X1, Z.Y1, Z.N_Lobes, Z.A.Cu, Z.A.Cv, Z.B.Cu, Z.B.Cv);
+                  T.Pieces_Known (Chan.Per_Arm) := True;
+               end if;
                --  开机每个通道推过一下:跟着动的那块 = 这个通道带的零件(不长在这只手上的相机里才算)
                if Cam_Arm (C, Cm) /= Integer (A) then
                   for K in 0 .. Chan.Per_Arm - 1 loop
@@ -57,7 +61,7 @@ package body Act is
                            declare
                               P : constant Selfmap.Part := C.Map.Parts (Pi);
                            begin
-                              T.Pieces (K) := (True, P.Cu, P.Cv, 0.0, P.X0, P.Y0, P.X1, P.Y1);
+                              T.Pieces (K) := (True, P.Cu, P.Cv, 0.0, P.X0, P.Y0, P.X1, P.Y1, 1, P.Cu, P.Cv, 0.0, 0.0);
                               T.Pieces_Known (K) := True;
                            end;
                         end if;
@@ -323,10 +327,11 @@ package body Act is
    --  ── 被跟踪的点 ──
    type Point is record
       Arm : Natural := 0;
-      Kind : Track_Kind := Zone_Pt;
+      Kind : Track_Kind := Piece_Pt;
       Slot : Integer := -1;
       Item_No : Natural := 0;
-      Lobe : Integer := -1;      --  握区的哪一瓣(两瓣时一瓣一个点:两指各自到位,歪了就有一瓣不到位 —— 倾斜自然被罚)
+      Chan_K : Natural := 0;     --  带这块的通道(Chan.Per_Arm = 握合通道 ⇒ 这块是手指)
+      Blob : Integer := -1;      --  这块的第几团(手指两团时一团一个点:两指各自到位,歪了就有一团不到位 —— 倾斜自然被罚)
       Cu, Cv, Z : Long_Float := 0.0;
       Tu, Tv, Tz : Long_Float := 0.0;
       Wz : Long_Float := 0.0;
@@ -351,19 +356,19 @@ package body Act is
       return Sqrt ((P.Tu - P.Cu) ** 2 + (P.Tv - P.Cv) ** 2 + Dz * Dz);
    end Err_Of;
 
-   function Find_Effect (C : Context; Arm, Cam : Natural; Kind : Track_Kind; Lobe : Integer := -1) return Integer is
+   function Find_Effect (C : Context; Arm, Cam : Natural; Kind : Track_Kind; Chan_K : Natural; Blob : Integer := -1) return Integer is
    begin
       for I in 0 .. Natural (C.Tables.Length) - 1 loop
-         if C.Tables (I).Arm = Arm and then C.Tables (I).Cam = Cam and then C.Tables (I).Kind = Kind and then C.Tables (I).Lobe = Lobe then
+         if C.Tables (I).Arm = Arm and then C.Tables (I).Cam = Cam and then C.Tables (I).Kind = Kind and then C.Tables (I).Chan_K = Chan_K and then C.Tables (I).Blob = Blob then
             return I;
          end if;
       end loop;
       return -1;
    end Find_Effect;
 
-   procedure Store_Effect (C : in out Context; Arm, Cam : Natural; Kind : Track_Kind; Lobe : Integer; E : Table.Effect; Trust : Table.Mask; Reach : Long_Float := 1.0) is
-      I : constant Integer := Find_Effect (C, Arm, Cam, Kind, Lobe);
-      Se : constant Stored_Effect := (Arm, Cam, Kind, Lobe, E, Trust, Reach);
+   procedure Store_Effect (C : in out Context; Arm, Cam : Natural; Kind : Track_Kind; Chan_K : Natural; Blob : Integer; E : Table.Effect; Trust : Table.Mask; Reach : Long_Float := 1.0) is
+      I : constant Integer := Find_Effect (C, Arm, Cam, Kind, Chan_K, Blob);
+      Se : constant Stored_Effect := (Arm, Cam, Kind, Chan_K, Blob, E, Trust, Reach);
    begin
       if I >= 0 then
          C.Tables.Replace_Element (Natural (I), Se);
@@ -390,11 +395,12 @@ package body Act is
                         Sm : constant Schema.Sample := C.Sch.S (Natural (Si));
                         Tr : Zone_Track := C.Zones (Track_Idx (C, A, Cm));
                         Reach : Long_Float := 1.0;
-                        function Shift (Lobe : Integer) return Table.Vec3 is
-                           Idx : Integer := Find_Effect (C, A, Cm, Zone_Pt, Lobe);
+                        Gp : constant Schema.Part_Pos := Sm.Parts (Chan.Per_Arm);   --  握合通道带的那块 = 手指
+                        function Shift (Blob : Integer) return Table.Vec3 is
+                           Idx : Integer := Find_Effect (C, A, Cm, Piece_Pt, Chan.Per_Arm, Blob);
                         begin
                            if Idx < 0 then
-                              Idx := Find_Effect (C, A, Cm, Zone_Pt, -1);
+                              Idx := Find_Effect (C, A, Cm, Piece_Pt, Chan.Per_Arm, -1);
                            end if;
                            if Idx >= 0 then
                               Reach := Long_Float'Max (Reach, C.Tables (Natural (Idx)).Reach);
@@ -405,29 +411,33 @@ package body Act is
                         Sa : constant Table.Vec3 := Shift (0);
                         Sb : constant Table.Vec3 := Shift (1);
                      begin
-                        Tr.Valid := True;
-                        Tr.Au := Clamp (Sm.Au + Sa (0)); Tr.Av := Clamp (Sm.Av + Sa (1));
-                        Tr.Bu := Clamp (Sm.Bu + Sb (0)); Tr.Bv := Clamp (Sm.Bv + Sb (1));
-                        Tr.Has_Lobes := Sm.N_Lobes >= 1;
-                        if Sm.N_Lobes >= 2 then
-                           Tr.Cu := (Tr.Au + Tr.Bu) / 2.0; Tr.Cv := (Tr.Av + Tr.Bv) / 2.0;
-                        else
-                           Tr.Cu := Tr.Au; Tr.Cv := Tr.Av;
-                        end if;
-                        if Sm.Z > 0.0 then
-                           Tr.Z := Sm.Z + (if Sm.N_Lobes >= 2 then (Sa (2) + Sb (2)) / 2.0 else Sa (2));
-                        end if;
-                        Tr.Known := True;
-                        for K in 0 .. Chan.Per_Arm - 1 loop
-                           if abs Diff (K) > Long_Float'Max (1.0e-6, C.Map.Amp (A * Chan.Per_Arm + K)) * Cap_Mult * Reach then
-                              Tr.Known := False;
+                        if Gp.Valid then
+                           Tr.Valid := True;
+                           Tr.Au := Clamp (Gp.B0u + Sa (0)); Tr.Av := Clamp (Gp.B0v + Sa (1));
+                           Tr.Bu := Clamp (Gp.B1u + Sb (0)); Tr.Bv := Clamp (Gp.B1v + Sb (1));
+                           Tr.Has_Lobes := Gp.N_Blobs >= 1;
+                           if Gp.N_Blobs >= 2 then
+                              Tr.Cu := (Tr.Au + Tr.Bu) / 2.0; Tr.Cv := (Tr.Av + Tr.Bv) / 2.0;
+                           else
+                              Tr.Cu := Tr.Au; Tr.Cv := Tr.Av;
                            end if;
-                        end loop;
+                           if Gp.Z > 0.0 then
+                              Tr.Z := Gp.Z + (if Gp.N_Blobs >= 2 then (Sa (2) + Sb (2)) / 2.0 else Sa (2));
+                           end if;
+                           Tr.Known := True;
+                           for K in 0 .. Chan.Per_Arm - 1 loop
+                              if abs Diff (K) > Long_Float'Max (1.0e-6, C.Map.Amp (A * Chan.Per_Arm + K)) * Cap_Mult * Reach then
+                                 Tr.Known := False;
+                              end if;
+                           end loop;
+                           Tr.Pieces (Chan.Per_Arm) := (True, Tr.Cu, Tr.Cv, Tr.Z, Gp.X0, Gp.Y0, Gp.X1, Gp.Y1, Gp.N_Blobs, Tr.Au, Tr.Av, Tr.Bu, Tr.Bv);
+                           Tr.Pieces_Known (Chan.Per_Arm) := Tr.Known;
+                        end if;
                         --  零件:样本里的位置 + 这个零件自己的响应表外推(没表 ⇒ 只在位姿几乎没差时算"知道")
                         for K in 0 .. Chan.Per_Arm - 1 loop
                            if Sm.Parts (K).Valid then
                               declare
-                                 Idx : constant Integer := Find_Effect (C, A, Cm, Part_Pt, K);
+                                 Idx : constant Integer := Find_Effect (C, A, Cm, Piece_Pt, K, -1);
                                  Sh : constant Table.Vec3 := (if Idx >= 0 then Table.Predict (C.Tables (Natural (Idx)).E, Diff) else Table.Zero3);
                                  Pr : Schema.Part_Pos := Sm.Parts (K);
                                  Kn : Boolean := True;
@@ -468,7 +478,7 @@ package body Act is
    begin
       P.Lost := False;
       case P.Kind is
-         when Zone_Pt | Part_Pt =>
+         when Piece_Pt =>
             if Cam_Arm (C, Cam) = Integer (P.Arm) then
                return;    --  自己的手上相机:握区是固定像素
             end if;
@@ -715,7 +725,7 @@ package body Act is
          declare
             Z : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, Cam);
          begin
-            if P.Kind = Zone_Pt and then Cam_Arm (C, Cam) /= Integer (P.Arm) and then Z.Valid and then Z.N_Lobes = 2 then
+            if P.Kind = Piece_Pt and then P.Chan_K = Chan.Per_Arm and then Cam_Arm (C, Cam) /= Integer (P.Arm) and then Z.Valid and then Z.N_Lobes = 2 then
                for Lb in 0 .. 1 loop
                   declare
                      Q : Point := P;
@@ -725,7 +735,7 @@ package body Act is
                      Ov : constant Long_Float := (if Tr.Has_Lobes then (if Lb = 0 then Tr.Av else Tr.Bv) - Tr.Cv else (if Lb = 0 then Z.A.Cv else Z.B.Cv) - Z.Cv);
                      Zd : Long_Float := P.Z;
                   begin
-                     Q.Lobe := Lb;
+                     Q.Blob := Lb;
                      Q.Cu := P.Cu + Ou; Q.Cv := P.Cv + Ov;
                      Q.Tu := P.Tu + Ou; Q.Tv := P.Tv + Ov;
                      if F.Cams (Cam).Has_Depth then
@@ -783,7 +793,7 @@ package body Act is
       begin
          for I in 0 .. Natural (Pts.Length) - 1 loop
             declare
-               Idx : constant Integer := Find_Effect (C, Arm, Cam, Pts (I).Kind, Pts (I).Lobe);
+               Idx : constant Integer := Find_Effect (C, Arm, Cam, Pts (I).Kind, Pts (I).Chan_K, Pts (I).Blob);
             begin
                if Idx >= 0 then
                   Effs (I) := C.Tables (Natural (Idx)).E;
@@ -805,7 +815,7 @@ package body Act is
                end if;
                for I in 0 .. Natural (Pts.Length) - 1 loop
                   Trusts (I) := Trust;
-                  Store_Effect (C, Arm, Cam, Pts (I).Kind, Pts (I).Lobe, Effs (I), Trust);
+                  Store_Effect (C, Arm, Cam, Pts (I).Kind, Pts (I).Chan_K, Pts (I).Blob, Effs (I), Trust);
                end loop;
             end;
          end if;
@@ -960,7 +970,7 @@ package body Act is
                         W0 : constant Point := Was (I);
                      begin
                         P.Has_Meas := False;
-                        if P.Kind in Zone_Pt | Part_Pt and then Cam_Arm (C, Cam) /= Integer (P.Arm) then
+                        if P.Kind = Piece_Pt and then Cam_Arm (C, Cam) /= Integer (P.Arm) then
                            declare
                               Diff : Table.Vec;
                               Dist : Long_Float;
@@ -972,16 +982,17 @@ package body Act is
                                  declare
                                     Sm : constant Schema.Sample := C.Sch.S (Natural (Si));
                                  begin
-                                    In_Map := (if P.Kind = Part_Pt then P.Lobe >= 0 and then P.Lobe < Chan.Per_Arm and then Sm.Parts (P.Lobe).Valid else Sm.Lobes_Valid);
+                                    In_Map := P.Chan_K <= Chan.Per_Arm and then Sm.Parts (P.Chan_K).Valid and then (P.Blob < 0 or else Sm.Parts (P.Chan_K).N_Blobs > Natural (P.Blob));
                                  end;
                               end if;
                               if In_Map then
                                  declare
                                     Sm : constant Schema.Sample := C.Sch.S (Natural (Si));
                                     Pm : constant Table.Vec3 := Table.Predict (Effs (I), Diff);
-                                    Su : constant Long_Float := (if P.Kind = Part_Pt then Sm.Parts (P.Lobe).Cu elsif P.Lobe = 1 then Sm.Bu elsif P.Lobe = 0 then Sm.Au else Sm.Cu);
-                                    Sv : constant Long_Float := (if P.Kind = Part_Pt then Sm.Parts (P.Lobe).Cv elsif P.Lobe = 1 then Sm.Bv elsif P.Lobe = 0 then Sm.Av else Sm.Cv);
-                                    Sz : constant Long_Float := (if P.Kind = Part_Pt then Sm.Parts (P.Lobe).Z else Sm.Z);
+                                    Gp : constant Schema.Part_Pos := Sm.Parts (P.Chan_K);
+                                    Su : constant Long_Float := (if P.Blob = 1 then Gp.B1u elsif P.Blob = 0 then Gp.B0u else Gp.Cu);
+                                    Sv : constant Long_Float := (if P.Blob = 1 then Gp.B1v elsif P.Blob = 0 then Gp.B0v else Gp.Cv);
+                                    Sz : constant Long_Float := Gp.Z;
                                  begin
                                     P.Cu := Long_Float'Max (0.0, Long_Float'Min (1.0, Su + Pm (0)));
                                     P.Cv := Long_Float'Max (0.0, Long_Float'Min (1.0, Sv + Pm (1)));
@@ -1060,7 +1071,7 @@ package body Act is
                            end if;
                         end if;
                         Effs (I) := E;
-                        Store_Effect (C, Arm, Cam, P.Kind, P.Lobe, E, Trusts (I), Reach);
+                        Store_Effect (C, Arm, Cam, P.Kind, P.Chan_K, P.Blob, E, Trusts (I), Reach);
                         Err_Now := Err_Now + Err_Of (P);
                      end;
                   end loop;
@@ -1070,7 +1081,7 @@ package body Act is
                      Reach := Long_Float'Max (1.0, Reach * 0.5);
                   end if;
                   for I in 0 .. Natural (Pts.Length) - 1 loop
-                     Store_Effect (C, Arm, Cam, Pts (I).Kind, Pts (I).Lobe, Effs (I), Trusts (I), Reach);
+                     Store_Effect (C, Arm, Cam, Pts (I).Kind, Pts (I).Chan_K, Pts (I).Blob, Effs (I), Trusts (I), Reach);
                   end loop;
                end;
                Monitor.Step (W, Monitor.Floor (Long_Float'Max (0.0, Pic_Delta)), Monitor.Bounded (Last_Err), Monitor.Bounded (Err_Now),
@@ -1197,7 +1208,7 @@ package body Act is
    begin
       Jaw.Append (J0);
       for P of Pts loop
-         if P.Kind = Zone_Pt then
+         if P.Kind = Piece_Pt and then P.Chan_K = Chan.Per_Arm then
             Any_Fingers := True;
          end if;
       end loop;
@@ -1215,7 +1226,7 @@ package body Act is
                declare
                   P : Point := Pts (I);
                begin
-                  if P.Kind = Zone_Pt then
+                  if P.Kind = Piece_Pt and then P.Chan_K = Chan.Per_Arm then
                      --  认领半径:一个张幅,再小也有一个跟踪窗;读深窗口 = 张幅的四分之一,再小也有半个百分点的画幅(比例,无量纲)
                      Claim (P, Long_Float'Max (Z.Span, Track_Win), Long_Float'Max (0.005, Z.Span * 0.25), Taken, Regs);
                      Pts.Replace_Element (I, P);
@@ -1229,9 +1240,9 @@ package body Act is
          declare
             P : Point := Pts (I);
          begin
-            if P.Kind = Part_Pt and then P.Lobe >= 0 and then P.Lobe < Chan.Per_Arm then
+            if P.Kind = Piece_Pt and then P.Chan_K < Chan.Per_Arm then
                declare
-                  K : constant Natural := Natural (P.Lobe);
+                  K : constant Natural := P.Chan_K;
                   Chn : constant Natural := Arm * Chan.Per_Arm + K;
                   A : Table.Vec := Table.Zero_Vec;
                   Deliv : Table.Vec;
@@ -1265,42 +1276,47 @@ package body Act is
             end if;
          end;
       end loop;
-      --  认到的记进身体图:这个位姿下,这只手的手指 / 这些零件在这台相机里就在这儿(下次到这附近不用看)
+      --  认到的记进身体图:这个位姿下,这只手的这些零件(手指也是零件)在这台相机里就在这儿(下次到这附近不用看)
       declare
          X : Schema.Sample;
+         Gp : Schema.Part_Pos;   --  手指那块:各团合成
          All_Fingers : Boolean := True;
          N, Nz : Natural := 0;
          Zmin : Long_Float := 1.0e30;   --  哨兵(无量纲)
          Any_Part : Boolean := False;
+         Zh : constant Zone.Hand_Zone := Zone_Of (C, Arm, Cam);
       begin
          X.Arm := Arm; X.Cam := Cam; X.Pose := F.EE (Arm);
          for P of Pts loop
-            if P.Kind = Zone_Pt then
+            if P.Kind = Piece_Pt and then P.Chan_K = Chan.Per_Arm then
                if P.Lost then
                   All_Fingers := False;
                end if;
                N := N + 1;
-               X.Cu := X.Cu + P.Cu; X.Cv := X.Cv + P.Cv;
-               if P.Lobe = 1 then
-                  X.Bu := P.Cu; X.Bv := P.Cv;
+               Gp.Cu := Gp.Cu + P.Cu; Gp.Cv := Gp.Cv + P.Cv;
+               if P.Blob = 1 then
+                  Gp.B1u := P.Cu; Gp.B1v := P.Cv;
                else
-                  X.Au := P.Cu; X.Av := P.Cv;
+                  Gp.B0u := P.Cu; Gp.B0v := P.Cv;
                end if;
                if P.Z > 0.0 then
                   Zmin := Long_Float'Min (Zmin, P.Z); Nz := Nz + 1;
                end if;
-            elsif P.Kind = Part_Pt and then not P.Lost and then P.Lobe >= 0 and then P.Lobe < Chan.Per_Arm then
-               X.Parts (P.Lobe) := (True, P.Cu, P.Cv, P.Z,
-                                    Natural (Long_Float'Max (0.0, (P.Cu - P.Box_W / 2.0) * Long_Float (Cw))), Natural (Long_Float'Max (0.0, (P.Cv - P.Box_H / 2.0) * Long_Float (Ch))),
-                                    Natural (Long_Float'Min (Long_Float (Cw - 1), (P.Cu + P.Box_W / 2.0) * Long_Float (Cw))), Natural (Long_Float'Min (Long_Float (Ch - 1), (P.Cv + P.Box_H / 2.0) * Long_Float (Ch))));
+            elsif P.Kind = Piece_Pt and then not P.Lost and then P.Chan_K < Chan.Per_Arm then
+               X.Parts (P.Chan_K) := (True, P.Cu, P.Cv, P.Z,
+                                      Natural (Long_Float'Max (0.0, (P.Cu - P.Box_W / 2.0) * Long_Float (Cw))), Natural (Long_Float'Max (0.0, (P.Cv - P.Box_H / 2.0) * Long_Float (Ch))),
+                                      Natural (Long_Float'Min (Long_Float (Cw - 1), (P.Cu + P.Box_W / 2.0) * Long_Float (Cw))), Natural (Long_Float'Min (Long_Float (Ch - 1), (P.Cv + P.Box_H / 2.0) * Long_Float (Ch))),
+                                      1, P.Cu, P.Cv, 0.0, 0.0);
                Any_Part := True;
             end if;
          end loop;
          if All_Fingers and then N > 0 then
-            X.Lobes_Valid := True;
-            X.Cu := X.Cu / Long_Float (N); X.Cv := X.Cv / Long_Float (N);
-            X.N_Lobes := N;
-            X.Z := (if Nz > 0 then Zmin else 0.0);
+            Gp.Valid := True;
+            Gp.Cu := Gp.Cu / Long_Float (N); Gp.Cv := Gp.Cv / Long_Float (N);
+            Gp.N_Blobs := N;
+            Gp.Z := (if Nz > 0 then Zmin else 0.0);
+            Gp.X0 := Zh.X0; Gp.Y0 := Zh.Y0; Gp.X1 := Zh.X1; Gp.Y1 := Zh.Y1;   --  框先沿用开机量的(Feel 会按形心平移)
+            X.Parts (Chan.Per_Arm) := Gp;
          end if;
          if (All_Fingers and then N > 0) or else Any_Part then
             Schema.Add (C.Sch, X, C.Map.EE_Noise, C.Map.Rot_Noise);
@@ -1493,11 +1509,11 @@ package body Act is
                      Ok_Pt := False;
                   elsif It.Kind = Piece then
                      --  我身上的一块零件:点 = 它此刻的形心,表按需量(六个通道各推一下)
-                     P.Arm := It.Arm; P.Kind := Part_Pt; P.Lobe := Integer (It.Which);
+                     P.Arm := It.Arm; P.Kind := Piece_Pt; P.Chan_K := It.Which; P.Blob := -1;
                      P.Cu := It.Cu; P.Cv := It.Cv; P.Z := It.Depth;
                      P.Box_W := Long_Float (It.X1 - It.X0) / Long_Float (Cw); P.Box_H := Long_Float (It.Y1 - It.Y0) / Long_Float (Ch);
                   elsif Own then
-                     P.Arm := It.Arm; P.Kind := Zone_Pt;
+                     P.Arm := It.Arm; P.Kind := Piece_Pt; P.Chan_K := Chan.Per_Arm;   --  手指 = 握合通道带的那块
                      declare
                         Tr : constant Zone_Track := C.Zones (Track_Idx (C, P.Arm, Cam));
                      begin
@@ -1549,7 +1565,7 @@ package body Act is
                                        P.Tu := Z.Cu; P.Tv := Z.Cv; P.Tz := Z.Depth; P.Wz := (if Picture.Is_Nan (Z.Depth) then 0.0 else 1.0);
                                        P.Lateral_First := True; P.Lat_Tol := Long_Float'Max (Z.Span * 0.25, Track_Win * 0.5);
                                     end;
-                                 elsif P.Kind = Zone_Pt and then O.Kind in Thing | Thing_Remembered then
+                                 elsif P.Kind = Piece_Pt and then O.Kind in Thing | Thing_Remembered then
                                     P.Tz := O.Depth + O.Height * 0.5; P.Wz := (if O.Depth > 0.0 then 1.0 else 0.0);   --  指尖到它的半腰(顶面深 + 鼓起的一半,都是量的)
                                  else
                                     P.Tz := O.Depth; P.Wz := (if O.Depth > 0.0 and then P.Z > 0.0 then 1.0 else 0.0);
@@ -1619,7 +1635,7 @@ package body Act is
                      declare
                         Tr : constant Zone_Track := C.Zones (Track_Idx (C, A, Cam));
                      begin
-                        P.Kind := Zone_Pt; P.Cu := Tr.Cu; P.Cv := Tr.Cv; P.Z := Tr.Z;
+                        P.Kind := Piece_Pt; P.Chan_K := Chan.Per_Arm; P.Cu := Tr.Cu; P.Cv := Tr.Cv; P.Z := Tr.Z;
                         P.Tu := O.Cu; P.Tv := O.Cv; P.Tz := O.Depth + O.Height * 0.5; P.Wz := (if O.Depth > 0.0 and then Tr.Z > 0.0 then 1.0 else 0.0);
                         P.Desc := S ("grip " & Codec.Img (A + 1) & " onto item " & Codec.Img (Say.Grip_On) & " (fingertips to its middle)");
                      end;
@@ -1641,8 +1657,8 @@ package body Act is
             Report := Report & "you asked " & Desc & ": " & Event & ". I took " & Codec.Img (Steps_Taken) & " pushes; ";
             Put_Line ("[身]   这一段:" & Codec.Img (Steps_Taken) & " 推 · " & Codec.Img (Beats) & " 拍 · 这一集累计 " & Codec.Img (Plug.Steps (L)) & " 拍");
             for P of Pts loop
-               if P.Lobe <= 0 then
-                  Report := Report & "item " & Codec.Img (P.Item_No) & (if P.Lobe = 0 then " (finger A)" else "") & " now at (" & Codec.Fmt (P.Cu, 2) & "," & Codec.Fmt (P.Cv, 2) &
+               if P.Blob <= 0 then
+                  Report := Report & "item " & Codec.Img (P.Item_No) & (if P.Blob = 0 then " (finger A)" else "") & " now at (" & Codec.Fmt (P.Cu, 2) & "," & Codec.Fmt (P.Cv, 2) &
                             ") depth " & Codec.Fmt (P.Z, 2) & ", remaining error " & Codec.Fmt (Err_Of (P), 3) & " of a frame; ";
                end if;
             end loop;
@@ -1670,7 +1686,7 @@ package body Act is
                   begin
                      for P of Pts loop
                         if P.Item_No = Say.Grip_On then
-                           if P.Kind = Zone_Pt then
+                           if P.Kind = Piece_Pt then
                               --  瓣点取均值 = 区心;深度取最近的那一瓣
                               if not Found then
                                  Pin := P; Pin.Cu := 0.0; Pin.Cv := 0.0; Pin.Z := 1.0e30;
@@ -1685,7 +1701,7 @@ package body Act is
                            Found := True;
                         end if;
                      end loop;
-                     if Found and then Pin.Kind = Zone_Pt and then Nz > 0.0 then
+                     if Found and then Pin.Kind = Piece_Pt and then Nz > 0.0 then
                         Pin.Cu := Pin.Cu / Nz; Pin.Cv := Pin.Cv / Nz;
                         --  1e29 = "没读到"的哨兵(无量纲)
                         if Pin.Z >= 1.0e29 then
@@ -1702,7 +1718,7 @@ package body Act is
                            Cage_Note := S ("cage check in this hand camera: the thing's centre is " & (if Inside then "inside" else "OUTSIDE") & " my grip box and its depth " &
                                            (if Depth_Ok then "matches" else "does not match") & " my fingertips (" & Codec.Fmt (Pin.Z, 3) & " vs " & Codec.Fmt (Hz.Depth, 3) & ")");
                         end;
-                     elsif Found and then Pin.Kind = Zone_Pt then
+                     elsif Found and then Pin.Kind = Piece_Pt then
                         declare
                            O : constant Item := C.Items (Say.Grip_On - 1);
                            Dist : constant Long_Float := Sqrt ((Pin.Cu - O.Cu) ** 2 + (Pin.Cv - O.Cv) ** 2);

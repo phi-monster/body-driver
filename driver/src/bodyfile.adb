@@ -121,7 +121,7 @@ package body Bodyfile is
             T : constant Act.Stored_Effect := Tables (I);
          begin
             Append (B, (if I > 0 then "," else "") & "{""arm"":" & Codec.Img (T.Arm) & ",""cam"":" & Codec.Img (T.Cam) & ",""kind"":" & Codec.Img (Act.Track_Kind'Pos (T.Kind)) &
-                    ",""lobe"":" & Codec.Img (T.Lobe) & ",""n"":" & Codec.Img (T.E.N) & ",""b"":[");
+                    ",""chan"":" & Codec.Img (T.Chan_K) & ",""blob"":" & Codec.Img (T.Blob) & ",""n"":" & Codec.Img (T.E.N) & ",""b"":[");
             for K in 0 .. T.E.N - 1 loop
                for R in 0 .. 2 loop
                   Append (B, (if K + R > 0 then "," else "") & Codec.Fmt (T.E.B (K, R), 6));
@@ -144,15 +144,15 @@ package body Bodyfile is
             for K in 0 .. 6 loop
                Append (B, (if K > 0 then "," else "") & Codec.Fmt (X.Pose (K), 6));
             end loop;
-            Append (B, "],""lobes"":" & (if X.Lobes_Valid then "1" else "0") & ",""n"":" & Codec.Img (X.N_Lobes) & ",""a"":[" & Codec.Fmt (X.Au, 5) & "," & Codec.Fmt (X.Av, 5) & "],""b"":[" & Codec.Fmt (X.Bu, 5) & "," & Codec.Fmt (X.Bv, 5) &
-                    "],""c"":[" & Codec.Fmt (X.Cu, 5) & "," & Codec.Fmt (X.Cv, 5) & "],""z"":" & Codec.Fmt (X.Z, 5) & ",""parts"":[");
+            Append (B, "],""parts"":[");
             declare
                First : Boolean := True;
             begin
                for K in Schema.Part_Array'Range loop
                   if X.Parts (K).Valid then
                      Append (B, (if First then "" else ",") & "[" & Codec.Img (K) & "," & Codec.Fmt (X.Parts (K).Cu, 5) & "," & Codec.Fmt (X.Parts (K).Cv, 5) & "," & Codec.Fmt (X.Parts (K).Z, 5) & "," &
-                             Codec.Img (X.Parts (K).X0) & "," & Codec.Img (X.Parts (K).Y0) & "," & Codec.Img (X.Parts (K).X1) & "," & Codec.Img (X.Parts (K).Y1) & "]");
+                             Codec.Img (X.Parts (K).X0) & "," & Codec.Img (X.Parts (K).Y0) & "," & Codec.Img (X.Parts (K).X1) & "," & Codec.Img (X.Parts (K).Y1) & "," &
+                             Codec.Img (X.Parts (K).N_Blobs) & "," & Codec.Fmt (X.Parts (K).B0u, 5) & "," & Codec.Fmt (X.Parts (K).B0v, 5) & "," & Codec.Fmt (X.Parts (K).B1u, 5) & "," & Codec.Fmt (X.Parts (K).B1v, 5) & "]");
                      First := False;
                   end if;
                end loop;
@@ -321,7 +321,8 @@ package body Bodyfile is
                   T.Arm := Natural (Json.Num (D, Json.Get (D, Tn, "arm")));
                   T.Cam := Natural (Json.Num (D, Json.Get (D, Tn, "cam")));
                   T.Kind := Act.Track_Kind'Val (Integer (Json.Num (D, Json.Get (D, Tn, "kind"))));
-                  T.Lobe := Integer (Json.Num (D, Json.Get (D, Tn, "lobe")));
+                  T.Chan_K := Natural (Long_Float'Max (0.0, Json.Num (D, Json.Get (D, Tn, "chan"))));
+                  T.Blob := Integer (Json.Num (D, Json.Get (D, Tn, "blob")));
                   if Json.Get (D, Tn, "reach") >= 0 then
                      T.Reach := Long_Float'Max (1.0, Json.Num (D, Json.Get (D, Tn, "reach")));
                   end if;
@@ -347,15 +348,9 @@ package body Bodyfile is
                      Sn : constant Integer := Json.Child (D, Ss, I);
                      X : Schema.Sample;
                      Pv : constant Floats := Arr (Json.Get (D, Sn, "pose"));
-                     Av : constant Floats := Arr (Json.Get (D, Sn, "a"));
-                     Bv : constant Floats := Arr (Json.Get (D, Sn, "b"));
-                     Cv : constant Floats := Arr (Json.Get (D, Sn, "c"));
                   begin
                      X.Arm := Natural (Json.Num (D, Json.Get (D, Sn, "arm")));
                      X.Cam := Natural (Json.Num (D, Json.Get (D, Sn, "cam")));
-                     X.N_Lobes := Natural (Json.Num (D, Json.Get (D, Sn, "n")));
-                     X.Z := Json.Num (D, Json.Get (D, Sn, "z"));
-                     X.Lobes_Valid := Json.Get (D, Sn, "lobes") < 0 or else Json.Num (D, Json.Get (D, Sn, "lobes")) > 0.5;
                      declare
                         Ps : constant Integer := Json.Get (D, Sn, "parts");
                      begin
@@ -364,18 +359,18 @@ package body Bodyfile is
                               declare
                                  Pv2 : constant Floats := Arr (Json.Child (D, Ps, J));
                               begin
-                                 if Natural (Pv2.Length) = 8 and then Pv2 (0) >= 0.0 and then Integer (Pv2 (0)) < Chan.Per_Arm then
-                                    X.Parts (Integer (Pv2 (0))) := (True, Pv2 (1), Pv2 (2), Pv2 (3), Natural (Pv2 (4)), Natural (Pv2 (5)), Natural (Pv2 (6)), Natural (Pv2 (7)));
+                                 if Natural (Pv2.Length) = 13 and then Pv2 (0) >= 0.0 and then Integer (Pv2 (0)) <= Chan.Per_Arm then
+                                    X.Parts (Integer (Pv2 (0))) := (True, Pv2 (1), Pv2 (2), Pv2 (3), Natural (Pv2 (4)), Natural (Pv2 (5)), Natural (Pv2 (6)), Natural (Pv2 (7)),
+                                                                    Natural (Pv2 (8)), Pv2 (9), Pv2 (10), Pv2 (11), Pv2 (12));
                                  end if;
                               end;
                            end loop;
                         end if;
                      end;
-                     if Natural (Pv.Length) = 7 and then Natural (Av.Length) = 2 and then Natural (Bv.Length) = 2 and then Natural (Cv.Length) = 2 then
+                     if Natural (Pv.Length) = 7 then
                         for K in 0 .. 6 loop
                            X.Pose (K) := Pv (K);
                         end loop;
-                        X.Au := Av (0); X.Av := Av (1); X.Bu := Bv (0); X.Bv := Bv (1); X.Cu := Cv (0); X.Cv := Cv (1);
                         Sch.S.Append (X);
                      end if;
                   end;
