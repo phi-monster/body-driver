@@ -1163,14 +1163,15 @@ package body Act is
                   end loop;
                   --  出事立刻回去问脑(owner:脑说一句"去做,直到做成或出事",身体不许闭眼走,也不许让脑数步):认不到被跟的点 / 身体没照做
                   declare
-                     Any_Lost : Boolean := False;
+                     All_Lost : Boolean := True;
                   begin
+                     --  一块东西有两团(两根手指),被挡住一团是常事 ⇒ 全部认不到才算看不见(EM:认出一根仍被判"看不见",每轮只走一步)
                      for P of Pts loop
-                        if P.Lost then
-                           Any_Lost := True;
+                        if not P.Lost then
+                           All_Lost := False;
                         end if;
                      end loop;
-                     Lost_Streak := (if Any_Lost then Lost_Streak + 1 else 0);
+                     Lost_Streak := (if All_Lost then Lost_Streak + 1 else 0);
                      if Lost_Streak >= 1 then
                         Event := S ("lost sight: I could not find what I am tracking in this picture after this step (it left my view or is hidden); I stopped rather than move blind");
                         Beats := Plug.Steps (L) - Beats0;
