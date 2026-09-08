@@ -753,6 +753,10 @@ package body Act is
       Ch : constant Natural := F.Cams (Cam).H;
       Floor_Px : constant Long_Float := 4.0 / Long_Float (Cw);   --  跟踪地板:4 个像素(倍数,无量纲)
       Floor_Z : array (0 .. Natural (Pts.Length) - 1) of Long_Float := [others => 0.0];
+      --  新加的两行也要有自己的噪声地板:探针那一点点幅度下,"看着多大/朝向"的变化可能比噪声还小,
+      --  连符号都会是反的 ⇒ 身体照着反方向走(FB 实测:它一路往后退)。地板 = 静止两拍的抖动的 4 倍(倍数,无量纲)
+      Floor_S : array (0 .. Natural (Pts.Length) - 1) of Long_Float := [others => 0.0];
+      Floor_A : array (0 .. Natural (Pts.Length) - 1) of Long_Float := [others => 0.0];
       Z : constant Zone.Hand_Zone := Zone_Of (C, Arm, Cam);
    begin
       Trust := [others => False];
@@ -777,9 +781,25 @@ package body Act is
                --  读深窗口 = 张幅的四分之一,再小也有半个百分点的画幅(比例,无量纲)
                Z1 (I) := Picture.Near_Depth (F.Cams (Cam).Depth, Cw, Ch, Pts (I).Cu, Pts (I).Cv, Long_Float'Max (0.005, Z.Span * 0.25));
             end loop;
-            Selfmap.Idle (L, F, 1, Ok2);
+            declare
+               Was0 : constant Point_Vectors.Vector := Pts;
+               Before0 : constant Buf := F.Cams (Cam).Gray;
+            begin
+               Selfmap.Idle (L, F, 1, Ok2);
+               --  静止一拍,量"看着多大/朝向"自己抖多少
+               for I in 0 .. Natural (Pts.Length) - 1 loop
+                  declare
+                     P2 : Point := Pts (I);
+                  begin
+                     Retrack (C, F, Cam, Before0, P2, Was0 (I).Cu, Was0 (I).Cv, False);
+                     Floor_S (I) := 4.0 * abs (P2.Size - Was0 (I).Size);
+                     Floor_A (I) := 4.0 * abs (Wrap (P2.Ang - Was0 (I).Ang));
+                  end;
+               end loop;
+            end;
             for I in 0 .. Natural (Pts.Length) - 1 loop
                declare
+                  --  读深窗口 = 张幅的四分之一,再小也有半个百分点的画幅(比例,无量纲)
                   Z2 : constant Long_Float := Picture.Near_Depth (F.Cams (Cam).Depth, Cw, Ch, Pts (I).Cu, Pts (I).Cv, Long_Float'Max (0.005, Z.Span * 0.25));
                   Zr : constant Long_Float := (if Pts (I).Z > 0.0 then Pts (I).Z else 1.0);
                begin
@@ -841,8 +861,11 @@ package body Act is
                                  Col (1) := (P.Cv - W0.Cv) / Deliv (K);
                                  Col (2) := (if P.Z > 0.0 and then W0.Z > 0.0 then (P.Z - W0.Z) / Deliv (K) else 0.0);
                                  --  推一下这块看着变大变小多少、转了多少(圆的东西转不出来 ⇒ 这一列恒零 ⇒ 自动不参与)
-                                 Col (3) := (if P.Size > 0.0 and then W0.Size > 0.0 then (P.Size - W0.Size) / Deliv (K) else 0.0);
-                                 Col (4) := (if P.Size > 0.0 and then W0.Size > 0.0 then Wrap (P.Ang - W0.Ang) / Deliv (K) else 0.0);
+                                 --  只有变化过了自己的噪声地板才敢写进表,否则这一格留零(留零 = 归一时这一行自动不参与)
+                                 Col (3) := (if P.Size > 0.0 and then W0.Size > 0.0 and then abs (P.Size - W0.Size) > Floor_S (I)
+                                             then (P.Size - W0.Size) / Deliv (K) else 0.0);
+                                 Col (4) := (if P.Size > 0.0 and then W0.Size > 0.0 and then abs (Wrap (P.Ang - W0.Ang)) > Floor_A (I)
+                                             then Wrap (P.Ang - W0.Ang) / Deliv (K) else 0.0);
                                  Table.Set_Col (Effs (I), K, Col);
                               end;
                            else
