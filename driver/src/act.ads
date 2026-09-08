@@ -81,6 +81,9 @@ package Act is
       Fast : Boolean := False;
       Boot_Steps : Natural := 0;   --  开机量身体用掉的拍数(记账,不是上限)
       Sch : Schema.Map;            --  身体图:位姿 → 手指在各相机画面里的位置(只存真看见过的)
+      Cut_Seq : Natural := 0;      --  切块缓存:这一帧的编号(同一帧同一台相机不重切,颜色切块很贵)
+      Cut_Cam : Integer := -1;
+      Cut_Regs : Picture.Regions;
    end record;
 
    procedure Init_Tracks (C : in out Context);

@@ -86,6 +86,167 @@ package body Picture is
       end loop;
    end Slide;
 
+   procedure Mean_Colour (RGB : Buf; W, H : Natural; R : Region; Cr, Cg, Cb : out Long_Float) is
+      Sr, Sg, Sb : Long_Float := 0.0;
+      N : Natural := 0;
+   begin
+      Cr := -1.0; Cg := -1.0; Cb := -1.0;
+      if Natural (RGB.Length) < W * H * 3 then
+         return;
+      end if;
+      for Y in R.Y0 .. Natural'Min (R.Y1, H - 1) loop
+         for X in R.X0 .. Natural'Min (R.X1, W - 1) loop
+            Sr := Sr + Long_Float (RGB.Element (3 * (Y * W + X)));
+            Sg := Sg + Long_Float (RGB.Element (3 * (Y * W + X) + 1));
+            Sb := Sb + Long_Float (RGB.Element (3 * (Y * W + X) + 2));
+            N := N + 1;
+         end loop;
+      end loop;
+      if N > 0 then
+         Cr := Sr / Long_Float (N); Cg := Sg / Long_Float (N); Cb := Sb / Long_Float (N);
+      end if;
+   end Mean_Colour;
+
+   --  颜色连片:和右边、下面的邻居颜色差在门槛内就连成一块(并查集式的两遍扫描,零依赖)
+   function Cut_Colour (RGB : Buf; W, H : Natural; Floor_Level : Long_Float; Min_Count : Natural) return Regions is
+      N : constant Natural := W * H;
+      Out_R : Regions;
+      Lab : Ints;
+      procedure Find (X : in out Integer) is
+      begin
+         while Lab (X) /= X loop
+            X := Lab (X);
+         end loop;
+      end Find;
+      procedure Union (A, B : Integer) is
+         Ra : Integer := A;
+         Rb : Integer := B;
+      begin
+         Find (Ra); Find (Rb);
+         if Ra /= Rb then
+            Lab.Replace_Element (Natural (Integer'Max (Ra, Rb)), Integer'Min (Ra, Rb));
+         end if;
+      end Union;
+      function Diff (I, J : Natural) return Long_Float is
+        (Long_Float'Max (Long_Float'Max (abs (Long_Float (RGB.Element (3 * I)) - Long_Float (RGB.Element (3 * J))),
+                                         abs (Long_Float (RGB.Element (3 * I + 1)) - Long_Float (RGB.Element (3 * J + 1)))),
+                         abs (Long_Float (RGB.Element (3 * I + 2)) - Long_Float (RGB.Element (3 * J + 2)))));
+   begin
+      if W = 0 or else H = 0 or else Natural (RGB.Length) < N * 3 then
+         return Out_R;
+      end if;
+      Lab := Int_Vectors.To_Vector (0, Ada.Containers.Count_Type (N));
+      for I in 0 .. N - 1 loop
+         Lab.Replace_Element (I, I);
+      end loop;
+      for Y in 0 .. H - 1 loop
+         for X in 0 .. W - 1 loop
+            declare
+               I : constant Natural := Y * W + X;
+            begin
+               if X + 1 < W and then Diff (I, I + 1) <= Floor_Level then
+                  Union (I, I + 1);
+               end if;
+               if Y + 1 < H and then Diff (I, I + W) <= Floor_Level then
+                  Union (I, I + W);
+               end if;
+            end;
+         end loop;
+      end loop;
+      --  收成块:一遍扫描,每个根各自累计像素数、外框、一阶二阶矩(不许对每个根再扫一遍全图 —— 那是平方级)
+      declare
+         type Acc is record
+            Cnt : Natural := 0;
+            X0, Y0, X1, Y1 : Natural := 0;
+            Sx, Sy, Sxx, Syy, Sxy : Long_Float := 0.0;
+            Slot : Integer := -1;
+         end record;
+         package Acc_Vectors is new Ada.Containers.Vectors (Natural, Acc);
+         Accs : Acc_Vectors.Vector;
+         Slot_Of : Ints := Int_Vectors.To_Vector (-1, Ada.Containers.Count_Type (N));
+      begin
+         for Y in 0 .. H - 1 loop
+            for X in 0 .. W - 1 loop
+               declare
+                  I : constant Natural := Y * W + X;
+                  R : Integer := I;
+                  Sl : Integer;
+               begin
+                  Find (R);
+                  Sl := Slot_Of (Natural (R));
+                  if Sl < 0 then
+                     declare
+                        A0 : Acc;
+                     begin
+                        A0.X0 := X; A0.Y0 := Y; A0.X1 := X; A0.Y1 := Y;
+                        Accs.Append (A0);
+                     end;
+                     Sl := Integer (Accs.Length) - 1;
+                     Slot_Of.Replace_Element (Natural (R), Sl);
+                  end if;
+                  declare
+                     A1 : Acc := Accs (Natural (Sl));
+                     Fx : constant Long_Float := Long_Float (X);
+                     Fy : constant Long_Float := Long_Float (Y);
+                  begin
+                     A1.Cnt := A1.Cnt + 1;
+                     A1.X0 := Natural'Min (A1.X0, X); A1.Y0 := Natural'Min (A1.Y0, Y);
+                     A1.X1 := Natural'Max (A1.X1, X); A1.Y1 := Natural'Max (A1.Y1, Y);
+                     A1.Sx := A1.Sx + Fx; A1.Sy := A1.Sy + Fy;
+                     A1.Sxx := A1.Sxx + Fx * Fx; A1.Syy := A1.Syy + Fy * Fy; A1.Sxy := A1.Sxy + Fx * Fy;
+                     Accs.Replace_Element (Natural (Sl), A1);
+                  end;
+               end;
+            end loop;
+         end loop;
+         for A1 of Accs loop
+            if A1.Cnt >= Natural'Max (1, Min_Count) then
+               declare
+                  R : Region;
+                  C : constant Long_Float := Long_Float (A1.Cnt);
+                  Mx : constant Long_Float := A1.Sx / C;
+                  My : constant Long_Float := A1.Sy / C;
+                  Vxx : constant Long_Float := Long_Float'Max (0.0, A1.Sxx / C - Mx * Mx);
+                  Vyy : constant Long_Float := Long_Float'Max (0.0, A1.Syy / C - My * My);
+                  Vxy : constant Long_Float := A1.Sxy / C - Mx * My;
+                  Tr : constant Long_Float := Vxx + Vyy;
+                  Det : constant Long_Float := Long_Float'Max (0.0, Vxx * Vyy - Vxy * Vxy);
+                  Disc : constant Long_Float := Long_Float'Max (0.0, 0.25 * Tr * Tr - Det);
+                  L1 : constant Long_Float := 0.5 * Tr + Sqrt (Disc);
+                  L2 : constant Long_Float := Long_Float'Max (0.0, 0.5 * Tr - Sqrt (Disc));
+                  Ax, Ay, Ln : Long_Float;
+               begin
+                  R.X0 := A1.X0; R.Y0 := A1.Y0; R.X1 := A1.X1; R.Y1 := A1.Y1;
+                  R.Count := A1.Cnt;
+                  R.Cu := Mx / Long_Float (W); R.Cv := My / Long_Float (H);
+                  R.Sig_U := Sqrt (Vxx) / Long_Float (W); R.Sig_V := Sqrt (Vyy) / Long_Float (H);
+                  if abs Vxy > 1.0e-12 then
+                     Ax := L1 - Vyy; Ay := Vxy;
+                  elsif Vxx >= Vyy then
+                     Ax := 1.0; Ay := 0.0;
+                  else
+                     Ax := 0.0; Ay := 1.0;
+                  end if;
+                  Ln := Sqrt (Ax * Ax + Ay * Ay);
+                  if Ln > 1.0e-12 then
+                     R.Au := Ax / Ln; R.Av := Ay / Ln;
+                  end if;
+                  --  短轴为零时伸长比记成一个大数(无量纲)
+                  R.Elong := (if L2 > 1.0e-9 then Sqrt (L1 / L2) else 1.0e3);
+                  Out_R.Append (R);
+               end;
+            end if;
+         end loop;
+      end;
+      declare
+         function Bigger (A, B : Region) return Boolean is (A.Count > B.Count);
+         package Sorter is new Region_Vectors.Generic_Sorting (Bigger);
+      begin
+         Sorter.Sort (Out_R);
+      end;
+      return Out_R;
+   end Cut_Colour;
+
    function Cut (Depth : Floats; W, H : Natural; Win_Frac, Sigma_Mult : Long_Float) return Regions is
       Out_R : Regions;
       N : constant Natural := W * H;

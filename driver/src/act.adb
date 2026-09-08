@@ -112,7 +112,7 @@ package body Act is
       return 0.125;   --  世界相机:画幅八分之一(比例,无量纲)
    end Cut_Window;
 
-   function Cut_Things (C : Context; F : Plug.Frame; Cam : Natural) return Picture.Regions is
+   function Cut_Things_Raw (C : Context; F : Plug.Frame; Cam : Natural) return Picture.Regions is
       Cw : constant Natural := F.Cams (Cam).W;
       Ch : constant Natural := F.Cams (Cam).H;
       Raw : Picture.Regions;
@@ -122,6 +122,29 @@ package body Act is
          return Kept;
       end if;
       Raw := Picture.Cut (F.Cams (Cam).Depth, Cw, Ch, Cut_Window (C, Cam, F), Sigma_Mult);
+      --  再按颜色切一遍,把深度上鼓不出来的细东西(线、缝、刀口)补进来:
+      --  门槛 = 这台相机静止时颜色抖多少(量出来的)的几倍;贴画面边的是桌面/墙,丢掉(本仓既有规矩);
+      --  已经被深度块盖住的不重复列
+      declare
+         Floor_C : constant Long_Float := Long_Float (Integer'(if Cam < Natural (C.Map.Pic_Floor.Length) then C.Map.Pic_Floor (Cam) else 0)) * 2.0 + 1.0;
+         Thin : constant Picture.Regions := Picture.Cut_Colour (F.Cams (Cam).RGB, Cw, Ch, Floor_C, Picture.Min_Pixels (Cw, Ch));
+      begin
+         for R of Thin loop
+            declare
+               Edge : constant Boolean := R.X0 = 0 or else R.Y0 = 0 or else R.X1 >= Cw - 1 or else R.Y1 >= Ch - 1;
+               Covered : Boolean := False;
+            begin
+               for Q of Raw loop
+                  if Picture.Inside (Q, R.Cu, R.Cv, Cw, Ch, 0.0) then
+                     Covered := True;
+                  end if;
+               end loop;
+               if not Edge and then not Covered then
+                  Raw.Append (R);
+               end if;
+            end;
+         end loop;
+      end;
       for R of Raw loop
          declare
             Mine : Boolean := False;
@@ -137,6 +160,19 @@ package body Act is
          end;
       end loop;
       return Kept;
+   end Cut_Things_Raw;
+
+   --  同一帧、同一台相机只切一次(颜色切块要扫全图两遍,一步里被问好几次)
+   function Cut_Things (C : Context; F : Plug.Frame; Cam : Natural) return Picture.Regions is
+      Self : constant access Context := C'Unrestricted_Access;
+   begin
+      if C.Cut_Seq = F.Seq and then C.Cut_Cam = Integer (Cam) then
+         return C.Cut_Regs;
+      end if;
+      Self.Cut_Regs := Cut_Things_Raw (C, F, Cam);
+      Self.Cut_Seq := F.Seq;
+      Self.Cut_Cam := Integer (Cam);
+      return Self.Cut_Regs;
    end Cut_Things;
 
    function Cell_Of (C : Context; U, V : Long_Float) return Natural is

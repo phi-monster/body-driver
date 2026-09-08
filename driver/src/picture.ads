@@ -24,6 +24,10 @@ package Picture is
 
    function Min_Pixels (W, H : Natural) return Natural;
    function Cut (Depth : Floats; W, H : Natural; Win_Frac, Sigma_Mult : Long_Float) return Regions;
+   --  按颜色切:颜色连成一片的算一块。细的东西(线、缝、刀口)在深度图上鼓不出来,只有这条能把它们切出来。
+   --  门槛不是写死的:先量"静止时同一块地方颜色抖多少"(噪声地板),差过它的几倍才算换了一块。
+   function Cut_Colour (RGB : Buf; W, H : Natural; Floor_Level : Long_Float; Min_Count : Natural) return Regions;
+   procedure Mean_Colour (RGB : Buf; W, H : Natural; R : Region; Cr, Cg, Cb : out Long_Float);
    function Region_Mask (Depth : Floats; W, H : Natural; R : Region) return Bools;
    function Near_Depth (Depth : Floats; W, H : Natural; U, V, Win_Frac : Long_Float) return Long_Float;  --  NaN = 读不到
    function Null_Floor (A, B : Buf; W, H : Natural; Min_Px : Natural) return Floor_Map;

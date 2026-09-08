@@ -253,6 +253,48 @@ begin
       Check (abs (Z.Depth - 0.2) < 1.0e-6, "握区:手指深 " & Codec.Fmt (Z.Depth, 3));
       Check (Z.X0 >= 10 and then Z.X1 <= 53, "握区:区框在两瓣之间 " & Codec.Img (Z.X0) & ".." & Codec.Img (Z.X1));
    end;
+   --  颜色切块:两根细杆在深度上鼓不出来,但颜色分得开 —— 各自成一块,而且是细长的
+   declare
+      W : constant Natural := 60;
+      H : constant Natural := 40;
+      RGB : Buf := U8_Vectors.To_Vector (30, Ada.Containers.Count_Type (W * H * 3));
+      Rs : Picture.Regions;
+      Cr, Cg, Cb : Long_Float;
+   begin
+      for Y in 5 .. 34 loop            --  一根红的竖杆(x = 20,宽 2 px)
+         for X in 20 .. 21 loop
+            RGB.Replace_Element (3 * (Y * W + X), 200);
+            RGB.Replace_Element (3 * (Y * W + X) + 1, 30);
+            RGB.Replace_Element (3 * (Y * W + X) + 2, 30);
+         end loop;
+      end loop;
+      for Y in 5 .. 34 loop            --  一根蓝的竖杆(x = 30,宽 2 px)
+         for X in 30 .. 31 loop
+            RGB.Replace_Element (3 * (Y * W + X), 30);
+            RGB.Replace_Element (3 * (Y * W + X) + 1, 30);
+            RGB.Replace_Element (3 * (Y * W + X) + 2, 200);
+         end loop;
+      end loop;
+      Rs := Picture.Cut_Colour (RGB, W, H, 20.0, 8);
+      Check (Natural (Rs.Length) >= 3, "颜色切块:背景 + 两根杆 至少三块(切出" & Codec.Img (Natural (Rs.Length)) & " 块)");
+      declare
+         Thin : Natural := 0;
+      begin
+         for R of Rs loop
+            if R.Count in 40 .. 80 and then R.Elong > 3.0 then
+               Thin := Thin + 1;
+            end if;
+         end loop;
+         Check (Thin = 2, "颜色切块:两根都被切成细长块(" & Codec.Img (Thin) & " 根)");
+      end;
+      for R of Rs loop
+         if R.Count in 40 .. 80 then
+            Picture.Mean_Colour (RGB, W, H, R, Cr, Cg, Cb);
+            Check ((Cr > 100.0 and then Cb < 100.0) or else (Cb > 100.0 and then Cr < 100.0),
+                   "颜色切块:一根偏红一根偏蓝(" & Codec.Fmt (Cr, 0) & "," & Codec.Fmt (Cg, 0) & "," & Codec.Fmt (Cb, 0) & ")");
+         end if;
+      end loop;
+   end;
    --  五行的表:只有"往前走"能改大小、只有"转腕"能改朝向 ⇒ 要它变大且转正时,两个通道各自被用上
    declare
       E : Table.Effect;
