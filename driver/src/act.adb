@@ -712,8 +712,15 @@ package body Act is
                      Zd : constant Long_Float := Picture.Near_Depth (F.Cams (Cam).Depth, Cw, Ch, P.Cu, P.Cv, Win);
                   begin
                      if not Picture.Is_Nan (Zd) then
-                        --  一步之内深度跳了超过"预测的变化 + 距离的一成"(比例,无量纲)⇒ 读到的不是我的手指,留预测
-                        if Old_Z <= 0.0 or else Pred_Z <= 0.0 or else abs (Zd - Pred_Z) <= abs (Pred_Z - Old_Z) + 0.1 * Old_Z then
+                        --  一步之内深度跳了超过"预测的变化 + 距离的一成"(比例,无量纲)⇒ 读到的不是我的手指,留预测。
+                        --  🔴 没有预测值时这道闸以前【整条失效】,于是任何读数都收:FS 实测手指的"离相机多远"
+                        --  一步从 0.454 m 跳到 0.010 m(离相机一厘米,物理上不可能),抓握的高低判据当场作废。
+                        --  没有预测就退回"一步最多变一成",而不是不管。
+                        if Old_Z <= 0.0 then
+                           P.Z := Zd;
+                        elsif Pred_Z <= 0.0 then
+                           P.Z := (if abs (Zd - Old_Z) <= 0.1 * Old_Z then Zd else Old_Z);
+                        elsif abs (Zd - Pred_Z) <= abs (Pred_Z - Old_Z) + 0.1 * Old_Z then
                            P.Z := Zd;
                         else
                            P.Z := Pred_Z;
