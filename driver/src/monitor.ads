@@ -25,7 +25,9 @@ package Monitor is
        and then (if Pic_Delta <= F.Picture then W.Quiet = Natural'Min (W'Old.Quiet + 1, Count'Last) else W.Quiet = 0)
        and then (if Delivered <= F.Delivery then W.Refused = Natural'Min (W'Old.Refused + 1, Count'Last) else W.Refused = 0);
    function Settled (W : Watch) return Boolean is (W.Quiet >= 2);
-   function Stalled (W : Watch) return Boolean is (W.No_Progress >= 2);
+   --  连着几步没比"到目前为止最好的一次"更好才算走不动了(次数,无量纲)。
+   --  2 太急:每一步只缩掉剩余差距的百分之一二,噪声一晃就被判死,一段永远走不完(FL 实测)
+   function Stalled (W : Watch) return Boolean is (W.No_Progress >= 5);
    function Refusing (W : Watch) return Boolean is (W.Refused >= 2);
    function Slipped (Reading, Empty : Bounded; Noise : Floor) return Boolean is (Reading - Empty <= Noise);
    --  🔴 "碰到"和"顶住"是两件事,不许压成一条(它们以前共用"零表更准或连着被拒",而那一条同时对应五种原因:

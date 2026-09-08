@@ -188,8 +188,9 @@ begin
       Had : Boolean;
    begin
       F.Picture := 2.0; F.Track := 0.001; F.Delivery := 0.0001;
-      Monitor.Step (W, 1.0, 0.5, 0.5, 0.01, F);
-      Monitor.Step (W, 1.0, 0.5, 0.5, 0.01, F);
+      for K in 1 .. 5 loop   --  走不动了要连着五步没进步(次数,无量纲)
+         Monitor.Step (W, 1.0, 0.5, 0.5, 0.01, F);
+      end loop;
       Check (Monitor.Settled (W) and then Monitor.Stalled (W) and then not Monitor.Refusing (W), "监视器:静止且没进展");
       Check (Monitor.Fired (Monitor.U_Settle, W, 0, False, 0.0, 0.0, 0.0), "until settle 触发");
       Check (not Monitor.Fired (Monitor.U_Contact, W, 0, False, 0.0, 0.0, 0.0), "until contact 不误触");

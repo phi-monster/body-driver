@@ -347,8 +347,14 @@ package body Bodyfile is
                end;
             end loop;
          end;
-         --  响应表初值
+         --  响应表【不跨炮沿用】:它是在某一次跟踪里学出来的,跟错了东西就会把"往哪走会靠近"学反,
+         --  存进档案再拿回来用,下一炮会一路朝反方向走(FK/FL 实测,清掉表当场重量之后球才第一次变近)。
+         --  重量一遍只要几十拍,不值得冒这个险。身体图、通道幅度、握区照旧沿用。
          Tables.Clear;
+         if True then
+            Note := To_Unbounded_String ("装回身体文件(量过 " & Codec.Img (M.Measured_Times) & " 次;响应表不沿用,当场重量)");
+            return True;
+         end if;
          declare
             Ts : constant Integer := Json.Get (D, 0, "tables");
          begin
