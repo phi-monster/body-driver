@@ -319,22 +319,6 @@ package body Picture is
       return Long_Float (C) / Long_Float (Mask.Length);
    end Fraction;
 
-   function Mean_Gray (G : Buf; W, H : Natural; R : Region) return Long_Float is
-      S : Long_Float := 0.0;
-      N : Natural := 0;
-   begin
-      if Natural (G.Length) < W * H then
-         return -1.0;
-      end if;
-      for Y in R.Y0 .. Natural'Min (R.Y1, H - 1) loop
-         for X in R.X0 .. Natural'Min (R.X1, W - 1) loop
-            S := S + Long_Float (G.Element (Y * W + X));
-            N := N + 1;
-         end loop;
-      end loop;
-      return (if N > 0 then S / Long_Float (N) else -1.0);
-   end Mean_Gray;
-
    function Max_Diff (A, B : Buf) return Natural is
       N : constant Natural := Natural'Min (Natural (A.Length), Natural (B.Length));
       M : Natural := 0;

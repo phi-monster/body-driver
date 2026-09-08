@@ -276,15 +276,12 @@ package body Act is
                It.Kind := Thing; It.Located := True;
                It.Cu := Sl.R.Cu; It.Cv := Sl.R.Cv; It.Depth := Sl.R.Depth; It.Height := Sl.R.Height; It.Count := Sl.R.Count;
                It.X0 := Sl.R.X0; It.Y0 := Sl.R.Y0; It.X1 := Sl.R.X1; It.Y1 := Sl.R.Y1;
-               It.Au := Sl.R.Au; It.Av := Sl.R.Av; It.Elong := Sl.R.Elong;
-               It.Gray := Picture.Mean_Gray (F.Cams (Cam).Gray, Cw, Ch, Sl.R);
                Push (It, "a thing, now in cell " & Codec.Img (Cell_Of (C, It.Cu, It.Cv)) & " (" & Codec.Img (It.Count) & " px, standing " &
                      Codec.Fmt (It.Height, 3) & " out of the surface)" & Rel (It.Cu, It.Cv), Draw.Green, 2);
             elsif Sl.Seen then
                It.Kind := Thing_Remembered; It.Located := True;
                It.Cu := Sl.Shadow.Cu; It.Cv := Sl.Shadow.Cv; It.Depth := Sl.Shadow.Depth; It.Height := Sl.Shadow.Height; It.Count := Sl.Shadow.Count;
                It.X0 := Sl.Shadow.X0; It.Y0 := Sl.Shadow.Y0; It.X1 := Sl.Shadow.X1; It.Y1 := Sl.Shadow.Y1;
-               It.Au := Sl.Shadow.Au; It.Av := Sl.Shadow.Av; It.Elong := Sl.Shadow.Elong;
                Push (It, "a thing you saw before, remembered where it was last seen, cell " & Codec.Img (Cell_Of (C, It.Cu, It.Cv)) &
                      " (not visible right now - probably under my hand; " & Codec.Img (It.Count) & " px)", Draw.Dim_Green, 1);
             else
@@ -348,12 +345,6 @@ package body Act is
       Has_Meas : Boolean := False;              --  眼睛(光流)另外量到的位置,只用来修表
       Meas_U, Meas_V, Meas_Z : Long_Float := 0.0;
       Known : Boolean := True;                  --  这个位置是真看过的/离真看过的样本不超过一步 ⇒ 不是,走之前先看一眼
-      Elong : Long_Float := 1.0;                --  脑点名那一刻这块的胖瘦(长轴/短轴),用来和别的块区分
-      Gray : Long_Float := -1.0;                --  脑点名那一刻这块的平均灰度(< 0 = 没量到)
-      Unsure : Boolean := False;                --  重新认的时候有两块一样像 ⇒ 不许自己挑,回去问脑
-      Side : Integer := 0;                      --  这一块的哪一侧(0 = 整块;-1/+1 = 沿合拢方向的两侧,各去一根手指)
-      Ax, Ay : Long_Float := 0.0;               --  合拢方向(画面里的单位向量,从这块自己的形状量的)
-      Half : Long_Float := 0.0;                 --  这块沿合拢方向的半宽(画幅)
       Steps_Err : Long_Float := 0.0;            --  上一步算出来的"还差几步"(三样都除以推一步能改多少之后的总和)
       Err_U, Err_V, Err_Z : Long_Float := 0.0;  --  拆开的三样(左右 / 上下 / 远近),单位都是"还差几步"
       Par_Tu, Par_Tv : Long_Float := 0.0;       --  两团展开时,整块的目标(看清各团真实位置后按它重算各团目标)
@@ -560,37 +551,19 @@ package body Act is
                end if;
             end;
          when Thing_Pt =>
-            --  重新认脑点名的那一块:除了"位置近、大小差不多",还要"胖瘦像、颜色像"(ER:球 4703 px 和乐高 6334 px 大小分不开,跟错了)。
-            --  🔴 认东西是脑的活:两块一样像的时候不许自己挑 —— 记 Unsure,回去问脑要号。
             declare
                Regs : constant Picture.Regions := Cut_Things (C, F, Cam);
-               Best, Second : Integer := -1;
-               Bd, Sd : Long_Float := 1.0e9;
+               Best : Integer := -1;
+               Bd : Long_Float := 1.0e9;
                Tol : constant Long_Float := Long_Float'Max (P.Box_W, P.Box_H) * 0.75 + Track_Win;
-               --  不像的程度:位置差几个跟踪窗 + 胖瘦差几成 + 灰度差几成(都是比例,无量纲)
-               function Unlike (R : Picture.Region) return Long_Float is
-                  D : constant Long_Float := Sqrt ((R.Cu - Pred_U) ** 2 + (R.Cv - Pred_V) ** 2) / Long_Float'Max (Tol, 1.0e-9);
-                  E : constant Long_Float := abs (R.Elong - P.Elong) / Long_Float'Max (1.0, P.Elong);
-                  G : constant Long_Float := (if P.Gray >= 0.0 then
-                                                 abs (Picture.Mean_Gray (F.Cams (Cam).Gray, Cw, Ch, R) - P.Gray) / 255.0
-                                              else 0.0);
-               begin
-                  return D + E + G;
-               end Unlike;
             begin
                for I in 0 .. Natural (Regs.Length) - 1 loop
                   declare
                      R : constant Picture.Region := Regs (I);
                      D : constant Long_Float := Sqrt ((R.Cu - Pred_U) ** 2 + (R.Cv - Pred_V) ** 2);
-                     U : constant Long_Float := Unlike (R);
                   begin
-                     if R.Count * 3 >= P.Count and then R.Count <= P.Count * 3 and then D <= Tol then
-                        if U < Bd then
-                           Sd := Bd; Second := Best;
-                           Bd := U; Best := I;
-                        elsif U < Sd then
-                           Sd := U; Second := I;
-                        end if;
+                     if R.Count * 3 >= P.Count and then R.Count <= P.Count * 3 and then D <= Tol and then D < Bd then
+                        Bd := D; Best := I;
                      end if;
                   end;
                end loop;
@@ -598,30 +571,9 @@ package body Act is
                   declare
                      R : constant Picture.Region := Regs (Best);
                   begin
-                     P.Z := R.Depth; P.Height := R.Height; P.Count := R.Count;
+                     P.Cu := R.Cu; P.Cv := R.Cv; P.Z := R.Depth; P.Height := R.Height; P.Count := R.Count;
                      P.Box_W := Long_Float (R.X1 - R.X0) / Long_Float (Cw);
                      P.Box_H := Long_Float (R.Y1 - R.Y0) / Long_Float (Ch);
-                     if P.Side = 0 then
-                        P.Cu := R.Cu; P.Cv := R.Cv;
-                     else
-                        --  这一侧的位置 = 这块的中心 + 侧 × 半宽 × 合拢方向。方向每步从这块自己的形状重算,
-                        --  但主轴有正负两种写法 ⇒ 跟上一步同向的那个(不然两侧会来回对调)
-                        declare
-                           Gx : Long_Float := -R.Av;
-                           Gy : Long_Float := R.Au;
-                           Hf : Long_Float;
-                        begin
-                           if Gx * P.Ax + Gy * P.Ay < 0.0 then
-                              Gx := -Gx; Gy := -Gy;
-                           end if;
-                           Hf := 0.5 * Sqrt ((P.Box_W * Gx) ** 2 + (P.Box_H * Gy) ** 2);
-                           P.Ax := Gx; P.Ay := Gy; P.Half := Hf;
-                           P.Cu := R.Cu + Long_Float (P.Side) * Hf * Gx;
-                           P.Cv := R.Cv + Long_Float (P.Side) * Hf * Gy;
-                        end;
-                     end if;
-                     --  第二像的和最像的差不到一半 ⇒ 分不开,不许自己挑
-                     P.Unsure := Second >= 0 and then Sd < Bd * 2.0;
                   end;
                else
                   P.Cu := Pred_U; P.Cv := Pred_V; P.Lost := True;
@@ -1337,29 +1289,6 @@ package body Act is
                         Beats := Plug.Steps (L) - Beats0;
                         return;
                      end if;
-                     --  🔴 认东西是脑的活:两块一样像的时候身体不许自己挑(ER:球和乐高大小分不开,跟着乐高走还把它撞倒)
-                     for P of Pts loop
-                        if P.Unsure then
-                           if C.Dump_Dir /= "" then
-                              declare
-                                 RGB2 : Buf := F.Cams (Cam).RGB;
-                                 Regs2 : constant Picture.Regions := Cut_Things (C, F, Cam);
-                                 N2 : Natural := 0;
-                              begin
-                                 for R of Regs2 loop
-                                    N2 := N2 + 1;
-                                    Draw.Numbered_Box (RGB2, F.Cams (Cam).W, F.Cams (Cam).H, R.X0, R.Y0, R.X1, R.Y1, N2, Draw.Green, 2);
-                                 end loop;
-                                 Codec.Write_BMP (To_String (C.Dump_Dir) & "/unsure_" & Codec.Pad6 (C.Round_N) & "_" & Codec.Pad6 (Steps_Taken) & ".bmp",
-                                                  RGB2, F.Cams (Cam).W, F.Cams (Cam).H);
-                              end;
-                           end if;
-                           Event := S ("not sure which one is yours: two things here look equally like the one you named (same size, same distance); "
-                                       & "I stopped instead of guessing - look again and tell me its number");
-                           Beats := Plug.Steps (L) - Beats0;
-                           return;
-                        end if;
-                     end loop;
                      if Not_Followed then
                         Put_Line ("[身]     没照做这一步不算数,步幅已缩回;接着走");
                      end if;
@@ -1923,56 +1852,10 @@ package body Act is
                if Pts.Is_Empty and then Z.Valid then
                   P.Arm := A; P.Item_No := Say.Grip_On;
                   if Own_Cam then
-                     --  🔴 两个接触点,不是一个中心:这块东西的两侧各去一根手指。
-                     --  一个中心只给三个数,而胳膊有六个能动的 ⇒ 剩下三个自由度身体爱怎么动怎么动(手腕乱拧、球被转出画面)。
-                     --  两侧各三个 = 六个,姿势被题目定死;而且白捡一个强信号:这块在画面里显得多宽,必须正好等于两指的间距。
-                     declare
-                        Gx : Long_Float := -O.Av;   --  合拢方向 = 这块主轴的垂线(从窄的那边下手)
-                        Gy : Long_Float := O.Au;
-                        Ln : constant Long_Float := Sqrt (Gx * Gx + Gy * Gy);
-                        Bw : constant Long_Float := Long_Float (O.X1 - O.X0) / Long_Float (Cw);
-                        Bh : constant Long_Float := Long_Float (O.Y1 - O.Y0) / Long_Float (Ch);
-                        Hf : Long_Float;
-                        --  两侧配哪根手指:挑总路程短的那种配法(最省劲,不是规矩)
-                        D1, D2 : Long_Float;
-                        Sw : Boolean;
-                     begin
-                        if Ln > 1.0e-9 then
-                           Gx := Gx / Ln; Gy := Gy / Ln;
-                        else
-                           Gx := 1.0; Gy := 0.0;
-                        end if;
-                        Hf := 0.5 * Sqrt ((Bw * Gx) ** 2 + (Bh * Gy) ** 2);
-                        D1 := Sqrt ((O.Cu - Hf * Gx - Z.A.Cu) ** 2 + (O.Cv - Hf * Gy - Z.A.Cv) ** 2)
-                            + Sqrt ((O.Cu + Hf * Gx - Z.B.Cu) ** 2 + (O.Cv + Hf * Gy - Z.B.Cv) ** 2);
-                        D2 := Sqrt ((O.Cu - Hf * Gx - Z.B.Cu) ** 2 + (O.Cv - Hf * Gy - Z.B.Cv) ** 2)
-                            + Sqrt ((O.Cu + Hf * Gx - Z.A.Cu) ** 2 + (O.Cv + Hf * Gy - Z.A.Cv) ** 2);
-                        Sw := D2 < D1;
-                        for Sd in 0 .. 1 loop
-                           declare
-                              Q : Point;
-                              Sg : constant Long_Float := (if Sd = 0 then -1.0 else 1.0);
-                              Lb : constant Zone.Lobe := (if (Sd = 0) xor Sw then Z.A else Z.B);
-                           begin
-                              Q.Arm := A; Q.Item_No := Say.Grip_On;
-                              Q.Kind := Thing_Pt; Q.Slot := O.Slot;
-                              Q.Side := (if Sd = 0 then -1 else 1);
-                              Q.Ax := Gx; Q.Ay := Gy; Q.Half := Hf;
-                              Q.Cu := O.Cu + Sg * Hf * Gx; Q.Cv := O.Cv + Sg * Hf * Gy;
-                              Q.Z := O.Depth; Q.Height := O.Height; Q.Count := O.Count;
-                              Q.Box_W := Bw; Q.Box_H := Bh;
-                              Q.Elong := O.Elong; Q.Gray := O.Gray;
-                              Q.Tu := Lb.Cu; Q.Tv := Lb.Cv;
-                              Q.Tz := Z.Depth; Q.Wz := (if Picture.Is_Nan (Z.Depth) then 0.0 else 1.0);
-                              if Sd = 0 then
-                                 Q.Desc := S ("the two sides of item " & Codec.Img (Say.Grip_On) & " onto my two fingers (this hand camera)");
-                              end if;
-                              Pts.Append (Q);
-                           end;
-                        end loop;
-                     end;
-                  elsif False then
-                     null;
+                     P.Kind := Thing_Pt; P.Slot := O.Slot; P.Cu := O.Cu; P.Cv := O.Cv; P.Z := O.Depth; P.Height := O.Height; P.Count := O.Count;
+                     P.Box_W := Long_Float (O.X1 - O.X0) / Long_Float (Cw); P.Box_H := Long_Float (O.Y1 - O.Y0) / Long_Float (Ch);
+                     P.Tu := Z.Cu; P.Tv := Z.Cv; P.Tz := Z.Depth; P.Wz := (if Picture.Is_Nan (Z.Depth) then 0.0 else 1.0);
+                     P.Desc := S ("item " & Codec.Img (Say.Grip_On) & " into grip " & Codec.Img (A + 1) & " (this hand camera)");
                   else
                      declare
                         Tr : constant Zone_Track := C.Zones (Track_Idx (C, A, Cam));
@@ -2104,27 +1987,15 @@ package body Act is
                            Pin.Z := 0.0;
                         end if;
                      end if;
-                     if Found and then Pin.Kind = Thing_Pt and then Pin.Side /= 0 and then Hz.Valid then
-                        --  笼住 = 这块的两侧各自到了自己那根手指(画面里进跟踪噪声),而且远近和指尖对得上。
-                        --  只看"中心在区框里"不够:手上相机里区框就是整个下半幅,那条判据恒真(EI/EM 实测)
+                     if Found and then Pin.Kind = Thing_Pt and then Hz.Valid then
                         declare
-                           Worst : Long_Float := 0.0;
-                           Depth_Ok : Boolean := True;
-                           Tol : constant Long_Float := Long_Float'Max (Track_Win * 0.5, Hz.Span * 0.25);
+                           Inside : constant Boolean := Pin.Cu * Long_Float (Cw) >= Long_Float (Hz.X0) and then Pin.Cu * Long_Float (Cw) <= Long_Float (Hz.X1)
+                                                        and then Pin.Cv * Long_Float (Ch) >= Long_Float (Hz.Y0) and then Pin.Cv * Long_Float (Ch) <= Long_Float (Hz.Y1);
+                           Depth_Ok : constant Boolean := Picture.Is_Nan (Hz.Depth) or else Pin.Z <= 0.0 or else abs (Pin.Z - Hz.Depth) <= Long_Float'Max (Pin.Height, Long_Float'Max (Pin.Box_W, Pin.Box_H) * Pin.Z);
                         begin
-                           for P of Pts loop
-                              if P.Item_No = Say.Grip_On and then P.Side /= 0 then
-                                 Worst := Long_Float'Max (Worst, Sqrt ((P.Tu - P.Cu) ** 2 + (P.Tv - P.Cv) ** 2));
-                                 if not (Picture.Is_Nan (Hz.Depth) or else P.Z <= 0.0
-                                         or else abs (P.Z - Hz.Depth) <= Long_Float'Max (P.Height, Long_Float'Max (P.Box_W, P.Box_H) * P.Z))
-                                 then
-                                    Depth_Ok := False;
-                                 end if;
-                              end if;
-                           end loop;
-                           Caged := Worst <= Tol and then Depth_Ok;
-                           Cage_Note := S ("cage check in this hand camera: the two sides of it are " & Codec.Fmt (Worst, 3) & " of a frame from my two fingers (allowed " &
-                                           Codec.Fmt (Tol, 3) & ") and their distance " & (if Depth_Ok then "matches" else "does not match") & " my fingertips");
+                           Caged := Inside and then Depth_Ok;
+                           Cage_Note := S ("cage check in this hand camera: the thing's centre is " & (if Inside then "inside" else "OUTSIDE") & " my grip box and its depth " &
+                                           (if Depth_Ok then "matches" else "does not match") & " my fingertips (" & Codec.Fmt (Pin.Z, 3) & " vs " & Codec.Fmt (Hz.Depth, 3) & ")");
                         end;
                      elsif Found and then Pin.Kind = Piece_Pt then
                         declare

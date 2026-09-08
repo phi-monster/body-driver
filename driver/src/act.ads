@@ -26,9 +26,6 @@ package Act is
       X0, Y0, X1, Y1 : Natural := 0;
       Depth, Height : Long_Float := 0.0;
       Count : Natural := 0;
-      Au, Av : Long_Float := 0.0;    --  这一块自己的主轴(画面里的单位向量)
-      Elong : Long_Float := 1.0;     --  长轴/短轴
-      Gray : Long_Float := -1.0;     --  框里的平均灰度(< 0 = 没量到)
    end record;
    package Item_Vectors is new Ada.Containers.Vectors (Natural, Item);
 

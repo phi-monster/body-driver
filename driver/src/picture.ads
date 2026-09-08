@@ -33,7 +33,6 @@ package Picture is
    function Components (Mask : Bools; W, H : Natural; Min_Count : Natural) return Regions;
    function Fraction (Mask : Bools) return Long_Float;
    function Max_Diff (A, B : Buf) return Natural;
-   function Mean_Gray (G : Buf; W, H : Natural; R : Region) return Long_Float;   --  这一块框里的平均灰度(0..255)
    function Quantile (F : in out Floats; Q : Long_Float) return Long_Float;
    function Region_Depth (Depth : Floats; W, H : Natural; Mask : Bools; Q : Long_Float) return Long_Float;  --  掩膜上的深度分位;NaN = 无
    function Inside (R : Region; U, V : Long_Float; W, H : Natural; Grow : Long_Float) return Boolean;
