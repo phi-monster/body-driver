@@ -450,6 +450,12 @@ package body Act is
       return Sqrt ((P.Tu - P.Cu) ** 2 + (P.Tv - P.Cv) ** 2);
    end Err_Of;
 
+   --  "看着多大"最小分得清多少:框变一个像素(画幅的 1/宽)。仿真里静止两拍画面一模一样,拿"静止时抖多少"当地板会得到 0 = 没有地板
+   function Size_Floor (Cw : Natural) return Long_Float is (1.0 / Long_Float (Natural'Max (1, Cw)));
+   --  朝向最小分得清多少:这块最长的那边偏一个像素(两倍角 ⇒ ×4)
+   function Ang_Floor (P : Point; Cw, Ch : Natural) return Long_Float is
+     (4.0 / Long_Float'Max (4.0, Long_Float'Max (P.Box_W * Long_Float (Cw), P.Box_H * Long_Float (Ch))));
+
    --  到位了没:画面上进了跟踪噪声,且远近的差不超过这块东西自己的尺寸(全是量出来的,没有写死的容差)
    function Reached (P : Point; Track_Floor : Long_Float) return Boolean is
       Tol : constant Long_Float := Long_Float'Max (P.Height, Long_Float'Max (P.Box_W, P.Box_H) * P.Z);
@@ -792,8 +798,8 @@ package body Act is
                      P2 : Point := Pts (I);
                   begin
                      Retrack (C, F, Cam, Before0, P2, Was0 (I).Cu, Was0 (I).Cv, False);
-                     Floor_S (I) := 4.0 * abs (P2.Size - Was0 (I).Size);
-                     Floor_A (I) := 4.0 * abs (Wrap (P2.Ang - Was0 (I).Ang));
+                     Floor_S (I) := Long_Float'Max (4.0 * abs (P2.Size - Was0 (I).Size), Size_Floor (Cw));
+                     Floor_A (I) := Long_Float'Max (4.0 * abs (Wrap (P2.Ang - Was0 (I).Ang)), Ang_Floor (Was0 (I), Cw, Ch));
                   end;
                end loop;
             end;
@@ -1471,8 +1477,11 @@ package body Act is
                   Dy (1) := (if P.Has_Meas then P.Meas_V else P.Cv) - W0.Cv;
                   Dy (2) := (if P.Has_Meas then (if P.Meas_Z > 0.0 and then W0.Z > 0.0 then P.Meas_Z - W0.Z else 0.0)
                              elsif P.Z > 0.0 and then W0.Z > 0.0 then P.Z - W0.Z else 0.0);
-                  Dy (3) := (if P.Size > 0.0 and then W0.Size > 0.0 then P.Size - W0.Size else 0.0);
-                  Dy (4) := (if P.Size > 0.0 and then W0.Size > 0.0 then Wrap (P.Ang - W0.Ang) else 0.0);
+                  --  同样的地板:没过就当没变(不然把量化噪声学进表里,符号可能是反的)
+                  Dy (3) := (if P.Size > 0.0 and then W0.Size > 0.0 and then abs (P.Size - W0.Size) > Size_Floor (Cw)
+                             then P.Size - W0.Size else 0.0);
+                  Dy (4) := (if P.Size > 0.0 and then W0.Size > 0.0 and then abs (Wrap (P.Ang - W0.Ang)) > Ang_Floor (W0, Cw, Ch)
+                             then Wrap (P.Ang - W0.Ang) else 0.0);
                   Table.Update (E, Note.Got, Dy, Fl.Track * 2.0, Long_Float'Max (C.Map.EE_Noise, 0.5 * Note.Floor_Cmd));
                   if Table.Blocked (E) then
                      Note.Blocked := True;
