@@ -28,12 +28,18 @@ package Monitor is
    function Stalled (W : Watch) return Boolean is (W.No_Progress >= 2);
    function Refusing (W : Watch) return Boolean is (W.Refused >= 2);
    function Slipped (Reading, Empty : Bounded; Noise : Floor) return Boolean is (Reading - Empty <= Noise);
-   --  这一段该不该停:U_Steps 到步数;U_Contact/U_Resist 由"零表更准"(Blocked)或连着被拒判;U_Slip 读数回到空合;U_Settle 画面静止。
+   --  🔴 "碰到"和"顶住"是两件事,不许压成一条(它们以前共用"零表更准或连着被拒",而那一条同时对应五种原因:
+   --  指尖碰到目标 · 别处撞上 · 控制器拒了命令 · 还没生效 · 跟丢了)。分法用的是两个量得到的量:
+   --    碰到 = 我在动,而【我没在推的那个东西】也动了(在不跟着这只手动的相机里量);
+   --    顶住 = 命令发了而【身体没走】(实到落进本体噪声,连着两步)。
+   --  两条都不成立时,这一段不许自称"碰到了"——不确定就继续走或者回去问脑。
+   function Touching (Moved_Other : Boolean) return Boolean is (Moved_Other);
    function Fired (U : Until_Kind; W : Watch; Step_Cap : Natural; Blocked : Boolean;
-                   Reading, Empty : Bounded; Reading_Noise : Floor) return Boolean is
+                   Reading, Empty : Bounded; Reading_Noise : Floor; Moved_Other : Boolean := False) return Boolean is
      (case U is
          when U_Steps => W.Steps >= Step_Cap,
-         when U_Contact | U_Resist => Blocked or else Refusing (W),
+         when U_Contact => Touching (Moved_Other),
+         when U_Resist => Blocked or else Refusing (W),
          when U_Slip => Slipped (Reading, Empty, Reading_Noise),
          when U_Settle => Settled (W));
 end Monitor;

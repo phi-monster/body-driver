@@ -849,6 +849,8 @@ package body Act is
       Reach : Table.Vec := Unit_Reach;   --  每通道核实过的步幅倍数(存在表里,越用越强):用到上限一半以上且表报准才翻倍,报错/没照做/认丢减半(翻倍协议,次数)
       Lost_Streak : Natural := 0;        --  连着几步没在画面里认出被跟的点
       Halted : Boolean := False;         --  这一步途中被眼睛叫停了
+      Touched : Boolean := False;        --  这一步碰到了别的东西(我没在推的东西动了)
+      Was_Regs : Picture.Regions;        --  走这一步之前世界里各块在哪
       --  走的途中每一拍看:被跟的世界块还找得到吗、离画面边够不够远(owner:转一点点就该知道不对劲 —— 眼睛长在身体上,不用等脑)
       function Watch_Things (Fr : Plug.Frame) return Boolean is
          Regs : Picture.Regions;
@@ -1134,6 +1136,11 @@ package body Act is
                Moved : constant Boolean := True;
             begin
                Halted := False;
+               if Cam_Arm (C, Cam) /= Integer (Arm) then
+                  Was_Regs := Cut_Things (C, F, Cam);
+               else
+                  Was_Regs.Clear;
+               end if;
                Step_Arm (L, C, F, Arm, A, Jaw, Deliv, Ok, C.Fast, Watch_Things'Unrestricted_Access);
                Beats := Plug.Steps (L) - Beats0;
                if Halted then
@@ -1159,6 +1166,7 @@ package body Act is
                   All_Verified : Boolean := True;
                   Any_Wrong : Boolean := False;
                   Not_Followed : Boolean := False;
+                  Moved_Other : Boolean := False;   --  我没在推的东西也动了 ⇒ 碰到它了
                begin
                   --  ① 认位置。我的手指(世界相机里):先"感觉"—— 按此刻位姿从身体图算;熟地只让眼睛核对一下(光流),
                   --     生地或大步就去看(抖手指,看完记进图)。世界里的块:每步重切就近对上。
@@ -1391,6 +1399,46 @@ package body Act is
                      if Not_Followed then
                         Put_Line ("[身]     没照做这一步不算数,步幅已缩回;接着走");
                      end if;
+                     --  碰到 = 我没在推的东西自己动了。跟着这只手动的相机里满画面都在动,分不出来 ⇒ 那种相机里不下这个结论
+                     if Cam_Arm (C, Cam) /= Integer (Arm) and then not Was_Regs.Is_Empty then
+                        declare
+                           Now_Regs : constant Picture.Regions := Cut_Things (C, F, Cam);
+                        begin
+                           for R of Now_Regs loop
+                              declare
+                                 Mine : Boolean := False;
+                                 Found_Prev : Boolean := False;
+                                 Best : Long_Float := 0.0;
+                              begin
+                                 for P of Pts loop
+                                    if Sqrt ((R.Cu - P.Cu) ** 2 + (R.Cv - P.Cv) ** 2) <= Long_Float'Max (P.Box_W, P.Box_H) then
+                                       Mine := True;
+                                    end if;
+                                 end loop;
+                                 if not Mine then
+                                    for Q of Was_Regs loop
+                                       if Q.Count * 3 >= R.Count and then R.Count * 3 >= Q.Count then
+                                          declare
+                                             D2 : constant Long_Float := Sqrt ((R.Cu - Q.Cu) ** 2 + (R.Cv - Q.Cv) ** 2);
+                                          begin
+                                             if not Found_Prev or else D2 < Best then
+                                                Best := D2; Found_Prev := True;
+                                             end if;
+                                          end;
+                                       end if;
+                                    end loop;
+                                    if Found_Prev and then Best > Fl.Track * 2.0 then
+                                       Moved_Other := True;
+                                    end if;
+                                 end if;
+                              end;
+                           end loop;
+                        end;
+                     end if;
+                     Touched := Moved_Other;
+                     if Touched then
+                        Put_Line ("[身]     我没在推的东西也动了 ⇒ 碰到它了");
+                     end if;
                   end;
                end;
                Monitor.Step (W, Monitor.Floor (Long_Float'Max (0.0, Pic_Delta)), Monitor.Bounded (Last_Err), Monitor.Bounded (Err_Now),
@@ -1405,12 +1453,13 @@ package body Act is
                   Blocked_Out := True;
                end if;
                if Monitor.Fired (Until_Kind, W, Step_Limit, Any_Blocked, Monitor.Bounded (Selfmap.Jaw_Of (F, Arm)),
-                                 Monitor.Bounded (if Arm < Natural (C.Hands.Length) then C.Hands (Arm).Empty_Close else 0.0), Monitor.Floor (C.Map.Jaw_Noise))
+                                 Monitor.Bounded (if Arm < Natural (C.Hands.Length) then C.Hands (Arm).Empty_Close else 0.0), Monitor.Floor (C.Map.Jaw_Noise),
+                                 Touched)
                then
                   Event := (case Until_Kind is
                               when Monitor.U_Steps => S ("steps: I took the steps you asked for"),
-                              when Monitor.U_Contact => S ("contact: my pushes stopped producing motion (something is touched or the body will not go there)"),
-                              when Monitor.U_Resist => S ("resist: it will not move any further"),
+                              when Monitor.U_Contact => S ("contact: something I was not pushing moved when I moved - I am touching it"),
+                              when Monitor.U_Resist => S ("resist: I commanded a push and my body did not go"),
                               when Monitor.U_Slip => S ("slip: what I was holding has left my fingers"),
                               when Monitor.U_Settle => S ("settle: the picture stopped changing"));
                   return;
