@@ -2079,6 +2079,7 @@ package body Act is
       if World_Cam >= 0 then
          Before_Regs := Cut_Things (C, F, Natural (World_Cam));
          --  抬之前记下:那东西在哪、我的手在哪(拿住的唯一硬证据是"它跟着我的手走了同样一段")
+         Feel (C, F);   --  先按当前关节把手在这台相机里的位置算准,否则"抬之前"读的是上一段留下的旧位置
          if Track_Idx (C, Arm, Natural (World_Cam)) < Natural (C.Zones.Length) then
             declare
                Tr : constant Zone_Track := C.Zones (Track_Idx (C, Arm, Natural (World_Cam)));
