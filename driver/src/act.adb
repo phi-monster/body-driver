@@ -1548,6 +1548,9 @@ package body Act is
                    (if Note.Blocked then " · 零表更准(顶住?)" else ""));
          Last_Err := Note.Err_Now;
          Last_Raw := Note.Raw_Now;
+         if Codec.Env ("BL_STEPSHOT") /= "" then
+            Dump_Picture ("step");   --  逐步落图:看被跟的那块在靠近时到底怎么变(BL_STEPSHOT 打开才存)
+         end if;
          if Note.Blocked or else Monitor.Refusing (W) then
             Blocked_Out := True;
          end if;
