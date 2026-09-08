@@ -107,6 +107,28 @@ package body Picture is
       end if;
    end Mean_Colour;
 
+   function Texture_Level (RGB : Buf; W, H : Natural) return Long_Float is
+      Ds : Floats;
+      I : Natural := 0;
+      Step : constant Natural := Natural'Max (1, (W * H) / 20000);   --  抽样步长(次数,无量纲)
+   begin
+      if Natural (RGB.Length) < W * H * 3 or else W < 2 then
+         return 0.0;
+      end if;
+      while I < W * H - 1 loop
+         if (I + 1) mod W /= 0 then
+            Ds.Append (Long_Float'Max (Long_Float'Max (abs (Long_Float (RGB.Element (3 * I)) - Long_Float (RGB.Element (3 * I + 3))),
+                                                       abs (Long_Float (RGB.Element (3 * I + 1)) - Long_Float (RGB.Element (3 * I + 4)))),
+                                       abs (Long_Float (RGB.Element (3 * I + 2)) - Long_Float (RGB.Element (3 * I + 5)))));
+         end if;
+         I := I + Step;
+      end loop;
+      if Natural (Ds.Length) < 16 then
+         return 0.0;
+      end if;
+      return Quantile (Ds, 0.5);
+   end Texture_Level;
+
    --  颜色连片:和右边、下面的邻居颜色差在门槛内就连成一块(并查集式的两遍扫描,零依赖)
    function Cut_Colour (RGB : Buf; W, H : Natural; Floor_Level : Long_Float; Min_Count : Natural) return Regions is
       N : constant Natural := W * H;

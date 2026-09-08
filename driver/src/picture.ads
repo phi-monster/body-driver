@@ -27,6 +27,8 @@ package Picture is
    --  按颜色切:颜色连成一片的算一块。细的东西(线、缝、刀口)在深度图上鼓不出来,只有这条能把它们切出来。
    --  门槛不是写死的:先量"静止时同一块地方颜色抖多少"(噪声地板),差过它的几倍才算换了一块。
    function Cut_Colour (RGB : Buf; W, H : Natural; Floor_Level : Long_Float; Min_Count : Natural) return Regions;
+   --  这张画面自己的纹理有多粗:相邻像素颜色差的中位数(木纹、布纹都在这个量级)。切块的门槛要比它大才不会把纹理切成块
+   function Texture_Level (RGB : Buf; W, H : Natural) return Long_Float;
    procedure Mean_Colour (RGB : Buf; W, H : Natural; R : Region; Cr, Cg, Cb : out Long_Float);
    function Region_Mask (Depth : Floats; W, H : Natural; R : Region) return Bools;
    function Near_Depth (Depth : Floats; W, H : Natural; U, V, Win_Frac : Long_Float) return Long_Float;  --  NaN = 读不到
