@@ -158,11 +158,19 @@ package body Act is
       declare
          Base : constant Long_Float := Cut_Window (C, Cam, F);
          Win : Long_Float;
+         --  🔴 长在这只手上的相机:被画面切掉一角的块【一开始就算数】。
+         --  这台相机跟着手走,越靠近要抓的东西,它越贴边;而我自己的胳膊在这台相机【后面】,
+         --  不会从边上伸进来(手指另有扫过的像素在剔)。第三方相机则相反,胳膊天天贴边 ⇒ 那里仍然严。
+         --  实测(FP):球贴住右边缘 ⇒ 整块消失 ⇒ 一连四轮身体都说"我看不见它",最后的接近根本无从谈起。
+         Own : constant Boolean := Cam_Arm (C, Cam) >= 0;
       begin
+         if Own then
+            Raw := Picture.Cut (F.Cams (Cam).Depth, Cw, Ch, Base, Sigma_Mult, Keep_Edge => True);
+         end if;
          Win := Base;
          while Raw.Is_Empty and then Win < 0.5 loop
             Win := Win * 2.0;
-            Raw := Picture.Cut (F.Cams (Cam).Depth, Cw, Ch, Long_Float'Min (0.5, Win), Sigma_Mult);
+            Raw := Picture.Cut (F.Cams (Cam).Depth, Cw, Ch, Long_Float'Min (0.5, Win), Sigma_Mult, Keep_Edge => Own);
          end loop;
          --  尺子放到头还是一块都没有 ⇒ 这才允许"被画面切掉一角"的块算数(严格规则下它整块消失)。
          --  放在最后一档:第三方相机里从画面外伸进来的胳膊也贴边,平时不许它变成"一件东西"。
@@ -1311,8 +1319,15 @@ package body Act is
                      end loop;
                      --  上限 = 自己那一档 × 核实过的倍数,再压在"眼睛跟得住"这个天花板下。
                      --  倍数只有靠"表说会挪多少 vs 实际挪了多少"对上才涨(见 Learn),没证明过就不许迈大步
-                     Note.Cap (K) := Long_Float'Min (Am * Cap_Mult * Reach (K),
-                                                     (if Known_All then Track_Win / Px else Am * Cap_Mult * Reach (K))) * Amount;
+                     --  🔴 下限 = 自己那一档:开机量到"命令小于这一档,点在画面里根本不动"。
+                     --  比它还小的一步等于没走,而没走会被判成"身体没照做"⇒ 步幅再减半 ⇒ 更走不动。
+                     --  实测(FP):某通道量到要 0.0256 才看得见动,而"小步"给出的额度只有 0.008,
+                     --  连着三步实到全 0,身体报"要么有东西拽着我,要么这条胳膊到头了" —— 其实只是自己没迈够。
+                     --  ⇒ "小/中/大"只能把一步放大,不能把它缩到动不了。
+                     Note.Cap (K) := Long_Float'Max
+                       (Am,
+                        Long_Float'Min (Am * Cap_Mult * Reach (K),
+                                        (if Known_All then Track_Win / Px else Am * Cap_Mult * Reach (K))) * Amount);
                   end;
                   Note.Floor_Cmd := (if Note.Floor_Cmd <= 0.0 then Am else Long_Float'Min (Note.Floor_Cmd, Am));
                end if;
@@ -1406,6 +1421,34 @@ package body Act is
          for K in 0 .. Chan.Per_Arm - 1 loop
             Note.Cmd (K) := Note.Cmd (K) * Scale * Trust;   --  表有多准就走多少(不然每步走过头,下一步再拉回来,来回晃)
          end loop;
+         --  同一条规矩的第二半:缩完之后若整步又掉到"动不了"以下,按比例整体抬回去 ——
+         --  方向听解算的,大小至少迈到自己量到的那一档,再压回各自的上限之下(比例,无量纲)。
+         declare
+            Most : Long_Float := 0.0;                  --  最大的那个通道走了自己那一档的几成
+            Room : Long_Float := Long_Float'Last;      --  还能整体放大几倍才顶到上限
+         begin
+            for K in 0 .. Chan.Per_Arm - 1 loop
+               if Note.Active (K) then
+                  declare
+                     Am : constant Long_Float := Long_Float'Max (1.0e-6, C.Map.Amp (Arm * Chan.Per_Arm + K));
+                  begin
+                     Most := Long_Float'Max (Most, abs Note.Cmd (K) / Am);
+                     if abs Note.Cmd (K) > 1.0e-12 and then Note.Cap (K) > 0.0 then
+                        Room := Long_Float'Min (Room, Note.Cap (K) / abs Note.Cmd (K));
+                     end if;
+                  end;
+               end if;
+            end loop;
+            if Most > 0.0 and then Most < 1.0 and then Room > 1.0 then
+               declare
+                  G : constant Long_Float := Long_Float'Min (1.0 / Most, Room);
+               begin
+                  for K in 0 .. Chan.Per_Arm - 1 loop
+                     Note.Cmd (K) := Note.Cmd (K) * G;
+                  end loop;
+               end;
+            end if;
+         end;
          if Table.Norm (Note.Cmd, Chan.Per_Arm) <= C.Map.EE_Noise then
             Note.Say_Stop := S ("amount: already there (what is left to push is within my own noise)");
          end if;
