@@ -880,18 +880,48 @@ package body Act is
       Pts := Out_P;
    end Expand_Lobes;
 
-   --  ── 一段:把这些点推到各自的目标,直到事件 ──
+   --  ── 一段 = 反复做五件事:①打算怎么走 ②走 ③看 ④学 ⑤判 ──
+   --  每件事一个小过程;这一步发生了什么全记在 Note 里(字段名就是人话),五件事之间只靠它说话。
    procedure Run_Segment (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Cam : Natural; Pts : in out Point_Vectors.Vector;
                           Until_Kind : Monitor.Until_Kind; Step_Limit : Natural; Amount : Long_Float; Avoid : Item_Vectors.Vector;
                           Event : out Unbounded_String; Steps_Taken : out Natural; Blocked_Out : out Boolean; Beats : out Natural) is
       Arm : constant Natural := Pts (0).Arm;
       Beats0 : constant Natural := Plug.Steps (L);
-      Reach : Table.Vec := Unit_Reach;   --  每通道核实过的步幅倍数(存在表里,越用越强):用到上限一半以上且表报准才翻倍,报错/没照做/认丢减半(翻倍协议,次数)
-      Lost_Streak : Natural := 0;        --  连着几步没在画面里认出被跟的点
-      Halted : Boolean := False;         --  这一步途中被眼睛叫停了
-      Touched : Boolean := False;        --  这一步碰到了别的东西(我没在推的东西动了)
-      Was_Regs : Picture.Regions;        --  走这一步之前世界里各块在哪
-      --  走的途中每一拍看:被跟的世界块还找得到吗、离画面边够不够远(owner:转一点点就该知道不对劲 —— 眼睛长在身体上,不用等脑)
+      Cw : constant Natural := F.Cams (Cam).W;
+      Ch : constant Natural := F.Cams (Cam).H;
+      Own_Cam : constant Boolean := Cam_Arm (C, Cam) = Integer (Arm);
+      Effs : Effect_Array (0 .. Natural (Pts.Length) - 1);
+      Trusts : array (0 .. Natural (Pts.Length) - 1) of Table.Mask := [others => [others => True]];
+      Reach : Table.Vec := Unit_Reach;   --  每通道核实过的步幅倍数(存表里,越用越强)
+      Fl : Monitor.Floors;
+      W : Monitor.Watch;
+      Ring : Backup.Ring;
+      Jaw : Floats;
+      Last_Err : Long_Float := -1.0;     --  -1 = 还没算过"还差几步"(哨兵,无量纲)
+      Lost_Run : Natural := 0;           --  连着几步全部认不到
+
+      --  这一步的账
+      type Note_Rec is record
+         Cmd, Got, Cap : Table.Vec := Table.Zero_Vec;   --  要走的 / 实际走的 / 各通道这一步的上限
+         Active : Table.Mask := [others => False];
+         Floor_Cmd : Long_Float := 0.0;                 --  最小探针幅度:比它一半还小的命令说明不了"顶住"
+         Err_Now : Long_Float := 0.0;                   --  这一步之后还差几步
+         Pic_Delta : Long_Float := 0.0;
+         Big_Step : Boolean := False;                   --  大到光流跟不住 ⇒ 走完抖一下认自己
+         Halted : Boolean := False;                     --  途中眼睛叫停
+         Blocked : Boolean := False;                    --  顶住了(零表更准)
+         Not_Followed : Boolean := False;               --  整步没照做
+         Touched : Boolean := False;                    --  我没在推的东西也动了 = 碰到
+         Lost_All : Boolean := False;                   --  被跟的全都认不到
+         Unsure : Boolean := False;                     --  两块一样像,不许自己挑
+         Say_Stop : Unbounded_String;                   --  非空 = 这一段到此为止,内容就是给脑的话
+      end record;
+      Note : Note_Rec;
+      Before : Buf;                      --  走之前那一拍的灰度(光流用)
+      Was : Point_Vectors.Vector;        --  走之前各点在哪
+      Was_Regs : Picture.Regions;        --  走之前世界里各块在哪
+
+      --  走的途中每一拍看一眼:被跟的东西还找得到吗、离画面边够不够远(转一点点就该知道不对劲)
       function Watch_Things (Fr : Plug.Frame) return Boolean is
          Regs : Picture.Regions;
          Have : Boolean := False;
@@ -910,54 +940,68 @@ package body Act is
                      if R.Count * 3 >= P.Count and then R.Count <= P.Count * 3 and then Sqrt ((R.Cu - P.Cu) ** 2 + (R.Cv - P.Cv) ** 2) <= Tol then
                         Found := True;
                         if R.Cu < Track_Win or else R.Cu > 1.0 - Track_Win or else R.Cv < Track_Win or else R.Cv > 1.0 - Track_Win then
-                           Halted := True;
-                           return True;   --  快出画面了 ⇒ 停
+                           Note.Halted := True;
+                           return True;
                         end if;
                      end if;
                   end loop;
                   if not Found then
-                     Halted := True;
-                     return True;         --  看不见了 ⇒ 停
+                     Note.Halted := True;
+                     return True;
                   end if;
                end;
             end if;
          end loop;
          return False;
       end Watch_Things;
-      Effs : Effect_Array (0 .. Natural (Pts.Length) - 1);
-      Trusts : array (0 .. Natural (Pts.Length) - 1) of Table.Mask := [others => [others => True]];
-      W : Monitor.Watch;
-      Fl : Monitor.Floors;
-      Cw : constant Natural := F.Cams (Cam).W;
-      Ring : Backup.Ring;
-      Jaw : Floats;
-      Last_Err : Long_Float := 0.0;
-      Ok : Boolean;
-      Cmd_Floor : Long_Float := 0.0;   --  最小探针幅度:比它一半还小的命令说明不了"顶住"
-   begin
-      Event := S ("hit the safety cap on steps");
-      Steps_Taken := 0;
-      Beats := 0;
-      Blocked_Out := False;
-      Jaw.Append (Selfmap.Jaw_Of (F, Arm));
-      Fl.Track := Long_Float'Max (1.0 / Long_Float (Cw), 0.0);
-      Fl.Picture := Long_Float (Integer'(if Cam < Natural (C.Map.Pic_Floor.Length) then C.Map.Pic_Floor (Cam) else 0));
-      Fl.Reading := C.Map.Jaw_Noise;
-      Fl.Delivery := C.Map.EE_Noise;
-      Backup.Clear (Ring);
-      declare
+
+      --  落一张图,把这一拍切出来的块和被跟的点画上去(出岔子时给人看)
+      procedure Dump_Picture (Tag : String) is
+      begin
+         if C.Dump_Dir = "" then
+            return;
+         end if;
+         declare
+            RGB : Buf := F.Cams (Cam).RGB;
+            Regs : constant Picture.Regions := Cut_Things (C, F, Cam);
+            N : Natural := 0;
+         begin
+            for R of Regs loop
+               N := N + 1;
+               Draw.Numbered_Box (RGB, Cw, Ch, R.X0, R.Y0, R.X1, R.Y1, N, Draw.Green, 2);
+            end loop;
+            for P of Pts loop
+               declare
+                  Hw : constant Long_Float := Long_Float'Max (P.Box_W, Track_Win) * 0.5;   --  框(没有就用一个跟踪窗;比例,无量纲)
+                  Hh : constant Long_Float := Long_Float'Max (P.Box_H, Track_Win) * 0.5;
+               begin
+                  Draw.Numbered_Box (RGB, Cw, Ch,
+                                     Natural (Long_Float'Max (0.0, (P.Cu - Hw) * Long_Float (Cw))),
+                                     Natural (Long_Float'Max (0.0, (P.Cv - Hh) * Long_Float (Ch))),
+                                     Natural (Long_Float'Min (Long_Float (Cw - 1), (P.Cu + Hw) * Long_Float (Cw))),
+                                     Natural (Long_Float'Min (Long_Float (Ch - 1), (P.Cv + Hh) * Long_Float (Ch))),
+                                     0, Draw.Pink, 2);
+               end;
+            end loop;
+            Codec.Write_BMP (To_String (C.Dump_Dir) & "/" & Tag & "_" & Codec.Pad6 (C.Round_N) & "_" & Codec.Pad6 (Steps_Taken) & ".bmp", RGB, Cw, Ch);
+            Put_Line ("[身]     落图 " & Tag & "_" & Codec.Pad6 (C.Round_N) & "_" & Codec.Pad6 (Steps_Taken) & ".bmp(切出" & Natural'Image (N) & " 块)");
+         end;
+      end Dump_Picture;
+
+      --  段前:每个点的响应表 —— 装回(必须是同一位姿、同样拿着东西、至少有一列信得过)或当场重量
+      procedure Ready_Tables (Ok_Out : out Boolean) is
          Need : Boolean := False;
       begin
+         Ok_Out := True;
          for I in 0 .. Natural (Pts.Length) - 1 loop
             declare
                Idx : constant Integer := Find_Effect (C, Arm, Cam, Pts (I).Kind, Pts (I).Chan_K, Pts (I).Blob);
             begin
-               --  存的表:一列都信不过(EI:在错位置量的,六列全空)⇒ 当没有;量它时的位姿离现在太远也当没有 —— 表是就地的(EP:远近那一列小了 7 倍)
                if Idx >= 0 and then (for some K in 0 .. Chan.Per_Arm - 1 => C.Tables (Natural (Idx)).Trust (K))
-                 and then (C.Tables (Natural (Idx)).Has_Pose
-                           and then (for all K in 0 .. Chan.Per_Arm - 1 =>
-                                       abs Chan.Delivered (C.Tables (Natural (Idx)).Pose, F.EE (Arm)) (K)
-                                       <= Long_Float'Max (1.0e-6, C.Map.Amp (Arm * Chan.Per_Arm + K)) * Cap_Mult * C.Tables (Natural (Idx)).Reach (K)))
+                 and then C.Tables (Natural (Idx)).Has_Pose
+                 and then (for all K in 0 .. Chan.Per_Arm - 1 =>
+                             abs Chan.Delivered (C.Tables (Natural (Idx)).Pose, F.EE (Arm)) (K)
+                             <= Long_Float'Max (1.0e-6, C.Map.Amp (Arm * Chan.Per_Arm + K)) * Cap_Mult * C.Tables (Natural (Idx)).Reach (K))
                then
                   Effs (I) := C.Tables (Natural (Idx)).E;
                   Trusts (I) := C.Tables (Natural (Idx)).Trust;
@@ -972,10 +1016,11 @@ package body Act is
          if Need then
             declare
                Trust : Table.Mask;
+               Ok : Boolean;
             begin
                Probe_Effects (L, C, F, Cam, Pts, Effs, Trust, Ok);
                if not Ok then
-                  Event := S ("the body stopped answering while I measured my response table");
+                  Ok_Out := False;
                   return;
                end if;
                for I in 0 .. Natural (Pts.Length) - 1 loop
@@ -984,576 +1029,551 @@ package body Act is
                end loop;
             end;
          end if;
-      end;
-      Last_Err := -1.0;   --  -1 = 还没算过"还差几步";第一步的目标项算完就填上(哨兵,无量纲)
-      for Step in 1 .. Natural'Min (Step_Cap, (if Step_Limit > 0 then Step_Limit else Step_Cap)) loop
-         declare
-            Terms : Table.Term_Vectors.Vector;
-            Cap : Table.Vec := Table.Zero_Vec;
-            Active : Table.Mask := [others => False];
-            A : Table.Vec;
-            Solved : Boolean;
-            Scale : Long_Float := 1.0;
-            Jump : Boolean := False;   --  这一步预计有点在画面里跑过一个跟踪窗:光流跟不住 ⇒ 走完抖手指重新认自己
-         begin
-            for I in 0 .. Natural (Pts.Length) - 1 loop
-               declare
-                  P : constant Point := Pts (I);
-                  T : Table.Term;
-               begin
-                  T.E := Effs (I);
-                  T.Err (0) := P.Tu - P.Cu;
-                  T.Err (1) := P.Tv - P.Cv;
-                  T.W (0) := 1.0; T.W (1) := 1.0;
-                  --  画面位置和远近一起要(owner:不许替它定"先对准再靠近"的顺序 —— 那等于叫它先扭脖子)
-                  if P.Wz > 0.0 and then P.Z > 0.0 and then not Picture.Is_Nan (P.Tz) then
-                     T.Err (2) := P.Tz - P.Z;
-                     T.W (2) := 1.0;
-                  else
-                     T.Err (2) := 0.0; T.W (2) := 0.0;
-                  end if;
-                  --  看着多大:离得越近越大,这是最稳的远近信号(画面上量的)
-                  if P.Wsize > 0.0 and then P.Size > 0.0 and then P.Tsize > 0.0 then
-                     T.Err (3) := P.Tsize - P.Size;
-                     T.W (3) := 1.0;
-                  else
-                     T.Err (3) := 0.0; T.W (3) := 0.0;
-                  end if;
-                  --  朝向:差绕回 (-π, π];圆的东西这一行谁也改不动 ⇒ 下面归一时自动被关掉
-                  if P.Wang > 0.0 then
-                     T.Err (4) := Wrap (P.Tang - P.Ang);
-                     T.W (4) := 1.0;
-                  else
-                     T.Err (4) := 0.0; T.W (4) := 0.0;
-                  end if;
-                  --  🔴 三样误差单位不同(画幅 / 画幅 / 米),混着求和就是错的判据(LAB 2026-08-17)。
-                  --  不换算成米(owner 2026-08-25 判死米制:"爪子和物体在同一张深度图里直接比,中间那道厘米不需要存在"),
-                  --  改成【只比较】:每一样都除以"身体推一步最多能把它改多少"(各通道上限 × 该行响应,取最大),
-                  --  三样都变成"还差几步"(无量纲),本来就可比。扭手腕改不了远近 ⇒ 它在"远近还差几步"上拿不到分,偷不了便宜。
-                  for R in 0 .. Table.Rows - 1 loop
-                     declare
-                        Per_Step : Long_Float := 0.0;
-                     begin
-                        for K in 0 .. Chan.Per_Arm - 1 loop
-                           if C.Map.Seen (Arm * Chan.Per_Arm + K) and then Trusts (I) (K) then
-                              Per_Step := Long_Float'Max (Per_Step, abs (T.E.B (K, R)) * Long_Float'Max (1.0e-9, C.Map.Amp (Arm * Chan.Per_Arm + K)));
-                           end if;
-                        end loop;
-                        if Per_Step > 0.0 then
-                           T.Err (R) := T.Err (R) / Per_Step;
-                           for K in 0 .. Chan.Per_Arm - 1 loop
-                              T.E.B (K, R) := T.E.B (K, R) / Per_Step;
-                           end loop;
-                        else
-                           T.W (R) := 0.0;   --  这一行一个通道都改不动 ⇒ 这一步不管它
-                        end if;
-                     end;
-                  end loop;
-                  declare
-                     Q : Point := P;
-                  begin
-                     Q.Steps_Err := 0.0;
-                     for R in 0 .. Table.Rows - 1 loop
-                        Q.Steps_Err := Q.Steps_Err + (T.Err (R) * T.W (R)) ** 2;
-                     end loop;
-                     Q.Steps_Err := Sqrt (Q.Steps_Err);
-                     Q.Err_U := T.Err (0) * T.W (0); Q.Err_V := T.Err (1) * T.W (1); Q.Err_Z := T.Err (2) * T.W (2);
-                     Q.Err_S := T.Err (3) * T.W (3); Q.Err_A := T.Err (4) * T.W (4);
-                     Pts.Replace_Element (I, Q);
-                  end;
-                  Terms.Append (T);
-               end;
-            end loop;
-            if Last_Err < 0.0 then
-               --  第一步之前的"还差几步"(不算成没进步)
-               Last_Err := 0.0;
-               for P of Pts loop
-                  Last_Err := Last_Err + P.Steps_Err;
-               end loop;
-            end if;
+      end Ready_Tables;
+
+      --  ①a 定目标:每个点的五样差距,各自除以"推一步最多能改多少",变成"还差几步"
+      procedure Aim (Terms : out Table.Term_Vectors.Vector) is
+      begin
+         Terms.Clear;
+         for I in 0 .. Natural (Pts.Length) - 1 loop
             declare
-               Damp : Table.Vec := Table.Zero_Vec;
+               P : constant Point := Pts (I);
+               T : Table.Term;
             begin
-               Cmd_Floor := 0.0;
+               T.E := Effs (I);
+               T.Err (0) := P.Tu - P.Cu;  T.W (0) := 1.0;
+               T.Err (1) := P.Tv - P.Cv;  T.W (1) := 1.0;
+               --  远近:画面位置和远近一起要,不许替它定"先对准再靠近"的顺序(那等于叫它先扭脖子)
+               if P.Wz > 0.0 and then P.Z > 0.0 and then not Picture.Is_Nan (P.Tz) then
+                  T.Err (2) := P.Tz - P.Z; T.W (2) := 1.0;
+               end if;
+               --  看着多大:离得越近越大,这是最稳的远近信号(画面上量的)
+               if P.Wsize > 0.0 and then P.Size > 0.0 and then P.Tsize > 0.0 then
+                  T.Err (3) := P.Tsize - P.Size; T.W (3) := 1.0;
+               end if;
+               --  朝向:差绕回 (-π, π];圆的东西这一行谁也改不动,归一时自动关掉
+               if P.Wang > 0.0 then
+                  T.Err (4) := Wrap (P.Tang - P.Ang); T.W (4) := 1.0;
+               end if;
+               --  🔴 五样单位不同,混着求和就是错的判据。不换算成米,改成【只比较】:
+               --  每一样除以"推一步最多能把它改多少",都变成"还差几步"(无量纲),本来就可比。
+               --  扭手腕改不了远近 ⇒ 它在那一栏拿不到分,偷不了便宜。
+               for R in 0 .. Table.Rows - 1 loop
+                  declare
+                     Per_Step : Long_Float := 0.0;
+                  begin
+                     for K in 0 .. Chan.Per_Arm - 1 loop
+                        if C.Map.Seen (Arm * Chan.Per_Arm + K) and then Trusts (I) (K) then
+                           Per_Step := Long_Float'Max (Per_Step, abs (T.E.B (K, R)) * Long_Float'Max (1.0e-9, C.Map.Amp (Arm * Chan.Per_Arm + K)));
+                        end if;
+                     end loop;
+                     if Per_Step > 0.0 then
+                        T.Err (R) := T.Err (R) / Per_Step;
+                        for K in 0 .. Chan.Per_Arm - 1 loop
+                           T.E.B (K, R) := T.E.B (K, R) / Per_Step;
+                        end loop;
+                     else
+                        T.W (R) := 0.0;   --  这一行一个通道都改不动 ⇒ 这一步不管它
+                     end if;
+                  end;
+               end loop;
+               declare
+                  Q : Point := P;
+               begin
+                  Q.Steps_Err := 0.0;
+                  for R in 0 .. Table.Rows - 1 loop
+                     Q.Steps_Err := Q.Steps_Err + (T.Err (R) * T.W (R)) ** 2;
+                  end loop;
+                  Q.Steps_Err := Sqrt (Q.Steps_Err);
+                  Q.Err_U := T.Err (0) * T.W (0); Q.Err_V := T.Err (1) * T.W (1); Q.Err_Z := T.Err (2) * T.W (2);
+                  Q.Err_S := T.Err (3) * T.W (3); Q.Err_A := T.Err (4) * T.W (4);
+                  Pts.Replace_Element (I, Q);
+               end;
+               Terms.Append (T);
+            end;
+         end loop;
+         if Last_Err < 0.0 then
+            Last_Err := 0.0;
+            for P of Pts loop
+               Last_Err := Last_Err + P.Steps_Err;
+            end loop;
+         end if;
+      end Aim;
+
+      --  ①b 定额度:各通道这一步最多走多少 —— 两条取小:①眼睛跟得住的那么多(表说走多少画面跑满一个跟踪窗)
+      --  ②自己那一档 × 核实过的倍数。只用①,在画面里几乎不动的通道会拿到无限额度(甩腕 2 rad)
+      procedure Budget (Terms : Table.Term_Vectors.Vector; Solved : out Boolean) is
+         Damp : Table.Vec := Table.Zero_Vec;
+      begin
+         for K in 0 .. Chan.Per_Arm - 1 loop
+            declare
+               Ch_No : constant Natural := Arm * Chan.Per_Arm + K;
+               Am : constant Long_Float := Long_Float'Max (1.0e-6, C.Map.Amp (Ch_No));
+               All_Trust : Boolean := True;
+               Px : Long_Float := 0.0;
+            begin
+               for I in 0 .. Natural (Pts.Length) - 1 loop
+                  if not Trusts (I) (K) then
+                     All_Trust := False;
+                  end if;
+                  Px := Long_Float'Max (Px, Sqrt (Effs (I).B (K, 0) ** 2 + Effs (I).B (K, 1) ** 2));
+               end loop;
+               if C.Map.Seen (Ch_No) and then All_Trust then
+                  Note.Active (K) := True;
+                  Note.Cap (K) := Long_Float'Min ((if Px > 0.0 then Track_Win / Px else Am * Cap_Mult * Reach (K)),
+                                                  Am * Cap_Mult * Reach (K)) * Amount;
+                  Note.Floor_Cmd := (if Note.Floor_Cmd <= 0.0 then Am else Long_Float'Min (Note.Floor_Cmd, Am));
+               end if;
+               --  阻尼 = 1e-4 / 幅²:每通道都以"几个探针幅度"计价(无量纲),小到让上限当家
+               Damp (K) := 1.0e-4 / (Am * Am);
+            end;
+         end loop;
+         Table.Solve (Terms, Chan.Per_Arm, Note.Cap, Note.Active, Damp, Note.Cmd, Solved);
+      end Budget;
+
+      --  ①c 修步子:缩到眼睛跟得住,且不把被跟的东西推出视野、不让我身上任何一块压到"不许碰"的框
+      procedure Trim is
+         Scale : Long_Float := 1.0;
+      begin
+         --  求稳不求快:一步里任何被跟的点在画面里最多跑一个跟踪窗
+         for I in 0 .. Natural (Pts.Length) - 1 loop
+            declare
+               Pr : constant Table.Vec3 := Table.Predict (Effs (I), Note.Cmd);
+               D : constant Long_Float := Sqrt (Pr (0) ** 2 + Pr (1) ** 2);
+            begin
+               if D > Track_Win then
+                  Scale := Long_Float'Min (Scale, Track_Win / D);
+               end if;
+            end;
+         end loop;
+         if Scale < 1.0e-3 then
+            Note.Big_Step := True;   --  缩到千分之一还不够(比例,无量纲)= 表已经不可信
+         end if;
+         --  不许把被跟的东西推出视野;不许让【我身上任何一块】压到"不许碰"的框里(只查一个点等于没查)
+         for Round in 1 .. 4 loop
+            declare
+               Hit : Boolean := False;
+               function In_Avoid (X0, Y0, X1, Y1 : Long_Float) return Boolean is
+               begin
+                  for Av of Avoid loop
+                     if Av.Located and then X0 <= Long_Float (Av.X1) and then X1 >= Long_Float (Av.X0)
+                       and then Y0 <= Long_Float (Av.Y1) and then Y1 >= Long_Float (Av.Y0)
+                     then
+                        return True;
+                     end if;
+                  end loop;
+                  return False;
+               end In_Avoid;
+            begin
+               for I in 0 .. Natural (Pts.Length) - 1 loop
+                  declare
+                     Pr : constant Table.Vec3 := Table.Predict (Effs (I), Note.Cmd);
+                     Nu : constant Long_Float := Pts (I).Cu + Pr (0) * Scale;
+                     Nv : constant Long_Float := Pts (I).Cv + Pr (1) * Scale;
+                  begin
+                     if Nu < Track_Win or else Nu > 1.0 - Track_Win or else Nv < Track_Win or else Nv > 1.0 - Track_Win then
+                        Hit := True;
+                     end if;
+                     if In_Avoid (Nu * Long_Float (Cw), Nv * Long_Float (Ch), Nu * Long_Float (Cw), Nv * Long_Float (Ch)) then
+                        Hit := True;
+                     end if;
+                  end;
+               end loop;
+               if not Own_Cam and then Track_Idx (C, Arm, Cam) < Natural (C.Zones.Length) then
+                  declare
+                     Tr : constant Zone_Track := C.Zones (Track_Idx (C, Arm, Cam));
+                  begin
+                     for K in 0 .. Chan.Per_Arm loop
+                        if Tr.Pieces (K).Valid then
+                           declare
+                              Idx : constant Integer := Find_Effect (C, Arm, Cam, Piece_Pt, K, -1);
+                              Sh : constant Table.Vec3 := (if Idx >= 0 then Table.Predict (C.Tables (Natural (Idx)).E, Note.Cmd) else Table.Zero3);
+                              Du : constant Long_Float := Sh (0) * Scale * Long_Float (Cw);
+                              Dv : constant Long_Float := Sh (1) * Scale * Long_Float (Ch);
+                           begin
+                              if In_Avoid (Long_Float (Tr.Pieces (K).X0) + Du, Long_Float (Tr.Pieces (K).Y0) + Dv,
+                                           Long_Float (Tr.Pieces (K).X1) + Du, Long_Float (Tr.Pieces (K).Y1) + Dv)
+                              then
+                                 Hit := True;
+                              end if;
+                           end;
+                        end if;
+                     end loop;
+                  end;
+               end if;
+               exit when not Hit;
+               if Round = 4 then
+                  Note.Say_Stop := S ("stopped: every step would push what I am tracking out of my sight, or put some part of me onto a thing I must not touch");
+                  return;
+               end if;
+               Scale := Scale * 0.5;
+            end;
+         end loop;
+         for K in 0 .. Chan.Per_Arm - 1 loop
+            Note.Cmd (K) := Note.Cmd (K) * Scale;
+         end loop;
+         if Table.Norm (Note.Cmd, Chan.Per_Arm) <= C.Map.EE_Noise then
+            Note.Say_Stop := S ("amount: already there (what is left to push is within my own noise)");
+         end if;
+      end Trim;
+
+      --  ① 打算怎么走 = 定目标 → 定额度 → 修步子
+      procedure Plan is
+         Terms : Table.Term_Vectors.Vector;
+         Solved : Boolean;
+      begin
+         Note := (others => <>);
+         Aim (Terms);
+         Budget (Terms, Solved);
+         if not Solved then
+            Note.Say_Stop := S ("could not solve which channels to push");
+            return;
+         end if;
+         Trim;
+      end Plan;
+
+      --  ② 走:记下走之前的样子,发命令,途中盯着
+      procedure Walk (Ok_Out : out Boolean) is
+      begin
+         Before := F.Cams (Cam).Gray;
+         Was := Pts;
+         Was_Regs := (if not Own_Cam then Cut_Things (C, F, Cam) else Picture.Region_Vectors.Empty_Vector);
+         Step_Arm (L, C, F, Arm, Note.Cmd, Jaw, Note.Got, Ok_Out, C.Fast, Watch_Things'Unrestricted_Access);
+         Beats := Plug.Steps (L) - Beats0;
+         if Note.Halted then
+            Put_Line ("[身]     途中眼睛叫停:被跟的东西快出画面或看不见了,这一步没走完");
+         end if;
+         if not Ok_Out then
+            return;
+         end if;
+         Steps_Taken := Steps_Taken + 1;
+         declare
+            Sv : Backup.Step_Vec := [others => 0.0];
+         begin
+            for K in 0 .. Chan.Per_Arm - 1 loop
+               Sv (K) := Note.Got (K);
+            end loop;
+            Backup.Remember (Ring, Sv);
+         end;
+         Note.Pic_Delta := Long_Float (Picture.Max_Diff (Before, F.Cams (Cam).Gray));
+      end Walk;
+
+      --  ③ 看:每个点现在在哪。我的零件(别人的相机里)先按位姿"感觉",熟地让眼睛核对,生地或大步就抖一下去看;
+      --  世界里的块每步重切就近对上。全都认不到才叫看不见。
+      procedure Look is
+         Need_Refind : Boolean := False;
+      begin
+         for I in 0 .. Natural (Pts.Length) - 1 loop
+            declare
+               P : Point := Pts (I);
+               W0 : constant Point := Was (I);
+               Pr : constant Table.Vec3 := Table.Predict (Effs (I), Note.Got);
+            begin
+               P.Has_Meas := False;
+               if P.Kind = Piece_Pt and then not Own_Cam then
+                  declare
+                     Diff : Table.Vec;
+                     Dist : Long_Float;
+                     Si : constant Integer := Schema.Nearest (C.Sch, P.Arm, Cam, F.EE (P.Arm), C.Map.Amp, Chan.Per_Arm, Diff, Dist);
+                     Familiar : Boolean := False;
+                     In_Map : Boolean := False;
+                  begin
+                     if Si >= 0 then
+                        In_Map := P.Chan_K <= Chan.Per_Arm and then C.Sch.S (Natural (Si)).Parts (P.Chan_K).Valid
+                                  and then (P.Blob < 0 or else C.Sch.S (Natural (Si)).Parts (P.Chan_K).N_Blobs > Natural (P.Blob));
+                     end if;
+                     if In_Map then
+                        declare
+                           Gp : constant Schema.Part_Pos := C.Sch.S (Natural (Si)).Parts (P.Chan_K);
+                           Pm : constant Table.Vec3 := Table.Predict (Effs (I), Diff);
+                           Su : constant Long_Float := (if P.Blob = 1 then Gp.B1u elsif P.Blob = 0 then Gp.B0u else Gp.Cu);
+                           Sv : constant Long_Float := (if P.Blob = 1 then Gp.B1v elsif P.Blob = 0 then Gp.B0v else Gp.Cv);
+                        begin
+                           P.Cu := Long_Float'Max (0.0, Long_Float'Min (1.0, Su + Pm (0)));
+                           P.Cv := Long_Float'Max (0.0, Long_Float'Min (1.0, Sv + Pm (1)));
+                           if Gp.Z > 0.0 then
+                              P.Z := Gp.Z + Pm (2);
+                           end if;
+                           Familiar := True;
+                           for K in 0 .. Chan.Per_Arm - 1 loop
+                              if abs Diff (K) > Long_Float'Max (1.0e-6, C.Map.Amp (P.Arm * Chan.Per_Arm + K)) * Cap_Mult * Reach (K) then
+                                 Familiar := False;
+                              end if;
+                           end loop;
+                        end;
+                     else
+                        P.Cu := Long_Float'Max (0.0, Long_Float'Min (1.0, W0.Cu + Pr (0)));
+                        P.Cv := Long_Float'Max (0.0, Long_Float'Min (1.0, W0.Cv + Pr (1)));
+                        if W0.Z > 0.0 then
+                           P.Z := W0.Z + Pr (2);
+                        end if;
+                     end if;
+                     if Note.Big_Step or else not Familiar then
+                        P.Lost := True;
+                        Need_Refind := True;
+                     else
+                        declare
+                           Q : Point := W0;
+                           Z : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, Cam);
+                        begin
+                           Retrack (C, F, Cam, Before, Q, W0.Cu + Pr (0), W0.Cv + Pr (1), True, (if W0.Z > 0.0 then W0.Z + Pr (2) else -1.0));
+                           --  眼睛和图对不上(差过张幅的四分之一,比例,无量纲;再小也有两个跟踪地板)⇒ 去看
+                           if Q.Lost or else Sqrt ((Q.Cu - P.Cu) ** 2 + (Q.Cv - P.Cv) ** 2) > Long_Float'Max (Z.Span * 0.25, Fl.Track * 2.0) then
+                              P.Lost := True;
+                              Need_Refind := True;
+                           else
+                              P.Lost := False;
+                              P.Has_Meas := True; P.Meas_U := Q.Cu; P.Meas_V := Q.Cv; P.Meas_Z := Q.Z;
+                           end if;
+                        end;
+                     end if;
+                  end;
+               else
+                  Retrack (C, F, Cam, Before, P, W0.Cu + Pr (0), W0.Cv + Pr (1), True, (if W0.Z > 0.0 then W0.Z + Pr (2) else -1.0));
+               end if;
+               Pts.Replace_Element (I, P);
+            end;
+         end loop;
+         if Need_Refind then
+            Refind_Pieces (L, C, F, Cam, Pts);
+            Beats := Plug.Steps (L) - Beats0;
+         end if;
+         Note.Lost_All := True;
+         for P of Pts loop
+            if not P.Lost then
+               Note.Lost_All := False;
+            end if;
+            if P.Unsure then
+               Note.Unsure := True;
+            end if;
+         end loop;
+      end Look;
+
+      --  ④ 学:拿这一步的实际结果修表;判"整步没照做";按通道各自放宽/收紧步幅;看有没有碰到别的东西
+      procedure Learn is
+         All_Verified : Boolean := True;
+         Any_Wrong : Boolean := False;
+      begin
+         Note.Err_Now := 0.0;
+         for I in 0 .. Natural (Pts.Length) - 1 loop
+            declare
+               P : constant Point := Pts (I);
+               W0 : constant Point := Was (I);
+               Dy : Table.Vec3;
+               E : Table.Effect := Effs (I);
+            begin
+               if P.Lost then
+                  All_Verified := False;
+                  Any_Wrong := True;
+               else
+                  --  修表只用眼睛量到的(光流核对值或抖认到的),按图猜的位置不喂回表
+                  Dy (0) := (if P.Has_Meas then P.Meas_U else P.Cu) - W0.Cu;
+                  Dy (1) := (if P.Has_Meas then P.Meas_V else P.Cv) - W0.Cv;
+                  Dy (2) := (if P.Has_Meas then (if P.Meas_Z > 0.0 and then W0.Z > 0.0 then P.Meas_Z - W0.Z else 0.0)
+                             elsif P.Z > 0.0 and then W0.Z > 0.0 then P.Z - W0.Z else 0.0);
+                  Dy (3) := (if P.Size > 0.0 and then W0.Size > 0.0 then P.Size - W0.Size else 0.0);
+                  Dy (4) := (if P.Size > 0.0 and then W0.Size > 0.0 then Wrap (P.Ang - W0.Ang) else 0.0);
+                  Table.Update (E, Note.Got, Dy, Fl.Track * 2.0, Long_Float'Max (C.Map.EE_Noise, 0.5 * Note.Floor_Cmd));
+                  if Table.Blocked (E) then
+                     Note.Blocked := True;
+                  end if;
+                  if not (E.Null_Res > Fl.Track * 2.0 and then E.Free_Res < E.Null_Res) then
+                     All_Verified := False;
+                  end if;
+                  if E.Free_Res > Fl.Track * 2.0 and then E.Free_Res >= E.Null_Res then
+                     Any_Wrong := True;
+                  end if;
+               end if;
+               Effs (I) := E;
+               Note.Err_Now := Note.Err_Now + P.Steps_Err;
+            end;
+         end loop;
+         --  整步没照做:各通道按自己的探针幅度归一后,实到与命令差过一半(逐个通道判会被同量级的小出入触发)
+         if not Note.Halted then
+            declare
+               Dn, An : Long_Float := 0.0;
+            begin
                for K in 0 .. Chan.Per_Arm - 1 loop
                   declare
-                     Ch : constant Natural := Arm * Chan.Per_Arm + K;
-                     Am : constant Long_Float := Long_Float'Max (1.0e-6, C.Map.Amp (Ch));
-                     All_Trust : Boolean := True;
+                     Am : constant Long_Float := Long_Float'Max (1.0e-6, C.Map.Amp (Arm * Chan.Per_Arm + K));
                   begin
-                     for I in 0 .. Natural (Pts.Length) - 1 loop
-                        if not Trusts (I) (K) then
-                           All_Trust := False;
-                        end if;
-                     end loop;
-                     if C.Map.Seen (Ch) and then All_Trust then
-                        --  一步的上限 = 眼睛跟得住的那么多:按表算,这个通道走多少会让被跟的点在画面里跑满一个跟踪窗。
-                        --  探针那一档只是【量得出来】的下限,不是上限(EQ:限在两个探针幅度 = 1.3 cm,一步只改深度 5 mm,
-                        --  而深度读数自己就抖 5 mm ⇒ 学不到响应,数字乱跳)。Reach 只再放宽,不再收紧。
-                        declare
-                           Px : Long_Float := 0.0;
-                        begin
-                           for I in 0 .. Natural (Pts.Length) - 1 loop
-                              Px := Long_Float'Max (Px, Sqrt (Effs (I).B (K, 0) ** 2 + Effs (I).B (K, 1) ** 2));
-                           end loop;
-                           Active (K) := True;
-                           --  两条上限取小:① 眼睛跟得住的那么多(表说走多少画面跑满一个跟踪窗)② 这个通道自己那一档 × 核实过的倍数。
-                           --  只有 ① 会让"在画面里几乎不动"的通道拿到无限额度(ER:2 rad 的甩腕命令,深度读到 94 m)
-                           Cap (K) := Long_Float'Min ((if Px > 0.0 then Track_Win / Px else Am * Cap_Mult * Reach (K)),
-                                                      Am * Cap_Mult * Reach (K)) * Amount;
-                        end;
-                        Cmd_Floor := (if Cmd_Floor <= 0.0 then Am else Long_Float'Min (Cmd_Floor, Am));
-                     end if;
-                     --  阻尼 = 1e-4 / 幅²:每个通道都以"几个探针幅度"计价(无量纲),小到让上限当家而不是阻尼当家
-                     Damp (K) := 1.0e-4 / (Am * Am);
+                     Dn := Dn + ((Note.Got (K) - Note.Cmd (K)) / Am) ** 2;
+                     An := An + (Note.Cmd (K) / Am) ** 2;
                   end;
                end loop;
-               Table.Solve (Terms, Chan.Per_Arm, Cap, Active, Damp, A, Solved);
+               Dn := Sqrt (Dn); An := Sqrt (An);
+               if An > 1.0 and then Dn > 0.5 * An then
+                  Any_Wrong := True; All_Verified := False; Note.Not_Followed := True;
+                  for K in 0 .. Chan.Per_Arm - 1 loop
+                     if Note.Active (K) then
+                        Reach (K) := Long_Float'Max (1.0, Reach (K) * 0.5);
+                     end if;
+                  end loop;
+                  Put_Line ("[身]     整步没照做:要走的和实际走的差了 " & Codec.Fmt (Dn / Long_Float'Max (1.0e-9, An) * 100.0, 0) & "% ⇒ 步幅缩回上一档");
+               end if;
             end;
-            if not Solved then
-               Event := S ("could not solve which channels to push");
-               return;
+         end if;
+         --  步幅按通道各自放宽/收紧:用到它上限一半以上且表报准了才翻倍
+         for K in 0 .. Chan.Per_Arm - 1 loop
+            if Note.Active (K) then
+               if All_Verified and then (not Note.Halted) and then abs Note.Got (K) >= 0.5 * Note.Cap (K) then
+                  Reach (K) := Reach (K) * 2.0;
+               elsif Any_Wrong and then abs Note.Cmd (K) > Long_Float'Max (Note.Floor_Cmd, C.Map.EE_Noise) then
+                  Reach (K) := Long_Float'Max (1.0, Reach (K) * 0.5);
+               end if;
             end if;
-            --  求稳不求快(owner 2026-09-08:方法不重要,做对才重要):一步里任何被跟的点在画面里最多跑一个跟踪窗,眼睛每一步都跟得住;
-            --  步数压进 200 靠不重量身体,不靠大步。缩不下来(表说一步就跑过窗)才记成"大步",走完抖手指认自己
-            for I in 0 .. Natural (Pts.Length) - 1 loop
-               declare
-                  Pr : constant Table.Vec3 := Table.Predict (Effs (I), A);
-                  D : constant Long_Float := Sqrt (Pr (0) ** 2 + Pr (1) ** 2);
-               begin
-                  if D > Track_Win then
-                     Scale := Long_Float'Min (Scale, Track_Win / D);
-                  end if;
-               end;
-            end loop;
-            if Scale < 1.0e-3 then
-               Jump := True;   --  缩到千分之一还不够(比例,无量纲)= 表已经不可信,按大步处理
-            end if;
-            for Round in 1 .. 4 loop
-               declare
-                  Hit : Boolean := False;
-               begin
-                  for I in 0 .. Natural (Pts.Length) - 1 loop
-                     declare
-                        Pr : constant Table.Vec3 := Table.Predict (Effs (I), A);
-                        Nu : constant Long_Float := Pts (I).Cu + Pr (0) * Scale;
-                        Nv : constant Long_Float := Pts (I).Cv + Pr (1) * Scale;
-                     begin
-                        --  被跟的点不许被推出视野:离画面边不到一个跟踪窗就缩步(EI:大步转腕把球转出手上相机,之后闭眼猜了 8 步)
-                        if Nu < Track_Win or else Nu > 1.0 - Track_Win or else Nv < Track_Win or else Nv > 1.0 - Track_Win then
-                           Hit := True;
-                        end if;
-                        for Av of Avoid loop
-                           if Av.Located and then Nu * Long_Float (Cw) >= Long_Float (Av.X0) and then Nu * Long_Float (Cw) <= Long_Float (Av.X1)
-                             and then Nv * Long_Float (F.Cams (Cam).H) >= Long_Float (Av.Y0) and then Nv * Long_Float (F.Cams (Cam).H) <= Long_Float (Av.Y1)
-                           then
-                              Hit := True;
-                           end if;
-                        end loop;
-                     end;
-                  end loop;
-                  --  🔴 不许碰的东西,要防的是【整条胳膊】,不是只有被跟的那一个点:
-                  --  我身上每一块此刻在哪、这一步会挪到哪,身体自己都知道(部件图 + 那一块自己的表)⇒ 逐块按框查。
-                  --  密线里蹭断邻线,靠的就是这一条(只查一个点等于没查)
-                  if Cam_Arm (C, Cam) /= Integer (Arm) and then Track_Idx (C, Arm, Cam) < Natural (C.Zones.Length) then
-                     declare
-                        Tr : constant Zone_Track := C.Zones (Track_Idx (C, Arm, Cam));
-                     begin
-                        for K in 0 .. Chan.Per_Arm loop
-                           if Tr.Pieces (K).Valid then
-                              declare
-                                 Idx : constant Integer := Find_Effect (C, Arm, Cam, Piece_Pt, K, -1);
-                                 Sh : constant Table.Vec3 := (if Idx >= 0 then Table.Predict (C.Tables (Natural (Idx)).E, A) else Table.Zero3);
-                                 Du : constant Long_Float := Sh (0) * Scale;
-                                 Dv : constant Long_Float := Sh (1) * Scale;
-                                 X0 : constant Long_Float := Long_Float (Tr.Pieces (K).X0) + Du * Long_Float (Cw);
-                                 X1 : constant Long_Float := Long_Float (Tr.Pieces (K).X1) + Du * Long_Float (Cw);
-                                 Y0 : constant Long_Float := Long_Float (Tr.Pieces (K).Y0) + Dv * Long_Float (F.Cams (Cam).H);
-                                 Y1 : constant Long_Float := Long_Float (Tr.Pieces (K).Y1) + Dv * Long_Float (F.Cams (Cam).H);
-                              begin
-                                 for Av of Avoid loop
-                                    if Av.Located and then X0 <= Long_Float (Av.X1) and then X1 >= Long_Float (Av.X0)
-                                      and then Y0 <= Long_Float (Av.Y1) and then Y1 >= Long_Float (Av.Y0)
-                                    then
-                                       Hit := True;
-                                    end if;
-                                 end loop;
-                              end;
-                           end if;
-                        end loop;
-                     end;
-                  end if;
-                  exit when not Hit;
-                  if Round = 4 then
-                     Event := S ("stopped: every step would push what I am tracking out of my sight, or put some part of me onto a thing I must not touch");
-                     return;
-                  end if;
-                  Scale := Scale * 0.5;
-               end;
-            end loop;
-            for K in 0 .. Chan.Per_Arm - 1 loop
-               A (K) := A (K) * Scale;
-            end loop;
-            if Table.Norm (A, Chan.Per_Arm) <= C.Map.EE_Noise then
-               Event := S ("amount: already there (what is left to push is within my own noise)");
-               return;
-            end if;
+         end loop;
+         for I in 0 .. Natural (Pts.Length) - 1 loop
+            Store_Effect (C, Arm, Cam, Pts (I).Kind, Pts (I).Chan_K, Pts (I).Blob, Effs (I), Trusts (I), Reach);
+         end loop;
+         --  碰到 = 我没在推的东西自己动了(跟着这只手动的相机里满画面都在动,分不出来 ⇒ 不下结论)
+         if not Own_Cam and then not Was_Regs.Is_Empty then
             declare
-               Before : constant Buf := F.Cams (Cam).Gray;
-               Deliv : Table.Vec;
-               Pic_Delta : Long_Float;
-               Err_Now : Long_Float := 0.0;
-               Any_Blocked : Boolean := False;
-               Moved : constant Boolean := True;
+               Now_Regs : constant Picture.Regions := Cut_Things (C, F, Cam);
             begin
-               Halted := False;
-               if Cam_Arm (C, Cam) /= Integer (Arm) then
-                  Was_Regs := Cut_Things (C, F, Cam);
-               else
-                  Was_Regs.Clear;
-               end if;
-               Step_Arm (L, C, F, Arm, A, Jaw, Deliv, Ok, C.Fast, Watch_Things'Unrestricted_Access);
-               Beats := Plug.Steps (L) - Beats0;
-               if Halted then
-                  Put_Line ("[身]     途中眼睛叫停:被跟的东西快出画面或看不见了,这一步没走完");
-               end if;
-               if not Ok then
-                  Event := S ("the body refused the command");
-                  return;
-               end if;
-               Steps_Taken := Steps_Taken + 1;
-               declare
-                  Sv : Backup.Step_Vec := [others => 0.0];
-               begin
-                  for K in 0 .. Chan.Per_Arm - 1 loop
-                     Sv (K) := Deliv (K);
-                  end loop;
-                  Backup.Remember (Ring, Sv);
-               end;
-               Pic_Delta := Long_Float (Picture.Max_Diff (Before, F.Cams (Cam).Gray));
-               declare
-                  Was : constant Point_Vectors.Vector := Pts;
-                  Need_Refind : Boolean := False;
-                  All_Verified : Boolean := True;
-                  Any_Wrong : Boolean := False;
-                  Not_Followed : Boolean := False;
-                  Moved_Other : Boolean := False;   --  我没在推的东西也动了 ⇒ 碰到它了
-               begin
-                  --  ① 认位置。我的手指(世界相机里):先"感觉"—— 按此刻位姿从身体图算;熟地只让眼睛核对一下(光流),
-                  --     生地或大步就去看(抖手指,看完记进图)。世界里的块:每步重切就近对上。
-                  for I in 0 .. Natural (Pts.Length) - 1 loop
-                     declare
-                        P : Point := Pts (I);
-                        Pr : constant Table.Vec3 := Table.Predict (Effs (I), Deliv);
-                        W0 : constant Point := Was (I);
-                     begin
-                        P.Has_Meas := False;
-                        if P.Kind = Piece_Pt and then Cam_Arm (C, Cam) /= Integer (P.Arm) then
-                           declare
-                              Diff : Table.Vec;
-                              Dist : Long_Float;
-                              Si : constant Integer := Schema.Nearest (C.Sch, P.Arm, Cam, F.EE (P.Arm), C.Map.Amp, Chan.Per_Arm, Diff, Dist);
-                              Familiar : Boolean := False;
-                              In_Map : Boolean := False;
-                           begin
-                              if Si >= 0 then
-                                 declare
-                                    Sm : constant Schema.Sample := C.Sch.S (Natural (Si));
-                                 begin
-                                    In_Map := P.Chan_K <= Chan.Per_Arm and then Sm.Parts (P.Chan_K).Valid and then (P.Blob < 0 or else Sm.Parts (P.Chan_K).N_Blobs > Natural (P.Blob));
-                                 end;
-                              end if;
-                              if In_Map then
-                                 declare
-                                    Sm : constant Schema.Sample := C.Sch.S (Natural (Si));
-                                    Pm : constant Table.Vec3 := Table.Predict (Effs (I), Diff);
-                                    Gp : constant Schema.Part_Pos := Sm.Parts (P.Chan_K);
-                                    Su : constant Long_Float := (if P.Blob = 1 then Gp.B1u elsif P.Blob = 0 then Gp.B0u else Gp.Cu);
-                                    Sv : constant Long_Float := (if P.Blob = 1 then Gp.B1v elsif P.Blob = 0 then Gp.B0v else Gp.Cv);
-                                    Sz : constant Long_Float := Gp.Z;
-                                 begin
-                                    P.Cu := Long_Float'Max (0.0, Long_Float'Min (1.0, Su + Pm (0)));
-                                    P.Cv := Long_Float'Max (0.0, Long_Float'Min (1.0, Sv + Pm (1)));
-                                    if Sz > 0.0 then
-                                       P.Z := Sz + Pm (2);
-                                    end if;
-                                    Familiar := True;
-                                    for K in 0 .. Chan.Per_Arm - 1 loop
-                                       if abs Diff (K) > Long_Float'Max (1.0e-6, C.Map.Amp (P.Arm * Chan.Per_Arm + K)) * Cap_Mult * Reach (K) then
-                                          Familiar := False;
-                                       end if;
-                                    end loop;
-                                 end;
-                              else
-                                 P.Cu := Long_Float'Max (0.0, Long_Float'Min (1.0, W0.Cu + Pr (0)));
-                                 P.Cv := Long_Float'Max (0.0, Long_Float'Min (1.0, W0.Cv + Pr (1)));
-                                 if W0.Z > 0.0 then
-                                    P.Z := W0.Z + Pr (2);
-                                 end if;
-                              end if;
-                              if Jump or else not Familiar then
-                                 P.Lost := True;
-                                 Need_Refind := True;
-                              else
-                                 declare
-                                    Q : Point := W0;
-                                    Z : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, Cam);
-                                 begin
-                                    Retrack (C, F, Cam, Before, Q, W0.Cu + Pr (0), W0.Cv + Pr (1), Moved, (if W0.Z > 0.0 then W0.Z + Pr (2) else -1.0));
-                                    --  眼睛和图对不上(差过张幅的四分之一,比例,无量纲;再小也有两个跟踪地板)⇒ 去看
-                                    if Q.Lost or else Sqrt ((Q.Cu - P.Cu) ** 2 + (Q.Cv - P.Cv) ** 2) > Long_Float'Max (Z.Span * 0.25, Fl.Track * 2.0) then
-                                       P.Lost := True;
-                                       Need_Refind := True;
-                                    else
-                                       P.Lost := False;
-                                       P.Has_Meas := True; P.Meas_U := Q.Cu; P.Meas_V := Q.Cv; P.Meas_Z := Q.Z;
-                                    end if;
-                                 end;
-                              end if;
-                           end;
-                        else
-                           Retrack (C, F, Cam, Before, P, W0.Cu + Pr (0), W0.Cv + Pr (1), Moved, (if W0.Z > 0.0 then W0.Z + Pr (2) else -1.0));
-                        end if;
-                        Pts.Replace_Element (I, P);
-                     end;
-                  end loop;
-                  if Need_Refind then
-                     Refind_Pieces (L, C, F, Cam, Pts);
-                     Beats := Plug.Steps (L) - Beats0;
-                  end if;
-                  --  ② 修表:只用真认到的点(按表猜的位置不许再喂回表);表比零表准 = 核实,反之 = 报错
-                  for I in 0 .. Natural (Pts.Length) - 1 loop
-                     declare
-                        P : constant Point := Pts (I);
-                        W0 : constant Point := Was (I);
-                        Dy : Table.Vec3;
-                        E : Table.Effect := Effs (I);
-                     begin
-                        if P.Lost then
-                           All_Verified := False;
-                           Any_Wrong := True;
-                        else
-                           --  修表只用眼睛量到的(光流核对值或抖手指认到的),按图猜的位置不喂回表
-                           Dy (0) := (if P.Has_Meas then P.Meas_U else P.Cu) - W0.Cu; Dy (1) := (if P.Has_Meas then P.Meas_V else P.Cv) - W0.Cv;
-                           Dy (2) := (if P.Has_Meas then (if P.Meas_Z > 0.0 and then W0.Z > 0.0 then P.Meas_Z - W0.Z else 0.0)
-                                      elsif P.Z > 0.0 and then W0.Z > 0.0 then P.Z - W0.Z else 0.0);
-                           Dy (3) := (if P.Size > 0.0 and then W0.Size > 0.0 then P.Size - W0.Size else 0.0);
-                           Dy (4) := (if P.Size > 0.0 and then W0.Size > 0.0 then Wrap (P.Ang - W0.Ang) else 0.0);
-                           Table.Update (E, Deliv, Dy, Fl.Track * 2.0, Long_Float'Max (C.Map.EE_Noise, 0.5 * Cmd_Floor));
-                           if Table.Blocked (E) then
-                              Any_Blocked := True;
-                           end if;
-                           if not (E.Null_Res > Fl.Track * 2.0 and then E.Free_Res < E.Null_Res) then
-                              All_Verified := False;
-                           end if;
-                           if E.Free_Res > Fl.Track * 2.0 and then E.Free_Res >= E.Null_Res then
-                              Any_Wrong := True;
-                           end if;
-                        end if;
-                        Effs (I) := E;
-                        Store_Effect (C, Arm, Cam, P.Kind, P.Chan_K, P.Blob, E, Trusts (I), Reach);
-                        Err_Now := Err_Now + P.Steps_Err;
-                     end;
-                  end loop;
-                  --  身体没照做:看【整步】而不是逐个通道(EN:要一个通道退 3 mm 它走了 4 mm 就停,一轮一步)。
-                  --  各通道按自己的探针幅度归一之后,实到与命令差过一半 ⇒ 这一步不算数,用到的通道步幅都缩回上一档(EI:0.236 rad 实到 -0.055)
-                  if not Halted then
-                     declare
-                        Dn, An : Long_Float := 0.0;
-                     begin
-                        for K in 0 .. Chan.Per_Arm - 1 loop
-                           declare
-                              Am : constant Long_Float := Long_Float'Max (1.0e-6, C.Map.Amp (Arm * Chan.Per_Arm + K));
-                           begin
-                              Dn := Dn + ((Deliv (K) - A (K)) / Am) ** 2;
-                              An := An + (A (K) / Am) ** 2;
-                           end;
-                        end loop;
-                        Dn := Sqrt (Dn); An := Sqrt (An);
-                        if An > 1.0 and then Dn > 0.5 * An then
-                           Any_Wrong := True; All_Verified := False; Not_Followed := True;
-                           for K in 0 .. Chan.Per_Arm - 1 loop
-                              if Active (K) then
-                                 Reach (K) := Long_Float'Max (1.0, Reach (K) * 0.5);
-                              end if;
-                           end loop;
-                           Put_Line ("[身]     整步没照做:要走的和实际走的差了 " & Codec.Fmt (Dn / Long_Float'Max (1.0e-9, An) * 100.0, 0) & "%(按各通道自己的探针幅度算)⇒ 步幅缩回上一档");
-                        end if;
-                     end;
-                  end if;
-                  --  步幅按通道各自翻倍/减半:这一步用到它上限一半以上、且表报准了,它才翻倍(EI:靠平移走对了 4 步就把转动放到 16 倍,一转就把球转出视野)
-                  for K in 0 .. Chan.Per_Arm - 1 loop
-                     if Active (K) then
-                        if All_Verified and then (not Halted) and then abs Deliv (K) >= 0.5 * Cap (K) then
-                           Reach (K) := Reach (K) * 2.0;
-                        elsif Any_Wrong and then abs A (K) > Long_Float'Max (Cmd_Floor, C.Map.EE_Noise) then
-                           Reach (K) := Long_Float'Max (1.0, Reach (K) * 0.5);
-                        end if;
-                     end if;
-                  end loop;
-                  for I in 0 .. Natural (Pts.Length) - 1 loop
-                     Store_Effect (C, Arm, Cam, Pts (I).Kind, Pts (I).Chan_K, Pts (I).Blob, Effs (I), Trusts (I), Reach);
-                  end loop;
-                  --  出事只报不打断(owner 2026-09-08:八炮里"朝球靠近"没有一次连着跑过 4 下,全被这些保险掐掉,
-                  --  于是后面合手/抬起来那一整段从没执行过)。真看不见了才停 —— 连着两步全部认不到,再走就是闭眼走。
+               for R of Now_Regs loop
                   declare
-                     All_Lost : Boolean := True;
+                     Mine : Boolean := False;
+                     Found_Prev : Boolean := False;
+                     Best : Long_Float := 0.0;
                   begin
-                     --  一块东西有两团(两根手指),被挡住一团是常事 ⇒ 全部认不到才算看不见
                      for P of Pts loop
-                        if not P.Lost then
-                           All_Lost := False;
+                        if Sqrt ((R.Cu - P.Cu) ** 2 + (R.Cv - P.Cv) ** 2) <= Long_Float'Max (P.Box_W, P.Box_H) then
+                           Mine := True;
                         end if;
                      end loop;
-                     Lost_Streak := (if All_Lost then Lost_Streak + 1 else 0);
-                     if Lost_Streak = 1 then
-                        --  第一次全丢:把这一拍的画面和切出来的块落图,好看清它是被当成了我自己、还是并成了一团
-                        if C.Dump_Dir /= "" then
-                           declare
-                              RGB : Buf := F.Cams (Cam).RGB;
-                              Cw2 : constant Natural := F.Cams (Cam).W;
-                              Ch2 : constant Natural := F.Cams (Cam).H;
-                              Regs : constant Picture.Regions := Cut_Things (C, F, Cam);
-                              N : Natural := 0;
-                           begin
-                              for R of Regs loop
-                                 N := N + 1;
-                                 Draw.Numbered_Box (RGB, Cw2, Ch2, R.X0, R.Y0, R.X1, R.Y1, N, Draw.Green, 2);
-                              end loop;
-                              for P of Pts loop
-                                 --  标记框 = 这个点自己的框(没有就用一个跟踪窗),只为落图看得见(比例,无量纲)
-                                 declare
-                                    Hw : constant Long_Float := Long_Float'Max (P.Box_W, Track_Win) * 0.5;
-                                    Hh2 : constant Long_Float := Long_Float'Max (P.Box_H, Track_Win) * 0.5;
-                                 begin
-                                    Draw.Numbered_Box (RGB, Cw2, Ch2,
-                                                       Natural (Long_Float'Max (0.0, (P.Cu - Hw) * Long_Float (Cw2))),
-                                                       Natural (Long_Float'Max (0.0, (P.Cv - Hh2) * Long_Float (Ch2))),
-                                                       Natural (Long_Float'Min (Long_Float (Cw2 - 1), (P.Cu + Hw) * Long_Float (Cw2))),
-                                                       Natural (Long_Float'Min (Long_Float (Ch2 - 1), (P.Cv + Hh2) * Long_Float (Ch2))),
-                                                       0, Draw.Pink, 2);
-                                 end;
-                              end loop;
-                              Codec.Write_BMP (To_String (C.Dump_Dir) & "/lost_" & Codec.Pad6 (C.Round_N) & "_" & Codec.Pad6 (Steps_Taken) & ".bmp", RGB, Cw2, Ch2);
-                              Put_Line ("[身]     全丢了:这一拍的画面和切出来的" & Natural'Image (N) & " 块落图 lost_" & Codec.Pad6 (C.Round_N) & "_" & Codec.Pad6 (Steps_Taken) & ".bmp");
-                           end;
-                        end if;
-                     end if;
-                     if Lost_Streak >= 2 then
-                        Event := S ("lost sight: two steps in a row I could not find what I am tracking in this picture; I stopped rather than move blind");
-                        Beats := Plug.Steps (L) - Beats0;
-                        return;
-                     end if;
-                     --  🔴 认东西是脑的活:两块一样像的时候身体不许自己挑(ER:球和乐高大小分不开,跟着乐高走还把它撞倒)
-                     for P of Pts loop
-                        if P.Unsure then
-                           if C.Dump_Dir /= "" then
+                     if not Mine then
+                        for Q of Was_Regs loop
+                           if Q.Count * 3 >= R.Count and then R.Count * 3 >= Q.Count then
                               declare
-                                 RGB2 : Buf := F.Cams (Cam).RGB;
-                                 Regs2 : constant Picture.Regions := Cut_Things (C, F, Cam);
-                                 N2 : Natural := 0;
+                                 D : constant Long_Float := Sqrt ((R.Cu - Q.Cu) ** 2 + (R.Cv - Q.Cv) ** 2);
                               begin
-                                 for R of Regs2 loop
-                                    N2 := N2 + 1;
-                                    Draw.Numbered_Box (RGB2, F.Cams (Cam).W, F.Cams (Cam).H, R.X0, R.Y0, R.X1, R.Y1, N2, Draw.Green, 2);
-                                 end loop;
-                                 Codec.Write_BMP (To_String (C.Dump_Dir) & "/unsure_" & Codec.Pad6 (C.Round_N) & "_" & Codec.Pad6 (Steps_Taken) & ".bmp",
-                                                  RGB2, F.Cams (Cam).W, F.Cams (Cam).H);
-                              end;
-                           end if;
-                           Event := S ("not sure which one is yours: two things here look equally like the one you named (same size, same distance); "
-                                       & "I stopped instead of guessing - look again and tell me its number");
-                           Beats := Plug.Steps (L) - Beats0;
-                           return;
-                        end if;
-                     end loop;
-                     if Not_Followed then
-                        Put_Line ("[身]     没照做这一步不算数,步幅已缩回;接着走");
-                     end if;
-                     --  碰到 = 我没在推的东西自己动了。跟着这只手动的相机里满画面都在动,分不出来 ⇒ 那种相机里不下这个结论
-                     if Cam_Arm (C, Cam) /= Integer (Arm) and then not Was_Regs.Is_Empty then
-                        declare
-                           Now_Regs : constant Picture.Regions := Cut_Things (C, F, Cam);
-                        begin
-                           for R of Now_Regs loop
-                              declare
-                                 Mine : Boolean := False;
-                                 Found_Prev : Boolean := False;
-                                 Best : Long_Float := 0.0;
-                              begin
-                                 for P of Pts loop
-                                    if Sqrt ((R.Cu - P.Cu) ** 2 + (R.Cv - P.Cv) ** 2) <= Long_Float'Max (P.Box_W, P.Box_H) then
-                                       Mine := True;
-                                    end if;
-                                 end loop;
-                                 if not Mine then
-                                    for Q of Was_Regs loop
-                                       if Q.Count * 3 >= R.Count and then R.Count * 3 >= Q.Count then
-                                          declare
-                                             D2 : constant Long_Float := Sqrt ((R.Cu - Q.Cu) ** 2 + (R.Cv - Q.Cv) ** 2);
-                                          begin
-                                             if not Found_Prev or else D2 < Best then
-                                                Best := D2; Found_Prev := True;
-                                             end if;
-                                          end;
-                                       end if;
-                                    end loop;
-                                    if Found_Prev and then Best > Fl.Track * 2.0 then
-                                       Moved_Other := True;
-                                    end if;
+                                 if not Found_Prev or else D < Best then
+                                    Best := D; Found_Prev := True;
                                  end if;
                               end;
-                           end loop;
-                        end;
-                     end if;
-                     Touched := Moved_Other;
-                     if Touched then
-                        Put_Line ("[身]     我没在推的东西也动了 ⇒ 碰到它了");
+                           end if;
+                        end loop;
+                        if Found_Prev and then Best > Fl.Track * 2.0 then
+                           Note.Touched := True;
+                        end if;
                      end if;
                   end;
-               end;
-               Monitor.Step (W, Monitor.Floor (Long_Float'Max (0.0, Pic_Delta)), Monitor.Bounded (Last_Err), Monitor.Bounded (Err_Now),
-                             Monitor.Floor (Long_Float'Max (0.0, Table.Norm (Deliv, Chan.Per_Arm))), Fl);
-               Put_Line ("[身]     步" & Natural'Image (Steps_Taken) & (if Jump then "(大步)" else "") & ":误 " & Codec.Fmt (Last_Err, 3) & " → " & Codec.Fmt (Err_Now, 3) & " · 步幅 ×[" & Codec.Fmt (Reach (0), 0) & " " & Codec.Fmt (Reach (1), 0) & " " & Codec.Fmt (Reach (2), 0) & " " & Codec.Fmt (Reach (3), 0) & " " & Codec.Fmt (Reach (4), 0) & " " & Codec.Fmt (Reach (5), 0) & "] · 还差 " & Codec.Fmt (Err_Now, 1) & " 步(左右 " & Codec.Fmt (Pts (0).Err_U, 1) & " 上下 " & Codec.Fmt (Pts (0).Err_V, 1) & " 远近 " & Codec.Fmt (Pts (0).Err_Z, 1) &
-                         " 大小 " & Codec.Fmt (Pts (0).Err_S, 1) & " 朝向 " & Codec.Fmt (Pts (0).Err_A, 1) & ")· 拍 " & Codec.Img (Beats) &
-                         " · 命令 [" & Codec.Fmt (A (0), 3) & " " & Codec.Fmt (A (1), 3) & " " & Codec.Fmt (A (2), 3) & " " & Codec.Fmt (A (3), 3) & " " & Codec.Fmt (A (4), 3) & " " & Codec.Fmt (A (5), 3) &
-                         "] · 实到 [" & Codec.Fmt (Deliv (0), 4) & " " & Codec.Fmt (Deliv (1), 4) & " " & Codec.Fmt (Deliv (2), 4) & " " & Codec.Fmt (Deliv (3), 3) & " " & Codec.Fmt (Deliv (4), 3) & " " & Codec.Fmt (Deliv (5), 3) &
-                         "] · 点 (" & Codec.Fmt (Pts (0).Cu, 3) & "," & Codec.Fmt (Pts (0).Cv, 3) & ") 深 " & Codec.Fmt (Pts (0).Z, 3) & (if Any_Blocked then " · 零表更准(顶住?)" else ""));
-               Last_Err := Err_Now;
-               if Any_Blocked or else Monitor.Refusing (W) then
-                  Blocked_Out := True;
-               end if;
-               if Monitor.Fired (Until_Kind, W, Step_Limit, Any_Blocked, Monitor.Bounded (Selfmap.Jaw_Of (F, Arm)),
-                                 Monitor.Bounded (if Arm < Natural (C.Hands.Length) then C.Hands (Arm).Empty_Close else 0.0), Monitor.Floor (C.Map.Jaw_Noise),
-                                 Touched)
-               then
-                  Event := (case Until_Kind is
-                              when Monitor.U_Steps => S ("steps: I took the steps you asked for"),
-                              when Monitor.U_Contact => S ("contact: something I was not pushing moved when I moved - I am touching it"),
-                              when Monitor.U_Resist => S ("resist: I commanded a push and my body did not go"),
-                              when Monitor.U_Slip => S ("slip: what I was holding has left my fingers"),
-                              when Monitor.U_Settle => S ("settle: the picture stopped changing"));
-                  return;
-               end if;
-               declare
-                  All_There : Boolean := True;
-               begin
-                  for P of Pts loop
-                     if not Reached (P, Fl.Track * 2.0) then
-                        All_There := False;
-                     end if;
-                  end loop;
-                  if All_There then
-                     Event := S ("amount: arrived (in the picture and at the same distance as my fingers)");
-                     return;
-                  end if;
-               end;
-               if Steps_Taken > 1 and then Monitor.Stalled (W) then
-                  Event := S ("amount: stopped getting closer (still about " & Codec.Fmt (Err_Now, 1) & " pushes away) - either something holds me or this arm cannot reach farther from here");
-                  return;
-               end if;
+               end loop;
             end;
+         end if;
+         if Note.Touched then
+            Put_Line ("[身]     我没在推的东西也动了 ⇒ 碰到它了");
+         end if;
+      end Learn;
+
+      --  ⑤ 判:这一步之后接着走,还是到了 / 出事了 / 拿不准
+      procedure Judge is
+      begin
+         Monitor.Step (W, Monitor.Floor (Long_Float'Max (0.0, Note.Pic_Delta)), Monitor.Bounded (Last_Err), Monitor.Bounded (Note.Err_Now),
+                       Monitor.Floor (Long_Float'Max (0.0, Table.Norm (Note.Got, Chan.Per_Arm))), Fl);
+         Put_Line ("[身]     步" & Natural'Image (Steps_Taken) & (if Note.Big_Step then "(大步)" else "") &
+                   ":还差 " & Codec.Fmt (Last_Err, 1) & " → " & Codec.Fmt (Note.Err_Now, 1) & " 步(左右 " & Codec.Fmt (Pts (0).Err_U, 1) &
+                   " 上下 " & Codec.Fmt (Pts (0).Err_V, 1) & " 远近 " & Codec.Fmt (Pts (0).Err_Z, 1) &
+                   " 大小 " & Codec.Fmt (Pts (0).Err_S, 1) & " 朝向 " & Codec.Fmt (Pts (0).Err_A, 1) & ")· 拍 " & Codec.Img (Beats) &
+                   " · 步幅 ×[" & Codec.Fmt (Reach (0), 0) & " " & Codec.Fmt (Reach (1), 0) & " " & Codec.Fmt (Reach (2), 0) & " " &
+                   Codec.Fmt (Reach (3), 0) & " " & Codec.Fmt (Reach (4), 0) & " " & Codec.Fmt (Reach (5), 0) &
+                   "] · 命令 [" & Codec.Fmt (Note.Cmd (0), 3) & " " & Codec.Fmt (Note.Cmd (1), 3) & " " & Codec.Fmt (Note.Cmd (2), 3) & " " &
+                   Codec.Fmt (Note.Cmd (3), 3) & " " & Codec.Fmt (Note.Cmd (4), 3) & " " & Codec.Fmt (Note.Cmd (5), 3) &
+                   "] · 实到 [" & Codec.Fmt (Note.Got (0), 4) & " " & Codec.Fmt (Note.Got (1), 4) & " " & Codec.Fmt (Note.Got (2), 4) & " " &
+                   Codec.Fmt (Note.Got (3), 3) & " " & Codec.Fmt (Note.Got (4), 3) & " " & Codec.Fmt (Note.Got (5), 3) &
+                   "] · 点 (" & Codec.Fmt (Pts (0).Cu, 3) & "," & Codec.Fmt (Pts (0).Cv, 3) & ") 深 " & Codec.Fmt (Pts (0).Z, 3) &
+                   (if Note.Blocked then " · 零表更准(顶住?)" else ""));
+         Last_Err := Note.Err_Now;
+         if Note.Blocked or else Monitor.Refusing (W) then
+            Blocked_Out := True;
+         end if;
+         --  认不到:第一次落图给人看,连着两步才停(被挡住一团是常事)
+         Lost_Run := (if Note.Lost_All then Lost_Run + 1 else 0);
+         if Lost_Run = 1 then
+            Dump_Picture ("lost");
+         end if;
+         if Lost_Run >= 2 then
+            Note.Say_Stop := S ("lost sight: two steps in a row I could not find what I am tracking in this picture; I stopped rather than move blind");
+            return;
+         end if;
+         --  🔴 认东西是脑的活:两块一样像的时候身体不许自己挑
+         if Note.Unsure then
+            Dump_Picture ("unsure");
+            Note.Say_Stop := S ("not sure which one is yours: two things here look equally like the one you named (same size, same distance); "
+                                & "I stopped instead of guessing - look again and tell me its number");
+            return;
+         end if;
+         if Note.Not_Followed then
+            Put_Line ("[身]     没照做这一步不算数,步幅已缩回;接着走");
+         end if;
+         if Monitor.Fired (Until_Kind, W, Step_Limit, Note.Blocked, Monitor.Bounded (Selfmap.Jaw_Of (F, Arm)),
+                           Monitor.Bounded (if Arm < Natural (C.Hands.Length) then C.Hands (Arm).Empty_Close else 0.0),
+                           Monitor.Floor (C.Map.Jaw_Noise), Note.Touched)
+         then
+            Note.Say_Stop := (case Until_Kind is
+                                when Monitor.U_Steps => S ("steps: I took the steps you asked for"),
+                                when Monitor.U_Contact => S ("contact: something I was not pushing moved when I moved - I am touching it"),
+                                when Monitor.U_Resist => S ("resist: I commanded a push and my body did not go"),
+                                when Monitor.U_Slip => S ("slip: what I was holding has left my fingers"),
+                                when Monitor.U_Settle => S ("settle: the picture stopped changing"));
+            return;
+         end if;
+         declare
+            All_There : Boolean := True;
+         begin
+            for P of Pts loop
+               if not Reached (P, Fl.Track * 2.0) then
+                  All_There := False;
+               end if;
+            end loop;
+            if All_There then
+               Note.Say_Stop := S ("amount: arrived (in the picture and at the same distance as my fingers)");
+               return;
+            end if;
          end;
+         if Steps_Taken > 1 and then Monitor.Stalled (W) then
+            Note.Say_Stop := S ("amount: stopped getting closer (still about " & Codec.Fmt (Note.Err_Now, 1) &
+                                " pushes away) - either something holds me or this arm cannot reach farther from here");
+         end if;
+      end Judge;
+
+      Ok : Boolean;
+   begin
+      Event := S ("hit the safety cap on steps");
+      Steps_Taken := 0;
+      Beats := 0;
+      Blocked_Out := False;
+      Jaw.Append (Selfmap.Jaw_Of (F, Arm));
+      Fl.Track := Long_Float'Max (1.0 / Long_Float (Cw), 0.0);
+      Fl.Picture := Long_Float (Integer'(if Cam < Natural (C.Map.Pic_Floor.Length) then C.Map.Pic_Floor (Cam) else 0));
+      Fl.Reading := C.Map.Jaw_Noise;
+      Fl.Delivery := C.Map.EE_Noise;
+      Backup.Clear (Ring);
+      Ready_Tables (Ok);
+      if not Ok then
+         Event := S ("the body stopped answering while I measured my response table");
+         return;
+      end if;
+      for Step in 1 .. Natural'Min (Step_Cap, (if Step_Limit > 0 then Step_Limit else Step_Cap)) loop
+         Plan;
+         if Note.Say_Stop /= "" then
+            Event := Note.Say_Stop;
+            return;
+         end if;
+         Walk (Ok);
+         if not Ok then
+            Event := S ("the body refused the command");
+            return;
+         end if;
+         Look;
+         Learn;
+         Judge;
+         if Note.Say_Stop /= "" then
+            Event := Note.Say_Stop;
+            Beats := Plug.Steps (L) - Beats0;
+            return;
+         end if;
       end loop;
       Event := S ("steps: hit the step cap (" & Codec.Img (Steps_Taken) & ")");
    end Run_Segment;
@@ -1983,205 +2003,346 @@ package body Act is
          Desc : Unbounded_String;
          Grip_Arm : constant Integer := (if Say.Grip_Arm >= 1 and then Say.Grip_Arm <= C.Map.Arms then Integer (Say.Grip_Arm) - 1 else -1);
          Did_Grip : Unbounded_String;
+      --  2a 把脑说的话变成要求:别动的,目标就是它现在的位置;要动的,目标是格子或与某号的关系;
+      --  抓某号,目标是"和我张开的那片地方重合"(位置 / 远近 / 看着多大 / 朝向)
+      --  把去哪翻成目标:格子 / 与某号的关系(碰到它 · 上下左右 · 前后 · 离远点)。全是量出来的位置,没有写死的距离
+      procedure Set_Target (G : Brain.Goal; P : in out Point; Ok_Pt : in out Boolean) is
+      begin
+                           --  目标
+                           if G.Cell >= 1 and then G.Cell <= Natural (C.Cells_U.Length) then
+                              P.Tu := C.Cells_U (G.Cell - 1); P.Tv := C.Cells_V (G.Cell - 1); P.Tz := P.Z; P.Wz := 0.0;
+                              P.Desc := S ("item " & Codec.Img (G.Item) & " to cell " & Codec.Img (G.Cell));
+                           elsif G.Rel /= "" and then G.Of_Item >= 1 and then G.Of_Item <= Natural (C.Items.Length) then
+                              declare
+                                 O : constant Item := C.Items (G.Of_Item - 1);
+                                 Ow : constant Long_Float := Long_Float (O.X1 - O.X0) / Long_Float (Cw);
+                                 Oh : constant Long_Float := Long_Float (O.Y1 - O.Y0) / Long_Float (Ch);
+                                 Rl : constant String := To_String (G.Rel);
+                              begin
+                                 if not O.Located then
+                                    Report := S ("goal: item " & Codec.Img (G.Of_Item) & " is not locatable right now. ");
+                                    Ok_Pt := False;
+                                 else
+                                    P.Desc := S ("item " & Codec.Img (G.Item) & " " & Rl & " item " & Codec.Img (G.Of_Item));
+                                    P.Tu := O.Cu; P.Tv := O.Cv; P.Tz := P.Z; P.Wz := 0.0;
+                                    if Rl = "at" then
+                                       if P.Kind = Thing_Pt and then O.Kind in Finger | Grip then
+                                          --  X 装进握区:区心、区深
+                                          declare
+                                             Z : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, Cam);
+                                          begin
+                                             P.Tu := Z.Cu; P.Tv := Z.Cv; P.Tz := Z.Depth; P.Wz := (if Picture.Is_Nan (Z.Depth) then 0.0 else 1.0);
+                                          end;
+                                       elsif P.Kind = Piece_Pt and then O.Kind in Thing | Thing_Remembered then
+                                          P.Tz := O.Depth + O.Height * 0.5; P.Wz := (if O.Depth > 0.0 then 1.0 else 0.0);   --  指尖到它的半腰(顶面深 + 鼓起的一半,都是量的)
+                                       else
+                                          P.Tz := O.Depth; P.Wz := (if O.Depth > 0.0 and then P.Z > 0.0 then 1.0 else 0.0);
+                                       end if;
+                                    elsif Rl = "above" then
+                                       P.Tv := O.Cv - Long_Float'Max (Oh, 1.0 / Long_Float (Ch));
+                                    elsif Rl = "below" then
+                                       P.Tv := O.Cv + Long_Float'Max (Oh, 1.0 / Long_Float (Ch));
+                                    elsif Rl = "left" then
+                                       P.Tu := O.Cu - Long_Float'Max (Ow, 1.0 / Long_Float (Cw));
+                                    elsif Rl = "right" then
+                                       P.Tu := O.Cu + Long_Float'Max (Ow, 1.0 / Long_Float (Cw));
+                                    elsif Rl = "front" or else Rl = "back" then
+                                       declare
+                                          --  "一截" = 它自己在画面里的宽 × 它的深度(米,全是量的),没量到深度就用它鼓起的高度
+                                          Sz : constant Long_Float := Long_Float'Max (O.Height, Long_Float'Max (P.Height, Ow * O.Depth));
+                                       begin
+                                          P.Tz := (if Rl = "front" then O.Depth - Sz else O.Depth + Sz);
+                                          P.Wz := (if O.Depth > 0.0 and then P.Z > 0.0 then 1.0 else 0.0);
+                                       end;
+                                    elsif Rl = "away" then
+                                       declare
+                                          Du : constant Long_Float := P.Cu - O.Cu;
+                                          Dv : constant Long_Float := P.Cv - O.Cv;
+                                          Ln : constant Long_Float := Long_Float'Max (1.0e-9, Sqrt (Du * Du + Dv * Dv));
+                                          St : constant Long_Float := Long_Float'Max (Ow, 1.0 / Long_Float (Cw));
+                                       begin
+                                          P.Tu := P.Cu + Du / Ln * St; P.Tv := P.Cv + Dv / Ln * St;
+                                       end;
+                                    end if;
+                                 end if;
+                              end;
+                           else
+                              Ok_Pt := False;
+                           end if;
+      end Set_Target;
+
+      procedure Build_Goals is
+      begin
+            --  "保持不动" → 也变成一个点:它的目标就是它此刻在哪(误差为零)。这样解算必须选一条【不动它】的走法,
+            --  而不是"没人管它" —— 一只手捏住不动、另一只手干活,全靠这一条(以前这种条目被直接跳过)
+            for G of Say.Moves loop
+               if G.Item >= 1 and then G.Item <= Natural (C.Items.Length) and then G.Stay then
+                  declare
+                     It : constant Item := C.Items (G.Item - 1);
+                     P : Point;
+                  begin
+                     if It.Located then
+                        P.Item_No := G.Item;
+                        if It.Kind in Finger | Grip | Piece | Thing_Held then
+                           P.Arm := It.Arm; P.Kind := Piece_Pt;
+                           P.Chan_K := (if It.Kind = Piece then It.Which else Chan.Per_Arm);
+                           declare
+                              Tr : constant Zone_Track := C.Zones (Track_Idx (C, P.Arm, Cam));
+                           begin
+                              P.Cu := Tr.Cu; P.Cv := Tr.Cv; P.Z := Tr.Z; P.Known := Tr.Known;
+                           end;
+                        elsif Cam_Arm (C, Cam) >= 0 then
+                           P.Arm := Natural (Cam_Arm (C, Cam)); P.Kind := Thing_Pt; P.Slot := It.Slot;
+                           P.Cu := It.Cu; P.Cv := It.Cv; P.Z := It.Depth; P.Height := It.Height; P.Count := It.Count;
+                           P.Box_W := Long_Float (It.X1 - It.X0) / Long_Float (Cw); P.Box_H := Long_Float (It.Y1 - It.Y0) / Long_Float (Ch);
+                           P.Elong := It.Elong; P.Gray := It.Gray;
+                        end if;
+                        P.Tu := P.Cu; P.Tv := P.Cv; P.Tz := P.Z;
+                        P.Wz := (if P.Z > 0.0 then 1.0 else 0.0);
+                        P.Desc := S ("item " & Codec.Img (G.Item) & " stays exactly where it is");
+                        if Pts.Is_Empty or else Pts (0).Arm = P.Arm then
+                           Pts.Append (P);
+                        end if;
+                     end if;
+                  end;
+               end if;
+               if G.Item >= 1 and then G.Item <= Natural (C.Items.Length) and then not G.Stay then
+                  declare
+                     It : constant Item := C.Items (G.Item - 1);
+                     P : Point;
+                     Own : constant Boolean := It.Kind in Finger | Grip | Thing_Held | Piece;
+                     Cam_A : constant Integer := Cam_Arm (C, Cam);
+                     Ok_Pt : Boolean := True;
+                  begin
+                     Amount := Amount_Factor (G.Amount);
+                     P.Item_No := G.Item;
+                     if not It.Located then
+                        Report := S ("goal: item " & Codec.Img (G.Item) & " is not locatable in this picture right now. ");
+                        Ok_Pt := False;
+                     elsif It.Kind = Piece then
+                        --  我身上的一块零件:点 = 它此刻的形心,表按需量(六个通道各推一下)
+                        P.Arm := It.Arm; P.Kind := Piece_Pt; P.Chan_K := It.Which; P.Blob := -1;
+                        P.Cu := It.Cu; P.Cv := It.Cv; P.Z := It.Depth;
+                        P.Known := C.Zones (Track_Idx (C, P.Arm, Cam)).Pieces_Known (It.Which);
+                        P.Box_W := Long_Float (It.X1 - It.X0) / Long_Float (Cw); P.Box_H := Long_Float (It.Y1 - It.Y0) / Long_Float (Ch);
+                     elsif Own then
+                        P.Arm := It.Arm; P.Kind := Piece_Pt; P.Chan_K := Chan.Per_Arm;   --  手指 = 握合通道带的那块
+                        declare
+                           Tr : constant Zone_Track := C.Zones (Track_Idx (C, P.Arm, Cam));
+                        begin
+                           P.Cu := Tr.Cu; P.Cv := Tr.Cv; P.Z := Tr.Z; P.Known := Tr.Known or else Cam_A = Integer (P.Arm);
+                        end;
+                        if Cam_A = Integer (P.Arm) and then G.Rel /= "" and then G.Of_Item >= 1 and then G.Of_Item <= Natural (C.Items.Length)
+                          and then C.Items (G.Of_Item - 1).Kind = Thing
+                        then
+                           --  自己的手上相机里"我的手到 X" = 让 X 的像素来到握区:改跟 X
+                           declare
+                              O : constant Item := C.Items (G.Of_Item - 1);
+                           begin
+                              P.Kind := Thing_Pt; P.Slot := O.Slot; P.Cu := O.Cu; P.Cv := O.Cv; P.Z := O.Depth; P.Height := O.Height; P.Count := O.Count;
+                              P.Box_W := Long_Float (O.X1 - O.X0) / Long_Float (Cw); P.Box_H := Long_Float (O.Y1 - O.Y0) / Long_Float (Ch);
+                           end;
+                        end if;
+                     elsif It.Kind = Thing and then Cam_A >= 0 then
+                        P.Arm := Natural (Cam_A); P.Kind := Thing_Pt; P.Slot := It.Slot;
+                        P.Cu := It.Cu; P.Cv := It.Cv; P.Z := It.Depth; P.Height := It.Height; P.Count := It.Count;
+                        P.Box_W := Long_Float (It.X1 - It.X0) / Long_Float (Cw); P.Box_H := Long_Float (It.Y1 - It.Y0) / Long_Float (Ch);
+                     else
+                        Report := S ("goal: item " & Codec.Img (G.Item) & " is a thing I am not holding; I can only move things I hold (say grip close on it first). ");
+                        Ok_Pt := False;
+                     end if;
+                     if Ok_Pt then
+                        Set_Target (G, P, Ok_Pt);
+                     end if;
+                     if Ok_Pt then
+                        if Pts.Is_Empty or else Pts (0).Arm = P.Arm then
+                           Pts.Append (P);
+                        else
+                           Report := Report & "goal for item " & Codec.Img (G.Item) & " needs a different arm than the first goal; I do one arm per segment. ";
+                        end if;
+                     end if;
+                  end;
+               end if;
+            end loop;
+            --  抓握 close 在某块上:先把那块装进握区(手上相机里跟块;否则世界相机里握区去它的顶面),笼住了才合
+            if Say.Grip = "close" and then Grip_Arm >= 0 and then Say.Grip_On >= 1 and then Say.Grip_On <= Natural (C.Items.Length)
+              and then C.Items (Say.Grip_On - 1).Kind in Thing | Thing_Remembered and then C.Items (Say.Grip_On - 1).Located
+            then
+               declare
+                  O : constant Item := C.Items (Say.Grip_On - 1);
+                  A : constant Natural := Natural (Grip_Arm);
+                  Z : constant Zone.Hand_Zone := Zone_Of (C, A, Cam);
+                  P : Point;
+                  Own_Cam : constant Boolean := Cam_Arm (C, Cam) = Integer (A);
+               begin
+                  if Pts.Is_Empty and then Z.Valid then
+                     P.Arm := A; P.Item_No := Say.Grip_On;
+                     if Own_Cam then
+                        --  🔴 "抓住它" = 让它在画面里和我张开的那片地方重合:位置对上、远近对上、看着一样大、朝向一样。
+                        --  这四件全是量出来的区域属性,一个字没提手指几根 —— 两指、七指、吸盘、软体臂同一句话。
+                        --  只对中心那一版是错的:三个数管不住六个通道,剩下的自由度乱走(手腕拧、球转出画面)。
+                        --  "看着一样大"顺带就是最稳的远近信号(离得越近越大),比一步只变 5 mm、自己抖 5 mm 的深度读数强。
+                        --  圆的东西没有朝向 ⇒ 那一行谁也改不动 ⇒ 自动不参与,不需要写规则。
+                        P.Kind := Thing_Pt; P.Slot := O.Slot; P.Cu := O.Cu; P.Cv := O.Cv; P.Z := O.Depth; P.Height := O.Height; P.Count := O.Count;
+                        P.Box_W := Long_Float (O.X1 - O.X0) / Long_Float (Cw); P.Box_H := Long_Float (O.Y1 - O.Y0) / Long_Float (Ch);
+                        P.Size := Sqrt (Long_Float'Max (0.0, P.Box_W * P.Box_H));
+                        P.Ang := 2.0 * Arctan (O.Av, O.Au);
+                        P.Elong := O.Elong; P.Gray := O.Gray;
+                        P.Tu := Z.Cu; P.Tv := Z.Cv; P.Tz := Z.Depth; P.Wz := (if Picture.Is_Nan (Z.Depth) then 0.0 else 1.0);
+                        P.Tsize := Sqrt (Long_Float'Max (0.0, (Long_Float (Z.X1 - Z.X0) / Long_Float (Cw)) * (Long_Float (Z.Y1 - Z.Y0) / Long_Float (Ch))));
+                        P.Tang := 2.0 * Arctan (Z.Av, Z.Au);
+                        P.Wsize := 1.0; P.Wang := 1.0;
+                        P.Desc := S ("item " & Codec.Img (Say.Grip_On) & " to sit where my fingers close (same place, same distance, same apparent size, same lie)");
+                     else
+                        declare
+                           Tr : constant Zone_Track := C.Zones (Track_Idx (C, A, Cam));
+                        begin
+                           P.Kind := Piece_Pt; P.Chan_K := Chan.Per_Arm; P.Cu := Tr.Cu; P.Cv := Tr.Cv; P.Z := Tr.Z; P.Known := Tr.Known;
+                           P.Tu := O.Cu; P.Tv := O.Cv; P.Tz := O.Depth + O.Height * 0.5; P.Wz := (if O.Depth > 0.0 and then Tr.Z > 0.0 then 1.0 else 0.0);
+                           P.Desc := S ("grip " & Codec.Img (A + 1) & " onto item " & Codec.Img (Say.Grip_On) & " (fingertips to its middle)");
+                        end;
+                     end if;
+                     Pts.Append (P);
+                  end if;
+               end;
+            end if;
+      end Build_Goals;
+
+      --  2c 抓握:先看笼住没有,合到画面不再变,再抬一截量结果(跟我走了没有 / 我没推的东西动了几件 / 原地剩几块)
+      procedure Do_Grip is
+      begin
+            --  ── 抓握 ──
+            if Say.Grip = "close" and then Grip_Arm >= 0 then
+               declare
+                  A : constant Natural := Natural (Grip_Arm);
+                  Caged : Boolean := True;
+                  Cage_Note : Unbounded_String;
+                  Steps_J : Natural;
+                  Reading : Long_Float;
+                  Hz : constant Zone.Hand_Zone := Zone_Of (C, A, Cam);
+               begin
+                  --  笼判据:点名的那块的像素在握区框里(它的形心落在区框内),深度和手指对得上
+                  if Say.Grip_On >= 1 and then Say.Grip_On <= Natural (C.Items.Length) then
+                     declare
+                        Pin : Point;
+                        Found : Boolean := False;
+                        Nz : Long_Float := 0.0;
+                     begin
+                        for P of Pts loop
+                           if P.Item_No = Say.Grip_On then
+                              if P.Kind = Piece_Pt then
+                                 --  瓣点取均值 = 区心;深度取最近的那一瓣
+                                 if not Found then
+                                    Pin := P; Pin.Cu := 0.0; Pin.Cv := 0.0; Pin.Z := 1.0e30;
+                                 end if;
+                                 Pin.Cu := Pin.Cu + P.Cu; Pin.Cv := Pin.Cv + P.Cv; Nz := Nz + 1.0;
+                                 if P.Z > 0.0 then
+                                    Pin.Z := Long_Float'Min (Pin.Z, P.Z);
+                                 end if;
+                              else
+                                 Pin := P;
+                              end if;
+                              Found := True;
+                           end if;
+                        end loop;
+                        if Found and then Pin.Kind = Piece_Pt and then Nz > 0.0 then
+                           Pin.Cu := Pin.Cu / Nz; Pin.Cv := Pin.Cv / Nz;
+                           --  1e29 = "没读到"的哨兵(无量纲)
+                           if Pin.Z >= 1.0e29 then
+                              Pin.Z := 0.0;
+                           end if;
+                        end if;
+                        if Found and then Pin.Kind = Thing_Pt and then Hz.Valid then
+                           --  笼住 = 它已经和我张开的那片地方重合:画面里位置进了跟踪噪声、看着一样大、远近对得上。
+                           --  只看"中心在区框里"不够 —— 手上相机里区框就是整个下半幅,那条判据恒真(EI/EM 实测)
+                           declare
+                              Dp : constant Long_Float := Sqrt ((Pin.Tu - Pin.Cu) ** 2 + (Pin.Tv - Pin.Cv) ** 2);
+                              Ds : constant Long_Float := (if Pin.Wsize > 0.0 and then Pin.Tsize > 0.0 then abs (Pin.Tsize - Pin.Size) / Pin.Tsize else 0.0);
+                              Tol : constant Long_Float := Long_Float'Max (Track_Win * 0.5, Hz.Span * 0.25);
+                              Depth_Ok : constant Boolean := Picture.Is_Nan (Hz.Depth) or else Pin.Z <= 0.0
+                                                            or else abs (Pin.Z - Hz.Depth) <= Long_Float'Max (Pin.Height, Long_Float'Max (Pin.Box_W, Pin.Box_H) * Pin.Z);
+                              --  看着一样大 = 差不超过四分之一(比例,无量纲)
+                              Size_Ok : constant Boolean := Pin.Wsize <= 0.0 or else Ds <= 0.25;
+                           begin
+                              Caged := Dp <= Tol and then Depth_Ok and then Size_Ok;
+                              Cage_Note := S ("cage check in this hand camera: it is " & Codec.Fmt (Dp, 3) & " of a frame from where my fingers close (allowed " &
+                                              Codec.Fmt (Tol, 3) & "), looks " & Codec.Fmt (Pin.Size / Long_Float'Max (1.0e-9, Pin.Tsize) * 100.0, 0) &
+                                              "% of the size it should, and its distance " & (if Depth_Ok then "matches" else "does not match") & " my fingertips");
+                           end;
+                        elsif Found and then Pin.Kind = Piece_Pt then
+                           declare
+                              O : constant Item := C.Items (Say.Grip_On - 1);
+                              Dist : constant Long_Float := Sqrt ((Pin.Cu - O.Cu) ** 2 + (Pin.Cv - O.Cv) ** 2);
+                              Tol : constant Long_Float := Long_Float'Max (Hz.Span * 0.5, Track_Win * 0.5);
+                           begin
+                              Caged := Dist <= Tol;
+                              Cage_Note := S ("cage check in this camera: my grip centre is " & Codec.Fmt (Dist, 3) & " of a frame from the thing (allowed " & Codec.Fmt (Tol, 3) & ")");
+                           end;
+                        end if;
+                     end;
+                  end if;
+                  if Caged then
+                     Move_Jaw (L, C, F, A, 0.0, Steps_J, Reading);
+                     declare
+                        Empty : constant Long_Float := C.Hands (A).Empty_Close;
+                        By_Reading : Boolean := Reading - Empty > C.Map.Jaw_Noise;
+                        Note : Unbounded_String;
+                        Origin : Picture.Region;
+                        Obj_Count : Natural := 0;
+                     begin
+                        if Say.Grip_On >= 1 and then Say.Grip_On <= Natural (C.Items.Length) then
+                           Origin := World.Get (C.Wld, Cam, Natural (C.Items (Say.Grip_On - 1).Slot)).Shadow;
+                           Obj_Count := C.Items (Say.Grip_On - 1).Count;
+                        end if;
+                        Held_Test (L, C, F, A, Cam, Origin, Obj_Count, By_Reading, Note);
+                        Did_Grip := S ("I closed grip " & Codec.Img (A + 1) & " until the picture stopped changing (" & Codec.Img (Steps_J) & " steps, reading " & Codec.Fmt (Reading, 3) &
+                                       ", empty-close reading " & Codec.Fmt (Empty, 3) & "); " & To_String (Note));
+                        if By_Reading then
+                           C.Wld.Holding := True; C.Wld.Held_Arm := Integer (A); C.Wld.Held_Cam := Integer (Cam);
+                           if Say.Grip_On >= 1 and then Say.Grip_On <= Natural (C.Items.Length) then
+                              C.Wld.Held_Slot := C.Items (Say.Grip_On - 1).Slot;
+                              C.Wld.Held_Origin := World.Get (C.Wld, Cam, Natural (C.Items (Say.Grip_On - 1).Slot)).Shadow;
+                           else
+                              C.Wld.Held_Slot := -1;
+                           end if;
+                           Memory.Set (C.Mem, "holding", "arm " & Codec.Img (A + 1) & " closed on item " & Codec.Img (Say.Grip_On) & " at reading " & Codec.Fmt (Reading, 3));
+                        else
+                           C.Wld.Holding := False; C.Wld.Held_Arm := -1;
+                           Move_Jaw (L, C, F, A, C.Hands (A).Open_Reading, Steps_J, Reading);
+                           Append (Did_Grip, "; I opened it again");
+                        end if;
+                     end;
+                  else
+                     Did_Grip := S ("I did NOT close grip " & Codec.Img (A + 1) & ": " & To_String (Cage_Note));
+                  end if;
+                  if Cage_Note /= "" and then Caged then
+                     Append (Did_Grip, " (" & To_String (Cage_Note) & ")");
+                  end if;
+               end;
+            elsif Say.Grip = "open" and then Grip_Arm >= 0 then
+               declare
+                  A : constant Natural := Natural (Grip_Arm);
+                  Steps_J : Natural;
+                  Reading : Long_Float;
+               begin
+                  Move_Jaw (L, C, F, A, C.Hands (A).Open_Reading, Steps_J, Reading);
+                  C.Wld.Holding := False; C.Wld.Held_Arm := -1; C.Wld.Held_Slot := -1;
+                  Memory.Set (C.Mem, "holding", "");
+                  Did_Grip := S ("I opened grip " & Codec.Img (A + 1) & " (" & Codec.Img (Steps_J) & " steps, reading " & Codec.Fmt (Reading, 3) & ")");
+               end;
+            end if;
+            if Did_Grip /= "" then
+               Report := Report & To_String (Did_Grip) & ". ";
+            end if;
+      end Do_Grip;
+
       begin
          for N of Say.Avoid loop
             if N >= 1 and then N <= Natural (C.Items.Length) then
                Avoid.Append (C.Items (N - 1));
             end if;
          end loop;
-         --  "保持不动" → 也变成一个点:它的目标就是它此刻在哪(误差为零)。这样解算必须选一条【不动它】的走法,
-         --  而不是"没人管它" —— 一只手捏住不动、另一只手干活,全靠这一条(以前这种条目被直接跳过)
-         for G of Say.Moves loop
-            if G.Item >= 1 and then G.Item <= Natural (C.Items.Length) and then G.Stay then
-               declare
-                  It : constant Item := C.Items (G.Item - 1);
-                  P : Point;
-               begin
-                  if It.Located then
-                     P.Item_No := G.Item;
-                     if It.Kind in Finger | Grip | Piece | Thing_Held then
-                        P.Arm := It.Arm; P.Kind := Piece_Pt;
-                        P.Chan_K := (if It.Kind = Piece then It.Which else Chan.Per_Arm);
-                        declare
-                           Tr : constant Zone_Track := C.Zones (Track_Idx (C, P.Arm, Cam));
-                        begin
-                           P.Cu := Tr.Cu; P.Cv := Tr.Cv; P.Z := Tr.Z; P.Known := Tr.Known;
-                        end;
-                     elsif Cam_Arm (C, Cam) >= 0 then
-                        P.Arm := Natural (Cam_Arm (C, Cam)); P.Kind := Thing_Pt; P.Slot := It.Slot;
-                        P.Cu := It.Cu; P.Cv := It.Cv; P.Z := It.Depth; P.Height := It.Height; P.Count := It.Count;
-                        P.Box_W := Long_Float (It.X1 - It.X0) / Long_Float (Cw); P.Box_H := Long_Float (It.Y1 - It.Y0) / Long_Float (Ch);
-                        P.Elong := It.Elong; P.Gray := It.Gray;
-                     end if;
-                     P.Tu := P.Cu; P.Tv := P.Cv; P.Tz := P.Z;
-                     P.Wz := (if P.Z > 0.0 then 1.0 else 0.0);
-                     P.Desc := S ("item " & Codec.Img (G.Item) & " stays exactly where it is");
-                     if Pts.Is_Empty or else Pts (0).Arm = P.Arm then
-                        Pts.Append (P);
-                     end if;
-                  end if;
-               end;
-            end if;
-            if G.Item >= 1 and then G.Item <= Natural (C.Items.Length) and then not G.Stay then
-               declare
-                  It : constant Item := C.Items (G.Item - 1);
-                  P : Point;
-                  Own : constant Boolean := It.Kind in Finger | Grip | Thing_Held | Piece;
-                  Cam_A : constant Integer := Cam_Arm (C, Cam);
-                  Ok_Pt : Boolean := True;
-               begin
-                  Amount := Amount_Factor (G.Amount);
-                  P.Item_No := G.Item;
-                  if not It.Located then
-                     Report := S ("goal: item " & Codec.Img (G.Item) & " is not locatable in this picture right now. ");
-                     Ok_Pt := False;
-                  elsif It.Kind = Piece then
-                     --  我身上的一块零件:点 = 它此刻的形心,表按需量(六个通道各推一下)
-                     P.Arm := It.Arm; P.Kind := Piece_Pt; P.Chan_K := It.Which; P.Blob := -1;
-                     P.Cu := It.Cu; P.Cv := It.Cv; P.Z := It.Depth;
-                     P.Known := C.Zones (Track_Idx (C, P.Arm, Cam)).Pieces_Known (It.Which);
-                     P.Box_W := Long_Float (It.X1 - It.X0) / Long_Float (Cw); P.Box_H := Long_Float (It.Y1 - It.Y0) / Long_Float (Ch);
-                  elsif Own then
-                     P.Arm := It.Arm; P.Kind := Piece_Pt; P.Chan_K := Chan.Per_Arm;   --  手指 = 握合通道带的那块
-                     declare
-                        Tr : constant Zone_Track := C.Zones (Track_Idx (C, P.Arm, Cam));
-                     begin
-                        P.Cu := Tr.Cu; P.Cv := Tr.Cv; P.Z := Tr.Z; P.Known := Tr.Known or else Cam_A = Integer (P.Arm);
-                     end;
-                     if Cam_A = Integer (P.Arm) and then G.Rel /= "" and then G.Of_Item >= 1 and then G.Of_Item <= Natural (C.Items.Length)
-                       and then C.Items (G.Of_Item - 1).Kind = Thing
-                     then
-                        --  自己的手上相机里"我的手到 X" = 让 X 的像素来到握区:改跟 X
-                        declare
-                           O : constant Item := C.Items (G.Of_Item - 1);
-                        begin
-                           P.Kind := Thing_Pt; P.Slot := O.Slot; P.Cu := O.Cu; P.Cv := O.Cv; P.Z := O.Depth; P.Height := O.Height; P.Count := O.Count;
-                           P.Box_W := Long_Float (O.X1 - O.X0) / Long_Float (Cw); P.Box_H := Long_Float (O.Y1 - O.Y0) / Long_Float (Ch);
-                        end;
-                     end if;
-                  elsif It.Kind = Thing and then Cam_A >= 0 then
-                     P.Arm := Natural (Cam_A); P.Kind := Thing_Pt; P.Slot := It.Slot;
-                     P.Cu := It.Cu; P.Cv := It.Cv; P.Z := It.Depth; P.Height := It.Height; P.Count := It.Count;
-                     P.Box_W := Long_Float (It.X1 - It.X0) / Long_Float (Cw); P.Box_H := Long_Float (It.Y1 - It.Y0) / Long_Float (Ch);
-                  else
-                     Report := S ("goal: item " & Codec.Img (G.Item) & " is a thing I am not holding; I can only move things I hold (say grip close on it first). ");
-                     Ok_Pt := False;
-                  end if;
-                  if Ok_Pt then
-                     --  目标
-                     if G.Cell >= 1 and then G.Cell <= Natural (C.Cells_U.Length) then
-                        P.Tu := C.Cells_U (G.Cell - 1); P.Tv := C.Cells_V (G.Cell - 1); P.Tz := P.Z; P.Wz := 0.0;
-                        P.Desc := S ("item " & Codec.Img (G.Item) & " to cell " & Codec.Img (G.Cell));
-                     elsif G.Rel /= "" and then G.Of_Item >= 1 and then G.Of_Item <= Natural (C.Items.Length) then
-                        declare
-                           O : constant Item := C.Items (G.Of_Item - 1);
-                           Ow : constant Long_Float := Long_Float (O.X1 - O.X0) / Long_Float (Cw);
-                           Oh : constant Long_Float := Long_Float (O.Y1 - O.Y0) / Long_Float (Ch);
-                           Rl : constant String := To_String (G.Rel);
-                        begin
-                           if not O.Located then
-                              Report := S ("goal: item " & Codec.Img (G.Of_Item) & " is not locatable right now. ");
-                              Ok_Pt := False;
-                           else
-                              P.Desc := S ("item " & Codec.Img (G.Item) & " " & Rl & " item " & Codec.Img (G.Of_Item));
-                              P.Tu := O.Cu; P.Tv := O.Cv; P.Tz := P.Z; P.Wz := 0.0;
-                              if Rl = "at" then
-                                 if P.Kind = Thing_Pt and then O.Kind in Finger | Grip then
-                                    --  X 装进握区:区心、区深
-                                    declare
-                                       Z : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, Cam);
-                                    begin
-                                       P.Tu := Z.Cu; P.Tv := Z.Cv; P.Tz := Z.Depth; P.Wz := (if Picture.Is_Nan (Z.Depth) then 0.0 else 1.0);
-                                    end;
-                                 elsif P.Kind = Piece_Pt and then O.Kind in Thing | Thing_Remembered then
-                                    P.Tz := O.Depth + O.Height * 0.5; P.Wz := (if O.Depth > 0.0 then 1.0 else 0.0);   --  指尖到它的半腰(顶面深 + 鼓起的一半,都是量的)
-                                 else
-                                    P.Tz := O.Depth; P.Wz := (if O.Depth > 0.0 and then P.Z > 0.0 then 1.0 else 0.0);
-                                 end if;
-                              elsif Rl = "above" then
-                                 P.Tv := O.Cv - Long_Float'Max (Oh, 1.0 / Long_Float (Ch));
-                              elsif Rl = "below" then
-                                 P.Tv := O.Cv + Long_Float'Max (Oh, 1.0 / Long_Float (Ch));
-                              elsif Rl = "left" then
-                                 P.Tu := O.Cu - Long_Float'Max (Ow, 1.0 / Long_Float (Cw));
-                              elsif Rl = "right" then
-                                 P.Tu := O.Cu + Long_Float'Max (Ow, 1.0 / Long_Float (Cw));
-                              elsif Rl = "front" or else Rl = "back" then
-                                 declare
-                                    --  "一截" = 它自己在画面里的宽 × 它的深度(米,全是量的),没量到深度就用它鼓起的高度
-                                    Sz : constant Long_Float := Long_Float'Max (O.Height, Long_Float'Max (P.Height, Ow * O.Depth));
-                                 begin
-                                    P.Tz := (if Rl = "front" then O.Depth - Sz else O.Depth + Sz);
-                                    P.Wz := (if O.Depth > 0.0 and then P.Z > 0.0 then 1.0 else 0.0);
-                                 end;
-                              elsif Rl = "away" then
-                                 declare
-                                    Du : constant Long_Float := P.Cu - O.Cu;
-                                    Dv : constant Long_Float := P.Cv - O.Cv;
-                                    Ln : constant Long_Float := Long_Float'Max (1.0e-9, Sqrt (Du * Du + Dv * Dv));
-                                    St : constant Long_Float := Long_Float'Max (Ow, 1.0 / Long_Float (Cw));
-                                 begin
-                                    P.Tu := P.Cu + Du / Ln * St; P.Tv := P.Cv + Dv / Ln * St;
-                                 end;
-                              end if;
-                           end if;
-                        end;
-                     else
-                        Ok_Pt := False;
-                     end if;
-                  end if;
-                  if Ok_Pt then
-                     if Pts.Is_Empty or else Pts (0).Arm = P.Arm then
-                        Pts.Append (P);
-                     else
-                        Report := Report & "goal for item " & Codec.Img (G.Item) & " needs a different arm than the first goal; I do one arm per segment. ";
-                     end if;
-                  end if;
-               end;
-            end if;
-         end loop;
-         --  抓握 close 在某块上:先把那块装进握区(手上相机里跟块;否则世界相机里握区去它的顶面),笼住了才合
-         if Say.Grip = "close" and then Grip_Arm >= 0 and then Say.Grip_On >= 1 and then Say.Grip_On <= Natural (C.Items.Length)
-           and then C.Items (Say.Grip_On - 1).Kind in Thing | Thing_Remembered and then C.Items (Say.Grip_On - 1).Located
-         then
-            declare
-               O : constant Item := C.Items (Say.Grip_On - 1);
-               A : constant Natural := Natural (Grip_Arm);
-               Z : constant Zone.Hand_Zone := Zone_Of (C, A, Cam);
-               P : Point;
-               Own_Cam : constant Boolean := Cam_Arm (C, Cam) = Integer (A);
-            begin
-               if Pts.Is_Empty and then Z.Valid then
-                  P.Arm := A; P.Item_No := Say.Grip_On;
-                  if Own_Cam then
-                     --  🔴 "抓住它" = 让它在画面里和我张开的那片地方重合:位置对上、远近对上、看着一样大、朝向一样。
-                     --  这四件全是量出来的区域属性,一个字没提手指几根 —— 两指、七指、吸盘、软体臂同一句话。
-                     --  只对中心那一版是错的:三个数管不住六个通道,剩下的自由度乱走(手腕拧、球转出画面)。
-                     --  "看着一样大"顺带就是最稳的远近信号(离得越近越大),比一步只变 5 mm、自己抖 5 mm 的深度读数强。
-                     --  圆的东西没有朝向 ⇒ 那一行谁也改不动 ⇒ 自动不参与,不需要写规则。
-                     P.Kind := Thing_Pt; P.Slot := O.Slot; P.Cu := O.Cu; P.Cv := O.Cv; P.Z := O.Depth; P.Height := O.Height; P.Count := O.Count;
-                     P.Box_W := Long_Float (O.X1 - O.X0) / Long_Float (Cw); P.Box_H := Long_Float (O.Y1 - O.Y0) / Long_Float (Ch);
-                     P.Size := Sqrt (Long_Float'Max (0.0, P.Box_W * P.Box_H));
-                     P.Ang := 2.0 * Arctan (O.Av, O.Au);
-                     P.Elong := O.Elong; P.Gray := O.Gray;
-                     P.Tu := Z.Cu; P.Tv := Z.Cv; P.Tz := Z.Depth; P.Wz := (if Picture.Is_Nan (Z.Depth) then 0.0 else 1.0);
-                     P.Tsize := Sqrt (Long_Float'Max (0.0, (Long_Float (Z.X1 - Z.X0) / Long_Float (Cw)) * (Long_Float (Z.Y1 - Z.Y0) / Long_Float (Ch))));
-                     P.Tang := 2.0 * Arctan (Z.Av, Z.Au);
-                     P.Wsize := 1.0; P.Wang := 1.0;
-                     P.Desc := S ("item " & Codec.Img (Say.Grip_On) & " to sit where my fingers close (same place, same distance, same apparent size, same lie)");
-                  else
-                     declare
-                        Tr : constant Zone_Track := C.Zones (Track_Idx (C, A, Cam));
-                     begin
-                        P.Kind := Piece_Pt; P.Chan_K := Chan.Per_Arm; P.Cu := Tr.Cu; P.Cv := Tr.Cv; P.Z := Tr.Z; P.Known := Tr.Known;
-                        P.Tu := O.Cu; P.Tv := O.Cv; P.Tz := O.Depth + O.Height * 0.5; P.Wz := (if O.Depth > 0.0 and then Tr.Z > 0.0 then 1.0 else 0.0);
-                        P.Desc := S ("grip " & Codec.Img (A + 1) & " onto item " & Codec.Img (Say.Grip_On) & " (fingertips to its middle)");
-                     end;
-                  end if;
-                  Pts.Append (P);
-               end if;
-            end;
-         end if;
+         Build_Goals;
          if not Pts.Is_Empty then
             Expand_Lobes (C, F, Cam, Pts);
             --  生地先看一眼:我的手/零件在这台相机里的位置若只是按关节推的(没真看过),先抖/推一下认清,再按认清的位置重算各团目标,再量表、再走
@@ -2259,129 +2420,7 @@ package body Act is
                           elsif Say.See = "unclear" then "you said you could not tell; the body did not move. "
                           else "you gave no move and no grip; the body did not move. "));
          end if;
-         --  ── 抓握 ──
-         if Say.Grip = "close" and then Grip_Arm >= 0 then
-            declare
-               A : constant Natural := Natural (Grip_Arm);
-               Caged : Boolean := True;
-               Cage_Note : Unbounded_String;
-               Steps_J : Natural;
-               Reading : Long_Float;
-               Hz : constant Zone.Hand_Zone := Zone_Of (C, A, Cam);
-            begin
-               --  笼判据:点名的那块的像素在握区框里(它的形心落在区框内),深度和手指对得上
-               if Say.Grip_On >= 1 and then Say.Grip_On <= Natural (C.Items.Length) then
-                  declare
-                     Pin : Point;
-                     Found : Boolean := False;
-                     Nz : Long_Float := 0.0;
-                  begin
-                     for P of Pts loop
-                        if P.Item_No = Say.Grip_On then
-                           if P.Kind = Piece_Pt then
-                              --  瓣点取均值 = 区心;深度取最近的那一瓣
-                              if not Found then
-                                 Pin := P; Pin.Cu := 0.0; Pin.Cv := 0.0; Pin.Z := 1.0e30;
-                              end if;
-                              Pin.Cu := Pin.Cu + P.Cu; Pin.Cv := Pin.Cv + P.Cv; Nz := Nz + 1.0;
-                              if P.Z > 0.0 then
-                                 Pin.Z := Long_Float'Min (Pin.Z, P.Z);
-                              end if;
-                           else
-                              Pin := P;
-                           end if;
-                           Found := True;
-                        end if;
-                     end loop;
-                     if Found and then Pin.Kind = Piece_Pt and then Nz > 0.0 then
-                        Pin.Cu := Pin.Cu / Nz; Pin.Cv := Pin.Cv / Nz;
-                        --  1e29 = "没读到"的哨兵(无量纲)
-                        if Pin.Z >= 1.0e29 then
-                           Pin.Z := 0.0;
-                        end if;
-                     end if;
-                     if Found and then Pin.Kind = Thing_Pt and then Hz.Valid then
-                        --  笼住 = 它已经和我张开的那片地方重合:画面里位置进了跟踪噪声、看着一样大、远近对得上。
-                        --  只看"中心在区框里"不够 —— 手上相机里区框就是整个下半幅,那条判据恒真(EI/EM 实测)
-                        declare
-                           Dp : constant Long_Float := Sqrt ((Pin.Tu - Pin.Cu) ** 2 + (Pin.Tv - Pin.Cv) ** 2);
-                           Ds : constant Long_Float := (if Pin.Wsize > 0.0 and then Pin.Tsize > 0.0 then abs (Pin.Tsize - Pin.Size) / Pin.Tsize else 0.0);
-                           Tol : constant Long_Float := Long_Float'Max (Track_Win * 0.5, Hz.Span * 0.25);
-                           Depth_Ok : constant Boolean := Picture.Is_Nan (Hz.Depth) or else Pin.Z <= 0.0
-                                                         or else abs (Pin.Z - Hz.Depth) <= Long_Float'Max (Pin.Height, Long_Float'Max (Pin.Box_W, Pin.Box_H) * Pin.Z);
-                           --  看着一样大 = 差不超过四分之一(比例,无量纲)
-                           Size_Ok : constant Boolean := Pin.Wsize <= 0.0 or else Ds <= 0.25;
-                        begin
-                           Caged := Dp <= Tol and then Depth_Ok and then Size_Ok;
-                           Cage_Note := S ("cage check in this hand camera: it is " & Codec.Fmt (Dp, 3) & " of a frame from where my fingers close (allowed " &
-                                           Codec.Fmt (Tol, 3) & "), looks " & Codec.Fmt (Pin.Size / Long_Float'Max (1.0e-9, Pin.Tsize) * 100.0, 0) &
-                                           "% of the size it should, and its distance " & (if Depth_Ok then "matches" else "does not match") & " my fingertips");
-                        end;
-                     elsif Found and then Pin.Kind = Piece_Pt then
-                        declare
-                           O : constant Item := C.Items (Say.Grip_On - 1);
-                           Dist : constant Long_Float := Sqrt ((Pin.Cu - O.Cu) ** 2 + (Pin.Cv - O.Cv) ** 2);
-                           Tol : constant Long_Float := Long_Float'Max (Hz.Span * 0.5, Track_Win * 0.5);
-                        begin
-                           Caged := Dist <= Tol;
-                           Cage_Note := S ("cage check in this camera: my grip centre is " & Codec.Fmt (Dist, 3) & " of a frame from the thing (allowed " & Codec.Fmt (Tol, 3) & ")");
-                        end;
-                     end if;
-                  end;
-               end if;
-               if Caged then
-                  Move_Jaw (L, C, F, A, 0.0, Steps_J, Reading);
-                  declare
-                     Empty : constant Long_Float := C.Hands (A).Empty_Close;
-                     By_Reading : Boolean := Reading - Empty > C.Map.Jaw_Noise;
-                     Note : Unbounded_String;
-                     Origin : Picture.Region;
-                     Obj_Count : Natural := 0;
-                  begin
-                     if Say.Grip_On >= 1 and then Say.Grip_On <= Natural (C.Items.Length) then
-                        Origin := World.Get (C.Wld, Cam, Natural (C.Items (Say.Grip_On - 1).Slot)).Shadow;
-                        Obj_Count := C.Items (Say.Grip_On - 1).Count;
-                     end if;
-                     Held_Test (L, C, F, A, Cam, Origin, Obj_Count, By_Reading, Note);
-                     Did_Grip := S ("I closed grip " & Codec.Img (A + 1) & " until the picture stopped changing (" & Codec.Img (Steps_J) & " steps, reading " & Codec.Fmt (Reading, 3) &
-                                    ", empty-close reading " & Codec.Fmt (Empty, 3) & "); " & To_String (Note));
-                     if By_Reading then
-                        C.Wld.Holding := True; C.Wld.Held_Arm := Integer (A); C.Wld.Held_Cam := Integer (Cam);
-                        if Say.Grip_On >= 1 and then Say.Grip_On <= Natural (C.Items.Length) then
-                           C.Wld.Held_Slot := C.Items (Say.Grip_On - 1).Slot;
-                           C.Wld.Held_Origin := World.Get (C.Wld, Cam, Natural (C.Items (Say.Grip_On - 1).Slot)).Shadow;
-                        else
-                           C.Wld.Held_Slot := -1;
-                        end if;
-                        Memory.Set (C.Mem, "holding", "arm " & Codec.Img (A + 1) & " closed on item " & Codec.Img (Say.Grip_On) & " at reading " & Codec.Fmt (Reading, 3));
-                     else
-                        C.Wld.Holding := False; C.Wld.Held_Arm := -1;
-                        Move_Jaw (L, C, F, A, C.Hands (A).Open_Reading, Steps_J, Reading);
-                        Append (Did_Grip, "; I opened it again");
-                     end if;
-                  end;
-               else
-                  Did_Grip := S ("I did NOT close grip " & Codec.Img (A + 1) & ": " & To_String (Cage_Note));
-               end if;
-               if Cage_Note /= "" and then Caged then
-                  Append (Did_Grip, " (" & To_String (Cage_Note) & ")");
-               end if;
-            end;
-         elsif Say.Grip = "open" and then Grip_Arm >= 0 then
-            declare
-               A : constant Natural := Natural (Grip_Arm);
-               Steps_J : Natural;
-               Reading : Long_Float;
-            begin
-               Move_Jaw (L, C, F, A, C.Hands (A).Open_Reading, Steps_J, Reading);
-               C.Wld.Holding := False; C.Wld.Held_Arm := -1; C.Wld.Held_Slot := -1;
-               Memory.Set (C.Mem, "holding", "");
-               Did_Grip := S ("I opened grip " & Codec.Img (A + 1) & " (" & Codec.Img (Steps_J) & " steps, reading " & Codec.Fmt (Reading, 3) & ")");
-            end;
-         end if;
-         if Did_Grip /= "" then
-            Report := Report & To_String (Did_Grip) & ". ";
-         end if;
+         Do_Grip;
          Report := Report & Mode_Line (C, To_String (Event));
       end;
       C.Recent := Report;
