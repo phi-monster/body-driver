@@ -2011,9 +2011,21 @@ package body Act is
       Before_Regs : Picture.Regions;
       Moved_Others : Natural := 0;
       Pieces_Now : Natural := 0;
+      Hand_U0, Hand_V0 : Long_Float := 0.0;
+      Have_Hand0 : Boolean := False;
+      Follows : Boolean := False;   --  它跟着我的手走了同样一段
+      Follow_Note : Unbounded_String;
    begin
       if World_Cam >= 0 then
          Before_Regs := Cut_Things (C, F, Natural (World_Cam));
+         --  抬之前记下:那东西在哪、我的手在哪(拿住的唯一硬证据是"它跟着我的手走了同样一段")
+         if Track_Idx (C, Arm, Natural (World_Cam)) < Natural (C.Zones.Length) then
+            declare
+               Tr : constant Zone_Track := C.Zones (Track_Idx (C, Arm, Natural (World_Cam)));
+            begin
+               Hand_U0 := Tr.Cu; Hand_V0 := Tr.Cv; Have_Hand0 := Tr.Valid;
+            end;
+         end if;
       end if;
       Jaw.Append (Selfmap.Jaw_Of (F, Arm));
       A (2) := C.Map.Amp (Arm * Chan.Per_Arm + 2) * 4.0;   --  抬起 = 看得见的探针幅度的几倍(倍数,无量纲),不假设哪根轴朝上:2 号轴是身体报的第三个平移通道
@@ -2040,6 +2052,55 @@ package body Act is
       if Cam < Natural (F.Cams.Length) and then Cam_Arm (C, Cam) < 0 and then Origin.Count > 0 then
          Could_Judge := True;
          Gone_From_Table := World.Vanished (Cut_Things (C, F, Cam), Origin, F.Cams (Cam).W, F.Cams (Cam).H);
+      end if;
+      --  🔴 拿住了 = 抬手时它跟着我的手走了【同样一段】。只看"原地空了"会把【撞跑】当成拿住(FO 实测:
+      --  球被撞到画面角落,原地空了,身体报"拿住",而两指之间什么都没有)
+      if World_Cam >= 0 and then Have_Hand0 and then Origin.Count > 0 then
+         declare
+            After : constant Picture.Regions := Cut_Things (C, F, Natural (World_Cam));
+            Best : Integer := -1;
+            Bd : Long_Float := 0.0;
+            Hand_Du, Hand_Dv : Long_Float := 0.0;
+         begin
+            Feel (C, F);
+            if Track_Idx (C, Arm, Natural (World_Cam)) < Natural (C.Zones.Length) then
+               declare
+                  Tr : constant Zone_Track := C.Zones (Track_Idx (C, Arm, Natural (World_Cam)));
+               begin
+                  Hand_Du := Tr.Cu - Hand_U0; Hand_Dv := Tr.Cv - Hand_V0;
+               end;
+            end if;
+            --  找抬完之后最像它的那一块(大小相近的里面离原处最近的)
+            for I in 0 .. Natural (After.Length) - 1 loop
+               if After (I).Count * 3 >= Origin.Count and then Origin.Count * 3 >= After (I).Count then
+                  declare
+                     D : constant Long_Float := Sqrt ((After (I).Cu - Origin.Cu) ** 2 + (After (I).Cv - Origin.Cv) ** 2);
+                  begin
+                     if Best < 0 or else D < Bd then
+                        Bd := D; Best := I;
+                     end if;
+                  end;
+               end if;
+            end loop;
+            declare
+               Hand_Len : constant Long_Float := Sqrt (Hand_Du ** 2 + Hand_Dv ** 2);
+            begin
+               if Best >= 0 and then Hand_Len > 0.0 then
+                  declare
+                     Ou : constant Long_Float := After (Best).Cu - Origin.Cu;
+                     Ov : constant Long_Float := After (Best).Cv - Origin.Cv;
+                     Miss : constant Long_Float := Sqrt ((Ou - Hand_Du) ** 2 + (Ov - Hand_Dv) ** 2);
+                  begin
+                     --  它挪的和我的手挪的差得比"我的手挪了多少"的一半还小 ⇒ 它跟着我走
+                     Follows := Miss <= 0.5 * Hand_Len;
+                     Follow_Note := S (" (my hand moved " & Codec.Fmt (Hand_Len, 3) & " of a frame, it moved " &
+                                       Codec.Fmt (Sqrt (Ou ** 2 + Ov ** 2), 3) & ", they differ by " & Codec.Fmt (Miss, 3) & ")");
+                  end;
+               elsif Best < 0 then
+                  Follow_Note := S (" (after the lift I could not find it anywhere in the still camera)");
+               end if;
+            end;
+         end;
       end if;
       --  旁边动了几件 · 原地现在剩几块(断成两块的话会多出一块)
       if World_Cam >= 0 then
@@ -2081,14 +2142,14 @@ package body Act is
       --  🔴 "拿住了"只有一条硬证据:它原来待的地方空了。手上相机里"还在握区框里"不算数 ——
       --  那个框在手上相机里几乎是半个屏幕,球留在画面里就过关(FM 实测报了"拿住",而头顶相机里球还在桌上)。
       --  两台相机都判不了就老实说"我说不准",不许自称拿住。
-      Held := (if World_Cam >= 0 then Gone_From_Table else Seen_In_Hand);
-      Sure := World_Cam >= 0;
-      if World_Cam >= 0 and then Gone_From_Table then
-         Note := S ("after a small lift its place is empty in the camera that does not move with me ⇒ held"
-                    & (if Seen_In_Hand then ", and my hand camera still shows it between my fingers" else ""));
-      elsif World_Cam >= 0 then
-         Note := S ("after a small lift it is still sitting where it was ⇒ NOT held"
-                    & (if Seen_In_Hand then " (my hand camera still shows something between my fingers, which proves nothing)" else ""));
+      Held := (if World_Cam >= 0 and then Have_Hand0 then Follows else Seen_In_Hand);
+      Sure := World_Cam >= 0 and then Have_Hand0;
+      if Sure and then Follows then
+         Note := S ("after a small lift it moved with my hand ⇒ held") & Follow_Note;
+      elsif Sure then
+         Note := S ("after a small lift it did NOT move with my hand ⇒ not held"
+                    & (if Gone_From_Table then " (its old place is empty, so I pushed it away rather than picked it up)" else ""))
+                 & Follow_Note;
       elsif Seen_In_Hand then
          Note := S ("after a small lift the thing is still inside my grip box in my hand camera; no still camera could check, so I am not sure");
       elsif Could_Judge then
