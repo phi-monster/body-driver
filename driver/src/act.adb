@@ -1195,8 +1195,9 @@ package body Act is
                end loop;
                if C.Map.Seen (Ch_No) and then All_Trust then
                   Note.Active (K) := True;
-                  Note.Cap (K) := Long_Float'Min ((if Px > 0.0 then Track_Win / Px else Am * Cap_Mult * Reach (K)),
-                                                  Am * Cap_Mult * Reach (K)) * Amount;
+                  --  这个通道推一下,被跟的点在画面里动过噪声了吗?动过 ⇒ 额度按"眼睛跟得住多少"给(能走多远走多远);
+                  --  没动过 ⇒ 表对它说不清,只按自己那一档给(ER:几乎不动的通道拿到无限额度,甩出 2 rad 的腕)
+                  Note.Cap (K) := (if Px * Am > Fl.Track * 2.0 then Track_Win / Px else Am * Cap_Mult * Reach (K)) * Amount;
                   Note.Floor_Cmd := (if Note.Floor_Cmd <= 0.0 then Am else Long_Float'Min (Note.Floor_Cmd, Am));
                end if;
                --  阻尼 = 1e-4 / 幅²:每通道都以"几个探针幅度"计价(无量纲),小到让上限当家
