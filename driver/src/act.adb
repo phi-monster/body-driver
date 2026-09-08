@@ -88,10 +88,8 @@ package body Act is
             Med : Long_Float;
          begin
             --  窗口至少要比正在跟的那块大半圈(倍数,无量纲),否则它一走近就被闭运算填平、只剩一圈边
-            if C.Want_Size > 0.0 then
-               --  比它大半圈就够;再大会把整张桌面也算进背景,深度那一路反而什么都切不出来(EW 实测)
-               return Long_Float'Max (Long_Float'Min (0.25, C.Want_Size * 1.5), 0.02);
-            end if;
+            --  ⚠️ 试过"窗口跟着被跟的东西放大",错的:窗口一到画幅四分之一,桌面自己的起伏就盖过物体,
+            --  深度那一路彻底切不出东西,颜色那一路接管、把墙缝和衣服切成上百块(EZ 逐步落图坐实)。窗口保持小。
             if Z.Valid and then Z.Span > 0.0 and then not Picture.Is_Nan (Z.Depth) and then F.Cams (Cam).Has_Depth then
                declare
                   Samp : Floats;
@@ -692,8 +690,26 @@ package body Act is
                end loop;
                if Best >= 0 then
                   declare
-                     R : constant Picture.Region := Regs (Best);
+                     R : Picture.Region := Regs (Best);
                   begin
+                     --  挨在一起的碎片算同一块:走近时物体会被切成几瓣(EV 落图:球裂成上沿+左右两条边)。
+                     --  把外框挨着最像那块的碎片并进来,大小/形状按并集算
+                     for Q of Regs loop
+                        if Q.Count > 0 and then Q.X0 <= R.X1 and then Q.X1 >= R.X0 and then Q.Y0 <= R.Y1 and then Q.Y1 >= R.Y0 then
+                           declare
+                              Cx : constant Long_Float := (R.Cu * Long_Float (R.Count) + Q.Cu * Long_Float (Q.Count)) / Long_Float (R.Count + Q.Count);
+                              Cy : constant Long_Float := (R.Cv * Long_Float (R.Count) + Q.Cv * Long_Float (Q.Count)) / Long_Float (R.Count + Q.Count);
+                           begin
+                              R.X0 := Natural'Min (R.X0, Q.X0); R.Y0 := Natural'Min (R.Y0, Q.Y0);
+                              R.X1 := Natural'Max (R.X1, Q.X1); R.Y1 := Natural'Max (R.Y1, Q.Y1);
+                              R.Cu := Cx; R.Cv := Cy;
+                              R.Count := R.Count + Q.Count;
+                              if Q.Depth > 0.0 and then (R.Depth <= 0.0 or else Q.Depth < R.Depth) then
+                                 R.Depth := Q.Depth;   --  并起来之后取最近的那一片的远近
+                              end if;
+                           end;
+                        end if;
+                     end loop;
                      P.Z := R.Depth; P.Height := R.Height; P.Count := R.Count;
                      P.Box_W := Long_Float (R.X1 - R.X0) / Long_Float (Cw);
                      P.Box_H := Long_Float (R.Y1 - R.Y0) / Long_Float (Ch);
