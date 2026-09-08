@@ -87,6 +87,10 @@ package body Act is
             Dp : Floats := F.Cams (Cam).Depth;
             Med : Long_Float;
          begin
+            --  窗口至少要比正在跟的那块大半圈(倍数,无量纲),否则它一走近就被闭运算填平、只剩一圈边
+            if C.Want_Size > 0.0 then
+               return Long_Float'Max (Long_Float'Min (0.5, C.Want_Size * 1.5), 0.02);
+            end if;
             if Z.Valid and then Z.Span > 0.0 and then not Picture.Is_Nan (Z.Depth) and then F.Cams (Cam).Has_Depth then
                declare
                   Samp : Floats;
@@ -1054,6 +1058,16 @@ package body Act is
       procedure Aim (Terms : out Table.Term_Vectors.Vector) is
       begin
          Terms.Clear;
+         declare
+            Big : Long_Float := 0.0;
+         begin
+            for P of Pts loop
+               if P.Kind = Thing_Pt then
+                  Big := Long_Float'Max (Big, Long_Float'Max (P.Box_W, P.Box_H));
+               end if;
+            end loop;
+            C.Want_Size := Big;
+         end;
          for I in 0 .. Natural (Pts.Length) - 1 loop
             declare
                P : constant Point := Pts (I);

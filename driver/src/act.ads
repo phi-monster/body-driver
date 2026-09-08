@@ -81,6 +81,7 @@ package Act is
       Fast : Boolean := False;
       Boot_Steps : Natural := 0;   --  开机量身体用掉的拍数(记账,不是上限)
       Sch : Schema.Map;            --  身体图:位姿 → 手指在各相机画面里的位置(只存真看见过的)
+      Want_Size : Long_Float := 0.0;   --  正在跟的那块东西现在看着多大(画幅):切块的窗口要比它大,否则闭运算把它填平、只剩一圈边(EV 实测球被切成三块)
       Cut_Seq : Natural := 0;      --  切块缓存:这一帧的编号(同一帧同一台相机不重切,颜色切块很贵)
       Cut_Cam : Integer := -1;
       Cut_Regs : Picture.Regions;
