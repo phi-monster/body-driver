@@ -1224,9 +1224,21 @@ package body Act is
                end loop;
                if C.Map.Seen (Ch_No) and then All_Trust then
                   Note.Active (K) := True;
-                  --  这个通道推一下,被跟的点在画面里动过噪声了吗?动过 ⇒ 额度按"眼睛跟得住多少"给(能走多远走多远);
-                  --  没动过 ⇒ 表对它说不清,只按自己那一档给(ER:几乎不动的通道拿到无限额度,甩出 2 rad 的腕)
-                  Note.Cap (K) := (if Px * Am > Fl.Track * 2.0 then Track_Win / Px else Am * Cap_Mult * Reach (K)) * Amount;
+                  --  🔴 只有【后果全量清楚了】的方向才准迈大步。某一格没量出来(探针时变化没过地板)会被留成 0,
+                  --  而 0 的意思是"没影响",解算就当它免费 —— 转腕对"远近/看着多大"正是这样,于是它拿转腕去修画面位置,
+                  --  一转就把距离搞坏(FD 实测:0.6 rad 的腕,球越走越远)。没量清楚的方向只给探针那一档。
+                  declare
+                     Known_All : Boolean := Px * Am > Fl.Track * 2.0;
+                  begin
+                     for I in 0 .. Natural (Pts.Length) - 1 loop
+                        for R in 0 .. Table.Rows - 1 loop
+                           if Terms (I).W (R) > 0.0 and then abs (Effs (I).B (K, R)) <= 0.0 then
+                              Known_All := False;
+                           end if;
+                        end loop;
+                     end loop;
+                     Note.Cap (K) := (if Known_All then Track_Win / Px else Am * Cap_Mult * Reach (K)) * Amount;
+                  end;
                   Note.Floor_Cmd := (if Note.Floor_Cmd <= 0.0 then Am else Long_Float'Min (Note.Floor_Cmd, Am));
                end if;
                --  阻尼 = 1e-4 / 幅²:每通道都以"几个探针幅度"计价(无量纲),小到让上限当家
