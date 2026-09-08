@@ -25,6 +25,7 @@ package Act is
       Cu, Cv : Long_Float := 0.0;
       X0, Y0, X1, Y1 : Natural := 0;
       Depth, Height : Long_Float := 0.0;
+      Top : Long_Float := 0.0;      --  这块顶面的深度(米):抓在"顶面到桌面的一半"处,而不是贴着顶面
       Count : Natural := 0;
       Au, Av : Long_Float := 0.0;    --  这一块自己的主轴(画面里的单位向量)
       Elong : Long_Float := 1.0;     --  长轴/短轴

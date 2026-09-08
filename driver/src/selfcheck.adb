@@ -1,5 +1,6 @@
 --  离线自检:不连仿真就能跑的那些量法和格式。每条断言写清楚"错了会是什么病"。
 with Ada.Text_IO; use Ada.Text_IO;
+with Ada.Numerics.Long_Elementary_Functions; use Ada.Numerics.Long_Elementary_Functions;
 with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
 with Bytes; use Bytes;
 with Codec;
@@ -109,6 +110,82 @@ begin
          Check (abs (R (0).Cu - 47.5 / 96.0) < 0.02 and then abs (R (0).Cv - 35.5 / 72.0) < 0.02, "切块:形心");
          Check (R (0).Elong > 1.2, "切块:主轴伸长 " & Codec.Fmt (R (0).Elong, 2));
       end if;
+   end;
+   --  顶面 / 贴边 / 横跨整幅:抓握要靠"顶面到桌面的一半",而近处的东西必然贴画面边
+   declare
+      W : constant := 96;
+      H : constant := 72;
+      Dep : Floats := Filled (W * H, 0.80);
+      R : Picture.Regions;
+      Rad : constant Long_Float := 12.0;
+      Seed : Long_Long_Integer := 11;
+   begin
+      for I in 0 .. W * H - 1 loop
+         Seed := (Seed * 1103515245 + 12345) mod 2147483648;
+         Dep.Replace_Element (I, 0.80 + Long_Float (Seed mod 1000) * 1.0e-6 - 0.0005);
+      end loop;
+      --  一个半球:中心最高,边缘贴桌面 ⇒ 顶面必须比中位深度更近
+      for Y in 21 .. 44 loop
+         for X in 36 .. 59 loop
+            declare
+               Dx : constant Long_Float := Long_Float (X - 47) ;
+               Dy : constant Long_Float := Long_Float (Y - 32);
+               T : constant Long_Float := Rad * Rad - Dx * Dx - Dy * Dy;
+            begin
+               if T > 0.0 then
+                  Dep.Replace_Element (Y * W + X, 0.80 - 0.04 * Sqrt (T) / Rad);
+               end if;
+            end;
+         end loop;
+      end loop;
+      R := Picture.Cut (Dep, W, H, 0.125, 3.0);
+      Check (Natural (R.Length) = 1, "顶面:半球切出" & Natural'Image (Natural (R.Length)) & " 块");
+      if not R.Is_Empty then
+         Check (R (0).Top < R (0).Depth - 0.005, "顶面:顶 " & Codec.Fmt (R (0).Top, 3) & " 比中位 " & Codec.Fmt (R (0).Depth, 3) & " 更近");
+         Check (abs (R (0).Top + R (0).Height - 0.80) < 0.012, "顶面:顶 + 鼓高 = 桌面 " & Codec.Fmt (R (0).Top + R (0).Height, 3));
+      end if;
+   end;
+   declare
+      W : constant := 96;
+      H : constant := 72;
+      Dep : Floats := Filled (W * H, 0.80);
+      R : Picture.Regions;
+      Seed : Long_Long_Integer := 13;
+   begin
+      for I in 0 .. W * H - 1 loop
+         Seed := (Seed * 1103515245 + 12345) mod 2147483648;
+         Dep.Replace_Element (I, 0.80 + Long_Float (Seed mod 1000) * 1.0e-6 - 0.0005);
+      end loop;
+      --  贴右边的一块:凑近了要抓的东西就长这样,不许整块丢掉
+      for Y in 26 .. 45 loop
+         for X in 76 .. 95 loop
+            Dep.Replace_Element (Y * W + X, 0.77);
+         end loop;
+      end loop;
+      R := Picture.Cut (Dep, W, H, 0.125, 3.0);
+      Check (R.Is_Empty, "贴边:严格规则下贴右边的块被丢掉(" & Natural'Image (Natural (R.Length)) & " 块)");
+      R := Picture.Cut (Dep, W, H, 0.125, 3.0, Keep_Edge => True);
+      Check (Natural (R.Length) = 1, "贴边:放宽之后它留下了(" & Natural'Image (Natural (R.Length)) & " 块)");
+   end;
+   declare
+      W : constant := 96;
+      H : constant := 72;
+      Dep : Floats := Filled (W * H, 0.80);
+      R : Picture.Regions;
+      Seed : Long_Long_Integer := 17;
+   begin
+      for I in 0 .. W * H - 1 loop
+         Seed := (Seed * 1103515245 + 12345) mod 2147483648;
+         Dep.Replace_Element (I, 0.80 + Long_Float (Seed mod 1000) * 1.0e-6 - 0.0005);
+      end loop;
+      --  横贯整幅的一条带 = 背景,必须丢
+      for Y in 26 .. 45 loop
+         for X in 0 .. 95 loop
+            Dep.Replace_Element (Y * W + X, 0.77);
+         end loop;
+      end loop;
+      R := Picture.Cut (Dep, W, H, 0.125, 3.0);
+      Check (R.Is_Empty, "贴边:横跨整幅的带丢掉了(" & Natural'Image (Natural (R.Length)) & " 块)");
    end;
    --  动过的像素 + 连通块 + 两瓣
    declare

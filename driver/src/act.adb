@@ -23,6 +23,32 @@ package body Act is
       return (others => <>);
    end Zone_Of;
 
+   --  抓在这块的哪个高度上 = 它的顶面到它站着的那个面之间的一半。
+   --  两个数都是这一块【自己】在这张画面里量出来的:顶面 = 它自己深度里最近的那一档;
+   --  鼓多高 = 它比周围背景高出多少。所以平的东西鼓 0 ⇒ 一半就是它的表面;
+   --  球鼓一个球 ⇒ 一半就是赤道;瓶子鼓一个瓶身 ⇒ 一半就是瓶腰。没有一个字提它是什么东西,
+   --  也没有一个字提手上有几根手指。量不到就退回中位深度(至少不比原来差)。
+   function Grab_Depth (O : Item) return Long_Float is
+     (if O.Top > 0.0 and then O.Height > 0.0 then O.Top + 0.5 * O.Height else O.Depth);
+
+   --  读"我这一瓣离相机多远"时,窗口要用【这一瓣自己在画面里多大】,不能用整只手的张幅。
+   --  🔴 张幅那么大的窗口会把自己的大臂一起框进来,而大臂比手指更靠近相机 ⇒ 靠近的那一档分位一路爬到大臂上。
+   --  实测(FO):爪子的"离相机多远"9 步从 1.07 米滑到 0.50 米,每一步都正好卡在"一步最多变一成"的限速上 ——
+   --  限速只是把错误读数拖慢,拦不住它;拦得住的是别把大臂框进来。
+   function Lobe_Win (Z : Zone.Hand_Zone; Cw, Ch : Natural) return Long_Float is
+      W1 : constant Long_Float := Long_Float (Z.A.X1 - Z.A.X0 + 1) / Long_Float (Cw);
+      H1 : constant Long_Float := Long_Float (Z.A.Y1 - Z.A.Y0 + 1) / Long_Float (Ch);
+      W2 : constant Long_Float := (if Z.B.Valid then Long_Float (Z.B.X1 - Z.B.X0 + 1) / Long_Float (Cw) else W1);
+      H2 : constant Long_Float := (if Z.B.Valid then Long_Float (Z.B.Y1 - Z.B.Y0 + 1) / Long_Float (Ch) else H1);
+   begin
+      --  还没量到手的时候退回一个百分之一画幅的小窗(比例,无量纲:占画面的多少,跟相机、镜头、机器人大小都无关)
+      if not Z.Valid or else not Z.A.Valid then
+         return 0.01;
+      end if;
+      --  取最窄的那一边的四分之一:落在手指身上,不碰到旁边。再小也留半个千分之四画幅,免得窗口小到一个像素(比例,无量纲)
+      return Long_Float'Max (0.004, 0.25 * Long_Float'Min (Long_Float'Min (W1, H1), Long_Float'Min (W2, H2)));
+   end Lobe_Win;
+
    function Track_Idx (C : Context; Arm, Cam : Natural) return Natural is (Arm * C.Map.N_Cams + Cam);
 
    function Cam_Arm (C : Context; Cam : Natural) return Integer is
@@ -125,6 +151,30 @@ package body Act is
          return Kept;
       end if;
       Raw := Picture.Cut (F.Cams (Cam).Depth, Cw, Ch, Cut_Window (C, Cam, F), Sigma_Mult);
+      --  🔴 一个都没切出来 ⇒ 换个大一号的尺子再看一遍。
+      --  "鼓出来"是相对周围说的:窗口比这块东西还小的时候,这块东西【自己就是周围】,于是它鼓 0、整个消失。
+      --  实测(FO):手伸到球跟前时,手腕相机里球占了小半幅画面,深度这一路一块也切不出来,退化成按颜色切出几十块碎片
+      --  ⇒ 越靠近越看不见要抓的东西。尺子一路放大到半幅画面为止,先看出东西的那一档算数。
+      declare
+         Base : constant Long_Float := Cut_Window (C, Cam, F);
+         Win : Long_Float;
+      begin
+         Win := Base;
+         while Raw.Is_Empty and then Win < 0.5 loop
+            Win := Win * 2.0;
+            Raw := Picture.Cut (F.Cams (Cam).Depth, Cw, Ch, Long_Float'Min (0.5, Win), Sigma_Mult);
+         end loop;
+         --  尺子放到头还是一块都没有 ⇒ 这才允许"被画面切掉一角"的块算数(严格规则下它整块消失)。
+         --  放在最后一档:第三方相机里从画面外伸进来的胳膊也贴边,平时不许它变成"一件东西"。
+         if Raw.Is_Empty then
+            Win := Base;
+            loop
+               Raw := Picture.Cut (F.Cams (Cam).Depth, Cw, Ch, Long_Float'Min (0.5, Win), Sigma_Mult, Keep_Edge => True);
+               exit when not Raw.Is_Empty or else Win >= 0.5;
+               Win := Win * 2.0;
+            end loop;
+         end if;
+      end;
       --  🔴 只有【深度上一个都看不出来】的时候才按颜色切:桌面木纹、瓷砖缝的颜色台阶比线还明显,
       --  在能看见东西的桌子上开着它,清单会从 7 条涨到 46 条,脑子被淹掉(ES 实测)。
       --  线板那种场合深度切不出任何东西,颜色这一路才接手。
@@ -142,7 +192,8 @@ package body Act is
       begin
          for R of Thin loop
             declare
-               Edge : constant Boolean := R.X0 = 0 or else R.Y0 = 0 or else R.X1 >= Cw - 1 or else R.Y1 >= Ch - 1;
+               --  只丢横跨整幅的(左右都贴边、或上下都贴边)= 桌面/墙;贴一条边的只是被画面切了一角,仍然是块
+               Edge : constant Boolean := (R.X0 = 0 and then R.X1 >= Cw - 1) or else (R.Y0 = 0 and then R.Y1 >= Ch - 1);
                Covered : Boolean := False;
             begin
                for Q of Raw loop
@@ -333,12 +384,12 @@ package body Act is
                   It.Kind := Thing_Held; It.Arm := A; It.Located := Tr.Valid;
                   It.Cu := Tr.Cu; It.Cv := Tr.Cv; It.Depth := Tr.Z;
                   It.X0 := Z.X0; It.Y0 := Z.Y0; It.X1 := Z.X1; It.Y1 := Z.Y1;
-                  It.Count := Sl.Shadow.Count; It.Height := Sl.Shadow.Height;
+                  It.Count := Sl.Shadow.Count; It.Height := Sl.Shadow.Height; It.Top := Sl.Shadow.Top;
                   Push (It, "the thing between the fingers of arm " & Codec.Img (A + 1) & " (it moves with that arm), now in cell " & Codec.Img (Cell_Of (C, It.Cu, It.Cv)), Draw.Green, 2);
                end;
             elsif Sl.Present then
                It.Kind := Thing; It.Located := True;
-               It.Cu := Sl.R.Cu; It.Cv := Sl.R.Cv; It.Depth := Sl.R.Depth; It.Height := Sl.R.Height; It.Count := Sl.R.Count;
+               It.Cu := Sl.R.Cu; It.Cv := Sl.R.Cv; It.Depth := Sl.R.Depth; It.Height := Sl.R.Height; It.Top := Sl.R.Top; It.Count := Sl.R.Count;
                It.X0 := Sl.R.X0; It.Y0 := Sl.R.Y0; It.X1 := Sl.R.X1; It.Y1 := Sl.R.Y1;
                It.Au := Sl.R.Au; It.Av := Sl.R.Av; It.Elong := Sl.R.Elong;
                It.Gray := Picture.Mean_Gray (F.Cams (Cam).Gray, Cw, Ch, Sl.R);
@@ -346,7 +397,7 @@ package body Act is
                      Codec.Fmt (It.Height, 3) & " out of the surface)" & Rel (It.Cu, It.Cv), Draw.Green, 2);
             elsif Sl.Seen then
                It.Kind := Thing_Remembered; It.Located := True;
-               It.Cu := Sl.Shadow.Cu; It.Cv := Sl.Shadow.Cv; It.Depth := Sl.Shadow.Depth; It.Height := Sl.Shadow.Height; It.Count := Sl.Shadow.Count;
+               It.Cu := Sl.Shadow.Cu; It.Cv := Sl.Shadow.Cv; It.Depth := Sl.Shadow.Depth; It.Height := Sl.Shadow.Height; It.Top := Sl.Shadow.Top; It.Count := Sl.Shadow.Count;
                It.X0 := Sl.Shadow.X0; It.Y0 := Sl.Shadow.Y0; It.X1 := Sl.Shadow.X1; It.Y1 := Sl.Shadow.Y1;
                It.Au := Sl.Shadow.Au; It.Av := Sl.Shadow.Av; It.Elong := Sl.Shadow.Elong;
                Push (It, "a thing you saw before, remembered where it was last seen, cell " & Codec.Img (Cell_Of (C, It.Cu, It.Cv)) &
@@ -427,6 +478,15 @@ package body Act is
       Par_Tu, Par_Tv : Long_Float := 0.0;       --  两团展开时,整块的目标(看清各团真实位置后按它重算各团目标)
    end record;
    package Point_Vectors is new Ada.Containers.Vectors (Natural, Point);
+
+   --  读一个点的"离相机多远"时该框多大:自己的零件用这一瓣自己的大小,世界上的块用那块自己的框。
+   --  一句话:框住【要读的那个东西本身】,别框住它旁边的东西。
+   --  下界都是"占画幅的多少"(比例,无量纲),只为了窗口不缩到一个像素
+   function Depth_Win (P : Point; Z : Zone.Hand_Zone; Cw, Ch : Natural) return Long_Float is
+     (if P.Kind = Piece_Pt then Lobe_Win (Z, Cw, Ch)
+      elsif P.Box_W > 0.0 and then P.Box_H > 0.0 then Long_Float'Max (0.005, 0.25 * Long_Float'Min (P.Box_W, P.Box_H))
+      else Long_Float'Max (0.005, Z.Span * 0.25));
+
    type Effect_Array is array (Natural range <>) of Table.Effect;
    procedure Refind_Pieces (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Cam : Natural; Pts : in out Point_Vectors.Vector);
 
@@ -639,8 +699,8 @@ package body Act is
                end if;
                if F.Cams (Cam).Has_Depth then
                   declare
-                     --  深度读在这一瓣自己的位置上(区心是两指之间的空,读到的是桌面);窗口 = 张幅的四分之一(比例,无量纲)
-                     Win : constant Long_Float := Long_Float'Max (0.005, Z.Span * 0.25);
+                     --  深度读在这一瓣自己的位置上(区心是两指之间的空,读到的是桌面);窗口 = 这一瓣自己的大小
+                     Win : constant Long_Float := Lobe_Win (Z, Cw, Ch);
                      Zd : constant Long_Float := Picture.Near_Depth (F.Cams (Cam).Depth, Cw, Ch, P.Cu, P.Cv, Win);
                   begin
                      if not Picture.Is_Nan (Zd) then
@@ -784,8 +844,8 @@ package body Act is
             Ok2 : Boolean;
          begin
             for I in 0 .. Natural (Pts.Length) - 1 loop
-               --  读深窗口 = 张幅的四分之一,再小也有半个百分点的画幅(比例,无量纲)
-               Z1 (I) := Picture.Near_Depth (F.Cams (Cam).Depth, Cw, Ch, Pts (I).Cu, Pts (I).Cv, Long_Float'Max (0.005, Z.Span * 0.25));
+               --  读深窗口 = 要读的那个东西自己的大小
+               Z1 (I) := Picture.Near_Depth (F.Cams (Cam).Depth, Cw, Ch, Pts (I).Cu, Pts (I).Cv, Depth_Win (Pts (I), Z, Cw, Ch));
             end loop;
             declare
                Was0 : constant Point_Vectors.Vector := Pts;
@@ -805,8 +865,8 @@ package body Act is
             end;
             for I in 0 .. Natural (Pts.Length) - 1 loop
                declare
-                  --  读深窗口 = 张幅的四分之一,再小也有半个百分点的画幅(比例,无量纲)
-                  Z2 : constant Long_Float := Picture.Near_Depth (F.Cams (Cam).Depth, Cw, Ch, Pts (I).Cu, Pts (I).Cv, Long_Float'Max (0.005, Z.Span * 0.25));
+                  --  读深窗口 = 要读的那个东西自己的大小
+                  Z2 : constant Long_Float := Picture.Near_Depth (F.Cams (Cam).Depth, Cw, Ch, Pts (I).Cu, Pts (I).Cv, Depth_Win (Pts (I), Z, Cw, Ch));
                   Zr : constant Long_Float := (if Pts (I).Z > 0.0 then Pts (I).Z else 1.0);
                begin
                   --  地板 = 两拍读深抖动的 4 倍(倍数,无量纲),再小也有距离的百分之一(比例,无量纲)
@@ -946,8 +1006,8 @@ package body Act is
                      Q.Cu := P.Cu + Ou; Q.Cv := P.Cv + Ov;
                      Q.Tu := P.Tu + Ou; Q.Tv := P.Tv + Ov;
                      if F.Cams (Cam).Has_Depth then
-                        --  读深窗口 = 张幅的四分之一,再小也有半个百分点的画幅(比例,无量纲)
-                        Zd := Picture.Near_Depth (F.Cams (Cam).Depth, Cw, Ch, Q.Cu, Q.Cv, Long_Float'Max (0.005, Z.Span * 0.25));
+                        --  读深窗口 = 这一瓣自己的大小
+                        Zd := Picture.Near_Depth (F.Cams (Cam).Depth, Cw, Ch, Q.Cu, Q.Cv, Lobe_Win (Z, Cw, Ch));
                         if Picture.Is_Nan (Zd) then
                            Zd := P.Z;
                         end if;
@@ -1889,7 +1949,7 @@ package body Act is
                   if P.Kind = Piece_Pt and then P.Chan_K = Chan.Per_Arm then
                      --  认领半径:一个张幅,再小也有一个跟踪窗;读深窗口 = 张幅的四分之一,再小也有半个百分点的画幅(比例,无量纲)
                      --  没真看过的位置(只是按关节推的)可能差得远 ⇒ 认领半径放到整幅画面(比例,无量纲)
-                     Claim (P, (if P.Known then Long_Float'Max (Z.Span, Track_Win) else 1.0), Long_Float'Max (0.005, Z.Span * 0.25), Taken, Regs);
+                     Claim (P, (if P.Known then Long_Float'Max (Z.Span, Track_Win) else 1.0), Lobe_Win (Z, Cw, Ch), Taken, Regs);
                      if not P.Lost then
                         P.Known := True;
                      end if;
@@ -2462,6 +2522,10 @@ package body Act is
                         P.Tu := Z.Cu; P.Tv := Z.Cv; P.Tz := Z.Depth; P.Wz := (if Picture.Is_Nan (Z.Depth) then 0.0 else 1.0);
                         P.Tsize := Sqrt (Long_Float'Max (0.0, (Long_Float (Z.X1 - Z.X0) / Long_Float (Cw)) * (Long_Float (Z.Y1 - Z.Y0) / Long_Float (Ch))));
                         P.Tang := 2.0 * Arctan (Z.Av, Z.Au);
+                        --  🔴 手指要落在【顶面到它站着的那个面之间的一半】处,不是贴着顶面。顶面和"鼓多高"都是这一块
+                        --  自己量出来的,一个字没提它是什么:平的东西鼓 0 ⇒ 一半就是表面;球鼓一个球 ⇒ 一半就是赤道。
+                        --  这一行盯的是这块自己的中位深度,所以把差额加在目标上(FN/FO 实测:不加就夹在球的很偏上处,一合撞飞)。
+                        P.Tz := P.Tz + (O.Depth - Grab_Depth (O));
                         --  ⚠️ "看着多大"这一项【实测不稳,先关掉】(2026-09-08):框随切块忽大忽小,一项就把目标和进度全带偏,
                         --  每一步都是它在变坏;今天唯一真的靠近过的那一炮(32 cm → 16 cm)恰恰没有这一项。
                         --  机制(五行的表)留着,等切块稳了再开。
@@ -2475,8 +2539,10 @@ package body Act is
                         begin
                            P.Kind := Piece_Pt; P.Chan_K := Chan.Per_Arm; P.Cu := Tr.Cu; P.Cv := Tr.Cv; P.Z := Tr.Z; P.Known := Tr.Known;
                            --  同上:合到它那一面,高低由脑说了算
-                           P.Tu := O.Cu; P.Tv := O.Cv; P.Tz := O.Depth; P.Wz := (if O.Depth > 0.0 and then Tr.Z > 0.0 then 1.0 else 0.0);
-                           P.Desc := S ("grip " & Codec.Img (A + 1) & " onto item " & Codec.Img (Say.Grip_On) & " (fingertips to its middle)");
+                           --  同上:手指去"顶面到桌面之间的一半"处
+                           P.Tu := O.Cu; P.Tv := O.Cv; P.Tz := Grab_Depth (O);
+                           P.Wz := (if O.Depth > 0.0 and then Tr.Z > 0.0 then 1.0 else 0.0);
+                           P.Desc := S ("grip " & Codec.Img (A + 1) & " onto item " & Codec.Img (Say.Grip_On) & " (fingertips halfway down what sticks up)");
                         end;
                      end if;
                      Pts.Append (P);
@@ -2551,9 +2617,16 @@ package body Act is
                               O : constant Item := C.Items (Say.Grip_On - 1);
                               Dist : constant Long_Float := Sqrt ((Pin.Cu - O.Cu) ** 2 + (Pin.Cv - O.Cv) ** 2);
                               Tol : constant Long_Float := Long_Float'Max (Hz.Span * 0.5, Track_Win * 0.5);
+                              Want : constant Long_Float := Grab_Depth (O);
+                              --  🔴 高低也要对上:只看"画面里挨着"会在【还差一截高】时就合(FO 实测:合了、把球撞飞,
+                              --  而两指之间什么都没有)。容差 = 这块鼓起来的四分之一。
+                              Deep_Ok : constant Boolean := O.Height <= 0.0 or else Pin.Z <= 0.0 or else Want <= 0.0
+                                                           or else abs (Pin.Z - Want) <= 0.25 * O.Height;
                            begin
-                              Caged := Dist <= Tol;
-                              Cage_Note := S ("cage check in this camera: my grip centre is " & Codec.Fmt (Dist, 3) & " of a frame from the thing (allowed " & Codec.Fmt (Tol, 3) & ")");
+                              Caged := Dist <= Tol and then Deep_Ok;
+                              Cage_Note := S ("cage check in this camera: my grip centre is " & Codec.Fmt (Dist, 3) & " of a frame from the thing (allowed " &
+                                              Codec.Fmt (Tol, 3) & "), and my fingers sit at " & Codec.Fmt (Pin.Z, 3) & " while the middle of the thing is at " &
+                                              Codec.Fmt (Want, 3) & " ⇒ " & (if Deep_Ok then "level with it" else "NOT level with it, I must go further before closing"));
                            end;
                         end if;
                      end;

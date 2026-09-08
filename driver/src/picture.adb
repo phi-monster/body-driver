@@ -269,7 +269,7 @@ package body Picture is
       return Out_R;
    end Cut_Colour;
 
-   function Cut (Depth : Floats; W, H : Natural; Win_Frac, Sigma_Mult : Long_Float) return Regions is
+   function Cut (Depth : Floats; W, H : Natural; Win_Frac, Sigma_Mult : Long_Float; Keep_Edge : Boolean := False) return Regions is
       Out_R : Regions;
       N : constant Natural := W * H;
    begin
@@ -353,8 +353,11 @@ package body Picture is
                   Rg : Region := C;
                   Ds, Hs : Floats;
                begin
-                  --  贴着画面边的块丢掉:整条背景带、细缝、我自己的胳膊都贴边;能拿的东西完整地在画面里
-                  if Rg.X0 > 0 and then Rg.Y0 > 0 and then Rg.X1 + 1 < W and then Rg.Y1 + 1 < H then
+                  --  贴边的块丢不丢,见 Keep_Edge 的说明
+                  if (if Keep_Edge
+                      then not ((Rg.X0 = 0 and then Rg.X1 + 1 = W) or else (Rg.Y0 = 0 and then Rg.Y1 + 1 = H))
+                      else Rg.X0 > 0 and then Rg.Y0 > 0 and then Rg.X1 + 1 < W and then Rg.Y1 + 1 < H)
+                  then
                      for Y in Rg.Y0 .. Rg.Y1 loop
                         for X in Rg.X0 .. Rg.X1 loop
                            if Mask.Element (Y * W + X) then
@@ -363,6 +366,8 @@ package body Picture is
                            end if;
                         end loop;
                      end loop;
+                     --  顶面 = 这块自己深度里最近的十分之一档(分位,比例,无量纲;不用最小值是因为一个坏像素就能当顶)
+                     Rg.Top := Quantile (Ds, 0.1);
                      Rg.Depth := Quantile (Ds, 0.5);
                      Rg.Height := Quantile (Hs, 0.5);
                      Out_R.Append (Rg);
