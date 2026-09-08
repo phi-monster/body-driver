@@ -1256,8 +1256,10 @@ package body Act is
                   end;
                   Note.Floor_Cmd := (if Note.Floor_Cmd <= 0.0 then Am else Long_Float'Min (Note.Floor_Cmd, Am));
                end if;
-               --  阻尼 = 1e-4 / 幅²:每通道都以"几个探针幅度"计价(无量纲),小到让上限当家
-               Damp (K) := 1.0e-4 / (Am * Am);
+               --  🔴 标价改成"这个动作把画面搅动多少":一单位命令让被跟的点在画面里跑几个跟踪窗,就付几分钱(无量纲)。
+               --  以前按"自己那一档"计价,而转腕那一档(0.0256)比平移那一档(0.0064)大四倍 ⇒ 转腕在账本上便宜十六倍,
+               --  于是它一直买转腕,而转腕不会让手靠近(FJ 实测:横挪 4 cm,球反而从 0.333 m 退到 0.360 m)
+               Damp (K) := (Px / Track_Win) ** 2;
             end;
          end loop;
          Table.Solve (Terms, Chan.Per_Arm, Note.Cap, Note.Active, Damp, Note.Cmd, Solved);
