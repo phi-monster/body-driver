@@ -2077,13 +2077,18 @@ package body Act is
             end loop;
          end;
       end if;
-      Held := Seen_In_Hand or else (Gone_From_Table and then Hc < 0);
-      if Seen_In_Hand then
-         Note := S ("after a small lift the thing is still inside my grip box in my hand camera ⇒ held");
-      elsif Gone_From_Table and then Hc >= 0 then
-         Note := S ("after a small lift its place on the table is empty but my hand camera does not show it between my fingers ⇒ not counted as held");
-      elsif Gone_From_Table then
-         Note := S ("after a small lift its place on the table is empty ⇒ held");
+      --  🔴 "拿住了"只有一条硬证据:它原来待的地方空了。手上相机里"还在握区框里"不算数 ——
+      --  那个框在手上相机里几乎是半个屏幕,球留在画面里就过关(FM 实测报了"拿住",而头顶相机里球还在桌上)。
+      --  两台相机都判不了就老实说"我说不准",不许自称拿住。
+      Held := (if World_Cam >= 0 then Gone_From_Table else Seen_In_Hand);
+      if World_Cam >= 0 and then Gone_From_Table then
+         Note := S ("after a small lift its place is empty in the camera that does not move with me ⇒ held"
+                    & (if Seen_In_Hand then ", and my hand camera still shows it between my fingers" else ""));
+      elsif World_Cam >= 0 then
+         Note := S ("after a small lift it is still sitting where it was ⇒ NOT held"
+                    & (if Seen_In_Hand then " (my hand camera still shows something between my fingers, which proves nothing)" else ""));
+      elsif Seen_In_Hand then
+         Note := S ("after a small lift the thing is still inside my grip box in my hand camera; no still camera could check, so I am not sure");
       elsif Could_Judge then
          Note := S ("after a small lift the thing did not come with me ⇒ not held");
       else
