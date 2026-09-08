@@ -987,6 +987,7 @@ package body Act is
       Last_Err : Long_Float := -1.0;     --  -1 = 还没算过(哨兵,无量纲)
       Last_Raw : Long_Float := -1.0;     --  上一步不随表变的差距
       Best_Raw : Long_Float := -1.0;     --  到目前为止最好的一次(判"有没有在靠近"和它比,不和上一步比 —— 噪声一晃就成退步)
+      Trust : Long_Float := 0.5;         --  这张表有多准,就走它算出来的多大比例(半开始;预测差一半就只走一半,准了再放开)
       Lost_Run : Natural := 0;           --  连着几步全部认不到
 
       --  这一步的账
@@ -1332,7 +1333,7 @@ package body Act is
             end;
          end loop;
          for K in 0 .. Chan.Per_Arm - 1 loop
-            Note.Cmd (K) := Note.Cmd (K) * Scale;
+            Note.Cmd (K) := Note.Cmd (K) * Scale * Trust;   --  表有多准就走多少(不然每步走过头,下一步再拉回来,来回晃)
          end loop;
          if Table.Norm (Note.Cmd, Chan.Per_Arm) <= C.Map.EE_Noise then
             Note.Say_Stop := S ("amount: already there (what is left to push is within my own noise)");
@@ -1580,6 +1581,28 @@ package body Act is
             if Any_Meas and then not Pred_Ok then
                Put_Line ("[身]     表说了不算:预测挪的和实际挪的差过一半 ⇒ 用到的通道步子缩回去");
             end if;
+            --  这张表这一步准到什么程度 ⇒ 下一步走它算出来的多大比例(准 = 走满,差一半 = 走一半)
+            if Any_Meas then
+               declare
+                  Worst_Rel : Long_Float := 0.0;
+               begin
+                  for I in 0 .. Natural (Pts.Length) - 1 loop
+                     if not Pts (I).Lost then
+                        declare
+                           W0 : constant Point := Was (I);
+                           Pr : constant Table.Vec3 := Table.Predict (Effs (I), Note.Got);
+                           Au : constant Long_Float := (if Pts (I).Has_Meas then Pts (I).Meas_U else Pts (I).Cu) - W0.Cu;
+                           Av : constant Long_Float := (if Pts (I).Has_Meas then Pts (I).Meas_V else Pts (I).Cv) - W0.Cv;
+                           Pd : constant Long_Float := Sqrt (Pr (0) ** 2 + Pr (1) ** 2);
+                           Ac : constant Long_Float := Sqrt (Au ** 2 + Av ** 2);
+                        begin
+                           Worst_Rel := Long_Float'Max (Worst_Rel, abs (Ac - Pd) / Long_Float'Max (Pd, Track_Win * 0.25));
+                        end;
+                     end if;
+                  end loop;
+                  Trust := 0.5 * Trust + 0.5 / (1.0 + Worst_Rel);
+               end;
+            end if;
          end;
          for I in 0 .. Natural (Pts.Length) - 1 loop
             Store_Effect (C, Arm, Cam, Pts (I).Kind, Pts (I).Chan_K, Pts (I).Blob, Effs (I), Trusts (I), Reach);
@@ -1636,7 +1659,7 @@ package body Act is
                    ":差距 " & Codec.Fmt (Last_Raw, 3) & " → " & Codec.Fmt (Note.Raw_Now, 3) & " · 还差 " & Codec.Fmt (Note.Err_Now, 1) & " 步(左右 " & Codec.Fmt (Pts (0).Err_U, 1) &
                    " 上下 " & Codec.Fmt (Pts (0).Err_V, 1) & " 远近 " & Codec.Fmt (Pts (0).Err_Z, 1) &
                    " 大小 " & Codec.Fmt (Pts (0).Err_S, 1) & " 朝向 " & Codec.Fmt (Pts (0).Err_A, 1) & ")· 拍 " & Codec.Img (Beats) &
-                   " · 步幅 ×[" & Codec.Fmt (Reach (0), 0) & " " & Codec.Fmt (Reach (1), 0) & " " & Codec.Fmt (Reach (2), 0) & " " &
+                   " · 信表 " & Codec.Fmt (Trust, 2) & " · 步幅 ×[" & Codec.Fmt (Reach (0), 0) & " " & Codec.Fmt (Reach (1), 0) & " " & Codec.Fmt (Reach (2), 0) & " " &
                    Codec.Fmt (Reach (3), 0) & " " & Codec.Fmt (Reach (4), 0) & " " & Codec.Fmt (Reach (5), 0) &
                    "] · 命令 [" & Codec.Fmt (Note.Cmd (0), 3) & " " & Codec.Fmt (Note.Cmd (1), 3) & " " & Codec.Fmt (Note.Cmd (2), 3) & " " &
                    Codec.Fmt (Note.Cmd (3), 3) & " " & Codec.Fmt (Note.Cmd (4), 3) & " " & Codec.Fmt (Note.Cmd (5), 3) &
