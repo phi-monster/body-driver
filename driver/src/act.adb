@@ -401,10 +401,14 @@ package body Act is
       return True;
    end Reached;
 
+   function Held_Now (C : Context; Arm : Natural) return Integer is
+     (if C.Wld.Holding and then C.Wld.Held_Arm = Integer (Arm) then C.Wld.Held_Slot else -1);
+
    function Find_Effect (C : Context; Arm, Cam : Natural; Kind : Track_Kind; Chan_K : Natural; Blob : Integer := -1) return Integer is
    begin
       for I in 0 .. Natural (C.Tables.Length) - 1 loop
-         if C.Tables (I).Arm = Arm and then C.Tables (I).Cam = Cam and then C.Tables (I).Kind = Kind and then C.Tables (I).Chan_K = Chan_K and then C.Tables (I).Blob = Blob then
+         if C.Tables (I).Arm = Arm and then C.Tables (I).Cam = Cam and then C.Tables (I).Kind = Kind and then C.Tables (I).Chan_K = Chan_K and then C.Tables (I).Blob = Blob
+           and then C.Tables (I).Held = Held_Now (C, Arm) then
             return I;
          end if;
       end loop;
@@ -415,7 +419,7 @@ package body Act is
                            Pose : Plug.Arm_Pose := [others => 0.0]; Has_Pose : Boolean := False) is
       I : constant Integer := Find_Effect (C, Arm, Cam, Kind, Chan_K, Blob);
       Old : constant Integer := I;
-      Se : Stored_Effect := (Arm, Cam, Kind, Chan_K, Blob, E, Trust, Reach, Pose, Has_Pose);
+      Se : Stored_Effect := (Arm, Cam, Kind, Chan_K, Blob, E, Trust, Reach, Pose, Has_Pose, Held_Now (C, Arm));
    begin
       if not Has_Pose and then Old >= 0 then
          Se.Pose := C.Tables (Natural (Old)).Pose;      --  没带位姿的更新:沿用这张表原来量的位姿
@@ -1713,7 +1717,15 @@ package body Act is
       Seen_In_Hand : Boolean := False;
       Gone_From_Table : Boolean := False;
       Could_Judge : Boolean := False;
+      --  合完之后要量出"到底发生了什么",不是只答"拿住了没":旁边有没有东西被我碰动、那一块是不是断成了两块
+      World_Cam : constant Integer := (if Cam < Natural (F.Cams.Length) and then Cam_Arm (C, Cam) < 0 then Integer (Cam) else -1);
+      Before_Regs : Picture.Regions;
+      Moved_Others : Natural := 0;
+      Pieces_Now : Natural := 0;
    begin
+      if World_Cam >= 0 then
+         Before_Regs := Cut_Things (C, F, Natural (World_Cam));
+      end if;
       Jaw.Append (Selfmap.Jaw_Of (F, Arm));
       A (2) := C.Map.Amp (Arm * Chan.Per_Arm + 2) * 4.0;   --  抬起 = 看得见的探针幅度的几倍(倍数,无量纲),不假设哪根轴朝上:2 号轴是身体报的第三个平移通道
       Step_Arm (L, C, F, Arm, A, Jaw, Deliv, Ok);
@@ -1740,6 +1752,43 @@ package body Act is
          Could_Judge := True;
          Gone_From_Table := World.Vanished (Cut_Things (C, F, Cam), Origin, F.Cams (Cam).W, F.Cams (Cam).H);
       end if;
+      --  旁边动了几件 · 原地现在剩几块(断成两块的话会多出一块)
+      if World_Cam >= 0 then
+         declare
+            After : constant Picture.Regions := Cut_Things (C, F, Natural (World_Cam));
+            Tol : constant Long_Float := 1.0 / Long_Float (F.Cams (Natural (World_Cam)).W);   --  一个像素(画幅比例,无量纲)
+         begin
+            for Q of Before_Regs loop
+               declare
+                  Best : Long_Float := 0.0;
+                  Found : Boolean := False;
+               begin
+                  for R of After loop
+                     if Q.Count * 3 >= R.Count and then R.Count * 3 >= Q.Count then
+                        declare
+                           D : constant Long_Float := Sqrt ((R.Cu - Q.Cu) ** 2 + (R.Cv - Q.Cv) ** 2);
+                        begin
+                           if not Found or else D < Best then
+                              Best := D; Found := True;
+                           end if;
+                        end;
+                     end if;
+                  end loop;
+                  --  不是我夹的那件,却挪过了噪声地板 ⇒ 我碰动了它
+                  if Found and then Best > Tol * 4.0 and then Origin.Count > 0
+                    and then Sqrt ((Q.Cu - Origin.Cu) ** 2 + (Q.Cv - Origin.Cv) ** 2) > Long_Float'Max (Origin.Sig_U, Origin.Sig_V) * 2.0
+                  then
+                     Moved_Others := Moved_Others + 1;
+                  end if;
+               end;
+            end loop;
+            for R of After loop
+               if Origin.Count > 0 and then Sqrt ((R.Cu - Origin.Cu) ** 2 + (R.Cv - Origin.Cv) ** 2) <= Long_Float'Max (Origin.Sig_U, Origin.Sig_V) * 3.0 then
+                  Pieces_Now := Pieces_Now + 1;
+               end if;
+            end loop;
+         end;
+      end if;
       Held := Seen_In_Hand or else (Gone_From_Table and then Hc < 0);
       if Seen_In_Hand then
          Note := S ("after a small lift the thing is still inside my grip box in my hand camera ⇒ held");
@@ -1751,6 +1800,12 @@ package body Act is
          Note := S ("after a small lift the thing did not come with me ⇒ not held");
       else
          Note := S ("I could not judge whether it is held (no camera could see it)");
+      end if;
+      if World_Cam >= 0 then
+         Append (Note, ". While I closed and lifted, " & Codec.Img (Moved_Others) & " other thing(s) I was not pushing moved");
+         if Pieces_Now >= 2 then
+            Append (Note, ", and where it stood there are now " & Codec.Img (Pieces_Now) & " separate pieces");
+         end if;
       end if;
    end Held_Test;
 

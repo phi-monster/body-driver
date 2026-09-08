@@ -128,7 +128,7 @@ package body Bodyfile is
             T : constant Act.Stored_Effect := Tables (I);
          begin
             Append (B, (if I > 0 then "," else "") & "{""arm"":" & Codec.Img (T.Arm) & ",""cam"":" & Codec.Img (T.Cam) & ",""kind"":" & Codec.Img (Act.Track_Kind'Pos (T.Kind)) &
-                    ",""chan"":" & Codec.Img (T.Chan_K) & ",""blob"":" & Codec.Img (T.Blob) & ",""n"":" & Codec.Img (T.E.N) & ",""b"":[");
+                    ",""chan"":" & Codec.Img (T.Chan_K) & ",""blob"":" & Codec.Img (T.Blob) & ",""held"":" & Codec.Img (T.Held) & ",""n"":" & Codec.Img (T.E.N) & ",""b"":[");
             for K in 0 .. T.E.N - 1 loop
                for R in 0 .. Table.Rows - 1 loop
                   Append (B, (if K + R > 0 then "," else "") & Codec.Fmt (T.E.B (K, R), 6));
@@ -365,6 +365,7 @@ package body Bodyfile is
                   T.Kind := Act.Track_Kind'Val (Integer (Json.Num (D, Json.Get (D, Tn, "kind"))));
                   T.Chan_K := Natural (Long_Float'Max (0.0, Json.Num (D, Json.Get (D, Tn, "chan"))));
                   T.Blob := Integer (Json.Num (D, Json.Get (D, Tn, "blob")));
+                  T.Held := (if Json.Get (D, Tn, "held") >= 0 then Integer (Json.Num (D, Json.Get (D, Tn, "held"))) else -1);
                   declare
                      Tp : constant Floats := Arr (Json.Get (D, Tn, "tpose"));
                   begin
