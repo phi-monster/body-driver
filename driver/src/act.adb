@@ -1237,7 +1237,10 @@ package body Act is
                            end if;
                         end loop;
                      end loop;
-                     Note.Cap (K) := (if Known_All then Track_Win / Px else Am * Cap_Mult * Reach (K)) * Amount;
+                     --  上限 = 自己那一档 × 核实过的倍数,再压在"眼睛跟得住"这个天花板下。
+                     --  倍数只有靠"表说会挪多少 vs 实际挪了多少"对上才涨(见 Learn),没证明过就不许迈大步
+                     Note.Cap (K) := Long_Float'Min (Am * Cap_Mult * Reach (K),
+                                                     (if Known_All then Track_Win / Px else Am * Cap_Mult * Reach (K))) * Amount;
                   end;
                   Note.Floor_Cmd := (if Note.Floor_Cmd <= 0.0 then Am else Long_Float'Min (Note.Floor_Cmd, Am));
                end if;
@@ -1535,16 +1538,46 @@ package body Act is
                end if;
             end;
          end if;
-         --  步幅按通道各自放宽/收紧:用到它上限一半以上且表报准了才翻倍
-         for K in 0 .. Chan.Per_Arm - 1 loop
-            if Note.Active (K) then
-               if All_Verified and then (not Note.Halted) and then abs Note.Got (K) >= 0.5 * Note.Cap (K) then
-                  Reach (K) := Reach (K) * 2.0;
-               elsif Any_Wrong and then abs Note.Cmd (K) > Long_Float'Max (Note.Floor_Cmd, C.Map.EE_Noise) then
-                  Reach (K) := Long_Float'Max (1.0, Reach (K) * 0.5);
+         --  🔴 步幅只认一件事:这一步【表说会挪多少】和【实际挪了多少】对不对得上。
+         --  对得上 ⇒ 这几个用到的通道可以把步子放大一倍;差过一半 ⇒ 立刻缩回去。
+         --  不管是平移还是转腕,都得先证明自己说话算数才有资格迈大步(FD/FE:转腕说了不算,一转球就更远)
+         declare
+            Pred_Ok : Boolean := True;
+            Any_Meas : Boolean := False;
+         begin
+            for I in 0 .. Natural (Pts.Length) - 1 loop
+               if not Pts (I).Lost then
+                  declare
+                     W0 : constant Point := Was (I);
+                     Pr : constant Table.Vec3 := Table.Predict (Effs (I), Note.Got);
+                     Act_U : constant Long_Float := (if Pts (I).Has_Meas then Pts (I).Meas_U else Pts (I).Cu) - W0.Cu;
+                     Act_V : constant Long_Float := (if Pts (I).Has_Meas then Pts (I).Meas_V else Pts (I).Cv) - W0.Cv;
+                     Pred : constant Long_Float := Sqrt (Pr (0) ** 2 + Pr (1) ** 2);
+                     Act : constant Long_Float := Sqrt (Act_U ** 2 + Act_V ** 2);
+                  begin
+                     if Pred > Fl.Track * 2.0 or else Act > Fl.Track * 2.0 then
+                        Any_Meas := True;
+                        --  差过预测的一半(再加两个跟踪地板的宽容)就算说了不算
+                        if abs (Act - Pred) > 0.5 * Pred + Fl.Track * 2.0 then
+                           Pred_Ok := False;
+                        end if;
+                     end if;
+                  end;
                end if;
+            end loop;
+            for K in 0 .. Chan.Per_Arm - 1 loop
+               if Note.Active (K) and then abs Note.Cmd (K) > Long_Float'Max (Note.Floor_Cmd, C.Map.EE_Noise) then
+                  if Any_Meas and then Pred_Ok and then (not Note.Halted) and then not Note.Not_Followed then
+                     Reach (K) := Long_Float'Min (Reach (K) * 2.0, Track_Win / Long_Float'Max (1.0e-9, C.Map.Amp (Arm * Chan.Per_Arm + K)));
+                  elsif Any_Meas and then not Pred_Ok then
+                     Reach (K) := Long_Float'Max (1.0, Reach (K) * 0.5);
+                  end if;
+               end if;
+            end loop;
+            if Any_Meas and then not Pred_Ok then
+               Put_Line ("[身]     表说了不算:预测挪的和实际挪的差过一半 ⇒ 用到的通道步子缩回去");
             end if;
-         end loop;
+         end;
          for I in 0 .. Natural (Pts.Length) - 1 loop
             Store_Effect (C, Arm, Cam, Pts (I).Kind, Pts (I).Chan_K, Pts (I).Blob, Effs (I), Trusts (I), Reach);
          end loop;
