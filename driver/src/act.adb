@@ -1995,8 +1995,9 @@ package body Act is
    end Refind_Pieces;
 
    --  握住了没:抬一小截,看东西跟不跟我走。手上相机里 = 它的块还在握区框里;世界相机里 = 它原来那块地方空了。读数不算数(回声)。
+   --  Sure = 有没有【不跟着手动的相机】能核实。没有就只能说"我说不准",不许把状态记成"手里有东西"
    procedure Held_Test (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Arm : Natural; Cam : Natural; Origin : Picture.Region;
-                        Obj_Count : Natural; Held : out Boolean; Note : out Unbounded_String) is
+                        Obj_Count : Natural; Held : out Boolean; Sure : out Boolean; Note : out Unbounded_String) is
       A : Table.Vec := Table.Zero_Vec;
       Deliv : Table.Vec;
       Ok : Boolean;
@@ -2081,6 +2082,7 @@ package body Act is
       --  那个框在手上相机里几乎是半个屏幕,球留在画面里就过关(FM 实测报了"拿住",而头顶相机里球还在桌上)。
       --  两台相机都判不了就老实说"我说不准",不许自称拿住。
       Held := (if World_Cam >= 0 then Gone_From_Table else Seen_In_Hand);
+      Sure := World_Cam >= 0;
       if World_Cam >= 0 and then Gone_From_Table then
          Note := S ("after a small lift its place is empty in the camera that does not move with me ⇒ held"
                     & (if Seen_In_Hand then ", and my hand camera still shows it between my fingers" else ""));
@@ -2500,6 +2502,7 @@ package body Act is
                      declare
                         Empty : constant Long_Float := C.Hands (A).Empty_Close;
                         By_Reading : Boolean := Reading - Empty > C.Map.Jaw_Noise;
+                        Sure_Held : Boolean := False;
                         Note : Unbounded_String;
                         Origin : Picture.Region;
                         Obj_Count : Natural := 0;
@@ -2508,7 +2511,10 @@ package body Act is
                            Origin := World.Get (C.Wld, Cam, Natural (C.Items (Say.Grip_On - 1).Slot)).Shadow;
                            Obj_Count := C.Items (Say.Grip_On - 1).Count;
                         end if;
-                        Held_Test (L, C, F, A, Cam, Origin, Obj_Count, By_Reading, Note);
+                        Held_Test (L, C, F, A, Cam, Origin, Obj_Count, By_Reading, Sure_Held, Note);
+                        if not Sure_Held then
+                           By_Reading := False;   --  说不准 ⇒ 不许记成"手里有东西"(记错了下一步它就去"搬"而不是重抓)
+                        end if;
                         Did_Grip := S ("I closed grip " & Codec.Img (A + 1) & " until the picture stopped changing (" & Codec.Img (Steps_J) & " steps, reading " & Codec.Fmt (Reading, 3) &
                                        ", empty-close reading " & Codec.Fmt (Empty, 3) & "); " & To_String (Note));
                         if By_Reading then
