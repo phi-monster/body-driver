@@ -1365,6 +1365,14 @@ package body Act is
             Note.Big_Step := True;   --  缩到千分之一还不够(比例,无量纲)= 表已经不可信
          end if;
          --  不许把被跟的东西推出视野;不许让【我身上任何一块】压到"不许碰"的框里(只查一个点等于没查)
+         --  出了安全带多远(比例,无量纲):0 = 还在带内
+         declare
+            function Out_Of (U, V : Long_Float) return Long_Float is
+              (Long_Float'Max
+                 (0.0,
+                  Long_Float'Max (Long_Float'Max (Track_Win - U, U - (1.0 - Track_Win)),
+                                  Long_Float'Max (Track_Win - V, V - (1.0 - Track_Win)))));
+         begin
          for Round in 1 .. 4 loop
             declare
                Hit : Boolean := False;
@@ -1386,7 +1394,11 @@ package body Act is
                      Nu : constant Long_Float := Pts (I).Cu + Pr (0) * Scale;
                      Nv : constant Long_Float := Pts (I).Cv + Pr (1) * Scale;
                   begin
-                     if Nu < Track_Win or else Nu > 1.0 - Track_Win or else Nv < Track_Win or else Nv > 1.0 - Track_Win then
+                     --  🔴 只拦"越走越出画面"的步子。以前是"新位置在安全带外就拦",而【本来就在带外】的点
+                     --  (手指本来就贴着画面右边)会让任何一步都被拦掉 —— FR 实测:这一段推了 0 下,
+                     --  身体报"每一步都会把我盯着的东西推出视野",而它其实是想往回走。
+                     --  出界量:0 = 在带内,越大出得越远;新的比现在还远才拦。
+                     if Out_Of (Nu, Nv) > Out_Of (Pts (I).Cu, Pts (I).Cv) and then Out_Of (Nu, Nv) > 0.0 then
                         Hit := True;
                      end if;
                      if In_Avoid (Nu * Long_Float (Cw), Nv * Long_Float (Ch), Nu * Long_Float (Cw), Nv * Long_Float (Ch)) then
@@ -1424,6 +1436,7 @@ package body Act is
                Scale := Scale * 0.5;
             end;
          end loop;
+         end;
          for K in 0 .. Chan.Per_Arm - 1 loop
             Note.Cmd (K) := Note.Cmd (K) * Scale * Trust;   --  表有多准就走多少(不然每步走过头,下一步再拉回来,来回晃)
          end loop;
