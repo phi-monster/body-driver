@@ -700,6 +700,11 @@ package body Act is
                      P.Cu := R.Cu; P.Cv := R.Cv;
                      P.Size := Sqrt (Long_Float'Max (0.0, P.Box_W * P.Box_H));
                      P.Ang := 2.0 * Arctan (R.Av, R.Au);
+                     P.Elong := R.Elong;
+                     --  朝向算多少分,看这块有多"长条":圆的(长短轴一样)自动为零 —— 球没有朝向,给满分就是追噪声
+                     if P.Wang > 0.0 then
+                        P.Wang := Long_Float'Max (0.0, 1.0 - 1.0 / Long_Float'Max (1.0, P.Elong));
+                     end if;
                      --  只有真打平才叫分不开:第二像的和最像的差不到一成(比例,无量纲)。
                      --  松了会天天停下问(EU:球和它自己裂出来的小块也算"一样像")
                      P.Unsure := Second >= 0 and then Sd <= Bd * 1.1;
@@ -1102,7 +1107,7 @@ package body Act is
                end if;
                --  朝向:差绕回 (-π, π];圆的东西这一行谁也改不动,归一时自动关掉
                if P.Wang > 0.0 then
-                  T.Err (4) := Wrap (P.Tang - P.Ang); T.W (4) := 1.0;
+                  T.Err (4) := Wrap (P.Tang - P.Ang); T.W (4) := P.Wang;
                end if;
                --  🔴 五样单位不同,混着求和就是错的判据。不换算成米,改成【只比较】:
                --  每一样除以"推一步最多能把它改多少",都变成"还差几步"(无量纲),本来就可比。
@@ -1139,7 +1144,7 @@ package body Act is
                   Q.Raw_Err := Sqrt ((P.Tu - P.Cu) ** 2 + (P.Tv - P.Cv) ** 2
                                      + (if P.Wz > 0.0 and then P.Z > 0.0 then ((P.Tz - P.Z) / P.Z) ** 2 else 0.0)
                                      + (if P.Wsize > 0.0 and then P.Tsize > 0.0 then ((P.Tsize - P.Size) / P.Tsize) ** 2 else 0.0)
-                                     + (if P.Wang > 0.0 then (Wrap (P.Tang - P.Ang) / Ada.Numerics.Pi) ** 2 else 0.0));
+                                     + (if P.Wang > 0.0 then (P.Wang * Wrap (P.Tang - P.Ang) / Ada.Numerics.Pi) ** 2 else 0.0));
                   Pts.Replace_Element (I, Q);
                end;
                Terms.Append (T);
@@ -2249,7 +2254,9 @@ package body Act is
                         P.Tu := Z.Cu; P.Tv := Z.Cv; P.Tz := Z.Depth; P.Wz := (if Picture.Is_Nan (Z.Depth) then 0.0 else 1.0);
                         P.Tsize := Sqrt (Long_Float'Max (0.0, (Long_Float (Z.X1 - Z.X0) / Long_Float (Cw)) * (Long_Float (Z.Y1 - Z.Y0) / Long_Float (Ch))));
                         P.Tang := 2.0 * Arctan (Z.Av, Z.Au);
-                        P.Wsize := 1.0; P.Wang := 1.0;
+                        P.Wsize := 1.0;
+                        --  朝向的分量 = 这块有多长条(圆的为零)
+                        P.Wang := Long_Float'Max (0.0, 1.0 - 1.0 / Long_Float'Max (1.0, O.Elong));
                         P.Desc := S ("item " & Codec.Img (Say.Grip_On) & " to sit where my fingers close (same place, same distance, same apparent size, same lie)");
                      else
                         declare
