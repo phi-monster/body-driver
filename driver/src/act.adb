@@ -1116,9 +1116,40 @@ package body Act is
                         end loop;
                      end;
                   end loop;
+                  --  🔴 不许碰的东西,要防的是【整条胳膊】,不是只有被跟的那一个点:
+                  --  我身上每一块此刻在哪、这一步会挪到哪,身体自己都知道(部件图 + 那一块自己的表)⇒ 逐块按框查。
+                  --  密线里蹭断邻线,靠的就是这一条(只查一个点等于没查)
+                  if Cam_Arm (C, Cam) /= Integer (Arm) and then Track_Idx (C, Arm, Cam) < Natural (C.Zones.Length) then
+                     declare
+                        Tr : constant Zone_Track := C.Zones (Track_Idx (C, Arm, Cam));
+                     begin
+                        for K in 0 .. Chan.Per_Arm loop
+                           if Tr.Pieces (K).Valid then
+                              declare
+                                 Idx : constant Integer := Find_Effect (C, Arm, Cam, Piece_Pt, K, -1);
+                                 Sh : constant Table.Vec3 := (if Idx >= 0 then Table.Predict (C.Tables (Natural (Idx)).E, A) else Table.Zero3);
+                                 Du : constant Long_Float := Sh (0) * Scale;
+                                 Dv : constant Long_Float := Sh (1) * Scale;
+                                 X0 : constant Long_Float := Long_Float (Tr.Pieces (K).X0) + Du * Long_Float (Cw);
+                                 X1 : constant Long_Float := Long_Float (Tr.Pieces (K).X1) + Du * Long_Float (Cw);
+                                 Y0 : constant Long_Float := Long_Float (Tr.Pieces (K).Y0) + Dv * Long_Float (F.Cams (Cam).H);
+                                 Y1 : constant Long_Float := Long_Float (Tr.Pieces (K).Y1) + Dv * Long_Float (F.Cams (Cam).H);
+                              begin
+                                 for Av of Avoid loop
+                                    if Av.Located and then X0 <= Long_Float (Av.X1) and then X1 >= Long_Float (Av.X0)
+                                      and then Y0 <= Long_Float (Av.Y1) and then Y1 >= Long_Float (Av.Y0)
+                                    then
+                                       Hit := True;
+                                    end if;
+                                 end loop;
+                              end;
+                           end if;
+                        end loop;
+                     end;
+                  end if;
                   exit when not Hit;
                   if Round = 4 then
-                     Event := S ("stopped: every step would push what I am tracking out of my sight or onto a thing I must not touch");
+                     Event := S ("stopped: every step would push what I am tracking out of my sight, or put some part of me onto a thing I must not touch");
                      return;
                   end if;
                   Scale := Scale * 0.5;
