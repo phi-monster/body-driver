@@ -1378,8 +1378,11 @@ package body Act is
          --  大块就得早点停。固定一成留边在最后一刻恰恰是致命的:FT 实测手指走到 0.90 就被钉死,
          --  一连三段推 0 下,而球还差 30 cm 没下去。
          declare
+            --  留边 = 这一块自己的半个身子 + 半个跟踪窗:半个身子保证"还认得出是它",
+            --  半个跟踪窗是"一步最多跑这么远"的余量(两个都是量出来的;比例,无量纲)。
+            --  只留半个身子太薄:FU 实测手指被允许一路推到画面外(u=1.00)然后跟丢。
             function Margin (P : Point) return Long_Float is
-              (Long_Float'Max (0.01, 0.5 * Long_Float'Max (P.Box_W, P.Box_H)));
+              (0.5 * Long_Float'Max (Long_Float'Max (P.Box_W, P.Box_H), Track_Win));
             function Out_Of (U, V, M : Long_Float) return Long_Float is
               (Long_Float'Max
                  (0.0,
