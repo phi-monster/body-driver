@@ -89,7 +89,8 @@ package body Act is
          begin
             --  窗口至少要比正在跟的那块大半圈(倍数,无量纲),否则它一走近就被闭运算填平、只剩一圈边
             if C.Want_Size > 0.0 then
-               return Long_Float'Max (Long_Float'Min (0.5, C.Want_Size * 1.5), 0.02);
+               --  比它大半圈就够;再大会把整张桌面也算进背景,深度那一路反而什么都切不出来(EW 实测)
+               return Long_Float'Max (Long_Float'Min (0.25, C.Want_Size * 1.5), 0.02);
             end if;
             if Z.Valid and then Z.Span > 0.0 and then not Picture.Is_Nan (Z.Depth) and then F.Cams (Cam).Has_Depth then
                declare
@@ -152,7 +153,22 @@ package body Act is
                   end if;
                end loop;
                if not Edge and then not Covered then
-                  Raw.Append (R);
+                  declare
+                     Q : Picture.Region := R;
+                  begin
+                     --  颜色切出来的块也要有远近:在它自己的位置上读一小片深度(窗口 = 它自己框的四分之一,比例,无量纲)
+                     if F.Cams (Cam).Has_Depth then
+                        declare
+                           Zd : constant Long_Float := Picture.Near_Depth (F.Cams (Cam).Depth, Cw, Ch, R.Cu, R.Cv,
+                                                                          Long_Float'Max (0.005, Long_Float (R.X1 - R.X0) / Long_Float (Cw) * 0.25));
+                        begin
+                           if not Picture.Is_Nan (Zd) then
+                              Q.Depth := Zd;
+                           end if;
+                        end;
+                     end if;
+                     Raw.Append (Q);
+                  end;
                end if;
             end;
          end loop;
