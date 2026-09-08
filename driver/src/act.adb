@@ -1867,8 +1867,39 @@ package body Act is
                Avoid.Append (C.Items (N - 1));
             end if;
          end loop;
-         --  移动条目 → 点
+         --  "保持不动" → 也变成一个点:它的目标就是它此刻在哪(误差为零)。这样解算必须选一条【不动它】的走法,
+         --  而不是"没人管它" —— 一只手捏住不动、另一只手干活,全靠这一条(以前这种条目被直接跳过)
          for G of Say.Moves loop
+            if G.Item >= 1 and then G.Item <= Natural (C.Items.Length) and then G.Stay then
+               declare
+                  It : constant Item := C.Items (G.Item - 1);
+                  P : Point;
+               begin
+                  if It.Located then
+                     P.Item_No := G.Item;
+                     if It.Kind in Finger | Grip | Piece | Thing_Held then
+                        P.Arm := It.Arm; P.Kind := Piece_Pt;
+                        P.Chan_K := (if It.Kind = Piece then It.Which else Chan.Per_Arm);
+                        declare
+                           Tr : constant Zone_Track := C.Zones (Track_Idx (C, P.Arm, Cam));
+                        begin
+                           P.Cu := Tr.Cu; P.Cv := Tr.Cv; P.Z := Tr.Z; P.Known := Tr.Known;
+                        end;
+                     elsif Cam_Arm (C, Cam) >= 0 then
+                        P.Arm := Natural (Cam_Arm (C, Cam)); P.Kind := Thing_Pt; P.Slot := It.Slot;
+                        P.Cu := It.Cu; P.Cv := It.Cv; P.Z := It.Depth; P.Height := It.Height; P.Count := It.Count;
+                        P.Box_W := Long_Float (It.X1 - It.X0) / Long_Float (Cw); P.Box_H := Long_Float (It.Y1 - It.Y0) / Long_Float (Ch);
+                        P.Elong := It.Elong; P.Gray := It.Gray;
+                     end if;
+                     P.Tu := P.Cu; P.Tv := P.Cv; P.Tz := P.Z;
+                     P.Wz := (if P.Z > 0.0 then 1.0 else 0.0);
+                     P.Desc := S ("item " & Codec.Img (G.Item) & " stays exactly where it is");
+                     if Pts.Is_Empty or else Pts (0).Arm = P.Arm then
+                        Pts.Append (P);
+                     end if;
+                  end if;
+               end;
+            end if;
             if G.Item >= 1 and then G.Item <= Natural (C.Items.Length) and then not G.Stay then
                declare
                   It : constant Item := C.Items (G.Item - 1);
