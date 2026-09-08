@@ -404,6 +404,8 @@ package body Act is
       Steps_Err : Long_Float := 0.0;            --  上一步算出来的"还差几步"(三样都除以推一步能改多少之后的总和)
       Err_U, Err_V, Err_Z : Long_Float := 0.0;  --  拆开的五样(左右 / 上下 / 远近 / 大小 / 朝向),单位都是"还差几步"
       Err_S, Err_A : Long_Float := 0.0;
+      Raw_Err : Long_Float := 0.0;              --  不随表变的差距(全是比例):画面距离 + 远近差几成 + 大小差几成 + 朝向差几成。
+                                                --  判"有没有在靠近"只能用它 —— "还差几步"的刻度每步都在变,尺子一缩就看着像退步
       Par_Tu, Par_Tv : Long_Float := 0.0;       --  两团展开时,整块的目标(看清各团真实位置后按它重算各团目标)
    end record;
    package Point_Vectors is new Ada.Containers.Vectors (Natural, Point);
@@ -906,7 +908,8 @@ package body Act is
       W : Monitor.Watch;
       Ring : Backup.Ring;
       Jaw : Floats;
-      Last_Err : Long_Float := -1.0;     --  -1 = 还没算过"还差几步"(哨兵,无量纲)
+      Last_Err : Long_Float := -1.0;     --  -1 = 还没算过(哨兵,无量纲)
+      Last_Raw : Long_Float := -1.0;     --  上一步不随表变的差距
       Lost_Run : Natural := 0;           --  连着几步全部认不到
 
       --  这一步的账
@@ -914,7 +917,8 @@ package body Act is
          Cmd, Got, Cap : Table.Vec := Table.Zero_Vec;   --  要走的 / 实际走的 / 各通道这一步的上限
          Active : Table.Mask := [others => False];
          Floor_Cmd : Long_Float := 0.0;                 --  最小探针幅度:比它一半还小的命令说明不了"顶住"
-         Err_Now : Long_Float := 0.0;                   --  这一步之后还差几步
+         Err_Now : Long_Float := 0.0;                   --  这一步之后还差几步(尺度会变,只用来说话)
+         Raw_Now : Long_Float := 0.0;                   --  这一步之后不随表变的差距(判有没有在靠近就看它)
          Pic_Delta : Long_Float := 0.0;
          Big_Step : Boolean := False;                   --  大到光流跟不住 ⇒ 走完抖一下认自己
          Halted : Boolean := False;                     --  途中眼睛叫停
@@ -1096,15 +1100,20 @@ package body Act is
                   Q.Steps_Err := Sqrt (Q.Steps_Err);
                   Q.Err_U := T.Err (0) * T.W (0); Q.Err_V := T.Err (1) * T.W (1); Q.Err_Z := T.Err (2) * T.W (2);
                   Q.Err_S := T.Err (3) * T.W (3); Q.Err_A := T.Err (4) * T.W (4);
+                  Q.Raw_Err := Sqrt ((P.Tu - P.Cu) ** 2 + (P.Tv - P.Cv) ** 2
+                                     + (if P.Wz > 0.0 and then P.Z > 0.0 then ((P.Tz - P.Z) / P.Z) ** 2 else 0.0)
+                                     + (if P.Wsize > 0.0 and then P.Tsize > 0.0 then ((P.Tsize - P.Size) / P.Tsize) ** 2 else 0.0)
+                                     + (if P.Wang > 0.0 then (Wrap (P.Tang - P.Ang) / Ada.Numerics.Pi) ** 2 else 0.0));
                   Pts.Replace_Element (I, Q);
                end;
                Terms.Append (T);
             end;
          end loop;
          if Last_Err < 0.0 then
-            Last_Err := 0.0;
+            Last_Err := 0.0; Last_Raw := 0.0;
             for P of Pts loop
                Last_Err := Last_Err + P.Steps_Err;
+               Last_Raw := Last_Raw + P.Raw_Err;
             end loop;
          end if;
       end Aim;
@@ -1364,6 +1373,7 @@ package body Act is
          Any_Wrong : Boolean := False;
       begin
          Note.Err_Now := 0.0;
+         Note.Raw_Now := 0.0;
          for I in 0 .. Natural (Pts.Length) - 1 loop
             declare
                P : constant Point := Pts (I);
@@ -1395,6 +1405,7 @@ package body Act is
                end if;
                Effs (I) := E;
                Note.Err_Now := Note.Err_Now + P.Steps_Err;
+               Note.Raw_Now := Note.Raw_Now + P.Raw_Err;
             end;
          end loop;
          --  整步没照做:各通道按自己的探针幅度归一后,实到与命令差过一半(逐个通道判会被同量级的小出入触发)
@@ -1479,10 +1490,11 @@ package body Act is
       --  ⑤ 判:这一步之后接着走,还是到了 / 出事了 / 拿不准
       procedure Judge is
       begin
-         Monitor.Step (W, Monitor.Floor (Long_Float'Max (0.0, Note.Pic_Delta)), Monitor.Bounded (Last_Err), Monitor.Bounded (Note.Err_Now),
+         --  进度只看不随表变的那把尺(Raw):"还差几步"的刻度每步都在变,用它判进度会把靠近判成退步(ES 实测两步就报停滞)
+         Monitor.Step (W, Monitor.Floor (Long_Float'Max (0.0, Note.Pic_Delta)), Monitor.Bounded (Last_Raw), Monitor.Bounded (Note.Raw_Now),
                        Monitor.Floor (Long_Float'Max (0.0, Table.Norm (Note.Got, Chan.Per_Arm))), Fl);
          Put_Line ("[身]     步" & Natural'Image (Steps_Taken) & (if Note.Big_Step then "(大步)" else "") &
-                   ":还差 " & Codec.Fmt (Last_Err, 1) & " → " & Codec.Fmt (Note.Err_Now, 1) & " 步(左右 " & Codec.Fmt (Pts (0).Err_U, 1) &
+                   ":差距 " & Codec.Fmt (Last_Raw, 3) & " → " & Codec.Fmt (Note.Raw_Now, 3) & " · 还差 " & Codec.Fmt (Note.Err_Now, 1) & " 步(左右 " & Codec.Fmt (Pts (0).Err_U, 1) &
                    " 上下 " & Codec.Fmt (Pts (0).Err_V, 1) & " 远近 " & Codec.Fmt (Pts (0).Err_Z, 1) &
                    " 大小 " & Codec.Fmt (Pts (0).Err_S, 1) & " 朝向 " & Codec.Fmt (Pts (0).Err_A, 1) & ")· 拍 " & Codec.Img (Beats) &
                    " · 步幅 ×[" & Codec.Fmt (Reach (0), 0) & " " & Codec.Fmt (Reach (1), 0) & " " & Codec.Fmt (Reach (2), 0) & " " &
@@ -1494,6 +1506,7 @@ package body Act is
                    "] · 点 (" & Codec.Fmt (Pts (0).Cu, 3) & "," & Codec.Fmt (Pts (0).Cv, 3) & ") 深 " & Codec.Fmt (Pts (0).Z, 3) &
                    (if Note.Blocked then " · 零表更准(顶住?)" else ""));
          Last_Err := Note.Err_Now;
+         Last_Raw := Note.Raw_Now;
          if Note.Blocked or else Monitor.Refusing (W) then
             Blocked_Out := True;
          end if;
