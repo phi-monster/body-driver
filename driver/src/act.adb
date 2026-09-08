@@ -986,6 +986,7 @@ package body Act is
       Jaw : Floats;
       Last_Err : Long_Float := -1.0;     --  -1 = 还没算过(哨兵,无量纲)
       Last_Raw : Long_Float := -1.0;     --  上一步不随表变的差距
+      Best_Raw : Long_Float := -1.0;     --  到目前为止最好的一次(判"有没有在靠近"和它比,不和上一步比 —— 噪声一晃就成退步)
       Lost_Run : Natural := 0;           --  连着几步全部认不到
 
       --  这一步的账
@@ -1201,6 +1202,7 @@ package body Act is
                Last_Err := Last_Err + P.Steps_Err;
                Last_Raw := Last_Raw + P.Raw_Err;
             end loop;
+            Best_Raw := Last_Raw;
          end if;
       end Aim;
 
@@ -1557,8 +1559,9 @@ package body Act is
                   begin
                      if Pred > Fl.Track * 2.0 or else Act > Fl.Track * 2.0 then
                         Any_Meas := True;
-                        --  差过预测的一半(再加两个跟踪地板的宽容)就算说了不算
-                        if abs (Act - Pred) > 0.5 * Pred + Fl.Track * 2.0 then
+                        --  差过预测的一半就算说了不算;再给一个和跟踪精度挂钩的绝对宽容(四分之一个跟踪窗),
+                        --  否则步子越小相对误差越大,永远判"说了不算",步子就永远放不大(FF 实测每步都判不准)
+                        if abs (Act - Pred) > 0.5 * Pred + Track_Win * 0.25 then
                            Pred_Ok := False;
                         end if;
                      end if;
@@ -1626,7 +1629,8 @@ package body Act is
       procedure Judge is
       begin
          --  进度只看不随表变的那把尺(Raw):"还差几步"的刻度每步都在变,用它判进度会把靠近判成退步(ES 实测两步就报停滞)
-         Monitor.Step (W, Monitor.Floor (Long_Float'Max (0.0, Note.Pic_Delta)), Monitor.Bounded (Last_Raw), Monitor.Bounded (Note.Raw_Now),
+         --  和"到目前为止最好的一次"比:和上一步比的话,一次噪声就被当成退步
+         Monitor.Step (W, Monitor.Floor (Long_Float'Max (0.0, Note.Pic_Delta)), Monitor.Bounded (Best_Raw), Monitor.Bounded (Note.Raw_Now),
                        Monitor.Floor (Long_Float'Max (0.0, Table.Norm (Note.Got, Chan.Per_Arm))), Fl);
          Put_Line ("[身]     步" & Natural'Image (Steps_Taken) & (if Note.Big_Step then "(大步)" else "") &
                    ":差距 " & Codec.Fmt (Last_Raw, 3) & " → " & Codec.Fmt (Note.Raw_Now, 3) & " · 还差 " & Codec.Fmt (Note.Err_Now, 1) & " 步(左右 " & Codec.Fmt (Pts (0).Err_U, 1) &
@@ -1642,6 +1646,9 @@ package body Act is
                    (if Note.Blocked then " · 零表更准(顶住?)" else ""));
          Last_Err := Note.Err_Now;
          Last_Raw := Note.Raw_Now;
+         if Best_Raw < 0.0 or else Note.Raw_Now < Best_Raw then
+            Best_Raw := Note.Raw_Now;
+         end if;
          if Codec.Env ("BL_STEPSHOT") /= "" then
             Dump_Picture ("step");   --  逐步落图:看被跟的那块在靠近时到底怎么变(BL_STEPSHOT 打开才存)
          end if;
