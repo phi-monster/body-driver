@@ -680,8 +680,9 @@ package body Act is
                      P.Cu := R.Cu; P.Cv := R.Cv;
                      P.Size := Sqrt (Long_Float'Max (0.0, P.Box_W * P.Box_H));
                      P.Ang := 2.0 * Arctan (R.Av, R.Au);
-                     --  第二像的和最像的差不到一半 ⇒ 分不开,不许自己挑
-                     P.Unsure := Second >= 0 and then Sd < Bd * 2.0;
+                     --  只有真打平才叫分不开:第二像的和最像的差不到一成(比例,无量纲)。
+                     --  松了会天天停下问(EU:球和它自己裂出来的小块也算"一样像")
+                     P.Unsure := Second >= 0 and then Sd <= Bd * 1.1;
                   end;
                else
                   P.Cu := Pred_U; P.Cv := Pred_V; P.Lost := True;
