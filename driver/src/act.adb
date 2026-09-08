@@ -1142,8 +1142,17 @@ package body Act is
                T : Table.Term;
             begin
                T.E := Effs (I);
-               T.Err (0) := P.Tu - P.Cu;  T.W (0) := 1.0;
-               T.Err (1) := P.Tv - P.Cv;  T.W (1) := 1.0;
+               --  🔴 离得越远,"落在两指正中间"越不该急着满足:那是到跟前才成立的几何。
+               --  权重 = 指尖有多近 ÷ 它有多远(量出来的两个深度之比):远的时候远近压过画面 ⇒ 先走过去;
+               --  越走近画面越重要 ⇒ 最后才精确对准。不这么定,它会在 25 cm 外用转手腕把画面对齐,手一步没靠近(FI 实测)
+               declare
+                  Near : constant Long_Float :=
+                    (if P.Wz > 0.0 and then P.Z > 0.0 and then not Picture.Is_Nan (P.Tz) and then P.Tz > 0.0
+                     then Long_Float'Min (1.0, P.Tz / P.Z) else 1.0);
+               begin
+                  T.Err (0) := P.Tu - P.Cu;  T.W (0) := Near;
+                  T.Err (1) := P.Tv - P.Cv;  T.W (1) := Near;
+               end;
                --  远近:画面位置和远近一起要,不许替它定"先对准再靠近"的顺序(那等于叫它先扭脖子)
                if P.Wz > 0.0 and then P.Z > 0.0 and then not Picture.Is_Nan (P.Tz) then
                   T.Err (2) := P.Tz - P.Z; T.W (2) := 1.0;
