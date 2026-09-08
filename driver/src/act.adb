@@ -638,15 +638,20 @@ package body Act is
                Best, Second : Integer := -1;
                Bd, Sd : Long_Float := 1.0e9;
                Tol : constant Long_Float := Long_Float'Max (P.Box_W, P.Box_H) * 0.75 + Track_Win;
-               --  不像的程度:位置差几个跟踪窗 + 胖瘦差几成 + 灰度差几成(都是比例,无量纲)
+               --  不像的程度:位置差几个跟踪窗 + 大小差几成 + 胖瘦差几成 + 灰度差几成(都是比例,无量纲)。
+               --  🔴 大小只参与"像不像",不许当一票否决的硬门槛 —— 越走近它越大,硬门槛会在最该抓住的时候把它判丢(ET 实测)
                function Unlike (R : Picture.Region) return Long_Float is
                   D : constant Long_Float := Sqrt ((R.Cu - Pred_U) ** 2 + (R.Cv - Pred_V) ** 2) / Long_Float'Max (Tol, 1.0e-9);
+                  Sz : constant Long_Float := (if P.Count > 0 and then R.Count > 0 then
+                                                  Long_Float (Integer'Max (R.Count, P.Count) - Integer'Min (R.Count, P.Count))
+                                                  / Long_Float (Integer'Max (R.Count, P.Count))
+                                               else 0.0);
                   E : constant Long_Float := abs (R.Elong - P.Elong) / Long_Float'Max (1.0, P.Elong);
                   G : constant Long_Float := (if P.Gray >= 0.0 then
                                                  abs (Picture.Mean_Gray (F.Cams (Cam).Gray, Cw, Ch, R) - P.Gray) / 255.0
                                               else 0.0);
                begin
-                  return D + E + G;
+                  return D + Sz + E + G;
                end Unlike;
             begin
                for I in 0 .. Natural (Regs.Length) - 1 loop
@@ -655,7 +660,7 @@ package body Act is
                      D : constant Long_Float := Sqrt ((R.Cu - Pred_U) ** 2 + (R.Cv - Pred_V) ** 2);
                      U : constant Long_Float := Unlike (R);
                   begin
-                     if R.Count * 3 >= P.Count and then R.Count <= P.Count * 3 and then D <= Tol then
+                     if D <= Tol then
                         if U < Bd then
                            Sd := Bd; Second := Best;
                            Bd := U; Best := I;
