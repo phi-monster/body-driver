@@ -122,6 +122,10 @@ package body Act is
          return Kept;
       end if;
       Raw := Picture.Cut (F.Cams (Cam).Depth, Cw, Ch, Cut_Window (C, Cam, F), Sigma_Mult);
+      --  🔴 只有【深度上一个都看不出来】的时候才按颜色切:桌面木纹、瓷砖缝的颜色台阶比线还明显,
+      --  在能看见东西的桌子上开着它,清单会从 7 条涨到 46 条,脑子被淹掉(ES 实测)。
+      --  线板那种场合深度切不出任何东西,颜色这一路才接手。
+      if Raw.Is_Empty then
       --  再按颜色切一遍,把深度上鼓不出来的细东西(线、缝、刀口)补进来:
       --  门槛 = 这台相机静止时颜色抖多少(量出来的)的几倍;贴画面边的是桌面/墙,丢掉(本仓既有规矩);
       --  已经被深度块盖住的不重复列
@@ -149,6 +153,7 @@ package body Act is
             end;
          end loop;
       end;
+      end if;
       for R of Raw loop
          declare
             Mine : Boolean := False;
