@@ -1372,13 +1372,19 @@ package body Act is
             Note.Big_Step := True;   --  缩到千分之一还不够(比例,无量纲)= 表已经不可信
          end if;
          --  不许把被跟的东西推出视野;不许让【我身上任何一块】压到"不许碰"的框里(只查一个点等于没查)
-         --  出了安全带多远(比例,无量纲):0 = 还在带内
+         --  出了留边多远(比例,无量纲):0 = 还在里面。
+         --  🔴 留边 = 【这一块自己在画面里的半个身子】,不是固定的一成画幅。
+         --  含义是"别把它推到一半以上都在画面外",而多大算一半是量出来的:小手指能走到画面 97% 处还认得住,
+         --  大块就得早点停。固定一成留边在最后一刻恰恰是致命的:FT 实测手指走到 0.90 就被钉死,
+         --  一连三段推 0 下,而球还差 30 cm 没下去。
          declare
-            function Out_Of (U, V : Long_Float) return Long_Float is
+            function Margin (P : Point) return Long_Float is
+              (Long_Float'Max (0.01, 0.5 * Long_Float'Max (P.Box_W, P.Box_H)));
+            function Out_Of (U, V, M : Long_Float) return Long_Float is
               (Long_Float'Max
                  (0.0,
-                  Long_Float'Max (Long_Float'Max (Track_Win - U, U - (1.0 - Track_Win)),
-                                  Long_Float'Max (Track_Win - V, V - (1.0 - Track_Win)))));
+                  Long_Float'Max (Long_Float'Max (M - U, U - (1.0 - M)),
+                                  Long_Float'Max (M - V, V - (1.0 - M)))));
          begin
          for Round in 1 .. 4 loop
             declare
@@ -1405,9 +1411,13 @@ package body Act is
                      --  (手指本来就贴着画面右边)会让任何一步都被拦掉 —— FR 实测:这一段推了 0 下,
                      --  身体报"每一步都会把我盯着的东西推出视野",而它其实是想往回走。
                      --  出界量:0 = 在带内,越大出得越远;新的比现在还远才拦。
-                     if Out_Of (Nu, Nv) > Out_Of (Pts (I).Cu, Pts (I).Cv) and then Out_Of (Nu, Nv) > 0.0 then
-                        Hit := True;
-                     end if;
+                     declare
+                        M : constant Long_Float := Margin (Pts (I));
+                     begin
+                        if Out_Of (Nu, Nv, M) > Out_Of (Pts (I).Cu, Pts (I).Cv, M) and then Out_Of (Nu, Nv, M) > 0.0 then
+                           Hit := True;
+                        end if;
+                     end;
                      if In_Avoid (Nu * Long_Float (Cw), Nv * Long_Float (Ch), Nu * Long_Float (Cw), Nv * Long_Float (Ch)) then
                         Hit := True;
                      end if;
