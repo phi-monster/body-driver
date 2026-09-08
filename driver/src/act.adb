@@ -2358,7 +2358,10 @@ package body Act is
                         P.Tu := Z.Cu; P.Tv := Z.Cv; P.Tz := Z.Depth; P.Wz := (if Picture.Is_Nan (Z.Depth) then 0.0 else 1.0);
                         P.Tsize := Sqrt (Long_Float'Max (0.0, (Long_Float (Z.X1 - Z.X0) / Long_Float (Cw)) * (Long_Float (Z.Y1 - Z.Y0) / Long_Float (Ch))));
                         P.Tang := 2.0 * Arctan (Z.Av, Z.Au);
-                        P.Wsize := 1.0;
+                        --  ⚠️ "看着多大"这一项【实测不稳,先关掉】(2026-09-08):框随切块忽大忽小,一项就把目标和进度全带偏,
+                        --  每一步都是它在变坏;今天唯一真的靠近过的那一炮(32 cm → 16 cm)恰恰没有这一项。
+                        --  机制(五行的表)留着,等切块稳了再开。
+                        P.Wsize := 0.0;
                         --  朝向的分量 = 这块有多长条(圆的为零)
                         P.Wang := Long_Float'Max (0.0, 1.0 - 1.0 / Long_Float'Max (1.0, O.Elong));
                         P.Desc := S ("item " & Codec.Img (Say.Grip_On) & " to sit where my fingers close (same place, same distance, same apparent size, same lie)");
