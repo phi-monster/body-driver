@@ -908,7 +908,8 @@ package body Act is
                      Deliv, Back : Table.Vec;
                      Ok2 : Boolean;
                      Frames : Natural;
-                     Seen_Enough : Boolean := True;
+                     Seen_Enough : Boolean := False;   --  🔴 只要【有一个】被跟的点真的动过,这一列就量到了
+                     N_Moved : Natural := 0;
                      Ran_Max : Long_Float := 0.0;
                   begin
                      A (K) := Amp;
@@ -942,15 +943,20 @@ package body Act is
                                              then Wrap (P.Ang - W0.Ang) / Deliv (K) else 0.0);
                                  Table.Set_Col (Effs (I), K, Col);
                               end;
-                           else
-                              Seen_Enough := False;
+                              Seen_Enough := True;
+                              N_Moved := N_Moved + 1;
                            end if;
+                           --  🔴 没动过的点这一列【留零】,而留零本身就是一次正确的测量("这个通道不动它"),
+                           --  归一时它自动不参与。以前是"任一个点没动 ⇒ 整条通道作废",于是两指里被挡住一根
+                           --  就把一整个自由度扔掉:FQ 实测 6 个通道扔掉 5 个,只剩 1 个还想管三个方向,
+                           --  于是"还差几步"算出 5528 步、手来回摆。同一条教训 LAB 里记过一次(丢点要按【全部】判)。
                            Pts.Replace_Element (I, P);
                         end;
                      end loop;
                      if Seen_Enough then
                         Trust (K) := True;
-                        Put_Line ("[身]     通道" & Natural'Image (Chn) & ":命令 " & Codec.Fmt (Amp, 4) & " 实到 " & Codec.Fmt (Deliv (K), 4) & " ⇒ 点跑了 " &
+                        Put_Line ("[身]     通道" & Natural'Image (Chn) & ":命令 " & Codec.Fmt (Amp, 4) & " 实到 " & Codec.Fmt (Deliv (K), 4) & " ⇒ " &
+                                  Natural'Image (N_Moved) & "/" & Natural'Image (Natural (Pts.Length)) & " 个点动了,最多的跑了 " &
                                   Codec.Fmt (Ran_Max, 4) & " 画幅,深度变 " & Codec.Fmt ((if Pts (0).Z > 0.0 and then Was (0).Z > 0.0 then Pts (0).Z - Was (0).Z else 0.0), 4));
                      end if;
                      declare
@@ -973,7 +979,7 @@ package body Act is
                      end;
                      exit when Trust (K);
                      if Amp * 2.0 > Cap_Amp then
-                        Put_Line ("[身]     通道" & Natural'Image (Chn) & ":到 " & Codec.Fmt (Amp, 4) & " 点还没动过地板(跑 " & Codec.Fmt (Ran_Max, 4) & " 画幅,地板 " & Codec.Fmt (Floor_Px, 4) & ")⇒ 这一段不用它");
+                        Put_Line ("[身]     通道" & Natural'Image (Chn) & ":到 " & Codec.Fmt (Amp, 4) & " 一个点也没动过地板(最多的跑了 " & Codec.Fmt (Ran_Max, 4) & " 画幅,地板 " & Codec.Fmt (Floor_Px, 4) & ")⇒ 这一段不用它");
                         exit;
                      end if;
                      Amp := Amp * 2.0;
