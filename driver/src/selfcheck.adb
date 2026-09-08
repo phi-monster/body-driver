@@ -147,9 +147,9 @@ begin
       Ok : Boolean;
    begin
       Table.Reset (E, 2, 1.0);
-      Table.Set_Col (E, 0, [0.5, 0.0, 0.0]);
-      Table.Set_Col (E, 1, [0.0, 0.25, 0.0]);
-      T.E := E; T.Err := [0.1, 0.05, 0.0]; T.W := [1.0, 1.0, 0.0];
+      Table.Set_Col (E, 0, [0.5, 0.0, 0.0, 0.0, 0.0]);
+      Table.Set_Col (E, 1, [0.0, 0.25, 0.0, 0.0, 0.0]);
+      T.E := E; T.Err := [0.1, 0.05, 0.0, 0.0, 0.0]; T.W := [1.0, 1.0, 0.0, 0.0, 0.0];
       Terms.Append (T);
       Cap (0) := 1.0; Cap (1) := 1.0; Act (0) := True; Act (1) := True;
       Table.Solve (Terms, 2, Cap, Act, [others => 1.0e-9], A, Ok);
@@ -164,7 +164,7 @@ begin
             Cmd : Table.Vec := Table.Zero_Vec;
          begin
             Cmd (0) := 0.01 * Long_Float (K);
-            Table.Update (E, Cmd, [Cmd (0) * 1.0, 0.0, 0.0], 0.0, 0.0);
+            Table.Update (E, Cmd, [Cmd (0) * 1.0, 0.0, 0.0, 0.0, 0.0], 0.0, 0.0);
          end;
       end loop;
       Check (abs (Table.Col (E, 0) (0) - 1.0) < 0.05, "递推最小二乘学到 B=" & Codec.Fmt (Table.Col (E, 0) (0), 3));
@@ -174,7 +174,7 @@ begin
             Cmd : Table.Vec := Table.Zero_Vec;
          begin
             Cmd (0) := 0.05;
-            Table.Update (E, Cmd, [0.0, 0.0, 0.0], 0.001, 0.0);
+            Table.Update (E, Cmd, [0.0, 0.0, 0.0, 0.0, 0.0], 0.001, 0.0);
          end;
       end loop;
       Check (Table.Blocked (E), "顶住 = 零表连着两步更准");
@@ -252,6 +252,33 @@ begin
       Check (abs (Z.Span - 40.0 / 64.0) < 0.06, "握区:张幅 " & Codec.Fmt (Z.Span, 3) & "(该 ≈ 0.625)");
       Check (abs (Z.Depth - 0.2) < 1.0e-6, "握区:手指深 " & Codec.Fmt (Z.Depth, 3));
       Check (Z.X0 >= 10 and then Z.X1 <= 53, "握区:区框在两瓣之间 " & Codec.Img (Z.X0) & ".." & Codec.Img (Z.X1));
+   end;
+   --  五行的表:只有"往前走"能改大小、只有"转腕"能改朝向 ⇒ 要它变大且转正时,两个通道各自被用上
+   declare
+      E : Table.Effect;
+      T : Table.Term;
+      Terms : Table.Term_Vectors.Vector;
+      Cap : Table.Vec := [others => 1.0];
+      Act : Table.Mask := [others => False];
+      A : Table.Vec;
+      Ok : Boolean;
+   begin
+      Table.Reset (E, 2, 1.0);
+      Table.Set_Col (E, 0, [0.0, 0.0, -1.0, 0.5, 0.0]);   --  通道 0:往前走 ⇒ 更近、看着更大
+      Table.Set_Col (E, 1, [0.0, 0.0, 0.0, 0.0, 1.0]);    --  通道 1:转腕 ⇒ 只改朝向
+      T.E := E;
+      T.Err := [0.0, 0.0, -0.10, 0.05, 0.20];
+      T.W := [1.0, 1.0, 1.0, 1.0, 1.0];
+      Terms.Append (T);
+      Act (0) := True; Act (1) := True;
+      Table.Solve (Terms, 2, Cap, Act, [others => 1.0e-9], A, Ok);
+      Check (Ok and then A (0) > 0.05 and then abs (A (1) - 0.20) < 1.0e-3,
+             "五行表:往前走 " & Codec.Fmt (A (0), 3) & " · 转腕 " & Codec.Fmt (A (1), 3) & "(转腕该正好补上朝向)");
+      --  圆的东西:朝向那一列全零 ⇒ 朝向的差再大也不会让它去转
+      Table.Set_Col (E, 1, [0.0, 0.0, 0.0, 0.0, 0.0]);
+      Terms.Clear; T.E := E; T.Err := [0.0, 0.0, 0.0, 0.0, 2.0]; Terms.Append (T);
+      Table.Solve (Terms, 2, Cap, Act, [others => 1.0e-9], A, Ok);
+      Check (Ok and then abs (A (0)) < 1.0e-6 and then abs (A (1)) < 1.0e-6, "五行表:改不动的那一行不会让它乱动");
    end;
    --  连通块按大小排序:先扫到的小碎点不许排在大块前面(EL:4x4 碎点被当成一根手指)
    declare

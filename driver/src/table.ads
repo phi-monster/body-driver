@@ -1,4 +1,7 @@
---  通道响应表(效能矩阵):每个通道动一点,某个被跟踪的点在画面里 (u,v,深) 变多少。
+--  通道响应表(效能矩阵):每个通道动一点,某个被跟踪的【那一块】在画面里五样各变多少:
+--  左右 u · 上下 v · 远近(深度)· 看起来多大(块的边长 = √像素数)· 朝向(主轴角的两倍,避开正负两种写法)。
+--  后两样是"区域和区域重合"要的:大小告诉远近(离得越近看着越大,比深度读数稳得多),朝向告诉转多少。
+--  对圆的东西朝向本来就没有意义 ⇒ 那一行谁也改不动 ⇒ 自动不参与(不需要写规则)。
 --  在线递推最小二乘(带遗忘)重估;两套模型的责任:空着走的表 vs "顶住了"的零表,谁预测准信谁 ⇒ 碰上/推不动从这里长出来。
 --  解算:带上下限的加权最小二乘分配(飞控的控制分配),没有减半/放大/禁用这类规则。
 with Ada.Containers.Vectors;
@@ -6,8 +9,9 @@ package Table is
    Max_Ch : constant := 64;
    subtype Ch_Index is Natural range 0 .. Max_Ch - 1;
    type Vec is array (Ch_Index) of Long_Float;
-   type Vec3 is array (0 .. 2) of Long_Float;
-   type Mat3 is array (Ch_Index, 0 .. 2) of Long_Float;
+   Rows : constant := 5;    --  一块东西在画面里被量的五样(次数,无量纲)
+   type Vec3 is array (0 .. Rows - 1) of Long_Float;
+   type Mat3 is array (Ch_Index, 0 .. Rows - 1) of Long_Float;
    type Cov is array (Ch_Index, Ch_Index) of Long_Float;
    type Mask is array (Ch_Index) of Boolean;
    Zero_Vec : constant Vec := [others => 0.0];

@@ -32,7 +32,7 @@ package body Table is
    procedure Set_Col (E : in out Effect; Ch : Natural; D : Vec3) is
    begin
       if Ch < E.N then
-         for R in 0 .. 2 loop
+         for R in 0 .. Rows - 1 loop
             E.B (Ch, R) := D (R);
          end loop;
       end if;
@@ -42,7 +42,7 @@ package body Table is
       V : Vec3 := Zero3;
    begin
       if Ch < E.N then
-         for R in 0 .. 2 loop
+         for R in 0 .. Rows - 1 loop
             V (R) := E.B (Ch, R);
          end loop;
       end if;
@@ -52,7 +52,7 @@ package body Table is
    function Predict (E : Effect; A : Vec) return Vec3 is
       V : Vec3 := Zero3;
    begin
-      for R in 0 .. 2 loop
+      for R in 0 .. Rows - 1 loop
          for I in 0 .. E.N - 1 loop
             V (R) := V (R) + E.B (I, R) * A (I);
          end loop;
@@ -67,7 +67,7 @@ package body Table is
       Denom : Long_Float := E.Lambda;
       K : Vec := Zero_Vec;
    begin
-      for R in 0 .. 2 loop
+      for R in 0 .. Rows - 1 loop
          Err (R) := Dy (R) - Pred (R);
       end loop;
       E.Free_Res := Norm3 (Err);
@@ -96,7 +96,7 @@ package body Table is
          K (I) := Pa (I) / Denom;
       end loop;
       for I in 0 .. E.N - 1 loop
-         for R in 0 .. 2 loop
+         for R in 0 .. Rows - 1 loop
             E.B (I, R) := E.B (I, R) + K (I) * Err (R);
          end loop;
       end loop;
@@ -144,7 +144,7 @@ package body Table is
          return;
       end if;
       for T of Terms loop
-         for R in 0 .. 2 loop
+         for R in 0 .. Rows - 1 loop
             if T.W (R) > 0.0 then
                for I in 0 .. Nn - 1 loop
                   declare

@@ -130,7 +130,7 @@ package body Bodyfile is
             Append (B, (if I > 0 then "," else "") & "{""arm"":" & Codec.Img (T.Arm) & ",""cam"":" & Codec.Img (T.Cam) & ",""kind"":" & Codec.Img (Act.Track_Kind'Pos (T.Kind)) &
                     ",""chan"":" & Codec.Img (T.Chan_K) & ",""blob"":" & Codec.Img (T.Blob) & ",""n"":" & Codec.Img (T.E.N) & ",""b"":[");
             for K in 0 .. T.E.N - 1 loop
-               for R in 0 .. 2 loop
+               for R in 0 .. Table.Rows - 1 loop
                   Append (B, (if K + R > 0 then "," else "") & Codec.Fmt (T.E.B (K, R), 6));
                end loop;
             end loop;
@@ -392,8 +392,15 @@ package body Bodyfile is
                   end;
                   Table.Reset (T.E, N, 1.0);
                   for K in 0 .. N - 1 loop
-                     if 3 * K + 2 < Natural (Bv.Length) then
-                        Table.Set_Col (T.E, K, [Bv (3 * K), Bv (3 * K + 1), Bv (3 * K + 2)]);
+                     if Table.Rows * K + Table.Rows - 1 < Natural (Bv.Length) then
+                        declare
+                           Cl : Table.Vec3;
+                        begin
+                           for R in 0 .. Table.Rows - 1 loop
+                              Cl (R) := Bv (Table.Rows * K + R);
+                           end loop;
+                           Table.Set_Col (T.E, K, Cl);
+                        end;
                      end if;
                      T.Trust (K) := K < Natural (Tv.Length) and then Tv (K) > 0.5;
                   end loop;
