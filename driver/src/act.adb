@@ -1033,7 +1033,12 @@ package body Act is
                      end if;
                      declare
                         Before2 : constant Buf := F.Cams (Cam).Gray;
+                        Z_Out : array (0 .. Natural'Max (0, Natural (Pts.Length) - 1)) of Long_Float :=
+                          [others => -1.0];
                      begin
+                        for I in 0 .. Natural (Pts.Length) - 1 loop
+                           Z_Out (I) := Pts (I).Z;      --  推出去之后读到的远近
+                        end loop;
                         Selfmap.Go (L, C.Map, Arm, P0, Jaw, F, Back, Frames, Ok2);
                         if not Ok2 then
                            Ok := False;
@@ -1042,8 +1047,29 @@ package body Act is
                         for I in 0 .. Natural (Pts.Length) - 1 loop
                            declare
                               P : Point := Pts (I);
+                              Zb : Long_Float;
                            begin
                               Retrack (C, F, Cam, Before2, P, Was (I).Cu, Was (I).Cv, True);
+                              Zb := P.Z;               --  推回起点之后又读一次
+                              --  🔴 远近这一列必须【来回都对得上】才算量到:推出去改了多少、推回来就该改回多少。
+                              --  一次抖动就能把这一列写成真实值的几十倍 —— 实测(GN):表说"推一下改 16 cm",
+                              --  实际一步只改几毫米,于是身体永远以为"再一两步就到",只迈一小步,永远压不进去。
+                              --  对不上就把这一格留零(留零 = 归一时这一行自动不参与),而不是写一个假的大数。
+                              if Was (I).Z > 0.0 and then Z_Out (I) > 0.0 and then Zb > 0.0 then
+                                 declare
+                                    D_Out : constant Long_Float := Z_Out (I) - Was (I).Z;
+                                    D_Back : constant Long_Float := Zb - Z_Out (I);
+                                 begin
+                                    if abs (D_Out + D_Back) > 0.5 * abs D_Out then
+                                       declare
+                                          Col : Table.Vec3 := Table.Col (Effs (I), K);
+                                       begin
+                                          Col (2) := 0.0;
+                                          Table.Set_Col (Effs (I), K, Col);
+                                       end;
+                                    end if;
+                                 end;
+                              end if;
                               P.Cu := Was (I).Cu; P.Cv := Was (I).Cv; P.Z := Was (I).Z;   --  推回起点了:点回到原处(比光流往返的累积误差可信)
                               Pts.Replace_Element (I, P);
                            end;
