@@ -967,7 +967,11 @@ package body Act is
          declare
             Chn : constant Natural := Arm * Chan.Per_Arm + K;
             Amp : Long_Float := C.Map.Amp (Chn);
-            Cap_Amp : constant Long_Float := C.Map.Amp (Chn) * Cap_Mult;
+            --  🔴 探针能推多大:一路翻倍,直到【点在画面里跑满一个跟踪窗】—— 眼睛还跟得住的最大一下。
+            --  以前卡死在"开机那一档的 2 倍",只能翻一次,于是"看着多大"这一行永远变化不过它自己的地板,
+            --  那一列永远是零(GR 实测),而深度读数又不重复 ⇒ 身体手里没有任何能用的"我在靠近吗"。
+            --  最多翻四次(次数,无量纲)兜底,免得某个通道怎么推画面都不动时一直翻下去。
+            Cap_Amp : constant Long_Float := C.Map.Amp (Chn) * 16.0;
          begin
             if not C.Map.Seen (Chn) or else Amp <= 0.0 then
                Put_Line ("[身]     通道" & Natural'Image (Chn) & " 开机时没看见它动,这一列留零");
@@ -982,6 +986,7 @@ package body Act is
                      Frames : Natural;
                      Seen_Enough : Boolean := False;   --  🔴 只要【有一个】被跟的点真的动过,这一列就量到了
                      N_Moved : Natural := 0;
+                     Size_Seen : Boolean := False;     --  这一下推得够不够大,让"看着多大"那一行也量到了
                      Ran_Max : Long_Float := 0.0;
                   begin
                      A (K) := Amp;
@@ -1009,8 +1014,12 @@ package body Act is
                                  Col (2) := (if P.Z > 0.0 and then W0.Z > 0.0 then (P.Z - W0.Z) / Deliv (K) else 0.0);
                                  --  推一下这块看着变大变小多少、转了多少(圆的东西转不出来 ⇒ 这一列恒零 ⇒ 自动不参与)
                                  --  只有变化过了自己的噪声地板才敢写进表,否则这一格留零(留零 = 归一时这一行自动不参与)
-                                 Col (3) := (if P.Size > 0.0 and then W0.Size > 0.0 and then abs (P.Size - W0.Size) > Floor_S (I)
-                                             then (P.Size - W0.Size) / Deliv (K) else 0.0);
+                                 if P.Size > 0.0 and then W0.Size > 0.0 and then abs (P.Size - W0.Size) > Floor_S (I) then
+                                    Col (3) := (P.Size - W0.Size) / Deliv (K);
+                                    Size_Seen := True;
+                                 else
+                                    Col (3) := 0.0;
+                                 end if;
                                  Col (4) := (if P.Size > 0.0 and then W0.Size > 0.0 and then abs (Wrap (P.Ang - W0.Ang)) > Floor_A (I)
                                              then Wrap (P.Ang - W0.Ang) / Deliv (K) else 0.0);
                                  Table.Set_Col (Effs (I), K, Col);
@@ -1075,7 +1084,12 @@ package body Act is
                            end;
                         end loop;
                      end;
-                     exit when Trust (K);
+                     --  🔴 推到"大小也真的变过它自己的地板"为止,不只是"点动过"。
+                     --  GR 实测:探针那一下太小,球在画面里的大小变化没过地板 ⇒ 那一列永远是零 ⇒
+                     --  "看着多大"这条最稳的远近信号根本没被量到,而深度读数又不重复 ⇒
+                     --  身体手里一个能用的"我在靠近吗"都没有,压不进去一整晚。
+                     --  和"推到点真的动过"是同一条规矩,只是这次盯的是大小那一行;仍然被幅度上限兜着。
+                     exit when Trust (K) and then (Size_Seen or else Ran_Max >= Track_Win or else Amp * 2.0 > Cap_Amp);
                      if Amp * 2.0 > Cap_Amp then
                         Put_Line ("[身]     通道" & Natural'Image (Chn) & ":到 " & Codec.Fmt (Amp, 4) & " 一个点也没动过地板(最多的跑了 " & Codec.Fmt (Ran_Max, 4) & " 画幅,地板 " & Codec.Fmt (Floor_Px, 4) & ")⇒ 这一段不用它");
                         exit;
