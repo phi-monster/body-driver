@@ -722,6 +722,10 @@ package body Act is
       Ch : constant Natural := F.Cams (Cam).H;
    begin
       P.Lost := False;
+      --  🔴 出了画面的点没有意义:它的位置是编出来的,而解算会一本正经地朝它收敛。
+      --  实测(GK):被跟的点跑到 (0.63,1.11) 和 (0.85,1.48)(竖直超过 1 = 画面下沿以外),
+      --  身体报"差 0.8 步就到了",而真正的球在画面左边好好待着,手一路往外走。
+      --  删掉"不许推出画面"那道闸之后,这个洞就没人堵了 ⇒ 在这里堵:夹回画面里,并记成跟丢。
       case P.Kind is
          when Piece_Pt =>
             if Cam_Arm (C, Cam) = Integer (P.Arm) then
@@ -866,6 +870,12 @@ package body Act is
                end if;
             end;
       end case;
+      --  统一收口:任何路径算出来的位置都不许留在画面外(见上面的说明)
+      if P.Cu < 0.0 or else P.Cu > 1.0 or else P.Cv < 0.0 or else P.Cv > 1.0 then
+         P.Cu := Long_Float'Max (0.0, Long_Float'Min (1.0, P.Cu));
+         P.Cv := Long_Float'Max (0.0, Long_Float'Min (1.0, P.Cv));
+         P.Lost := True;
+      end if;
    end Retrack;
 
    --  发一步并等稳;返回实到(通道)
