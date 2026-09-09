@@ -1495,8 +1495,12 @@ package body Act is
                      --  地图说了不算就把这一步咬小一口,准了也不许超过脑要的那一档。
                      --  老版是"只会减速、没有底线"⇒ 一路减到零卡死(那才是 bug);
                      --  新版有底线(Am,自己量到的推得动的最小量),所以减得下去、踩不死。
+                     --  🔴 下限改成【身体自己的噪声的两倍】,不是"探针那一档"。
+                     --  实测:FO 每一步的命令是 0.006 = 探针那一档的四分之一,照样一步推进 8 厘米、44 推抓到球;
+                     --  我把下限设成整整一档 ⇒ 今晚每一步是 FO 的 4 倍(0.026),表当场不准、球被甩出视野。
+                     --  真正要挡的是"命令小到身体根本不动"(本体噪声那一档),不是"比探针小"。
                      Note.Cap (K) := Long_Float'Max
-                       (Am, Am * Cap_Mult * Amount * Long_Float'Min (1.0, Reach (K)))
+                       (2.0 * C.Map.EE_Noise, Am * Cap_Mult * Amount * Long_Float'Min (1.0, Reach (K)))
                        + 0.0 * (if Known_All then 1.0 else 0.0);
                   end;
                   Note.Floor_Cmd := (if Note.Floor_Cmd <= 0.0 then Am else Long_Float'Min (Note.Floor_Cmd, Am));
