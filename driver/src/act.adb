@@ -1175,11 +1175,14 @@ package body Act is
                   Hw : constant Long_Float := Long_Float'Max (P.Box_W, Track_Win) * 0.5;   --  框(没有就用一个跟踪窗;比例,无量纲)
                   Hh : constant Long_Float := Long_Float'Max (P.Box_H, Track_Win) * 0.5;
                begin
+                  --  🔴 删掉"不许推出画面"那道闸之后,被跟的点会真的跑出画面(实测 v = -0.056),
+                  --  两个角都要先夹回画面里再取整,否则画框这一步 Natural(负数) 直接把整个驱动崩掉
+                  --  (GC 实测:act.adb:1182 range check failed,rc=1,一炮当场死)
                   Draw.Numbered_Box (RGB, Cw, Ch,
-                                     Natural (Long_Float'Max (0.0, (P.Cu - Hw) * Long_Float (Cw))),
-                                     Natural (Long_Float'Max (0.0, (P.Cv - Hh) * Long_Float (Ch))),
-                                     Natural (Long_Float'Min (Long_Float (Cw - 1), (P.Cu + Hw) * Long_Float (Cw))),
-                                     Natural (Long_Float'Min (Long_Float (Ch - 1), (P.Cv + Hh) * Long_Float (Ch))),
+                                     Natural (Long_Float'Max (0.0, Long_Float'Min (Long_Float (Cw - 1), (P.Cu - Hw) * Long_Float (Cw)))),
+                                     Natural (Long_Float'Max (0.0, Long_Float'Min (Long_Float (Ch - 1), (P.Cv - Hh) * Long_Float (Ch)))),
+                                     Natural (Long_Float'Max (0.0, Long_Float'Min (Long_Float (Cw - 1), (P.Cu + Hw) * Long_Float (Cw)))),
+                                     Natural (Long_Float'Max (0.0, Long_Float'Min (Long_Float (Ch - 1), (P.Cv + Hh) * Long_Float (Ch)))),
                                      0, Draw.Pink, 2);
                end;
             end loop;
@@ -2182,8 +2185,8 @@ package body Act is
                end if;
             elsif P.Kind = Piece_Pt and then not P.Lost and then P.Chan_K < Chan.Per_Arm then
                X.Parts (P.Chan_K) := (True, P.Cu, P.Cv, P.Z,
-                                      Natural (Long_Float'Max (0.0, (P.Cu - P.Box_W / 2.0) * Long_Float (Cw))), Natural (Long_Float'Max (0.0, (P.Cv - P.Box_H / 2.0) * Long_Float (Ch))),
-                                      Natural (Long_Float'Min (Long_Float (Cw - 1), (P.Cu + P.Box_W / 2.0) * Long_Float (Cw))), Natural (Long_Float'Min (Long_Float (Ch - 1), (P.Cv + P.Box_H / 2.0) * Long_Float (Ch))),
+                                      Natural (Long_Float'Max (0.0, Long_Float'Min (Long_Float (Cw - 1), (P.Cu - P.Box_W / 2.0) * Long_Float (Cw)))), Natural (Long_Float'Max (0.0, Long_Float'Min (Long_Float (Ch - 1), (P.Cv - P.Box_H / 2.0) * Long_Float (Ch)))),
+                                      Natural (Long_Float'Max (0.0, Long_Float'Min (Long_Float (Cw - 1), (P.Cu + P.Box_W / 2.0) * Long_Float (Cw)))), Natural (Long_Float'Max (0.0, Long_Float'Min (Long_Float (Ch - 1), (P.Cv + P.Box_H / 2.0) * Long_Float (Ch)))),
                                       1, P.Cu, P.Cv, 0.0, 0.0);
                Any_Part := True;
             end if;
