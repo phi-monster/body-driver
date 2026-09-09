@@ -50,6 +50,11 @@ package Picture is
    --  两块【挨着没有】:画面上的框贴住(留一条缝的宽容),且顶面的远近对得上(不是一前一后错开)。
    --  这是"动作词表"的唯一原始事实:谁和谁挨着,以及这个关系什么时候变。不需要知道它们是什么东西。
    function Adjacent (A, B : Region; W, H : Natural; Gap : Long_Float) return Boolean;
+   --  画面里最大的那个平面(深度随画面位置线性变化的那一片):Z ≈ Ca * U + Cb * V + Cc。
+   --  这是"东西站在什么上面"的量法,不是"世界上有张桌子"的假设 —— 拟合不出来就 Ok = False,
+   --  那两个方向词当场不可用。⚠️ 相机恰好【贴着那个面看过去】时,深度几乎不随位置变,拟合会很差,
+   --  这时也返回 Ok = False。
+   procedure Fit_Plane (Depth : Floats; W, H : Natural; Ca, Cb, Cc : out Long_Float; Ok : out Boolean);
    function Is_Nan (X : Long_Float) return Boolean;
    --  一堆数分成两拨(Otsu):返回分界;分不开(单峰)返回 NaN
    function Split (F : Floats) return Long_Float;

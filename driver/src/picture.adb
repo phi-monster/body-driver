@@ -734,6 +734,49 @@ package body Picture is
       return Best_T;
    end Split;
 
+   procedure Fit_Plane (Depth : Floats; W, H : Natural; Ca, Cb, Cc : out Long_Float; Ok : out Boolean) is
+      --  最小二乘拟合 Z = Ca*U + Cb*V + Cc,U/V 是归一化画幅(比例,无量纲)。每隔若干像素取一个样(次数)
+      Suu, Suv, Svv, Su, Sv, Sn : Long_Float := 0.0;
+      Suz, Svz, Sz : Long_Float := 0.0;
+      Step : constant Natural := Natural'Max (1, W / 64);
+   begin
+      Ca := 0.0; Cb := 0.0; Cc := 0.0; Ok := False;
+      for Y in 0 .. H - 1 loop
+         if Y mod Step = 0 then
+            for X in 0 .. W - 1 loop
+               if X mod Step = 0 then
+                  declare
+                     Z : constant Long_Float := Depth.Element (Y * W + X);
+                     U : constant Long_Float := Long_Float (X) / Long_Float (W);
+                     V : constant Long_Float := Long_Float (Y) / Long_Float (H);
+                  begin
+                     if not Is_Nan (Z) and then Z > 1.0e-6 then
+                        Suu := Suu + U * U; Suv := Suv + U * V; Svv := Svv + V * V;
+                        Su := Su + U; Sv := Sv + V; Sn := Sn + 1.0;
+                        Suz := Suz + U * Z; Svz := Svz + V * Z; Sz := Sz + Z;
+                     end if;
+                  end;
+               end if;
+            end loop;
+         end if;
+      end loop;
+      if Sn < 32.0 then      --  样本太少,拟合不出来(次数)
+         return;
+      end if;
+      declare
+         D : constant Long_Float :=
+           Suu * (Svv * Sn - Sv * Sv) - Suv * (Suv * Sn - Sv * Su) + Su * (Suv * Sv - Svv * Su);
+      begin
+         if abs D < 1.0e-12 then
+            return;
+         end if;
+         Ca := (Suz * (Svv * Sn - Sv * Sv) - Suv * (Svz * Sn - Sv * Sz) + Su * (Svz * Sv - Svv * Sz)) / D;
+         Cb := (Suu * (Svz * Sn - Sv * Sz) - Suz * (Suv * Sn - Sv * Su) + Su * (Suv * Sz - Svz * Su)) / D;
+         Cc := (Suu * (Svv * Sz - Svz * Sv) - Suv * (Suv * Sz - Svz * Su) + Suz * (Suv * Sv - Svv * Su)) / D;
+         Ok := True;
+      end;
+   end Fit_Plane;
+
    function Adjacent (A, B : Region; W, H : Natural; Gap : Long_Float) return Boolean is
       Gx : constant Long_Float := Gap * Long_Float (W);
       Gy : constant Long_Float := Gap * Long_Float (H);

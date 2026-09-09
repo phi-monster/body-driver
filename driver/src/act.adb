@@ -2632,6 +2632,37 @@ package body Act is
                                           P.Tz := (if Rl = "front" then O.Depth - Sz else O.Depth + Sz);
                                           P.Wz := (if O.Depth > 0.0 and then P.Z > 0.0 then 1.0 else 0.0);
                                        end;
+                                    elsif Rl = "down" or else Rl = "up" then
+                                       --  🔴 "朝地面 / 离开地面" = 朝它站着的那个【量出来的面】。
+                                       --  做法:在这张深度画面里拟合出最大的那个平面,算出这一点比那个面高出多少,
+                                       --  然后把远近朝那个面推一截。面拟合不出来(或相机恰好贴着那个面看)就当没有这个词。
+                                       --  这不是"世界上有张桌子"的假设:量得到就用,量不到就说没有。
+                                       declare
+                                          Ca, Cb, Cc : Long_Float;
+                                          Plane_Ok : Boolean;
+                                          Step : constant Long_Float := Long_Float'Max (O.Height, Long_Float'Max (P.Height, Ow * O.Depth));
+                                       begin
+                                          if F.Cams (Cam).Has_Depth then
+                                             Picture.Fit_Plane (F.Cams (Cam).Depth, Cw, Ch, Ca, Cb, Cc, Plane_Ok);
+                                          else
+                                             Plane_Ok := False;
+                                          end if;
+                                          if not Plane_Ok or else P.Z <= 0.0 then
+                                             Report := Report & "I cannot tell which way is toward the surface here, so I did not use that word. ";
+                                             Ok_Pt := False;
+                                          else
+                                             declare
+                                                Face : constant Long_Float := Ca * P.Cu + Cb * P.Cv + Cc;   --  这一点正下方那个面有多远
+                                                Gap : constant Long_Float := Face - P.Z;                    --  比那个面高出多少(同一张画面同一把尺子)
+                                             begin
+                                                P.Tu := P.Cu; P.Tv := P.Cv;
+                                                P.Tz := (if Rl = "down"
+                                                         then P.Z + Long_Float'Min (Step, Long_Float'Max (0.0, Gap))
+                                                         else P.Z - Step);
+                                                P.Wz := 1.0;
+                                             end;
+                                          end if;
+                                       end;
                                     elsif Rl = "away" then
                                        declare
                                           Du : constant Long_Float := P.Cu - O.Cu;

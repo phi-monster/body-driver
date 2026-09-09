@@ -167,6 +167,31 @@ begin
       R := Picture.Cut (Dep, W, H, 0.125, 3.0, Keep_Edge => True);
       Check (Natural (R.Length) = 1, "贴边:放宽之后它留下了(" & Natural'Image (Natural (R.Length)) & " 块)");
    end;
+   --  量出"东西站在什么面上":斜着的一片深度,拟合出来的面要和真值对上;全 NaN 时要说拟合不出来
+   declare
+      W : constant := 96;
+      H : constant := 72;
+      Dep : Floats := Filled (W * H, 0.0);
+      Ca, Cb, Cc : Long_Float;
+      Ok : Boolean;
+   begin
+      for Y in 0 .. H - 1 loop
+         for X in 0 .. W - 1 loop
+            Dep.Replace_Element (Y * W + X,
+              0.60 + 0.20 * (Long_Float (Y) / Long_Float (H)) + 0.05 * (Long_Float (X) / Long_Float (W)));
+         end loop;
+      end loop;
+      Picture.Fit_Plane (Dep, W, H, Ca, Cb, Cc, Ok);
+      Check (Ok, "站在什么上面:斜面拟合成功");
+      Check (abs (Ca - 0.05) < 0.01 and then abs (Cb - 0.20) < 0.01 and then abs (Cc - 0.60) < 0.01,
+             "站在什么上面:系数 " & Codec.Fmt (Ca, 3) & " " & Codec.Fmt (Cb, 3) & " " & Codec.Fmt (Cc, 3));
+      declare
+         Empty : Floats := Filled (W * H, 0.0);
+      begin
+         Picture.Fit_Plane (Empty, W, H, Ca, Cb, Cc, Ok);
+         Check (not Ok, "站在什么上面:一个读数都没有时明说拟合不出来");
+      end;
+   end;
    --  挨着没有:框贴住 + 远近对得上才算(动作词表唯一的原始事实)
    declare
       A, B, C2 : Picture.Region;

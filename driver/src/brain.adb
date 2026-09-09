@@ -52,7 +52,7 @@ package body Brain is
         "- say: one sentence in your own words: what you see and what you decide." & NL &
         "- see: target = the thing the task refers to is in THIS picture; not_here = it is not in this picture; unclear = you cannot tell. not_here and unclear are normal answers: nothing moves, and you may ask for another camera." & NL &
         "- look: 0 = keep answering about this camera; k = show me camera k next time (cameras are listed under YOUR BODY)." & NL &
-        "- moves: 0 to 4 entries. Each names WHICH NUMBERED ITEM moves and WHERE: a numbered CELL, or a RELATION to another numbered item (rel = at: touching it / above / below / left / right / front: nearer the camera / back: farther / away: farther from it than now, with of = that item's number). " &
+        "- moves: 0 to 4 entries. Each names WHICH NUMBERED ITEM moves and WHERE: a numbered CELL, or a RELATION to another numbered item (rel = at: touching it / above / below / left / right / front: nearer the camera / back: farther / away: farther from it than now / down: toward the surface things here are standing on / up: away from that surface, with of = that item's number). " &
         "amount = small / medium / large: how far to push this time, as a fraction of what the body measured it can reach. stay_put = true only for an item that must not move (then give it no cell and no rel). " &
         "The body solves all entries together and works out which channels to push from what it measured. An empty list = do not move. The grid lies flat over the picture: nearer/farther from the camera does not change the cell - say front/back for that." & NL &
         "- grip: close / open / none, with grip_arm = which arm (1.." & Codec.Img (N_Arms) & "), and grip_on = the numbered thing to close on (0 = just close or open where the fingers are). " &
@@ -69,7 +69,7 @@ package body Brain is
         """required"":[""item"",""cell"",""rel"",""of"",""amount"",""stay_put""],""properties"":{" &
         """item"":{""type"":""integer"",""minimum"":1,""maximum"":" & Codec.Img (Items) & "}," &
         """cell"":{""type"":""integer"",""minimum"":0,""maximum"":" & Codec.Img (Cells) & "}," &
-        """rel"":{""type"":""string"",""enum"":[""none"",""at"",""above"",""below"",""left"",""right"",""front"",""back"",""away""]}," &
+        """rel"":{""type"":""string"",""enum"":[""none"",""at"",""above"",""below"",""left"",""right"",""front"",""back"",""away"",""down"",""up""]}," &
         """of"":{""type"":""integer"",""minimum"":0,""maximum"":" & Codec.Img (Items) & "}," &
         """amount"":{""type"":""string"",""enum"":[""small"",""medium"",""large""]},""stay_put"":{""type"":""boolean""}}}}," &
         """grip"":{""type"":""string"",""enum"":[""none"",""close"",""open""]}," &
