@@ -185,10 +185,17 @@ package body Act is
                      Ate : Natural := 0;
                      Keep : Picture.Regions;
                      Touch : Boolean := False;
+                     Big_Swallow : Boolean := False;
                   begin
                      for Q of Raw loop
-                        if Picture.Inside (R, Q.Cu, Q.Cv, Cw, Ch, 0.0) then
-                           Ate := Ate + 1;          --  这个细块的中心在粗块里 ⇒ 它是粗块的一部分,丢掉
+                        --  🔴 只有"大小是一个量级"的才算同一个东西的粗细两版。粗块比某个细块大十倍以上
+                        --  (倍数,无量纲),它就是背景 —— 一条桌面长条 —— 不是那个东西的全貌,整块不要。
+                        --  实测(GH):球被一条横贯下沿的桌面长条吃掉,球不再是能点名的东西,整炮卡死。
+                        if Picture.Inside (R, Q.Cu, Q.Cv, Cw, Ch, 0.0) and then Q.Count * 10 < R.Count then
+                           Big_Swallow := True;
+                        end if;
+                        if Picture.Inside (R, Q.Cu, Q.Cv, Cw, Ch, 0.0) and then Q.Count * 10 >= R.Count then
+                           Ate := Ate + 1;          --  这个细块的中心在粗块里、大小同一量级 ⇒ 它是粗块的一部分,丢掉
                         else
                            Keep.Append (Q);
                            if R.X0 <= Q.X1 and then Q.X0 <= R.X1
@@ -198,7 +205,9 @@ package body Act is
                            end if;
                         end if;
                      end loop;
-                     if Ate > 0 then
+                     if Big_Swallow then
+                        null;                        --  背景,整块不要
+                     elsif Ate > 0 then
                         Raw := Keep;
                         Raw.Append (R);
                      elsif not Touch then
