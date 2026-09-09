@@ -311,6 +311,7 @@ package body Act is
                --  🔴 不给脑数字:大小/距离/高度这类数,大模型判得比人差远了,而"是哪一个/什么关系"它比专门
                --  训练的模型还强。数还会主动骗人(GB:身体报"还差 2.2 步",我据此提前合爪,合了个空)。
                --  只留"远/近"这种关系词和左右半幅。
+               --  只是把"几格远"翻成人话的三档,分界按【格数】说(比例,无量纲:占画面几分之几,与相机无关)
                return ", " & (if D > Long_Float (C.Cols) * 0.4 then "far from" elsif D > 1.5 then "near" else "right next to")
                       & " the thing you last named, in the " & Half & " half of the picture";
             end;
@@ -2410,6 +2411,7 @@ package body Act is
       declare
          Sc : constant String :=
            (if not Have_Score then "I could not tell whether it came with me"
+            --  打分本身就是两段位移的比值(比例,无量纲);这里只是把它翻成三句人话
             elsif Score > 0.8 then "it came with me almost exactly"
             elsif Score > 0.4 then "it came with me only partly - it is slipping"
             else "it did not come with me at all");
@@ -2968,6 +2970,7 @@ package body Act is
                      --  只说它现在在第几格,以及还差得远不远 —— 剩下的看画面。
                      Report := Report & "item " & Codec.Img (P.Item_No) & (if P.Blob = 0 then " (finger A)" else "") & " is now in cell " &
                                Codec.Img (Cell_Of (C, P.Cu, P.Cv)) & ", " &
+                               --  "还差几步"已经是无量纲的(每一样都除以"一步最多能改多少"),这里只翻成三句人话
                                (if P.Steps_Err > 10.0 then "still a long way from where you want it"
                                 elsif P.Steps_Err > 2.0 then "getting close to where you want it"
                                 else "about where you want it") & "; ";
