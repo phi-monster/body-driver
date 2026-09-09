@@ -1239,8 +1239,28 @@ package body Act is
                     (if P.Wz > 0.0 and then P.Z > 0.0 and then not Picture.Is_Nan (P.Tz) and then P.Tz > 0.0
                      then Long_Float'Min (1.0, P.Tz / P.Z) else 1.0);
                begin
-                  T.Err (0) := P.Tu - P.Cu;  T.W (0) := Near;
-                  T.Err (1) := P.Tv - P.Cv;  T.W (1) := Near;
+                  --  🔴🔴 两块东西一前一后时,【画面上重合 ≠ 真的在一起】。
+                  --  投影的规矩是:同一个真实横移,离相机越近在画面上跑得越多(跑的距离 ∝ 1/远近)。
+                  --  所以要对齐的不是 u,而是 u × 远近 —— 这样比出来的是真实的横向差,而镜头焦距在两边同样出现、
+                  --  自动约掉,一个标定参数都不需要。
+                  --  实测(FZ):头顶相机报"爪子离球只差 0.062 幅、几乎压上了",而切到手腕相机一看,
+                  --  球根本不在视野里 —— 爪子在球上方 30 cm,画面上却正好叠住。只比 u 就是在比影子。
+                  --  把目标【投影到我这一点自己的那个远近平面上】再比:同一个真实横移,离相机越近在画面上跑得越多,
+                  --  所以远处的目标 u 要按 远近之比 从画面中心往外放大,才是"我要走到的那个 u"。
+                  --  这样误差仍然是 u 的单位(表、预测、走多远的检查全部不变),但比的是真实位置而不是影子。
+                  if P.Z > 0.0 and then P.Tz > 0.0 then
+                     declare
+                        R : constant Long_Float := P.Tz / P.Z;
+                     begin
+                        T.Err (0) := (0.5 + (P.Tu - 0.5) * R) - P.Cu;
+                        T.Err (1) := (0.5 + (P.Tv - 0.5) * R) - P.Cv;
+                     end;
+                  else
+                     T.Err (0) := P.Tu - P.Cu;
+                     T.Err (1) := P.Tv - P.Cv;
+                  end if;
+                  T.W (0) := Near;
+                  T.W (1) := Near;
                end;
                --  远近:画面位置和远近一起要,不许替它定"先对准再靠近"的顺序(那等于叫它先扭脖子)
                if P.Wz > 0.0 and then P.Z > 0.0 and then not Picture.Is_Nan (P.Tz) then
