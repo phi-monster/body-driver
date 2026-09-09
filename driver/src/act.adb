@@ -1315,7 +1315,17 @@ package body Act is
                   if not Trusts (I) (K) then
                      All_Trust := False;
                   end if;
-                  Px := Long_Float'Max (Px, Sqrt (Effs (I).B (K, 0) ** 2 + Effs (I).B (K, 1) ** 2));
+                  --  🔴 "搅动画面多少"必须把【远近】也算进去,否则一个几乎不改变画面位置、却让手大幅前后
+                  --  移动的通道在账本上等于免费 ⇒ 拿到近乎无限的额度(FW/FX 实测:步幅长到 31 倍、
+                  --  单步命令 0.19,手冲过头再拉回来)。远近除以此刻的距离变成【相对变化】,
+                  --  和"跑了几分之一画幅"同一个量纲(比例,无量纲),可以直接一起算。
+                  --  这就是"转腕在账本上便宜十六倍"那个老坑的一般形式:便宜的方向会被买爆。
+                  declare
+                     Zr : constant Long_Float := (if Pts (I).Z > 0.0 then Pts (I).Z else 1.0);
+                  begin
+                     Px := Long_Float'Max (Px, Sqrt (Effs (I).B (K, 0) ** 2 + Effs (I).B (K, 1) ** 2
+                                                     + (Effs (I).B (K, 2) / Zr) ** 2));
+                  end;
                end loop;
                if C.Map.Seen (Ch_No) and then All_Trust then
                   Note.Active (K) := True;
