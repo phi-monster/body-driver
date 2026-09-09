@@ -308,7 +308,11 @@ package body Act is
             declare
                D : constant Long_Float := Sqrt (((U - Named_U) * Long_Float (C.Cols)) ** 2 + ((V - Named_V) * Long_Float (C.Rows)) ** 2);
             begin
-               return ", " & Codec.Fmt (D, 1) & " cells from the thing you last named, in the " & Half & " half of the picture";
+               --  🔴 不给脑数字:大小/距离/高度这类数,大模型判得比人差远了,而"是哪一个/什么关系"它比专门
+               --  训练的模型还强。数还会主动骗人(GB:身体报"还差 2.2 步",我据此提前合爪,合了个空)。
+               --  只留"远/近"这种关系词和左右半幅。
+               return ", " & (if D > Long_Float (C.Cols) * 0.4 then "far from" elsif D > 1.5 then "near" else "right next to")
+                      & " the thing you last named, in the " & Half & " half of the picture";
             end;
          end if;
          return ", in the " & Half & " half of the picture";
@@ -427,15 +431,14 @@ package body Act is
                It.X0 := Sl.R.X0; It.Y0 := Sl.R.Y0; It.X1 := Sl.R.X1; It.Y1 := Sl.R.Y1;
                It.Au := Sl.R.Au; It.Av := Sl.R.Av; It.Elong := Sl.R.Elong;
                It.Gray := Picture.Mean_Gray (F.Cams (Cam).Gray, Cw, Ch, Sl.R);
-               Push (It, "a thing, now in cell " & Codec.Img (Cell_Of (C, It.Cu, It.Cv)) & " (" & Codec.Img (It.Count) & " px, standing " &
-                     Codec.Fmt (It.Height, 3) & " out of the surface)" & Rel (It.Cu, It.Cv), Draw.Green, 2);
+               Push (It, "a thing, now in cell " & Codec.Img (Cell_Of (C, It.Cu, It.Cv)) & Rel (It.Cu, It.Cv), Draw.Green, 2);
             elsif Sl.Seen then
                It.Kind := Thing_Remembered; It.Located := True;
                It.Cu := Sl.Shadow.Cu; It.Cv := Sl.Shadow.Cv; It.Depth := Sl.Shadow.Depth; It.Height := Sl.Shadow.Height; It.Top := Sl.Shadow.Top; It.Count := Sl.Shadow.Count;
                It.X0 := Sl.Shadow.X0; It.Y0 := Sl.Shadow.Y0; It.X1 := Sl.Shadow.X1; It.Y1 := Sl.Shadow.Y1;
                It.Au := Sl.Shadow.Au; It.Av := Sl.Shadow.Av; It.Elong := Sl.Shadow.Elong;
                Push (It, "a thing you saw before, remembered where it was last seen, cell " & Codec.Img (Cell_Of (C, It.Cu, It.Cv)) &
-                     " (not visible right now - probably under my hand; " & Codec.Img (It.Count) & " px)", Draw.Dim_Green, 1);
+                     " (not visible right now - probably under my hand)", Draw.Dim_Green, 1);
             else
                It.Kind := Thing_Remembered;
                Push (It, "(a slot with nothing in it right now)", Draw.Dim_Green, 0);
@@ -2405,12 +2408,14 @@ package body Act is
       Held := Touch_Me;
       Sure := Could_Judge or else Touch_Me;
       declare
-         Sc : constant String := (if Have_Score then Codec.Fmt (Score, 2) else "unknown");
+         Sc : constant String :=
+           (if not Have_Score then "I could not tell whether it came with me"
+            elsif Score > 0.8 then "it came with me almost exactly"
+            elsif Score > 0.4 then "it came with me only partly - it is slipping"
+            else "it did not come with me at all");
       begin
          Note := S ("after a small lift: it is " & (if Touch_Me then "" else "NOT ") & "touching me; it is "
-                    & (if Off_Sup then "no longer" else "still") & " touching what it was standing on; it copied "
-                    & Sc & " of my hand's movement (1.00 = it came with me exactly, 0 = it did not move)")
-                 & Follow_Note;
+                    & (if Off_Sup then "no longer" else "still") & " touching what it was standing on; " & Sc);
       end;
       if World_Cam >= 0 then
          Append (Note, ". While I closed and lifted, " & Codec.Img (Moved_Others) & " other thing(s) I was not pushing moved");
@@ -2805,9 +2810,8 @@ package body Act is
                            begin
                               Caged := True;   --  同上:只报不拦
                               pragma Unreferenced (Depth_Ok, Size_Ok, Tol, Dp, Ds);
-                              Cage_Note := S ("cage check in this hand camera: it is " & Codec.Fmt (Dp, 3) & " of a frame from where my fingers close (allowed " &
-                                              Codec.Fmt (Tol, 3) & "), looks " & Codec.Fmt (Pin.Size / Long_Float'Max (1.0e-9, Pin.Tsize) * 100.0, 0) &
-                                              "% of the size it should, and its distance " & (if Depth_Ok then "matches" else "does not match") & " my fingertips");
+                              Cage_Note := S ("in my hand camera it is " & (if Dp <= Tol then "where my fingers close" else "NOT yet where my fingers close") &
+                                              ", and its distance " & (if Depth_Ok then "matches" else "does not match") & " my fingertips");
                            end;
                         elsif Found and then Pin.Kind = Piece_Pt then
                            declare
@@ -2822,9 +2826,8 @@ package body Act is
                            begin
                               Caged := True;   --  🔴 身体不许否决合爪:脑说合就合,判据只当【说明】报回去
                               pragma Unreferenced (Deep_Ok, Tol, Dist);
-                              Cage_Note := S ("cage check in this camera: my grip centre is " & Codec.Fmt (Dist, 3) & " of a frame from the thing (allowed " &
-                                              Codec.Fmt (Tol, 3) & "), and my fingers sit at " & Codec.Fmt (Pin.Z, 3) & " while the middle of the thing is at " &
-                                              Codec.Fmt (Want, 3) & " ⇒ " & (if Deep_Ok then "level with it" else "NOT level with it, I must go further before closing"));
+                              Cage_Note := S ("in this camera my grip is " & (if Dist <= Tol then "on the thing" else "NOT yet on the thing") &
+                                              ", and my fingers are " & (if Deep_Ok then "level with it" else "not level with it yet"));
                            end;
                         end if;
                      end;
@@ -2961,8 +2964,13 @@ package body Act is
                Put_Line ("[身]   这一段:" & Codec.Img (Steps_Taken) & " 推 · " & Codec.Img (Beats) & " 拍 · 这一集累计 " & Codec.Img (Plug.Steps (L)) & " 拍");
                for P of Pts loop
                   if P.Blob <= 0 then
-                     Report := Report & "item " & Codec.Img (P.Item_No) & (if P.Blob = 0 then " (finger A)" else "") & " now at (" & Codec.Fmt (P.Cu, 2) & "," & Codec.Fmt (P.Cv, 2) &
-                               ") depth " & Codec.Fmt (P.Z, 2) & ", still " & Codec.Fmt (P.Steps_Err, 1) & " pushes away; ";
+                     --  🔴 不给脑坐标/远近/"还差几步":那些数骗过我一次(GB:"还差 2.2 步"⇒ 我提前合爪合了个空)。
+                     --  只说它现在在第几格,以及还差得远不远 —— 剩下的看画面。
+                     Report := Report & "item " & Codec.Img (P.Item_No) & (if P.Blob = 0 then " (finger A)" else "") & " is now in cell " &
+                               Codec.Img (Cell_Of (C, P.Cu, P.Cv)) & ", " &
+                               (if P.Steps_Err > 10.0 then "still a long way from where you want it"
+                                elsif P.Steps_Err > 2.0 then "getting close to where you want it"
+                                else "about where you want it") & "; ";
                   end if;
                end loop;
             else
