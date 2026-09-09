@@ -164,10 +164,33 @@ package body Act is
          if Own then
             Raw := Picture.Cut (F.Cams (Cam).Depth, Cw, Ch, Base, Sigma_Mult, Keep_Edge => True);
          end if;
+         --  🔴 尺子不是选一把,是【每一把都看一遍,合起来】。
+         --  "鼓出来"是相对周围说的:窗口比这块东西小的时候,这块东西自己就是周围 ⇒ 它鼓 0、整个消失。
+         --  实测(GB):球贴到 5 cm 时占满画面中央,深度这一路一块也切不出它,而画面里别的东西还切得出来
+         --  ⇒ 旧的"一块都没有才换大尺子"根本不触发 ⇒ 最后一步反而瞎了。
+         --  合并规则:粗尺子切出来的块,只有当它的形心还没被任何已收的块盖住时才收(不重复列)。
          Win := Base;
-         while Raw.Is_Empty and then Win < 0.5 loop
+         while Win < 0.5 loop
             Win := Win * 2.0;
-            Raw := Picture.Cut (F.Cams (Cam).Depth, Cw, Ch, Long_Float'Min (0.5, Win), Sigma_Mult, Keep_Edge => Own);
+            declare
+               More : constant Picture.Regions :=
+                 Picture.Cut (F.Cams (Cam).Depth, Cw, Ch, Long_Float'Min (0.5, Win), Sigma_Mult, Keep_Edge => Own);
+            begin
+               for R of More loop
+                  declare
+                     Covered : Boolean := False;
+                  begin
+                     for Q of Raw loop
+                        if Picture.Inside (Q, R.Cu, R.Cv, Cw, Ch, 0.0) then
+                           Covered := True;
+                        end if;
+                     end loop;
+                     if not Covered then
+                        Raw.Append (R);
+                     end if;
+                  end;
+               end loop;
+            end;
          end loop;
          --  尺子放到头还是一块都没有 ⇒ 这才允许"被画面切掉一角"的块算数(严格规则下它整块消失)。
          --  放在最后一档:第三方相机里从画面外伸进来的胳膊也贴边,平时不许它变成"一件东西"。
