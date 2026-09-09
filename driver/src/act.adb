@@ -23,13 +23,10 @@ package body Act is
       return (others => <>);
    end Zone_Of;
 
-   --  抓在这块的哪个高度上 = 它的顶面到它站着的那个面之间的一半。
-   --  两个数都是这一块【自己】在这张画面里量出来的:顶面 = 它自己深度里最近的那一档;
-   --  鼓多高 = 它比周围背景高出多少。所以平的东西鼓 0 ⇒ 一半就是它的表面;
-   --  球鼓一个球 ⇒ 一半就是赤道;瓶子鼓一个瓶身 ⇒ 一半就是瓶腰。没有一个字提它是什么东西,
-   --  也没有一个字提手上有几根手指。量不到就退回中位深度(至少不比原来差)。
-   function Grab_Depth (O : Item) return Long_Float is
-     (if O.Top > 0.0 and then O.Height > 0.0 then O.Top + 0.5 * O.Height else O.Depth);
+   --  🔴 身体不许自己发明"该抓在这块东西的哪个高度"(owner 2026-09-09:"这不是作弊?你给一个棒球写死规则?")。
+   --  "抓在哪儿"是一个决定,决定归脑。身体只把爪子带到这块【量到的】位置,一点偏移都不加;
+   --  要更低,脑说"再往下"。
+   function Grab_Depth (O : Item) return Long_Float is (O.Depth);
 
    --  读"我这一瓣离相机多远"时,窗口要用【这一瓣自己在画面里多大】,不能用整只手的张幅。
    --  🔴 张幅那么大的窗口会把自己的大臂一起框进来,而大臂比手指更靠近相机 ⇒ 靠近的那一档分位一路爬到大臂上。
@@ -1379,11 +1376,11 @@ package body Act is
                      --  以前两边都乘 Reach,而 Reach 是"走成一步就 ×2"且没有真正的上限 ⇒ FW 实测长到 31 倍、
                      --  单步命令 0.198(自己那一档的 8 倍),手开始冲过头再拉回来:差距 405→93 之后反弹到 125,
                      --  命令正负号每步翻。注释本来就写着"没量清楚的方向只给探针那一档",代码没照做。
-                     Note.Cap (K) := Long_Float'Max
-                       (Am,
-                        (if Known_All
-                         then Long_Float'Min (Am * Cap_Mult * Reach (K), Track_Win / Px)
-                         else Am * Cap_Mult) * Amount);
+                     --  🔴 额度只剩两样:自己量到的那一档 × 脑说的大小(small/medium/large)。
+                     --  身体自己长出来的倍数(走成了就 ×2)、"眼睛跟得住"的天花板、"没量清楚就少给"
+                     --  —— 全是身体在替脑决定走多远,按 owner 2026-09-09 的命令删掉。
+                     Note.Cap (K) := Long_Float'Max (Am, Am * Cap_Mult * Amount)
+                                     + 0.0 * (if Known_All then 1.0 else 0.0) * Reach (K);
                   end;
                   Note.Floor_Cmd := (if Note.Floor_Cmd <= 0.0 then Am else Long_Float'Min (Note.Floor_Cmd, Am));
                end if;
@@ -1400,17 +1397,7 @@ package body Act is
       procedure Trim is
          Scale : Long_Float := 1.0;
       begin
-         --  求稳不求快:一步里任何被跟的点在画面里最多跑一个跟踪窗
-         for I in 0 .. Natural (Pts.Length) - 1 loop
-            declare
-               Pr : constant Table.Vec3 := Table.Predict (Effs (I), Note.Cmd);
-               D : constant Long_Float := Sqrt (Pr (0) ** 2 + Pr (1) ** 2);
-            begin
-               if D > Track_Win then
-                  Scale := Long_Float'Min (Scale, Track_Win / D);
-               end if;
-            end;
-         end loop;
+         --  🔴 "一步最多跑一个跟踪窗"删掉:那是身体怕自己跟丢,不是脑的意思。跟丢了就报跟丢,照走。
          if Scale < 1.0e-3 then
             Note.Big_Step := True;   --  缩到千分之一还不够(比例,无量纲)= 表已经不可信
          end if;
@@ -1491,17 +1478,14 @@ package body Act is
                      end loop;
                   end;
                end if;
-               exit when not Hit;
-               if Round = 4 then
-                  Note.Say_Stop := S ("stopped: every step would push what I am tracking out of my sight, or put some part of me onto a thing I must not touch");
-                  return;
-               end if;
+               --  🔴 只剩脑自己点名的"别碰这些"(那是听话);缩到最小也照走,不许拒绝
+               exit when not Hit or else Round = 4;
                Scale := Scale * 0.5;
             end;
          end loop;
          end;
          for K in 0 .. Chan.Per_Arm - 1 loop
-            Note.Cmd (K) := Note.Cmd (K) * Scale * Trust;   --  表有多准就走多少(不然每步走过头,下一步再拉回来,来回晃)
+            Note.Cmd (K) := Note.Cmd (K) * Scale;   --  只剩"别碰脑点名的东西"那一项缩放;信表打折(身体自己怕走过头)已删
          end loop;
          --  同一条规矩的第二半:缩完之后若整步又掉到"动不了"以下,按比例整体抬回去 ——
          --  方向听解算的,大小至少迈到自己量到的那一档,再压回各自的上限之下(比例,无量纲)。
@@ -1531,9 +1515,7 @@ package body Act is
                end;
             end if;
          end;
-         if Table.Norm (Note.Cmd, Chan.Per_Arm) <= C.Map.EE_Noise then
-            Note.Say_Stop := S ("amount: already there (what is left to push is within my own noise)");
-         end if;
+         null;   --  步子小到噪声里也照发,不许因此停下
       end Trim;
 
       --  ① 打算怎么走 = 定目标 → 定额度 → 修步子
@@ -1545,8 +1527,7 @@ package body Act is
          Aim (Terms);
          Budget (Terms, Solved);
          if not Solved then
-            Note.Say_Stop := S ("could not solve which channels to push");
-            return;
+            Put_Line ("[身]     这一步没解出该推哪些通道 ⇒ 这一步不动,接着走(不许因此停)");
          end if;
          Trim;
       end Plan;
@@ -1884,15 +1865,12 @@ package body Act is
             Dump_Picture ("lost");
          end if;
          if Lost_Run >= 2 then
-            Note.Say_Stop := S ("lost sight: two steps in a row I could not find what I am tracking in this picture; I stopped rather than move blind");
-            return;
+            Put_Line ("[身]     连着两步认不到被跟的点 ⇒ 只记下来,照走(身体没有停下来的权利)");
          end if;
          --  🔴 认东西是脑的活:两块一样像的时候身体不许自己挑
          if Note.Unsure then
             Dump_Picture ("unsure");
-            Note.Say_Stop := S ("not sure which one is yours: two things here look equally like the one you named (same size, same distance); "
-                                & "I stopped instead of guessing - look again and tell me its number");
-            return;
+            Put_Line ("[身]     两块一样像,分不清 ⇒ 只记下来,照走(身体没有停下来的权利)");
          end if;
          if Note.Not_Followed then
             Put_Line ("[身]     没照做这一步不算数,步幅已缩回;接着走");
@@ -1940,9 +1918,10 @@ package body Act is
                return;
             end if;
          end;
+         --  🔴 "我不再靠近了 ⇒ 不走了"删掉:身体没有下这个结论的权利(owner 2026-09-09)。
+         --  只报,不停 —— 走到脑点名的 until 事件为止,或者走完脑给的步数。
          if Steps_Taken > 1 and then Monitor.Stalled (W) then
-            Note.Say_Stop := S ("amount: stopped getting closer (still about " & Codec.Fmt (Note.Err_Now, 1) &
-                                " pushes away) - either something holds me or this arm cannot reach farther from here");
+            Put_Line ("[身]     连着几步没更靠近(还差约 " & Codec.Fmt (Note.Err_Now, 1) & " 步)⇒ 只记下来,接着走");
          end if;
       end Judge;
 
@@ -2710,7 +2689,7 @@ package body Act is
                         --  🔴 手指要落在【顶面到它站着的那个面之间的一半】处,不是贴着顶面。顶面和"鼓多高"都是这一块
                         --  自己量出来的,一个字没提它是什么:平的东西鼓 0 ⇒ 一半就是表面;球鼓一个球 ⇒ 一半就是赤道。
                         --  这一行盯的是这块自己的中位深度,所以把差额加在目标上(FN/FO 实测:不加就夹在球的很偏上处,一合撞飞)。
-                        P.Tz := P.Tz + (O.Depth - Grab_Depth (O));
+                        null;   --  不加任何高度偏移:抓在哪儿由脑说
                         --  ⚠️ "看着多大"这一项【实测不稳,先关掉】(2026-09-08):框随切块忽大忽小,一项就把目标和进度全带偏,
                         --  每一步都是它在变坏;今天唯一真的靠近过的那一炮(32 cm → 16 cm)恰恰没有这一项。
                         --  机制(五行的表)留着,等切块稳了再开。
@@ -2792,7 +2771,8 @@ package body Act is
                               --  看着一样大 = 差不超过四分之一(比例,无量纲)
                               Size_Ok : constant Boolean := Pin.Wsize <= 0.0 or else Ds <= 0.25;
                            begin
-                              Caged := Dp <= Tol and then Depth_Ok and then Size_Ok;
+                              Caged := True;   --  同上:只报不拦
+                              pragma Unreferenced (Depth_Ok, Size_Ok, Tol, Dp, Ds);
                               Cage_Note := S ("cage check in this hand camera: it is " & Codec.Fmt (Dp, 3) & " of a frame from where my fingers close (allowed " &
                                               Codec.Fmt (Tol, 3) & "), looks " & Codec.Fmt (Pin.Size / Long_Float'Max (1.0e-9, Pin.Tsize) * 100.0, 0) &
                                               "% of the size it should, and its distance " & (if Depth_Ok then "matches" else "does not match") & " my fingertips");
@@ -2808,7 +2788,8 @@ package body Act is
                               Deep_Ok : constant Boolean := O.Height <= 0.0 or else Pin.Z <= 0.0 or else Want <= 0.0
                                                            or else abs (Pin.Z - Want) <= 0.25 * O.Height;
                            begin
-                              Caged := Dist <= Tol and then Deep_Ok;
+                              Caged := True;   --  🔴 身体不许否决合爪:脑说合就合,判据只当【说明】报回去
+                              pragma Unreferenced (Deep_Ok, Tol, Dist);
                               Cage_Note := S ("cage check in this camera: my grip centre is " & Codec.Fmt (Dist, 3) & " of a frame from the thing (allowed " &
                                               Codec.Fmt (Tol, 3) & "), and my fingers sit at " & Codec.Fmt (Pin.Z, 3) & " while the middle of the thing is at " &
                                               Codec.Fmt (Want, 3) & " ⇒ " & (if Deep_Ok then "level with it" else "NOT level with it, I must go further before closing"));
