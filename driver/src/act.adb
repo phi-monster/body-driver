@@ -1470,8 +1470,13 @@ package body Act is
                      --  🔴 额度只剩两样:自己量到的那一档 × 脑说的大小(small/medium/large)。
                      --  身体自己长出来的倍数(走成了就 ×2)、"眼睛跟得住"的天花板、"没量清楚就少给"
                      --  —— 全是身体在替脑决定走多远,按 owner 2026-09-09 的命令删掉。
-                     Note.Cap (K) := Long_Float'Max (Am, Am * Cap_Mult * Amount)
-                                     + 0.0 * (if Known_All then 1.0 else 0.0) * Reach (K);
+                     --  🔴 油门装回来,但只许【往下踩】:Reach 只取不超过 1 的那一半 ——
+                     --  地图说了不算就把这一步咬小一口,准了也不许超过脑要的那一档。
+                     --  老版是"只会减速、没有底线"⇒ 一路减到零卡死(那才是 bug);
+                     --  新版有底线(Am,自己量到的推得动的最小量),所以减得下去、踩不死。
+                     Note.Cap (K) := Long_Float'Max
+                       (Am, Am * Cap_Mult * Amount * Long_Float'Min (1.0, Reach (K)))
+                       + 0.0 * (if Known_All then 1.0 else 0.0);
                   end;
                   Note.Floor_Cmd := (if Note.Floor_Cmd <= 0.0 then Am else Long_Float'Min (Note.Floor_Cmd, Am));
                end if;
@@ -1591,7 +1596,9 @@ package body Act is
          end loop;
          end;
          for K in 0 .. Chan.Per_Arm - 1 loop
-            Note.Cmd (K) := Note.Cmd (K) * Scale;   --  只剩"别碰脑点名的东西"那一项缩放;信表打折(身体自己怕走过头)已删
+            --  信表打折也装回来:表越不准走得越保守。后面那段"掉到动不了就整体抬回去"是它的底线,
+            --  所以打折只会变慢,不会变成零(老版没有那段底线,才会卡死)。
+            Note.Cmd (K) := Note.Cmd (K) * Scale * Trust;
          end loop;
          --  同一条规矩的第二半:缩完之后若整步又掉到"动不了"以下,按比例整体抬回去 ——
          --  方向听解算的,大小至少迈到自己量到的那一档,再压回各自的上限之下(比例,无量纲)。
