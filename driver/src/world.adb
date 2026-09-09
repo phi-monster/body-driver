@@ -29,14 +29,23 @@ package body World is
             declare
                Sl : Slot := Cs.Slots (Si);
                Ref : constant Picture.Region := (if Sl.Present then Sl.R else Sl.Shadow);
+               --  🔴 认号的半径原来是"这块自己框的一半",太小:手一动、块一变大,它就对不上号,
+               --  于是同一个东西被当成【新的一件】接在清单末尾 ⇒ 编号每轮都在变,脑每轮都要重新看图找它是几号
+               --  (实测:一晚上一多半的轮次花在重新认号上,还点错过好几次)。
+               --  改:半径放到"这块自己一个半身位,再小也有十分之一画幅";同时要求【大小是一个量级】
+               --  (三倍以内)才准认 —— 位置放宽、身份收紧,比原来两头都松的做法稳。
+               --  半径 = 这块自己的一个半身位,再小也有十分之一画幅(两个都是【占画幅的比例】,无量纲:
+               --  跟相机、镜头、机器人大小都无关)
                Tol : constant Long_Float := Long_Float'Max (
-                  Long_Float'Max (Long_Float (Ref.X1 - Ref.X0) / Long_Float (W), Long_Float (Ref.Y1 - Ref.Y0) / Long_Float (H)) * 0.5,
-                  1.0 / Long_Float (W));
+                  Long_Float'Max (Long_Float (Ref.X1 - Ref.X0) / Long_Float (W), Long_Float (Ref.Y1 - Ref.Y0) / Long_Float (H)) * 1.5,
+                  0.1);
                Best : Integer := -1;
                Bd : Long_Float := 1.0e9;
             begin
                for Ri in 0 .. Natural (Regs.Length) - 1 loop
-                  if not Used (Ri) then
+                  if not Used (Ri)
+                    and then Regs (Ri).Count * 3 >= Ref.Count and then Ref.Count * 3 >= Regs (Ri).Count
+                  then
                      declare
                         D : constant Long_Float := Sqrt ((Regs (Ri).Cu - Ref.Cu) ** 2 + (Regs (Ri).Cv - Ref.Cv) ** 2);
                      begin

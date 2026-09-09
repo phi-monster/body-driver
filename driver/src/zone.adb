@@ -269,6 +269,11 @@ package body Zone is
          exit when Still >= 2 and then Step >= 3;
       end loop;
       H.Empty_Close := Selfmap.Jaw_Of (F, Arm);
+      --  合空时手指一共扫过画面的几分之几(取各相机里最大的那台):真合一次如果扫过的明显更少,
+      --  说明手指还没走完就被中间的东西挡住了 = 夹住了。量出来的,不看画面判断,也不用力传感器。
+      for C in 0 .. Natural (F.Cams.Length) - 1 loop
+         H.Empty_Sweep := Long_Float'Max (H.Empty_Sweep, Picture.Fraction (Swept (C)));
+      end loop;
       Closed_Frame := F.Cams;
       Put_Line ("[身]   合到停住:读数 " & Codec.Fmt (H.Empty_Close, 3) & "(" & Natural'Image (H.Close_Steps) & " 拍)");
       --  张回去

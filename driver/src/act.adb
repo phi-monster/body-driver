@@ -2766,7 +2766,24 @@ package body Act is
                         P.Size := Sqrt (Long_Float'Max (0.0, P.Box_W * P.Box_H));
                         P.Ang := 2.0 * Arctan (O.Av, O.Au);
                         P.Elong := O.Elong; P.Gray := O.Gray;
-                        P.Tu := Z.Cu; P.Tv := Z.Cv; P.Tz := Z.Depth; P.Wz := (if Picture.Is_Nan (Z.Depth) then 0.0 else 1.0);
+                        --  🔴 目标取【合拢时扫过的那几瓣的共同中心】,不是整片扫过区的中心:手腕相机里手指离镜头很近,
+                        --  扫过的那一片几乎半个屏幕,它的中心没有意义。瓣是量出来的 —— 一瓣 = 吸盘,两瓣 = 两指,
+                        --  七瓣 = 七指,同一段代码,不含"几根手指"的假设。
+                        declare
+                           Lu : Long_Float := 0.0;
+                           Lv : Long_Float := 0.0;
+                           Ln : Long_Float := 0.0;
+                        begin
+                           if Z.A.Valid then
+                              Lu := Lu + Z.A.Cu; Lv := Lv + Z.A.Cv; Ln := Ln + 1.0;
+                           end if;
+                           if Z.B.Valid then
+                              Lu := Lu + Z.B.Cu; Lv := Lv + Z.B.Cv; Ln := Ln + 1.0;
+                           end if;
+                           P.Tu := (if Ln > 0.0 then Lu / Ln else Z.Cu);
+                           P.Tv := (if Ln > 0.0 then Lv / Ln else Z.Cv);
+                        end;
+                        P.Tz := Z.Depth; P.Wz := (if Picture.Is_Nan (Z.Depth) then 0.0 else 1.0);
                         P.Tsize := Sqrt (Long_Float'Max (0.0, (Long_Float (Z.X1 - Z.X0) / Long_Float (Cw)) * (Long_Float (Z.Y1 - Z.Y0) / Long_Float (Ch))));
                         P.Tang := 2.0 * Arctan (Z.Av, Z.Au);
                         --  🔴 手指要落在【顶面到它站着的那个面之间的一半】处,不是贴着顶面。顶面和"鼓多高"都是这一块
@@ -2810,6 +2827,8 @@ package body Act is
                   Steps_J : Natural;
                   Reading : Long_Float;
                   Hz : constant Zone.Hand_Zone := Zone_Of (C, A, Cam);
+                  Close_Sweep : Bools;
+                  Sweep_Now : Long_Float := -1.0;
                begin
                   --  笼判据:点名的那块的像素在握区框里(它的形心落在区框内),深度和手指对得上
                   if Say.Grip_On >= 1 and then Say.Grip_On <= Natural (C.Items.Length) then
@@ -2879,7 +2898,11 @@ package body Act is
                      end;
                   end if;
                   if Caged then
-                     Move_Jaw (L, C, F, A, 0.0, Steps_J, Reading);
+                     --  🔴 合的时候顺便量"这次手指扫过了多少画面":比合空时明显少 ⇒ 手指没走完就被挡住了
+                     --  = 中间有东西。这台机器人的爪子读数是命令的回声(见 LAB),所以读数那条路不能用;
+                     --  这条是量出来的,而且不含任何"几根手指 / 什么东西"的假设。
+                     Jaw_Sweep (L, C, F, A, 0.0, 40, Integer (Cam), Close_Sweep, Steps_J, Reading);
+                     Sweep_Now := Picture.Fraction (Close_Sweep);
                      declare
                         Empty : constant Long_Float := C.Hands (A).Empty_Close;
                         By_Reading : Boolean := Reading - Empty > C.Map.Jaw_Noise;
@@ -2896,8 +2919,19 @@ package body Act is
                         if not Sure_Held then
                            By_Reading := False;   --  说不准 ⇒ 不许记成"手里有东西"(记错了下一步它就去"搬"而不是重抓)
                         end if;
-                        Did_Grip := S ("I closed grip " & Codec.Img (A + 1) & " until the picture stopped changing (" & Codec.Img (Steps_J) & " steps, reading " & Codec.Fmt (Reading, 3) &
-                                       ", empty-close reading " & Codec.Fmt (Empty, 3) & "); " & To_String (Note));
+                        declare
+                           Es : constant Long_Float := C.Hands (A).Empty_Sweep;
+                           Blocked_Fingers : constant Boolean := Es > 0.0 and then Sweep_Now >= 0.0 and then Sweep_Now < Es * 0.6;
+                        begin
+                           Did_Grip := S ("I closed grip " & Codec.Img (A + 1) & " until the picture stopped changing; "
+                                          & (if Es <= 0.0 or else Sweep_Now < 0.0 then "I could not tell whether anything stopped my fingers"
+                                             elsif Blocked_Fingers then "my fingers travelled much less than they do when I close on nothing, so something stopped them"
+                                             else "my fingers travelled as far as they do when I close on nothing, so nothing was between them")
+                                          & "; " & To_String (Note));
+                           if Blocked_Fingers then
+                              By_Reading := True;
+                           end if;
+                        end;
                         if By_Reading then
                            C.Wld.Holding := True; C.Wld.Held_Arm := Integer (A); C.Wld.Held_Cam := Integer (Cam);
                            if Say.Grip_On >= 1 and then Say.Grip_On <= Natural (C.Items.Length) then
@@ -3012,12 +3046,28 @@ package body Act is
                   if P.Blob <= 0 then
                      --  🔴 不给脑坐标/远近/"还差几步":那些数骗过我一次(GB:"还差 2.2 步"⇒ 我提前合爪合了个空)。
                      --  只说它现在在第几格,以及还差得远不远 —— 剩下的看画面。
-                     Report := Report & "item " & Codec.Img (P.Item_No) & (if P.Blob = 0 then " (finger A)" else "") & " is now in cell " &
-                               Codec.Img (Cell_Of (C, P.Cu, P.Cv)) & ", " &
-                               --  "还差几步"已经是无量纲的(每一样都除以"一步最多能改多少"),这里只翻成三句人话
-                               (if P.Steps_Err > 10.0 then "still a long way from where you want it"
-                                elsif P.Steps_Err > 2.0 then "getting close to where you want it"
-                                else "about where you want it") & "; ";
+                     --  🔴 脑每一轮真正需要的那一句:这东西在我指尖【前面 / 齐平 / 后面】。
+                     --  两个读数都在同一张画面里(它多远、我合拢时扫过的那几瓣多远),直接说成人话,
+                     --  不需要任何单位,也不需要脑自己去算。
+                     declare
+                        Hz : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, Cam);
+                        Own : constant Boolean := Cam_Arm (C, Cam) = Integer (P.Arm);
+                        Thick : constant Long_Float := Long_Float'Max (P.Height, 1.0e-3);
+                        Where : constant String :=
+                          (if P.Kind /= Thing_Pt or else not Own or else not Hz.Valid
+                             or else Picture.Is_Nan (Hz.Depth) or else Hz.Depth <= 0.0 or else P.Z <= 0.0
+                           then ""
+                           elsif P.Z > Hz.Depth + Thick then " and it is still beyond my fingertips"
+                           elsif P.Z < Hz.Depth - Thick then " and I have gone past it - it is behind my fingertips"
+                           else " and it is level with my fingertips");
+                     begin
+                        Report := Report & "item " & Codec.Img (P.Item_No) & (if P.Blob = 0 then " (finger A)" else "") & " is now in cell " &
+                                  Codec.Img (Cell_Of (C, P.Cu, P.Cv)) & ", " &
+                                  --  "还差几步"已经是无量纲的,这里只翻成三句人话
+                                  (if P.Steps_Err > 10.0 then "still a long way from where you want it"
+                                   elsif P.Steps_Err > 2.0 then "getting close to where you want it"
+                                   else "about where you want it") & Where & "; ";
+                     end;
                   end if;
                end loop;
             else
