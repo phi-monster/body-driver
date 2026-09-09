@@ -734,6 +734,24 @@ package body Picture is
       return Best_T;
    end Split;
 
+   function Adjacent (A, B : Region; W, H : Natural; Gap : Long_Float) return Boolean is
+      Gx : constant Long_Float := Gap * Long_Float (W);
+      Gy : constant Long_Float := Gap * Long_Float (H);
+      Box : constant Boolean :=
+        Long_Float (A.X0) - Gx <= Long_Float (B.X1) and then Long_Float (B.X0) - Gx <= Long_Float (A.X1)
+        and then Long_Float (A.Y0) - Gy <= Long_Float (B.Y1) and then Long_Float (B.Y0) - Gy <= Long_Float (A.Y1);
+      --  远近也要对得上:各自"最靠近相机的那一档"差不超过两块里厚的那一块自己的厚度
+      Thick : constant Long_Float := Long_Float'Max (Long_Float'Max (A.Height, B.Height), 1.0e-3);
+   begin
+      if not Box then
+         return False;
+      end if;
+      if A.Top <= 0.0 or else B.Top <= 0.0 then
+         return True;      --  读不到远近就只按画面判
+      end if;
+      return abs (A.Top - B.Top) <= Thick;
+   end Adjacent;
+
    function Inside (R : Region; U, V : Long_Float; W, H : Natural; Grow : Long_Float) return Boolean is
       X0 : constant Long_Float := Long_Float (R.X0) / Long_Float (W);
       X1 : constant Long_Float := Long_Float (R.X1 + 1) / Long_Float (W);

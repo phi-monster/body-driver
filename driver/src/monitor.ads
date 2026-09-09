@@ -17,7 +17,9 @@ package Monitor is
       Steps : Count := 0;
       Refused : Count := 0;        --  连着几步一步没走
    end record;
-   type Until_Kind is (U_Steps, U_Contact, U_Resist, U_Slip, U_Settle);
+   --  U_Free = 我点名的那块【不再挨着它原来站着的那个面】。这就是"抬起来了"的字面定义,
+   --  也是动作词表里"拿起"和"推着走"的分界:推着走它一直挨着桌面,拿起来它离开了。
+   type Until_Kind is (U_Steps, U_Contact, U_Resist, U_Slip, U_Settle, U_Free);
 
    procedure Step (W : in out Watch; Pic_Delta : Floor; Err_Before, Err_After : Bounded;
                    Delivered : Floor; F : Floors)
@@ -37,11 +39,13 @@ package Monitor is
    --  两条都不成立时,这一段不许自称"碰到了"——不确定就继续走或者回去问脑。
    function Touching (Moved_Other : Boolean) return Boolean is (Moved_Other);
    function Fired (U : Until_Kind; W : Watch; Step_Cap : Natural; Blocked : Boolean;
-                   Reading, Empty : Bounded; Reading_Noise : Floor; Moved_Other : Boolean := False) return Boolean is
+                   Reading, Empty : Bounded; Reading_Noise : Floor; Moved_Other : Boolean := False;
+                   Off_Support : Boolean := False) return Boolean is
      (case U is
          when U_Steps => W.Steps >= Step_Cap,
          when U_Contact => Touching (Moved_Other),
          when U_Resist => Blocked or else Refusing (W),
          when U_Slip => Slipped (Reading, Empty, Reading_Noise),
-         when U_Settle => Settled (W));
+         when U_Settle => Settled (W),
+         when U_Free => Off_Support);
 end Monitor;

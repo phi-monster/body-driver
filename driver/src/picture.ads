@@ -47,6 +47,9 @@ package Picture is
    function Quantile (F : in out Floats; Q : Long_Float) return Long_Float;
    function Region_Depth (Depth : Floats; W, H : Natural; Mask : Bools; Q : Long_Float) return Long_Float;  --  掩膜上的深度分位;NaN = 无
    function Inside (R : Region; U, V : Long_Float; W, H : Natural; Grow : Long_Float) return Boolean;
+   --  两块【挨着没有】:画面上的框贴住(留一条缝的宽容),且顶面的远近对得上(不是一前一后错开)。
+   --  这是"动作词表"的唯一原始事实:谁和谁挨着,以及这个关系什么时候变。不需要知道它们是什么东西。
+   function Adjacent (A, B : Region; W, H : Natural; Gap : Long_Float) return Boolean;
    function Is_Nan (X : Long_Float) return Boolean;
    --  一堆数分成两拨(Otsu):返回分界;分不开(单峰)返回 NaN
    function Split (F : Floats) return Long_Float;

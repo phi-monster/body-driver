@@ -1068,6 +1068,7 @@ package body Act is
       Last_Err : Long_Float := -1.0;     --  -1 = 还没算过(哨兵,无量纲)
       Last_Raw : Long_Float := -1.0;     --  上一步不随表变的差距
       Best_Raw : Long_Float := -1.0;     --  到目前为止最好的一次(判"有没有在靠近"和它比,不和上一步比 —— 噪声一晃就成退步)
+      Start_H : Long_Float := -1.0;      --  这一段开始时,我点名的那块比它周围鼓出多少(米):它离开台面,这个数就长
       Trust : Long_Float := 0.5;         --  这张表有多准,就走它算出来的多大比例(半开始;预测差一半就只走一半,准了再放开)
       Lost_Run : Natural := 0;           --  连着几步全部认不到
 
@@ -1082,6 +1083,7 @@ package body Act is
          Big_Step : Boolean := False;                   --  大到光流跟不住 ⇒ 走完抖一下认自己
          Halted : Boolean := False;                     --  途中眼睛叫停
          Blocked : Boolean := False;                    --  顶住了(零表更准)
+         Free : Boolean := False;                       --  我点名的那块不再挨着它原来站的那个面
          Not_Followed : Boolean := False;               --  整步没照做
          Touched : Boolean := False;                    --  我没在推的东西也动了 = 碰到
          Lost_All : Boolean := False;                   --  被跟的全都认不到
@@ -1337,10 +1339,15 @@ package body Act is
                      --  实测(FP):某通道量到要 0.0256 才看得见动,而"小步"给出的额度只有 0.008,
                      --  连着三步实到全 0,身体报"要么有东西拽着我,要么这条胳膊到头了" —— 其实只是自己没迈够。
                      --  ⇒ "小/中/大"只能把一步放大,不能把它缩到动不了。
+                     --  🔴 后果没量清楚的方向,只给【探针那一档】,不许再乘"核实过的倍数"。
+                     --  以前两边都乘 Reach,而 Reach 是"走成一步就 ×2"且没有真正的上限 ⇒ FW 实测长到 31 倍、
+                     --  单步命令 0.198(自己那一档的 8 倍),手开始冲过头再拉回来:差距 405→93 之后反弹到 125,
+                     --  命令正负号每步翻。注释本来就写着"没量清楚的方向只给探针那一档",代码没照做。
                      Note.Cap (K) := Long_Float'Max
                        (Am,
-                        Long_Float'Min (Am * Cap_Mult * Reach (K),
-                                        (if Known_All then Track_Win / Px else Am * Cap_Mult * Reach (K))) * Amount);
+                        (if Known_All
+                         then Long_Float'Min (Am * Cap_Mult * Reach (K), Track_Win / Px)
+                         else Am * Cap_Mult) * Amount);
                   end;
                   Note.Floor_Cmd := (if Note.Floor_Cmd <= 0.0 then Am else Long_Float'Min (Note.Floor_Cmd, Am));
                end if;
@@ -1724,7 +1731,11 @@ package body Act is
             end loop;
             for K in 0 .. Chan.Per_Arm - 1 loop
                if Note.Active (K) and then abs Note.Cmd (K) > Long_Float'Max (Note.Floor_Cmd, C.Map.EE_Noise) then
-                  if Any_Meas and then Pred_Ok and then (not Note.Halted) and then not Note.Not_Followed then
+                  --  🔴 "零表更准"= 这张表已经不如"什么都不会发生"准了 ⇒ 立刻降档。
+                  --  FW 实测:最后三步都印了这句,而步幅一直是 31 倍没动过 —— 印出来了却没生效。
+                  if Note.Blocked then
+                     Reach (K) := Long_Float'Max (1.0, Reach (K) * 0.5);
+                  elsif Any_Meas and then Pred_Ok and then (not Note.Halted) and then not Note.Not_Followed then
                      Reach (K) := Long_Float'Min (Reach (K) * 2.0, Track_Win / Long_Float'Max (1.0e-9, C.Map.Amp (Arm * Chan.Per_Arm + K)));
                   elsif Any_Meas and then not Pred_Ok then
                      Reach (K) := Long_Float'Max (1.0, Reach (K) * 0.5);
@@ -1850,16 +1861,34 @@ package body Act is
          if Note.Not_Followed then
             Put_Line ("[身]     没照做这一步不算数,步幅已缩回;接着走");
          end if;
+         --  它还挨不挨着它站着的那个面:一块东西坐在台面上时,深度切块量到的"鼓出多少"就是它自己的厚度;
+         --  被提起来之后,它下面露出的还是台面,于是"鼓出多少"会长出提起来的那一截。
+         --  长过它自己厚度的四分之一(比例,无量纲)就算离开了台面 —— 这是"抬起来了"的字面定义。
+         declare
+            H_Now : Long_Float := -1.0;
+         begin
+            for P of Pts loop
+               if P.Kind = Thing_Pt and then P.Height > 0.0 then
+                  H_Now := P.Height;
+                  exit;
+               end if;
+            end loop;
+            if Start_H < 0.0 and then H_Now > 0.0 then
+               Start_H := H_Now;
+            end if;
+            Note.Free := Start_H > 0.0 and then H_Now > 0.0 and then H_Now - Start_H > 0.25 * Start_H;
+         end;
          if Monitor.Fired (Until_Kind, W, Step_Limit, Note.Blocked, Monitor.Bounded (Selfmap.Jaw_Of (F, Arm)),
                            Monitor.Bounded (if Arm < Natural (C.Hands.Length) then C.Hands (Arm).Empty_Close else 0.0),
-                           Monitor.Floor (C.Map.Jaw_Noise), Note.Touched)
+                           Monitor.Floor (C.Map.Jaw_Noise), Note.Touched, Note.Free)
          then
             Note.Say_Stop := (case Until_Kind is
                                 when Monitor.U_Steps => S ("steps: I took the steps you asked for"),
                                 when Monitor.U_Contact => S ("contact: something I was not pushing moved when I moved - I am touching it"),
                                 when Monitor.U_Resist => S ("resist: I commanded a push and my body did not go"),
                                 when Monitor.U_Slip => S ("slip: what I was holding has left my fingers"),
-                                when Monitor.U_Settle => S ("settle: the picture stopped changing"));
+                                when Monitor.U_Settle => S ("settle: the picture stopped changing"),
+                                when Monitor.U_Free => S ("free: the thing you named is no longer touching what it was standing on"));
             return;
          end if;
          declare
@@ -2157,6 +2186,12 @@ package body Act is
       Have_Hand0 : Boolean := False;
       Follows : Boolean := False;   --  它跟着我的手走了同样一段
       Follow_Note : Unbounded_String;
+      --  三件量出来的事(全是测量,一句判断都没有)
+      Touch_Me : Boolean := False;      --  它现在挨着我
+      Off_Sup : Boolean := False;       --  它不再挨着它原来站的那个面
+      Score : Long_Float := 0.0;        --  它跟着我的手走了几成(比值)
+      Have_Score : Boolean := False;
+      Start_Height : constant Long_Float := Origin.Height;
    begin
       if World_Cam >= 0 then
          Before_Regs := Cut_Things (C, F, Natural (World_Cam));
@@ -2236,8 +2271,36 @@ package body Act is
                   begin
                      --  它挪的和我的手挪的差得比"我的手挪了多少"的一半还小 ⇒ 它跟着我走
                      Follows := Miss <= 0.5 * Hand_Len;
+                     --  打分 = 它跟着我走了几成。两段位移在同一张画面、同一时刻、同一把尺子上量,
+                     --  尺子错了两边同样错 ⇒ 比值不变(不需要任何绝对距离)。
+                     Score := Long_Float'Max (0.0, Long_Float'Min (1.0, 1.0 - Miss / Hand_Len));
+                     Have_Score := True;
+                     --  它挨着我没有:那一块和我这只手扫过的两瓣,框贴住 + 远近对得上
+                     declare
+                        Z : constant Zone.Hand_Zone := Zone_Of (C, Arm, Natural (World_Cam));
+                        Cw2 : constant Natural := F.Cams (Natural (World_Cam)).W;
+                        Ch2 : constant Natural := F.Cams (Natural (World_Cam)).H;
+                        function Lobe_Reg (Lb : Zone.Lobe) return Picture.Region is
+                           R : Picture.Region;
+                        begin
+                           R.X0 := Lb.X0; R.Y0 := Lb.Y0; R.X1 := Lb.X1; R.Y1 := Lb.Y1;
+                           R.Top := (if Picture.Is_Nan (Z.Depth) then 0.0 else Z.Depth);
+                           return R;
+                        end Lobe_Reg;
+                     begin
+                        if Z.Valid then
+                           Touch_Me :=
+                             (Z.A.Valid and then Picture.Adjacent (After (Best), Lobe_Reg (Z.A), Cw2, Ch2, Track_Win * 0.5))
+                             or else (Z.B.Valid and then Picture.Adjacent (After (Best), Lobe_Reg (Z.B), Cw2, Ch2, Track_Win * 0.5));
+                        end if;
+                     end;
+                     --  它还挨不挨着它原来站的那个面:坐在台面上时"鼓出多少"就是它自己的厚度,
+                     --  被提起来之后它下面露出的还是台面 ⇒ 这个数会长出提起来的那一截(比例,无量纲:它自己厚度的四分之一)
+                     Off_Sup := Start_Height > 0.0 and then After (Best).Height > Start_Height * 1.25;
                      Follow_Note := S (" (my hand moved " & Codec.Fmt (Hand_Len, 3) & " of a frame, it moved " &
-                                       Codec.Fmt (Sqrt (Ou ** 2 + Ov ** 2), 3) & ", they differ by " & Codec.Fmt (Miss, 3) & ")");
+                                       Codec.Fmt (Sqrt (Ou ** 2 + Ov ** 2), 3) & ", they differ by " & Codec.Fmt (Miss, 3) &
+                                       "; it stood " & Codec.Fmt (Start_Height, 3) & " out of the surface before and " &
+                                       Codec.Fmt (After (Best).Height, 3) & " now)");
                   end;
                elsif Best < 0 then
                   Follow_Note := S (" (after the lift I could not find it anywhere in the still camera)");
@@ -2282,24 +2345,24 @@ package body Act is
             end loop;
          end;
       end if;
-      --  🔴 "拿住了"只有一条硬证据:它原来待的地方空了。手上相机里"还在握区框里"不算数 ——
-      --  那个框在手上相机里几乎是半个屏幕,球留在画面里就过关(FM 实测报了"拿住",而头顶相机里球还在桌上)。
-      --  两台相机都判不了就老实说"我说不准",不许自称拿住。
-      Held := (if World_Cam >= 0 and then Have_Hand0 then Follows else Seen_In_Hand);
-      Sure := World_Cam >= 0 and then Have_Hand0;
-      if Sure and then Follows then
-         Note := S ("after a small lift it moved with my hand ⇒ held") & Follow_Note;
-      elsif Sure then
-         Note := S ("after a small lift it did NOT move with my hand ⇒ not held"
-                    & (if Gone_From_Table then " (its old place is empty, so I pushed it away rather than picked it up)" else ""))
+      --  🔴🔴 身体【不许自己下"拿住了"这个结论】(owner 2026-09-09:"你只给拿住了这一个东西写死定义,
+      --  这算不算作弊,世界任务无数呢")。"拿住了"是一句关于世界的知识 = 任务词,属于脑;
+      --  身体只交三件【量出来的】事,一句判断都不加:
+      --    ① 它现在挨着我没有(两块框贴住 + 远近对得上)
+      --    ② 它还挨不挨着它原来站的那个面(鼓出多少长了没有)
+      --    ③ 它跟着我的手走了几成(两段位移的比值 —— 比值,尺子错了两边同样错,自动约掉)
+      --  身体不再声称这件事,它就不可能在这件事上说谎(FM/FO 各假报过一次"拿住了")。
+      --  内部那个"手里有东西"的状态也只认①:那是测量,不是判断。
+      Held := Touch_Me;
+      Sure := Could_Judge or else Touch_Me;
+      declare
+         Sc : constant String := (if Have_Score then Codec.Fmt (Score, 2) else "unknown");
+      begin
+         Note := S ("after a small lift: it is " & (if Touch_Me then "" else "NOT ") & "touching me; it is "
+                    & (if Off_Sup then "no longer" else "still") & " touching what it was standing on; it copied "
+                    & Sc & " of my hand's movement (1.00 = it came with me exactly, 0 = it did not move)")
                  & Follow_Note;
-      elsif Seen_In_Hand then
-         Note := S ("after a small lift the thing is still inside my grip box in my hand camera; no still camera could check, so I am not sure");
-      elsif Could_Judge then
-         Note := S ("after a small lift the thing did not come with me ⇒ not held");
-      else
-         Note := S ("I could not judge whether it is held (no camera could see it)");
-      end if;
+      end;
       if World_Cam >= 0 then
          Append (Note, ". While I closed and lifted, " & Codec.Img (Moved_Others) & " other thing(s) I was not pushing moved");
          if Pieces_Now >= 2 then
@@ -2403,7 +2466,8 @@ package body Act is
       declare
          Until_K : constant Monitor.Until_Kind :=
            (if Say.Until_Kind = "contact" then Monitor.U_Contact elsif Say.Until_Kind = "resist" then Monitor.U_Resist
-            elsif Say.Until_Kind = "slip" then Monitor.U_Slip elsif Say.Until_Kind = "settle" then Monitor.U_Settle else Monitor.U_Steps);
+            elsif Say.Until_Kind = "slip" then Monitor.U_Slip elsif Say.Until_Kind = "settle" then Monitor.U_Settle
+            elsif Say.Until_Kind = "free" then Monitor.U_Free else Monitor.U_Steps);
          Step_Limit : constant Natural := (if Say.Until_Kind = "steps" then Natural'Max (1, Say.Steps) else 0);
          Avoid : Item_Vectors.Vector;
          Pts : Point_Vectors.Vector;
@@ -2744,9 +2808,10 @@ package body Act is
                            end if;
                            Memory.Set (C.Mem, "holding", "arm " & Codec.Img (A + 1) & " closed on item " & Codec.Img (Say.Grip_On) & " at reading " & Codec.Fmt (Reading, 3));
                         else
+                           --  🔴 不自作主张张开:合完之后是"再压低一点重来"还是"松手"是脑的决定,不是身体的。
+                           --  以前身体自己张开,把现场毁掉,脑连"刚才夹到哪儿了"都看不见。
                            C.Wld.Holding := False; C.Wld.Held_Arm := -1;
-                           Move_Jaw (L, C, F, A, C.Hands (A).Open_Reading, Steps_J, Reading);
-                           Append (Did_Grip, "; I opened it again");
+                           Append (Did_Grip, "; my fingers are still closed where they are - say open if you want them opened");
                         end if;
                      end;
                   else

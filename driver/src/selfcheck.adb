@@ -167,6 +167,18 @@ begin
       R := Picture.Cut (Dep, W, H, 0.125, 3.0, Keep_Edge => True);
       Check (Natural (R.Length) = 1, "贴边:放宽之后它留下了(" & Natural'Image (Natural (R.Length)) & " 块)");
    end;
+   --  挨着没有:框贴住 + 远近对得上才算(动作词表唯一的原始事实)
+   declare
+      A, B, C2 : Picture.Region;
+   begin
+      A.X0 := 10; A.Y0 := 10; A.X1 := 30; A.Y1 := 30; A.Top := 0.80; A.Height := 0.03;
+      B.X0 := 32; B.Y0 := 12; B.X1 := 50; B.Y1 := 28; B.Top := 0.80; B.Height := 0.03;
+      C2.X0 := 60; C2.Y0 := 12; C2.X1 := 80; C2.Y1 := 28; C2.Top := 0.80; C2.Height := 0.03;
+      Check (Picture.Adjacent (A, B, 96, 72, 0.05), "挨着:贴住的两块算挨着");
+      Check (not Picture.Adjacent (A, C2, 96, 72, 0.05), "挨着:隔开的两块不算");
+      B.Top := 0.50;   --  远近差 0.30,远超两块里最厚的 0.03
+      Check (not Picture.Adjacent (A, B, 96, 72, 0.05), "挨着:画面贴住但一前一后错开的不算");
+   end;
    declare
       W : constant := 96;
       H : constant := 72;
