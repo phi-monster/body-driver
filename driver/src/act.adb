@@ -2921,6 +2921,8 @@ package body Act is
                         end if;
                         declare
                            Es : constant Long_Float := C.Hands (A).Empty_Sweep;
+                           --  少到合空时的六成以下才算被挡住(比例,无量纲:两次都是"占画面的几分之几",
+                           --  同一把尺子,相机换了两边同样变,比值不变)
                            Blocked_Fingers : constant Boolean := Es > 0.0 and then Sweep_Now >= 0.0 and then Sweep_Now < Es * 0.6;
                         begin
                            Did_Grip := S ("I closed grip " & Codec.Img (A + 1) & " until the picture stopped changing; "
