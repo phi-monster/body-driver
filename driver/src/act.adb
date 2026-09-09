@@ -60,6 +60,11 @@ package body Act is
 
    procedure Init_Tracks (C : in out Context) is
    begin
+      --  死区一开始当作零(还没证据说哪个通道推不动),边走边学
+      C.Dead.Clear;
+      for K in 0 .. C.Map.Arms * Chan.Per_Arm loop
+         C.Dead.Append (0.0);
+      end loop;
       C.Zones.Clear;
       for A in 0 .. C.Map.Arms - 1 loop
          for Cm in 0 .. C.Map.N_Cams - 1 loop
@@ -1499,8 +1504,11 @@ package body Act is
                      --  实测:FO 每一步的命令是 0.006 = 探针那一档的四分之一,照样一步推进 8 厘米、44 推抓到球;
                      --  我把下限设成整整一档 ⇒ 今晚每一步是 FO 的 4 倍(0.026),表当场不准、球被甩出视野。
                      --  真正要挡的是"命令小到身体根本不动"(本体噪声那一档),不是"比探针小"。
+                     --  下限 = 这个通道自己量出来的死区(见 act.ads),再小也不低于本体噪声的两倍
                      Note.Cap (K) := Long_Float'Max
-                       (2.0 * C.Map.EE_Noise, Am * Cap_Mult * Amount * Long_Float'Min (1.0, Reach (K)))
+                       (Long_Float'Max (2.0 * C.Map.EE_Noise,
+                                        (if Ch_No < Natural (C.Dead.Length) then C.Dead.Element (Ch_No) else 0.0)),
+                        Am * Cap_Mult * Amount * Long_Float'Min (1.0, Reach (K)))
                        + 0.0 * (if Known_All then 1.0 else 0.0);
                   end;
                   Note.Floor_Cmd := (if Note.Floor_Cmd <= 0.0 then Am else Long_Float'Min (Note.Floor_Cmd, Am));
@@ -1690,6 +1698,19 @@ package body Act is
          begin
             for K in 0 .. Chan.Per_Arm - 1 loop
                Sv (K) := Note.Got (K);
+               --  🔴 学死区:命令发了而身体没动 ⇒ 这一档不够,抬上去;真动了 ⇒ 说明这一档够,压下来。
+               --  抬 1.5 倍、压到刚好走成的那一档(倍数,无量纲)。
+               declare
+                  Cn : constant Natural := Arm * Chan.Per_Arm + K;
+               begin
+                  if Cn < Natural (C.Dead.Length) and then abs Note.Cmd (K) > C.Map.EE_Noise then
+                     if abs Note.Got (K) <= C.Map.EE_Noise then
+                        C.Dead.Replace_Element (Cn, Long_Float'Max (C.Dead.Element (Cn), abs Note.Cmd (K) * 1.5));
+                     else
+                        C.Dead.Replace_Element (Cn, Long_Float'Min (C.Dead.Element (Cn), abs Note.Cmd (K)));
+                     end if;
+                  end if;
+               end;
             end loop;
             Backup.Remember (Ring, Sv);
          end;
