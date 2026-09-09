@@ -1069,7 +1069,11 @@ package body Act is
                                     D_Out : constant Long_Float := Z_Out (I) - Was (I).Z;
                                     D_Back : constant Long_Float := Zb - Z_Out (I);
                                  begin
-                                    if abs (D_Out + D_Back) > 0.5 * abs D_Out then
+                                    --  🔴 只杀【真正的漂移】:推出去和推回来【同一个方向】= 这个读数在自己往一边跑,不是响应。
+                                    --  方向相反、只是大小对不齐 ⇒ 那是噪声,不是假信号,留着用(FO 靠的正是这种"有噪声但方向对"的
+                                    --  距离信号,从 32 cm 一路读到 8.4 cm 并真的碰到了球)。
+                                    --  之前写成"和超过出程的一半就清零",太严,把六个通道全判死,身体连距离都不会改了。
+                                    if D_Out * D_Back > 0.0 then
                                        declare
                                           Col : Table.Vec3 := Table.Col (Effs (I), K);
                                        begin
@@ -1279,11 +1283,14 @@ package body Act is
             declare
                Idx : constant Integer := Find_Effect (C, Arm, Cam, Pts (I).Kind, Pts (I).Chan_K, Pts (I).Blob);
             begin
+               --  🔴 有表就用,不再因为"位姿走远了"重探一遍。
+               --  账:实测一"推"要花 13~21 拍,而真正干活的那一下只占一两拍 —— 差出来的全是【每一段重探六个通道】。
+               --  官方上限 200 拍,FO 用了 1153 拍,超的 5.7 倍几乎全在这个倍数上。
+               --  而每一步本来就是一次测量(命令了多少、画面里发生了什么),表是递推更新的,
+               --  所以除了开机第一次,专门的探针阶段是纯浪费:走两步它自己就修回来了,而重探要花上百拍。
+               --  位姿走远了不再当作"作废",只是头几步预测会差一点 —— 那正是"信表"这个数会自动压住的。
                if Idx >= 0 and then (for some K in 0 .. Chan.Per_Arm - 1 => C.Tables (Natural (Idx)).Trust (K))
                  and then C.Tables (Natural (Idx)).Has_Pose
-                 and then (for all K in 0 .. Chan.Per_Arm - 1 =>
-                             abs Chan.Delivered (C.Tables (Natural (Idx)).Pose, F.EE (Arm)) (K)
-                             <= Long_Float'Max (1.0e-6, C.Map.Amp (Arm * Chan.Per_Arm + K)) * Cap_Mult * C.Tables (Natural (Idx)).Reach (K))
                then
                   Effs (I) := C.Tables (Natural (Idx)).E;
                   Trusts (I) := C.Tables (Natural (Idx)).Trust;
