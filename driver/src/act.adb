@@ -726,6 +726,12 @@ package body Act is
                            P.Z := Pred_Z;
                         end if;
                      end if;
+                     --  🔴 "离相机多远"不可能 ≤ 0。预测是线性外推,越推越小就会推过零点,
+                     --  而一旦变成负数,上面那道"一步不许跳太多"的闸(它以 Old_Z > 0 为前提)就【永久失效】,
+                     --  之后什么读数都收(FY 实测:深 -0.032 之后整段乱走)。留住上一份正数。
+                     if P.Z <= 0.0 then
+                        P.Z := Old_Z;
+                     end if;
                   end;
                end if;
             end;
@@ -2037,7 +2043,9 @@ package body Act is
                if F.Cams (Cam).Has_Depth then
                   --  深度一步跳过"距离的一成"(比例,无量纲)就是读到别的东西了
                   Zd := Picture.Near_Depth (F.Cams (Cam).Depth, Cw, Ch, P.Cu, P.Cv, Win);
-                  if not Picture.Is_Nan (Zd) and then (Old_Z <= 0.0 or else abs (Zd - Old_Z) <= 0.1 * Old_Z) then
+                  if not Picture.Is_Nan (Zd) and then Zd > 0.0
+                    and then (Old_Z <= 0.0 or else abs (Zd - Old_Z) <= 0.1 * Old_Z)
+                  then
                      P.Z := Zd;
                   end if;
                end if;
