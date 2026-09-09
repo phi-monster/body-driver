@@ -1443,7 +1443,22 @@ package body Act is
       procedure Trim is
          Scale : Long_Float := 1.0;
       begin
-         --  🔴 "一步最多跑一个跟踪窗"删掉:那是身体怕自己跟丢,不是脑的意思。跟丢了就报跟丢,照走。
+         --  🔴🔴 这一条装回来了(owner 2026-09-09 认可):它【不是否决权,是眼睛的快门速度】。
+         --  身体认东西靠"这一帧和上一帧比";一步挪太大,那块东西变大了、被手指挡掉一块、位置跳了,
+         --  对号就跳到旁边另一个东西上,而且从那一刻起它朝着【错的东西】走,自己不知道。
+         --  证据:FN–FO 连着五炮都真的碰到了球,靠的就是当时每一步都极小(被一堆 bug 砍的);
+         --  今晚把砍步子的全删掉之后,步子一大,一段之内必跟丢(GG:十步之后身体说球在右下角)。
+         --  ⚠️ 和"一步不许小到动不了"那条【一起】才对:能动得起来,又跟得住。
+         for I in 0 .. Natural (Pts.Length) - 1 loop
+            declare
+               Pr : constant Table.Vec3 := Table.Predict (Effs (I), Note.Cmd);
+               D : constant Long_Float := Sqrt (Pr (0) ** 2 + Pr (1) ** 2);
+            begin
+               if D > Track_Win then
+                  Scale := Long_Float'Min (Scale, Track_Win / D);
+               end if;
+            end;
+         end loop;
          if Scale < 1.0e-3 then
             Note.Big_Step := True;   --  缩到千分之一还不够(比例,无量纲)= 表已经不可信
          end if;
