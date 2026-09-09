@@ -1182,6 +1182,7 @@ package body Act is
       Last_Err : Long_Float := -1.0;     --  -1 = 还没算过(哨兵,无量纲)
       Last_Raw : Long_Float := -1.0;     --  上一步不随表变的差距
       Best_Raw : Long_Float := -1.0;     --  到目前为止最好的一次(判"有没有在靠近"和它比,不和上一步比 —— 噪声一晃就成退步)
+      Blocked_Run : Natural := 0;        --  连着几步"零表更准":身体自己说这张地图不如"什么都不会发生"准
       Start_H : Long_Float := -1.0;      --  这一段开始时,我点名的那块比它周围鼓出多少(米):它离开台面,这个数就长
       Trust : Long_Float := 0.5;         --  这张表有多准,就走它算出来的多大比例(半开始;预测差一半就只走一半,准了再放开)
       Lost_Run : Natural := 0;           --  连着几步全部认不到
@@ -2014,6 +2015,30 @@ package body Act is
          end if;
          if Codec.Env ("BL_STEPSHOT") /= "" then
             Dump_Picture ("step");   --  逐步落图:看被跟的那块在靠近时到底怎么变(BL_STEPSHOT 打开才存)
+         end if;
+         --  🔴 平时不重量表(每段重量 = 一推 13~21 拍的老账);但身体一旦【连着三步说"我的地图不如零假设准"】,
+         --  就当场重量一遍 —— 拿着一张被证明错的表一路开,是今晚"手在动、球的距离一点不变"的直接原因。
+         --  这是"只在被证明错的时候才重量",既不回到每段重量,也不拿假表开车。
+         if Note.Blocked then
+            Blocked_Run := Blocked_Run + 1;
+         else
+            Blocked_Run := 0;
+         end if;
+         if Blocked_Run >= 3 then
+            Blocked_Run := 0;
+            Put_Line ("[身]     连着三步都是零表更准 ⇒ 这张表已经被证明不准,当场重量一遍");
+            declare
+               Trust2 : Table.Mask;
+               Ok2 : Boolean;
+            begin
+               Probe_Effects (L, C, F, Cam, Pts, Effs, Trust2, Ok2);
+               if Ok2 then
+                  for I in 0 .. Natural (Pts.Length) - 1 loop
+                     Trusts (I) := Trust2;
+                     Store_Effect (C, Arm, Cam, Pts (I).Kind, Pts (I).Chan_K, Pts (I).Blob, Effs (I), Trust2, Unit_Reach, F.EE (Arm), True);
+                  end loop;
+               end if;
+            end;
          end if;
          if Note.Blocked or else Monitor.Refusing (W) then
             Blocked_Out := True;
