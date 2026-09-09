@@ -180,8 +180,14 @@ package body Act is
                   declare
                      Covered : Boolean := False;
                   begin
+                     --  🔴 只收【真正新的】东西:和任何已收的块有一点重叠就不收。
+                     --  以前只看"形心有没有落在已收的块里",太松 —— 一个盖住球的大粗块,形心常常落在细块外面,
+                     --  于是同一个球被重复列两次。实测(GD):清单从 7 件涨到 40 多件、每帧都不一样,
+                     --  编号一轮一变,脑一多半的轮次花在重新认号上,手停在 22 cm 没再往前(GB 能贴到球身上)。
                      for Q of Raw loop
-                        if Picture.Inside (Q, R.Cu, R.Cv, Cw, Ch, 0.0) then
+                        if R.X0 <= Q.X1 and then Q.X0 <= R.X1
+                          and then R.Y0 <= Q.Y1 and then Q.Y0 <= R.Y1
+                        then
                            Covered := True;
                         end if;
                      end loop;
