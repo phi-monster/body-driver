@@ -623,6 +623,12 @@ package body Act is
       Raw_Err : Long_Float := 0.0;              --  不随表变的差距(全是比例):画面距离 + 远近差几成 + 大小差几成 + 朝向差几成。
                                                 --  判"有没有在靠近"只能用它 —— "还差几步"的刻度每步都在变,尺子一缩就看着像退步
       Par_Tu, Par_Tv : Long_Float := 0.0;       --  两团展开时,整块的目标(看清各团真实位置后按它重算各团目标)
+      --  🔴 认死【脑指的那一刻它长什么样】。以前每一步都拿上一帧那块当样子,一步错一点,
+      --  60 步之后整个走到墙上去了(IC 实测:手转到窗户前,身体还报"它就在我指间、大小也对")。
+      --  样子只存一次,以后每一帧都和这一份比;比不上就是跟丢,不许跟到别的东西上。
+      Anc : Buf;                                --  那一刻那块的灰度(半幅分辨率下的一小片)
+      Anc_W, Anc_H : Natural := 0;              --  这一小片多宽多高(0 = 还没存)
+      Scale : Long_Float := 1.0;                --  现在看着是那一刻的几倍(绝对,不是一步步乘出来的)
    end record;
    package Point_Vectors is new Ada.Containers.Vectors (Natural, Point);
 
@@ -980,9 +986,14 @@ package body Act is
                      --  做法:在预测位置周围搜一圈,找和上一帧那块最像的位置(灰度差平方和最小);
                      --  最像的那个也不够像 ⇒ 明说跟丢,不许悄悄跟到别的东西上。
                      declare
-                        --  模板取这块自己的半个身子,再小也有画幅的百分之三(比例,无量纲)
-                        Pw : constant Integer := Integer'Max (3, Integer (Long_Float'Max (P.Box_W, 0.03) * Long_Float (Hw) * 0.5));
-                        Ph : constant Integer := Integer'Max (3, Integer (Long_Float'Max (P.Box_H, 0.03) * Long_Float (Hh) * 0.5));
+                        --  模板 = 【脑指的那一刻这块长什么样】,存下来就不再改(见 Point 里的说明)。
+                        --  还没存过就用这一刻的:取这块自己的半个身子,再小也有画幅的百分之三(比例,无量纲)
+                        Pw : constant Integer :=
+                          (if P.Anc_W > 0 then (P.Anc_W - 1) / 2
+                           else Integer'Max (3, Integer (Long_Float'Max (P.Box_W, 0.03) * Long_Float (Hw) * 0.5)));
+                        Ph : constant Integer :=
+                          (if P.Anc_H > 0 then (P.Anc_H - 1) / 2
+                           else Integer'Max (3, Integer (Long_Float'Max (P.Box_H, 0.03) * Long_Float (Hh) * 0.5)));
                         Cx : constant Integer := Integer (P.Cu * Long_Float (Hw));
                         Cy : constant Integer := Integer (P.Cv * Long_Float (Hh));
                         --  "够不够像"的门槛用【这台相机静止时自己抖多少】(量出来的)算(倍数,无量纲)
@@ -1005,16 +1016,13 @@ package body Act is
                                  declare
                                     X : constant Integer := Xi * Step;
                                     Y : constant Integer := Yi * Step;
-                                    Ax : constant Integer := Cx + X;
-                                    Ay : constant Integer := Cy + Y;
                                     Bx2 : constant Integer := Cx + Integer (Long_Float (X) * Sc) + Ox;
                                     By2 : constant Integer := Cy + Integer (Long_Float (Y) * Sc) + Oy;
                                  begin
-                                    if Ax >= 0 and then Ay >= 0 and then Ax < Hw and then Ay < Hh
-                                      and then Bx2 >= 0 and then By2 >= 0 and then Bx2 < Hw and then By2 < Hh
-                                    then
+                                    if Bx2 >= 0 and then By2 >= 0 and then Bx2 < Hw and then By2 < Hh then
                                        declare
-                                          Va : constant Long_Float := Long_Float (A.Element (Ay * Hw + Ax));
+                                          Va : constant Long_Float :=
+                                            Long_Float (P.Anc.Element ((Ph + Y) * (2 * Pw + 1) + (Pw + X)));
                                           Vb : constant Long_Float := Long_Float (B.Element (By2 * Hw + Bx2));
                                        begin
                                           Sa := Sa + Va; Sb := Sb + Vb;
@@ -1053,12 +1061,28 @@ package body Act is
                         end Score;
                         Best_D : Long_Float := Long_Float'Last;
                         Bx, By : Integer := 0;
-                        Best_S : Long_Float := 1.0;    --  最像的那一档尺度 = 这一步它看着大了还是小了
-                        Base_D : constant Long_Float := Score (0, 0, 1.0, 1);   --  原地不动有多像
+                        Best_S : Long_Float := P.Scale;   --  现在看着是那一刻的几倍(绝对值,不是一步步乘出来的)
+                        Base_D : Long_Float := Long_Float'Last;   --  原地不动有多像
                         Sum_D : Long_Float := 0.0;     --  整幅画面上"随便一个位置"平均多像
                         N_Try : Natural := 0;
                         Sx0, Sy0 : Integer := 0;
                      begin
+                        --  第一次跟这块:把它此刻的样子存下来,以后每一帧都和这一份比。
+                        if P.Anc_W = 0 then
+                           P.Anc.Clear;
+                           for Y in -Ph .. Ph loop
+                              for X in -Pw .. Pw loop
+                                 declare
+                                    Ax : constant Integer := Integer'Max (0, Integer'Min (Hw - 1, Cx + X));
+                                    Ay : constant Integer := Integer'Max (0, Integer'Min (Hh - 1, Cy + Y));
+                                 begin
+                                    P.Anc.Append (A.Element (Ay * Hw + Ax));
+                                 end;
+                              end loop;
+                           end loop;
+                           P.Anc_W := 2 * Pw + 1; P.Anc_H := 2 * Ph + 1;
+                        end if;
+                        Base_D := Score (0, 0, P.Scale, 1);
                         --  🔴 先在粗的一档上把【整幅画面】搜一遍,再回到细的一档只在赢家附近搜。
                         --  手上的相机一动,整幅画面都在跑,固定半径的搜索圈根本追不上 —— HZ 实测:
                         --  探针把某个关节推到 0.53,球早跑出搜索圈,身体记成"这个通道推了没反应",表里写进
@@ -1066,7 +1090,7 @@ package body Act is
                         for Oy in -(Hh / Cs) .. Hh / Cs loop
                            for Ox in -(Hw / Cs) .. Hw / Cs loop
                               declare
-                                 S : constant Long_Float := Score (Ox * Cs, Oy * Cs, 1.0, Cs);
+                                 S : constant Long_Float := Score (Ox * Cs, Oy * Cs, P.Scale, Cs);
                               begin
                                  if S < Long_Float'Last then
                                     Sum_D := Sum_D + S; N_Try := N_Try + 1;
@@ -1083,8 +1107,9 @@ package body Act is
                         Best_D := Long_Float'Last;
                         for Si in 0 .. 4 loop
                            declare
-                              Sc : constant Long_Float := (case Si is when 0 => 0.94, when 1 => 0.97, when 2 => 1.0,
-                                                           when 3 => 1.03, when others => 1.06);
+                              Sc : constant Long_Float := P.Scale *
+                                (case Si is when 0 => 0.94, when 1 => 0.97, when 2 => 1.0,
+                                 when 3 => 1.03, when others => 1.06);
                            begin
                               for Oy in -Cs .. Cs loop
                                  for Ox in -Cs .. Cs loop
@@ -1101,8 +1126,8 @@ package body Act is
                         end loop;
                         --  🔴 尺度要【明显】更像才准改:一步一步乘上去的东西,靠噪声也能走成单边漂移。
                         --  比原尺寸好不到半成就当没变(比例,无量纲)。
-                        if Best_S /= 1.0 and then Best_D > Score (Bx, By, 1.0, 1) * 0.95 then
-                           Best_S := 1.0;
+                        if Best_S /= P.Scale and then Best_D > Score (Bx, By, P.Scale, 1) * 0.95 then
+                           Best_S := P.Scale;
                         end if;
                         --  🔴 认得住要满足两条:①最像的那个本身够像(不超过噪声门槛,或者比原地明显好);
                         --  ②它要明显比【整幅画面上随便一个位置】好(不到平均的一半;比例,无量纲)——
@@ -1115,8 +1140,9 @@ package body Act is
                         else
                            P.Cu := Long_Float'Max (0.0, Long_Float'Min (1.0, P.Cu + Long_Float (Bx) / Long_Float (Hw)));
                            P.Cv := Long_Float'Max (0.0, Long_Float'Min (1.0, P.Cv + Long_Float (By) / Long_Float (Hh)));
-                           P.Box_W := P.Box_W * Best_S;
-                           P.Box_H := P.Box_H * Best_S;
+                           P.Scale := Best_S;
+                           P.Box_W := Long_Float (P.Anc_W) / Long_Float (Hw) * Best_S;
+                           P.Box_H := Long_Float (P.Anc_H) / Long_Float (Hh) * Best_S;
                            P.Size := Sqrt (Long_Float'Max (0.0, P.Box_W * P.Box_H));
                            P.Lost := False;
                         end if;
