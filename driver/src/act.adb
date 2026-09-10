@@ -1066,6 +1066,10 @@ package body Act is
                         Sum_D : Long_Float := 0.0;     --  整幅画面上"随便一个位置"平均多像
                         N_Try : Natural := 0;
                         Sx0, Sy0 : Integer := 0;
+                        --  尺度搜索:五档,最低 0.94,每档三个百分点(都是比例,无量纲)。
+                        --  太粗就当不了控制信号 —— 一步要么判"没变"要么判"变了一成半"。
+                        Sc_Lo : constant Long_Float := 0.94;
+                        Sc_Step : constant Long_Float := 0.03;
                         --  🔴 整幅搜索必须带一条【它不会瞬移】:同样像的两处,信离预测近的那一处。
                         --  不带这一条,画面里任何一块浅色的东西都可能在某一帧比真身更像 ——
                         --  IE 实测:跟的框从球跳到剪刀那只浅绿手柄上,而球就在旁边好好地待着。
@@ -1121,9 +1125,7 @@ package body Act is
                         Best_D := Long_Float'Last;
                         for Si in 0 .. 4 loop
                            declare
-                              Sc : constant Long_Float := P.Scale *
-                                (case Si is when 0 => 0.94, when 1 => 0.97, when 2 => 1.0,
-                                 when 3 => 1.03, when others => 1.06);
+                              Sc : constant Long_Float := P.Scale * (Sc_Lo + Sc_Step * Long_Float (Si));
                            begin
                               for Oy in -Cs .. Cs loop
                                  for Ox in -Cs .. Cs loop
@@ -1138,11 +1140,41 @@ package body Act is
                               end loop;
                            end;
                         end loop;
-                        --  🔴 尺度要【明显】更像才准改:一步一步乘上去的东西,靠噪声也能走成单边漂移。
-                        --  比原尺寸好不到半成就当没变(比例,无量纲)。
-                        if Best_S /= P.Scale and then Best_D > Near (Bx, By, Score (Bx, By, P.Scale, 1)) * 0.95 then
-                           Best_S := P.Scale;
-                        end if;
+                        --  🔴 尺度要【连续】地估:五档里挑一档是个台阶,小的真变化跨不过台阶就被判成"没变",
+                        --  于是表里"推一下它看着变大多少"越学越小,而"还差几步 = 差多少 ÷ 推一下能改多少"
+                        --  就炸上天(IF 实测:第 1–9 步差距 0.353 → 0.164 一路在靠近,第 10 步起大小那一项
+                        --  4 → 20 → 262 → 1342,手随即开始乱转)。样子是认死的那一份,尺度是【相对它的绝对倍数】,
+                        --  不会一步步乘出漂移,所以可以放心在赢的那一档和左右两档之间插值。
+                        declare
+                           Sv : array (0 .. 4) of Long_Float;
+                           Bi : Natural := 2;
+                           Half : constant Long_Float := 0.5;   --  半档(比例,无量纲)
+                        begin
+                           for Si in 0 .. 4 loop
+                              Sv (Si) := Near (Bx, By, Score (Bx, By, P.Scale * (Sc_Lo + Sc_Step * Long_Float (Si)), 1));
+                           end loop;
+                           for Si in 0 .. 4 loop
+                              if Sv (Si) < Sv (Bi) then
+                                 Bi := Si;
+                              end if;
+                           end loop;
+                           Best_S := P.Scale * (Sc_Lo + Sc_Step * Long_Float (Bi));
+                           if Bi > 0 and then Bi < 4
+                             and then Sv (Bi - 1) < Long_Float'Last and then Sv (Bi + 1) < Long_Float'Last
+                           then
+                              declare
+                                 Den : constant Long_Float := Sv (Bi - 1) - 2.0 * Sv (Bi) + Sv (Bi + 1);
+                              begin
+                                 if Den > 0.0 then
+                                    --  抛物线顶点,只许在自己这一档里挪(半档;比例,无量纲)
+                                    Best_S := P.Scale *
+                                      (Sc_Lo + Sc_Step * (Long_Float (Bi)
+                                       + Long_Float'Max (-Half, Long_Float'Min (Half,
+                                           Half * (Sv (Bi - 1) - Sv (Bi + 1)) / Den))));
+                                 end if;
+                              end;
+                           end if;
+                        end;
                         --  🔴 认得住要满足两条:①最像的那个本身够像(不超过噪声门槛,或者比原地明显好);
                         --  ②它要明显比【整幅画面上随便一个位置】好(不到平均的一半;比例,无量纲)——
                         --  否则说明这一片到处都差不多(木纹、墙面),最像的只是巧合(HN 实测:锁到球拍、锁到墙)。
@@ -1702,7 +1734,13 @@ package body Act is
                            Per_Step := Long_Float'Max (Per_Step, abs (T.E.B (K, R)) * Long_Float'Max (1.0e-9, C.Map.Amp (Arm * Chan.Per_Arm + K)));
                         end if;
                      end loop;
-                     if Per_Step > 0.0 then
+                     --  🔴 一推能改的比【眼睛自己抖的还少】⇒ 这一行根本没量到,不许拿它当分母。
+                     --  除以一个没量到的小数,"还差几步"就冲上天,那一行随即吃掉整个目标
+                     --  (IF 实测:大小那一项 4 → 1342,手随即开始乱转;左右上下明明都快归零了)。
+                     --  画面上的三样(左右、上下、看着多大)都是画幅里的长度,共用同一条地板。
+                     if R /= 2 and then R /= 4 and then Per_Step <= Fl.Track then
+                        T.W (R) := 0.0;
+                     elsif Per_Step > 0.0 then
                         T.Err (R) := T.Err (R) / Per_Step;
                         for K in 0 .. Chan.Per_Arm - 1 loop
                            T.E.B (K, R) := T.E.B (K, R) / Per_Step;
