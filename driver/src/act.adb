@@ -2912,19 +2912,28 @@ package body Act is
                   end if;
                   Tl := Tl * 2.0;   --  一档翻一倍(倍数,无量纲)
                end loop;
-               for K in reverse 0 .. Levels - 2 loop
-                  if Cn (K) > 0.0 and then Cn (K + 1) < Cn (K) * 1.5   --  下一档只多出不到半成 = 这条边真的在那儿(比例)
-                    and then Cn (K) < Long_Float (Cwp * Chp)
-                  then
-                     Pick := K; exit;
-                  end if;
-               end loop;
-               if Pick < 0 and then Cn (0) < Long_Float (Cwp * Chp) then
+               --  一直放松到【跨过去就变一个数量级】的那一档为止:东西自己的边就在那儿。
+               --  球面上的缝线、明暗只让它慢慢变大(几成到一倍),而跨到桌面上是几十倍。
+               if Cn (0) < Long_Float (Cwp * Chp) then
                   Pick := 0;
+                  for K in 0 .. Levels - 2 loop
+                     exit when Cn (K + 1) > Cn (K) * 4.0;   --  一档翻四倍以上 = 越过了这个东西的边(倍数,无量纲)
+                     Pick := K + 1;
+                  end loop;
                end if;
+               declare
+                  Cs : String (1 .. 0) := (others => ' ');
+                  pragma Unreferenced (Cs);
+                  Line : Unbounded_String := To_Unbounded_String ("[身] 一档档放松门槛,这一片长到:");
+               begin
+                  for K in 0 .. Levels - 1 loop
+                     Line := Line & Natural'Image (Natural (Cn (K)));
+                  end loop;
+                  Put_Line (To_String (Line));
+               end;
                if Pick >= 0 then
                   R := Gs (Pick);
-                  Put_Line ("[身] 从那一点按颜色长出去(第" & Integer'Image (Pick + 1) & " 档门槛稳住)⇒ 这一片"
+                  Put_Line ("[身] 从那一点按颜色长出去(放松到第" & Integer'Image (Pick + 1) & " 档就到边了)⇒ 这一片"
                             & Natural'Image (R.Count) & " 个像素,拿它当这个东西的框");
                end if;
             end;
