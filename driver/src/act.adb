@@ -577,6 +577,18 @@ package body Act is
       begin
          if A >= 0 then
             Append (T, "- this picture rides on arm " & Codec.Img (Natural (A) + 1) & ": its fingers and grip stay put in this picture, the world moves when that arm moves" & ASCII.LF);
+            --  🔴 身体要把【自己量不到什么】说出来。这一台相机跟着这只胳膊动 ⇒ 在它里面对齐,
+            --  只说明东西在两指的正前方,而那条线转个手腕就满足了,和手离它多远无关
+            --  (II 实测:在这一台里对齐了、也一直在满幅推,球就是不变大,38 步没靠近)。
+            --  怎么办是脑的活(换那台不跟着这只胳膊动的相机去对齐),身体只负责把这句实话摆出来 ——
+            --  不说,脑就没有理由去换,而它在这一台里会一直以为自己在进步。
+            Append (T, "- from this picture alone I cannot tell how far a thing is from my fingers: this picture moves with that arm, so lining a thing up here only means it is straight ahead of my fingers, not that it is near. A picture that does NOT ride on this arm can tell me." & ASCII.LF);
+            --  🔴 身体要把【自己量不到什么】说出来。这一台相机跟着这只胳膊动 ⇒ 它给的只是
+            --  "东西在两指的连线上",而那条线转个手腕就满足了,和手离它多远无关 ——
+            --  也就是说,光靠这一台,身体判断不出远近(IJ/II 实测:在这一台里对齐了、也一直在推,
+            --  球就是不变大)。怎么办是脑的活(换一台看、或者让另一只胳膊转过来看着),
+            --  身体只负责把这句实话摆出来 —— 不说,脑就没有理由去换。
+            Append (T, "- from this picture alone I cannot tell how far a thing is from my fingers: this picture moves with that arm, so lining a thing up here only means it is straight ahead of my fingers, not that it is close. A picture that does NOT ride on this arm can tell me." & ASCII.LF);
          end if;
       end;
       if Have_Named then
@@ -1743,6 +1755,10 @@ package body Act is
                         for K in 0 .. Chan.Per_Arm - 1 loop
                            T.E.B (K, R) := T.E.B (K, R) / Per_Step;
                         end loop;
+                        --  🔴 一步就是一推:任何一行这一步最多也只能要求一推。不压这一条,
+                        --  一行算出"还差一千步"就会把整个目标吃掉,手开始乱转(IF 实测:大小 4 → 1342)。
+                        --  压完之后各行都只剩"这一步管不管你",方向由解算把它们放在一起挑。
+                        T.Err (R) := Long_Float'Max (-1.0, Long_Float'Min (1.0, T.Err (R)));
                         --  🔴 差不到一推的,这一步就别管它 —— 身体本来就分辨不到比一推更细。
                         --  不加这一条,已经瞄准到"零点一推"的那两行会死死拽住手不让它往前:
                         --  往前必然要动画面位置,而那两行不肯让 ⇒ 解算给出的命令只有一推的二十分之一,
@@ -3361,17 +3377,18 @@ package body Act is
                                  else
                                     P.Tz := P.Z; P.Wz := 0.0;
                                  end if;
-                                 --  🔴 "看着多大"不当距离信号(2026-09-11 定)。两条都不成立:
-                                 --  ① 够不着 —— 合空扫过的那一片比一个小东西大得多,一个球永远长不到那么大,
-                                 --     这一项就永远差着九成,把整个目标吃掉(ID 实测:左右上下全归零,差距死卡 0.90);
-                                 --  ② 量不到 —— 手往前挪一厘米,四十厘米外的东西只变大不到一个像素,低于画面自己的抖动,
-                                 --     表里那一列学不出来(II 实测:满幅一推、手确实在动,球一直不变大,38 步没靠近)。
-                                 --  换成【换一台相机再看一次】:在一台相机里手压在东西上只说明手在那条视线上,
-                                 --  两台位置不同的相机里同时压上,两条线一交就只能是真的在那儿 —— 误差还是像素,
-                                 --  和左右上下一样灵敏。轮流看哪一台是脑的活,身体这边只要不再假装自己懂距离。
+                                 --  没有深度的时候,这一台相机里能给的距离只剩"看着多大"。它够不着也没关系:
+                                 --  下面归一那一段把每一行的要求都压在一推之内,它只负责给一个"往前"的方向,终点是碰上。
+                                 --  ⚠️ 真正的距离来自【两条视线交会】—— 在两台位置不同、都不跟着这只手动的相机里
+                                 --  同时把手压在东西上,两条线一交就只能是真的在那儿,而且误差还是像素,和左右上下
+                                 --  一样灵敏。这台机器上两台都有(头顶那台 + 另一只胳膊腕上那台,推这只手时它不动),
+                                 --  只是另一只胳膊可能正看着别处 —— 把它转过去看是【脑】的活,身体不替它决定,
+                                 --  身体要做的只是把"我从这一台判断不出远近"说出来(见下面那句)。
+                                 --  手上自己那台给不出距离:它那条"东西在两指连线上"的约束,转个手腕就满足了。
                                  P.Size := Sqrt (Long_Float'Max (0.0, P.Box_W * P.Box_H));
-                                 P.Tsize := 0.0;
-                                 P.Wsize := 0.0;
+                                 P.Tsize := Sqrt (Long_Float'Max (0.0,
+                                   (Long_Float (Z.X1 - Z.X0) / Long_Float (Cw)) * (Long_Float (Z.Y1 - Z.Y0) / Long_Float (Ch))));
+                                 P.Wsize := (if P.Tsize > 0.0 and then P.Size > 0.0 then 1.0 else 0.0);
                                  P.Desc := S ("item " & Codec.Img (G.Of_Item) & " to come to where my fingers close");
                                  Pre_Targeted := True;
                               end if;
