@@ -1015,6 +1015,7 @@ package body Act is
                               declare
                                  Sum : Long_Float := 0.0;
                                  N_Pix : Natural := 0;
+                                 Sa, Sb, Qa, Qb : Long_Float := 0.0;   --  两边各自的平均亮度和起伏
                               begin
                                  for Y in -Ph .. Ph loop
                                     for X in -Pw .. Pw loop
@@ -1027,13 +1028,39 @@ package body Act is
                                           if Ax >= 0 and then Ay >= 0 and then Ax < Hw and then Ay < Hh
                                             and then Bx2 >= 0 and then By2 >= 0 and then Bx2 < Hw and then By2 < Hh
                                           then
-                                             Sum := Sum + (Long_Float (A.Element (Ay * Hw + Ax)) - Long_Float (B.Element (By2 * Hw + Bx2))) ** 2;
-                                             N_Pix := N_Pix + 1;
+                                             declare
+                                                Va : constant Long_Float := Long_Float (A.Element (Ay * Hw + Ax));
+                                                Vb : constant Long_Float := Long_Float (B.Element (By2 * Hw + Bx2));
+                                             begin
+                                                Sum := Sum + (Va - Vb) ** 2;
+                                                Sa := Sa + Va; Sb := Sb + Vb;
+                                                Qa := Qa + Va * Va; Qb := Qb + Vb * Vb;
+                                                N_Pix := N_Pix + 1;
+                                             end;
                                           end if;
                                        end;
                                     end loop;
                                  end loop;
+                                 --  🔴 只和"长得像它"的候选比:平均亮度要接近,【起伏】也要接近。
+                                 --  只比灰度差平方和的话,平整的墙面和木纹到处都能凑出一个"最像"的位置 ——
+                                 --  实测手腕越抬越高、模板锁到墙上,尺度也跟着被带偏(HT)。
+                                 --  球有缝线所以起伏大,墙是平的起伏小,这一条就把墙挡掉了。
                                  if N_Pix > 0 then
+                                    declare
+                                       Ma : constant Long_Float := Sa / Long_Float (N_Pix);
+                                       Mb : constant Long_Float := Sb / Long_Float (N_Pix);
+                                       Da : constant Long_Float := Sqrt (Long_Float'Max (0.0, Qa / Long_Float (N_Pix) - Ma * Ma));
+                                       Db : constant Long_Float := Sqrt (Long_Float'Max (0.0, Qb / Long_Float (N_Pix) - Mb * Mb));
+                                    begin
+                                       --  亮度差过噪声的四倍、或者起伏差一倍以上(倍数,无量纲)⇒ 不是它
+                                       if abs (Ma - Mb) > Noise_G * 4.0
+                                         or else Db > Da * 2.0 + 1.0 or else Da > Db * 2.0 + 1.0
+                                       then
+                                          Sum := Long_Float'Last;
+                                       end if;
+                                    end;
+                                 end if;
+                                 if N_Pix > 0 and then Sum < Long_Float'Last then
                                     Sum := Sum / Long_Float (N_Pix);
                                     if Ox = 0 and then Oy = 0 then
                                        Base_D := Sum;
