@@ -149,9 +149,8 @@ package body Act is
       Raw : Picture.Regions;
       Kept : Picture.Regions;
    begin
-      if not F.Cams (Cam).Has_Depth then
-         return Kept;
-      end if;
+      --  🔴 没有深度就直接走颜色那一路(真机没有深度相机)。以前这里直接返回空 = 什么都看不见。
+      if F.Cams (Cam).Has_Depth then
       Raw := Picture.Cut (F.Cams (Cam).Depth, Cw, Ch, Cut_Window (C, Cam, F), Sigma_Mult);
       --  🔴 一个都没切出来 ⇒ 换个大一号的尺子再看一遍。
       --  "鼓出来"是相对周围说的:窗口比这块东西还小的时候,这块东西【自己就是周围】,于是它鼓 0、整个消失。
@@ -233,6 +232,7 @@ package body Act is
             end loop;
          end if;
       end;
+      end if;
       --  🔴 只有【深度上一个都看不出来】的时候才按颜色切:桌面木纹、瓷砖缝的颜色台阶比线还明显,
       --  在能看见东西的桌子上开着它,清单会从 7 条涨到 46 条,脑子被淹掉(ES 实测)。
       --  线板那种场合深度切不出任何东西,颜色这一路才接手。
@@ -2878,6 +2878,12 @@ package body Act is
                                  else
                                     P.Tz := P.Z; P.Wz := 0.0;
                                  end if;
+                                 --  🔴 没有深度的时候,距离靠"看着多大":东西真的到了两指之间,它在画面里就该和
+                                 --  合空时扫过的那片一样大。这是画面上直接量的,不吃深度噪声,而且越近越大是单调的。
+                                 P.Size := Sqrt (Long_Float'Max (0.0, P.Box_W * P.Box_H));
+                                 P.Tsize := Sqrt (Long_Float'Max (0.0,
+                                   (Long_Float (Z.X1 - Z.X0) / Long_Float (Cw)) * (Long_Float (Z.Y1 - Z.Y0) / Long_Float (Ch))));
+                                 P.Wsize := (if P.Tsize > 0.0 and then P.Size > 0.0 then 1.0 else 0.0);
                                  P.Desc := S ("item " & Codec.Img (G.Of_Item) & " to come to where my fingers close");
                                  Pre_Targeted := True;
                               end if;
@@ -3221,13 +3227,21 @@ package body Act is
                         Hz : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, Cam);
                         Own : constant Boolean := Cam_Arm (C, Cam) = Integer (P.Arm);
                         Thick : constant Long_Float := Long_Float'Max (P.Height, 1.0e-3);
+                        --  没有深度的时候用"看着多大"说同一句话:比它该有的小 = 还远,大 = 走过头了
+                        Sz_Now : constant Long_Float := P.Size;
+                        Sz_Want : constant Long_Float := P.Tsize;
                         Where : constant String :=
-                          (if P.Kind /= Thing_Pt or else not Own or else not Hz.Valid
-                             or else Picture.Is_Nan (Hz.Depth) or else Hz.Depth <= 0.0 or else P.Z <= 0.0
-                           then ""
-                           elsif P.Z > Hz.Depth + Thick then " and it is still beyond my fingertips"
-                           elsif P.Z < Hz.Depth - Thick then " and I have gone past it - it is behind my fingertips"
-                           else " and it is level with my fingertips");
+                          (if P.Kind /= Thing_Pt or else not Own then ""
+                           elsif Hz.Valid and then not Picture.Is_Nan (Hz.Depth) and then Hz.Depth > 0.0 and then P.Z > 0.0 then
+                             (if P.Z > Hz.Depth + Thick then " and it is still beyond my fingertips"
+                              elsif P.Z < Hz.Depth - Thick then " and I have gone past it - it is behind my fingertips"
+                              else " and it is level with my fingertips")
+                           elsif Sz_Now > 0.0 and then Sz_Want > 0.0 then
+                             --  两个都是"占画幅的多少",比值(无量纲):差两成以内就算一样大
+                             (if Sz_Now < Sz_Want * 0.8 then " and it still looks too small, so it is not at my fingertips yet"
+                              elsif Sz_Now > Sz_Want * 1.25 then " and it now looks bigger than my fingers' own span, so I have gone past it"
+                              else " and it looks the size it should when it sits between my fingers")
+                           else "");
                      begin
                         Report := Report & "item " & Codec.Img (P.Item_No) & (if P.Blob = 0 then " (finger A)" else "") & " is now in cell " &
                                   Codec.Img (Cell_Of (C, P.Cu, P.Cv)) & ", " &
