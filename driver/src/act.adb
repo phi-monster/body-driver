@@ -267,7 +267,52 @@ package body Act is
                end loop;
                return False;
             end Same_There;
+            --  🔴 再加一路:让画面自己把明暗分成两拨(Otsu,分不开就说分不开),两拨各自连通成块。
+            --  白球在棕桌上、红乐高在木桌上,都是这一路一刀就切出来的;门槛是【算出来的】,不是我定的。
+            --  一个全局颜色门槛切不出球:球身上有明暗渐变,门槛低了碎成几瓣,高了和桌面并成一块(HD 实测)。
+            function By_Brightness return Picture.Regions is
+               Gs : Floats;
+               Cut_At : Long_Float;
+               Hi, Lo : Bools;
+               Res : Picture.Regions;
+            begin
+               for I in 0 .. Cw * Ch - 1 loop
+                  Gs.Append (Long_Float (F.Cams (Cam).Gray.Element (I)));
+               end loop;
+               Cut_At := Picture.Split (Gs);
+               if Picture.Is_Nan (Cut_At) then
+                  return Res;      --  分不开(单峰)⇒ 这一路没有东西可给
+               end if;
+               Hi := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (Cw * Ch));
+               Lo := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (Cw * Ch));
+               for I in 0 .. Cw * Ch - 1 loop
+                  if Long_Float (F.Cams (Cam).Gray.Element (I)) > Cut_At then
+                     Hi.Replace_Element (I, True);
+                  else
+                     Lo.Replace_Element (I, True);
+                  end if;
+               end loop;
+               Res := Picture.Components (Hi, Cw, Ch, Picture.Min_Pixels (Cw, Ch));
+               for R of Picture.Components (Lo, Cw, Ch, Picture.Min_Pixels (Cw, Ch)) loop
+                  Res.Append (R);
+               end loop;
+               return Res;
+            end By_Brightness;
          begin
+            for R of By_Brightness loop
+               declare
+                  Dup : Boolean := False;
+               begin
+                  for Q of Out_R loop
+                     if Picture.Inside (Q, R.Cu, R.Cv, Cw, Ch, 0.0) then
+                        Dup := True;
+                     end if;
+                  end loop;
+                  if not Dup then
+                     Out_R.Append (R);
+                  end if;
+               end;
+            end loop;
             for R of R2 loop
                if Same_There (R1, R) or else Same_There (R3, R) then
                   declare
