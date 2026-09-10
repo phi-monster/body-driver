@@ -246,41 +246,47 @@ package body Act is
                                         then Natural (C.Map.Pic_Floor (Cam)) else 0);
          Floor_C : constant Long_Float :=
            Long_Float'Max (Long_Float (Noise_C) * 2.0 + 1.0, Picture.Texture_Level (F.Cams (Cam).RGB, Cw, Ch) * 4.0);
-         --  🔴 门槛也走一把梯子,和深度那边同一个道理:木纹把门槛抬高之后,白球和棕桌会被并成一块 ——
-         --  实测(HA):切出 28 块碎片,而画面正中那个白球一块都没有。
-         --  从量出来的那一档起,一路减半再切几遍,把每一档【新出现】的块收进来(倍数、次数,无量纲)。
-         function Colour_Ladder return Picture.Regions is
+         --  🔴🔴 颜色切块只收【稳定的块】:一个真东西,门槛变一倍它的样子几乎不变;
+         --  而桌面、墙面、纹理碎片会随门槛剧烈变化(实测:粗门槛把白球和棕桌并成一块,
+         --  细门槛把整幅画面碎成 1112 块 —— 两头都不能用)。
+         --  做法:在三档门槛(量出来那一档的 1/4、1/2、1 倍;倍数无量纲)各切一遍,
+         --  只保留【在相邻那一档里也能找到一个位置和大小都差不多的块】的那些 —— 稳定 = 真东西。
+         function Colour_Stable return Picture.Regions is
+            R1 : constant Picture.Regions := Picture.Cut_Colour (F.Cams (Cam).RGB, Cw, Ch, Floor_C * 0.25, Picture.Min_Pixels (Cw, Ch));
+            R2 : constant Picture.Regions := Picture.Cut_Colour (F.Cams (Cam).RGB, Cw, Ch, Floor_C * 0.5, Picture.Min_Pixels (Cw, Ch));
+            R3 : constant Picture.Regions := Picture.Cut_Colour (F.Cams (Cam).RGB, Cw, Ch, Floor_C, Picture.Min_Pixels (Cw, Ch));
             Out_R : Picture.Regions;
-            --  🔴 从【最细】的门槛开始:粗门槛会把白球和棕桌并成一大块,先收了它,后面细门槛切出来的球
-            --  就会因为"中心落在已收的块里"被当成重复丢掉(HA/HB 实测:97 块碎片,而画面正中的球一块都没有)。
-            --  倒过来走,细的先收,粗的只补细门槛没看见的东西。
-            Th : Long_Float := Floor_C / 8.0;
+            function Same_There (Rs : Picture.Regions; R : Picture.Region) return Boolean is
+            begin
+               for Q of Rs loop
+                  if Picture.Inside (R, Q.Cu, Q.Cv, Cw, Ch, 0.0)
+                    and then Q.Count * 3 >= R.Count * 2 and then R.Count * 3 >= Q.Count * 2
+                  then
+                     return True;      --  位置在它里面,而且大小差不到三分之一 ⇒ 这一档也认得它
+                  end if;
+               end loop;
+               return False;
+            end Same_There;
          begin
-            for Try in 1 .. 4 loop
-               declare
-                  Got : constant Picture.Regions :=
-                    Picture.Cut_Colour (F.Cams (Cam).RGB, Cw, Ch, Th, Picture.Min_Pixels (Cw, Ch));
-               begin
-                  for R of Got loop
-                     declare
-                        Dup : Boolean := False;
-                     begin
-                        for Q of Out_R loop
-                           if Picture.Inside (Q, R.Cu, R.Cv, Cw, Ch, 0.0) or else Picture.Inside (R, Q.Cu, Q.Cv, Cw, Ch, 0.0) then
-                              Dup := True;
-                           end if;
-                        end loop;
-                        if not Dup then
-                           Out_R.Append (R);
+            for R of R2 loop
+               if Same_There (R1, R) or else Same_There (R3, R) then
+                  declare
+                     Dup : Boolean := False;
+                  begin
+                     for Q of Out_R loop
+                        if Picture.Inside (Q, R.Cu, R.Cv, Cw, Ch, 0.0) then
+                           Dup := True;
                         end if;
-                     end;
-                  end loop;
-               end;
-               Th := Th * 2.0;
+                     end loop;
+                     if not Dup then
+                        Out_R.Append (R);
+                     end if;
+                  end;
+               end if;
             end loop;
             return Out_R;
-         end Colour_Ladder;
-         Thin : constant Picture.Regions := Colour_Ladder;
+         end Colour_Stable;
+         Thin : constant Picture.Regions := Colour_Stable;
       begin
          for R of Thin loop
             declare
