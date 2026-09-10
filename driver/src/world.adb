@@ -58,6 +58,11 @@ package body World is
                if Best >= 0 then
                   Used (Best) := True;
                   Sl.Present := True; Sl.R := Regs (Best); Sl.Shadow := Regs (Best); Sl.Seen := True;
+               elsif Regs.Is_Empty then
+                  --  🔴 这张画面里一块都切不出来(没有深度、颜色也切不出)⇒ 不能因此说"东西不见了"。
+                  --  它没消失,是我们切不出来 —— 位置留着上一次的,照样当它在,由光流在段内把它追下去。
+                  --  以前这里一律标成"看不见",于是脑指出来的那个东西下一轮就点不了名(HG/HH 实测)。
+                  null;
                else
                   Sl.Present := False;
                end if;
