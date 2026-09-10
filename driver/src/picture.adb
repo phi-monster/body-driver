@@ -107,6 +107,82 @@ package body Picture is
       end if;
    end Mean_Colour;
 
+   procedure Grow_From (RGB : Buf; W, H : Natural; U, V, Tol : Long_Float; R : out Region; Ok : out Boolean) is
+      N : constant Natural := W * H;
+      Seen : Bools;
+      Q : Ints;
+      Head : Natural := 0;
+      Cnt : Natural := 0;
+      Su, Sv : Long_Float := 0.0;
+      X0, Y0, X1, Y1 : Natural;
+      Sx, Sy, Si : Natural;
+      function Diff (A, B : Natural) return Long_Float is
+        (Long_Float'Max
+           (Long_Float'Max (abs (Long_Float (RGB.Element (3 * A)) - Long_Float (RGB.Element (3 * B))),
+                            abs (Long_Float (RGB.Element (3 * A + 1)) - Long_Float (RGB.Element (3 * B + 1)))),
+            abs (Long_Float (RGB.Element (3 * A + 2)) - Long_Float (RGB.Element (3 * B + 2)))));
+   begin
+      Ok := False;
+      if Natural (RGB.Length) < N * 3 or else W < 3 or else H < 3 then
+         return;
+      end if;
+      Sx := Natural'Min (W - 1, Natural (Long_Float'Max (0.0, U * Long_Float (W))));
+      Sy := Natural'Min (H - 1, Natural (Long_Float'Max (0.0, V * Long_Float (H))));
+      Si := Sy * W + Sx;
+      Seen.Set_Length (Ada.Containers.Count_Type (N));
+      for I in 0 .. N - 1 loop
+         Seen.Replace_Element (I, False);
+      end loop;
+      X0 := Sx; X1 := Sx; Y0 := Sy; Y1 := Sy;
+      Seen.Replace_Element (Si, True);
+      Q.Append (Integer (Si));
+      while Head < Natural (Q.Length) loop
+         declare
+            P : constant Natural := Natural (Q.Element (Head));
+            Px : constant Natural := P mod W;
+            Py : constant Natural := P / W;
+         begin
+            Head := Head + 1;
+            Cnt := Cnt + 1;
+            Su := Su + Long_Float (Px); Sv := Sv + Long_Float (Py);
+            if Px < X0 then X0 := Px; end if;
+            if Px > X1 then X1 := Px; end if;
+            if Py < Y0 then Y0 := Py; end if;
+            if Py > Y1 then Y1 := Py; end if;
+            if Cnt * 2 > N then      --  长到半幅以上(比例,无量纲)= 这条边不成立
+               return;
+            end if;
+            for D in 0 .. 3 loop
+               declare
+                  Nx : constant Integer := Integer (Px) + (case D is when 0 => 1, when 1 => -1, when others => 0);
+                  Ny : constant Integer := Integer (Py) + (case D is when 2 => 1, when 3 => -1, when others => 0);
+               begin
+                  if Nx >= 0 and then Nx < Integer (W) and then Ny >= 0 and then Ny < Integer (H) then
+                     declare
+                        Nq : constant Natural := Natural (Ny) * W + Natural (Nx);
+                     begin
+                        if not Seen.Element (Nq) and then Diff (P, Nq) <= Tol then
+                           Seen.Replace_Element (Nq, True);
+                           Q.Append (Integer (Nq));
+                        end if;
+                     end;
+                  end if;
+               end;
+            end loop;
+         end;
+      end loop;
+      if Cnt < Min_Pixels (W, H) then
+         return;
+      end if;
+      R.X0 := X0; R.Y0 := Y0; R.X1 := X1; R.Y1 := Y1;
+      R.Count := Cnt;
+      R.Cu := (Su / Long_Float (Cnt)) / Long_Float (W);
+      R.Cv := (Sv / Long_Float (Cnt)) / Long_Float (H);
+      R.Sig_U := Long_Float (X1 - X0 + 1) / (2.0 * Long_Float (W));   --  半宽(比例,无量纲)
+      R.Sig_V := Long_Float (Y1 - Y0 + 1) / (2.0 * Long_Float (H));
+      Ok := True;
+   end Grow_From;
+
    function Texture_Level (RGB : Buf; W, H : Natural) return Long_Float is
       Ds : Floats;
       I : Natural := 0;

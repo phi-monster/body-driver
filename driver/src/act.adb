@@ -2885,9 +2885,28 @@ package body Act is
             R.Y1 := Natural (Long_Float'Min (Long_Float (Chp - 1), (V + Hv) * Long_Float (Chp)));
             R.Count := (R.X1 - R.X0 + 1) * (R.Y1 - R.Y0 + 1);
             R.Sig_U := Hu; R.Sig_V := Hv;
+            --  🔴 脑说的是【在哪儿】,身体量的是【这一片到哪儿为止】:从那一点按颜色长出去,
+            --  长成了就换成长出来的框 —— 那才是那个东西本身。一格里常有一半是桌面,
+            --  拿半格桌面当模板去追,追上的就是桌面(HL/HU 实测:框压在球边上,手腕越抬越高)。
+            declare
+               Noise_P : constant Natural := (if Cam < Natural (C.Map.Pic_Floor.Length) and then C.Map.Pic_Floor (Cam) > 0
+                                              then Natural (C.Map.Pic_Floor (Cam)) else 0);
+               --  门槛和切块用的是同一个:相机噪声的 2 倍、这张画面纹理的 4 倍,取大(倍数无量纲)
+               Tol_P : constant Long_Float :=
+                 Long_Float'Max (Long_Float (Noise_P) * 2.0 + 1.0,
+                                 Picture.Texture_Level (F.Cams (Cam).RGB, Cwp, Chp) * 4.0);
+               G : Picture.Region;
+               Gok : Boolean;
+            begin
+               Picture.Grow_From (F.Cams (Cam).RGB, Cwp, Chp, U, V, Tol_P, G, Gok);
+               if Gok then
+                  R := G;
+                  Put_Line ("[身] 从那一点按颜色长出去 ⇒ 这一片" & Natural'Image (G.Count) & " 个像素,拿它当这个东西的框");
+               end if;
+            end;
             Regs.Append (R);
             World.Observe (C.Wld, Cam, Regs, Cwp, Chp);
-            World.Pin (C.Wld, Cam, U, V);   --  脑指的那个:钉住,以后不许因为"这一帧没对上"就说看不见
+            World.Pin (C.Wld, Cam, R.Cu, R.Cv);   --  脑指的那个:钉住,以后不许因为"这一帧没对上"就说看不见
             Put_Line ("[身] 脑指了第" & Natural'Image (Say.Point_At) & " 格 ⇒ 把那一片当成一个东西收下,以后照常跟");
          end;
       end if;
