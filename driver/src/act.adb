@@ -983,8 +983,8 @@ package body Act is
                         --  模板取这块自己的半个身子,再小也有画幅的百分之三(比例,无量纲);搜一圈 = 一个跟踪窗
                         Pw : constant Integer := Integer'Max (3, Integer (Long_Float'Max (P.Box_W, 0.03) * Long_Float (Hw) * 0.5));
                         Ph : constant Integer := Integer'Max (3, Integer (Long_Float'Max (P.Box_H, 0.03) * Long_Float (Hh) * 0.5));
-                        --  搜两个跟踪窗:球一步跑得比一个窗远时,只搜一个窗就会锁到旁边的东西上(HN 实测锁到球拍上)
-                        Rr : constant Integer := Integer'Max (2, Integer (Track_Win * 2.0 * Long_Float (Hw)));
+                        --  搜一个跟踪窗(一步最多让画面跑这么多;比例,无量纲)。范围收回来,把算力让给尺度那一档
+                        Rr : constant Integer := Integer'Max (2, Integer (Track_Win * Long_Float (Hw)));
                         Cx : constant Integer := Integer (P.Cu * Long_Float (Hw));
                         Cy : constant Integer := Integer (P.Cv * Long_Float (Hh));
                         Best_D : Long_Float := Long_Float'Last;
@@ -1003,10 +1003,12 @@ package body Act is
                         --  🔴 一起把【尺度】也搜出来:模板在这一帧变大还是变小,就是"离得越近越大"那条距离信号。
                         --  没有深度之后,这是身体唯一可能有的"往前"的感觉 —— 不搜尺度,大小那一行永远是零,
                         --  伺服就只能靠转手腕在画面里挪球,最后把手臂仰到天上(HQ 实测)。
-                        for Si in 0 .. 2 loop
+                        for Si in 0 .. 4 loop
                         declare
-                           --  三档尺度:小一档、原样、大一档(比例,无量纲;互为倒数,来回一步就能回到原样)
-                           Sc : constant Long_Float := (case Si is when 0 => 0.85, when 1 => 1.0, when others => 1.18);
+                           --  五档尺度,每档三个百分点(比例,无量纲)。三档太粗:一步要么判"没变"要么判"变了一成半",
+                           --  当不了控制信号 —— 实测大小那一项不降反涨(60 → 439 → 525)。
+                           Sc : constant Long_Float := (case Si is when 0 => 0.94, when 1 => 0.97, when 2 => 1.0,
+                                                        when 3 => 1.03, when others => 1.06);
                         begin
                         for Oy in -Rr .. Rr loop
                            for Ox in -Rr .. Rr loop
