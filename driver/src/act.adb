@@ -3119,9 +3119,13 @@ package body Act is
                                                 P.Tv := (if Ln > 0.0 then Lv / Ln else Z.Cv);
                                              end;
                                              P.Tz := Z.Depth; P.Wz := (if Picture.Is_Nan (Z.Depth) then 0.0 else 1.0);
-                                             P.Tsize := Sqrt (Long_Float'Max (0.0,
-                                               (Long_Float (Z.X1 - Z.X0) / Long_Float (Cw)) * (Long_Float (Z.Y1 - Z.Y0) / Long_Float (Ch))));
+                                             --  同上:手掌张开那一片当不了终点,只当上限;每一段只要求它看着
+                                             --  比现在大两成半(比例,无量纲),真正的终点是碰上(见下面那一段的说明)
                                              P.Size := Sqrt (Long_Float'Max (0.0, P.Box_W * P.Box_H));
+                                             P.Tsize := Long_Float'Min
+                                               (Sqrt (Long_Float'Max (0.0,
+                                                  (Long_Float (Z.X1 - Z.X0) / Long_Float (Cw)) * (Long_Float (Z.Y1 - Z.Y0) / Long_Float (Ch)))),
+                                                P.Size * 1.25);
                                              P.Wsize := (if P.Tsize > 0.0 and then P.Size > 0.0 then 1.0 else 0.0);
                                              --  🔴 远的时候不许把目标定在两指那个位置。手指贴着镜头,它们在这张画面里
                                              --  落在最下沿;而远处的东西在画面里根本到不了那儿 —— 硬要它去,手腕就一路
@@ -3305,8 +3309,15 @@ package body Act is
                                  --  🔴 没有深度的时候,距离靠"看着多大":东西真的到了两指之间,它在画面里就该和
                                  --  合空时扫过的那片一样大。这是画面上直接量的,不吃深度噪声,而且越近越大是单调的。
                                  P.Size := Sqrt (Long_Float'Max (0.0, P.Box_W * P.Box_H));
-                                 P.Tsize := Sqrt (Long_Float'Max (0.0,
-                                   (Long_Float (Z.X1 - Z.X0) / Long_Float (Cw)) * (Long_Float (Z.Y1 - Z.Y0) / Long_Float (Ch))));
+                                 --  🔴 "该看着多大"不许拿【手掌张开那么大】当终点。合空扫过的那一片比一个球大
+                                 --  得多,一个小东西永远长不到那么大 ⇒ 这一项永远差着九成,身体一直往前顶也算不完
+                                 --  (ID 实测:左右上下都已经归零,差距还死死卡在 0.90,大小那一项 235 步)。
+                                 --  真正的终点是【碰上】(脑说的 at 就是挨着),这一项只负责给身体一个"往前"的方向:
+                                 --  每一段只要求它看着比现在大两成半(比例,无量纲),再压在"不许比两指之间还大"之下。
+                                 P.Tsize := Long_Float'Min
+                                   (Sqrt (Long_Float'Max (0.0,
+                                      (Long_Float (Z.X1 - Z.X0) / Long_Float (Cw)) * (Long_Float (Z.Y1 - Z.Y0) / Long_Float (Ch)))),
+                                    P.Size * 1.25);
                                  P.Wsize := (if P.Tsize > 0.0 and then P.Size > 0.0 then 1.0 else 0.0);
                                  P.Desc := S ("item " & Codec.Img (G.Of_Item) & " to come to where my fingers close");
                                  Pre_Targeted := True;
