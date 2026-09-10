@@ -2796,7 +2796,17 @@ package body Act is
                   begin
                      if It.Located then
                         P.Item_No := G.Item;
-                        if It.Kind in Finger | Grip | Piece | Thing_Held then
+                        --  🔴 在【长在这只手上的】相机里,我自己的零件是固定像素:手怎么动,它在这张画面里都不动,
+                        --  远近也永远是标定时那个常数。对它下命令是一句空话,而以前身体不但不拦,还当场报"到位了"
+                        --  (GX 实测:推了 80 步、报了两次"爪子已经到你要的位置",球一厘米都没近)。
+                        --  明说做不到,别再假装成功 —— 这台相机里唯一有意义的是"让那个东西去到两指合上的地方"。
+                        if It.Kind in Finger | Grip | Piece | Thing_Held
+                          and then Cam_Arm (C, Cam) = Integer (It.Arm)
+                        then
+                           Report := Report & "goal: in this camera my own hand does not move - it is fixed pixels here. "
+                                     & "Name the thing you want moved instead, or use another camera. ";
+                           Ok_Pt := False;
+                        elsif It.Kind in Finger | Grip | Piece | Thing_Held then
                            P.Arm := It.Arm; P.Kind := Piece_Pt;
                            P.Chan_K := (if It.Kind = Piece then It.Which else Chan.Per_Arm);
                            declare
