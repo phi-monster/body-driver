@@ -1427,7 +1427,11 @@ package body Act is
                      --  "看着多大"这条最稳的远近信号根本没被量到,而深度读数又不重复 ⇒
                      --  身体手里一个能用的"我在靠近吗"都没有,压不进去一整晚。
                      --  和"推到点真的动过"是同一条规矩,只是这次盯的是大小那一行;仍然被幅度上限兜着。
-                     exit when Trust (K) and then (Size_Seen or else Ran_Max >= Track_Win or else Amp * 2.0 > Cap_Amp);
+                     --  🔴 "点已经跑够一个跟踪窗了"不许当作可以收手 —— 那正是把这一条规矩废掉的那个口子:
+                     --  位置在很小的一推下就动了,于是探到那儿就停,而"看着多大"根本没变过地板 ⇒ 那一列恒零。
+                     --  II 实测:命令、实到都是满幅的一推,手也在动,球却一直不变大,38 步差距 0.84 纹丝不动 ——
+                     --  身体压根不知道往哪边是"更近"。现在整幅都能搜回来,推大一点不怕跟丢,仍被幅度上限兜着。
+                     exit when Trust (K) and then (Size_Seen or else Amp * 2.0 > Cap_Amp);
                      if Amp * 2.0 > Cap_Amp then
                         Put_Line ("[身]     通道" & Natural'Image (Chn) & ":到 " & Codec.Fmt (Amp, 4) & " 一个点也没动过地板(最多的跑了 " & Codec.Fmt (Ran_Max, 4) & " 画幅,地板 " & Codec.Fmt (Floor_Px, 4) & ")⇒ 这一段不用它");
                         exit;
