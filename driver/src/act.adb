@@ -992,6 +992,7 @@ package body Act is
                         Base_D : Long_Float := 0.0;
                         Sum_D : Long_Float := 0.0;     --  所有位置的平均像不像 —— 最像的那个要明显比它好
                         N_Try : Natural := 0;
+                        Best_S : Long_Float := 1.0;    --  最像的那一档尺度 = 这一步它看着大了还是小了
                         --  "够不够像"的门槛用【这台相机静止时自己抖多少】(量出来的)算:抖动的四倍平方
                         --  (倍数,无量纲)。没量到就退回一个很松的值,宁可跟着也不乱丢。
                         Noise_G : constant Long_Float :=
@@ -999,6 +1000,14 @@ package body Act is
                            then Long_Float (C.Map.Pic_Floor (Cam)) else 4.0);
                         Bad_D : constant Long_Float := (Noise_G * 4.0) ** 2;
                      begin
+                        --  🔴 一起把【尺度】也搜出来:模板在这一帧变大还是变小,就是"离得越近越大"那条距离信号。
+                        --  没有深度之后,这是身体唯一可能有的"往前"的感觉 —— 不搜尺度,大小那一行永远是零,
+                        --  伺服就只能靠转手腕在画面里挪球,最后把手臂仰到天上(HQ 实测)。
+                        for Si in 0 .. 2 loop
+                        declare
+                           --  三档尺度:小一档、原样、大一档(比例,无量纲;互为倒数,来回一步就能回到原样)
+                           Sc : constant Long_Float := (case Si is when 0 => 0.85, when 1 => 1.0, when others => 1.18);
+                        begin
                         for Oy in -Rr .. Rr loop
                            for Ox in -Rr .. Rr loop
                               declare
@@ -1010,8 +1019,8 @@ package body Act is
                                        declare
                                           Ax : constant Integer := Cx + X;
                                           Ay : constant Integer := Cy + Y;
-                                          Bx2 : constant Integer := Cx + X + Ox;
-                                          By2 : constant Integer := Cy + Y + Oy;
+                                          Bx2 : constant Integer := Cx + Integer (Long_Float (X) * Sc) + Ox;
+                                          By2 : constant Integer := Cy + Integer (Long_Float (Y) * Sc) + Oy;
                                        begin
                                           if Ax >= 0 and then Ay >= 0 and then Ax < Hw and then Ay < Hh
                                             and then Bx2 >= 0 and then By2 >= 0 and then Bx2 < Hw and then By2 < Hh
@@ -1029,11 +1038,13 @@ package body Act is
                                     end if;
                                     Sum_D := Sum_D + Sum; N_Try := N_Try + 1;
                                     if Sum < Best_D then
-                                       Best_D := Sum; Bx := Ox; By := Oy;
+                                       Best_D := Sum; Bx := Ox; By := Oy; Best_S := Sc;
                                     end if;
                                  end if;
                               end;
                            end loop;
+                        end loop;
+                        end;
                         end loop;
                         --  最像的那个也不像(比原地还差不了多少、而且绝对值很大)⇒ 跟丢了,老实说
                         --  🔴 认得住要满足两条:①最像的那个本身够像(不超过噪声门槛);
@@ -1047,6 +1058,10 @@ package body Act is
                         else
                            P.Cu := Long_Float'Max (0.0, Long_Float'Min (1.0, P.Cu + Long_Float (Bx) / Long_Float (Hw)));
                            P.Cv := Long_Float'Max (0.0, Long_Float'Min (1.0, P.Cv + Long_Float (By) / Long_Float (Hh)));
+                           --  尺度赢在哪一档,这块就跟着变大变小 —— 这就是"看着多大"那一行的来源
+                           P.Box_W := P.Box_W * Best_S;
+                           P.Box_H := P.Box_H * Best_S;
+                           P.Size := Sqrt (Long_Float'Max (0.0, P.Box_W * P.Box_H));
                            P.Lost := False;
                         end if;
                      end;
