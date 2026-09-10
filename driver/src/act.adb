@@ -246,7 +246,38 @@ package body Act is
                                         then Natural (C.Map.Pic_Floor (Cam)) else 0);
          Floor_C : constant Long_Float :=
            Long_Float'Max (Long_Float (Noise_C) * 2.0 + 1.0, Picture.Texture_Level (F.Cams (Cam).RGB, Cw, Ch) * 4.0);
-         Thin : constant Picture.Regions := Picture.Cut_Colour (F.Cams (Cam).RGB, Cw, Ch, Floor_C, Picture.Min_Pixels (Cw, Ch));
+         --  🔴 门槛也走一把梯子,和深度那边同一个道理:木纹把门槛抬高之后,白球和棕桌会被并成一块 ——
+         --  实测(HA):切出 28 块碎片,而画面正中那个白球一块都没有。
+         --  从量出来的那一档起,一路减半再切几遍,把每一档【新出现】的块收进来(倍数、次数,无量纲)。
+         function Colour_Ladder return Picture.Regions is
+            Out_R : Picture.Regions;
+            Th : Long_Float := Floor_C;
+         begin
+            for Try in 1 .. 4 loop
+               declare
+                  Got : constant Picture.Regions :=
+                    Picture.Cut_Colour (F.Cams (Cam).RGB, Cw, Ch, Th, Picture.Min_Pixels (Cw, Ch));
+               begin
+                  for R of Got loop
+                     declare
+                        Dup : Boolean := False;
+                     begin
+                        for Q of Out_R loop
+                           if Picture.Inside (Q, R.Cu, R.Cv, Cw, Ch, 0.0) or else Picture.Inside (R, Q.Cu, Q.Cv, Cw, Ch, 0.0) then
+                              Dup := True;
+                           end if;
+                        end loop;
+                        if not Dup then
+                           Out_R.Append (R);
+                        end if;
+                     end;
+                  end loop;
+               end;
+               Th := Th * 0.5;
+            end loop;
+            return Out_R;
+         end Colour_Ladder;
+         Thin : constant Picture.Regions := Colour_Ladder;
       begin
          for R of Thin loop
             declare
