@@ -2895,13 +2895,37 @@ package body Act is
                Tol_P : constant Long_Float :=
                  Long_Float'Max (Long_Float (Noise_P) * 2.0 + 1.0,
                                  Picture.Texture_Level (F.Cams (Cam).RGB, Cwp, Chp) * 4.0);
-               G : Picture.Region;
+               --  🔴 一个门槛不够:太紧只长出球上的一小块白(缝线、明暗都能挡住),太松一路淌到桌面。
+               --  用和切块同一条判据 —— 【真东西的边,门槛翻倍它几乎不变】:门槛一档档翻倍各长一遍,
+               --  取【下一档只多出不到半成】的那一档里最大的那个。长过半幅的当作没长成。
+               Levels : constant Natural := 5;   --  档数(次数,无量纲)
+               Gs : array (0 .. Levels - 1) of Picture.Region;
+               Cn : array (0 .. Levels - 1) of Long_Float := (others => Long_Float (Cwp * Chp));
                Gok : Boolean;
+               Pick : Integer := -1;
+               Tl : Long_Float := Tol_P;
             begin
-               Picture.Grow_From (F.Cams (Cam).RGB, Cwp, Chp, U, V, Tol_P, G, Gok);
-               if Gok then
-                  R := G;
-                  Put_Line ("[身] 从那一点按颜色长出去 ⇒ 这一片" & Natural'Image (G.Count) & " 个像素,拿它当这个东西的框");
+               for K in 0 .. Levels - 1 loop
+                  Picture.Grow_From (F.Cams (Cam).RGB, Cwp, Chp, U, V, Tl, Gs (K), Gok);
+                  if Gok then
+                     Cn (K) := Long_Float (Gs (K).Count);
+                  end if;
+                  Tl := Tl * 2.0;   --  一档翻一倍(倍数,无量纲)
+               end loop;
+               for K in reverse 0 .. Levels - 2 loop
+                  if Cn (K) > 0.0 and then Cn (K + 1) < Cn (K) * 1.5   --  下一档只多出不到半成 = 这条边真的在那儿(比例)
+                    and then Cn (K) < Long_Float (Cwp * Chp)
+                  then
+                     Pick := K; exit;
+                  end if;
+               end loop;
+               if Pick < 0 and then Cn (0) < Long_Float (Cwp * Chp) then
+                  Pick := 0;
+               end if;
+               if Pick >= 0 then
+                  R := Gs (Pick);
+                  Put_Line ("[身] 从那一点按颜色长出去(第" & Integer'Image (Pick + 1) & " 档门槛稳住)⇒ 这一片"
+                            & Natural'Image (R.Count) & " 个像素,拿它当这个东西的框");
                end if;
             end;
             Regs.Append (R);
