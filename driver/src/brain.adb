@@ -39,6 +39,12 @@ package body Brain is
                  Cols, Rows, N_Items, N_Cams, N_Arms : Natural; RGB : Buf; W, H : Natural;
                  Answer : out Say; Err : out Unbounded_String) return Boolean is
       Cells : constant Natural := Cols * Rows;
+      --  指点用的细格子:比画出来的粗格子每边细四倍。两倍不够 —— 远处的东西在广角相机里
+      --  只有二十几个像素宽,半格就有五十多,一格的中心根本落不到东西上(IJ 实测:头顶相机里
+      --  没有任何一个细格中心落在球上)。倍数无量纲。
+      Fine_C : constant Natural := Cols * 4;
+      Fine_R : constant Natural := Rows * 4;
+      Fine_N : constant Natural := Fine_C * Fine_R;
       Items : constant Natural := Natural'Max (1, N_Items);
       NL : constant String := "" & ASCII.LF;
       Prompt : constant String :=
@@ -58,7 +64,7 @@ package body Brain is
         "- grip: close / open / none, with grip_arm = which arm (1.." & Codec.Img (N_Arms) & "), and grip_on = the numbered thing to close on (0 = just close or open where the fingers are). " &
         "Closing on a thing means the body itself works out where on that thing to hold it and from which free side, brings that arm's fingers there, closes, and checks whether it is held - you do not describe those steps. This is its own word; a move never implies it." & NL &
         "- until: WHEN to call you back, an EVENT the body measures: steps (after the number in steps, 1..50) / contact (something is touched) / resist (it will not move any further) / slip (the thing stops following me) / settle (the picture stops changing) / free (the thing you named is no longer touching what it was standing on - that is what lifted means)." & NL &
-        "- point_at: 0, or a FINE cell number 1..96. For this one field the picture is divided 12 columns by 8 rows (finer than the drawn grid), numbered 1..96 left to right then top to bottom, so column c row r is (r-1)*12+c. Use it when the thing you mean is not in my numbered list: I will take whatever is in that fine cell as a thing, give it a number, and keep following it from then on. Naming what a thing is, is your job; following it and measuring it is mine." & NL &
+        "- point_at: 0, or a FINE cell number 1.." & Codec.Img (Fine_N) & ". For this one field the picture is divided " & Codec.Img (Fine_C) & " columns by " & Codec.Img (Fine_R) & " rows (finer than the drawn grid), numbered 1.." & Codec.Img (Fine_N) & " left to right then top to bottom, so column c row r is (r-1)*" & Codec.Img (Fine_C) & "+c. Use it when the thing you mean is not in my numbered list: I will take whatever is in that fine cell as a thing, give it a number, and keep following it from then on. Naming what a thing is, is your job; following it and measuring it is mine." & NL &
         "- fast: full steps without pausing. avoid_items: numbered items that must not be touched (may be empty). done: true only when the thing has ALREADY ended up where the task wants it." & NL & NL &
         "Do NOT give distances, angles, speeds or any numbers other than item, cell, camera and step counts - the body measures them. Keep say to ONE short sentence.";
       Schema : constant String :=
@@ -76,7 +82,7 @@ package body Brain is
         """grip"":{""type"":""string"",""enum"":[""none"",""close"",""open""]}," &
         """grip_arm"":{""type"":""integer"",""minimum"":0,""maximum"":" & Codec.Img (Natural'Max (1, N_Arms)) & "}," &
         """grip_on"":{""type"":""integer"",""minimum"":0,""maximum"":" & Codec.Img (Items) & "}," &
-        """point_at"":{""type"":""integer"",""minimum"":0,""maximum"":96}," &
+        """point_at"":{""type"":""integer"",""minimum"":0,""maximum"":" & Codec.Img (Fine_N) & "}," &
         """until"":{""type"":""string"",""enum"":[""steps"",""contact"",""resist"",""slip"",""settle"",""free""]}," &
         """steps"":{""type"":""integer"",""minimum"":0,""maximum"":50},""fast"":{""type"":""boolean""}," &
         """avoid_items"":{""type"":""array"",""maxItems"":4,""items"":{""type"":""integer"",""minimum"":1,""maximum"":" & Codec.Img (Items) & "}}," &

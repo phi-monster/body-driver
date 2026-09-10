@@ -2982,14 +2982,16 @@ package body Act is
       --  给它一个号,以后照常跟。没有深度的时候身体分不清"什么是一个东西",而认东西本来就是脑的活;
       --  身体只负责跟住和量 —— 跟住靠位置+大小+颜色对号,不需要分割(HD/HE 实测:关掉深度后
       --  头顶相机一个东西都切不出来,而我看着图一眼就知道球在哪)。
-      --  指的时候用一张【更细】的格子:列数行数各翻一倍(12 × 8 = 96 格)。画出来的粗格子一格太大,
-      --  指出来的那一片常常落在东西旁边而不是东西上(HL 实测:框压在球的左上角,模板追的是桌面)。
-      if Say.Point_At >= 1 and then Say.Point_At <= C.Cols * 2 * C.Rows * 2 and then Cam < Natural (F.Cams.Length) then
+      --  指的时候用一张【更细】的格子:列数行数各细四倍。画出来的粗格子一格太大,指出来的那一片
+      --  常常落在东西旁边而不是东西上(HL 实测:框压在球的左上角,模板追的是桌面)。
+      --  细两倍还不够:远处的东西在广角相机里只有二十几个像素宽,而半格有五十多,
+      --  一格的中心根本落不到它身上(IJ 实测:头顶相机里没有任何一个细格中心落在球上)。
+      if Say.Point_At >= 1 and then Say.Point_At <= C.Cols * 4 * C.Rows * 4 and then Cam < Natural (F.Cams.Length) then
          declare
             Cwp : constant Natural := F.Cams (Cam).W;
             Chp : constant Natural := F.Cams (Cam).H;
-            Fc : constant Natural := C.Cols * 2;
-            Fr : constant Natural := C.Rows * 2;
+            Fc : constant Natural := C.Cols * 4;   --  和 brain 里那段说明同一个细度(倍数,无量纲)
+            Fr : constant Natural := C.Rows * 4;
             Col_I : constant Natural := (Say.Point_At - 1) mod Fc;
             Row_I : constant Natural := (Say.Point_At - 1) / Fc;
             Hu : constant Long_Float := 0.5 / Long_Float (Fc);   --  半格(比例,无量纲)
