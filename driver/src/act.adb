@@ -2796,17 +2796,7 @@ package body Act is
                   begin
                      if It.Located then
                         P.Item_No := G.Item;
-                        --  🔴 在【长在这只手上的】相机里,我自己的零件是固定像素:手怎么动,它在这张画面里都不动,
-                        --  远近也永远是标定时那个常数。对它下命令是一句空话,而以前身体不但不拦,还当场报"到位了"
-                        --  (GX 实测:推了 80 步、报了两次"爪子已经到你要的位置",球一厘米都没近)。
-                        --  明说做不到,别再假装成功 —— 这台相机里唯一有意义的是"让那个东西去到两指合上的地方"。
-                        if It.Kind in Finger | Grip | Piece | Thing_Held
-                          and then Cam_Arm (C, Cam) = Integer (It.Arm)
-                        then
-                           Report := Report & "goal: in this camera my own hand does not move - it is fixed pixels here. "
-                                     & "Name the thing you want moved instead, or use another camera. ";
-                           Ok_Pt := False;
-                        elsif It.Kind in Finger | Grip | Piece | Thing_Held then
+                        if It.Kind in Finger | Grip | Piece | Thing_Held then
                            P.Arm := It.Arm; P.Kind := Piece_Pt;
                            P.Chan_K := (if It.Kind = Piece then It.Which else Chan.Per_Arm);
                            declare
@@ -2836,6 +2826,7 @@ package body Act is
                      Own : constant Boolean := It.Kind in Finger | Grip | Thing_Held | Piece;
                      Cam_A : constant Integer := Cam_Arm (C, Cam);
                      Ok_Pt : Boolean := True;
+                     Pre_Targeted : Boolean := False;
                   begin
                      Amount := Amount_Factor (G.Amount);
                      P.Item_No := G.Item;
@@ -2858,12 +2849,38 @@ package body Act is
                         if Cam_A = Integer (P.Arm) and then G.Rel /= "" and then G.Of_Item >= 1 and then G.Of_Item <= Natural (C.Items.Length)
                           and then C.Items (G.Of_Item - 1).Kind = Thing
                         then
-                           --  自己的手上相机里"我的手到 X" = 让 X 的像素来到握区:改跟 X
+                           --  自己的手上相机里"我的手到 X" = 让 X 的像素来到【两指合上的地方】:改跟 X,
+                           --  🔴 而目标必须取【握区】,不能再拿 X 自己算 —— 以前那样等于"让球去到球自己那儿",
+                           --  一开始就满足,身体推 80 步、连报两次"到位了",球一厘米没近(GX 实测)。
                            declare
                               O : constant Item := C.Items (G.Of_Item - 1);
+                              Z : constant Zone.Hand_Zone := Zone_Of (C, It.Arm, Cam);
+                              Sz : constant Long_Float := Long_Float'Max (O.Height, 1.0e-3);
+                              Rl : constant String := To_String (G.Rel);
+                              Lu, Lv, Ln : Long_Float := 0.0;
                            begin
                               P.Kind := Thing_Pt; P.Slot := O.Slot; P.Cu := O.Cu; P.Cv := O.Cv; P.Z := O.Depth; P.Height := O.Height; P.Count := O.Count;
                               P.Box_W := Long_Float (O.X1 - O.X0) / Long_Float (Cw); P.Box_H := Long_Float (O.Y1 - O.Y0) / Long_Float (Ch);
+                              if Z.Valid then
+                                 if Z.A.Valid then
+                                    Lu := Lu + Z.A.Cu; Lv := Lv + Z.A.Cv; Ln := Ln + 1.0;
+                                 end if;
+                                 if Z.B.Valid then
+                                    Lu := Lu + Z.B.Cu; Lv := Lv + Z.B.Cv; Ln := Ln + 1.0;
+                                 end if;
+                                 P.Tu := (if Ln > 0.0 then Lu / Ln else Z.Cu);
+                                 P.Tv := (if Ln > 0.0 then Lv / Ln else Z.Cv);
+                                 if not Picture.Is_Nan (Z.Depth) and then Z.Depth > 0.0 then
+                                    P.Tz := (if Rl = "front" then Z.Depth - Sz
+                                             elsif Rl = "back" then Z.Depth + Sz
+                                             else Z.Depth);
+                                    P.Wz := 1.0;
+                                 else
+                                    P.Tz := P.Z; P.Wz := 0.0;
+                                 end if;
+                                 P.Desc := S ("item " & Codec.Img (G.Of_Item) & " to come to where my fingers close");
+                                 Pre_Targeted := True;
+                              end if;
                            end;
                         end if;
                      elsif It.Kind = Thing and then Cam_A >= 0 then
@@ -2874,7 +2891,7 @@ package body Act is
                         Report := S ("goal: item " & Codec.Img (G.Item) & " is a thing I am not holding; I can only move things I hold (say grip close on it first). ");
                         Ok_Pt := False;
                      end if;
-                     if Ok_Pt then
+                     if Ok_Pt and then not Pre_Targeted then
                         Set_Target (G, P, Ok_Pt);
                      end if;
                      if Ok_Pt then
