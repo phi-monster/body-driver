@@ -583,12 +583,6 @@ package body Act is
             --  怎么办是脑的活(换那台不跟着这只胳膊动的相机去对齐),身体只负责把这句实话摆出来 ——
             --  不说,脑就没有理由去换,而它在这一台里会一直以为自己在进步。
             Append (T, "- from this picture alone I cannot tell how far a thing is from my fingers: this picture moves with that arm, so lining a thing up here only means it is straight ahead of my fingers, not that it is near. A picture that does NOT ride on this arm can tell me." & ASCII.LF);
-            --  🔴 身体要把【自己量不到什么】说出来。这一台相机跟着这只胳膊动 ⇒ 它给的只是
-            --  "东西在两指的连线上",而那条线转个手腕就满足了,和手离它多远无关 ——
-            --  也就是说,光靠这一台,身体判断不出远近(IJ/II 实测:在这一台里对齐了、也一直在推,
-            --  球就是不变大)。怎么办是脑的活(换一台看、或者让另一只胳膊转过来看着),
-            --  身体只负责把这句实话摆出来 —— 不说,脑就没有理由去换。
-            Append (T, "- from this picture alone I cannot tell how far a thing is from my fingers: this picture moves with that arm, so lining a thing up here only means it is straight ahead of my fingers, not that it is close. A picture that does NOT ride on this arm can tell me." & ASCII.LF);
          end if;
       end;
       if Have_Named then
