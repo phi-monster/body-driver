@@ -956,7 +956,34 @@ package body Act is
                      P.Unsure := Second >= 0 and then Sd <= Bd * 1.1;
                   end;
                else
-                  P.Cu := Pred_U; P.Cv := Pred_V; P.Lost := True;
+                  --  🔴 没有切块可以对上(没有深度、颜色也切不出来)⇒ 靠画面本身把这一小片追下去:
+                  --  算光流,在这一点周围取平均位移,把点挪过去。这样【脑指出来的那个东西】不需要任何分割
+                  --  就能一直被跟住 —— 认东西是脑的活,跟住是身体的活。
+                  declare
+                     Hw : constant Natural := Cw / 2;
+                     Hh : constant Natural := Ch / 2;
+                     A, B : Buf;
+                     Fl : Flow.Field;
+                     Du, Dv : Long_Float;
+                  begin
+                     A.Reserve_Capacity (Ada.Containers.Count_Type (Hw * Hh));
+                     B.Reserve_Capacity (Ada.Containers.Count_Type (Hw * Hh));
+                     for Y in 0 .. Hh - 1 loop
+                        for X in 0 .. Hw - 1 loop
+                           A.Append (Before.Element ((2 * Y) * Cw + 2 * X));
+                           B.Append (F.Cams (Cam).Gray.Element ((2 * Y) * Cw + 2 * X));
+                        end loop;
+                     end loop;
+                     Fl := Flow.Compute (A, B, Hw, Hh, 3, 30);
+                     --  取平均的那一片 = 这块自己的半个身子,再小也有画幅的百分之二(比例,无量纲)
+                     Flow.Sample (Fl, P.Cu, P.Cv, Long_Float'Max (0.02, Long_Float'Max (P.Box_W, P.Box_H) * 0.5), Du, Dv);
+                     if Moved_Arm and then Sqrt (Du * Du + Dv * Dv) * Long_Float (Cw) < 0.5 then
+                        P.Cu := Pred_U; P.Cv := Pred_V; P.Lost := True;   --  手臂动了这儿却没流 ⇒ 真跟丢了
+                     else
+                        P.Cu := P.Cu + Du; P.Cv := P.Cv + Dv;
+                        P.Lost := False;
+                     end if;
+                  end;
                end if;
             end;
       end case;
