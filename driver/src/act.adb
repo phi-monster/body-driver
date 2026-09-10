@@ -1734,17 +1734,20 @@ package body Act is
                            Per_Step := Long_Float'Max (Per_Step, abs (T.E.B (K, R)) * Long_Float'Max (1.0e-9, C.Map.Amp (Arm * Chan.Per_Arm + K)));
                         end if;
                      end loop;
-                     --  🔴 一推能改的比【眼睛自己抖的还少】⇒ 这一行根本没量到,不许拿它当分母。
-                     --  除以一个没量到的小数,"还差几步"就冲上天,那一行随即吃掉整个目标
-                     --  (IF 实测:大小那一项 4 → 1342,手随即开始乱转;左右上下明明都快归零了)。
-                     --  画面上的三样(左右、上下、看着多大)都是画幅里的长度,共用同一条地板。
-                     if R /= 2 and then R /= 4 and then Per_Step <= Fl.Track then
-                        T.W (R) := 0.0;
-                     elsif Per_Step > 0.0 then
+                     if Per_Step > 0.0 then
                         T.Err (R) := T.Err (R) / Per_Step;
                         for K in 0 .. Chan.Per_Arm - 1 loop
                            T.E.B (K, R) := T.E.B (K, R) / Per_Step;
                         end loop;
+                        --  🔴 "往前"这一项只是个方向,不是终点 —— 终点是【碰上】。
+                        --  一推能把一个 40 厘米外的东西看大多少?半个像素,低于画面自己的抖动。
+                        --  于是"还差几步"算出来是几百上千步,这一行就吃掉整个目标,手开始乱转
+                        --  (IF 实测:大小 4 → 1342,左右上下明明都快归零了)。而把它当"没量到"关掉
+                        --  又会让身体瞄准之后原地不动(IG 实测:差距卡在 0.18,大小那一项 0.0,60 步没往前)。
+                        --  正确的做法:每一步只要求它【一推的量】,剩下的力气全用来瞄准,一推一推走到碰上。
+                        if R = 3 then
+                           T.Err (R) := Long_Float'Max (-1.0, Long_Float'Min (1.0, T.Err (R)));
+                        end if;
                      else
                         T.W (R) := 0.0;   --  这一行一个通道都改不动 ⇒ 这一步不管它
                      end if;
@@ -3171,13 +3174,9 @@ package body Act is
                                                 P.Tv := (if Ln > 0.0 then Lv / Ln else Z.Cv);
                                              end;
                                              P.Tz := Z.Depth; P.Wz := (if Picture.Is_Nan (Z.Depth) then 0.0 else 1.0);
-                                             --  同上:手掌张开那一片当不了终点,只当上限;每一段只要求它看着
-                                             --  比现在大两成半(比例,无量纲),真正的终点是碰上(见下面那一段的说明)
                                              P.Size := Sqrt (Long_Float'Max (0.0, P.Box_W * P.Box_H));
-                                             P.Tsize := Long_Float'Min
-                                               (Sqrt (Long_Float'Max (0.0,
-                                                  (Long_Float (Z.X1 - Z.X0) / Long_Float (Cw)) * (Long_Float (Z.Y1 - Z.Y0) / Long_Float (Ch)))),
-                                                P.Size * 1.25);
+                                             P.Tsize := Sqrt (Long_Float'Max (0.0,
+                                               (Long_Float (Z.X1 - Z.X0) / Long_Float (Cw)) * (Long_Float (Z.Y1 - Z.Y0) / Long_Float (Ch))));
                                              P.Wsize := (if P.Tsize > 0.0 and then P.Size > 0.0 then 1.0 else 0.0);
                                              --  🔴 远的时候不许把目标定在两指那个位置。手指贴着镜头,它们在这张画面里
                                              --  落在最下沿;而远处的东西在画面里根本到不了那儿 —— 硬要它去,手腕就一路
@@ -3361,15 +3360,8 @@ package body Act is
                                  --  🔴 没有深度的时候,距离靠"看着多大":东西真的到了两指之间,它在画面里就该和
                                  --  合空时扫过的那片一样大。这是画面上直接量的,不吃深度噪声,而且越近越大是单调的。
                                  P.Size := Sqrt (Long_Float'Max (0.0, P.Box_W * P.Box_H));
-                                 --  🔴 "该看着多大"不许拿【手掌张开那么大】当终点。合空扫过的那一片比一个球大
-                                 --  得多,一个小东西永远长不到那么大 ⇒ 这一项永远差着九成,身体一直往前顶也算不完
-                                 --  (ID 实测:左右上下都已经归零,差距还死死卡在 0.90,大小那一项 235 步)。
-                                 --  真正的终点是【碰上】(脑说的 at 就是挨着),这一项只负责给身体一个"往前"的方向:
-                                 --  每一段只要求它看着比现在大两成半(比例,无量纲),再压在"不许比两指之间还大"之下。
-                                 P.Tsize := Long_Float'Min
-                                   (Sqrt (Long_Float'Max (0.0,
-                                      (Long_Float (Z.X1 - Z.X0) / Long_Float (Cw)) * (Long_Float (Z.Y1 - Z.Y0) / Long_Float (Ch)))),
-                                    P.Size * 1.25);
+                                 P.Tsize := Sqrt (Long_Float'Max (0.0,
+                                   (Long_Float (Z.X1 - Z.X0) / Long_Float (Cw)) * (Long_Float (Z.Y1 - Z.Y0) / Long_Float (Ch))));
                                  P.Wsize := (if P.Tsize > 0.0 and then P.Size > 0.0 then 1.0 else 0.0);
                                  P.Desc := S ("item " & Codec.Img (G.Of_Item) & " to come to where my fingers close");
                                  Pre_Targeted := True;
