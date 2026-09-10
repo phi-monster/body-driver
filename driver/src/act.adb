@@ -251,7 +251,10 @@ package body Act is
          --  从量出来的那一档起,一路减半再切几遍,把每一档【新出现】的块收进来(倍数、次数,无量纲)。
          function Colour_Ladder return Picture.Regions is
             Out_R : Picture.Regions;
-            Th : Long_Float := Floor_C;
+            --  🔴 从【最细】的门槛开始:粗门槛会把白球和棕桌并成一大块,先收了它,后面细门槛切出来的球
+            --  就会因为"中心落在已收的块里"被当成重复丢掉(HA/HB 实测:97 块碎片,而画面正中的球一块都没有)。
+            --  倒过来走,细的先收,粗的只补细门槛没看见的东西。
+            Th : Long_Float := Floor_C / 8.0;
          begin
             for Try in 1 .. 4 loop
                declare
@@ -273,7 +276,7 @@ package body Act is
                      end;
                   end loop;
                end;
-               Th := Th * 0.5;
+               Th := Th * 2.0;
             end loop;
             return Out_R;
          end Colour_Ladder;
