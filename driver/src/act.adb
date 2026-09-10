@@ -983,12 +983,15 @@ package body Act is
                         --  模板取这块自己的半个身子,再小也有画幅的百分之三(比例,无量纲);搜一圈 = 一个跟踪窗
                         Pw : constant Integer := Integer'Max (3, Integer (Long_Float'Max (P.Box_W, 0.03) * Long_Float (Hw) * 0.5));
                         Ph : constant Integer := Integer'Max (3, Integer (Long_Float'Max (P.Box_H, 0.03) * Long_Float (Hh) * 0.5));
-                        Rr : constant Integer := Integer'Max (2, Integer (Track_Win * Long_Float (Hw)));
+                        --  搜两个跟踪窗:球一步跑得比一个窗远时,只搜一个窗就会锁到旁边的东西上(HN 实测锁到球拍上)
+                        Rr : constant Integer := Integer'Max (2, Integer (Track_Win * 2.0 * Long_Float (Hw)));
                         Cx : constant Integer := Integer (P.Cu * Long_Float (Hw));
                         Cy : constant Integer := Integer (P.Cv * Long_Float (Hh));
                         Best_D : Long_Float := Long_Float'Last;
                         Bx, By : Integer := 0;
                         Base_D : Long_Float := 0.0;
+                        Sum_D : Long_Float := 0.0;     --  所有位置的平均像不像 —— 最像的那个要明显比它好
+                        N_Try : Natural := 0;
                         --  "够不够像"的门槛用【这台相机静止时自己抖多少】(量出来的)算:抖动的四倍平方
                         --  (倍数,无量纲)。没量到就退回一个很松的值,宁可跟着也不乱丢。
                         Noise_G : constant Long_Float :=
@@ -1024,6 +1027,7 @@ package body Act is
                                     if Ox = 0 and then Oy = 0 then
                                        Base_D := Sum;
                                     end if;
+                                    Sum_D := Sum_D + Sum; N_Try := N_Try + 1;
                                     if Sum < Best_D then
                                        Best_D := Sum; Bx := Ox; By := Oy;
                                     end if;
@@ -1032,8 +1036,13 @@ package body Act is
                            end loop;
                         end loop;
                         --  最像的那个也不像(比原地还差不了多少、而且绝对值很大)⇒ 跟丢了,老实说
-                        --  最像的那个也不像(超过噪声门槛),而且并不比原地好多少(差不到一成;比例,无量纲)⇒ 跟丢了
-                        if Best_D > Bad_D and then Best_D > Base_D * 0.9 then
+                        --  🔴 认得住要满足两条:①最像的那个本身够像(不超过噪声门槛);
+                        --  ②它要【明显比搜索范围里的平均水平好】(不到平均的一半;比例,无量纲)——
+                        --  否则说明这一片到处都差不多(木纹、墙面),最像的那个只是噪声里的巧合,
+                        --  锁上去就等于跟到别的东西上(HN 实测:锁到球拍、锁到墙)。两条有一条不满足就明说跟丢。
+                        if (Best_D > Bad_D and then Best_D > Base_D * 0.9)
+                          or else (N_Try > 0 and then Best_D > 0.5 * (Sum_D / Long_Float (N_Try)))
+                        then
                            P.Cu := Pred_U; P.Cv := Pred_V; P.Lost := True;
                         else
                            P.Cu := Long_Float'Max (0.0, Long_Float'Min (1.0, P.Cu + Long_Float (Bx) / Long_Float (Hw)));
