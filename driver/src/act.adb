@@ -2989,6 +2989,19 @@ package body Act is
                                                (Long_Float (Z.X1 - Z.X0) / Long_Float (Cw)) * (Long_Float (Z.Y1 - Z.Y0) / Long_Float (Ch))));
                                              P.Size := Sqrt (Long_Float'Max (0.0, P.Box_W * P.Box_H));
                                              P.Wsize := (if P.Tsize > 0.0 and then P.Size > 0.0 then 1.0 else 0.0);
+                                             --  🔴 远的时候不许把目标定在两指那个位置。手指贴着镜头,它们在这张画面里
+                                             --  落在最下沿;而远处的东西在画面里根本到不了那儿 —— 硬要它去,手腕就一路
+                                             --  往上仰,直到东西从画面下沿掉出去(HT/HU 实测,反复)。
+                                             --  正确的目标:远 ⇒ 画面中央(手指指出去的方向);越近 ⇒ 越往两指的位置靠。
+                                             --  远近用"看着多大"的比例衡量,不需要深度(比例,无量纲)。
+                                             if P.Wsize > 0.0 then
+                                                declare
+                                                   R : constant Long_Float := Long_Float'Min (1.0, P.Size / P.Tsize);
+                                                begin
+                                                   P.Tu := 0.5 + (P.Tu - 0.5) * R;
+                                                   P.Tv := 0.5 + (P.Tv - 0.5) * R;
+                                                end;
+                                             end if;
                                           end;
                                        elsif P.Kind = Piece_Pt and then O.Kind in Thing | Thing_Remembered then
                                           --  "到它那儿" = 到它那一面,不替它挑高低(owner 2026-09-08:"半腰"假设了两指从侧面夹一个立在台面上的东西,
