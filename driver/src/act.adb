@@ -974,15 +974,73 @@ package body Act is
                            B.Append (F.Cams (Cam).Gray.Element ((2 * Y) * Cw + 2 * X));
                         end loop;
                      end loop;
-                     Fl := Flow.Compute (A, B, Hw, Hh, 3, 30);
-                     --  取平均的那一片 = 这块自己的半个身子,再小也有画幅的百分之二(比例,无量纲)
-                     Flow.Sample (Fl, P.Cu, P.Cv, Long_Float'Max (0.02, Long_Float'Max (P.Box_W, P.Box_H) * 0.5), Du, Dv);
-                     if Moved_Arm and then Sqrt (Du * Du + Dv * Dv) * Long_Float (Cw) < 0.5 then
-                        P.Cu := Pred_U; P.Cv := Pred_V; P.Lost := True;   --  手臂动了这儿却没流 ⇒ 真跟丢了
-                     else
-                        P.Cu := P.Cu + Du; P.Cv := P.Cv + Dv;
-                        P.Lost := False;
-                     end if;
+                     pragma Unreferenced (Fl, Du, Dv);
+                     --  🔴 拿它【上一帧的样子】去对,而不是取一片光流的平均:平均会被旁边的东西带走,
+                     --  实测十步左右就飘到墙上、飘到剪刀上,而且飘了不吭声。
+                     --  做法:在预测位置周围搜一圈,找和上一帧那块最像的位置(灰度差平方和最小);
+                     --  最像的那个也不够像 ⇒ 明说跟丢,不许悄悄跟到别的东西上。
+                     declare
+                        --  模板取这块自己的半个身子,再小也有画幅的百分之三(比例,无量纲);搜一圈 = 一个跟踪窗
+                        Pw : constant Integer := Integer'Max (3, Integer (Long_Float'Max (P.Box_W, 0.03) * Long_Float (Hw) * 0.5));
+                        Ph : constant Integer := Integer'Max (3, Integer (Long_Float'Max (P.Box_H, 0.03) * Long_Float (Hh) * 0.5));
+                        Rr : constant Integer := Integer'Max (2, Integer (Track_Win * Long_Float (Hw)));
+                        Cx : constant Integer := Integer (P.Cu * Long_Float (Hw));
+                        Cy : constant Integer := Integer (P.Cv * Long_Float (Hh));
+                        Best_D : Long_Float := Long_Float'Last;
+                        Bx, By : Integer := 0;
+                        Base_D : Long_Float := 0.0;
+                        --  "够不够像"的门槛用【这台相机静止时自己抖多少】(量出来的)算:抖动的四倍平方
+                        --  (倍数,无量纲)。没量到就退回一个很松的值,宁可跟着也不乱丢。
+                        Noise_G : constant Long_Float :=
+                          (if Cam < Natural (C.Map.Pic_Floor.Length) and then C.Map.Pic_Floor (Cam) > 0
+                           then Long_Float (C.Map.Pic_Floor (Cam)) else 4.0);
+                        Bad_D : constant Long_Float := (Noise_G * 4.0) ** 2;
+                     begin
+                        for Oy in -Rr .. Rr loop
+                           for Ox in -Rr .. Rr loop
+                              declare
+                                 Sum : Long_Float := 0.0;
+                                 N_Pix : Natural := 0;
+                              begin
+                                 for Y in -Ph .. Ph loop
+                                    for X in -Pw .. Pw loop
+                                       declare
+                                          Ax : constant Integer := Cx + X;
+                                          Ay : constant Integer := Cy + Y;
+                                          Bx2 : constant Integer := Cx + X + Ox;
+                                          By2 : constant Integer := Cy + Y + Oy;
+                                       begin
+                                          if Ax >= 0 and then Ay >= 0 and then Ax < Hw and then Ay < Hh
+                                            and then Bx2 >= 0 and then By2 >= 0 and then Bx2 < Hw and then By2 < Hh
+                                          then
+                                             Sum := Sum + (Long_Float (A.Element (Ay * Hw + Ax)) - Long_Float (B.Element (By2 * Hw + Bx2))) ** 2;
+                                             N_Pix := N_Pix + 1;
+                                          end if;
+                                       end;
+                                    end loop;
+                                 end loop;
+                                 if N_Pix > 0 then
+                                    Sum := Sum / Long_Float (N_Pix);
+                                    if Ox = 0 and then Oy = 0 then
+                                       Base_D := Sum;
+                                    end if;
+                                    if Sum < Best_D then
+                                       Best_D := Sum; Bx := Ox; By := Oy;
+                                    end if;
+                                 end if;
+                              end;
+                           end loop;
+                        end loop;
+                        --  最像的那个也不像(比原地还差不了多少、而且绝对值很大)⇒ 跟丢了,老实说
+                        --  最像的那个也不像(超过噪声门槛),而且并不比原地好多少(差不到一成;比例,无量纲)⇒ 跟丢了
+                        if Best_D > Bad_D and then Best_D > Base_D * 0.9 then
+                           P.Cu := Pred_U; P.Cv := Pred_V; P.Lost := True;
+                        else
+                           P.Cu := Long_Float'Max (0.0, Long_Float'Min (1.0, P.Cu + Long_Float (Bx) / Long_Float (Hw)));
+                           P.Cv := Long_Float'Max (0.0, Long_Float'Min (1.0, P.Cv + Long_Float (By) / Long_Float (Hh)));
+                           P.Lost := False;
+                        end if;
+                     end;
                   end;
                end if;
             end;
