@@ -989,15 +989,14 @@ package body Act is
                         Noise_G : constant Long_Float :=
                           (if Cam < Natural (C.Map.Pic_Floor.Length) and then C.Map.Pic_Floor (Cam) > 0
                            then Long_Float (C.Map.Pic_Floor (Cam)) else 4.0);
-                        Bad_D : constant Long_Float := (Noise_G * 4.0) ** 2;
+                        Bad_D : constant Long_Float := 0.5;   --  相关不到一半就不算是它(比例,无量纲)
                         Cs : constant Positive := 4;   --  粗搜隔几个像素取一个(次数,无量纲)
                         --  比一个位置:上一帧那块(A 里以 Cx,Cy 为心)对这一帧挪了 Ox,Oy 又放大 Sc 的那块(B 里)。
                         --  Step = 隔几个像素取一个;只和"长得像它"的候选比 —— 平均亮度要接近,起伏也要接近,
                         --  否则平整的墙面和木纹到处都能凑出一个"最像"(HT 实测:模板锁到墙上,手腕越抬越高)。
                         function Score (Ox, Oy : Integer; Sc : Long_Float; Step : Positive) return Long_Float is
-                           Sum : Long_Float := 0.0;
                            N_Pix : Natural := 0;
-                           Sa, Sb, Qa, Qb : Long_Float := 0.0;
+                           Sa, Sb, Qa, Qb, Sab : Long_Float := 0.0;
                            Ny : constant Integer := Integer'Max (1, Ph / Step);
                            Nx : constant Integer := Integer'Max (1, Pw / Step);
                         begin
@@ -1018,9 +1017,9 @@ package body Act is
                                           Va : constant Long_Float := Long_Float (A.Element (Ay * Hw + Ax));
                                           Vb : constant Long_Float := Long_Float (B.Element (By2 * Hw + Bx2));
                                        begin
-                                          Sum := Sum + (Va - Vb) ** 2;
                                           Sa := Sa + Va; Sb := Sb + Vb;
                                           Qa := Qa + Va * Va; Qb := Qb + Vb * Vb;
+                                          Sab := Sab + Va * Vb;
                                           N_Pix := N_Pix + 1;
                                        end;
                                     end if;
@@ -1038,14 +1037,19 @@ package body Act is
                               Mb : constant Long_Float := Sb / Long_Float (N_Pix);
                               Da : constant Long_Float := Sqrt (Long_Float'Max (0.0, Qa / Long_Float (N_Pix) - Ma * Ma));
                               Db : constant Long_Float := Sqrt (Long_Float'Max (0.0, Qb / Long_Float (N_Pix) - Mb * Mb));
-                           begin
-                              if abs (Ma - Mb) > Noise_G * 4.0
-                                or else Db > Da * 2.0 + 1.0 or else Da > Db * 2.0 + 1.0
-                              then
-                                 return Long_Float'Last;
-                              end if;
-                           end;
-                           return Sum / Long_Float (N_Pix);
+                                 begin
+                                    --  🔴 比"像不像"用【相关】,不用灰度差:灰度差有一个致命的偏心 ——
+                                    --  模板缩小一点采到的是更平滑的一片,差值自然更小 ⇒ 每一步都判"它变小了",
+                                    --  框按 0.94 一路乘下去缩成零,而"看着多大"那一项正比于 1/框 ⇒ 冲到十万
+                                    --  (IB 实测:大小那一项 220 → 108331,差距一路涨,手越走越偏)。
+                                    --  相关系数把两边各自的亮度和起伏都除掉,缩放不再天然占便宜。
+                                    --  另一半好处:【平的一片没有相关可言】—— 墙面、木纹的起伏低于相机自己的抖动,
+                                    --  直接出局,不用再单独写"别锁到墙上"那条规矩。
+                                    if Da <= Noise_G or else Db <= Noise_G then
+                                       return Long_Float'Last;
+                                    end if;
+                                    return 1.0 - (Sab / Long_Float (N_Pix) - Ma * Mb) / (Da * Db);
+                                 end;
                         end Score;
                         Best_D : Long_Float := Long_Float'Last;
                         Bx, By : Integer := 0;
@@ -1095,6 +1099,11 @@ package body Act is
                               end loop;
                            end;
                         end loop;
+                        --  🔴 尺度要【明显】更像才准改:一步一步乘上去的东西,靠噪声也能走成单边漂移。
+                        --  比原尺寸好不到半成就当没变(比例,无量纲)。
+                        if Best_S /= 1.0 and then Best_D > Score (Bx, By, 1.0, 1) * 0.95 then
+                           Best_S := 1.0;
+                        end if;
                         --  🔴 认得住要满足两条:①最像的那个本身够像(不超过噪声门槛,或者比原地明显好);
                         --  ②它要明显比【整幅画面上随便一个位置】好(不到平均的一半;比例,无量纲)——
                         --  否则说明这一片到处都差不多(木纹、墙面),最像的只是巧合(HN 实测:锁到球拍、锁到墙)。
