@@ -19,6 +19,9 @@ package Brain is
       Moves : Goal_Vectors.Vector;
       Grip : Unbounded_String;     --  none / close / open
       Grip_Arm, Grip_On : Natural := 0;
+      Point_At : Natural := 0;   --  🔴 脑直接指:"我说的那个东西在第 N 格"(0 = 不指)。
+                                 --  没有深度的时候身体分不清"什么是一个东西",而认东西本来就是脑的活;
+                                 --  身体的活是【跟住】和【量】—— 跟住只要拿那一小片画面当模板追,不需要分割。
       Until_Kind : Unbounded_String;   --  steps / contact / resist / slip / settle
       Steps : Natural := 0;
       Fast, Done : Boolean := False;

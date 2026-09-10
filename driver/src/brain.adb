@@ -58,11 +58,12 @@ package body Brain is
         "- grip: close / open / none, with grip_arm = which arm (1.." & Codec.Img (N_Arms) & "), and grip_on = the numbered thing to close on (0 = just close or open where the fingers are). " &
         "Closing on a thing means the body itself works out where on that thing to hold it and from which free side, brings that arm's fingers there, closes, and checks whether it is held - you do not describe those steps. This is its own word; a move never implies it." & NL &
         "- until: WHEN to call you back, an EVENT the body measures: steps (after the number in steps, 1..50) / contact (something is touched) / resist (it will not move any further) / slip (the thing stops following me) / settle (the picture stops changing) / free (the thing you named is no longer touching what it was standing on - that is what lifted means)." & NL &
+        "- point_at: 0, or a CELL number. Use it when the thing you mean is not in my numbered list: I will take whatever is in that cell as a thing, give it a number, and keep following it from then on. Naming what a thing is, is your job; following it and measuring it is mine." & NL &
         "- fast: full steps without pausing. avoid_items: numbered items that must not be touched (may be empty). done: true only when the thing has ALREADY ended up where the task wants it." & NL & NL &
         "Do NOT give distances, angles, speeds or any numbers other than item, cell, camera and step counts - the body measures them. Keep say to ONE short sentence.";
       Schema : constant String :=
         "{""type"":""json_schema"",""json_schema"":{""name"":""what_i_do_now"",""strict"":true,""schema"":{""type"":""object"",""additionalProperties"":false," &
-        """required"":[""say"",""see"",""look"",""moves"",""grip"",""grip_arm"",""grip_on"",""until"",""steps"",""fast"",""avoid_items"",""done""]," &
+        """required"":[""say"",""see"",""look"",""moves"",""grip"",""grip_arm"",""grip_on"",""until"",""steps"",""fast"",""avoid_items"",""done"",""point_at""]," &
         """properties"":{""say"":{""type"":""string""},""see"":{""type"":""string"",""enum"":[""target"",""not_here"",""unclear""]}," &
         """look"":{""type"":""integer"",""minimum"":0,""maximum"":" & Codec.Img (Natural'Max (1, N_Cams)) & "}," &
         """moves"":{""type"":""array"",""minItems"":0,""maxItems"":4,""items"":{""type"":""object"",""additionalProperties"":false," &
@@ -75,6 +76,7 @@ package body Brain is
         """grip"":{""type"":""string"",""enum"":[""none"",""close"",""open""]}," &
         """grip_arm"":{""type"":""integer"",""minimum"":0,""maximum"":" & Codec.Img (Natural'Max (1, N_Arms)) & "}," &
         """grip_on"":{""type"":""integer"",""minimum"":0,""maximum"":" & Codec.Img (Items) & "}," &
+        """point_at"":{""type"":""integer"",""minimum"":0,""maximum"":24}," &
         """until"":{""type"":""string"",""enum"":[""steps"",""contact"",""resist"",""slip"",""settle"",""free""]}," &
         """steps"":{""type"":""integer"",""minimum"":0,""maximum"":50},""fast"":{""type"":""boolean""}," &
         """avoid_items"":{""type"":""array"",""maxItems"":4,""items"":{""type"":""integer"",""minimum"":1,""maximum"":" & Codec.Img (Items) & "}}," &
@@ -151,6 +153,7 @@ package body Brain is
          end;
          Answer.Grip_Arm := Natural (Long_Float'Max (0.0, Json.Num (D, Json.Get (D, 0, "grip_arm"))));
          Answer.Grip_On := Natural (Long_Float'Max (0.0, Json.Num (D, Json.Get (D, 0, "grip_on"))));
+         Answer.Point_At := Natural (Long_Float'Max (0.0, Json.Num (D, Json.Get (D, 0, "point_at"))));
          Answer.Until_Kind := To_Unbounded_String (Json.Text (D, Json.Get (D, 0, "until")));
          if Answer.Until_Kind = "" then
             Err := To_Unbounded_String ("脑没给 until");
