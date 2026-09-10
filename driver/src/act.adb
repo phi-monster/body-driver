@@ -3226,8 +3226,25 @@ package body Act is
                                           --  "一截" = 它自己在画面里的宽 × 它的深度(米,全是量的),没量到深度就用它鼓起的高度
                                           Sz : constant Long_Float := Long_Float'Max (O.Height, Long_Float'Max (P.Height, Ow * O.Depth));
                                        begin
-                                          P.Tz := (if Rl = "front" then O.Depth - Sz else O.Depth + Sz);
-                                          P.Wz := (if O.Depth > 0.0 and then P.Z > 0.0 then 1.0 else 0.0);
+                                          if O.Depth > 0.0 and then P.Z > 0.0 then
+                                             P.Tz := (if Rl = "front" then O.Depth - Sz else O.Depth + Sz);
+                                             P.Wz := 1.0;
+                                          else
+                                             --  🔴 没有深度也照样量得到"离相机近一点/远一点":
+                                             --  【画面里的位置不变、自己看着变大或变小】—— 同一件事的另一种说法,
+                                             --  量的是这一块【自己】的框(手离相机近,它的框就大),而手就在相机跟前、
+                                             --  框有一百多个像素宽,推一下就变好几个像素,远比"远处那个小东西变大多少"灵敏。
+                                             --  差多少不重要(归一那一段把每一行都压在一推之内),重要的是往哪边。
+                                             --  这一条把"沿着一条视线往里走"变成一个能说出口的词 —— 在一台相机里对齐之后,
+                                             --  剩下的那一维就是它(IL 实测:稳定相机里差距压到 0.003、判据报"到了",
+                                             --  合手却是空的 —— 差的正是这一维,而当时没有词能说它)。
+                                             P.Size := Sqrt (Long_Float'Max (0.0, P.Box_W * P.Box_H));
+                                             if P.Size > 0.0 then
+                                                --  往哪边:近一点 ⇒ 看着变大(比例,无量纲;大小不承重,方向承重)
+                                                P.Tsize := P.Size * (if Rl = "front" then 1.25 else 0.8);
+                                                P.Wsize := 1.0;
+                                             end if;
+                                          end if;
                                        end;
                                     elsif Rl = "down" or else Rl = "up" then
                                        --  🔴 "朝地面 / 离开地面" = 朝它站着的那个【量出来的面】。
@@ -3339,6 +3356,9 @@ package body Act is
                         begin
                            P.Cu := Tr.Cu; P.Cv := Tr.Cv; P.Z := Tr.Z; P.Known := Tr.Known or else Cam_A = Integer (P.Arm);
                         end;
+                        --  这一块自己在画面里多大 —— 没有深度的时候"离相机近一点/远一点"就靠它(见 front/back)
+                        P.Box_W := Long_Float (It.X1 - It.X0) / Long_Float (Cw);
+                        P.Box_H := Long_Float (It.Y1 - It.Y0) / Long_Float (Ch);
                         if Cam_A = Integer (P.Arm) and then G.Rel /= "" and then G.Of_Item >= 1 and then G.Of_Item <= Natural (C.Items.Length)
                           and then C.Items (G.Of_Item - 1).Kind = Thing
                         then
