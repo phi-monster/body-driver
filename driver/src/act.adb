@@ -2939,7 +2939,27 @@ package body Act is
                                           declare
                                              Z : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, Cam);
                                           begin
-                                             P.Tu := Z.Cu; P.Tv := Z.Cv; P.Tz := Z.Depth; P.Wz := (if Picture.Is_Nan (Z.Depth) then 0.0 else 1.0);
+                                             --  目标取【那几瓣的共同中心】,并把"看着多大"这一项打开:
+                                             --  东西真到了两指之间,它在画面里就该和合空时扫过的那片一样大。
+                                             --  没有深度的时候这是唯一的"往前"信号 —— 不打开这一项,伺服只会转手腕
+                                             --  在画面里挪球,最后把手臂仰到天上(HQ/HR 实测,"大小"那一行一直是 0)。
+                                             declare
+                                                Lu, Lv, Ln : Long_Float := 0.0;
+                                             begin
+                                                if Z.A.Valid then
+                                                   Lu := Lu + Z.A.Cu; Lv := Lv + Z.A.Cv; Ln := Ln + 1.0;
+                                                end if;
+                                                if Z.B.Valid then
+                                                   Lu := Lu + Z.B.Cu; Lv := Lv + Z.B.Cv; Ln := Ln + 1.0;
+                                                end if;
+                                                P.Tu := (if Ln > 0.0 then Lu / Ln else Z.Cu);
+                                                P.Tv := (if Ln > 0.0 then Lv / Ln else Z.Cv);
+                                             end;
+                                             P.Tz := Z.Depth; P.Wz := (if Picture.Is_Nan (Z.Depth) then 0.0 else 1.0);
+                                             P.Tsize := Sqrt (Long_Float'Max (0.0,
+                                               (Long_Float (Z.X1 - Z.X0) / Long_Float (Cw)) * (Long_Float (Z.Y1 - Z.Y0) / Long_Float (Ch))));
+                                             P.Size := Sqrt (Long_Float'Max (0.0, P.Box_W * P.Box_H));
+                                             P.Wsize := (if P.Tsize > 0.0 and then P.Size > 0.0 then 1.0 else 0.0);
                                           end;
                                        elsif P.Kind = Piece_Pt and then O.Kind in Thing | Thing_Remembered then
                                           --  "到它那儿" = 到它那一面,不替它挑高低(owner 2026-09-08:"半腰"假设了两指从侧面夹一个立在台面上的东西,
