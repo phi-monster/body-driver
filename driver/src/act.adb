@@ -1066,6 +1066,20 @@ package body Act is
                         Sum_D : Long_Float := 0.0;     --  整幅画面上"随便一个位置"平均多像
                         N_Try : Natural := 0;
                         Sx0, Sy0 : Integer := 0;
+                        --  🔴 整幅搜索必须带一条【它不会瞬移】:同样像的两处,信离预测近的那一处。
+                        --  不带这一条,画面里任何一块浅色的东西都可能在某一帧比真身更像 ——
+                        --  IE 实测:跟的框从球跳到剪刀那只浅绿手柄上,而球就在旁边好好地待着。
+                        --  罚 = 离预测多远(按模板自己的大小折算,比例,无量纲);远一个模板就贵一倍。
+                        function Near (Ox, Oy : Integer; S : Long_Float) return Long_Float is
+                           Dx : constant Long_Float := Long_Float (Cx + Ox) - Pred_U * Long_Float (Hw);
+                           Dy : constant Long_Float := Long_Float (Cy + Oy) - Pred_V * Long_Float (Hh);
+                           R : constant Long_Float := Long_Float (Integer'Max (Pw, Ph));
+                        begin
+                           if S >= Long_Float'Last then
+                              return S;
+                           end if;
+                           return S * (1.0 + Sqrt (Dx * Dx + Dy * Dy) / R);
+                        end Near;
                      begin
                         --  第一次跟这块:把它此刻的样子存下来,以后每一帧都和这一份比。
                         if P.Anc_W = 0 then
@@ -1082,7 +1096,7 @@ package body Act is
                            end loop;
                            P.Anc_W := 2 * Pw + 1; P.Anc_H := 2 * Ph + 1;
                         end if;
-                        Base_D := Score (0, 0, P.Scale, 1);
+                        Base_D := Near (0, 0, Score (0, 0, P.Scale, 1));
                         --  🔴 先在粗的一档上把【整幅画面】搜一遍,再回到细的一档只在赢家附近搜。
                         --  手上的相机一动,整幅画面都在跑,固定半径的搜索圈根本追不上 —— HZ 实测:
                         --  探针把某个关节推到 0.53,球早跑出搜索圈,身体记成"这个通道推了没反应",表里写进
@@ -1090,7 +1104,7 @@ package body Act is
                         for Oy in -(Hh / Cs) .. Hh / Cs loop
                            for Ox in -(Hw / Cs) .. Hw / Cs loop
                               declare
-                                 S : constant Long_Float := Score (Ox * Cs, Oy * Cs, P.Scale, Cs);
+                                 S : constant Long_Float := Near (Ox * Cs, Oy * Cs, Score (Ox * Cs, Oy * Cs, P.Scale, Cs));
                               begin
                                  if S < Long_Float'Last then
                                     Sum_D := Sum_D + S; N_Try := N_Try + 1;
@@ -1114,7 +1128,7 @@ package body Act is
                               for Oy in -Cs .. Cs loop
                                  for Ox in -Cs .. Cs loop
                                     declare
-                                       S : constant Long_Float := Score (Sx0 + Ox, Sy0 + Oy, Sc, 1);
+                                       S : constant Long_Float := Near (Sx0 + Ox, Sy0 + Oy, Score (Sx0 + Ox, Sy0 + Oy, Sc, 1));
                                     begin
                                        if S < Best_D then
                                           Best_D := S; Bx := Sx0 + Ox; By := Sy0 + Oy; Best_S := Sc;
@@ -1126,7 +1140,7 @@ package body Act is
                         end loop;
                         --  🔴 尺度要【明显】更像才准改:一步一步乘上去的东西,靠噪声也能走成单边漂移。
                         --  比原尺寸好不到半成就当没变(比例,无量纲)。
-                        if Best_S /= P.Scale and then Best_D > Score (Bx, By, P.Scale, 1) * 0.95 then
+                        if Best_S /= P.Scale and then Best_D > Near (Bx, By, Score (Bx, By, P.Scale, 1)) * 0.95 then
                            Best_S := P.Scale;
                         end if;
                         --  🔴 认得住要满足两条:①最像的那个本身够像(不超过噪声门槛,或者比原地明显好);
