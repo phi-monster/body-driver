@@ -2898,7 +2898,7 @@ package body Act is
                --  🔴 一个门槛不够:太紧只长出球上的一小块白(缝线、明暗都能挡住),太松一路淌到桌面。
                --  用和切块同一条判据 —— 【真东西的边,门槛翻倍它几乎不变】:门槛一档档翻倍各长一遍,
                --  取【下一档只多出不到半成】的那一档里最大的那个。长过半幅的当作没长成。
-               Levels : constant Natural := 5;   --  档数(次数,无量纲)
+               Levels : constant Natural := 7;   --  档数(次数,无量纲)
                Gs : array (0 .. Levels - 1) of Picture.Region;
                Cn : array (0 .. Levels - 1) of Long_Float := (others => Long_Float (Cwp * Chp));
                Gok : Boolean;
@@ -2910,7 +2910,7 @@ package body Act is
                   if Gok then
                      Cn (K) := Long_Float (Gs (K).Count);
                   end if;
-                  Tl := Tl * 2.0;   --  一档翻一倍(倍数,无量纲)
+                  Tl := Tl * 1.4;   --  一档松四成(倍数,无量纲):翻倍太粗,球面和桌面之间只隔一档
                end loop;
                --  一直放松到【跨过去就变一个数量级】的那一档为止:东西自己的边就在那儿。
                --  球面上的缝线、明暗只让它慢慢变大(几成到一倍),而跨到桌面上是几十倍。
@@ -2933,6 +2933,24 @@ package body Act is
                end;
                if Pick >= 0 then
                   R := Gs (Pick);
+                  --  🔴 框要把这一片自己的【边】框进来:一块纯白的中段和墙上任何一块白长得一模一样,
+                  --  真正把它和别的白东西分开的是它的边。以形心为中心取对称框,再各向外放四分之一
+                  --  (比例,无量纲)。这一步是给"照着样子找回它"用的,不改这一片本身。
+                  declare
+                     Cx : constant Long_Float := R.Cu * Long_Float (Cwp);
+                     Cy : constant Long_Float := R.Cv * Long_Float (Chp);
+                     Hw : constant Long_Float :=
+                       Long_Float'Max (Cx - Long_Float (R.X0), Long_Float (R.X1) - Cx) * 1.25;
+                     Hh : constant Long_Float :=
+                       Long_Float'Max (Cy - Long_Float (R.Y0), Long_Float (R.Y1) - Cy) * 1.25;
+                  begin
+                     R.X0 := Natural (Long_Float'Max (0.0, Cx - Hw));
+                     R.X1 := Natural (Long_Float'Min (Long_Float (Cwp - 1), Cx + Hw));
+                     R.Y0 := Natural (Long_Float'Max (0.0, Cy - Hh));
+                     R.Y1 := Natural (Long_Float'Min (Long_Float (Chp - 1), Cy + Hh));
+                     R.Sig_U := Hw / Long_Float (Cwp);
+                     R.Sig_V := Hh / Long_Float (Chp);
+                  end;
                   Put_Line ("[身] 从那一点按颜色长出去(放松到第" & Integer'Image (Pick + 1) & " 档就到边了)⇒ 这一片"
                             & Natural'Image (R.Count) & " 个像素,拿它当这个东西的框");
                end if;
