@@ -980,114 +980,129 @@ package body Act is
                      --  做法:在预测位置周围搜一圈,找和上一帧那块最像的位置(灰度差平方和最小);
                      --  最像的那个也不够像 ⇒ 明说跟丢,不许悄悄跟到别的东西上。
                      declare
-                        --  模板取这块自己的半个身子,再小也有画幅的百分之三(比例,无量纲);搜一圈 = 一个跟踪窗
+                        --  模板取这块自己的半个身子,再小也有画幅的百分之三(比例,无量纲)
                         Pw : constant Integer := Integer'Max (3, Integer (Long_Float'Max (P.Box_W, 0.03) * Long_Float (Hw) * 0.5));
                         Ph : constant Integer := Integer'Max (3, Integer (Long_Float'Max (P.Box_H, 0.03) * Long_Float (Hh) * 0.5));
-                        --  搜一个跟踪窗(一步最多让画面跑这么多;比例,无量纲)。范围收回来,把算力让给尺度那一档
-                        Rr : constant Integer := Integer'Max (2, Integer (Track_Win * Long_Float (Hw)));
                         Cx : constant Integer := Integer (P.Cu * Long_Float (Hw));
                         Cy : constant Integer := Integer (P.Cv * Long_Float (Hh));
-                        Best_D : Long_Float := Long_Float'Last;
-                        Bx, By : Integer := 0;
-                        Base_D : Long_Float := 0.0;
-                        Sum_D : Long_Float := 0.0;     --  所有位置的平均像不像 —— 最像的那个要明显比它好
-                        N_Try : Natural := 0;
-                        Best_S : Long_Float := 1.0;    --  最像的那一档尺度 = 这一步它看着大了还是小了
-                        --  "够不够像"的门槛用【这台相机静止时自己抖多少】(量出来的)算:抖动的四倍平方
-                        --  (倍数,无量纲)。没量到就退回一个很松的值,宁可跟着也不乱丢。
+                        --  "够不够像"的门槛用【这台相机静止时自己抖多少】(量出来的)算(倍数,无量纲)
                         Noise_G : constant Long_Float :=
                           (if Cam < Natural (C.Map.Pic_Floor.Length) and then C.Map.Pic_Floor (Cam) > 0
                            then Long_Float (C.Map.Pic_Floor (Cam)) else 4.0);
                         Bad_D : constant Long_Float := (Noise_G * 4.0) ** 2;
-                     begin
-                        --  🔴 一起把【尺度】也搜出来:模板在这一帧变大还是变小,就是"离得越近越大"那条距离信号。
-                        --  没有深度之后,这是身体唯一可能有的"往前"的感觉 —— 不搜尺度,大小那一行永远是零,
-                        --  伺服就只能靠转手腕在画面里挪球,最后把手臂仰到天上(HQ 实测)。
-                        for Si in 0 .. 4 loop
-                        declare
-                           --  五档尺度,每档三个百分点(比例,无量纲)。三档太粗:一步要么判"没变"要么判"变了一成半",
-                           --  当不了控制信号 —— 实测大小那一项不降反涨(60 → 439 → 525)。
-                           Sc : constant Long_Float := (case Si is when 0 => 0.94, when 1 => 0.97, when 2 => 1.0,
-                                                        when 3 => 1.03, when others => 1.06);
+                        Cs : constant Positive := 4;   --  粗搜隔几个像素取一个(次数,无量纲)
+                        --  比一个位置:上一帧那块(A 里以 Cx,Cy 为心)对这一帧挪了 Ox,Oy 又放大 Sc 的那块(B 里)。
+                        --  Step = 隔几个像素取一个;只和"长得像它"的候选比 —— 平均亮度要接近,起伏也要接近,
+                        --  否则平整的墙面和木纹到处都能凑出一个"最像"(HT 实测:模板锁到墙上,手腕越抬越高)。
+                        function Score (Ox, Oy : Integer; Sc : Long_Float; Step : Positive) return Long_Float is
+                           Sum : Long_Float := 0.0;
+                           N_Pix : Natural := 0;
+                           Sa, Sb, Qa, Qb : Long_Float := 0.0;
+                           Ny : constant Integer := Integer'Max (1, Ph / Step);
+                           Nx : constant Integer := Integer'Max (1, Pw / Step);
                         begin
-                        for Oy in -Rr .. Rr loop
-                           for Ox in -Rr .. Rr loop
-                              declare
-                                 Sum : Long_Float := 0.0;
-                                 N_Pix : Natural := 0;
-                                 Sa, Sb, Qa, Qb : Long_Float := 0.0;   --  两边各自的平均亮度和起伏
-                              begin
-                                 for Y in -Ph .. Ph loop
-                                    for X in -Pw .. Pw loop
+                           for Yi in -Ny .. Ny loop
+                              for Xi in -Nx .. Nx loop
+                                 declare
+                                    X : constant Integer := Xi * Step;
+                                    Y : constant Integer := Yi * Step;
+                                    Ax : constant Integer := Cx + X;
+                                    Ay : constant Integer := Cy + Y;
+                                    Bx2 : constant Integer := Cx + Integer (Long_Float (X) * Sc) + Ox;
+                                    By2 : constant Integer := Cy + Integer (Long_Float (Y) * Sc) + Oy;
+                                 begin
+                                    if Ax >= 0 and then Ay >= 0 and then Ax < Hw and then Ay < Hh
+                                      and then Bx2 >= 0 and then By2 >= 0 and then Bx2 < Hw and then By2 < Hh
+                                    then
                                        declare
-                                          Ax : constant Integer := Cx + X;
-                                          Ay : constant Integer := Cy + Y;
-                                          Bx2 : constant Integer := Cx + Integer (Long_Float (X) * Sc) + Ox;
-                                          By2 : constant Integer := Cy + Integer (Long_Float (Y) * Sc) + Oy;
+                                          Va : constant Long_Float := Long_Float (A.Element (Ay * Hw + Ax));
+                                          Vb : constant Long_Float := Long_Float (B.Element (By2 * Hw + Bx2));
                                        begin
-                                          if Ax >= 0 and then Ay >= 0 and then Ax < Hw and then Ay < Hh
-                                            and then Bx2 >= 0 and then By2 >= 0 and then Bx2 < Hw and then By2 < Hh
-                                          then
-                                             declare
-                                                Va : constant Long_Float := Long_Float (A.Element (Ay * Hw + Ax));
-                                                Vb : constant Long_Float := Long_Float (B.Element (By2 * Hw + Bx2));
-                                             begin
-                                                Sum := Sum + (Va - Vb) ** 2;
-                                                Sa := Sa + Va; Sb := Sb + Vb;
-                                                Qa := Qa + Va * Va; Qb := Qb + Vb * Vb;
-                                                N_Pix := N_Pix + 1;
-                                             end;
-                                          end if;
+                                          Sum := Sum + (Va - Vb) ** 2;
+                                          Sa := Sa + Va; Sb := Sb + Vb;
+                                          Qa := Qa + Va * Va; Qb := Qb + Vb * Vb;
+                                          N_Pix := N_Pix + 1;
                                        end;
-                                    end loop;
-                                 end loop;
-                                 --  🔴 只和"长得像它"的候选比:平均亮度要接近,【起伏】也要接近。
-                                 --  只比灰度差平方和的话,平整的墙面和木纹到处都能凑出一个"最像"的位置 ——
-                                 --  实测手腕越抬越高、模板锁到墙上,尺度也跟着被带偏(HT)。
-                                 --  球有缝线所以起伏大,墙是平的起伏小,这一条就把墙挡掉了。
-                                 if N_Pix > 0 then
-                                    declare
-                                       Ma : constant Long_Float := Sa / Long_Float (N_Pix);
-                                       Mb : constant Long_Float := Sb / Long_Float (N_Pix);
-                                       Da : constant Long_Float := Sqrt (Long_Float'Max (0.0, Qa / Long_Float (N_Pix) - Ma * Ma));
-                                       Db : constant Long_Float := Sqrt (Long_Float'Max (0.0, Qb / Long_Float (N_Pix) - Mb * Mb));
-                                    begin
-                                       --  亮度差过噪声的四倍、或者起伏差一倍以上(倍数,无量纲)⇒ 不是它
-                                       if abs (Ma - Mb) > Noise_G * 4.0
-                                         or else Db > Da * 2.0 + 1.0 or else Da > Db * 2.0 + 1.0
-                                       then
-                                          Sum := Long_Float'Last;
-                                       end if;
-                                    end;
-                                 end if;
-                                 if N_Pix > 0 and then Sum < Long_Float'Last then
-                                    Sum := Sum / Long_Float (N_Pix);
-                                    if Ox = 0 and then Oy = 0 then
-                                       Base_D := Sum;
                                     end if;
-                                    Sum_D := Sum_D + Sum; N_Try := N_Try + 1;
-                                    if Sum < Best_D then
-                                       Best_D := Sum; Bx := Ox; By := Oy; Best_S := Sc;
+                                 end;
+                              end loop;
+                           end loop;
+                           if N_Pix = 0 then
+                              return Long_Float'Last;
+                           end if;
+                           declare
+                              Ma : constant Long_Float := Sa / Long_Float (N_Pix);
+                              Mb : constant Long_Float := Sb / Long_Float (N_Pix);
+                              Da : constant Long_Float := Sqrt (Long_Float'Max (0.0, Qa / Long_Float (N_Pix) - Ma * Ma));
+                              Db : constant Long_Float := Sqrt (Long_Float'Max (0.0, Qb / Long_Float (N_Pix) - Mb * Mb));
+                           begin
+                              if abs (Ma - Mb) > Noise_G * 4.0
+                                or else Db > Da * 2.0 + 1.0 or else Da > Db * 2.0 + 1.0
+                              then
+                                 return Long_Float'Last;
+                              end if;
+                           end;
+                           return Sum / Long_Float (N_Pix);
+                        end Score;
+                        Best_D : Long_Float := Long_Float'Last;
+                        Bx, By : Integer := 0;
+                        Best_S : Long_Float := 1.0;    --  最像的那一档尺度 = 这一步它看着大了还是小了
+                        Base_D : constant Long_Float := Score (0, 0, 1.0, 1);   --  原地不动有多像
+                        Sum_D : Long_Float := 0.0;     --  整幅画面上"随便一个位置"平均多像
+                        N_Try : Natural := 0;
+                        Sx0, Sy0 : Integer := 0;
+                     begin
+                        --  🔴 先在粗的一档上把【整幅画面】搜一遍,再回到细的一档只在赢家附近搜。
+                        --  手上的相机一动,整幅画面都在跑,固定半径的搜索圈根本追不上 —— HZ 实测:
+                        --  探针把某个关节推到 0.53,球早跑出搜索圈,身体记成"这个通道推了没反应",表里写进
+                        --  一列零 ⇒ 解算认为哪个通道都没用,连着 12 步一个命令都没发出来,手一动没动。
+                        for Oy in -(Hh / Cs) .. Hh / Cs loop
+                           for Ox in -(Hw / Cs) .. Hw / Cs loop
+                              declare
+                                 S : constant Long_Float := Score (Ox * Cs, Oy * Cs, 1.0, Cs);
+                              begin
+                                 if S < Long_Float'Last then
+                                    Sum_D := Sum_D + S; N_Try := N_Try + 1;
+                                    if S < Best_D then
+                                       Best_D := S; Sx0 := Ox * Cs; Sy0 := Oy * Cs;
                                     end if;
                                  end if;
                               end;
                            end loop;
                         end loop;
-                        end;
+                        --  细搜:在粗搜赢的那一点周围一个粗格之内,连【尺度】一起搜。
+                        --  尺度五档,每档三个百分点(比例,无量纲):模板这一帧变大还是变小,就是
+                        --  "离得越近看着越大"那条距离信号 —— 没有深度之后这是身体唯一往前的感觉。
+                        Best_D := Long_Float'Last;
+                        for Si in 0 .. 4 loop
+                           declare
+                              Sc : constant Long_Float := (case Si is when 0 => 0.94, when 1 => 0.97, when 2 => 1.0,
+                                                           when 3 => 1.03, when others => 1.06);
+                           begin
+                              for Oy in -Cs .. Cs loop
+                                 for Ox in -Cs .. Cs loop
+                                    declare
+                                       S : constant Long_Float := Score (Sx0 + Ox, Sy0 + Oy, Sc, 1);
+                                    begin
+                                       if S < Best_D then
+                                          Best_D := S; Bx := Sx0 + Ox; By := Sy0 + Oy; Best_S := Sc;
+                                       end if;
+                                    end;
+                                 end loop;
+                              end loop;
+                           end;
                         end loop;
-                        --  最像的那个也不像(比原地还差不了多少、而且绝对值很大)⇒ 跟丢了,老实说
-                        --  🔴 认得住要满足两条:①最像的那个本身够像(不超过噪声门槛);
-                        --  ②它要【明显比搜索范围里的平均水平好】(不到平均的一半;比例,无量纲)——
-                        --  否则说明这一片到处都差不多(木纹、墙面),最像的那个只是噪声里的巧合,
-                        --  锁上去就等于跟到别的东西上(HN 实测:锁到球拍、锁到墙)。两条有一条不满足就明说跟丢。
-                        if (Best_D > Bad_D and then Best_D > Base_D * 0.9)
+                        --  🔴 认得住要满足两条:①最像的那个本身够像(不超过噪声门槛,或者比原地明显好);
+                        --  ②它要明显比【整幅画面上随便一个位置】好(不到平均的一半;比例,无量纲)——
+                        --  否则说明这一片到处都差不多(木纹、墙面),最像的只是巧合(HN 实测:锁到球拍、锁到墙)。
+                        if Best_D = Long_Float'Last
+                          or else (Best_D > Bad_D and then Best_D > Base_D * 0.9)
                           or else (N_Try > 0 and then Best_D > 0.5 * (Sum_D / Long_Float (N_Try)))
                         then
                            P.Cu := Pred_U; P.Cv := Pred_V; P.Lost := True;
                         else
                            P.Cu := Long_Float'Max (0.0, Long_Float'Min (1.0, P.Cu + Long_Float (Bx) / Long_Float (Hw)));
                            P.Cv := Long_Float'Max (0.0, Long_Float'Min (1.0, P.Cv + Long_Float (By) / Long_Float (Hh)));
-                           --  尺度赢在哪一档,这块就跟着变大变小 —— 这就是"看着多大"那一行的来源
                            P.Box_W := P.Box_W * Best_S;
                            P.Box_H := P.Box_H * Best_S;
                            P.Size := Sqrt (Long_Float'Max (0.0, P.Box_W * P.Box_H));
@@ -1233,7 +1248,14 @@ package body Act is
                            Ran := Sqrt ((P.Cu - W0.Cu) ** 2 + (P.Cv - W0.Cv) ** 2);
                            Dz := (if P.Z > 0.0 and then W0.Z > 0.0 then abs (P.Z - W0.Z) else 0.0);
                            Ran_Max := Long_Float'Max (Ran_Max, Ran);
-                           if abs Deliv (K) > C.Map.EE_Noise and then (Ran >= Floor_Px or else Dz >= Floor_Z (I)) then
+                           --  🔴 跟丢了就是【什么也没量到】,不许当成"这个通道不动它"记成一列零。
+                           --  没有深度的时候 Dz 恒为 0 而 Floor_Z 也是 0,于是 "Dz >= Floor_Z" 恒真 ——
+                           --  一次跟丢的探针会被当成一次成功的测量写进表(HZ 实测:整张表全零,
+                           --  解算说"哪个通道都没用",连着 12 步一个命令都没发出来)。
+                           if abs Deliv (K) > C.Map.EE_Noise and then not P.Lost
+                             and then (Ran >= Floor_Px
+                                       or else (P.Z > 0.0 and then W0.Z > 0.0 and then Dz >= Floor_Z (I)))
+                           then
                               declare
                                  Col : Table.Vec3;
                               begin
@@ -1457,7 +1479,11 @@ package body Act is
                         end if;
                      end if;
                   end loop;
-                  if not Found then
+                  --  🔴 切不出块的时候,这只眼睛【什么也没看见】,不是"东西不见了"。
+                  --  关掉深度以后颜色切块常常一块都切不出来(脑指出来的东西本来就切不出来,
+                  --  那正是"脑指"存在的理由)⇒ 老写法每一步都叫停,一步都走不完(HZ 实测:
+                  --  12 推全部"途中眼睛叫停",手一动没动)。判不了就别插嘴。
+                  if not Found and then not Regs.Is_Empty then
                      Note.Halted := True;
                      return True;
                   end if;
