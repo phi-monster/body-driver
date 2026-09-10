@@ -2834,6 +2834,7 @@ package body Act is
             R.Sig_U := Hu; R.Sig_V := Hv;
             Regs.Append (R);
             World.Observe (C.Wld, Cam, Regs, Cwp, Chp);
+            World.Pin (C.Wld, Cam, U, V);   --  脑指的那个:钉住,以后不许因为"这一帧没对上"就说看不见
             Put_Line ("[身] 脑指了第" & Natural'Image (Say.Point_At) & " 格 ⇒ 把那一片当成一个东西收下,以后照常跟");
          end;
       end if;

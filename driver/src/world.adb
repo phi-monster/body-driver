@@ -16,6 +16,38 @@ package body World is
       Init (S, N);
    end Reset_All;
 
+   procedure Pin (S : in out State; Cam : Natural; U, V : Long_Float) is
+      Bd : Long_Float := 1.0e9;
+      Best : Integer := -1;
+   begin
+      if Cam >= Natural (S.Cams.Length) then
+         return;
+      end if;
+      declare
+         Cs : Cam_State := S.Cams (Cam);
+      begin
+         for I in 0 .. Natural (Cs.Slots.Length) - 1 loop
+            declare
+               R : constant Picture.Region := (if Cs.Slots (I).Present then Cs.Slots (I).R else Cs.Slots (I).Shadow);
+               D : constant Long_Float := Sqrt ((R.Cu - U) ** 2 + (R.Cv - V) ** 2);
+            begin
+               if D < Bd then
+                  Bd := D; Best := I;
+               end if;
+            end;
+         end loop;
+         if Best >= 0 then
+            declare
+               Sl : Slot := Cs.Slots (Natural (Best));
+            begin
+               Sl.Pinned := True; Sl.Present := True; Sl.Seen := True;
+               Cs.Slots.Replace_Element (Natural (Best), Sl);
+            end;
+            S.Cams.Replace_Element (Cam, Cs);
+         end if;
+      end;
+   end Pin;
+
    procedure Observe (S : in out State; Cam : Natural; Regs : Picture.Regions; W, H : Natural) is
    begin
       if Cam >= Natural (S.Cams.Length) then
@@ -58,6 +90,8 @@ package body World is
                if Best >= 0 then
                   Used (Best) := True;
                   Sl.Present := True; Sl.R := Regs (Best); Sl.Shadow := Regs (Best); Sl.Seen := True;
+               elsif Sl.Pinned then
+                  null;             --  脑指的那个:这一帧没对上也留着,位置留上一次的
                elsif Regs.Is_Empty then
                   --  🔴 这张画面里一块都切不出来(没有深度、颜色也切不出)⇒ 不能因此说"东西不见了"。
                   --  它没消失,是我们切不出来 —— 位置留着上一次的,照样当它在,由光流在段内把它追下去。
@@ -71,7 +105,7 @@ package body World is
          end loop;
          for Ri in 0 .. Natural (Regs.Length) - 1 loop
             if not Used (Ri) then
-               Cs.Slots.Append (Slot'(Present => True, R => Regs (Ri), Seen => True, Shadow => Regs (Ri)));
+               Cs.Slots.Append (Slot'(Present => True, R => Regs (Ri), Seen => True, Shadow => Regs (Ri), Pinned => False));
             end if;
          end loop;
          S.Cams.Replace_Element (Cam, Cs);
