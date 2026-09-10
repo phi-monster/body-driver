@@ -2808,14 +2808,20 @@ package body Act is
       --  给它一个号,以后照常跟。没有深度的时候身体分不清"什么是一个东西",而认东西本来就是脑的活;
       --  身体只负责跟住和量 —— 跟住靠位置+大小+颜色对号,不需要分割(HD/HE 实测:关掉深度后
       --  头顶相机一个东西都切不出来,而我看着图一眼就知道球在哪)。
-      if Say.Point_At >= 1 and then Say.Point_At <= Natural (C.Cells_U.Length) and then Cam < Natural (F.Cams.Length) then
+      --  指的时候用一张【更细】的格子:列数行数各翻一倍(12 × 8 = 96 格)。画出来的粗格子一格太大,
+      --  指出来的那一片常常落在东西旁边而不是东西上(HL 实测:框压在球的左上角,模板追的是桌面)。
+      if Say.Point_At >= 1 and then Say.Point_At <= C.Cols * 2 * C.Rows * 2 and then Cam < Natural (F.Cams.Length) then
          declare
             Cwp : constant Natural := F.Cams (Cam).W;
             Chp : constant Natural := F.Cams (Cam).H;
-            Hu : constant Long_Float := 0.5 / Long_Float (C.Cols);   --  半格(比例,无量纲)
-            Hv : constant Long_Float := 0.5 / Long_Float (C.Rows);
-            U : constant Long_Float := C.Cells_U (Say.Point_At - 1);
-            V : constant Long_Float := C.Cells_V (Say.Point_At - 1);
+            Fc : constant Natural := C.Cols * 2;
+            Fr : constant Natural := C.Rows * 2;
+            Col_I : constant Natural := (Say.Point_At - 1) mod Fc;
+            Row_I : constant Natural := (Say.Point_At - 1) / Fc;
+            Hu : constant Long_Float := 0.5 / Long_Float (Fc);   --  半格(比例,无量纲)
+            Hv : constant Long_Float := 0.5 / Long_Float (Fr);
+            U : constant Long_Float := (Long_Float (Col_I) + 0.5) / Long_Float (Fc);
+            V : constant Long_Float := (Long_Float (Row_I) + 0.5) / Long_Float (Fr);
             R : Picture.Region;
             Regs : Picture.Regions;
          begin
