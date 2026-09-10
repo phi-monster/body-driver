@@ -1027,7 +1027,10 @@ package body Act is
                                  end;
                               end loop;
                            end loop;
-                           if N_Pix = 0 then
+                           --  🔴 重叠不够就不算"像":候选挪到画面边上时只剩一两个像素落在画面里,
+                           --  按像素平均的差值反而最小 ⇒ 整幅搜索必然赢在边角上(IA 实测:一次探针
+                           --  "跑了 0.9955 画幅",点被甩到 v=1.000 和 v=0.000)。至少要有一半模板落在画面里。
+                           if N_Pix * 2 < (2 * Nx + 1) * (2 * Ny + 1) then
                               return Long_Float'Last;
                            end if;
                            declare
