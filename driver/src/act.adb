@@ -2302,6 +2302,20 @@ package body Act is
          for I in 0 .. Natural (Pts.Length) - 1 loop
             Store_Effect (C, Arm, Cam, Pts (I).Kind, Pts (I).Chan_K, Pts (I).Blob, Effs (I), Trusts (I), Reach);
          end loop;
+         --  🔴 "碰到"也要从【被跟住的那几块】上判,不能只靠切块比对。
+         --  关掉深度以后,不跟着手动的那台相机里常常一块都切不出来 ⇒ 那条判据永远不响 ⇒
+         --  脑说的"走到碰到为止"变成一句空话,身体只会一路走到步数上限(IL/IM 实测:手压到球上、
+         --  差距 0.003,60 步里一次 contact 都没响过)。而被脑点名跟住的那个东西【本来就在跟着】:
+         --  在不跟着这只手动的相机里,它自己动了就只能是被碰了。
+         if not Own_Cam then
+            for I in 0 .. Natural (Pts.Length) - 1 loop
+               if Pts (I).Kind = Thing_Pt and then not Pts (I).Lost and then I < Natural (Was.Length)
+                 and then Sqrt ((Pts (I).Cu - Was (I).Cu) ** 2 + (Pts (I).Cv - Was (I).Cv) ** 2) > Fl.Track * 3.0
+               then
+                  Note.Touched := True;
+               end if;
+            end loop;
+         end if;
          --  碰到 = 我没在推的东西自己动了(跟着这只手动的相机里满画面都在动,分不出来 ⇒ 不下结论)
          if not Own_Cam and then not Was_Regs.Is_Empty then
             declare
@@ -3240,8 +3254,11 @@ package body Act is
                                              --  合手却是空的 —— 差的正是这一维,而当时没有词能说它)。
                                              P.Size := Sqrt (Long_Float'Max (0.0, P.Box_W * P.Box_H));
                                              if P.Size > 0.0 then
-                                                --  往哪边:近一点 ⇒ 看着变大(比例,无量纲;大小不承重,方向承重)
-                                                P.Tsize := P.Size * (if Rl = "front" then 1.25 else 0.8);
+                                                --  🔴 目标给一个【够不着】的:这个词是方向,不是终点 —— 终点由脑说的 until 定。
+                                                --  给一个走十几步就能达成的目标,身体会自称"到位了"然后停在半路,
+                                                --  而实际已经从要够的东西旁边冲过去了(IM 实测:小步 back 走 16 推就"到了",
+                                                --  手横趴在桌上,球还在原处)。倍数无量纲。
+                                                P.Tsize := P.Size * (if Rl = "front" then 2.0 else 0.5);
                                                 P.Wsize := 1.0;
                                              end if;
                                           end if;
