@@ -1396,6 +1396,16 @@ package body Act is
                                  --  只有变化过了自己的噪声地板才敢写进表,否则这一格留零(留零 = 归一时这一行自动不参与)
                                  if P.Size > 0.0 and then W0.Size > 0.0 and then abs (P.Size - W0.Size) > Floor_S (I) then
                                     Col (3) := (P.Size - W0.Size) / Deliv (K);
+                                    --  🔴 一推不可能让一个东西看着变大超过它自己:这一格乘上自己那一档
+                                    --  之后必须还在它当前大小之内。不封这一条,探针里一次"实到很小而尺度抖了
+                                    --  一下"就能把这一格推到几十,身体从此以为【一推就到】,于是每步只轻轻推
+                                    --  一下等着,而球纹丝不动(IR 实测:大小那一行常年 1.0 步,球的大小 0.2238 →
+                                    --  0.2255 三十步没变)。比例,无量纲。
+                                    declare
+                                       Lim : constant Long_Float := W0.Size / Long_Float'Max (1.0e-9, C.Map.Amp (Chn));
+                                    begin
+                                       Col (3) := Long_Float'Max (-Lim, Long_Float'Min (Lim, Col (3)));
+                                    end;
                                     Size_Seen := True;
                                  else
                                     Col (3) := 0.0;
