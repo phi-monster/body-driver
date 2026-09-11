@@ -869,6 +869,11 @@ package body Act is
                         P.Sep_U := Z.A.Cu - Z.Cu; P.Sep_V := Z.A.Cv - Z.Cv;
                      elsif Z.B.Valid then
                         P.Sep_U := Z.B.Cu - Z.Cu; P.Sep_V := Z.B.Cv - Z.Cv;
+                     elsif Z.X1 > Z.X0 then
+                        --  一瓣都没认出来的时候,用【合空时扫过的那一片】自己的半宽当基线:
+                        --  那一片就是这只手,两头都落在手上,一样量得出它看着变大变小(比例,无量纲)。
+                        P.Sep_U := Long_Float (Z.X1 - Z.X0) / (2.0 * Long_Float (Cw));
+                        P.Sep_V := 0.0;
                      end if;
                   end if;
                   if P.Sep_U /= 0.0 or else P.Sep_V /= 0.0 then
@@ -2408,7 +2413,7 @@ package body Act is
          Put_Line ("[身]     步" & Natural'Image (Steps_Taken) & (if Note.Big_Step then "(大步)" else "") &
                    ":差距 " & Codec.Fmt (Last_Raw, 3) & " → " & Codec.Fmt (Note.Raw_Now, 3) & " · 还差 " & Codec.Fmt (Note.Err_Now, 1) & " 步(左右 " & Codec.Fmt (Pts (0).Err_U, 1) &
                    " 上下 " & Codec.Fmt (Pts (0).Err_V, 1) & " 远近 " & Codec.Fmt (Pts (0).Err_Z, 1) &
-                   " 大小 " & Codec.Fmt (Pts (0).Err_S, 1) & " 朝向 " & Codec.Fmt (Pts (0).Err_A, 1) & ")· 手看着多大 " & Codec.Fmt (Pts (0).Size, 4) & "· 拍 " & Codec.Img (Beats) &
+                   " 大小 " & Codec.Fmt (Pts (0).Err_S, 1) & " 朝向 " & Codec.Fmt (Pts (0).Err_A, 1) & ")· 手看着多大 " & Codec.Fmt (Pts (0).Size, 4) & " 基线 " & Codec.Fmt (Sqrt (Pts (0).Sep_U ** 2 + Pts (0).Sep_V ** 2), 4) & "· 拍 " & Codec.Img (Beats) &
                    " · 信表 " & Codec.Fmt (Trust, 2) & " · 步幅 ×[" & Codec.Fmt (Reach (0), 0) & " " & Codec.Fmt (Reach (1), 0) & " " & Codec.Fmt (Reach (2), 0) & " " &
                    Codec.Fmt (Reach (3), 0) & " " & Codec.Fmt (Reach (4), 0) & " " & Codec.Fmt (Reach (5), 0) &
                    "] · 命令 [" & Codec.Fmt (Note.Cmd (0), 3) & " " & Codec.Fmt (Note.Cmd (1), 3) & " " & Codec.Fmt (Note.Cmd (2), 3) & " " &
