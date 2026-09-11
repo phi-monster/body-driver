@@ -2435,7 +2435,7 @@ package body Act is
          Put_Line ("[身]     步" & Natural'Image (Steps_Taken) & (if Note.Big_Step then "(大步)" else "") &
                    ":差距 " & Codec.Fmt (Last_Raw, 3) & " → " & Codec.Fmt (Note.Raw_Now, 3) & " · 还差 " & Codec.Fmt (Note.Err_Now, 1) & " 步(左右 " & Codec.Fmt (Pts (0).Err_U, 1) &
                    " 上下 " & Codec.Fmt (Pts (0).Err_V, 1) & " 远近 " & Codec.Fmt (Pts (0).Err_Z, 1) &
-                   " 大小 " & Codec.Fmt (Pts (0).Err_S, 1) & " 朝向 " & Codec.Fmt (Pts (0).Err_A, 1) & ")· 手看着多大 " & Codec.Fmt (Pts (0).Size, 4) & " 基线 " & Codec.Fmt (Sqrt (Pts (0).Sep_U ** 2 + Pts (0).Sep_V ** 2), 4) & "· 拍 " & Codec.Img (Beats) &
+                   " 大小 " & Codec.Fmt (Pts (0).Err_S, 1) & " 朝向 " & Codec.Fmt (Pts (0).Err_A, 1) & ")· 手看着多大 " & Codec.Fmt (Pts (0).Size, 4) & " 目标深 " & Codec.Fmt (Pts (0).Tz, 3) & " 重 " & Codec.Fmt (Pts (0).Wz, 1) & " 点数" & Codec.Img (Natural (Pts.Length)) & "· 拍 " & Codec.Img (Beats) &
                    " · 信表 " & Codec.Fmt (Trust, 2) & " · 步幅 ×[" & Codec.Fmt (Reach (0), 0) & " " & Codec.Fmt (Reach (1), 0) & " " & Codec.Fmt (Reach (2), 0) & " " &
                    Codec.Fmt (Reach (3), 0) & " " & Codec.Fmt (Reach (4), 0) & " " & Codec.Fmt (Reach (5), 0) &
                    "] · 命令 [" & Codec.Fmt (Note.Cmd (0), 3) & " " & Codec.Fmt (Note.Cmd (1), 3) & " " & Codec.Fmt (Note.Cmd (2), 3) & " " &
