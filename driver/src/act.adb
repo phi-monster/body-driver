@@ -634,6 +634,10 @@ package body Act is
       --  样子只存一次,以后每一帧都和这一份比;比不上就是跟丢,不许跟到别的东西上。
       Anc : Buf;                                --  那一刻那块的灰度(半幅分辨率下的一小片)
       Anc_W, Anc_H : Natural := 0;              --  这一小片多宽多高(0 = 还没存)
+      --  🔴 我自己这只手【看着多大】:从这一点指向其中一瓣的半间距向量(归一化画幅)。
+      --  手离相机越近,两瓣看着分得越开 —— 这是这只手自己的远近,而且每一帧都量得到
+      --  (手的那个框是开机合空量的、之后只跟着平移,尺寸永远不变,当不了远近)。
+      Sep_U, Sep_V : Long_Float := 0.0;
       Scale : Long_Float := 1.0;                --  现在看着是那一刻的几倍(绝对,不是一步步乘出来的)
    end record;
    package Point_Vectors is new Ada.Containers.Vectors (Natural, Point);
@@ -852,6 +856,27 @@ package body Act is
                   end loop;
                end loop;
                Fl := Flow.Compute (A, B, Hw, Hh, 3, 30);
+               --  🔴 顺手把"这只手看着多大"量出来:在两瓣上各采一次光流,看它们之间的间距怎么变。
+               --  没有深度的时候,这是身体唯一每帧都能拿到的"我离相机多远",而"沿视线往里走"就靠它。
+               if P.Chan_K = Chan.Per_Arm then
+                  if P.Sep_U = 0.0 and then P.Sep_V = 0.0 and then Z.A.Valid and then Z.B.Valid then
+                     P.Sep_U := (Z.B.Cu - Z.A.Cu) * 0.5;
+                     P.Sep_V := (Z.B.Cv - Z.A.Cv) * 0.5;
+                  end if;
+                  if P.Sep_U /= 0.0 or else P.Sep_V /= 0.0 then
+                     declare
+                        Au, Av, Bu, Bv : Long_Float;
+                        Win : constant Long_Float := Long_Float'Max (0.01, Z.Span * 0.25);
+                     begin
+                        Flow.Sample (Fl, P.Cu - P.Sep_U, P.Cv - P.Sep_V, Win, Au, Av);
+                        Flow.Sample (Fl, P.Cu + P.Sep_U, P.Cv + P.Sep_V, Win, Bu, Bv);
+                        --  两瓣各自跑了多少,差的一半就是半间距的变化(比例,无量纲)
+                        P.Sep_U := P.Sep_U + (Bu - Au) * 0.5;
+                        P.Sep_V := P.Sep_V + (Bv - Av) * 0.5;
+                        P.Size := 2.0 * Sqrt (P.Sep_U ** 2 + P.Sep_V ** 2);   --  半间距的两倍 = 整个间距
+                     end;
+                  end if;
+               end if;
                --  取平均的那一片 = 张幅的四分之一(比例,无量纲),再小也有一个像素百分比
                Flow.Sample (Fl, P.Cu, P.Cv, Long_Float'Max (0.01, Z.Span * 0.25), Du, Dv);
                if Moved_Arm and then Sqrt (Du * Du + Dv * Dv) * Long_Float (Cw) < 0.5 then
@@ -3251,14 +3276,25 @@ package body Act is
                                              P.Wz := 1.0;
                                           else
                                              --  🔴 没有深度也照样量得到"离相机近一点/远一点":
-                                             --  【画面里的位置不变、自己看着变大或变小】—— 同一件事的另一种说法,
-                                             --  量的是这一块【自己】的框(手离相机近,它的框就大),而手就在相机跟前、
-                                             --  框有一百多个像素宽,推一下就变好几个像素,远比"远处那个小东西变大多少"灵敏。
-                                             --  差多少不重要(归一那一段把每一行都压在一推之内),重要的是往哪边。
-                                             --  这一条把"沿着一条视线往里走"变成一个能说出口的词 —— 在一台相机里对齐之后,
-                                             --  剩下的那一维就是它(IL 实测:稳定相机里差距压到 0.003、判据报"到了",
-                                             --  合手却是空的 —— 差的正是这一维,而当时没有词能说它)。
-                                             P.Size := Sqrt (Long_Float'Max (0.0, P.Box_W * P.Box_H));
+                                             --  【画面里的位置不变、自己看着变大或变小】。
+                                             --  ⚠️ 不能拿这一块的框来量:手的那个框是开机合空时量出来的、之后只跟着平移,
+                                             --  尺寸【永远不变】⇒ 这一项恒零,身体一推就报"到位了",一步也走不动
+                                             --  (IN/IO 实测:back 走 1 推就"到了")。
+                                             --  改用一个每一帧都在量的量:【两根指尖在画面里离多远】。手离相机越近,
+                                             --  两指看着分得越开 —— 这就是这只手自己的远近,而且手就在相机跟前,
+                                             --  一推能让它变好几个像素,远比"远处那个小东西变大多少"灵敏。
+                                             --  这一条把"沿着一条视线往里走"变成一个能说出口的词:在一台相机里对齐之后,
+                                             --  剩下的那一维就是它(IL/IN/IO 实测:稳定相机里差距压到 0.003、判据报"到了",
+                                             --  合手却一次次是空的 —— 差的正是这一维)。
+                                             --  这只手看着多大:每一帧由两瓣的间距量出来(见 Retrack 里那一段),
+                                             --  还没量到就先用开机合空量到的那一对瓣。
+                                             declare
+                                                Zh : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, Cam);
+                                             begin
+                                                if P.Size <= 0.0 and then Zh.A.Valid and then Zh.B.Valid then
+                                                   P.Size := Sqrt ((Zh.B.Cu - Zh.A.Cu) ** 2 + (Zh.B.Cv - Zh.A.Cv) ** 2);
+                                                end if;
+                                             end;
                                              if P.Size > 0.0 then
                                                 --  🔴 目标给一个【够不着】的:这个词是方向,不是终点 —— 终点由脑说的 until 定。
                                                 --  给一个走十几步就能达成的目标,身体会自称"到位了"然后停在半路,
