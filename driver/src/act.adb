@@ -1266,8 +1266,14 @@ package body Act is
    --  没有表的点(同一只手的几个点一起):每个通道推一下量一列。幅度从开机看得见的那一档起,翻倍到每个点在画面里
    --  跑过 4 个跟踪地板、或深度变过深度地板为止(倍数,无量纲;EF 实测:最小可见幅度量出的列全是噪声,解算据此拧手腕);
    --  深度地板 = 这一点连着两拍读深度抖多少的 4 倍,再小也有距离的百分之一(比例,无量纲);翻到上限还看不出动的通道,这一段不用它。推完推回起点。
+   --  🔴 身体【为了量自己而动】的幅度,不许超过【脑让它动】的幅度(Allow = 脑说的 small/medium/large)。
+   --  原来这里是"一路加码到自己那一档的十六倍",于是每次量身体、每次中途重量,关节都被推到
+   --  0.4 弧度去甩一下 —— owner 看 JA 视频:"机械臂全程在发癫"。
+   --  这不是给某个任务定的数,是一条规矩:擦桌子的时候你也不会想让它为了标定自己甩胳膊。
+   --  量不出来就【老实说这个方向量不到】,要不要给更大的幅度去量,是脑的事。
    procedure Probe_Effects (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Cam : Natural; Pts : in out Point_Vectors.Vector;
-                            Effs : in out Effect_Array; Trust : out Table.Mask; Ok : out Boolean) is
+                            Effs : in out Effect_Array; Trust : out Table.Mask; Ok : out Boolean;
+                            Allow : Long_Float := 1.0) is
       Arm : constant Natural := Pts (0).Arm;
       P0 : constant Plug.Arm_Pose := F.EE (Arm);
       Jaw : Floats;
@@ -1347,10 +1353,8 @@ package body Act is
             --  以前卡死在"开机那一档的 2 倍",只能翻一次,于是"看着多大"这一行永远变化不过它自己的地板,
             --  那一列永远是零(GR 实测),而深度读数又不重复 ⇒ 身体手里没有任何能用的"我在靠近吗"。
             --  最多翻四次(次数,无量纲)兜底,免得某个通道怎么推画面都不动时一直翻下去。
-            --  🔴 探针最多加码到自己那一档的四倍(倍数,无量纲)。原来是十六倍:为了把"远近/看着多大"
-      --  那两栏量出来而一路加码,关节被推到 0.4 弧度去甩一下 —— 每次量身体、每次中途重量都甩,
-      --  视频里就是全程发癫(owner 看 JA)。四倍已经足够让远近变过地板(IW 实测:0.1024 就变了 5.6 cm)。
-      Cap_Amp : constant Long_Float := C.Map.Amp (Chn) * 4.0;
+            --  上限 = 脑让它动的那一档(见过程头上的规矩);至少是自己那一档,否则一步都探不出来
+      Cap_Amp : constant Long_Float := C.Map.Amp (Chn) * Long_Float'Max (1.0, Allow);
          begin
             if not C.Map.Seen (Chn) or else Amp <= 0.0 then
                Put_Line ("[身]     通道" & Natural'Image (Chn) & " 开机时没看见它动,这一列留零");
@@ -1721,7 +1725,7 @@ package body Act is
                Trust : Table.Mask;
                Ok : Boolean;
             begin
-               Probe_Effects (L, C, F, Cam, Pts, Effs, Trust, Ok);
+               Probe_Effects (L, C, F, Cam, Pts, Effs, Trust, Ok, Amount * Cap_Mult);
                if not Ok then
                   Ok_Out := False;
                   return;
@@ -2476,7 +2480,7 @@ package body Act is
                Trust2 : Table.Mask;
                Ok2 : Boolean;
             begin
-               Probe_Effects (L, C, F, Cam, Pts, Effs, Trust2, Ok2);
+               Probe_Effects (L, C, F, Cam, Pts, Effs, Trust2, Ok2, Amount * Cap_Mult);
                if Ok2 then
                   for I in 0 .. Natural (Pts.Length) - 1 loop
                      Trusts (I) := Trust2;
