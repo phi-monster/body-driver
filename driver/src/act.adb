@@ -866,6 +866,7 @@ package body Act is
                   if P.Sep_U /= 0.0 or else P.Sep_V /= 0.0 then
                      declare
                         Au, Av, Bu, Bv : Long_Float;
+                        --  取平均的那一片 = 张幅的四分之一,再小也有画幅的百分之一(都是比例,无量纲)
                         Win : constant Long_Float := Long_Float'Max (0.01, Z.Span * 0.25);
                      begin
                         Flow.Sample (Fl, P.Cu - P.Sep_U, P.Cv - P.Sep_V, Win, Au, Av);
