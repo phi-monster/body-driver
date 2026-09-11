@@ -859,9 +859,17 @@ package body Act is
                --  🔴 顺手把"这只手看着多大"量出来:在两瓣上各采一次光流,看它们之间的间距怎么变。
                --  没有深度的时候,这是身体唯一每帧都能拿到的"我离相机多远",而"沿视线往里走"就靠它。
                if P.Chan_K = Chan.Per_Arm then
-                  if P.Sep_U = 0.0 and then P.Sep_V = 0.0 and then Z.A.Valid and then Z.B.Valid then
-                     P.Sep_U := (Z.B.Cu - Z.A.Cu) * 0.5;
-                     P.Sep_V := (Z.B.Cv - Z.A.Cv) * 0.5;
+                  --  两瓣都看得见就用两瓣;只看得见一瓣(实测这台机器常年只认得到一根指头)
+                  --  就量【那一瓣到两指中心】的距离 —— 一根也够,只是基线短一半。
+                  if P.Sep_U = 0.0 and then P.Sep_V = 0.0 then
+                     if Z.A.Valid and then Z.B.Valid then
+                        P.Sep_U := (Z.B.Cu - Z.A.Cu) * 0.5;
+                        P.Sep_V := (Z.B.Cv - Z.A.Cv) * 0.5;
+                     elsif Z.A.Valid then
+                        P.Sep_U := Z.A.Cu - Z.Cu; P.Sep_V := Z.A.Cv - Z.Cv;
+                     elsif Z.B.Valid then
+                        P.Sep_U := Z.B.Cu - Z.Cu; P.Sep_V := Z.B.Cv - Z.Cv;
+                     end if;
                   end if;
                   if P.Sep_U /= 0.0 or else P.Sep_V /= 0.0 then
                      declare
@@ -869,11 +877,12 @@ package body Act is
                         --  取平均的那一片 = 张幅的四分之一,再小也有画幅的百分之一(都是比例,无量纲)
                         Win : constant Long_Float := Long_Float'Max (0.01, Z.Span * 0.25);
                      begin
-                        Flow.Sample (Fl, P.Cu - P.Sep_U, P.Cv - P.Sep_V, Win, Au, Av);
+                        --  一头取这一点自己(它就在手上),另一头取那一瓣:两头都在手上,
+                        --  它们之间的距离变化就是这只手看着变大变小(比例,无量纲)
+                        Flow.Sample (Fl, P.Cu, P.Cv, Win, Au, Av);
                         Flow.Sample (Fl, P.Cu + P.Sep_U, P.Cv + P.Sep_V, Win, Bu, Bv);
-                        --  两瓣各自跑了多少,差的一半就是半间距的变化(比例,无量纲)
-                        P.Sep_U := P.Sep_U + (Bu - Au) * 0.5;
-                        P.Sep_V := P.Sep_V + (Bv - Av) * 0.5;
+                        P.Sep_U := P.Sep_U + (Bu - Au);
+                        P.Sep_V := P.Sep_V + (Bv - Av);
                         P.Size := 2.0 * Sqrt (P.Sep_U ** 2 + P.Sep_V ** 2);   --  半间距的两倍 = 整个间距
                      end;
                   end if;
@@ -2399,7 +2408,7 @@ package body Act is
          Put_Line ("[身]     步" & Natural'Image (Steps_Taken) & (if Note.Big_Step then "(大步)" else "") &
                    ":差距 " & Codec.Fmt (Last_Raw, 3) & " → " & Codec.Fmt (Note.Raw_Now, 3) & " · 还差 " & Codec.Fmt (Note.Err_Now, 1) & " 步(左右 " & Codec.Fmt (Pts (0).Err_U, 1) &
                    " 上下 " & Codec.Fmt (Pts (0).Err_V, 1) & " 远近 " & Codec.Fmt (Pts (0).Err_Z, 1) &
-                   " 大小 " & Codec.Fmt (Pts (0).Err_S, 1) & " 朝向 " & Codec.Fmt (Pts (0).Err_A, 1) & ")· 拍 " & Codec.Img (Beats) &
+                   " 大小 " & Codec.Fmt (Pts (0).Err_S, 1) & " 朝向 " & Codec.Fmt (Pts (0).Err_A, 1) & ")· 手看着多大 " & Codec.Fmt (Pts (0).Size, 4) & "· 拍 " & Codec.Img (Beats) &
                    " · 信表 " & Codec.Fmt (Trust, 2) & " · 步幅 ×[" & Codec.Fmt (Reach (0), 0) & " " & Codec.Fmt (Reach (1), 0) & " " & Codec.Fmt (Reach (2), 0) & " " &
                    Codec.Fmt (Reach (3), 0) & " " & Codec.Fmt (Reach (4), 0) & " " & Codec.Fmt (Reach (5), 0) &
                    "] · 命令 [" & Codec.Fmt (Note.Cmd (0), 3) & " " & Codec.Fmt (Note.Cmd (1), 3) & " " & Codec.Fmt (Note.Cmd (2), 3) & " " &
