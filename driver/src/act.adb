@@ -2190,6 +2190,23 @@ package body Act is
                            P.Z := W0.Z + Pr (2);
                         end if;
                      end if;
+                     --  🔴🔴 位置从姿态表里查出来之后,【深度要在深度图上就地重读】。
+                     --  以前这一路的 Z 全是姿态表里存的那个数加上表的预测 —— 也就是【猜】出来的,
+                     --  从来没被眼睛校过。IY 实测(真深度也开着):球读 0.640 m,而挨着它的指尖读 2.40 m,
+                     --  差了四倍;每一步 Z 平滑地变 0.007,像预测不像测量。于是"远近"那一行永远差着,
+                     --  手在前后方向上要么不动要么一路顶,合手全是空的 —— 一整晚的症状都出自这里。
+                     --  读法和读桌上的东西一模一样:在这一瓣自己的位置上、用这一瓣自己的大小当窗口。
+                     if F.Cams (Cam).Has_Depth then
+                        declare
+                           Zn : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, Cam);
+                           Zd : constant Long_Float :=
+                             Picture.Near_Depth (F.Cams (Cam).Depth, Cw, Ch, P.Cu, P.Cv, Lobe_Win (Zn, Cw, Ch));
+                        begin
+                           if not Picture.Is_Nan (Zd) and then Zd > 0.0 then
+                              P.Z := Zd;
+                           end if;
+                        end;
+                     end if;
                      if Note.Big_Step or else not Familiar then
                         P.Lost := True;
                         Need_Refind := True;
