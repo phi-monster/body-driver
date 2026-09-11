@@ -1363,6 +1363,7 @@ package body Act is
                      Seen_Enough : Boolean := False;   --  🔴 只要【有一个】被跟的点真的动过,这一列就量到了
                      N_Moved : Natural := 0;
                      Size_Seen : Boolean := False;     --  这一下推得够不够大,让"看着多大"那一行也量到了
+                     Depth_Seen : Boolean := False;    --  同理:让"远近"那一行也量到(有深度的时候才要求)
                      Ran_Max : Long_Float := 0.0;
                   begin
                      A (K) := Amp;
@@ -1395,6 +1396,9 @@ package body Act is
                                  Col (0) := (P.Cu - W0.Cu) / Deliv (K);
                                  Col (1) := (P.Cv - W0.Cv) / Deliv (K);
                                  Col (2) := (if P.Z > 0.0 and then W0.Z > 0.0 then (P.Z - W0.Z) / Deliv (K) else 0.0);
+                                 if Col (2) /= 0.0 then
+                                    Depth_Seen := True;
+                                 end if;
                                  --  推一下这块看着变大变小多少、转了多少(圆的东西转不出来 ⇒ 这一列恒零 ⇒ 自动不参与)
                                  --  只有变化过了自己的噪声地板才敢写进表,否则这一格留零(留零 = 归一时这一行自动不参与)
                                  if P.Size > 0.0 and then W0.Size > 0.0 and then abs (P.Size - W0.Size) > Floor_S (I) then
@@ -1490,7 +1494,12 @@ package body Act is
                      --  位置在很小的一推下就动了,于是探到那儿就停,而"看着多大"根本没变过地板 ⇒ 那一列恒零。
                      --  II 实测:命令、实到都是满幅的一推,手也在动,球却一直不变大,38 步差距 0.84 纹丝不动 ——
                      --  身体压根不知道往哪边是"更近"。现在整幅都能搜回来,推大一点不怕跟丢,仍被幅度上限兜着。
-                     exit when Trust (K) and then (Size_Seen or else Amp * 2.0 > Cap_Amp);
+                     --  🔴 "远近"那一行和"看着多大"是同一个洞:探针那一下里手的深度变化没过地板 ⇒ 那一列恒零 ⇒
+                     --  解算把整行扔掉 ⇒ 【手在前后方向上根本没有控制】。IV 实测:连真深度都开着的时候,
+                     --  每一行都写着"深度变 0.0000",左右上下能压到两个像素而前后永远差着,合手永远是空的。
+                     --  所以要推到"远近也真的变过"为止(这台相机有深度才要求),仍被幅度上限兜着。
+                     exit when Trust (K) and then (Size_Seen or else Amp * 2.0 > Cap_Amp)
+                       and then (Depth_Seen or else not F.Cams (Cam).Has_Depth or else Amp * 2.0 > Cap_Amp);
                      if Amp * 2.0 > Cap_Amp then
                         Put_Line ("[身]     通道" & Natural'Image (Chn) & ":到 " & Codec.Fmt (Amp, 4) & " 一个点也没动过地板(最多的跑了 " & Codec.Fmt (Ran_Max, 4) & " 画幅,地板 " & Codec.Fmt (Floor_Px, 4) & ")⇒ 这一段不用它");
                         exit;
