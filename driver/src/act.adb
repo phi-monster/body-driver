@@ -3108,12 +3108,61 @@ package body Act is
          --  拍数只进日志(我们自己记账),不进问脑的话:真实世界没有"步",脑只看画面
          Recent : constant String := Memory.Text (C.Mem) & To_String (C.Recent);
       begin
-         if not Brain.Ask (To_String (C.Eye_Host), C.Eye_Port, To_String (C.Task_Text), To_String (Listing), Recent,
-                           C.Cols, C.Rows, Natural (C.Items.Length), C.Map.N_Cams, C.Map.Arms, RGB, Cw, Ch, Say, Err)
+         --  🔴 每一轮把【所有相机】一起给脑:编号那张在上面(格子和编号只管它),其余几只眼睛按半幅
+         --  拼在下面一条。以前一轮只给一台,想看别的得先说"下一轮换一台" —— 那是【盲切】:说完看不到
+         --  结果,切过去才发现手腕正对着墙(DS/EI/EA 记过三次,今晚又走了一遍)。而且切一台就丢一轮,
+         --  跨相机的判断根本做不了。Astra 那套是每一轮同时给三路,这一条抄它的。
+         --  下面那一条不画格子、不编号 —— 它只是"我另外几只眼睛现在看见什么",要点名还得回上面那张。
+         declare
+            Sh : constant Natural := Ch / 2;
+            Sw : constant Natural := Cw / 2;
+            Bh : constant Natural := Ch + (if C.Map.N_Cams > 1 then Sh else 0);
+            Big : Buf := U8_Vectors.To_Vector (0, Ada.Containers.Count_Type (Cw * Bh * 3));
+            Slot : Natural := 0;
+         begin
+            for I in 0 .. Cw * Ch * 3 - 1 loop
+               Big.Replace_Element (I, RGB.Element (I));
+            end loop;
+            if C.Map.N_Cams > 1 then
+               for K in 0 .. Natural (F.Cams.Length) - 1 loop
+                  if K /= Cam and then Slot * Sw < Cw then
+                     declare
+                        Kw : constant Natural := F.Cams (K).W;
+                        Kh : constant Natural := F.Cams (K).H;
+                        Ox : constant Natural := Slot * Sw;
+                     begin
+                        if Natural (F.Cams (K).RGB.Length) >= Kw * Kh * 3 then
+                           for Y in 0 .. Sh - 1 loop
+                              for X in 0 .. Sw - 1 loop
+                                 declare
+                                    Sx : constant Natural := Natural'Min (Kw - 1, X * Kw / Sw);
+                                    Sy : constant Natural := Natural'Min (Kh - 1, Y * Kh / Sh);
+                                    D : constant Natural := ((Ch + Y) * Cw + Ox + X) * 3;
+                                    Sp : constant Natural := (Sy * Kw + Sx) * 3;
+                                 begin
+                                    if Ox + X < Cw then
+                                       Big.Replace_Element (D, F.Cams (K).RGB.Element (Sp));
+                                       Big.Replace_Element (D + 1, F.Cams (K).RGB.Element (Sp + 1));
+                                       Big.Replace_Element (D + 2, F.Cams (K).RGB.Element (Sp + 2));
+                                    end if;
+                                 end;
+                              end loop;
+                           end loop;
+                           Draw.Numbered_Box (Big, Cw, Bh, Ox, Ch, Natural'Min (Cw - 1, Ox + Sw - 1), Bh - 1,
+                                              K + 1, Draw.White, 2);
+                        end if;
+                        Slot := Slot + 1;
+                     end;
+                  end if;
+               end loop;
+            end if;
+            if not Brain.Ask (To_String (C.Eye_Host), C.Eye_Port, To_String (C.Task_Text), To_String (Listing), Recent,
+                              C.Cols, C.Rows, Natural (C.Items.Length), C.Map.N_Cams, C.Map.Arms, Big, Cw, Bh, Say, Err)
          then
             Put_Line ("[身] 🧠 问不通(" & To_String (Err) & ")⇒ 这一拍不动,下一拍重问");
             return;
          end if;
+         end;
       end;
       Put_Line ("[身] 🧠 它说:" & To_String (Say.Text) & " ‖ 看见=" & To_String (Say.See) & " · 动" & Natural'Image (Natural (Say.Moves.Length)) &
                 " 条 · 抓握=" & To_String (Say.Grip) & (if Say.Grip_Arm > 0 then "(第" & Natural'Image (Say.Grip_Arm) & " 只手" & (if Say.Grip_On > 0 then ",在第" & Natural'Image (Say.Grip_On) & " 号上" else "") & ")" else "") &
