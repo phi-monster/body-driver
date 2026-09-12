@@ -643,6 +643,11 @@ package body Act is
       --  而真读数在 0.45~0.61,和球的 0.64 同一个尺度)。
       Z_Seen : Long_Float := 0.0;
       Z_Raw : Long_Float := 0.0;   --  这一帧从深度图上读到的原始值(过闸之前),只为看清它怎么跳
+      --  🔴 起头那几帧的原始读数,取中位数当【第一个可信值】。读窗里同时有指头和夹爪自己更靠近
+      --  相机的那块身体,读数在两个面之间跳(JG 实测:0.59 和 0.39 来回,差 20 cm)。闸能挡住跳,
+      --  但挡不住【起头就落在错的那个面上】—— 一落上去就永远锁死(JF 实测:冻在 0.397 不动)。
+      --  几帧里出现得多的那个才是指头(它占满窗口),所以取中位数,不信任何单独一帧。
+      Z_Buf : Floats;
       Scale : Long_Float := 1.0;                --  现在看着是那一刻的几倍(绝对,不是一步步乘出来的)
    end record;
    package Point_Vectors is new Ada.Containers.Vectors (Natural, Point);
@@ -2232,7 +2237,17 @@ package body Act is
                            end if;
                            if not Picture.Is_Nan (Zd) and then Zd > 0.0 then
                               if Old_Z <= 0.0 then
-                                 P.Z_Seen := Zd; P.Z := Zd;
+                                 P.Z_Buf.Append (Zd);
+                                 if Natural (P.Z_Buf.Length) >= 5 then     --  几帧(次数,无量纲)
+                                    declare
+                                       B : Floats := P.Z_Buf;
+                                    begin
+                                       P.Z_Seen := Picture.Quantile (B, 0.5);
+                                       P.Z := P.Z_Seen;
+                                    end;
+                                 else
+                                    P.Z := Zd;
+                                 end if;
                               elsif abs (Zd - Old_Z) <= abs (Pr (2)) + 0.1 * Old_Z then   --  一成(比例,无量纲)
                                  P.Z_Seen := Zd; P.Z := Zd;
                               else
