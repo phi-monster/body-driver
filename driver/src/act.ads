@@ -25,7 +25,6 @@ package Act is
       Cu, Cv : Long_Float := 0.0;
       X0, Y0, X1, Y1 : Natural := 0;
       Depth, Height : Long_Float := 0.0;
-      Top : Long_Float := 0.0;      --  这块顶面的深度(米):抓在"顶面到桌面的一半"处,而不是贴着顶面
       Count : Natural := 0;
       Au, Av : Long_Float := 0.0;    --  这一块自己的主轴(画面里的单位向量)
       Elong : Long_Float := 1.0;     --  长轴/短轴
@@ -82,10 +81,6 @@ package Act is
       Fast : Boolean := False;
       Boot_Steps : Natural := 0;   --  开机量身体用掉的拍数(记账,不是上限)
       Sch : Schema.Map;            --  身体图:位姿 → 手指在各相机画面里的位置(只存真看见过的)
-      --  🔴 每个通道自己的【死区】:命令小于它,身体根本不动(实测随姿势和关节而变 ——
-      --  FO 时 0.006 能动,GV 时同一批通道 0.013 实到 0.000)。身体本来就看得见"我命令了多少、实到多少",
-      --  只是从来没拿它去调下限。命令发了实到为零 ⇒ 把这一档抬上去;真动了 ⇒ 把它压下来。
-      Dead : Floats;                   --  按全局通道号索引(米/弧度,机体自己的单位;只和自己比)
       Want_Size : Long_Float := 0.0;   --  正在跟的那块东西现在看着多大(画幅):切块的窗口要比它大,否则闭运算把它填平、只剩一圈边(EV 实测球被切成三块)
       Cut_Seq : Natural := 0;      --  切块缓存:这一帧的编号(同一帧同一台相机不重切,颜色切块很贵)
       Cut_Cam : Integer := -1;

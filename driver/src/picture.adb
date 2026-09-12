@@ -107,82 +107,6 @@ package body Picture is
       end if;
    end Mean_Colour;
 
-   procedure Grow_From (RGB : Buf; W, H : Natural; U, V, Tol : Long_Float; R : out Region; Ok : out Boolean) is
-      N : constant Natural := W * H;
-      Seen : Bools;
-      Q : Ints;
-      Head : Natural := 0;
-      Cnt : Natural := 0;
-      Su, Sv : Long_Float := 0.0;
-      X0, Y0, X1, Y1 : Natural;
-      Sx, Sy, Si : Natural;
-      function Diff (A, B : Natural) return Long_Float is
-        (Long_Float'Max
-           (Long_Float'Max (abs (Long_Float (RGB.Element (3 * A)) - Long_Float (RGB.Element (3 * B))),
-                            abs (Long_Float (RGB.Element (3 * A + 1)) - Long_Float (RGB.Element (3 * B + 1)))),
-            abs (Long_Float (RGB.Element (3 * A + 2)) - Long_Float (RGB.Element (3 * B + 2)))));
-   begin
-      Ok := False;
-      if Natural (RGB.Length) < N * 3 or else W < 3 or else H < 3 then
-         return;
-      end if;
-      Sx := Natural'Min (W - 1, Natural (Long_Float'Max (0.0, U * Long_Float (W))));
-      Sy := Natural'Min (H - 1, Natural (Long_Float'Max (0.0, V * Long_Float (H))));
-      Si := Sy * W + Sx;
-      Seen.Set_Length (Ada.Containers.Count_Type (N));
-      for I in 0 .. N - 1 loop
-         Seen.Replace_Element (I, False);
-      end loop;
-      X0 := Sx; X1 := Sx; Y0 := Sy; Y1 := Sy;
-      Seen.Replace_Element (Si, True);
-      Q.Append (Integer (Si));
-      while Head < Natural (Q.Length) loop
-         declare
-            P : constant Natural := Natural (Q.Element (Head));
-            Px : constant Natural := P mod W;
-            Py : constant Natural := P / W;
-         begin
-            Head := Head + 1;
-            Cnt := Cnt + 1;
-            Su := Su + Long_Float (Px); Sv := Sv + Long_Float (Py);
-            if Px < X0 then X0 := Px; end if;
-            if Px > X1 then X1 := Px; end if;
-            if Py < Y0 then Y0 := Py; end if;
-            if Py > Y1 then Y1 := Py; end if;
-            if Cnt * 2 > N then      --  长到半幅以上(比例,无量纲)= 这条边不成立
-               return;
-            end if;
-            for D in 0 .. 3 loop
-               declare
-                  Nx : constant Integer := Integer (Px) + (case D is when 0 => 1, when 1 => -1, when others => 0);
-                  Ny : constant Integer := Integer (Py) + (case D is when 2 => 1, when 3 => -1, when others => 0);
-               begin
-                  if Nx >= 0 and then Nx < Integer (W) and then Ny >= 0 and then Ny < Integer (H) then
-                     declare
-                        Nq : constant Natural := Natural (Ny) * W + Natural (Nx);
-                     begin
-                        if not Seen.Element (Nq) and then Diff (P, Nq) <= Tol then
-                           Seen.Replace_Element (Nq, True);
-                           Q.Append (Integer (Nq));
-                        end if;
-                     end;
-                  end if;
-               end;
-            end loop;
-         end;
-      end loop;
-      if Cnt < Min_Pixels (W, H) then
-         return;
-      end if;
-      R.X0 := X0; R.Y0 := Y0; R.X1 := X1; R.Y1 := Y1;
-      R.Count := Cnt;
-      R.Cu := (Su / Long_Float (Cnt)) / Long_Float (W);
-      R.Cv := (Sv / Long_Float (Cnt)) / Long_Float (H);
-      R.Sig_U := Long_Float (X1 - X0 + 1) / (2.0 * Long_Float (W));   --  半宽(比例,无量纲)
-      R.Sig_V := Long_Float (Y1 - Y0 + 1) / (2.0 * Long_Float (H));
-      Ok := True;
-   end Grow_From;
-
    function Texture_Level (RGB : Buf; W, H : Natural) return Long_Float is
       Ds : Floats;
       I : Natural := 0;
@@ -345,7 +269,7 @@ package body Picture is
       return Out_R;
    end Cut_Colour;
 
-   function Cut (Depth : Floats; W, H : Natural; Win_Frac, Sigma_Mult : Long_Float; Keep_Edge : Boolean := False) return Regions is
+   function Cut (Depth : Floats; W, H : Natural; Win_Frac, Sigma_Mult : Long_Float) return Regions is
       Out_R : Regions;
       N : constant Natural := W * H;
    begin
@@ -429,11 +353,8 @@ package body Picture is
                   Rg : Region := C;
                   Ds, Hs : Floats;
                begin
-                  --  贴边的块丢不丢,见 Keep_Edge 的说明
-                  if (if Keep_Edge
-                      then not ((Rg.X0 = 0 and then Rg.X1 + 1 = W) or else (Rg.Y0 = 0 and then Rg.Y1 + 1 = H))
-                      else Rg.X0 > 0 and then Rg.Y0 > 0 and then Rg.X1 + 1 < W and then Rg.Y1 + 1 < H)
-                  then
+                  --  贴着画面边的块丢掉:整条背景带、细缝、我自己的胳膊都贴边;能拿的东西完整地在画面里
+                  if Rg.X0 > 0 and then Rg.Y0 > 0 and then Rg.X1 + 1 < W and then Rg.Y1 + 1 < H then
                      for Y in Rg.Y0 .. Rg.Y1 loop
                         for X in Rg.X0 .. Rg.X1 loop
                            if Mask.Element (Y * W + X) then
@@ -442,8 +363,6 @@ package body Picture is
                            end if;
                         end loop;
                      end loop;
-                     --  顶面 = 这块自己深度里最近的十分之一档(分位,比例,无量纲;不用最小值是因为一个坏像素就能当顶)
-                     Rg.Top := Quantile (Ds, 0.1);
                      Rg.Depth := Quantile (Ds, 0.5);
                      Rg.Height := Quantile (Hs, 0.5);
                      Out_R.Append (Rg);
@@ -809,67 +728,6 @@ package body Picture is
       end;
       return Best_T;
    end Split;
-
-   procedure Fit_Plane (Depth : Floats; W, H : Natural; Ca, Cb, Cc : out Long_Float; Ok : out Boolean) is
-      --  最小二乘拟合 Z = Ca*U + Cb*V + Cc,U/V 是归一化画幅(比例,无量纲)。每隔若干像素取一个样(次数)
-      Suu, Suv, Svv, Su, Sv, Sn : Long_Float := 0.0;
-      Suz, Svz, Sz : Long_Float := 0.0;
-      Step : constant Natural := Natural'Max (1, W / 64);
-   begin
-      Ca := 0.0; Cb := 0.0; Cc := 0.0; Ok := False;
-      for Y in 0 .. H - 1 loop
-         if Y mod Step = 0 then
-            for X in 0 .. W - 1 loop
-               if X mod Step = 0 then
-                  declare
-                     Z : constant Long_Float := Depth.Element (Y * W + X);
-                     U : constant Long_Float := Long_Float (X) / Long_Float (W);
-                     V : constant Long_Float := Long_Float (Y) / Long_Float (H);
-                  begin
-                     if not Is_Nan (Z) and then Z > 1.0e-6 then
-                        Suu := Suu + U * U; Suv := Suv + U * V; Svv := Svv + V * V;
-                        Su := Su + U; Sv := Sv + V; Sn := Sn + 1.0;
-                        Suz := Suz + U * Z; Svz := Svz + V * Z; Sz := Sz + Z;
-                     end if;
-                  end;
-               end if;
-            end loop;
-         end if;
-      end loop;
-      if Sn < 32.0 then      --  样本太少,拟合不出来(次数)
-         return;
-      end if;
-      declare
-         D : constant Long_Float :=
-           Suu * (Svv * Sn - Sv * Sv) - Suv * (Suv * Sn - Sv * Su) + Su * (Suv * Sv - Svv * Su);
-      begin
-         if abs D < 1.0e-12 then
-            return;
-         end if;
-         Ca := (Suz * (Svv * Sn - Sv * Sv) - Suv * (Svz * Sn - Sv * Sz) + Su * (Svz * Sv - Svv * Sz)) / D;
-         Cb := (Suu * (Svz * Sn - Sv * Sz) - Suz * (Suv * Sn - Sv * Su) + Su * (Suv * Sz - Svz * Su)) / D;
-         Cc := (Suu * (Svv * Sz - Svz * Sv) - Suv * (Suv * Sz - Svz * Su) + Suz * (Suv * Sv - Svv * Su)) / D;
-         Ok := True;
-      end;
-   end Fit_Plane;
-
-   function Adjacent (A, B : Region; W, H : Natural; Gap : Long_Float) return Boolean is
-      Gx : constant Long_Float := Gap * Long_Float (W);
-      Gy : constant Long_Float := Gap * Long_Float (H);
-      Box : constant Boolean :=
-        Long_Float (A.X0) - Gx <= Long_Float (B.X1) and then Long_Float (B.X0) - Gx <= Long_Float (A.X1)
-        and then Long_Float (A.Y0) - Gy <= Long_Float (B.Y1) and then Long_Float (B.Y0) - Gy <= Long_Float (A.Y1);
-      --  远近也要对得上:各自"最靠近相机的那一档"差不超过两块里厚的那一块自己的厚度
-      Thick : constant Long_Float := Long_Float'Max (Long_Float'Max (A.Height, B.Height), 1.0e-3);
-   begin
-      if not Box then
-         return False;
-      end if;
-      if A.Top <= 0.0 or else B.Top <= 0.0 then
-         return True;      --  读不到远近就只按画面判
-      end if;
-      return abs (A.Top - B.Top) <= Thick;
-   end Adjacent;
 
    function Inside (R : Region; U, V : Long_Float; W, H : Natural; Grow : Long_Float) return Boolean is
       X0 : constant Long_Float := Long_Float (R.X0) / Long_Float (W);

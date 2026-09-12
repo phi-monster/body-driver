@@ -28,10 +28,6 @@ package Zone is
       Arm : Natural := 0;
       Zones : Zone_Vectors.Vector;     --  每台相机一个
       Empty_Close : Long_Float := 0.0; --  合空时的读数
-      Empty_Sweep : Long_Float := 0.0; --  合空时,合拢过程中动过的像素占画面的几分之几(比例,无量纲)。
-                                       --  真合一次如果动过的明显更少,说明手指被中间的东西挡住了 —— 这是
-                                       --  【量出来的"夹住了没有"】,不看画面判断,也不需要力传感器;
-                                       --  这台机器人的爪子读数是命令的回声(见 LAB),所以读数那条路不能用。
       Open_Reading : Long_Float := 1.0;
       Close_Steps : Natural := 0;
       Pose : Plug.Arm_Pose := [others => 0.0];   --  合空时这只手的位姿(别的相机里的握区只在这个位姿下成立)

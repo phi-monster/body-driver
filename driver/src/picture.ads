@@ -8,7 +8,6 @@ package Picture is
       Count : Natural := 0;
       Cu, Cv : Long_Float := 0.0;           --  形心(归一化画幅)
       Depth : Long_Float := 0.0;            --  中位深度(米)
-      Top : Long_Float := 0.0;              --  最靠近相机的那一档深度(米)= 这块的顶面
       Height : Long_Float := 0.0;           --  比背景鼓出多少(米)
       Au, Av : Long_Float := 0.0;           --  主轴单位向量(像素系)
       Elong : Long_Float := 1.0;            --  长轴 σ / 短轴 σ
@@ -24,10 +23,7 @@ package Picture is
    end record;
 
    function Min_Pixels (W, H : Natural) return Natural;
-   --  Keep_Edge = False:贴到任何一条画面边的块都丢(第三方相机里从画面外伸进来的胳膊、桌沿、墙都贴边)。
-   --  Keep_Edge = True:只丢【横跨整幅】的(左右都贴边或上下都贴边)—— 凑近了要抓的东西必然被画面切掉一角,
-   --  严格规则下它会整块消失。只在严格规则一块都没切出来时才放宽。
-   function Cut (Depth : Floats; W, H : Natural; Win_Frac, Sigma_Mult : Long_Float; Keep_Edge : Boolean := False) return Regions;
+   function Cut (Depth : Floats; W, H : Natural; Win_Frac, Sigma_Mult : Long_Float) return Regions;
    --  按颜色切:颜色连成一片的算一块。细的东西(线、缝、刀口)在深度图上鼓不出来,只有这条能把它们切出来。
    --  门槛不是写死的:先量"静止时同一块地方颜色抖多少"(噪声地板),差过它的几倍才算换了一块。
    function Cut_Colour (RGB : Buf; W, H : Natural; Floor_Level : Long_Float; Min_Count : Natural) return Regions;
@@ -47,19 +43,6 @@ package Picture is
    function Quantile (F : in out Floats; Q : Long_Float) return Long_Float;
    function Region_Depth (Depth : Floats; W, H : Natural; Mask : Bools; Q : Long_Float) return Long_Float;  --  掩膜上的深度分位;NaN = 无
    function Inside (R : Region; U, V : Long_Float; W, H : Natural; Grow : Long_Float) return Boolean;
-   --  两块【挨着没有】:画面上的框贴住(留一条缝的宽容),且顶面的远近对得上(不是一前一后错开)。
-   --  这是"动作词表"的唯一原始事实:谁和谁挨着,以及这个关系什么时候变。不需要知道它们是什么东西。
-   function Adjacent (A, B : Region; W, H : Natural; Gap : Long_Float) return Boolean;
-   --  从脑指的那一点长出去:和已经长进来的邻居颜色差在 Tol 之内就接着长,返回长出来的那一片的外框。
-   --  身体不认东西 —— 脑说"在这儿",身体只量"这儿的这一片到哪儿为止"。跟着邻居比(不是跟种子比)
-   --  才能顺着明暗渐变长满一个球,而在球和桌子那条硬边上停住。长到超过半幅就当没长成(Ok=False),
-   --  因为那说明这条边不成立,回退到脑指的那一格。
-   procedure Grow_From (RGB : Buf; W, H : Natural; U, V, Tol : Long_Float; R : out Region; Ok : out Boolean);
-   --  画面里最大的那个平面(深度随画面位置线性变化的那一片):Z ≈ Ca * U + Cb * V + Cc。
-   --  这是"东西站在什么上面"的量法,不是"世界上有张桌子"的假设 —— 拟合不出来就 Ok = False,
-   --  那两个方向词当场不可用。⚠️ 相机恰好【贴着那个面看过去】时,深度几乎不随位置变,拟合会很差,
-   --  这时也返回 Ok = False。
-   procedure Fit_Plane (Depth : Floats; W, H : Natural; Ca, Cb, Cc : out Long_Float; Ok : out Boolean);
    function Is_Nan (X : Long_Float) return Boolean;
    --  一堆数分成两拨(Otsu):返回分界;分不开(单峰)返回 NaN
    function Split (F : Floats) return Long_Float;

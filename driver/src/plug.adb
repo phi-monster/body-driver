@@ -1,17 +1,9 @@
-with Ada.Environment_Variables;
 with Ada.Text_IO; use Ada.Text_IO;
 with Ada.Calendar;
 with Ada.Unchecked_Conversion;
 with Interfaces; use Interfaces;
 with Codec;
 package body Plug is
-
-   --  真机没有深度相机 ⇒ 默认不用深度;BL_DEPTH=1 只是仿真里做对照用的开关(协议,不是策略)
-   function Depth_Wanted return Boolean is
-     (Ada.Environment_Variables.Exists ("BL_DEPTH")
-      and then Ada.Environment_Variables.Value ("BL_DEPTH") /= "0");
-   Use_Depth : constant Boolean := Depth_Wanted;
-
    use Msgpack;
    function U32_To_F32 is new Ada.Unchecked_Conversion (Unsigned_32, Float);
    use type Websocket.Op;
@@ -364,13 +356,6 @@ package body Plug is
                            end if;
                         end if;
                      end;
-                  end if;
-                  --  🔴🔴 真机没有深度相机(owner 2026-09-10),所以整套东西不许依赖它。
-                  --  默认【当作没有深度】:切块走颜色,距离走"看着多大"。
-                  --  仿真里想临时开回来做对照:BL_DEPTH=1。
-                  if not Use_Depth then
-                     C.Has_Depth := False;
-                     C.Depth.Clear;
                   end if;
                   F.Cams.Append (C);
                end if;
