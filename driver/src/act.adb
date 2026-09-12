@@ -1353,8 +1353,10 @@ package body Act is
             --  以前卡死在"开机那一档的 2 倍",只能翻一次,于是"看着多大"这一行永远变化不过它自己的地板,
             --  那一列永远是零(GR 实测),而深度读数又不重复 ⇒ 身体手里没有任何能用的"我在靠近吗"。
             --  最多翻四次(次数,无量纲)兜底,免得某个通道怎么推画面都不动时一直翻下去。
-            --  上限 = 脑让它动的那一档(见过程头上的规矩);至少是自己那一档,否则一步都探不出来
-      Cap_Amp : constant Long_Float := C.Map.Amp (Chn) * Long_Float'Max (1.0, Allow);
+            --  上限 = 脑那三个词定的:小 = 四倍、中 = 八倍、大 = 十六倍(用已有的那把梯子,不新造数)。
+      --  ⚠️ 上一版把这条写成"不许超过一档",结果探针完全不能加码 —— 五行全部量不到、
+      --  权重全零、身体一动不动(JC 实测:"还差 0.0 步",每一行都是 0.0)。规矩是对的,实现写死了。
+      Cap_Amp : constant Long_Float := C.Map.Amp (Chn) * Long_Float'Max (1.0, 16.0 * Allow);
          begin
             if not C.Map.Seen (Chn) or else Amp <= 0.0 then
                Put_Line ("[身]     通道" & Natural'Image (Chn) & " 开机时没看见它动,这一列留零");
@@ -1725,7 +1727,7 @@ package body Act is
                Trust : Table.Mask;
                Ok : Boolean;
             begin
-               Probe_Effects (L, C, F, Cam, Pts, Effs, Trust, Ok, Amount * Cap_Mult);
+               Probe_Effects (L, C, F, Cam, Pts, Effs, Trust, Ok, Amount);
                if not Ok then
                   Ok_Out := False;
                   return;
@@ -1829,6 +1831,22 @@ package body Act is
                      end if;
                   end;
                end loop;
+               --  🔴 五样一个都没量到 ⇒ 身体这一步无从下手,必须【说出来】,不许默默不动
+               --  (JC 实测:每一行都是 0.0、身体 50 步一动没动,而日志上看不出为什么)。
+               declare
+                  Any_Row : Boolean := False;
+               begin
+                  for R in 0 .. Table.Rows - 1 loop
+                     if T.W (R) > 0.0 then
+                        Any_Row := True;
+                     end if;
+                  end loop;
+                  if not Any_Row then
+                     Note.Say_Stop := S ("I cannot measure any direction for this from where I am: "
+                       & "pushing does not change what I see of it by more than my own jitter. "
+                       & "Let me take bigger steps (amount large), or name it in another picture.");
+                  end if;
+               end;
                declare
                   Q : Point := P;
                begin
@@ -2480,7 +2498,7 @@ package body Act is
                Trust2 : Table.Mask;
                Ok2 : Boolean;
             begin
-               Probe_Effects (L, C, F, Cam, Pts, Effs, Trust2, Ok2, Amount * Cap_Mult);
+               Probe_Effects (L, C, F, Cam, Pts, Effs, Trust2, Ok2, Amount);
                if Ok2 then
                   for I in 0 .. Natural (Pts.Length) - 1 loop
                      Trusts (I) := Trust2;
