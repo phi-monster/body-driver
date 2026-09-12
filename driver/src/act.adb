@@ -2215,9 +2215,19 @@ package body Act is
                            Zn : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, Cam);
                            Zd : constant Long_Float :=
                              Picture.Near_Depth (F.Cams (Cam).Depth, Cw, Ch, P.Cu, P.Cv, Lobe_Win (Zn, Cw, Ch));
+                           Old_Z : constant Long_Float := P.Z;
                         begin
+                           --  🔴 收读数前先过闸,和老路上那一道一样:一步之内跳得超过【表预测的变化 + 距离的一成】
+                           --  就不认 —— 读窗里同时有指头和它后面的另一个面时,读数会在两者之间来回跳。
+                           --  JD 实测(真深度):指尖深度在 0.61 和 0.45 之间几乎每步翻一次(差 16 cm),
+                           --  而它在画面里几乎没动 ⇒ 前后那一维的误差每步翻符号 ⇒ 手被拉过去又拉回来,
+                           --  就是 owner 在视频里看到的发癫。昨天我补"就地重读"时忘了带这道闸。
                            if not Picture.Is_Nan (Zd) and then Zd > 0.0 then
-                              P.Z := Zd;
+                              if Old_Z <= 0.0 then
+                                 P.Z := Zd;
+                              elsif abs (Zd - Old_Z) <= abs (Pr (2)) + 0.1 * Old_Z then   --  一成(比例,无量纲)
+                                 P.Z := Zd;
+                              end if;
                            end if;
                         end;
                      end if;
