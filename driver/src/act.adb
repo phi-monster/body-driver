@@ -696,6 +696,11 @@ package body Act is
       if Err_Of (P) > Track_Floor then
          return False;
       end if;
+      --  🔴 朝向也要算进"到没到" —— 否则脑说"瞄准它",身体一推就报到位(FS 实测:face 走 1 推就"到了")。
+      --  这一项本来就一直在(圆的东西转不出主轴,它自己会关掉),只是判据从来没看过它。
+      if P.Wang > 0.0 and then abs (Wrap (P.Tang - P.Ang)) > 0.1 then   --  两倍角差 0.1 弧度(比例,无量纲)
+         return False;
+      end if;
       if P.Wsize > 0.0 and then P.Tsize > 0.0 and then abs (P.Tsize - P.Size) / P.Tsize > 0.25 then
          return False;   --  看着差过四分之一就还没到(比例,无量纲)
       end if;
