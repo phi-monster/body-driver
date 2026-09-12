@@ -3410,6 +3410,16 @@ package body Act is
                                        else
                                           P.Tz := O.Depth; P.Wz := (if O.Depth > 0.0 and then P.Z > 0.0 then 1.0 else 0.0);
                                        end if;
+                                    elsif Rl = "face" then
+                                       --  🔴 瞄准:转到让【我的手指向指尖的那条线】指着它,人不动。
+                                       --  这是词表里一直缺的那一个(README 自己记着"缺:瞄准")。今晚实测:手已经压在
+                                       --  球正上方、球被它挡住,而腕上相机对着天花板 —— 夹爪开合的方向朝天,合手当然是空的。
+                                       --  脑说得出"手该在哪儿",说不出"手该朝哪儿",两样都要才抓得到。
+                                       --  不新造概念:身体本来就有"朝向"那一行(块的主轴,存的是两倍角,让主轴的正反算同一个),
+                                       --  目标就是"从我这一点到它那一点"的方向。两条方向都在画面里量得到,不吃深度。
+                                       P.Tu := P.Cu; P.Tv := P.Cv;
+                                       P.Tang := Wrap (2.0 * Arctan (O.Cv - P.Cv, O.Cu - P.Cu));
+                                       P.Wang := 1.0;
                                     elsif Rl = "above" then
                                        P.Tv := O.Cv - Long_Float'Max (Oh, 1.0 / Long_Float (Ch));
                                     elsif Rl = "below" then
