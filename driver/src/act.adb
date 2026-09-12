@@ -642,6 +642,7 @@ package body Act is
       --  猜测从来没被眼睛校过,拿它当基准会把真读数全挡在外面(JE 实测:深度从此纹丝不动 2.422,
       --  而真读数在 0.45~0.61,和球的 0.64 同一个尺度)。
       Z_Seen : Long_Float := 0.0;
+      Z_Raw : Long_Float := 0.0;   --  这一帧从深度图上读到的原始值(过闸之前),只为看清它怎么跳
       Scale : Long_Float := 1.0;                --  现在看着是那一刻的几倍(绝对,不是一步步乘出来的)
    end record;
    package Point_Vectors is new Ada.Containers.Vectors (Natural, Point);
@@ -2226,6 +2227,9 @@ package body Act is
                            --  JD 实测(真深度):指尖深度在 0.61 和 0.45 之间几乎每步翻一次(差 16 cm),
                            --  而它在画面里几乎没动 ⇒ 前后那一维的误差每步翻符号 ⇒ 手被拉过去又拉回来,
                            --  就是 owner 在视频里看到的发癫。昨天我补"就地重读"时忘了带这道闸。
+                           if not Picture.Is_Nan (Zd) then
+                              P.Z_Raw := Zd;
+                           end if;
                            if not Picture.Is_Nan (Zd) and then Zd > 0.0 then
                               if Old_Z <= 0.0 then
                                  P.Z_Seen := Zd; P.Z := Zd;
@@ -2482,7 +2486,7 @@ package body Act is
          Put_Line ("[身]     步" & Natural'Image (Steps_Taken) & (if Note.Big_Step then "(大步)" else "") &
                    ":差距 " & Codec.Fmt (Last_Raw, 3) & " → " & Codec.Fmt (Note.Raw_Now, 3) & " · 还差 " & Codec.Fmt (Note.Err_Now, 1) & " 步(左右 " & Codec.Fmt (Pts (0).Err_U, 1) &
                    " 上下 " & Codec.Fmt (Pts (0).Err_V, 1) & " 远近 " & Codec.Fmt (Pts (0).Err_Z, 1) &
-                   " 大小 " & Codec.Fmt (Pts (0).Err_S, 1) & " 朝向 " & Codec.Fmt (Pts (0).Err_A, 1) & ")· 手看着多大 " & Codec.Fmt (Pts (0).Size, 4) & " 目标深 " & Codec.Fmt (Pts (0).Tz, 3) & " 重 " & Codec.Fmt (Pts (0).Wz, 1) & " 点数" & Codec.Img (Natural (Pts.Length)) & "· 拍 " & Codec.Img (Beats) &
+                   " 大小 " & Codec.Fmt (Pts (0).Err_S, 1) & " 朝向 " & Codec.Fmt (Pts (0).Err_A, 1) & ")· 手看着多大 " & Codec.Fmt (Pts (0).Size, 4) & " 生读 " & Codec.Fmt (Pts (0).Z_Raw, 3) & " 目标深 " & Codec.Fmt (Pts (0).Tz, 3) & " 重 " & Codec.Fmt (Pts (0).Wz, 1) & "· 拍 " & Codec.Img (Beats) &
                    " · 信表 " & Codec.Fmt (Trust, 2) & " · 步幅 ×[" & Codec.Fmt (Reach (0), 0) & " " & Codec.Fmt (Reach (1), 0) & " " & Codec.Fmt (Reach (2), 0) & " " &
                    Codec.Fmt (Reach (3), 0) & " " & Codec.Fmt (Reach (4), 0) & " " & Codec.Fmt (Reach (5), 0) &
                    "] · 命令 [" & Codec.Fmt (Note.Cmd (0), 3) & " " & Codec.Fmt (Note.Cmd (1), 3) & " " & Codec.Fmt (Note.Cmd (2), 3) & " " &
