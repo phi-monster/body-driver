@@ -638,6 +638,10 @@ package body Act is
       --  手离相机越近,两瓣看着分得越开 —— 这是这只手自己的远近,而且每一帧都量得到
       --  (手的那个框是开机合空量的、之后只跟着平移,尺寸永远不变,当不了远近)。
       Sep_U, Sep_V : Long_Float := 0.0;
+      --  上一次【真从深度图上读到】的远近(0 = 还没读到过)。闸要盯着它,不能盯姿态表里那个猜测:
+      --  猜测从来没被眼睛校过,拿它当基准会把真读数全挡在外面(JE 实测:深度从此纹丝不动 2.422,
+      --  而真读数在 0.45~0.61,和球的 0.64 同一个尺度)。
+      Z_Seen : Long_Float := 0.0;
       Scale : Long_Float := 1.0;                --  现在看着是那一刻的几倍(绝对,不是一步步乘出来的)
    end record;
    package Point_Vectors is new Ada.Containers.Vectors (Natural, Point);
@@ -2215,7 +2219,7 @@ package body Act is
                            Zn : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, Cam);
                            Zd : constant Long_Float :=
                              Picture.Near_Depth (F.Cams (Cam).Depth, Cw, Ch, P.Cu, P.Cv, Lobe_Win (Zn, Cw, Ch));
-                           Old_Z : constant Long_Float := P.Z;
+                           Old_Z : constant Long_Float := P.Z_Seen;
                         begin
                            --  🔴 收读数前先过闸,和老路上那一道一样:一步之内跳得超过【表预测的变化 + 距离的一成】
                            --  就不认 —— 读窗里同时有指头和它后面的另一个面时,读数会在两者之间来回跳。
@@ -2224,9 +2228,11 @@ package body Act is
                            --  就是 owner 在视频里看到的发癫。昨天我补"就地重读"时忘了带这道闸。
                            if not Picture.Is_Nan (Zd) and then Zd > 0.0 then
                               if Old_Z <= 0.0 then
-                                 P.Z := Zd;
+                                 P.Z_Seen := Zd; P.Z := Zd;
                               elsif abs (Zd - Old_Z) <= abs (Pr (2)) + 0.1 * Old_Z then   --  一成(比例,无量纲)
-                                 P.Z := Zd;
+                                 P.Z_Seen := Zd; P.Z := Zd;
+                              else
+                                 P.Z := Old_Z;   --  这一帧读到的是别的面,留上一次真读到的
                               end if;
                            end if;
                         end;
