@@ -2551,8 +2551,14 @@ package body Act is
                   V : Plan.Verdict;
 
                   --  角色靠【量出来的东西】绑定:grasper = 我量到能相向靠拢并夹住东西的那一组。
-                  --  好几组的时候(五指手),挑离脑点名那个东西最近的那一组 —— 这也是量出来的,不是设定的。
+                  --  🔴 挑哪一只手【不许】用"这张画面里离它最近":在一只长在【另一条胳膊】上的眼睛里,
+                  --  那条胳膊的手可以正好投影在球旁边而实际隔着半张桌子(GD 实测:在手2的眼睛里
+                  --  绑到了手1,于是两只眼睛之间来回弹,一步不走)。这和最初那个 bug 是同一个病:
+                  --  拿一个看不见这件事的视角去判空间关系。
+                  --  规矩改成:我现在这只眼睛长在哪条胳膊上,就用那条胳膊;这只眼睛不长在任何胳膊上
+                  --  (它看得见全场),才在这里比远近。
                   function Bind_Role (R : Sinew.Role; Near_U, Near_V : Long_Float; Has_Near : Boolean) return Integer is
+                     Own : constant Integer := Cam_Arm (C, C.Cam);
                      Best : Integer := -1;
                      Bd : Long_Float := 1.0e9;
                   begin
@@ -2568,7 +2574,10 @@ package body Act is
                              (if Has_Near and then It.Located
                               then Sqrt ((It.Cu - Near_U) ** 2 + (It.Cv - Near_V) ** 2) else 0.0);
                         begin
-                           if Want and then It.Located and then D < Bd then
+                           if Want and then It.Located
+                             and then (Own < 0 or else Integer (It.Arm) = Own)
+                             and then D < Bd
+                           then
                               Bd := D; Best := Integer (K) + 1;
                            end if;
                         end;
@@ -2682,11 +2691,12 @@ package body Act is
                               end if;
                            end;
                         end loop;
-                        if Best_Cam /= C.Cam then
+                        if Best_Cam /= C.Cam and then not C.Eye_Chosen then
                            Put_Line ("[身] 👁 这条胳膊一动,第" & Codec.Img (Best_Cam) & " 只眼睛的画面变 "
                                      & Codec.Fmt (Best_V, 3) & " 幅,比现在这只多 ⇒ 换过去再看"
                                      & "(我自己换的,你没说,也不用说)");
                            C.Cam := Best_Cam;
+                           C.Eye_Chosen := True;   --  一段任务只换一次:再换就是来回弹
                            C.Recent := S ("I looked with a different eye of mine: when that arm moves, that eye's "
                                           & "picture changes the most, so it is the one that can actually see how far "
                                           & "off I am. Nothing moved. Say the same thing again. "
