@@ -354,13 +354,16 @@ package body Sinew is
                      Patch_To (Integer (B.At_Addr), Here);
                   when B_If | B_Else =>
                      Patch_To (B.Patch, Here);
-                  when B_Try | B_Or =>
+                  when B_Try =>
+                     --  try 没有 or 分支:走完就摘掉这一层
                      declare
                         I : Instr;
                      begin
                         I.O := Op_Endtry;
                         Emit (I);
                      end;
+                     Patch_To (B.Patch, Here);
+                  when B_Or =>
                      Patch_To (B.Patch, Here);
                   when B_Def =>
                      declare
@@ -401,9 +404,12 @@ package body Sinew is
                I : Instr;
                B : constant Open_Block := Stack (Depth);
             begin
+               I.O := Op_Endtry;
+               Emit (I);                       --  try 体顺利走完:先把这一层 try 摘掉
+               I := (others => <>);
                I.O := Op_Jump;
-               Emit (I);                       --  try 成功了跳过 or 那一段
-               Patch_To (B.Patch, Here);       --  try 里失败跳到这里
+               Emit (I);                       --  再跳过 or 那一段
+               Patch_To (B.Patch, Here);       --  try 里失败跳到这里(运行时顺手出栈)
                Stack (Depth) := (K => B_Or, At_Addr => B.At_Addr, Patch => Integer (Here) - 1);
             end;
             return;

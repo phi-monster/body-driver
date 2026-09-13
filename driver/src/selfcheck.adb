@@ -17,6 +17,7 @@ with Plug;
 with Chan;
 with Lang;
 with Sinew;
+with Runtime;
 with Plan;
 with Layout;
 with Selfmap;
@@ -742,6 +743,91 @@ begin
       Check (G.Ok and then G.Code (0).Target = Integer (G.Code.Length),
              "Sinew:循环头的出口指向 end 之后");
       Check (G.Ok and then G.Code (1).Max_Steps = 3, "Sinew:「or 3 steps」读出来了");
+   end;
+   --  ── Sinew 执行器:喂给它剧本里的结局,看它走出什么次序 ──
+   declare
+      use Sinew;
+      use type Runtime.Yield;
+      NL : constant String := "" & ASCII.LF;
+      --  跑一段程序,按剧本喂结局,返回"依次执行了哪几段区间"的字串 + 结束方式
+      function Trace (Src : String; Script : String; Ending : out Runtime.Yield) return String is
+         P : constant Program := Sinew.Parse (Src);
+         M : Runtime.Machine;
+         W : Runtime.Yield;
+         I : Instr;
+         Out_S : Unbounded_String;
+         K : Natural := Script'First;
+         Guard : Natural := 0;
+      begin
+         Ending := Runtime.Y_Broken;
+         if not P.Ok then
+            return "解析就没过:" & To_String (P.Err);
+         end if;
+         loop
+            Guard := Guard + 1;
+            exit when Guard > 200;
+            Runtime.Advance (P, M, W, I);
+            Ending := W;
+            case W is
+               when Runtime.Y_Interval =>
+                  Append (Out_S, (if Length (Out_S) > 0 then "," else "")
+                          & To_String (I.Cons (0).Obj.Word));
+                  declare
+                     O : Outcome := Oc_Arrived;
+                  begin
+                     if K <= Script'Last then
+                        O := (case Script (K) is
+                                 when 'a' => Oc_Arrived, when 't' => Oc_Touched,
+                                 when 's' => Oc_Stuck,   when 'l' => Oc_Lost,
+                                 when 'p' => Oc_Slipped, when 'f' => Oc_Free,
+                                 when 'o' => Oc_Timeout, when others => Oc_Refused);
+                        K := K + 1;
+                     end if;
+                     Runtime.Report (P, M, O);
+                  end;
+               when Runtime.Y_Say | Runtime.Y_Remember =>
+                  null;
+               when Runtime.Y_Done | Runtime.Y_Finished | Runtime.Y_Broken =>
+                  exit;
+            end case;
+         end loop;
+         return To_String (Out_S);
+      end Trace;
+      E : Runtime.Yield;
+   begin
+      Check (Trace ("repeat 3 times:" & NL & "  do grasper touching A until arrived" & NL & "end", "aaa", E) = "A,A,A"
+               and then E = Runtime.Y_Finished, "执行器:repeat 3 times 跑三遍");
+      Check (Trace ("repeat until touched:" & NL & "  do grasper touching A until touched" & NL & "end", "oot", E) = "A,A,A",
+             "执行器:repeat until touched —— 前两次没碰到就接着来,碰到就出去");
+      Check (Trace ("do grasper touching A until arrived" & NL & "if stuck:" & NL
+                    & "  do grasper touching B until arrived" & NL & "else:" & NL
+                    & "  do grasper touching C until arrived" & NL & "end", "sa", E) = "A,B",
+             "执行器:上一段结局是 stuck ⇒ 走 if 那一支");
+      Check (Trace ("do grasper touching A until arrived" & NL & "if stuck:" & NL
+                    & "  do grasper touching B until arrived" & NL & "else:" & NL
+                    & "  do grasper touching C until arrived" & NL & "end", "aa", E) = "A,C",
+             "执行器:结局不是 stuck ⇒ 走 else 那一支");
+      Check (Trace ("try:" & NL & "  do grasper touching A until arrived" & NL
+                    & "or:" & NL & "  do grasper touching B until arrived" & NL & "end", "sa", E) = "A,B",
+             "执行器:try 里那一段没成 ⇒ 走 or 那一段");
+      Check (Trace ("try:" & NL & "  do grasper touching A until arrived" & NL
+                    & "or:" & NL & "  do grasper touching B until arrived" & NL & "end", "aa", E) = "A",
+             "执行器:try 里那一段成了 ⇒ or 那一段跳过");
+      Check (Trace ("to poke:" & NL & "  do grasper touching A until arrived" & NL & "end" & NL
+                    & "run poke" & NL & "run poke", "aa", E) = "A,A"
+               and then E = Runtime.Y_Finished, "执行器:定义一次,叫两次;定义体不会被正常流走进去");
+      declare
+         T : constant String := Trace ("run nosuch", "", E);
+      begin
+         Check (E = Runtime.Y_Broken and then T = "", "执行器:叫一个没定义过的名字 ⇒ 当场判坏");
+      end;
+      declare
+         T : constant String := Trace ("repeat until touched:" & NL
+               & "  do grasper touching A until arrived" & NL & "end", "aaaaaaaaaaaaaaaaaaaa", E);
+         pragma Unreferenced (T);
+      begin
+         Check (E /= Runtime.Y_Finished, "执行器:等一个永远不来的结局 ⇒ 不会假装跑完");
+      end;
    end;
    Put_Line ((if Fails = 0 then "🟢 自检全过" else "🔴 自检失败" & Natural'Image (Fails) & " 条"));
    if Fails > 0 then
