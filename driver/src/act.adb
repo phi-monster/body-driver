@@ -3316,6 +3316,7 @@ package body Act is
                   --  而头顶相机里它一直在,身体却从没去那儿看过。
                   --  脑点名的那一块自己带着"我在哪台相机里",直接跟过去。这一条不受"一段只换一次眼"限制:
                   --  它不是偏好,是这一段能不能干活的前提。
+                  C.Tgt_Cam := -1;
                   declare
                      Tgt_Cam : Integer := -1;
                   begin
@@ -3340,6 +3341,7 @@ package body Act is
                                        & Mode_Line (C, "moved to the eye that can see what you named"));
                         return;
                      end if;
+                     C.Tgt_Cam := Tgt_Cam;   --  给下面的选眼用:脑点的眼睛不许把段挪离目标所在的那一台
                   end;
 
                   --  🔴 用哪只眼睛,身体自己选,脑不参与(语言里没有 look 这个词)。
@@ -3398,6 +3400,19 @@ package body Act is
                                     end if;
                                  end;
                               end loop;
+                              --  🔴 "静"只是一半,另一半是【它得看得见目标】。
+                              --  HA 实测:我写 with my still eye,它按判据挑了第 1 台(变 0.024 幅,确实最静)——
+                              --  而第 1 台里是风扇和键盘,根本没有球。判据没错,是我少写了一半。
+                              --  脑点了名的那一块自己带着相机号,那一台是唯一看得见它的;
+                              --  两者冲突时【目标那一台赢】,并且照实说清楚为什么没听脑的。
+                              if C.Tgt_Cam >= 0 and then Pick >= 0 and then Pick /= C.Tgt_Cam then
+                                 Put_Line ("[身] 👁 你要的那只眼睛(第" & Codec.Img (Natural (Pick))
+                                           & " 只)看不见你点名的那块 ⇒ 用看得见它的第" & Codec.Img (Natural (C.Tgt_Cam)) & " 只");
+                                 C.Blind_Say := S ("the eye you asked for is the one that moves least when I move, "
+                                                   & "but it cannot see the thing you named, so I used the eye that can "
+                                                   & "and I am telling you instead of quietly doing something else");
+                                 Pick := C.Tgt_Cam;
+                              end if;
                               if not Any or else Pick < 0 then
                                  C.Blind_Say := S ("you asked me to judge this with one of my eyes picked by how much it "
                                                    & "changes when I move, but I have not measured that for this part yet, "
