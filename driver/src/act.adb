@@ -1837,7 +1837,11 @@ package body Act is
                         begin
                            P.Cu := Long_Float'Max (0.0, Long_Float'Min (1.0, Su + Pm (0)));
                            P.Cv := Long_Float'Max (0.0, Long_Float'Min (1.0, Sv + Pm (1)));
-                           if Gp.Z > 0.0 then
+                           --  🔴 距离不可能是负的(物理,不是人拍的门槛)。这里只检查了【旧】深度是正的,
+                           --  没检查【算出来的新】深度 —— 画面坐标 u/v 都夹在 [0,1] 里,唯独深度一个夹子都没有。
+                           --  GV 实测:预测把它推成 -0.526 ⇒ 远近整行作废 ⇒ 身体只在画面上对齐、
+                           --  停在离球 0.08 画幅处还报"差 0.005 m"。(同一个坑 LAB 记过:ca3641b。)
+                           if Gp.Z > 0.0 and then Gp.Z + Pm (2) > 0.0 then
                               P.Z := Gp.Z + Pm (2);
                            end if;
                            Familiar := True;
@@ -1850,7 +1854,8 @@ package body Act is
                      else
                         P.Cu := Long_Float'Max (0.0, Long_Float'Min (1.0, W0.Cu + Pr (0)));
                         P.Cv := Long_Float'Max (0.0, Long_Float'Min (1.0, W0.Cv + Pr (1)));
-                        if W0.Z > 0.0 then
+                        --  同上:算出来的新深度必须仍是正的,否则这一步的预测就是错的,宁可留着旧值
+                        if W0.Z > 0.0 and then W0.Z + Pr (2) > 0.0 then
                            P.Z := W0.Z + Pr (2);
                         end if;
                      end if;
