@@ -462,6 +462,7 @@ package body Act is
       Raw_Err : Long_Float := 0.0;              --  不随表变的差距(全是比例):画面距离 + 远近差几成 + 大小差几成 + 朝向差几成。
                                                 --  判"有没有在靠近"只能用它 —— "还差几步"的刻度每步都在变,尺子一缩就看着像退步
       Par_Tu, Par_Tv : Long_Float := 0.0;       --  两团展开时,整块的目标(看清各团真实位置后按它重算各团目标)
+      To_Grip : Boolean := False;               --  这个点是【被换成跟着那个东西】的:目标是我的握区,不是它自己
       Hard : Boolean := False;                  --  脑说的是 hold ⇒ 这一条整段不许被牺牲(解算时进硬约束,软目标只能在它的零空间里做文章)
    end record;
    package Point_Vectors is new Ada.Containers.Vectors (Natural, Point);
@@ -2932,7 +2933,18 @@ package body Act is
                                     P.Desc := S ("item " & Codec.Img (G.Item) & " " & Rl & " item " & Codec.Img (G.Of_Item));
                                     P.Tu := O.Cu; P.Tv := O.Cv; P.Tz := P.Z; P.Wz := 0.0;
                                     if Rl = "at" then
-                                       if P.Kind = Thing_Pt and then O.Kind in Finger | Grip then
+                                       if P.To_Grip then
+                                          --  它要来的地方 = 我两指之间:区心、区深、【到了跟前该有多大】
+                                          declare
+                                             Z : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, Cam, 0);
+                                          begin
+                                             P.Tu := Z.Cu; P.Tv := Z.Cv;
+                                             P.Tz := Z.Depth;
+                                             P.Wz := (if Picture.Is_Nan (Z.Depth) then 0.0 else 1.0);
+                                             P.Tsize := Long_Float'Max (1.0e-6, Z.Span);
+                                             P.Wsize := (if Z.Span > 0.0 then 1.0 else 0.0);
+                                          end;
+                                       elsif P.Kind = Thing_Pt and then O.Kind in Finger | Grip then
                                           --  X 装进握区:区心、区深、【到了跟前该有多大】
                                           --  🔴 最后这一项不能少:在手上这只眼睛里,握区的远近常常读不到(NaN),
                                           --  那时"看着多大"是【唯一】的距离信号。两个都没有的话,
@@ -3091,12 +3103,17 @@ package body Act is
                         if Cam_A = Integer (P.Arm) and then G.Rel /= "" and then G.Of_Item >= 1 and then G.Of_Item <= Natural (C.Items.Length)
                           and then C.Items (G.Of_Item - 1).Kind = Thing
                         then
-                           --  自己的手上相机里"我的手到 X" = 让 X 的像素来到握区:改跟 X
+                           --  自己的手上相机里"我的手到 X" = 让 X 的像素来到握区:改跟 X。
+                           --  🔴 换了跟的点,【目标也必须跟着换成握区】。以前只换了前者,于是目标是
+                           --  它自己的位置,误差恒等于 0 ⇒ 每一次都 0 推就宣布"已经到了"(GG 实测)。
                            declare
                               O : constant Item := C.Items (G.Of_Item - 1);
                            begin
                               P.Kind := Thing_Pt; P.Slot := O.Slot; P.Cu := O.Cu; P.Cv := O.Cv; P.Z := O.Depth; P.Height := O.Height; P.Count := O.Count;
                               P.Box_W := Long_Float (O.X1 - O.X0) / Long_Float (Cw); P.Box_H := Long_Float (O.Y1 - O.Y0) / Long_Float (Ch);
+                              P.Size := Sqrt (Long_Float (O.Count) / Long_Float'Max (1.0, Long_Float (Cw * Ch)));
+                              P.Elong := O.Elong; P.Gray := O.Gray;
+                              P.To_Grip := True;
                            end;
                         end if;
                      elsif It.Kind = Thing and then Cam_A >= 0 then
