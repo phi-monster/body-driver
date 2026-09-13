@@ -35,6 +35,50 @@ package body Brain is
       return To_String (R);
    end Extract_Content;
 
+   function Find (Host : String; Port : Natural; Word, Body_Text : String; N_Items : Natural;
+                  RGB : Buf; W, H : Natural; Which : out Natural; Err : out Unbounded_String) return Boolean is
+      NL : constant String := "" & ASCII.LF;
+      Prompt : constant String :=
+        "Everything I can see right now is already cut out and NUMBERED for you, boxed on the picture:" & NL &
+        Body_Text & NL & NL &
+        "Which one of those numbers is what someone would call: " & Word & NL &
+        "Answer with that number. Answer 0 if none of them is that thing, or if two of them look equally like it - " &
+        "0 is a normal answer and I will say so plainly rather than guess." & NL &
+        "Do not give me coordinates. Only one of the numbers that are already on the picture.";
+      Schema : constant String :=
+        "{""type"":""json_schema"",""json_schema"":{""name"":""which_one"",""strict"":true,""schema"":{""type"":""object"",""additionalProperties"":false," &
+        """required"":[""which""],""properties"":{""which"":{""type"":""integer"",""minimum"":0,""maximum"":" & Codec.Img (Natural'Max (1, N_Items)) & "}}}}}";
+      B64 : constant String := Codec.Base64 (Codec.BMP24 (RGB, W, H));
+      Body_Json : constant String :=
+        "{""model"":""eye"",""max_tokens"":80,""temperature"":0,""chat_template_kwargs"":{""enable_thinking"":false},""response_format"":" & Schema &
+        ",""messages"":[{""role"":""user"",""content"":[{""type"":""image_url"",""image_url"":{""url"":""data:image/bmp;base64," & B64 &
+        """}},{""type"":""text"",""text"":""" & Json.Escape (Prompt) & """}]}]}";
+      Reply : Unbounded_String;
+   begin
+      Which := 0;
+      Err := Null_Unbounded_String;
+      if Natural (RGB.Length) < W * H * 3 then
+         Err := To_Unbounded_String ("画面短了");
+         return False;
+      end if;
+      if not Http_Client.Post (Host, Port, "/v1/chat/completions", Body_Json, Reply) then
+         Err := To_Unbounded_String ("连不上脑 " & Host & ":" & Codec.Img (Port));
+         return False;
+      end if;
+      declare
+         Inner : constant String := Extract_Content (To_String (Reply));
+         D : Json.Doc;
+         Perr : Unbounded_String;
+      begin
+         if Inner = "" or else not Json.Parse (Inner, D, Perr) then
+            Err := To_Unbounded_String ("认名字的回包读不出来");
+            return False;
+         end if;
+         Which := Natural (Long_Float'Max (0.0, Json.Num (D, Json.Get (D, 0, "which"))));
+         return True;
+      end;
+   end Find;
+
    function Ask (Host : String; Port : Natural; Task_Text, Body_Text, Recent, Grammar, Refused : String;
                  Cols, Rows, N_Items, N_Cams, N_Arms : Natural; RGB : Buf; W, H : Natural;
                  Program : out Unbounded_String; Err : out Unbounded_String) return Boolean is

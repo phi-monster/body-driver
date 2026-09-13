@@ -2481,9 +2481,62 @@ package body Act is
                Put_Line (To_String (Text));
                declare
                   Rep : constant Exam.Report := Exam.Judge (C.Map, C.Tables);
-                  Cm : constant Plan.Compiled :=
-                    Plan.Compile (Lang.Parse (To_String (Text)), Rep, Build_Facts (C));
+                  P : Lang.Program := Lang.Parse (To_String (Text));
+                  Tried : Unbounded_String;
+                  Words : Strs;
+                  Nums : Ints;
+                  --  🔴 认名字:画面已经被身体自己切成带编号的块,只让模型在这些块里【挑一个】。
+                  --  这是选择题,精度来自身体的切块;挑不出来就是挑不出来,身体如实说,绝不瞎猜。
+                  procedure Name_It (X : in out Lang.Name) is
+                     Which : Natural := 0;
+                     E2 : Unbounded_String;
+                     Hit : Integer := -1;
+                  begin
+                     if not X.Given or else X.By_Number then
+                        return;
+                     end if;
+                     for I in 0 .. Natural (Words.Length) - 1 loop
+                        if Words (I) = To_String (X.Word) then
+                           Hit := Integer (I);
+                        end if;
+                     end loop;
+                     if Hit >= 0 then
+                        Which := Natural (Integer'Max (0, Nums (Natural (Hit))));
+                     elsif Brain.Find (To_String (C.Eye_Host), C.Eye_Port, To_String (X.Word),
+                                       To_String (Listing), Natural (C.Items.Length), Big, Cw, Bh, Which, E2)
+                     then
+                        Words.Append (To_String (X.Word));
+                        Nums.Append (Integer (Which));
+                        Append (Tried, (if Length (Tried) > 0 then " · " else "") & To_String (X.Word) & " ⇒ "
+                                & (if Which = 0 then "认不出" else Codec.Img (Which) & " 号"));
+                     else
+                        Words.Append (To_String (X.Word));
+                        Nums.Append (0);
+                        Append (Tried, (if Length (Tried) > 0 then " · " else "") & To_String (X.Word) & " ⇒ 问不通("
+                                & To_String (E2) & ")");
+                     end if;
+                     if Which >= 1 and then Which <= Natural (C.Items.Length) then
+                        X.By_Number := True;
+                        X.Number := Which;
+                     end if;
+                  end Name_It;
+                  Cm : Plan.Compiled;
                begin
+                  if P.Ok then
+                     for I in 0 .. Natural (P.Stmts.Length) - 1 loop
+                        declare
+                           St : Lang.Stmt := P.Stmts (I);
+                        begin
+                           Name_It (St.Subject);
+                           Name_It (St.Object);
+                           P.Stmts.Replace_Element (I, St);
+                        end;
+                     end loop;
+                     if Length (Tried) > 0 then
+                        Put_Line ("[身] 🔎 名字对号:" & To_String (Tried));
+                     end if;
+                  end if;
+                  Cm := Plan.Compile (P, Rep, Build_Facts (C));
                   Put_Line ("[身] ⚖ " & Plan.Report_Text (Cm));
                   if not Cm.Ok then
                      C.Refused := S ("line " & Codec.Img (Cm.Err_Line) & ": " & To_String (Cm.Err)
