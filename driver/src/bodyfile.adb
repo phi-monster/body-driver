@@ -190,7 +190,8 @@ package body Bodyfile is
 
    --  ── 读 ──
    function Load (Path : String; Key : String; M : in out Selfmap.Body_Map; Hands : in out Zone.Hand_Vectors.Vector;
-                  Tables : in out Act.Effect_Vectors.Vector; Sch : in out Schema.Map; Note : out Unbounded_String) return Boolean is
+                  Tables : in out Act.Effect_Vectors.Vector; Sch : in out Schema.Map; Note : out Unbounded_String;
+                  With_Tables : Boolean := False) return Boolean is
       D : Json.Doc;
       Err : Unbounded_String;
       Text : Unbounded_String;
@@ -351,10 +352,11 @@ package body Bodyfile is
          --  存进档案再拿回来用,下一炮会一路朝反方向走(FK/FL 实测,清掉表当场重量之后球才第一次变近)。
          --  重量一遍只要几十拍,不值得冒这个险。身体图、通道幅度、握区照旧沿用。
          Tables.Clear;
-         if True then
-            Note := To_Unbounded_String ("装回身体文件(量过 " & Codec.Img (M.Measured_Times) & " 次;响应表不沿用,当场重量)");
-            return True;
-         end if;
+         --  🔴 原来这里是 `if True then ... return True; end if;` —— 它把【身体图】也一起跳过了。
+         --  注释只说"响应表不沿用",可那一个 return 落在身体图读取【之前】,于是每次开机
+         --  都把上一炮攒下来的"位姿 → 我的零件在画面里的位置"整份丢掉(今晚这份档案里有 16 个样本)。
+         --  改成只挡响应表:身体图照常装回。
+         if With_Tables then
          declare
             Ts : constant Integer := Json.Get (D, 0, "tables");
          begin
@@ -415,6 +417,7 @@ package body Bodyfile is
                end;
             end loop;
          end;
+         end if;
          --  身体图(旧文件没有这一节 ⇒ 空)
          Sch.S.Clear;
          declare

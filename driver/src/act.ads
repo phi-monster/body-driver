@@ -14,6 +14,7 @@ with Table;
 with Memory;
 with Schema;
 with Chan;
+with Learned;
 package Act is
    type Item_Kind is (Finger, Grip, Piece, Thing, Thing_Remembered, Thing_Held);   --  Piece = 我身上某个通道带的一块(Which = 通道号)
    type Item is record
@@ -32,20 +33,10 @@ package Act is
    end record;
    package Item_Vectors is new Ada.Containers.Vectors (Natural, Item);
 
-   type Track_Kind is (Piece_Pt, Thing_Pt);   --  Piece_Pt:我身上的一块零件(Chan_K = 带它的通道;握合通道 = Chan.Per_Arm,那块就是手指)
-   type Stored_Effect is record
-      Arm, Cam : Natural := 0;
-      Kind : Track_Kind := Piece_Pt;
-      Chan_K : Natural := 0;     --  带这块的通道(Chan.Per_Arm = 握合通道)
-      Blob : Integer := -1;      --  这块的第几团(-1 = 整块;手指 0/1 = 两指各自)
-      E : Table.Effect;
-      Trust : Table.Mask := [others => True];   --  探针时这个点真跑过地板的通道
-      Reach : Table.Vec := [others => 1.0];   --  每个通道各自被核实过的步幅(探针上限的倍数):那个通道用到上限一半以上且表报准了才翻倍;报错/没照做/认丢了减半;存进身体文件
-      Pose : Plug.Arm_Pose := [others => 0.0];   --  这张表是在哪个位姿下量的:表是【就地】的,离得远了不成立(EP:远近那一列小了 7 倍,是别处量的)
-      Has_Pose : Boolean := False;
-      Held : Integer := -1;      --  量这张表的时候手里是什么(-1 = 空手,否则是那一槽)。拿着东西以后同一条命令后果不同 ⇒ 换了就当没有、重量
-   end record;
-   package Effect_Vectors is new Ada.Containers.Vectors (Natural, Stored_Effect);
+   --  响应表已挪进 Learned(体检要审判它,执行器要用它 —— 谁也不该依赖谁的上层)
+   subtype Track_Kind is Learned.Track_Kind;
+   subtype Stored_Effect is Learned.Stored_Effect;
+   package Effect_Vectors renames Learned.Effect_Vectors;
    type Known_Array is array (0 .. Chan.Per_Arm) of Boolean;
    type Zone_Track is record
       Valid : Boolean := False;

@@ -4,7 +4,7 @@ project Body_Driver is
    for Object_Dir use "obj";
    for Exec_Dir use "bin";
    for Create_Missing_Dirs use "True";
-   for Main use ("body_driver.adb", "selfcheck.adb");
+   for Main use ("body_driver.adb", "selfcheck.adb", "bodyexam.adb");
    package Compiler is
       for Default_Switches ("Ada") use
         ("-gnat2022", "-gnata", "-gnatwa", "-O2", "-g", "-gnatyM200");
