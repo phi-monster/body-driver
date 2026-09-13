@@ -1934,14 +1934,36 @@ package body Act is
                   --  分开判,不用新系数:实到比"命令与实到之差"还小 = 几乎没动 ⇒ 步子太小,加倍;
                   --  实到不小但对不上 = 动过头/动错了 ⇒ 缩。加倍这一条和开机探针是同一条规矩。
                   if Gn < Dn then
-                     for K in 0 .. Chan.Per_Arm - 1 loop
-                        if Note.Active (K) then
-                           Reach (K) := Long_Float'Min (Reach (K) * 2.0,
-                                                        Track_Win / Long_Float'Max (1.0e-9, C.Map.Amp (Arm * Chan.Per_Arm + K)));
+                     --  🔴🔴 加倍只治"步子太小"。治不了【顶死】—— 顶死的方向上,62 倍的零还是零。
+                     --  GN/GO/GP/GQ 四炮同一个终局:胳膊推进一个出不来的姿势,正反两个方向命令都交付 0,
+                     --  而步幅已经被加到 ×62。加力是错的解药,该做的是【换个走法】。
+                     --  这一具身体不知道自己的关节限位(零假设),它只能量:这一根被命令了、实到却落在
+                     --  自己的噪声地板里 ⇒ 此刻它推不动 ⇒ 这一步把它摘掉,让解算拿剩下的自由度绕过去。
+                     --  地板是量出来的(Fl.Delivery = 本体报的"实到"抖多少),不是人拍的。
+                     declare
+                        Stuck : Natural := 0;
+                     begin
+                        for K in 0 .. Chan.Per_Arm - 1 loop
+                           if Note.Active (K)
+                             and then abs Note.Cmd (K) > Long_Float (Fl.Delivery)
+                             and then abs Note.Got (K) <= Long_Float (Fl.Delivery)
+                           then
+                              Note.Active (K) := False;   --  这一根此刻推不动,绕过它
+                              Stuck := Stuck + 1;
+                           elsif Note.Active (K) then
+                              Reach (K) := Long_Float'Min (Reach (K) * 2.0,
+                                                           Track_Win / Long_Float'Max (1.0e-9, C.Map.Amp (Arm * Chan.Per_Arm + K)));
+                           end if;
+                        end loop;
+                        if Stuck > 0 then
+                           Put_Line ("[身]     顶死了:" & Codec.Img (Stuck) & " 根通道命令了而实到落在噪声里 ⇒ 这一步不用它们,换剩下的自由度绕过去");
+                           C.Blind_Say := S ("some of the ways I can move are jammed right now - I commanded them and my body "
+                                             & "did not move at all - so I dropped those and went around with the ways that still work");
+                        else
+                           Put_Line ("[身]     命令了几乎没动:实到只有命令的 " & Codec.Fmt (Gn / Long_Float'Max (1.0e-9, An) * 100.0, 0) & "% ⇒ 步幅加倍再试");
+                           C.Blind_Say := S ("I commanded a push and my body barely moved at all, so I doubled the step and kept going");
                         end if;
-                     end loop;
-                     Put_Line ("[身]     命令了几乎没动:实到只有命令的 " & Codec.Fmt (Gn / Long_Float'Max (1.0e-9, An) * 100.0, 0) & "% ⇒ 步幅加倍再试");
-                     C.Blind_Say := S ("I commanded a push and my body barely moved at all, so I doubled the step and kept going");
+                     end;
                   else
                      Any_Wrong := True; All_Verified := False;
                      for K in 0 .. Chan.Per_Arm - 1 loop
