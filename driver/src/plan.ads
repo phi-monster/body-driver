@@ -19,6 +19,8 @@ package Plan is
       Jaw_K : Natural := 0;
       Thing_Idx : Integer := -1;    --  它对应体检报告里的第几条(-1 = 这一块还没量过响应)
       Stands : Boolean := False;    --  量得出它鼓出它靠着的那个面多少 ⇒ 才谈得上 onto/off/free
+      Span : Long_Float := 0.0;     --  这一组能张多开(画幅);grasper 才有
+      Size : Long_Float := 0.0;     --  这一块在画面里多大(画幅)
       Label : Unbounded_String;
    end record;
    package Facts_Vectors is new Ada.Containers.Vectors (Natural, Item_Facts);
@@ -43,6 +45,15 @@ package Plan is
    --  整段检查:每一条 Op_Interval 里的每一条约束都过一遍。
    function Check (P : Sinew.Program; R : Exam.Report; Facts : Facts_Vectors.Vector;
                    B : Bind_Vectors.Vector) return Verdict;
+
+   --  🔴 第三道闸:整段程序在【自己量出来的表】上跑一遍,不通电。
+   --  它复用同一台执行器,只是喂【预测的结局】而不是真结局 —— 所以循环、分支、try 全都照走。
+   --  这一关抓的是真跑才会暴露、而跑一次要几分钟的那些错:
+   --    · 循环等一个这段程序里永远不会发生的结局 ⇒ 它会一直转下去
+   --    · 一节里两条 must 抢同一行 ⇒ 一定得牺牲一条
+   --    · 张不到那么开却要去合它 ⇒ 合了也是空的
+   function Dry_Run (P : Sinew.Program; R : Exam.Report; Facts : Facts_Vectors.Vector;
+                     B : Bind_Vectors.Vector) return Verdict;
 
    --  这具身体此刻【说得出口】的关系有哪些(报错时列给模型抄)
    function Usable_Rels (R : Exam.Report; Thing_Idx : Integer; Surface : Boolean) return String;

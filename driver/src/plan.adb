@@ -1,10 +1,12 @@
 with Codec;
+with Runtime;
 package body Plan is
 
    use type Sinew.Rel;
    use type Sinew.Noun_Kind;
    use type Sinew.Op;
    use type Sinew.Outcome;
+   use type Sinew.Rank;
    use type Exam.Verdict;
 
    function Rows_Needed (R : Sinew.Rel) return Need is
@@ -165,6 +167,30 @@ package body Plan is
             I : constant Sinew.Instr := P.Code (Ix);
          begin
             if I.O = Sinew.Op_Interval then
+               --  一节里两条 must 抢同一行 ⇒ 解算时一定得牺牲一条,不许跑
+               declare
+                  Taken : Need := [others => False];
+               begin
+                  for Ci in 0 .. Natural (I.Cons.Length) - 1 loop
+                     if I.Cons (Ci).Rk = Sinew.Rk_Must then
+                        declare
+                           Nd : constant Need := Rows_Needed (I.Cons (Ci).R);
+                        begin
+                           for Row in Exam.Row_Id loop
+                              if Nd (Row) and then Taken (Row) then
+                                 Reject (I.Line, "这一节里有两条 must 都在管「" & Exam.Row_Name (Row)
+                                         & "」这一行 —— 我一定得牺牲一条",
+                                         "把其中一条的 must 去掉(去掉就成了可以被牺牲的那种),"
+                                         & "或者换一个不抢这一行的关系");
+                              end if;
+                              if Nd (Row) then
+                                 Taken (Row) := True;
+                              end if;
+                           end loop;
+                        end;
+                     end if;
+                  end loop;
+               end;
                for Ci in 0 .. Natural (I.Cons.Length) - 1 loop
                   exit when not V.Ok;
                   declare
@@ -227,6 +253,83 @@ package body Plan is
       end loop;
       return V;
    end Check;
+
+   function Dry_Run (P : Sinew.Program; R : Exam.Report; Facts : Facts_Vectors.Vector;
+                     B : Bind_Vectors.Vector) return Verdict is
+      use Sinew;
+      V : Verdict;
+      M : Runtime.Machine;
+      W : Runtime.Yield;
+      I : Sinew.Instr;
+      Segments : Natural := 0;
+
+      --  这一节里有没有"心里就走不通"的事。有 ⇒ 直接判死,不绕结局
+      --  (until stuck 本来就是合手的正常写法,绕结局绕不出来)。
+      function Impossible (Ins : Sinew.Instr) return String is
+      begin
+         for Ci in 0 .. Natural (Ins.Cons.Length) - 1 loop
+            declare
+               C : constant Constraint := Ins.Cons (Ci);
+               Sub : constant Integer := Look_Up (B, C.Subj);
+               Obj : constant Integer := Look_Up (B, C.Obj);
+            begin
+               if C.R = Re_Close and then Sub > 0 and then Sub < Integer (Facts.Length)
+                 and then Obj > 0 and then Obj < Integer (Facts.Length)
+                 and then Facts (Natural (Sub)).Span > 0.0
+                 and then Facts (Natural (Obj)).Size > Facts (Natural (Sub)).Span
+               then
+                  return "我张得开 " & Codec.Fmt (Facts (Natural (Sub)).Span, 3)
+                    & " 幅,而它有 " & Codec.Fmt (Facts (Natural (Obj)).Size, 3)
+                    & " 幅那么宽 —— 合下去也是空的";
+               end if;
+            end;
+         end loop;
+         return "";
+      end Impossible;
+
+      --  这一节【最好的情况】会是什么结局。乐观是故意的:乐观都还停不下来的循环,真跑更停不下来。
+      function Predict (Ins : Sinew.Instr) return Outcome is
+        (if Ins.Until_Oc = Oc_None then Oc_Arrived else Ins.Until_Oc);
+   begin
+      if not P.Ok then
+         return (Ok => False, Err => P.Err, Instead => <>, Err_Line => P.Err_Line);
+      end if;
+      loop
+         Runtime.Advance (P, M, W, I);
+         case W is
+            when Runtime.Y_Interval =>
+               Segments := Segments + 1;
+               if Segments > 4096 then      --  空转都走这么多节 = 它停不下来(次数,无量纲)
+                  return (Ok => False,
+                          Err => To_Unbounded_String ("我在心里把这段跑了一遍,它停不下来 —— 走了几千节还没到头"),
+                          Instead => To_Unbounded_String ("给循环一个真到得了的出口,或者改成 repeat <几> times"),
+                          Err_Line => I.Line);
+               end if;
+               declare
+                  Bad : constant String := Impossible (I);
+               begin
+                  if Bad /= "" then
+                     return (Ok => False,
+                             Err => To_Unbounded_String ("这一节我在心里就走不通:" & Bad),
+                             Instead => To_Unbounded_String ("换一个我夹得住的东西,或者先把它推到别处再夹"),
+                             Err_Line => I.Line);
+                  end if;
+                  Runtime.Report (P, M, Predict (I));
+               end;
+            when Runtime.Y_Say | Runtime.Y_Remember =>
+               null;
+            when Runtime.Y_Done | Runtime.Y_Finished =>
+               exit;
+            when Runtime.Y_Broken =>
+               return (Ok => False,
+                       Err => To_Unbounded_String (Runtime.Broken_Why (M)),
+                       Instead => To_Unbounded_String ("给循环一个真到得了的出口;调用的名字要先 to 过"),
+                       Err_Line => I.Line);
+         end case;
+      end loop;
+      pragma Unreferenced (R);
+      return V;
+   end Dry_Run;
 
    function Say (V : Verdict) return String is
    begin

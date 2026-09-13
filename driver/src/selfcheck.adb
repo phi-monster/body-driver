@@ -415,10 +415,12 @@ begin
       end;
       Facts.Append (Plan.Item_Facts'(others => <>));                        --  0 号空着
       Ft := (Exists => True, Mine => True, Grasp => True, Arm => 0, Jaw_K => 0,
-             Thing_Idx => 0, Stands => False, Label => To_Unbounded_String ("grasper"));
+             Thing_Idx => 0, Stands => False, Span => 0.10, Size => 0.05,
+             Label => To_Unbounded_String ("grasper"));
       Facts.Append (Ft);                                                    --  1 = 我的 grasper
       Ft := (Exists => True, Mine => False, Grasp => False, Arm => 0, Jaw_K => 0,
-             Thing_Idx => -1, Stands => False, Label => To_Unbounded_String ("外面的东西"));
+             Thing_Idx => -1, Stands => False, Span => 0.0, Size => 0.04,
+             Label => To_Unbounded_String ("外面的东西"));
       Facts.Append (Ft);                                                    --  2 = 外面那个东西
       Binds.Append (Plan.Bind_Entry'(Key => To_Unbounded_String ("grasper"), Item => 1, Tried => <>));
       Binds.Append (Plan.Bind_Entry'(Key => To_Unbounded_String ("pusher"), Item => 1, Tried => <>));
@@ -470,6 +472,56 @@ begin
          X.Grasp := True;
          Facts.Replace_Element (1, X);
       end;
+   end;
+   --  ── 空转:整段在心里跑一遍,不通电 ──
+   declare
+      use Sinew;
+      R : Exam.Report;
+      Facts : Plan.Facts_Vectors.Vector;
+      Binds : Plan.Bind_Vectors.Vector;
+      T : Exam.Thing_Check;
+      function Dry (Src : String) return Plan.Verdict is
+        (Plan.Dry_Run (Sinew.Parse (Src), R, Facts, Binds));
+      procedure Set_Size (Sz : Long_Float) is
+         X : Plan.Item_Facts := Facts (2);
+      begin
+         X.Size := Sz;
+         Facts.Replace_Element (2, X);
+      end Set_Size;
+   begin
+      for Row in Exam.Row_Id loop
+         T.Rows (Row).V := Exam.Usable;
+      end loop;
+      R.Things.Append (T);
+      Facts.Append (Plan.Item_Facts'(others => <>));
+      Facts.Append (Plan.Item_Facts'(Exists => True, Mine => True, Grasp => True, Arm => 0, Jaw_K => 0,
+                    Thing_Idx => 0, Stands => True, Span => 0.10, Size => 0.05,
+                    Label => To_Unbounded_String ("grasper")));
+      Facts.Append (Plan.Item_Facts'(Exists => True, Mine => False, Grasp => False, Arm => 0, Jaw_K => 0,
+                    Thing_Idx => -1, Stands => True, Span => 0.0, Size => 0.04,
+                    Label => To_Unbounded_String ("ball")));
+      Binds.Append (Plan.Bind_Entry'(Key => To_Unbounded_String ("grasper"), Item => 1, Tried => <>));
+      Binds.Append (Plan.Bind_Entry'(Key => To_Unbounded_String ("the ball"), Item => 2, Tried => <>));
+
+      Check (Dry ("do grasper touching the ball small until touched" & ASCII.LF
+                  & "do grasper close on the ball until stuck").Ok,
+             "空转:走得通的一段,空转放行");
+      declare
+         V : constant Plan.Verdict := Dry
+           ("repeat until free:" & ASCII.LF
+            & "  do grasper touching the ball small until touched" & ASCII.LF & "end");
+      begin
+         Check (not V.Ok, "空转:循环在等一个这段程序里【永远不会发生】的结局 ⇒ 心里就转不出来,当场拦住");
+         Check (Length (V.Instead) > 0, "空转:拦住时也要给能照抄的替代(" & To_String (V.Instead) & ")");
+      end;
+      Check (Dry ("repeat until touched:" & ASCII.LF
+                  & "  do grasper touching the ball small until touched" & ASCII.LF & "end").Ok,
+             "空转:循环等的结局这一节真产得出 ⇒ 放行");
+      Set_Size (0.5);
+      Check (not Dry ("do grasper close on the ball until stuck").Ok,
+             "空转:那个东西比我张得开的还大 ⇒ 合了也是空的,不通电就拦住");
+      Set_Size (0.04);
+      Check (not Dry ("run nothing").Ok, "空转:叫一个没 to 过的名字 ⇒ 拦住");
    end;
    --  ── 优先级:hold 那一条不许被牺牲 ──
    --  造一个【真的挤不下】的局面:只有一个自由度,朝向要 1.0,位置要 10.0。

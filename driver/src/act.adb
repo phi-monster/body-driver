@@ -2279,7 +2279,12 @@ package body Act is
       "; without new words from you I hold still and keep my grip as it is; this segment ended on: " & Until_Text & ".");
 
    --  编译器要知道的、关于每个名词的事实。编号和给脑看的清单一致(1 起),0 号空着。
-   function Build_Facts (C : Context) return Plan.Facts_Vectors.Vector is
+   function Cw_Of (C : Context; F : Plug.Frame) return Natural is
+     (if C.Cam < Natural (F.Cams.Length) then F.Cams (C.Cam).W else 1);
+   function Ch_Of (C : Context; F : Plug.Frame) return Natural is
+     (if C.Cam < Natural (F.Cams.Length) then F.Cams (C.Cam).H else 1);
+
+   function Build_Facts (C : Context; F : Plug.Frame) return Plan.Facts_Vectors.Vector is
       Fs : Plan.Facts_Vectors.Vector;
       Zero : Plan.Item_Facts;
    begin
@@ -2298,6 +2303,10 @@ package body Act is
             --  量得出它鼓出它站的那个面多少 ⇒ 才有"那个面"可言。面不是全局开关,是每个东西自己的事。
             Ft.Stands := It.Height > 0.0;
             Ft.Jaw_K := It.Jaw_K;
+            --  张得开多少 / 这一块多宽:空转拿它判"合下去是不是必然空的"
+            Ft.Span := (if It.Kind = Grip then Zone_Of (C, It.Arm, C.Cam, It.Jaw_K).Span else 0.0);
+            Ft.Size := Long_Float'Max (Long_Float (It.X1 - It.X0) / Long_Float (Natural'Max (1, Cw_Of (C, F))),
+                                       Long_Float (It.Y1 - It.Y0) / Long_Float (Natural'Max (1, Ch_Of (C, F))));
             Ft.Label := To_Unbounded_String
               ((case It.Kind is
                    when Grip => "grasper(第" & Codec.Img (It.Arm + 1) & " 只手第" & Codec.Img (It.Jaw_K) & " 组)",
@@ -2516,7 +2525,7 @@ package body Act is
                declare
                   Rep : constant Exam.Report := Exam.Judge (C.Map, C.Tables);
                   P : constant Sinew.Program := Sinew.Parse (To_String (Text));
-                  Facts : constant Plan.Facts_Vectors.Vector := Build_Facts (C);
+                  Facts : constant Plan.Facts_Vectors.Vector := Build_Facts (C, F);
                   Binds : Plan.Bind_Vectors.Vector;
                   V : Plan.Verdict;
 
@@ -2623,8 +2632,60 @@ package body Act is
                                      else "认不出"));
                      end loop;
                   end if;
+                  --  🔴 用哪只眼睛,身体自己选,脑不参与(语言里没有 look 这个词)。
+                  --  判据是量出来的:这条胳膊一动,哪只眼睛的画面变得最多 —— 变得最少的那只
+                  --  正好是"顺着我伸过去的方向看"的那只,真实偏差在它眼里是零(GC 实测:
+                  --  主相机说差 0.2 格,腕相机里一看,夹的是剪刀)。20 台位置毫无规律的相机也是这一招:
+                  --  20 个数取最大,位置朝向内参一个都不用知道。
+                  declare
+                     Sub_Arm : Integer := -1;
+                     Best_Cam : Natural := C.Cam;
+                     Best_V : Long_Float := -1.0;
+                  begin
+                     for I2 in 0 .. Natural (Binds.Length) - 1 loop
+                        if To_String (Binds (I2).Key) = "grasper" and then Binds (I2).Item > 0
+                          and then Binds (I2).Item <= Integer (C.Items.Length)
+                        then
+                           Sub_Arm := Integer (C.Items (Natural (Binds (I2).Item) - 1).Arm);
+                        end if;
+                     end loop;
+                     if Sub_Arm >= 0 then
+                        for Cm in 0 .. C.Map.N_Cams - 1 loop
+                           declare
+                              Ix : constant Natural := Natural (Sub_Arm) * C.Map.N_Cams + Cm;
+                              Vv : constant Long_Float :=
+                                (if Ix < Natural (C.Map.Cam_Frac.Length) then C.Map.Cam_Frac (Ix) else 0.0);
+                           begin
+                              if Vv > Best_V then
+                                 Best_V := Vv; Best_Cam := Cm;
+                              end if;
+                           end;
+                        end loop;
+                        if Best_Cam /= C.Cam then
+                           Put_Line ("[身] 👁 这条胳膊一动,第" & Codec.Img (Best_Cam) & " 只眼睛的画面变 "
+                                     & Codec.Fmt (Best_V, 3) & " 幅,比现在这只多 ⇒ 换过去再看"
+                                     & "(我自己换的,你没说,也不用说)");
+                           C.Cam := Best_Cam;
+                           C.Recent := S ("I looked with a different eye of mine: when that arm moves, that eye's "
+                                          & "picture changes the most, so it is the one that can actually see how far "
+                                          & "off I am. Nothing moved. Say the same thing again. "
+                                          & Mode_Line (C, "changed which eye I judge with"));
+                           return;
+                        end if;
+                     end if;
+                  end;
                   V := Plan.Check (P, Rep, Facts, Binds);
-                  Put_Line ("[身] ⚖ " & Plan.Say (V));
+                  if V.Ok then
+                     --  第三道闸:整段在自己量出来的表上跑一遍,不通电
+                     V := Plan.Dry_Run (P, Rep, Facts, Binds);
+                     if V.Ok then
+                        Put_Line ("[身] ⚖ 编译过了,空转也走得通");
+                     else
+                        Put_Line ("[身] ⚖ 空转就走不通:" & Plan.Say (V));
+                     end if;
+                  else
+                     Put_Line ("[身] ⚖ " & Plan.Say (V));
+                  end if;
                   if not V.Ok then
                      C.Refused := S ("line " & Codec.Img (V.Err_Line) & ": " & To_String (V.Err)
                                      & (if Length (V.Instead) > 0 then "  -> " & To_String (V.Instead) else ""));
