@@ -967,6 +967,72 @@ begin
              "执行器:脑没写步数 ⇒ 用安全上限,而安全上限不是 1(没写不等于只走一步)");
    end;
 
+   --  🔴 变异测试查出来的真空区:until stuck 和 until slipped 的判据【一条测试都没有】。
+   --  把 Refusing 和 Slipped 各改成恒 False,自检照样全过 —— 语言里两个结局词判据没人看着。
+   declare
+      function W_Ref (N : Monitor.Count) return Monitor.Watch is
+        ((Quiet => 0, No_Progress => 0, Steps => 0, Refused => N));
+   begin
+      --  顶住 = 命令发了而身体没走,连着两步才算(一步可能只是还没生效)
+      Check (not Monitor.Refusing (W_Ref (0)) and then not Monitor.Refusing (W_Ref (1)),
+             "监视器:才一步没走不算顶住(一步可能只是还没生效)");
+      Check (Monitor.Refusing (W_Ref (2)) and then Monitor.Refusing (W_Ref (5)),
+             "监视器:连着两步没走 = 顶住(until stuck 靠这一条)");
+      --  掉了 = 抓握读数回到"合空"那个读数附近(差在噪声以内)
+      Check (Monitor.Slipped (1.00, 1.00, 0.01) and then Monitor.Slipped (1.005, 1.00, 0.01),
+             "监视器:读数回到合空那个数 = 手里的东西掉了(until slipped 靠这一条)");
+      Check (not Monitor.Slipped (1.20, 1.00, 0.01),
+             "监视器:读数比合空高出噪声以上 = 还夹着东西");
+   end;
+
+   --  🔴🔴 GM 的死法,在一张造出来的深度图上重现并钉死:
+   --  手一凑近,要抓的东西【比尺子还宽】⇒ 它自己就是背景 ⇒ 鼓 0 ⇒ 整块消失;
+   --  同时它被画面下沿切掉一角 ⇒ 又被"贴边的丢掉"扔一次。两个洞同时张开。
+   declare
+      W : constant Natural := 96;
+      H : constant Natural := 72;
+      Dep : Floats := Filled (W * H, 0.80);
+      Seed : Long_Long_Integer := 11;
+      Small : Picture.Regions;   --  小尺子:近处那块大的应该【切不出来】
+      Wide : Picture.Regions;    --  拿它自己的宽度当尺子:应该切得出来
+      Edge_Off, Edge_On : Picture.Regions;
+      Found_Big : Boolean := False;
+   begin
+      for I in 0 .. W * H - 1 loop
+         Seed := (Seed * 1103515245 + 12345) mod 2147483648;
+         Dep.Replace_Element (I, 0.80 + Long_Float (Seed mod 1000) * 1.0e-6 - 0.0005);
+      end loop;
+      --  一块占了画面一多半宽的东西(凑到跟前的球就是这样),而且下沿压在画面最后一行
+      for Y in 40 .. H - 1 loop
+         for X in 20 .. 75 loop
+            Dep.Replace_Element (Y * W + X, 0.70);
+         end loop;
+      end loop;
+      --  ① 小尺子(0.125 画幅 = 12 px,远窄于这块 56 px 宽的东西)⇒ 它自己就是背景,切不出来
+      Small := Picture.Cut (Dep, W, H, 0.125, 3.0, Keep_Edge => True);
+      for R of Small loop
+         if R.X1 - R.X0 > 30 then
+            Found_Big := True;
+         end if;
+      end loop;
+      Check (not Found_Big,
+             "切块:比尺子宽的东西,小尺子下【确实】切不出来 —— GM 里球就是这么没的");
+      --  ② 拿这块东西自己的宽度当第二把尺子 ⇒ 切得出来
+      Wide := Picture.Cut (Dep, W, H, 56.0 / Long_Float (W), 3.0, Keep_Edge => True);
+      Found_Big := False;
+      for R of Wide loop
+         if R.X1 - R.X0 > 30 then
+            Found_Big := True;
+         end if;
+      end loop;
+      Check (Found_Big, "切块:第二把尺子用这块东西自己的宽度 ⇒ 它回来了");
+      --  ③ 贴边:同一块东西,Keep_Edge 关掉就该丢、开着就该留
+      Edge_Off := Picture.Cut (Dep, W, H, 56.0 / Long_Float (W), 3.0, Keep_Edge => False);
+      Edge_On := Picture.Cut (Dep, W, H, 56.0 / Long_Float (W), 3.0, Keep_Edge => True);
+      Check (Natural (Edge_On.Length) > Natural (Edge_Off.Length),
+             "切块:下沿压在画面最后一行的那块,Keep_Edge 关掉会被丢、开着才留得住");
+   end;
+
    Put_Line ((if Fails = 0 then "🟢 自检全过" else "🔴 自检失败" & Natural'Image (Fails) & " 条"));
    if Fails > 0 then
       raise Program_Error;
