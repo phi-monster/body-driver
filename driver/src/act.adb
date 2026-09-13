@@ -2941,8 +2941,19 @@ package body Act is
                                              P.Tu := Z.Cu; P.Tv := Z.Cv;
                                              P.Tz := Z.Depth;
                                              P.Wz := (if Picture.Is_Nan (Z.Depth) then 0.0 else 1.0);
-                                             P.Tsize := Long_Float'Max (1.0e-6, Z.Span);
-                                             P.Wsize := (if Z.Span > 0.0 then 1.0 else 0.0);
+                                             --  🔴 "到了跟前该有多大"不能用瓣心距:在手【自己】的眼睛里,
+                                             --  两根指头分别贴在画面最左最右,瓣心距 ≈ 整幅画(实测 1.001),
+                                             --  拿它当目标等于要求球把整幅画填满(身体报"只有该有的 10.0% 那么大"),
+                                             --  这一项就把解算整个带跑偏。
+                                             --  正确的量:看着多大与距离成反比 —— 现在在 d、该到 d*,就该大 d/d* 倍。
+                                             if not Picture.Is_Nan (Z.Depth) and then Z.Depth > 0.0
+                                               and then P.Z > 0.0 and then P.Size > 0.0
+                                             then
+                                                P.Tsize := P.Size * (P.Z / Z.Depth);
+                                                P.Wsize := 1.0;
+                                             else
+                                                P.Wsize := 0.0;   --  量不出该有多大就别用它,不许瞎给一个
+                                             end if;
                                           end;
                                        elsif P.Kind = Thing_Pt and then O.Kind in Finger | Grip then
                                           --  X 装进握区:区心、区深、【到了跟前该有多大】
@@ -3162,14 +3173,17 @@ package body Act is
                         P.Ang := 2.0 * Arctan (O.Av, O.Au);
                         P.Elong := O.Elong; P.Gray := O.Gray;
                         P.Tu := Z.Cu; P.Tv := Z.Cv; P.Tz := Z.Depth; P.Wz := (if Picture.Is_Nan (Z.Depth) then 0.0 else 1.0);
-                        --  "到了跟前该有多大" = 两瓣之间那么宽(瓣心距是量出来的,比区框稳)
-                        P.Tsize := Long_Float'Max (1.0e-6, Z.Span);
+                        --  "到了跟前该有多大":看着多大与距离成反比 —— 现在在 d、该到 d*,就该大 d/d* 倍。
+                        --  (不能用瓣心距:手自己的眼睛里两指贴在画面两端,那个数 ≈ 整幅画)
+                        P.Tsize := (if not Picture.Is_Nan (Z.Depth) and then Z.Depth > 0.0 and then P.Z > 0.0
+                                    then P.Size * (P.Z / Z.Depth) else P.Size);
                         P.Tang := 2.0 * Arctan (Z.Av, Z.Au);
                         --  🔴 "看着多大"这一项 2026-09-08 曾被写死关掉(当时框随切块忽大忽小)。现在重新打开:
                         --  稳不稳【由体检量出来判】,不由我写死 —— 不稳的话点用之前那一关会把它摘掉。
                         --  而在手上这只眼睛里,握区的远近常常读不到(NaN),那时它是【唯一】的距离信号:
                         --  GE 实测,两个距离信号同时关着 ⇒ 像素一对齐就宣布"到了",实际差着 20 厘米。
-                        P.Wsize := 1.0;
+                        P.Wsize := (if not Picture.Is_Nan (Z.Depth) and then Z.Depth > 0.0 and then P.Z > 0.0
+                                    then 1.0 else 0.0);
                         --  朝向的分量 = 这块有多长条(圆的为零)
                         P.Wang := Long_Float'Max (0.0, 1.0 - 1.0 / Long_Float'Max (1.0, O.Elong));
                         P.Desc := S ("item " & Codec.Img (Say.Grip_On) & " to sit where my fingers close (same place, same distance, same apparent size, same lie)");
