@@ -146,6 +146,18 @@ package body Act is
       return 0.125;   --  世界相机:画幅八分之一(比例,无量纲)
    end Cut_Window;
 
+   function Role_Wants (R : Sinew.Role; K : Item_Kind) return Boolean is
+     (case R is
+         --  grasper = 我量到能相向靠拢、中间扫出一片能装东西的那一组
+         when Sinew.Rl_Grasper => K = Grip,
+         --  pusher = 推得动东西、但【合不拢】的部件。合得拢的(Grip / Finger)一律不算 ——
+         --  以前这里写 Grip | Piece,爪心同时满足两个角色,语言的角色区分等于没有。
+         --  这具身体上量不到这样的零件时,绑不上就是对的,身体要说出来,不许拿爪心顶数。
+         when Sinew.Rl_Pusher => K = Piece,
+         --  me = 整个我。只有"推一下整幅画面跟着变、而且身上量不出可分的零件"的机体(无人机)才有它。
+         --  这具身体量得出手指和爪心 ⇒ me 绑不上,而这是对的;身体要说清为什么,不许只回一句"认不出"。
+         when others => False);
+
    function Rel_Cmd (R : Sinew.Rel) return String is
      (case R is
          when Sinew.Re_Touching => "at",   when Sinew.Re_Above => "above", when Sinew.Re_Below => "below",
@@ -2764,11 +2776,7 @@ package body Act is
                      for K in 0 .. Natural (C.Items.Length) - 1 loop
                         declare
                            It : constant Item := C.Items (K);
-                           Want : constant Boolean :=
-                             (case R is
-                                 when Sinew.Rl_Grasper => It.Kind = Grip,
-                                 when Sinew.Rl_Pusher => It.Kind in Grip | Piece,
-                                 when others => False);
+                           Want : constant Boolean := Role_Wants (R, It.Kind);
                            D : constant Long_Float :=
                              (if Has_Near and then It.Located
                               then Sqrt ((It.Cu - Near_U) ** 2 + (It.Cv - Near_V) ** 2) else 0.0);
@@ -2783,6 +2791,29 @@ package body Act is
                      end loop;
                      return Best;
                   end Bind_Role;
+
+                  --  绑不上时,把身上量到的零件种类如实报出来,让脑知道该换成什么说法
+                  function Why_No_Role (Key : String) return String is
+                     N_Grip, N_Piece, N_Finger : Natural := 0;
+                  begin
+                     for K in 0 .. Natural (C.Items.Length) - 1 loop
+                        case C.Items (K).Kind is
+                           when Grip => N_Grip := N_Grip + 1;
+                           when Piece => N_Piece := N_Piece + 1;
+                           when Finger => N_Finger := N_Finger + 1;
+                           when others => null;
+                        end case;
+                     end loop;
+                     if Key = "pusher" then
+                        return "我身上没量到【推得动东西又合不拢】的零件(合得拢的爪心"
+                          & Codec.Img (N_Grip) & " 组不算);要用手,写 grasper";
+                     elsif Key = "me" then
+                        return "me 是【整个我】,只有推一下整幅画面跟着变、身上又分不出零件的机体才有它;"
+                          & "我身上量得出 " & Codec.Img (N_Finger) & " 瓣手指、" & Codec.Img (N_Grip)
+                          & " 组爪心,所以要点名到零件:写 grasper";
+                     end if;
+                     return "这只眼睛里没有一块符合它";
+                  end Why_No_Role;
 
                   --  名字靠身体自己去认:画面已经被切成带编号的块,只让模型在这些块里【挑一个】。
                   --  编号从头到尾没进语言,它只活在这一问里。挑不出来 ⇒ 如实说,绝不瞎猜。
@@ -2856,9 +2887,10 @@ package body Act is
                   if P.Ok then
                      Bind_All;
                      for I2 in 0 .. Natural (Binds.Length) - 1 loop
+                        --  绑不上要说【为什么】:光一句"认不出"等于没说,脑没法据此改写程序
                         Put_Line ("[身] 🔎 " & To_String (Binds (I2).Key) & " ⇒ "
                                   & (if Binds (I2).Item > 0 then "第" & Codec.Img (Natural (Binds (I2).Item)) & " 块"
-                                     else "认不出"));
+                                     else "绑不上:" & Why_No_Role (To_String (Binds (I2).Key))));
                      end loop;
                   end if;
                   --  🔴 用哪只眼睛,身体自己选,脑不参与(语言里没有 look 这个词)。

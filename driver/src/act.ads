@@ -49,6 +49,10 @@ package Act is
       Elong : Long_Float := 1.0;     --  长轴/短轴
       Gray : Long_Float := -1.0;     --  框里的平均灰度(< 0 = 没量到)
    end record;
+   --  角色 → 它肯收哪种自己的零件。**只有这一处**,自检钉死 grasper 和 pusher 不许收同一种
+   --  (语言里 pusher 就是"推得动东西、但【合不拢】的部件";以前它把 Grip 也收了,
+   --  于是两个角色绑到同一块,语言里的角色区分是假的)。
+   function Role_Wants (R : Sinew.Role; K : Item_Kind) return Boolean;
    package Item_Vectors is new Ada.Containers.Vectors (Natural, Item);
 
    --  响应表已挪进 Learned(体检要审判它,执行器要用它 —— 谁也不该依赖谁的上层)

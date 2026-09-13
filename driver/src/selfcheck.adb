@@ -918,6 +918,28 @@ begin
       Check (Uniq, "语言:关系词两两不同(不许两个词做同一件事)");
    end;
 
+   --  角色词同一条焊缝:grasper 和 pusher 按语言的定义是互斥的
+   --  (pusher = 推得动东西、但【合不拢】的部件),不许有哪种零件同时满足两个角色。
+   --  以前 pusher 写成 Grip | Piece,爪心同时中两个,GM 日志里 grasper 和 pusher 绑到同一块。
+   declare
+      Overlap : Boolean := False;
+      Grasp_Any, Push_Any : Boolean := False;
+   begin
+      for K in Act.Item_Kind loop
+         if Act.Role_Wants (Sinew.Rl_Grasper, K) and then Act.Role_Wants (Sinew.Rl_Pusher, K) then
+            Overlap := True;
+         end if;
+         if Act.Role_Wants (Sinew.Rl_Grasper, K) then
+            Grasp_Any := True;
+         end if;
+         if Act.Role_Wants (Sinew.Rl_Pusher, K) then
+            Push_Any := True;
+         end if;
+      end loop;
+      Check (not Overlap, "语言:grasper 和 pusher 互斥(合得拢的零件不许算 pusher)");
+      Check (Grasp_Any and then Push_Any, "语言:两个角色各自都收得下至少一种零件(不许有空角色)");
+   end;
+
    Put_Line ((if Fails = 0 then "🟢 自检全过" else "🔴 自检失败" & Natural'Image (Fails) & " 条"));
    if Fails > 0 then
       raise Program_Error;
