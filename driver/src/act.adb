@@ -1453,10 +1453,26 @@ package body Act is
          for K in 0 .. Chan.Per_Arm - 1 loop
             Note.Cmd (K) := Note.Cmd (K) * Scale * Trust;   --  表有多准就走多少(不然每步走过头,下一步再拉回来,来回晃)
          end loop;
-         if Table.Norm (Note.Cmd, Chan.Per_Arm) <= C.Map.EE_Noise and then Want_Arrived then
-            --  只有脑写了 until arrived 才准因为"到了"而停。没写就接着走它给的步数。
-            Note.Say_Stop := S ("amount: already there (what is left to push is within my own noise)");
-         end if;
+         declare
+            N0 : constant Long_Float := Table.Norm (Note.Cmd, Chan.Per_Arm);
+         begin
+            if N0 <= C.Map.EE_Noise then
+               if Want_Arrived then
+                  --  只有脑写了 until arrived 才准因为"到了"而停。
+                  Note.Say_Stop := S ("amount: already there (what is left to push is within my own noise)");
+               elsif N0 > 0.0 then
+                  --  🔴 脑没让停 ⇒ 不许发一个身体根本走不动的命令。放大到我能走的最小一步,方向不变。
+                  --  (GK 实测:不放大的话每一步都是零命令,30 步全是空转。)
+                  declare
+                     G : constant Long_Float := Long_Float'Max (1.0, C.Map.EE_Noise / N0);
+                  begin
+                     for K in 0 .. Chan.Per_Arm - 1 loop
+                        Note.Cmd (K) := Note.Cmd (K) * G;
+                     end loop;
+                  end;
+               end if;
+            end if;
+         end;
       end Trim;
 
       --  ① 打算怎么走 = 定目标 → 定额度 → 修步子
@@ -1897,15 +1913,12 @@ package body Act is
                   if Table.Row_Proven (Effs (I), Notch, R) then
                      Live := Live + 1;
                   else
+                     --  🔴 没证过【不等于】不用它。摘掉的后果:五行全摘 ⇒ 归一后误差恒为 0 ⇒
+                     --  每一步发出的命令幅度都是 0,身体空转烧步数(GK 实测:差距 0.241 一动不动)。
+                     --  按规矩:说出来,照用。
                      Append (Dropped, (if Length (Dropped) > 0 then "; " else "")
-                             & "I left out " & Nm & " for item " & Codec.Img (P.Item_No) & ", because "
-                             & Table.Row_Why (Effs (I), Notch, R));
-                     case R is
-                        when 2 => Q.Wz := 0.0;
-                        when 3 => Q.Wsize := 0.0;
-                        when 4 => Q.Wang := 0.0;
-                        when others => null;
-                     end case;
+                             & "I used " & Nm & " for item " & Codec.Img (P.Item_No)
+                             & " even though " & Table.Row_Why (Effs (I), Notch, R));
                   end if;
                end Want;
             begin
