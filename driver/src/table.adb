@@ -29,6 +29,16 @@ package body Table is
       end if;
    end Set_Prior;
 
+   procedure Set_Spread (E : in out Effect; Ch : Natural; N : Natural; S : Vec3) is
+   begin
+      if Ch <= Ch_Index'Last then
+         E.Reps (Ch) := N;
+         for R in 0 .. Rows - 1 loop
+            E.Scatter (Ch, R) := S (R);
+         end loop;
+      end if;
+   end Set_Spread;
+
    procedure Set_Col (E : in out Effect; Ch : Natural; D : Vec3) is
    begin
       if Ch < E.N then
@@ -278,4 +288,157 @@ package body Table is
          end;
       end loop;
    end Solve;
+
+   function Row_Scale (E : Effect; Notch : Vec; R : Natural) return Long_Float is
+      M : Long_Float := 0.0;
+   begin
+      for C in 0 .. E.N - 1 loop
+         M := Long_Float'Max (M, abs (E.B (C, R)) * abs Notch (C));
+      end loop;
+      return M;
+   end Row_Scale;
+
+   procedure Solve_Priority (Hard, Soft : Term_Vectors.Vector; N : Natural; Cap : Vec; Active : Mask; Damp : Vec;
+                             A : out Vec; Ok : out Boolean) is
+      A1 : Vec := Zero_Vec;
+      P : array (Ch_Index, Ch_Index) of Long_Float := [others => [others => 0.0]];
+      Q : array (0 .. Rows * 8 - 1, Ch_Index) of Long_Float := [others => [others => 0.0]];
+      NQ : Natural := 0;
+   begin
+      A := Zero_Vec;
+      if Natural (Hard.Length) = 0 then
+         Solve (Soft, N, Cap, Active, Damp, A, Ok);
+         return;
+      end if;
+      Solve (Hard, N, Cap, Active, Damp, A1, Ok);
+      if not Ok then
+         return;
+      end if;
+      if Natural (Soft.Length) = 0 then
+         A := A1;
+         return;
+      end if;
+      --  硬约束那些行,正交化成 Q
+      for T in 0 .. Natural (Hard.Length) - 1 loop
+         for R in 0 .. Rows - 1 loop
+            if Hard (T).W (R) > 0.0 and then NQ <= Q'Last (1) then
+               declare
+                  V : array (Ch_Index) of Long_Float := [others => 0.0];
+                  Nm : Long_Float := 0.0;
+               begin
+                  for C in 0 .. N - 1 loop
+                     V (C) := (if Active (C) then Hard (T).E.B (C, R) else 0.0);
+                  end loop;
+                  for K in 0 .. NQ - 1 loop
+                     declare
+                        D : Long_Float := 0.0;
+                     begin
+                        for C in 0 .. N - 1 loop
+                           D := D + V (C) * Q (K, C);
+                        end loop;
+                        for C in 0 .. N - 1 loop
+                           V (C) := V (C) - D * Q (K, C);
+                        end loop;
+                     end;
+                  end loop;
+                  for C in 0 .. N - 1 loop
+                     Nm := Nm + V (C) * V (C);
+                  end loop;
+                  Nm := Sqrt (Nm);
+                  if Nm > 0.0 then
+                     for C in 0 .. N - 1 loop
+                        Q (NQ, C) := V (C) / Nm;
+                     end loop;
+                     NQ := NQ + 1;
+                  end if;
+               end;
+            end if;
+         end loop;
+      end loop;
+      --  投影阵 P = I − QᵀQ
+      for I in 0 .. N - 1 loop
+         P (I, I) := 1.0;
+      end loop;
+      for K in 0 .. NQ - 1 loop
+         for I in 0 .. N - 1 loop
+            for J in 0 .. N - 1 loop
+               P (I, J) := P (I, J) - Q (K, I) * Q (K, J);
+            end loop;
+         end loop;
+      end loop;
+      --  Soft 的雅可比右乘 P:在这套坐标下解出的 z,乘回 P 一定落在零空间里
+      declare
+         Sp : Term_Vectors.Vector;
+         Z : Vec := Zero_Vec;
+         Ok2 : Boolean;
+         Worst : Long_Float := 1.0;
+      begin
+         for T in 0 .. Natural (Soft.Length) - 1 loop
+            declare
+               X : Term := Soft (T);
+               Bp : Mat3 := [others => [others => 0.0]];
+            begin
+               for C in 0 .. N - 1 loop
+                  for R in 0 .. Rows - 1 loop
+                     declare
+                        Acc : Long_Float := 0.0;
+                     begin
+                        for J in 0 .. N - 1 loop
+                           Acc := Acc + Soft (T).E.B (J, R) * P (J, C);
+                        end loop;
+                        Bp (C, R) := Acc;
+                     end;
+                  end loop;
+               end loop;
+               --  误差要扣掉第一段已经走掉的那一部分
+               declare
+                  Got : constant Vec3 := Predict (Soft (T).E, A1);
+               begin
+                  for R in 0 .. Rows - 1 loop
+                     X.Err (R) := Soft (T).Err (R) - Got (R);
+                  end loop;
+               end;
+               X.E.B := Bp;
+               Sp.Append (X);
+            end;
+         end loop;
+         Solve (Sp, N, Cap, Active, Damp, Z, Ok2);
+         if not Ok2 then
+            A := A1;
+            return;
+         end if;
+         for C in 0 .. N - 1 loop
+            declare
+               Acc : Long_Float := 0.0;
+            begin
+               for J in 0 .. N - 1 loop
+                  Acc := Acc + P (C, J) * Z (J);
+               end loop;
+               A (C) := A1 (C) + Acc;
+            end;
+         end loop;
+         --  越界只缩零空间那一半:硬约束已经达成的部分一点不动
+         for C in 0 .. N - 1 loop
+            if Cap (C) > 0.0 and then abs A (C) > Cap (C) then
+               declare
+                  Extra : constant Long_Float := abs (A (C) - A1 (C));
+                  Room : constant Long_Float := Long_Float'Max (0.0, Cap (C) - abs A1 (C));
+               begin
+                  if Extra > 0.0 then
+                     Worst := Long_Float'Min (Worst, Room / Extra);
+                  else
+                     Worst := 0.0;
+                  end if;
+               end;
+            end if;
+         end loop;
+         if Worst < 1.0 then
+            for C in 0 .. N - 1 loop
+               A (C) := A1 (C) + (A (C) - A1 (C)) * Worst;
+            end loop;
+         end if;
+      end;
+      Ok := True;
+   end Solve_Priority;
+
 end Table;

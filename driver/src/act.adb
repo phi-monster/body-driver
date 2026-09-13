@@ -765,6 +765,34 @@ package body Act is
       Floor_S : array (0 .. Natural (Pts.Length) - 1) of Long_Float := [others => 0.0];
       Floor_A : array (0 .. Natural (Pts.Length) - 1) of Long_Float := [others => 0.0];
       Z : constant Zone.Hand_Zone := Zone_Of (C, Arm, Cam);
+      --  一次推动只证明"它动过",证明不了"它稳"。同一个推法重复这么多次,量散布(次数,无量纲)。
+      Reps_Wanted : constant := 3;
+      N_Pts : constant Natural := Natural (Pts.Length);
+      type Sum_Grid is array (0 .. N_Pts - 1, 0 .. Chan.Per_Arm - 1, 0 .. Table.Rows - 1) of Long_Float;
+      S1 : Sum_Grid := [others => [others => [others => 0.0]]];   --  各次列值之和
+      S2 : Sum_Grid := [others => [others => [others => 0.0]]];   --  各次列值平方和
+      Nrep : array (0 .. Chan.Per_Arm - 1) of Natural := [others => 0];
+      --  重复够了(或者中途翻脸了)⇒ 把均值写进表,把散布÷|均值| 写进散布格
+      procedure Finalise (K : Natural) is
+      begin
+         for I in 0 .. N_Pts - 1 loop
+            declare
+               Nk : constant Long_Float := Long_Float (Natural'Max (1, Nrep (K)));
+               Mean, Sc : Table.Vec3;
+            begin
+               for R in 0 .. Table.Rows - 1 loop
+                  Mean (R) := S1 (I, K, R) / Nk;
+                  declare
+                     Var : constant Long_Float := Long_Float'Max (0.0, S2 (I, K, R) / Nk - Mean (R) * Mean (R));
+                  begin
+                     Sc (R) := (if abs Mean (R) > 0.0 then Sqrt (Var) / abs Mean (R) else 0.0);
+                  end;
+               end loop;
+               Table.Set_Col (Effs (I), K, Mean);
+               Table.Set_Spread (Effs (I), K, Nrep (K), Sc);
+            end;
+         end loop;
+      end Finalise;
    begin
       Trust := [others => False];
       Jaw.Append (Selfmap.Jaw_Of (F, Arm));
@@ -873,7 +901,10 @@ package body Act is
                                              then (P.Size - W0.Size) / Deliv (K) else 0.0);
                                  Col (4) := (if P.Size > 0.0 and then W0.Size > 0.0 and then abs (Wrap (P.Ang - W0.Ang)) > Floor_A (I)
                                              then Wrap (P.Ang - W0.Ang) / Deliv (K) else 0.0);
-                                 Table.Set_Col (Effs (I), K, Col);
+                                 for R in 0 .. Table.Rows - 1 loop
+                                    S1 (I, K, R) := S1 (I, K, R) + Col (R);
+                                    S2 (I, K, R) := S2 (I, K, R) + Col (R) * Col (R);
+                                 end loop;
                               end;
                            else
                               Seen_Enough := False;
@@ -882,8 +913,8 @@ package body Act is
                         end;
                      end loop;
                      if Seen_Enough then
-                        Trust (K) := True;
-                        Put_Line ("[身]     通道" & Natural'Image (Chn) & ":命令 " & Codec.Fmt (Amp, 4) & " 实到 " & Codec.Fmt (Deliv (K), 4) & " ⇒ 点跑了 " &
+                        Nrep (K) := Nrep (K) + 1;
+                        Put_Line ("[身]     通道" & Natural'Image (Chn) & " 第" & Natural'Image (Nrep (K)) & " 次:命令 " & Codec.Fmt (Amp, 4) & " 实到 " & Codec.Fmt (Deliv (K), 4) & " ⇒ 点跑了 " &
                                   Codec.Fmt (Ran_Max, 4) & " 画幅,深度变 " & Codec.Fmt ((if Pts (0).Z > 0.0 and then Was (0).Z > 0.0 then Pts (0).Z - Was (0).Z else 0.0), 4));
                      end if;
                      declare
@@ -904,12 +935,27 @@ package body Act is
                            end;
                         end loop;
                      end;
-                     exit when Trust (K);
-                     if Amp * 2.0 > Cap_Amp then
-                        Put_Line ("[身]     通道" & Natural'Image (Chn) & ":到 " & Codec.Fmt (Amp, 4) & " 点还没动过地板(跑 " & Codec.Fmt (Ran_Max, 4) & " 画幅,地板 " & Codec.Fmt (Floor_Px, 4) & ")⇒ 这一段不用它");
-                        exit;
+                     if Seen_Enough then
+                        if Nrep (K) >= Reps_Wanted then
+                           Finalise (K);
+                           Trust (K) := True;
+                           exit;
+                        end if;
+                        --  同一幅度再来一次(不翻倍):现在要证的是"它稳",不是"它动过"
+                     else
+                        if Nrep (K) > 0 then
+                           --  前面动过,这一次同样的推法没动 ⇒ 这就是"不稳"本身,如实收档交给体检判
+                           Finalise (K);
+                           Trust (K) := True;
+                           Put_Line ("[身]     通道" & Natural'Image (Chn) & ":同一个推法第" & Natural'Image (Nrep (K) + 1) & " 次没动 ⇒ 不稳,如实记下");
+                           exit;
+                        end if;
+                        if Amp * 2.0 > Cap_Amp then
+                           Put_Line ("[身]     通道" & Natural'Image (Chn) & ":到 " & Codec.Fmt (Amp, 4) & " 点还没动过地板(跑 " & Codec.Fmt (Ran_Max, 4) & " 画幅,地板 " & Codec.Fmt (Floor_Px, 4) & ")⇒ 这一段不用它");
+                           exit;
+                        end if;
+                        Amp := Amp * 2.0;
                      end if;
-                     Amp := Amp * 2.0;
                   end;
                end loop;
             end if;

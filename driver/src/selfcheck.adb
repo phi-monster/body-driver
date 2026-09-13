@@ -473,6 +473,67 @@ begin
                   and then To_String (C.Says) = "hi", "编译:say/done 不产生动作,reach 产生一条约束");
       end;
    end;
+   --  ── 优先级:hold 那一条不许被牺牲 ──
+   --  造一个【真的挤不下】的局面:只有一个自由度,朝向要 1.0,位置要 10.0。
+   --  平权解一定折中(昨晚就是这个形状);零空间解必须保住朝向,宁可位置一点不办。
+   declare
+      use Table;
+      Hard, Soft, Both : Term_Vectors.Vector;
+      H, S : Term;
+      Cap : constant Vec := [others => 100.0];
+      Damp : constant Vec := [others => 1.0e-9];
+      One : Mask := [others => False];
+      Two : Mask := [others => False];
+      A : Vec;
+      Okp : Boolean;
+   begin
+      One (0) := True;
+      Two (0) := True; Two (1) := True;
+      Reset (H.E, 1, 1.0);
+      Set_Col (H.E, 0, [0.0, 0.0, 0.0, 0.0, 1.0]);
+      H.Err := [0.0, 0.0, 0.0, 0.0, 1.0];  H.W := [0.0, 0.0, 0.0, 0.0, 1.0];
+      Reset (S.E, 1, 1.0);
+      Set_Col (S.E, 0, [1.0, 0.0, 0.0, 0.0, 0.0]);
+      S.Err := [10.0, 0.0, 0.0, 0.0, 0.0];  S.W := [1.0, 0.0, 0.0, 0.0, 0.0];
+      Hard.Append (H); Soft.Append (S);
+      Both.Append (H); Both.Append (S);
+      Solve (Both, 1, Cap, One, Damp, A, Okp);
+      declare
+         F : constant Long_Float := Predict (H.E, A) (4);
+      begin
+         Check (Okp and then abs (F - 1.0) > 1.0e-3,
+                "优先级:挤不下时,平权解【牺牲】朝向(朝哪冲到 " & Codec.Fmt (F, 3) & ",要的是 1.000)");
+      end;
+      Solve_Priority (Hard, Soft, 1, Cap, One, Damp, A, Okp);
+      declare
+         F : constant Long_Float := Predict (H.E, A) (4);
+      begin
+         Check (Okp and then abs (F - 1.0) < 1.0e-6,
+                "优先级:挤不下时,零空间解【保住】朝向(朝哪 " & Codec.Fmt (F, 6) & "),软目标这一步就不办");
+      end;
+      --  再看挤得下的时候:朝向照样精确,剩下的自由度全去办软目标
+      declare
+         H2, S2 : Term;
+         Hd, Sf : Term_Vectors.Vector;
+      begin
+         Reset (H2.E, 2, 1.0);
+         Set_Col (H2.E, 0, [0.0, 0.0, 0.0, 0.0, 1.0]);
+         Set_Col (H2.E, 1, [0.0, 0.0, 0.0, 0.0, 0.0]);
+         H2.Err := [0.0, 0.0, 0.0, 0.0, 1.0];  H2.W := [0.0, 0.0, 0.0, 0.0, 1.0];
+         Reset (S2.E, 2, 1.0);
+         Set_Col (S2.E, 0, [1.0, 0.0, 0.0, 0.0, 0.0]);
+         Set_Col (S2.E, 1, [1.0, 0.0, 0.0, 0.0, 0.0]);
+         S2.Err := [10.0, 0.0, 0.0, 0.0, 0.0];  S2.W := [1.0, 0.0, 0.0, 0.0, 0.0];
+         Hd.Append (H2); Sf.Append (S2);
+         Solve_Priority (Hd, Sf, 2, Cap, Two, Damp, A, Okp);
+         Check (Okp and then abs (Predict (H2.E, A) (4) - 1.0) < 1.0e-6
+                  and then abs (Predict (S2.E, A) (0) - 10.0) < 1.0e-3,
+                "优先级:挤得下时两个都办到(朝哪 " & Codec.Fmt (Predict (H2.E, A) (4), 4)
+                & " 左右 " & Codec.Fmt (Predict (S2.E, A) (0), 3) & ")");
+      end;
+      Check (abs (Row_Scale (S.E, [0 => 2.0, others => 0.0], 0) - 2.0) < 1.0e-9,
+             "行归一:最响那个通道一格推动 = |B|×幅度 的最大值");
+   end;
    Put_Line ((if Fails = 0 then "🟢 自检全过" else "🔴 自检失败" & Natural'Image (Fails) & " 条"));
    if Fails > 0 then
       raise Program_Error;

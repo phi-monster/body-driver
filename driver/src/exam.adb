@@ -20,11 +20,14 @@ package body Exam is
    --  这一行在这具身体上,最响的那个通道推一格能把它推动多少。
    --  一格 = 那个通道自己量出来的探针幅度 ⇒ 所有行都换算到同一种货币("几格"),行与行之间才可比。
    procedure Row_Effect (M : Selfmap.Body_Map; T : Learned.Stored_Effect; R : Row_Id;
-                         Per_Notch : out Long_Float; Best : out Integer) is
+                         Per_Notch : out Long_Float; Best : out Integer;
+                         Reps : out Natural; Scatter : out Long_Float) is
       Ri : constant Natural := Row_Id'Pos (R);
    begin
       Per_Notch := 0.0;
       Best := -1;
+      Reps := 0;
+      Scatter := 0.0;
       for C in 0 .. T.E.N - 1 loop
          declare
             G : constant Natural := T.Arm * M.Per_Arm + C;
@@ -34,6 +37,8 @@ package body Exam is
             if E > Per_Notch then
                Per_Notch := E;
                Best := C;
+               Reps := T.E.Reps (C);
+               Scatter := T.E.Scatter (C, Ri);
             end if;
          end;
       end loop;
@@ -118,20 +123,31 @@ package body Exam is
             for R in Row_Id loop
                declare
                   Rc : Row_Check;
-                  P : Long_Float;
+                  P, Sc : Long_Float;
                   B : Integer;
+                  Nr : Natural;
                begin
-                  Row_Effect (M, T, R, P, B);
+                  Row_Effect (M, T, R, P, B, Nr, Sc);
                   Rc.Per_Notch := P;
                   Rc.Best_Chan := B;
-                  Rc.Reps := 0;
+                  Rc.Reps := Nr;
+                  Rc.Spread := Sc;
                   if P = 0.0 then
                      Rc.V := Dead;
                      Rc.Why := To_Unbounded_String ("这具身体上所有通道推遍,这一行【一次都没动过】");
                      Rc.Instead := To_Unbounded_String ("凡是要靠「" & Row_Name (R) & "」的话,这里都说不出口");
-                  else
+                  elsif Nr < 2 then
                      Rc.V := Unproven;
-                     Rc.Why := To_Unbounded_String ("量到了(最响的是第" & Codec.Img (B) & " 号通道),但同一个推法没重复过");
+                     Rc.Why := To_Unbounded_String ("量到了(最响的是第" & Codec.Img (B) & " 号通道),但同一个推法只做过"
+                       & Codec.Img (Nr) & " 次 ⇒ 证不出它稳");
+                  elsif Sc >= 1.0 then
+                     --  散布不小于均值本身 = 同一个推法给出的结果彼此打架,拿它算动作就是拿噪声算动作
+                     Rc.V := Unstable;
+                     Rc.Why := To_Unbounded_String ("同一个推法重复" & Codec.Img (Nr) & " 次,结果的散布是均值的 "
+                       & Codec.Fmt (Sc, 2) & " 倍 ⇒ 它自己跟自己打架");
+                     Rc.Instead := To_Unbounded_String ("换一行稳的,或者换一个不靠「" & Row_Name (R) & "」的说法");
+                  else
+                     Rc.V := Usable;
                   end if;
                   Tc.Rows (R) := Rc;
                   if P > 0.0 then
@@ -201,7 +217,9 @@ package body Exam is
                   Rc : constant Row_Check := T.Rows (Rw);
                begin
                   Put_Line ("     " & Row_Name (Rw) & "  " & Verdict_Name (Rc.V)
-                    & "   一格推动 " & Codec.Fmt (Rc.Per_Notch, 6));
+                    & "   一格推动 " & Codec.Fmt (Rc.Per_Notch, 6)
+                    & " · 重复 " & Codec.Img (Rc.Reps) & " 次"
+                    & (if Rc.Reps >= 2 then " · 散布是均值的 " & Codec.Fmt (Rc.Spread, 2) & " 倍" else ""));
                   if Rc.V /= Usable then
                      Put_Line ("            " & To_String (Rc.Why));
                      Blocked := Blocked + 1;

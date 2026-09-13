@@ -14,6 +14,7 @@ package Table is
    type Mat3 is array (Ch_Index, 0 .. Rows - 1) of Long_Float;
    type Cov is array (Ch_Index, Ch_Index) of Long_Float;
    type Mask is array (Ch_Index) of Boolean;
+   type Counts is array (Ch_Index) of Natural;
    Zero_Vec : constant Vec := [others => 0.0];
    Zero3 : constant Vec3 := [others => 0.0];
 
@@ -26,11 +27,16 @@ package Table is
       Null_Wins : Natural := 0;
       Updates : Natural := 0;
       Last_Pred_Err : Long_Float := 0.0;
+      --  同一个推法重复了几次(次数,无量纲),以及每(通道,行)的【散布 ÷ |均值|】(比例,无量纲)。
+      --  一次推动只证明"它动过",证明不了"它稳"。体检只放行 重复≥2 且 散布 < 均值本身 的行。
+      Reps : Counts := [others => 0];
+      Scatter : Mat3 := [others => [others => 0.0]];
    end record;
 
    procedure Reset (E : in out Effect; N : Natural; P0 : Long_Float);
    procedure Set_Prior (E : in out Effect; Ch : Natural; P0 : Long_Float);   --  这一通道的先验不确定度(按它的命令量级定)
    procedure Set_Col (E : in out Effect; Ch : Natural; D : Vec3);
+   procedure Set_Spread (E : in out Effect; Ch : Natural; N : Natural; S : Vec3);
    function Col (E : Effect; Ch : Natural) return Vec3;
    function Predict (E : Effect; A : Vec) return Vec3;
    procedure Update (E : in out Effect; A : Vec; Dy : Vec3; Motion_Floor, Cmd_Floor : Long_Float);
@@ -49,4 +55,14 @@ package Table is
    --  Damp (k) = 这一通道每单位命令的阻尼(按它的探针幅度归一:μ/幅²,所有通道都以"几个探针幅度"计价)
    procedure Solve (Terms : Term_Vectors.Vector; N : Natural; Cap : Vec; Active : Mask; Damp : Vec;
                     A : out Vec; Ok : out Boolean);
+   --  带优先级的解:Hard 里的约束【不许被牺牲】,Soft 只能在剩下的自由度里做文章。
+   --  做法是真的零空间投影,不是"给硬的加大权重"—— 加权重只是让它更重要,不是让它不被牺牲。
+   --  先解 Hard 得 A1;再把 Soft 的雅可比右乘投影阵 P = I − QᵀQ(Q = 硬约束行的正交化),
+   --  解出 z,最终 A = A1 + P·z。P·z 恒落在硬约束的零空间里 ⇒ 走它不改变硬约束已经达成的那几行。
+   --  上下限:A1 由第一段自己守;越界只缩 z 那一半,方向不变,硬约束照旧成立。
+   procedure Solve_Priority (Hard, Soft : Term_Vectors.Vector; N : Natural; Cap : Vec; Active : Mask; Damp : Vec;
+                             A : out Vec; Ok : out Boolean);
+   --  这一行在这具身体上"推一格能被推动多少"(所有通道里最响的那个)。
+   --  把每一行的误差按它自己的这个尺度归一,五行才在同一种货币里比较 —— 否则量纲最大的那一行独吞方程。
+   function Row_Scale (E : Effect; Notch : Vec; R : Natural) return Long_Float;
 end Table;

@@ -134,6 +134,16 @@ package body Bodyfile is
                   Append (B, (if K + R > 0 then "," else "") & Codec.Fmt (T.E.B (K, R), 6));
                end loop;
             end loop;
+            Append (B, "],""reps"":[");
+            for K in 0 .. T.E.N - 1 loop
+               Append (B, (if K > 0 then "," else "") & Codec.Img (T.E.Reps (K)));
+            end loop;
+            Append (B, "],""scatter"":[");
+            for K in 0 .. T.E.N - 1 loop
+               for R in 0 .. Table.Rows - 1 loop
+                  Append (B, (if K + R > 0 then "," else "") & Codec.Fmt (T.E.Scatter (K, R), 4));
+               end loop;
+            end loop;
             Append (B, "],""trust"":[");
             for K in 0 .. T.E.N - 1 loop
                Append (B, (if K > 0 then "," else "") & (if T.Trust (K) then "1" else "0"));
@@ -366,6 +376,8 @@ package body Bodyfile is
                   T : Act.Stored_Effect;
                   Bv : constant Floats := Arr (Json.Get (D, Tn, "b"));
                   Tv : constant Floats := Arr (Json.Get (D, Tn, "trust"));
+                  Rp : constant Floats := Arr (Json.Get (D, Tn, "reps"));
+                  Sc : constant Floats := Arr (Json.Get (D, Tn, "scatter"));
                   N : constant Natural := Natural (Json.Num (D, Json.Get (D, Tn, "n")));
                begin
                   T.Arm := Natural (Json.Num (D, Json.Get (D, Tn, "arm")));
@@ -412,6 +424,18 @@ package body Bodyfile is
                         end;
                      end if;
                      T.Trust (K) := K < Natural (Tv.Length) and then Tv (K) > 0.5;
+                     if K < Natural (Rp.Length) then
+                        declare
+                           Sv : Table.Vec3 := Table.Zero3;
+                        begin
+                           for R in 0 .. Table.Rows - 1 loop
+                              if Table.Rows * K + R < Natural (Sc.Length) then
+                                 Sv (R) := Sc (Table.Rows * K + R);
+                              end if;
+                           end loop;
+                           Table.Set_Spread (T.E, K, Natural (Long_Float'Max (0.0, Rp (K))), Sv);
+                        end;
+                     end if;
                   end loop;
                   Tables.Append (T);
                end;
