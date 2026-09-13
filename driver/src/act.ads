@@ -61,6 +61,12 @@ package Act is
    --  差得比它本身还大 ⇒ 这次外推不作数(零系数:两个都是量出来的长度)。
    --  箱上真数据:样本存的是 0.137,而身体报给脑的是四分之三个画面 —— 就是这里炸的。
    function Extrapolation_Blew (Was, Now : Long_Float) return Boolean;
+   --  🔴 拿住了没,唯一分得开的那一条:抬手时它跟着我的手走了【同样一段】。
+   --  只看"它原来待的地方空了"分不开【撞跑】—— 球被我撞到画面角落,原地照样空了,
+   --  身体照样报"拿住"并开始抬爪,而两指之间什么都没有(FM/FO 实测,三次假拿住全是这么来的)。
+   --  零系数:两段位移的差比【我的手自己挪了多远】的一半还小 ⇒ 它跟着我走了。
+   --  手一步没挪 ⇒ 判不了(Hand 位移为 0 时恒假),由调用方报"我说不准",不许自称拿住。
+   function Came_With_Me (Obj_Du, Obj_Dv, Hand_Du, Hand_Dv : Long_Float) return Boolean;
    --  🔴 into 瞄哪儿:它自己的皮(这块的中位深度)和它站着的那个面,正中间。两个都是量出来的深度。
    function Into_Depth (Skin, Surface : Long_Float) return Long_Float;
    --  🔴 这一段到底能走几步。脑写了 or N steps 就是 N,没写就用安全上限。

@@ -175,6 +175,14 @@ package body Act is
    function Extrapolation_Blew (Was, Now : Long_Float) return Boolean is
      (Was > 0.0 and then (Now <= 0.0 or else abs (Now - Was) > Was));
 
+   --  差 + 差 <= 手挪的 —— 写成加法是为了不引入一个手挑的系数(棘轮认那个形状)
+   function Came_With_Me (Obj_Du, Obj_Dv, Hand_Du, Hand_Dv : Long_Float) return Boolean is
+      Hand_Len : constant Long_Float := Sqrt (Hand_Du ** 2 + Hand_Dv ** 2);
+      Miss : constant Long_Float := Sqrt ((Obj_Du - Hand_Du) ** 2 + (Obj_Dv - Hand_Dv) ** 2);
+   begin
+      return Hand_Len > 0.0 and then Miss + Miss <= Hand_Len;
+   end Came_With_Me;
+
    function Role_Wants (R : Sinew.Role; K : Item_Kind) return Boolean is
      (case R is
          --  grasper = 我量到能相向靠拢、中间扫出一片能装东西的那一组
@@ -2828,7 +2836,21 @@ package body Act is
       Before_Regs : Picture.Regions;
       Moved_Others : Natural := 0;
       Pieces_Now : Natural := 0;
+      --  抬之前我的手在【那台不跟着我动的相机】里的哪儿(拿住的唯一硬证据是"它跟着我的手走了同样一段")
+      Hand_U0, Hand_V0 : Long_Float := 0.0;
+      Have_Hand0 : Boolean := False;
+      Follows : Boolean := False;
+      Found_After : Boolean := False;
+      Follow_Note : Unbounded_String;
    begin
+      if World_Cam >= 0 and then Track_Idx (C, Arm, Natural (World_Cam)) < Natural (C.Zones.Length) then
+         declare
+            Tr : constant Zone_Track := C.Zones (Track_Idx (C, Arm, Natural (World_Cam)));
+         begin
+            Hand_U0 := Tr.Cu; Hand_V0 := Tr.Cv;
+            Have_Hand0 := Tr.Valid and then not Tr.Blew_Up;
+         end;
+      end if;
       --  它原来在【那台相机】里的哪儿:用那台相机自己记着的影子,不能拿当前这只眼睛里的位置去比
       if World_Cam >= 0 and then Slot >= 0
         and then Natural (World_Cam) /= Cam
@@ -2902,17 +2924,72 @@ package body Act is
             end loop;
          end;
       end if;
-      --  🔴 "拿住了"只有一条硬证据:它原来待的地方空了。手上相机里"还在握区框里"不算数 ——
-      --  那个框在手上相机里几乎是半个屏幕,球留在画面里就过关(FM 实测报了"拿住",而头顶相机里球还在桌上)。
-      --  两台相机都判不了就老实说"我说不准",不许自称拿住。
-      Held := (if World_Cam >= 0 then Gone_From_Table else Seen_In_Hand);
-      Sure := World_Cam >= 0;
-      if World_Cam >= 0 and then Gone_From_Table then
-         Note := S ("after a small lift its place is empty in the camera that does not move with me ⇒ held"
-                    & (if Seen_In_Hand then ", and my hand camera still shows it between my fingers" else ""));
+      --  抬完之后:我的手挪了多远、它挪了多远,两段差多少
+      if World_Cam >= 0 and then Have_Hand0 and then Home.Count > 0 then
+         declare
+            After : constant Picture.Regions := Cut_Things (C, F, Natural (World_Cam));
+            Best : Integer := -1;
+            Bd : Long_Float := 0.0;
+            Hand_Du, Hand_Dv : Long_Float := 0.0;
+         begin
+            Feel (C, F);
+            if Track_Idx (C, Arm, Natural (World_Cam)) < Natural (C.Zones.Length) then
+               declare
+                  Tr : constant Zone_Track := C.Zones (Track_Idx (C, Arm, Natural (World_Cam)));
+               begin
+                  if Tr.Valid and then not Tr.Blew_Up then
+                     Hand_Du := Tr.Cu - Hand_U0; Hand_Dv := Tr.Cv - Hand_V0;
+                  else
+                     Have_Hand0 := False;   --  这一抬我把自己的手跟丢了 ⇒ 判不了,老实说
+                  end if;
+               end;
+            end if;
+            --  抬完之后最像它的那一块:大小相近的里面离原处最近的
+            for I in 0 .. Natural (After.Length) - 1 loop
+               if After (I).Count * 3 >= Home.Count and then Home.Count * 3 >= After (I).Count then
+                  declare
+                     D : constant Long_Float := Sqrt ((After (I).Cu - Home.Cu) ** 2 + (After (I).Cv - Home.Cv) ** 2);
+                  begin
+                     if Best < 0 or else D < Bd then
+                        Bd := D; Best := I;
+                     end if;
+                  end;
+               end if;
+            end loop;
+            Found_After := Best >= 0;
+            if Found_After and then Have_Hand0 then
+               declare
+                  Ou : constant Long_Float := After (Best).Cu - Home.Cu;
+                  Ov : constant Long_Float := After (Best).Cv - Home.Cv;
+               begin
+                  Follows := Came_With_Me (Ou, Ov, Hand_Du, Hand_Dv);
+                  Follow_Note := S (" (my hand moved " & Codec.Fmt (Sqrt (Hand_Du ** 2 + Hand_Dv ** 2), 3) &
+                                    " of a frame, it moved " & Codec.Fmt (Sqrt (Ou ** 2 + Ov ** 2), 3) &
+                                    ", the two differ by " & Codec.Fmt (Sqrt ((Ou - Hand_Du) ** 2 + (Ov - Hand_Dv) ** 2), 3) & ")");
+               end;
+            elsif not Found_After then
+               Follow_Note := S (" (after the lift I could not find it anywhere in the camera that does not move with me)");
+            else
+               Follow_Note := S (" (I lost track of my own hand during the lift, so I cannot tell)");
+            end if;
+         end;
+      end if;
+      --  🔴 "拿住了"唯一分得开的硬证据:抬手时它【跟着我的手走了同样一段】。
+      --  "它原来待的地方空了"分不开【撞跑】—— 球被撞到画面角落,原地照样空了,身体照样报"拿住"(FO 实测)。
+      --  手上相机里"还在握区框里"更不算数 —— 那个框在手上相机里几乎是半个屏幕(FM 实测)。
+      --  判不了就老实说"我说不准",不许自称拿住。
+      Held := (if World_Cam >= 0 and then Have_Hand0 and then Found_After then Follows else Seen_In_Hand);
+      Sure := World_Cam >= 0 and then Have_Hand0 and then Found_After;
+      if Sure and then Follows then
+         Note := S ("after a small lift it came with my hand ⇒ held") & Follow_Note
+                 & (if Seen_In_Hand then ", and my hand camera still shows it between my fingers" else "");
+      elsif Sure then
+         Note := S ("after a small lift it did NOT come with my hand ⇒ not held")
+                 & (if Gone_From_Table then S (" - and its old place is empty, so I knocked it away rather than picked it up") else S (""))
+                 & Follow_Note
+                 & (if Seen_In_Hand then " (my hand camera still shows something between my fingers, which proves nothing)" else "");
       elsif World_Cam >= 0 then
-         Note := S ("after a small lift it is still sitting where it was ⇒ NOT held"
-                    & (if Seen_In_Hand then " (my hand camera still shows something between my fingers, which proves nothing)" else ""));
+         Note := S ("after a small lift I could not judge whether it came with me") & Follow_Note;
       elsif Seen_In_Hand then
          Note := S ("after a small lift the thing is still inside my grip box in my hand camera; no still camera could check, so I am not sure");
       elsif Could_Judge then
