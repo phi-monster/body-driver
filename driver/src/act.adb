@@ -1257,6 +1257,39 @@ package body Act is
                      Out_P.Append (Q);
                   end;
                end loop;
+            elsif P.Kind = Thing_Pt and then Z.Valid and then Z.N_Lobes >= 2
+              and then Zone.Lobe_Of (Z, 0).Valid and then Zone.Lobe_Of (Z, 1).Valid
+            then
+               --  🔴🔴 要抓的那一块,也沿【合拢方向】拆成和爪瓣一样多的点。
+               --  只跟它的中心时,一个点只给 3 行(左右/上下/远近)去定 6 个通道 ⇒ 3 个自由度在零空间里
+               --  自由乱走 —— 6b3ad77 原话:"手腕乱拧、球被转出画面、指尖落在球旁边",GU 实测:
+               --  爪子到过距球 0.09 画幅,下一条命令又晃回去。两点 × 3 行 = 6 个约束,正好按住 6 个通道。
+               --  拆几个不写死:爪有几瓣就几个(Z.N_Lobes,身体量的)。方向用爪的合拢方向(Z.Au,Z.Av,量的),
+               --  半径用这一块自己的半宽(量的)。这是"跟这块沿合拢方向的两侧",讲的是【物体】的性质,
+               --  和几根手指无关 —— owner 当年撤掉的是"写死两根手指"那一版实现,不是这个做法。
+               begin
+                  for Lb in 0 .. Z.N_Lobes - 1 loop
+                     declare
+                        Q : Point := P;
+                        Lo : constant Zone.Lobe := Zone.Lobe_Of (Z, Lb);
+                        --  🔴 拆开多远,不自己算半宽(那要写 ×0.5,是人拍的系数),
+                        --  直接用【身体量到的瓣位相对区心的偏移】—— 球的接触点本来就该落在手指将来所在的地方。
+                        Ou : constant Long_Float := Lo.Cu - Z.Cu;
+                        Ov : constant Long_Float := Lo.Cv - Z.Cv;
+                     begin
+                        Q.Blob := Lb;
+                        Q.Par_Tu := P.Tu; Q.Par_Tv := P.Tv;
+                        Q.Cu := P.Cu + Ou;
+                        Q.Cv := P.Cv + Ov;
+                        Q.Tu := P.Tu + Ou;
+                        Q.Tv := P.Tv + Ov;
+                        if Lb > 0 then
+                           Q.Desc := Null_Unbounded_String;
+                        end if;
+                        Out_P.Append (Q);
+                     end;
+                  end loop;
+               end;
             else
                Out_P.Append (P);
             end if;
