@@ -146,6 +146,18 @@ package body Act is
       return 0.125;   --  世界相机:画幅八分之一(比例,无量纲)
    end Cut_Window;
 
+   function Rel_Cmd (R : Sinew.Rel) return String is
+     (case R is
+         when Sinew.Re_Touching => "at",   when Sinew.Re_Above => "above", when Sinew.Re_Below => "below",
+         when Sinew.Re_Left => "left",     when Sinew.Re_Right => "right",
+         when Sinew.Re_Nearer => "front",  when Sinew.Re_Farther => "back",
+         when Sinew.Re_Onto => "onto",     when Sinew.Re_Off => "off", when Sinew.Re_Facing => "face",
+         when Sinew.Re_Press => "press",   when Sinew.Re_Still => "",
+         when others => "?");   --  close / open / clear 各有各的分支,够得着这里的只有 Re_None
+   function Rel_Has_Own_Branch (R : Sinew.Rel) return Boolean is
+     (case R is when Sinew.Re_Close | Sinew.Re_Open | Sinew.Re_Clear | Sinew.Re_Still => True,
+                when others => False);
+
    --  🔴 结局词 → 判法,唯一的一处(见 act.ads 的说明)
    function Until_Word (O : Sinew.Outcome) return String is
      (case O is
@@ -2529,13 +2541,7 @@ package body Act is
    --  把 Sinew 的一段区间落成执行器内部那一小节。角色在这儿变成具体的那一块。
    procedure Fill_Say (C : in out Context; I : Sinew.Instr; Answer : out Brain.Say) is
       use Sinew;
-      function Old_Rel (R : Rel) return String is
-        (case R is
-            when Re_Touching => "at", when Re_Above => "above", when Re_Below => "below",
-            when Re_Left => "left", when Re_Right => "right",
-            when Re_Nearer => "front", when Re_Farther => "back",
-            when Re_Onto => "onto", when Re_Off => "off", when Re_Facing => "face",
-            when Re_Press => "press", when Re_Still => "", when others => "?");
+      function Old_Rel (R : Rel) return String is (Rel_Cmd (R));   --  唯一那张表,不许在这儿再抄一份
       function Old_Until (O : Outcome) return String is (Until_Word (O));   --  唯一那张表,不许在这儿再抄一份
       function Old_Step (Sp : Step) return String is
         (case Sp is when Sp_Small => "small", when Sp_Medium => "medium",

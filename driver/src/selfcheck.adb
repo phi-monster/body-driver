@@ -894,6 +894,30 @@ begin
              "语言:只有脑真写了 arrived,身体才准自称到了");
    end;
 
+   --  关系词同一条焊缝:每一个都要么有自己的分支,要么有自己的、非空非 "?" 的字,且两两不同
+   declare
+      use Sinew;
+      Named : Boolean := True;
+      Uniq : Boolean := True;
+   begin
+      for R in Rel loop
+         if R /= Re_None and then not Act.Rel_Has_Own_Branch (R) then
+            if Act.Rel_Cmd (R) = "?" or else Act.Rel_Cmd (R) = "" then
+               Named := False;
+            end if;
+            for Q in Rel loop
+               if Q /= R and then Q /= Re_None and then not Act.Rel_Has_Own_Branch (Q)
+                 and then Act.Rel_Cmd (Q) = Act.Rel_Cmd (R)
+               then
+                  Uniq := False;
+               end if;
+            end loop;
+         end if;
+      end loop;
+      Check (Named, "语言:每个关系词都有自己的字(没有一个落进兜底的 ?)");
+      Check (Uniq, "语言:关系词两两不同(不许两个词做同一件事)");
+   end;
+
    Put_Line ((if Fails = 0 then "🟢 自检全过" else "🔴 自检失败" & Natural'Image (Fails) & " 条"));
    if Fails > 0 then
       raise Program_Error;

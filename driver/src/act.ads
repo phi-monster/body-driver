@@ -29,6 +29,10 @@ package Act is
    function Wants_Arrive (O : Sinew.Outcome) return Boolean;
    function Until_Word (O : Sinew.Outcome) return String;   --  给旧的 Brain.Say 用的同一张表
    function Kind_Of_Word (W : String) return Monitor.Until_Kind;   --  字符串那一跳的反向表(自检钉死它和 Until_Of 一致)
+   --  关系词 → 执行器认得的那个字。四个词(close / open / clear / still)不走这里,它们各有各的分支。
+   --  剩下的每一个都必须有自己的、非空非 "?" 的字 —— 自检钉死,防的是和结局词同一类的悄悄降级。
+   function Rel_Cmd (R : Sinew.Rel) return String;
+   function Rel_Has_Own_Branch (R : Sinew.Rel) return Boolean;
    type Item_Kind is (Finger, Grip, Piece, Thing, Thing_Remembered, Thing_Held);   --  Piece = 我身上某个通道带的一块(Which = 通道号)
    type Item is record
       Kind : Item_Kind := Thing;
