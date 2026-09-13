@@ -19,6 +19,7 @@ with Sinew;
 with Runtime;
 with Plan;
 with Layout;
+with Act;
 with Selfmap;
 with Learned;
 with Exam;
@@ -845,6 +846,54 @@ begin
          Check (E /= Runtime.Y_Finished, "执行器:等一个永远不来的结局 ⇒ 不会假装跑完");
       end;
    end;
+
+   --  🔴 每个结局词都要有【自己】的判法 —— 这一条焊死本仓最贵的一类 bug:
+   --  语言收下一个词,身体悄悄换成另一个词的行为,还回报得一本正经。
+   --  GM 实测:写 until arrived 一段只走一步;而 until free(=被拿起来了,本任务的判据)
+   --  当时接在"爪子读数掉回空手"上,和拿起来毫无关系。
+   declare
+      use Sinew;
+      use type Monitor.Until_Kind;
+      --  这张表就是语言的承诺,逐词钉死。要改这里,必须先改 LANGUAGE.md 的那张表。
+      type Row is record
+         O : Outcome;
+         K : Monitor.Until_Kind;
+      end record;
+      Want : constant array (1 .. 8) of Row :=
+        [(Oc_Touched, Monitor.U_Contact), (Oc_Stuck, Monitor.U_Resist),
+         (Oc_Slipped, Monitor.U_Slip),    (Oc_Free, Monitor.U_Free),
+         (Oc_Lost, Monitor.U_Lost),       (Oc_Settled, Monitor.U_Settle),
+         (Oc_Arrived, Monitor.U_Steps),   (Oc_Timeout, Monitor.U_Steps)];
+      All_Right : Boolean := True;
+      Round_Trip : Boolean := True;
+      Distinct : Boolean := True;
+   begin
+      for R of Want loop
+         if Act.Until_Of (R.O) /= R.K then
+            All_Right := False;
+         end if;
+         --  Outcome → 字符串 → Until_Kind 这一跳不许把词弄丢(以前 lost/free 就是在这儿丢的)
+         if Act.Kind_Of_Word (Act.Until_Word (R.O)) /= Act.Until_Of (R.O) then
+            Round_Trip := False;
+         end if;
+      end loop;
+      --  六个"有自己事件"的词必须两两不同;arrived 和 timeout 共用步数上限,靠 Wants_Arrive 分开。
+      --  ⚠️ 比的必须是【身体的真实映射】Until_Of,不是我写的期望表自己跟自己 ——
+      --  第一版就是拿 Want(I).K 和 Want(J).K 比,把 free 故意改坏之后它照样绿:一条永不失败的断言。
+      for I in 1 .. 6 loop
+         for J in I + 1 .. 6 loop
+            if Act.Until_Of (Want (I).O) = Act.Until_Of (Want (J).O) then
+               Distinct := False;
+            end if;
+         end loop;
+      end loop;
+      Check (All_Right, "语言:每个结局词都接到自己的判法上(不许并进兜底的步数上限)");
+      Check (Round_Trip, "语言:结局词转成字符串再转回来,判法不变");
+      Check (Distinct, "语言:有自己事件的六个结局词两两不同");
+      Check (Act.Wants_Arrive (Oc_Arrived) and then not Act.Wants_Arrive (Oc_Timeout),
+             "语言:只有脑真写了 arrived,身体才准自称到了");
+   end;
+
    Put_Line ((if Fails = 0 then "🟢 自检全过" else "🔴 自检失败" & Natural'Image (Fails) & " 条"));
    if Fails > 0 then
       raise Program_Error;

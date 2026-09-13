@@ -146,6 +146,39 @@ package body Act is
       return 0.125;   --  世界相机:画幅八分之一(比例,无量纲)
    end Cut_Window;
 
+   --  🔴 结局词 → 判法,唯一的一处(见 act.ads 的说明)
+   function Until_Word (O : Sinew.Outcome) return String is
+     (case O is
+         when Sinew.Oc_Touched => "contact",
+         when Sinew.Oc_Stuck   => "resist",
+         when Sinew.Oc_Slipped => "slip",
+         when Sinew.Oc_Free    => "free",      --  离开了原来靠着的面 = 被拿起来了
+         when Sinew.Oc_Lost    => "lost",      --  看不见我正跟着的东西了
+         when Sinew.Oc_Settled => "settle",
+         when Sinew.Oc_Arrived => "arrived",
+         when others           => "steps");    --  timeout / none / refused(refused 编译期就被拒了)
+   --  字符串那一跳的反向表。自检逐词钉死 Kind_Of_Word (Until_Word (O)) = Until_Of (O),
+   --  任何一次"顺手并个词"都会当场红
+   function Kind_Of_Word (W : String) return Monitor.Until_Kind is
+     (if W = "contact" then Monitor.U_Contact
+      elsif W = "resist" then Monitor.U_Resist
+      elsif W = "slip" then Monitor.U_Slip
+      elsif W = "settle" then Monitor.U_Settle
+      elsif W = "lost" then Monitor.U_Lost
+      elsif W = "free" then Monitor.U_Free
+      else Monitor.U_Steps);
+   function Wants_Arrive (O : Sinew.Outcome) return Boolean is
+     (case O is when Sinew.Oc_Arrived => True, when others => False);
+   function Until_Of (O : Sinew.Outcome) return Monitor.Until_Kind is
+     (case O is
+         when Sinew.Oc_Touched => Monitor.U_Contact,
+         when Sinew.Oc_Stuck   => Monitor.U_Resist,
+         when Sinew.Oc_Slipped => Monitor.U_Slip,
+         when Sinew.Oc_Free    => Monitor.U_Free,
+         when Sinew.Oc_Lost    => Monitor.U_Lost,
+         when Sinew.Oc_Settled => Monitor.U_Settle,
+         when others           => Monitor.U_Steps);   --  arrived / timeout 都走步数上限,靠 Wants_Arrive 区分
+
    function Cut_Things_Raw (C : Context; F : Plug.Frame; Cam : Natural) return Picture.Regions is
       Cw : constant Natural := F.Cams (Cam).W;
       Ch : constant Natural := F.Cams (Cam).H;
@@ -460,6 +493,7 @@ package body Act is
       Box_W, Box_H : Long_Float := 0.0;
       Count : Natural := 0;
       Height : Long_Float := 0.0;
+      Z_Noise : Long_Float := 0.0;   --  这一点读深度抖多少(米):高度是深度之差,判"离开了面"用它当地板
       Err0 : Long_Float := 0.0;
       Lost : Boolean := False;   --  这一步没在画面里认出它,位置是按表猜的
       Has_Meas : Boolean := False;              --  眼睛(光流)另外量到的位置,只用来修表
@@ -901,6 +935,13 @@ package body Act is
                   else
                      Floor_Z (I) := 0.01 * Zr;
                   end if;
+                  --  同一个地板留在点上:高度是深度之差,判"离开了原来靠着的面"用的就是它
+                  declare
+                     P : Point := Pts (I);
+                  begin
+                     P.Z_Noise := Floor_Z (I);
+                     Pts.Replace_Element (I, P);
+                  end;
                end;
             end loop;
          end;
@@ -1083,6 +1124,8 @@ package body Act is
       --  🔴 不是 constant:线一断重连,仿真那边的帧计数从头开始 ⇒ 现在的拍数会【小于】开工时的拍数。
       --  以前这里两个 Natural 直接相减,负数当场 CONSTRAINT_ERROR 把整炮打死
       --  (GM 崩在 act.adb:1518,崩之前日志里 [链] 线断了/重新接上了 刷了几十遍)。
+      --  这一段开始时,被跟的那块鼓出背景多少米。"离开了原来靠着的面"就是拿它和此刻比
+      H0 : constant Long_Float := (if Natural (Pts.Length) > 0 then Pts (0).Height else 0.0);
       Beats0 : Natural := Plug.Steps (L);
       --  开工到现在过了几拍。倒退 = 对面重连过 ⇒ 把起点挪到现在,从这儿重新数,别炸
       function Since (Lk : Plug.Link; Start : in out Natural) return Natural is
@@ -1903,14 +1946,20 @@ package body Act is
          --  没写步数就拿安全上限比,别拿 0 比(拿 0 比 = 第一步就"走完了")
          if Monitor.Fired (Until_Kind, W, (if Step_Limit > 0 then Step_Limit else Step_Cap), Note.Blocked, Monitor.Bounded (Selfmap.Jaw_Of (F, Arm)),
                            Monitor.Bounded (if Arm < Natural (C.Hands.Length) then C.Hands (Arm).Empty_Close else 0.0),
-                           Monitor.Floor (C.Map.Jaw_Noise), Note.Touched)
+                           Monitor.Floor (C.Map.Jaw_Noise), Note.Touched,
+                           Lost => Pts (0).Lost,
+                           Height_Now => Monitor.Bounded (Pts (0).Height),
+                           Height_Then => Monitor.Bounded (H0),
+                           Height_Noise => Monitor.Floor (Long_Float'Max (0.0, Pts (0).Z_Noise)))
          then
             Note.Say_Stop := (case Until_Kind is
                                 when Monitor.U_Steps => S ("steps: I took the steps you asked for"),
                                 when Monitor.U_Contact => S ("contact: something I was not pushing moved when I moved - I am touching it"),
                                 when Monitor.U_Resist => S ("resist: I commanded a push and my body did not go"),
                                 when Monitor.U_Slip => S ("slip: what I was holding has left my fingers"),
-                                when Monitor.U_Settle => S ("settle: the picture stopped changing"));
+                                when Monitor.U_Settle => S ("settle: the picture stopped changing"),
+                                when Monitor.U_Lost => S ("lost: I cannot see the thing I am tracking any more"),
+                                when Monitor.U_Free => S ("free: it now stands higher off the surface than when I started - it has come free"));
             return;
          end if;
          declare
@@ -2487,12 +2536,7 @@ package body Act is
             when Re_Nearer => "front", when Re_Farther => "back",
             when Re_Onto => "onto", when Re_Off => "off", when Re_Facing => "face",
             when Re_Press => "press", when Re_Still => "", when others => "?");
-      function Old_Until (O : Outcome) return String is
-        (case O is
-            when Oc_Touched => "contact", when Oc_Stuck => "resist",
-            when Oc_Slipped | Oc_Free => "slip", when Oc_Settled => "settle",
-            when Oc_Arrived => "arrived",      --  只有脑真写了 arrived,身体才准因为"到了"而停
-            when others => "steps");
+      function Old_Until (O : Outcome) return String is (Until_Word (O));   --  唯一那张表,不许在这儿再抄一份
       function Old_Step (Sp : Step) return String is
         (case Sp is when Sp_Small => "small", when Sp_Medium => "medium",
             when Sp_Large => "large", when Sp_None => "medium");
@@ -3006,8 +3050,7 @@ package body Act is
       --  ── 执行 ──
       declare
          Until_K : constant Monitor.Until_Kind :=
-           (if Say.Until_Kind = "contact" then Monitor.U_Contact elsif Say.Until_Kind = "resist" then Monitor.U_Resist
-            elsif Say.Until_Kind = "slip" then Monitor.U_Slip elsif Say.Until_Kind = "settle" then Monitor.U_Settle else Monitor.U_Steps);
+           Kind_Of_Word (To_String (Say.Until_Kind));
          --  🔴 脑写的 "or N steps" 是【所有】until 的步数上限,不是只有 until steps 才读。
          --  以前只在 Until_Kind = "steps" 时才取 ⇒ 写 until arrived 时上限成了 0,而 arrived 又落进
          --  Until_K 的 else 分支变成 U_Steps,Fired 判 W.Steps >= 0 立刻成立 ⇒ 一段只走一步。

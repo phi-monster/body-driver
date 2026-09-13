@@ -18,7 +18,17 @@ with Learned;
 with Plan;
 with Sinew;
 with Runtime;
+with Monitor;
 package Act is
+   --  🔴 脑写的结局词 → 身体的判法。**只有这一处**。
+   --  以前它散在两个局部函数里(Outcome → 字符串 → Until_Kind),中间那一跳把 lost / free / refused
+   --  三个词悄悄并进了兜底的"走够步数":脑写一个词,身体做的是另一个词的事,还回报"步子走完还没到"。
+   --  自检逐词钉死这张表(selfcheck「每个结局词都有自己的判法」),再想并词就会当场红。
+   function Until_Of (O : Sinew.Outcome) return Monitor.Until_Kind;
+   --  只有脑真写了 arrived,身体才准因为"约束满足了"而停(timeout 同样走步数上限,但不许自称到了)
+   function Wants_Arrive (O : Sinew.Outcome) return Boolean;
+   function Until_Word (O : Sinew.Outcome) return String;   --  给旧的 Brain.Say 用的同一张表
+   function Kind_Of_Word (W : String) return Monitor.Until_Kind;   --  字符串那一跳的反向表(自检钉死它和 Until_Of 一致)
    type Item_Kind is (Finger, Grip, Piece, Thing, Thing_Remembered, Thing_Held);   --  Piece = 我身上某个通道带的一块(Which = 通道号)
    type Item is record
       Kind : Item_Kind := Thing;

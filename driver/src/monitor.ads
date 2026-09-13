@@ -17,7 +17,11 @@ package Monitor is
       Steps : Count := 0;
       Refused : Count := 0;        --  连着几步一步没走
    end record;
-   type Until_Kind is (U_Steps, U_Contact, U_Resist, U_Slip, U_Settle);
+   --  🔴 脑写的每一个结局词都要有【自己】的判法。以前 lost / free / refused 三个词
+   --  统统落进兜底的 U_Steps,身体收下这个词然后做的是别的事,还回报"步子走完还没到"。
+   --  free 尤其致命:语言里 free = "它离开了原来靠着的面" = 【被拿起来了】,正是本任务的判据,
+   --  而它当时被接到 Slipped(爪子读数掉回空手)上,和"拿起来"毫无关系。
+   type Until_Kind is (U_Steps, U_Contact, U_Resist, U_Slip, U_Settle, U_Lost, U_Free);
 
    procedure Step (W : in out Watch; Pic_Delta : Floor; Err_Before, Err_After : Bounded;
                    Delivered : Floor; F : Floors)
@@ -30,6 +34,10 @@ package Monitor is
    function Stalled (W : Watch) return Boolean is (W.No_Progress >= 5);
    function Refusing (W : Watch) return Boolean is (W.Refused >= 2);
    function Slipped (Reading, Empty : Bounded; Noise : Floor) return Boolean is (Reading - Empty <= Noise);
+   --  离开原来靠着的面 = 它此刻"鼓出背景"的高度,比这一段开始时高出的量超过了这个量自己的抖动。
+   --  两个高度都是量出来的(米),抖动也是量出来的(这一点的深度噪声地板)——这里只做比较。
+   function Came_Free (Height_Now, Height_Then : Bounded; Noise : Floor) return Boolean is
+     (Height_Now - Height_Then > Noise);
    --  🔴 "碰到"和"顶住"是两件事,不许压成一条(它们以前共用"零表更准或连着被拒",而那一条同时对应五种原因:
    --  指尖碰到目标 · 别处撞上 · 控制器拒了命令 · 还没生效 · 跟丢了)。分法用的是两个量得到的量:
    --    碰到 = 我在动,而【我没在推的那个东西】也动了(在不跟着这只手动的相机里量);
@@ -37,11 +45,16 @@ package Monitor is
    --  两条都不成立时,这一段不许自称"碰到了"——不确定就继续走或者回去问脑。
    function Touching (Moved_Other : Boolean) return Boolean is (Moved_Other);
    function Fired (U : Until_Kind; W : Watch; Step_Cap : Natural; Blocked : Boolean;
-                   Reading, Empty : Bounded; Reading_Noise : Floor; Moved_Other : Boolean := False) return Boolean is
+                   Reading, Empty : Bounded; Reading_Noise : Floor; Moved_Other : Boolean := False;
+                   Lost : Boolean := False;
+                   Height_Now : Bounded := 0.0; Height_Then : Bounded := 0.0;
+                   Height_Noise : Floor := 0.0) return Boolean is
      (case U is
          when U_Steps => W.Steps >= Step_Cap,
          when U_Contact => Touching (Moved_Other),
          when U_Resist => Blocked or else Refusing (W),
          when U_Slip => Slipped (Reading, Empty, Reading_Noise),
-         when U_Settle => Settled (W));
+         when U_Settle => Settled (W),
+         when U_Lost => Lost,
+         when U_Free => Came_Free (Height_Now, Height_Then, Height_Noise));
 end Monitor;

@@ -191,6 +191,14 @@ package body Plan is
                      end if;
                   end loop;
                end;
+               --  🔴 「until refused」说不出口:refused 是【我做不到】,是我回给你的话,不是我能等来的事。
+               --  等自己开口拒绝,这一段永远走不完。宁可当场说不认,也不许悄悄换成"走够步数"
+               --  (lost / free / refused 三个词以前统统被换成步数上限,脑写什么身体做的是别的)。
+               if I.Until_Oc = Sinew.Oc_Refused then
+                  Reject (I.Line, "「until refused」我说不出口 —— refused 是我做不到的时候回给你的话,"
+                          & "不是我能等来的事;等我自己开口拒绝,这一段永远走不完",
+                          "想让我一直推到推不动为止,写 until stuck;想限步数,写 or N steps");
+               end if;
                for Ci in 0 .. Natural (I.Cons.Length) - 1 loop
                   exit when not V.Ok;
                   declare
