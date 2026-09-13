@@ -16,6 +16,7 @@ with Schema;
 with Plug;
 with Chan;
 with Lang;
+with Sinew;
 with Plan;
 with Layout;
 with Selfmap;
@@ -666,6 +667,81 @@ begin
       Check (Natural (L1.Jaw.Length) = 1, "认身体:两指手照旧认得出");
       Check (Natural (L5.Joints.Length) = 1 and then Natural (L1.Joints.Length) = 1,
              "认身体:六个不在 [0,1] 的数仍然算关节角,没被抢走");
+   end;
+   --  ── Sinew:第二版语言 ──
+   declare
+      use Sinew;
+      NL : constant String := "" & ASCII.LF;
+      G : constant Program := Sinew.Parse
+        ("to reach for it:" & NL &
+         "  do grasper facing the white ball must and grasper above the white ball small until arrived or 20 steps" & NL &
+         "end" & NL &
+         "remember where grasper is as start" & NL &
+         "repeat 3 times:" & NL &
+         "  run reach for it" & NL &
+         "  do grasper onto the white ball small until touched" & NL &
+         "  do grasper close on the white ball until stuck" & NL &
+         "  if slipped:" & NL &
+         "    do grasper open until arrived" & NL &
+         "    do grasper touching start medium until arrived anyway" & NL &
+         "  else:" & NL &
+         "    done" & NL &
+         "  end" & NL &
+         "end" & NL &
+         "say I tried three times");
+   begin
+      Check (G.Ok, "Sinew:一段带定义/循环/分支的完整程序解析得通"
+             & (if G.Ok then "" else " —— 第" & Natural'Image (G.Err_Line) & " 行:" & To_String (G.Err)));
+      Check (Natural (G.Defs.Length) = 1 and then To_String (G.Defs (0).Name) = "reach for it",
+             "Sinew:定义被记下来了(名字可以是好几个词)");
+   end;
+   declare
+      use Sinew;
+      G : constant Program := Sinew.Parse ("do grasper touching the white ball small must until touched");
+      C : constant Constraint := (if G.Ok and then Natural (G.Code.Length) > 0
+                                  then G.Code (0).Cons (0) else (others => <>));
+   begin
+      Check (G.Ok and then C.Subj.K = Nk_Role and then C.Subj.R = Rl_Grasper,
+             "Sinew:主语是【角色】,不是编号");
+      Check (C.R = Re_Touching and then To_String (C.Obj.Word) = "the white ball",
+             "Sinew:宾语是一句名字,好几个词也认(" & To_String (C.Obj.Word) & ")");
+      Check (C.Sp = Sp_Small and then C.Rk = Rk_Must and then G.Code (0).Until_Oc = Oc_Touched,
+             "Sinew:步子 / must / 结局都读出来了");
+   end;
+   declare
+      use Sinew;
+      function Bad (S : String) return Boolean is (not Sinew.Parse (S).Ok);
+   begin
+      Check (Bad ("move joint 3 by 0.1"), "Sinew:关节号这种话语法上不存在 ⇒ 说不出口");
+      Check (Bad ("do grasper press the table until stuck"), "Sinew:press 不说劲 ⇒ 退回");
+      Check (Bad ("do grasper press the table hard small until stuck"),
+             "Sinew:press 说了劲还说步子 ⇒ 退回(一根轴上二选一)");
+      Check (Bad ("do grasper touching the ball small"), "Sinew:不说【到什么为止】⇒ 退回");
+      Check (Bad ("do touching the ball until touched"), "Sinew:不说【谁】⇒ 退回");
+      Check (Bad ("do grasper the ball until touched"), "Sinew:不说关系 ⇒ 退回");
+      Check (Bad ("do grasper touching the ball until soon"), "Sinew:until 后面不是那八个结局 ⇒ 退回");
+      Check (Bad ("repeat 3 times:" & ASCII.LF & "  do grasper open until arrived"),
+             "Sinew:块没有 end ⇒ 退回");
+      Check (Bad ("end"), "Sinew:多一个 end ⇒ 退回");
+      Check (Bad ("else:" & ASCII.LF & "end"), "Sinew:else 前面没有 if ⇒ 退回");
+      Check (Sinew.Parse ("do grasper still until arrived").Ok, "Sinew:still 不需要宾语");
+      Check (Sinew.Parse ("do grasper open until arrived").Ok, "Sinew:open 不需要宾语");
+      Check (Sinew.Parse ("try:" & ASCII.LF & "  do grasper open until arrived" & ASCII.LF
+             & "or:" & ASCII.LF & "  done" & ASCII.LF & "end").Ok, "Sinew:try / or / end");
+   end;
+   declare
+      use Sinew;
+      G : constant Program := Sinew.Parse ("repeat until touched:" & ASCII.LF
+            & "  do grasper onto the ball small until timeout or 3 steps" & ASCII.LF & "end");
+   begin
+      Check (G.Ok and then G.Code (0).O = Op_Loop and then G.Code (0).Cond = Oc_Touched,
+             "Sinew:repeat until <结局> 编成一条循环头");
+      Check (G.Ok and then G.Code (Natural (G.Code.Length) - 1).O = Op_Next
+               and then G.Code (Natural (G.Code.Length) - 1).Target = 0,
+             "Sinew:循环尾跳回循环头");
+      Check (G.Ok and then G.Code (0).Target = Integer (G.Code.Length),
+             "Sinew:循环头的出口指向 end 之后");
+      Check (G.Ok and then G.Code (1).Max_Steps = 3, "Sinew:「or 3 steps」读出来了");
    end;
    Put_Line ((if Fails = 0 then "🟢 自检全过" else "🔴 自检失败" & Natural'Image (Fails) & " 条"));
    if Fails > 0 then
