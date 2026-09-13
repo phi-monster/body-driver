@@ -741,6 +741,8 @@ begin
       Check (Bad ("else:" & ASCII.LF & "end"), "Sinew:else 前面没有 if ⇒ 退回");
       Check (Sinew.Parse ("do grasper still until arrived").Ok, "Sinew:still 不需要宾语");
       Check (Sinew.Parse ("do grasper open until arrived").Ok, "Sinew:open 不需要宾语");
+      Check (Sinew.Parse ("do grasper close until stuck").Ok,
+             "Sinew:close 可以不带宾语 —— 就在这儿合上(球被自己的手挡住时唯一能说的话)");
       Check (Sinew.Parse ("try:" & ASCII.LF & "  do grasper open until arrived" & ASCII.LF
              & "or:" & ASCII.LF & "  done" & ASCII.LF & "end").Ok, "Sinew:try / or / end");
    end;

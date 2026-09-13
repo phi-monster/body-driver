@@ -635,7 +635,9 @@ package body Sinew is
                      Fail ("press 说了劲就不许再说步子 —— 同一根轴上位置和力只能二选一", Line_No);
                      return;
                   end if;
-                  if C.R not in Re_Still | Re_Open and then C.Obj.K = Nk_None then
+                  --  close 可以不带宾语:"就在这儿合上"。GH 实测:球被我自己的手挡住、点不了名的时候,
+                  --  没有任何一句话能让它合手 —— 那是语言缺一个原语,不是身体做不到。
+                  if C.R not in Re_Still | Re_Open | Re_Close and then C.Obj.K = Nk_None then
                      Fail ("「" & Rel_Word (C.R) & "」后面要跟一个东西 —— 这个词说的是【和谁的关系】", Line_No);
                      return;
                   end if;

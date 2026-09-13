@@ -214,6 +214,8 @@ package body Plan is
                         if not Resolve (C.Obj, I.Line, "【和谁】", Obj) then
                            exit;
                         end if;
+                     elsif C.R = Sinew.Re_Close then
+                        Obj := 0;   --  就在这儿合上:不点名任何东西
                      end if;
                      declare
                         Ti : constant Integer := Facts (Sub).Thing_Idx;
