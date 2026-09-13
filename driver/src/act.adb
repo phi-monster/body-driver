@@ -2230,7 +2230,10 @@ package body Act is
                      Any_Wrong := True; All_Verified := False;
                      for K in 0 .. Chan.Per_Arm - 1 loop
                         if Note.Active (K) then
-                           Reach (K) := Long_Float'Max (1.0, Reach (K) * 0.5);
+                           --  🔴 油门只许往下踩,但【踩得死不了】:以前这里夹在 1.0,于是表被证明不准的时候身体一步也慢不下来。
+                           --  老版"只会减速、没有底线"会一路减到零卡死 —— 那才是当初的 bug;现在底线在 Push_Cap 里
+                           --  (身体噪声的两倍 / 这个通道自己量到的死区),所以减得下去、踩不死。
+                           Reach (K) := Reach (K) * 0.5;
                         end if;
                      end loop;
                      Put_Line ("[身]     整步没照做:要走的和实际走的差了 " & Codec.Fmt (Dn / Long_Float'Max (1.0e-9, An) * 100.0, 0) & "% ⇒ 步幅缩回上一档");
@@ -2271,7 +2274,8 @@ package body Act is
                   if Any_Meas and then Pred_Ok and then (not Note.Halted) and then not Note.Not_Followed then
                      Reach (K) := Long_Float'Min (Reach (K) * 2.0, Track_Win / Long_Float'Max (1.0e-9, C.Map.Amp (Arm * Chan.Per_Arm + K)));
                   elsif Any_Meas and then not Pred_Ok then
-                     Reach (K) := Long_Float'Max (1.0, Reach (K) * 0.5);
+                     --  同上:油门踩得下去,底线在 Push_Cap 里
+                     Reach (K) := Reach (K) * 0.5;
                   end if;
                end if;
             end loop;
