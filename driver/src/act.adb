@@ -1275,6 +1275,12 @@ package body Act is
       --  以前这里两个 Natural 直接相减,负数当场 CONSTRAINT_ERROR 把整炮打死
       --  (GM 崩在 act.adb:1518,崩之前日志里 [链] 线断了/重新接上了 刷了几十遍)。
       --  这一段开始时,被跟的那块鼓出背景多少米。"离开了原来靠着的面"就是拿它和此刻比
+      --  🔴🔴 命令整体放大多少倍。上一步点在画面里没跑过跟踪地板 ⇒ 翻倍;跑过了 ⇒ 复位。
+      --  这一条治的是 GN–GR 四炮的共同终局:表【高估】了"推一单位点跑多远" ⇒ 解算算出 0.002 rad
+      --  就够了 ⇒ 推下去一动不动 ⇒ 点没动就没有新信息去纠正表 ⇒ 永远循环。
+      --  已有的放大只把命令抬到【关节】的噪声地板(EE_Noise),抬不到"画面里看得出动过"。
+      --  翻倍这条和开机探针"翻倍到点真的动过地板为止"是同一条规矩,不是新拍的系数。
+      Push_Mult : Long_Float := 1.0;
       H0 : constant Long_Float := (if Natural (Pts.Length) > 0 then Pts (0).Height else 0.0);
       Beats0 : Natural := Plug.Steps (L);
       --  开工到现在过了几拍。倒退 = 对面重连过 ⇒ 把起点挪到现在,从这儿重新数,别炸
@@ -1706,6 +1712,12 @@ package body Act is
                end if;
             end if;
          end;
+         --  上一步点在画面里没动过 ⇒ 这一步整体放大(方向不变)
+         if Push_Mult > 1.0 then
+            for K in 0 .. Chan.Per_Arm - 1 loop
+               Note.Cmd (K) := Note.Cmd (K) * Push_Mult;
+            end loop;
+         end if;
       end Trim;
 
       --  ① 打算怎么走 = 定目标 → 定额度 → 修步子
@@ -2131,6 +2143,24 @@ package body Act is
                    "] · 差 " & Cm_Gap (Effs (0), Pts (0)) &
                    " · 点 (" & Codec.Fmt (Pts (0).Cu, 3) & "," & Codec.Fmt (Pts (0).Cv, 3) & ") 深 " & Codec.Fmt (Pts (0).Z, 3) &
                    (if Note.Blocked then " · 零表更准(顶住?)" else ""));
+         --  点这一步在画面里跑了多远?没跑过跟踪地板就把下一步的命令翻倍(见 Push_Mult 的说明)
+         if Natural (Pts.Length) > 0 and then Natural (Was.Length) > 0 then
+            declare
+               D : constant Long_Float :=
+                 Sqrt ((Pts (0).Cu - Was (0).Cu) ** 2 + (Pts (0).Cv - Was (0).Cv) ** 2);
+            begin
+               if D <= Long_Float (Fl.Track) then
+                  --  放大多少不是人拍的:这一步跑了 D、需要跑到跟踪地板 ⇒ 差几倍就放大几倍。
+                  --  D 可能是 0,下限取这台相机的一个像素(它自己的分辨率,也是量出来的)。
+                  Push_Mult := Push_Mult
+                    * (Long_Float (Fl.Track) / Long_Float'Max (D, 1.0 / Long_Float'Max (1.0, Long_Float (Cw))));
+                  Put_Line ("[身]     点在画面里没动过(" & Codec.Fmt (D, 4) & " ≤ 地板 " & Codec.Fmt (Long_Float (Fl.Track), 4)
+                            & ")⇒ 下一步命令整体 ×" & Codec.Fmt (Push_Mult, 0));
+               else
+                  Push_Mult := 1.0;
+               end if;
+            end;
+         end if;
          Last_Err := Note.Err_Now;
          Last_Raw := Note.Raw_Now;
          if Best_Raw < 0.0 or else Note.Raw_Now < Best_Raw then
