@@ -1064,7 +1064,20 @@ package body Act is
                           Step_Limit : Natural; Amount : Long_Float; Avoid : Item_Vectors.Vector;
                           Event : out Unbounded_String; Steps_Taken : out Natural; Blocked_Out : out Boolean; Beats : out Natural) is
       Arm : constant Natural := Pts (0).Arm;
-      Beats0 : constant Natural := Plug.Steps (L);
+      --  🔴 不是 constant:线一断重连,仿真那边的帧计数从头开始 ⇒ 现在的拍数会【小于】开工时的拍数。
+      --  以前这里两个 Natural 直接相减,负数当场 CONSTRAINT_ERROR 把整炮打死
+      --  (GM 崩在 act.adb:1518,崩之前日志里 [链] 线断了/重新接上了 刷了几十遍)。
+      Beats0 : Natural := Plug.Steps (L);
+      --  开工到现在过了几拍。倒退 = 对面重连过 ⇒ 把起点挪到现在,从这儿重新数,别炸
+      function Since (Lk : Plug.Link; Start : in out Natural) return Natural is
+         Now : constant Natural := Plug.Steps (Lk);
+      begin
+         if Now < Start then
+            Start := Now;
+            return 0;
+         end if;
+         return Now - Start;
+      end Since;
       Cw : constant Natural := F.Cams (Cam).W;
       Ch : constant Natural := F.Cams (Cam).H;
       Own_Cam : constant Boolean := Cam_Arm (C, Cam) = Integer (Arm);
@@ -1515,7 +1528,7 @@ package body Act is
          Was := Pts;
          Was_Regs := (if not Own_Cam then Cut_Things (C, F, Cam) else Picture.Region_Vectors.Empty_Vector);
          Step_Arm (L, C, F, Arm, Note.Cmd, Jaw, Note.Got, Ok_Out, C.Fast, Watch_Things'Unrestricted_Access);
-         Beats := Plug.Steps (L) - Beats0;
+         Beats := Since (L, Beats0);
          if Note.Halted then
             Put_Line ("[身]     途中眼睛叫停:被跟的东西快出画面或看不见了,这一步没走完");
          end if;
@@ -1612,7 +1625,7 @@ package body Act is
          end loop;
          if Need_Refind then
             Refind_Pieces (L, C, F, Cam, Pts);
-            Beats := Plug.Steps (L) - Beats0;
+            Beats := Since (L, Beats0);
          end if;
          Note.Lost_All := True;
          for P of Pts loop
@@ -1672,7 +1685,7 @@ package body Act is
          --  整步没照做:各通道按自己的探针幅度归一后,实到与命令差过一半(逐个通道判会被同量级的小出入触发)
          if not Note.Halted then
             declare
-               Dn, An : Long_Float := 0.0;
+               Dn, An, Gn : Long_Float := 0.0;
             begin
                for K in 0 .. Chan.Per_Arm - 1 loop
                   declare
@@ -1680,17 +1693,37 @@ package body Act is
                   begin
                      Dn := Dn + ((Note.Got (K) - Note.Cmd (K)) / Am) ** 2;
                      An := An + (Note.Cmd (K) / Am) ** 2;
+                     Gn := Gn + (Note.Got (K) / Am) ** 2;
                   end;
                end loop;
-               Dn := Sqrt (Dn); An := Sqrt (An);
-               if An > 1.0 and then Dn > 0.5 * An then
-                  Any_Wrong := True; All_Verified := False; Note.Not_Followed := True;
-                  for K in 0 .. Chan.Per_Arm - 1 loop
-                     if Note.Active (K) then
-                        Reach (K) := Long_Float'Max (1.0, Reach (K) * 0.5);
-                     end if;
-                  end loop;
-                  Put_Line ("[身]     整步没照做:要走的和实际走的差了 " & Codec.Fmt (Dn / Long_Float'Max (1.0e-9, An) * 100.0, 0) & "% ⇒ 步幅缩回上一档");
+               Dn := Sqrt (Dn); An := Sqrt (An); Gn := Sqrt (Gn);
+               --  🔴 以前这里写 An > 1.0 ⇒ 命令比一次探针幅度小就【一个字都不报】。
+               --  GM 实测:连着 60 步命令 0.004、实到精确 0.0000,脑什么都没听到。任何非零命令都要判。
+               if An > 0.0 and then Dn > 0.5 * An then
+                  Note.Not_Followed := True;
+                  --  🔴 "没照做"有两种完全相反的情形,以前一律【缩】步幅,于是越缩越动不了:
+                  --  缩到地板 1.0 时命令只剩 0.003 弧度,关节压根不转,而步幅只有"走成了才加倍"这一条回头路
+                  --  ⇒ 永久锁死(GM:三段命令三次一步 timeout,手一个像素没挪)。
+                  --  分开判,不用新系数:实到比"命令与实到之差"还小 = 几乎没动 ⇒ 步子太小,加倍;
+                  --  实到不小但对不上 = 动过头/动错了 ⇒ 缩。加倍这一条和开机探针是同一条规矩。
+                  if Gn < Dn then
+                     for K in 0 .. Chan.Per_Arm - 1 loop
+                        if Note.Active (K) then
+                           Reach (K) := Long_Float'Min (Reach (K) * 2.0,
+                                                        Track_Win / Long_Float'Max (1.0e-9, C.Map.Amp (Arm * Chan.Per_Arm + K)));
+                        end if;
+                     end loop;
+                     Put_Line ("[身]     命令了几乎没动:实到只有命令的 " & Codec.Fmt (Gn / Long_Float'Max (1.0e-9, An) * 100.0, 0) & "% ⇒ 步幅加倍再试");
+                     C.Blind_Say := S ("I commanded a push and my body barely moved at all, so I doubled the step and kept going");
+                  else
+                     Any_Wrong := True; All_Verified := False;
+                     for K in 0 .. Chan.Per_Arm - 1 loop
+                        if Note.Active (K) then
+                           Reach (K) := Long_Float'Max (1.0, Reach (K) * 0.5);
+                        end if;
+                     end loop;
+                     Put_Line ("[身]     整步没照做:要走的和实际走的差了 " & Codec.Fmt (Dn / Long_Float'Max (1.0e-9, An) * 100.0, 0) & "% ⇒ 步幅缩回上一档");
+                  end if;
                end if;
             end;
          end if;
@@ -1851,7 +1884,8 @@ package body Act is
          if Note.Not_Followed then
             Put_Line ("[身]     没照做这一步不算数,步幅已缩回;接着走");
          end if;
-         if Monitor.Fired (Until_Kind, W, Step_Limit, Note.Blocked, Monitor.Bounded (Selfmap.Jaw_Of (F, Arm)),
+         --  没写步数就拿安全上限比,别拿 0 比(拿 0 比 = 第一步就"走完了")
+         if Monitor.Fired (Until_Kind, W, (if Step_Limit > 0 then Step_Limit else Step_Cap), Note.Blocked, Monitor.Bounded (Selfmap.Jaw_Of (F, Arm)),
                            Monitor.Bounded (if Arm < Natural (C.Hands.Length) then C.Hands (Arm).Empty_Close else 0.0),
                            Monitor.Floor (C.Map.Jaw_Noise), Note.Touched)
          then
@@ -1988,7 +2022,7 @@ package body Act is
          Judge;
          if Note.Say_Stop /= "" then
             Event := Note.Say_Stop;
-            Beats := Plug.Steps (L) - Beats0;
+            Beats := Since (L, Beats0);
             return;
          end if;
       end loop;
@@ -2958,7 +2992,11 @@ package body Act is
          Until_K : constant Monitor.Until_Kind :=
            (if Say.Until_Kind = "contact" then Monitor.U_Contact elsif Say.Until_Kind = "resist" then Monitor.U_Resist
             elsif Say.Until_Kind = "slip" then Monitor.U_Slip elsif Say.Until_Kind = "settle" then Monitor.U_Settle else Monitor.U_Steps);
-         Step_Limit : constant Natural := (if Say.Until_Kind = "steps" then Natural'Max (1, Say.Steps) else 0);
+         --  🔴 脑写的 "or N steps" 是【所有】until 的步数上限,不是只有 until steps 才读。
+         --  以前只在 Until_Kind = "steps" 时才取 ⇒ 写 until arrived 时上限成了 0,而 arrived 又落进
+         --  Until_K 的 else 分支变成 U_Steps,Fired 判 W.Steps >= 0 立刻成立 ⇒ 一段只走一步。
+         --  (GM 实测:三段 until arrived 各只走 1 推 5 拍,身体却报"步子走完还没到")
+         Step_Limit : constant Natural := Say.Steps;
          Avoid : Item_Vectors.Vector;
          Pts : Point_Vectors.Vector;
          Amount : Long_Float := 1.0;   --  没说 amount 时用满(比例);说了按它的
