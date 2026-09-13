@@ -2150,10 +2150,19 @@ package body Act is
                  Sqrt ((Pts (0).Cu - Was (0).Cu) ** 2 + (Pts (0).Cv - Was (0).Cv) ** 2);
             begin
                if D <= Long_Float (Fl.Track) then
-                  --  放大多少不是人拍的:这一步跑了 D、需要跑到跟踪地板 ⇒ 差几倍就放大几倍。
-                  --  D 可能是 0,下限取这台相机的一个像素(它自己的分辨率,也是量出来的)。
-                  Push_Mult := Push_Mult
-                    * (Long_Float (Fl.Track) / Long_Float'Max (D, 1.0 / Long_Float'Max (1.0, Long_Float (Cw))));
+                  --  🔴 放大多少不是人拍的:拿【这一点还差多远】当目标,不是拿跟踪地板。
+                  --  第一版用的是跟踪地板,而跟踪地板 ≈ 一个像素(实测 0.0016 vs 1/640 = 0.0015625)⇒
+                  --  比值恒等于 1.02 ⇒ 打印永远是 ×1.0,等于没放大。目标设成"一个像素"本来就够不着任何用。
+                  --  D 可能是 0,下限仍取这台相机的一个像素(它能分辨的最小位移,量出来的)。
+                  declare
+                     Need : constant Long_Float :=
+                       Sqrt ((Pts (0).Tu - Pts (0).Cu) ** 2 + (Pts (0).Tv - Pts (0).Cv) ** 2);
+                     Floor_D : constant Long_Float := 1.0 / Long_Float'Max (1.0, Long_Float (Cw));
+                  begin
+                     if Need > Long_Float (Fl.Track) then
+                        Push_Mult := Push_Mult * (Need / Long_Float'Max (D, Floor_D));
+                     end if;
+                  end;
                   Put_Line ("[身]     点在画面里没动过(" & Codec.Fmt (D, 4) & " ≤ 地板 " & Codec.Fmt (Long_Float (Fl.Track), 4)
                             & ")⇒ 下一步命令整体 ×" & Codec.Fmt (Push_Mult, 0));
                else
