@@ -48,6 +48,10 @@ package Act is
       Au, Av : Long_Float := 0.0;    --  这一块自己的主轴(画面里的单位向量)
       Elong : Long_Float := 1.0;     --  长轴/短轴
       Gray : Long_Float := -1.0;     --  框里的平均灰度(< 0 = 没量到)
+      --  🔴 这一块是在【哪台相机】里看见的。以前整张清单默认就是"当前这台",
+      --  于是脑只能点名当前那台里的东西 —— GM 里我答"一个都不是",而【头顶相机里球一直看得见】,
+      --  只是它没有号可点。带上这一位,清单才谈得上跨相机。
+      Cam : Natural := 0;
    end record;
    --  角色 → 它肯收哪种自己的零件。**只有这一处**,自检钉死 grasper 和 pusher 不许收同一种
    --  (语言里 pusher 就是"推得动东西、但【合不拢】的部件";以前它把 Grip 也收了,
@@ -85,6 +89,7 @@ package Act is
    end record;
    package Place_Vectors is new Ada.Containers.Vectors (Natural, Place);
 
+   package Buf_Vectors is new Ada.Containers.Vectors (Natural, Buf, U8_Vectors."=");
    type Context is record
       Map : Selfmap.Body_Map;
       Hands : Zone.Hand_Vectors.Vector;
@@ -96,6 +101,9 @@ package Act is
       Recent : Unbounded_String;
       Task_Text : Unbounded_String;
       Items : Item_Vectors.Vector;
+      --  每台相机【画过框、编过号】的那一份图。条带里给脑看的就是它 ——
+      --  以前条带只给原图,别的相机里的东西看得见却没有号,脑点不了名。
+      Shown : Buf_Vectors.Vector;
       Cells_U, Cells_V : Floats;
       Cols : Natural := 6;
       Rows : Natural := 4;

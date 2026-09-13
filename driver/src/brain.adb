@@ -102,8 +102,9 @@ package body Brain is
         "hold means that line must not be given up while the rest runs. reach means go that way. never means do not enter that. " &
         "until says when to call me back. Lines run in the order you write them." & NL & NL &
         "Do NOT give distances, angles, speeds or any numbers other than item numbers, camera numbers and step counts - I measure those myself. " &
-        "If there is a strip of smaller pictures under the numbered one, those are my OTHER eyes right now, each boxed with its camera number in white; " &
-        "they carry no grid and no item numbers - the numbered grid and every item number belong to the BIG picture on top only.";
+        "If there is a strip of smaller pictures under the numbered one, those are my OTHER eyes right now, each boxed with its camera number in white. " &
+        "Every eye is numbered: an item number means the same thing wherever I say it, and a thing only one eye can see still has a number you can point at. " &
+        "The grid of cells belongs to the BIG picture on top only.";
       Schema : constant String :=
         "{""type"":""json_schema"",""json_schema"":{""name"":""my_program"",""strict"":true,""schema"":{""type"":""object"",""additionalProperties"":false," &
         """required"":[""program""],""properties"":{""program"":{""type"":""string""}}}}}";

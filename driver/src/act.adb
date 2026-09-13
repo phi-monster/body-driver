@@ -355,7 +355,11 @@ package body Act is
    end Cell_Of;
 
    --  ── 编号表:先我身上的,再世界里的 ──
-   procedure Build_Listing (C : in out Context; F : Plug.Frame; Cam : Natural; RGB : in out Buf; Text : out Unbounded_String) is
+   --  Keep = True:不清空清单,编号接着往下排 —— 这样【每一台相机】都能各切各的、各编各的号,
+   --  而号是全局唯一的。以前只有当前那一台有号:GM 里我答"一个都不是",而头顶相机里球一直看得见,
+   --  只是它没有号可点。
+   procedure Build_Listing (C : in out Context; F : Plug.Frame; Cam : Natural; RGB : in out Buf; Text : out Unbounded_String;
+                            Keep : Boolean := False; Things_Only : Boolean := False) is
       Cw : constant Natural := F.Cams (Cam).W;
       Ch : constant Natural := F.Cams (Cam).H;
       T : Unbounded_String;
@@ -373,8 +377,10 @@ package body Act is
          end if;
          return ", in the " & Half & " half of the picture";
       end Rel;
-      procedure Push (It : Item; Line : String; Col : Draw.Color; Thick : Natural) is
+      procedure Push (It_In : Item; Line : String; Col : Draw.Color; Thick : Natural) is
+         It : Item := It_In;
       begin
+         It.Cam := Cam;   --  这一块是在哪台相机里看见的:清单跨相机之后,这一位是它唯一的落脚点
          C.Items.Append (It);
          if It.Located then
             Draw.Numbered_Box (RGB, Cw, Ch, It.X0, It.Y0, It.X1, It.Y1, Natural (C.Items.Length), Col, Thick);
@@ -382,7 +388,9 @@ package body Act is
          Append (T, "  item " & Codec.Img (Natural (C.Items.Length)) & ": " & Line & ASCII.LF);
       end Push;
    begin
-      C.Items.Clear;
+      if not Keep then
+         C.Items.Clear;
+      end if;
       if C.Wld.Cams (Cam).Named >= 0 then
          declare
             Sl : constant World.Slot := World.Get (C.Wld, Cam, Natural (C.Wld.Cams (Cam).Named));
@@ -394,6 +402,8 @@ package body Act is
             end if;
          end;
       end if;
+      --  Things_Only:条带里的相机不再重列一遍我自己的零件(主图已经列过),只列世界里的东西
+      if not Things_Only then
       Append (T, "PIECES OF YOURSELF (measured just now: you moved one channel at a time and watched which part of the picture followed; you closed each hand on nothing and watched which pixels swept). Each is boxed and NUMBERED on the picture in orange:" & ASCII.LF);
       for A in 0 .. C.Map.Arms - 1 loop
        --  一条臂上量到几个抓握通道就列几组:两指手 1 组,五指手 5 组。代码里没有"一只手一个夹爪"这个假设。
@@ -467,7 +477,10 @@ package body Act is
          end;
        end loop;
       end loop;
-      Append (T, "THINGS OUT IN THE WORLD (cut out of the depth picture; you do not know what they are called). Each is boxed and NUMBERED on the picture in green:" & ASCII.LF);
+      end if;
+      Append (T, (if Things_Only
+                  then "THINGS IN MY EYE " & Codec.Img (Cam + 1) & " (same numbering - a number means the same thing everywhere I say it):"
+                  else "THINGS OUT IN THE WORLD (cut out of the depth picture; you do not know what they are called). Each is boxed and NUMBERED on the picture in green:") & ASCII.LF);
       for Si in 0 .. World.Count (C.Wld, Cam) - 1 loop
          declare
             Sl : constant World.Slot := World.Get (C.Wld, Cam, Si);
@@ -2780,6 +2793,28 @@ package body Act is
       World.Observe (C.Wld, Cam, Cut_Things (C, F, Cam), Cw, Ch);
       Draw.Grid (RGB, Cw, Ch, C.Cols, C.Rows, C.Cells_U, C.Cells_V);
       Build_Listing (C, F, Cam, RGB, Listing);
+      --  🔴 每一台相机都切块、都编号,号全局唯一。以前只有当前这一台有号,别的相机在条带里
+      --  连个框都没有 ⇒ 脑看得见却点不了名(GM:我答"一个都不是",而头顶相机里球一直看得见)。
+      --  先把位子占够:Shown 是空向量时 C.Shown (K) 会当场 CONSTRAINT_ERROR 把炮打死
+      while Natural (C.Shown.Length) < Natural (F.Cams.Length) loop
+         C.Shown.Append (Bytes.U8_Vectors.Empty_Vector);
+      end loop;
+      for K in 0 .. Natural (F.Cams.Length) - 1 loop
+         if K /= Cam and then F.Cams (K).W > 0 then
+            declare
+               Kw : constant Natural := F.Cams (K).W;
+               Kh : constant Natural := F.Cams (K).H;
+               Sub : Unbounded_String;
+            begin
+               if Natural (F.Cams (K).RGB.Length) >= Kw * Kh * 3 then
+                  C.Shown (K) := F.Cams (K).RGB;
+                  World.Observe (C.Wld, K, Cut_Things (C, F, K), Kw, Kh);
+                  Build_Listing (C, F, K, C.Shown (K), Sub, Keep => True, Things_Only => True);
+                  Append (Listing, Sub);
+               end if;
+            end;
+         end if;
+      end loop;
       Put_Line ("[身] ── 第" & Natural'Image (C.Round_N) & " 轮(第" & Natural'Image (Cam) & " 台相机)── 这一集已用 " & Codec.Img (Plug.Steps (L)) & " 拍(开机量身体 " & Codec.Img (C.Boot_Steps) & " 拍)");
       Put (To_String (Listing));
       if C.Dump_Dir /= "" then
@@ -2813,7 +2848,7 @@ package body Act is
                         Kh : constant Natural := F.Cams (K).H;
                         Ox : constant Natural := Slot * Sw;
                      begin
-                        if Natural (F.Cams (K).RGB.Length) >= Kw * Kh * 3 then
+                        if Natural (C.Shown (K).Length) >= Kw * Kh * 3 then
                            for Y in 0 .. Sh - 1 loop
                               for X in 0 .. Sw - 1 loop
                                  declare
@@ -2823,9 +2858,9 @@ package body Act is
                                     Sp : constant Natural := (Sy * Kw + Sx) * 3;
                                  begin
                                     if Ox + X < Cw then
-                                       Big.Replace_Element (D, F.Cams (K).RGB.Element (Sp));
-                                       Big.Replace_Element (D + 1, F.Cams (K).RGB.Element (Sp + 1));
-                                       Big.Replace_Element (D + 2, F.Cams (K).RGB.Element (Sp + 2));
+                                       Big.Replace_Element (D, C.Shown (K).Element (Sp));
+                                       Big.Replace_Element (D + 1, C.Shown (K).Element (Sp + 1));
+                                       Big.Replace_Element (D + 2, C.Shown (K).Element (Sp + 2));
                                     end if;
                                  end;
                               end loop;
