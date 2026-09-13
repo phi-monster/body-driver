@@ -9,8 +9,15 @@ package body Selfmap is
    function Jaw_Index (F : Plug.Frame; Arm : Natural) return Natural is
      (if Natural (F.Jaw.Length) > Arm then Arm else 0);
 
-   function Jaw_Of (F : Plug.Frame; Arm : Natural) return Long_Float is
-     (if F.Jaw.Is_Empty then 1.0 else F.Jaw (Jaw_Index (F, Arm)));
+   function Jaw_Count (F : Plug.Frame; Arm : Natural) return Natural is
+     (if F.Jaw.Is_Empty then 0 else Natural (F.Jaw (Jaw_Index (F, Arm)).Length));
+
+   function Jaw_All (F : Plug.Frame; Arm : Natural) return Floats is
+     (if F.Jaw.Is_Empty then F64_Vectors.Empty_Vector else F.Jaw (Jaw_Index (F, Arm)));
+
+   function Jaw_Of (F : Plug.Frame; Arm : Natural; K : Natural := 0) return Long_Float is
+     (if F.Jaw.Is_Empty or else K >= Jaw_Count (F, Arm) then 1.0
+      else F.Jaw (Jaw_Index (F, Arm)) (K));
 
    procedure Idle (L : in out Plug.Link; F : in out Plug.Frame; N : Natural; Ok : out Boolean) is
    begin
@@ -191,6 +198,10 @@ package body Selfmap is
    begin
       M := (others => <>);
       M.Arms := Arms; M.N_Cams := N_Cams; M.Per_Arm := Chan.Per_Arm; M.Channels := Arms * Chan.Per_Arm;
+      M.Jaws.Clear;
+      for A in 0 .. Arms - 1 loop
+         M.Jaws.Append (Integer (Natural'Max (1, Jaw_Count (F, A))));
+      end loop;
       Ok := False;
       if Arms = 0 or else N_Cams = 0 then
          Put_Line ("[身] 没有末端位姿或没有相机,量不了身体");
@@ -199,7 +210,7 @@ package body Selfmap is
       --  ① 什么都不做时读数抖多少、画面抖多少(静止对)
       declare
          Prev_EE : Plug.Pose_Vectors.Vector := F.EE;
-         Prev_Jaw : Floats := F.Jaw;
+         Prev_Jaw : Plug.Floats_Vectors.Vector := F.Jaw;
          Prev_Gray : Plug.Cam_Vectors.Vector := F.Cams;
       begin
          for K in 1 .. 4 loop
@@ -216,7 +227,9 @@ package body Selfmap is
             end loop;
             for J in 0 .. Natural (F.Jaw.Length) - 1 loop
                if J < Natural (Prev_Jaw.Length) then
-                  M.Jaw_Noise := Long_Float'Max (M.Jaw_Noise, abs (F.Jaw (J) - Prev_Jaw (J)));
+                  for K in 0 .. Natural'Min (Natural (F.Jaw (J).Length), Natural (Prev_Jaw (J).Length)) - 1 loop
+                     M.Jaw_Noise := Long_Float'Max (M.Jaw_Noise, abs (F.Jaw (J) (K) - Prev_Jaw (J) (K)));
+                  end loop;
                end if;
             end loop;
             Prev_EE := F.EE; Prev_Jaw := F.Jaw;

@@ -100,7 +100,8 @@ package body Bodyfile is
             H : constant Zone.Hand := Hands (A);
             First : Boolean := True;
          begin
-            Append (B, (if A > 0 then "," else "") & "{""empty_close"":" & Codec.Fmt (H.Empty_Close, 6) & ",""open"":" & Codec.Fmt (H.Open_Reading, 6) & ",""pose"":[");
+            Append (B, (if A > 0 then "," else "") & "{""arm"":" & Codec.Img (H.Arm) & ",""k"":" & Codec.Img (H.K)
+                    & ",""empty_close"":" & Codec.Fmt (H.Empty_Close, 6) & ",""open"":" & Codec.Fmt (H.Open_Reading, 6) & ",""pose"":[");
             for K in 0 .. 6 loop
                Append (B, (if K > 0 then "," else "") & Codec.Fmt (H.Pose (K), 6));
             end loop;
@@ -297,6 +298,8 @@ package body Bodyfile is
                declare
                   Hn : constant Integer := Json.Child (D, Hs, A);
                   H : Zone.Hand;
+                  Hk : constant Integer := Json.Get (D, Hn, "k");
+                  Ha : constant Integer := Json.Get (D, Hn, "arm");
                   Zn : constant Integer := Json.Get (D, Hn, "zone");
                begin
                   H.Arm := A;
@@ -354,6 +357,8 @@ package body Bodyfile is
                         Read_Zone (Zn, Natural (Json.Num (D, Json.Get (D, Hn, "own_cam"))));
                      end if;
                   end;
+                  H.Arm := (if Ha >= 0 then Natural (Long_Float'Max (0.0, Json.Num (D, Ha))) else A);
+                  H.K := (if Hk >= 0 then Natural (Long_Float'Max (0.0, Json.Num (D, Hk))) else 0);
                   Hands.Append (H);
                end;
             end loop;

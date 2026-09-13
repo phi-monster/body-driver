@@ -18,6 +18,7 @@ package World is
       Cams : Cam_Vectors.Vector;
       Holding : Boolean := False;
       Held_Arm : Integer := -1;
+      Held_Jaw : Integer := -1;   --  拿着它的是这条臂的第几个抓握通道
       Held_Cam : Integer := -1;
       Held_Slot : Integer := -1;
       Held_Origin : Picture.Region;  --  合上时它在桌上最后的样子

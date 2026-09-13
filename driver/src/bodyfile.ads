@@ -22,5 +22,6 @@ package Bodyfile is
    History_Depth : constant := 7;    --  每格留几次(次数,无量纲)
    --  量法版本:量身体/量握区的代码一改就 +1,存的东西版本对不上就重量(协议,无量纲)
    --  2 = 连通块按大小排序之后;1 及以前量的握区不可信(碎点被当成手指)
-   Method_Ver : constant := 2;
+   --  3 = 握区按【每个抓握通道】各量一次(五指手一根手指一个握区)
+   Method_Ver : constant := 3;
 end Bodyfile;

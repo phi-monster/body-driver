@@ -23,6 +23,7 @@ package Brain is
       Moves : Goal_Vectors.Vector;
       Grip : Unbounded_String;
       Grip_Arm, Grip_On : Natural := 0;
+      Grip_K : Natural := 0;       --  合/张的是这条臂的第几个抓握通道(五指手:点名哪一根)
       Until_Kind : Unbounded_String;
       Steps : Natural := 0;
       Fast, Done : Boolean := False;

@@ -18,13 +18,36 @@ package body Act is
 
    function S (X : String) return Unbounded_String renames To_Unbounded_String;
 
-   function Zone_Of (C : Context; Arm, Cam : Natural) return Zone.Hand_Zone is
+   --  按(第几只手,第几个抓握通道)查握区。一条臂可以有好几个通道(五指手),所以不能拿臂号当下标。
+   function Zone_Of (C : Context; Arm, Cam : Natural; K : Natural := 0) return Zone.Hand_Zone is
    begin
-      if Arm < Natural (C.Hands.Length) and then Cam < Natural (C.Hands (Arm).Zones.Length) then
-         return C.Hands (Arm).Zones (Cam);
-      end if;
+      for I in 0 .. Natural (C.Hands.Length) - 1 loop
+         if C.Hands (I).Arm = Arm and then C.Hands (I).K = K
+           and then Cam < Natural (C.Hands (I).Zones.Length)
+         then
+            return C.Hands (I).Zones (Cam);
+         end if;
+      end loop;
       return (others => <>);
    end Zone_Of;
+
+   function Jaws_Of (C : Context; Arm : Natural) return Natural is
+     (if Arm < Natural (C.Map.Jaws.Length) then Natural'Max (1, C.Map.Jaws (Arm)) else 1);
+
+   --  按(第几只手,第几个抓握通道)取那只"手"。一条臂可以有好几个,拿臂号当下标是错的。
+   function Hand_Of (C : Context; Arm : Natural; K : Natural := 0) return Zone.Hand is
+   begin
+      for I in 0 .. Natural (C.Hands.Length) - 1 loop
+         if C.Hands (I).Arm = Arm and then C.Hands (I).K = K then
+            return C.Hands (I);
+         end if;
+      end loop;
+      return (others => <>);
+   end Hand_Of;
+
+   --  这个点属于哪个抓握通道(不是抓握通道带的就当 0 号)
+   function Jaw_K_Of (Ck : Natural) return Natural is
+     (if Ck >= Chan.Per_Arm then Ck - Chan.Per_Arm else 0);
 
    function Track_Idx (C : Context; Arm, Cam : Natural) return Natural is (Arm * C.Map.N_Cams + Cam);
 
@@ -254,8 +277,10 @@ package body Act is
       end if;
       Append (T, "PIECES OF YOURSELF (measured just now: you moved one channel at a time and watched which part of the picture followed; you closed each hand on nothing and watched which pixels swept). Each is boxed and NUMBERED on the picture in orange:" & ASCII.LF);
       for A in 0 .. C.Map.Arms - 1 loop
+       --  一条臂上量到几个抓握通道就列几组:两指手 1 组,五指手 5 组。代码里没有"一只手一个夹爪"这个假设。
+       for Jk in 0 .. Jaws_Of (C, A) - 1 loop
          declare
-            Z : constant Zone.Hand_Zone := Zone_Of (C, A, Cam);
+            Z : constant Zone.Hand_Zone := Zone_Of (C, A, Cam, Jk);
             Tr : constant Zone_Track := (if Track_Idx (C, A, Cam) < Natural (C.Zones.Length) then C.Zones (Track_Idx (C, A, Cam)) else (others => <>));
             Own_Cam : constant Boolean := Cam_Arm (C, Cam) = Integer (A);
             Du : constant Long_Float := (if Own_Cam then 0.0 else Tr.Cu - Z.Cu);
@@ -266,7 +291,7 @@ package body Act is
                Lu : constant Long_Float := (if Own_Cam then 0.0 elsif Tr.Has_Lobes then (if Which = 0 then Tr.Au else Tr.Bu) - Lb.Cu else Du);
                Lv : constant Long_Float := (if Own_Cam then 0.0 elsif Tr.Has_Lobes then (if Which = 0 then Tr.Av else Tr.Bv) - Lb.Cv else Dv);
             begin
-               It.Kind := Finger; It.Arm := A; It.Which := Which;
+               It.Kind := Finger; It.Arm := A; It.Which := Which; It.Jaw_K := Jk;
                if Z.Valid and then Lb.Valid and then Tr.Valid then
                   It.Located := True;
                   It.Cu := Lb.Cu + Lu; It.Cv := Lb.Cv + Lv;
@@ -275,18 +300,20 @@ package body Act is
                   It.Y0 := Natural (Long_Float'Max (0.0, Long_Float (Lb.Y0) + Lv * Long_Float (Ch)));
                   It.Y1 := Natural (Long_Float'Max (0.0, Long_Float'Min (Long_Float (Ch - 1), Long_Float (Lb.Y1) + Lv * Long_Float (Ch))));
                   It.Depth := Tr.Z; It.Count := Lb.Count;
-                  Push (It, "a finger of arm " & Codec.Img (A + 1) & " (it moves when that arm's grip channel moves), now in cell " &
+                  Push (It, "a finger of arm " & Codec.Img (A + 1) & " (it moves when grip channel " & Codec.Img (Jk)
+                        & " of that arm moves), now in cell " &
                         Codec.Img (Cell_Of (C, It.Cu, It.Cv)) & Rel (It.Cu, It.Cv) &
                         (if Own_Cam or else Tr.Known then "" else " (placed from my joints; I have not yet looked at my hand here)"), Draw.Orange, 2);
                else
-                  Push (It, "a finger of arm " & Codec.Img (A + 1) & " - NOT locatable in this picture right now, do not name it", Draw.Orange, 0);
+                  Push (It, "a finger of arm " & Codec.Img (A + 1) & " (grip channel " & Codec.Img (Jk)
+                        & ") - NOT locatable in this picture right now, do not name it", Draw.Orange, 0);
                end if;
             end Finger;
             G : Item;
          begin
             Finger (Z.A, 0);
             Finger (Z.B, 1);
-            G.Kind := Grip; G.Arm := A;
+            G.Kind := Grip; G.Arm := A; G.Jaw_K := Jk;
             if Z.Valid and then Tr.Valid then
                G.Located := True;
                G.Cu := Tr.Cu; G.Cv := Tr.Cv; G.Depth := Tr.Z;
@@ -301,7 +328,7 @@ package body Act is
                Push (G, "grip " & Codec.Img (A + 1) & " (the space between the fingers of arm " & Codec.Img (A + 1) & ") - not locatable in this picture right now", Draw.Pink, 0);
             end if;
             --  全身零件:每个通道带的那一块(从那个关节往外的全部),位置按此刻位姿从身体图来
-            if not Own_Cam then
+            if not Own_Cam and then Jk = 0 then
                for K in 0 .. Chan.Per_Arm - 1 loop
                   declare
                      Pc : constant Schema.Part_Pos := Tr.Pieces (K);
@@ -319,6 +346,7 @@ package body Act is
                end loop;
             end if;
          end;
+       end loop;
       end loop;
       Append (T, "THINGS OUT IN THE WORLD (cut out of the depth picture; you do not know what they are called). Each is boxed and NUMBERED on the picture in green:" & ASCII.LF);
       for Si in 0 .. World.Count (C.Wld, Cam) - 1 loop
@@ -331,7 +359,8 @@ package body Act is
                declare
                   A : constant Natural := Natural (C.Wld.Held_Arm);
                   Tr : constant Zone_Track := C.Zones (Track_Idx (C, A, Cam));
-                  Z : constant Zone.Hand_Zone := Zone_Of (C, A, Cam);
+                  --  拿着东西的是哪一个抓握通道:身体记着(C.Wld.Held_Jaw)
+                  Z : constant Zone.Hand_Zone := Zone_Of (C, A, Cam, Natural (Integer'Max (0, C.Wld.Held_Jaw)));
                begin
                   It.Kind := Thing_Held; It.Arm := A; It.Located := Tr.Valid;
                   It.Cu := Tr.Cu; It.Cv := Tr.Cv; It.Depth := Tr.Z;
@@ -621,7 +650,7 @@ package body Act is
                A, B : Buf;
                Fl : Flow.Field;
                Du, Dv : Long_Float;
-               Z : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, Cam);
+               Z : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, Cam, Jaw_K_Of (P.Chan_K));
                Old_Z : constant Long_Float := P.Z;
             begin
                A.Reserve_Capacity (Ada.Containers.Count_Type (Hw * Hh));
@@ -798,7 +827,7 @@ package body Act is
       end Finalise;
    begin
       Trust := [others => False];
-      Jaw.Append (Selfmap.Jaw_Of (F, Arm));
+      Jaw := Selfmap.Jaw_All (F, Arm);
       for I in 0 .. Natural (Pts.Length) - 1 loop
          Table.Reset (Effs (I), Chan.Per_Arm, 1.0);
          for K in 0 .. Chan.Per_Arm - 1 loop
@@ -979,7 +1008,7 @@ package body Act is
    begin
       for P of Pts loop
          declare
-            Z : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, Cam);
+            Z : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, Cam, Jaw_K_Of (P.Chan_K));
          begin
             if P.Kind = Piece_Pt and then P.Chan_K = Chan.Per_Arm and then Cam_Arm (C, Cam) /= Integer (P.Arm) and then Z.Valid and then Z.N_Lobes = 2 then
                for Lb in 0 .. 1 loop
@@ -1511,7 +1540,7 @@ package body Act is
                      else
                         declare
                            Q : Point := W0;
-                           Z : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, Cam);
+                           Z : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, Cam, Jaw_K_Of (P.Chan_K));
                         begin
                            Retrack (C, F, Cam, Before, Q, W0.Cu + Pr (0), W0.Cv + Pr (1), True, (if W0.Z > 0.0 then W0.Z + Pr (2) else -1.0));
                            --  眼睛和图对不上(差过张幅的四分之一,比例,无量纲;再小也有两个跟踪地板)⇒ 去看
@@ -1808,7 +1837,7 @@ package body Act is
       Steps_Taken := 0;
       Beats := 0;
       Blocked_Out := False;
-      Jaw.Append (Selfmap.Jaw_Of (F, Arm));
+      Jaw := Selfmap.Jaw_All (F, Arm);
       Fl.Track := Long_Float'Max (1.0 / Long_Float (Cw), 0.0);
       Fl.Picture := Long_Float (Integer'(if Cam < Natural (C.Map.Pic_Floor.Length) then C.Map.Pic_Floor (Cam) else 0));
       Fl.Reading := C.Map.Jaw_Noise;
@@ -1886,15 +1915,22 @@ package body Act is
    end Run_Segment;
 
    --  合/张:最多 Max_Iter 拍,或到画面不再变;Sweep_Cam >= 0 时把那台相机里动过的像素累进 Sweep(手指自己扫过的地方)
-   procedure Jaw_Sweep (L : in out Plug.Link; C : Context; F : in out Plug.Frame; Arm : Natural; Target : Long_Float; Max_Iter : Natural;
+   procedure Jaw_Sweep (L : in out Plug.Link; C : Context; F : in out Plug.Frame; Arm, K : Natural; Target : Long_Float; Max_Iter : Natural;
                         Sweep_Cam : Integer; Sweep : in out Bools; Steps : out Natural; Reading : out Long_Float) is
       Jaw : Floats;
-      Prev : Long_Float := Selfmap.Jaw_Of (F, Arm);
+      Prev : Long_Float := Selfmap.Jaw_Of (F, Arm, K);
       Prev_Cams : Plug.Cam_Vectors.Vector := F.Cams;
       Still : Natural := 0;
       Cm : Plug.Cmd;
    begin
-      Jaw.Append (Target);
+      --  只动点名的那一个抓握通道,其余保持它们此刻的读数(五指手:合一根不牵动另外四根)
+      declare
+         Rest : constant Floats := Selfmap.Jaw_All (F, Arm);
+      begin
+         for I in 0 .. Natural'Max (1, Natural (Rest.Length)) - 1 loop
+            Jaw.Append (if I = K then Target elsif I < Natural (Rest.Length) then Rest (I) else 1.0);
+         end loop;
+      end;
       Steps := 0;
       Reading := Prev;
       --  读数是命令的回声,"停住"只认画面:每台相机连着两拍不变
@@ -1902,7 +1938,7 @@ package body Act is
          Cm.Kind := Plug.Ee; Cm.Arm := Arm; Cm.Pose := F.EE (Arm); Cm.Jaw := Jaw;
          exit when not Plug.Act (L, Cm) or else not Plug.Sense (L, F);
          Steps := I;
-         Reading := Selfmap.Jaw_Of (F, Arm);
+         Reading := Selfmap.Jaw_Of (F, Arm, K);
          if Sweep_Cam >= 0 and then Natural (Sweep_Cam) < Natural (F.Cams.Length) and then Natural (Sweep_Cam) < Natural (C.Map.Floors.Length) then
             Sweep := Picture.Either (Sweep, Picture.Moved (Prev_Cams (Natural (Sweep_Cam)).Gray, F.Cams (Natural (Sweep_Cam)).Gray, C.Map.Floors (Natural (Sweep_Cam))));
          end if;
@@ -1918,10 +1954,11 @@ package body Act is
    end Jaw_Sweep;
 
    --  合/张到读数不再变
-   procedure Move_Jaw (L : in out Plug.Link; C : Context; F : in out Plug.Frame; Arm : Natural; Target : Long_Float; Steps : out Natural; Reading : out Long_Float) is
+   procedure Move_Jaw (L : in out Plug.Link; C : Context; F : in out Plug.Frame; Arm : Natural; Target : Long_Float; Steps : out Natural; Reading : out Long_Float;
+                       K : Natural := 0) is
       None : Bools;
    begin
-      Jaw_Sweep (L, C, F, Arm, Target, 40, -1, None, Steps, Reading);
+      Jaw_Sweep (L, C, F, Arm, K, Target, 40, -1, None, Steps, Reading);
    end Move_Jaw;
 
    --  生地/大步之后在世界相机里重新看见自己:手指 = 抖一下手指(合几拍再张回来),零件 = 推一下它自己的通道再推回来;
@@ -1974,7 +2011,7 @@ package body Act is
    begin
       Jaw.Append (J0);
       for P of Pts loop
-         if P.Kind = Piece_Pt and then P.Chan_K = Chan.Per_Arm then
+         if P.Kind = Piece_Pt and then P.Chan_K >= Chan.Per_Arm then
             Any_Fingers := True;
          end if;
       end loop;
@@ -1984,15 +2021,29 @@ package body Act is
             Regs : Picture.Regions;
             Taken : Bools;
          begin
-            Jaw_Sweep (L, C, F, Arm, 0.0, C.Map.Settle + 1, Integer (Cam), Sweep, Steps_J, Reading);
-            Jaw_Sweep (L, C, F, Arm, J0, C.Map.Settle + 1, Integer (Cam), Sweep, Steps_J, Reading);
+            --  这些点分别属于哪几个抓握通道,就抖哪几个(五指手:只抖被跟着的那几根)
+            for Kk in 0 .. Jaws_Of (C, Arm) - 1 loop
+               declare
+                  Wanted : Boolean := False;
+               begin
+                  for P of Pts loop
+                     if P.Kind = Piece_Pt and then P.Chan_K = Chan.Per_Arm + Kk then
+                        Wanted := True;
+                     end if;
+                  end loop;
+                  if Wanted then
+                     Jaw_Sweep (L, C, F, Arm, Kk, 0.0, C.Map.Settle + 1, Integer (Cam), Sweep, Steps_J, Reading);
+                     Jaw_Sweep (L, C, F, Arm, Kk, Selfmap.Jaw_Of (F, Arm, Kk), C.Map.Settle + 1, Integer (Cam), Sweep, Steps_J, Reading);
+                  end if;
+               end;
+            end loop;
             Regs := Picture.Components (Sweep, Cw, Ch, Picture.Min_Pixels (Cw, Ch));
             Taken := Bool_Vectors.To_Vector (False, Regs.Length);
             for I in 0 .. Natural (Pts.Length) - 1 loop
                declare
                   P : Point := Pts (I);
                begin
-                  if P.Kind = Piece_Pt and then P.Chan_K = Chan.Per_Arm then
+                  if P.Kind = Piece_Pt and then P.Chan_K >= Chan.Per_Arm then
                      --  认领半径:一个张幅,再小也有一个跟踪窗;读深窗口 = 张幅的四分之一,再小也有半个百分点的画幅(比例,无量纲)
                      --  没真看过的位置(只是按关节推的)可能差得远 ⇒ 认领半径放到整幅画面(比例,无量纲)
                      Claim (P, (if P.Known then Long_Float'Max (Z.Span, Track_Win) else 1.0), Long_Float'Max (0.005, Z.Span * 0.25), Taken, Regs);
@@ -2061,7 +2112,7 @@ package body Act is
       begin
          X.Arm := Arm; X.Cam := Cam; X.Pose := F.EE (Arm);
          for P of Pts loop
-            if P.Kind = Piece_Pt and then P.Chan_K = Chan.Per_Arm then
+            if P.Kind = Piece_Pt and then P.Chan_K >= Chan.Per_Arm then
                if P.Lost then
                   All_Fingers := False;
                end if;
@@ -2121,7 +2172,7 @@ package body Act is
       if World_Cam >= 0 then
          Before_Regs := Cut_Things (C, F, Natural (World_Cam));
       end if;
-      Jaw.Append (Selfmap.Jaw_Of (F, Arm));
+      Jaw := Selfmap.Jaw_All (F, Arm);
       A (2) := C.Map.Amp (Arm * Chan.Per_Arm + 2) * 4.0;   --  抬起 = 看得见的探针幅度的几倍(倍数,无量纲),不假设哪根轴朝上:2 号轴是身体报的第三个平移通道
       Step_Arm (L, C, F, Arm, A, Jaw, Deliv, Ok);
       if Hc >= 0 and then Natural (Hc) < Natural (F.Cams.Length) then
@@ -2224,13 +2275,16 @@ package body Act is
          declare
             It : constant Item := C.Items (I);
             Ft : Plan.Item_Facts;
-            Kk : constant Natural := (if It.Kind in Finger | Grip then Chan.Per_Arm else It.Which);
+            Kk : constant Natural := (if It.Kind in Finger | Grip then Chan.Per_Arm + It.Jaw_K else It.Which);
          begin
             Ft.Exists := It.Located or else It.Kind in Finger | Grip | Piece;
             Ft.Mine := It.Kind in Finger | Grip | Piece;
             Ft.Grip := It.Kind = Grip;
             Ft.Arm := It.Arm;
             Ft.Thing_Idx := -1;
+            --  量得出它鼓出它站的那个面多少 ⇒ 才有"那个面"可言。面不是全局开关,是每个东西自己的事。
+            Ft.Stands := It.Height > 0.0;
+            Ft.Jaw_K := It.Jaw_K;
             if Ft.Mine then
                for T in 0 .. Natural (C.Tables.Length) - 1 loop
                   if C.Tables (T).Arm = It.Arm and then C.Tables (T).Cam = C.Cam
@@ -2285,7 +2339,9 @@ package body Act is
             end if;
          end;
       end loop;
-      while C.Prog_At < Natural (C.Prog.Goals.Length) and then not Acted loop
+      while C.Prog_At < Natural (C.Prog.Goals.Length)
+        and then (not Acted or else C.Prog.Goals (C.Prog_At).Together)
+      loop
          declare
             G : constant Plan.Goal := C.Prog.Goals (C.Prog_At);
          begin
@@ -2294,6 +2350,15 @@ package body Act is
                null;   --  背景约束,上面已经带上了
             else
                case G.V is
+                  when V_Press =>
+                     Answer.Moves.Append (Brain.Goal'(Item => G.Subject, Cell => 0,
+                                                      Rel => To_Unbounded_String ("press"),
+                                                      Of_Item => G.Object,
+                                                      Amount => To_Unbounded_String
+                                                        (case G.Ef is
+                                                            when F_Light => "small", when F_Firm => "medium",
+                                                            when F_Hard => "large", when F_None => "small"),
+                                                      Stay => False, Hard => False));
                   when V_Reach =>
                      Answer.Moves.Append (Brain.Goal'(Item => G.Subject, Cell => 0, Rel => To_Unbounded_String (Old_Rel (G.R)),
                                                       Of_Item => G.Object, Amount => To_Unbounded_String (Amount_Word (G.Amt)),
@@ -2301,10 +2366,12 @@ package body Act is
                   when V_Close =>
                      Answer.Grip := To_Unbounded_String ("close");
                      Answer.Grip_Arm := G.Subject_Arm + 1;
+                     Answer.Grip_K := G.Subject_Jaw;
                      Answer.Grip_On := G.Object;
                   when V_Open =>
                      Answer.Grip := To_Unbounded_String ("open");
                      Answer.Grip_Arm := G.Subject_Arm + 1;
+                     Answer.Grip_K := G.Subject_Jaw;
                   when others =>
                      null;
                end case;
@@ -2415,7 +2482,7 @@ package body Act is
                declare
                   Rep : constant Exam.Report := Exam.Judge (C.Map, C.Tables);
                   Cm : constant Plan.Compiled :=
-                    Plan.Compile (Lang.Parse (To_String (Text)), Rep, Build_Facts (C), Surface => False);
+                    Plan.Compile (Lang.Parse (To_String (Text)), Rep, Build_Facts (C));
                begin
                   Put_Line ("[身] ⚖ " & Plan.Report_Text (Cm));
                   if not Cm.Ok then
@@ -2530,7 +2597,7 @@ package body Act is
                                        if P.Kind = Thing_Pt and then O.Kind in Finger | Grip then
                                           --  X 装进握区:区心、区深
                                           declare
-                                             Z : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, Cam);
+                                             Z : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, Cam, Jaw_K_Of (P.Chan_K));
                                           begin
                                              P.Tu := Z.Cu; P.Tv := Z.Cv; P.Tz := Z.Depth; P.Wz := (if Picture.Is_Nan (Z.Depth) then 0.0 else 1.0);
                                           end;
@@ -2565,6 +2632,26 @@ package body Act is
                                           St : constant Long_Float := Long_Float'Max (Ow, 1.0 / Long_Float (Cw));
                                        begin
                                           P.Tu := P.Cu + Du / Ln * St; P.Tv := P.Cv + Dv / Ln * St;
+                                       end;
+                                    elsif Rl = "onto" or else Rl = "off" or else Rl = "press" then
+                                       --  它站的那个面在哪:它自己的深度 + 它鼓出多少(两个都是量出来的)。
+                                       --  onto = 压到那个面那么深;off = 反过来离开那个面它自己那么高一截。
+                                       --  press = 朝那个面【压过去一个到不了的深度】:走不到的那一截就是力。
+                                       --  这具身体的观测里没有力那一路,所以"劲"只能是命令与实到之差 —— 那是任何身体都有的。
+                                       declare
+                                          Floor_Z : constant Long_Float := O.Depth + O.Height;
+                                       begin
+                                          if O.Depth > 0.0 and then P.Z > 0.0 and then O.Height > 0.0 then
+                                             P.Tu := P.Cu; P.Tv := P.Cv;
+                                             P.Tz := (if Rl = "off" then O.Depth - O.Height
+                                                      elsif Rl = "onto" then Floor_Z
+                                                      else Floor_Z + O.Height * Amount);
+                                             P.Wz := 1.0;
+                                          else
+                                             Report := S ("goal: I cannot measure how far item " & Codec.Img (G.Of_Item)
+                                                          & " stands out of what it rests on, so I do not know which way is into it. ");
+                                             Ok_Pt := False;
+                                          end if;
                                        end;
                                     elsif Rl = "face" then
                                        --  转到"从我这一点指向它那一点"的方向 = 我这一块的主轴方向。人不动,只转。
@@ -2610,7 +2697,7 @@ package body Act is
                         P.Item_No := G.Item;
                         if It.Kind in Finger | Grip | Piece | Thing_Held then
                            P.Arm := It.Arm; P.Kind := Piece_Pt;
-                           P.Chan_K := (if It.Kind = Piece then It.Which else Chan.Per_Arm);
+                           P.Chan_K := (if It.Kind = Piece then It.Which else Chan.Per_Arm + It.Jaw_K);
                            declare
                               Tr : constant Zone_Track := C.Zones (Track_Idx (C, P.Arm, Cam));
                            begin
@@ -2652,7 +2739,7 @@ package body Act is
                         P.Known := C.Zones (Track_Idx (C, P.Arm, Cam)).Pieces_Known (It.Which);
                         P.Box_W := Long_Float (It.X1 - It.X0) / Long_Float (Cw); P.Box_H := Long_Float (It.Y1 - It.Y0) / Long_Float (Ch);
                      elsif Own then
-                        P.Arm := It.Arm; P.Kind := Piece_Pt; P.Chan_K := Chan.Per_Arm;   --  手指 = 握合通道带的那块
+                        P.Arm := It.Arm; P.Kind := Piece_Pt; P.Chan_K := Chan.Per_Arm + It.Jaw_K;   --  手指 = 那个抓握通道带的那块
                         declare
                            Tr : constant Zone_Track := C.Zones (Track_Idx (C, P.Arm, Cam));
                         begin
@@ -2751,7 +2838,7 @@ package body Act is
                   Cage_Note : Unbounded_String;
                   Steps_J : Natural;
                   Reading : Long_Float;
-                  Hz : constant Zone.Hand_Zone := Zone_Of (C, A, Cam);
+                  Hz : constant Zone.Hand_Zone := Zone_Of (C, A, Cam, Say.Grip_K);
                begin
                   --  笼判据:点名的那块的像素在握区框里(它的形心落在区框内),深度和手指对得上
                   if Say.Grip_On >= 1 and then Say.Grip_On <= Natural (C.Items.Length) then
@@ -2814,7 +2901,7 @@ package body Act is
                      end;
                   end if;
                   if Caged then
-                     Move_Jaw (L, C, F, A, 0.0, Steps_J, Reading);
+                     Move_Jaw (L, C, F, A, 0.0, Steps_J, Reading, Say.Grip_K);
                      declare
                         Empty : constant Long_Float := C.Hands (A).Empty_Close;
                         By_Reading : Boolean := Reading - Empty > C.Map.Jaw_Noise;
@@ -2834,7 +2921,7 @@ package body Act is
                         Did_Grip := S ("I closed grip " & Codec.Img (A + 1) & " until the picture stopped changing (" & Codec.Img (Steps_J) & " steps, reading " & Codec.Fmt (Reading, 3) &
                                        ", empty-close reading " & Codec.Fmt (Empty, 3) & "); " & To_String (Note));
                         if By_Reading then
-                           C.Wld.Holding := True; C.Wld.Held_Arm := Integer (A); C.Wld.Held_Cam := Integer (Cam);
+                           C.Wld.Holding := True; C.Wld.Held_Arm := Integer (A); C.Wld.Held_Jaw := Integer (Say.Grip_K); C.Wld.Held_Cam := Integer (Cam);
                            if Say.Grip_On >= 1 and then Say.Grip_On <= Natural (C.Items.Length) then
                               C.Wld.Held_Slot := C.Items (Say.Grip_On - 1).Slot;
                               C.Wld.Held_Origin := World.Get (C.Wld, Cam, Natural (C.Items (Say.Grip_On - 1).Slot)).Shadow;
@@ -2843,8 +2930,8 @@ package body Act is
                            end if;
                            Memory.Set (C.Mem, "holding", "arm " & Codec.Img (A + 1) & " closed on item " & Codec.Img (Say.Grip_On) & " at reading " & Codec.Fmt (Reading, 3));
                         else
-                           C.Wld.Holding := False; C.Wld.Held_Arm := -1;
-                           Move_Jaw (L, C, F, A, C.Hands (A).Open_Reading, Steps_J, Reading);
+                           C.Wld.Holding := False; C.Wld.Held_Arm := -1; C.Wld.Held_Jaw := -1;
+                           Move_Jaw (L, C, F, A, Hand_Of (C, A, Say.Grip_K).Open_Reading, Steps_J, Reading, Say.Grip_K);
                            Append (Did_Grip, "; I opened it again");
                         end if;
                      end;
@@ -2861,8 +2948,8 @@ package body Act is
                   Steps_J : Natural;
                   Reading : Long_Float;
                begin
-                  Move_Jaw (L, C, F, A, C.Hands (A).Open_Reading, Steps_J, Reading);
-                  C.Wld.Holding := False; C.Wld.Held_Arm := -1; C.Wld.Held_Slot := -1;
+                  Move_Jaw (L, C, F, A, Hand_Of (C, A, Say.Grip_K).Open_Reading, Steps_J, Reading, Say.Grip_K);
+                  C.Wld.Holding := False; C.Wld.Held_Arm := -1; C.Wld.Held_Jaw := -1; C.Wld.Held_Slot := -1;
                   Memory.Set (C.Mem, "holding", "");
                   Did_Grip := S ("I opened grip " & Codec.Img (A + 1) & " (" & Codec.Img (Steps_J) & " steps, reading " & Codec.Fmt (Reading, 3) & ")");
                end;

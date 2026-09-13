@@ -1,5 +1,6 @@
 with Ada.Text_IO;
 with Codec;
+with Limits;
 package body Layout is
    use Msgpack;
 
@@ -152,9 +153,12 @@ package body Layout is
                   else
                      L.Ambiguous.Append (Joined (F.P));
                   end if;
-               elsif Nn = 1 and then Kind_Of (D, F.N) /= Bool and then Xs (0) >= 0.0 and then Xs (0) <= 1.0
+               elsif Nn >= 1 and then Nn <= Limits.Max_Jaws and then Kind_Of (D, F.N) /= Bool
                  and then Kind_Of (D, F.N) in Arr | Map
+                 and then (for all I in 0 .. Nn - 1 => Xs (I) >= 0.0 and then Xs (I) <= 1.0)
                then
+                  --  🔴 一串都落在 [0,1] 的数 = 一组抓握通道。以前只认长度为 1 的,
+                  --  于是五指手报回来的五个值整组被忽略掉 —— 那是"每条臂只有一个夹爪"这个身体假设的根。
                   L.Jaw.Append (F.P);
                end if;
             end;

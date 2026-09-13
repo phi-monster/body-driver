@@ -86,8 +86,7 @@ package body Plan is
       return (if Length (S) = 0 then "(一个都没有)" else To_String (S));
    end Mine_List;
 
-   function Compile (P : Lang.Program; R : Exam.Report; Facts : Facts_Vectors.Vector;
-                     Surface : Boolean) return Compiled is
+   function Compile (P : Lang.Program; R : Exam.Report; Facts : Facts_Vectors.Vector) return Compiled is
       C : Compiled;
       Hard_Rows : Need := [others => False];
 
@@ -166,13 +165,34 @@ package body Plan is
                              "合手要对着一只手说");
                      exit;
                   end if;
-                  if S.R /= Lang.R_None then
+                  if S.V = Lang.V_Press then
+                     if not Resolve (S.Object, S.Line, "【朝谁压】", Obj) then
+                        exit;
+                     end if;
+                     if not Facts (Obj).Stands then
+                        Reject (S.Line, "我量不出第" & Name_Of (Facts, Obj) & "鼓出它站的那个面多少,"
+                                & "所以我不知道往哪个方向才算「压向它」",
+                                "换成 nearer(比它更靠近我这只眼睛)—— 那个方向我量得到");
+                        exit;
+                     end if;
+                     if not Row_Ok (R, Facts (Sub).Thing_Idx, Exam.Nearness)
+                       and then Facts (Sub).Thing_Idx >= 0
+                     then
+                        Reject (S.Line, "压要靠「远近」这一行,而这一行在我身上不能用:"
+                                & Why_Row (R, Facts (Sub).Thing_Idx, Exam.Nearness),
+                                "我现在说得出口的关系只有:" & Usable_Rels (R, Facts (Sub).Thing_Idx, True));
+                        exit;
+                     end if;
+                     G.Needs_Proof := Facts (Sub).Thing_Idx < 0;
+                     G.Rows (Exam.Nearness) := True;
+                  elsif S.R /= Lang.R_None then
                      if not Resolve (S.Object, S.Line, "【相对谁】", Obj) then
                         exit;
                      end if;
                      declare
                         Ti : constant Integer := Facts (Sub).Thing_Idx;
                         N : constant Need := Rows_Needed (S.R);
+                        Surface : constant Boolean := Obj < Natural (Facts.Length) and then Facts (Obj).Stands;
                      begin
                         --  这一块还没量过响应:编译期没有判据。不许因此放行到底 —— 记一笔,
                         --  执行器量完当场补判(见 Needs_Proof)。
@@ -196,7 +216,9 @@ package body Plan is
                         G.Rows := N;
                      end;
                   end if;
-                  if S.Ev = Lang.E_Free and then not Surface then
+                  if S.Ev = Lang.E_Free
+                    and then not (S.Object.Given and then Obj < Natural (Facts.Length) and then Facts (Obj).Stands)
+                  then
                      Reject (S.Line, "「until free」要知道它原来站在哪个面上,而我现在拟不出那个面",
                              "换成 until touch 或 until resist —— 这两个不用面");
                      exit;
@@ -221,9 +243,11 @@ package body Plan is
                   G.Line := S.Line; G.V := S.V; G.R := S.R;
                   G.Subject := Sub; G.Object := Obj;
                   G.Subject_Arm := Facts (Sub).Arm;
+                  G.Subject_Jaw := Facts (Sub).Jaw_K;
                   G.Hard := S.V = Lang.V_Hold;
                   G.Forbid := S.V = Lang.V_Never;
                   G.Amt := S.Amt; G.Ev := S.Ev; G.Steps := S.Steps;
+                  G.Ef := S.Ef; G.Together := S.Together;
                   G.Src := S.Src;
                   C.Goals.Append (G);
             end case;

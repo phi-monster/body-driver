@@ -11,7 +11,12 @@ package Lang is
    --  close/open  手
    --  never 不许进入(不等式)
    --  say/look/onfail/done  不动身体的四句
-   type Verb is (V_Hold, V_Reach, V_Close, V_Open, V_Never, V_Say, V_Look, V_Onfail, V_Done, V_Bad);
+   --  press:在【接触方向】上只说"用多大劲",不说"走到哪"。任务坐标系那条老规矩:
+   --  同一根轴上要么说怎么动,要么说多用力,二选一 —— 这里语法上就只给你后者。
+   --  这具身体的观测里没有力/电流那一路,所以"劲"= 命令出去而没走到的那一部分(实到差),
+   --  它是任何身体都有的量:朝它压过去一个到不了的目标,压不动的那一截就是力。
+   type Verb is (V_Hold, V_Reach, V_Press, V_Close, V_Open, V_Never, V_Say, V_Look, V_Onfail, V_Done, V_Bad);
+   type Effort is (F_None, F_Light, F_Firm, F_Hard);
 
    --  关系只描述【画面里和远近上的相对状态】,不描述怎么走
    type Rel is (R_None, R_At, R_Above, R_Below, R_Left, R_Right, R_Nearer, R_Farther, R_Onto, R_Off, R_Facing);
@@ -42,6 +47,8 @@ package Lang is
       Eye : Natural := 0;
       Text : Unbounded_String;     --  say 的内容
       Fa : Fail_Act := F_None;
+      Ef : Effort := F_None;
+      Together : Boolean := False;  --  这一行前面写了 while ⇒ 和上一条动作【同一节里一起解】,不是排在它后面
       Line : Natural := 0;         --  原文第几行(报错要指得准)
       Src : Unbounded_String;      --  原文这一行
    end record;
@@ -65,6 +72,7 @@ package Lang is
    function Rel_Word (R : Rel) return String;
    function Amount_Word (A : Amount) return String;
    function Event_Word (E : Event) return String;
+   function Effort_Word (E : Effort) return String;
    function Rel_Cn (R : Rel) return String;      --  给日志和报错用的人话
    function Verb_Cn (V : Verb) return String;
    function Event_Cn (E : Event) return String;

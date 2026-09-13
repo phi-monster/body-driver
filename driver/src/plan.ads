@@ -19,6 +19,8 @@ package Plan is
       Grip : Boolean := False;      --  是一只手的握区(只有它能合、能张)
       Arm : Natural := 0;
       Thing_Idx : Integer := -1;    --  它对应体检报告里的第几条(-1 = 这一块还没有量过响应)
+      Stands : Boolean := False;
+      Jaw_K : Natural := 0;         --  它是这条臂的第几个抓握通道(五指手:哪一根)    --  量得出它"鼓出它站的那个面多少" ⇒ 才谈得上朝那个面压 / 离开那个面
       Label : Unbounded_String;
    end record;
    package Facts_Vectors is new Ada.Containers.Vectors (Natural, Item_Facts);
@@ -28,11 +30,14 @@ package Plan is
       V : Lang.Verb := Lang.V_Reach;
       R : Lang.Rel := Lang.R_None;
       Subject, Object : Natural := 0;
-      Subject_Arm : Natural := 0;   --  谁动的那一块长在第几只手上(合手要知道是哪只手)
+      Subject_Arm : Natural := 0;
+      Subject_Jaw : Natural := 0;   --  合/张点名的是第几个抓握通道   --  谁动的那一块长在第几只手上(合手要知道是哪只手)
       Rows : Need := [others => False];
       Hard : Boolean := False;      --  hold ⇒ 整段保持,不许被牺牲
       Forbid : Boolean := False;    --  never ⇒ 不许进入
       Amt : Lang.Amount := Lang.A_None;
+      Ef : Lang.Effort := Lang.F_None;
+      Together : Boolean := False;   --  和上一条动作同一节里一起解
       Ev : Lang.Event := Lang.E_None;
       Steps : Natural := 0;
       Needs_Proof : Boolean := False;   --  这一块还没量过响应 ⇒ 编译期无从判,执行器量完必须【当场再判一次】,
@@ -53,9 +58,8 @@ package Plan is
       Err_Line : Natural := 0;
    end record;
 
-   --  Surface:身体此刻拟得出"东西站在哪个面上"吗(onto/off/free 靠它)
-   function Compile (P : Lang.Program; R : Exam.Report; Facts : Facts_Vectors.Vector;
-                     Surface : Boolean) return Compiled;
+   --  面不再是一个全局开关:能不能说 onto/off/free,取决于【那个东西】量不量得出它鼓出多少。
+   function Compile (P : Lang.Program; R : Exam.Report; Facts : Facts_Vectors.Vector) return Compiled;
 
    --  这具身体此刻【说得出口】的关系有哪些(报错时列给模型抄)
    function Usable_Rels (R : Exam.Report; Thing_Idx : Integer; Surface : Boolean) return String;

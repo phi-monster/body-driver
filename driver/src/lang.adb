@@ -3,14 +3,14 @@ package body Lang is
 
    function Verb_Word (V : Verb) return String is
      (case V is
-         when V_Hold => "hold", when V_Reach => "reach", when V_Close => "close",
+         when V_Hold => "hold", when V_Reach => "reach", when V_Press => "press", when V_Close => "close",
          when V_Open => "open", when V_Never => "never", when V_Say => "say",
          when V_Look => "look", when V_Onfail => "onfail", when V_Done => "done",
          when V_Bad => "?");
 
    function Verb_Cn (V : Verb) return String is
      (case V is
-         when V_Hold => "一直保持", when V_Reach => "朝这个关系走", when V_Close => "合手",
+         when V_Hold => "一直保持", when V_Reach => "朝这个关系走", when V_Press => "朝它压,只说劲不说位置", when V_Close => "合手",
          when V_Open => "张手", when V_Never => "不许进入", when V_Say => "说一句",
          when V_Look => "换主画面", when V_Onfail => "失手了怎么办", when V_Done => "做完了",
          when V_Bad => "?");
@@ -41,6 +41,19 @@ package body Lang is
      (case E is when E_None => "(没说到什么为止)", when E_Steps => "走够步数",
          when E_Touch => "碰到", when E_Resist => "顶住推不动", when E_Settle => "画面不再变",
          when E_Free => "它离开了原来站的那个面");
+
+   function Effort_Word (E : Effort) return String is
+     (case E is when F_None => "", when F_Light => "light", when F_Firm => "firm", when F_Hard => "hard");
+
+   function To_Effort (W : String) return Effort is
+   begin
+      for E in Effort loop
+         if E /= F_None and then Effort_Word (E) = W then
+            return E;
+         end if;
+      end loop;
+      return F_None;
+   end To_Effort;
 
    function Lower (S : String) return String is
       R : String := S;
@@ -119,10 +132,11 @@ package body Lang is
       function N (X : Name) return String is
         (if not X.Given then "" elsif X.By_Number then Natural'Image (X.Number) else " " & To_String (X.Word));
    begin
-      return Verb_Word (S.V) & N (S.Subject)
+      return (if S.Together then "while " else "") & Verb_Word (S.V) & N (S.Subject)
         & (if S.R /= R_None then " " & Rel_Word (S.R) else "")
         & N (S.Object)
         & (if S.Amt /= A_None then " " & Amount_Word (S.Amt) else "")
+        & (if S.Ef /= F_None then " " & Effort_Word (S.Ef) else "")
         & (if S.Ev /= E_None then " until " & Event_Word (S.Ev)
              & (if S.Ev = E_Steps then Natural'Image (S.Steps) else "") else "");
    end Unparse;
@@ -168,6 +182,14 @@ package body Lang is
          end loop;
          if N = 0 then
             return;
+         end if;
+         --  行首的 while:和上一条动作同一节里一起解
+         if Lower (To_String (Words (1))) = "while" and then N >= 2 then
+            S.Together := True;
+            for K in 1 .. N - 1 loop
+               Words (K) := Words (K + 1);
+            end loop;
+            N := N - 1;
          end if;
          declare
             W1 : constant String := Lower (To_String (Words (1)));
@@ -248,7 +270,18 @@ package body Lang is
                         Rr : constant Rel := To_Rel (W);
                         Aa : constant Amount := To_Amount (W);
                      begin
-                        if W = "on" then
+                        if S.V = V_Press and then S.R = R_None and then not S.Object.Given
+                          and then Rr = R_None and then Aa = A_None and then To_Effort (W) = F_None
+                          and then W /= "until"
+                        then
+                           S.Object.Given := True;
+                           if Is_Digits (To_String (Words (K))) then
+                              S.Object.By_Number := True;
+                              S.Object.Number := Natural'Value (To_String (Words (K)));
+                           else
+                              S.Object.Word := Words (K);
+                           end if;
+                        elsif W = "on" then
                            --  close 的 "on X" 就是 at X
                            if K + 1 > N then
                               Fail ("on 后面要跟一个东西", Line_No);
@@ -280,6 +313,8 @@ package body Lang is
                            end if;
                         elsif Aa /= A_None then
                            S.Amt := Aa;
+                        elsif To_Effort (W) /= F_None then
+                           S.Ef := To_Effort (W);
                         elsif W = "until" then
                            if K + 1 > N then
                               Fail ("until 后面要跟一个事件:steps touch resist settle free", Line_No);
@@ -319,6 +354,24 @@ package body Lang is
                   Fail (Verb_Word (S.V) & " 要说清楚【和谁的什么关系】。关系只有这几个:" & All_Rels, Line_No);
                   return;
                end if;
+               if S.V = V_Press then
+                  if not S.Object.Given then
+                     Fail ("press 要说【朝谁压】", Line_No);
+                     return;
+                  end if;
+                  if S.Ef = F_None then
+                     Fail ("press 要说多大劲:light firm hard。"
+                           & "压这一路上不许再说走到哪 —— 一根轴上要么说怎么动,要么说多用力,二选一", Line_No);
+                     return;
+                  end if;
+                  if S.Amt /= A_None then
+                     Fail ("press 说了劲就不许再说步子 —— 同一根轴上位置和力只能二选一", Line_No);
+                     return;
+                  end if;
+                  if S.Ev = E_None then
+                     S.Ev := E_Resist;   --  压的默认停机条件就是"顶住了"
+                  end if;
+               end if;
          end case;
          P.Stmts.Append (S);
       end Do_Line;
@@ -352,17 +405,18 @@ package body Lang is
    begin
       return
         "<program> ::= <line>+" & ASCII.LF &
-        "<line>    ::= hold <mine> <rel> <thing>" & ASCII.LF &
+        "<line>    ::= [while] <action>            (while = run it together with the line above, not after it)" & ASCII.LF &
+        "            | look <eye> | say <one sentence in your own words>" & ASCII.LF &
+        "            | onfail retry | onfail stop | done" & ASCII.LF &
+        "<action>  ::= hold <mine> <rel> <thing>" & ASCII.LF &
         "            | reach <mine> <rel> <thing> [<step>] [until <event>]" & ASCII.LF &
+        "            | press <mine> <thing> <effort> [until <event>]" & ASCII.LF &
         "            | never <mine> <rel> <thing>" & ASCII.LF &
         "            | close <mine> [on <thing>] [until <event>]" & ASCII.LF &
         "            | open  <mine>" & ASCII.LF &
-        "            | look  <eye>" & ASCII.LF &
-        "            | say   <one sentence in your own words>" & ASCII.LF &
-        "            | onfail retry | onfail stop" & ASCII.LF &
-        "            | done" & ASCII.LF &
         "<rel>     ::= " & All_Rels & ASCII.LF &
         "<step>    ::= small | medium | large" & ASCII.LF &
+        "<effort>  ::= light | firm | hard        (on the axis you press, you say effort and NOT where to go)" & ASCII.LF &
         "<event>   ::= steps <n> | touch | resist | settle | free" & ASCII.LF &
         "<mine> <thing> ::= <number on the picture> | <a name I must find myself>" & ASCII.LF &
         "<eye>     ::= <number of one of my eyes>";

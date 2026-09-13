@@ -33,6 +33,7 @@ package Selfmap is
       Jaw_Noise : Long_Float := 0.0;
       Floors : Floor_Vectors.Vector;       --  每台相机的静止噪声地板
       Pic_Floor : Ints;                    --  每台相机:整幅画静止时最大灰度差
+      Jaws : Ints;                         --  每条臂量到几个抓握通道(五指手 5,两指手 1)
       Settle : Natural := 2;               --  一条命令发出后读数稳下来要几拍(量出来的)
       --  越用越强:历次量到的幅度/实到(现值取中位数),量过几次
       Amp_Hist : Plug.Floats_Vectors.Vector;
@@ -57,6 +58,8 @@ package Selfmap is
    procedure Wait_Still (L : in out Plug.Link; M : Body_Map; F : in out Plug.Frame; Max : Natural; Used : out Natural; Ok : out Boolean);
    function Pictures_Still (M : Body_Map; Before, After : Plug.Cam_Vectors.Vector) return Boolean;
    procedure Measure (L : in out Plug.Link; F : in out Plug.Frame; M : out Body_Map; Ok : out Boolean);
-   function Jaw_Of (F : Plug.Frame; Arm : Natural) return Long_Float;
+   function Jaw_Of (F : Plug.Frame; Arm : Natural; K : Natural := 0) return Long_Float;
+   function Jaw_Count (F : Plug.Frame; Arm : Natural) return Natural;   --  这条臂量到几个抓握通道
+   function Jaw_All (F : Plug.Frame; Arm : Natural) return Floats;      --  这条臂全部抓握通道此刻的读数
    function Jaw_Index (F : Plug.Frame; Arm : Natural) return Natural;
 end Selfmap;

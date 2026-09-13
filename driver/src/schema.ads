@@ -15,8 +15,8 @@ package Schema is
       N_Blobs : Natural := 0;               --  这块由几团组成(两指 = 2 团;先只存前两团的形心 —— 五指是欠账)
       B0u, B0v, B1u, B1v : Long_Float := 0.0;
    end record;
-   --  每个通道一块:0 .. Per_Arm-1 = 位姿通道带的,Per_Arm = 握合通道带的(手指)
-   type Part_Array is array (0 .. Chan.Per_Arm) of Part_Pos;
+   --  每个通道一块:0 .. Per_Arm-1 = 位姿通道带的,Per_Arm + k = 第 k 个抓握通道带的那一块(手指)
+   type Part_Array is array (0 .. Chan.Per_Arm + Chan.Max_Jaws - 1) of Part_Pos;
    type Sample is record
       Arm, Cam : Natural := 0;
       Pose : Plug.Arm_Pose := [others => 0.0];

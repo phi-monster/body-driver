@@ -22,6 +22,7 @@ package Act is
       Kind : Item_Kind := Thing;
       Arm : Natural := 0;
       Which : Natural := 0;
+      Jaw_K : Natural := 0;          --  Finger/Grip:这是这条臂的第几个抓握通道(五指手一根手指一个)
       Slot : Integer := -1;
       Located : Boolean := False;
       Cu, Cv : Long_Float := 0.0;

@@ -294,7 +294,7 @@ package body Plug is
          declare
             A : constant Floats := Nums_At (L, P);
          begin
-            F.Jaw.Append (if A.Is_Empty then 0.0 else A (0));
+            F.Jaw.Append (A);   --  整组留下,不再只取 A (0)
          end;
       end loop;
       declare
@@ -483,14 +483,21 @@ package body Plug is
          declare
             Ji : constant Natural := Natural'Min (I, Natural (L.Lay.Jaw.Length) - 1);
             Cur : constant Floats := Nums_At (L, L.Lay.Jaw (Ji));
-            V : Long_Float := (if Cur.Is_Empty then 1.0 else Cur (0));
+            Nj : constant Natural := Natural'Max (1, Natural (Cur.Length));
+            Mine : constant Boolean := (I = C.Arm or else Natural (L.Lay.Jaw.Length) = 1) and then not C.Jaw.Is_Empty;
          begin
-            if (I = C.Arm or else Natural (L.Lay.Jaw.Length) = 1) and then not C.Jaw.Is_Empty then
-               V := C.Jaw (0);
-            end if;
             Put_Str (S, Layout.Last_Seg (L.Lay.Jaw (Ji)));
-            Put_Array (S, 1);
-            Put_Float (S, Long_Float'Max (0.0, Long_Float'Min (1.0, V)));
+            Put_Array (S, Nj);
+            for K in 0 .. Nj - 1 loop
+               declare
+                  --  没给命令的通道保持它此刻的读数 —— 一次只动脑点名的那一根手指
+                  V : constant Long_Float :=
+                    (if Mine and then K < Natural (C.Jaw.Length) then C.Jaw (K)
+                     elsif K < Natural (Cur.Length) then Cur (K) else 1.0);
+               begin
+                  Put_Float (S, Long_Float'Max (0.0, Long_Float'Min (1.0, V)));
+               end;
+            end loop;
          end;
       end loop;
       L.Pending := S; L.Has_Pending := True;

@@ -154,14 +154,22 @@ begin
          end if;
       end if;
       --  握区:存的这只手若是在【同一个位姿】下合空量的(每通道差不过一个探针幅度),身体又核对没变 ⇒ 照用,不再合空;否则合空一次
+      --  一条臂上有几个抓握通道是【量出来的】:两指手 1 个,五指手 5 个。每一个各合空一次,各成一个名词。
       for A in 0 .. C.Map.Arms - 1 loop
+       for Jk in 0 .. (if A < Natural (C.Map.Jaws.Length) then Natural'Max (1, C.Map.Jaws (A)) else 1) - 1 loop
          declare
             H : Zone.Hand;
             Reuse : Boolean := False;
+            Old : Integer := -1;   --  存的手里,哪一个是这条臂的这个通道
          begin
-            if Use_Stored and then A < Natural (Stored_Hands.Length) and then A < Natural (F.EE.Length) then
+            for I in 0 .. Natural (Stored_Hands.Length) - 1 loop
+               if Stored_Hands (I).Arm = A and then Stored_Hands (I).K = Jk then
+                  Old := Integer (I);
+               end if;
+            end loop;
+            if Use_Stored and then Old >= 0 and then A < Natural (F.EE.Length) then
                declare
-                  Dv : constant Table.Vec := Chan.Delivered (Stored_Hands (A).Pose, F.EE (A));
+                  Dv : constant Table.Vec := Chan.Delivered (Stored_Hands (Natural (Old)).Pose, F.EE (A));
                   Any_Zone : Boolean := False;
                begin
                   Reuse := True;
@@ -170,7 +178,7 @@ begin
                         Reuse := False;
                      end if;
                   end loop;
-                  for Zc of Stored_Hands (A).Zones loop
+                  for Zc of Stored_Hands (Natural (Old)).Zones loop
                      if Zc.Valid then
                         Any_Zone := True;
                      end if;
@@ -179,24 +187,24 @@ begin
                end;
             end if;
             if Reuse then
-               H := Stored_Hands (A);
-               Put_Line ("[装] 第" & Natural'Image (A + 1) & " 只手:开机位姿和存的合空位姿一样 ⇒ 握区照用,不合空");
+               H := Stored_Hands (Natural (Old));
+               Put_Line ("[装] 第" & Natural'Image (A + 1) & " 只手第" & Natural'Image (Jk) & " 号抓握通道:位姿和存的一样 ⇒ 握区照用,不合空");
             else
-               Zone.Measure (L, C.Map, A, F, H, Ok);
+               Zone.Measure (L, C.Map, A, Jk, F, H, Ok);
                if not Ok then
-                  Put_Line ("[身] 第" & Natural'Image (A + 1) & " 只手的握区量不了");
+                  Put_Line ("[身] 第" & Natural'Image (A + 1) & " 只手第" & Natural'Image (Jk) & " 号抓握通道的握区量不了");
                end if;
             end if;
-            if (not Reuse) and then Use_Stored and then A < Natural (Stored_Hands.Length) then
+            if (not Reuse) and then Use_Stored and then Old >= 0 then
                declare
                   Hc : constant Integer := (if A < Natural (C.Map.Cam_On_Arm.Length) then C.Map.Cam_On_Arm (A) else -1);
                begin
-                  if Hc >= 0 and then Natural (Hc) < Natural (H.Zones.Length) and then Natural (Hc) < Natural (Stored_Hands (A).Zones.Length)
-                    and then H.Zones (Natural (Hc)).Valid and then Stored_Hands (A).Zones (Natural (Hc)).Valid
+                  if Hc >= 0 and then Natural (Hc) < Natural (H.Zones.Length) and then Natural (Hc) < Natural (Stored_Hands (Natural (Old)).Zones.Length)
+                    and then H.Zones (Natural (Hc)).Valid and then Stored_Hands (Natural (Old)).Zones (Natural (Hc)).Valid
                   then
                      declare
                         Zn : constant Zone.Hand_Zone := H.Zones (Natural (Hc));
-                        Zo : constant Zone.Hand_Zone := Stored_Hands (A).Zones (Natural (Hc));
+                        Zo : constant Zone.Hand_Zone := Stored_Hands (Natural (Old)).Zones (Natural (Hc));
                      begin
                         Put_Line ("[装]   第" & Natural'Image (A + 1) & " 只手上相机里的握区:这次 (" & Codec.Fmt (Zn.Cu, 3) & "," & Codec.Fmt (Zn.Cv, 3) & ") 深 " & Codec.Fmt (Zn.Depth, 3) &
                                   " · 存的 (" & Codec.Fmt (Zo.Cu, 3) & "," & Codec.Fmt (Zo.Cv, 3) & ") 深 " & Codec.Fmt (Zo.Depth, 3));
@@ -213,7 +221,7 @@ begin
                   begin
                      X.Arm := A; X.Cam := Cm; X.Pose := F.EE (A);
                      --  握合通道带的那块 = 手指:合空时看见的两团 + 区心 + 手指深
-                     X.Parts (Chan.Per_Arm) := (True, Z.Cu, Z.Cv, (if Picture.Is_Nan (Z.Depth) then 0.0 else Z.Depth), Z.X0, Z.Y0, Z.X1, Z.Y1, Z.N_Lobes, Z.A.Cu, Z.A.Cv, Z.B.Cu, Z.B.Cv);
+                     X.Parts (Chan.Per_Arm + Jk) := (True, Z.Cu, Z.Cv, (if Picture.Is_Nan (Z.Depth) then 0.0 else Z.Depth), Z.X0, Z.Y0, Z.X1, Z.Y1, Z.N_Lobes, Z.A.Cu, Z.A.Cv, Z.B.Cu, Z.B.Cv);
                      --  别的通道带的零件:开机每个通道推过一下,跟着动的那块(从零量的这次才有;装回的身体图里已经带着)
                      begin
                         for K in 0 .. Chan.Per_Arm - 1 loop
@@ -245,6 +253,7 @@ begin
             end loop;
             C.Hands.Append (H);
          end;
+       end loop;
       end loop;
       Put_Line ("[装] 身体图:" & Codec.Img (Natural (C.Sch.S.Length)) & " 个样本(位姿 → 手指在画面哪儿;只存真看见过的)");
       if Body_Path /= "" then

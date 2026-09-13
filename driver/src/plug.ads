@@ -20,7 +20,8 @@ package Plug is
    type Frame is record
       Joints : Floats_Vectors.Vector;   --  每个关节组一串
       EE : Pose_Vectors.Vector;          --  每条臂 xyz + wxyz
-      Jaw : Floats;                      --  每个抓握通道的读数
+      Jaw : Floats_Vectors.Vector;       --  每条臂一串:这条臂【全部】抓握通道的读数
+                                         --  (以前只留第一个 ⇒ 五指手的后四根手指整组丢掉)
       Cams : Cam_Vectors.Vector;
       Seq : Natural := 0;
       Instruction : Unbounded_String;    --  观测里带的任务句
@@ -31,7 +32,7 @@ package Plug is
       Kind : Cmd_Kind := Hold;
       Arm : Natural := 0;
       Pose : Arm_Pose := [others => 0.0];   --  Ee:绝对位姿
-      Jaw : Floats;                          --  这条臂的抓握通道(空 = 保持读数)
+      Jaw : Floats;                          --  这条臂全部抓握通道的目标(空 = 保持读数)
       Q : Floats;                            --  Joint:这一组的绝对关节角
       V : Floats;                            --  Base:速度
    end record;

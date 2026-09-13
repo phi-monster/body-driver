@@ -17,6 +17,7 @@ with Plug;
 with Chan;
 with Lang;
 with Plan;
+with Layout;
 with Selfmap;
 with Learned;
 with Exam;
@@ -437,8 +438,14 @@ begin
       Facts : Plan.Facts_Vectors.Vector;
       T : Exam.Thing_Check;
       Ft : Plan.Item_Facts;
-      function Comp (Src : String; Surface : Boolean := False) return Plan.Compiled is
-        (Plan.Compile (Lang.Parse (Src), R, Facts, Surface));
+      function Comp (Src : String) return Plan.Compiled is
+        (Plan.Compile (Lang.Parse (Src), R, Facts));
+      procedure Set_Stands (On : Boolean) is
+         Ft : Plan.Item_Facts := Facts (1);
+      begin
+         Ft.Stands := On;
+         Facts.Replace_Element (1, Ft);
+      end Set_Stands;
    begin
       --  一具想象的身体:左右/上下/远近证过了能用,朝哪是死的
       for Row in Exam.Row_Id loop
@@ -448,7 +455,7 @@ begin
       R.Things.Append (T);
       Ft.Exists := True; Ft.Mine := True; Ft.Grip := True; Ft.Thing_Idx := 0;
       Facts.Append (Ft);                                   --  0 号 = 我的手
-      Ft := (Exists => True, Mine => False, Grip => False, Arm => 0, Thing_Idx => -1, Label => <>);
+      Ft := (Exists => True, Mine => False, Grip => False, Arm => 0, Thing_Idx => -1, Stands => False, Jaw_K => 0, Label => <>);
       Facts.Append (Ft);                                   --  1 号 = 外面的东西
       Check (Comp ("reach 0 at 1 small until touch").Ok, "编译:能用的行 ⇒ 收");
       declare
@@ -459,9 +466,25 @@ begin
       end;
       Check (not Comp ("reach 1 at 0 small").Ok, "编译:命令别人动 ⇒ 退回(我只推得动我自己)");
       Check (not Comp ("close 1 on 0").Ok, "编译:对着不是手的东西说合手 ⇒ 退回");
-      Check (not Comp ("reach 0 onto 1 small until touch").Ok, "编译:拟不出面时 onto 说不出口");
-      Check (Comp ("reach 0 onto 1 small until touch", Surface => True).Ok, "编译:拟得出面时 onto 就能说了");
-      Check (not Comp ("reach 0 at 1 small until free").Ok, "编译:拟不出面时 until free 说不出口");
+      Check (not Comp ("reach 0 onto 1 small until touch").Ok, "编译:量不出它鼓出多少时 onto 说不出口");
+      Check (not Comp ("reach 0 at 1 small until free").Ok, "编译:量不出它鼓出多少时 until free 说不出口");
+      Check (not Comp ("press 0 1 hard").Ok, "编译:量不出它鼓出多少时 press 说不出口(不知道哪个方向算压向它)");
+      Set_Stands (True);
+      Check (Comp ("reach 0 onto 1 small until touch").Ok, "编译:量得出它鼓出多少 ⇒ onto 就能说了");
+      Check (Comp ("press 0 1 hard").Ok, "编译:量得出 ⇒ press 能说了");
+      Check (not Comp ("press 0 1 hard small").Ok, "编译:press 说了劲就不许再说步子(一根轴上二选一)");
+      Check (not Comp ("press 0 1").Ok, "编译:press 不说劲 ⇒ 退回");
+      declare
+         C6 : constant Plan.Compiled := Comp ("hold 0 above 1" & ASCII.LF & "reach 0 at 1 small until touch"
+              & ASCII.LF & "while reach 0 left 1 small" & ASCII.LF & "press 0 1 firm"
+              & ASCII.LF & "close 0 on 1 until resist" & ASCII.LF & "open 0" & ASCII.LF & "never 0 nearer 1");
+      begin
+         Check (C6.Ok and then Natural (C6.Goals.Length) = 7,
+                "编译:一段程序里 7 条约束照收,没有"
+                & "「一次最多四条」这种上限了(实" & Natural'Image (Natural (C6.Goals.Length)) & ")");
+         Check (C6.Ok and then C6.Goals (2).Together, "编译:while 那一条标成【和上一条同一节里一起解】");
+      end;
+      Set_Stands (False);
       Check (not Comp ("hold 0 at 1" & ASCII.LF & "hold 0 above 1").Ok,
              "编译:两条 hold 抢同一行 ⇒ 退回(一定得牺牲一条,不许跑)");
       Check (Comp ("hold 0 above 1" & ASCII.LF & "reach 0 at 1 small until touch").Ok,
@@ -590,6 +613,38 @@ begin
          Ts.Replace_Element (0, X);
       end;
       Both ("推遍所有通道一格都推不动", False);
+   end;
+   --  ── 认身体:一串都落在 [0,1] 的数 = 一组抓握通道(五指手报五个,以前整组被忽略)──
+   declare
+      S : Buf;
+      D : Msgpack.Doc;
+      L5, L1 : Layout.Body_Layout;
+      procedure Build (N : Natural; V : Long_Float) is
+      begin
+         S.Clear;
+         Msgpack.Put_Map (S, 1);
+         Msgpack.Put_Str (S, "obs"); Msgpack.Put_Map (S, 2);
+         Msgpack.Put_Str (S, "hand"); Msgpack.Put_Array (S, N);
+         for I in 1 .. N loop
+            Msgpack.Put_Float (S, V);
+         end loop;
+         Msgpack.Put_Str (S, "elbow"); Msgpack.Put_Array (S, 6);
+         for I in 1 .. 6 loop
+            Msgpack.Put_Float (S, 0.1);
+         end loop;
+      end Build;
+   begin
+      Build (5, 0.4);
+      Check (Msgpack.Decode (S, D), "认身体:五指手那一帧解得开");
+      Layout.Recognise (D, Msgpack.Key (D, 0, "obs"), L5);
+      Check (Natural (L5.Jaw.Length) = 1,
+             "认身体:五个都在 [0,1] 的数 = 一组抓握通道(以前只认长度 1,五指手整组被忽略)");
+      Build (1, 0.4);
+      Check (Msgpack.Decode (S, D), "认身体:两指手那一帧解得开");
+      Layout.Recognise (D, Msgpack.Key (D, 0, "obs"), L1);
+      Check (Natural (L1.Jaw.Length) = 1, "认身体:两指手照旧认得出");
+      Check (Natural (L5.Joints.Length) = 1 and then Natural (L1.Joints.Length) = 1,
+             "认身体:六个不在 [0,1] 的数仍然算关节角,没被抢走");
    end;
    Put_Line ((if Fails = 0 then "🟢 自检全过" else "🔴 自检失败" & Natural'Image (Fails) & " 条"));
    if Fails > 0 then

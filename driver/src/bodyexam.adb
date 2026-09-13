@@ -89,14 +89,14 @@ begin
             declare
                Ft : Plan.Item_Facts;
             begin
-               Ft.Exists := True; Ft.Mine := False; Ft.Thing_Idx := -1;
+               Ft.Exists := True; Ft.Mine := False; Ft.Thing_Idx := -1; Ft.Stands := True;
                Ft.Label := To_Unbounded_String ("外面的一个东西");
                Facts.Append (Ft);
             end;
             Put_Line ("══ 交上来的程序 ══");
             Put_Line (To_String (Src));
             Put_Line ("══ 编译器 ══");
-            Put_Line (Plan.Report_Text (Plan.Compile (Lang.Parse (To_String (Src)), R, Facts, Surface => False)));
+            Put_Line (Plan.Report_Text (Plan.Compile (Lang.Parse (To_String (Src)), R, Facts)));
             Put_Line ("");
          end;
       end if;

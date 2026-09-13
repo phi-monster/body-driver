@@ -201,11 +201,12 @@ package body Zone is
       return Z;
    end From_Sweep;
 
-   procedure Measure (L : in out Plug.Link; M : Selfmap.Body_Map; Arm : Natural; F : in out Plug.Frame; H : out Hand; Ok : out Boolean) is
+   procedure Measure (L : in out Plug.Link; M : Selfmap.Body_Map; Arm, K : Natural; F : in out Plug.Frame; H : out Hand; Ok : out Boolean) is
       N_Cams : constant Natural := Natural (F.Cams.Length);
       F0 : Plug.Cam_Vectors.Vector;
       Swept : array (0 .. Natural'Max (0, N_Cams - 1)) of Bools;
-      J0 : constant Long_Float := Selfmap.Jaw_Of (F, Arm);
+      J0 : constant Long_Float := Selfmap.Jaw_Of (F, Arm, K);
+      Rest : constant Floats := Selfmap.Jaw_All (F, Arm);   --  其余通道保持它们此刻的读数
       Pose : constant Plug.Arm_Pose := (if Arm < Natural (F.EE.Length) then F.EE (Arm) else [others => 0.0]);
       Prev_J : Long_Float := J0;
       Prev_Cams : Plug.Cam_Vectors.Vector;
@@ -215,6 +216,7 @@ package body Zone is
    begin
       H := (others => <>);
       H.Arm := Arm;
+      H.K := K;
       H.Open_Reading := J0;
       H.Pose := Pose;
       Ok := False;
@@ -224,7 +226,9 @@ package body Zone is
       for C in 0 .. N_Cams - 1 loop
          Swept (C) := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (F.Cams (C).W * F.Cams (C).H));
       end loop;
-      Target.Append (0.0);
+      for I in 0 .. Natural'Max (1, Natural (Rest.Length)) - 1 loop
+         Target.Append (if I = K then 0.0 elsif I < Natural (Rest.Length) then Rest (I) else 1.0);
+      end loop;
       --  抓握读数只是命令的回声(这台机器如此;真机也未必是关节)⇒ "合到停住"只认画面:每台相机连着两拍不变
       declare
          Used : Natural;
@@ -234,7 +238,7 @@ package body Zone is
          if not Ok2 then
             return;
          end if;
-         Put_Line ("[身] 第" & Natural'Image (Arm + 1) & " 只手合空一次(先等画面静止:" & Natural'Image (Used) & " 拍;读数从 " & Codec.Fmt (J0, 3) & " 起)…");
+         Put_Line ("[身] 第" & Natural'Image (Arm + 1) & " 只手第" & Natural'Image (K) & " 号抓握通道合空一次(先等画面静止:" & Natural'Image (Used) & " 拍;读数从 " & Codec.Fmt (J0, 3) & " 起)…");
       end;
       F0 := F.Cams;
       Prev_Cams := F.Cams;
@@ -256,7 +260,7 @@ package body Zone is
             end;
          end loop;
          declare
-            J : constant Long_Float := Selfmap.Jaw_Of (F, Arm);
+            J : constant Long_Float := Selfmap.Jaw_Of (F, Arm, K);
          begin
             if abs (J - Prev_J) <= M.Jaw_Noise and then Selfmap.Pictures_Still (M, Prev_Cams, F.Cams) then
                Still := Still + 1;
@@ -268,11 +272,11 @@ package body Zone is
          end;
          exit when Still >= 2 and then Step >= 3;
       end loop;
-      H.Empty_Close := Selfmap.Jaw_Of (F, Arm);
+      H.Empty_Close := Selfmap.Jaw_Of (F, Arm, K);
       Closed_Frame := F.Cams;
       Put_Line ("[身]   合到停住:读数 " & Codec.Fmt (H.Empty_Close, 3) & "(" & Natural'Image (H.Close_Steps) & " 拍)");
       --  张回去
-      Target.Replace_Element (0, J0);
+      Target.Replace_Element (K, J0);
       Still := 0;
       Prev_Cams := F.Cams;
       for Step in 1 .. 40 loop
@@ -284,7 +288,7 @@ package body Zone is
                return;
             end if;
          end;
-         if abs (Selfmap.Jaw_Of (F, Arm) - J0) <= Long_Float'Max (M.Jaw_Noise, 1.0e-3) and then Selfmap.Pictures_Still (M, Prev_Cams, F.Cams) then
+         if abs (Selfmap.Jaw_Of (F, Arm, K) - J0) <= Long_Float'Max (M.Jaw_Noise, 1.0e-3) and then Selfmap.Pictures_Still (M, Prev_Cams, F.Cams) then
             Still := Still + 1;
          else
             Still := 0;
