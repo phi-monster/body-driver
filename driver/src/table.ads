@@ -65,4 +65,8 @@ package Table is
    --  这一行在这具身体上"推一格能被推动多少"(所有通道里最响的那个)。
    --  把每一行的误差按它自己的这个尺度归一,五行才在同一种货币里比较 —— 否则量纲最大的那一行独吞方程。
    function Row_Scale (E : Effect; Notch : Vec; R : Natural) return Long_Float;
+   --  🔴 "这一行证明过了没有" 只在这里定义一次 —— 体检和执行器都问它,免得两处判据分叉。
+   --  证明过 = 一格推得动(尺度 > 0)+ 同一个推法重复过至少两次 + 散布小于均值本身。
+   function Row_Proven (E : Effect; Notch : Vec; R : Natural) return Boolean;
+   function Row_Why (E : Effect; Notch : Vec; R : Natural) return String;   --  没证过时,一句人话
 end Table;

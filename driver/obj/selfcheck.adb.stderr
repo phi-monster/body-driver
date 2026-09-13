@@ -1,0 +1,3 @@
+selfcheck.adb:16:06: warning: unit "Plug" is not referenced [-gnatwu]
+selfcheck.adb:80:201: (style) this line is too long: 317 [-gnatyM]
+selfcheck.adb:304:07: warning: "Cap" is not modified, could be declared constant [-gnatwk]

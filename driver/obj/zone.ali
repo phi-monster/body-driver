@@ -1,0 +1,757 @@
+V "GNAT Lib v16"
+A -O2
+A -gnatA
+A -gnat2022
+A -gnata
+A -gnatwa
+A -g
+A -gnatyM200
+A -mmacosx-version-min=26.0.0
+A -mcpu=apple-m1
+A -mlittle-endian
+A -mabi=lp64
+A -fPIC
+P SS ZX
+
+RN
+RV NO_DISPATCHING_CALLS
+RV NO_ENUMERATION_MAPS
+RV NO_EXCEPTION_HANDLERS
+RV NO_EXCEPTION_PROPAGATION
+RV NO_EXCEPTIONS
+RV NO_FLOATING_POINT
+RV NO_IO
+RV NO_IMPLICIT_CONDITIONALS
+RV NO_LOCAL_ALLOCATORS
+RV NO_NESTED_FINALIZATION
+RV NO_SECONDARY_STACK
+RV NO_STANDARD_STORAGE_POOLS
+RV NO_DEFAULT_INITIALIZATION
+RV NO_DYNAMIC_SIZED_OBJECTS
+RV NO_IMPLEMENTATION_PRAGMAS
+RV NO_IMPLICIT_LOOPS
+RV NO_ELABORATION_CODE
+
+U zone%b		zone.adb		f5d54776 NE OO PK
+W ada%s			ada.ads			ada.ali
+W ada.containers%s	a-contai.ads		a-contai.ali
+Z ada.exceptions%s	a-except.adb		a-except.ali
+W ada.numerics%s	a-numeri.ads		a-numeri.ali
+W ada.numerics.long_elementary_functions%s  a-nlelfu.ads  a-nlelfu.ali
+Z ada.strings.text_buffers%s  a-sttebu.adb	a-sttebu.ali
+Z ada.tags%s		a-tags.adb		a-tags.ali
+W ada.text_io%s		a-textio.adb		a-textio.ali
+W codec%s		codec.adb		codec.ali
+Z system%s		system.ads		system.ali
+Z system.finalization_primitives%s  s-finpri.adb  s-finpri.ali
+Z system.img_int%s	s-imgint.ads		s-imgint.ali
+Z system.return_stack%s	s-retsta.ads		s-retsta.ali
+Z system.secondary_stack%s  s-secsta.adb	s-secsta.ali
+Z system.soft_links%s	s-soflin.adb		s-soflin.ali
+Z system.standard_library%s  s-stalib.adb	s-stalib.ali
+Z system.storage_elements%s  s-stoele.ads	s-stoele.ali
+
+U zone%s		zone.ads		d3158dd7 EE OO PF PK
+W ada%s			ada.ads			ada.ali
+W ada.containers%s	a-contai.ads		a-contai.ali
+Z ada.containers.generic_array_sort%s
+Z ada.containers.helpers%s  a-conhel.adb	a-conhel.ali
+W ada.containers.vectors%s
+Z ada.exceptions%s	a-except.adb		a-except.ali
+Z ada.finalization%s	a-finali.ads		a-finali.ali
+Z ada.iterator_interfaces%s
+Z ada.streams%s		a-stream.adb		a-stream.ali
+W ada.strings%s		a-string.ads		a-string.ali
+Z ada.strings.text_buffers%s  a-sttebu.adb	a-sttebu.ali
+Z ada.tags%s		a-tags.adb		a-tags.ali
+Z ada.unchecked_deallocation%s
+W bytes%s		bytes.adb		bytes.ali
+W picture%s		picture.adb		picture.ali
+W plug%s		plug.adb		plug.ali
+W selfmap%s		selfmap.adb		selfmap.ali
+Z system%s		system.ads		system.ali
+Z system.assertions%s	s-assert.adb		s-assert.ali
+Z system.finalization_primitives%s  s-finpri.adb  s-finpri.ali
+Z system.img_lflt%s	s-imglfl.ads		s-imglfl.ali
+Z system.pool_global%s	s-pooglo.adb		s-pooglo.ali
+Z system.put_images%s	s-putima.adb		s-putima.ali
+Z system.return_stack%s	s-retsta.ads		s-retsta.ali
+Z system.secondary_stack%s  s-secsta.adb	s-secsta.ali
+Z system.soft_links%s	s-soflin.adb		s-soflin.ali
+Z system.standard_library%s  s-stalib.adb	s-stalib.ali
+Z system.storage_elements%s  s-stoele.ads	s-stoele.ali
+Z system.storage_pools%s  s-stopoo.adb		s-stopoo.ali
+Z system.storage_pools.subpools%s  s-stposu.adb	s-stposu.ali
+Z system.stream_attributes%s  s-stratt.adb	s-stratt.ali
+Z system.wch_stw%s	s-wchstw.adb		s-wchstw.ali
+
+D ada.ads		20260610194523 76789da1 ada%s
+D a-assert.ads		20260610194523 ba465f5c ada.assertions%s
+D a-charac.ads		20260610194523 2d3ec45b ada.characters%s
+D a-chlat1.ads		20260610194523 e0d72e76 ada.characters.latin_1%s
+D a-contai.ads		20260610194523 61e5e089 ada.containers%s
+D a-cgarso.ads		20260610194523 9129bfa8 ada.containers.generic_array_sort%s
+D a-conhel.ads		20260610194523 46fe1ce3 ada.containers.helpers%s
+D a-conhel.adb		20260610194523 854d323e ada.containers.helpers%b
+D a-coinve.ads		20260610194523 2d0a9a0e ada.containers.indefinite_vectors%s
+D a-convec.ads		20260610194523 cb0f314a ada.containers.vectors%s
+D a-convec.adb		20260610194523 b2ed0168 ada.containers.vectors%b
+D a-except.ads		20260610194523 8699d7ff ada.exceptions%s
+D a-finali.ads		20260610194523 099c16e4 ada.finalization%s
+D a-ioexce.ads		20260610194523 40018c65 ada.io_exceptions%s
+D a-iteint.ads		20260610194523 49a8bee2 ada.iterator_interfaces%s
+D a-numeri.ads		20260610194523 84bea7a3 ada.numerics%s
+D a-ngelfu.ads		20260610194523 324808ac ada.numerics.generic_elementary_functions%s
+D a-nlelfu.ads		20260610194523 7620113d ada.numerics.long_elementary_functions%s
+D a-stream.ads		20260610194523 cb01a8f8 ada.streams%s
+D a-string.ads		20260610194523 90ac6797 ada.strings%s
+D a-strmap.ads		20260610194523 f7e6ca10 ada.strings.maps%s
+D a-strsea.ads		20260610194523 18c3c634 ada.strings.search%s
+D a-sttebu.ads		20260610194523 f1ad67a2 ada.strings.text_buffers%s
+D a-strunb.ads		20260610194523 8d6ccba7 ada.strings.unbounded%s
+D a-stuten.ads		20260610194523 c6ced0ae ada.strings.utf_encoding%s
+D a-tags.ads		20260610194523 2dbf449c ada.tags%s
+D a-textio.ads		20260610194523 34ef47de ada.text_io%s
+D a-unccon.ads		20260610194523 0e9b276f ada.unchecked_conversion%s
+D a-uncdea.ads		20260610194523 c3a8ac65 ada.unchecked_deallocation%s
+D bytes.ads		20260906203008 86b1403c bytes%s
+D codec.ads		20260906203008 34417e50 codec%s
+D gnat.ads		20260610194523 b5988c27 gnat%s
+D g-socket.ads		20260610194523 a4cab028 gnat.sockets%s
+D interfac.ads		20260610194523 9111f9c1 interfaces%s
+D i-c.ads		20260610194523 dbdd3be7 interfaces.c%s
+D i-cstrea.ads		20260610194523 ffd01b9d interfaces.c_streams%s
+D layout.ads		20260906203008 c005157d layout%s
+D msgpack.ads		20260906203008 0af3a83c msgpack%s
+D picture.ads		20260912223334 103f308c picture%s
+D plug.ads		20260907080552 5ecb2156 plug%s
+D selfmap.ads		20260907102348 3ecf7596 selfmap%s
+D system.ads		20260610194523 8a611ac3 system%s
+D s-assert.ads		20260610194523 9c4520c7 system.assertions%s
+D s-atocou.ads		20260610194523 dc18efc3 system.atomic_counters%s
+D s-atocou.adb		20260610194523 6fe685de system.atomic_counters%b
+D s-atopri.ads		20260610194523 e19c1d89 system.atomic_primitives%s
+D s-crtl.ads		20260610194523 823b6536 system.crtl%s
+D s-exctab.ads		20260610194523 91bef6ef system.exception_table%s
+D s-ficobl.ads		20260610194523 dc5161d4 system.file_control_block%s
+D s-finpri.ads		20260610194523 5970d55a system.finalization_primitives%s
+D s-finroo.ads		20260610194523 0a7c3ed4 system.finalization_root%s
+D s-imagei.ads		20260610194523 11a376a2 system.image_i%s
+D s-imager.ads		20260610194523 45c7157d system.image_r%s
+D s-imageu.ads		20260610194523 95851461 system.image_u%s
+D s-imgint.ads		20260610194523 86836590 system.img_int%s
+D s-imglfl.ads		20260610194523 941be202 system.img_lflt%s
+D s-imgllu.ads		20260610194523 047fb1fb system.img_llu%s
+D s-memory.ads		20260610194523 18949c1a system.memory%s
+D s-oscons.ads		20260626180535 42ad9981 system.os_constants%s
+D s-oslock.ads		20260610194523 bcc789d2 system.os_locks%s
+D s-parame.ads		20260610194523 a1aeab5c system.parameters%s
+D s-pooglo.ads		20260610194523 91708d21 system.pool_global%s
+D s-powlfl.ads		20260610194523 ac0852c8 system.powten_lflt%s
+D s-putima.ads		20260610194523 1b989439 system.put_images%s
+D s-retsta.ads		20260610194523 0f6b06cb system.return_stack%s
+D s-secsta.ads		20260610194523 578279f5 system.secondary_stack%s
+D s-soflin.ads		20260610194523 5d88fdea system.soft_links%s
+D s-stache.ads		20260610194523 0b81c1fe system.stack_checking%s
+D s-stalib.ads		20260610194523 1c9580f6 system.standard_library%s
+D s-stalib.adb		20260610194523 eb464a47 system.standard_library%b
+D s-stoele.ads		20260610194523 ccded4e8 system.storage_elements%s
+D s-stopoo.ads		20260610194523 45459446 system.storage_pools%s
+D s-stposu.ads		20260610194523 f8e797ef system.storage_pools.subpools%s
+D s-stratt.ads		20260610194523 80b8dafb system.stream_attributes%s
+D s-traent.ads		20260610194523 c81cbf8c system.traceback_entries%s
+D s-unstyp.ads		20260610194523 fa2a7f59 system.unsigned_types%s
+D s-wchcon.ads		20260610194523 d9032363 system.wch_con%s
+D s-wchstw.ads		20260610194523 2d112c01 system.wch_stw%s
+D table.ads		20260908002242 51b66f9a table%s
+D websocket.ads		20260906203008 e2cfe5a2 websocket%s
+D zone.ads		20260912223334 ee9098ed zone%s
+D zone.adb		20260912223334 0c2e17a1 zone%b
+G a e
+G c Z s s [lobeIP zone 9 9 none]
+G c Z s s [hand_zoneDI zone 15 9 none]
+G c Z s s [hand_zoneDA zone 15 9 none]
+G c Z s s [hand_zoneDF zone 15 9 none]
+G c Z s s [hand_zoneIP zone 15 9 none]
+G c Z s s [has_element zone__zone_vectors 115 13 26_4]
+G c Z s s [empty zone__zone_vectors 125 13 26_4]
+G c Z s s [Oeq zone__zone_vectors 127 24 26_4]
+G c Z s s [to_vector zone__zone_vectors 136 13 26_4]
+G c Z s s [to_vector zone__zone_vectors 139 13 26_4]
+G c Z s s [Oconcat zone__zone_vectors 145 13 26_4]
+G c Z s s [Oconcat zone__zone_vectors 149 13 26_4]
+G c Z s s [Oconcat zone__zone_vectors 153 13 26_4]
+G c Z s s [Oconcat zone__zone_vectors 157 13 26_4]
+G c Z s s [capacity zone__zone_vectors 161 13 26_4]
+G c Z s s [reserve_capacity zone__zone_vectors 164 14 26_4]
+G c Z s s [length zone__zone_vectors 175 13 26_4]
+G c Z s s [set_length zone__zone_vectors 178 14 26_4]
+G c Z s s [is_empty zone__zone_vectors 187 13 26_4]
+G c Z s s [clear zone__zone_vectors 190 14 26_4]
+G c Z s s [to_cursor zone__zone_vectors 194 13 26_4]
+G c Z s s [to_index zone__zone_vectors 201 13 26_4]
+G c Z s s [element zone__zone_vectors 206 13 26_4]
+G c Z s s [element zone__zone_vectors 213 13 26_4]
+G c Z s s [replace_element zone__zone_vectors 217 14 26_4]
+G c Z s s [replace_element zone__zone_vectors 228 14 26_4]
+G c Z s s [query_element zone__zone_vectors 239 14 26_4]
+G c Z s s [query_element zone__zone_vectors 250 14 26_4]
+G c Z s s [update_element zone__zone_vectors 259 14 26_4]
+G c Z s s [update_element zone__zone_vectors 276 14 26_4]
+G c Z s s [constant_reference zone__zone_vectors 303 13 26_4]
+G c Z s s [reference zone__zone_vectors 308 13 26_4]
+G c Z s s [constant_reference zone__zone_vectors 313 13 26_4]
+G c Z s s [reference zone__zone_vectors 318 13 26_4]
+G c Z s s [assign zone__zone_vectors 323 14 26_4]
+G c Z s s [copy zone__zone_vectors 325 13 26_4]
+G c Z s s [move zone__zone_vectors 327 14 26_4]
+G c Z s s [new_vector zone__zone_vectors 333 13 26_4]
+G c Z s s [insert_vector zone__zone_vectors 337 14 26_4]
+G c Z s s [insert_vector zone__zone_vectors 361 14 26_4]
+G c Z s s [insert_vector zone__zone_vectors 378 14 26_4]
+G c Z s s [insert zone__zone_vectors 396 14 26_4]
+G c Z s s [insert zone__zone_vectors 404 14 26_4]
+G c Z s s [insert zone__zone_vectors 412 14 26_4]
+G c Z s s [insert zone__zone_vectors 421 14 26_4]
+G c Z s s [insert zone__zone_vectors 438 14 26_4]
+G c Z s s [prepend_vector zone__zone_vectors 449 14 26_4]
+G c Z s s [prepend zone__zone_vectors 459 14 26_4]
+G c Z s s [append_vector zone__zone_vectors 466 14 26_4]
+G c Z s s [append zone__zone_vectors 476 14 26_4]
+G c Z s s [append zone__zone_vectors 483 14 26_4]
+G c Z s s [insert_space zone__zone_vectors 486 14 26_4]
+G c Z s s [insert_space zone__zone_vectors 503 14 26_4]
+G c Z s s [delete zone__zone_vectors 514 14 26_4]
+G c Z s s [delete zone__zone_vectors 524 14 26_4]
+G c Z s s [delete_first zone__zone_vectors 533 14 26_4]
+G c Z s s [delete_last zone__zone_vectors 538 14 26_4]
+G c Z s s [reverse_elements zone__zone_vectors 546 14 26_4]
+G c Z s s [swap zone__zone_vectors 549 14 26_4]
+G c Z s s [swap zone__zone_vectors 554 14 26_4]
+G c Z s s [first_index zone__zone_vectors 560 13 26_4]
+G c Z s s [first zone__zone_vectors 563 13 26_4]
+G c Z s s [first_element zone__zone_vectors 567 13 26_4]
+G c Z s s [last_index zone__zone_vectors 570 13 26_4]
+G c Z s s [last zone__zone_vectors 574 13 26_4]
+G c Z s s [last_element zone__zone_vectors 578 13 26_4]
+G c Z s s [next zone__zone_vectors 581 13 26_4]
+G c Z s s [next zone__zone_vectors 587 14 26_4]
+G c Z s s [previous zone__zone_vectors 590 13 26_4]
+G c Z s s [previous zone__zone_vectors 596 14 26_4]
+G c Z s s [find_index zone__zone_vectors 599 13 26_4]
+G c Z s s [find zone__zone_vectors 609 13 26_4]
+G c Z s s [reverse_find_index zone__zone_vectors 623 13 26_4]
+G c Z s s [reverse_find zone__zone_vectors 635 13 26_4]
+G c Z s s [contains zone__zone_vectors 649 13 26_4]
+G c Z s s [iterate zone__zone_vectors 654 14 26_4]
+G c Z s s [reverse_iterate zone__zone_vectors 662 14 26_4]
+G c Z s s [iterate zone__zone_vectors 669 13 26_4]
+G c Z s s [iterate zone__zone_vectors 672 13 26_4]
+G c Z s s [adjust zone__zone_vectors__implementation 90 28 726_4_26_4]
+G c Z s s [finalize zone__zone_vectors__implementation 93 28 726_4_26_4]
+G c Z s s [zero_counts zone__zone_vectors__implementation 96 17 726_4_26_4]
+G c Z s s [busy zone__zone_vectors__implementation 100 17 726_4_26_4]
+G c Z s s [unbusy zone__zone_vectors__implementation 104 17 726_4_26_4]
+G c Z s s [lock zone__zone_vectors__implementation 108 17 726_4_26_4]
+G c Z s s [unlock zone__zone_vectors__implementation 112 17 726_4_26_4]
+G c Z s s [tc_check zone__zone_vectors__implementation 116 17 726_4_26_4]
+G c Z s s [te_check zone__zone_vectors__implementation 120 17 726_4_26_4]
+G c Z s s [is_busy zone__zone_vectors__implementation 136 16 726_4_26_4]
+G c Z s s [is_locked zone__zone_vectors__implementation 140 16 726_4_26_4]
+G c Z s s [initialize zone__zone_vectors__implementation 161 28 726_4_26_4]
+G c Z s s [finalize zone__zone_vectors__implementation 162 28 726_4_26_4]
+G c Z s s [initialize zone__zone_vectors__implementation 167 28 726_4_26_4]
+G c Z s s [finalize zone__zone_vectors__implementation 168 28 726_4_26_4]
+G c Z s s [reference_control_typeDA zone__zone_vectors__implementation 84 12 726_4_26_4]
+G c Z s s [reference_control_typeDF zone__zone_vectors__implementation 84 12 726_4_26_4]
+G c Z s s [reference_control_typeIP zone__zone_vectors__implementation 84 12 726_4_26_4]
+G c Z s s [with_busyDF zone__zone_vectors__implementation 158 12 726_4_26_4]
+G c Z s s [with_busyIP zone__zone_vectors__implementation 158 12 726_4_26_4]
+G c Z s s [with_lockDF zone__zone_vectors__implementation 164 12 726_4_26_4]
+G c Z s s [with_lockIP zone__zone_vectors__implementation 164 12 726_4_26_4]
+G c Z s s [put_image zone__zone_vectors 747 14 26_4]
+G c Z s s [adjust zone__zone_vectors 750 25 26_4]
+G c Z s s [finalize zone__zone_vectors 751 25 26_4]
+G c Z s s [write zone__zone_vectors 753 14 26_4]
+G c Z s s [read zone__zone_vectors 759 14 26_4]
+G c Z s s [read zone__zone_vectors 773 14 26_4]
+G c Z s s [write zone__zone_vectors 779 14 26_4]
+G c Z s s [write zone__zone_vectors 798 14 26_4]
+G c Z s s [read zone__zone_vectors 804 14 26_4]
+G c Z s s [write zone__zone_vectors 820 14 26_4]
+G c Z s s [read zone__zone_vectors 826 14 26_4]
+G c Z s s [pseudo_reference zone__zone_vectors 840 13 26_4]
+G c Z s s [get_element_access zone__zone_vectors 849 13 26_4]
+G c Z s s [cursorIP zone__zone_vectors 768 9 26_4]
+G c Z s s [vectorDA zone__zone_vectors 741 9 26_4]
+G c Z s s [vectorDF zone__zone_vectors 741 9 26_4]
+G c Z s s [vectorIP zone__zone_vectors 741 9 26_4]
+G c Z s s [finalize zone__zone_vectors 865 25 26_4]
+G c Z s s [first zone__zone_vectors 867 24 26_4]
+G c Z s s [last zone__zone_vectors 868 24 26_4]
+G c Z s s [next zone__zone_vectors 870 24 26_4]
+G c Z s s [previous zone__zone_vectors 874 24 26_4]
+G c Z s s [constant_reference_typeDI zone__zone_vectors 788 9 26_4]
+G c Z s s [constant_reference_typeDA zone__zone_vectors 788 9 26_4]
+G c Z s s [constant_reference_typeDF zone__zone_vectors 788 9 26_4]
+G c Z s s [constant_reference_typeIP zone__zone_vectors 788 9 26_4]
+G c Z s s [reference_typeDI zone__zone_vectors 810 9 26_4]
+G c Z s s [reference_typeDA zone__zone_vectors 810 9 26_4]
+G c Z s s [reference_typeDF zone__zone_vectors 810 9 26_4]
+G c Z s s [reference_typeIP zone__zone_vectors 810 9 26_4]
+G c Z s s [elements_arrayIP zone__zone_vectors 729 9 26_4]
+G c Z s s [elements_arrayDI zone__zone_vectors 729 9 26_4]
+G c Z s s [elements_arrayDA zone__zone_vectors 729 9 26_4]
+G c Z s s [elements_arrayDF zone__zone_vectors 729 9 26_4]
+G c Z s s [elements_typeDI zone__zone_vectors 732 9 26_4]
+G c Z s s [elements_typeDF zone__zone_vectors 732 9 26_4]
+G c Z s s [elements_typeIP zone__zone_vectors 732 9 26_4]
+G c Z s s [iteratorDF zone__zone_vectors 857 9 26_4]
+G c Z s s [iteratorIP zone__zone_vectors 857 9 26_4]
+G c Z s s [free zone__zone_vectors 44 14 26_4]
+G c Z s s [append_slow_path zone__zone_vectors 47 14 26_4]
+G c Z s s [handDI zone 27 9 none]
+G c Z s s [handDA zone 27 9 none]
+G c Z s s [handDF zone 27 9 none]
+G c Z s s [handIP zone 27 9 none]
+G c Z s s [has_element zone__hand_vectors 115 13 35_4]
+G c Z s s [empty zone__hand_vectors 125 13 35_4]
+G c Z s s [Oeq zone__hand_vectors 127 24 35_4]
+G c Z s s [to_vector zone__hand_vectors 136 13 35_4]
+G c Z s s [to_vector zone__hand_vectors 139 13 35_4]
+G c Z s s [Oconcat zone__hand_vectors 145 13 35_4]
+G c Z s s [Oconcat zone__hand_vectors 149 13 35_4]
+G c Z s s [Oconcat zone__hand_vectors 153 13 35_4]
+G c Z s s [Oconcat zone__hand_vectors 157 13 35_4]
+G c Z s s [capacity zone__hand_vectors 161 13 35_4]
+G c Z s s [reserve_capacity zone__hand_vectors 164 14 35_4]
+G c Z s s [length zone__hand_vectors 175 13 35_4]
+G c Z s s [set_length zone__hand_vectors 178 14 35_4]
+G c Z s s [is_empty zone__hand_vectors 187 13 35_4]
+G c Z s s [clear zone__hand_vectors 190 14 35_4]
+G c Z s s [to_cursor zone__hand_vectors 194 13 35_4]
+G c Z s s [to_index zone__hand_vectors 201 13 35_4]
+G c Z s s [element zone__hand_vectors 206 13 35_4]
+G c Z s s [element zone__hand_vectors 213 13 35_4]
+G c Z s s [replace_element zone__hand_vectors 217 14 35_4]
+G c Z s s [replace_element zone__hand_vectors 228 14 35_4]
+G c Z s s [query_element zone__hand_vectors 239 14 35_4]
+G c Z s s [query_element zone__hand_vectors 250 14 35_4]
+G c Z s s [update_element zone__hand_vectors 259 14 35_4]
+G c Z s s [update_element zone__hand_vectors 276 14 35_4]
+G c Z s s [constant_reference zone__hand_vectors 303 13 35_4]
+G c Z s s [reference zone__hand_vectors 308 13 35_4]
+G c Z s s [constant_reference zone__hand_vectors 313 13 35_4]
+G c Z s s [reference zone__hand_vectors 318 13 35_4]
+G c Z s s [assign zone__hand_vectors 323 14 35_4]
+G c Z s s [copy zone__hand_vectors 325 13 35_4]
+G c Z s s [move zone__hand_vectors 327 14 35_4]
+G c Z s s [new_vector zone__hand_vectors 333 13 35_4]
+G c Z s s [insert_vector zone__hand_vectors 337 14 35_4]
+G c Z s s [insert_vector zone__hand_vectors 361 14 35_4]
+G c Z s s [insert_vector zone__hand_vectors 378 14 35_4]
+G c Z s s [insert zone__hand_vectors 396 14 35_4]
+G c Z s s [insert zone__hand_vectors 404 14 35_4]
+G c Z s s [insert zone__hand_vectors 412 14 35_4]
+G c Z s s [insert zone__hand_vectors 421 14 35_4]
+G c Z s s [insert zone__hand_vectors 438 14 35_4]
+G c Z s s [prepend_vector zone__hand_vectors 449 14 35_4]
+G c Z s s [prepend zone__hand_vectors 459 14 35_4]
+G c Z s s [append_vector zone__hand_vectors 466 14 35_4]
+G c Z s s [append zone__hand_vectors 476 14 35_4]
+G c Z s s [append zone__hand_vectors 483 14 35_4]
+G c Z s s [insert_space zone__hand_vectors 486 14 35_4]
+G c Z s s [insert_space zone__hand_vectors 503 14 35_4]
+G c Z s s [delete zone__hand_vectors 514 14 35_4]
+G c Z s s [delete zone__hand_vectors 524 14 35_4]
+G c Z s s [delete_first zone__hand_vectors 533 14 35_4]
+G c Z s s [delete_last zone__hand_vectors 538 14 35_4]
+G c Z s s [reverse_elements zone__hand_vectors 546 14 35_4]
+G c Z s s [swap zone__hand_vectors 549 14 35_4]
+G c Z s s [swap zone__hand_vectors 554 14 35_4]
+G c Z s s [first_index zone__hand_vectors 560 13 35_4]
+G c Z s s [first zone__hand_vectors 563 13 35_4]
+G c Z s s [first_element zone__hand_vectors 567 13 35_4]
+G c Z s s [last_index zone__hand_vectors 570 13 35_4]
+G c Z s s [last zone__hand_vectors 574 13 35_4]
+G c Z s s [last_element zone__hand_vectors 578 13 35_4]
+G c Z s s [next zone__hand_vectors 581 13 35_4]
+G c Z s s [next zone__hand_vectors 587 14 35_4]
+G c Z s s [previous zone__hand_vectors 590 13 35_4]
+G c Z s s [previous zone__hand_vectors 596 14 35_4]
+G c Z s s [find_index zone__hand_vectors 599 13 35_4]
+G c Z s s [find zone__hand_vectors 609 13 35_4]
+G c Z s s [reverse_find_index zone__hand_vectors 623 13 35_4]
+G c Z s s [reverse_find zone__hand_vectors 635 13 35_4]
+G c Z s s [contains zone__hand_vectors 649 13 35_4]
+G c Z s s [iterate zone__hand_vectors 654 14 35_4]
+G c Z s s [reverse_iterate zone__hand_vectors 662 14 35_4]
+G c Z s s [iterate zone__hand_vectors 669 13 35_4]
+G c Z s s [iterate zone__hand_vectors 672 13 35_4]
+G c Z s s [adjust zone__hand_vectors__implementation 90 28 726_4_35_4]
+G c Z s s [finalize zone__hand_vectors__implementation 93 28 726_4_35_4]
+G c Z s s [zero_counts zone__hand_vectors__implementation 96 17 726_4_35_4]
+G c Z s s [busy zone__hand_vectors__implementation 100 17 726_4_35_4]
+G c Z s s [unbusy zone__hand_vectors__implementation 104 17 726_4_35_4]
+G c Z s s [lock zone__hand_vectors__implementation 108 17 726_4_35_4]
+G c Z s s [unlock zone__hand_vectors__implementation 112 17 726_4_35_4]
+G c Z s s [tc_check zone__hand_vectors__implementation 116 17 726_4_35_4]
+G c Z s s [te_check zone__hand_vectors__implementation 120 17 726_4_35_4]
+G c Z s s [is_busy zone__hand_vectors__implementation 136 16 726_4_35_4]
+G c Z s s [is_locked zone__hand_vectors__implementation 140 16 726_4_35_4]
+G c Z s s [initialize zone__hand_vectors__implementation 161 28 726_4_35_4]
+G c Z s s [finalize zone__hand_vectors__implementation 162 28 726_4_35_4]
+G c Z s s [initialize zone__hand_vectors__implementation 167 28 726_4_35_4]
+G c Z s s [finalize zone__hand_vectors__implementation 168 28 726_4_35_4]
+G c Z s s [reference_control_typeDA zone__hand_vectors__implementation 84 12 726_4_35_4]
+G c Z s s [reference_control_typeDF zone__hand_vectors__implementation 84 12 726_4_35_4]
+G c Z s s [reference_control_typeIP zone__hand_vectors__implementation 84 12 726_4_35_4]
+G c Z s s [with_busyDF zone__hand_vectors__implementation 158 12 726_4_35_4]
+G c Z s s [with_busyIP zone__hand_vectors__implementation 158 12 726_4_35_4]
+G c Z s s [with_lockDF zone__hand_vectors__implementation 164 12 726_4_35_4]
+G c Z s s [with_lockIP zone__hand_vectors__implementation 164 12 726_4_35_4]
+G c Z s s [put_image zone__hand_vectors 747 14 35_4]
+G c Z s s [adjust zone__hand_vectors 750 25 35_4]
+G c Z s s [finalize zone__hand_vectors 751 25 35_4]
+G c Z s s [write zone__hand_vectors 753 14 35_4]
+G c Z s s [read zone__hand_vectors 759 14 35_4]
+G c Z s s [read zone__hand_vectors 773 14 35_4]
+G c Z s s [write zone__hand_vectors 779 14 35_4]
+G c Z s s [write zone__hand_vectors 798 14 35_4]
+G c Z s s [read zone__hand_vectors 804 14 35_4]
+G c Z s s [write zone__hand_vectors 820 14 35_4]
+G c Z s s [read zone__hand_vectors 826 14 35_4]
+G c Z s s [pseudo_reference zone__hand_vectors 840 13 35_4]
+G c Z s s [get_element_access zone__hand_vectors 849 13 35_4]
+G c Z s s [cursorIP zone__hand_vectors 768 9 35_4]
+G c Z s s [vectorDA zone__hand_vectors 741 9 35_4]
+G c Z s s [vectorDF zone__hand_vectors 741 9 35_4]
+G c Z s s [vectorIP zone__hand_vectors 741 9 35_4]
+G c Z s s [finalize zone__hand_vectors 865 25 35_4]
+G c Z s s [first zone__hand_vectors 867 24 35_4]
+G c Z s s [last zone__hand_vectors 868 24 35_4]
+G c Z s s [next zone__hand_vectors 870 24 35_4]
+G c Z s s [previous zone__hand_vectors 874 24 35_4]
+G c Z s s [constant_reference_typeDI zone__hand_vectors 788 9 35_4]
+G c Z s s [constant_reference_typeDA zone__hand_vectors 788 9 35_4]
+G c Z s s [constant_reference_typeDF zone__hand_vectors 788 9 35_4]
+G c Z s s [constant_reference_typeIP zone__hand_vectors 788 9 35_4]
+G c Z s s [reference_typeDI zone__hand_vectors 810 9 35_4]
+G c Z s s [reference_typeDA zone__hand_vectors 810 9 35_4]
+G c Z s s [reference_typeDF zone__hand_vectors 810 9 35_4]
+G c Z s s [reference_typeIP zone__hand_vectors 810 9 35_4]
+G c Z s s [elements_arrayIP zone__hand_vectors 729 9 35_4]
+G c Z s s [elements_arrayDI zone__hand_vectors 729 9 35_4]
+G c Z s s [elements_arrayDA zone__hand_vectors 729 9 35_4]
+G c Z s s [elements_arrayDF zone__hand_vectors 729 9 35_4]
+G c Z s s [elements_typeDI zone__hand_vectors 732 9 35_4]
+G c Z s s [elements_typeDF zone__hand_vectors 732 9 35_4]
+G c Z s s [elements_typeIP zone__hand_vectors 732 9 35_4]
+G c Z s s [iteratorDF zone__hand_vectors 857 9 35_4]
+G c Z s s [iteratorIP zone__hand_vectors 857 9 35_4]
+G c Z s s [free zone__hand_vectors 44 14 35_4]
+G c Z s s [append_slow_path zone__hand_vectors 47 14 35_4]
+G c Z s b [measure zone 37 14 none]
+G c Z s b [from_sweep zone 40 13 none]
+G c Z s b [is_self zone 42 13 none]
+G r c none [measure zone 37 14 none] [jaw_of selfmap 60 13 none]
+G r c none [measure zone 37 14 none] [wait_still selfmap 57 14 none]
+G r c none [measure zone 37 14 none] [fmt codec 14 13 none]
+G r s cmd [measure zone 37 14 none] [cmdIP plug 30 9 none]
+G r l cmd [measure zone 37 14 none] [cmdDI plug 30 9 none]
+G r k cmd [measure zone 37 14 none] [cmdDF plug 30 9 none]
+G r c none [measure zone 37 14 none] [sense plug 59 13 none]
+G r c none [measure zone 37 14 none] [act plug 60 13 none]
+G r c none [measure zone 37 14 none] [moved picture 36 13 none]
+G r c none [measure zone 37 14 none] [either picture 38 13 none]
+G r c none [measure zone 37 14 none] [pictures_still selfmap 58 13 none]
+G r c none [measure zone 37 14 none] [env codec 17 13 none]
+G r c none [measure zone 37 14 none] [img codec 15 13 none]
+G r c none [measure zone 37 14 none] [write_pgm codec 10 14 none]
+G r c none [measure zone 37 14 none] [min_pixels picture 25 13 none]
+G r c none [measure zone 37 14 none] [components picture 39 13 none]
+G r c none [measure zone 37 14 none] [is_nan picture 46 13 none]
+G r c none [measure zone 37 14 none] [quantile picture 43 13 none]
+G r c none [measure zone 37 14 none] [region_depth picture 44 13 none]
+G r c none [measure zone 37 14 none] [fraction picture 40 13 none]
+G r c none [from_sweep zone 40 13 none] [min_pixels picture 25 13 none]
+G r c none [from_sweep zone 40 13 none] [components picture 39 13 none]
+G r c none [from_sweep zone 40 13 none] [is_nan picture 46 13 none]
+G r c none [from_sweep zone 40 13 none] [quantile picture 43 13 none]
+G r c none [from_sweep zone 40 13 none] [region_depth picture 44 13 none]
+X 1 ada.ads
+18K9*Ada 22e8 81|7r6 26r32 35r32 82|1r6 1r23 2r6 2r50 4r6 30r55 31r54 32r57
+. 33r53 48r56 225r54 304r56 320r59
+X 5 a-contai.ads
+16K13*Containers 28e19 81|7r10 26r36 35r36 82|4w10 30r59 31r58 32r61 33r57
+. 48r60 225r58 304r60 320r63
+22I9*Count_Type<integer> 82|30r70 31r69 32r72 33r68 48r71 225r69 304r71 320r74
+X 10 a-convec.ads
+74k24*Vectors 878e27 81|7w21 26r47 35r47
+91R9*Vector<13|43R9> 81|29r28[26] 82|206r29[40|19] 211r36[40|19] 214r39[40|19]
+139V13*To_Vector{91R9[30|11]} 82|30s37[30|11] 31s36[30|11] 32s39[30|11] 33s35[30|11]
+. 48s41[30|13] 225s36[30|11] 304s42[30|7] 320s45[30|7]
+175V13*Length{5|22I9} 82|42s25[30|11] 53s39[39|16] 73s49[30|9] 73s93[30|9]
+. 93s36[30|9] 128s28[39|16] 162s44[39|16] 205s52[40|19] 209s64[40|11] 221s50[40|11]
+187V13*Is_Empty{boolean} 82|50s19[39|16] 123s19[39|16] 149s24[39|16] 151s25[39|16]
+. 156s22[39|16]
+206V13*Element{boolean} 82|60s34[30|11] 69s48[30|13] 80s29[30|11] 82s60[30|9]
+. 83s62[30|9] 96s22[30|11] 98s57[30|9] 99s59[30|9] 171s38[30|11] 307s35[30|11]
+217U14*Replace_Element 82|61s37[30|13] 69s19[30|11] 103s30[30|11] 105s33[30|11]
+. 106s29[30|11] 108s29[30|11] 275s14[30|9] 308s28[30|7] 325s31[30|7] 332s37[30|7]
+483U14*Append 82|86s28[30|9] 227s14[30|9] 346s21[81|26]
+X 15 a-iteint.ads
+24h9 Forward_Iterator
+32h9 Reversible_Iterator<24R9[9|84]>
+X 16 a-numeri.ads
+20K13*Numerics 36e17 82|2r10 2r54
+X 17 a-ngelfu.ads
+53V13*Sqrt{long_float} 82|136s44[18|18]
+X 18 a-nlelfu.ads
+18K22*Long_Elementary_Functions[17|39] 82|2w19 2r63
+X 27 a-textio.ads
+58K13*Text_IO 785e16 82|1w10 1r27
+565U14*Put_Line 82|237s10 273s7 340s16 344s16
+X 30 bytes.ads
+5K9*Bytes 23e10 81|3w6 3r17
+7K12*U8_Vectors[10|74] 82|304r31 320r34
+8R12*Buf{10|91R9[7]} 82|304r24 320r27
+10R12*Floats{10|91R9[9]} 81|40r67 82|27r67 76r18 213r16
+11K12*Bool_Vectors[10|74] 82|30r24 31r23 32r26 33r22 225r23
+12R12*Bools{10|91R9[11]} 81|23r17 40r33 82|27r33 30r15 31r14 32r17 33r13
+. 207r59 253r30
+13K12*Int_Vectors[10|74] 82|48r29
+14R12*Ints{10|91R9[13]} 82|48r21
+X 31 codec.ads
+3K9*Codec 19e10 82|3w6 237r147 273r50 302r16 311r19 311r36 311r74 311r105
+. 312r19 312r36 312r74 312r105 313r19 313r36 313r74 313r105 318r19 337r22
+. 337r39 337r77 337r108 341r26 341r54 341r93 341r118 341r143 341r168 342r42
+. 342r92 342r135
+10U14*Write_PGM 82|311s25 312s25 313s25 337s28
+14V13*Fmt{string} 82|237s153 273s56 341s32 341s60 342s48 342s98 342s141
+15V13*Img{string} 82|311s80 311s111 312s80 312s111 313s80 313s111 337s83
+. 337s114 341s99 341s124 341s149 341s174
+17V13*Env{string} 82|302s22 311s42 312s42 313s42 318s25 337s45
+X 39 picture.ads
+5K9*Picture 49e12 81|5w6 42r41 82|6r41 35r45 47r27 47r46 47r80 56r32 85r29
+. 85r61 93r55 101r26 101r58 119r27 119r46 119r79 120r25 120r44 120r80 121r26
+. 121r45 121r77 165r38 192r24 193r16 194r27 253r39 255r29 342r146
+6R9*Region 15e14 81|42r49 82|6r49 35r53 56r40 165r46
+7i7*X0{natural} 82|37r39 59r33 167r50 170r39
+7i11*Y0{natural} 82|37r54 58r30 167r80 169r36
+7i15*X1{natural} 82|37r69 59r41 168r50 170r47
+7i19*Y1{natural} 82|37r84 58r38 168r80 169r44
+8i7*Count{natural} 82|38r54 54r26 54r50 128r60 128r83 163r31 163r54
+9f7*Cu{long_float} 82|9r46 38r21 150r29 152r30
+9f11*Cv{long_float} 82|10r46 38r36 150r49 152r51
+12f7*Au{long_float} 82|143r31
+12f11*Av{long_float} 82|143r53
+17R12*Regions{10|91R9[16]} 82|47r35 119r35 120r33 121r34
+25V13*Min_Pixels{natural} 82|47s88 119s87 120s88 121s85
+36V13*Moved{30|12R12} 82|253s47
+38V13*Either{30|12R12} 82|255s37
+39V13*Components{17R12} 82|47s54 119s54 120s52 121s53
+40V13*Fraction{long_float} 82|342s154
+43V13*Quantile{long_float} 82|93s63
+44V13*Region_Depth{long_float} 82|192s32 194s35
+46V13*Is_Nan{boolean} 82|85s37 85s69 101s34 101s66 193s24
+X 40 plug.ads
+9K9*Plug 65e9 81|4w6 33r14 37r34 37r93 82|204r34 204r93 206r12 209r23 211r19
+. 214r22 243r17 245r23 246r20 246r48 280r17 282r23 283r20 283r48
+10A9*Arm_Pose(long_float)<integer> 81|33r19 82|209r28
+14i7*W{natural} 82|225r92 298r49
+14i10*H{natural} 82|225r107 299r49
+15r7*Gray{30|8R12} 82|253r61 253r78 312r153 313r141
+16b7*Has_Depth{boolean} 82|316r86 316r122
+17r7*Depth{30|10R12} 82|316r48 316r72
+19K12*Cam_Vectors[10|74] 82|206r17 211r24 214r27
+20R9*Frame 27e14 81|37r98 82|204r98
+22r7*EE{10|91R9[11]} 82|209r61 209r79 221r47
+24r7*Cams{10|91R9[19]} 82|205r47 225r83 225r98 239r15 240r22 253r69 261r97
+. 267r28 272r25 277r22 287r137 292r25 298r40 299r40
+29n28*Ee{29E9} 82|245r28 282r28
+30R9*Cmd 37e14 82|243r22 280r22
+31e7*Kind{29E9} 82|245m15 282m15
+32i7*Arm{natural} 82|245m34 282m34
+33a7*Pose{10A9} 82|245m48 282m48
+34r7*Jaw{30|10R12} 82|245m64 282m64
+39R9*Link 56e14 81|37r39 82|204r39
+59V13*Sense{boolean} 82|246s53 283s53
+60V13*Act{boolean} 82|246s25 283s25
+X 41 selfmap.ads
+9K9*Selfmap 62e12 81|6w6 37r49 82|204r49 208r35 233r10 259r40 261r57 271r24
+. 287r18 287r97
+19R9*Body_Map 41e14 81|37r57 82|204r57
+33f7*Jaw_Noise{long_float} 82|261r38 287r69
+34r7*Floors{10|91R9[18]} 82|253r86
+57U14*Wait_Still 82|233s18
+58V13*Pictures_Still{boolean} 82|261s65 287s105
+60V13*Jaw_Of{long_float} 82|208s43 259s48 271s32 287s26
+X 42 system.ads
+67M9*Address
+X 58 s-memory.ads
+51V13*Alloc{42|67M9} 101i<c,__gnat_malloc>22
+66U14*Free 102i<c,__gnat_free>22
+74V13*Realloc{42|67M9} 103i<c,__gnat_realloc>22
+X 70 s-stalib.adb
+87U14 Break_Start 88i<c,__gnat_break_start>22
+X 81 zone.ads
+8K9*Zone 43l5 43e9 82|5b14 351l5 351t9
+9R9*Lobe 14e14 22r14 82|35r35 321r62
+10b7*Valid{boolean} 82|18r14 21r14 37m13 329r31
+11i7*X0{natural} 82|18r41 21r41 37m31 188r25 189r48 331r43
+11i11*Y0{natural} 82|18r49 21r49 37m46 188r41 330r40
+11i15*X1{natural} 82|18r57 21r57 37m61 188r57 189r39 331r52
+11i19*Y1{natural} 82|18r65 21r65 37m76 188r73 330r49
+12f7*Cu{long_float} 82|38m13 134r48 134r57 148r32 148r41 154r25
+12f11*Cv{long_float} 82|38m28 135r48 135r57 148r65 148r74 154r41
+13i7*Count{natural} 82|38m43
+15R9*Hand_Zone 25e14 26r65 40r120 42r26 82|6r26 27r120 28r11 300r17
+16b7*Valid{boolean} 82|15r16 199m12 317r18
+17f7*Cu{long_float} 82|148m15 150m15 152m15 154m15 341r39
+17f11*Cv{long_float} 82|148m48 150m35 152m36 154m31 341r67
+18f7*Au{long_float} 82|139m21 143m15 173r102
+18f11*Av{long_float} 82|139m38 143m37 173r146
+19f7*Span{long_float} 82|185m18 189m15 342r55
+20f7*Depth{long_float} 82|192m15 193r34 194m18 197m15 342r105
+21i7*N_Lobes{natural} 82|127m12 130m15 132r15 147r15 340r98
+22r7*A{9R9} 82|18r12 18r39 18r47 18r55 18r63 126m18 134r55 135r55 148r30
+. 148r63 154r23 154r39 188r23 188r39 188r55 188r71 189r37 189r46 321r73
+22r10*B{9R9} 82|21r12 21r39 21r47 21r55 21r63 129m21 134r46 135r46 148r39
+. 148r72 321r78
+23r7*Fingers{30|12R12} 82|41m9 72m9
+24i7*X0{natural} 82|184m18 188m15 324r36 341r106
+24i11*Y0{natural} 82|184m30 188m31 323r33 341r131
+24i15*X1{natural} 82|184m42 188m47 324r44 341r156
+24i19*Y1{natural} 82|184m54 188m63 323r41 341r181
+26K12*Zone_Vectors[10|74] 29r15
+27R9*Hand 34e14 35r65 37r113 82|204r113
+28i7*Arm{natural} 82|217m9
+29r7*Zones{10|91R9[26]} 82|346m15
+30f7*Empty_Close{long_float} 82|271m9 273r63
+31f7*Open_Reading{long_float} 82|218m9
+32i7*Close_Steps{natural} 82|250m12 273r104
+33a7*Pose{40|10A9} 82|219m9
+35K12*Hand_Vectors[10|74]
+37U14*Measure 37=23 37>45 37>67 37=82 37<105 37<119 82|204b14 350l8 350t15
+37r23 L{40|39R9} 82|204b23 233m30 246m30 246r30 246m60 246r60 283m30 283r30
+. 283m60 283r60
+37r45 M{41|19R9} 82|204b45 233r33 253r84 261r36 261r81 287r67 287r121
+37i67 Arm{natural} 82|204b67 208r54 209r44 209r83 217r16 221r29 237r49 245r41
+. 259r59 271r43 282r41 287r37 311r85 312r85 313r85 337r88
+37r82 F{40|20R9} 82|204b82 205r45 208r51 209r59 209r77 221r45 225r81 225r96
+. 233m36 239r13 240r20 246m63 246r63 253r67 259r56 261r95 267r26 271r40 272r23
+. 277r20 283m63 283r63 287r34 287r135 292r23 298r38 299r38
+37r105 H{27R9} 82|204b105 216m7 217m7 218m7 219m7 250m10 271m7 273r61 273r102
+. 346m13 346r13
+37b119 Ok{boolean} 82|204b119 220m7 349m7
+40V13*From_Sweep{15R9} 40>25 40>40 40>52 40>75 40>96 40>99 82|27b13 202l8
+. 202t18 316s18
+40r25 Swept{30|12R12} 82|27b25 41r20 42r19 47r66 60r28
+40r40 Depth_Open{30|10R12} 82|27b40 73r38 82r49 98r46 192r46
+40r52 Depth_Closed{30|10R12} 82|27b52 73r80 83r49 99r46 194r49
+40b75 Has_Depth{boolean} 82|27b75 73r10 191r13
+40i96 W{natural} 82|27b96 29r31 47r73 47r100 60r47 61r58 119r72 119r99 120r73
+. 120r100 121r70 121r97 160r32 171r51 173r94 189r66 192r58 194r63
+40i99 Hh{natural} 82|27b99 29r35 47r76 47r103 119r75 119r102 120r76 120r103
+. 121r73 121r100 160r51 173r137 192r61 194r66
+42V13*Is_Self{boolean} 42>22 42>37 42>57 42>60 82|6b13 25l8 25t15
+42r22 Z{15R9} 82|6b22 15r14 18r10 18r37 18r45 18r53 18r61 21r10 21r37 21r45
+. 21r53 21r61
+42r37 R{39|6R9} 82|6b37 9r44 10r44
+42i57 W{natural} 82|6b57 9r63
+42i60 Hh{natural} 82|6b60 10r63
+X 82 zone.adb
+8V16 In_Box{boolean} 8b16 8>24 8>28 8>32 8>36 13l11 13t17 18s29 21s29
+8i24 X0{natural} 12r23
+8i28 Y0{natural} 12r59
+8i32 X1{natural} 12r41
+8i36 Y1{natural} 12r77
+9i10 Cx{natural} 12r17 12r35
+10i10 Cy{natural} 12r53 12r71
+28r7 Z{81|15R9} 41m7 43r17 51r20 72m7 124r20 126m16 126r16 127m10 129m19
+. 129r19 130m13 132r13 134r44 134r53 135r44 135r53 139m19 139m36 143m13 143m35
+. 147r13 148m13 148r28 148r37 148m46 148r61 148r70 150m13 150m33 152m13 152m34
+. 154m13 154r21 154m29 154r37 173r100 173r144 184m16 184m28 184m40 184m52
+. 185m16 188m13 188r21 188m29 188r37 188m45 188r53 188m61 188r69 189m13 189r35
+. 189r44 192m13 193r32 194m16 197m13 199m10 201r14
+29i7 N{natural} 30r82 31r81 32r84 33r80 42r35 48r83 68r24 73r60 73r104 79r23
+. 95r24
+30r7 Clean{30|12R12} 69m13 69r13 72r20 80r23 96r16 115r18 116r17 194r70
+31r7 Left{30|12R12} 103m25 103r25 115m10 119r66 192r65
+32r7 Arrived{30|12R12} 105m25 105r25 120r64
+33r7 Gap{30|12R12} 106m25 106r25 108m25 108r25 116m10 121r65 171r34
+34f7 Tol{long_float} 93m13 102r33 104r36
+35U17 Fill 35b17 35=23 35>41 39l11 39t15 126s10 129s13
+35r23 Lb{81|9R9} 37m10 37m28 37m43 37m58 37m73 38m10 38m25 38m40
+35r41 R{39|6R9} 37r37 37r52 37r67 37r82 38r19 38r34 38r52
+47r10 Comps{39|17R12} 50r13 53r33 54r16 54r40 56r50
+48r10 Keep_Ids{30|14R12} 61m28 61r28 69r39
+53i14 K{integer} 54r23 56r57 61r65
+56r19 R{39|6R9} 58r28 58r36 59r31 59r39
+58i23 Y{integer} 60r43 61r54
+59i26 X{integer} 60r51 61r62
+68i14 I{integer} 69r36 69r57
+76r13 Ds{30|10R12} 86m25 86r25 93r33 93m73 93r73
+77i13 I{natural} 79r19 80r38 82r69 83r71 90m16 90r21
+82f22 A{long_float} 85r45 85r89 86r41
+83f22 B{long_float} 85r77 85r106 86r45
+95i14 I{integer} 96r31 98r66 99r68 103r47 105r50 106r46 108r46
+98f19 A{long_float} 101r42 101r86 102r29 104r28
+99f19 B{long_float} 101r74 101r103 102r25 104r32
+119r10 Lobes{39|17R12} 123r13 126r21 128r22 128r50 128r73 129r24 143r21 143r43
+120r10 Arr{39|17R12} 149r20 150r21 150r41
+121r10 Gaps{39|17R12} 151r20 152r21 152r42 156r17 162r39 163r22 163r45 165r56
+134f16 Du{long_float} 136r50 136r55 139r27
+135f16 Dv{long_float} 136r60 136r65 139r44
+136f16 Ln{long_float} 138r19 139r32 139r49
+158f16 Lo{long_float} 175m37 175r59 185r52
+159f16 Hi{long_float} 176m37 176r59 185r47
+160i16 X0{natural} 167m25 167r44 184r24
+160i35 Y0{natural} 167m55 167r74 184r36
+160i55 X1{natural} 168m25 168r44 184r48
+160i74 Y1{natural} 168m55 168r74 184r60
+162i20 K{integer} 163r28 165r62
+165r25 G{39|6R9} 167r48 167r78 168r48 168r78 169r34 169r42 170r37 170r45
+169i29 Y{integer} 171r47 173r120
+170i32 X{integer} 171r55 173r77
+173f37 P{long_float} 175r63 176r63
+205i7 N_Cams{natural} 207r43 221r10 224r21 251r24 296r21
+206r7 F0{10|91R9[40|19]} 239m7 253r54 313r134 316r41 316r79
+207a7 Swept(30|12R12) 225m10 255m16 255r45 307r25 316r30 342r164
+208f7 J0{long_float} 210r30 218r25 237r158 275r34 287r44
+209a7 Pose{40|10A9} 219r17 245r56 282r56
+210f7 Prev_J{long_float} 261r25 266m13
+211r7 Prev_Cams{10|91R9[40|19]} 240m7 261r84 267m13 277m7 287r124 292m10
+212i7 Still{natural} 262m16 262r25 264m16 269r20 276m7 288m13 288r22 290m13
+. 293r20
+213r7 Target{30|10R12} 227m7 227r7 245r71 275m7 275r7 282r71
+214r7 Closed_Frame{10|91R9[40|19]} 272m7 312r136 316r55 316r105
+224i11 C{integer} 225r17 225r89 225r104
+230i10 Used{natural} 233m43 237r119
+231b10 Ok2{boolean} 233m49 234r17
+241i11 Step{integer} 250r27 269r40
+243r13 C{40|30R9} 245m13 245m32 245m46 245m62 246r33
+251i14 C{integer} 253r58 253r75 253r94 255r23 255r52
+253r16 Mv{30|12R12} 255r56
+259f13 J{long_float} 261r21 266r23
+278i11 Step{integer} 293r40
+280r13 C{40|30R9} 282m13 282m32 282m46 282m62 283r33
+296i11 C{integer} 298r46 299r46 307r32 311r116 312r116 312r150 313r116 313r138
+. 316r37 316r45 316r69 316r83 316r119 337r119 340r57 342r171 344r57
+298i13 Cw{natural} 304r83 306r33 311r139 312r159 313r147 316r133 320r86 325r52
+. 332r58 337r141
+299i13 Ch{natural} 304r88 306r38 311r143 312r163 313r151 316r137 320r91 337r145
+300r13 Z{81|15R9} 316m13 316r13 317r16 321r71 321r76 323r31 323r39 324r34
+. 324r42 340r96 341r37 341r65 341r104 341r129 341r154 341r179 342r53 342r103
+. 346r29
+304r19 Mk{30|8R12} 308m25 308r25 311r135
+306i23 I{integer} 307r44 308r45
+320r22 Mk{30|8R12} 325m28 325r28 332m34 332r34 337r137
+321a22 Lobes_Of_Z(81|9R9) 328r32
+323i26 Y{integer} 325r48
+324i29 X{integer} 325r57
+328r26 Lb=328:32{81|9R9} 329r28 330r37 330r46 331r40 331r49
+330i32 Y{integer} 332r54
+331i35 X{integer} 332r63
+

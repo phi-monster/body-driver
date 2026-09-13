@@ -1,0 +1,34 @@
+[GENERATED OBJECT FILE]
+b__selfcheck.o
+[PROJECT FILES]
+/Users/gogogod/Project/phi/body-driver/driver/body_driver.gpr
+20260906201250 a73e50a0da217c1f3251bbc6e47ad651
+[BOUND OBJECT FILES]
+/Users/gogogod/Project/phi/body-driver/driver/obj/backup.o
+/Users/gogogod/Project/phi/body-driver/driver/obj/bytes.o
+/Users/gogogod/Project/phi/body-driver/driver/obj/codec.o
+/Users/gogogod/Project/phi/body-driver/driver/obj/flow.o
+/Users/gogogod/Project/phi/body-driver/driver/obj/json.o
+/Users/gogogod/Project/phi/body-driver/driver/obj/monitor.o
+/Users/gogogod/Project/phi/body-driver/driver/obj/msgpack.o
+/Users/gogogod/Project/phi/body-driver/driver/obj/layout.o
+/Users/gogogod/Project/phi/body-driver/driver/obj/picture.o
+/Users/gogogod/Project/phi/body-driver/driver/obj/table.o
+/Users/gogogod/Project/phi/body-driver/driver/obj/websocket.o
+/Users/gogogod/Project/phi/body-driver/driver/obj/plug.o
+/Users/gogogod/Project/phi/body-driver/driver/obj/chan.o
+/Users/gogogod/Project/phi/body-driver/driver/obj/schema.o
+/Users/gogogod/Project/phi/body-driver/driver/obj/selfmap.o
+/Users/gogogod/Project/phi/body-driver/driver/obj/zone.o
+/Users/gogogod/Project/phi/body-driver/driver/obj/selfcheck.o
+[GENERATED SOURCE FILES]
+b__selfcheck.ads
+b__selfcheck.adb
+b__selfcheck.ali
+[RESULTING OPTIONS]
+-L/Users/gogogod/Project/phi/body-driver/driver/obj/
+-L/Users/gogogod/Project/phi/body-driver/driver/obj/
+-L/users/gogogod/.local/share/alire/toolchains/gnat_native_16.1.0_657cf254/lib/gcc/aarch64-apple-darwin24.6.0/16.1.0/adalib/
+-static
+/users/gogogod/.local/share/alire/toolchains/gnat_native_16.1.0_657cf254/lib/gcc/aarch64-apple-darwin24.6.0/16.1.0/adalib/libgnat.a
+-lm

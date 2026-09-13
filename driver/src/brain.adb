@@ -35,11 +35,10 @@ package body Brain is
       return To_String (R);
    end Extract_Content;
 
-   function Ask (Host : String; Port : Natural; Task_Text, Body_Text, Recent : String;
+   function Ask (Host : String; Port : Natural; Task_Text, Body_Text, Recent, Grammar, Refused : String;
                  Cols, Rows, N_Items, N_Cams, N_Arms : Natural; RGB : Buf; W, H : Natural;
-                 Answer : out Say; Err : out Unbounded_String) return Boolean is
+                 Program : out Unbounded_String; Err : out Unbounded_String) return Boolean is
       Cells : constant Natural := Cols * Rows;
-      Items : constant Natural := Natural'Max (1, N_Items);
       NL : constant String := "" & ASCII.LF;
       Prompt : constant String :=
         "You are not a model looking at a picture. You ARE this robot, and you run the loop: nothing moves unless you say so, and you are called back whenever you ask to be. " &
@@ -48,38 +47,22 @@ package body Brain is
         "YOUR BODY (measured by yourself: you moved one channel at a time and watched which part of the picture followed):" & NL & Body_Text & NL & NL &
         "WHAT YOU JUST DID AND WHAT HAPPENED:" & NL & Recent & NL & NL &
         "WHAT YOU ARE TRYING TO DO: " & Task_Text & NL & NL &
-        "Answer with these fields." & NL &
-        "- say: one sentence in your own words: what you see and what you decide." & NL &
-        "- see: target = the thing the task refers to is in THIS picture; not_here = it is not in this picture; unclear = you cannot tell. not_here and unclear are normal answers: nothing moves, and you may ask for another camera." & NL &
-        "- look: 0 = keep answering about this camera; k = show me camera k next time (cameras are listed under YOUR BODY)." & NL &
-        "- moves: 0 to 4 entries. Each names WHICH NUMBERED ITEM moves and WHERE: a numbered CELL, or a RELATION to another numbered item (rel = at: touching it / above / below / left / right / front: nearer the camera / back: farther / away: farther from it than now, with of = that item's number). " &
-        "amount = small / medium / large: how far to push this time, as a fraction of what the body measured it can reach. stay_put = true only for an item that must not move (then give it no cell and no rel). " &
-        "The body solves all entries together and works out which channels to push from what it measured. An empty list = do not move. The grid lies flat over the picture: nearer/farther from the camera does not change the cell - say front/back for that." & NL &
-        "- grip: close / open / none, with grip_arm = which arm (1.." & Codec.Img (N_Arms) & "), and grip_on = the numbered thing to close on (0 = just close or open where the fingers are). " &
-        "Closing on a thing means the body itself works out where on that thing to hold it and from which free side, brings that arm's fingers there, closes, and checks whether it is held - you do not describe those steps. This is its own word; a move never implies it." & NL &
-        "- until: WHEN to call you back, an EVENT the body measures: steps (after the number in steps, 1..50) / contact (something is touched) / resist (it will not move any further) / slip (the thing stops following me) / settle (the picture stops changing)." & NL &
-        "- If there is a strip of smaller pictures under the numbered one: those are my OTHER eyes right now, each boxed with its camera number in white. They carry no grid and no item numbers - the numbered grid and every item number belong to the BIG picture on top only. Use the strip to see what my other eyes see (for example whether one of them is facing a wall) and say look = k if you want that one to become the big numbered picture next turn." & NL &
-        "- fast: full steps without pausing. avoid_items: numbered items that must not be touched (may be empty). done: true only when the thing has ALREADY ended up where the task wants it." & NL & NL &
-        "Do NOT give distances, angles, speeds or any numbers other than item, cell, camera and step counts - the body measures them. Keep say to ONE short sentence.";
+        (if Refused = "" then ""
+         else "I REFUSED YOUR LAST PROGRAM BEFORE ANYTHING MOVED:" & NL & Refused & NL & NL) &
+        "ANSWER WITH ONE PROGRAM in my language. This is the whole grammar - there is nothing else I understand:" & NL &
+        Grammar & NL & NL &
+        "How this works: I read every line of your program and check it against what I have actually measured about myself BEFORE anything moves. " &
+        "If a line asks for something I cannot measure or cannot do, I run none of it, and I tell you which line, why, and what I can do instead. " &
+        "That refusal is free: no motor turns, nothing gets knocked over, and you may answer again. " &
+        "A program can hold several things at once and run several lines in order, so you do not have to be called back after every single push." & NL &
+        "hold means that line must not be given up while the rest runs. reach means go that way. never means do not enter that. " &
+        "until says when to call me back. Lines run in the order you write them." & NL & NL &
+        "Do NOT give distances, angles, speeds or any numbers other than item numbers, camera numbers and step counts - I measure those myself. " &
+        "If there is a strip of smaller pictures under the numbered one, those are my OTHER eyes right now, each boxed with its camera number in white; " &
+        "they carry no grid and no item numbers - the numbered grid and every item number belong to the BIG picture on top only.";
       Schema : constant String :=
-        "{""type"":""json_schema"",""json_schema"":{""name"":""what_i_do_now"",""strict"":true,""schema"":{""type"":""object"",""additionalProperties"":false," &
-        """required"":[""say"",""see"",""look"",""moves"",""grip"",""grip_arm"",""grip_on"",""until"",""steps"",""fast"",""avoid_items"",""done""]," &
-        """properties"":{""say"":{""type"":""string""},""see"":{""type"":""string"",""enum"":[""target"",""not_here"",""unclear""]}," &
-        """look"":{""type"":""integer"",""minimum"":0,""maximum"":" & Codec.Img (Natural'Max (1, N_Cams)) & "}," &
-        """moves"":{""type"":""array"",""minItems"":0,""maxItems"":4,""items"":{""type"":""object"",""additionalProperties"":false," &
-        """required"":[""item"",""cell"",""rel"",""of"",""amount"",""stay_put""],""properties"":{" &
-        """item"":{""type"":""integer"",""minimum"":1,""maximum"":" & Codec.Img (Items) & "}," &
-        """cell"":{""type"":""integer"",""minimum"":0,""maximum"":" & Codec.Img (Cells) & "}," &
-        """rel"":{""type"":""string"",""enum"":[""none"",""at"",""above"",""below"",""left"",""right"",""front"",""back"",""away""]}," &
-        """of"":{""type"":""integer"",""minimum"":0,""maximum"":" & Codec.Img (Items) & "}," &
-        """amount"":{""type"":""string"",""enum"":[""small"",""medium"",""large""]},""stay_put"":{""type"":""boolean""}}}}," &
-        """grip"":{""type"":""string"",""enum"":[""none"",""close"",""open""]}," &
-        """grip_arm"":{""type"":""integer"",""minimum"":0,""maximum"":" & Codec.Img (Natural'Max (1, N_Arms)) & "}," &
-        """grip_on"":{""type"":""integer"",""minimum"":0,""maximum"":" & Codec.Img (Items) & "}," &
-        """until"":{""type"":""string"",""enum"":[""steps"",""contact"",""resist"",""slip"",""settle""]}," &
-        """steps"":{""type"":""integer"",""minimum"":0,""maximum"":50},""fast"":{""type"":""boolean""}," &
-        """avoid_items"":{""type"":""array"",""maxItems"":4,""items"":{""type"":""integer"",""minimum"":1,""maximum"":" & Codec.Img (Items) & "}}," &
-        """done"":{""type"":""boolean""}}}}}";
+        "{""type"":""json_schema"",""json_schema"":{""name"":""my_program"",""strict"":true,""schema"":{""type"":""object"",""additionalProperties"":false," &
+        """required"":[""program""],""properties"":{""program"":{""type"":""string""}}}}}";
       B64 : constant String := Codec.Base64 (Codec.BMP24 (RGB, W, H));
       Body_Json : constant String :=
         "{""model"":""eye"",""max_tokens"":700,""temperature"":0,""chat_template_kwargs"":{""enable_thinking"":false},""response_format"":" & Schema &
@@ -87,8 +70,9 @@ package body Brain is
         """}},{""type"":""text"",""text"":""" & Json.Escape (Prompt) & """}]}]}";
       Reply : Unbounded_String;
    begin
-      Answer := (others => <>);
+      Program := Null_Unbounded_String;
       Err := Null_Unbounded_String;
+      pragma Unreferenced (N_Items, N_Cams, N_Arms);
       if Natural (RGB.Length) < W * H * 3 then
          Err := To_Unbounded_String ("画面短了");
          return False;
@@ -110,69 +94,11 @@ package body Brain is
             Err := To_Unbounded_String ("脑给的不是 JSON:" & To_String (Perr) & " ‖ " & Ada.Strings.Fixed.Head (Inner, 200));
             return False;
          end if;
-         Answer.Text := To_Unbounded_String (Json.Text (D, Json.Get (D, 0, "say")));
-         Answer.See := To_Unbounded_String (Json.Text (D, Json.Get (D, 0, "see")));
-         if Answer.See = "" then
-            Answer.See := To_Unbounded_String ("target");
-         end if;
-         Answer.Look := Natural (Long_Float'Max (0.0, Json.Num (D, Json.Get (D, 0, "look"))));
-         declare
-            Mv : constant Integer := Json.Get (D, 0, "moves");
-         begin
-            for I in 0 .. Natural'Min (4, Json.Count (D, Mv)) - 1 loop
-               declare
-                  G : constant Integer := Json.Child (D, Mv, I);
-                  Gl : Goal;
-                  Rel : constant String := Json.Text (D, Json.Get (D, G, "rel"));
-               begin
-                  Gl.Item := Natural (Long_Float'Max (0.0, Json.Num (D, Json.Get (D, G, "item"))));
-                  Gl.Cell := Natural (Long_Float'Max (0.0, Json.Num (D, Json.Get (D, G, "cell"))));
-                  Gl.Of_Item := Natural (Long_Float'Max (0.0, Json.Num (D, Json.Get (D, G, "of"))));
-                  Gl.Rel := To_Unbounded_String (if Rel = "none" then "" else Rel);
-                  Gl.Amount := To_Unbounded_String (Json.Text (D, Json.Get (D, G, "amount")));
-                  --  说了地方就是要动;"别动"只在没说任何地方时才算数
-                  Gl.Stay := not (Gl.Cell > 0 or else (Gl.Rel /= "" and then Gl.Of_Item > 0))
-                             and then Json.Bool (D, Json.Get (D, G, "stay_put"));
-                  if Gl.Item = 0 then
-                     Err := To_Unbounded_String ("第" & Natural'Image (I + 1) & " 条移动没说动第几号");
-                     return False;
-                  end if;
-                  if not Gl.Stay and then Gl.Cell = 0 and then (Gl.Rel = "" or else Gl.Of_Item = 0) then
-                     Err := To_Unbounded_String ("第" & Natural'Image (I + 1) & " 条移动既没说格子、也没说相对哪一号、也没说别动");
-                     return False;
-                  end if;
-                  Answer.Moves.Append (Gl);
-               end;
-            end loop;
-         end;
-         declare
-            G : constant String := Json.Text (D, Json.Get (D, 0, "grip"));
-         begin
-            Answer.Grip := To_Unbounded_String (if G = "" then "none" else G);
-         end;
-         Answer.Grip_Arm := Natural (Long_Float'Max (0.0, Json.Num (D, Json.Get (D, 0, "grip_arm"))));
-         Answer.Grip_On := Natural (Long_Float'Max (0.0, Json.Num (D, Json.Get (D, 0, "grip_on"))));
-         Answer.Until_Kind := To_Unbounded_String (Json.Text (D, Json.Get (D, 0, "until")));
-         if Answer.Until_Kind = "" then
-            Err := To_Unbounded_String ("脑没给 until");
+         Program := To_Unbounded_String (Json.Text (D, Json.Get (D, 0, "program")));
+         if Length (Program) = 0 then
+            Err := To_Unbounded_String ("脑交上来一段空程序");
             return False;
          end if;
-         Answer.Steps := Natural (Long_Float'Max (0.0, Json.Num (D, Json.Get (D, 0, "steps"))));
-         Answer.Fast := Json.Bool (D, Json.Get (D, 0, "fast"));
-         Answer.Done := Json.Bool (D, Json.Get (D, 0, "done"));
-         declare
-            Av : constant Integer := Json.Get (D, 0, "avoid_items");
-         begin
-            for I in 0 .. Json.Count (D, Av) - 1 loop
-               declare
-                  V : constant Long_Float := Json.Num (D, Json.Child (D, Av, I));
-               begin
-                  if V >= 1.0 then
-                     Answer.Avoid.Append (Integer (V));
-                  end if;
-               end;
-            end loop;
-         end;
          return True;
       end;
    end Ask;

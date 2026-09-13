@@ -1,0 +1,455 @@
+V "GNAT Lib v16"
+A -O2
+A -gnatA
+A -gnat2022
+A -gnata
+A -gnatwa
+A -g
+A -gnatyM200
+A -mmacosx-version-min=26.0.0
+A -mcpu=apple-m1
+A -mlittle-endian
+A -mabi=lp64
+A -fPIC
+P SS ZX
+
+RN
+RV NO_DISPATCHING_CALLS
+RV NO_ENUMERATION_MAPS
+RV NO_EXCEPTION_HANDLERS
+RV NO_EXCEPTION_PROPAGATION
+RV NO_EXCEPTIONS
+RV NO_FLOATING_POINT
+RV NO_IMPLICIT_CONDITIONALS
+RV NO_LOCAL_ALLOCATORS
+RV NO_NESTED_FINALIZATION
+RV NO_SECONDARY_STACK
+RV NO_STANDARD_STORAGE_POOLS
+RV NO_DEFAULT_INITIALIZATION
+RV NO_DYNAMIC_SIZED_OBJECTS
+RV NO_IMPLEMENTATION_PRAGMAS
+RV NO_ELABORATION_CODE
+RV NO_OBSOLESCENT_FEATURES
+
+U brain%b		brain.adb		05f1c746 NE OO PK
+W ada%s			ada.ads			ada.ali
+Z ada.exceptions%s	a-except.adb		a-except.ali
+W ada.strings%s		a-string.ads		a-string.ali
+W ada.strings.fixed%s	a-strfix.adb		a-strfix.ali
+Z ada.strings.text_buffers%s  a-sttebu.adb	a-sttebu.ali
+Z ada.tags%s		a-tags.adb		a-tags.ali
+W codec%s		codec.adb		codec.ali
+W http_client%s		http_client.adb		http_client.ali
+W json%s		json.adb		json.ali
+Z system%s		system.ads		system.ali
+Z system.finalization_primitives%s  s-finpri.adb  s-finpri.ali
+Z system.img_int%s	s-imgint.ads		s-imgint.ali
+Z system.secondary_stack%s  s-secsta.adb	s-secsta.ali
+Z system.soft_links%s	s-soflin.adb		s-soflin.ali
+Z system.standard_library%s  s-stalib.adb	s-stalib.ali
+
+U brain%s		brain.ads		2c981e9c EE OO PF PK
+W ada%s			ada.ads			ada.ali
+W ada.containers%s	a-contai.ads		a-contai.ali
+Z ada.containers.generic_array_sort%s
+Z ada.containers.helpers%s  a-conhel.adb	a-conhel.ali
+W ada.containers.vectors%s
+Z ada.exceptions%s	a-except.adb		a-except.ali
+Z ada.finalization%s	a-finali.ads		a-finali.ali
+Z ada.iterator_interfaces%s
+Z ada.streams%s		a-stream.adb		a-stream.ali
+W ada.strings%s		a-string.ads		a-string.ali
+Z ada.strings.text_buffers%s  a-sttebu.adb	a-sttebu.ali
+W ada.strings.unbounded%s  a-strunb.adb		a-strunb.ali
+Z ada.tags%s		a-tags.adb		a-tags.ali
+Z ada.unchecked_deallocation%s
+W bytes%s		bytes.adb		bytes.ali
+Z system%s		system.ads		system.ali
+Z system.assertions%s	s-assert.adb		s-assert.ali
+Z system.finalization_primitives%s  s-finpri.adb  s-finpri.ali
+Z system.pool_global%s	s-pooglo.adb		s-pooglo.ali
+Z system.put_images%s	s-putima.adb		s-putima.ali
+Z system.return_stack%s	s-retsta.ads		s-retsta.ali
+Z system.secondary_stack%s  s-secsta.adb	s-secsta.ali
+Z system.soft_links%s	s-soflin.adb		s-soflin.ali
+Z system.standard_library%s  s-stalib.adb	s-stalib.ali
+Z system.storage_elements%s  s-stoele.ads	s-stoele.ali
+Z system.storage_pools%s  s-stopoo.adb		s-stopoo.ali
+Z system.storage_pools.subpools%s  s-stposu.adb	s-stposu.ali
+Z system.stream_attributes%s  s-stratt.adb	s-stratt.ali
+Z system.strings.stream_ops%s  s-ststop.adb	s-ststop.ali
+Z system.wch_stw%s	s-wchstw.adb		s-wchstw.ali
+
+D ada.ads		20260610194523 76789da1 ada%s
+D a-assert.ads		20260610194523 ba465f5c ada.assertions%s
+D a-charac.ads		20260610194523 2d3ec45b ada.characters%s
+D a-chlat1.ads		20260610194523 e0d72e76 ada.characters.latin_1%s
+D a-contai.ads		20260610194523 61e5e089 ada.containers%s
+D a-cgarso.ads		20260610194523 9129bfa8 ada.containers.generic_array_sort%s
+D a-conhel.ads		20260610194523 46fe1ce3 ada.containers.helpers%s
+D a-conhel.adb		20260610194523 854d323e ada.containers.helpers%b
+D a-coinve.ads		20260610194523 2d0a9a0e ada.containers.indefinite_vectors%s
+D a-convec.ads		20260610194523 cb0f314a ada.containers.vectors%s
+D a-convec.adb		20260610194523 b2ed0168 ada.containers.vectors%b
+D a-except.ads		20260610194523 8699d7ff ada.exceptions%s
+D a-finali.ads		20260610194523 099c16e4 ada.finalization%s
+D a-iteint.ads		20260610194523 49a8bee2 ada.iterator_interfaces%s
+D a-stream.ads		20260610194523 cb01a8f8 ada.streams%s
+D a-string.ads		20260610194523 90ac6797 ada.strings%s
+D a-strfix.ads		20260610194523 8648dedb ada.strings.fixed%s
+D a-strmap.ads		20260610194523 f7e6ca10 ada.strings.maps%s
+D a-strsea.ads		20260610194523 18c3c634 ada.strings.search%s
+D a-sttebu.ads		20260610194523 f1ad67a2 ada.strings.text_buffers%s
+D a-strunb.ads		20260610194523 8d6ccba7 ada.strings.unbounded%s
+D a-stuten.ads		20260610194523 c6ced0ae ada.strings.utf_encoding%s
+D a-tags.ads		20260610194523 2dbf449c ada.tags%s
+D a-unccon.ads		20260610194523 0e9b276f ada.unchecked_conversion%s
+D a-uncdea.ads		20260610194523 c3a8ac65 ada.unchecked_deallocation%s
+D brain.ads		20260912223334 ec4aa44d brain%s
+D brain.adb		20260912223459 8b63787d brain%b
+D bytes.ads		20260906203008 86b1403c bytes%s
+D codec.ads		20260906203008 34417e50 codec%s
+D http_client.ads	20260906203008 8d89ef8d http_client%s
+D interfac.ads		20260610194523 9111f9c1 interfaces%s
+D i-c.ads		20260610194523 dbdd3be7 interfaces.c%s
+D json.ads		20260906203008 5d585470 json%s
+D system.ads		20260610194523 8a611ac3 system%s
+D s-assert.ads		20260610194523 9c4520c7 system.assertions%s
+D s-atocou.ads		20260610194523 dc18efc3 system.atomic_counters%s
+D s-atocou.adb		20260610194523 6fe685de system.atomic_counters%b
+D s-atopri.ads		20260610194523 e19c1d89 system.atomic_primitives%s
+D s-exctab.ads		20260610194523 91bef6ef system.exception_table%s
+D s-finpri.ads		20260610194523 5970d55a system.finalization_primitives%s
+D s-finroo.ads		20260610194523 0a7c3ed4 system.finalization_root%s
+D s-imagei.ads		20260610194523 11a376a2 system.image_i%s
+D s-imgint.ads		20260610194523 86836590 system.img_int%s
+D s-memory.ads		20260610194523 18949c1a system.memory%s
+D s-oscons.ads		20260626180535 42ad9981 system.os_constants%s
+D s-oslock.ads		20260610194523 bcc789d2 system.os_locks%s
+D s-parame.ads		20260610194523 a1aeab5c system.parameters%s
+D s-pooglo.ads		20260610194523 91708d21 system.pool_global%s
+D s-putima.ads		20260610194523 1b989439 system.put_images%s
+D s-retsta.ads		20260610194523 0f6b06cb system.return_stack%s
+D s-secsta.ads		20260610194523 578279f5 system.secondary_stack%s
+D s-soflin.ads		20260610194523 5d88fdea system.soft_links%s
+D s-stache.ads		20260610194523 0b81c1fe system.stack_checking%s
+D s-stalib.ads		20260610194523 1c9580f6 system.standard_library%s
+D s-stalib.adb		20260610194523 eb464a47 system.standard_library%b
+D s-stoele.ads		20260610194523 ccded4e8 system.storage_elements%s
+D s-stopoo.ads		20260610194523 45459446 system.storage_pools%s
+D s-stposu.ads		20260610194523 f8e797ef system.storage_pools.subpools%s
+D s-stratt.ads		20260610194523 80b8dafb system.stream_attributes%s
+D s-string.ads		20260610194523 582aac7d system.strings%s
+D s-ststop.ads		20260610194523 c569db7c system.strings.stream_ops%s
+D s-traent.ads		20260610194523 c81cbf8c system.traceback_entries%s
+D s-unstyp.ads		20260610194523 fa2a7f59 system.unsigned_types%s
+D s-wchcon.ads		20260610194523 d9032363 system.wch_con%s
+D s-wchstw.ads		20260610194523 2d112c01 system.wch_stw%s
+G a e
+G c Z s s [goalDI brain 7 9 none]
+G c Z s s [goalDA brain 7 9 none]
+G c Z s s [goalDF brain 7 9 none]
+G c Z s s [goalIP brain 7 9 none]
+G c Z s s [has_element brain__goal_vectors 115 13 15_4]
+G c Z s s [empty brain__goal_vectors 125 13 15_4]
+G c Z s s [Oeq brain__goal_vectors 127 24 15_4]
+G c Z s s [to_vector brain__goal_vectors 136 13 15_4]
+G c Z s s [to_vector brain__goal_vectors 139 13 15_4]
+G c Z s s [Oconcat brain__goal_vectors 145 13 15_4]
+G c Z s s [Oconcat brain__goal_vectors 149 13 15_4]
+G c Z s s [Oconcat brain__goal_vectors 153 13 15_4]
+G c Z s s [Oconcat brain__goal_vectors 157 13 15_4]
+G c Z s s [capacity brain__goal_vectors 161 13 15_4]
+G c Z s s [reserve_capacity brain__goal_vectors 164 14 15_4]
+G c Z s s [length brain__goal_vectors 175 13 15_4]
+G c Z s s [set_length brain__goal_vectors 178 14 15_4]
+G c Z s s [is_empty brain__goal_vectors 187 13 15_4]
+G c Z s s [clear brain__goal_vectors 190 14 15_4]
+G c Z s s [to_cursor brain__goal_vectors 194 13 15_4]
+G c Z s s [to_index brain__goal_vectors 201 13 15_4]
+G c Z s s [element brain__goal_vectors 206 13 15_4]
+G c Z s s [element brain__goal_vectors 213 13 15_4]
+G c Z s s [replace_element brain__goal_vectors 217 14 15_4]
+G c Z s s [replace_element brain__goal_vectors 228 14 15_4]
+G c Z s s [query_element brain__goal_vectors 239 14 15_4]
+G c Z s s [query_element brain__goal_vectors 250 14 15_4]
+G c Z s s [update_element brain__goal_vectors 259 14 15_4]
+G c Z s s [update_element brain__goal_vectors 276 14 15_4]
+G c Z s s [constant_reference brain__goal_vectors 303 13 15_4]
+G c Z s s [reference brain__goal_vectors 308 13 15_4]
+G c Z s s [constant_reference brain__goal_vectors 313 13 15_4]
+G c Z s s [reference brain__goal_vectors 318 13 15_4]
+G c Z s s [assign brain__goal_vectors 323 14 15_4]
+G c Z s s [copy brain__goal_vectors 325 13 15_4]
+G c Z s s [move brain__goal_vectors 327 14 15_4]
+G c Z s s [new_vector brain__goal_vectors 333 13 15_4]
+G c Z s s [insert_vector brain__goal_vectors 337 14 15_4]
+G c Z s s [insert_vector brain__goal_vectors 361 14 15_4]
+G c Z s s [insert_vector brain__goal_vectors 378 14 15_4]
+G c Z s s [insert brain__goal_vectors 396 14 15_4]
+G c Z s s [insert brain__goal_vectors 404 14 15_4]
+G c Z s s [insert brain__goal_vectors 412 14 15_4]
+G c Z s s [insert brain__goal_vectors 421 14 15_4]
+G c Z s s [insert brain__goal_vectors 438 14 15_4]
+G c Z s s [prepend_vector brain__goal_vectors 449 14 15_4]
+G c Z s s [prepend brain__goal_vectors 459 14 15_4]
+G c Z s s [append_vector brain__goal_vectors 466 14 15_4]
+G c Z s s [append brain__goal_vectors 476 14 15_4]
+G c Z s s [append brain__goal_vectors 483 14 15_4]
+G c Z s s [insert_space brain__goal_vectors 486 14 15_4]
+G c Z s s [insert_space brain__goal_vectors 503 14 15_4]
+G c Z s s [delete brain__goal_vectors 514 14 15_4]
+G c Z s s [delete brain__goal_vectors 524 14 15_4]
+G c Z s s [delete_first brain__goal_vectors 533 14 15_4]
+G c Z s s [delete_last brain__goal_vectors 538 14 15_4]
+G c Z s s [reverse_elements brain__goal_vectors 546 14 15_4]
+G c Z s s [swap brain__goal_vectors 549 14 15_4]
+G c Z s s [swap brain__goal_vectors 554 14 15_4]
+G c Z s s [first_index brain__goal_vectors 560 13 15_4]
+G c Z s s [first brain__goal_vectors 563 13 15_4]
+G c Z s s [first_element brain__goal_vectors 567 13 15_4]
+G c Z s s [last_index brain__goal_vectors 570 13 15_4]
+G c Z s s [last brain__goal_vectors 574 13 15_4]
+G c Z s s [last_element brain__goal_vectors 578 13 15_4]
+G c Z s s [next brain__goal_vectors 581 13 15_4]
+G c Z s s [next brain__goal_vectors 587 14 15_4]
+G c Z s s [previous brain__goal_vectors 590 13 15_4]
+G c Z s s [previous brain__goal_vectors 596 14 15_4]
+G c Z s s [find_index brain__goal_vectors 599 13 15_4]
+G c Z s s [find brain__goal_vectors 609 13 15_4]
+G c Z s s [reverse_find_index brain__goal_vectors 623 13 15_4]
+G c Z s s [reverse_find brain__goal_vectors 635 13 15_4]
+G c Z s s [contains brain__goal_vectors 649 13 15_4]
+G c Z s s [iterate brain__goal_vectors 654 14 15_4]
+G c Z s s [reverse_iterate brain__goal_vectors 662 14 15_4]
+G c Z s s [iterate brain__goal_vectors 669 13 15_4]
+G c Z s s [iterate brain__goal_vectors 672 13 15_4]
+G c Z s s [adjust brain__goal_vectors__implementation 90 28 726_4_15_4]
+G c Z s s [finalize brain__goal_vectors__implementation 93 28 726_4_15_4]
+G c Z s s [zero_counts brain__goal_vectors__implementation 96 17 726_4_15_4]
+G c Z s s [busy brain__goal_vectors__implementation 100 17 726_4_15_4]
+G c Z s s [unbusy brain__goal_vectors__implementation 104 17 726_4_15_4]
+G c Z s s [lock brain__goal_vectors__implementation 108 17 726_4_15_4]
+G c Z s s [unlock brain__goal_vectors__implementation 112 17 726_4_15_4]
+G c Z s s [tc_check brain__goal_vectors__implementation 116 17 726_4_15_4]
+G c Z s s [te_check brain__goal_vectors__implementation 120 17 726_4_15_4]
+G c Z s s [is_busy brain__goal_vectors__implementation 136 16 726_4_15_4]
+G c Z s s [is_locked brain__goal_vectors__implementation 140 16 726_4_15_4]
+G c Z s s [initialize brain__goal_vectors__implementation 161 28 726_4_15_4]
+G c Z s s [finalize brain__goal_vectors__implementation 162 28 726_4_15_4]
+G c Z s s [initialize brain__goal_vectors__implementation 167 28 726_4_15_4]
+G c Z s s [finalize brain__goal_vectors__implementation 168 28 726_4_15_4]
+G c Z s s [reference_control_typeDA brain__goal_vectors__implementation 84 12 726_4_15_4]
+G c Z s s [reference_control_typeDF brain__goal_vectors__implementation 84 12 726_4_15_4]
+G c Z s s [reference_control_typeIP brain__goal_vectors__implementation 84 12 726_4_15_4]
+G c Z s s [with_busyDF brain__goal_vectors__implementation 158 12 726_4_15_4]
+G c Z s s [with_busyIP brain__goal_vectors__implementation 158 12 726_4_15_4]
+G c Z s s [with_lockDF brain__goal_vectors__implementation 164 12 726_4_15_4]
+G c Z s s [with_lockIP brain__goal_vectors__implementation 164 12 726_4_15_4]
+G c Z s s [put_image brain__goal_vectors 747 14 15_4]
+G c Z s s [adjust brain__goal_vectors 750 25 15_4]
+G c Z s s [finalize brain__goal_vectors 751 25 15_4]
+G c Z s s [write brain__goal_vectors 753 14 15_4]
+G c Z s s [read brain__goal_vectors 759 14 15_4]
+G c Z s s [read brain__goal_vectors 773 14 15_4]
+G c Z s s [write brain__goal_vectors 779 14 15_4]
+G c Z s s [write brain__goal_vectors 798 14 15_4]
+G c Z s s [read brain__goal_vectors 804 14 15_4]
+G c Z s s [write brain__goal_vectors 820 14 15_4]
+G c Z s s [read brain__goal_vectors 826 14 15_4]
+G c Z s s [pseudo_reference brain__goal_vectors 840 13 15_4]
+G c Z s s [get_element_access brain__goal_vectors 849 13 15_4]
+G c Z s s [cursorIP brain__goal_vectors 768 9 15_4]
+G c Z s s [vectorDA brain__goal_vectors 741 9 15_4]
+G c Z s s [vectorDF brain__goal_vectors 741 9 15_4]
+G c Z s s [vectorIP brain__goal_vectors 741 9 15_4]
+G c Z s s [finalize brain__goal_vectors 865 25 15_4]
+G c Z s s [first brain__goal_vectors 867 24 15_4]
+G c Z s s [last brain__goal_vectors 868 24 15_4]
+G c Z s s [next brain__goal_vectors 870 24 15_4]
+G c Z s s [previous brain__goal_vectors 874 24 15_4]
+G c Z s s [constant_reference_typeDI brain__goal_vectors 788 9 15_4]
+G c Z s s [constant_reference_typeDA brain__goal_vectors 788 9 15_4]
+G c Z s s [constant_reference_typeDF brain__goal_vectors 788 9 15_4]
+G c Z s s [constant_reference_typeIP brain__goal_vectors 788 9 15_4]
+G c Z s s [reference_typeDI brain__goal_vectors 810 9 15_4]
+G c Z s s [reference_typeDA brain__goal_vectors 810 9 15_4]
+G c Z s s [reference_typeDF brain__goal_vectors 810 9 15_4]
+G c Z s s [reference_typeIP brain__goal_vectors 810 9 15_4]
+G c Z s s [elements_arrayIP brain__goal_vectors 729 9 15_4]
+G c Z s s [elements_arrayDI brain__goal_vectors 729 9 15_4]
+G c Z s s [elements_arrayDA brain__goal_vectors 729 9 15_4]
+G c Z s s [elements_arrayDF brain__goal_vectors 729 9 15_4]
+G c Z s s [elements_typeDI brain__goal_vectors 732 9 15_4]
+G c Z s s [elements_typeDF brain__goal_vectors 732 9 15_4]
+G c Z s s [elements_typeIP brain__goal_vectors 732 9 15_4]
+G c Z s s [iteratorDF brain__goal_vectors 857 9 15_4]
+G c Z s s [iteratorIP brain__goal_vectors 857 9 15_4]
+G c Z s s [free brain__goal_vectors 44 14 15_4]
+G c Z s s [append_slow_path brain__goal_vectors 47 14 15_4]
+G c Z s b [ask brain 27 13 none]
+G c Z s s [sayDI brain 16 9 none]
+G c Z s s [sayDA brain 16 9 none]
+G c Z s s [sayDF brain 16 9 none]
+G c Z s s [sayIP brain 16 9 none]
+G c Z b b [extract_content brain 6 13 none]
+G r c none [ask brain 27 13 none] [img codec 15 13 none]
+G r c none [ask brain 27 13 none] [bmp24 codec 8 13 none]
+G r c none [ask brain 27 13 none] [base64 codec 4 13 none]
+G r c none [ask brain 27 13 none] [escape json 27 13 none]
+G r c none [ask brain 27 13 none] [post http_client 5 13 none]
+G r s doc [ask brain 27 13 none] [docIP json 15 9 none]
+G r l doc [ask brain 27 13 none] [docDI json 15 9 none]
+G r k doc [ask brain 27 13 none] [docDF json 15 9 none]
+G r c none [ask brain 27 13 none] [parse json 18 13 none]
+G r c none [ask brain 27 13 none] [get json 20 13 none]
+G r c none [ask brain 27 13 none] [text json 21 13 none]
+G r c none [ask brain 27 13 none] [num json 22 13 none]
+G r c none [ask brain 27 13 none] [count json 25 13 none]
+G r c none [ask brain 27 13 none] [child json 26 13 none]
+G r c none [ask brain 27 13 none] [bool json 24 13 none]
+X 1 ada.ads
+18K9*Ada 22e8 26|4r6 4r33 5r6 15r32 27|1r6 8r31 106r82 110r96
+X 5 a-contai.ads
+16K13*Containers 28e19 26|5r10 15r36
+22I9*Count_Type<integer>
+X 10 a-convec.ads
+74k24*Vectors 878e27 26|5w21 15r47
+91R9*Vector<13|43R9> 26|19r28[15]
+175V13*Length{5|22I9} 27|92s23[28|7]
+483U14*Append 27|144s32[26|15] 171s35[28|13]
+X 14 a-iteint.ads
+24h9 Forward_Iterator
+32h9 Reversible_Iterator<24R9[9|84]>
+X 16 a-string.ads
+16K13*Strings 35e16 26|4r10 4r37 27|1r10 8r35 106r86 110r100
+X 17 a-strfix.ads
+49K21*Fixed 1390e22 27|1w18 8r43 106r94 110r108
+252V13*Index{natural} 27|8s49
+1228V13*Head{string} 27|106s100 110s114
+X 21 a-strunb.ads
+91K21*Unbounded 1641e26 26|4w18 4r45
+105R9*Unbounded_String<13|43R9> 1620e15 26|10r13 12r16 17r19 20r14 22r20
+. 29r46 27|9r11 40r46 88r15 103r17
+109r4*Null_Unbounded_String{105R9} 27|91r14
+122V13*To_Unbounded_String{105R9} 27|93s17 97s17 106s20 110s20 113s25 114s24
+. 116s27 131s29 132s32 137s29 141s29 151s28 155s31 157s20
+135V13*To_String{string} 27|18s32 35s14 101s54 106s106 110s67
+168U14*Append 27|23s34 24s34 26s34 27s34 28s37 31s28
+276V14*"="{boolean} 27|115s24 134s63 140s72 156s31
+X 26 brain.ads
+6K9*Brain 30l5 30e10 27|5b14 179l5 179t10
+7R9*Goal 14e14 15r65 27|125r24
+8i7*Item{natural} 27|128m22 136r25
+9i7*Cell{natural} 27|129m22 134r38 140r46
+10r7*Rel{21|105R9} 27|131m22 134r59 140r68
+11i7*Of_Item{natural} 27|130m22 134r81 140r88
+12r7*Amount{21|105R9} 27|132m22
+13b7*Stay{boolean} 27|134m22 140r29
+15K12*Goal_Vectors[10|74] 19r15
+16R9*Say 26e14 29r31 27|40r31
+17r7*Text{21|105R9} 27|113m17
+17r13*See{21|105R9} 27|114m17 115r20 116m20
+18i7*Look{natural} 27|118m17
+19r7*Moves{10|91R9[15]} 27|144m26
+20r7*Grip{21|105R9} 27|151m20
+21i7*Grip_Arm{natural} 27|153m17
+21i17*Grip_On{natural} 27|154m17
+22r7*Until_Kind{21|105R9} 27|155m17 156r20
+23i7*Steps{natural} 27|160m17
+24b7*Fast{boolean} 27|161m17
+24b13*Done{boolean} 27|162m17
+25r7*Avoid{28|14R12} 27|171m29
+27V13*Ask{boolean} 27>18 27>33 27>49 27>60 27>71 28>18 28>24 28>30 28>39
+. 28>47 28>65 28>76 28>79 29<18 29<36 27|38b13 178l8 178t11
+27a18 Host{string} 27|38b18 96r32 97r56
+27i33 Port{natural} 27|38b33 96r38 97r80
+27a49 Task_Text{string} 27|38b49 50r41
+27a60 Body_Text{string} 27|38b60 48r132
+27a71 Recent{string} 27|38b71 49r55
+28i18 Cols{natural} 27|39b18 41r35 46r135 47r114
+28i24 Rows{natural} 27|39b24 41r42 46r170
+28i30 N_Items{natural} 27|39b30 42r51
+28i39 N_Cams{natural} 27|39b39 68r98
+28i47 N_Arms{natural} 27|39b47 58r84 77r102
+28r65 RGB{28|8R12} 27|39b65 83r59 92r19
+28i76 W{natural} 27|39b76 83r64 92r33
+28i79 H{natural} 27|39b79 83r67 92r37
+29r18 Answer{16R9} 27|40b18 90m7 113m10 114m10 115r13 116m13 118m10 144m19
+. 144r19 151m13 153m10 154m10 155m10 156r13 160m10 161m10 162m10 171m22 171r22
+29r36 Err{21|105R9} 27|40b36 91m7 93m10 97m10 106m13 110m13 137m22 141m22
+. 157m13
+X 27 brain.adb
+6V13 Extract_Content{string} 6b13 6>30 36l8 36t23 101s37
+6a30 Raw{string} 8r56 16r18 17r15 20r23 22r24 28r48 31r39
+7a7 Key_S{string} 8r61 15r16
+8i7 P{natural} 12r10 15r12
+9r7 R{21|105R9} 18r43 23m42 23r42 24m42 24r42 26m42 26r42 27m42 27r42 28m45
+. 28r45 31m36 31r36 35r25
+10i7 I{natural} 15m7 16r13 17r20 20r19 21m19 21r24 22r29 28r53 31r44 33m10
+. 33r15
+41i7 Cells{natural} 47r44 72r82
+42i7 Items{natural} 71r82 74r80 78r85 81r134
+43a7 NL{string} 47r191 47r196 48r127 48r144 48r149 49r50 49r64 49r69 50r53
+. 50r58 51r39 52r86 53r235 54r128 57r259 59r274 60r264 61r457 62r195 62r200
+44a7 Prompt=62:203{string} 87r62
+64a7 Schema=81:149{string} 85r143
+83a7 B64{string} 86r132
+84a7 Body_Json=87:70{string} 96r68
+88r7 Reply{21|105R9} 96m79 96r79 101r65 106r117
+101a10 Inner{string} 105r13 109r29 110r120
+102r10 D{33|15R9} 109m36 109r36 113r57 113r70 114r56 114r69 118r65 118r78
+. 120r48 122r55 124r55 126r55 126r68 128r70 128r83 129r70 129r83 130r73 130r86
+. 132r64 132r77 135r50 135r63 149r47 149r60 153r69 153r82 154r68 154r81 155r63
+. 155r76 160r66 160r79 161r36 161r49 162r36 162r49 164r48 166r39 168r56 168r71
+103r10 Perr{21|105R9} 109m39 109r39 110r78
+120i13 Mv{integer} 122r58 124r58
+122i17 I{integer} 124r62 137r73 141r73
+124i19 G{integer} 126r71 128r86 129r86 130r89 132r80 135r66
+125r19 Gl{26|7R9} 128m19 129m19 130m19 131m19 132m19 134m19 134r35 134r56
+. 134r78 136r22 140r26 140r43 140r65 140r85 144r40
+126a19 Rel{string} 131r53 131r79
+149a13 G{string} 151r52 151r76
+164i13 Av{integer} 166r42 168r74
+166i17 I{integer} 168r78
+168f19 V{long_float} 170r22 171r52
+X 28 bytes.ads
+5K9*Bytes 26|3w6 3r17 28|23e10
+8R12*Buf{10|91R9[7]} 26|28r71 27|39r71
+14R12*Ints{10|91R9[13]} 26|25r15
+X 29 codec.ads
+3K9*Codec 27|2w6 46r124 46r159 47r33 47r103 58r73 68r71 71r71 72r71 74r69
+. 77r75 78r74 81r123 83r32 83r46 97r69 29|19e10
+4V13*Base64{string} 27|83s38
+8V13*BMP24{28|8R12} 27|83s52
+15V13*Img{string} 27|46s130 46s165 47s39 47s109 58s79 68s77 71s77 72s77 74s75
+. 77s81 78s80 81s129 97s75
+X 30 http_client.ads
+3K9*Http_Client 27|4w6 96r14 30|7e16
+5V13*Post{boolean} 27|96s26
+X 33 json.ads
+5K9*Json 27|3w6 87r49 102r14 109r17 113r46 113r60 114r45 114r59 118r55 118r68
+. 120r38 122r43 124r43 126r44 126r58 128r60 128r73 129r60 129r73 130r63 130r76
+. 132r53 132r67 135r39 135r53 149r36 149r50 153r59 153r72 154r58 154r71 155r52
+. 155r66 160r56 160r69 161r25 161r39 162r25 162r39 164r38 166r27 168r46 168r59
+. 33|28e9
+15R9*Doc 27|102r19 33|17e14
+18V13*Parse{boolean} 27|109s22
+20V13*Get{integer} 27|113s65 114s64 118s73 120s43 126s63 128s78 129s78 130s81
+. 132s72 135s58 149s55 153s77 154s76 155s71 160s74 161s44 162s44 164s43
+21V13*Text{string} 27|113s51 114s50 126s49 132s58 149s41 155s57
+22V13*Num{long_float} 27|118s60 128s65 129s65 130s68 153s64 154s63 160s61
+. 168s51
+24V13*Bool{boolean} 27|135s44 161s30 162s30
+25V13*Count{natural} 27|122s48 166s32
+26V13*Child{integer} 27|124s48 168s64
+27V13*Escape{string} 27|87s54
+X 34 system.ads
+67M9*Address
+X 44 s-memory.ads
+51V13*Alloc{34|67M9} 101i<c,__gnat_malloc>22
+66U14*Free 102i<c,__gnat_free>22
+74V13*Realloc{34|67M9} 103i<c,__gnat_realloc>22
+X 55 s-stalib.adb
+87U14 Break_Start 88i<c,__gnat_break_start>22
+

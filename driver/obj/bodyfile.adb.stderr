@@ -1,0 +1,7 @@
+bodyfile.adb:63:201: (style) this line is too long: 206 [-gnatyM]
+bodyfile.adb:96:201: (style) this line is too long: 218 [-gnatyM]
+bodyfile.adb:116:201: (style) this line is too long: 239 [-gnatyM]
+bodyfile.adb:117:201: (style) this line is too long: 240 [-gnatyM]
+bodyfile.adb:168:201: (style) this line is too long: 202 [-gnatyM]
+bodyfile.adb:170:201: (style) this line is too long: 224 [-gnatyM]
+bodyfile.adb:289:19: warning: constant "Zn" is not referenced [-gnatwu]

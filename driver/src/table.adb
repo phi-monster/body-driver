@@ -298,6 +298,47 @@ package body Table is
       return M;
    end Row_Scale;
 
+   function Loudest (E : Effect; Notch : Vec; R : Natural; Best : out Integer) return Long_Float is
+      M : Long_Float := 0.0;
+   begin
+      Best := -1;
+      for C in 0 .. E.N - 1 loop
+         declare
+            V : constant Long_Float := abs (E.B (C, R)) * abs Notch (C);
+         begin
+            if V > M then
+               M := V;
+               Best := C;
+            end if;
+         end;
+      end loop;
+      return M;
+   end Loudest;
+
+   function Row_Proven (E : Effect; Notch : Vec; R : Natural) return Boolean is
+      Best : Integer;
+      M : constant Long_Float := Loudest (E, Notch, R, Best);
+   begin
+      if M <= 0.0 or else Best < 0 then
+         return False;
+      end if;
+      return E.Reps (Best) >= 2 and then E.Scatter (Best, R) < 1.0;
+   end Row_Proven;
+
+   function Row_Why (E : Effect; Notch : Vec; R : Natural) return String is
+      Best : Integer;
+      M : constant Long_Float := Loudest (E, Notch, R, Best);
+   begin
+      if M <= 0.0 or else Best < 0 then
+         return "pushing every channel moved it not at all";
+      elsif E.Reps (Best) < 2 then
+         return "I pushed it only" & Natural'Image (E.Reps (Best)) & " time(s), so I cannot say it is steady";
+      elsif E.Scatter (Best, R) >= 1.0 then
+         return "the same push gave answers that scatter more than their own average";
+      end if;
+      return "";
+   end Row_Why;
+
    procedure Solve_Priority (Hard, Soft : Term_Vectors.Vector; N : Natural; Cap : Vec; Active : Mask; Damp : Vec;
                              A : out Vec; Ok : out Boolean) is
       A1 : Vec := Zero_Vec;

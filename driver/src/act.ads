@@ -15,6 +15,7 @@ with Memory;
 with Schema;
 with Chan;
 with Learned;
+with Plan;
 package Act is
    type Item_Kind is (Finger, Grip, Piece, Thing, Thing_Remembered, Thing_Held);   --  Piece = 我身上某个通道带的一块(Which = 通道号)
    type Item is record
@@ -76,6 +77,12 @@ package Act is
       Cut_Seq : Natural := 0;      --  切块缓存:这一帧的编号(同一帧同一台相机不重切,颜色切块很贵)
       Cut_Cam : Integer := -1;
       Cut_Regs : Picture.Regions;
+      --  🔴 脑不再一轮填一张表,而是交【一段程序】。程序编译过了就存在这里,一轮跑一小节,
+      --  跑完才回去问下一段 —— 这才是"少问几百次"的来源。
+      Prog : Plan.Compiled;
+      Prog_At : Natural := 0;          --  下一条要跑的动作是第几条
+      Have_Prog : Boolean := False;
+      Refused : Unbounded_String;      --  上一段被退回的话:理由 + 能照抄的替代,随下一轮一起给脑
    end record;
 
    procedure Init_Tracks (C : in out Context);

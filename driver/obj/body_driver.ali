@@ -1,0 +1,474 @@
+V "GNAT Lib v16"
+M P W=b
+A -O2
+A -gnatA
+A -gnat2022
+A -gnata
+A -gnatwa
+A -g
+A -gnatyM200
+A -mmacosx-version-min=26.0.0
+A -mcpu=apple-m1
+A -mlittle-endian
+A -mabi=lp64
+A -fPIC
+P SS ZX
+
+RN
+RV NO_DISPATCHING_CALLS
+RV NO_EXCEPTION_HANDLERS
+RV NO_EXCEPTION_PROPAGATION
+RV NO_EXCEPTIONS
+RV NO_FLOATING_POINT
+RV NO_IO
+RV NO_IMPLICIT_CONDITIONALS
+RV NO_LOCAL_ALLOCATORS
+RV NO_NESTED_FINALIZATION
+RV NO_SECONDARY_STACK
+RV NO_STANDARD_STORAGE_POOLS
+RV NO_DEFAULT_INITIALIZATION
+RV NO_DYNAMIC_SIZED_OBJECTS
+RV NO_IMPLEMENTATION_PRAGMAS
+
+U body_driver%b		body_driver.adb		72e67de3 NE OO SU
+W act%s			act.adb			act.ali
+W ada%s			ada.ads			ada.ali
+W ada.command_line%s	a-comlin.adb		a-comlin.ali
+Z ada.exceptions%s	a-except.adb		a-except.ali
+W ada.strings%s		a-string.ads		a-string.ali
+W ada.strings.fixed%s	a-strfix.adb		a-strfix.ali
+Z ada.strings.text_buffers%s  a-sttebu.adb	a-sttebu.ali
+W ada.strings.unbounded%s  a-strunb.adb		a-strunb.ali
+Z ada.tags%s		a-tags.adb		a-tags.ali
+W ada.text_io%s		a-textio.adb		a-textio.ali
+W bodyfile%s		bodyfile.adb		bodyfile.ali
+W bytes%s		bytes.adb		bytes.ali
+W chan%s		chan.adb		chan.ali
+W codec%s		codec.adb		codec.ali
+W memory%s		memory.adb		memory.ali
+W picture%s		picture.adb		picture.ali
+W plug%s		plug.adb		plug.ali
+W schema%s		schema.adb		schema.ali
+W selfmap%s		selfmap.adb		selfmap.ali
+Z system%s		system.ads		system.ali
+Z system.finalization_primitives%s  s-finpri.adb  s-finpri.ali
+Z system.img_int%s	s-imgint.ads		s-imgint.ali
+Z system.secondary_stack%s  s-secsta.adb	s-secsta.ali
+Z system.soft_links%s	s-soflin.adb		s-soflin.ali
+Z system.standard_library%s  s-stalib.adb	s-stalib.ali
+Z system.val_int%s	s-valint.ads		s-valint.ali
+W table%s		table.adb		table.ali
+W world%s		world.adb		world.ali
+W zone%s		zone.adb		zone.ali
+
+D act.ads		20260912223334 a537acb2 act%s
+D ada.ads		20260610194523 76789da1 ada%s
+D a-charac.ads		20260610194523 2d3ec45b ada.characters%s
+D a-chlat1.ads		20260610194523 e0d72e76 ada.characters.latin_1%s
+D a-comlin.ads		20260610194523 4aa66568 ada.command_line%s
+D a-contai.ads		20260610194523 61e5e089 ada.containers%s
+D a-conhel.ads		20260610194523 46fe1ce3 ada.containers.helpers%s
+D a-coinve.ads		20260610194523 2d0a9a0e ada.containers.indefinite_vectors%s
+D a-convec.ads		20260610194523 cb0f314a ada.containers.vectors%s
+D a-except.ads		20260610194523 8699d7ff ada.exceptions%s
+D a-finali.ads		20260610194523 099c16e4 ada.finalization%s
+D a-ioexce.ads		20260610194523 40018c65 ada.io_exceptions%s
+D a-iteint.ads		20260610194523 49a8bee2 ada.iterator_interfaces%s
+D a-stream.ads		20260610194523 cb01a8f8 ada.streams%s
+D a-string.ads		20260610194523 90ac6797 ada.strings%s
+D a-strfix.ads		20260610194523 8648dedb ada.strings.fixed%s
+D a-strmap.ads		20260610194523 f7e6ca10 ada.strings.maps%s
+D a-strsea.ads		20260610194523 18c3c634 ada.strings.search%s
+D a-sttebu.ads		20260610194523 f1ad67a2 ada.strings.text_buffers%s
+D a-strunb.ads		20260610194523 8d6ccba7 ada.strings.unbounded%s
+D a-stuten.ads		20260610194523 c6ced0ae ada.strings.utf_encoding%s
+D a-tags.ads		20260610194523 2dbf449c ada.tags%s
+D a-textio.ads		20260610194523 34ef47de ada.text_io%s
+D a-unccon.ads		20260610194523 0e9b276f ada.unchecked_conversion%s
+D a-uncdea.ads		20260610194523 c3a8ac65 ada.unchecked_deallocation%s
+D body_driver.adb	20260907100237 9710d1dc body_driver%b
+D bodyfile.ads		20260907193058 d358b588 bodyfile%s
+D brain.ads		20260912223334 ec4aa44d brain%s
+D bytes.ads		20260906203008 86b1403c bytes%s
+D chan.ads		20260906213131 fcae972f chan%s
+D codec.ads		20260906203008 34417e50 codec%s
+D gnat.ads		20260610194523 b5988c27 gnat%s
+D g-socket.ads		20260610194523 a4cab028 gnat.sockets%s
+D interfac.ads		20260610194523 9111f9c1 interfaces%s
+D i-c.ads		20260610194523 dbdd3be7 interfaces.c%s
+D i-cstrea.ads		20260610194523 ffd01b9d interfaces.c_streams%s
+D layout.ads		20260906203008 c005157d layout%s
+D memory.ads		20260906203008 784566c6 memory%s
+D msgpack.ads		20260906203008 0af3a83c msgpack%s
+D picture.ads		20260912223334 103f308c picture%s
+D plug.ads		20260907080552 5ecb2156 plug%s
+D schema.ads		20260907084801 c19c9abf schema%s
+D selfmap.ads		20260907102348 3ecf7596 selfmap%s
+D system.ads		20260610194523 8a611ac3 system%s
+D s-atocou.ads		20260610194523 dc18efc3 system.atomic_counters%s
+D s-crtl.ads		20260610194523 823b6536 system.crtl%s
+D s-exctab.ads		20260610194523 91bef6ef system.exception_table%s
+D s-ficobl.ads		20260610194523 dc5161d4 system.file_control_block%s
+D s-finpri.ads		20260610194523 5970d55a system.finalization_primitives%s
+D s-finroo.ads		20260610194523 0a7c3ed4 system.finalization_root%s
+D s-imagei.ads		20260610194523 11a376a2 system.image_i%s
+D s-imgint.ads		20260610194523 86836590 system.img_int%s
+D s-memory.ads		20260610194523 18949c1a system.memory%s
+D s-oscons.ads		20260626180535 42ad9981 system.os_constants%s
+D s-oslock.ads		20260610194523 bcc789d2 system.os_locks%s
+D s-parame.ads		20260610194523 a1aeab5c system.parameters%s
+D s-pooglo.ads		20260610194523 91708d21 system.pool_global%s
+D s-putima.ads		20260610194523 1b989439 system.put_images%s
+D s-retsta.ads		20260610194523 0f6b06cb system.return_stack%s
+D s-secsta.ads		20260610194523 578279f5 system.secondary_stack%s
+D s-soflin.ads		20260610194523 5d88fdea system.soft_links%s
+D s-stache.ads		20260610194523 0b81c1fe system.stack_checking%s
+D s-stalib.ads		20260610194523 1c9580f6 system.standard_library%s
+D s-stalib.adb		20260610194523 eb464a47 system.standard_library%b
+D s-stoele.ads		20260610194523 ccded4e8 system.storage_elements%s
+D s-stopoo.ads		20260610194523 45459446 system.storage_pools%s
+D s-stratt.ads		20260610194523 80b8dafb system.stream_attributes%s
+D s-traent.ads		20260610194523 c81cbf8c system.traceback_entries%s
+D s-unstyp.ads		20260610194523 fa2a7f59 system.unsigned_types%s
+D s-valint.ads		20260610194523 9081ae83 system.val_int%s
+D s-valuns.ads		20260610194523 c639d3c7 system.val_uns%s
+D s-valuei.ads		20260610194523 75953b98 system.value_i%s
+D s-valueu.ads		20260610194523 099f68d2 system.value_u%s
+D s-wchcon.ads		20260610194523 d9032363 system.wch_con%s
+D table.ads		20260908002242 51b66f9a table%s
+D websocket.ads		20260906203008 e2cfe5a2 websocket%s
+D world.ads		20260912223334 de6e44ce world%s
+D zone.ads		20260912223334 ee9098ed zone%s
+G a e
+G c Z b b [body_driver standard 20 11 none]
+G r s link [body_driver standard 20 11 none] [linkIP plug 39 9 none]
+G r l link [body_driver standard 20 11 none] [linkDI plug 39 9 none]
+G r k link [body_driver standard 20 11 none] [linkDF plug 39 9 none]
+G r s frame [body_driver standard 20 11 none] [frameIP plug 20 9 none]
+G r l frame [body_driver standard 20 11 none] [frameDI plug 20 9 none]
+G r k frame [body_driver standard 20 11 none] [frameDF plug 20 9 none]
+G r s context [body_driver standard 20 11 none] [contextIP act 62 9 none]
+G r l context [body_driver standard 20 11 none] [contextDI act 62 9 none]
+G r k context [body_driver standard 20 11 none] [contextDF act 62 9 none]
+G r c none [body_driver standard 20 11 none] [env codec 17 13 none]
+G r c none [body_driver standard 20 11 none] [make_dir codec 12 14 none]
+G r c none [body_driver standard 20 11 none] [boot plug 58 14 none]
+G r c none [body_driver standard 20 11 none] [sense plug 59 13 none]
+G r c none [body_driver standard 20 11 none] [img codec 15 13 none]
+G r c none [body_driver standard 20 11 none] [fingerprint bodyfile 11 13 none]
+G r s body_map [body_driver standard 20 11 none] [body_mapIP selfmap 19 9 none]
+G r l body_map [body_driver standard 20 11 none] [body_mapDI selfmap 19 9 none]
+G r k body_map [body_driver standard 20 11 none] [body_mapDF selfmap 19 9 none]
+G r s map [body_driver standard 20 11 none] [mapIP schema 26 9 none]
+G r l map [body_driver standard 20 11 none] [mapDI schema 26 9 none]
+G r k map [body_driver standard 20 11 none] [mapDF schema 26 9 none]
+G r c none [body_driver standard 20 11 none] [load bodyfile 13 13 none]
+G r s string_note [body_driver standard 20 11 none] [string_noteIP selfmap 43 9 none]
+G r l string_note [body_driver standard 20 11 none] [string_noteDI selfmap 43 9 none]
+G r k string_note [body_driver standard 20 11 none] [string_noteDF selfmap 43 9 none]
+G r c none [body_driver standard 20 11 none] [idle selfmap 55 14 none]
+G r c none [body_driver standard 20 11 none] [min_pixels picture 25 13 none]
+G r c none [body_driver standard 20 11 none] [null_floor picture 35 13 none]
+G r c none [body_driver standard 20 11 none] [max_diff picture 41 13 none]
+G r c none [body_driver standard 20 11 none] [verify selfmap 46 14 none]
+G r j body_map [body_driver standard 20 11 none] [body_mapDA selfmap 19 9 none]
+G r j map [body_driver standard 20 11 none] [mapDA schema 26 9 none]
+G r c none [body_driver standard 20 11 none] [measure selfmap 59 14 none]
+G r c none [body_driver standard 20 11 none] [merge bodyfile 18 14 none]
+G r s hand [body_driver standard 20 11 none] [handIP zone 27 9 none]
+G r l hand [body_driver standard 20 11 none] [handDI zone 27 9 none]
+G r k hand [body_driver standard 20 11 none] [handDF zone 27 9 none]
+G r c none [body_driver standard 20 11 none] [delivered chan 11 13 none]
+G r j hand [body_driver standard 20 11 none] [handDA zone 27 9 none]
+G r c none [body_driver standard 20 11 none] [measure zone 37 14 none]
+G r j hand_zone [body_driver standard 20 11 none] [hand_zoneDA zone 15 9 none]
+G r c none [body_driver standard 20 11 none] [fmt codec 14 13 none]
+G r s sample [body_driver standard 20 11 none] [sampleIP schema 20 9 none]
+G r c none [body_driver standard 20 11 none] [is_nan picture 46 13 none]
+G r c none [body_driver standard 20 11 none] [near_depth picture 34 13 none]
+G r c none [body_driver standard 20 11 none] [add schema 31 14 none]
+G r c none [body_driver standard 20 11 none] [save bodyfile 16 14 none]
+G r c none [body_driver standard 20 11 none] [steps plug 62 13 none]
+G r c none [body_driver standard 20 11 none] [init_tracks act 90 14 none]
+G r c none [body_driver standard 20 11 none] [init world 25 14 none]
+G r c none [body_driver standard 20 11 none] [take_reset plug 61 13 none]
+G r c none [body_driver standard 20 11 none] [reset_all world 26 14 none]
+G r c none [body_driver standard 20 11 none] [clear memory 10 14 none]
+G r c none [body_driver standard 20 11 none] [set memory 7 14 none]
+G r c none [body_driver standard 20 11 none] [round act 91 14 none]
+X 1 act.ads
+17K9*Act 92e8 26|13w6 27r8 89r23 257r4 278r10 292r10
+48K12*Effect_Vectors[9|74] 26|89r27
+62R9*Context 88e14 26|27r12
+63r7*Map{43|19R9} 26|126m12 130m35 140r42 141m18 145m15 146r30 150r32 150r60
+. 151r21 151r49 157r23 169r64 185r35 192r63 192r93 209r34 209r68 221r83 223r50
+. 223r79 225r68 242r46 242r62 251r55 252r94 258r25 259r20 260r97 261r30 261r50
+. 261r80 261r113 261r133 262r23 262r56 262r76 264r15 277r21 294r82
+64r7*Hands{9|91R9[78|35]} 26|246m15 251r62 294r89
+65r7*Wld{77|17R9} 26|258m18 274m29
+66r7*Mem{38|4R9} 26|275m26 288m21
+67i7*Cam{natural} 26|264m6 277m12
+68r7*Tables{9|91R9[48]} 26|127m12 251r71 294r98
+70r7*Recent{20|105R9} 26|276m12
+71r7*Task_Text{20|105R9} 26|281m12 283m12 285r12 286m12 288r47
+76b7*Look_Only{boolean} 26|67m6 265r124
+77r7*Eye_Host{20|105R9} 26|61m12 64m12 265r75
+78i7*Eye_Port{natural} 26|62m12 265r106
+79r7*Dump_Dir{20|105R9} 26|68m6 69r9 70r36
+82i7*Boot_Steps{natural} 26|255m6 256r66
+83r7*Sch{42|26R9} 26|128m12 242m36 249r60 251r81 294r108
+90U14*Init_Tracks 26|257s8 278s14
+91U14*Round 26|292s14
+X 2 ada.ads
+18K9*Ada 22e8 26|3r6 3r23 4r6 5r6 5r33 6r6 32r15 34r33 36r41 37r36 38r41
+. 39r41 40r62 41r47 53r7 58r31 75r7
+X 5 a-comlin.ads
+40K13*Command_Line 148e21 26|4w10 32r19 34r37 36r45 37r40 38r45 39r45 40r66
+. 41r51 53r11 75r11
+43V13*Argument_Count{natural} 26|32s32 36s58 38s58 40s79
+56V13*Argument{string} 26|34s50 37s53 39s58 41s64
+79U14*Set_Exit_Status 26|53s24 75s24
+X 6 a-contai.ads
+22I9*Count_Type<integer>
+X 9 a-convec.ads
+91R9*Vector<11|43R9> 26|88r40[78|35] 89r42[1|48] 107r49[41|19]
+175V13*Length{6|22I9} 26|82s64[41|11] 82s120[29|9] 83s45[41|19] 111s47[41|19]
+. 162s62[78|35] 162s97[41|11] 190s83[78|35] 192s78[29|13] 194s71[78|26] 194s135[78|26]
+. 208s45[78|26] 209s49[29|13] 209s158[41|11] 223s60[43|17] 249s66[42|25]
+187V13*Is_Empty{boolean} 26|83s82[41|19] 289s17[41|19]
+190U14*Clear 26|105s27[43|18] 105s51[29|13]
+483U14*Append 26|112s33[43|18] 113s36[29|13] 150s22[29|9] 150s50[29|9] 151s34[41|12]
+. 151s64[41|12] 246s21[78|35]
+X 13 a-iteint.ads
+24h9 Forward_Iterator
+32h9 Reversible_Iterator<24R9[8|84]>
+X 15 a-string.ads
+16K13*Strings 35e16 26|5r10 5r37 6r10 58r35
+X 16 a-strfix.ads
+49K21*Fixed 1390e22 26|6w18 58r43
+252V13*Index{natural} 26|58s49
+X 20 a-strunb.ads
+91K21*Unbounded 1641e26 26|5w18 5r45
+105R9*Unbounded_String<11|43R9> 1620e15 26|22r16 24r10 91r14
+109r4*Null_Unbounded_String{105R9} 26|276r22
+122V13*To_Unbounded_String{105R9} 26|24s30 39s20 41s26 49s14 61s24 68s18
+. 281s25 286s25
+135V13*To_String{string} 26|57s30 70s23 96s35 97s31 117s47 251s25 252s44
+. 265s62 288s34 294s28
+276V14*"="{boolean} 26|69s18 95s20 250s20 282s27 285s22 293s23
+X 23 a-textio.ads
+58K13*Text_IO 785e16 26|3w10 3r27
+565U14*Put_Line 26|43s13 52s7 74s7 79s7 82s4 97s10 117s13 119s16 132s13 142s16
+. 183s16 187s19 201s25 249s7 252s10 256s4 260s7 265s4 269s10 273s10 290s10
+X 26 body_driver.adb
+20U11*Body_Driver 20b11 298l5 298t16
+21i4 Port{natural} 37m13 51r7 72r15
+22r4 Body_Path{20|105R9} 41m13 95r10 96r46 250r10 251r36 252r55 293r13 294r39
+24r4 Eye{20|105R9} 39m13 49m7 57r41 64r24
+25r4 L{41|39R9} 72m21 72r21 78m23 78r23 86r54 110m30 110r30 116m29 116r29
+. 130m27 130r27 185m30 185r30 255r32 268m26 268r26 272m27 272r27 292m21 292r21
+. 294r73
+26r4 F{41|20R9} 78m26 78r26 82r59 82r114 83r38 83r75 83r121 83r154 83r174
+. 86r57 107r59 110m33 110r33 111r40 112r77 112r95 112r110 112r145 112r160
+. 113r78 116m40 116r40 130m30 130r30 162r92 164r85 185m43 185r43 209r153
+. 214r57 228r40 230r66 230r85 230r100 231r128 268m29 268r29 282r13 283r25
+. 289r10 292m24 292r24 294r76
+27r4 C{1|62R9} 61m10 62m10 64m10 67m4 68m4 69r7 70r34 126m10 127m10 128m10
+. 130m33 130r33 140r40 141m16 145m13 146r28 150r30 150r58 151m19 151r19 151m47
+. 151r47 157r21 169r62 185r33 192r61 192r91 209r32 209r66 221r81 223r48 223r77
+. 225r66 242m34 242r34 242r44 242r60 246m13 246r13 249r58 251r53 251r60 251r69
+. 251r79 252r92 255m4 256r64 257m21 257r21 258m16 258r16 258r23 259r18 260r95
+. 261r28 261r48 261r78 261r111 261r131 262r21 262r54 262r74 264m4 264r13
+. 265r73 265r104 265r122 274m27 274r27 275m24 275r24 276m10 277m10 277r19
+. 278m27 278r27 281m10 283m10 285r10 286m10 288m19 288r19 288r45 292m27 292r27
+. 294r80 294r87 294r96 294r106
+28b4 Ok{boolean} 72m24 73r11 130m40 131r17 185m49 186r23
+29i4 I{natural} 32r10 34r60 36r37 37r63 37m72 37r77 38r37 39r68 39m77 39r82
+. 40r58 41r74 41m83 41r88 46m7 46r12
+30a4 Order{string} 280r10 281r46
+34a10 A{string} 36r13 38r16 40r17 40r36 43r47
+57a7 E{string} 58r56 61r45 61r48 62r39 62r51
+58i7 P{natural} 60r10 61r59 62r42
+86a7 Key{string} 96r58 251r48
+87r7 Stored{43|19R9} 96m63 96r63 105m13 105r13 105m34 105r34 112m19 112r19
+. 113m19 113r19 116r32 126r19 140r32
+88r7 Stored_Hands{9|91R9[78|35]} 96m71 96r71 162r49 164r62 173r29 182r21
+. 190r70 194r112 195r68 199r57
+89r7 Stored_Tables{9|91R9[1|48]} 96m85 96r85 127r22
+90r7 Stored_Sch{42|26R9} 96m100 96r100 128r19
+91r7 Note{20|105R9} 96m112 96r112 97r42
+92b7 Loaded{boolean} 96m10 99r10 135r13
+93b7 Use_Stored{boolean} 122m13 125r10 162r16 190r37
+101b13 Ok_Body{boolean} 116m43 117r73 122r27
+101b22 Ok_Link{boolean} 116m52 118r20
+102r13 Vn{43|43R9} 116m61 117r58
+107r16 Prev{9|91R9[41|19]} 112r61 113r62
+108b16 Ok2{boolean} 110m39
+111i20 Cm{integer} 112r67 112r85 112r103 112r118 112r153 112r168 113r68 113r86
+137r16 Merged{43|19R9} 140m47 141r25
+138i16 Replaced{natural} 140m55 142r88
+138i26 Kept{natural} 140m65 142r128
+146i17 Ch{integer} 150r41 150r75
+148r19 Ha{29|10R12} 150m19 150r19 151r42
+148r23 Hd{29|10R12} 150m47 150r47 151r72
+157i11 A{integer} 162r36 162r79 164r76 164r91 169r73 173r43 182r35 183r55
+. 185r40 187r58 190r57 192r48 192r109 194r126 195r82 199r71 201r66 209r19
+. 209r84 209r140 214r31 214r63 221r57
+159r13 H{78|27R9} 182m16 182r16 185m46 194r63 195r30 198r57 208r37 209r112
+. 211r53 246r29
+160b13 Reuse{boolean} 167m19 170m25 178m19 178r28 181r16 190r21
+164a19 Dv{75|11A9} 169r29
+165b19 Any_Zone{boolean} 175m25 178r43
+168i23 K{integer} 169r33 169r92
+173r23 Zc{78|15R9} 174r25
+192i19 Hc{integer} 194r22 194r48 194r97 195r48 195r101 198r75 199r90
+198r25 Zn{78|15R9} 201r128 201r157 201r191
+199r25 Zo{78|15R9} 202r63 202r92 202r126
+208i17 Cm{integer} 209r99 209r121 211r62 214r43 221r96 228r48 230r74 230r93
+. 230r108 231r136
+211r22 Z{78|15R9} 216r55 216r61 216r87 216r110 216r120 216r126 216r132 216r138
+. 216r144 216r155 216r163 216r171 216r179
+212r22 X{42|20R9} 214m22 214m34 214m47 216m22 236m37 242r41
+219i29 K{integer} 221r76 236r46
+221i31 Pi{natural} 223r34 223r90 225r79
+225r37 P{43|10R9} 230r115 230r121 231r101 231r108 236r59 236r65 236r75 236r81
+. 236r87 236r93 236r102 236r108
+226f37 Zp{long_float} 230m40 232r59 233m43 236r71
+259i8 A{integer} 260r46 260r113 261r44 261r127 262r70
+X 27 bodyfile.ads
+10K9*Bodyfile 26|14w6 86r32 96r20 140r16 251r10 294r13 294r51 27|23e13
+11V13*Fingerprint{string} 26|86s41 294s60
+13V13*Load{boolean} 26|96s29
+16U14*Save 26|251s19 294s22
+18U14*Merge 26|140s25
+X 29 bytes.ads
+5K9*Bytes 26|15w6 148r28 29|23e10
+8R12*Buf{9|91R9[7]}
+10R12*Floats{9|91R9[9]} 26|148r34
+14R12*Ints{9|91R9[13]}
+X 30 chan.ads
+4K9*Chan 26|18w6 164r46 168r33 169r77 216r31 219r39 221r61 30|14e9
+6N4*Per_Arm 26|168r38 169r82 216r36 219r44 221r66
+11V13*Delivered{75|11A9} 26|164s51
+X 31 codec.ads
+3K9*Codec 26|7w6 30r31 48r7 49r35 67r19 68r39 70r7 83r110 83r143 142r77 142r117
+. 201r117 201r146 201r180 202r52 202r81 202r115 249r38 252r81 256r53 261r17
+. 261r100 262r43 265r93 31|19e10
+12U14*Make_Dir 26|70s13
+14V13*Fmt{string} 26|201s123 201s152 201s186 202s58 202s87 202s121 261s23
+. 261s106 262s49
+15V13*Img{string} 26|83s116 83s149 142s83 142s123 249s44 252s87 256s59 265s99
+17V13*Env{string} 26|30s37 48s13 49s41 67s25 68s45
+X 38 memory.ads
+3K9*Memory 26|12w6 275r10 288r7 38|11e11
+7U14*Set 26|288s14
+10U14*Clear 26|275s17
+X 40 picture.ads
+5K9*Picture 26|16w6 112r41 112r125 113r44 216r71 230r46 232r43 40|49e12
+25V13*Min_Pixels{natural} 26|112s133
+34V13*Near_Depth{long_float} 26|230s54
+35V13*Null_Floor{19R9} 26|112s49
+41V13*Max_Diff{natural} 26|113s52
+46V13*Is_Nan{boolean} 26|216s79 232s51
+X 41 plug.ads
+9K9*Plug 26|8w6 25r8 26r8 72r4 78r11 107r32 255r20 268r14 272r10 41|65e9
+10A9*Arm_Pose(long_float)<integer>
+14i7*W{natural} 26|83r132 112r107 112r157 230r97 231r140
+14i10*H{natural} 26|83r165 112r122 112r172 230r112
+15r7*Gray{29|8R12} 26|112r71 112r89 113r72 113r90
+16b7*Has_Depth{boolean} 26|83r185 228r52
+17r7*Depth{29|10R12} 26|230r78
+19K12*Cam_Vectors[9|74] 26|107r37
+20R9*Frame 26|26r13 41|27e14
+22r7*EE{9|91R9[11]} 26|82r61 162r94 164r87 209r155 214r59
+23r7*Jaw{29|10R12} 26|82r116
+24r7*Cams{9|91R9[19]} 26|83r40 83r77 83r123 83r156 83r176 107r61 111r42 112r79
+. 112r97 112r112 112r147 112r162 113r80 228r42 230r68 230r87 230r102 231r130
+. 289r12
+26r7*Instruction{20|105R9} 26|282r15 283r27
+39R9*Link 26|25r13 41|56e14
+58U14*Boot 26|72s9
+59V13*Sense{boolean} 26|78s16 268s19
+61V13*Take_Reset{boolean} 26|272s15
+62V13*Steps{natural} 26|255s25
+X 42 schema.ads
+10K9*Schema 26|17w6 90r20 212r26 242r22 42|36e11
+19A9*Part_Array(11R9)<integer>
+20R9*Sample 26|212r33 42|24e14
+21i7*Arm{natural} 26|214m24
+21i12*Cam{natural} 26|214m36
+22a7*Pose{41|10A9} 26|214m49
+23a7*Parts{19A9} 26|216m24 236m39
+26R9*Map 26|90r27 42|28e14
+27r7*S{9|91R9[25]} 26|249r64
+31U14*Add 26|242s29
+X 43 selfmap.ads
+9K9*Selfmap 26|9w6 87r16 102r18 110r16 116r13 130r10 137r25 225r50 43|62e12
+10R9*Part 26|225r58 43|16e14
+11b7*Valid{boolean} 26|223r94
+12i7*X0{natural} 26|231r110 236r77
+12i11*Y0{natural} 26|236r83
+12i15*X1{natural} 26|231r103 236r89
+12i19*Y1{natural} 26|236r95
+13f7*Cu{long_float} 26|230r117 236r61 236r104
+13f11*Cv{long_float} 26|230r123 236r67 236r110
+19R9*Body_Map 26|87r24 137r33 43|41e14
+20i7*Arms{natural} 26|157r27 259r24
+21i7*N_Cams{natural} 26|221r87 258r29 261r54 261r84 261r137 262r27 262r80
+23i7*Channels{natural} 26|146r34
+24r7*Parts{9|91R9[17]} 26|223r54 223r83 225r72
+25r7*Cam_Frac{29|10R12} 26|261r34 261r117 262r60
+26r7*Cam_On_Arm{29|14R12} 26|192r67 192r97 209r38 209r72 260r101
+27i7*World_Cam{natural} 26|264r19 277r25
+28r7*Amp{29|10R12} 26|150m36 169r68
+29r7*Delivered{29|10R12} 26|150m64
+31f7*EE_Noise{long_float} 26|242r50
+32f7*Rot_Noise{long_float} 26|242r66
+34r7*Floors{9|91R9[18]} 26|105m20 112m26
+35r7*Pic_Floor{29|14R12} 26|105m41 113m26
+38r7*Amp_Hist{9|91R9[41|12]} 26|151m25
+39r7*Deliv_Hist{9|91R9[41|12]} 26|151m53
+40i7*Measured_Times{natural} 26|145m19 252r98
+43R9*String_Note 26|102r26 43|45e14
+44r7*Text{20|105R9} 26|117r61
+46U14*Verify 26|116s21
+55U14*Idle 26|110s24
+59U14*Measure 26|130s18
+X 44 system.ads
+67M9*Address
+X 53 s-memory.ads
+51V13*Alloc{44|67M9} 101i<c,__gnat_malloc>22
+66U14*Free 102i<c,__gnat_free>22
+74V13*Realloc{44|67M9} 103i<c,__gnat_realloc>22
+X 64 s-stalib.adb
+87U14 Break_Start 88i<c,__gnat_break_start>22
+X 75 table.ads
+8K9*Table 26|19w6 164r33 75|52e10
+11A9*Vec(long_float)<integer> 26|164r39
+X 77 world.ads
+4K9*World 26|11w6 258r4 274r10 77|31e10
+25U14*Init 26|258s10
+26U14*Reset_All 26|274s16
+X 78 zone.ads
+8K9*Zone 26|10w6 88r22 159r17 185r16 198r39 199r39 211r35 78|43e9
+12f7*Cu{long_float} 26|216r159 216r175
+12f11*Cv{long_float} 26|216r167 216r183
+15R9*Hand_Zone 26|198r44 199r44 211r40 78|25e14
+16b7*Valid{boolean} 26|174r28 195r53 195r106 209r125
+17f7*Cu{long_float} 26|201r131 202r66 216r57
+17f11*Cv{long_float} 26|201r160 202r95 216r63
+20f7*Depth{long_float} 26|201r194 202r129 216r89 216r112
+21i7*N_Lobes{natural} 26|216r146
+22r7*A{9R9} 26|216r157 216r165
+22r10*B{9R9} 26|216r173 216r181
+24i7*X0{natural} 26|216r122
+24i11*Y0{natural} 26|216r128
+24i15*X1{natural} 26|216r134
+24i19*Y1{natural} 26|216r140
+27R9*Hand 26|159r22 78|34e14
+29r7*Zones{9|91R9[26]} 26|173r46 194r65 194r129 195r32 195r85 198r59 199r74
+. 208r39 209r114 211r55
+33a7*Pose{41|10A9} 26|164r79
+35K12*Hand_Vectors[9|74] 26|88r27
+37U14*Measure 26|185s21
+

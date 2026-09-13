@@ -1,0 +1,1051 @@
+V "GNAT Lib v16"
+A -O2
+A -gnatA
+A -gnat2022
+A -gnata
+A -gnatwa
+A -g
+A -gnatyM200
+A -mmacosx-version-min=26.0.0
+A -mcpu=apple-m1
+A -mlittle-endian
+A -mabi=lp64
+A -fPIC
+P SS ZX
+
+RN
+RV NO_CALENDAR
+RV NO_DELAY
+RV NO_DISPATCHING_CALLS
+RV NO_ENUMERATION_MAPS
+RV NO_EXCEPTION_HANDLERS
+RV NO_EXCEPTION_PROPAGATION
+RV NO_EXCEPTIONS
+RV NO_FIXED_POINT
+RV NO_FLOATING_POINT
+RV NO_IO
+RV NO_IMPLICIT_CONDITIONALS
+RV NO_LOCAL_ALLOCATORS
+RV NO_NESTED_FINALIZATION
+RV NO_SECONDARY_STACK
+RV NO_STANDARD_STORAGE_POOLS
+RV NO_UNCHECKED_CONVERSION
+RV NO_DEFAULT_INITIALIZATION
+RV NO_DYNAMIC_SIZED_OBJECTS
+RV NO_IMPLEMENTATION_PRAGMAS
+RV NO_IMPLICIT_LOOPS
+RV NO_ELABORATION_CODE
+
+U plug%b		plug.adb		b0b7fcaf NE OO PK
+W ada%s			ada.ads			ada.ali
+W ada.calendar%s	a-calend.adb		a-calend.ali
+Z ada.exceptions%s	a-except.adb		a-except.ali
+Z ada.strings.text_buffers%s  a-sttebu.adb	a-sttebu.ali
+Z ada.tags%s		a-tags.adb		a-tags.ali
+W ada.text_io%s		a-textio.adb		a-textio.ali
+W ada.unchecked_conversion%s
+W codec%s		codec.adb		codec.ali
+W interfaces%s		interfac.ads		interfac.ali
+Z system%s		system.ads		system.ali
+Z system.finalization_primitives%s  s-finpri.adb  s-finpri.ali
+Z system.img_int%s	s-imgint.ads		s-imgint.ali
+Z system.return_stack%s	s-retsta.ads		s-retsta.ali
+Z system.secondary_stack%s  s-secsta.adb	s-secsta.ali
+Z system.soft_links%s	s-soflin.adb		s-soflin.ali
+Z system.standard_library%s  s-stalib.adb	s-stalib.ali
+
+U plug%s		plug.ads		b620c364 EE OO PF PK
+W ada%s			ada.ads			ada.ali
+W ada.containers%s	a-contai.ads		a-contai.ali
+Z ada.containers.generic_array_sort%s
+Z ada.containers.helpers%s  a-conhel.adb	a-conhel.ali
+W ada.containers.vectors%s
+Z ada.exceptions%s	a-except.adb		a-except.ali
+Z ada.finalization%s	a-finali.ads		a-finali.ali
+Z ada.iterator_interfaces%s
+Z ada.streams%s		a-stream.adb		a-stream.ali
+W ada.strings%s		a-string.ads		a-string.ali
+Z ada.strings.text_buffers%s  a-sttebu.adb	a-sttebu.ali
+W ada.strings.unbounded%s  a-strunb.adb		a-strunb.ali
+Z ada.tags%s		a-tags.adb		a-tags.ali
+Z ada.unchecked_deallocation%s
+W bytes%s		bytes.adb		bytes.ali
+W layout%s		layout.adb		layout.ali
+W msgpack%s		msgpack.adb		msgpack.ali
+Z system%s		system.ads		system.ali
+Z system.assertions%s	s-assert.adb		s-assert.ali
+Z system.finalization_primitives%s  s-finpri.adb  s-finpri.ali
+Z system.img_lflt%s	s-imglfl.ads		s-imglfl.ali
+Z system.pool_global%s	s-pooglo.adb		s-pooglo.ali
+Z system.put_images%s	s-putima.adb		s-putima.ali
+Z system.return_stack%s	s-retsta.ads		s-retsta.ali
+Z system.secondary_stack%s  s-secsta.adb	s-secsta.ali
+Z system.soft_links%s	s-soflin.adb		s-soflin.ali
+Z system.standard_library%s  s-stalib.adb	s-stalib.ali
+Z system.storage_elements%s  s-stoele.ads	s-stoele.ali
+Z system.storage_pools%s  s-stopoo.adb		s-stopoo.ali
+Z system.storage_pools.subpools%s  s-stposu.adb	s-stposu.ali
+Z system.stream_attributes%s  s-stratt.adb	s-stratt.ali
+Z system.wch_stw%s	s-wchstw.adb		s-wchstw.ali
+W websocket%s		websocket.adb		websocket.ali
+
+D ada.ads		20260610194523 76789da1 ada%s
+D a-assert.ads		20260610194523 ba465f5c ada.assertions%s
+D a-calend.ads		20260610194523 bf7f3cc9 ada.calendar%s
+D a-charac.ads		20260610194523 2d3ec45b ada.characters%s
+D a-chlat1.ads		20260610194523 e0d72e76 ada.characters.latin_1%s
+D a-contai.ads		20260610194523 61e5e089 ada.containers%s
+D a-cgarso.ads		20260610194523 9129bfa8 ada.containers.generic_array_sort%s
+D a-conhel.ads		20260610194523 46fe1ce3 ada.containers.helpers%s
+D a-conhel.adb		20260610194523 854d323e ada.containers.helpers%b
+D a-coinve.ads		20260610194523 2d0a9a0e ada.containers.indefinite_vectors%s
+D a-convec.ads		20260610194523 cb0f314a ada.containers.vectors%s
+D a-convec.adb		20260610194523 b2ed0168 ada.containers.vectors%b
+D a-except.ads		20260610194523 8699d7ff ada.exceptions%s
+D a-finali.ads		20260610194523 099c16e4 ada.finalization%s
+D a-ioexce.ads		20260610194523 40018c65 ada.io_exceptions%s
+D a-iteint.ads		20260610194523 49a8bee2 ada.iterator_interfaces%s
+D a-stream.ads		20260610194523 cb01a8f8 ada.streams%s
+D a-string.ads		20260610194523 90ac6797 ada.strings%s
+D a-strmap.ads		20260610194523 f7e6ca10 ada.strings.maps%s
+D a-strsea.ads		20260610194523 18c3c634 ada.strings.search%s
+D a-sttebu.ads		20260610194523 f1ad67a2 ada.strings.text_buffers%s
+D a-strunb.ads		20260610194523 8d6ccba7 ada.strings.unbounded%s
+D a-stuten.ads		20260610194523 c6ced0ae ada.strings.utf_encoding%s
+D a-tags.ads		20260610194523 2dbf449c ada.tags%s
+D a-textio.ads		20260610194523 34ef47de ada.text_io%s
+D a-unccon.ads		20260610194523 0e9b276f ada.unchecked_conversion%s
+D a-uncdea.ads		20260610194523 c3a8ac65 ada.unchecked_deallocation%s
+D bytes.ads		20260906203008 86b1403c bytes%s
+D codec.ads		20260906203008 34417e50 codec%s
+D gnat.ads		20260610194523 b5988c27 gnat%s
+D g-socket.ads		20260610194523 a4cab028 gnat.sockets%s
+D interfac.ads		20260610194523 9111f9c1 interfaces%s
+D i-c.ads		20260610194523 dbdd3be7 interfaces.c%s
+D i-cstrea.ads		20260610194523 ffd01b9d interfaces.c_streams%s
+D layout.ads		20260906203008 c005157d layout%s
+D msgpack.ads		20260906203008 0af3a83c msgpack%s
+D plug.ads		20260907080552 5ecb2156 plug%s
+D plug.adb		20260912223334 ce270610 plug%b
+D system.ads		20260610194523 8a611ac3 system%s
+D s-assert.ads		20260610194523 9c4520c7 system.assertions%s
+D s-atocou.ads		20260610194523 dc18efc3 system.atomic_counters%s
+D s-atocou.adb		20260610194523 6fe685de system.atomic_counters%b
+D s-atopri.ads		20260610194523 e19c1d89 system.atomic_primitives%s
+D s-crtl.ads		20260610194523 823b6536 system.crtl%s
+D s-exctab.ads		20260610194523 91bef6ef system.exception_table%s
+D s-ficobl.ads		20260610194523 dc5161d4 system.file_control_block%s
+D s-finpri.ads		20260610194523 5970d55a system.finalization_primitives%s
+D s-finroo.ads		20260610194523 0a7c3ed4 system.finalization_root%s
+D s-imagei.ads		20260610194523 11a376a2 system.image_i%s
+D s-imager.ads		20260610194523 45c7157d system.image_r%s
+D s-imageu.ads		20260610194523 95851461 system.image_u%s
+D s-imgint.ads		20260610194523 86836590 system.img_int%s
+D s-imglfl.ads		20260610194523 941be202 system.img_lflt%s
+D s-imgllu.ads		20260610194523 047fb1fb system.img_llu%s
+D s-memory.ads		20260610194523 18949c1a system.memory%s
+D s-oscons.ads		20260626180535 42ad9981 system.os_constants%s
+D s-oslock.ads		20260610194523 bcc789d2 system.os_locks%s
+D s-parame.ads		20260610194523 a1aeab5c system.parameters%s
+D s-pooglo.ads		20260610194523 91708d21 system.pool_global%s
+D s-powlfl.ads		20260610194523 ac0852c8 system.powten_lflt%s
+D s-putima.ads		20260610194523 1b989439 system.put_images%s
+D s-retsta.ads		20260610194523 0f6b06cb system.return_stack%s
+D s-secsta.ads		20260610194523 578279f5 system.secondary_stack%s
+D s-soflin.ads		20260610194523 5d88fdea system.soft_links%s
+D s-stache.ads		20260610194523 0b81c1fe system.stack_checking%s
+D s-stalib.ads		20260610194523 1c9580f6 system.standard_library%s
+D s-stalib.adb		20260610194523 eb464a47 system.standard_library%b
+D s-stoele.ads		20260610194523 ccded4e8 system.storage_elements%s
+D s-stopoo.ads		20260610194523 45459446 system.storage_pools%s
+D s-stposu.ads		20260610194523 f8e797ef system.storage_pools.subpools%s
+D s-stratt.ads		20260610194523 80b8dafb system.stream_attributes%s
+D s-traent.ads		20260610194523 c81cbf8c system.traceback_entries%s
+D s-unstyp.ads		20260610194523 fa2a7f59 system.unsigned_types%s
+D s-wchcon.ads		20260610194523 d9032363 system.wch_con%s
+D s-wchstw.ads		20260610194523 2d112c01 system.wch_stw%s
+D websocket.ads		20260906203008 e2cfe5a2 websocket%s
+G a e
+G c Z s s [Tarm_poseBIP plug 10 4 none]
+G c Z s s [has_element plug__pose_vectors 115 13 11_4]
+G c Z s s [empty plug__pose_vectors 125 13 11_4]
+G c Z s s [Oeq plug__pose_vectors 127 24 11_4]
+G c Z s s [to_vector plug__pose_vectors 136 13 11_4]
+G c Z s s [to_vector plug__pose_vectors 139 13 11_4]
+G c Z s s [Oconcat plug__pose_vectors 145 13 11_4]
+G c Z s s [Oconcat plug__pose_vectors 149 13 11_4]
+G c Z s s [Oconcat plug__pose_vectors 153 13 11_4]
+G c Z s s [Oconcat plug__pose_vectors 157 13 11_4]
+G c Z s s [capacity plug__pose_vectors 161 13 11_4]
+G c Z s s [reserve_capacity plug__pose_vectors 164 14 11_4]
+G c Z s s [length plug__pose_vectors 175 13 11_4]
+G c Z s s [set_length plug__pose_vectors 178 14 11_4]
+G c Z s s [is_empty plug__pose_vectors 187 13 11_4]
+G c Z s s [clear plug__pose_vectors 190 14 11_4]
+G c Z s s [to_cursor plug__pose_vectors 194 13 11_4]
+G c Z s s [to_index plug__pose_vectors 201 13 11_4]
+G c Z s s [element plug__pose_vectors 206 13 11_4]
+G c Z s s [element plug__pose_vectors 213 13 11_4]
+G c Z s s [replace_element plug__pose_vectors 217 14 11_4]
+G c Z s s [replace_element plug__pose_vectors 228 14 11_4]
+G c Z s s [query_element plug__pose_vectors 239 14 11_4]
+G c Z s s [query_element plug__pose_vectors 250 14 11_4]
+G c Z s s [update_element plug__pose_vectors 259 14 11_4]
+G c Z s s [update_element plug__pose_vectors 276 14 11_4]
+G c Z s s [constant_reference plug__pose_vectors 303 13 11_4]
+G c Z s s [reference plug__pose_vectors 308 13 11_4]
+G c Z s s [constant_reference plug__pose_vectors 313 13 11_4]
+G c Z s s [reference plug__pose_vectors 318 13 11_4]
+G c Z s s [assign plug__pose_vectors 323 14 11_4]
+G c Z s s [copy plug__pose_vectors 325 13 11_4]
+G c Z s s [move plug__pose_vectors 327 14 11_4]
+G c Z s s [new_vector plug__pose_vectors 333 13 11_4]
+G c Z s s [insert_vector plug__pose_vectors 337 14 11_4]
+G c Z s s [insert_vector plug__pose_vectors 361 14 11_4]
+G c Z s s [insert_vector plug__pose_vectors 378 14 11_4]
+G c Z s s [insert plug__pose_vectors 396 14 11_4]
+G c Z s s [insert plug__pose_vectors 404 14 11_4]
+G c Z s s [insert plug__pose_vectors 412 14 11_4]
+G c Z s s [insert plug__pose_vectors 421 14 11_4]
+G c Z s s [insert plug__pose_vectors 438 14 11_4]
+G c Z s s [prepend_vector plug__pose_vectors 449 14 11_4]
+G c Z s s [prepend plug__pose_vectors 459 14 11_4]
+G c Z s s [append_vector plug__pose_vectors 466 14 11_4]
+G c Z s s [append plug__pose_vectors 476 14 11_4]
+G c Z s s [append plug__pose_vectors 483 14 11_4]
+G c Z s s [insert_space plug__pose_vectors 486 14 11_4]
+G c Z s s [insert_space plug__pose_vectors 503 14 11_4]
+G c Z s s [delete plug__pose_vectors 514 14 11_4]
+G c Z s s [delete plug__pose_vectors 524 14 11_4]
+G c Z s s [delete_first plug__pose_vectors 533 14 11_4]
+G c Z s s [delete_last plug__pose_vectors 538 14 11_4]
+G c Z s s [reverse_elements plug__pose_vectors 546 14 11_4]
+G c Z s s [swap plug__pose_vectors 549 14 11_4]
+G c Z s s [swap plug__pose_vectors 554 14 11_4]
+G c Z s s [first_index plug__pose_vectors 560 13 11_4]
+G c Z s s [first plug__pose_vectors 563 13 11_4]
+G c Z s s [first_element plug__pose_vectors 567 13 11_4]
+G c Z s s [last_index plug__pose_vectors 570 13 11_4]
+G c Z s s [last plug__pose_vectors 574 13 11_4]
+G c Z s s [last_element plug__pose_vectors 578 13 11_4]
+G c Z s s [next plug__pose_vectors 581 13 11_4]
+G c Z s s [next plug__pose_vectors 587 14 11_4]
+G c Z s s [previous plug__pose_vectors 590 13 11_4]
+G c Z s s [previous plug__pose_vectors 596 14 11_4]
+G c Z s s [find_index plug__pose_vectors 599 13 11_4]
+G c Z s s [find plug__pose_vectors 609 13 11_4]
+G c Z s s [reverse_find_index plug__pose_vectors 623 13 11_4]
+G c Z s s [reverse_find plug__pose_vectors 635 13 11_4]
+G c Z s s [contains plug__pose_vectors 649 13 11_4]
+G c Z s s [iterate plug__pose_vectors 654 14 11_4]
+G c Z s s [reverse_iterate plug__pose_vectors 662 14 11_4]
+G c Z s s [iterate plug__pose_vectors 669 13 11_4]
+G c Z s s [iterate plug__pose_vectors 672 13 11_4]
+G c Z s s [adjust plug__pose_vectors__implementation 90 28 726_4_11_4]
+G c Z s s [finalize plug__pose_vectors__implementation 93 28 726_4_11_4]
+G c Z s s [zero_counts plug__pose_vectors__implementation 96 17 726_4_11_4]
+G c Z s s [busy plug__pose_vectors__implementation 100 17 726_4_11_4]
+G c Z s s [unbusy plug__pose_vectors__implementation 104 17 726_4_11_4]
+G c Z s s [lock plug__pose_vectors__implementation 108 17 726_4_11_4]
+G c Z s s [unlock plug__pose_vectors__implementation 112 17 726_4_11_4]
+G c Z s s [tc_check plug__pose_vectors__implementation 116 17 726_4_11_4]
+G c Z s s [te_check plug__pose_vectors__implementation 120 17 726_4_11_4]
+G c Z s s [is_busy plug__pose_vectors__implementation 136 16 726_4_11_4]
+G c Z s s [is_locked plug__pose_vectors__implementation 140 16 726_4_11_4]
+G c Z s s [initialize plug__pose_vectors__implementation 161 28 726_4_11_4]
+G c Z s s [finalize plug__pose_vectors__implementation 162 28 726_4_11_4]
+G c Z s s [initialize plug__pose_vectors__implementation 167 28 726_4_11_4]
+G c Z s s [finalize plug__pose_vectors__implementation 168 28 726_4_11_4]
+G c Z s s [reference_control_typeDA plug__pose_vectors__implementation 84 12 726_4_11_4]
+G c Z s s [reference_control_typeDF plug__pose_vectors__implementation 84 12 726_4_11_4]
+G c Z s s [reference_control_typeIP plug__pose_vectors__implementation 84 12 726_4_11_4]
+G c Z s s [with_busyDF plug__pose_vectors__implementation 158 12 726_4_11_4]
+G c Z s s [with_busyIP plug__pose_vectors__implementation 158 12 726_4_11_4]
+G c Z s s [with_lockDF plug__pose_vectors__implementation 164 12 726_4_11_4]
+G c Z s s [with_lockIP plug__pose_vectors__implementation 164 12 726_4_11_4]
+G c Z s s [put_image plug__pose_vectors 747 14 11_4]
+G c Z s s [adjust plug__pose_vectors 750 25 11_4]
+G c Z s s [finalize plug__pose_vectors 751 25 11_4]
+G c Z s s [write plug__pose_vectors 753 14 11_4]
+G c Z s s [read plug__pose_vectors 759 14 11_4]
+G c Z s s [read plug__pose_vectors 773 14 11_4]
+G c Z s s [write plug__pose_vectors 779 14 11_4]
+G c Z s s [write plug__pose_vectors 798 14 11_4]
+G c Z s s [read plug__pose_vectors 804 14 11_4]
+G c Z s s [write plug__pose_vectors 820 14 11_4]
+G c Z s s [read plug__pose_vectors 826 14 11_4]
+G c Z s s [pseudo_reference plug__pose_vectors 840 13 11_4]
+G c Z s s [get_element_access plug__pose_vectors 849 13 11_4]
+G c Z s s [cursorIP plug__pose_vectors 768 9 11_4]
+G c Z s s [vectorDA plug__pose_vectors 741 9 11_4]
+G c Z s s [vectorDF plug__pose_vectors 741 9 11_4]
+G c Z s s [vectorIP plug__pose_vectors 741 9 11_4]
+G c Z s s [finalize plug__pose_vectors 865 25 11_4]
+G c Z s s [first plug__pose_vectors 867 24 11_4]
+G c Z s s [last plug__pose_vectors 868 24 11_4]
+G c Z s s [next plug__pose_vectors 870 24 11_4]
+G c Z s s [previous plug__pose_vectors 874 24 11_4]
+G c Z s s [constant_reference_typeDI plug__pose_vectors 788 9 11_4]
+G c Z s s [constant_reference_typeDA plug__pose_vectors 788 9 11_4]
+G c Z s s [constant_reference_typeDF plug__pose_vectors 788 9 11_4]
+G c Z s s [constant_reference_typeIP plug__pose_vectors 788 9 11_4]
+G c Z s s [reference_typeDI plug__pose_vectors 810 9 11_4]
+G c Z s s [reference_typeDA plug__pose_vectors 810 9 11_4]
+G c Z s s [reference_typeDF plug__pose_vectors 810 9 11_4]
+G c Z s s [reference_typeIP plug__pose_vectors 810 9 11_4]
+G c Z s s [elements_arrayIP plug__pose_vectors 729 9 11_4]
+G c Z s s [elements_typeIP plug__pose_vectors 732 9 11_4]
+G c Z s s [iteratorDF plug__pose_vectors 857 9 11_4]
+G c Z s s [iteratorIP plug__pose_vectors 857 9 11_4]
+G c Z s s [free plug__pose_vectors 44 14 11_4]
+G c Z s s [append_slow_path plug__pose_vectors 47 14 11_4]
+G c Z s s [has_element plug__floats_vectors 115 13 12_4]
+G c Z s s [empty plug__floats_vectors 125 13 12_4]
+G c Z s s [Oeq plug__floats_vectors 127 24 12_4]
+G c Z s s [to_vector plug__floats_vectors 136 13 12_4]
+G c Z s s [to_vector plug__floats_vectors 139 13 12_4]
+G c Z s s [Oconcat plug__floats_vectors 145 13 12_4]
+G c Z s s [Oconcat plug__floats_vectors 149 13 12_4]
+G c Z s s [Oconcat plug__floats_vectors 153 13 12_4]
+G c Z s s [Oconcat plug__floats_vectors 157 13 12_4]
+G c Z s s [capacity plug__floats_vectors 161 13 12_4]
+G c Z s s [reserve_capacity plug__floats_vectors 164 14 12_4]
+G c Z s s [length plug__floats_vectors 175 13 12_4]
+G c Z s s [set_length plug__floats_vectors 178 14 12_4]
+G c Z s s [is_empty plug__floats_vectors 187 13 12_4]
+G c Z s s [clear plug__floats_vectors 190 14 12_4]
+G c Z s s [to_cursor plug__floats_vectors 194 13 12_4]
+G c Z s s [to_index plug__floats_vectors 201 13 12_4]
+G c Z s s [element plug__floats_vectors 206 13 12_4]
+G c Z s s [element plug__floats_vectors 213 13 12_4]
+G c Z s s [replace_element plug__floats_vectors 217 14 12_4]
+G c Z s s [replace_element plug__floats_vectors 228 14 12_4]
+G c Z s s [query_element plug__floats_vectors 239 14 12_4]
+G c Z s s [query_element plug__floats_vectors 250 14 12_4]
+G c Z s s [update_element plug__floats_vectors 259 14 12_4]
+G c Z s s [update_element plug__floats_vectors 276 14 12_4]
+G c Z s s [constant_reference plug__floats_vectors 303 13 12_4]
+G c Z s s [reference plug__floats_vectors 308 13 12_4]
+G c Z s s [constant_reference plug__floats_vectors 313 13 12_4]
+G c Z s s [reference plug__floats_vectors 318 13 12_4]
+G c Z s s [assign plug__floats_vectors 323 14 12_4]
+G c Z s s [copy plug__floats_vectors 325 13 12_4]
+G c Z s s [move plug__floats_vectors 327 14 12_4]
+G c Z s s [new_vector plug__floats_vectors 333 13 12_4]
+G c Z s s [insert_vector plug__floats_vectors 337 14 12_4]
+G c Z s s [insert_vector plug__floats_vectors 361 14 12_4]
+G c Z s s [insert_vector plug__floats_vectors 378 14 12_4]
+G c Z s s [insert plug__floats_vectors 396 14 12_4]
+G c Z s s [insert plug__floats_vectors 404 14 12_4]
+G c Z s s [insert plug__floats_vectors 412 14 12_4]
+G c Z s s [insert plug__floats_vectors 421 14 12_4]
+G c Z s s [insert plug__floats_vectors 438 14 12_4]
+G c Z s s [prepend_vector plug__floats_vectors 449 14 12_4]
+G c Z s s [prepend plug__floats_vectors 459 14 12_4]
+G c Z s s [append_vector plug__floats_vectors 466 14 12_4]
+G c Z s s [append plug__floats_vectors 476 14 12_4]
+G c Z s s [append plug__floats_vectors 483 14 12_4]
+G c Z s s [insert_space plug__floats_vectors 486 14 12_4]
+G c Z s s [insert_space plug__floats_vectors 503 14 12_4]
+G c Z s s [delete plug__floats_vectors 514 14 12_4]
+G c Z s s [delete plug__floats_vectors 524 14 12_4]
+G c Z s s [delete_first plug__floats_vectors 533 14 12_4]
+G c Z s s [delete_last plug__floats_vectors 538 14 12_4]
+G c Z s s [reverse_elements plug__floats_vectors 546 14 12_4]
+G c Z s s [swap plug__floats_vectors 549 14 12_4]
+G c Z s s [swap plug__floats_vectors 554 14 12_4]
+G c Z s s [first_index plug__floats_vectors 560 13 12_4]
+G c Z s s [first plug__floats_vectors 563 13 12_4]
+G c Z s s [first_element plug__floats_vectors 567 13 12_4]
+G c Z s s [last_index plug__floats_vectors 570 13 12_4]
+G c Z s s [last plug__floats_vectors 574 13 12_4]
+G c Z s s [last_element plug__floats_vectors 578 13 12_4]
+G c Z s s [next plug__floats_vectors 581 13 12_4]
+G c Z s s [next plug__floats_vectors 587 14 12_4]
+G c Z s s [previous plug__floats_vectors 590 13 12_4]
+G c Z s s [previous plug__floats_vectors 596 14 12_4]
+G c Z s s [find_index plug__floats_vectors 599 13 12_4]
+G c Z s s [find plug__floats_vectors 609 13 12_4]
+G c Z s s [reverse_find_index plug__floats_vectors 623 13 12_4]
+G c Z s s [reverse_find plug__floats_vectors 635 13 12_4]
+G c Z s s [contains plug__floats_vectors 649 13 12_4]
+G c Z s s [iterate plug__floats_vectors 654 14 12_4]
+G c Z s s [reverse_iterate plug__floats_vectors 662 14 12_4]
+G c Z s s [iterate plug__floats_vectors 669 13 12_4]
+G c Z s s [iterate plug__floats_vectors 672 13 12_4]
+G c Z s s [adjust plug__floats_vectors__implementation 90 28 726_4_12_4]
+G c Z s s [finalize plug__floats_vectors__implementation 93 28 726_4_12_4]
+G c Z s s [zero_counts plug__floats_vectors__implementation 96 17 726_4_12_4]
+G c Z s s [busy plug__floats_vectors__implementation 100 17 726_4_12_4]
+G c Z s s [unbusy plug__floats_vectors__implementation 104 17 726_4_12_4]
+G c Z s s [lock plug__floats_vectors__implementation 108 17 726_4_12_4]
+G c Z s s [unlock plug__floats_vectors__implementation 112 17 726_4_12_4]
+G c Z s s [tc_check plug__floats_vectors__implementation 116 17 726_4_12_4]
+G c Z s s [te_check plug__floats_vectors__implementation 120 17 726_4_12_4]
+G c Z s s [is_busy plug__floats_vectors__implementation 136 16 726_4_12_4]
+G c Z s s [is_locked plug__floats_vectors__implementation 140 16 726_4_12_4]
+G c Z s s [initialize plug__floats_vectors__implementation 161 28 726_4_12_4]
+G c Z s s [finalize plug__floats_vectors__implementation 162 28 726_4_12_4]
+G c Z s s [initialize plug__floats_vectors__implementation 167 28 726_4_12_4]
+G c Z s s [finalize plug__floats_vectors__implementation 168 28 726_4_12_4]
+G c Z s s [reference_control_typeDA plug__floats_vectors__implementation 84 12 726_4_12_4]
+G c Z s s [reference_control_typeDF plug__floats_vectors__implementation 84 12 726_4_12_4]
+G c Z s s [reference_control_typeIP plug__floats_vectors__implementation 84 12 726_4_12_4]
+G c Z s s [with_busyDF plug__floats_vectors__implementation 158 12 726_4_12_4]
+G c Z s s [with_busyIP plug__floats_vectors__implementation 158 12 726_4_12_4]
+G c Z s s [with_lockDF plug__floats_vectors__implementation 164 12 726_4_12_4]
+G c Z s s [with_lockIP plug__floats_vectors__implementation 164 12 726_4_12_4]
+G c Z s s [put_image plug__floats_vectors 747 14 12_4]
+G c Z s s [adjust plug__floats_vectors 750 25 12_4]
+G c Z s s [finalize plug__floats_vectors 751 25 12_4]
+G c Z s s [write plug__floats_vectors 753 14 12_4]
+G c Z s s [read plug__floats_vectors 759 14 12_4]
+G c Z s s [read plug__floats_vectors 773 14 12_4]
+G c Z s s [write plug__floats_vectors 779 14 12_4]
+G c Z s s [write plug__floats_vectors 798 14 12_4]
+G c Z s s [read plug__floats_vectors 804 14 12_4]
+G c Z s s [write plug__floats_vectors 820 14 12_4]
+G c Z s s [read plug__floats_vectors 826 14 12_4]
+G c Z s s [pseudo_reference plug__floats_vectors 840 13 12_4]
+G c Z s s [get_element_access plug__floats_vectors 849 13 12_4]
+G c Z s s [cursorIP plug__floats_vectors 768 9 12_4]
+G c Z s s [vectorDA plug__floats_vectors 741 9 12_4]
+G c Z s s [vectorDF plug__floats_vectors 741 9 12_4]
+G c Z s s [vectorIP plug__floats_vectors 741 9 12_4]
+G c Z s s [finalize plug__floats_vectors 865 25 12_4]
+G c Z s s [first plug__floats_vectors 867 24 12_4]
+G c Z s s [last plug__floats_vectors 868 24 12_4]
+G c Z s s [next plug__floats_vectors 870 24 12_4]
+G c Z s s [previous plug__floats_vectors 874 24 12_4]
+G c Z s s [constant_reference_typeDI plug__floats_vectors 788 9 12_4]
+G c Z s s [constant_reference_typeDA plug__floats_vectors 788 9 12_4]
+G c Z s s [constant_reference_typeDF plug__floats_vectors 788 9 12_4]
+G c Z s s [constant_reference_typeIP plug__floats_vectors 788 9 12_4]
+G c Z s s [reference_typeDI plug__floats_vectors 810 9 12_4]
+G c Z s s [reference_typeDA plug__floats_vectors 810 9 12_4]
+G c Z s s [reference_typeDF plug__floats_vectors 810 9 12_4]
+G c Z s s [reference_typeIP plug__floats_vectors 810 9 12_4]
+G c Z s s [elements_arrayIP plug__floats_vectors 729 9 12_4]
+G c Z s s [elements_arrayDI plug__floats_vectors 729 9 12_4]
+G c Z s s [elements_arrayDA plug__floats_vectors 729 9 12_4]
+G c Z s s [elements_arrayDF plug__floats_vectors 729 9 12_4]
+G c Z s s [elements_typeDI plug__floats_vectors 732 9 12_4]
+G c Z s s [elements_typeDF plug__floats_vectors 732 9 12_4]
+G c Z s s [elements_typeIP plug__floats_vectors 732 9 12_4]
+G c Z s s [iteratorDF plug__floats_vectors 857 9 12_4]
+G c Z s s [iteratorIP plug__floats_vectors 857 9 12_4]
+G c Z s s [free plug__floats_vectors 44 14 12_4]
+G c Z s s [append_slow_path plug__floats_vectors 47 14 12_4]
+G c Z s s [camDI plug 13 9 none]
+G c Z s s [camDA plug 13 9 none]
+G c Z s s [camDF plug 13 9 none]
+G c Z s s [camIP plug 13 9 none]
+G c Z s s [has_element plug__cam_vectors 115 13 19_4]
+G c Z s s [empty plug__cam_vectors 125 13 19_4]
+G c Z s s [Oeq plug__cam_vectors 127 24 19_4]
+G c Z s s [to_vector plug__cam_vectors 136 13 19_4]
+G c Z s s [to_vector plug__cam_vectors 139 13 19_4]
+G c Z s s [Oconcat plug__cam_vectors 145 13 19_4]
+G c Z s s [Oconcat plug__cam_vectors 149 13 19_4]
+G c Z s s [Oconcat plug__cam_vectors 153 13 19_4]
+G c Z s s [Oconcat plug__cam_vectors 157 13 19_4]
+G c Z s s [capacity plug__cam_vectors 161 13 19_4]
+G c Z s s [reserve_capacity plug__cam_vectors 164 14 19_4]
+G c Z s s [length plug__cam_vectors 175 13 19_4]
+G c Z s s [set_length plug__cam_vectors 178 14 19_4]
+G c Z s s [is_empty plug__cam_vectors 187 13 19_4]
+G c Z s s [clear plug__cam_vectors 190 14 19_4]
+G c Z s s [to_cursor plug__cam_vectors 194 13 19_4]
+G c Z s s [to_index plug__cam_vectors 201 13 19_4]
+G c Z s s [element plug__cam_vectors 206 13 19_4]
+G c Z s s [element plug__cam_vectors 213 13 19_4]
+G c Z s s [replace_element plug__cam_vectors 217 14 19_4]
+G c Z s s [replace_element plug__cam_vectors 228 14 19_4]
+G c Z s s [query_element plug__cam_vectors 239 14 19_4]
+G c Z s s [query_element plug__cam_vectors 250 14 19_4]
+G c Z s s [update_element plug__cam_vectors 259 14 19_4]
+G c Z s s [update_element plug__cam_vectors 276 14 19_4]
+G c Z s s [constant_reference plug__cam_vectors 303 13 19_4]
+G c Z s s [reference plug__cam_vectors 308 13 19_4]
+G c Z s s [constant_reference plug__cam_vectors 313 13 19_4]
+G c Z s s [reference plug__cam_vectors 318 13 19_4]
+G c Z s s [assign plug__cam_vectors 323 14 19_4]
+G c Z s s [copy plug__cam_vectors 325 13 19_4]
+G c Z s s [move plug__cam_vectors 327 14 19_4]
+G c Z s s [new_vector plug__cam_vectors 333 13 19_4]
+G c Z s s [insert_vector plug__cam_vectors 337 14 19_4]
+G c Z s s [insert_vector plug__cam_vectors 361 14 19_4]
+G c Z s s [insert_vector plug__cam_vectors 378 14 19_4]
+G c Z s s [insert plug__cam_vectors 396 14 19_4]
+G c Z s s [insert plug__cam_vectors 404 14 19_4]
+G c Z s s [insert plug__cam_vectors 412 14 19_4]
+G c Z s s [insert plug__cam_vectors 421 14 19_4]
+G c Z s s [insert plug__cam_vectors 438 14 19_4]
+G c Z s s [prepend_vector plug__cam_vectors 449 14 19_4]
+G c Z s s [prepend plug__cam_vectors 459 14 19_4]
+G c Z s s [append_vector plug__cam_vectors 466 14 19_4]
+G c Z s s [append plug__cam_vectors 476 14 19_4]
+G c Z s s [append plug__cam_vectors 483 14 19_4]
+G c Z s s [insert_space plug__cam_vectors 486 14 19_4]
+G c Z s s [insert_space plug__cam_vectors 503 14 19_4]
+G c Z s s [delete plug__cam_vectors 514 14 19_4]
+G c Z s s [delete plug__cam_vectors 524 14 19_4]
+G c Z s s [delete_first plug__cam_vectors 533 14 19_4]
+G c Z s s [delete_last plug__cam_vectors 538 14 19_4]
+G c Z s s [reverse_elements plug__cam_vectors 546 14 19_4]
+G c Z s s [swap plug__cam_vectors 549 14 19_4]
+G c Z s s [swap plug__cam_vectors 554 14 19_4]
+G c Z s s [first_index plug__cam_vectors 560 13 19_4]
+G c Z s s [first plug__cam_vectors 563 13 19_4]
+G c Z s s [first_element plug__cam_vectors 567 13 19_4]
+G c Z s s [last_index plug__cam_vectors 570 13 19_4]
+G c Z s s [last plug__cam_vectors 574 13 19_4]
+G c Z s s [last_element plug__cam_vectors 578 13 19_4]
+G c Z s s [next plug__cam_vectors 581 13 19_4]
+G c Z s s [next plug__cam_vectors 587 14 19_4]
+G c Z s s [previous plug__cam_vectors 590 13 19_4]
+G c Z s s [previous plug__cam_vectors 596 14 19_4]
+G c Z s s [find_index plug__cam_vectors 599 13 19_4]
+G c Z s s [find plug__cam_vectors 609 13 19_4]
+G c Z s s [reverse_find_index plug__cam_vectors 623 13 19_4]
+G c Z s s [reverse_find plug__cam_vectors 635 13 19_4]
+G c Z s s [contains plug__cam_vectors 649 13 19_4]
+G c Z s s [iterate plug__cam_vectors 654 14 19_4]
+G c Z s s [reverse_iterate plug__cam_vectors 662 14 19_4]
+G c Z s s [iterate plug__cam_vectors 669 13 19_4]
+G c Z s s [iterate plug__cam_vectors 672 13 19_4]
+G c Z s s [adjust plug__cam_vectors__implementation 90 28 726_4_19_4]
+G c Z s s [finalize plug__cam_vectors__implementation 93 28 726_4_19_4]
+G c Z s s [zero_counts plug__cam_vectors__implementation 96 17 726_4_19_4]
+G c Z s s [busy plug__cam_vectors__implementation 100 17 726_4_19_4]
+G c Z s s [unbusy plug__cam_vectors__implementation 104 17 726_4_19_4]
+G c Z s s [lock plug__cam_vectors__implementation 108 17 726_4_19_4]
+G c Z s s [unlock plug__cam_vectors__implementation 112 17 726_4_19_4]
+G c Z s s [tc_check plug__cam_vectors__implementation 116 17 726_4_19_4]
+G c Z s s [te_check plug__cam_vectors__implementation 120 17 726_4_19_4]
+G c Z s s [is_busy plug__cam_vectors__implementation 136 16 726_4_19_4]
+G c Z s s [is_locked plug__cam_vectors__implementation 140 16 726_4_19_4]
+G c Z s s [initialize plug__cam_vectors__implementation 161 28 726_4_19_4]
+G c Z s s [finalize plug__cam_vectors__implementation 162 28 726_4_19_4]
+G c Z s s [initialize plug__cam_vectors__implementation 167 28 726_4_19_4]
+G c Z s s [finalize plug__cam_vectors__implementation 168 28 726_4_19_4]
+G c Z s s [reference_control_typeDA plug__cam_vectors__implementation 84 12 726_4_19_4]
+G c Z s s [reference_control_typeDF plug__cam_vectors__implementation 84 12 726_4_19_4]
+G c Z s s [reference_control_typeIP plug__cam_vectors__implementation 84 12 726_4_19_4]
+G c Z s s [with_busyDF plug__cam_vectors__implementation 158 12 726_4_19_4]
+G c Z s s [with_busyIP plug__cam_vectors__implementation 158 12 726_4_19_4]
+G c Z s s [with_lockDF plug__cam_vectors__implementation 164 12 726_4_19_4]
+G c Z s s [with_lockIP plug__cam_vectors__implementation 164 12 726_4_19_4]
+G c Z s s [put_image plug__cam_vectors 747 14 19_4]
+G c Z s s [adjust plug__cam_vectors 750 25 19_4]
+G c Z s s [finalize plug__cam_vectors 751 25 19_4]
+G c Z s s [write plug__cam_vectors 753 14 19_4]
+G c Z s s [read plug__cam_vectors 759 14 19_4]
+G c Z s s [read plug__cam_vectors 773 14 19_4]
+G c Z s s [write plug__cam_vectors 779 14 19_4]
+G c Z s s [write plug__cam_vectors 798 14 19_4]
+G c Z s s [read plug__cam_vectors 804 14 19_4]
+G c Z s s [write plug__cam_vectors 820 14 19_4]
+G c Z s s [read plug__cam_vectors 826 14 19_4]
+G c Z s s [pseudo_reference plug__cam_vectors 840 13 19_4]
+G c Z s s [get_element_access plug__cam_vectors 849 13 19_4]
+G c Z s s [cursorIP plug__cam_vectors 768 9 19_4]
+G c Z s s [vectorDA plug__cam_vectors 741 9 19_4]
+G c Z s s [vectorDF plug__cam_vectors 741 9 19_4]
+G c Z s s [vectorIP plug__cam_vectors 741 9 19_4]
+G c Z s s [finalize plug__cam_vectors 865 25 19_4]
+G c Z s s [first plug__cam_vectors 867 24 19_4]
+G c Z s s [last plug__cam_vectors 868 24 19_4]
+G c Z s s [next plug__cam_vectors 870 24 19_4]
+G c Z s s [previous plug__cam_vectors 874 24 19_4]
+G c Z s s [constant_reference_typeDI plug__cam_vectors 788 9 19_4]
+G c Z s s [constant_reference_typeDA plug__cam_vectors 788 9 19_4]
+G c Z s s [constant_reference_typeDF plug__cam_vectors 788 9 19_4]
+G c Z s s [constant_reference_typeIP plug__cam_vectors 788 9 19_4]
+G c Z s s [reference_typeDI plug__cam_vectors 810 9 19_4]
+G c Z s s [reference_typeDA plug__cam_vectors 810 9 19_4]
+G c Z s s [reference_typeDF plug__cam_vectors 810 9 19_4]
+G c Z s s [reference_typeIP plug__cam_vectors 810 9 19_4]
+G c Z s s [elements_arrayIP plug__cam_vectors 729 9 19_4]
+G c Z s s [elements_arrayDI plug__cam_vectors 729 9 19_4]
+G c Z s s [elements_arrayDA plug__cam_vectors 729 9 19_4]
+G c Z s s [elements_arrayDF plug__cam_vectors 729 9 19_4]
+G c Z s s [elements_typeDI plug__cam_vectors 732 9 19_4]
+G c Z s s [elements_typeDF plug__cam_vectors 732 9 19_4]
+G c Z s s [elements_typeIP plug__cam_vectors 732 9 19_4]
+G c Z s s [iteratorDF plug__cam_vectors 857 9 19_4]
+G c Z s s [iteratorIP plug__cam_vectors 857 9 19_4]
+G c Z s s [free plug__cam_vectors 44 14 19_4]
+G c Z s s [append_slow_path plug__cam_vectors 47 14 19_4]
+G c Z s b [boot plug 58 14 none]
+G c Z s b [sense plug 59 13 none]
+G c Z s b [act plug 60 13 none]
+G c Z s b [take_reset plug 61 13 none]
+G c Z s b [steps plug 62 13 none]
+G c Z s b [arms plug 63 13 none]
+G c Z s b [joint_mode plug 64 13 none]
+G c Z s s [frameDI plug 20 9 none]
+G c Z s s [frameDA plug 20 9 none]
+G c Z s s [frameDF plug 20 9 none]
+G c Z s s [frameIP plug 20 9 none]
+G c Z s s [cmdDI plug 30 9 none]
+G c Z s s [cmdDA plug 30 9 none]
+G c Z s s [cmdDF plug 30 9 none]
+G c Z s s [cmdIP plug 30 9 none]
+G c Z s s [linkDI plug 39 9 none]
+G c Z s s [linkDA plug 39 9 none]
+G c Z s s [linkDF plug 39 9 none]
+G c Z s s [linkIP plug 39 9 none]
+G c Z b b [u32_to_f32 plug 8 13 none]
+G c Z b b [nums_at plug 30 13 none]
+G c Z b b [hold_action plug 39 13 none]
+G c Z b b [reply plug 81 14 none]
+G c Z b b [pump plug 124 13 none]
+G r c none [boot plug 58 14 none] [listen websocket 14 14 none]
+G r c none [boot plug 58 14 none] [read_message websocket 16 14 none]
+G r c none [boot plug 58 14 none] [accept_client websocket 15 14 none]
+G r s doc [boot plug 58 14 none] [docIP msgpack 19 9 none]
+G r l doc [boot plug 58 14 none] [docDI msgpack 19 9 none]
+G r k doc [boot plug 58 14 none] [docDF msgpack 19 9 none]
+G r c none [boot plug 58 14 none] [decode msgpack 24 13 none]
+G r c none [boot plug 58 14 none] [key msgpack 26 13 none]
+G r c none [boot plug 58 14 none] [text msgpack 27 13 none]
+G r j doc [boot plug 58 14 none] [docDA msgpack 19 9 none]
+G r c none [boot plug 58 14 none] [put_map msgpack 49 14 none]
+G r c none [boot plug 58 14 none] [last_seg layout 23 13 none]
+G r c none [boot plug 58 14 none] [put_str msgpack 46 14 none]
+G r c none [boot plug 58 14 none] [find layout 22 13 none]
+G r c none [boot plug 58 14 none] [numbers msgpack 36 13 none]
+G r c none [boot plug 58 14 none] [put_array msgpack 48 14 none]
+G r c none [boot plug 58 14 none] [put_float msgpack 45 14 none]
+G r c none [boot plug 58 14 none] [put_bool msgpack 43 14 none]
+G r c none [boot plug 58 14 none] [put_node msgpack 50 14 none]
+G r c none [boot plug 58 14 none] [put_int msgpack 44 14 none]
+G r c none [boot plug 58 14 none] [send_binary websocket 17 14 none]
+G r c none [boot plug 58 14 none] [recognise layout 19 14 none]
+G r c none [boot plug 58 14 none] [missing layout 20 13 none]
+G r c none [boot plug 58 14 none] [say layout 21 14 none]
+G r c none [sense plug 59 13 none] [read_message websocket 16 14 none]
+G r c none [sense plug 59 13 none] [accept_client websocket 15 14 none]
+G r s doc [sense plug 59 13 none] [docIP msgpack 19 9 none]
+G r l doc [sense plug 59 13 none] [docDI msgpack 19 9 none]
+G r k doc [sense plug 59 13 none] [docDF msgpack 19 9 none]
+G r c none [sense plug 59 13 none] [decode msgpack 24 13 none]
+G r c none [sense plug 59 13 none] [key msgpack 26 13 none]
+G r c none [sense plug 59 13 none] [text msgpack 27 13 none]
+G r j doc [sense plug 59 13 none] [docDA msgpack 19 9 none]
+G r c none [sense plug 59 13 none] [put_map msgpack 49 14 none]
+G r c none [sense plug 59 13 none] [last_seg layout 23 13 none]
+G r c none [sense plug 59 13 none] [put_str msgpack 46 14 none]
+G r c none [sense plug 59 13 none] [find layout 22 13 none]
+G r c none [sense plug 59 13 none] [numbers msgpack 36 13 none]
+G r c none [sense plug 59 13 none] [put_array msgpack 48 14 none]
+G r c none [sense plug 59 13 none] [put_float msgpack 45 14 none]
+G r c none [sense plug 59 13 none] [put_bool msgpack 43 14 none]
+G r c none [sense plug 59 13 none] [put_node msgpack 50 14 none]
+G r c none [sense plug 59 13 none] [put_int msgpack 44 14 none]
+G r c none [sense plug 59 13 none] [send_binary websocket 17 14 none]
+G r c none [sense plug 59 13 none] [is_image layout 25 13 none]
+G r c none [sense plug 59 13 none] [nd_data msgpack 40 14 none]
+G r c none [sense plug 59 13 none] [nd_type msgpack 38 13 none]
+G r c none [sense plug 59 13 none] [is_depth layout 26 13 none]
+G r c none [sense plug 59 13 none] [env codec 17 13 none]
+G r c none [sense plug 59 13 none] [make_dir codec 12 14 none]
+G r c none [sense plug 59 13 none] [pad6 codec 16 13 none]
+G r c none [sense plug 59 13 none] [img codec 15 13 none]
+G r c none [sense plug 59 13 none] [write_pgm codec 10 14 none]
+G r c none [sense plug 59 13 none] [env_nat codec 18 13 none]
+G r c none [sense plug 59 13 none] [fmt codec 14 13 none]
+G r c none [act plug 60 13 none] [put_map msgpack 49 14 none]
+G r c none [act plug 60 13 none] [last_seg layout 23 13 none]
+G r c none [act plug 60 13 none] [put_str msgpack 46 14 none]
+G r c none [act plug 60 13 none] [put_array msgpack 48 14 none]
+G r c none [act plug 60 13 none] [put_float msgpack 45 14 none]
+G r c none [act plug 60 13 none] [find layout 22 13 none]
+G r c none [act plug 60 13 none] [numbers msgpack 36 13 none]
+G r j body_layout [linkDA plug 39 9 none] [body_layoutDA layout 13 9 none]
+G r j doc [linkDA plug 39 9 none] [docDA msgpack 19 9 none]
+G r k doc [linkDF plug 39 9 none] [docDF msgpack 19 9 none]
+G r k body_layout [linkDF plug 39 9 none] [body_layoutDF layout 13 9 none]
+G r s conn [linkIP plug 39 9 none] [connIP websocket 6 9 none]
+G r s body_layout [linkIP plug 39 9 none] [body_layoutIP layout 13 9 none]
+G r l body_layout [linkIP plug 39 9 none] [body_layoutDI layout 13 9 none]
+G r s doc [linkIP plug 39 9 none] [docIP msgpack 19 9 none]
+G r l doc [linkIP plug 39 9 none] [docDI msgpack 19 9 none]
+G r k doc [linkIP plug 39 9 none] [docDF msgpack 19 9 none]
+G r k body_layout [linkIP plug 39 9 none] [body_layoutDF layout 13 9 none]
+G r c none [nums_at plug 30 13 none] [find layout 22 13 none]
+G r c none [nums_at plug 30 13 none] [numbers msgpack 36 13 none]
+G r c none [hold_action plug 39 13 none] [put_map msgpack 49 14 none]
+G r c none [hold_action plug 39 13 none] [last_seg layout 23 13 none]
+G r c none [hold_action plug 39 13 none] [put_str msgpack 46 14 none]
+G r c none [hold_action plug 39 13 none] [find layout 22 13 none]
+G r c none [hold_action plug 39 13 none] [numbers msgpack 36 13 none]
+G r c none [hold_action plug 39 13 none] [put_array msgpack 48 14 none]
+G r c none [hold_action plug 39 13 none] [put_float msgpack 45 14 none]
+G r c none [reply plug 81 14 none] [key msgpack 26 13 none]
+G r c none [reply plug 81 14 none] [put_map msgpack 49 14 none]
+G r c none [reply plug 81 14 none] [put_str msgpack 46 14 none]
+G r c none [reply plug 81 14 none] [put_node msgpack 50 14 none]
+G r c none [reply plug 81 14 none] [put_int msgpack 44 14 none]
+G r c none [reply plug 81 14 none] [send_binary websocket 17 14 none]
+G r c none [pump plug 124 13 none] [read_message websocket 16 14 none]
+G r c none [pump plug 124 13 none] [accept_client websocket 15 14 none]
+G r s doc [pump plug 124 13 none] [docIP msgpack 19 9 none]
+G r l doc [pump plug 124 13 none] [docDI msgpack 19 9 none]
+G r k doc [pump plug 124 13 none] [docDF msgpack 19 9 none]
+G r c none [pump plug 124 13 none] [decode msgpack 24 13 none]
+G r c none [pump plug 124 13 none] [key msgpack 26 13 none]
+G r c none [pump plug 124 13 none] [text msgpack 27 13 none]
+G r j doc [pump plug 124 13 none] [docDA msgpack 19 9 none]
+G r c none [pump plug 124 13 none] [put_map msgpack 49 14 none]
+G r c none [pump plug 124 13 none] [last_seg layout 23 13 none]
+G r c none [pump plug 124 13 none] [put_str msgpack 46 14 none]
+G r c none [pump plug 124 13 none] [find layout 22 13 none]
+G r c none [pump plug 124 13 none] [numbers msgpack 36 13 none]
+G r c none [pump plug 124 13 none] [put_array msgpack 48 14 none]
+G r c none [pump plug 124 13 none] [put_float msgpack 45 14 none]
+G r c none [pump plug 124 13 none] [put_bool msgpack 43 14 none]
+G r c none [pump plug 124 13 none] [put_node msgpack 50 14 none]
+G r c none [pump plug 124 13 none] [put_int msgpack 44 14 none]
+G r c none [pump plug 124 13 none] [send_binary websocket 17 14 none]
+X 1 ada.ads
+18K9*Ada 22e8 37|7r6 8r6 8r33 11r32 12r34 19r31 38|1r6 1r23 2r6 3r6 8r31
+. 266r11 319r53 320r54 341r70
+X 3 a-calend.ads
+36K13*Calendar 440e17 38|2w10 266r15
+42I9*Time<226I9> 38|267r21 268r12
+56V13*Clock{42I9} 38|267s29 274s13 409s46
+112V14*"-"{duration} 38|408s47 409s52
+226I9 Time_Rep<long_long_integer>
+X 6 a-contai.ads
+16K13*Containers 28e19 37|7r10 11r36 12r38 19r35 38|319r57 320r58 341r74
+22I9*Count_Type<integer> 38|319r68 320r69 341r85
+X 10 a-coinve.ads
+60R9*Vector<14|43R9>
+281U14*Append 38|87s14[28|15] 87s47[28|15] 87s81[28|15] 88s14[28|15] 88s46[28|15]
+X 11 a-convec.ads
+74k24*Vectors 878e27 37|7w21 11r47 12r49 19r46
+91R9*Vector<14|43R9> 37|21r31[12] 22r25[11] 24r26[19]
+122r4*Empty_Vector{91R9[28|9]} 38|33r29[28|9]
+127V25*"="{boolean} 37|12r88[28|9]
+139V13*To_Vector{91R9[28|7]} 38|319s39[28|7] 320s40[28|7] 341s54[28|9]
+175V13*Length{6|22I9} 38|14s48[35|11] 14s92[35|11] 16s36[35|11] 53s41[28|9]
+. 63s41[28|9] 70s73[35|11] 285s27[28|9] 307s42[35|11] 331s48[35|11] 355s63[28|9]
+. 374s47[37|19] 388s50[37|19] 415s68[37|19] 435s42[35|11] 436s44[35|11] 438s36[35|11]
+. 439s43[28|9] 444s51[28|9] 460s41[28|9] 476s44[28|9] 484s73[35|11] 488s54[35|11]
+187V13*Is_Empty{boolean} 38|13s23[35|11] 19s63[35|11] 75s33[28|9] 197s41[28|7]
+. 297s32[28|9] 432s24[35|11] 486s39[28|9] 488s86[28|9]
+206V13*Element{32|81M9} 38|323s69[28|7] 324s69[28|7] 325s69[28|7] 346s63[28|7]
+. 346s115[28|7] 347s78[28|7] 347s139[28|7] 397s48[28|7]
+217U14*Replace_Element 38|327s31[28|7] 327s70[28|7] 327s113[28|7] 328s32[28|7]
+. 349s45[28|9]
+483U14*Append 38|118s12[28|7] 202s45[28|7] 278s19[37|12] 290s18[37|11] 297s19[28|9]
+. 360s26[37|19] 397s33[28|7]
+X 16 a-iteint.ads
+24h9 Forward_Iterator
+32h9 Reversible_Iterator<24R9[10|84]>
+X 18 a-string.ads
+16K13*Strings 35e16 37|8r10 8r37
+X 22 a-strunb.ads
+91K21*Unbounded 1641e26 37|8w18 8r45
+105R9*Unbounded_String<14|43R9> 1620e15 37|26r21
+122V13*To_Unbounded_String{105R9} 38|304s30
+X 25 a-textio.ads
+58K13*Text_IO 785e16 38|1w10 1r27
+565U14*Put_Line 38|133s13 136s16 141s13 166s25 231s7 236s7 254s16 413s10
+X 26 a-unccon.ads
+23v14*Unchecked_Conversion 38|3w10 8r35
+X 28 bytes.ads
+5K9*Bytes 23e10 37|3w6 3r17
+6M12*U8{32|81M9} 38|327r55 327r98 327r141 328r52
+7K12*U8_Vectors[11|74] 38|319r28 320r29
+8R12*Buf{11|91R9[7]} 37|15r19 45r17 47r19 38|39r43 40r11 81r74 82r11 126r14
+. 162r32 183r40 393r29 422r11
+9K12*F64_Vectors[11|74] 37|12r75 38|33r17 341r42
+10R12*Floats{11|91R9[9]} 37|12r67 17r15 23r13 34r13 35r11 36r11 38|30r56
+. 51r29 61r29 71r26 282r26 295r26 458r29 474r32 485r28
+16R12*Strs{10|60R9[15]} 38|84r16
+X 29 codec.ads
+3K9*Codec 19e10 38|5w6 367r35 368r36 373r16 375r19 375r49 375r79 383r61 384r42
+. 387r19 400r25 400r56 400r79 413r58 414r20 414r81
+10U14*Write_PGM 38|375s25 400s31
+12U14*Make_Dir 38|373s22 387s25
+14V13*Fmt{string} 38|413s64 414s26 414s87
+15V13*Img{string} 38|375s85 400s62
+16V13*Pad6{string} 38|375s55 400s85
+17V13*Env{string} 38|367s41 368s42
+18V13*Env_Nat{natural} 38|383s67 384s48
+X 32 interfac.ads
+47K9*Interfaces 247e15 38|4w6 4r22
+81M9*Unsigned_8
+92M9*Unsigned_32 38|8r57 345r50 346r39 346r91 347r54 347r115
+154V13*Shift_Left{92M9} 38|346s79 347s42 347s103
+X 35 layout.ads
+7K9*Layout 27e11 37|4w6 41r13 38|30r36 35r31 49r25 59r25 73r25 242r10 244r36
+. 248r16 255r16 309r37 314r16 333r50 338r28 437r25 456r25 466r25 491r25
+8R9*Path 10e14 38|30r43
+12R12*Paths{11|91R9[11]}
+13R9*Body_Layout 17e14 37|41r20
+14r7*Joints{12R12} 38|16r29 49r48 51r57 277r22 456r48 458r85
+14r15*EE{12R12} 38|13r20 14r45 19r60 59r48 61r57 280r22 466r48 474r60
+14r19*Jaw{12R12} 38|14r88 70r69 71r54 73r48 293r22 484r69 485r56 488r50 491r48
+14r24*Cams{12R12} 38|307r37 309r76
+14r30*Depth{12R12} 38|331r42 333r89
+14r37*Base{12R12} 38|432r19 435r37 436r39 437r48 438r31
+19U14*Recognise 38|242s17
+20V13*Missing{string} 38|244s43
+21U14*Say 38|248s23 255s23
+22V13*Find{integer} 38|35s38 309s44 333s57
+23V13*Last_Seg{string} 38|49s32 59s32 73s32 437s32 456s32 466s32 491s32
+25V13*Is_Image{boolean} 38|314s23
+26V13*Is_Depth{boolean} 38|338s35
+X 36 msgpack.ads
+6K9*Msgpack 51e12 37|5w6 43r14 38|7r8
+19R9*Doc 22e14 37|43r22 38|81r44 144r20
+21r7*Raw{28|8R12} 38|323r65 324r65 325r65 346r59 346r111 347r74 347r135
+24V13*Decode{boolean} 38|146s19
+26V13*Key{integer} 38|90s13 96s52 99s37 108s34 148s55 149s46 150s55 151s39
+. 174s35 301s36
+27V13*Text{string} 38|148s46 150s46 304s51
+36V13*Numbers{28|10R12} 38|35s14 354s42
+38V13*Nd_Type{string} 38|336s48
+40U14*Nd_Data 38|315s16 339s28
+43U14*Put_Bool 38|208s53 213s53
+44U14*Put_Int 38|113s13
+45U14*Put_Float 38|55s19 65s19 75s13 441s19 444s16 462s19 470s19 478s22 493s13
+46U14*Put_Str 38|49s13 59s13 73s13 95s7 95s36 96s7 102s16 106s7 116s7 196s31
+. 208s28 209s28 209s57 210s28 210s69 213s28 437s13 456s13 466s13 491s13
+48U14*Put_Array 38|53s16 63s16 74s13 198s34 200s34 439s16 460s16 468s16 476s19
+. 492s13
+49U14*Put_Map 38|46s7 94s7 195s31 207s28 212s28 435s10 453s7
+50U14*Put_Node 38|96s34 102s32 111s13
+X 37 plug.ads
+9K9*Plug 65l5 65e9 38|6b14 499l5 499t9
+10A9*Arm_Pose(long_float)<integer> 11r65 33r14 38|283r20
+11K12*Pose_Vectors[11|74] 22r12
+12K12*Floats_Vectors[11|74] 21r16
+13R9*Cam 18e14 19r64 38|311r17 390r29
+14i7*W{natural} 38|317m21 376r66 391r52 397r69
+14i10*H{natural} 38|317m31 376r81 392r52
+15r7*Gray{28|8R12} 38|320m21 328m27 376r48 397r43
+15r13*RGB{28|8R12} 38|319m21 327m27 327m66 327m109
+16b7*Has_Depth{boolean} 38|352m33 355m33
+17r7*Depth{28|10R12} 38|341m33 349m39 354m33 355r57
+19K12*Cam_Vectors[11|74] 24r14
+20R9*Frame 27e14 59r45 38|265r45
+21r7*Joints{11|91R9[12]} 38|278m12
+22r7*EE{11|91R9[11]} 38|290m15
+23r7*Jaw{28|10R12} 38|297m15
+24r7*Cams{11|91R9[19]} 38|360m21 374r42 376r38 376r56 376r71 388r45 390m43
+. 415r63
+25i7*Seq{natural} 38|276m9
+26r7*Instruction{22|105R9} 38|304m15
+29E9*Cmd_Kind 29e44 31r14
+29n22*Hold{29E9} 31r26 38|425r19
+29n28*Ee{29E9}
+29n32*Joint{29E9} 38|450r20
+29n39*Base{29E9} 38|431r19
+30R9*Cmd 37e14 60r39 38|421r39
+31e7*Kind{29E9} 38|425r12 431r12 450r13
+32i7*Arm{natural} 38|458r49 467r22 488r23
+33a7*Pose{10A9} 38|470r35
+34r7*Jaw{28|10R12} 38|488r82 489r23
+35r7*Q{28|10R12} 38|458r60
+36r7*V{28|10R12} 38|439r41 440r27 444r49 444r66
+39R9*Link 56e14 58r47 59r31 60r29 61r36 62r24 63r23 64r29 38|11r23 19r29
+. 21r24 23r36 30r26 39r30 81r32 124r30 227r47 265r31 421r29
+40r7*Conn{76|6R9} 38|120m32 131m36 134m40 232m33
+41r7*Lay{35|13R9} 38|13r16 14r41 14r84 16r25 19r56 49r44 51r53 59r44 61r53
+. 70r65 71r50 73r44 242m50 244r54 248r30 255r30 277r18 280r18 293r18 307r33
+. 309r72 331r38 333r85 432r15 435r33 436r35 437r44 438r27 456r44 458r81 466r44
+. 474r56 484r65 485r52 488r46 491r44
+42b7*Have_Layout{boolean} 38|247m18
+43r7*Last{36|19R9} 38|35r25 35r46 177m30 242r30 301r43 304r59 309r52 314r35
+. 315r27 323r60 324r60 325r60 333r65 336r59 338r47 339r39 346r54 346r106
+. 347r69 347r130 354r53
+44i7*Last_Obs{integer} 38|32r12 35r54 43r26 178m30 242r38 301r51 309r60 333r73
+. 428r12
+45r7*Pending{28|8R12} 38|186r46 187r51 447m12 496m9
+46b7*Has_Pending{boolean} 38|185r36 189m36 447m28 496m25
+47r7*Last_Sent{28|8R12} 38|187m36 191r46
+48b7*Has_Last{boolean} 38|188m36 190r39
+49b7*Reset_Flag{boolean} 38|24r33 26m9 169m27
+50i7*Seq{natural} 38|21r54 21r78 21r101 170r40 275m9 275r18 276r18 372r18
+. 372r40 386r21 410r12
+51i7*Ep_Seq0{natural} 38|21r63 21r86 170m27
+52i7*Vid_N{natural} 38|375r63 378m18 378r29
+53i7*Film_N{natural} 38|386r51 400r93 403m21 403r33
+54f7*Wait_Us{long_float} 38|408m9 408r22 412r26 413r71 416m12
+54f16*Parse_Us{long_float} 38|409m9 409r23 412r38 414r33 416m30
+55f7*Frame_S{long_float} 38|412m12 414r94
+58U14*Boot 58>20 58=36 58<53 38|227b14 263l8 263t12
+58i20 Port{natural} 38|227b20 231r46 232r25
+58r36 L{39R9} 38|227b36 232m31 232r31 238m23 238r23 242r28 242r36 242m48
+. 242r48 244r52 247m16 248r28 255r28
+58b53 Ok{boolean} 38|227b53 230m7 232m39 233r14 239m13 249m16 258m16
+59V13*Sense{boolean} 59=20 59<37 38|265b13 419l8 419t13
+59r20 L{39R9} 38|265b20 271m20 271r20 275m7 275r16 276r16 277r16 278r36 280r16
+. 282r45 293r16 295r45 301r41 301r49 304r57 307r31 309r50 309r58 309r70 314r33
+. 315r25 323r58 324r58 325r58 331r36 333r63 333r71 333r83 336r57 338r45 339r37
+. 346r52 346r104 347r67 347r128 354r51 372r16 372r38 375r61 378m16 378r27
+. 386r19 386r49 400r91 403m19 403r31 408m7 408r20 409m7 409r21 410r10 412m10
+. 412r24 412r36 413r69 414r31 414r92 416m10 416m28
+59r37 F{20R9} 38|265b37 270m7 276m7 278m10 278r10 290m13 290r13 297m13 297r13
+. 304m13 360m19 360r19 374r40 376r36 376r54 376r69 388r43 390r41 415r61
+60V13*Act{boolean} 60=18 60>35 38|421b13 498l8 498t11
+60r18 L{39R9} 38|421b18 423r37 428r10 432r13 435r31 436r33 437r42 438r25
+. 447m10 447m26 450r42 455r25 456r42 458r76 458r79 466r42 474r51 474r54 484r63
+. 485r47 485r50 488r44 491r42 496m7 496m23
+60r35 C{30R9} 38|421b35 425r10 431r10 439r39 440r25 444r47 444r64 450r11
+. 458r47 458r58 467r20 470r33 488r21 488r80 489r21
+61V13*Take_Reset{boolean} 61=25 38|23b13 28l8 28t18
+61r25 L{39R9} 38|23b25 24r31 26m7
+62V13*Steps{natural} 62>20 38|21b13
+62r20 L{39R9} 38|21r52 21r61 21r76 21r84 21r99
+63V13*Arms{natural} 63>19 38|11b13 17l8 17t12 41s31 423s31
+63r19 L{39R9} 38|11b19 13r14 14r39 14r82 16r23
+64V13*Joint_Mode{boolean} 64>25 38|19b13 48s13 450s30 455s13
+64r25 L{39R9} 38|19r54
+X 38 plug.adb
+8V13 U32_To_F32[26|23]{float} 349s77
+24b7 R{boolean} 27r14
+30V13 Nums_At{28|10R12} 30b13 30>22 30>32 36l8 36t15 51s39 61s39 71s36 278s27
+. 282s36 295s36 458s67 474s42 485s38
+30r22 L{37|39R9} 32r10 35r23 35r44 35r52
+30r32 P{35|8R9} 35r64
+39V13 Hold_Action{28|8R12} 39b13 39>26 79l8 79t19 193s44
+39r26 L{37|39R9} 41r37 43r24 48r25 49r42 51r48 51r51 59r42 61r48 61r51 70r63
+. 71r45 71r48 73r42
+40r7 S{28|8R12} 44r17 46m16 46r16 49m22 49r22 53m27 53r27 55m30 55r30 59m22
+. 59r22 63m27 63r27 65m30 65r30 73m22 73r22 74m24 74r24 75m24 75r24 78r14
+41i7 N{natural} 43r10 46r23 47r21
+47i11 I{integer} 49r56 51r65 59r52 61r61 70r51
+51r16 Q{28|10R12} 53r39 54r25
+54f20 X{long_float} 55r33
+61r16 P{28|10R12} 63r39 64r25
+64f20 X{long_float} 65r33
+70i13 Ji{natural} 71r59 73r53
+71r13 J{28|10R12} 75r31 75r56
+81U14 Reply 81b14 81=21 81>38 81>49 81>64 121l8 121t13 215s25
+81r21 L{37|39R9} 120m30 120r30
+81r38 Req{36|19R9} 90r18 96r47 96r57 99r42 102r45 108r39 111r26
+81a49 Kind{string} 95r48
+81r64 Payload{28|8R12} 117r16
+82r7 S{28|8R12} 94m16 94r16 95m16 95r16 95m45 95r45 96m16 96r16 96m44 96r44
+. 102m25 102r25 102m42 102r42 106m16 106r16 111m23 111r23 113m22 113r22 116m16
+. 116r16 118m10 118r10 120r38
+83i7 N{natural} 91m13 91r18 94r19
+84r7 Extras{28|16R12} 87m7 87r7 87m40 87r40 87m74 87r74 88m7 88r7 88m39 88r39
+. 89r16 97r16
+85b7 Ok{boolean} 120m41
+89a11 E{string} 90r26
+97a11 E{string} 99r50 102r28
+99i13 K{integer} 101r16 102r50
+108i10 K{integer} 110r13 111r31
+117m11 B{32|81M9} 118r20
+124V13 Pump{boolean} 124b13 124=19 225l8 225t12 238s17 271s14
+124r19 L{37|39R9} 131m34 131r34 134m38 134r38 169m25 170m25 170r38 177m28
+. 178m28 185r34 186r44 187m34 187r49 188m34 189m34 190r37 191r44 193r57 215m32
+125e7 Kind{76|12E9} 131m42 132r28 142r16
+126r7 Data{28|8R12} 131m48 146r27
+127b7 Ok{boolean} 131m54 132r17 134m46 135r20
+128i7 Idle{natural} 164m22 164r30 165r25 166r73
+144r16 D{36|19R9} 146m33 146r33 148r52 148r60 149r51 150r52 150r60 151r44
+. 174r40 177r38 215r35
+148a22 MT{string} 153r28 154r31 155r31 156r31 157r31 158r31 159r31 168r25
+149i22 P{integer} 150r63 151r47 174r43
+150a22 Fn{string} 181r28
+151i22 Obs{integer} 173r28 174m28 176r28 178r42
+152a22 Ack{string} 172r25 206r31 215r38
+161b22 New_Frame{boolean} 179m28 216r28
+162r22 Payload{28|8R12} 195m40 195r40 196m40 196r40 198m45 198r45 200m45
+. 200r45 202m37 202r37 207m37 207r37 208m37 208r37 208m63 208r63 209m37 209r37
+. 209m66 209r66 210m37 210r37 210m78 210r78 212m37 212r37 213m37 213r37 213m63
+. 213r63 215r43
+183r31 Action{28|8R12} 186m34 191m34 193m34 197r34 201r43
+201m38 B{32|81M9} 202r53
+228i7 Tries{natural} 252m13 252r22 253r16 257r16
+244a13 M{string} 246r16 254r73
+267i7 T0{3|42I9} 408r49
+268i7 T1{3|42I9} 274m7 408r44 409r54
+277r11 P{35|8R9} 278r39
+280r11 P{35|8R9} 282r48
+282r13 A{28|10R12} 285r25 287r31
+283a13 Pose{37|10A9} 287m19 290r26
+286i20 I{integer} 287r25 287r34
+293r11 P{35|8R9} 295r48
+295r13 A{28|10R12} 297r30 297r55
+301i10 Ins{integer} 303r13 304r65
+307i11 Ci{integer} 309r82 331r22 333r96
+309i13 N{integer} 314r41 315r33
+310i13 W{natural} 314m44 314r44 316r26 317r26 319r80 320r81 321r33 338r79
+. 340r129 341r97 342r45 355r73
+310i16 H{natural} 314m47 314r47 316r30 317r36 319r84 320r85 321r37 338r95
+. 340r133 341r101 342r49 355r77
+311r13 C{37|13R9} 317m19 317m29 319m19 320m19 327m25 327r25 327m64 327r64
+. 327m107 327r107 328m25 328r25 341m31 349m37 349r37 352m31 354m31 355m31
+. 355r55 360r34
+312i13 First{natural} 315m36 323r78 324r78 325r78
+312i20 Len{natural} 315m43 316r19
+321i23 I{integer} 323r90 324r90 325r90 327r52 327r91 327r134 328r49
+323i25 R{natural} 327r59 328r57
+324i25 G{natural} 327r102 328r67
+325i25 B{natural} 327r145 328r77
+333i25 Dn{integer} 336r65 338r53 339r45 354r59
+334i25 Dw{natural} 338m57 338r57 338r74
+334i29 Dh{natural} 338m61 338r61 338r90
+335i25 Df{natural} 339m49 344r61
+335i29 Dl{natural} 339m53 340r123
+336a25 T{string} 340r31 340r54 340r57 340r71 340r95 340r98
+342i35 I{integer} 344r70 349r62
+344i37 O{natural} 346r72 346r124 347r87 347r148
+345m37 V{32|92M9} 349r89
+367a10 Vid{string} 370r13 373r32 375r36
+368a10 Film{string} 381r13 387r35 400r42
+374i20 Ci{integer} 375r90 376r44 376r62 376r77
+383i16 Stride{natural} 386r29
+384i16 Max{natural} 386r60
+388i23 Ci{integer} 390r49 400r67
+390r25 C{37|13R9} 391r50 392r50 397r41 397r67
+391i25 Hw{natural} 396r42 400r114
+392i25 Hh{natural} 395r39 400r118
+393r25 G{28|8R12} 397m31 397r31 400r111
+395i29 Y{integer} 397r58
+396i32 X{integer} 397r73
+422r7 S{28|8R12} 435m19 435r19 437m22 437r22 439m27 439r27 441m30 441r30
+. 444m27 444r27 447r23 453m16 453r16 456m22 456r22 460m27 460r27 462m30 462r30
+. 466m22 466r22 468m27 468r27 470m30 470r30 476m30 476r30 478m33 478r33 491m22
+. 491r22 492m24 492r24 493m24 493r24 496r20
+423i7 N{natural} 428r33 453r23 454r21
+436i14 I{integer} 437r54 444r34 444r69
+440f20 X{long_float} 441r33
+454i11 I{integer} 456r56 458r43 458r93 466r52 467r16 474r64 484r51 488r17
+458r16 Q{28|10R12} 460r39 461r25
+461f20 X{long_float} 462r33
+469i20 K{integer} 470r41
+474r19 P{28|10R12} 476r42 477r28
+477f23 X{long_float} 478r36
+484i13 Ji{natural} 485r61 491r53
+485r13 Cur{28|10R12} 486r35 486r62
+486f13 V{long_float} 489m16 493r69
+X 39 system.ads
+67M9*Address
+X 55 s-memory.ads
+51V13*Alloc{39|67M9} 101i<c,__gnat_malloc>22
+66U14*Free 102i<c,__gnat_free>22
+74V13*Realloc{39|67M9} 103i<c,__gnat_realloc>22
+X 67 s-stalib.adb
+87U14 Break_Start 88i<c,__gnat_break_start>22
+X 76 websocket.ads
+5K9*Websocket 37|6w6 40r14 38|9r13 120r7 125r14 131r10 132r35 134r13 142r23
+. 232r7 76|19e14
+6R9*Conn 37|40r24 76|11e14
+12E9*Op 38|9r23 125r24 76|12e54
+12n16*Op_Binary{12E9} 38|142r33
+12n36*Op_Close{12E9} 38|132r45
+14U14*Listen 38|232s17
+15U14*Accept_Client 38|134s23
+16U14*Read_Message 38|131s20
+17U14*Send_Binary 38|120s17
+

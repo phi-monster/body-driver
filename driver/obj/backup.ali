@@ -1,0 +1,71 @@
+V "GNAT Lib v16"
+A -O2
+A -gnatA
+A -gnat2022
+A -gnata
+A -gnatwa
+A -g
+A -gnatyM200
+A -mmacosx-version-min=26.0.0
+A -mcpu=apple-m1
+A -mlittle-endian
+A -mabi=lp64
+A -fPIC
+P ZX
+
+RN
+RV NO_DIRECT_BOOLEAN_OPERATORS
+RV NO_FLOATING_POINT
+RV NO_IMPLICIT_CONDITIONALS
+RV NO_IMPLEMENTATION_ASPECT_SPECIFICATIONS
+RV NO_IMPLEMENTATION_PRAGMAS
+
+U backup%b		backup.adb		6235089e NE OO PK
+Z system.assertions%s	s-assert.adb		s-assert.ali
+
+U backup%s		backup.ads		3a42c177 EE NE OO PK
+
+D ada.ads		20260610194523 76789da1 ada%s
+D a-assert.ads		20260610194523 ba465f5c ada.assertions%s
+D a-unccon.ads		20260610194523 0e9b276f ada.unchecked_conversion%s
+D backup.ads		20260906203008 3a42c177 backup%s
+D backup.adb		20260906203008 5877c9e9 backup%b
+D system.ads		20260610194523 8a611ac3 system%s
+D s-assert.ads		20260610194523 9c4520c7 system.assertions%s
+D s-exctab.ads		20260610194523 91bef6ef system.exception_table%s
+D s-stalib.ads		20260610194523 1c9580f6 system.standard_library%s
+G a e
+G c Z s b [clear backup 8 14 none]
+G c Z s b [remember backup 9 14 none]
+G c Z s b [count backup 11 13 none]
+G c Z s b [retreat backup 13 14 none]
+G c Z s s [freeze backup 15 13 none]
+G c Z s s [Tstep_vecBIP backup 6 4 none]
+G c Z s s [TslotsBIP backup 17 4 none]
+G c Z s s [ringIP backup 18 9 none]
+X 4 backup.ads
+3K9*Backup 17E9 24l5 24e11 5|2b14 34l5 34t11
+4N4*Depth 10r44 17r30 23r34 23r56 5|14r34 15r16 27r37
+5N4*Max_Ch 6r33
+6A9*Step_Vec(long_float)<integer> 9r45 13r48 15r27 17r44 5|11r45 20r48
+7R9*Ring 8r32 9r35 11r24 13r34 18c9 23e6 5|3r32 9r24 11r35 20r34
+8U14*Clear 8=21 5|3b14 7l8 7t13
+8r21 R{7R9} 5|3b21 5m7 6m7
+9U14*Remember 9=24 9>41 5|11b14
+9r24 R{7R9} 10r26 10r58 5|11b24 13m7 13r12 14m7 14r18 15r10 16m10 16r17
+9a41 S{6A9} 5|11b41 13r23
+11V13*Count{natural} 10s19 10s51 11>20 14s32 14s44 14s67 14s79 5|9b13
+11r20 R{7R9} 5|9r49
+13U14*Retreat 13=23 13<40 13<58 5|20b14
+13r23 R{7R9} 14r39 14r51 14r74 14r86 5|20b23 24r10 27m7 27r21 27r52 29r20
+. 29r25 31m7 31r14
+13a40 S{6A9} 5|20b40 22m7 28r16 29m10
+13b58 Had{boolean} 14r23 5|20b58 23m7 32m7
+15V13*Freeze{6A9} 15b13
+17A9 Slots(6A9)<integer> 19r11
+19a7*S{17A9} 5|13m9 29r22
+20i7*N{natural} 23r29 5|5m9 9r51 15r12 16m12 16r19 24r12 31m9 31r16
+21i7*Head{natural} 23r49 5|6m9 13r14 14m9 14r20 27m9 27r23 27r54 29r27
+X 5 backup.adb
+28i11 I{integer} 29r13 29r34
+

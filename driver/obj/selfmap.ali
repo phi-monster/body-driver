@@ -1,0 +1,828 @@
+V "GNAT Lib v16"
+A -O2
+A -gnatA
+A -gnat2022
+A -gnata
+A -gnatwa
+A -g
+A -gnatyM200
+A -mmacosx-version-min=26.0.0
+A -mcpu=apple-m1
+A -mlittle-endian
+A -mabi=lp64
+A -fPIC
+P SS ZX
+
+RN
+RV NO_ACCESS_SUBPROGRAMS
+RV NO_DISPATCHING_CALLS
+RV NO_ENUMERATION_MAPS
+RV NO_EXCEPTION_HANDLERS
+RV NO_EXCEPTION_PROPAGATION
+RV NO_EXCEPTIONS
+RV NO_FLOATING_POINT
+RV NO_IO
+RV NO_IMPLICIT_CONDITIONALS
+RV NO_LOCAL_ALLOCATORS
+RV NO_NESTED_FINALIZATION
+RV NO_SECONDARY_STACK
+RV NO_STANDARD_STORAGE_POOLS
+RV NO_DEFAULT_INITIALIZATION
+RV NO_DYNAMIC_SIZED_OBJECTS
+RV NO_IMPLEMENTATION_PRAGMAS
+RV NO_ELABORATION_CODE
+
+U selfmap%b		selfmap.adb		8785ed89 NE OO PK
+W ada%s			ada.ads			ada.ali
+Z ada.exceptions%s	a-except.adb		a-except.ali
+W ada.numerics%s	a-numeri.ads		a-numeri.ali
+W ada.numerics.long_elementary_functions%s  a-nlelfu.ads  a-nlelfu.ali
+Z ada.strings.text_buffers%s  a-sttebu.adb	a-sttebu.ali
+Z ada.tags%s		a-tags.adb		a-tags.ali
+W ada.text_io%s		a-textio.adb		a-textio.ali
+W chan%s		chan.adb		chan.ali
+W codec%s		codec.adb		codec.ali
+Z system%s		system.ads		system.ali
+Z system.finalization_primitives%s  s-finpri.adb  s-finpri.ali
+Z system.img_int%s	s-imgint.ads		s-imgint.ali
+Z system.secondary_stack%s  s-secsta.adb	s-secsta.ali
+Z system.soft_links%s	s-soflin.adb		s-soflin.ali
+Z system.standard_library%s  s-stalib.adb	s-stalib.ali
+
+U selfmap%s		selfmap.ads		e15fb107 EE OO PF PK
+W ada%s			ada.ads			ada.ali
+W ada.containers%s	a-contai.ads		a-contai.ali
+Z ada.containers.generic_array_sort%s
+Z ada.containers.helpers%s  a-conhel.adb	a-conhel.ali
+W ada.containers.vectors%s
+Z ada.exceptions%s	a-except.adb		a-except.ali
+Z ada.finalization%s	a-finali.ads		a-finali.ali
+Z ada.iterator_interfaces%s
+Z ada.streams%s		a-stream.adb		a-stream.ali
+W ada.strings%s		a-string.ads		a-string.ali
+Z ada.strings.text_buffers%s  a-sttebu.adb	a-sttebu.ali
+W ada.strings.unbounded%s  a-strunb.adb		a-strunb.ali
+Z ada.tags%s		a-tags.adb		a-tags.ali
+Z ada.unchecked_deallocation%s
+W bytes%s		bytes.adb		bytes.ali
+W picture%s		picture.adb		picture.ali
+W plug%s		plug.adb		plug.ali
+Z system%s		system.ads		system.ali
+Z system.assertions%s	s-assert.adb		s-assert.ali
+Z system.finalization_primitives%s  s-finpri.adb  s-finpri.ali
+Z system.img_lflt%s	s-imglfl.ads		s-imglfl.ali
+Z system.pool_global%s	s-pooglo.adb		s-pooglo.ali
+Z system.put_images%s	s-putima.adb		s-putima.ali
+Z system.return_stack%s	s-retsta.ads		s-retsta.ali
+Z system.secondary_stack%s  s-secsta.adb	s-secsta.ali
+Z system.soft_links%s	s-soflin.adb		s-soflin.ali
+Z system.standard_library%s  s-stalib.adb	s-stalib.ali
+Z system.storage_elements%s  s-stoele.ads	s-stoele.ali
+Z system.storage_pools%s  s-stopoo.adb		s-stopoo.ali
+Z system.storage_pools.subpools%s  s-stposu.adb	s-stposu.ali
+Z system.stream_attributes%s  s-stratt.adb	s-stratt.ali
+Z system.wch_stw%s	s-wchstw.adb		s-wchstw.ali
+W table%s		table.adb		table.ali
+
+D ada.ads		20260610194523 76789da1 ada%s
+D a-assert.ads		20260610194523 ba465f5c ada.assertions%s
+D a-charac.ads		20260610194523 2d3ec45b ada.characters%s
+D a-chlat1.ads		20260610194523 e0d72e76 ada.characters.latin_1%s
+D a-contai.ads		20260610194523 61e5e089 ada.containers%s
+D a-cgarso.ads		20260610194523 9129bfa8 ada.containers.generic_array_sort%s
+D a-conhel.ads		20260610194523 46fe1ce3 ada.containers.helpers%s
+D a-conhel.adb		20260610194523 854d323e ada.containers.helpers%b
+D a-coinve.ads		20260610194523 2d0a9a0e ada.containers.indefinite_vectors%s
+D a-convec.ads		20260610194523 cb0f314a ada.containers.vectors%s
+D a-convec.adb		20260610194523 b2ed0168 ada.containers.vectors%b
+D a-except.ads		20260610194523 8699d7ff ada.exceptions%s
+D a-finali.ads		20260610194523 099c16e4 ada.finalization%s
+D a-ioexce.ads		20260610194523 40018c65 ada.io_exceptions%s
+D a-iteint.ads		20260610194523 49a8bee2 ada.iterator_interfaces%s
+D a-numeri.ads		20260610194523 84bea7a3 ada.numerics%s
+D a-ngelfu.ads		20260610194523 324808ac ada.numerics.generic_elementary_functions%s
+D a-nlelfu.ads		20260610194523 7620113d ada.numerics.long_elementary_functions%s
+D a-stream.ads		20260610194523 cb01a8f8 ada.streams%s
+D a-string.ads		20260610194523 90ac6797 ada.strings%s
+D a-strmap.ads		20260610194523 f7e6ca10 ada.strings.maps%s
+D a-strsea.ads		20260610194523 18c3c634 ada.strings.search%s
+D a-sttebu.ads		20260610194523 f1ad67a2 ada.strings.text_buffers%s
+D a-strunb.ads		20260610194523 8d6ccba7 ada.strings.unbounded%s
+D a-stuten.ads		20260610194523 c6ced0ae ada.strings.utf_encoding%s
+D a-tags.ads		20260610194523 2dbf449c ada.tags%s
+D a-textio.ads		20260610194523 34ef47de ada.text_io%s
+D a-unccon.ads		20260610194523 0e9b276f ada.unchecked_conversion%s
+D a-uncdea.ads		20260610194523 c3a8ac65 ada.unchecked_deallocation%s
+D bytes.ads		20260906203008 86b1403c bytes%s
+D chan.ads		20260906213131 fcae972f chan%s
+D codec.ads		20260906203008 34417e50 codec%s
+D gnat.ads		20260610194523 b5988c27 gnat%s
+D g-socket.ads		20260610194523 a4cab028 gnat.sockets%s
+D interfac.ads		20260610194523 9111f9c1 interfaces%s
+D i-c.ads		20260610194523 dbdd3be7 interfaces.c%s
+D i-cstrea.ads		20260610194523 ffd01b9d interfaces.c_streams%s
+D layout.ads		20260906203008 c005157d layout%s
+D msgpack.ads		20260906203008 0af3a83c msgpack%s
+D picture.ads		20260912223334 103f308c picture%s
+D plug.ads		20260907080552 5ecb2156 plug%s
+D selfmap.ads		20260907102348 3ecf7596 selfmap%s
+D selfmap.adb		20260907102348 336a2783 selfmap%b
+D system.ads		20260610194523 8a611ac3 system%s
+D s-assert.ads		20260610194523 9c4520c7 system.assertions%s
+D s-atocou.ads		20260610194523 dc18efc3 system.atomic_counters%s
+D s-atocou.adb		20260610194523 6fe685de system.atomic_counters%b
+D s-atopri.ads		20260610194523 e19c1d89 system.atomic_primitives%s
+D s-crtl.ads		20260610194523 823b6536 system.crtl%s
+D s-exctab.ads		20260610194523 91bef6ef system.exception_table%s
+D s-ficobl.ads		20260610194523 dc5161d4 system.file_control_block%s
+D s-finpri.ads		20260610194523 5970d55a system.finalization_primitives%s
+D s-finroo.ads		20260610194523 0a7c3ed4 system.finalization_root%s
+D s-imagei.ads		20260610194523 11a376a2 system.image_i%s
+D s-imager.ads		20260610194523 45c7157d system.image_r%s
+D s-imageu.ads		20260610194523 95851461 system.image_u%s
+D s-imgint.ads		20260610194523 86836590 system.img_int%s
+D s-imglfl.ads		20260610194523 941be202 system.img_lflt%s
+D s-imgllu.ads		20260610194523 047fb1fb system.img_llu%s
+D s-memory.ads		20260610194523 18949c1a system.memory%s
+D s-oscons.ads		20260626180535 42ad9981 system.os_constants%s
+D s-oslock.ads		20260610194523 bcc789d2 system.os_locks%s
+D s-parame.ads		20260610194523 a1aeab5c system.parameters%s
+D s-pooglo.ads		20260610194523 91708d21 system.pool_global%s
+D s-powlfl.ads		20260610194523 ac0852c8 system.powten_lflt%s
+D s-putima.ads		20260610194523 1b989439 system.put_images%s
+D s-retsta.ads		20260610194523 0f6b06cb system.return_stack%s
+D s-secsta.ads		20260610194523 578279f5 system.secondary_stack%s
+D s-soflin.ads		20260610194523 5d88fdea system.soft_links%s
+D s-stache.ads		20260610194523 0b81c1fe system.stack_checking%s
+D s-stalib.ads		20260610194523 1c9580f6 system.standard_library%s
+D s-stalib.adb		20260610194523 eb464a47 system.standard_library%b
+D s-stoele.ads		20260610194523 ccded4e8 system.storage_elements%s
+D s-stopoo.ads		20260610194523 45459446 system.storage_pools%s
+D s-stposu.ads		20260610194523 f8e797ef system.storage_pools.subpools%s
+D s-stratt.ads		20260610194523 80b8dafb system.stream_attributes%s
+D s-traent.ads		20260610194523 c81cbf8c system.traceback_entries%s
+D s-unstyp.ads		20260610194523 fa2a7f59 system.unsigned_types%s
+D s-wchcon.ads		20260610194523 d9032363 system.wch_con%s
+D s-wchstw.ads		20260610194523 2d112c01 system.wch_stw%s
+D table.ads		20260908002242 51b66f9a table%s
+D websocket.ads		20260906203008 e2cfe5a2 websocket%s
+G a e
+G c Z s s [partIP selfmap 10 9 none]
+G c Z s s [has_element selfmap__part_vectors 115 13 17_4]
+G c Z s s [empty selfmap__part_vectors 125 13 17_4]
+G c Z s s [Oeq selfmap__part_vectors 127 24 17_4]
+G c Z s s [to_vector selfmap__part_vectors 136 13 17_4]
+G c Z s s [to_vector selfmap__part_vectors 139 13 17_4]
+G c Z s s [Oconcat selfmap__part_vectors 145 13 17_4]
+G c Z s s [Oconcat selfmap__part_vectors 149 13 17_4]
+G c Z s s [Oconcat selfmap__part_vectors 153 13 17_4]
+G c Z s s [Oconcat selfmap__part_vectors 157 13 17_4]
+G c Z s s [capacity selfmap__part_vectors 161 13 17_4]
+G c Z s s [reserve_capacity selfmap__part_vectors 164 14 17_4]
+G c Z s s [length selfmap__part_vectors 175 13 17_4]
+G c Z s s [set_length selfmap__part_vectors 178 14 17_4]
+G c Z s s [is_empty selfmap__part_vectors 187 13 17_4]
+G c Z s s [clear selfmap__part_vectors 190 14 17_4]
+G c Z s s [to_cursor selfmap__part_vectors 194 13 17_4]
+G c Z s s [to_index selfmap__part_vectors 201 13 17_4]
+G c Z s s [element selfmap__part_vectors 206 13 17_4]
+G c Z s s [element selfmap__part_vectors 213 13 17_4]
+G c Z s s [replace_element selfmap__part_vectors 217 14 17_4]
+G c Z s s [replace_element selfmap__part_vectors 228 14 17_4]
+G c Z s s [query_element selfmap__part_vectors 239 14 17_4]
+G c Z s s [query_element selfmap__part_vectors 250 14 17_4]
+G c Z s s [update_element selfmap__part_vectors 259 14 17_4]
+G c Z s s [update_element selfmap__part_vectors 276 14 17_4]
+G c Z s s [constant_reference selfmap__part_vectors 303 13 17_4]
+G c Z s s [reference selfmap__part_vectors 308 13 17_4]
+G c Z s s [constant_reference selfmap__part_vectors 313 13 17_4]
+G c Z s s [reference selfmap__part_vectors 318 13 17_4]
+G c Z s s [assign selfmap__part_vectors 323 14 17_4]
+G c Z s s [copy selfmap__part_vectors 325 13 17_4]
+G c Z s s [move selfmap__part_vectors 327 14 17_4]
+G c Z s s [new_vector selfmap__part_vectors 333 13 17_4]
+G c Z s s [insert_vector selfmap__part_vectors 337 14 17_4]
+G c Z s s [insert_vector selfmap__part_vectors 361 14 17_4]
+G c Z s s [insert_vector selfmap__part_vectors 378 14 17_4]
+G c Z s s [insert selfmap__part_vectors 396 14 17_4]
+G c Z s s [insert selfmap__part_vectors 404 14 17_4]
+G c Z s s [insert selfmap__part_vectors 412 14 17_4]
+G c Z s s [insert selfmap__part_vectors 421 14 17_4]
+G c Z s s [insert selfmap__part_vectors 438 14 17_4]
+G c Z s s [prepend_vector selfmap__part_vectors 449 14 17_4]
+G c Z s s [prepend selfmap__part_vectors 459 14 17_4]
+G c Z s s [append_vector selfmap__part_vectors 466 14 17_4]
+G c Z s s [append selfmap__part_vectors 476 14 17_4]
+G c Z s s [append selfmap__part_vectors 483 14 17_4]
+G c Z s s [insert_space selfmap__part_vectors 486 14 17_4]
+G c Z s s [insert_space selfmap__part_vectors 503 14 17_4]
+G c Z s s [delete selfmap__part_vectors 514 14 17_4]
+G c Z s s [delete selfmap__part_vectors 524 14 17_4]
+G c Z s s [delete_first selfmap__part_vectors 533 14 17_4]
+G c Z s s [delete_last selfmap__part_vectors 538 14 17_4]
+G c Z s s [reverse_elements selfmap__part_vectors 546 14 17_4]
+G c Z s s [swap selfmap__part_vectors 549 14 17_4]
+G c Z s s [swap selfmap__part_vectors 554 14 17_4]
+G c Z s s [first_index selfmap__part_vectors 560 13 17_4]
+G c Z s s [first selfmap__part_vectors 563 13 17_4]
+G c Z s s [first_element selfmap__part_vectors 567 13 17_4]
+G c Z s s [last_index selfmap__part_vectors 570 13 17_4]
+G c Z s s [last selfmap__part_vectors 574 13 17_4]
+G c Z s s [last_element selfmap__part_vectors 578 13 17_4]
+G c Z s s [next selfmap__part_vectors 581 13 17_4]
+G c Z s s [next selfmap__part_vectors 587 14 17_4]
+G c Z s s [previous selfmap__part_vectors 590 13 17_4]
+G c Z s s [previous selfmap__part_vectors 596 14 17_4]
+G c Z s s [find_index selfmap__part_vectors 599 13 17_4]
+G c Z s s [find selfmap__part_vectors 609 13 17_4]
+G c Z s s [reverse_find_index selfmap__part_vectors 623 13 17_4]
+G c Z s s [reverse_find selfmap__part_vectors 635 13 17_4]
+G c Z s s [contains selfmap__part_vectors 649 13 17_4]
+G c Z s s [iterate selfmap__part_vectors 654 14 17_4]
+G c Z s s [reverse_iterate selfmap__part_vectors 662 14 17_4]
+G c Z s s [iterate selfmap__part_vectors 669 13 17_4]
+G c Z s s [iterate selfmap__part_vectors 672 13 17_4]
+G c Z s s [adjust selfmap__part_vectors__implementation 90 28 726_4_17_4]
+G c Z s s [finalize selfmap__part_vectors__implementation 93 28 726_4_17_4]
+G c Z s s [zero_counts selfmap__part_vectors__implementation 96 17 726_4_17_4]
+G c Z s s [busy selfmap__part_vectors__implementation 100 17 726_4_17_4]
+G c Z s s [unbusy selfmap__part_vectors__implementation 104 17 726_4_17_4]
+G c Z s s [lock selfmap__part_vectors__implementation 108 17 726_4_17_4]
+G c Z s s [unlock selfmap__part_vectors__implementation 112 17 726_4_17_4]
+G c Z s s [tc_check selfmap__part_vectors__implementation 116 17 726_4_17_4]
+G c Z s s [te_check selfmap__part_vectors__implementation 120 17 726_4_17_4]
+G c Z s s [is_busy selfmap__part_vectors__implementation 136 16 726_4_17_4]
+G c Z s s [is_locked selfmap__part_vectors__implementation 140 16 726_4_17_4]
+G c Z s s [initialize selfmap__part_vectors__implementation 161 28 726_4_17_4]
+G c Z s s [finalize selfmap__part_vectors__implementation 162 28 726_4_17_4]
+G c Z s s [initialize selfmap__part_vectors__implementation 167 28 726_4_17_4]
+G c Z s s [finalize selfmap__part_vectors__implementation 168 28 726_4_17_4]
+G c Z s s [reference_control_typeDA selfmap__part_vectors__implementation 84 12 726_4_17_4]
+G c Z s s [reference_control_typeDF selfmap__part_vectors__implementation 84 12 726_4_17_4]
+G c Z s s [reference_control_typeIP selfmap__part_vectors__implementation 84 12 726_4_17_4]
+G c Z s s [with_busyDF selfmap__part_vectors__implementation 158 12 726_4_17_4]
+G c Z s s [with_busyIP selfmap__part_vectors__implementation 158 12 726_4_17_4]
+G c Z s s [with_lockDF selfmap__part_vectors__implementation 164 12 726_4_17_4]
+G c Z s s [with_lockIP selfmap__part_vectors__implementation 164 12 726_4_17_4]
+G c Z s s [put_image selfmap__part_vectors 747 14 17_4]
+G c Z s s [adjust selfmap__part_vectors 750 25 17_4]
+G c Z s s [finalize selfmap__part_vectors 751 25 17_4]
+G c Z s s [write selfmap__part_vectors 753 14 17_4]
+G c Z s s [read selfmap__part_vectors 759 14 17_4]
+G c Z s s [read selfmap__part_vectors 773 14 17_4]
+G c Z s s [write selfmap__part_vectors 779 14 17_4]
+G c Z s s [write selfmap__part_vectors 798 14 17_4]
+G c Z s s [read selfmap__part_vectors 804 14 17_4]
+G c Z s s [write selfmap__part_vectors 820 14 17_4]
+G c Z s s [read selfmap__part_vectors 826 14 17_4]
+G c Z s s [pseudo_reference selfmap__part_vectors 840 13 17_4]
+G c Z s s [get_element_access selfmap__part_vectors 849 13 17_4]
+G c Z s s [cursorIP selfmap__part_vectors 768 9 17_4]
+G c Z s s [vectorDA selfmap__part_vectors 741 9 17_4]
+G c Z s s [vectorDF selfmap__part_vectors 741 9 17_4]
+G c Z s s [vectorIP selfmap__part_vectors 741 9 17_4]
+G c Z s s [finalize selfmap__part_vectors 865 25 17_4]
+G c Z s s [first selfmap__part_vectors 867 24 17_4]
+G c Z s s [last selfmap__part_vectors 868 24 17_4]
+G c Z s s [next selfmap__part_vectors 870 24 17_4]
+G c Z s s [previous selfmap__part_vectors 874 24 17_4]
+G c Z s s [constant_reference_typeDI selfmap__part_vectors 788 9 17_4]
+G c Z s s [constant_reference_typeDA selfmap__part_vectors 788 9 17_4]
+G c Z s s [constant_reference_typeDF selfmap__part_vectors 788 9 17_4]
+G c Z s s [constant_reference_typeIP selfmap__part_vectors 788 9 17_4]
+G c Z s s [reference_typeDI selfmap__part_vectors 810 9 17_4]
+G c Z s s [reference_typeDA selfmap__part_vectors 810 9 17_4]
+G c Z s s [reference_typeDF selfmap__part_vectors 810 9 17_4]
+G c Z s s [reference_typeIP selfmap__part_vectors 810 9 17_4]
+G c Z s s [elements_arrayIP selfmap__part_vectors 729 9 17_4]
+G c Z s s [elements_typeIP selfmap__part_vectors 732 9 17_4]
+G c Z s s [iteratorDF selfmap__part_vectors 857 9 17_4]
+G c Z s s [iteratorIP selfmap__part_vectors 857 9 17_4]
+G c Z s s [free selfmap__part_vectors 44 14 17_4]
+G c Z s s [append_slow_path selfmap__part_vectors 47 14 17_4]
+G c Z s s [has_element selfmap__floor_vectors 115 13 18_4]
+G c Z s s [empty selfmap__floor_vectors 125 13 18_4]
+G c Z s s [Oeq selfmap__floor_vectors 127 24 18_4]
+G c Z s s [to_vector selfmap__floor_vectors 136 13 18_4]
+G c Z s s [to_vector selfmap__floor_vectors 139 13 18_4]
+G c Z s s [Oconcat selfmap__floor_vectors 145 13 18_4]
+G c Z s s [Oconcat selfmap__floor_vectors 149 13 18_4]
+G c Z s s [Oconcat selfmap__floor_vectors 153 13 18_4]
+G c Z s s [Oconcat selfmap__floor_vectors 157 13 18_4]
+G c Z s s [capacity selfmap__floor_vectors 161 13 18_4]
+G c Z s s [reserve_capacity selfmap__floor_vectors 164 14 18_4]
+G c Z s s [length selfmap__floor_vectors 175 13 18_4]
+G c Z s s [set_length selfmap__floor_vectors 178 14 18_4]
+G c Z s s [is_empty selfmap__floor_vectors 187 13 18_4]
+G c Z s s [clear selfmap__floor_vectors 190 14 18_4]
+G c Z s s [to_cursor selfmap__floor_vectors 194 13 18_4]
+G c Z s s [to_index selfmap__floor_vectors 201 13 18_4]
+G c Z s s [element selfmap__floor_vectors 206 13 18_4]
+G c Z s s [element selfmap__floor_vectors 213 13 18_4]
+G c Z s s [replace_element selfmap__floor_vectors 217 14 18_4]
+G c Z s s [replace_element selfmap__floor_vectors 228 14 18_4]
+G c Z s s [query_element selfmap__floor_vectors 239 14 18_4]
+G c Z s s [query_element selfmap__floor_vectors 250 14 18_4]
+G c Z s s [update_element selfmap__floor_vectors 259 14 18_4]
+G c Z s s [update_element selfmap__floor_vectors 276 14 18_4]
+G c Z s s [constant_reference selfmap__floor_vectors 303 13 18_4]
+G c Z s s [reference selfmap__floor_vectors 308 13 18_4]
+G c Z s s [constant_reference selfmap__floor_vectors 313 13 18_4]
+G c Z s s [reference selfmap__floor_vectors 318 13 18_4]
+G c Z s s [assign selfmap__floor_vectors 323 14 18_4]
+G c Z s s [copy selfmap__floor_vectors 325 13 18_4]
+G c Z s s [move selfmap__floor_vectors 327 14 18_4]
+G c Z s s [new_vector selfmap__floor_vectors 333 13 18_4]
+G c Z s s [insert_vector selfmap__floor_vectors 337 14 18_4]
+G c Z s s [insert_vector selfmap__floor_vectors 361 14 18_4]
+G c Z s s [insert_vector selfmap__floor_vectors 378 14 18_4]
+G c Z s s [insert selfmap__floor_vectors 396 14 18_4]
+G c Z s s [insert selfmap__floor_vectors 404 14 18_4]
+G c Z s s [insert selfmap__floor_vectors 412 14 18_4]
+G c Z s s [insert selfmap__floor_vectors 421 14 18_4]
+G c Z s s [insert selfmap__floor_vectors 438 14 18_4]
+G c Z s s [prepend_vector selfmap__floor_vectors 449 14 18_4]
+G c Z s s [prepend selfmap__floor_vectors 459 14 18_4]
+G c Z s s [append_vector selfmap__floor_vectors 466 14 18_4]
+G c Z s s [append selfmap__floor_vectors 476 14 18_4]
+G c Z s s [append selfmap__floor_vectors 483 14 18_4]
+G c Z s s [insert_space selfmap__floor_vectors 486 14 18_4]
+G c Z s s [insert_space selfmap__floor_vectors 503 14 18_4]
+G c Z s s [delete selfmap__floor_vectors 514 14 18_4]
+G c Z s s [delete selfmap__floor_vectors 524 14 18_4]
+G c Z s s [delete_first selfmap__floor_vectors 533 14 18_4]
+G c Z s s [delete_last selfmap__floor_vectors 538 14 18_4]
+G c Z s s [reverse_elements selfmap__floor_vectors 546 14 18_4]
+G c Z s s [swap selfmap__floor_vectors 549 14 18_4]
+G c Z s s [swap selfmap__floor_vectors 554 14 18_4]
+G c Z s s [first_index selfmap__floor_vectors 560 13 18_4]
+G c Z s s [first selfmap__floor_vectors 563 13 18_4]
+G c Z s s [first_element selfmap__floor_vectors 567 13 18_4]
+G c Z s s [last_index selfmap__floor_vectors 570 13 18_4]
+G c Z s s [last selfmap__floor_vectors 574 13 18_4]
+G c Z s s [last_element selfmap__floor_vectors 578 13 18_4]
+G c Z s s [next selfmap__floor_vectors 581 13 18_4]
+G c Z s s [next selfmap__floor_vectors 587 14 18_4]
+G c Z s s [previous selfmap__floor_vectors 590 13 18_4]
+G c Z s s [previous selfmap__floor_vectors 596 14 18_4]
+G c Z s s [find_index selfmap__floor_vectors 599 13 18_4]
+G c Z s s [find selfmap__floor_vectors 609 13 18_4]
+G c Z s s [reverse_find_index selfmap__floor_vectors 623 13 18_4]
+G c Z s s [reverse_find selfmap__floor_vectors 635 13 18_4]
+G c Z s s [contains selfmap__floor_vectors 649 13 18_4]
+G c Z s s [iterate selfmap__floor_vectors 654 14 18_4]
+G c Z s s [reverse_iterate selfmap__floor_vectors 662 14 18_4]
+G c Z s s [iterate selfmap__floor_vectors 669 13 18_4]
+G c Z s s [iterate selfmap__floor_vectors 672 13 18_4]
+G c Z s s [adjust selfmap__floor_vectors__implementation 90 28 726_4_18_4]
+G c Z s s [finalize selfmap__floor_vectors__implementation 93 28 726_4_18_4]
+G c Z s s [zero_counts selfmap__floor_vectors__implementation 96 17 726_4_18_4]
+G c Z s s [busy selfmap__floor_vectors__implementation 100 17 726_4_18_4]
+G c Z s s [unbusy selfmap__floor_vectors__implementation 104 17 726_4_18_4]
+G c Z s s [lock selfmap__floor_vectors__implementation 108 17 726_4_18_4]
+G c Z s s [unlock selfmap__floor_vectors__implementation 112 17 726_4_18_4]
+G c Z s s [tc_check selfmap__floor_vectors__implementation 116 17 726_4_18_4]
+G c Z s s [te_check selfmap__floor_vectors__implementation 120 17 726_4_18_4]
+G c Z s s [is_busy selfmap__floor_vectors__implementation 136 16 726_4_18_4]
+G c Z s s [is_locked selfmap__floor_vectors__implementation 140 16 726_4_18_4]
+G c Z s s [initialize selfmap__floor_vectors__implementation 161 28 726_4_18_4]
+G c Z s s [finalize selfmap__floor_vectors__implementation 162 28 726_4_18_4]
+G c Z s s [initialize selfmap__floor_vectors__implementation 167 28 726_4_18_4]
+G c Z s s [finalize selfmap__floor_vectors__implementation 168 28 726_4_18_4]
+G c Z s s [reference_control_typeDA selfmap__floor_vectors__implementation 84 12 726_4_18_4]
+G c Z s s [reference_control_typeDF selfmap__floor_vectors__implementation 84 12 726_4_18_4]
+G c Z s s [reference_control_typeIP selfmap__floor_vectors__implementation 84 12 726_4_18_4]
+G c Z s s [with_busyDF selfmap__floor_vectors__implementation 158 12 726_4_18_4]
+G c Z s s [with_busyIP selfmap__floor_vectors__implementation 158 12 726_4_18_4]
+G c Z s s [with_lockDF selfmap__floor_vectors__implementation 164 12 726_4_18_4]
+G c Z s s [with_lockIP selfmap__floor_vectors__implementation 164 12 726_4_18_4]
+G c Z s s [put_image selfmap__floor_vectors 747 14 18_4]
+G c Z s s [adjust selfmap__floor_vectors 750 25 18_4]
+G c Z s s [finalize selfmap__floor_vectors 751 25 18_4]
+G c Z s s [write selfmap__floor_vectors 753 14 18_4]
+G c Z s s [read selfmap__floor_vectors 759 14 18_4]
+G c Z s s [read selfmap__floor_vectors 773 14 18_4]
+G c Z s s [write selfmap__floor_vectors 779 14 18_4]
+G c Z s s [write selfmap__floor_vectors 798 14 18_4]
+G c Z s s [read selfmap__floor_vectors 804 14 18_4]
+G c Z s s [write selfmap__floor_vectors 820 14 18_4]
+G c Z s s [read selfmap__floor_vectors 826 14 18_4]
+G c Z s s [pseudo_reference selfmap__floor_vectors 840 13 18_4]
+G c Z s s [get_element_access selfmap__floor_vectors 849 13 18_4]
+G c Z s s [cursorIP selfmap__floor_vectors 768 9 18_4]
+G c Z s s [vectorDA selfmap__floor_vectors 741 9 18_4]
+G c Z s s [vectorDF selfmap__floor_vectors 741 9 18_4]
+G c Z s s [vectorIP selfmap__floor_vectors 741 9 18_4]
+G c Z s s [finalize selfmap__floor_vectors 865 25 18_4]
+G c Z s s [first selfmap__floor_vectors 867 24 18_4]
+G c Z s s [last selfmap__floor_vectors 868 24 18_4]
+G c Z s s [next selfmap__floor_vectors 870 24 18_4]
+G c Z s s [previous selfmap__floor_vectors 874 24 18_4]
+G c Z s s [constant_reference_typeDI selfmap__floor_vectors 788 9 18_4]
+G c Z s s [constant_reference_typeDA selfmap__floor_vectors 788 9 18_4]
+G c Z s s [constant_reference_typeDF selfmap__floor_vectors 788 9 18_4]
+G c Z s s [constant_reference_typeIP selfmap__floor_vectors 788 9 18_4]
+G c Z s s [reference_typeDI selfmap__floor_vectors 810 9 18_4]
+G c Z s s [reference_typeDA selfmap__floor_vectors 810 9 18_4]
+G c Z s s [reference_typeDF selfmap__floor_vectors 810 9 18_4]
+G c Z s s [reference_typeIP selfmap__floor_vectors 810 9 18_4]
+G c Z s s [elements_arrayIP selfmap__floor_vectors 729 9 18_4]
+G c Z s s [elements_arrayDI selfmap__floor_vectors 729 9 18_4]
+G c Z s s [elements_arrayDA selfmap__floor_vectors 729 9 18_4]
+G c Z s s [elements_arrayDF selfmap__floor_vectors 729 9 18_4]
+G c Z s s [elements_typeDI selfmap__floor_vectors 732 9 18_4]
+G c Z s s [elements_typeDF selfmap__floor_vectors 732 9 18_4]
+G c Z s s [elements_typeIP selfmap__floor_vectors 732 9 18_4]
+G c Z s s [iteratorDF selfmap__floor_vectors 857 9 18_4]
+G c Z s s [iteratorIP selfmap__floor_vectors 857 9 18_4]
+G c Z s s [free selfmap__floor_vectors 44 14 18_4]
+G c Z s s [append_slow_path selfmap__floor_vectors 47 14 18_4]
+G c Z s b [verify selfmap 46 14 none]
+G c Z s b [go selfmap 52 14 none]
+G c Z s b [idle selfmap 55 14 none]
+G c Z s b [wait_still selfmap 57 14 none]
+G c Z s b [pictures_still selfmap 58 13 none]
+G c Z s b [measure selfmap 59 14 none]
+G c Z s b [jaw_of selfmap 60 13 none]
+G c Z s b [jaw_index selfmap 61 13 none]
+G c Z s s [body_mapDI selfmap 19 9 none]
+G c Z s s [body_mapDA selfmap 19 9 none]
+G c Z s s [body_mapDF selfmap 19 9 none]
+G c Z s s [body_mapIP selfmap 19 9 none]
+G c Z s s [string_noteDI selfmap 43 9 none]
+G c Z s s [string_noteDA selfmap 43 9 none]
+G c Z s s [string_noteDF selfmap 43 9 none]
+G c Z s s [string_noteIP selfmap 43 9 none]
+G r c none [verify selfmap 46 14 none] [compose chan 9 13 none]
+G r s cmd [verify selfmap 46 14 none] [cmdIP plug 30 9 none]
+G r l cmd [verify selfmap 46 14 none] [cmdDI plug 30 9 none]
+G r k cmd [verify selfmap 46 14 none] [cmdDF plug 30 9 none]
+G r c none [verify selfmap 46 14 none] [act plug 60 13 none]
+G r c none [verify selfmap 46 14 none] [sense plug 59 13 none]
+G r c none [verify selfmap 46 14 none] [delivered chan 11 13 none]
+G r c none [verify selfmap 46 14 none] [norm table 39 13 none]
+G r c none [verify selfmap 46 14 none] [moved picture 36 13 none]
+G r c none [verify selfmap 46 14 none] [min_pixels picture 25 13 none]
+G r c none [verify selfmap 46 14 none] [components picture 39 13 none]
+G r c none [verify selfmap 46 14 none] [fmt codec 14 13 none]
+G r s cmd [go selfmap 52 14 none] [cmdIP plug 30 9 none]
+G r l cmd [go selfmap 52 14 none] [cmdDI plug 30 9 none]
+G r k cmd [go selfmap 52 14 none] [cmdDF plug 30 9 none]
+G r c none [go selfmap 52 14 none] [act plug 60 13 none]
+G r c none [go selfmap 52 14 none] [sense plug 59 13 none]
+G r c none [go selfmap 52 14 none] [delivered chan 11 13 none]
+G r c none [go selfmap 52 14 none] [norm table 39 13 none]
+G r c none [idle selfmap 55 14 none] [sense plug 59 13 none]
+G r c none [wait_still selfmap 57 14 none] [sense plug 59 13 none]
+G r c none [wait_still selfmap 57 14 none] [moved picture 36 13 none]
+G r c none [wait_still selfmap 57 14 none] [min_pixels picture 25 13 none]
+G r c none [pictures_still selfmap 58 13 none] [moved picture 36 13 none]
+G r c none [pictures_still selfmap 58 13 none] [min_pixels picture 25 13 none]
+G r c none [measure selfmap 59 14 none] [sense plug 59 13 none]
+G r c none [measure selfmap 59 14 none] [delivered chan 11 13 none]
+G r c none [measure selfmap 59 14 none] [norm table 39 13 none]
+G r c none [measure selfmap 59 14 none] [min_pixels picture 25 13 none]
+G r c none [measure selfmap 59 14 none] [null_floor picture 35 13 none]
+G r c none [measure selfmap 59 14 none] [max_diff picture 41 13 none]
+G r c none [measure selfmap 59 14 none] [fmt codec 14 13 none]
+G r c none [measure selfmap 59 14 none] [img codec 15 13 none]
+G r c none [measure selfmap 59 14 none] [zeros bytes 21 13 none]
+G r c none [measure selfmap 59 14 none] [compose chan 9 13 none]
+G r s cmd [measure selfmap 59 14 none] [cmdIP plug 30 9 none]
+G r l cmd [measure selfmap 59 14 none] [cmdDI plug 30 9 none]
+G r k cmd [measure selfmap 59 14 none] [cmdDF plug 30 9 none]
+G r c none [measure selfmap 59 14 none] [act plug 60 13 none]
+G r c none [measure selfmap 59 14 none] [moved picture 36 13 none]
+G r c none [measure selfmap 59 14 none] [both picture 37 13 none]
+G r c none [measure selfmap 59 14 none] [components picture 39 13 none]
+G r c none [measure selfmap 59 14 none] [either picture 38 13 none]
+G r c none [measure selfmap 59 14 none] [fraction picture 40 13 none]
+X 1 ada.ads
+18K9*Ada 22e8 42|7r6 8r6 17r32 18r33 44r14 43|1r6 1r23 4r6 4r50 125r11 242r58
+. 245r48 246r50
+X 5 a-contai.ads
+16K13*Containers 28e19 42|7r10 17r36 18r37 43|242r62 245r52 246r54
+22I9*Count_Type<integer> 43|242r73 245r63 246r65
+X 10 a-convec.ads
+74k24*Vectors 878e27 42|7w21 17r47 18r48
+91R9*Vector<13|43R9> 42|24r28[17] 34r30[18] 38r38[41|12] 39r40[41|12] 58r76[41|19]
+. 43|26r76[41|19] 50r31[41|19] 134r44[41|19] 201r38[41|11] 203r39[41|19]
+. 255r47[41|19] 271r44[41|19]
+139V13*To_Vector{91R9[42|17]} 43|242s31[42|17] 245s30[30|11] 246s35[30|13]
+175V13*Length{5|22I9} 43|10s25[30|9] 28s50[41|19] 28s74[41|19] 29s35[42|18]
+. 75s62[41|11] 97s41[41|11] 119s30[41|11] 142s37[30|9] 153s46[41|19] 154s44[42|18]
+. 189s52[41|19] 190s48[41|11] 217s42[30|9] 218s41[30|9]
+187V13*Is_Empty{boolean} 43|13s16[30|9] 159s38[40|16] 240s33[30|13] 297s41[40|16]
+190U14*Clear 43|227s19[42|18] 227s38[30|13]
+217U14*Replace_Element 43|308s45[42|17] 313s42[30|9] 319s31[30|9] 320s37[30|9]
+. 321s32[30|11] 331s28[30|9] 332s34[30|9] 361s29[30|13]
+483U14*Append 43|146s21[30|9] 233s25[42|18] 234s28[30|13] 262s21[30|9]
+X 15 a-iteint.ads
+24h9 Forward_Iterator
+32h9 Reversible_Iterator<24R9[9|84]>
+X 16 a-numeri.ads
+20K13*Numerics 36e17 43|4r10 4r54
+X 17 a-ngelfu.ads
+53V13*Sqrt{long_float} 43|214s63[18|18]
+X 18 a-nlelfu.ads
+18K22*Long_Elementary_Functions[17|39] 43|4w19 4r63
+X 20 a-string.ads
+16K13*Strings 35e16 42|8r10 44r18 43|125r15
+X 24 a-strunb.ads
+91K21*Unbounded 1641e26 42|8w18 44r26 43|125r23
+105R9*Unbounded_String<13|43R9> 1620e15 42|44r36 43|126r11
+159U14*Append 43|143s16 176s22 178s22
+X 27 a-textio.ads
+58K13*Text_IO 785e16 43|1w10 1r27
+565U14*Put_Line 43|196s10 238s7 327s25 337s19 362s16 384s10
+X 30 bytes.ads
+5K9*Bytes 23e10 42|3w6 3r17
+8R12*Buf{10|91R9[7]}
+10R12*Floats{10|91R9[9]} 42|25r18 28r13 29r19 52r99 43|71r99 139r20 202r21
+. 260r23
+11K12*Bool_Vectors[10|74] 43|245r17
+12R12*Bools{10|91R9[11]} 42|30r14 43|32r30 156r39 289r42 290r42 291r44
+13K12*Int_Vectors[10|74] 43|246r23
+14R12*Ints{10|91R9[13]} 42|26r20 35r19
+21V13*Zeros{10R12} 43|243s21 244s16 244s51
+X 31 chan.ads
+4K9*Chan 14e9 43|3w6 106r39 120r23 132r42 148r29 193r56 193r91 211r45 251r24
+. 253r45 275r35
+5A12*Pose{41|10A9}<integer>
+6N4*Per_Arm 43|132r47 193r61 193r96 251r29 253r50
+9V13*Compose{5A12} 43|148s34 275s40
+11V13*Delivered{81|11A9} 43|106s44 120s28 211s50
+X 32 codec.ads
+3K9*Codec 19e10 43|2w6 176r85 176r126 176r160 178r85 178r122 238r54 238r100
+. 239r43 240r56 328r53 328r87 337r82 337r151 363r26
+14V13*Fmt{string} 43|176s91 176s132 176s166 178s91 178s128 238s60 238s106
+. 239s49 328s59 328s93 337s88 337s157 363s32
+15V13*Img{string} 43|240s62
+X 40 picture.ads
+5K9*Picture 49e12 42|5w6 18r66 18r85 43|32r39 40r29 156r48 157r42 157r61
+. 157r113 233r33 233r98 234r36 288r33 289r51 290r51 291r53 294r45 294r64
+. 294r99 295r56 295r74 301r49
+6R9*Region 15e14 43|301r57
+7i7*X0{natural} 43|304r47
+7i11*Y0{natural} 43|304r64
+7i15*X1{natural} 43|304r81
+7i19*Y1{natural} 43|304r98
+8i7*Count{natural} 43|305r84 306r61
+9f7*Cu{long_float} 43|305r47
+9f11*Cv{long_float} 43|305r64
+17R12*Regions{10|91R9[16]} 43|157r50 294r53
+19R9*Floor_Map 23e14 42|18r74 43|288r41
+25V13*Min_Pixels{natural} 43|40s37 157s121 233s106 294s107
+35V13*Null_Floor{19R9} 43|233s41
+36V13*Moved{30|12R12} 43|32s47 156s56 289s59 290s59
+37V13*Both{30|12R12} 43|291s61
+38V13*Either{30|12R12} 43|295s82
+39V13*Components{17R12} 43|157s69 294s72
+40V13*Fraction{long_float} 43|295s64
+41V13*Max_Diff{natural} 43|234s44
+X 41 plug.ads
+9K9*Plug 65e9 42|4w6 38r18 39r20 46r33 46r69 51r41 52r29 52r78 53r29 55r31
+. 55r53 57r37 57r73 58r59 59r34 59r56 60r25 61r28 43|9r28 12r25 15r31 15r53
+. 19r17 26r59 49r37 49r73 50r14 56r17 71r29 71r78 72r29 74r11 75r21 76r14
+. 83r17 86r19 92r17 124r33 124r69 133r27 134r27 188r34 188r56 201r20 203r22
+. 206r20 254r30 255r30 271r27
+10A9*Arm_Pose(long_float)<integer> 42|52r83 43|71r83 75r26 76r19 133r32 254r35
+11K12*Pose_Vectors[10|74] 43|201r25
+12K12*Floats_Vectors[10|74] 42|38r23 39r25
+14i7*W{natural} 43|40r60 157r96 157r144 230r52 292r64
+14i10*H{natural} 43|40r74 157r110 157r158 231r52 293r65
+15r7*Gray{30|8R12} 43|32r65 32r81 156r70 156r87 233r67 233r84 234r68 234r85
+. 289r73 289r86 290r73 290r90
+19K12*Cam_Vectors[10|74] 42|58r64 43|26r64 50r19 134r32 203r27 255r35 271r32
+20R9*Frame 27e14 42|46r74 51r46 53r34 55r58 57r78 59r61 60r30 61r33 43|9r33
+. 12r30 15r58 49r78 72r34 124r74 188r61
+22r7*EE{10|91R9[11]} 43|75r59 75r77 97r38 101r25 106r63 115r23 119r27 120r45
+. 133r46 190r45 201r50 211r76 222r26 254r49
+23r7*Jaw{30|10R12} 43|10r21 13r12 13r41 202r33 217r38 219r70 222r44
+24r7*Cams{10|91R9[19]} 43|50r43 61r40 66r20 134r56 153r41 156r78 157r87 157r101
+. 157r135 157r149 189r47 203r51 224r31 230r43 231r43 233r75 234r76 255r59
+. 281r30 290r81 292r55 293r56
+29n28*Ee{29E9} 43|83r22
+30R9*Cmd 37e14 43|74r16
+31e7*Kind{29E9} 43|83m9
+32i7*Arm{natural} 43|83m28
+33a7*Pose{10A9} 43|83m42 101m15
+34r7*Jaw{30|10R12} 43|83m60
+39R9*Link 56e14 42|46r38 52r34 55r36 57r42 59r39 43|15r36 49r42 71r34 124r38
+. 188r39
+59V13*Sense{boolean} 43|19s22 56s22 92s22 206s25
+60V13*Act{boolean} 43|86s24
+X 42 selfmap.ads
+9K9*Selfmap 62l5 62e12 43|5b14 388l5 388t12
+10R9*Part 16e14 17r65 43|300r39
+11b7*Valid{boolean} 43|303m37
+12i7*X0{natural} 43|304m37
+12i11*Y0{natural} 43|304m54
+12i15*X1{natural} 43|304m71
+12i19*Y1{natural} 43|304m88
+13f7*Cu{long_float} 43|305m37
+13f11*Cv{long_float} 43|305m54
+14i7*Count{natural} 43|305m71
+15f7*Frac{long_float} 43|306m37
+17K12*Part_Vectors[10|74] 24r15 43|242r18
+18K12*Floor_Vectors[10|74] 34r16
+19R9*Body_Map 41e14 46r48 52r44 57r52 58r33 59r76 43|26r33 49r52 71r44 124r48
+. 188r76
+20i7*Arms{natural} 43|129r23 193m9
+21i7*N_Cams{natural} 43|193m25
+22i7*Per_Arm{natural} 43|193m45
+23i7*Channels{natural} 43|193m72 242r87 244r25 244r60 245r77
+24r7*Parts{10|91R9[17]} 43|242m9 308m39
+25r7*Cam_Frac{30|10R12} 43|243m9 313m33 313m93 351r48 376r47
+26r7*Cam_On_Arm{30|14R12} 43|246m9 361m18
+27i7*World_Cam{natural} 43|383m12
+28r7*Amp{30|10R12} 43|142r33 147r31 176r98 244m9 319m27 331m24 337r95
+29r7*Delivered{30|10R12} 43|171r53 244m38 320m27 332m24 337r164
+30r7*Seen{30|12R12} 43|142r59 245m9 321m27
+31f7*EE_Noise{long_float} 43|110r29 175r65 213m21 213r51 238r67 256r64
+32f7*Rot_Noise{long_float} 43|110r55 110r69 214m21 214r52 238r113 256r80
+33f7*Jaw_Noise{long_float} 43|219m21 219r52 239r56
+34r7*Floors{10|91R9[18]} 43|29r28 32r89 154r37 156r95 227m12 233m18 288m61
+35r7*Pic_Floor{30|14R12} 43|227m28 234m18 240r23 240r69
+36i7*Settle{natural} 43|117r53 117r86 117r129 279m24 279r49
+38r7*Amp_Hist{10|91R9[41|12]}
+39r7*Deliv_Hist{10|91R9[41|12]}
+40i7*Measured_Times{natural}
+43R9*String_Note 45e14 46r124 43|124r124
+44r7*Text{24|105R9} 43|185m12
+46U14*Verify 46=22 46>44 46=58 46<81 46<90 46<113 43|124b14 186l8 186t14
+46r22 L{41|39R9} 43|124b22 148m20 165m20
+46r44 M{19R9} 43|124b44 129r21 142r31 142r57 147r29 148r23 154r35 156r93
+. 165r23 171r51 175r63 176r96
+46r58 F{41|20R9} 43|124b58 133r44 134r54 146r37 148m61 153r39 156r76 157r85
+. 157r99 157r133 157r147 165m39
+46b81 Ok_Body{boolean} 43|124b81 128m7 144m16 179m22
+46b90 Ok_Link{boolean} 43|124b90 128m24 150m19 167m19
+46r113 Note{43R9} 43|124b113 185m7
+51P9*Watcher(boolean) 51>37 54r26 43|73r26
+51r37 F{41|20R9}
+52U14*Go 52=18 52>40 52>54 52>69 52>93 53=18 53<41 53<68 53<90 53>108 54>18
+. 43|71b14 122l8 122t10 148s16 165s16 275s22 282s22
+52r18 L{41|39R9} 43|71b18 86m29 86r29 92m29 92r29
+52r40 M{19R9} 43|71b40 110r27 110r53 110r67 117r51 117r84 117r127
+52i54 Arm{natural} 43|71b54 75r42 75r81 83r35 97r20 101r29 106r67 115r27
+. 119r10 120r49
+52a69 Target{41|10A9} 43|71b69 83r50
+52r93 Jaw{30|10R12} 43|71b93 83r67
+53r18 F{41|20R9} 43|72b18 75r57 75r75 92m32 92r32 97r36 99r63 101r23 106r61
+. 115r21 119r25 120r43
+53a41 Delivered{81|11A9} 43|72b41 81m7 120m10
+53i68 Frames{natural} 43|72b68 82m7 96m10 96r20 117r41 117r69 117r117
+53b90 Ok{boolean} 43|72b90 86m13 87r20 93m13
+53b108 Quick{boolean} 43|72b108 117r102
+54p18 Watch{51P9} 43|73b18 99r13 99r56
+55U14*Idle 55=20 55=42 55>65 55<78 43|15b14 24l8 24t12
+55r20 L{41|39R9} 43|15b20 19m29 19r29
+55r42 F{41|20R9} 43|15b42 19m32 19r32
+55i65 N{natural} 43|15b65 18r21
+55b78 Ok{boolean} 43|15b78 17m7 20m13
+57U14*Wait_Still 57=26 57>48 57=62 57>85 57<100 57<120 43|49b14 69l8 69t18
+57r26 L{41|39R9} 43|49b26 56m29 56r29
+57r48 M{19R9} 43|49b48 61r29
+57r62 F{41|20R9} 43|49b62 50r41 56m32 56r32 61r38 66r18
+57i85 Max{natural} 43|49b85 55r21
+57i100 Used{natural} 43|49b100 53m7 60m10
+57b120 Ok{boolean} 43|49b120 54m7 57m13
+58V13*Pictures_Still{boolean} 58>29 58>43 58>51 43|26b13 47l8 47t22 61s13
+58r29 M{19R9} 43|26b29 29r26 32r87
+58r43 Before{10|91R9[41|19]} 43|26b43 28r43 32r54 40r49 40r63
+58r51 After{10|91R9[41|19]} 43|26b51 28r68 32r71
+59U14*Measure 59=23 59=45 59<68 59<86 43|188b14 387l8 387t15
+59r23 L{41|39R9} 43|188b23 206m32 206r32 275m26 282m26
+59r45 F{41|20R9} 43|188b45 189r45 190r43 201r48 202r31 203r49 206m35 206r35
+. 211r74 217r36 219r68 222r24 222r42 224r29 230r41 231r41 233r73 234r74 254r47
+. 255r57 262r37 275m67 281r28 282m45 290r79 292r53 293r54
+59r68 M{19R9} 43|188b68 192m7 193m7 193m23 193m43 193m70 213m19 213r49 214m19
+. 214r50 219m19 219r50 227m10 227r10 227m26 227r26 233m16 233r16 234m16 234r16
+. 238r65 238r111 239r54 240r21 240r67 242m7 242r85 243m7 244m7 244r23 244m36
+. 244r58 245m7 245r75 246m7 256r62 256r78 275r29 279m22 279r47 282r29 288r59
+. 308m37 308r37 313m31 313r31 313r91 319m25 319r25 320m25 320r25 321m25 321r25
+. 331m22 331r22 332m22 332r22 337r93 337r162 351r46 361m16 361r16 376r45
+. 383m10
+59b86 Ok{boolean} 43|188b86 194m7 386m7
+60V13*Jaw_Of{long_float} 60>21 60>37 43|12b13 146s29 262s29
+60r21 F{41|20R9} 43|13r10 13r39 13r57
+60i37 Arm{natural} 43|13r60
+61V13*Jaw_Index{natural} 61>24 61>40 43|9b13 13s46
+61r24 F{41|20R9} 43|10r19
+61i40 Arm{natural} 43|10r35 10r44
+X 43 selfmap.adb
+6f4 Start_Amp{long_float} 258r52
+7N4 Max_Doublings 263r32
+18i11 I{integer}
+28i11 C{integer} 29r13 32r62 32r78 32r97 40r57 40r71
+32r16 Mv{30|12R12} 35r25
+33i16 Cnt{natural} 37m22 37r29 40r19
+35b20 B{boolean} 36r22
+50r7 Prev{10|91R9[41|19]} 61r32 66m10
+51i7 Still{natural} 62m13 62r22 64m13 67r20
+55i11 I{integer} 60r18
+74r7 C{41|30R9} 83m7 83m26 83m40 83m58 86r32 101m13
+75a7 P0{41|10A9} 76r31 120r39
+76a7 Prev{41|10A9} 106r55 115m13
+77i7 Still{natural} 103m13 111m16 111r25 113m16 117r21
+78b7 Send{boolean} 85r13 90m13 102m13
+79b7 Halted{boolean} 99r40 100m13
+106a13 D{81|11A9} 107r58 108r41 108r54 108r67
+107f13 Moved_P{long_float} 110r16
+108f13 Rv{long_float} 110r47
+126r7 T{24|105R9} 143m24 143r24 176m30 176r30 178m30 178r30 185r20
+129i11 A{integer} 132r38 133r50 143r50 146r40 148r26 165r26 176r56 178r56
+131i13 K{natural} 132r57 147r23 172r55
+132i13 Ch{natural} 142r16 142r65 147r36 171r64 176r103
+133a13 P0{41|10A9} 148r43 165r29
+134r13 F0{10|91R9[41|19]} 156r63
+135a13 A_Cmd{81|11A9} 147m16 148r47
+136a13 Deliv{81|11A9} 148m64 172r48
+136a20 Back{81|11A9} 165m42
+137i13 Frames{natural} 148m71 165m48
+138b13 Ok2{boolean} 148m79 149r23 165m56 166r23
+139r13 Jaw0{30|10R12} 146m16 146r16 148r55 165r33
+140b13 Visible{boolean} 160m28 175r83 178r165
+153i20 C{integer} 154r22 156r67 156r84 156r103 157r93 157r107 157r141 157r155
+156r25 Mv{30|12R12} 157r81
+157r25 Comps{40|17R12} 159r32
+171f19 Expect{long_float} 175r33 175r54 176r171 178r133
+172f19 Got{long_float} 175r27 176r137 178r96
+189i7 N_Cams{natural} 193r35 195r27 228r24 242r98 243r35 286r36 308r67 313r63
+. 313r107 349r27 351r62 371r24 376r61
+190i7 Arms{natural} 193r17 193r84 195r10 209r27 243r28 246r77 250r21 344r21
+. 375r30
+201r10 Prev_EE{10|91R9[41|11]} 211r61 222m13
+202r10 Prev_Jaw{30|10R12} 218r32 219r80 222m30
+203r10 Prev_Gray{10|91R9[41|19]} 224m16 233r53 234r54
+205i14 K{integer} 223r16
+209i17 A{integer} 211r70 211r80
+211a19 D{81|11A9} 213r73 214r69 214r82 214r95
+217i17 J{integer} 218r19 219r75 219r90
+228i14 C{integer} 230r49 231r49 233r64 233r81 234r65 234r82
+230i16 Cw{natural} 233r90 233r118
+231i16 Ch{natural} 233r94 233r122
+248f10 Last_Trans{long_float} 258r107 323m28
+248f22 Last_Rot{long_float} 258r123 325m28
+250i11 A{integer} 253r41 254r53 262r40 275r32 282r32 313r59 313r103 327r99
+251i14 K{integer} 253r60 256r51 258r96 274r29 280r36 322r28 327r138
+253i16 Ch{natural} 308r62 319r48 320r54 321r49 327r69 331r45 332r51 337r63
+. 337r100 337r175
+254a16 P0{41|10A9} 275r49 282r35
+255r16 F0{10|91R9[41|19]} 289r66
+256f16 Noise{long_float} 258r85
+258f16 Amp{long_float} 274r35 307r48 312r42 317r36 319r52 323r42 325r40 328r64
+. 331r49 333m22 333r29
+259b16 Accepted{boolean} 318m25 336r23
+260r16 Jaw0{30|10R12} 262m16 262r16 275r61 282r39
+263i20 Try{integer}
+265a22 A_Cmd{81|11A9} 274m22 275r53
+266a22 Deliv{81|11A9} 275m70 280r29
+266a29 Back{81|11A9} 282m48
+267i22 Frames{natural} 275m77 279r70 328r132
+268b22 Ok2{boolean} 275m85 276r29 282m67 283r29
+269i22 Frames_Back{natural} 282m54
+270f22 Got{long_float} 280m22 307r41 312r35 317r29 320r58 328r98 332r55
+271r22 F1{10|91R9[41|19]} 281m22 289r79 290r66
+272b22 Visible{boolean} 298m31 317r55
+286i26 C{integer} 288r69 289r70 289r83 290r70 290r87 292r61 293r62 308r76
+. 313r72 313r116
+288r28 Fl{40|19R9} 289r92 290r96
+289r28 M1{30|12R12} 291r67 295r90
+290r28 M2{30|12R12} 291r71 295r94
+291r28 Here{30|12R12} 294r84
+292i28 Cw{natural} 294r90 294r119 306r82
+293i28 Ch2{natural} 294r94 294r123 306r87
+294r28 Comps{40|17R12} 297r35 301r67
+295f28 Fr{long_float} 313r120
+300r34 Pt{42|10R9} 303m34 304m34 304m51 304m68 304m85 305m34 305m51 305m68
+. 306m34 308r79
+301r34 Big{40|6R9} 304r43 304r60 304r77 304r94 305r43 305r60 305r80 306r57
+344i11 A{integer} 351r58 361r46 362r55
+346i13 Best{integer} 354m45 360r16 361r49 362r101
+347f13 Bv{long_float} 353r26 354r32 354m36 360r35 360r53 363r37
+347f17 Second{long_float} 354m22 355r29 356m22 360r65
+349i17 C{integer} 351r71 354r53
+351f19 V{long_float} 353r22 354r42 355r25 356r32
+368i10 Best{natural} 379m29 383r25 384r64
+369f10 Bv{long_float} 378r24 379m19
+371i14 C{integer} 376r70 379r37
+373f16 Mx{long_float} 376m19 376r41 378r19 379r25
+375i20 A{integer} 376r57
+X 44 system.ads
+67M9*Address
+X 60 s-memory.ads
+51V13*Alloc{44|67M9} 101i<c,__gnat_malloc>22
+66U14*Free 102i<c,__gnat_free>22
+74V13*Realloc{44|67M9} 103i<c,__gnat_realloc>22
+X 72 s-stalib.adb
+87U14 Break_Start 88i<c,__gnat_break_start>22
+X 81 table.ads
+8K9*Table 42|6w6 53r57 43|72r57 81r20 106r26 107r46 135r21 135r34 136r27
+. 211r32 213r61 265r30 265r43 266r36 81|52e10
+11A9*Vec(long_float)<integer> 42|53r63 43|72r63 106r32 135r27 136r33 211r38
+. 265r36 266r42
+17a4*Zero_Vec{11A9} 43|81r26 135r40 265r49
+39V13*Norm{long_float} 43|107s52 213s67
+

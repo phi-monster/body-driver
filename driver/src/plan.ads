@@ -28,12 +28,15 @@ package Plan is
       V : Lang.Verb := Lang.V_Reach;
       R : Lang.Rel := Lang.R_None;
       Subject, Object : Natural := 0;
+      Subject_Arm : Natural := 0;   --  谁动的那一块长在第几只手上(合手要知道是哪只手)
       Rows : Need := [others => False];
       Hard : Boolean := False;      --  hold ⇒ 整段保持,不许被牺牲
       Forbid : Boolean := False;    --  never ⇒ 不许进入
       Amt : Lang.Amount := Lang.A_None;
       Ev : Lang.Event := Lang.E_None;
       Steps : Natural := 0;
+      Needs_Proof : Boolean := False;   --  这一块还没量过响应 ⇒ 编译期无从判,执行器量完必须【当场再判一次】,
+                                        --  判不过就中止这一节并把同一句话退回给脑。证明可以晚,但不许没有。
       Src : Unbounded_String;
    end record;
    package Goal_Vectors is new Ada.Containers.Vectors (Natural, Goal);

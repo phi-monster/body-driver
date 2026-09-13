@@ -1,0 +1,8 @@
+brain.adb:53:201: (style) this line is too long: 238 [-gnatyM]
+brain.adb:55:201: (style) this line is too long: 303 [-gnatyM]
+brain.adb:56:201: (style) this line is too long: 213 [-gnatyM]
+brain.adb:57:201: (style) this line is too long: 262 [-gnatyM]
+brain.adb:59:201: (style) this line is too long: 277 [-gnatyM]
+brain.adb:60:201: (style) this line is too long: 267 [-gnatyM]
+brain.adb:61:201: (style) this line is too long: 460 [-gnatyM]
+brain.adb:62:201: (style) this line is too long: 203 [-gnatyM]

@@ -7,6 +7,8 @@ with Flow;
 with Monitor;
 with Backup;
 with Learned; use Learned;
+with Lang;
+with Exam;
 package body Act is
    Sigma_Mult : constant Long_Float := 3.0;   --  鼓出来超过背景自己稳健 σ 的几倍才算一块(在真实深度图上验过:3 中,5 杀光);无量纲
    Track_Win : constant Long_Float := 0.10;   --  一步里任何被跟踪的点在画面里最多跑十分之一画幅(跟踪窗,比例,无量纲)
@@ -426,6 +428,7 @@ package body Act is
       Raw_Err : Long_Float := 0.0;              --  不随表变的差距(全是比例):画面距离 + 远近差几成 + 大小差几成 + 朝向差几成。
                                                 --  判"有没有在靠近"只能用它 —— "还差几步"的刻度每步都在变,尺子一缩就看着像退步
       Par_Tu, Par_Tv : Long_Float := 0.0;       --  两团展开时,整块的目标(看清各团真实位置后按它重算各团目标)
+      Hard : Boolean := False;                  --  脑说的是 hold ⇒ 这一条整段不许被牺牲(解算时进硬约束,软目标只能在它的零空间里做文章)
    end record;
    package Point_Vectors is new Ada.Containers.Vectors (Natural, Point);
    type Effect_Array is array (Natural range <>) of Table.Effect;
@@ -1309,7 +1312,20 @@ package body Act is
                Damp (K) := (Px / Track_Win) ** 2;
             end;
          end loop;
-         Table.Solve (Terms, Chan.Per_Arm, Note.Cap, Note.Active, Damp, Note.Cmd, Solved);
+         --  hold 的那几条进硬约束:先把它们解到位,软目标只能在剩下的自由度里做文章。
+         --  平权解在挤不下的时候一定会牺牲朝向(自检里那条 5.500 就是),所以这里不能用平权。
+         declare
+            Hard, Soft : Table.Term_Vectors.Vector;
+         begin
+            for I in 0 .. Natural (Terms.Length) - 1 loop
+               if I < Natural (Pts.Length) and then Pts (I).Hard then
+                  Hard.Append (Terms (I));
+               else
+                  Soft.Append (Terms (I));
+               end if;
+            end loop;
+            Table.Solve_Priority (Hard, Soft, Chan.Per_Arm, Note.Cap, Note.Active, Damp, Note.Cmd, Solved);
+         end;
       end Budget;
 
       --  ①c 修步子:缩到眼睛跟得住,且不把被跟的东西推出视野、不让我身上任何一块压到"不许碰"的框
@@ -1803,6 +1819,49 @@ package body Act is
          Event := S ("the body stopped answering while I measured my response table");
          return;
       end if;
+      --  🔴 证明可以晚,但不许没有:到【要拿这一行去算动作】的这一刻,它必须已经被证明过。
+      --  编译期这一块还没量过响应时放行了,现在量完了,当场补判;判不过就一步都不走,把原话退回给脑。
+      declare
+         Bad : Unbounded_String;
+         Notch : Table.Vec := Table.Zero_Vec;
+      begin
+         for K in 0 .. Chan.Per_Arm - 1 loop
+            Notch (K) := C.Map.Amp (Arm * Chan.Per_Arm + K);
+         end loop;
+         for I in 0 .. Natural (Pts.Length) - 1 loop
+            declare
+               P : constant Point := Pts (I);
+               procedure Want (R : Natural; Nm : String) is
+               begin
+                  if not Table.Row_Proven (Effs (I), Notch, R) then
+                     Append (Bad, (if Length (Bad) > 0 then "; " else "")
+                             & "item " & Codec.Img (P.Item_No) & " needs " & Nm & ", but "
+                             & Table.Row_Why (Effs (I), Notch, R));
+                  end if;
+               end Want;
+            begin
+               if abs (P.Tu - P.Cu) > 0.0 then
+                  Want (0, "sideways");
+               end if;
+               if abs (P.Tv - P.Cv) > 0.0 then
+                  Want (1, "up-down");
+               end if;
+               if P.Wz > 0.0 and then abs (P.Tz - P.Z) > 0.0 then
+                  Want (2, "nearness");
+               end if;
+               if P.Wsize > 0.0 then
+                  Want (3, "apparent size");
+               end if;
+               if P.Wang > 0.0 then
+                  Want (4, "facing");
+               end if;
+            end;
+         end loop;
+         if Length (Bad) > 0 then
+            Event := S ("I did not move: " & To_String (Bad));
+            return;
+         end if;
+      end;
       for Step in 1 .. Natural'Min (Step_Cap, (if Step_Limit > 0 then Step_Limit else Step_Cap)) loop
          Plan;
          if Note.Say_Stop /= "" then
@@ -2155,6 +2214,115 @@ package body Act is
      ("MODE: " & (if C.Wld.Holding then "holding something with arm " & Codec.Img (Natural (C.Wld.Held_Arm) + 1) else "hands empty") &
       "; without new words from you I hold still and keep my grip as it is; this segment ended on: " & Until_Text & ".");
 
+   --  编译器要知道的、关于每个名词的事实。编号和给脑看的清单一致(1 起),0 号空着。
+   function Build_Facts (C : Context) return Plan.Facts_Vectors.Vector is
+      Fs : Plan.Facts_Vectors.Vector;
+      Zero : Plan.Item_Facts;
+   begin
+      Fs.Append (Zero);
+      for I in 0 .. Natural (C.Items.Length) - 1 loop
+         declare
+            It : constant Item := C.Items (I);
+            Ft : Plan.Item_Facts;
+            Kk : constant Natural := (if It.Kind in Finger | Grip then Chan.Per_Arm else It.Which);
+         begin
+            Ft.Exists := It.Located or else It.Kind in Finger | Grip | Piece;
+            Ft.Mine := It.Kind in Finger | Grip | Piece;
+            Ft.Grip := It.Kind = Grip;
+            Ft.Arm := It.Arm;
+            Ft.Thing_Idx := -1;
+            if Ft.Mine then
+               for T in 0 .. Natural (C.Tables.Length) - 1 loop
+                  if C.Tables (T).Arm = It.Arm and then C.Tables (T).Cam = C.Cam
+                    and then C.Tables (T).Chan_K = Kk
+                  then
+                     Ft.Thing_Idx := Integer (T);
+                     exit;
+                  end if;
+               end loop;
+            end if;
+            Fs.Append (Ft);
+         end;
+      end loop;
+      return Fs;
+   end Build_Facts;
+
+   --  把编译过的程序落成【这一小节】:所有 hold 一直带着(它们是背景约束),再取下一条动作。
+   --  程序跑完了才把 Have_Prog 放掉 —— 那时候才回去问脑。这就是"少问几百次"的全部机关。
+   procedure Fill_Say (C : in out Context; Answer : out Brain.Say) is
+      use Lang;
+      function Old_Rel (R : Rel) return String is
+        (case R is
+            when R_Nearer => "front", when R_Farther => "back", when R_Facing => "face",
+            when others => Rel_Word (R));
+      function Old_Until (E : Event) return String is
+        (case E is
+            when E_Touch => "contact", when E_Free => "slip", when E_None => "steps",
+            when others => Event_Word (E));
+      Acted : Boolean := False;
+   begin
+      Answer := (others => <>);
+      Answer.See := To_Unbounded_String ("target");
+      Answer.Fast := True;
+      Answer.Until_Kind := To_Unbounded_String ("steps");
+      Answer.Steps := 1;
+      if C.Prog_At = 0 then
+         Answer.Text := C.Prog.Says;
+         if C.Prog.Look >= 1 then
+            Answer.Look := C.Prog.Look;
+         end if;
+      end if;
+      for I in 0 .. Natural (C.Prog.Goals.Length) - 1 loop
+         declare
+            G : constant Plan.Goal := C.Prog.Goals (I);
+         begin
+            if G.Hard then
+               Answer.Moves.Append (Brain.Goal'(Item => G.Subject, Cell => 0, Rel => To_Unbounded_String (Old_Rel (G.R)),
+                                                Of_Item => G.Object, Amount => To_Unbounded_String (Amount_Word (G.Amt)),
+                                                Stay => False, Hard => True));
+            elsif G.Forbid then
+               Answer.Avoid.Append (Integer (G.Object));
+            end if;
+         end;
+      end loop;
+      while C.Prog_At < Natural (C.Prog.Goals.Length) and then not Acted loop
+         declare
+            G : constant Plan.Goal := C.Prog.Goals (C.Prog_At);
+         begin
+            C.Prog_At := C.Prog_At + 1;
+            if G.Hard or else G.Forbid then
+               null;   --  背景约束,上面已经带上了
+            else
+               case G.V is
+                  when V_Reach =>
+                     Answer.Moves.Append (Brain.Goal'(Item => G.Subject, Cell => 0, Rel => To_Unbounded_String (Old_Rel (G.R)),
+                                                      Of_Item => G.Object, Amount => To_Unbounded_String (Amount_Word (G.Amt)),
+                                                      Stay => False, Hard => False));
+                  when V_Close =>
+                     Answer.Grip := To_Unbounded_String ("close");
+                     Answer.Grip_Arm := G.Subject_Arm + 1;
+                     Answer.Grip_On := G.Object;
+                  when V_Open =>
+                     Answer.Grip := To_Unbounded_String ("open");
+                     Answer.Grip_Arm := G.Subject_Arm + 1;
+                  when others =>
+                     null;
+               end case;
+               Answer.Until_Kind := To_Unbounded_String (Old_Until (G.Ev));
+               Answer.Steps := (if G.Ev = E_Steps then Natural'Max (1, G.Steps) else 0);
+               Acted := True;
+            end if;
+         end;
+      end loop;
+      if not Acted then
+         --  这一段跑完了:回去问下一段
+         C.Have_Prog := False;
+         C.Prog_At := 0;
+         Answer.Done := C.Prog.Done;
+         Answer.Moves.Clear;
+      end if;
+   end Fill_Say;
+
    --  ── 一轮 ──
    procedure Round (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context) is
       Cam : constant Natural := Natural'Min (C.Cam, Natural (F.Cams.Length) - 1);
@@ -2229,12 +2397,42 @@ package body Act is
                   end if;
                end loop;
             end if;
-         if not Brain.Ask (To_String (C.Eye_Host), C.Eye_Port, To_String (C.Task_Text), To_String (Listing), Recent,
-                           C.Cols, C.Rows, Natural (C.Items.Length), C.Map.N_Cams, C.Map.Arms, Big, Cw, Bh, Say, Err)
-         then
-            Put_Line ("[身] 🧠 问不通(" & To_String (Err) & ")⇒ 这一拍不动,下一拍重问");
-            return;
+         --  🔴 脑交上来的是【一段程序】,不是一张表。收到之后:解析 → 对着体检判决编译 → 过了才存起来跑。
+         --  退回是免费的:一根手指都不动,理由和一个能照抄的替代随下一轮一起给它。
+         if not C.Have_Prog then
+            declare
+               Text : Unbounded_String;
+            begin
+               if not Brain.Ask (To_String (C.Eye_Host), C.Eye_Port, To_String (C.Task_Text), To_String (Listing), Recent,
+                                 Lang.Grammar, To_String (C.Refused),
+                                 C.Cols, C.Rows, Natural (C.Items.Length), C.Map.N_Cams, C.Map.Arms, Big, Cw, Bh, Text, Err)
+               then
+                  Put_Line ("[身] 🧠 问不通(" & To_String (Err) & ")⇒ 这一拍不动,下一拍重问");
+                  return;
+               end if;
+               Put_Line ("[身] 🧠 它交上来一段程序:");
+               Put_Line (To_String (Text));
+               declare
+                  Rep : constant Exam.Report := Exam.Judge (C.Map, C.Tables);
+                  Cm : constant Plan.Compiled :=
+                    Plan.Compile (Lang.Parse (To_String (Text)), Rep, Build_Facts (C), Surface => False);
+               begin
+                  Put_Line ("[身] ⚖ " & Plan.Report_Text (Cm));
+                  if not Cm.Ok then
+                     C.Refused := S ("line " & Codec.Img (Cm.Err_Line) & ": " & To_String (Cm.Err)
+                                     & (if Length (Cm.Instead) > 0 then "  -> " & To_String (Cm.Instead) else ""));
+                     C.Recent := S ("I refused your program before anything moved. " & To_String (C.Refused)
+                                    & " Nothing has moved. " & Mode_Line (C, "refused"));
+                     return;
+                  end if;
+                  C.Refused := Null_Unbounded_String;
+                  C.Prog := Cm;
+                  C.Prog_At := 0;
+                  C.Have_Prog := True;
+               end;
+            end;
          end if;
+         Fill_Say (C, Say);
          end;
       end;
       Put_Line ("[身] 🧠 它说:" & To_String (Say.Text) & " ‖ 看见=" & To_String (Say.See) & " · 动" & Natural'Image (Natural (Say.Moves.Length)) &
@@ -2368,6 +2566,28 @@ package body Act is
                                        begin
                                           P.Tu := P.Cu + Du / Ln * St; P.Tv := P.Cv + Dv / Ln * St;
                                        end;
+                                    elsif Rl = "face" then
+                                       --  转到"从我这一点指向它那一点"的方向 = 我这一块的主轴方向。人不动,只转。
+                                       --  存两倍角(和"朝哪"那一行同一个约定:主轴的正负两种写法算同一个)。
+                                       declare
+                                          Du : constant Long_Float := O.Cu - P.Cu;
+                                          Dv : constant Long_Float := O.Cv - P.Cv;
+                                       begin
+                                          if abs Du > 0.0 or else abs Dv > 0.0 then
+                                             P.Tu := P.Cu; P.Tv := P.Cv; P.Wz := 0.0;
+                                             P.Tang := Wrap (2.0 * Arctan (Dv, Du));
+                                             P.Wang := 1.0;
+                                          else
+                                             Report := S ("goal: item " & Codec.Img (G.Item) & " and item " & Codec.Img (G.Of_Item)
+                                                          & " sit at the same spot in the picture, so there is no direction to turn to. ");
+                                             Ok_Pt := False;
+                                          end if;
+                                       end;
+                                    else
+                                       --  🔴 认不得的关系【不许静悄悄地什么都不做】。词表长出一个新词而执行器还没实现它,
+                                       --  静默 no-op 会让脑以为它说的话被执行了 —— 这正是整套设计要杀掉的那一类失败。
+                                       Report := S ("goal: I do not know where the relation " & Rl & " would put me. ");
+                                       Ok_Pt := False;
                                     end if;
                                  end if;
                               end;
@@ -2421,6 +2641,7 @@ package body Act is
                   begin
                      Amount := Amount_Factor (G.Amount);
                      P.Item_No := G.Item;
+                     P.Hard := G.Hard;   --  脑说的是 hold ⇒ 这一条进硬约束,解算时不许被牺牲
                      if not It.Located then
                         Report := S ("goal: item " & Codec.Img (G.Item) & " is not locatable in this picture right now. ");
                         Ok_Pt := False;

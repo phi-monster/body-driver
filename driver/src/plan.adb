@@ -174,8 +174,11 @@ package body Plan is
                         Ti : constant Integer := Facts (Sub).Thing_Idx;
                         N : constant Need := Rows_Needed (S.R);
                      begin
+                        --  这一块还没量过响应:编译期没有判据。不许因此放行到底 —— 记一笔,
+                        --  执行器量完当场补判(见 Needs_Proof)。
+                        G.Needs_Proof := Ti < 0;
                         for Row in Exam.Row_Id loop
-                           if N (Row) and then not Row_Ok (R, Ti, Row) then
+                           if N (Row) and then not G.Needs_Proof and then not Row_Ok (R, Ti, Row) then
                               Reject (S.Line,
                                 "「" & Lang.Rel_Word (S.R) & "」(" & Lang.Rel_Cn (S.R) & ")要靠「"
                                 & Exam.Row_Name (Row) & "」这一行,而这一行在我身上不能用:"
@@ -217,6 +220,7 @@ package body Plan is
                   end if;
                   G.Line := S.Line; G.V := S.V; G.R := S.R;
                   G.Subject := Sub; G.Object := Obj;
+                  G.Subject_Arm := Facts (Sub).Arm;
                   G.Hard := S.V = Lang.V_Hold;
                   G.Forbid := S.V = Lang.V_Never;
                   G.Amt := S.Amt; G.Ev := S.Ev; G.Steps := S.Steps;

@@ -1,0 +1,165 @@
+V "GNAT Lib v16"
+A -O2
+A -gnatA
+A -gnat2022
+A -gnata
+A -gnatwa
+A -g
+A -gnatyM200
+A -mmacosx-version-min=26.0.0
+A -mcpu=apple-m1
+A -mlittle-endian
+A -mabi=lp64
+A -fPIC
+P SS ZX
+
+RN
+RV NO_FLOATING_POINT
+RV NO_IMPLICIT_CONDITIONALS
+RV NO_IMPLEMENTATION_PRAGMAS
+
+U chan%b		chan.adb		97401218 NE OO PK
+W ada%s			ada.ads			ada.ali
+W ada.numerics%s	a-numeri.ads		a-numeri.ali
+W ada.numerics.long_elementary_functions%s  a-nlelfu.ads  a-nlelfu.ali
+Z ada.strings.text_buffers%s  a-sttebu.adb	a-sttebu.ali
+
+U chan%s		chan.ads		f3d3d9e3 EE NE OO PK
+W plug%s		plug.adb		plug.ali
+W table%s		table.adb		table.ali
+
+D ada.ads		20260610194523 76789da1 ada%s
+D a-charac.ads		20260610194523 2d3ec45b ada.characters%s
+D a-chlat1.ads		20260610194523 e0d72e76 ada.characters.latin_1%s
+D a-contai.ads		20260610194523 61e5e089 ada.containers%s
+D a-conhel.ads		20260610194523 46fe1ce3 ada.containers.helpers%s
+D a-coinve.ads		20260610194523 2d0a9a0e ada.containers.indefinite_vectors%s
+D a-convec.ads		20260610194523 cb0f314a ada.containers.vectors%s
+D a-except.ads		20260610194523 8699d7ff ada.exceptions%s
+D a-finali.ads		20260610194523 099c16e4 ada.finalization%s
+D a-iteint.ads		20260610194523 49a8bee2 ada.iterator_interfaces%s
+D a-numeri.ads		20260610194523 84bea7a3 ada.numerics%s
+D a-ngelfu.ads		20260610194523 324808ac ada.numerics.generic_elementary_functions%s
+D a-nlelfu.ads		20260610194523 7620113d ada.numerics.long_elementary_functions%s
+D a-stream.ads		20260610194523 cb01a8f8 ada.streams%s
+D a-string.ads		20260610194523 90ac6797 ada.strings%s
+D a-strmap.ads		20260610194523 f7e6ca10 ada.strings.maps%s
+D a-strsea.ads		20260610194523 18c3c634 ada.strings.search%s
+D a-sttebu.ads		20260610194523 f1ad67a2 ada.strings.text_buffers%s
+D a-strunb.ads		20260610194523 8d6ccba7 ada.strings.unbounded%s
+D a-stuten.ads		20260610194523 c6ced0ae ada.strings.utf_encoding%s
+D a-tags.ads		20260610194523 2dbf449c ada.tags%s
+D a-unccon.ads		20260610194523 0e9b276f ada.unchecked_conversion%s
+D a-uncdea.ads		20260610194523 c3a8ac65 ada.unchecked_deallocation%s
+D bytes.ads		20260906203008 86b1403c bytes%s
+D chan.ads		20260906213131 fcae972f chan%s
+D chan.adb		20260906203008 1dce940a chan%b
+D gnat.ads		20260610194523 b5988c27 gnat%s
+D g-socket.ads		20260610194523 a4cab028 gnat.sockets%s
+D interfac.ads		20260610194523 9111f9c1 interfaces%s
+D i-c.ads		20260610194523 dbdd3be7 interfaces.c%s
+D layout.ads		20260906203008 c005157d layout%s
+D msgpack.ads		20260906203008 0af3a83c msgpack%s
+D plug.ads		20260907080552 5ecb2156 plug%s
+D system.ads		20260610194523 8a611ac3 system%s
+D s-atocou.ads		20260610194523 dc18efc3 system.atomic_counters%s
+D s-exctab.ads		20260610194523 91bef6ef system.exception_table%s
+D s-finpri.ads		20260610194523 5970d55a system.finalization_primitives%s
+D s-finroo.ads		20260610194523 0a7c3ed4 system.finalization_root%s
+D s-oscons.ads		20260626180535 42ad9981 system.os_constants%s
+D s-oslock.ads		20260610194523 bcc789d2 system.os_locks%s
+D s-parame.ads		20260610194523 a1aeab5c system.parameters%s
+D s-pooglo.ads		20260610194523 91708d21 system.pool_global%s
+D s-putima.ads		20260610194523 1b989439 system.put_images%s
+D s-retsta.ads		20260610194523 0f6b06cb system.return_stack%s
+D s-secsta.ads		20260610194523 578279f5 system.secondary_stack%s
+D s-soflin.ads		20260610194523 5d88fdea system.soft_links%s
+D s-stache.ads		20260610194523 0b81c1fe system.stack_checking%s
+D s-stalib.ads		20260610194523 1c9580f6 system.standard_library%s
+D s-stoele.ads		20260610194523 ccded4e8 system.storage_elements%s
+D s-stopoo.ads		20260610194523 45459446 system.storage_pools%s
+D s-stratt.ads		20260610194523 80b8dafb system.stream_attributes%s
+D s-traent.ads		20260610194523 c81cbf8c system.traceback_entries%s
+D s-unstyp.ads		20260610194523 fa2a7f59 system.unsigned_types%s
+D table.ads		20260908002242 51b66f9a table%s
+D websocket.ads		20260906203008 e2cfe5a2 websocket%s
+G a e
+G c Z s b [compose chan 9 13 none]
+G c Z s b [delivered chan 11 13 none]
+G c Z s b [rot_vec chan 12 13 none]
+G c Z s b [quat_mul chan 13 13 none]
+X 1 ada.ads
+18K9*Ada 22e8 26|1r6 1r50
+X 10 a-iteint.ads
+24h9 Forward_Iterator
+32h9 Reversible_Iterator<24R9[7|119]>
+X 11 a-numeri.ads
+20K13*Numerics 36e17 26|1r10 1r54
+X 12 a-ngelfu.ads
+53V13*Sqrt{long_float} 26|20s36[13|18] 35s18[13|18] 63s12[13|18]
+100V13*Sin{long_float} 26|28s40[13|18]
+112V13*Cos{long_float} 26|32s23[13|18]
+165V13*Arctan{long_float} 26|67s20[13|18]
+X 13 a-nlelfu.ads
+18K22*Long_Elementary_Functions[12|39] 26|1w19 1r63
+X 25 chan.ads
+4K9*Chan 14l5 14e9 26|2b14 82l5 82t9
+5A12*Pose{33|10A9}<integer> 9r27 9r78 11r33 12r31 13r30 13r43 26|3r30 3r43
+. 4r11 15r27 15r78 16r11 27r18 29r17 46r31 47r14 48r11 72r33
+6N4*Per_Arm
+7N4*Pos_Channels
+9V13*Compose{5A12} 9>22 9>33 9>48 26|15b13 44l8 44t15
+9a22 P0{5A12} 26|15b22 16r19 22r16 23r16 24r16 34r32
+9a33 A{54|11A9} 26|15b33 17r35 18r35 19r35 22r25 23r25 24r25
+9i48 Offset{natural} 26|15b48 17r38 18r38 19r38 22r28 23r28 24r28
+11V13*Delivered{54|11A9} 11>24 11>28 26|72b13 81l8 81t17
+11a24 P0{5A12} 26|72b24 74r43 76r25 77r25 78r25
+11a28 P1{5A12} 26|72b28 74r47 76r16 77r16 78r16
+12V13*Rot_Vec{54|13A9} 12>22 12>26 26|46b13 70l8 70t15 74s34
+12a22 Q0{5A12} 26|46b22 47r22 53r23
+12a26 Q1{5A12} 26|46b26 55r22
+13V13*Quat_Mul{5A12} 13>23 13>26 26|3b13 13l8 13t16 34s18 55s12
+13a23 A{5A12} 26|3b23 5r35 5r70 5r105 5r140
+13a26 B{5A12} 26|3b26 6r35 6r70 6r105 6r140
+X 26 chan.adb
+4a7 R{25|5A12} 8m7 9m7 10m7 11m7 12r14
+5f7 W1{long_float} 8r16 9r16 10r16 11r16
+5f42 X1{long_float} 8r26 9r26 10r26 11r26
+5f77 Y1{long_float} 8r36 9r36 10r36 11r36
+5f112 Z1{long_float} 8r46 9r46 10r46 11r46
+6f7 W2{long_float} 8r21 9r31 10r41 11r51
+6f42 X2{long_float} 8r31 9r21 10r51 11r41
+6f77 Y2{long_float} 8r41 9r51 10r21 11r31
+6f112 Z2{long_float} 8r51 9r41 10r31 11r21
+16a7 P{25|5A12} 22m7 23m7 24m7 38m19 43r14
+17f7 Rx{long_float} 20r42 20r47 33r23
+18f7 Ry{long_float} 20r52 20r57 33r41
+19f7 Rz{long_float} 20r62 20r67 33r59
+20f7 Ang{long_float} 25r10 28r45 28r58 32r28
+27a13 Dq{25|5A12} 32m13 33m13 33m31 33m49 34r28
+28f13 S{long_float} 33r28 33r46 33r64
+29a13 Q{25|5A12} 34m13 35r24 35r32 35r40 35r48 35r56 35r64 35r72 35r80 38r28
+30f13 N{long_float} 35m13 36r16 38r36
+37i20 K{integer} 38r22 38r31
+47a7 Conj{25|5A12} 53m10 55r26
+48a7 D{25|5A12} 55m7 56r12 60m13 60r23 63r18 63r26 63r34 63r42 63r50 63r58
+. 68r16 68r42 68r68
+49a7 V{54|13A9} 65r17 68m7 68m33 68m59 69r14
+50f7 W{long_float} 56m7 57r10 58m10 58r16 67r52
+50f10 S{long_float} 63m7 64r10 67r28 68r24 68r50 68r76
+50f13 Ang{long_float} 67m7 68r28 68r54 68r80
+52i11 K{integer} 53r16 53r27
+59i14 K{integer} 60r16 60r26
+73a7 A{54|11A9} 76m7 77m7 78m7 79m7 79m23 79m39 80r14
+74a7 R{54|13A9} 79r16 79r32 79r48
+X 33 plug.ads
+9K9*Plug 25|2w6 5r20 33|65e9
+10A9*Arm_Pose(long_float)<integer> 25|5r25
+X 54 table.ads
+8K9*Table 25|3w6 9r37 11r46 12r44 26|15r37 46r44 49r11 49r25 72r46 73r11
+. 73r24 74r20 54|52e10
+11A9*Vec(long_float)<integer> 25|9r43 11r52 26|15r43 72r52 73r17
+13A9*Vec3(long_float)<integer> 25|12r50 26|46r50 49r17 74r26
+17a4*Zero_Vec{11A9} 26|73r30
+18a4*Zero3{13A9} 26|49r31
+

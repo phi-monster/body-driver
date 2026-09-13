@@ -113,42 +113,31 @@
 
 ---
 
-## 8. 文法(喂给模型的形式;来源 Grammar Prompting, NeurIPS 2023)
+## 8. 文法(已实现;这就是喂给脑的原文)
 
 > 论文结论:**DSL 模型预训练时不可能见全,给【BNF 文法】比给散文说明有效。**
+> 下面这段由 `Lang.Grammar` 生成,每一轮原样进提示词 —— **文档和运行时是同一份,不会漂。**
 
 ```bnf
-<turn>        ::= <say> <see> <look> <constraints> <grip> <timing> <point>
-
-<constraints> ::= <constraint>*                    ; 一次可说多条,身体一起解
-<constraint>  ::= <subject> <relation> <amount> [<priority>] [<keep>]
-<subject>     ::= <item-number>                    ; 我身上的块,或世界上的东西
-<relation>    ::= "at" <item> | "above" <item> | "below" <item>
-                | "left" <item> | "right" <item>
-                | "front" <item> | "back" <item>
-                | "down" <item> | "up" <item>
-                | "face" <item>                    ; 转到指着它
-                | "stay"                           ; 别动
-                | "keep_clear" <item>              ; 缺:别靠太近
-                | "within" <item>                  ; 缺:别超过
-                | "press" <item> <effort>          ; 缺:垂直这个面用多大劲
-<effort>      ::= "light" | "firm" | "hard"        ; 占我推得动的最大量的几成
-<amount>      ::= "small" | "medium" | "large"
-<priority>    ::= "must" | "prefer"                ; 缺:must 不许被牺牲
-<keep>        ::= "keep"                           ; 缺:整段保持
-
-<timing>      ::= "until" <event> ["steps" <n>]
-<event>       ::= "steps" | "contact" | "resist" | "settle" | "free"
-
-<grip>        ::= "close" <item> | "open" | "none"  ; 缺:第几根指头合
-
-<see>         ::= "target" | "not_here" | "unclear"
-<look>        ::= 0 | <camera-number>
-<point>       ::= 0 | <fine-cell>                  ; 我说的东西在这一格
-<say>         ::= 一句人话
+<program> ::= <line>+
+<line>    ::= hold <mine> <rel> <thing>
+            | reach <mine> <rel> <thing> [<step>] [until <event>]
+            | never <mine> <rel> <thing>
+            | close <mine> [on <thing>] [until <event>]
+            | open  <mine>
+            | look  <eye>
+            | say   <one sentence in your own words>
+            | onfail retry | onfail stop
+            | done
+<rel>     ::= at above below left right nearer farther onto off facing
+<step>    ::= small | medium | large
+<event>   ::= steps <n> | touch | resist | settle | free
+<mine> <thing> ::= <number on the picture> | <a name I must find myself>
+<eye>     ::= <number of one of my eyes>
 ```
 
----
+**语法上不存在的词**:关节号、坐标、米、牛顿、任何具体身体的名字。
+`move_joint 3 0.1` 这一行在自检里被断言为**编译不过** —— 不是不建议,是说不出口。
 
 ## 9. 三个身体,三句话
 
@@ -170,25 +159,37 @@
 
 ---
 
-## 10. 现在到哪儿了(诚实表)
+## 10. 现在到哪儿了(诚实表,2026-09-13 实测)
 
-| 能力 | 现状 |
+**已装上并有测试兜着(自检 44 条全过):**
+
+| 能力 | 证据 |
 |---|---|
-| 名词(编号 + 脑指) | ✅ |
-| 等式关系(挨着/上下左右/远近/朝面/对着/别动) | ✅ |
-| 到…为止(五个事件) | ✅ |
-| 步子三档 | ✅ |
-| 身体说"我量不到什么" | ✅(2026-09-12/13 加) |
-| 一次说几条 | ⚠️ 最多 4 条,五指不够 |
-| **不等式**(别靠太近 / 别超过) | ❌ |
-| **力**(每轴二选一) | ❌ |
-| **保持 / 同时** | ❌ |
-| **优先级** | ❌ |
-| **第几根指头合** | ❌(握合还是一路通道、一个标量跨度) |
+| 名词(编号 + 名字) | 名字认不出 ⇒ 编译错并列出能用的编号 |
+| 等式关系 at/above/below/left/right/nearer/farther | 执行器实现;`facing` 也已接回 |
+| 到…为止(五个事件) | steps/touch/resist/settle/free |
+| 步子三档 | small/medium/large |
+| **体检 = 类型检查,有否决权** | `bodyexam <身体文件>` 出判决书;GA 真档案判死 10 个量 |
+| **身体必须【证明】每一行才准用** | 探针同一幅度重复 3 次量散布;**证明过 = 一格推得动 + 重复≥2 + 散布<均值**,这个定义**只有一处**,体检和执行器共用(自检里断言两者永远给同一答案) |
+| **证明可以晚,不许没有** | 编译期没量过的块放行,执行器量完**当场补判**,判不过一步不走,原话退回给脑 |
+| **hold 不许被牺牲** | 真零空间投影(不是加大权重)。挤不下时:平权解把朝向冲到 5.500(要 1.000),零空间解保住 1.000000 |
+| **不等式 never** | 语法 + 编译 + 落到 avoid |
+| **失手怎么办 onfail** | 语法 + 编译 |
+| **一段程序多条动作,一轮跑一节** | 程序编译过存在身体里,跑完才回去问脑 —— 这是"少问几百次"的机关 |
+| 认不得的关系不许静默 no-op | 执行器遇到没实现的关系当场出声中止 |
 
-> **在这五项补齐之前,"所有机体所有任务"是假的。** 补齐之后能不能成立,是要被验证的判断,不是承诺。
+**还缺:**
 
----
+| 缺的 | 现状 |
+|---|---|
+| **力**(每轴二选一) | ❌ 这具身体的观测里没有力/电流,`press` 还没进语法 |
+| **onto / off**(朝面压下去 / 离开面) | ⚠️ 语法有、编译有,但身体拟不出"它站在哪个面上" ⇒ 一律编译错 |
+| **while(同时)** | ❌ 只有 hold(整段保持),没有"保持 A 的同时做 B 的一串" |
+| **一次几条** | ⚠️ 最多 4 条,五指不够 |
+| **名字→画面区域** | ❌ 还得靠编号;要一个"听名字找东西"的传感器 |
+| **第几根指头合** | ❌ 握合还是一路通道、一个标量跨度 |
+
+🔴 **拿今晚 GA 那具真身体跑,现在【一句话都编译不过】** —— 因为所有行的"重复次数"都是 0(那一炮的探针还是老的、只推一次)。这不是倒退,这是**否决权真的在生效**:下一炮开机会重复三次,证得出的行才会被放行。
 
 ## 11. 怎么验这门语言(不需要机器人)
 

@@ -1,0 +1,99 @@
+V "GNAT Lib v16"
+A -O2
+A -gnatA
+A -gnat2022
+A -gnata
+A -gnatwa
+A -g
+A -gnatyM200
+A -mmacosx-version-min=26.0.0
+A -mcpu=apple-m1
+A -mlittle-endian
+A -mabi=lp64
+A -fPIC
+P ZX
+
+RN
+RV NO_FLOATING_POINT
+RV NO_IMPLICIT_CONDITIONALS
+RV NO_DYNAMIC_SIZED_OBJECTS
+RV NO_IMPLEMENTATION_PRAGMAS
+RV NO_IMPLICIT_LOOPS
+
+U monitor%b		monitor.adb		7eb9e2b7 NE OO PK
+Z system.assertions%s	s-assert.adb		s-assert.ali
+
+U monitor%s		monitor.ads		6c1b2206 EE NE OO PK
+
+D ada.ads		20260610194523 76789da1 ada%s
+D a-assert.ads		20260610194523 ba465f5c ada.assertions%s
+D a-unccon.ads		20260610194523 0e9b276f ada.unchecked_conversion%s
+D monitor.ads		20260912223334 6c1b2206 monitor%s
+D monitor.adb		20260906203008 12a2c0b1 monitor%b
+D system.ads		20260610194523 8a611ac3 system%s
+D s-assert.ads		20260610194523 9c4520c7 system.assertions%s
+D s-exctab.ads		20260610194523 91bef6ef system.exception_table%s
+D s-stalib.ads		20260610194523 1c9580f6 system.standard_library%s
+G a e
+G c Z s b [step monitor 22 14 none]
+G c Z s s [settled monitor 27 13 none]
+G c Z s s [stalled monitor 30 13 none]
+G c Z s s [refusing monitor 31 13 none]
+G c Z s s [slipped monitor 32 13 none]
+G c Z s s [touching monitor 38 13 none]
+G c Z s s [fired monitor 39 13 none]
+G c Z s s [floorsIP monitor 7 9 none]
+G c Z s s [watchIP monitor 14 9 none]
+X 4 monitor.ads
+4K9*Monitor 47l5 47e12 5|2b14 23l5 23t12
+5F12*Bounded{long_float} 22r81 32r39 40r37 5|3r81
+6F12*Floor{long_float} 8r15 9r17 10r17 11r18 22r50 23r32 32r56 40r62 5|3r50
+. 4r32
+7R9*Floors 12e14 23r43 5|4r43
+8f7*Track{6F12} 5|12r37
+9f7*Picture{6F12} 25r36 5|7r25
+10f7*Reading{6F12}
+11f7*Delivery{6F12} 26r36 5|17r25
+13I12*Count{natural} 15r15 16r21 17r15 18r17 24r59 25r89 26r94 5|6r44 8r47
+. 15r59 18r51
+14R9*Watch 19e14 22r31 27r26 30r26 31r27 39r40 5|3r31
+15i7*Quiet{13I12} 25r51 25r78 25r108 27r54 5|8m12 8r36 10m12
+16i7*No_Progress{13I12} 30r54 5|13m12 15m12 15r42
+17i7*Steps{13I12} 24r21 24r48 42r28 5|6m9 6r33
+18i7*Refused{13I12} 26r52 26r81 26r113 31r55 5|18m12 18r38 20m12
+20E9*Until_Kind 20e71 39r24
+20n24*U_Steps{20E9} 42r15
+20n33*U_Contact{20E9} 43r15
+20n44*U_Resist{20E9} 44r15
+20n54*U_Slip{20E9} 45r15
+20n62*U_Settle{20E9} 46r15
+22U14*Step 22=20 22>38 22>57 22>69 23>20 23>39 5|3b14
+22r20 W{14R9} 24r19 24r42 25r49 25r72 25r106 26r50 26r75 26r111 5|3b20 6m7
+. 6r31 8m10 8r34 10m10 13m10 15m10 15r40 18m10 18r36 20m10
+22f38 Pic_Delta{6F12} 25r21 5|3b38 7r10
+22f57 Err_Before{5F12} 5|3b57 12r10
+22f69 Err_After{5F12} 5|3b69 12r23
+23f20 Delivered{6F12} 26r21 5|4b20 17r10
+23r39 F{7R9} 25r34 26r34 5|4b39 7r23 12r35 17r23
+27V13*Settled{boolean} 27b13 27>22 46s27
+27r22 W{14R9} 27r52
+30V13*Stalled{boolean} 30b13 30>22
+30r22 W{14R9} 30r52
+31V13*Refusing{boolean} 31b13 31>23 44s43
+31r23 W{14R9} 31r53
+32V13*Slipped{boolean} 32b13 32>22 32>31 32>48 45s25
+32f22 Reading{5F12} 32r82
+32f31 Empty{5F12} 32r92
+32f48 Noise{6F12} 32r101
+38V13*Touching{boolean} 38b13 38>23 43s28
+38b23 Moved_Other{boolean} 38r65
+39V13*Fired{boolean} 39b13 39>20 39>36 39>47 39>67 40>20 40>29 40>46 40>69
+39e20 U{20E9} 41r12
+39r36 W{14R9} 42r26 44r53 46r36
+39i47 Step_Cap{natural} 42r37
+39b67 Blocked{boolean} 44r27
+40f20 Reading{5F12} 45r34
+40f29 Empty{5F12} 45r43
+40f46 Reading_Noise{6F12} 45r50
+40b69 Moved_Other{boolean} 43r38
+

@@ -17,6 +17,8 @@ with Plug;
 with Chan;
 with Lang;
 with Plan;
+with Selfmap;
+with Learned;
 with Exam;
 with Ada.Containers;
 with Interfaces; use type Interfaces.Unsigned_8;
@@ -533,6 +535,61 @@ begin
       end;
       Check (abs (Row_Scale (S.E, [0 => 2.0, others => 0.0], 0) - 2.0) < 1.0e-9,
              "行归一:最响那个通道一格推动 = |B|×幅度 的最大值");
+   end;
+   --  ── "证明过了"只有一个定义:体检和执行器必须给出同一个答案 ──
+   declare
+      use Table;
+      use type Exam.Verdict;
+      E : Effect;
+      Notch : constant Vec := [others => 1.0];
+      M : Selfmap.Body_Map;
+      Ts : Learned.Effect_Vectors.Vector;
+      Se : Learned.Stored_Effect;
+      procedure Both (What : String; Want : Boolean) is
+         R : constant Exam.Report := Exam.Judge (M, Ts);
+         Ex : constant Boolean := (R.Things (0).Rows (Exam.Sideways).V = Exam.Usable);
+         Tb : constant Boolean := Row_Proven (Ts (0).E, Notch, 0);
+      begin
+         Check (Ex = Tb, "证明的定义唯一:" & What & " —— 体检说 " & (if Ex then "能用" else "不能用")
+                & ",执行器说 " & (if Tb then "能用" else "不能用"));
+         Check (Tb = Want, "证明的判据:" & What & " ⇒ " & (if Want then "能用" else "不能用"));
+      end Both;
+   begin
+      M.Arms := 1; M.N_Cams := 1; M.Per_Arm := 2; M.Channels := 2;
+      M.Amp.Append (1.0); M.Amp.Append (1.0);
+      M.Delivered.Append (1.0); M.Delivered.Append (1.0);
+      M.Seen.Append (True); M.Seen.Append (True);
+      M.Cam_Frac.Append (0.5);
+      M.Cam_On_Arm.Append (-1);
+      M.Pic_Floor.Append (3);
+      Reset (E, 2, 1.0);
+      Set_Col (E, 0, [1.0, 0.0, 0.0, 0.0, 0.0]);
+      Se.E := E; Se.Arm := 0; Se.Cam := 0;
+      Ts.Append (Se);
+      Both ("量到了但一次都没重复", False);
+      Set_Spread (Ts (0).E, 0, 3, [0.05, 0.0, 0.0, 0.0, 0.0]);
+      declare
+         X : Learned.Stored_Effect := Ts (0);
+      begin
+         Set_Spread (X.E, 0, 3, [0.05, 0.0, 0.0, 0.0, 0.0]);
+         Ts.Replace_Element (0, X);
+      end;
+      Both ("重复 3 次,散布只有均值的 5%", True);
+      declare
+         X : Learned.Stored_Effect := Ts (0);
+      begin
+         Set_Spread (X.E, 0, 3, [1.4, 0.0, 0.0, 0.0, 0.0]);
+         Ts.Replace_Element (0, X);
+      end;
+      Both ("重复 3 次,散布是均值的 1.4 倍(自己跟自己打架)", False);
+      declare
+         X : Learned.Stored_Effect := Ts (0);
+      begin
+         Set_Col (X.E, 0, [0.0, 0.0, 0.0, 0.0, 0.0]);
+         Set_Spread (X.E, 0, 3, [0.0, 0.0, 0.0, 0.0, 0.0]);
+         Ts.Replace_Element (0, X);
+      end;
+      Both ("推遍所有通道一格都推不动", False);
    end;
    Put_Line ((if Fails = 0 then "🟢 自检全过" else "🔴 自检失败" & Natural'Image (Fails) & " 条"));
    if Fails > 0 then

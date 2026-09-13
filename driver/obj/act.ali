@@ -1,0 +1,2879 @@
+V "GNAT Lib v16"
+A -O2
+A -gnatA
+A -gnat2022
+A -gnata
+A -gnatwa
+A -g
+A -gnatyM200
+A -mmacosx-version-min=26.0.0
+A -mcpu=apple-m1
+A -mlittle-endian
+A -mabi=lp64
+A -fPIC
+P SS ZX
+
+RN
+RV NO_ACCESS_SUBPROGRAMS
+RV NO_ALLOCATORS
+RV NO_DIRECT_BOOLEAN_OPERATORS
+RV NO_DISPATCH
+RV NO_DISPATCHING_CALLS
+RV NO_ENUMERATION_MAPS
+RV NO_EXCEPTION_HANDLERS
+RV NO_EXCEPTION_PROPAGATION
+RV NO_EXCEPTIONS
+RV NO_FLOATING_POINT
+RV NO_IO
+RV NO_IMPLICIT_CONDITIONALS
+RV NO_LOCAL_ALLOCATORS
+RV NO_NESTED_FINALIZATION
+RV NO_SECONDARY_STACK
+RV NO_STANDARD_STORAGE_POOLS
+RV NO_STREAMS
+RV NO_UNCHECKED_ACCESS
+RV NO_DEFAULT_INITIALIZATION
+RV NO_DYNAMIC_SIZED_OBJECTS
+RV NO_IMPLEMENTATION_ASPECT_SPECIFICATIONS
+RV NO_IMPLEMENTATION_ATTRIBUTES
+RV NO_IMPLEMENTATION_PRAGMAS
+RV NO_IMPLICIT_ALIASING
+RV NO_IMPLICIT_LOOPS
+RV NO_ELABORATION_CODE
+RV NO_OBSOLESCENT_FEATURES
+
+U act%b			act.adb			88f70f03 OO PF PK
+W ada%s			ada.ads			ada.ali
+W ada.containers%s	a-contai.ads		a-contai.ali
+Z ada.containers.generic_array_sort%s
+Z ada.containers.helpers%s  a-conhel.adb	a-conhel.ali
+Z ada.exceptions%s	a-except.adb		a-except.ali
+Z ada.finalization%s	a-finali.ads		a-finali.ali
+Z ada.iterator_interfaces%s
+W ada.numerics%s	a-numeri.ads		a-numeri.ali
+W ada.numerics.long_elementary_functions%s  a-nlelfu.ads  a-nlelfu.ali
+Z ada.streams%s		a-stream.adb		a-stream.ali
+W ada.strings%s		a-string.ads		a-string.ali
+Z ada.strings.text_buffers%s  a-sttebu.adb	a-sttebu.ali
+Z ada.tags%s		a-tags.adb		a-tags.ali
+W ada.text_io%s		a-textio.adb		a-textio.ali
+Z ada.unchecked_deallocation%s
+W backup%s		backup.adb		backup.ali
+W codec%s		codec.adb		codec.ali
+W draw%s		draw.adb		draw.ali
+W flow%s		flow.adb		flow.ali
+W monitor%s		monitor.adb		monitor.ali
+Z system%s		system.ads		system.ali
+Z system.assertions%s	s-assert.adb		s-assert.ali
+Z system.fat_lflt%s	s-fatlfl.ads		s-fatlfl.ali
+Z system.finalization_primitives%s  s-finpri.adb  s-finpri.ali
+Z system.img_int%s	s-imgint.ads		s-imgint.ali
+Z system.img_lflt%s	s-imglfl.ads		s-imglfl.ali
+Z system.pool_global%s	s-pooglo.adb		s-pooglo.ali
+Z system.put_images%s	s-putima.adb		s-putima.ali
+Z system.return_stack%s	s-retsta.ads		s-retsta.ali
+Z system.secondary_stack%s  s-secsta.adb	s-secsta.ali
+Z system.soft_links%s	s-soflin.adb		s-soflin.ali
+Z system.standard_library%s  s-stalib.adb	s-stalib.ali
+Z system.storage_elements%s  s-stoele.ads	s-stoele.ali
+Z system.storage_pools%s  s-stopoo.adb		s-stopoo.ali
+Z system.storage_pools.subpools%s  s-stposu.adb	s-stposu.ali
+Z system.stream_attributes%s  s-stratt.adb	s-stratt.ali
+Z system.strings.stream_ops%s  s-ststop.adb	s-ststop.ali
+Z system.wch_stw%s	s-wchstw.adb		s-wchstw.ali
+
+U act%s			act.ads			ddab0e8d EE OO PF PK
+W ada%s			ada.ads			ada.ali
+W ada.containers%s	a-contai.ads		a-contai.ali
+Z ada.containers.generic_array_sort%s
+Z ada.containers.helpers%s  a-conhel.adb	a-conhel.ali
+W ada.containers.vectors%s
+Z ada.exceptions%s	a-except.adb		a-except.ali
+Z ada.finalization%s	a-finali.ads		a-finali.ali
+Z ada.iterator_interfaces%s
+Z ada.streams%s		a-stream.adb		a-stream.ali
+W ada.strings%s		a-string.ads		a-string.ali
+Z ada.strings.text_buffers%s  a-sttebu.adb	a-sttebu.ali
+W ada.strings.unbounded%s  a-strunb.adb		a-strunb.ali
+Z ada.tags%s		a-tags.adb		a-tags.ali
+Z ada.unchecked_deallocation%s
+W brain%s		brain.adb		brain.ali
+W bytes%s		bytes.adb		bytes.ali
+W chan%s		chan.adb		chan.ali
+W memory%s		memory.adb		memory.ali
+W picture%s		picture.adb		picture.ali
+W plug%s		plug.adb		plug.ali
+W schema%s		schema.adb		schema.ali
+W selfmap%s		selfmap.adb		selfmap.ali
+Z system%s		system.ads		system.ali
+Z system.assertions%s	s-assert.adb		s-assert.ali
+Z system.finalization_primitives%s  s-finpri.adb  s-finpri.ali
+Z system.img_lflt%s	s-imglfl.ads		s-imglfl.ali
+Z system.put_images%s	s-putima.adb		s-putima.ali
+Z system.return_stack%s	s-retsta.ads		s-retsta.ali
+Z system.secondary_stack%s  s-secsta.adb	s-secsta.ali
+Z system.soft_links%s	s-soflin.adb		s-soflin.ali
+Z system.standard_library%s  s-stalib.adb	s-stalib.ali
+Z system.storage_elements%s  s-stoele.ads	s-stoele.ali
+Z system.storage_pools%s  s-stopoo.adb		s-stopoo.ali
+Z system.storage_pools.subpools%s  s-stposu.adb	s-stposu.ali
+Z system.stream_attributes%s  s-stratt.adb	s-stratt.ali
+Z system.wch_stw%s	s-wchstw.adb		s-wchstw.ali
+W table%s		table.adb		table.ali
+W world%s		world.adb		world.ali
+W zone%s		zone.adb		zone.ali
+
+D act.ads		20260912223334 a537acb2 act%s
+D act.adb		20260912223423 1f538af1 act%b
+D ada.ads		20260610194523 76789da1 ada%s
+D a-assert.ads		20260610194523 ba465f5c ada.assertions%s
+D a-charac.ads		20260610194523 2d3ec45b ada.characters%s
+D a-chlat1.ads		20260610194523 e0d72e76 ada.characters.latin_1%s
+D a-contai.ads		20260610194523 61e5e089 ada.containers%s
+D a-cgarso.ads		20260610194523 9129bfa8 ada.containers.generic_array_sort%s
+D a-conhel.ads		20260610194523 46fe1ce3 ada.containers.helpers%s
+D a-conhel.adb		20260610194523 854d323e ada.containers.helpers%b
+D a-coinve.ads		20260610194523 2d0a9a0e ada.containers.indefinite_vectors%s
+D a-convec.ads		20260610194523 cb0f314a ada.containers.vectors%s
+D a-convec.adb		20260610194523 b2ed0168 ada.containers.vectors%b
+D a-except.ads		20260610194523 8699d7ff ada.exceptions%s
+D a-finali.ads		20260610194523 099c16e4 ada.finalization%s
+D a-ioexce.ads		20260610194523 40018c65 ada.io_exceptions%s
+D a-iteint.ads		20260610194523 49a8bee2 ada.iterator_interfaces%s
+D a-numeri.ads		20260610194523 84bea7a3 ada.numerics%s
+D a-ngelfu.ads		20260610194523 324808ac ada.numerics.generic_elementary_functions%s
+D a-nlelfu.ads		20260610194523 7620113d ada.numerics.long_elementary_functions%s
+D a-stream.ads		20260610194523 cb01a8f8 ada.streams%s
+D a-string.ads		20260610194523 90ac6797 ada.strings%s
+D a-strmap.ads		20260610194523 f7e6ca10 ada.strings.maps%s
+D a-strsea.ads		20260610194523 18c3c634 ada.strings.search%s
+D a-sttebu.ads		20260610194523 f1ad67a2 ada.strings.text_buffers%s
+D a-strunb.ads		20260610194523 8d6ccba7 ada.strings.unbounded%s
+D a-stuten.ads		20260610194523 c6ced0ae ada.strings.utf_encoding%s
+D a-tags.ads		20260610194523 2dbf449c ada.tags%s
+D a-textio.ads		20260610194523 34ef47de ada.text_io%s
+D a-unccon.ads		20260610194523 0e9b276f ada.unchecked_conversion%s
+D a-uncdea.ads		20260610194523 c3a8ac65 ada.unchecked_deallocation%s
+D backup.ads		20260906203008 3a42c177 backup%s
+D brain.ads		20260912223334 ec4aa44d brain%s
+D bytes.ads		20260906203008 86b1403c bytes%s
+D chan.ads		20260906213131 fcae972f chan%s
+D codec.ads		20260906203008 34417e50 codec%s
+D draw.ads		20260906203008 ee89dd85 draw%s
+D flow.ads		20260906203008 787398a4 flow%s
+D gnat.ads		20260610194523 b5988c27 gnat%s
+D g-socket.ads		20260610194523 a4cab028 gnat.sockets%s
+D interfac.ads		20260610194523 9111f9c1 interfaces%s
+D i-c.ads		20260610194523 dbdd3be7 interfaces.c%s
+D i-cstrea.ads		20260610194523 ffd01b9d interfaces.c_streams%s
+D layout.ads		20260906203008 c005157d layout%s
+D memory.ads		20260906203008 784566c6 memory%s
+D monitor.ads		20260912223334 6c1b2206 monitor%s
+D msgpack.ads		20260906203008 0af3a83c msgpack%s
+D picture.ads		20260912223334 103f308c picture%s
+D plug.ads		20260907080552 5ecb2156 plug%s
+D schema.ads		20260907084801 c19c9abf schema%s
+D selfmap.ads		20260907102348 3ecf7596 selfmap%s
+D system.ads		20260610194523 8a611ac3 system%s
+D s-assert.ads		20260610194523 9c4520c7 system.assertions%s
+D s-atocou.ads		20260610194523 dc18efc3 system.atomic_counters%s
+D s-atocou.adb		20260610194523 6fe685de system.atomic_counters%b
+D s-atopri.ads		20260610194523 e19c1d89 system.atomic_primitives%s
+D s-crtl.ads		20260610194523 823b6536 system.crtl%s
+D s-exctab.ads		20260610194523 91bef6ef system.exception_table%s
+D s-fatgen.ads		20260610194523 d28c6cfe system.fat_gen%s
+D s-fatlfl.ads		20260610194523 378cba9f system.fat_lflt%s
+D s-ficobl.ads		20260610194523 dc5161d4 system.file_control_block%s
+D s-finpri.ads		20260610194523 5970d55a system.finalization_primitives%s
+D s-finroo.ads		20260610194523 0a7c3ed4 system.finalization_root%s
+D s-imagei.ads		20260610194523 11a376a2 system.image_i%s
+D s-imager.ads		20260610194523 45c7157d system.image_r%s
+D s-imageu.ads		20260610194523 95851461 system.image_u%s
+D s-imgint.ads		20260610194523 86836590 system.img_int%s
+D s-imglfl.ads		20260610194523 941be202 system.img_lflt%s
+D s-imgllu.ads		20260610194523 047fb1fb system.img_llu%s
+D s-memory.ads		20260610194523 18949c1a system.memory%s
+D s-oscons.ads		20260626180535 42ad9981 system.os_constants%s
+D s-oslock.ads		20260610194523 bcc789d2 system.os_locks%s
+D s-parame.ads		20260610194523 a1aeab5c system.parameters%s
+D s-pooglo.ads		20260610194523 91708d21 system.pool_global%s
+D s-powlfl.ads		20260610194523 ac0852c8 system.powten_lflt%s
+D s-putima.ads		20260610194523 1b989439 system.put_images%s
+D s-retsta.ads		20260610194523 0f6b06cb system.return_stack%s
+D s-secsta.ads		20260610194523 578279f5 system.secondary_stack%s
+D s-soflin.ads		20260610194523 5d88fdea system.soft_links%s
+D s-stache.ads		20260610194523 0b81c1fe system.stack_checking%s
+D s-stalib.ads		20260610194523 1c9580f6 system.standard_library%s
+D s-stalib.adb		20260610194523 eb464a47 system.standard_library%b
+D s-stoele.ads		20260610194523 ccded4e8 system.storage_elements%s
+D s-stopoo.ads		20260610194523 45459446 system.storage_pools%s
+D s-stposu.ads		20260610194523 f8e797ef system.storage_pools.subpools%s
+D s-stratt.ads		20260610194523 80b8dafb system.stream_attributes%s
+D s-string.ads		20260610194523 582aac7d system.strings%s
+D s-ststop.ads		20260610194523 c569db7c system.strings.stream_ops%s
+D s-traent.ads		20260610194523 c81cbf8c system.traceback_entries%s
+D s-unstyp.ads		20260610194523 fa2a7f59 system.unsigned_types%s
+D s-wchcon.ads		20260610194523 d9032363 system.wch_con%s
+D s-wchstw.ads		20260610194523 2d112c01 system.wch_stw%s
+D table.ads		20260908002242 51b66f9a table%s
+D websocket.ads		20260906203008 e2cfe5a2 websocket%s
+D world.ads		20260912223334 de6e44ce world%s
+D zone.ads		20260912223334 ee9098ed zone%s
+G a e
+G c Z s s [itemIP act 19 9 none]
+G c Z s s [has_element act__item_vectors 115 13 33_4]
+G c Z s s [empty act__item_vectors 125 13 33_4]
+G c Z s s [Oeq act__item_vectors 127 24 33_4]
+G c Z s s [to_vector act__item_vectors 136 13 33_4]
+G c Z s s [to_vector act__item_vectors 139 13 33_4]
+G c Z s s [Oconcat act__item_vectors 145 13 33_4]
+G c Z s s [Oconcat act__item_vectors 149 13 33_4]
+G c Z s s [Oconcat act__item_vectors 153 13 33_4]
+G c Z s s [Oconcat act__item_vectors 157 13 33_4]
+G c Z s s [capacity act__item_vectors 161 13 33_4]
+G c Z s s [reserve_capacity act__item_vectors 164 14 33_4]
+G c Z s s [length act__item_vectors 175 13 33_4]
+G c Z s s [set_length act__item_vectors 178 14 33_4]
+G c Z s s [is_empty act__item_vectors 187 13 33_4]
+G c Z s s [clear act__item_vectors 190 14 33_4]
+G c Z s s [to_cursor act__item_vectors 194 13 33_4]
+G c Z s s [to_index act__item_vectors 201 13 33_4]
+G c Z s s [element act__item_vectors 206 13 33_4]
+G c Z s s [element act__item_vectors 213 13 33_4]
+G c Z s s [replace_element act__item_vectors 217 14 33_4]
+G c Z s s [replace_element act__item_vectors 228 14 33_4]
+G c Z s s [query_element act__item_vectors 239 14 33_4]
+G c Z s s [query_element act__item_vectors 250 14 33_4]
+G c Z s s [update_element act__item_vectors 259 14 33_4]
+G c Z s s [update_element act__item_vectors 276 14 33_4]
+G c Z s s [constant_reference act__item_vectors 303 13 33_4]
+G c Z s s [reference act__item_vectors 308 13 33_4]
+G c Z s s [constant_reference act__item_vectors 313 13 33_4]
+G c Z s s [reference act__item_vectors 318 13 33_4]
+G c Z s s [assign act__item_vectors 323 14 33_4]
+G c Z s s [copy act__item_vectors 325 13 33_4]
+G c Z s s [move act__item_vectors 327 14 33_4]
+G c Z s s [new_vector act__item_vectors 333 13 33_4]
+G c Z s s [insert_vector act__item_vectors 337 14 33_4]
+G c Z s s [insert_vector act__item_vectors 361 14 33_4]
+G c Z s s [insert_vector act__item_vectors 378 14 33_4]
+G c Z s s [insert act__item_vectors 396 14 33_4]
+G c Z s s [insert act__item_vectors 404 14 33_4]
+G c Z s s [insert act__item_vectors 412 14 33_4]
+G c Z s s [insert act__item_vectors 421 14 33_4]
+G c Z s s [insert act__item_vectors 438 14 33_4]
+G c Z s s [prepend_vector act__item_vectors 449 14 33_4]
+G c Z s s [prepend act__item_vectors 459 14 33_4]
+G c Z s s [append_vector act__item_vectors 466 14 33_4]
+G c Z s s [append act__item_vectors 476 14 33_4]
+G c Z s s [append act__item_vectors 483 14 33_4]
+G c Z s s [insert_space act__item_vectors 486 14 33_4]
+G c Z s s [insert_space act__item_vectors 503 14 33_4]
+G c Z s s [delete act__item_vectors 514 14 33_4]
+G c Z s s [delete act__item_vectors 524 14 33_4]
+G c Z s s [delete_first act__item_vectors 533 14 33_4]
+G c Z s s [delete_last act__item_vectors 538 14 33_4]
+G c Z s s [reverse_elements act__item_vectors 546 14 33_4]
+G c Z s s [swap act__item_vectors 549 14 33_4]
+G c Z s s [swap act__item_vectors 554 14 33_4]
+G c Z s s [first_index act__item_vectors 560 13 33_4]
+G c Z s s [first act__item_vectors 563 13 33_4]
+G c Z s s [first_element act__item_vectors 567 13 33_4]
+G c Z s s [last_index act__item_vectors 570 13 33_4]
+G c Z s s [last act__item_vectors 574 13 33_4]
+G c Z s s [last_element act__item_vectors 578 13 33_4]
+G c Z s s [next act__item_vectors 581 13 33_4]
+G c Z s s [next act__item_vectors 587 14 33_4]
+G c Z s s [previous act__item_vectors 590 13 33_4]
+G c Z s s [previous act__item_vectors 596 14 33_4]
+G c Z s s [find_index act__item_vectors 599 13 33_4]
+G c Z s s [find act__item_vectors 609 13 33_4]
+G c Z s s [reverse_find_index act__item_vectors 623 13 33_4]
+G c Z s s [reverse_find act__item_vectors 635 13 33_4]
+G c Z s s [contains act__item_vectors 649 13 33_4]
+G c Z s s [iterate act__item_vectors 654 14 33_4]
+G c Z s s [reverse_iterate act__item_vectors 662 14 33_4]
+G c Z s s [iterate act__item_vectors 669 13 33_4]
+G c Z s s [iterate act__item_vectors 672 13 33_4]
+G c Z s s [adjust act__item_vectors__implementation 90 28 726_4_33_4]
+G c Z s s [finalize act__item_vectors__implementation 93 28 726_4_33_4]
+G c Z s s [zero_counts act__item_vectors__implementation 96 17 726_4_33_4]
+G c Z s s [busy act__item_vectors__implementation 100 17 726_4_33_4]
+G c Z s s [unbusy act__item_vectors__implementation 104 17 726_4_33_4]
+G c Z s s [lock act__item_vectors__implementation 108 17 726_4_33_4]
+G c Z s s [unlock act__item_vectors__implementation 112 17 726_4_33_4]
+G c Z s s [tc_check act__item_vectors__implementation 116 17 726_4_33_4]
+G c Z s s [te_check act__item_vectors__implementation 120 17 726_4_33_4]
+G c Z s s [is_busy act__item_vectors__implementation 136 16 726_4_33_4]
+G c Z s s [is_locked act__item_vectors__implementation 140 16 726_4_33_4]
+G c Z s s [initialize act__item_vectors__implementation 161 28 726_4_33_4]
+G c Z s s [finalize act__item_vectors__implementation 162 28 726_4_33_4]
+G c Z s s [initialize act__item_vectors__implementation 167 28 726_4_33_4]
+G c Z s s [finalize act__item_vectors__implementation 168 28 726_4_33_4]
+G c Z s s [reference_control_typeDA act__item_vectors__implementation 84 12 726_4_33_4]
+G c Z s s [reference_control_typeDF act__item_vectors__implementation 84 12 726_4_33_4]
+G c Z s s [reference_control_typeIP act__item_vectors__implementation 84 12 726_4_33_4]
+G c Z s s [with_busyDF act__item_vectors__implementation 158 12 726_4_33_4]
+G c Z s s [with_busyIP act__item_vectors__implementation 158 12 726_4_33_4]
+G c Z s s [with_lockDF act__item_vectors__implementation 164 12 726_4_33_4]
+G c Z s s [with_lockIP act__item_vectors__implementation 164 12 726_4_33_4]
+G c Z s s [put_image act__item_vectors 747 14 33_4]
+G c Z s s [adjust act__item_vectors 750 25 33_4]
+G c Z s s [finalize act__item_vectors 751 25 33_4]
+G c Z s s [write act__item_vectors 753 14 33_4]
+G c Z s s [read act__item_vectors 759 14 33_4]
+G c Z s s [read act__item_vectors 773 14 33_4]
+G c Z s s [write act__item_vectors 779 14 33_4]
+G c Z s s [write act__item_vectors 798 14 33_4]
+G c Z s s [read act__item_vectors 804 14 33_4]
+G c Z s s [write act__item_vectors 820 14 33_4]
+G c Z s s [read act__item_vectors 826 14 33_4]
+G c Z s s [pseudo_reference act__item_vectors 840 13 33_4]
+G c Z s s [get_element_access act__item_vectors 849 13 33_4]
+G c Z s s [cursorIP act__item_vectors 768 9 33_4]
+G c Z s s [vectorDA act__item_vectors 741 9 33_4]
+G c Z s s [vectorDF act__item_vectors 741 9 33_4]
+G c Z s s [vectorIP act__item_vectors 741 9 33_4]
+G c Z s s [finalize act__item_vectors 865 25 33_4]
+G c Z s s [first act__item_vectors 867 24 33_4]
+G c Z s s [last act__item_vectors 868 24 33_4]
+G c Z s s [next act__item_vectors 870 24 33_4]
+G c Z s s [previous act__item_vectors 874 24 33_4]
+G c Z s s [constant_reference_typeDI act__item_vectors 788 9 33_4]
+G c Z s s [constant_reference_typeDA act__item_vectors 788 9 33_4]
+G c Z s s [constant_reference_typeDF act__item_vectors 788 9 33_4]
+G c Z s s [constant_reference_typeIP act__item_vectors 788 9 33_4]
+G c Z s s [reference_typeDI act__item_vectors 810 9 33_4]
+G c Z s s [reference_typeDA act__item_vectors 810 9 33_4]
+G c Z s s [reference_typeDF act__item_vectors 810 9 33_4]
+G c Z s s [reference_typeIP act__item_vectors 810 9 33_4]
+G c Z s s [elements_arrayIP act__item_vectors 729 9 33_4]
+G c Z s s [elements_typeIP act__item_vectors 732 9 33_4]
+G c Z s s [iteratorDF act__item_vectors 857 9 33_4]
+G c Z s s [iteratorIP act__item_vectors 857 9 33_4]
+G c Z s s [free act__item_vectors 44 14 33_4]
+G c Z s s [append_slow_path act__item_vectors 47 14 33_4]
+G c Z s s [stored_effectIP act 36 9 none]
+G c Z s s [has_element act__effect_vectors 115 13 48_4]
+G c Z s s [empty act__effect_vectors 125 13 48_4]
+G c Z s s [Oeq act__effect_vectors 127 24 48_4]
+G c Z s s [to_vector act__effect_vectors 136 13 48_4]
+G c Z s s [to_vector act__effect_vectors 139 13 48_4]
+G c Z s s [Oconcat act__effect_vectors 145 13 48_4]
+G c Z s s [Oconcat act__effect_vectors 149 13 48_4]
+G c Z s s [Oconcat act__effect_vectors 153 13 48_4]
+G c Z s s [Oconcat act__effect_vectors 157 13 48_4]
+G c Z s s [capacity act__effect_vectors 161 13 48_4]
+G c Z s s [reserve_capacity act__effect_vectors 164 14 48_4]
+G c Z s s [length act__effect_vectors 175 13 48_4]
+G c Z s s [set_length act__effect_vectors 178 14 48_4]
+G c Z s s [is_empty act__effect_vectors 187 13 48_4]
+G c Z s s [clear act__effect_vectors 190 14 48_4]
+G c Z s s [to_cursor act__effect_vectors 194 13 48_4]
+G c Z s s [to_index act__effect_vectors 201 13 48_4]
+G c Z s s [element act__effect_vectors 206 13 48_4]
+G c Z s s [element act__effect_vectors 213 13 48_4]
+G c Z s s [replace_element act__effect_vectors 217 14 48_4]
+G c Z s s [replace_element act__effect_vectors 228 14 48_4]
+G c Z s s [query_element act__effect_vectors 239 14 48_4]
+G c Z s s [query_element act__effect_vectors 250 14 48_4]
+G c Z s s [update_element act__effect_vectors 259 14 48_4]
+G c Z s s [update_element act__effect_vectors 276 14 48_4]
+G c Z s s [constant_reference act__effect_vectors 303 13 48_4]
+G c Z s s [reference act__effect_vectors 308 13 48_4]
+G c Z s s [constant_reference act__effect_vectors 313 13 48_4]
+G c Z s s [reference act__effect_vectors 318 13 48_4]
+G c Z s s [assign act__effect_vectors 323 14 48_4]
+G c Z s s [copy act__effect_vectors 325 13 48_4]
+G c Z s s [move act__effect_vectors 327 14 48_4]
+G c Z s s [new_vector act__effect_vectors 333 13 48_4]
+G c Z s s [insert_vector act__effect_vectors 337 14 48_4]
+G c Z s s [insert_vector act__effect_vectors 361 14 48_4]
+G c Z s s [insert_vector act__effect_vectors 378 14 48_4]
+G c Z s s [insert act__effect_vectors 396 14 48_4]
+G c Z s s [insert act__effect_vectors 404 14 48_4]
+G c Z s s [insert act__effect_vectors 412 14 48_4]
+G c Z s s [insert act__effect_vectors 421 14 48_4]
+G c Z s s [insert act__effect_vectors 438 14 48_4]
+G c Z s s [prepend_vector act__effect_vectors 449 14 48_4]
+G c Z s s [prepend act__effect_vectors 459 14 48_4]
+G c Z s s [append_vector act__effect_vectors 466 14 48_4]
+G c Z s s [append act__effect_vectors 476 14 48_4]
+G c Z s s [append act__effect_vectors 483 14 48_4]
+G c Z s s [insert_space act__effect_vectors 486 14 48_4]
+G c Z s s [insert_space act__effect_vectors 503 14 48_4]
+G c Z s s [delete act__effect_vectors 514 14 48_4]
+G c Z s s [delete act__effect_vectors 524 14 48_4]
+G c Z s s [delete_first act__effect_vectors 533 14 48_4]
+G c Z s s [delete_last act__effect_vectors 538 14 48_4]
+G c Z s s [reverse_elements act__effect_vectors 546 14 48_4]
+G c Z s s [swap act__effect_vectors 549 14 48_4]
+G c Z s s [swap act__effect_vectors 554 14 48_4]
+G c Z s s [first_index act__effect_vectors 560 13 48_4]
+G c Z s s [first act__effect_vectors 563 13 48_4]
+G c Z s s [first_element act__effect_vectors 567 13 48_4]
+G c Z s s [last_index act__effect_vectors 570 13 48_4]
+G c Z s s [last act__effect_vectors 574 13 48_4]
+G c Z s s [last_element act__effect_vectors 578 13 48_4]
+G c Z s s [next act__effect_vectors 581 13 48_4]
+G c Z s s [next act__effect_vectors 587 14 48_4]
+G c Z s s [previous act__effect_vectors 590 13 48_4]
+G c Z s s [previous act__effect_vectors 596 14 48_4]
+G c Z s s [find_index act__effect_vectors 599 13 48_4]
+G c Z s s [find act__effect_vectors 609 13 48_4]
+G c Z s s [reverse_find_index act__effect_vectors 623 13 48_4]
+G c Z s s [reverse_find act__effect_vectors 635 13 48_4]
+G c Z s s [contains act__effect_vectors 649 13 48_4]
+G c Z s s [iterate act__effect_vectors 654 14 48_4]
+G c Z s s [reverse_iterate act__effect_vectors 662 14 48_4]
+G c Z s s [iterate act__effect_vectors 669 13 48_4]
+G c Z s s [iterate act__effect_vectors 672 13 48_4]
+G c Z s s [adjust act__effect_vectors__implementation 90 28 726_4_48_4]
+G c Z s s [finalize act__effect_vectors__implementation 93 28 726_4_48_4]
+G c Z s s [zero_counts act__effect_vectors__implementation 96 17 726_4_48_4]
+G c Z s s [busy act__effect_vectors__implementation 100 17 726_4_48_4]
+G c Z s s [unbusy act__effect_vectors__implementation 104 17 726_4_48_4]
+G c Z s s [lock act__effect_vectors__implementation 108 17 726_4_48_4]
+G c Z s s [unlock act__effect_vectors__implementation 112 17 726_4_48_4]
+G c Z s s [tc_check act__effect_vectors__implementation 116 17 726_4_48_4]
+G c Z s s [te_check act__effect_vectors__implementation 120 17 726_4_48_4]
+G c Z s s [is_busy act__effect_vectors__implementation 136 16 726_4_48_4]
+G c Z s s [is_locked act__effect_vectors__implementation 140 16 726_4_48_4]
+G c Z s s [initialize act__effect_vectors__implementation 161 28 726_4_48_4]
+G c Z s s [finalize act__effect_vectors__implementation 162 28 726_4_48_4]
+G c Z s s [initialize act__effect_vectors__implementation 167 28 726_4_48_4]
+G c Z s s [finalize act__effect_vectors__implementation 168 28 726_4_48_4]
+G c Z s s [reference_control_typeDA act__effect_vectors__implementation 84 12 726_4_48_4]
+G c Z s s [reference_control_typeDF act__effect_vectors__implementation 84 12 726_4_48_4]
+G c Z s s [reference_control_typeIP act__effect_vectors__implementation 84 12 726_4_48_4]
+G c Z s s [with_busyDF act__effect_vectors__implementation 158 12 726_4_48_4]
+G c Z s s [with_busyIP act__effect_vectors__implementation 158 12 726_4_48_4]
+G c Z s s [with_lockDF act__effect_vectors__implementation 164 12 726_4_48_4]
+G c Z s s [with_lockIP act__effect_vectors__implementation 164 12 726_4_48_4]
+G c Z s s [put_image act__effect_vectors 747 14 48_4]
+G c Z s s [adjust act__effect_vectors 750 25 48_4]
+G c Z s s [finalize act__effect_vectors 751 25 48_4]
+G c Z s s [write act__effect_vectors 753 14 48_4]
+G c Z s s [read act__effect_vectors 759 14 48_4]
+G c Z s s [read act__effect_vectors 773 14 48_4]
+G c Z s s [write act__effect_vectors 779 14 48_4]
+G c Z s s [write act__effect_vectors 798 14 48_4]
+G c Z s s [read act__effect_vectors 804 14 48_4]
+G c Z s s [write act__effect_vectors 820 14 48_4]
+G c Z s s [read act__effect_vectors 826 14 48_4]
+G c Z s s [pseudo_reference act__effect_vectors 840 13 48_4]
+G c Z s s [get_element_access act__effect_vectors 849 13 48_4]
+G c Z s s [cursorIP act__effect_vectors 768 9 48_4]
+G c Z s s [vectorDA act__effect_vectors 741 9 48_4]
+G c Z s s [vectorDF act__effect_vectors 741 9 48_4]
+G c Z s s [vectorIP act__effect_vectors 741 9 48_4]
+G c Z s s [finalize act__effect_vectors 865 25 48_4]
+G c Z s s [first act__effect_vectors 867 24 48_4]
+G c Z s s [last act__effect_vectors 868 24 48_4]
+G c Z s s [next act__effect_vectors 870 24 48_4]
+G c Z s s [previous act__effect_vectors 874 24 48_4]
+G c Z s s [constant_reference_typeDI act__effect_vectors 788 9 48_4]
+G c Z s s [constant_reference_typeDA act__effect_vectors 788 9 48_4]
+G c Z s s [constant_reference_typeDF act__effect_vectors 788 9 48_4]
+G c Z s s [constant_reference_typeIP act__effect_vectors 788 9 48_4]
+G c Z s s [reference_typeDI act__effect_vectors 810 9 48_4]
+G c Z s s [reference_typeDA act__effect_vectors 810 9 48_4]
+G c Z s s [reference_typeDF act__effect_vectors 810 9 48_4]
+G c Z s s [reference_typeIP act__effect_vectors 810 9 48_4]
+G c Z s s [elements_arrayIP act__effect_vectors 729 9 48_4]
+G c Z s s [elements_typeIP act__effect_vectors 732 9 48_4]
+G c Z s s [iteratorDF act__effect_vectors 857 9 48_4]
+G c Z s s [iteratorIP act__effect_vectors 857 9 48_4]
+G c Z s s [free act__effect_vectors 44 14 48_4]
+G c Z s s [append_slow_path act__effect_vectors 47 14 48_4]
+G c Z s s [Tknown_arrayBIP act 49 4 none]
+G c Z s s [zone_trackIP act 50 9 none]
+G c Z s s [has_element act__zone_track_vectors 115 13 60_4]
+G c Z s s [empty act__zone_track_vectors 125 13 60_4]
+G c Z s s [Oeq act__zone_track_vectors 127 24 60_4]
+G c Z s s [to_vector act__zone_track_vectors 136 13 60_4]
+G c Z s s [to_vector act__zone_track_vectors 139 13 60_4]
+G c Z s s [Oconcat act__zone_track_vectors 145 13 60_4]
+G c Z s s [Oconcat act__zone_track_vectors 149 13 60_4]
+G c Z s s [Oconcat act__zone_track_vectors 153 13 60_4]
+G c Z s s [Oconcat act__zone_track_vectors 157 13 60_4]
+G c Z s s [capacity act__zone_track_vectors 161 13 60_4]
+G c Z s s [reserve_capacity act__zone_track_vectors 164 14 60_4]
+G c Z s s [length act__zone_track_vectors 175 13 60_4]
+G c Z s s [set_length act__zone_track_vectors 178 14 60_4]
+G c Z s s [is_empty act__zone_track_vectors 187 13 60_4]
+G c Z s s [clear act__zone_track_vectors 190 14 60_4]
+G c Z s s [to_cursor act__zone_track_vectors 194 13 60_4]
+G c Z s s [to_index act__zone_track_vectors 201 13 60_4]
+G c Z s s [element act__zone_track_vectors 206 13 60_4]
+G c Z s s [element act__zone_track_vectors 213 13 60_4]
+G c Z s s [replace_element act__zone_track_vectors 217 14 60_4]
+G c Z s s [replace_element act__zone_track_vectors 228 14 60_4]
+G c Z s s [query_element act__zone_track_vectors 239 14 60_4]
+G c Z s s [query_element act__zone_track_vectors 250 14 60_4]
+G c Z s s [update_element act__zone_track_vectors 259 14 60_4]
+G c Z s s [update_element act__zone_track_vectors 276 14 60_4]
+G c Z s s [constant_reference act__zone_track_vectors 303 13 60_4]
+G c Z s s [reference act__zone_track_vectors 308 13 60_4]
+G c Z s s [constant_reference act__zone_track_vectors 313 13 60_4]
+G c Z s s [reference act__zone_track_vectors 318 13 60_4]
+G c Z s s [assign act__zone_track_vectors 323 14 60_4]
+G c Z s s [copy act__zone_track_vectors 325 13 60_4]
+G c Z s s [move act__zone_track_vectors 327 14 60_4]
+G c Z s s [new_vector act__zone_track_vectors 333 13 60_4]
+G c Z s s [insert_vector act__zone_track_vectors 337 14 60_4]
+G c Z s s [insert_vector act__zone_track_vectors 361 14 60_4]
+G c Z s s [insert_vector act__zone_track_vectors 378 14 60_4]
+G c Z s s [insert act__zone_track_vectors 396 14 60_4]
+G c Z s s [insert act__zone_track_vectors 404 14 60_4]
+G c Z s s [insert act__zone_track_vectors 412 14 60_4]
+G c Z s s [insert act__zone_track_vectors 421 14 60_4]
+G c Z s s [insert act__zone_track_vectors 438 14 60_4]
+G c Z s s [prepend_vector act__zone_track_vectors 449 14 60_4]
+G c Z s s [prepend act__zone_track_vectors 459 14 60_4]
+G c Z s s [append_vector act__zone_track_vectors 466 14 60_4]
+G c Z s s [append act__zone_track_vectors 476 14 60_4]
+G c Z s s [append act__zone_track_vectors 483 14 60_4]
+G c Z s s [insert_space act__zone_track_vectors 486 14 60_4]
+G c Z s s [insert_space act__zone_track_vectors 503 14 60_4]
+G c Z s s [delete act__zone_track_vectors 514 14 60_4]
+G c Z s s [delete act__zone_track_vectors 524 14 60_4]
+G c Z s s [delete_first act__zone_track_vectors 533 14 60_4]
+G c Z s s [delete_last act__zone_track_vectors 538 14 60_4]
+G c Z s s [reverse_elements act__zone_track_vectors 546 14 60_4]
+G c Z s s [swap act__zone_track_vectors 549 14 60_4]
+G c Z s s [swap act__zone_track_vectors 554 14 60_4]
+G c Z s s [first_index act__zone_track_vectors 560 13 60_4]
+G c Z s s [first act__zone_track_vectors 563 13 60_4]
+G c Z s s [first_element act__zone_track_vectors 567 13 60_4]
+G c Z s s [last_index act__zone_track_vectors 570 13 60_4]
+G c Z s s [last act__zone_track_vectors 574 13 60_4]
+G c Z s s [last_element act__zone_track_vectors 578 13 60_4]
+G c Z s s [next act__zone_track_vectors 581 13 60_4]
+G c Z s s [next act__zone_track_vectors 587 14 60_4]
+G c Z s s [previous act__zone_track_vectors 590 13 60_4]
+G c Z s s [previous act__zone_track_vectors 596 14 60_4]
+G c Z s s [find_index act__zone_track_vectors 599 13 60_4]
+G c Z s s [find act__zone_track_vectors 609 13 60_4]
+G c Z s s [reverse_find_index act__zone_track_vectors 623 13 60_4]
+G c Z s s [reverse_find act__zone_track_vectors 635 13 60_4]
+G c Z s s [contains act__zone_track_vectors 649 13 60_4]
+G c Z s s [iterate act__zone_track_vectors 654 14 60_4]
+G c Z s s [reverse_iterate act__zone_track_vectors 662 14 60_4]
+G c Z s s [iterate act__zone_track_vectors 669 13 60_4]
+G c Z s s [iterate act__zone_track_vectors 672 13 60_4]
+G c Z s s [adjust act__zone_track_vectors__implementation 90 28 726_4_60_4]
+G c Z s s [finalize act__zone_track_vectors__implementation 93 28 726_4_60_4]
+G c Z s s [zero_counts act__zone_track_vectors__implementation 96 17 726_4_60_4]
+G c Z s s [busy act__zone_track_vectors__implementation 100 17 726_4_60_4]
+G c Z s s [unbusy act__zone_track_vectors__implementation 104 17 726_4_60_4]
+G c Z s s [lock act__zone_track_vectors__implementation 108 17 726_4_60_4]
+G c Z s s [unlock act__zone_track_vectors__implementation 112 17 726_4_60_4]
+G c Z s s [tc_check act__zone_track_vectors__implementation 116 17 726_4_60_4]
+G c Z s s [te_check act__zone_track_vectors__implementation 120 17 726_4_60_4]
+G c Z s s [is_busy act__zone_track_vectors__implementation 136 16 726_4_60_4]
+G c Z s s [is_locked act__zone_track_vectors__implementation 140 16 726_4_60_4]
+G c Z s s [initialize act__zone_track_vectors__implementation 161 28 726_4_60_4]
+G c Z s s [finalize act__zone_track_vectors__implementation 162 28 726_4_60_4]
+G c Z s s [initialize act__zone_track_vectors__implementation 167 28 726_4_60_4]
+G c Z s s [finalize act__zone_track_vectors__implementation 168 28 726_4_60_4]
+G c Z s s [reference_control_typeDA act__zone_track_vectors__implementation 84 12 726_4_60_4]
+G c Z s s [reference_control_typeDF act__zone_track_vectors__implementation 84 12 726_4_60_4]
+G c Z s s [reference_control_typeIP act__zone_track_vectors__implementation 84 12 726_4_60_4]
+G c Z s s [with_busyDF act__zone_track_vectors__implementation 158 12 726_4_60_4]
+G c Z s s [with_busyIP act__zone_track_vectors__implementation 158 12 726_4_60_4]
+G c Z s s [with_lockDF act__zone_track_vectors__implementation 164 12 726_4_60_4]
+G c Z s s [with_lockIP act__zone_track_vectors__implementation 164 12 726_4_60_4]
+G c Z s s [put_image act__zone_track_vectors 747 14 60_4]
+G c Z s s [adjust act__zone_track_vectors 750 25 60_4]
+G c Z s s [finalize act__zone_track_vectors 751 25 60_4]
+G c Z s s [write act__zone_track_vectors 753 14 60_4]
+G c Z s s [read act__zone_track_vectors 759 14 60_4]
+G c Z s s [read act__zone_track_vectors 773 14 60_4]
+G c Z s s [write act__zone_track_vectors 779 14 60_4]
+G c Z s s [write act__zone_track_vectors 798 14 60_4]
+G c Z s s [read act__zone_track_vectors 804 14 60_4]
+G c Z s s [write act__zone_track_vectors 820 14 60_4]
+G c Z s s [read act__zone_track_vectors 826 14 60_4]
+G c Z s s [pseudo_reference act__zone_track_vectors 840 13 60_4]
+G c Z s s [get_element_access act__zone_track_vectors 849 13 60_4]
+G c Z s s [cursorIP act__zone_track_vectors 768 9 60_4]
+G c Z s s [vectorDA act__zone_track_vectors 741 9 60_4]
+G c Z s s [vectorDF act__zone_track_vectors 741 9 60_4]
+G c Z s s [vectorIP act__zone_track_vectors 741 9 60_4]
+G c Z s s [finalize act__zone_track_vectors 865 25 60_4]
+G c Z s s [first act__zone_track_vectors 867 24 60_4]
+G c Z s s [last act__zone_track_vectors 868 24 60_4]
+G c Z s s [next act__zone_track_vectors 870 24 60_4]
+G c Z s s [previous act__zone_track_vectors 874 24 60_4]
+G c Z s s [constant_reference_typeDI act__zone_track_vectors 788 9 60_4]
+G c Z s s [constant_reference_typeDA act__zone_track_vectors 788 9 60_4]
+G c Z s s [constant_reference_typeDF act__zone_track_vectors 788 9 60_4]
+G c Z s s [constant_reference_typeIP act__zone_track_vectors 788 9 60_4]
+G c Z s s [reference_typeDI act__zone_track_vectors 810 9 60_4]
+G c Z s s [reference_typeDA act__zone_track_vectors 810 9 60_4]
+G c Z s s [reference_typeDF act__zone_track_vectors 810 9 60_4]
+G c Z s s [reference_typeIP act__zone_track_vectors 810 9 60_4]
+G c Z s s [elements_arrayIP act__zone_track_vectors 729 9 60_4]
+G c Z s s [elements_typeIP act__zone_track_vectors 732 9 60_4]
+G c Z s s [iteratorDF act__zone_track_vectors 857 9 60_4]
+G c Z s s [iteratorIP act__zone_track_vectors 857 9 60_4]
+G c Z s s [free act__zone_track_vectors 44 14 60_4]
+G c Z s s [append_slow_path act__zone_track_vectors 47 14 60_4]
+G c Z s b [init_tracks act 90 14 none]
+G c Z s b [round act 91 14 none]
+G c Z s s [contextDI act 62 9 none]
+G c Z s s [contextDA act 62 9 none]
+G c Z s s [contextDF act 62 9 none]
+G c Z s s [contextIP act 62 9 none]
+G c Z b b [zone_of act 18 13 none]
+G c Z b b [track_idx act 26 13 none]
+G c Z b b [cam_arm act 28 13 none]
+G c Z b b [cut_window act 79 13 none]
+G c Z b b [cut_things_raw act 118 13 none]
+G c Z b b [cut_things act 193 13 none]
+G c Z b b [cell_of act 205 13 none]
+G c Z b b [build_listing act 213 14 none]
+G c Z b b [pointDI act 396 9 none]
+G c Z b b [pointDA act 396 9 none]
+G c Z b b [pointDF act 396 9 none]
+G c Z b b [pointIP act 396 9 none]
+G c Z b b [has_element act__point_vectors 115 13 429_4]
+G c Z b b [empty act__point_vectors 125 13 429_4]
+G c Z b b [Oeq act__point_vectors 127 24 429_4]
+G c Z b b [to_vector act__point_vectors 136 13 429_4]
+G c Z b b [to_vector act__point_vectors 139 13 429_4]
+G c Z b b [Oconcat act__point_vectors 145 13 429_4]
+G c Z b b [Oconcat act__point_vectors 149 13 429_4]
+G c Z b b [Oconcat act__point_vectors 153 13 429_4]
+G c Z b b [Oconcat act__point_vectors 157 13 429_4]
+G c Z b b [capacity act__point_vectors 161 13 429_4]
+G c Z b b [reserve_capacity act__point_vectors 164 14 429_4]
+G c Z b b [length act__point_vectors 175 13 429_4]
+G c Z b b [set_length act__point_vectors 178 14 429_4]
+G c Z b b [is_empty act__point_vectors 187 13 429_4]
+G c Z b b [clear act__point_vectors 190 14 429_4]
+G c Z b b [to_cursor act__point_vectors 194 13 429_4]
+G c Z b b [to_index act__point_vectors 201 13 429_4]
+G c Z b b [element act__point_vectors 206 13 429_4]
+G c Z b b [element act__point_vectors 213 13 429_4]
+G c Z b b [replace_element act__point_vectors 217 14 429_4]
+G c Z b b [replace_element act__point_vectors 228 14 429_4]
+G c Z b b [query_element act__point_vectors 239 14 429_4]
+G c Z b b [query_element act__point_vectors 250 14 429_4]
+G c Z b b [update_element act__point_vectors 259 14 429_4]
+G c Z b b [update_element act__point_vectors 276 14 429_4]
+G c Z b b [constant_reference act__point_vectors 303 13 429_4]
+G c Z b b [reference act__point_vectors 308 13 429_4]
+G c Z b b [constant_reference act__point_vectors 313 13 429_4]
+G c Z b b [reference act__point_vectors 318 13 429_4]
+G c Z b b [assign act__point_vectors 323 14 429_4]
+G c Z b b [copy act__point_vectors 325 13 429_4]
+G c Z b b [move act__point_vectors 327 14 429_4]
+G c Z b b [new_vector act__point_vectors 333 13 429_4]
+G c Z b b [insert_vector act__point_vectors 337 14 429_4]
+G c Z b b [insert_vector act__point_vectors 361 14 429_4]
+G c Z b b [insert_vector act__point_vectors 378 14 429_4]
+G c Z b b [insert act__point_vectors 396 14 429_4]
+G c Z b b [insert act__point_vectors 404 14 429_4]
+G c Z b b [insert act__point_vectors 412 14 429_4]
+G c Z b b [insert act__point_vectors 421 14 429_4]
+G c Z b b [insert act__point_vectors 438 14 429_4]
+G c Z b b [prepend_vector act__point_vectors 449 14 429_4]
+G c Z b b [prepend act__point_vectors 459 14 429_4]
+G c Z b b [append_vector act__point_vectors 466 14 429_4]
+G c Z b b [append act__point_vectors 476 14 429_4]
+G c Z b b [append act__point_vectors 483 14 429_4]
+G c Z b b [insert_space act__point_vectors 486 14 429_4]
+G c Z b b [insert_space act__point_vectors 503 14 429_4]
+G c Z b b [delete act__point_vectors 514 14 429_4]
+G c Z b b [delete act__point_vectors 524 14 429_4]
+G c Z b b [delete_first act__point_vectors 533 14 429_4]
+G c Z b b [delete_last act__point_vectors 538 14 429_4]
+G c Z b b [reverse_elements act__point_vectors 546 14 429_4]
+G c Z b b [swap act__point_vectors 549 14 429_4]
+G c Z b b [swap act__point_vectors 554 14 429_4]
+G c Z b b [first_index act__point_vectors 560 13 429_4]
+G c Z b b [first act__point_vectors 563 13 429_4]
+G c Z b b [first_element act__point_vectors 567 13 429_4]
+G c Z b b [last_index act__point_vectors 570 13 429_4]
+G c Z b b [last act__point_vectors 574 13 429_4]
+G c Z b b [last_element act__point_vectors 578 13 429_4]
+G c Z b b [next act__point_vectors 581 13 429_4]
+G c Z b b [next act__point_vectors 587 14 429_4]
+G c Z b b [previous act__point_vectors 590 13 429_4]
+G c Z b b [previous act__point_vectors 596 14 429_4]
+G c Z b b [find_index act__point_vectors 599 13 429_4]
+G c Z b b [find act__point_vectors 609 13 429_4]
+G c Z b b [reverse_find_index act__point_vectors 623 13 429_4]
+G c Z b b [reverse_find act__point_vectors 635 13 429_4]
+G c Z b b [contains act__point_vectors 649 13 429_4]
+G c Z b b [iterate act__point_vectors 654 14 429_4]
+G c Z b b [reverse_iterate act__point_vectors 662 14 429_4]
+G c Z b b [iterate act__point_vectors 669 13 429_4]
+G c Z b b [iterate act__point_vectors 672 13 429_4]
+G c Z b b [adjust act__point_vectors__implementation 90 28 726_4_429_4]
+G c Z b b [finalize act__point_vectors__implementation 93 28 726_4_429_4]
+G c Z b b [zero_counts act__point_vectors__implementation 96 17 726_4_429_4]
+G c Z b b [busy act__point_vectors__implementation 100 17 726_4_429_4]
+G c Z b b [unbusy act__point_vectors__implementation 104 17 726_4_429_4]
+G c Z b b [lock act__point_vectors__implementation 108 17 726_4_429_4]
+G c Z b b [unlock act__point_vectors__implementation 112 17 726_4_429_4]
+G c Z b b [tc_check act__point_vectors__implementation 116 17 726_4_429_4]
+G c Z b b [te_check act__point_vectors__implementation 120 17 726_4_429_4]
+G c Z b b [is_busy act__point_vectors__implementation 136 16 726_4_429_4]
+G c Z b b [is_locked act__point_vectors__implementation 140 16 726_4_429_4]
+G c Z b b [initialize act__point_vectors__implementation 161 28 726_4_429_4]
+G c Z b b [finalize act__point_vectors__implementation 162 28 726_4_429_4]
+G c Z b b [initialize act__point_vectors__implementation 167 28 726_4_429_4]
+G c Z b b [finalize act__point_vectors__implementation 168 28 726_4_429_4]
+G c Z b b [reference_control_typeDA act__point_vectors__implementation 84 12 726_4_429_4]
+G c Z b b [reference_control_typeDF act__point_vectors__implementation 84 12 726_4_429_4]
+G c Z b b [reference_control_typeIP act__point_vectors__implementation 84 12 726_4_429_4]
+G c Z b b [with_busyDF act__point_vectors__implementation 158 12 726_4_429_4]
+G c Z b b [with_busyIP act__point_vectors__implementation 158 12 726_4_429_4]
+G c Z b b [with_lockDF act__point_vectors__implementation 164 12 726_4_429_4]
+G c Z b b [with_lockIP act__point_vectors__implementation 164 12 726_4_429_4]
+G c Z b b [put_image act__point_vectors 747 14 429_4]
+G c Z b b [adjust act__point_vectors 750 25 429_4]
+G c Z b b [finalize act__point_vectors 751 25 429_4]
+G c Z b b [write act__point_vectors 753 14 429_4]
+G c Z b b [read act__point_vectors 759 14 429_4]
+G c Z b b [read act__point_vectors 773 14 429_4]
+G c Z b b [write act__point_vectors 779 14 429_4]
+G c Z b b [write act__point_vectors 798 14 429_4]
+G c Z b b [read act__point_vectors 804 14 429_4]
+G c Z b b [write act__point_vectors 820 14 429_4]
+G c Z b b [read act__point_vectors 826 14 429_4]
+G c Z b b [pseudo_reference act__point_vectors 840 13 429_4]
+G c Z b b [get_element_access act__point_vectors 849 13 429_4]
+G c Z b b [cursorIP act__point_vectors 768 9 429_4]
+G c Z b b [vectorDA act__point_vectors 741 9 429_4]
+G c Z b b [vectorDF act__point_vectors 741 9 429_4]
+G c Z b b [vectorIP act__point_vectors 741 9 429_4]
+G c Z b b [finalize act__point_vectors 865 25 429_4]
+G c Z b b [first act__point_vectors 867 24 429_4]
+G c Z b b [last act__point_vectors 868 24 429_4]
+G c Z b b [next act__point_vectors 870 24 429_4]
+G c Z b b [previous act__point_vectors 874 24 429_4]
+G c Z b b [constant_reference_typeDI act__point_vectors 788 9 429_4]
+G c Z b b [constant_reference_typeDA act__point_vectors 788 9 429_4]
+G c Z b b [constant_reference_typeDF act__point_vectors 788 9 429_4]
+G c Z b b [constant_reference_typeIP act__point_vectors 788 9 429_4]
+G c Z b b [reference_typeDI act__point_vectors 810 9 429_4]
+G c Z b b [reference_typeDA act__point_vectors 810 9 429_4]
+G c Z b b [reference_typeDF act__point_vectors 810 9 429_4]
+G c Z b b [reference_typeIP act__point_vectors 810 9 429_4]
+G c Z b b [elements_arrayIP act__point_vectors 729 9 429_4]
+G c Z b b [elements_arrayDI act__point_vectors 729 9 429_4]
+G c Z b b [elements_arrayDA act__point_vectors 729 9 429_4]
+G c Z b b [elements_arrayDF act__point_vectors 729 9 429_4]
+G c Z b b [elements_typeDI act__point_vectors 732 9 429_4]
+G c Z b b [elements_typeDF act__point_vectors 732 9 429_4]
+G c Z b b [elements_typeIP act__point_vectors 732 9 429_4]
+G c Z b b [iteratorDF act__point_vectors 857 9 429_4]
+G c Z b b [iteratorIP act__point_vectors 857 9 429_4]
+G c Z b b [free act__point_vectors 44 14 429_4]
+G c Z b b [append_slow_path act__point_vectors 47 14 429_4]
+G c Z b b [refind_pieces act 431 14 none]
+G c Z b b [effect_arrayIP act 430 9 none]
+G c Z b b [wrap act 435 13 none]
+G c Z b b [err_of act 448 13 none]
+G c Z b b [size_floor act 454 13 none]
+G c Z b b [ang_floor act 456 13 none]
+G c Z b b [reached act 460 13 none]
+G c Z b b [held_now act 475 13 none]
+G c Z b b [find_effect act 478 13 none]
+G c Z b b [store_effect act 489 14 none]
+G c Z b b [feel act 508 14 none]
+G c Z b b [retrack act 603 14 none]
+G c Z b b [step_arm act 742 14 none]
+G c Z b b [probe_effects act 753 14 none]
+G c Z b b [amount_factor act 919 13 none]
+G c Z b b [expand_lobes act 925 14 none]
+G c Z b b [run_segment act 972 14 none]
+G c Z b b [jaw_sweep act 1783 14 none]
+G c Z b b [move_jaw act 1815 14 none]
+G c Z b b [held_test act 1999 14 none]
+G c Z b b [mode_line act 2107 13 none]
+G r s effect [stored_effectIP act 36 9 none] [effectIP table 20 9 none]
+G r s Tpart_arrayB [zone_trackIP act 50 9 none] [Tpart_arrayBIP schema 19 4 none]
+G r j hand_zone [init_tracks act 90 14 none] [hand_zoneDA zone 15 9 none]
+G r s lobe [init_tracks act 90 14 none] [lobeIP zone 9 9 none]
+G r s Tpart_arrayB [init_tracks act 90 14 none] [Tpart_arrayBIP schema 19 4 none]
+G r c none [init_tracks act 90 14 none] [is_nan picture 46 13 none]
+G r s say [round act 91 14 none] [sayIP brain 16 9 none]
+G r l say [round act 91 14 none] [sayDI brain 16 9 none]
+G r k say [round act 91 14 none] [sayDF brain 16 9 none]
+G r c none [round act 91 14 none] [nearest schema 33 13 none]
+G r c none [round act 91 14 none] [predict table 35 13 none]
+G r j hand_zone [round act 91 14 none] [hand_zoneDA zone 15 9 none]
+G r s lobe [round act 91 14 none] [lobeIP zone 9 9 none]
+G r c none [round act 91 14 none] [is_nan picture 46 13 none]
+G r c none [round act 91 14 none] [quantile picture 43 13 none]
+G r c none [round act 91 14 none] [cut picture 26 13 none]
+G r c none [round act 91 14 none] [texture_level picture 31 13 none]
+G r c none [round act 91 14 none] [min_pixels picture 25 13 none]
+G r c none [round act 91 14 none] [cut_colour picture 29 13 none]
+G r c none [round act 91 14 none] [inside picture 45 13 none]
+G r c none [round act 91 14 none] [near_depth picture 34 13 none]
+G r c none [round act 91 14 none] [is_self zone 42 13 none]
+G r c none [round act 91 14 none] [observe world 27 14 none]
+G r c none [round act 91 14 none] [grid draw 18 14 none]
+G r c none [round act 91 14 none] [get world 29 13 none]
+G r s Tpart_arrayB [round act 91 14 none] [Tpart_arrayBIP schema 19 4 none]
+G r c none [round act 91 14 none] [img codec 15 13 none]
+G r c none [round act 91 14 none] [fmt codec 14 13 none]
+G r c none [round act 91 14 none] [numbered_box draw 15 14 none]
+G r c none [round act 91 14 none] [count world 28 13 none]
+G r c none [round act 91 14 none] [mean_gray picture 42 13 none]
+G r c none [round act 91 14 none] [steps plug 62 13 none]
+G r c none [round act 91 14 none] [pad6 codec 16 13 none]
+G r c none [round act 91 14 none] [write_bmp codec 11 14 none]
+G r c none [round act 91 14 none] [text memory 9 13 none]
+G r c none [round act 91 14 none] [ask brain 27 13 none]
+G r j cam_state [round act 91 14 none] [cam_stateDA world 12 9 none]
+G r c none [round act 91 14 none] [jaw_of selfmap 60 13 none]
+G r s cmd [round act 91 14 none] [cmdIP plug 30 9 none]
+G r l cmd [round act 91 14 none] [cmdDI plug 30 9 none]
+G r k cmd [round act 91 14 none] [cmdDF plug 30 9 none]
+G r c none [round act 91 14 none] [sense plug 59 13 none]
+G r c none [round act 91 14 none] [act plug 60 13 none]
+G r c none [round act 91 14 none] [moved picture 36 13 none]
+G r c none [round act 91 14 none] [either picture 38 13 none]
+G r c none [round act 91 14 none] [pictures_still selfmap 58 13 none]
+G r c none [round act 91 14 none] [components picture 39 13 none]
+G r c none [round act 91 14 none] [compose chan 9 13 none]
+G r c none [round act 91 14 none] [go selfmap 52 14 none]
+G r s sample [round act 91 14 none] [sampleIP schema 20 9 none]
+G r c none [round act 91 14 none] [add schema 31 14 none]
+G r c none [round act 91 14 none] [count schema 35 13 none]
+G r s effect [round act 91 14 none] [effectIP table 20 9 none]
+G r s ring [round act 91 14 none] [ringIP backup 18 9 none]
+G r c none [round act 91 14 none] [clear backup 8 14 none]
+G r c none [round act 91 14 none] [delivered chan 11 13 none]
+G r c none [round act 91 14 none] [reset table 31 14 none]
+G r c none [round act 91 14 none] [set_prior table 32 14 none]
+G r c none [round act 91 14 none] [idle selfmap 55 14 none]
+G r s field [round act 91 14 none] [fieldIP flow 5 9 none]
+G r l field [round act 91 14 none] [fieldDI flow 5 9 none]
+G r k field [round act 91 14 none] [fieldDF flow 5 9 none]
+G r c none [round act 91 14 none] [compute flow 9 13 none]
+G r j field [round act 91 14 none] [fieldDA flow 5 9 none]
+G r c none [round act 91 14 none] [sample flow 11 14 none]
+G r c none [round act 91 14 none] [set_col table 33 14 none]
+G r s term [round act 91 14 none] [termIP table 42 9 none]
+G r c none [round act 91 14 none] [solve table 50 14 none]
+G r c none [round act 91 14 none] [norm table 39 13 none]
+G r c none [round act 91 14 none] [remember backup 9 14 none]
+G r c none [round act 91 14 none] [max_diff picture 41 13 none]
+G r c none [round act 91 14 none] [update table 36 14 none]
+G r c none [round act 91 14 none] [blocked table 37 13 none]
+G r c none [round act 91 14 none] [step monitor 22 14 none]
+G r c none [round act 91 14 none] [env codec 17 13 none]
+G r c none [round act 91 14 none] [refusing monitor 31 13 none]
+G r c none [round act 91 14 none] [fired monitor 39 13 none]
+G r c none [round act 91 14 none] [stalled monitor 30 13 none]
+G r c none [round act 91 14 none] [vanished world 30 13 none]
+G r c none [round act 91 14 none] [set memory 7 14 none]
+G r j body_map [contextDA act 62 9 none] [body_mapDA selfmap 19 9 none]
+G r j state [contextDA act 62 9 none] [stateDA world 17 9 none]
+G r j store [contextDA act 62 9 none] [storeDA memory 4 9 none]
+G r j map [contextDA act 62 9 none] [mapDA schema 26 9 none]
+G r k map [contextDF act 62 9 none] [mapDF schema 26 9 none]
+G r k store [contextDF act 62 9 none] [storeDF memory 4 9 none]
+G r k state [contextDF act 62 9 none] [stateDF world 17 9 none]
+G r k body_map [contextDF act 62 9 none] [body_mapDF selfmap 19 9 none]
+G r s body_map [contextIP act 62 9 none] [body_mapIP selfmap 19 9 none]
+G r l body_map [contextIP act 62 9 none] [body_mapDI selfmap 19 9 none]
+G r s state [contextIP act 62 9 none] [stateIP world 17 9 none]
+G r l state [contextIP act 62 9 none] [stateDI world 17 9 none]
+G r s store [contextIP act 62 9 none] [storeIP memory 4 9 none]
+G r l store [contextIP act 62 9 none] [storeDI memory 4 9 none]
+G r s map [contextIP act 62 9 none] [mapIP schema 26 9 none]
+G r l map [contextIP act 62 9 none] [mapDI schema 26 9 none]
+G r k map [contextIP act 62 9 none] [mapDF schema 26 9 none]
+G r k store [contextIP act 62 9 none] [storeDF memory 4 9 none]
+G r k state [contextIP act 62 9 none] [stateDF world 17 9 none]
+G r k body_map [contextIP act 62 9 none] [body_mapDF selfmap 19 9 none]
+G r j hand_zone [zone_of act 18 13 none] [hand_zoneDA zone 15 9 none]
+G r s lobe [zone_of act 18 13 none] [lobeIP zone 9 9 none]
+G r j hand_zone [cut_window act 79 13 none] [hand_zoneDA zone 15 9 none]
+G r s lobe [cut_window act 79 13 none] [lobeIP zone 9 9 none]
+G r c none [cut_window act 79 13 none] [is_nan picture 46 13 none]
+G r c none [cut_window act 79 13 none] [quantile picture 43 13 none]
+G r j hand_zone [cut_things_raw act 118 13 none] [hand_zoneDA zone 15 9 none]
+G r s lobe [cut_things_raw act 118 13 none] [lobeIP zone 9 9 none]
+G r c none [cut_things_raw act 118 13 none] [is_nan picture 46 13 none]
+G r c none [cut_things_raw act 118 13 none] [quantile picture 43 13 none]
+G r c none [cut_things_raw act 118 13 none] [cut picture 26 13 none]
+G r c none [cut_things_raw act 118 13 none] [texture_level picture 31 13 none]
+G r c none [cut_things_raw act 118 13 none] [min_pixels picture 25 13 none]
+G r c none [cut_things_raw act 118 13 none] [cut_colour picture 29 13 none]
+G r c none [cut_things_raw act 118 13 none] [inside picture 45 13 none]
+G r c none [cut_things_raw act 118 13 none] [near_depth picture 34 13 none]
+G r c none [cut_things_raw act 118 13 none] [is_self zone 42 13 none]
+G r j hand_zone [cut_things act 193 13 none] [hand_zoneDA zone 15 9 none]
+G r s lobe [cut_things act 193 13 none] [lobeIP zone 9 9 none]
+G r c none [cut_things act 193 13 none] [is_nan picture 46 13 none]
+G r c none [cut_things act 193 13 none] [quantile picture 43 13 none]
+G r c none [cut_things act 193 13 none] [cut picture 26 13 none]
+G r c none [cut_things act 193 13 none] [texture_level picture 31 13 none]
+G r c none [cut_things act 193 13 none] [min_pixels picture 25 13 none]
+G r c none [cut_things act 193 13 none] [cut_colour picture 29 13 none]
+G r c none [cut_things act 193 13 none] [inside picture 45 13 none]
+G r c none [cut_things act 193 13 none] [near_depth picture 34 13 none]
+G r c none [cut_things act 193 13 none] [is_self zone 42 13 none]
+G r c none [build_listing act 213 14 none] [get world 29 13 none]
+G r j hand_zone [build_listing act 213 14 none] [hand_zoneDA zone 15 9 none]
+G r s lobe [build_listing act 213 14 none] [lobeIP zone 9 9 none]
+G r s Tpart_arrayB [build_listing act 213 14 none] [Tpart_arrayBIP schema 19 4 none]
+G r c none [build_listing act 213 14 none] [img codec 15 13 none]
+G r c none [build_listing act 213 14 none] [fmt codec 14 13 none]
+G r c none [build_listing act 213 14 none] [numbered_box draw 15 14 none]
+G r c none [build_listing act 213 14 none] [count world 28 13 none]
+G r c none [build_listing act 213 14 none] [mean_gray picture 42 13 none]
+G r j hand_zone [refind_pieces act 431 14 none] [hand_zoneDA zone 15 9 none]
+G r s lobe [refind_pieces act 431 14 none] [lobeIP zone 9 9 none]
+G r c none [refind_pieces act 431 14 none] [jaw_of selfmap 60 13 none]
+G r s cmd [refind_pieces act 431 14 none] [cmdIP plug 30 9 none]
+G r l cmd [refind_pieces act 431 14 none] [cmdDI plug 30 9 none]
+G r k cmd [refind_pieces act 431 14 none] [cmdDF plug 30 9 none]
+G r c none [refind_pieces act 431 14 none] [sense plug 59 13 none]
+G r c none [refind_pieces act 431 14 none] [act plug 60 13 none]
+G r c none [refind_pieces act 431 14 none] [moved picture 36 13 none]
+G r c none [refind_pieces act 431 14 none] [either picture 38 13 none]
+G r c none [refind_pieces act 431 14 none] [pictures_still selfmap 58 13 none]
+G r c none [refind_pieces act 431 14 none] [min_pixels picture 25 13 none]
+G r c none [refind_pieces act 431 14 none] [components picture 39 13 none]
+G r c none [refind_pieces act 431 14 none] [near_depth picture 34 13 none]
+G r c none [refind_pieces act 431 14 none] [is_nan picture 46 13 none]
+G r c none [refind_pieces act 431 14 none] [compose chan 9 13 none]
+G r c none [refind_pieces act 431 14 none] [go selfmap 52 14 none]
+G r s sample [refind_pieces act 431 14 none] [sampleIP schema 20 9 none]
+G r c none [refind_pieces act 431 14 none] [add schema 31 14 none]
+G r c none [refind_pieces act 431 14 none] [fmt codec 14 13 none]
+G r c none [refind_pieces act 431 14 none] [count schema 35 13 none]
+G r c none [refind_pieces act 431 14 none] [img codec 15 13 none]
+G r s effect [effect_arrayIP act 430 9 none] [effectIP table 20 9 none]
+G r c none [reached act 460 13 none] [is_nan picture 46 13 none]
+G r c none [feel act 508 14 none] [nearest schema 33 13 none]
+G r c none [feel act 508 14 none] [predict table 35 13 none]
+G r s field [retrack act 603 14 none] [fieldIP flow 5 9 none]
+G r l field [retrack act 603 14 none] [fieldDI flow 5 9 none]
+G r k field [retrack act 603 14 none] [fieldDF flow 5 9 none]
+G r j hand_zone [retrack act 603 14 none] [hand_zoneDA zone 15 9 none]
+G r s lobe [retrack act 603 14 none] [lobeIP zone 9 9 none]
+G r c none [retrack act 603 14 none] [compute flow 9 13 none]
+G r j field [retrack act 603 14 none] [fieldDA flow 5 9 none]
+G r c none [retrack act 603 14 none] [sample flow 11 14 none]
+G r c none [retrack act 603 14 none] [near_depth picture 34 13 none]
+G r c none [retrack act 603 14 none] [is_nan picture 46 13 none]
+G r c none [retrack act 603 14 none] [quantile picture 43 13 none]
+G r c none [retrack act 603 14 none] [cut picture 26 13 none]
+G r c none [retrack act 603 14 none] [texture_level picture 31 13 none]
+G r c none [retrack act 603 14 none] [min_pixels picture 25 13 none]
+G r c none [retrack act 603 14 none] [cut_colour picture 29 13 none]
+G r c none [retrack act 603 14 none] [inside picture 45 13 none]
+G r c none [retrack act 603 14 none] [is_self zone 42 13 none]
+G r c none [retrack act 603 14 none] [mean_gray picture 42 13 none]
+G r c none [step_arm act 742 14 none] [compose chan 9 13 none]
+G r c none [step_arm act 742 14 none] [go selfmap 52 14 none]
+G r j hand_zone [probe_effects act 753 14 none] [hand_zoneDA zone 15 9 none]
+G r s lobe [probe_effects act 753 14 none] [lobeIP zone 9 9 none]
+G r c none [probe_effects act 753 14 none] [jaw_of selfmap 60 13 none]
+G r c none [probe_effects act 753 14 none] [reset table 31 14 none]
+G r c none [probe_effects act 753 14 none] [set_prior table 32 14 none]
+G r c none [probe_effects act 753 14 none] [near_depth picture 34 13 none]
+G r c none [probe_effects act 753 14 none] [idle selfmap 55 14 none]
+G r s field [probe_effects act 753 14 none] [fieldIP flow 5 9 none]
+G r l field [probe_effects act 753 14 none] [fieldDI flow 5 9 none]
+G r k field [probe_effects act 753 14 none] [fieldDF flow 5 9 none]
+G r c none [probe_effects act 753 14 none] [compute flow 9 13 none]
+G r j field [probe_effects act 753 14 none] [fieldDA flow 5 9 none]
+G r c none [probe_effects act 753 14 none] [sample flow 11 14 none]
+G r c none [probe_effects act 753 14 none] [is_nan picture 46 13 none]
+G r c none [probe_effects act 753 14 none] [quantile picture 43 13 none]
+G r c none [probe_effects act 753 14 none] [cut picture 26 13 none]
+G r c none [probe_effects act 753 14 none] [texture_level picture 31 13 none]
+G r c none [probe_effects act 753 14 none] [min_pixels picture 25 13 none]
+G r c none [probe_effects act 753 14 none] [cut_colour picture 29 13 none]
+G r c none [probe_effects act 753 14 none] [inside picture 45 13 none]
+G r c none [probe_effects act 753 14 none] [is_self zone 42 13 none]
+G r c none [probe_effects act 753 14 none] [mean_gray picture 42 13 none]
+G r c none [probe_effects act 753 14 none] [compose chan 9 13 none]
+G r c none [probe_effects act 753 14 none] [go selfmap 52 14 none]
+G r c none [probe_effects act 753 14 none] [set_col table 33 14 none]
+G r c none [probe_effects act 753 14 none] [fmt codec 14 13 none]
+G r j hand_zone [expand_lobes act 925 14 none] [hand_zoneDA zone 15 9 none]
+G r s lobe [expand_lobes act 925 14 none] [lobeIP zone 9 9 none]
+G r c none [expand_lobes act 925 14 none] [near_depth picture 34 13 none]
+G r c none [expand_lobes act 925 14 none] [is_nan picture 46 13 none]
+G r c none [run_segment act 972 14 none] [steps plug 62 13 none]
+G r s effect [run_segment act 972 14 none] [effectIP table 20 9 none]
+G r s ring [run_segment act 972 14 none] [ringIP backup 18 9 none]
+G r c none [run_segment act 972 14 none] [jaw_of selfmap 60 13 none]
+G r c none [run_segment act 972 14 none] [clear backup 8 14 none]
+G r c none [run_segment act 972 14 none] [delivered chan 11 13 none]
+G r j hand_zone [run_segment act 972 14 none] [hand_zoneDA zone 15 9 none]
+G r s lobe [run_segment act 972 14 none] [lobeIP zone 9 9 none]
+G r c none [run_segment act 972 14 none] [reset table 31 14 none]
+G r c none [run_segment act 972 14 none] [set_prior table 32 14 none]
+G r c none [run_segment act 972 14 none] [near_depth picture 34 13 none]
+G r c none [run_segment act 972 14 none] [idle selfmap 55 14 none]
+G r s field [run_segment act 972 14 none] [fieldIP flow 5 9 none]
+G r l field [run_segment act 972 14 none] [fieldDI flow 5 9 none]
+G r k field [run_segment act 972 14 none] [fieldDF flow 5 9 none]
+G r c none [run_segment act 972 14 none] [compute flow 9 13 none]
+G r j field [run_segment act 972 14 none] [fieldDA flow 5 9 none]
+G r c none [run_segment act 972 14 none] [sample flow 11 14 none]
+G r c none [run_segment act 972 14 none] [is_nan picture 46 13 none]
+G r c none [run_segment act 972 14 none] [quantile picture 43 13 none]
+G r c none [run_segment act 972 14 none] [cut picture 26 13 none]
+G r c none [run_segment act 972 14 none] [texture_level picture 31 13 none]
+G r c none [run_segment act 972 14 none] [min_pixels picture 25 13 none]
+G r c none [run_segment act 972 14 none] [cut_colour picture 29 13 none]
+G r c none [run_segment act 972 14 none] [inside picture 45 13 none]
+G r c none [run_segment act 972 14 none] [is_self zone 42 13 none]
+G r c none [run_segment act 972 14 none] [mean_gray picture 42 13 none]
+G r c none [run_segment act 972 14 none] [compose chan 9 13 none]
+G r c none [run_segment act 972 14 none] [go selfmap 52 14 none]
+G r c none [run_segment act 972 14 none] [set_col table 33 14 none]
+G r c none [run_segment act 972 14 none] [fmt codec 14 13 none]
+G r s term [run_segment act 972 14 none] [termIP table 42 9 none]
+G r c none [run_segment act 972 14 none] [solve table 50 14 none]
+G r c none [run_segment act 972 14 none] [predict table 35 13 none]
+G r c none [run_segment act 972 14 none] [norm table 39 13 none]
+G r c none [run_segment act 972 14 none] [remember backup 9 14 none]
+G r c none [run_segment act 972 14 none] [max_diff picture 41 13 none]
+G r c none [run_segment act 972 14 none] [nearest schema 33 13 none]
+G r s cmd [run_segment act 972 14 none] [cmdIP plug 30 9 none]
+G r l cmd [run_segment act 972 14 none] [cmdDI plug 30 9 none]
+G r k cmd [run_segment act 972 14 none] [cmdDF plug 30 9 none]
+G r c none [run_segment act 972 14 none] [sense plug 59 13 none]
+G r c none [run_segment act 972 14 none] [act plug 60 13 none]
+G r c none [run_segment act 972 14 none] [moved picture 36 13 none]
+G r c none [run_segment act 972 14 none] [either picture 38 13 none]
+G r c none [run_segment act 972 14 none] [pictures_still selfmap 58 13 none]
+G r c none [run_segment act 972 14 none] [components picture 39 13 none]
+G r s sample [run_segment act 972 14 none] [sampleIP schema 20 9 none]
+G r c none [run_segment act 972 14 none] [add schema 31 14 none]
+G r c none [run_segment act 972 14 none] [count schema 35 13 none]
+G r c none [run_segment act 972 14 none] [img codec 15 13 none]
+G r c none [run_segment act 972 14 none] [update table 36 14 none]
+G r c none [run_segment act 972 14 none] [blocked table 37 13 none]
+G r c none [run_segment act 972 14 none] [step monitor 22 14 none]
+G r c none [run_segment act 972 14 none] [env codec 17 13 none]
+G r c none [run_segment act 972 14 none] [numbered_box draw 15 14 none]
+G r c none [run_segment act 972 14 none] [pad6 codec 16 13 none]
+G r c none [run_segment act 972 14 none] [write_bmp codec 11 14 none]
+G r c none [run_segment act 972 14 none] [refusing monitor 31 13 none]
+G r c none [run_segment act 972 14 none] [fired monitor 39 13 none]
+G r c none [run_segment act 972 14 none] [stalled monitor 30 13 none]
+G r c none [jaw_sweep act 1783 14 none] [jaw_of selfmap 60 13 none]
+G r s cmd [jaw_sweep act 1783 14 none] [cmdIP plug 30 9 none]
+G r l cmd [jaw_sweep act 1783 14 none] [cmdDI plug 30 9 none]
+G r k cmd [jaw_sweep act 1783 14 none] [cmdDF plug 30 9 none]
+G r c none [jaw_sweep act 1783 14 none] [sense plug 59 13 none]
+G r c none [jaw_sweep act 1783 14 none] [act plug 60 13 none]
+G r c none [jaw_sweep act 1783 14 none] [moved picture 36 13 none]
+G r c none [jaw_sweep act 1783 14 none] [either picture 38 13 none]
+G r c none [jaw_sweep act 1783 14 none] [pictures_still selfmap 58 13 none]
+G r c none [move_jaw act 1815 14 none] [jaw_of selfmap 60 13 none]
+G r s cmd [move_jaw act 1815 14 none] [cmdIP plug 30 9 none]
+G r l cmd [move_jaw act 1815 14 none] [cmdDI plug 30 9 none]
+G r k cmd [move_jaw act 1815 14 none] [cmdDF plug 30 9 none]
+G r c none [move_jaw act 1815 14 none] [sense plug 59 13 none]
+G r c none [move_jaw act 1815 14 none] [act plug 60 13 none]
+G r c none [move_jaw act 1815 14 none] [moved picture 36 13 none]
+G r c none [move_jaw act 1815 14 none] [either picture 38 13 none]
+G r c none [move_jaw act 1815 14 none] [pictures_still selfmap 58 13 none]
+G r j hand_zone [held_test act 1999 14 none] [hand_zoneDA zone 15 9 none]
+G r s lobe [held_test act 1999 14 none] [lobeIP zone 9 9 none]
+G r c none [held_test act 1999 14 none] [is_nan picture 46 13 none]
+G r c none [held_test act 1999 14 none] [quantile picture 43 13 none]
+G r c none [held_test act 1999 14 none] [cut picture 26 13 none]
+G r c none [held_test act 1999 14 none] [texture_level picture 31 13 none]
+G r c none [held_test act 1999 14 none] [min_pixels picture 25 13 none]
+G r c none [held_test act 1999 14 none] [cut_colour picture 29 13 none]
+G r c none [held_test act 1999 14 none] [inside picture 45 13 none]
+G r c none [held_test act 1999 14 none] [near_depth picture 34 13 none]
+G r c none [held_test act 1999 14 none] [is_self zone 42 13 none]
+G r c none [held_test act 1999 14 none] [jaw_of selfmap 60 13 none]
+G r c none [held_test act 1999 14 none] [compose chan 9 13 none]
+G r c none [held_test act 1999 14 none] [go selfmap 52 14 none]
+G r c none [held_test act 1999 14 none] [vanished world 30 13 none]
+G r c none [held_test act 1999 14 none] [img codec 15 13 none]
+G r c none [mode_line act 2107 13 none] [img codec 15 13 none]
+X 1 act.ads
+17K9*Act 92l5 92e8 2|9b14 2697l5 2697t8
+18E9*Item_Kind 18e80 20r14
+18n23*Finger{18E9} 2|266r27 2285r80 2344r39 2371r59
+18n31*Grip{18E9} 2|286r23 2285r89 2344r48 2371r68
+18n37*Piece{18E9} 2|308r36 2344r55 2346r54 2371r88 2380r38
+18n44*Thing{18E9} 20r27 2|340r27 386r36 2203r95 2214r119 2292r83 2394r67
+. 2404r38 2427r58
+18n51*Thing_Remembered{18E9} 2|348r27 355r27 386r44 2203r103 2214r127 2292r91
+. 2427r66
+18n69*Thing_Held{18E9} 2|333r30 386r63 2203r122 2344r63 2371r75
+19R9*Item 32e14 33r65 2|231r28 261r21 282r17 305r27 324r18 2273r47 2339r36
+. 2369r36 2398r44 2430r32 2538r44
+20e7*Kind{18E9} 2|266m19 286m15 308m28 333m22 340m19 348m19 355m19 386r28
+. 2203r87 2214r111 2285r72 2292r75 2344r31 2346r47 2371r51 2380r31 2394r60
+. 2404r31 2427r50
+21i7*Arm{natural} 2|266m38 286m31 308m46 333m45 2345r40 2382r37 2387r37
+22i7*Which{natural} 2|266m51 308m59 2346r68 2382r77 2384r89
+23i7*Slot{integer} 2|326m16 386r95 2207r47 2218r51 2353r98 2400r63 2405r84
+. 2444r57 2559r96 2571r76 2572r110
+24b7*Located{boolean} 2|234r16 268m22 288m18 308m74 333m58 340m37 348m48
+. 1293r28 2278r43 2342r28 2377r32 2427r118
+25f7*Cu{long_float} 2|269m22 276r51 276r73 289m18 296r47 296r67 309m28 312r57
+. 312r79 334m22 337r161 341m19 345r78 346r82 349m19 352r121 2283r47 2304r50
+. 2306r50 2317r80 2354r39 2383r36 2400r79 2406r36 2444r73 2465r38 2539r79
+25f11*Cv{long_float} 2|269m43 276r58 276r80 289m33 296r53 296r73 309m44 312r64
+. 312r86 334m38 337r168 341m37 345r85 346r89 349m42 352r128 2283r61 2300r50
+. 2302r50 2318r80 2354r54 2383r51 2400r93 2406r51 2444r87 2465r52 2539r102
+26i7*X0{natural} 2|235r48 270m22 290m18 310m28 335m22 342m19 350m19 1293r100
+. 2274r83 2355r62 2385r59 2401r63 2407r59 2445r57
+26i11*Y0{natural} 2|235r55 272m22 292m18 310m44 335m37 342m37 350m42 1294r88
+. 2275r83 2355r119 2385r116 2401r118 2407r116 2445r112
+26i15*X1{natural} 2|235r62 271m22 291m18 310m60 335m52 342m55 350m65 1293r66
+. 2274r76 2355r54 2385r51 2401r56 2407r51 2445r50
+26i19*Y1{natural} 2|235r69 273m22 293m18 310m76 335m67 342m73 350m88 1294r54
+. 2275r76 2355r111 2385r108 2401r111 2407r108 2445r105
+27f7*Depth{long_float} 2|274m22 289m48 309m60 334m54 341m55 349m65 2295r53
+. 2295r74 2297r53 2297r74 2310r130 2312r75 2312r93 2313r57 2354r68 2383r65
+. 2400r106 2406r65 2444r100 2465r66 2465r87
+27f14*Height{long_float} 2|336m51 341m79 346r36 349m94 2310r89 2354r90 2400r127
+. 2406r87 2444r121
+28i7*Count{natural} 2|274m40 336m22 341m105 345r113 349m125 353r91 2354r112
+. 2400r148 2406r109 2444r142 2560r67
+29f7*Au{long_float} 2|343m19 351m19 2447r56
+29f11*Av{long_float} 2|343m37 351m42 2447r50
+30f7*Elong{long_float} 2|343m55 351m65 2356r42 2448r38 2457r91
+31f7*Gray{long_float} 2|344m19 2356r62 2448r57
+33K12*Item_Vectors[12|74] 72r15 2|973r111 2252r18
+35E9*Track_Kind 35e43 38r14 2|398r14 478r66 489r75
+35n24*Piece_Pt{35E9} 38r28 2|398r28 526r68 529r61 568r83 609r15 934r25 1323r83
+. 1407r28 1871r22 1889r31 1907r25 1958r25 1972r28 2292r55 2345r55 2382r52
+. 2387r52 2463r38 2497r43 2512r54 2536r57 2622r31 2634r37 2643r43
+35n34*Thing_Pt{35E9} 2|657r15 1021r25 1133r28 2285r52 2353r75 2400r41 2405r61
+. 2444r35 2519r54
+36R9*Stored_Effect 47e14 48r67 2|493r12
+37i7*Arm{natural} 2|481r26
+37i12*Cam{natural} 2|481r58
+38e7*Kind{35E9} 2|481r90
+39i7*Chan_K{natural} 2|481r124
+40i7*Blob{integer} 2|481r162
+41r7*E{93|20R9} 2|535r78 569r120 1097r56 1324r117
+42a7*Trust{93|16A9} 2|1091r102 1098r58
+43a7*Reach{93|11A9} 2|533r99 572r104 1095r131 1100r87
+44a7*Pose{49|10A9} 2|496m13 496r46 1094r75
+45b7*Has_Pose{boolean} 2|497m13 497r50 1092r52
+46i7*Held{integer} 2|482r34
+48K12*Effect_Vectors[12|74] 68r16
+49A9*Known_Array(boolean)<integer> 58r22
+50R9*Zone_Track 59e14 60r71 2|45r20 256r27 330r33 522r30 938r36 1318r36 2348r45
+. 2389r42 2461r42
+51b7*Valid{boolean} 2|47m18 267r57 287r36 333r72 543m31
+52f7*Cu{long_float} 2|48m18 258r70 289r27 334r31 548m34 550m34 561r66 940r111
+. 2350r42 2391r39 2463r85
+52f11*Cv{long_float} 2|48m32 259r70 289r42 334r47 548m66 550m50 561r73 941r111
+. 2350r57 2391r54 2463r100
+52f15*Z{long_float} 2|48m46 274r34 289r60 334r66 553m34 561r80 2350r71 2391r68
+. 2463r114 2465r111
+53i7*Stale{natural}
+54f7*Au{long_float} 2|49m18 263r111 544m31 548r44 550r43 561r126 940r91
+54f11*Av{long_float} 2|49m34 264r111 544m65 548r76 550r59 561r133 941r91
+54f15*Bu{long_float} 2|49m50 263r122 545m31 548r52 561r140 940r102
+54f19*Bv{long_float} 2|49m66 264r122 545m65 548r84 561r147 941r102
+55b7*Has_Lobes{boolean} 2|50m18 263r74 264r74 546m31 940r57 941r57
+56b7*Known{boolean} 2|51m18 277r48 555m31 558m37 562r65 2350r88 2391r85 2463r131
+57a7*Pieces{50|19A9} 2|53m21 66m33 304r58 561m31 588m37 1321r31 1328r59 1328r95
+. 1329r59 1329r95
+58a7*Pieces_Known{49A9} 2|54m21 67m33 313r38 562m31 589m37 2384r72
+60K12*Zone_Track_Vectors[12|74] 69r15
+62R9*Context 88e14 90r38 91r77 2|18r26 26r28 28r26 38r38 79r29 118r33 193r29
+. 194r30 205r26 213r40 431r62 475r27 478r30 489r39 508r31 603r34 742r50 753r62
+. 925r32 972r60 1783r51 1815r50 1823r62 1999r58 2107r28 2112r77
+63r7*Map{51|19R9} 2|26r84 30r32 31r15 41r23 42r27 60r77 62r44 62r73 64r62
+. 137r61 137r94 138r57 179r29 253r23 365r27 511r23 512r27 517r86 557r75 584r81
+. 747r24 774r70 829r35 830r48 832r22 862r49 891r42 1095r59 1176r30 1177r113
+. 1227r70 1237r21 1349r54 1411r98 1433r75 1514r84 1537r76 1584r97 1586r106
+. 1713r45 1750r62 1750r91 1751r23 1752r24 1800r125 1801r135 1803r39 1803r88
+. 1881r45 1882r44 1921r39 1921r66 1921r112 1922r33 1924r71 1928r42 1929r97
+. 1989r37 1989r53 2004r53 2004r83 2019r18 2145r49 2152r18 2186r72 2186r86
+. 2227r30 2260r90 2552r69
+64r7*Hands{12|91R9[96|35]} 2|20r27 20r67 21r19 1712r65 1712r86 2551r58 2579r52
+. 2596r43
+65r7*Wld{95|17R9} 2|241r12 243r54 243r75 321r37 323r54 327r18 327r41 327r71
+. 329r54 386r104 391r40 476r12 476r35 476r71 2108r24 2108r95 2126m24 2205r45
+. 2208r21 2216r39 2219r15 2559r51 2569m30 2569m53 2569m84 2571m33 2572m33
+. 2572r65 2574m33 2578m30 2578m54 2597m21 2597m45 2597m67
+66r7*Mem{45|4R9} 2|2136r53 2576m42 2598m33
+67i7*Cam{natural} 2|2113r48 2123m9 2230m24
+68r7*Tables{12|91R9[48]} 2|480r32 481r15 481r47 481r79 481r113 481r151 482r23
+. 496r23 497r27 500m12 502m12 533r76 535r55 569r97 572r81 1091r79 1092r29
+. 1094r52 1095r108 1097r33 1098r35 1100r64 1324r94
+69r7*Zones{12|91R9[60]} 2|40m9 73m18 256r80 256r101 330r49 513r125 522r46
+. 593m27 938r52 1316r77 1318r52 2348r61 2384r38 2389r58 2461r58
+70r7*Recent{26|105R9} 2|2136r73 2239m12 2243m12 2694m9
+71r7*Task_Text{26|105R9} 2|2185r77
+72r7*Items{12|91R9[33]} 2|233m12 235r84 237r55 240m9 385r35 386r18 386r85
+. 2186r55 2203r48 2203r73 2207r33 2214r62 2214r87 2218r27 2271r103 2273r57
+. 2337r61 2339r46 2367r61 2369r46 2393r130 2394r38 2398r54 2426r119 2427r26
+. 2427r94 2430r42 2489r74 2538r54 2558r80 2559r72 2560r43 2570r83 2571r52
+. 2572r86 2609r48 2610m32
+73r7*Cells_U{34|10R12} 2|2127m49 2268r73 2269r41
+73r16*Cells_V{34|10R12} 2|2127m60 2269r73
+74i7*Cols{natural} 2|206r93 206r142 209r22 224r80 2127r33 2186r30
+75i7*Rows{natural} 2|207r93 207r142 224r125 2127r41 2186r38
+76b7*Look_Only{boolean} 2|2242r12
+77r7*Eye_Host{26|105R9} 2|2185r41
+78i7*Eye_Port{natural} 2|2185r54
+79r7*Dump_Dir{26|105R9} 2|1052r15 1077r43 2131r12 2132r40
+80i7*Round_N{natural} 2|1077r87 1078r71 2122m9 2122r22 2129r55 2132r77
+81b7*Fast{boolean} 2|1375r69 2222m9
+82i7*Boot_Steps{natural} 2|2129r208
+83r7*Sch{50|26R9} 2|517r62 521r58 1411r65 1416r71 1417r66 1421r63 1989m27
+. 1994r90
+84f7*Want_Size{long_float} 2|1137m15
+85i7*Cut_Seq{natural} 2|196r12 200m12
+86i7*Cut_Cam{integer} 2|196r39 201m12
+87r7*Cut_Regs{48|17R12} 2|197r19 199m12 202r19
+90U14*Init_Tracks 90=27 2|38b14 77l8 77t19
+90r27 C{62R9} 2|38b27 40m7 40r7 41r21 42r25 44r56 57r28 60r75 62r42 62r71
+. 64r60 73m16 73r16
+91U14*Round 91=21 91=43 91=66 2|2112b14 2696l8 2696t13
+91r21 L{49|39R9} 2|2112b21 2129r163 2549m32 2562m36 2579m38 2596m29 2628m34
+. 2673m29 2676r160
+91r43 F{49|20R9} 2|2112b43 2113r62 2114r32 2115r32 2116r20 2124r16 2126r49
+. 2128r25 2153r39 2156r50 2157r50 2160r37 2170r64 2171r68 2172r68 2549m38
+. 2562m42 2579m44 2596m35 2615r30 2628m40 2629r28 2673m35 2674r25
+91r66 C{62R9} 2|2112b66 2113r46 2122m7 2122r20 2123m7 2124m13 2126m22 2126r22
+. 2126r46 2127r31 2127r39 2127m47 2127r47 2127m58 2127r58 2128m22 2129r53
+. 2129r206 2131r10 2132r38 2132r75 2136r51 2136r71 2145r47 2152r16 2185r39
+. 2185r52 2185r75 2186r28 2186r36 2186r53 2186r70 2186r84 2203r46 2203r71
+. 2205r43 2207r31 2208m19 2208r19 2214r60 2214r85 2216r37 2218r25 2219m13
+. 2219r13 2222m7 2227r28 2230m22 2239m10 2239r113 2242r10 2243m10 2243r69
+. 2260r88 2268r71 2269r39 2269r71 2271r101 2273r55 2288r86 2337r59 2339r44
+. 2348r59 2348r79 2352r40 2353r55 2367r59 2369r44 2372r59 2384r36 2384r56
+. 2389r56 2389r76 2393r128 2394r36 2398r52 2426r117 2427r24 2427r92 2430r40
+. 2432r59 2434r58 2461r56 2461r76 2486r60 2489r72 2538r52 2549r35 2551r56
+. 2552r67 2558r78 2559r49 2559r70 2560r41 2562m39 2569m28 2569m51 2569m82
+. 2570r81 2571m31 2571r50 2572m31 2572r63 2572r84 2574m31 2576m40 2576r40
+. 2578m28 2578m52 2579r41 2579r50 2596r32 2596r41 2597m19 2597m43 2597m65
+. 2598m31 2598r31 2609r46 2610r30 2615r27 2622r58 2628m37 2629m25 2673m32
+. 2674m22 2692r40 2694m7
+X 2 act.adb
+10f4 Sigma_Mult{long_float} 127r79
+11f4 Track_Win{long_float} 664r88 1028r91 1033r35 1033r66 1033r91 1033r122
+. 1066r72 1067r72 1255r73 1262r34 1278r23 1279r51 1308r30 1308r59 1308r82
+. 1308r111 1576r60 1586r68 1610r104 1892r73 1934r100 2525r76 2540r91
+12f4 Cap_Mult{long_float} 557r109 584r133 830r64 1095r95 1254r59 1255r98
+. 1433r113
+13N4 Step_Cap 1759r37 1759r87
+14a4 Unit_Reach{93|11A9} 489r180 523r46 982r28 1119r107
+16V13 S=16:60{26|105R9} 1340s36 1350s30 1363s30 1698s30 1704s30 1716s57 1717s59
+. 1718s58 1719s56 1720s58 1732s33 1737s30 1744s16 1756s19 1767s22 1779s16
+. 2087s18 2090s18 2093s18 2095s18 2097s18 2239s22 2243s22 2270s41 2279s47
+. 2282s47 2360s35 2378s35 2409s35 2458s35 2466s38 2532s44 2543s44 2566s37
+. 2584s34 2599s31 2684s25 2687s23
+16a16 X{string}
+18V13 Zone_Of{96|15R9} 18b13 18>22 18>35 18>40 24l8 24t15 44s47 86s44 180s33
+. 255s44 331s50 620s47 766s38 932s44 1451s59 1827s38 1954s42 2023s44 2288s77
+. 2432s50 2486s51
+18r22 C{1|62R9} 20r25 20r65 21r17
+18i35 Arm{natural} 20r10 20r74 21r26
+18i40 Cam{natural} 20r50 21r38
+26V13 Track_Idx{natural} 26b13 26>24 26>37 26>42 256s45 256s108 330s56 513s91
+. 522s53 593s50 938s59 1316s40 1318s59 2348s68 2384s45 2389s65 2461s65
+26r24 C{1|62R9} 26r82
+26i37 Arm{natural} 26r76
+26i42 Cam{natural} 26r97
+28V13 Cam_Arm{integer} 28b13 28>22 28>35 36l8 36t15 57s19 80s31 257s43 368s43
+. 378s34 513s16 610s16 934s76 979s37 2010s82 2040s49 2352s31 2353s46 2372s50
+. 2434s49 2622s49
+28r22 C{1|62R9} 30r30 31r13
+28i35 Cam{natural} 31r45
+30i11 A{integer} 31r31 32r20
+41i11 A{integer} 44r59 57r47 60r51
+42i14 Cm{integer} 44r62 57r31 60r90
+44r16 Z{96|15R9} 47r27 48r24 48r38 48r51 49r24 49r40 49r56 49r72 50r31 50r48
+. 51r27 52r19 53r53 53r59 53r85 53r108 53r118 53r124 53r130 53r136 53r142
+. 53r153 53r161 53r169 53r177
+45r16 T{1|50R9} 47m16 48m16 48m30 48m44 49m16 49m32 49m48 49m64 50m16 51m16
+. 53m19 54m19 66m31 67m31 73r32
+58i23 K{integer} 60r70 66r41 67r47
+60i25 Pi{natural} 62r28 62r84 64r73
+64r31 P{51|10R9} 66r54 66r60 66r71 66r77 66r83 66r89 66r98 66r104
+79V13 Cut_Window{long_float} 79b13 79>25 79>38 79>53 116l8 116t18 127s55
+79r25 C{1|62R9} 80r40 86r53
+79i38 Cam{natural} 80r43 86r59 87r36 93r101
+79r53 F{49|20R9} 87r28 93r93
+80i7 A{integer} 84r10 86r56
+86r13 Z{96|15R9} 93r16 93r33 93r75 108r77 108r87
+87r13 Dp{34|10R12} 98r38 99r45 99r62 100r38
+88f13 Med{long_float} 105m22 106r25 108r97
+95r19 Samp{34|10R12} 100m25 100r25 104r31 105m47 105r47
+96i19 I{natural} 98r25 99r49 99r66 100r42 102m22 102r27
+118V13 Cut_Things_Raw{48|17R12} 118b13 118>29 118>42 118>58 190l8 190t22
+. 199s24
+118r29 C{1|62R9} 127r67 137r59 137r92 138r55 179r27 180r42
+118r42 F{49|20R9} 119r32 120r32 124r14 127r27 127r75 140r85 141r65 158r25
+. 160r76
+118i58 Cam{natural} 119r40 120r40 124r22 127r35 127r70 137r44 137r109 138r72
+. 140r93 141r73 158r33 160r84 180r48
+119i7 Cw{natural} 127r47 140r103 141r83 141r120 145r85 149r53 160r96 161r137
+. 180r57
+120i7 Ch{natural} 127r51 140r107 141r87 141r124 145r108 149r57 160r100 180r61
+121r7 Raw{48|17R12} 127m7 131r10 148r25 168m22 168r22 175r16
+122r7 Kept{48|17R12} 125r17 185m16 185r16 189r14
+137i10 Noise_C{natural} 140r40
+139f10 Floor_C{long_float} 141r91
+141r10 Thin{48|17R12} 143r19
+143r14 R{48|6R9} 145r43 145r60 145r77 145r100 149r41 149r47 155r44 160r104
+. 160r110 161r110 161r117
+145b16 Edge{boolean} 153r23
+146b16 Covered{boolean} 150m22 153r41
+148r20 Q{48|6R9} 149r38
+155r22 Q{48|6R9} 164m31 168r34
+160f28 Zd{long_float} 163r51 164r42
+175r11 R{48|6R9} 180r54 185r29
+177b13 Mine{boolean} 181m19 184r20
+179i17 A{integer} 180r45
+193V13 Cut_Things{48|17R12} 193b13 193>25 193>38 193>54 203l8 203t18 661s51
+. 1023s27 1057s48 1374s43 1624s55 2016s25 2024s48 2042s45 2047s49 2126s34
+193r25 C{1|62R9} 194r41 196r10 196r37 197r17 199r40
+193r38 F{49|20R9} 196r22 199r43 200r23
+193i54 Cam{natural} 196r58 199r46 201r32
+194p7 Self(1|62R9) 199r7 200r7 201r7 202r14
+205V13 Cell_Of{natural} 205b13 205>22 205>35 205>38 210l8 210t15 276s36 296s33
+. 312s42 337s146 345s63 352s106 387s117
+205r22 C{1|62R9} 206r91 206r140 207r91 207r140 209r20
+205f35 U{long_float} 206r124
+205f38 V{long_float} 207r124
+206i7 Col{natural} 209r29
+207i7 Row{natural} 209r14
+213U14 Build_Listing 213b14 213=29 213>49 213>65 213=80 213<98 393l8 393t21
+. 2128s7
+213r29 C{1|62R9} 224r78 224r123 233m10 233r10 235r82 237r53 240m7 240r7 241r10
+. 243r52 243r73 253r21 255r53 256r56 256r78 256r99 256r119 257r52 276r45
+. 296r42 312r51 321r35 323r52 327r16 327r39 327r69 329r52 330r47 330r67 331r59
+. 337r155 345r72 352r115 365r25 368r52 378r43 385r33 386r16 386r83 386r102
+. 387r126 391r38
+213r49 F{49|20R9} 214r32 215r32 344r46
+213i65 Cam{natural} 214r40 215r40 241r22 243r59 243r85 255r59 256r62 256r125
+. 257r55 321r42 323r59 327r95 330r73 331r65 344r54 364r129 366r22 378r46
+. 386r114
+213r80 RGB{34|8R12} 235m32
+213r98 Text{26|105R9} 392m7
+214i7 Cw{natural} 235r37 270r96 271r86 271r133 290r91 291r82 291r128 344r65
+215i7 Ch{natural} 235r41 272r96 273r86 273r133 292r91 293r82 293r128 344r69
+216r7 T{26|105R9} 237m18 237r18 252m15 252r15 320m15 320r15 364m18 364r18
+. 370m27 370r27 375m18 375r18 381m21 381r21 387m24 387r24 391m15 391r15 392r15
+217f7 Named_U{long_float} 224r55 247m16 387r129
+217f16 Named_V{long_float} 224r100 248m16 387r138
+218b7 Have_Named{boolean} 222r13 246m16 384r10
+219V16 Rel{string} 219b16 219>21 219>24 230l11 230t14 276s65 296s60 312s71
+. 346s74
+219f21 U{long_float} 220r40 224r51
+219f24 V{long_float} 224r96
+220a10 Half{string} 226r99 229r31
+224f16 D{long_float} 226r41
+231U17 Push 231b17 231>23 231>34 231>49 231>67 238l11 238t15 275s19 279s19
+. 294s16 298s16 311s25 337s19 345s16 352s16 356s16
+231r23 It{1|19R9} 233r26 234r13 235r45 235r52 235r59 235r66
+231a34 Line{string} 237r79
+231r49 Col{37|4R9} 235r99
+231i67 Thick{natural} 235r104
+243r13 Sl{95|5R9} 245r16 247r31 247r47 247r60 248r31 248r47 248r60
+253i11 A{integer} 255r56 256r59 256r122 257r71 266r45 275r61 279r61 286r38
+. 294r46 294r111 295r75 298r46 298r110 308r53 311r132
+255r13 Z{96|15R9} 258r75 259r75 267r19 284r21 285r21 287r16 290r66 291r103
+. 292r66 293r103
+256r13 Tr{1|50R9} 258r67 259r67 263r71 263r108 263r119 264r71 264r108 264r119
+. 267r54 274r31 277r45 287r33 289r24 289r39 289r57 304r55 313r35
+257b13 Own_Cam{boolean} 258r45 259r45 263r48 264r48 277r29 301r20
+258f13 Du{long_float} 263r139 290r74 291r111
+259f13 Dv{long_float} 264r139 292r74 293r111
+260U23 Finger 260b23 260>31 260>47 281l17 281t23 284s13 285s13
+260r31 Lb{96|9R9} 263r128 264r128 267r36 269r28 269r49 270r70 271r107 272r70
+. 273r107 274r49
+260i47 Which{natural} 263r93 264r93 266r60
+261r16 It{1|19R9} 266m16 266m35 266m48 268m19 269m19 269m40 270m19 271m19
+. 272m19 273m19 274m19 274m37 275r25 276r48 276r55 276r70 276r77 279r25
+263f16 Lu{long_float} 269r36 270r79 271r116
+264f16 Lv{long_float} 269r57 272r79 273r116
+282r13 G{1|19R9} 286m13 286m29 288m16 289m16 289m31 289m46 290m16 291m16
+. 292m16 293m16 294r22 296r45 296r51 296r65 296r71 298r22
+302i20 K{integer} 304r66 308r68 311r103 313r52
+304r22 Pc{50|11R9} 307r25 309r34 309r50 309r69 310r34 310r50 310r66 310r82
+305r22 It{1|19R9} 308m25 308m43 308m56 308m71 309m25 309m41 309m57 310m25
+. 310m41 310m57 310m73 311r31 312r54 312r61 312r76 312r83
+321i11 Si{integer} 323r64 326r24 327r57
+323r13 Sl{95|5R9} 336r31 336r61 339r19 341r25 341r43 341r64 341r89 341r114
+. 342r25 342r43 342r61 342r79 343r25 343r43 343r64 344r73 347r19 349r25 349r48
+. 349r74 349r104 349r134 350r25 350r48 350r71 350r94 351r25 351r48 351r74
+324r13 It{1|19R9} 326m13 333m19 333m42 333m55 334m19 334m35 334m51 335m19
+. 335m34 335m49 335m64 336m19 336m48 337r25 337r158 337r165 340m16 340m34
+. 341m16 341m34 341m52 341m76 341m102 342m16 342m34 342m52 342m70 343m16
+. 343m34 343m52 344m16 345r22 345r75 345r82 345r110 346r33 346r79 346r86
+. 348m16 348m45 349m16 349m39 349m62 349m91 349m122 350m16 350m39 350m62
+. 350m85 351m16 351m39 351m62 352r22 352r118 352r125 353r88 355m16 356r22
+329i19 A{natural} 330r70 331r62 333r52 337r82
+330r19 Tr{1|50R9} 333r69 334r28 334r44 334r63
+331r19 Z{96|15R9} 335r28 335r43 335r58 335r73
+362i10 K{natural} 370r48 371m19 371r24
+365i14 Ci{integer} 366r16 368r55 370r85
+368i19 A{integer} 370r95 370r147
+378i10 A{integer} 380r13 381r77
+385i14 I{integer} 386r25 386r92 387r78
+396R9 Point 428e14 429r66 448r25 456r28 460r26 603r99 798r27 854r32 855r42
+. 898r35 937r26 1141r29 1191r23 1402r20 1403r30 1450r32 1495r29 1496r30 1565r36
+. 1603r42 1834r35 1887r23 1905r17 2265r56 2340r26 2370r26 2433r23 2491r31
+. 2641r35
+397i7*Arm{natural} 610r46 620r61 755r41 932r58 934r107 938r75 975r41 1411r72
+. 1411r90 1433r86 1451r73 1824r41 2288r91 2345m30 2348r84 2353m30 2361r57
+. 2361r65 2382m27 2384r61 2387m27 2389r81 2391r118 2393r47 2405m27 2416r57
+. 2416r65 2437m24 2622r80
+398e7*Kind{1|35E9} 608r14 934r18 1021r18 1089r76 1119r54 1133r21 1407r21
+. 1619r48 1871r15 1889r24 1907r18 1958r18 1972r21 2285r45 2292r48 2345m47
+. 2353m67 2382m44 2387m44 2400m33 2405m53 2444m27 2463m30 2497r36 2512r47
+. 2519r47 2536r50 2622r24 2634r30 2643r36
+399i7*Slot{integer} 2353m87 2400m53 2405m73 2444m47
+400i7*Item_No{natural} 2343m27 2376m24 2437m36 2496r33 2679r64
+401i7*Chan_K{natural} 934r45 1089r90 1119r68 1416r37 1416r101 1417r96 1421r93
+. 1619r62 1871r42 1889r51 1907r45 1909r45 1958r45 1972r68 1973r27 2346m30
+. 2382m64 2387m64 2463m50
+402i7*Blob{integer} 944m24 1089r106 1119r84 1417r47 1417r125 1423r62 1423r91
+. 1424r62 1424r91 1619r78 1964r21 2382m86 2634r57 2643r63 2678r24 2679r81
+403f7*Cu{long_float} 450r30 633r35 635m21 637m21 637r71 644r100 722m24 735m21
+. 788r82 800r64 809r103 858r62 859r44 859r52 866r48 866r56 900r71 901m33
+. 901r47 946m24 946r32 950r81 1031r105 1070r71 1072r87 1153r41 1200r48 1305r58
+. 1426m30 1439m27 1439r78 1453r62 1455r55 1455r62 1460r65 1466r53 1505r65
+. 1505r74 1567r107 1567r116 1605r110 1605r119 1633r44 1679r54 1840r66 1853m18
+. 1858r75 1963r35 1965r31 1967r31 1973r47 1974r72 1975r88 1976r44 1993r101
+. 2317r73 2322r53 2350m33 2354m30 2358r35 2383m27 2391m30 2400m71 2406m27
+. 2444m65 2463m76 2500m51 2502m38 2502r48 2502r55 2513m32 2513r42 2523r79
+. 2539r72 2635r41 2644r56 2679r147
+403f11*Cv{long_float} 450r51 633r41 635m37 638m21 638r71 644r106 722m38 735m37
+. 788r94 800r77 809r115 858r69 859r66 859r74 867r48 867r56 900r83 901m53
+. 901r67 946m43 946r51 950r87 1031r126 1071r71 1073r87 1154r41 1200r69 1306r58
+. 1427m30 1440m27 1440r78 1453r78 1455r76 1455r83 1460r83 1466r69 1506r65
+. 1506r74 1568r107 1568r116 1606r110 1606r119 1633r65 1679r88 1840r94 1853m42
+. 1858r81 1963r58 1965r47 1967r47 1973r53 1974r146 1975r178 1976r50 1993r135
+. 2318r73 2322r82 2350m48 2354m45 2358r49 2383m42 2391m45 2400m85 2406m42
+. 2444m79 2463m91 2500m66 2502m63 2502r73 2502r80 2513m55 2513r65 2523r104
+. 2539r95 2635r58 2644r92 2679r175
+403f15*Z{long_float} 461r100 469r32 470r31 621r49 649m30 651m30 719m24 810r59
+. 810r80 860r40 860r60 860r80 860r87 868r51 868r71 868r87 868r94 886r106
+. 886r131 886r152 886r164 901m73 901r86 942r43 952r36 955m24 1150r47 1151r57
+. 1157r41 1158r41 1201r66 1201r90 1201r97 1429m33 1441r31 1442m30 1442r38
+. 1453r104 1453r120 1460r101 1466r95 1466r111 1507r80 1507r107 1508r38 1508r58
+. 1508r73 1508r80 1679r127 1850r49 1860m24 1969r21 1970r51 1973r59 1993r174
+. 2269r105 2283r75 2297r97 2313r80 2350m63 2354m60 2358r63 2359r39 2383m57
+. 2391m60 2400m99 2406m57 2444m93 2463m106 2500m81 2503r39 2504m41 2504r66
+. 2504r71 2515r35 2516m35 2526r100 2527r78 2527r167 2680r58
+404f7*Tu{long_float} 450r23 945r36 947m24 947r32 1153r34 1200r41 2269m33
+. 2283m39 2290m48 2304m42 2306m42 2322m45 2358m27 2449m27 2465m30 2523r70
+. 2644m36
+404f11*Tv{long_float} 450r44 945r54 947m43 947r51 1154r34 1200r62 2269m65
+. 2283m53 2290m62 2300m42 2302m42 2322m74 2358m41 2449m41 2465m44 2523r95
+. 2644m72
+404f15*Tz{long_float} 469r71 470r24 1150r86 1150r101 1151r50 1157r80 1158r34
+. 1201r83 2269m97 2283m67 2290m76 2295m45 2297m45 2312m45 2358m55 2449m55
+. 2465m58
+405f7*Wz{long_float} 469r12 1150r27 1157r21 1201r46 2269m110 2283m80 2290m93
+. 2295m62 2297m62 2313m45 2359m27 2449m72 2465m75
+406r7*Desc{26|105R9} 957m27 2270m33 2282m39 2360m27 2458m27 2466m30 2667r21
+. 2668r84
+407f7*Box_W{long_float} 457r52 461r80 664r63 720m24 723r61 1028r66 1066r65
+. 1134r65 1633r96 1854m18 1934r83 1934r163 1974r79 1975r95 2355m30 2385m27
+. 2401m33 2407m27 2445m27 2446r64 2527r143
+407f14*Box_H{long_float} 457r79 461r89 664r72 721m24 723r71 1028r75 1067r65
+. 1134r74 1633r105 1855m18 1934r92 1934r172 1974r153 1975r185 2355m87 2385m84
+. 2401m88 2407m84 2445m82 2446r74 2527r154
+408i7*Count{natural} 669r53 670r87 670r120 671r89 719m62 1031r42 1031r70
+. 2354m100 2400m137 2406m97 2444m131
+409f7*Height{long_float} 461r54 719m40 2310r115 2354m77 2400m115 2406m74
+. 2444m109 2527r115
+410f7*Err0{long_float}
+411b7*Lost{boolean} 607m9 635m53 735m53 1446m27 1455r33 1456m33 1459m33 1477r22
+. 1500r21 1563r31 1601r37 1853m66 1865m15 1893r31 1935r31 1939m24 1959r21
+. 1972r52 1993r29 2634r82 2643r88 2655r30
+412b7*Has_Meas{boolean} 1406m18 1460m33 1505r35 1506r35 1507r35 1567r65 1568r65
+. 1605r68 1606r68
+413f7*Meas_U{long_float} 1460m53 1505r51 1567r87 1605r90
+413f15*Meas_V{long_float} 1460m71 1506r51 1568r87 1606r90
+413f23*Meas_Z{long_float} 1460m89 1507r55 1507r95
+414b7*Known{boolean} 1892r38 1894m27 1934r38 1936m27 2350m76 2384m27 2391m73
+. 2463m119 2622r100
+415f7*Elong{long_float} 673r63 673r95 725m24 728r91 2356m30 2448m27
+416f7*Gray{long_float} 674r52 675r108 2356m51 2448m47
+417b7*Unsure{boolean} 732m24 1480r18
+418f7*Size{long_float} 466r73 723m24 801r67 801r83 871r51 871r74 871r101
+. 871r111 872r54 872r64 873r51 873r74 1161r44 1162r44 1202r100 1510r35 1510r58
+. 1510r85 1510r95 1511r37 1511r47 1512r35 1512r58 2446m27 2524r130 2533r97
+419f7*Ang{long_float} 724m24 802r73 802r88 873r107 873r116 874r59 874r68
+. 1166r49 1203r89 1512r91 1512r100 1513r43 1513r52 2447m27
+420f7*Tsize{long_float} 466r35 466r63 466r83 1161r66 1162r34 1202r69 1202r90
+. 1202r110 2450m27 2524r92 2524r118 2524r142 2533r132
+420f14*Tang{long_float} 1166r40 1203r80 2451m27
+421f7*Wsize{long_float} 466r12 1161r21 1202r46 2455m27 2524r67 2529r65
+421f14*Wang{long_float} 727r27 728m27 1165r21 1166r68 1203r46 1203r65 2457m27
+422f7*Steps_Err{long_float} 1193m21 1195m24 1195r39 1197m21 1197r42 1212r41
+. 1526r49 2680r92
+423f7*Err_U{long_float} 1198m21 1670r181
+423f14*Err_V{long_float} 1198m53 1671r52
+423f21*Err_Z{long_float} 1198m85 1671r96
+424f7*Err_S{long_float} 1199m21 1672r52
+424f14*Err_A{long_float} 1199m53 1672r96
+425f7*Raw_Err{long_float} 1200m21 1213r41 1527r49
+427f7*Par_Tu{long_float} 945m24 2644r44
+427f15*Par_Tv{long_float} 945m42 2644r80
+429K12 Point_Vectors[12|74] 431r122 753r122 791r32 839r37 925r85 926r15 972r120
+. 1012r13 1823r122 2253r16
+430A9 Effect_Array(93|20R9)<integer> 754r43 980r14
+431U14 Refind_Pieces 431=29 431=51 431=71 431>94 431=109 1472s13 1823b14
+. 1995l8 1995t21 2628s19
+431r29 L{49|39R9} 1823b29 1881m24 1882m24 1923m32 1928m37
+431r51 C{1|62R9} 1823b51 1827r47 1881r27 1881r43 1882r27 1882r42 1921r37
+. 1921r64 1921r110 1922r31 1923r35 1924r69 1928r40 1929r95 1954r51 1989m25
+. 1989r25 1989r35 1989r51 1994r88
+431r71 F{49|20R9} 1823b71 1825r32 1826r32 1828r51 1856r19 1858r45 1881m30
+. 1882m30 1914r40 1918r50 1923m38 1924r50 1926r46 1928m61 1929r76 1956r48
+431i94 Cam{natural} 1823b94 1825r40 1826r40 1827r55 1856r27 1858r53 1881r70
+. 1882r69 1914r48 1921r95 1924r58 1924r83 1926r54 1929r84 1929r109 1954r59
+. 1956r33 1994r100
+431r109 Pts{12|91R9[429]} 1823b109 1824r33 1870r16 1885r36 1887r32 1896m22
+. 1896r22 1903r30 1905r26 1941m19 1941r19 1957r19 1993r21 1993r93 1993r127
+. 1993r166
+435V13 Wrap{long_float} 435b13 435>19 446l8 446t12 802s64 873s99 874s51 1166s32
+. 1203s72 1512s83 1513s35
+435f19 X{long_float} 437r25
+436f7 Two_Pi{long_float} 440r19 443r19
+437f7 Y{long_float} 439r13 440m10 440r15 442r13 443m10 443r15 445r14
+448V13 Err_Of{long_float} 448b13 448>21 451l8 451t14 463s10
+448r21 P{396R9} 450r21 450r28 450r42 450r49
+454V13 Size_Floor{long_float} 454b13 454>25 801s90 1510s103
+454i25 Cw{natural} 454r95
+456V13 Ang_Floor{long_float} 456b13 456>24 456>35 456>39 802s95 1512s108
+456r24 P{396R9} 457r50 457r77
+456i35 Cw{natural} 457r72
+456i39 Ch{natural} 457r99
+460V13 Reached{boolean} 460b13 460>22 460>33 473l8 473t15 1727s23
+460r22 P{396R9} 461r52 461r78 461r87 461r98 463r18 466r10 466r33 466r61 466r71
+. 466r81 469r10 469r30 469r69 470r22 470r29
+460f33 Track_Floor{long_float} 463r23
+461f7 Tol{long_float} 470r53
+475V13 Held_Now{integer} 475b13 475>23 475>36 482s41 493s93
+475r23 C{1|62R9} 476r10 476r33 476r69
+475i36 Arm{natural} 476r59
+478V13 Find_Effect{integer} 478b13 478>26 478>39 478>44 478>59 478>78 478>96
+. 487l8 487t19 491s31 526s45 529s38 568s60 1089s42 1323s57
+478r26 C{1|62R9} 480r30 481r13 481r45 481r77 481r111 481r149 482r21 482r51
+478i39 Arm{natural} 481r32 482r54
+478i44 Cam{natural} 481r64
+478e59 Kind{1|35E9} 481r97
+478i78 Chan_K{natural} 481r133
+478i96 Blob{integer} 481r169
+480i11 I{integer} 481r23 481r55 481r87 481r121 481r159 482r31 483r20
+489U14 Store_Effect 489b14 489=28 489>48 489>53 489>68 489>87 489>105 489>121
+. 489>139 489>159 490>28 490>69 504l8 504t20 1119s19 1619s13
+489r28 C{1|62R9} 491r44 493r103 496r21 497r25 500m10 500r10 502m10 502r10
+489i48 Arm{natural} 491r47 493r30 493r106
+489i53 Cam{natural} 491r52 493r35
+489e68 Kind{1|35E9} 491r57 493r40
+489i87 Chan_K{natural} 491r63 493r46
+489i105 Blob{integer} 491r71 493r54
+489r121 E{93|20R9} 493r60
+489a139 Trust{93|16A9} 493r63
+489a159 Reach{93|11A9} 493r70
+490a28 Pose{49|10A9} 493r77
+490b69 Has_Pose{boolean} 493r83 495r14
+491i7 I{integer} 492r33 499r10 500r45
+492i7 Old{integer} 495r32 496r40 497r44
+493r7 Se{1|36R9} 496m10 497m10 500r49 502r27
+508U14 Feel 508b14 508=20 508>40 600l8 600t12 2124s7 2629s19 2674s16
+508r20 C{1|62R9} 511r21 512r25 513r25 513r102 513r123 517r60 517r84 521r56
+. 522r44 522r64 526r58 529r51 533r74 535r53 557r73 568r73 569r95 572r79 584r79
+. 593m25 593r25 593r61
+508r40 F{49|20R9} 513r69 517r74 579r125 580r101 580r173 581r125 582r101 582r173
+509V16 Clamp{long_float} 509b16 509>23 544s37 544s71 545s37 545s71 574s43
+. 574s86
+509f23 X{long_float} 509r103
+511i11 A{integer} 513r44 513r56 513r105 517r67 517r80 522r67 526r61 529r54
+. 557r84 568r76 584r90 593r64
+512i14 Cm{integer} 513r28 513r108 517r70 522r70 526r64 529r57 568r79 579r133
+. 580r109 580r181 581r133 582r109 582r181 593r67
+515a19 Diff{93|11A9} 517m109 517r109 535r81 557r38 569r123 584r44
+516f19 Dist{long_float} 517m115 517r115
+517i19 Si{integer} 519r22 521r74
+521r25 Sm{50|20R9} 524r58 566r31 570r58 574r50 574r93 575r37 576r45 579r85
+. 580r133 581r85 582r133
+522r25 Tr{1|50R9} 543m28 544m28 544m62 545m28 545m62 546m28 548m31 548r41
+. 548r49 548m63 548r73 548r81 550m31 550r40 550m47 550r56 553m31 555m28 558m34
+. 561m28 561r63 561r70 561r77 561r123 561r130 561r137 561r144 562m28 562r62
+. 588m34 589m34 593r72
+523a25 Reach{93|11A9} 533m34 533r63 557r120
+524r25 Gp{50|11R9} 542r28 544r44 544r78 545r44 545r78 546r44 547r31 552r31
+. 553r39 553r50 561r83 561r90 561r97 561r104 561r111
+525V34 Shift{93|13A9} 525b34 525>41 538l29 538t34 539s53 540s53
+525i41 Blob{integer} 526r92
+526i28 Idx{integer} 528r31 529m31 531r31 533r93 535r72
+532i35 K{integer} 533r41 533r70 533r106
+539a25 Sa{93|13A9} 544r53 544r87 553r72 553r100
+540a25 Sb{93|13A9} 545r53 545r87 553r81
+556i32 K{integer} 557r44 557r103 557r127
+565i29 K{integer} 566r41 568r93 570r68 574r60 574r103 575r47 576r55 579r95
+. 580r143 581r95 582r143 588r45 589r51
+568i34 Idx{integer} 569r66 569r114 572r65 572r98 584r119
+569a34 Sh{93|13A9} 574r68 574r111 576r62 579r104 580r152 581r104 582r152
+570r34 Pr{50|11R9} 574m34 574m77 576m37 579m34 580m34 581m34 582m34 588r51
+571b34 Kn{boolean} 585m40 589r57
+572a34 R2{93|11A9} 584r165
+583i38 J{integer} 584r50 584r109 584r169
+603U14 Retrack 603b14 603=23 603>43 603>59 603>74 603=88 603>106 603>114
+. 603>135 603>156 739l8 739t15 800s22 858s28 900s31 1453s28 1466s19
+603r23 C{1|62R9} 610r25 620r56 661r63
+603r43 F{49|20R9} 604r32 605r32 628r32 640r19 644r70 661r66 675r74
+603i59 Cam{natural} 604r40 605r40 610r28 620r66 628r40 640r27 644r78 661r69
+. 675r82
+603r74 Before{34|8R12} 627r32
+603r88 P{396R9} 607m7 608r12 610r44 620r59 621r47 633r33 633r39 635m19 635m35
+. 635m51 637m19 637r69 638m19 638r69 644r98 644r104 649m28 651m28 664r61
+. 664r70 669r51 670r85 670r118 671r87 673r61 673r93 674r50 675r106 719m22
+. 719m38 719m60 720m22 721m22 722m22 722m36 723m22 723r59 723r69 724m22 725m22
+. 727r25 728m25 728r89 732m22 735m19 735m35 735m51
+603f106 Pred_U{long_float} 635r27 668r60 684r63 735r27
+603f114 Pred_V{long_float} 635r43 668r83 684r86 735r43
+603b135 Moved_Arm{boolean} 634r19
+603f156 Pred_Z{long_float} 648r49 648r81 648r97 651r35
+604i7 Cw{natural} 615r41 627r58 628r69 634r77 644r90 675r93 720r72
+605i7 Ch{natural} 616r41 644r94 675r97 721r72
+615i16 Hw{natural} 623r63 624r63 626r33 631r42
+616i16 Hh{natural} 623r68 624r68 625r30 631r46
+617r16 A{34|8R12} 623m16 623r16 627m22 627r22 631r36
+617r19 B{34|8R12} 624m16 624r16 628m22 628r22 631r39
+618r16 Fl{38|5R9} 631m16 631r16 633r29
+619f16 Du{long_float} 633m83 634r44 634r49 637r76
+619f20 Dv{long_float} 633m87 634r54 634r59 638r76
+620r16 Z{96|15R9} 633r67 643r74
+621f16 Old_Z{long_float} 648r28 648r106 648r121
+625i20 Y{integer} 627r53 628r64
+626i23 X{integer} 627r67 628r78
+643f22 Win{long_float} 644r110
+644f22 Zd{long_float} 646r45 648r76 649r35
+661r16 Regs{48|17R12} 681r39 683r53 699r44 703r31
+662i16 Best{integer} 689r48 690m37 697r19 699r50
+662i22 Second{integer} 689m38 692m37 732r34
+663f16 Bd{long_float} 688r32 689r34 690m28 732r61
+663f20 Sd{long_float} 689m28 691r35 692m28 732r55
+664f16 Tol{long_float} 668r115 687r30
+667V25 Unlike{long_float} 667b25 667>33 679l20 679t26 685s49
+667r33 R{48|6R9} 668r53 668r76 669r72 670r76 670r109 671r78 673r51 675r101
+668f19 D{long_float} 678r26
+669f19 Sz{long_float} 678r30
+673f19 E{long_float} 678r35
+674f19 G{long_float} 678r39
+681i20 I{integer} 683r59 690r45 692r47
+683r22 R{48|6R9} 684r56 684r79 685r57
+684f22 D{long_float} 687r25
+685f22 U{long_float} 688r28 690r34 691r31 692r34
+699r22 R{48|6R9} 704r57 704r79 704r101 704r123 706r60 706r79 706r133 707r60
+. 707r79 707r133 709m31 709r52 709m65 709r86 710m31 710r52 710m65 710r86
+. 711m31 711m43 712m31 712r42 713r58 713r91 714m34 719r29 719r50 719r71 720r45
+. 720r52 721r45 721r52 722r30 722r44 724r45 724r51 725r33
+703r26 Q{48|6R9} 704r28 704r49 704r71 704r93 704r115 706r90 706r109 706r143
+. 707r90 707r109 707r143 709r58 709r92 710r58 710r92 712r52 713r34 713r81
+. 714r45
+706f31 Cx{long_float} 711r39
+707f31 Cy{long_float} 711r51
+742U14 Step_Arm 742b14 742=24 742>46 742=59 742>82 742>97 742>112 743<24
+. 743<51 743>69 743>95 748l8 748t16 847s22 1375s10 1923s22 2020s7
+742r24 L{49|39R9} 747m19
+742r46 C{1|62R9} 747r22
+742r59 F{49|20R9} 744r38 747m61
+742i82 Arm{natural} 744r44 747r29
+742a97 A{93|11A9} 747r52
+742r112 Jaw{34|10R12} 747r56
+743a24 Delivered{93|11A9} 747m64
+743b51 Ok{boolean} 747m83
+743b69 Quick{boolean} 747r87
+743p95 Watch{51|51P9} 747r94
+744a7 P0{49|10A9} 747r48
+745i7 Frames{natural} 747m75
+753U14 Probe_Effects 753b14 753=29 753=51 753=71 753>94 753=109 754=29 754<57
+. 754<81 917l8 917t21 1112s16
+753r29 L{49|39R9} 794m30 847m32 891m37
+753r51 C{1|62R9} 766r47 774r68 800m31 829r33 830r46 832r20 847r35 858m37
+. 862r47 891r40 900m40
+753r71 F{49|20R9} 756r38 758r32 759r32 769r35 781r10 788r46 792r42 794m33
+. 800r34 809r67 838r47 847m38 858r40 889r51 891m61 900r43
+753i94 Cam{natural} 758r40 759r40 766r55 781r18 788r54 792r50 800r37 809r75
+. 838r55 858r43 889r59 900r46
+753r109 Pts{12|91R9[429]} 755r33 761r38 764r38 765r38 770r30 783r39 786r36
+. 788r74 788r86 791r56 796r39 798r36 806r36 809r95 809r107 810r51 810r72
+. 839r61 852r45 854r41 880m28 880r28 886r98 886r144 896r48 898r44 902m31
+. 902r31
+754a29 Effs{430A9} 771m23 771r23 776m33 776r33 875m49 875r49
+754a57 Trust{93|16A9} 768m7 884m25 906r32
+754b81 Ok{boolean} 822m7 849m25 893m28
+755i7 Arm{natural} 756r44 766r50 769r38 774r79 828r39 847r41 891r47
+756a7 P0{49|10A9} 891r52
+757r7 Jaw{34|10R12} 769m7 769r7 847r49 891r56
+758i7 Cw{natural} 760r59 788r66 801r102 802r116 809r87
+759i7 Ch{natural} 788r70 802r120 809r91
+760f7 Floor_Px{long_float} 862r79 908r197
+761a7 Floor_Z(long_float) 814m22 816m22 862r102
+764a7 Floor_S(long_float) 801m22 871r119
+765a7 Floor_A(long_float) 802m22 873r124
+766r7 Z{96|15R9} 788r121 809r142
+770i11 I{integer} 771r29 776r39
+772i14 K{integer} 774r100 776r43
+774f16 Am{long_float} 776r55 776r60
+783a13 Z1(long_float) 788m16 813r42 814r64
+784b13 Ok2{boolean} 794m39
+786i17 I{integer} 788r20 788r79 788r91
+791r16 Was0{12|91R9[429]} 800r55 800r68 801r74 802r79 802r106
+792r16 Before0{34|8R12} 800r42
+796i20 I{integer} 798r41 800r61 800r74 801r31 801r80 802r31 802r85 802r112
+798r22 P2{396R9} 800m51 800r51 801r64 802r70
+806i17 I{integer} 809r100 809r112 810r56 810r77 813r46 814r31 814r68 816r31
+809f19 Z2{long_float} 813r79 814r73
+810f19 Zr{long_float} 814r85 816r44
+826i11 K{integer} 828r60 846r25 862r42 866r69 867r69 868r106 872r79 874r82
+. 875r59 884r32 885r143 906r39
+828i13 Chn{natural} 829r44 830r57 832r32 833r62 885r71 908r71
+829f13 Amp{long_float} 832r45 846r31 885r102 907r25 908r99 911m22 911r29
+830f13 Cap_Amp{long_float} 907r37
+837a22 A{93|11A9} 846m22 847r46
+838r22 Before{34|8R12} 858r48
+839r22 Was{12|91R9[429]} 855r51 886r123 886r156 900r63 900r75 901r39 901r59
+. 901r78
+840a22 Deliv{93|11A9} 847m54 862r35 866r62 867r62 868r99 872r72 874r75 885r136
+840a29 Back{93|11A9} 891m64
+841b22 Ok2{boolean} 847m61 848r29 891m78 892r32
+842i22 Frames{natural} 891m70
+843b22 Seen_Enough{boolean} 878m31 883r25
+844f22 Ran_Max{long_float} 861m28 861r55 886r46 908r152
+852i26 I{integer} 854r46 855r56 862r111 871r128 873r133 875r55 880r49
+854r28 P{396R9} 858m56 858r56 859r42 859r64 860r38 860r78 866r46 867r46 868r49
+. 868r85 871r49 871r99 872r52 873r49 873r105 874r57 880r52
+855r28 W0{396R9} 858r59 858r66 859r49 859r71 860r57 860r84 866r53 867r53
+. 868r68 868r91 871r71 871r108 872r61 873r71 873r113 874r65
+856f28 Ran{long_float} 859m28 861r64 862r72
+856f33 Dz{long_float} 860m28 862r96
+864a34 Col{93|13A9} 866m34 867m34 868m34 871m34 873m34 875r62
+889r25 Before2{34|8R12} 900r51
+896i29 I{integer} 898r49 900r68 900r80 901r44 901r64 901r83 902r52
+898r31 P{396R9} 900m60 900r60 901m31 901m51 901m71 902r55
+919V13 Amount_Factor{long_float} 919b13 919>28 2375s32
+919r28 A{26|105R9} 920r10 920r38
+925U14 Expand_Lobes 925b14 925>28 925>41 925>57 925=72 968l8 968t20 2615s13
+925r28 C{1|62R9} 932r53 934r85 938r50 938r70
+925r41 F{49|20R9} 927r32 928r32 948r25 950r51
+925i57 Cam{natural} 927r40 928r40 932r63 934r88 938r80 948r33 950r59
+925r72 Pts{12|91R9[429]} 930r16 967m7
+926r7 Out_P{12|91R9[429]} 959m22 959r22 963m16 963r16 967r14
+927i7 Cw{natural} 950r71
+928i7 Ch{natural} 950r75
+930r11 P{396R9} 932r56 934r16 934r43 934r105 937r35 938r73 942r41 945r34
+. 945r52 946r30 946r49 947r30 947r49 952r34 963r30
+932r13 Z{96|15R9} 934r121 934r138 940r135 940r147 940r157 941r135 941r147
+. 941r157 950r114
+935i20 Lb{integer} 940r76 940r123 941r76 941r123 944r32 956r25
+937r22 Q{396R9} 944m22 945m22 945m40 946m22 946m41 947m22 947m41 950r79 950r85
+. 955m22 957m25 959r36
+938r22 Tr{1|50R9} 940r54 940r88 940r99 940r108 941r54 941r88 941r99 941r108
+940f22 Ou{long_float} 946r37 947r37
+941f22 Ov{long_float} 946r56 947r56
+942f22 Zd{long_float} 950m25 951r44 952m28 955r29
+972U14 Run_Segment 972b14 972=27 972=49 972=69 972>92 972=107 973>27 973>60
+. 973>82 973>103 974<27 974<57 974<84 974<111 1780l8 1780t19 2673s16
+972r27 L{49|39R9} 976r48 1112m31 1375m20 1376r31 1472m28 1473r34 1775r34
+972r49 C{1|62R9} 979r46 1023r39 1052r13 1057r60 1077r41 1077r85 1078r69 1089r55
+. 1091r77 1092r27 1094r50 1095r57 1095r106 1097r31 1098r33 1100r62 1112m34
+. 1119m33 1137m13 1176r28 1177r111 1227r68 1237r19 1316r51 1316r75 1318r50
+. 1318r70 1323r70 1324r92 1349r52 1374r55 1375r23 1375r67 1411r63 1411r96
+. 1416r69 1417r64 1421r61 1433r73 1451r68 1453m37 1466m28 1472m31 1514r82
+. 1537r74 1584r95 1586r104 1619m27 1624r67 1712r63 1712r84 1713r43 1750r60
+. 1750r89 1751r21 1752r22
+972r69 F{49|20R9} 977r32 978r32 1056r26 1057r63 1094r81 1112m37 1119r119
+. 1372r20 1374r58 1375m26 1392r66 1411r82 1453r40 1466r31 1472m34 1624r70
+. 1711r102 1748r35
+972i92 Cam{natural} 977r40 978r40 979r49 1023r46 1056r34 1057r66 1089r63
+. 1112r40 1119r41 1316r59 1318r78 1323r78 1372r28 1374r61 1392r74 1411r77
+. 1451r78 1453r43 1466r34 1472r37 1619r35 1624r73 1750r45 1750r106
+972r107 Pts{12|91R9[429]} 975r33 980r42 981r37 1020r19 1064r22 1087r33 1089r68
+. 1089r82 1089r98 1112m45 1117r39 1119r46 1119r60 1119r76 1132r22 1139r33
+. 1141r38 1204m19 1204r19 1211r22 1231r39 1245r45 1273r33 1302r39 1305r50
+. 1306r50 1373r17 1400r33 1402r29 1468m16 1468r16 1472m42 1476r19 1493r33
+. 1495r38 1562r36 1563r23 1567r57 1567r79 1567r99 1568r57 1568r79 1568r99
+. 1600r42 1601r29 1605r60 1605r82 1605r102 1606r60 1606r82 1606r102 1618r33
+. 1619r40 1619r54 1619r70 1632r31 1670r173 1671r44 1671r88 1672r44 1672r88
+. 1679r46 1679r80 1679r119 1726r22
+973e27 Until_Kind{46|20E9} 1711r28 1715r36
+973i60 Step_Limit{natural} 1711r43 1759r51 1759r71
+973f82 Amount{long_float} 1255r123
+973r103 Avoid{12|91R9[1|33]} 1292r29
+974r27 Event{26|105R9} 1744m7 1756m10 1762m13 1767m13 1774m13 1779m7
+974i57 Steps_Taken{natural} 1077r116 1078r100 1383m10 1383r25 1669r53 1736r13
+. 1745m7 1779r60
+974b84 Blocked_Out{boolean} 1690m13 1747m7
+974i111 Beats{natural} 1376m10 1473m13 1672r132 1746m7 1775m13
+975i7 Arm{natural} 979r65 1089r58 1094r87 1095r68 1119r36 1119r125 1176r40
+. 1177r122 1226r44 1316r54 1318r73 1323r73 1375r29 1537r85 1586r115 1619r30
+. 1711r105 1712r48 1712r93 1748r38
+976i7 Beats0{natural} 1376r36 1473r39 1775r39
+977i7 Cw{natural} 1062r40 1069r43 1070r94 1072r75 1072r110 1077r144 1311r52
+. 1311r96 1325r88 1510r115 1512r123 1749r53
+978i7 Ch{natural} 1062r44 1069r47 1071r94 1073r75 1073r110 1077r148 1311r74
+. 1311r118 1326r88 1512r127
+979b7 Own_Cam{boolean} 1316r23 1374r30 1407r50 1622r17
+980a7 Effs{430A9} 1097m19 1112m50 1112r50 1119r90 1144r23 1235r51 1235r76
+. 1247r67 1275r59 1304r65 1404r59 1422r71 1498r36 1525m16 1566r65 1604r71
+. 1619r84
+981a7 Trusts(93|16A9) 1098m19 1118m19 1176r73 1232r26 1619r94
+982a7 Reach{93|11A9} 1100m22 1100r51 1254r70 1255r109 1433r124 1548m25 1548r59
+. 1586m22 1586r51 1588m22 1588r56 1619r106 1673r89 1673r122 1673r155 1674r31
+. 1674r64 1674r97
+983r7 Fl{46|7R9} 1243r55 1455r126 1514r50 1518r40 1521r35 1572r32 1572r61
+. 1649r55 1668r99 1727r35 1749m7 1750m7 1751m7 1752m7
+984r7 W{46|14R9} 1667m24 1667r24 1689r52 1711r40 1736r55
+985r7 Ring{32|7R9} 1390m30 1390r30 1753m21 1753r21
+986r7 Jaw{34|10R12} 1375r44 1748m7 1748r7
+987f7 Last_Err{long_float} 1209r13 1210m13 1212m16 1212r28 1681m10
+988f7 Last_Raw{long_float} 1210m30 1213m16 1213r28 1215r25 1670r44 1682m10
+989f7 Best_Raw{long_float} 1215m13 1667r98 1683r13 1683r51 1684m13
+990f7 Trust{long_float} 1347r52 1614m19 1614r34 1673r47
+991i7 Lost_Run{natural} 1693m10 1693r45 1694r13 1697r13
+994R12 Note_Rec 1009e17 1010r14
+995a10 Cmd{93|11A9} 1265m78 1275r74 1304r80 1324r125 1347m18 1347r34 1349r30
+. 1375r39 1539r55 1540r39 1584r53 1675r54 1675r90 1675r126 1676r36 1676r72
+. 1676r108
+995a15 Got{93|11A9} 1375m54 1388r31 1404r74 1514r41 1539r40 1566r80 1604r86
+. 1668r77 1677r54 1677r90 1677r126 1678r36 1678r72 1678r108
+995a20 Cap{93|11A9} 1254m27 1265r49
+996a10 Active{93|16A9} 1238m24 1265r59 1547r30 1584r24
+997f10 Floor_Cmd{long_float} 1257m24 1257r46 1257r97 1514r109 1584r84
+998f10 Err_Now{long_float} 1491m15 1526m21 1526r37 1670r131 1681r27 1737r98
+999f10 Raw_Now{long_float} 1492m15 1527m21 1527r37 1667r131 1670r85 1682r27
+. 1683r41 1684r30
+1000f10 Pic_Delta{long_float} 1392m15 1667r68
+1001b10 Big_Step{boolean} 1284m18 1445r30 1669r77
+1002b10 Halted{boolean} 1034m33 1040m27 1377r18 1531r22 1585r67
+1003b10 Blocked{boolean} 1516m27 1680r29 1689r18 1711r60
+1004b10 Not_Followed{boolean} 1545m66 1585r93 1708r18
+1005b10 Touched{boolean} 1650m33 1657r18 1713r66
+1006b10 Lost_All{boolean} 1475m15 1478m21 1693r31
+1007b10 Unsure{boolean} 1481m21 1702r18
+1008r10 Say_Stop{26|105R9} 1340m24 1350m18 1363m18 1698m18 1704m18 1715m18
+. 1732m21 1737m18 1761r18 1762r27 1773r18 1774r27
+1010r7 Note{994R12} 1034m28 1040m22 1238m19 1254m22 1257m19 1257r41 1257r92
+. 1265r44 1265r54 1265m73 1265r73 1275r69 1284m13 1304r75 1324r120 1340m19
+. 1347m13 1347r29 1349r25 1350m13 1359m10 1359r10 1363m13 1375r34 1375m49
+. 1375r49 1377r13 1388r26 1392m10 1404r69 1445r25 1475m10 1478m16 1481m16
+. 1491m10 1492m10 1514r36 1514r104 1516m22 1526m16 1526r32 1527m16 1527r32
+. 1531r17 1539r35 1539r50 1540r34 1545m61 1547r25 1566r75 1584r19 1584r48
+. 1584r79 1585r62 1585r88 1604r81 1650m28 1657r13 1667r63 1667r126 1668r72
+. 1669r72 1670r80 1670r126 1675r49 1675r85 1675r121 1676r31 1676r67 1676r103
+. 1677r49 1677r85 1677r121 1678r31 1678r67 1678r103 1680r24 1681r22 1682r22
+. 1683r36 1684r25 1689r13 1693r26 1698m13 1702r13 1704m13 1708r13 1711r55
+. 1713r61 1715m13 1732m16 1737m13 1737r93 1761r13 1762r22 1773r13 1774r22
+1011r7 Before{34|8R12} 1372m10 1392r58 1453r48 1466r39
+1012r7 Was{12|91R9[429]} 1373m10 1403r39 1496r39 1565r45 1603r51
+1013r7 Was_Regs{48|17R12} 1374m10 1622r38 1638r34
+1016V16 Watch_Things{boolean} 1016b16 1016>30 1047l11 1047t23 1375r75
+1016r30 Fr{49|20R9} 1023r42
+1017r10 Regs{48|17R12} 1023m19 1030r28
+1018b10 Have{boolean} 1022r23 1024m19
+1020r14 P{396R9} 1021r16 1028r64 1028r73 1031r40 1031r68 1031r103 1031r124
+1027b19 Found{boolean} 1032m25 1039r26
+1028f19 Tol{long_float} 1031r139
+1030r23 R{48|6R9} 1031r25 1031r57 1031r96 1031r117 1033r28 1033r53 1033r84
+. 1033r109
+1050U17 Dump_Picture 1050b17 1050>31 1080l11 1080t23 1687s13 1695s13 1703s13
+1050a31 Tag{string} 1077r61 1078r45
+1056r13 RGB{34|8R12} 1062m35 1062r35 1069m38 1069r38 1077r139
+1057r13 Regs{48|17R12} 1060r22
+1058i13 N{natural} 1061m16 1061r21 1062r72 1078r146
+1060r17 R{48|6R9} 1062r48 1062r54 1062r60 1062r66
+1064r17 P{396R9} 1066r63 1067r63 1070r69 1071r69 1072r85 1073r85
+1066f19 Hw{long_float} 1070r76 1072r92
+1067f19 Hh{long_float} 1071r76 1073r92
+1083U17 Ready_Tables 1083b17 1083<31 1123l11 1123t23 1754s7
+1083b31 Ok_Out{boolean} 1086m10 1114m19
+1084b10 Need{boolean} 1103m19 1107r13
+1087i14 I{integer} 1089r73 1089r87 1089r103 1097r25 1098r27
+1089i16 Idx{integer} 1091r19 1091r96 1092r46 1094r69 1095r125 1097r50 1098r52
+. 1100r81
+1091i47 K{integer} 1091r109
+1093i36 K{integer} 1094r94 1095r89 1095r138
+1099i23 K{integer} 1100r29 1100r58 1100r94
+1109a16 Trust{93|16A9} 1112m56 1118r33 1119r100
+1110b16 Ok{boolean} 1112m63 1113r23
+1117i20 I{integer} 1118r27 1119r51 1119r65 1119r81 1119r96
+1126U17 Aim 1126b17 1126<22 1217l11 1217t14 1360s10
+1126r22 Terms{12|91R9[93|47]} 1128m10 1128r10 1206m16 1206r16
+1130f13 Big{long_float} 1134m19 1134r42 1137r28
+1132r17 P{396R9} 1133r19 1134r63 1134r72
+1139i14 I{integer} 1141r43 1144r29 1176r81 1204r40
+1141r16 P{396R9} 1150r25 1150r45 1150r84 1150r99 1151r48 1151r55 1153r32
+. 1153r39 1154r32 1154r39 1157r19 1157r39 1157r78 1158r32 1158r39 1161r19
+. 1161r42 1161r64 1162r32 1162r42 1165r19 1166r38 1166r47 1166r66 1191r32
+. 1200r39 1200r46 1200r60 1200r67 1201r44 1201r64 1201r81 1201r88 1201r95
+. 1202r44 1202r67 1202r88 1202r98 1202r108 1203r44 1203r63 1203r78 1203r87
+1142r16 T{93|42R9} 1144m16 1153m19 1153m46 1154m19 1154m46 1158m19 1158m44
+. 1162m19 1162m50 1166m19 1166m55 1177r71 1181m25 1181r38 1183m28 1183r44
+. 1186m25 1195r52 1195r64 1198r30 1198r42 1198r62 1198r74 1198r94 1198r106
+. 1199r30 1199r42 1199r62 1199r74 1206r30
+1149f19 Near{long_float} 1153r57 1154r57
+1171i20 R{integer} 1177r81 1181r32 1181r45 1183r38 1183r54 1186r30
+1173f22 Per_Step{long_float} 1177m28 1177r56 1180r25 1181r50 1183r59
+1175i26 K{integer} 1176r61 1176r85 1177r78 1177r143
+1182i29 K{integer} 1183r35 1183r51
+1191r19 Q{396R9} 1193m19 1195m22 1195r37 1197m19 1197r40 1198m19 1198m51
+. 1198m83 1199m19 1199m51 1200m19 1204r43
+1194i23 R{integer} 1195r59 1195r69
+1211r17 P{396R9} 1212r39 1213r39
+1221U17 Budget 1221b17 1221>25 1221<60 1266l11 1266t17 1361s10
+1221r25 Terms{12|91R9[93|47]} 1247r31 1265r23
+1221b60 Solved{boolean} 1265m83
+1222a10 Damp{93|11A9} 1262m16 1265r67
+1224i14 K{integer} 1226r65 1232r38 1235r63 1235r88 1238r32 1247r79 1254r32
+. 1254r77 1255r116 1262r22
+1226i16 Ch_No{natural} 1227r79 1237r31
+1227f16 Am{long_float} 1243r50 1254r54 1255r93 1257r68 1257r108
+1228b16 All_Trust{boolean} 1233m22 1237r47
+1229f16 Px{long_float} 1235m19 1235r41 1243r45 1255r85 1262r29
+1231i20 I{integer} 1232r34 1235r57 1235r82
+1243b22 Known_All{boolean} 1248m31 1255r58
+1245i26 I{integer} 1247r38 1247r73
+1246i29 R{integer} 1247r44 1247r82
+1269U17 Trim 1269b17 1352l11 1352t15 1366s10
+1270f10 Scale{long_float} 1279m19 1279r44 1283r13 1305r72 1306r72 1325r68
+. 1326r68 1343m16 1343r25 1347r44
+1273i14 I{integer} 1275r65
+1275a16 Pr{93|13A9} 1276r49 1276r63
+1276f16 D{long_float} 1278r19 1279r63
+1287i14 Round{integer} 1339r19
+1289b16 Hit{boolean} 1309m25 1312m25 1331m34 1338r30
+1290V25 In_Avoid{boolean} 1290b25 1290>35 1290>39 1290>43 1290>47 1300l20
+. 1300t28 1311s25 1328s34
+1290f35 X0{long_float} 1293r45
+1290f39 Y0{long_float} 1294r33
+1290f43 X1{long_float} 1293r79
+1290f47 Y1{long_float} 1294r67
+1292r23 Av{1|19R9} 1293r25 1293r63 1293r97 1294r51 1294r85
+1302i20 I{integer} 1304r71 1305r55 1306r55
+1304a22 Pr{93|13A9} 1305r63 1306r63
+1305f22 Nu{long_float} 1308r25 1308r48 1311r35 1311r79
+1306f22 Nv{long_float} 1308r77 1308r100 1311r57 1311r101
+1318r22 Tr{1|50R9} 1321r28 1328r56 1328r92 1329r56 1329r92
+1320i26 K{integer} 1321r39 1323r93 1328r67 1328r103 1329r67 1329r103
+1323i31 Idx{integer} 1324r63 1324r111
+1324a31 Sh{93|13A9} 1325r59 1326r59
+1325f31 Du{long_float} 1328r76 1329r76
+1326f31 Dv{long_float} 1328r112 1329r112
+1346i14 K{integer} 1347r23 1347r39
+1355U17 Plan 1355b17 1367l11 1367t15 1760s10
+1356r10 Terms{12|91R9[93|47]} 1360m15 1361r18
+1357b10 Solved{boolean} 1361m25 1362r17
+1370U17 Walk 1370b17 1370<23 1393l11 1393t15 1765s10
+1370b23 Ok_Out{boolean} 1375m59 1380r17
+1385a13 Sv{32|6A9} 1388m16 1390r36
+1387i17 K{integer} 1388r20 1388r36
+1397U17 Look 1397b17 1484l11 1484t15 1770s10
+1398b10 Need_Refind{boolean} 1447m25 1457m31 1471r13
+1400i14 I{integer} 1402r34 1403r44 1404r65 1422r77 1468r37
+1402r16 P{396R9} 1406m16 1407r19 1411r70 1411r88 1416r35 1416r99 1417r45
+. 1417r94 1417r123 1421r91 1423r60 1423r89 1424r60 1424r89 1426m28 1427m28
+. 1429m31 1433r84 1439m25 1440m25 1442m28 1446m25 1451r71 1455r60 1455r81
+. 1456m31 1459m31 1460m31 1460m51 1460m69 1460m87 1466m47 1466r47 1468r40
+1403r16 W0{396R9} 1439r75 1440r75 1441r28 1442r35 1450r41 1453r59 1453r75
+. 1453r101 1453r117 1466r50 1466r66 1466r92 1466r108
+1404a16 Pr{93|13A9} 1439r83 1440r83 1442r42 1453r67 1453r83 1453r124 1466r58
+. 1466r74 1466r115
+1409a22 Diff{93|11A9} 1411m121 1411r121 1422r81 1433r38
+1410f22 Dist{long_float} 1411m127 1411r127
+1411i22 Si{integer} 1415r25 1416r87 1417r82 1421r79
+1412b22 Familiar{boolean} 1431m28 1434m34 1445r51
+1413b22 In_Map{boolean} 1416m25 1419r25
+1421r28 Gp{50|11R9} 1423r76 1423r105 1423r117 1424r76 1424r105 1424r117 1428r31
+. 1429r38
+1422a28 Pm{93|13A9} 1426r83 1427r83 1429r45
+1423f28 Su{long_float} 1426r78
+1424f28 Sv{long_float} 1427r78
+1432i32 K{integer} 1433r44 1433r107 1433r131
+1450r28 Q{396R9} 1453m56 1453r56 1455r31 1455r53 1455r74 1460r63 1460r81
+. 1460r99
+1451r28 Z{96|15R9} 1455r111
+1476r14 P{396R9} 1477r20 1480r16
+1487U17 Learn 1487b17 1660l11 1660t16 1771s10
+1488b10 All_Verified{boolean} 1501m19 1519m22 1545m38
+1489b10 Any_Wrong{boolean} 1502m19 1522m22 1545m19
+1493i14 I{integer} 1495r43 1496r44 1498r42 1525r22
+1495r16 P{396R9} 1500r19 1505r33 1505r49 1505r63 1506r33 1506r49 1506r63
+. 1507r33 1507r53 1507r93 1508r36 1508r71 1510r33 1510r83 1511r35 1512r33
+. 1512r89 1513r41 1526r47 1527r47
+1496r16 W0{396R9} 1505r71 1506r71 1507r77 1507r104 1508r55 1508r77 1510r55
+. 1510r92 1511r44 1512r55 1512r97 1512r119 1513r49
+1497a16 Dy{93|13A9} 1505m19 1506m19 1507m19 1510m19 1512m19 1514r46
+1498r16 E{93|20R9} 1514m33 1514r33 1515r37 1518r27 1518r64 1518r77 1521r22
+. 1521r59 1521r73 1525r28
+1533f16 Dn{long_float} 1539m22 1539r28 1543m16 1543r28 1544r37 1551r102
+1533f20 An{long_float} 1540m22 1540r28 1543m33 1543r45 1544r19 1544r48 1551r131
+1535i20 K{integer} 1537r106 1539r45 1539r60 1540r44
+1537f22 Am{long_float} 1539r66 1540r49
+1546i23 K{integer} 1547r38 1548r32 1548r66
+1559b13 Pred_Ok{boolean} 1577m28 1585r40 1587r47 1592r38
+1560b13 Any_Meas{boolean} 1573m25 1585r22 1587r25 1592r16 1596r16
+1562i17 I{integer} 1563r28 1565r50 1566r71 1567r62 1567r84 1567r104 1568r62
+. 1568r84 1568r104
+1565r22 W0{396R9} 1567r113 1568r113
+1566a22 Pr{93|13A9} 1569r58 1569r72
+1567f22 Act_U{long_float} 1570r57
+1568f22 Act_V{long_float} 1570r70
+1569f22 Pred{long_float} 1572r25 1576r39 1576r53
+1570f22 Act{long_float} 1572r55 1576r33
+1583i17 K{integer} 1584r32 1584r58 1586r29 1586r58 1586r136 1588r29 1588r63
+1598f19 Worst_Rel{long_float} 1610m28 1610r57 1614r55
+1600i23 I{integer} 1601r34 1603r56 1604r77 1605r65 1605r87 1605r107 1606r65
+. 1606r87 1606r107
+1603r28 W0{396R9} 1605r116 1606r116
+1604a28 Pr{93|13A9} 1607r62 1607r76
+1605f28 Au{long_float} 1608r62
+1606f28 Av{long_float} 1608r72
+1607f28 Pd{long_float} 1610r78 1610r100
+1608f28 Ac{long_float} 1610r73
+1618i14 I{integer} 1619r45 1619r59 1619r75 1619r90 1619r102
+1624r16 Now_Regs{48|17R12} 1626r25
+1626r20 R{48|6R9} 1633r35 1633r56 1639r46 1639r63 1641r68 1641r89
+1628b22 Mine{boolean} 1634m28 1637r29
+1629b22 Found_Prev{boolean} 1643r41 1644m48 1649r28
+1630f22 Best{long_float} 1643r64 1644m37 1649r48
+1632r26 P{396R9} 1633r42 1633r63 1633r94 1633r103
+1638r29 Q{48|6R9} 1639r31 1639r78 1641r75 1641r96
+1641f34 D{long_float} 1643r60 1644r45
+1663U17 Judge 1663b17 1740l11 1740t16 1772s10
+1724b13 All_There{boolean} 1728m19 1731r16
+1726r17 P{396R9} 1727r32
+1742b7 Ok{boolean} 1754m21 1755r14 1765m16 1766r17
+1759i11 Step{integer}
+1783U14 Jaw_Sweep 1783b14 1783=25 1783>47 1783=60 1783>83 1783>98 1783>119
+. 1784>25 1784=46 1784<68 1784<89 1812l8 1812t17 1818s7 1881s13 1882s13
+1783r25 L{49|39R9} 1797m34 1797r34 1797m65 1797r65
+1783r47 C{1|62R9} 1800r123 1801r133 1803r37 1803r86
+1783r60 F{49|20R9} 1786r44 1787r46 1796r56 1797m68 1797r68 1799r37 1800r68
+. 1801r98 1803r104 1809r23
+1783i83 Arm{natural} 1786r47 1796r40 1796r62 1799r40
+1783f98 Target{long_float} 1791r19
+1783i119 Max_Iter{natural} 1795r21
+1784i25 Sweep_Cam{integer} 1800r13 1800r46 1800r101 1801r80 1801r115 1801r156
+1784r46 Sweep{34|12R12} 1801m13 1801r38
+1784i68 Steps{natural} 1792m7 1798m10
+1784f89 Reading{long_float} 1793m7 1799m10 1803r18 1808r18
+1785r7 Jaw{34|10R12} 1791m7 1791r7 1796r78
+1786f7 Prev{long_float} 1793r18 1803r28 1808m10
+1787r7 Prev_Cams{12|91R9[49|19]} 1801r60 1803r93 1809m10
+1788i7 Still{natural} 1804m13 1804r22 1806m13 1810r20
+1789r7 Cm{49|30R9} 1796m10 1796m30 1796m45 1796m68 1797r37
+1795i11 I{integer} 1798r19 1810r40
+1815U14 Move_Jaw 1815b14 1815=24 1815>46 1815=59 1815>82 1815>97 1815<118
+. 1815<139 1819l8 1819t16 2549s22 2579s28 2596s19
+1815r24 L{49|39R9} 1818m18
+1815r46 C{1|62R9} 1818r21
+1815r59 F{49|20R9} 1818m24
+1815i82 Arm{natural} 1818r27
+1815f97 Target{long_float} 1818r32
+1815i118 Steps{natural} 1818m54
+1815f139 Reading{long_float} 1818m61
+1816r7 None{34|12R12} 1818m48 1818r48
+1824i7 Arm{natural} 1827r50 1828r54 1881r33 1882r33 1910r45 1918r56 1923r41
+. 1928r47 1954r54 1956r19 1956r54 1994r95
+1825i7 Cw{natural} 1854r86 1858r65 1877r88 1883r48 1883r76 1931r57 1931r85
+. 1974r106 1975r76 1975r122
+1826i7 Ch{natural} 1855r86 1858r69 1877r93 1883r52 1883r80 1931r61 1931r89
+. 1974r180 1975r166 1975r212
+1827r7 Z{96|15R9} 1892r65 1892r118
+1828f7 J0{long_float} 1869r19 1882r38
+1829i7 Steps_J{natural} 1881m83 1882m82
+1830f7 Reading{long_float} 1881m92 1882m91
+1831b7 Any_Fingers{boolean} 1872m13 1875r10
+1832r7 Jaw{34|10R12} 1869m7 1869r7 1923r49 1928r56
+1834U17 Claim 1834b17 1834=24 1834>42 1834>47 1834=65 1834>87 1867l11 1867t16
+. 1892s22 1934s22
+1834r24 P{396R9} 1840r64 1840r92 1850r47 1853m16 1853m40 1853m64 1854m16
+. 1855m16 1858r73 1858r79 1860m22 1865m13
+1834f42 Tol{long_float} 1842r47
+1834f47 Win{long_float} 1858r85
+1834r65 Taken{34|12R12} 1842r23 1848m13 1848r13
+1834r87 Regs{48|17R12} 1838r33 1840r50 1840r78 1853r24 1853r48 1854r39 1854r56
+. 1855r39 1855r56
+1835i10 Best{integer} 1843m28 1847r13 1848r45 1853r30 1853r54 1854r45 1854r62
+. 1855r45 1855r62
+1836f10 Bd{long_float} 1842r64 1843m19
+1838i14 R{integer} 1840r56 1840r84 1842r30 1843r36
+1840f16 D{long_float} 1842r42 1842r60 1843r25
+1850f16 Old_Z{long_float} 1859r56 1859r87 1859r103
+1851f16 Zd{long_float} 1858m19 1859r42 1859r82 1860r29
+1870r11 P{396R9} 1871r13 1871r40
+1877r13 Sweep{34|12R12} 1881m76 1881r76 1882m75 1882r75 1883r41
+1878r13 Regs{48|17R12} 1883m13 1884r53 1892r141
+1879r13 Taken{34|12R12} 1884m13 1892m134 1892r134
+1885i17 I{integer} 1887r37 1896r43
+1887r19 P{396R9} 1889r22 1889r49 1892m29 1892r29 1892r36 1893r29 1894m25
+. 1896r46
+1903i11 I{integer} 1905r31 1941r40
+1905r13 P{396R9} 1907r16 1907r43 1909r43 1934m29 1934r29 1934r36 1934r81
+. 1934r90 1934r161 1934r170 1935r29 1936m25 1939m22 1941r43
+1909i19 K{natural} 1910r66 1922r25
+1910i19 Chn{natural} 1921r22 1921r75 1922r42
+1911a19 A{93|11A9} 1922m22 1923r46
+1912a19 Deliv{93|11A9} 1923m54 1928m64
+1913b19 Ok{boolean} 1923m61 1928m79
+1914r19 B0{34|8R12} 1924r46
+1915r19 Sweep{34|12R12} 1924m22 1929m25 1929r50 1931r50
+1916r19 Regs{48|17R12} 1931m22 1932r62 1934r195
+1917r19 Taken{34|12R12} 1932m22 1934m188 1934r188
+1918a19 P0{49|10A9} 1928r52
+1919i19 Frames{natural} 1928m71
+1926r25 B1{34|8R12} 1929r72
+1948r10 X{50|20R9} 1956m10 1956m24 1956m38 1973m16 1986m13 1989r32
+1949r10 Gp{50|11R9} 1963m16 1963r25 1963m39 1963r48 1965m19 1965m35 1967m19
+. 1967m35 1981m13 1982m13 1982r22 1982m46 1982r55 1983m13 1984m13 1985m13
+. 1985m29 1985m45 1985m61 1986r39
+1950b10 All_Fingers{boolean} 1960m19 1980r13 1988r14
+1951i10 N{natural} 1962m16 1962r21 1980r34 1982r42 1982r75 1983r27 1988r35
+1951i13 Nz{natural} 1970m55 1970r61 1984r25
+1952f10 Zmin{long_float} 1970m19 1970r43 1984r37
+1953b10 Any_Part{boolean} 1977m16 1988r50
+1954r10 Zh{96|15R9} 1985r22 1985r38 1985r54 1985r70
+1957r14 P{396R9} 1958r16 1958r43 1959r19 1963r33 1963r56 1964r19 1965r29
+. 1965r45 1967r29 1967r45 1969r19 1970r49 1972r19 1972r50 1972r66 1973r25
+. 1973r45 1973r51 1973r57 1974r70 1974r77 1974r144 1974r151 1975r86 1975r93
+. 1975r176 1975r183 1976r42 1976r48
+1999U14 Held_Test 1999b14 1999=25 1999=47 1999=67 1999>90 1999>105 1999>120
+. 2000>25 2000<46 2000<66 2000<86 2105l8 2105t17 2562s25
+1999r25 L{49|39R9} 2020m17
+1999r47 C{1|62R9} 2004r51 2004r81 2010r91 2016r37 2019r16 2020r20 2023r53
+. 2024r60 2040r58 2042r57 2047r61
+1999r67 F{49|20R9} 2010r58 2016r40 2018r35 2020m23 2021r51 2024r63 2025r38
+. 2026r38 2040r25 2042r60 2042r77 2042r93 2047r64 2048r60
+1999i90 Arm{natural} 2004r36 2004r99 2018r38 2019r27 2020r26 2023r56
+1999i105 Cam{natural} 2010r43 2010r94 2010r117 2040r10 2040r61 2042r63 2042r85
+. 2042r101
+1999r120 Origin{48|6R9} 2040r79 2042r69 2067r63 2068r44 2068r70 2068r105
+. 2068r119 2075r19 2075r59 2075r85 2075r121 2075r135
+2000i25 Obj_Count{natural} 2031r37
+2000b46 Held{boolean} 2084m7
+2000b66 Sure{boolean} 2085m7
+2000r86 Note{26|105R9} 2087m10 2090m10 2093m10 2095m10 2097m10 2100m18 2102m21
+2001a7 A{93|11A9} 2019m7 2020r31
+2002a7 Deliv{93|11A9} 2020m39
+2003b7 Ok{boolean} 2020m46
+2004i7 Hc{integer} 2021r10 2021r36 2023r70 2024r75 2025r55 2026r55
+2005r7 Jaw{34|10R12} 2018m7 2018r7 2020r34
+2006b7 Seen_In_Hand{boolean} 2034m22 2084r60 2088r27 2091r27 2092r13
+2007b7 Gone_From_Table{boolean} 2042m10 2084r39 2086r34
+2008b7 Could_Judge{boolean} 2029m16 2041m10 2094r13
+2010i7 World_Cam{integer} 2015r10 2016r52 2045r10 2047r76 2048r77 2084r19
+. 2085r15 2086r10 2089r13 2099r10
+2011r7 Before_Regs{48|17R12} 2016m10 2050r22
+2012i7 Moved_Others{natural} 2070m22 2070r38 2100r69
+2013i7 Pieces_Now{natural} 2076m19 2076r33 2101r13 2102r78
+2023r13 Z{96|15R9} 2028r16 2031r94 2031r147 2032r68 2032r121
+2024r13 Regs{48|17R12} 2030r25
+2025i13 Cw{natural} 2031r75 2031r128
+2026i13 Ch{natural} 2032r49 2032r102
+2030r20 R{48|6R9} 2031r22 2031r56 2031r109 2032r30 2032r83
+2047r13 After{48|17R12} 2055r28 2074r22
+2048f13 Tol{long_float} 2067r44
+2050r17 Q{48|6R9} 2056r25 2056r72 2058r69 2058r90 2068r37 2068r63
+2052f19 Best{long_float} 2060r53 2061m31 2067r37
+2053b19 Found{boolean} 2060r35 2061m42 2067r22
+2055r23 R{48|6R9} 2056r40 2056r57 2058r62 2058r83
+2058f28 D{long_float} 2060r49 2061r39
+2074r17 R{48|6R9} 2075r52 2075r78
+2107V13 Mode_Line{string} 2107b13 2107>24 2107>37 2239s102 2243s58 2692s29
+2107r24 C{1|62R9} 2108r22 2108r93
+2107a37 Until_Text{string} 2109r104
+2113i7 Cam{natural} 2114r40 2115r40 2116r28 2123r16 2126r29 2126r52 2128r28
+. 2129r94 2154r27 2205r55 2208r47 2216r49 2219r41 2228r25 2288r96 2348r89
+. 2352r43 2353r58 2372r62 2384r66 2389r86 2432r65 2434r61 2461r82 2486r66
+. 2559r56 2562r48 2569r109 2572r70 2615r33 2622r61 2628r43 2673r38
+2114i7 Cw{natural} 2126r58 2127r23 2132r101 2144r38 2146r78 2149r27 2154r52
+. 2166r73 2169r49 2177r52 2177r81 2186r101 2274r101 2304r93 2306r93 2320r109
+. 2355r80 2385r77 2401r81 2407r77 2445r75 2450r103
+2115i7 Ch{natural} 2126r62 2127r27 2132r105 2143r38 2145r38 2149r32 2166r63
+. 2177r64 2275r101 2300r93 2302r93 2355r137 2385r134 2401r136 2407r134 2445r130
+. 2450r150
+2116r7 RGB{34|8R12} 2127m18 2127r18 2128m33 2128r33 2132r96 2150r40
+2117r7 Listing{26|105R9} 2128m38 2130r23 2185r100
+2118r7 Say{33|16R9} 2186m109 2186r109 2193r51 2193r91 2193r138 2194r48 2194r64
+. 2194r110 2194r142 2194r190 2195r41 2195r63 2195r108 2196r21 2196r60 2198r16
+. 2214r10 2214r36 2214r94 2218r34 2222r17 2223r10 2229r26 2238r10 2249r16
+. 2249r72 2250r19 2250r69 2251r47 2251r93 2260r45 2260r72 2260r113 2336r22
+. 2426r16 2426r67 2426r93 2427r33 2427r101 2430r49 2437r47 2458r59 2466r98
+. 2479r16 2489r22 2489r48 2496r43 2538r61 2558r28 2558r54 2559r79 2560r50
+. 2570r31 2570r57 2571r59 2572r93 2576r119 2590r19 2608r19 2686r16 2686r44
+. 2687r30 2688r33
+2119r7 Err{26|105R9} 2186m114 2186r114 2188r60
+2120r7 Report{26|105R9} 2279m37 2378m25 2409m25 2419m28 2419r38 2603m16 2603r26
+. 2660m25 2660r35 2675m16 2675r26 2679m22 2679r32 2687m13 2692m10 2692r20
+. 2694r19 2695r45
+2136a10 Recent=2136:58{string} 2185r110
+2143i13 Sh{natural} 2145r69 2161r42 2165r92
+2144i13 Sw{natural} 2154r47 2158r57 2162r45 2164r92 2177r94
+2145i13 Bh{natural} 2146r83 2177r56 2177r103 2186r105
+2146r13 Big{34|8R12} 2150m16 2150r16 2170m40 2170r40 2171m40 2171r40 2172m40
+. 2172r40 2177m47 2177r47 2186r96
+2147i13 Slot{natural} 2154r40 2158r50 2180m25 2180r33
+2149i17 I{integer} 2150r37 2150r53
+2153i20 K{integer} 2154r22 2156r58 2157r58 2160r45 2170r72 2171r76 2172r76
+. 2178r47
+2156i25 Kw{natural} 2160r63 2164r75 2164r87 2167r68
+2157i25 Kh{natural} 2160r68 2165r75 2165r87
+2158i25 Ox{natural} 2166r78 2169r40 2177r60 2177r89
+2161i32 Y{integer} 2165r83 2166r68
+2162i35 X{integer} 2164r83 2166r83 2169r45
+2164i37 Sx{natural} 2167r73
+2165i37 Sy{natural} 2167r63
+2166i37 D{natural} 2170r61 2171r61 2172r61
+2167i37 Sp{natural} 2170r88 2171r92 2172r92
+2198r11 G{33|7R9} 2200r57 2200r68
+2200a13 Ns(natural) 2202r19
+2202i14 N=2202:19{natural} 2203r16 2203r32 2203r80 2207r40
+2205r19 Cs{95|12R9} 2207m19 2208r52
+2216r13 Cs{95|12R9} 2218m13 2219r46
+2225i13 K{natural} 2229r22 2233m19 2233r24
+2227i17 Ci{integer} 2228r19 2230r31 2231r76
+2248e10 Until_K{46|20E9} 2673r48
+2251i10 Step_Limit{natural} 2673r57
+2252r10 Avoid{12|91R9[1|33]} 2610m16 2610r16 2673r77
+2253r10 Pts{12|91R9[429]} 2361r28 2361r49 2362m28 2362r28 2416r28 2416r49
+. 2417m28 2417r28 2436r22 2469m22 2469r22 2495r34 2614r17 2615m38 2615r38
+. 2621r25 2628m48 2628r48 2633r31 2639r48 2641r44 2645m34 2645r34 2654r31
+. 2661m25 2661r25 2666r22 2671r20 2672r74 2673m43 2673r43 2677r25
+2254f10 Amount{long_float} 2375m22 2673r69
+2255r10 Event{26|105R9} 2673m84 2675r64 2684m16 2692r54
+2256i10 Steps_Taken{natural} 2673m91 2675r97 2676r60
+2257i10 Beats{natural} 2673m113 2676r99
+2258b10 Blocked{boolean} 2673m104
+2259r10 Desc{26|105R9} 2668m27 2668r27 2668r37 2672r110 2675r50
+2260i10 Grip_Arm{integer} 2426r44 2431r52 2479r44 2481r52 2590r46 2592r52
+2261r10 Did_Grip{26|105R9} 2566m25 2580m36 2580r36 2584m22 2587m30 2587r30
+. 2599m19 2602r16 2603r46
+2265U17 Set_Target 2265b17 2265>29 2265=45 2265=63 2330l11 2330t21 2413s25
+2265r29 G{33|7R9} 2268r31 2268r52 2269r50 2269r82 2270r65 2270r100 2271r34
+. 2271r55 2271r79 2273r64 2276r69 2279r77 2282r71 2282r114
+2265r45 P{396R9} 2269m31 2269m63 2269m95 2269r103 2269m108 2270m31 2282m37
+. 2283m37 2283m51 2283m65 2283r73 2283m78 2285r43 2288r89 2290m46 2290m60
+. 2290m74 2290m91 2292r46 2295m43 2295m60 2297m43 2297m60 2297r95 2300m40
+. 2302m40 2304m40 2306m40 2310r113 2312m43 2313m43 2313r78 2317r71 2318r71
+. 2322m43 2322r51 2322m72 2322r80
+2265b63 Ok_Pt{boolean} 2280m37 2328m31
+2273r34 O{1|19R9} 2274r74 2274r81 2275r74 2275r81 2278r41 2283r45 2283r59
+. 2285r70 2292r73 2295r51 2295r72 2297r51 2297r72 2300r48 2302r48 2304r48
+. 2306r48 2310r87 2310r128 2312r73 2312r91 2313r55 2317r78 2318r78
+2274f34 Ow{long_float} 2304r71 2306r71 2310r123 2320r87
+2275f34 Oh{long_float} 2300r71 2302r71
+2276a34 Rl{string} 2282r87 2284r40 2299r43 2301r43 2303r43 2305r43 2307r43
+. 2307r64 2312r55 2315r43
+2288r46 Z{96|15R9} 2290r54 2290r68 2290r82 2290r119
+2310f43 Sz{long_float} 2312r83 2312r101
+2317f43 Du{long_float} 2319r101 2319r106 2322r58
+2318f43 Dv{long_float} 2319r111 2319r116 2322r87
+2319f43 Ln{long_float} 2322r63 2322r92
+2320f43 St{long_float} 2322r68 2322r97
+2332U17 Build_Goals 2332b17 2473l11 2473t22 2613s10
+2336r17 G{33|7R9} 2337r19 2337r40 2337r84 2339r53 2343r38 2360r59 2367r19
+. 2367r40 2367r88 2369r53 2375r47 2376r35 2378r65 2393r61 2393r82 2393r106
+. 2394r45 2398r61 2409r65 2413r37 2419r77
+2339r22 It{1|19R9} 2342r25 2344r28 2345r37 2346r44 2346r65 2353r95 2354r36
+. 2354r51 2354r65 2354r87 2354r109 2355r51 2355r59 2355r108 2355r116 2356r39
+. 2356r59
+2340r22 P{396R9} 2343m25 2345m28 2345m45 2346m28 2348r82 2350m31 2350m46
+. 2350m61 2350m74 2353m28 2353m65 2353m85 2354m28 2354m43 2354m58 2354m75
+. 2354m98 2355m28 2355m85 2356m28 2356m49 2358m25 2358r33 2358m39 2358r47
+. 2358m53 2358r61 2359m25 2359r37 2360m25 2361r63 2362r40
+2348r31 Tr{1|50R9} 2350r39 2350r54 2350r68 2350r85
+2369r22 It{1|19R9} 2371r48 2377r29 2380r28 2382r34 2382r74 2383r33 2383r48
+. 2383r62 2384r86 2385r48 2385r56 2385r105 2385r113 2387r34 2404r28 2405r81
+. 2406r33 2406r48 2406r62 2406r84 2406r106 2407r48 2407r56 2407r105 2407r113
+2370r22 P{396R9} 2376m22 2382m25 2382m42 2382m62 2382m84 2383m25 2383m40
+. 2383m55 2384m25 2384r59 2385m25 2385m82 2387m25 2387m42 2387m62 2389r79
+. 2391m28 2391m43 2391m58 2391m71 2391r116 2393r45 2400m31 2400m51 2400m69
+. 2400m83 2400m97 2400m113 2400m135 2401m31 2401m86 2405m25 2405m51 2405m71
+. 2406m25 2406m40 2406m55 2406m72 2406m95 2407m25 2407m82 2413m40 2413r40
+. 2416r63 2417r40
+2371b22 Own{boolean} 2386r28
+2372i22 Cam_A{integer} 2391r99 2393r28 2404r53 2405r43
+2373b22 Ok_Pt{boolean} 2379m25 2410m25 2412r25 2413m43 2413r43 2415r25
+2389r28 Tr{1|50R9} 2391r36 2391r51 2391r65 2391r82
+2398r31 O{1|19R9} 2400r61 2400r77 2400r91 2400r104 2400r125 2400r146 2401r54
+. 2401r61 2401r109 2401r116
+2430r19 O{1|19R9} 2444r55 2444r71 2444r85 2444r98 2444r119 2444r140 2445r48
+. 2445r55 2445r103 2445r110 2447r48 2447r54 2448r36 2448r55 2457r89 2465r36
+. 2465r50 2465r64 2465r85
+2431i19 A{natural} 2432r62 2434r77 2437r31 2461r79 2466r62
+2432r19 Z{96|15R9} 2436r44 2449r33 2449r47 2449r61 2449r98 2450r76 2450r83
+. 2450r123 2450r130 2451r49 2451r55
+2433r19 P{396R9} 2437m22 2437m34 2444m25 2444m45 2444m63 2444m77 2444m91
+. 2444m107 2444m129 2445m25 2445m80 2446m25 2446r62 2446r72 2447m25 2448m25
+. 2448m45 2449m25 2449m39 2449m53 2449m70 2450m25 2451m25 2455m25 2457m25
+. 2458m25 2463m28 2463m48 2463m74 2463m89 2463m104 2463m117 2465m28 2465m42
+. 2465m56 2465m73 2466m28 2469r34
+2434b19 Own_Cam{boolean} 2438r25
+2461r28 Tr{1|50R9} 2463r82 2463r97 2463r111 2463r128 2465r108
+2476U17 Do_Grip 2476b17 2605l11 2605t18 2691s10
+2481i19 A{natural} 2486r63 2549r41 2551r65 2562r45 2566r70 2569r78 2576r78
+. 2579r47 2579r59 2584r74
+2482b19 Caged{boolean} 2531m31 2542m31 2548r22 2586r47
+2483r19 Cage_Note{26|105R9} 2532m31 2543m31 2584r101 2586r22 2587r58
+2484i19 Steps_J{natural} 2549m49 2566r132 2579m76
+2485f19 Reading{long_float} 2549m58 2552r49 2566r175 2576r162 2579m85
+2486r19 Hz{96|15R9} 2519r72 2525r93 2526r78 2527r82 2540r76
+2491r25 Pin{396R9} 2500m37 2500r37 2500m47 2500m62 2500m77 2502m34 2502r44
+. 2502m59 2502r69 2504m37 2504r62 2507m34 2507r34 2512r43 2513m28 2513r38
+. 2513m51 2513r61 2515r31 2516m31 2519r43 2523r66 2523r75 2523r91 2523r100
+. 2524r63 2524r88 2524r114 2524r126 2524r138 2526r96 2527r74 2527r111 2527r139
+. 2527r150 2527r163 2529r61 2533r93 2533r128 2536r46 2539r68 2539r91
+2492b25 Found{boolean} 2499r41 2509m31 2512r28 2519r28 2536r31
+2493f25 Nz{long_float} 2502m84 2502r90 2512r72 2513r47 2513r70
+2495r29 P{396R9} 2496r31 2497r34 2500r44 2502r53 2502r78 2503r37 2504r69
+. 2507r41
+2523f31 Dp{long_float} 2531r40 2532r101
+2524f31 Ds{long_float} 2529r86
+2525f31 Tol{long_float} 2531r46 2533r58
+2526b31 Depth_Ok{boolean} 2531r59 2534r98
+2529b31 Size_Ok{boolean} 2531r77
+2538r31 O{1|19R9} 2539r77 2539r100
+2539f31 Dist{long_float} 2542r40 2543r108
+2540f31 Tol{long_float} 2542r48 2543r171
+2551f25 Empty{long_float} 2552r59 2567r78
+2552b25 By_Reading{boolean} 2562m72 2564m28 2568r28
+2553b25 Sure_Held{boolean} 2562m84 2563r32
+2554r25 Note{26|105R9} 2562m95 2567r109
+2555r25 Origin{48|6R9} 2559m28 2562r53
+2556i25 Obj_Count{natural} 2560m28 2562r61
+2592i19 A{natural} 2596r38 2596r50 2599r64
+2593i19 Steps_J{natural} 2596m67 2599r91
+2594f19 Reading{long_float} 2596m76 2599r134
+2608i14 N{integer} 2609r16 2609r32 2610r39
+2619b16 Need_Look{boolean} 2623m22 2626r19
+2621r20 P{396R9} 2622r22 2622r78 2622r98
+2631f22 Su{long_float} 2635m28 2635r34 2644r61
+2631f26 Sv{long_float} 2635m45 2635r51 2644r97
+2631f30 N{long_float} 2635m62 2635r67 2638r25 2644r66 2644r102
+2633r26 P{396R9} 2634r28 2634r55 2634r80 2635r39 2635r56
+2639i29 I{integer} 2641r49 2645r55
+2641r31 P{396R9} 2643r34 2643r61 2643r86 2644m34 2644r42 2644r54 2644m70
+. 2644r78 2644r90 2645r58
+2652b22 Lost_Any{boolean} 2656m28 2659r25
+2654r26 P{396R9} 2655r28
+2666r17 P{396R9} 2667r19 2668r82
+2677r20 P{396R9} 2678r22 2679r62 2679r79 2679r145 2679r173 2680r56 2680r90
+X 3 ada.ads
+18K9*Ada 1|5r6 5r33 6r6 33r32 48r34 60r38 2|1r6 1r23 2r6 3r6 3r50 429r33
+. 436r45 439r17 442r19 623r36 624r36 1203r96 1877r61 2146r51 3|22e8
+X 7 a-contai.ads
+16K13*Containers 1|6r10 33r36 48r38 60r42 2|429r37 623r40 624r40 1877r65
+. 2146r55 7|28e19
+22I9*Count_Type<integer> 2|623r51 624r51 1877r76 2146r66
+X 12 a-convec.ads
+74k24*Vectors 1|6w21 33r47 48r49 60r53 2|429r48 12|878e27
+91R9*Vector<15|43R9> 1|64r33[96|35] 68r31[48] 69r34[60] 72r28[33] 2|431r136[429]
+. 753r136[429] 791r46[429] 839r51[429] 925r99[429] 926r29[429] 972r134[429]
+. 973r124[1|33] 1012r27[429] 1126r53[93|47] 1221r52[93|47] 1356r37[93|47]
+. 1787r36[49|19] 1823r136[429] 2252r31[1|33] 2253r30[429]
+122r4*Empty_Vector{91R9[48|16]} 2|1374r94[48|16]
+139V13*To_Vector{91R9[34|11]} 2|1877s43[34|11] 1884s35[34|11] 1932s44[34|11]
+. 2146s37[34|7]
+164U14*Reserve_Capacity 2|623s18[34|7] 624s18[34|7]
+175V13*Length{7|22I9} 2|20s33[96|35] 20s85[96|26] 30s47[34|13] 62s54[51|17]
+. 98s41[34|9] 104s36[34|9] 137s75[34|13] 235s90[1|33] 237s61[1|33] 256s86[1|60]
+. 385s41[1|33] 480s39[1|48] 513s74[49|11] 513s131[1|60] 681s44[48|16] 761s42[429]
+. 764s42[429] 765s42[429] 770s34[429] 783s43[429] 786s40[429] 796s43[429]
+. 806s40[429] 852s49[429] 896s52[429] 980s46[429] 981s41[429] 1087s37[429]
+. 1117s43[429] 1139s37[429] 1231s43[429] 1245s49[429] 1273s37[429] 1302s43[429]
+. 1316s83[1|60] 1400s37[429] 1493s37[429] 1562s40[429] 1600s46[429] 1618s37[429]
+. 1712s71[96|35] 1750s76[34|13] 1800s75[49|19] 1800s136[51|18] 1838s38[48|16]
+. 1884s58[48|16] 1885s40[429] 1903s34[429] 1921s47[34|9] 1921s123[51|18]
+. 1932s67[48|16] 2004s68[34|13] 2010s65[49|19] 2021s58[49|19] 2040s32[49|19]
+. 2113s69[49|19] 2153s46[49|19] 2160s52[34|7] 2186s61[1|33] 2193s148[33|15]
+. 2203s54[1|33] 2214s68[1|33] 2268s81[34|9] 2271s109[1|33] 2337s67[1|33]
+. 2367s67[1|33] 2393s136[1|33] 2426s125[1|33] 2489s80[1|33] 2558s86[1|33]
+. 2570s89[1|33] 2609s54[1|33] 2639s52[429] 2672s78[429]
+187V13*Is_Empty{boolean} 2|131s14[48|16] 1622s47[48|16] 2361s32[429] 2416s32[429]
+. 2436s26[429] 2614s21[429] 2671s24[429] 2686s26[33|15]
+190U14*Clear 2|40s15[1|60] 240s15[1|33] 1128s16[93|47] 2661s29[429]
+206V13*Element{41|81M9} 2|627s39[34|7] 628s50[34|7] 2150s44[34|7] 2170s79[34|7]
+. 2171s83[34|7] 2172s83[34|7]
+217U14*Replace_Element 2|500s19[1|48] 593s33[1|60] 880s32[429] 902s35[429]
+. 1204s23[429] 1468s20[429] 1848s19[34|11] 1896s26[429] 1941s23[429] 2150s20[34|7]
+. 2170s44[34|7] 2171s44[34|7] 2172s44[34|7] 2208s30[95|16] 2219s24[95|16]
+. 2645s38[429]
+483U14*Append 2|73s24[1|60] 100s30[34|9] 168s26[48|16] 185s21[48|16] 233s18[1|33]
+. 502s19[1|48] 627s24[34|7] 628s24[34|7] 769s11[34|9] 959s28[429] 963s22[429]
+. 1206s22[93|47] 1748s11[34|9] 1791s11[34|9] 1869s11[34|9] 2018s11[34|9]
+. 2362s32[429] 2417s32[429] 2469s26[429] 2610s22[1|33]
+X 17 a-iteint.ads
+24h9 Forward_Iterator
+32h9 Reversible_Iterator<24R9[12|119]>
+X 18 a-numeri.ads
+20K13*Numerics 2|2w10 3r10 3r54 436r49 439r21 442r23 1203r100 18|36e17
+28N4*Pi 2|436r58 439r30 442r32 1203r109
+X 19 a-ngelfu.ads
+53V13*Sqrt{long_float} 2|224s43[20|18] 450s14[20|18] 634s38[20|18] 668s46[20|18]
+. 684s49[20|18] 723s32[20|18] 859s35[20|18] 1031s89[20|18] 1197s34[20|18]
+. 1200s32[20|18] 1235s45[20|18] 1276s43[20|18] 1455s46[20|18] 1543s22[20|18]
+. 1543s39[20|18] 1569s52[20|18] 1570s51[20|18] 1607s56[20|18] 1608s56[20|18]
+. 1633s28[20|18] 1641s61[20|18] 1840s43[20|18] 2058s55[20|18] 2068s30[20|18]
+. 2075s45[20|18] 2319s95[20|18] 2446s35[20|18] 2450s36[20|18] 2523s59[20|18]
+. 2539s61[20|18]
+165V13*Arctan{long_float} 2|724s37[20|18] 2447s40[20|18] 2451s41[20|18]
+X 20 a-nlelfu.ads
+18K22*Long_Elementary_Functions[19|39] 2|3w19 3r63
+X 22 a-string.ads
+16K13*Strings 1|5r10 5r37 22|35e16
+X 26 a-strunb.ads
+91K21*Unbounded 1|5w18 5r45 26|1641e26
+105R9*Unbounded_String<15|43R9> 1|70r16 71r19 77r18 79r18 2|16r35 213r109
+. 216r11 406r14 919r32 974r39 1008r21 2000r97 2117r17 2119r13 2120r16 2255r18
+. 2259r17 2261r21 2483r31 2554r32 26|1620e15
+109r4*Null_Unbounded_String{105R9} 2|957r35
+122V13*To_Unbounded_String{105R9} 2|16r60
+135V13*To_String{string} 2|1077s30 2130s12 2132s27 2136s60 2185s28 2185s64
+. 2185s89 2188s49 2193s40 2193s80 2194s37 2195s30 2276s58 2567s98 2584s90
+. 2587s47 2603s35 2668s71 2672s99 2692s43 2695s34
+159U14*Append 2|237s10 252s7 320s7 364s10 370s19 381s13 387s16 391s7 2100s10
+. 2102s13 2580s28 2587s22 2668s19
+168U14*Append 2|375s10
+177V14*"&"{105R9} 2|2675s48 2675s62
+185V14*"&"{105R9} 2|2419s45 2419s64 2419s85 2603s33 2603s56 2660s42 2675s33
+. 2675s55 2675s70 2675s84 2675s110 2679s39 2679s49 2679s73 2679s118 2679s132
+. 2679s154 2679s160 2679s182 2680s43 2680s64 2680s77 2680s106 2692s27
+276V14*"="{boolean} 2|920s12 920s40 1052s24 1761s27 1773s27 2131s21 2195s78
+. 2249s31 2249s87 2250s34 2250s84 2251s62 2271s40 2393s67 2426s25 2479s25
+. 2586s32 2590s28 2602s25 2667s26 2668s42 2686s53 2687s38 2688s41
+X 29 a-textio.ads
+58K13*Text_IO 2|1w10 1r27 29|785e16
+515U14*Put 2|2130s7
+565U14*Put_Line 2|823s7 833s16 885s25 908s25 1078s13 1378s13 1551s19 1593s16
+. 1658s13 1669s10 1709s13 1992s7 2129s7 2188s13 2193s7 2231s22 2627s19 2672s16
+. 2676s16 2695s7
+X 32 backup.ads
+3K9*Backup 2|8w6 985r14 1385r18 1390r13 1753r7 32|24e11
+6A9*Step_Vec(long_float)<integer> 2|1385r25
+7R9*Ring 2|985r21 32|23e6
+8U14*Clear 2|1753s14
+9U14*Remember 2|1390s20
+X 33 brain.ads
+6K9*Brain 1|11w6 2|2118r13 2185r17 2265r33 33|30e10
+7R9*Goal 2|2265r39 33|14e14
+8i7*Item{natural} 2|2200r70 2270r67 2282r73 2337r21 2337r42 2339r55 2343r40
+. 2360r61 2367r21 2367r42 2369r55 2376r37 2378r67 2409r67 2419r79
+9i7*Cell{natural} 2|2268r33 2268r54 2269r52 2269r84 2270r102
+10r7*Rel{26|105R9} 2|2271r36 2276r71 2393r63
+11i7*Of_Item{natural} 2|2200r59 2271r57 2271r81 2273r66 2279r79 2282r116
+. 2393r84 2393r108 2394r47 2398r63
+12r7*Amount{26|105R9} 2|2375r49
+13b7*Stay{boolean} 2|2337r86 2367r90
+16R9*Say 2|2118r19 33|26e14
+17r7*Text{26|105R9} 2|2193r55
+17r13*See{26|105R9} 2|2193r95 2687r34 2688r37
+18i7*Look{natural} 2|2223r14 2229r30
+19r7*Moves{12|91R9[15]} 2|2193r142 2198r20 2336r26 2686r20
+20r7*Grip{26|105R9} 2|2194r52 2426r20 2479r20 2590r23 2686r48
+21i7*Grip_Arm{natural} 2|2194r68 2194r114 2260r49 2260r76 2260r117
+21i17*Grip_On{natural} 2|2194r146 2194r194 2214r14 2214r40 2214r98 2218r38
+. 2426r71 2426r97 2427r37 2427r105 2430r53 2437r51 2458r63 2466r102 2489r26
+. 2489r52 2496r47 2538r65 2558r32 2558r58 2559r83 2560r54 2570r35 2570r61
+. 2571r63 2572r97 2576r123
+22r7*Until_Kind{26|105R9} 2|2195r45 2195r67 2249r20 2249r76 2250r23 2250r73
+. 2251r51
+23i7*Steps{natural} 2|2195r112 2251r97
+24b7*Fast{boolean} 2|2196r25 2222r21
+24b13*Done{boolean} 2|2196r64 2238r14
+25r7*Avoid{34|14R12} 2|2608r23
+27V13*Ask{boolean} 2|2185s23
+X 34 bytes.ads
+5K9*Bytes 1|4w6 4r17 34|23e10
+7K12*U8_Vectors[12|74] 2|2146r26
+8R12*Buf{12|91R9[7]} 2|213r93 603r83 617r23 792r35 838r40 889r44 1011r16
+. 1056r19 1914r33 1926r39 2116r13 2146r19
+10R12*Floats{12|91R9[9]} 1|73r26 2|87r18 95r26 742r118 757r13 986r13 1785r13
+. 1832r13 2005r13
+11K12*Bool_Vectors[12|74] 2|1877r30 1884r22 1932r31
+12R12*Bools{12|91R9[11]} 2|1784r61 1816r14 1834r80 1877r21 1879r21 1915r27
+. 1917r27
+14R12*Ints{12|91R9[13]}
+X 35 chan.ads
+4K9*Chan 1|16w6 49r36 2|53r29 54r35 58r33 60r55 302r30 517r95 524r68 526r78
+. 529r71 532r45 556r42 557r88 561r39 562r45 565r39 583r48 584r94 747r34 771r33
+. 772r24 774r85 826r21 828r45 934r54 1091r57 1093r46 1094r34 1095r74 1099r33
+. 1175r36 1176r46 1177r128 1182r39 1224r24 1226r50 1265r30 1320r36 1346r24
+. 1349r35 1387r27 1411r107 1416r47 1432r42 1433r92 1535r30 1537r91 1546r33
+. 1583r27 1586r121 1668r82 1871r51 1889r60 1907r54 1910r51 1958r54 1972r77
+. 1986r22 2019r33 2346r79 2387r74 2463r60 35|14e9
+5A12*Pose{49|10A9}<integer>
+6N4*Per_Arm 1|49r41 2|53r34 54r40 58r38 60r60 302r35 517r100 524r73 526r83
+. 529r76 532r50 556r47 557r93 561r44 562r50 565r44 583r53 584r99 771r38 772r29
+. 774r90 826r26 828r50 934r59 1091r62 1093r51 1095r79 1099r38 1175r41 1176r51
+. 1177r133 1182r44 1224r29 1226r55 1265r35 1320r41 1346r29 1349r40 1387r32
+. 1411r112 1416r52 1432r47 1433r97 1535r35 1537r96 1546r38 1583r32 1586r126
+. 1668r87 1871r56 1889r65 1907r59 1910r56 1958r59 1972r82 1986r27 2019r38
+. 2346r84 2387r79 2463r65
+9V13*Compose{5A12} 2|747s39
+11V13*Delivered{93|11A9} 2|1094s39
+X 36 codec.ads
+3K9*Codec 2|4w6 226r30 237r33 275r50 276r25 279r50 294r35 294r100 295r64
+. 296r22 298r35 298r99 311r92 311r121 312r31 337r71 337r135 345r52 345r99
+. 346r22 352r95 353r77 364r118 370r37 370r74 370r127 381r57 387r67 387r106
+. 885r91 885r125 886r35 886r83 908r88 908r141 908r186 1077r13 1077r73 1077r104
+. 1078r57 1078r88 1551r91 1670r33 1670r69 1670r115 1670r162 1671r33 1671r77
+. 1672r33 1672r77 1672r121 1673r36 1673r78 1673r111 1673r144 1674r20 1674r53
+. 1674r86 1675r38 1675r74 1675r110 1676r20 1676r56 1676r92 1677r38 1677r74
+. 1677r110 1678r20 1678r56 1678r92 1679r35 1679r69 1679r108 1686r13 1737r82
+. 1779r49 1993r82 1993r116 1993r155 1994r63 2100r58 2102r67 2108r73 2129r140
+. 2129r195 2132r10 2132r63 2270r54 2270r89 2279r66 2282r60 2282r103 2360r48
+. 2378r54 2409r54 2419r66 2458r48 2466r51 2466r87 2532r90 2533r47 2533r82
+. 2543r97 2543r160 2566r59 2566r121 2566r164 2567r67 2576r67 2576r108 2576r151
+. 2584r63 2599r53 2599r80 2599r123 2675r86 2676r49 2676r88 2676r137 2679r51
+. 2679r134 2679r162 2680r45 2680r79 36|19e10
+11U14*Write_BMP 2|1077s19 2132s16
+14V13*Fmt{string} 2|226s36 346s28 885s97 885s131 886s41 886s89 908s94 908s147
+. 908s192 1551s97 1670s39 1670s75 1670s121 1670s168 1671s39 1671s83 1672s39
+. 1672s83 1673s42 1673s84 1673s117 1673s150 1674s26 1674s59 1674s92 1675s44
+. 1675s80 1675s116 1676s26 1676s62 1676s98 1677s44 1677s80 1677s116 1678s26
+. 1678s62 1678s98 1679s41 1679s75 1679s114 1737s88 1993s88 1993s122 1993s161
+. 2532s96 2533s53 2533s88 2543s103 2543s166 2566s170 2567s73 2576s157 2599s129
+. 2679s140 2679s168 2680s51 2680s85
+15V13*Img{string} 2|237s39 275s56 276s31 279s56 294s41 294s106 295s70 296s28
+. 298s41 298s105 311s98 311s127 312s37 337s77 337s141 345s58 345s105 352s101
+. 353s83 364s124 370s43 370s80 370s133 381s63 387s73 387s112 1672s127 1779s55
+. 1994s69 2100s64 2102s73 2108s79 2129s146 2129s201 2270s60 2270s95 2279s72
+. 2282s66 2282s109 2360s54 2378s60 2409s60 2419s72 2458s54 2466s57 2466s93
+. 2566s65 2566s127 2576s73 2576s114 2584s69 2599s59 2599s86 2675s92 2676s55
+. 2676s94 2676s143 2679s57
+16V13*Pad6{string} 2|1077s79 1077s110 1078s63 1078s94 2132s69
+17V13*Env{string} 2|1686s19
+X 37 draw.ads
+3K9*Draw 2|5w6 231r55 235r13 277r135 279r132 296r78 298r166 313r121 337r174
+. 346r94 353r108 356r67 1062r16 1062r75 1069r19 1074r41 2127r7 2177r28 2178r54
+. 37|19e9
+4R9*Color 2|231r60 37|6e14
+7r4*Orange{4R9} 2|277r140 279r137 313r126
+8r4*Green{4R9} 2|337r179 346r99 1062r80
+9r4*Dim_Green{4R9} 2|353r113 356r72
+10r4*Pink{4R9} 2|296r83 298r171 1074r46
+11r4*White{4R9} 2|2178r59
+15U14*Numbered_Box 2|235s18 1062s21 1069s24 2177s33
+18U14*Grid 2|2127s12
+X 38 flow.ads
+4K9*Flow 2|6w6 618r21 631r22 633r16 38|12e9
+5R9*Field 2|618r26 38|8e14
+9V13*Compute{5R9} 2|631s27
+11U14*Sample 2|633s21
+X 41 interfac.ads
+81M9*Unsigned_8
+X 45 memory.ads
+3K9*Memory 1|14w6 66r13 2|2136r38 2576r28 2598r19 45|11e11
+4R9*Store 1|66r20 45|6e14
+7U14*Set 2|2576s35 2598s26
+9V13*Text{string} 2|2136s45
+X 46 monitor.ads
+4K9*Monitor 2|7w6 973r40 983r12 984r11 1667r10 1667r27 1667r81 1667r109 1668r24
+. 1689r34 1711r13 1711r69 1712r28 1713r28 1716r38 1717r38 1718r38 1719r38
+. 1720r38 1736r38 2248r29 2249r48 2249r103 2250r48 2250r100 2250r122 46|47e12
+5F12*Bounded{long_float} 2|1667r89 1667r117 1711r77 1712r36
+6F12*Floor{long_float} 2|1667r35 1668r32 1713r36
+7R9*Floors 2|983r20 46|12e14
+8f7*Track{6F12} 2|1243r58 1455r129 1514r53 1518r43 1521r38 1572r35 1572r64
+. 1649r58 1727r38 1749m10
+9f7*Picture{6F12} 2|1750m10
+10f7*Reading{6F12} 2|1751m10
+11f7*Delivery{6F12} 2|1752m10
+14R9*Watch 2|984r19 46|19e14
+20E9*Until_Kind 2|973r48 2248r37 46|20e71
+20n24*U_Steps{20E9} 2|1716r46 2250r130
+20n33*U_Contact{20E9} 2|1717r46 2249r56
+20n44*U_Resist{20E9} 2|1718r46 2249r111
+20n54*U_Slip{20E9} 2|1719r46 2250r56
+20n62*U_Settle{20E9} 2|1720r46 2250r108
+22U14*Step 2|1667s18
+30V13*Stalled{boolean} 2|1736s46
+31V13*Refusing{boolean} 2|1689s42
+39V13*Fired{boolean} 2|1711s21
+X 48 picture.ads
+5K9*Picture 1|12w6 87r18 2|53r69 93r59 99r29 105r29 118r80 121r13 122r14
+. 127r14 140r62 141r26 141r45 141r100 149r22 155r26 160r56 163r35 193r76
+. 344r27 469r53 644r50 646r29 661r32 667r37 675r55 683r35 699r26 788r26 809r47
+. 813r26 813r63 950r31 951r28 1013r18 1017r17 1057r29 1150r68 1157r62 1374r71
+. 1392r40 1624r36 1801r22 1801r45 1834r94 1858r25 1859r26 1878r20 1883r21
+. 1883r56 1916r26 1924r31 1929r34 1929r57 1931r30 1931r65 1999r129 2011r21
+. 2024r29 2047r30 2290r103 2449r82 2526r62 2555r34 48|49e12
+6R9*Region 2|155r34 667r45 683r43 699r34 1999r137 2555r42 48|15e14
+7i7*X0{natural} 2|145r45 161r119 342r30 350r35 704r51 704r81 709m33 709r54
+. 709r60 720r54 1062r50 1854r68
+7i11*Y0{natural} 2|145r62 342r48 350r58 704r95 704r125 709m67 709r88 709r94
+. 721r54 1062r56 1855r68
+7i15*X1{natural} 2|145r79 161r112 342r66 350r81 704r59 704r73 710m33 710r54
+. 710r60 720r47 1062r62 1854r51
+7i19*Y1{natural} 2|145r102 342r84 350r104 704r103 704r117 710m67 710r88 710r94
+. 721r47 1062r68 1855r51
+8i7*Count{natural} 2|336r41 341r119 349r144 669r74 670r78 670r111 671r80
+. 704r30 706r81 706r111 706r135 706r145 707r81 707r111 707r135 707r145 712m33
+. 712r44 712r54 719r73 1031r27 1031r59 1639r33 1639r48 1639r65 1639r80 2031r24
+. 2040r86 2056r27 2056r42 2056r59 2056r74 2067r70 2075r26
+9f7*Cu{long_float} 2|149r43 160r106 247r52 247r70 341r30 349r35 668r55 684r58
+. 706r62 706r92 711m33 722r32 1031r98 1033r30 1033r55 1633r37 1641r70 1641r77
+. 1840r59 1853r36 2031r58 2031r111 2058r64 2058r71 2068r39 2068r51 2075r54
+. 2075r66
+9f11*Cv{long_float} 2|149r49 160r112 248r52 248r70 341r48 349r58 668r78 684r81
+. 707r62 707r92 711m45 722r46 1031r119 1033r86 1033r111 1633r58 1641r91 1641r98
+. 1840r87 1853r60 2032r32 2032r85 2058r85 2058r92 2068r65 2068r77 2075r80
+. 2075r92
+10f7*Depth{long_float} 2|164m33 341r69 349r84 713r36 713r60 713r83 713r93
+. 714m36 714r47 719r31
+11f7*Height{long_float} 2|336r71 341r94 349r114 719r52
+12f7*Au{long_float} 2|343r30 351r35 724r53
+12f11*Av{long_float} 2|343r48 351r58 724r47
+13f7*Elong{long_float} 2|343r69 351r84 673r53 725r35
+14f7*Sig_U{long_float} 2|2068r112 2075r128
+14f14*Sig_V{long_float} 2|2068r126 2075r142
+16K12*Region_Vectors[12|74] 2|1374r79
+17R12*Regions{12|91R9[16]} 1|87r26 2|118r88 121r21 122r22 141r34 193r84 661r40
+. 1013r26 1017r25 1057r37 1624r44 1834r102 1878r28 1916r34 2011r29 2024r37
+. 2047r38
+25V13*Min_Pixels{natural} 2|141s108 1883s64 1931s73
+26V13*Cut{17R12} 2|127s22
+29V13*Cut_Colour{17R12} 2|141s53
+31V13*Texture_Level{long_float} 2|140s70
+34V13*Near_Depth{long_float} 2|160s64 644s58 788s34 809s55 950s39 1858s33
+36V13*Moved{34|12R12} 2|1801s53 1924s39 1929s65
+38V13*Either{34|12R12} 2|1801s30 1929s42
+39V13*Components{17R12} 2|1883s29 1931s38
+41V13*Max_Diff{natural} 2|1392s48
+42V13*Mean_Gray{long_float} 2|344s35 675s63
+43V13*Quantile{long_float} 2|105s37
+45V13*Inside{boolean} 2|149s30
+46V13*Is_Nan{boolean} 2|53s77 93s67 99s37 163s43 469s61 646s37 813s34 813s71
+. 951s36 1150s76 1157s70 1859s34 2290s111 2449s90 2526s70
+X 49 plug.ads
+9K9*Plug 1|7w6 44r14 91r32 91r54 2|79r57 118r46 193r42 213r53 431r40 431r82
+. 490r35 508r44 603r47 742r35 742r70 744r21 753r40 753r82 756r21 925r45 972r38
+. 972r80 976r36 1016r35 1376r19 1473r22 1775r22 1783r36 1783r71 1787r19 1789r12
+. 1796r21 1797r24 1797r53 1815r35 1815r70 1823r40 1823r82 1918r33 1999r36
+. 1999r78 2112r32 2112r54 2129r151 2676r148 49|65e9
+10A9*Arm_Pose(long_float)<integer> 1|44r19 2|490r40 744r26 756r26 1918r38
+14i7*W{natural} 2|119r45 214r45 579r137 580r113 580r185 604r45 758r45 927r45
+. 977r45 1825r45 2025r60 2042r90 2048r89 2114r45 2156r61
+14i10*H{natural} 2|120r45 215r45 581r137 582r113 582r185 605r45 759r45 928r45
+. 978r45 1826r45 2026r60 2042r106 2115r45 2157r61
+15r7*Gray{34|8R12} 2|344r59 628r45 675r87 792r55 838r60 889r64 1372r33 1392r79
+. 1801r92 1801r127 1914r53 1924r63 1926r59 1929r89
+15r13*RGB{34|8R12} 2|140r98 141r78 1056r39 2116r33 2160r48 2170r75 2171r79
+. 2172r79
+16b7*Has_Depth{boolean} 2|93r106 124r27 158r38 640r32 781r23 948r38 1856r32
+17r7*Depth{34|10R12} 2|87r41 127r40 160r89 644r83 788r59 809r80 950r64 1858r58
+19K12*Cam_Vectors[12|74] 2|1787r24
+20R9*Frame 1|91r59 2|79r62 118r51 193r47 213r58 431r87 508r49 603r52 742r75
+. 753r87 925r50 972r85 1016r40 1783r76 1815r75 1823r87 1999r83 2112r59 49|27e14
+22r7*EE{12|91R9[11]} 2|513r71 517r76 744r40 756r40 1094r83 1119r121 1411r84
+. 1796r58 1918r52 1956r50
+24r7*Cams{12|91R9[19]} 2|87r30 93r95 119r34 120r34 124r16 127r29 140r87 141r67
+. 158r27 160r78 214r34 215r34 344r48 579r127 580r103 580r175 581r127 582r103
+. 582r175 604r34 605r34 628r34 640r21 644r72 675r76 758r34 759r34 781r12
+. 788r48 792r44 809r69 838r49 889r53 927r34 928r34 948r27 950r53 977r34 978r34
+. 1056r28 1372r22 1392r68 1787r48 1800r70 1801r100 1803r106 1809r25 1825r34
+. 1826r34 1856r21 1858r47 1914r42 1924r52 1926r48 1929r78 2010r60 2021r53
+. 2025r40 2026r40 2040r27 2042r79 2042r95 2048r62 2113r64 2114r34 2115r34
+. 2116r22 2153r41 2156r52 2157r52 2160r39 2170m66 2171m70 2172m70
+25i7*Seq{natural} 2|196r24 200r25
+29n28*Ee{29E9} 2|1796r26
+30R9*Cmd 2|1789r17 49|37e14
+31e7*Kind{29E9} 2|1796m13
+32i7*Arm{natural} 2|1796m33
+33a7*Pose{10A9} 2|1796m48
+34r7*Jaw{34|10R12} 2|1796m71
+39R9*Link 1|91r37 2|431r45 742r40 753r45 972r43 1783r41 1815r40 1823r45 1999r41
+. 2112r37 49|56e14
+59V13*Sense{boolean} 2|1797s58
+60V13*Act{boolean} 2|1797s29
+62V13*Steps{natural} 2|976s41 1376s24 1473s27 1775s27 2129s156 2676s153
+X 50 schema.ads
+10K9*Schema 1|15w6 57r16 83r13 2|304r36 517r44 521r39 524r39 570r39 1411r47
+. 1421r42 1948r14 1949r15 1989r13 1994r74 50|36e11
+11R9*Part_Pos 2|304r43 524r46 570r46 1421r49 1949r22 50|17e14
+12b7*Valid{boolean} 2|307r28 542r31 566r44 1321r42 1416r109 1981m16
+13f7*Cu{long_float} 2|309r37 574m37 574r63 1423r120 1963m19 1963r28 1982m16
+. 1982r25
+13f11*Cv{long_float} 2|309r53 574m80 574r106 1424r120 1963m42 1963r51 1982m49
+. 1982r58
+13f15*Z{long_float} 2|309r72 552r34 553r42 575r50 576m40 576r58 1428r34 1429r41
+. 1984m16
+14i7*X0{natural} 2|310r37 561r86 579m37 579r98 1328r70 1985m16
+14i11*Y0{natural} 2|310r53 561r93 581m37 581r98 1328r106 1985m32
+14i15*X1{natural} 2|310r69 561r100 580m37 580r146 1329r70 1985m48
+14i19*Y1{natural} 2|310r85 561r107 582m37 582r146 1329r106 1985m64
+15i7*N_Blobs{natural} 2|546r47 547r34 553r53 561r114 1417r104 1983m16
+16f7*B0u{long_float} 2|544r47 1423r108 1967m22
+16f12*B0v{long_float} 2|544r81 1424r108 1967m38
+16f17*B1u{long_float} 2|545r47 1423r79 1965m22
+16f22*B1v{long_float} 2|545r81 1424r79 1965m38
+19A9*Part_Array(11R9)<integer> 1|57r23
+20R9*Sample 2|521r46 1948r21 50|24e14
+21i7*Arm{natural} 2|1956m12
+21i12*Cam{natural} 2|1956m26
+22a7*Pose{49|10A9} 2|1956m40
+23a7*Parts{19A9} 2|524r61 566r34 570r61 574r53 574r96 575r40 576r48 579r88
+. 580r136 581r88 582r136 1416r92 1417r87 1421r84 1973m18 1986m15
+26R9*Map 1|83r20 50|28e14
+27r7*S{12|91R9[25]} 2|521r62 1416r75 1417r70 1421r67
+31U14*Add 2|1989s20
+33V13*Nearest{integer} 2|517s51 1411s54
+35V13*Count{natural} 2|1994s81
+X 51 selfmap.ads
+9K9*Selfmap 1|8w6 63r13 2|64r44 743r103 747r7 769r19 794r16 891r25 1711r86
+. 1748r19 1786r28 1799r21 1803r62 1828r35 1928r25 2018r19 51|62e12
+10R9*Part 2|64r52 51|16e14
+11b7*Valid{boolean} 2|62r88
+12i7*X0{natural} 2|66r73
+12i11*Y0{natural} 2|66r79
+12i15*X1{natural} 2|66r85
+12i19*Y1{natural} 2|66r91
+13f7*Cu{long_float} 2|66r56 66r100
+13f11*Cv{long_float} 2|66r62 66r106
+19R9*Body_Map 1|63r21 51|41e14
+20i7*Arms{natural} 2|41r27 179r33 253r27 511r27 2186r90 2260r94
+21i7*N_Cams{natural} 2|26r88 42r31 60r81 365r31 512r31 2145r53 2152r22 2186r76
+. 2227r34
+24r7*Parts{12|91R9[17]} 2|62r48 62r77 64r66
+26r7*Cam_On_Arm{34|14R12} 2|30r36 31r19 2004r57 2004r87
+28r7*Amp{34|10R12} 2|517r90 557r79 584r85 774r74 829r39 830r52 1095r63 1177r117
+. 1227r74 1411r102 1433r79 1537r80 1586r110 1921r43 1921r70 1922r37 2019r22
+30r7*Seen{34|12R12} 2|832r26 1176r34 1237r25
+31f7*EE_Noise{long_float} 2|862r53 1349r58 1514r88 1584r101 1752r28 1989r41
+32f7*Rot_Noise{long_float} 2|1989r57
+33f7*Jaw_Noise{long_float} 2|1713r49 1751r27 1803r43 2552r73
+34r7*Floors{12|91R9[18]} 2|1800r129 1801r139 1921r116 1924r75 1929r101
+35r7*Pic_Floor{34|14R12} 2|137r65 137r98 138r61 1750r66 1750r95
+36i7*Settle{natural} 2|1881r49 1882r48
+51P9*Watcher(boolean) 2|743r111
+52U14*Go 2|747s15 891s33 1928s33
+55U14*Idle 2|794s24
+58V13*Pictures_Still{boolean} 2|1803s70
+60V13*Jaw_Of{long_float} 2|769s27 1711s94 1748s27 1786s36 1799s29 1828s43
+. 2018s27
+X 52 system.ads
+67M9*Address
+X 70 s-memory.ads
+51V13*Alloc{52|67M9} 101i<c,__gnat_malloc>22
+66U14*Free 102i<c,__gnat_free>22
+74V13*Realloc{52|67M9} 103i<c,__gnat_realloc>22
+X 82 s-stalib.adb
+87U14 Break_Start 88i<c,__gnat_break_start>22
+X 93 table.ads
+8K9*Table 1|13w6 41r11 42r15 43r15 2|14r26 430r53 489r125 489r147 489r167
+. 515r26 523r33 525r64 535r38 537r35 539r39 540r39 569r48 569r80 569r134
+. 572r48 572r115 742r101 743r40 754r69 771r10 776r16 837r26 837r39 840r36
+. 864r40 875r34 981r57 982r15 995r26 995r39 996r19 1109r24 1126r34 1142r20
+. 1171r30 1194r33 1221r33 1222r17 1222r30 1246r39 1265r10 1275r30 1275r44
+. 1304r36 1304r50 1324r45 1324r77 1324r135 1349r13 1356r18 1404r30 1404r44
+. 1409r29 1422r42 1422r56 1497r21 1498r20 1514r19 1515r22 1566r36 1566r50
+. 1604r42 1604r56 1668r60 1911r23 1911r36 1912r27 2001r11 2001r24 2002r15
+. 93|52e10
+11A9*Vec(long_float)<integer> 1|43r21 2|14r32 489r173 515r32 523r39 572r54
+. 742r107 743r46 837r32 840r42 982r21 995r32 1222r23 1409r35 1911r29 1912r33
+. 2001r17 2002r21
+12N4*Rows 2|1171r36 1194r39 1246r45
+13A9*Vec3(long_float)<integer> 2|525r70 539r45 540r45 569r54 864r46 1275r36
+. 1304r42 1324r51 1404r36 1422r48 1497r27 1566r42 1604r48
+14A9*Mat3(long_float)<integer><integer>
+16A9*Mask(boolean)<integer> 1|42r21 2|489r153 754r75 981r63 996r25 1109r30
+17a4*Zero_Vec{11A9} 2|572r121 837r45 995r45 1222r36 1911r42 2001r30
+18a4*Zero3{13A9} 2|537r41 569r140 1324r141
+20R9*Effect 1|41r17 2|430r59 489r131 1498r26 93|29e14
+22a7*B{14A9} 2|1177r75 1183m32 1183r48 1235r60 1235r85 1247r76
+25f7*Free_Res{long_float} 2|1518r66 1521r24 1521r61
+25f17*Null_Res{long_float} 2|1518r29 1518r79 1521r75
+31U14*Reset 2|771s16
+32U14*Set_Prior 2|776s22
+33U14*Set_Col 2|875s40
+35V13*Predict{13A9} 2|535s44 569s86 1275s50 1304s56 1324s83 1404s50 1422s62
+. 1566s56 1604s62
+36U14*Update 2|1514s25
+37V13*Blocked{boolean} 2|1515s28
+39V13*Norm{long_float} 2|1349s19 1668s66
+42R9*Term 2|1142r26 93|46e14
+43r7*E{20R9} 2|1144m18 1177r73 1183m30 1183r46
+44a7*Err{13A9} 2|1153m21 1154m21 1158m21 1162m21 1166m21 1181m27 1181r40
+. 1195r54 1198r32 1198r64 1198r96 1199r32 1199r64
+45a7*W{13A9} 2|1153m48 1154m48 1158m46 1162m52 1166m57 1186m27 1195r66 1198r44
+. 1198r76 1198r108 1199r44 1199r76 1247r41
+47K12*Term_Vectors[12|74] 2|1126r40 1221r39 1356r24
+50U14*Solve 2|1265s16
+X 95 world.ads
+4K9*World 1|10w6 65r13 2|243r27 243r41 321r22 323r27 323r41 2042r29 2126r7
+. 2205r24 2216r18 2559r38 2572r52 95|31e10
+5R9*Slot 2|243r33 323r33 95|10e14
+6b7*Present{boolean} 2|247r34 248r34 339r22
+7r7*R{48|6R9} 2|247r50 248r50 341r28 341r46 341r67 341r92 341r117 342r28
+. 342r46 342r64 342r82 343r28 343r46 343r67 344r76
+8b7*Seen{boolean} 2|245r19 347r22
+9r7*Shadow{48|6R9} 2|247r63 248r63 336r34 336r64 349r28 349r51 349r77 349r107
+. 349r137 350r28 350r51 350r74 350r97 351r28 351r51 351r77 2559r103 2572r117
+12R9*Cam_State 2|2205r30 2216r24 95|15e14
+14i7*Named{integer} 2|241r27 243r90 386r119 2207m22 2218m16
+17R9*State 1|65r19 95|24e14
+18r7*Cams{12|91R9[16]} 2|241r16 243r79 386r108 2205r49 2208m25 2216r43 2219m19
+19b7*Holding{boolean} 2|327r22 391r44 476r16 2108r28 2569m34 2578m34 2597m25
+20i7*Held_Arm{integer} 2|329r58 476r39 2108r99 2569m57 2578m58 2597m49
+21i7*Held_Cam{integer} 2|327r75 2569m88
+22i7*Held_Slot{integer} 2|327r45 476r75 2571m37 2574m37 2597m71
+23r7*Held_Origin{48|6R9} 2|2572m37
+27U14*Observe 2|2126s13
+28V13*Count{natural} 2|321s28
+29V13*Get{5R9} 2|243s47 323s47 2559s44 2572s58
+30V13*Vanished{boolean} 2|2042s35
+X 96 zone.ads
+8K9*Zone 1|9w6 64r15 2|18r62 44r29 86r26 180r19 255r26 260r36 331r32 620r29
+. 766r20 932r26 1451r41 1827r20 1954r24 2023r26 2288r59 2432r32 2486r33 96|43e9
+9R9*Lobe 2|260r41 96|14e14
+10b7*Valid{boolean} 2|267r39
+11i7*X0{natural} 2|270r73
+11i11*Y0{natural} 2|272r73
+11i15*X1{natural} 2|271r110
+11i19*Y1{natural} 2|273r110
+12f7*Cu{long_float} 2|49r28 49r60 53r157 53r173 263r131 269r31 940r139 940r151
+12f11*Cv{long_float} 2|49r44 49r76 53r165 53r181 264r131 269r52 941r139 941r151
+13i7*Count{natural} 2|274r52
+15R9*Hand_Zone 2|18r67 44r34 86r31 255r31 331r37 620r34 766r25 932r31 1451r46
+. 1827r25 1954r29 2023r31 2288r64 2432r37 2486r38 96|25e14
+16b7*Valid{boolean} 2|47r29 50r33 51r29 52r21 93r18 267r21 287r18 934r123
+. 2028r18 2436r46 2519r75
+17f7*Cu{long_float} 2|48r26 53r55 258r77 940r159 2290r56 2449r35
+17f11*Cv{long_float} 2|48r40 53r61 259r77 941r159 2290r70 2449r49
+18f7*Au{long_float} 2|2451r57
+18f11*Av{long_float} 2|2451r51
+19f7*Span{long_float} 2|93r35 108r79 633r69 643r76 788r123 809r144 950r116
+. 1455r113 1892r67 1892r120 2525r96 2540r79
+20f7*Depth{long_float} 2|48r53 53r87 53r110 93r77 108r89 2290r84 2290r121
+. 2449r63 2449r100 2526r81 2527r85
+21i7*N_Lobes{natural} 2|50r50 53r144 934r140
+22r7*A{9R9} 2|49r26 49r42 53r155 53r163 284r23 940r137 941r137
+22r10*B{9R9} 2|49r58 49r74 53r171 53r179 285r23 940r149 941r149
+24i7*X0{natural} 2|53r120 290r68 335r30 1985r25 2031r96 2450r85
+24i11*Y0{natural} 2|53r126 292r68 335r45 1985r41 2032r70 2450r132
+24i15*X1{natural} 2|53r132 291r105 335r60 1985r57 2031r149 2450r78
+24i19*Y1{natural} 2|53r138 293r105 335r75 1985r73 2032r123 2450r125
+29r7*Zones{12|91R9[26]} 2|20r79 21r31
+30f7*Empty_Close{long_float} 2|1712r98 2551r68
+31f7*Open_Reading{long_float} 2|2579r62 2596r53
+35K12*Hand_Vectors[12|74] 1|64r20
+42V13*Is_Self{boolean} 2|180s24
+

@@ -1,0 +1,530 @@
+V "GNAT Lib v16"
+A -O2
+A -gnatA
+A -gnat2022
+A -gnata
+A -gnatwa
+A -g
+A -gnatyM200
+A -mmacosx-version-min=26.0.0
+A -mcpu=apple-m1
+A -mlittle-endian
+A -mabi=lp64
+A -fPIC
+P SS ZX
+
+RN
+RV NO_DISPATCHING_CALLS
+RV NO_ENUMERATION_MAPS
+RV NO_EXCEPTION_HANDLERS
+RV NO_EXCEPTION_PROPAGATION
+RV NO_EXCEPTIONS
+RV NO_FLOATING_POINT
+RV NO_IMPLICIT_CONDITIONALS
+RV NO_NESTED_FINALIZATION
+RV NO_SECONDARY_STACK
+RV NO_STANDARD_STORAGE_POOLS
+RV NO_DEFAULT_INITIALIZATION
+RV NO_DYNAMIC_SIZED_OBJECTS
+RV NO_IMPLEMENTATION_PRAGMAS
+RV NO_ELABORATION_CODE
+
+U world%b		world.adb		cee7f420 NE OO PK
+W ada%s			ada.ads			ada.ali
+Z ada.exceptions%s	a-except.adb		a-except.ali
+W ada.numerics%s	a-numeri.ads		a-numeri.ali
+W ada.numerics.long_elementary_functions%s  a-nlelfu.ads  a-nlelfu.ali
+Z ada.strings.text_buffers%s  a-sttebu.adb	a-sttebu.ali
+Z ada.tags%s		a-tags.adb		a-tags.ali
+Z system%s		system.ads		system.ali
+Z system.finalization_primitives%s  s-finpri.adb  s-finpri.ali
+Z system.secondary_stack%s  s-secsta.adb	s-secsta.ali
+Z system.soft_links%s	s-soflin.adb		s-soflin.ali
+
+U world%s		world.ads		055e4508 EE OO PF PK
+W ada%s			ada.ads			ada.ali
+W ada.containers%s	a-contai.ads		a-contai.ali
+Z ada.containers.generic_array_sort%s
+Z ada.containers.helpers%s  a-conhel.adb	a-conhel.ali
+W ada.containers.vectors%s
+Z ada.exceptions%s	a-except.adb		a-except.ali
+Z ada.finalization%s	a-finali.ads		a-finali.ali
+Z ada.iterator_interfaces%s
+Z ada.streams%s		a-stream.adb		a-stream.ali
+W ada.strings%s		a-string.ads		a-string.ali
+Z ada.strings.text_buffers%s  a-sttebu.adb	a-sttebu.ali
+Z ada.tags%s		a-tags.adb		a-tags.ali
+Z ada.unchecked_deallocation%s
+W picture%s		picture.adb		picture.ali
+Z system%s		system.ads		system.ali
+Z system.assertions%s	s-assert.adb		s-assert.ali
+Z system.finalization_primitives%s  s-finpri.adb  s-finpri.ali
+Z system.img_lflt%s	s-imglfl.ads		s-imglfl.ali
+Z system.pool_global%s	s-pooglo.adb		s-pooglo.ali
+Z system.put_images%s	s-putima.adb		s-putima.ali
+Z system.return_stack%s	s-retsta.ads		s-retsta.ali
+Z system.secondary_stack%s  s-secsta.adb	s-secsta.ali
+Z system.soft_links%s	s-soflin.adb		s-soflin.ali
+Z system.standard_library%s  s-stalib.adb	s-stalib.ali
+Z system.storage_elements%s  s-stoele.ads	s-stoele.ali
+Z system.storage_pools%s  s-stopoo.adb		s-stopoo.ali
+Z system.storage_pools.subpools%s  s-stposu.adb	s-stposu.ali
+Z system.stream_attributes%s  s-stratt.adb	s-stratt.ali
+Z system.wch_stw%s	s-wchstw.adb		s-wchstw.ali
+
+D ada.ads		20260610194523 76789da1 ada%s
+D a-assert.ads		20260610194523 ba465f5c ada.assertions%s
+D a-contai.ads		20260610194523 61e5e089 ada.containers%s
+D a-cgarso.ads		20260610194523 9129bfa8 ada.containers.generic_array_sort%s
+D a-conhel.ads		20260610194523 46fe1ce3 ada.containers.helpers%s
+D a-conhel.adb		20260610194523 854d323e ada.containers.helpers%b
+D a-coinve.ads		20260610194523 2d0a9a0e ada.containers.indefinite_vectors%s
+D a-convec.ads		20260610194523 cb0f314a ada.containers.vectors%s
+D a-convec.adb		20260610194523 b2ed0168 ada.containers.vectors%b
+D a-except.ads		20260610194523 8699d7ff ada.exceptions%s
+D a-finali.ads		20260610194523 099c16e4 ada.finalization%s
+D a-iteint.ads		20260610194523 49a8bee2 ada.iterator_interfaces%s
+D a-numeri.ads		20260610194523 84bea7a3 ada.numerics%s
+D a-ngelfu.ads		20260610194523 324808ac ada.numerics.generic_elementary_functions%s
+D a-nlelfu.ads		20260610194523 7620113d ada.numerics.long_elementary_functions%s
+D a-stream.ads		20260610194523 cb01a8f8 ada.streams%s
+D a-string.ads		20260610194523 90ac6797 ada.strings%s
+D a-sttebu.ads		20260610194523 f1ad67a2 ada.strings.text_buffers%s
+D a-stuten.ads		20260610194523 c6ced0ae ada.strings.utf_encoding%s
+D a-tags.ads		20260610194523 2dbf449c ada.tags%s
+D a-unccon.ads		20260610194523 0e9b276f ada.unchecked_conversion%s
+D a-uncdea.ads		20260610194523 c3a8ac65 ada.unchecked_deallocation%s
+D bytes.ads		20260906203008 86b1403c bytes%s
+D interfac.ads		20260610194523 9111f9c1 interfaces%s
+D i-c.ads		20260610194523 dbdd3be7 interfaces.c%s
+D picture.ads		20260912223334 103f308c picture%s
+D system.ads		20260610194523 8a611ac3 system%s
+D s-assert.ads		20260610194523 9c4520c7 system.assertions%s
+D s-atocou.ads		20260610194523 dc18efc3 system.atomic_counters%s
+D s-atocou.adb		20260610194523 6fe685de system.atomic_counters%b
+D s-atopri.ads		20260610194523 e19c1d89 system.atomic_primitives%s
+D s-exctab.ads		20260610194523 91bef6ef system.exception_table%s
+D s-finpri.ads		20260610194523 5970d55a system.finalization_primitives%s
+D s-finroo.ads		20260610194523 0a7c3ed4 system.finalization_root%s
+D s-imager.ads		20260610194523 45c7157d system.image_r%s
+D s-imageu.ads		20260610194523 95851461 system.image_u%s
+D s-imglfl.ads		20260610194523 941be202 system.img_lflt%s
+D s-imgllu.ads		20260610194523 047fb1fb system.img_llu%s
+D s-memory.ads		20260610194523 18949c1a system.memory%s
+D s-oscons.ads		20260626180535 42ad9981 system.os_constants%s
+D s-oslock.ads		20260610194523 bcc789d2 system.os_locks%s
+D s-parame.ads		20260610194523 a1aeab5c system.parameters%s
+D s-pooglo.ads		20260610194523 91708d21 system.pool_global%s
+D s-powlfl.ads		20260610194523 ac0852c8 system.powten_lflt%s
+D s-putima.ads		20260610194523 1b989439 system.put_images%s
+D s-retsta.ads		20260610194523 0f6b06cb system.return_stack%s
+D s-secsta.ads		20260610194523 578279f5 system.secondary_stack%s
+D s-soflin.ads		20260610194523 5d88fdea system.soft_links%s
+D s-stache.ads		20260610194523 0b81c1fe system.stack_checking%s
+D s-stalib.ads		20260610194523 1c9580f6 system.standard_library%s
+D s-stalib.adb		20260610194523 eb464a47 system.standard_library%b
+D s-stoele.ads		20260610194523 ccded4e8 system.storage_elements%s
+D s-stopoo.ads		20260610194523 45459446 system.storage_pools%s
+D s-stposu.ads		20260610194523 f8e797ef system.storage_pools.subpools%s
+D s-stratt.ads		20260610194523 80b8dafb system.stream_attributes%s
+D s-traent.ads		20260610194523 c81cbf8c system.traceback_entries%s
+D s-unstyp.ads		20260610194523 fa2a7f59 system.unsigned_types%s
+D s-wchcon.ads		20260610194523 d9032363 system.wch_con%s
+D s-wchstw.ads		20260610194523 2d112c01 system.wch_stw%s
+D world.ads		20260912223334 de6e44ce world%s
+D world.adb		20260912223334 66a9a1d3 world%b
+G a e
+G c Z s s [slotIP world 5 9 none]
+G c Z s s [has_element world__slot_vectors 115 13 11_4]
+G c Z s s [empty world__slot_vectors 125 13 11_4]
+G c Z s s [Oeq world__slot_vectors 127 24 11_4]
+G c Z s s [to_vector world__slot_vectors 136 13 11_4]
+G c Z s s [to_vector world__slot_vectors 139 13 11_4]
+G c Z s s [Oconcat world__slot_vectors 145 13 11_4]
+G c Z s s [Oconcat world__slot_vectors 149 13 11_4]
+G c Z s s [Oconcat world__slot_vectors 153 13 11_4]
+G c Z s s [Oconcat world__slot_vectors 157 13 11_4]
+G c Z s s [capacity world__slot_vectors 161 13 11_4]
+G c Z s s [reserve_capacity world__slot_vectors 164 14 11_4]
+G c Z s s [length world__slot_vectors 175 13 11_4]
+G c Z s s [set_length world__slot_vectors 178 14 11_4]
+G c Z s s [is_empty world__slot_vectors 187 13 11_4]
+G c Z s s [clear world__slot_vectors 190 14 11_4]
+G c Z s s [to_cursor world__slot_vectors 194 13 11_4]
+G c Z s s [to_index world__slot_vectors 201 13 11_4]
+G c Z s s [element world__slot_vectors 206 13 11_4]
+G c Z s s [element world__slot_vectors 213 13 11_4]
+G c Z s s [replace_element world__slot_vectors 217 14 11_4]
+G c Z s s [replace_element world__slot_vectors 228 14 11_4]
+G c Z s s [query_element world__slot_vectors 239 14 11_4]
+G c Z s s [query_element world__slot_vectors 250 14 11_4]
+G c Z s s [update_element world__slot_vectors 259 14 11_4]
+G c Z s s [update_element world__slot_vectors 276 14 11_4]
+G c Z s s [constant_reference world__slot_vectors 303 13 11_4]
+G c Z s s [reference world__slot_vectors 308 13 11_4]
+G c Z s s [constant_reference world__slot_vectors 313 13 11_4]
+G c Z s s [reference world__slot_vectors 318 13 11_4]
+G c Z s s [assign world__slot_vectors 323 14 11_4]
+G c Z s s [copy world__slot_vectors 325 13 11_4]
+G c Z s s [move world__slot_vectors 327 14 11_4]
+G c Z s s [new_vector world__slot_vectors 333 13 11_4]
+G c Z s s [insert_vector world__slot_vectors 337 14 11_4]
+G c Z s s [insert_vector world__slot_vectors 361 14 11_4]
+G c Z s s [insert_vector world__slot_vectors 378 14 11_4]
+G c Z s s [insert world__slot_vectors 396 14 11_4]
+G c Z s s [insert world__slot_vectors 404 14 11_4]
+G c Z s s [insert world__slot_vectors 412 14 11_4]
+G c Z s s [insert world__slot_vectors 421 14 11_4]
+G c Z s s [insert world__slot_vectors 438 14 11_4]
+G c Z s s [prepend_vector world__slot_vectors 449 14 11_4]
+G c Z s s [prepend world__slot_vectors 459 14 11_4]
+G c Z s s [append_vector world__slot_vectors 466 14 11_4]
+G c Z s s [append world__slot_vectors 476 14 11_4]
+G c Z s s [append world__slot_vectors 483 14 11_4]
+G c Z s s [insert_space world__slot_vectors 486 14 11_4]
+G c Z s s [insert_space world__slot_vectors 503 14 11_4]
+G c Z s s [delete world__slot_vectors 514 14 11_4]
+G c Z s s [delete world__slot_vectors 524 14 11_4]
+G c Z s s [delete_first world__slot_vectors 533 14 11_4]
+G c Z s s [delete_last world__slot_vectors 538 14 11_4]
+G c Z s s [reverse_elements world__slot_vectors 546 14 11_4]
+G c Z s s [swap world__slot_vectors 549 14 11_4]
+G c Z s s [swap world__slot_vectors 554 14 11_4]
+G c Z s s [first_index world__slot_vectors 560 13 11_4]
+G c Z s s [first world__slot_vectors 563 13 11_4]
+G c Z s s [first_element world__slot_vectors 567 13 11_4]
+G c Z s s [last_index world__slot_vectors 570 13 11_4]
+G c Z s s [last world__slot_vectors 574 13 11_4]
+G c Z s s [last_element world__slot_vectors 578 13 11_4]
+G c Z s s [next world__slot_vectors 581 13 11_4]
+G c Z s s [next world__slot_vectors 587 14 11_4]
+G c Z s s [previous world__slot_vectors 590 13 11_4]
+G c Z s s [previous world__slot_vectors 596 14 11_4]
+G c Z s s [find_index world__slot_vectors 599 13 11_4]
+G c Z s s [find world__slot_vectors 609 13 11_4]
+G c Z s s [reverse_find_index world__slot_vectors 623 13 11_4]
+G c Z s s [reverse_find world__slot_vectors 635 13 11_4]
+G c Z s s [contains world__slot_vectors 649 13 11_4]
+G c Z s s [iterate world__slot_vectors 654 14 11_4]
+G c Z s s [reverse_iterate world__slot_vectors 662 14 11_4]
+G c Z s s [iterate world__slot_vectors 669 13 11_4]
+G c Z s s [iterate world__slot_vectors 672 13 11_4]
+G c Z s s [adjust world__slot_vectors__implementation 90 28 726_4_11_4]
+G c Z s s [finalize world__slot_vectors__implementation 93 28 726_4_11_4]
+G c Z s s [zero_counts world__slot_vectors__implementation 96 17 726_4_11_4]
+G c Z s s [busy world__slot_vectors__implementation 100 17 726_4_11_4]
+G c Z s s [unbusy world__slot_vectors__implementation 104 17 726_4_11_4]
+G c Z s s [lock world__slot_vectors__implementation 108 17 726_4_11_4]
+G c Z s s [unlock world__slot_vectors__implementation 112 17 726_4_11_4]
+G c Z s s [tc_check world__slot_vectors__implementation 116 17 726_4_11_4]
+G c Z s s [te_check world__slot_vectors__implementation 120 17 726_4_11_4]
+G c Z s s [is_busy world__slot_vectors__implementation 136 16 726_4_11_4]
+G c Z s s [is_locked world__slot_vectors__implementation 140 16 726_4_11_4]
+G c Z s s [initialize world__slot_vectors__implementation 161 28 726_4_11_4]
+G c Z s s [finalize world__slot_vectors__implementation 162 28 726_4_11_4]
+G c Z s s [initialize world__slot_vectors__implementation 167 28 726_4_11_4]
+G c Z s s [finalize world__slot_vectors__implementation 168 28 726_4_11_4]
+G c Z s s [reference_control_typeDA world__slot_vectors__implementation 84 12 726_4_11_4]
+G c Z s s [reference_control_typeDF world__slot_vectors__implementation 84 12 726_4_11_4]
+G c Z s s [reference_control_typeIP world__slot_vectors__implementation 84 12 726_4_11_4]
+G c Z s s [with_busyDF world__slot_vectors__implementation 158 12 726_4_11_4]
+G c Z s s [with_busyIP world__slot_vectors__implementation 158 12 726_4_11_4]
+G c Z s s [with_lockDF world__slot_vectors__implementation 164 12 726_4_11_4]
+G c Z s s [with_lockIP world__slot_vectors__implementation 164 12 726_4_11_4]
+G c Z s s [put_image world__slot_vectors 747 14 11_4]
+G c Z s s [adjust world__slot_vectors 750 25 11_4]
+G c Z s s [finalize world__slot_vectors 751 25 11_4]
+G c Z s s [write world__slot_vectors 753 14 11_4]
+G c Z s s [read world__slot_vectors 759 14 11_4]
+G c Z s s [read world__slot_vectors 773 14 11_4]
+G c Z s s [write world__slot_vectors 779 14 11_4]
+G c Z s s [write world__slot_vectors 798 14 11_4]
+G c Z s s [read world__slot_vectors 804 14 11_4]
+G c Z s s [write world__slot_vectors 820 14 11_4]
+G c Z s s [read world__slot_vectors 826 14 11_4]
+G c Z s s [pseudo_reference world__slot_vectors 840 13 11_4]
+G c Z s s [get_element_access world__slot_vectors 849 13 11_4]
+G c Z s s [cursorIP world__slot_vectors 768 9 11_4]
+G c Z s s [vectorDA world__slot_vectors 741 9 11_4]
+G c Z s s [vectorDF world__slot_vectors 741 9 11_4]
+G c Z s s [vectorIP world__slot_vectors 741 9 11_4]
+G c Z s s [finalize world__slot_vectors 865 25 11_4]
+G c Z s s [first world__slot_vectors 867 24 11_4]
+G c Z s s [last world__slot_vectors 868 24 11_4]
+G c Z s s [next world__slot_vectors 870 24 11_4]
+G c Z s s [previous world__slot_vectors 874 24 11_4]
+G c Z s s [constant_reference_typeDI world__slot_vectors 788 9 11_4]
+G c Z s s [constant_reference_typeDA world__slot_vectors 788 9 11_4]
+G c Z s s [constant_reference_typeDF world__slot_vectors 788 9 11_4]
+G c Z s s [constant_reference_typeIP world__slot_vectors 788 9 11_4]
+G c Z s s [reference_typeDI world__slot_vectors 810 9 11_4]
+G c Z s s [reference_typeDA world__slot_vectors 810 9 11_4]
+G c Z s s [reference_typeDF world__slot_vectors 810 9 11_4]
+G c Z s s [reference_typeIP world__slot_vectors 810 9 11_4]
+G c Z s s [elements_arrayIP world__slot_vectors 729 9 11_4]
+G c Z s s [elements_typeIP world__slot_vectors 732 9 11_4]
+G c Z s s [iteratorDF world__slot_vectors 857 9 11_4]
+G c Z s s [iteratorIP world__slot_vectors 857 9 11_4]
+G c Z s s [free world__slot_vectors 44 14 11_4]
+G c Z s s [append_slow_path world__slot_vectors 47 14 11_4]
+G c Z s s [cam_stateDI world 12 9 none]
+G c Z s s [cam_stateDA world 12 9 none]
+G c Z s s [cam_stateDF world 12 9 none]
+G c Z s s [cam_stateIP world 12 9 none]
+G c Z s s [has_element world__cam_vectors 115 13 16_4]
+G c Z s s [empty world__cam_vectors 125 13 16_4]
+G c Z s s [Oeq world__cam_vectors 127 24 16_4]
+G c Z s s [to_vector world__cam_vectors 136 13 16_4]
+G c Z s s [to_vector world__cam_vectors 139 13 16_4]
+G c Z s s [Oconcat world__cam_vectors 145 13 16_4]
+G c Z s s [Oconcat world__cam_vectors 149 13 16_4]
+G c Z s s [Oconcat world__cam_vectors 153 13 16_4]
+G c Z s s [Oconcat world__cam_vectors 157 13 16_4]
+G c Z s s [capacity world__cam_vectors 161 13 16_4]
+G c Z s s [reserve_capacity world__cam_vectors 164 14 16_4]
+G c Z s s [length world__cam_vectors 175 13 16_4]
+G c Z s s [set_length world__cam_vectors 178 14 16_4]
+G c Z s s [is_empty world__cam_vectors 187 13 16_4]
+G c Z s s [clear world__cam_vectors 190 14 16_4]
+G c Z s s [to_cursor world__cam_vectors 194 13 16_4]
+G c Z s s [to_index world__cam_vectors 201 13 16_4]
+G c Z s s [element world__cam_vectors 206 13 16_4]
+G c Z s s [element world__cam_vectors 213 13 16_4]
+G c Z s s [replace_element world__cam_vectors 217 14 16_4]
+G c Z s s [replace_element world__cam_vectors 228 14 16_4]
+G c Z s s [query_element world__cam_vectors 239 14 16_4]
+G c Z s s [query_element world__cam_vectors 250 14 16_4]
+G c Z s s [update_element world__cam_vectors 259 14 16_4]
+G c Z s s [update_element world__cam_vectors 276 14 16_4]
+G c Z s s [constant_reference world__cam_vectors 303 13 16_4]
+G c Z s s [reference world__cam_vectors 308 13 16_4]
+G c Z s s [constant_reference world__cam_vectors 313 13 16_4]
+G c Z s s [reference world__cam_vectors 318 13 16_4]
+G c Z s s [assign world__cam_vectors 323 14 16_4]
+G c Z s s [copy world__cam_vectors 325 13 16_4]
+G c Z s s [move world__cam_vectors 327 14 16_4]
+G c Z s s [new_vector world__cam_vectors 333 13 16_4]
+G c Z s s [insert_vector world__cam_vectors 337 14 16_4]
+G c Z s s [insert_vector world__cam_vectors 361 14 16_4]
+G c Z s s [insert_vector world__cam_vectors 378 14 16_4]
+G c Z s s [insert world__cam_vectors 396 14 16_4]
+G c Z s s [insert world__cam_vectors 404 14 16_4]
+G c Z s s [insert world__cam_vectors 412 14 16_4]
+G c Z s s [insert world__cam_vectors 421 14 16_4]
+G c Z s s [insert world__cam_vectors 438 14 16_4]
+G c Z s s [prepend_vector world__cam_vectors 449 14 16_4]
+G c Z s s [prepend world__cam_vectors 459 14 16_4]
+G c Z s s [append_vector world__cam_vectors 466 14 16_4]
+G c Z s s [append world__cam_vectors 476 14 16_4]
+G c Z s s [append world__cam_vectors 483 14 16_4]
+G c Z s s [insert_space world__cam_vectors 486 14 16_4]
+G c Z s s [insert_space world__cam_vectors 503 14 16_4]
+G c Z s s [delete world__cam_vectors 514 14 16_4]
+G c Z s s [delete world__cam_vectors 524 14 16_4]
+G c Z s s [delete_first world__cam_vectors 533 14 16_4]
+G c Z s s [delete_last world__cam_vectors 538 14 16_4]
+G c Z s s [reverse_elements world__cam_vectors 546 14 16_4]
+G c Z s s [swap world__cam_vectors 549 14 16_4]
+G c Z s s [swap world__cam_vectors 554 14 16_4]
+G c Z s s [first_index world__cam_vectors 560 13 16_4]
+G c Z s s [first world__cam_vectors 563 13 16_4]
+G c Z s s [first_element world__cam_vectors 567 13 16_4]
+G c Z s s [last_index world__cam_vectors 570 13 16_4]
+G c Z s s [last world__cam_vectors 574 13 16_4]
+G c Z s s [last_element world__cam_vectors 578 13 16_4]
+G c Z s s [next world__cam_vectors 581 13 16_4]
+G c Z s s [next world__cam_vectors 587 14 16_4]
+G c Z s s [previous world__cam_vectors 590 13 16_4]
+G c Z s s [previous world__cam_vectors 596 14 16_4]
+G c Z s s [find_index world__cam_vectors 599 13 16_4]
+G c Z s s [find world__cam_vectors 609 13 16_4]
+G c Z s s [reverse_find_index world__cam_vectors 623 13 16_4]
+G c Z s s [reverse_find world__cam_vectors 635 13 16_4]
+G c Z s s [contains world__cam_vectors 649 13 16_4]
+G c Z s s [iterate world__cam_vectors 654 14 16_4]
+G c Z s s [reverse_iterate world__cam_vectors 662 14 16_4]
+G c Z s s [iterate world__cam_vectors 669 13 16_4]
+G c Z s s [iterate world__cam_vectors 672 13 16_4]
+G c Z s s [adjust world__cam_vectors__implementation 90 28 726_4_16_4]
+G c Z s s [finalize world__cam_vectors__implementation 93 28 726_4_16_4]
+G c Z s s [zero_counts world__cam_vectors__implementation 96 17 726_4_16_4]
+G c Z s s [busy world__cam_vectors__implementation 100 17 726_4_16_4]
+G c Z s s [unbusy world__cam_vectors__implementation 104 17 726_4_16_4]
+G c Z s s [lock world__cam_vectors__implementation 108 17 726_4_16_4]
+G c Z s s [unlock world__cam_vectors__implementation 112 17 726_4_16_4]
+G c Z s s [tc_check world__cam_vectors__implementation 116 17 726_4_16_4]
+G c Z s s [te_check world__cam_vectors__implementation 120 17 726_4_16_4]
+G c Z s s [is_busy world__cam_vectors__implementation 136 16 726_4_16_4]
+G c Z s s [is_locked world__cam_vectors__implementation 140 16 726_4_16_4]
+G c Z s s [initialize world__cam_vectors__implementation 161 28 726_4_16_4]
+G c Z s s [finalize world__cam_vectors__implementation 162 28 726_4_16_4]
+G c Z s s [initialize world__cam_vectors__implementation 167 28 726_4_16_4]
+G c Z s s [finalize world__cam_vectors__implementation 168 28 726_4_16_4]
+G c Z s s [reference_control_typeDA world__cam_vectors__implementation 84 12 726_4_16_4]
+G c Z s s [reference_control_typeDF world__cam_vectors__implementation 84 12 726_4_16_4]
+G c Z s s [reference_control_typeIP world__cam_vectors__implementation 84 12 726_4_16_4]
+G c Z s s [with_busyDF world__cam_vectors__implementation 158 12 726_4_16_4]
+G c Z s s [with_busyIP world__cam_vectors__implementation 158 12 726_4_16_4]
+G c Z s s [with_lockDF world__cam_vectors__implementation 164 12 726_4_16_4]
+G c Z s s [with_lockIP world__cam_vectors__implementation 164 12 726_4_16_4]
+G c Z s s [put_image world__cam_vectors 747 14 16_4]
+G c Z s s [adjust world__cam_vectors 750 25 16_4]
+G c Z s s [finalize world__cam_vectors 751 25 16_4]
+G c Z s s [write world__cam_vectors 753 14 16_4]
+G c Z s s [read world__cam_vectors 759 14 16_4]
+G c Z s s [read world__cam_vectors 773 14 16_4]
+G c Z s s [write world__cam_vectors 779 14 16_4]
+G c Z s s [write world__cam_vectors 798 14 16_4]
+G c Z s s [read world__cam_vectors 804 14 16_4]
+G c Z s s [write world__cam_vectors 820 14 16_4]
+G c Z s s [read world__cam_vectors 826 14 16_4]
+G c Z s s [pseudo_reference world__cam_vectors 840 13 16_4]
+G c Z s s [get_element_access world__cam_vectors 849 13 16_4]
+G c Z s s [cursorIP world__cam_vectors 768 9 16_4]
+G c Z s s [vectorDA world__cam_vectors 741 9 16_4]
+G c Z s s [vectorDF world__cam_vectors 741 9 16_4]
+G c Z s s [vectorIP world__cam_vectors 741 9 16_4]
+G c Z s s [finalize world__cam_vectors 865 25 16_4]
+G c Z s s [first world__cam_vectors 867 24 16_4]
+G c Z s s [last world__cam_vectors 868 24 16_4]
+G c Z s s [next world__cam_vectors 870 24 16_4]
+G c Z s s [previous world__cam_vectors 874 24 16_4]
+G c Z s s [constant_reference_typeDI world__cam_vectors 788 9 16_4]
+G c Z s s [constant_reference_typeDA world__cam_vectors 788 9 16_4]
+G c Z s s [constant_reference_typeDF world__cam_vectors 788 9 16_4]
+G c Z s s [constant_reference_typeIP world__cam_vectors 788 9 16_4]
+G c Z s s [reference_typeDI world__cam_vectors 810 9 16_4]
+G c Z s s [reference_typeDA world__cam_vectors 810 9 16_4]
+G c Z s s [reference_typeDF world__cam_vectors 810 9 16_4]
+G c Z s s [reference_typeIP world__cam_vectors 810 9 16_4]
+G c Z s s [elements_arrayIP world__cam_vectors 729 9 16_4]
+G c Z s s [elements_arrayDI world__cam_vectors 729 9 16_4]
+G c Z s s [elements_arrayDA world__cam_vectors 729 9 16_4]
+G c Z s s [elements_arrayDF world__cam_vectors 729 9 16_4]
+G c Z s s [elements_typeDI world__cam_vectors 732 9 16_4]
+G c Z s s [elements_typeDF world__cam_vectors 732 9 16_4]
+G c Z s s [elements_typeIP world__cam_vectors 732 9 16_4]
+G c Z s s [iteratorDF world__cam_vectors 857 9 16_4]
+G c Z s s [iteratorIP world__cam_vectors 857 9 16_4]
+G c Z s s [free world__cam_vectors 44 14 16_4]
+G c Z s s [append_slow_path world__cam_vectors 47 14 16_4]
+G c Z s b [init world 25 14 none]
+G c Z s b [reset_all world 26 14 none]
+G c Z s b [observe world 27 14 none]
+G c Z s b [count world 28 13 none]
+G c Z s b [get world 29 13 none]
+G c Z s b [vanished world 30 13 none]
+G c Z s s [stateDI world 17 9 none]
+G c Z s s [stateDA world 17 9 none]
+G c Z s s [stateDF world 17 9 none]
+G c Z s s [stateIP world 17 9 none]
+G c Z b b [bool_arrayIP world 3 9 none]
+G r s region [slotIP world 5 9 none] [regionIP picture 6 9 none]
+G r s region [get world 29 13 none] [regionIP picture 6 9 none]
+G r c none [vanished world 30 13 none] [inside picture 45 13 none]
+G r s region [stateIP world 17 9 none] [regionIP picture 6 9 none]
+X 1 ada.ads
+18K9*Ada 22e8 60|3r6 11r32 16r31 61|1r6 1r50
+X 3 a-contai.ads
+16K13*Containers 28e19 60|3r10 11r36 16r35
+22I9*Count_Type<integer>
+X 8 a-convec.ads
+74k24*Vectors 878e27 60|3w21 11r47 16r46
+91R9*Vector<11|43R9> 60|13r28[11] 18r26[16]
+175V13*Length{3|22I9} 61|14s47[60|16] 21s33[60|16] 26s64[26|16] 28s43[60|11]
+. 38s45[26|16] 58s39[26|16] 68s32[60|16] 68s73[60|11] 71s32[60|16] 71s81[60|11]
+190U14*Clear 61|6s14[60|16]
+217U14*Replace_Element 61|55s25[60|11] 63s17[60|16]
+483U14*Append 61|8s17[60|16] 60s25[60|11]
+X 12 a-iteint.ads
+24h9 Forward_Iterator
+32h9 Reversible_Iterator<24R9[7|84]>
+X 13 a-numeri.ads
+20K13*Numerics 36e17 61|1r10 1r54
+X 14 a-ngelfu.ads
+53V13*Sqrt{long_float} 61|41s52[15|18]
+X 15 a-nlelfu.ads
+18K22*Long_Elementary_Functions[14|39] 61|1w19 1r63
+X 26 picture.ads
+5K9*Picture 49e12 60|2w6 7r11 9r16 23r21 27r63 30r30 30r56 61|19r63 31r31
+. 73r30 73r56 76r50
+6R9*Region 15e14 60|7r19 9r24 23r29 30r64 61|31r39 73r64
+7i7*X0{natural} 61|33r60
+7i11*Y0{natural} 61|33r107
+7i15*X1{natural} 61|33r51
+7i19*Y1{natural} 61|33r98
+8i7*Count{natural} 61|76r15 76r35
+9f7*Cu{long_float} 61|41r69 41r78 76r76
+9f11*Cv{long_float} 61|41r100 41r109 76r82
+17R12*Regions{8|91R9[16]} 60|27r71 30r38 61|19r71 73r38
+45V13*Inside{boolean} 61|76s58
+X 27 system.ads
+67M9*Address
+X 39 s-memory.ads
+51V13*Alloc{27|67M9} 101i<c,__gnat_malloc>22
+66U14*Free 102i<c,__gnat_free>22
+74V13*Realloc{27|67M9} 103i<c,__gnat_realloc>22
+X 51 s-stalib.adb
+87U14 Break_Start 88i<c,__gnat_break_start>22
+X 60 world.ads
+4K9*World 31l5 31e10 61|2b14 82l5 82t10
+5R9*Slot 10e14 11r65 29r64 61|30r21 60r33 70r64
+6b7*Present{boolean} 61|31r56 51m22 53m22 60m39
+7r7*R{26|6R9} 61|31r72 51m42 60m56
+8b7*Seen{boolean} 61|51m89 60m72
+9r7*Shadow{26|6R9} 61|31r82 51m63 60m86
+11K12*Slot_Vectors[8|74] 13r15
+12R9*Cam_State 15e14 16r64 61|8r25 25r15
+13r7*Slots{8|91R9[11]} 61|28r37 30r32 55m19 60m19 68r67 71r75 71r107
+14i7*Named{integer}
+16K12*Cam_Vectors[8|74] 18r14
+17R9*State 24e14 25r31 26r36 27r34 28r24 29r22 61|4r31 13r36 19r34 67r24
+. 70r22
+18r7*Cams{8|91R9[16]} 61|6m9 8m12 14r42 21r28 25r30 63m12 68r27 68r56 71r27
+. 71r64 71r96
+19b7*Holding{boolean} 61|10m9
+20i7*Held_Arm{integer} 61|10m29
+21i7*Held_Cam{integer} 61|10m47
+22i7*Held_Slot{integer} 61|10m65
+23r7*Held_Origin{26|6R9}
+25U14*Init 25=20 25>38 61|4b14 11l8 11t12 16s7
+25r20 S{17R9} 61|4b20 6m7 6r7 8m10 8r10 10m7 10m27 10m45 10m63
+25i38 N_Cams{natural} 61|4b38 7r21
+26U14*Reset_All 26=25 61|13b14 17l8 17t17
+26r25 S{17R9} 61|13b25 14r40 16m13
+27U14*Observe 27=23 27>41 27>56 27>80 27>83 61|19b14 65l8 65t15
+27r23 S{17R9} 61|19b23 21r26 25r28 63m10 63r10
+27i41 Cam{natural} 61|19b41 21r10 25r36 63r34
+27r56 Regs{26|17R12} 61|19b56 26r59 38r40 41r59 41r90 51r47 51r73 58r34 60r61
+. 60r96
+27i80 W{natural} 61|19b80 33r78 34r37
+27i83 H{natural} 61|19b83 33r125
+28V13*Count{natural} 28>20 28>31 61|67b13
+28r20 S{17R9} 61|68r25 68r54
+28i31 Cam{natural} 61|68r10 68r62
+29V13*Get{5R9} 29>18 29>29 29>44 61|70b13
+29r18 S{17R9} 61|71r25 71r62 71r94
+29i29 Cam{natural} 61|71r10 71r70 71r102
+29i44 I{natural} 61|71r49 71r114
+30V13*Vanished{boolean} 30>23 30>47 30>72 30>75 61|73b13 81l8 81t16
+30r23 Regs{26|17R12} 61|73b23 75r16
+30r47 Origin{26|6R9} 61|73b47 76r28 76r66
+30i72 W{natural} 61|73b72 76r86
+30i75 H{natural} 61|73b75 76r89
+X 61 world.adb
+3A9 Bool_Array(boolean)<integer> 26r17
+7i11 I{integer}
+14i7 N{natural} 16r16
+25r10 Cs{60|12R9} 28r34 30r29 55m16 55r16 60m16 60r16 63r39
+26a10 Used{3A9} 39r26 50m19 59r20
+28i14 Si{integer} 30r39 55r42
+30r16 Sl{60|5R9} 31r53 31r69 31r79 51m19 51m39 51m60 51m86 53m19 55r46
+31r16 Ref{26|6R9} 33r47 33r56 33r94 33r103 41r74 41r105
+32f16 Tol{long_float} 43r33
+35i16 Best{integer} 44m37 49r19 50r25 51r53 51r79
+36f16 Bd{long_float} 43r50 44m28
+38i20 Ri{integer} 39r32 41r65 41r96 44r45
+41f25 D{long_float} 43r28 43r46 44r34
+58i14 Ri{integer} 59r26 60r67 60r102
+75r11 R{26|6R9} 76r13 76r74 76r80
+

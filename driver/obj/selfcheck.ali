@@ -1,0 +1,552 @@
+V "GNAT Lib v16"
+M P W=b
+A -O2
+A -gnatA
+A -gnat2022
+A -gnata
+A -gnatwa
+A -g
+A -gnatyM200
+A -mmacosx-version-min=26.0.0
+A -mcpu=apple-m1
+A -mlittle-endian
+A -mabi=lp64
+A -fPIC
+P SS ZX
+
+RN
+RV NO_DISPATCHING_CALLS
+RV NO_EXCEPTION_HANDLERS
+RV NO_EXCEPTION_PROPAGATION
+RV NO_EXCEPTIONS
+RV NO_FLOATING_POINT
+RV NO_IO
+RV NO_IMPLICIT_CONDITIONALS
+RV NO_LOCAL_ALLOCATORS
+RV NO_LONG_LONG_INTEGERS
+RV NO_NESTED_FINALIZATION
+RV NO_SECONDARY_STACK
+RV NO_STANDARD_STORAGE_POOLS
+RV NO_DEFAULT_INITIALIZATION
+RV NO_DYNAMIC_SIZED_OBJECTS
+RV NO_IMPLEMENTATION_PRAGMAS
+RV NO_OBSOLESCENT_FEATURES
+
+U selfcheck%b		selfcheck.adb		f28ab473 NE OO SU
+W ada%s			ada.ads			ada.ali
+W ada.containers%s	a-contai.ads		a-contai.ali
+Z ada.exceptions%s	a-except.adb		a-except.ali
+W ada.strings%s		a-string.ads		a-string.ali
+Z ada.strings.text_buffers%s  a-sttebu.adb	a-sttebu.ali
+W ada.strings.unbounded%s  a-strunb.adb		a-strunb.ali
+Z ada.tags%s		a-tags.adb		a-tags.ali
+W ada.text_io%s		a-textio.adb		a-textio.ali
+W backup%s		backup.adb		backup.ali
+W bytes%s		bytes.adb		bytes.ali
+W chan%s		chan.adb		chan.ali
+W codec%s		codec.adb		codec.ali
+W flow%s		flow.adb		flow.ali
+W gnat%s		gnat.ads		gnat.ali
+W gnat.sha1%s		g-sha1.ads		g-sha1.ali
+W interfaces%s		interfac.ads		interfac.ali
+W json%s		json.adb		json.ali
+W monitor%s		monitor.adb		monitor.ali
+W msgpack%s		msgpack.adb		msgpack.ali
+W picture%s		picture.adb		picture.ali
+W plug%s		plug.adb		plug.ali
+W schema%s		schema.adb		schema.ali
+Z system%s		system.ads		system.ali
+Z system.assertions%s	s-assert.adb		s-assert.ali
+Z system.finalization_primitives%s  s-finpri.adb  s-finpri.ali
+Z system.img_int%s	s-imgint.ads		s-imgint.ali
+Z system.return_stack%s	s-retsta.ads		s-retsta.ali
+Z system.secondary_stack%s  s-secsta.adb	s-secsta.ali
+Z system.soft_links%s	s-soflin.adb		s-soflin.ali
+Z system.standard_library%s  s-stalib.adb	s-stalib.ali
+W table%s		table.adb		table.ali
+W zone%s		zone.adb		zone.ali
+
+D ada.ads		20260610194523 76789da1 ada%s
+D a-assert.ads		20260610194523 ba465f5c ada.assertions%s
+D a-charac.ads		20260610194523 2d3ec45b ada.characters%s
+D a-chlat1.ads		20260610194523 e0d72e76 ada.characters.latin_1%s
+D a-contai.ads		20260610194523 61e5e089 ada.containers%s
+D a-conhel.ads		20260610194523 46fe1ce3 ada.containers.helpers%s
+D a-coinve.ads		20260610194523 2d0a9a0e ada.containers.indefinite_vectors%s
+D a-convec.ads		20260610194523 cb0f314a ada.containers.vectors%s
+D a-except.ads		20260610194523 8699d7ff ada.exceptions%s
+D a-finali.ads		20260610194523 099c16e4 ada.finalization%s
+D a-ioexce.ads		20260610194523 40018c65 ada.io_exceptions%s
+D a-iteint.ads		20260610194523 49a8bee2 ada.iterator_interfaces%s
+D a-stream.ads		20260610194523 cb01a8f8 ada.streams%s
+D a-string.ads		20260610194523 90ac6797 ada.strings%s
+D a-strmap.ads		20260610194523 f7e6ca10 ada.strings.maps%s
+D a-strsea.ads		20260610194523 18c3c634 ada.strings.search%s
+D a-sttebu.ads		20260610194523 f1ad67a2 ada.strings.text_buffers%s
+D a-strunb.ads		20260610194523 8d6ccba7 ada.strings.unbounded%s
+D a-stuten.ads		20260610194523 c6ced0ae ada.strings.utf_encoding%s
+D a-tags.ads		20260610194523 2dbf449c ada.tags%s
+D a-textio.ads		20260610194523 34ef47de ada.text_io%s
+D a-unccon.ads		20260610194523 0e9b276f ada.unchecked_conversion%s
+D a-uncdea.ads		20260610194523 c3a8ac65 ada.unchecked_deallocation%s
+D backup.ads		20260906203008 3a42c177 backup%s
+D bytes.ads		20260906203008 86b1403c bytes%s
+D chan.ads		20260906213131 fcae972f chan%s
+D codec.ads		20260906203008 34417e50 codec%s
+D flow.ads		20260906203008 787398a4 flow%s
+D gnat.ads		20260610194523 b5988c27 gnat%s
+D g-bytswa.ads		20260610194523 a4d21639 gnat.byte_swapping%s
+D g-sechas.ads		20260610194523 302163b5 gnat.secure_hashes%s
+D g-sehash.ads		20260610194523 3c0b3e8a gnat.secure_hashes.sha1%s
+D g-sha1.ads		20260610194523 077f0b47 gnat.sha1%s
+D g-socket.ads		20260610194523 a4cab028 gnat.sockets%s
+D interfac.ads		20260610194523 9111f9c1 interfaces%s
+D i-c.ads		20260610194523 dbdd3be7 interfaces.c%s
+D i-cstrea.ads		20260610194523 ffd01b9d interfaces.c_streams%s
+D json.ads		20260906203008 5d585470 json%s
+D layout.ads		20260906203008 c005157d layout%s
+D monitor.ads		20260912223334 6c1b2206 monitor%s
+D msgpack.ads		20260906203008 0af3a83c msgpack%s
+D picture.ads		20260912223334 103f308c picture%s
+D plug.ads		20260907080552 5ecb2156 plug%s
+D schema.ads		20260907084801 c19c9abf schema%s
+D selfcheck.adb		20260912223334 bb1378cd selfcheck%b
+D selfmap.ads		20260907102348 3ecf7596 selfmap%s
+D system.ads		20260610194523 8a611ac3 system%s
+D s-assert.ads		20260610194523 9c4520c7 system.assertions%s
+D s-atocou.ads		20260610194523 dc18efc3 system.atomic_counters%s
+D s-crtl.ads		20260610194523 823b6536 system.crtl%s
+D s-exctab.ads		20260610194523 91bef6ef system.exception_table%s
+D s-ficobl.ads		20260610194523 dc5161d4 system.file_control_block%s
+D s-finpri.ads		20260610194523 5970d55a system.finalization_primitives%s
+D s-finroo.ads		20260610194523 0a7c3ed4 system.finalization_root%s
+D s-imagei.ads		20260610194523 11a376a2 system.image_i%s
+D s-imgint.ads		20260610194523 86836590 system.img_int%s
+D s-memory.ads		20260610194523 18949c1a system.memory%s
+D s-oscons.ads		20260626180535 42ad9981 system.os_constants%s
+D s-oslock.ads		20260610194523 bcc789d2 system.os_locks%s
+D s-parame.ads		20260610194523 a1aeab5c system.parameters%s
+D s-pooglo.ads		20260610194523 91708d21 system.pool_global%s
+D s-putima.ads		20260610194523 1b989439 system.put_images%s
+D s-retsta.ads		20260610194523 0f6b06cb system.return_stack%s
+D s-secsta.ads		20260610194523 578279f5 system.secondary_stack%s
+D s-soflin.ads		20260610194523 5d88fdea system.soft_links%s
+D s-stache.ads		20260610194523 0b81c1fe system.stack_checking%s
+D s-stalib.ads		20260610194523 1c9580f6 system.standard_library%s
+D s-stalib.adb		20260610194523 eb464a47 system.standard_library%b
+D s-stoele.ads		20260610194523 ccded4e8 system.storage_elements%s
+D s-stopoo.ads		20260610194523 45459446 system.storage_pools%s
+D s-stratt.ads		20260610194523 80b8dafb system.stream_attributes%s
+D s-traent.ads		20260610194523 c81cbf8c system.traceback_entries%s
+D s-unstyp.ads		20260610194523 fa2a7f59 system.unsigned_types%s
+D s-wchcon.ads		20260610194523 d9032363 system.wch_con%s
+D table.ads		20260908002242 51b66f9a table%s
+D websocket.ads		20260906203008 e2cfe5a2 websocket%s
+D zone.ads		20260912223334 ee9098ed zone%s
+G a e
+G c Z b b [selfcheck standard 20 11 none]
+G r c none [selfcheck standard 20 11 none] [base64_of_string codec 5 13 none]
+G r c none [selfcheck standard 20 11 none] [hex_to_bytes codec 6 13 none]
+G r c none [selfcheck standard 20 11 none] [base64 codec 4 13 none]
+G r s doc [selfcheck standard 20 11 none] [docIP msgpack 19 9 none]
+G r l doc [selfcheck standard 20 11 none] [docDI msgpack 19 9 none]
+G r k doc [selfcheck standard 20 11 none] [docDF msgpack 19 9 none]
+G r c none [selfcheck standard 20 11 none] [put_map msgpack 49 14 none]
+G r c none [selfcheck standard 20 11 none] [put_str msgpack 46 14 none]
+G r c none [selfcheck standard 20 11 none] [put_int msgpack 44 14 none]
+G r c none [selfcheck standard 20 11 none] [put_float msgpack 45 14 none]
+G r c none [selfcheck standard 20 11 none] [put_array msgpack 48 14 none]
+G r c none [selfcheck standard 20 11 none] [put_bool msgpack 43 14 none]
+G r c none [selfcheck standard 20 11 none] [put_bin msgpack 47 14 none]
+G r c none [selfcheck standard 20 11 none] [decode msgpack 24 13 none]
+G r c none [selfcheck standard 20 11 none] [key msgpack 26 13 none]
+G r c none [selfcheck standard 20 11 none] [text msgpack 27 13 none]
+G r c none [selfcheck standard 20 11 none] [num msgpack 30 13 none]
+G r c none [selfcheck standard 20 11 none] [numbers msgpack 36 13 none]
+G r c none [selfcheck standard 20 11 none] [put_node msgpack 50 14 none]
+G r s doc [selfcheck standard 20 11 none] [docIP json 15 9 none]
+G r l doc [selfcheck standard 20 11 none] [docDI json 15 9 none]
+G r k doc [selfcheck standard 20 11 none] [docDF json 15 9 none]
+G r c none [selfcheck standard 20 11 none] [parse json 18 13 none]
+G r c none [selfcheck standard 20 11 none] [get json 20 13 none]
+G r c none [selfcheck standard 20 11 none] [text json 21 13 none]
+G r c none [selfcheck standard 20 11 none] [count json 25 13 none]
+G r c none [selfcheck standard 20 11 none] [child json 26 13 none]
+G r c none [selfcheck standard 20 11 none] [num json 22 13 none]
+G r c none [selfcheck standard 20 11 none] [escape json 27 13 none]
+G r c none [selfcheck standard 20 11 none] [filled bytes 22 13 none]
+G r c none [selfcheck standard 20 11 none] [cut picture 26 13 none]
+G r c none [selfcheck standard 20 11 none] [fmt codec 14 13 none]
+G r s floor_map [selfcheck standard 20 11 none] [floor_mapIP picture 19 9 none]
+G r l floor_map [selfcheck standard 20 11 none] [floor_mapDI picture 19 9 none]
+G r k floor_map [selfcheck standard 20 11 none] [floor_mapDF picture 19 9 none]
+G r c none [selfcheck standard 20 11 none] [min_pixels picture 25 13 none]
+G r c none [selfcheck standard 20 11 none] [null_floor picture 35 13 none]
+G r j floor_map [selfcheck standard 20 11 none] [floor_mapDA picture 19 9 none]
+G r c none [selfcheck standard 20 11 none] [moved picture 36 13 none]
+G r c none [selfcheck standard 20 11 none] [components picture 39 13 none]
+G r s effect [selfcheck standard 20 11 none] [effectIP table 20 9 none]
+G r s term [selfcheck standard 20 11 none] [termIP table 42 9 none]
+G r c none [selfcheck standard 20 11 none] [reset table 31 14 none]
+G r c none [selfcheck standard 20 11 none] [set_col table 33 14 none]
+G r c none [selfcheck standard 20 11 none] [solve table 50 14 none]
+G r c none [selfcheck standard 20 11 none] [update table 36 14 none]
+G r c none [selfcheck standard 20 11 none] [col table 34 13 none]
+G r c none [selfcheck standard 20 11 none] [blocked table 37 13 none]
+G r s ring [selfcheck standard 20 11 none] [ringIP backup 18 9 none]
+G r c none [selfcheck standard 20 11 none] [step monitor 22 14 none]
+G r c none [selfcheck standard 20 11 none] [refusing monitor 31 13 none]
+G r c none [selfcheck standard 20 11 none] [stalled monitor 30 13 none]
+G r c none [selfcheck standard 20 11 none] [settled monitor 27 13 none]
+G r c none [selfcheck standard 20 11 none] [fired monitor 39 13 none]
+G r c none [selfcheck standard 20 11 none] [remember backup 9 14 none]
+G r c none [selfcheck standard 20 11 none] [retreat backup 13 14 none]
+G r c none [selfcheck standard 20 11 none] [count backup 11 13 none]
+G r c none [selfcheck standard 20 11 none] [compute flow 9 13 none]
+G r c none [selfcheck standard 20 11 none] [sample flow 11 14 none]
+G r s hand_zone [selfcheck standard 20 11 none] [hand_zoneIP zone 15 9 none]
+G r l hand_zone [selfcheck standard 20 11 none] [hand_zoneDI zone 15 9 none]
+G r k hand_zone [selfcheck standard 20 11 none] [hand_zoneDF zone 15 9 none]
+G r c none [selfcheck standard 20 11 none] [from_sweep zone 40 13 none]
+G r j hand_zone [selfcheck standard 20 11 none] [hand_zoneDA zone 15 9 none]
+G r c none [selfcheck standard 20 11 none] [img codec 15 13 none]
+G r c none [selfcheck standard 20 11 none] [cut_colour picture 29 13 none]
+G r c none [selfcheck standard 20 11 none] [mean_colour picture 32 14 none]
+G r s map [selfcheck standard 20 11 none] [mapIP schema 26 9 none]
+G r l map [selfcheck standard 20 11 none] [mapDI schema 26 9 none]
+G r k map [selfcheck standard 20 11 none] [mapDF schema 26 9 none]
+G r s sample [selfcheck standard 20 11 none] [sampleIP schema 20 9 none]
+G r c none [selfcheck standard 20 11 none] [add schema 31 14 none]
+G r c none [selfcheck standard 20 11 none] [nearest schema 33 13 none]
+G r c none [selfcheck standard 20 11 none] [count schema 35 13 none]
+G r c none [selfcheck standard 20 11 none] [from_string bytes 19 13 none]
+G r c none [selfcheck standard 20 11 none] [bmp24 codec 8 13 none]
+X 1 ada.ads
+18K9*Ada 22e8 45|2r6 2r23 3r6 3r33 18r6 233r55 261r46 330r51
+X 5 a-contai.ads
+16K13*Containers 28e19 45|18w10 233r59 261r50 330r55
+22I9*Count_Type<integer> 45|233r70 261r61 330r66
+X 8 a-convec.ads
+91R9*Vector<10|43R9> 45|142r34[75|47] 303r34[75|47]
+139V13*To_Vector{91R9[25|11]} 45|233s37[25|11] 261s31[25|7] 330s33[25|11]
+175V13*Length{5|22I9} 45|62s70[25|9] 66s29[25|9] 106s25[42|16] 106s94[42|16]
+. 136s29[42|16] 136s90[42|16] 280s26[42|16] 280s119[42|16] 344s26[42|16]
+. 378s25[25|7]
+187V13*Is_Empty{boolean} 45|107s16[42|16]
+190U14*Clear 45|322s13[75|47]
+217U14*Replace_Element 45|98s14[25|9] 102s17[25|9] 127s15[25|7] 130s15[25|7]
+. 214s18[25|7] 240s22[25|9] 243s24[25|9] 246s22[25|11] 267s17[25|7] 268s17[25|7]
+. 269s17[25|7] 274s17[25|7] 275s17[25|7] 276s17[25|7] 335s15[25|11] 340s15[25|11]
+483U14*Append 45|46s12[25|7] 46s29[25|7] 46s46[25|7] 46s68[25|7] 47s12[25|7]
+. 47s29[25|7] 47s46[25|7] 47s63[25|7] 123s12[25|7] 123s27[25|7] 153s13[75|47]
+. 210s15[25|7] 315s13[75|47] 322s72[75|47] 357s14[25|9]
+X 12 a-iteint.ads
+24h9 Forward_Iterator
+32h9 Reversible_Iterator<24R9[8|119]>
+X 14 a-string.ads
+16K13*Strings 35e16 45|3r10 3r37
+X 18 a-strunb.ads
+91K21*Unbounded 1641e26 45|3w18 3r45
+105R9*Unbounded_String<10|43R9> 1620e15 45|79r11
+135V13*To_String{string} 45|82s55
+X 21 a-textio.ads
+58K13*Text_IO 785e16 45|2w10 2r27
+565U14*Put_Line 45|25s10 27s10 380s4
+X 24 backup.ads
+3K9*Backup 24e11 45|11w6 186r11 187r11 198r7 199r7 200r50
+6A9*Step_Vec(long_float)<integer> 45|187r18
+7R9*Ring 23e6 45|186r18
+9U14*Remember 45|198s14
+11V13*Count{natural} 45|200s57
+13U14*Retreat 45|199s14
+X 25 bytes.ads
+5K9*Bytes 23e10 45|4w6 4r17
+7K12*U8_Vectors[8|74] 45|261r20
+8R12*Buf{8|91R9[7]} 45|42r11 44r14 69r15 117r14 206r42 207r14 261r13 376r20
+10R12*Floats{8|91R9[9]} 45|64r24 92r13 232r24 351r13
+11K12*Bool_Vectors[8|74] 45|233r24 330r20
+12R12*Bools{8|91R9[11]} 45|118r11 233r15 330r11
+19V13*From_String{8R12} 45|376s40
+22V13*Filled{10R12} 45|92s23 232s34
+X 26 chan.ads
+4K9*Chan 14e9 45|17w6 360r16 362r35 366r44 369r70
+6N4*Per_Arm 45|360r21 362r40 366r49 369r75
+X 27 codec.ads
+3K9*Codec 19e10 45|5w6 33r11 34r11 36r32 36r46 108r77 110r61 156r102 156r131
+. 159r114 170r87 223r78 252r102 252r130 253r68 254r66 255r80 255r106 280r96
+. 289r73 295r63 295r89 295r115 319r39 319r78 345r45 345r85 365r171 376r27
+4V13*Base64{string} 45|36s38
+5V13*Base64_Of_String{string} 45|33s17 34s17
+6V13*Hex_To_Bytes{25|8R12} 45|36s52
+8V13*BMP24{25|8R12} 45|376s33
+14V13*Fmt{string} 45|108s83 110s67 156s108 156s137 159s120 170s93 223s84
+. 252s108 252s136 253s74 254s72 295s69 295s95 295s121 319s45 319s84 365s177
+15V13*Img{string} 45|255s86 255s112 280s102 289s79 345s51 345s91
+X 28 flow.ads
+4K9*Flow 12e9 45|12w6 219r21 219r35 222r7 224r7
+5R9*Field 8e14 45|219r26
+9V13*Compute{5R9} 45|219s40
+11U14*Sample 45|222s12 224s12
+X 29 gnat.ads
+40K9*GNAT 63e9 45|13r6 36r66
+X 31 g-sechas.ads
+178A15*Message_Digest{string}<integer>
+186V16*Digest{178A15[33|42]} 45|36s76[33|42]
+X 33 g-sha1.ads
+42K14*SHA1[31|126] 45|13w11 36r71
+X 35 interfac.ads
+47K9*Interfaces 247e15 45|19w6 19r27
+81M9*Unsigned_8 45|19r38
+X 38 json.ads
+5K9*Json 28e9 45|7w6 78r11 82r14 83r14 83r28 84r14 84r27 84r42 84r86 84r101
+. 85r14 85r27 85r40 85r55 86r14
+15R9*Doc 17e14 45|78r16
+18V13*Parse{boolean} 45|82s19
+20V13*Get{integer} 45|83s33 84s47 84s106 85s32 85s60
+21V13*Text{string} 45|83s19
+22V13*Num{long_float} 45|84s19 85s19
+25V13*Count{natural} 45|84s91
+26V13*Child{integer} 45|84s32 85s45
+27V13*Escape{string} 45|86s19
+X 40 monitor.ads
+4K9*Monitor 47e12 45|10w6 184r11 185r11 192r10 194r14 194r43 194r76 195r14
+. 195r29 196r18 196r33
+6F12*Floor{long_float}
+7R9*Floors 12e14 45|185r19
+8f7*Track{6F12} 45|190m27
+9f7*Picture{6F12} 45|190m9
+11f7*Delivery{6F12} 45|190m45
+14R9*Watch 19e14 45|184r19
+20n33*U_Contact{20E9} 45|196r41
+20n62*U_Settle{20E9} 45|195r37
+22U14*Step 45|192s18
+27V13*Settled{boolean} 45|194s22
+30V13*Stalled{boolean} 45|194s51
+31V13*Refusing{boolean} 45|194s84
+39V13*Fired{boolean} 45|195s22 196s26
+X 41 msgpack.ads
+6K9*Msgpack 51e12 45|6w6 43r11 48r7 49r7 49r44 50r7 50r33 51r7 51r33 52r7
+. 52r35 52r61 52r85 53r7 53r34 54r7 54r34 55r7 55r36 56r7 56r37 56r63 57r7
+. 57r36 58r14 59r14 59r31 60r14 60r30 61r14 61r30 62r23 62r43 62r91 62r111
+. 64r34 64r54 70r15 72r10 73r17 73r50 73r68
+19R9*Doc 22e14 45|43r19 70r23
+24V13*Decode{boolean} 45|58s22 73s25
+26V13*Key{integer} 45|59s39 60s38 61s38 62s51 62s119 64s62 73s76
+27V13*Text{string} 45|59s22 73s58
+30V13*Num{long_float} 45|60s22 61s22
+36V13*Numbers{25|10R12} 45|62s31 62s99 64s42
+43U14*Put_Bool 45|54s42
+44U14*Put_Int 45|50s41 52s69 52s93 56s71
+45U14*Put_Float 45|51s41
+46U14*Put_Str 45|49s15 49s52 50s15 51s15 52s15 53s15 54s15 55s15 55s44 56s15
+. 57s15
+47U14*Put_Bin 45|57s44
+48U14*Put_Array 45|52s43 56s45
+49U14*Put_Map 45|48s15 53s42
+50U14*Put_Node 45|72s18
+X 42 picture.ads
+5K9*Picture 49e12 45|8w6 93r11 105r12 119r12 120r15 133r13 133r45 134r12
+. 135r16 262r12 279r13 293r13 331r12 343r13
+8i7*Count{natural} 45|285r18 292r15 344r54 344r82 345r63 345r103
+9f7*Cu{long_float} 45|109r28
+9f11*Cv{long_float} 45|109r73
+11f7*Height{long_float} 45|108r28 108r94
+13f7*Elong{long_float} 45|110r23 110r78 285r47
+17R12*Regions{8|91R9[16]} 45|93r19 120r23 262r20 331r20
+19R9*Floor_Map 23e14 45|119r20
+21m7*Global{25|6M12} 45|137r17
+25V13*Min_Pixels{natural} 45|133s53
+26V13*Cut{17R12} 45|105s20
+29V13*Cut_Colour{17R12} 45|279s21
+32U14*Mean_Colour 45|293s21
+35V13*Null_Floor{19R9} 45|133s21
+36V13*Moved{25|12R12} 45|134s20
+39V13*Components{17R12} 45|135s24 343s21
+X 43 plug.ads
+9K9*Plug 65e9 45|16w6
+10A9*Arm_Pose(long_float)<integer>
+X 44 schema.ads
+10K9*Schema 36e11 45|15w6 349r11 350r11 361r7 363r7 364r12 368r7 369r14 371r12
+12b7*Valid{boolean} 45|369r132
+16f7*B0u{long_float} 45|362m49 366m58 369r84
+19A9*Part_Array(11R9)<integer>
+20R9*Sample 24e14 45|350r18
+21i7*Arm{natural} 45|359m9
+21i12*Cam{natural} 45|359m21
+22a7*Pose{43|10A9} 45|359m33 362m9 366m9
+23a7*Parts{19A9} 45|360m9 362m28 366m37 367m9 369r63 369r122
+26R9*Map 28e14 45|349r18
+27r7*S{8|91R9[25]} 45|369r57 369r116
+31U14*Add 45|361s14 363s14 368s14
+33V13*Nearest{integer} 45|364s19 371s19
+35V13*Count{natural} 45|369s21
+X 45 selfcheck.adb
+20U11*Selfcheck 20b11 384l5 384t14
+21i4 Fails{natural} 28m10 28r19 380r18 380r95 381r7
+22U14 Check 22b14 22>21 22>37 30l8 30t13 33s4 34s4 38s7 58s7 59s7 60s7 61s7
+. 62s7 66s10 73s10 82s7 83s7 84s7 85s7 86s7 106s7 108s10 109s10 110s10 136s7
+. 137s7 156s7 159s7 170s7 180s7 194s7 195s7 196s7 200s7 223s7 225s7 251s7
+. 252s7 253s7 254s7 255s7 280s7 289s10 294s13 318s7 324s7 344s7 365s7 369s7
+. 372s7 378s7
+22b21 Cond{boolean} 24r10
+22a37 What{string} 25r32 27r32
+36a7 Acc{string} 38r14 38r88
+42r7 S{25|8R12} 48m24 48r24 49m24 49r24 49m61 49r61 50m24 50r24 50m50 50r50
+. 51m24 51r24 51m52 51r52 52m24 52r24 52m54 52r54 52m78 52r78 52m102 52r102
+. 53m24 53r24 53m51 53r51 54m24 54r24 54m52 54r52 55m24 55r24 55m53 55r53
+. 56m24 56r24 56m56 56r56 56m80 56r80 57m24 57r24 57m53 57r53 58r30
+43r7 D{41|19R9} 58m33 58r33 59r28 59r44 60r27 60r43 61r27 61r43 62r40 62r56
+. 62r108 62r124 64r51 64r67 72r32
+44r7 Data{25|8R12} 46m7 46r7 46m24 46r24 46m41 46r41 46m63 46r63 47m7 47r7
+. 47m24 47r24 47m41 47r41 47m58 47r58 57r56
+64r10 Nd{25|10R12} 66r26 66r50 66r72
+69r10 S2{25|8R12} 72m28 72r28 73r33
+70r10 D2{41|19R9} 73m37 73r37 73r64 73r81
+78r7 D{38|15R9} 82m31 82r31 83r25 83r38 84r24 84r39 84r52 84r98 84r111 85r24
+. 85r37 85r52 85r65
+79r7 E{18|105R9} 82m34 82r34 82r66
+80a7 Src{string} 82r26
+90N7 W 92r31 96r21 102r38 105r30
+91N7 H 92r35 96r25 105r33
+92r7 Dep{25|10R12} 98m10 98r10 102m13 102r13 105r25
+93r7 R{42|17R12} 105m7 106r23 106r92 107r14 108r22 108r88 109r22 109r67 110r17
+. 110r72
+94i7 Seed{long_long_integer} 97m10 97r19 98r53
+96i11 I{integer} 98r31
+100i11 Y{integer} 102r34
+101i14 X{integer} 102r42
+115N7 W 122r21 127r36 130r36 133r39 133r65 135r39
+116N7 H 122r25 133r42 133r68 135r42
+117r7 A{25|8R12} 123m10 123r10 133r33 133r36 134r27
+117r10 B{25|8R12} 123m25 123r25 127m13 127r13 130m13 130r13 134r30
+118r7 M{25|12R12} 134m7 135r36
+119r7 Fl{42|19R9} 133m7 133r7 134r33 137r14
+120r7 Comps{42|17R12} 135m7 136r23 136r84
+122i11 I{integer}
+125i11 Y{integer} 127r32 130r32
+126i14 X{integer} 127r40
+129i14 X{integer} 130r40
+141r7 E{75|20R9} 149m20 149r20 150m22 150r22 151m22 151r22 152r14 161m20
+. 161r20 167m27 167r27 170r30 170r109 177m27 177r27 180r29
+142r7 Terms{8|91R9[75|47]} 153m7 153r7 155r20 158r20
+143r7 T{75|42R9} 152m7 152m17 152m54 153r21
+144a7 Cap{75|11A9} 154m7 154m23 155r30 157m7 158r30
+145a7 Act{75|16A9} 154m39 154m56 155r35 158r35
+146a7 A{75|11A9} 155m60 156r31 156r67 156r113 156r142 158m60 159r31 159r67
+. 159r125
+147b7 Ok{boolean} 155m63 156r14 158m63 159r14
+162i11 K{integer} 166r43
+164a13 Cmd{75|11A9} 166m13 167r30 167r36
+172i11 K{integer}
+174a13 Cmd{75|11A9} 176m13 177r30
+184r7 W{40|14R9} 192m24 192r24 194r31 194r60 194r94 195r47 196r52
+185r7 F{40|7R9} 190m7 190m25 190m43 192r48
+186r7 R{24|7R9} 198m24 198r24 199m23 199r23 200r64
+187a7 S{24|6A9} 197m7 198r27 199m26 200r27
+188b7 Had{boolean} 199m29 200r14
+191i11 K{integer}
+204N7 W 209r24 214r39 219r69 223r31 223r106 225r35
+205N7 H 209r28 219r72
+206V16 Pic{25|8R12} 206b16 206>21 218l11 218t14 219s49 219s59
+206i21 X0{natural} 213r22 213r28
+207r10 G{25|8R12} 210m13 210r13 214m16 214r16 217r17
+209i14 I{integer}
+212i14 Y{integer} 214r35
+213i17 X{integer} 214r43
+219r7 Fl{28|5R9} 222r20 224r20
+220f7 Du{long_float} 222m57 223r14 223r89 224m58 225r18
+220f11 Dv{long_float} 222m61 224m62
+230N7 W 232r42 233r82 240r43 243r45 246r43 250r58
+231N7 H 232r46 233r86 250r61
+232r7 Dopen{25|10R12} 240m16 240r16 250r36
+232r14 Dclosed{25|10R12} 243m16 243r16 250r43
+233r7 Swept{25|12R12} 246m16 246r16 250r29
+234r7 Z{77|15R9} 250m7 250r7 251r14 251r31 251r86 252r19 252r55 252r113 252r141
+. 253r19 253r79 254r19 254r77 255r14 255r34 255r91 255r117
+236i11 Y{integer} 240r39 243r41 246r39
+237i14 X{integer} 239r16 239r37 240r47 242r16 243r49 245r16 246r47
+259i7 W{natural} 261r73 267r43 268r43 269r43 274r43 275r43 276r43 279r38
+. 293r39
+260i7 H{natural} 261r77 279r41 293r42
+261r7 RGB{25|8R12} 267m13 267r13 268m13 268r13 269m13 269r13 274m13 274r13
+. 275m13 275r13 276m13 276r13 279r33 293r34
+262r7 Rs{42|17R12} 279m7 280r23 280r116 284r19 291r16
+263f7 Cr{long_float} 293m48 294r21 294r82 295r74
+263f11 Cg{long_float} 293m52 295r100
+263f15 Cb{long_float} 293m56 294r41 294r62 295r126
+265i11 Y{integer} 267r39 268r39 269r39
+266i14 X{integer} 267r47 268r47 269r47
+272i11 Y{integer} 274r39 275r39 276r39
+273i14 X{integer} 274r47 275r47 276r47
+282i10 Thin{natural} 286m16 286r24 289r17 289r84
+284r14 R{42|6R9} 285r16 285r45
+291r11 R{42|6R9} 292r13 293r45
+301r7 E{75|20R9} 309m20 309r20 310m22 310r22 311m22 311r22 312r14 321m22
+. 321r22 322r27
+302r7 T{75|42R9} 312m7 313m7 314m7 315r21 322m20 322m30 322r80
+303r7 Terms{8|91R9[75|47]} 315m7 315r7 317r20 322m7 322r7 322m66 322r66 323r20
+304a7 Cap{75|11A9} 317r30 323r30
+305a7 Act{75|16A9} 316m7 316m24 317r35 323r35
+306a7 A{75|11A9} 317m60 318r26 318r53 319r50 319r89 323m60 324r31 324r61
+307b7 Ok{boolean} 317m63 318r14 323m63 324r14
+328i7 W{natural} 330r78 335r36 340r36 343r36
+329i7 H{natural} 330r82 343r39
+330r7 M{25|12R12} 335m13 335r13 340m13 340r13 343r33
+331r7 Rs{42|17R12} 343m7 344r23 344r47 344r75 345r56 345r96
+333i11 Y{integer} 335r32
+334i14 X{integer} 335r40
+338i11 Y{integer} 340r32
+339i14 X{integer} 340r40
+349r7 M{44|26R9} 361m19 361r19 363m19 363r19 364r28 368m19 368r19 369r28
+. 369r55 369r114 371r28
+350r7 X{44|20R9} 359m7 359m19 359m31 360m7 361r22 362m7 362m26 363r22 366m7
+. 366m35 367m7 368r22
+351r7 Amp{25|10R12} 357m10 357r10 364r75 371r74
+352a7 Diff{75|11A9} 364m83 364r83 365r34 371m82 371r82
+353f7 Dist{long_float} 364m89 364r89 365r74 365r182 371m88 371r88
+354i7 N{integer} 364m7 365r14 371m7 372r14
+356i11 I{integer}
+376r7 B{25|8R12} 378r23 378r51 378r71
+X 47 system.ads
+67M9*Address
+X 57 s-memory.ads
+51V13*Alloc{47|67M9} 101i<c,__gnat_malloc>22
+66U14*Free 102i<c,__gnat_free>22
+74V13*Realloc{47|67M9} 103i<c,__gnat_realloc>22
+X 68 s-stalib.adb
+87U14 Break_Start 88i<c,__gnat_break_start>22
+X 75 table.ads
+8K9*Table 45|9w6 141r11 142r15 143r11 144r13 144r26 145r13 146r11 149r7 150r7
+. 151r7 155r7 158r7 161r7 164r19 164r32 167r13 170r19 170r98 174r19 174r32
+. 177r13 180r14 301r11 302r11 303r15 304r13 305r13 306r11 309r7 310r7 311r7
+. 317r7 321r7 323r7 352r14 75|52e10
+11A9*Vec(long_float)<integer> 45|144r19 146r17 164r25 174r25 304r19 306r17
+. 352r20
+13A9*Vec3(long_float)<integer>
+16A9*Mask(boolean)<integer> 45|145r19 305r19
+17a4*Zero_Vec{11A9} 45|144r32 164r38 174r38
+20R9*Effect 45|141r17 301r17 75|29e14
+31U14*Reset 45|149s13 161s13 309s13
+33U14*Set_Col 45|150s13 151s13 310s13 311s13 321s13
+34V13*Col{13A9} 45|170s25 170s104
+36U14*Update 45|167s19 177s19
+37V13*Blocked{boolean} 45|180s20
+42R9*Term 45|143r17 302r17 75|46e14
+43r7*E{20R9} 45|152m9 312m9 322m22
+44a7*Err{13A9} 45|152m19 313m9 322m32
+45a7*W{13A9} 45|152m56 314m9
+47K12*Term_Vectors[8|74] 45|142r21 303r21
+50U14*Solve 45|155s13 158s13 317s13 323s13
+X 77 zone.ads
+8K9*Zone 45|14w6 234r11 250r12 77|43e9
+15R9*Hand_Zone 45|234r16 77|25e14
+16b7*Valid{boolean} 45|251r16
+17f7*Cu{long_float} 45|252r21 252r115
+17f11*Cv{long_float} 45|252r57 252r143
+19f7*Span{long_float} 45|253r21 253r81
+20f7*Depth{long_float} 45|254r21 254r79
+21i7*N_Lobes{natural} 45|251r33 251r88
+24i7*X0{natural} 45|255r16 255r93
+24i15*X1{natural} 45|255r36 255r119
+40V13*From_Sweep{15R9} 45|250s17
+

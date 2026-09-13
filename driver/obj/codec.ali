@@ -1,0 +1,287 @@
+V "GNAT Lib v16"
+A -O2
+A -gnatA
+A -gnat2022
+A -gnata
+A -gnatwa
+A -g
+A -gnatyM200
+A -mmacosx-version-min=26.0.0
+A -mcpu=apple-m1
+A -mlittle-endian
+A -mabi=lp64
+A -fPIC
+P SS ZX
+
+RN
+RV NO_EXCEPTION_HANDLERS
+RV NO_EXCEPTIONS
+RV NO_FLOATING_POINT
+RV NO_IO
+RV NO_IMPLICIT_CONDITIONALS
+RV NO_LOCAL_ALLOCATORS
+RV NO_NESTED_FINALIZATION
+RV NO_SECONDARY_STACK
+RV NO_STANDARD_STORAGE_POOLS
+RV NO_DEFAULT_INITIALIZATION
+RV NO_DYNAMIC_SIZED_OBJECTS
+RV NO_IMPLEMENTATION_PRAGMAS
+RV NO_IMPLICIT_LOOPS
+RV NO_OBSOLESCENT_FEATURES
+
+U codec%b		codec.adb		a0fcf1e8 NE OO PK
+W ada%s			ada.ads			ada.ali
+W ada.containers%s	a-contai.ads		a-contai.ali
+W ada.directories%s	a-direct.adb		a-direct.ali
+W ada.environment_variables%s  a-envvar.adb	a-envvar.ali
+Z ada.exceptions%s	a-except.adb		a-except.ali
+W ada.long_float_text_io%s  a-lfteio.ads	a-lfteio.ali
+W ada.streams%s		a-stream.adb		a-stream.ali
+W ada.streams.stream_io%s  a-ststio.adb		a-ststio.ali
+W ada.strings%s		a-string.ads		a-string.ali
+W ada.strings.fixed%s	a-strfix.adb		a-strfix.ali
+Z ada.strings.text_buffers%s  a-sttebu.adb	a-sttebu.ali
+Z ada.tags%s		a-tags.adb		a-tags.ali
+W interfaces%s		interfac.ads		interfac.ali
+Z system%s		system.ads		system.ali
+Z system.finalization_primitives%s  s-finpri.adb  s-finpri.ali
+Z system.img_int%s	s-imgint.ads		s-imgint.ali
+Z system.return_stack%s	s-retsta.ads		s-retsta.ali
+Z system.secondary_stack%s  s-secsta.adb	s-secsta.ali
+Z system.soft_links%s	s-soflin.adb		s-soflin.ali
+Z system.val_int%s	s-valint.ads		s-valint.ali
+
+U codec%s		codec.ads		b2f03e6c EE NE OO PK
+W bytes%s		bytes.adb		bytes.ali
+
+D ada.ads		20260610194523 76789da1 ada%s
+D a-calend.ads		20260610194523 bf7f3cc9 ada.calendar%s
+D a-charac.ads		20260610194523 2d3ec45b ada.characters%s
+D a-chlat1.ads		20260610194523 e0d72e76 ada.characters.latin_1%s
+D a-contai.ads		20260610194523 61e5e089 ada.containers%s
+D a-conhel.ads		20260610194523 46fe1ce3 ada.containers.helpers%s
+D a-coinve.ads		20260610194523 2d0a9a0e ada.containers.indefinite_vectors%s
+D a-convec.ads		20260610194523 cb0f314a ada.containers.vectors%s
+D a-direct.ads		20260610194523 467e87a1 ada.directories%s
+D a-envvar.ads		20260610194523 00080416 ada.environment_variables%s
+D a-except.ads		20260610194523 8699d7ff ada.exceptions%s
+D a-finali.ads		20260610194523 099c16e4 ada.finalization%s
+D a-ioexce.ads		20260610194523 40018c65 ada.io_exceptions%s
+D a-iteint.ads		20260610194523 49a8bee2 ada.iterator_interfaces%s
+D a-lfteio.ads		20260610194523 4969a46f ada.long_float_text_io%s
+D a-stream.ads		20260610194523 cb01a8f8 ada.streams%s
+D a-ststio.ads		20260610194523 13ffc4d2 ada.streams.stream_io%s
+D a-string.ads		20260610194523 90ac6797 ada.strings%s
+D a-strfix.ads		20260610194523 8648dedb ada.strings.fixed%s
+D a-strmap.ads		20260610194523 f7e6ca10 ada.strings.maps%s
+D a-strsea.ads		20260610194523 18c3c634 ada.strings.search%s
+D a-sttebu.ads		20260610194523 f1ad67a2 ada.strings.text_buffers%s
+D a-strunb.ads		20260610194523 8d6ccba7 ada.strings.unbounded%s
+D a-stuten.ads		20260610194523 c6ced0ae ada.strings.utf_encoding%s
+D a-tags.ads		20260610194523 2dbf449c ada.tags%s
+D a-textio.ads		20260610194523 34ef47de ada.text_io%s
+D a-tiflio.ads		20260610194523 48a0360d ada.text_io.float_io%s
+D a-unccon.ads		20260610194523 0e9b276f ada.unchecked_conversion%s
+D bytes.ads		20260906203008 86b1403c bytes%s
+D codec.ads		20260906203008 34417e50 codec%s
+D codec.adb		20260906203008 35e003d9 codec%b
+D interfac.ads		20260610194523 9111f9c1 interfaces%s
+D i-c.ads		20260610194523 dbdd3be7 interfaces.c%s
+D i-cstrea.ads		20260610194523 ffd01b9d interfaces.c_streams%s
+D system.ads		20260610194523 8a611ac3 system%s
+D s-atocou.ads		20260610194523 dc18efc3 system.atomic_counters%s
+D s-crtl.ads		20260610194523 823b6536 system.crtl%s
+D s-exctab.ads		20260610194523 91bef6ef system.exception_table%s
+D s-ficobl.ads		20260610194523 dc5161d4 system.file_control_block%s
+D s-finpri.ads		20260610194523 5970d55a system.finalization_primitives%s
+D s-finroo.ads		20260610194523 0a7c3ed4 system.finalization_root%s
+D s-imagei.ads		20260610194523 11a376a2 system.image_i%s
+D s-imgint.ads		20260610194523 86836590 system.img_int%s
+D s-oscons.ads		20260626180535 42ad9981 system.os_constants%s
+D s-oslock.ads		20260610194523 bcc789d2 system.os_locks%s
+D s-parame.ads		20260610194523 a1aeab5c system.parameters%s
+D s-putima.ads		20260610194523 1b989439 system.put_images%s
+D s-retsta.ads		20260610194523 0f6b06cb system.return_stack%s
+D s-secsta.ads		20260610194523 578279f5 system.secondary_stack%s
+D s-soflin.ads		20260610194523 5d88fdea system.soft_links%s
+D s-stache.ads		20260610194523 0b81c1fe system.stack_checking%s
+D s-stalib.ads		20260610194523 1c9580f6 system.standard_library%s
+D s-stoele.ads		20260610194523 ccded4e8 system.storage_elements%s
+D s-stopoo.ads		20260610194523 45459446 system.storage_pools%s
+D s-stratt.ads		20260610194523 80b8dafb system.stream_attributes%s
+D s-traent.ads		20260610194523 c81cbf8c system.traceback_entries%s
+D s-unstyp.ads		20260610194523 fa2a7f59 system.unsigned_types%s
+D s-valint.ads		20260610194523 9081ae83 system.val_int%s
+D s-valuns.ads		20260610194523 c639d3c7 system.val_uns%s
+D s-valuei.ads		20260610194523 75953b98 system.value_i%s
+D s-valueu.ads		20260610194523 099f68d2 system.value_u%s
+D s-wchcon.ads		20260610194523 d9032363 system.wch_con%s
+G a e
+G c Z s b [base64 codec 4 13 none]
+G c Z s b [base64_of_string codec 5 13 none]
+G c Z s b [hex_to_bytes codec 6 13 none]
+G c Z s b [bmp24 codec 8 13 none]
+G c Z s b [write_file codec 9 14 none]
+G c Z s b [write_pgm codec 10 14 none]
+G c Z s b [write_bmp codec 11 14 none]
+G c Z s b [make_dir codec 12 14 none]
+G c Z s b [fmt codec 14 13 none]
+G c Z s b [img codec 15 13 none]
+G c Z s b [pad6 codec 16 13 none]
+G c Z s b [env codec 17 13 none]
+G c Z s b [env_nat codec 18 13 none]
+G c Z b b [put_u32 codec 56 14 none]
+G c Z b b [put_u16 codec 65 14 none]
+G r c none [base64_of_string codec 5 13 none] [from_string bytes 19 13 none]
+G r c none [bmp24 codec 8 13 none] [append bytes 20 14 none]
+G r c none [write_pgm codec 10 14 none] [append bytes 20 14 none]
+G r c none [write_bmp codec 11 14 none] [append bytes 20 14 none]
+X 1 ada.ads
+18K9*Ada 22e8 31|1r6 2r6 3r6 4r6 5r6 6r6 7r6 78r27 115r11 121r14 121r53 124r16
+. 124r62 153r34 154r10 170r7 171r14 171r41 175r7 175r50 188r10 189r17
+X 5 a-contai.ads
+16K13*Containers 28e19 31|2w10 78r31
+22I9*Count_Type<integer> 31|78r42
+X 8 a-convec.ads
+91R9*Vector<12|43R9>
+164U14*Reserve_Capacity 31|78s9[29|7]
+175V13*Length{5|22I9} 31|14s42[29|7] 98s40[29|7] 117s42[29|7] 141s41[29|7]
+206V13*Element{32|81M9} 31|23s27[29|7] 24s46[29|7] 25s46[29|7] 99s33[29|7]
+. 100s33[29|7] 101s33[29|7] 124s92[29|7] 141s59[29|7]
+483U14*Append 31|50s12[29|7] 59s9[29|7] 60s9[29|7] 61s9[29|7] 62s9[29|7]
+. 67s9[29|7] 68s9[29|7] 99s21[29|7] 100s21[29|7] 101s21[29|7] 103s21[29|7]
+. 103s35[29|7] 103s49[29|7] 108s15[29|7] 141s12[29|7]
+X 9 a-direct.ads
+76K13*Directories 524e20 31|4w10 153r38 154r14
+118U14*Create_Path 31|154s26
+310V13*Exists{boolean} 31|153s50
+X 10 a-envvar.ads
+19K13*Environment_Variables 69e30 31|5w10 188r14 189r21
+22V13*Value{string} 31|189s43
+34V13*Exists{boolean} 31|188s36
+X 14 a-iteint.ads
+24h9 Forward_Iterator
+32h9 Reversible_Iterator<24R9[8|119]>
+X 15 a-lfteio.ads
+18K13*Long_Float_Text_IO[27|46] 31|7w10 170r11
+X 16 a-stream.ads
+36K13*Streams 90e16 31|1r10 3w10 115r15 121r18 121r57 124r20 124r66
+42M9*Stream_Element 31|124r74
+44I9*Stream_Element_Offset<long_long_integer> 31|121r65 124r28
+54A9*Stream_Element_Array(42M9)<44I9> 31|121r26
+X 17 a-ststio.ads
+39K21*Stream_IO 225e26 31|1w18 115r23
+44P9*File_Type 31|116r11
+48n32*Out_File{48E9} 31|119r18
+69U14*Create 31|119s7
+81U14*Close 31|128s7 132s13
+90V13*Is_Open{boolean} 31|131s13
+115U14*Write 31|126s10
+X 18 a-string.ads
+16K13*Strings 35e16 31|6r10 171r18 171r45 175r11 175r54
+33n37*Both{33E9} 31|171r53 175r62
+X 19 a-strfix.ads
+49K21*Fixed 1390e22 31|6w18 171r26 175r19
+1133V13*Trim{string} 31|171s32 175s25
+X 26 a-textio.ads
+89I12*Field{integer}
+X 27 a-tiflio.ads
+108U14*Put 31|170s30[15|18]
+111i7 Aft{26|89I12} 31|170r41[15|18]
+112i7 Exp{26|89I12} 31|170r53[15|18]
+X 29 bytes.ads
+5K9*Bytes 23e10 30|2w6 2r17
+6M12*U8{32|81M9} 31|50r20 59r17 60r17 61r17 62r17 67r17 68r17
+8R12*Buf{8|91R9[7]} 30|4r25 6r46 8r26 8r54 9r45 10r47 11r46 31|13r25 39r46
+. 40r11 56r34 65r34 71r26 71r54 75r11 114r45 136r47 137r11 146r46
+19V13*From_String{8R12} 31|37s69
+20U14*Append 31|79s7 139s7
+X 30 codec.ads
+3K9*Codec 19l5 19e10 31|9b14 204l5 204t10
+4V13*Base64{string} 4>21 31|13b13 35l8 35t14 37s61
+4r21 B{29|8R12} 31|13b21 14r40 23r25 24r44 25r44
+5V13*Base64_Of_String{string} 5>31 31|37b13
+5a31 S{string} 31|37r82
+6V13*Hex_To_Bytes{29|8R12} 6>27 31|39b13 54l8 54t20
+6a27 H{string} 31|39b27 47r22 49r22 50r29 50r48
+8V13*BMP24{29|8R12} 8>20 8>31 8>34 31|71b13 112l8 112t13 148s25
+8r20 RGB{29|8R12} 31|71b20 98r36 99r29 100r29 101r29
+8i31 W{natural} 31|71b31 72r33 84r43 94r24 96r45
+8i34 H{natural} 31|71b34 74r48 76r88 93r21
+9U14*Write_File 9>26 9>41 31|114b14 134l8 134t18 143s7 148s7
+9a26 Path{string} 31|114b26 119r28
+9r41 B{29|8R12} 31|114b41 117r40 124r90
+10U14*Write_PGM 10>25 10>40 10>52 10>55 31|136b14 144l8 144t17
+10a25 Path{string} 31|136b25 143r19
+10r40 Gray{29|8R12} 31|136b40 141r36 141r54
+10i52 W{natural} 31|136b52 139r41 140r21
+10i55 H{natural} 31|136b55 139r57 140r25
+11U14*Write_BMP 11>25 11>40 11>51 11>54 31|146b14 149l8 149t17
+11a25 Path{string} 31|146b25 148r19
+11r40 RGB{29|8R12} 31|146b40 148r32
+11i51 W{natural} 31|146b51 148r37
+11i54 H{natural} 31|146b54 148r40
+12U14*Make_Dir 12>24 31|151b14 158l8 158t16
+12a24 Path{string} 31|151b24 153r10 153r58 154r39
+14V13*Fmt{string} 14>18 14>34 31|160b13 172l8 172t11
+14f18 X{long_float} 31|160b18 163r10 163r15 167r14 168r21 170r38
+14i34 Aft{natural} 31|160b34 170r48
+15V13*Img{string} 15>18 31|139s36 139s52 174b13 178s30
+15i18 N{integer} 31|175r46
+16V13*Pad6{string} 16>19 31|177b13 184l8 184t12
+16i19 N{natural} 31|177b19 178r35
+17V13*Env{string} 17>18 31|186b13 192l8 192t11 195s30
+17a18 Name{string} 31|186b18 188r44 189r50
+18V13*Env_Nat{natural} 18>22 18>37 31|194b13 203l8 203t15
+18a22 Name{string} 31|194b22 195r35
+18i37 Default{natural} 31|194b37 198r17 202r29
+X 31 codec.adb
+10a4 Alphabet{string} 27r19 28r23 29r42 30r42
+14i7 N{natural} 15r39 22r17 24r28 25r28 29r35 30r35
+15i7 Out_Len{natural} 16r24
+16a7 S{string} 27m10 28m10 29m10 30m10 34r14
+17i7 P{natural} 27r13 28r13 29r13 30r13 31m10 31r15
+18i7 I{natural} 22r13 23r36 24r20 24r55 25r20 25r55 29r27 30r27 32m10 32r15
+19i7 V{natural} 26m10 27r29 28r33 29r52 30r52
+20i7 B0{natural} 23m10 26r15
+20i11 B1{natural} 24m10 26r28
+20i15 B2{natural} 25m10 26r39
+40r7 B{29|8R12} 50m10 50r10 53r14
+41V16 Nib{natural} 41b16 41>21 50s24 50s43
+41e21 C{character} 42r15 43r47 44r47 45r47
+47i7 I{natural} 49r13 50r32 50r51 51m10 51r15
+56U14 Put_U32 56b14 56=23 56>39 63l8 63t15 80s7 81s7 82s7 83s7 84s7 85s7
+. 88s7 89s7 91s10
+56r23 B{29|8R12} 59m7 59r7 60m7 60r7 61m7 61r7 62m7 62r7
+56m39 V{32|92M9} 59r21 60r34 61r34 62r34
+65U14 Put_U16 65b14 65=23 65>39 69l8 69t15 86s7 87s7
+65r23 B{29|8R12} 67m7 67r7 68m7 68r7
+65i39 V{natural} 67r21 68r21
+72i7 Row{natural} 73r38 74r35
+73i7 Pad{natural} 74r41 107r24
+74i7 Data{natural} 78r59 80r48 89r43
+75r7 B{29|8R12} 78m7 78r7 79m15 79r15 80m16 80r16 81m16 81r16 82m16 82r16
+. 83m16 83r16 84m16 84r16 85m16 85r16 86m16 86r16 87m16 87r16 88m16 88r16
+. 89m16 89r16 91m19 91r19 99m19 99r19 100m19 100r19 101m19 101r19 103m19
+. 103r19 103m33 103r33 103m47 103r47 108m13 108r13 111r14
+76m7 Neg_H{32|92M9} 85r19
+90i11 K{integer}
+93i11 Y{integer} 96r41
+94i14 X{integer} 96r49
+96i16 P{natural} 98r19 99r42 100r42 101r42
+107i14 K{integer}
+116p7 F{17|44P9} 119m15 119r15 126r17 128m14 128r14 131r22 132m20 132r20
+117i7 N{natural} 121r88 123r24
+121a10 A{16|54A9} 124m13 126r20
+123i14 I{integer} 124r51 124r101
+137r7 B{29|8R12} 139m15 139r15 141m10 141r10 143r25
+140i11 I{integer} 141r23 141r68
+161a7 S{string} 170m35 171r38
+178a7 S{string} 180r10 181r17 183r24 183r43
+195a7 V{string} 197r10 200r29
+X 32 interfac.ads
+47K9*Interfaces 31|8w6 56r43 57r11 76r24 76r50 80r19 84r19 89r19 32|247e15
+81M9*Unsigned_8
+92M9*Unsigned_32 31|56r54 76r35 76r61 80r30 84r30 89r30
+159V13*Shift_Right{92M9} 31|60s21 61s21 62s21
+

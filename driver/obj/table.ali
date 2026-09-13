@@ -1,0 +1,449 @@
+V "GNAT Lib v16"
+A -O2
+A -gnatA
+A -gnat2022
+A -gnata
+A -gnatwa
+A -g
+A -gnatyM200
+A -mmacosx-version-min=26.0.0
+A -mcpu=apple-m1
+A -mlittle-endian
+A -mabi=lp64
+A -fPIC
+P SS ZX
+
+RN
+RV NO_DISPATCHING_CALLS
+RV NO_EXCEPTION_HANDLERS
+RV NO_EXCEPTIONS
+RV NO_FLOATING_POINT
+RV NO_IMPLICIT_CONDITIONALS
+RV NO_NESTED_FINALIZATION
+RV NO_SECONDARY_STACK
+RV NO_STANDARD_STORAGE_POOLS
+RV NO_IMPLEMENTATION_PRAGMAS
+RV NO_IMPLICIT_LOOPS
+RV NO_ELABORATION_CODE
+
+U table%b		table.adb		d26115e2 NE OO PK
+W ada%s			ada.ads			ada.ali
+Z ada.exceptions%s	a-except.adb		a-except.ali
+W ada.numerics%s	a-numeri.ads		a-numeri.ali
+W ada.numerics.long_elementary_functions%s  a-nlelfu.ads  a-nlelfu.ali
+Z ada.strings.text_buffers%s  a-sttebu.adb	a-sttebu.ali
+Z ada.tags%s		a-tags.adb		a-tags.ali
+Z system%s		system.ads		system.ali
+Z system.finalization_primitives%s  s-finpri.adb  s-finpri.ali
+Z system.secondary_stack%s  s-secsta.adb	s-secsta.ali
+Z system.soft_links%s	s-soflin.adb		s-soflin.ali
+
+U table%s		table.ads		9ab95ed0 EE OO PF PK
+W ada%s			ada.ads			ada.ali
+W ada.containers%s	a-contai.ads		a-contai.ali
+Z ada.containers.generic_array_sort%s
+Z ada.containers.helpers%s  a-conhel.adb	a-conhel.ali
+W ada.containers.vectors%s
+Z ada.exceptions%s	a-except.adb		a-except.ali
+Z ada.finalization%s	a-finali.ads		a-finali.ali
+Z ada.iterator_interfaces%s
+Z ada.streams%s		a-stream.adb		a-stream.ali
+W ada.strings%s		a-string.ads		a-string.ali
+Z ada.strings.text_buffers%s  a-sttebu.adb	a-sttebu.ali
+Z ada.tags%s		a-tags.adb		a-tags.ali
+Z ada.unchecked_deallocation%s
+Z system%s		system.ads		system.ali
+Z system.assertions%s	s-assert.adb		s-assert.ali
+Z system.finalization_primitives%s  s-finpri.adb  s-finpri.ali
+Z system.img_lflt%s	s-imglfl.ads		s-imglfl.ali
+Z system.put_images%s	s-putima.adb		s-putima.ali
+Z system.return_stack%s	s-retsta.ads		s-retsta.ali
+Z system.secondary_stack%s  s-secsta.adb	s-secsta.ali
+Z system.soft_links%s	s-soflin.adb		s-soflin.ali
+Z system.standard_library%s  s-stalib.adb	s-stalib.ali
+Z system.storage_elements%s  s-stoele.ads	s-stoele.ali
+Z system.storage_pools%s  s-stopoo.adb		s-stopoo.ali
+Z system.storage_pools.subpools%s  s-stposu.adb	s-stposu.ali
+Z system.stream_attributes%s  s-stratt.adb	s-stratt.ali
+Z system.wch_stw%s	s-wchstw.adb		s-wchstw.ali
+
+D ada.ads		20260610194523 76789da1 ada%s
+D a-assert.ads		20260610194523 ba465f5c ada.assertions%s
+D a-contai.ads		20260610194523 61e5e089 ada.containers%s
+D a-cgarso.ads		20260610194523 9129bfa8 ada.containers.generic_array_sort%s
+D a-conhel.ads		20260610194523 46fe1ce3 ada.containers.helpers%s
+D a-conhel.adb		20260610194523 854d323e ada.containers.helpers%b
+D a-convec.ads		20260610194523 cb0f314a ada.containers.vectors%s
+D a-convec.adb		20260610194523 b2ed0168 ada.containers.vectors%b
+D a-except.ads		20260610194523 8699d7ff ada.exceptions%s
+D a-finali.ads		20260610194523 099c16e4 ada.finalization%s
+D a-iteint.ads		20260610194523 49a8bee2 ada.iterator_interfaces%s
+D a-numeri.ads		20260610194523 84bea7a3 ada.numerics%s
+D a-ngelfu.ads		20260610194523 324808ac ada.numerics.generic_elementary_functions%s
+D a-nlelfu.ads		20260610194523 7620113d ada.numerics.long_elementary_functions%s
+D a-stream.ads		20260610194523 cb01a8f8 ada.streams%s
+D a-string.ads		20260610194523 90ac6797 ada.strings%s
+D a-sttebu.ads		20260610194523 f1ad67a2 ada.strings.text_buffers%s
+D a-stuten.ads		20260610194523 c6ced0ae ada.strings.utf_encoding%s
+D a-tags.ads		20260610194523 2dbf449c ada.tags%s
+D a-unccon.ads		20260610194523 0e9b276f ada.unchecked_conversion%s
+D a-uncdea.ads		20260610194523 c3a8ac65 ada.unchecked_deallocation%s
+D interfac.ads		20260610194523 9111f9c1 interfaces%s
+D i-c.ads		20260610194523 dbdd3be7 interfaces.c%s
+D system.ads		20260610194523 8a611ac3 system%s
+D s-assert.ads		20260610194523 9c4520c7 system.assertions%s
+D s-atocou.ads		20260610194523 dc18efc3 system.atomic_counters%s
+D s-atocou.adb		20260610194523 6fe685de system.atomic_counters%b
+D s-atopri.ads		20260610194523 e19c1d89 system.atomic_primitives%s
+D s-exctab.ads		20260610194523 91bef6ef system.exception_table%s
+D s-finpri.ads		20260610194523 5970d55a system.finalization_primitives%s
+D s-finroo.ads		20260610194523 0a7c3ed4 system.finalization_root%s
+D s-imager.ads		20260610194523 45c7157d system.image_r%s
+D s-imageu.ads		20260610194523 95851461 system.image_u%s
+D s-imglfl.ads		20260610194523 941be202 system.img_lflt%s
+D s-imgllu.ads		20260610194523 047fb1fb system.img_llu%s
+D s-memory.ads		20260610194523 18949c1a system.memory%s
+D s-oscons.ads		20260626180535 42ad9981 system.os_constants%s
+D s-oslock.ads		20260610194523 bcc789d2 system.os_locks%s
+D s-parame.ads		20260610194523 a1aeab5c system.parameters%s
+D s-powlfl.ads		20260610194523 ac0852c8 system.powten_lflt%s
+D s-putima.ads		20260610194523 1b989439 system.put_images%s
+D s-retsta.ads		20260610194523 0f6b06cb system.return_stack%s
+D s-secsta.ads		20260610194523 578279f5 system.secondary_stack%s
+D s-soflin.ads		20260610194523 5d88fdea system.soft_links%s
+D s-stache.ads		20260610194523 0b81c1fe system.stack_checking%s
+D s-stalib.ads		20260610194523 1c9580f6 system.standard_library%s
+D s-stalib.adb		20260610194523 eb464a47 system.standard_library%b
+D s-stoele.ads		20260610194523 ccded4e8 system.storage_elements%s
+D s-stopoo.ads		20260610194523 45459446 system.storage_pools%s
+D s-stposu.ads		20260610194523 f8e797ef system.storage_pools.subpools%s
+D s-stratt.ads		20260610194523 80b8dafb system.stream_attributes%s
+D s-traent.ads		20260610194523 c81cbf8c system.traceback_entries%s
+D s-unstyp.ads		20260610194523 fa2a7f59 system.unsigned_types%s
+D s-wchcon.ads		20260610194523 d9032363 system.wch_con%s
+D s-wchstw.ads		20260610194523 2d112c01 system.wch_stw%s
+D table.ads		20260908002242 51b66f9a table%s
+D table.adb		20260908002242 f5f76b45 table%b
+G a e
+G c Z s s [TvecBIP table 11 4 none]
+G c Z s s [Tvec3BIP table 13 4 none]
+G c Z s b [reset table 31 14 none]
+G c Z s b [set_prior table 32 14 none]
+G c Z s b [set_col table 33 14 none]
+G c Z s b [col table 34 13 none]
+G c Z s b [predict table 35 13 none]
+G c Z s b [update table 36 14 none]
+G c Z s b [blocked table 37 13 none]
+G c Z s b [spread table 38 13 none]
+G c Z s b [norm table 39 13 none]
+G c Z s b [norm3 table 40 13 none]
+G c Z s s [Tmat3BIP table 14 4 none]
+G c Z s s [TcovBIP table 15 4 none]
+G c Z s s [effectIP table 20 9 none]
+G c Z s s [termIP table 42 9 none]
+G c Z s s [has_element table__term_vectors 115 13 47_4]
+G c Z s s [empty table__term_vectors 125 13 47_4]
+G c Z s s [Oeq table__term_vectors 127 24 47_4]
+G c Z s s [to_vector table__term_vectors 136 13 47_4]
+G c Z s s [to_vector table__term_vectors 139 13 47_4]
+G c Z s s [Oconcat table__term_vectors 145 13 47_4]
+G c Z s s [Oconcat table__term_vectors 149 13 47_4]
+G c Z s s [Oconcat table__term_vectors 153 13 47_4]
+G c Z s s [Oconcat table__term_vectors 157 13 47_4]
+G c Z s s [capacity table__term_vectors 161 13 47_4]
+G c Z s s [reserve_capacity table__term_vectors 164 14 47_4]
+G c Z s s [length table__term_vectors 175 13 47_4]
+G c Z s s [set_length table__term_vectors 178 14 47_4]
+G c Z s s [is_empty table__term_vectors 187 13 47_4]
+G c Z s s [clear table__term_vectors 190 14 47_4]
+G c Z s s [to_cursor table__term_vectors 194 13 47_4]
+G c Z s s [to_index table__term_vectors 201 13 47_4]
+G c Z s s [element table__term_vectors 206 13 47_4]
+G c Z s s [element table__term_vectors 213 13 47_4]
+G c Z s s [replace_element table__term_vectors 217 14 47_4]
+G c Z s s [replace_element table__term_vectors 228 14 47_4]
+G c Z s s [query_element table__term_vectors 239 14 47_4]
+G c Z s s [query_element table__term_vectors 250 14 47_4]
+G c Z s s [update_element table__term_vectors 259 14 47_4]
+G c Z s s [update_element table__term_vectors 276 14 47_4]
+G c Z s s [constant_reference table__term_vectors 303 13 47_4]
+G c Z s s [reference table__term_vectors 308 13 47_4]
+G c Z s s [constant_reference table__term_vectors 313 13 47_4]
+G c Z s s [reference table__term_vectors 318 13 47_4]
+G c Z s s [assign table__term_vectors 323 14 47_4]
+G c Z s s [copy table__term_vectors 325 13 47_4]
+G c Z s s [move table__term_vectors 327 14 47_4]
+G c Z s s [new_vector table__term_vectors 333 13 47_4]
+G c Z s s [insert_vector table__term_vectors 337 14 47_4]
+G c Z s s [insert_vector table__term_vectors 361 14 47_4]
+G c Z s s [insert_vector table__term_vectors 378 14 47_4]
+G c Z s s [insert table__term_vectors 396 14 47_4]
+G c Z s s [insert table__term_vectors 404 14 47_4]
+G c Z s s [insert table__term_vectors 412 14 47_4]
+G c Z s s [insert table__term_vectors 421 14 47_4]
+G c Z s s [insert table__term_vectors 438 14 47_4]
+G c Z s s [prepend_vector table__term_vectors 449 14 47_4]
+G c Z s s [prepend table__term_vectors 459 14 47_4]
+G c Z s s [append_vector table__term_vectors 466 14 47_4]
+G c Z s s [append table__term_vectors 476 14 47_4]
+G c Z s s [append table__term_vectors 483 14 47_4]
+G c Z s s [insert_space table__term_vectors 486 14 47_4]
+G c Z s s [insert_space table__term_vectors 503 14 47_4]
+G c Z s s [delete table__term_vectors 514 14 47_4]
+G c Z s s [delete table__term_vectors 524 14 47_4]
+G c Z s s [delete_first table__term_vectors 533 14 47_4]
+G c Z s s [delete_last table__term_vectors 538 14 47_4]
+G c Z s s [reverse_elements table__term_vectors 546 14 47_4]
+G c Z s s [swap table__term_vectors 549 14 47_4]
+G c Z s s [swap table__term_vectors 554 14 47_4]
+G c Z s s [first_index table__term_vectors 560 13 47_4]
+G c Z s s [first table__term_vectors 563 13 47_4]
+G c Z s s [first_element table__term_vectors 567 13 47_4]
+G c Z s s [last_index table__term_vectors 570 13 47_4]
+G c Z s s [last table__term_vectors 574 13 47_4]
+G c Z s s [last_element table__term_vectors 578 13 47_4]
+G c Z s s [next table__term_vectors 581 13 47_4]
+G c Z s s [next table__term_vectors 587 14 47_4]
+G c Z s s [previous table__term_vectors 590 13 47_4]
+G c Z s s [previous table__term_vectors 596 14 47_4]
+G c Z s s [find_index table__term_vectors 599 13 47_4]
+G c Z s s [find table__term_vectors 609 13 47_4]
+G c Z s s [reverse_find_index table__term_vectors 623 13 47_4]
+G c Z s s [reverse_find table__term_vectors 635 13 47_4]
+G c Z s s [contains table__term_vectors 649 13 47_4]
+G c Z s s [iterate table__term_vectors 654 14 47_4]
+G c Z s s [reverse_iterate table__term_vectors 662 14 47_4]
+G c Z s s [iterate table__term_vectors 669 13 47_4]
+G c Z s s [iterate table__term_vectors 672 13 47_4]
+G c Z s s [adjust table__term_vectors__implementation 90 28 726_4_47_4]
+G c Z s s [finalize table__term_vectors__implementation 93 28 726_4_47_4]
+G c Z s s [zero_counts table__term_vectors__implementation 96 17 726_4_47_4]
+G c Z s s [busy table__term_vectors__implementation 100 17 726_4_47_4]
+G c Z s s [unbusy table__term_vectors__implementation 104 17 726_4_47_4]
+G c Z s s [lock table__term_vectors__implementation 108 17 726_4_47_4]
+G c Z s s [unlock table__term_vectors__implementation 112 17 726_4_47_4]
+G c Z s s [tc_check table__term_vectors__implementation 116 17 726_4_47_4]
+G c Z s s [te_check table__term_vectors__implementation 120 17 726_4_47_4]
+G c Z s s [is_busy table__term_vectors__implementation 136 16 726_4_47_4]
+G c Z s s [is_locked table__term_vectors__implementation 140 16 726_4_47_4]
+G c Z s s [initialize table__term_vectors__implementation 161 28 726_4_47_4]
+G c Z s s [finalize table__term_vectors__implementation 162 28 726_4_47_4]
+G c Z s s [initialize table__term_vectors__implementation 167 28 726_4_47_4]
+G c Z s s [finalize table__term_vectors__implementation 168 28 726_4_47_4]
+G c Z s s [reference_control_typeDA table__term_vectors__implementation 84 12 726_4_47_4]
+G c Z s s [reference_control_typeDF table__term_vectors__implementation 84 12 726_4_47_4]
+G c Z s s [reference_control_typeIP table__term_vectors__implementation 84 12 726_4_47_4]
+G c Z s s [with_busyDF table__term_vectors__implementation 158 12 726_4_47_4]
+G c Z s s [with_busyIP table__term_vectors__implementation 158 12 726_4_47_4]
+G c Z s s [with_lockDF table__term_vectors__implementation 164 12 726_4_47_4]
+G c Z s s [with_lockIP table__term_vectors__implementation 164 12 726_4_47_4]
+G c Z s s [put_image table__term_vectors 747 14 47_4]
+G c Z s s [adjust table__term_vectors 750 25 47_4]
+G c Z s s [finalize table__term_vectors 751 25 47_4]
+G c Z s s [write table__term_vectors 753 14 47_4]
+G c Z s s [read table__term_vectors 759 14 47_4]
+G c Z s s [read table__term_vectors 773 14 47_4]
+G c Z s s [write table__term_vectors 779 14 47_4]
+G c Z s s [write table__term_vectors 798 14 47_4]
+G c Z s s [read table__term_vectors 804 14 47_4]
+G c Z s s [write table__term_vectors 820 14 47_4]
+G c Z s s [read table__term_vectors 826 14 47_4]
+G c Z s s [pseudo_reference table__term_vectors 840 13 47_4]
+G c Z s s [get_element_access table__term_vectors 849 13 47_4]
+G c Z s s [cursorIP table__term_vectors 768 9 47_4]
+G c Z s s [vectorDA table__term_vectors 741 9 47_4]
+G c Z s s [vectorDF table__term_vectors 741 9 47_4]
+G c Z s s [vectorIP table__term_vectors 741 9 47_4]
+G c Z s s [finalize table__term_vectors 865 25 47_4]
+G c Z s s [first table__term_vectors 867 24 47_4]
+G c Z s s [last table__term_vectors 868 24 47_4]
+G c Z s s [next table__term_vectors 870 24 47_4]
+G c Z s s [previous table__term_vectors 874 24 47_4]
+G c Z s s [constant_reference_typeDI table__term_vectors 788 9 47_4]
+G c Z s s [constant_reference_typeDA table__term_vectors 788 9 47_4]
+G c Z s s [constant_reference_typeDF table__term_vectors 788 9 47_4]
+G c Z s s [constant_reference_typeIP table__term_vectors 788 9 47_4]
+G c Z s s [reference_typeDI table__term_vectors 810 9 47_4]
+G c Z s s [reference_typeDA table__term_vectors 810 9 47_4]
+G c Z s s [reference_typeDF table__term_vectors 810 9 47_4]
+G c Z s s [reference_typeIP table__term_vectors 810 9 47_4]
+G c Z s s [elements_arrayIP table__term_vectors 729 9 47_4]
+G c Z s s [elements_typeIP table__term_vectors 732 9 47_4]
+G c Z s s [iteratorDF table__term_vectors 857 9 47_4]
+G c Z s s [iteratorIP table__term_vectors 857 9 47_4]
+G c Z s s [free table__term_vectors 44 14 47_4]
+G c Z s s [append_slow_path table__term_vectors 47 14 47_4]
+G c Z s b [solve table 50 14 none]
+G c Z s s [TmaskBIP table 16 4 none]
+X 1 ada.ads
+18K9*Ada 22e8 56|7r6 47r32 57|1r6 1r50
+X 3 a-contai.ads
+16K13*Containers 28e19 56|7r10 47r36
+X 7 a-convec.ads
+74k24*Vectors 878e27 56|7w21 47r47
+91R9*Vector<10|43R9> 56|50r42[47] 57|134r42[56|47]
+187V13*Is_Empty{boolean} 57|143s31[56|47]
+X 11 a-iteint.ads
+24h9 Forward_Iterator
+32h9 Reversible_Iterator<24R9[7|119]>
+X 12 a-numeri.ads
+20K13*Numerics 36e17 57|1r10 1r54
+X 13 a-ngelfu.ads
+53V13*Sqrt{long_float} 57|3s52[14|18] 11s14[14|18]
+X 14 a-nlelfu.ads
+18K22*Long_Elementary_Functions[13|39] 57|1w19 1r63
+X 24 system.ads
+67M9*Address
+X 36 s-memory.ads
+51V13*Alloc{24|67M9} 101i<c,__gnat_malloc>22
+66U14*Free 102i<c,__gnat_free>22
+74V13*Realloc{24|67M9} 103i<c,__gnat_realloc>22
+X 47 s-stalib.adb
+87U14 Break_Start 88i<c,__gnat_break_start>22
+X 56 table.ads
+8K9*Table 52l5 52e10 57|2b14 281l5 281t10
+9N4*Max_Ch 10r43 57|8r37 16r30 136r48
+10I12*Ch_Index{natural} 11r23 14r24 15r23 15r33 16r24 57|172r26
+11A9*Vec(long_float)<integer> 17r24 35r38 36r45 39r23 50r69 50r96 51r29 57|5r23
+. 52r38 63r45 66r12 68r11 104r15 134r69 134r96 135r29 138r12 175r19 246r20
+12N4*Rows 13r29 14r39 57|35r24 45r24 55r21 70r21 99r24 147r24
+13A9*Vec3(long_float)<integer> 18r21 33r60 34r51 35r50 36r55 40r24 44r13
+. 45r11 57|3r24 32r60 41r51 42r11 52r50 53r11 63r55 64r23 65r13
+14A9*Mat3(long_float)<integer><integer> 22r11
+15A9*Cov(long_float)<integer><integer> 23r11 57|137r11 174r19
+16A9*Mask(boolean)<integer> 50r83 57|134r83 139r15
+17a4*Zero_Vec{11A9} 57|66r19 68r18 104r22 138r19 141r12 175r26 246r27
+18a4*Zero3{13A9} 57|42r19 53r19
+20R9*Effect 29e14 31r32 32r36 33r34 34r22 35r26 36r33 37r26 38r25 43r11 57|14r32
+. 25r36 32r34 41r22 52r26 63r33 120r26 122r25
+21i7*N{natural} 57|16m9 19r23 27r17 34r17 44r17 56r26 77r21 77r128 82r21
+. 86r23 87r26 95r23 98r23 106r26 107r29 111r26 112r29 125r12 128r23 131r32
+. 151r62 155r75
+22a7*B{14A9} 57|17m9 36m15 46r24 57r32 100m15 100r29 151r73 155r86
+23a7*P{15A9} 57|18m9 20m12 28m12 88r34 108r45 113m18 113r33 129r21
+24f7*Lambda{long_float} 57|67r31 113r64
+25f7*Free_Res{long_float} 57|22m9 73m9 75r28 77r47 77r95
+25f17*Null_Res{long_float} 57|22m28 74m9 77r82
+26i7*Null_Wins{natural} 57|22m47 78m12 78r27 80m12 120r55
+27i7*Updates{natural} 57|22m65 77r115 117m9 117r22
+28f7*Last_Pred_Err{long_float} 57|22m81 75m9
+31U14*Reset 31=21 31>40 31>53 57|14b14 23l8 23t13
+31r21 E{20R9} 57|14b21 16m7 17m7 18m7 19r21 20m10 22m7 22m26 22m45 22m63
+. 22m79
+31i40 N{natural} 57|14b40 16r27
+31f53 P0{long_float} 57|14b53 20r24
+32U14*Set_Prior 32=25 32>44 32>58 57|25b14 30l8 30t17
+32r25 E{20R9} 57|25b25 27r15 28m10
+32i44 Ch{natural} 57|25b44 27r10 28r15 28r19
+32f58 P0{long_float} 57|25b58 28r26
+33U14*Set_Col 33=23 33>42 33>56 57|32b14 39l8 39t15
+33r23 E{20R9} 57|32b23 34r15 36m13
+33i42 Ch{natural} 57|32b42 34r10 36r18
+33a56 D{13A9} 57|32b56 36r28
+34V13*Col{13A9} 34>18 34>30 57|41b13 50l8 50t11
+34r18 E{20R9} 57|41b18 44r15 46r22
+34i30 Ch{natural} 57|41b30 44r10 46r27
+35V13*Predict{13A9} 35>22 35>34 57|52b13 61l8 61t15 64s31
+35r22 E{20R9} 57|52b22 56r24 57r30
+35a34 A{11A9} 57|52b34 57r43
+36U14*Update 36=22 36>41 36>50 36>61 36>75 57|63b14 118l8 118t14
+36r22 E{20R9} 57|63b22 64r40 67r29 73m7 74m7 75m7 75r26 77r19 77r45 77r80
+. 77r93 77r113 77r126 78m10 78r25 80m10 82r19 86r21 87r24 88r32 95r21 98r21
+. 100m13 100r27 106r24 107r27 108r43 111r24 112r27 113m16 113r31 113r62 117m7
+. 117r20
+36a41 A{11A9} 57|63b41 64r43 77r16 82r16 88r45 90r27 108r35
+36a50 Dy{13A9} 57|63b50 71r21 74r28
+36f61 Motion_Floor{long_float} 57|63b61 77r58
+36f75 Cmd_Floor{long_float} 57|63b75 77r26 82r27
+37V13*Blocked{boolean} 37>22 57|120b13
+37r22 E{20R9} 57|120r53
+38V13*Spread{long_float} 38>21 57|122b13 132l8 132t14
+38r21 E{20R9} 57|122b21 125r10 128r21 129r19 131r30
+39V13*Norm{long_float} 39>19 39>28 57|5b13 12l8 12t12 77s10 82s10
+39a19 A{11A9} 57|5b19 9r19 9r27
+39i28 N{natural} 57|5b28 8r34
+40V13*Norm3{long_float} 40>20 57|3b13 73s21 74s21
+40a20 V{13A9} 57|3r58 3r66 3r74 3r82 3r90 3r98
+42R9*Term 46e14 47r65
+43r7*E{20R9} 57|151r60 151r71 155r73 155r84
+44a7*Err{13A9} 57|153r58
+45a7*W{13A9} 57|148r18 153r43 155r50
+47K12*Term_Vectors[7|74] 50r29 57|134r29
+50U14*Solve 50>21 50>50 50>63 50>74 50>89 51<21 51<34 57|134b14 280l8 280t13
+50r21 Terms{7|91R9[47]} 57|134b21 143r25 146r16
+50i50 N{natural} 57|134b50 136r45
+50a63 Cap{11A9} 57|134b63 262r53
+50a74 Active{16A9} 57|134b74 164r17
+50a89 Damp{11A9} 57|134b89 163r33
+51a21 A{11A9} 57|135b21 141m7 166m13 194r57 265m25 267m25 269m25
+51b34 Ok{boolean} 57|135b34 142m7 184m16 273m16
+X 57 table.adb
+6f7 S{long_float} 9m10 9r15 11r20
+8i11 I{integer} 9r22 9r30
+19i11 I{integer} 20r15 20r18
+35i14 R{integer} 36r22 36r31
+42a7 V{56|13A9} 46m13 49r14
+45i14 R{integer} 46r16 46r31
+53a7 V{56|13A9} 57m13 57r22 60r14
+55i11 R{integer} 57r16 57r25 57r38
+56i14 I{integer} 57r35 57r46
+64a7 Pred{56|13A9} 71r30
+65a7 Err{56|13A9} 71m10 73r28 100r48
+66a7 Pa{56|11A9} 88m13 88r23 90r35 96r19
+67f7 Denom{long_float} 90m10 90r19 92r15 96r28
+68a7 K{56|11A9} 96m10 100r40 113r44
+70i11 R{integer} 71r15 71r25 71r36
+86i11 I{integer} 88r17 88r27 88r37 90r30 90r39
+87i14 J{integer} 88r40 88r48
+95i11 I{integer} 96r13 96r23
+98i11 I{integer} 100r18 100r32 100r43
+99i14 R{integer} 100r21 100r35 100r53
+104a10 Ap{56|11A9} 108m16 108r26 113r52
+106i14 J{integer} 108r20 108r30 108r51
+107i17 I{integer} 108r38 108r48
+111i14 I{integer} 113r21 113r36 113r47
+112i17 J{integer} 113r24 113r39 113r56
+123f7 S{long_float} 129m10 129r15 131r14
+128i11 I{integer} 129r24 129r27
+136i7 Nn{natural} 143r10 149r30 154r36 162r21 177r27 192r33
+137a7 G{56|15A9} 155m25 155r37 163m10 163r22 194r46 198r36
+138a7 Hv{56|11A9} 153m22 153r32 191r30
+139a7 Fixed{56|16A9} 165m13 178r23 193r25 265m37 267m38
+146r11 T{56|42R9} 148r16 151r58 151r69 153r41 153r56 155r48 155r71 155r82
+147i14 R{integer} 148r21 151r79 153r46 153r63 155r53 155r92
+149i20 I{integer} 151r54 151r76 153r26 153r36 155r28 155r40
+151f22 Bi{long_float} 153r51 155r58
+154i26 J{integer} 155r31 155r43 155r67 155r89
+162i11 I{integer} 163r13 163r16 163r25 163r28 163r39 164r25 165r20 166r16
+170i11 Round{integer} 274r43
+172a13 Idx(natural) 179m19 189r43 198r42 261r46
+173i13 M{natural} 179r24 180m19 180r24 183r16 187r27 197r33 203r27 207r37
+. 216r36 231r37 236r42 249r38 253r40 259r30
+174a13 Sys{56|15A9} 198m22 208r29 208r46 212r26 218r57 220m28 220r42 221m28
+. 233r52 233r65 237m31 237r45 237r62 254r34 256r35
+175a13 Rhs{56|11A9} 191m19 194m25 194r36 225r54 227m25 227r36 228m25 239m28
+. 239r39 239r53 251r40
+177i17 I{integer} 178r30 179r30
+187i17 P{integer} 189r48 191r24 194r30 194r41 198r27
+189i19 I{natural} 191r34 194r49 198r39
+192i23 J{integer} 193r32 194r52 194r60
+197i23 Q{integer} 198r30 198r47
+203i17 C{integer} 205r36 207r28 208r37 208r56 212r36 215r29 218r62 220r33
+. 225r59 227r30 231r28 233r60 233r70 233r73 236r37 237r67 239r58
+205i19 Piv{natural} 208r51 209m25 212r31 215r22 220r47 221r33 227r41 228r30
+207i23 R{integer} 208r34 209r32
+216i26 Q{integer} 218r65 220r36 220r52 221r38
+218f28 Tmp{long_float} 221r44
+225f25 Tmp{long_float} 228r38
+231i23 R{integer} 233r57 237r36 237r50 239r33 239r44
+233f25 F{long_float} 235r28 237r58 239r49
+236i32 Q{integer} 237r39 237r53 237r70
+246a16 X{56|11A9} 254r47 256m22 264r25 266r28 269r34
+247b16 Any_Clamped{boolean} 265m56 267m57 274r23
+249i20 R{integer} 251r45 253r31 254r39 256r25 256r40 256r43
+251f22 S{long_float} 254m25 254r30 256r31
+253i26 Q{integer} 254r42 254r50
+259i20 P{integer} 261r51 264r28 266r31 269r37
+261i22 I{natural} 262r58 265r28 265r44 267r28 267r45 269r28
+262f22 C{long_float} 264r33 265r34 266r37 267r35
+

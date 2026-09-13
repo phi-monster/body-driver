@@ -1,0 +1,11 @@
+20260906204339
+-c
+-x
+ada
+-gnatA
+-gnat2022
+-gnata
+-gnatwa
+-O2
+-g
+-gnatyM200
