@@ -315,26 +315,43 @@ package body Table is
       return M;
    end Loudest;
 
+   --  🔴 这一行能不能拿去算动作:【有没有任何一个】通道又证明过、又推得动它。
+   --  以前写的是"最响的那个证过了没有" —— 那是错的:一行常常有好几个通道都推得动它,
+   --  最响的那个偶尔抽一下(推了一次、同样的推法第二次没动),就一票否决整行,
+   --  哪怕另外几个通道稳稳地推了三次完全够用。GB 实测:reach 走了 0 步、合手被拒。
    function Row_Proven (E : Effect; Notch : Vec; R : Natural) return Boolean is
-      Best : Integer;
-      M : constant Long_Float := Loudest (E, Notch, R, Best);
    begin
-      if M <= 0.0 or else Best < 0 then
-         return False;
-      end if;
-      return E.Reps (Best) >= 2 and then E.Scatter (Best, R) < 1.0;
+      for C in 0 .. E.N - 1 loop
+         if abs (E.B (C, R)) * abs Notch (C) > 0.0
+           and then E.Reps (C) >= 2 and then E.Scatter (C, R) < 1.0
+         then
+            return True;
+         end if;
+      end loop;
+      return False;
    end Row_Proven;
 
+   --  没证过时说人话:先说"一个都推不动",否则说【最接近够格的那一个】差在哪
    function Row_Why (E : Effect; Notch : Vec; R : Natural) return String is
-      Best : Integer;
-      M : constant Long_Float := Loudest (E, Notch, R, Best);
+      Any_Moves : Boolean := False;
+      Best_Reps : Natural := 0;
+      Best_Scatter : Long_Float := 0.0;
    begin
-      if M <= 0.0 or else Best < 0 then
+      for C in 0 .. E.N - 1 loop
+         if abs (E.B (C, R)) * abs Notch (C) > 0.0 then
+            Any_Moves := True;
+            if E.Reps (C) > Best_Reps then
+               Best_Reps := E.Reps (C);
+               Best_Scatter := E.Scatter (C, R);
+            end if;
+         end if;
+      end loop;
+      if not Any_Moves then
          return "pushing every channel moved it not at all";
-      elsif E.Reps (Best) < 2 then
-         return "I pushed it only" & Natural'Image (E.Reps (Best)) & " time(s), so I cannot say it is steady";
-      elsif E.Scatter (Best, R) >= 1.0 then
-         return "the same push gave answers that scatter more than their own average";
+      elsif Best_Reps < 2 then
+         return "no channel that moves it has been pushed the same way more than" & Natural'Image (Best_Reps) & " time(s), so I cannot say any of them is steady";
+      elsif Best_Scatter >= 1.0 then
+         return "every channel that moves it gave answers that scatter more than their own average";
       end if;
       return "";
    end Row_Why;

@@ -2382,7 +2382,7 @@ package body Act is
          end;
       end loop;
       if not Acted then
-         --  这一段跑完了:回去问下一段
+         --  这一段跑完了:回去问下一段。把整段里每一节的结果一起交给脑 —— 不许只留最后一句空话。
          C.Have_Prog := False;
          C.Prog_At := 0;
          Answer.Done := C.Prog.Done;
@@ -2414,8 +2414,10 @@ package body Act is
          Codec.Write_BMP (To_String (C.Dump_Dir) & "/grid_" & Codec.Pad6 (C.Round_N) & ".bmp", RGB, Cw, Ch);
       end if;
       declare
-         --  拍数只进日志(我们自己记账),不进问脑的话:真实世界没有"步",脑只看画面
-         Recent : constant String := Memory.Text (C.Mem) & To_String (C.Recent);
+         --  拍数只进日志(我们自己记账),不进问脑的话:真实世界没有"步",脑只看画面。
+         --  🔴 一段程序跑了好几节 ⇒ 把【每一节】的结果都给它,不是只给最后一节。
+         Recent : constant String := Memory.Text (C.Mem)
+           & (if Length (C.Prog_Log) > 0 then To_String (C.Prog_Log) else To_String (C.Recent));
       begin
          --  🔴 每一轮把【所有相机】一起给脑:编号那张在上面(格子和编号只管它),其余几只眼睛按半幅
          --  拼在下面一条。以前一轮只给一台,想看别的得先说"下一轮换一台" —— 那是【盲切】:说完看不到
@@ -2549,6 +2551,7 @@ package body Act is
                   C.Prog := Cm;
                   C.Prog_At := 0;
                   C.Have_Prog := True;
+                  C.Prog_Log := Null_Unbounded_String;
                end;
             end;
          end if;
@@ -3099,6 +3102,8 @@ package body Act is
          Do_Grip;
          Report := Report & Mode_Line (C, To_String (Event));
       end;
+      --  这一节的结果攒进这一段程序的账上;跑完一整段才一次交给脑
+      Append (C.Prog_Log, (if Length (C.Prog_Log) > 0 then ASCII.LF & "" else "") & To_String (Report));
       C.Recent := Report;
       Put_Line ("[身]   ⇒ " & To_String (Report));
    end Round;

@@ -84,6 +84,9 @@ package Act is
       Prog_At : Natural := 0;          --  下一条要跑的动作是第几条
       Have_Prog : Boolean := False;
       Refused : Unbounded_String;      --  上一段被退回的话:理由 + 能照抄的替代,随下一轮一起给脑
+      Prog_Log : Unbounded_String;     --  🔴 这一段程序里【每一节】的结果都攒在这儿。
+                                       --  以前只留最后一节,而最后那一轮恰好是"程序跑完了"的空话,
+                                       --  于是前几节说了什么全被冲掉,脑只能去翻日志 —— 等于身体不会说话。
    end record;
 
    procedure Init_Tracks (C : in out Context);

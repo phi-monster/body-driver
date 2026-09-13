@@ -1,5 +1,6 @@
 with Ada.Text_IO; use Ada.Text_IO;
 with Codec;
+with Table;
 package body Exam is
 
    function Row_Name (X : Row_Id) return String is
@@ -43,6 +44,20 @@ package body Exam is
          end;
       end loop;
    end Row_Effect;
+
+   --  这张表所属那条臂的"每通道一格是多大"
+   function Notch_Of (M : Selfmap.Body_Map; T : Learned.Stored_Effect) return Table.Vec is
+      N : Table.Vec := [others => 0.0];
+   begin
+      for C in 0 .. T.E.N - 1 loop
+         declare
+            G : constant Natural := T.Arm * M.Per_Arm + C;
+         begin
+            N (C) := (if G < Natural (M.Amp.Length) then M.Amp (G) else 0.0);
+         end;
+      end loop;
+      return N;
+   end Notch_Of;
 
    function Judge (M : Selfmap.Body_Map; Tables : Learned.Effect_Vectors.Vector) return Report is
       Rep : Report;
@@ -132,14 +147,16 @@ package body Exam is
                   Rc.Best_Chan := B;
                   Rc.Reps := Nr;
                   Rc.Spread := Sc;
-                  if P = 0.0 then
+                  --  判"能不能用"只用 Table.Row_Proven 那一个定义(全仓唯一),这里只负责把理由说成人话
+                  if Table.Row_Proven (T.E, Notch_Of (M, T), Row_Id'Pos (R)) then
+                     Rc.V := Usable;
+                  elsif P = 0.0 then
                      Rc.V := Dead;
                      Rc.Why := To_Unbounded_String ("这具身体上所有通道推遍,这一行【一次都没动过】");
                      Rc.Instead := To_Unbounded_String ("凡是要靠「" & Row_Name (R) & "」的话,这里都说不出口");
                   elsif Nr < 2 then
                      Rc.V := Unproven;
-                     Rc.Why := To_Unbounded_String ("量到了(最响的是第" & Codec.Img (B) & " 号通道),但同一个推法只做过"
-                       & Codec.Img (Nr) & " 次 ⇒ 证不出它稳");
+                     Rc.Why := To_Unbounded_String ("量到了,但推得动它的通道里,没有一个同一个推法做过两次以上 ⇒ 证不出稳");
                   elsif Sc >= 1.0 then
                      --  散布不小于均值本身 = 同一个推法给出的结果彼此打架,拿它算动作就是拿噪声算动作
                      Rc.V := Unstable;
@@ -147,7 +164,8 @@ package body Exam is
                        & Codec.Fmt (Sc, 2) & " 倍 ⇒ 它自己跟自己打架");
                      Rc.Instead := To_Unbounded_String ("换一行稳的,或者换一个不靠「" & Row_Name (R) & "」的说法");
                   else
-                     Rc.V := Usable;
+                     Rc.V := Unproven;
+                     Rc.Why := To_Unbounded_String ("推得动它的通道里,没有一个又稳又够格");
                   end if;
                   Tc.Rows (R) := Rc;
                   if P > 0.0 then
