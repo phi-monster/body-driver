@@ -207,6 +207,31 @@ package body Act is
          when Sinew.Oc_Settled => Monitor.U_Settle,
          when others           => Monitor.U_Steps);   --  arrived / timeout 都走步数上限,靠 Wants_Arrive 区分
 
+   --  这一台相机比"看得最大的那一台"小多少倍:探针在这台里就要按这个倍数多推一点才看得见。
+   --  1.0 = 它就是看得最大的那台;量不到就退回 1.0(不放宽,和以前一样)。
+   function Cam_Slack (C : Context; Arm, Cam : Natural) return Long_Float is
+      Best, Here : Long_Float := 0.0;
+   begin
+      for Cm in 0 .. C.Map.N_Cams - 1 loop
+         declare
+            Ix : constant Natural := Arm * C.Map.N_Cams + Cm;
+            V : constant Long_Float :=
+              (if Ix < Natural (C.Map.Cam_Frac.Length) then C.Map.Cam_Frac (Ix) else 0.0);
+         begin
+            if V > Best then
+               Best := V;
+            end if;
+            if Cm = Cam then
+               Here := V;
+            end if;
+         end;
+      end loop;
+      if Here <= 0.0 or else Best <= Here then
+         return 1.0;
+      end if;
+      return Best / Here;
+   end Cam_Slack;
+
    function Cut_Things_Raw (C : Context; F : Plug.Frame; Cam : Natural) return Picture.Regions is
       Cw : constant Natural := F.Cams (Cam).W;
       Ch : constant Natural := F.Cams (Cam).H;
@@ -1037,7 +1062,14 @@ package body Act is
          declare
             Chn : constant Natural := Arm * Chan.Per_Arm + K;
             Amp : Long_Float := C.Map.Amp (Chn);
-            Cap_Amp : constant Long_Float := C.Map.Amp (Chn) * Cap_Mult;
+            --  🔴🔴 "能看见它动的那一档"(C.Map.Amp)是【开机时在某一台相机里】量的,而它被所有相机通用。
+            --  同样推一下关节,手在不长在这条胳膊上的相机里跑的画幅小得多 ⇒ 在那台相机里还没推到看得见,
+            --  就先撞上限被扔掉 ⇒ 表只剩几列噪声 ⇒ 符号都能算反。
+            --  GO 实测:头顶相机里推 0.0222 rad,点跑了 0.0000 画幅 ⇒ 整根通道被扔;
+            --  拿这种表解出来的命令把胳膊一路推出画面右边缘,而"还差几步"一路从 29.8 "改善"到 20.0。
+            --  放宽多少不用人拍:身体开机就量了 Cam_Frac(这条胳膊一动,每台相机的画面各变多少)——
+            --  哪台看得小,上限就按【看得最大的那台 ÷ 这一台】的比例放大。全是量出来的。
+            Cap_Amp : constant Long_Float := C.Map.Amp (Chn) * Cap_Mult * Cam_Slack (C, Arm, Cam);
          begin
             if not C.Map.Seen (Chn) or else Amp <= 0.0 then
                Put_Line ("[身]     通道" & Natural'Image (Chn) & " 开机时没看见它动,这一列留零");
