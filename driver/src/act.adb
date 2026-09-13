@@ -146,6 +146,10 @@ package body Act is
       return 0.125;   --  世界相机:画幅八分之一(比例,无量纲)
    end Cut_Window;
 
+   function Safety_Cap return Positive is (Step_Cap);
+   function Effective_Cap (Say_Steps : Natural) return Positive is
+     (if Say_Steps > 0 then Say_Steps else Safety_Cap);
+
    function Role_Wants (R : Sinew.Role; K : Item_Kind) return Boolean is
      (case R is
          --  grasper = 我量到能相向靠拢、中间扫出一片能装东西的那一组
@@ -1373,7 +1377,7 @@ package body Act is
                         --  不许它压过那些修得完的行。上限用的是【脑自己给的步数】,不是我拍的数。
                         declare
                            Budget : constant Long_Float :=
-                             Long_Float (Natural'Max (1, (if Step_Limit > 0 then Step_Limit else Step_Cap)));
+                             Long_Float (Effective_Cap (Step_Limit));
                         begin
                            T.Err (R) := Long_Float'Max (-Budget, Long_Float'Min (Budget, T.Err (R)));
                         end;
@@ -1986,7 +1990,7 @@ package body Act is
             Put_Line ("[身]     没照做这一步不算数,步幅已缩回;接着走");
          end if;
          --  没写步数就拿安全上限比,别拿 0 比(拿 0 比 = 第一步就"走完了")
-         if Monitor.Fired (Until_Kind, W, (if Step_Limit > 0 then Step_Limit else Step_Cap), Note.Blocked, Monitor.Bounded (Selfmap.Jaw_Of (F, Arm)),
+         if Monitor.Fired (Until_Kind, W, Effective_Cap (Step_Limit), Note.Blocked, Monitor.Bounded (Selfmap.Jaw_Of (F, Arm)),
                            Monitor.Bounded (if Arm < Natural (C.Hands.Length) then C.Hands (Arm).Empty_Close else 0.0),
                            Monitor.Floor (C.Map.Jaw_Noise), Note.Touched,
                            Lost => Pts (0).Lost,
@@ -2113,7 +2117,7 @@ package body Act is
             C.Blind_Say := S ("I went ahead even though " & To_String (Bad));
          end if;
       end;
-      for Step in 1 .. Natural'Min (Step_Cap, (if Step_Limit > 0 then Step_Limit else Step_Cap)) loop
+      for Step in 1 .. Natural'Min (Step_Cap, Effective_Cap (Step_Limit)) loop
          Plan;
          if Note.Say_Stop /= "" then
             Event := Note.Say_Stop;

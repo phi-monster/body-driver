@@ -53,6 +53,11 @@ package Act is
    --  (语言里 pusher 就是"推得动东西、但【合不拢】的部件";以前它把 Grip 也收了,
    --  于是两个角色绑到同一块,语言里的角色区分是假的)。
    function Role_Wants (R : Sinew.Role; K : Item_Kind) return Boolean;
+   --  🔴 这一段到底能走几步。脑写了 or N steps 就是 N,没写就用安全上限。
+   --  **永远不许返回 0** —— 上限 0 交给 Monitor.Fired,U_Steps 判 W.Steps >= 0 第一步就成立,
+   --  一段只走一推(GM:三段 until arrived 各 1 推 5 拍,身体却回报"步子走完还没到")。自检钉死。
+   function Effective_Cap (Say_Steps : Natural) return Positive;
+   function Safety_Cap return Positive;   --  脑没写步数时用的那个上限(自检钉死它不是 1 —— "没写"不等于"只走一步")
    package Item_Vectors is new Ada.Containers.Vectors (Natural, Item);
 
    --  响应表已挪进 Learned(体检要审判它,执行器要用它 —— 谁也不该依赖谁的上层)

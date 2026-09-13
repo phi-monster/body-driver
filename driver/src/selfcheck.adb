@@ -940,6 +940,33 @@ begin
       Check (Grasp_Any and then Push_Any, "语言:两个角色各自都收得下至少一种零件(不许有空角色)");
    end;
 
+   --  🔴 打死 GM 的那个 bug 的正对焊缝:交给 Monitor 的步数上限永远不许是 0。
+   --  先证明"上限 0 = 第一步就成立"确有其事,再证明 Effective_Cap 不可能给出 0。
+   declare
+      W0 : constant Monitor.Watch := (Quiet => 0, No_Progress => 0, Steps => 0, Refused => 0);
+      Zero_Fires : constant Boolean :=
+        Monitor.Fired (Monitor.U_Steps, W0, 0, False, 0.0, 0.0, 0.0);
+      Cap_Holds : constant Boolean :=
+        not Monitor.Fired (Monitor.U_Steps, W0, 60, False, 0.0, 0.0, 0.0);
+      Never_Zero : Boolean := True;
+   begin
+      for N in 0 .. 300 loop
+         if Act.Effective_Cap (N) <= 0 then
+            Never_Zero := False;
+         end if;
+         if N > 0 and then Act.Effective_Cap (N) /= N then
+            Never_Zero := False;
+         end if;
+      end loop;
+      Check (Zero_Fires, "监视器:步数上限 0 ⇒ 一步没走就算走完(所以上限不许是 0)");
+      Check (Cap_Holds, "监视器:上限 60 时,一步没走不算走完");
+      Check (Never_Zero, "执行器:脑写了几步就是几步,没写就用安全上限 —— 永远不会是 0");
+      --  ⚠️ 上面那条**不够**:把兜底改成 1(正是 GM 那个 bug 的效果:一段只走一步)它照样绿。
+      --  第二条永不失败的断言,和"六个词两两不同"同一个毛病。真正要钉的是【没写步数 ≠ 只走一步】。
+      Check (Act.Effective_Cap (0) = Act.Safety_Cap and then Act.Safety_Cap > 1,
+             "执行器:脑没写步数 ⇒ 用安全上限,而安全上限不是 1(没写不等于只走一步)");
+   end;
+
    Put_Line ((if Fails = 0 then "🟢 自检全过" else "🔴 自检失败" & Natural'Image (Fails) & " 条"));
    if Fails > 0 then
       raise Program_Error;
