@@ -3152,6 +3152,21 @@ package body Act is
                declare
                   Rep : constant Exam.Report := Exam.Judge (C.Map, C.Tables);
                   P : constant Sinew.Program := Sinew.Parse (To_String (Text));
+                  --  🔴 脑点的眼睛要在【绑定和选眼之前】就位。第一版把 C.Eye_Want 放在执行指令时赋值,
+                  --  而顺序是 解析 → 绑定 → 选眼 → 执行 ⇒ 赋值永远晚一步,自动选眼照样把段拽走
+                  --  (GZ 实测:写了 with my still eye,日志里还是"这条胳膊一动,第2 只眼睛…换过去")。
+                  --  取第一条 do 的那个选择:一段程序里几节用不同眼睛是后话,现在按整段一个眼睛算。
+                  function First_Eye return Sinew.Eye_Pick is
+                  begin
+                     for K in 0 .. Natural (P.Code.Length) - 1 loop
+                        if P.Code (K).O = Sinew.Op_Interval
+                          and then Sinew."/=" (P.Code (K).Eye, Sinew.Ey_None)
+                        then
+                           return P.Code (K).Eye;
+                        end if;
+                     end loop;
+                     return Sinew.Ey_None;
+                  end First_Eye;
                   Facts : constant Plan.Facts_Vectors.Vector := Build_Facts (C, F);
                   Binds : Plan.Bind_Vectors.Vector;
                   V : Plan.Verdict;
@@ -3286,6 +3301,7 @@ package body Act is
                      end loop;
                   end Bind_All;
                begin
+                  C.Eye_Want := First_Eye;
                   if P.Ok then
                      Bind_All;
                      for I2 in 0 .. Natural (Binds.Length) - 1 loop
