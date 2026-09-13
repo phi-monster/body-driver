@@ -3283,14 +3283,21 @@ package body Act is
                            declare
                               Dp : constant Long_Float := Sqrt ((Pin.Tu - Pin.Cu) ** 2 + (Pin.Tv - Pin.Cv) ** 2);
                               Ds : constant Long_Float := (if Pin.Wsize > 0.0 and then Pin.Tsize > 0.0 then abs (Pin.Tsize - Pin.Size) / Pin.Tsize else 0.0);
-                              Tol : constant Long_Float := Long_Float'Max (Track_Win * 0.5, Hz.Span * 0.25);
+                              --  🔴 容差【不许】从瓣心距来:在手自己的眼睛里两根指头贴在画面两端,
+                              --  瓣心距 ≈ 整幅画(实测 1.001)⇒ 容差成了四分之一个画面,横着偏十几厘米也照样"通过"
+                              --  (GJ 实测:0.220 过关,实际没夹住)。在这只眼睛里横向对没对准,只能拿跟踪噪声当尺子;
+                              --  瓣心距只有在【不长在这只手上】的相机里才真的是"两指之间那道缝"。
+                              Own_Eye : constant Boolean := Cam_Arm (C, Cam) = Integer (A);
+                              Tol : constant Long_Float :=
+                                (if Own_Eye then Track_Win * 0.5
+                                 else Long_Float'Max (Track_Win * 0.5, Hz.Span * 0.25));
                               Depth_Ok : constant Boolean := Picture.Is_Nan (Hz.Depth) or else Pin.Z <= 0.0
                                                             or else abs (Pin.Z - Hz.Depth) <= Long_Float'Max (Pin.Height, Long_Float'Max (Pin.Box_W, Pin.Box_H) * Pin.Z);
                               --  看着一样大 = 差不超过四分之一(比例,无量纲)
                               Size_Ok : constant Boolean := Pin.Wsize <= 0.0 or else Ds <= 0.25;
                            begin
                               Caged := Dp <= Tol and then Depth_Ok and then Size_Ok;
-                              Cage_Note := S ("cage check in this hand camera: it is " & Codec.Fmt (Dp, 3) & " of a frame from where my fingers close (allowed " &
+                              Cage_Note := S ("cage check in " & (if Own_Eye then "my own hand camera (so the allowance is my tracking noise, not the gap between my fingers - in this eye they sit at the edges of the picture)" else "a camera that does not ride this arm") & ": it is " & Codec.Fmt (Dp, 3) & " of a frame from where my fingers close (allowed " &
                                               Codec.Fmt (Tol, 3) & "), looks " & Codec.Fmt (Pin.Size / Long_Float'Max (1.0e-9, Pin.Tsize) * 100.0, 0) &
                                               "% of the size it should, and its distance " & (if Depth_Ok then "matches" else "does not match") & " my fingertips");
                            end;
