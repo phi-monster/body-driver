@@ -1865,6 +1865,7 @@ package body Act is
       --  编译期这一块还没量过响应时放行了,现在量完了,当场补判;判不过就一步都不走,把原话退回给脑。
       declare
          Bad : Unbounded_String;
+         Dropped : Unbounded_String;
          Notch : Table.Vec := Table.Zero_Vec;
       begin
          for K in 0 .. Chan.Per_Arm - 1 loop
@@ -1873,12 +1874,24 @@ package body Act is
          for I in 0 .. Natural (Pts.Length) - 1 loop
             declare
                P : constant Point := Pts (I);
+               Q : Point := Pts (I);
+               Live : Natural := 0;
+               --  🔴 没证过的行【摘掉】,不是整节拒绝 —— "不许参与"的意思就是不参与解算。
+               --  一行都不剩,才是真的做不到。
                procedure Want (R : Natural; Nm : String) is
                begin
-                  if not Table.Row_Proven (Effs (I), Notch, R) then
-                     Append (Bad, (if Length (Bad) > 0 then "; " else "")
-                             & "item " & Codec.Img (P.Item_No) & " needs " & Nm & ", but "
+                  if Table.Row_Proven (Effs (I), Notch, R) then
+                     Live := Live + 1;
+                  else
+                     Append (Dropped, (if Length (Dropped) > 0 then "; " else "")
+                             & "I left out " & Nm & " for item " & Codec.Img (P.Item_No) & ", because "
                              & Table.Row_Why (Effs (I), Notch, R));
+                     case R is
+                        when 2 => Q.Wz := 0.0;
+                        when 3 => Q.Wsize := 0.0;
+                        when 4 => Q.Wang := 0.0;
+                        when others => null;
+                     end case;
                   end if;
                end Want;
             begin
@@ -1897,8 +1910,25 @@ package body Act is
                if P.Wang > 0.0 then
                   Want (4, "facing");
                end if;
+               --  🔴 判距离的行【一个都不剩】的时候,不许宣布"到了":
+               --  那正是"看着对齐、实际差 20 厘米"那一类(GE 实测)。这是无能,如实说。
+               if (P.Wz > 0.0 or else P.Wsize > 0.0) and then Q.Wz <= 0.0 and then Q.Wsize <= 0.0 then
+                  Append (Bad, (if Length (Bad) > 0 then "; " else "")
+                          & "item " & Codec.Img (P.Item_No)
+                          & ": in this eye I have nothing left that tells me how far away it is "
+                          & "(its distance reads as nothing here, and how big it looks is not steady), "
+                          & "so lining up the picture would prove nothing");
+               end if;
+               if Live = 0 then
+                  Append (Bad, (if Length (Bad) > 0 then "; " else "")
+                          & "item " & Codec.Img (P.Item_No) & ": not one of the things this needs is proven");
+               end if;
+               Pts.Replace_Element (I, Q);
             end;
          end loop;
+         if Length (Dropped) > 0 then
+            Put_Line ("[身]   ⊘ " & To_String (Dropped));
+         end if;
          if Length (Bad) > 0 then
             Event := S ("I did not move: " & To_String (Bad));
             return;
@@ -3109,10 +3139,11 @@ package body Act is
                         P.Tu := Z.Cu; P.Tv := Z.Cv; P.Tz := Z.Depth; P.Wz := (if Picture.Is_Nan (Z.Depth) then 0.0 else 1.0);
                         P.Tsize := Sqrt (Long_Float'Max (0.0, (Long_Float (Z.X1 - Z.X0) / Long_Float (Cw)) * (Long_Float (Z.Y1 - Z.Y0) / Long_Float (Ch))));
                         P.Tang := 2.0 * Arctan (Z.Av, Z.Au);
-                        --  ⚠️ "看着多大"这一项【实测不稳,先关掉】(2026-09-08):框随切块忽大忽小,一项就把目标和进度全带偏,
-                        --  每一步都是它在变坏;今天唯一真的靠近过的那一炮(32 cm → 16 cm)恰恰没有这一项。
-                        --  机制(五行的表)留着,等切块稳了再开。
-                        P.Wsize := 0.0;
+                        --  🔴 "看着多大"这一项 2026-09-08 曾被写死关掉(当时框随切块忽大忽小)。现在重新打开:
+                        --  稳不稳【由体检量出来判】,不由我写死 —— 不稳的话点用之前那一关会把它摘掉。
+                        --  而在手上这只眼睛里,握区的远近常常读不到(NaN),那时它是【唯一】的距离信号:
+                        --  GE 实测,两个距离信号同时关着 ⇒ 像素一对齐就宣布"到了",实际差着 20 厘米。
+                        P.Wsize := 1.0;
                         --  朝向的分量 = 这块有多长条(圆的为零)
                         P.Wang := Long_Float'Max (0.0, 1.0 - 1.0 / Long_Float'Max (1.0, O.Elong));
                         P.Desc := S ("item " & Codec.Img (Say.Grip_On) & " to sit where my fingers close (same place, same distance, same apparent size, same lie)");
