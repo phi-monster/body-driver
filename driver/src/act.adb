@@ -548,7 +548,11 @@ package body Act is
       end;
       if Have_Named then
          for I in 0 .. Natural (C.Items.Length) - 1 loop
-            if C.Items (I).Kind in Thing | Thing_Remembered | Thing_Held and then C.Items (I).Slot = C.Wld.Cams (Cam).Named then
+            --  槽号是【每台相机各一套】的,不许拿别台相机的槽号来和这台的"上次点名"比
+            if C.Items (I).Kind in Thing | Thing_Remembered | Thing_Held
+              and then C.Items (I).Cam = Cam
+              and then C.Items (I).Slot = C.Wld.Cams (Cam).Named
+            then
                Append (T, "- the thing you last named is item " & Codec.Img (I + 1) & ", now in cell " & Codec.Img (Cell_Of (C, Named_U, Named_V)) & ASCII.LF);
             end if;
          end loop;
@@ -2994,8 +2998,11 @@ package body Act is
                         E.Key := To_Unbounded_String (Key);
                         E.Item := Bind_Name (Key, E.Tried);
                         Binds.Append (E);
+                        --  "离它近"这个提示是拿画面坐标比的 ⇒ 必须同一台相机,别台的坐标没有可比性
                         if E.Item >= 1 and then E.Item <= Integer (C.Items.Length)
-                          and then C.Items (Natural (E.Item) - 1).Located and then not Has_Near
+                          and then C.Items (Natural (E.Item) - 1).Located
+                          and then C.Items (Natural (E.Item) - 1).Cam = C.Cam
+                          and then not Has_Near
                         then
                            Nu := C.Items (Natural (E.Item) - 1).Cu;
                            Nv := C.Items (Natural (E.Item) - 1).Cv;
@@ -3159,7 +3166,7 @@ package body Act is
                           and then C.Items (Natural (A) - 1).Located
                         then
                            Pl.Name := Ins.Name;
-                           Pl.Cam := C.Cam;
+                           Pl.Cam := C.Items (Natural (A) - 1).Cam;   --  这个地方是在哪台相机里记下的
                            Pl.Cu := C.Items (Natural (A) - 1).Cu;
                            Pl.Cv := C.Items (Natural (A) - 1).Cv;
                            Pl.Z := C.Items (Natural (A) - 1).Depth;
@@ -3215,10 +3222,12 @@ package body Act is
          for N of Ns loop
             if N >= 1 and then N <= Natural (C.Items.Length) and then C.Items (N - 1).Kind in Thing | Thing_Remembered | Thing_Held then
                declare
-                  Cs : World.Cam_State := C.Wld.Cams (Cam);
+                  --  记到【那一块自己所在的】相机上:槽号跨相机不通用,记错台等于记了个别的东西
+                  Kc : constant Natural := C.Items (N - 1).Cam;
+                  Cs : World.Cam_State := C.Wld.Cams (Kc);
                begin
                   Cs.Named := C.Items (N - 1).Slot;
-                  C.Wld.Cams.Replace_Element (Cam, Cs);
+                  C.Wld.Cams.Replace_Element (Kc, Cs);
                end;
             end if;
          end loop;
