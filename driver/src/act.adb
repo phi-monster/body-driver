@@ -1990,6 +1990,32 @@ package body Act is
       end Learn;
 
       --  ⑤ 判:这一步之后接着走,还是到了 / 出事了 / 拿不准
+      --  🔴 差多少,报【厘米】。没有相机内参,也不需要:响应表平移那三列存的就是
+      --  "这条通道推一个单位,这一点在画面里跑多少" —— 而平移通道的单位就是米(位姿前三位是平移)。
+      --  拿它当折算率,画幅 ÷ (画幅/米) = 米。全是量出来的,零假设。
+      --  不加这个,读数只有归一化的"差距 0.262",没法和历史炮的厘米数摆在一起比(本仓规矩:相对量必须配绝对量)。
+      function Cm_Gap (E : Table.Effect; P : Point) return String is
+         Du : constant Table.Vec3 := Table.Col (E, 0);
+         Dv : constant Table.Vec3 := Table.Col (E, 1);
+         Dz : constant Table.Vec3 := Table.Col (E, 2);
+         --  这三条平移通道各自"推一米画面跑多少":取它在自己主方向上的那一项
+         Su : constant Long_Float := abs Du (0) + abs Dv (0) + abs Dz (0);
+         Sv : constant Long_Float := abs Du (1) + abs Dv (1) + abs Dz (1);
+         Eu : constant Long_Float := P.Tu - P.Cu;
+         Ev : constant Long_Float := P.Tv - P.Cv;
+         Ez : constant Long_Float := (if P.Wz > 0.0 and then P.Z > 0.0 and then not Picture.Is_Nan (P.Tz)
+                                      then P.Tz - P.Z else 0.0);
+         Mu : constant Long_Float := (if Su > 1.0e-9 then Eu / Su else 0.0);
+         Mv : constant Long_Float := (if Sv > 1.0e-9 then Ev / Sv else 0.0);
+      begin
+         if Su <= 1.0e-9 and then Sv <= 1.0e-9 then
+            return "左右上下折不成厘米(平移三列还没量到);远近 " & Codec.Fmt (Ez * 100.0, 1) & " cm";
+         end if;
+         return Codec.Fmt (Sqrt (Mu * Mu + Mv * Mv + Ez * Ez) * 100.0, 1) & " cm"
+           & "(左右 " & Codec.Fmt (Mu * 100.0, 1) & " 上下 " & Codec.Fmt (Mv * 100.0, 1)
+           & " 远近 " & Codec.Fmt (Ez * 100.0, 1) & ")";
+      end Cm_Gap;
+
       procedure Judge is
       begin
          --  进度只看不随表变的那把尺(Raw):"还差几步"的刻度每步都在变,用它判进度会把靠近判成退步(ES 实测两步就报停滞)
@@ -2006,7 +2032,8 @@ package body Act is
                    Codec.Fmt (Note.Cmd (3), 3) & " " & Codec.Fmt (Note.Cmd (4), 3) & " " & Codec.Fmt (Note.Cmd (5), 3) &
                    "] · 实到 [" & Codec.Fmt (Note.Got (0), 4) & " " & Codec.Fmt (Note.Got (1), 4) & " " & Codec.Fmt (Note.Got (2), 4) & " " &
                    Codec.Fmt (Note.Got (3), 3) & " " & Codec.Fmt (Note.Got (4), 3) & " " & Codec.Fmt (Note.Got (5), 3) &
-                   "] · 点 (" & Codec.Fmt (Pts (0).Cu, 3) & "," & Codec.Fmt (Pts (0).Cv, 3) & ") 深 " & Codec.Fmt (Pts (0).Z, 3) &
+                   "] · 差 " & Cm_Gap (Effs (0), Pts (0)) &
+                   " · 点 (" & Codec.Fmt (Pts (0).Cu, 3) & "," & Codec.Fmt (Pts (0).Cv, 3) & ") 深 " & Codec.Fmt (Pts (0).Z, 3) &
                    (if Note.Blocked then " · 零表更准(顶住?)" else ""));
          Last_Err := Note.Err_Now;
          Last_Raw := Note.Raw_Now;
