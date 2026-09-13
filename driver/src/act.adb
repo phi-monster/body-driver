@@ -207,6 +207,25 @@ package body Act is
          when Sinew.Oc_Settled => Monitor.U_Settle,
          when others           => Monitor.U_Steps);   --  arrived / timeout 都走步数上限,靠 Wants_Arrive 区分
 
+   --  这一台相机里,脑上次点名那一块有多宽(画幅)。切块的第二把尺子要按相机各算各的。
+   function Named_Span (C : Context; Cam : Natural; Cw : Natural) return Long_Float is
+      N : constant Integer := (if Cam < Natural (C.Wld.Cams.Length) then C.Wld.Cams (Cam).Named else -1);
+   begin
+      if N < 0 or else Natural (N) >= World.Count (C.Wld, Cam) then
+         return 0.0;
+      end if;
+      declare
+         Sl : constant World.Slot := World.Get (C.Wld, Cam, Natural (N));
+         R : constant Picture.Region := (if Sl.Present then Sl.R else Sl.Shadow);
+      begin
+         if R.X1 <= R.X0 then
+            return 0.0;
+         end if;
+         --  用它自己的框宽,除以这台相机的画幅宽 —— 两个都是量出来的
+         return Long_Float (R.X1 - R.X0 + 1) / Long_Float'Max (1.0, Long_Float (Cw));
+      end;
+   end Named_Span;
+
    --  这一台相机比"看得最大的那一台"小多少倍:探针在这台里就要按这个倍数多推一点才看得见。
    --  1.0 = 它就是看得最大的那台;量不到就退回 1.0(不放宽,和以前一样)。
    function Cam_Slack (C : Context; Arm, Cam : Natural) return Long_Float is
@@ -255,7 +274,11 @@ package body Act is
          --  🔴 第二把尺子 = 【脑点名那个东西自己有多大】(身体量的,不是我拍的系数)。
          --  闭运算填的是比窗口窄的东西 ⇒ 比窗口【宽】的东西自己就是背景,鼓 0、整块消失。
          --  所以会消失的恰恰是"比尺子宽"的那个,拿它自己的宽度当第二把尺子正好够着它。
-         Wide : constant Long_Float := C.Want_Size;
+         --  🔴🔴 而"多大"必须【按这一台相机算】:同一个球在头顶相机里 144 px、在腕相机里 96 px 宽却
+         --  占 0.15 画幅。GP 实测:段跑在头顶相机 ⇒ Want_Size 是头顶那个小数 ⇒ 到腕相机不够大 ⇒
+         --  球又被抹掉(腕相机只切出 3 块、2 块判成自己、只剩一块 516 px)。
+         --  这一台相机自己记着"你上次点名那块在我这儿多大",拿它。取不到才退回 Want_Size。
+         Wide : constant Long_Float := Long_Float'Max (Named_Span (C, Cam, Cw), C.Want_Size);
       begin
          Raw := Picture.Cut (F.Cams (Cam).Depth, Cw, Ch, Win, Sigma_Mult, Keep_Edge => Own_Cam_Here);
          if Wide > Win then
