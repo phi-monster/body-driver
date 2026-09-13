@@ -1703,6 +1703,24 @@ package body Act is
                else
                   Retrack (C, F, Cam, Before, P, W0.Cu + Pr (0), W0.Cv + Pr (1), True, (if W0.Z > 0.0 then W0.Z + Pr (2) else -1.0));
                end if;
+               --  🔴 认错了东西要说出来,不许悄悄换目标。
+               --  GM 实测:被跟的那块从 (0.44,0.93) 深 0.81 m 一步跳到 (0.21,0.60) 深 2.13 m —— 那是球后面的墙。
+               --  身体自己知道(信表从 0.94 掉到 0.31),脑一个字没听到,然后追着墙把关节顶死 60 步。
+               --  判据不用新系数,用【物理上不可能】:这一步就算把额度用满,表说这块最多能跑多远?
+               --  跑得比那还远 ⇒ 不是同一个东西。
+               if not P.Lost and then P.Z > 0.0 and then W0.Z > 0.0 then
+                  declare
+                     Most : constant Table.Vec3 := Table.Predict (Effs (I), Note.Cap);
+                     Jump : constant Long_Float := abs (P.Z - W0.Z);
+                  begin
+                     if Jump > abs (Most (2)) + Long_Float'Max (0.0, P.Z_Noise) then
+                        C.Blind_Say := S ("the thing I am tracking jumped further in one push than any push of mine could move it"
+                                          & " - I have probably locked onto something else, and I kept going");
+                        Put_Line ("[身]     认错了?这一步它跑了 " & Codec.Fmt (Jump, 3) & " m,而用满额度最多也只跑得动 "
+                                  & Codec.Fmt (abs (Most (2)), 3) & " m(读深抖动 " & Codec.Fmt (P.Z_Noise, 3) & " m)");
+                     end if;
+                  end;
+               end if;
                Pts.Replace_Element (I, P);
             end;
          end loop;
