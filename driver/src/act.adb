@@ -2160,7 +2160,11 @@ package body Act is
                      Floor_D : constant Long_Float := 1.0 / Long_Float'Max (1.0, Long_Float (Cw));
                   begin
                      if Need > Long_Float (Fl.Track) then
-                        Push_Mult := Push_Mult * (Need / Long_Float'Max (D, Floor_D));
+                        --  🔴 封顶:一步推出去,这一点在画面里跑的距离不许超过【眼睛跟得住的一个窗口】。
+                        --  没有这一条,GT 实测一步就放到 ×236,点被甩到画面角落 (1.000,0.124) 深 13.9 m。
+                        --  这条上界不是新拍的 —— Note.Cap 用的就是同一条(Track_Win / 这一点每单位跑多远)。
+                        Push_Mult := Long_Float'Min (Push_Mult * (Need / Long_Float'Max (D, Floor_D)),
+                                                     Track_Win / Long_Float'Max (D, Floor_D));
                      end if;
                   end;
                   Put_Line ("[身]     点在画面里没动过(" & Codec.Fmt (D, 4) & " ≤ 地板 " & Codec.Fmt (Long_Float (Fl.Track), 4)
