@@ -24,6 +24,11 @@ package Zone is
       X0, Y0, X1, Y1 : Natural := 0;   --  区框
    end record;
    package Zone_Vectors is new Ada.Containers.Vectors (Natural, Hand_Zone);
+   --  🔴 第 I 瓣。别处一律走这个口子,不许直接写 Z.A / Z.B ——
+   --  今天这具身体的握区只记得两瓣(A/B),以后长出五瓣、七瓣、吸盘一个点,只改这一处,
+   --  上面所有"每瓣一个接触点"的代码一个字都不用动。瓣数一律读 Z.N_Lobes,不许写死。
+   function Lobe_Of (Z : Hand_Zone; I : Natural) return Lobe is
+     (if I = 0 then Z.A elsif I = 1 then Z.B else (Valid => False, others => <>));
    type Hand is record
       Arm : Natural := 0;
       K : Natural := 0;                --  这条臂的第几个抓握通道(五指手有五个,两指手只有 0 号)

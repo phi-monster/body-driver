@@ -1142,14 +1142,26 @@ package body Act is
          declare
             Z : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, Cam, Jaw_K_Of (P.Chan_K));
          begin
-            if P.Kind = Piece_Pt and then P.Chan_K = Chan.Per_Arm and then Cam_Arm (C, Cam) /= Integer (P.Arm) and then Z.Valid and then Z.N_Lobes = 2 then
-               for Lb in 0 .. 1 loop
+            --  🔴🔴 每一瓣一个接触点,瓣数【读身体量到的那个数】,不许写死。
+            --  以前这里写 Z.N_Lobes = 2:7 指爪、软体臂、吸盘一律不展开 —— owner 揪出过一次,换了个地方又长出来。
+            --  以前还写 Cam_Arm (C, Cam) /= P.Arm(手【自己】的相机里不展开):而 GM 全程跑在手腕相机里
+            --  ⇒ 这段代码等于从没执行 ⇒ 全程只跟一个中心点 ⇒ 3 个自由度在零空间里乱走
+            --  (6b3ad77 原话:手腕乱拧、球被转出画面、指尖落在球旁边 —— 一字不差就是 GM 的死法)。
+            --  手自己的相机里瓣是固定像素,那正好:它们就是【要抓的东西的几侧必须去到的地方】,
+            --  两点 ×(左右/上下/远近) = 6 个约束,正好按住 6 个通道。
+            if P.Kind = Piece_Pt and then P.Chan_K = Chan.Per_Arm and then Z.Valid and then Z.N_Lobes >= 2 then
+               for Lb in 0 .. Z.N_Lobes - 1 loop
                   declare
                      Q : Point := P;
                      Tr : constant Zone_Track := C.Zones (Track_Idx (C, P.Arm, Cam));
                      --  瓣相对区心的偏移:身体图给了此刻各瓣位置就用它(转过的手瓣也跟着转),否则用开机量的
-                     Ou : constant Long_Float := (if Tr.Has_Lobes then (if Lb = 0 then Tr.Au else Tr.Bu) - Tr.Cu else (if Lb = 0 then Z.A.Cu else Z.B.Cu) - Z.Cu);
-                     Ov : constant Long_Float := (if Tr.Has_Lobes then (if Lb = 0 then Tr.Av else Tr.Bv) - Tr.Cv else (if Lb = 0 then Z.A.Cv else Z.B.Cv) - Z.Cv);
+                     Lo : constant Zone.Lobe := Zone.Lobe_Of (Z, Lb);
+                     Ou : constant Long_Float :=
+                       (if Tr.Has_Lobes and then Lb <= 1 then (if Lb = 0 then Tr.Au else Tr.Bu) - Tr.Cu
+                        else Lo.Cu - Z.Cu);
+                     Ov : constant Long_Float :=
+                       (if Tr.Has_Lobes and then Lb <= 1 then (if Lb = 0 then Tr.Av else Tr.Bv) - Tr.Cv
+                        else Lo.Cv - Z.Cv);
                      Zd : Long_Float := P.Z;
                   begin
                      Q.Blob := Lb;
@@ -1164,7 +1176,7 @@ package body Act is
                         end if;
                      end if;
                      Q.Z := Zd;
-                     if Lb = 1 then
+                     if Lb > 0 then
                         Q.Desc := Null_Unbounded_String;
                      end if;
                      Out_P.Append (Q);
