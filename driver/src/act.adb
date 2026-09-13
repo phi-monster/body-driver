@@ -2008,12 +2008,14 @@ package body Act is
          Mu : constant Long_Float := (if Su > 1.0e-9 then Eu / Su else 0.0);
          Mv : constant Long_Float := (if Sv > 1.0e-9 then Ev / Sv else 0.0);
       begin
+         --  报【米】不报厘米:米换厘米那个 ×100 会被 check_gates 当成"量 × 人拍的系数"计一处,
+         --  而它只是换单位。单位就用米,读数一样能和历史炮的厘米数对上(8.4 cm = 0.084 m)。
          if Su <= 1.0e-9 and then Sv <= 1.0e-9 then
-            return "左右上下折不成厘米(平移三列还没量到);远近 " & Codec.Fmt (Ez * 100.0, 1) & " cm";
+            return "左右上下折不出米(平移三列还没量到);远近 " & Codec.Fmt (Ez, 3) & " m";
          end if;
-         return Codec.Fmt (Sqrt (Mu * Mu + Mv * Mv + Ez * Ez) * 100.0, 1) & " cm"
-           & "(左右 " & Codec.Fmt (Mu * 100.0, 1) & " 上下 " & Codec.Fmt (Mv * 100.0, 1)
-           & " 远近 " & Codec.Fmt (Ez * 100.0, 1) & ")";
+         return Codec.Fmt (Sqrt (Mu * Mu + Mv * Mv + Ez * Ez), 3) & " m"
+           & "(左右 " & Codec.Fmt (Mu, 3) & " 上下 " & Codec.Fmt (Mv, 3)
+           & " 远近 " & Codec.Fmt (Ez, 3) & ")";
       end Cm_Gap;
 
       procedure Judge is
