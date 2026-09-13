@@ -85,6 +85,11 @@ package body Act is
 
    procedure Init_Tracks (C : in out Context) is
    begin
+      --  死区一开始当作零(还没证据说哪个通道推不动),边走边学
+      C.Dead.Clear;
+      for K in 0 .. C.Map.Arms * Chan.Per_Arm loop
+         C.Dead.Append (0.0);
+      end loop;
       C.Zones.Clear;
       for A in 0 .. C.Map.Arms - 1 loop
          for Cm in 0 .. C.Map.N_Cams - 1 loop
@@ -171,6 +176,9 @@ package body Act is
    --  这个洞是自检当场逮到的:|0 − 0.137| > 0.137 是【假】(不是严格大于),原判据放过了它。
    function Into_Depth (Skin, Surface : Long_Float) return Long_Float is
      ((Skin + Surface) / 2.0);
+
+   function Push_Cap (Ceiling, Noise, Dead : Long_Float) return Long_Float is
+     (Long_Float'Max (Long_Float'Max (Noise + Noise, Dead), Ceiling));
 
    function Extrapolation_Blew (Was, Now : Long_Float) return Boolean is
      (Was > 0.0 and then (Now <= 0.0 or else abs (Now - Was) > Was));
@@ -1189,7 +1197,11 @@ package body Act is
                      Deliv, Back : Table.Vec;
                      Ok2 : Boolean;
                      Frames : Natural;
-                     Seen_Enough : Boolean := True;
+                     --  🔴 只要【有一个】被跟的点真的动过,这一列就算量到了。
+                     --  以前是"任一个点没动 ⇒ 整条通道作废",于是两指里被挡住一根就扔掉一整个自由度:
+                     --  FQ 实测 6 个通道扔掉 5 个,只剩 1 个还想管三个方向 ⇒ "还差几步"算出 5528 步、手来回摆。
+                     Seen_Enough : Boolean := False;
+                     N_Moved : Natural := 0;
                      Ran_Max : Long_Float := 0.0;
                   begin
                      A (K) := Amp;
@@ -1226,15 +1238,17 @@ package body Act is
                                     S2 (I, K, R) := S2 (I, K, R) + Col (R) * Col (R);
                                  end loop;
                               end;
-                           else
-                              Seen_Enough := False;
+                              Seen_Enough := True;
+                              N_Moved := N_Moved + 1;
                            end if;
+                           --  没动过的点这一列【留零】,而留零本身就是一次正确的测量("这个通道不动它"),归一时它自动不参与
                            Pts.Replace_Element (I, P);
                         end;
                      end loop;
                      if Seen_Enough then
                         Nrep (K) := Nrep (K) + 1;
-                        Put_Line ("[身]     通道" & Natural'Image (Chn) & " 第" & Natural'Image (Nrep (K)) & " 次:命令 " & Codec.Fmt (Amp, 4) & " 实到 " & Codec.Fmt (Deliv (K), 4) & " ⇒ 点跑了 " &
+                        Put_Line ("[身]     通道" & Natural'Image (Chn) & " 第" & Natural'Image (Nrep (K)) & " 次:命令 " & Codec.Fmt (Amp, 4) & " 实到 " & Codec.Fmt (Deliv (K), 4) & " ⇒ " &
+                                  Natural'Image (N_Moved) & "/" & Natural'Image (Natural (Pts.Length)) & " 个点动了,最多的跑了 " &
                                   Codec.Fmt (Ran_Max, 4) & " 画幅,深度变 " & Codec.Fmt ((if Pts (0).Z > 0.0 and then Was (0).Z > 0.0 then Pts (0).Z - Was (0).Z else 0.0), 4));
                      end if;
                      declare
@@ -1271,7 +1285,7 @@ package body Act is
                            exit;
                         end if;
                         if Amp * 2.0 > Cap_Amp then
-                           Put_Line ("[身]     通道" & Natural'Image (Chn) & ":到 " & Codec.Fmt (Amp, 4) & " 点还没动过地板(跑 " & Codec.Fmt (Ran_Max, 4) & " 画幅,地板 " & Codec.Fmt (Floor_Px, 4) & ")⇒ 这一段不用它");
+                           Put_Line ("[身]     通道" & Natural'Image (Chn) & ":到 " & Codec.Fmt (Amp, 4) & " 一个点也没动过地板(最多的跑了 " & Codec.Fmt (Ran_Max, 4) & " 画幅,地板 " & Codec.Fmt (Floor_Px, 4) & ")⇒ 这一段不用它");
                            exit;
                         end if;
                         Amp := Amp * 2.0;
@@ -1416,6 +1430,7 @@ package body Act is
       Effs : Effect_Array (0 .. Natural (Pts.Length) - 1);
       Trusts : array (0 .. Natural (Pts.Length) - 1) of Table.Mask := [others => [others => True]];
       Reach : Table.Vec := Unit_Reach;   --  每通道核实过的步幅倍数(存表里,越用越强)
+      Blocked_Run : Natural := 0;        --  连着几步"零表更准":身体自己说这张地图不如"什么都不会发生"准
       Fl : Monitor.Floors;
       W : Monitor.Watch;
       Ring : Backup.Ring;
@@ -1698,8 +1713,26 @@ package body Act is
                      end loop;
                      --  上限 = 自己那一档 × 核实过的倍数,再压在"眼睛跟得住"这个天花板下。
                      --  倍数只有靠"表说会挪多少 vs 实际挪了多少"对上才涨(见 Learn),没证明过就不许迈大步
-                     Note.Cap (K) := Long_Float'Min (Am * Cap_Mult * Reach (K),
-                                                     (if Known_All then Track_Win / Px else Am * Cap_Mult * Reach (K))) * Amount;
+                     --  🔴 天花板底下还要有【地板】:命令小到比身体自己的噪声还小 ⇒ 一步一动不动。
+                     --  这条 7d832e3 装过又被 09-13 那次整体回滚削掉:FO 每步命令 0.006(探针那一档的 1/4),
+                     --  一步推进 8 厘米、44 推抓到球;削掉之后同一通道每步走到 0.026,表当场不准、球被甩出视野。
+                     --  地板 = 身体自己的噪声的两倍(量出来的,不是探针那一档)。
+                     --  地板顶穿天花板 = "能让我动起来的命令,我的眼睛一步跟不住" —— 这是身体量得出来的事实,
+                     --  照地板走并且说出来(动不了的命令严格无用,跟丢了还能重新认)。
+                     declare
+                        Ceiling : constant Long_Float :=
+                          Long_Float'Min (Am * Cap_Mult * Reach (K),
+                                          (if Known_All then Track_Win / Px else Am * Cap_Mult * Reach (K))) * Amount;
+                        Floor : constant Long_Float := Long_Float'Max (C.Map.EE_Noise + C.Map.EE_Noise, (if Ch_No < Natural (C.Dead.Length) then C.Dead.Element (Ch_No) else 0.0));
+                     begin
+                        Note.Cap (K) := Push_Cap
+                          (Ceiling, C.Map.EE_Noise,
+                           (if Ch_No < Natural (C.Dead.Length) then C.Dead.Element (Ch_No) else 0.0));
+                        if Floor > Ceiling and then Ceiling > 0.0 then
+                           C.Blind_Say := S ("any push big enough for my body to actually move is bigger than my eye "
+                                             & "can follow in one step here; I took the smaller-of-the-two that still moves me");
+                        end if;
+                     end;
                   end;
                   Note.Floor_Cmd := (if Note.Floor_Cmd <= 0.0 then Am else Long_Float'Min (Note.Floor_Cmd, Am));
                end if;
@@ -1879,6 +1912,22 @@ package body Act is
          begin
             for K in 0 .. Chan.Per_Arm - 1 loop
                Sv (K) := Note.Got (K);
+               --  🔴 学死区:命令发了而身体没动 ⇒ 这一档不够,抬上去;真动了 ⇒ 说明这一档够,压下来。
+               --  抬到刚才那一档的一半再加一次(=1.5 倍,倍数无量纲),压到刚好走成的那一档。
+               declare
+                  Cn : constant Natural := Arm * Chan.Per_Arm + K;
+                  Half : constant Long_Float := abs Note.Cmd (K) / 2.0;
+               begin
+                  if Cn < Natural (C.Dead.Length) and then abs Note.Cmd (K) > C.Map.EE_Noise then
+                     if abs Note.Got (K) <= C.Map.EE_Noise then
+                        C.Dead.Replace_Element
+                          (Cn, Long_Float'Max (C.Dead.Element (Cn), abs Note.Cmd (K) + Half));
+                     else
+                        C.Dead.Replace_Element
+                          (Cn, Long_Float'Min (C.Dead.Element (Cn), abs Note.Cmd (K)));
+                     end if;
+                  end if;
+               end;
             end loop;
             Backup.Remember (Ring, Sv);
          end;
@@ -2496,6 +2545,33 @@ package body Act is
          end if;
          Look;
          Learn;
+         --  🔴 平时不重量表(每段重量 = 一推 13~21 拍的老账);但身体一旦【连着三步说"我的地图不如零假设准"】,
+         --  就当场重量一遍 —— 拿着一张被证明错的表一路开,正是 GW 实测"手在动、球的距离一点不变"的直接原因。
+         --  只在被证明错的时候才重量:既不回到每段重量,也不拿假表开车。
+         if Note.Blocked then
+            Blocked_Run := Blocked_Run + 1;
+         else
+            Blocked_Run := 0;
+         end if;
+         if Blocked_Run >= 3 then
+            Blocked_Run := 0;
+            Put_Line ("[身]     连着三步都是零表更准 ⇒ 这张表已经被证明不准,当场重量一遍");
+            C.Blind_Say := S ("for three steps in a row my own map of what my pushes do was worse than assuming "
+                              & "nothing happens, so I stopped driving on it and measured it again on the spot");
+            declare
+               Trust2 : Table.Mask;
+               Ok2 : Boolean;
+            begin
+               Probe_Effects (L, C, F, Cam, Pts, Effs, Trust2, Ok2);
+               if Ok2 then
+                  for I in 0 .. Natural (Pts.Length) - 1 loop
+                     Trusts (I) := Trust2;
+                     Store_Effect (C, Arm, Cam, Pts (I).Kind, Pts (I).Chan_K, Pts (I).Blob, Effs (I), Trust2,
+                                   Unit_Reach, F.EE (Arm), True);
+                  end loop;
+               end if;
+            end;
+         end if;
          Judge;
          --  🔴 没有距离这一路的时候要说出来。GV 实测:这一点的深度读成 -0.526(负数,物理上不可能),
          --  远近那一行的权重于是是 0 ⇒ 身体只在【画面上】对齐,完全没有距离信息 ——

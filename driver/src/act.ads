@@ -67,6 +67,12 @@ package Act is
    --  零系数:两段位移的差比【我的手自己挪了多远】的一半还小 ⇒ 它跟着我走了。
    --  手一步没挪 ⇒ 判不了(Hand 位移为 0 时恒假),由调用方报"我说不准",不许自称拿住。
    function Came_With_Me (Obj_Du, Obj_Dv, Hand_Du, Hand_Dv : Long_Float) return Boolean;
+   --  🔴 这一步的命令上限:眼睛跟得住的那个天花板,底下垫一块【身体自己动得起来】的地板。
+   --  地板 = 身体噪声的两倍(量出来的)。命令比这还小 ⇒ 发出去身体一动不动,这一步白走。
+   --  地板【不是】探针那一档 —— 探针那一档是 FO 用的四倍(0.026 vs 0.006),
+   --  按探针那一档当地板,球被甩出视野;FO 正是拿它的四分之一,一步推进 8 厘米、44 推抓到球。
+   --  Dead = 这个通道自己量出来的死区(命令比它小,身体不动);还没学到就是 0。
+   function Push_Cap (Ceiling, Noise, Dead : Long_Float) return Long_Float;
    --  🔴 into 瞄哪儿:它自己的皮(这块的中位深度)和它站着的那个面,正中间。两个都是量出来的深度。
    function Into_Depth (Skin, Surface : Long_Float) return Long_Float;
    --  🔴 这一段到底能走几步。脑写了 or N steps 就是 N,没写就用安全上限。
@@ -111,6 +117,10 @@ package Act is
       Cam : Natural := 0;
       Tables : Effect_Vectors.Vector;
       Zones : Zone_Track_Vectors.Vector;     --  (臂 × N_Cams + 相机)
+      --  🔴 每个通道自己的【死区】:命令小于它,身体根本不动(实测随姿势和关节而变 ——
+      --  FO 时 0.006 能动,GV 时同一批通道 0.013 实到 0.000)。身体本来就看得见"我命令了多少、实到多少",
+      --  只是从来没拿它去调下限。命令发了实到为零 ⇒ 把这一档抬上去;真动了 ⇒ 把它压下来。
+      Dead : Floats;                         --  按全局通道号索引(机体自己的单位;只和自己比)
       Recent : Unbounded_String;
       Task_Text : Unbounded_String;
       Items : Item_Vectors.Vector;
