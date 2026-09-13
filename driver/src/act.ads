@@ -97,6 +97,7 @@ package Act is
       Refused : Unbounded_String;      --  上一段被退回的话:理由 + 能照抄的替代,随下一轮一起给脑
       Places : Place_Vectors.Vector;   --  remember 记下的地方:身体自己能重新找到的位置,不是坐标
       Last_Outcome : Sinew.Outcome := Sinew.Oc_None;   --  上一节的结局(八个词之一)
+      Blind_Say : Unbounded_String;    --  身体照走了,但有件事要如实说给脑(不是停,是说)
       Eye_Chosen : Boolean := False;   --  这一集已经自己换过一次眼睛了(不许来回弹)
       Reckless : Boolean := False;     --  这一节写了 anyway:身体的一切谨慎作废
       Prog_Log : Unbounded_String;     --  🔴 这一段程序里【每一节】的结果都攒在这儿。

@@ -5,6 +5,7 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 bash "$ROOT/check_purity.sh"
 bash "$ROOT/check_constants.sh"
 bash "$ROOT/check_freedom.sh"
+bash "$ROOT/check_gates.sh"
 cd "$ROOT/driver"
 command -v alr >/dev/null || export PATH="$HOME/.alire/bin:$HOME/alire/bin:/root/alire/bin:$PATH"
 command -v alr >/dev/null || { echo "need Alire (alr) with gnat_native + gprbuild: https://alire.ada.dev"; exit 1; }

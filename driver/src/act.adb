@@ -1057,8 +1057,11 @@ package body Act is
 
    --  ── 一段 = 反复做五件事:①打算怎么走 ②走 ③看 ④学 ⑤判 ──
    --  每件事一个小过程;这一步发生了什么全记在 Note 里(字段名就是人话),五件事之间只靠它说话。
+   --  🔴 Want_Arrived:脑有没有写 "until arrived"。没写就【不许】因为"我觉得到了"而停 ——
+   --  身体唯一能结束一节的理由,是脑写的那个 until(含它给的步数),外加"我物理上做不到"。
    procedure Run_Segment (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Cam : Natural; Pts : in out Point_Vectors.Vector;
-                          Until_Kind : Monitor.Until_Kind; Step_Limit : Natural; Amount : Long_Float; Avoid : Item_Vectors.Vector;
+                          Until_Kind : Monitor.Until_Kind; Want_Arrived : Boolean;
+                          Step_Limit : Natural; Amount : Long_Float; Avoid : Item_Vectors.Vector;
                           Event : out Unbounded_String; Steps_Taken : out Natural; Blocked_Out : out Boolean; Beats : out Natural) is
       Arm : constant Natural := Pts (0).Arm;
       Beats0 : constant Natural := Plug.Steps (L);
@@ -1438,14 +1441,11 @@ package body Act is
                end if;
                exit when not Hit;
                if Round = 4 then
-                  --  🔴 这是"我怕"不是"我做不到"。脑写了 anyway 就照走,身体一个字都不许顶。
-                  if C.Reckless then
-                     exit;
-                  end if;
-                  Note.Say_Stop := S ("stopped: every step would push what I am tracking out of my sight, "
-                                      & "or put some part of me onto a thing I must not touch. "
-                                      & "Say anyway and I will do it regardless");
-                  return;
+                  --  🔴 原来这里会停下,理由是"再走一步我就看不见它了"。那是【怕】,不是【做不到】。
+                  --  身体不许有意见:照走,把这件事说出来就行。
+                  C.Blind_Say := S ("I kept going even though the next step may take what I am tracking "
+                                    & "out of my sight");
+                  exit;
                end if;
                Scale := Scale * 0.5;
             end;
@@ -1453,7 +1453,8 @@ package body Act is
          for K in 0 .. Chan.Per_Arm - 1 loop
             Note.Cmd (K) := Note.Cmd (K) * Scale * Trust;   --  表有多准就走多少(不然每步走过头,下一步再拉回来,来回晃)
          end loop;
-         if Table.Norm (Note.Cmd, Chan.Per_Arm) <= C.Map.EE_Noise then
+         if Table.Norm (Note.Cmd, Chan.Per_Arm) <= C.Map.EE_Noise and then Want_Arrived then
+            --  只有脑写了 until arrived 才准因为"到了"而停。没写就接着走它给的步数。
             Note.Say_Stop := S ("amount: already there (what is left to push is within my own noise)");
          end if;
       end Trim;
@@ -1467,7 +1468,14 @@ package body Act is
          Aim (Terms);
          Budget (Terms, Solved);
          if not Solved then
-            Note.Say_Stop := S ("could not solve which channels to push");
+            --  🔴 解不出来也不许停:用手上最好的那个估计推一步,并说清楚这一步是硬凑的。
+            for K in 0 .. Chan.Per_Arm - 1 loop
+               Note.Cmd (K) := 0.0;
+            end loop;
+            if Note.Active (0) then
+               Note.Cmd (0) := C.Map.Amp (Arm * Chan.Per_Arm) * Amount;
+            end if;
+            C.Blind_Say := S ("I could not work out which channels to push, so this step was a guess");
             return;
          end if;
          Trim;
@@ -1801,18 +1809,17 @@ package body Act is
          if Lost_Run = 1 then
             Dump_Picture ("lost");
          end if;
-         if Lost_Run >= 2 and then not C.Reckless then
-            --  🔴 "我宁可停下也不瞎走"是意见,不是无能。写了 anyway 就瞎着走。
-            Note.Say_Stop := S ("lost sight: two steps in a row I could not find what I am tracking in this picture; "
-                                & "I stopped rather than move blind. Say anyway and I will move blind");
-            return;
+         if Lost_Run >= 2 then
+            --  🔴 "我宁可停下也不瞎走"是意见。改成:瞎着也走,并且如实说我瞎着走了。
+            C.Blind_Say := S ("for two steps in a row I could not find what I am tracking in this picture, "
+                              & "so from here I am moving without seeing it");
          end if;
          --  🔴 认东西是脑的活:两块一样像的时候身体不许自己挑
          if Note.Unsure then
             Dump_Picture ("unsure");
-            Note.Say_Stop := S ("not sure which one is yours: two things here look equally like the one you named (same size, same distance); "
-                                & "I stopped instead of guessing - look again and tell me its number");
-            return;
+            --  🔴 分不清也不许停:挑一个走,并如实说我分不清、我挑了哪个。
+            C.Blind_Say := S ("two things here look equally like the one you named (same size, same distance); "
+                              & "I could not tell them apart, so I picked one and kept going");
          end if;
          if Note.Not_Followed then
             Put_Line ("[身]     没照做这一步不算数,步幅已缩回;接着走");
@@ -1837,14 +1844,17 @@ package body Act is
                   All_There := False;
                end if;
             end loop;
-            if All_There then
+            if All_There and then Want_Arrived then
                Note.Say_Stop := S ("amount: arrived (in the picture and at the same distance as my fingers)");
                return;
             end if;
          end;
+         --  🔴 原来这里有一条"停止靠近了 —— 要么有东西挡着我,要么这条胳膊够不了更远"。
+         --  那是身体自己发明的终止条件,而且那句解释还常常是假的(真实原因往往是这个视角看不出)。
+         --  【删掉】。误差不缩小是一个【事实】,如实记下来给脑看,由脑决定还走不走。
          if Steps_Taken > 1 and then Monitor.Stalled (W) then
-            Note.Say_Stop := S ("amount: stopped getting closer (still about " & Codec.Fmt (Note.Err_Now, 1) &
-                                " pushes away) - either something holds me or this arm cannot reach farther from here");
+            C.Blind_Say := S ("for several steps in a row the gap stopped shrinking (about "
+                              & Codec.Fmt (Note.Err_Now, 1) & " pushes still to go) - I kept going anyway");
          end if;
       end Judge;
 
@@ -1933,9 +1943,9 @@ package body Act is
          if Length (Dropped) > 0 then
             Put_Line ("[身]   ⊘ " & To_String (Dropped));
          end if;
+         --  🔴 这里原来会因为"没证过"而一步不走。身体不许自己停 —— 说出来,照走。
          if Length (Bad) > 0 then
-            Event := S ("I did not move: " & To_String (Bad));
-            return;
+            C.Blind_Say := S ("I went ahead even though " & To_String (Bad));
          end if;
       end;
       for Step in 1 .. Natural'Min (Step_Cap, (if Step_Limit > 0 then Step_Limit else Step_Cap)) loop
@@ -2407,6 +2417,7 @@ package body Act is
         (case O is
             when Oc_Touched => "contact", when Oc_Stuck => "resist",
             when Oc_Slipped | Oc_Free => "slip", when Oc_Settled => "settle",
+            when Oc_Arrived => "arrived",      --  只有脑真写了 arrived,身体才准因为"到了"而停
             when others => "steps");
       function Old_Step (Sp : Step) return String is
         (case Sp is when Sp_Small => "small", when Sp_Medium => "medium",
@@ -2957,8 +2968,9 @@ package body Act is
                                     P.Tz := G.Pz;
                                     P.Wz := (if G.Pz > 0.0 and then P.Z > 0.0 then 1.0 else 0.0);
                                  elsif not O.Located then
-                                    Report := S ("goal: item " & Codec.Img (G.Of_Item) & " is not locatable right now. ");
-                                    Ok_Pt := False;
+                                    --  🔴 看不见它也不许停:用它上次被看见的地方当目标,照走,如实说。
+                                    Report := Report & "I cannot see item " & Codec.Img (G.Of_Item)
+                                              & " right now, so I aimed at where it was last seen. ";
                                  else
                                     P.Desc := S ("item " & Codec.Img (G.Item) & " " & Rl & " item " & Codec.Img (G.Of_Item));
                                     P.Tu := O.Cu; P.Tv := O.Cv; P.Tz := P.Z; P.Wz := 0.0;
@@ -3044,9 +3056,11 @@ package body Act is
                                                       else Floor_Z + O.Height * Amount);
                                              P.Wz := 1.0;
                                           else
-                                             Report := S ("goal: I cannot measure how far item " & Codec.Img (G.Of_Item)
-                                                          & " stands out of what it rests on, so I do not know which way is into it. ");
-                                             Ok_Pt := False;
+                                             --  🔴 量不出它鼓出多少也不许停:就朝它本身的远近走,如实说。
+                                             P.Tu := P.Cu; P.Tv := P.Cv; P.Tz := O.Depth;
+                                             P.Wz := (if O.Depth > 0.0 and then P.Z > 0.0 then 1.0 else 0.0);
+                                             Report := Report & "I cannot measure how far item " & Codec.Img (G.Of_Item)
+                                                       & " stands out of what it rests on, so I just went to its own distance. ";
                                           end if;
                                        end;
                                     elsif Rl = "face" then
@@ -3061,20 +3075,27 @@ package body Act is
                                              P.Tang := Wrap (2.0 * Arctan (Dv, Du));
                                              P.Wang := 1.0;
                                           else
-                                             Report := S ("goal: item " & Codec.Img (G.Item) & " and item " & Codec.Img (G.Of_Item)
-                                                          & " sit at the same spot in the picture, so there is no direction to turn to. ");
-                                             Ok_Pt := False;
+                                             --  🔴 没方向可转就不转,别的照走。
+                                             Report := Report & "item " & Codec.Img (G.Item) & " and item "
+                                                       & Codec.Img (G.Of_Item) & " sit at the same spot, so I did not turn. ";
                                           end if;
                                        end;
                                     else
                                        --  🔴 认不得的关系【不许静悄悄地什么都不做】。词表长出一个新词而执行器还没实现它,
                                        --  静默 no-op 会让脑以为它说的话被执行了 —— 这正是整套设计要杀掉的那一类失败。
-                                       Report := S ("goal: I do not know where the relation " & Rl & " would put me. ");
-                                       Ok_Pt := False;
+                                       --  🔴 运行期不许拦(认不得的词是编译器的活)。当作"贴上它"走。
+                                       P.Tu := O.Cu; P.Tv := O.Cv; P.Tz := O.Depth;
+                                       P.Wz := (if O.Depth > 0.0 and then P.Z > 0.0 then 1.0 else 0.0);
+                                       Report := Report & "I do not know the relation " & Rl
+                                                 & ", so I went to it. ";
                                     end if;
                                  end if;
                               end;
                            else
+                              --  编译器已经拦掉"既没说格子也没说关系"的句子;真走到这儿说明编译器漏了。
+                              --  不许静默丢掉这一条 —— 出声。
+                              Report := Report & "this line named neither a place nor a relation, "
+                                        & "so I had nothing to aim at (my compiler should have caught that). ";
                               Ok_Pt := False;
                            end if;
       end Set_Target;
@@ -3126,8 +3147,9 @@ package body Act is
                      P.Item_No := G.Item;
                      P.Hard := G.Hard;   --  脑说的是 hold ⇒ 这一条进硬约束,解算时不许被牺牲
                      if not It.Located then
-                        Report := S ("goal: item " & Codec.Img (G.Item) & " is not locatable in this picture right now. ");
-                        Ok_Pt := False;
+                        --  🔴 看不见自己那一块也不许停:按身体图算出来的位置当它此刻在哪,照走。
+                        Report := Report & "I cannot see item " & Codec.Img (G.Item)
+                                  & " in this picture, so I used where my joints say it is. ";
                      elsif It.Kind = Piece then
                         --  我身上的一块零件:点 = 它此刻的形心,表按需量(六个通道各推一下)
                         P.Arm := It.Arm; P.Kind := Piece_Pt; P.Chan_K := It.Which; P.Blob := -1;
@@ -3162,8 +3184,8 @@ package body Act is
                         P.Cu := It.Cu; P.Cv := It.Cv; P.Z := It.Depth; P.Height := It.Height; P.Count := It.Count;
                         P.Box_W := Long_Float (It.X1 - It.X0) / Long_Float (Cw); P.Box_H := Long_Float (It.Y1 - It.Y0) / Long_Float (Ch);
                      else
-                        Report := S ("goal: item " & Codec.Img (G.Item) & " is a thing I am not holding; I can only move things I hold (say grip close on it first). ");
-                        Ok_Pt := False;
+                        --  🔴 这是意见,不是无能(而且编译器已经查过"是不是我身上的")。照走。
+                        Report := Report & "item " & Codec.Img (G.Item) & " is not in my hand, I pushed toward it anyway. ";
                      end if;
                      if Ok_Pt then
                         Set_Target (G, P, Ok_Pt);
@@ -3240,7 +3262,7 @@ package body Act is
             if Say.Grip = "close" and then Grip_Arm >= 0 then
                declare
                   A : constant Natural := Natural (Grip_Arm);
-                  Caged : Boolean := True;
+                  Caged : constant Boolean := True;   --  永远合:成没成由合完提一提来判,不由合之前的预测来判
                   Cage_Note : Unbounded_String;
                   Steps_J : Natural;
                   Reading : Long_Float;
@@ -3278,46 +3300,23 @@ package body Act is
                            end if;
                         end if;
                         if Found and then Pin.Kind = Thing_Pt and then Hz.Valid then
-                           --  笼住 = 它已经和我张开的那片地方重合:画面里位置进了跟踪噪声、看着一样大、远近对得上。
-                           --  只看"中心在区框里"不够 —— 手上相机里区框就是整个下半幅,那条判据恒真(EI/EM 实测)
+                           --  🔴 这里原来有一道"笼住了没有"的预测闸(位置/远近/看着多大三项容差),
+                           --  它拦住过真实的合手动作,而三项容差全是"量出来的东西 × 人拍的系数":
+                           --  横向 = 两指间距 × 0.25(在手自己的眼睛里 ≈ 四分之一张画)、
+                           --  远近 = 球自己鼓出桌面那么高。GJ 实测:手离球十几厘米,三项全"过"。
+                           --  【删掉】。预测不是判据:脑说合就合,成没成由【合完提一提】来判 —— 那是真实验。
                            declare
                               Dp : constant Long_Float := Sqrt ((Pin.Tu - Pin.Cu) ** 2 + (Pin.Tv - Pin.Cv) ** 2);
-                              Ds : constant Long_Float := (if Pin.Wsize > 0.0 and then Pin.Tsize > 0.0 then abs (Pin.Tsize - Pin.Size) / Pin.Tsize else 0.0);
-                              --  🔴 容差【不许】从瓣心距来:在手自己的眼睛里两根指头贴在画面两端,
-                              --  瓣心距 ≈ 整幅画(实测 1.001)⇒ 容差成了四分之一个画面,横着偏十几厘米也照样"通过"
-                              --  (GJ 实测:0.220 过关,实际没夹住)。在这只眼睛里横向对没对准,只能拿跟踪噪声当尺子;
-                              --  瓣心距只有在【不长在这只手上】的相机里才真的是"两指之间那道缝"。
-                              Own_Eye : constant Boolean := Cam_Arm (C, Cam) = Integer (A);
-                              Tol : constant Long_Float :=
-                                (if Own_Eye then Track_Win * 0.5
-                                 else Long_Float'Max (Track_Win * 0.5, Hz.Span * 0.25));
-                              Depth_Ok : constant Boolean := Picture.Is_Nan (Hz.Depth) or else Pin.Z <= 0.0
-                                                            or else abs (Pin.Z - Hz.Depth) <= Long_Float'Max (Pin.Height, Long_Float'Max (Pin.Box_W, Pin.Box_H) * Pin.Z);
-                              --  看着一样大 = 差不超过四分之一(比例,无量纲)
-                              Size_Ok : constant Boolean := Pin.Wsize <= 0.0 or else Ds <= 0.25;
                            begin
-                              Caged := Dp <= Tol and then Depth_Ok and then Size_Ok;
-                              Cage_Note := S ("cage check in " & (if Own_Eye then "my own hand camera (so the allowance is my tracking noise, not the gap between my fingers - in this eye they sit at the edges of the picture)" else "a camera that does not ride this arm") & ": it is " & Codec.Fmt (Dp, 3) & " of a frame from where my fingers close (allowed " &
-                                              Codec.Fmt (Tol, 3) & "), looks " & Codec.Fmt (Pin.Size / Long_Float'Max (1.0e-9, Pin.Tsize) * 100.0, 0) &
-                                              "% of the size it should, and its distance " & (if Depth_Ok then "matches" else "does not match") & " my fingertips");
-                           end;
-                        elsif Found and then Pin.Kind = Piece_Pt then
-                           declare
-                              O : constant Item := C.Items (Say.Grip_On - 1);
-                              Dist : constant Long_Float := Sqrt ((Pin.Cu - O.Cu) ** 2 + (Pin.Cv - O.Cv) ** 2);
-                              Tol : constant Long_Float := Long_Float'Max (Hz.Span * 0.5, Track_Win * 0.5);
-                           begin
-                              Caged := Dist <= Tol;
-                              Cage_Note := S ("cage check in this camera: my grip centre is " & Codec.Fmt (Dist, 3) & " of a frame from the thing (allowed " & Codec.Fmt (Tol, 3) & ")");
+                              Cage_Note := S ("before I closed, it was " & Codec.Fmt (Dp, 3)
+                                              & " of a frame from where my fingers close, and looked "
+                                              & Codec.Fmt (Pin.Size / Long_Float'Max (1.0e-9, Pin.Tsize) * 100.0, 0)
+                                              & "% of the size it should - I closed anyway and let the lift decide");
                            end;
                         end if;
                      end;
                   end if;
-                  --  🔴 "离得太远我不敢合"是意见,不是无能。写了 anyway 就合。
-                  if C.Reckless and then not Caged then
-                     Append (Cage_Note, "; you said anyway, so I closed regardless");
-                     Caged := True;
-                  end if;
+                  --  🔴 脑说合就合。这里不再有任何"我觉得还不到时候"的判断。
                   if Caged then
                      Move_Jaw (L, C, F, A, 0.0, Steps_J, Reading, Say.Grip_K);
                      declare
@@ -3359,7 +3358,7 @@ package body Act is
                   else
                      Did_Grip := S ("I did NOT close grip " & Codec.Img (A + 1) & ": " & To_String (Cage_Note));
                   end if;
-                  if Cage_Note /= "" and then Caged then
+                  if Cage_Note /= "" then
                      Append (Did_Grip, " (" & To_String (Cage_Note) & ")");
                   end if;
                end;
@@ -3446,7 +3445,7 @@ package body Act is
             end loop;
             if not Pts.Is_Empty then
                Put_Line ("[身] ⚙ 一起解" & Natural'Image (Natural (Pts.Length)) & " 条:" & To_String (Desc));
-               Run_Segment (L, C, F, Cam, Pts, Until_K, Step_Limit, Amount, Avoid, Event, Steps_Taken, Blocked, Beats);
+               Run_Segment (L, C, F, Cam, Pts, Until_K, Say.Until_Kind = "arrived", Step_Limit, Amount, Avoid, Event, Steps_Taken, Blocked, Beats);
                C.Last_Outcome := Classify (To_String (Event));
                Feel (C, F);
                Report := Report & "you asked " & Desc & ": " & Event & ". I took " & Codec.Img (Steps_Taken) & " pushes; ";
@@ -3469,6 +3468,11 @@ package body Act is
          Report := Report & Mode_Line (C, To_String (Event));
       end;
       --  这一节的结果攒进这一段程序的账上;跑完一整段才一次交给脑
+      --  身体照走了但有话要说的,一并交给脑(不是停,是说)
+      if Length (C.Blind_Say) > 0 then
+         Report := Report & " " & To_String (C.Blind_Say);
+         C.Blind_Say := Null_Unbounded_String;
+      end if;
       --  把这一节的结局喂回执行器 —— 控制流只认这八个词
       if C.Have_Prog then
          declare
