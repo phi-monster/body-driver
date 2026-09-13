@@ -758,7 +758,10 @@ package body Act is
                      P.Box_W := Long_Float (R.X1 - R.X0) / Long_Float (Cw);
                      P.Box_H := Long_Float (R.Y1 - R.Y0) / Long_Float (Ch);
                      P.Cu := R.Cu; P.Cv := R.Cv;
-                     P.Size := Sqrt (Long_Float'Max (0.0, P.Box_W * P.Box_H));
+                     --  🔴 按【面积】算,不按外接框:框被一颗杂散像素并进来就跳,面积几乎不动。
+                     --  GF 实测:框版的"看着多大"散得比自己的均值还大 ⇒ 体检把它摘掉 ⇒ 腕相机里
+                     --  一个能判距离的信号都不剩(2026-09-08 曾因此把这一项写死关掉,那是治标)。
+                     P.Size := Sqrt (Long_Float (P.Count) / Long_Float'Max (1.0, Long_Float (Cw * Ch)));
                      P.Ang := 2.0 * Arctan (R.Av, R.Au);
                      P.Elong := R.Elong;
                      --  朝向算多少分,看这块有多"长条":圆的(长短轴一样)自动为零 —— 球没有朝向,给满分就是追噪声
@@ -2930,11 +2933,16 @@ package body Act is
                                     P.Tu := O.Cu; P.Tv := O.Cv; P.Tz := P.Z; P.Wz := 0.0;
                                     if Rl = "at" then
                                        if P.Kind = Thing_Pt and then O.Kind in Finger | Grip then
-                                          --  X 装进握区:区心、区深
+                                          --  X 装进握区:区心、区深、【到了跟前该有多大】
+                                          --  🔴 最后这一项不能少:在手上这只眼睛里,握区的远近常常读不到(NaN),
+                                          --  那时"看着多大"是【唯一】的距离信号。两个都没有的话,
+                                          --  像素一对齐就会被判成"到了",而实际差着 20 厘米(GE 实测)。
                                           declare
                                              Z : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, Cam, Jaw_K_Of (P.Chan_K));
                                           begin
                                              P.Tu := Z.Cu; P.Tv := Z.Cv; P.Tz := Z.Depth; P.Wz := (if Picture.Is_Nan (Z.Depth) then 0.0 else 1.0);
+                                             P.Tsize := Long_Float'Max (1.0e-6, Z.Span);
+                                             P.Wsize := (if Z.Span > 0.0 then 1.0 else 0.0);
                                           end;
                                        elsif P.Kind = Piece_Pt and then O.Kind in Thing | Thing_Remembered then
                                           --  "到它那儿" = 到它那一面,不替它挑高低(owner 2026-09-08:"半腰"假设了两指从侧面夹一个立在台面上的东西,
@@ -3133,11 +3141,12 @@ package body Act is
                         --  圆的东西没有朝向 ⇒ 那一行谁也改不动 ⇒ 自动不参与,不需要写规则。
                         P.Kind := Thing_Pt; P.Slot := O.Slot; P.Cu := O.Cu; P.Cv := O.Cv; P.Z := O.Depth; P.Height := O.Height; P.Count := O.Count;
                         P.Box_W := Long_Float (O.X1 - O.X0) / Long_Float (Cw); P.Box_H := Long_Float (O.Y1 - O.Y0) / Long_Float (Ch);
-                        P.Size := Sqrt (Long_Float'Max (0.0, P.Box_W * P.Box_H));
+                        P.Size := Sqrt (Long_Float (O.Count) / Long_Float'Max (1.0, Long_Float (Cw * Ch)));
                         P.Ang := 2.0 * Arctan (O.Av, O.Au);
                         P.Elong := O.Elong; P.Gray := O.Gray;
                         P.Tu := Z.Cu; P.Tv := Z.Cv; P.Tz := Z.Depth; P.Wz := (if Picture.Is_Nan (Z.Depth) then 0.0 else 1.0);
-                        P.Tsize := Sqrt (Long_Float'Max (0.0, (Long_Float (Z.X1 - Z.X0) / Long_Float (Cw)) * (Long_Float (Z.Y1 - Z.Y0) / Long_Float (Ch))));
+                        --  "到了跟前该有多大" = 两瓣之间那么宽(瓣心距是量出来的,比区框稳)
+                        P.Tsize := Long_Float'Max (1.0e-6, Z.Span);
                         P.Tang := 2.0 * Arctan (Z.Av, Z.Au);
                         --  🔴 "看着多大"这一项 2026-09-08 曾被写死关掉(当时框随切块忽大忽小)。现在重新打开:
                         --  稳不稳【由体检量出来判】,不由我写死 —— 不稳的话点用之前那一关会把它摘掉。
