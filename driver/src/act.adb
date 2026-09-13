@@ -54,6 +54,23 @@ package body Act is
    function Jaw_K_Of (Ck : Natural) return Natural is
      (if Ck >= Chan.Per_Arm then Ck - Chan.Per_Arm else 0);
 
+   --  🔴 读手指深度用的窗口:取【这一瓣自己】最窄那一边的四分之一,落在手指身上。
+   --  以前用的是整只手的张幅,把自己的白色大臂框了进去(大臂比手指更近)⇒ 靠近的那一档分位一路下滑,
+   --  9 步从 1.07 m 滑到 0.50 m(LAB 09-09「爬深」)。这一条和"就地重读"是一对,一起被 a7ab7e9 退掉了。
+   function Lobe_Win (Z : Zone.Hand_Zone; Cw, Ch : Natural) return Long_Float is
+      W1 : constant Long_Float := Long_Float (Z.A.X1 - Z.A.X0 + 1) / Long_Float (Cw);
+      H1 : constant Long_Float := Long_Float (Z.A.Y1 - Z.A.Y0 + 1) / Long_Float (Ch);
+      W2 : constant Long_Float := (if Z.B.Valid then Long_Float (Z.B.X1 - Z.B.X0 + 1) / Long_Float (Cw) else W1);
+      H2 : constant Long_Float := (if Z.B.Valid then Long_Float (Z.B.Y1 - Z.B.Y0 + 1) / Long_Float (Ch) else H1);
+   begin
+      --  还没量到手的时候退回一个百分之一画幅的小窗(比例,无量纲)
+      if not Z.Valid or else not Z.A.Valid then
+         return 0.01;
+      end if;
+      --  取最窄那一边的四分之一;再小也留千分之四画幅,免得窗口小到一个像素(比例,无量纲)
+      return Long_Float'Max (0.004, 0.25 * Long_Float'Min (Long_Float'Min (W1, H1), Long_Float'Min (W2, H2)));
+   end Lobe_Win;
+
    function Track_Idx (C : Context; Arm, Cam : Natural) return Natural is (Arm * C.Map.N_Cams + Cam);
 
    function Cam_Arm (C : Context; Cam : Natural) return Integer is
@@ -1877,6 +1894,34 @@ package body Act is
                         if W0.Z > 0.0 and then W0.Z + Pr (2) > 0.0 then
                            P.Z := W0.Z + Pr (2);
                         end if;
+                     end if;
+                     --  🔴🔴 位置从姿态表里查出来之后,【深度要在深度图上就地重读】。
+                     --  以前这一路的 Z 全是姿态表里存的那个数加上表的预测 —— 也就是【猜】出来的,
+                     --  从来没被眼睛校过。IY 实测(真深度也开着):球读 0.640 m,而挨着它的指尖读 2.40 m,
+                     --  差了四倍;每一步 Z 平滑地变 0.007,像预测不像测量。于是"远近"那一行永远差着,
+                     --  手在前后方向上要么不动要么一路顶,合手全是空的。
+                     --  LAB 判定这就是 FO"夹太靠上、一合把球顶飞"的根子。修法(4c24742 + 闸 ad6d76e)
+                     --  在 a7ab7e9 回滚里被一起退掉了,这里捞回来。
+                     if F.Cams (Cam).Has_Depth then
+                        declare
+                           Zn : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, Cam);
+                           Zd : constant Long_Float :=
+                             Picture.Near_Depth (F.Cams (Cam).Depth, Cw, Ch, P.Cu, P.Cv, Lobe_Win (Zn, Cw, Ch));
+                           Old_Z : constant Long_Float := P.Z;
+                        begin
+                           --  🔴 收读数前先过闸:读窗里同时有指头和它【后面那个面】时,读数会在两者之间来回跳
+                           --  (JD 实测:指尖深度在 0.61 和 0.45 之间几乎每步翻一次,差 16 cm,而它在画面里几乎没动
+                           --   ⇒ 前后那一维的误差每步翻符号 ⇒ 手被拉过去又拉回来,视频里就是发癫)。
+                           --  原版这道闸写的是"表预测的变化 + 距离的【一成】",那个一成是人拍的;
+                           --  换成这一点自己量到的深度抖动地板(Z_Noise),零系数,而且比一成更对。
+                           if not Picture.Is_Nan (Zd) and then Zd > 0.0 then
+                              if Old_Z <= 0.0
+                                or else abs (Zd - Old_Z) <= abs (Pr (2)) + Long_Float'Max (0.0, P.Z_Noise)
+                              then
+                                 P.Z := Zd;
+                              end if;
+                           end if;
+                        end;
                      end if;
                      if Note.Big_Step or else not Familiar then
                         P.Lost := True;
