@@ -757,7 +757,7 @@ package body Act is
      (4.0 / Long_Float'Max (4.0, Long_Float'Max (P.Box_W * Long_Float (Cw), P.Box_H * Long_Float (Ch))));
 
    --  到位了没:画面上进了跟踪噪声,且远近的差不超过这块东西自己的尺寸(全是量出来的,没有写死的容差)
-   function Reached (P : Point; Track_Floor : Long_Float) return Boolean is
+   function Reached (P : Point; Track_Floor : Long_Float; Cw, Ch : Natural) return Boolean is
       Tol : constant Long_Float := Long_Float'Max (P.Height, Long_Float'Max (P.Box_W, P.Box_H) * P.Z);
    begin
       if Err_Of (P) > Track_Floor then
@@ -765,6 +765,12 @@ package body Act is
       end if;
       if P.Wsize > 0.0 and then P.Tsize > 0.0 and then abs (P.Tsize - P.Size) / P.Tsize > 0.25 then
          return False;   --  看着差过四分之一就还没到(比例,无量纲)
+      end if;
+      --  🔴 朝向也要算进"到没到" —— 否则脑说"瞄准它",身体一推就报到位(FS 实测:face 走 1 推就"到了")。
+      --  这一项本来就一直在(圆的东西转不出主轴,它自己会关掉 Wang=0),只是判据从来没看过它。
+      --  容差用这块自己的朝向分辨率(最长那边偏一个像素),不是拍一个角度。
+      if P.Wang > 0.0 and then abs (Wrap (P.Tang - P.Ang)) > Ang_Floor (P, Cw, Ch) then
+         return False;
       end if;
       if P.Wz > 0.0 and then P.Z > 0.0 and then not Picture.Is_Nan (P.Tz) then
          return abs (P.Tz - P.Z) <= Long_Float'Max (Tol, 1.0e-9);
@@ -1086,8 +1092,14 @@ package body Act is
    --  没有表的点(同一只手的几个点一起):每个通道推一下量一列。幅度从开机看得见的那一档起,翻倍到每个点在画面里
    --  跑过 4 个跟踪地板、或深度变过深度地板为止(倍数,无量纲;EF 实测:最小可见幅度量出的列全是噪声,解算据此拧手腕);
    --  深度地板 = 这一点连着两拍读深度抖多少的 4 倍,再小也有距离的百分之一(比例,无量纲);翻到上限还看不出动的通道,这一段不用它。推完推回起点。
+   --  🔴 身体【为了量自己而动】的幅度,不许超过【脑让它动】的幅度(Allow = 脑说的 small/medium/large 那一档)。
+   --  原来这里一路加码到自己那一档的十几倍,于是每次量身体、每次中途重量,关节都被推到 0.4 弧度去甩一下 ——
+   --  owner 看 JA 视频的原话:"机械臂全程在发癫"。这不是给某个任务定的数,是一条规矩:
+   --  擦桌子的时候你也不会想让它为了标定自己甩胳膊。量不出来就【老实说这个方向量不到】,
+   --  要不要给更大的幅度去量,是脑的事。
    procedure Probe_Effects (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Cam : Natural; Pts : in out Point_Vectors.Vector;
-                            Effs : in out Effect_Array; Trust : out Table.Mask; Ok : out Boolean) is
+                            Effs : in out Effect_Array; Trust : out Table.Mask; Ok : out Boolean;
+                            Allow : Long_Float := 1.0) is
       Arm : constant Natural := Pts (0).Arm;
       P0 : constant Plug.Arm_Pose := F.EE (Arm);
       Jaw : Floats;
@@ -1205,7 +1217,9 @@ package body Act is
             --  拿这种表解出来的命令把胳膊一路推出画面右边缘,而"还差几步"一路从 29.8 "改善"到 20.0。
             --  放宽多少不用人拍:身体开机就量了 Cam_Frac(这条胳膊一动,每台相机的画面各变多少)——
             --  哪台看得小,上限就按【看得最大的那台 ÷ 这一台】的比例放大。全是量出来的。
-            Cap_Amp : constant Long_Float := C.Map.Amp (Chn) * Cap_Mult * Cam_Slack (C, Arm, Cam);
+            --  上限 = 脑让它动的那一档 × 这台相机看得出动过所需要的放宽;至少是自己那一档,否则一步都探不出来
+            Cap_Amp : constant Long_Float :=
+              C.Map.Amp (Chn) * Long_Float'Max (1.0, Allow) * Cam_Slack (C, Arm, Cam);
          begin
             if not C.Map.Seen (Chn) or else Amp <= 0.0 then
                Put_Line ("[身]     通道" & Natural'Image (Chn) & " 开机时没看见它动,这一列留零");
@@ -1581,7 +1595,7 @@ package body Act is
                Trust : Table.Mask;
                Ok : Boolean;
             begin
-               Probe_Effects (L, C, F, Cam, Pts, Effs, Trust, Ok);
+               Probe_Effects (L, C, F, Cam, Pts, Effs, Trust, Ok, Amount * Cap_Mult);
                if not Ok then
                   Ok_Out := False;
                   return;
@@ -2326,6 +2340,20 @@ package body Act is
                end loop;
             end;
          end if;
+         --  🔴 "碰到"也要从【被跟住的那几块】上判,不能只靠切块比对。
+         --  不跟着这只手动的那台相机里常常一块都切不出来 ⇒ 那条判据永远不响 ⇒ 脑说的"走到碰到为止"
+         --  变成一句空话,身体只会一路走到步数上限(IL/IM 实测:手压到球上、差距 0.003,
+         --  60 步里一次 contact 都没响过)。而被脑点名跟住的那个东西【本来就在跟着】:
+         --  在不跟着这只手动的相机里,它自己动了就只能是被碰了。
+         if not Own_Cam then
+            for I in 0 .. Natural (Pts.Length) - 1 loop
+               if Pts (I).Kind = Thing_Pt and then not Pts (I).Lost and then I < Natural (Was.Length)
+                 and then Sqrt ((Pts (I).Cu - Was (I).Cu) ** 2 + (Pts (I).Cv - Was (I).Cv) ** 2) > Fl.Track
+               then
+                  Note.Touched := True;
+               end if;
+            end loop;
+         end if;
          if Note.Touched then
             Put_Line ("[身]     我没在推的东西也动了 ⇒ 碰到它了");
          end if;
@@ -2464,7 +2492,7 @@ package body Act is
             All_There : Boolean := True;
          begin
             for P of Pts loop
-               if not Reached (P, Fl.Track * 2.0) then
+               if not Reached (P, Fl.Track * 2.0, Cw, Ch) then
                   All_There := False;
                end if;
             end loop;
@@ -2599,7 +2627,7 @@ package body Act is
                Trust2 : Table.Mask;
                Ok2 : Boolean;
             begin
-               Probe_Effects (L, C, F, Cam, Pts, Effs, Trust2, Ok2);
+               Probe_Effects (L, C, F, Cam, Pts, Effs, Trust2, Ok2, Amount * Cap_Mult);
                if Ok2 then
                   for I in 0 .. Natural (Pts.Length) - 1 loop
                      Trusts (I) := Trust2;
@@ -3901,7 +3929,24 @@ package body Act is
                                           declare
                                              Z : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, Cam, 0);
                                           begin
-                                             P.Tu := Z.Cu; P.Tv := Z.Cv;
+                                             --  🔴 目标取【合拢时扫过的那几瓣的共同中心】,不是整片扫过区的中心:
+                                             --  手腕相机里手指离镜头很近,扫过的那一片几乎半个屏幕,它的中心没有意义。
+                                             --  瓣是量出来的 —— 一瓣 = 吸盘,两瓣 = 两指,七瓣 = 七指,同一段代码,
+                                             --  一个字没提手指几根。
+                                             declare
+                                                Lu : Long_Float := 0.0;
+                                                Lv : Long_Float := 0.0;
+                                                Ln : Long_Float := 0.0;
+                                             begin
+                                                if Z.A.Valid then
+                                                   Lu := Lu + Z.A.Cu; Lv := Lv + Z.A.Cv; Ln := Ln + 1.0;
+                                                end if;
+                                                if Z.B.Valid then
+                                                   Lu := Lu + Z.B.Cu; Lv := Lv + Z.B.Cv; Ln := Ln + 1.0;
+                                                end if;
+                                                P.Tu := (if Ln > 0.0 then Lu / Ln else Z.Cu);
+                                                P.Tv := (if Ln > 0.0 then Lv / Ln else Z.Cv);
+                                             end;
                                              P.Tz := Z.Depth;
                                              P.Wz := (if Picture.Is_Nan (Z.Depth) then 0.0 else 1.0);
                                              --  🔴 "到了跟前该有多大"不能用瓣心距:在手【自己】的眼睛里,
