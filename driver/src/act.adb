@@ -612,6 +612,9 @@ package body Act is
    --  ── 被跟踪的点 ──
    type Point is record
       Arm : Natural := 0;
+      --  🔴 这一点是【哪台相机】里的。一段动作要同时用几台相机时,每个点各带各的;
+      --  只有一台时全都等于那一台,行为和以前一模一样(这一步是纯搬家)。
+      Cam : Natural := 0;
       Kind : Track_Kind := Piece_Pt;
       Slot : Integer := -1;
       Item_No : Natural := 0;
@@ -3609,7 +3612,8 @@ package body Act is
                         P.Wz := (if P.Z > 0.0 then 1.0 else 0.0);
                         P.Desc := S ("item " & Codec.Img (G.Item) & " stays exactly where it is");
                         if Pts.Is_Empty or else Pts (0).Arm = P.Arm then
-                           Pts.Append (P);
+                           P.Cam := Cam;   --  这一点是哪台相机里的(此刻只有一台)
+                     Pts.Append (P);
                         end if;
                      end if;
                   end;
@@ -3671,7 +3675,8 @@ package body Act is
                      end if;
                      if Ok_Pt then
                         if Pts.Is_Empty or else Pts (0).Arm = P.Arm then
-                           Pts.Append (P);
+                           P.Cam := Cam;   --  这一点是哪台相机里的(此刻只有一台)
+                     Pts.Append (P);
                         else
                            Report := Report & "goal for item " & Codec.Img (G.Item) & " needs a different arm than the first goal; I do one arm per segment. ";
                         end if;
@@ -3728,6 +3733,7 @@ package body Act is
                            P.Desc := S ("grip " & Codec.Img (A + 1) & " onto item " & Codec.Img (Say.Grip_On) & " (fingertips to its middle)");
                         end;
                      end if;
+                     P.Cam := Cam;   --  这一点是哪台相机里的(此刻只有一台)
                      Pts.Append (P);
                   end if;
                end;
