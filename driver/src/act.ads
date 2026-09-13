@@ -57,6 +57,10 @@ package Act is
    --  (语言里 pusher 就是"推得动东西、但【合不拢】的部件";以前它把 Grip 也收了,
    --  于是两个角色绑到同一块,语言里的角色区分是假的)。
    function Role_Wants (R : Sinew.Role; K : Item_Kind) return Boolean;
+   --  🔴 从身体图外推手的位置,炸没炸。Was = 样本里那两瓣本来隔多远,Now = 外推之后隔多远。
+   --  差得比它本身还大 ⇒ 这次外推不作数(零系数:两个都是量出来的长度)。
+   --  箱上真数据:样本存的是 0.137,而身体报给脑的是四分之三个画面 —— 就是这里炸的。
+   function Extrapolation_Blew (Was, Now : Long_Float) return Boolean;
    --  🔴 这一段到底能走几步。脑写了 or N steps 就是 N,没写就用安全上限。
    --  **永远不许返回 0** —— 上限 0 交给 Monitor.Fired,U_Steps 判 W.Steps >= 0 第一步就成立,
    --  一段只走一推(GM:三段 until arrived 各 1 推 5 拍,身体却回报"步子走完还没到")。自检钉死。
@@ -76,6 +80,7 @@ package Act is
       Au, Av, Bu, Bv : Long_Float := 0.0;   --  两瓣各自的位置(从身体图按此刻位姿算出)
       Has_Lobes : Boolean := False;
       Known : Boolean := False;             --  此刻位姿离某个真看过的样本不超过一步核实过的步幅 ⇒ 不用看就知道
+      Blew_Up : Boolean := False;           --  这次从样本外推炸了(算出来的两瓣间距和样本里的差得比它本身还大)
       Pieces : Schema.Part_Array;           --  这只手每个通道带的零件此刻在这台相机里的位置(按位姿从身体图算)
       Pieces_Known : Known_Array := [others => False];
    end record;

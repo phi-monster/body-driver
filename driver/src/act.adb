@@ -167,6 +167,11 @@ package body Act is
    function Effective_Cap (Say_Steps : Natural) return Positive is
      (if Say_Steps > 0 then Say_Steps else Safety_Cap);
 
+   --  两瓣叠到一起(间距 0)也是炸 —— 两根手指不可能落在同一个像素上。
+   --  这个洞是自检当场逮到的:|0 − 0.137| > 0.137 是【假】(不是严格大于),原判据放过了它。
+   function Extrapolation_Blew (Was, Now : Long_Float) return Boolean is
+     (Was > 0.0 and then (Now <= 0.0 or else abs (Now - Was) > Was));
+
    function Role_Wants (R : Sinew.Role; K : Item_Kind) return Boolean is
      (case R is
          --  grasper = 我量到能相向靠拢、中间扫出一片能装东西的那一组
@@ -800,8 +805,36 @@ package body Act is
                      begin
                         if Gp.Valid then
                            Tr.Valid := True;
-                           Tr.Au := Clamp (Gp.B0u + Sa (0)); Tr.Av := Clamp (Gp.B0v + Sa (1));
-                           Tr.Bu := Clamp (Gp.B1u + Sb (0)); Tr.Bv := Clamp (Gp.B1v + Sb (1));
+                           --  🔴🔴 外推炸了就不许用,退回样本里存的原样,并且不许再自称"我知道"。
+                           --  箱上真数据(cal.json,臂1/相机0,64 个样本)存的是:两瓣 u = 0.8475 / 0.9847,
+                           --  隔 0.137,都在画面右边 —— 样本是对的。而身体报给脑的是"左边,第 2 格和第 19 格,
+                           --  隔四分之三个画面"。坏在这一行:胳膊离样本远时 Sa/Sb 这个外推量会炸,
+                           --  Clamp 把它夹到 0 或 1 ⇒ 一瓣被夹到画面最左、另一瓣在别处。
+                           --  而"我知不知道"只看【位姿差多大】,不看【算出来的结果合不合理】⇒
+                           --  它一边给荒谬的位置一边说"我知道",十三炮的伺服全是拿这个位置算的。
+                           --  判据零系数:算出来的两瓣间距,和【样本里那两瓣本来隔多远】比;
+                           --  差得比它本身还大 ⇒ 这次外推不作数。
+                           declare
+                              Pu0 : constant Long_Float := Gp.B0u + Sa (0);
+                              Pv0 : constant Long_Float := Gp.B0v + Sa (1);
+                              Pu1 : constant Long_Float := Gp.B1u + Sb (0);
+                              Pv1 : constant Long_Float := Gp.B1v + Sb (1);
+                              Was : constant Long_Float :=
+                                Sqrt ((Gp.B0u - Gp.B1u) ** 2 + (Gp.B0v - Gp.B1v) ** 2);
+                              Now : constant Long_Float := Sqrt ((Pu0 - Pu1) ** 2 + (Pv0 - Pv1) ** 2);
+                              Blew : constant Boolean :=
+                                Gp.N_Blobs >= 2 and then Extrapolation_Blew (Was, Now);
+                           begin
+                              if Blew then
+                                 --  外推不作数:用样本里的原样,并在下面把 Known 判掉(身体会因此先看一眼)
+                                 Tr.Au := Gp.B0u; Tr.Av := Gp.B0v;
+                                 Tr.Bu := Gp.B1u; Tr.Bv := Gp.B1v;
+                              else
+                                 Tr.Au := Clamp (Pu0); Tr.Av := Clamp (Pv0);
+                                 Tr.Bu := Clamp (Pu1); Tr.Bv := Clamp (Pv1);
+                              end if;
+                              Tr.Blew_Up := Blew;
+                           end;
                            Tr.Has_Lobes := Gp.N_Blobs >= 1;
                            if Gp.N_Blobs >= 2 then
                               Tr.Cu := (Tr.Au + Tr.Bu) / 2.0; Tr.Cv := (Tr.Av + Tr.Bv) / 2.0;
@@ -811,7 +844,7 @@ package body Act is
                            if Gp.Z > 0.0 then
                               Tr.Z := Gp.Z + (if Gp.N_Blobs >= 2 then (Sa (2) + Sb (2)) / 2.0 else Sa (2));
                            end if;
-                           Tr.Known := True;
+                           Tr.Known := not Tr.Blew_Up;   --  外推炸过 ⇒ 这一处的位置不作数,别再自称知道
                            for K in 0 .. Chan.Per_Arm - 1 loop
                               if abs Diff (K) > Long_Float'Max (1.0e-6, C.Map.Amp (A * Chan.Per_Arm + K)) * Cap_Mult * Reach (K) then
                                  Tr.Known := False;
@@ -2521,6 +2554,13 @@ package body Act is
    --  动过的像素就是它,每个点认离预测最近的那团。抖的幅度不是常数:手指合"量出来的稳定拍数"那么久;零件推开机看得见的那一档。认不到的留预测、记 Lost。
    procedure Refind_Pieces (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Cam : Natural; Pts : in out Point_Vectors.Vector) is
       Arm : constant Natural := Pts (0).Arm;
+      --  🔴🔴 抖之前先记下【我猜的】位置。抖完拿"我看到的"和它一比,就是这具身体
+      --  唯一一次能自己验证"我的手在哪"的机会 —— 而它一直没比过。
+      --  十三炮的终局全是"伺服往错的方向推",而错的源头就是这个猜出来的位置
+      --  (GW 实测:右臂两根手指被放到画面左边、相隔四分之三个画面)。
+      Guess_U : constant Long_Float := Pts (0).Cu;
+      Guess_V : constant Long_Float := Pts (0).Cv;
+      Guess_Z : constant Long_Float := Pts (0).Z;
       Cw : constant Natural := F.Cams (Cam).W;
       Ch : constant Natural := F.Cams (Cam).H;
       Z : constant Zone.Hand_Zone := Zone_Of (C, Arm, Cam);
@@ -2713,6 +2753,23 @@ package body Act is
          Edge : constant Long_Float := Track_Win;
          Off : constant Boolean := U <= Edge or else U >= 1.0 - Edge or else V <= Edge or else V >= 1.0 - Edge;
       begin
+         --  猜的 vs 看到的:差了多少。比不出来就不说(没认到时看到的那一份不存在)
+         if not Pts (0).Lost then
+            declare
+               D : constant Long_Float := Sqrt ((U - Guess_U) ** 2 + (V - Guess_V) ** 2);
+            begin
+               if D > Track_Win then
+                  Put_Line ("[身]     🔴 我猜我在 (" & Codec.Fmt (Guess_U, 3) & "," & Codec.Fmt (Guess_V, 3)
+                            & ") 深 " & Codec.Fmt (Guess_Z, 3) & ",一看其实在 (" & Codec.Fmt (U, 3) & ","
+                            & Codec.Fmt (V, 3) & ") 深 " & Codec.Fmt (Pts (0).Z, 3) & " —— 差 "
+                            & Codec.Fmt (D, 3) & " 画幅(眼睛能跟住的一个窗口才 " & Codec.Fmt (Track_Win, 4)
+                            & ")。这一段之前算的误差全是拿猜的位置算的");
+                  C.Blind_Say := S ("careful: where my body map said my hand was and where I just saw it are "
+                                    & Codec.Fmt (D, 3) & " of the picture apart - everything I worked out before "
+                                    & "this look was measured from the wrong place");
+               end if;
+            end;
+         end if;
          Put_Line ("[身]     生地/大步之后看一眼自己(手指抖一下 / 零件推一下):" &
                    (if Pts (0).Lost then "没认到,按图猜" else "认到了") &
                    " (" & Codec.Fmt (U, 3) & "," & Codec.Fmt (V, 3) & ") 深 " & Codec.Fmt (Pts (0).Z, 3) &

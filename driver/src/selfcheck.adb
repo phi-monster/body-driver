@@ -937,6 +937,19 @@ begin
          end if;
       end loop;
       Check (not Overlap, "语言:grasper 和 pusher 互斥(合得拢的零件不许算 pusher)");
+      --  🔴 判据一(起炮的四条门槛之一):手在画面里的位置不许算炸。
+      --  数字取自箱上真 cal.json(臂1/相机0,64 个样本):两瓣存的是 u=0.8475 / 0.9847,隔 0.137。
+      --  而身体当时报给脑的是"画面左边,第 2 格和第 19 格",隔约 0.75 画幅 —— 那就是外推炸了。
+      declare
+         Was : constant Long_Float := 0.137;    --  样本里两瓣本来隔多远(真数据)
+      begin
+         Check (not Act.Extrapolation_Blew (Was, 0.137), "身体图:外推没变化 ⇒ 作数");
+         Check (not Act.Extrapolation_Blew (Was, 0.200), "身体图:外推变一点 ⇒ 仍作数");
+         Check (Act.Extrapolation_Blew (Was, 0.750),
+                "身体图:外推把两瓣拉到隔四分之三个画面 ⇒ 不作数(这正是十三炮里手被放到画面另一边的那一步)");
+         Check (Act.Extrapolation_Blew (Was, 0.000),
+                "身体图:外推把两瓣叠到一起 ⇒ 也不作数");
+      end;
       --  🔴 新词「用哪只眼睛判这一段」。十二炮里每炮开头我都在用手工做这件事
       --  (先发一条只说话的命令烧掉换眼额度,再靠"在哪台相机里点名"这个副作用把段挪过去)——
       --  一炮浪费两条命令。这一条钉死它真的被读进来了,而且不用编号。
