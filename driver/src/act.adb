@@ -2200,7 +2200,24 @@ package body Act is
 
    --  握住了没:抬一小截,看东西跟不跟我走。手上相机里 = 它的块还在握区框里;世界相机里 = 它原来那块地方空了。读数不算数(回声)。
    --  Sure = 有没有【不跟着手动的相机】能核实。没有就只能说"我说不准",不许把状态记成"手里有东西"
+   --  一台不长在这只手上的相机(优先不长在任何手上的那台):判"夹住没有"只能靠它
+   function Still_Cam (C : Context; F : Plug.Frame; Arm : Natural) return Integer is
+   begin
+      for Cm in 0 .. Natural (F.Cams.Length) - 1 loop
+         if Cam_Arm (C, Cm) < 0 then
+            return Integer (Cm);
+         end if;
+      end loop;
+      for Cm in 0 .. Natural (F.Cams.Length) - 1 loop
+         if Cam_Arm (C, Cm) /= Integer (Arm) then
+            return Integer (Cm);
+         end if;
+      end loop;
+      return -1;
+   end Still_Cam;
+
    procedure Held_Test (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Arm : Natural; Cam : Natural; Origin : Picture.Region;
+                        Slot : Integer;
                         Obj_Count : Natural; Held : out Boolean; Sure : out Boolean; Note : out Unbounded_String) is
       A : Table.Vec := Table.Zero_Vec;
       Deliv : Table.Vec;
@@ -2208,14 +2225,27 @@ package body Act is
       Hc : constant Integer := (if Arm < Natural (C.Map.Cam_On_Arm.Length) then C.Map.Cam_On_Arm (Arm) else -1);
       Jaw : Floats;
       Seen_In_Hand : Boolean := False;
+      Home : Picture.Region := Origin;
       Gone_From_Table : Boolean := False;
       Could_Judge : Boolean := False;
       --  合完之后要量出"到底发生了什么",不是只答"拿住了没":旁边有没有东西被我碰动、那一块是不是断成了两块
-      World_Cam : constant Integer := (if Cam < Natural (F.Cams.Length) and then Cam_Arm (C, Cam) < 0 then Integer (Cam) else -1);
+      --  🔴 判"到底夹住没有"要的是【一台不跟着这只手动的相机】—— 以前只在【当前这只眼睛】里找,
+      --  而当前这只正好长在手上 ⇒ 找不到 ⇒ "我不确定" ⇒ 把到手的东西又松开(GI 实测:
+      --  笼住三项全过、合到底了,就因为没人核实而松手)。外面那台一直在那儿,去用它。
+      World_Cam : constant Integer :=
+        (if Cam < Natural (F.Cams.Length) and then Cam_Arm (C, Cam) < 0 then Integer (Cam)
+         else Still_Cam (C, F, Arm));
       Before_Regs : Picture.Regions;
       Moved_Others : Natural := 0;
       Pieces_Now : Natural := 0;
    begin
+      --  它原来在【那台相机】里的哪儿:用那台相机自己记着的影子,不能拿当前这只眼睛里的位置去比
+      if World_Cam >= 0 and then Slot >= 0
+        and then Natural (World_Cam) /= Cam
+        and then Natural (Slot) < World.Count (C.Wld, Natural (World_Cam))
+      then
+         Home := World.Get (C.Wld, Natural (World_Cam), Natural (Slot)).Shadow;
+      end if;
       if World_Cam >= 0 then
          Before_Regs := Cut_Things (C, F, Natural (World_Cam));
       end if;
@@ -2268,15 +2298,15 @@ package body Act is
                      end if;
                   end loop;
                   --  不是我夹的那件,却挪过了噪声地板 ⇒ 我碰动了它
-                  if Found and then Best > Tol * 4.0 and then Origin.Count > 0
-                    and then Sqrt ((Q.Cu - Origin.Cu) ** 2 + (Q.Cv - Origin.Cv) ** 2) > Long_Float'Max (Origin.Sig_U, Origin.Sig_V) * 2.0
+                  if Found and then Best > Tol * 4.0 and then Home.Count > 0
+                    and then Sqrt ((Q.Cu - Home.Cu) ** 2 + (Q.Cv - Home.Cv) ** 2) > Long_Float'Max (Home.Sig_U, Home.Sig_V) * 2.0
                   then
                      Moved_Others := Moved_Others + 1;
                   end if;
                end;
             end loop;
             for R of After loop
-               if Origin.Count > 0 and then Sqrt ((R.Cu - Origin.Cu) ** 2 + (R.Cv - Origin.Cv) ** 2) <= Long_Float'Max (Origin.Sig_U, Origin.Sig_V) * 3.0 then
+               if Home.Count > 0 and then Sqrt ((R.Cu - Home.Cu) ** 2 + (R.Cv - Home.Cv) ** 2) <= Long_Float'Max (Home.Sig_U, Home.Sig_V) * 3.0 then
                   Pieces_Now := Pieces_Now + 1;
                end if;
             end loop;
@@ -3295,7 +3325,10 @@ package body Act is
                            Origin := World.Get (C.Wld, Cam, Natural (C.Items (Say.Grip_On - 1).Slot)).Shadow;
                            Obj_Count := C.Items (Say.Grip_On - 1).Count;
                         end if;
-                        Held_Test (L, C, F, A, Cam, Origin, Obj_Count, By_Reading, Sure_Held, Note);
+                        Held_Test (L, C, F, A, Cam, Origin,
+                                   (if Say.Grip_On >= 1 and then Say.Grip_On <= Natural (C.Items.Length)
+                                    then C.Items (Say.Grip_On - 1).Slot else -1),
+                                   Obj_Count, By_Reading, Sure_Held, Note);
                         if not Sure_Held then
                            By_Reading := False;   --  说不准 ⇒ 不许记成"手里有东西"(记错了下一步它就去"搬"而不是重抓)
                         end if;
