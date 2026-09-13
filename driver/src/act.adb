@@ -203,6 +203,10 @@ package body Act is
          end loop;
       end;
       end if;
+      declare
+         Mine_N : Natural := 0;
+         Big_W : Natural := 0;
+      begin
       for R of Raw loop
          declare
             Mine : Boolean := False;
@@ -214,9 +218,20 @@ package body Act is
             end loop;
             if not Mine then
                Kept.Append (R);
+               Big_W := Natural'Max (Big_W, R.X1 - R.X0 + 1);
+            else
+               Mine_N := Mine_N + 1;
             end if;
          end;
       end loop;
+      --  GM 里手一凑近,球(3027 px)和乐高人(5098 px)双双从清单里消失,只剩 2 米外 10 px 的墙斑。
+      --  两个可疑处各印一个数,别再靠猜:闭运算窗口(比它窄的凸起会被当背景填平)· 被判成"我自己"而丢掉的块数。
+      if Codec.Env ("BL_CUTLOG") /= "" then
+         Put_Line ("[身]     切块(相机" & Natural'Image (Cam) & "):窗口 " & Codec.Fmt (Cut_Window (C, Cam, F), 3) & " 画幅 = "
+                   & Codec.Img (Natural (Long_Float (Cw) * Cut_Window (C, Cam, F))) & " px · 切出 " & Codec.Img (Natural (Raw.Length))
+                   & " 块,其中 " & Codec.Img (Mine_N) & " 块判成我自己丢掉 · 留下最宽的一块 " & Codec.Img (Big_W) & " px");
+      end if;
+      end;
       return Kept;
    end Cut_Things_Raw;
 
@@ -387,7 +402,8 @@ package body Act is
                It.X0 := Sl.Shadow.X0; It.Y0 := Sl.Shadow.Y0; It.X1 := Sl.Shadow.X1; It.Y1 := Sl.Shadow.Y1;
                It.Au := Sl.Shadow.Au; It.Av := Sl.Shadow.Av; It.Elong := Sl.Shadow.Elong;
                Push (It, "a thing you saw before, remembered where it was last seen, cell " & Codec.Img (Cell_Of (C, It.Cu, It.Cv)) &
-                     " (not visible right now - probably under my hand; " & Codec.Img (It.Count) & " px)", Draw.Dim_Green, 1);
+                     " (I cannot find it in this picture right now - I do not know why; when I last saw it, it was "
+                     & Codec.Img (It.Count) & " px)", Draw.Dim_Green, 1);
             else
                It.Kind := Thing_Remembered;
                Push (It, "(a slot with nothing in it right now)", Draw.Dim_Green, 0);
