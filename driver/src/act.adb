@@ -2383,6 +2383,15 @@ package body Act is
          Look;
          Learn;
          Judge;
+         --  🔴 没有距离这一路的时候要说出来。GV 实测:这一点的深度读成 -0.526(负数,物理上不可能),
+         --  远近那一行的权重于是是 0 ⇒ 身体只在【画面上】对齐,完全没有距离信息 ——
+         --  于是它停在"图上重合"的地方,报"差 0.005 m、还差 7.3 步",而画面里爪子离球还有 0.08 画幅。
+         --  单目对齐的经典歧义:图上重合,实际可能差得远。身体知道自己没距离,必须说,别让脑以为到了。
+         if Natural (Pts.Length) > 0 and then Pts (0).Wz <= 0.0 then
+            C.Blind_Say := S ("I have no distance to this thing right now - my depth reading for it is not usable - "
+                              & "so I am only lining it up in the picture. Lining up in the picture does not mean "
+                              & "I am next to it: I could be well short of it or past it.");
+         end if;
          if Note.Say_Stop /= "" then
             Event := Note.Say_Stop;
             Beats := Since (L, Beats0);
