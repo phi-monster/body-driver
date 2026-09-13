@@ -1270,11 +1270,22 @@ package body Act is
                      end loop;
                      if Per_Step > 0.0 then
                         T.Err (R) := T.Err (R) / Per_Step;
+                        --  🔴 "还差几步"不许超过"我这一节总共有几步"。
+                        --  一行几乎推不动时,它的每步效果≈0,误差除下来是个天文数字(GL 实测:
+                        --  "看着多大"这一行推每根通道都一动不动,却算出 12.9 步,把整个解算劫持了)。
+                        --  超过这一节的步数预算,就说明这一行在这一节里【本来就修不完】,
+                        --  不许它压过那些修得完的行。上限用的是【脑自己给的步数】,不是我拍的数。
+                        declare
+                           Budget : constant Long_Float :=
+                             Long_Float (Natural'Max (1, (if Step_Limit > 0 then Step_Limit else Step_Cap)));
+                        begin
+                           T.Err (R) := Long_Float'Max (-Budget, Long_Float'Min (Budget, T.Err (R)));
+                        end;
                         for K in 0 .. Chan.Per_Arm - 1 loop
                            T.E.B (K, R) := T.E.B (K, R) / Per_Step;
                         end loop;
                      else
-                        T.W (R) := 0.0;   --  这一行一个通道都改不动 ⇒ 这一步不管它
+                        T.W (R) := 0.0;   --  这一行一个通道都改不动 ⇒ 这一步没法管它(不是拦,是算不出)
                      end if;
                   end;
                end loop;
