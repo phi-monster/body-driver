@@ -143,9 +143,12 @@ package body Plan is
                when Lang.V_Done =>
                   C.Done := True;
                when Lang.V_Look =>
-                  if S.Eye >= Natural (R.Eyes.Length) then
+                  --  🔴 眼睛在这门语言里【从 1 编号】(提示词里就是 1 = 这一张、2、3…),
+                  --  以前这里按 0 起算 ⇒ 最后一只眼睛永远被判成"不存在"(GC 实测:look 3 被退回)。
+                  if S.Eye < 1 or else S.Eye > Natural (R.Eyes.Length) then
                      Reject (S.Line, "我没有第" & Codec.Img (S.Eye) & " 只眼睛",
-                             "我一共有 " & Codec.Img (Natural (R.Eyes.Length)) & " 只,编号从 0 起");
+                             "我一共有 " & Codec.Img (Natural (R.Eyes.Length)) & " 只,编号 1 到 "
+                             & Codec.Img (Natural (R.Eyes.Length)));
                   else
                      C.Look := Integer (S.Eye);
                   end if;

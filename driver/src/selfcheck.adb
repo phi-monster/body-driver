@@ -453,6 +453,11 @@ begin
          T.Rows (Row).Why := To_Unbounded_String ("这一行一次都没动过");
       end loop;
       R.Things.Append (T);
+      declare
+         E1 : Exam.Eye_Check;
+      begin
+         R.Eyes.Append (E1);      --  这具想象的身体只有一只眼睛
+      end;
       Ft.Exists := True; Ft.Mine := True; Ft.Grip := True; Ft.Thing_Idx := 0;
       Facts.Append (Ft);                                   --  0 号 = 我的手
       Ft := (Exists => True, Mine => False, Grip => False, Arm => 0, Thing_Idx => -1, Stands => False, Jaw_K => 0, Label => <>);
@@ -490,6 +495,10 @@ begin
       Check (Comp ("hold 0 above 1" & ASCII.LF & "reach 0 at 1 small until touch").Ok,
              "编译:一条 hold 一条 reach 不冲突 ⇒ 收");
       Check (not Comp ("reach 0 at baseball small").Ok, "编译:名字认不出 ⇒ 退回(不是语法错,是身体认不出)");
+      --  眼睛从 1 编号(提示词里就是这么给的);以前按 0 起算 ⇒ 最后一只眼睛永远"不存在"
+      Check (Comp ("look 1").Ok, "编译:第 1 只眼睛认");
+      Check (not Comp ("look 0").Ok, "编译:没有第 0 只眼睛");
+      Check (not Comp ("look 2").Ok, "编译:这具身体只有 1 只眼睛,说 2 就退回");
       Check (not Comp ("reach 0 at 9 small").Ok, "编译:点名一个看不到的东西 ⇒ 退回");
       declare
          C : constant Plan.Compiled := Comp ("say hi" & ASCII.LF & "reach 0 at 1 large until resist" & ASCII.LF & "done");
