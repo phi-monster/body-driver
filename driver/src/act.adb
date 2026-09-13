@@ -2523,9 +2523,29 @@ package body Act is
             Schema.Add (C.Sch, X, C.Map.EE_Noise, C.Map.Rot_Noise);
          end if;
       end;
-      Put_Line ("[身]     生地/大步之后看一眼自己(手指抖一下 / 零件推一下):" &
-                (if Pts (0).Lost then "没认到,按图猜" else "认到了 (" & Codec.Fmt (Pts (0).Cu, 3) & "," & Codec.Fmt (Pts (0).Cv, 3) & ") 深 " & Codec.Fmt (Pts (0).Z, 3)) &
-                " · 这台相机里这只手的身体图 " & Codec.Img (Schema.Count (C.Sch, Arm, Cam)) & " 个样本");
+      --  🔴 认不出自己的时候,光说"按图猜"不够 —— 要说清【猜到哪儿了】。
+      --  GP 实测:猜到 (1.000,0.475),那是画面最右边一列;从画面外的位置算出来的误差全是垃圾,
+      --  于是 60 步一个像素没动,而日志一路"绿"。猜到画面边上 = 这台相机判不了这一段,
+      --  必须让脑知道,好换一只眼睛(和"看不见目标的眼睛干不了这一段"是同一条规矩,只是换到我自己这一半)。
+      declare
+         U : constant Long_Float := Pts (0).Cu;
+         V : constant Long_Float := Pts (0).Cv;
+         --  边不是人拍的:一个跟踪窗那么宽 —— 眼睛跟得住的最小尺度,比它还靠边就没法量位移了
+         Edge : constant Long_Float := Track_Win;
+         Off : constant Boolean := U <= Edge or else U >= 1.0 - Edge or else V <= Edge or else V >= 1.0 - Edge;
+      begin
+         Put_Line ("[身]     生地/大步之后看一眼自己(手指抖一下 / 零件推一下):" &
+                   (if Pts (0).Lost then "没认到,按图猜" else "认到了") &
+                   " (" & Codec.Fmt (U, 3) & "," & Codec.Fmt (V, 3) & ") 深 " & Codec.Fmt (Pts (0).Z, 3) &
+                   (if Off then " 🔴 这个位置贴在画面边上(边宽 " & Codec.Fmt (Edge, 3)
+                      & " 画幅)—— 从画面外算出来的误差是垃圾,这台相机判不了这一段" else "") &
+                   " · 这台相机里这只手的身体图 " & Codec.Img (Schema.Count (C.Sch, Arm, Cam)) & " 个样本");
+         if Off then
+            C.Blind_Say := S ("I could not find my own part in this eye and the place my body map guesses for it "
+                              & "is right at the edge of the picture, so anything I measure from it is rubbish - "
+                              & "name what you want in one of my other eyes and I will work there");
+         end if;
+      end;
    end Refind_Pieces;
 
    --  握住了没:抬一小截,看东西跟不跟我走。手上相机里 = 它的块还在握区框里;世界相机里 = 它原来那块地方空了。读数不算数(回声)。
