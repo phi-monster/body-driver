@@ -490,6 +490,25 @@ package body Act is
          begin
             Finger (Z.A, 0);
             Finger (Z.B, 1);
+            --  🔴🔴 同一个爪的两瓣,在画面里应该只隔【量到的钳口张幅】那么远。
+            --  差得离谱 = 我按关节推出来的位置在这台相机里根本不对,而这条我自己量得出来。
+            --  GW 实测:arm 2(右臂)的两根手指被放到画面【左】边的第 2 格和第 19 格,相隔四分之三个画面,
+            --  而它自己标着"我还没在这儿看过我的手"。位置错 ⇒ 误差错 ⇒ 往错的方向推 ⇒
+            --  十炮里七炮"靠近→停在错的稳定点→退开"。必须说出来,别让脑拿它当真。
+            if Z.Valid and then Z.A.Valid and then Z.B.Valid and then Z.Span > 0.0 then
+               declare
+                  Sep : constant Long_Float :=
+                    Sqrt ((Z.A.Cu - Z.B.Cu) ** 2 + (Z.A.Cv - Z.B.Cv) ** 2);
+               begin
+                  --  比的是两个量出来的量,没有人拍的系数:隔得比张幅还远 ⇒ 对不上
+                  if Sep > Z.Span + Z.Span then
+                     Append (T, "  (careful: I placed the two jaws of arm " & Codec.Img (A + 1)
+                             & " " & Codec.Fmt (Sep, 3) & " of the picture apart, but the jaw span I measured on myself is only "
+                             & Codec.Fmt (Z.Span, 3) & " - they cannot both be right, so where I think my hand is in this"
+                             & " picture is not to be trusted)" & ASCII.LF);
+                  end if;
+               end;
+            end if;
             G.Kind := Grip; G.Arm := A; G.Jaw_K := Jk;
             if Z.Valid and then Tr.Valid then
                G.Located := True;
