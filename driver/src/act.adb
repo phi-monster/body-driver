@@ -3948,9 +3948,26 @@ package body Act is
                   if P.Kind = Piece_Pt and then Cam_Arm (C, Cam) /= Integer (P.Arm) and then not P.Known then
                      Need_Look := True;
                   end if;
+                  --  🔴🔴 还有一种"生地":位置【看着像知道】,但它自相矛盾。
+                  --  同一个爪的两瓣在画面里应该只隔【量到的钳口张幅】那么远;
+                  --  GW 实测 arm 2(右臂)的两瓣被放到画面左边、相隔四分之三个画面 —— 不可能都对。
+                  --  这时候位置是错的而 Known 却是真的 ⇒ 不会触发"先看一眼" ⇒ 拿错位置算误差 ⇒
+                  --  往错的方向推 ⇒ 十炮里七炮"靠近→停在错的稳定点→退开"。
+                  --  这不是给身体加闸(它照样动),是让它动之前先看清自己 —— 那条路本来就有。
+                  if P.Kind = Piece_Pt and then Cam_Arm (C, Cam) /= Integer (P.Arm) then
+                     declare
+                        Z : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, Cam, Jaw_K_Of (P.Chan_K));
+                     begin
+                        if Z.Valid and then Z.A.Valid and then Z.B.Valid and then Z.Span > 0.0
+                          and then Sqrt ((Z.A.Cu - Z.B.Cu) ** 2 + (Z.A.Cv - Z.B.Cv) ** 2) > Z.Span + Z.Span
+                        then
+                           Need_Look := True;
+                        end if;
+                     end;
+                  end if;
                end loop;
                if Need_Look then
-                  Put_Line ("[身] 生地:我的手/零件在这台相机里的位置只是按关节推的 ⇒ 先动一下认清自己再走");
+                  Put_Line ("[身] 生地:我在这台相机里对自己位置没把握(按关节推的,或者两瓣间距和量到的钳口张幅对不上)⇒ 先动一下认清自己再走");
                   Refind_Pieces (L, C, F, Cam, Pts);
                   Feel (C, F);
                   declare
