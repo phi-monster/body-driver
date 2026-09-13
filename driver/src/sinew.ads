@@ -30,7 +30,7 @@ package Sinew is
 
    --  ── 结局:控制流唯一能读的东西 ──
    type Outcome is (Oc_None, Oc_Arrived, Oc_Touched, Oc_Stuck, Oc_Slipped,
-                    Oc_Lost, Oc_Free, Oc_Timeout, Oc_Refused);
+                    Oc_Lost, Oc_Free, Oc_Settled, Oc_Timeout, Oc_Refused);
 
    type Constraint is record
       Subj, Obj : Noun;

@@ -15,7 +15,6 @@ with Zone;
 with Schema;
 with Plug;
 with Chan;
-with Lang;
 with Sinew;
 with Runtime;
 with Plan;
@@ -385,71 +384,25 @@ begin
    begin
       Check (Natural (B.Length) = 54 + 8 and then B (0) = 66 and then B (54) = 99, "BMP24 头与 BGR 顺序");
    end;
-   --  ── 身体语言:解析 ──
+   --  ── 编译:体检的否决权(对着 Sinew) ──
    declare
-      use Lang;
-      use type Exam.Row_Id;
-      function P1 (Src : String) return Program is (Lang.Parse (Src));
-      G : constant Program := P1 ("hold 6 facing 7" & ASCII.LF &
-                                  "reach 6 at 7 medium until touch" & ASCII.LF &
-                                  "close 6 on 7 until resist" & ASCII.LF &
-                                  "never 6 nearer 9" & ASCII.LF &
-                                  "# 这一行是注释" & ASCII.LF &
-                                  "say I can see it" & ASCII.LF &
-                                  "onfail retry" & ASCII.LF &
-                                  "done");
-   begin
-      Check (G.Ok, "语言:一段完整程序解析得通" & (if G.Ok then "" else " —— " & To_String (G.Err)));
-      Check (Natural (G.Stmts.Length) = 7, "语言:注释不算一句,共 7 句(实" & Natural'Image (Natural (G.Stmts.Length)) & ")");
-      Check (G.Stmts (0).V = V_Hold and then G.Stmts (0).R = R_Facing and then G.Stmts (0).Object.Number = 7,
-             "语言:hold 6 facing 7");
-      Check (G.Stmts (1).V = V_Reach and then G.Stmts (1).R = R_At and then G.Stmts (1).Amt = A_Medium
-               and then G.Stmts (1).Ev = E_Touch, "语言:reach 带步子带停机事件");
-      Check (G.Stmts (2).V = V_Close and then G.Stmts (2).R = R_At and then G.Stmts (2).Ev = E_Resist,
-             "语言:close X on Y 的 on 等于 at");
-      Check (G.Stmts (3).V = V_Never and then G.Stmts (3).R = R_Nearer, "语言:never = 不等式");
-      Check (G.On_Fail = F_Retry, "语言:onfail retry 记在程序上");
-      Check (G.Stmts (6).V = V_Done, "语言:done");
-   end;
-   declare
-      use Lang;
-      use type Exam.Row_Id;
-      A : constant Program := Lang.Parse ("wiggle 6 at 7");
-      B : constant Program := Lang.Parse ("reach 6 at");
-      C : constant Program := Lang.Parse ("reach 6 medium until touch");
-      D : constant Program := Lang.Parse ("reach 6 at 7 until steps");
-      E : constant Program := Lang.Parse ("move_joint 3 0.1");
-      F : constant Program := Lang.Parse ("reach hand at baseball small until touch");
-   begin
-      Check (not A.Ok and then A.Err_Line = 1, "语言:不是动词的第一个词 ⇒ 编译错,而且指出第几行");
-      Check (not B.Ok, "语言:关系后面不跟东西 ⇒ 编译错");
-      Check (not C.Ok, "语言:reach 不说关系 ⇒ 编译错");
-      Check (not D.Ok, "语言:until steps 不给步数 ⇒ 编译错");
-      Check (not E.Ok, "语言:关节号这种话【语法上就不存在】⇒ 说不出口");
-      Check (F.Ok and then not F.Stmts (0).Subject.By_Number
-               and then To_String (F.Stmts (0).Object.Word) = "baseball",
-             "语言:名词可以是名字(能不能认出来是身体的事,不是语法的事)");
-      Check (Lang.Unparse (F.Stmts (0)) = "reach hand at baseball small until touch",
-             "语言:解析回写一模一样(" & Lang.Unparse (F.Stmts (0)) & ")");
-   end;
-   --  ── 编译:体检的否决权 ──
-   declare
-      use Lang;
+      use Sinew;
       use type Exam.Row_Id;
       R : Exam.Report;
       Facts : Plan.Facts_Vectors.Vector;
+      Binds : Plan.Bind_Vectors.Vector;
       T : Exam.Thing_Check;
       Ft : Plan.Item_Facts;
-      function Comp (Src : String) return Plan.Compiled is
-        (Plan.Compile (Lang.Parse (Src), R, Facts));
+      function Comp (Src : String) return Plan.Verdict is
+        (Plan.Check (Sinew.Parse (Src), R, Facts, Binds));
       procedure Set_Stands (On : Boolean) is
-         Ft : Plan.Item_Facts := Facts (1);
+         X : Plan.Item_Facts := Facts (2);
       begin
-         Ft.Stands := On;
-         Facts.Replace_Element (1, Ft);
+         X.Stands := On;
+         Facts.Replace_Element (2, X);
       end Set_Stands;
    begin
-      --  一具想象的身体:左右/上下/远近证过了能用,朝哪是死的
+      --  一具想象的身体:左右/上下/远近证过了能用,朝哪和看着多大是死的
       for Row in Exam.Row_Id loop
          T.Rows (Row).V := (if Row = Exam.Facing or else Row = Exam.Bigness then Exam.Dead else Exam.Usable);
          T.Rows (Row).Why := To_Unbounded_String ("这一行一次都没动过");
@@ -458,55 +411,64 @@ begin
       declare
          E1 : Exam.Eye_Check;
       begin
-         R.Eyes.Append (E1);      --  这具想象的身体只有一只眼睛
+         R.Eyes.Append (E1);
       end;
-      Ft.Exists := True; Ft.Mine := True; Ft.Grip := True; Ft.Thing_Idx := 0;
-      Facts.Append (Ft);                                   --  0 号 = 我的手
-      Ft := (Exists => True, Mine => False, Grip => False, Arm => 0, Thing_Idx => -1, Stands => False, Jaw_K => 0, Label => <>);
-      Facts.Append (Ft);                                   --  1 号 = 外面的东西
-      Check (Comp ("reach 0 at 1 small until touch").Ok, "编译:能用的行 ⇒ 收");
+      Facts.Append (Plan.Item_Facts'(others => <>));                        --  0 号空着
+      Ft := (Exists => True, Mine => True, Grasp => True, Arm => 0, Jaw_K => 0,
+             Thing_Idx => 0, Stands => False, Label => To_Unbounded_String ("grasper"));
+      Facts.Append (Ft);                                                    --  1 = 我的 grasper
+      Ft := (Exists => True, Mine => False, Grasp => False, Arm => 0, Jaw_K => 0,
+             Thing_Idx => -1, Stands => False, Label => To_Unbounded_String ("外面的东西"));
+      Facts.Append (Ft);                                                    --  2 = 外面那个东西
+      Binds.Append (Plan.Bind_Entry'(Key => To_Unbounded_String ("grasper"), Item => 1, Tried => <>));
+      Binds.Append (Plan.Bind_Entry'(Key => To_Unbounded_String ("pusher"), Item => 1, Tried => <>));
+      Binds.Append (Plan.Bind_Entry'(Key => To_Unbounded_String ("me"), Item => -1, Tried => <>));
+      Binds.Append (Plan.Bind_Entry'(Key => To_Unbounded_String ("the ball"), Item => 2, Tried => <>));
+      Binds.Append (Plan.Bind_Entry'(Key => To_Unbounded_String ("the moon"), Item => -1,
+                                     Tried => To_Unbounded_String ("我把看得见的每一块都过了一遍,没有一块是它")));
+
+      Check (Comp ("do grasper touching the ball small until touched").Ok, "编译:能用的行 ⇒ 收");
       declare
-         C : constant Plan.Compiled := Comp ("hold 0 facing 1");
+         V : constant Plan.Verdict := Comp ("do grasper facing the ball must until arrived");
       begin
-         Check (not C.Ok and then C.Err_Line = 1, "编译:朝哪是死的 ⇒ 退回,并指出第几行");
-         Check (Length (C.Instead) > 0, "编译:退回必须附一个能照抄的替代(" & To_String (C.Instead) & ")");
+         Check (not V.Ok, "编译:朝哪是死的 ⇒ 退回");
+         Check (Length (V.Instead) > 0, "编译:退回必须附能照抄的替代(" & To_String (V.Instead) & ")");
       end;
-      Check (not Comp ("reach 1 at 0 small").Ok, "编译:命令别人动 ⇒ 退回(我只推得动我自己)");
-      Check (not Comp ("close 1 on 0").Ok, "编译:对着不是手的东西说合手 ⇒ 退回");
-      Check (not Comp ("reach 0 onto 1 small until touch").Ok, "编译:量不出它鼓出多少时 onto 说不出口");
-      Check (not Comp ("reach 0 at 1 small until free").Ok, "编译:量不出它鼓出多少时 until free 说不出口");
-      Check (not Comp ("press 0 1 hard").Ok, "编译:量不出它鼓出多少时 press 说不出口(不知道哪个方向算压向它)");
+      Check (not Comp ("do the ball touching grasper small until touched").Ok,
+             "编译:命令外面的东西动 ⇒ 退回(我只推得动我自己)");
+      Check (not Comp ("do me touching the ball small until touched").Ok,
+             "编译:这具身体没有 me 这个角色 ⇒ 退回");
+      Check (not Comp ("do grasper touching the moon small until touched").Ok,
+             "编译:名字认不出 ⇒ 退回(不是语法错,是身体认不出)");
+      Check (not Comp ("do grasper onto the ball small until touched").Ok,
+             "编译:量不出它鼓出多少 ⇒ onto 说不出口");
+      Check (not Comp ("do grasper press the ball firm until stuck").Ok,
+             "编译:量不出它鼓出多少 ⇒ press 说不出口(不知道哪个方向算朝它压)");
+      Check (not Comp ("do grasper touching the ball small until free").Ok,
+             "编译:量不出它鼓出多少 ⇒ until free 说不出口");
       Set_Stands (True);
-      Check (Comp ("reach 0 onto 1 small until touch").Ok, "编译:量得出它鼓出多少 ⇒ onto 就能说了");
-      Check (Comp ("press 0 1 hard").Ok, "编译:量得出 ⇒ press 能说了");
-      Check (not Comp ("press 0 1 hard small").Ok, "编译:press 说了劲就不许再说步子(一根轴上二选一)");
-      Check (not Comp ("press 0 1").Ok, "编译:press 不说劲 ⇒ 退回");
-      declare
-         C6 : constant Plan.Compiled := Comp ("hold 0 above 1" & ASCII.LF & "reach 0 at 1 small until touch"
-              & ASCII.LF & "while reach 0 left 1 small" & ASCII.LF & "press 0 1 firm"
-              & ASCII.LF & "close 0 on 1 until resist" & ASCII.LF & "open 0" & ASCII.LF & "never 0 nearer 1");
-      begin
-         Check (C6.Ok and then Natural (C6.Goals.Length) = 7,
-                "编译:一段程序里 7 条约束照收,没有"
-                & "「一次最多四条」这种上限了(实" & Natural'Image (Natural (C6.Goals.Length)) & ")");
-         Check (C6.Ok and then C6.Goals (2).Together, "编译:while 那一条标成【和上一条同一节里一起解】");
-      end;
+      Check (Comp ("do grasper onto the ball small until touched").Ok, "编译:量得出 ⇒ onto 能说了");
+      Check (Comp ("do grasper press the ball firm until stuck").Ok, "编译:量得出 ⇒ press 能说了");
       Set_Stands (False);
-      Check (not Comp ("hold 0 at 1" & ASCII.LF & "hold 0 above 1").Ok,
-             "编译:两条 hold 抢同一行 ⇒ 退回(一定得牺牲一条,不许跑)");
-      Check (Comp ("hold 0 above 1" & ASCII.LF & "reach 0 at 1 small until touch").Ok,
-             "编译:一条 hold 一条 reach 不冲突 ⇒ 收");
-      Check (not Comp ("reach 0 at baseball small").Ok, "编译:名字认不出 ⇒ 退回(不是语法错,是身体认不出)");
-      --  眼睛从 1 编号(提示词里就是这么给的);以前按 0 起算 ⇒ 最后一只眼睛永远"不存在"
-      Check (Comp ("look 1").Ok, "编译:第 1 只眼睛认");
-      Check (not Comp ("look 0").Ok, "编译:没有第 0 只眼睛");
-      Check (not Comp ("look 2").Ok, "编译:这具身体只有 1 只眼睛,说 2 就退回");
-      Check (not Comp ("reach 0 at 9 small").Ok, "编译:点名一个看不到的东西 ⇒ 退回");
       declare
-         C : constant Plan.Compiled := Comp ("say hi" & ASCII.LF & "reach 0 at 1 large until resist" & ASCII.LF & "done");
+         V : constant Plan.Verdict := Comp
+           ("repeat 2 times:" & ASCII.LF
+            & "  do grasper above the ball small and grasper touching the ball must until touched" & ASCII.LF
+            & "  do grasper close on the ball until stuck" & ASCII.LF
+            & "end");
       begin
-         Check (C.Ok and then Natural (C.Goals.Length) = 1 and then C.Done
-                  and then To_String (C.Says) = "hi", "编译:say/done 不产生动作,reach 产生一条约束");
+         Check (V.Ok, "编译:循环里的每一条约束都过一遍,一段程序整体收"
+                & (if V.Ok then "" else " —— " & To_String (V.Err)));
+      end;
+      declare
+         X : Plan.Item_Facts := Facts (1);
+      begin
+         X.Grasp := False;
+         Facts.Replace_Element (1, X);
+         Check (not Comp ("do grasper close on the ball until stuck").Ok,
+                "编译:没量到它能相向靠拢 ⇒ 说不出「合拢」");
+         X.Grasp := True;
+         Facts.Replace_Element (1, X);
       end;
    end;
    --  ── 优先级:hold 那一条不许被牺牲 ──

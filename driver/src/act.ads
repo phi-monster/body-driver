@@ -16,6 +16,8 @@ with Schema;
 with Chan;
 with Learned;
 with Plan;
+with Sinew;
+with Runtime;
 package Act is
    type Item_Kind is (Finger, Grip, Piece, Thing, Thing_Remembered, Thing_Held);   --  Piece = 我身上某个通道带的一块(Which = 通道号)
    type Item is record
@@ -80,10 +82,13 @@ package Act is
       Cut_Regs : Picture.Regions;
       --  🔴 脑不再一轮填一张表,而是交【一段程序】。程序编译过了就存在这里,一轮跑一小节,
       --  跑完才回去问下一段 —— 这才是"少问几百次"的来源。
-      Prog : Plan.Compiled;
-      Prog_At : Natural := 0;          --  下一条要跑的动作是第几条
+      Prog : Sinew.Program;            --  脑交的那一段程序(带循环/分支/定义)
+      M : Runtime.Machine;             --  跑到哪一条了
+      Binds : Plan.Bind_Vectors.Vector;--  每个名词落到了哪一块
       Have_Prog : Boolean := False;
       Refused : Unbounded_String;      --  上一段被退回的话:理由 + 能照抄的替代,随下一轮一起给脑
+      Last_Outcome : Sinew.Outcome := Sinew.Oc_None;   --  上一节的结局(八个词之一)
+      Reckless : Boolean := False;     --  这一节写了 anyway:身体的一切谨慎作废
       Prog_Log : Unbounded_String;     --  🔴 这一段程序里【每一节】的结果都攒在这儿。
                                        --  以前只留最后一节,而最后那一轮恰好是"程序跑完了"的空话,
                                        --  于是前几节说了什么全被冲掉,脑只能去翻日志 —— 等于身体不会说话。

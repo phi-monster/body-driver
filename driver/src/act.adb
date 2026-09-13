@@ -7,7 +7,12 @@ with Flow;
 with Monitor;
 with Backup;
 with Learned; use Learned;
-with Lang;
+with Sinew;
+use type Sinew.Noun_Kind;
+use type Sinew.Op;
+use type Sinew.Role;
+use type Sinew.Outcome;
+with Runtime;
 with Exam;
 package body Act is
    Sigma_Mult : constant Long_Float := 3.0;   --  鼓出来超过背景自己稳健 σ 的几倍才算一块(在真实深度图上验过:3 中,5 杀光);无量纲
@@ -1429,7 +1434,13 @@ package body Act is
                end if;
                exit when not Hit;
                if Round = 4 then
-                  Note.Say_Stop := S ("stopped: every step would push what I am tracking out of my sight, or put some part of me onto a thing I must not touch");
+                  --  🔴 这是"我怕"不是"我做不到"。脑写了 anyway 就照走,身体一个字都不许顶。
+                  if C.Reckless then
+                     exit;
+                  end if;
+                  Note.Say_Stop := S ("stopped: every step would push what I am tracking out of my sight, "
+                                      & "or put some part of me onto a thing I must not touch. "
+                                      & "Say anyway and I will do it regardless");
                   return;
                end if;
                Scale := Scale * 0.5;
@@ -1786,8 +1797,10 @@ package body Act is
          if Lost_Run = 1 then
             Dump_Picture ("lost");
          end if;
-         if Lost_Run >= 2 then
-            Note.Say_Stop := S ("lost sight: two steps in a row I could not find what I am tracking in this picture; I stopped rather than move blind");
+         if Lost_Run >= 2 and then not C.Reckless then
+            --  🔴 "我宁可停下也不瞎走"是意见,不是无能。写了 anyway 就瞎着走。
+            Note.Say_Stop := S ("lost sight: two steps in a row I could not find what I am tracking in this picture; "
+                                & "I stopped rather than move blind. Say anyway and I will move blind");
             return;
          end if;
          --  🔴 认东西是脑的活:两块一样像的时候身体不许自己挑
@@ -2279,12 +2292,18 @@ package body Act is
          begin
             Ft.Exists := It.Located or else It.Kind in Finger | Grip | Piece;
             Ft.Mine := It.Kind in Finger | Grip | Piece;
-            Ft.Grip := It.Kind = Grip;
+            Ft.Grasp := It.Kind = Grip;
             Ft.Arm := It.Arm;
             Ft.Thing_Idx := -1;
             --  量得出它鼓出它站的那个面多少 ⇒ 才有"那个面"可言。面不是全局开关,是每个东西自己的事。
             Ft.Stands := It.Height > 0.0;
             Ft.Jaw_K := It.Jaw_K;
+            Ft.Label := To_Unbounded_String
+              ((case It.Kind is
+                   when Grip => "grasper(第" & Codec.Img (It.Arm + 1) & " 只手第" & Codec.Img (It.Jaw_K) & " 组)",
+                   when Finger => "grasper 的一瓣",
+                   when Piece => "第" & Codec.Img (It.Arm + 1) & " 只手" & Codec.Img (It.Which) & " 轴带的那一块",
+                   when others => ""));
             if Ft.Mine then
                for T in 0 .. Natural (C.Tables.Length) - 1 loop
                   if C.Tables (T).Arm = It.Arm and then C.Tables (T).Cam = C.Cam
@@ -2301,94 +2320,105 @@ package body Act is
       return Fs;
    end Build_Facts;
 
-   --  把编译过的程序落成【这一小节】:所有 hold 一直带着(它们是背景约束),再取下一条动作。
-   --  程序跑完了才把 Have_Prog 放掉 —— 那时候才回去问脑。这就是"少问几百次"的全部机关。
-   procedure Fill_Say (C : in out Context; Answer : out Brain.Say) is
-      use Lang;
+   --  把 Sinew 的一段区间落成执行器内部那一小节。角色在这儿变成具体的那一块。
+   procedure Fill_Say (C : in out Context; I : Sinew.Instr; Answer : out Brain.Say) is
+      use Sinew;
       function Old_Rel (R : Rel) return String is
         (case R is
-            when R_Nearer => "front", when R_Farther => "back", when R_Facing => "face",
-            when others => Rel_Word (R));
-      function Old_Until (E : Event) return String is
-        (case E is
-            when E_Touch => "contact", when E_Free => "slip", when E_None => "steps",
-            when others => Event_Word (E));
-      Acted : Boolean := False;
+            when Re_Touching => "at", when Re_Above => "above", when Re_Below => "below",
+            when Re_Left => "left", when Re_Right => "right",
+            when Re_Nearer => "front", when Re_Farther => "back",
+            when Re_Onto => "onto", when Re_Off => "off", when Re_Facing => "face",
+            when Re_Press => "press", when Re_Still => "", when others => "?");
+      function Old_Until (O : Outcome) return String is
+        (case O is
+            when Oc_Touched => "contact", when Oc_Stuck => "resist",
+            when Oc_Slipped | Oc_Free => "slip", when Oc_Settled => "settle",
+            when others => "steps");
+      function Old_Step (Sp : Step) return String is
+        (case Sp is when Sp_Small => "small", when Sp_Medium => "medium",
+            when Sp_Large => "large", when Sp_None => "medium");
+      function Item_Of (N : Noun) return Natural is
+         A : constant Integer := Plan.Look_Up (C.Binds, N);
+      begin
+         return (if A > 0 then Natural (A) else 0);
+      end Item_Of;
    begin
       Answer := (others => <>);
       Answer.See := To_Unbounded_String ("target");
       Answer.Fast := True;
-      Answer.Until_Kind := To_Unbounded_String ("steps");
-      Answer.Steps := 1;
-      if C.Prog_At = 0 then
-         Answer.Text := C.Prog.Says;
-         if C.Prog.Look >= 1 then
-            Answer.Look := C.Prog.Look;
-         end if;
-      end if;
-      for I in 0 .. Natural (C.Prog.Goals.Length) - 1 loop
+      Answer.Until_Kind := To_Unbounded_String (Old_Until (I.Until_Oc));
+      Answer.Steps := (if I.Max_Steps > 0 then I.Max_Steps else 0);
+      for K in 0 .. Natural (I.Cons.Length) - 1 loop
          declare
-            G : constant Plan.Goal := C.Prog.Goals (I);
+            Cn : constant Constraint := I.Cons (K);
+            Sub : constant Natural := Item_Of (Cn.Subj);
+            Obj : constant Natural := Item_Of (Cn.Obj);
          begin
-            if G.Hard then
-               Answer.Moves.Append (Brain.Goal'(Item => G.Subject, Cell => 0, Rel => To_Unbounded_String (Old_Rel (G.R)),
-                                                Of_Item => G.Object, Amount => To_Unbounded_String (Amount_Word (G.Amt)),
-                                                Stay => False, Hard => True));
-            elsif G.Forbid then
-               Answer.Avoid.Append (Integer (G.Object));
-            end if;
+            case Cn.R is
+               when Re_Close =>
+                  Answer.Grip := To_Unbounded_String ("close");
+                  Answer.Grip_Arm := (if Sub >= 1 and then Sub <= Natural (C.Items.Length)
+                                      then C.Items (Sub - 1).Arm + 1 else 1);
+                  Answer.Grip_K := (if Sub >= 1 and then Sub <= Natural (C.Items.Length)
+                                    then C.Items (Sub - 1).Jaw_K else 0);
+                  Answer.Grip_On := Obj;
+               when Re_Open =>
+                  Answer.Grip := To_Unbounded_String ("open");
+                  Answer.Grip_Arm := (if Sub >= 1 and then Sub <= Natural (C.Items.Length)
+                                      then C.Items (Sub - 1).Arm + 1 else 1);
+                  Answer.Grip_K := (if Sub >= 1 and then Sub <= Natural (C.Items.Length)
+                                    then C.Items (Sub - 1).Jaw_K else 0);
+               when Re_Clear =>
+                  Answer.Avoid.Append (Integer (Obj));
+               when Re_Still =>
+                  Answer.Moves.Append (Brain.Goal'(Item => Sub, Cell => 0, Rel => Null_Unbounded_String,
+                                                   Of_Item => 0, Amount => Null_Unbounded_String,
+                                                   Stay => True, Hard => True));
+               when others =>
+                  Answer.Moves.Append
+                    (Brain.Goal'(Item => Sub, Cell => 0,
+                                 Rel => To_Unbounded_String (Old_Rel (Cn.R)),
+                                 Of_Item => Obj,
+                                 Amount => To_Unbounded_String
+                                   (if Cn.R = Re_Press
+                                    then (case Cn.Ef is
+                                             when Ef_Light => "small", when Ef_Firm => "medium",
+                                             when Ef_Hard => "large", when Ef_None => "small")
+                                    else Old_Step (Cn.Sp)),
+                                 Stay => False, Hard => Cn.Rk = Rk_Must));
+            end case;
          end;
       end loop;
-      while C.Prog_At < Natural (C.Prog.Goals.Length)
-        and then (not Acted or else C.Prog.Goals (C.Prog_At).Together)
-      loop
-         declare
-            G : constant Plan.Goal := C.Prog.Goals (C.Prog_At);
-         begin
-            C.Prog_At := C.Prog_At + 1;
-            if G.Hard or else G.Forbid then
-               null;   --  背景约束,上面已经带上了
-            else
-               case G.V is
-                  when V_Press =>
-                     Answer.Moves.Append (Brain.Goal'(Item => G.Subject, Cell => 0,
-                                                      Rel => To_Unbounded_String ("press"),
-                                                      Of_Item => G.Object,
-                                                      Amount => To_Unbounded_String
-                                                        (case G.Ef is
-                                                            when F_Light => "small", when F_Firm => "medium",
-                                                            when F_Hard => "large", when F_None => "small"),
-                                                      Stay => False, Hard => False));
-                  when V_Reach =>
-                     Answer.Moves.Append (Brain.Goal'(Item => G.Subject, Cell => 0, Rel => To_Unbounded_String (Old_Rel (G.R)),
-                                                      Of_Item => G.Object, Amount => To_Unbounded_String (Amount_Word (G.Amt)),
-                                                      Stay => False, Hard => False));
-                  when V_Close =>
-                     Answer.Grip := To_Unbounded_String ("close");
-                     Answer.Grip_Arm := G.Subject_Arm + 1;
-                     Answer.Grip_K := G.Subject_Jaw;
-                     Answer.Grip_On := G.Object;
-                  when V_Open =>
-                     Answer.Grip := To_Unbounded_String ("open");
-                     Answer.Grip_Arm := G.Subject_Arm + 1;
-                     Answer.Grip_K := G.Subject_Jaw;
-                  when others =>
-                     null;
-               end case;
-               Answer.Until_Kind := To_Unbounded_String (Old_Until (G.Ev));
-               Answer.Steps := (if G.Ev = E_Steps then Natural'Max (1, G.Steps) else 0);
-               Acted := True;
-            end if;
-         end;
-      end loop;
-      if not Acted then
-         --  这一段跑完了:回去问下一段。把整段里每一节的结果一起交给脑 —— 不许只留最后一句空话。
-         C.Have_Prog := False;
-         C.Prog_At := 0;
-         Answer.Done := C.Prog.Done;
-         Answer.Moves.Clear;
-      end if;
+      --  🔴 anyway:身体的一切认知性谨慎全部作废 —— 瞎着也走、离得远也合、顶着也推。
+      C.Reckless := I.Anyway;
    end Fill_Say;
+
+   --  身体报的那句事件,归到八个结局里的哪一个。控制流只认这八个。
+   function Classify (Event : String) return Sinew.Outcome is
+      use Sinew;
+      function Has (P : String) return Boolean is
+        (Event'Length >= P'Length and then Event (Event'First .. Event'First + P'Length - 1) = P);
+   begin
+      if Has ("amount: arrived") or else Has ("amount: already there") then
+         return Oc_Arrived;
+      elsif Has ("contact") then
+         return Oc_Touched;
+      elsif Has ("resist") or else Has ("amount: stopped getting closer") then
+         return Oc_Stuck;
+      elsif Has ("slip") then
+         return Oc_Slipped;
+      elsif Has ("settle") then
+         return Oc_Settled;
+      elsif Has ("lost") then
+         return Oc_Lost;
+      elsif Has ("free") then
+         return Oc_Free;
+      elsif Has ("steps") then
+         return Oc_Timeout;
+      end if;
+      return Oc_Refused;
+   end Classify;
 
    --  ── 一轮 ──
    procedure Round (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context) is
@@ -2468,12 +2498,14 @@ package body Act is
             end if;
          --  🔴 脑交上来的是【一段程序】,不是一张表。收到之后:解析 → 对着体检判决编译 → 过了才存起来跑。
          --  退回是免费的:一根手指都不动,理由和一个能照抄的替代随下一轮一起给它。
+         --  🔴 脑交上来的是【一段 Sinew 程序】。收到之后:解析 → 把名词落到具体的块上 →
+         --  对着体检判决整段检查 → 过了才存起来跑。退回是免费的:一根手指都不动。
          if not C.Have_Prog then
             declare
                Text : Unbounded_String;
             begin
                if not Brain.Ask (To_String (C.Eye_Host), C.Eye_Port, To_String (C.Task_Text), To_String (Listing), Recent,
-                                 Lang.Grammar, To_String (C.Refused),
+                                 Sinew.Grammar, To_String (C.Refused),
                                  C.Cols, C.Rows, Natural (C.Items.Length), C.Map.N_Cams, C.Map.Arms, Big, Cw, Bh, Text, Err)
                then
                   Put_Line ("[身] 🧠 问不通(" & To_String (Err) & ")⇒ 这一拍不动,下一拍重问");
@@ -2483,79 +2515,168 @@ package body Act is
                Put_Line (To_String (Text));
                declare
                   Rep : constant Exam.Report := Exam.Judge (C.Map, C.Tables);
-                  P : Lang.Program := Lang.Parse (To_String (Text));
-                  Tried : Unbounded_String;
-                  Words : Strs;
-                  Nums : Ints;
-                  --  🔴 认名字:画面已经被身体自己切成带编号的块,只让模型在这些块里【挑一个】。
-                  --  这是选择题,精度来自身体的切块;挑不出来就是挑不出来,身体如实说,绝不瞎猜。
-                  procedure Name_It (X : in out Lang.Name) is
-                     Which : Natural := 0;
-                     E2 : Unbounded_String;
-                     Hit : Integer := -1;
+                  P : constant Sinew.Program := Sinew.Parse (To_String (Text));
+                  Facts : constant Plan.Facts_Vectors.Vector := Build_Facts (C);
+                  Binds : Plan.Bind_Vectors.Vector;
+                  V : Plan.Verdict;
+
+                  --  角色靠【量出来的东西】绑定:grasper = 我量到能相向靠拢并夹住东西的那一组。
+                  --  好几组的时候(五指手),挑离脑点名那个东西最近的那一组 —— 这也是量出来的,不是设定的。
+                  function Bind_Role (R : Sinew.Role; Near_U, Near_V : Long_Float; Has_Near : Boolean) return Integer is
+                     Best : Integer := -1;
+                     Bd : Long_Float := 1.0e9;
                   begin
-                     if not X.Given or else X.By_Number then
-                        return;
-                     end if;
-                     for I in 0 .. Natural (Words.Length) - 1 loop
-                        if Words (I) = To_String (X.Word) then
-                           Hit := Integer (I);
-                        end if;
-                     end loop;
-                     if Hit >= 0 then
-                        Which := Natural (Integer'Max (0, Nums (Natural (Hit))));
-                     elsif Brain.Find (To_String (C.Eye_Host), C.Eye_Port, To_String (X.Word),
-                                       To_String (Listing), Natural (C.Items.Length), Big, Cw, Bh, Which, E2)
-                     then
-                        Words.Append (To_String (X.Word));
-                        Nums.Append (Integer (Which));
-                        Append (Tried, (if Length (Tried) > 0 then " · " else "") & To_String (X.Word) & " ⇒ "
-                                & (if Which = 0 then "认不出" else Codec.Img (Which) & " 号"));
-                     else
-                        Words.Append (To_String (X.Word));
-                        Nums.Append (0);
-                        Append (Tried, (if Length (Tried) > 0 then " · " else "") & To_String (X.Word) & " ⇒ 问不通("
-                                & To_String (E2) & ")");
-                     end if;
-                     if Which >= 1 and then Which <= Natural (C.Items.Length) then
-                        X.By_Number := True;
-                        X.Number := Which;
-                     end if;
-                  end Name_It;
-                  Cm : Plan.Compiled;
-               begin
-                  if P.Ok then
-                     for I in 0 .. Natural (P.Stmts.Length) - 1 loop
+                     for K in 0 .. Natural (C.Items.Length) - 1 loop
                         declare
-                           St : Lang.Stmt := P.Stmts (I);
+                           It : constant Item := C.Items (K);
+                           Want : constant Boolean :=
+                             (case R is
+                                 when Sinew.Rl_Grasper => It.Kind = Grip,
+                                 when Sinew.Rl_Pusher => It.Kind in Grip | Piece,
+                                 when others => False);
+                           D : constant Long_Float :=
+                             (if Has_Near and then It.Located
+                              then Sqrt ((It.Cu - Near_U) ** 2 + (It.Cv - Near_V) ** 2) else 0.0);
                         begin
-                           Name_It (St.Subject);
-                           Name_It (St.Object);
-                           P.Stmts.Replace_Element (I, St);
+                           if Want and then It.Located and then D < Bd then
+                              Bd := D; Best := Integer (K) + 1;
+                           end if;
                         end;
                      end loop;
-                     if Length (Tried) > 0 then
-                        Put_Line ("[身] 🔎 名字对号:" & To_String (Tried));
+                     return Best;
+                  end Bind_Role;
+
+                  --  名字靠身体自己去认:画面已经被切成带编号的块,只让模型在这些块里【挑一个】。
+                  --  编号从头到尾没进语言,它只活在这一问里。挑不出来 ⇒ 如实说,绝不瞎猜。
+                  function Bind_Name (W : String; Tried : out Unbounded_String) return Integer is
+                     Which : Natural := 0;
+                     E2 : Unbounded_String;
+                  begin
+                     Tried := Null_Unbounded_String;
+                     if Brain.Find (To_String (C.Eye_Host), C.Eye_Port, W, To_String (Listing),
+                                    Natural (C.Items.Length), Big, Cw, Bh, Which, E2)
+                     then
+                        if Which >= 1 and then Which <= Natural (C.Items.Length) then
+                           return Integer (Which);
+                        end if;
+                        Tried := To_Unbounded_String ("我把看得见的每一块都过了一遍,没有一块是它");
+                        return -1;
                      end if;
+                     Tried := To_Unbounded_String ("我问自己的眼睛时没问通(" & To_String (E2) & ")");
+                     return -1;
+                  end Bind_Name;
+
+                  --  先认外面的东西(名字),再绑角色 —— 角色要挑"离它最近的那一组",所以顺序不能反
+                  procedure Bind_All is
+                     Nu, Nv : Long_Float := 0.0;
+                     Has_Near : Boolean := False;
+                     procedure One (N : Sinew.Noun) is
+                        Key : constant String := Plan.Key_Of (N);
+                        E : Plan.Bind_Entry;
+                     begin
+                        if N.K /= Sinew.Nk_Thing or else Key = "" then
+                           return;
+                        end if;
+                        for I2 in 0 .. Natural (Binds.Length) - 1 loop
+                           if To_String (Binds (I2).Key) = Key then
+                              return;
+                           end if;
+                        end loop;
+                        E.Key := To_Unbounded_String (Key);
+                        E.Item := Bind_Name (Key, E.Tried);
+                        Binds.Append (E);
+                        if E.Item >= 1 and then E.Item <= Integer (C.Items.Length)
+                          and then C.Items (Natural (E.Item) - 1).Located and then not Has_Near
+                        then
+                           Nu := C.Items (Natural (E.Item) - 1).Cu;
+                           Nv := C.Items (Natural (E.Item) - 1).Cv;
+                           Has_Near := True;
+                        end if;
+                     end One;
+                  begin
+                     for Ix in 0 .. Natural (P.Code.Length) - 1 loop
+                        if P.Code (Ix).O = Sinew.Op_Interval then
+                           for Ci in 0 .. Natural (P.Code (Ix).Cons.Length) - 1 loop
+                              One (P.Code (Ix).Cons (Ci).Subj);
+                              One (P.Code (Ix).Cons (Ci).Obj);
+                           end loop;
+                        end if;
+                     end loop;
+                     for R in Sinew.Role loop
+                        if R /= Sinew.Rl_None then
+                           declare
+                              E : Plan.Bind_Entry;
+                           begin
+                              E.Key := To_Unbounded_String (Sinew.Role_Word (R));
+                              E.Item := Bind_Role (R, Nu, Nv, Has_Near);
+                              Binds.Append (E);
+                           end;
+                        end if;
+                     end loop;
+                  end Bind_All;
+               begin
+                  if P.Ok then
+                     Bind_All;
+                     for I2 in 0 .. Natural (Binds.Length) - 1 loop
+                        Put_Line ("[身] 🔎 " & To_String (Binds (I2).Key) & " ⇒ "
+                                  & (if Binds (I2).Item > 0 then "第" & Codec.Img (Natural (Binds (I2).Item)) & " 块"
+                                     else "认不出"));
+                     end loop;
                   end if;
-                  Cm := Plan.Compile (P, Rep, Build_Facts (C));
-                  Put_Line ("[身] ⚖ " & Plan.Report_Text (Cm));
-                  if not Cm.Ok then
-                     C.Refused := S ("line " & Codec.Img (Cm.Err_Line) & ": " & To_String (Cm.Err)
-                                     & (if Length (Cm.Instead) > 0 then "  -> " & To_String (Cm.Instead) else ""));
+                  V := Plan.Check (P, Rep, Facts, Binds);
+                  Put_Line ("[身] ⚖ " & Plan.Say (V));
+                  if not V.Ok then
+                     C.Refused := S ("line " & Codec.Img (V.Err_Line) & ": " & To_String (V.Err)
+                                     & (if Length (V.Instead) > 0 then "  -> " & To_String (V.Instead) else ""));
                      C.Recent := S ("I refused your program before anything moved. " & To_String (C.Refused)
                                     & " Nothing has moved. " & Mode_Line (C, "refused"));
                      return;
                   end if;
                   C.Refused := Null_Unbounded_String;
-                  C.Prog := Cm;
-                  C.Prog_At := 0;
+                  C.Prog := P;
+                  C.Binds := Binds;
+                  C.M := (others => <>);
                   C.Have_Prog := True;
                   C.Prog_Log := Null_Unbounded_String;
                end;
             end;
          end if;
-         Fill_Say (C, Say);
+         --  往前走到下一条要真动身体的指令。说人话、记地方这些在这儿就地办掉。
+         declare
+            What : Runtime.Yield;
+            Ins : Sinew.Instr;
+            Guard : Natural := 0;
+         begin
+            loop
+               Guard := Guard + 1;
+               exit when Guard > 64;
+               Runtime.Advance (C.Prog, C.M, What, Ins);
+               case What is
+                  when Runtime.Y_Say =>
+                     Put_Line ("[身] 🧠 它说:" & To_String (Ins.Text));
+                  when Runtime.Y_Remember =>
+                     C.Have_Prog := False;
+                     C.Recent := S ("I cannot remember a place yet, so I stopped. " & Mode_Line (C, "cannot remember a place"));
+                     return;
+                  when Runtime.Y_Done =>
+                     Say.Done := True;
+                     exit;
+                  when Runtime.Y_Finished =>
+                     C.Have_Prog := False;
+                     C.Recent := S (To_String (C.Prog_Log) & " That was the whole program. " & Mode_Line (C, "program finished"));
+                     return;
+                  when Runtime.Y_Broken =>
+                     C.Have_Prog := False;
+                     C.Refused := S (Runtime.Broken_Why (C.M));
+                     C.Recent := S (To_String (C.Prog_Log) & " " & Runtime.Broken_Why (C.M) & " " & Mode_Line (C, "program broke"));
+                     return;
+                  when Runtime.Y_Interval =>
+                     Fill_Say (C, Ins, Say);
+                     Put_Line ("[身] ▶ " & Sinew.Unparse (Ins));
+                     exit;
+               end case;
+            end loop;
+         end;
          end;
       end;
       Put_Line ("[身] 🧠 它说:" & To_String (Say.Text) & " ‖ 看见=" & To_String (Say.See) & " · 动" & Natural'Image (Natural (Say.Moves.Length)) &
@@ -2956,6 +3077,11 @@ package body Act is
                         end if;
                      end;
                   end if;
+                  --  🔴 "离得太远我不敢合"是意见,不是无能。写了 anyway 就合。
+                  if C.Reckless and then not Caged then
+                     Append (Cage_Note, "; you said anyway, so I closed regardless");
+                     Caged := True;
+                  end if;
                   if Caged then
                      Move_Jaw (L, C, F, A, 0.0, Steps_J, Reading, Say.Grip_K);
                      declare
@@ -3082,6 +3208,7 @@ package body Act is
             if not Pts.Is_Empty then
                Put_Line ("[身] ⚙ 一起解" & Natural'Image (Natural (Pts.Length)) & " 条:" & To_String (Desc));
                Run_Segment (L, C, F, Cam, Pts, Until_K, Step_Limit, Amount, Avoid, Event, Steps_Taken, Blocked, Beats);
+               C.Last_Outcome := Classify (To_String (Event));
                Feel (C, F);
                Report := Report & "you asked " & Desc & ": " & Event & ". I took " & Codec.Img (Steps_Taken) & " pushes; ";
                Put_Line ("[身]   这一段:" & Codec.Img (Steps_Taken) & " 推 · " & Codec.Img (Beats) & " 拍 · 这一集累计 " & Codec.Img (Plug.Steps (L)) & " 拍");
@@ -3103,6 +3230,15 @@ package body Act is
          Report := Report & Mode_Line (C, To_String (Event));
       end;
       --  这一节的结果攒进这一段程序的账上;跑完一整段才一次交给脑
+      --  把这一节的结局喂回执行器 —— 控制流只认这八个词
+      if C.Have_Prog then
+         declare
+            O : constant Sinew.Outcome := C.Last_Outcome;
+         begin
+            Put_Line ("[身]   结局 = " & Sinew.Outcome_Word (O) & "(" & Sinew.Outcome_Cn (O) & ")");
+            Runtime.Report (C.Prog, C.M, O);
+         end;
+      end if;
       Append (C.Prog_Log, (if Length (C.Prog_Log) > 0 then ASCII.LF & "" else "") & To_String (Report));
       C.Recent := Report;
       Put_Line ("[身]   ⇒ " & To_String (Report));

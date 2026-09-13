@@ -11,7 +11,7 @@ with Zone;
 with Learned;
 with Schema;
 with Exam;
-with Lang;
+with Sinew;
 with Plan;
 procedure Bodyexam is
    Text : Unbounded_String;
@@ -80,7 +80,7 @@ begin
                declare
                   Ft : Plan.Item_Facts;
                begin
-                  Ft.Exists := True; Ft.Mine := True; Ft.Grip := True;
+                  Ft.Exists := True; Ft.Mine := True; Ft.Grasp := True;
                   Ft.Arm := R.Things (I).Arm; Ft.Thing_Idx := Integer (I);
                   Ft.Label := To_Unbounded_String ("我身上量过响应的第 " & Natural'Image (I) & " 块");
                   Facts.Append (Ft);
@@ -96,7 +96,18 @@ begin
             Put_Line ("══ 交上来的程序 ══");
             Put_Line (To_String (Src));
             Put_Line ("══ 编译器 ══");
-            Put_Line (Plan.Report_Text (Plan.Compile (Lang.Parse (To_String (Src)), R, Facts)));
+            declare
+               Pg : constant Sinew.Program := Sinew.Parse (To_String (Src));
+               Binds : Plan.Bind_Vectors.Vector;
+            begin
+               --  离线:角色绑到第一块量过响应的东西,名字一律认不出(没有眼睛可问)
+               Binds.Append (Plan.Bind_Entry'(Key => To_Unbounded_String ("grasper"),
+                                              Item => (if Natural (R.Things.Length) > 0 then 1 else -1), Tried => <>));
+               Binds.Append (Plan.Bind_Entry'(Key => To_Unbounded_String ("pusher"),
+                                              Item => (if Natural (R.Things.Length) > 0 then 1 else -1), Tried => <>));
+               Binds.Append (Plan.Bind_Entry'(Key => To_Unbounded_String ("me"), Item => -1, Tried => <>));
+               Put_Line (Plan.Say (Plan.Check (Pg, R, Facts, Binds)));
+            end;
             Put_Line ("");
          end;
       end if;
