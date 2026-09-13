@@ -54,6 +54,14 @@ package Act is
    end record;
    package Zone_Track_Vectors is new Ada.Containers.Vectors (Natural, Zone_Track);
 
+   --  记住的一个地方:那一刻它在这台相机画面里的位置和远近。名字是脑起的,数留在身体里。
+   type Place is record
+      Name : Unbounded_String;
+      Cam : Natural := 0;
+      Cu, Cv, Z : Long_Float := 0.0;
+   end record;
+   package Place_Vectors is new Ada.Containers.Vectors (Natural, Place);
+
    type Context is record
       Map : Selfmap.Body_Map;
       Hands : Zone.Hand_Vectors.Vector;
@@ -87,6 +95,7 @@ package Act is
       Binds : Plan.Bind_Vectors.Vector;--  每个名词落到了哪一块
       Have_Prog : Boolean := False;
       Refused : Unbounded_String;      --  上一段被退回的话:理由 + 能照抄的替代,随下一轮一起给脑
+      Places : Place_Vectors.Vector;   --  remember 记下的地方:身体自己能重新找到的位置,不是坐标
       Last_Outcome : Sinew.Outcome := Sinew.Oc_None;   --  上一节的结局(八个词之一)
       Reckless : Boolean := False;     --  这一节写了 anyway:身体的一切谨慎作废
       Prog_Log : Unbounded_String;     --  🔴 这一段程序里【每一节】的结果都攒在这儿。

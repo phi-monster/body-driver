@@ -2352,6 +2352,20 @@ package body Act is
       begin
          return (if A > 0 then Natural (A) else 0);
       end Item_Of;
+      function Place_Of (N : Noun; Pl : out Place) return Boolean is
+      begin
+         Pl := (others => <>);
+         if N.K /= Nk_Thing then
+            return False;
+         end if;
+         for K in 0 .. Natural (C.Places.Length) - 1 loop
+            if C.Places (K).Name = N.Word then
+               Pl := C.Places (K);
+               return True;
+            end if;
+         end loop;
+         return False;
+      end Place_Of;
    begin
       Answer := (others => <>);
       Answer.See := To_Unbounded_String ("target");
@@ -2383,8 +2397,13 @@ package body Act is
                when Re_Still =>
                   Answer.Moves.Append (Brain.Goal'(Item => Sub, Cell => 0, Rel => Null_Unbounded_String,
                                                    Of_Item => 0, Amount => Null_Unbounded_String,
-                                                   Stay => True, Hard => True));
+                                                   Stay => True, Hard => True,
+                                                   Has_Place => False, Pu => 0.0, Pv => 0.0, Pz => 0.0));
                when others =>
+                  declare
+                     Pl : Place;
+                     Is_Place : constant Boolean := Place_Of (Cn.Obj, Pl);
+                  begin
                   Answer.Moves.Append
                     (Brain.Goal'(Item => Sub, Cell => 0,
                                  Rel => To_Unbounded_String (Old_Rel (Cn.R)),
@@ -2395,7 +2414,9 @@ package body Act is
                                              when Ef_Light => "small", when Ef_Firm => "medium",
                                              when Ef_Hard => "large", when Ef_None => "small")
                                     else Old_Step (Cn.Sp)),
-                                 Stay => False, Hard => Cn.Rk = Rk_Must));
+                                 Stay => False, Hard => Cn.Rk = Rk_Must,
+                                 Has_Place => Is_Place, Pu => Pl.Cu, Pv => Pl.Cv, Pz => Pl.Z));
+                  end;
             end case;
          end;
       end loop;
@@ -2716,9 +2737,39 @@ package body Act is
                   when Runtime.Y_Say =>
                      Put_Line ("[身] 🧠 它说:" & To_String (Ins.Text));
                   when Runtime.Y_Remember =>
-                     C.Have_Prog := False;
-                     C.Recent := S ("I cannot remember a place yet, so I stopped. " & Mode_Line (C, "cannot remember a place"));
-                     return;
+                     --  记的是"这一刻它在我这只眼睛里的位置和远近" —— 身体自己找得回来的东西,不是坐标
+                     declare
+                        A : constant Integer := Plan.Look_Up (C.Binds, Ins.Subj);
+                        Pl : Place;
+                        Found : Boolean := False;
+                     begin
+                        if A > 0 and then A <= Integer (C.Items.Length)
+                          and then C.Items (Natural (A) - 1).Located
+                        then
+                           Pl.Name := Ins.Name;
+                           Pl.Cam := C.Cam;
+                           Pl.Cu := C.Items (Natural (A) - 1).Cu;
+                           Pl.Cv := C.Items (Natural (A) - 1).Cv;
+                           Pl.Z := C.Items (Natural (A) - 1).Depth;
+                           for K in 0 .. Natural (C.Places.Length) - 1 loop
+                              if C.Places (K).Name = Pl.Name then
+                                 C.Places.Replace_Element (K, Pl);
+                                 Found := True;
+                              end if;
+                           end loop;
+                           if not Found then
+                              C.Places.Append (Pl);
+                           end if;
+                           Put_Line ("[身] 📍 记住了「" & To_String (Pl.Name) & "」= 此刻 ("
+                                     & Codec.Fmt (Pl.Cu, 3) & "," & Codec.Fmt (Pl.Cv, 3) & ") 深 "
+                                     & Codec.Fmt (Pl.Z, 3));
+                        else
+                           C.Have_Prog := False;
+                           C.Recent := S ("I could not see the thing you asked me to remember, so I remembered nothing "
+                                          & "and stopped. " & Mode_Line (C, "could not see what to remember"));
+                           return;
+                        end if;
+                     end;
                   when Runtime.Y_Done =>
                      Say.Done := True;
                      exit;
@@ -2825,7 +2876,13 @@ package body Act is
                                  Oh : constant Long_Float := Long_Float (O.Y1 - O.Y0) / Long_Float (Ch);
                                  Rl : constant String := To_String (G.Rel);
                               begin
-                                 if not O.Located then
+                                 if G.Has_Place then
+                                    --  去一个【记住的地方】:目标就是那一刻记下的位置和远近
+                                    P.Desc := S ("item " & Codec.Img (G.Item) & " back to the place you had me remember");
+                                    P.Tu := G.Pu; P.Tv := G.Pv;
+                                    P.Tz := G.Pz;
+                                    P.Wz := (if G.Pz > 0.0 and then P.Z > 0.0 then 1.0 else 0.0);
+                                 elsif not O.Located then
                                     Report := S ("goal: item " & Codec.Img (G.Of_Item) & " is not locatable right now. ");
                                     Ok_Pt := False;
                                  else

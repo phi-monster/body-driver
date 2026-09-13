@@ -15,6 +15,8 @@ package Brain is
       Amount : Unbounded_String;
       Stay : Boolean := False;
       Hard : Boolean := False;     --  hold:这一条整段不许被牺牲(解算时进硬约束)
+      Has_Place : Boolean := False;   --  去的是一个【记住的地方】,不是某一块东西
+      Pu, Pv, Pz : Long_Float := 0.0;
    end record;
    package Goal_Vectors is new Ada.Containers.Vectors (Natural, Goal);
    type Say is record
