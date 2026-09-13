@@ -2917,7 +2917,9 @@ package body Act is
                              (if Has_Near and then It.Located
                               then Sqrt ((It.Cu - Near_U) ** 2 + (It.Cv - Near_V) ** 2) else 0.0);
                         begin
-                           if Want and then It.Located
+                           --  🔴 清单跨相机之后必须加这一条:只认【这一台相机里】看见的那一块。
+                           --  不加,grasper 可能绑到另一台相机里的那只爪上 —— 位置、响应表全对不上。
+                           if Want and then It.Located and then It.Cam = C.Cam
                              and then (Own < 0 or else Integer (It.Arm) = Own)
                              and then D < Bd
                            then
@@ -2933,12 +2935,14 @@ package body Act is
                      N_Grip, N_Piece, N_Finger : Natural := 0;
                   begin
                      for K in 0 .. Natural (C.Items.Length) - 1 loop
-                        case C.Items (K).Kind is
-                           when Grip => N_Grip := N_Grip + 1;
-                           when Piece => N_Piece := N_Piece + 1;
-                           when Finger => N_Finger := N_Finger + 1;
-                           when others => null;
-                        end case;
+                        if C.Items (K).Cam = C.Cam then   --  只数这一台相机里的,别把跨相机的重复计进来
+                           case C.Items (K).Kind is
+                              when Grip => N_Grip := N_Grip + 1;
+                              when Piece => N_Piece := N_Piece + 1;
+                              when Finger => N_Finger := N_Finger + 1;
+                              when others => null;
+                           end case;
+                        end if;
                      end loop;
                      if Key = "pusher" then
                         return "我身上没量到【推得动东西又合不拢】的零件(合得拢的爪心"
@@ -3029,6 +3033,37 @@ package body Act is
                                      else "绑不上:" & Why_No_Role (To_String (Binds (I2).Key))));
                      end loop;
                   end if;
+                  --  🔴🔴 先看一条更硬的:这一段能用的相机,必须是【看得见被点名那个东西】的相机。
+                  --  看不见目标的相机,把手看得再清楚也没用 —— GM 就死在这儿:球从手腕相机里消失了,
+                  --  而头顶相机里它一直在,身体却从没去那儿看过。
+                  --  脑点名的那一块自己带着"我在哪台相机里",直接跟过去。这一条不受"一段只换一次眼"限制:
+                  --  它不是偏好,是这一段能不能干活的前提。
+                  declare
+                     Tgt_Cam : Integer := -1;
+                  begin
+                     for I2 in 0 .. Natural (Binds.Length) - 1 loop
+                        declare
+                           Key : constant String := To_String (Binds (I2).Key);
+                        begin
+                           if Key /= "me" and then Key /= "grasper" and then Key /= "pusher"
+                             and then Binds (I2).Item > 0
+                             and then Binds (I2).Item <= Integer (C.Items.Length)
+                           then
+                              Tgt_Cam := Integer (C.Items (Natural (Binds (I2).Item) - 1).Cam);
+                           end if;
+                        end;
+                     end loop;
+                     if Tgt_Cam >= 0 and then Natural (Tgt_Cam) /= C.Cam then
+                        Put_Line ("[身] 👁 你点名的那块在第" & Codec.Img (Natural (Tgt_Cam))
+                                  & " 只眼睛里,这只眼睛看不见它 ⇒ 换过去(看不见目标的眼睛干不了这一段)");
+                        C.Cam := Natural (Tgt_Cam);
+                        C.Recent := S ("the thing you named is in a different eye of mine and this one cannot see it, "
+                                       & "so I moved to the eye that can. Nothing moved. Say the same thing again. "
+                                       & Mode_Line (C, "moved to the eye that can see what you named"));
+                        return;
+                     end if;
+                  end;
+
                   --  🔴 用哪只眼睛,身体自己选,脑不参与(语言里没有 look 这个词)。
                   --  判据是量出来的:这条胳膊一动,哪只眼睛的画面变得最多 —— 变得最少的那只
                   --  正好是"顺着我伸过去的方向看"的那只,真实偏差在它眼里是零(GC 实测:
