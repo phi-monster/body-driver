@@ -20,8 +20,13 @@ package Sinew is
    end record;
 
    --  ── 关系 ──
+   --  Re_Into = 瞄【进它身子里】:它自己的皮(这块的中位深度)和它站着的那个面,正中间。
+   --  两个数都是这块自己量出来的,一个字不提它是什么东西、也不提手上有几根手指
+   --  (吸盘瞄进去照样先碰到皮就停)。owner 2026-09-08 判过"身体不许自己挑高低",
+   --  所以这件事必须由【脑说得出口】—— 而 touching(皮) / onto(桌面) / press(穿过桌面)
+   --  三个词都不是那一层,球就卡在这儿:FO 瞄了皮,夹在球的很偏上处,一合把球撞飞。
    type Rel is (Re_None, Re_Touching, Re_Above, Re_Below, Re_Left, Re_Right,
-                Re_Nearer, Re_Farther, Re_Onto, Re_Off, Re_Facing, Re_Clear,
+                Re_Nearer, Re_Farther, Re_Onto, Re_Off, Re_Into, Re_Facing, Re_Clear,
                 Re_Still, Re_Press, Re_Close, Re_Open);
 
    --  ── 用哪只眼睛判这一段 ──

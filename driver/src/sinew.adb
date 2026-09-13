@@ -9,7 +9,7 @@ package body Sinew is
      (case R is
          when Re_None => "", when Re_Touching => "touching", when Re_Above => "above",
          when Re_Below => "below", when Re_Left => "left", when Re_Right => "right",
-         when Re_Nearer => "nearer", when Re_Farther => "farther", when Re_Onto => "onto",
+         when Re_Nearer => "nearer", when Re_Farther => "farther", when Re_Onto => "onto", when Re_Into => "into",
          when Re_Off => "off", when Re_Facing => "facing", when Re_Clear => "clear",
          when Re_Still => "still", when Re_Press => "press", when Re_Close => "close",
          when Re_Open => "open");
@@ -19,7 +19,7 @@ package body Sinew is
          when Re_None => "(没说关系)", when Re_Touching => "贴上它", when Re_Above => "在它上面",
          when Re_Below => "在它下面", when Re_Left => "在它左边", when Re_Right => "在它右边",
          when Re_Nearer => "比它更靠近看得最清的那只眼睛", when Re_Farther => "比它更远离那只眼睛",
-         when Re_Onto => "朝它靠着的那个面压过去", when Re_Off => "离开那个面",
+         when Re_Onto => "朝它靠着的那个面压过去", when Re_Into => "瞄进它身子里(皮和它站的面正中间)", when Re_Off => "离开那个面",
          when Re_Facing => "转到我这一块指着它", when Re_Clear => "不许靠得比这更近",
          when Re_Still => "这一段不许动", when Re_Press => "朝它压,只说劲不说位置",
          when Re_Close => "合拢", when Re_Open => "张开");

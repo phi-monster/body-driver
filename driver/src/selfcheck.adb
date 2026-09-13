@@ -950,6 +950,21 @@ begin
          Check (Act.Extrapolation_Blew (Was, 0.000),
                 "身体图:外推把两瓣叠到一起 ⇒ 也不作数");
       end;
+      --  🔴 判据二(起炮门槛之二):瞄的是它的腰,不是它的皮。
+      --  数字取自 LAB 那个 4 cm 半球的实测:顶 0.762 · 中位深度(=皮)0.771 · 真中间 0.782。
+      --  它站的那个面在 0.802(顶再往下 4 cm)。FO 就是瞄了皮 ⇒ 夹在球很偏上处 ⇒ 一合把球撞飞。
+      declare
+         Skin : constant Long_Float := 0.771;   --  这块自己的中位深度(身体量的)
+         Surf : constant Long_Float := 0.802;   --  它站着的那个面(中位 + 鼓出多高)
+         True_Mid : constant Long_Float := 0.782;
+         Into : constant Long_Float := Act.Into_Depth (Skin, Surf);
+      begin
+         Check (Into > Skin, "抓握:into 瞄的比它的皮更深(瞄进身子里,不是贴着表面)");
+         Check (Into < Surf, "抓握:into 没瞄穿到它站着的那个面(那是 onto 干的事)");
+         Check (abs (Into - True_Mid) < abs (Skin - True_Mid),
+                "抓握:into 比 touching 更接近真正的中间(" & Codec.Fmt (abs (Into - True_Mid) * 1000.0, 1)
+                & " mm vs " & Codec.Fmt (abs (Skin - True_Mid) * 1000.0, 1) & " mm)");
+      end;
       --  🔴 新词「用哪只眼睛判这一段」。十二炮里每炮开头我都在用手工做这件事
       --  (先发一条只说话的命令烧掉换眼额度,再靠"在哪台相机里点名"这个副作用把段挪过去)——
       --  一炮浪费两条命令。这一条钉死它真的被读进来了,而且不用编号。

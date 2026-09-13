@@ -169,6 +169,9 @@ package body Act is
 
    --  两瓣叠到一起(间距 0)也是炸 —— 两根手指不可能落在同一个像素上。
    --  这个洞是自检当场逮到的:|0 − 0.137| > 0.137 是【假】(不是严格大于),原判据放过了它。
+   function Into_Depth (Skin, Surface : Long_Float) return Long_Float is
+     ((Skin + Surface) / 2.0);
+
    function Extrapolation_Blew (Was, Now : Long_Float) return Boolean is
      (Was > 0.0 and then (Now <= 0.0 or else abs (Now - Was) > Was));
 
@@ -189,7 +192,8 @@ package body Act is
          when Sinew.Re_Touching => "at",   when Sinew.Re_Above => "above", when Sinew.Re_Below => "below",
          when Sinew.Re_Left => "left",     when Sinew.Re_Right => "right",
          when Sinew.Re_Nearer => "front",  when Sinew.Re_Farther => "back",
-         when Sinew.Re_Onto => "onto",     when Sinew.Re_Off => "off", when Sinew.Re_Facing => "face",
+         when Sinew.Re_Onto => "onto",     when Sinew.Re_Off => "off", when Sinew.Re_Into => "into",
+         when Sinew.Re_Facing => "face",
          when Sinew.Re_Press => "press",   when Sinew.Re_Still => "",
          when others => "?");   --  close / open / clear 各有各的分支,够得着这里的只有 Re_None
    function Rel_Has_Own_Branch (R : Sinew.Rel) return Boolean is
@@ -3768,7 +3772,7 @@ package body Act is
                                        begin
                                           P.Tu := P.Cu + Du / Ln * St; P.Tv := P.Cv + Dv / Ln * St;
                                        end;
-                                    elsif Rl = "onto" or else Rl = "off" or else Rl = "press" then
+                                    elsif Rl = "onto" or else Rl = "off" or else Rl = "press" or else Rl = "into" then
                                        --  它站的那个面在哪:它自己的深度 + 它鼓出多少(两个都是量出来的)。
                                        --  onto = 压到那个面那么深;off = 反过来离开那个面它自己那么高一截。
                                        --  press = 朝那个面【压过去一个到不了的深度】:走不到的那一截就是力。
@@ -3778,8 +3782,11 @@ package body Act is
                                        begin
                                           if O.Depth > 0.0 and then P.Z > 0.0 and then O.Height > 0.0 then
                                              P.Tu := P.Cu; P.Tv := P.Cv;
+                                             --  into = 皮(这块的中位深度)和它站着的那个面(Floor_Z),正中间。
+                                             --  写成两个量出来的深度取中点,不是"高度 × 一个我拍的数"。
                                              P.Tz := (if Rl = "off" then O.Depth - O.Height
                                                       elsif Rl = "onto" then Floor_Z
+                                                      elsif Rl = "into" then Into_Depth (O.Depth, Floor_Z)
                                                       else Floor_Z + O.Height * Amount);
                                              P.Wz := 1.0;
                                           else

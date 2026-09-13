@@ -19,7 +19,7 @@ package body Plan is
             N (Exam.Updown) := True;
          when Sinew.Re_Left | Sinew.Re_Right =>
             N (Exam.Sideways) := True;
-         when Sinew.Re_Nearer | Sinew.Re_Farther | Sinew.Re_Onto | Sinew.Re_Off | Sinew.Re_Press =>
+         when Sinew.Re_Nearer | Sinew.Re_Farther | Sinew.Re_Onto | Sinew.Re_Off | Sinew.Re_Into | Sinew.Re_Press =>
             N (Exam.Nearness) := True;
          when Sinew.Re_Facing =>
             N (Exam.Facing) := True;
@@ -73,7 +73,7 @@ package body Plan is
    function Rel_Ok (R : Exam.Report; Thing_Idx : Integer; Rl : Sinew.Rel; Surface : Boolean) return Boolean is
       N : constant Need := Rows_Needed (Rl);
    begin
-      if Rl in Sinew.Re_Onto | Sinew.Re_Off | Sinew.Re_Press and then not Surface then
+      if Rl in Sinew.Re_Onto | Sinew.Re_Off | Sinew.Re_Into | Sinew.Re_Press and then not Surface then
          return False;
       end if;
       for Row in Exam.Row_Id loop
@@ -232,7 +232,7 @@ package body Plan is
                           C.Obj.K = Sinew.Nk_None or else Facts (Obj).Stands;
                         Unknown : constant Boolean := Ti < 0;   --  还没量过 ⇒ 执行器量完当场补判
                      begin
-                        if C.R in Sinew.Re_Onto | Sinew.Re_Off | Sinew.Re_Press and then not Surface then
+                        if C.R in Sinew.Re_Onto | Sinew.Re_Off | Sinew.Re_Into | Sinew.Re_Press and then not Surface then
                            Reject (I.Line, "我量不出「" & Key_Of (C.Obj) & "」鼓出它靠着的那个面多少,"
                                    & "所以我不知道哪个方向才算朝它压",
                                    "我现在说得出口的关系:" & Usable_Rels (R, Ti, False));
