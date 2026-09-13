@@ -937,6 +937,23 @@ begin
          end if;
       end loop;
       Check (not Overlap, "语言:grasper 和 pusher 互斥(合得拢的零件不许算 pusher)");
+      --  🔴 新词「用哪只眼睛判这一段」。十二炮里每炮开头我都在用手工做这件事
+      --  (先发一条只说话的命令烧掉换眼额度,再靠"在哪台相机里点名"这个副作用把段挪过去)——
+      --  一炮浪费两条命令。这一条钉死它真的被读进来了,而且不用编号。
+      declare
+         use Sinew;
+         A : constant Program := Sinew.Parse ("do grasper touching the ball until touched with my still eye");
+         B : constant Program := Sinew.Parse ("do grasper touching the ball until touched with my moving eye");
+         Cn : constant Program := Sinew.Parse ("do grasper touching the ball until touched");
+         Bad : constant Program := Sinew.Parse ("do grasper touching the ball until touched with my third eye");
+         function Eye_Of (G : Program) return Eye_Pick is
+           (if G.Ok and then Natural (G.Code.Length) > 0 then G.Code (0).Eye else Ey_None);
+      begin
+         Check (A.Ok and then Eye_Of (A) = Ey_Still, "语言:「with my still eye」读进来了(不跟着我动的那只)");
+         Check (B.Ok and then Eye_Of (B) = Ey_Moving, "语言:「with my moving eye」读进来了(跟着我动的那只)");
+         Check (Cn.Ok and then Eye_Of (Cn) = Ey_None, "语言:不写就是身体自己挑");
+         Check (not Bad.Ok, "语言:「with my third eye」说不出口 —— 眼睛按【量出来的性质】点名,不按编号");
+      end;
       Check (Grasp_Any and then Push_Any, "语言:两个角色各自都收得下至少一种零件(不许有空角色)");
    end;
 

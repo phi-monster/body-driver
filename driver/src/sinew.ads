@@ -24,6 +24,16 @@ package Sinew is
                 Re_Nearer, Re_Farther, Re_Onto, Re_Off, Re_Facing, Re_Clear,
                 Re_Still, Re_Press, Re_Close, Re_Open);
 
+   --  ── 用哪只眼睛判这一段 ──
+   --  🔴 十二炮里每一炮开头我都在【用手工做这件事】:先发一条只说话的命令把"一集只换一次眼"
+   --  烧掉,再靠"在哪台相机里点名"这个副作用把段挪过去 —— 一炮浪费两条命令,而且脆。
+   --  真正想说的就一句:「用不长在我这一块上的那只眼睛判这一段」。语言里没这个词(look 被删后没补)。
+   --  不用编号(脑说话不说数字);判据是量出来的、任何机体都成立:
+   --    Ey_Still  = 我这一块一动,画面变得【最少】的那只 —— 它不长在我身上,所以能看见我在平移
+   --    Ey_Moving = 变得【最多】的那只 —— 它长在我这一块上,离得近、看得清,但看不见自己平移
+   --  只有一只眼、身上又分不出零件的机体(无人机):Ey_Still 不存在,身体照实说。
+   type Eye_Pick is (Ey_None, Ey_Still, Ey_Moving);
+
    type Step is (Sp_None, Sp_Small, Sp_Medium, Sp_Large);
    type Effort is (Ef_None, Ef_Light, Ef_Firm, Ef_Hard);
    type Rank is (Rk_Prefer, Rk_Must);   --  must 不许被牺牲(走零空间),prefer 可以
@@ -52,6 +62,7 @@ package Sinew is
       Until_Oc : Outcome := Oc_None;
       Max_Steps : Natural := 0;
       Anyway : Boolean := False;      --  作废身体的一切认知性谨慎:瞎着也走、远也合、顶着也推
+      Eye : Eye_Pick := Ey_None;      --  这一段用哪只眼睛判(没写 = 身体自己按量到的挑)
       --  控制
       Cond : Outcome := Oc_None;
       Target : Integer := -1;

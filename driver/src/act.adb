@@ -3005,6 +3005,7 @@ package body Act is
       end loop;
       --  🔴 anyway:身体的一切认知性谨慎全部作废 —— 瞎着也走、离得远也合、顶着也推。
       C.Reckless := I.Anyway;
+      C.Eye_Want := I.Eye;
    end Fill_Say;
 
    --  身体报的那句事件,归到八个结局里的哪一个。控制流只认这八个。
@@ -3354,7 +3355,52 @@ package body Act is
                               end if;
                            end;
                         end loop;
-                        if Best_Cam /= C.Cam and then not C.Eye_Chosen then
+                        --  🔴 脑点了名就照脑说的挑,而且不受"一集只换一次眼"限制:
+                        --  那条限制防的是身体自己来回弹,不是防脑。判据仍然是量出来的 Cam_Frac:
+                        --  still = 这条胳膊一动、画面变得【最少】的那只(不长在我身上 ⇒ 看得见我平移);
+                        --  moving = 变得【最多】的那只。量不出来就照实说,不许瞎挑。
+                        if Sinew."/=" (C.Eye_Want, Sinew.Ey_None) then
+                           declare
+                              use type Sinew.Eye_Pick;
+                              Pick : Integer := -1;
+                              Bv : Long_Float := (if C.Eye_Want = Sinew.Ey_Still then 1.0e9 else -1.0);
+                              Any : Boolean := False;
+                           begin
+                              for Cm in 0 .. C.Map.N_Cams - 1 loop
+                                 declare
+                                    Ix : constant Natural := Natural (Sub_Arm) * C.Map.N_Cams + Cm;
+                                    Vv : constant Long_Float :=
+                                      (if Ix < Natural (C.Map.Cam_Frac.Length) then C.Map.Cam_Frac (Ix) else -1.0);
+                                 begin
+                                    if Vv >= 0.0 then
+                                       Any := True;
+                                       if (C.Eye_Want = Sinew.Ey_Still and then Vv < Bv)
+                                         or else (C.Eye_Want = Sinew.Ey_Moving and then Vv > Bv)
+                                       then
+                                          Bv := Vv; Pick := Cm;
+                                       end if;
+                                    end if;
+                                 end;
+                              end loop;
+                              if not Any or else Pick < 0 then
+                                 C.Blind_Say := S ("you asked me to judge this with one of my eyes picked by how much it "
+                                                   & "changes when I move, but I have not measured that for this part yet, "
+                                                   & "so I used the eye I am already in and said so");
+                              elsif Natural (Pick) /= C.Cam then
+                                 Put_Line ("[身] 👁 你点名要"
+                                           & (if C.Eye_Want = Sinew.Ey_Still then "不跟着我动" else "跟着我动")
+                                           & "的那只眼睛 ⇒ 第" & Codec.Img (Natural (Pick)) & " 只(这条胳膊一动它变 "
+                                           & Codec.Fmt (Bv, 3) & " 幅)⇒ 换过去");
+                                 C.Cam := Natural (Pick);
+                                 C.Recent := S ("I moved to the eye you asked for. Nothing moved. Say the same thing again. "
+                                                & Mode_Line (C, "moved to the eye you named"));
+                                 return;
+                              end if;
+                           end;
+                        end if;
+                        if Best_Cam /= C.Cam and then not C.Eye_Chosen
+                          and then Sinew."=" (C.Eye_Want, Sinew.Ey_None)
+                        then
                            Put_Line ("[身] 👁 这条胳膊一动,第" & Codec.Img (Best_Cam) & " 只眼睛的画面变 "
                                      & Codec.Fmt (Best_V, 3) & " 幅,比现在这只多 ⇒ 换过去再看"
                                      & "(我自己换的,你没说,也不用说)");

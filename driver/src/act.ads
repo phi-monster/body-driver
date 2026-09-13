@@ -131,6 +131,7 @@ package Act is
       Blind_Say : Unbounded_String;    --  身体照走了,但有件事要如实说给脑(不是停,是说)
       Eye_Chosen : Boolean := False;   --  这一集已经自己换过一次眼睛了(不许来回弹)
       Reckless : Boolean := False;     --  这一节写了 anyway:身体的一切谨慎作废
+      Eye_Want : Sinew.Eye_Pick := Sinew.Ey_None;   --  这一节脑点了用哪只眼睛(没点 = 身体自己挑)
       Prog_Log : Unbounded_String;     --  🔴 这一段程序里【每一节】的结果都攒在这儿。
                                        --  以前只留最后一节,而最后那一轮恰好是"程序跑完了"的空话,
                                        --  于是前几节说了什么全被冲掉,脑只能去翻日志 —— 等于身体不会说话。
