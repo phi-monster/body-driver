@@ -269,7 +269,8 @@ package body Picture is
       return Out_R;
    end Cut_Colour;
 
-   function Cut (Depth : Floats; W, H : Natural; Win_Frac, Sigma_Mult : Long_Float) return Regions is
+   function Cut (Depth : Floats; W, H : Natural; Win_Frac, Sigma_Mult : Long_Float;
+                 Keep_Edge : Boolean := False) return Regions is
       Out_R : Regions;
       N : constant Natural := W * H;
    begin
@@ -353,8 +354,12 @@ package body Picture is
                   Rg : Region := C;
                   Ds, Hs : Floats;
                begin
-                  --  贴着画面边的块丢掉:整条背景带、细缝、我自己的胳膊都贴边;能拿的东西完整地在画面里
-                  if Rg.X0 > 0 and then Rg.Y0 > 0 and then Rg.X1 + 1 < W and then Rg.Y1 + 1 < H then
+                  --  贴着画面边的块丢掉:整条背景带、细缝、我自己的胳膊都贴边。
+                  --  🔴 但在长着动手那条胳膊的相机里不许丢:手一凑近,要抓的东西必然被画面切掉一角
+                  --  (GM 实测:球的下沿正好压在画面最后一行 ⇒ 整块消失 ⇒ 脑连它的名字都点不出来)。
+                  if Keep_Edge
+                    or else (Rg.X0 > 0 and then Rg.Y0 > 0 and then Rg.X1 + 1 < W and then Rg.Y1 + 1 < H)
+                  then
                      for Y in Rg.Y0 .. Rg.Y1 loop
                         for X in Rg.X0 .. Rg.X1 loop
                            if Mask.Element (Y * W + X) then

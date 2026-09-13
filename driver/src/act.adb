@@ -216,7 +216,45 @@ package body Act is
       if not F.Cams (Cam).Has_Depth then
          return Kept;
       end if;
-      Raw := Picture.Cut (F.Cams (Cam).Depth, Cw, Ch, Cut_Window (C, Cam, F), Sigma_Mult);
+      --  🔴🔴 尺子不是选一把,是【每一把都看一遍,合起来】。
+      --  "鼓出来"是相对周围说的:窗口比这块东西小的时候,这块东西自己就是周围 ⇒ 它鼓 0、整块消失。
+      --  而窗口是按"两指在画面里张多开"缩放的 ⇒ 手越近、窗口越大、能被抹掉的东西越大 —— 方向正好反了。
+      --  GM 实测:手一凑近,球(3027 px)和乐高(5098 px)双双从清单里消失,只剩 2 米外 10 px 的墙斑;
+      --  而旧的"一块都切不出才换尺子"因为墙斑还在,根本不触发 ⇒ 最后一步反而瞎了 ⇒ 模板飘到墙上 ⇒
+      --  手追着 2.13 m 外的墙把关节顶死。(同一条 GB 也实测过,修法 fe2ec8e 写过,被 a7ab7e9 回滚掉了。)
+      --  合并规则:粗尺子切出来的块,只有当它的形心还没被任何已收的块盖住时才收(不重复列)。
+      declare
+         Win : constant Long_Float := Cut_Window (C, Cam, F);
+         --  这台相机长在某条胳膊上吗:长着的话,要抓的东西贴到画面边是常态,不许因为贴边就丢
+         Own_Cam_Here : constant Boolean := Cam_Arm (C, Cam) >= 0;
+         --  🔴 第二把尺子 = 【脑点名那个东西自己有多大】(身体量的,不是我拍的系数)。
+         --  闭运算填的是比窗口窄的东西 ⇒ 比窗口【宽】的东西自己就是背景,鼓 0、整块消失。
+         --  所以会消失的恰恰是"比尺子宽"的那个,拿它自己的宽度当第二把尺子正好够着它。
+         Wide : constant Long_Float := C.Want_Size;
+      begin
+         Raw := Picture.Cut (F.Cams (Cam).Depth, Cw, Ch, Win, Sigma_Mult, Keep_Edge => Own_Cam_Here);
+         if Wide > Win then
+            declare
+               More : constant Picture.Regions :=
+                 Picture.Cut (F.Cams (Cam).Depth, Cw, Ch, Wide, Sigma_Mult, Keep_Edge => Own_Cam_Here);
+            begin
+               for R of More loop
+                  declare
+                     Covered : Boolean := False;
+                  begin
+                     for Q of Raw loop
+                        if Picture.Inside (Q, R.Cu, R.Cv, Cw, Ch, 0.0) then
+                           Covered := True;
+                        end if;
+                     end loop;
+                     if not Covered then
+                        Raw.Append (R);
+                     end if;
+                  end;
+               end loop;
+            end;
+         end if;
+      end;
       --  🔴 只有【深度上一个都看不出来】的时候才按颜色切:桌面木纹、瓷砖缝的颜色台阶比线还明显,
       --  在能看见东西的桌子上开着它,清单会从 7 条涨到 46 条,脑子被淹掉(ES 实测)。
       --  线板那种场合深度切不出任何东西,颜色这一路才接手。
