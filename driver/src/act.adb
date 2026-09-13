@@ -177,6 +177,18 @@ package body Act is
    function Into_Depth (Skin, Surface : Long_Float) return Long_Float is
      ((Skin + Surface) / 2.0);
 
+   function Depth_Ok (Zd, Old_Z, Pred_Z, Noise : Long_Float) return Boolean is
+     (Old_Z <= 0.0
+      or else (if Pred_Z <= 0.0
+               then abs (Zd - Old_Z) <= Long_Float'Max (0.0, Noise)
+               else abs (Zd - Pred_Z) <= abs (Pred_Z - Old_Z) + Long_Float'Max (0.0, Noise)));
+
+   --  0.5 = 画面中心(比例,不是系数:u 是 0..1 的画幅比例,中心就在一半处)
+   function On_My_Plane (T_Pic, T_Depth, My_Depth : Long_Float) return Long_Float is
+     (if My_Depth > 0.0 and then T_Depth > 0.0
+      then 0.5 + (T_Pic - 0.5) * (T_Depth / My_Depth)
+      else T_Pic);
+
    function Push_Cap (Ceiling, Noise, Dead : Long_Float) return Long_Float is
      (Long_Float'Max (Long_Float'Max (Noise + Noise, Dead), Ceiling));
 
@@ -689,6 +701,10 @@ package body Act is
       Count : Natural := 0;
       Height : Long_Float := 0.0;
       Z_Noise : Long_Float := 0.0;   --  这一点读深度抖多少(米):高度是深度之差,判"离开了面"用它当地板
+      --  🔴 上一次【真从深度图上读到】的远近(0 = 还没读到过)。闸要盯着它,不能盯 Z ——
+      --  Z 有可能是按位姿猜出来的、从没被眼睛校过,拿猜测当基准会把真读数全挡在外面
+      --  (JE 实测:深度从此纹丝不动 2.422,而真读数在 0.45~0.61,和球的 0.64 同一个尺度)。
+      Z_Seen : Long_Float := 0.0;
       Err0 : Long_Float := 0.0;
       Lost : Boolean := False;   --  这一步没在画面里认出它,位置是按表猜的
       Has_Meas : Boolean := False;              --  眼睛(光流)另外量到的位置,只用来修表
@@ -930,7 +946,7 @@ package body Act is
                Fl : Flow.Field;
                Du, Dv : Long_Float;
                Z : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, Cam, Jaw_K_Of (P.Chan_K));
-               Old_Z : constant Long_Float := P.Z;
+               Old_Z : constant Long_Float := (if P.Z_Seen > 0.0 then P.Z_Seen else P.Z);
             begin
                A.Reserve_Capacity (Ada.Containers.Count_Type (Hw * Hh));
                B.Reserve_Capacity (Ada.Containers.Count_Type (Hw * Hh));
@@ -956,11 +972,16 @@ package body Act is
                      Zd : constant Long_Float := Picture.Near_Depth (F.Cams (Cam).Depth, Cw, Ch, P.Cu, P.Cv, Win);
                   begin
                      if not Picture.Is_Nan (Zd) then
-                        --  一步之内深度跳了超过"预测的变化 + 距离的一成"(比例,无量纲)⇒ 读到的不是我的手指,留预测
-                        if Old_Z <= 0.0 or else Pred_Z <= 0.0 or else abs (Zd - Pred_Z) <= abs (Pred_Z - Old_Z) + 0.1 * Old_Z then
-                           P.Z := Zd;
-                        else
+                        --  一步之内深度跳了超过"预测的变化 + 这一点自己的读深抖动"⇒ 读到的不是我的手指,留预测。
+                        --  🔴 没有预测值时这道闸以前【整条失效】(Pred_Z <= 0.0 直接短路成真),于是任何读数都收:
+                        --  FS 实测手指的"离相机多远"一步从 0.454 m 跳到 0.010 m(离镜头一厘米,物理上不可能),
+                        --  抓握的高低判据当场作废。没有预测就退回"一步最多变自己抖动那么多",而不是不管。
+                        if Depth_Ok (Zd, Old_Z, Pred_Z, P.Z_Noise) then
+                           P.Z := Zd; P.Z_Seen := Zd;
+                        elsif Pred_Z > 0.0 then
                            P.Z := Pred_Z;
+                        else
+                           P.Z := Old_Z;
                         end if;
                      end if;
                   end;
@@ -1601,8 +1622,23 @@ package body Act is
                     (if P.Wz > 0.0 and then P.Z > 0.0 and then not Picture.Is_Nan (P.Tz) and then P.Tz > 0.0
                      then Long_Float'Min (1.0, P.Tz / P.Z) else 1.0);
                begin
-                  T.Err (0) := P.Tu - P.Cu;  T.W (0) := Near;
-                  T.Err (1) := P.Tv - P.Cv;  T.W (1) := Near;
+                  --  🔴🔴 两块东西一前一后时,【画面上重合 ≠ 真的在一起】。
+                  --  投影的规矩:同一段真实的横移,离相机越近在画面上跑得越多(跑的距离 ∝ 1/远近)。
+                  --  所以要对齐的不是 u,而是 u × 远近 —— 比出来的才是真实的横向差,而焦距在两边同样出现、自动约掉,
+                  --  一个标定参数都不需要。
+                  --  实测(FZ):头顶相机报"爪子离球只差 0.062 幅、几乎压上了",切到手腕相机一看球根本不在视野里 ——
+                  --  爪子在球【上方 30 厘米】,画面上却正好叠住。只比 u 就是在比影子。
+                  --  做法:把目标投影到【我这一点自己的那个远近平面】上再比 —— 远处的目标 u 按远近之比从画面中心
+                  --  往外放大,那才是"我要走到的那个 u"。误差仍然是 u 的单位(表/预测/走多远的检查全不变)。
+                  if P.Z > 0.0 and then P.Tz > 0.0 and then not Picture.Is_Nan (P.Tz) then
+                     T.Err (0) := On_My_Plane (P.Tu, P.Tz, P.Z) - P.Cu;
+                     T.Err (1) := On_My_Plane (P.Tv, P.Tz, P.Z) - P.Cv;
+                  else
+                     T.Err (0) := P.Tu - P.Cu;
+                     T.Err (1) := P.Tv - P.Cv;
+                  end if;
+                  T.W (0) := Near;
+                  T.W (1) := Near;
                end;
                --  远近:画面位置和远近一起要,不许替它定"先对准再靠近"的顺序(那等于叫它先扭脖子)
                if P.Wz > 0.0 and then P.Z > 0.0 and then not Picture.Is_Nan (P.Tz) then
@@ -2001,7 +2037,8 @@ package body Act is
                            Zn : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, Cam);
                            Zd : constant Long_Float :=
                              Picture.Near_Depth (F.Cams (Cam).Depth, Cw, Ch, P.Cu, P.Cv, Lobe_Win (Zn, Cw, Ch));
-                           Old_Z : constant Long_Float := P.Z;
+                           --  🔴 闸盯【上一次真读到的】远近,不是 P.Z —— P.Z 可能是按位姿猜的、从没被眼睛校过
+                           Old_Z : constant Long_Float := (if P.Z_Seen > 0.0 then P.Z_Seen else P.Z);
                         begin
                            --  🔴 收读数前先过闸:读窗里同时有指头和它【后面那个面】时,读数会在两者之间来回跳
                            --  (JD 实测:指尖深度在 0.61 和 0.45 之间几乎每步翻一次,差 16 cm,而它在画面里几乎没动
@@ -2009,10 +2046,10 @@ package body Act is
                            --  原版这道闸写的是"表预测的变化 + 距离的【一成】",那个一成是人拍的;
                            --  换成这一点自己量到的深度抖动地板(Z_Noise),零系数,而且比一成更对。
                            if not Picture.Is_Nan (Zd) and then Zd > 0.0 then
-                              if Old_Z <= 0.0
-                                or else abs (Zd - Old_Z) <= abs (Pr (2)) + Long_Float'Max (0.0, P.Z_Noise)
-                              then
-                                 P.Z := Zd;
+                              if Depth_Ok (Zd, Old_Z, Old_Z + Pr (2), P.Z_Noise) then
+                                 P.Z := Zd; P.Z_Seen := Zd;
+                              else
+                                 P.Z := Old_Z;   --  这一帧读到的是别的面,留上一次真读到的
                               end if;
                            end if;
                         end;

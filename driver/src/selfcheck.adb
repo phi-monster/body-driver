@@ -965,6 +965,42 @@ begin
                 "抓握:into 比 touching 更接近真正的中间(" & Codec.Fmt (abs (Into - True_Mid) * 1000.0, 1)
                 & " mm vs " & Codec.Fmt (abs (Skin - True_Mid) * 1000.0, 1) & " mm)");
       end;
+      --  🔴 深度读数收不收。数字取自 FS 实测:手指上一次真读到 0.454 m,这一帧读出 0.010 m(离镜头一厘米)。
+      declare
+         Was : constant Long_Float := 0.454;    --  上一次真读到的
+         Crazy : constant Long_Float := 0.010;  --  这一帧读出来的(物理上不可能)
+         Noise : constant Long_Float := 0.02;   --  这一点自己量到的读深抖动
+      begin
+         Check (not Act.Depth_Ok (Crazy, Was, 0.0, Noise),
+                "深度:没有预测值时也要挡 —— 0.454 m 一步跳到 0.010 m 不许收(旧写法这里整条闸短路放行)");
+         Check (Act.Depth_Ok (0.460, Was, 0.0, Noise),
+                "深度:没有预测值时,变化在自己的抖动之内 ⇒ 照收");
+         Check (Act.Depth_Ok (Crazy, 0.0, 0.0, Noise),
+                "深度:头一次读到(还没有上一次)⇒ 照收,没有基准可比");
+         Check (Act.Depth_Ok (0.300, Was, 0.290, Noise),
+                "深度:表预测这一步会走到 0.290,读到 0.300 ⇒ 收(大跳但预测过)");
+         Check (not Act.Depth_Ok (0.010, Was, 0.440, Noise),
+                "深度:表预测只走到 0.440,却读出 0.010 ⇒ 不收");
+      end;
+      --  🔴 画面上重合 ≠ 真的在一起(FZ 实测:头顶相机报差 0.062 幅"几乎压上了",爪子在球上方 30 厘米)。
+      --  数字:球在 0.64 m、爪子在 0.34 m(高出 30 cm),球在画面里偏左到 0.40。
+      declare
+         Ball_U : constant Long_Float := 0.40;
+         Ball_Z : constant Long_Float := 0.64;
+         Mine_Z : constant Long_Float := 0.34;
+         Aim : constant Long_Float := Act.On_My_Plane (Ball_U, Ball_Z, Mine_Z);
+      begin
+         Check (abs (Aim - Ball_U) > 0.062,
+                "对齐:爪子高出球 30 厘米时,该去的那个 u 和球在画面里的 u 差 "
+                & Codec.Fmt (abs (Aim - Ball_U), 3) & " 幅 —— 比那句「只差 0.062 幅、几乎压上了」还大");
+         Check (Act.On_My_Plane (Ball_U, Ball_Z, Ball_Z) = Ball_U,
+                "对齐:我和它在同一个远近上 ⇒ 画面坐标就是真坐标,不许动它");
+         Check (Act.On_My_Plane (0.5, Ball_Z, Mine_Z) = 0.5,
+                "对齐:东西正在画面中心 ⇒ 不管远近,该去的还是中心(投影从中心发散)");
+         Check (Act.On_My_Plane (Ball_U, 0.0, Mine_Z) = Ball_U
+                and then Act.On_My_Plane (Ball_U, Ball_Z, 0.0) = Ball_U,
+                "对齐:任一边没有远近 ⇒ 退回只比画面坐标,不许瞎放大");
+      end;
       --  🔴 一步的命令上限:天花板底下垫一块"身体自己动得起来"的地板。
       --  数字取自 LAB 那一条:FO 每步命令 0.006(探针那一档 0.026 的四分之一),一步推进 8 厘米、44 推抓到球。
       --  09-13 那次整体回滚把地板削掉之后,步子走到 0.026 —— 表当场不准、球被甩出视野。
