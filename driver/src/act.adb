@@ -1380,6 +1380,18 @@ package body Act is
             end if;
          end;
       end loop;
+      --  🔴 一根都没量到 ⇒ 这一段根本无从下手,必须当场说给脑听,并且说清【它能怎么办】。
+      --  HH 实测:我给的程序里只有第一行写了 large,后两行默认只给一半幅度;而在【手自己那台相机】里
+      --  按相机放宽的系数是 1 ⇒ "量自己"的上限正好等于起始档 ⇒ 一次都加不了 ⇒ 六根全被扔、
+      --  表是空的、命令恒零,连着六步 `还差 0.0 步 · 命令 [0.000 ×6]`,读日志像"已经到位了"。
+      --  身体当时每根都老实说了"这一段不用它",但没有一句话说"合起来 = 我这一段动不了"。
+      if (for all K in 0 .. Chan.Per_Arm - 1 => not Trust (K)) then
+         Put_Line ("[身]   🔴 这一段一根通道都没量到 ⇒ 我没有任何一条能用的走法。"
+                   & "你给的幅度那一档不够我看清自己动了没有。");
+         C.Blind_Say := S ("with the step size you gave me I could not see any of my channels move in this eye, "
+                           & "so I have no usable way to move at all for this stretch - "
+                           & "say a larger step, or judge this stretch with another eye");
+      end if;
    end Probe_Effects;
 
    function Amount_Factor (A : Unbounded_String) return Long_Float is
