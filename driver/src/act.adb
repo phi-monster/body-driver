@@ -1823,9 +1823,12 @@ package body Act is
                                           (if Known_All then Track_Win / Px else Am * Cap_Mult * Reach (K))) * Amount;
                         Floor : constant Long_Float := Long_Float'Max (C.Map.EE_Noise + C.Map.EE_Noise, (if Ch_No < Natural (C.Dead.Length) then C.Dead.Element (Ch_No) else 0.0));
                      begin
+                        --  地板同理:静止噪声在这具仿真里量到 0,拿它当地板等于没有地板。
+                        --  用【这个通道确实动过的最小命令】:学到的死区,没学到就用开机量到的那一档。
                         Note.Cap (K) := Push_Cap
                           (Ceiling, C.Map.EE_Noise,
-                           (if Ch_No < Natural (C.Dead.Length) then C.Dead.Element (Ch_No) else 0.0));
+                           (if Ch_No < Natural (C.Dead.Length) and then C.Dead.Element (Ch_No) > 0.0
+                            then C.Dead.Element (Ch_No) else C.Map.Amp (Ch_No)));
                         if Floor > Ceiling and then Ceiling > 0.0 then
                            C.Blind_Say := S ("any push big enough for my body to actually move is bigger than my eye "
                                              & "can follow in one step here; I took the smaller-of-the-two that still moves me");
@@ -1943,15 +1946,33 @@ package body Act is
          end loop;
          declare
             N0 : constant Long_Float := Table.Norm (Note.Cmd, Chan.Per_Arm);
+            --  🔴🔴 "我能走的最小一步"不能用【静止噪声】——这具仿真里静止两拍画面一模一样,
+            --  量出来就是 0.00000,于是这条放大整条失效(G = Max(1, 0/N0) = 1)。
+            --  HK 实测:连着五步 `命令 [-0.000 …] 实到 [0.0000 ×6]`,差距钉在 0.400、远近还差 0.198 m。
+            --  改用【我确实动过的最小命令】:这个通道自己学到的死区;还没学到就用开机量到的那一档
+            --  (0.0064/0.0032/0.0016 —— 正是 FO 抓球那一档的量级)。两个都是量出来的。
+            Floor_Move : Long_Float := C.Map.EE_Noise;
          begin
-            if N0 <= C.Map.EE_Noise then
-               --  同上:剩下要推的比我自己的噪声还小,也【不许】宣布"已经到了" ——
-               --  那同样是身体在替脑判断。它是一个事实,说出来,继续走。
+            for K in 0 .. Chan.Per_Arm - 1 loop
+               if Note.Active (K) then
+                  declare
+                     Cn : constant Natural := Arm * Chan.Per_Arm + K;
+                     D : constant Long_Float :=
+                       (if Cn < Natural (C.Dead.Length) and then C.Dead.Element (Cn) > 0.0
+                        then C.Dead.Element (Cn) else C.Map.Amp (Cn));
+                  begin
+                     Floor_Move := Long_Float'Max (Floor_Move, D);
+                  end;
+               end if;
+            end loop;
+            if N0 <= Floor_Move then
+               --  剩下要推的比我能动起来的最小一步还小,【不许】宣布"已经到了" ——
+               --  那是身体在替脑判断。它是一个事实,说出来,继续走。
                if N0 > 0.0 then
                   --  🔴 脑没让停 ⇒ 不许发一个身体根本走不动的命令。放大到我能走的最小一步,方向不变。
                   --  (GK 实测:不放大的话每一步都是零命令,30 步全是空转。)
                   declare
-                     G : constant Long_Float := Long_Float'Max (1.0, C.Map.EE_Noise / N0);
+                     G : constant Long_Float := Long_Float'Max (1.0, Floor_Move / N0);
                   begin
                      for K in 0 .. Chan.Per_Arm - 1 loop
                         Note.Cmd (K) := Note.Cmd (K) * G;
