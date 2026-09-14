@@ -2458,8 +2458,13 @@ package body Act is
             declare
                Not_Mine : constant Boolean := Cam_Arm (C, Pts (I).Cam) /= Integer (Arm);
             begin
+               --  🔴 门槛用【这块东西自己有多大】,不是跟踪噪声地板。
+               --  用地板当门槛 ⇒ 噪声天天越过它 ⇒ HN 实测:手离球 0.9 m,每一推都报"碰上了",
+               --  于是 `until touched` 每段只走一推就结束,永远走不到球跟前。
+               --  一个东西被撞得挪了【自己一个身位】,那才是真碰上了;零系数,尺寸是量出来的。
                if Not_Mine and then Pts (I).Kind = Thing_Pt and then not Pts (I).Lost and then I < Natural (Was.Length)
-                 and then Sqrt ((Pts (I).Cu - Was (I).Cu) ** 2 + (Pts (I).Cv - Was (I).Cv) ** 2) > Fl.Track
+                 and then Sqrt ((Pts (I).Cu - Was (I).Cu) ** 2 + (Pts (I).Cv - Was (I).Cv) ** 2)
+                          > Long_Float'Max (Pts (I).Box_W, Pts (I).Box_H)
                then
                   Note.Touched := True;
                end if;
