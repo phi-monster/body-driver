@@ -192,9 +192,15 @@ package body Act is
       --  连着两次被拒、而两次读数互相吻合 ⇒ 新值是可重复的,旧基准才是陈的 ⇒ 收
       or else (Last_Rejected > 0.0
                and then abs (Zd - Last_Rejected) <= Long_Float'Max (0.0, Noise))
+      --  🔴 带子的【中心是上次真读到的那个数】,不是表预测的位置。半宽 = 表说这一步会变多少 + 自己的抖动。
+      --  以前中心设在预测上:表一旦高估这一步的变化(说走 0.223,实际没走),
+      --  一个离上次真读数只差 0.04 m 的【诚实读数】就会被判成离谱 ——
+      --  HS 实测:读到 2.306 · 上次真读到 2.346 · 表说走 0.223 · 抖动 0.022
+      --            |2.306-2.569| = 0.263 > 0.245 ⇒ 拒。于是深度连着几十推纹丝不动。
+      --  改成以 Old_Z 为中心之后:|2.306-2.346| = 0.040 <= 0.245 ⇒ 收,而该挡的仍然挡得住。
       or else (if Pred_Z <= 0.0
                then abs (Zd - Old_Z) <= Long_Float'Max (0.0, Noise)
-               else abs (Zd - Pred_Z) <= abs (Pred_Z - Old_Z) + Long_Float'Max (0.0, Noise)));
+               else abs (Zd - Old_Z) <= abs (Pred_Z - Old_Z) + Long_Float'Max (0.0, Noise)));
 
    --  0.5 = 画面中心(比例,不是系数:u 是 0..1 的画幅比例,中心就在一半处)
    function On_My_Plane (T_Pic, T_Depth, My_Depth : Long_Float) return Long_Float is
