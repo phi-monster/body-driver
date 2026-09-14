@@ -4135,7 +4135,7 @@ package body Act is
                                           Ln : constant Long_Float := Long_Float'Max (1.0e-9, Sqrt (Du * Du + Dv * Dv));
                                           St : constant Long_Float := Long_Float'Max (Ow, 1.0 / Long_Float (Cw));
                                        begin
-                                          P.Tu := P.Cu + Du / Ln * St; P.Tv := P.Cv + Dv / Ln * St;
+                                          P.Tu := P.Cu + Du / Ln * St; P.Tv := P.Cv + Dv / Ln * St; P.Tuv_Z := P.Z;
                                        end;
                                     elsif Rl = "onto" or else Rl = "off" or else Rl = "press" or else Rl = "into" then
                                        --  它站的那个面在哪:它自己的深度 + 它鼓出多少(两个都是量出来的)。
@@ -4146,7 +4146,7 @@ package body Act is
                                           Floor_Z : constant Long_Float := O.Depth + O.Height;
                                        begin
                                           if O.Depth > 0.0 and then P.Z > 0.0 and then O.Height > 0.0 then
-                                             P.Tu := P.Cu; P.Tv := P.Cv;
+                                             P.Tu := P.Cu; P.Tv := P.Cv; P.Tuv_Z := P.Z;
                                              --  into = 皮(这块的中位深度)和它站着的那个面(Floor_Z),正中间。
                                              --  写成两个量出来的深度取中点,不是"高度 × 一个我拍的数"。
                                              P.Tz := (if Rl = "off" then O.Depth - O.Height
@@ -4156,7 +4156,7 @@ package body Act is
                                              P.Wz := 1.0;
                                           else
                                              --  🔴 量不出它鼓出多少也不许停:就朝它本身的远近走,如实说。
-                                             P.Tu := P.Cu; P.Tv := P.Cv; P.Tz := O.Depth;
+                                             P.Tu := P.Cu; P.Tv := P.Cv; P.Tz := O.Depth; P.Tuv_Z := P.Z;
                                              P.Wz := (if O.Depth > 0.0 and then P.Z > 0.0 then 1.0 else 0.0);
                                              Report := Report & "I cannot measure how far item " & Codec.Img (G.Of_Item)
                                                        & " stands out of what it rests on, so I just went to its own distance. ";
@@ -4170,7 +4170,7 @@ package body Act is
                                           Dv : constant Long_Float := O.Cv - P.Cv;
                                        begin
                                           if abs Du > 0.0 or else abs Dv > 0.0 then
-                                             P.Tu := P.Cu; P.Tv := P.Cv; P.Wz := 0.0;
+                                             P.Tu := P.Cu; P.Tv := P.Cv; P.Wz := 0.0; P.Tuv_Z := P.Z;
                                              P.Tang := Wrap (2.0 * Arctan (Dv, Du));
                                              P.Wang := 1.0;
                                           else
@@ -4225,7 +4225,7 @@ package body Act is
                            P.Box_W := Long_Float (It.X1 - It.X0) / Long_Float (Cw); P.Box_H := Long_Float (It.Y1 - It.Y0) / Long_Float (Ch);
                            P.Elong := It.Elong; P.Gray := It.Gray;
                         end if;
-                        P.Tu := P.Cu; P.Tv := P.Cv; P.Tz := P.Z;
+                        P.Tu := P.Cu; P.Tv := P.Cv; P.Tz := P.Z; P.Tuv_Z := P.Z;
                         P.Wz := (if P.Z > 0.0 then 1.0 else 0.0);
                         P.Desc := S ("item " & Codec.Img (G.Item) & " stays exactly where it is");
                         if Pts.Is_Empty or else Pts (0).Arm = P.Arm then
