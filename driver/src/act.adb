@@ -4629,6 +4629,14 @@ package body Act is
                                    & Codec.Fmt (C.Tables (Natural (Ix)).E.B (K, 0), 3));
                         end loop;
                         Put_Line (To_String (Ln));
+                        --  远近那一行:推 +1 我离相机远近变多少(正 = 变远)。方向对不对全看它的正负。
+                        Ln := S ("[身]   点" & Codec.Img (I) & " 表(推 +1 远近变多少,正=变远):");
+                        for K in 0 .. Chan.Per_Arm - 1 loop
+                           Append (Ln, " ch" & Codec.Img (P.Arm * Chan.Per_Arm + K) & "="
+                                   & Codec.Fmt (C.Tables (Natural (Ix)).E.B (K, 2), 3)
+                                   & (if C.Tables (Natural (Ix)).Trust (K) then "" else "(没证过)"));
+                        end loop;
+                        Put_Line (To_String (Ln));
                      end if;
                   end;
                end loop;
