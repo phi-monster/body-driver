@@ -1119,6 +1119,11 @@ package body Act is
       S1 : Sum_Grid := [others => [others => [others => 0.0]]];   --  各次列值之和
       S2 : Sum_Grid := [others => [others => [others => 0.0]]];   --  各次列值平方和
       Nrep : array (0 .. Chan.Per_Arm - 1) of Natural := [others => 0];
+      --  🔴 上一轮(幅度的一半)这一通道最多的那个点跑了多远。加倍之后【一点没多跑】⇒ 再加也没用,
+      --  这一列就是零 —— 零本身是一次正确的测量("这个通道不动它")。
+      --  HC 实测:腕转那几根一路加码到 0.8192 rad(47°,owner 看 JA 视频原话"机械臂全程在发癫"),
+      --  每一档都是 0.0000 画幅,加了五档等于白甩五次。
+      Last_Ran : array (0 .. Chan.Per_Arm - 1) of Long_Float := [others => -1.0];
       --  重复够了(或者中途翻脸了)⇒ 把均值写进表,把散布÷|均值| 写进散布格
       procedure Finalise (K : Natural) is
       begin
@@ -1323,6 +1328,14 @@ package body Act is
                            Put_Line ("[身]     通道" & Natural'Image (Chn) & ":到 " & Codec.Fmt (Amp, 4) & " 一个点也没动过地板(最多的跑了 " & Codec.Fmt (Ran_Max, 4) & " 画幅,地板 " & Codec.Fmt (Floor_Px, 4) & ")⇒ 这一段不用它");
                            exit;
                         end if;
+                        --  加倍了却一点没多跑 ⇒ 这一列是零,再加码只是空甩胳膊
+                        if Last_Ran (K) >= 0.0 and then Ran_Max <= Last_Ran (K) then
+                           Put_Line ("[身]     通道" & Natural'Image (Chn) & ":加倍到 " & Codec.Fmt (Amp, 4) &
+                                     " 之后点一点没多跑(" & Codec.Fmt (Last_Ran (K), 4) & " ⇒ " & Codec.Fmt (Ran_Max, 4) &
+                                     " 画幅)⇒ 这一列就是零,不再加码空甩");
+                           exit;
+                        end if;
+                        Last_Ran (K) := Ran_Max;
                         Amp := Amp * 2.0;
                      end if;
                   end;
