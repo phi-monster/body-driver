@@ -776,7 +776,12 @@ package body Act is
 
    --  到位了没:画面上进了跟踪噪声,且远近的差不超过这块东西自己的尺寸(全是量出来的,没有写死的容差)
    function Reached (P : Point; Track_Floor : Long_Float; Cw, Ch : Natural) return Boolean is
-      Tol : constant Long_Float := Long_Float'Max (P.Height, Long_Float'Max (P.Box_W, P.Box_H) * P.Z);
+      --  🔴 远近的容差 = 【这块东西自己有多大】(看着多大 × 离我多远 = 它的真实尺寸;两个都是量出来的,
+      --  画幅比例 × 米 = 米)。以前还取了 P.Height 的较大者,而 Height 是"比背景鼓出多少" ——
+      --  在手腕相机里球后面的背景是远处的墙,不是它底下的桌面,于是一个 7 cm 的棒球读成 0.401 m。
+      --  HI 实测:`结局 = arrived` 只走了 1 推,而远近还差 0.200 m —— 拿 0.4 当容差当然"到了"。
+      --  这正是 FO"夹太靠上、一合把球顶飞"的同一类:到位判据比东西本身还松。
+      Tol : constant Long_Float := Long_Float'Max (P.Box_W, P.Box_H) * P.Z;
    begin
       if Err_Of (P) > Track_Floor then
          return False;
