@@ -187,8 +187,11 @@ package body Act is
    function Into_Depth (Skin, Surface : Long_Float) return Long_Float is
      ((Skin + Surface) / 2.0);
 
-   function Depth_Ok (Zd, Old_Z, Pred_Z, Noise : Long_Float) return Boolean is
+   function Depth_Ok (Zd, Old_Z, Pred_Z, Noise, Last_Rejected : Long_Float) return Boolean is
      (Old_Z <= 0.0
+      --  连着两次被拒、而两次读数互相吻合 ⇒ 新值是可重复的,旧基准才是陈的 ⇒ 收
+      or else (Last_Rejected > 0.0
+               and then abs (Zd - Last_Rejected) <= Long_Float'Max (0.0, Noise))
       or else (if Pred_Z <= 0.0
                then abs (Zd - Old_Z) <= Long_Float'Max (0.0, Noise)
                else abs (Zd - Pred_Z) <= abs (Pred_Z - Old_Z) + Long_Float'Max (0.0, Noise)));
@@ -715,6 +718,11 @@ package body Act is
       --  Z 有可能是按位姿猜出来的、从没被眼睛校过,拿猜测当基准会把真读数全挡在外面
       --  (JE 实测:深度从此纹丝不动 2.422,而真读数在 0.45~0.61,和球的 0.64 同一个尺度)。
       Z_Seen : Long_Float := 0.0;
+      --  🔴 上一次【被闸拒掉】的读数。闸拒了一次就永远拿旧值当基准 ⇒ 真实深度一旦变了就锁死:
+      --  HE 实测手的深度连着 12 步一模一样 2.182 m,而它在画面里一直在动,差距全卡在"远近"上不动。
+      --  这是"永不响的闸"那一类。escape:两次被拒的读数【互相吻合】(差在这一点自己的读深抖动之内)
+      --  ⇒ 两次独立测量一致,胜过一个陈旧的基准 ⇒ 收下新值。零系数,用的是量出来的 Z_Noise。
+      Z_Rej : Long_Float := 0.0;
       Err0 : Long_Float := 0.0;
       Lost : Boolean := False;   --  这一步没在画面里认出它,位置是按表猜的
       Has_Meas : Boolean := False;              --  眼睛(光流)另外量到的位置,只用来修表
@@ -992,12 +1000,15 @@ package body Act is
                         --  🔴 没有预测值时这道闸以前【整条失效】(Pred_Z <= 0.0 直接短路成真),于是任何读数都收:
                         --  FS 实测手指的"离相机多远"一步从 0.454 m 跳到 0.010 m(离镜头一厘米,物理上不可能),
                         --  抓握的高低判据当场作废。没有预测就退回"一步最多变自己抖动那么多",而不是不管。
-                        if Depth_Ok (Zd, Old_Z, Pred_Z, P.Z_Noise) then
-                           P.Z := Zd; P.Z_Seen := Zd;
-                        elsif Pred_Z > 0.0 then
-                           P.Z := Pred_Z;
+                        if Depth_Ok (Zd, Old_Z, Pred_Z, P.Z_Noise, P.Z_Rej) then
+                           P.Z := Zd; P.Z_Seen := Zd; P.Z_Rej := 0.0;
                         else
-                           P.Z := Old_Z;
+                           P.Z_Rej := Zd;   --  记下这次被拒的:下一次要是又读到同一个数,就是它对、旧的陈了
+                           if Pred_Z > 0.0 then
+                              P.Z := Pred_Z;
+                           else
+                              P.Z := Old_Z;
+                           end if;
                         end if;
                      end if;
                   end;
@@ -2092,10 +2103,11 @@ package body Act is
                            --  原版这道闸写的是"表预测的变化 + 距离的【一成】",那个一成是人拍的;
                            --  换成这一点自己量到的深度抖动地板(Z_Noise),零系数,而且比一成更对。
                            if not Picture.Is_Nan (Zd) and then Zd > 0.0 then
-                              if Depth_Ok (Zd, Old_Z, Old_Z + Pr (2), P.Z_Noise) then
-                                 P.Z := Zd; P.Z_Seen := Zd;
+                              if Depth_Ok (Zd, Old_Z, Old_Z + Pr (2), P.Z_Noise, P.Z_Rej) then
+                                 P.Z := Zd; P.Z_Seen := Zd; P.Z_Rej := 0.0;
                               else
-                                 P.Z := Old_Z;   --  这一帧读到的是别的面,留上一次真读到的
+                                 P.Z_Rej := Zd;   --  记下被拒的那个数;连着两次一致就说明旧基准陈了
+                                 P.Z := Old_Z;    --  这一帧读到的是别的面,留上一次真读到的
                               end if;
                            end if;
                         end;

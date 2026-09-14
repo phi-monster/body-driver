@@ -1019,16 +1019,24 @@ begin
          Crazy : constant Long_Float := 0.010;  --  这一帧读出来的(物理上不可能)
          Noise : constant Long_Float := 0.02;   --  这一点自己量到的读深抖动
       begin
-         Check (not Act.Depth_Ok (Crazy, Was, 0.0, Noise),
+         Check (not Act.Depth_Ok (Crazy, Was, 0.0, Noise, 0.0),
                 "深度:没有预测值时也要挡 —— 0.454 m 一步跳到 0.010 m 不许收(旧写法这里整条闸短路放行)");
-         Check (Act.Depth_Ok (0.460, Was, 0.0, Noise),
+         Check (Act.Depth_Ok (0.460, Was, 0.0, Noise, 0.0),
                 "深度:没有预测值时,变化在自己的抖动之内 ⇒ 照收");
-         Check (Act.Depth_Ok (Crazy, 0.0, 0.0, Noise),
+         Check (Act.Depth_Ok (Crazy, 0.0, 0.0, Noise, 0.0),
                 "深度:头一次读到(还没有上一次)⇒ 照收,没有基准可比");
-         Check (Act.Depth_Ok (0.300, Was, 0.290, Noise),
+         Check (Act.Depth_Ok (0.300, Was, 0.290, Noise, 0.0),
                 "深度:表预测这一步会走到 0.290,读到 0.300 ⇒ 收(大跳但预测过)");
-         Check (not Act.Depth_Ok (0.010, Was, 0.440, Noise),
+         Check (not Act.Depth_Ok (0.010, Was, 0.440, Noise, 0.0),
                 "深度:表预测只走到 0.440,却读出 0.010 ⇒ 不收");
+         --  🔴 闸不许把自己锁死:HE 实测手的深度连着 12 步一模一样 2.182 m,而它在画面里一直在动 ——
+         --  拒了一次就永远拿旧值当基准,真实深度一变就再也收不回来("永不响的闸"那一类)。
+         Check (not Act.Depth_Ok (0.900, Was, 0.0, Noise, 0.0),
+                "深度:第一次读到 0.900(离 0.454 很远)⇒ 先不收,记下来");
+         Check (Act.Depth_Ok (0.905, Was, 0.0, Noise, 0.900),
+                "深度:下一帧又读到 0.905,和上次被拒的 0.900 吻合 ⇒ 两次独立测量一致,收下 —— 闸有出路");
+         Check (not Act.Depth_Ok (0.300, Was, 0.0, Noise, 0.900),
+                "深度:这次读 0.300,和上次被拒的 0.900 对不上 ⇒ 仍然不收(出路不是无条件放行)");
       end;
       --  🔴 画面上重合 ≠ 真的在一起(FZ 实测:头顶相机报差 0.062 幅"几乎压上了",爪子在球上方 30 厘米)。
       --  数字:球在 0.64 m、爪子在 0.34 m(高出 30 cm),球在画面里偏左到 0.40。
