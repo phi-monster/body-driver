@@ -1,6 +1,7 @@
 --  离线自检:不连仿真就能跑的那些量法和格式。每条断言写清楚"错了会是什么病"。
 with Ada.Text_IO; use Ada.Text_IO;
 with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
+with Ada.Strings.Fixed;
 with Bytes; use Bytes;
 with Codec;
 with Msgpack;
@@ -1012,6 +1013,25 @@ begin
          Check (Kept_Noise = 0,
                 "握区:每步换一个像素闪一下的(噪声)一个都没留(" & Codec.Img (Kept_Noise)
                 & ")—— 旧写法(整段取并集)会把它们全收进来,握区就被钉到画面边上");
+      end;
+      --  🔴🔴 owner 2026-09-14 死命令:"到了没到"只有脑能判,身体不许说 arrived。
+      --  它自己判过并且判错了:一段只走 1 推就宣布"到了",实际离点名的东西还差 0.2 m、
+      --  只有该有大小的 7.7%。⇒ 语法里不列这个词;脑真写了也要在【动之前】当场退回并说明。
+      declare
+         use Sinew;
+         G : constant Program := Sinew.Parse ("do grasper into the ball until arrived or 10 steps");
+         Ok_One : constant Program := Sinew.Parse ("do grasper into the ball until touched or 10 steps");
+      begin
+         Check (Sinew.Grammar'Length > 0
+                and then Ada.Strings.Fixed.Index (Sinew.Grammar, "arrived") = 0,
+                "到位:语法里不再有 arrived 这个词(到了没到只有脑能判)");
+         Check (Sinew.Grammar'Length > 0
+                and then Ada.Strings.Fixed.Index (Sinew.Grammar, "touched") > 0,
+                "到位:量得到的事件词还在(touched)—— 删的是意见,不是事件");
+         Check (G.Ok and then G.Code (0).Until_Oc = Oc_Arrived,
+                "到位:脑真写了 arrived,解析层照样读得出来(才好在编译期退回并说明,而不是悄悄换成步数)");
+         Check (Ok_One.Ok and then Ok_One.Code (0).Until_Oc = Oc_Touched,
+                "到位:until touched 不受影响");
       end;
       --  🔴 深度读数收不收。数字取自 FS 实测:手指上一次真读到 0.454 m,这一帧读出 0.010 m(离镜头一厘米)。
       declare

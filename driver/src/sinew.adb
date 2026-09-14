@@ -41,7 +41,7 @@ package body Sinew is
 
    function Outcome_Cn (O : Outcome) return String is
      (case O is
-         when Oc_None => "(没说到什么为止)", when Oc_Arrived => "约束满足了",
+         when Oc_None => "(没说到什么为止)", when Oc_Arrived => "到了没到只有你能判,这个词我说不出口",
          when Oc_Touched => "碰上了", when Oc_Stuck => "命令了但身体没走",
          when Oc_Slipped => "手里的东西掉了", when Oc_Lost => "看不见我正跟着的东西了",
          when Oc_Free => "它离开了原来靠着的面", when Oc_Settled => "画面不再变了",
@@ -62,8 +62,11 @@ package body Sinew is
    function All_Outcomes return String is
       S : Unbounded_String;
    begin
+      --  🔴 arrived / refused 不列进语法(owner 2026-09-14):
+      --  arrived = "到了没到",只有脑能判;refused = 我做不到时回给脑的话,等不来。
+      --  两个都在编译期当场退回并说明,不许悄悄换成步数上限。
       for O in Outcome loop
-         if O /= Oc_None then
+         if O /= Oc_None and then O /= Oc_Arrived and then O /= Oc_Refused then
             Append (S, (if Length (S) > 0 then " " else "") & Outcome_Word (O));
          end if;
       end loop;

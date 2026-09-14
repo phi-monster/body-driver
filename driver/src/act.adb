@@ -775,31 +775,7 @@ package body Act is
      (4.0 / Long_Float'Max (4.0, Long_Float'Max (P.Box_W * Long_Float (Cw), P.Box_H * Long_Float (Ch))));
 
    --  到位了没:画面上进了跟踪噪声,且远近的差不超过这块东西自己的尺寸(全是量出来的,没有写死的容差)
-   function Reached (P : Point; Track_Floor : Long_Float; Cw, Ch : Natural) return Boolean is
-      --  🔴 远近的容差 = 【这块东西自己有多大】(看着多大 × 离我多远 = 它的真实尺寸;两个都是量出来的,
-      --  画幅比例 × 米 = 米)。以前还取了 P.Height 的较大者,而 Height 是"比背景鼓出多少" ——
-      --  在手腕相机里球后面的背景是远处的墙,不是它底下的桌面,于是一个 7 cm 的棒球读成 0.401 m。
-      --  HI 实测:`结局 = arrived` 只走了 1 推,而远近还差 0.200 m —— 拿 0.4 当容差当然"到了"。
-      --  这正是 FO"夹太靠上、一合把球顶飞"的同一类:到位判据比东西本身还松。
-      Tol : constant Long_Float := Long_Float'Max (P.Box_W, P.Box_H) * P.Z;
-   begin
-      if Err_Of (P) > Track_Floor then
-         return False;
-      end if;
-      if P.Wsize > 0.0 and then P.Tsize > 0.0 and then abs (P.Tsize - P.Size) / P.Tsize > 0.25 then
-         return False;   --  看着差过四分之一就还没到(比例,无量纲)
-      end if;
-      --  🔴 朝向也要算进"到没到" —— 否则脑说"瞄准它",身体一推就报到位(FS 实测:face 走 1 推就"到了")。
-      --  这一项本来就一直在(圆的东西转不出主轴,它自己会关掉 Wang=0),只是判据从来没看过它。
-      --  容差用这块自己的朝向分辨率(最长那边偏一个像素),不是拍一个角度。
-      if P.Wang > 0.0 and then abs (Wrap (P.Tang - P.Ang)) > Ang_Floor (P, Cw, Ch) then
-         return False;
-      end if;
-      if P.Wz > 0.0 and then P.Z > 0.0 and then not Picture.Is_Nan (P.Tz) then
-         return abs (P.Tz - P.Z) <= Long_Float'Max (Tol, 1.0e-9);
-      end if;
-      return True;
-   end Reached;
+   --  🔴 Reached 已删(owner 2026-09-14):"到了没到"只有脑能判,身体不许自己算一个容差说"够近了"。
 
    function Held_Now (C : Context; Arm : Natural) return Integer is
      (if C.Wld.Holding and then C.Wld.Held_Arm = Integer (Arm) then C.Wld.Held_Slot else -1);
@@ -1497,10 +1473,10 @@ package body Act is
 
    --  ── 一段 = 反复做五件事:①打算怎么走 ②走 ③看 ④学 ⑤判 ──
    --  每件事一个小过程;这一步发生了什么全记在 Note 里(字段名就是人话),五件事之间只靠它说话。
-   --  🔴 Want_Arrived:脑有没有写 "until arrived"。没写就【不许】因为"我觉得到了"而停 ——
+   --  🔴 "到了没到"只有脑能判(owner 2026-09-14)。身体只报量到的事件,不报"我觉得到了"。
    --  身体唯一能结束一节的理由,是脑写的那个 until(含它给的步数),外加"我物理上做不到"。
    procedure Run_Segment (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Cam : Natural; Pts : in out Point_Vectors.Vector;
-                          Until_Kind : Monitor.Until_Kind; Want_Arrived : Boolean;
+                          Until_Kind : Monitor.Until_Kind;
                           Step_Limit : Natural; Amount : Long_Float; Avoid : Item_Vectors.Vector;
                           Event : out Unbounded_String; Steps_Taken : out Natural; Blocked_Out : out Boolean; Beats : out Natural) is
       Arm : constant Natural := Pts (0).Arm;
@@ -1969,10 +1945,9 @@ package body Act is
             N0 : constant Long_Float := Table.Norm (Note.Cmd, Chan.Per_Arm);
          begin
             if N0 <= C.Map.EE_Noise then
-               if Want_Arrived then
-                  --  只有脑写了 until arrived 才准因为"到了"而停。
-                  Note.Say_Stop := S ("amount: already there (what is left to push is within my own noise)");
-               elsif N0 > 0.0 then
+               --  同上:剩下要推的比我自己的噪声还小,也【不许】宣布"已经到了" ——
+               --  那同样是身体在替脑判断。它是一个事实,说出来,继续走。
+               if N0 > 0.0 then
                   --  🔴 脑没让停 ⇒ 不许发一个身体根本走不动的命令。放大到我能走的最小一步,方向不变。
                   --  (GK 实测:不放大的话每一步都是零命令,30 步全是空转。)
                   declare
@@ -2571,19 +2546,12 @@ package body Act is
                                 when Monitor.U_Free => S ("free: it now stands higher off the surface than when I started - it has come free"));
             return;
          end if;
-         declare
-            All_There : Boolean := True;
-         begin
-            for P of Pts loop
-               if not Reached (P, Fl.Track * 2.0, Cw, Ch) then
-                  All_There := False;
-               end if;
-            end loop;
-            if All_There and then Want_Arrived then
-               Note.Say_Stop := S ("amount: arrived (in the picture and at the same distance as my fingers)");
-               return;
-            end if;
-         end;
+         --  🔴🔴 owner 2026-09-14 死命令:【"到了没到"只有脑能判】。身体这里原来自己算一个容差,
+         --  容差之内就宣布"到了"并停下 —— 那是身体在替脑做判断,而且它判错过:
+         --  HI 实测 `结局 = arrived` 只走了 1 推,而远近还差 0.200 m,合爪时球离两指之间 0.289 画幅、
+         --  只有该有大小的 7.7%。容差换了一版还是错(容差本身就不该存在)。
+         --  身体只许报它【量到的事件】:碰到、顶住、滑了、跟丢、离开了面、合拢停住。
+         --  "我觉得够近了"不是事件,是意见。⇒ 整段删掉,不再有任何"到了"的自停。
          --  🔴 原来这里有一条"停止靠近了 —— 要么有东西挡着我,要么这条胳膊够不了更远"。
          --  那是身体自己发明的终止条件,而且那句解释还常常是假的(真实原因往往是这个视角看不出)。
          --  【删掉】。误差不缩小是一个【事实】,如实记下来给脑看,由脑决定还走不走。
@@ -4548,7 +4516,7 @@ package body Act is
             end loop;
             if not Pts.Is_Empty then
                Put_Line ("[身] ⚙ 一起解" & Natural'Image (Natural (Pts.Length)) & " 条:" & To_String (Desc));
-               Run_Segment (L, C, F, Cam, Pts, Until_K, Say.Until_Kind = "arrived", Step_Limit, Amount, Avoid, Event, Steps_Taken, Blocked, Beats);
+               Run_Segment (L, C, F, Cam, Pts, Until_K, Step_Limit, Amount, Avoid, Event, Steps_Taken, Blocked, Beats);
                C.Last_Outcome := Classify (To_String (Event));
                Feel (C, F);
                Report := Report & "you asked " & Desc & ": " & Event & ". I took " & Codec.Img (Steps_Taken) & " pushes; ";
