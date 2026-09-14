@@ -723,6 +723,12 @@ package body Act is
       --  这是"永不响的闸"那一类。escape:两次被拒的读数【互相吻合】(差在这一点自己的读深抖动之内)
       --  ⇒ 两次独立测量一致,胜过一个陈旧的基准 ⇒ 收下新值。零系数,用的是量出来的 Z_Noise。
       Z_Rej : Long_Float := 0.0;
+      --  🔴🔴 目标的【画面坐标】是在哪个远近上量的。把目标搬到我这个远近平面上再比,
+      --  倍数要用这一个,不是 Tz。HP 实测:`into` 的目标是"左右别动,只把远近走到球的腰上"
+      --  ⇒ Tu/Tv 直接抄的我自己的位置(在【我的】远近上),而 Tz 是球的远近;
+      --  拿 Tz/Z = 1.63 去放大"别动",就把"别动"变成了"一路往画面外走" ——
+      --  被跟的点整天往右沿飘到 u=1.000,根子在这儿。0 = 就在我这个远近上(不放大)。
+      Tuv_Z : Long_Float := 0.0;
       Err0 : Long_Float := 0.0;
       Lost : Boolean := False;   --  这一步没在画面里认出它,位置是按表猜的
       Has_Meas : Boolean := False;              --  眼睛(光流)另外量到的位置,只用来修表
@@ -1447,7 +1453,7 @@ package body Act is
                      Q.Blob := Lb;
                      Q.Par_Tu := P.Tu; Q.Par_Tv := P.Tv;
                      Q.Cu := P.Cu + Ou; Q.Cv := P.Cv + Ov;
-                     Q.Tu := P.Tu + Ou; Q.Tv := P.Tv + Ov;
+                     Q.Tu := P.Tu + Ou; Q.Tv := P.Tv + Ov; Q.Tuv_Z := P.Tuv_Z;
                      if F.Cams (Cam).Has_Depth then
                         --  读深窗口 = 张幅的四分之一,再小也有半个百分点的画幅(比例,无量纲)
                         Zd := Picture.Near_Depth (F.Cams (Cam).Depth, Cw, Ch, Q.Cu, Q.Cv, Long_Float'Max (0.005, Z.Span * 0.25));
@@ -1486,7 +1492,7 @@ package body Act is
                         Q.Par_Tu := P.Tu; Q.Par_Tv := P.Tv;
                         Q.Cu := P.Cu + Ou;
                         Q.Cv := P.Cv + Ov;
-                        Q.Tu := P.Tu + Ou;
+                        Q.Tu := P.Tu + Ou; Q.Tuv_Z := P.Tuv_Z;
                         Q.Tv := P.Tv + Ov;
                         if Lb > 0 then
                            Q.Desc := Null_Unbounded_String;
@@ -1724,9 +1730,14 @@ package body Act is
                   --  爪子在球【上方 30 厘米】,画面上却正好叠住。只比 u 就是在比影子。
                   --  做法:把目标投影到【我这一点自己的那个远近平面】上再比 —— 远处的目标 u 按远近之比从画面中心
                   --  往外放大,那才是"我要走到的那个 u"。误差仍然是 u 的单位(表/预测/走多远的检查全不变)。
-                  if P.Z > 0.0 and then P.Tz > 0.0 and then not Picture.Is_Nan (P.Tz) then
-                     T.Err (0) := On_My_Plane (P.Tu, P.Tz, P.Z) - P.Cu;
-                     T.Err (1) := On_My_Plane (P.Tv, P.Tz, P.Z) - P.Cv;
+                  --  🔴 放大倍数用【目标的画面坐标是在哪个远近上量的】(Tuv_Z),不是目标本身的远近 Tz。
+                  --  `into` 的目标是"左右别动,只把远近走到它的腰上":Tu/Tv 抄的是我自己的位置,
+                  --  在【我的】远近上;拿 Tz/Z 去放大它,"别动"就变成了"一路往画面外走"
+                  --  (HP 实测:目标 (0.766,0.562) = 我自己的位置,放大后"该去 0.935",第二个点更是 1.014,
+                  --   已经在画面外;被跟的点整天往右沿飘到 u=1.000 就是这么来的)。
+                  if P.Z > 0.0 and then P.Tuv_Z > 0.0 then
+                     T.Err (0) := On_My_Plane (P.Tu, P.Tuv_Z, P.Z) - P.Cu;
+                     T.Err (1) := On_My_Plane (P.Tv, P.Tuv_Z, P.Z) - P.Cv;
                   else
                      T.Err (0) := P.Tu - P.Cu;
                      T.Err (1) := P.Tv - P.Cv;
@@ -4041,7 +4052,7 @@ package body Act is
                                               & " right now, so I aimed at where it was last seen. ";
                                  else
                                     P.Desc := S ("item " & Codec.Img (G.Item) & " " & Rl & " item " & Codec.Img (G.Of_Item));
-                                    P.Tu := O.Cu; P.Tv := O.Cv; P.Tz := P.Z; P.Wz := 0.0;
+                                    P.Tu := O.Cu; P.Tv := O.Cv; P.Tz := P.Z; P.Wz := 0.0; P.Tuv_Z := O.Depth;
                                     if Rl = "at" then
                                        if P.To_Grip then
                                           --  它要来的地方 = 我两指之间:区心、区深、【到了跟前该有多大】
@@ -4090,7 +4101,7 @@ package body Act is
                                           declare
                                              Z : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, Cam, Jaw_K_Of (P.Chan_K));
                                           begin
-                                             P.Tu := Z.Cu; P.Tv := Z.Cv; P.Tz := Z.Depth; P.Wz := (if Picture.Is_Nan (Z.Depth) then 0.0 else 1.0);
+                                             P.Tu := Z.Cu; P.Tv := Z.Cv; P.Tz := Z.Depth; P.Wz := (if Picture.Is_Nan (Z.Depth) then 0.0 else 1.0); P.Tuv_Z := Z.Depth;
                                              P.Tsize := Long_Float'Max (1.0e-6, Z.Span);
                                              P.Wsize := (if Z.Span > 0.0 then 1.0 else 0.0);
                                           end;
@@ -4172,7 +4183,7 @@ package body Act is
                                        --  🔴 认不得的关系【不许静悄悄地什么都不做】。词表长出一个新词而执行器还没实现它,
                                        --  静默 no-op 会让脑以为它说的话被执行了 —— 这正是整套设计要杀掉的那一类失败。
                                        --  🔴 运行期不许拦(认不得的词是编译器的活)。当作"贴上它"走。
-                                       P.Tu := O.Cu; P.Tv := O.Cv; P.Tz := O.Depth;
+                                       P.Tu := O.Cu; P.Tv := O.Cv; P.Tz := O.Depth; P.Tuv_Z := O.Depth;
                                        P.Wz := (if O.Depth > 0.0 and then P.Z > 0.0 then 1.0 else 0.0);
                                        Report := Report & "I do not know the relation " & Rl
                                                  & ", so I went to it. ";
@@ -4326,7 +4337,7 @@ package body Act is
                         P.Size := Sqrt (Long_Float (O.Count) / Long_Float'Max (1.0, Long_Float (Cw * Ch)));
                         P.Ang := 2.0 * Arctan (O.Av, O.Au);
                         P.Elong := O.Elong; P.Gray := O.Gray;
-                        P.Tu := Z.Cu; P.Tv := Z.Cv; P.Tz := Z.Depth; P.Wz := (if Picture.Is_Nan (Z.Depth) then 0.0 else 1.0);
+                        P.Tu := Z.Cu; P.Tv := Z.Cv; P.Tz := Z.Depth; P.Wz := (if Picture.Is_Nan (Z.Depth) then 0.0 else 1.0); P.Tuv_Z := Z.Depth;
                         --  "到了跟前该有多大":看着多大与距离成反比 —— 现在在 d、该到 d*,就该大 d/d* 倍。
                         --  (不能用瓣心距:手自己的眼睛里两指贴在画面两端,那个数 ≈ 整幅画)
                         P.Tsize := (if not Picture.Is_Nan (Z.Depth) and then Z.Depth > 0.0 and then P.Z > 0.0
@@ -4347,7 +4358,7 @@ package body Act is
                         begin
                            P.Kind := Piece_Pt; P.Chan_K := Chan.Per_Arm; P.Cu := Tr.Cu; P.Cv := Tr.Cv; P.Z := Tr.Z; P.Known := Tr.Known;
                            --  同上:合到它那一面,高低由脑说了算
-                           P.Tu := O.Cu; P.Tv := O.Cv; P.Tz := O.Depth; P.Wz := (if O.Depth > 0.0 and then Tr.Z > 0.0 then 1.0 else 0.0);
+                           P.Tu := O.Cu; P.Tv := O.Cv; P.Tz := O.Depth; P.Wz := (if O.Depth > 0.0 and then Tr.Z > 0.0 then 1.0 else 0.0); P.Tuv_Z := O.Depth;
                            P.Desc := S ("grip " & Codec.Img (A + 1) & " onto item " & Codec.Img (Say.Grip_On) & " (fingertips to its middle)");
                         end;
                      end if;
@@ -4587,8 +4598,9 @@ package body Act is
                               & Codec.Fmt (P.Cu, 3) & "," & Codec.Fmt (P.Cv, 3) & ") 深 " & Codec.Fmt (P.Z, 3)
                               & " · 目标 (" & Codec.Fmt (P.Tu, 3) & "," & Codec.Fmt (P.Tv, 3) & ") 深 "
                               & Codec.Fmt (P.Tz, 3)
-                              & " · 搬到我这个远近后该去 " & Codec.Fmt (On_My_Plane (P.Tu, P.Tz, P.Z), 3)
-                              & " ⇒ 左右要走 " & Codec.Fmt (On_My_Plane (P.Tu, P.Tz, P.Z) - P.Cu, 3) & " 画幅");
+                              & " · 目标画面坐标量在 " & Codec.Fmt (P.Tuv_Z, 3)
+                              & " · 搬到我这个远近后该去 " & Codec.Fmt (On_My_Plane (P.Tu, P.Tuv_Z, P.Z), 3)
+                              & " ⇒ 左右要走 " & Codec.Fmt (On_My_Plane (P.Tu, P.Tuv_Z, P.Z) - P.Cu, 3) & " 画幅");
                      Put_Line (To_String (Ln));
                      if Ix >= 0 then
                         Ln := S ("[身]   点" & Codec.Img (I) & " 表(推 +1 画面往哪跑,左右那一行):");
