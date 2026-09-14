@@ -2189,9 +2189,20 @@ package body Act is
                      if F.Cams (P.Cam).Has_Depth then
                         declare
                            Zn : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, P.Cam);
+                           --  🔴 读"我离相机多远"要读在【我这一瓣自己身上】。
+                           --  区心是【两指之间的空】,那儿什么都没有,读到的是它背后的东西 ——
+                           --  HW 实测:爪子读 2.19 m 而球读 3.53 m,差了 1.34 m;桌面上不可能有这么大的高度差,
+                           --  是读窗落在空处、读到了更靠近相机的自己的大臂。
+                           --  (LAB 3b9d570 原话:"区心是两指之间的空,读到的是桌面"。)
+                           --  瓣是量出来的:一瓣=吸盘,两瓣=两指,七瓣=七指,这里取第一瓣的位置,零身体假设。
+                           Lb : constant Zone.Lobe := Zone.Lobe_Of (Zn, 0);
+                           Ru : constant Long_Float := (if P.Kind = Piece_Pt and then P.Blob < 0
+                                                        and then Zn.Valid and then Lb.Valid then Lb.Cu else P.Cu);
+                           Rv : constant Long_Float := (if P.Kind = Piece_Pt and then P.Blob < 0
+                                                        and then Zn.Valid and then Lb.Valid then Lb.Cv else P.Cv);
                            Zd : constant Long_Float :=
                              Picture.Near_Depth (F.Cams (P.Cam).Depth, F.Cams (P.Cam).W, F.Cams (P.Cam).H,
-                                                 P.Cu, P.Cv, Lobe_Win (Zn, F.Cams (P.Cam).W, F.Cams (P.Cam).H));
+                                                 Ru, Rv, Lobe_Win (Zn, F.Cams (P.Cam).W, F.Cams (P.Cam).H));
                            --  🔴 闸盯【上一次真读到的】远近,不是 P.Z —— P.Z 可能是按位姿猜的、从没被眼睛校过
                            Old_Z : constant Long_Float := (if P.Z_Seen > 0.0 then P.Z_Seen else P.Z);
                         begin
