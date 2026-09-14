@@ -2178,6 +2178,15 @@ package body Act is
                               then
                                  P.Z := Zd; P.Z_Seen := Zd; P.Z_Rej := 0.0;
                               else
+                                 --  🔴 打出来:读到多少、上次真读到多少、表预测这一步走多少、抖动多少、上次被拒的是多少。
+                                 --  HR 实测:深度 8 推纹丝不动 2.062,而点在画面里确实在动 ⇒ 每一读都被挡,
+                                 --  光看"差 1.498 m"看不出是挡的还是真没动。
+                                 Put_Line ("[身]     深度被挡:读到 " & Codec.Fmt (Zd, 3)
+                                           & " · 上次真读到 " & Codec.Fmt (Old_Z, 3)
+                                           & " · 表说这一步走 " & Codec.Fmt (Pr (2), 3)
+                                           & " · 这一点读深抖动 " & Codec.Fmt (P.Z_Noise, 3)
+                                           & " · 上次被拒 " & Codec.Fmt (P.Z_Rej, 3)
+                                           & (if P.Lost then " · 此刻跟丢了(出路不给)" else ""));
                                  P.Z_Rej := Zd;   --  记下被拒的那个数;连着两次一致就说明旧基准陈了
                                  P.Z := Old_Z;    --  这一帧读到的是别的面,留上一次真读到的
                               end if;
