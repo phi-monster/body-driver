@@ -73,6 +73,16 @@ package body Act is
 
    function Track_Idx (C : Context; Arm, Cam : Natural) return Natural is (Arm * C.Map.N_Cams + Cam);
 
+   --  一段动作同时用所有相机 ⇒ 每台相机的"走之前那一拍"都要留着(光流按点自己那台相机算)
+   function All_Gray (F : Plug.Frame) return Buf_Vectors.Vector is
+      V : Buf_Vectors.Vector;
+   begin
+      for Cm in 0 .. Natural (F.Cams.Length) - 1 loop
+         V.Append (F.Cams (Cm).Gray);
+      end loop;
+      return V;
+   end All_Gray;
+
    function Cam_Arm (C : Context; Cam : Natural) return Integer is
    begin
       for A in 0 .. Natural (C.Map.Cam_On_Arm.Length) - 1 loop
@@ -1166,11 +1176,12 @@ package body Act is
          begin
             for I in 0 .. Natural (Pts.Length) - 1 loop
                --  读深窗口 = 张幅的四分之一,再小也有半个百分点的画幅(比例,无量纲)
-               Z1 (I) := Picture.Near_Depth (F.Cams (Cam).Depth, Cw, Ch, Pts (I).Cu, Pts (I).Cv, Long_Float'Max (0.005, Z.Span * 0.25));
+               Z1 (I) := Picture.Near_Depth (F.Cams (Pts (I).Cam).Depth, F.Cams (Pts (I).Cam).W, F.Cams (Pts (I).Cam).H,
+                                             Pts (I).Cu, Pts (I).Cv, Long_Float'Max (0.005, Z.Span * 0.25));
             end loop;
             declare
                Was0 : constant Point_Vectors.Vector := Pts;
-               Before0 : constant Buf := F.Cams (Cam).Gray;
+               Before0_All : Buf_Vectors.Vector := All_Gray (F);
             begin
                Selfmap.Idle (L, F, 1, Ok2);
                --  静止一拍,量"看着多大/朝向"自己抖多少
@@ -1178,7 +1189,7 @@ package body Act is
                   declare
                      P2 : Point := Pts (I);
                   begin
-                     Retrack (C, F, Cam, Before0, P2, Was0 (I).Cu, Was0 (I).Cv, False);
+                     Retrack (C, F, P2.Cam, Before0_All (P2.Cam), P2, Was0 (I).Cu, Was0 (I).Cv, False);
                      Floor_S (I) := Long_Float'Max (4.0 * abs (P2.Size - Was0 (I).Size), Size_Floor (Cw));
                      Floor_A (I) := Long_Float'Max (4.0 * abs (Wrap (P2.Ang - Was0 (I).Ang)), Ang_Floor (Was0 (I), Cw, Ch));
                   end;
@@ -1187,7 +1198,8 @@ package body Act is
             for I in 0 .. Natural (Pts.Length) - 1 loop
                declare
                   --  读深窗口 = 张幅的四分之一,再小也有半个百分点的画幅(比例,无量纲)
-                  Z2 : constant Long_Float := Picture.Near_Depth (F.Cams (Cam).Depth, Cw, Ch, Pts (I).Cu, Pts (I).Cv, Long_Float'Max (0.005, Z.Span * 0.25));
+                  Z2 : constant Long_Float := Picture.Near_Depth (F.Cams (Pts (I).Cam).Depth, F.Cams (Pts (I).Cam).W, F.Cams (Pts (I).Cam).H,
+                                                                 Pts (I).Cu, Pts (I).Cv, Long_Float'Max (0.005, Z.Span * 0.25));
                   Zr : constant Long_Float := (if Pts (I).Z > 0.0 then Pts (I).Z else 1.0);
                begin
                   --  地板 = 两拍读深抖动的 4 倍(倍数,无量纲),再小也有距离的百分之一(比例,无量纲)
@@ -1232,7 +1244,7 @@ package body Act is
                loop
                   declare
                      A : Table.Vec := Table.Zero_Vec;
-                     Before : constant Buf := F.Cams (Cam).Gray;
+                     Before_All : constant Buf_Vectors.Vector := All_Gray (F);
                      Was : constant Point_Vectors.Vector := Pts;
                      Deliv, Back : Table.Vec;
                      Ok2 : Boolean;
@@ -1256,7 +1268,7 @@ package body Act is
                            W0 : constant Point := Was (I);
                            Ran, Dz : Long_Float;
                         begin
-                           Retrack (C, F, Cam, Before, P, W0.Cu, W0.Cv, True);
+                           Retrack (C, F, P.Cam, Before_All (P.Cam), P, W0.Cu, W0.Cv, True);
                            Ran := Sqrt ((P.Cu - W0.Cu) ** 2 + (P.Cv - W0.Cv) ** 2);
                            Dz := (if P.Z > 0.0 and then W0.Z > 0.0 then abs (P.Z - W0.Z) else 0.0);
                            Ran_Max := Long_Float'Max (Ran_Max, Ran);
@@ -1292,7 +1304,7 @@ package body Act is
                                   Codec.Fmt (Ran_Max, 4) & " 画幅,深度变 " & Codec.Fmt ((if Pts (0).Z > 0.0 and then Was (0).Z > 0.0 then Pts (0).Z - Was (0).Z else 0.0), 4));
                      end if;
                      declare
-                        Before2 : constant Buf := F.Cams (Cam).Gray;
+                        Before2_All : constant Buf_Vectors.Vector := All_Gray (F);
                      begin
                         Selfmap.Go (L, C.Map, Arm, P0, Jaw, F, Back, Frames, Ok2);
                         if not Ok2 then
@@ -1303,7 +1315,7 @@ package body Act is
                            declare
                               P : Point := Pts (I);
                            begin
-                              Retrack (C, F, Cam, Before2, P, Was (I).Cu, Was (I).Cv, True);
+                              Retrack (C, F, P.Cam, Before2_All (P.Cam), P, Was (I).Cu, Was (I).Cv, True);
                               P.Cu := Was (I).Cu; P.Cv := Was (I).Cv; P.Z := Was (I).Z;   --  推回起点了:点回到原处(比光流往返的累积误差可信)
                               Pts.Replace_Element (I, P);
                            end;
@@ -1358,7 +1370,7 @@ package body Act is
    begin
       for P of Pts loop
          declare
-            Z : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, Cam, Jaw_K_Of (P.Chan_K));
+            Z : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, P.Cam, Jaw_K_Of (P.Chan_K));
          begin
             --  🔴🔴 每一瓣一个接触点,瓣数【读身体量到的那个数】,不许写死。
             --  以前这里写 Z.N_Lobes = 2:7 指爪、软体臂、吸盘一律不展开 —— owner 揪出过一次,换了个地方又长出来。
@@ -1507,7 +1519,12 @@ package body Act is
          Say_Stop : Unbounded_String;                   --  非空 = 这一段到此为止,内容就是给脑的话
       end record;
       Note : Note_Rec;
-      Before : Buf;                      --  走之前那一拍的灰度(光流用)
+      --  🔴 一段动作【同时用所有相机】(owner 死命令)。以前整段只在一台相机里解:
+      --  "我的手在哪、目标在哪、差多少、推哪几根"全在单只眼里算 ⇒ 必须选一只眼 ⇒
+      --  选中了唯一看不见自己手的那只(不动的那台,开合扫出来的是噪声,填充率 0.015)⇒ 手的位置是编的 ⇒ 全线中毒。
+      --  FO 没这个病只是因为当年只有一只眼可选,而那只正好是看得见手的腕相机 —— 运气,不是设计。
+      --  现在每个点带着自己那台相机(Point.Cam),走之前的灰度也每台各存一份。
+      Before_All : Buf_Vectors.Vector;   --  走之前那一拍的灰度,每台相机各一份(光流用)
       Was : Point_Vectors.Vector;        --  走之前各点在哪
       Was_Regs : Picture.Regions;        --  走之前世界里各块在哪
 
@@ -1585,7 +1602,7 @@ package body Act is
          Ok_Out := True;
          for I in 0 .. Natural (Pts.Length) - 1 loop
             declare
-               Idx : constant Integer := Find_Effect (C, Arm, Cam, Pts (I).Kind, Pts (I).Chan_K, Pts (I).Blob);
+               Idx : constant Integer := Find_Effect (C, Arm, Pts (I).Cam, Pts (I).Kind, Pts (I).Chan_K, Pts (I).Blob);
             begin
                if Idx >= 0 and then (for some K in 0 .. Chan.Per_Arm - 1 => C.Tables (Natural (Idx)).Trust (K))
                  and then C.Tables (Natural (Idx)).Has_Pose
@@ -1869,7 +1886,8 @@ package body Act is
                      end if;
                   end;
                end loop;
-               if not Own_Cam and then Track_Idx (C, Arm, Cam) < Natural (C.Zones.Length) then
+               --  这一段是"别撞到脑点名要躲的东西",躲的框是【脑看的那台相机】里的坐标,所以这里仍用 Cam
+               if Cam_Arm (C, Cam) /= Integer (Arm) and then Track_Idx (C, Arm, Cam) < Natural (C.Zones.Length) then
                   declare
                      Tr : constant Zone_Track := C.Zones (Track_Idx (C, Arm, Cam));
                   begin
@@ -1958,9 +1976,9 @@ package body Act is
       --  ② 走:记下走之前的样子,发命令,途中盯着
       procedure Walk (Ok_Out : out Boolean) is
       begin
-         Before := F.Cams (Cam).Gray;
+         Before_All := All_Gray (F);
          Was := Pts;
-         Was_Regs := (if not Own_Cam then Cut_Things (C, F, Cam) else Picture.Region_Vectors.Empty_Vector);
+         Was_Regs := (if Cam_Arm (C, Cam) /= Integer (Arm) then Cut_Things (C, F, Cam) else Picture.Region_Vectors.Empty_Vector);
          Step_Arm (L, C, F, Arm, Note.Cmd, Jaw, Note.Got, Ok_Out, C.Fast, Watch_Things'Unrestricted_Access);
          Beats := Since (L, Beats0);
          if Note.Halted then
@@ -1994,7 +2012,7 @@ package body Act is
             end loop;
             Backup.Remember (Ring, Sv);
          end;
-         Note.Pic_Delta := Long_Float (Picture.Max_Diff (Before, F.Cams (Cam).Gray));
+         Note.Pic_Delta := Long_Float (Picture.Max_Diff (Before_All (Cam), F.Cams (Cam).Gray));
       end Walk;
 
       --  ③ 看:每个点现在在哪。我的零件(别人的相机里)先按位姿"感觉",熟地让眼睛核对,生地或大步就抖一下去看;
@@ -2009,7 +2027,7 @@ package body Act is
                Pr : constant Table.Vec3 := Table.Predict (Effs (I), Note.Got);
             begin
                P.Has_Meas := False;
-               if P.Kind = Piece_Pt and then not Own_Cam then
+               if P.Kind = Piece_Pt and then Cam_Arm (C, P.Cam) /= Integer (P.Arm) then
                   declare
                      Diff : Table.Vec;
                      Dist : Long_Float;
@@ -2059,11 +2077,12 @@ package body Act is
                      --  手在前后方向上要么不动要么一路顶,合手全是空的。
                      --  LAB 判定这就是 FO"夹太靠上、一合把球顶飞"的根子。修法(4c24742 + 闸 ad6d76e)
                      --  在 a7ab7e9 回滚里被一起退掉了,这里捞回来。
-                     if F.Cams (Cam).Has_Depth then
+                     if F.Cams (P.Cam).Has_Depth then
                         declare
-                           Zn : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, Cam);
+                           Zn : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, P.Cam);
                            Zd : constant Long_Float :=
-                             Picture.Near_Depth (F.Cams (Cam).Depth, Cw, Ch, P.Cu, P.Cv, Lobe_Win (Zn, Cw, Ch));
+                             Picture.Near_Depth (F.Cams (P.Cam).Depth, F.Cams (P.Cam).W, F.Cams (P.Cam).H,
+                                                 P.Cu, P.Cv, Lobe_Win (Zn, F.Cams (P.Cam).W, F.Cams (P.Cam).H));
                            --  🔴 闸盯【上一次真读到的】远近,不是 P.Z —— P.Z 可能是按位姿猜的、从没被眼睛校过
                            Old_Z : constant Long_Float := (if P.Z_Seen > 0.0 then P.Z_Seen else P.Z);
                         begin
@@ -2087,9 +2106,9 @@ package body Act is
                      else
                         declare
                            Q : Point := W0;
-                           Z : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, Cam, Jaw_K_Of (P.Chan_K));
+                           Z : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, P.Cam, Jaw_K_Of (P.Chan_K));
                         begin
-                           Retrack (C, F, Cam, Before, Q, W0.Cu + Pr (0), W0.Cv + Pr (1), True, (if W0.Z > 0.0 then W0.Z + Pr (2) else -1.0));
+                           Retrack (C, F, P.Cam, Before_All (P.Cam), Q, W0.Cu + Pr (0), W0.Cv + Pr (1), True, (if W0.Z > 0.0 then W0.Z + Pr (2) else -1.0));
                            --  眼睛和图对不上(差过张幅的四分之一,比例,无量纲;再小也有两个跟踪地板)⇒ 去看
                            if Q.Lost or else Sqrt ((Q.Cu - P.Cu) ** 2 + (Q.Cv - P.Cv) ** 2) > Long_Float'Max (Z.Span * 0.25, Fl.Track * 2.0) then
                               P.Lost := True;
@@ -2102,7 +2121,7 @@ package body Act is
                      end if;
                   end;
                else
-                  Retrack (C, F, Cam, Before, P, W0.Cu + Pr (0), W0.Cv + Pr (1), True, (if W0.Z > 0.0 then W0.Z + Pr (2) else -1.0));
+                  Retrack (C, F, P.Cam, Before_All (P.Cam), P, W0.Cu + Pr (0), W0.Cv + Pr (1), True, (if W0.Z > 0.0 then W0.Z + Pr (2) else -1.0));
                end if;
                --  🔴 认错了东西要说出来,不许悄悄换目标。
                --  GM 实测:被跟的那块从 (0.44,0.93) 深 0.81 m 一步跳到 (0.21,0.60) 深 2.13 m —— 那是球后面的墙。
@@ -2319,7 +2338,7 @@ package body Act is
             end if;
          end;
          for I in 0 .. Natural (Pts.Length) - 1 loop
-            Store_Effect (C, Arm, Cam, Pts (I).Kind, Pts (I).Chan_K, Pts (I).Blob, Effs (I), Trusts (I), Reach);
+            Store_Effect (C, Arm, Pts (I).Cam, Pts (I).Kind, Pts (I).Chan_K, Pts (I).Blob, Effs (I), Trusts (I), Reach);
          end loop;
          --  碰到 = 我没在推的东西自己动了(跟着这只手动的相机里满画面都在动,分不出来 ⇒ 不下结论)
          if not Own_Cam and then not Was_Regs.Is_Empty then
@@ -2362,15 +2381,17 @@ package body Act is
          --  变成一句空话,身体只会一路走到步数上限(IL/IM 实测:手压到球上、差距 0.003,
          --  60 步里一次 contact 都没响过)。而被脑点名跟住的那个东西【本来就在跟着】:
          --  在不跟着这只手动的相机里,它自己动了就只能是被碰了。
-         if not Own_Cam then
-            for I in 0 .. Natural (Pts.Length) - 1 loop
-               if Pts (I).Kind = Thing_Pt and then not Pts (I).Lost and then I < Natural (Was.Length)
+         for I in 0 .. Natural (Pts.Length) - 1 loop
+            declare
+               Not_Mine : constant Boolean := Cam_Arm (C, Pts (I).Cam) /= Integer (Arm);
+            begin
+               if Not_Mine and then Pts (I).Kind = Thing_Pt and then not Pts (I).Lost and then I < Natural (Was.Length)
                  and then Sqrt ((Pts (I).Cu - Was (I).Cu) ** 2 + (Pts (I).Cv - Was (I).Cv) ** 2) > Fl.Track
                then
                   Note.Touched := True;
                end if;
-            end loop;
-         end if;
+            end;
+         end loop;
          if Note.Touched then
             Put_Line ("[身]     我没在推的东西也动了 ⇒ 碰到它了");
          end if;
