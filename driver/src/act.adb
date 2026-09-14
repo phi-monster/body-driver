@@ -1341,6 +1341,16 @@ package body Act is
                                   & " 画幅,比眼睛一步跟得住的 " & Codec.Fmt (Track_Win, 4)
                                   & " 还远 ⇒ 这一推太大,按比例缩回一个窗再来");
                         Amp := Amp * Track_Win / Ran_Max;   --  直接缩到"正好一个跟踪窗"那一档:两个都是量出来的画幅
+                        --  🔴 换了幅度 = 换了一个推法 ⇒ 前面攒的那几次全部清零重来。
+                        --  不清的话,下一推(更小的那一档)一旦没动,会被当成"同一个推法第 2 次没动 ⇒ 不稳",
+                        --  而它根本不是同一个推法。HM 实测:缩是缩了,紧接着还是判了"不稳"。
+                        Nrep (K) := 0;
+                        for I in 0 .. Natural (Pts.Length) - 1 loop
+                           for R in 0 .. Table.Rows - 1 loop
+                              S1 (I, K, R) := 0.0;
+                              S2 (I, K, R) := 0.0;
+                           end loop;
+                        end loop;
                         for I in 0 .. Natural (Pts.Length) - 1 loop
                            declare
                               P : Point := Pts (I);
