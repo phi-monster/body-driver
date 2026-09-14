@@ -965,6 +965,54 @@ begin
                 "抓握:into 比 touching 更接近真正的中间(" & Codec.Fmt (abs (Into - True_Mid) * 1000.0, 1)
                 & " mm vs " & Codec.Fmt (abs (Skin - True_Mid) * 1000.0, 1) & " mm)");
       end;
+      --  🔴 "扫过哪些像素 = 手指"的筛法:动过【不止一步】的才算数。
+      --  HC 实测:不动的那只眼里,40 步的并集让渲染噪声铺满全画面(4140 个散点,填充率 0.015),
+      --  由此硬编出的握区钉在画面最右边缘,下游全线中毒。手指像素连着好多步都和第一帧不同,噪声只闪一步。
+      --  这里把 Zone.Measure 里那两行照样跑一遍(离线,不用机器人)。
+      declare
+         N : constant Natural := 64;
+         Steps : constant Natural := 40;
+         Once : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (N));
+         Swept : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (N));
+         Finger_Lo : constant Natural := 10;   --  手指扫过的那一段像素
+         Finger_Hi : constant Natural := 19;
+         Kept_Finger : Natural := 0;
+         Kept_Noise : Natural := 0;
+      begin
+         for St in 1 .. Steps loop
+            declare
+               Mv : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (N));
+            begin
+               --  手指:从第 5 步起一直和第一帧不同
+               if St >= 5 then
+                  for I in Finger_Lo .. Finger_Hi loop
+                     Mv.Replace_Element (I, True);
+                  end loop;
+               end if;
+               --  噪声:每一步点亮一个【不同的】像素,只闪这一步(30..59,各闪一次,不重复)
+               if St <= 30 then
+                  Mv.Replace_Element (30 + St - 1, True);
+               end if;
+               Swept := Picture.Either (Swept, Picture.Both (Once, Mv));
+               Once := Picture.Either (Once, Mv);
+            end;
+         end loop;
+         for I in 0 .. N - 1 loop
+            if Swept.Element (I) then
+               if I >= Finger_Lo and then I <= Finger_Hi then
+                  Kept_Finger := Kept_Finger + 1;
+               else
+                  Kept_Noise := Kept_Noise + 1;
+               end if;
+            end if;
+         end loop;
+         Check (Kept_Finger = Finger_Hi - Finger_Lo + 1,
+                "握区:连着好多步都动的那一片(手指)全留下了(" & Codec.Img (Kept_Finger) & "/"
+                & Codec.Img (Finger_Hi - Finger_Lo + 1) & ")");
+         Check (Kept_Noise = 0,
+                "握区:每步换一个像素闪一下的(噪声)一个都没留(" & Codec.Img (Kept_Noise)
+                & ")—— 旧写法(整段取并集)会把它们全收进来,握区就被钉到画面边上");
+      end;
       --  🔴 深度读数收不收。数字取自 FS 实测:手指上一次真读到 0.454 m,这一帧读出 0.010 m(离镜头一厘米)。
       declare
          Was : constant Long_Float := 0.454;    --  上一次真读到的

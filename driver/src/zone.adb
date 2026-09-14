@@ -205,6 +205,15 @@ package body Zone is
       N_Cams : constant Natural := Natural (F.Cams.Length);
       F0 : Plug.Cam_Vectors.Vector;
       Swept : array (0 .. Natural'Max (0, N_Cams - 1)) of Bools;
+      --  🔴 扫过的那片以前是【40 步的并集】(每步和第一帧比,超过灰度地板就算动过)——
+      --  渲染噪声有 40 次机会点亮每一个像素,于是并集铺满全画面。
+      --  HC 实测:不动的那只眼里两只手都只"扫出"4100 个散点,外接框 616x430 ≈ 整幅画,填充率 0.015;
+      --  由此硬编出来的握区被钉在画面最右边缘(u≈0.898),下游全线中毒 ——
+      --  身体图垃圾 ⇒ 外推炸 ⇒ 手的位置不可信 ⇒ 拿住判据整段进不去、伺服也粗。
+      --  对照:自己的腕相机里同一段代码扫出 13 万像素、填充率 0.44,是实打实的一团手指。
+      --  改法零系数、零额外拍数:手指像素会【连着好几步】都和第一帧不同(手指离开了那儿),
+      --  噪声只闪一步。只收【不止一步动过】的像素。
+      Once : array (0 .. Natural'Max (0, N_Cams - 1)) of Bools;
       J0 : constant Long_Float := Selfmap.Jaw_Of (F, Arm, K);
       Rest : constant Floats := Selfmap.Jaw_All (F, Arm);   --  其余通道保持它们此刻的读数
       Pose : constant Plug.Arm_Pose := (if Arm < Natural (F.EE.Length) then F.EE (Arm) else [others => 0.0]);
@@ -224,6 +233,7 @@ package body Zone is
          return;
       end if;
       for C in 0 .. N_Cams - 1 loop
+         Once (C) := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (F.Cams (C).W * F.Cams (C).H));
          Swept (C) := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (F.Cams (C).W * F.Cams (C).H));
       end loop;
       for I in 0 .. Natural'Max (1, Natural (Rest.Length)) - 1 loop
@@ -256,7 +266,9 @@ package body Zone is
             declare
                Mv : constant Bools := Picture.Moved (F0 (C).Gray, F.Cams (C).Gray, M.Floors (C));
             begin
-               Swept (C) := Picture.Either (Swept (C), Mv);
+               --  动过不止一步的才算数(见上面那段):第二次再动到同一个像素时才收进来
+               Swept (C) := Picture.Either (Swept (C), Picture.Both (Once (C), Mv));
+               Once (C) := Picture.Either (Once (C), Mv);
             end;
          end loop;
          declare
