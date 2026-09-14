@@ -1327,7 +1327,29 @@ package body Act is
                            end;
                         end loop;
                      end;
-                     if Seen_Enough then
+                     --  🔴🔴 一推让画面跑得【比眼睛一步跟得住的还远】⇒ 这一推太大,不是"量到了"。
+                     --  下一推同样幅度必然跟丢,而跟丢会被记成"同一个推法没动 ⇒ 不稳" ——
+                     --  于是这一列永远攒不够两次重复,凡是要靠它的关系词全部在编译期被退回。
+                     --  HL 实测:通道 6 第一推 0.0064 就让点跑了 **0.1848 画幅**(整幅的 18%,
+                     --  而跟踪窗只有 0.10),第二推当场"没动" ⇒ 身体报"不稳" ⇒
+                     --  「into」被退回,最后一句是"我现在说得出口的关系:(一个都没有)"。
+                     --  真因是【探针那一档是在别的相机里量的】:在手自己那台相机里同样的命令让画面跑得多得多。
+                     --  改:超出一个跟踪窗就把幅度【按比例缩回一个窗】再来,不算一次重复,也不判它不稳。零系数 ——
+                     --  跟踪窗是眼睛自己的上限,缩回一个窗是"缩到眼睛跟得住的那一档"。
+                     if Ran_Max > Track_Win and then Amp > 0.0 then
+                        Put_Line ("[身]     通道" & Natural'Image (Chn) & ":这一推让点跑了 " & Codec.Fmt (Ran_Max, 4)
+                                  & " 画幅,比眼睛一步跟得住的 " & Codec.Fmt (Track_Win, 4)
+                                  & " 还远 ⇒ 这一推太大,按比例缩回一个窗再来");
+                        Amp := Amp * Track_Win / Ran_Max;   --  直接缩到"正好一个跟踪窗"那一档:两个都是量出来的画幅
+                        for I in 0 .. Natural (Pts.Length) - 1 loop
+                           declare
+                              P : Point := Pts (I);
+                           begin
+                              P.Cu := Was (I).Cu; P.Cv := Was (I).Cv; P.Z := Was (I).Z; P.Lost := False;
+                              Pts.Replace_Element (I, P);
+                           end;
+                        end loop;
+                     elsif Seen_Enough then
                         if Nrep (K) >= Reps_Wanted then
                            Finalise (K);
                            Trust (K) := True;
