@@ -4574,6 +4574,32 @@ package body Act is
             end loop;
             if not Pts.Is_Empty then
                Put_Line ("[身] ⚙ 一起解" & Natural'Image (Natural (Pts.Length)) & " 条:" & To_String (Desc));
+               --  🔴 把【目标在哪、我在哪、每根通道推正一点画面往哪跑】原样打出来。
+               --  HO 实测:手一路往右飘到画面最右沿(u 0.926→0.998),而球在它左边 —— 不知道是
+               --  目标算错了还是表的符号反了,光看"差 x m / 还差 N 步"分不出来。打出来就分得出。
+               for I in 0 .. Natural (Pts.Length) - 1 loop
+                  declare
+                     P : constant Point := Pts (I);
+                     Ix : constant Integer := Find_Effect (C, P.Arm, P.Cam, P.Kind, P.Chan_K, P.Blob);
+                     Ln : Unbounded_String;
+                  begin
+                     Ln := S ("[身]   点" & Codec.Img (I) & "(相机" & Codec.Img (P.Cam) & "):我在 ("
+                              & Codec.Fmt (P.Cu, 3) & "," & Codec.Fmt (P.Cv, 3) & ") 深 " & Codec.Fmt (P.Z, 3)
+                              & " · 目标 (" & Codec.Fmt (P.Tu, 3) & "," & Codec.Fmt (P.Tv, 3) & ") 深 "
+                              & Codec.Fmt (P.Tz, 3)
+                              & " · 搬到我这个远近后该去 " & Codec.Fmt (On_My_Plane (P.Tu, P.Tz, P.Z), 3)
+                              & " ⇒ 左右要走 " & Codec.Fmt (On_My_Plane (P.Tu, P.Tz, P.Z) - P.Cu, 3) & " 画幅");
+                     Put_Line (To_String (Ln));
+                     if Ix >= 0 then
+                        Ln := S ("[身]   点" & Codec.Img (I) & " 表(推 +1 画面往哪跑,左右那一行):");
+                        for K in 0 .. Chan.Per_Arm - 1 loop
+                           Append (Ln, " ch" & Codec.Img (P.Arm * Chan.Per_Arm + K) & "="
+                                   & Codec.Fmt (C.Tables (Natural (Ix)).E.B (K, 0), 3));
+                        end loop;
+                        Put_Line (To_String (Ln));
+                     end if;
+                  end;
+               end loop;
                Run_Segment (L, C, F, Cam, Pts, Until_K, Step_Limit, Amount, Avoid, Event, Steps_Taken, Blocked, Beats);
                C.Last_Outcome := Classify (To_String (Event));
                Feel (C, F);
