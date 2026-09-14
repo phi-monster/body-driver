@@ -3083,6 +3083,16 @@ package body Act is
          end;
       end if;
       --  抬完之后:我的手挪了多远、它挪了多远,两段差多少
+      --  🔴 判不了也要说【缺哪一样】。HC 实测这一整段没进来,而给脑的话只有"我判不出来"五个字,
+      --  我是靠 grep 括号才发现判据根本没跑 —— 不说缺什么 = 让脑以为判据跑过了。
+      if World_Cam < 0 then
+         Follow_Note := S (" (I have no camera that stays put while this arm moves, so nothing could watch it travel)");
+      elsif not Have_Hand0 then
+         Follow_Note := S (" (I could not pin down where my own hand was in that still camera before the lift"
+                           & ", so I had nothing to compare the thing's travel against)");
+      elsif Home.Count <= 0 then
+         Follow_Note := S (" (I had no picture of where the thing was sitting before the lift)");
+      end if;
       if World_Cam >= 0 and then Have_Hand0 and then Home.Count > 0 then
          declare
             After : constant Picture.Regions := Cut_Things (C, F, Natural (World_Cam));
