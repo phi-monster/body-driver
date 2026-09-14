@@ -1000,7 +1000,10 @@ package body Act is
                         --  🔴 没有预测值时这道闸以前【整条失效】(Pred_Z <= 0.0 直接短路成真),于是任何读数都收:
                         --  FS 实测手指的"离相机多远"一步从 0.454 m 跳到 0.010 m(离镜头一厘米,物理上不可能),
                         --  抓握的高低判据当场作废。没有预测就退回"一步最多变自己抖动那么多",而不是不管。
-                        if Depth_Ok (Zd, Old_Z, Pred_Z, P.Z_Noise, P.Z_Rej) then
+                        --  🔴 出路只给【我此刻真看得见自己】的时候用:墙是极其"可重复"的,
+                        --  两次读到同一面墙也一致。HF 实测:点飘到画面角落之后,出路把 2.19 m 一路放到 5.109 m
+                        --  (场景渲染出来的深度只到 4.359 m,物理上不可能)。跟丢的时候不许走出路。
+                        if Depth_Ok (Zd, Old_Z, Pred_Z, P.Z_Noise, (if P.Lost then 0.0 else P.Z_Rej)) then
                            P.Z := Zd; P.Z_Seen := Zd; P.Z_Rej := 0.0;
                         else
                            P.Z_Rej := Zd;   --  记下这次被拒的:下一次要是又读到同一个数,就是它对、旧的陈了
@@ -1099,6 +1102,17 @@ package body Act is
                end if;
             end;
       end case;
+      --  🔴 统一收口:算出来的位置落在【画面边界上】就不是一次测量 —— 它是被夹回来的,
+      --  真值在画面外。以前各处都写 Max(0.0, Min(1.0, …)) 把它夹回来却【不标跟丢】,
+      --  于是解算一本正经地朝一个编出来的位置收敛,深度也跟着读到那儿的墙。
+      --  HF 实测:点一路走到 (0.000,0.000) 画面左上角,深度读出 5.109 m ——
+      --  而这个场景渲染出来的深度范围只有 0.646~4.359 m,物理上不可能;差距当场从 0.294 炸到 2.575。
+      --  (这就是 5754c72 那条修法,a7ab7e9 回滚里丢掉的 13 条里我漏捞的那一条。)
+      if P.Cu <= 0.0 or else P.Cu >= 1.0 or else P.Cv <= 0.0 or else P.Cv >= 1.0 then
+         P.Cu := Long_Float'Max (0.0, Long_Float'Min (1.0, P.Cu));
+         P.Cv := Long_Float'Max (0.0, Long_Float'Min (1.0, P.Cv));
+         P.Lost := True;
+      end if;
    end Retrack;
 
    --  发一步并等稳;返回实到(通道)
@@ -2103,7 +2117,9 @@ package body Act is
                            --  原版这道闸写的是"表预测的变化 + 距离的【一成】",那个一成是人拍的;
                            --  换成这一点自己量到的深度抖动地板(Z_Noise),零系数,而且比一成更对。
                            if not Picture.Is_Nan (Zd) and then Zd > 0.0 then
-                              if Depth_Ok (Zd, Old_Z, Old_Z + Pr (2), P.Z_Noise, P.Z_Rej) then
+                              if Depth_Ok (Zd, Old_Z, Old_Z + Pr (2), P.Z_Noise,
+                                           (if P.Lost then 0.0 else P.Z_Rej))
+                              then
                                  P.Z := Zd; P.Z_Seen := Zd; P.Z_Rej := 0.0;
                               else
                                  P.Z_Rej := Zd;   --  记下被拒的那个数;连着两次一致就说明旧基准陈了
