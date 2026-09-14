@@ -14,7 +14,10 @@ CEIL="$ROOT/gates_ceiling.txt"
 strip() { sed -E 's#--.*$##' "$1"; }
 
 # ① 身体自己决定停下的地方
-stops=$(for f in "$SRC"/*.adb; do strip "$f"; done | grep -cE 'Say_Stop *:=|Ok_Pt *:= *False' || true)
+# 🔴 第三种写法:把【这一段要跟的点】整个清空 ⇒ 后面 `if not Pts.Is_Empty` 直接跳过整段,
+#    一推不走而日志全绿。HC 实测连着四段零推(45 推那一段一个"步"都没有),而棘轮当时是绿的 ——
+#    它只认前两种写法。闸不一定写成"停",也可以写成"没活儿干"。
+stops=$(for f in "$SRC"/*.adb; do strip "$f"; done | grep -cE 'Say_Stop *:=|Ok_Pt *:= *False|Pts\.Clear' || true)
 # ② 伪装成测量的门槛:量 × 系数 / 量 ÷ 系数(排除纯数学 0.0/1.0/2.0 的向量运算无从分辨,一律计入)
 coef=$(for f in "$SRC"/*.adb "$SRC"/*.ads; do strip "$f"; done | grep -oE '[A-Za-z_.]+ *[*/] *[0-9]+\.[0-9]+' | wc -l | tr -d ' ')
 

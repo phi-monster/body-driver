@@ -4417,16 +4417,25 @@ package body Act is
                      end if;
                   end;
                   declare
-                     Lost_Any : Boolean := False;
+                     Lost_N : Natural := 0;
                   begin
                      for P of Pts loop
                         if P.Lost then
-                           Lost_Any := True;
+                           Lost_N := Lost_N + 1;
                         end if;
                      end loop;
-                     if Lost_Any then
-                        Report := Report & "I moved my own piece to find it in this picture and could not see it, so I did not move toward the goal. ";
-                        Pts.Clear;
+                     --  🔴 认不出自己【不是停下的理由】(owner 死命令:能让身体停的只有人的命令和脑写的 until,
+                     --  "我做不到"都不算)。以前这里 Pts.Clear ⇒ 整段一推不走:HC 实测【连着四段零推】,
+                     --  45 推的那一段一个 步 都没有,三段全 timeout,而胳膊是自由的、球就在画面里。
+                     --  而且判据是"任一个点跟丢"就全清 —— 和探针那条一票否决同一类错。
+                     --  改成:位置用身体图按此刻关节推出来的那一份(Feel 刚算过),说出来,照走。
+                     if Lost_N > 0 then
+                        Report := Report & "I moved my own piece to find it in this picture and could not see "
+                                  & Codec.Img (Lost_N) & " of " & Codec.Img (Natural (Pts.Length))
+                                  & " of the points I am tracking; I am going on where my body map says they are, "
+                                  & "and I am telling you rather than holding still. ";
+                        C.Blind_Say := S ("I could not see my own piece after moving it, so I am going on the guess "
+                                          & "my body map gives for it - I am moving, not holding still");
                      end if;
                   end;
                end if;
@@ -4442,6 +4451,14 @@ package body Act is
                C.Last_Outcome := Classify (To_String (Event));
                Feel (C, F);
                Report := Report & "you asked " & Desc & ": " & Event & ". I took " & Codec.Img (Steps_Taken) & " pushes; ";
+               --  🔴 一段【一推都没走】绝不许看起来正常:除非脑写的 until 在第 0 步就成立,否则这是身体自己没动。
+               --  HC 实测连着四段零推、全部报 timeout,读日志像一切正常。喊出来,让脑看得见。
+               if Steps_Taken = 0 then
+                  Report := Report & "*** I took ZERO pushes in that stretch - nothing on me moved at all. "
+                            & "Unless your until was already true before I started, that is me failing to move, "
+                            & "not the task being done. ";
+                  Put_Line ("[身]   🔴 这一段一推都没走 —— 除非脑的 until 在第 0 步就成立,这就是身体自己没动");
+               end if;
                Put_Line ("[身]   这一段:" & Codec.Img (Steps_Taken) & " 推 · " & Codec.Img (Beats) & " 拍 · 这一集累计 " & Codec.Img (Plug.Steps (L)) & " 拍");
                for P of Pts loop
                   if P.Blob <= 0 then
