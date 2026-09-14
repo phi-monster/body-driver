@@ -729,6 +729,10 @@ package body Act is
       --  这是"永不响的闸"那一类。escape:两次被拒的读数【互相吻合】(差在这一点自己的读深抖动之内)
       --  ⇒ 两次独立测量一致,胜过一个陈旧的基准 ⇒ 收下新值。零系数,用的是量出来的 Z_Noise。
       Z_Rej : Long_Float := 0.0;
+      --  🔴 这一点是不是【被夹在画面边界上】。跟丢 ≠ 贴边:跟丢的时候读数仍可能是真的,
+      --  而贴边意味着真值在画面外、读到的是那儿的墙(HF:点被夹到 (0,0),深度一路放到 5.109 m)。
+      --  深度闸的"出路"只在【不贴边】时才给。
+      At_Edge : Boolean := False;
       --  🔴🔴 目标的【画面坐标】是在哪个远近上量的。把目标搬到我这个远近平面上再比,
       --  倍数要用这一个,不是 Tz。HP 实测:`into` 的目标是"左右别动,只把远近走到球的腰上"
       --  ⇒ Tu/Tv 直接抄的我自己的位置(在【我的】远近上),而 Tz 是球的远近;
@@ -996,7 +1000,7 @@ package body Act is
                         --  🔴 出路只给【我此刻真看得见自己】的时候用:墙是极其"可重复"的,
                         --  两次读到同一面墙也一致。HF 实测:点飘到画面角落之后,出路把 2.19 m 一路放到 5.109 m
                         --  (场景渲染出来的深度只到 4.359 m,物理上不可能)。跟丢的时候不许走出路。
-                        if Depth_Ok (Zd, Old_Z, Pred_Z, P.Z_Noise, (if P.Lost then 0.0 else P.Z_Rej)) then
+                        if Depth_Ok (Zd, Old_Z, Pred_Z, P.Z_Noise, (if P.At_Edge then 0.0 else P.Z_Rej)) then
                            P.Z := Zd; P.Z_Seen := Zd; P.Z_Rej := 0.0;
                         else
                            P.Z_Rej := Zd;   --  记下这次被拒的:下一次要是又读到同一个数,就是它对、旧的陈了
@@ -1101,7 +1105,8 @@ package body Act is
       --  HF 实测:点一路走到 (0.000,0.000) 画面左上角,深度读出 5.109 m ——
       --  而这个场景渲染出来的深度范围只有 0.646~4.359 m,物理上不可能;差距当场从 0.294 炸到 2.575。
       --  (这就是 5754c72 那条修法,a7ab7e9 回滚里丢掉的 13 条里我漏捞的那一条。)
-      if P.Cu <= 0.0 or else P.Cu >= 1.0 or else P.Cv <= 0.0 or else P.Cv >= 1.0 then
+      P.At_Edge := P.Cu <= 0.0 or else P.Cu >= 1.0 or else P.Cv <= 0.0 or else P.Cv >= 1.0;
+      if P.At_Edge then
          P.Cu := Long_Float'Max (0.0, Long_Float'Min (1.0, P.Cu));
          P.Cv := Long_Float'Max (0.0, Long_Float'Min (1.0, P.Cv));
          P.Lost := True;
@@ -2180,7 +2185,7 @@ package body Act is
                            --  换成这一点自己量到的深度抖动地板(Z_Noise),零系数,而且比一成更对。
                            if not Picture.Is_Nan (Zd) and then Zd > 0.0 then
                               if Depth_Ok (Zd, Old_Z, Old_Z + Pr (2), P.Z_Noise,
-                                           (if P.Lost then 0.0 else P.Z_Rej))
+                                           (if P.At_Edge then 0.0 else P.Z_Rej))
                               then
                                  P.Z := Zd; P.Z_Seen := Zd; P.Z_Rej := 0.0;
                               else
@@ -2192,7 +2197,7 @@ package body Act is
                                            & " · 表说这一步走 " & Codec.Fmt (Pr (2), 3)
                                            & " · 这一点读深抖动 " & Codec.Fmt (P.Z_Noise, 3)
                                            & " · 上次被拒 " & Codec.Fmt (P.Z_Rej, 3)
-                                           & (if P.Lost then " · 此刻跟丢了(出路不给)" else ""));
+                                           & (if P.At_Edge then " · 此刻贴在画面边上(出路不给)" else ""));
                                  P.Z_Rej := Zd;   --  记下被拒的那个数;连着两次一致就说明旧基准陈了
                                  P.Z := Old_Z;    --  这一帧读到的是别的面,留上一次真读到的
                               end if;
