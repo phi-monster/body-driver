@@ -4209,6 +4209,18 @@ package body Act is
                   P : Point;
                   Own_Cam : constant Boolean := Cam_Arm (C, Cam) = Integer (A);
                begin
+                  --  🔴 这台相机里没量到握区 ⇒ 以前整块【静默跳过】,脑只看到一段什么都没干。
+                  --  新的扫描筛法(动过不止一步的才算手指)会让"看不见自己开合"的相机诚实地交白卷,
+                  --  所以这条路一定会被走到 —— 必须说出来,并且告诉脑它能怎么办。
+                  if Pts.Is_Empty and then not Z.Valid then
+                     Report := Report & "I have no measured grip for arm " & Codec.Img (A + 1)
+                               & " in the eye I am judging this stretch with: when I open and close that hand here, "
+                               & "nothing on me sweeps a solid patch of pixels, so I refuse to invent a grip box. "
+                               & "Judge this stretch with the eye that rides on that hand, or name the thing in that eye. ";
+                     C.Blind_Say := S ("in this eye I cannot see my own hand open and close, so I have no grip box here");
+                     Put_Line ("[身]   🔴 相机" & Codec.Img (Cam) & " 里量不到第" & Codec.Img (A + 1)
+                               & " 只手的握区(开合扫不出一团像素)⇒ 不编握区,如实说");
+                  end if;
                   if Pts.Is_Empty and then Z.Valid then
                      P.Arm := A; P.Item_No := Say.Grip_On;
                      if Own_Cam then
