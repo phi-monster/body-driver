@@ -77,3 +77,12 @@ bash install.sh                 # 三道棘轮 → 自检 → 证明 → 编译 
 bl-calibrate --listen 9080 --eye 127.0.0.1:8079   # 脑桥在 :8079;BL_ORDER 覆盖任务句;BL_LOOK=1 只看不动;BL_DUMP/BL_VID 落图
 ```
 陷阱与逐炮读数见 `LAB.md`;三份自由搜索报告与通读笔记在 `results/refactor_sep2026/`。
+
+---
+
+## 许可证
+
+**GNU AGPL v3**(见 `LICENSE`;版权与商业授权见 `NOTICE`)。
+
+- **学术 / 研究:直接用,不用问,不设审批。**
+- **公司:** AGPL 要求你把自己的源码一并开放。做不到就来信谈商业授权。
