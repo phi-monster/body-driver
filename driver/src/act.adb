@@ -1701,6 +1701,23 @@ package body Act is
                   Trusts (I) := Trust;
                   Store_Effect (C, Arm, Cam, Pts (I).Kind, Pts (I).Chan_K, Pts (I).Blob, Effs (I), Trust, Unit_Reach, F.EE (Arm), True);
                end loop;
+               --  🔴 量完就把表打出来:每根通道推 +1,画面左右跑多少 / 离相机远近变多少(正=变远)。
+               --  方向对不对全看正负。HU 实测:左右已经对到 0.008 m,而远近误差越走越大(1.357→1.711),
+               --  手朝相机走而球在 3.5 m 外 —— 光看误差分不出是表的符号反了还是解算没得选。
+               for I in 0 .. Natural (Pts.Length) - 1 loop
+                  declare
+                     Ln : Unbounded_String :=
+                       S ("[身]   表 点" & Codec.Img (I) & ":");
+                  begin
+                     for K in 0 .. Chan.Per_Arm - 1 loop
+                        Append (Ln, " ch" & Codec.Img (Arm * Chan.Per_Arm + K) & "(左右"
+                                & Codec.Fmt (Effs (I).B (K, 0), 3) & " 远近"
+                                & Codec.Fmt (Effs (I).B (K, 2), 3)
+                                & (if Trust (K) then "" else " 没证过") & ")");
+                     end loop;
+                     Put_Line (To_String (Ln));
+                  end;
+               end loop;
             end;
          end if;
       end Ready_Tables;
