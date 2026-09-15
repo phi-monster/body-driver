@@ -3767,7 +3767,13 @@ package body Act is
       --  🔴 开工先拨一下量一次 —— 不量就等于闭着眼睛往前够。
       --  不用脑点名:任何机体只要"眼睛跟着我动"就量得了,量不了它自己会说。
       Range_Probe;
-      for Step in 1 .. Natural'Min (Step_Cap, Effective_Cap (Step_Limit)) loop
+      --  🔴🔴 这里以前是 Natural'Min (Step_Cap, Effective_Cap (Step_Limit)) —— 身体把【脑写的步数】
+      --  砍到自己那个 60,还把 60 当成"你的上限"报回去(JD 2026-09-15 实测:我写 or 400 steps,
+      --  它走了 60 步就回 "hit the step cap (60)")。
+      --  owner 死命令:**能让身体停下来的只有【人的命令】和【脑写的 until,含脑给的步数】**,
+      --  60 两个都不是。Effective_Cap 本来就已经分好了:脑写了就用脑的,脑没写才用安全上限。
+      --  取 min 等于把安全上限偷偷盖在脑的话上面 —— 删。
+      for Step in 1 .. Effective_Cap (Step_Limit) loop
          Plan;
          if Note.Say_Stop /= "" then
             Event := Note.Say_Stop;

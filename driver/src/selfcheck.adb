@@ -1450,6 +1450,20 @@ begin
              "两条要一致:跳过瞎眼之后挑到的,就是脑认出过它的那只 —— 不会来回弹");
    end;
 
+   --  ===== 脑写的步数不许被身体的安全上限盖住(JD:我写 400,它走 60 就回"你的上限 60") =====
+   declare
+      Brain_Says : constant Natural := 400;   --  脑写的 or 400 steps
+      Silent     : constant Natural := 0;     --  脑一个字没写
+      Safety     : constant Positive := Act.Safety_Cap;
+   begin
+      Check (Act.Effective_Cap (Brain_Says) = Brain_Says,
+             "步数:脑写了几步就走几步 —— 安全上限不许盖在脑的话上面(owner 死命令)");
+      Check (Act.Effective_Cap (Silent) = Safety,
+             "步数:脑一个字没写才轮到安全上限");
+      Check (Act.Effective_Cap (Brain_Says) > Safety,
+             "步数:JD 实测正是这种情形(脑 400 > 安全 60)—— 取 min 就等于身体替脑做决定");
+   end;
+
    --  ===== 放大器要有天花板:解算里面夹过了,外面那两下放大没人管(IZ:命令 7.6e9,实到 0) =====
    declare
       Cap_Eye  : constant Long_Float := 0.0512;   --  眼睛跟得住的那一档(量出来的)
