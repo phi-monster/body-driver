@@ -2109,8 +2109,42 @@ package body Act is
       Seen_In_Hand : Boolean := False;
       Gone_From_Table : Boolean := False;
       Could_Judge : Boolean := False;
-      --  合完之后要量出"到底发生了什么",不是只答"拿住了没":旁边有没有东西被我碰动、那一块是不是断成了两块
-      World_Cam : constant Integer := (if Cam < Natural (F.Cams.Length) and then Cam_Arm (C, Cam) < 0 then Integer (Cam) else -1);
+      --  合完之后要量出"到底发生了什么",不是只答"拿住了没":旁边有没有东西被我碰动、那一块是不是断成了两块。
+      --  🔴 判"拿住了没"要用一台【不跟着这只手动】的相机。以前只认"当前这只眼",而当前这只正好长在手上时
+      --  ⇒ 没人能核实 ⇒ "我说不准" ⇒ 松手(GI 实测:合到底了又张开)。改成:当前眼不长在手上就用它;
+      --  否则找任何一台不长在任何胳膊上的,再不行找不长在【这条】胳膊上的。它原来在那台相机里的哪儿,
+      --  用那台相机自己记着的影子(脑在那台里点过名),不能拿当前眼睛里的位置去比。
+      function Still_Cam_Of return Integer is
+      begin
+         if Cam < Natural (F.Cams.Length) and then Cam_Arm (C, Cam) < 0 then
+            return Integer (Cam);
+         end if;
+         for Cm in 0 .. Natural (F.Cams.Length) - 1 loop
+            if Cam_Arm (C, Cm) < 0 then
+               return Cm;
+            end if;
+         end loop;
+         for Cm in 0 .. Natural (F.Cams.Length) - 1 loop
+            if Cam_Arm (C, Cm) /= Integer (Arm) then
+               return Cm;
+            end if;
+         end loop;
+         return -1;
+      end Still_Cam_Of;
+      World_Cam : constant Integer := Still_Cam_Of;
+      function Org_Of return Picture.Region is
+      begin
+         if World_Cam < 0 or else Natural (World_Cam) = Cam then
+            return Origin;
+         end if;
+         if Natural (World_Cam) < Natural (C.Wld.Cams.Length) and then C.Wld.Cams (Natural (World_Cam)).Named >= 0
+           and then Natural (C.Wld.Cams (Natural (World_Cam)).Named) < World.Count (C.Wld, Natural (World_Cam))
+         then
+            return World.Get (C.Wld, Natural (World_Cam), Natural (C.Wld.Cams (Natural (World_Cam)).Named)).Shadow;
+         end if;
+         return (others => <>);   --  那台相机里脑没点过名 ⇒ 判不了(Count = 0)
+      end Org_Of;
+      Org : constant Picture.Region := Org_Of;
       Before_Regs : Picture.Regions;
       Moved_Others : Natural := 0;
       Pieces_Now : Natural := 0;
@@ -2153,13 +2187,13 @@ package body Act is
             end if;
          end;
       end if;
-      if Cam < Natural (F.Cams.Length) and then Cam_Arm (C, Cam) < 0 and then Origin.Count > 0 then
+      if World_Cam >= 0 and then Org.Count > 0 then
          Could_Judge := True;
-         Gone_From_Table := World.Vanished (Cut_Things (C, F, Cam), Origin, F.Cams (Cam).W, F.Cams (Cam).H);
+         Gone_From_Table := World.Vanished (Cut_Things (C, F, Natural (World_Cam)), Org, F.Cams (Natural (World_Cam)).W, F.Cams (Natural (World_Cam)).H);
       end if;
       --  🔴 拿住了 = 抬手时它跟着我的手走了【同样一段】。只看"原地空了"会把【撞跑】当成拿住(FO 实测:
       --  球被撞到画面角落,原地空了,身体报"拿住",而两指之间什么都没有)
-      if World_Cam >= 0 and then Have_Hand0 and then Origin.Count > 0 then
+      if World_Cam >= 0 and then Have_Hand0 and then Org.Count > 0 then
          declare
             After : constant Picture.Regions := Cut_Things (C, F, Natural (World_Cam));
             Best : Integer := -1;
@@ -2180,9 +2214,9 @@ package body Act is
             end if;
             --  抬完之后最像它的那一块:大小相近的里面离原处最近的
             for I in 0 .. Natural (After.Length) - 1 loop
-               if After (I).Count * 3 >= Origin.Count and then Origin.Count * 3 >= After (I).Count then
+               if After (I).Count * 3 >= Org.Count and then Org.Count * 3 >= After (I).Count then
                   declare
-                     D : constant Long_Float := Sqrt ((After (I).Cu - Origin.Cu) ** 2 + (After (I).Cv - Origin.Cv) ** 2);
+                     D : constant Long_Float := Sqrt ((After (I).Cu - Org.Cu) ** 2 + (After (I).Cv - Org.Cv) ** 2);
                   begin
                      if Best < 0 or else D < Bd then
                         Bd := D; Best := I;
@@ -2193,8 +2227,8 @@ package body Act is
             Found_After := Best >= 0;
             if Found_After and then Have_Hand0 then
                declare
-                  Ou : constant Long_Float := After (Best).Cu - Origin.Cu;
-                  Ov : constant Long_Float := After (Best).Cv - Origin.Cv;
+                  Ou : constant Long_Float := After (Best).Cu - Org.Cu;
+                  Ov : constant Long_Float := After (Best).Cv - Org.Cv;
                begin
                   Follows := Came_With_Me (Ou, Ov, Hand_Du, Hand_Dv);
                   Follow_Note := S (" (my hand moved " & Codec.Fmt (Sqrt (Hand_Du ** 2 + Hand_Dv ** 2), 3) &
@@ -2231,15 +2265,15 @@ package body Act is
                      end if;
                   end loop;
                   --  不是我夹的那件,却挪过了噪声地板 ⇒ 我碰动了它
-                  if Found and then Best > Tol * 4.0 and then Origin.Count > 0
-                    and then Sqrt ((Q.Cu - Origin.Cu) ** 2 + (Q.Cv - Origin.Cv) ** 2) > Long_Float'Max (Origin.Sig_U, Origin.Sig_V) * 2.0
+                  if Found and then Best > Tol * 4.0 and then Org.Count > 0
+                    and then Sqrt ((Q.Cu - Org.Cu) ** 2 + (Q.Cv - Org.Cv) ** 2) > Long_Float'Max (Org.Sig_U, Org.Sig_V) * 2.0
                   then
                      Moved_Others := Moved_Others + 1;
                   end if;
                end;
             end loop;
             for R of After loop
-               if Origin.Count > 0 and then Sqrt ((R.Cu - Origin.Cu) ** 2 + (R.Cv - Origin.Cv) ** 2) <= Long_Float'Max (Origin.Sig_U, Origin.Sig_V) * 3.0 then
+               if Org.Count > 0 and then Sqrt ((R.Cu - Org.Cu) ** 2 + (R.Cv - Org.Cv) ** 2) <= Long_Float'Max (Org.Sig_U, Org.Sig_V) * 3.0 then
                   Pieces_Now := Pieces_Now + 1;
                end if;
             end loop;
