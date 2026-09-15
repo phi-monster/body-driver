@@ -1414,6 +1414,21 @@ begin
              "温度计 ≠ 尺子:体检只说'我的距离感放大了 32 倍',量距离得靠胳膊滑出来的那两个数");
    end;
 
+   --  ===== 撤回:"我能分辨到多远" ≠ "它有多远"(IT 2026-09-15:球近了四倍,那个数反而涨了) =====
+   declare
+      Ball_Px_Far  : constant Long_Float := 78.0000;    --  IT 实测:一开始球在画面里这么大
+      Ball_Px_Near : constant Long_Float := 334.0000;   --  走近之后
+      Lim_Early    : constant Long_Float := 0.2030;     --  同期"只能说它比 X m 远"
+      Lim_Late     : constant Long_Float := 0.7480;
+   begin
+      Check (Ball_Px_Near > Ball_Px_Far,
+             "IT:球在画面里长了四倍多 —— 看图也证实了,手确实在靠近");
+      Check (Lim_Late > Lim_Early,
+             "IT:而那个数反而从 0.203 涨到 0.748 —— 它跟着【我走了多远】涨,不跟着球涨");
+      Check (not (Lim_Late < Lim_Early),
+             "IT:两者方向相反 ⇒ 那个数不是距离,是【我能分辨到多远】,拿它驱动就是追一个越走越远的目标");
+   end;
+
    --  ===== 走米的时候,用哪根关节也不看"画面证没证过"(IS 2026-09-15:每步只挪 2 mm) =====
    declare
       Chans      : constant Natural := 6;
