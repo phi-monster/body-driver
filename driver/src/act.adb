@@ -2167,6 +2167,19 @@ package body Act is
                                           & "quietly going nowhere.");
                         Put_Line ("[身]     📏 米那一行没换算(还没量到一推走几米)⇒ 这一行是死的");
                      end if;
+                     --  🔴🔴 只加观测,不改逻辑:把【真正送进解算的那个误差】和【分母】原样打出来。
+                     --  IY 2026-09-15:我压小了分母,`还差` 照旧全是 0.0 —— 五次落空之后不再猜第六个机制。
+                     --  同一份日志里 `我在 (0.872,0.489) · 目标 (0.918,0.750)` 明明差 0.26 画幅,
+                     --  而 `还差 上下 0.0` ⇒ **送进解算的误差和打印给脑看的目标不是同一个东西**。
+                     --  哪一半是 0,打出来就知道 —— `米那一行没换算` 那次正是这么抓到的。
+                     if I = 0 then
+                        Put_Line ("[身]     🔎 第" & Codec.Img (R) & " 行:误差 "
+                                  & Codec.Fmt (T.Err (R), 4) & " · 权重 " & Codec.Fmt (T.W (R), 3)
+                                  & " · 一推能改 " & Codec.Fmt (Per_Step, 4)
+                                  & " ⇒ 还差 "
+                                  & Codec.Fmt ((if Per_Step > 0.0 then T.Err (R) / Per_Step else T.Err (R)), 2)
+                                  & " 步");
+                     end if;
                      if Per_Step > 0.0 then
                         T.Err (R) := T.Err (R) / Per_Step;
                         --  🔴 "还差几步"不许超过"我这一节总共有几步"。
