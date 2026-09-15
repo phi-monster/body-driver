@@ -5843,8 +5843,18 @@ package body Act is
                --  【看得见但没被切成块】(被两根手指从中间劈开),我照实答 0,结果那只眼整集被判死,
                --  而尺子只有长在手上的眼能用 ⇒ 这一集再也量不了远近。
                --  "这几个框里没有它" ≠ "这只眼看不见它" —— 我把两件事混成了一件。
-               --  画面只有我动了才会变 ⇒ **真走过步之后就该重新问**。零系数:走没走是身体自己数的。
-               if Steps_Taken > 0 then
+               --  🔴 清标记的条件不是"我动了",是"**那只眼跟着我动了**"(JG 2026-09-16 实测)。
+               --  第一版写成"走过步就清",于是每跑完一段、我再要"不跟着我动的那只眼",
+               --  它又被挑回第 1 只 —— 而第 1 只长在【另一条】胳膊上,我动这条它的画面一帧都不会变,
+               --  切块一模一样,答案必然还是 0。白弹三个来回(每回两分半)。
+               --  身体早就量过哪只眼长在哪条胳膊上(Cam_On_Arm)⇒ 直接用:
+               --    长在我正动的这条胳膊上 ⇒ 画面确实变了 ⇒ 清掉重新问;
+               --    长在别处 ⇒ 我动它不变 ⇒ 标记留着,别再弹过去。
+               if Steps_Taken > 0 and then C.Blind_Cam >= 0
+                 and then not Pts.Is_Empty
+                 and then Pts (0).Arm < Natural (C.Map.Cam_On_Arm.Length)
+                 and then C.Map.Cam_On_Arm (Pts (0).Arm) = C.Blind_Cam
+               then
                   C.Blind_Cam := -1;
                end if;
                C.Last_Outcome := Classify (To_String (Event));

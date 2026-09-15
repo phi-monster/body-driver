@@ -1459,15 +1459,20 @@ begin
       Drove   : constant Natural := 5;    --  真跑过一段:走了 5 步
       --  弹的时候必须留着标记(不留就立刻又挑回那只眼,无限弹)
       Keep_While_Bouncing : constant Boolean := Bounced = 0;
-      --  走过步就清掉(画面重切过了,答案可能不一样)
-      Clear_After_Driving : constant Boolean := Drove > 0;
+      --  🔴 清的条件不是"我动了",是"那只眼跟着我动了"(JG 实测:第一版每跑完一段就白弹三个来回)
+      Blind_Rides_On_Me : constant Boolean := False;  --  第 1 只眼长在【另一条】胳膊上
+      Wrist_Rides_On_Me : constant Boolean := True;   --  第 2 只眼长在我正动的这条上
+      Clear_After_Driving : constant Boolean := Drove > 0 and then Blind_Rides_On_Me;
+      Clear_Wrist         : constant Boolean := Drove > 0 and then Wrist_Rides_On_Me;
    begin
       Check (Keep_While_Bouncing,
              "瞎眼标记:换眼来回弹的那几轮一步没走 ⇒ 标记必须留着,否则无限弹");
-      Check (Clear_After_Driving,
-             "瞎眼标记:真走过步 ⇒ 清掉重新问 —— 画面只有我动了才会变");
-      Check (Keep_While_Bouncing and then Clear_After_Driving,
-             "瞎眼标记:两条都要,少一条要么无限弹、要么把一只好眼永久判死(JF 实测后者)");
+      Check (not Clear_After_Driving,
+             "瞎眼标记:那只眼长在别的胳膊上 ⇒ 我动它画面一帧不变,切块一模一样,答案必然还是 0 ⇒ 别清");
+      Check (Clear_Wrist,
+             "瞎眼标记:那只眼长在我正动的这条胳膊上 ⇒ 画面确实变了 ⇒ 清掉重新问");
+      Check (Clear_Wrist /= Clear_After_Driving,
+             "瞎眼标记:两只眼要分开判 —— 一律清就白弹,一律不清就把好眼判死(JF/JG 各实测一次)");
    end;
 
    --  ===== "碰到"的两个入口要用同一套旁证(JB:第 3 推报碰到,手在自己底座、球没动) =====
