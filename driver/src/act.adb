@@ -225,6 +225,13 @@ package body Act is
    function Farther_By (Near_Me, Near_It : Long_Float) return Long_Float is
      (if Near_Me > 0.0 and then Near_It > 0.0 then Near_Me / Near_It else 0.0);
 
+   type Xyz is array (0 .. 2) of Long_Float;
+
+   --  两拨是不是【同一下】:世界里的方向要一样。容差 = 方向本身的不确定度(读数抖动 ÷ 挪了多远)。
+   function Same_Nudge (Dot, Len_A, Len_B, Jitter : Long_Float) return Boolean is
+     (Len_A > 0.0 and then Len_B > 0.0
+      and then Dot / (Len_A * Len_B) > 1.0 - Jitter / Long_Float'Min (Len_A, Len_B));
+
    --  走近一段再拨同样的一下 ⇒ 米数。滑得没比上次多(没过跟踪抖动)= 这一段没走近 ⇒ 说不准。
    function Distance_Now (Travelled, Swim_Then, Swim_Now, Floor : Long_Float) return Long_Float is
      (if Travelled > 0.0 and then Swim_Then > 0.0 and then Swim_Now - Swim_Then > Floor
@@ -3016,6 +3023,10 @@ package body Act is
       Probe_K : Integer := -1;
       Probe_Amp : Long_Float := 0.0;
       Probe_EE : Plug.Arm_Pose := [others => 0.0];
+      --  🔴 参照那一拨【在世界里往哪儿推了、推了多远】。下一拨方向不一样就不能比:
+      --  滑速里含着"我横着挪了多少",方向一变它就变,而那跟远近无关(IC 实测 0.014 m 假距离的真凶)。
+      Probe_Dir : Xyz := [others => 0.0];
+      Probe_Len : Long_Float := 0.0;
       Probe_Have : Boolean := False;
       --  🔴🔴 量距离:轻轻拨一下,看它滑多远;走一段,再拨【同样的一下】(2026-09-15)。
       --  这是"拿自己的胳膊当尺子"真正该干的那一半 —— 以前只量出"我的距离感放大了三十二倍"
@@ -3045,6 +3056,10 @@ package body Act is
          Ok_W : Boolean;
          Tries : Natural := 0;
          Swims : Boolean := False;
+         Moved_Ref : Boolean := False;   --  这一次真出了米数 ⇒ 参照才换到这儿
+         Dir : Xyz := [others => 0.0];
+         Dot : Long_Float := 0.0;
+         Comparable : Boolean := False;
       begin
          --  ① 这只眼睛跟着我动吗?不动的眼睛里,世界永远不滑 ⇒ 在这里量不出远近。
          declare
@@ -3153,16 +3168,29 @@ package body Act is
                               & "Too small a nudge makes the answer worthless, so I am giving you no number at all.");
             return;
          end if;
+         --  这一拨在世界里往哪儿推了
+         for K in 0 .. 2 loop
+            Dir (K) := F.EE (Arm) (K) - EE0 (K);
+         end loop;
          --  ③ 每一块滑了多远 ⇒ 这一次的"滑速";和上一次的滑速一比,就是米
          declare
             Said : Unbounded_String;
             Trav : Long_Float := 0.0;
+            Got_One : Boolean := False;
          begin
             if Probe_Have then
                for K in 0 .. 2 loop
                   Trav := Trav + (EE0 (K) - Probe_EE (K)) ** 2;
+                  Dot := Dot + Dir (K) * Probe_Dir (K);
                end loop;
                Trav := Sqrt (Trav);
+               Comparable := Same_Nudge (Dot, Moved, Probe_Len, C.Map.EE_Noise);
+               if not Comparable then
+                  Put_Line ("[身]   📏 这两拨不是同一下:上次把手推向一个方向,这次推向另一个"
+                            & "(方向一致度 " & Codec.Fmt ((if Moved * Probe_Len > 0.0
+                                                          then Dot / (Moved * Probe_Len) else 0.0), 3)
+                            & ")⇒ 滑速变了不代表我走近了 ⇒ 这次不出米数,把参照换成这一拨");
+               end if;
             end if;
             for I in 0 .. Natural (Pts.Length) - 1 loop
                declare
@@ -3178,10 +3206,14 @@ package body Act is
                   S_Now := Near_From_Motion (Ran, Moved, Fl.Track, C.Map.EE_Noise);
                   Append (Said, (if Length (Said) > 0 then " · " else "")
                           & To_String (Q.Desc) & " 滑了 " & Codec.Fmt (Ran, 4) & " 幅");
-                  if Probe_Have and then Q.Near > 0.0 and then S_Now > 0.0 and then Trav > C.Map.EE_Noise then
+                  if Probe_Have and then Comparable and then Q.Near > 0.0 and then S_Now > 0.0
+                    and then Trav > C.Map.EE_Noise
+                  then
                      declare
+                        --  🔴 门槛的单位必须跟滑速一样是"幅每米":跟踪抖动(幅)÷ 这一拨挪了多少米。
+                        --  直接拿"幅"当门槛,门槛就小了三个数量级,噪声会当场变成一个距离(IC 实测 0.014 m)。
                         Zd : constant Long_Float :=
-                          Distance_Now (Trav, Q.Near, S_Now, Long_Float (Fl.Track));
+                          Distance_Now (Trav, Q.Near, S_Now, Long_Float (Fl.Track) / Moved);
                      begin
                         if Zd > 0.0 then
                            Q.Dist := Zd;
@@ -3192,9 +3224,13 @@ package body Act is
                         end if;
                      end;
                   end if;
-                  if S_Now > 0.0 then
+                  --  🔴🔴 参照那一次【出不了米数就不许换】(IC 实测):
+                  --  每拨一次就把参照换成这一次 ⇒ 两次之间永远只隔七八毫米 ⇒ 滑速差永远淹在噪声里 ⇒
+                  --  永远量不出米数。参照留着不动,我一路走下去,差值自己会长过噪声。
+                  if S_Now > 0.0 and then (Q.Near <= 0.0 or else Q.Dist > 0.0 or else not Comparable) then
                      Q.Near := S_Now;
                      Q.Near_N := Q.Near_N + 1;
+                     Got_One := True;
                   end if;
                   Q.Cu := W0.Cu; Q.Cv := W0.Cv; Q.Z := W0.Z;
                   Pts.Replace_Element (I, Q);
@@ -3208,6 +3244,7 @@ package body Act is
                          & "(我的姿态读数抖动才 " & Codec.Fmt (C.Map.Rot_Noise, 4)
                          & ")⇒ 转出来的那一份和远近无关,这个数只是近似");
             end if;
+            Moved_Ref := Got_One;
             if Probe_Have and then Trav > C.Map.EE_Noise then
                C.Blind_Say := S ("I worked out how far things are without any depth sensor: I nudge myself, watch how far "
                                  & "a thing slides across my eye, travel, then give myself the same nudge again. A thing "
@@ -3224,7 +3261,13 @@ package body Act is
             A (Natural (Best_K)) := -Best_Amp;
             Step_Arm (L, C, F, Arm, A, Jaw, Got, Ok_W, C.Fast);
          end;
-         Probe_K := Best_K; Probe_Amp := Best_Amp; Probe_EE := EE0; Probe_Have := True;
+         Probe_K := Best_K; Probe_Amp := Best_Amp;
+         if not Probe_Have or else Moved_Ref or else not Comparable then
+            Probe_EE := EE0;
+            Probe_Dir := Dir;
+            Probe_Len := Moved;
+         end if;
+         Probe_Have := True;
       end Range_Probe;
    begin
       Event := S ("hit the safety cap on steps");

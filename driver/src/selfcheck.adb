@@ -1430,6 +1430,37 @@ begin
              "所以退出条件必须是【它在我眼里滑过了跟踪抖动】—— 三角形扁不扁看它滑了多少,不看我动了多少");
    end;
 
+   --  ===== IC 2026-09-15:身体报出"离我 0.014 m"而球在几十厘米外 =====
+   --  两个洞同时开着,一个单位错、一个假设错。两个都补,才拦得住那个看起来完全正常的数。
+   declare
+      Track_Jitter : constant Long_Float := 0.0016;   --  跟踪抖动,单位是【幅】
+      EE_Jitter    : constant Long_Float := 0.0003;   --  位置读数抖动,单位是【米】
+      Nudge        : constant Long_Float := 0.0012;   --  这一拨挪了多少【米】
+      Slip_Noise   : constant Long_Float := Track_Jitter / Nudge;   --  滑速的噪声,单位【幅每米】
+      Many         : constant Long_Float := 100.0;
+      S1 : constant Long_Float := 0.0037 / Nudge;
+      S2 : constant Long_Float := 0.0059 / Nudge;     --  IC 实测的两次滑速
+      Trav : constant Long_Float := 0.0070;           --  两次之间只走了 7 mm
+      --  两拨的方向:一致 vs 各推各的
+      Same_Dot : constant Long_Float := Nudge * Nudge;          --  完全同向
+      Off_Dot  : constant Long_Float := Nudge * Nudge / Many;   --  几乎垂直
+   begin
+      --  ① 单位:滑速的噪声和跟踪抖动差着三个数量级,拿后者当门槛等于没有门槛
+      Check (Slip_Noise > Track_Jitter * Many,
+             "单位:滑速的噪声(幅每米)比跟踪抖动(幅)大三个数量级 —— 混用等于这道闸根本不响");
+      --  ② 假设:同一根关节同样的命令,在不同姿势下把手推向【不同方向】⇒ 滑速变了跟远近无关
+      Check (Act.Same_Nudge (Same_Dot, Nudge, Nudge, EE_Jitter),
+             "同一下:两拨方向一样 ⇒ 才能比滑速");
+      Check (not Act.Same_Nudge (Off_Dot, Nudge, Nudge, EE_Jitter),
+             "同一下:两拨把手推向不同方向 ⇒ 滑速变了不代表走近了 ⇒ 不许出米数(IC 那个 0.014 m 的真凶)");
+      Check (not Act.Same_Nudge (Same_Dot, 0.0, Nudge, EE_Jitter),
+             "同一下:有一拨根本没挪 ⇒ 没有方向可比 ⇒ 不许出米数");
+      --  ③ 这一组数在补完之后【确实】被拦住:方向不一致就够了,不必靠单位
+      Check (Act.Distance_Now (Trav, S1, S2, Slip_Noise) > 0.0
+             and then not Act.Same_Nudge (Off_Dot, Nudge, Nudge, EE_Jitter),
+             "IC:光看滑速这组数是过关的 —— 拦住它的是【方向不一样】,所以两个洞都得补");
+   end;
+
    --  ===== 米数:一只眼 + 会动 + 知道自己走了多远(所有机体通用) =====
    declare
       Ran_Floor : constant Long_Float := 0.0016;   --  跟踪抖动(画幅)
