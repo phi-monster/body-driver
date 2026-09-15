@@ -97,8 +97,10 @@ package body Act is
    begin
       --  死区一开始当作零(还没证据说哪个通道推不动),边走边学
       C.Dead.Clear;
+      C.Reach_M.Clear;
       for K in 0 .. C.Map.Arms * Chan.Per_Arm loop
          C.Dead.Append (0.0);
+         C.Reach_M.Append (0.0);   --  0 = 还没量过这根通道一推走几米
       end loop;
       C.Zones.Clear;
       for A in 0 .. C.Map.Arms - 1 loop
@@ -1504,11 +1506,29 @@ package body Act is
                      Ran_Max : Long_Float := 0.0;
                   begin
                      A (K) := Amp;
-                     Step_Arm (L, C, F, Arm, A, Jaw, Deliv, Ok2);
-                     if not Ok2 then
-                        Ok := False;
-                        return;
-                     end if;
+                     declare
+                        Ee0 : constant Plug.Arm_Pose := F.EE (Arm);
+                     begin
+                        Step_Arm (L, C, F, Arm, A, Jaw, Deliv, Ok2);
+                        if not Ok2 then
+                           Ok := False;
+                           return;
+                        end if;
+                        --  🔴 顺手量下这一推【手在世界里真走了几米】:尺子量出来的米要接进解算,
+                        --  就靠这个换算(还差几米 ÷ 一推走几米 = 还差几步)。关节读数给的,不碰深度图。
+                        declare
+                           Dm : Long_Float := 0.0;
+                           Ch_No : constant Natural := Arm * Chan.Per_Arm + K;
+                        begin
+                           for Q in 0 .. 2 loop
+                              Dm := Dm + (F.EE (Arm) (Q) - Ee0 (Q)) ** 2;
+                           end loop;
+                           Dm := Sqrt (Dm);
+                           if Amp > 0.0 and then Ch_No < Natural (C.Reach_M.Length) then
+                              C.Reach_M.Replace_Element (Ch_No, Dm / Amp);
+                           end if;
+                        end;
+                     end;
                      for I in 0 .. Natural (Pts.Length) - 1 loop
                         declare
                            P : Point := Pts (I);
@@ -2022,8 +2042,12 @@ package body Act is
       end Ready_Tables;
 
       --  ①a 定目标:每个点的五样差距,各自除以"推一步最多能改多少",变成"还差几步"
+      --  🔴 这一段里,哪几个点的"远近"那一行是【米】(尺子量出来的),不是深度读数
+      In_Metres : array (0 .. Natural'Max (0, Natural (Pts.Length) - 1)) of Boolean := [others => False];
+
       procedure Aim (Terms : out Table.Term_Vectors.Vector) is
       begin
+         In_Metres := [others => False];
          Terms.Clear;
          declare
             Big : Long_Float := 0.0;
@@ -2073,7 +2097,15 @@ package body Act is
                   T.W (1) := Near;
                end;
                --  远近:画面位置和远近一起要,不许替它定"先对准再靠近"的顺序(那等于叫它先扭脖子)
-               if P.Wz > 0.0 and then P.Z > 0.0 and then not Picture.Is_Nan (P.Tz) then
+               --  🔴🔴 尺子量出来的距离【优先】(2026-09-15):深度读数被我自己量出来放大了几十倍,
+               --  而胳膊量出来的那个米数是真的。有米数就用米数,单位换算靠"一推走几米"(探针顺手量的)。
+               --  IM 实测不接进来的后果:横向对到 2 毫米、前后还差 0.535 m,解算却说"还差 0.0 步" ——
+               --  前后那一栏没有任何真东西在驱动它。
+               if P.Kind = Thing_Pt and then P.Dist > 0.0 then
+                  T.Err (2) := -P.Dist;   --  还要往它那边走这么多米(负号 = 要靠近)
+                  T.W (2) := 1.0;
+                  In_Metres (I) := True;
+               elsif P.Wz > 0.0 and then P.Z > 0.0 and then not Picture.Is_Nan (P.Tz) then
                   T.Err (2) := P.Tz - P.Z; T.W (2) := 1.0;
                end if;
                --  看着多大:离得越近越大,这是最稳的远近信号(画面上量的)
@@ -2092,9 +2124,23 @@ package body Act is
                      Per_Step : Long_Float := 0.0;
                   begin
                      for K in 0 .. Chan.Per_Arm - 1 loop
-                        if C.Map.Seen (Arm * Chan.Per_Arm + K) and then Trusts (I) (K) then
-                           Per_Step := Long_Float'Max (Per_Step, abs (T.E.B (K, R)) * Long_Float'Max (1.0e-9, C.Map.Amp (Arm * Chan.Per_Arm + K)));
-                        end if;
+                        declare
+                           Ch_No : constant Natural := Arm * Chan.Per_Arm + K;
+                           Am : constant Long_Float := Long_Float'Max (1.0e-9, C.Map.Amp (Ch_No));
+                        begin
+                           if C.Map.Seen (Ch_No) and then Trusts (I) (K) then
+                              --  🔴 这一行是【米】的时候,一步能改多少也得是米:一推手在世界里走几米。
+                              --  拿画面单位的斜率去除米,等于把两把不同的尺子相除 —— 那才是真的乱来。
+                              if R = 2 and then In_Metres (I) then
+                                 Per_Step := Long_Float'Max
+                                   (Per_Step,
+                                    (if Ch_No < Natural (C.Reach_M.Length)
+                                     then C.Reach_M.Element (Ch_No) else 0.0) * Am);
+                              else
+                                 Per_Step := Long_Float'Max (Per_Step, abs (T.E.B (K, R)) * Am);
+                              end if;
+                           end if;
+                        end;
                      end loop;
                      if Per_Step > 0.0 then
                         T.Err (R) := T.Err (R) / Per_Step;
@@ -3362,7 +3408,9 @@ package body Act is
                            Append (Said, " ⇒ 离我 " & Codec.Fmt (Zd, 3) & " m");
                         elsif Lim > 0.0 then
                            --  \U0001f534 走得太短就只给【下界】,不给一个编出来的数
-                           Q.Dist := 0.0;
+                           --  🔴 下界照样能开车:"它至少有这么远" ⇒ 往前走这么多是安全的,
+                           --  走完再量一次,越走越近、下界越紧。欠走会收敛,冒进会撞翻。
+                           Q.Dist := Lim;
                            Append (Said, " ⇒ 只能说它比 " & Codec.Fmt (Lim, 3)
                                    & " m 远(这一段我才走了 " & Codec.Fmt (Trav, 3) & " m,再远就分辨不出来了)");
                         else

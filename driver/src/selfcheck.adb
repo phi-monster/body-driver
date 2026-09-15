@@ -1414,6 +1414,24 @@ begin
              "温度计 ≠ 尺子:体检只说'我的距离感放大了 32 倍',量距离得靠胳膊滑出来的那两个数");
    end;
 
+   --  ===== 尺子量出来的米,要接进解算(IM 2026-09-15:横向 2 mm、前后 0.535 m,却说"还差 0.0 步") =====
+   declare
+      Gap_M    : constant Long_Float := 0.5350;   --  IM 实测:前后还差这么多米
+      Reach    : constant Long_Float := 0.0200;   --  一推手在世界里走几米(探针量出来的)
+      Amp      : constant Long_Float := 1.0000;
+      Pic_Slope : constant Long_Float := 49.1650; --  画面单位的深度斜率
+      Steps_M, Steps_Pic : Long_Float;
+   begin
+      Steps_M := Gap_M / (Reach * Amp);
+      Check (Steps_M > 1.0,
+             "接进解算:用【一推走几米】换算 ⇒ 0.535 m 还差二十几步,解算才有事可做");
+      Steps_Pic := Gap_M / (Pic_Slope * Amp);
+      Check (Steps_Pic < 1.0,
+             "接进解算:拿画面单位的深度斜率去除米 ⇒ 算出不到一步 ⇒ 正是 IM 那个'还差 0.0 步'");
+      Check (Steps_M > Steps_Pic,
+             "接进解算:两把不同的尺子相除差着一个数量级 —— 米要配米,不许混");
+   end;
+
    --  ===== 画面那两行是一对:合起来判过了,不许再分开清零(IL 2026-09-15) =====
    declare
       --  IL 实测:通道 7 画面两行合起来 分歧 56.67 · 共识 141.61 ⇒ 信得过
