@@ -1414,6 +1414,29 @@ begin
              "温度计 ≠ 尺子:体检只说'我的距离感放大了 32 倍',量距离得靠胳膊滑出来的那两个数");
    end;
 
+   --  ===== 选眼要看【脑在那只眼里认不认得出这一段要做的事】(JA:最静的那只眼里是风扇) =====
+   declare
+      --  JA 2026-09-15 实测:这条胳膊一动,三只眼各变多少画幅
+      Frac_0 : constant Long_Float := 0.039;   --  世界眼:看得见球
+      Frac_1 : constant Long_Float := 0.024;   --  1 号眼:最静,但画面里只有风扇和键盘
+      Blind  : constant Integer := 1;          --  脑看着图说过"这只眼里没有它"
+      Named  : constant Integer := 0;          --  脑上一次真认出它的那只眼
+      --  只按"最静"挑
+      Old_Pick : constant Integer := (if Frac_1 < Frac_0 then 1 else 0);
+      --  跳过脑说过"这儿没有"的那只之后
+      New_Pick : constant Integer :=
+        (if Blind /= 1 and then Frac_1 < Frac_0 then 1 else 0);
+   begin
+      Check (Old_Pick = 1,
+             "选眼:只按最静挑 ⇒ 挑中 1 号眼 —— 而那只眼里没有球,编译期连拒三轮一推没走");
+      Check (New_Pick = 0,
+             "选眼:跳过【脑自己说过「这儿没有」】的那只 ⇒ 挑中看得见的那只");
+      Check (Named >= 0 and then Named /= Blind,
+             "认不出时回到【脑上次真认出它的那只眼】—— 这是身体自己印出去的承诺,必须真做");
+      Check (New_Pick = Named,
+             "两条要一致:跳过瞎眼之后挑到的,就是脑认出过它的那只 —— 不会来回弹");
+   end;
+
    --  ===== 放大器要有天花板:解算里面夹过了,外面那两下放大没人管(IZ:命令 7.6e9,实到 0) =====
    declare
       Cap_Eye  : constant Long_Float := 0.0512;   --  眼睛跟得住的那一档(量出来的)

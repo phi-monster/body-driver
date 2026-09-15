@@ -250,6 +250,8 @@ package Act is
       Reckless : Boolean := False;     --  这一节写了 anyway:身体的一切谨慎作废
       Eye_Want : Sinew.Eye_Pick := Sinew.Ey_None;   --  这一节脑点了用哪只眼睛(没点 = 身体自己挑)
       Tgt_Cam : Integer := -1;         --  脑点名的那一块在哪台相机里(-1 = 这一节没点名东西)
+      Name_Cam : Integer := -1;        --  脑【最近一次真的认出来】一个名字时,身体在哪只眼里(-1 = 还没认出过)
+      Blind_Cam : Integer := -1;       --  脑刚说过【这只眼里没有它】的那只眼(选眼时跳过它,不然来回弹)
       Prog_Log : Unbounded_String;     --  🔴 这一段程序里【每一节】的结果都攒在这儿。
                                        --  以前只留最后一节,而最后那一轮恰好是"程序跑完了"的空话,
                                        --  于是前几节说了什么全被冲掉,脑只能去翻日志 —— 等于身体不会说话。

@@ -4695,8 +4695,18 @@ package body Act is
                                     Natural (C.Items.Length), Big, Cw, Bh, Which, E2)
                      then
                         if Which >= 1 and then Which <= Natural (C.Items.Length) then
+                           --  认出来了 ⇒ 记住这是在哪只眼里认出来的,给下面"答 0 就回去"用。
+                           --  ⚠️ 只在【就是这只被判过"没有它"的眼】里又认出来了才解除标记 —— 一认出就无脑清空,
+                           --  下一轮选眼又会挑回那只瞎眼,来回弹(JA 推演过这条,别再改回去)。
+                           if C.Blind_Cam = Integer (C.Cam) then
+                              C.Blind_Cam := -1;
+                           end if;
+                           C.Name_Cam := Integer (C.Cam);
                            return Integer (Which);
                         end if;
+                        --  脑看着图说"这只眼里没有它" ⇒ 记下这只眼,选眼的时候跳过它。
+                        --  不记就会来回弹:脑要"不跟着我动"的那只 ⇒ 弹过去 ⇒ 认不出 ⇒ 弹回来 ⇒ 脑再说一遍。
+                        C.Blind_Cam := Integer (C.Cam);
                         Tried := To_Unbounded_String ("我把看得见的每一块都过了一遍,没有一块是它");
                         return -1;
                      end if;
@@ -4845,7 +4855,14 @@ package body Act is
                                     Vv : constant Long_Float :=
                                       (if Ix < Natural (C.Map.Cam_Frac.Length) then C.Map.Cam_Frac (Ix) else -1.0);
                                  begin
-                                    if Vv >= 0.0 then
+                                    --  🔴 "最静"只是一半 —— 另一半是【脑在那只眼里认得出这一段要做的事】。
+                                    --  JA 2026-09-15 实测:我写 with my still eye,身体按 Cam_Frac 挑了第 1 只
+                                    --  (这条胳膊一动它只变 0.024 幅,确实最静),而那只眼里是风扇和键盘,没有球
+                                    --  ⇒ 编译期连拒三轮,一推没走。判据没错,是少了一半。
+                                    --  ⚠️ 这不是 IH 撤回的那条("目标那只眼永远赢"—— 那条会把脑永远拽回 0 号眼,
+                                    --  于是量远近永远被拒)。这里只跳过【脑自己刚说过"这儿没有"】的那只:
+                                    --  是脑在决定,不是身体替它决定;脑看得见时照样答真编号,那只眼一次都不会被跳。
+                                    if Vv >= 0.0 and then Integer (Cm) /= C.Blind_Cam then
                                        Any := True;
                                        if (C.Eye_Want = Sinew.Ey_Still and then Vv < Bv)
                                          or else (C.Eye_Want = Sinew.Ey_Moving and then Vv > Bv)
@@ -4907,6 +4924,36 @@ package body Act is
                                           & Mode_Line (C, "changed which eye I judge with"));
                            return;
                         end if;
+                     end if;
+                  end;
+                  --  🔴 兑现身体自己印过的那句承诺:"Answer 0 if it is not visible there and I will go
+                  --  back to the eye that can see it"。JA 2026-09-15 实测:我答了 0,它【没回去】,
+                  --  原地又拒了三轮 —— 身体说了一句它不做的话,这是本仓最坏的一类。
+                  --  脑说"这只眼里没有它"⇒ 回到脑上一次真认出名字的那只眼,让它再说一遍同样的话。
+                  declare
+                     Miss : Boolean := False;
+                  begin
+                     for I2 in 0 .. Natural (Binds.Length) - 1 loop
+                        declare
+                           Key : constant String := To_String (Binds (I2).Key);
+                        begin
+                           if Key /= "me" and then Key /= "grasper" and then Key /= "pusher"
+                             and then Binds (I2).Item <= 0
+                           then
+                              Miss := True;
+                           end if;
+                        end;
+                     end loop;
+                     if Miss and then C.Name_Cam >= 0 and then C.Name_Cam /= Integer (C.Cam) then
+                        Put_Line ("[身] 👁 你说这只眼(第" & Codec.Img (C.Cam)
+                                  & " 只)里没有它 ⇒ 我回到你上次真认出它的第"
+                                  & Codec.Img (Natural (C.Name_Cam)) & " 只眼(这是我答应过的)");
+                        C.Cam := Natural (C.Name_Cam);
+                        C.Recent := S ("you told me that thing is not visible in the eye I had moved to, so I went "
+                                       & "back to the eye you last recognised it in, as I said I would. Nothing "
+                                       & "moved. Say the same thing again. "
+                                       & Mode_Line (C, "went back to the eye that can see what you named"));
+                        return;
                      end if;
                   end;
                   V := Plan.Check (P, Rep, Facts, Binds);
