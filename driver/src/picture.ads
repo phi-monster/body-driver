@@ -8,6 +8,7 @@ package Picture is
       Count : Natural := 0;
       Cu, Cv : Long_Float := 0.0;           --  形心(归一化画幅)
       Depth : Long_Float := 0.0;            --  中位深度(米)
+      Top : Long_Float := 0.0;              --  最靠近相机的那一档深度(米)= 这块的顶面
       Height : Long_Float := 0.0;           --  比背景鼓出多少(米)
       Au, Av : Long_Float := 0.0;           --  主轴单位向量(像素系)
       Elong : Long_Float := 1.0;            --  长轴 σ / 短轴 σ
@@ -23,7 +24,10 @@ package Picture is
    end record;
 
    function Min_Pixels (W, H : Natural) return Natural;
-   function Cut (Depth : Floats; W, H : Natural; Win_Frac, Sigma_Mult : Long_Float) return Regions;
+   --  Keep_Edge = False:贴到任何一条画面边的块都丢(第三方相机里从画面外伸进来的胳膊、桌沿、墙都贴边)。
+   --  Keep_Edge = True:只丢【横跨整幅】的(左右都贴边或上下都贴边)—— 凑近了要抓的东西必然被画面切掉一角,
+   --  严格规则下它会整块消失。只在严格规则一块都没切出来时才放宽。
+   function Cut (Depth : Floats; W, H : Natural; Win_Frac, Sigma_Mult : Long_Float; Keep_Edge : Boolean := False) return Regions;
    --  按颜色切:颜色连成一片的算一块。细的东西(线、缝、刀口)在深度图上鼓不出来,只有这条能把它们切出来。
    --  门槛不是写死的:先量"静止时同一块地方颜色抖多少"(噪声地板),差过它的几倍才算换了一块。
    function Cut_Colour (RGB : Buf; W, H : Natural; Floor_Level : Long_Float; Min_Count : Natural) return Regions;

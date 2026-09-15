@@ -17,6 +17,10 @@ with Plug;
 with Chan;
 with Ada.Containers;
 with Interfaces; use type Interfaces.Unsigned_8;
+with Ada.Numerics.Long_Elementary_Functions; use Ada.Numerics.Long_Elementary_Functions;
+with Sinew;
+with Plan;
+with Act;
 procedure Selfcheck is
    Fails : Natural := 0;
    procedure Check (Cond : Boolean; What : String) is
@@ -376,6 +380,277 @@ begin
       B : constant Buf := Codec.BMP24 (From_String ("abcdef"), 2, 1);
    begin
       Check (Natural (B.Length) = 54 + 8 and then B (0) = 66 and then B (54) = 99, "BMP24 头与 BGR 顺序");
+   end;
+
+   --  ── 顶面 / 贴边 / 横跨整幅:抓握要靠"顶面到桌面的一半",而近处的东西必然贴画面边 ──
+   declare
+      W : constant := 96;
+      H : constant := 72;
+      Dep : Floats := Filled (W * H, 0.80);
+      R : Picture.Regions;
+      Rad : constant Long_Float := 12.0;
+      Seed : Long_Long_Integer := 11;
+   begin
+      for I in 0 .. W * H - 1 loop
+         Seed := (Seed * 1103515245 + 12345) mod 2147483648;
+         Dep.Replace_Element (I, 0.80 + Long_Float (Seed mod 1000) * 1.0e-6 - 0.0005);
+      end loop;
+      --  一个半球:中心最高,边缘贴桌面 ⇒ 顶面必须比中位深度更近
+      for Y in 21 .. 44 loop
+         for X in 36 .. 59 loop
+            declare
+               Dx : constant Long_Float := Long_Float (X - 47);
+               Dy : constant Long_Float := Long_Float (Y - 32);
+               T : constant Long_Float := Rad * Rad - Dx * Dx - Dy * Dy;
+            begin
+               if T > 0.0 then
+                  Dep.Replace_Element (Y * W + X, 0.80 - 0.04 * Sqrt (T) / Rad);
+               end if;
+            end;
+         end loop;
+      end loop;
+      R := Picture.Cut (Dep, W, H, 0.125, 3.0);
+      Check (Natural (R.Length) = 1, "顶面:半球切出" & Natural'Image (Natural (R.Length)) & " 块");
+      if not R.Is_Empty then
+         Check (R (0).Top < R (0).Depth - 0.005, "顶面:顶 " & Codec.Fmt (R (0).Top, 3) & " 比中位 " & Codec.Fmt (R (0).Depth, 3) & " 更近");
+         Check (abs (R (0).Top + R (0).Height - 0.80) < 0.012, "顶面:顶 + 鼓高 = 桌面 " & Codec.Fmt (R (0).Top + R (0).Height, 3));
+         declare
+            It : Act.Item;
+         begin
+            It.Top := R (0).Top; It.Height := R (0).Height; It.Depth := R (0).Depth;
+            Check (Act.Grab_Depth (It) > It.Top and then Act.Grab_Depth (It) > It.Depth and then Act.Grab_Depth (It) < It.Top + It.Height,
+                   "抓握:瞄的高度在顶面和桌面之间、比中位深度(=皮)更深(" & Codec.Fmt (Act.Grab_Depth (It), 3) & ")");
+            It.Top := 0.0;
+            Check (abs (Act.Grab_Depth (It) - It.Depth) < 1.0e-12, "抓握:没量到顶面就退回中位深度");
+         end;
+      end if;
+   end;
+   declare
+      W : constant := 96;
+      H : constant := 72;
+      Dep : Floats := Filled (W * H, 0.80);
+      R : Picture.Regions;
+      Seed : Long_Long_Integer := 13;
+   begin
+      for I in 0 .. W * H - 1 loop
+         Seed := (Seed * 1103515245 + 12345) mod 2147483648;
+         Dep.Replace_Element (I, 0.80 + Long_Float (Seed mod 1000) * 1.0e-6 - 0.0005);
+      end loop;
+      --  贴右边的一块:凑近了要抓的东西就长这样,不许整块丢掉
+      for Y in 26 .. 45 loop
+         for X in 76 .. 95 loop
+            Dep.Replace_Element (Y * W + X, 0.77);
+         end loop;
+      end loop;
+      R := Picture.Cut (Dep, W, H, 0.125, 3.0);
+      Check (R.Is_Empty, "贴边:严格规则下贴右边的块被丢掉(" & Natural'Image (Natural (R.Length)) & " 块)");
+      R := Picture.Cut (Dep, W, H, 0.125, 3.0, Keep_Edge => True);
+      Check (Natural (R.Length) = 1, "贴边:放宽之后它留下了(" & Natural'Image (Natural (R.Length)) & " 块)");
+   end;
+   declare
+      W : constant := 96;
+      H : constant := 72;
+      Dep : Floats := Filled (W * H, 0.80);
+      R : Picture.Regions;
+      Seed : Long_Long_Integer := 17;
+   begin
+      for I in 0 .. W * H - 1 loop
+         Seed := (Seed * 1103515245 + 12345) mod 2147483648;
+         Dep.Replace_Element (I, 0.80 + Long_Float (Seed mod 1000) * 1.0e-6 - 0.0005);
+      end loop;
+      --  横贯整幅的一条带 = 背景,必须丢
+      for Y in 26 .. 45 loop
+         for X in 0 .. 95 loop
+            Dep.Replace_Element (Y * W + X, 0.77);
+         end loop;
+      end loop;
+      R := Picture.Cut (Dep, W, H, 0.125, 3.0, Keep_Edge => True);
+      Check (R.Is_Empty, "贴边:横跨整幅的带就算放宽也丢掉(" & Natural'Image (Natural (R.Length)) & " 块)");
+   end;
+
+   --  ── 拿住了没:唯一分得开的那一条 ──
+   declare
+      Hu : constant Long_Float := 0.10;   --  我的手在那台不动的相机里往右挪了十分之一个画面(画幅比例)
+      Hv : constant Long_Float := 0.00;
+   begin
+      Check (Act.Came_With_Me (0.10, 0.00, Hu, Hv), "拿住:它跟我挪了同样一段 ⇒ 拿住了");
+      Check (Act.Came_With_Me (0.09, 0.01, Hu, Hv), "拿住:它跟我挪的差一点点(抖动)⇒ 仍然算拿住");
+      Check (not Act.Came_With_Me (0.00, 0.00, Hu, Hv), "拿住:我抬了手它留在原地 ⇒ 没拿住");
+      Check (not Act.Came_With_Me (0.00, -0.30, Hu, Hv),
+             "拿住:我抬了手它朝另一个方向飞出去 ⇒ 没拿住(原地空了但是被撞飞的 —— 旧判据在这里判成拿住,三次假拿住全是它)");
+      Check (not Act.Came_With_Me (0.10, 0.00, 0.00, 0.00), "拿住:我的手一步没挪 ⇒ 判不了,不许自称拿住");
+      Check (Act.Came_With_Me (0.05, 0.00, Hu, Hv), "拿住:它只挪了我的一半(差正好是一半)⇒ 还算拿住,边界在这儿");
+      Check (not Act.Came_With_Me (0.04, 0.00, Hu, Hv), "拿住:它挪得比我的一半还少 ⇒ 不算拿住,边界另一侧");
+   end;
+
+   --  ── Sinew:脑的嘴 ──
+   declare
+      use Sinew;
+      G : constant Program := Sinew.Parse
+        ("to pick up:" & ASCII.LF &
+         "  repeat 3 times:" & ASCII.LF &
+         "    do grasper above the ball must until touched or 20 steps" & ASCII.LF &
+         "    try:" & ASCII.LF &
+         "      do grasper close the ball until free" & ASCII.LF &
+         "    or:" & ASCII.LF &
+         "      do grasper open until settled" & ASCII.LF &
+         "    end" & ASCII.LF &
+         "  end" & ASCII.LF &
+         "end" & ASCII.LF &
+         "run pick up" & ASCII.LF &
+         "say done my best");
+   begin
+      Check (G.Ok, "Sinew:一段带定义/循环/try 的完整程序解析得通" & (if G.Ok then "" else "(" & To_String (G.Err) & ")"));
+      Check (Natural (G.Defs.Length) = 1 and then To_String (G.Defs (0).Name) = "pick up", "Sinew:定义被记下来了(名字可以是好几个词)");
+   end;
+   declare
+      use Sinew;
+      G : constant Program := Sinew.Parse ("do grasper touching the white ball small must until touched or 7 steps with my still eye");
+      C : Constraint;
+   begin
+      Check (G.Ok and then Natural (G.Code.Length) = 1 and then G.Code (0).O = Op_Interval, "Sinew:一行 do = 一段区间");
+      if G.Ok and then not G.Code.Is_Empty and then not G.Code (0).Cons.Is_Empty then
+         C := G.Code (0).Cons (0);
+         Check (C.Subj.K = Nk_Role and then C.Subj.R = Rl_Grasper, "Sinew:主语是【角色】,不是编号");
+         Check (C.Obj.K = Nk_Thing and then To_String (C.Obj.Word) = "the white ball", "Sinew:宾语是一句名字,好几个词也认");
+         Check (C.Sp = Sp_Small and then C.Rk = Rk_Must and then G.Code (0).Until_Oc = Oc_Touched and then G.Code (0).Max_Steps = 7,
+                "Sinew:步子 / must / 结局 / or N steps 都读出来了");
+         Check (G.Code (0).Eye = Ey_Still, "Sinew:「with my still eye」读出来了");
+      end if;
+   end;
+   declare
+      function Bad (S : String) return Boolean is (not Sinew.Parse (S).Ok);
+   begin
+      Check (Bad ("move joint 3 by 0.1"), "Sinew:关节号这种话语法上不存在 ⇒ 说不出口");
+      Check (Bad ("do grasper touching the ball small"), "Sinew:不说【到什么为止】⇒ 退回");
+      Check (Bad ("do touching the ball until touched"), "Sinew:不说【谁】⇒ 退回");
+      Check (Bad ("do grasper the ball until touched"), "Sinew:不说关系 ⇒ 退回");
+      Check (Bad ("do grasper touching the ball until soon"), "Sinew:until 后面不是结局词 ⇒ 退回");
+      Check (Bad ("repeat 3 times:" & ASCII.LF & "do grasper open until settled"), "Sinew:块没有 end ⇒ 退回");
+      Check (Bad ("end"), "Sinew:多一个 end ⇒ 退回");
+      Check (Sinew.Parse ("do grasper close until stuck").Ok, "Sinew:close 可以不带宾语 —— 就在这儿合上");
+   end;
+
+   --  🔴 每个结局词都要有【自己】的判法 —— 语言收下一个词,身体悄悄换成另一个词的行为,是本仓最贵的一类 bug。
+   --  这张表就是语言的承诺,逐词钉死;比的是【身体的真实映射】,不是期望表自己跟自己。
+   declare
+      use Sinew;
+      use type Monitor.Until_Kind;
+      type Row is record
+         O : Outcome;
+         K : Monitor.Until_Kind;
+      end record;
+      Want : constant array (1 .. 7) of Row :=
+        [(Oc_Touched, Monitor.U_Contact), (Oc_Stuck, Monitor.U_Resist),
+         (Oc_Slipped, Monitor.U_Slip),    (Oc_Settled, Monitor.U_Settle),
+         (Oc_Stalled, Monitor.U_Stall),
+         (Oc_Timeout, Monitor.U_Steps),   (Oc_Free, Monitor.U_Steps)];
+      All_Right : Boolean := True;
+      Round_Trip : Boolean := True;
+      Distinct : Boolean := True;
+   begin
+      for R of Want loop
+         if Act.Until_Of (R.O) /= R.K then
+            All_Right := False;
+         end if;
+         if Act.Kind_Of_Word (Act.Until_Word (R.O)) /= Act.Until_Of (R.O) then
+            Round_Trip := False;
+         end if;
+      end loop;
+      --  五个"有自己事件"的词必须两两不同(前五行);timeout / free 走步数上限是设计(free 由合手那一节判)
+      for I in 1 .. 5 loop
+         for J in I + 1 .. 5 loop
+            if Act.Until_Of (Want (I).O) = Act.Until_Of (Want (J).O) then
+               Distinct := False;
+            end if;
+         end loop;
+      end loop;
+      Check (All_Right, "语言:每个结局词都接到自己的判法上(不许并进兜底的步数上限)");
+      Check (Round_Trip, "语言:结局词转成字符串再转回来,判法不变");
+      Check (Distinct, "语言:有自己事件的五个结局词两两不同");
+      --  身体段末那句话 → 结局词:每一句都要落到它自己的词上(顺序错一处就会串词,这里逐句钉死)
+      Check (Act.Classify ("contact: something I was not pushing moved when I moved - I am touching it", "") = Oc_Touched, "语言:碰到 → touched");
+      Check (Act.Classify ("resist: I commanded a push and my body did not go", "") = Oc_Stuck, "语言:顶住 → stuck");
+      Check (Act.Classify ("slip: what I was holding has left my fingers", "") = Oc_Slipped, "语言:滑了 → slipped");
+      Check (Act.Classify ("settle: the picture stopped changing", "") = Oc_Settled, "语言:画面不变 → settled(含 stopped 一词也不许串成 stalled)");
+      Check (Act.Classify ("amount: stopped getting closer (still about 3.0 pushes away) - either something holds me or this arm cannot reach farther from here", "") = Oc_Stalled,
+             "语言:差距不缩 → stalled");
+      Check (Act.Classify ("steps: hit the step cap (12)", "") = Oc_Timeout, "语言:步数用完 → timeout");
+      Check (Act.Classify ("lost sight: two steps in a row I could not find what I am tracking in this picture; I stopped rather than move blind", "") = Oc_Lost,
+             "语言:跟丢 → lost(含 steps 一词也不许串成 timeout)");
+      Check (Act.Classify ("amount: arrived (in the picture and at the same distance as my fingers)", "") = Oc_Arrived, "语言:到位 → arrived");
+      Check (Act.Classify ("steps: I took the steps you asked for", "I closed grip 2 until the picture stopped changing (9 steps, reading 0.000, empty-close reading 0.000); after a small lift it came with my hand ⇒ held (my hand moved 0.020 of a frame, it moved 0.019, the two differ by 0.001)") = Oc_Free,
+             "语言:合完抬一截它跟着我走 → free");
+      Check (Act.Classify ("steps: I took the steps you asked for", "I closed grip 2 until the picture stopped changing (9 steps, reading 0.000, empty-close reading 0.000); after a small lift it did NOT come with my hand ⇒ not held - and its old place is empty, so I knocked it away rather than picked it up; I opened it again") = Oc_Slipped,
+             "语言:合了没拿住(撞飞)→ slipped");
+      Check (Act.Classify ("steps: I took the steps you asked for", "I did NOT close grip 2: cage check in this camera: my grip centre is 0.120 of a frame from the thing (allowed 0.050)") = Oc_Stalled,
+             "语言:没笼住不敢合 → stalled");
+      Check (Act.Classify ("", "I opened grip 2 (4 steps, reading 1.000)") = Oc_Arrived, "语言:只张开、没有要走的段 → arrived");
+   end;
+
+   --  关系词同一条焊缝:每一个都要么有自己的分支,要么有自己的、非空非 "?" 的字,且两两不同
+   declare
+      use Sinew;
+      Named : Boolean := True;
+      Uniq : Boolean := True;
+   begin
+      for R in Rel loop
+         if R /= Re_None and then not Act.Rel_Has_Own_Branch (R) then
+            if Act.Rel_Cmd (R) = "?" or else Act.Rel_Cmd (R) = "" then
+               Named := False;
+            end if;
+            for Q in Rel loop
+               if Q /= R and then Q /= Re_None and then not Act.Rel_Has_Own_Branch (Q) and then Act.Rel_Cmd (Q) = Act.Rel_Cmd (R) then
+                  Uniq := False;
+               end if;
+            end loop;
+         end if;
+      end loop;
+      Check (Named, "语言:每个关系词都有自己的字(没有一个落进兜底的 ?)");
+      Check (Uniq, "语言:关系词两两不同(不许两个词做同一件事)");
+      Check (not (Act.Role_Wants (Rl_Grasper, Act.Grip) and then Act.Role_Wants (Rl_Pusher, Act.Grip)), "语言:grasper 和 pusher 互斥(合得拢的零件不许算 pusher)");
+   end;
+
+   --  ── 编译器:说不了的当场退回,说得了的放行;空转抓停不下来的循环 ──
+   declare
+      use Sinew;
+      Facts : Plan.Facts_Vectors.Vector;
+      B : Plan.Bind_Vectors.Vector;
+      Zero : Plan.Item_Facts;
+      Gr, Th : Plan.Item_Facts;
+      function Verdict_Of (Src : String; Own : Boolean := False) return Plan.Verdict is
+        (Plan.Check (Sinew.Parse (Src), Facts, B, Own));
+      function Dry (Src : String) return Plan.Verdict is
+        (Plan.Dry_Run (Sinew.Parse (Src), Facts, B));
+   begin
+      Facts.Append (Zero);
+      Gr.Exists := True; Gr.Mine := True; Gr.Grasp := True; Gr.Span := 0.13; Gr.Label := To_Unbounded_String ("grasper(第1 只手)");
+      Facts.Append (Gr);                                     --  1 号 = 爪心
+      Th.Exists := True; Th.Stands := True; Th.Size := 0.10;
+      Facts.Append (Th);                                     --  2 号 = 球
+      B.Append (Plan.Bind_Entry'(Key => To_Unbounded_String ("grasper"), Item => 1, Tried => Null_Unbounded_String));
+      B.Append (Plan.Bind_Entry'(Key => To_Unbounded_String ("the ball"), Item => 2, Tried => Null_Unbounded_String));
+      Check (Verdict_Of ("do grasper into the ball until touched or 30 steps").Ok, "编译:说得出口的一句放行");
+      Check (not Verdict_Of ("do grasper touching the ball until arrived").Ok, "编译:until arrived 退回(到没到只有脑能判)");
+      Check (not Verdict_Of ("do grasper press the ball firm until stuck").Ok, "编译:press 这版做不了 ⇒ 退回");
+      Check (not Verdict_Of ("do grasper touching the ball until free").Ok, "编译:until free 不跟 close 一起 ⇒ 退回");
+      Check (Verdict_Of ("do grasper close the ball until free").Ok, "编译:close … until free 放行");
+      Check (not Verdict_Of ("do grasper nearer the ball until touched or 5 steps", Own => True).Ok, "编译:跟着我动的眼里 nearer 判不了 ⇒ 退回");
+      Check (Verdict_Of ("do grasper nearer the ball until touched or 5 steps", Own => False).Ok, "编译:不动的眼里 nearer 放行");
+      Check (not Verdict_Of ("do the ball touching grasper until touched").Ok, "编译:主语不是我身上的东西 ⇒ 退回");
+      Check (not Verdict_Of ("do grasper touching the cup until touched").Ok, "编译:认不出的名字 ⇒ 退回");
+      Check (not Dry ("repeat until touched:" & ASCII.LF & "do grasper open until settled" & ASCII.LF & "end").Ok,
+             "空转:等一个这段程序里永远不会发生的结局 ⇒ 停不下来 ⇒ 退回");
+      Check (Dry ("repeat until touched:" & ASCII.LF & "do grasper into the ball until touched or 30 steps" & ASCII.LF & "end").Ok,
+             "空转:出口真到得了的循环放行");
+      Check (not Dry ("run fly").Ok, "空转:run 一个没 to 过的名字 ⇒ 退回");
+      declare
+         Wide : Plan.Item_Facts := Th;
+      begin
+         Wide.Size := 0.30;
+         Facts.Replace_Element (2, Wide);
+         Check (not Dry ("do grasper close the ball until free").Ok, "空转:张不到那么开却要合 ⇒ 退回");
+      end;
    end;
    Put_Line ((if Fails = 0 then "🟢 自检全过" else "🔴 自检失败" & Natural'Image (Fails) & " 条"));
    if Fails > 0 then

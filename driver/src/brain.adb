@@ -176,4 +176,114 @@ package body Brain is
          return True;
       end;
    end Ask;
+
+   function Find (Host : String; Port : Natural; Word, Body_Text : String; N_Items : Natural;
+                  RGB : Buf; W, H : Natural; Which : out Natural; Err : out Unbounded_String) return Boolean is
+      NL : constant String := "" & ASCII.LF;
+      Prompt : constant String :=
+        "Everything I can see right now is already cut out and NUMBERED for you, boxed on the picture:" & NL &
+        Body_Text & NL & NL &
+        "Which one of those numbers is what someone would call: " & Word & NL &
+        "Answer with that number. Answer 0 if none of them is that thing, or if two of them look equally like it - " &
+        "0 is a normal answer and I will say so plainly rather than guess." & NL &
+        "Do not give me coordinates. Only one of the numbers that are already on the picture.";
+      Schema : constant String :=
+        "{""type"":""json_schema"",""json_schema"":{""name"":""which_one"",""strict"":true,""schema"":{""type"":""object"",""additionalProperties"":false," &
+        """required"":[""which""],""properties"":{""which"":{""type"":""integer"",""minimum"":0,""maximum"":" & Codec.Img (Natural'Max (1, N_Items)) & "}}}}}";
+      B64 : constant String := Codec.Base64 (Codec.BMP24 (RGB, W, H));
+      Body_Json : constant String :=
+        "{""model"":""eye"",""max_tokens"":80,""temperature"":0,""chat_template_kwargs"":{""enable_thinking"":false},""response_format"":" & Schema &
+        ",""messages"":[{""role"":""user"",""content"":[{""type"":""image_url"",""image_url"":{""url"":""data:image/bmp;base64," & B64 &
+        """}},{""type"":""text"",""text"":""" & Json.Escape (Prompt) & """}]}]}";
+      Reply : Unbounded_String;
+   begin
+      Which := 0;
+      Err := Null_Unbounded_String;
+      if Natural (RGB.Length) < W * H * 3 then
+         Err := To_Unbounded_String ("画面短了");
+         return False;
+      end if;
+      if not Http_Client.Post (Host, Port, "/v1/chat/completions", Body_Json, Reply) then
+         Err := To_Unbounded_String ("连不上脑 " & Host & ":" & Codec.Img (Port));
+         return False;
+      end if;
+      declare
+         Inner : constant String := Extract_Content (To_String (Reply));
+         D : Json.Doc;
+         Perr : Unbounded_String;
+      begin
+         if Inner = "" or else not Json.Parse (Inner, D, Perr) then
+            Err := To_Unbounded_String ("认名字的回包读不出来");
+            return False;
+         end if;
+         Which := Natural (Long_Float'Max (0.0, Json.Num (D, Json.Get (D, 0, "which"))));
+         return True;
+      end;
+   end Find;
+
+   function Ask_Prog (Host : String; Port : Natural; Task_Text, Body_Text, Recent, Grammar, Refused : String;
+                      Cols, Rows : Natural; RGB : Buf; W, H : Natural;
+                      Program : out Unbounded_String; Err : out Unbounded_String) return Boolean is
+      Cells : constant Natural := Cols * Rows;
+      NL : constant String := "" & ASCII.LF;
+      Prompt : constant String :=
+        "You are not a model looking at a picture. You ARE this robot, and you run the loop: nothing moves unless you say so, and you are called back whenever you ask to be. " &
+        "This colour image is what you see right now through the eye I am judging with, with a numbered grid drawn over it: " & Codec.Img (Cols) & " columns x " & Codec.Img (Rows) &
+        " rows, numbered 1.." & Codec.Img (Cells) & " left to right then top to bottom." & NL & NL &
+        "YOUR BODY (measured by yourself: you moved one channel at a time and watched which part of the picture followed):" & NL & Body_Text & NL & NL &
+        "WHAT YOU JUST DID AND WHAT HAPPENED:" & NL & Recent & NL & NL &
+        "WHAT YOU ARE TRYING TO DO: " & Task_Text & NL & NL &
+        (if Refused = "" then ""
+         else "I REFUSED YOUR LAST PROGRAM BEFORE ANYTHING MOVED:" & NL & Refused & NL & NL) &
+        "ANSWER WITH ONE PROGRAM in my language. This is the whole grammar - there is nothing else I understand:" & NL &
+        Grammar & NL & NL &
+        "How this works: I read every line of your program and check it against what I have measured about myself BEFORE anything moves. " &
+        "If a line asks for something I cannot do, I run none of it, and I tell you which line, why, and what I can say instead. " &
+        "That refusal is free: no motor turns, and you may answer again. " &
+        "A program runs one do-line at a time; each do-line ends on its outcome, and try/repeat/if read that outcome, so you are not called back after every push." & NL &
+        "Name things in your own words (the ball, the small figure): I will ask you which numbered box that is. " &
+        "Do NOT give distances, angles, speeds or any numbers other than step counts - I measure those myself. " &
+        "If there is a strip of smaller pictures under the numbered one, those are my OTHER eyes right now, each boxed with its eye number in white; " &
+        "they are not numbered inside - to act in one of them say with my still eye / with my moving eye and I will move there and ask you again.";
+      Schema : constant String :=
+        "{""type"":""json_schema"",""json_schema"":{""name"":""my_program"",""strict"":true,""schema"":{""type"":""object"",""additionalProperties"":false," &
+        """required"":[""program""],""properties"":{""program"":{""type"":""string""}}}}}";
+      B64 : constant String := Codec.Base64 (Codec.BMP24 (RGB, W, H));
+      Body_Json : constant String :=
+        "{""model"":""eye"",""max_tokens"":700,""temperature"":0,""chat_template_kwargs"":{""enable_thinking"":false},""response_format"":" & Schema &
+        ",""messages"":[{""role"":""user"",""content"":[{""type"":""image_url"",""image_url"":{""url"":""data:image/bmp;base64," & B64 &
+        """}},{""type"":""text"",""text"":""" & Json.Escape (Prompt) & """}]}]}";
+      Reply : Unbounded_String;
+   begin
+      Program := Null_Unbounded_String;
+      Err := Null_Unbounded_String;
+      if Natural (RGB.Length) < W * H * 3 then
+         Err := To_Unbounded_String ("画面短了");
+         return False;
+      end if;
+      if not Http_Client.Post (Host, Port, "/v1/chat/completions", Body_Json, Reply) then
+         Err := To_Unbounded_String ("连不上脑 " & Host & ":" & Codec.Img (Port));
+         return False;
+      end if;
+      declare
+         Inner : constant String := Extract_Content (To_String (Reply));
+         D : Json.Doc;
+         Perr : Unbounded_String;
+      begin
+         if Inner = "" then
+            Err := To_Unbounded_String ("回包里没有 content(前 200 字:" & Ada.Strings.Fixed.Head (To_String (Reply), 200) & ")");
+            return False;
+         end if;
+         if not Json.Parse (Inner, D, Perr) then
+            Err := To_Unbounded_String ("脑给的不是 JSON:" & To_String (Perr) & " ‖ " & Ada.Strings.Fixed.Head (Inner, 200));
+            return False;
+         end if;
+         Program := To_Unbounded_String (Json.Text (D, Json.Get (D, 0, "program")));
+         if Length (Program) = 0 then
+            Err := To_Unbounded_String ("脑交上来一段空程序");
+            return False;
+         end if;
+         return True;
+      end;
+   end Ask_Prog;
 end Brain;

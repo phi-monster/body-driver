@@ -17,7 +17,8 @@ package Monitor is
       Steps : Count := 0;
       Refused : Count := 0;        --  连着几步一步没走
    end record;
-   type Until_Kind is (U_Steps, U_Contact, U_Resist, U_Slip, U_Settle);
+   --  U_Stall = 我还在动,可差距连着几步不缩了(脑要有词能问这件事;stuck 是"命令了身体没走",两者不许压成一条)
+   type Until_Kind is (U_Steps, U_Contact, U_Resist, U_Slip, U_Settle, U_Stall);
 
    procedure Step (W : in out Watch; Pic_Delta : Floor; Err_Before, Err_After : Bounded;
                    Delivered : Floor; F : Floors)
@@ -43,5 +44,6 @@ package Monitor is
          when U_Contact => Touching (Moved_Other),
          when U_Resist => Blocked or else Refusing (W),
          when U_Slip => Slipped (Reading, Empty, Reading_Noise),
-         when U_Settle => Settled (W));
+         when U_Settle => Settled (W),
+         when U_Stall => Stalled (W));
 end Monitor;

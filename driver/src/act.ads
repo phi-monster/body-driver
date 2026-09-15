@@ -14,6 +14,10 @@ with Table;
 with Memory;
 with Schema;
 with Chan;
+with Monitor;
+with Sinew;
+with Runtime;
+with Plan;
 package Act is
    type Item_Kind is (Finger, Grip, Piece, Thing, Thing_Remembered, Thing_Held);   --  Piece = 我身上某个通道带的一块(Which = 通道号)
    type Item is record
@@ -25,6 +29,7 @@ package Act is
       Cu, Cv : Long_Float := 0.0;
       X0, Y0, X1, Y1 : Natural := 0;
       Depth, Height : Long_Float := 0.0;
+      Top : Long_Float := 0.0;      --  这块顶面的深度(米):抓在"顶面到桌面的一半"处,而不是贴着顶面
       Count : Natural := 0;
       Au, Av : Long_Float := 0.0;    --  这一块自己的主轴(画面里的单位向量)
       Elong : Long_Float := 1.0;     --  长轴/短轴
@@ -85,8 +90,38 @@ package Act is
       Cut_Seq : Natural := 0;      --  切块缓存:这一帧的编号(同一帧同一台相机不重切,颜色切块很贵)
       Cut_Cam : Integer := -1;
       Cut_Regs : Picture.Regions;
+      --  ── 脑交的是一段 Sinew 程序(FO 那套 JSON 表只在 BL_JSON=1 时用)──
+      --  Sinew 只是脑的嘴:一段区间编译成 FO 执行核那一轮的命令,段末事件翻回结局词;循环/分支/try 由它自己的状态机走。
+      Use_Json : Boolean := False;
+      Prog : Sinew.Program;
+      M : Runtime.Machine;
+      Binds : Plan.Bind_Vectors.Vector;   --  每个名词落到了第几号(编号只活在身体里,从不进语言)
+      Have_Prog : Boolean := False;
+      Refused : Unbounded_String;         --  上一段被退回的话:理由 + 能照抄的替代,随下一轮一起给脑
+      Prog_Log : Unbounded_String;        --  这一段程序里每一节的结果都攒在这儿,一起给脑
+      Eye_Want : Sinew.Eye_Pick := Sinew.Ey_None;
+      Name_Cam : Integer := -1;           --  脑最近一次真认出一个名字时,身体在哪只眼里
+      Blind_Cam : Integer := -1;          --  脑刚说过"这只眼里没有它"的那只眼
    end record;
 
    procedure Init_Tracks (C : in out Context);
    procedure Round (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);
+
+   --  ── 下面几个是接缝,离线自检要逐条钉死 ──
+   --  拿住了没,唯一分得开的那一条:抬手时它跟着我的手走了【同样一段】。
+   --  "它原来待的地方空了"分不开【撞跑】(FM/FO 三次假拿住全是它)。零系数:两段位移的差比手自己挪的一半还小。
+   --  手一步没挪 ⇒ 判不了(恒假),由调用方报"我说不准"。
+   function Came_With_Me (Obj_Du, Obj_Dv, Hand_Du, Hand_Dv : Long_Float) return Boolean;
+   --  抓在这块的哪个高度 = 顶面到它站着的那个面之间的一半(球 = 赤道;平的 = 表面)。两个数都是这块自己量的。
+   function Grab_Depth (O : Item) return Long_Float;
+   --  结局词 → 判法,唯一的一处。每个词必须有自己的判法,不许并进兜底的步数上限。
+   function Until_Of (O : Sinew.Outcome) return Monitor.Until_Kind;
+   function Until_Word (O : Sinew.Outcome) return String;
+   function Kind_Of_Word (W : String) return Monitor.Until_Kind;
+   --  关系词 → FO 执行核的字,唯一的一处
+   function Rel_Cmd (R : Sinew.Rel) return String;
+   function Rel_Has_Own_Branch (R : Sinew.Rel) return Boolean;
+   --  身体报的那句事件 + 合手那句话,归到结局词里的哪一个
+   function Classify (Event, Grip_Note : String) return Sinew.Outcome;
+   function Role_Wants (R : Sinew.Role; K : Item_Kind) return Boolean;
 end Act;

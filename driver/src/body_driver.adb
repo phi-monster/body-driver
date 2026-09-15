@@ -65,6 +65,8 @@ begin
       end if;
    end;
    C.Look_Only := Codec.Env ("BL_LOOK") /= "";
+   --  脑说的话:默认交一段 Sinew 程序;BL_JSON=1 退回 FO 那张表(接缝有事时的后路)
+   C.Use_Json := Codec.Env ("BL_JSON") /= "";
    C.Dump_Dir := To_Unbounded_String (Codec.Env ("BL_DUMP"));
    if C.Dump_Dir /= "" then
       Codec.Make_Dir (To_String (C.Dump_Dir));
@@ -262,7 +264,8 @@ begin
                 (if C.Map.N_Cams > 2 then Codec.Fmt (C.Map.Cam_Frac (A * C.Map.N_Cams + 2), 3) else ""));
    end loop;
    C.Cam := C.Map.World_Cam;
-   Put_Line ("[身] 身体量完 ⇒ 开始干活(脑在 " & To_String (C.Eye_Host) & ":" & Codec.Img (C.Eye_Port) & (if C.Look_Only then ",只看不动" else "") & ")");
+   Put_Line ("[身] 身体量完 ⇒ 开始干活(脑在 " & To_String (C.Eye_Host) & ":" & Codec.Img (C.Eye_Port) & (if C.Look_Only then ",只看不动" else "") &
+             (if C.Use_Json then ",脑填 FO 那张表" else ",脑交 Sinew 程序") & ")");
    --  ── 干活循环 ──
    loop
       if not Plug.Sense (L, F) then
