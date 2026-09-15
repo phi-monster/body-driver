@@ -5037,6 +5037,21 @@ package body Act is
                                                 P.Tsize := Z.Span;
                                                 P.Wsize := 1.0;
                                              else
+                                                --  🔴🔴 不许静悄悄地把前后这一维关掉:说清楚【为什么】关。
+                                                --  一句"这一栏是 0"什么都不说明,"我为什么把它关了"才指得到地方
+                                                --  (IV 2026-09-15:我补了退路,可 大小 还是 0.0,而日志一个字都没解释)。
+                                                Put_Line ("[身]   📏 看着多大这一栏我关了 —— 握区的远近 "
+                                                          & (if Picture.Is_Nan (Z.Depth) then "读不到(NaN)"
+                                                             else Codec.Fmt (Z.Depth, 3))
+                                                          & " · 握区张开 " & Codec.Fmt (Z.Span, 4)
+                                                          & " 画幅 · 它现在看着 " & Codec.Fmt (P.Size, 4)
+                                                          & " · 我自己的远近 " & Codec.Fmt (P.Z, 3)
+                                                          & " ⇒ 这几样凑不出【它该多大】");
+                                                C.Blind_Say := S ("I switched off the one thing that tells me how far away it is "
+                                                                 & "in this eye - how big it looks - because I could not work out "
+                                                                 & "how big it OUGHT to look: my grip's distance is unreadable here "
+                                                                 & "and I have no width measured for it either. Without that I am "
+                                                                 & "lining up the picture and nothing else.");
                                                 P.Wsize := 0.0;   --  量不出该有多大就别用它,不许瞎给一个
                                              end if;
                                           end;
