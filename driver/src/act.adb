@@ -897,6 +897,10 @@ package body Act is
       Tsize, Tang : Long_Float := 0.0;          --  要它看着多大 / 转到多少
       Wsize, Wang : Long_Float := 0.0;          --  这两样这一段要不要(0 = 不管)
       Steps_Err : Long_Float := 0.0;            --  上一步算出来的"还差几步"(三样都除以推一步能改多少之后的总和)
+      --  🔴 这一步里有【要管的行】因为"推一下能改多少"没量出来而算不出来。
+      --  算不出 ≠ 到了:JH 2026-09-16 实测,两行都没量到 ⇒ 权重被清零 ⇒ 总和 0 ⇒ 打印成
+      --  `还差 0.0 步`,而同一屏的诊断写着 `误差 0.4277`。这个数骗过我一次(IZ 的假 settled)。
+      No_Scale : Boolean := False;
       Err_U, Err_V, Err_Z : Long_Float := 0.0;  --  拆开的五样(左右 / 上下 / 远近 / 大小 / 朝向),单位都是"还差几步"
       Err_S, Err_A : Long_Float := 0.0;
       Raw_Err : Long_Float := 0.0;              --  不随表变的差距(全是比例):画面距离 + 远近差几成 + 大小差几成 + 朝向差几成。
@@ -2047,6 +2051,8 @@ package body Act is
       --  ①a 定目标:每个点的五样差距,各自除以"推一步最多能改多少",变成"还差几步"
       --  🔴 这一段里,哪几个点的"远近"那一行是【米】(尺子量出来的),不是深度读数
       In_Metres : array (0 .. Natural'Max (0, Natural (Pts.Length) - 1)) of Boolean := [others => False];
+      --  这一个点的五行里,有没有【这一段要管、却算不出"还差几步"】的行(见 Point.No_Scale)
+      No_Scale_Row : Boolean := False;
 
       procedure Aim (Terms : out Table.Term_Vectors.Vector) is
       begin
@@ -2122,6 +2128,7 @@ package body Act is
                --  🔴 五样单位不同,混着求和就是错的判据。不换算成米,改成【只比较】:
                --  每一样除以"推一步最多能把它改多少",都变成"还差几步"(无量纲),本来就可比。
                --  扭手腕改不了远近 ⇒ 它在那一栏拿不到分,偷不了便宜。
+               No_Scale_Row := False;
                for R in 0 .. Table.Rows - 1 loop
                   declare
                      Per_Step : Long_Float := 0.0;
@@ -2200,6 +2207,11 @@ package body Act is
                            T.E.B (K, R) := T.E.B (K, R) / Per_Step;
                         end loop;
                      else
+                        --  🔴 "算不出"要记下来,不许悄悄变成 0 ——
+                        --  下面 Steps_Err 是按权重加起来的,权重清零 ⇒ 总和 0 ⇒ 对外就成了"还差 0.0 步"。
+                        if T.W (R) > 0.0 then
+                           No_Scale_Row := True;
+                        end if;
                         T.W (R) := 0.0;   --  这一行一个通道都改不动 ⇒ 这一步没法管它(不是拦,是算不出)
                      end if;
                   end;
@@ -2212,6 +2224,7 @@ package body Act is
                      Q.Steps_Err := Q.Steps_Err + (T.Err (R) * T.W (R)) ** 2;
                   end loop;
                   Q.Steps_Err := Sqrt (Q.Steps_Err);
+                  Q.No_Scale := No_Scale_Row;
                   Q.Err_U := T.Err (0) * T.W (0); Q.Err_V := T.Err (1) * T.W (1); Q.Err_Z := T.Err (2) * T.W (2);
                   Q.Err_S := T.Err (3) * T.W (3); Q.Err_A := T.Err (4) * T.W (4);
                   Q.Raw_Err := Sqrt ((P.Tu - P.Cu) ** 2 + (P.Tv - P.Cv) ** 2
@@ -3210,7 +3223,11 @@ package body Act is
                        Monitor.Floor (Long_Float'Max (0.0, Table.Norm (Note.Got, Chan.Per_Arm))), Fl,
                        Seen => (for all P of Pts => not P.Lost));
          Put_Line ("[身]     步" & Natural'Image (Steps_Taken) & (if Note.Big_Step then "(大步)" else "") &
-                   ":差距 " & Codec.Fmt (Last_Raw, 3) & " → " & Codec.Fmt (Note.Raw_Now, 3) & " · 还差 " & Codec.Fmt (Note.Err_Now, 1) & " 步(左右 " & Codec.Fmt (Pts (0).Err_U, 1) &
+                   ":差距 " & Codec.Fmt (Last_Raw, 3) & " → " & Codec.Fmt (Note.Raw_Now, 3)
+                   & (if Pts (0).No_Scale and then Note.Err_Now <= 0.0
+                      then " · 还差几步【我不知道】(这里推一下能改多少还没量出来,不是到了)"
+                      else " · 还差 " & Codec.Fmt (Note.Err_Now, 1) & " 步")
+                   & "(左右 " & Codec.Fmt (Pts (0).Err_U, 1) &
                    " 上下 " & Codec.Fmt (Pts (0).Err_V, 1) & " 远近 " & Codec.Fmt (Pts (0).Err_Z, 1) &
                    " 大小 " & Codec.Fmt (Pts (0).Err_S, 1) & " 朝向 " & Codec.Fmt (Pts (0).Err_A, 1) & ")· 拍 " & Codec.Img (Beats) &
                    " · 信表 " & Codec.Fmt (Trust, 2) & " · 步幅 ×[" & Codec.Fmt (Reach (0), 0) & " " & Codec.Fmt (Reach (1), 0) & " " & Codec.Fmt (Reach (2), 0) & " " &
@@ -5880,7 +5897,12 @@ package body Act is
                for P of Pts loop
                   if P.Blob <= 0 then
                      Report := Report & "item " & Codec.Img (P.Item_No) & (if P.Blob = 0 then " (finger A)" else "") & " now at (" & Codec.Fmt (P.Cu, 2) & "," & Codec.Fmt (P.Cv, 2) &
-                               ") depth " & Codec.Fmt (P.Z, 2) & ", still " & Codec.Fmt (P.Steps_Err, 1) & " pushes away; ";
+                               ") depth " & Codec.Fmt (P.Z, 2)
+                               & (if P.No_Scale and then P.Steps_Err <= 0.0
+                                  then ", and I do not know how many pushes away it is: I have not yet measured "
+                                       & "what one push changes here, so I cannot turn the gap into pushes - "
+                                       & "this is NOT me saying I have arrived; "
+                                  else ", still " & Codec.Fmt (P.Steps_Err, 1) & " pushes away; ");
                   end if;
                end loop;
             else

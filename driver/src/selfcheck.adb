@@ -1453,6 +1453,24 @@ begin
              "两条要一致:跳过瞎眼之后挑到的,就是脑认出过它的那只 —— 不会来回弹");
    end;
 
+   --  ===== "算不出还差几步" ≠ "还差 0 步"(JH:两行都没量到,却报"还差 0.0 步") =====
+   declare
+      Err_Row0  : constant Long_Float := 0.4277;  --  JH 实测:误差是真的
+      Err_Row1  : constant Long_Float := -0.1274;
+      Per_Step  : constant Long_Float := 0.0;     --  可"推一下能改多少"这只眼在这个姿势还没量到
+      --  代码把算不出的行权重清零,于是按权重加起来的总和是 0
+      W0        : constant Long_Float := (if Per_Step > 0.0 then 1.0 else 0.0);
+      Sum_Err   : constant Long_Float := abs (Err_Row0 * W0) + abs (Err_Row1 * W0);
+      No_Scale  : constant Boolean := Per_Step <= 0.0;
+   begin
+      Check (Sum_Err = 0.0,
+             "还差几步:算不出的行权重清零 ⇒ 总和确实是 0(这一步没错)");
+      Check (Err_Row0 /= 0.0,
+             "还差几步:可误差是【真的】—— 0 是算不出来,不是到了");
+      Check (No_Scale,
+             "还差几步:这时候必须说'我不知道还差几步',不许打印'还差 0.0 步'(IZ 的假 settled 就是被这个数骗的)");
+   end;
+
    --  ===== "这几个框里没有它"只对当下这一帧成立:我走过步之后要重新问(JF:腕眼被永久判死) =====
    declare
       Bounced : constant Natural := 0;    --  换眼来回弹的那几轮:一步都没走
