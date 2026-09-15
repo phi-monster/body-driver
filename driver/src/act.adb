@@ -2128,17 +2128,21 @@ package body Act is
                            Ch_No : constant Natural := Arm * Chan.Per_Arm + K;
                            Am : constant Long_Float := Long_Float'Max (1.0e-9, C.Map.Amp (Ch_No));
                         begin
-                           if C.Map.Seen (Ch_No) and then Trusts (I) (K) then
-                              --  🔴 这一行是【米】的时候,一步能改多少也得是米:一推手在世界里走几米。
-                              --  拿画面单位的斜率去除米,等于把两把不同的尺子相除 —— 那才是真的乱来。
-                              if R = 2 and then In_Metres (I) then
+                           --  🔴 这一行是【米】的时候,一步能改多少也得是米:一推手在世界里走几米。
+                           --  拿画面单位的斜率去除米,等于把两把不同的尺子相除 —— 那才是真的乱来。
+                           --  🔴🔴 而且米这一行【不看画面证没证过】(IR 2026-09-15 实测):
+                           --  走几米是关节读数给的,是本体感觉,跟"这根通道在画面里量准没量准"毫无关系。
+                           --  卡在 Trusts 上的后果:腕眼里所有通道都标"没证过" ⇒ 这一行永远没有换算
+                           --  ⇒ `米那一行没换算` 连喊 8 次,而换算其实早就量到了。
+                           if R = 2 and then In_Metres (I) then
+                              if C.Map.Seen (Ch_No) then
                                  Per_Step := Long_Float'Max
                                    (Per_Step,
                                     (if Ch_No < Natural (C.Reach_M.Length)
                                      then C.Reach_M.Element (Ch_No) else 0.0) * Am);
-                              else
-                                 Per_Step := Long_Float'Max (Per_Step, abs (T.E.B (K, R)) * Am);
                               end if;
+                           elsif C.Map.Seen (Ch_No) and then Trusts (I) (K) then
+                              Per_Step := Long_Float'Max (Per_Step, abs (T.E.B (K, R)) * Am);
                            end if;
                         end;
                      end loop;

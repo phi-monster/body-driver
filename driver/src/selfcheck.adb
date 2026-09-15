@@ -1414,6 +1414,23 @@ begin
              "温度计 ≠ 尺子:体检只说'我的距离感放大了 32 倍',量距离得靠胳膊滑出来的那两个数");
    end;
 
+   --  ===== 米那一行不看"画面证没证过"(IR 2026-09-15:换算早量到了,却连喊 8 次没换算) =====
+   declare
+      Reach     : constant Long_Float := 0.0200;   --  一推手在世界里走几米(关节读数量出来的)
+      Pic_Proven : constant Boolean := False;      --  腕眼里所有通道都标"没证过"
+      Seen       : constant Boolean := True;       --  但开机就看见过它动
+      Per_Step_Gated, Per_Step_Free : Long_Float;
+   begin
+      Per_Step_Gated := (if Seen and then Pic_Proven then Reach else 0.0);
+      Per_Step_Free  := (if Seen then Reach else 0.0);
+      Check (Per_Step_Gated <= 0.0,
+             "IR:卡在'画面证过'上 ⇒ 腕眼里没有一根通道过关 ⇒ 这一行永远没换算,连喊 8 次");
+      Check (Per_Step_Free > 0.0,
+             "IR:不卡它就有换算 —— 走几米是关节读数给的,跟画面量没量准毫无关系");
+      Check (Per_Step_Free > Per_Step_Gated,
+             "IR:同一套数,卡不卡给出【相反】的结论 ⇒ 米那一行只看本体感觉,不看画面");
+   end;
+
    --  ===== 第一次只许给下界,不许给准数(IQ 2026-09-15:第一次量就报"离我 0.001 m") =====
    declare
       No_Ref : constant Long_Float := 0.0000;   --  第一次量:手上没有可比的那一次
