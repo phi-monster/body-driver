@@ -1453,6 +1453,22 @@ begin
              "两条要一致:跳过瞎眼之后挑到的,就是脑认出过它的那只 —— 不会来回弹");
    end;
 
+   --  ===== "碰到"的两个入口要用同一套旁证(JB:第 3 推报碰到,手在自己底座、球没动) =====
+   declare
+      Moved_Far : constant Boolean := True;    --  重切的斑点配对后"挪了"超过两个跟踪地板
+      Pushed    : constant Boolean := False;   --  可我这一步一推都没真送出去
+      Near_Me   : constant Boolean := False;   --  而且它离我最近那一块比那一块自己还远
+      Old_Fires : constant Boolean := Moved_Far;
+      New_Fires : constant Boolean := Moved_Far and then Pushed and then Near_Me;
+   begin
+      Check (Old_Fires,
+             "碰到:老的那个入口只看'斑点挪了'⇒ 分割抖一下就成立(斑点没有身份)");
+      Check (not New_Fires,
+             "碰到:补上'我真推了'和'它贴着我'两条旁证之后,这一步不算碰到");
+      Check (Old_Fires /= New_Fires,
+             "碰到:同一条结论的两个入口必须用同一套旁证 —— 只堵一个等于没堵");
+   end;
+
    --  ===== 脑写的步数不许被身体的安全上限盖住(JD:我写 400,它走 60 就回"你的上限 60") =====
    declare
       Brain_Says : constant Natural := 400;   --  脑写的 or 400 steps

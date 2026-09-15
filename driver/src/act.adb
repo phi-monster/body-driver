@@ -3064,9 +3064,34 @@ package body Act is
                               end;
                            end if;
                         end loop;
-                        if Found_Prev and then Best > Fl.Track * 2.0 then
-                           Note.Touched := True;
-                        end if;
+                        --  🔴🔴 "碰到"有【两个入口】,今晚加的三条旁证只挡住了另一个
+                        --  (有身份的那条:跟着的点动了)。这一条是重切斑点、按大小差不到三倍去配对,
+                        --  **斑点没有身份**,分割抖一下就配出"挪了两个跟踪地板"。
+                        --  JB 2026-09-15 实测:`until touched` 第 3 推成立,而画面里手整条收回自己底座、
+                        --  球在桌心一动没动。⇒ 补上和另一条一样的两条旁证:
+                        --    ① 我这一步【真送出去了一推】(实到超过本体交付噪声);
+                        --    ② 它得【贴着我】—— 离我最近那一块不超过那一块自己的大小。
+                        --  两个都是量出来的,零系数。
+                        declare
+                           Pushed : constant Boolean :=
+                             Table.Norm (Note.Got, Chan.Per_Arm) > Long_Float (Fl.Delivery);
+                           Near_Me : Boolean := False;
+                        begin
+                           for P of Pts loop
+                              if P.Kind /= Thing_Pt
+                                and then Sqrt ((R.Cu - P.Cu) ** 2 + (R.Cv - P.Cv) ** 2)
+                                         <= Long_Float'Max (Track_Win,
+                                                            Long_Float'Max (P.Box_W, P.Box_H))
+                              then
+                                 Near_Me := True;
+                              end if;
+                           end loop;
+                           if Found_Prev and then Best > Fl.Track * 2.0
+                             and then Pushed and then Near_Me
+                           then
+                              Note.Touched := True;
+                           end if;
+                        end;
                      end if;
                   end;
                end loop;
