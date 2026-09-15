@@ -469,6 +469,28 @@ begin
       Check (R.Is_Empty, "贴边:横跨整幅的带就算放宽也丢掉(" & Natural'Image (Natural (R.Length)) & " 块)");
    end;
 
+   --  ── 明暗分两拨(Otsu):腕眼里按明暗切东西靠它;两拨分得开时分界落在两拨之间,单峰时说分不开 ──
+   declare
+      F : Floats;
+      T : Long_Float;
+   begin
+      for I in 1 .. 200 loop
+         F.Append (40.0 + Long_Float (I mod 7));      --  暗的一拨(桌面)
+      end loop;
+      for I in 1 .. 60 loop
+         F.Append (210.0 + Long_Float (I mod 5));     --  亮的一拨(白球)
+      end loop;
+      T := Picture.Split (F);
+      Check (not Picture.Is_Nan (T) and then T > 46.0 and then T < 210.0, "明暗:两拨分得开,分界 " & Codec.Fmt (T, 1) & " 落在两拨之间(暗拨 40–46,亮拨 210–214)");
+      --  ⚠️ Split 是 Otsu:单峰的一堆数它照样给一个分界(它判不了"分不开");全一样的数才回 NaN。
+      --  所以 Cut_Bright 在没有亮东西的画面里会把纹理切成碎块 —— 靠最少像素数和"横跨整幅就丢"兜住,认东西靠脑。
+      F.Clear;
+      for I in 1 .. 40 loop
+         F.Append (100.0);
+      end loop;
+      Check (Picture.Is_Nan (Picture.Split (F)), "明暗:全一样 ⇒ 分不开(NaN)");
+   end;
+
    --  ── 拿住了没:唯一分得开的那一条 ──
    declare
       Hu : constant Long_Float := 0.10;   --  我的手在那台不动的相机里往右挪了十分之一个画面(画幅比例)
