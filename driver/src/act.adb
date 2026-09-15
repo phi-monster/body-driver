@@ -3104,6 +3104,44 @@ package body Act is
          end loop;
          if Note.Touched then
             Put_Line ("[身]     我没在推的东西也动了 ⇒ 碰到它了");
+            --  🔴 观测,不改行为(JB 2026-09-15:第 3 推就报碰到,而画面里手整条收回自己底座、
+            --  球在桌心一动没动 —— 身体报的球的位置 (0.89,0.85) 正压在它自己的爪子上)。
+            --  今晚的做法定版:同一处连续猜错就停止改判据,改成【让身体把判据用到的量自己说出来】。
+            --  这一行说四件:球在哪 · 这一步是看见的还是按身体图猜的 · 它离我最近那一块有几个"我"那么远
+            --  · 它挪了多少 vs 我那一块挪了多少(真碰到时这两个应该同量级)。
+            for I in 0 .. Natural (Pts.Length) - 1 loop
+               if Pts (I).Kind = Thing_Pt and then I < Natural (Was.Length) then
+                  declare
+                     Me_D : Long_Float := -1.0;   --  离我最近那一块多远(以那一块自己的大小为尺)
+                     Me_M : Long_Float := 0.0;    --  我那一块这一步挪了多少
+                  begin
+                     for J in 0 .. Natural (Pts.Length) - 1 loop
+                        if Pts (J).Kind /= Thing_Pt and then J < Natural (Was.Length) then
+                           declare
+                              Sz : constant Long_Float :=
+                                Long_Float'Max (Track_Win,
+                                                Long_Float'Max (Pts (J).Box_W, Pts (J).Box_H));
+                              D : constant Long_Float :=
+                                Sqrt ((Pts (I).Cu - Pts (J).Cu) ** 2 + (Pts (I).Cv - Pts (J).Cv) ** 2) / Sz;
+                           begin
+                              if Me_D < 0.0 or else D < Me_D then
+                                 Me_D := D;
+                                 Me_M := Sqrt ((Pts (J).Cu - Was (J).Cu) ** 2
+                                               + (Pts (J).Cv - Was (J).Cv) ** 2);
+                              end if;
+                           end;
+                        end if;
+                     end loop;
+                     Put_Line ("[身]     🔎 碰到谁:第" & Codec.Img (Pts (I).Item_No) & " 块在 ("
+                               & Codec.Fmt (Pts (I).Cu, 3) & "," & Codec.Fmt (Pts (I).Cv, 3) & ")·"
+                               & (if Pts (I).Lost then "这一步【没看见,按身体图猜的】" else "这一步真看见了")
+                               & "·离我最近那一块 " & Codec.Fmt (Me_D, 2) & " 个我"
+                               & "·它挪了 " & Codec.Fmt (Sqrt ((Pts (I).Cu - Was (I).Cu) ** 2
+                                                            + (Pts (I).Cv - Was (I).Cv) ** 2), 4)
+                               & " 而我那一块挪了 " & Codec.Fmt (Me_M, 4));
+                  end;
+               end if;
+            end loop;
          end if;
       end Learn;
 
