@@ -3150,7 +3150,10 @@ package body Act is
             --  ID 实测:0.5 mm 的拨动滑 0.003 幅(地板 0.0016),球从 0.40 m 走到 0.35 m
             --  滑动只变 0.0004 幅 —— 永远测不出来。记录 08-26 D6:步子太小信号就淹进噪声。
             --  所以按 LAB 那条老结论办:**推得够大**。跟丢了才停,那就是"我还跟得住"的边界本身。
-            exit when Any_Lost or else Tries >= Levels_For (1.0) or else not Ok_W;
+            --  🔴 循环上限不是门槛,是【这台相机有几层金字塔】这条分辨率事实:
+            --  `Levels_For (1.0)` 返回 1 ⇒ 拨一下就退出 ⇒ 上面那段"一路拨大"一次都没跑过
+            --  (IE 2026-09-15 实测:每次都停在开机那一档 0.0256,滑动 0.0009 幅,永远太扁)。
+            exit when Any_Lost or else Tries >= Levels_For (Long_Float (Cw)) or else not Ok_W;
             if Slid > Long_Float (Fl.Track) and then Moved > C.Map.EE_Noise then
                Good_Amp := Best_Amp; Good_Slid := Slid; Good_Moved := Moved;
                Good_Turn := Turned; Have_Good := True;
