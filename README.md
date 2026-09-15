@@ -20,9 +20,10 @@
 - **NJK(fo-base 第一炮):0 抓起,球被撞开。** 头顶眼里手朝球走到左右差 0.054 画幅,高低从没对上。两条机制(逐条见 `LAB.md` 09-16):
   头顶眼里【手】的单目深度读数 0.4↔2.2 乱跳 ⇒ 远近列垃圾 ⇒ 解算买转腕;毫米级探针量不出远近 ⇒ z 通道被扔 ⇒ 没有一根通道管"降"。
   **单目深度只能在同一帧里比大小;靠近和合手要在腕眼里做(球的读数按指头锚定)。**
-- **已装未打**(`origin/fo-base` HEAD `6a772be`,箱上 `~/.local/bin/bl-calibrate` md5 `5253886931ae`,起炮要 owner 点头):
-  判拿住用不跟着这只手动的相机 · 平移探针为量远近可翻 16 倍 · 腕眼里 nearer/farther 说得了。
-- 下一炮(NJL)的脑程序全在腕眼里跑:`into` 贴到球腰 → `close … until free` → `farther <旁边的东西>` 抬。赢 = 球离桌、在两指之间、`Came_With_Me` 判成、仿真 Success 记 1。
+- **已装未打**(`origin/fo-base` HEAD `418c01b`,箱上 `~/.local/bin/bl-calibrate` md5 `5919093a6bbf`,起炮要 owner 点头):
+  腕眼里彻底不用深度(离线实测单目深度在腕眼里连相对量都是反的):按明暗切东西(两刀 Otsu)· 远近关掉、"看着多大"打开(一路朝球降,降到顶住)·
+  nearer/farther = 看着变大一倍/变小一半 · 判拿住用不动的眼(没点过名就拿离手最近的那块)· 平移探针为量远近可翻 16 倍。
+- 下一炮(NJL)的脑程序全在腕眼里跑:`touching` 降到顶住 → `close … until free` → `farther the small figure` 抬。赢 = 球离桌、在两指之间、`Came_With_Me` 判成、仿真 Success 记 1。
 
 ## 09-14 的状态(HC 之后;`main` 那棵树,已不是主线)
 - 官方 `general_pickup`:**0/55**。GN–HB 十五炮 **抓起来 0 次**。
