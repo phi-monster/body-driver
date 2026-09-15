@@ -230,7 +230,10 @@ package body Act is
    --  两拨是不是【同一下】:世界里的方向要一样。容差 = 方向本身的不确定度(读数抖动 ÷ 挪了多远)。
    function Same_Nudge (Dot, Len_A, Len_B, Slid, Floor : Long_Float) return Boolean is
      (Len_A > 0.0 and then Len_B > 0.0 and then Slid > 0.0
-      and then Dot / (Len_A * Len_B) >= 1.0 - Floor / Slid);
+      --  方向要一样
+      and then Dot / (Len_A * Len_B) >= 1.0 - Floor / Slid
+      --  幅度也要一样:差得看得出来就不是同一下了
+      and then abs (Len_A - Len_B) / Long_Float'Max (Len_A, Len_B) <= Floor / Slid);
 
    --  走近一段再拨同样的一下 ⇒ 米数。滑得没比上次多(没过跟踪抖动)= 这一段没走近 ⇒ 说不准。
    function Distance_Now (Travelled, Swim_Then, Swim_Now, Floor : Long_Float) return Long_Float is

@@ -1599,6 +1599,20 @@ begin
              "同一下:两拨把手推向不同方向 ⇒ 滑速变了不代表走近了 ⇒ 不许出米数(IC 那个 0.014 m 的真凶)");
       Check (not Act.Same_Nudge (Same_Dot, 0.0, Nudge, Slid, Track_Jitter),
              "同一下:有一拨根本没挪 ⇒ 没有方向可比 ⇒ 不许出米数");
+      --  \U0001f534 IK 2026-09-15:两拨方向完全一致,幅度却差八倍(0.0033 m vs 0.0004 m)
+      --  ⇒ 只查方向就过关 ⇒ 报出"离我 0.014 m",而球在二三十厘米外。
+      declare
+         Big   : constant Long_Float := 0.0033;
+         Small : constant Long_Float := 0.0004;
+         Aligned : constant Long_Float := Big * Small;   --  方向完全一致
+      begin
+         Check (Aligned / (Big * Small) >= 1.0 - Track_Jitter / Slid,
+                "IK:那两拨方向是完全一致的 —— 方向这一关它确实过得去");
+         Check (not Act.Same_Nudge (Aligned, Big, Small, Slid, Track_Jitter),
+                "IK:但幅度差了八倍 ⇒ 加上幅度这一关就拦住了(小的那一拨落在关节死区里,滑速早就不成正比)");
+         Check (Act.Same_Nudge (Big * Big, Big, Big, Slid, Track_Jitter),
+                "同一下:方向和幅度都一样,才算同一下");
+      end;
       --  \U0001f534 II 实测:容差写成"位置读数抖动 ÷ 挪了多远"时,抖动量出来是 0 ⇒ 门槛正好 1.0
       --  ⇒ `cos > 1.0` 恒假 ⇒ 方向一致度 1.000 也被判"不是同一下",这道闸从来没放行过。
       Check (EE_Jitter / Nudge > 0.0,
