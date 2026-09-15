@@ -228,9 +228,9 @@ package body Act is
    type Xyz is array (0 .. 2) of Long_Float;
 
    --  两拨是不是【同一下】:世界里的方向要一样。容差 = 方向本身的不确定度(读数抖动 ÷ 挪了多远)。
-   function Same_Nudge (Dot, Len_A, Len_B, Jitter : Long_Float) return Boolean is
-     (Len_A > 0.0 and then Len_B > 0.0
-      and then Dot / (Len_A * Len_B) > 1.0 - Jitter / Long_Float'Min (Len_A, Len_B));
+   function Same_Nudge (Dot, Len_A, Len_B, Slid, Floor : Long_Float) return Boolean is
+     (Len_A > 0.0 and then Len_B > 0.0 and then Slid > 0.0
+      and then Dot / (Len_A * Len_B) >= 1.0 - Floor / Slid);
 
    --  走近一段再拨同样的一下 ⇒ 米数。滑得没比上次多(没过跟踪抖动)= 这一段没走近 ⇒ 说不准。
    function Distance_Now (Travelled, Swim_Then, Swim_Now, Floor : Long_Float) return Long_Float is
@@ -3299,7 +3299,7 @@ package body Act is
                   Dot := Dot + Dir (K) * Probe_Dir (K);
                end loop;
                Trav := Sqrt (Trav);
-               Comparable := Same_Nudge (Dot, Moved, Probe_Len, C.Map.EE_Noise);
+               Comparable := Same_Nudge (Dot, Moved, Probe_Len, Slid, Long_Float (Fl.Track));
                if not Comparable then
                   Put_Line ("[身]   📏 这两拨不是同一下:上次把手推向一个方向,这次推向另一个"
                             & "(方向一致度 " & Codec.Fmt ((if Moved * Probe_Len > 0.0

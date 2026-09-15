@@ -1555,20 +1555,28 @@ begin
       --  两拨的方向:一致 vs 各推各的
       Same_Dot : constant Long_Float := Nudge * Nudge;          --  完全同向
       Off_Dot  : constant Long_Float := Nudge * Nudge / Many;   --  几乎垂直
+      --  II 2026-09-15:腕相机贴着球,一拨滑掉四分之一个画面
+      Slid     : constant Long_Float := 0.2791;
    begin
       --  ① 单位:滑速的噪声和跟踪抖动差着三个数量级,拿后者当门槛等于没有门槛
       Check (Slip_Noise > Track_Jitter * Many,
              "单位:滑速的噪声(幅每米)比跟踪抖动(幅)大三个数量级 —— 混用等于这道闸根本不响");
       --  ② 假设:同一根关节同样的命令,在不同姿势下把手推向【不同方向】⇒ 滑速变了跟远近无关
-      Check (Act.Same_Nudge (Same_Dot, Nudge, Nudge, EE_Jitter),
+      Check (Act.Same_Nudge (Same_Dot, Nudge, Nudge, Slid, Track_Jitter),
              "同一下:两拨方向一样 ⇒ 才能比滑速");
-      Check (not Act.Same_Nudge (Off_Dot, Nudge, Nudge, EE_Jitter),
+      Check (not Act.Same_Nudge (Off_Dot, Nudge, Nudge, Slid, Track_Jitter),
              "同一下:两拨把手推向不同方向 ⇒ 滑速变了不代表走近了 ⇒ 不许出米数(IC 那个 0.014 m 的真凶)");
-      Check (not Act.Same_Nudge (Same_Dot, 0.0, Nudge, EE_Jitter),
+      Check (not Act.Same_Nudge (Same_Dot, 0.0, Nudge, Slid, Track_Jitter),
              "同一下:有一拨根本没挪 ⇒ 没有方向可比 ⇒ 不许出米数");
+      --  \U0001f534 II 实测:容差写成"位置读数抖动 ÷ 挪了多远"时,抖动量出来是 0 ⇒ 门槛正好 1.0
+      --  ⇒ `cos > 1.0` 恒假 ⇒ 方向一致度 1.000 也被判"不是同一下",这道闸从来没放行过。
+      Check (EE_Jitter / Nudge > 0.0,
+             "撤回:容差原来写成 位置读数抖动 ÷ 挪了多远 —— 抖动是 0 时门槛就是 1.0,恒不放行");
+      Check (Track_Jitter / Slid < EE_Jitter / Nudge,
+             "撤回:改成 跟踪抖动 ÷ 这一次滑了多少 —— 滑得越多,方向就越容不得差,而它永远放得行");
       --  ③ 这一组数在补完之后【确实】被拦住:方向不一致就够了,不必靠单位
       Check (Act.Distance_Now (Trav, S1, S2, Slip_Noise) > 0.0
-             and then not Act.Same_Nudge (Off_Dot, Nudge, Nudge, EE_Jitter),
+             and then not Act.Same_Nudge (Off_Dot, Nudge, Nudge, Slid, Track_Jitter),
              "IC:光看滑速这组数是过关的 —— 拦住它的是【方向不一样】,所以两个洞都得补");
    end;
 
