@@ -225,6 +225,11 @@ package body Act is
    function Farther_By (Near_Me, Near_It : Long_Float) return Long_Float is
      (if Near_Me > 0.0 and then Near_It > 0.0 then Near_Me / Near_It else 0.0);
 
+   --  走近一段再拨同样的一下 ⇒ 米数。滑得没比上次多(没过跟踪抖动)= 这一段没走近 ⇒ 说不准。
+   function Distance_Now (Travelled, Swim_Then, Swim_Now, Floor : Long_Float) return Long_Float is
+     (if Travelled > 0.0 and then Swim_Then > 0.0 and then Swim_Now - Swim_Then > Floor
+      then Travelled * Swim_Then / (Swim_Now - Swim_Then) else 0.0);
+
    function Depth_Ok (Zd, Old_Z, Pred_Z, Noise, Last_Rejected : Long_Float) return Boolean is
      (Old_Z <= 0.0
       --  连着两次被拒、而两次读数互相吻合 ⇒ 新值是可重复的,旧基准才是陈的 ⇒ 收
@@ -853,6 +858,8 @@ package body Act is
       --  0 = 这一段还没量过(没挪够 / 没游够),不许当真。
       Near : Long_Float := 0.0;
       Near_N : Natural := 0;      --  量过几次(一次不算稳,两次以上才谈得上重复)
+      --  🔴 它离我多少米 —— 全靠我自己走出来的,不碰深度图。0 = 还没量出来。
+      Dist : Long_Float := 0.0;
       Err0 : Long_Float := 0.0;
       Lost : Boolean := False;   --  这一步没在画面里认出它,位置是按表猜的
       Has_Meas : Boolean := False;              --  眼睛(光流)另外量到的位置,只用来修表
@@ -3004,157 +3011,180 @@ package body Act is
       --  量一次要把另一条胳膊甩出去再收回来,不该每步都甩;而画面已经对齐之后,
       --  剩下的差距就只可能是前后,这时候才值得再量。零系数:两个都是量出来的差距。
       Ranged_Raw : Long_Float := Long_Float'Last;
-      --  🔴🔴 量距离:晃一下【长着这只眼睛的那条胳膊】,看谁游得快(2026-09-15)。
+      --  🔴 量距离用的那一下:第一次量什么,以后就一直拨同样的一下 ——
+      --  两次相除时,横向那一份才会约掉(不同的拨法之间没法比)。
+      Probe_K : Integer := -1;
+      Probe_Amp : Long_Float := 0.0;
+      Probe_EE : Plug.Arm_Pose := [others => 0.0];
+      Probe_Have : Boolean := False;
+      --  🔴🔴 量距离:轻轻拨一下,看它滑多远;走一段,再拨【同样的一下】(2026-09-15)。
       --  这是"拿自己的胳膊当尺子"真正该干的那一半 —— 以前只量出"我的距离感放大了三十二倍"
-      --  然后把这句话打印出来,从来没拿它量过任何一个距离,于是"远近"那一栏常年是 0.0,
-      --  身体把左右上下对得极准而人和球之间一步没缩(FP–GS 十八炮 0 握、HC–HZ 二十三炮 0 握的同一个死因)。
-      --  做法:我这一段推的是 Arm,而这只眼睛长在另一条胳膊 B 上 ⇒ 把 B 挪一大步,
-      --  世界里所有静止的东西都会在这只眼里【游】过去,近的游得快、远的游得慢;
-      --  我的爪心此刻在世界里也是静止的 ⇒ 它也游。两个游速一比:
-      --      它比我远几倍 = 我游得多快 ÷ 它游得多快
-      --  焦距、基线、深度尺度全部约掉,== 1 就是"它和我在同一个远近上"。零系数。
-      --  ⚠️ 挪得不够 = 三角形太扁 = 误差爆炸(记录 2026-08-16:挪 4 mm 而至少要 50 mm)
-      --  ⇒ 挪不够就翻倍再挪,还是不够就【说我量不出来】,绝不给一个看起来正常的烂数。
-      procedure Range_Waggle is
-         use type Sinew.Eye_Pick;
-         B : constant Integer := Cam_Arm (C, Cam);
+      --  然后把这句话打印出来,从来没拿它量过任何一个距离,于是"远近"那一栏常年 0.0,
+      --  身体把左右上下对得极准而人和球之间一步没缩(FP–GS 十八炮、HC–IA 二十四炮 0 握,同一个死因)。
+      --
+      --  🔴 撤回(owner 当场指出):我第一版写的是"甩【另一条胳膊】,比谁滑得快"——
+      --  那是把这台机器人当成了所有机体。一条胳膊的机器没有"另一条",无人机连胳膊都没有。
+      --  量距离要的从来不是第二条胳膊,只有三件:**眼睛跟着我动 · 我知道自己动了多远 · 我能把同一下拨两遍**。
+      --
+      --  几何(零系数,焦距/基线/深度尺度全部约掉):
+      --    同一下拨动,在离我 Z 的东西上滑过 S ∝ 1/Z
+      --    走近一段 D 之后再拨同样一下,滑 S₂ ∝ 1/(Z−D)
+      --    ⇒ 此刻它离我 = D × S₁ ÷ (S₂ − S₁)     ← 单位就是 D 的单位(米),不需要知道焦距
+      --  ⚠️ D 是我【总共走了多远】,而公式要的是【朝它走了多远】。两者相等只有在我一直朝它走时成立;
+      --     我要是还横着挪了,真实距离比算出来的更近 —— 这一句必须照实说出去,不许假装是纯几何。
+      --  ⚠️ S₂ − S₁ 没过跟踪抖动 ⇒ 这一段我没有真的走近过 ⇒ **说我量不出来**,
+      --     绝不给一个看起来正常的烂数(记录 2026-08-16:三角形太扁时误差 ∝ 距离²/基线,当场拒绝)。
+      procedure Range_Probe is
          Best_K : Integer := -1;
          Best_Amp : Long_Float := 0.0;
          EE0 : Plug.Arm_Pose;
-         Moved : Long_Float := 0.0;
-         Turned : Long_Float := 0.0;
+         Moved, Turned : Long_Float := 0.0;
          Before : Buf_Vectors.Vector;
          Was_R : Point_Vectors.Vector;
          Got : Table.Vec;
          Ok_W : Boolean;
          Tries : Natural := 0;
+         Swims : Boolean := False;
       begin
-         if B < 0 or else Natural (B) = Arm then
-            --  这只眼睛要么长在我正推的这条胳膊上(我恒不游),要么根本不动(世界恒不游)
-            C.Blind_Say := S ("I cannot measure which of us is nearer with this eye: it either rides on the very part "
-                              & "I am moving (so I never swim across it) or it does not move at all (so the world never "
-                              & "swims across it). Ask me again with my ranging eye - the one that rides on a part I am "
-                              & "NOT moving in this stretch.");
-            Put_Line ("[身]   📏 这只眼睛量不了远近(它长在我正推的那条胳膊上,或者它根本不动)");
+         --  ① 这只眼睛跟着我动吗?不动的眼睛里,世界永远不滑 ⇒ 在这里量不出远近。
+         declare
+            Ix : constant Natural := Arm * C.Map.N_Cams + Cam;
+         begin
+            Swims := Ix < Natural (C.Map.Cam_Frac.Length)
+                     and then C.Map.Cam_Frac (Ix) > Long_Float (Fl.Track);
+         end;
+         if not Swims then
+            Put_Line ("[身]   📏 这只眼睛量不了远近:我一动,它几乎不变 ⇒ 世界在它里面不滑");
+            C.Blind_Say := S ("I cannot work out how far anything is with this eye: it barely changes when I move, "
+                              & "so nothing slides across it and there is no distance to read. Give me a stretch with "
+                              & "an eye that moves when I move.");
             return;
          end if;
-         for K in 0 .. Chan.Per_Arm - 1 loop
-            declare
-               Ch_No : constant Natural := Natural (B) * Chan.Per_Arm + K;
-            begin
-               if Ch_No < Natural (C.Map.Amp.Length) and then C.Map.Seen (Ch_No)
-                 and then C.Map.Amp (Ch_No) > Best_Amp
-               then
-                  Best_Amp := C.Map.Amp (Ch_No);
-                  Best_K := K;
-               end if;
-            end;
-         end loop;
+         --  ② 拨哪一下:第一次量什么就一直用它,同一下拨两遍,横向那一份才会在相除时约掉
+         if Probe_Have then
+            Best_K := Probe_K; Best_Amp := Probe_Amp;
+         else
+            for K in 0 .. Chan.Per_Arm - 1 loop
+               declare
+                  Ch_No : constant Natural := Arm * Chan.Per_Arm + K;
+               begin
+                  if Ch_No < Natural (C.Map.Amp.Length) and then C.Map.Seen (Ch_No)
+                    and then C.Map.Amp (Ch_No) > Best_Amp
+                  then
+                     Best_Amp := C.Map.Amp (Ch_No); Best_K := K;
+                  end if;
+               end;
+            end loop;
+         end if;
          if Best_K < 0 then
-            Put_Line ("[身]   📏 量不了远近:另一条胳膊我一根通道都没量过");
+            Put_Line ("[身]   📏 量不了远近:我一根通道都没量过,不知道该拨哪一下");
             return;
          end if;
          Before := All_Gray (F);
          Was_R := Pts;
-         EE0 := F.EE (Natural (B));
+         EE0 := F.EE (Arm);
          loop
             declare
                A : Table.Vec := Table.Zero_Vec;
             begin
                A (Natural (Best_K)) := Best_Amp;
-               Step_Arm (L, C, F, Natural (B), A, Selfmap.Jaw_All (F, Natural (B)), Got, Ok_W, C.Fast);
+               Step_Arm (L, C, F, Arm, A, Jaw, Got, Ok_W, C.Fast);
             end;
             Moved := 0.0;
             for K in 0 .. 2 loop
-               Moved := Moved + (F.EE (Natural (B)) (K) - EE0 (K)) ** 2;
+               Moved := Moved + (F.EE (Arm) (K) - EE0 (K)) ** 2;
             end loop;
             Moved := Sqrt (Moved);
-            --  🔴 这一甩转了多少:相机【转】一下,画面里所有东西都同样地扫过去,
-            --  和远近没关系 ⇒ 转的那一份会同时加在我和它头上,把比值污染掉。
-            --  身体自己知道它转了多少(位姿里就有四元数),所以这件事只需要【如实说】,不需要猜。
             Turned := 0.0;
             for K in 3 .. 6 loop
-               Turned := Turned + (F.EE (Natural (B)) (K) - EE0 (K)) ** 2;
+               Turned := Turned + (F.EE (Arm) (K) - EE0 (K)) ** 2;
             end loop;
             Turned := Sqrt (Turned);
             Tries := Tries + 1;
             exit when Moved > C.Map.EE_Noise or else Tries >= Levels_For (1.0) or else not Ok_W;
-            Best_Amp := Best_Amp + Best_Amp;   --  挪得还不够 ⇒ 挪得更大(缩是修反的,记录 08-27 V2)
+            Best_Amp := Best_Amp + Best_Amp;   --  拨得还不够 ⇒ 拨得更大(缩是修反的,记录 08-27 V2)
          end loop;
          if Moved <= C.Map.EE_Noise then
-            Put_Line ("[身]   📏 量不了远近:另一条胳膊挪了 " & Codec.Fmt (Moved, 4)
+            Put_Line ("[身]   📏 量不了远近:这一拨我只挪了 " & Codec.Fmt (Moved, 4)
                       & " m,没过我自己的位置读数抖动 " & Codec.Fmt (C.Map.EE_Noise, 4) & " m");
-            C.Blind_Say := S ("I tried to measure which of us is nearer by swinging my other arm, but it only travelled "
-                              & Codec.Fmt (Moved, 4) & " m, which is inside my own position-reading jitter. "
-                              & "Too short a swing makes the triangle flat and the answer worthless, so I am not "
-                              & "giving you a number at all.");
+            C.Blind_Say := S ("I tried to measure how far things are by nudging myself, but I only travelled "
+                              & Codec.Fmt (Moved, 4) & " m, inside my own position-reading jitter. "
+                              & "Too small a nudge makes the answer worthless, so I am giving you no number at all.");
             return;
          end if;
-         --  重新在画面里认出每一块,算它游了多远
+         --  ③ 每一块滑了多远 ⇒ 这一次的"滑速";和上一次的滑速一比,就是米
          declare
-            Me_Near, It_Near : Long_Float := 0.0;
             Said : Unbounded_String;
+            Trav : Long_Float := 0.0;
          begin
+            if Probe_Have then
+               for K in 0 .. 2 loop
+                  Trav := Trav + (EE0 (K) - Probe_EE (K)) ** 2;
+               end loop;
+               Trav := Sqrt (Trav);
+            end if;
             for I in 0 .. Natural (Pts.Length) - 1 loop
                declare
                   Q : Point := Pts (I);
                   W0 : constant Point := Was_R (I);
                   Ran : Long_Float;
+                  S_Now : Long_Float;
                begin
                   if Natural (Q.Cam) < Natural (Before.Length) then
                      Retrack (C, F, Q.Cam, Before (Natural (Q.Cam)), Q, W0.Cu, W0.Cv, True);
                   end if;
                   Ran := Sqrt ((Q.Cu - W0.Cu) ** 2 + (Q.Cv - W0.Cv) ** 2);
-                  Q.Near := Near_From_Motion (Ran, Moved, Fl.Track, C.Map.EE_Noise);
-                  if Q.Near > 0.0 then
+                  S_Now := Near_From_Motion (Ran, Moved, Fl.Track, C.Map.EE_Noise);
+                  Append (Said, (if Length (Said) > 0 then " · " else "")
+                          & To_String (Q.Desc) & " 滑了 " & Codec.Fmt (Ran, 4) & " 幅");
+                  if Probe_Have and then Q.Near > 0.0 and then S_Now > 0.0 and then Trav > C.Map.EE_Noise then
+                     declare
+                        Zd : constant Long_Float :=
+                          Distance_Now (Trav, Q.Near, S_Now, Long_Float (Fl.Track));
+                     begin
+                        if Zd > 0.0 then
+                           Q.Dist := Zd;
+                           Append (Said, " ⇒ 离我 " & Codec.Fmt (Zd, 3) & " m");
+                        else
+                           Q.Dist := 0.0;
+                           Append (Said, " ⇒ 说不准(这一段我没真的走近它)");
+                        end if;
+                     end;
+                  end if;
+                  if S_Now > 0.0 then
+                     Q.Near := S_Now;
                      Q.Near_N := Q.Near_N + 1;
                   end if;
-                  Append (Said, (if Length (Said) > 0 then " · " else "")
-                          & To_String (Q.Desc) & " 游了 " & Codec.Fmt (Ran, 4) & " 幅 ⇒ 近度 "
-                          & Codec.Fmt (Q.Near, 1));
-                  if Q.Kind = Thing_Pt then
-                     It_Near := Long_Float'Max (It_Near, Q.Near);
-                  else
-                     Me_Near := Long_Float'Max (Me_Near, Q.Near);
-                  end if;
-                  --  位置退回去(等下就把胳膊推回原处,点也该回原处)
                   Q.Cu := W0.Cu; Q.Cv := W0.Cv; Q.Z := W0.Z;
                   Pts.Replace_Element (I, Q);
                end;
             end loop;
-            Put_Line ("[身]   📏 量远近:另一条胳膊挪了 " & Codec.Fmt (Moved, 4) & " m ⇒ " & To_String (Said));
-            declare
-               R : constant Long_Float := Farther_By (Me_Near, It_Near);
-            begin
-               if R > 0.0 then
-                  Put_Line ("[身]   📏 ⇒ 它比我远 " & Codec.Fmt (R, 2)
-                            & " 倍(1.00 = 它和我在同一个远近上;> 1 = 它比我远;< 1 = 它比我近)");
-                  if Turned > C.Map.Rot_Noise then
-                     Put_Line ("[身]   📏 ⚠️ 这一甩还转了 " & Codec.Fmt (Turned, 4)
-                               & "(我自己的姿态读数抖动才 " & Codec.Fmt (C.Map.Rot_Noise, 4)
-                               & ")⇒ 转的那一份和远近无关、会同时加在我和它头上 ⇒ 这个倍数只是【近似】,不是纯几何");
-                  end if;
-                  C.Blind_Say := S ("I swung my other arm " & Codec.Fmt (Moved, 4)
-                                    & " m and watched who swam past that eye faster. "
-                                    & "The thing is " & Codec.Fmt (R, 2) & " times as far from that eye as I am "
-                                    & "(1.00 would mean we are at the same distance). "
-                                    & "Nothing in that number comes from a depth reading - my own arm is the ruler.");
-               else
-                  Put_Line ("[身]   📏 ⇒ 说不准:我和它至少有一个没游够(我 "
-                            & Codec.Fmt (Me_Near, 1) & " · 它 " & Codec.Fmt (It_Near, 1) & ")");
-                  C.Blind_Say := S ("I swung my other arm to see which of us is nearer, but at least one of us did not "
-                                    & "swim far enough across that eye to count, so I will not give you a number.");
-               end if;
-            end;
+            Put_Line ("[身]   📏 量远近:这一拨我挪了 " & Codec.Fmt (Moved, 4) & " m"
+                      & (if Probe_Have then " · 上次量到现在走了 " & Codec.Fmt (Trav, 3) & " m" else " · 这是第一次量,还没有米数")
+                      & " ⇒ " & To_String (Said));
+            if Turned > C.Map.Rot_Noise then
+               Put_Line ("[身]   📏 ⚠️ 这一拨还转了 " & Codec.Fmt (Turned, 4)
+                         & "(我的姿态读数抖动才 " & Codec.Fmt (C.Map.Rot_Noise, 4)
+                         & ")⇒ 转出来的那一份和远近无关,这个数只是近似");
+            end if;
+            if Probe_Have and then Trav > C.Map.EE_Noise then
+               C.Blind_Say := S ("I worked out how far things are without any depth sensor: I nudge myself, watch how far "
+                                 & "a thing slides across my eye, travel, then give myself the same nudge again. A thing "
+                                 & "that slides more after I travelled is nearer, and how much more turns my own travel "
+                                 & "into its distance. One caveat I will not hide: I used how far I travelled in total, "
+                                 & "and the sum only equals how far I travelled TOWARD it if I went straight at it - if I "
+                                 & "also moved sideways, it is nearer than I just said.");
+            end if;
          end;
-         --  把那条胳膊推回原处:量距离不该改变我要抓的姿势
+         --  ④ 拨回去:量距离不该改变我要抓的姿势
          declare
             A : Table.Vec := Table.Zero_Vec;
          begin
             A (Natural (Best_K)) := -Best_Amp;
-            Step_Arm (L, C, F, Natural (B), A, Selfmap.Jaw_All (F, Natural (B)), Got, Ok_W, C.Fast);
+            Step_Arm (L, C, F, Arm, A, Jaw, Got, Ok_W, C.Fast);
          end;
-      end Range_Waggle;
+         Probe_K := Best_K; Probe_Amp := Best_Amp; Probe_EE := EE0; Probe_Have := True;
+      end Range_Probe;
    begin
       Event := S ("hit the safety cap on steps");
       Steps_Taken := 0;
@@ -3241,10 +3271,9 @@ package body Act is
             C.Blind_Say := S ("I went ahead even though " & To_String (Bad));
          end if;
       end;
-      --  🔴 开工先量一次"它比我远几倍" —— 不量就等于闭着眼睛往前够
-      if Sinew."=" (C.Eye_Want, Sinew.Ey_Ranging) then
-         Range_Waggle;
-      end if;
+      --  🔴 开工先拨一下量一次 —— 不量就等于闭着眼睛往前够。
+      --  不用脑点名:任何机体只要"眼睛跟着我动"就量得了,量不了它自己会说。
+      Range_Probe;
       for Step in 1 .. Natural'Min (Step_Cap, Effective_Cap (Step_Limit)) loop
          Plan;
          if Note.Say_Stop /= "" then
@@ -3258,14 +3287,11 @@ package body Act is
          end if;
          Look;
          Learn;
-         --  🔴 画面已经对齐(左右上下都在一推之内)而差距还在 ⇒ 剩下的只可能是前后 ⇒ 再量一次。
-         --  "一推"是身体自己的单位,不是我拍的数。
-         if Sinew."=" (C.Eye_Want, Sinew.Ey_Ranging)
-           and then abs Pts (0).Err_U <= 1.0 and then abs Pts (0).Err_V <= 1.0
-           and then Note.Raw_Now < Ranged_Raw
-         then
+         --  🔴 比上一次量的时候更近了 ⇒ 再拨同样的一下量一次。
+         --  走近了才量得出米数(S₂ − S₁ 就是那点"走近"),所以判据就是"我又走近了",零系数。
+         if Note.Raw_Now < Ranged_Raw then
             Ranged_Raw := Note.Raw_Now;
-            Range_Waggle;
+            Range_Probe;
          end if;
          --  🔴 平时不重量表(每段重量 = 一推 13~21 拍的老账);但身体一旦【连着三步说"我的地图不如零假设准"】,
          --  就当场重量一遍 —— 拿着一张被证明错的表一路开,正是 GW 实测"手在动、球的距离一点不变"的直接原因。
@@ -4342,32 +4368,6 @@ package body Act is
                                          or else (C.Eye_Want = Sinew.Ey_Moving and then Vv > Bv)
                                        then
                                           Bv := Vv; Pick := Cm;
-                                       end if;
-                                       --  🔴 量距离那只眼:长在【我这一段没在动的】部件上。
-                                       --  分数 = 别的部件一动它变多少 − 我一动它变多少,两个都是开机量出来的。
-                                       --  最高分那只:别人一动它就整幅地游,我一动它纹丝不动 —— 这正是
-                                       --  "它和我谁离它近"这个比值成立的条件。
-                                       if C.Eye_Want = Sinew.Ey_Ranging then
-                                          declare
-                                             Other : Long_Float := 0.0;
-                                             Sc : Long_Float;
-                                          begin
-                                             for Ab in 0 .. C.Map.Arms - 1 loop
-                                                if Ab /= Natural (Sub_Arm) then
-                                                   declare
-                                                      Jx : constant Natural := Ab * C.Map.N_Cams + Cm;
-                                                   begin
-                                                      if Jx < Natural (C.Map.Cam_Frac.Length) then
-                                                         Other := Long_Float'Max (Other, C.Map.Cam_Frac (Jx));
-                                                      end if;
-                                                   end;
-                                                end if;
-                                             end loop;
-                                             Sc := Other - Vv;
-                                             if Sc > Bv then
-                                                Bv := Sc; Pick := Cm;
-                                             end if;
-                                          end;
                                        end if;
                                     end if;
                                  end;

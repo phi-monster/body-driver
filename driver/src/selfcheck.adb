@@ -1408,13 +1408,33 @@ begin
       Check (Act.Farther_By (N_Near, N_Near) = 1.0,
              "尺子:游得一样快 = 同一个远近 —— 抓的时候要的就是这一条,而它不需要任何常数");
       Check (Act.Farther_By (N_Near, 0.0) = 0.0 and then Act.Farther_By (0.0, N_Far) = 0.0,
-             "尺子:有一个没游够 ⇒ 说不准(返回 0),不许假装等于 1 —— 假装等于 1 就是假装抓得到");
-      --  🔴 两种退化:相机长在我推的那条胳膊上 / 相机根本不动。两种都让一边恒为零。
-      Check (Act.Farther_By (0.0, N_Near) = 0.0,
-             "尺子:相机长在我推的这条胳膊上 ⇒ 我恒不游 ⇒ 这只眼睛量不了远近,必须换一只");
+             "尺子:有一个没滑够 ⇒ 说不准(返回 0),不许假装等于 1 —— 假装等于 1 就是假装抓得到");
       --  🔴 温度计 ≠ 尺子:体检那个倍数量的是【我的距离感坏了多少】,它不产生任何距离。
       Check (Act.Depth_Scale_Bad (-32.1) and then Act.Farther_By (N_Near, N_Far) > 0.0,
-             "温度计 ≠ 尺子:体检只说'我的距离感放大了 32 倍',量距离得靠胳膊游出来的那两个数");
+             "温度计 ≠ 尺子:体检只说'我的距离感放大了 32 倍',量距离得靠胳膊滑出来的那两个数");
+   end;
+
+   --  ===== 米数:一只眼 + 会动 + 知道自己走了多远(所有机体通用) =====
+   declare
+      Ran_Floor : constant Long_Float := 0.0016;   --  跟踪抖动(画幅)
+      --  离我 1 米时拨一下滑出 0.0500;朝它走 0.5 m 之后,同一下滑速翻倍 ⇒ 它就在 0.5 m 外
+      S1 : constant Long_Float := 0.0500;
+      S2 : constant Long_Float := 0.1000;
+      Went : constant Long_Float := 0.5000;
+      Z : Long_Float;
+   begin
+      Z := Act.Distance_Now (Went, S1, S2, Ran_Floor);
+      Check (Z > 0.4900 and then Z < 0.5100,
+             "米数:滑速翻一倍 = 它离我只剩一半 ⇒ 走了 0.5 m 之后它就在 0.5 m 外。焦距/基线/深度尺度全约掉");
+      Check (Act.Distance_Now (Went, S1, S1, Ran_Floor) = 0.0,
+             "米数:滑速一点没变 ⇒ 这一段我根本没走近它 ⇒ 说不准,不许给数");
+      Check (Act.Distance_Now (Went, S1, S1 + Ran_Floor, Ran_Floor) = 0.0,
+             "米数:滑速只多了一个跟踪抖动 ⇒ 那是噪声不是走近 ⇒ 说不准");
+      Check (Act.Distance_Now (0.0, S1, S2, Ran_Floor) = 0.0,
+             "米数:我一步没走 ⇒ 没有尺子 ⇒ 说不准(这一条就是【胳膊当尺子】里的那条胳膊)");
+      --  🔴 撤回:第一版要求"甩另一条胳膊"。一条胳膊的机器没有另一条,无人机连胳膊都没有。
+      Check (Act.Distance_Now (Went, S1, S2, Ran_Floor) > 0.0,
+             "撤回:量距离不需要第二条胳膊、不需要第二只眼 —— 只要会动、知道走了多远、拨得出同样的一下");
    end;
 
    Put_Line ((if Fails = 0 then "🟢 自检全过" else "🔴 自检失败" & Natural'Image (Fails) & " 条"));
