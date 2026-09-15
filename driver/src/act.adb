@@ -11,6 +11,11 @@ package body Act is
    Sigma_Mult : constant Long_Float := 3.0;   --  鼓出来超过背景自己稳健 σ 的几倍才算一块(在真实深度图上验过:3 中,5 杀光);无量纲
    Track_Win : constant Long_Float := 0.10;   --  一步里任何被跟踪的点在画面里最多跑十分之一画幅(跟踪窗,比例,无量纲)
    Cap_Mult : constant Long_Float := 2.0;     --  一步命令上限 = 探针幅度(点在画面里跑过地板的那一档)的几倍(倍数,无量纲;EH:8 倍让阻尼当家,步子反而只剩探针的一倍)
+   --  🔴 探针为了量【远近那一行】可以往上翻到开机那一档的几倍(倍数,无量纲),只对【平移】通道:
+   --  单目深度下,平移几毫米在深度图上量不出变化(NJK 实测:z 那一档 1.6 mm,深度变 -0.04 全是噪声),翻两倍就放弃 ⇒
+   --  没有一根通道管远近 ⇒ 手永远不会朝球降下去。翻到 16 倍 = 两三厘米,球在画面里才看得出变近/变大。
+   --  转动通道不许这么翻:0.0256 rad × 16 = 0.41 rad,JA 实测"机械臂全程在发癫"就是它。
+   Probe_Cap_Pos : constant Long_Float := 16.0;
    Step_Cap : constant := 60;                 --  一段最多几步(安全上限,不是策略)
    Unit_Reach : constant Table.Vec := [others => 1.0];
 
@@ -904,7 +909,7 @@ package body Act is
          declare
             Chn : constant Natural := Arm * Chan.Per_Arm + K;
             Amp : Long_Float := C.Map.Amp (Chn);
-            Cap_Amp : constant Long_Float := C.Map.Amp (Chn) * Cap_Mult;
+            Cap_Amp : constant Long_Float := C.Map.Amp (Chn) * (if K < Chan.Pos_Channels then Probe_Cap_Pos else Cap_Mult);
          begin
             if not C.Map.Seen (Chn) or else Amp <= 0.0 then
                Put_Line ("[身]     通道" & Natural'Image (Chn) & " 开机时没看见它动,这一列留零");
@@ -2932,6 +2937,17 @@ package body Act is
                                     P.Tz := Z.Depth; P.Wz := (if Picture.Is_Nan (Z.Depth) or else O.Depth <= 0.0 then 0.0 else 1.0);
                                     if Rl = "into" then
                                        P.Tz := P.Tz + (O.Depth - Grab_Depth (O));
+                                    elsif Rl = "front" or else Rl = "back" then
+                                       --  在自己手上的眼里"比它更近/更远":X 留在画面里原处,只让它的远近读数变一截(它自己一个身位)。
+                                       --  这只眼跟着手走,所以"X 变远" = 我离开了 X(拿着球之后靠旁边的东西量抬起来了多少)
+                                       declare
+                                          Sz : constant Long_Float := Long_Float'Max (O.Height, Long_Float'Max (Ow, Oh) * O.Depth);
+                                       begin
+                                          P.Tu := O.Cu; P.Tv := O.Cv;
+                                          P.Tz := (if Rl = "front" then O.Depth - Sz else O.Depth + Sz);
+                                          P.Wz := (if O.Depth > 0.0 and then Sz > 0.0 then 1.0 else 0.0);
+                                          P.Desc := S ("item " & Codec.Img (G.Of_Item) & " " & (if Rl = "front" then "nearer" else "farther") & " by its own size (in my own hand camera)");
+                                       end;
                                     elsif Rl = "above" then
                                        P.Tv := Z.Cv + Long_Float'Max (Oh, 1.0 / Long_Float (Ch)); P.Wz := 0.0;
                                     elsif Rl = "below" then

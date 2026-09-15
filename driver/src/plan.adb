@@ -38,14 +38,16 @@ package body Plan is
       return "";
    end Tried_Of;
 
-   --  这一版在这只眼里说得出口的关系。手上那只眼里手不动,前后/贴面这类要靠"我离它多远"的关系判不了
+   --  这一版在这只眼里说得出口的关系。手上那只眼里手不动:贴面(onto/off)要知道它靠着的面朝哪儿,这只眼判不了;
+   --  更近/更远在这只眼里 = 让那东西的远近读数变一截(这只眼跟着手走),说得了
    function Rel_Ok_Here (R : Sinew.Rel; Own_Eye : Boolean) return Boolean is
    begin
       case R is
          when Sinew.Re_Touching | Sinew.Re_Into | Sinew.Re_Above | Sinew.Re_Below | Sinew.Re_Left | Sinew.Re_Right
+            | Sinew.Re_Nearer | Sinew.Re_Farther
             | Sinew.Re_Clear | Sinew.Re_Still | Sinew.Re_Close | Sinew.Re_Open =>
             return True;
-         when Sinew.Re_Nearer | Sinew.Re_Farther | Sinew.Re_Onto | Sinew.Re_Off =>
+         when Sinew.Re_Onto | Sinew.Re_Off =>
             return not Own_Eye;
          when Sinew.Re_Facing | Sinew.Re_Press | Sinew.Re_None =>
             return False;
@@ -171,11 +173,11 @@ package body Plan is
                      end if;
                      if not Rel_Ok_Here (C.R, Own_Eye) then
                         Reject (I.Line, "「" & Sinew.Rel_Word (C.R) & "」(" & Sinew.Rel_Cn (C.R) & ")这一版"
-                                & (if Own_Eye and then C.R in Sinew.Re_Nearer | Sinew.Re_Farther | Sinew.Re_Onto | Sinew.Re_Off
-                                   then "在跟着我动的这只眼里判不了(手在这只眼里不动,前后要用不动的那只眼看)"
+                                & (if Own_Eye and then C.R in Sinew.Re_Onto | Sinew.Re_Off
+                                   then "在跟着我动的这只眼里判不了(它靠着的面朝哪儿这只眼看不出来)"
                                    else "还做不了"),
                                 "我在这只眼里说得出口的关系:" & Usable_Rels (Own_Eye)
-                                & (if Own_Eye then ";要前后/抬起,加 with my still eye" else ""));
+                                & (if Own_Eye then ";要抬起,说 farther <旁边一个看得见的东西>;要贴面,加 with my still eye" else ""));
                         exit;
                      end if;
                      if C.Obj.K /= Sinew.Nk_None then

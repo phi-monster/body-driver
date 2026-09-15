@@ -657,7 +657,8 @@ begin
       Check (not Verdict_Of ("do grasper press the ball firm until stuck").Ok, "编译:press 这版做不了 ⇒ 退回");
       Check (not Verdict_Of ("do grasper touching the ball until free").Ok, "编译:until free 不跟 close 一起 ⇒ 退回");
       Check (Verdict_Of ("do grasper close the ball until free").Ok, "编译:close … until free 放行");
-      Check (not Verdict_Of ("do grasper nearer the ball until touched or 5 steps", Own => True).Ok, "编译:跟着我动的眼里 nearer 判不了 ⇒ 退回");
+      Check (not Verdict_Of ("do grasper onto the ball until stuck or 5 steps", Own => True).Ok, "编译:跟着我动的眼里 onto 判不了 ⇒ 退回");
+      Check (Verdict_Of ("do grasper farther the ball until stuck or 5 steps", Own => True).Ok, "编译:跟着我动的眼里 farther 放行(= 让它的远近读数变一截)");
       Check (Verdict_Of ("do grasper nearer the ball until touched or 5 steps", Own => False).Ok, "编译:不动的眼里 nearer 放行");
       Check (not Verdict_Of ("do the ball touching grasper until touched").Ok, "编译:主语不是我身上的东西 ⇒ 退回");
       Check (not Verdict_Of ("do grasper touching the cup until touched").Ok, "编译:认不出的名字 ⇒ 退回");
