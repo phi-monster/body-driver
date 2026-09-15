@@ -20,14 +20,21 @@ strip() { sed -E 's#--.*$##' "$1"; }
 stops=$(for f in "$SRC"/*.adb; do strip "$f"; done | grep -cE 'Say_Stop *:=|Ok_Pt *:= *False|Pts\.Clear' || true)
 # ② 伪装成测量的门槛:量 × 系数 / 量 ÷ 系数(排除纯数学 0.0/1.0/2.0 的向量运算无从分辨,一律计入)
 coef=$(for f in "$SRC"/*.adb "$SRC"/*.ads; do strip "$f"; done | grep -oE '[A-Za-z_.]+ *[*/] *[0-9]+\.[0-9]+' | wc -l | tr -d ' ')
+# 🔴 第三条(HZ 2026-09-15 补):把【脑交上来的整段程序】半路扔掉,也是一种闸,而且前两条看不见它。
+#    实测:脑写了三行,第二行是"记个名字",没记成 ⇒ `Have_Prog := False; return` 把第三行那句
+#    "去球上方"一起扔了 ⇒ 整段一推没走,而 stops 和 coef 两个数都是绿的。
+#    只许两处:Y_Finished(程序自己跑完)和 Y_Broken(编译期退回,动之前、免费)。多一处都是闸。
+disc=$(for f in "$SRC"/*.adb; do strip "$f"; done | grep -cE 'Have_Prog *:= *False' || true)
 
-read -r c_stops c_coef < <(cat "$CEIL" 2>/dev/null || echo "999 999")
-echo "== 闸门棘轮:身体自己停下 $stops 处(上限 $c_stops)· 伪装成测量的门槛 $coef 处(上限 $c_coef) =="
+read -r c_stops c_coef c_disc < <(cat "$CEIL" 2>/dev/null || echo "999 999 999")
+c_disc=${c_disc:-999}
+echo "== 闸门棘轮:身体自己停下 $stops 处(上限 $c_stops)· 伪装成测量的门槛 $coef 处(上限 $c_coef) · 半路扔掉整段程序 $disc 处(上限 $c_disc) =="
 fail=0
 if [ "$stops" -gt "$c_stops" ]; then echo "🔴 身体自己决定不动的地方从 $c_stops 涨到 $stops —— 身体不许有意见,只许有无能"; fail=1; fi
 if [ "$coef" -gt "$c_coef" ]; then echo "🔴 伪装成测量的门槛从 $c_coef 涨到 $coef —— 门槛必须说得出它是从哪次测量来的"; fail=1; fi
+if [ "$disc" -gt "$c_disc" ]; then echo "🔴 半路扔掉整段程序的地方从 $c_disc 涨到 $disc —— 只许"跑完"和"编译期退回"两处"; fail=1; fi
 if [ "$fail" = 0 ]; then
-  echo "$stops $coef" > "$CEIL"
-  echo "🟢 没有新增的闸;上限已收紧到 $stops / $coef"
+  echo "$stops $coef $disc" > "$CEIL"
+  echo "🟢 没有新增的闸;上限已收紧到 $stops / $coef / $disc"
 fi
 exit $fail

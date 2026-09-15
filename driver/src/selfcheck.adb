@@ -1331,6 +1331,41 @@ begin
              "切块:下沿压在画面最后一行的那块,Keep_Edge 关掉会被丢、开着才留得住");
    end;
 
+   --  ===== 一行一判(HZ 2026-09-15:身体连着 10 步命令全零,日志全绿)=====
+   declare
+      --  HZ 实测 ch7 那一根的真实数字:画面两行量得准准的,深度那一行在乱跳。
+      Pic_Dif  : constant Long_Float := 0.0290;   --  左右/上下 去回之差
+      Pic_Con  : constant Long_Float := 0.1670;   --  左右/上下 去回共识
+      Dep_Bad  : constant Long_Float := 4.9000;   --  远近 去回之差(比共识还大 ⇒ 这一行不是测量)
+      Dep_Con  : constant Long_Float := 4.4115;   --  远近 去回共识(-5.024 与 -3.799 的均值绝对值)
+      --  旧写法:五行合成一个数(HZ 日志原样)
+      Bundle_Dif : constant Long_Float := 6.4593;
+      Bundle_Con : constant Long_Float := 3.2772;
+      --  HY 撤回的那一条:体检那个倍数是灵敏度,拿它去除绝对距离 ⇒ 手变成 4 厘米,物理上不可能
+      Hand_Z     : constant Long_Float := 1.4000;
+      Sens_32    : constant Long_Float := 32.1000;
+      Too_Close  : constant Long_Float := 0.0500;
+   begin
+      Check (Act.Row_Is_Measurement (Pic_Dif, Pic_Con),
+             "一行一判:画面那两行去回对得上 ⇒ 这根通道【能用来在画面里走】");
+      Check (not Act.Row_Is_Measurement (Bundle_Dif, Bundle_Con),
+             "一行一判:同一根通道,五行合成一个数就【判死】—— 这正是 HZ 连着 10 步全零的来源");
+      --  载重的那一条:同一根通道,分行判和合并判给出【相反】的结论。
+      Check (Act.Row_Is_Measurement (Pic_Dif, Pic_Con)
+             and then not Act.Row_Is_Measurement (Bundle_Dif, Bundle_Con),
+             "一行一判:分行判【留下】、合并判【判死】,两者结论相反 ⇒ 不许再退回合并判");
+      Check (not Act.Row_Is_Measurement (Dep_Bad, Dep_Con),
+             "一行一判:深度那一行自己对不上时,只清【那一行】,不许连累画面两行");
+      Check (Act.Row_Is_Measurement (0.0, 0.0),
+             "一行一判:两遍都是零 = 没有证据说它错,照原样留着(没量过 ≠ 量出来是错的)");
+      --  HZ 的另一半:画面一动不动的通道,深度那一格 -23.864 仍然被当成测量带进表。
+      Check (Act.Depth_Scale_Bad (-23.864),
+             "体检:一根平移通道推一米深度读数变 23.9 米 —— 物理上不可能,这一条照旧要喊出来");
+      --  \U0001f534 撤回(HY 实测):体检那个倍数是【灵敏度】,不是绝对尺度错,不许拿它去除深度。
+      Check (Hand_Z / Sens_32 < Too_Close,
+             "撤回:1.4 m 的手除以体检的 32.1 倍 = 0.04 m ⇒ 物理上不可能,所以永远不许这么除");
+   end;
+
    Put_Line ((if Fails = 0 then "🟢 自检全过" else "🔴 自检失败" & Natural'Image (Fails) & " 条"));
    if Fails > 0 then
       raise Program_Error;

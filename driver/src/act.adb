@@ -213,6 +213,10 @@ package body Act is
    function Depth_Scale_Bad (Depth_Per_Metre : Long_Float) return Boolean is
      (abs Depth_Per_Metre > 1.0);
 
+   --  一行一判:这一行去回两遍的【分歧】要小于两遍的【共识】。两遍都是零 ⇒ 没证据,照留。
+   function Row_Is_Measurement (Dif, Con : Long_Float) return Boolean is
+     (Con <= 0.0 or else Dif < Con);
+
    function Depth_Ok (Zd, Old_Z, Pred_Z, Noise, Last_Rejected : Long_Float) return Boolean is
      (Old_Z <= 0.0
       --  连着两次被拒、而两次读数互相吻合 ⇒ 新值是可重复的,旧基准才是陈的 ⇒ 收
@@ -1289,6 +1293,9 @@ package body Act is
       B2 : Sum_Grid := [others => [others => [others => 0.0]]];   --  回程那一遍的列
       Nb : array (0 .. Chan.Per_Arm - 1) of Natural := [others => 0];
       Agree_Out : Table.Vec := [others => -1.0];   --  每根通道:分歧 ÷ 共识(<1 才算稳)
+      --  🔴 每(通道,行)自己的来回对账结果。对不上的【那一行】清零 = "这根通道对这一行没有意见"。
+      --  一开始全是 True:没对过表的行照原样用(没量过不等于量出来是错的)。
+      Row_Ok : array (0 .. Chan.Per_Arm - 1, 0 .. Table.Rows - 1) of Boolean := [others => [others => True]];
       Said_Wide : array (0 .. Chan.Per_Arm - 1) of Boolean := [others => False];
       Nrep : array (0 .. Chan.Per_Arm - 1) of Natural := [others => 0];
       --  🔴 上一轮(幅度的一半)这一通道最多的那个点跑了多远。加倍之后【一点没多跑】⇒ 再加也没用,
@@ -1311,6 +1318,14 @@ package body Act is
                   begin
                      Sc (R) := (if abs Mean (R) > 0.0 then Sqrt (Var) / abs Mean (R) else 0.0);
                   end;
+               end loop;
+               --  🔴 来回对不上的那几行,写进表里的是零 —— "这根通道对这一行没有意见"。
+               --  留着它反而更坏:解算会拿一个假的斜率去修那一行,越修越远(HZ 实测深度行如此)。
+               for R in 0 .. Table.Rows - 1 loop
+                  if not Row_Ok (K, R) then
+                     Mean (R) := 0.0;
+                     Sc (R) := 0.0;
+                  end if;
                end loop;
                Table.Set_Col (Effs (I), K, Mean);
                Table.Set_Spread (Effs (I), K, Nrep (K), Sc);
@@ -1506,23 +1521,49 @@ package body Act is
                      if Seen_Enough then
                         --  🔴 来回对账:去程和回程量出来的同一列应当相等。
                         --  分歧 = 两遍之差的长度;共识 = 两遍之和的一半的长度。分歧 ≥ 共识 ⇒ 这一列不是测量。
+                        --  🔴🔴 一行一判(HZ 2026-09-15 实测改):以前把五行【合成一个数】来判整根通道,
+                        --  于是被放大了二三十倍、且一动不动也在乱跳的【深度那一行】,单独一行就能把一整根
+                        --  【画面里量得准准的】通道否掉。HZ 实测:6 根判死 4 根,活下来的两根左右都是 0.000
+                        --  ⇒ 解算连着 10 步命令全零、身体一动不动,而日志每一行都是绿的。
+                        --  改成:画面那两行(左右/上下)说了算"这根通道能不能用";其余各行自己对自己负责,
+                        --  哪一行来回对不上就把【那一行】清零 —— 清零的意思是"这根通道对这一行没有意见",
+                        --  不是"它是零"。⚠️ 不许拿体检那个倍数去除深度:那是灵敏度不是绝对尺度错,
+                        --  而且解算里误差和列都用同一套读数单位,倍数本来就会约掉(HY 实测除了就炸)。
                         if Nb (K) > 0 and then Agree_Out (K) < 0.0 then
                            declare
-                              Dif, Con : Long_Float := 0.0;
+                              Dp, Cp : Long_Float := 0.0;
+                              Dropped : Natural := 0;
                            begin
-                              for I in 0 .. Natural (Pts.Length) - 1 loop
-                                 for R in 0 .. Table.Rows - 1 loop
-                                    Dif := Dif + (B1 (I, K, R) - B2 (I, K, R)) ** 2;
-                                    Con := Con + ((B1 (I, K, R) + B2 (I, K, R)) / 2.0) ** 2;
-                                 end loop;
+                              for R in 0 .. Table.Rows - 1 loop
+                                 declare
+                                    Dr, Cr : Long_Float := 0.0;
+                                 begin
+                                    for I in 0 .. Natural (Pts.Length) - 1 loop
+                                       Dr := Dr + (B1 (I, K, R) - B2 (I, K, R)) ** 2;
+                                       Cr := Cr + ((B1 (I, K, R) + B2 (I, K, R)) / 2.0) ** 2;
+                                    end loop;
+                                    Dr := Sqrt (Dr); Cr := Sqrt (Cr);
+                                    Row_Ok (K, R) := Row_Is_Measurement (Dr, Cr);
+                                    if R <= 1 then
+                                       Dp := Dp + Dr * Dr;
+                                       Cp := Cp + Cr * Cr;
+                                    elsif not Row_Ok (K, R) then
+                                       Dropped := Dropped + 1;
+                                    end if;
+                                 end;
                               end loop;
-                              Dif := Sqrt (Dif); Con := Sqrt (Con);
-                              if Con > 0.0 then
-                                 Agree_Out (K) := Dif / Con;
-                                 Put_Line ("[身]     通道" & Natural'Image (Chn) & " 来回对表:分歧 "
-                                           & Codec.Fmt (Dif, 4) & " · 共识 " & Codec.Fmt (Con, 4)
-                                           & " ⇒ " & (if Agree_Out (K) < 1.0 then "对得上,这一列信得过"
-                                                      else "🔴 对不上,这一列不是测量(跟丢/符号反/关节翻支)"));
+                              Dp := Sqrt (Dp); Cp := Sqrt (Cp);
+                              if Cp > 0.0 then
+                                 Agree_Out (K) := Dp / Cp;
+                                 Put_Line ("[身]     通道" & Natural'Image (Chn) & " 来回对表(画面那两行):分歧 "
+                                           & Codec.Fmt (Dp, 4) & " · 共识 " & Codec.Fmt (Cp, 4)
+                                           & " ⇒ " & (if Agree_Out (K) < 1.0 then "对得上,这根通道信得过"
+                                                      else "🔴 对不上,这根通道不是测量(跟丢/符号反/关节翻支)"));
+                              end if;
+                              if Dropped > 0 then
+                                 Put_Line ("[身]     通道" & Natural'Image (Chn) & ":其中 " & Codec.Img (Dropped)
+                                           & " 行(远近/看着多大/朝向)来回对不上 ⇒ 这几行清零,"
+                                           & "这根通道对它们没意见;画面那两行照用");
                               end if;
                            end;
                         end if;
@@ -2253,14 +2294,55 @@ package body Act is
          Note := (others => <>);
          Aim (Terms);
          Budget (Terms, Solved);
+         --  🔴🔴 "算出来了,而算出来的是一动不动" 和 "算不出来" 是同一件事(HZ 2026-09-15 实测)。
+         --  HZ:6 根通道被判死 4 根,活下来的两根左右都是 0.000 ⇒ 解算每一步都返回全零、还报成功,
+         --  于是身体连着 10 步一根关节都没转,差距 0.479 → 0.565(还涨了),而日志每一行都绿。
+         --  一步命令全零 = 这一步没走。不许把它当成"走过了"。
+         if Solved and then (for all K in 0 .. Chan.Per_Arm - 1 => abs Note.Cmd (K) <= 0.0) then
+            Solved := False;
+         end if;
          if not Solved then
             --  🔴 解不出来也不许停:用手上最好的那个估计推一步,并说清楚这一步是硬凑的。
+            --  🔴 挑哪一根:能用的里面【画面里动得最多】的那一根 —— 以前写死推 0 号,
+            --  0 号不能用就等于什么都不推,"不许停"变成了一句空话(HZ 实测全零 10 步)。
             for K in 0 .. Chan.Per_Arm - 1 loop
                Note.Cmd (K) := 0.0;
             end loop;
-            if Note.Active (0) then
-               Note.Cmd (0) := C.Map.Amp (Arm * Chan.Per_Arm) * Amount;
-            end if;
+            declare
+               Best : Integer := -1;
+               Best_Px : Long_Float := -1.0;
+            begin
+               for K in 0 .. Chan.Per_Arm - 1 loop
+                  if Note.Active (K) then
+                     declare
+                        Px : Long_Float := 0.0;
+                     begin
+                        for T of Terms loop
+                           Px := Long_Float'Max
+                             (Px, Sqrt (T.E.B (K, 0) ** 2 + T.E.B (K, 1) ** 2));
+                        end loop;
+                        if Px > Best_Px then
+                           Best_Px := Px;
+                           Best := K;
+                        end if;
+                     end;
+                  end if;
+               end loop;
+               --  一根能用的都没有 ⇒ 还是要动:推身上量到过幅度的第一根,并说清楚这是硬凑的。
+               if Best < 0 then
+                  for K in 0 .. Chan.Per_Arm - 1 loop
+                     if C.Map.Seen (Arm * Chan.Per_Arm + K) then
+                        Best := K;
+                        exit;
+                     end if;
+                  end loop;
+               end if;
+               if Best >= 0 then
+                  Note.Cmd (Natural (Best)) :=
+                    C.Map.Amp (Arm * Chan.Per_Arm + Natural (Best)) * Amount;
+                  Note.Active (Natural (Best)) := True;
+               end if;
+            end;
             C.Blind_Say := S ("I could not work out which channels to push, so this step was a guess");
             return;
          end if;
@@ -4164,10 +4246,15 @@ package body Act is
                                      & Codec.Fmt (Pl.Cu, 3) & "," & Codec.Fmt (Pl.Cv, 3) & ") 深 "
                                      & Codec.Fmt (Pl.Z, 3));
                         else
-                           C.Have_Prog := False;
-                           C.Recent := S ("I could not see the thing you asked me to remember, so I remembered nothing "
-                                          & "and stopped. " & Mode_Line (C, "could not see what to remember"));
-                           return;
+                           --  🔴 记不住不是停下的理由(HZ 2026-09-15 实测:脑写了三行,
+                           --  第二行是【记个名字】,没记成就把第三行那句"去球上方"整条扔了 ⇒ 一推没走)。
+                           --  能停我的只有人的命令和脑写的 until。记不住就照说出来,后面的行照跑。
+                           Append (C.Prog_Log,
+                                   (if Length (C.Prog_Log) > 0 then ASCII.LF & "" else "")
+                                   & "I could not see what you told me to remember, so I remembered nothing - "
+                                   & "I did not stop, and I ran the rest of your program anyway.");
+                           Put_Line ("[身] 📍 记不住「" & To_String (Ins.Name)
+                                     & "」—— 这一刻我看不见它;我不停,后面的行照跑");
                         end if;
                      end;
                   when Runtime.Y_Done =>
