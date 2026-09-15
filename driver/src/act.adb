@@ -1110,12 +1110,12 @@ package body Act is
                   declare
                      --  深度读在这一瓣自己的位置上(区心是两指之间的空,读到的是桌面);窗口 = 张幅的四分之一(比例,无量纲)
                      Win : constant Long_Float := Long_Float'Max (0.005, Z.Span * 0.25);
-                     --  🔴 读回来先除以【我自己量出来的放大倍数】—— 这样全身的"远近"是同一个单位(真米),
-                     --  不是"估计器的米"。倍数是拿胳膊当尺子量的:我真走一米,读数变了几米。
-                     --  还没量出倍数时就是 1(原样),量出来之后每一次读都跟着修正。
+                     --  ⚠️ 撤回(HY 实测):曾经在这里除以"量出来的放大倍数"。**那是过头了** ——
+                     --  那个倍数量的是"推一米读数变几米"(灵敏度),不是"读数的绝对尺度错几倍"。
+                     --  拿灵敏度去除绝对值 ⇒ 1.4 m 被除成 0.003 m(手离镜头 3 毫米,物理上不可能),
+                     --  差距当场从 1.366 炸到 2460。倍数只作【自知之明】用,不许改读数。
                      Zd : constant Long_Float :=
-                       Picture.Near_Depth (F.Cams (Cam).Depth, Cw, Ch, P.Cu, P.Cv, Win)
-                       / (if C.Depth_Scale > 1.0 then C.Depth_Scale else 1.0);
+                       Picture.Near_Depth (F.Cams (Cam).Depth, Cw, Ch, P.Cu, P.Cv, Win);
                   begin
                      if not Picture.Is_Nan (Zd) then
                         --  一步之内深度跳了超过"预测的变化 + 这一点自己的读深抖动"⇒ 读到的不是我的手指,留预测。
@@ -1339,8 +1339,7 @@ package body Act is
             for I in 0 .. Natural (Pts.Length) - 1 loop
                --  读深窗口 = 张幅的四分之一,再小也有半个百分点的画幅(比例,无量纲)
                Z1 (I) := Picture.Near_Depth (F.Cams (Pts (I).Cam).Depth, F.Cams (Pts (I).Cam).W, F.Cams (Pts (I).Cam).H,
-                                             Pts (I).Cu, Pts (I).Cv, Long_Float'Max (0.005, Z.Span * 0.25))
-                        / (if C.Depth_Scale > 1.0 then C.Depth_Scale else 1.0);
+                                             Pts (I).Cu, Pts (I).Cv, Long_Float'Max (0.005, Z.Span * 0.25));
             end loop;
             declare
                Was0 : constant Point_Vectors.Vector := Pts;
@@ -1362,8 +1361,7 @@ package body Act is
                declare
                   --  读深窗口 = 张幅的四分之一,再小也有半个百分点的画幅(比例,无量纲)
                   Z2 : constant Long_Float := Picture.Near_Depth (F.Cams (Pts (I).Cam).Depth, F.Cams (Pts (I).Cam).W, F.Cams (Pts (I).Cam).H,
-                                                                 Pts (I).Cu, Pts (I).Cv, Long_Float'Max (0.005, Z.Span * 0.25))
-                                              / (if C.Depth_Scale > 1.0 then C.Depth_Scale else 1.0);
+                                                                 Pts (I).Cu, Pts (I).Cv, Long_Float'Max (0.005, Z.Span * 0.25));
                   Zr : constant Long_Float := (if Pts (I).Z > 0.0 then Pts (I).Z else 1.0);
                begin
                   --  地板 = 两拍读深抖动的 4 倍(倍数,无量纲),再小也有距离的百分之一(比例,无量纲)
@@ -1870,14 +1868,28 @@ package body Act is
                      --  🔴🔴 体检:平移通道推一米,远近最多变一米。绝对值 > 1 = 物理上不可能。
                      --  取所有平移通道里最大的那个,就是【我的深度读数被放大了几倍】的下界 ——
                      --  这就是拿自己的胳膊当尺子:我知道自己走了几米,也看得见深度读数变了多少。
+                     --  🔴 分两句说:信得过的列里最坏多少 · 【已经作废的列里】最坏多少。
+                     --  只统计信得过的列会把病情说小:HY 实测报"1.4 倍",而同一炮里有一根
+                     --  命令 0.0032 实到 0.0020、深度却变 0.7605 ⇒ 380 倍 —— 那一根已被来回对表判死,
+                     --  于是不参与,病情就被漏报了。作废的那些不参与修正,但必须说出来给脑看病。
                      declare
                         Worst : Long_Float := 0.0;
+                        Worst_Dead : Long_Float := 0.0;
                      begin
                         for K in 0 .. Chan.Per_Arm - 1 loop
-                           if Trust (K) and then Depth_Scale_Bad (Effs (I).B (K, 2)) then
-                              Worst := Long_Float'Max (Worst, abs Effs (I).B (K, 2));
+                           if Depth_Scale_Bad (Effs (I).B (K, 2)) then
+                              if Trust (K) then
+                                 Worst := Long_Float'Max (Worst, abs Effs (I).B (K, 2));
+                              else
+                                 Worst_Dead := Long_Float'Max (Worst_Dead, abs Effs (I).B (K, 2));
+                              end if;
                            end if;
                         end loop;
+                        if Worst_Dead > 0.0 then
+                           Put_Line ("[身]   🔴 体检(已作废的那些列里):最坏的一根是 我真走一米、深度读数变 "
+                                     & Codec.Fmt (Worst_Dead, 1) & " 米 —— 它已经被来回对表判死了,不参与,"
+                                     & "但这就是我的距离感到底有多烂。");
+                        end if;
                         if Worst > 0.0 then
                            C.Depth_Scale := Long_Float'Max (C.Depth_Scale, Worst);
                            Put_Line ("[身]   🔴 体检:我真走一米,深度读数变了 " & Codec.Fmt (Worst, 1)
@@ -2373,11 +2385,9 @@ package body Act is
                                                         and then Zn.Valid and then Lb.Valid then Lb.Cu else P.Cu);
                            Rv : constant Long_Float := (if P.Kind = Piece_Pt and then P.Blob < 0
                                                         and then Zn.Valid and then Lb.Valid then Lb.Cv else P.Cv);
-                           --  🔴 同上:读回来先除以量出来的放大倍数,全身统一成真米
                            Zd : constant Long_Float :=
                              Picture.Near_Depth (F.Cams (P.Cam).Depth, F.Cams (P.Cam).W, F.Cams (P.Cam).H,
-                                                 Ru, Rv, Lobe_Win (Zn, F.Cams (P.Cam).W, F.Cams (P.Cam).H))
-                             / (if C.Depth_Scale > 1.0 then C.Depth_Scale else 1.0);
+                                                 Ru, Rv, Lobe_Win (Zn, F.Cams (P.Cam).W, F.Cams (P.Cam).H));
                            --  🔴 闸盯【上一次真读到的】远近,不是 P.Z —— P.Z 可能是按位姿猜的、从没被眼睛校过
                            Old_Z : constant Long_Float := (if P.Z_Seen > 0.0 then P.Z_Seen else P.Z);
                         begin
