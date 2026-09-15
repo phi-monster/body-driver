@@ -860,10 +860,13 @@ begin
          O : Outcome;
          K : Monitor.Until_Kind;
       end record;
-      Want : constant array (1 .. 8) of Row :=
+      Want : constant array (1 .. 9) of Row :=
         [(Oc_Touched, Monitor.U_Contact), (Oc_Stuck, Monitor.U_Resist),
          (Oc_Slipped, Monitor.U_Slip),    (Oc_Free, Monitor.U_Free),
          (Oc_Lost, Monitor.U_Lost),       (Oc_Settled, Monitor.U_Settle),
+         --  🔴 stalled 必须自己一格:stuck = 命令了身体没走;stalled = 我在动可差距不缩。
+         --  压成一条就等于脑问"还有救吗"而身体答"我没瘫痪"(JE 2026-09-15 加这个词)
+         (Oc_Stalled, Monitor.U_Stall),
          (Oc_Arrived, Monitor.U_Steps),   (Oc_Timeout, Monitor.U_Steps)];
       All_Right : Boolean := True;
       Round_Trip : Boolean := True;
@@ -878,11 +881,11 @@ begin
             Round_Trip := False;
          end if;
       end loop;
-      --  六个"有自己事件"的词必须两两不同;arrived 和 timeout 共用步数上限,靠 Wants_Arrive 分开。
+      --  七个"有自己事件"的词必须两两不同;arrived 和 timeout 共用步数上限,靠 Wants_Arrive 分开。
       --  ⚠️ 比的必须是【身体的真实映射】Until_Of,不是我写的期望表自己跟自己 ——
       --  第一版就是拿 Want(I).K 和 Want(J).K 比,把 free 故意改坏之后它照样绿:一条永不失败的断言。
-      for I in 1 .. 6 loop
-         for J in I + 1 .. 6 loop
+      for I in 1 .. 7 loop
+         for J in I + 1 .. 7 loop
             if Act.Until_Of (Want (I).O) = Act.Until_Of (Want (J).O) then
                Distinct := False;
             end if;

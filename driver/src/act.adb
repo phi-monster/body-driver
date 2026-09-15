@@ -316,12 +316,14 @@ package body Act is
          when Sinew.Oc_Free    => "free",      --  离开了原来靠着的面 = 被拿起来了
          when Sinew.Oc_Lost    => "lost",      --  看不见我正跟着的东西了
          when Sinew.Oc_Settled => "settle",
+         when Sinew.Oc_Stalled => "stall",
          when Sinew.Oc_Arrived => "arrived",
          when others           => "steps");    --  timeout / none / refused(refused 编译期就被拒了)
    --  字符串那一跳的反向表。自检逐词钉死 Kind_Of_Word (Until_Word (O)) = Until_Of (O),
    --  任何一次"顺手并个词"都会当场红
    function Kind_Of_Word (W : String) return Monitor.Until_Kind is
      (if W = "contact" then Monitor.U_Contact
+      elsif W = "stall" then Monitor.U_Stall
       elsif W = "resist" then Monitor.U_Resist
       elsif W = "slip" then Monitor.U_Slip
       elsif W = "settle" then Monitor.U_Settle
@@ -338,6 +340,7 @@ package body Act is
          when Sinew.Oc_Free    => Monitor.U_Free,
          when Sinew.Oc_Lost    => Monitor.U_Lost,
          when Sinew.Oc_Settled => Monitor.U_Settle,
+         when Sinew.Oc_Stalled => Monitor.U_Stall,
          when others           => Monitor.U_Steps);   --  arrived / timeout 都走步数上限,靠 Wants_Arrive 区分
 
    --  这一台相机里,脑上次点名那一块有多宽(画幅)。切块的第二把尺子要按相机各算各的。
@@ -3271,6 +3274,9 @@ package body Act is
                                 when Monitor.U_Resist => S ("resist: I commanded a push and my body did not go"),
                                 when Monitor.U_Slip => S ("slip: what I was holding has left my fingers"),
                                 when Monitor.U_Settle => S ("settle: the picture stopped changing"),
+                                when Monitor.U_Stall => S ("stall: I am still moving, but for several steps in a row "
+                                                           & "the gap has stopped shrinking - you asked me to come back "
+                                                           & "when that happened"),
                                 when Monitor.U_Lost => S ("lost: I cannot see the thing I am tracking any more"),
                                 when Monitor.U_Free => S ("free: it now stands higher off the surface than when I started - it has come free"));
             return;

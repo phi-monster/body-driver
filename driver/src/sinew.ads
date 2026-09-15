@@ -48,8 +48,13 @@ package Sinew is
    type Rank is (Rk_Prefer, Rk_Must);   --  must 不许被牺牲(走零空间),prefer 可以
 
    --  ── 结局:控制流唯一能读的东西 ──
+   --  🔴 Oc_Stalled(JE 2026-09-15 补):身体每次卡住都在说
+   --  "for several steps in a row the gap stopped shrinking - I kept going anyway",
+   --  而那句话旁边的注释写着"由脑决定还走不走"—— 可脑【没有这个词能问它】,
+   --  只能等整段跑完才知道。差距不缩是身体量得出来的事实(No_Progress),
+   --  给它一个结局词,脑才真的能决定。停身体的仍然只有脑写的 until。
    type Outcome is (Oc_None, Oc_Arrived, Oc_Touched, Oc_Stuck, Oc_Slipped,
-                    Oc_Lost, Oc_Free, Oc_Settled, Oc_Timeout, Oc_Refused);
+                    Oc_Lost, Oc_Free, Oc_Settled, Oc_Stalled, Oc_Timeout, Oc_Refused);
 
    type Constraint is record
       Subj, Obj : Noun;
@@ -118,5 +123,5 @@ package Sinew is
    function Unparse (I : Instr) return String;
    --  这个结局算不算"这一段没成"(try 用它决定跳不跳)
    function Is_Failure (O : Outcome) return Boolean is
-     (O in Oc_Stuck | Oc_Slipped | Oc_Lost | Oc_Timeout | Oc_Refused);
+     (O in Oc_Stuck | Oc_Slipped | Oc_Lost | Oc_Stalled | Oc_Timeout | Oc_Refused);
 end Sinew;

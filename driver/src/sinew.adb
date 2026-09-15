@@ -37,6 +37,7 @@ package body Sinew is
          when Oc_None => "", when Oc_Arrived => "arrived", when Oc_Touched => "touched",
          when Oc_Stuck => "stuck", when Oc_Slipped => "slipped", when Oc_Lost => "lost",
          when Oc_Free => "free", when Oc_Settled => "settled",
+         when Oc_Stalled => "stalled",
          when Oc_Timeout => "timeout", when Oc_Refused => "refused");
 
    function Outcome_Cn (O : Outcome) return String is
@@ -45,6 +46,7 @@ package body Sinew is
          when Oc_Touched => "碰上了", when Oc_Stuck => "命令了但身体没走",
          when Oc_Slipped => "手里的东西掉了", when Oc_Lost => "看不见我正跟着的东西了",
          when Oc_Free => "它离开了原来靠着的面", when Oc_Settled => "画面不再变了",
+         when Oc_Stalled => "我还在动,可差距连着几步不缩了",
          when Oc_Timeout => "步子走完还没到",
          when Oc_Refused => "我做不到");
 

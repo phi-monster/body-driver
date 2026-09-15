@@ -22,7 +22,7 @@ package Monitor is
    --  统统落进兜底的 U_Steps,身体收下这个词然后做的是别的事,还回报"步子走完还没到"。
    --  free 尤其致命:语言里 free = "它离开了原来靠着的面" = 【被拿起来了】,正是本任务的判据,
    --  而它当时被接到 Slipped(爪子读数掉回空手)上,和"拿起来"毫无关系。
-   type Until_Kind is (U_Steps, U_Contact, U_Resist, U_Slip, U_Settle, U_Lost, U_Free);
+   type Until_Kind is (U_Steps, U_Contact, U_Resist, U_Slip, U_Settle, U_Stall, U_Lost, U_Free);
 
    procedure Step (W : in out Watch; Pic_Delta : Floor; Err_Before, Err_After : Bounded;
                    Delivered : Floor; F : Floors; Seen : Boolean)
@@ -69,6 +69,7 @@ package Monitor is
          when U_Resist => Blocked or else Refusing (W),
          when U_Slip => Slipped (Reading, Empty, Reading_Noise),
          when U_Settle => Settled (W),
+       when U_Stall => Stalled (W),
          when U_Lost => Lost,
          when U_Free => Came_Free (Height_Now, Height_Then, Height_Noise));
 end Monitor;
