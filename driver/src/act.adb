@@ -195,6 +195,20 @@ package body Act is
    function Cn_Changed (C : Context; Cn : Natural) return Boolean is
      (Index (C.Changed_Say, "channel " & Codec.Img (Cn) & " used to move") = 0);
 
+   --  层数 = 让最粗那一层的位移落到一个像素以内所需要的层数。
+   --  上限 6 层:再粗下去图本身只剩几十个像素,已经没有内容可对(不是调参,是图没了)。
+   function Levels_For (Px_Move : Long_Float) return Positive is
+      N : Natural := Natural (Long_Float'Min (1.0e6, Long_Float'Max (0.0, abs Px_Move)));
+      L : Positive := 1;
+   begin
+      --  整数写:每加一层分辨率【减半】是金字塔的定义本身,不是一个可调的门槛
+      while N > 1 and then L < 6 loop
+         N := N / 2;
+         L := L + 1;
+      end loop;
+      return L;
+   end Levels_For;
+
    --  1.0 不是系数:它是"沿着相机看的方向走一米,远近最多变一米"这条几何事实本身
    function Depth_Scale_Bad (Depth_Per_Metre : Long_Float) return Boolean is
      (abs Depth_Per_Metre > 1.0);
@@ -1077,7 +1091,13 @@ package body Act is
                      B.Append (F.Cams (Cam).Gray.Element ((2 * Y) * Cw + 2 * X));
                   end loop;
                end loop;
-               Fl := Flow.Compute (A, B, Hw, Hh, 3, 30);
+               --  🔴 搜多宽由【这一步预计跑多远】定,不是写死 3 层。
+               --  预计位移 = 从上一个位置到预测位置的距离(画幅)× 这半分辨率图的宽(像素)。
+               --  预计跑得远 ⇒ 多加几层,最粗那层的位移落到一个像素以内,光流才找得准。
+               Fl := Flow.Compute
+                 (A, B, Hw, Hh,
+                  Levels_For (Sqrt ((Pred_U - P.Cu) ** 2 + (Pred_V - P.Cv) ** 2) * Long_Float (Hw)),
+                  30);
                --  取平均的那一片 = 张幅的四分之一(比例,无量纲),再小也有一个像素百分比
                Flow.Sample (Fl, P.Cu, P.Cv, Long_Float'Max (0.01, Z.Span * 0.25), Du, Dv);
                if Moved_Arm and then Sqrt (Du * Du + Dv * Dv) * Long_Float (Cw) < 0.5 then
@@ -1090,7 +1110,12 @@ package body Act is
                   declare
                      --  深度读在这一瓣自己的位置上(区心是两指之间的空,读到的是桌面);窗口 = 张幅的四分之一(比例,无量纲)
                      Win : constant Long_Float := Long_Float'Max (0.005, Z.Span * 0.25);
-                     Zd : constant Long_Float := Picture.Near_Depth (F.Cams (Cam).Depth, Cw, Ch, P.Cu, P.Cv, Win);
+                     --  🔴 读回来先除以【我自己量出来的放大倍数】—— 这样全身的"远近"是同一个单位(真米),
+                     --  不是"估计器的米"。倍数是拿胳膊当尺子量的:我真走一米,读数变了几米。
+                     --  还没量出倍数时就是 1(原样),量出来之后每一次读都跟着修正。
+                     Zd : constant Long_Float :=
+                       Picture.Near_Depth (F.Cams (Cam).Depth, Cw, Ch, P.Cu, P.Cv, Win)
+                       / (if C.Depth_Scale > 1.0 then C.Depth_Scale else 1.0);
                   begin
                      if not Picture.Is_Nan (Zd) then
                         --  一步之内深度跳了超过"预测的变化 + 这一点自己的读深抖动"⇒ 读到的不是我的手指,留预测。
@@ -1314,7 +1339,8 @@ package body Act is
             for I in 0 .. Natural (Pts.Length) - 1 loop
                --  读深窗口 = 张幅的四分之一,再小也有半个百分点的画幅(比例,无量纲)
                Z1 (I) := Picture.Near_Depth (F.Cams (Pts (I).Cam).Depth, F.Cams (Pts (I).Cam).W, F.Cams (Pts (I).Cam).H,
-                                             Pts (I).Cu, Pts (I).Cv, Long_Float'Max (0.005, Z.Span * 0.25));
+                                             Pts (I).Cu, Pts (I).Cv, Long_Float'Max (0.005, Z.Span * 0.25))
+                        / (if C.Depth_Scale > 1.0 then C.Depth_Scale else 1.0);
             end loop;
             declare
                Was0 : constant Point_Vectors.Vector := Pts;
@@ -1336,7 +1362,8 @@ package body Act is
                declare
                   --  读深窗口 = 张幅的四分之一,再小也有半个百分点的画幅(比例,无量纲)
                   Z2 : constant Long_Float := Picture.Near_Depth (F.Cams (Pts (I).Cam).Depth, F.Cams (Pts (I).Cam).W, F.Cams (Pts (I).Cam).H,
-                                                                 Pts (I).Cu, Pts (I).Cv, Long_Float'Max (0.005, Z.Span * 0.25));
+                                                                 Pts (I).Cu, Pts (I).Cv, Long_Float'Max (0.005, Z.Span * 0.25))
+                                              / (if C.Depth_Scale > 1.0 then C.Depth_Scale else 1.0);
                   Zr : constant Long_Float := (if Pts (I).Z > 0.0 then Pts (I).Z else 1.0);
                begin
                   --  地板 = 两拍读深抖动的 4 倍(倍数,无量纲),再小也有距离的百分之一(比例,无量纲)
@@ -2346,9 +2373,11 @@ package body Act is
                                                         and then Zn.Valid and then Lb.Valid then Lb.Cu else P.Cu);
                            Rv : constant Long_Float := (if P.Kind = Piece_Pt and then P.Blob < 0
                                                         and then Zn.Valid and then Lb.Valid then Lb.Cv else P.Cv);
+                           --  🔴 同上:读回来先除以量出来的放大倍数,全身统一成真米
                            Zd : constant Long_Float :=
                              Picture.Near_Depth (F.Cams (P.Cam).Depth, F.Cams (P.Cam).W, F.Cams (P.Cam).H,
-                                                 Ru, Rv, Lobe_Win (Zn, F.Cams (P.Cam).W, F.Cams (P.Cam).H));
+                                                 Ru, Rv, Lobe_Win (Zn, F.Cams (P.Cam).W, F.Cams (P.Cam).H))
+                             / (if C.Depth_Scale > 1.0 then C.Depth_Scale else 1.0);
                            --  🔴 闸盯【上一次真读到的】远近,不是 P.Z —— P.Z 可能是按位姿猜的、从没被眼睛校过
                            Old_Z : constant Long_Float := (if P.Z_Seen > 0.0 then P.Z_Seen else P.Z);
                         begin
@@ -4654,6 +4683,15 @@ package body Act is
                         if not Sure_Held then
                            By_Reading := False;   --  说不准 ⇒ 不许记成"手里有东西"(记错了下一步它就去"搬"而不是重抓)
                         end if;
+                        --  🔴 抓没抓到,是这本经历账里最要紧的一条 —— 它以后说"上次我在这上面是怎么成的",
+                        --  靠的就是这一行。判据用的是身体自己抬手量出来的那一条,不是我替它写的。
+                        Codec.Append_Line (Life_Path,
+                                           "beat " & Codec.Img (Plug.Steps (L))
+                                           & " | eye " & Codec.Img (Cam)
+                                           & " | CLOSED on item " & Codec.Img (Say.Grip_On)
+                                           & " | " & (if not Sure_Held then "COULD NOT TELL"
+                                                      elsif By_Reading then "HELD - it came with my hand"
+                                                      else "NOT HELD - it did not come with my hand"));
                         Did_Grip := S ("I closed grip " & Codec.Img (A + 1) & " until the picture stopped changing (" & Codec.Img (Steps_J) & " steps, reading " & Codec.Fmt (Reading, 3) &
                                        ", empty-close reading " & Codec.Fmt (Empty, 3) & "); " & To_String (Note));
                         if By_Reading then
