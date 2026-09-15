@@ -1366,6 +1366,57 @@ begin
              "撤回:1.4 m 的手除以体检的 32.1 倍 = 0.04 m ⇒ 物理上不可能,所以永远不许这么除");
    end;
 
+   --  ===== 碰到:我不动就碰不到(IA 2026-09-15 一推假报) =====
+   declare
+      Deliv_Floor : constant Long_Float := 0.0020;   --  身体自己量到的交付噪声
+      Sat_Still   : constant Long_Float := 0.0000;   --  这一步一根关节都没真动
+      Really_Went : constant Long_Float := 0.0180;
+      Jumped      : constant Long_Float := 0.1500;   --  东西在画面里跳了 0.15 幅(比它自己还宽)
+      Its_Size    : constant Long_Float := 0.0400;
+   begin
+      Check (Jumped > Its_Size,
+             "碰到:东西被撞得挪了自己一个身位 —— 这一半的判据没变,是对的");
+      Check (Sat_Still <= Deliv_Floor,
+             "碰到:我这一步一根关节都没真动 ⇒ 不许宣布碰到(IA 第 1 推假报就是这么来的)");
+      Check (Really_Went > Deliv_Floor,
+             "碰到:我真动了,那一半判据才谈得上成立");
+   end;
+
+   --  ===== 胳膊当尺子:量距离,不是量体温(2026-09-15) =====
+   declare
+      Move_Floor : constant Long_Float := 0.0020;   --  本体位置读数抖动(米)
+      Ran_Floor  : constant Long_Float := 0.0016;   --  跟踪抖动(画幅)
+      Big_Swing  : constant Long_Float := 0.1200;   --  甩出去 12 cm
+      Tiny_Swing : constant Long_Float := 0.0010;   --  只挪了 1 mm
+      Near_Swim  : constant Long_Float := 0.0600;   --  近的东西游 0.06 画幅
+      Far_Swim   : constant Long_Float := 0.0200;   --  远的东西只游 0.02 画幅
+      N_Near, N_Far : Long_Float;
+   begin
+      N_Near := Act.Near_From_Motion (Near_Swim, Big_Swing, Ran_Floor, Move_Floor);
+      N_Far  := Act.Near_From_Motion (Far_Swim,  Big_Swing, Ran_Floor, Move_Floor);
+      Check (N_Near > N_Far,
+             "尺子:同一甩里游得多的那个【更近】—— 这就是前后那一维唯一不靠深度读数的信号");
+      Check (Act.Near_From_Motion (Near_Swim, Tiny_Swing, Ran_Floor, Move_Floor) = 0.0,
+             "尺子:只挪了 1 mm(没过本体读数抖动)⇒ 不出数。三角形太扁的烂数比没有数更坏");
+      Check (Act.Near_From_Motion (Ran_Floor, Big_Swing, Ran_Floor, Move_Floor) = 0.0,
+             "尺子:它根本没游过跟踪抖动 ⇒ 不出数,不许把噪声当视差");
+      --  两个游速一比:焦距、基线、深度尺度全约掉
+      Check (Act.Farther_By (N_Near, N_Far) > 1.0,
+             "尺子:我游得比它快 ⇒ 它比我远,倍数 > 1");
+      Check (Act.Farther_By (N_Far, N_Near) < 1.0,
+             "尺子:我游得比它慢 ⇒ 它比我近,倍数 < 1");
+      Check (Act.Farther_By (N_Near, N_Near) = 1.0,
+             "尺子:游得一样快 = 同一个远近 —— 抓的时候要的就是这一条,而它不需要任何常数");
+      Check (Act.Farther_By (N_Near, 0.0) = 0.0 and then Act.Farther_By (0.0, N_Far) = 0.0,
+             "尺子:有一个没游够 ⇒ 说不准(返回 0),不许假装等于 1 —— 假装等于 1 就是假装抓得到");
+      --  🔴 两种退化:相机长在我推的那条胳膊上 / 相机根本不动。两种都让一边恒为零。
+      Check (Act.Farther_By (0.0, N_Near) = 0.0,
+             "尺子:相机长在我推的这条胳膊上 ⇒ 我恒不游 ⇒ 这只眼睛量不了远近,必须换一只");
+      --  🔴 温度计 ≠ 尺子:体检那个倍数量的是【我的距离感坏了多少】,它不产生任何距离。
+      Check (Act.Depth_Scale_Bad (-32.1) and then Act.Farther_By (N_Near, N_Far) > 0.0,
+             "温度计 ≠ 尺子:体检只说'我的距离感放大了 32 倍',量距离得靠胳膊游出来的那两个数");
+   end;
+
    Put_Line ((if Fails = 0 then "🟢 自检全过" else "🔴 自检失败" & Natural'Image (Fails) & " 条"));
    if Fails > 0 then
       raise Program_Error;

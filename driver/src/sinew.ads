@@ -37,7 +37,11 @@ package Sinew is
    --    Ey_Still  = 我这一块一动,画面变得【最少】的那只 —— 它不长在我身上,所以能看见我在平移
    --    Ey_Moving = 变得【最多】的那只 —— 它长在我这一块上,离得近、看得清,但看不见自己平移
    --  只有一只眼、身上又分不出零件的机体(无人机):Ey_Still 不存在,身体照实说。
-   type Eye_Pick is (Ey_None, Ey_Still, Ey_Moving);
+   --  🔴 Ey_Ranging(2026-09-15 加):量距离专用的那只眼。
+   --  前后这一维唯一不需要常数的判据是"它和我,谁在这只眼里游得快" —— 而这要求这只眼
+   --  【长在我没在动的那个部件上】:长在我正推的部件上 ⇒ 我恒不游;完全不动 ⇒ 世界恒不游。
+   --  两种退化都让比值失效,所以测距必须单独有一只眼。
+   type Eye_Pick is (Ey_None, Ey_Still, Ey_Moving, Ey_Ranging);
 
    type Step is (Sp_None, Sp_Small, Sp_Medium, Sp_Large);
    type Effort is (Ef_None, Ef_Light, Ef_Firm, Ef_Hard);

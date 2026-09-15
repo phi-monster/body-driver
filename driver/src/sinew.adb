@@ -204,7 +204,7 @@ package body Sinew is
         "<program>   ::= <line>+" & ASCII.LF &
         "<line>      ::= <interval> | <control> | <decl> | <word>" & ASCII.LF &
         "<interval>  ::= do <constraint> (and <constraint>)* until <outcome> [or <n> steps] [anyway] [<eye>]" & ASCII.LF &
-        "<eye>       ::= with my still eye | with my moving eye" & ASCII.LF &
+        "<eye>       ::= with my still eye | with my moving eye | with my ranging eye" & ASCII.LF &
         "<constraint>::= <who> <relation> <what> [<step>] [must]" & ASCII.LF &
         "              | <who> press <what> <effort> [must]      (that axis says effort, NOT where to go)" & ASCII.LF &
         "              | <who> close <what> | <who> open | <who> still" & ASCII.LF &
@@ -225,7 +225,12 @@ package body Sinew is
         "with my still eye = judge this stretch with the eye that changes LEAST when the part I am moving moves"
         & " - that eye does not ride on me, so it can see me travel. with my moving eye = the one that changes MOST"
         & " - it rides on the part I am moving, so it sees the target close up but cannot see itself travel."
-        & " Say neither and I pick for myself.";
+        & " with my ranging eye = the eye that rides on a part I am NOT moving in this stretch. That is the only eye"
+        & " that can tell me WHICH OF US IS NEARER: when that eye swims past the world, a near thing sweeps across it"
+        & " faster than a far thing, so I can compare how fast you swim against how fast I swim, and the answer needs"
+        & " no ruler, no focal length and no depth reading - equal speed means equal distance. Ask for it when the"
+        & " thing is lined up in the picture but you do not know whether I am short of it or past it."
+        & " Say no eye at all and I pick for myself.";
    end Grammar;
 
    Max_Words : constant := 64;
@@ -683,16 +688,18 @@ package body Sinew is
                --  moving = 变得最多的那只(长在我这一块上 ⇒ 离得近看得清,但看不见自己平移)。
                elsif Lw (K) = "with" then
                   if K + 3 <= N and then Lw (K + 1) = "my" and then Lw (K + 3) = "eye"
-                    and then (Lw (K + 2) = "still" or else Lw (K + 2) = "moving")
+                    and then (Lw (K + 2) = "still" or else Lw (K + 2) = "moving"
+                              or else Lw (K + 2) = "ranging")
                   then
-                     I.Eye := (if Lw (K + 2) = "still" then Ey_Still else Ey_Moving);
+                     I.Eye := (if Lw (K + 2) = "still" then Ey_Still
+                               elsif Lw (K + 2) = "ranging" then Ey_Ranging else Ey_Moving);
                      K := K + 4;
                   else
-                     Fail ("写成「with my still eye」或「with my moving eye」", Line_No);
+                     Fail ("写成「with my still eye」/「with my moving eye」/「with my ranging eye」", Line_No);
                      return;
                   end if;
                else
-                  Fail ("「" & To_String (W (K)) & "」我不认得。这一位上能放的是:until / or <几> steps / anyway / with my still eye / with my moving eye", Line_No);
+                  Fail ("「" & To_String (W (K)) & "」我不认得。这一位上能放的是:until / or <几> steps / anyway / with my still eye / with my moving eye / with my ranging eye", Line_No);
                   return;
                end if;
             end loop;
