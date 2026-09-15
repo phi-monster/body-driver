@@ -235,7 +235,12 @@ package body Act is
    --  走近一段再拨同样的一下 ⇒ 米数。滑得没比上次多(没过跟踪抖动)= 这一段没走近 ⇒ 说不准。
    function Distance_Now (Travelled, Swim_Then, Swim_Now, Floor : Long_Float) return Long_Float is
      (if Travelled > 0.0 and then Swim_Then > 0.0 and then Swim_Now - Swim_Then > Floor
+        and then Travelled * Swim_Then / (Swim_Now - Swim_Then) >= Travelled
       then Travelled * Swim_Then / (Swim_Now - Swim_Then) else 0.0);
+
+   --  走这么远最远分辨得到多远:滑速变化要过跟踪抖动 ⇒ 走 D 能分辨到 滑速 × D ÷ 抖动
+   function Can_Tell_Upto (Swim_Now, Travelled, Floor : Long_Float) return Long_Float is
+     (if Floor > 0.0 then Swim_Now * Travelled / Floor else 0.0);
 
    function Depth_Ok (Zd, Old_Z, Pred_Z, Noise, Last_Rejected : Long_Float) return Boolean is
      (Old_Z <= 0.0
@@ -867,6 +872,10 @@ package body Act is
       Near_N : Natural := 0;      --  量过几次(一次不算稳,两次以上才谈得上重复)
       --  🔴 它离我多少米 —— 全靠我自己走出来的,不碰深度图。0 = 还没量出来。
       Dist : Long_Float := 0.0;
+      --  🔴🔴 我【没走】的时候,同一下拨动量出来的滑速自己会晃多少(IJ 2026-09-15 量出来的真地板)。
+      --  IJ 实测:两次只隔 2 mm,滑速却差了 40% —— 那不是"走近了",是这一拨落点不一样。
+      --  拿跟踪抖动当地板挡不住它(小了两个数量级);真正的地板只能是【原地重量一遍它自己晃多少】。
+      Near_Jit : Long_Float := 0.0;
       Err0 : Long_Float := 0.0;
       Lost : Boolean := False;   --  这一步没在画面里认出它,位置是按表猜的
       Has_Meas : Boolean := False;              --  眼睛(光流)另外量到的位置,只用来修表
@@ -3321,18 +3330,32 @@ package body Act is
                   S_Now := Near_From_Motion (Ran, Moved, Fl.Track, C.Map.EE_Noise);
                   Append (Said, (if Length (Said) > 0 then " · " else "")
                           & To_String (Q.Desc) & " 滑了 " & Codec.Fmt (Ran, 4) & " 幅");
+                  --  🔴 没走多远(还不到我自己拨一下挪的那么远)⇒ 这一次只用来【量滑速自己晃多少】
                   if Probe_Have and then Comparable and then Q.Near > 0.0 and then S_Now > 0.0
+                    and then Trav <= Probe_Len
+                  then
+                     Q.Near_Jit := Long_Float'Max (Q.Near_Jit, abs (S_Now - Q.Near));
+                  elsif Probe_Have and then Comparable and then Q.Near > 0.0 and then S_Now > 0.0
                     and then Trav > C.Map.EE_Noise
                   then
                      declare
                         --  🔴 门槛的单位必须跟滑速一样是"幅每米":跟踪抖动(幅)÷ 这一拨挪了多少米。
                         --  直接拿"幅"当门槛,门槛就小了三个数量级,噪声会当场变成一个距离(IC 实测 0.014 m)。
                         Zd : constant Long_Float :=
-                          Distance_Now (Trav, Q.Near, S_Now, Long_Float (Fl.Track) / Moved);
+                          Distance_Now (Trav, Q.Near, S_Now,
+                                        Long_Float'Max (Long_Float (Fl.Track) / Moved, Q.Near_Jit));
+                        Lim : Long_Float;
                      begin
-                        if Zd > 0.0 then
+                        Lim := Can_Tell_Upto (S_Now, Trav,
+                                              Long_Float'Max (Long_Float (Fl.Track) / Moved, Q.Near_Jit));
+                        if Zd > 0.0 and then Zd < Lim then
                            Q.Dist := Zd;
                            Append (Said, " ⇒ 离我 " & Codec.Fmt (Zd, 3) & " m");
+                        elsif Lim > 0.0 then
+                           --  \U0001f534 走得太短就只给【下界】,不给一个编出来的数
+                           Q.Dist := 0.0;
+                           Append (Said, " ⇒ 只能说它比 " & Codec.Fmt (Lim, 3)
+                                   & " m 远(这一段我才走了 " & Codec.Fmt (Trav, 3) & " m,再远就分辨不出来了)");
                         else
                            Q.Dist := 0.0;
                            Append (Said, " ⇒ 说不准(这一段我没真的走近它)");

@@ -1470,6 +1470,37 @@ begin
              "碰到:所以第三条旁证是【它得贴着我】—— 尺子是我自己那块有多大,量出来的");
    end;
 
+   --  ===== 算出来的距离不许比刚走过的路还短 · 走得短就只给下界(IJ 2026-09-15:报出 0.000 m) =====
+   declare
+      Floor : constant Long_Float := 0.0016;   --  跟踪抖动(幅)
+      Nudge : constant Long_Float := 0.0013;   --  IJ 实测一拨挪多少米
+      S1 : constant Long_Float := 0.2621 / Nudge;   --  IJ 实测的两次滑速(幅每米)
+      S2 : constant Long_Float := 0.3684 / Nudge;
+      Short : constant Long_Float := 0.0020;   --  IJ 实测两次量之间只走了 2 mm
+      Long_Walk : constant Long_Float := 0.1500;
+      Jit : constant Long_Float := (S2 - S1) * 1.0;   --  原地重量时滑速自己晃这么多(IJ 实测的量级)
+      Zs, Zl, Lim : Long_Float;
+   begin
+      --  \U0001f534 IJ 实测:两次只隔 2 mm,滑速却差了 40% —— 拿跟踪抖动当地板,这个差轻松过关
+      Zs := Act.Distance_Now (Short, S1, S2, Floor / Nudge);
+      Check (Zs > 0.0,
+             "地板:拿【跟踪抖动】当地板时,IJ 那两个滑速的差轻松过关 ⇒ 于是编出一个几毫米的距离");
+      --  而身体【原地】重量一遍时,滑速自己就晃这么多 ⇒ 这才是真地板
+      Check (Act.Distance_Now (Short, S1, S2, Jit) = 0.0,
+             "地板:用身体【原地量出来的滑速自晃】当地板 ⇒ 同一组数当场判成'没真走近',不给数");
+      Check (Jit > Floor / Nudge,
+             "地板:原地自晃比跟踪抖动大得多 —— 小的那个挡不住任何东西,这就是它一直放行的原因");
+      Zl := Act.Distance_Now (Long_Walk, S1, S2, Floor / Nudge);
+      Check (Zl > Long_Walk,
+             "距离:同样两个滑速,走够长才给得出一个【比走过的路还远】的数,那才可能是真的");
+      --  走多短就只分辨得到多近:滑速 × 走了多远 ÷ 跟踪抖动
+      Lim := Act.Can_Tell_Upto (S2, Short, Floor);
+      Check (Lim > 0.0,
+             "下界:走这么远最远分辨得到多远,是算得出来的 —— 超过它就只说'它比这个远'");
+      Check (Act.Can_Tell_Upto (S2, Long_Walk, Floor) > Lim,
+             "下界:走得越远,分辨得到的越远 —— 所以'走了多远'才是这件事的尺子");
+   end;
+
    --  ===== 只有【长在我身上】的眼睛量得了别人的远近(IF 2026-09-15:一甩把球撞飞) =====
    declare
       Track : constant Long_Float := 0.0016;
