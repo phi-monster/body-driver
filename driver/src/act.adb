@@ -3401,13 +3401,17 @@ package body Act is
                   S_Now := Near_From_Motion (Ran, Moved, Fl.Track, C.Map.EE_Noise);
                   Append (Said, (if Length (Said) > 0 then " · " else "")
                           & To_String (Q.Desc) & " 滑了 " & Codec.Fmt (Ran, 4) & " 幅");
-                  --  🔴 没走多远(还不到我自己拨一下挪的那么远)⇒ 这一次只用来【量滑速自己晃多少】
+                  --  🔴🔴 走得还不到【我已经知道的那个下界】⇒ 这一段根本不可能分辨出它有多远,
+                  --  这一次只拿来量【滑速自己晃多少】,不出距离(IP 2026-09-15 实测:
+                  --  只走 2 mm 就敢报"离我 0.002 m",而球在三十厘米外)。
+                  --  尺度不是我拍的:上一次量出来的下界就是"至少要走这么远才谈得上分辨"。
+                  --  还没有下界时退回"拨一下挪多远",和以前一样。
                   if Probe_Have and then Comparable and then Q.Near > 0.0 and then S_Now > 0.0
-                    and then Trav <= Probe_Len
+                    and then Trav <= Long_Float'Max (Probe_Len, Q.Dist)
                   then
                      Q.Near_Jit := Long_Float'Max (Q.Near_Jit, abs (S_Now - Q.Near));
                   elsif Probe_Have and then Comparable and then Q.Near > 0.0 and then S_Now > 0.0
-                    and then Trav > C.Map.EE_Noise
+                    and then Trav > Long_Float'Max (C.Map.EE_Noise, Long_Float'Max (Probe_Len, Q.Dist))
                   then
                      declare
                         --  🔴 门槛的单位必须跟滑速一样是"幅每米":跟踪抖动(幅)÷ 这一拨挪了多少米。

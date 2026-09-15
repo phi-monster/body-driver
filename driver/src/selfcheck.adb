@@ -1414,6 +1414,21 @@ begin
              "温度计 ≠ 尺子:体检只说'我的距离感放大了 32 倍',量距离得靠胳膊滑出来的那两个数");
    end;
 
+   --  ===== 走得还不到已知的下界,就不许再报距离(IP 2026-09-15:走 2 mm 报"离我 0.002 m") =====
+   declare
+      Bound   : constant Long_Float := 0.0500;   --  上一次量出来的下界:它至少有这么远
+      Went_S  : constant Long_Float := 0.0020;   --  IP 实测:两次之间只走了 2 mm
+      Went_OK : constant Long_Float := 0.0600;
+      Nudge   : constant Long_Float := 0.0012;
+   begin
+      Check (Went_S <= Long_Float'Max (Nudge, Bound),
+             "IP:只走 2 mm、而已知下界是 5 cm ⇒ 这一段根本分辨不出它有多远,不许报距离");
+      Check (Went_OK > Long_Float'Max (Nudge, Bound),
+             "IP:走过了已知的下界才谈得上再量一次 —— 尺度是它自己上一次量出来的,不是我拍的");
+      Check (Bound > Went_S,
+             "IP:报出来的 0.002 m 比自己上一次的下界还小两个数量级 —— 自相矛盾,本该当场拦住");
+   end;
+
    --  ===== 换算表没量到 ⇒ 米那一行【静悄悄失效】(IO 2026-09-15:差距五步纹丝不动) =====
    declare
       Gap_M : constant Long_Float := 0.7190;   --  IO 实测:前后差这么多米,五步一点没缩
