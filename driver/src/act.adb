@@ -3288,6 +3288,18 @@ package body Act is
                   Pts.Replace_Element (I, Q);
                end;
             end loop;
+            --  🔴 一推走几米:这一拨【只推了一根通道】,归因最干净 —— 当场记下来。
+            --  放在循环里(而不是函数末尾),是因为函数有好几条提前返回的路,
+            --  记在末尾就会整段漏掉 ⇒ 换算表永远是 0 ⇒ 米那一行永远是死的(IQ 实测喊了 8 次)。
+            declare
+               Ch_No : constant Natural := Arm * Chan.Per_Arm + Natural (Best_K);
+            begin
+               if Best_Amp > 0.0 and then Moved > 0.0
+                 and then Ch_No < Natural (C.Reach_M.Length)
+               then
+                  C.Reach_M.Replace_Element (Ch_No, Moved / Best_Amp);
+               end if;
+            end;
             Tries := Tries + 1;
             exit when Reuse;   --  原样重用那一拨:量一次就走,不再加大
             --  🔴🔴 拨到【我还跟得住的最大那一档】,不是拨到"刚过地板"就停(ID 2026-09-15 实测)。
@@ -3416,9 +3428,15 @@ package body Act is
                      declare
                         --  🔴 门槛的单位必须跟滑速一样是"幅每米":跟踪抖动(幅)÷ 这一拨挪了多少米。
                         --  直接拿"幅"当门槛,门槛就小了三个数量级,噪声会当场变成一个距离(IC 实测 0.014 m)。
+                        --  🔴🔴 【第一次】只许给下界,不许给准数(IQ 2026-09-15 实测:
+                        --  第一次量、走了 1 mm 就报"离我 0.001 m",而球在三十厘米外)。
+                        --  道理:下界只要这一次的滑速就算得出来;准数要拿【两次】比,
+                        --  而第一次根本没有可比的那一次 —— 手上没有尺度,就不许报尺度。
+                        --  有过一次下界之后,那个下界本身就是"至少要走这么远才谈得上再量"的尺度。
                         Zd : constant Long_Float :=
-                          Distance_Now (Trav, Q.Near, S_Now,
-                                        Long_Float'Max (Long_Float (Fl.Track) / Moved, Q.Near_Jit));
+                          (if Q.Dist <= 0.0 then 0.0
+                           else Distance_Now (Trav, Q.Near, S_Now,
+                                              Long_Float'Max (Long_Float (Fl.Track) / Moved, Q.Near_Jit)));
                         Lim : Long_Float;
                      begin
                         Lim := Can_Tell_Upto (S_Now, Trav,

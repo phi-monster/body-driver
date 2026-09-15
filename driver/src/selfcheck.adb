@@ -1414,6 +1414,30 @@ begin
              "温度计 ≠ 尺子:体检只说'我的距离感放大了 32 倍',量距离得靠胳膊滑出来的那两个数");
    end;
 
+   --  ===== 第一次只许给下界,不许给准数(IQ 2026-09-15:第一次量就报"离我 0.001 m") =====
+   declare
+      No_Ref : constant Long_Float := 0.0000;   --  第一次量:手上没有可比的那一次
+      Ref    : constant Long_Float := 0.0730;   --  量过一次之后手上的下界
+      Went   : constant Long_Float := 0.0010;   --  IQ 实测第一次只走了 1 mm
+   begin
+      Check (No_Ref <= 0.0,
+             "IQ:第一次量的时候手上没有【可比的那一次】—— 准数要拿两次比,下界只要这一次");
+      Check (Went < Ref,
+             "IQ:它却在只走了 1 mm 的第一次就报出准数,而同一行的下界是 7.3 cm —— 自相矛盾");
+      Check (Ref > No_Ref,
+             "IQ:有过一次下界之后,那个下界本身就是'至少要走这么远才谈得上再量'的尺度");
+   end;
+
+   --  ===== 换算表要记在【循环里】,不能记在函数末尾(IQ:提前返回 ⇒ 整段漏掉) =====
+   declare
+      Early_Returns : constant Natural := 4;   --  Range_Probe 里提前返回的路数
+   begin
+      Check (Early_Returns > 0,
+             "IQ:量距离那个函数有好几条提前返回的路(眼睛不对/拨不动/太扁/挪不够)");
+      Check (Early_Returns > 1,
+             "IQ:把'一推走几米'记在函数末尾 ⇒ 走上任何一条就整段漏掉 ⇒ 换算表永远是 0,米那一行永远是死的");
+   end;
+
    --  ===== 走得还不到已知的下界,就不许再报距离(IP 2026-09-15:走 2 mm 报"离我 0.002 m") =====
    declare
       Bound   : constant Long_Float := 0.0500;   --  上一次量出来的下界:它至少有这么远
