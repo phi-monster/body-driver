@@ -2126,7 +2126,19 @@ package body Act is
                      for K in 0 .. Chan.Per_Arm - 1 loop
                         declare
                            Ch_No : constant Natural := Arm * Chan.Per_Arm + K;
-                           Am : constant Long_Float := Long_Float'Max (1.0e-9, C.Map.Amp (Ch_No));
+                           --  🔴🔴 "一推能改多少"必须用【这一段真发得出的那一推】,
+                           --  不是开机量到的那一档(IX 2026-09-15 实测两边差四十倍):
+                           --  开机那一档 0.0256 在腕眼里能扫 4 个画幅,而实际发出的命令是 0.003
+                           --  (被"眼睛一步跟得住多少"的天花板压着),只扫 0.1 个画幅。
+                           --  于是真实误差 0.26 画幅(四分之一张画面)被算成"不到一步",
+                           --  身体认定自己差不到一根头发丝,只发极小命令一步步蹭,差距九步不动。
+                           --  天花板是量出来的:跟踪窗 ÷ 这根通道每单位命令把画面搅动多少。
+                           Px_K : constant Long_Float :=
+                             Sqrt (T.E.B (K, 0) ** 2 + T.E.B (K, 1) ** 2);
+                           Am : constant Long_Float :=
+                             Long_Float'Min (Long_Float'Max (1.0e-9, C.Map.Amp (Ch_No)),
+                                             (if Px_K > 0.0 then Track_Win / Px_K
+                                              else Long_Float'Max (1.0e-9, C.Map.Amp (Ch_No))));
                         begin
                            --  🔴 这一行是【米】的时候,一步能改多少也得是米:一推手在世界里走几米。
                            --  拿画面单位的斜率去除米,等于把两把不同的尺子相除 —— 那才是真的乱来。

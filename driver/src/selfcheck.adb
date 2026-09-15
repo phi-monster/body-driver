@@ -1414,6 +1414,27 @@ begin
              "温度计 ≠ 尺子:体检只说'我的距离感放大了 32 倍',量距离得靠胳膊滑出来的那两个数");
    end;
 
+   --  ===== "一推能改多少"要用【真发得出的那一推】(IX 2026-09-15:两边差四十倍) =====
+   declare
+      Track_Win : constant Long_Float := 0.1000;   --  眼睛一步跟得住多少画幅(量出来的)
+      Px        : constant Long_Float := 156.0000; --  IX 实测:这根通道每单位命令把画面搅动多少
+      Boot_Amp  : constant Long_Float := 0.0256;   --  开机量到的那一档
+      Err_V     : constant Long_Float := 0.2600;   --  IX 实测:上下真的还差四分之一张画面
+      Can_Push, Step_Boot, Step_Real : Long_Float;
+   begin
+      Can_Push := Track_Win / Px;                  --  眼睛跟得住的那一推
+      Check (Boot_Amp > Can_Push,
+             "IX:开机那一档比【眼睛一步跟得住的】大得多 —— 腕眼里它能扫四个画幅");
+      Step_Boot := Err_V / (Px * Boot_Amp);
+      Step_Real := Err_V / (Px * Can_Push);
+      Check (Step_Boot < 1.0,
+             "IX:按开机那一档算 ⇒ 0.26 画幅被算成'不到一步' ⇒ 只发极小命令一步步蹭");
+      Check (Step_Real > 1.0,
+             "IX:按真发得出的那一推算 ⇒ 还差两步多,解算才会认真走");
+      Check (Step_Real > Step_Boot,
+             "IX:同一个误差,分母用哪一推给出【相反】的结论 ⇒ 估计必须和实际发出的那一推一致");
+   end;
+
    --  ===== 腕眼里"抬手"和"仰镜头"画面一样,标价也一样 ⇒ 总买转腕(IW 一炮里连着两次仰到墙上) =====
    declare
       Track_Win : constant Long_Float := 0.1000;
