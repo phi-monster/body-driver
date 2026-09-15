@@ -2142,6 +2142,15 @@ package body Act is
                            end if;
                         end;
                      end loop;
+                     --  🔴 米那一行没有换算(一推走几米还没量到)⇒ 这一行【静悄悄地失效】,
+                     --  解算照跑、日志全绿、差距一步不动(IO 实测五步 0.719→0.719)。喊出来。
+                     if R = 2 and then In_Metres (I) and then Per_Step <= 0.0 then
+                        C.Blind_Say := S ("I measured how far that thing is with my own arm, but I have not yet "
+                                          & "measured how far my hand travels per push, so I cannot turn those metres "
+                                          & "into pushes - that row is doing nothing and I am telling you instead of "
+                                          & "quietly going nowhere.");
+                        Put_Line ("[身]     📏 米那一行没换算(还没量到一推走几米)⇒ 这一行是死的");
+                     end if;
                      if Per_Step > 0.0 then
                         T.Err (R) := T.Err (R) / Per_Step;
                         --  🔴 "还差几步"不许超过"我这一节总共有几步"。
@@ -3462,6 +3471,19 @@ package body Act is
          begin
             A (Natural (Best_K)) := -Best_Amp;
             Step_Arm (L, C, F, Arm, A, Jaw, Got, Ok_W, C.Fast);
+         end;
+         --  🔴🔴 顺手把【一推走几米】记下来:这一拨只推了一根通道,归因最干净。
+         --  IO 2026-09-15 实测非记不可:这个换算原来只在探针里量,而身体一旦【装回存好的表】
+         --  探针就不跑 ⇒ 换算表全是 0 ⇒ 尺子量出来的米进了解算也是死的,
+         --  差距五步纹丝不动(0.719 / 0.731 / 0.729 / 0.724 / 0.719)而日志全绿。
+         declare
+            Ch_No : constant Natural := Arm * Chan.Per_Arm + Natural (Best_K);
+         begin
+            if Best_Amp > 0.0 and then Moved > 0.0
+              and then Ch_No < Natural (C.Reach_M.Length)
+            then
+               C.Reach_M.Replace_Element (Ch_No, Moved / Best_Amp);
+            end if;
          end;
          Probe_K := Best_K; Probe_Amp := Best_Amp;
          if not Probe_Have or else Moved_Ref or else not Comparable then

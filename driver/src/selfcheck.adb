@@ -1414,6 +1414,20 @@ begin
              "温度计 ≠ 尺子:体检只说'我的距离感放大了 32 倍',量距离得靠胳膊滑出来的那两个数");
    end;
 
+   --  ===== 换算表没量到 ⇒ 米那一行【静悄悄失效】(IO 2026-09-15:差距五步纹丝不动) =====
+   declare
+      Gap_M : constant Long_Float := 0.7190;   --  IO 实测:前后差这么多米,五步一点没缩
+      No_Conv : constant Long_Float := 0.0000; --  一推走几米:还没量到
+      Conv    : constant Long_Float := 0.0200;
+   begin
+      Check (No_Conv <= 0.0,
+             "IO:身体装回了存好的表 ⇒ 探针不跑 ⇒ '一推走几米'从来没量到过");
+      Check (Gap_M / Long_Float'Max (Conv, 1.0e-9) > 1.0,
+             "IO:有换算时,0.719 m 换出三十几步,解算才推得动");
+      Check (not (No_Conv > 0.0),
+             "IO:没换算时这一行【什么都不做】,而解算照跑、日志全绿 —— 所以必须喊出来,不许静悄悄失效");
+   end;
+
    --  ===== 尺子量出来的米,要接进解算(IM 2026-09-15:横向 2 mm、前后 0.535 m,却说"还差 0.0 步") =====
    declare
       Gap_M    : constant Long_Float := 0.5350;   --  IM 实测:前后还差这么多米
