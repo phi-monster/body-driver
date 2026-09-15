@@ -232,10 +232,10 @@ package body Act is
    --  两拨是不是【同一下】:世界里的方向要一样。容差 = 方向本身的不确定度(读数抖动 ÷ 挪了多远)。
    function Same_Nudge (Dot, Len_A, Len_B, Slid, Floor : Long_Float) return Boolean is
      (Len_A > 0.0 and then Len_B > 0.0 and then Slid > 0.0
-      --  方向要一样
-      and then Dot / (Len_A * Len_B) >= 1.0 - Floor / Slid
-      --  幅度也要一样:差得看得出来就不是同一下了
-      and then abs (Len_A - Len_B) / Long_Float'Max (Len_A, Len_B) <= Floor / Slid);
+      --  方向要一样。幅度不必一样 —— 除以各自的实到之后它本来就抵消了,
+      --  硬拿方向那条容差(0.3%)去卡幅度 ⇒ 真实推送几个百分点的波动就被判成"不是同一下",
+      --  这道闸当场变成永不放行(IN 2026-09-15 实测:方向一致度 0.999 也被拦)。
+      and then Dot / (Len_A * Len_B) >= 1.0 - Floor / Slid);
 
    --  走近一段再拨同样的一下 ⇒ 米数。滑得没比上次多(没过跟踪抖动)= 这一段没走近 ⇒ 说不准。
    function Distance_Now (Travelled, Swim_Then, Swim_Now, Floor : Long_Float) return Long_Float is
@@ -3168,6 +3168,7 @@ package body Act is
          Tries : Natural := 0;
          Swims : Boolean := False;
          Moved_Ref : Boolean := False;   --  这一次真出了米数 ⇒ 参照才换到这儿
+         Reuse : Boolean := False;       --  这一段已经挑好拨法了 ⇒ 原样重用,不再加大
          Dir : Xyz := [others => 0.0];
          Dot : Long_Float := 0.0;
          Comparable : Boolean := False;
@@ -3207,8 +3208,13 @@ package body Act is
             return;
          end if;
          --  ② 拨哪一下:第一次量什么就一直用它,同一下拨两遍,横向那一份才会在相除时约掉
+         --  🔴🔴 一段里【只挑一次拨法】,之后原样重用,不许再加大(IK 2026-09-15 的真凶)。
+         --  IK 实测:同一段里参照那一拨挪 0.0033 m、后一拨只挪 0.0004 m —— 差八倍。
+         --  差的来源不是物理,是我自己每次都重跑一遍"一路拨大"的escalation。
+         --  同一下拨两遍,"同一下"首先得是【同一个命令】。
          if Probe_Have then
             Best_K := Probe_K; Best_Amp := Probe_Amp;
+            Reuse := True;
          else
             for K in 0 .. Chan.Per_Arm - 1 loop
                declare
@@ -3274,6 +3280,7 @@ package body Act is
                end;
             end loop;
             Tries := Tries + 1;
+            exit when Reuse;   --  原样重用那一拨:量一次就走,不再加大
             --  🔴🔴 拨到【我还跟得住的最大那一档】,不是拨到"刚过地板"就停(ID 2026-09-15 实测)。
             --  刚过地板 = 滑动只有地板的两倍,而我要比的是【两次滑动之差】——
             --  差是滑动的一小部分,所以滑动必须【远大于】地板,差才有可能过噪声。

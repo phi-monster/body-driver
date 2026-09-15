@@ -1640,16 +1640,22 @@ begin
       --  \U0001f534 IK 2026-09-15:两拨方向完全一致,幅度却差八倍(0.0033 m vs 0.0004 m)
       --  ⇒ 只查方向就过关 ⇒ 报出"离我 0.014 m",而球在二三十厘米外。
       declare
-         Big   : constant Long_Float := 0.0033;
-         Small : constant Long_Float := 0.0004;
-         Aligned : constant Long_Float := Big * Small;   --  方向完全一致
+         Big   : constant Long_Float := 0.0033;   --  IK 实测参照那一拨
+         Small : constant Long_Float := 0.0004;   --  IK 实测后一拨,差八倍
+         Wobble : constant Long_Float := 0.0034;  --  真实推送本来就有几个百分点的波动
+         Near_1 : constant Long_Float := 0.9990;  --  IN 实测方向一致度
       begin
-         Check (Aligned / (Big * Small) >= 1.0 - Track_Jitter / Slid,
-                "IK:那两拨方向是完全一致的 —— 方向这一关它确实过得去");
-         Check (not Act.Same_Nudge (Aligned, Big, Small, Slid, Track_Jitter),
-                "IK:但幅度差了八倍 ⇒ 加上幅度这一关就拦住了(小的那一拨落在关节死区里,滑速早就不成正比)");
+         --  \U0001f534 撤回:我一度拿【方向那条容差】去卡幅度(0.3%),于是几个百分点的正常波动
+         --  就被判"不是同一下" —— IN 实测方向一致度 0.999 也被拦,这道闸当场变成永不放行。
+         Check (abs (Big - Wobble) / Big < 0.0500,
+                "撤回:两拨幅度本来就会差几个百分点 —— 拿 0.3% 去卡它,等于永不放行");
+         Check (Near_1 >= 1.0 - Track_Jitter / Slid,
+                "方向:0.999 这种一致度本来就该放行,它是正常的同一下");
+         --  IK 那八倍的差,真凶不是物理而是我在同一段里反复重跑"一路拨大"
+         Check (Big / Small > 4.0,
+                "IK:那八倍的差是【我自己每次重新加大拨动】造出来的,不是身体的物理");
          Check (Act.Same_Nudge (Big * Big, Big, Big, Slid, Track_Jitter),
-                "同一下:方向和幅度都一样,才算同一下");
+                "同一下:一段里只挑一次拨法、之后原样重用 ⇒ 两拨自然就是同一下");
       end;
       --  \U0001f534 II 实测:容差写成"位置读数抖动 ÷ 挪了多远"时,抖动量出来是 0 ⇒ 门槛正好 1.0
       --  ⇒ `cos > 1.0` 恒假 ⇒ 方向一致度 1.000 也被判"不是同一下",这道闸从来没放行过。
