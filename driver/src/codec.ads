@@ -16,4 +16,8 @@ package Codec is
    function Pad6 (N : Natural) return String;
    function Env (Name : String) return String;       --  没有就 ""
    function Env_Nat (Name : String; Default : Natural) return Natural;
+   --  🔴 经历账:身体干过什么、成没成,跨炮留着。一行一条,纯文本 —— 零依赖,坏一行不毁整份
+   --  (身体文件里一个 NaN 就让整份读不回来,那个坑记在 LAB 里,这里不许重犯)。
+   procedure Append_Line (Path : String; Line : String);
+   function Tail_Lines (Path : String; N : Natural) return String;
 end Codec;

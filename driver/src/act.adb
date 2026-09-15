@@ -187,6 +187,18 @@ package body Act is
    function Into_Depth (Skin, Surface : Long_Float) return Long_Float is
      ((Skin + Surface) / 2.0);
 
+   --  🔴 经历账放哪:和身体文件同一个地方,跨炮留着。永远只追加,不许清。
+   function Life_Path return String is
+     (if Codec.Env ("BL_LIFE") /= "" then Codec.Env ("BL_LIFE") else "/root/经历.txt");
+
+   --  同一根通道只记一次"我变了",免得同一句话刷满整段话
+   function Cn_Changed (C : Context; Cn : Natural) return Boolean is
+     (Index (C.Changed_Say, "channel " & Codec.Img (Cn) & " used to move") = 0);
+
+   --  1.0 不是系数:它是"沿着相机看的方向走一米,远近最多变一米"这条几何事实本身
+   function Depth_Scale_Bad (Depth_Per_Metre : Long_Float) return Boolean is
+     (abs Depth_Per_Metre > 1.0);
+
    function Depth_Ok (Zd, Old_Z, Pred_Z, Noise, Last_Rejected : Long_Float) return Boolean is
      (Old_Z <= 0.0
       --  连着两次被拒、而两次读数互相吻合 ⇒ 新值是可重复的,旧基准才是陈的 ⇒ 收
@@ -523,8 +535,79 @@ package body Act is
             end if;
          end;
       end if;
-      --  Things_Only:条带里的相机不再重列一遍我自己的零件(主图已经列过),只列世界里的东西
+      --  🔴🔴 自述那一条通道(owner 2026-09-15 定;架构 2026-08-18 已为它留位):
+      --  命令那条通道一个字不提身体 ⇒ 换一具机器照样能用,那是命根子,不许碰。
+      --  这一条【必然提到身体】—— "我这根通道""我的手""我上次" —— 所以单独一段、单独出现。
+      --  它是身体唯一一处可以讲【自己】的地方:我知道什么 · 我不知道什么 · 我变了什么。
+      --  每一句后面都带【我凭什么信它】(量过几次 / 上次第几拍 / 来回对不对得上),
+      --  没有这个,"我很有把握"和"我瞎猜的"在脑那边长得一模一样。
       if not Things_Only then
+         Append (T, ASCII.LF & "ABOUT MYSELF (measured by me, on this body, with how much I trust each line):" & ASCII.LF);
+         declare
+            Said : Natural := 0;
+         begin
+            for I in 0 .. Natural (C.Tables.Length) - 1 loop
+               declare
+                  Se : constant Stored_Effect := C.Tables (I);
+               begin
+                  if Se.Cam = C.Cam and then Se.Kind = Piece_Pt and then Said < 4 then
+                     for K in 0 .. Chan.Per_Arm - 1 loop
+                        if Se.Trust (K) and then Said < 4 then
+                           Append (T, "  I KNOW: push channel " & Codec.Img (Se.Arm * Chan.Per_Arm + K)
+                                   & " by one unit and a piece of me travels "
+                                   & Codec.Fmt (Sqrt (Se.E.B (K, 0) ** 2 + Se.E.B (K, 1) ** 2), 3)
+                                   & " of a frame here - learned " & Codec.Img (Se.N_Learned)
+                                   & " time(s), last confirmed at beat " & Codec.Img (Se.When_Beat)
+                                   & (if Se.Agree (K) < 0.0 then ", never checked out-and-back"
+                                      elsif Se.Agree (K) < 1.0 then ", and out-and-back agree so I am confident"
+                                      else ", but out-and-back DISAGREE so I do not trust it")
+                                   & ASCII.LF);
+                           Said := Said + 1;
+                        end if;
+                     end loop;
+                  end if;
+               end;
+            end loop;
+            if Said = 0 then
+               Append (T, "  I KNOW: nothing yet about how my own pushes move me in this eye - I have not measured it here." & ASCII.LF);
+            end if;
+         end;
+         if C.Depth_Scale > 0.0 then
+            Append (T, "  I DO NOT KNOW HOW FAR: one metre of my own real motion changes my depth reading by "
+                    & Codec.Fmt (C.Depth_Scale, 1) & " metres, and one metre is the most that is physically possible."
+                    & " So my sense of distance is inflated by at least that much. I use it for which way, never for how far."
+                    & ASCII.LF);
+         end if;
+         for A in 0 .. C.Map.Arms - 1 loop
+            for Cm in 0 .. C.Map.N_Cams - 1 loop
+               if Cam_Arm (C, Cm) /= Integer (A) and then Track_Idx (C, A, Cm) < Natural (C.Zones.Length)
+                 and then Cm = C.Cam
+               then
+                  declare
+                     Tr : constant Zone_Track := C.Zones (Track_Idx (C, A, Cm));
+                  begin
+                     Append (T, "  I KNOW WHERE MY OWN HAND IS (arm " & Codec.Img (A + 1) & ") here only "
+                             & (if not Tr.Valid then "not at all"
+                                elsif Tr.Blew_Up then "as a guess that blew up - I refuse it"
+                                elsif Tr.Known then "because I have actually looked at it from a pose close to this one"
+                                else "by working it out from my joints; I have not looked at it from a pose like this")
+                             & ASCII.LF);
+                  end;
+               end if;
+            end loop;
+         end loop;
+         Append (T, To_String (C.Changed_Say));
+         --  🔴 经历账读回来:它才说得出"上次我在这上面是怎么成的"。
+         --  这一段【不是】命令通道的一部分 —— 它提到我自己干过什么,所以只出现在自述这一段里。
+         declare
+            Life : constant String := Codec.Tail_Lines (Life_Path, 6);
+         begin
+            if Life /= "" then
+               Append (T, "  WHAT I HAVE DONE BEFORE (my own log, kept across every run I have ever had):" & ASCII.LF & Life);
+            else
+               Append (T, "  WHAT I HAVE DONE BEFORE: nothing - this is the first stretch I can remember." & ASCII.LF);
+            end if;
+         end;
       Append (T, "PIECES OF YOURSELF (measured just now: you moved one channel at a time and watched which part of the picture followed; you closed each hand on nothing and watched which pixels swept). Each is boxed and NUMBERED on the picture in orange:" & ASCII.LF);
       for A in 0 .. C.Map.Arms - 1 loop
        --  一条臂上量到几个抓握通道就列几组:两指手 1 组,五指手 5 组。代码里没有"一只手一个夹爪"这个假设。
@@ -808,11 +891,28 @@ package body Act is
    end Find_Effect;
 
    procedure Store_Effect (C : in out Context; Arm, Cam : Natural; Kind : Track_Kind; Chan_K : Natural; Blob : Integer; E : Table.Effect; Trust : Table.Mask; Reach : Table.Vec := Unit_Reach;
-                           Pose : Plug.Arm_Pose := [others => 0.0]; Has_Pose : Boolean := False) is
+                           Pose : Plug.Arm_Pose := [others => 0.0]; Has_Pose : Boolean := False;
+                           Beat : Natural := 0; Agree : Table.Vec := [others => -1.0]) is
       I : constant Integer := Find_Effect (C, Arm, Cam, Kind, Chan_K, Blob);
       Old : constant Integer := I;
-      Se : Stored_Effect := (Arm, Cam, Kind, Chan_K, Blob, E, Trust, Reach, Pose, Has_Pose, Held_Now (C, Arm));
+      Se : Stored_Effect := (Arm, Cam, Kind, Chan_K, Blob, E, Trust, Reach, Pose, Has_Pose, Held_Now (C, Arm),
+                             0, Beat, Agree);
    begin
+      --  🔴 自我:每学一次就加一次,并记下是第几拍学的。没有这两格,身体只能说"是这个数",
+      --  说不出"我有多信、什么时候学的"。来回对表的分歧也跟着存,没对过的沿用旧的。
+      if Old >= 0 then
+         Se.N_Learned := C.Tables (Natural (Old)).N_Learned + 1;
+         for K in 0 .. Chan.Per_Arm - 1 loop
+            if Se.Agree (K) < 0.0 then
+               Se.Agree (K) := C.Tables (Natural (Old)).Agree (K);
+            end if;
+         end loop;
+         if Beat = 0 then
+            Se.When_Beat := C.Tables (Natural (Old)).When_Beat;
+         end if;
+      else
+         Se.N_Learned := 1;
+      end if;
       if not Has_Pose and then Old >= 0 then
          Se.Pose := C.Tables (Natural (Old)).Pose;      --  没带位姿的更新:沿用这张表原来量的位姿
          Se.Has_Pose := C.Tables (Natural (Old)).Has_Pose;
@@ -1038,13 +1138,18 @@ package body Act is
                   return D + Sz + E + G;
                end Unlike;
             begin
+               --  🔴🔴 不许只在一个小窗里挑(2026-08-27 V2 实测):窗口比真实位移小的时候,
+               --  它会在窗里挑一个【完全错误而读起来毫无异常】的位置,从不报错。
+               --  改成【全画面都参与排序】—— 远的靠 Unlike 里那一项自己吃亏,但不再被一刀切掉。
+               --  (我 2026-09-15 一度把探针幅度缩小来迁就小窗口,那是修反了:
+               --   缩幅度等于把信号缩进噪声里,记录 D6 写着"探针步子太小 ⇒ 一列只解释掉 42%"。)
                for I in 0 .. Natural (Regs.Length) - 1 loop
                   declare
                      R : constant Picture.Region := Regs (I);
                      D : constant Long_Float := Sqrt ((R.Cu - Pred_U) ** 2 + (R.Cv - Pred_V) ** 2);
                      U : constant Long_Float := Unlike (R);
                   begin
-                     if D <= Tol then
+                     if True then
                         if U < Bd then
                            Sd := Bd; Second := Best;
                            Bd := U; Best := I;
@@ -1151,6 +1256,15 @@ package body Act is
       type Sum_Grid is array (0 .. N_Pts - 1, 0 .. Chan.Per_Arm - 1, 0 .. Table.Rows - 1) of Long_Float;
       S1 : Sum_Grid := [others => [others => [others => 0.0]]];   --  各次列值之和
       S2 : Sum_Grid := [others => [others => [others => 0.0]]];   --  各次列值平方和
+      --  🔴🔴 来回对表(2026-08-27 NV3 第一次上机就抓到一个符号错:分歧 2.539 / 共识 0.019):
+      --  同一根通道 +δ 走一遍、−δ 走回来一遍,两遍各除以【自己那一遍的实到】⇒ 结果应当相等。
+      --  不相等 = 这一列不是一个测量(跟丢了 / 符号错了 / 关节翻支了),而光看去程那一遍看不出来。
+      --  判据零系数:两遍的【分歧】要小于两遍的【共识】。
+      B1 : Sum_Grid := [others => [others => [others => 0.0]]];   --  去程那一遍的列
+      B2 : Sum_Grid := [others => [others => [others => 0.0]]];   --  回程那一遍的列
+      Nb : array (0 .. Chan.Per_Arm - 1) of Natural := [others => 0];
+      Agree_Out : Table.Vec := [others => -1.0];   --  每根通道:分歧 ÷ 共识(<1 才算稳)
+      Said_Wide : array (0 .. Chan.Per_Arm - 1) of Boolean := [others => False];
       Nrep : array (0 .. Chan.Per_Arm - 1) of Natural := [others => 0];
       --  🔴 上一轮(幅度的一半)这一通道最多的那个点跑了多远。加倍之后【一点没多跑】⇒ 再加也没用,
       --  这一列就是零 —— 零本身是一次正确的测量("这个通道不动它")。
@@ -1311,6 +1425,7 @@ package body Act is
                                  for R in 0 .. Table.Rows - 1 loop
                                     S1 (I, K, R) := S1 (I, K, R) + Col (R);
                                     S2 (I, K, R) := S2 (I, K, R) + Col (R) * Col (R);
+                                    B1 (I, K, R) := Col (R);   --  去程这一遍,留着和回程对
                                  end loop;
                               end;
                               Seen_Enough := True;
@@ -1337,49 +1452,58 @@ package body Act is
                         for I in 0 .. Natural (Pts.Length) - 1 loop
                            declare
                               P : Point := Pts (I);
+                              Wb : constant Point := Pts (I);   --  回程之前(= 去程走完)那一刻
                            begin
                               Retrack (C, F, P.Cam, Before2_All (P.Cam), P, Was (I).Cu, Was (I).Cv, True);
+                              --  🔴 回程也量一遍同一列:除以【回程自己的实到】(反号),两遍应当相等
+                              if abs Back (K) > C.Map.EE_Noise and then not P.Lost then
+                                 B2 (I, K, 0) := (P.Cu - Wb.Cu) / Back (K);
+                                 B2 (I, K, 1) := (P.Cv - Wb.Cv) / Back (K);
+                                 B2 (I, K, 2) := (if P.Z > 0.0 and then Wb.Z > 0.0 then (P.Z - Wb.Z) / Back (K) else 0.0);
+                                 Nb (K) := Nb (K) + 1;
+                              end if;
                               P.Cu := Was (I).Cu; P.Cv := Was (I).Cv; P.Z := Was (I).Z;   --  推回起点了:点回到原处(比光流往返的累积误差可信)
                               Pts.Replace_Element (I, P);
                            end;
                         end loop;
                      end;
-                     --  🔴🔴 一推让画面跑得【比眼睛一步跟得住的还远】⇒ 这一推太大,不是"量到了"。
-                     --  下一推同样幅度必然跟丢,而跟丢会被记成"同一个推法没动 ⇒ 不稳" ——
-                     --  于是这一列永远攒不够两次重复,凡是要靠它的关系词全部在编译期被退回。
-                     --  HL 实测:通道 6 第一推 0.0064 就让点跑了 **0.1848 画幅**(整幅的 18%,
-                     --  而跟踪窗只有 0.10),第二推当场"没动" ⇒ 身体报"不稳" ⇒
-                     --  「into」被退回,最后一句是"我现在说得出口的关系:(一个都没有)"。
-                     --  真因是【探针那一档是在别的相机里量的】:在手自己那台相机里同样的命令让画面跑得多得多。
-                     --  改:超出一个跟踪窗就把幅度【按比例缩回一个窗】再来,不算一次重复,也不判它不稳。零系数 ——
-                     --  跟踪窗是眼睛自己的上限,缩回一个窗是"缩到眼睛跟得住的那一档"。
-                     if Ran_Max > Track_Win and then Amp > 0.0 then
+                     --  🔴 一推跑得比眼睛一步跟得住的还远 ⇒ 【不是把推的幅度缩小】,而是【把搜索范围放宽】。
+                     --  记录 2026-08-27 V2:窗口比真实位移小的时候,模板搜索会静默返回一个完全错误的位置;
+                     --  记录 2026-08-26 D6:探针步子太小 ⇒ 信号和噪声一样大,一列只解释掉 42%。
+                     --  所以两条合起来只有一个做法:**推得够大,搜得够宽**。我 09-15 一度改成缩幅度,是修反了,已撤。
+                     --  这里只如实说出来,幅度不动。
+                     if Ran_Max > Track_Win and then not Said_Wide (K) then
+                        Said_Wide (K) := True;
                         Put_Line ("[身]     通道" & Natural'Image (Chn) & ":这一推让点跑了 " & Codec.Fmt (Ran_Max, 4)
                                   & " 画幅,比眼睛一步跟得住的 " & Codec.Fmt (Track_Win, 4)
-                                  & " 还远 ⇒ 这一推太大,按比例缩回一个窗再来");
-                        Amp := Amp * Track_Win / Ran_Max;   --  直接缩到"正好一个跟踪窗"那一档:两个都是量出来的画幅
-                        --  🔴 换了幅度 = 换了一个推法 ⇒ 前面攒的那几次全部清零重来。
-                        --  不清的话,下一推(更小的那一档)一旦没动,会被当成"同一个推法第 2 次没动 ⇒ 不稳",
-                        --  而它根本不是同一个推法。HM 实测:缩是缩了,紧接着还是判了"不稳"。
-                        Nrep (K) := 0;
-                        for I in 0 .. Natural (Pts.Length) - 1 loop
-                           for R in 0 .. Table.Rows - 1 loop
-                              S1 (I, K, R) := 0.0;
-                              S2 (I, K, R) := 0.0;
-                           end loop;
-                        end loop;
-                        for I in 0 .. Natural (Pts.Length) - 1 loop
+                                  & " 还远 ⇒ 我不缩这一推,改成整幅画面都找(缩了就等于把信号缩进噪声里)");
+                     end if;
+                     if Seen_Enough then
+                        --  🔴 来回对账:去程和回程量出来的同一列应当相等。
+                        --  分歧 = 两遍之差的长度;共识 = 两遍之和的一半的长度。分歧 ≥ 共识 ⇒ 这一列不是测量。
+                        if Nb (K) > 0 and then Agree_Out (K) < 0.0 then
                            declare
-                              P : Point := Pts (I);
+                              Dif, Con : Long_Float := 0.0;
                            begin
-                              P.Cu := Was (I).Cu; P.Cv := Was (I).Cv; P.Z := Was (I).Z; P.Lost := False;
-                              Pts.Replace_Element (I, P);
+                              for I in 0 .. Natural (Pts.Length) - 1 loop
+                                 for R in 0 .. Table.Rows - 1 loop
+                                    Dif := Dif + (B1 (I, K, R) - B2 (I, K, R)) ** 2;
+                                    Con := Con + ((B1 (I, K, R) + B2 (I, K, R)) / 2.0) ** 2;
+                                 end loop;
+                              end loop;
+                              Dif := Sqrt (Dif); Con := Sqrt (Con);
+                              if Con > 0.0 then
+                                 Agree_Out (K) := Dif / Con;
+                                 Put_Line ("[身]     通道" & Natural'Image (Chn) & " 来回对表:分歧 "
+                                           & Codec.Fmt (Dif, 4) & " · 共识 " & Codec.Fmt (Con, 4)
+                                           & " ⇒ " & (if Agree_Out (K) < 1.0 then "对得上,这一列信得过"
+                                                      else "🔴 对不上,这一列不是测量(跟丢/符号反/关节翻支)"));
+                              end if;
                            end;
-                        end loop;
-                     elsif Seen_Enough then
+                        end if;
                         if Nrep (K) >= Reps_Wanted then
                            Finalise (K);
-                           Trust (K) := True;
+                           Trust (K) := Agree_Out (K) < 0.0 or else Agree_Out (K) < 1.0;
                            exit;
                         end if;
                         --  同一幅度再来一次(不翻倍):现在要证的是"它稳",不是"它动过"
@@ -1716,6 +1840,28 @@ package body Act is
                                 & (if Trust (K) then "" else " 没证过") & ")");
                      end loop;
                      Put_Line (To_String (Ln));
+                     --  🔴🔴 体检:平移通道推一米,远近最多变一米。绝对值 > 1 = 物理上不可能。
+                     --  取所有平移通道里最大的那个,就是【我的深度读数被放大了几倍】的下界 ——
+                     --  这就是拿自己的胳膊当尺子:我知道自己走了几米,也看得见深度读数变了多少。
+                     declare
+                        Worst : Long_Float := 0.0;
+                     begin
+                        for K in 0 .. Chan.Per_Arm - 1 loop
+                           if Trust (K) and then Depth_Scale_Bad (Effs (I).B (K, 2)) then
+                              Worst := Long_Float'Max (Worst, abs Effs (I).B (K, 2));
+                           end if;
+                        end loop;
+                        if Worst > 0.0 then
+                           C.Depth_Scale := Long_Float'Max (C.Depth_Scale, Worst);
+                           Put_Line ("[身]   🔴 体检:我真走一米,深度读数变了 " & Codec.Fmt (Worst, 1)
+                                     & " 米 —— 物理上最多一米。我的深度读数被放大了至少 "
+                                     & Codec.Fmt (Worst, 1) & " 倍,这一维我不当真的量看。");
+                           C.Blind_Say := S ("I checked myself: one metre of my own real motion changes my depth reading by "
+                                             & Codec.Fmt (Worst, 1) & " metres, and the most that is physically possible is one. "
+                                             & "So my sense of distance is inflated by at least that much and I do not trust it "
+                                             & "as a real measurement - I am using it only for direction, not for how far.");
+                        end if;
+                     end;
                   end;
                end loop;
             end;
@@ -2376,6 +2522,14 @@ package body Act is
                            then
                               Note.Active (K) := False;   --  这一根此刻推不动,绕过它
                               Stuck := Stuck + 1;
+                              --  🔴 自述那一条通道的"我变了":这一根以前听话、现在不听话,是关于【我自己】的变化,
+                              --  不是这一段任务的事 ⇒ 它该被记住并讲出来,而不是修完这一步就忘。
+                              if Cn_Changed (C, Arm * Chan.Per_Arm + K) then
+                                 Append (C.Changed_Say,
+                                         "  I HAVE CHANGED: channel " & Codec.Img (Arm * Chan.Per_Arm + K)
+                                         & " used to move when I commanded it and now it does not - "
+                                         & "I commanded it and my body delivered nothing." & ASCII.LF);
+                              end if;
                            elsif Note.Active (K) then
                               Reach (K) := Long_Float'Min (Reach (K) * 2.0,
                                                            Track_Win / Long_Float'Max (1.0e-9, C.Map.Amp (Arm * Chan.Per_Arm + K)));
@@ -4681,6 +4835,14 @@ package body Act is
                   Put_Line ("[身]   🔴 这一段一推都没走 —— 除非脑的 until 在第 0 步就成立,这就是身体自己没动");
                end if;
                Put_Line ("[身]   这一段:" & Codec.Img (Steps_Taken) & " 推 · " & Codec.Img (Beats) & " 拍 · 这一集累计 " & Codec.Img (Plug.Steps (L)) & " 拍");
+               --  🔴 经历账:这一段我干了什么、成没成。跨炮留着 —— 这是"它记得自己昨天"的全部物质基础。
+               --  一行一条纯文本:坏一行不毁整份(身体文件里一个 NaN 就整份读不回来,那个坑不许重犯)。
+               Codec.Append_Line (Life_Path,
+                                  "beat " & Codec.Img (Plug.Steps (L))
+                                  & " | eye " & Codec.Img (Cam)
+                                  & " | " & To_String (Desc)
+                                  & " | " & Codec.Img (Steps_Taken) & " pushes"
+                                  & " | ended: " & To_String (Event));
                for P of Pts loop
                   if P.Blob <= 0 then
                      Report := Report & "item " & Codec.Img (P.Item_No) & (if P.Blob = 0 then " (finger A)" else "") & " now at (" & Codec.Fmt (P.Cu, 2) & "," & Codec.Fmt (P.Cv, 2) &

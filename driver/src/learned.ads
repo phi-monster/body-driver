@@ -17,6 +17,12 @@ package Learned is
       Pose : Plug.Arm_Pose := [others => 0.0];   --  这张表是在哪个位姿下量的:表是【就地】的,离得远了不成立
       Has_Pose : Boolean := False;
       Held : Integer := -1;      --  量这张表的时候手里是什么(-1 = 空手,否则是那一槽)
+      --  🔴 自我那一半:一条关于自己的知识,必须带【我凭什么信它】。
+      --  没有这两格,身体只能说"是这个数",说不出"我有多信、什么时候学的" ——
+      --  而"我很有把握 / 这根从昨天起不听话"正是这两格变出来的。
+      N_Learned : Natural := 0;        --  这一格被量到过几次(越多越信)
+      When_Beat : Natural := 0;        --  上一次确认它是在第几拍
+      Agree : Table.Vec := [others => -1.0];   --  来回对表:去和回两遍的分歧 ÷ 共识(<1 才算稳;-1 = 还没对过)
    end record;
    package Effect_Vectors is new Ada.Containers.Vectors (Natural, Stored_Effect);
 end Learned;

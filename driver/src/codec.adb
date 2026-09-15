@@ -1,9 +1,11 @@
+with Ada.Text_IO;
 with Ada.Streams.Stream_IO;
 with Ada.Containers;
 with Ada.Streams;
 with Ada.Directories;
 with Ada.Environment_Variables;
 with Ada.Strings.Fixed;
+with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
 with Ada.Long_Float_Text_IO;
 with Interfaces;
 package body Codec is
@@ -201,4 +203,52 @@ package body Codec is
    exception
       when others => return Default;
    end Env_Nat;
+   procedure Append_Line (Path : String; Line : String) is
+      F : Ada.Text_IO.File_Type;
+   begin
+      begin
+         Ada.Text_IO.Open (F, Ada.Text_IO.Append_File, Path);
+      exception
+         when others =>
+            begin
+               Ada.Text_IO.Create (F, Ada.Text_IO.Out_File, Path);
+            exception
+               when others => return;   --  写不了就算了,绝不许因为记账把身体弄死
+            end;
+      end;
+      Ada.Text_IO.Put_Line (F, Line);
+      Ada.Text_IO.Close (F);
+   exception
+      when others => null;
+   end Append_Line;
+
+   function Tail_Lines (Path : String; N : Natural) return String is
+      F : Ada.Text_IO.File_Type;
+      Ring : array (0 .. Natural'Max (1, N) - 1) of Unbounded_String;
+      Cnt : Natural := 0;
+      Out_S : Unbounded_String;
+   begin
+      begin
+         Ada.Text_IO.Open (F, Ada.Text_IO.In_File, Path);
+      exception
+         when others => return "";
+      end;
+      while not Ada.Text_IO.End_Of_File (F) loop
+         Ring (Cnt mod Ring'Length) := To_Unbounded_String (Ada.Text_IO.Get_Line (F));
+         Cnt := Cnt + 1;
+      end loop;
+      Ada.Text_IO.Close (F);
+      for I in 0 .. Natural'Min (Cnt, Ring'Length) - 1 loop
+         declare
+            Idx : constant Natural := (if Cnt <= Ring'Length then I
+                                       else (Cnt - Natural'Min (Cnt, Ring'Length) + I) mod Ring'Length);
+         begin
+            Append (Out_S, Ring (Idx) & ASCII.LF);
+         end;
+      end loop;
+      return To_String (Out_S);
+   exception
+      when others => return "";
+   end Tail_Lines;
+
 end Codec;

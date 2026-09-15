@@ -1033,6 +1033,41 @@ begin
          Check (Ok_One.Ok and then Ok_One.Code (0).Until_Oc = Oc_Touched,
                 "到位:until touched 不受影响");
       end;
+      --  🔴🔴 来回对表:同一根通道 +δ 走一遍、−δ 走回来一遍,两遍各除以自己那一遍的实到 ⇒ 应当相等。
+      --  判据零系数:两遍的【分歧】要小于两遍的【共识】。数字取自 2026-08-27 NV3 真数据
+      --  (它上机第一次就抓到一个符号错:分歧 2.539 / 共识 0.019)。
+      declare
+         function Ratio (Out_V, Back_V : Long_Float) return Long_Float is
+            Dif : constant Long_Float := abs (Out_V - Back_V);
+            Con : constant Long_Float := abs ((Out_V + Back_V) / 2.0);
+         begin
+            return (if Con > 0.0 then Dif / Con else -1.0);
+         end Ratio;
+      begin
+         Check (Ratio (0.830, 0.835) < 1.0,
+                "来回:去程 0.830、回程 0.835 ⇒ 对得上,这一列信得过");
+         Check (Ratio (0.830, -0.820) >= 1.0,
+                "来回:去程 0.830、回程 -0.820(符号反了)⇒ 对不上 —— 这正是 NV3 上机第一次抓到的那种错");
+         Check (Ratio (0.830, 0.050) >= 1.0,
+                "来回:去程 0.830、回程 0.050(回程跟丢了)⇒ 对不上,不许收");
+         Check (Ratio (0.0, 0.0) < 0.0,
+                "来回:两遍都是零(这个通道不动它)⇒ 说不上对不对,交给别的判据,不许当成错");
+      end;
+      --  🔴🔴 体检:一根【平移】通道推一米,我离相机的远近最多变一米(正好沿着相机看的方向走时取到 1)。
+      --  绝对值大于 1 = 物理上不可能 ⇒ 我的深度读数尺度是坏的。数字取自 HW 真数据。
+      declare
+         Seen1 : constant Long_Float := -36.732;   --  HW 实测 ch8 那一格
+         Seen2 : constant Long_Float := -60.270;   --  另一个点上的同一格
+      begin
+         Check (Act.Depth_Scale_Bad (Seen1) and then Act.Depth_Scale_Bad (Seen2),
+                "体检:推一米远近变 36.7 米 / 60.3 米 ⇒ 物理上不可能,必须判成【我的距离感坏了】");
+         Check (not Act.Depth_Scale_Bad (0.94),
+                "体检:推一米远近变 0.94 米 ⇒ 完全可能(几乎正对着相机走),不许误判");
+         Check (not Act.Depth_Scale_Bad (-1.0) and then Act.Depth_Scale_Bad (-1.02),
+                "体检:边界正好在 1 —— 1 是【沿着相机看的方向】那一档,超过它才不可能");
+         Check (not Act.Depth_Scale_Bad (0.0),
+                "体检:这一格是 0(这个通道不改变远近)⇒ 不是坏,是一次正确的测量");
+      end;
       --  🔴 深度读数收不收。数字取自 FS 实测:手指上一次真读到 0.454 m,这一帧读出 0.010 m(离镜头一厘米)。
       declare
          Was : constant Long_Float := 0.454;    --  上一次真读到的
