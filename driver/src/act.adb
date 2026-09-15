@@ -179,8 +179,24 @@ package body Act is
       end loop;
       T := Picture.Split (Samp);
       if Picture.Is_Nan (T) then
-         return Out_R;   --  分不成两拨(单峰)⇒ 这只眼里按明暗切不出东西,如实交空
+         return Out_R;   --  全一样 ⇒ 这只眼里按明暗切不出东西,如实交空
       end if;
+      --  🔴 分两次:第一刀分的是"暗桌面 vs 亮的一切"(NJK 存图离线:分界 111,浅色木纹和白球并成一块);
+      --  在亮的那一拨里再分一刀,才把最亮的一撮(白球、乐高的黄)从浅木纹里切出来。两刀的分界都是算出来的。
+      declare
+         Upper : Floats;
+         T2 : Long_Float;
+      begin
+         for X of Samp loop
+            if X > T then
+               Upper.Append (X);
+            end if;
+         end loop;
+         T2 := Picture.Split (Upper);
+         if not Picture.Is_Nan (T2) then
+            T := T2;
+         end if;
+      end;
       Mask := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (Cw * Ch));
       for J in 0 .. Cw * Ch - 1 loop
          if Long_Float (G.Element (J)) > T then
