@@ -234,8 +234,9 @@ package body Act is
       Raw : Picture.Regions;
       Kept : Picture.Regions;
    begin
-      --  长在手上的眼:按明暗切(见 Cut_Bright);只有一块都切不出时才退回深度那一路
-      if Cam_Arm (C, Cam) >= 0 then
+      --  长在手上的眼、或者根本没有深度的眼(真机:手机 + 腕部 RGB):按明暗切(见 Cut_Bright);
+      --  长在手上的眼只有一块都切不出时才退回深度那一路
+      if Cam_Arm (C, Cam) >= 0 or else not F.Cams (Cam).Has_Depth then
          Raw := Cut_Bright (C, F, Cam);
          if not Raw.Is_Empty then
             for R of Raw loop
