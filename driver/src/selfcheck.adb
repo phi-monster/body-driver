@@ -1430,6 +1430,32 @@ begin
              "所以退出条件必须是【它在我眼里滑过了跟踪抖动】—— 三角形扁不扁看它滑了多少,不看我动了多少");
    end;
 
+   --  ===== 只有【长在我身上】的眼睛量得了别人的远近(IF 2026-09-15:一甩把球撞飞) =====
+   declare
+      Track : constant Long_Float := 0.0016;
+      --  我一动,三台眼睛各变多少画面(开机量出来的)
+      On_Me   : constant Long_Float := 0.7460;   --  长在我这条胳膊上的那台
+      Other   : constant Long_Float := 0.6190;   --  长在别的部件上的那台
+      World   : constant Long_Float := 0.0240;   --  完全不动的那台(我的胳膊在画面里占一点)
+      Ball_Slid : constant Long_Float := 0.0300; --  IF 实测:球在【不动的那台】里滑了这么多
+      Ball_Wide : constant Long_Float := 0.0400; --  球自己有多宽
+      Big_Nudge : constant Long_Float := 0.3529; --  IF 实测那一甩
+      OK_Nudge  : constant Long_Float := 0.0564;
+   begin
+      Check (World > Track,
+             "IF:判据只问'我一动它变不变'时,不动的那台也过关 —— 因为我的胳膊在它画面里占着地方");
+      Check (not (World >= On_Me),
+             "IF:而它并不是【变得最多】的那台 ⇒ 按'哪台变得最多'判,它就被挡在外面了");
+      Check (On_Me >= Other and then On_Me >= World,
+             "只有变得最多的那台才是长在我身上的 —— 世界只在它里面滑");
+      Check (Ball_Slid > Track,
+             "IF:球在【不动的那台】里滑了 0.03 幅 —— 身体把它读成了视差");
+      Check (Big_Nudge > OK_Nudge,
+             "IF:于是一路把拨动加到 0.3529 m,那一甩把球从桌心撞到了最远沿(看图确认)");
+      Check (Ball_Slid < Ball_Wide,
+             "封顶:滑得比那东西自己还宽就够了 —— 再大就是白甩一路家具,尺寸是量出来的");
+   end;
+
    --  ===== 循环上限写错 = 那段代码一次都没跑过(IE 2026-09-15) =====
    declare
       Wide : constant Long_Float := 640.0;   --  这台相机一行有多少像素

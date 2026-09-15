@@ -3054,6 +3054,7 @@ package body Act is
          Good_Amp, Good_Slid, Good_Moved, Good_Turn : Long_Float := 0.0;
          Have_Good : Boolean := False;
          Any_Lost : Boolean := False;
+         Widest : Long_Float := 0.0;    --  被跟的那几块里最宽的那块,在画面里占多少
          Before : Buf_Vectors.Vector;
          Was_R : Point_Vectors.Vector;
          Got : Table.Vec;
@@ -3065,18 +3066,38 @@ package body Act is
          Dot : Long_Float := 0.0;
          Comparable : Boolean := False;
       begin
-         --  ① 这只眼睛跟着我动吗?不动的眼睛里,世界永远不滑 ⇒ 在这里量不出远近。
+         --  🔴🔴 ① 这只眼睛得【长在我正在动的这部分上】,世界才会在它里面滑。
+         --  IF 2026-09-15 实测这一条写松了的后果:判据只问"我一动它变不变",
+         --  而不动的那台眼睛里我自己的胳膊也占着画面 ⇒ 判据通过 ⇒ 身体在【不动的眼睛】里量远近。
+         --  可是在不动的眼睛里,桌上的东西本来就【一动不动】—— 它要是动了,那只能是【我撞的】。
+         --  当时身体把"球滑了 0.0300 幅"读成了视差,一路把拨动加到 0.3529 m,
+         --  **那一甩直接把球撞到桌子最里面去了**(看图确认:球从桌心跑到最远沿)。
+         --  判据改成量出来的比较:我一动,哪台眼睛变得最多,哪台才是长在我身上的。
+         --  这一条对所有机体成立(无人机的眼睛长在自己身上;不动的那台只能量【我自己的零件】有多远)。
          declare
             Ix : constant Natural := Arm * C.Map.N_Cams + Cam;
+            Mine : constant Long_Float :=
+              (if Ix < Natural (C.Map.Cam_Frac.Length) then C.Map.Cam_Frac (Ix) else -1.0);
+            Most : Long_Float := -1.0;
          begin
-            Swims := Ix < Natural (C.Map.Cam_Frac.Length)
-                     and then C.Map.Cam_Frac (Ix) > Long_Float (Fl.Track);
+            for Cm in 0 .. C.Map.N_Cams - 1 loop
+               declare
+                  Jx : constant Natural := Arm * C.Map.N_Cams + Cm;
+               begin
+                  if Jx < Natural (C.Map.Cam_Frac.Length) then
+                     Most := Long_Float'Max (Most, C.Map.Cam_Frac (Jx));
+                  end if;
+               end;
+            end loop;
+            Swims := Mine > Long_Float (Fl.Track) and then Mine >= Most;
          end;
          if not Swims then
-            Put_Line ("[身]   📏 这只眼睛量不了远近:我一动,它几乎不变 ⇒ 世界在它里面不滑");
-            C.Blind_Say := S ("I cannot work out how far anything is with this eye: it barely changes when I move, "
-                              & "so nothing slides across it and there is no distance to read. Give me a stretch with "
-                              & "an eye that moves when I move.");
+            Put_Line ("[身]   📏 这只眼睛量不了远近:它不是长在我正动的这部分上 ⇒ 桌上的东西在它里面本来就不滑;"
+                      & "在这只眼睛里东西要是动了,那是【我撞的】,不是远近");
+            C.Blind_Say := S ("I cannot work out how far that thing is with this eye: this eye does not ride on the part "
+                              & "I am moving, so the world does not slide across it at all. In this eye, a thing that "
+                              & "moves while I move has been HIT by me, not measured. Ask again with the eye that rides "
+                              & "on me if you want a distance.");
             return;
          end if;
          --  ② 拨哪一下:第一次量什么就一直用它,同一下拨两遍,横向那一份才会在相除时约掉
@@ -3099,6 +3120,9 @@ package body Act is
             Put_Line ("[身]   📏 量不了远近:我一根通道都没量过,不知道该拨哪一下");
             return;
          end if;
+         for P of Pts loop
+            Widest := Long_Float'Max (Widest, Long_Float'Max (P.Box_W, P.Box_H));
+         end loop;
          Before := All_Gray (F);
          Was_R := Pts;
          EE0 := F.EE (Arm);
@@ -3158,6 +3182,9 @@ package body Act is
                Good_Amp := Best_Amp; Good_Slid := Slid; Good_Moved := Moved;
                Good_Turn := Turned; Have_Good := True;
             end if;
+            --  🔴 已经滑得比【那东西自己还宽】了就够了,再大就是白甩一路家具。
+            --  尺寸是量出来的,不是我拍的门槛(和"碰到"用的是同一把尺)。
+            exit when Have_Good and then Slid > Widest;
             --  还能拨得更大 ⇒ 先拨回去,再拨得更大(缩是修反的,记录 08-27 V2:缩了就等于把信号缩进噪声里)
             declare
                A : Table.Vec := Table.Zero_Vec;
