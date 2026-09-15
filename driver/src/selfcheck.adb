@@ -1414,6 +1414,24 @@ begin
              "温度计 ≠ 尺子:体检只说'我的距离感放大了 32 倍',量距离得靠胳膊滑出来的那两个数");
    end;
 
+   --  ===== 手自己那只眼睛里握区读不到远近 ⇒ 别把前后整维扔了(IU 2026-09-15:九步纹丝不动) =====
+   declare
+      Grip_Depth_Nan : constant Boolean := True;    --  手腕相机里握区的远近读不到
+      Grip_Span      : constant Long_Float := 0.1400;  --  但它张开多宽,画面里量得到
+      Ball_Size_Far  : constant Long_Float := 0.0400;
+      Ball_Size_Near : constant Long_Float := 0.1400;
+      W_Old, W_New   : Long_Float;
+   begin
+      W_Old := (if not Grip_Depth_Nan then 1.0 else 0.0);
+      W_New := (if not Grip_Depth_Nan then 1.0 elsif Grip_Span > 0.0 then 1.0 else 0.0);
+      Check (W_Old <= 0.0,
+             "IU:按老写法,握区远近读不到就把'看着多大'整个关掉 ⇒ 那只眼睛里前后一个信号都不剩");
+      Check (W_New > 0.0,
+             "IU:退路不需要深度 —— 目标就是【我张开的那片爪心有多宽】,画面里量得到");
+      Check (Ball_Size_Near > Ball_Size_Far and then Ball_Size_Near >= Grip_Span,
+             "定版判据(2026-09-08):它在画面里长到和我张开的那片爪心一样宽,就是到了");
+   end;
+
    --  ===== 撤回:"我能分辨到多远" ≠ "它有多远"(IT 2026-09-15:球近了四倍,那个数反而涨了) =====
    declare
       Ball_Px_Far  : constant Long_Float := 78.0000;    --  IT 实测:一开始球在画面里这么大
