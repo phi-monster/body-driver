@@ -28,7 +28,13 @@ package Monitor is
      with Post => W.Steps = Natural'Min (W'Old.Steps + 1, Count'Last)
        and then (if Pic_Delta <= F.Picture then W.Quiet = Natural'Min (W'Old.Quiet + 1, Count'Last) else W.Quiet = 0)
        and then (if Delivered <= F.Delivery then W.Refused = Natural'Min (W'Old.Refused + 1, Count'Last) else W.Refused = 0);
-   function Settled (W : Watch) return Boolean is (W.Quiet >= 2);
+   --  🔴🔴 "画面不再变了"必须配一条旁证:【我这几步真动过】(IZ 2026-09-15 实测)。
+   --  换姿势之后表是空的(每一行"一推能改"都量到 0.0000)⇒ 解算推不出任何命令
+   --  ⇒ 身体不动 ⇒ 画面当然不变 ⇒ `until settled` 被【假满足】:4 推就报"到了、还差 0.0 推"。
+   --  判据本身没错,错在它分不出"到位了"和"我根本没推动"。
+   --  身体早就在量这件事:命令发了而实到落进本体噪声 ⇒ Refused 计数。
+   --  这一条和今晚给"碰到"立的那条同构:**没动过就不许自称到了**。
+   function Settled (W : Watch) return Boolean is (W.Quiet >= 2 and then W.Refused = 0);
    --  连着几步没比"到目前为止最好的一次"更好才算走不动了(次数,无量纲)。
    --  2 太急:每一步只缩掉剩余差距的百分之一二,噪声一晃就被判死,一段永远走不完(FL 实测)
    function Stalled (W : Watch) return Boolean is (W.No_Progress >= 5);

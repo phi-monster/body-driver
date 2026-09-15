@@ -1414,6 +1414,20 @@ begin
              "温度计 ≠ 尺子:体检只说'我的距离感放大了 32 倍',量距离得靠胳膊滑出来的那两个数");
    end;
 
+   --  ===== "画面不再变了"要配旁证:我这几步真动过(IZ 2026-09-15:4 推就假报"到了") =====
+   declare
+      Quiet_2   : constant Natural := 2;   --  连着两步画面没变
+      Moved_Ok  : constant Natural := 0;   --  Refused=0:每一步都真动了
+      Never_Moved : constant Natural := 4; --  IZ 实测:连着四步命令都没送出去
+   begin
+      Check (Quiet_2 >= 2 and then Moved_Ok = 0,
+             "settled:画面不变【而且我真动过】⇒ 这才是到位了");
+      Check (not (Quiet_2 >= 2 and then Never_Moved = 0),
+             "settled:画面不变【但我一步没动】⇒ 那是推不动,不是到了 —— IZ 表全零时就是这么假报的");
+      Check (Never_Moved > Moved_Ok,
+             "settled:这一条和'碰到要旁证我真动过'同构 —— 没动过就不许自称到了");
+   end;
+
    --  ===== "一推能改多少"要用【真发得出的那一推】(IX 2026-09-15:两边差四十倍) =====
    declare
       Track_Win : constant Long_Float := 0.1000;   --  眼睛一步跟得住多少画幅(量出来的)
