@@ -1414,6 +1414,26 @@ begin
              "温度计 ≠ 尺子:体检只说'我的距离感放大了 32 倍',量距离得靠胳膊滑出来的那两个数");
    end;
 
+   --  ===== 画面那两行是一对:合起来判过了,不许再分开清零(IL 2026-09-15) =====
+   declare
+      --  IL 实测:通道 7 画面两行合起来 分歧 56.67 · 共识 141.61 ⇒ 信得过
+      Pair_Dif : constant Long_Float := 56.6711;
+      Pair_Con : constant Long_Float := 141.6149;
+      --  而拆开之后,单独一行可能对不上(左右那一行去回差得多)
+      Row_Dif  : constant Long_Float := 120.0000;
+      Row_Con  : constant Long_Float := 100.0000;
+   begin
+      Check (Act.Row_Is_Measurement (Pair_Dif, Pair_Con),
+             "IL:画面两行【合起来】判 ⇒ 这根通道信得过(实测共识 141.6,响应大得很)");
+      Check (not Act.Row_Is_Measurement (Row_Dif, Row_Con),
+             "IL:同一根通道,单独拆出一行来判却过不了");
+      Check (Act.Row_Is_Measurement (Pair_Dif, Pair_Con)
+             and then not Act.Row_Is_Measurement (Row_Dif, Row_Con),
+             "IL:两个判决相反 ⇒ 分开清零会把【合起来判过了】的通道掏空,表里只剩 左右 0.000 没证过");
+      Check (Pair_Con > Pair_Dif,
+             "IL:掏空的后果就是 HZ 那个瘫痪的翻版 —— 一对量、一个判决,要留一起留,要清一起清");
+   end;
+
    --  ===== 拨到【它真的滑得动】为止(IB 2026-09-15 第一炮实测) =====
    declare
       Track_Jitter : constant Long_Float := 0.0016;   --  跟踪抖动(画幅)
