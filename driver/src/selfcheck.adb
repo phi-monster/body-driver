@@ -1430,6 +1430,22 @@ begin
              "所以退出条件必须是【它在我眼里滑过了跟踪抖动】—— 三角形扁不扁看它滑了多少,不看我动了多少");
    end;
 
+   --  ===== 脑点名换眼睛,身体不许替它改主意(IH 2026-09-15:量远近永远被拒) =====
+   declare
+      Tgt_Cam  : constant Natural := 0;   --  球是在 0 号眼里被点的名
+      Want_Cam : constant Natural := 2;   --  脑写 with my moving eye ⇒ 长在我身上的那只
+      --  我一动,各只眼睛变多少画面(开机量出来的)
+      Frac0 : constant Long_Float := 0.0240;
+      Frac2 : constant Long_Float := 0.7460;
+   begin
+      Check (Want_Cam /= Tgt_Cam,
+             "IH:脑要的那只眼,不是球上次被点名的那只 —— '目标那台赢'于是每次都把它拽回去");
+      Check (not (Frac0 >= Frac2),
+             "IH:而被拽回去的那只【不长在我身上】⇒ 量远近的判据当场否掉 ⇒ 前后那一栏永远是 0.0");
+      Check (Frac2 > Frac0,
+             "IH:脑要的那只才是长在我身上的 —— 照脑说的换过去,到那边再问一次它是哪一块");
+   end;
+
    --  ===== 碰到:瞎着的时候不许宣布 · 隔着半张桌子不许宣布(IG 2026-09-15 看图证伪) =====
    declare
       --  IG 身体自己的原话:"I could not see 2 of 2 of the points I am tracking;

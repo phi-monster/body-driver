@@ -4587,13 +4587,22 @@ package body Act is
                               --  而第 1 台里是风扇和键盘,根本没有球。判据没错,是我少写了一半。
                               --  脑点了名的那一块自己带着相机号,那一台是唯一看得见它的;
                               --  两者冲突时【目标那一台赢】,并且照实说清楚为什么没听脑的。
+                              --  🔴🔴 撤回"目标那一台赢"(IH 2026-09-15 实测)。
+                              --  原意是对的:HA 那次身体【自己】挑了一只没有球的眼睛,于是规定"看得见的那台赢"。
+                              --  但脑【明确点名】要换眼睛时,这条就变成了一道永远拉不开的闸:
+                              --  球只在 0 号眼里被点过名 ⇒ 每次都被拽回 0 号眼 ⇒ 而 0 号眼不长在我身上
+                              --  ⇒ 量远近永远被拒 ⇒ 前后那一栏永远是 0.0。IH 实测:横向已经对到 0.2 步,
+                              --  而两段下来一个米数都没有,就卡在这儿。
+                              --  改成:照脑说的换过去,并且【在新那只眼睛里重新点一次名】——
+                              --  认不认得出由脑看着图说,不由我替它决定(脑答 0 = 这儿没有,我再回去)。
                               if C.Tgt_Cam >= 0 and then Pick >= 0 and then Pick /= C.Tgt_Cam then
-                                 Put_Line ("[身] 👁 你要的那只眼睛(第" & Codec.Img (Natural (Pick))
-                                           & " 只)看不见你点名的那块 ⇒ 用看得见它的第" & Codec.Img (Natural (C.Tgt_Cam)) & " 只");
-                                 C.Blind_Say := S ("the eye you asked for is the one that moves least when I move, "
-                                                   & "but it cannot see the thing you named, so I used the eye that can "
-                                                   & "and I am telling you instead of quietly doing something else");
-                                 Pick := C.Tgt_Cam;
+                                 Put_Line ("[身] 👁 你点名要的那只眼睛(第" & Codec.Img (Natural (Pick))
+                                           & " 只)不是你上次点名那块所在的第" & Codec.Img (Natural (C.Tgt_Cam))
+                                           & " 只 ⇒ 我照你说的换过去,到那边再问你一次它是哪一块");
+                                 C.Blind_Say := S ("the eye you asked for is not the one you last named that thing in. "
+                                                   & "I moved to the eye you asked for anyway, and I will ask you which "
+                                                   & "one it is in that picture. Answer 0 if it is not visible there and "
+                                                   & "I will go back to the eye that can see it.");
                               end if;
                               if not Any or else Pick < 0 then
                                  C.Blind_Say := S ("you asked me to judge this with one of my eyes picked by how much it "
