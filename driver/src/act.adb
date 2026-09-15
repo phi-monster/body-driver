@@ -2223,7 +2223,20 @@ package body Act is
                   end if;
                   Px := Long_Float'Max (Px, Sqrt (Effs (I).B (K, 0) ** 2 + Effs (I).B (K, 1) ** 2));
                end loop;
-               if C.Map.Seen (Ch_No) and then All_Trust then
+               --  🔴🔴 走【米】的时候,能不能用一根关节看的是"它能把手挪动几米"(本体感觉),
+               --  不是"它在画面里量准没量准"(IS 2026-09-15 实测)。
+               --  IS:米数终于进了解算(远近 -40.0 步,前 24 炮全是 0.0),可六根关节里
+               --  只有一根过得了画面那道门 ⇒ 每步只挪 2 毫米 ⇒ 0.73 m 要三百多步,
+               --  而一段只有 40 步。差距九步 0.744 → 0.730,基本不动。
+               --  ⚠️ 只在【这一段真的在用米】的时候放开(有点的远近是尺子量出来的),
+               --  免得平时让没量准的通道去搅画面(FD 实测:0.6 rad 的腕一转就把距离搞坏)。
+               declare
+                  Walks : constant Boolean :=
+                    (for some I in 0 .. Natural (Pts.Length) - 1 => In_Metres (I))
+                    and then Ch_No < Natural (C.Reach_M.Length)
+                    and then C.Reach_M.Element (Ch_No) > 0.0;
+               begin
+               if C.Map.Seen (Ch_No) and then (All_Trust or else Walks) then
                   Note.Active (K) := True;
                   --  🔴 只有【后果全量清楚了】的方向才准迈大步。某一格没量出来(探针时变化没过地板)会被留成 0,
                   --  而 0 的意思是"没影响",解算就当它免费 —— 转腕对"远近/看着多大"正是这样,于是它拿转腕去修画面位置,
@@ -2266,6 +2279,7 @@ package body Act is
                   end;
                   Note.Floor_Cmd := (if Note.Floor_Cmd <= 0.0 then Am else Long_Float'Min (Note.Floor_Cmd, Am));
                end if;
+               end;
                --  🔴 标价改成"这个动作把画面搅动多少":一单位命令让被跟的点在画面里跑几个跟踪窗,就付几分钱(无量纲)。
                --  以前按"自己那一档"计价,而转腕那一档(0.0256)比平移那一档(0.0064)大四倍 ⇒ 转腕在账本上便宜十六倍,
                --  于是它一直买转腕,而转腕不会让手靠近(FJ 实测:横挪 4 cm,球反而从 0.333 m 退到 0.360 m)

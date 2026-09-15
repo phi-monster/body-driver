@@ -1414,6 +1414,22 @@ begin
              "温度计 ≠ 尺子:体检只说'我的距离感放大了 32 倍',量距离得靠胳膊滑出来的那两个数");
    end;
 
+   --  ===== 走米的时候,用哪根关节也不看"画面证没证过"(IS 2026-09-15:每步只挪 2 mm) =====
+   declare
+      Chans      : constant Natural := 6;
+      Pic_Proven : constant Natural := 1;        --  腕眼里只有一根过得了画面那道门
+      Gap_M      : constant Long_Float := 0.7300;
+      Per_Step_M : constant Long_Float := 0.0020;  --  IS 实测:只用那一根,每步挪 2 mm
+      Budget     : constant Long_Float := 40.0000; --  一段给 40 步
+   begin
+      Check (Pic_Proven < Chans,
+             "IS:腕眼里六根关节只有一根过得了画面那道门(滑得太快,来回对表几乎全判死)");
+      Check (Gap_M / Per_Step_M > Budget,
+             "IS:只用那一根 ⇒ 0.73 m 要三百多步,而一段只有 40 步 ⇒ 注定走不到");
+      Check (Gap_M / Per_Step_M > Budget + Budget,
+             "IS:差得不是一点半点 —— 所以这不是调参,是那道门根本不该管【往前走】");
+   end;
+
    --  ===== 米那一行不看"画面证没证过"(IR 2026-09-15:换算早量到了,却连喊 8 次没换算) =====
    declare
       Reach     : constant Long_Float := 0.0200;   --  一推手在世界里走几米(关节读数量出来的)
