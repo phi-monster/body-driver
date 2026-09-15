@@ -889,6 +889,31 @@ package body Act is
       Hard : Boolean := False;                  --  脑说的是 hold ⇒ 这一条整段不许被牺牲(解算时进硬约束,软目标只能在它的零空间里做文章)
    end record;
    package Point_Vectors is new Ada.Containers.Vectors (Natural, Point);
+
+   --  🔴 这一块在画面上贴着我自己的某一块吗(隔得比我自己那块还宽 ⇒ 碰不到)
+   function Near_My_Piece (Pts : Point_Vectors.Vector; I : Natural) return Boolean is
+      Best : Long_Float := Long_Float'Last;
+      Mine : Long_Float := 0.0;
+   begin
+      for J in 0 .. Natural (Pts.Length) - 1 loop
+         if J /= I and then Pts (J).Kind /= Thing_Pt and then not Pts (J).Lost then
+            declare
+               D : constant Long_Float :=
+                 Sqrt ((Pts (I).Cu - Pts (J).Cu) ** 2 + (Pts (I).Cv - Pts (J).Cv) ** 2);
+               W : constant Long_Float :=
+                 Long_Float'Max (Long_Float'Max (Pts (J).Box_W, Pts (J).Box_H),
+                                 Long_Float'Max (Pts (I).Box_W, Pts (I).Box_H));
+            begin
+               if D < Best then
+                  Best := D; Mine := W;
+               end if;
+            end;
+         end if;
+      end loop;
+      --  身上一块都看不见 ⇒ 说不准它贴没贴着我 ⇒ 不许据此宣布碰到
+      return Best < Long_Float'Last and then Best <= Mine;
+   end Near_My_Piece;
+
    type Effect_Array is array (Natural range <>) of Table.Effect;
    procedure Refind_Pieces (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Cam : Natural; Pts : in out Point_Vectors.Vector);
 
@@ -2593,7 +2618,14 @@ package body Act is
       procedure Learn is
          All_Verified : Boolean := True;
          Any_Wrong : Boolean := False;
+         --  🔴 这一步有没有哪个被跟的点是【跟丢的】(位置是按身体图猜的,不是看见的)
+         Blind_Now : Boolean := False;
       begin
+         for P of Pts loop
+            if P.Lost then
+               Blind_Now := True;
+            end if;
+         end loop;
          Note.Err_Now := 0.0;
          Note.Raw_Now := 0.0;
          for I in 0 .. Natural (Pts.Length) - 1 loop
@@ -2801,7 +2833,12 @@ package body Act is
             Store_Effect (C, Arm, Pts (I).Cam, Pts (I).Kind, Pts (I).Chan_K, Pts (I).Blob, Effs (I), Trusts (I), Reach);
          end loop;
          --  碰到 = 我没在推的东西自己动了(跟着这只手动的相机里满画面都在动,分不出来 ⇒ 不下结论)
-         if not Own_Cam and then not Was_Regs.Is_Empty then
+         --  🔴🔴 还要一条:【我看得见】才谈得上碰到(IG 2026-09-15 实测)。
+         --  身体自己的原话:"I could not see 2 of 2 of the points I am tracking; I am going on where my
+         --  body map says they are" —— 两个点全跟丢、位置全靠身体图猜,然后宣布"碰上了"。
+         --  看图证实:机械手在画面右下角,球在桌心,中间隔着大半张桌子。
+         --  瞎着的时候不许宣布碰到 —— 这不是保守,是"碰到"这个词在没有观测时根本没有内容。
+         if not Own_Cam and then not Was_Regs.Is_Empty and then not Blind_Now then
             declare
                Now_Regs : constant Picture.Regions := Cut_Things (C, F, Cam);
             begin
@@ -2855,8 +2892,13 @@ package body Act is
                --  差距 2.830 → 2.830(一点没变)、还差二十步、"点在画面里没动过"——
                --  一个什么都没发生的步子宣布了接触,`until touched` 于是一推就结束。
                --  零系数:门槛是身体自己量到的交付噪声。
-               if Not_Mine and then Pts (I).Kind = Thing_Pt and then not Pts (I).Lost and then I < Natural (Was.Length)
+               --  🔴🔴 第三条旁证:【它得贴着我】。画面上离我自己那一块比一个我还远 ⇒
+               --  隔着大半张桌子,不可能是我碰的(IG 2026-09-15 看图证实:手在右下角,球在桌心)。
+               --  尺子是我自己那块有多大,量出来的,零系数。
+               if Not_Mine and then Pts (I).Kind = Thing_Pt and then not Pts (I).Lost
+                 and then not Blind_Now and then I < Natural (Was.Length)
                  and then Table.Norm (Note.Got, Chan.Per_Arm) > Long_Float (Fl.Delivery)
+                 and then Near_My_Piece (Pts, I)
                  and then Sqrt ((Pts (I).Cu - Was (I).Cu) ** 2 + (Pts (I).Cv - Was (I).Cv) ** 2)
                           > Long_Float'Max (Pts (I).Box_W, Pts (I).Box_H)
                then

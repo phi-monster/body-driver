@@ -1430,6 +1430,30 @@ begin
              "所以退出条件必须是【它在我眼里滑过了跟踪抖动】—— 三角形扁不扁看它滑了多少,不看我动了多少");
    end;
 
+   --  ===== 碰到:瞎着的时候不许宣布 · 隔着半张桌子不许宣布(IG 2026-09-15 看图证伪) =====
+   declare
+      --  IG 身体自己的原话:"I could not see 2 of 2 of the points I am tracking;
+      --  I am going on where my body map says they are" —— 然后宣布 contact。
+      Lost_Both  : constant Natural := 2;
+      Tracked    : constant Natural := 2;
+      --  看图量到的:手在画面右下角,球在桌心
+      Hand_U : constant Long_Float := 0.7900;
+      Hand_V : constant Long_Float := 0.6900;
+      Ball_U : constant Long_Float := 0.6900;
+      Ball_V : constant Long_Float := 0.3600;
+      My_Size : constant Long_Float := 0.1000;   --  我自己那一块在画面里有多大
+      Du : constant Long_Float := Hand_U - Ball_U;
+      Dv : constant Long_Float := Hand_V - Ball_V;
+      Gap2 : constant Long_Float := Du * Du + Dv * Dv;
+   begin
+      Check (Lost_Both = Tracked,
+             "碰到:IG 当时两个跟踪点【全丢了】,位置全靠身体图猜 ⇒ 那一刻它是瞎的");
+      Check (Gap2 > My_Size * My_Size,
+             "碰到:而画面上手和球隔着比我自己还宽三倍 ⇒ 隔着大半张桌子,不可能是我碰的");
+      Check (not (Gap2 <= My_Size * My_Size),
+             "碰到:所以第三条旁证是【它得贴着我】—— 尺子是我自己那块有多大,量出来的");
+   end;
+
    --  ===== 只有【长在我身上】的眼睛量得了别人的远近(IF 2026-09-15:一甩把球撞飞) =====
    declare
       Track : constant Long_Float := 0.0016;
