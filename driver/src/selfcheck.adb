@@ -1430,6 +1430,39 @@ begin
              "所以退出条件必须是【它在我眼里滑过了跟踪抖动】—— 三角形扁不扁看它滑了多少,不看我动了多少");
    end;
 
+   --  ===== 拨得够大:滑动要【远大于】地板,两次之差才有可能过噪声(ID 2026-09-15) =====
+   declare
+      Floor : constant Long_Float := 0.0016;   --  跟踪抖动(幅)
+      Z1    : constant Long_Float := 0.4000;   --  球先在 0.40 m
+      Z2    : constant Long_Float := 0.3500;   --  走近到 0.35 m
+      Small : constant Long_Float := 0.0032;   --  小拨动:滑动刚过地板两倍(ID 实测就是这一档)
+      Big   : constant Long_Float := 0.0320;   --  大拨动:滑动是地板的二十倍
+      DS, DB : Long_Float;
+   begin
+      --  同一下拨动,滑动 ∝ 1/Z ⇒ 走近之后滑动按 Z1/Z2 变大
+      DS := Small * Z1 / Z2 - Small;
+      DB := Big * Z1 / Z2 - Big;
+      Check (DS < Floor,
+             "拨得够大:刚过地板那一档,走近 5 cm 的滑动之差还在噪声里 ⇒ 这一段永远量不出米数");
+      Check (DB > Floor,
+             "拨得够大:滑动是地板二十倍那一档,同样走近 5 cm 就分得出来 ⇒ 所以要拨到我还跟得住的最大一档");
+      Check (DB > DS,
+             "拨得够大:拨得越大,同样的走近越分得出来 —— 缩幅度是修反的(记录 08-27 V2)");
+   end;
+
+   --  ===== 再量一次的判据:走了多远,不是差距有没有变小(ID 实测米数永远停在"第一次量") =====
+   declare
+      Gap_Before : constant Long_Float := 0.633;
+      Gap_After  : constant Long_Float := 1.022;   --  ID 实测:差距不但没缩,还涨了
+      Nudge_Len  : constant Long_Float := 0.0011;  --  上一拨我自己挪了多远
+      Went       : constant Long_Float := 0.0070;  --  从上次量到现在走了多远
+   begin
+      Check (not (Gap_After < Gap_Before),
+             "判据:ID 那一段差距没缩 ⇒ 用'更近了'当判据的话,一次都不会再量");
+      Check (Went > Nudge_Len,
+             "判据:而它确实走了 7 mm、比上一拨自己挪的还远 ⇒ 用'走了多远'当判据就会再量一次");
+   end;
+
    --  ===== IC 2026-09-15:身体报出"离我 0.014 m"而球在几十厘米外 =====
    --  两个洞同时开着,一个单位错、一个假设错。两个都补,才拦得住那个看起来完全正常的数。
    declare

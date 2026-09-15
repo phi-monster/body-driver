@@ -3050,6 +3050,10 @@ package body Act is
          Best_Amp : Long_Float := 0.0;
          EE0 : Plug.Arm_Pose;
          Moved, Turned, Slid : Long_Float := 0.0;
+         --  🔴 一路拨大的过程里,最后一档【还跟得住】的读数。跟丢那一档不算数。
+         Good_Amp, Good_Slid, Good_Moved, Good_Turn : Long_Float := 0.0;
+         Have_Good : Boolean := False;
+         Any_Lost : Boolean := False;
          Before : Buf_Vectors.Vector;
          Was_R : Point_Vectors.Vector;
          Got : Table.Vec;
@@ -3122,6 +3126,7 @@ package body Act is
             Turned := Sqrt (Turned);
             --  这一拨,最能滑的那一块滑了多少
             Slid := 0.0;
+            Any_Lost := False;
             for I in 0 .. Natural (Pts.Length) - 1 loop
                declare
                   Q : Point := Pts (I);
@@ -3130,15 +3135,27 @@ package body Act is
                   if Natural (Q.Cam) < Natural (Before.Length) then
                      Retrack (C, F, Q.Cam, Before (Natural (Q.Cam)), Q, W0.Cu, W0.Cv, True);
                   end if;
+                  if Q.Lost or else Q.At_Edge then
+                     Any_Lost := True;
+                  end if;
                   Slid := Long_Float'Max
                     (Slid, Sqrt ((Q.Cu - W0.Cu) ** 2 + (Q.Cv - W0.Cv) ** 2));
                   Pts.Replace_Element (I, Q);
                end;
             end loop;
             Tries := Tries + 1;
-            exit when (Slid > Long_Float (Fl.Track) and then Moved > C.Map.EE_Noise)
-                      or else Tries >= Levels_For (1.0) or else not Ok_W;
-            --  还不够 ⇒ 先拨回去,再拨得更大(缩是修反的,记录 08-27 V2:缩了就等于把信号缩进噪声里)
+            --  🔴🔴 拨到【我还跟得住的最大那一档】,不是拨到"刚过地板"就停(ID 2026-09-15 实测)。
+            --  刚过地板 = 滑动只有地板的两倍,而我要比的是【两次滑动之差】——
+            --  差是滑动的一小部分,所以滑动必须【远大于】地板,差才有可能过噪声。
+            --  ID 实测:0.5 mm 的拨动滑 0.003 幅(地板 0.0016),球从 0.40 m 走到 0.35 m
+            --  滑动只变 0.0004 幅 —— 永远测不出来。记录 08-26 D6:步子太小信号就淹进噪声。
+            --  所以按 LAB 那条老结论办:**推得够大**。跟丢了才停,那就是"我还跟得住"的边界本身。
+            exit when Any_Lost or else Tries >= Levels_For (1.0) or else not Ok_W;
+            if Slid > Long_Float (Fl.Track) and then Moved > C.Map.EE_Noise then
+               Good_Amp := Best_Amp; Good_Slid := Slid; Good_Moved := Moved;
+               Good_Turn := Turned; Have_Good := True;
+            end if;
+            --  还能拨得更大 ⇒ 先拨回去,再拨得更大(缩是修反的,记录 08-27 V2:缩了就等于把信号缩进噪声里)
             declare
                A : Table.Vec := Table.Zero_Vec;
             begin
@@ -3150,6 +3167,32 @@ package body Act is
             end loop;
             Best_Amp := Best_Amp + Best_Amp;
          end loop;
+         --  跟丢的那一档不作数,退回最后一档还跟得住的
+         if Any_Lost and then Have_Good then
+            declare
+               A : Table.Vec := Table.Zero_Vec;
+            begin
+               A (Natural (Best_K)) := -Best_Amp;
+               Step_Arm (L, C, F, Arm, A, Jaw, Got, Ok_W, C.Fast);
+               A (Natural (Best_K)) := Good_Amp;
+               Step_Arm (L, C, F, Arm, A, Jaw, Got, Ok_W, C.Fast);
+            end;
+            Best_Amp := Good_Amp; Slid := Good_Slid; Moved := Good_Moved; Turned := Good_Turn;
+            for I in 0 .. Natural (Pts.Length) - 1 loop
+               declare
+                  Q : Point := Pts (I);
+                  W0 : constant Point := Was_R (I);
+               begin
+                  if Natural (Q.Cam) < Natural (Before.Length) then
+                     Retrack (C, F, Q.Cam, Before (Natural (Q.Cam)), Q, W0.Cu, W0.Cv, True);
+                  end if;
+                  Pts.Replace_Element (I, Q);
+               end;
+            end loop;
+            Put_Line ("[身]   📏 再大就跟丢了 ⇒ 退回还跟得住的最大一档:拨 "
+                      & Codec.Fmt (Good_Amp, 4) & " ⇒ 挪 " & Codec.Fmt (Good_Moved, 4)
+                      & " m · 最能滑的滑了 " & Codec.Fmt (Good_Slid, 4) & " 幅");
+         end if;
          if Slid <= Long_Float (Fl.Track) then
             Put_Line ("[身]   📏 量不了远近:拨到 " & Codec.Fmt (Best_Amp, 4)
                       & " 了,最能滑的那一块也只滑了 " & Codec.Fmt (Slid, 4)
@@ -3371,12 +3414,23 @@ package body Act is
          end if;
          Look;
          Learn;
-         --  🔴 比上一次量的时候更近了 ⇒ 再拨同样的一下量一次。
-         --  走近了才量得出米数(S₂ − S₁ 就是那点"走近"),所以判据就是"我又走近了",零系数。
-         if Note.Raw_Now < Ranged_Raw then
-            Ranged_Raw := Note.Raw_Now;
-            Range_Probe;
+         --  🔴 再量一次的判据:**我从上次量到现在走了多远**,不是"差距有没有变小"。
+         --  ID 2026-09-15 实测:判据写成"更近了"时,身体一路没改善 ⇒ 一次都不再量 ⇒
+         --  米数永远停在"这是第一次量"。而米数要的正是【两次之间走了多远】,
+         --  所以该由走了多远说了算。走够我上一拨自己挪的那么多,就再量一次(零系数,都是量出来的)。
+         if Probe_Have then
+            declare
+               D : Long_Float := 0.0;
+            begin
+               for K in 0 .. 2 loop
+                  D := D + (F.EE (Arm) (K) - Probe_EE (K)) ** 2;
+               end loop;
+               if Sqrt (D) > Probe_Len then
+                  Range_Probe;
+               end if;
+            end;
          end if;
+         Ranged_Raw := Long_Float'Min (Ranged_Raw, Note.Raw_Now);
          --  🔴 平时不重量表(每段重量 = 一推 13~21 拍的老账);但身体一旦【连着三步说"我的地图不如零假设准"】,
          --  就当场重量一遍 —— 拿着一张被证明错的表一路开,正是 GW 实测"手在动、球的距离一点不变"的直接原因。
          --  只在被证明错的时候才重量:既不回到每段重量,也不拿假表开车。
