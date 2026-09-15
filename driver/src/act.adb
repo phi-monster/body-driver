@@ -5838,6 +5838,15 @@ package body Act is
                   end;
                end loop;
                Run_Segment (L, C, F, Cam, Pts, Until_K, Step_Limit, Amount, Avoid, Event, Steps_Taken, Blocked, Beats);
+               --  🔴 脑说过"这只眼的这几个框里没有它"⇒ 那只眼被跳过(见 Blind_Cam)。
+               --  可那句话只对【当下这一帧的切块】成立:JF 2026-09-16 实测,腕眼里球
+               --  【看得见但没被切成块】(被两根手指从中间劈开),我照实答 0,结果那只眼整集被判死,
+               --  而尺子只有长在手上的眼能用 ⇒ 这一集再也量不了远近。
+               --  "这几个框里没有它" ≠ "这只眼看不见它" —— 我把两件事混成了一件。
+               --  画面只有我动了才会变 ⇒ **真走过步之后就该重新问**。零系数:走没走是身体自己数的。
+               if Steps_Taken > 0 then
+                  C.Blind_Cam := -1;
+               end if;
                C.Last_Outcome := Classify (To_String (Event));
                Feel (C, F);
                Report := Report & "you asked " & Desc & ": " & Event & ". I took " & Codec.Img (Steps_Taken) & " pushes; ";
