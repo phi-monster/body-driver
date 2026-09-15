@@ -1414,6 +1414,22 @@ begin
              "温度计 ≠ 尺子:体检只说'我的距离感放大了 32 倍',量距离得靠胳膊滑出来的那两个数");
    end;
 
+   --  ===== 拨到【它真的滑得动】为止(IB 2026-09-15 第一炮实测) =====
+   declare
+      Track_Jitter : constant Long_Float := 0.0016;   --  跟踪抖动(画幅)
+      EE_Jitter    : constant Long_Float := 0.0003;   --  本体位置读数抖动(米)
+      Tiny_Move    : constant Long_Float := 0.0005;   --  一拨只挪了半毫米
+      Tiny_Slide   : constant Long_Float := 0.0009;   --  于是它只滑了 0.0009 幅
+      Good_Slide   : constant Long_Float := 0.0400;
+   begin
+      Check (Tiny_Move > EE_Jitter,
+             "退出条件写成'挪过本体读数抖动' ⇒ 半毫米就算过关 —— IB 第一炮就是这么退出的");
+      Check (Tiny_Slide < Track_Jitter,
+             "而它只滑了 0.0009 幅、还没过跟踪抖动 ⇒ 那一拨等于没量");
+      Check (Good_Slide > Track_Jitter,
+             "所以退出条件必须是【它在我眼里滑过了跟踪抖动】—— 三角形扁不扁看它滑了多少,不看我动了多少");
+   end;
+
    --  ===== 米数:一只眼 + 会动 + 知道自己走了多远(所有机体通用) =====
    declare
       Ran_Floor : constant Long_Float := 0.0016;   --  跟踪抖动(画幅)

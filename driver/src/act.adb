@@ -3038,7 +3038,7 @@ package body Act is
          Best_K : Integer := -1;
          Best_Amp : Long_Float := 0.0;
          EE0 : Plug.Arm_Pose;
-         Moved, Turned : Long_Float := 0.0;
+         Moved, Turned, Slid : Long_Float := 0.0;
          Before : Buf_Vectors.Vector;
          Was_R : Point_Vectors.Vector;
          Got : Table.Vec;
@@ -3083,6 +3083,11 @@ package body Act is
          Before := All_Gray (F);
          Was_R := Pts;
          EE0 := F.EE (Arm);
+         --  🔴🔴 拨到【它真的滑得动】为止,不是拨到"我自己的位置读数动了"为止。
+         --  IB 2026-09-15 实测第一炮就踩到:退出条件写的是"挪过本体读数抖动",
+         --  而本体读数抖动只有半毫米 ⇒ 一拨 0.0005 m 就退出 ⇒ 东西只滑 0.0009 幅,
+         --  还没过跟踪抖动 ⇒ 等于没量。三角形扁不扁,看的是【它在我眼里滑了多少】,
+         --  不是我自己动了多少(记录 2026-08-16:挪 4 mm 而至少要 50 mm)。
          loop
             declare
                A : Table.Vec := Table.Zero_Vec;
@@ -3100,10 +3105,46 @@ package body Act is
                Turned := Turned + (F.EE (Arm) (K) - EE0 (K)) ** 2;
             end loop;
             Turned := Sqrt (Turned);
+            --  这一拨,最能滑的那一块滑了多少
+            Slid := 0.0;
+            for I in 0 .. Natural (Pts.Length) - 1 loop
+               declare
+                  Q : Point := Pts (I);
+                  W0 : constant Point := Was_R (I);
+               begin
+                  if Natural (Q.Cam) < Natural (Before.Length) then
+                     Retrack (C, F, Q.Cam, Before (Natural (Q.Cam)), Q, W0.Cu, W0.Cv, True);
+                  end if;
+                  Slid := Long_Float'Max
+                    (Slid, Sqrt ((Q.Cu - W0.Cu) ** 2 + (Q.Cv - W0.Cv) ** 2));
+                  Pts.Replace_Element (I, Q);
+               end;
+            end loop;
             Tries := Tries + 1;
-            exit when Moved > C.Map.EE_Noise or else Tries >= Levels_For (1.0) or else not Ok_W;
-            Best_Amp := Best_Amp + Best_Amp;   --  拨得还不够 ⇒ 拨得更大(缩是修反的,记录 08-27 V2)
+            exit when (Slid > Long_Float (Fl.Track) and then Moved > C.Map.EE_Noise)
+                      or else Tries >= Levels_For (1.0) or else not Ok_W;
+            --  还不够 ⇒ 先拨回去,再拨得更大(缩是修反的,记录 08-27 V2:缩了就等于把信号缩进噪声里)
+            declare
+               A : Table.Vec := Table.Zero_Vec;
+            begin
+               A (Natural (Best_K)) := -Best_Amp;
+               Step_Arm (L, C, F, Arm, A, Jaw, Got, Ok_W, C.Fast);
+            end;
+            for I in 0 .. Natural (Pts.Length) - 1 loop
+               Pts.Replace_Element (I, Was_R (I));
+            end loop;
+            Best_Amp := Best_Amp + Best_Amp;
          end loop;
+         if Slid <= Long_Float (Fl.Track) then
+            Put_Line ("[身]   📏 量不了远近:拨到 " & Codec.Fmt (Best_Amp, 4)
+                      & " 了,最能滑的那一块也只滑了 " & Codec.Fmt (Slid, 4)
+                      & " 幅,没过跟踪抖动 " & Codec.Fmt (Long_Float (Fl.Track), 4)
+                      & " ⇒ 三角形太扁,这个数我不给");
+            C.Blind_Say := S ("I tried to work out how far things are by nudging myself and watching them slide, but "
+                              & "even at my biggest nudge nothing slid further than my own tracking jitter. A flat "
+                              & "triangle gives a worthless distance, so I am giving you no number at all.");
+            return;
+         end if;
          if Moved <= C.Map.EE_Noise then
             Put_Line ("[身]   📏 量不了远近:这一拨我只挪了 " & Codec.Fmt (Moved, 4)
                       & " m,没过我自己的位置读数抖动 " & Codec.Fmt (C.Map.EE_Noise, 4) & " m");
