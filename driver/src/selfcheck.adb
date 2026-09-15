@@ -534,6 +534,7 @@ begin
    --  done 写在循环里 = 整段程序到此为止,不许说完"做完了"又循环回去
    declare
       use Sinew;
+      use type Runtime.Yield;
       G : constant Program := Sinew.Parse
         ("repeat 3 times:" & ASCII.LF & "  do grasper open until settled" & ASCII.LF & "  done" & ASCII.LF & "end" & ASCII.LF & "say never here");
       M : Runtime.Machine;
