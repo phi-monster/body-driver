@@ -198,7 +198,7 @@ begin
    begin
       F.Picture := 2.0; F.Track := 0.001; F.Delivery := 0.0001;
       for K in 1 .. 5 loop   --  走不动了要连着五步没进步(次数,无量纲)
-         Monitor.Step (W, 1.0, 0.5, 0.5, 0.01, F);
+         Monitor.Step (W, 1.0, 0.5, 0.5, 0.01, F, Seen => True);
       end loop;
       Check (Monitor.Settled (W) and then Monitor.Stalled (W) and then not Monitor.Refusing (W), "监视器:静止且没进展");
       Check (Monitor.Fired (Monitor.U_Settle, W, 0, False, 0.0, 0.0, 0.0), "until settle 触发");
@@ -1241,7 +1241,7 @@ begin
    --  🔴 打死 GM 的那个 bug 的正对焊缝:交给 Monitor 的步数上限永远不许是 0。
    --  先证明"上限 0 = 第一步就成立"确有其事,再证明 Effective_Cap 不可能给出 0。
    declare
-      W0 : constant Monitor.Watch := (Quiet => 0, No_Progress => 0, Steps => 0, Refused => 0);
+      W0 : constant Monitor.Watch := (Quiet => 0, No_Progress => 0, Steps => 0, Refused => 0, Blind => 0);
       Zero_Fires : constant Boolean :=
         Monitor.Fired (Monitor.U_Steps, W0, 0, False, 0.0, 0.0, 0.0);
       Cap_Holds : constant Boolean :=
@@ -1269,7 +1269,7 @@ begin
    --  把 Refusing 和 Slipped 各改成恒 False,自检照样全过 —— 语言里两个结局词判据没人看着。
    declare
       function W_Ref (N : Monitor.Count) return Monitor.Watch is
-        ((Quiet => 0, No_Progress => 0, Steps => 0, Refused => N));
+        ((Quiet => 0, No_Progress => 0, Steps => 0, Refused => N, Blind => 0));
    begin
       --  顶住 = 命令发了而身体没走,连着两步才算(一步可能只是还没生效)
       Check (not Monitor.Refusing (W_Ref (0)) and then not Monitor.Refusing (W_Ref (1)),
@@ -1412,6 +1412,19 @@ begin
       --  🔴 温度计 ≠ 尺子:体检那个倍数量的是【我的距离感坏了多少】,它不产生任何距离。
       Check (Act.Depth_Scale_Bad (-32.1) and then Act.Farther_By (N_Near, N_Far) > 0.0,
              "温度计 ≠ 尺子:体检只说'我的距离感放大了 32 倍',量距离得靠胳膊滑出来的那两个数");
+   end;
+
+   --  ===== "画面不再变了"的第三条旁证:我得真看见了我在判的那些点(JB:跟丢之后在幻影上报 settle) =====
+   declare
+      Seen_W  : constant Monitor.Watch := (Quiet => 2, No_Progress => 0, Steps => 9, Refused => 0, Blind => 0);
+      Blind_W : constant Monitor.Watch := (Quiet => 2, No_Progress => 0, Steps => 9, Refused => 0, Blind => 2);
+   begin
+      Check (Monitor.Settled (Seen_W),
+             "settled:画面不变 · 我真动过 · 而且我真看见了那些点 ⇒ 这才是到位了");
+      Check (not Monitor.Settled (Blind_W),
+             "settled:跟丢之后位置是按身体图猜的 ⇒ 画面当然不变,那是幻影不是到位(JB 实测 2/2 点全丢还报 settle)");
+      Check (Monitor.Settled (Seen_W) /= Monitor.Settled (Blind_W),
+             "settled:三条旁证缺一条就不许成立 —— 跟丢不是停下的理由,但绝对不能算到了");
    end;
 
    --  ===== 选眼要看【脑在那只眼里认不认得出这一段要做的事】(JA:最静的那只眼里是风扇) =====
