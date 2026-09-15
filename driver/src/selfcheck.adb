@@ -20,6 +20,7 @@ with Interfaces; use type Interfaces.Unsigned_8;
 with Ada.Numerics.Long_Elementary_Functions; use Ada.Numerics.Long_Elementary_Functions;
 with Sinew;
 with Plan;
+with Runtime;
 with Act;
 procedure Selfcheck is
    Fails : Natural := 0;
@@ -529,6 +530,26 @@ begin
       Check (Bad ("repeat 3 times:" & ASCII.LF & "do grasper open until settled"), "Sinew:块没有 end ⇒ 退回");
       Check (Bad ("end"), "Sinew:多一个 end ⇒ 退回");
       Check (Sinew.Parse ("do grasper close until stuck").Ok, "Sinew:close 可以不带宾语 —— 就在这儿合上");
+   end;
+   --  done 写在循环里 = 整段程序到此为止,不许说完"做完了"又循环回去
+   declare
+      use Sinew;
+      G : constant Program := Sinew.Parse
+        ("repeat 3 times:" & ASCII.LF & "  do grasper open until settled" & ASCII.LF & "  done" & ASCII.LF & "end" & ASCII.LF & "say never here");
+      M : Runtime.Machine;
+      W : Runtime.Yield;
+      I : Sinew.Instr;
+      Seen_Done, Then_Finished : Boolean := False;
+   begin
+      Runtime.Advance (G, M, W, I);                 --  第一段 open
+      if W = Runtime.Y_Interval then
+         Runtime.Report (G, M, Oc_Settled);
+         Runtime.Advance (G, M, W, I);              --  done
+         Seen_Done := W = Runtime.Y_Done;
+         Runtime.Advance (G, M, W, I);              --  之后必须是 Finished,不许回到循环头、也不许走到 say
+         Then_Finished := W = Runtime.Y_Finished;
+      end if;
+      Check (Seen_Done and then Then_Finished, "Sinew:循环里的 done 之后程序结束(不再循环、不走后面的行)");
    end;
 
    --  🔴 每个结局词都要有【自己】的判法 —— 语言收下一个词,身体悄悄换成另一个词的行为,是本仓最贵的一类 bug。

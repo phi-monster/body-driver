@@ -52,7 +52,9 @@ package body Runtime is
                What := Y_Remember;
                return;
             when Op_Done =>
-               M.PC := M.PC + 1;
+               --  done = 这件事做完了 ⇒ 整段程序到此为止(跳到末尾;下一次 Advance 报 Y_Finished)。
+               --  以前只是 PC+1:写在 repeat 里的 done 说完"做完了"接着又循环回去 ⇒ 拿着球再去"贴球"
+               M.PC := Natural (P.Code.Length);
                What := Y_Done;
                return;
             when Op_Jump =>
