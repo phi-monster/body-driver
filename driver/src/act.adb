@@ -2283,7 +2283,42 @@ package body Act is
                --  🔴 标价改成"这个动作把画面搅动多少":一单位命令让被跟的点在画面里跑几个跟踪窗,就付几分钱(无量纲)。
                --  以前按"自己那一档"计价,而转腕那一档(0.0256)比平移那一档(0.0064)大四倍 ⇒ 转腕在账本上便宜十六倍,
                --  于是它一直买转腕,而转腕不会让手靠近(FJ 实测:横挪 4 cm,球反而从 0.333 m 退到 0.360 m)
+               --  🔴🔴 在【长在我身上的那只眼】里,"把手抬高"和"把镜头仰起来"在画面上一模一样:
+               --  球都往下走。按上面那个标价,两者花的钱也一样(代价 = 画面改变量²,与用哪根通道无关),
+               --  于是解算总买更省力的那个 —— 转腕。手一步没靠近,球却被仰出了视野。
+               --  IW 2026-09-15 同一炮里【连着两次】:腕眼里压几步,画面就只剩窗户和天花板。
+               --  这是 FJ 那条老账的同族(转腕不会让手靠近:横挪 4 cm,球反而从 0.333 m 退到 0.360 m)。
+               --  身体现在分得出来:我在世界里【真走了多少米】是关节读数给的,
+               --  仰镜头几乎不位移、抬手真位移 —— 画面里一样,本体感觉里天差地别。
+               --  ⇒ 在这只眼里按【搅动画面 ÷ 真把我挪了多远】标价:
+               --  只搅画面不挪我的通道,价钱按倍数涨上去,解算自己就不买了。零系数,两个都是量出来的。
                Damp (K) := (Px / Track_Win) ** 2;
+               if Own_Cam and then Ch_No < Natural (C.Reach_M.Length) then
+                  declare
+                     Mine : constant Long_Float := C.Reach_M.Element (Ch_No);
+                     Best : Long_Float := 0.0;
+                  begin
+                     for J in 0 .. Chan.Per_Arm - 1 loop
+                        declare
+                           Jn : constant Natural := Arm * Chan.Per_Arm + J;
+                        begin
+                           if Jn < Natural (C.Reach_M.Length) then
+                              Best := Long_Float'Max (Best, C.Reach_M.Element (Jn));
+                           end if;
+                        end;
+                     end loop;
+                     if Best > 0.0 then
+                        if Mine > 0.0 then
+                           Damp (K) := Damp (K) * (Best / Mine);
+                        else
+                           --  一点都不挪我 ⇒ 在这只眼里它对"靠近"毫无贡献,只会把镜头转开
+                           --  一点都不挪我 ⇒ 在这只眼里它对"靠近"毫无贡献,只会把镜头转开。
+                           --  价钱抬到【这一段最能挪我的那根】的整个量级之上,解算自然不买。
+                           Damp (K) := Damp (K) + Damp (K) / Long_Float'Max (Best, Long_Float'Small);
+                        end if;
+                     end if;
+                  end;
+               end if;
             end;
          end loop;
          --  hold 的那几条进硬约束:先把它们解到位,软目标只能在剩下的自由度里做文章。

@@ -1414,6 +1414,28 @@ begin
              "温度计 ≠ 尺子:体检只说'我的距离感放大了 32 倍',量距离得靠胳膊滑出来的那两个数");
    end;
 
+   --  ===== 腕眼里"抬手"和"仰镜头"画面一样,标价也一样 ⇒ 总买转腕(IW 一炮里连着两次仰到墙上) =====
+   declare
+      Track_Win : constant Long_Float := 0.1000;
+      --  两根通道:一根真把手挪出去,一根只转腕
+      Px_Lift  : constant Long_Float := 0.5000;   --  抬手:画面里球跑这么多
+      Px_Tilt  : constant Long_Float := 0.5000;   --  仰镜头:画面里球跑一样多
+      Reach_Lift : constant Long_Float := 0.0200; --  抬手:手在世界里真挪 2 cm
+      Reach_Tilt : constant Long_Float := 0.0010; --  仰镜头:手几乎不动
+      D_Lift_Old, D_Tilt_Old, D_Lift_New, D_Tilt_New : Long_Float;
+   begin
+      D_Lift_Old := (Px_Lift / Track_Win) ** 2;
+      D_Tilt_Old := (Px_Tilt / Track_Win) ** 2;
+      Check (D_Lift_Old = D_Tilt_Old,
+             "IW:老标价下两者【一模一样贵】—— 画面上长得一样,价钱也一样,解算凭什么不买转腕");
+      D_Lift_New := D_Lift_Old * (Reach_Lift / Reach_Lift);
+      D_Tilt_New := D_Tilt_Old * (Reach_Lift / Reach_Tilt);
+      Check (D_Tilt_New > D_Lift_New,
+             "IW:按【搅动画面 ÷ 真把我挪了多远】标价 ⇒ 转腕贵了二十倍,解算自己就不买了");
+      Check (Reach_Lift > Reach_Tilt,
+             "IW:两者在画面里一样,在【本体感觉】里天差地别 —— 这就是分得开它们的那把尺子");
+   end;
+
    --  ===== 关掉一整维的时候必须说【为什么】(IV 2026-09-15:补了退路仍是 0.0,日志一个字没解释) =====
    declare
       Row_Off   : constant Long_Float := 0.0000;   --  那一栏印出来就是 0.0
