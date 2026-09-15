@@ -1414,6 +1414,46 @@ begin
              "温度计 ≠ 尺子:体检只说'我的距离感放大了 32 倍',量距离得靠胳膊滑出来的那两个数");
    end;
 
+   --  ===== 放大器要有天花板:解算里面夹过了,外面那两下放大没人管(IZ:命令 7.6e9,实到 0) =====
+   declare
+      Cap_Eye  : constant Long_Float := 0.0512;   --  眼睛跟得住的那一档(量出来的)
+      Dead_Ch  : constant Long_Float := 0.0256;   --  能让我动起来的最小一步(量出来的)
+      Lim      : constant Long_Float := Long_Float'Max (Cap_Eye, Dead_Ch);
+      N0       : constant Long_Float := 1.0e-9;   --  表说"没一根通道能改这个"⇒ 解出来几乎是零
+      G        : constant Long_Float := Dead_Ch / N0;      --  放大到"能动起来的一步"
+      --  IZ 2026-09-15 同一段连着两步的第 4 根通道命令(照抄日志,不是我挑的系数)
+      Iz_Step2 : constant Long_Float := 88947710.235;
+      Iz_Step3 : constant Long_Float := 7563365780.274;
+      Blown    : constant Long_Float := N0 * G * (Iz_Step3 / Iz_Step2);   --  再乘一次 Push_Mult
+      Sent     : constant Long_Float := Long_Float'Min (Blown, Lim);
+   begin
+      Check (G > 1.0e6,
+             "放大器:表≈0 时 G = 能动起来的一步 / 解出来的 ⇒ 天文数字 —— 这就是 7.6e9 的来源");
+      Check (Blown > Lim,
+             "放大器:不夹的话,放大后的命令远超我推得动的那一下");
+      Check (Sent <= Lim + 1.0e-12,
+             "放大器:夹完之后,发出去的不许超过【眼睛跟得住】和【能动起来的最小一步】里大的那个");
+      Check (Sent >= Dead_Ch - 1.0e-12,
+             "放大器:夹完之后仍然推得动 —— GK 那条'不放大就 30 步空转'不受影响");
+   end;
+
+   --  ===== 表说"我一推也改不了"要能触发重量:零表和废表预测一样,'零表更准'永不成立 =====
+   declare
+      Gap        : constant Long_Float := 0.359;   --  差距还在(量出来的)
+      Track      : constant Long_Float := 0.010;
+      Asked      : constant Long_Float := 0.0;     --  一下推得动的推都没开出来
+      Floor_Cmd  : constant Long_Float := 0.0064;
+      Null_Wins  : constant Boolean := False;      --  零表【不】更准:两张表预测一模一样
+      Fires      : constant Boolean := Null_Wins or else (Asked <= Floor_Cmd and then Gap > Track);
+   begin
+      Check (not Null_Wins,
+             "重量表:表说'我一推也改不了'时,零表和它预测一样 ⇒ 老那条触发不了");
+      Check (Fires,
+             "重量表:第二条触发认的是'差距还在而我一下推得动的推都没开出来'⇒ 这时才重量");
+      Check (not (Asked <= Floor_Cmd and then Gap <= Track),
+             "重量表:差距已经进噪声了就不算 —— 不许把'到了'当成'表废了'");
+   end;
+
    --  ===== "画面不再变了"要配旁证:我这几步真动过(IZ 2026-09-15:4 推就假报"到了") =====
    declare
       Quiet_2   : constant Natural := 2;   --  连着两步画面没变

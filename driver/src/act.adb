@@ -2490,6 +2490,51 @@ package body Act is
                Note.Cmd (K) := Note.Cmd (K) * Push_Mult;
             end loop;
          end if;
+         --  🔴🔴 解算【里面】按 Note.Cap 夹过了,可上面这两下放大都在【外面】,谁都不管:
+         --    ① G = Floor_Move / N0 —— 表说"没有一根通道能改这个"时 N0≈0 ⇒ G 是天文数字;
+         --    ② Push_Mult —— 画面没动就一直涨,于是上一步的天文数字再乘一遍。
+         --  IZ 2026-09-15 实测三步:命令 [.. -2.2e8 -3.5e9 7.6e9 -1.9e9],实到全零,每步 ×85。
+         --  身体送不出去 ⇒ 画面不动 ⇒ Push_Mult 再涨 ⇒ 自我放大,一段四步全废。
+         --  🔴 一条量出来的天花板就够:**我发的这一下不许超过【眼睛跟得住的那一档】和
+         --  【能让我动起来的最小一步】里大的那个**。两个都是身体自己量的:
+         --    Note.Cap = 探针那一档 × 核实过的倍数,压在"眼睛一步跟得住"底下;
+         --    Floor_Move = 这根通道自己学到的死区(没学到就用开机量到的那一档)。
+         --  放大到死区那一档照样成立(GK 那条"不放大就 30 步空转"不受影响),
+         --  再往上的一律不是推,是胡说 —— 夹回去并且说出来。
+         declare
+            Said : Boolean := False;
+            Floor_Move : Long_Float := C.Map.EE_Noise;
+         begin
+            for K in 0 .. Chan.Per_Arm - 1 loop
+               if Note.Active (K) then
+                  declare
+                     Cn : constant Natural := Arm * Chan.Per_Arm + K;
+                     D : constant Long_Float :=
+                       (if Cn < Natural (C.Dead.Length) and then C.Dead.Element (Cn) > 0.0
+                        then C.Dead.Element (Cn) else C.Map.Amp (Cn));
+                  begin
+                     Floor_Move := Long_Float'Max (Floor_Move, D);
+                  end;
+               end if;
+            end loop;
+            for K in 0 .. Chan.Per_Arm - 1 loop
+               declare
+                  Lim : constant Long_Float := Long_Float'Max (abs Note.Cap (K), Floor_Move);
+               begin
+                  if Lim > 0.0 and then abs Note.Cmd (K) > Lim then
+                     if not Said then
+                        Put_Line ("[身]     要发的这一下比我真推得动的那一下大 "
+                                  & Codec.Fmt (abs Note.Cmd (K) / Lim, 0) & " 倍 ⇒ 按我推得动的那一下走"
+                                  & "(表说没一根通道能改这个，放大它也没用)");
+                        C.Blind_Say := S ("the push my own map asked for was far bigger than anything I have ever "
+                                          & "actually managed to deliver, so I sent the biggest one I really can");
+                        Said := True;
+                     end if;
+                     Note.Cmd (K) := (if Note.Cmd (K) > 0.0 then Lim else -Lim);
+                  end if;
+               end;
+            end loop;
+         end;
       end Trim;
 
       --  ① 打算怎么走 = 定目标 → 定额度 → 修步子
@@ -3716,14 +3761,32 @@ package body Act is
          --  🔴 平时不重量表(每段重量 = 一推 13~21 拍的老账);但身体一旦【连着三步说"我的地图不如零假设准"】,
          --  就当场重量一遍 —— 拿着一张被证明错的表一路开,正是 GW 实测"手在动、球的距离一点不变"的直接原因。
          --  只在被证明错的时候才重量:既不回到每段重量,也不拿假表开车。
-         if Note.Blocked then
-            Blocked_Run := Blocked_Run + 1;
-         else
-            Blocked_Run := 0;
-         end if;
+         --  🔴 第二条触发(IZ 2026-09-15):上面那条只认"零表【更准】",而表说"我一推也改不了这个"时,
+         --  零表和这张表【预测一模一样】(都说不动)⇒ 零表永远不更准 ⇒ 重量这条路一次都走不到,
+         --  身体就守着一张废表把命令放大到 7.6e9,一段四步全空转。
+         --  这一条判的是另一件事:**差距还在,而我连一下【推得动的推】都没开出来**。
+         --  两个量都是身体自己的:差距 = 这一步量到的;推得动 = 这根通道的死区 / 本体噪声。
+         declare
+            Nothing_Asked : Boolean := True;
+         begin
+            for K in 0 .. Chan.Per_Arm - 1 loop
+               if Note.Active (K)
+                 and then abs Note.Cmd (K) > Long_Float'Max (Note.Floor_Cmd, C.Map.EE_Noise)
+               then
+                  Nothing_Asked := False;
+               end if;
+            end loop;
+            if Note.Blocked
+              or else (Nothing_Asked and then Note.Raw_Now > Fl.Track)
+            then
+               Blocked_Run := Blocked_Run + 1;
+            else
+               Blocked_Run := 0;
+            end if;
+         end;
          if Blocked_Run >= 3 then
             Blocked_Run := 0;
-            Put_Line ("[身]     连着三步都是零表更准 ⇒ 这张表已经被证明不准,当场重量一遍");
+            Put_Line ("[身]     连着三步这张表要么不如零表准、要么一推也改不了差距 ⇒ 当场重量一遍");
             C.Blind_Say := S ("for three steps in a row my own map of what my pushes do was worse than assuming "
                               & "nothing happens, so I stopped driving on it and measured it again on the spot");
             declare
