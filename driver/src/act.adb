@@ -3037,12 +3037,42 @@ package body Act is
                --  (GA8:多量三次把手带到天上去了);最后几厘米靠手自己的位姿读数走,它准到毫米
                if Frac >= 1.0 then
                   declare
-                     Cur2 : constant Plug.Arm_Pose := F.EE (Arm);
-                     Went : constant Geom.V3 := [Cur2 (0) - Cur (0), Cur2 (1) - Cur (1), Cur2 (2) - Cur (2)];
-                     Short : constant Long_Float := Geom.Norm ([Dw (0) - Went (0), Dw (1) - Went (1), Dw (2) - Went (2)]);
+                     --  最后一截差得多就按读数再补(GC6 第 1 桌:命令下 21 mm 只到 12.6,差 8.8 mm 也算"到了",
+                     --  合手咬在球顶,一抬就滑)。补的门槛 = 半个容差(比例,无量纲);最多补两次(次数);
+                     --  一补几乎没动(不到要的两成,比例,无量纲)= 顶住了,再推也没用,停
+                     Fix_Frac : constant Long_Float := 0.5;
+                     Fix_Max : constant Natural := 2;
+                     Stuck_Frac : constant Long_Float := 0.2;
+                     Cur2 : Plug.Arm_Pose := F.EE (Arm);
+                     Went : Geom.V3 := [Cur2 (0) - Cur (0), Cur2 (1) - Cur (1), Cur2 (2) - Cur (2)];
+                     Rest : Geom.V3 := [Dw (0) - Went (0), Dw (1) - Went (1), Dw (2) - Went (2)];
+                     Short : Long_Float := Geom.Norm (Rest);
+                     Fixes : Natural := 0;
                   begin
+                     while Short > Fix_Frac * Tol and then Fixes < Fix_Max loop
+                        declare
+                           Before : constant Plug.Arm_Pose := F.EE (Arm);
+                           Moved : Long_Float;
+                        begin
+                           Geo_Move (L, C, F, Arm, Rest, Mok);
+                           Fixes := Fixes + 1;
+                           Cur2 := F.EE (Arm);
+                           Moved := Geom.Norm ([Cur2 (0) - Before (0), Cur2 (1) - Before (1), Cur2 (2) - Before (2)]);
+                           Went := [Cur2 (0) - Cur (0), Cur2 (1) - Cur (1), Cur2 (2) - Cur (2)];
+                           Rest := [Dw (0) - Went (0), Dw (1) - Went (1), Dw (2) - Went (2)];
+                           Geo_Say ("最后一截差 " & Mm (Short) & " ⇒ 按读数补第" & Codec.Img (Fixes) & " 次,动了 " & Mm (Moved) & ",还差 " & Mm (Geom.Norm (Rest)));
+                           if Moved < Stuck_Frac * Short then
+                              Geo_Say ("补了几乎没动 ⇒ 顶住了,不再推");
+                              Short := Geom.Norm (Rest);
+                              exit;
+                           end if;
+                           Short := Geom.Norm (Rest);
+                        end;
+                     end loop;
                      C.Geo_Dist := Short; C.Geo_Round := C.Round_N;
-                     Event := S ("amount: arrived (I went the last " & Mm (Ln) & " by my own arm's reckoning; it fell short by " & Mm (Short) & ")");
+                     Event := S ("amount: arrived (I went the last " & Mm (Ln) & " by my own arm's reckoning"
+                                 & (if Fixes > 0 then ", then corrected" & Natural'Image (Fixes) & " time(s) by the same reckoning" else "")
+                                 & "; it fell short by " & Mm (Short) & ")");
                      exit;
                   end;
                end if;
