@@ -3842,8 +3842,7 @@ package body Act is
                   Reading : Long_Float;
                   Hz : constant Zone.Hand_Zone := Zone_Of (C, A, Cam);
                   --  几何逼近刚算过它离指尖该到的那点多远(这一轮或上一轮)⇒ 笼住与否由那个数说,不再拿像素框/深度猜
-                  Geo_Cage : constant Boolean := C.Geo_Dist >= 0.0 and then C.Round_N - C.Geo_Round <= 1
-                                                 and then Cam_Arm (C, Cam) = Integer (A) and then Geo_Ready (C, Cam);
+                  Geo_Cage : constant Boolean := Geo_Case = 3;   --  和上面"合前不再走"是同一个判断,只此一处
                begin
                   if Geo_Cage then
                      declare
