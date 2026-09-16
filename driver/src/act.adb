@@ -2515,10 +2515,12 @@ package body Act is
          Su, Sv : Long_Float := 0.0;
          Cnt : Natural := 0;
          Ds : Floats;
+         --  合空扫过的像素(手指本身)装回身体文件后没有,那就只靠"这个框里最近的那一团"
+         Use_Mask : constant Boolean := Natural (Z.Fingers.Length) = Cw * Ch;
          function Dep (X, Y : Natural) return Long_Float is
             I : constant Natural := Y * Cw + X;
          begin
-            if I < Natural (Z.Fingers.Length) and then Z.Fingers (I) and then I < Natural (F.Cams (Cam).Depth.Length) then
+            if (not Use_Mask or else (I < Natural (Z.Fingers.Length) and then Z.Fingers (I))) and then I < Natural (F.Cams (Cam).Depth.Length) then
                declare
                   D : constant Long_Float := F.Cams (Cam).Depth (I);
                begin
