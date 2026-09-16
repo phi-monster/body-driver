@@ -2510,22 +2510,64 @@ package body Act is
       Tips : array (0 .. 1) of Geom.V3 := [others => [others => 0.0]];
       Nt : Natural := 0;
       procedure One (Lb : Zone.Lobe) is
+         Dmin : Long_Float := Long_Float'Last;
          Top : Integer := -1;
          Su, Sv : Long_Float := 0.0;
          Cnt : Natural := 0;
          Ds : Floats;
+         function Dep (X, Y : Natural) return Long_Float is
+            I : constant Natural := Y * Cw + X;
+         begin
+            if I < Natural (Z.Fingers.Length) and then Z.Fingers (I) and then I < Natural (F.Cams (Cam).Depth.Length) then
+               declare
+                  D : constant Long_Float := F.Cams (Cam).Depth (I);
+               begin
+                  if D > 0.0 and then not Picture.Is_Nan (D) then
+                     return D;
+                  end if;
+               end;
+            end if;
+            return -1.0;
+         end Dep;
+         --  手指是它自己框里离相机最近的那一团:比最近处远过一半的像素不是手指(桌面、影子;倍数,无量纲)
+         function Near (X, Y : Natural) return Boolean is
+            D : constant Long_Float := Dep (X, Y);
+         begin
+            return D > 0.0 and then D < Dmin * 1.5;
+         end Near;
       begin
          if not Lb.Valid then
             return;
          end if;
          for Y in Lb.Y0 .. Lb.Y1 loop
             for X in Lb.X0 .. Lb.X1 loop
-               if Y * Cw + X < Natural (Z.Fingers.Length) and then Z.Fingers (Y * Cw + X) then
+               declare
+                  D : constant Long_Float := Dep (X, Y);
+               begin
+                  if D > 0.0 and then D < Dmin then
+                     Dmin := D;
+                  end if;
+               end;
+            end loop;
+         end loop;
+         if Dmin >= Long_Float'Last then
+            return;
+         end if;
+         --  指尖 = 手指那一团最靠上的一行(一行里至少 5 个像素,免得认到孤零零的杂点;次数)
+         for Y in Lb.Y0 .. Lb.Y1 loop
+            declare
+               Row : Natural := 0;
+            begin
+               for X in Lb.X0 .. Lb.X1 loop
+                  if Near (X, Y) then
+                     Row := Row + 1;
+                  end if;
+               end loop;
+               if Row >= 5 then
                   Top := Y;
                   exit;
                end if;
-            end loop;
-            exit when Top >= 0;
+            end;
          end loop;
          if Top < 0 then
             return;
@@ -2533,21 +2575,13 @@ package body Act is
          --  指尖那一截 = 最靠上的 1/80 画幅高(比例,无量纲)
          for Y in Top .. Natural'Min (Lb.Y1, Top + Ch / 80) loop
             for X in Lb.X0 .. Lb.X1 loop
-               if Y * Cw + X < Natural (Z.Fingers.Length) and then Z.Fingers (Y * Cw + X) then
+               if Near (X, Y) then
                   Su := Su + Long_Float (X); Sv := Sv + Long_Float (Y); Cnt := Cnt + 1;
-                  if F.Cams (Cam).Has_Depth and then Y * Cw + X < Natural (F.Cams (Cam).Depth.Length) then
-                     declare
-                        D : constant Long_Float := F.Cams (Cam).Depth (Y * Cw + X);
-                     begin
-                        if D > 0.0 and then not Picture.Is_Nan (D) then
-                           Ds.Append (D);
-                        end if;
-                     end;
-                  end if;
+                  Ds.Append (Dep (X, Y));
                end if;
             end loop;
          end loop;
-         if Cnt = 0 or else Ds.Is_Empty then
+         if Cnt = 0 then
             return;
          end if;
          --  深度取中位数(排序)
@@ -2574,7 +2608,7 @@ package body Act is
             Dm := Arr (Arr'Length / 2);
             Tips (Nt) := [(U - G.Cx) / G.F * Dm, -(V - G.Cy) / G.F * Dm, -Dm];
             Nt := Nt + 1;
-            Geo_Say ("指尖:像素 (" & Codec.Fmt (U, 1) & "," & Codec.Fmt (V, 1) & ") 离相机 " & Mm (Dm));
+            Geo_Say ("指尖:像素 (" & Codec.Fmt (U, 1) & "," & Codec.Fmt (V, 1) & ") 离相机 " & Mm (Dm) & "(这根手指最近处 " & Mm (Dmin) & ")");
          end;
       end One;
    begin
@@ -2586,6 +2620,11 @@ package body Act is
       One (Z.A);
       if Nt < 2 then
          One (Z.B);
+      end if;
+      --  两根指尖离相机的远近要对得上(差不过两成,比例,无量纲),否则是认错了,不许存
+      if Nt = 2 and then abs (Tips (0) (2) - Tips (1) (2)) > 0.2 * abs (Tips (0) (2) + Tips (1) (2)) / 2.0 then
+         Geo_Say ("第" & Codec.Img (Cam) & " 台相机:两根指尖远近对不上(" & Mm (-Tips (0) (2)) & " vs " & Mm (-Tips (1) (2)) & ")⇒ 指尖没量到");
+         Nt := 0;
       end if;
       if Nt = 2 then
          G.Tip := [(Tips (0) (0) + Tips (1) (0)) / 2.0, (Tips (0) (1) + Tips (1) (1)) / 2.0, (Tips (0) (2) + Tips (1) (2)) / 2.0];
