@@ -2948,8 +2948,10 @@ package body Act is
       Beats0 : constant Natural := Plug.Steps (L);
       Limit : constant Natural := (if Step_Limit > 0 then Step_Limit else 12);   --  没说步数时的安全上限(次数)
       Tol : constant Long_Float := 0.1 * G.Gap;      --  到位容差 = 张口的一成(比例,无量纲)
-      --  指尖中点再往手心里 = 张口的三成(比例,无量纲):GA7 逐帧量过,放 15% 时手指只合 5 mm 就顶住 —— 夹的是球最前面那层皮,一抬就滑
-      Inward : constant Long_Float := 0.3 * G.Gap;
+      --  GC8 逐拍:以前"指尖中点再往手心里三成张口"是给斜着贴近用的;改成从正上方下之后,这三成沿相机轴的偏移有一大半是【往上】,
+      --  指尖停在它重心上方 ~2 cm,合爪捏的还是上半截(读数 0.579 = 52 mm 弦)。现在悬停点 = 指尖中点正对它重心,
+      --  再往下走:直下到它重心估计再往下三成张口(比例,无量纲),或者顶住为止 —— 深浅由"顶住"说,不由偏移量说
+      Deeper : constant Long_Float := 0.3 * G.Gap;
       --  🔴 不再斜着撞上去:先到它【正上方】半个张口高(比例,无量纲),再张开手从正上方直下。GC6/GC7 彩色帧:斜着贴近时
       --  手的前沿先碰到它,停在它上半截,合爪捏的是顶;从正上方下,手指先从两边绕过它,直到手心顶到它才停 —— 最深的那一圈。
       --  不带形状假设:顶住 = 命令下去读数不动;它多宽由画面说;方的圆的一样走
@@ -2965,7 +2967,7 @@ package body Act is
          --  一截实到不到要的两成(比例,无量纲)= 底下有东西顶住我 ⇒ 停,照实说(顶住的高度就是它的顶)
          Leg : constant Long_Float := 0.1 * G.Gap;
          Blocked_Frac : constant Long_Float := 0.2;
-         Total : constant Long_Float := Hover + Tol;
+         Total : constant Long_Float := Hover + Deeper;
          Down : Long_Float := 0.0;
          Got : Long_Float := 0.0;
          Blocked : Boolean := False;
@@ -2999,7 +3001,6 @@ package body Act is
       end Descend;
    begin
       Event := Null_Unbounded_String; Steps_Taken := 0; Beats := 0;
-      Want (2) := Want (2) + Inward;   --  相机 -z 朝前 ⇒ 往手心方向 = +z
       if C.Geo_Slot /= Slot then
          C.Geo_Obs.Clear; C.Geo_Slot := Slot; C.Geo_Came := 0.0;
       end if;
