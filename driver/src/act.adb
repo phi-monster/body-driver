@@ -2950,11 +2950,53 @@ package body Act is
       Tol : constant Long_Float := 0.1 * G.Gap;      --  到位容差 = 张口的一成(比例,无量纲)
       --  指尖中点再往手心里 = 张口的三成(比例,无量纲):GA7 逐帧量过,放 15% 时手指只合 5 mm 就顶住 —— 夹的是球最前面那层皮,一抬就滑
       Inward : constant Long_Float := 0.3 * G.Gap;
+      --  🔴 不再斜着撞上去:先到它【正上方】半个张口高(比例,无量纲),再张开手从正上方直下。GC6/GC7 彩色帧:斜着贴近时
+      --  手的前沿先碰到它,停在它上半截,合爪捏的是顶;从正上方下,手指先从两边绕过它,直到手心顶到它才停 —— 最深的那一圈。
+      --  不带形状假设:顶住 = 命令下去读数不动;它多宽由画面说;方的圆的一样走
+      Hover : constant Long_Float := 0.5 * G.Gap;
       Want : Geom.V3 := G.Tip;
       U, V : Long_Float;
       Seen, Mok : Boolean;
       Pw_Last : Geom.V3 := [others => 0.0];
       Have_Pw : Boolean := False;
+
+      procedure Descend (Ev : out Unbounded_String) is
+         --  从正上方直下:一截 = 张口的一成(比例,无量纲);最多下 悬高 + 容差;
+         --  一截实到不到要的两成(比例,无量纲)= 底下有东西顶住我 ⇒ 停,照实说(顶住的高度就是它的顶)
+         Leg : constant Long_Float := 0.1 * G.Gap;
+         Blocked_Frac : constant Long_Float := 0.2;
+         Total : constant Long_Float := Hover + Tol;
+         Down : Long_Float := 0.0;
+         Got : Long_Float := 0.0;
+         Blocked : Boolean := False;
+         Mk : Boolean;
+      begin
+         Geo_Say ("到它正上方了 ⇒ 张开手,从正上方直下(沿位姿读数的 z 轴,当它朝上),每截 " & Mm (Leg) & ",顶住就停");
+         while Down < Total loop
+            declare
+               P0 : constant Plug.Arm_Pose := F.EE (Arm);
+               Ask : constant Long_Float := Long_Float'Min (Leg, Total - Down);
+            begin
+               Geo_Move (L, C, F, Arm, [0.0, 0.0, -Ask], Mk, Jaw_Target => 1.0, Quick => True);
+               Steps_Taken := Steps_Taken + 1;
+               Got := P0 (2) - F.EE (Arm) (2);
+               if Got < Blocked_Frac * Ask then
+                  Blocked := True;
+                  Down := Down + Long_Float'Max (0.0, Got);
+                  exit;
+               end if;
+               Down := Down + Ask;
+            end;
+         end loop;
+         C.Geo_Dist := Long_Float'Max (0.0, Hover - Down); C.Geo_Round := C.Round_N;
+         if Blocked then
+            Geo_Say ("直下 " & Mm (Down) & " 被顶住(命令下去读数不动)⇒ 它顶着我的手,离该合的高度还差 " & Mm (C.Geo_Dist));
+            Ev := S ("amount: arrived (I came straight down " & Mm (Down) & " from above it, then something under my hand held me up, "
+                     & Mm (C.Geo_Dist) & " above where I meant to close; my fingers are open around it)");
+         else
+            Ev := S ("amount: arrived (I came straight down " & Mm (Down) & " from above it by my own arm's reckoning, all the way)");
+         end if;
+      end Descend;
    begin
       Event := Null_Unbounded_String; Steps_Taken := 0; Beats := 0;
       Want (2) := Want (2) + Inward;   --  相机 -z 朝前 ⇒ 往手心方向 = +z
@@ -3004,17 +3046,22 @@ package body Act is
             Pw := Geom.Triangulate (G, Use_Obs);
             Pw_Last := Pw; Have_Pw := True;
             Pc := Geom.To_Cam (G, Cur, Pw);
-            D := [Pc (0) - Want (0), Pc (1) - Want (1), Pc (2) - Want (2)];
+            declare
+               --  目标 = 它正上方 Hover 高的那一点(世界 z 朝上,换到相机系)
+               Upc : constant Geom.V3 := Geom.Ap (Geom.Tr (Geom.Cam_R (G, Cur)), [0.0, 0.0, Hover]);
+            begin
+               D := [Pc (0) + Upc (0) - Want (0), Pc (1) + Upc (1) - Want (1), Pc (2) + Upc (2) - Want (2)];
+            end;
             Dist := Geom.Norm (D);
-            C.Geo_Dist := Dist; C.Geo_Round := C.Round_N;
-            Geo_Say ("它在相机前 " & Mm (-Pc (2)) & "(左右 " & Mm (Pc (0)) & " 上下 " & Mm (Pc (1)) & "),离指尖该到的那点还差 " & Mm (Dist) &
+            C.Geo_Dist := Dist + Hover; C.Geo_Round := C.Round_N;
+            Geo_Say ("它在相机前 " & Mm (-Pc (2)) & "(左右 " & Mm (Pc (0)) & " 上下 " & Mm (Pc (1)) & "),离它正上方该停的那点还差 " & Mm (Dist) &
                      "(左右 " & Mm (D (0)) & " 上下 " & Mm (D (1)) & " 前后 " & Mm (D (2)) & ")");
             if -Pc (2) <= 0.0 then
                Event := S ("lost: my sightlines do not meet in front of me (the thing may have moved)");
                exit;
             end if;
             if Dist <= Tol then
-               Event := S ("amount: arrived (the thing sits " & Mm (Dist) & " from where my fingers close)");
+               Descend (Event);
                exit;
             end if;
             if Steps_Taken >= Limit then
@@ -3085,10 +3132,8 @@ package body Act is
                            Short := Geom.Norm (Rest);
                         end;
                      end loop;
-                     C.Geo_Dist := Short; C.Geo_Round := C.Round_N;
-                     Event := S ("amount: arrived (I went the last " & Mm (Ln) & " by my own arm's reckoning"
-                                 & (if Fixes > 0 then ", then corrected" & Natural'Image (Fixes) & " time(s) by the same reckoning" else "")
-                                 & "; it fell short by " & Mm (Short) & ")");
+                     Geo_Say ("到正上方的最后一截按读数走完(补了 " & Codec.Img (Fixes) & " 次,还差 " & Mm (Short) & ")");
+                     Descend (Event);
                      exit;
                   end;
                end if;
@@ -3109,7 +3154,8 @@ package body Act is
                if not Seen then
                   --  最后一步它进了指缝、被手指挡住也正常:上一眼已经在两倍容差内(倍数,无量纲)
                   if Dist <= 2.0 * Tol then
-                     Event := S ("amount: arrived (I lost sight of it on the last step; it was " & Mm (Dist) & " from where my fingers close)");
+                     Geo_Say ("最后一步它出了画面,但上一眼已在两倍容差内 ⇒ 当作到了正上方");
+                     Descend (Event);
                   else
                      Event := S ("lost: I lost sight of it after that step (it was " & Mm (Dist) & " away)");
                   end if;
@@ -3132,6 +3178,11 @@ package body Act is
       Seen0, Seen1, Mok : Boolean;
       N0 : Natural := 0;
       Lift : constant Long_Float := 0.5 * G.Gap;   --  抬半个张口那么远(比例,无量纲)
+      --  🔴 手指读数就是力:命令合到底、读数停在空手值以上 = 捏着东西,停的位置 = 它在指缝里多宽。抬的时候读数往小走
+      --  = 手指在往里合 = 它正在滑出去,比画面早。滑的门槛 = 读数量程的百分之二(比例,无量纲)
+      Slip_Tol : constant Long_Float := 0.02;
+      R0 : Long_Float := 0.0;
+      R1 : Long_Float := 0.0;
    begin
       Held := False; Sure := False; Note := Null_Unbounded_String;
       if not Reading_Says then
@@ -3149,14 +3200,26 @@ package body Act is
       --  GB2/GB3 的教训在这里也成立:半个张口一截抬得快,球在指间一点点下滑(仿真接触解算速度迭代 0 次)。
       --  GC6/GC7 布局 0 就是这一截滑的(同一条路前三次没滑 = 边缘)。改成和离远一样的小步:一截 = 张口的一成(比例,无量纲),
       --  五截凑够半个张口(次数),每截不等停稳(Quick),爪子一路给合到底
+      R0 := Selfmap.Jaw_Of (F, Arm);
       declare
          Leg : constant Long_Float := 0.1 * G.Gap;
          Legs : constant Natural := 5;
+         Up : Long_Float := 0.0;
       begin
          for K in 1 .. Legs loop
             Geo_Move (L, C, F, Arm, [0.0, 0.0, Leg], Mok, Jaw_Target => 0.0, Quick => True);
+            Up := Up + Leg;
+            R1 := Selfmap.Jaw_Of (F, Arm);
+            if R0 - R1 > Slip_Tol then
+               Geo_Say ("抬到 " & Mm (Up) & " 手指读数 " & Codec.Fmt (R0, 3) & " → " & Codec.Fmt (R1, 3) & " = 手指在往里合 ⇒ 它在滑,停");
+               Sure := True;
+               Note := S ("while lifting " & Mm (Up) & " my grip reading fell from " & Codec.Fmt (R0, 3) & " to " & Codec.Fmt (R1, 3)
+                          & " (my fingers kept closing) ⇒ it is slipping out, not held");
+               return;
+            end if;
          end loop;
       end;
+      Geo_Say ("抬完 " & Mm (Lift) & " 手指读数 " & Codec.Fmt (R0, 3) & " → " & Codec.Fmt (R1, 3) & "(没变 = 还捏着)");
       if not Seen0 then
          Note := S ("I could not see it in my hand camera before the lift, so I could not judge whether it came with me");
          return;
@@ -3168,15 +3231,16 @@ package body Act is
          Ratio : constant Long_Float := Long_Float (N1) / Long_Float (Natural'Max (1, N0));
       begin
          Sure := True;
-         --  没动 = 挪不过一成画幅、看着大小没变过一倍(比例,无量纲)
-         if Seen1 and then Moved <= 0.1 and then Ratio >= 0.5 and then Ratio <= 2.0 then
+         --  拿住 = 手指读数没变(力说的);画面只作旁证说出来:没动 = 挪不过一成画幅、看着大小没变过一倍(比例,无量纲)
+         declare
+            Pic_Ok : constant Boolean := Seen1 and then Moved <= 0.1 and then Ratio >= 0.5 and then Ratio <= 2.0;
+            Pic : constant String := (if Seen1 then "in my hand camera it " & (if Pic_Ok then "stayed put" else "moved") & " (" & Codec.Fmt (Moved * Long_Float (Cw), 0)
+                                      & " px, size x" & Codec.Fmt (Ratio, 2) & ")" else "in my hand camera I could not find it afterwards");
+         begin
             Held := True;
-            Note := S ("after lifting " & Mm (Lift) & " straight up, it stayed put in my hand camera (moved " &
-                       Codec.Fmt (Moved * Long_Float (Cw), 0) & " px, size x" & Codec.Fmt (Ratio, 2) & ") and my grip reads above empty ⇒ held");
-         else
-            Note := S ("after lifting " & Mm (Lift) & " straight up, it did " & (if Seen1 then "move in my hand camera (" & Codec.Fmt (Moved * Long_Float (Cw), 0) &
-                       " px, size x" & Codec.Fmt (Ratio, 2) & ")" else "leave my hand camera") & " ⇒ it did NOT come with my hand");
-         end if;
+            Note := S ("after lifting " & Mm (Lift) & " straight up in small steps my grip reading stayed at " & Codec.Fmt (R1, 3)
+                       & " (above empty) ⇒ held; " & Pic);
+         end;
       end;
    end Geo_Held;
 
@@ -3209,10 +3273,25 @@ package body Act is
          end if;
       end if;
       Geo_Say ("离远 = 直上 " & Codec.Img (Legs) & " 截,每截 " & Mm (Leg) & "(沿位姿读数的 z 轴,当它朝上;拿着就继续使劲,每截看一眼它还在不在手里)");
+      declare
+         --  和判拿住同一条力的规矩:抬的时候手指读数往小走过量程的百分之二(比例,无量纲)= 在滑
+         Slip_Tol : constant Long_Float := 0.02;
+         R0 : constant Long_Float := Selfmap.Jaw_Of (F, Arm);
+         R1 : Long_Float := R0;
+      begin
       for K in 1 .. Legs loop
          Geo_Move (L, C, F, Arm, [0.0, 0.0, Leg], Mok, Jaw_Target => (if C.Wld.Holding then 0.0 else -1.0), Quick => True);
          Steps_Taken := Steps_Taken + 1;
          Up := Up + Leg;
+         R1 := Selfmap.Jaw_Of (F, Arm);
+         if C.Wld.Holding and then R0 - R1 > Slip_Tol then
+            Event := S ("slip: while lifting (after " & Mm (Up) & ") my grip reading fell from " & Codec.Fmt (R0, 3) & " to " & Codec.Fmt (R1, 3)
+                        & " - my fingers kept closing, so it is slipping out");
+            C.Wld.Holding := False; C.Wld.Held_Arm := -1; C.Wld.Held_Slot := -1;
+            Memory.Set (C.Mem, "holding", "");
+            Beats := Plug.Steps (L) - Beats0;
+            return;
+         end if;
          if C.Wld.Holding and then Slot >= 0 and then U0 >= 0.0 then
             Geo_Track (C, F, Cam, Slot, U, V, Seen, U0, V0);
             --  拿住的东西在腕眼里不该动:挪过一成画幅(比例,无量纲)就是掉了
@@ -3225,6 +3304,7 @@ package body Act is
             end if;
          end if;
       end loop;
+      end;
       Event := S ("amount: arrived (I lifted straight up " & Mm (Up) & (if C.Wld.Holding then ", still holding it" else "") & ")");
       Beats := Plug.Steps (L) - Beats0;
    end Geo_Retreat;
