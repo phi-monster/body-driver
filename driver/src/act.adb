@@ -3146,7 +3146,17 @@ package body Act is
       --  🔴 抬 = 沿位姿读数那个坐标系的第三根轴(z)直上。GA9 逐帧:沿来的路退是后上 30°,先把球在桌上往后拖 39 mm 才抬,
       --  球被搓出指缝。"哪边是上"身体现在量不出(真机由惯导报重力),这里先当读数系 z 朝上,并且说出来。
       Geo_Say ("抬 " & Mm (Lift) & ":沿位姿读数的 z 轴直上(当它朝上;真机该由重力读数定),爪子继续往合到底使劲");
-      Geo_Move (L, C, F, Arm, [0.0, 0.0, Lift], Mok, Jaw_Target => 0.0);
+      --  GB2/GB3 的教训在这里也成立:半个张口一截抬得快,球在指间一点点下滑(仿真接触解算速度迭代 0 次)。
+      --  GC6/GC7 布局 0 就是这一截滑的(同一条路前三次没滑 = 边缘)。改成和离远一样的小步:一截 = 张口的一成(比例,无量纲),
+      --  五截凑够半个张口(次数),每截不等停稳(Quick),爪子一路给合到底
+      declare
+         Leg : constant Long_Float := 0.1 * G.Gap;
+         Legs : constant Natural := 5;
+      begin
+         for K in 1 .. Legs loop
+            Geo_Move (L, C, F, Arm, [0.0, 0.0, Leg], Mok, Jaw_Target => 0.0, Quick => True);
+         end loop;
+      end;
       if not Seen0 then
          Note := S ("I could not see it in my hand camera before the lift, so I could not judge whether it came with me");
          return;
