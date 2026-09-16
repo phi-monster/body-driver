@@ -2775,7 +2775,8 @@ package body Act is
       Beats0 : constant Natural := Plug.Steps (L);
       Limit : constant Natural := (if Step_Limit > 0 then Step_Limit else 12);   --  没说步数时的安全上限(次数)
       Tol : constant Long_Float := 0.1 * G.Gap;      --  到位容差 = 张口的一成(比例,无量纲)
-      Inward : constant Long_Float := 0.15 * G.Gap;  --  指尖中点再往手心里一点 = 张口的 15%(比例,无量纲):别咬在皮上
+      --  指尖中点再往手心里 = 张口的三成(比例,无量纲):GA7 逐帧量过,放 15% 时手指只合 5 mm 就顶住 —— 夹的是球最前面那层皮,一抬就滑
+      Inward : constant Long_Float := 0.3 * G.Gap;
       Want : Geom.V3 := G.Tip;
       U, V : Long_Float;
       Seen, Mok : Boolean;
