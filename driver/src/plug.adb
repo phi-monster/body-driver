@@ -175,6 +175,9 @@ package body Plug is
                      if MT = "reset" then
                         L.Reset_Flag := True;
                         L.Ep_Seq0 := L.Seq;   --  新的一集从零数拍
+                        --  新的一集不带上一集攥着的命令:尤其是"这一集到此为止"的空动作,
+                        --  重发一次就把新的一集当场掐死(GC4 第 4/5/6 桌就是这么一拍没走就没的)
+                        L.Has_Last := False; L.Has_Pending := False;
                      end if;
                      if Ack /= "" then
                         if Obs < 0 then
@@ -191,8 +194,13 @@ package body Plug is
                            begin
                               if L.Has_Pending then
                                  Action := L.Pending;
-                                 L.Last_Sent := L.Pending;
-                                 L.Has_Last := True;
+                                 --  空动作 = "这一集到此为止",只交这一次,绝不记成"上一条命令"再重发
+                                 if L.Pending.Is_Empty then
+                                    L.Has_Last := False;
+                                 else
+                                    L.Last_Sent := L.Pending;
+                                    L.Has_Last := True;
+                                 end if;
                                  L.Has_Pending := False;
                               elsif L.Has_Last then
                                  Action := L.Last_Sent;
