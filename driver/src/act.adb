@@ -2887,6 +2887,56 @@ package body Act is
       Beats := Plug.Steps (L) - Beats0;
    end Geo_Approach;
 
+   --  拿住了没(几何版):眼睛长在手上 ⇒ 真拿住的东西在这只眼里【不动】;留在桌上的东西一抬手就在画面里跑掉/变小。
+   --  合完沿来的路退半个张口那么远,再看它在不在原来的像素上。爪读数回到合空 = 没夹到。
+   procedure Geo_Held (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Arm, Cam : Natural; Slot : Integer;
+                       Reading_Says : Boolean; Held, Sure : out Boolean; Note : out Unbounded_String) is
+      G : constant Geom.Cam_Geo := Geo_Of (C, Cam);
+      Cw : constant Natural := F.Cams (Cam).W;
+      U0, V0, U1, V1 : Long_Float;
+      Seen0, Seen1, Mok : Boolean;
+      N0 : Natural := 0;
+      Lift : constant Long_Float := 0.5 * G.Gap;   --  抬半个张口那么远(比例,无量纲)
+   begin
+      Held := False; Sure := False; Note := Null_Unbounded_String;
+      if not Reading_Says then
+         Note := S ("my grip closed all the way to its empty reading, so there is nothing between my fingers ⇒ not held");
+         Sure := True;
+         return;
+      end if;
+      Geo_Track (C, F, Cam, Slot, U0, V0, Seen0);
+      if Seen0 and then Slot >= 0 and then Natural (Slot) < World.Count (C.Wld, Cam) then
+         N0 := World.Get (C.Wld, Cam, Natural (Slot)).R.Count;
+      end if;
+      if Geom.Norm (C.Geo_Dir) <= 0.0 then
+         Note := S ("I have no approach path to lift along, so I could not judge whether it came with me");
+         return;
+      end if;
+      Geo_Move (L, C, F, Arm, [-C.Geo_Dir (0) * Lift, -C.Geo_Dir (1) * Lift, -C.Geo_Dir (2) * Lift], Mok);
+      C.Geo_Came := C.Geo_Came - Lift;
+      if not Seen0 then
+         Note := S ("I could not see it in my hand camera before the lift, so I could not judge whether it came with me");
+         return;
+      end if;
+      Geo_Track (C, F, Cam, Slot, U1, V1, Seen1, U0, V0);
+      declare
+         Moved : constant Long_Float := (if Seen1 then Sqrt ((U1 - U0) ** 2 + (V1 - V0) ** 2) / Long_Float (Cw) else 1.0);
+         N1 : constant Natural := (if Seen1 then World.Get (C.Wld, Cam, Natural (Slot)).R.Count else 0);
+         Ratio : constant Long_Float := Long_Float (N1) / Long_Float (Natural'Max (1, N0));
+      begin
+         Sure := True;
+         --  没动 = 挪不过一成画幅、看着大小没变过一倍(比例,无量纲)
+         if Seen1 and then Moved <= 0.1 and then Ratio >= 0.5 and then Ratio <= 2.0 then
+            Held := True;
+            Note := S ("after lifting " & Mm (Lift) & " back along the way I came, it stayed put in my hand camera (moved " &
+                       Codec.Fmt (Moved * Long_Float (Cw), 0) & " px, size x" & Codec.Fmt (Ratio, 2) & ") and my grip reads above empty ⇒ held");
+         else
+            Note := S ("after lifting " & Mm (Lift) & " back along the way I came, it did " & (if Seen1 then "move in my hand camera (" & Codec.Fmt (Moved * Long_Float (Cw), 0) &
+                       " px, size x" & Codec.Fmt (Ratio, 2) & ")" else "leave my hand camera") & " ⇒ it did NOT come with my hand");
+         end if;
+      end;
+   end Geo_Held;
+
    --  离远点(拿着东西):沿来的路退,退它来时那么远(全是量的,两段走)
    procedure Geo_Retreat (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Arm : Natural;
                           Event : out Unbounded_String; Steps_Taken : out Natural; Beats : out Natural) is
@@ -3887,7 +3937,12 @@ package body Act is
                            Origin := World.Get (C.Wld, Cam, Natural (C.Items (Say.Grip_On - 1).Slot)).Shadow;
                            Obj_Count := C.Items (Say.Grip_On - 1).Count;
                         end if;
-                        Held_Test (L, C, F, A, Cam, Origin, Obj_Count, By_Reading, Sure_Held, Note);
+                        if Geo_Cage then
+                           Geo_Held (L, C, F, A, Cam, (if Say.Grip_On >= 1 and then Say.Grip_On <= Natural (C.Items.Length) then C.Items (Say.Grip_On - 1).Slot else -1),
+                                     By_Reading, By_Reading, Sure_Held, Note);
+                        else
+                           Held_Test (L, C, F, A, Cam, Origin, Obj_Count, By_Reading, Sure_Held, Note);
+                        end if;
                         if not Sure_Held then
                            By_Reading := False;   --  说不准 ⇒ 不许记成"手里有东西"(记错了下一步它就去"搬"而不是重抓)
                         end if;
