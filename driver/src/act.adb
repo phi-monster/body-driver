@@ -2927,12 +2927,10 @@ package body Act is
       if Seen0 and then Slot >= 0 and then Natural (Slot) < World.Count (C.Wld, Cam) then
          N0 := World.Get (C.Wld, Cam, Natural (Slot)).R.Count;
       end if;
-      if Geom.Norm (C.Geo_Dir) <= 0.0 then
-         Note := S ("I have no approach path to lift along, so I could not judge whether it came with me");
-         return;
-      end if;
-      Geo_Move (L, C, F, Arm, [-C.Geo_Dir (0) * Lift, -C.Geo_Dir (1) * Lift, -C.Geo_Dir (2) * Lift], Mok);
-      C.Geo_Came := C.Geo_Came - Lift;
+      --  🔴 抬 = 沿位姿读数那个坐标系的第三根轴(z)直上。GA9 逐帧:沿来的路退是后上 30°,先把球在桌上往后拖 39 mm 才抬,
+      --  球被搓出指缝。"哪边是上"身体现在量不出(真机由惯导报重力),这里先当读数系 z 朝上,并且说出来。
+      Geo_Say ("抬 " & Mm (Lift) & ":沿位姿读数的 z 轴直上(当它朝上;真机该由重力读数定)");
+      Geo_Move (L, C, F, Arm, [0.0, 0.0, Lift], Mok);
       if not Seen0 then
          Note := S ("I could not see it in my hand camera before the lift, so I could not judge whether it came with me");
          return;
@@ -2947,32 +2945,34 @@ package body Act is
          --  没动 = 挪不过一成画幅、看着大小没变过一倍(比例,无量纲)
          if Seen1 and then Moved <= 0.1 and then Ratio >= 0.5 and then Ratio <= 2.0 then
             Held := True;
-            Note := S ("after lifting " & Mm (Lift) & " back along the way I came, it stayed put in my hand camera (moved " &
+            Note := S ("after lifting " & Mm (Lift) & " straight up, it stayed put in my hand camera (moved " &
                        Codec.Fmt (Moved * Long_Float (Cw), 0) & " px, size x" & Codec.Fmt (Ratio, 2) & ") and my grip reads above empty ⇒ held");
          else
-            Note := S ("after lifting " & Mm (Lift) & " back along the way I came, it did " & (if Seen1 then "move in my hand camera (" & Codec.Fmt (Moved * Long_Float (Cw), 0) &
+            Note := S ("after lifting " & Mm (Lift) & " straight up, it did " & (if Seen1 then "move in my hand camera (" & Codec.Fmt (Moved * Long_Float (Cw), 0) &
                        " px, size x" & Codec.Fmt (Ratio, 2) & ")" else "leave my hand camera") & " ⇒ it did NOT come with my hand");
          end if;
       end;
    end Geo_Held;
 
    --  离远点(拿着东西):沿来的路退,退它来时那么远(全是量的,两段走)
-   procedure Geo_Retreat (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Arm : Natural;
+   procedure Geo_Retreat (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Arm, Cam : Natural;
                           Event : out Unbounded_String; Steps_Taken : out Natural; Beats : out Natural) is
       Beats0 : constant Natural := Plug.Steps (L);
-      Dist : constant Long_Float := C.Geo_Came;
+      G : constant Geom.Cam_Geo := Geo_Of (C, Cam);
+      Dist : constant Long_Float := 2.0 * G.Gap;   --  直上两个张口那么高(倍数,无量纲)
       Mok : Boolean;
    begin
       Steps_Taken := 0; Beats := 0;
-      if Dist <= 0.0 or else Geom.Norm (C.Geo_Dir) <= 0.0 then
-         Event := S ("amount: stopped (I have no approach path to retrace)");
+      if Dist <= 0.0 then
+         Event := S ("amount: stopped (I do not know my own gap, so I do not know how far to lift)");
          return;
       end if;
+      Geo_Say ("离远 = 直上 " & Mm (Dist) & "(沿位姿读数的 z 轴,当它朝上)");
       for Leg in 1 .. 2 loop
-         Geo_Move (L, C, F, Arm, [-C.Geo_Dir (0) * Dist / 2.0, -C.Geo_Dir (1) * Dist / 2.0, -C.Geo_Dir (2) * Dist / 2.0], Mok);
+         Geo_Move (L, C, F, Arm, [0.0, 0.0, Dist / 2.0], Mok);
          Steps_Taken := Steps_Taken + 1;
       end loop;
-      Event := S ("amount: arrived (I went back the way I came, " & Mm (Dist) & ")");
+      Event := S ("amount: arrived (I lifted straight up " & Mm (Dist) & ")");
       Beats := Plug.Steps (L) - Beats0;
    end Geo_Retreat;
 
@@ -3944,6 +3944,13 @@ package body Act is
                   if Caged then
                      Move_Jaw (L, C, F, A, 0.0, Steps_J, Reading);
                      declare
+                        Iok : Boolean;
+                     begin
+                        --  合到底后再等两倍稳定拍数(倍数,无量纲),让夹爪把劲使上再抬
+                        Selfmap.Idle (L, F, 2 * Natural'Max (1, C.Map.Settle), Iok);
+                        Reading := Selfmap.Jaw_Of (F, A);
+                     end;
+                     declare
                         Empty : constant Long_Float := C.Hands (A).Empty_Close;
                         By_Reading : Boolean := Reading - Empty > C.Map.Jaw_Noise;
                         Sure_Held : Boolean := False;
@@ -4066,7 +4073,7 @@ package body Act is
             Put_Line ("[身]   这一段:" & Codec.Img (Steps_Taken) & " 推 · " & Codec.Img (Beats) & " 拍 · 这一集累计 " & Codec.Img (Plug.Steps (L)) & " 拍");
          elsif Geo_Case = 2 then
             Put_Line ("[身] ⚙ 几何驾驶:" & To_String (Geo_Desc));
-            Geo_Retreat (L, C, F, Natural (Cam_Arm (C, Cam)), Event, Steps_Taken, Beats);
+            Geo_Retreat (L, C, F, Natural (Cam_Arm (C, Cam)), Cam, Event, Steps_Taken, Beats);
             Feel (C, F);
             Report := Report & "you asked " & To_String (Geo_Desc) & ": " & To_String (Event) & ". I took " & Codec.Img (Steps_Taken) & " pushes; ";
             Put_Line ("[身]   这一段:" & Codec.Img (Steps_Taken) & " 推 · " & Codec.Img (Beats) & " 拍");
