@@ -13,6 +13,7 @@ package Geom is
       U, V : Long_Float := 0.0;                  --  它在画面里的像素
    end record;
    package Obs_Vectors is new Ada.Containers.Vectors (Natural, Obs);
+   package Slot_Obs_Vectors is new Ada.Containers.Vectors (Natural, Obs_Vectors.Vector, Obs_Vectors."=");   --  每个世界槽一串观测
    type Cam_Geo is record
       Valid : Boolean := False;        --  相机朝向量过了
       F, Cx, Cy : Long_Float := 0.0;   --  焦距(像素)、主点

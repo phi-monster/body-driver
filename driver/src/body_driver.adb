@@ -276,6 +276,7 @@ begin
       if Plug.Take_Reset (L) then
          Put_Line ("[身] 对方复位(新的一集)⇒ 世界记忆清空,身体留着");
          World.Reset_All (C.Wld);
+         Act.Geo_New_Episode (C);
          Memory.Clear (C.Mem);
          C.Recent := Null_Unbounded_String;
          C.Cam := C.Map.World_Cam;

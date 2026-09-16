@@ -112,12 +112,16 @@ package Act is
       Geo_Dir : Geom.V3 := [others => 0.0];   --  逼近的方向(世界系单位向量)
       Geo_Obs : Geom.Obs_Vectors.Vector;  --  这一集里点名那块在腕眼里的历次观测(位姿 + 像素)
       Geo_Slot : Integer := -1;
+      Geo_Slot_Obs : Geom.Slot_Obs_Vectors.Vector;   --  这一集里腕眼看见过的【每一样东西】的历次观测(按世界槽号),用来算它们在三维哪儿
+      Geo_Map_Cam : Integer := -1;
    end record;
 
    procedure Init_Tracks (C : in out Context);
    procedure Round (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);
    --  开机:装回几何常数;观测里带了焦距就记下;有深度的开机帧里量一次指尖(之后不再读深度)
    procedure Geo_Boot (F : Plug.Frame; C : in out Context; Body_Path : String);
+   --  新的一集:几何账和三维记忆清空(身体常数留着)
+   procedure Geo_New_Episode (C : in out Context);
 
    --  ── 下面几个是接缝,离线自检要逐条钉死 ──
    --  拿住了没,唯一分得开的那一条:抬手时它跟着我的手走了【同样一段】。
