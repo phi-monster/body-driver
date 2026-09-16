@@ -2528,6 +2528,8 @@ package body Act is
    begin
       A (0) := Dw (0); A (1) := Dw (1); A (2) := Dw (2);
       Step_Arm (L, C, F, Arm, A, Jaw, Del, Ok);
+      Geo_Say ("挪 (" & Mm (Dw (0)) & "," & Mm (Dw (1)) & "," & Mm (Dw (2)) & ") ⇒ 实到 (" & Mm (Del (0)) & "," & Mm (Del (1)) & "," & Mm (Del (2)) &
+               "),差 " & Mm (Geom.Norm ([Dw (0) - Del (0), Dw (1) - Del (1), Dw (2) - Del (2)])) & (if Ok then "" else " · 身体说没走成"));
    end Geo_Move;
 
    --  这只手一步能走出来又看得见的那一档(开机量的,米)
@@ -2858,6 +2860,19 @@ package body Act is
                C.Geo_Came := C.Geo_Came + Ln;
                if Ln > 0.0 then
                   C.Geo_Dir := [Dw (0) / Ln, Dw (1) / Ln, Dw (2) / Ln];
+               end if;
+               --  最后一截整段走完就算到:这么近它已经撑满画面、压着画面下沿,切出来的重心不再是球心,再量只会量歪
+               --  (GA8:多量三次把手带到天上去了);最后几厘米靠手自己的位姿读数走,它准到毫米
+               if Frac >= 1.0 then
+                  declare
+                     Cur2 : constant Plug.Arm_Pose := F.EE (Arm);
+                     Went : constant Geom.V3 := [Cur2 (0) - Cur (0), Cur2 (1) - Cur (1), Cur2 (2) - Cur (2)];
+                     Short : constant Long_Float := Geom.Norm ([Dw (0) - Went (0), Dw (1) - Went (1), Dw (2) - Went (2)]);
+                  begin
+                     C.Geo_Dist := Short; C.Geo_Round := C.Round_N;
+                     Event := S ("amount: arrived (I went the last " & Mm (Ln) & " by my own arm's reckoning; it fell short by " & Mm (Short) & ")");
+                     exit;
+                  end;
                end if;
                --  走完按几何预测它该在画面哪儿,拿预测去找
                declare
