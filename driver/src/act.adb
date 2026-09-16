@@ -3736,7 +3736,10 @@ package body Act is
          end;
       end if;
       if Say.Done then
-         C.Recent := S ("you said it is already done. the body did nothing and is looking again. " & Mode_Line (C, "you said done"));
+         --  脑说 done = 这一集到此为止:交一个空动作,对方结束这一集(不然剩下的几百拍全是"还要我做什么")
+         Plug.End_Episode (L);
+         C.Recent := S ("you said it is done. I ended this episode. " & Mode_Line (C, "you said done"));
+         Put_Line ("[身] ■ 脑说 done ⇒ 交空动作,这一集到此为止");
          return;
       end if;
       if C.Look_Only then

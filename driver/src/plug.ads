@@ -61,6 +61,7 @@ package Plug is
    function Sense (L : in out Link; F : out Frame) return Boolean;
    function Act (L : in out Link; C : Cmd) return Boolean;
    function Take_Reset (L : in out Link) return Boolean;
+   procedure End_Episode (L : in out Link);   --  下一次对方要动作时交一个空动作 = 这一集到此为止(脑说 done)
    function Steps (L : Link) return Natural;            --  这一集到现在收了几拍画面(一拍 = 对方走一步;只数,不停)
    function Arms (L : Link) return Natural;
    function Joint_Mode (L : Link) return Boolean;     --  没有末端位姿、只有关节角
