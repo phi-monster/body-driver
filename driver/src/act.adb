@@ -3963,8 +3963,13 @@ package body Act is
                         end if;
                      end if;
                   end;
-               elsif Say.Grip = "close" and then Grip_Arm = Own and then C.Geo_Dist >= 0.0 and then C.Round_N - C.Geo_Round <= 1 then
-                  Geo_Case := 3;   --  合:不再先走一段,笼住与否由刚算的距离说
+               elsif Say.Grip = "close" then
+                  --  合:几何账还新鲜(中间没别的段动过手,轮数只差几轮)就不再先走一段,笼住与否由刚算的距离说
+                  Geo_Say ("合手前的几何账:上次算的差 " & (if C.Geo_Dist >= 0.0 then Mm (C.Geo_Dist) else "没有") & " · 那是第" & Codec.Img (C.Geo_Round) &
+                           " 轮,现在第" & Codec.Img (C.Round_N) & " 轮 · 合的是第" & Codec.Img (Grip_Arm + 1) & " 只手,这只眼长在第" & Codec.Img (Own + 1) & " 只手上");
+                  if Grip_Arm = Own and then C.Geo_Dist >= 0.0 and then C.Round_N - C.Geo_Round <= 3 then
+                     Geo_Case := 3;
+                  end if;
                end if;
             end if;
          end;
@@ -3997,6 +4002,7 @@ package body Act is
          else
          Build_Goals;
          if not Pts.Is_Empty then
+            C.Geo_Dist := -1.0;   --  老路要动手了,几何账作废
             Expand_Lobes (C, F, Cam, Pts);
             --  生地先看一眼:我的手/零件在这台相机里的位置若只是按关节推的(没真看过),先抖/推一下认清,再按认清的位置重算各团目标,再量表、再走
             --  (EI:按关节推的手指位置差 0.2 画幅,在错地方量表 ⇒ 六列全空 ⇒ 一步没走)
