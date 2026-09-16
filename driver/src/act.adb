@@ -2964,20 +2964,44 @@ package body Act is
                           Event : out Unbounded_String; Steps_Taken : out Natural; Beats : out Natural) is
       Beats0 : constant Natural := Plug.Steps (L);
       G : constant Geom.Cam_Geo := Geo_Of (C, Cam);
-      Dist : constant Long_Float := 2.0 * G.Gap;   --  直上两个张口那么高(倍数,无量纲)
+      Leg : constant Long_Float := 0.5 * G.Gap;   --  一截 = 半个张口(比例,无量纲):判拿住时抬这么多球没掉,一截 90 mm 就掉(GB2)
+      Legs : constant Natural := 4;               --  共两个张口高(次数)
       Mok : Boolean;
+      U, V : Long_Float;
+      Seen : Boolean;
+      Up : Long_Float := 0.0;
+      Slot : constant Integer := (if C.Wld.Holding then C.Wld.Held_Slot else -1);
+      U0, V0 : Long_Float := -1.0;
    begin
       Steps_Taken := 0; Beats := 0;
-      if Dist <= 0.0 then
+      if Leg <= 0.0 then
          Event := S ("amount: stopped (I do not know my own gap, so I do not know how far to lift)");
          return;
       end if;
-      Geo_Say ("离远 = 直上 " & Mm (Dist) & "(沿位姿读数的 z 轴,当它朝上)");
-      for Leg in 1 .. 2 loop
-         Geo_Move (L, C, F, Arm, [0.0, 0.0, Dist / 2.0], Mok, Jaw_Target => (if C.Wld.Holding then 0.0 else -1.0));
+      if Slot >= 0 then
+         Geo_Track (C, F, Cam, Slot, U0, V0, Seen);
+         if not Seen then
+            U0 := -1.0; V0 := -1.0;
+         end if;
+      end if;
+      Geo_Say ("离远 = 直上 " & Codec.Img (Legs) & " 截,每截 " & Mm (Leg) & "(沿位姿读数的 z 轴,当它朝上;拿着就继续使劲,每截看一眼它还在不在手里)");
+      for K in 1 .. Legs loop
+         Geo_Move (L, C, F, Arm, [0.0, 0.0, Leg], Mok, Jaw_Target => (if C.Wld.Holding then 0.0 else -1.0));
          Steps_Taken := Steps_Taken + 1;
+         Up := Up + Leg;
+         if C.Wld.Holding and then Slot >= 0 and then U0 >= 0.0 then
+            Geo_Track (C, F, Cam, Slot, U, V, Seen, U0, V0);
+            if not Seen or else Sqrt ((U - U0) ** 2 + (V - V0) ** 2) / Long_Float (F.Cams (Cam).W) > 0.1 then
+               --  一成画幅(比例,无量纲):拿住的东西在腕眼里不该动
+               Event := S ("slip: what I was holding has left my fingers on the way up (after " & Mm (Up) & ")");
+               C.Wld.Holding := False; C.Wld.Held_Arm := -1; C.Wld.Held_Slot := -1;
+               Memory.Set (C.Mem, "holding", "");
+               Beats := Plug.Steps (L) - Beats0;
+               return;
+            end if;
+         end if;
       end loop;
-      Event := S ("amount: arrived (I lifted straight up " & Mm (Dist) & ")");
+      Event := S ("amount: arrived (I lifted straight up " & Mm (Up) & (if C.Wld.Holding then ", still holding it" else "") & ")");
       Beats := Plug.Steps (L) - Beats0;
    end Geo_Retreat;
 
