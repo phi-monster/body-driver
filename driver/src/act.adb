@@ -2964,8 +2964,10 @@ package body Act is
                           Event : out Unbounded_String; Steps_Taken : out Natural; Beats : out Natural) is
       Beats0 : constant Natural := Plug.Steps (L);
       G : constant Geom.Cam_Geo := Geo_Of (C, Cam);
-      Leg : constant Long_Float := 0.5 * G.Gap;   --  一截 = 半个张口(比例,无量纲):判拿住时抬这么多球没掉,一截 90 mm 就掉(GB2)
-      Legs : constant Natural := 4;               --  共两个张口高(次数)
+      --  一截 = 张口的一成(比例,无量纲),共 20 截 = 两个张口高(次数)。GB3:半个张口一截抬得快,球在指间一点点往下滑
+      --  (仿真接触解算速度迭代 0 次),第二截就掉;小步慢抬
+      Leg : constant Long_Float := 0.1 * G.Gap;
+      Legs : constant Natural := 20;
       Mok : Boolean;
       U, V : Long_Float;
       Seen : Boolean;
