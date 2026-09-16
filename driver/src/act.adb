@@ -2526,12 +2526,17 @@ package body Act is
    end Geo_Track;
 
    --  只平移(世界系),不转
-   procedure Geo_Move (L : in out Plug.Link; C : Context; F : in out Plug.Frame; Arm : Natural; Dw : Geom.V3; Ok : out Boolean) is
+   --  Jaw_Target < 0 = 抓握通道保持读数;拿着东西挪的时候必须继续给"合到底"的目标,不然驱动把目标换成当前读数 = 不再使劲,球就掉
+   procedure Geo_Move (L : in out Plug.Link; C : Context; F : in out Plug.Frame; Arm : Natural; Dw : Geom.V3; Ok : out Boolean;
+                       Jaw_Target : Long_Float := -1.0) is
       A : Table.Vec := Table.Zero_Vec;
       Jaw : Floats;
       Del : Table.Vec;
    begin
       A (0) := Dw (0); A (1) := Dw (1); A (2) := Dw (2);
+      if Jaw_Target >= 0.0 then
+         Jaw.Append (Jaw_Target);
+      end if;
       Step_Arm (L, C, F, Arm, A, Jaw, Del, Ok);
       Geo_Say ("挪 (" & Mm (Dw (0)) & "," & Mm (Dw (1)) & "," & Mm (Dw (2)) & ") ⇒ 实到 (" & Mm (Del (0)) & "," & Mm (Del (1)) & "," & Mm (Del (2)) &
                "),差 " & Mm (Geom.Norm ([Dw (0) - Del (0), Dw (1) - Del (1), Dw (2) - Del (2)])) & (if Ok then "" else " · 身体说没走成"));
@@ -2929,8 +2934,8 @@ package body Act is
       end if;
       --  🔴 抬 = 沿位姿读数那个坐标系的第三根轴(z)直上。GA9 逐帧:沿来的路退是后上 30°,先把球在桌上往后拖 39 mm 才抬,
       --  球被搓出指缝。"哪边是上"身体现在量不出(真机由惯导报重力),这里先当读数系 z 朝上,并且说出来。
-      Geo_Say ("抬 " & Mm (Lift) & ":沿位姿读数的 z 轴直上(当它朝上;真机该由重力读数定)");
-      Geo_Move (L, C, F, Arm, [0.0, 0.0, Lift], Mok);
+      Geo_Say ("抬 " & Mm (Lift) & ":沿位姿读数的 z 轴直上(当它朝上;真机该由重力读数定),爪子继续往合到底使劲");
+      Geo_Move (L, C, F, Arm, [0.0, 0.0, Lift], Mok, Jaw_Target => 0.0);
       if not Seen0 then
          Note := S ("I could not see it in my hand camera before the lift, so I could not judge whether it came with me");
          return;
@@ -2969,7 +2974,7 @@ package body Act is
       end if;
       Geo_Say ("离远 = 直上 " & Mm (Dist) & "(沿位姿读数的 z 轴,当它朝上)");
       for Leg in 1 .. 2 loop
-         Geo_Move (L, C, F, Arm, [0.0, 0.0, Dist / 2.0], Mok);
+         Geo_Move (L, C, F, Arm, [0.0, 0.0, Dist / 2.0], Mok, Jaw_Target => (if C.Wld.Holding then 0.0 else -1.0));
          Steps_Taken := Steps_Taken + 1;
       end loop;
       Event := S ("amount: arrived (I lifted straight up " & Mm (Dist) & ")");
