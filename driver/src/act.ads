@@ -18,6 +18,7 @@ with Monitor;
 with Sinew;
 with Runtime;
 with Plan;
+with Geom;
 package Act is
    type Item_Kind is (Finger, Grip, Piece, Thing, Thing_Remembered, Thing_Held);   --  Piece = 我身上某个通道带的一块(Which = 通道号)
    type Item is record
@@ -102,10 +103,21 @@ package Act is
       Eye_Want : Sinew.Eye_Pick := Sinew.Ey_None;
       Name_Cam : Integer := -1;           --  脑最近一次真认出一个名字时,身体在哪只眼里
       Blind_Cam : Integer := -1;          --  脑刚说过"这只眼里没有它"的那只眼
+      --  ── 几何驾驶(腕眼里只用彩色图 + 手的位姿读数 + 焦距;不读深度)──
+      Geo : Geom.Geo_Vectors.Vector;      --  每台相机一份:焦距、朝向、指尖
+      Geo_Path : Unbounded_String;        --  几何常数存哪(身体文件旁边)
+      Geo_Dist : Long_Float := -1.0;      --  上一次几何逼近结束时,它离"指尖该到的那一点"还差多少米(< 0 = 没有)
+      Geo_Round : Natural := 0;           --  那是第几轮
+      Geo_Came : Long_Float := 0.0;       --  几何逼近一共走了多远(米);"离远点"就沿原路退这么远
+      Geo_Dir : Geom.V3 := [others => 0.0];   --  逼近的方向(世界系单位向量)
+      Geo_Obs : Geom.Obs_Vectors.Vector;  --  这一集里点名那块在腕眼里的历次观测(位姿 + 像素)
+      Geo_Slot : Integer := -1;
    end record;
 
    procedure Init_Tracks (C : in out Context);
    procedure Round (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);
+   --  开机:装回几何常数;观测里带了焦距就记下;有深度的开机帧里量一次指尖(之后不再读深度)
+   procedure Geo_Boot (F : Plug.Frame; C : in out Context; Body_Path : String);
 
    --  ── 下面几个是接缝,离线自检要逐条钉死 ──
    --  拿住了没,唯一分得开的那一条:抬手时它跟着我的手走了【同样一段】。

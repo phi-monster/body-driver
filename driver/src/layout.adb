@@ -77,6 +77,40 @@ package body Layout is
       end;
    end Is_Depth;
 
+   function Is_Intrinsic (D : Msgpack.Doc; N : Integer; F, Cx, Cy : out Long_Float) return Boolean is
+   begin
+      F := 0.0; Cx := 0.0; Cy := 0.0;
+      if not Is_Nd (D, N) then
+         return False;
+      end if;
+      declare
+         T : constant String := Nd_Type (D, N);
+         Sh : constant Ints := Nd_Shape (D, N);
+      begin
+         if T'Length < 2 or else (T (T'Last - 1 .. T'Last) /= "f4" and then T (T'Last - 1 .. T'Last) /= "f8") then
+            return False;
+         end if;
+         if Natural (Sh.Length) /= 2 or else Sh (0) /= 3 or else Sh (1) /= 3 then
+            return False;
+         end if;
+      end;
+      declare
+         V : constant Floats := Numbers (D, N);
+      begin
+         if Natural (V.Length) /= 9 or else V (0) <= 0.0 or else V (4) <= 0.0 then
+            return False;
+         end if;
+         --  针孔的样子:对角是焦距、右下是 1、其余接近 0(容差是焦距的百万分之一,比例,无量纲)
+         if abs (V (8) - 1.0) > 1.0e-6 or else abs V (1) > V (0) * 1.0e-6 or else abs V (3) > V (0) * 1.0e-6
+           or else abs V (6) > V (0) * 1.0e-6 or else abs V (7) > V (0) * 1.0e-6
+         then
+            return False;
+         end if;
+         F := V (0); Cx := V (2); Cy := V (5);
+         return True;
+      end;
+   end Is_Intrinsic;
+
    procedure Recognise (D : Msgpack.Doc; Obs : Integer; L : out Body_Layout) is
       type Leaf is record
          P : Path;
@@ -103,6 +137,8 @@ package body Layout is
 
       W, H : Natural;
       Empty : Path;
+      Intr_Raw : Paths;
+      Kf, Kcx, Kcy : Long_Float;
    begin
       L := (others => <>);
       Walk (Obs, Empty);
@@ -119,6 +155,8 @@ package body Layout is
          end;
          if Is_Image (D, F.N, W, H) then
             L.Cams.Append (F.P);
+         elsif Is_Intrinsic (D, F.N, Kf, Kcx, Kcy) then
+            Intr_Raw.Append (F.P);
          elsif Is_Depth (D, F.N, W, H) then
             L.Depth.Append (F.P);
          else
@@ -217,6 +255,36 @@ package body Layout is
          end loop;
          L.Depth := (if Ordered.Is_Empty then Real else Ordered);
       end;
+      --  内参按最长公共前缀配到相机;没配上的那台留空路径,保持和 Cams 同序
+      for Cp of L.Cams loop
+         declare
+            Best : Integer := -1;
+            Best_Len : Integer := 0;
+         begin
+            for I in 0 .. Natural (Intr_Raw.Length) - 1 loop
+               declare
+                  Common : Natural := 0;
+                  A : constant Path := Cp;
+                  B : constant Path := Intr_Raw (I);
+               begin
+                  while Common < Natural (A.Segs.Length) and then Common < Natural (B.Segs.Length)
+                    and then A.Segs (Common) = B.Segs (Common)
+                  loop
+                     Common := Common + 1;
+                  end loop;
+                  if Integer (Common) > Best_Len then
+                     Best_Len := Integer (Common);
+                     Best := I;
+                  end if;
+               end;
+            end loop;
+            if Best >= 0 then
+               L.Intr.Append (Intr_Raw (Best));
+            else
+               L.Intr.Append (Empty);
+            end if;
+         end;
+      end loop;
    end Recognise;
 
    function Missing (L : Body_Layout) return String is

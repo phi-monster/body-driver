@@ -12,6 +12,7 @@ package Layout is
    subtype Paths is Path_Vectors.Vector;
    type Body_Layout is record
       Joints, EE, Jaw, Cams, Depth, Base : Paths;
+      Intr : Paths;          --  每台相机的内参矩阵(按形状认:3×3 浮点、针孔样子;没有的那台留空路径)
       Ambiguous : Strs;
       Leaves : Strs;
    end record;
@@ -24,4 +25,6 @@ package Layout is
    function Joined (P : Path) return String;
    function Is_Image (D : Msgpack.Doc; N : Integer; W, H : out Natural) return Boolean;
    function Is_Depth (D : Msgpack.Doc; N : Integer; W, H : out Natural) return Boolean;
+   --  3×3 浮点、[f 0 cx; 0 f cy; 0 0 1] 的样子 = 针孔内参(只看形状与值的样子,不看键名)
+   function Is_Intrinsic (D : Msgpack.Doc; N : Integer; F, Cx, Cy : out Long_Float) return Boolean;
 end Layout;

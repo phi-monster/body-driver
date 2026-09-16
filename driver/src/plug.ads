@@ -15,6 +15,8 @@ package Plug is
       Gray, RGB : Buf;
       Has_Depth : Boolean := False;
       Depth : Floats;
+      Has_K : Boolean := False;                 --  观测里带了这台相机的内参(焦距、主点);没有就由身体自己量
+      Focal, Cx, Cy : Long_Float := 0.0;        --  像素
    end record;
    package Cam_Vectors is new Ada.Containers.Vectors (Natural, Cam);
    type Frame is record

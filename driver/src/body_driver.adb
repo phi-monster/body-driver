@@ -264,6 +264,7 @@ begin
                 (if C.Map.N_Cams > 2 then Codec.Fmt (C.Map.Cam_Frac (A * C.Map.N_Cams + 2), 3) else ""));
    end loop;
    C.Cam := C.Map.World_Cam;
+   Act.Geo_Boot (F, C, To_String (Body_Path));
    Put_Line ("[身] 身体量完 ⇒ 开始干活(脑在 " & To_String (C.Eye_Host) & ":" & Codec.Img (C.Eye_Port) & (if C.Look_Only then ",只看不动" else "") &
              (if C.Use_Json then ",脑填 FO 那张表" else ",脑交 Sinew 程序") & ")");
    --  ── 干活循环 ──

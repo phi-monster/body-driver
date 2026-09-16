@@ -2429,6 +2429,386 @@ package body Act is
       end if;
    end Held_Test;
 
+
+   --  ══ 几何驾驶:腕眼里只用【彩色图 + 手的位姿读数 + 焦距】,深度通道一个字不读 ══
+   --  以前"前后"那一维靠深度/看着多大/模板/单目网,180 炮没有一个稳过 10 步。现在是大拇指测距:手挪一段【读数说的】米数,
+   --  看它在画面里跳多少像素,两条视线一交就是它在哪。误差随距离平方缩:远处两厘米、指尖前两毫米,正合抓取。
+   procedure Geo_Say (S : String) is
+   begin
+      Put_Line ("[身] 📐 " & S);
+   end Geo_Say;
+
+   function Geo_Of (C : Context; Cam : Natural) return Geom.Cam_Geo is
+     (if Cam < Natural (C.Geo.Length) then C.Geo (Cam) else Geom.No_Geo);
+
+   --  这台相机的几何能不能开工:焦距 + 指尖都有(朝向没有可以现量)
+   function Geo_Ready (C : Context; Cam : Natural) return Boolean is
+      G : constant Geom.Cam_Geo := Geo_Of (C, Cam);
+   begin
+      return G.Tip_Valid and then G.F > 0.0;
+   end Geo_Ready;
+
+   --  观测里带了焦距就记进这台相机的几何(没带就留着以前存的)
+   procedure Geo_Take_K (C : in out Context; F : Plug.Frame; Cam : Natural) is
+      G : Geom.Cam_Geo := Geo_Of (C, Cam);
+   begin
+      if Cam < Natural (F.Cams.Length) and then F.Cams (Cam).Has_K and then Cam < Natural (C.Geo.Length) then
+         G.F := F.Cams (Cam).Focal; G.Cx := F.Cams (Cam).Cx; G.Cy := F.Cams (Cam).Cy;
+         C.Geo.Replace_Element (Cam, G);
+      end if;
+   end Geo_Take_K;
+
+   --  点名的那块此刻在这台相机里的像素(这一帧还没切过就切一遍、槽号对上)
+   procedure Geo_Track (C : in out Context; F : Plug.Frame; Cam : Natural; Slot : Integer; U, V : out Long_Float; Seen : out Boolean) is
+      Cw : constant Natural := F.Cams (Cam).W;
+      Ch : constant Natural := F.Cams (Cam).H;
+   begin
+      Seen := False; U := 0.0; V := 0.0;
+      if not (C.Cut_Seq = F.Seq and then C.Cut_Cam = Integer (Cam)) then
+         World.Observe (C.Wld, Cam, Cut_Things (C, F, Cam), Cw, Ch);
+      end if;
+      if Slot >= 0 and then Natural (Slot) < World.Count (C.Wld, Cam) then
+         declare
+            Sl : constant World.Slot := World.Get (C.Wld, Cam, Natural (Slot));
+         begin
+            if Sl.Present and then Sl.Seen then
+               U := Sl.R.Cu * Long_Float (Cw); V := Sl.R.Cv * Long_Float (Ch); Seen := True;
+            end if;
+         end;
+      end if;
+   end Geo_Track;
+
+   --  只平移(世界系),不转
+   procedure Geo_Move (L : in out Plug.Link; C : Context; F : in out Plug.Frame; Arm : Natural; Dw : Geom.V3; Ok : out Boolean) is
+      A : Table.Vec := Table.Zero_Vec;
+      Jaw : Floats;
+      Del : Table.Vec;
+   begin
+      A (0) := Dw (0); A (1) := Dw (1); A (2) := Dw (2);
+      Step_Arm (L, C, F, Arm, A, Jaw, Del, Ok);
+   end Geo_Move;
+
+   --  这只手一步能走出来又看得见的那一档(开机量的,米)
+   function Geo_Base (C : Context; Arm : Natural) return Long_Float is
+      K : constant Natural := Arm * C.Map.Per_Arm;
+   begin
+      if K < Natural (C.Map.Amp.Length) and then C.Map.Amp (K) > 0.0 then
+         return C.Map.Amp (K);
+      end if;
+      return C.Map.EE_Noise;
+   end Geo_Base;
+
+   function Mm (X : Long_Float) return String is (Codec.Fmt (X * 1000.0, 0) & " mm");
+
+   --  指尖在相机里的位置:开机那一帧里两根手指(合空扫过的像素)各自最靠上的那一截 = 指尖;有深度那一帧读一次深度
+   --  (真机:一台相机一辈子量一次,用尺子也行;之后再也不读深度)
+   procedure Geo_Measure_Tips (C : in out Context; F : Plug.Frame; Cam, Arm : Natural) is
+      G : Geom.Cam_Geo := Geo_Of (C, Cam);
+      Z : constant Zone.Hand_Zone := Zone_Of (C, Arm, Cam);
+      Cw : constant Natural := F.Cams (Cam).W;
+      Ch : constant Natural := F.Cams (Cam).H;
+      Tips : array (0 .. 1) of Geom.V3 := [others => [others => 0.0]];
+      Nt : Natural := 0;
+      procedure One (Lb : Zone.Lobe) is
+         Top : Integer := -1;
+         Su, Sv : Long_Float := 0.0;
+         Cnt : Natural := 0;
+         Ds : Floats;
+      begin
+         if not Lb.Valid then
+            return;
+         end if;
+         for Y in Lb.Y0 .. Lb.Y1 loop
+            for X in Lb.X0 .. Lb.X1 loop
+               if Y * Cw + X < Natural (Z.Fingers.Length) and then Z.Fingers (Y * Cw + X) then
+                  Top := Y;
+                  exit;
+               end if;
+            end loop;
+            exit when Top >= 0;
+         end loop;
+         if Top < 0 then
+            return;
+         end if;
+         --  指尖那一截 = 最靠上的 1/80 画幅高(比例,无量纲)
+         for Y in Top .. Natural'Min (Lb.Y1, Top + Ch / 80) loop
+            for X in Lb.X0 .. Lb.X1 loop
+               if Y * Cw + X < Natural (Z.Fingers.Length) and then Z.Fingers (Y * Cw + X) then
+                  Su := Su + Long_Float (X); Sv := Sv + Long_Float (Y); Cnt := Cnt + 1;
+                  if F.Cams (Cam).Has_Depth and then Y * Cw + X < Natural (F.Cams (Cam).Depth.Length) then
+                     declare
+                        D : constant Long_Float := F.Cams (Cam).Depth (Y * Cw + X);
+                     begin
+                        if D > 0.0 and then not Picture.Is_Nan (D) then
+                           Ds.Append (D);
+                        end if;
+                     end;
+                  end if;
+               end if;
+            end loop;
+         end loop;
+         if Cnt = 0 or else Ds.Is_Empty then
+            return;
+         end if;
+         --  深度取中位数(排序)
+         declare
+            Arr : array (0 .. Natural (Ds.Length) - 1) of Long_Float;
+            U : constant Long_Float := Su / Long_Float (Cnt);
+            V : constant Long_Float := Sv / Long_Float (Cnt);
+            Dm : Long_Float;
+         begin
+            for I in Arr'Range loop
+               Arr (I) := Ds (I);
+            end loop;
+            for I in Arr'First + 1 .. Arr'Last loop
+               declare
+                  Key : constant Long_Float := Arr (I);
+                  J : Integer := I - 1;
+               begin
+                  while J >= Arr'First and then Arr (J) > Key loop
+                     Arr (J + 1) := Arr (J); J := J - 1;
+                  end loop;
+                  Arr (J + 1) := Key;
+               end;
+            end loop;
+            Dm := Arr (Arr'Length / 2);
+            Tips (Nt) := [(U - G.Cx) / G.F * Dm, -(V - G.Cy) / G.F * Dm, -Dm];
+            Nt := Nt + 1;
+            Geo_Say ("指尖:像素 (" & Codec.Fmt (U, 1) & "," & Codec.Fmt (V, 1) & ") 离相机 " & Mm (Dm));
+         end;
+      end One;
+   begin
+      if not Z.Valid or else G.F <= 0.0 or else not F.Cams (Cam).Has_Depth then
+         Geo_Say ("第" & Codec.Img (Cam) & " 台相机的指尖量不了:" &
+                  (if not Z.Valid then "握区没量到" elsif G.F <= 0.0 then "没有焦距" else "这一帧没有深度(真机:用尺子量一次填进几何文件)"));
+         return;
+      end if;
+      One (Z.A);
+      if Nt < 2 then
+         One (Z.B);
+      end if;
+      if Nt = 2 then
+         G.Tip := [(Tips (0) (0) + Tips (1) (0)) / 2.0, (Tips (0) (1) + Tips (1) (1)) / 2.0, (Tips (0) (2) + Tips (1) (2)) / 2.0];
+         G.Gap := Geom.Norm ([Tips (0) (0) - Tips (1) (0), Tips (0) (1) - Tips (1) (1), Tips (0) (2) - Tips (1) (2)]);
+         G.Tip_Valid := True;
+         C.Geo.Replace_Element (Cam, G);
+         Geo_Say ("第" & Codec.Img (Cam) & " 台相机:指尖中点在相机前 " & Mm (-G.Tip (2)) & ",两指尖相距 " & Mm (G.Gap));
+      else
+         Geo_Say ("第" & Codec.Img (Cam) & " 台相机:只认出 " & Codec.Img (Nt) & " 根指尖 ⇒ 指尖没量到");
+      end if;
+   end Geo_Measure_Tips;
+
+   procedure Geo_Boot (F : Plug.Frame; C : in out Context; Body_Path : String) is
+      Note : String (1 .. 160);
+   begin
+      C.Geo_Path := S (Body_Path & ".geo.json");
+      Geom.Load (To_String (C.Geo_Path), C.Geo, C.Map.N_Cams, Note);
+      Geo_Say (Ada.Strings.Fixed.Trim (Note, Ada.Strings.Both));
+      for Cam in 0 .. C.Map.N_Cams - 1 loop
+         Geo_Take_K (C, F, Cam);
+         declare
+            A : constant Integer := Cam_Arm (C, Cam);
+            G : Geom.Cam_Geo;
+         begin
+            if A >= 0 and then Cam < Natural (F.Cams.Length) then
+               if not Geo_Of (C, Cam).Tip_Valid then
+                  Geo_Measure_Tips (C, F, Cam, Natural (A));
+               end if;
+               G := Geo_Of (C, Cam);
+               Geo_Say ("第" & Codec.Img (Cam) & " 台相机(长在第" & Codec.Img (Natural (A) + 1) & " 只手上):焦距 " &
+                        (if G.F > 0.0 then Codec.Fmt (G.F, 1) & " px" else "没有") & " · 朝向 " & (if G.Valid then "量过(残差 " & Codec.Fmt (G.Rms, 2) & " px)" else "没量,用到时现量") &
+                        " · 指尖 " & (if G.Tip_Valid then "有" else "没有"));
+            end if;
+         end;
+      end loop;
+      if not C.Geo.Is_Empty then
+         Geom.Save (To_String (C.Geo_Path), C.Geo);
+      end if;
+   end Geo_Boot;
+
+   --  量相机朝向:盯着点名那块,手做四次平移,每次停稳记一笔,回起点,解朝向,存文件
+   procedure Geo_Calibrate (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Cam, Arm : Natural; Slot : Integer; Ok : out Boolean) is
+      G : Geom.Cam_Geo;
+      Home : constant Plug.Arm_Pose := F.EE (Arm);
+      B : constant Long_Float := 4.0 * Geo_Base (C, Arm);   --  四倍那一档(倍数,无量纲):远处一步要跳得过跟踪噪声
+      Moves : constant array (1 .. 4) of Geom.V3 := [[B, 0.0, 0.0], [0.0, 0.0, B], [0.0, B, 0.0], [-B, 0.0, B]];
+      Obs : Geom.Obs_Vectors.Vector;
+      U, V : Long_Float;
+      Seen, Mok : Boolean;
+   begin
+      Ok := False;
+      Geo_Take_K (C, F, Cam);
+      G := Geo_Of (C, Cam);
+      if G.F <= 0.0 then
+         Geo_Say ("这台相机没有焦距(观测里没带、也没量过)⇒ 量不了朝向");
+         return;
+      end if;
+      Geo_Track (C, F, Cam, Slot, U, V, Seen);
+      if not Seen then
+         Geo_Say ("起点就看不见点名的那块 ⇒ 量不了朝向");
+         return;
+      end if;
+      Obs.Append (Geom.Obs'(Pose => F.EE (Arm), U => U, V => V));
+      for M of Moves loop
+         declare
+            Cur : constant Plug.Arm_Pose := F.EE (Arm);
+            Dw : constant Geom.V3 := [Home (0) + M (0) - Cur (0), Home (1) + M (1) - Cur (1), Home (2) + M (2) - Cur (2)];
+         begin
+            Geo_Move (L, C, F, Arm, Dw, Mok);
+            Geo_Track (C, F, Cam, Slot, U, V, Seen);
+            declare
+               Rot : constant Long_Float := Geom.Angle_Between (Home, F.EE (Arm));
+               --  身体拿转动凑平移的那一停不算:转动引起的相机位移和平移之比 > 一成就扔(比例,无量纲)
+               Turned : constant Boolean := Rot > 0.1;
+            begin
+               if Seen and then not Turned then
+                  Obs.Append (Geom.Obs'(Pose => F.EE (Arm), U => U, V => V));
+               end if;
+               Geo_Say ("量朝向:挪 (" & Mm (M (0)) & "," & Mm (M (1)) & "," & Mm (M (2)) & ") ⇒ " &
+                        (if Seen then "它在 (" & Codec.Fmt (U, 1) & "," & Codec.Fmt (V, 1) & ")" else "没看见它") &
+                        (if Turned then ",手转了 " & Codec.Fmt (Rot * 57.3, 1) & "°,这一停不算" else ""));
+            end;
+         end;
+      end loop;
+      declare
+         Cur : constant Plug.Arm_Pose := F.EE (Arm);
+      begin
+         Geo_Move (L, C, F, Arm, [Home (0) - Cur (0), Home (1) - Cur (1), Home (2) - Cur (2)], Mok);
+      end;
+      Geom.Fit (G, Obs, Ok);
+      if Ok then
+         C.Geo.Replace_Element (Cam, G);
+         Geom.Save (To_String (C.Geo_Path), C.Geo);
+         Geo_Say ("相机朝向量好:" & Codec.Img (Natural (Obs.Length)) & " 停,像素残差 " & Codec.Fmt (G.Rms, 2) & " px,存进 " & To_String (C.Geo_Path));
+      else
+         Geo_Say ("朝向解不出来(能用的停只有 " & Codec.Img (Natural (Obs.Length)) & " 个)");
+      end if;
+   end Geo_Calibrate;
+
+   --  几何逼近:让"指尖该到的那一点"(指尖中点再往手心里一点)和点名那块重合。每段走一截、停稳、再看一眼、再算。
+   procedure Geo_Approach (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Cam, Arm : Natural; Slot : Integer;
+                           Step_Limit : Natural; Event : out Unbounded_String; Steps_Taken : out Natural; Beats : out Natural) is
+      G : constant Geom.Cam_Geo := Geo_Of (C, Cam);
+      Beats0 : constant Natural := Plug.Steps (L);
+      Limit : constant Natural := (if Step_Limit > 0 then Step_Limit else 12);   --  没说步数时的安全上限(次数)
+      Tol : constant Long_Float := 0.1 * G.Gap;      --  到位容差 = 张口的一成(比例,无量纲)
+      Inward : constant Long_Float := 0.15 * G.Gap;  --  指尖中点再往手心里一点 = 张口的 15%(比例,无量纲):别咬在皮上
+      Want : Geom.V3 := G.Tip;
+      U, V : Long_Float;
+      Seen, Mok : Boolean;
+   begin
+      Event := Null_Unbounded_String; Steps_Taken := 0; Beats := 0;
+      Want (2) := Want (2) + Inward;   --  相机 -z 朝前 ⇒ 往手心方向 = +z
+      if C.Geo_Slot /= Slot then
+         C.Geo_Obs.Clear; C.Geo_Slot := Slot; C.Geo_Came := 0.0;
+      end if;
+      Geo_Track (C, F, Cam, Slot, U, V, Seen);
+      if not Seen then
+         Event := S ("lost: I cannot see the thing you named in this eye right now");
+         return;
+      end if;
+      C.Geo_Obs.Append (Geom.Obs'(Pose => F.EE (Arm), U => U, V => V));
+      if Natural (C.Geo_Obs.Length) < 2 then
+         --  只有一笔观测 ⇒ 先横挪一步当基线(拇指测距的"换只眼")
+         declare
+            Rc : constant Geom.M3 := Geom.Cam_R (G, F.EE (Arm));
+            B : constant Long_Float := 4.0 * Geo_Base (C, Arm);   --  同量朝向那一档(倍数,无量纲)
+            Dw : constant Geom.V3 := Geom.Ap (Rc, [B, 0.0, 0.0]);
+            U0 : constant Long_Float := U;
+         begin
+            Geo_Move (L, C, F, Arm, Dw, Mok);
+            Steps_Taken := Steps_Taken + 1;
+            Geo_Track (C, F, Cam, Slot, U, V, Seen);
+            if not Seen then
+               Event := S ("lost: it left my sight when I stepped sideways to measure its distance");
+               Beats := Plug.Steps (L) - Beats0;
+               return;
+            end if;
+            C.Geo_Obs.Append (Geom.Obs'(Pose => F.EE (Arm), U => U, V => V));
+            Geo_Say ("视差基线:横挪 " & Mm (B) & ",它在画面里从 u=" & Codec.Fmt (U0, 1) & " 跳到 u=" & Codec.Fmt (U, 1));
+         end;
+      end if;
+      loop
+         declare
+            Cur : constant Plug.Arm_Pose := F.EE (Arm);
+            Nobs : constant Natural := Natural (C.Geo_Obs.Length);
+            Use_Obs : Geom.Obs_Vectors.Vector;
+            Pw, Pc, D : Geom.V3;
+            Dist : Long_Float;
+         begin
+            --  用最近的几笔观测(它不动,我动过的地方越多交点越稳;最多 6 笔,次数)
+            for K in Natural'Max (0, Nobs - 6) .. Nobs - 1 loop
+               Use_Obs.Append (C.Geo_Obs (K));
+            end loop;
+            Pw := Geom.Triangulate (G, Use_Obs);
+            Pc := Geom.To_Cam (G, Cur, Pw);
+            D := [Pc (0) - Want (0), Pc (1) - Want (1), Pc (2) - Want (2)];
+            Dist := Geom.Norm (D);
+            C.Geo_Dist := Dist; C.Geo_Round := C.Round_N;
+            Geo_Say ("它在相机前 " & Mm (-Pc (2)) & "(左右 " & Mm (Pc (0)) & " 上下 " & Mm (Pc (1)) & "),离指尖该到的那点还差 " & Mm (Dist) &
+                     "(左右 " & Mm (D (0)) & " 上下 " & Mm (D (1)) & " 前后 " & Mm (D (2)) & ")");
+            if -Pc (2) <= 0.0 then
+               Event := S ("lost: my sightlines do not meet in front of me (the thing may have moved)");
+               exit;
+            end if;
+            if Dist <= Tol then
+               Event := S ("amount: arrived (the thing sits " & Mm (Dist) & " from where my fingers close)");
+               exit;
+            end if;
+            if Steps_Taken >= Limit then
+               Event := S ("steps: I took the steps you asked for (still " & Mm (Dist) & " from where my fingers close)");
+               exit;
+            end if;
+            declare
+               Frac : constant Long_Float := (if Dist > G.Gap then 0.6 else 1.0);   --  远时走六成再看一眼(比例,无量纲);近了一步到
+               Step : constant Geom.V3 := [D (0) * Frac, D (1) * Frac, D (2) * Frac];
+               Rc : constant Geom.M3 := Geom.Cam_R (G, Cur);
+               Dw : constant Geom.V3 := Geom.Ap (Rc, Step);
+               Ln : constant Long_Float := Geom.Norm (Dw);
+            begin
+               Geo_Move (L, C, F, Arm, Dw, Mok);
+               Steps_Taken := Steps_Taken + 1;
+               C.Geo_Came := C.Geo_Came + Ln;
+               if Ln > 0.0 then
+                  C.Geo_Dir := [Dw (0) / Ln, Dw (1) / Ln, Dw (2) / Ln];
+               end if;
+               Geo_Track (C, F, Cam, Slot, U, V, Seen);
+               if not Seen then
+                  --  最后一步它进了指缝、被手指挡住也正常:上一眼已经在两倍容差内(倍数,无量纲)
+                  if Dist <= 2.0 * Tol then
+                     Event := S ("amount: arrived (I lost sight of it on the last step; it was " & Mm (Dist) & " from where my fingers close)");
+                  else
+                     Event := S ("lost: I lost sight of it after that step (it was " & Mm (Dist) & " away)");
+                  end if;
+                  exit;
+               end if;
+               C.Geo_Obs.Append (Geom.Obs'(Pose => F.EE (Arm), U => U, V => V));
+            end;
+         end;
+      end loop;
+      Beats := Plug.Steps (L) - Beats0;
+   end Geo_Approach;
+
+   --  离远点(拿着东西):沿来的路退,退它来时那么远(全是量的,两段走)
+   procedure Geo_Retreat (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Arm : Natural;
+                          Event : out Unbounded_String; Steps_Taken : out Natural; Beats : out Natural) is
+      Beats0 : constant Natural := Plug.Steps (L);
+      Dist : constant Long_Float := C.Geo_Came;
+      Mok : Boolean;
+   begin
+      Steps_Taken := 0; Beats := 0;
+      if Dist <= 0.0 or else Geom.Norm (C.Geo_Dir) <= 0.0 then
+         Event := S ("amount: stopped (I have no approach path to retrace)");
+         return;
+      end if;
+      for Leg in 1 .. 2 loop
+         Geo_Move (L, C, F, Arm, [-C.Geo_Dir (0) * Dist / 2.0, -C.Geo_Dir (1) * Dist / 2.0, -C.Geo_Dir (2) * Dist / 2.0], Mok);
+         Steps_Taken := Steps_Taken + 1;
+      end loop;
+      Event := S ("amount: arrived (I went back the way I came, " & Mm (Dist) & ")");
+      Beats := Plug.Steps (L) - Beats0;
+   end Geo_Retreat;
+
    function Mode_Line (C : Context; Until_Text : String) return String is
      ("MODE: " & (if C.Wld.Holding then "holding something with arm " & Codec.Img (Natural (C.Wld.Held_Arm) + 1) else "hands empty") &
       "; without new words from you I hold still and keep my grip as it is; this segment ended on: " & Until_Text & ".");
@@ -3022,6 +3402,9 @@ package body Act is
          Desc : Unbounded_String;
          Grip_Arm : constant Integer := (if Say.Grip_Arm >= 1 and then Say.Grip_Arm <= C.Map.Arms then Integer (Say.Grip_Arm) - 1 else -1);
          Did_Grip : Unbounded_String;
+         Geo_Case : Natural := 0;            --  0 = 老路;1 = 几何贴近;2 = 沿原路退;3 = 合(不先走)
+         Geo_Slot_Now : Integer := -1;
+         Geo_Desc : Unbounded_String;
       --  2a 把脑说的话变成要求:别动的,目标就是它现在的位置;要动的,目标是格子或与某号的关系;
       --  抓某号,目标是"和我张开的那片地方重合"(位置 / 远近 / 看着多大 / 朝向)
       --  把去哪翻成目标:格子 / 与某号的关系(碰到它 · 上下左右 · 前后 · 离远点)。全是量出来的位置,没有写死的距离
@@ -3310,9 +3693,21 @@ package body Act is
                   Steps_J : Natural;
                   Reading : Long_Float;
                   Hz : constant Zone.Hand_Zone := Zone_Of (C, A, Cam);
+                  --  几何逼近刚算过它离指尖该到的那点多远(这一轮或上一轮)⇒ 笼住与否由那个数说,不再拿像素框/深度猜
+                  Geo_Cage : constant Boolean := C.Geo_Dist >= 0.0 and then C.Round_N - C.Geo_Round <= 1
+                                                 and then Cam_Arm (C, Cam) = Integer (A) and then Geo_Ready (C, Cam);
                begin
+                  if Geo_Cage then
+                     declare
+                        --  合手容差 = 张口的两成(比例,无量纲):指缝本来就有余量
+                        Allow : constant Long_Float := 0.2 * Geo_Of (C, Cam).Gap;
+                     begin
+                        Caged := C.Geo_Dist <= Allow;
+                        Cage_Note := S ("cage check by sightlines: the thing is " & Mm (C.Geo_Dist) & " from where my fingers close (allowed " & Mm (Allow) & ")");
+                     end;
+                  end if;
                   --  笼判据:点名的那块的像素在握区框里(它的形心落在区框内),深度和手指对得上
-                  if Say.Grip_On >= 1 and then Say.Grip_On <= Natural (C.Items.Length) then
+                  if not Geo_Cage and then Say.Grip_On >= 1 and then Say.Grip_On <= Natural (C.Items.Length) then
                      declare
                         Pin : Point;
                         Found : Boolean := False;
@@ -3401,6 +3796,7 @@ package body Act is
                         Did_Grip := S ("I closed grip " & Codec.Img (A + 1) & " until the picture stopped changing (" & Codec.Img (Steps_J) & " steps, reading " & Codec.Fmt (Reading, 3) &
                                        ", empty-close reading " & Codec.Fmt (Empty, 3) & "); " & To_String (Note));
                         if By_Reading then
+                           C.Geo_Obs.Clear;   --  它在手里了,以前那些视线作废
                            C.Wld.Holding := True; C.Wld.Held_Arm := Integer (A); C.Wld.Held_Cam := Integer (Cam);
                            if Say.Grip_On >= 1 and then Say.Grip_On <= Natural (C.Items.Length) then
                               C.Wld.Held_Slot := C.Items (Say.Grip_On - 1).Slot;
@@ -3445,6 +3841,62 @@ package body Act is
                Avoid.Append (C.Items (N - 1));
             end if;
          end loop;
+         --  ── 几何驾驶(腕眼)──:贴近/瞄进 = 视线交点;合 = 刚算过的距离说了算;离远 = 沿原路退
+         declare
+            Own : constant Integer := Cam_Arm (C, Cam);
+         begin
+            if Own >= 0 and then Geo_Ready (C, Cam) then
+               if Say.Grip = "none" and then Natural (Say.Moves.Length) = 1 then
+                  declare
+                     G0 : constant Brain.Goal := Say.Moves (0);
+                     Rl : constant String := To_String (G0.Rel);
+                  begin
+                     if G0.Item >= 1 and then G0.Item <= Natural (C.Items.Length) and then C.Items (G0.Item - 1).Kind in Finger | Grip
+                       and then Integer (C.Items (G0.Item - 1).Arm) = Own
+                     then
+                        if (Rl = "at" or else Rl = "into") and then G0.Of_Item >= 1 and then G0.Of_Item <= Natural (C.Items.Length)
+                          and then C.Items (G0.Of_Item - 1).Kind = Thing and then C.Items (G0.Of_Item - 1).Located
+                        then
+                           Geo_Case := 1; Geo_Slot_Now := C.Items (G0.Of_Item - 1).Slot;
+                           Geo_Desc := S ("item " & Codec.Img (G0.Item) & " " & Rl & " item " & Codec.Img (G0.Of_Item) & " (by sightlines, in my own hand camera)");
+                        elsif Rl = "back" and then C.Wld.Holding and then C.Wld.Held_Arm = Own then
+                           Geo_Case := 2;
+                           Geo_Desc := S ("item " & Codec.Img (G0.Item) & " back the way it came, holding");
+                        end if;
+                     end if;
+                  end;
+               elsif Say.Grip = "close" and then Grip_Arm = Own and then C.Geo_Dist >= 0.0 and then C.Round_N - C.Geo_Round <= 1 then
+                  Geo_Case := 3;   --  合:不再先走一段,笼住与否由刚算的距离说
+               end if;
+            end if;
+         end;
+         if Geo_Case = 1 and then not Geo_Of (C, Cam).Valid then
+            declare
+               Cok : Boolean;
+            begin
+               Put_Line ("[身] 📐 这台相机的朝向还没量 ⇒ 先盯着它挪四下量出来");
+               Geo_Calibrate (L, C, F, Cam, Natural (Cam_Arm (C, Cam)), Geo_Slot_Now, Cok);
+               if not Cok then
+                  Geo_Case := 0;
+                  Report := S ("I tried to measure how my hand camera sits on my hand and could not, so I fell back to pushing by feel. ");
+               end if;
+            end;
+         end if;
+         if Geo_Case = 1 then
+            Put_Line ("[身] ⚙ 几何驾驶:" & To_String (Geo_Desc));
+            Geo_Approach (L, C, F, Cam, Natural (Cam_Arm (C, Cam)), Geo_Slot_Now, Step_Limit, Event, Steps_Taken, Beats);
+            Feel (C, F);
+            Report := Report & "you asked " & To_String (Geo_Desc) & ": " & To_String (Event) & ". I took " & Codec.Img (Steps_Taken) & " pushes; ";
+            Put_Line ("[身]   这一段:" & Codec.Img (Steps_Taken) & " 推 · " & Codec.Img (Beats) & " 拍 · 这一集累计 " & Codec.Img (Plug.Steps (L)) & " 拍");
+         elsif Geo_Case = 2 then
+            Put_Line ("[身] ⚙ 几何驾驶:" & To_String (Geo_Desc));
+            Geo_Retreat (L, C, F, Natural (Cam_Arm (C, Cam)), Event, Steps_Taken, Beats);
+            Feel (C, F);
+            Report := Report & "you asked " & To_String (Geo_Desc) & ": " & To_String (Event) & ". I took " & Codec.Img (Steps_Taken) & " pushes; ";
+            Put_Line ("[身]   这一段:" & Codec.Img (Steps_Taken) & " 推 · " & Codec.Img (Beats) & " 拍");
+         elsif Geo_Case = 3 then
+            Put_Line ("[身] ⚙ 几何驾驶:合手前不再走,笼住与否由刚算的 " & Mm (C.Geo_Dist) & " 说");
+         else
          Build_Goals;
          if not Pts.Is_Empty then
             Expand_Lobes (C, F, Cam, Pts);
@@ -3522,6 +3974,7 @@ package body Act is
             Report := S ((if Say.See = "not_here" then "you said the thing is not in that picture; the body did not move. "
                           elsif Say.See = "unclear" then "you said you could not tell; the body did not move. "
                           else "you gave no move and no grip; the body did not move. "));
+         end if;
          end if;
          Do_Grip;
          Report := Report & Mode_Line (C, To_String (Event));

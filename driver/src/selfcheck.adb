@@ -22,6 +22,7 @@ with Sinew;
 with Plan;
 with Runtime;
 with Act;
+with Geom;
 procedure Selfcheck is
    Fails : Natural := 0;
    procedure Check (Cond : Boolean; What : String) is
@@ -695,6 +696,89 @@ begin
          Wide.Size := 0.30;
          Facts.Replace_Element (2, Wide);
          Check (not Dry ("do grasper close the ball until free").Ok, "空转:张不到那么开却要合 ⇒ 退回");
+      end;
+   end;
+
+   --  ── 几何(视线、三角化、朝向拟合)──
+   declare
+      G : Geom.Cam_Geo;
+      Rv : constant Geom.V3 := [0.3, -0.2, 0.5];
+      R : constant Geom.M3 := Geom.Rodrigues (Rv);
+      Back : constant Geom.V3 := Geom.Rot_Vec (R);
+      Pw : constant Geom.V3 := [0.27, 0.03, 0.80];
+      function Pose_At (X, Y, Z : Long_Float) return Plug.Arm_Pose is
+        ([X, Y, Z, 0.707, 0.0, 0.0, 0.7072]);
+      Obs : Geom.Obs_Vectors.Vector;
+      Ok : Boolean;
+      Ang : Long_Float;
+   begin
+      Check (Geom.Norm ([Back (0) - Rv (0), Back (1) - Rv (1), Back (2) - Rv (2)]) < 1.0e-9, "几何:转向量 → 矩阵 → 转向量 回得来");
+      G.F := 397.0; G.Cx := 320.0; G.Cy := 240.0;
+      --  真的相机朝向:取 CA1 实测那台(相机在手系里的列)
+      --  四位小数的矩阵不正交;经转向量再回来就是一个真正的旋转
+      G.R_Ce := Geom.Rodrigues (Geom.Rot_Vec ([[0.0038, 0.4971, -0.8677], [-1.0, 0.0032, -0.0026], [0.0015, 0.8677, 0.4971]]));
+      G.Valid := True;
+      --  投影再沿视线回去,应指向同一个点
+      declare
+         P0 : constant Plug.Arm_Pose := Pose_At (0.30, -0.35, 0.92);
+         U, V : Long_Float;
+         Front : Boolean;
+      begin
+         Geom.Project (G, P0, Pw, U, V, Front);
+         Check (Front and then U > 0.0 and then U < 640.0 and then V > 0.0 and then V < 480.0, "几何:球投在画面里 (" & Codec.Fmt (U, 1) & "," & Codec.Fmt (V, 1) & ")");
+         declare
+            D : constant Geom.V3 := Geom.Ray (G, P0, U, V);
+            To : constant Geom.V3 := [Pw (0) - P0 (0), Pw (1) - P0 (1), Pw (2) - P0 (2)];
+            N : constant Long_Float := Geom.Norm (To);
+         begin
+            Check (abs (D (0) * To (0) / N + D (1) * To (1) / N + D (2) * To (2) / N - 1.0) < 1.0e-9, "几何:像素回推的视线正对着那个点");
+         end;
+      end;
+      --  五个平移位姿看同一个点 ⇒ 交点回到那个点
+      for K in 0 .. 4 loop
+         declare
+            P : constant Plug.Arm_Pose := Pose_At (0.30 + 0.03 * Long_Float (K mod 3), -0.35 + 0.02 * Long_Float (K / 2), 0.92 + 0.03 * Long_Float (K mod 2));
+            U, V : Long_Float;
+            Front : Boolean;
+         begin
+            Geom.Project (G, P, Pw, U, V, Front);
+            Obs.Append (Geom.Obs'(Pose => P, U => U, V => V));
+         end;
+      end loop;
+      declare
+         T : constant Geom.V3 := Geom.Triangulate (G, Obs);
+      begin
+         Check (Geom.Norm ([T (0) - Pw (0), T (1) - Pw (1), T (2) - Pw (2)]) < 1.0e-6, "几何:五条视线交回原点(差 " & Codec.Fmt (Geom.Norm ([T (0) - Pw (0), T (1) - Pw (1), T (2) - Pw (2)]) * 1000.0, 3) & " mm)");
+      end;
+      --  盲拟合朝向:只给像素和位姿,应解回同一个朝向
+      declare
+         G2 : Geom.Cam_Geo;
+      begin
+         G2.F := G.F; G2.Cx := G.Cx; G2.Cy := G.Cy;
+         Geom.Fit (G2, Obs, Ok);
+         Ang := Geom.Norm (Geom.Rot_Vec (Geom.Mul (Geom.Tr (G2.R_Ce), G.R_Ce)));
+         Check (Ok and then Ang < 0.01, "几何:盲拟合解回相机朝向(差 " & Codec.Fmt (Ang * 57.3, 2) & "°,残差 " & Codec.Fmt (G2.Rms, 3) & " px)");
+         --  故意给错的朝向,同一批观测的交点就不在原处 —— 这条焊缝会响
+         declare
+            Bad : Geom.Cam_Geo := G;
+            T : Geom.V3;
+         begin
+            Bad.R_Ce := Geom.Rodrigues ([0.0, 0.0, 1.0]);
+            T := Geom.Triangulate (Bad, Obs);
+            Check (Geom.Norm ([T (0) - Pw (0), T (1) - Pw (1), T (2) - Pw (2)]) > 0.01, "几何:朝向错了交点就错(焊缝会响)");
+         end;
+      end;
+      --  存 / 读
+      declare
+         Gs, Gs2 : Geom.Geo_Vectors.Vector;
+         Note : String (1 .. 160);
+      begin
+         Gs.Append (Geom.No_Geo); Gs.Append (G);
+         Gs (1).Tip := [0.0, -0.0045, -0.085]; Gs (1).Gap := 0.0889; Gs (1).Tip_Valid := True;
+         Geom.Save ("/tmp/selfcheck_geo.json", Gs);
+         Geom.Load ("/tmp/selfcheck_geo.json", Gs2, 2, Note);
+         Check (Natural (Gs2.Length) = 2 and then Gs2 (1).Valid and then Gs2 (1).Tip_Valid and then abs (Gs2 (1).Gap - 0.0889) < 1.0e-6
+                and then abs (Gs2 (1).R_Ce (0, 2) - G.R_Ce (0, 2)) < 1.0e-6 and then not Gs2 (0).Valid, "几何:存了再读回来一样");
       end;
    end;
    Put_Line ((if Fails = 0 then "🟢 自检全过" else "🔴 自检失败" & Natural'Image (Fails) & " 条"));
