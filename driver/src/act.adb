@@ -2458,8 +2458,11 @@ package body Act is
       end if;
    end Geo_Take_K;
 
-   --  点名的那块此刻在这台相机里的像素(这一帧还没切过就切一遍、槽号对上)
-   procedure Geo_Track (C : in out Context; F : Plug.Frame; Cam : Natural; Slot : Integer; U, V : out Long_Float; Seen : out Boolean) is
+   --  点名的那块此刻在这台相机里的像素(这一帧还没切过就切一遍、槽号对上)。
+   --  世界槽的对号半径只有半个框,几何一步能让它在画面里跳几百像素 ⇒ 对不上时按【预测的像素】(有的话)或上次位置,
+   --  在更大的半径里找一块大小同量级的,找到就把槽接上。
+   procedure Geo_Track (C : in out Context; F : Plug.Frame; Cam : Natural; Slot : Integer; U, V : out Long_Float; Seen : out Boolean;
+                        Pred_U : Long_Float := -1.0; Pred_V : Long_Float := -1.0) is
       Cw : constant Natural := F.Cams (Cam).W;
       Ch : constant Natural := F.Cams (Cam).H;
    begin
@@ -2467,15 +2470,54 @@ package body Act is
       if not (C.Cut_Seq = F.Seq and then C.Cut_Cam = Integer (Cam)) then
          World.Observe (C.Wld, Cam, Cut_Things (C, F, Cam), Cw, Ch);
       end if;
-      if Slot >= 0 and then Natural (Slot) < World.Count (C.Wld, Cam) then
+      if Slot < 0 or else Natural (Slot) >= World.Count (C.Wld, Cam) then
+         return;
+      end if;
+      declare
+         Sl : World.Slot := World.Get (C.Wld, Cam, Natural (Slot));
+      begin
+         if Sl.Present and then Sl.Seen then
+            U := Sl.R.Cu * Long_Float (Cw); V := Sl.R.Cv * Long_Float (Ch); Seen := True;
+            return;
+         end if;
          declare
-            Sl : constant World.Slot := World.Get (C.Wld, Cam, Natural (Slot));
+            Ref : constant Picture.Region := (if Sl.Present then Sl.R else Sl.Shadow);
+            Bw : constant Long_Float := Long_Float'Max (Long_Float (Ref.X1 - Ref.X0) / Long_Float (Cw), Long_Float (Ref.Y1 - Ref.Y0) / Long_Float (Ch));
+            Has_Pred : constant Boolean := Pred_U >= 0.0 and then Pred_V >= 0.0;
+            Cu0 : constant Long_Float := (if Has_Pred then Pred_U / Long_Float (Cw) else Ref.Cu);
+            Cv0 : constant Long_Float := (if Has_Pred then Pred_V / Long_Float (Ch) else Ref.Cv);
+            --  找回半径:有预测时三个框、没有时两个框(倍数,无量纲);面积得在上次的 0.3 到 6 倍之间(靠近时它会变大,比例,无量纲)
+            Radius : constant Long_Float := (if Has_Pred then 3.0 else 2.0) * Long_Float'Max (Bw, 1.0 / Long_Float (Cw));
+            Regs : constant Picture.Regions := Cut_Things (C, F, Cam);
+            Best : Integer := -1;
+            Bd : Long_Float := Long_Float'Last;
          begin
-            if Sl.Present and then Sl.Seen then
-               U := Sl.R.Cu * Long_Float (Cw); V := Sl.R.Cv * Long_Float (Ch); Seen := True;
+            for Ri in 0 .. Natural (Regs.Length) - 1 loop
+               declare
+                  R : constant Picture.Region := Regs (Ri);
+                  Ratio : constant Long_Float := Long_Float (R.Count) / Long_Float (Natural'Max (1, Ref.Count));
+                  D : constant Long_Float := Sqrt ((R.Cu - Cu0) ** 2 + (R.Cv - Cv0) ** 2);
+               begin
+                  --  面积比 0.3 到 6 倍(比例,无量纲)
+                  if Ratio >= 0.3 and then Ratio <= 6.0 and then D <= Radius and then D < Bd then
+                     Bd := D; Best := Ri;
+                  end if;
+               end;
+            end loop;
+            if Best >= 0 then
+               declare
+                  Cs : World.Cam_State := C.Wld.Cams (Cam);
+               begin
+                  Sl.Present := True; Sl.Seen := True; Sl.R := Regs (Best); Sl.Shadow := Regs (Best);
+                  Cs.Slots.Replace_Element (Natural (Slot), Sl);
+                  C.Wld.Cams.Replace_Element (Cam, Cs);
+               end;
+               U := Regs (Best).Cu * Long_Float (Cw); V := Regs (Best).Cv * Long_Float (Ch); Seen := True;
+               Geo_Say ("槽对不上,按" & (if Has_Pred then "预测" else "上次位置") & "找回来了:(" & Codec.Fmt (U, 1) & "," & Codec.Fmt (V, 1) & ")," &
+                        Codec.Img (Regs (Best).Count) & " px(上次 " & Codec.Img (Ref.Count) & " px)");
             end if;
          end;
-      end if;
+      end;
    end Geo_Track;
 
    --  只平移(世界系),不转
@@ -2737,6 +2779,8 @@ package body Act is
       Want : Geom.V3 := G.Tip;
       U, V : Long_Float;
       Seen, Mok : Boolean;
+      Pw_Last : Geom.V3 := [others => 0.0];
+      Have_Pw : Boolean := False;
    begin
       Event := Null_Unbounded_String; Steps_Taken := 0; Beats := 0;
       Want (2) := Want (2) + Inward;   --  相机 -z 朝前 ⇒ 往手心方向 = +z
@@ -2782,6 +2826,7 @@ package body Act is
                Use_Obs.Append (C.Geo_Obs (K));
             end loop;
             Pw := Geom.Triangulate (G, Use_Obs);
+            Pw_Last := Pw; Have_Pw := True;
             Pc := Geom.To_Cam (G, Cur, Pw);
             D := [Pc (0) - Want (0), Pc (1) - Want (1), Pc (2) - Want (2)];
             Dist := Geom.Norm (D);
@@ -2813,7 +2858,19 @@ package body Act is
                if Ln > 0.0 then
                   C.Geo_Dir := [Dw (0) / Ln, Dw (1) / Ln, Dw (2) / Ln];
                end if;
-               Geo_Track (C, F, Cam, Slot, U, V, Seen);
+               --  走完按几何预测它该在画面哪儿,拿预测去找
+               declare
+                  Pu, Pv : Long_Float := -1.0;
+                  Front : Boolean;
+               begin
+                  if Have_Pw then
+                     Geom.Project (G, F.EE (Arm), Pw_Last, Pu, Pv, Front);
+                     if not Front then
+                        Pu := -1.0; Pv := -1.0;
+                     end if;
+                  end if;
+                  Geo_Track (C, F, Cam, Slot, U, V, Seen, Pu, Pv);
+               end;
                if not Seen then
                   --  最后一步它进了指缝、被手指挡住也正常:上一眼已经在两倍容差内(倍数,无量纲)
                   if Dist <= 2.0 * Tol then
