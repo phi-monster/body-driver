@@ -2571,8 +2571,10 @@ package body Act is
 
    --  只平移(世界系),不转
    --  Jaw_Target < 0 = 抓握通道保持读数;拿着东西挪的时候必须继续给"合到底"的目标,不然驱动把目标换成当前读数 = 不再使劲,球就掉
+   --  Quick = 到量出来的稳定拍数就走(小步慢抬用,省拍数);大步不许 Quick:GC3 第一截 15 cm 在稳定拍数上读到的是走了一半的位姿
+   --  (命令 z −80 mm 读到 +65 mm),几何全算歪
    procedure Geo_Move (L : in out Plug.Link; C : Context; F : in out Plug.Frame; Arm : Natural; Dw : Geom.V3; Ok : out Boolean;
-                       Jaw_Target : Long_Float := -1.0) is
+                       Jaw_Target : Long_Float := -1.0; Quick : Boolean := False) is
       A : Table.Vec := Table.Zero_Vec;
       Jaw : Floats;
       Del : Table.Vec;
@@ -2581,7 +2583,7 @@ package body Act is
       if Jaw_Target >= 0.0 then
          Jaw.Append (Jaw_Target);
       end if;
-      Step_Arm (L, C, F, Arm, A, Jaw, Del, Ok, Quick => True);   --  到量出来的稳定拍数就走,不再多等两拍(官方一集只有 200 拍)
+      Step_Arm (L, C, F, Arm, A, Jaw, Del, Ok, Quick => Quick);
       Geo_Say ("挪 (" & Mm (Dw (0)) & "," & Mm (Dw (1)) & "," & Mm (Dw (2)) & ") ⇒ 实到 (" & Mm (Del (0)) & "," & Mm (Del (1)) & "," & Mm (Del (2)) &
                "),差 " & Mm (Geom.Norm ([Dw (0) - Del (0), Dw (1) - Del (1), Dw (2) - Del (2)])) & (if Ok then "" else " · 身体说没走成"));
    end Geo_Move;
@@ -3152,7 +3154,7 @@ package body Act is
       end if;
       Geo_Say ("离远 = 直上 " & Codec.Img (Legs) & " 截,每截 " & Mm (Leg) & "(沿位姿读数的 z 轴,当它朝上;拿着就继续使劲,每截看一眼它还在不在手里)");
       for K in 1 .. Legs loop
-         Geo_Move (L, C, F, Arm, [0.0, 0.0, Leg], Mok, Jaw_Target => (if C.Wld.Holding then 0.0 else -1.0));
+         Geo_Move (L, C, F, Arm, [0.0, 0.0, Leg], Mok, Jaw_Target => (if C.Wld.Holding then 0.0 else -1.0), Quick => True);
          Steps_Taken := Steps_Taken + 1;
          Up := Up + Leg;
          if C.Wld.Holding and then Slot >= 0 and then U0 >= 0.0 then
