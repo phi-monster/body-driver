@@ -243,8 +243,10 @@ package body Act is
                declare
                   Mine : Boolean := False;
                begin
+                  --  自己手上的眼里,手指是黑的,按明暗切出来的亮块不可能是手指 ⇒ 不按握区框剔"我自己"
+                  --  (GC1:球一进画面下半幅,形心落进瓣框就被当成手扔掉,清单里一个可见的东西都没有)
                   for A in 0 .. C.Map.Arms - 1 loop
-                     if Zone.Is_Self (Zone_Of (C, A, Cam), R, Cw, Ch) then
+                     if Cam_Arm (C, Cam) < 0 and then Zone.Is_Self (Zone_Of (C, A, Cam), R, Cw, Ch) then
                         Mine := True;
                      end if;
                   end loop;
