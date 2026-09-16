@@ -2991,8 +2991,8 @@ package body Act is
          Up := Up + Leg;
          if C.Wld.Holding and then Slot >= 0 and then U0 >= 0.0 then
             Geo_Track (C, F, Cam, Slot, U, V, Seen, U0, V0);
+            --  拿住的东西在腕眼里不该动:挪过一成画幅(比例,无量纲)就是掉了
             if not Seen or else Sqrt ((U - U0) ** 2 + (V - V0) ** 2) / Long_Float (F.Cams (Cam).W) > 0.1 then
-               --  一成画幅(比例,无量纲):拿住的东西在腕眼里不该动
                Event := S ("slip: what I was holding has left my fingers on the way up (after " & Mm (Up) & ")");
                C.Wld.Holding := False; C.Wld.Held_Arm := -1; C.Wld.Held_Slot := -1;
                Memory.Set (C.Mem, "holding", "");
