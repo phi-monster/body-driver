@@ -2770,6 +2770,7 @@ package body Act is
    begin
       C.Geo_Obs.Clear; C.Geo_Slot := -1; C.Geo_Dist := -1.0; C.Geo_Came := 0.0;
       C.Geo_Slot_Obs.Clear; C.Geo_Map_Cam := -1;
+      C.Blind_Mask := 0;
    end Geo_New_Episode;
 
    procedure Geo_Record_All (C : in out Context; F : Plug.Frame; Cam : Natural) is
@@ -3029,6 +3030,21 @@ package body Act is
             begin
                Geo_Move (L, C, F, Arm, Dw, Mok);
                Steps_Taken := Steps_Taken + 1;
+               --  命令发出去手没跟着走(GC6 布局 4/17:要 18 cm 只动了几毫米,仿真对那个位姿解不出逆运动学就静默不动):
+               --  身体唯一看得见的是"读数没变"。不到要的两成(比例,无量纲)= 那儿够不着 ⇒ 立刻把控制权交回脑、说清楚,
+               --  不许再把同一截重发五次;怎么办是脑的事,身体只报事实
+               declare
+                  Stuck_Frac : constant Long_Float := 0.2;
+                  Cur3 : constant Plug.Arm_Pose := F.EE (Arm);
+                  Moved : constant Long_Float := Geom.Norm ([Cur3 (0) - Cur (0), Cur3 (1) - Cur (1), Cur3 (2) - Cur (2)]);
+               begin
+                  if Moved < Stuck_Frac * Ln then
+                     Event := S ("stalled: my arm did not follow my own command toward it (I asked for " & Mm (Ln) & ", it moved " & Mm (Moved)
+                                 & ") - that place seems out of my reach the way this hand is held; it is still " & Mm (Dist) & " from where my fingers close");
+                     Geo_Say ("手没跟着走(要 " & Mm (Ln) & " 只动了 " & Mm (Moved) & ")⇒ 够不着,交回脑");
+                     exit;
+                  end if;
+               end;
                C.Geo_Came := C.Geo_Came + Ln;
                if Ln > 0.0 then
                   C.Geo_Dir := [Dw (0) / Ln, Dw (1) / Ln, Dw (2) / Ln];
@@ -3419,6 +3435,7 @@ package body Act is
                   V : Plan.Verdict;
                   Grasp_Arm : Integer := -1;
                   Own_Eye : Boolean := False;
+                  Missing_Here : Boolean := False;   --  这一轮脑对某个名字答了"这只眼里没有它"
 
                   function First_Eye return Sinew.Eye_Pick is
                   begin
@@ -3466,10 +3483,15 @@ package body Act is
                            if C.Blind_Cam = Integer (Cam) then
                               C.Blind_Cam := -1;
                            end if;
+                           C.Blind_Mask := 0;
                            C.Name_Cam := Integer (Cam);
                            return Integer (Which);
                         end if;
                         C.Blind_Cam := Integer (Cam);
+                        if (C.Blind_Mask / 2 ** Cam) mod 2 = 0 then
+                           C.Blind_Mask := C.Blind_Mask + 2 ** Cam;
+                        end if;
+                        Missing_Here := True;
                         Tried := S ("我把看得见的每一块都过了一遍,没有一块是它");
                         return -1;
                      end if;
@@ -3546,6 +3568,30 @@ package body Act is
                                & (if Binds (I2).Item > 0 then "第" & Codec.Img (Natural (Binds (I2).Item)) & " 块"
                                   else "绑不上:" & To_String (Binds (I2).Tried)));
                   end loop;
+                  --  🔴 这只眼里认不到它(脑答"没有")⇒ 身体自己换到一只还没问过的、长在胳膊上的眼,让脑在那只眼里再认一遍
+                  --  (GC6 布局 41:球贴在右爪旁,头顶眼被爪子挡住,只有右腕眼看得见;语言里没有"用右手",只能身体自己换眼)。
+                  --  每只眼只问一次(按位记),都问过还没有才照实拒绝。
+                  if Missing_Here then
+                     declare
+                        Next_Eye : Integer := -1;
+                     begin
+                        for K in 0 .. C.Map.N_Cams - 1 loop
+                           if K /= Cam and then Cam_Arm (C, K) >= 0 and then (C.Blind_Mask / 2 ** K) mod 2 = 0 and then Next_Eye < 0 then
+                              Next_Eye := Integer (K);
+                           end if;
+                        end loop;
+                        if Next_Eye >= 0 then
+                           Put_Line ("[身] 👁 这只眼里没有它 ⇒ 换到第" & Codec.Img (Next_Eye) & " 台相机(长在第"
+                                     & Codec.Img (Cam_Arm (C, Natural (Next_Eye)) + 1) & " 只手上)再认一遍,这一轮不动");
+                           C.Cam := Natural (Next_Eye);
+                           C.Recent := S ("Not in that eye. I moved to the eye that rides on my arm " & Codec.Img (Cam_Arm (C, Natural (Next_Eye)) + 1)
+                                          & " - the numbers you see now belong to that eye; say the same thing again. "
+                                          & Mode_Line (C, "moved to my other eye to look for it"));
+                           Stop := True;
+                           return;
+                        end if;
+                     end;
+                  end if;
                   --  🔴 脑点了眼睛就换过去,换完这一轮不动,让它再说一遍(编号是按这只眼列的,换眼要重新列、重新认)。
                   --  still = 变得最少的那只 = 世界眼;moving = 长在 grasper 那条胳膊上的那只。量不出就照实说,不瞎挑。
                   if C.Eye_Want /= Sinew.Ey_None then

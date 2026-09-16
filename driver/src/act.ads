@@ -103,6 +103,7 @@ package Act is
       Eye_Want : Sinew.Eye_Pick := Sinew.Ey_None;
       Name_Cam : Integer := -1;           --  脑最近一次真认出一个名字时,身体在哪只眼里
       Blind_Cam : Integer := -1;          --  脑刚说过"这只眼里没有它"的那只眼
+      Blind_Mask : Natural := 0;          --  这一集里脑说过"这只眼里没有它"的眼(按位:第 k 位 = 第 k 台相机);认出来就清
       --  ── 几何驾驶(腕眼里只用彩色图 + 手的位姿读数 + 焦距;不读深度)──
       Geo : Geom.Geo_Vectors.Vector;      --  每台相机一份:焦距、朝向、指尖
       Geo_Path : Unbounded_String;        --  几何常数存哪(身体文件旁边)
