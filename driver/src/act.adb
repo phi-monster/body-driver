@@ -2000,6 +2000,9 @@ package body Act is
          exit when not Plug.Act (L, Cm) or else not Plug.Sense (L, F);
          Steps := I;
          Reading := Selfmap.Jaw_Of (F, Arm);
+         if Sweep_Cam < 0 then
+            Put_Line ("[身]     爪 第" & Codec.Img (I) & " 拍:读数 " & Codec.Fmt (Reading, 3) & "(要去 " & Codec.Fmt (Target, 3) & ")");
+         end if;
          if Sweep_Cam >= 0 and then Natural (Sweep_Cam) < Natural (F.Cams.Length) and then Natural (Sweep_Cam) < Natural (C.Map.Floors.Length) then
             Sweep := Picture.Either (Sweep, Picture.Moved (Prev_Cams (Natural (Sweep_Cam)).Gray, F.Cams (Natural (Sweep_Cam)).Gray, C.Map.Floors (Natural (Sweep_Cam))));
          end if;
@@ -2438,6 +2441,8 @@ package body Act is
       Put_Line ("[身] 📐 " & S);
    end Geo_Say;
 
+   function Mm (X : Long_Float) return String is (Codec.Fmt (X * 1000.0, 0) & " mm");
+
    function Geo_Of (C : Context; Cam : Natural) return Geom.Cam_Geo is
      (if Cam < Natural (C.Geo.Length) then C.Geo (Cam) else Geom.No_Geo);
 
@@ -2541,8 +2546,6 @@ package body Act is
       end if;
       return C.Map.EE_Noise;
    end Geo_Base;
-
-   function Mm (X : Long_Float) return String is (Codec.Fmt (X * 1000.0, 0) & " mm");
 
    --  指尖在相机里的位置:开机那一帧里两根手指(合空扫过的像素)各自最靠上的那一截 = 指尖;有深度那一帧读一次深度
    --  (真机:一台相机一辈子量一次,用尺子也行;之后再也不读深度)
