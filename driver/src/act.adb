@@ -2781,7 +2781,7 @@ package body Act is
       C.Geo_Slot_Obs.Clear; C.Geo_Map_Cam := -1;
       C.Blind_Mask := 0;
       C.Spots.Clear;
-      C.Geo_Last_Down := 0.0; C.Geo_Slid_Slot := -1;
+      C.Geo_Last_Down := 0.0; C.Geo_Slid_Slot := -1; C.Geo_Have_Last_Pw := False;
    end Geo_New_Episode;
 
    procedure Geo_Record_All (C : in out Context; F : Plug.Frame; Cam : Natural) is
@@ -3163,6 +3163,9 @@ package body Act is
          Blocked : Boolean := False;
          Mk : Boolean;
       begin
+         if Have_Pw then
+            C.Geo_Last_Pw := Pw_Last; C.Geo_Have_Last_Pw := True;
+         end if;
          Geo_Say ("到它正上方了 ⇒ 张开手,从正上方直下(沿位姿读数的 z 轴,当它朝上),每截 " & Mm (Leg) & ",顶住就停"
                   & (if Cut > 0.0 then "(上次对它抬时溜走,这次比上次少下 " & Mm (Cut) & ",到 " & Mm (Total) & " 就停)" else ""));
          while Down < Total loop
@@ -3195,6 +3198,22 @@ package body Act is
       Event := Null_Unbounded_String; Steps_Taken := 0; Beats := 0;
       if C.Geo_Slot /= Slot then
          C.Geo_Obs.Clear; C.Geo_Slot := Slot; C.Geo_Came := 0.0;
+      end if;
+      --  GC17:溜走后它就在手底下,腕眼里是紧贴下沿的超大一块,横挪测距立刻跟丢。它刚才在哪我算过 ⇒ 不再测距,
+      --  直接回到那一点正上方(半个张口高),再按"少下一截"直下。它要是滚远了,直下合到空手值会照实报
+      if C.Geo_Slid_Slot = Slot and then C.Geo_Have_Last_Pw then
+         declare
+            Ev : Unbounded_String;
+            St, Bt : Natural;
+         begin
+            Geo_Say ("它上次从指缝溜走,位置我算过 ⇒ 不测距,直接回到它正上方");
+            Geo_Hover (L, C, F, Cam, Arm, C.Geo_Last_Pw, Ev, St, Bt, Hover);
+            Steps_Taken := Steps_Taken + St;
+            Pw_Last := C.Geo_Last_Pw; Have_Pw := True;
+            Descend (Event);
+            Beats := Plug.Steps (L) - Beats0;
+            return;
+         end;
       end if;
       Geo_Track (C, F, Cam, Slot, U, V, Seen);
       Geo_Record_All (C, F, Cam);
