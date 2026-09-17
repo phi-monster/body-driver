@@ -3191,9 +3191,11 @@ package body Act is
          if Blocked then
             Geo_Say ("直下 " & Mm (Down) & " 被顶住(命令下去读数不动)⇒ 它顶着我的手,离该合的高度还差 " & Mm (C.Geo_Dist));
             --  GC13–GC21:顶住的高度是指尖到它最宽处(球)或桌面;在这个高度一夹,楔形指尖把它往上挤、一抬就溜。
-            --  抓住过的三次都是夹在它上半截。⇒ 顶住后先按它的宽抬两成(比例,无量纲,最多两成张口),手还张着、它没被碰过,再合
+            --  抓住过的三次都是夹在它上半截。⇒ 顶住后先按它的宽抬三成(比例,无量纲,最多三成张口),手还张着、它没被碰过,再合
             declare
-               Rise : constant Long_Float := Long_Float'Min (0.2 * Obj_W, 0.2 * G.Gap);
+               --  GC22:抬两成(12 mm)合到 0.40 才碰到、读数一路缩到 0、它往前冒 ⇒ 还是被挤出去;
+               --  抓住过的三次指尖都在它三成高处(合停 0.586)。⇒ 抬三成
+               Rise : constant Long_Float := Long_Float'Min (0.3 * Obj_W, 0.3 * G.Gap);
                Mk2 : Boolean;
             begin
                if Rise > 0.0 then
