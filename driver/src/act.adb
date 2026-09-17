@@ -3284,11 +3284,14 @@ package body Act is
                --  落点会算到桌面以下,仿真解不出来就静默不动。⇒ 远(两个张口以外,比例,无量纲)时这一截只平移不下降,近了再下
                Far : constant Long_Float := 2.0 * G.Gap;
                Dw0 : constant Geom.V3 := Geom.Ap (Rc, Step);
-               Dw : constant Geom.V3 := (if Dist > Far and then Dw0 (2) < 0.0 then [Dw0 (0), Dw0 (1), 0.0] else Dw0);
+               --  "远"按【水平】距离算(GC11:按总距离算时,估计里往下的那一截占大头,水平走完了总距离还是"远",永远不下降)
+               Dfull : constant Geom.V3 := Geom.Ap (Rc, D);
+               Dh : constant Long_Float := Sqrt (Dfull (0) ** 2 + Dfull (1) ** 2);
+               Dw : constant Geom.V3 := (if Dh > Far and then Dw0 (2) < 0.0 then [Dw0 (0), Dw0 (1), 0.0] else Dw0);
                Ln : constant Long_Float := Geom.Norm (Dw);
             begin
-               if Dist > Far and then Dw0 (2) < 0.0 then
-                  Geo_Say ("还远(" & Mm (Dist) & ")⇒ 这一截只平移,不下降(省掉 " & Mm (-Dw0 (2)) & " 的下降)");
+               if Dh > Far and then Dw0 (2) < 0.0 then
+                  Geo_Say ("水平还远(" & Mm (Dh) & ")⇒ 这一截只平移,不下降(省掉 " & Mm (-Dw0 (2)) & " 的下降)");
                end if;
                Geo_Move (L, C, F, Arm, Dw, Mok);
                Steps_Taken := Steps_Taken + 1;
