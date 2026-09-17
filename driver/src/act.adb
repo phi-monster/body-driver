@@ -4675,14 +4675,44 @@ package body Act is
                         Note : Unbounded_String;
                         Origin : Picture.Region;
                         Obj_Count : Natural := 0;
+                        --  GC15 布局 0:合上时读数稳在 0.50(它没动),抬 27 mm 读数才掉到空手值 —— 手指夹在它下半截,一抬就把它往下挤出去。
+                        --  ⇒ 抬时溜走就:张开、回到比第一次合手高一成半张口(比例,无量纲)的地方、再合、再抬;只试一次(次数)
+                        Z_Grasp : constant Long_Float := F.EE (A) (2);
+                        Regrasp_Up : constant Long_Float := 0.15;
+                        Regrasp_Max : constant Natural := 1;
+                        Regrasps : Natural := 0;
+                        Slot_H : constant Integer := (if Say.Grip_On >= 1 and then Say.Grip_On <= Natural (C.Items.Length) then C.Items (Say.Grip_On - 1).Slot else -1);
                      begin
                         if Say.Grip_On >= 1 and then Say.Grip_On <= Natural (C.Items.Length) then
                            Origin := World.Get (C.Wld, Cam, Natural (C.Items (Say.Grip_On - 1).Slot)).Shadow;
                            Obj_Count := C.Items (Say.Grip_On - 1).Count;
                         end if;
                         if Geo_Cage then
-                           Geo_Held (L, C, F, A, Cam, (if Say.Grip_On >= 1 and then Say.Grip_On <= Natural (C.Items.Length) then C.Items (Say.Grip_On - 1).Slot else -1),
-                                     By_Reading, By_Reading, Sure_Held, Note);
+                           Geo_Held (L, C, F, A, Cam, Slot_H, By_Reading, By_Reading, Sure_Held, Note);
+                           while Sure_Held and then not By_Reading and then Regrasps < Regrasp_Max
+                             and then Index (Note, "empty reading") > 0
+                           loop
+                              Regrasps := Regrasps + 1;
+                              declare
+                                 Up : constant Long_Float := Regrasp_Up * Geo_Of (C, Cam).Gap;
+                                 Back : constant Long_Float := (Z_Grasp + Up) - F.EE (A) (2);
+                                 Sj : Natural;
+                                 Rd : Long_Float;
+                                 Mk, Iok : Boolean;
+                                 Note2 : Unbounded_String;
+                              begin
+                                 Geo_Say ("抬的时候它溜走了 ⇒ 张开,回到比第一次合手高 " & Mm (Up) & " 的地方(挪 " & Mm (Back) & "),再合、再抬");
+                                 Move_Jaw (L, C, F, A, C.Hands (A).Open_Reading, Sj, Rd);
+                                 Geo_Move (L, C, F, A, [0.0, 0.0, Back], Mk, Jaw_Target => 1.0);
+                                 Move_Jaw (L, C, F, A, 0.0, Sj, Reading);
+                                 Selfmap.Idle (L, F, 2 * Natural'Max (1, C.Map.Settle), Iok);
+                                 Reading := Selfmap.Jaw_Of (F, A);
+                                 By_Reading := Reading - Empty > C.Map.Jaw_Noise;
+                                 Geo_Held (L, C, F, A, Cam, Slot_H, By_Reading, By_Reading, Sure_Held, Note2);
+                                 Note := Note & "; it slid out while I lifted, so I opened, went back to " & Mm (Up) & " above where I first closed, closed again (reading "
+                                         & Codec.Fmt (Reading, 3) & ") and lifted: " & Note2;
+                              end;
+                           end loop;
                         else
                            Held_Test (L, C, F, A, Cam, Origin, Obj_Count, By_Reading, Sure_Held, Note);
                         end if;
