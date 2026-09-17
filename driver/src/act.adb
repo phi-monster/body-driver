@@ -553,6 +553,15 @@ package body Act is
             end if;
          end;
       end loop;
+      --  脑让我记住的地方也列出来(按名字认,不问脑;不画框)
+      for I in 0 .. Natural (C.Spots.Length) - 1 loop
+         declare
+            It : Item := C.Spots (I);
+         begin
+            It.Kind := Spot; It.Located := False;
+            Push (It, "a place you asked me to remember, called " & To_String (It.Name) & " (where my fingertips were then; say it by that name)", Draw.Dim_Green, 0);
+         end;
+      end loop;
       --  相机表
       declare
          K : Natural := 2;
@@ -2771,6 +2780,7 @@ package body Act is
       C.Geo_Obs.Clear; C.Geo_Slot := -1; C.Geo_Dist := -1.0; C.Geo_Came := 0.0;
       C.Geo_Slot_Obs.Clear; C.Geo_Map_Cam := -1;
       C.Blind_Mask := 0;
+      C.Spots.Clear;
    end Geo_New_Episode;
 
    procedure Geo_Record_All (C : in out Context; F : Plug.Frame; Cam : Natural) is
@@ -2880,6 +2890,42 @@ package body Act is
       Event := S ("amount: arrived (my fingertips are above it)");
       Beats := Plug.Steps (L) - Beats0;
    end Geo_Hover;
+
+   --  放下 = 从上方直下,一截一成张口(比例,无量纲),顶住就停(命令下去读数不动 = 手里的东西/指尖碰到面了);
+   --  最多下两个半张口(次数 25 截);拿着就一路合到底;张不张手是脑说
+   procedure Geo_Drop (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Cam, Arm : Natural;
+                       Event : out Unbounded_String; Steps_Taken : out Natural; Beats : out Natural) is
+      G : constant Geom.Cam_Geo := Geo_Of (C, Cam);
+      Beats0 : constant Natural := Plug.Steps (L);
+      Leg : constant Long_Float := 0.1 * G.Gap;
+      Blocked_Frac : constant Long_Float := 0.2;
+      Legs_Max : constant Natural := 25;
+      Down : Long_Float := 0.0;
+      Mok : Boolean;
+   begin
+      Steps_Taken := 0; Beats := 0;
+      Geo_Say ("放下 = 直下,每截 " & Mm (Leg) & ",顶住就停" & (if C.Wld.Holding then "(拿着,爪子继续合到底)" else ""));
+      for K in 1 .. Legs_Max loop
+         declare
+            P0 : constant Plug.Arm_Pose := F.EE (Arm);
+            Got : Long_Float;
+         begin
+            Geo_Move (L, C, F, Arm, [0.0, 0.0, -Leg], Mok, Jaw_Target => (if C.Wld.Holding then 0.0 else -1.0), Quick => True);
+            Steps_Taken := Steps_Taken + 1;
+            Got := P0 (2) - F.EE (Arm) (2);
+            if Got < Blocked_Frac * Leg then
+               Down := Down + Long_Float'Max (0.0, Got);
+               Geo_Say ("直下 " & Mm (Down) & " 被顶住 ⇒ 它/指尖碰到面了");
+               Event := S ("amount: arrived (I came down " & Mm (Down) & " and something under my hand held me up - it is resting on the surface now)");
+               Beats := Plug.Steps (L) - Beats0;
+               return;
+            end if;
+            Down := Down + Got;
+         end;
+      end loop;
+      Event := S ("steps: I came down " & Mm (Down) & " and nothing held me up yet");
+      Beats := Plug.Steps (L) - Beats0;
+   end Geo_Drop;
 
    --  量相机朝向:盯着点名那块,手做四次平移,每次停稳记一笔,回起点,解朝向,存文件
    procedure Geo_Calibrate (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Cam, Arm : Natural; Slot : Integer; Ok : out Boolean) is
@@ -3466,12 +3512,12 @@ package body Act is
             It : constant Item := C.Items (I);
             Ft : Plan.Item_Facts;
          begin
-            Ft.Exists := It.Located or else It.Kind in Finger | Grip | Piece;
+            Ft.Exists := It.Located or else It.Kind in Finger | Grip | Piece | Spot;
             Ft.Mine := It.Kind in Finger | Grip | Piece;
             Ft.Grasp := It.Kind = Grip;
             Ft.Arm := It.Arm;
             --  量得出它鼓出它站的那个面多少 ⇒ 才有"那个面"可言
-            Ft.Stands := It.Height > 0.0;
+            Ft.Stands := It.Height > 0.0 or else It.Kind = Spot;   --  记住的地方就是一个面上的点,onto/into 说得通
             Ft.Span := (if It.Kind = Grip then Zone_Of (C, It.Arm, C.Cam).Span else 0.0);
             Ft.Size := Long_Float'Max (Long_Float (It.X1 - It.X0) / Long_Float (Natural'Max (1, Cw)),
                                        Long_Float (It.Y1 - It.Y0) / Long_Float (Natural'Max (1, Ch)));
@@ -3480,6 +3526,7 @@ package body Act is
                    when Grip => "grasper(第" & Codec.Img (It.Arm + 1) & " 只手)",
                    when Finger => "grasper 的一瓣",
                    when Piece => "第" & Codec.Img (It.Arm + 1) & " 只手" & Codec.Img (It.Which) & " 轴带的那一块",
+                   when Spot => "记住的地方「" & To_String (It.Name) & "」",
                    when others => ""));
             Fs.Append (Ft);
          end;
@@ -3620,6 +3667,11 @@ package body Act is
                      E3 : Unbounded_String;
                   begin
                      Tried := Null_Unbounded_String;
+                     for I in 0 .. Natural (C.Items.Length) - 1 loop
+                        if C.Items (I).Kind = Spot and then To_String (C.Items (I).Name) = W then
+                           return Integer (I) + 1;
+                        end if;
+                     end loop;
                      if Brain.Find (To_String (C.Eye_Host), C.Eye_Port, W, To_String (Listing),
                                     Natural (C.Items.Length), Big, Cw, Bh, Which, E3)
                      then
@@ -3804,7 +3856,46 @@ package body Act is
                   when Runtime.Y_Say =>
                      Put_Line ("[身] 🧠 它说:" & To_String (Ins.Text));
                   when Runtime.Y_Remember =>
-                     Put_Line ("[身] 📍 这版记不住地方,跳过这一行(编译期本该拦下)");
+                     declare
+                        Idx : constant Integer := Plan.Look_Up (C.Binds, Ins.Subj);
+                        A : Integer := (if Idx >= 1 and then Idx <= Integer (C.Items.Length) then Integer (C.Items (Natural (Idx) - 1).Arm) else Cam_Arm (C, Cam));
+                        It : Item;
+                     begin
+                        if A < 0 then
+                           A := 0;
+                        end if;
+                        declare
+                           Cur : constant Plug.Arm_Pose := F.EE (Natural (A));
+                           Kc : constant Integer := (if Natural (A) < Natural (C.Map.Cam_On_Arm.Length) then C.Map.Cam_On_Arm (Natural (A)) else -1);
+                        begin
+                           It.Kind := Spot; It.Arm := Natural (A); It.Name := Ins.Name; It.Located := False;
+                           if Kc >= 0 and then Geo_Ready (C, Natural (Kc)) then
+                              declare
+                                 G : constant Geom.Cam_Geo := Geo_Of (C, Natural (Kc));
+                                 Tw : constant Geom.V3 := Geom.Ap (Geom.Cam_R (G, Cur), G.Tip);
+                              begin
+                                 It.Pw := [Cur (0) + Tw (0), Cur (1) + Tw (1), Cur (2) + Tw (2)];
+                              end;
+                           else
+                              It.Pw := [Cur (0), Cur (1), Cur (2)];
+                           end if;
+                        end;
+                        declare
+                           Found : Boolean := False;
+                        begin
+                           for I in 0 .. Natural (C.Spots.Length) - 1 loop
+                              if C.Spots (I).Name = It.Name then
+                                 C.Spots.Replace_Element (I, It); Found := True;
+                              end if;
+                           end loop;
+                           if not Found then
+                              C.Spots.Append (It);
+                           end if;
+                        end;
+                        Put_Line ("[身] 📍 记住「" & To_String (It.Name) & "」= 第" & Codec.Img (A + 1) & " 只手指尖此刻 ("
+                                  & Mm (It.Pw (0)) & "," & Mm (It.Pw (1)) & "," & Mm (It.Pw (2)) & ")");
+                        Append (C.Prog_Log, "I remembered where my fingertips are now as '" & To_String (It.Name) & "'. ");
+                     end;
                   when Runtime.Y_Done =>
                      Answer.Done := True;
                      exit;
@@ -4461,6 +4552,39 @@ package body Act is
                         elsif Rl = "back" and then C.Wld.Holding and then C.Wld.Held_Arm = Own then
                            Geo_Case := 2;
                            Geo_Desc := S ("item " & Codec.Img (G0.Item) & " back the way it came, holding");
+                        elsif G0.Of_Item >= 1 and then G0.Of_Item <= Natural (C.Items.Length) and then C.Items (G0.Of_Item - 1).Kind = Spot
+                          and then (Rl = "above" or else Rl = "at" or else Rl = "into" or else Rl = "onto"
+                                    or else Rl = "left" or else Rl = "right" or else Rl = "front" or else Rl = "back")
+                        then
+                           --  目标是记住的地方:above/left/right/front/back = 到它上方(偏一段);at/into/onto = 到它上方再直下到顶住(放下)
+                           declare
+                              Sp : constant Item := C.Items (G0.Of_Item - 1);
+                              Am : constant String := To_String (G0.Amount);
+                              --  偏多远:小 = 半个张口,中 = 一个,大 = 两个(比例,无量纲)
+                              Mag : constant Long_Float := (if Am = "small" then 0.5 elsif Am = "large" then 2.0 else 1.0) * Geo_Of (C, Cam).Gap;
+                              Rc : constant Geom.M3 := Geom.Cam_R (Geo_Of (C, Cam), F.EE (Natural (Own)));
+                              Xw : constant Geom.V3 := Geom.Ap (Rc, [1.0, 0.0, 0.0]);   --  这只眼画面的"右"在世界里的方向
+                              Yw : constant Geom.V3 := Geom.Ap (Rc, [0.0, 1.0, 0.0]);   --  画面的"上"= 离我远的方向
+                              function Flat (V : Geom.V3) return Geom.V3 is
+                                 H : constant Geom.V3 := [V (0), V (1), 0.0];
+                                 N : constant Long_Float := Geom.Norm (H);
+                              begin
+                                 return (if N > 0.0 then [H (0) / N, H (1) / N, 0.0] else [0.0, 0.0, 0.0]);
+                              end Flat;
+                              Dir : constant Geom.V3 := (if Rl = "left" then Flat ([-Xw (0), -Xw (1), -Xw (2)]) elsif Rl = "right" then Flat (Xw)
+                                                         elsif Rl = "back" then Flat (Yw) elsif Rl = "front" then Flat ([-Yw (0), -Yw (1), -Yw (2)])
+                                                         else [0.0, 0.0, 0.0]);
+                           begin
+                              Geo_Pw := [Sp.Pw (0) + Dir (0) * Mag, Sp.Pw (1) + Dir (1) * Mag, Sp.Pw (2) + Dir (2) * Mag];
+                              if Rl = "at" or else Rl = "into" or else Rl = "onto" then
+                                 Geo_Case := 6;
+                                 Geo_Desc := S ("item " & Codec.Img (G0.Item) & " " & Rl & " the place '" & To_String (Sp.Name) & "' (above it, then straight down until something holds me)");
+                              else
+                                 Geo_Case := 4;
+                                 Geo_Desc := S ("item " & Codec.Img (G0.Item) & " " & Rl & " the place '" & To_String (Sp.Name) & "'"
+                                                & (if Rl = "above" then "" else " by " & Mm (Mag)) & " (by my own arm's reckoning)");
+                              end if;
+                           end;
                         elsif Rl = "above" and then G0.Of_Item >= 1 and then G0.Of_Item <= Natural (C.Items.Length)
                           and then C.Items (G0.Of_Item - 1).Kind in Thing | Thing_Remembered
                         then
@@ -4513,6 +4637,20 @@ package body Act is
          elsif Geo_Case = 4 then
             Put_Line ("[身] ⚙ 几何驾驶:" & To_String (Geo_Desc));
             Geo_Hover (L, C, F, Cam, Natural (Cam_Arm (C, Cam)), Geo_Pw, Event, Steps_Taken, Beats);
+            Feel (C, F);
+            Report := Report & "you asked " & To_String (Geo_Desc) & ": " & To_String (Event) & ". I took " & Codec.Img (Steps_Taken) & " pushes; ";
+            Put_Line ("[身]   这一段:" & Codec.Img (Steps_Taken) & " 推 · " & Codec.Img (Beats) & " 拍");
+         elsif Geo_Case = 6 then
+            Put_Line ("[身] ⚙ 几何驾驶:" & To_String (Geo_Desc));
+            Geo_Hover (L, C, F, Cam, Natural (Cam_Arm (C, Cam)), Geo_Pw, Event, Steps_Taken, Beats);
+            declare
+               Ev2 : Unbounded_String;
+               St2, Bt2 : Natural;
+            begin
+               Geo_Drop (L, C, F, Cam, Natural (Cam_Arm (C, Cam)), Ev2, St2, Bt2);
+               Steps_Taken := Steps_Taken + St2; Beats := Beats + Bt2;
+               Event := Event & "; then " & Ev2;
+            end;
             Feel (C, F);
             Report := Report & "you asked " & To_String (Geo_Desc) & ": " & To_String (Event) & ". I took " & Codec.Img (Steps_Taken) & " pushes; ";
             Put_Line ("[身]   这一段:" & Codec.Img (Steps_Taken) & " 推 · " & Codec.Img (Beats) & " 拍");

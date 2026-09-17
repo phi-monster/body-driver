@@ -20,7 +20,7 @@ with Runtime;
 with Plan;
 with Geom;
 package Act is
-   type Item_Kind is (Finger, Grip, Piece, Thing, Thing_Remembered, Thing_Held);   --  Piece = 我身上某个通道带的一块(Which = 通道号)
+   type Item_Kind is (Finger, Grip, Piece, Thing, Thing_Remembered, Thing_Held, Spot);   --  Spot = 脑让我记住的一个地方(指尖当时的位置)   --  Piece = 我身上某个通道带的一块(Which = 通道号)
    type Item is record
       Kind : Item_Kind := Thing;
       Arm : Natural := 0;
@@ -35,6 +35,8 @@ package Act is
       Au, Av : Long_Float := 0.0;    --  这一块自己的主轴(画面里的单位向量)
       Elong : Long_Float := 1.0;     --  长轴/短轴
       Gray : Long_Float := -1.0;     --  框里的平均灰度(< 0 = 没量到)
+      Pw : Geom.V3 := [others => 0.0];   --  Spot:记住的那一点(世界坐标)
+      Name : Unbounded_String;           --  Spot:脑给它起的名字
    end record;
    package Item_Vectors is new Ada.Containers.Vectors (Natural, Item);
 
@@ -112,6 +114,7 @@ package Act is
       Geo_Came : Long_Float := 0.0;       --  几何逼近一共走了多远(米);"离远点"就沿原路退这么远
       Geo_Dir : Geom.V3 := [others => 0.0];   --  逼近的方向(世界系单位向量)
       Geo_Obs : Geom.Obs_Vectors.Vector;  --  这一集里点名那块在腕眼里的历次观测(位姿 + 像素)
+      Spots : Item_Vectors.Vector;        --  脑让我记住的地方(这一集里留着,换集清空)
       Geo_Slot : Integer := -1;
       Geo_Slot_Obs : Geom.Slot_Obs_Vectors.Vector;   --  这一集里腕眼看见过的【每一样东西】的历次观测(按世界槽号),用来算它们在三维哪儿
       Geo_Map_Cam : Integer := -1;

@@ -125,8 +125,7 @@ package body Plan is
             I : constant Sinew.Instr := P.Code (Ix);
          begin
             if I.O = Sinew.Op_Remember then
-               Reject (I.Line, "这一版我还记不住地方(remember 没接上)",
-                       "把这一行去掉;想回到原处,用 above / left / right 说清和哪个东西的关系");
+               null;   --  记地方:执行到这一行时把指尖此刻的位置存进 Spots,之后那个名字当 <what> 用
             elsif I.O = Sinew.Op_Interval then
                --  结局词:这一版身体量得到的事件是 碰到 / 顶住 / 滑了 / 画面不变 / 差距不缩 / 步数用完;
                --  free 只在合手那一节有意义(合完抬一截,它跟着我走了 = 它离开了那个面)
