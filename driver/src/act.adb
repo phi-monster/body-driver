@@ -3199,48 +3199,6 @@ package body Act is
       if C.Geo_Slot /= Slot then
          C.Geo_Obs.Clear; C.Geo_Slot := Slot; C.Geo_Came := 0.0;
       end if;
-      --  GC17:溜走后它就在手底下,腕眼里是紧贴下沿的超大一块,横挪测距立刻跟丢。它刚才在哪我算过 ⇒ 不再测距,
-      --  直接回到那一点正上方(半个张口高),再按"少下一截"直下。它要是滚远了,直下合到空手值会照实报
-      if C.Geo_Slid_Slot = Slot and then C.Geo_Have_Last_Pw then
-         declare
-            Ev : Unbounded_String;
-            St, Bt : Natural;
-         begin
-            --  GC18:溜走时它被挤开几厘米,原位置的正上方合到空。它的【高度】没变(还在桌上),腕眼里它就在眼前:
-            --  拿此刻画面里它的重心那条视线,和"上次算出的那个高度"的水平面相交 ⇒ 新的左右前后,一眼就定,不用横挪
-            declare
-               Uu, Vv : Long_Float;
-               Sn : Boolean;
-               P0 : constant Plug.Arm_Pose := F.EE (Arm);
-            begin
-               Geo_Track (C, F, Cam, Slot, Uu, Vv, Sn);
-               if Sn then
-                  declare
-                     D : constant Geom.V3 := Geom.Ray (G, P0, Uu, Vv);
-                     Tz : constant Long_Float := (if abs D (2) > 1.0e-9 then (C.Geo_Last_Pw (2) - P0 (2)) / D (2) else -1.0);
-                  begin
-                     if Tz > 0.0 then
-                        declare
-                           Nw : constant Geom.V3 := [P0 (0) + Tz * D (0), P0 (1) + Tz * D (1), C.Geo_Last_Pw (2)];
-                        begin
-                           Geo_Say ("它上次从指缝溜走 ⇒ 按此刻画面里它的位置重定:挪了 (" & Mm (Nw (0) - C.Geo_Last_Pw (0)) & "," & Mm (Nw (1) - C.Geo_Last_Pw (1)) & "),高度照旧");
-                           C.Geo_Last_Pw := Nw;
-                        end;
-                     end if;
-                  end;
-               else
-                  Geo_Say ("它上次从指缝溜走,此刻画面里没认到它 ⇒ 按上次的位置回去");
-               end if;
-            end;
-            Geo_Say ("直接回到它正上方(不横挪测距)");
-            Geo_Hover (L, C, F, Cam, Arm, C.Geo_Last_Pw, Ev, St, Bt, Hover);
-            Steps_Taken := Steps_Taken + St;
-            Pw_Last := C.Geo_Last_Pw; Have_Pw := True;
-            Descend (Event);
-            Beats := Plug.Steps (L) - Beats0;
-            return;
-         end;
-      end if;
       Geo_Track (C, F, Cam, Slot, U, V, Seen);
       Geo_Record_All (C, F, Cam);
       if not Seen then
@@ -3282,6 +3240,48 @@ package body Act is
             return;
          end if;
       end;
+      --  GC17:溜走后它就在手底下,腕眼里是紧贴下沿的超大一块,横挪测距立刻跟丢。GC19:截断块的重心偏,重定也偏 ⇒ 先过上面的"贴边就后退",整个进画面再重定。它刚才在哪我算过 ⇒ 不再测距,
+      --  直接回到那一点正上方(半个张口高),再按"少下一截"直下。它要是滚远了,直下合到空手值会照实报
+      if C.Geo_Slid_Slot = Slot and then C.Geo_Have_Last_Pw then
+         declare
+            Ev : Unbounded_String;
+            St, Bt : Natural;
+         begin
+            --  GC18:溜走时它被挤开几厘米,原位置的正上方合到空。它的【高度】没变(还在桌上),腕眼里它就在眼前:
+            --  拿此刻画面里它的重心那条视线,和"上次算出的那个高度"的水平面相交 ⇒ 新的左右前后,一眼就定,不用横挪
+            declare
+               Uu, Vv : Long_Float;
+               Sn : Boolean;
+               P0 : constant Plug.Arm_Pose := F.EE (Arm);
+            begin
+               Geo_Track (C, F, Cam, Slot, Uu, Vv, Sn);
+               if Sn then
+                  declare
+                     D : constant Geom.V3 := Geom.Ray (G, P0, Uu, Vv);
+                     Tz : constant Long_Float := (if abs D (2) > 1.0e-9 then (C.Geo_Last_Pw (2) - P0 (2)) / D (2) else -1.0);
+                  begin
+                     if Tz > 0.0 then
+                        declare
+                           Nw : constant Geom.V3 := [P0 (0) + Tz * D (0), P0 (1) + Tz * D (1), C.Geo_Last_Pw (2)];
+                        begin
+                           Geo_Say ("它上次从指缝溜走 ⇒ 按此刻画面里它的位置重定:挪了 (" & Mm (Nw (0) - C.Geo_Last_Pw (0)) & "," & Mm (Nw (1) - C.Geo_Last_Pw (1)) & "),高度照旧");
+                           C.Geo_Last_Pw := Nw;
+                        end;
+                     end if;
+                  end;
+               else
+                  Geo_Say ("它上次从指缝溜走,此刻画面里没认到它 ⇒ 按上次的位置回去");
+               end if;
+            end;
+            Geo_Say ("直接回到它正上方(不横挪测距)");
+            Geo_Hover (L, C, F, Cam, Arm, C.Geo_Last_Pw, Ev, St, Bt, Hover);
+            Steps_Taken := Steps_Taken + St;
+            Pw_Last := C.Geo_Last_Pw; Have_Pw := True;
+            Descend (Event);
+            Beats := Plug.Steps (L) - Beats0;
+            return;
+         end;
+      end if;
       C.Geo_Obs.Append (Geom.Obs'(Pose => F.EE (Arm), U => U, V => V));
       if Natural (C.Geo_Obs.Length) < 2 then
          --  只有一笔观测 ⇒ 先横挪一步当基线(拇指测距的"换只眼")
