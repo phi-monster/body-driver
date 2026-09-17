@@ -3024,6 +3024,116 @@ package body Act is
          end;
       end Cut_At_Edge;
 
+      --  朝向对齐,不写"手腕":目标 = 它的长轴横过指缝(两样都在这只眼里量:块的主轴 · 两瓣连线);
+      --  哪个通道能让画面转,现场各推一下量出来(转动通道 3..5 各推开机量的那一档幅度),挑效果最大的那个,
+      --  按量出来的比例推到差小于阈值为止。圆的东西(长短轴比不到 1.3,比例,无量纲)没有朝向,跳过。
+      Aligned : Boolean := False;
+
+      procedure Geo_Align is
+         Round_Elong : constant Long_Float := 1.3;
+         Done_Rad : constant Long_Float := 0.087;    --  5 度(弧度)
+         Clamp_Mul : constant Long_Float := 2.0;     --  一推最多探针幅度的两倍(比例,无量纲)
+         Pushes_Max : constant Natural := 6;
+         Rot_First : constant Natural := 3;
+         Rot_Last : constant Natural := 5;
+         Z : constant Zone.Hand_Zone := Zone_Of (C, Arm, Cam);
+         function Err_Now (Ok : out Boolean) return Long_Float is
+            Uu, Vv : Long_Float;
+            Sn : Boolean;
+         begin
+            Ok := False;
+            Geo_Track (C, F, Cam, Slot, Uu, Vv, Sn);
+            if not Sn or else Slot < 0 or else Natural (Slot) >= World.Count (C.Wld, Cam) then
+               return 0.0;
+            end if;
+            declare
+               R : constant Picture.Region := World.Get (C.Wld, Cam, Natural (Slot)).R;
+               Th : constant Long_Float := Arctan (R.Av, R.Au);
+               Gap_Ang : constant Long_Float := Arctan (Z.Av, Z.Au);
+               --  两倍角绕回 (-π, π] 再除二:主轴正负两种写法算同一个 ⇒ 差落在 (-π/2, π/2]
+               D2 : Long_Float := 2.0 * (Th - (Gap_Ang + Ada.Numerics.Pi / 2.0));
+            begin
+               if R.Elong < Round_Elong then
+                  return 0.0;
+               end if;
+               while D2 > Ada.Numerics.Pi loop
+                  D2 := D2 - 2.0 * Ada.Numerics.Pi;
+               end loop;
+               while D2 <= -Ada.Numerics.Pi loop
+                  D2 := D2 + 2.0 * Ada.Numerics.Pi;
+               end loop;
+               Ok := True;
+               return D2 / 2.0;
+            end;
+         end Err_Now;
+         procedure Push (K : Natural; Amount : Long_Float) is
+            A : Table.Vec := Table.Zero_Vec;
+            Jaw : Floats;
+            Del : Table.Vec;
+            Ok : Boolean;
+         begin
+            A (K) := Amount;
+            Step_Arm (L, C, F, Arm, A, Jaw, Del, Ok, Quick => True);
+            Steps_Taken := Steps_Taken + 1;
+         end Push;
+         E0, E1 : Long_Float;
+         Ok0, Ok1 : Boolean;
+         Best_K : Integer := -1;
+         Best_Gain : Long_Float := 0.0;
+      begin
+         if not Z.Valid or else Z.N_Lobes < 2 then
+            return;
+         end if;
+         E0 := Err_Now (Ok0);
+         if not Ok0 then
+            Geo_Say ("朝向:它是圆的或看不见 ⇒ 不用对齐");
+            return;
+         end if;
+         Geo_Say ("朝向:它的长轴和指缝差 " & Codec.Fmt (E0 * 180.0 / Ada.Numerics.Pi, 0) & " 度 ⇒ 各转动通道推一下,看谁能让画面转");
+         if abs E0 < Done_Rad then
+            return;
+         end if;
+         for K in Rot_First .. Rot_Last loop
+            declare
+               Amp : constant Long_Float := (if Arm * Chan.Per_Arm + K < Natural (C.Map.Amp.Length) then C.Map.Amp (Arm * Chan.Per_Arm + K) else 0.0);
+            begin
+               if Amp > 0.0 then
+                  Push (K, Amp);
+                  E1 := Err_Now (Ok1);
+                  if Ok1 then
+                     Geo_Say ("  通道 " & Codec.Img (K) & " 推 " & Codec.Fmt (Amp, 3) & " ⇒ 差 " & Codec.Fmt (E0 * 180.0 / Ada.Numerics.Pi, 0) & " → "
+                              & Codec.Fmt (E1 * 180.0 / Ada.Numerics.Pi, 0) & " 度");
+                     if abs ((E1 - E0) / Amp) > abs Best_Gain then
+                        Best_Gain := (E1 - E0) / Amp; Best_K := Integer (K);
+                     end if;
+                     E0 := E1;
+                  end if;
+               end if;
+            end;
+         end loop;
+         if Best_K < 0 or else abs Best_Gain < 1.0e-9 then
+            Geo_Say ("朝向:没有一个通道能让画面转 ⇒ 照实说,不对齐");
+            return;
+         end if;
+         for I in 1 .. Pushes_Max loop
+            exit when abs E0 < Done_Rad;
+            declare
+               Amp : constant Long_Float := C.Map.Amp (Arm * Chan.Per_Arm + Natural (Best_K));
+               Want : constant Long_Float := -E0 / Best_Gain;
+               Amount : constant Long_Float := (if Want > Clamp_Mul * Amp then Clamp_Mul * Amp elsif Want < -Clamp_Mul * Amp then -Clamp_Mul * Amp else Want);
+            begin
+               Push (Natural (Best_K), Amount);
+               E1 := Err_Now (Ok1);
+               exit when not Ok1;
+               if abs (Amount) > 1.0e-9 then
+                  Best_Gain := (E1 - E0) / Amount;
+               end if;
+               E0 := E1;
+               Geo_Say ("  对齐第" & Codec.Img (I) & " 推(通道 " & Codec.Img (Best_K) & ")⇒ 差 " & Codec.Fmt (E0 * 180.0 / Ada.Numerics.Pi, 0) & " 度");
+            end;
+         end loop;
+      end Geo_Align;
+
       procedure Descend (Ev : out Unbounded_String) is
          --  从正上方直下:一截 = 张口的一成(比例,无量纲);最多下 悬高 + 容差;
          --  一截实到不到要的两成(比例,无量纲)= 底下有东西顶住我 ⇒ 停,照实说(顶住的高度就是它的顶)
@@ -3150,8 +3260,13 @@ package body Act is
                exit;
             end if;
             if Dist <= Tol then
-               Descend (Event);
-               exit;
+               if not Aligned then
+                  Aligned := True;
+                  Geo_Align;
+               else
+                  Descend (Event);
+                  exit;
+               end if;
             end if;
             if Steps_Taken >= Limit then
                Event := S ("steps: I took the steps you asked for (still " & Mm (Dist) & " from where my fingers close)");
@@ -3229,6 +3344,10 @@ package body Act is
                         end;
                      end loop;
                      Geo_Say ("到正上方的最后一截按读数走完(补了 " & Codec.Img (Fixes) & " 次,还差 " & Mm (Short) & ")");
+                     if not Aligned then
+                        Aligned := True;
+                        Geo_Align;
+                     end if;
                      Descend (Event);
                      exit;
                   end;
