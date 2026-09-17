@@ -3338,8 +3338,10 @@ package body Act is
                   Geo_Say ("对中:差 " & Mm (Mag) & ",在张口的百分之五内 ⇒ 对准了");
                   exit;
                end if;
-               if Mag > 0.5 * G.Gap then
-                  Geo_Say ("对中:差 " & Mm (Mag) & ",超过半个张口,不像是它 ⇒ 不挪");
+               --  GC30:第一轮的差常年 41–45 mm(视差把悬停点系统性地放在偏基座 4 cm 处),半个张口(45 mm)的门槛把 45.1 拦掉,整炮没对中。
+               --  门槛放到一个张口(比例,无量纲):超过一个张口才不像是它
+               if Mag > 1.0 * G.Gap then
+                  Geo_Say ("对中:差 " & Mm (Mag) & ",超过一个张口,不像是它 ⇒ 不挪");
                   exit;
                end if;
                Geo_Say ("对中 第" & Codec.Img (Round) & " 轮:横挪 (" & Mm (Mv (0)) & "," & Mm (Mv (1)) & ")" & (if Free > 0.0 then ",先抬 " & Mm (Free) & " 让指尖脱开" else ""));
