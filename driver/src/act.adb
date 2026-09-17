@@ -3157,8 +3157,9 @@ package body Act is
          Leg : constant Long_Float := 0.1 * G.Gap;
          Blocked_Frac : constant Long_Float := 0.2;
          --  GC15/16:直下到顶住(桌面)后合上,抬时它从指缝溜走 = 夹在它下半截;原地回高一点再合找不到它(它滚开了)。
-         --  ⇒ 记住"上次对它直下了多深、抬时溜走了",下一次再贴近它就少下一成半张口(比例,无量纲),夹在更高处
-         Cut : constant Long_Float := (if C.Geo_Slid_Slot = Slot and then C.Geo_Last_Down > 0.0 then 0.15 * G.Gap else 0.0);
+         --  ⇒ 记住"上次对它直下了多深、抬时溜走了",下一次再贴近它就少下半成张口(比例,无量纲),夹在略高处
+         --  GC28:溜走后少下约 4 mm 合 0.578、抬 45 mm 不掉;GC34:少下 13.5 mm 合空 ⇒ 少下改成半成张口(比例,无量纲)
+         Cut : constant Long_Float := (if C.Geo_Slid_Slot = Slot and then C.Geo_Last_Down > 0.0 then 0.05 * G.Gap else 0.0);
          Total : constant Long_Float := (if Cut > 0.0 then Long_Float'Min (Hover + Deeper, C.Geo_Last_Down - Cut) else Hover + Deeper);
          Down : Long_Float := 0.0;
          Got : Long_Float := 0.0;
@@ -3389,96 +3390,7 @@ package body Act is
          end loop;
          C.Geo_Dist := Long_Float'Max (0.0, Hover - Down); C.Geo_Round := C.Round_N;
          C.Geo_Last_Down := Down;
-         --  GC34/35:对得越准越糟 —— 正对着它直下时两指在它最宽处一层就被顶住(指尖比它的重心高 3 mm),在那儿合 0.48–0.51、一抬就溜;
-         --  GC13(偏 4 cm)和 GC28(偏几毫米)的手指下得更深、合 0.58、抬得起来。⇒ 顶住之后往两边各错开一成张口(比例,无量纲)再直下一次,
-         --  哪边下得更深(多出半成张口以上)就用哪边:下得深 = 手指过了它最宽处、把它罩在指缝里;平的东西三处一样深,留在正中
-         if Blocked then
-            declare
-               Free : constant Long_Float := 0.15 * G.Gap;   --  脱开 = 一成半张口(比例,无量纲)
-               Shift : constant Long_Float := 0.1 * G.Gap;   --  错开 = 一成张口(比例,无量纲)
-               Rc : constant Geom.M3 := Geom.Cam_R (G, F.EE (Arm));
-               --  指缝方向 = 画面横向;错开要沿画面纵向(两指的宽度方向)= 相机 y 轴在世界里的投影(压平)
-               Cy : Geom.V3 := Geom.Ap (Rc, [0.0, 1.0, 0.0]);
-               Ny : Long_Float;
-               D0 : constant Long_Float := Down;
-               Best_Side : Integer := 0;
-               Best_Down : Long_Float := Down;
-               Cur_Side : Integer := 0;
-               procedure Try_Side (Side : Integer) is
-                  Dz : Long_Float;
-               begin
-                  Geo_Move (L, C, F, Arm, [0.0, 0.0, Free], Mk, Jaw_Target => 1.0, Quick => True);
-                  Geo_Move (L, C, F, Arm, [Long_Float (Side - Cur_Side) * Shift * Cy (0), Long_Float (Side - Cur_Side) * Shift * Cy (1), 0.0], Mk, Jaw_Target => 1.0, Quick => True);
-                  Steps_Taken := Steps_Taken + 2;
-                  Cur_Side := Side;
-                  Dz := Down - Free;
-                  Blocked := False;
-                  while Dz < Total loop
-                     declare
-                        P0 : constant Plug.Arm_Pose := F.EE (Arm);
-                        Ask : constant Long_Float := Long_Float'Min (Leg, Total - Dz);
-                     begin
-                        Geo_Move (L, C, F, Arm, [0.0, 0.0, -Ask], Mk, Jaw_Target => 1.0, Quick => True);
-                        Steps_Taken := Steps_Taken + 1;
-                        Got := P0 (2) - F.EE (Arm) (2);
-                        if Got < Blocked_Frac * Ask then
-                           Blocked := True;
-                           Dz := Dz + Long_Float'Max (0.0, Got);
-                           exit;
-                        end if;
-                        Dz := Dz + Ask;
-                     end;
-                  end loop;
-                  Down := Dz;
-                  Geo_Say ("错开 " & (if Side > 0 then "+" else "-") & Mm (Shift) & " 再直下:到 " & Mm (Down) & (if Blocked then "(顶住)" else "(到底)") & ",正中是 " & Mm (D0));
-                  if Down > Best_Down + 0.05 * G.Gap then   --  深出半成张口(比例,无量纲)才算更深
-                     Best_Down := Down; Best_Side := Side;
-                  end if;
-               end Try_Side;
-            begin
-               Ny := Sqrt (Cy (0) ** 2 + Cy (1) ** 2);
-               if Ny > 0.0 then
-                  Cy := [Cy (0) / Ny, Cy (1) / Ny, 0.0];
-                  Geo_Say ("直下 " & Mm (D0) & " 被顶住 ⇒ 往两边各错开一成张口再试,哪边下得更深用哪边");
-                  Try_Side (1);
-                  if Best_Side = 0 then
-                     Try_Side (-1);
-                  end if;
-                  if Cur_Side /= Best_Side then
-                     --  回到最深的那一侧(或正中)
-                     Geo_Move (L, C, F, Arm, [0.0, 0.0, Free], Mk, Jaw_Target => 1.0, Quick => True);
-                     Geo_Move (L, C, F, Arm, [Long_Float (Best_Side - Cur_Side) * Shift * Cy (0), Long_Float (Best_Side - Cur_Side) * Shift * Cy (1), 0.0], Mk, Jaw_Target => 1.0, Quick => True);
-                     Steps_Taken := Steps_Taken + 2;
-                     Cur_Side := Best_Side;
-                     declare
-                        Dz : Long_Float := Down - Free;
-                     begin
-                        Blocked := False;
-                        while Dz < Total loop
-                           declare
-                              P0 : constant Plug.Arm_Pose := F.EE (Arm);
-                              Ask : constant Long_Float := Long_Float'Min (Leg, Total - Dz);
-                           begin
-                              Geo_Move (L, C, F, Arm, [0.0, 0.0, -Ask], Mk, Jaw_Target => 1.0, Quick => True);
-                              Steps_Taken := Steps_Taken + 1;
-                              Got := P0 (2) - F.EE (Arm) (2);
-                              if Got < Blocked_Frac * Ask then
-                                 Blocked := True;
-                                 Dz := Dz + Long_Float'Max (0.0, Got);
-                                 exit;
-                              end if;
-                              Dz := Dz + Ask;
-                           end;
-                        end loop;
-                        Down := Dz;
-                     end;
-                  end if;
-                  Geo_Say ("错开试完:用 " & (if Best_Side = 0 then "正中" elsif Best_Side > 0 then "+ 侧" else "- 侧") & ",直下到 " & Mm (Down));
-                  C.Geo_Dist := Long_Float'Max (0.0, Hover - Down);
-                  C.Geo_Last_Down := Down;
-               end if;
-            end;
-         end if;
+         --  GC36:顶住后往两边各错开 9 mm 再直下 —— 指尖实际高度没变(仍在它最宽处一层),偏 9 mm 那侧合爪反而合空。撤回。
          if Blocked then
             Geo_Say ("直下 " & Mm (Down) & " 被顶住(命令下去读数不动)⇒ 它顶着我的手,离该合的高度还差 " & Mm (C.Geo_Dist));
             --  量给人看:顶住时指尖比它(视差量的重心)高多少、张口多大 —— 判断指尖停在它哪一层
