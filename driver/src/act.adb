@@ -3214,7 +3214,25 @@ package body Act is
             end if;
             Geo_Track (C, F, Cam, Slot, Ub, Vb, Sn);
             if not Sn then
-               Why := S ("此刻腕眼里认不到它"); return;
+               --  GC25:横挪之后槽对不上(参考块被换成 14 px 的碎片,面积比过不了)⇒ 第二轮没跑,球留在指尖前方 6 cm 处,合到空。
+               --  这么近它是画面里最大的一块(量的:面积),没别的候选 ⇒ 认不到就取最大块
+               declare
+                  Regs : constant Picture.Regions := Cut_Things (C, F, Cam);
+                  Best : Integer := -1;
+                  Bn : Natural := 0;
+               begin
+                  for Ri in 0 .. Natural (Regs.Length) - 1 loop
+                     if Regs (Ri).Count > Bn then
+                        Bn := Regs (Ri).Count; Best := Ri;
+                     end if;
+                  end loop;
+                  if Best < 0 then
+                     Why := S ("此刻腕眼里认不到它,也没别的块"); return;
+                  end if;
+                  Ub := Regs (Best).Cu * Long_Float (F.Cams (Cam).W); Vb := Regs (Best).Cv * Long_Float (F.Cams (Cam).H);
+                  Geo_Say ("对中:槽对不上,取此刻画面里最大的一块当它:(" & Codec.Fmt (Ub, 0) & "," & Codec.Fmt (Vb, 0) & "),"
+                           & Codec.Img (Bn) & " px");
+               end;
             end if;
             declare
                Ra : constant Geom.V3 := Geom.Ray (G, Cur, Ax, Ay);
@@ -3262,8 +3280,8 @@ package body Act is
                Down := Down + Ask;
             end;
          end loop;
-         --  对中:最多两轮(次数);顶住了就先抬一成半张口让指尖脱开,横挪,再下回去(顶住就停)
-         for Round in 1 .. 2 loop
+         --  对中:最多三轮(次数;横挪只到八五成、球心又比指尖高,一轮修不完);顶住了就先抬一成半张口让指尖脱开,横挪,再下回去(顶住就停)
+         for Round in 1 .. 3 loop
             declare
                Mv : Geom.V3;
                Ok : Boolean;
