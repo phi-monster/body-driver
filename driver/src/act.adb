@@ -4602,13 +4602,51 @@ package body Act is
                      end;
                   end if;
                   if Caged then
-                     Move_Jaw (L, C, F, A, 0.0, Steps_J, Reading);
                      declare
-                        Iok : Boolean;
+                        --  GC13 彩色帧:手指在它腰以下一夹,它被楔形指尖挤着往上冒出指缝(帧 320),抬起就空。量得到的信号 = 合的时候它在腕眼里
+                        --  往上跑了(重心上移超过它自己框高的一半,比例,无量纲)⇒ 张开、直上一点五成张口(比例,无量纲)、再合一次(次数 1);
+                        --  没往上跑就照旧。不带形状词:方的扁的一夹不会往上跑,自然不触发
+                        Rise_Frac : constant Long_Float := 0.5;
+                        Up_Frac : constant Long_Float := 0.15;
+                        Retry_Max : constant Natural := 1;
+                        Slot_G : constant Integer := (if Say.Grip_On >= 1 and then Say.Grip_On <= Natural (C.Items.Length) then C.Items (Say.Grip_On - 1).Slot else -1);
+                        U0, V0, U1, V1 : Long_Float := 0.0;
+                        Seen0, Seen1, Mk : Boolean := False;
+                        H0 : Long_Float := 0.0;
+                        Tries : Natural := 0;
+                        procedure Close_Once is
+                           Iok : Boolean;
+                        begin
+                           Move_Jaw (L, C, F, A, 0.0, Steps_J, Reading);
+                           --  合到底后再等两倍稳定拍数(倍数,无量纲),让夹爪把劲使上再抬
+                           Selfmap.Idle (L, F, 2 * Natural'Max (1, C.Map.Settle), Iok);
+                           Reading := Selfmap.Jaw_Of (F, A);
+                        end Close_Once;
                      begin
-                        --  合到底后再等两倍稳定拍数(倍数,无量纲),让夹爪把劲使上再抬
-                        Selfmap.Idle (L, F, 2 * Natural'Max (1, C.Map.Settle), Iok);
-                        Reading := Selfmap.Jaw_Of (F, A);
+                        if Geo_Cage and then Slot_G >= 0 then
+                           Geo_Track (C, F, Cam, Slot_G, U0, V0, Seen0);
+                           if Seen0 and then Natural (Slot_G) < World.Count (C.Wld, Cam) then
+                              H0 := Long_Float (World.Get (C.Wld, Cam, Natural (Slot_G)).R.Y1 - World.Get (C.Wld, Cam, Natural (Slot_G)).R.Y0);
+                           end if;
+                        end if;
+                        Close_Once;
+                        while Geo_Cage and then Seen0 and then H0 > 0.0 and then Tries < Retry_Max loop
+                           Geo_Track (C, F, Cam, Slot_G, U1, V1, Seen1);
+                           exit when not Seen1 or else V0 - V1 <= Rise_Frac * H0;
+                           Tries := Tries + 1;
+                           declare
+                              Up : constant Long_Float := Up_Frac * Geo_Of (C, Cam).Gap;
+                              Sj : Natural;
+                              Rd : Long_Float;
+                           begin
+                              Geo_Say ("合的时候它在腕眼里往上冒了 " & Codec.Fmt (V0 - V1, 0) & " px(它框高 " & Codec.Fmt (H0, 0) & ")⇒ 张开、直上 " & Mm (Up) & "、再合一次");
+                              Move_Jaw (L, C, F, A, C.Hands (A).Open_Reading, Sj, Rd);
+                              Geo_Move (L, C, F, A, [0.0, 0.0, Up], Mk, Jaw_Target => 1.0);
+                              Geo_Track (C, F, Cam, Slot_G, U0, V0, Seen0);
+                              Close_Once;
+                              Append (C.Prog_Log, "it rode up between my fingers when I squeezed, so I opened, rose " & Mm (Up) & " and squeezed again. ");
+                           end;
+                        end loop;
                      end;
                      declare
                         Empty : constant Long_Float := C.Hands (A).Empty_Close;
