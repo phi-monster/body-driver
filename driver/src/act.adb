@@ -2962,6 +2962,22 @@ package body Act is
       Pw_Last : Geom.V3 := [others => 0.0];
       Have_Pw : Boolean := False;
 
+      --  贴着画面边沿的块是截断的:切出来的重心不是它的重心(GC7/GC8 布局 41:球压着左边沿、被手指挡一半,视差算成 62 cm 外,
+      --  手臂甩出 40 cm)。碰边 = 框的任一边贴到画面边(像素,量的)⇒ 不拿它做视差
+      function Cut_At_Edge return Boolean is
+         Cw : constant Natural := F.Cams (Cam).W;
+         Ch : constant Natural := F.Cams (Cam).H;
+      begin
+         if Slot < 0 or else Natural (Slot) >= World.Count (C.Wld, Cam) then
+            return False;
+         end if;
+         declare
+            R : constant Picture.Region := World.Get (C.Wld, Cam, Natural (Slot)).R;
+         begin
+            return R.X0 = 0 or else R.Y0 = 0 or else R.X1 + 1 >= Cw or else R.Y1 + 1 >= Ch;
+         end;
+      end Cut_At_Edge;
+
       procedure Descend (Ev : out Unbounded_String) is
          --  从正上方直下:一截 = 张口的一成(比例,无量纲);最多下 悬高 + 容差;
          --  一截实到不到要的两成(比例,无量纲)= 底下有东西顶住我 ⇒ 停,照实说(顶住的高度就是它的顶)
@@ -3010,6 +3026,32 @@ package body Act is
          Event := S ("lost: I cannot see the thing you named in this eye right now");
          return;
       end if;
+      --  它贴着画面边 ⇒ 先直上半个张口(比例,无量纲)让它整个进画面,最多两次(次数);还贴着就照实说,不瞎量
+      declare
+         Back : constant Long_Float := 0.5 * G.Gap;
+         Backs_Max : constant Natural := 2;
+         Backs : Natural := 0;
+      begin
+         while Cut_At_Edge and then Backs < Backs_Max loop
+            Backs := Backs + 1;
+            Geo_Say ("它贴着画面边,切出来的是半个 ⇒ 直上 " & Mm (Back) & " 让它整个进画面再量(第" & Codec.Img (Backs) & " 次)");
+            Geo_Move (L, C, F, Arm, [0.0, 0.0, Back], Mok);
+            Steps_Taken := Steps_Taken + 1;
+            Geo_Track (C, F, Cam, Slot, U, V, Seen);
+            Geo_Record_All (C, F, Cam);
+            if not Seen then
+               Event := S ("lost: it was cut off at the edge of my eye; I backed up " & Mm (Back) & " to see all of it and lost it");
+               Beats := Plug.Steps (L) - Beats0;
+               return;
+            end if;
+         end loop;
+         if Cut_At_Edge then
+            Event := S ("stalled: it is cut off at the edge of this eye even after I backed up " & Codec.Img (Backs)
+                        & " time(s); I cannot measure where it is from here");
+            Beats := Plug.Steps (L) - Beats0;
+            return;
+         end if;
+      end;
       C.Geo_Obs.Append (Geom.Obs'(Pose => F.EE (Arm), U => U, V => V));
       if Natural (C.Geo_Obs.Length) < 2 then
          --  只有一笔观测 ⇒ 先横挪一步当基线(拇指测距的"换只眼")
@@ -3073,9 +3115,16 @@ package body Act is
                Frac : constant Long_Float := (if Dist > G.Gap then 0.6 else 1.0);   --  远时走六成再看一眼(比例,无量纲);近了一步到
                Step : constant Geom.V3 := [D (0) * Frac, D (1) * Frac, D (2) * Frac];
                Rc : constant Geom.M3 := Geom.Cam_R (G, Cur);
-               Dw : constant Geom.V3 := Geom.Ap (Rc, Step);
+               --  GC6/GC7/GC8 布局 17:离它两个张口以外时视差还粗(25 mm 基线量 30 cm 外,误差按厘米算),这一截要是带下降,
+               --  落点会算到桌面以下,仿真解不出来就静默不动。⇒ 远(两个张口以外,比例,无量纲)时这一截只平移不下降,近了再下
+               Far : constant Long_Float := 2.0 * G.Gap;
+               Dw0 : constant Geom.V3 := Geom.Ap (Rc, Step);
+               Dw : constant Geom.V3 := (if Dist > Far and then Dw0 (2) < 0.0 then [Dw0 (0), Dw0 (1), 0.0] else Dw0);
                Ln : constant Long_Float := Geom.Norm (Dw);
             begin
+               if Dist > Far and then Dw0 (2) < 0.0 then
+                  Geo_Say ("还远(" & Mm (Dist) & ")⇒ 这一截只平移,不下降(省掉 " & Mm (-Dw0 (2)) & " 的下降)");
+               end if;
                Geo_Move (L, C, F, Arm, Dw, Mok);
                Steps_Taken := Steps_Taken + 1;
                --  命令发出去手没跟着走(GC6 布局 4/17:要 18 cm 只动了几毫米,仿真对那个位姿解不出逆运动学就静默不动):
@@ -3162,7 +3211,11 @@ package body Act is
                   end if;
                   exit;
                end if;
-               C.Geo_Obs.Append (Geom.Obs'(Pose => F.EE (Arm), U => U, V => V));
+               if Cut_At_Edge then
+                  Geo_Say ("这一眼它贴着画面边 ⇒ 这笔观测不进视线组,照上一次的估计走");
+               else
+                  C.Geo_Obs.Append (Geom.Obs'(Pose => F.EE (Arm), U => U, V => V));
+               end if;
             end;
          end;
       end loop;
