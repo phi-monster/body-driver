@@ -3083,7 +3083,10 @@ package body Act is
          Best_K : Integer := -1;
          Best_Gain : Long_Float := 0.0;
       begin
-         if not Z.Valid or else Z.N_Lobes < 2 then
+         --  指缝方向 = 握区里两瓣的连线;装回的握区只有一瓣时,它的主轴(合空扫过的那片的长边)就是两指并排的方向,一样是量的
+         --  (GC12:握区 n_lobes=1、主轴 (1,0),对齐被静默跳过 ⇒ 笔顺着指缝躺着,手指压在笔上)
+         if not Z.Valid or else (Z.N_Lobes < 2 and then Z.Au * Z.Au + Z.Av * Z.Av < 0.5) then
+            Geo_Say ("朝向:握区里量不出指缝的方向(瓣 " & Codec.Img (Z.N_Lobes) & ")⇒ 不对齐,照实说");
             return;
          end if;
          E0 := Err_Now (Ok0);
