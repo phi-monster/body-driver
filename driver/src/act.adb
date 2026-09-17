@@ -3374,6 +3374,16 @@ package body Act is
          C.Geo_Last_Down := Down;
          if Blocked then
             Geo_Say ("直下 " & Mm (Down) & " 被顶住(命令下去读数不动)⇒ 它顶着我的手,离该合的高度还差 " & Mm (C.Geo_Dist));
+            --  量给人看:顶住时指尖比它(视差量的重心)高多少、张口多大 —— 判断指尖停在它哪一层
+            declare
+               Cur : constant Plug.Arm_Pose := F.EE (Arm);
+               Tip_W : constant Geom.V3 := Geom.Ap (Geom.Cam_R (G, Cur), G.Tip);
+            begin
+               if C.Geo_Have_Last_Pw then
+                  Geo_Say ("顶住时指尖高 " & Mm (Cur (2) + Tip_W (2)) & ",它的重心高 " & Mm (C.Geo_Last_Pw (2)) & " ⇒ 指尖比它的重心高 "
+                           & Mm (Cur (2) + Tip_W (2) - C.Geo_Last_Pw (2)) & ";张口 " & Mm (G.Gap));
+               end if;
+            end;
             --  GC24(对中之后):顶住 = 两指尖对称落在它肩上(指尖张口比它窄,过不了它最宽处);在这个高度合就是夹它的肩。
             --  再抬(GC22 抬两成、GC23/24 抬三成)都把指尖抬到它顶上方,合到空 —— 抬这一步是错的,不抬。
             --  平的东西顶住 = 指尖到桌面,在桌面高度合也对。
@@ -4887,43 +4897,8 @@ package body Act is
                               H0 := Long_Float (World.Get (C.Wld, Cam, Natural (Slot_G)).R.Y1 - World.Get (C.Wld, Cam, Natural (Slot_G)).R.Y0);
                            end if;
                         end if;
-                        --  GC28:对准后在顶住的高度合,读数 0.495、抬 36 mm 掉;高 13.5 mm 再合,读数 0.578、抬 45 mm 还在。
-                        --  合停的读数 = 指尖那一层它有多宽;读数最大的高度就是它最宽处,夹在最宽处最不容易被挤出去(对任何凸的东西都成立)。
-                        --  ⇒ 真合之前先探:此高度、抬一成半张口、再抬一成半(比例,无量纲;共 3 处,次数)各试合 5 拍读一次,回到读数最大的高度再合
-                        if Geo_Cage then
-                           declare
-                              Step_Up : constant Long_Float := Up_Frac * Geo_Of (C, Cam).Gap;
-                              Best_K : Natural := 0;
-                              Best_R : Long_Float := -1.0;
-                              Rk : Long_Float;
-                              Sk : Natural;
-                              None : Bools;
-                              Sj : Natural;
-                              Rd : Long_Float;
-                           begin
-                              Steps_J := 0;
-                              for K in 0 .. 2 loop
-                                 if K > 0 then
-                                    Geo_Move (L, C, F, A, [0.0, 0.0, Step_Up], Mk, Jaw_Target => 1.0, Quick => True);
-                                 end if;
-                                 Jaw_Sweep (L, C, F, A, 0.0, 5, -1, None, Sk, Rk);
-                                 Steps_J := Steps_J + Sk;
-                                 Geo_Say ("探最宽处 第" & Codec.Img (K + 1) & " 处(高 " & Mm (Long_Float (K) * Step_Up) & "):试合 5 拍读数 " & Codec.Fmt (Rk, 3));
-                                 if Rk > Best_R then
-                                    Best_R := Rk; Best_K := K;
-                                 end if;
-                                 Move_Jaw (L, C, F, A, C.Hands (A).Open_Reading, Sj, Rd);
-                                 Steps_J := Steps_J + Sj;
-                              end loop;
-                              if Best_K < 2 then
-                                 Geo_Move (L, C, F, A, [0.0, 0.0, -Long_Float (2 - Best_K) * Step_Up], Mk, Jaw_Target => 1.0, Quick => True);
-                              end if;
-                              Geo_Say ("探最宽处:第" & Codec.Img (Best_K + 1) & " 处读数最大(" & Codec.Fmt (Best_R, 3) & ")⇒ 回到高 " & Mm (Long_Float (Best_K) * Step_Up) & " 再真合");
-                              if Slot_G >= 0 then
-                                 Geo_Track (C, F, Cam, Slot_G, U0, V0, Seen0);
-                              end if;
-                           end;
-                        end if;
+                        --  GC29:合前在 3 个高度试合找读数最大处 —— 试合本身把球推走,回原高度的挪动又不准,真合合空。撤回,不探。
+                        --  读数(合停时它在指尖那层有多宽)仍是握得牢不牢的量:GC13/GC28 读数 ≥0.58 的抬得起来,≤0.50 的溜。
                         Close_Once;
                         while Geo_Cage and then Tries < Retry_Max loop
                            declare
