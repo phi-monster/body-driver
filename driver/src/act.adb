@@ -4765,7 +4765,7 @@ package body Act is
                   A : constant Natural := Natural (Grip_Arm);
                   Caged : Boolean := True;
                   Cage_Note : Unbounded_String;
-                  Steps_J : Natural;
+                  Steps_J : Natural := 0;
                   Reading : Long_Float;
                   Hz : constant Zone.Hand_Zone := Zone_Of (C, A, Cam);
                   --  几何逼近刚算过它离指尖该到的那点多远(这一轮或上一轮)⇒ 笼住与否由那个数说,不再拿像素框/深度猜
@@ -4875,7 +4875,7 @@ package body Act is
                            --  分两段合:先 5 拍(次数)记下读数,再合到底;两段读数之差就是"它在指缝里动没动"
                            Jaw_Sweep (L, C, F, A, 0.0, 5, -1, None, S1, R5);
                            Jaw_Sweep (L, C, F, A, 0.0, 35, -1, None, S2, Reading);
-                           Steps_J := S1 + S2;
+                           Steps_J := Steps_J + S1 + S2;
                            --  合到底后再等两倍稳定拍数(倍数,无量纲),让夹爪把劲使上再抬
                            Selfmap.Idle (L, F, 2 * Natural'Max (1, C.Map.Settle), Iok);
                            Reading := Selfmap.Jaw_Of (F, A);
@@ -4886,6 +4886,43 @@ package body Act is
                            if Seen0 and then Natural (Slot_G) < World.Count (C.Wld, Cam) then
                               H0 := Long_Float (World.Get (C.Wld, Cam, Natural (Slot_G)).R.Y1 - World.Get (C.Wld, Cam, Natural (Slot_G)).R.Y0);
                            end if;
+                        end if;
+                        --  GC28:对准后在顶住的高度合,读数 0.495、抬 36 mm 掉;高 13.5 mm 再合,读数 0.578、抬 45 mm 还在。
+                        --  合停的读数 = 指尖那一层它有多宽;读数最大的高度就是它最宽处,夹在最宽处最不容易被挤出去(对任何凸的东西都成立)。
+                        --  ⇒ 真合之前先探:此高度、抬一成半张口、再抬一成半(比例,无量纲;共 3 处,次数)各试合 5 拍读一次,回到读数最大的高度再合
+                        if Geo_Cage then
+                           declare
+                              Step_Up : constant Long_Float := Up_Frac * Geo_Of (C, Cam).Gap;
+                              Best_K : Natural := 0;
+                              Best_R : Long_Float := -1.0;
+                              Rk : Long_Float;
+                              Sk : Natural;
+                              None : Bools;
+                              Sj : Natural;
+                              Rd : Long_Float;
+                           begin
+                              Steps_J := 0;
+                              for K in 0 .. 2 loop
+                                 if K > 0 then
+                                    Geo_Move (L, C, F, A, [0.0, 0.0, Step_Up], Mk, Jaw_Target => 1.0, Quick => True);
+                                 end if;
+                                 Jaw_Sweep (L, C, F, A, 0.0, 5, -1, None, Sk, Rk);
+                                 Steps_J := Steps_J + Sk;
+                                 Geo_Say ("探最宽处 第" & Codec.Img (K + 1) & " 处(高 " & Mm (Long_Float (K) * Step_Up) & "):试合 5 拍读数 " & Codec.Fmt (Rk, 3));
+                                 if Rk > Best_R then
+                                    Best_R := Rk; Best_K := K;
+                                 end if;
+                                 Move_Jaw (L, C, F, A, C.Hands (A).Open_Reading, Sj, Rd);
+                                 Steps_J := Steps_J + Sj;
+                              end loop;
+                              if Best_K < 2 then
+                                 Geo_Move (L, C, F, A, [0.0, 0.0, -Long_Float (2 - Best_K) * Step_Up], Mk, Jaw_Target => 1.0, Quick => True);
+                              end if;
+                              Geo_Say ("探最宽处:第" & Codec.Img (Best_K + 1) & " 处读数最大(" & Codec.Fmt (Best_R, 3) & ")⇒ 回到高 " & Mm (Long_Float (Best_K) * Step_Up) & " 再真合");
+                              if Slot_G >= 0 then
+                                 Geo_Track (C, F, Cam, Slot_G, U0, V0, Seen0);
+                              end if;
+                           end;
                         end if;
                         Close_Once;
                         while Geo_Cage and then Tries < Retry_Max loop
