@@ -3199,7 +3199,8 @@ package body Act is
          end Apex_Pixel;
 
          --  算出要横挪的量(米,世界系 xy);算不出就 Ok=False 照实说
-         procedure Centering_Offset (Mv : out Geom.V3; Ok : out Boolean; Why : out Unbounded_String) is
+         procedure Centering_Offset (Mv : out Geom.V3; Ok : out Boolean; Why : out Unbounded_String;
+                                     Pu, Pv, Au_Out, Av_Out : out Long_Float) is
             Cur : constant Plug.Arm_Pose := F.EE (Arm);
             Rc : constant Geom.M3 := Geom.Cam_R (G, Cur);
             Tip_W : constant Geom.V3 := Geom.Ap (Rc, G.Tip);
@@ -3208,6 +3209,7 @@ package body Act is
             Aok, Sn : Boolean;
          begin
             Mv := [0.0, 0.0, 0.0]; Ok := False; Why := Null_Unbounded_String;
+            Pu := 0.0; Pv := 0.0; Au_Out := 0.0; Av_Out := 0.0;
             Apex_Pixel (Ax, Ay, Aok);
             if not Aok then
                Why := S ("量不出指尖相遇的像素"); return;
@@ -3255,6 +3257,7 @@ package body Act is
                      Why := S ("相遇点按视线算和按读数算对不上"); return;
                   end if;
                   Mv := [Pb (0) - Pa (0), Pb (1) - Pa (1), 0.0]; Ok := True;
+                  Pu := Ub; Pv := Vb; Au_Out := Ax; Av_Out := Ay;
                end;
             end;
          end Centering_Offset;
@@ -3280,56 +3283,99 @@ package body Act is
                Down := Down + Ask;
             end;
          end loop;
-         --  对中:最多三轮(次数;横挪只到八五成、球心又比指尖高,一轮修不完);顶住了就先抬一成半张口让指尖脱开,横挪,再下回去(顶住就停)
+         --  对中:最多三轮(次数)。GC26:把它的重心对到相遇像素上只保证它在【那条视线】上,不保证在指尖【那个点】上 ——
+         --  它在视线上更远处(指尖前下方),手指合在它上方、合空,球纹丝不动。⇒ 第一轮按"视线落到指尖高度"挪(这一挪就是基线),
+         --  从第二轮起用各轮的位姿 + 像素做三角测量(和量距离用的同一个算法),直接得它的三维位置:横向挪到它正上方,直下到它的高度
+         declare
+            Obs : Geom.Obs_Vectors.Vector;
+            Pball : Geom.V3 := [0.0, 0.0, 0.0];
+            Have_3D : Boolean := False;
+         begin
          for Round in 1 .. 3 loop
             declare
                Mv : Geom.V3;
                Ok : Boolean;
                Why : Unbounded_String;
-               Free : constant Long_Float := (if Blocked then 0.15 * G.Gap else 0.0);
+               Free : constant Long_Float := (if Blocked then 0.15 * G.Gap else 0.0);   --  脱开 = 一成半张口(比例,无量纲)
                Mag : Long_Float;
+               Pu, Pv, Au1, Av1 : Long_Float;
+               Dz : Long_Float := 0.0;
+               Stop : Boolean := False;
             begin
-               Centering_Offset (Mv, Ok, Why);
+               Centering_Offset (Mv, Ok, Why, Pu, Pv, Au1, Av1);
                if not Ok then
                   Geo_Say ("对中:" & To_String (Why) & " ⇒ 不挪,照读数合");
                   exit;
                end if;
-               Mag := Sqrt (Mv (0) ** 2 + Mv (1) ** 2);
-               if Mag <= 0.05 * G.Gap then   --  对准 = 差不到张口的百分之五(比例,无量纲)
-                  Geo_Say ("对中:差 " & Mm (Mag) & ",在张口的百分之五内 ⇒ 对准了");
-                  exit;
+               Obs.Append (Geom.Obs'(Pose => F.EE (Arm), U => Pu, V => Pv));
+               if Natural (Obs.Length) >= 2 then
+                  declare
+                     Cur : constant Plug.Arm_Pose := F.EE (Arm);
+                     Rc : constant Geom.M3 := Geom.Cam_R (G, Cur);
+                     Tip_W : constant Geom.V3 := Geom.Ap (Rc, G.Tip);
+                     Tip : constant Geom.V3 := [Cur (0) + Tip_W (0), Cur (1) + Tip_W (1), Cur (2) + Tip_W (2)];
+                  begin
+                     Pball := Geom.Triangulate (G, Obs);
+                     Have_3D := True;
+                     Mv := [Pball (0) - Tip (0), Pball (1) - Tip (1), 0.0];
+                     Dz := Tip (2) - Pball (2);
+                     Geo_Say ("对中 三角(" & Codec.Img (Natural (Obs.Length)) & " 眼):它在 (" & Mm (Pball (0)) & "," & Mm (Pball (1)) & "," & Mm (Pball (2))
+                              & "),指尖横差 (" & Mm (Mv (0)) & "," & Mm (Mv (1)) & "),指尖比它高 " & Mm (Dz));
+                     if abs Dz > 2.0 * G.Gap then   --  高差超过两个张口(比例,无量纲)= 三角算歪了
+                        Geo_Say ("对中:三角出来的高差不像话 ⇒ 不信,照读数合");
+                        Stop := True;
+                     end if;
+                  end;
                end if;
+               exit when Stop;
+               Mag := Sqrt (Mv (0) ** 2 + Mv (1) ** 2);
                if Mag > 0.5 * G.Gap then
                   Geo_Say ("对中:差 " & Mm (Mag) & ",超过半个张口,不像是它 ⇒ 不挪");
                   exit;
                end if;
-               Geo_Say ("对中 第" & Codec.Img (Round) & " 轮:横挪 (" & Mm (Mv (0)) & "," & Mm (Mv (1)) & ")" & (if Free > 0.0 then ",先抬 " & Mm (Free) & " 让指尖脱开" else ""));
+               if Mag <= 0.05 * G.Gap and then (not Have_3D or else Dz <= 0.05 * G.Gap) then   --  对准 = 差不到张口的百分之五(比例,无量纲)
+                  Geo_Say ("对中:横差 " & Mm (Mag) & (if Have_3D then ",指尖已到它的高度" else "") & " ⇒ 对准了");
+                  exit;
+               end if;
+               if Mag <= 0.05 * G.Gap and then Have_3D and then Blocked then
+                  Geo_Say ("对中:横向对准了,指尖还比它高 " & Mm (Dz) & " 但被顶住下不去 ⇒ 就在这儿合");
+                  exit;
+               end if;
+               Geo_Say ("对中 第" & Codec.Img (Round) & " 轮:横挪 (" & Mm (Mv (0)) & "," & Mm (Mv (1)) & ")"
+                        & (if Have_3D then ",再直下到它的高度(还差 " & Mm (Dz) & ")" else "") & (if Free > 0.0 then ",先抬 " & Mm (Free) & " 让指尖脱开" else ""));
                if Free > 0.0 then
                   Geo_Move (L, C, F, Arm, [0.0, 0.0, Free], Mk, Jaw_Target => 1.0, Quick => True);
                   Down := Down - Free;
                end if;
-               Geo_Move (L, C, F, Arm, [Mv (0), Mv (1), 0.0], Mk, Jaw_Target => 1.0, Quick => True);
-               Steps_Taken := Steps_Taken + 1;
-               --  再下回去:到原来的总深度,顶住就停
-               Blocked := False;
-               while Down < Total loop
-                  declare
-                     P0 : constant Plug.Arm_Pose := F.EE (Arm);
-                     Ask : constant Long_Float := Long_Float'Min (Leg, Total - Down);
-                  begin
-                     Geo_Move (L, C, F, Arm, [0.0, 0.0, -Ask], Mk, Jaw_Target => 1.0, Quick => True);
-                     Steps_Taken := Steps_Taken + 1;
-                     Got := P0 (2) - F.EE (Arm) (2);
-                     if Got < Blocked_Frac * Ask then
-                        Blocked := True;
-                        Down := Down + Long_Float'Max (0.0, Got);
-                        exit;
-                     end if;
-                     Down := Down + Ask;
-                  end;
-               end loop;
+               if Mag > 0.05 * G.Gap then   --  差过了张口的百分之五才挪(比例,无量纲)
+                  Geo_Move (L, C, F, Arm, [Mv (0), Mv (1), 0.0], Mk, Jaw_Target => 1.0, Quick => True);
+                  Steps_Taken := Steps_Taken + 1;
+               end if;
+               --  再下回去:三角量过就下到它的高度,没量过就到原来的总深度;顶住就停
+               declare
+                  Goal : constant Long_Float := (if Have_3D then Down + Free + Dz else Total);
+               begin
+                  Blocked := False;
+                  while Down < Goal loop
+                     declare
+                        P0 : constant Plug.Arm_Pose := F.EE (Arm);
+                        Ask : constant Long_Float := Long_Float'Min (Leg, Goal - Down);
+                     begin
+                        Geo_Move (L, C, F, Arm, [0.0, 0.0, -Ask], Mk, Jaw_Target => 1.0, Quick => True);
+                        Steps_Taken := Steps_Taken + 1;
+                        Got := P0 (2) - F.EE (Arm) (2);
+                        if Got < Blocked_Frac * Ask then
+                           Blocked := True;
+                           Down := Down + Long_Float'Max (0.0, Got);
+                           exit;
+                        end if;
+                        Down := Down + Ask;
+                     end;
+                  end loop;
+               end;
             end;
          end loop;
+         end;
          C.Geo_Dist := Long_Float'Max (0.0, Hover - Down); C.Geo_Round := C.Round_N;
          C.Geo_Last_Down := Down;
          if Blocked then
