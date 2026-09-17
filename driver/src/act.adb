@@ -3760,7 +3760,9 @@ package body Act is
             Pic : constant String := (if Seen1 then "in my hand camera it " & (if Pic_Ok then "stayed put" else "moved") & " (" & Codec.Fmt (Moved * Long_Float (Cw), 0)
                                       & " px, size x" & Codec.Fmt (Ratio, 2) & ")" else "in my hand camera I could not find it afterwards");
          begin
-            Held := R1 >= Slip_Floor and then Pic_Ok;
+            --  GC37 纸杯蛋糕:抬完 45 mm 读数 0.669 → 0.169(远在空手值上),画面里它变了样/找不到,被判 slipped、随即张手把它扔了。
+            --  注释早就写着"画面只作旁证",代码却拿它一票否决 ⇒ 改成只由力说了算
+            Held := R1 >= Slip_Floor;
             Note := S ("after lifting " & Mm (Lift) & " straight up in small steps my grip reads " & Codec.Fmt (R1, 3)
                        & (if R1 >= Slip_Floor then " (above empty)" else " (empty)") & "; " & Pic
                        & (if Held then " ⇒ held" else " ⇒ I cannot call that held"));
