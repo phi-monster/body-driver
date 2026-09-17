@@ -2852,10 +2852,12 @@ package body Act is
 
    --  到它上方(拿着东西也行):指尖该到的点 = 它的三维位置正上方两个张口(倍数,无量纲);分截走,只走平移,拿着就继续使劲
    procedure Geo_Hover (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Cam, Arm : Natural; Pw : Geom.V3;
-                        Event : out Unbounded_String; Steps_Taken : out Natural; Beats : out Natural) is
+                        Event : out Unbounded_String; Steps_Taken : out Natural; Beats : out Natural; Clear : Long_Float := -1.0) is
       G : constant Geom.Cam_Geo := Geo_Of (C, Cam);
       Beats0 : constant Natural := Plug.Steps (L);
       Leg_Max : constant Long_Float := 0.5 * G.Gap;   --  一截最多半个张口(比例,无量纲)
+      --  到它上方多高:到一个东西上方 = 两个张口(要越过它);到一个记住的地方上方 = 调用方给(放下只要半个张口)(比例,无量纲)
+      Up : constant Long_Float := (if Clear >= 0.0 then Clear else 2.0 * G.Gap);
       Mok : Boolean;
       Guard : Natural := 0;
    begin
@@ -2866,7 +2868,7 @@ package body Act is
             Rc : constant Geom.M3 := Geom.Cam_R (G, Cur);
             Tip_W : constant Geom.V3 := Geom.Ap (Rc, G.Tip);
             Fingers : constant Geom.V3 := [Cur (0) + Tip_W (0), Cur (1) + Tip_W (1), Cur (2) + Tip_W (2)];
-            Target : constant Geom.V3 := [Pw (0), Pw (1), Pw (2) + 2.0 * G.Gap];
+            Target : constant Geom.V3 := [Pw (0), Pw (1), Pw (2) + Up];
             D : constant Geom.V3 := [Target (0) - Fingers (0), Target (1) - Fingers (1), Target (2) - Fingers (2)];
             Dist : constant Long_Float := Geom.Norm (D);
             Tol : constant Long_Float := 0.1 * G.Gap;   --  容差 = 张口的一成(比例,无量纲)
@@ -4203,6 +4205,7 @@ package body Act is
          Geo_Slot_Now : Integer := -1;
          Geo_Desc : Unbounded_String;
          Geo_Pw : Geom.V3 := [others => 0.0];
+         Geo_Clear : Long_Float := -1.0;     --  到目标上方多高(<0 = 默认两个张口;记住的地方 = 半个张口)
       --  2a 把脑说的话变成要求:别动的,目标就是它现在的位置;要动的,目标是格子或与某号的关系;
       --  抓某号,目标是"和我张开的那片地方重合"(位置 / 远近 / 看着多大 / 朝向)
       --  把去哪翻成目标:格子 / 与某号的关系(碰到它 · 上下左右 · 前后 · 离远点)。全是量出来的位置,没有写死的距离
@@ -4695,6 +4698,7 @@ package body Act is
                                                          else [0.0, 0.0, 0.0]);
                            begin
                               Geo_Pw := [Sp.Pw (0) + Dir (0) * Mag, Sp.Pw (1) + Dir (1) * Mag, Sp.Pw (2) + Dir (2) * Mag];
+                              Geo_Clear := 0.5 * Geo_Of (C, Cam).Gap;   --  记住的地方就是指尖到过的高度,上方留半个张口够了(比例,无量纲)
                               if Rl = "at" or else Rl = "into" or else Rl = "onto" then
                                  Geo_Case := 6;
                                  Geo_Desc := S ("item " & Codec.Img (G0.Item) & " " & Rl & " the place '" & To_String (Sp.Name) & "' (above it, then straight down until something holds me)");
@@ -4755,13 +4759,13 @@ package body Act is
             Put_Line ("[身] ⚙ 几何驾驶:合手前不再走,笼住与否由刚算的 " & Mm (C.Geo_Dist) & " 说");
          elsif Geo_Case = 4 then
             Put_Line ("[身] ⚙ 几何驾驶:" & To_String (Geo_Desc));
-            Geo_Hover (L, C, F, Cam, Natural (Cam_Arm (C, Cam)), Geo_Pw, Event, Steps_Taken, Beats);
+            Geo_Hover (L, C, F, Cam, Natural (Cam_Arm (C, Cam)), Geo_Pw, Event, Steps_Taken, Beats, Geo_Clear);
             Feel (C, F);
             Report := Report & "you asked " & To_String (Geo_Desc) & ": " & To_String (Event) & ". I took " & Codec.Img (Steps_Taken) & " pushes; ";
             Put_Line ("[身]   这一段:" & Codec.Img (Steps_Taken) & " 推 · " & Codec.Img (Beats) & " 拍");
          elsif Geo_Case = 6 then
             Put_Line ("[身] ⚙ 几何驾驶:" & To_String (Geo_Desc));
-            Geo_Hover (L, C, F, Cam, Natural (Cam_Arm (C, Cam)), Geo_Pw, Event, Steps_Taken, Beats);
+            Geo_Hover (L, C, F, Cam, Natural (Cam_Arm (C, Cam)), Geo_Pw, Event, Steps_Taken, Beats, Geo_Clear);
             declare
                Ev2 : Unbounded_String;
                St2, Bt2 : Natural;
