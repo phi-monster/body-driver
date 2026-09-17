@@ -4606,9 +4606,14 @@ package body Act is
                         --  GC13 彩色帧:手指在它腰以下一夹,它被楔形指尖挤着往上冒出指缝(帧 320),抬起就空。量得到的信号 = 合的时候它在腕眼里
                         --  往上跑了(重心上移超过它自己框高的一半,比例,无量纲)⇒ 张开、直上一点五成张口(比例,无量纲)、再合一次(次数 1);
                         --  没往上跑就照旧。不带形状词:方的扁的一夹不会往上跑,自然不触发
-                        Rise_Frac : constant Long_Float := 0.5;
+                        --  GC14:球被挤出去时画面里重心只上移了它框高的两成,门槛放到一成半(比例,无量纲);
+                        --  更稳的信号是力:夹住不动的东西,读数三拍就停;被挤着跑的东西,读数在 40 拍里一路往下爬。
+                        --  第 5 拍到最后一拍读数再降过量程的百分之三(比例,无量纲)= 它在指缝里动
+                        Rise_Frac : constant Long_Float := 0.15;
+                        Creep_Tol : constant Long_Float := 0.03;
                         Up_Frac : constant Long_Float := 0.15;
                         Retry_Max : constant Natural := 1;
+                        R5 : Long_Float := 0.0;
                         Slot_G : constant Integer := (if Say.Grip_On >= 1 and then Say.Grip_On <= Natural (C.Items.Length) then C.Items (Say.Grip_On - 1).Slot else -1);
                         U0, V0, U1, V1 : Long_Float := 0.0;
                         Seen0, Seen1, Mk : Boolean := False;
@@ -4616,8 +4621,13 @@ package body Act is
                         Tries : Natural := 0;
                         procedure Close_Once is
                            Iok : Boolean;
+                           None : Bools;
+                           S1, S2 : Natural;
                         begin
-                           Move_Jaw (L, C, F, A, 0.0, Steps_J, Reading);
+                           --  分两段合:先 5 拍(次数)记下读数,再合到底;两段读数之差就是"它在指缝里动没动"
+                           Jaw_Sweep (L, C, F, A, 0.0, 5, -1, None, S1, R5);
+                           Jaw_Sweep (L, C, F, A, 0.0, 35, -1, None, S2, Reading);
+                           Steps_J := S1 + S2;
                            --  合到底后再等两倍稳定拍数(倍数,无量纲),让夹爪把劲使上再抬
                            Selfmap.Idle (L, F, 2 * Natural'Max (1, C.Map.Settle), Iok);
                            Reading := Selfmap.Jaw_Of (F, A);
@@ -4630,9 +4640,19 @@ package body Act is
                            end if;
                         end if;
                         Close_Once;
-                        while Geo_Cage and then Seen0 and then H0 > 0.0 and then Tries < Retry_Max loop
-                           Geo_Track (C, F, Cam, Slot_G, U1, V1, Seen1);
-                           exit when not Seen1 or else V0 - V1 <= Rise_Frac * H0;
+                        while Geo_Cage and then Tries < Retry_Max loop
+                           declare
+                              Rose : Boolean := False;
+                              Crept : constant Boolean := R5 - Reading > Creep_Tol;
+                           begin
+                              if Seen0 and then H0 > 0.0 then
+                                 Geo_Track (C, F, Cam, Slot_G, U1, V1, Seen1);
+                                 Rose := Seen1 and then V0 - V1 > Rise_Frac * H0;
+                              end if;
+                              exit when not (Rose or else Crept);
+                              Geo_Say ("合的时候它在动:" & (if Crept then "读数从第 5 拍的 " & Codec.Fmt (R5, 3) & " 爬到 " & Codec.Fmt (Reading, 3) & " " else "")
+                                       & (if Rose then "画面里上移 " & Codec.Fmt (V0 - V1, 0) & " px(框高 " & Codec.Fmt (H0, 0) & ")" else ""));
+                           end;
                            Tries := Tries + 1;
                            declare
                               Up : constant Long_Float := Up_Frac * Geo_Of (C, Cam).Gap;
