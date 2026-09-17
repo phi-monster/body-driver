@@ -4914,8 +4914,48 @@ package body Act is
                               H0 := Long_Float (World.Get (C.Wld, Cam, Natural (Slot_G)).R.Y1 - World.Get (C.Wld, Cam, Natural (Slot_G)).R.Y0);
                            end if;
                         end if;
-                        --  GC29:合前在 3 个高度试合找读数最大处 —— 试合本身把球推走,回原高度的挪动又不准,真合合空。撤回,不探。
-                        --  读数(合停时它在指尖那层有多宽)仍是握得牢不牢的量:GC13/GC28 读数 ≥0.58 的抬得起来,≤0.50 的溜。
+                        --  GC29:合前在 +0/+13.5/+27 三个高度试合 —— 步子太粗、回原高度的挪动不准,真合合空。
+                        --  GC34:对准后在顶住高度合 0.479、抬 18 mm 溜;高 13.5 mm 合空;GC28 高约 4 mm 合 0.578、抬 45 mm 不掉。
+                        --  ⇒ 窗口只有几毫米:从顶住高度起每抬半成张口(比例,无量纲)试合 5 拍读一次,读数不再变大就停,回到读数最大的那格再真合
+                        --  (试合都在它顶上附近,推不动被桌面托着的它;回去最多一格,准)
+                        if Geo_Cage then
+                           declare
+                              Step_Up : constant Long_Float := 0.05 * Geo_Of (C, Cam).Gap;   --  半成张口(比例,无量纲)
+                              Probe_Max : constant Natural := 4;   --  最多 4 格(次数)
+                              Best_K : Natural := 0;
+                              Best_R : Long_Float := -1.0;
+                              K : Natural := 0;
+                              Rk : Long_Float;
+                              Sk : Natural;
+                              None : Bools;
+                              Sj : Natural;
+                              Rd : Long_Float;
+                           begin
+                              Steps_J := 0;
+                              loop
+                                 Jaw_Sweep (L, C, F, A, 0.0, 5, -1, None, Sk, Rk);
+                                 Steps_J := Steps_J + Sk;
+                                 Geo_Say ("探握处 第" & Codec.Img (K + 1) & " 格(比顶住高 " & Mm (Long_Float (K) * Step_Up) & "):试合 5 拍读数 " & Codec.Fmt (Rk, 3));
+                                 Move_Jaw (L, C, F, A, C.Hands (A).Open_Reading, Sj, Rd);
+                                 Steps_J := Steps_J + Sj;
+                                 if Rk > Best_R then
+                                    Best_R := Rk; Best_K := K;
+                                 elsif K > 0 then
+                                    exit;   --  读数不再变大 ⇒ 过了最宽处
+                                 end if;
+                                 exit when K + 1 >= Probe_Max;
+                                 K := K + 1;
+                                 Geo_Move (L, C, F, A, [0.0, 0.0, Step_Up], Mk, Jaw_Target => 1.0, Quick => True);
+                              end loop;
+                              if K > Best_K then
+                                 Geo_Move (L, C, F, A, [0.0, 0.0, -Long_Float (K - Best_K) * Step_Up], Mk, Jaw_Target => 1.0, Quick => True);
+                              end if;
+                              Geo_Say ("探握处:第" & Codec.Img (Best_K + 1) & " 格读数最大(" & Codec.Fmt (Best_R, 3) & ")⇒ 在比顶住高 " & Mm (Long_Float (Best_K) * Step_Up) & " 处真合");
+                              if Slot_G >= 0 then
+                                 Geo_Track (C, F, Cam, Slot_G, U0, V0, Seen0);
+                              end if;
+                           end;
+                        end if;
                         Close_Once;
                         while Geo_Cage and then Tries < Retry_Max loop
                            declare
