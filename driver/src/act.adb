@@ -3276,20 +3276,30 @@ package body Act is
                if Ra (2) >= -1.0e-6 or else Rb (2) >= -1.0e-6 then
                   Why := S ("视线不朝下,落不到指尖的高度"); return;
                end if;
+               --  GC31/32:把它的视线落到【指尖】的高度,只在它的重心和指尖一样高时才对。手在它后面时直下到底(指尖比它的重心低 27 mm),
+               --  落点冲过头(差被放大到 −41);手在它前面时被它顶住在高处(指尖比它高),落点又不够 —— 两侧偏差方向相反 ⇒ 五轮来回摆。
+               --  ⇒ 它的视线落到【它自己】的高度(视差量出的重心高),指尖的位置直接按读数取(不用视线);相遇像素的视线只做自检
                declare
+                  Zb : constant Long_Float := (if C.Geo_Have_Last_Pw then C.Geo_Last_Pw (2) else Zt);
                   Ta : constant Long_Float := (Zt - Cur (2)) / Ra (2);
-                  Tb : constant Long_Float := (Zt - Cur (2)) / Rb (2);
+                  Tb : constant Long_Float := (Zb - Cur (2)) / Rb (2);
                   Pa : constant Geom.V3 := [Cur (0) + Ta * Ra (0), Cur (1) + Ta * Ra (1), Zt];
-                  Pb : constant Geom.V3 := [Cur (0) + Tb * Rb (0), Cur (1) + Tb * Rb (1), Zt];
-                  --  自检:相遇像素沿视线落下来应该就是读数算的指尖点;差得比两成张口还多 = 这套换算不可信
-                  Self_Err : constant Long_Float := Sqrt ((Pa (0) - (Cur (0) + Tip_W (0))) ** 2 + (Pa (1) - (Cur (1) + Tip_W (1))) ** 2);
+                  Pb : constant Geom.V3 := [Cur (0) + Tb * Rb (0), Cur (1) + Tb * Rb (1), Zb];
+                  Tip_X : constant Long_Float := Cur (0) + Tip_W (0);
+                  Tip_Y : constant Long_Float := Cur (1) + Tip_W (1);
+                  --  自检:相遇像素沿视线落到指尖高度应该就是读数算的指尖点;差得比两成张口还多 = 这套换算不可信
+                  Self_Err : constant Long_Float := Sqrt ((Pa (0) - Tip_X) ** 2 + (Pa (1) - Tip_Y) ** 2);
                begin
+                  if Tb <= 0.0 then
+                     Why := S ("它的视线落不到它的高度(它在相机后面?)"); return;
+                  end if;
                   Geo_Say ("对中:指尖相遇像素 (" & Codec.Fmt (Ax, 0) & "," & Codec.Fmt (Ay, 0) & ") 它的重心 (" & Codec.Fmt (Ub, 0) & "," & Codec.Fmt (Vb, 0)
-                           & ") 落到指尖高度差 (" & Mm (Pb (0) - Pa (0)) & "," & Mm (Pb (1) - Pa (1)) & ");相遇点按视线 vs 按读数差 " & Mm (Self_Err));
+                           & ") 落到它的高度(" & Mm (Zb) & ",指尖高 " & Mm (Zt) & ")和指尖差 (" & Mm (Pb (0) - Tip_X) & "," & Mm (Pb (1) - Tip_Y)
+                           & ");相遇点按视线 vs 按读数差 " & Mm (Self_Err));
                   if Self_Err > 0.2 * G.Gap then   --  门槛 = 张口的两成(比例,无量纲)
                      Why := S ("相遇点按视线算和按读数算对不上"); return;
                   end if;
-                  Mv := [Pb (0) - Pa (0), Pb (1) - Pa (1), 0.0]; Ok := True;
+                  Mv := [Pb (0) - Tip_X, Pb (1) - Tip_Y, 0.0]; Ok := True;
                   Pu := Ub; Pv := Vb; Au_Out := Ax; Av_Out := Ay;
                end;
             end;
@@ -3321,7 +3331,7 @@ package body Act is
          --  量响应:上一轮它在画面里实际挪了多少 ÷ 预计挪多少 = 增益,下一轮按增益缩(累计;只信 0.5–3 倍之间的,比例,无量纲)。
          --  深度靠"每轮横挪后再直下到顶住"来定:它在相遇像素那条视线上 + 指尖被它的肩顶住 = 它就在指尖之间
          declare
-            Gain : Long_Float := 1.0;
+            Gain : Long_Float := C.Geo_Center_Gain;   --  上次量到的响应比先用上(GC28–32 每次都量到 1.33–1.39)
             Had_Prev : Boolean := False;
             Pu0, Pv0, Au0, Av0 : Long_Float := 0.0;
          begin
@@ -3350,6 +3360,7 @@ package body Act is
                         begin
                            if R >= 0.5 and then R <= 3.0 then   --  只信 0.5–3 倍(比例,无量纲)
                               Gain := Gain * R;
+                              C.Geo_Center_Gain := Gain;
                               Geo_Say ("对中:上一轮实际挪了预计的 " & Codec.Fmt (R, 2) & " 倍 ⇒ 这轮按累计增益 " & Codec.Fmt (Gain, 2) & " 缩");
                            else
                               Geo_Say ("对中:上一轮实际/预计 = " & Codec.Fmt (R, 2) & ",不在可信范围,增益不改");

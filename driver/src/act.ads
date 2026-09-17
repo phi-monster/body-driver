@@ -119,6 +119,7 @@ package Act is
       Geo_Slid_Slot : Integer := -1;      --  抬的时候从指缝溜走过的那一槽(下次对它直下就少下一截)
       Geo_Last_Pw : Geom.V3 := [others => 0.0];   --  上一次直下时它的三维位置(世界):溜走后再贴近它就直接回到这上方,不再测距
       Geo_Have_Last_Pw : Boolean := False;
+      Geo_Center_Gain : Long_Float := 1.0;   --  对中量到的响应比(实际挪出的像素 ÷ 预计),跨次记着,下次第一轮就按它缩
       Geo_Slot : Integer := -1;
       Geo_Slot_Obs : Geom.Slot_Obs_Vectors.Vector;   --  这一集里腕眼看见过的【每一样东西】的历次观测(按世界槽号),用来算它们在三维哪儿
       Geo_Map_Cam : Integer := -1;
