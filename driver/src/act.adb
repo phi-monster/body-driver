@@ -3198,7 +3198,14 @@ package body Act is
             --  GC10 布局 0:刀在画面下沿,直上 90 mm 它还贴着下沿(靠近手根的东西永远投在画面底部)⇒ 改成沿这只眼的视线往后退
             --  (相机 +z = 背后,既上又后),它才会缩小并往画面中间走
             Geo_Say ("它贴着画面边,切出来的是半个 ⇒ 沿视线后退 " & Mm (Back) & " 让它整个进画面再量(第" & Codec.Img (Backs) & " 次)");
-            Geo_Move (L, C, F, Arm, Geom.Ap (Geom.Cam_R (G, F.EE (Arm)), [0.0, 0.0, Back]), Mok);
+            --  GC12 两次在这一行崩(读帧时 finalize 报 PROGRAM_ERROR):把"从 F 算方向"和"把 F 交给 Geo_Move 改"拆成两步,不在同一条调用里
+            declare
+               Pose_Now : constant Plug.Arm_Pose := F.EE (Arm);
+               Rc_Now : constant Geom.M3 := Geom.Cam_R (G, Pose_Now);
+               Dwb : constant Geom.V3 := Geom.Ap (Rc_Now, [0.0, 0.0, Back]);
+            begin
+               Geo_Move (L, C, F, Arm, Dwb, Mok);
+            end;
             Steps_Taken := Steps_Taken + 1;
             Geo_Track (C, F, Cam, Slot, U, V, Seen);
             Geo_Record_All (C, F, Cam);
