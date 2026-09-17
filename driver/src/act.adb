@@ -3031,7 +3031,7 @@ package body Act is
       --  哪个通道能让画面转,现场各推一下量出来(转动通道 3..5 各推开机量的那一档幅度),挑效果最大的那个,
       --  按量出来的比例推到差小于阈值为止。圆的东西(长短轴比不到 1.3,比例,无量纲)没有朝向,跳过。
       Aligned : Boolean := False;
-      --  它看着多宽(米):框的像素宽 ÷ 焦距 × 离相机的距离,每次量距离时顺手算;直下顶住后按它的宽抬一点再合
+      --  它看着多宽(米):框的像素宽 ÷ 焦距 × 离相机的距离,每次量距离时顺手算(说给脑听,不再用来抬手)
       Obj_W : Long_Float := 0.0;
 
       procedure Geo_Align is
@@ -3316,21 +3316,9 @@ package body Act is
          C.Geo_Last_Down := Down;
          if Blocked then
             Geo_Say ("直下 " & Mm (Down) & " 被顶住(命令下去读数不动)⇒ 它顶着我的手,离该合的高度还差 " & Mm (C.Geo_Dist));
-            --  GC13–GC21:顶住的高度是指尖到它最宽处(球)或桌面;在这个高度一夹,楔形指尖把它往上挤、一抬就溜。
-            --  抓住过的三次都是夹在它上半截。⇒ 顶住后先按它的宽抬三成(比例,无量纲,最多三成张口),手还张着、它没被碰过,再合
-            declare
-               --  GC22:抬两成(12 mm)合到 0.40 才碰到、读数一路缩到 0、它往前冒 ⇒ 还是被挤出去;
-               --  抓住过的三次指尖都在它三成高处(合停 0.586)。⇒ 抬三成
-               Rise : constant Long_Float := Long_Float'Min (0.3 * Obj_W, 0.3 * G.Gap);
-               Mk2 : Boolean;
-            begin
-               if Rise > 0.0 then
-                  Geo_Say ("顶住了 ⇒ 按它的宽(" & Mm (Obj_W) & ")先抬 " & Mm (Rise) & " 再合,免得夹在它最宽处被挤出去");
-                  Geo_Move (L, C, F, Arm, [0.0, 0.0, Rise], Mk2, Jaw_Target => 1.0, Quick => True);
-                  Down := Down - Rise;
-                  C.Geo_Dist := Long_Float'Max (0.0, Hover - Down);
-               end if;
-            end;
+            --  GC24(对中之后):顶住 = 两指尖对称落在它肩上(指尖张口比它窄,过不了它最宽处);在这个高度合就是夹它的肩。
+            --  再抬(GC22 抬两成、GC23/24 抬三成)都把指尖抬到它顶上方,合到空 —— 抬这一步是错的,不抬。
+            --  平的东西顶住 = 指尖到桌面,在桌面高度合也对。
             Ev := S ("amount: arrived (I came straight down " & Mm (Down) & " from above it, then something under my hand held me up, "
                      & Mm (C.Geo_Dist) & " above where I meant to close; my fingers are open around it)");
          else
