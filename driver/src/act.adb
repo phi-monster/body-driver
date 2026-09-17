@@ -3177,7 +3177,13 @@ package body Act is
             N : Long_Float := 0.0;
          begin
             Ok := False; Ax := 0.0; Ay := 0.0;
-            if not Z.Valid or else Natural (Z.Fingers.Length) /= Cw * Ch or else Z.Y1 <= Z.Y0 then
+            if not Z.Valid or else Z.Y1 <= Z.Y0 then
+               return;
+            end if;
+            --  身体文件里只存区框不存扫过的像素(开机"握区照用,不合空"时掩膜是空的)⇒ 没掩膜就用区框:
+            --  两指对称扫,相遇点在区框顶边的正中(量的是框,不写形状)
+            if Natural (Z.Fingers.Length) /= Cw * Ch then
+               Ax := Long_Float (Z.X0 + Z.X1) / 2.0; Ay := Long_Float (Z.Y0) + Long_Float (Band) / 2.0; Ok := True;
                return;
             end if;
             for Y in Z.Y0 .. Natural'Min (Ch - 1, Z.Y0 + Band) loop
