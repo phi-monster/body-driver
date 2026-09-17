@@ -115,6 +115,8 @@ package Act is
       Geo_Dir : Geom.V3 := [others => 0.0];   --  逼近的方向(世界系单位向量)
       Geo_Obs : Geom.Obs_Vectors.Vector;  --  这一集里点名那块在腕眼里的历次观测(位姿 + 像素)
       Spots : Item_Vectors.Vector;        --  脑让我记住的地方(这一集里留着,换集清空)
+      Geo_Last_Down : Long_Float := 0.0;  --  上一次直下走了多深(米);0 = 这一集还没直下过
+      Geo_Slid_Slot : Integer := -1;      --  抬的时候从指缝溜走过的那一槽(下次对它直下就少下一截)
       Geo_Slot : Integer := -1;
       Geo_Slot_Obs : Geom.Slot_Obs_Vectors.Vector;   --  这一集里腕眼看见过的【每一样东西】的历次观测(按世界槽号),用来算它们在三维哪儿
       Geo_Map_Cam : Integer := -1;

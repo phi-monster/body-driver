@@ -2781,6 +2781,7 @@ package body Act is
       C.Geo_Slot_Obs.Clear; C.Geo_Map_Cam := -1;
       C.Blind_Mask := 0;
       C.Spots.Clear;
+      C.Geo_Last_Down := 0.0; C.Geo_Slid_Slot := -1;
    end Geo_New_Episode;
 
    procedure Geo_Record_All (C : in out Context; F : Plug.Frame; Cam : Natural) is
@@ -3153,13 +3154,17 @@ package body Act is
          --  一截实到不到要的两成(比例,无量纲)= 底下有东西顶住我 ⇒ 停,照实说(顶住的高度就是它的顶)
          Leg : constant Long_Float := 0.1 * G.Gap;
          Blocked_Frac : constant Long_Float := 0.2;
-         Total : constant Long_Float := Hover + Deeper;
+         --  GC15/16:直下到顶住(桌面)后合上,抬时它从指缝溜走 = 夹在它下半截;原地回高一点再合找不到它(它滚开了)。
+         --  ⇒ 记住"上次对它直下了多深、抬时溜走了",下一次再贴近它就少下一成半张口(比例,无量纲),夹在更高处
+         Cut : constant Long_Float := (if C.Geo_Slid_Slot = Slot and then C.Geo_Last_Down > 0.0 then 0.15 * G.Gap else 0.0);
+         Total : constant Long_Float := (if Cut > 0.0 then Long_Float'Min (Hover + Deeper, C.Geo_Last_Down - Cut) else Hover + Deeper);
          Down : Long_Float := 0.0;
          Got : Long_Float := 0.0;
          Blocked : Boolean := False;
          Mk : Boolean;
       begin
-         Geo_Say ("到它正上方了 ⇒ 张开手,从正上方直下(沿位姿读数的 z 轴,当它朝上),每截 " & Mm (Leg) & ",顶住就停");
+         Geo_Say ("到它正上方了 ⇒ 张开手,从正上方直下(沿位姿读数的 z 轴,当它朝上),每截 " & Mm (Leg) & ",顶住就停"
+                  & (if Cut > 0.0 then "(上次对它抬时溜走,这次比上次少下 " & Mm (Cut) & ",到 " & Mm (Total) & " 就停)" else ""));
          while Down < Total loop
             declare
                P0 : constant Plug.Arm_Pose := F.EE (Arm);
@@ -3177,6 +3182,7 @@ package body Act is
             end;
          end loop;
          C.Geo_Dist := Long_Float'Max (0.0, Hover - Down); C.Geo_Round := C.Round_N;
+         C.Geo_Last_Down := Down;
          if Blocked then
             Geo_Say ("直下 " & Mm (Down) & " 被顶住(命令下去读数不动)⇒ 它顶着我的手,离该合的高度还差 " & Mm (C.Geo_Dist));
             Ev := S ("amount: arrived (I came straight down " & Mm (Down) & " from above it, then something under my hand held me up, "
@@ -3458,6 +3464,7 @@ package body Act is
             R1 := Selfmap.Jaw_Of (F, Arm);
             if R1 < Slip_Floor then
                Geo_Say ("抬到 " & Mm (Up) & " 手指读数 " & Codec.Fmt (R0, 3) & " → " & Codec.Fmt (R1, 3) & " = 合到空手值了 ⇒ 指缝里没东西,停");
+               C.Geo_Slid_Slot := Slot;   --  记下:对这一槽夹在这个深度会溜,下次少下一截
                Sure := True;
                Note := S ("while lifting " & Mm (Up) & " my grip closed all the way to its empty reading (" & Codec.Fmt (R1, 3)
                           & ") ⇒ nothing between my fingers any more, not held");
@@ -4679,7 +4686,7 @@ package body Act is
                         --  ⇒ 抬时溜走就:张开、回到比第一次合手高一成半张口(比例,无量纲)的地方、再合、再抬;只试一次(次数)
                         Z_Grasp : constant Long_Float := F.EE (A) (2);
                         Regrasp_Up : constant Long_Float := 0.15;
-                        Regrasp_Max : constant Natural := 1;
+                        Regrasp_Max : constant Natural := 0;   --  GC16:原地回高再合找不到它(溜走后它滚开了)⇒ 关掉,改由下一次贴近少下一截(次数)
                         Regrasps : Natural := 0;
                         Slot_H : constant Integer := (if Say.Grip_On >= 1 and then Say.Grip_On <= Natural (C.Items.Length) then C.Items (Say.Grip_On - 1).Slot else -1);
                      begin
