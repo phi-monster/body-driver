@@ -3206,7 +3206,33 @@ package body Act is
             Ev : Unbounded_String;
             St, Bt : Natural;
          begin
-            Geo_Say ("它上次从指缝溜走,位置我算过 ⇒ 不测距,直接回到它正上方");
+            --  GC18:溜走时它被挤开几厘米,原位置的正上方合到空。它的【高度】没变(还在桌上),腕眼里它就在眼前:
+            --  拿此刻画面里它的重心那条视线,和"上次算出的那个高度"的水平面相交 ⇒ 新的左右前后,一眼就定,不用横挪
+            declare
+               Uu, Vv : Long_Float;
+               Sn : Boolean;
+               P0 : constant Plug.Arm_Pose := F.EE (Arm);
+            begin
+               Geo_Track (C, F, Cam, Slot, Uu, Vv, Sn);
+               if Sn then
+                  declare
+                     D : constant Geom.V3 := Geom.Ray (G, P0, Uu, Vv);
+                     Tz : constant Long_Float := (if abs D (2) > 1.0e-9 then (C.Geo_Last_Pw (2) - P0 (2)) / D (2) else -1.0);
+                  begin
+                     if Tz > 0.0 then
+                        declare
+                           Nw : constant Geom.V3 := [P0 (0) + Tz * D (0), P0 (1) + Tz * D (1), C.Geo_Last_Pw (2)];
+                        begin
+                           Geo_Say ("它上次从指缝溜走 ⇒ 按此刻画面里它的位置重定:挪了 (" & Mm (Nw (0) - C.Geo_Last_Pw (0)) & "," & Mm (Nw (1) - C.Geo_Last_Pw (1)) & "),高度照旧");
+                           C.Geo_Last_Pw := Nw;
+                        end;
+                     end if;
+                  end;
+               else
+                  Geo_Say ("它上次从指缝溜走,此刻画面里没认到它 ⇒ 按上次的位置回去");
+               end if;
+            end;
+            Geo_Say ("直接回到它正上方(不横挪测距)");
             Geo_Hover (L, C, F, Cam, Arm, C.Geo_Last_Pw, Ev, St, Bt, Hover);
             Steps_Taken := Steps_Taken + St;
             Pw_Last := C.Geo_Last_Pw; Have_Pw := True;
