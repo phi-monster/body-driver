@@ -3042,9 +3042,18 @@ package body Act is
          function Err_Now (Ok : out Boolean) return Long_Float is
             Uu, Vv : Long_Float;
             Sn : Boolean;
+            Pu, Pv : Long_Float := -1.0;
+            Front : Boolean;
          begin
             Ok := False;
-            Geo_Track (C, F, Cam, Slot, Uu, Vv, Sn);
+            --  转动通道一推整幅画面就转,槽按上一次位置对不上号;拿几何算过的三维点按此刻位姿投影去找(GC13:三推后就跟丢了)
+            if Have_Pw then
+               Geom.Project (G, F.EE (Arm), Pw_Last, Pu, Pv, Front);
+               if not Front then
+                  Pu := -1.0; Pv := -1.0;
+               end if;
+            end if;
+            Geo_Track (C, F, Cam, Slot, Uu, Vv, Sn, Pu, Pv);
             if not Sn or else Slot < 0 or else Natural (Slot) >= World.Count (C.Wld, Cam) then
                return 0.0;
             end if;
