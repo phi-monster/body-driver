@@ -3207,6 +3207,8 @@ package body Act is
             Zt : constant Long_Float := Cur (2) + Tip_W (2);
             Ax, Ay, Ub, Vb : Long_Float;
             Aok, Sn : Boolean;
+            Rg : Picture.Region;
+            Have_Rg : Boolean := False;
          begin
             Mv := [0.0, 0.0, 0.0]; Ok := False; Why := Null_Unbounded_String;
             Pu := 0.0; Pv := 0.0; Au_Out := 0.0; Av_Out := 0.0;
@@ -3215,6 +3217,9 @@ package body Act is
                Why := S ("量不出指尖相遇的像素"); return;
             end if;
             Geo_Track (C, F, Cam, Slot, Ub, Vb, Sn);
+            if Sn and then Slot >= 0 and then Natural (Slot) < World.Count (C.Wld, Cam) then
+               Rg := World.Get (C.Wld, Cam, Natural (Slot)).R; Have_Rg := True;
+            end if;
             if not Sn then
                --  GC25:横挪之后槽对不上(参考块被换成 14 px 的碎片,面积比过不了)⇒ 第二轮没跑,球留在指尖前方 6 cm 处,合到空。
                --  这么近它是画面里最大的一块(量的:面积),没别的候选 ⇒ 认不到就取最大块
@@ -3232,8 +3237,36 @@ package body Act is
                      Why := S ("此刻腕眼里认不到它,也没别的块"); return;
                   end if;
                   Ub := Regs (Best).Cu * Long_Float (F.Cams (Cam).W); Vb := Regs (Best).Cv * Long_Float (F.Cams (Cam).H);
+                  Rg := Regs (Best); Have_Rg := True;
                   Geo_Say ("对中:槽对不上,取此刻画面里最大的一块当它:(" & Codec.Fmt (Ub, 0) & "," & Codec.Fmt (Vb, 0) & "),"
                            & Codec.Img (Bn) & " px");
+               end;
+            end if;
+            --  GC31:它压着画面下沿时切出来的重心偏高(v 427 而它直径 210 px 出了画面),算出的差被放大 ⇒ 对中来回摆(−41/+24/−30/+16/−22)。
+            --  压边的那一侧看不见 ⇒ 用没被切的那条边加它另一个方向的一半尺寸估重心(它压着下沿就取上沿 + 宽的一半;左右同理)
+            if Have_Rg then
+               declare
+                  Cw : constant Natural := F.Cams (Cam).W;
+                  Ch : constant Natural := F.Cams (Cam).H;
+                  Wd : constant Long_Float := Long_Float (Rg.X1 - Rg.X0);
+                  Ht : constant Long_Float := Long_Float (Rg.Y1 - Rg.Y0);
+                  Vb0 : constant Long_Float := Vb;
+                  Ub0 : constant Long_Float := Ub;
+               begin
+                  if Rg.Y1 >= Ch - 2 and then Rg.Y0 > 1 then
+                     Vb := Long_Float'Max (Vb, Long_Float (Rg.Y0) + Wd / 2.0);
+                  elsif Rg.Y0 <= 1 and then Rg.Y1 < Ch - 2 then
+                     Vb := Long_Float'Min (Vb, Long_Float (Rg.Y1) - Wd / 2.0);
+                  end if;
+                  if Rg.X1 >= Cw - 2 and then Rg.X0 > 1 then
+                     Ub := Long_Float'Max (Ub, Long_Float (Rg.X0) + Ht / 2.0);
+                  elsif Rg.X0 <= 1 and then Rg.X1 < Cw - 2 then
+                     Ub := Long_Float'Min (Ub, Long_Float (Rg.X1) - Ht / 2.0);
+                  end if;
+                  if Vb /= Vb0 or else Ub /= Ub0 then
+                     Geo_Say ("对中:它压着画面边,重心按没切的那条边估:(" & Codec.Fmt (Ub0, 0) & "," & Codec.Fmt (Vb0, 0) & ") → ("
+                              & Codec.Fmt (Ub, 0) & "," & Codec.Fmt (Vb, 0) & ")");
+                  end if;
                end;
             end if;
             declare
