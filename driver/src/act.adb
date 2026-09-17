@@ -3164,6 +3164,76 @@ package body Act is
          Got : Long_Float := 0.0;
          Blocked : Boolean := False;
          Mk : Boolean;
+
+         --  GC22 彩色帧:合爪时两指尖在球顶上方相遇,球根本没进指缝 —— 手没对准球心,而这副楔形指尖的容差只有几毫米,
+         --  到位容差(张口一成 = 9 mm)不够。⇒ 合之前用自己的腕眼对中:指尖相遇的像素(合空时手指扫过区最靠上那条带的中点,量的)
+         --  和此刻它的重心像素,各自沿视线落到指尖此刻的高度上,两点之差就是要横挪的量;差得少于张口的百分之五就算对准
+         procedure Apex_Pixel (Ax, Ay : out Long_Float; Ok : out Boolean) is
+            Z : constant Zone.Hand_Zone := Zone_Of (C, Arm, Cam);
+            Cw : constant Natural := F.Cams (Cam).W;
+            Ch : constant Natural := F.Cams (Cam).H;
+            Band : constant Natural := Natural'Max (1, (Z.Y1 - Z.Y0) / 20);   --  区框高的二十分之一(比例,无量纲)
+            Sx : Long_Float := 0.0;
+            N : Long_Float := 0.0;
+         begin
+            Ok := False; Ax := 0.0; Ay := 0.0;
+            if not Z.Valid or else Natural (Z.Fingers.Length) /= Cw * Ch or else Z.Y1 <= Z.Y0 then
+               return;
+            end if;
+            for Y in Z.Y0 .. Natural'Min (Ch - 1, Z.Y0 + Band) loop
+               for X in Z.X0 .. Natural'Min (Cw - 1, Z.X1) loop
+                  if Z.Fingers.Element (Y * Cw + X) then
+                     Sx := Sx + Long_Float (X); N := N + 1.0;
+                  end if;
+               end loop;
+            end loop;
+            if N > 0.0 then
+               Ax := Sx / N; Ay := Long_Float (Z.Y0) + Long_Float (Band) / 2.0; Ok := True;
+            end if;
+         end Apex_Pixel;
+
+         --  算出要横挪的量(米,世界系 xy);算不出就 Ok=False 照实说
+         procedure Centering_Offset (Mv : out Geom.V3; Ok : out Boolean; Why : out Unbounded_String) is
+            Cur : constant Plug.Arm_Pose := F.EE (Arm);
+            Rc : constant Geom.M3 := Geom.Cam_R (G, Cur);
+            Tip_W : constant Geom.V3 := Geom.Ap (Rc, G.Tip);
+            Zt : constant Long_Float := Cur (2) + Tip_W (2);
+            Ax, Ay, Ub, Vb : Long_Float;
+            Aok, Sn : Boolean;
+         begin
+            Mv := [0.0, 0.0, 0.0]; Ok := False; Why := Null_Unbounded_String;
+            Apex_Pixel (Ax, Ay, Aok);
+            if not Aok then
+               Why := S ("量不出指尖相遇的像素"); return;
+            end if;
+            Geo_Track (C, F, Cam, Slot, Ub, Vb, Sn);
+            if not Sn then
+               Why := S ("此刻腕眼里认不到它"); return;
+            end if;
+            declare
+               Ra : constant Geom.V3 := Geom.Ray (G, Cur, Ax, Ay);
+               Rb : constant Geom.V3 := Geom.Ray (G, Cur, Ub, Vb);
+            begin
+               if Ra (2) >= -1.0e-6 or else Rb (2) >= -1.0e-6 then
+                  Why := S ("视线不朝下,落不到指尖的高度"); return;
+               end if;
+               declare
+                  Ta : constant Long_Float := (Zt - Cur (2)) / Ra (2);
+                  Tb : constant Long_Float := (Zt - Cur (2)) / Rb (2);
+                  Pa : constant Geom.V3 := [Cur (0) + Ta * Ra (0), Cur (1) + Ta * Ra (1), Zt];
+                  Pb : constant Geom.V3 := [Cur (0) + Tb * Rb (0), Cur (1) + Tb * Rb (1), Zt];
+                  --  自检:相遇像素沿视线落下来应该就是读数算的指尖点;差得比两成张口还多 = 这套换算不可信
+                  Self_Err : constant Long_Float := Sqrt ((Pa (0) - (Cur (0) + Tip_W (0))) ** 2 + (Pa (1) - (Cur (1) + Tip_W (1))) ** 2);
+               begin
+                  Geo_Say ("对中:指尖相遇像素 (" & Codec.Fmt (Ax, 0) & "," & Codec.Fmt (Ay, 0) & ") 它的重心 (" & Codec.Fmt (Ub, 0) & "," & Codec.Fmt (Vb, 0)
+                           & ") 落到指尖高度差 (" & Mm (Pb (0) - Pa (0)) & "," & Mm (Pb (1) - Pa (1)) & ");相遇点按视线 vs 按读数差 " & Mm (Self_Err));
+                  if Self_Err > 0.2 * G.Gap then   --  门槛 = 张口的两成(比例,无量纲)
+                     Why := S ("相遇点按视线算和按读数算对不上"); return;
+                  end if;
+                  Mv := [Pb (0) - Pa (0), Pb (1) - Pa (1), 0.0]; Ok := True;
+               end;
+            end;
+         end Centering_Offset;
       begin
          if Have_Pw then
             C.Geo_Last_Pw := Pw_Last; C.Geo_Have_Last_Pw := True;
@@ -3184,6 +3254,56 @@ package body Act is
                   exit;
                end if;
                Down := Down + Ask;
+            end;
+         end loop;
+         --  对中:最多两轮(次数);顶住了就先抬一成半张口让指尖脱开,横挪,再下回去(顶住就停)
+         for Round in 1 .. 2 loop
+            declare
+               Mv : Geom.V3;
+               Ok : Boolean;
+               Why : Unbounded_String;
+               Free : constant Long_Float := (if Blocked then 0.15 * G.Gap else 0.0);
+               Mag : Long_Float;
+            begin
+               Centering_Offset (Mv, Ok, Why);
+               if not Ok then
+                  Geo_Say ("对中:" & To_String (Why) & " ⇒ 不挪,照读数合");
+                  exit;
+               end if;
+               Mag := Sqrt (Mv (0) ** 2 + Mv (1) ** 2);
+               if Mag <= 0.05 * G.Gap then   --  对准 = 差不到张口的百分之五(比例,无量纲)
+                  Geo_Say ("对中:差 " & Mm (Mag) & ",在张口的百分之五内 ⇒ 对准了");
+                  exit;
+               end if;
+               if Mag > 0.5 * G.Gap then
+                  Geo_Say ("对中:差 " & Mm (Mag) & ",超过半个张口,不像是它 ⇒ 不挪");
+                  exit;
+               end if;
+               Geo_Say ("对中 第" & Codec.Img (Round) & " 轮:横挪 (" & Mm (Mv (0)) & "," & Mm (Mv (1)) & ")" & (if Free > 0.0 then ",先抬 " & Mm (Free) & " 让指尖脱开" else ""));
+               if Free > 0.0 then
+                  Geo_Move (L, C, F, Arm, [0.0, 0.0, Free], Mk, Jaw_Target => 1.0, Quick => True);
+                  Down := Down - Free;
+               end if;
+               Geo_Move (L, C, F, Arm, [Mv (0), Mv (1), 0.0], Mk, Jaw_Target => 1.0, Quick => True);
+               Steps_Taken := Steps_Taken + 1;
+               --  再下回去:到原来的总深度,顶住就停
+               Blocked := False;
+               while Down < Total loop
+                  declare
+                     P0 : constant Plug.Arm_Pose := F.EE (Arm);
+                     Ask : constant Long_Float := Long_Float'Min (Leg, Total - Down);
+                  begin
+                     Geo_Move (L, C, F, Arm, [0.0, 0.0, -Ask], Mk, Jaw_Target => 1.0, Quick => True);
+                     Steps_Taken := Steps_Taken + 1;
+                     Got := P0 (2) - F.EE (Arm) (2);
+                     if Got < Blocked_Frac * Ask then
+                        Blocked := True;
+                        Down := Down + Long_Float'Max (0.0, Got);
+                        exit;
+                     end if;
+                     Down := Down + Ask;
+                  end;
+               end loop;
             end;
          end loop;
          C.Geo_Dist := Long_Float'Max (0.0, Hover - Down); C.Geo_Round := C.Round_N;
