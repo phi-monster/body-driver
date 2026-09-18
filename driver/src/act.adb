@@ -999,35 +999,35 @@ package body Act is
             end;
          end loop;
       end loop;
-      --  深度读数地板:什么都不做,连着两拍在各点读深度
-      if F.Cams (Cam).Has_Depth then
-         declare
-            Z1 : array (0 .. Natural (Pts.Length) - 1) of Long_Float := [others => -1.0];
-            Ok2 : Boolean;
-         begin
+      --  两块噪声地板,静止一拍各量各的:
+      --    「看着多大 / 朝向」不吃深度 ⇒ **无条件量**(GC39:它俩原来嵌在 Has_Depth 块里,关深度后留在初值 0,
+      --     于是任何一丁点抖动都 > 0 被写进表,而这两行在探针那点幅度下连符号都可能是反的)
+      --    「深度」只有有深度才量
+      declare
+         Z1 : array (0 .. Natural (Pts.Length) - 1) of Long_Float := [others => -1.0];
+         Was0 : constant Point_Vectors.Vector := Pts;
+         Before0 : constant Buf := F.Cams (Cam).Gray;
+         Ok2 : Boolean;
+      begin
+         if F.Cams (Cam).Has_Depth then
             for I in 0 .. Natural (Pts.Length) - 1 loop
                --  读深窗口 = 要读的那个东西自己的大小
                Z1 (I) := Picture.Near_Depth (F.Cams (Cam).Depth, Cw, Ch, Pts (I).Cu, Pts (I).Cv, Depth_Win (Pts (I), Z, Cw, Ch));
             end loop;
+         end if;
+         Selfmap.Idle (L, F, 1, Ok2);
+         for I in 0 .. Natural (Pts.Length) - 1 loop
             declare
-               Was0 : constant Point_Vectors.Vector := Pts;
-               Before0 : constant Buf := F.Cams (Cam).Gray;
+               P2 : Point := Pts (I);
             begin
-               Selfmap.Idle (L, F, 1, Ok2);
-               --  静止一拍,量"看着多大/朝向"自己抖多少
-               for I in 0 .. Natural (Pts.Length) - 1 loop
-                  declare
-                     P2 : Point := Pts (I);
-                  begin
-                     Retrack (C, F, Cam, Before0, P2, Was0 (I).Cu, Was0 (I).Cv, False);
-                     Floor_S (I) := Long_Float'Max (4.0 * abs (P2.Size - Was0 (I).Size), Size_Floor (Cw));
-                     Floor_A (I) := Long_Float'Max (4.0 * abs (Wrap (P2.Ang - Was0 (I).Ang)), Ang_Floor (Was0 (I), Cw, Ch));
-                  end;
-               end loop;
+               Retrack (C, F, Cam, Before0, P2, Was0 (I).Cu, Was0 (I).Cv, False);
+               Floor_S (I) := Long_Float'Max (4.0 * abs (P2.Size - Was0 (I).Size), Size_Floor (Cw));
+               Floor_A (I) := Long_Float'Max (4.0 * abs (Wrap (P2.Ang - Was0 (I).Ang)), Ang_Floor (Was0 (I), Cw, Ch));
             end;
+         end loop;
+         if F.Cams (Cam).Has_Depth then
             for I in 0 .. Natural (Pts.Length) - 1 loop
                declare
-                  --  读深窗口 = 要读的那个东西自己的大小
                   Z2 : constant Long_Float := Picture.Near_Depth (F.Cams (Cam).Depth, Cw, Ch, Pts (I).Cu, Pts (I).Cv, Depth_Win (Pts (I), Z, Cw, Ch));
                   Zr : constant Long_Float := (if Pts (I).Z > 0.0 then Pts (I).Z else 1.0);
                begin
@@ -1039,8 +1039,8 @@ package body Act is
                   end if;
                end;
             end loop;
-         end;
-      end if;
+         end if;
+      end;
       Ok := True;
       Put_Line ("[身]   这些点还没有响应表 ⇒ 六个通道各推一下量列(幅度从开机看得见的那一档起翻倍,到点真的动过地板为止)");
       --  六个通道一起解:转动不禁(owner 2026-09-07:禁了就永远和桌面平行,格斗全成直线)。让转动有对错的是"两根手指各自到位":
