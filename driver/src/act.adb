@@ -406,10 +406,18 @@ package body Act is
    end Cell_Of;
 
    --  ── 编号表:先我身上的,再世界里的 ──
-   procedure Build_Listing (C : in out Context; F : Plug.Frame; Cam : Natural; RGB : in out Buf; Text : out Unbounded_String) is
+   --  Text     = 带编号的那份(给【挑框】那一问用:眼睛要答一个号)
+   --  Text_Words = 不带编号的那份(给【写程序】那一问用)
+   --  QW7:两份原来是同一份,于是写程序的那一问看到的每件东西都叫 "item 15",
+   --  而语言里 w ::= [a-z]+ —— 一个数字都打不出来。模型一路在写 item item /
+   --  itemitem / item ionic scissors:它一直想按那个号,而那个键根本不在键盘上。
+   --  编号是这具身体这一帧的内部记法,本来就不该进语言(驱动原有注释:"编号从头到尾没进语言")。
+   procedure Build_Listing (C : in out Context; F : Plug.Frame; Cam : Natural; RGB : in out Buf;
+                            Text, Text_Words : out Unbounded_String) is
       Cw : constant Natural := F.Cams (Cam).W;
       Ch : constant Natural := F.Cams (Cam).H;
       T : Unbounded_String;
+      T2 : Unbounded_String;
       Named_U, Named_V : Long_Float := -1.0;
       Have_Named : Boolean := False;
       function Rel (U, V : Long_Float) return String is
@@ -449,6 +457,7 @@ package body Act is
             Draw.Numbered_Box (RGB, Cw, Ch, It.X0, It.Y0, It.X1, It.Y1, Natural (C.Items.Length), Col, Thick);
          end if;
          Append (T, "  item " & Codec.Img (Natural (C.Items.Length)) & ": " & Line & ASCII.LF);
+         Append (T2, "  - " & Line & ASCII.LF);
       end Push;
    begin
       C.Items.Clear;
@@ -464,6 +473,7 @@ package body Act is
          end;
       end if;
       Append (T, "PIECES OF YOURSELF (measured just now: you moved one channel at a time and watched which part of the picture followed; you closed each hand on nothing and watched which pixels swept). Each is boxed and NUMBERED on the picture in orange:" & ASCII.LF);
+      Append (T2, "PIECES OF YOURSELF (measured just now: you moved one channel at a time and watched which part of the picture followed; you closed each hand on nothing and watched which pixels swept). Each is boxed and NUMBERED on the picture in orange:" & ASCII.LF);
       for A in 0 .. C.Map.Arms - 1 loop
          declare
             Z : constant Zone.Hand_Zone := Zone_Of (C, A, Cam);
@@ -534,6 +544,8 @@ package body Act is
       --  QW6:这行原来无条件说"从深度图里切出来的",而没深度时根本不是 —— 是从画面本身切的。
       Append (T, "THINGS OUT IN THE WORLD (cut out of the " & (if F.Cams (Cam).Has_Depth then "depth picture" else "picture")
                  & "; you do not know what they are called). Each is boxed and NUMBERED on the picture in green:" & ASCII.LF);
+      Append (T2, "THINGS OUT IN THE WORLD (cut out of the " & (if F.Cams (Cam).Has_Depth then "depth picture" else "picture")
+                 & "; you do not know what they are called). Each is boxed and NUMBERED on the picture in green:" & ASCII.LF);
       for Si in 0 .. World.Count (C.Wld, Cam) - 1 loop
          declare
             Sl : constant World.Slot := World.Get (C.Wld, Cam, Si);
@@ -598,24 +610,28 @@ package body Act is
       declare
          K : Natural := 2;
       begin
-         Append (T, "CAMERAS (say look = k to see through that camera next turn): 1 = this picture (camera index " & Codec.Img (Cam) & ")");
+         Append (T, "MY OTHER EYES (I choose which one I judge with; you can ask for mine or my still one at the end of a do-line): 1 = this picture (camera index " & Codec.Img (Cam) & ")");
+         Append (T2, "MY OTHER EYES (I choose which one I judge with; you can ask for mine or my still one at the end of a do-line): 1 = this picture (camera index " & Codec.Img (Cam) & ")");
          for Ci in 0 .. C.Map.N_Cams - 1 loop
             if Ci /= Cam then
                declare
                   A : constant Integer := Cam_Arm (C, Ci);
                begin
                   Append (T, "; " & Codec.Img (K) & " = camera index " & Codec.Img (Ci) & (if A >= 0 then " (rides on arm " & Codec.Img (Natural (A) + 1) & ": when that arm moves, that whole picture changes)" else ""));
+                  Append (T2, "; " & Codec.Img (K) & " = camera index " & Codec.Img (Ci) & (if A >= 0 then " (rides on arm " & Codec.Img (Natural (A) + 1) & ": when that arm moves, that whole picture changes)" else ""));
                   K := K + 1;
                end;
             end if;
          end loop;
          Append (T, ASCII.LF);
+         Append (T2, ASCII.LF);
       end;
       declare
          A : constant Integer := Cam_Arm (C, Cam);
       begin
          if A >= 0 then
             Append (T, "- this picture rides on arm " & Codec.Img (Natural (A) + 1) & ": its fingers and grip stay put in this picture, the world moves when that arm moves" & ASCII.LF);
+            Append (T2, "- this picture rides on arm " & Codec.Img (Natural (A) + 1) & ": its fingers and grip stay put in this picture, the world moves when that arm moves" & ASCII.LF);
          end if;
       end;
       if Have_Named then
@@ -626,7 +642,8 @@ package body Act is
          end loop;
       end if;
       Append (T, "- there is " & (if C.Wld.Holding then "ALREADY something" else "NOTHING") & " between your fingers right now" & ASCII.LF);
-      Text := T;
+      Append (T2, "- there is " & (if C.Wld.Holding then "ALREADY something" else "NOTHING") & " between your fingers right now" & ASCII.LF);
+      Text := T; Text_Words := T2;
    end Build_Listing;
 
    --  ── 被跟踪的点 ──
@@ -4165,6 +4182,7 @@ package body Act is
       Ch : constant Natural := F.Cams (Cam).H;
       RGB : Buf := F.Cams (Cam).RGB;
       Listing : Unbounded_String;
+      Listing_Words : Unbounded_String;   --  同一份清单,但不带 item 编号(编号打不进语言)
       Say : Brain.Say;
       Err : Unbounded_String;
       Report : Unbounded_String;
@@ -4185,7 +4203,7 @@ package body Act is
             declare
                Text, E2 : Unbounded_String;
             begin
-               if not Brain.Ask_Prog (To_String (C.Eye_Host), C.Eye_Port, To_String (C.Task_Text), To_String (Listing), Recent,
+               if not Brain.Ask_Prog (To_String (C.Eye_Host), C.Eye_Port, To_String (C.Task_Text), To_String (Listing_Words), Recent,
                                       Sinew.Grammar, To_String (C.Refused), Plan.Usable_Rels (Cam_Arm (C, Cam) >= 0), Roles_Usable,
                                       C.Cols, C.Rows, Big, Cw, Bh, Text, E2)
                then
@@ -4503,7 +4521,7 @@ package body Act is
       --  切块 → 世界槽
       World.Observe (C.Wld, Cam, Cut_Things (C, F, Cam), Cw, Ch);
       Draw.Grid (RGB, Cw, Ch, C.Cols, C.Rows, C.Cells_U, C.Cells_V);
-      Build_Listing (C, F, Cam, RGB, Listing);
+      Build_Listing (C, F, Cam, RGB, Listing, Listing_Words);
       Put_Line ("[身] ── 第" & Natural'Image (C.Round_N) & " 轮(第" & Natural'Image (Cam) & " 台相机)── 这一集已用 " & Codec.Img (Plug.Steps (L)) & " 拍(开机量身体 " & Codec.Img (C.Boot_Steps) & " 拍)");
       Put (To_String (Listing));
       if C.Dump_Dir /= "" then
