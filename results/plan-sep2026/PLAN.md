@@ -249,6 +249,45 @@ end
 | QW5 | 删掉这两个死键 | (作废) | 起炮漏了 `BL_NO_DEPTH=1` ⇒ 带深度,不合官方观测 |
 | QW5B | 同上,无深度重跑 | 2 / 4 | `until lost 不用等` ×2;**首次程序过三关 + 身体执行** |
 | QW6 | 名字不许吞语言自己的词 | **6 / 6 = 100%** | 说不出口 0 · 退回 0 |
+| QW7 | (同上,清单封顶后) | 16 / 16 | 16/16 全绑到爪心,一次没提世界里的东西 |
+| QW8 | 写程序那一问不看编号 | 4 / 30 | 第一次持续指世界(`scissors ⇒ 第23块`);`until lost` ×13 |
+| QW9 | `touched` 补"够得着"约束 | 4 / 7 | **步数行 0** —— 仍全写 `close grip`,必要但不充分 |
+| QW10 | **可读语法改成和 EBNF 同源** | 4 / 6 | **`close grip` 归零 · 步数行 16 · 最远第 8 步** |
+
+### 🟢 QW10:三炮同一死法的根因找到了(2026-09-18)
+
+QW7/QW8/QW9 连着三炮全死在 `do grasper close grip … until touched`(合自己的爪心)。
+排查掉两条(死键已清 / `touched` 假阳性已修,**都没改变行为**)之后,查到 `act.adb:4235`:
+
+🔴 **给脑【看】的语法 ≠ 掩码【允许】的语法。** 印给它的是手写宽版
+(里面有 `me` / `press` / `until lost` / `anyway` / `must` / `into` / `facing`),
+而解码器用的是生成的窄版,上面这些**一个都不允许**。
+它照着读到的那份造句,写到一半被掩码掐断,只能滑进剩下还能走的那条路。
+
+⇒ 改成 `Grammar` 和 `EBNF` 吃同一批表(`Usable_Rels` / `Roles_Usable` / `Waitable_Outcomes`),
+**看到的和允许的不可能再分岔**。一炮见效:
+
+| | QW9 | QW10 |
+|---|---|---|
+| `close grip` | 每段都有 | **0** |
+| 身体推步行 | **0** | **16**(最远第 8 步) |
+| 结局 | 清一色 `slipped`(自己开合手) | `arrived` 4 · `stalled` 3 · `touched` 2 |
+
+它第一次自己写出**靠近 + 合手**的形状,并绑到世界里的块:
+```
+do grasper touching scissors until touched with my still eye
+if touched:
+say I have the scissors
+done
+```
+```
+do grasper touching thing in cell until touched
+do grasper close thing in cell until settled
+```
+
+🔴 **这是"键盘=机器"这条原则今天第六次奏效,而且是最贵的一次** ——
+前五次是【键盘上有按不动的键】,这一次是【告诉它有哪些键的那张纸和键盘本身不一样】。
+**纸也算键盘的一部分。**
 
 ### 🟢 拼写这一关打穿了(QW6,2026-09-18)
 
