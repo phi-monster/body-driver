@@ -200,37 +200,52 @@ package body Sinew is
       return To_String (S);
    end Unparse;
 
-   function Grammar return String is
+   function Only_Targeted (S : String) return String;   --  体在下面
+
+   --  🔴 QW7/QW8/QW9 连着三炮同一死法(全写 `do grasper close grip …`),根因在这里:
+   --  给脑【看】的是这一份手写的宽语法(里面有 me / press / until lost / anyway / must / into / facing),
+   --  而【解码器】用的是生成的窄语法,上面那些一个都不允许。脑照着读到的造句,
+   --  写到一半被掩码掐断,只能滑进剩下能走的那条路。
+   --  ⇒ 这一份现在和 EBNF 吃同一批表,看到的和允许的不可能再分岔。
+   function Grammar (Rels_Usable, Roles_Usable, Outs_Usable, Outs_After_Close : String) return String is
+      function Bar (S : String) return String is
+         R : Unbounded_String;
+         I : Natural := S'First;
+         J : Natural;
+      begin
+         while I <= S'Last loop
+            J := I;
+            while J <= S'Last and then S (J) /= ' ' loop
+               J := J + 1;
+            end loop;
+            if J > I then
+               Append (R, (if Length (R) > 0 then " | " else "") & S (I .. J - 1));
+            end if;
+            I := J + 1;
+         end loop;
+         return To_String (R);
+      end Bar;
    begin
       return
-        "<program>   ::= <line>+" & ASCII.LF &
+        "<program>   ::= <line> (up to four lines)" & ASCII.LF &
         "<line>      ::= <interval> | <control> | <decl> | <word>" & ASCII.LF &
-        "<interval>  ::= do <constraint> (and <constraint>)* until <outcome> [or <n> steps] [anyway] [<eye>]" & ASCII.LF &
+        "<interval>  ::= do <constraint> (and <constraint>)? until <outcome> [or <n> steps] [<eye>]" & ASCII.LF &
         "<eye>       ::= with my still eye | with my moving eye" & ASCII.LF &
-        "<constraint>::= <who> <relation> <what> [<step>] [must]" & ASCII.LF &
-        "              | <who> press <what> <effort> [must]      (that axis says effort, NOT where to go)" & ASCII.LF &
+        "<constraint>::= <who> <relation> <what> [<step>]" & ASCII.LF &
         "              | <who> close <what> | <who> open | <who> still" & ASCII.LF &
-        "<who>       ::= me | grasper | pusher                   (roles; I bind them by measuring myself)" & ASCII.LF &
+        "<who>       ::= " & Bar (Roles_Usable) & "   (roles; I bind them by measuring myself)" & ASCII.LF &
         "<what>      ::= <a name in your words> | <a name you told me to remember> | <who>" & ASCII.LF &
-        "<relation>  ::= " & All_Rels & ASCII.LF &
+        "              (a name is one to three plain words; it may NOT be any of the words in this grammar)" & ASCII.LF &
+        "<relation>  ::= " & Bar (Only_Targeted (Rels_Usable)) & ASCII.LF &
         "<step>      ::= small | medium | large" & ASCII.LF &
-        "<effort>    ::= light | firm | hard" & ASCII.LF &
-        "<outcome>   ::= " & All_Outcomes & ASCII.LF &
-        "<control>   ::= repeat <n> times: <line>+ end" & ASCII.LF &
-        "              | repeat until <outcome>: <line>+ end" & ASCII.LF &
-        "              | if <outcome>: <line>+ [else: <line>+] end" & ASCII.LF &
-        "              | try: <line>+ or: <line>+ end" & ASCII.LF &
-        "<decl>      ::= to <name>: <line>+ end | run <name>" & ASCII.LF &
+        "<outcome>   ::= " & Bar (Outs_Usable) & ASCII.LF &
+        "              (after a close you may also say: " & Bar (Outs_After_Close) & ")" & ASCII.LF &
+        "<control>   ::= repeat <n> times: <line> [<line>] end" & ASCII.LF &
+        "              | if <outcome>: <line> [<line>] [else: <line> [<line>]] end" & ASCII.LF &
+        "              | try: <line> [<line>] or: <line> [<line>] end" & ASCII.LF &
+        "<decl>      ::= to <name>: <line> [<line>] end | run <name>" & ASCII.LF &
         "              | remember where <who> is as <name>" & ASCII.LF &
-        "<word>      ::= say <one sentence in your own words> | done" & ASCII.LF &
-        "anyway = I accept it, but in this version it changes nothing: I move the same way with or without it." & ASCII.LF &
-        "with my still eye = judge this stretch with the eye that changes LEAST when the part I am moving moves"
-        & " - that eye does not ride on me, so it can see me travel and can judge nearer/farther/onto/off."
-        & " with my moving eye = the one that changes MOST - it rides on the part I am moving, so it sees the target"
-        & " close up (good for the last bit and for closing) but cannot see itself travel, so nearer/farther/onto/off"
-        & " cannot be judged there. Say neither and I stay in the eye I am in now. If you name a different eye I first"
-        & " move to it without moving anything else and ask you again, because the numbers belong to the eye I am in."
-        & " must = I accept it, but in this version every line of a do is solved together anyway.";
+        "<word>      ::= say <one sentence in your own words> | done";
    end Grammar;
 
    --  "a b c" ⇒ ""a"" | ""b"" | ""c""

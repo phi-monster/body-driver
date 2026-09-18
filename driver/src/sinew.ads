@@ -109,7 +109,8 @@ package Sinew is
    function Parse (Src : String) return Program;
 
    --  给脑的文法原文(BNF)。文档和运行时是同一份,不会漂。
-   function Grammar return String;
+   --  给脑【看】的那一份语法。参数和 EBNF 完全一样 ⇒ 看到的和被掩码允许的不可能分岔。
+   function Grammar (Rels_Usable, Roles_Usable, Outs_Usable, Outs_After_Close : String) return String;
    --  同一份语法的机器可读版(GBNF):交给推理引擎做受限解码,不合语法的词根本采样不到。
    --  内容与 Grammar 逐字对应 —— 词表都从同两个枚举来,改一个必须改另一个(自检看着)。
    function EBNF (Rels_Usable, Roles_Usable, Outs_Usable, Outs_After_Close : String) return String;

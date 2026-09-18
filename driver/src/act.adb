@@ -4232,7 +4232,9 @@ package body Act is
                Text, E2 : Unbounded_String;
             begin
                if not Brain.Ask_Prog (To_String (C.Eye_Host), C.Eye_Port, To_String (C.Task_Text), To_String (Listing_Words), Recent,
-                                      Sinew.Grammar, To_String (C.Refused), Plan.Usable_Rels (Cam_Arm (C, Cam) >= 0), Roles_Usable,
+                                      Sinew.Grammar (Plan.Usable_Rels (Cam_Arm (C, Cam) >= 0), Roles_Usable,
+                                                     Plan.Waitable_Outcomes (False), Plan.Waitable_Outcomes (True)),
+                                      To_String (C.Refused), Plan.Usable_Rels (Cam_Arm (C, Cam) >= 0), Roles_Usable,
                               Plan.Waitable_Outcomes (False), Plan.Waitable_Outcomes (True),
                                       C.Cols, C.Rows, Big, Cw, Bh, Text, E2)
                then
