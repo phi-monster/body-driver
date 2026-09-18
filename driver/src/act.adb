@@ -387,6 +387,131 @@ package body Act is
       return Best / Here;
    end Cam_Slack;
 
+   --  ── 接触集(最小可落地版) ──────────────────────────────────────────────
+   --  来自 09-06 删掉的那三个 crate,核心判据【一个都不需要 μ】(原文:
+   --  "只给方向 —— 一个轴 + 一个半张角。没有牛顿" / "不需要 μ:μ 只决定'多大算过线',
+   --   而排序只需要'谁更小'")。这里把它搬成画面里的版本,无深度也能算:
+   --    硬过滤 within_jaw = 这一处要夹的【弦长】≤ 量出来的爪口(瓣心距)
+   --    ① face_tilt  = 弦长随位置变化的【斜率】。斜率≈0 ⇒ 两个面平行相对 ⇒ 不会横着滑走。
+   --       (原文:"沿指头宽方向,近面/远面的深度随位置变化的斜率取反正切" —— 换成轮廓即此)
+   --    ② com_offset = 这个下手点离这块东西【重心】多远。管"提起来转出去"。
+   --       (原文举的例子正是我们的场景:"抓在剪刀手柄圆环上,而重量全在刀刃那头")
+   --  两项都无量纲/无常数地合并:各自排名相加取最小(只用序,不引入权重)。
+   Last_Bright : Bools;
+   Last_Bright_Cam : Integer := -1;
+
+   --  在这一块东西上挑一个【夹得住】的下手点。挑不出来就 Ok = False(不瞎给)。
+   --  只用量出来的量:两瓣心距(爪口)、瓣到瓣方向(合爪方向)、这块东西自己的轮廓。
+   procedure Grip_Spot (Z : Zone.Hand_Zone; R : Picture.Region; Cw, Ch : Natural;
+                        Su, Sv : out Long_Float; Tilt, Com : out Long_Float; Ok : out Boolean) is
+      --  合爪方向和爪口都按【两瓣心】来,这是身体自己量出来的,不是推的
+      Dx : constant Long_Float := (Z.B.Cu - Z.A.Cu) * Long_Float (Cw);
+      Dy : constant Long_Float := (Z.B.Cv - Z.A.Cv) * Long_Float (Ch);
+      Jaw : constant Long_Float := Sqrt (Dx * Dx + Dy * Dy);   --  像素
+      Cx : constant Long_Float := R.Cu * Long_Float (Cw);
+      Cy : constant Long_Float := R.Cv * Long_Float (Ch);
+      Half : constant Natural := Natural'Max (R.X1 - R.X0, R.Y1 - R.Y0);
+      type Cand is record
+         T : Integer := 0;
+         Chord : Long_Float := 0.0;
+         Qx, Qy : Long_Float := 0.0;
+      end record;
+      package Cand_Vectors is new Ada.Containers.Vectors (Natural, Cand);
+      Cs : Cand_Vectors.Vector;
+      Ux, Uy, Px, Py : Long_Float;
+
+      --  过 (qx,qy) 沿合爪方向,这块东西的轮廓有多厚(像素);量不到返回 -1
+      function Chord_At (Qx, Qy : Long_Float) return Long_Float is
+         Lo : Long_Float := 0.0;
+         Hi : Long_Float := 0.0;
+         Seen : Boolean := False;
+         K : Integer := -Half;
+      begin
+         while K <= Half loop
+            declare
+               X : constant Integer := Integer (Qx + Long_Float (K) * Ux);
+               Y : constant Integer := Integer (Qy + Long_Float (K) * Uy);
+            begin
+               if X >= R.X0 and then X <= R.X1 and then Y >= R.Y0 and then Y <= R.Y1
+                 and then X >= 0 and then X < Cw and then Y >= 0 and then Y < Ch
+                 and then Natural (Y * Cw + X) < Natural (Last_Bright.Length)
+                 and then Last_Bright (Y * Cw + X)
+               then
+                  if not Seen then
+                     Lo := Long_Float (K); Seen := True;
+                  end if;
+                  Hi := Long_Float (K);
+               end if;
+            end;
+            K := K + 1;
+         end loop;
+         return (if Seen then Hi - Lo + 1.0 else -1.0);
+      end Chord_At;
+   begin
+      Su := 0.0; Sv := 0.0; Tilt := 0.0; Com := 0.0; Ok := False;
+      if not Z.Valid or else not Z.A.Valid or else not Z.B.Valid or else Jaw <= 0.0
+        or else Natural (Last_Bright.Length) < Cw * Ch or else Half = 0
+      then
+         return;
+      end if;
+      Ux := Dx / Jaw; Uy := Dy / Jaw;            --  合爪方向(单位)
+      Px := -Uy; Py := Ux;                        --  垂直方向:沿它扫位置
+      for T in -Half .. Half loop
+         declare
+            Qx : constant Long_Float := Cx + Long_Float (T) * Px;
+            Qy : constant Long_Float := Cy + Long_Float (T) * Py;
+            Ch_Len : constant Long_Float := Chord_At (Qx, Qy);
+         begin
+            --  硬过滤:夹得下才算候选(爪口是量出来的)
+            if Ch_Len > 0.0 and then Ch_Len <= Jaw then
+               Cs.Append (Cand'(T => T, Chord => Ch_Len, Qx => Qx, Qy => Qy));
+            end if;
+         end;
+      end loop;
+      if Cs.Is_Empty then
+         return;                                  --  整块东西没有一处夹得下 ⇒ 老实说挑不出来
+      end if;
+      --  两把尺子各自排名再相加:只用序,不引入权重,也不引入常数
+      declare
+         N : constant Natural := Natural (Cs.Length);
+         Best : Natural := 0;
+         Best_Score : Integer := Integer'Last;
+      begin
+         for I in 0 .. N - 1 loop
+            declare
+               Lo : constant Long_Float := (if I > 0 then Cs (I - 1).Chord else Cs (I).Chord);
+               Hi : constant Long_Float := (if I + 1 < N then Cs (I + 1).Chord else Cs (I).Chord);
+               Ti : constant Long_Float := abs (Hi - Lo) / 2.0;          --  ① 弦长斜率
+               Co : constant Long_Float := abs Long_Float (Cs (I).T);   --  ② 离重心多远
+               Rank_T : Integer := 0;
+               Rank_C : Integer := 0;
+            begin
+               for J in 0 .. N - 1 loop
+                  declare
+                     Lo2 : constant Long_Float := (if J > 0 then Cs (J - 1).Chord else Cs (J).Chord);
+                     Hi2 : constant Long_Float := (if J + 1 < N then Cs (J + 1).Chord else Cs (J).Chord);
+                  begin
+                     if abs (Hi2 - Lo2) / 2.0 < Ti then
+                        Rank_T := Rank_T + 1;
+                     end if;
+                     if abs Long_Float (Cs (J).T) < Co then
+                        Rank_C := Rank_C + 1;
+                     end if;
+                  end;
+               end loop;
+               if Rank_T + Rank_C < Best_Score then
+                  Best_Score := Rank_T + Rank_C; Best := I;
+                  Tilt := Ti; Com := Co;
+               end if;
+            end;
+         end loop;
+         Su := Cs (Best).Qx / Long_Float (Cw);
+         Sv := Cs (Best).Qy / Long_Float (Ch);
+         Ok := True;
+      end;
+   end Grip_Spot;
+
+
    function Cut_Bright (C : Context; F : Plug.Frame; Cam : Natural) return Picture.Regions is
       Cw : constant Natural := F.Cams (Cam).W;
       Ch : constant Natural := F.Cams (Cam).H;
@@ -465,6 +590,8 @@ package body Act is
             Mask.Replace_Element (J, True);
          end if;
       end loop;
+      Last_Bright := Mask;   --  留给接触集扫轮廓用(同一张掩膜,不另切一遍)
+      Last_Bright_Cam := Integer (Cam);
       for R of Picture.Components (Mask, Cw, Ch, Picture.Min_Pixels (Cw, Ch)) loop
          declare
             Q : Picture.Region := R;
@@ -5462,6 +5589,32 @@ package body Act is
                                  else
                                     P.Desc := S ("item " & Codec.Img (G.Item) & " " & Rl & " item " & Codec.Img (G.Of_Item));
                                     P.Tu := O.Cu; P.Tv := O.Cv; P.Tz := P.Z; P.Wz := 0.0; P.Tuv_Z := O.Depth;
+                                    --  🔴 接触集:要把它送进两指之间时,别瞄【整块的形心】,瞄这块东西上
+                                    --  真正夹得住的那一处。形心对圆球没差,对剪刀/碗就是成败之分
+                                    --  (原文记过:"抓在剪刀手柄圆环上,而重量全在刀刃那头")。
+                                    --  挑不出来就不动它,照原样瞄形心,并且如实说一句。
+                                    if P.To_Grip and then Last_Bright_Cam = Integer (Cam) then
+                                       declare
+                                          Z2 : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, Cam, 0);
+                                          Rg : Picture.Region;
+                                          Su, Sv, Ti, Co : Long_Float;
+                                          Sok : Boolean;
+                                       begin
+                                          Rg.X0 := O.X0; Rg.Y0 := O.Y0; Rg.X1 := O.X1; Rg.Y1 := O.Y1;
+                                          Rg.Cu := O.Cu; Rg.Cv := O.Cv; Rg.Count := O.Count;
+                                          Grip_Spot (Z2, Rg, Cw, Ch, Su, Sv, Ti, Co, Sok);
+                                          if Sok then
+                                             P.Tu := Su; P.Tv := Sv;
+                                             Report := Report & "contact set: on item " & Codec.Img (G.Of_Item)
+                                                       & " I aim where it is thin enough to fit between my fingers"
+                                                       & " (faces off by " & Codec.Fmt (Ti, 2)
+                                                       & " px per px, " & Codec.Fmt (Co, 0) & " px from its middle). ";
+                                          else
+                                             Report := Report & "contact set: nowhere on item " & Codec.Img (G.Of_Item)
+                                                       & " is thin enough to fit between my fingers; I aimed at its middle. ";
+                                          end if;
+                                       end;
+                                    end if;
                                     if Rl = "at" then
                                        if P.To_Grip then
                                           --  它要来的地方 = 我两指之间:区心、区深、【到了跟前该有多大】
