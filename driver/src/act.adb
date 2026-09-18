@@ -1029,12 +1029,50 @@ package body Act is
       Append (T, (if Things_Only
                   then "THINGS IN MY EYE " & Codec.Img (Cam + 1) & " (same numbering - a number means the same thing everywhere I say it):"
                   else "THINGS OUT IN THE WORLD (cut out of the depth picture; you do not know what they are called). Each is boxed and NUMBERED on the picture in green:") & ASCII.LF);
+      --  装不下时只列【最大的那几件】:小到几个像素的块脑也没法拿它做什么,
+      --  而把脑撑爆等于它什么都看不见。漏掉几件如实说出来,不装作没有。
+      declare
+         Kept_Min : Natural := 0;
+         Dropped : Natural := 0;
+      begin
+         if C.List_Cap > 0 then
+            declare
+               Sizes : array (0 .. Natural'Max (1, World.Count (C.Wld, Cam)) - 1) of Natural := [others => 0];
+               N : constant Natural := World.Count (C.Wld, Cam);
+            begin
+               for Si in 0 .. N - 1 loop
+                  Sizes (Si) := World.Get (C.Wld, Cam, Si).R.Count;
+               end loop;
+               --  第 List_Cap 大的那个尺寸就是门槛(选择排序够用,件数是几百级)
+               for I in 0 .. Natural'Min (C.List_Cap, N) - 1 loop
+                  declare
+                     Bi : Natural := I;
+                  begin
+                     for J in I + 1 .. N - 1 loop
+                        if Sizes (J) > Sizes (Bi) then
+                           Bi := J;
+                        end if;
+                     end loop;
+                     declare
+                        Tmp : constant Natural := Sizes (I);
+                     begin
+                        Sizes (I) := Sizes (Bi); Sizes (Bi) := Tmp;
+                     end;
+                     Kept_Min := Sizes (I);
+                  end;
+               end loop;
+               Dropped := (if N > C.List_Cap then N - C.List_Cap else 0);
+            end;
+         end if;
       for Si in 0 .. World.Count (C.Wld, Cam) - 1 loop
          declare
             Sl : constant World.Slot := World.Get (C.Wld, Cam, Si);
             It : Item;
          begin
             It.Slot := Si;
+            if C.List_Cap > 0 and then Sl.R.Count < Kept_Min then
+               goto Next_Slot;   --  这一件太小,这一轮装不下,下面那句会如实说漏了几件
+            end if;
             if C.Wld.Holding and then C.Wld.Held_Slot = Si and then C.Wld.Held_Cam = Integer (Cam) then
                declare
                   A : constant Natural := Natural (C.Wld.Held_Arm);
@@ -1073,8 +1111,15 @@ package body Act is
             else
                null;   --  空槽:里面此刻什么都没有,列出来只是占篇幅
             end if;
+            <<Next_Slot>>
+            null;
          end;
       end loop;
+         if Dropped > 0 then
+            Append (T, "  (I can also see " & Codec.Img (Dropped)
+                    & " smaller things here that I did not list: they would not fit in what you can read.)" & ASCII.LF);
+         end if;
+      end;
       --  相机表
       declare
          K : Natural := 2;
@@ -5028,6 +5073,23 @@ package body Act is
                                  Plan.Waitable_Outcomes (Any_Stands),
                                  C.Cols, C.Rows, Natural (C.Items.Length), C.Map.N_Cams, C.Map.Arms, Big, Cw, Bh, Text, Err)
                then
+                  --  🔴 装不下是【量得到的事实】,不是猜:回包里就写着限额和用量。
+                  --  照着把清单上限减半再来,减到装得下为止;以前只会一股脑全给,
+                  --  实测 3589 轮里 3577 轮撞墙 —— 脑几乎从没真正看见过画面。
+                  if (for some I in 1 .. Length (Err) - 21 =>
+                        Slice (Err, I, I + 21) = "maximum context length")
+                  then
+                     declare
+                        Now_N : constant Natural := World.Count (C.Wld, Cam);
+                        Was : constant Natural := C.List_Cap;
+                     begin
+                        C.List_Cap := (if C.List_Cap = 0 then Natural'Max (1, Now_N / 2)
+                                       else Natural'Max (1, C.List_Cap / 2));
+                        Put_Line ("[身] 🧠 你读不下这么长:清单上限 "
+                                  & (if Was = 0 then "不限" else Codec.Img (Was)) & " ⇒ " & Codec.Img (C.List_Cap)
+                                  & " 件(只留最大的,漏掉的我会说出来)");
+                     end;
+                  end if;
                   Put_Line ("[身] 🧠 问不通(" & To_String (Err) & ")⇒ 这一拍不动,下一拍重问");
                   return;
                end if;
