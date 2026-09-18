@@ -237,6 +237,35 @@ end
 
 **暴露的下一关是"会不会想",这是第一次能和拼写分开看**:它让手去合"抓握区"自己、按一个自己编的名字 `item ight`、写 `say ouch, i feel the table now.` 这类废话。
 
+### QW 系列逐炮(每炮只改一件事,判据 = 合语法段数 / 交上来段数)
+
+| 炮 | 改了什么 | 合语法 | 退回里最大的那一类 |
+|---|---|---|---|
+| GC9 | (基线,自由字符串) | **0 / 587** | 根本不是这门语言 |
+| QW1 | 上受限解码 | 2 / 11 | 名字乱编 |
+| QW2 | 收紧 rel/name | 0 / 8 | 散开,无单一主因 |
+| QW3 | `until free` 只跟 close | 1 / 3 | — |
+| QW4 | rel 表改由 `Plan.Usable_Rels` 生成 | 0 / 9 | **`press` ×5 · `me` ×2** |
+| QW5 | 删掉这两个死键 | (跑着) | — |
+
+**QW4 的教训(这是我自己漏的,不是模型的问题)**:上一炮我只把 `press` 从**关系表**里摘掉,
+可 `press` 在语法里**另有一条自己的产生式**(`cons ::= … | who " press " name " " effort`),那条没动。
+源码确证:`plan.adb` 的 `Rel_Ok_Here` 里 `Re_Press => return False` —— 它**从来就不在关系表里**,
+那 5 次全是从这条独立产生式按进去的。`me` 同理:`who ::= "me" | "grasper" | "pusher"` 是我手抄的,
+而 `act.adb` 的 `Role_Wants` 里 `me` 是 `when others => False`,**任何身体上都绑不上**。
+
+⇒ **键盘上不许有死键**:凡是"说得出口但落地必退"的词,都不许出现在交给解码器的语法里。
+这条现在**焊进 selfcheck**(四条闸:press 不许有 · me 不许给 · 能绑的角色必须给 · onto 只在非自眼给),
+不再靠我记得 —— 我已经漏过两次。
+
+### 🔴 待修:SPARK 证明闸在这台箱上整个崩了
+
+`install.sh` 里那步 `gnatprove -u monitor.adb -u backup.adb` 现在**每一个单元都崩**:
+`GNAT BUG DETECTED · 1.0 (spark) 1:1: unexpected character '/'`。
+**已确认与本次改动无关** —— 把我的改动 `git stash` 掉、在干净 HEAD 上跑,一样崩;清掉 `obj/gnatprove` 重跑,一样崩。
+⇒ monitor/backup 这两个单元**现在是没被证明就装上去的**。二进制照装(编译 + selfcheck 全绿),
+但这条闸**必须修回来**,不许当它不存在。
+
 ---
 
 ## 4. 三个未知数(会改时间表)
