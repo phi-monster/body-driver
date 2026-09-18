@@ -424,6 +424,24 @@ package body Act is
          end if;
          return ", in the " & Half & " half of the picture";
       end Rel;
+      --  这个框此刻跟我身上哪一块的框重叠吗(身体零件在世界那一段之前就已经列进 C.Items 了)
+      function Under_Me (X0, Y0, X1, Y1 : Natural) return Boolean is
+      begin
+         for I in 0 .. Natural (C.Items.Length) - 1 loop
+            declare
+               B : constant Item := C.Items (I);
+            begin
+               if B.Kind in Finger | Grip | Piece and then B.Located
+                 and then B.X1 >= X0 and then X1 >= B.X0
+                 and then B.Y1 >= Y0 and then Y1 >= B.Y0
+               then
+                  return True;
+               end if;
+            end;
+         end loop;
+         return False;
+      end Under_Me;
+
       procedure Push (It : Item; Line : String; Col : Draw.Color; Thick : Natural) is
       begin
          C.Items.Append (It);
@@ -513,7 +531,9 @@ package body Act is
             end if;
          end;
       end loop;
-      Append (T, "THINGS OUT IN THE WORLD (cut out of the depth picture; you do not know what they are called). Each is boxed and NUMBERED on the picture in green:" & ASCII.LF);
+      --  QW6:这行原来无条件说"从深度图里切出来的",而没深度时根本不是 —— 是从画面本身切的。
+      Append (T, "THINGS OUT IN THE WORLD (cut out of the " & (if F.Cams (Cam).Has_Depth then "depth picture" else "picture")
+                 & "; you do not know what they are called). Each is boxed and NUMBERED on the picture in green:" & ASCII.LF);
       for Si in 0 .. World.Count (C.Wld, Cam) - 1 loop
          declare
             Sl : constant World.Slot := World.Get (C.Wld, Cam, Si);
@@ -538,18 +558,30 @@ package body Act is
                It.X0 := Sl.R.X0; It.Y0 := Sl.R.Y0; It.X1 := Sl.R.X1; It.Y1 := Sl.R.Y1;
                It.Au := Sl.R.Au; It.Av := Sl.R.Av; It.Elong := Sl.R.Elong;
                It.Gray := Picture.Mean_Gray (F.Cams (Cam).Gray, Cw, Ch, Sl.R);
-               Push (It, "a thing, now in cell " & Codec.Img (Cell_Of (C, It.Cu, It.Cv)) & " (" & Codec.Img (It.Count) & " px, standing " &
-                     Codec.Fmt (It.Height, 3) & " out of the surface)" & Rel (It.Cu, It.Cv), Draw.Green, 2);
+               --  QW6:`Height` 只在 `if F.Cams(Cam).Has_Depth` 里填(act.adb:227/247),没深度时恒 0。
+               --  原来照印 "standing 0.000 out of the surface" —— 25 块全一样,读起来像量过,其实一个没量。
+               --  和 GC39(Floor_Z)、噪声底是同一类:深度守卫里填、守卫外无条件用。量不到就不说。
+               Push (It, "a thing, now in cell " & Codec.Img (Cell_Of (C, It.Cu, It.Cv)) & " (" & Codec.Img (It.Count) & " px"
+                     & (if F.Cams (Cam).Has_Depth then ", standing " & Codec.Fmt (It.Height, 3) & " out of the surface" else "")
+                     & ")" & Rel (It.Cu, It.Cv), Draw.Green, 2);
             elsif Sl.Seen then
                It.Kind := Thing_Remembered; It.Located := True;
                It.Cu := Sl.Shadow.Cu; It.Cv := Sl.Shadow.Cv; It.Depth := Sl.Shadow.Depth; It.Height := Sl.Shadow.Height; It.Top := Sl.Shadow.Top; It.Count := Sl.Shadow.Count;
                It.X0 := Sl.Shadow.X0; It.Y0 := Sl.Shadow.Y0; It.X1 := Sl.Shadow.X1; It.Y1 := Sl.Shadow.Y1;
                It.Au := Sl.Shadow.Au; It.Av := Sl.Shadow.Av; It.Elong := Sl.Shadow.Elong;
-               Push (It, "a thing you saw before, remembered where it was last seen, cell " & Codec.Img (Cell_Of (C, It.Cu, It.Cv)) &
-                     " (not visible right now - probably under my hand; " & Codec.Img (It.Count) & " px)", Draw.Dim_Green, 1);
+               --  🔴 QW6 死循环的根因就在这一行。
+               --  凡"见过但现在看不见"的槽全都列出来,而且每条都断言"probably under my hand" ——
+               --  实际涨到 item 317,提示词撑爆模型上下文(785 次 maximum context length),
+               --  从第 189 轮起 560 轮一段程序都问不出来。
+               --  ⇒ 那句断言现在【真的去查】:它上次待的框跟我身上哪一块此刻的框重不重叠。
+               --    重叠 ⇒ 确实是我自己挡住了它,留着(这正是伸手过去时那件东西消失的那一刻)。
+               --    不重叠 ⇒ 它就是不见了,我说不出它在哪,也就不许拿它占脑的篇幅。
+               if Under_Me (It.X0, It.Y0, It.X1, It.Y1) then
+                  Push (It, "a thing you saw before, now hidden behind a part of me, last seen in cell "
+                        & Codec.Img (Cell_Of (C, It.Cu, It.Cv)) & " (" & Codec.Img (It.Count) & " px)", Draw.Dim_Green, 1);
+               end if;
             else
-               It.Kind := Thing_Remembered;
-               Push (It, "(a slot with nothing in it right now)", Draw.Dim_Green, 0);
+               null;   --  空槽:里面此刻什么都没有,列出来只是占篇幅
             end if;
          end;
       end loop;
@@ -2284,8 +2316,10 @@ package body Act is
 
    --  握住了没:抬一小截,看东西跟不跟我走。手上相机里 = 它的块还在握区框里;世界相机里 = 它原来那块地方空了。读数不算数(回声)。
    --  Sure = 有没有【不跟着手动的相机】能核实。没有就只能说"我说不准",不许把状态记成"手里有东西"
+   --  Caliper_Says:合到底之后钳口读数比"空合读数"大出量到的钳口噪声 —— 也就是【指间确实夹着东西】。
+   --  它只准否决,不准断言(QW6:读数 0.000 = 空合读数 0.000,却被判成 held)。
    procedure Held_Test (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Arm : Natural; Cam : Natural; Origin : Picture.Region;
-                        Obj_Count : Natural; Held : out Boolean; Sure : out Boolean; Note : out Unbounded_String) is
+                        Obj_Count : Natural; Caliper_Says : Boolean; Held : out Boolean; Sure : out Boolean; Note : out Unbounded_String) is
       A : Table.Vec := Table.Zero_Vec;
       Deliv : Table.Vec;
       Ok : Boolean;
@@ -2489,6 +2523,15 @@ package body Act is
       --  判不了就老实说"我说不准",不许自称拿住。
       Held := (if World_Cam >= 0 and then Have_Hand0 and then Found_After then Follows else Seen_In_Hand);
       Sure := World_Cam >= 0 and then Have_Hand0 and then Found_After;
+      --  🔴 QW6:钳口是这台机器上量得到的卡尺(合空=空合读数)。它合到底、读数就是空合读数 ⇒ 指间是空的,
+      --  这时"抬起来它跟着我走"证明不了任何事 —— 跟着走的那一块本来就长在手上(实测绑到的是爪心自己)。
+      --  ⇒ 卡尺只否决、不断言:说空就一定不是拿住,而且这一条是【确定的】。
+      if not Caliper_Says and then Held then
+         Held := False;
+         Sure := True;
+         Note := S ("my jaw closed all the way to its empty-close reading ⇒ nothing is between my fingers")
+                 & (if Follows then S (" (something did move with my hand, but that only means it is part of my hand)") else S (""));
+      end if;
       if Sure and then Follows then
          Note := S ("after a small lift it came with my hand ⇒ held") & Follow_Note
                  & (if Seen_In_Hand then ", and my hand camera still shows it between my fingers" else "");
@@ -5107,7 +5150,11 @@ package body Act is
                               end;
                            end loop;
                         else
-                           Held_Test (L, C, F, A, Cam, Origin, Obj_Count, By_Reading, Sure_Held, Note);
+                           declare
+                              Caliper : constant Boolean := By_Reading;   --  上面刚量的卡尺判断,别让 out 参数把它盖掉
+                           begin
+                              Held_Test (L, C, F, A, Cam, Origin, Obj_Count, Caliper, By_Reading, Sure_Held, Note);
+                           end;
                         end if;
                         if not Sure_Held then
                            By_Reading := False;   --  说不准 ⇒ 不许记成"手里有东西"(记错了下一步它就去"搬"而不是重抓)
