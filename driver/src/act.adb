@@ -387,12 +387,141 @@ package body Act is
       return Best / Here;
    end Cam_Slack;
 
+   function Cut_Bright (C : Context; F : Plug.Frame; Cam : Natural) return Picture.Regions is
+      Cw : constant Natural := F.Cams (Cam).W;
+      Ch : constant Natural := F.Cams (Cam).H;
+      G : constant Buf := F.Cams (Cam).Gray;
+      Samp : Floats;
+      T : Long_Float;
+      T_First : Long_Float := 0.0;
+      Mask : Bools;
+      Out_R : Picture.Regions;
+      I : Natural := 0;
+   begin
+      if Natural (G.Length) < Cw * Ch then
+         return Out_R;
+      end if;
+      --  分界用抽样算(每 7 个像素取一个:次数,无量纲,只为省时间)
+      while I < Cw * Ch loop
+         Samp.Append (Long_Float (G.Element (I)));
+         I := I + 7;
+      end loop;
+      T := Picture.Split (Samp);
+      if Picture.Is_Nan (T) then
+         return Out_R;   --  全一样 ⇒ 这只眼里按明暗切不出东西,如实交空
+      end if;
+      T_First := T;
+      --  🔴 分两次:第一刀分的是"暗桌面 vs 亮的一切"(NJK 存图离线:分界 111,浅色木纹和白球并成一块);
+      --  在亮的那一拨里再分一刀,才把最亮的一撮(白球、乐高的黄)从浅木纹里切出来。两刀的分界都是算出来的。
+      declare
+         Upper : Floats;
+         T2 : Long_Float;
+      begin
+         for X of Samp loop
+            if X > T then
+               Upper.Append (X);
+            end if;
+         end loop;
+         T2 := Picture.Split (Upper);
+         if not Picture.Is_Nan (T2) then
+            T := T2;
+         end if;
+      end;
+      --  🔴 暗的东西也要认(黑键盘、红乐高、深色把手):在暗的那一拨里再分一刀,最暗的一撮单独成块;
+      --  贴着画面边的暗块是我自己的胳膊/手指(它们从画面外伸进来),丢掉
+      declare
+         Lower : Floats;
+         T_Low : Long_Float;
+         Dark : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (Cw * Ch));
+      begin
+         for X of Samp loop
+            if X <= T_First then
+               Lower.Append (X);
+            end if;
+         end loop;
+         T_Low := Picture.Split (Lower);
+         if not Picture.Is_Nan (T_Low) then
+            for J in 0 .. Cw * Ch - 1 loop
+               if Long_Float (G.Element (J)) < T_Low then
+                  Dark.Replace_Element (J, True);
+               end if;
+            end loop;
+            for R of Picture.Components (Dark, Cw, Ch, Picture.Min_Pixels (Cw, Ch)) loop
+               declare
+                  Q : Picture.Region := R;
+                  Edge : constant Boolean := R.X0 = 0 or else R.Y0 = 0 or else R.X1 + 1 >= Cw or else R.Y1 + 1 >= Ch;
+               begin
+                  if not Edge then
+                     Q.Height := 0.0; Q.Depth := 0.0;   --  main 的 Region 没有 Top 这一位
+                     Out_R.Append (Q);
+                  end if;
+               end;
+            end loop;
+         end if;
+      end;
+      Mask := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (Cw * Ch));
+      for J in 0 .. Cw * Ch - 1 loop
+         if Long_Float (G.Element (J)) > T then
+            Mask.Replace_Element (J, True);
+         end if;
+      end loop;
+      for R of Picture.Components (Mask, Cw, Ch, Picture.Min_Pixels (Cw, Ch)) loop
+         declare
+            Q : Picture.Region := R;
+            Span_W : constant Boolean := R.X0 = 0 and then R.X1 + 1 >= Cw;
+            Span_H : constant Boolean := R.Y0 = 0 and then R.Y1 + 1 >= Ch;
+         begin
+            if not Span_W and then not Span_H then
+               Q.Height := 0.0;   --  main 的 Region 没有 Top 这一位
+               if F.Cams (Cam).Has_Depth then
+                  declare
+                     --  读深窗口 = 这块自己最窄边的四分之一,再小也有半个百分点的画幅(比例,无量纲);只当记录
+                     Zd : constant Long_Float := Picture.Near_Depth (F.Cams (Cam).Depth, Cw, Ch, R.Cu, R.Cv,
+                                                                    Long_Float'Max (0.005, 0.25 * Long_Float'Min (Long_Float (R.X1 - R.X0 + 1) / Long_Float (Cw),
+                                                                                                                 Long_Float (R.Y1 - R.Y0 + 1) / Long_Float (Ch))));
+                  begin
+                     Q.Depth := (if Picture.Is_Nan (Zd) then 0.0 else Zd);
+                  end;
+               end if;
+               Out_R.Append (Q);
+            end if;
+         end;
+      end loop;
+      return Out_R;
+   end Cut_Bright;
+
    function Cut_Things_Raw (C : Context; F : Plug.Frame; Cam : Natural) return Picture.Regions is
       Cw : constant Natural := F.Cams (Cam).W;
       Ch : constant Natural := F.Cams (Cam).H;
       Raw : Picture.Regions;
       Kept : Picture.Regions;
    begin
+      --  🔴 M2 实测(850 轮 850 次撑爆、一段程序没问出来):没深度时这里原来直接返回空,
+      --  THINGS OUT IN THE WORLD 整节是空的 —— 官方观测就是 3 路 RGB,这等于把眼睛关掉。
+      --  而我第一次的修法(落到按颜色切)更糟:单帧清单涨到 267 条,把脑淹死
+      --  —— 同一段代码上面那行警告早写着"在能看见东西的桌子上开着它,清单会从 7 条涨到 46 条"。
+      --  ⇒ 正确的那条路是【按明暗切】(Cut_Bright):它自带门槛,并且在非自眼里把握区里的自己剔掉。
+      --  长在手上的眼也走这条(手指在自己眼里是黑的);它一块都切不出来时才退回深度那一路。
+      if Cam_Arm (C, Cam) >= 0 or else not F.Cams (Cam).Has_Depth then
+         Raw := Cut_Bright (C, F, Cam);
+         if not Raw.Is_Empty then
+            for R of Raw loop
+               declare
+                  Mine : Boolean := False;
+               begin
+                  for A in 0 .. C.Map.Arms - 1 loop
+                     if Cam_Arm (C, Cam) < 0 and then Zone.Is_Self (Zone_Of (C, A, Cam), R, Cw, Ch) then
+                        Mine := True;
+                     end if;
+                  end loop;
+                  if not Mine then
+                     Kept.Append (R);
+                  end if;
+               end;
+            end loop;
+            return Kept;
+         end if;
+      end if;
       if not F.Cams (Cam).Has_Depth then
          return Kept;
       end if;
