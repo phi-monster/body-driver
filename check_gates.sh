@@ -26,15 +26,24 @@ coef=$(for f in "$SRC"/*.adb "$SRC"/*.ads; do strip "$f"; done | grep -oE '[A-Za
 #    只许两处:Y_Finished(程序自己跑完)和 Y_Broken(编译期退回,动之前、免费)。多一处都是闸。
 disc=$(for f in "$SRC"/*.adb; do strip "$f"; done | grep -cE 'Have_Prog *:= *False' || true)
 
-read -r c_stops c_coef c_disc < <(cat "$CEIL" 2>/dev/null || echo "999 999 999")
+# 🔴 第四条(2026-09-18 补):【编译期宣称"物理上做不到"】也是一种闸,而且前三条一个都看不见它。
+#    实测:plan.adb 里一条"整块比爪口宽 ⇒ 合下去也是空的"把抓剪刀整段挡在动手之前,
+#    而三个棘轮全是绿的 —— 它们只数运行期的停。
+#    LAB 09-13 总规矩:驱动只准因为【量过期 / 依赖失效 / 量不出来】拒绝;
+#    "我物理上做不到"不算理由(owner:"事实不事实的 vlm 难道看不出来吗")。
+phys=$(for f in "$SRC"/*.adb; do strip "$f"; done | grep -cE '张不到|张得开|合下去也是空|够不着|太重|太宽|物理上' || true)
+
+read -r c_stops c_coef c_disc c_phys < <(cat "$CEIL" 2>/dev/null || echo "999 999 999 999")
+c_phys=${c_phys:-999}
 c_disc=${c_disc:-999}
-echo "== 闸门棘轮:身体自己停下 $stops 处(上限 $c_stops)· 伪装成测量的门槛 $coef 处(上限 $c_coef) · 半路扔掉整段程序 $disc 处(上限 $c_disc) =="
+echo "== 闸门棘轮:身体自己停下 $stops(上限 $c_stops)· 伪装成测量的门槛 $coef(上限 $c_coef) · 半路扔整段 $disc(上限 $c_disc) · 编译期宣称物理做不到 $phys(上限 $c_phys) =="
 fail=0
 if [ "$stops" -gt "$c_stops" ]; then echo "🔴 身体自己决定不动的地方从 $c_stops 涨到 $stops —— 身体不许有意见,只许有无能"; fail=1; fi
 if [ "$coef" -gt "$c_coef" ]; then echo "🔴 伪装成测量的门槛从 $c_coef 涨到 $coef —— 门槛必须说得出它是从哪次测量来的"; fail=1; fi
 if [ "$disc" -gt "$c_disc" ]; then echo "🔴 半路扔掉整段程序的地方从 $c_disc 涨到 $disc —— 只许"跑完"和"编译期退回"两处"; fail=1; fi
+if [ "$phys" -gt "$c_phys" ]; then echo "🔴 编译期宣称"物理上做不到"的地方从 $c_phys 涨到 $phys —— 只准因为量过期/依赖失效/量不出来而拒绝"; fail=1; fi
 if [ "$fail" = 0 ]; then
-  echo "$stops $coef $disc" > "$CEIL"
-  echo "🟢 没有新增的闸;上限已收紧到 $stops / $coef / $disc"
+  echo "$stops $coef $disc $phys" > "$CEIL"
+  echo "🟢 没有新增的闸;上限已收紧到 $stops / $coef / $disc / $phys"
 fi
 exit $fail

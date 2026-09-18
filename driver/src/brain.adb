@@ -1,9 +1,81 @@
 with Ada.Strings.Fixed;
+with Ada.Environment_Variables;
+with Ada.Directories;
+with Ada.Text_IO;
+with Ada.Streams.Stream_IO;
 with Sinew;
 with Codec;
 with Json;
 with Http_Client;
 package body Brain is
+
+   --  ── 人当脑 ────────────────────────────────────────────────────────────
+   --  BL_BRAIN=<目录> ⇒ 不走 HTTP:把问题(和这一帧的画面)写进那个目录,
+   --  然后等一个回答文件出现。脑机那头输出的也是文字,所以这条通道就是产品本身的形状:
+   --  一个没有身体、只会说话的脑,靠同一套键盘开这具身体。
+   function Brain_Dir return String is
+     (if Ada.Environment_Variables.Exists ("BL_BRAIN")
+      then Ada.Environment_Variables.Value ("BL_BRAIN") else "");
+
+   procedure Write_Text (Path, Text : String) is
+      F : Ada.Text_IO.File_Type;
+   begin
+      Ada.Text_IO.Create (F, Ada.Text_IO.Out_File, Path);
+      Ada.Text_IO.Put (F, Text);
+      Ada.Text_IO.Close (F);
+   end Write_Text;
+
+   procedure Write_Bmp (Path : String; RGB : Buf; W, H : Natural) is
+      use Ada.Streams.Stream_IO;
+      B : constant Buf := Codec.BMP24 (RGB, W, H);
+      F : File_Type;
+   begin
+      Create (F, Out_File, Path);
+      for X of B loop
+         Character'Write (Stream (F), Character'Val (Natural (X)));
+      end loop;
+      Close (F);
+   end Write_Bmp;
+
+   function Read_All (Path : String) return String is
+      F : Ada.Text_IO.File_Type;
+      R : Unbounded_String;
+   begin
+      Ada.Text_IO.Open (F, Ada.Text_IO.In_File, Path);
+      while not Ada.Text_IO.End_Of_File (F) loop
+         Append (R, Ada.Text_IO.Get_Line (F));
+         if not Ada.Text_IO.End_Of_File (F) then
+            Append (R, ASCII.LF);
+         end if;
+      end loop;
+      Ada.Text_IO.Close (F);
+      return To_String (R);
+   end Read_All;
+
+   --  问一句,等回答。回答文件出现即读走(读完删掉,免得下一轮拿到旧的)
+   function Ask_Human (Dir, Stem, Prompt : String; RGB : Buf; W, H : Natural;
+                       Answer : out Unbounded_String) return Boolean is
+      Q : constant String := Dir & "/" & Stem & ".txt";
+      Pic : constant String := Dir & "/" & Stem & ".bmp";
+      A : constant String := Dir & "/" & Stem & "_answer.txt";
+   begin
+      Answer := Null_Unbounded_String;
+      if Ada.Directories.Exists (A) then
+         Ada.Directories.Delete_File (A);
+      end if;
+      Write_Bmp (Pic, RGB, W, H);
+      Write_Text (Q, "[写回答请用:写临时文件再 mv 成 " & Stem & "_answer.txt —— 改名是原子的]" & ASCII.LF & ASCII.LF & Prompt);
+      loop
+         delay 1.0;
+         exit when Ada.Directories.Exists (A);
+      end loop;
+      --  回答一律【写临时文件再改名】(改名是原子的)⇒ 不需要"等它写完"这种睡眠,
+      --  也就不需要一个拍出来的秒数。问题文件头一行就把这条写给回答的人。
+      Answer := To_Unbounded_String (Read_All (A));
+      Ada.Directories.Delete_File (A);
+      return Length (Answer) > 0;
+   end Ask_Human;
+
    function Extract_Content (Raw : String) return String is
       Key_S : constant String := """content"":""";
       P : constant Natural := Ada.Strings.Fixed.Index (Raw, Key_S);
@@ -58,6 +130,24 @@ package body Brain is
    begin
       Which := 0;
       Err := Null_Unbounded_String;
+      if Brain_Dir /= "" then
+         declare
+            A : Unbounded_String;
+            N : Integer := 0;
+         begin
+            if not Ask_Human (Brain_Dir, "which", Prompt, RGB, W, H, A) then
+               Err := To_Unbounded_String ("人没回哪一块");
+               return False;
+            end if;
+            begin
+               N := Integer'Value (Ada.Strings.Fixed.Trim (To_String (A), Ada.Strings.Both));
+            exception
+               when others => N := 0;
+            end;
+            Which := Natural (Integer'Max (0, N));
+            return True;
+         end;
+      end if;
       if Natural (RGB.Length) < W * H * 3 then
          Err := To_Unbounded_String ("画面短了");
          return False;
@@ -120,6 +210,13 @@ package body Brain is
    begin
       Program := Null_Unbounded_String;
       Err := Null_Unbounded_String;
+      if Brain_Dir /= "" then
+         if not Ask_Human (Brain_Dir, "prog", Prompt, RGB, W, H, Program) then
+            Err := To_Unbounded_String ("人交上来一段空程序");
+            return False;
+         end if;
+         return True;
+      end if;
       pragma Unreferenced (N_Items, N_Cams, N_Arms);
       if Natural (RGB.Length) < W * H * 3 then
          Err := To_Unbounded_String ("画面短了");
