@@ -3584,7 +3584,62 @@ package body Act is
             Geo_Say ("它在相机前 " & Mm (-Pc (2)) & "(左右 " & Mm (Pc (0)) & " 上下 " & Mm (Pc (1)) & "),离它正上方该停的那点还差 " & Mm (Dist) &
                      "(左右 " & Mm (D (0)) & " 上下 " & Mm (D (1)) & " 前后 " & Mm (D (2)) & ")");
             if -Pc (2) <= 0.0 then
-               Event := S ("lost: my sightlines do not meet in front of me (the thing may have moved)");
+               --  GC42/GC43:视差交到相机背后。根因不是它动了,是【它在这只眼里碎成好几块】——
+               --  退一步、横挪一步之后"那一块"已经不是同一块(实测参考块 2913 px → 26 px,找回 106 px,
+               --  面积比 4.1 过得了 0.3–6 的窗,却是另一个碎片),拿两个碎片的连线去交会自然交到背后。
+               --  ⇒ 不放弃:测距不该只有视差一条路。沿【此刻这条视线】往前探,顶住为止 —— 碰到了,距离就有了。
+               --  这条不认形状、不认颜色、不需要跟住任何一块,用的是唯一从没出过错的信号(命令下去读数不动)。
+               declare
+                  Leg : constant Long_Float := 0.1 * G.Gap;   --  一截 = 张口的一成(比例,无量纲)
+                  Max_Legs : constant Natural := 30;          --  最多探几截(次数)
+                  Gone : Long_Float := 0.0;
+                  Hit : Boolean := False;
+                  Mk2 : Boolean;
+                  Uu, Vv : Long_Float;
+                  Sn : Boolean;
+               begin
+                  Geo_Say ("视差交到相机背后(多半是它在这只眼里碎成了好几块)⇒ 改用手当尺子:沿此刻这条视线往前探,每截 "
+                           & Mm (Leg) & ",顶住就停");
+                  for K in 1 .. Max_Legs loop
+                     Geo_Track (C, F, Cam, Slot, Uu, Vv, Sn);
+                     exit when not Sn;
+                     declare
+                        Bef : constant Plug.Arm_Pose := F.EE (Arm);
+                        Dir : constant Geom.V3 := Geom.Ray (G, Bef, Uu, Vv);
+                        Got : Long_Float;
+                     begin
+                        Geo_Move (L, C, F, Arm, [Dir (0) * Leg, Dir (1) * Leg, Dir (2) * Leg], Mk2,
+                                  Jaw_Target => 1.0, Quick => True);
+                        Steps_Taken := Steps_Taken + 1;
+                        Got := Sqrt ((F.EE (Arm) (0) - Bef (0)) ** 2 + (F.EE (Arm) (1) - Bef (1)) ** 2
+                                     + (F.EE (Arm) (2) - Bef (2)) ** 2);
+                        Gone := Gone + Got;
+                        if Got < 0.2 * Leg then   --  实到不到要的两成(比例,无量纲)= 顶住了
+                           Hit := True;
+                        end if;
+                     end;
+                     exit when Hit;
+                  end loop;
+                  if Hit then
+                     declare
+                        Cur2 : constant Plug.Arm_Pose := F.EE (Arm);
+                        Tw : constant Geom.V3 := Geom.Ap (Geom.Cam_R (G, Cur2), G.Tip);
+                     begin
+                        Pw := [Cur2 (0) + Tw (0), Cur2 (1) + Tw (1), Cur2 (2) + Tw (2)];
+                        Pw_Last := Pw; Have_Pw := True;
+                        C.Geo_Last_Pw := Pw; C.Geo_Have_Last_Pw := True;
+                        C.Geo_Dist := 0.0; C.Geo_Round := C.Round_N;
+                        C.Geo_Last_Down := 0.0;
+                        Geo_Say ("沿视线探了 " & Mm (Gone) & " 被顶住 ⇒ 它就在指尖这儿:("
+                                 & Mm (Pw (0)) & "," & Mm (Pw (1)) & "," & Mm (Pw (2)) & ")");
+                        Event := S ("amount: arrived (my sightlines would not meet, so I reached along the line I see it on; "
+                                    & "something stopped my fingers after " & Mm (Gone) & "; my fingers are open around it)");
+                     end;
+                  else
+                     Event := S ("lost: my sightlines do not meet in front of me, and I felt nothing when I reached "
+                                 & Mm (Gone) & " along the line I see it on");
+                  end if;
+               end;
                exit;
             end if;
             if Dist <= Tol then
@@ -4066,7 +4121,8 @@ package body Act is
                Text, E2 : Unbounded_String;
             begin
                if not Brain.Ask_Prog (To_String (C.Eye_Host), C.Eye_Port, To_String (C.Task_Text), To_String (Listing), Recent,
-                                      Sinew.Grammar, To_String (C.Refused), C.Cols, C.Rows, Big, Cw, Bh, Text, E2)
+                                      Sinew.Grammar, To_String (C.Refused), Plan.Usable_Rels (Cam_Arm (C, Cam) >= 0),
+                                      C.Cols, C.Rows, Big, Cw, Bh, Text, E2)
                then
                   Put_Line ("[身] 🧠 问不通(" & To_String (E2) & ")⇒ 这一拍不动,下一拍重问");
                   Stop := True;

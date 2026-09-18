@@ -36,7 +36,7 @@ package Brain is
 
    --  脑交一段【身体语言】的程序(Sinew)。Grammar:全部文法(BNF);Refused:上一轮被退回的话(原因 + 能照抄的替代)。
    --  提示词里只讲文法,不讲任何"要做什么就这么说"的示范。
-   function Ask_Prog (Host : String; Port : Natural; Task_Text, Body_Text, Recent, Grammar, Refused : String;
+   function Ask_Prog (Host : String; Port : Natural; Task_Text, Body_Text, Recent, Grammar, Refused, Rels_Usable : String;
                       Cols, Rows : Natural; RGB : Buf; W, H : Natural;
                       Program : out Unbounded_String; Err : out Unbounded_String) return Boolean;
 end Brain;

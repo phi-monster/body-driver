@@ -308,8 +308,8 @@ package body Sinew is
    --  受限解码用的机器可读语法。词表(关系 / 结局 / 角色 / 步幅 / 力道)全部来自同两个枚举,
    --  和 Grammar 印给脑看的那份是同一套词。名字是脑自己的话 ⇒ 只限成 1–3 个小写词。
    --  一段程序限成 1–4 行:GBNF 里 "行+" 没有停的理由,模型会一直吐到 token 上限(实测 done x60)。
-   function EBNF return String is
-      Rels : constant String := Quoted_List (All_Rels);
+   function EBNF (Rels_Usable : String) return String is
+      Rels : constant String := Quoted_List (Rels_Usable);
       Outs : constant String := Quoted_List (All_Outcomes);
    begin
       return
@@ -330,7 +330,9 @@ package body Sinew is
         --  于是 `do grasper open until free with medium until settled` 每个 token 都合语法:
         --  rel=open、name=「until free with」(name 是任意小写词,把语言自己的关键词吞了)、step=medium。
         --  ⇒ rel 只留【真的要跟一个宾语】的那些;open/close/still/press 在 cons 里各有自己的句式。
-        "rel ::= " & Quoted_List (Only_Targeted (All_Rels)) & ASCII.LF &
+        --  QW3:键盘不再由我手抄 —— 关系表直接问驱动 (`Plan.Usable_Rels`),它知道这一版、这只眼里哪些说得出口。
+        --  手抄的会和机器走偏:我把 open/close/still/press 当成带宾语的关系,`press` 这一版根本做不了。
+        "rel ::= " & Quoted_List (Only_Targeted (Rels_Usable)) & ASCII.LF &
         "outcome ::= " & Outs & ASCII.LF &
         "outc ::= " & Quoted_List (No_Free (All_Outcomes)) & ASCII.LF &
         "step ::= "" small"" | "" medium"" | "" large""" & ASCII.LF &
