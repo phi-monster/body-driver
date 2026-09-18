@@ -1081,7 +1081,12 @@ package body Act is
                            Ran := Sqrt ((P.Cu - W0.Cu) ** 2 + (P.Cv - W0.Cv) ** 2);
                            Dz := (if P.Z > 0.0 and then W0.Z > 0.0 then abs (P.Z - W0.Z) else 0.0);
                            Ran_Max := Long_Float'Max (Ran_Max, Ran);
-                           if abs Deliv (K) > C.Map.EE_Noise and then (Ran >= Floor_Px or else Dz >= Floor_Z (I)) then
+                           --  GC39:没深度时 Floor_Z 那一整段(被 Has_Depth 包着)不执行,留在初值 0 ⇒ `Dz >= Floor_Z` 成了 `0>=0` 恒真
+                           --  ⇒ 纹丝不动的点也算「量到了」,六个通道各写一列全零还标可信 ⇒ 解算说哪个通道都不动它 ⇒ 0 推 stalled。
+                           --  深度只有【真的变过】才算证据;跟丢的那一步位置是按表猜的,更不算证据(LAB 09-11 记过后一半)
+                           if abs Deliv (K) > C.Map.EE_Noise and then not P.Lost
+                             and then (Ran >= Floor_Px or else (Dz > 0.0 and then Dz >= Floor_Z (I)))
+                           then
                               declare
                                  Col : Table.Vec3;
                               begin
