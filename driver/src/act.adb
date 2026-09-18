@@ -1340,7 +1340,10 @@ package body Act is
    procedure Probe_Effects (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Cam : Natural; Pts : in out Point_Vectors.Vector;
                             Effs : in out Effect_Array; Trust : out Table.Mask; Ok : out Boolean;
                             Allow : Long_Float := 1.0) is
-      Arm : constant Natural := Pts (0).Arm;
+      --  Pts 空的时候 `Pts (0)` 当场越界,而它在声明区 ⇒ 异常记在【调用处】,
+      --  栈里根本看不到这个子程序这一帧(实测查了半天)。空就当第 0 条胳膊,下面第一句直接回。
+      Pts_Empty : constant Boolean := Natural (Pts.Length) = 0;
+      Arm : constant Natural := (if Pts_Empty then 0 else Pts (0).Arm);
       P0 : constant Plug.Arm_Pose := F.EE (Arm);
       Jaw : Floats;
       Cw : constant Natural := F.Cams (Cam).W;
@@ -1412,6 +1415,11 @@ package body Act is
          end loop;
       end Finalise;
    begin
+      if Pts_Empty then
+         Trust := [others => False];
+         Ok := False;
+         return;
+      end if;
       Trust := [others => False];
       Jaw := Selfmap.Jaw_All (F, Arm);
       for I in 0 .. Natural (Pts.Length) - 1 loop
@@ -1815,7 +1823,10 @@ package body Act is
                           Until_Kind : Monitor.Until_Kind;
                           Step_Limit : Natural; Amount : Long_Float; Avoid : Item_Vectors.Vector;
                           Event : out Unbounded_String; Steps_Taken : out Natural; Blocked_Out : out Boolean; Beats : out Natural) is
-      Arm : constant Natural := Pts (0).Arm;
+      --  Pts 空的时候 `Pts (0)` 当场越界,而它在声明区 ⇒ 异常记在【调用处】,
+      --  栈里根本看不到这个子程序这一帧(实测查了半天)。空就当第 0 条胳膊,下面第一句直接回。
+      Pts_Empty : constant Boolean := Natural (Pts.Length) = 0;
+      Arm : constant Natural := (if Pts_Empty then 0 else Pts (0).Arm);
       --  🔴 不是 constant:线一断重连,仿真那边的帧计数从头开始 ⇒ 现在的拍数会【小于】开工时的拍数。
       --  以前这里两个 Natural 直接相减,负数当场 CONSTRAINT_ERROR 把整炮打死
       --  (GM 崩在 act.adb:1518,崩之前日志里 [链] 线断了/重新接上了 刷了几十遍)。
@@ -3732,6 +3743,11 @@ package body Act is
          Probe_Have := True;
       end Range_Probe;
    begin
+      if Pts_Empty then
+         Event := To_Unbounded_String ("没有点要跟:这一节没有可动的东西");
+         Steps_Taken := 0; Blocked_Out := False; Beats := 0;
+         return;
+      end if;
       Event := S ("hit the safety cap on steps");
       Steps_Taken := 0;
       Beats := 0;
@@ -3970,7 +3986,10 @@ package body Act is
    --  生地/大步之后在世界相机里重新看见自己:手指 = 抖一下手指(合几拍再张回来),零件 = 推一下它自己的通道再推回来;
    --  动过的像素就是它,每个点认离预测最近的那团。抖的幅度不是常数:手指合"量出来的稳定拍数"那么久;零件推开机看得见的那一档。认不到的留预测、记 Lost。
    procedure Refind_Pieces (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Cam : Natural; Pts : in out Point_Vectors.Vector) is
-      Arm : constant Natural := Pts (0).Arm;
+      --  Pts 空的时候 `Pts (0)` 当场越界,而它在声明区 ⇒ 异常记在【调用处】,
+      --  栈里根本看不到这个子程序这一帧(实测查了半天)。空就当第 0 条胳膊,下面第一句直接回。
+      Pts_Empty : constant Boolean := Natural (Pts.Length) = 0;
+      Arm : constant Natural := (if Pts_Empty then 0 else Pts (0).Arm);
       --  🔴🔴 抖之前先记下【我猜的】位置。抖完拿"我看到的"和它一比,就是这具身体
       --  唯一一次能自己验证"我的手在哪"的机会 —— 而它一直没比过。
       --  十三炮的终局全是"伺服往错的方向推",而错的源头就是这个猜出来的位置
@@ -4022,6 +4041,9 @@ package body Act is
          end if;
       end Claim;
    begin
+      if Pts_Empty then
+         return;
+      end if;
       Jaw.Append (J0);
       for P of Pts loop
          if P.Kind = Piece_Pt and then P.Chan_K >= Chan.Per_Arm then
@@ -5699,7 +5721,11 @@ package body Act is
                         Origin : Picture.Region;
                         Obj_Count : Natural := 0;
                      begin
-                        if Say.Grip_On >= 1 and then Say.Grip_On <= Natural (C.Items.Length) then
+                        --  Slot 的声明就是 `Integer := -1`("世界图里没有槽"的东西正是 -1),
+                        --  只守 Grip_On 的范围挡不住 Natural(-1) ⇒ CONSTRAINT_ERROR 当场打死整炮。
+                        if Say.Grip_On >= 1 and then Say.Grip_On <= Natural (C.Items.Length)
+                          and then C.Items (Say.Grip_On - 1).Slot >= 0
+                        then
                            Origin := World.Get (C.Wld, Cam, Natural (C.Items (Say.Grip_On - 1).Slot)).Shadow;
                            Obj_Count := C.Items (Say.Grip_On - 1).Count;
                         end if;
@@ -5723,7 +5749,9 @@ package body Act is
                                        ", empty-close reading " & Codec.Fmt (Empty, 3) & "); " & To_String (Note));
                         if By_Reading then
                            C.Wld.Holding := True; C.Wld.Held_Arm := Integer (A); C.Wld.Held_Jaw := Integer (Say.Grip_K); C.Wld.Held_Cam := Integer (Cam);
-                           if Say.Grip_On >= 1 and then Say.Grip_On <= Natural (C.Items.Length) then
+                           if Say.Grip_On >= 1 and then Say.Grip_On <= Natural (C.Items.Length)
+                             and then C.Items (Say.Grip_On - 1).Slot >= 0
+                           then
                               C.Wld.Held_Slot := C.Items (Say.Grip_On - 1).Slot;
                               C.Wld.Held_Origin := World.Get (C.Wld, Cam, Natural (C.Items (Say.Grip_On - 1).Slot)).Shadow;
                            else
