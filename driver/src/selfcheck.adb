@@ -797,6 +797,15 @@ begin
              "键盘:能绑上的角色必须给");
       Check (Has (G_Head, """onto""") and then not Has (G_Own, """onto"""),
              "键盘:onto 只在别的眼里说得出口,自己那只眼里不许给");
+      --  落盘,好拿真解码器验(语法本身认不认,不能只靠我读)
+      declare
+         F : File_Type;
+      begin
+         Create (F, Out_File, "/tmp/selfcheck_grammar.txt");
+         Put (F, G_Head);
+         Close (F);
+      end;
+      Put_Line ("  · 语法" & Natural'Image (G_Head'Length) & " 字节,落在 /tmp/selfcheck_grammar.txt");
    end;
    Put_Line ((if Fails = 0 then "🟢 自检全过" else "🔴 自检失败" & Natural'Image (Fails) & " 条"));
    if Fails > 0 then

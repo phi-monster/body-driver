@@ -5071,7 +5071,12 @@ package body Act is
                         Regrasps : Natural := 0;
                         Slot_H : constant Integer := (if Say.Grip_On >= 1 and then Say.Grip_On <= Natural (C.Items.Length) then C.Items (Say.Grip_On - 1).Slot else -1);
                      begin
-                        if Say.Grip_On >= 1 and then Say.Grip_On <= Natural (C.Items.Length) then
+                        --  QW5B:这里 Slot 被直接转成 Natural,而它的声明就是 `Slot : Integer := -1`
+                        --  ——"这一块在世界图里没有槽"(身体部位、只记得位置的地方)正是 -1,
+                        --  于是脑一提这种名字就 CONSTRAINT_ERROR,整炮当场死(act.adb:5075)。
+                        if Say.Grip_On >= 1 and then Say.Grip_On <= Natural (C.Items.Length)
+                          and then C.Items (Say.Grip_On - 1).Slot >= 0
+                        then
                            Origin := World.Get (C.Wld, Cam, Natural (C.Items (Say.Grip_On - 1).Slot)).Shadow;
                            Obj_Count := C.Items (Say.Grip_On - 1).Count;
                         end if;
@@ -5112,7 +5117,10 @@ package body Act is
                         if By_Reading then
                            C.Geo_Obs.Clear;   --  它在手里了,以前那些视线作废
                            C.Wld.Holding := True; C.Wld.Held_Arm := Integer (A); C.Wld.Held_Cam := Integer (Cam);
-                           if Say.Grip_On >= 1 and then Say.Grip_On <= Natural (C.Items.Length) then
+                           --  同 5075 那一处:Slot 可以是 -1,转 Natural 会炸
+                           if Say.Grip_On >= 1 and then Say.Grip_On <= Natural (C.Items.Length)
+                             and then C.Items (Say.Grip_On - 1).Slot >= 0
+                           then
                               C.Wld.Held_Slot := C.Items (Say.Grip_On - 1).Slot;
                               C.Wld.Held_Origin := World.Get (C.Wld, Cam, Natural (C.Items (Say.Grip_On - 1).Slot)).Shadow;
                            else

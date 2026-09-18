@@ -326,10 +326,107 @@ package body Sinew is
    --  受限解码用的机器可读语法。词表(关系 / 结局 / 角色 / 步幅 / 力道)全部来自同两个枚举,
    --  和 Grammar 印给脑看的那份是同一套词。名字是脑自己的话 ⇒ 只限成 1–3 个小写词。
    --  一段程序限成 1–4 行:GBNF 里 "行+" 没有停的理由,模型会一直吐到 token 上限(实测 done x60)。
+   --  ── 名字不许吞掉语言自己的词 ───────────────────────────────────────────
+   --  QW5:5 次"说不出口"全是同一个根因 —— `name ::= w (" " w)? (" " w)?`,
+   --  而 `w` 是任意小写词 ⇒ `do grasper close until touched or and ...` 里
+   --  「until touched or」被整个吞成名字,每个 token 都合语法,真解析器却读成另一句。
+   --  GBNF 没有负向断言,于是用【前缀树的补集】把它展开。
+   --  保留词表不是我手抄的 —— 从生成好的语法里把所有字面量里的小写词扫出来:
+   --  语言以后加一个词,它自动被保留。
+
+   --  Words 里以 C 开头的那些词,去掉首字母;正好到此为止的用 "." 记
+   function Sufs (Words : String; C : Character) return String is
+      S : Unbounded_String;
+      I : Natural := Words'First;
+      J : Natural;
+   begin
+      while I <= Words'Last loop
+         J := I;
+         while J <= Words'Last and then Words (J) /= ' ' loop
+            J := J + 1;
+         end loop;
+         if J > I and then Words (I) = C then
+            Append (S, (if Length (S) > 0 then " " else "")
+                       & (if J - I = 1 then "." else Words (I + 1 .. J - 1)));
+         end if;
+         I := J + 1;
+      end loop;
+      return To_String (S);
+   end Sufs;
+
+   --  [a-z]+ 里不等于 Words 中任何一个词的串。Top = 这一层必须至少再吃一个字符
+   function Complement (Words : String; Top : Boolean) return String is
+      Free : Unbounded_String;
+      Alts : Unbounded_String;
+      procedure Add (S : String) is
+      begin
+         if Length (Alts) > 0 then
+            Append (Alts, " | ");
+         end if;
+         Append (Alts, S);
+      end Add;
+   begin
+      for C in Character range 'a' .. 'z' loop
+         if Sufs (Words, C) = "" then
+            Append (Free, C);
+         end if;
+      end loop;
+      if Length (Free) > 0 then
+         Add ("[" & To_String (Free) & "] ([a-z])*");
+      end if;
+      for C in Character range 'a' .. 'z' loop
+         declare
+            Su : constant String := Sufs (Words, C);
+         begin
+            if Su /= "" then
+               Add ("""" & C & """ " & Complement (Su, False));
+            end if;
+         end;
+      end loop;
+      return "(" & To_String (Alts) & ")"
+             & (if not Top and then not Has_Word (Words, ".") then "?" else "");
+   end Complement;
+
+   --  把一段语法里所有【双引号字面量】中的小写词扫出来,去重,空格分隔
+   function Literal_Words (G : String) return String is
+      S : Unbounded_String;
+      I : Natural := G'First;
+   begin
+      while I <= G'Last loop
+         if G (I) = '"' then
+            declare
+               J : Natural := I + 1;
+               K : Natural;
+            begin
+               while J <= G'Last and then G (J) /= '"' loop
+                  if G (J) in 'a' .. 'z' then
+                     K := J;
+                     while K <= G'Last and then G (K) in 'a' .. 'z' loop
+                        K := K + 1;
+                     end loop;
+                     if not Has_Word (To_String (S), G (J .. K - 1)) then
+                        Append (S, (if Length (S) > 0 then " " else "") & G (J .. K - 1));
+                     end if;
+                     J := K;
+                  else
+                     J := J + 1;
+                  end if;
+               end loop;
+               I := J + 1;
+            end;
+         else
+            I := I + 1;
+         end if;
+      end loop;
+      return To_String (S);
+   end Literal_Words;
+
    function EBNF (Rels_Usable, Roles_Usable : String) return String is
       Rels : constant String := Quoted_List (Rels_Usable);
       Outs : constant String := Quoted_List (All_Outcomes);
-   begin
+      --  先把语法拼出来(此时 w 还是占位),从它自己的字面量里扫出保留词,再回填 w。
+      function Body_Text (W_Rule : String) return String is
+      begin
       return
         "root ::= line (line)? (line)? (line)?" & ASCII.LF &
         "line ::= (interval | control | decl | word) ""\n""" & ASCII.LF &
@@ -362,12 +459,18 @@ package body Sinew is
         "effort ::= ""light"" | ""firm"" | ""hard""" & ASCII.LF &
         "num ::= [1-9] ([0-9])?" & ASCII.LF &
         "name ::= w ("" "" w)? ("" "" w)?" & ASCII.LF &
-        "w ::= [a-z] ([a-z])*" & ASCII.LF &
+        "w ::= " & W_Rule & ASCII.LF &
         "control ::= ""repeat "" num "" times:\n"" simple (simple)? ""end"" | ""if "" outcome "":\n"" simple (simple)? (""else:\n"" simple (simple)?)? ""end"" | ""try:\n"" simple (simple)? ""or:\n"" simple (simple)? ""end""" & ASCII.LF &
         "decl ::= ""to "" name "":\n"" simple (simple)? ""end"" | decl1" & ASCII.LF &
         "decl1 ::= ""run "" name | ""remember where "" who "" is as "" name" & ASCII.LF &
         "word ::= ""say "" sent | ""done""" & ASCII.LF &
         "sent ::= [a-zA-Z] ([a-zA-Z ,.'])*";
+      end Body_Text;
+      Draft : constant String := Body_Text ("[a-z] ([a-z])*");
+   begin
+      --  QW5:名字不许吞掉语言自己的词(实测 5/5 次"说不出口"都是这一个根因)。
+      --  保留词 = 这份语法自己所有字面量里的小写词 —— 由机器扫,不由我抄。
+      return Body_Text (Complement (Literal_Words (Draft), True));
    end EBNF;
 
 
