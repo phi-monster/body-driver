@@ -277,6 +277,34 @@ package body Sinew is
       return To_String (R);
    end No_Free;
 
+   --  只留"要跟一个宾语"的关系词:open / still 不带宾语,close / press 在 cons 里各有自己的句式
+   function Only_Targeted (S : String) return String is
+      R : Unbounded_String;
+      I : Natural := S'First;
+      J : Natural;
+   begin
+      while I <= S'Last loop
+         J := I;
+         while J <= S'Last and then S (J) /= ' ' loop
+            J := J + 1;
+         end loop;
+         if J > I then
+            declare
+               W : constant String := S (I .. J - 1);
+            begin
+               if W /= "open" and then W /= "close" and then W /= "still" and then W /= "press" then
+                  if Length (R) > 0 then
+                     Append (R, " ");
+                  end if;
+                  Append (R, W);
+               end if;
+            end;
+         end if;
+         I := J + 1;
+      end loop;
+      return To_String (R);
+   end Only_Targeted;
+
    --  受限解码用的机器可读语法。词表(关系 / 结局 / 角色 / 步幅 / 力道)全部来自同两个枚举,
    --  和 Grammar 印给脑看的那份是同一套词。名字是脑自己的话 ⇒ 只限成 1–3 个小写词。
    --  一段程序限成 1–4 行:GBNF 里 "行+" 没有停的理由,模型会一直吐到 token 上限(实测 done x60)。
@@ -298,7 +326,11 @@ package body Sinew is
         "eye ::= "" with my still eye"" | "" with my moving eye""" & ASCII.LF &
         "cons ::= who "" "" rel "" "" name (step)? | who "" press "" name "" "" effort | who "" close "" name | who "" open"" | who "" still""" & ASCII.LF &
         "who ::= ""me"" | ""grasper"" | ""pusher""" & ASCII.LF &
-        "rel ::= " & Rels & ASCII.LF &
+        --  QW2:rel 我照搬了枚举全表,把 open / close / still / press 也当成"能带宾语的关系"。
+        --  于是 `do grasper open until free with medium until settled` 每个 token 都合语法:
+        --  rel=open、name=「until free with」(name 是任意小写词,把语言自己的关键词吞了)、step=medium。
+        --  ⇒ rel 只留【真的要跟一个宾语】的那些;open/close/still/press 在 cons 里各有自己的句式。
+        "rel ::= " & Quoted_List (Only_Targeted (All_Rels)) & ASCII.LF &
         "outcome ::= " & Outs & ASCII.LF &
         "outc ::= " & Quoted_List (No_Free (All_Outcomes)) & ASCII.LF &
         "step ::= "" small"" | "" medium"" | "" large""" & ASCII.LF &
