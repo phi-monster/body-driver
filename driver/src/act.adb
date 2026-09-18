@@ -692,6 +692,11 @@ package body Act is
       else Long_Float'Max (0.005, Z.Span * 0.25));
 
    type Effect_Array is array (Natural range <>) of Table.Effect;
+   --  HB1:`Beats := Since (Plug.Steps (L), Beats0)` 两边都是 Natural,而日志里出现过
+   --  「[链] 线断了 ⇒ 等对方重新接上」—— 重连之后步数计数器回退,减出负数,
+   --  赋给 Natural 当场 CONSTRAINT_ERROR(act.adb:1676,整炮打死)。四处同写法统一走这里。
+   function Since (Now, Was : Natural) return Natural is (if Now >= Was then Now - Was else 0);
+
    procedure Refind_Pieces (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Cam : Natural; Pts : in out Point_Vectors.Vector);
 
    --  还差多少:只算画面上的距离(画幅)。远近不混进来 —— 混着求和是错的判据(LAB 2026-08-17)
@@ -1673,7 +1678,7 @@ package body Act is
          Was := Pts;
          Was_Regs := (if not Own_Cam then Cut_Things (C, F, Cam) else Picture.Region_Vectors.Empty_Vector);
          Step_Arm (L, C, F, Arm, Note.Cmd, Jaw, Note.Got, Ok_Out, C.Fast, Watch_Things'Unrestricted_Access);
-         Beats := Plug.Steps (L) - Beats0;
+         Beats := Since (Plug.Steps (L), Beats0);
          if Note.Halted then
             Put_Line ("[身]     途中眼睛叫停:被跟的东西快出画面或看不见了,这一步没走完");
          end if;
@@ -1795,7 +1800,7 @@ package body Act is
          end loop;
          if Need_Refind then
             Refind_Pieces (L, C, F, Cam, Pts);
-            Beats := Plug.Steps (L) - Beats0;
+            Beats := Since (Plug.Steps (L), Beats0);
          end if;
          Note.Lost_All := True;
          for P of Pts loop
@@ -1951,6 +1956,7 @@ package body Act is
                for R of Now_Regs loop
                   declare
                      Mine : Boolean := False;
+                     Within_Reach : Boolean := False;
                      Found_Prev : Boolean := False;
                      Best : Long_Float := 0.0;
                   begin
@@ -1959,7 +1965,23 @@ package body Act is
                            Mine := True;
                         end if;
                      end loop;
+                     --  🔴 HB1(我当脑那一炮)实测:推 1 下、离目标 38.5 下,这里照样判"我碰到它了"。
+                     --  原因:它拿当前帧每一块去上一帧找"大小 3 倍内最近的一块",距离超过噪声两倍就算"它动了"。
+                     --  画面里 57–106 块、尺寸相近的一大堆 ⇒ 分割一抖(某块裂开/合并/消失)就配到很远的同尺寸块上。
+                     --  缺的是一条物理约束:【只可能碰到指尖够得着的东西】。
+                     --  尺子用已经在用的那把(块自己的框),不引入新的数。
                      if not Mine then
+                        for P of Pts loop
+                           if Sqrt ((R.Cu - P.Cu) ** 2 + (R.Cv - P.Cv) ** 2)
+                              <= Long_Float'Max (P.Box_W, P.Box_H)
+                                 + Long_Float'Max (Long_Float (R.X1 - R.X0) / Long_Float (Natural'Max (1, F.Cams (Cam).W)),
+                                                   Long_Float (R.Y1 - R.Y0) / Long_Float (Natural'Max (1, F.Cams (Cam).H)))
+                           then
+                              Within_Reach := True;
+                           end if;
+                        end loop;
+                     end if;
+                     if not Mine and then Within_Reach then
                         for Q of Was_Regs loop
                            if Q.Count * 3 >= R.Count and then R.Count * 3 >= Q.Count then
                               declare
@@ -2098,7 +2120,7 @@ package body Act is
          Judge;
          if Note.Say_Stop /= "" then
             Event := Note.Say_Stop;
-            Beats := Plug.Steps (L) - Beats0;
+            Beats := Since (Plug.Steps (L), Beats0);
             return;
          end if;
       end loop;
@@ -2974,7 +2996,7 @@ package body Act is
             Guard := Guard + 1;
             if Guard > 12 then   --  次数
                Event := S ("steps: I took the steps you asked for (still " & Mm (Dist) & " from above it)");
-               Beats := Plug.Steps (L) - Beats0;
+               Beats := Since (Plug.Steps (L), Beats0);
                return;
             end if;
             declare
@@ -2986,7 +3008,7 @@ package body Act is
          end;
       end loop;
       Event := S ("amount: arrived (my fingertips are above it)");
-      Beats := Plug.Steps (L) - Beats0;
+      Beats := Since (Plug.Steps (L), Beats0);
    end Geo_Hover;
 
    --  放下 = 从上方直下,一截一成张口(比例,无量纲),顶住就停(命令下去读数不动 = 手里的东西/指尖碰到面了);
@@ -3015,14 +3037,14 @@ package body Act is
                Down := Down + Long_Float'Max (0.0, Got);
                Geo_Say ("直下 " & Mm (Down) & " 被顶住 ⇒ 它/指尖碰到面了");
                Event := S ("amount: arrived (I came down " & Mm (Down) & " and something under my hand held me up - it is resting on the surface now)");
-               Beats := Plug.Steps (L) - Beats0;
+               Beats := Since (Plug.Steps (L), Beats0);
                return;
             end if;
             Down := Down + Got;
          end;
       end loop;
       Event := S ("steps: I came down " & Mm (Down) & " and nothing held me up yet");
-      Beats := Plug.Steps (L) - Beats0;
+      Beats := Since (Plug.Steps (L), Beats0);
    end Geo_Drop;
 
    --  量相机朝向:盯着点名那块,手做四次平移,每次停稳记一笔,回起点,解朝向,存文件
@@ -3542,14 +3564,14 @@ package body Act is
             Geo_Record_All (C, F, Cam);
             if not Seen then
                Event := S ("lost: it was cut off at the edge of my eye; I backed up " & Mm (Back) & " to see all of it and lost it");
-               Beats := Plug.Steps (L) - Beats0;
+               Beats := Since (Plug.Steps (L), Beats0);
                return;
             end if;
          end loop;
          if Cut_At_Edge then
             Event := S ("stalled: it is cut off at the edge of this eye even after I backed up " & Codec.Img (Backs)
                         & " time(s); I cannot measure where it is from here");
-            Beats := Plug.Steps (L) - Beats0;
+            Beats := Since (Plug.Steps (L), Beats0);
             return;
          end if;
       end;
@@ -3591,7 +3613,7 @@ package body Act is
             Steps_Taken := Steps_Taken + St;
             Pw_Last := C.Geo_Last_Pw; Have_Pw := True;
             Descend (Event);
-            Beats := Plug.Steps (L) - Beats0;
+            Beats := Since (Plug.Steps (L), Beats0);
             return;
          end;
       end if;
@@ -3610,7 +3632,7 @@ package body Act is
             Geo_Record_All (C, F, Cam);
             if not Seen then
                Event := S ("lost: it left my sight when I stepped sideways to measure its distance");
-               Beats := Plug.Steps (L) - Beats0;
+               Beats := Since (Plug.Steps (L), Beats0);
                return;
             end if;
             C.Geo_Obs.Append (Geom.Obs'(Pose => F.EE (Arm), U => U, V => V));
@@ -3836,7 +3858,7 @@ package body Act is
             end;
          end;
       end loop;
-      Beats := Plug.Steps (L) - Beats0;
+      Beats := Since (Plug.Steps (L), Beats0);
    end Geo_Approach;
 
    --  拿住了没(几何版):眼睛长在手上 ⇒ 真拿住的东西在这只眼里【不动】;留在桌上的东西一抬手就在画面里跑掉/变小。
@@ -3965,7 +3987,7 @@ package body Act is
                         & ") - nothing between my fingers any more");
             C.Wld.Holding := False; C.Wld.Held_Arm := -1; C.Wld.Held_Slot := -1;
             Memory.Set (C.Mem, "holding", "");
-            Beats := Plug.Steps (L) - Beats0;
+            Beats := Since (Plug.Steps (L), Beats0);
             return;
          end if;
          if C.Wld.Holding and then Slot >= 0 and then U0 >= 0.0 then
@@ -3975,14 +3997,14 @@ package body Act is
                Event := S ("slip: what I was holding has left my fingers on the way up (after " & Mm (Up) & ")");
                C.Wld.Holding := False; C.Wld.Held_Arm := -1; C.Wld.Held_Slot := -1;
                Memory.Set (C.Mem, "holding", "");
-               Beats := Plug.Steps (L) - Beats0;
+               Beats := Since (Plug.Steps (L), Beats0);
                return;
             end if;
          end if;
       end loop;
       end;
       Event := S ("amount: arrived (I lifted straight up " & Mm (Up) & (if C.Wld.Holding then ", still holding it" else "") & ")");
-      Beats := Plug.Steps (L) - Beats0;
+      Beats := Since (Plug.Steps (L), Beats0);
    end Geo_Retreat;
 
    function Mode_Line (C : Context; Until_Text : String) return String is
