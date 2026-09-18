@@ -1493,7 +1493,7 @@ package body Act is
       end Budget;
 
       --  ①c 修步子:缩到眼睛跟得住,且不把被跟的东西推出视野、不让我身上任何一块压到"不许碰"的框
-      procedure Trim is
+      procedure Trim (Terms : Table.Term_Vectors.Vector) is
          Scale : Long_Float := 1.0;
       begin
          --  求稳不求快:一步里任何被跟的点在画面里最多跑一个跟踪窗
@@ -1507,6 +1507,30 @@ package body Act is
                end if;
             end;
          end loop;
+         --  GC40:再加一条「不许跨过目标」。原来只封「一步最多跑一个跟踪窗(0.10 画幅)」,而当时总差距才 0.128 画幅
+         --  ⇒ 一步可以跨掉全程八成,表稍偏就过冲:实测 0.119 → 0.076 之后来回摆到 0.137,判成 stalled。
+         --  拿【还差最远的那个点】说话:它不许被预测着跨过自己的目标。已经到位的点不参与(否则把整步冻住)
+         declare
+            E_Max : Long_Float := 0.0;
+            D_At : Long_Float := 0.0;
+         begin
+            for I in 0 .. Natural (Pts.Length) - 1 loop
+               if I < Natural (Terms.Length) then
+                  declare
+                     E : constant Long_Float := Sqrt (Terms (I).Err (0) ** 2 + Terms (I).Err (1) ** 2);
+                     Pr : constant Table.Vec3 := Table.Predict (Effs (I), Note.Cmd);
+                  begin
+                     if E > E_Max then
+                        E_Max := E;
+                        D_At := Sqrt (Pr (0) ** 2 + Pr (1) ** 2);
+                     end if;
+                  end;
+               end if;
+            end loop;
+            if E_Max > 0.0 and then D_At > E_Max then
+               Scale := Long_Float'Min (Scale, E_Max / D_At);
+            end if;
+         end;
          if Scale < 1.0e-3 then
             Note.Big_Step := True;   --  缩到千分之一还不够(比例,无量纲)= 表已经不可信
          end if;
@@ -1590,7 +1614,7 @@ package body Act is
             Note.Say_Stop := S ("could not solve which channels to push");
             return;
          end if;
-         Trim;
+         Trim (Terms);
       end Plan;
 
       --  ② 走:记下走之前的样子,发命令,途中盯着
