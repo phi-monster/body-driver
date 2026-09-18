@@ -5051,12 +5051,16 @@ package body Act is
                      Any_Stands := True;
                   end if;
                end loop;
+               --  🔴 CS2 实测:按 Role_Wants 这张【静态表】给键,pusher 就被给了出去,
+               --  而这具身体这一帧根本没有能绑上的 Piece ⇒ 28 次绑定 28 次失败,
+               --  程序卡在那儿走不到"送进两指之间",接触集一次都没跑到。
+               --  ⇒ 键盘按【此刻真绑得上谁】给:清单里有没有这个角色要的那种块。
                for R in Sinew.Role loop
                   declare
                      Any : Boolean := False;
                   begin
-                     for K in Item_Kind loop
-                        if Role_Wants (R, K) then
+                     for I in 0 .. Natural (C.Items.Length) - 1 loop
+                        if C.Items (I).Located and then Role_Wants (R, C.Items (I).Kind) then
                            Any := True;
                         end if;
                      end loop;
