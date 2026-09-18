@@ -54,6 +54,31 @@ package body Plan is
       end case;
    end Rel_Ok_Here;
 
+   --  这个结局等得到吗(写在 until 后面)。QW8:`until lost` 连撞 13 次 —— 又一个死键。
+   --  拒绝语和键盘从今往后共用这一个判定,不许再各写一份。
+   function Oc_Waitable (O : Sinew.Outcome; After_Close : Boolean) return Boolean is
+   begin
+      case O is
+         when Sinew.Oc_None | Sinew.Oc_Arrived | Sinew.Oc_Refused | Sinew.Oc_Lost =>
+            return False;                --  到没到只有脑能判 · refused 是我回给你的话 · 跟丢了我自己会停
+         when Sinew.Oc_Free =>
+            return After_Close;          --  只有合手那一节才谈得上"它离开了原来靠着的面"
+         when others =>
+            return True;
+      end case;
+   end Oc_Waitable;
+
+   function Waitable_Outcomes (After_Close : Boolean) return String is
+      S : Unbounded_String;
+   begin
+      for O in Sinew.Outcome loop
+         if Oc_Waitable (O, After_Close) then
+            Append (S, (if Length (S) > 0 then " " else "") & Sinew.Outcome_Word (O));
+         end if;
+      end loop;
+      return To_String (S);
+   end Waitable_Outcomes;
+
    function Usable_Rels (Own_Eye : Boolean) return String is
       S : Unbounded_String;
    begin
@@ -205,26 +230,15 @@ package body Plan is
       I : Sinew.Instr;
       Segments : Natural := 0;
 
-      --  这一节里有没有"心里就走不通"的事:张不到那么开却要去合它
+      --  🔴 2026-09-18 删除:这里原本有一条"整块比爪口宽 ⇒ 合下去也是空的"的拒绝。
+      --  它是【拒绝动手】,而且推理本身就是假的 —— 没人抓整把剪刀,抓的是一截;
+      --  人类遥操抓得起剪刀,就证明"整块比爪口宽"推不出"抓不了"。
+      --  LAB 09-13 总规矩原话:「闸只有一种:编译器(动之前、免费、理由给脑)…
+      --  连"我物理上做不到"都不算理由」(owner:"事实不事实的 vlm 难道看不出来吗")。
+      --  驱动只准因为【我这个量过期了 / 依赖失效 / 我量不出来】而拒绝。
       function Impossible (Ins : Sinew.Instr) return String is
+         pragma Unreferenced (Ins);
       begin
-         for Ci in 0 .. Natural (Ins.Cons.Length) - 1 loop
-            declare
-               C : constant Constraint := Ins.Cons (Ci);
-               Sub : constant Integer := Look_Up (B, C.Subj);
-               Obj : constant Integer := Look_Up (B, C.Obj);
-            begin
-               if C.R = Re_Close and then Sub > 0 and then Sub < Integer (Facts.Length)
-                 and then Obj > 0 and then Obj < Integer (Facts.Length)
-                 and then Facts (Natural (Sub)).Span > 0.0
-                 and then Facts (Natural (Obj)).Size > Facts (Natural (Sub)).Span
-               then
-                  return "我张得开 " & Codec.Fmt (Facts (Natural (Sub)).Span, 3)
-                    & " 幅,而它有 " & Codec.Fmt (Facts (Natural (Obj)).Size, 3)
-                    & " 幅那么宽 —— 合下去也是空的";
-               end if;
-            end;
-         end loop;
          return "";
       end Impossible;
 

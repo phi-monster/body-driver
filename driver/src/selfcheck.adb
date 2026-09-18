@@ -695,7 +695,11 @@ begin
       begin
          Wide.Size := 0.30;
          Facts.Replace_Element (2, Wide);
-         Check (not Dry ("do grasper close the ball until free").Ok, "空转:张不到那么开却要合 ⇒ 退回");
+         --  🔴 2026-09-18 掉头:这一条原来断言"东西比爪口宽 ⇒ 退回",而那是【拒绝动手】。
+         --  人类遥操抓得起剪刀,没人抓整把 —— 抓的是一截。"整块比爪口宽"推不出"抓不了"。
+         --  现在断言相反的方向,免得它再长回来。
+         Check (Dry ("do grasper close the ball until free").Ok,
+                "闸:东西比爪口宽【不许】当成拒绝动手的理由(只有量过期/依赖失效/量不出来才准拒绝)");
       end;
    end;
 
@@ -784,8 +788,10 @@ begin
    --  键盘上不许有死键(QW4:press 被我漏了一整条产生式,按了 5 次都白按)。
    --  规矩:任何在这一版【说得出口但落地就退回】的词,都不许出现在交给解码器的语法里。
    declare
-      G_Head : constant String := Sinew.EBNF (Plan.Usable_Rels (False), "grasper pusher");
-      G_Own  : constant String := Sinew.EBNF (Plan.Usable_Rels (True), "grasper pusher");
+      G_Head : constant String := Sinew.EBNF (Plan.Usable_Rels (False), "grasper pusher",
+                                              Plan.Waitable_Outcomes (False), Plan.Waitable_Outcomes (True));
+      G_Own  : constant String := Sinew.EBNF (Plan.Usable_Rels (True), "grasper pusher",
+                                              Plan.Waitable_Outcomes (False), Plan.Waitable_Outcomes (True));
       function Has (S, W : String) return Boolean is
         (for some I in S'First .. S'Last - W'Length + 1 => S (I .. I + W'Length - 1) = W);
    begin
@@ -797,6 +803,33 @@ begin
              "键盘:能绑上的角色必须给");
       Check (Has (G_Head, """onto""") and then not Has (G_Own, """onto"""),
              "键盘:onto 只在别的眼里说得出口,自己那只眼里不许给");
+      --  QW8:结局词也一样 —— until 后面等不到的那些不许给(驱动会当场退回)。
+      --  只看 outc 那一行:`outcome`(给 if 用)本来就该有全部结局,那是【读】不是【等】。
+      declare
+         function Rule (G, Name : String) return String is
+            K : constant String := ASCII.LF & Name & " ::= ";
+         begin
+            for I in G'First .. G'Last - K'Length + 1 loop
+               if G (I .. I + K'Length - 1) = K then
+                  for J in I + K'Length .. G'Last loop
+                     if G (J) = ASCII.LF then
+                        return G (I + K'Length .. J - 1);
+                     end if;
+                  end loop;
+                  return G (I + K'Length .. G'Last);
+               end if;
+            end loop;
+            return "";
+         end Rule;
+         U : constant String := Rule (G_Head, "outc");
+         Uc : constant String := Rule (G_Head, "outc_close");
+      begin
+         Check (U'Length > 0 and then not Has (U, """lost""") and then not Has (U, """arrived""")
+                and then not Has (U, """refused""") and then not Has (U, """free"""),
+                "键盘:until 后面等不到的结局(lost/arrived/refused/free)一个都不许有");
+         Check (Has (U, """touched""") and then Has (U, """stuck""") and then Has (Uc, """free"""),
+                "键盘:等得到的结局必须给,free 只在合手那一节给");
+      end;
       --  落盘,好拿真解码器验(语法本身认不认,不能只靠我读)
       declare
          F : File_Type;

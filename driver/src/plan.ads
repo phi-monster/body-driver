@@ -41,6 +41,8 @@ package Plan is
    --  空转:整段程序在自己的状态机上跑一遍,不通电;喂预测的结局,抓停不下来的循环、没 to 过的名字、张不开却要合的。
    function Dry_Run (P : Sinew.Program; Facts : Facts_Vectors.Vector; B : Bind_Vectors.Vector) return Verdict;
    --  这版在这只眼里说得出口的关系(退回时列给脑抄)
+   --  写在 until 后面等得到的那些结局(After_Close = 这一节里有没有合手)
+   function Waitable_Outcomes (After_Close : Boolean) return String;
    function Usable_Rels (Own_Eye : Boolean) return String;
    function Say (V : Verdict) return String;
 end Plan;

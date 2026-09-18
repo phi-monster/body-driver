@@ -2158,7 +2158,10 @@ package body Act is
    --  生地/大步之后在世界相机里重新看见自己:手指 = 抖一下手指(合几拍再张回来),零件 = 推一下它自己的通道再推回来;
    --  动过的像素就是它,每个点认离预测最近的那团。抖的幅度不是常数:手指合"量出来的稳定拍数"那么久;零件推开机看得见的那一档。认不到的留预测、记 Lost。
    procedure Refind_Pieces (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Cam : Natural; Pts : in out Point_Vectors.Vector) is
-      Arm : constant Natural := Pts (0).Arm;
+      --  QW8:Pts 空的时候 `Pts (0)` 当场越界,而它在声明区 ⇒ 异常记在调用处(act.adb:1798),
+      --  栈里根本看不到 Refind_Pieces 这一帧,查了半天。空就没什么可重找的,直接回。
+      Empty : constant Boolean := Natural (Pts.Length) = 0;
+      Arm : constant Natural := (if Empty then 0 else Pts (0).Arm);
       Cw : constant Natural := F.Cams (Cam).W;
       Ch : constant Natural := F.Cams (Cam).H;
       Z : constant Zone.Hand_Zone := Zone_Of (C, Arm, Cam);
@@ -2203,6 +2206,9 @@ package body Act is
          end if;
       end Claim;
    begin
+      if Empty then
+         return;   --  没有点要重找
+      end if;
       Jaw.Append (J0);
       for P of Pts loop
          if P.Kind = Piece_Pt and then P.Chan_K = Chan.Per_Arm then
@@ -4205,6 +4211,7 @@ package body Act is
             begin
                if not Brain.Ask_Prog (To_String (C.Eye_Host), C.Eye_Port, To_String (C.Task_Text), To_String (Listing_Words), Recent,
                                       Sinew.Grammar, To_String (C.Refused), Plan.Usable_Rels (Cam_Arm (C, Cam) >= 0), Roles_Usable,
+                              Plan.Waitable_Outcomes (False), Plan.Waitable_Outcomes (True),
                                       C.Cols, C.Rows, Big, Cw, Bh, Text, E2)
                then
                   Put_Line ("[身] 🧠 问不通(" & To_String (E2) & ")⇒ 这一拍不动,下一拍重问");

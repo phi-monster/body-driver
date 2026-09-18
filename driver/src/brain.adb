@@ -222,7 +222,7 @@ package body Brain is
       end;
    end Find;
 
-   function Ask_Prog (Host : String; Port : Natural; Task_Text, Body_Text, Recent, Grammar, Refused, Rels_Usable, Roles_Usable : String;
+   function Ask_Prog (Host : String; Port : Natural; Task_Text, Body_Text, Recent, Grammar, Refused, Rels_Usable, Roles_Usable, Outs_Usable, Outs_After_Close : String;
                       Cols, Rows : Natural; RGB : Buf; W, H : Natural;
                       Program : out Unbounded_String; Err : out Unbounded_String) return Boolean is
       Cells : constant Natural := Cols * Rows;
@@ -251,7 +251,7 @@ package body Brain is
       --  ⇒ 把同一份语法交给推理引擎做受限解码:不合语法的词根本采样不到。提示词里一个字的教程都不加。
       Body_Json : constant String :=
         "{""model"":""eye"",""max_tokens"":700,""temperature"":0,""chat_template_kwargs"":{""enable_thinking"":false}," &
-        """structured_outputs"":{""grammar"":""" & Json.Escape (Sinew.EBNF (Rels_Usable, Roles_Usable)) & """}" &
+        """structured_outputs"":{""grammar"":""" & Json.Escape (Sinew.EBNF (Rels_Usable, Roles_Usable, Outs_Usable, Outs_After_Close)) & """}" &
         ",""messages"":[{""role"":""user"",""content"":[{""type"":""image_url"",""image_url"":{""url"":""data:image/bmp;base64," & Codec.Base64 (Codec.BMP24 (RGB, W, H)) &
         """}},{""type"":""text"",""text"":""" & Json.Escape (Prompt) & """}]}]}";
       Reply : Unbounded_String;

@@ -421,7 +421,7 @@ package body Sinew is
       return To_String (S);
    end Literal_Words;
 
-   function EBNF (Rels_Usable, Roles_Usable : String) return String is
+   function EBNF (Rels_Usable, Roles_Usable, Outs_Usable, Outs_After_Close : String) return String is
       Rels : constant String := Quoted_List (Rels_Usable);
       Outs : constant String := Quoted_List (All_Outcomes);
       --  先把语法拼出来(此时 w 还是占位),从它自己的字面量里扫出保留词,再回填 w。
@@ -436,7 +436,7 @@ package body Sinew is
         --  ⇒ 9 次退回里 7 次撞的是这一条。键盘必须和机器一致:free 只能跟在 close 后面。
         --  (边界:静态就能判死的进语法;"那块东西在不在/够不够得着"这类世界里的事仍然留给运行时退回)
         "interval ::= ""do "" cons ("" and "" cons)? "" until "" outc ("" or "" num "" steps"")? (eye)?" & ASCII.LF &
-        "           | ""do "" clos ("" and "" cons)? "" until free"" ("" or "" num "" steps"")? (eye)?" & ASCII.LF &
+        "           | ""do "" clos ("" and "" cons)? "" until "" outc_close ("" or "" num "" steps"")? (eye)?" & ASCII.LF &
         "clos ::= who "" close "" name" & ASCII.LF &
         "eye ::= "" with my still eye"" | "" with my moving eye""" & ASCII.LF &
         --  QW4:上一改只把 press 从【关系表】摘掉,可它在 cons 里另有一条自己的产生式 —— 漏了,它又被按了 5 次。
@@ -454,7 +454,10 @@ package body Sinew is
         --  手抄的会和机器走偏:我把 open/close/still/press 当成带宾语的关系,`press` 这一版根本做不了。
         "rel ::= " & Quoted_List (Only_Targeted (Rels_Usable)) & ASCII.LF &
         "outcome ::= " & Outs & ASCII.LF &
-        "outc ::= " & Quoted_List (No_Free (All_Outcomes)) & ASCII.LF &
+        --  QW8:`until lost` 连撞 13 次(27 次退回里 13 次)—— 又一个我手抄出来的死键。
+        --  这一版起,"哪些结局等得到"直接问驱动的 Plan.Waitable_Outcomes,和拒绝语共用同一个判定。
+        "outc ::= " & Quoted_List (Outs_Usable) & ASCII.LF &
+        "outc_close ::= " & Quoted_List (Outs_After_Close) & ASCII.LF &
         "step ::= "" small"" | "" medium"" | "" large""" & ASCII.LF &
         "effort ::= ""light"" | ""firm"" | ""hard""" & ASCII.LF &
         "num ::= [1-9] ([0-9])?" & ASCII.LF &
