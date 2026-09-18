@@ -255,6 +255,28 @@ package body Sinew is
       return To_String (R);
    end Quoted_List;
 
+   --  把 "free" 从词表里摘掉(它只能跟在 close 后面,单列一条产生式)
+   function No_Free (S : String) return String is
+      R : Unbounded_String;
+      I : Natural := S'First;
+      J : Natural;
+   begin
+      while I <= S'Last loop
+         J := I;
+         while J <= S'Last and then S (J) /= ' ' loop
+            J := J + 1;
+         end loop;
+         if J > I and then S (I .. J - 1) /= "free" then
+            if Length (R) > 0 then
+               Append (R, " ");
+            end if;
+            Append (R, S (I .. J - 1));
+         end if;
+         I := J + 1;
+      end loop;
+      return To_String (R);
+   end No_Free;
+
    --  受限解码用的机器可读语法。词表(关系 / 结局 / 角色 / 步幅 / 力道)全部来自同两个枚举,
    --  和 Grammar 印给脑看的那份是同一套词。名字是脑自己的话 ⇒ 只限成 1–3 个小写词。
    --  一段程序限成 1–4 行:GBNF 里 "行+" 没有停的理由,模型会一直吐到 token 上限(实测 done x60)。
@@ -267,12 +289,18 @@ package body Sinew is
         "line ::= (interval | control | decl | word) ""\n""" & ASCII.LF &
         --  块里只能放简单行:否则 if 里能再套 if,模型在温度 0 下会无限套娃(实测 if touched: x26)
         "simple ::= (interval | decl1 | word) ""\n""" & ASCII.LF &
-        "interval ::= ""do "" cons ("" and "" cons)? "" until "" outcome ("" or "" num "" steps"")? (eye)?" & ASCII.LF &
+        --  QW1:`until free` 我给的键盘里能接在任何一段后面,而 plan.adb 只在【合手那一段】认它
+        --  ⇒ 9 次退回里 7 次撞的是这一条。键盘必须和机器一致:free 只能跟在 close 后面。
+        --  (边界:静态就能判死的进语法;"那块东西在不在/够不够得着"这类世界里的事仍然留给运行时退回)
+        "interval ::= ""do "" cons ("" and "" cons)? "" until "" outc ("" or "" num "" steps"")? (eye)?" & ASCII.LF &
+        "           | ""do "" clos ("" and "" cons)? "" until free"" ("" or "" num "" steps"")? (eye)?" & ASCII.LF &
+        "clos ::= who "" close "" name" & ASCII.LF &
         "eye ::= "" with my still eye"" | "" with my moving eye""" & ASCII.LF &
         "cons ::= who "" "" rel "" "" name (step)? | who "" press "" name "" "" effort | who "" close "" name | who "" open"" | who "" still""" & ASCII.LF &
         "who ::= ""me"" | ""grasper"" | ""pusher""" & ASCII.LF &
         "rel ::= " & Rels & ASCII.LF &
         "outcome ::= " & Outs & ASCII.LF &
+        "outc ::= " & Quoted_List (No_Free (All_Outcomes)) & ASCII.LF &
         "step ::= "" small"" | "" medium"" | "" large""" & ASCII.LF &
         "effort ::= ""light"" | ""firm"" | ""hard""" & ASCII.LF &
         "num ::= [1-9] ([0-9])?" & ASCII.LF &
