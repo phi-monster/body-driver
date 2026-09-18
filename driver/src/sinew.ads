@@ -111,6 +111,10 @@ package Sinew is
    --  给脑的文法原文(BNF)。文档和运行时是同一份,不会漂。
    function Grammar return String;
 
+   --  交给受限解码器的那份文法(GBNF)。三张表都由驱动当场生成,和给脑【看】的那份同源。
+   --  没有它,脑交上来的是自由字符串 —— GC9 实测 587 段里 0 段合语法。
+   function EBNF (Rels_Usable, Roles_Usable, Outs_Usable : String) return String;
+
    function Role_Word (R : Role) return String;
    function Rel_Word (R : Rel) return String;
    function Step_Word (S : Step) return String;

@@ -4692,9 +4692,37 @@ package body Act is
          if not C.Have_Prog then
             declare
                Text : Unbounded_String;
+               --  键盘只给这具身体、这一版、此刻真按得动的键。三张表都当场从驱动自己的判定里生成:
+               --  关系问 Plan.Usable_Rels(体检报告说哪几行量过了)· 结局问 Plan.Waitable_Outcomes
+               --  (和拒绝语共用 Oc_Waitable)· 角色问 Role_Wants(绑不上的角色不给)。
+               --  Any_Stands = 此刻有没有哪一块量得出它鼓出所靠的面多少 —— 没有就谈不上 onto/off/into/free。
+               Rep0 : constant Exam.Report := Exam.Judge (C.Map, C.Tables);
+               Any_Stands : Boolean := False;
+               Roles : Unbounded_String;
             begin
+               for I in 0 .. Natural (C.Items.Length) - 1 loop
+                  if C.Items (I).Height > 0.0 then
+                     Any_Stands := True;
+                  end if;
+               end loop;
+               for R in Sinew.Role loop
+                  declare
+                     Any : Boolean := False;
+                  begin
+                     for K in Item_Kind loop
+                        if Role_Wants (R, K) then
+                           Any := True;
+                        end if;
+                     end loop;
+                     if Any then
+                        Append (Roles, (if Length (Roles) > 0 then " " else "") & Sinew.Role_Word (R));
+                     end if;
+                  end;
+               end loop;
                if not Brain.Ask (To_String (C.Eye_Host), C.Eye_Port, To_String (C.Task_Text), To_String (Listing), Recent,
                                  Sinew.Grammar, To_String (C.Refused),
+                                 Plan.Usable_Rels (Rep0, -1, Any_Stands), To_String (Roles),
+                                 Plan.Waitable_Outcomes (Any_Stands),
                                  C.Cols, C.Rows, Natural (C.Items.Length), C.Map.N_Cams, C.Map.Arms, Big, Cw, Bh, Text, Err)
                then
                   Put_Line ("[身] 🧠 问不通(" & To_String (Err) & ")⇒ 这一拍不动,下一拍重问");

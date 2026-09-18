@@ -84,6 +84,29 @@ package body Plan is
       return True;
    end Rel_Ok;
 
+   function Oc_Waitable (O : Sinew.Outcome; Surface : Boolean) return Boolean is
+   begin
+      case O is
+         when Sinew.Oc_None | Sinew.Oc_Arrived | Sinew.Oc_Refused =>
+            return False;            --  到没到只有脑能判;refused 是我回给你的话,不是我能等来的事
+         when Sinew.Oc_Free =>
+            return Surface;          --  要知道它原来靠着哪个面,才谈得上"它离开了那个面"
+         when others =>
+            return True;
+      end case;
+   end Oc_Waitable;
+
+   function Waitable_Outcomes (Surface : Boolean) return String is
+      S : Unbounded_String;
+   begin
+      for O in Sinew.Outcome loop
+         if Oc_Waitable (O, Surface) then
+            Append (S, (if Length (S) > 0 then " " else "") & Sinew.Outcome_Word (O));
+         end if;
+      end loop;
+      return To_String (S);
+   end Waitable_Outcomes;
+
    function Usable_Rels (R : Exam.Report; Thing_Idx : Integer; Surface : Boolean) return String is
       S : Unbounded_String;
    begin

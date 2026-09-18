@@ -56,6 +56,11 @@ package Plan is
                      B : Bind_Vectors.Vector) return Verdict;
 
    --  这具身体此刻【说得出口】的关系有哪些(报错时列给模型抄)
+   --  写在 until 后面【等得到】的那些结局。和下面的拒绝语共用同一个判定,不许各写一份
+   --  (fo 那棵树上就是各写了一份,键盘给了 until lost 而驱动当场退回,27 次退回里 13 次撞这条)。
+   function Oc_Waitable (O : Sinew.Outcome; Surface : Boolean) return Boolean;
+   function Waitable_Outcomes (Surface : Boolean) return String;
+
    function Usable_Rels (R : Exam.Report; Thing_Idx : Integer; Surface : Boolean) return String;
    function Say (V : Verdict) return String;
 end Plan;

@@ -40,6 +40,7 @@ package Brain is
 
    --  Grammar:这门语言的全部文法(BNF)。Refused:上一轮的程序被退回的话,原因 + 能照抄的替代。
    function Ask (Host : String; Port : Natural; Task_Text, Body_Text, Recent, Grammar, Refused : String;
+                 Rels_Usable, Roles_Usable, Outs_Usable : String;
                  Cols, Rows, N_Items, N_Cams, N_Arms : Natural; RGB : Buf; W, H : Natural;
                  Program : out Unbounded_String; Err : out Unbounded_String) return Boolean;
 end Brain;

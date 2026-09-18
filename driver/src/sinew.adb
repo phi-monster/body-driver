@@ -200,6 +200,161 @@ package body Sinew is
       return To_String (S);
    end Unparse;
 
+   function Quoted_List (S : String) return String is
+      R : Unbounded_String;
+      I : Natural := S'First;
+      J : Natural;
+   begin
+      while I <= S'Last loop
+         J := I;
+         while J <= S'Last and then S (J) /= ' ' loop
+            J := J + 1;
+         end loop;
+         if J > I then
+            if Length (R) > 0 then
+               Append (R, " | ");
+            end if;
+            Append (R, '"' & S (I .. J - 1) & '"');
+         end if;
+         I := J + 1;
+      end loop;
+      return To_String (R);
+   end Quoted_List;
+
+   function Has_Word (S, W : String) return Boolean is
+      I : Natural := S'First;
+      J : Natural;
+   begin
+      while I <= S'Last loop
+         J := I;
+         while J <= S'Last and then S (J) /= ' ' loop
+            J := J + 1;
+         end loop;
+         if J > I and then S (I .. J - 1) = W then
+            return True;
+         end if;
+         I := J + 1;
+      end loop;
+      return False;
+   end Has_Word;
+
+   function Sufs (Words : String; C : Character) return String is
+      S : Unbounded_String;
+      I : Natural := Words'First;
+      J : Natural;
+   begin
+      while I <= Words'Last loop
+         J := I;
+         while J <= Words'Last and then Words (J) /= ' ' loop
+            J := J + 1;
+         end loop;
+         if J > I and then Words (I) = C then
+            Append (S, (if Length (S) > 0 then " " else "")
+                       & (if J - I = 1 then "." else Words (I + 1 .. J - 1)));
+         end if;
+         I := J + 1;
+      end loop;
+      return To_String (S);
+   end Sufs;
+
+   function Complement (Words : String; Top : Boolean) return String is
+      Free : Unbounded_String;
+      Alts : Unbounded_String;
+      procedure Add (S : String) is
+      begin
+         if Length (Alts) > 0 then
+            Append (Alts, " | ");
+         end if;
+         Append (Alts, S);
+      end Add;
+   begin
+      for C in Character range 'a' .. 'z' loop
+         if Sufs (Words, C) = "" then
+            Append (Free, C);
+         end if;
+      end loop;
+      if Length (Free) > 0 then
+         Add ("[" & To_String (Free) & "] ([a-z])*");
+      end if;
+      for C in Character range 'a' .. 'z' loop
+         declare
+            Su : constant String := Sufs (Words, C);
+         begin
+            if Su /= "" then
+               Add ("""" & C & """ " & Complement (Su, False));
+            end if;
+         end;
+      end loop;
+      return "(" & To_String (Alts) & ")"
+             & (if not Top and then not Has_Word (Words, ".") then "?" else "");
+   end Complement;
+
+   function Literal_Words (G : String) return String is
+      S : Unbounded_String;
+      I : Natural := G'First;
+   begin
+      while I <= G'Last loop
+         if G (I) = '"' then
+            declare
+               J : Natural := I + 1;
+               K : Natural;
+            begin
+               while J <= G'Last and then G (J) /= '"' loop
+                  if G (J) in 'a' .. 'z' then
+                     K := J;
+                     while K <= G'Last and then G (K) in 'a' .. 'z' loop
+                        K := K + 1;
+                     end loop;
+                     if not Has_Word (To_String (S), G (J .. K - 1)) then
+                        Append (S, (if Length (S) > 0 then " " else "") & G (J .. K - 1));
+                     end if;
+                     J := K;
+                  else
+                     J := J + 1;
+                  end if;
+               end loop;
+               I := J + 1;
+            end;
+         else
+            I := I + 1;
+         end if;
+      end loop;
+      return To_String (S);
+   end Literal_Words;
+
+   --  🔴 键盘只给这具身体、这一版真有的键;而且【告诉它有哪些键的那张纸】必须是同一张。
+   --  名字用前缀树补集挡掉语言自己的词(GBNF 没有负向断言)——
+   --  不挡的话 `do grasper close until touched or and ...` 里「until touched or」会被整个吞成一个名字,
+   --  每个 token 都合语法,而真解析器读成完全另一句。
+   function EBNF (Rels_Usable, Roles_Usable, Outs_Usable : String) return String is
+      function Body_Text (W_Rule : String) return String is
+      begin
+         return
+           "root ::= line (line)? (line)? (line)?" & ASCII.LF &
+           "line ::= (interval | control | decl | word) ""\n""" & ASCII.LF &
+           "simple ::= (interval | decl1 | word) ""\n""" & ASCII.LF &
+           "interval ::= ""do "" cons ("" and "" cons)? "" until "" outc ("" or "" num "" steps"")? (eye)?" & ASCII.LF &
+           "eye ::= "" with my still eye"" | "" with my moving eye""" & ASCII.LF &
+           "cons ::= who "" "" rel "" "" name (step)? | who "" close "" name | who "" open"" | who "" still""" & ASCII.LF &
+           "who ::= " & Quoted_List (Roles_Usable) & ASCII.LF &
+           "rel ::= " & Quoted_List (Rels_Usable) & ASCII.LF &
+           "outcome ::= " & Quoted_List (All_Outcomes) & ASCII.LF &
+           "outc ::= " & Quoted_List (Outs_Usable) & ASCII.LF &
+           "step ::= "" small"" | "" medium"" | "" large""" & ASCII.LF &
+           "num ::= [1-9] ([0-9])?" & ASCII.LF &
+           "name ::= w ("" "" w)? ("" "" w)?" & ASCII.LF &
+           "w ::= " & W_Rule & ASCII.LF &
+           "control ::= ""repeat "" num "" times:\n"" simple (simple)? ""end"" | ""if "" outcome "":\n"" simple (simple)? (""else:\n"" simple (simple)?)? ""end"" | ""try:\n"" simple (simple)? ""or:\n"" simple (simple)? ""end""" & ASCII.LF &
+           "decl ::= ""to "" name "":\n"" simple (simple)? ""end"" | decl1" & ASCII.LF &
+           "decl1 ::= ""run "" name | ""remember where "" who "" is as "" name" & ASCII.LF &
+           "word ::= ""say "" sent | ""done""" & ASCII.LF &
+           "sent ::= [a-zA-Z] ([a-zA-Z ,.\'])*";
+      end Body_Text;
+      Draft : constant String := Body_Text ("[a-z] ([a-z])*");
+   begin
+      return Body_Text (Complement (Literal_Words (Draft), True));
+   end EBNF;
+
    function Grammar return String is
    begin
       return

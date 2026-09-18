@@ -1,4 +1,5 @@
 with Ada.Strings.Fixed;
+with Sinew;
 with Codec;
 with Json;
 with Http_Client;
@@ -80,6 +81,7 @@ package body Brain is
    end Find;
 
    function Ask (Host : String; Port : Natural; Task_Text, Body_Text, Recent, Grammar, Refused : String;
+                 Rels_Usable, Roles_Usable, Outs_Usable : String;
                  Cols, Rows, N_Items, N_Cams, N_Arms : Natural; RGB : Buf; W, H : Natural;
                  Program : out Unbounded_String; Err : out Unbounded_String) return Boolean is
       Cells : constant Natural := Cols * Rows;
@@ -105,12 +107,13 @@ package body Brain is
         "If there is a strip of smaller pictures under the numbered one, those are my OTHER eyes right now, each boxed with its camera number in white. " &
         "Every eye is numbered: an item number means the same thing wherever I say it, and a thing only one eye can see still has a number you can point at. " &
         "The grid of cells belongs to the BIG picture on top only.";
-      Schema : constant String :=
-        "{""type"":""json_schema"",""json_schema"":{""name"":""my_program"",""strict"":true,""schema"":{""type"":""object"",""additionalProperties"":false," &
-        """required"":[""program""],""properties"":{""program"":{""type"":""string""}}}}}";
+      --  🔴 原来这里是 json_schema + "program": string —— 自由字符串,脑想写什么写什么。
+      --  实测 GC9:587 段里 0 段合语法。换成【受限解码】:把驱动当场生成的文法交给解码器,
+      --  说不出口的话在 token 层面就打不出来。回包的 content 本身就是程序,不再包一层 JSON。
       B64 : constant String := Codec.Base64 (Codec.BMP24 (RGB, W, H));
       Body_Json : constant String :=
-        "{""model"":""eye"",""max_tokens"":700,""temperature"":0,""chat_template_kwargs"":{""enable_thinking"":false},""response_format"":" & Schema &
+        "{""model"":""eye"",""max_tokens"":700,""temperature"":0,""chat_template_kwargs"":{""enable_thinking"":false}," &
+        """structured_outputs"":{""grammar"":""" & Json.Escape (Sinew.EBNF (Rels_Usable, Roles_Usable, Outs_Usable)) & """}" &
         ",""messages"":[{""role"":""user"",""content"":[{""type"":""image_url"",""image_url"":{""url"":""data:image/bmp;base64," & B64 &
         """}},{""type"":""text"",""text"":""" & Json.Escape (Prompt) & """}]}]}";
       Reply : Unbounded_String;
@@ -135,11 +138,9 @@ package body Brain is
             Err := To_Unbounded_String ("回包里没有 content(前 200 字:" & Ada.Strings.Fixed.Head (To_String (Reply), 200) & ")");
             return False;
          end if;
-         if not Json.Parse (Inner, D, Perr) then
-            Err := To_Unbounded_String ("脑给的不是 JSON:" & To_String (Perr) & " ‖ " & Ada.Strings.Fixed.Head (Inner, 200));
-            return False;
-         end if;
-         Program := To_Unbounded_String (Json.Text (D, Json.Get (D, 0, "program")));
+         --  受限解码之后 content 不是 JSON 了,这里原来那道 Json.Parse 会把【每一段】程序都毙掉。
+         --  受限解码之后 content 本身就是程序(不再包一层 JSON)
+         Program := To_Unbounded_String (Inner);
          if Length (Program) = 0 then
             Err := To_Unbounded_String ("脑交上来一段空程序");
             return False;
