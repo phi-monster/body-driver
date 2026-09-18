@@ -2076,14 +2076,18 @@ package body Act is
                   All_There := False;
                end if;
             end loop;
+            --  🔴 QW10:这一段里 11/16 段是【身体自己收工】停的,不是脑的 until 停的。
+            --  LAB 09-13 总规矩:「闸只有一种:编译器(动之前、免费)。动起来之后身体不许有任何闸。
+            --  能让它停的只有人的命令和脑写的 until(含脑给的步数)。运行期一律改成【说出来 + 照走】」。
+            --  ⇒ 这两条原来都 return / Say_Stop,现在只说出来,照走;要停,脑自己写
+            --  `until stalled` 或 `or N steps`(步数上限本来就兜着,不会跑飞)。
             if All_There then
-               Note.Say_Stop := S ("amount: arrived (in the picture and at the same distance as my fingers)");
-               return;
+               Put_Line ("[身]     到了(画面上和指尖同距);你没让我停,我接着走");
             end if;
          end;
          if Steps_Taken > 1 and then Monitor.Stalled (W) then
-            Note.Say_Stop := S ("amount: stopped getting closer (still about " & Codec.Fmt (Note.Err_Now, 1) &
-                                " pushes away) - either something holds me or this arm cannot reach farther from here");
+            Put_Line ("[身]     差距连着几拍不缩(还差约 " & Codec.Fmt (Note.Err_Now, 1)
+                      & " 推);你没让我停,我接着走");
          end if;
       end Judge;
 
