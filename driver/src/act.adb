@@ -561,6 +561,24 @@ package body Act is
          end if;
          return ", in the " & Half & " half of the picture";
       end Rel;
+      --  这个框此刻跟我身上哪一块的框重叠吗(身体零件在世界那一段之前就已经列进 C.Items 了)
+      function Under_Me (X0, Y0, X1, Y1 : Natural) return Boolean is
+      begin
+         for I in 0 .. Natural (C.Items.Length) - 1 loop
+            declare
+               B : constant Item := C.Items (I);
+            begin
+               if B.Kind in Finger | Grip | Piece and then B.Located
+                 and then B.X1 >= X0 and then X1 >= B.X0
+                 and then B.Y1 >= Y0 and then Y1 >= B.Y0
+               then
+                  return True;
+               end if;
+            end;
+         end loop;
+         return False;
+      end Under_Me;
+
       procedure Push (It_In : Item; Line : String; Col : Draw.Color; Thick : Natural) is
          It : Item := It_In;
       begin
@@ -787,12 +805,17 @@ package body Act is
                It.Cu := Sl.Shadow.Cu; It.Cv := Sl.Shadow.Cv; It.Depth := Sl.Shadow.Depth; It.Height := Sl.Shadow.Height; It.Count := Sl.Shadow.Count;
                It.X0 := Sl.Shadow.X0; It.Y0 := Sl.Shadow.Y0; It.X1 := Sl.Shadow.X1; It.Y1 := Sl.Shadow.Y1;
                It.Au := Sl.Shadow.Au; It.Av := Sl.Shadow.Av; It.Elong := Sl.Shadow.Elong;
-               Push (It, "a thing you saw before, remembered where it was last seen, cell " & Codec.Img (Cell_Of (C, It.Cu, It.Cv)) &
-                     " (I cannot find it in this picture right now - I do not know why; when I last saw it, it was "
-                     & Codec.Img (It.Count) & " px)", Draw.Dim_Green, 1);
+               --  🔴 实测(另一棵树,同样这一行):凡"见过但现在看不见"的槽全列出来 ⇒ 涨到 item 317,
+               --  提示词撑爆模型上下文 785 次,从第 189 轮起 560 轮一段程序都问不出来。
+               --  ⇒ 只留【我确实自己挡住了它】的那些:它上次待的框跟我身上哪一块此刻的框重不重叠。
+               --    重叠 = 伸手过去时那件东西消失的那一刻,留着有用;不重叠 = 它就是不见了,
+               --    我说不出它在哪,也就不许拿它占脑的篇幅。
+               if Under_Me (It.X0, It.Y0, It.X1, It.Y1) then
+                  Push (It, "a thing you saw before, now hidden behind a part of me, last seen in cell "
+                        & Codec.Img (Cell_Of (C, It.Cu, It.Cv)) & " (" & Codec.Img (It.Count) & " px)", Draw.Dim_Green, 1);
+               end if;
             else
-               It.Kind := Thing_Remembered;
-               Push (It, "(a slot with nothing in it right now)", Draw.Dim_Green, 0);
+               null;   --  空槽:里面此刻什么都没有,列出来只是占篇幅
             end if;
          end;
       end loop;
