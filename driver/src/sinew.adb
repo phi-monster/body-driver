@@ -305,10 +305,28 @@ package body Sinew is
       return To_String (R);
    end Only_Targeted;
 
+   --  空格分隔的词表里有没有这个词
+   function Has_Word (S, W : String) return Boolean is
+      I : Natural := S'First;
+      J : Natural;
+   begin
+      while I <= S'Last loop
+         J := I;
+         while J <= S'Last and then S (J) /= ' ' loop
+            J := J + 1;
+         end loop;
+         if J > I and then S (I .. J - 1) = W then
+            return True;
+         end if;
+         I := J + 1;
+      end loop;
+      return False;
+   end Has_Word;
+
    --  受限解码用的机器可读语法。词表(关系 / 结局 / 角色 / 步幅 / 力道)全部来自同两个枚举,
    --  和 Grammar 印给脑看的那份是同一套词。名字是脑自己的话 ⇒ 只限成 1–3 个小写词。
    --  一段程序限成 1–4 行:GBNF 里 "行+" 没有停的理由,模型会一直吐到 token 上限(实测 done x60)。
-   function EBNF (Rels_Usable : String) return String is
+   function EBNF (Rels_Usable, Roles_Usable : String) return String is
       Rels : constant String := Quoted_List (Rels_Usable);
       Outs : constant String := Quoted_List (All_Outcomes);
    begin
@@ -324,8 +342,13 @@ package body Sinew is
         "           | ""do "" clos ("" and "" cons)? "" until free"" ("" or "" num "" steps"")? (eye)?" & ASCII.LF &
         "clos ::= who "" close "" name" & ASCII.LF &
         "eye ::= "" with my still eye"" | "" with my moving eye""" & ASCII.LF &
-        "cons ::= who "" "" rel "" "" name (step)? | who "" press "" name "" "" effort | who "" close "" name | who "" open"" | who "" still""" & ASCII.LF &
-        "who ::= ""me"" | ""grasper"" | ""pusher""" & ASCII.LF &
+        --  QW4:上一改只把 press 从【关系表】摘掉,可它在 cons 里另有一条自己的产生式 —— 漏了,它又被按了 5 次。
+        --  ⇒ 这条也跟着 Rels_Usable 走:驱动说 press 做不了,键盘上就没有它。
+        "cons ::= who "" "" rel "" "" name (step)?" & (if Has_Word (Rels_Usable, "press") then " | who "" press "" name "" "" effort" else "")
+          & " | who "" close "" name | who "" open"" | who "" still""" & ASCII.LF &
+        --  QW4:`me` 在这一版 Role_Wants 里是 when others => False —— 任何身体上都绑不上。
+        --  角色表和关系表一样,由驱动生成,我不再手抄。
+        "who ::= " & Quoted_List (Roles_Usable) & ASCII.LF &
         --  QW2:rel 我照搬了枚举全表,把 open / close / still / press 也当成"能带宾语的关系"。
         --  于是 `do grasper open until free with medium until settled` 每个 token 都合语法:
         --  rel=open、name=「until free with」(name 是任意小写词,把语言自己的关键词吞了)、step=medium。

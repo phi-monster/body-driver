@@ -781,6 +781,23 @@ begin
                 and then abs (Gs2 (1).R_Ce (0, 2) - G.R_Ce (0, 2)) < 1.0e-6 and then not Gs2 (0).Valid, "几何:存了再读回来一样");
       end;
    end;
+   --  键盘上不许有死键(QW4:press 被我漏了一整条产生式,按了 5 次都白按)。
+   --  规矩:任何在这一版【说得出口但落地就退回】的词,都不许出现在交给解码器的语法里。
+   declare
+      G_Head : constant String := Sinew.EBNF (Plan.Usable_Rels (False), "grasper pusher");
+      G_Own  : constant String := Sinew.EBNF (Plan.Usable_Rels (True), "grasper pusher");
+      function Has (S, W : String) return Boolean is
+        (for some I in S'First .. S'Last - W'Length + 1 => S (I .. I + W'Length - 1) = W);
+   begin
+      Check (not Has (G_Head, "press") and then not Has (G_Own, "press"),
+             "键盘:press 这一版做不了 ⇒ 语法里一个 press 都不许有");
+      Check (not Has (G_Head, """me""") and then not Has (G_Own, """me"""),
+             "键盘:me 在这具身体上绑不上 ⇒ 语法里不许给这个键");
+      Check (Has (G_Head, """grasper""") and then Has (G_Own, """grasper"""),
+             "键盘:能绑上的角色必须给");
+      Check (Has (G_Head, """onto""") and then not Has (G_Own, """onto"""),
+             "键盘:onto 只在别的眼里说得出口,自己那只眼里不许给");
+   end;
    Put_Line ((if Fails = 0 then "🟢 自检全过" else "🔴 自检失败" & Natural'Image (Fails) & " 条"));
    if Fails > 0 then
       raise Program_Error;

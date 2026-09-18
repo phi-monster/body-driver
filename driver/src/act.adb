@@ -3933,6 +3933,28 @@ package body Act is
          --  me = 整个我,只有分不出零件的机体才有它;这具身体量得出手指和爪心 ⇒ me 绑不上
          when others => False);
 
+   --  这一版里【真能绑上】的角色,空格分隔:键盘只给这些键。
+   --  QW4:`me` 是 Role_Wants 的 when others => False —— 任何身体上都绑不上,却被按了 2 次。
+   function Roles_Usable return String is
+      S : Unbounded_String;
+   begin
+      for R in Sinew.Role loop
+         declare
+            Any : Boolean := False;
+         begin
+            for K in Item_Kind loop
+               if Role_Wants (R, K) then
+                  Any := True;
+               end if;
+            end loop;
+            if Any then
+               Append (S, (if Length (S) > 0 then " " else "") & Sinew.Role_Word (R));
+            end if;
+         end;
+      end loop;
+      return To_String (S);
+   end Roles_Usable;
+
    function Rel_Cmd (R : Sinew.Rel) return String is
      (case R is
          when Sinew.Re_Touching => "at",   when Sinew.Re_Above => "above", when Sinew.Re_Below => "below",
@@ -4121,7 +4143,7 @@ package body Act is
                Text, E2 : Unbounded_String;
             begin
                if not Brain.Ask_Prog (To_String (C.Eye_Host), C.Eye_Port, To_String (C.Task_Text), To_String (Listing), Recent,
-                                      Sinew.Grammar, To_String (C.Refused), Plan.Usable_Rels (Cam_Arm (C, Cam) >= 0),
+                                      Sinew.Grammar, To_String (C.Refused), Plan.Usable_Rels (Cam_Arm (C, Cam) >= 0), Roles_Usable,
                                       C.Cols, C.Rows, Big, Cw, Bh, Text, E2)
                then
                   Put_Line ("[身] 🧠 问不通(" & To_String (E2) & ")⇒ 这一拍不动,下一拍重问");
