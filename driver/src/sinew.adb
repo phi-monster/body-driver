@@ -355,37 +355,44 @@ package body Sinew is
       return Body_Text (Complement (Literal_Words (Draft), True));
    end EBNF;
 
-   function Grammar return String is
+   function Grammar (Rels_Usable, Roles_Usable, Outs_Usable : String) return String is
+      function Bar (S : String) return String is
+         R : Unbounded_String;
+         I : Natural := S'First;
+         J : Natural;
+      begin
+         while I <= S'Last loop
+            J := I;
+            while J <= S'Last and then S (J) /= ' ' loop
+               J := J + 1;
+            end loop;
+            if J > I then
+               Append (R, (if Length (R) > 0 then " | " else "") & S (I .. J - 1));
+            end if;
+            I := J + 1;
+         end loop;
+         return To_String (R);
+      end Bar;
    begin
       return
-        "<program>   ::= <line>+" & ASCII.LF &
+        "<program>   ::= <line> (up to four lines)" & ASCII.LF &
         "<line>      ::= <interval> | <control> | <decl> | <word>" & ASCII.LF &
-        "<interval>  ::= do <constraint> (and <constraint>)* until <outcome> [or <n> steps] [anyway] [<eye>]" & ASCII.LF &
+        "<interval>  ::= do <constraint> (and <constraint>)? until <outcome> [or <n> steps] [<eye>]" & ASCII.LF &
         "<eye>       ::= with my still eye | with my moving eye" & ASCII.LF &
-        "<constraint>::= <who> <relation> <what> [<step>] [must]" & ASCII.LF &
-        "              | <who> press <what> <effort> [must]      (that axis says effort, NOT where to go)" & ASCII.LF &
+        "<constraint>::= <who> <relation> <what> [<step>]" & ASCII.LF &
         "              | <who> close <what> | <who> open | <who> still" & ASCII.LF &
-        "<who>       ::= me | grasper | pusher                   (roles; I bind them by measuring myself)" & ASCII.LF &
+        "<who>       ::= " & Bar (Roles_Usable) & "   (roles; I bind them by measuring myself)" & ASCII.LF &
         "<what>      ::= <a name in your words> | <a name you told me to remember> | <who>" & ASCII.LF &
-        "<relation>  ::= " & All_Rels & ASCII.LF &
+        "              (a name is one to three plain words; it may NOT be any of the words in this grammar)" & ASCII.LF &
+        "<relation>  ::= " & Bar (Rels_Usable) & ASCII.LF &
         "<step>      ::= small | medium | large" & ASCII.LF &
-        "<effort>    ::= light | firm | hard" & ASCII.LF &
-        "<outcome>   ::= " & All_Outcomes & ASCII.LF &
-        "<control>   ::= repeat <n> times: <line>+ end" & ASCII.LF &
-        "              | repeat until <outcome>: <line>+ end" & ASCII.LF &
-        "              | if <outcome>: <line>+ [else: <line>+] end" & ASCII.LF &
-        "              | try: <line>+ or: <line>+ end" & ASCII.LF &
-        "<decl>      ::= to <name>: <line>+ end | run <name>" & ASCII.LF &
+        "<outcome>   ::= " & Bar (Outs_Usable) & ASCII.LF &
+        "<control>   ::= repeat <n> times: <line> [<line>] end" & ASCII.LF &
+        "              | if <outcome>: <line> [<line>] [else: <line> [<line>]] end" & ASCII.LF &
+        "              | try: <line> [<line>] or: <line> [<line>] end" & ASCII.LF &
+        "<decl>      ::= to <name>: <line> [<line>] end | run <name>" & ASCII.LF &
         "              | remember where <who> is as <name>" & ASCII.LF &
-        "<word>      ::= say <one sentence in your own words> | done" & ASCII.LF &
-        "anyway = drop every caution of mine: go blind, close far, keep pushing. I will not argue." & ASCII.LF &
-        "with my still eye = judge this stretch with the eye that changes LEAST when the part I am moving moves"
-        & " - that eye does not ride on me, so it can see me travel. with my moving eye = the one that changes MOST"
-        & " - it rides on the part I am moving, so it sees the target close up but cannot see itself travel."
-        & " Say neither and I pick for myself. How far away something is, I work out myself from my own travel:"
-        & " I nudge, I watch how far it slides across the eye, I travel, I nudge the same nudge again - a thing that"
-        & " slides more after I travelled is nearer, and how much more tells me how far it is in the same units as my"
-        & " own travel. I need no depth sensor and no second eye for that, only an eye that moves when I move.";
+        "<word>      ::= say <one sentence in your own words> | done";
    end Grammar;
 
    Max_Words : constant := 64;

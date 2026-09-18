@@ -1025,12 +1025,18 @@ begin
          G : constant Program := Sinew.Parse ("do grasper into the ball until arrived or 10 steps");
          Ok_One : constant Program := Sinew.Parse ("do grasper into the ball until touched or 10 steps");
       begin
-         Check (Sinew.Grammar'Length > 0
-                and then Ada.Strings.Fixed.Index (Sinew.Grammar, "arrived") = 0,
-                "到位:语法里不再有 arrived 这个词(到了没到只有脑能判)");
-         Check (Sinew.Grammar'Length > 0
-                and then Ada.Strings.Fixed.Index (Sinew.Grammar, "touched") > 0,
-                "到位:量得到的事件词还在(touched)—— 删的是意见,不是事件");
+         --  语法现在是【当场生成】的:关系/角色/结局三张表都来自驱动自己的判定。
+         --  这里拿一个典型配置查它:等不到的词不许出现,量得到的事件词必须在。
+         declare
+            Rep_0 : Exam.Report;
+            G_Txt : constant String := Sinew.Grammar (Plan.Usable_Rels (Rep_0, -1, True),
+                                                      "grasper pusher", Plan.Waitable_Outcomes (True));
+         begin
+            Check (G_Txt'Length > 0 and then Ada.Strings.Fixed.Index (G_Txt, "arrived") = 0,
+                   "到位:语法里不再有 arrived 这个词(到了没到只有脑能判)");
+            Check (G_Txt'Length > 0 and then Ada.Strings.Fixed.Index (G_Txt, "touched") > 0,
+                   "到位:量得到的事件词还在(touched)—— 删的是意见,不是事件");
+         end;
          Check (G.Ok and then G.Code (0).Until_Oc = Oc_Arrived,
                 "到位:脑真写了 arrived,解析层照样读得出来(才好在编译期退回并说明,而不是悄悄换成步数)");
          Check (Ok_One.Ok and then Ok_One.Code (0).Until_Oc = Oc_Touched,

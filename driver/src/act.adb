@@ -4742,7 +4742,9 @@ package body Act is
                   end;
                end loop;
                if not Brain.Ask (To_String (C.Eye_Host), C.Eye_Port, To_String (C.Task_Text), To_String (Listing), Recent,
-                                 Sinew.Grammar, To_String (C.Refused),
+                                 Sinew.Grammar (Plan.Usable_Rels (Rep0, -1, Any_Stands), To_String (Roles),
+                                                Plan.Waitable_Outcomes (Any_Stands)),
+                                 To_String (C.Refused),
                                  Plan.Usable_Rels (Rep0, -1, Any_Stands), To_String (Roles),
                                  Plan.Waitable_Outcomes (Any_Stands),
                                  C.Cols, C.Rows, Natural (C.Items.Length), C.Map.N_Cams, C.Map.Arms, Big, Cw, Bh, Text, Err)
