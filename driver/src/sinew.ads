@@ -110,6 +110,9 @@ package Sinew is
 
    --  给脑的文法原文(BNF)。文档和运行时是同一份,不会漂。
    function Grammar return String;
+   --  同一份语法的机器可读版(GBNF):交给推理引擎做受限解码,不合语法的词根本采样不到。
+   --  内容与 Grammar 逐字对应 —— 词表都从同两个枚举来,改一个必须改另一个(自检看着)。
+   function EBNF return String;
 
    function Role_Word (R : Role) return String;
    function Rel_Word (R : Rel) return String;

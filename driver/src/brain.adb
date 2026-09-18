@@ -2,6 +2,7 @@ with Ada.Strings.Fixed;
 with Codec;
 with Json;
 with Http_Client;
+with Sinew;
 package body Brain is
    function Extract_Content (Raw : String) return String is
       Key_S : constant String := """content"":""";
@@ -245,13 +246,13 @@ package body Brain is
         "Do NOT give distances, angles, speeds or any numbers other than step counts - I measure those myself. " &
         "If there is a strip of smaller pictures under the numbered one, those are my OTHER eyes right now, each boxed with its eye number in white; " &
         "they are not numbered inside - to act in one of them say with my still eye / with my moving eye and I will move there and ask you again.";
-      Schema : constant String :=
-        "{""type"":""json_schema"",""json_schema"":{""name"":""my_program"",""strict"":true,""schema"":{""type"":""object"",""additionalProperties"":false," &
-        """required"":[""program""],""properties"":{""program"":{""type"":""string""}}}}}";
-      B64 : constant String := Codec.Base64 (Codec.BMP24 (RGB, W, H));
+      --  GC9:这一问原来的约束只有 `{"program": 字符串}` —— 字符串里写什么完全不限,
+      --  于是 9B 自己发明动词和格子号,587 段 0 段合语法(而"哪一块"那一问带整数约束,它答得出)。
+      --  ⇒ 把同一份语法交给推理引擎做受限解码:不合语法的词根本采样不到。提示词里一个字的教程都不加。
       Body_Json : constant String :=
-        "{""model"":""eye"",""max_tokens"":700,""temperature"":0,""chat_template_kwargs"":{""enable_thinking"":false},""response_format"":" & Schema &
-        ",""messages"":[{""role"":""user"",""content"":[{""type"":""image_url"",""image_url"":{""url"":""data:image/bmp;base64," & B64 &
+        "{""model"":""eye"",""max_tokens"":700,""temperature"":0,""chat_template_kwargs"":{""enable_thinking"":false}," &
+        """structured_outputs"":{""grammar"":""" & Json.Escape (Sinew.EBNF) & """}" &
+        ",""messages"":[{""role"":""user"",""content"":[{""type"":""image_url"",""image_url"":{""url"":""data:image/bmp;base64," & Codec.Base64 (Codec.BMP24 (RGB, W, H)) &
         """}},{""type"":""text"",""text"":""" & Json.Escape (Prompt) & """}]}]}";
       Reply : Unbounded_String;
    begin
@@ -274,11 +275,8 @@ package body Brain is
             Err := To_Unbounded_String ("回包里没有 content(前 200 字:" & Ada.Strings.Fixed.Head (To_String (Reply), 200) & ")");
             return False;
          end if;
-         if not Json.Parse (Inner, D, Perr) then
-            Err := To_Unbounded_String ("脑给的不是 JSON:" & To_String (Perr) & " ‖ " & Ada.Strings.Fixed.Head (Inner, 200));
-            return False;
-         end if;
-         Program := To_Unbounded_String (Json.Text (D, Json.Get (D, 0, "program")));
+         --  受限解码之后 content 本身就是程序(不再包一层 JSON)
+         Program := To_Unbounded_String (Inner);
          if Length (Program) = 0 then
             Err := To_Unbounded_String ("脑交上来一段空程序");
             return False;

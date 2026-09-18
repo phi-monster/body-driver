@@ -233,6 +233,59 @@ package body Sinew is
         & " must = I accept it, but in this version every line of a do is solved together anyway.";
    end Grammar;
 
+   --  "a b c" ⇒ ""a"" | ""b"" | ""c""
+   function Quoted_List (S : String) return String is
+      R : Unbounded_String;
+      I : Natural := S'First;
+      J : Natural;
+   begin
+      while I <= S'Last loop
+         J := I;
+         while J <= S'Last and then S (J) /= ' ' loop
+            J := J + 1;
+         end loop;
+         if J > I then
+            if Length (R) > 0 then
+               Append (R, " | ");
+            end if;
+            Append (R, '"' & S (I .. J - 1) & '"');
+         end if;
+         I := J + 1;
+      end loop;
+      return To_String (R);
+   end Quoted_List;
+
+   --  受限解码用的机器可读语法。词表(关系 / 结局 / 角色 / 步幅 / 力道)全部来自同两个枚举,
+   --  和 Grammar 印给脑看的那份是同一套词。名字是脑自己的话 ⇒ 只限成 1–3 个小写词。
+   --  一段程序限成 1–4 行:GBNF 里 "行+" 没有停的理由,模型会一直吐到 token 上限(实测 done x60)。
+   function EBNF return String is
+      Rels : constant String := Quoted_List (All_Rels);
+      Outs : constant String := Quoted_List (All_Outcomes);
+   begin
+      return
+        "root ::= line (line)? (line)? (line)?" & ASCII.LF &
+        "line ::= (interval | control | decl | word) ""\n""" & ASCII.LF &
+        --  块里只能放简单行:否则 if 里能再套 if,模型在温度 0 下会无限套娃(实测 if touched: x26)
+        "simple ::= (interval | decl1 | word) ""\n""" & ASCII.LF &
+        "interval ::= ""do "" cons ("" and "" cons)? "" until "" outcome ("" or "" num "" steps"")? (eye)?" & ASCII.LF &
+        "eye ::= "" with my still eye"" | "" with my moving eye""" & ASCII.LF &
+        "cons ::= who "" "" rel "" "" name (step)? | who "" press "" name "" "" effort | who "" close "" name | who "" open"" | who "" still""" & ASCII.LF &
+        "who ::= ""me"" | ""grasper"" | ""pusher""" & ASCII.LF &
+        "rel ::= " & Rels & ASCII.LF &
+        "outcome ::= " & Outs & ASCII.LF &
+        "step ::= "" small"" | "" medium"" | "" large""" & ASCII.LF &
+        "effort ::= ""light"" | ""firm"" | ""hard""" & ASCII.LF &
+        "num ::= [1-9] ([0-9])?" & ASCII.LF &
+        "name ::= w ("" "" w)? ("" "" w)?" & ASCII.LF &
+        "w ::= [a-z] ([a-z])*" & ASCII.LF &
+        "control ::= ""repeat "" num "" times:\n"" simple (simple)? ""end"" | ""if "" outcome "":\n"" simple (simple)? (""else:\n"" simple (simple)?)? ""end"" | ""try:\n"" simple (simple)? ""or:\n"" simple (simple)? ""end""" & ASCII.LF &
+        "decl ::= ""to "" name "":\n"" simple (simple)? ""end"" | decl1" & ASCII.LF &
+        "decl1 ::= ""run "" name | ""remember where "" who "" is as "" name" & ASCII.LF &
+        "word ::= ""say "" sent | ""done""" & ASCII.LF &
+        "sent ::= [a-zA-Z] ([a-zA-Z ,.'])*";
+   end EBNF;
+
+
    Max_Words : constant := 64;
    type Word_Array is array (1 .. Max_Words) of Unbounded_String;
 
