@@ -246,7 +246,35 @@ end
 | QW2 | 收紧 rel/name | 0 / 8 | 散开,无单一主因 |
 | QW3 | `until free` 只跟 close | 1 / 3 | — |
 | QW4 | rel 表改由 `Plan.Usable_Rels` 生成 | 0 / 9 | **`press` ×5 · `me` ×2** |
-| QW5 | 删掉这两个死键 | (跑着) | — |
+| QW5 | 删掉这两个死键 | (作废) | 起炮漏了 `BL_NO_DEPTH=1` ⇒ 带深度,不合官方观测 |
+| QW5B | 同上,无深度重跑 | 2 / 4 | `until lost 不用等` ×2;**首次程序过三关 + 身体执行** |
+| QW6 | 名字不许吞语言自己的词 | **6 / 6 = 100%** | 说不出口 0 · 退回 0 |
+
+### 🟢 拼写这一关打穿了(QW6,2026-09-18)
+
+`GC9 0/587` → `QW4 0/9` → `QW5B 2/4` → **`QW6 6/6`**。零 Python,零提示词教程,Qwen 自己看自己写。
+
+做法一句话:**键盘上只有这具身体、这一版真有的键,而且键上的字不许被名字吞掉。**
+`name` 的词表由【前缀树补集】生成,保留词从语法自己的字面量里扫出来(`Literal_Words`),
+语言以后加词自动被保留。拿真解码器证伪过:`until→untils` · `and→ands` · `small→smaller`,
+而 `scissors/handle/blue/thing` 原样。
+
+### 🔴 压力换了个地方冒出来:名字是语法里唯一的自由槽
+
+保留词够不到之后,模型改成**把词粘在一起**塞进名字:
+```
+do grasper close grip ontoitem withmystilleyeuntiltouchedendor until timeout
+```
+它想说的是「close grip **onto item** **with my still eye** **until touched**」。
+**而绑定器照单全收**:`grip ontoitem withmystilleyeuntiltouchedendor ⇒ 第3 块`(抓握区自己)。
+
+⇒ **主指标换成"名字指对没有"**。绑定器现在对 `me`/`pusher` 会说"绑不上",对一串垃圾却不会 ——
+这是"宁可报假数也不肯说不知道",和 LAB「拒绝报假数=保留」那条正相反,下一炮查这里。
+
+### 🔴 另一条:驱动崩过一次(QW5B)
+
+`act.adb:5075 CONSTRAINT_ERROR` —— `Natural (C.Items(i).Slot)`,而 `Slot` 的声明就是 `Integer := -1`
+("世界图里没有槽"的东西正是 -1)。两处同写法都加了 `>= 0`。
 
 **QW4 的教训(这是我自己漏的,不是模型的问题)**:上一炮我只把 `press` 从**关系表**里摘掉,
 可 `press` 在语法里**另有一条自己的产生式**(`cons ::= … | who " press " name " " effort`),那条没动。
