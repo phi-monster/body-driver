@@ -71,6 +71,27 @@ begin
       Put_Line ("  act.adb 造键盘时的调用 Usable_Rels(R, -1, True)  = [" & Plan.Usable_Rels (R, -1, True) & "]");
       Put_Line ("  同一份报告,换成第 0 块当靶子 (R, 0, True)        = [" & Plan.Usable_Rels (R, 0, True) & "]");
       Put_Line ("  同一份报告,不认为有支撑面 (R, 0, False)          = [" & Plan.Usable_Rels (R, 0, False) & "]");
+      --  五行各自"这具身体上有没有哪一块量得出它" —— 键盘就是从这五个是/否推出来的。
+      --  只打印,不参与任何判定。
+      Put_Line ("");
+      Put_Line ("══ 五行,这具身体上有没有任何一块量得出它 ══");
+      for Row in Exam.Row_Id loop
+         declare
+            Any : Boolean := False;
+            N_Ok : Natural := 0;
+         begin
+            for I in 0 .. Integer (R.Things.Length) - 1 loop
+               if Exam.Allowed (R.Things (Natural (I)).Rows (Row)) then
+                  Any := True;
+                  N_Ok := N_Ok + 1;
+               end if;
+            end loop;
+            Put_Line ("  " & Exam.Row_Name (Row) & "  "
+                      & (if Any then "能用" else "死的")
+                      & "   (量得出它的块:" & Natural'Image (N_Ok)
+                      & " /" & Natural'Image (Natural (R.Things.Length)) & ")");
+         end;
+      end loop;
       if Argument_Count >= 2 then
          declare
             Src : Unbounded_String;
