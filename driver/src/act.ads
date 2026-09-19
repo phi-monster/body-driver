@@ -257,6 +257,13 @@ package Act is
       --  your prompt contains at least 7493 input tokens"),驱动照着把它减半再来,减到装得下为止。
       --  以前从不量"我能给多少",只会一股脑全给 ⇒ 单帧 347 件、3589 轮里 3577 轮撞墙,脑几乎没看见过画面。
       List_Cap : Natural := 0;
+      --  上一段程序的原文,和它有没有让身体动过。
+      --  🔴 CS3 实测:45 段里 43 段第一句一字不差(`remember where grasper is as myhand`),
+      --  全炮只有 3 种开头 —— 那不是 45 个样本,是 1 个样本的 43 份复印件。
+      --  死循环是闭合的:它写了一句不动身体的话 ⇒ 世界没变 ⇒ 提示词没变 ⇒ 温度 0 ⇒ 又写同一句。
+      --  身体要把这件事【如实说出来】(这是报告,不是窍门)。
+      Last_Prog : Unbounded_String;
+      Last_Moved : Boolean := True;
       Prog_Log : Unbounded_String;     --  🔴 这一段程序里【每一节】的结果都攒在这儿。
                                        --  以前只留最后一节,而最后那一轮恰好是"程序跑完了"的空话,
                                        --  于是前几节说了什么全被冲掉,脑只能去翻日志 —— 等于身体不会说话。

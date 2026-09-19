@@ -202,7 +202,12 @@ package body Brain is
       --  说不出口的话在 token 层面就打不出来。回包的 content 本身就是程序,不再包一层 JSON。
       B64 : constant String := Codec.Base64 (Codec.BMP24 (RGB, W, H));
       Body_Json : constant String :=
-        "{""model"":""eye"",""max_tokens"":700,""temperature"":0,""chat_template_kwargs"":{""enable_thinking"":false}," &
+        --  🔴 写程序这一问【不能用温度 0】。CS3 实测:45 段里 43 段第一句一字不差,
+        --  全炮只有 3 种开头 —— 那不是 45 个样本,是 1 个样本的 43 份复印件。
+        --  它写了一句不动身体的话 ⇒ 世界没变 ⇒ 提示词没变 ⇒ 温度 0 ⇒ 又写同一句,闭环。
+        --  温度是【解码器设置】,不是给它的暗示:要判"它会不会想",至少得是独立抽样。
+        --  代价照记:同一炮不再逐字可复现(认名字那一问仍然温度 0,那是要稳)。
+        "{""model"":""eye"",""max_tokens"":700,""temperature"":0.7,""chat_template_kwargs"":{""enable_thinking"":false}," &
         """structured_outputs"":{""grammar"":""" & Json.Escape (Sinew.EBNF (Rels_Usable, Roles_Usable, Outs_Usable)) & """}" &
         ",""messages"":[{""role"":""user"",""content"":[{""type"":""image_url"",""image_url"":{""url"":""data:image/bmp;base64," & B64 &
         """}},{""type"":""text"",""text"":""" & Json.Escape (Prompt) & """}]}]}";

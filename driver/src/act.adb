@@ -5099,6 +5099,16 @@ package body Act is
                end if;
                Put_Line ("[身] 🧠 它交上来一段程序:");
                Put_Line (To_String (Text));
+               --  🔴 一字不差地重复了上一段,而上一段一根手指都没动过 ⇒ 如实说出来。
+               --  不给窍门、不给例句,只报这一个事实 —— 它是真的,而且脑看不到就永远出不了这个圈。
+               if Text = C.Last_Prog and then not C.Last_Moved then
+                  C.Recent := C.Recent
+                    & " You just gave me the very same program again, word for word, and the one before it"
+                    & " did not move any part of me: nothing in the picture changed because of it.";
+                  Put_Line ("[身] 🧠 这一段和上一段一字不差,而上一段没让我动过 ⇒ 已如实告诉它");
+               end if;
+               C.Last_Prog := Text;
+               C.Last_Moved := False;   --  这一段走过步就会被置回 True
                declare
                   Rep : constant Exam.Report := Exam.Judge (C.Map, C.Tables);
                   P : constant Sinew.Program := Sinew.Parse (To_String (Text));
@@ -6301,6 +6311,9 @@ package body Act is
                --  身体早就量过哪只眼长在哪条胳膊上(Cam_On_Arm)⇒ 直接用:
                --    长在我正动的这条胳膊上 ⇒ 画面确实变了 ⇒ 清掉重新问;
                --    长在别处 ⇒ 我动它不变 ⇒ 标记留着,别再弹过去。
+               if Steps_Taken > 0 then
+                  C.Last_Moved := True;   --  这一段真的让身体走过步
+               end if;
                if Steps_Taken > 0 and then C.Blind_Cam >= 0
                  and then not Pts.Is_Empty
                  and then Pts (0).Arm < Natural (C.Map.Cam_On_Arm.Length)
