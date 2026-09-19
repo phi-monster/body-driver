@@ -62,9 +62,26 @@ package body Plan is
       return "";
    end Tried_Of;
 
+   --  🔴🔴 负号下标【不是】越界,是「还没点名靶子」—— 造键盘那一刻(act.adb 用 Thing_Idx = -1
+   --  问 Usable_Rels)必然如此:脑还没写出程序,当然还没有靶子。以前这两件被写成同一句
+   --  `Thing_Idx < 0 or else Thing_Idx >= Length ⇒ False`,于是造键盘时每一行都判"不能用",
+   --  每一个需要任何一行的关系词都被否掉,而 still/close/open 又被 Usable_Rels 按名字排除在外
+   --  ⇒ **递给解码器的关系词表恒为空**。CS5 实测:79 段程序 0 条移动命令 —— 不是它不用,是按不出来。
+   --  ⇒ 分开判。没点名靶子时,这一行"能不能用"问的是【这具身体上有没有哪一块量得出它】:
+   --    有 ⇒ 这个键按得动,放上键盘;没有 ⇒ 这一行在这具身体上就是死的,不给。
+   --    键盘只管"按得动吗";具体这一次点的那一块行不行,编译器到时候逐块判(Row_Ok 的正号分支),
+   --    判不过就带着理由退回给脑 —— 闸只有编译器那一道,不在键盘上多设一道。
    function Row_Ok (R : Exam.Report; Thing_Idx : Integer; Row : Exam.Row_Id) return Boolean is
    begin
-      if Thing_Idx < 0 or else Thing_Idx >= Integer (R.Things.Length) then
+      if Thing_Idx < 0 then
+         for I in 0 .. Integer (R.Things.Length) - 1 loop
+            if Exam.Allowed (R.Things (Natural (I)).Rows (Row)) then
+               return True;
+            end if;
+         end loop;
+         return False;
+      end if;
+      if Thing_Idx >= Integer (R.Things.Length) then
          return False;
       end if;
       return Exam.Allowed (R.Things (Natural (Thing_Idx)).Rows (Row));
