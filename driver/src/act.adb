@@ -399,6 +399,9 @@ package body Act is
    --  两项都无量纲/无常数地合并:各自排名相加取最小(只用序,不引入权重)。
    Last_Bright : Bools;
    Last_Bright_Cam : Integer := -1;
+   --  这只眼这一帧自己算出来的明暗分界(0..255)。清单里报每一块的亮度时拿它当基准:
+   --  「亮度 212,这只眼的分界是 149」比光说 212 多一件事 —— 它是我量的,不是写死的。
+   Last_Split : Long_Float := -1.0;
 
    --  在这一块东西上挑一个【夹得住】的下手点。挑不出来就 Ok = False(不瞎给)。
    --  只用量出来的量:两瓣心距(爪口)、瓣到瓣方向(合爪方向)、这块东西自己的轮廓。
@@ -592,6 +595,7 @@ package body Act is
       end loop;
       Last_Bright := Mask;   --  留给接触集扫轮廓用(同一张掩膜,不另切一遍)
       Last_Bright_Cam := Integer (Cam);
+      Last_Split := T;
       for R of Picture.Components (Mask, Cw, Ch, Picture.Min_Pixels (Cw, Ch)) loop
          declare
             Q : Picture.Region := R;
@@ -1092,8 +1096,21 @@ package body Act is
                It.X0 := Sl.R.X0; It.Y0 := Sl.R.Y0; It.X1 := Sl.R.X1; It.Y1 := Sl.R.Y1;
                It.Au := Sl.R.Au; It.Av := Sl.R.Av; It.Elong := Sl.R.Elong;
                It.Gray := Picture.Mean_Gray (F.Cams (Cam).Gray, Cw, Ch, Sl.R);
-               Push (It, "a thing, now in cell " & Codec.Img (Cell_Of (C, It.Cu, It.Cv)) & " (" & Codec.Img (It.Count) & " px, standing " &
-                     Codec.Fmt (It.Height, 3) & " out of the surface)" & Rel (It.Cu, It.Cv), Draw.Green, 2);
+               --  🔴 这一块的【胖瘦】和【亮度】我本来就量了(Elong / Gray,量它们的注释写着"用来和别的块区分"),
+               --  却只留给自己重新找目标用,从不说给脑听。结果是清单上两百条字面一模一样的
+               --  "a thing, now in cell N (NN px, standing 0.000)" —— 没有深度时"standing"全是 0.000,
+               --  于是每一行只剩一个格号和一个像素数,谁也点不出名。点不出名就写不出"走到它那儿去",
+               --  脑只好退回 close/open/still 这三个不用点名的词。**量了不说 = 把眼睛量到的东西藏起来。**
+               --  ⇒ 量到什么就说什么:长宽比、平均亮度、以及这只眼这一帧自己算出来的明暗分界(基准)。
+               --  这不是给窍门 —— 没有例句、没有"哪一块是球",只是把尺子上的读数念出来。
+               Push (It, "a thing, now in cell " & Codec.Img (Cell_Of (C, It.Cu, It.Cv)) & " (" & Codec.Img (It.Count) & " px, "
+                     & Codec.Fmt (It.Elong, 1) & "x as long as it is wide"
+                     & (if It.Gray >= 0.0 and then Last_Split >= 0.0 and then Last_Bright_Cam = Integer (Cam)
+                        then ", brightness " & Codec.Img (Natural (Long_Float'Floor (It.Gray)))
+                             & " where this eye's own dividing line this frame is " & Codec.Img (Natural (Long_Float'Floor (Last_Split)))
+                        elsif It.Gray >= 0.0 then ", brightness " & Codec.Img (Natural (Long_Float'Floor (It.Gray)))
+                        else "")
+                     & ", standing " & Codec.Fmt (It.Height, 3) & " out of the surface)" & Rel (It.Cu, It.Cv), Draw.Green, 2);
             elsif Sl.Seen then
                It.Kind := Thing_Remembered; It.Located := True;
                It.Cu := Sl.Shadow.Cu; It.Cv := Sl.Shadow.Cv; It.Depth := Sl.Shadow.Depth; It.Height := Sl.Shadow.Height; It.Count := Sl.Shadow.Count;
