@@ -11,6 +11,8 @@ with Zone;
 with Learned;
 with Schema;
 with Exam;
+with Codec;
+with Chan;
 with Sinew;
 with Plan;
 procedure Bodyexam is
@@ -91,6 +93,29 @@ begin
                       & "   (量得出它的块:" & Natural'Image (N_Ok)
                       & " /" & Natural'Image (Natural (R.Things.Length)) & ")");
          end;
+      end loop;
+      --  🔴 「抬起」那个词要接到哪条量上,有两个都说得通的做法。把两边的实测数各自打出来,
+      --  好让决定建立在数上,不是名字上。只打印,不参与任何判定。
+      Put_Line ("");
+      Put_Line ("══ 「抬起」可以接到哪:两条路各自的实测数 ══");
+      Put_Line ("  (a) 走视觉目标 —— 「看着多大」这一行,每一块各自的判决与一格效果:");
+      for I in 0 .. Integer (R.Things.Length) - 1 loop
+         declare
+            Rw : constant Exam.Row_Check := R.Things (Natural (I)).Rows (Exam.Bigness);
+         begin
+            Put_Line ("      第" & Integer'Image (I) & " 块(第" & Natural'Image (R.Things (Natural (I)).Arm + 1)
+                      & " 只手 · 第" & Natural'Image (R.Things (Natural (I)).Cam) & " 台相机):"
+                      & Exam.Verdict'Image (Rw.V)
+                      & " · 一格推动 " & Codec.Fmt (Rw.Per_Notch, 6)
+                      & " · 推得最动的通道 " & Integer'Image (Rw.Best_Chan)
+                      & " · 重复 " & Natural'Image (Rw.Reps) & " 次");
+         end;
+      end loop;
+      Put_Line ("  (b) 走开环一推 —— close 试抬用的那条通道(每只手的第 2 号平移通道)的探针幅度:");
+      for A in 0 .. M.Arms - 1 loop
+         Put_Line ("      第" & Natural'Image (A + 1) & " 只手 · 通道" & Natural'Image (A * Chan.Per_Arm + 2)
+                   & " 幅度 " & Codec.Fmt (M.Amp (A * Chan.Per_Arm + 2), 6)
+                   & "  (act.adb:4633 用的是它的 4 倍)");
       end loop;
       if Argument_Count >= 2 then
          declare
