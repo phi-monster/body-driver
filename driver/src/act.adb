@@ -5086,6 +5086,13 @@ package body Act is
                      end if;
                   end;
                end loop;
+               --  🔴 CS5 实测:整份日志里查不到【这一轮键盘上到底有哪些键】—— 语法一个字都没进日志。
+               --  于是"零死键"这条前置条件在事后无法核对,任何"给了它键它不用"的判决都建立在没记录的假设上。
+               --  ⇒ 把当场生成的三张表如实记一行。这行只写日志,不参与任何判定。
+               Put_Line ("[身] 🎹 这一轮键盘:关系 [" & Plan.Usable_Rels (Rep0, -1, Any_Stands)
+                         & "] · 角色 [" & To_String (Roles)
+                         & "] · 结局 [" & Plan.Waitable_Outcomes (Any_Stands)
+                         & "] · 清单 " & Codec.Img (Natural (C.Items.Length)) & " 件");
                if not Brain.Ask (To_String (C.Eye_Host), C.Eye_Port, To_String (C.Task_Text), To_String (Listing), Recent,
                                  Sinew.Grammar (Plan.Usable_Rels (Rep0, -1, Any_Stands), To_String (Roles),
                                                 Plan.Waitable_Outcomes (Any_Stands)),
