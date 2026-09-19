@@ -197,6 +197,30 @@ package body Act is
    function Cn_Changed (C : Context; Cn : Natural) return Boolean is
      (Index (C.Changed_Say, "channel " & Codec.Img (Cn) & " used to move") = 0);
 
+   --  🔴🔴 「这根通道不听话了」以前【只进不出】:`Changed_Say` 从不清空,`Cn_Changed` 是一次性闩,
+   --  于是某一步的一次顶死(在仿真里本体读数没有抖动,地板量出来恰好是 0,所以"实到恰好 0.0"
+   --  一步就够)被讲成永久的"我变了",而且此后每一轮都讲一遍。CS5 实测:从第 113 轮起
+   --  六条通道全被这么宣告死掉,同一份日志里身体却一直在交付(命令与实到平均差 0.0202 m)。
+   --  脑读到的是"我整具身体都不听话了"。**那是一句假话,而假话比不说更坏。**
+   --  ⇒ 这一根又交付得动了,就把那句话【撤掉】。量过期就收回,是这一层允许说的话之一。
+   procedure Cn_Recovered (C : in out Context; Cn : Natural) is
+      Tag : constant String := "  I HAVE CHANGED: channel " & Codec.Img (Cn) & " used to move";
+      At_S : constant Natural := Index (C.Changed_Say, Tag);
+   begin
+      if At_S = 0 then
+         return;
+      end if;
+      declare
+         Rest : constant String := Slice (C.Changed_Say, At_S, Length (C.Changed_Say));
+         Nl : constant Natural := Index (To_Unbounded_String (Rest), "" & ASCII.LF);
+         Head : constant String := Slice (C.Changed_Say, 1, At_S - 1);
+         Tail : constant String :=
+           (if Nl = 0 then "" else Slice (C.Changed_Say, At_S + Nl, Length (C.Changed_Say)));
+      begin
+         C.Changed_Say := To_Unbounded_String (Head & Tail);
+      end;
+   end Cn_Recovered;
+
    --  层数 = 让最粗那一层的位移落到一个像素以内所需要的层数。
    --  上限 6 层:再粗下去图本身只剩几十个像素,已经没有内容可对(不是调参,是图没了)。
    function Levels_For (Px_Move : Long_Float) return Positive is
@@ -3306,6 +3330,10 @@ package body Act is
                                          & "I commanded it and my body delivered nothing." & ASCII.LF);
                               end if;
                            elsif Note.Active (K) then
+                              --  🔴 这一根【交付得动】⇒ 如果之前宣告过它死了,现在收回那句话。
+                              if abs Note.Got (K) > Long_Float (Fl.Delivery) then
+                                 Cn_Recovered (C, Arm * Chan.Per_Arm + K);
+                              end if;
                               Reach (K) := Long_Float'Min (Reach (K) * 2.0,
                                                            Track_Win / Long_Float'Max (1.0e-9, C.Map.Amp (Arm * Chan.Per_Arm + K)));
                            end if;
