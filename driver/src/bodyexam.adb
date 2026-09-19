@@ -64,6 +64,13 @@ begin
       R : constant Exam.Report := Exam.Judge (M, Tables);
    begin
       Exam.Say (R);
+      --  🔴 act.adb 给解码器造键盘时用的就是 Thing_Idx = -1(它那时还没有靶子)。
+      --  这里把同一个调用原样打出来,好核对"键盘上到底有哪些关系词"。只打印,不参与任何判定。
+      Put_Line ("");
+      Put_Line ("══ 键盘上的关系词 ══");
+      Put_Line ("  act.adb 造键盘时的调用 Usable_Rels(R, -1, True)  = [" & Plan.Usable_Rels (R, -1, True) & "]");
+      Put_Line ("  同一份报告,换成第 0 块当靶子 (R, 0, True)        = [" & Plan.Usable_Rels (R, 0, True) & "]");
+      Put_Line ("  同一份报告,不认为有支撑面 (R, 0, False)          = [" & Plan.Usable_Rels (R, 0, False) & "]");
       if Argument_Count >= 2 then
          declare
             Src : Unbounded_String;
