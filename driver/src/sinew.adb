@@ -24,6 +24,53 @@ package body Sinew is
          when Re_Still => "这一段不许动", when Re_Press => "朝它压,只说劲不说位置",
          when Re_Close => "合拢", when Re_Open => "张开");
 
+   --  把"这只眼里说得出口的关系"逐个配上它的含义,一行一个
+   function Rel_Gloss (Rels_Usable : String) return String is
+      R : Unbounded_String;
+      I : Natural := Rels_Usable'First;
+      J : Natural;
+   begin
+      while I <= Rels_Usable'Last loop
+         J := I;
+         while J <= Rels_Usable'Last and then Rels_Usable (J) /= ' ' loop
+            J := J + 1;
+         end loop;
+         if J > I then
+            declare
+               W : constant String := Rels_Usable (I .. J - 1);
+            begin
+               for Rl in Rel loop
+                  if Rel_Word (Rl) = W and then Rel_En (Rl) /= "" then
+                     Append (R, "              " & W & " = " & Rel_En (Rl) & ASCII.LF);
+                  end if;
+               end loop;
+            end;
+         end if;
+         I := J + 1;
+      end loop;
+      return To_String (R);
+   end Rel_Gloss;
+
+   function Rel_En (R : Rel) return String is
+     (case R is
+         when Re_None => "",
+         when Re_Touching => "move me until I am against it",
+         when Re_Above => "move me until I am above it in the picture",
+         when Re_Below => "move me until I am below it in the picture",
+         when Re_Left => "move me until I am to the left of it in the picture",
+         when Re_Right => "move me until I am to the right of it in the picture",
+         when Re_Nearer => "move me nearer to the eye that sees it best",
+         when Re_Farther => "move me away from the eye that sees it best (this is how I lift)",
+         when Re_Onto => "press me down onto the surface it is resting on",
+         when Re_Into => "aim me inside it, halfway between its skin and the surface it stands on",
+         when Re_Off => "take me off that surface",
+         when Re_Facing => "turn this part of me until it points at it",
+         when Re_Clear => "never come closer to it than I am now",
+         when Re_Still => "do not move at all during this stretch",
+         when Re_Press => "push against it, saying only how hard, not where to go",
+         when Re_Close => "close my fingers",
+         when Re_Open => "open my fingers");
+
    function Step_Word (S : Step) return String is
      (case S is when Sp_None => "", when Sp_Small => "small",
          when Sp_Medium => "medium", when Sp_Large => "large");
@@ -385,6 +432,8 @@ package body Sinew is
         "<what>      ::= <a name in your words> | <a name you told me to remember> | <who>" & ASCII.LF &
         "              (a name is one to three plain words; it may NOT be any of the words in this grammar)" & ASCII.LF &
         "<relation>  ::= " & Bar (Rels_Usable) & ASCII.LF &
+        --  每个键标上它是干什么的(含义来自驱动自己那张表,不是我写的说明书)
+        Rel_Gloss (Rels_Usable) &
         "<step>      ::= small | medium | large" & ASCII.LF &
         "<outcome>   ::= " & Bar (Outs_Usable) & ASCII.LF &
         "<control>   ::= repeat <n> times: <line> [<line>] end" & ASCII.LF &

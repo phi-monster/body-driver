@@ -125,6 +125,12 @@ package Sinew is
    function Outcome_Word (O : Outcome) return String;
    function Outcome_Cn (O : Outcome) return String;
    function Rel_Cn (R : Rel) return String;
+   --  🔴 每个关系词【在这具身体上是干什么的】,一句话。
+   --  驱动里本来就有中文那一份(Rel_Cn),却从来没给过脑看 ——
+   --  于是它拿到的是一串光秃秃的英文单词,无从知道 touching 的意思是"走过去贴上它",
+   --  只敢用 still / close / remember 这些字面意思一看就懂的词,从不用能让身体移动的词。
+   --  给键标上它是干什么的,和给语法是同一类:那是键盘的一部分,不是窍门。
+   function Rel_En (R : Rel) return String;
    function All_Rels return String;
    function All_Outcomes return String;
    function Unparse (I : Instr) return String;
