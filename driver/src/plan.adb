@@ -14,7 +14,18 @@ package body Plan is
    begin
       case R is
          when Sinew.Re_Touching =>
-            N (Exam.Sideways) := True; N (Exam.Updown) := True; N (Exam.Nearness) := True;
+            --  🔴🔴 这里以前无条件也要「远近」,而【执行那一路根本不是这么写的】:
+            --    P.Tu/Tv 始终带权重(画面上的对齐永远在算),
+            --    距离那一路是两条各自按"读不读得到"给权重 ——
+            --    `P.Wz := (if Is_Nan (Z.Depth) then 0.0 else 1.0)` 和
+            --    `P.Wsize := (if Z.Span > 0.0 then 1.0 else 0.0)`,
+            --    旁边的注释还写着「在手上这只眼睛里,握区的远近常常读不到(NaN),
+            --    那时**「看着多大」是【唯一】的距离信号**」。
+            --  ⇒ 授权表和执行器对不上,错的是授权表:它要了一行执行器并不单独依赖的量,
+            --    于是无深度时「靠近」整个词被判死(CS5:79 段程序 0 条移动命令)。
+            --  ⇒ 改成:左右/上下【都要】,距离信号【两条里有一条就行】(Rows_Any)。
+            --    两条都没有时仍然拦 —— 那是合法的退回(量不出来),理由照样给脑。
+            N (Exam.Sideways) := True; N (Exam.Updown) := True;
          when Sinew.Re_Above | Sinew.Re_Below =>
             N (Exam.Updown) := True;
          when Sinew.Re_Left | Sinew.Re_Right =>
@@ -30,6 +41,23 @@ package body Plan is
       end case;
       return N;
    end Rows_Needed;
+
+   --  🔴 有些关系词的执行器【不依赖某一条具体的量,而是依赖"这几条里有一条读得到"】。
+   --  `Rows_Needed` 是逐行取【与】,表达不了这件事,于是只能整行要下去 —— 那就是上面那个 bug。
+   --  这张表回答的是另一个问题:这几行里【至少有一行】能用吗。空集 = 这个词没有这种依赖。
+   function Rows_Any (R : Sinew.Rel) return Need is
+      N : Need := [others => False];
+   begin
+      case R is
+         when Sinew.Re_Touching =>
+            --  "它离我还有多远":有深度就用深度,没有就用"看着多大"。执行器两条都带权重地用着。
+            N (Exam.Nearness) := True; N (Exam.Bigness) := True;
+         when others =>
+            null;
+      end case;
+      return N;
+   end Rows_Any;
+
 
    function Key_Of (N : Sinew.Noun) return String is
      (case N.K is
@@ -87,6 +115,22 @@ package body Plan is
       return Exam.Allowed (R.Things (Natural (Thing_Idx)).Rows (Row));
    end Row_Ok;
 
+   --  这几行里有没有【任意一行】能用(空集恒真:这个词没有这种依赖)
+   function Any_Row_Ok (R : Exam.Report; Thing_Idx : Integer; Rl : Sinew.Rel) return Boolean is
+      A : constant Need := Rows_Any (Rl);
+      Empty : Boolean := True;
+   begin
+      for Row in Exam.Row_Id loop
+         if A (Row) then
+            Empty := False;
+            if Row_Ok (R, Thing_Idx, Row) then
+               return True;
+            end if;
+         end if;
+      end loop;
+      return Empty;
+   end Any_Row_Ok;
+
    function Rel_Ok (R : Exam.Report; Thing_Idx : Integer; Rl : Sinew.Rel; Surface : Boolean) return Boolean is
       N : constant Need := Rows_Needed (Rl);
    begin
@@ -98,7 +142,7 @@ package body Plan is
             return False;
          end if;
       end loop;
-      return True;
+      return Any_Row_Ok (R, Thing_Idx, Rl);
    end Rel_Ok;
 
    function Oc_Waitable (O : Sinew.Outcome; Surface : Boolean) return Boolean is
@@ -305,6 +349,18 @@ package body Plan is
                                  exit;
                               end if;
                            end loop;
+                           --  🔴 上面那个循环管的是【每一行都得有】;这一条管【这几行里得有一行】。
+                           --  把「靠近」从"无条件要远近"放开之后,这一道必须补上,否则就是拆了闸不换 ——
+                           --  两条距离信号一条都读不到时,像素一对齐就会被判成"到了"(GE 实测差着 20 厘米)。
+                           --  拦住的理由是"我量不出来",这是合法的退回,不是"我做不到"。
+                           if not Any_Row_Ok (R, Ti, C.R) then
+                              Reject (I.Line,
+                                "「" & Sinew.Rel_Word (C.R) & "」(" & Sinew.Rel_Cn (C.R)
+                                & ")要知道它离我还有多远,而这两条我一条都读不到:"
+                                & "「" & Exam.Row_Name (Exam.Nearness) & "」" & Why_Row (R, Ti, Exam.Nearness)
+                                & " · 「" & Exam.Row_Name (Exam.Bigness) & "」" & Why_Row (R, Ti, Exam.Bigness),
+                                "我现在说得出口的关系:" & Usable_Rels (R, Ti, Surface));
+                           end if;
                         end if;
                      end;
                   end;
