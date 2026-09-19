@@ -3295,6 +3295,15 @@ package body Act is
                   end;
                end loop;
                Dn := Sqrt (Dn); An := Sqrt (An); Gn := Sqrt (Gn);
+               --  🔴 撤回要放在【每一步都会走到】的地方。上一版我把它塞进了"没照做 ⇒ 步子太小"
+               --  那个嵌套分支里 —— 那条路只在这一步没走成时才走到,于是一根【恢复正常、步步交付】的
+               --  通道永远碰不到它,那句假话就一直留在自述里。判"它死了"看的是单独这一根,
+               --  收回也该只看单独这一根:这一步它交付得动 ⇒ 那句话此刻是假的 ⇒ 撤掉。
+               for K in 0 .. Chan.Per_Arm - 1 loop
+                  if abs Note.Got (K) > Long_Float (Fl.Delivery) then
+                     Cn_Recovered (C, Arm * Chan.Per_Arm + K);
+                  end if;
+               end loop;
                --  🔴 以前这里写 An > 1.0 ⇒ 命令比一次探针幅度小就【一个字都不报】。
                --  GM 实测:连着 60 步命令 0.004、实到精确 0.0000,脑什么都没听到。任何非零命令都要判。
                if An > 0.0 and then Dn > 0.5 * An then
@@ -3330,10 +3339,6 @@ package body Act is
                                          & "I commanded it and my body delivered nothing." & ASCII.LF);
                               end if;
                            elsif Note.Active (K) then
-                              --  🔴 这一根【交付得动】⇒ 如果之前宣告过它死了,现在收回那句话。
-                              if abs Note.Got (K) > Long_Float (Fl.Delivery) then
-                                 Cn_Recovered (C, Arm * Chan.Per_Arm + K);
-                              end if;
                               Reach (K) := Long_Float'Min (Reach (K) * 2.0,
                                                            Track_Win / Long_Float'Max (1.0e-9, C.Map.Amp (Arm * Chan.Per_Arm + K)));
                            end if;
