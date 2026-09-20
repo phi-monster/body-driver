@@ -5,6 +5,7 @@ with Bytes; use Bytes;
 with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
 with Ada.Containers.Vectors;
 with Plug;
+with Geom;
 with Selfmap;
 with Zone;
 with World;
@@ -267,6 +268,15 @@ package Act is
       Prog_Log : Unbounded_String;     --  🔴 这一段程序里【每一节】的结果都攒在这儿。
                                        --  以前只留最后一节,而最后那一轮恰好是"程序跑完了"的空话,
                                        --  于是前几节说了什么全被冲掉,脑只能去翻日志 —— 等于身体不会说话。
+      --  ── 几何驾驶(腕眼里只用彩色图 + 手的位姿读数 + 焦距;不读深度)──
+      Geo : Geom.Geo_Vectors.Vector;      --  每台相机一份:焦距、朝向、指尖
+      Geo_Path : Unbounded_String;        --  几何常数存哪(身体文件旁边)
+      Geo_Dist : Long_Float := -1.0;      --  上一次几何逼近结束时,它离"指尖该到的那一点"还差多少米(< 0 = 没有)
+      Geo_Round : Natural := 0;           --  那是第几轮
+      Geo_Came : Long_Float := 0.0;       --  几何逼近一共走了多远(米);"离远点"就沿原路退这么远
+      Geo_Dir : Geom.V3 := [others => 0.0];   --  逼近的方向(世界系单位向量)
+      Geo_Obs : Geom.Obs_Vectors.Vector;  --  这一集里点名那块在腕眼里的历次观测(位姿 + 像素)
+      Geo_Slot : Integer := -1;
    end record;
 
    procedure Init_Tracks (C : in out Context);
