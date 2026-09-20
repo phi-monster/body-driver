@@ -5590,6 +5590,14 @@ package body Act is
                            end if;
                            I := I + 1;
                         end loop;
+                        --  🔴 k = 1 是"就用我现在这只眼"。以前这一支什么都不做,于是脑【说不出
+                        --  "别换,就这只"】—— 而那条"哪只眼变化最大"的启发式会在下一段把它抢走。
+                        --  说了"就用这只"也是点过名,一样要挡住启发式。
+                        if Got and then K = 1 then
+                           Put_Line ("[身]    它说就用现在这只眼(第" & Natural'Image (C.Cam)
+                                     & " 台)⇒ 这一段不再自己换");
+                           C.Eye_Chosen := True;
+                        end if;
                         if Got and then K >= 2 then
                            declare
                               N : Natural := 2;
