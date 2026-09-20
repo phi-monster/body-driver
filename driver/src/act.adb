@@ -5559,6 +5559,56 @@ package body Act is
                case What is
                   when Runtime.Y_Say =>
                      Put_Line ("[身] 🧠 它说:" & To_String (Ins.Text));
+                     --  🔴🔴 每一轮的提示词末尾都印着「CAMERAS (say look = k to see through that camera
+                     --  next turn)」,而这件事【从来没有实现过】:`Brain.Say.Look` 这个字段全项目没有
+                     --  任何地方给它赋过值,恒为 0,于是 `if Say.Look >= 2` 是一段死代码。
+                     --  HB6 实测:我说 `say look = 3`,下一轮日志仍是「第 2 轮(第 0 台相机)」。
+                     --  ⇒ 这是"我答应给你的键,其实按不动"—— 和键盘上关系词恒空是同一类错。
+                     --  ⇒ 就在 say 这一句里认这个词:第 k 个编号按提示词的排法(1 = 此刻这只眼,
+                     --    2.. = 其余各只,顺序和印给脑的那一行完全一致,所以脑看到几就是几)。
+                     declare
+                        T : constant String := To_String (Ins.Text);
+                        I : Natural := T'First;
+                        K : Natural := 0;
+                        Got : Boolean := False;
+                     begin
+                        while I + 3 <= T'Last loop
+                           if T (I .. I + 3) = "look" then
+                              declare
+                                 J : Natural := I + 4;
+                              begin
+                                 while J <= T'Last and then (T (J) = ' ' or else T (J) = '=') loop
+                                    J := J + 1;
+                                 end loop;
+                                 while J <= T'Last and then T (J) in '0' .. '9' loop
+                                    K := K * 10 + (Character'Pos (T (J)) - Character'Pos ('0'));
+                                    J := J + 1;
+                                    Got := True;
+                                 end loop;
+                              end;
+                              exit;
+                           end if;
+                           I := I + 1;
+                        end loop;
+                        if Got and then K >= 2 then
+                           declare
+                              N : Natural := 2;
+                           begin
+                              for Ci in 0 .. C.Map.N_Cams - 1 loop
+                                 if Ci /= C.Cam then
+                                    if N = K then
+                                       Put_Line ("[身]    它要换到第" & Natural'Image (Ci)
+                                                 & " 台相机 ⇒ 下一轮在那台里列块、问、执行");
+                                       C.Cam := Ci;
+                                       C.Blind_Cam := -1;
+                                       exit;
+                                    end if;
+                                    N := N + 1;
+                                 end if;
+                              end loop;
+                           end;
+                        end if;
+                     end;
                   when Runtime.Y_Remember =>
                      --  记的是"这一刻它在我这只眼睛里的位置和远近" —— 身体自己找得回来的东西,不是坐标
                      declare
