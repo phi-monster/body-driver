@@ -5950,8 +5950,16 @@ package body Act is
                               end if;
                            end;
                         end if;
+                        --  🔴🔴 换过去的那只眼【必须看得见这只手】,否则换完角色就绑不上了:
+                        --  SC2 实测,自动换眼把我挪到一只看不见爪子的眼里,那一轮键盘上
+                        --  「角色」整个是空的 —— 连 grasper 都点不了名,脑写什么都被退回,
+                        --  一步都走不了。理由本身(那只眼对这条胳膊的动作最敏感)没错,
+                        --  但"最敏感"不等于"看得见我" —— 得两条都成立才值得换。
+                        --  握区看不看得见是量出来的(每台相机各量一次),不是猜的。
                         if Best_Cam /= C.Cam and then not C.Eye_Chosen
                           and then Sinew."=" (C.Eye_Want, Sinew.Ey_None)
+                          and then (Sub_Arm < 0
+                                    or else Zone_Of (C, Natural (Sub_Arm), Best_Cam, 0).Valid)
                         then
                            Put_Line ("[身] 👁 这条胳膊一动,第" & Codec.Img (Best_Cam) & " 只眼睛的画面变 "
                                      & Codec.Fmt (Best_V, 3) & " 幅,比现在这只多 ⇒ 换过去再看"
