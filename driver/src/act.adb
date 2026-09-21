@@ -548,6 +548,7 @@ package body Act is
       Samp : Floats;
       T : Long_Float;
       T_First : Long_Float := 0.0;
+      T_Low_Keep : Long_Float := 0.0;   --  暗刀的分界,中间那一段要用它当下沿
       Mask : Bools;
       Out_R : Picture.Regions;
       I : Natural := 0;
@@ -594,6 +595,7 @@ package body Act is
             end if;
          end loop;
          T_Low := Picture.Split (Lower);
+         T_Low_Keep := (if Picture.Is_Nan (T_Low) then 0.0 else T_Low);
          if not Picture.Is_Nan (T_Low) then
             for J in 0 .. Cw * Ch - 1 loop
                if Long_Float (G.Element (J)) < T_Low then
@@ -607,6 +609,60 @@ package body Act is
                begin
                   if not Edge then
                      Q.Height := 0.0; Q.Depth := 0.0;   --  main 的 Region 没有 Top 这一位
+                     Out_R.Append (Q);
+                  end if;
+               end;
+            end loop;
+         end if;
+      end;
+      --  🔴🔴 中间那一段以前整个当桌面扔了 —— 而"不亮不暗"的东西正好落在那儿。
+      --  SC1 实测(头顶眼):剪刀那一片中位 95、桌面中位 135 —— 剪刀【比桌子暗】,
+      --  却又没暗过暗刀的分界,于是亮刀和暗刀都不要它,画面上一个框都没有,
+      --  脑连它的号都拿不到 ⇒ 点不了名 ⇒ 一步都动不了(验收线 1「剪刀」因此一次都没试成)。
+      --  ⇒ 中间这一段再分一刀(还是 Otsu,和上下两刀同一个办法,不新加门槛):
+      --    分完两拨里【少的那一拨】是东西,多的那一拨是桌面 —— 桌子总是占大头,这是数出来的,不是我拍的。
+      declare
+         Mid : Floats;
+         T_Mid : Long_Float;
+         N_Lo, N_Hi : Natural := 0;
+         Thing_Is_Darker : Boolean;
+         Band : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (Cw * Ch));
+      begin
+         for X of Samp loop
+            if X > T_Low_Keep and then X <= T then
+               Mid.Append (X);
+            end if;
+         end loop;
+         T_Mid := Picture.Split (Mid);
+         if not Picture.Is_Nan (T_Mid) then
+            for X of Mid loop
+               if X <= T_Mid then
+                  N_Lo := N_Lo + 1;
+               else
+                  N_Hi := N_Hi + 1;
+               end if;
+            end loop;
+            Thing_Is_Darker := N_Lo < N_Hi;
+            for J in 0 .. Cw * Ch - 1 loop
+               declare
+                  V : constant Long_Float := Long_Float (G.Element (J));
+               begin
+                  if V > T_Low_Keep and then V <= T
+                    and then ((Thing_Is_Darker and then V <= T_Mid)
+                              or else (not Thing_Is_Darker and then V > T_Mid))
+                  then
+                     Band.Replace_Element (J, True);
+                  end if;
+               end;
+            end loop;
+            for R of Picture.Components (Band, Cw, Ch, Picture.Min_Pixels (Cw, Ch)) loop
+               declare
+                  Q : Picture.Region := R;
+                  Span_W : constant Boolean := R.X0 = 0 and then R.X1 + 1 >= Cw;
+                  Span_H : constant Boolean := R.Y0 = 0 and then R.Y1 + 1 >= Ch;
+               begin
+                  if not Span_W and then not Span_H then
+                     Q.Height := 0.0; Q.Depth := 0.0;
                      Out_R.Append (Q);
                   end if;
                end;
@@ -6471,8 +6527,16 @@ package body Act is
                         begin
                            P.Cu := Tr.Cu; P.Cv := Tr.Cv; P.Z := Tr.Z; P.Known := Tr.Known or else Cam_A = Integer (P.Arm);
                         end;
-                        if Cam_A = Integer (P.Arm) and then G.Rel /= "" and then G.Of_Item >= 1 and then G.Of_Item <= Natural (C.Items.Length)
+                        --  🔴🔴 这一条以前写成"只在【正在抓的那条胳膊自己的腕相机】里才算",
+                        --  而接触集(挑"哪一段弦窄得塞得进钳口")只在 To_Grip 为真时才跑 ⇒
+                        --  从头顶眼开车时它【一次都跑不到】。SC1 实测:整炮 contact set 出现 0 次。
+                        --  这是个死结:头顶眼走得过去但没有接触集,腕眼有接触集但贴近走不过去
+                        --  (腕眼里"看着多大"要长到爪口那么大,手够不到就顶死)。
+                        --  而接触集本身不需要是腕眼 —— 它扫的是物体轮廓,任何一只【同时看得见
+                        --  这只爪子和这件东西】的眼都算得出来。⇒ 闸改成问这件事,不问相机长在哪。
+                        if G.Rel /= "" and then G.Of_Item >= 1 and then G.Of_Item <= Natural (C.Items.Length)
                           and then C.Items (G.Of_Item - 1).Kind = Thing
+                          and then Zone_Of (C, P.Arm, Cam, 0).Valid
                         then
                            --  自己的手上相机里"我的手到 X" = 让 X 的像素来到握区:改跟 X。
                            --  🔴 换了跟的点,【目标也必须跟着换成握区】。以前只换了前者,于是目标是
