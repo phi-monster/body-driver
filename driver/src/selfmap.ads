@@ -31,10 +31,6 @@ package Selfmap is
       EE_Noise : Long_Float := 0.0;        --  本体位置读数抖多少(米)
       Rot_Noise : Long_Float := 0.0;       --  本体姿态读数抖多少(弧度)
       Jaw_Noise : Long_Float := 0.0;
-      --  🔴 空手值:这一个抓握通道【合在空气上】时读数停在多少(每条臂 × Limits.Max_Jaws + 通道号)。
-      --  开机认握区时本来就要把爪子合到底再张开,那一下的读数就是它 —— 以前算出来就扔了。
-      --  有了它,"夹住没夹住"才有得问手指:读数停在空手值之上 = 中间有东西。< 0 = 还没量过。
-      Jaw_Empty : Floats;
 
       Floors : Floor_Vectors.Vector;       --  每台相机的静止噪声地板
       Pic_Floor : Ints;                    --  每台相机:整幅画静止时最大灰度差

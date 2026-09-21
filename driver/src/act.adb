@@ -4444,21 +4444,6 @@ package body Act is
                   end loop;
                   if Wanted then
                      Jaw_Sweep (L, C, F, Arm, Kk, 0.0, C.Map.Settle + 1, Integer (Cam), Sweep, Steps_J, Reading);
-                     --  🔴 合到底那一下的读数【就是空手值】—— 中间没夹东西,它停在哪儿就是哪儿。
-                     --  这个动作本来就要做(为了看哪些像素扫过去、认出握区),以前把这个数扔了,
-                     --  于是"夹住没夹住"只能去看画面 —— 而画面会把真拿住的东西判成滑掉(纸杯蛋糕那次,
-                     --  抬完 45 mm 读数远在空手值之上,却因画面里它变了样被张手扔掉)。
-                     declare
-                        Idx : constant Natural := Arm * Limits.Max_Jaws + Kk;
-                     begin
-                        while Natural (C.Map.Jaw_Empty.Length) <= Idx loop
-                           C.Map.Jaw_Empty.Append (-1.0);
-                        end loop;
-                        C.Map.Jaw_Empty.Replace_Element (Idx, Reading);
-                        Put_Line ("[装] 第" & Codec.Img (Arm + 1) & " 只手第" & Codec.Img (Kk)
-                                  & " 号抓握通道:合在空气上读数停在 " & Codec.Fmt (Reading, 4)
-                                  & " ⇒ 这就是空手值(比它大 = 中间有东西)");
-                     end;
                      Jaw_Sweep (L, C, F, Arm, Kk, Selfmap.Jaw_Of (F, Arm, Kk), C.Map.Settle + 1, Integer (Cam), Sweep, Steps_J, Reading);
                   end if;
                end;
@@ -4816,14 +4801,23 @@ package body Act is
       --  只因画面里它变了样就被判滑掉、随即张手扔了。
       declare
          Jk : constant Natural := Natural (Integer'Max (0, C.Wld.Held_Jaw));
-         Ix : constant Natural := Arm * Limits.Max_Jaws + Jk;
-         Emp : constant Long_Float :=
-           (if Ix < Natural (C.Map.Jaw_Empty.Length) then C.Map.Jaw_Empty (Ix) else -1.0);
+         --  空手值本来就量过、也存在身体文件里(Zone.Hand.Empty_Close,开机合空那一下的读数);
+         --  这里只是【第一次把它拿来判拿住】,不新量一个。
+         Hi : Integer := -1;
+         Emp : Long_Float := -1.0;
          R_Now : constant Long_Float := Selfmap.Jaw_Of (F, Arm, Jk);
       begin
+         for I in 0 .. Natural (C.Hands.Length) - 1 loop
+            if C.Hands (I).Arm = Arm and then C.Hands (I).K = Jk then
+               Hi := Integer (I);
+            end if;
+         end loop;
+         if Hi >= 0 then
+            Emp := C.Hands (Natural (Hi)).Empty_Close;
+         end if;
          --  量得出空手值才谈得上问手指;门槛是读数自己的抖动(量出来的),不是我拍的容差。
-         Grip_Says_Held := Emp >= 0.0 and then R_Now > Emp + C.Map.Jaw_Noise;
-         if Emp >= 0.0 then
+         Grip_Says_Held := Hi >= 0 and then R_Now > Emp + C.Map.Jaw_Noise;
+         if Hi >= 0 then
             Grip_Note := S (" (my fingers stopped at " & Codec.Fmt (R_Now, 3)
                             & ", empty they stop at " & Codec.Fmt (Emp, 3)
                             & (if Grip_Says_Held then " - so something is wedged between them" else " - so there is nothing between them") & ")");
