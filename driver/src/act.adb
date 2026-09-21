@@ -2,6 +2,7 @@ with Ada.Strings.Fixed;
 with Ada.Text_IO; use Ada.Text_IO;
 with Ada.Numerics;
 with Ada.Numerics.Long_Elementary_Functions; use Ada.Numerics.Long_Elementary_Functions;
+with Limits;
 with Codec;
 with Draw;
 with Flow;
@@ -4443,6 +4444,21 @@ package body Act is
                   end loop;
                   if Wanted then
                      Jaw_Sweep (L, C, F, Arm, Kk, 0.0, C.Map.Settle + 1, Integer (Cam), Sweep, Steps_J, Reading);
+                     --  🔴 合到底那一下的读数【就是空手值】—— 中间没夹东西,它停在哪儿就是哪儿。
+                     --  这个动作本来就要做(为了看哪些像素扫过去、认出握区),以前把这个数扔了,
+                     --  于是"夹住没夹住"只能去看画面 —— 而画面会把真拿住的东西判成滑掉(纸杯蛋糕那次,
+                     --  抬完 45 mm 读数远在空手值之上,却因画面里它变了样被张手扔掉)。
+                     declare
+                        Idx : constant Natural := Arm * Limits.Max_Jaws + Kk;
+                     begin
+                        while Natural (C.Map.Jaw_Empty.Length) <= Idx loop
+                           C.Map.Jaw_Empty.Append (-1.0);
+                        end loop;
+                        C.Map.Jaw_Empty.Replace_Element (Idx, Reading);
+                        Put_Line ("[装] 第" & Codec.Img (Arm + 1) & " 只手第" & Codec.Img (Kk)
+                                  & " 号抓握通道:合在空气上读数停在 " & Codec.Fmt (Reading, 4)
+                                  & " ⇒ 这就是空手值(比它大 = 中间有东西)");
+                     end;
                      Jaw_Sweep (L, C, F, Arm, Kk, Selfmap.Jaw_Of (F, Arm, Kk), C.Map.Settle + 1, Integer (Cam), Sweep, Steps_J, Reading);
                   end if;
                end;
@@ -4622,6 +4638,8 @@ package body Act is
       A : Table.Vec := Table.Zero_Vec;
       Deliv : Table.Vec;
       Ok : Boolean;
+      Grip_Says_Held : Boolean := False;   --  手指停在空手值之上 ⇒ 中间有东西(和画面完全独立的一条证据)
+      Grip_Note : Unbounded_String;
       Hc : constant Integer := (if Arm < Natural (C.Map.Cam_On_Arm.Length) then C.Map.Cam_On_Arm (Arm) else -1);
       Jaw : Floats;
       Seen_In_Hand : Boolean := False;
@@ -4790,13 +4808,40 @@ package body Act is
       --  "它原来待的地方空了"分不开【撞跑】—— 球被撞到画面角落,原地照样空了,身体照样报"拿住"(FO 实测)。
       --  手上相机里"还在握区框里"更不算数 —— 那个框在手上相机里几乎是半个屏幕(FM 实测)。
       --  判不了就老实说"我说不准",不许自称拿住。
-      Held := (if World_Cam >= 0 and then Have_Hand0 and then Found_After then Follows else Seen_In_Hand);
-      Sure := World_Cam >= 0 and then Have_Hand0 and then Found_After;
-      if Sure and then Follows then
-         Note := S ("after a small lift it came with my hand ⇒ held") & Follow_Note
+      --  🔴🔴 上面那三条全是【画面】信号。还有第四条,和画面完全独立:**手指停在哪儿**。
+      --  爪子合在空气上会停在一个固定读数(开机量的空手值);中间夹着东西就停得更早。
+      --  这一条撞跑伪造不了 —— 球被撞飞,手指照样合到空手值。
+      --  ⇒ 两条正面证据【谁也不许否决谁】:手指卡住 = 拿住;跟着手走 = 拿住;两条都没有才叫没拿住。
+      --  代价照记:反过来(拿画面一票否决)已经被实测判死 —— 纸杯蛋糕抬完 45 mm 读数远在空手值之上,
+      --  只因画面里它变了样就被判滑掉、随即张手扔了。
+      declare
+         Jk : constant Natural := Natural (Integer'Max (0, C.Wld.Held_Jaw));
+         Ix : constant Natural := Arm * Limits.Max_Jaws + Jk;
+         Emp : constant Long_Float :=
+           (if Ix < Natural (C.Map.Jaw_Empty.Length) then C.Map.Jaw_Empty (Ix) else -1.0);
+         R_Now : constant Long_Float := Selfmap.Jaw_Of (F, Arm, Jk);
+      begin
+         --  量得出空手值才谈得上问手指;门槛是读数自己的抖动(量出来的),不是我拍的容差。
+         Grip_Says_Held := Emp >= 0.0 and then R_Now > Emp + C.Map.Jaw_Noise;
+         if Emp >= 0.0 then
+            Grip_Note := S (" (my fingers stopped at " & Codec.Fmt (R_Now, 3)
+                            & ", empty they stop at " & Codec.Fmt (Emp, 3)
+                            & (if Grip_Says_Held then " - so something is wedged between them" else " - so there is nothing between them") & ")");
+         else
+            Grip_Note := S (" (I have never measured where my fingers stop on empty air, so I cannot ask them)");
+         end if;
+      end;
+      Held := Grip_Says_Held
+              or else (if World_Cam >= 0 and then Have_Hand0 and then Found_After then Follows else Seen_In_Hand);
+      Sure := Grip_Says_Held or else (World_Cam >= 0 and then Have_Hand0 and then Found_After);
+      if Grip_Says_Held and then not (World_Cam >= 0 and then Have_Hand0 and then Found_After and then Follows) then
+         --  手指说有、画面说不出 ⇒ 以手指为准,并且把两边都说出来(不许只报结论)
+         Note := S ("after a small lift my fingers are still held apart ⇒ held") & Grip_Note & Follow_Note;
+      elsif Sure and then Follows then
+         Note := S ("after a small lift it came with my hand ⇒ held") & Grip_Note & Follow_Note
                  & (if Seen_In_Hand then ", and my hand camera still shows it between my fingers" else "");
       elsif Sure then
-         Note := S ("after a small lift it did NOT come with my hand ⇒ not held")
+         Note := S ("after a small lift it did NOT come with my hand ⇒ not held") & Grip_Note
                  & (if Gone_From_Table then S (" - and its old place is empty, so I knocked it away rather than picked it up") else S (""))
                  & Follow_Note
                  & (if Seen_In_Hand then " (my hand camera still shows something between my fingers, which proves nothing)" else "");

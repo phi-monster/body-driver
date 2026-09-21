@@ -62,6 +62,8 @@ package body Bodyfile is
       Append (B, """arms"":" & Codec.Img (M.Arms) & ",""cams"":" & Codec.Img (M.N_Cams) & ",""per_arm"":" & Codec.Img (M.Per_Arm) & ",");
       Append (B, """ee_noise"":" & Codec.Fmt (M.EE_Noise, 6) & ",""rot_noise"":" & Codec.Fmt (M.Rot_Noise, 6) & ",""jaw_noise"":" & Codec.Fmt (M.Jaw_Noise, 6) & ",""settle"":" & Codec.Img (M.Settle) & ",");
       Put_Floats (B, "amp", M.Amp); Append (B, ",");
+      --  空手值:每个抓握通道合在空气上停在多少(跨炮留着,下一炮不必重量)
+      Put_Floats (B, "jaw_empty", M.Jaw_Empty); Append (B, ",");
       Put_Floats (B, "delivered", M.Delivered); Append (B, ",");
       for X of M.Seen loop
          Seen.Append (if X then 1 else 0);
@@ -252,6 +254,7 @@ package body Bodyfile is
          M.EE_Noise := Num ("ee_noise"); M.Rot_Noise := Num ("rot_noise"); M.Jaw_Noise := Num ("jaw_noise");
          M.Settle := Natural (Num ("settle"));
          M.Amp := Arr (Json.Get (D, 0, "amp"));
+         M.Jaw_Empty := Arr (Json.Get (D, 0, "jaw_empty"));
          M.Delivered := Arr (Json.Get (D, 0, "delivered"));
          M.Cam_Frac := Arr (Json.Get (D, 0, "cam_frac"));
          M.Seen.Clear;
@@ -537,6 +540,15 @@ package body Bodyfile is
       Merged.EE_Noise := Long_Float'Max (Stored.EE_Noise, Fresh.EE_Noise);
       Merged.Rot_Noise := Long_Float'Max (Stored.Rot_Noise, Fresh.Rot_Noise);
       Merged.Jaw_Noise := Long_Float'Max (Stored.Jaw_Noise, Fresh.Jaw_Noise);
+      --  🔴 空手值:这一炮量到了就用这一炮的(爪子会磨损、装夹会变);这一炮没量到就留着上一炮的。
+      --  它不是噪声地板,不能"只放大不缩小" —— 它是一个位置读数,新的更准。
+      for I in 0 .. Integer (Stored.Jaw_Empty.Length) - 1 loop
+         if I >= Integer (Merged.Jaw_Empty.Length) then
+            Merged.Jaw_Empty.Append (Stored.Jaw_Empty (Natural (I)));
+         elsif Merged.Jaw_Empty (Natural (I)) < 0.0 then
+            Merged.Jaw_Empty.Replace_Element (Natural (I), Stored.Jaw_Empty (Natural (I)));
+         end if;
+      end loop;
       Merged.Measured_Times := Stored.Measured_Times + 1;
    end Merge;
 end Bodyfile;
