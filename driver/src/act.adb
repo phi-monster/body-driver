@@ -5738,19 +5738,11 @@ package body Act is
          Geo_Say ("第" & Codec.Img (Wc) & " 台相机(不动的眼)没有焦距 ⇒ 量不了它在哪");
          Need_Still := False;
       end if;
-      --  哪只手上的眼还没量朝向:没有就不用挪
-      declare
-         Any_Eye : Boolean := False;
-      begin
-         for Cm in 0 .. C.Map.N_Cams - 1 loop
-            if Cam_Arm (C, Cm) >= 0 and then Cm < Natural (C.Geo.Length) and then not C.Geo (Cm).Valid and then C.Geo (Cm).F > 0.0 then
-               Any_Eye := True;
-            end if;
-         end loop;
-         if not Need_Still and then not Any_Eye then
-            return;
-         end if;
-      end;
+      --  🔴 这几停只为不动的眼而挪(每停合空要 30 多拍,八停 600 拍 = 半集;H41 2026-09-22 实测:为左腕眼白挪了 600 拍,它一次都没看见指尖)。
+      --  不动的眼量过了就不挪;别的手上的眼只【顺便】在这些停里量,量不到就如实说,不为它多挪。
+      if not Need_Still then
+         return;
+      end if;
       --  每只手:开机合空时它在这只眼里的位置(已量)+ 再挪三处各合空一次。挪的尺子 = 张口(身体量过的长度):
       --  先抬一个张口(离开桌上的东西),再前伸一个张口、再朝中间一个张口,然后原路回来。
       for A in 0 .. C.Map.Arms - 1 loop
