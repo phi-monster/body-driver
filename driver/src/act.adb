@@ -6280,8 +6280,8 @@ package body Act is
                   Geo_Say ("被一个面顶着:沿着面还差 " & Mm (Dist) & "(往面里那一份 " & Mm (Long_Float'Max (0.0, Into)) & " 走不了,不算)");
                end;
             end if;
-            if (Pressing or else Dist <= Tol) and then Until_Touch and then not Above and then not Held_Back
-              and then Geom.Norm (C.Geo_Dir) > 0.0 and then Steps_Taken < Limit
+            if (Pressing or else Dist <= Tol) and then Until_Touch and then (not Above or else Pressing) and then not Held_Back
+              and then (Geom.Norm (C.Geo_Dir) > 0.0 or else Pressing) and then Steps_Taken < Limit
             then
                if not Pressing then
                   Pressing := True; Press_Dir := C.Geo_Dir;
@@ -6300,7 +6300,7 @@ package body Act is
                      if Got + Got < Ln then
                         Event := S ("contact: I kept going toward it as you asked and something stopped my hand (I commanded " & Mm (Ln)
                                     & " and went " & Mm (Got) & "); by my own estimate the thing sits at where my fingers close");
-                        C.Geo_At := Now; C.Geo_At_Arm := Integer (Arm);
+                        C.Geo_At := Now; C.Geo_At_Arm := Integer (Arm); C.Geo_At_Above := False;   --  压到它身上了:接下来合手不用再下去
                         exit;
                      end if;
                   end;
@@ -6329,7 +6329,19 @@ package body Act is
                                      else "; I tried to point my fingers down at it: " & To_String (Ev)));
                   end;
                end if;
-               exit;
+               --  🔴 "到它上方、碰到为止":到了上方,脑说的是碰到为止 ⇒ 顺着它躺的面的法向往它身上压,到真被顶住(和 touching 的"接着往它身上走"同一条)。
+               --  H37 2026-09-22 实测:Qwen 十有八九写 `above X until touched`;上方永远碰不到,那一行就原地重跑十遍,然后它写 farther 走了。
+               --  "until touched" 是脑明说的:没碰到就接着走。
+               if Above and then Until_Touch and then not Held_Back and then Steps_Taken < Limit then
+                  declare
+                     Nn_P : constant Geom.V3 := (if C.Touch_Valid then C.Touch_N else [0.0, 0.0, 1.0]);
+                  begin
+                     Pressing := True; Press_Dir := [-Nn_P (0), -Nn_P (1), -Nn_P (2)];
+                     Geo_Say ("到了它上方,可你说的是碰到为止 ⇒ 顺着法向往它身上压,到真被顶住");
+                  end;
+               else
+                  exit;
+               end if;
             end if;
             if Steps_Taken >= Limit then
                Event := S ("steps: I took the steps you asked for (still " & Mm (Dist) & " from where my fingers close)");
@@ -7190,14 +7202,20 @@ package body Act is
                               --  挑中的是长在【另一条】胳膊上的左腕眼(这条胳膊一动它变 0.024 幅,比头顶眼的 0.039 还静),
                               --  而那只眼里没有剪刀、它自己一动画面又全变。一只眼都不长在胳膊上的才叫不动;没有这样的眼才退回"变得最少"。
                               Any_Free : Boolean := False;
+                              Free_Exists : Boolean := False;   --  有不长在胳膊上的眼(不管它此刻看不看得见它)
+                              Still_Dead : Boolean := False;    --  有这样的眼,可它们此刻都看不见它(脑指不出 / 我的手压着)⇒ 不换,说清楚
                            begin
                               for Cm in 0 .. C.Map.N_Cams - 1 loop
-                                 if Cam_Arm (C, Cm) < 0 and then not Blind_Here (Cm)
-                                   and then Natural (Sub_Arm) * C.Map.N_Cams + Cm < Natural (C.Map.Cam_Frac.Length)
-                                 then
-                                    Any_Free := True;
+                                 if Cam_Arm (C, Cm) < 0 and then Natural (Sub_Arm) * C.Map.N_Cams + Cm < Natural (C.Map.Cam_Frac.Length) then
+                                    Free_Exists := True;
+                                    if not Blind_Here (Cm) then
+                                       Any_Free := True;
+                                    end if;
                                  end if;
                               end loop;
+                              --  🔴 H37 2026-09-22 实测:头顶眼里它被我的手盖住了,"不动的眼"就退到了左腕眼,脑在那只眼里把 grasper 绑成了左手,
+                              --  从此指挥的是另一条胳膊。不长在胳膊上的眼都看不见它时,没有可用的"不动的眼",就不换。
+                              Still_Dead := C.Eye_Want = Sinew.Ey_Still and then Free_Exists and then not Any_Free;
                               for Cm in 0 .. C.Map.N_Cams - 1 loop
                                  declare
                                     Ix : constant Natural := Natural (Sub_Arm) * C.Map.N_Cams + Cm;
@@ -7213,7 +7231,7 @@ package body Act is
                                     --  ⚠️ 这不是 IH 撤回的那条("目标那只眼永远赢"—— 那条会把脑永远拽回 0 号眼,
                                     --  于是量远近永远被拒)。这里只跳过【脑自己刚说过"这儿没有"】的那只:
                                     --  是脑在决定,不是身体替它决定;脑看得见时照样答真编号,那只眼一次都不会被跳。
-                                    if Vv >= 0.0 and then not Blind_Here (Cm) then
+                                    if Vv >= 0.0 and then not Blind_Here (Cm) and then not Still_Dead then
                                        Any := True;
                                        if (C.Eye_Want = Sinew.Ey_Still and then Vv < Bv)
                                          or else (C.Eye_Want = Sinew.Ey_Moving and then Vv > Bv)
@@ -7258,7 +7276,11 @@ package body Act is
                                                    & "one it is in that picture. Answer 0 if it is not visible there and "
                                                    & "I will go back to the eye that can see it.");
                               end if;
-                              if not Any or else Pick < 0 then
+                              if Still_Dead then
+                                 Put_Line ("[身] 👁 你要不动的眼;不长在胳膊上的眼此刻都看不见它(指不出 / 被我的手盖着)⇒ 不换眼,留在这只");
+                                 C.Blind_Say := S ("you asked for my still eye, but right now none of my still eyes can see the thing "
+                                                   & "(it could not be pointed out there, or my hand is over it), so I stayed in the eye I am in");
+                              elsif not Any or else Pick < 0 then
                                  C.Blind_Say := S ("you asked me to judge this with one of my eyes picked by how much it "
                                                    & "changes when I move, but I have not measured that for this part yet, "
                                                    & "so I used the eye I am already in and said so");
