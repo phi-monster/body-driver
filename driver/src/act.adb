@@ -5704,18 +5704,50 @@ package body Act is
       Marks : Geom.Mark_Vectors.Vector;
       Cw : constant Natural := (if Wc < Natural (F.Cams.Length) then F.Cams (Wc).W else 0);
       Ch : constant Natural := (if Wc < Natural (F.Cams.Length) then F.Cams (Wc).H else 0);
+      --  🔴 长在【另一条】胳膊上的眼也一样:这只手挪那几停时那只眼不动,它看见这只手的指尖落在哪 ⇒ 同一套 Fit_Fixed 解出它那一刻在世界里的位姿,
+      --  再除掉它主人的手的位姿就是"相机装在手上的朝向"。左腕眼的朝向此前从没量过 ⇒ 左手永远选不上,离剪刀 10 cm 的手闲着,
+      --  右臂横跨整张桌去够、在关节尽头假碰(H31/H38 2026-09-22)。每只眼用它看得见的别的零件量自己,不多挪一步。
+      EM : array (0 .. C.Map.N_Cams - 1) of Geom.Mark_Vectors.Vector;
+      Need_Still : Boolean := True;
+      --  这一停里第 A 只手的指尖在每只眼里落在哪:不动的眼记进 Marks;别的手上的眼记进 EM
+      procedure Take_Marks (A : Natural; Zs : Zone.Zone_Vectors.Vector; Pw : Geom.V3) is
+      begin
+         if Need_Still and then Wc < Natural (Zs.Length) and then Zs (Wc).Valid then
+            Marks.Append (Geom.Mark'(Pw => Pw, U => Zs (Wc).Cu * Long_Float (Cw), V => Zs (Wc).Cv * Long_Float (Ch)));
+         end if;
+         for Cm in 0 .. C.Map.N_Cams - 1 loop
+            if Cm /= Wc and then Cam_Arm (C, Cm) >= 0 and then Cam_Arm (C, Cm) /= Integer (A)
+              and then Cm < Natural (Zs.Length) and then Zs (Cm).Valid and then Cm < Natural (F.Cams.Length)
+              and then Cm < Natural (C.Geo.Length) and then not C.Geo (Cm).Valid
+            then
+               EM (Cm).Append (Geom.Mark'(Pw => Pw, U => Zs (Cm).Cu * Long_Float (F.Cams (Cm).W), V => Zs (Cm).Cv * Long_Float (F.Cams (Cm).H)));
+            end if;
+         end loop;
+      end Take_Marks;
    begin
       if Wc >= Natural (C.Geo.Length) or else Cam_Arm (C, Wc) >= 0 or else Cw = 0 then
          return;
       end if;
       if C.Geo (Wc).Fixed then
          Geo_Say ("第" & Codec.Img (Wc) & " 台相机(不动的眼):位置和朝向量过(残差 " & Codec.Fmt (C.Geo (Wc).Rms, 2) & " px)");
-         return;
-      end if;
-      if C.Geo (Wc).F <= 0.0 then
+         Need_Still := False;
+      elsif C.Geo (Wc).F <= 0.0 then
          Geo_Say ("第" & Codec.Img (Wc) & " 台相机(不动的眼)没有焦距 ⇒ 量不了它在哪");
-         return;
+         Need_Still := False;
       end if;
+      --  哪只手上的眼还没量朝向:没有就不用挪
+      declare
+         Any_Eye : Boolean := False;
+      begin
+         for Cm in 0 .. C.Map.N_Cams - 1 loop
+            if Cam_Arm (C, Cm) >= 0 and then Cm < Natural (C.Geo.Length) and then not C.Geo (Cm).Valid and then C.Geo (Cm).F > 0.0 then
+               Any_Eye := True;
+            end if;
+         end loop;
+         if not Need_Still and then not Any_Eye then
+            return;
+         end if;
+      end;
       --  每只手:开机合空时它在这只眼里的位置(已量)+ 再挪三处各合空一次。挪的尺子 = 张口(身体量过的长度):
       --  先抬一个张口(离开桌上的东西),再前伸一个张口、再朝中间一个张口,然后原路回来。
       for A in 0 .. C.Map.Arms - 1 loop
@@ -5728,17 +5760,20 @@ package body Act is
             if not Have_Tip or else Gap <= 0.0 or else A >= Natural (F.EE.Length) then
                Geo_Say ("第" & Codec.Img (A + 1) & " 只手:指尖没量过 ⇒ 这只手帮不了不动的眼定位");
             else
-               --  开机那一停
-               for H of C.Hands loop
-                  if H.Arm = A and then H.K = 0 and then Wc < Natural (H.Zones.Length) and then H.Zones (Wc).Valid then
-                     Marks.Append (Geom.Mark'(Pw => Tip_World (C, A, H.Pose),
-                                              U => H.Zones (Wc).Cu * Long_Float (Cw), V => H.Zones (Wc).Cv * Long_Float (Ch)));
-                  end if;
-               end loop;
+               --  开机那一停(只给不动的眼:别的手上的眼那时的位姿和现在未必一样)
+               if Need_Still then
+                  for H of C.Hands loop
+                     if H.Arm = A and then H.K = 0 and then Wc < Natural (H.Zones.Length) and then H.Zones (Wc).Valid then
+                        Marks.Append (Geom.Mark'(Pw => Tip_World (C, A, H.Pose),
+                                                 U => H.Zones (Wc).Cu * Long_Float (Cw), V => H.Zones (Wc).Cv * Long_Float (Ch)));
+                     end if;
+                  end loop;
+               end if;
                declare
                   Home : constant Plug.Arm_Pose := F.EE (A);
                   Toward_Mid : constant Long_Float := (if Home (0) > 0.0 then -Gap else Gap);
-                  Stops : constant array (1 .. 3) of Geom.V3 := [[0.0, 0.0, Gap], [0.0, Gap, Gap], [Toward_Mid, Gap, Gap]];
+                  --  四停(别的手上的眼只靠这几停,要凑够 Fit_Fixed 的 4 个观测):抬一个张口、再前伸、再朝中间、再退回前伸那一格
+                  Stops : constant array (1 .. 4) of Geom.V3 := [[0.0, 0.0, Gap], [0.0, Gap, Gap], [Toward_Mid, Gap, Gap], [Toward_Mid, 0.0, Gap]];
                   Mok : Boolean;
                begin
                   for St of Stops loop
@@ -5746,17 +5781,21 @@ package body Act is
                         Cur : constant Plug.Arm_Pose := F.EE (A);
                         Hz : Zone.Hand;
                         Zok : Boolean;
+                        Seen_Eyes : Unbounded_String;
                      begin
                         Geo_Move (L, C, F, A, [Home (0) + St (0) - Cur (0), Home (1) + St (1) - Cur (1), Home (2) + St (2) - Cur (2)], Mok);
                         Zone.Measure (L, C.Map, A, 0, F, Hz, Zok);
-                        if Zok and then Wc < Natural (Hz.Zones.Length) and then Hz.Zones (Wc).Valid then
-                           Marks.Append (Geom.Mark'(Pw => Tip_World (C, A, F.EE (A)),
-                                                    U => Hz.Zones (Wc).Cu * Long_Float (Cw), V => Hz.Zones (Wc).Cv * Long_Float (Ch)));
-                           Geo_Say ("不动的眼里,第" & Codec.Img (A + 1) & " 只手挪到 (" & Mm (St (0)) & "," & Mm (St (1)) & "," & Mm (St (2)) & ") 后指尖在 ("
-                                    & Codec.Fmt (Hz.Zones (Wc).Cu * Long_Float (Cw), 1) & "," & Codec.Fmt (Hz.Zones (Wc).Cv * Long_Float (Ch), 1) & ")");
-                        else
-                           Geo_Say ("不动的眼里,第" & Codec.Img (A + 1) & " 只手挪到 (" & Mm (St (0)) & "," & Mm (St (1)) & "," & Mm (St (2)) & ") 后合空没看见手指");
+                        if Zok then
+                           Take_Marks (A, Hz.Zones, Tip_World (C, A, F.EE (A)));
+                           for Cm in 0 .. Natural (Hz.Zones.Length) - 1 loop
+                              if Hz.Zones (Cm).Valid and then Cam_Arm (C, Cm) /= Integer (A) then
+                                 Append (Seen_Eyes, (if Length (Seen_Eyes) > 0 then "、" else "") & "第" & Codec.Img (Cm) & " 台("
+                                         & Codec.Fmt (Hz.Zones (Cm).Cu * Long_Float (F.Cams (Cm).W), 1) & "," & Codec.Fmt (Hz.Zones (Cm).Cv * Long_Float (F.Cams (Cm).H), 1) & ")");
+                              end if;
+                           end loop;
                         end if;
+                        Geo_Say ("第" & Codec.Img (A + 1) & " 只手挪到 (" & Mm (St (0)) & "," & Mm (St (1)) & "," & Mm (St (2)) & ") 合空 ⇒ "
+                                 & (if Length (Seen_Eyes) > 0 then "指尖落在 " & To_String (Seen_Eyes) else "没有一只别的眼看见手指"));
                      end;
                   end loop;
                   declare
@@ -5765,24 +5804,70 @@ package body Act is
                      Geo_Move (L, C, F, A, [Home (0) - Cur (0), Home (1) - Cur (1), Home (2) - Cur (2)], Mok);
                   end;
                end;
-               Geo_Say ("第" & Codec.Img (A + 1) & " 只手给了不动的眼 " & Codec.Img (Natural (Marks.Length) - N0) & " 个观测");
+               if Need_Still then
+                  Geo_Say ("第" & Codec.Img (A + 1) & " 只手给了不动的眼 " & Codec.Img (Natural (Marks.Length) - N0) & " 个观测");
+               end if;
             end if;
          end;
       end loop;
-      declare
-         G : Geom.Cam_Geo := C.Geo (Wc);
-         Fok : Boolean;
-      begin
-         Geom.Fit_Fixed (G, Marks, Fok);
-         if Fok then
-            C.Geo.Replace_Element (Wc, G);
-            Geom.Save (To_String (C.Geo_Path), C.Geo);
-            Geo_Say ("不动的眼量好:" & Codec.Img (Natural (Marks.Length)) & " 个观测,像素残差 " & Codec.Fmt (G.Rms, 2) & " px,它在 ("
-                     & Mm (G.Pos (0)) & "," & Mm (G.Pos (1)) & "," & Mm (G.Pos (2)) & "),存进 " & To_String (C.Geo_Path));
-         else
-            Geo_Say ("不动的眼解不出来(观测只有 " & Codec.Img (Natural (Marks.Length)) & " 个,要 4 个以上)");
-         end if;
-      end;
+      if Need_Still then
+         declare
+            G : Geom.Cam_Geo := C.Geo (Wc);
+            Fok : Boolean;
+         begin
+            Geom.Fit_Fixed (G, Marks, Fok);
+            if Fok then
+               C.Geo.Replace_Element (Wc, G);
+               Geom.Save (To_String (C.Geo_Path), C.Geo);
+               Geo_Say ("不动的眼量好:" & Codec.Img (Natural (Marks.Length)) & " 个观测,像素残差 " & Codec.Fmt (G.Rms, 2) & " px,它在 ("
+                        & Mm (G.Pos (0)) & "," & Mm (G.Pos (1)) & "," & Mm (G.Pos (2)) & "),存进 " & To_String (C.Geo_Path));
+            else
+               Geo_Say ("不动的眼解不出来(观测只有 " & Codec.Img (Natural (Marks.Length)) & " 个,要 4 个以上)");
+            end if;
+         end;
+      end if;
+      --  手上的眼:另一只手挪那几停时它没动 ⇒ 按不动的眼解出它那一刻的世界位姿,除掉主人手的位姿 = 装在手上的朝向。
+      --  顺便量出相机中心离手的位姿原点多远(视线的起点一直按手的位置算;近处这一段差得出来,先如实报)。
+      for Cm in 0 .. C.Map.N_Cams - 1 loop
+         declare
+            B : constant Integer := Cam_Arm (C, Cm);
+         begin
+            if B >= 0 and then Cm < Natural (C.Geo.Length) and then not C.Geo (Cm).Valid and then C.Geo (Cm).F > 0.0
+              and then B < Integer (F.EE.Length)
+            then
+               if Natural (EM (Cm).Length) < 4 then
+                  Geo_Say ("第" & Codec.Img (Cm) & " 台相机(长在第" & Codec.Img (Natural (B) + 1) & " 只手上):别的手的指尖只在它里面出现了 "
+                           & Codec.Img (Natural (EM (Cm).Length)) & " 次(要 4 次)⇒ 朝向这回量不出来,用到时现量");
+               else
+                  declare
+                     G : Geom.Cam_Geo := C.Geo (Cm);
+                     Fok : Boolean;
+                  begin
+                     Geom.Fit_Fixed (G, EM (Cm), Fok);
+                     if Fok then
+                        declare
+                           Pb : constant Plug.Arm_Pose := F.EE (Natural (B));
+                           Re : constant Geom.M3 := Geom.Quat_To_R (Pb);                    --  主人手 → 世界(它这几停没动)
+                           Rce : constant Geom.M3 := Geom.Mul (Geom.Tr (Re), G.R_Ce);      --  相机 → 手
+                           Off : constant Geom.V3 := Geom.Ap (Geom.Tr (Re), [G.Pos (0) - Pb (0), G.Pos (1) - Pb (1), G.Pos (2) - Pb (2)]);
+                           Gh : Geom.Cam_Geo := C.Geo (Cm);
+                        begin
+                           Gh.R_Ce := Rce; Gh.Valid := True; Gh.Rms := G.Rms; Gh.Fixed := False; Gh.Pos := [others => 0.0];
+                           C.Geo.Replace_Element (Cm, Gh);
+                           Geom.Save (To_String (C.Geo_Path), C.Geo);
+                           Geo_Say ("第" & Codec.Img (Cm) & " 台相机(长在第" & Codec.Img (Natural (B) + 1) & " 只手上)朝向量好:看着另一只手的指尖 "
+                                    & Codec.Img (Natural (EM (Cm).Length)) & " 停,像素残差 " & Codec.Fmt (G.Rms, 2) & " px;相机中心离手的位姿原点 ("
+                                    & Mm (Off (0)) & "," & Mm (Off (1)) & "," & Mm (Off (2)) & ")(视线起点仍按手的位置算),存进 " & To_String (C.Geo_Path));
+                        end;
+                     else
+                        Geo_Say ("第" & Codec.Img (Cm) & " 台相机(长在第" & Codec.Img (Natural (B) + 1) & " 只手上):" & Codec.Img (Natural (EM (Cm).Length))
+                                 & " 个观测解不出朝向");
+                     end if;
+                  end;
+               end if;
+            end if;
+         end;
+      end loop;
    end Geo_Boot_Fixed;
 
    --  转这只手,让它自己那只眼的正前方对准世界里的一个方向(Want,单位向量)。
