@@ -5219,15 +5219,33 @@ package body Act is
    procedure Geo_Track (C : in out Context; F : Plug.Frame; Cam : Natural; Slot : Integer; U, V : out Long_Float; Seen : out Boolean) is
       Cw : constant Natural := F.Cams (Cam).W;
       Ch : constant Natural := F.Cams (Cam).H;
+      Bx : Integer := -1;
    begin
       Seen := False; U := 0.0; V := 0.0;
       if not (C.Cut_Seq = F.Seq and then C.Cut_Cam = Integer (Cam)) then
          World.Observe (C.Wld, Cam, Cut_Things (C, F, Cam), Cw, Ch);
       end if;
+      --  🔴 跟的是【脑点过名、我在框里重量出来的那一块】,不是槽。槽是全图切块的记账,认槽靠"就近",
+      --  H23 2026-09-22 实测:框里明明量到了(离线复算 3760 px、形心 (244,381)),槽却没对上 ⇒ 报"看丢了"。
+      --  点过名的东西按名字找;只有没点过名的才退回槽。
       if Slot >= 0 and then Natural (Slot) < World.Count (C.Wld, Cam) then
          declare
             Sl : constant World.Slot := World.Get (C.Wld, Cam, Natural (Slot));
+            Ref : constant Picture.Region := (if Sl.Present then Sl.R else Sl.Shadow);
          begin
+            Bx := Boxed_Index (C, Cam, Ref.Cu, Ref.Cv);
+            if Bx < 0 then
+               --  槽已经被挪到预测处、和框里的读数对不上号 ⇒ 按名字找这只眼里点过名的那一件
+               for Bi in 0 .. Natural (C.Boxed.Length) - 1 loop
+                  if C.Boxed (Bi).Cam = Cam and then C.Boxed (Bi).Seen then
+                     Bx := Integer (Bi);
+                  end if;
+               end loop;
+            end if;
+            if Bx >= 0 and then C.Boxed (Natural (Bx)).Seen then
+               U := C.Boxed (Natural (Bx)).Cu * Long_Float (Cw); V := C.Boxed (Natural (Bx)).Cv * Long_Float (Ch); Seen := True;
+               return;
+            end if;
             if Sl.Present and then Sl.Seen then
                U := Sl.R.Cu * Long_Float (Cw); V := Sl.R.Cv * Long_Float (Ch); Seen := True;
             end if;
@@ -5453,17 +5471,24 @@ package body Act is
 
    --  几何逼近:让"指尖该到的那一点"(指尖中点再往手心里一点)和点名那块重合。每段走一截、停稳、再看一眼、再算。
    --  这一槽里的东西此刻看得【全不全】,以及它叫什么(点过名的才有名字)。看不全(顶到窗边/被画面切掉)的那一眼,形心不是同一个物理点。
-   procedure Slot_Whole (C : Context; Cam : Natural; Slot : Integer; Whole : out Boolean; Name : out Unbounded_String) is
+   --  Whole = 这一眼量到的是一整块(没被【画面边】切掉;挨着邻居的已在框里量时裁掉,形心照用)。
+   --  Edge = 它被画面边切掉了 ⇒ 转一下眼把它整个看进来,这一眼才算数。
+   procedure Slot_Whole (C : Context; F : Plug.Frame; Cam : Natural; Slot : Integer; Whole, Edge : out Boolean; Name : out Unbounded_String) is
    begin
-      Whole := True; Name := Null_Unbounded_String;
+      Whole := True; Edge := False; Name := Null_Unbounded_String;
       if Slot >= 0 and then Natural (Slot) < World.Count (C.Wld, Cam) then
          declare
             R : constant Picture.Region := World.Get (C.Wld, Cam, Natural (Slot)).R;
             Bx : constant Integer := Boxed_Index (C, Cam, R.Cu, R.Cv);
          begin
             if Bx >= 0 then
-               Whole := C.Boxed (Natural (Bx)).Isolated;
-               Name := C.Boxed (Natural (Bx)).Name;
+               declare
+                  B : constant Boxed_Thing := C.Boxed (Natural (Bx));
+               begin
+                  Edge := B.X0 = 0 or else B.Y0 = 0 or else B.X1 + 1 >= F.Cams (Cam).W or else B.Y1 + 1 >= F.Cams (Cam).H;
+                  Whole := not Edge;
+                  Name := B.Name;
+               end;
             end if;
          end;
       end if;
@@ -5712,6 +5737,67 @@ package body Act is
       end;
    end Aim_Eye_At;
 
+   --  ── 此刻每一只看得见它的眼给一条视线 ──(它叫 Its_Name,脑点过名的)
+   --  眼可以是:正在走路的这只手自己的眼(Seen 且整块)、不动的眼(量过自己在哪)、另一只手的眼(朝向量过)。
+   --  两条以上 ⇒ 交点就是它此刻的位置,它动不动都一样;这是抓会动的东西唯一诚实的量法(owner 09-22)。
+   function Sightlines_Now (C : in out Context; F : Plug.Frame; Cam, Arm : Natural; Its_Name : Unbounded_String;
+                            Seen, Whole : Boolean; U, V : Long_Float; Who : out Unbounded_String) return Geom.Sight_Vectors.Vector is
+      Rays : Geom.Sight_Vectors.Vector;
+      G : constant Geom.Cam_Geo := Geo_Of (C, Cam);
+   begin
+      Who := Null_Unbounded_String;
+      if Seen and then Whole then
+         declare
+            P : constant Plug.Arm_Pose := F.EE (Arm);
+         begin
+            Rays.Append (Geom.Sight'(O => [P (0), P (1), P (2)], D => Geom.Ray (G, P, U, V)));
+            Append (Who, "第" & Codec.Img (Cam) & " 台");
+         end;
+      end if;
+      if Length (Its_Name) = 0 then
+         return Rays;
+      end if;
+      for Cm in 0 .. C.Map.N_Cams - 1 loop
+         if Cm /= Cam and then Cm < Natural (C.Geo.Length) and then Cm < Natural (F.Cams.Length) then
+            declare
+               Gm : constant Geom.Cam_Geo := C.Geo (Cm);
+               A2 : constant Integer := Cam_Arm (C, Cm);
+               Usable : constant Boolean := (A2 < 0 and then Gm.Fixed) or else (A2 >= 0 and then Gm.Valid and then Gm.F > 0.0 and then A2 < Integer (F.EE.Length));
+            begin
+               if Usable then
+                  --  这只眼这一帧再量一遍它(脑点过名 ⇒ 在上一帧量到它的地方原样重量)
+                  World.Observe (C.Wld, Cm, Cut_Things (C, F, Cm), F.Cams (Cm).W, F.Cams (Cm).H);
+                  for Bi in 0 .. Natural (C.Boxed.Length) - 1 loop
+                     declare
+                        B : constant Boxed_Thing := C.Boxed (Bi);
+                        Edge : constant Boolean := B.X0 = 0 or else B.Y0 = 0 or else B.X1 + 1 >= F.Cams (Cm).W or else B.Y1 + 1 >= F.Cams (Cm).H;
+                     begin
+                        if B.Cam = Cm and then B.Seen and then not Edge and then B.Name = Its_Name then
+                           declare
+                              Pu : constant Long_Float := B.Cu * Long_Float (F.Cams (Cm).W);
+                              Pv : constant Long_Float := B.Cv * Long_Float (F.Cams (Cm).H);
+                           begin
+                              if A2 < 0 then
+                                 Rays.Append (Geom.Sight'(O => Gm.Pos, D => Geom.Ray_Fixed (Gm, Pu, Pv)));
+                              else
+                                 declare
+                                    P2 : constant Plug.Arm_Pose := F.EE (Natural (A2));
+                                 begin
+                                    Rays.Append (Geom.Sight'(O => [P2 (0), P2 (1), P2 (2)], D => Geom.Ray (Gm, P2, Pu, Pv)));
+                                 end;
+                              end if;
+                              Append (Who, (if Length (Who) > 0 then "+" else "") & "第" & Codec.Img (Cm) & " 台");
+                           end;
+                        end if;
+                     end;
+                  end loop;
+               end if;
+            end;
+         end if;
+      end loop;
+      return Rays;
+   end Sightlines_Now;
+
    --  Above = True:不是走到它跟前,而是走到它【正上方、高出一个张口】(张口是身体量过的长度,不是拍的数)。
    --  "上" = 位姿读数系的 +z,和抬手那一条同一个约定(当它朝上;真机该由重力读数定)。
    procedure Geo_Approach (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Cam, Arm : Natural; Slot : Integer;
@@ -5742,9 +5828,11 @@ package body Act is
       --  🔴 不可信的观测不进解算。近处它有一截出了画面,"看到的那一块"的形心不再是同一个物理点(H14 2026-09-22 实测:
       --  下探到近处,估计位置乱跳,手往上往后走了两步,然后"看丢了")。远处那几眼看到的是完整的一块,交出来的位置是准的,
       --  而手的位姿读数每步只差 1 mm ⇒ 看不全了就不再更新它的位置,凭已知位置 + 位姿读数走完(LAB D2:不看也在)。
-      Whole : Boolean;
+      Whole, Edge : Boolean;
       Its_Name : Unbounded_String;
       Said_Blind : Boolean := False;
+      Said_One_Eye : Boolean := False;
+      Who : Unbounded_String;
       Pressing : Boolean := False;          --  估计已到位,正沿原方向接着往它身上走
       Press_Dir : Geom.V3 := [0.0, 0.0, 0.0];
       Held_Back : Boolean := False;
@@ -5752,8 +5840,32 @@ package body Act is
    begin
       Event := Null_Unbounded_String; Steps_Taken := 0; Beats := 0;
       Want (2) := Want (2) + Inward;   --  相机 -z 朝前 ⇒ 往手心方向 = +z
+      --  🔴 每一段从头量:上一段留下的那几眼(转过手、离得远)和这一段近处的眼搅在一起,交点会飞
+      --  (H25 2026-09-22 实测:悬停 12 cm 处重新指了它,交点却算到 0.7 m 外、偏 54 cm,手往反方向走)。
+      --  两只眼同时看见就一帧出数;只有一只眼就横挪一步当基线 —— 这一段自己的眼。
+      C.Geo_Obs.Clear;
       Geo_Track (C, F, Cam, Slot, U, V, Seen);
-      Slot_Whole (C, Cam, Slot, Whole, Its_Name);
+      Slot_Whole (C, F, Cam, Slot, Whole, Edge, Its_Name);
+      --  🔴 看着它走:它被画面边切掉时形心不是同一个物理点,H21 2026-09-22 实测整段路只有开头两眼算数,
+      --  一条 26 mm 的基线量 0.42 m 外的东西,落点偏了 5–8 cm。⇒ 被画面边切到就先转眼把它整个看进来。
+      if Above then
+         C.Fingers_Aimed := False;   --  又要去它上方 ⇒ 到了再重新指
+      end if;
+      if Seen and then Edge and then not (C.Fingers_Aimed and then not Above) then
+         declare
+            Ev : Unbounded_String;
+            St : Natural;
+            --  🔴 先算好再传:从 F 算出的东西不许直接当实参交给会改 F 的调用(GC12 / H24 2026-09-22 同一处崩:
+            --  Plug.Sense 里帧的 finalize 报 PROGRAM_ERROR)
+            Want : constant Geom.V3 := Geom.Ray (G, F.EE (Arm), U, V);
+         begin
+            Geo_Turn (L, C, F, Arm, Want, Amt, Ev, St);
+            Steps_Taken := Steps_Taken + St;
+            Geo_Say ("它被画面边切着 ⇒ 转眼看着它(" & To_String (Ev) & ")");
+            Geo_Track (C, F, Cam, Slot, U, V, Seen);
+            Slot_Whole (C, F, Cam, Slot, Whole, Edge, Its_Name);
+         end;
+      end if;
       if (Length (Its_Name) = 0 and then C.Geo_Slot /= Slot) or else (Length (Its_Name) > 0 and then C.Geo_Name /= Its_Name) then
          C.Geo_Obs.Clear; C.Geo_Came := 0.0;
       end if;
@@ -5768,7 +5880,9 @@ package body Act is
       if Seen and then (Whole or else Natural (C.Geo_Obs.Length) < 2) then
          C.Geo_Obs.Append (Geom.Obs'(Pose => F.EE (Arm), U => U, V => V));
       end if;
-      if Natural (C.Geo_Obs.Length) < 2 then
+      if Natural (C.Geo_Obs.Length) < 2
+        and then Natural (Sightlines_Now (C, F, Cam, Arm, Its_Name, Seen, Whole, U, V, Who).Length) < 2
+      then
          --  只有一笔观测 ⇒ 先横挪一步当基线(拇指测距的"换只眼")
          declare
             Rc : constant Geom.M3 := Geom.Cam_R (G, F.EE (Arm));
@@ -5796,11 +5910,30 @@ package body Act is
             Pw, Pc, D : Geom.V3;
             Dist : Long_Float;
          begin
-            --  用最近的几笔观测(它不动,我动过的地方越多交点越稳;最多 6 笔,次数)
-            for K in Natural'Max (0, Nobs - 6) .. Nobs - 1 loop
-               Use_Obs.Append (C.Geo_Obs (K));
-            end loop;
-            Pw := Geom.Triangulate (G, Use_Obs);
+            --  🔴 它此刻在哪:先问【此刻】每一只看得见它的眼 —— 两条以上视线一交就是它,它动不动都一样。
+            --  只有一只眼看见时才退回"我自己挪过的那几眼"(最多 6 笔,次数),并如实说前提是它没动。
+            declare
+               Rays : constant Geom.Sight_Vectors.Vector := Sightlines_Now (C, F, Cam, Arm, Its_Name, Seen, Whole, U, V, Who);
+               Mok : Boolean;
+               Spread : Long_Float;
+               Pm : Geom.V3;
+            begin
+               Pm := Geom.Meet (Rays, Mok, Spread);
+               if Mok then
+                  Pw := Pm;
+                  Geo_Say ("此刻 " & To_String (Who) & " 相机同时看见它 ⇒ 视线交在 (" & Mm (Pw (0)) & "," & Mm (Pw (1)) & "," & Mm (Pw (2))
+                           & "),视线间最大偏差 " & Mm (Spread));
+               else
+                  for K in Natural'Max (0, Nobs - 6) .. Nobs - 1 loop
+                     Use_Obs.Append (C.Geo_Obs (K));
+                  end loop;
+                  Pw := Geom.Triangulate (G, Use_Obs);
+                  if not Said_One_Eye then
+                     Said_One_Eye := True;
+                     Geo_Say ("此刻只有这一只眼看见它 ⇒ 按我自己挪过的那几眼算(前提是它没动;会动的东西这样量不出来)");
+                  end if;
+               end if;
+            end;
             Pc := Geom.To_Cam (G, Cur, Pw);
             --  🔴 合拢点要落在它身上【夹得住的那一处】,不是整块的形心(GB5 的球哪儿都一样宽;剪刀的形心在柄环上,
             --  两个柄环合起来 0.091 m 宽 ≈ 张口 0.090 m ⇒ H15 2026-09-22 指尖正好踩在环的外沿,一合就把它推到一边)。
@@ -5905,7 +6038,8 @@ package body Act is
                   begin
                      Geo_Turn (L, C, F, Arm, [-Nn (0), -Nn (1), -Nn (2)], Amt, Ev, St, Along => G.Tip);
                      Steps_Taken := Steps_Taken + St;
-                     Append (Event, (if Index (Ev, "amount: arrived") > 0 then "; my fingers now point down at it"
+                     C.Fingers_Aimed := Index (Ev, "amount: arrived") > 0;
+                     Append (Event, (if C.Fingers_Aimed then "; my fingers now point down at it"
                                      else "; I tried to point my fingers down at it: " & To_String (Ev)));
                   end;
                end if;
@@ -6006,7 +6140,21 @@ package body Act is
                   end;
                end if;
                Geo_Track (C, F, Cam, Slot, U, V, Seen);
-               Slot_Whole (C, Cam, Slot, Whole, Its_Name);
+               Slot_Whole (C, F, Cam, Slot, Whole, Edge, Its_Name);
+               --  手指已经指着它躺的面时,最后贴上去这一段不再为了看它而转手(转了指尖就不朝下了);看不全就按位姿读数走
+               if Seen and then Edge and then not Pressing and then not (C.Fingers_Aimed and then not Above) then
+                  declare
+                     Ev : Unbounded_String;
+                     St : Natural;
+                     Want : constant Geom.V3 := Geom.Ray (G, F.EE (Arm), U, V);   --  先算好再传(见上)
+                  begin
+                     Geo_Turn (L, C, F, Arm, Want, Amt, Ev, St);
+                     Steps_Taken := Steps_Taken + St;
+                     Geo_Say ("它被画面边切着 ⇒ 转眼看着它(" & To_String (Ev) & ")");
+                     Geo_Track (C, F, Cam, Slot, U, V, Seen);
+                     Slot_Whole (C, F, Cam, Slot, Whole, Edge, Its_Name);
+                  end;
+               end if;
                if Natural (C.Geo_Obs.Length) >= 2 and then not (Seen and then Whole) then
                   if not Said_Blind then
                      Said_Blind := True;

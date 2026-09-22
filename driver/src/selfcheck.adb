@@ -434,6 +434,44 @@ begin
          Check (not Hok, "视线背对着面 ⇒ 不交,如实说");
       end;
    end;
+   --  🔴 两眼同时交点(2026-09-22):两条视线 ⇒ 交点;一条 ⇒ 不解;两条平行 ⇒ 不解;交在眼后 ⇒ 不解
+   declare
+      Rs : Geom.Sight_Vectors.Vector;
+      Ok : Boolean;
+      Sp : Long_Float;
+      P : Geom.V3;
+   begin
+      --  两只眼(一只在 (0,0,1),一只在 (1,0,1))都看着同一点 (0,0.75,0):方向 = 点 − 眼,归一化
+      declare
+         function Toward (O : Geom.V3) return Geom.V3 is
+            D : constant Geom.V3 := [0.0 - O (0), 0.75 - O (1), 0.0 - O (2)];
+            N : constant Long_Float := Geom.Norm (D);
+         begin
+            return [D (0) / N, D (1) / N, D (2) / N];
+         end Toward;
+      begin
+         Rs.Append (Geom.Sight'(O => [0.0, 0.0, 1.0], D => Toward ([0.0, 0.0, 1.0])));
+         Rs.Append (Geom.Sight'(O => [1.0, 0.0, 1.0], D => Toward ([1.0, 0.0, 1.0])));
+      end;
+      P := Geom.Meet (Rs, Ok, Sp);
+      Check (Ok and then Sp < 1.0e-6 and then abs (P (2) - 0.0) < 1.0e-6 and then abs (P (1) - 0.75) < 1.0e-6 and then abs (P (0) - 0.0) < 1.0e-6,
+             "两眼交点:两条视线交在 (" & Codec.Fmt (P (0), 3) & "," & Codec.Fmt (P (1), 3) & "," & Codec.Fmt (P (2), 3) & "),偏差 " & Codec.Fmt (Sp, 6));
+      Rs.Delete_Last;
+      P := Geom.Meet (Rs, Ok, Sp);
+      Check (not Ok, "两眼交点:只有一条视线 ⇒ 不解,如实说");
+      declare
+         D0 : constant Geom.V3 := Rs (0).D;   --  先拷出来再 Append(容器不许一边引用一边改)
+      begin
+         Rs.Append (Geom.Sight'(O => [1.0, 0.0, 1.0], D => D0));
+      end;
+      P := Geom.Meet (Rs, Ok, Sp);
+      Check (not Ok, "两眼交点:两条平行视线 ⇒ 不解");
+      Rs.Clear;
+      Rs.Append (Geom.Sight'(O => [0.0, 0.0, 1.0], D => [0.0, 0.6, -0.8]));
+      Rs.Append (Geom.Sight'(O => [1.0, 0.0, 1.0], D => [0.6, 0.0, 0.8]));   --  第二条背对交点
+      P := Geom.Meet (Rs, Ok, Sp);
+      Check (not Ok, "两眼交点:交点在某只眼背后 ⇒ 不解");
+   end;
    --  🔴 框里量(2026-09-21):脑只说"它在这一框里",哪些像素是它由身体自己量。四条焊点,正反都要有。
    --  合成画面:木纹桌面(灰度 80 上下抖 ±6 的条纹)上放一根亮的长条(像剪刀那样细长)。
    declare

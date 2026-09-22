@@ -1,0 +1,101 @@
+{
+  "success_rate": 1.0,
+  "eval_time": 1,
+  "score": 100.0,
+  "details": {
+    "0": {
+      "layout_id": 0,
+      "success": true,
+      "score": 1.0
+    }
+  }
+}
+
+36:[装] 核对身体:第 1 只手:命令 0.0064 实到 0.0050(存的 0.0040)对得上;第 2 只手:命令 0.0064 实到 0.0050(存的 0.0040)对得上; ⇒ 同一具身体,直接用
+37:[装] 第 1 只手第 0 号抓握通道:位姿和存的一样 ⇒ 握区照用,不合空
+38:[装] 第 2 只手第 0 号抓握通道:位姿和存的一样 ⇒ 握区照用,不合空
+48:[身] 身体量完 ⇒ 开始干活(脑在 127.0.0.1:8078)
+49:[身] 对方复位(新的一集)⇒ 世界记忆清空,身体留着
+63:beat 160 | eye 2 | grip 2 above mint green scissors (by sightlines, in my own hand camera) | 12 pushes | ended: amount: arrived above it (it sits one hand-opening, 0.090 m, straight below where my fingers close, within 0.001 m); my fingers now point down at it
+88:[身] 🧠 它交上来一段程序:
+89:do grasper touching mint green scissors until touched
+90:[身] 📦 mint green scissors:脑给的框 [297 283 348 412](第0 台相机)⇒ 框里量到一整块 1381 px · 形心 (317.6,335.4) · 长宽比 5.0 · 它顶到了框外那一圈(挨着别的东西或被画面切掉),形心和长轴在这只眼里不可信
+91:[身] 🔎 grasper 挑第2 只手:它自己那只眼的朝向和指尖都量过(量得出东西有多远),且离点名的东西最近
+96:[身] 👁 你没点眼;这条胳膊自己的那只眼(第2 只)量得出东西有多远 ⇒ 换过去,在那儿再问你一次它在哪
+97:[身] 📐 不动的眼说它在 (-0.068 m,-0.443 m,0.876 m)(还没碰过任何面,先按指尖此刻的高度算),离第2 只手 0.383 m ⇒ 把这只手的眼转向它
+98:[身] 📐 转 0.205 rad ⇒ 实到 0.199 rad(还差 1.718)
+99:[身] 📐 转 0.205 rad ⇒ 实到 0.203 rad(还差 1.520)
+100:[身] 📐 转 0.205 rad ⇒ 实到 0.203 rad(还差 1.317)
+101:[身] 📐 转 0.205 rad ⇒ 实到 0.204 rad(还差 1.114)
+103:[身] 📐 转 0.205 rad ⇒ 实到 0.205 rad(还差 0.909)
+104:[身] 📐 转 0.205 rad ⇒ 实到 0.090 rad(还差 0.704)
+118:beat 160 | eye 2 | grip 2 above mint green scissors (by sightlines, in my own hand camera) | 12 pushes | ended: amount: arrived above it (it sits one hand-opening, 0.090 m, straight below where my fingers close, within 0.001 m); my fingers now point down at it
+144:[身] 🧠 它交上来一段程序:
+145:do grasper above mint green scissors until touched
+146:[身] 📦 mint green scissors:脑给的框 [140 324 305 444](第2 台相机)⇒ 框里量到一整块 2882 px · 形心 (231.1,376.1) · 长宽比 4.5 · 它顶到了框外那一圈(挨着别的东西或被画面切掉),形心和长轴在这只眼里不可信
+147:[身] 🔎 grasper 挑第2 只手:它自己那只眼的朝向和指尖都量过(量得出东西有多远),且离点名的东西最近
+156:[身] 📐 此刻 第2 台+第0 台 相机同时看见它 ⇒ 视线交在 (-0.070 m,-0.357 m,0.658 m),视线间最大偏差 0.014 m
+158:[身] 📐 挪 (-0.048 m,-0.010 m,-0.016 m) ⇒ 实到 (-0.048 m,-0.010 m,-0.015 m),差 0.001 m
+159:[身] 📐 它该出现在 (238.2,390.5),大了 1.10 倍 ⇒ 到那儿去量
+160:[身] 📐 此刻 第2 台+第0 台 相机同时看见它 ⇒ 视线交在 (-0.069 m,-0.357 m,0.653 m),视线间最大偏差 0.013 m
+162:[身] 📐 挪 (-0.047 m,-0.010 m,-0.017 m) ⇒ 实到 (-0.047 m,0.007 m,-0.008 m),差 0.019 m
+163:[身] 📐 它该出现在 (231.9,424.3),大了 1.13 倍 ⇒ 到那儿去量
+165:[身] 📐 转 0.205 rad ⇒ 实到 0.199 rad(还差 0.443)
+166:[身] 📐 转 0.205 rad ⇒ 实到 0.201 rad(还差 0.243)
+167:[身] 📐 转 0.043 rad ⇒ 实到 0.037 rad(还差 0.043)
+168:[身] 📐 它被画面边切着 ⇒ 转眼看着它(amount: arrived (my eye now points there, off by 0.005 rad))
+169:[身] 📐 此刻只有这一只眼看见它 ⇒ 按我自己挪过的那几眼算(前提是它没动;会动的东西这样量不出来)
+171:[身] 📐 挪 (-0.017 m,-0.032 m,0.036 m) ⇒ 实到 (-0.017 m,-0.031 m,0.036 m),差 0.001 m
+173:[身] 📐 挪 (0.011 m,-0.015 m,0.046 m) ⇒ 实到 (0.010 m,-0.015 m,0.046 m),差 0.001 m
+174:[身] 📐 这一步之后看不见它了 ⇒ 不再更新它的位置;它在哪我已经从看得全的那几眼里知道了,凭位姿读数走完
+176:[身] 📐 转 0.205 rad ⇒ 实到 0.200 rad(还差 0.937)
+177:[身] 📐 转 0.205 rad ⇒ 实到 0.199 rad(还差 0.737)
+179:[身] 📐 转 0.205 rad ⇒ 实到 0.199 rad(还差 0.537)
+180:[身] 📐 转 0.205 rad ⇒ 实到 0.204 rad(还差 0.338)
+181:[身] 📐 转 0.134 rad ⇒ 实到 0.132 rad(还差 0.134)
+184:[身]   ⇒ you asked grip 2 above mint green scissors (by sightlines, in my own hand camera): amount: arrived above it (it sits one hand-opening, 0.090 m, straight below where my fingers close, within 0.001 m); my fingers now point down at it. I took 12 pushes; MODE: hands empty; without new words from you I hold still and keep my grip as it is; this segment ended on: amount: arrived above it
+196:beat 160 | eye 2 | grip 2 above mint green scissors (by sightlines, in my own hand camera) | 12 pushes | ended: amount: arrived above it (it sits one hand-opening, 0.090 m, straight below where my fingers close, within 0.001 m); my fingers now point down at it
+199:beat 161 | eye 2 | grip 2 above mint green scissors (by sightlines, in my own hand camera) | 12 pushes | ended: amount: arrived above it (it sits one hand-opening, 0.090 m, straight below where my fingers close, within 0.001 m); my fingers now point down at it
+234:beat 160 | eye 2 | grip 2 above mint green scissors (by sightlines, in my own hand camera) | 12 pushes | ended: amount: arrived above it (it sits one hand-opening, 0.090 m, straight below where my fingers close, within 0.001 m); my fingers now point down at it
+237:beat 161 | eye 2 | grip 2 above mint green scissors (by sightlines, in my own hand camera) | 12 pushes | ended: amount: arrived above it (it sits one hand-opening, 0.090 m, straight below where my fingers close, within 0.001 m); my fingers now point down at it
+262:[身] 🧠 它交上来一段程序:
+263:do grasper touching mint green scissors small until touched
+264:[身] 📦 mint green scissors:脑给的框 [0 4 284 175](第2 台相机)⇒ 框里量到一整块 14524 px · 形心 (144.9,81.0) · 长宽比 3.0 · 它顶到了框外那一圈(挨着别的东西或被画面切掉),形心和长轴在这只眼里不可信
+265:[身] 🔎 grasper 挑第2 只手:它自己那只眼的朝向和指尖都量过(量得出东西有多远),且离点名的东西最近
+274:[身] 📐 挪 (0.017 m,0.019 m,-0.000 m) ⇒ 实到 (0.016 m,0.019 m,-0.000 m),差 0.001 m
+276:[身] 📐 此刻只有这一只眼看见它 ⇒ 按我自己挪过的那几眼算(前提是它没动;会动的东西这样量不出来)
+278:[身] 📐 挪 (-0.016 m,-0.001 m,-0.020 m) ⇒ 实到 (-0.015 m,-0.001 m,-0.019 m),差 0.001 m
+279:[身] 📐 它该出现在 (132.7,77.9),大了 1.04 倍 ⇒ 到那儿去量
+280:[身] 📐 它有一截出了画面/被挡住,这一眼不可信 ⇒ 不再更新它的位置;它在哪我已经从看得全的那几眼里知道了,凭位姿读数走完
+282:[身] 📐 挪 (-0.016 m,-0.001 m,-0.020 m) ⇒ 实到 (-0.015 m,-0.001 m,-0.019 m),差 0.001 m
+283:[身] 📐 它该出现在 (133.8,78.9),大了 1.04 倍 ⇒ 到那儿去量
+285:[身] 📐 挪 (-0.016 m,-0.001 m,-0.020 m) ⇒ 实到 (-0.015 m,-0.001 m,-0.019 m),差 0.001 m
+286:[身] 📐 它该出现在 (135.0,80.2),大了 1.04 倍 ⇒ 到那儿去量
+288:[身] 📐 挪 (-0.016 m,-0.001 m,-0.020 m) ⇒ 实到 (-0.015 m,-0.001 m,-0.019 m),差 0.001 m
+289:[身] 📐 它该出现在 (136.4,81.5),大了 1.04 倍 ⇒ 到那儿去量
+291:[身] 📐 挪 (-0.016 m,-0.001 m,-0.020 m) ⇒ 实到 (-0.015 m,-0.001 m,-0.019 m),差 0.001 m
+292:[身] 📐 它该出现在 (138.0,83.0),大了 1.04 倍 ⇒ 到那儿去量
+295:[身] 📐 挪 (-0.016 m,-0.001 m,-0.020 m) ⇒ 实到 (-0.015 m,-0.001 m,-0.019 m),差 0.001 m
+296:[身] 📐 它该出现在 (139.9,84.7),大了 1.04 倍 ⇒ 到那儿去量
+298:[身] 📐 挪 (-0.018 m,-0.002 m,-0.018 m) ⇒ 实到 (-0.022 m,0.001 m,-0.005 m),差 0.013 m
+300:[身] 📐 挪 (-0.003 m,-0.006 m,0.025 m) ⇒ 实到 (-0.003 m,-0.006 m,0.023 m),差 0.001 m
+303:[身] 📐 挪 (-0.017 m,-0.001 m,-0.019 m) ⇒ 实到 (-0.018 m,-0.000 m,-0.016 m),差 0.003 m
+305:[身] 📐 挪 (-0.016 m,-0.000 m,-0.020 m) ⇒ 实到 (-0.021 m,0.003 m,-0.007 m),差 0.014 m
+307:[身] 📐 挪 (-0.011 m,-0.000 m,-0.023 m) ⇒ 实到 (-0.014 m,0.002 m,-0.011 m),差 0.013 m
+311:[身]   ⇒ you asked grip 2 at mint green scissors (by sightlines, in my own hand camera): steps: I took the steps you asked for (still 0.030 m from where my fingers close). I took 12 pushes; MODE: hands empty; without new words from you I hold still and keep my grip as it is; this segment ended on: steps: I took the steps you asked for (still 0.030 m from where my fingers close).
+322:beat 160 | eye 2 | grip 2 above mint green scissors (by sightlines, in my own hand camera) | 12 pushes | ended: amount: arrived above it (it sits one hand-opening, 0.090 m, straight below where my fingers close, within 0.001 m); my fingers now point down at it
+325:beat 161 | eye 2 | grip 2 above mint green scissors (by sightlines, in my own hand camera) | 12 pushes | ended: amount: arrived above it (it sits one hand-opening, 0.090 m, straight below where my fingers close, within 0.001 m); my fingers now point down at it
+360:beat 160 | eye 2 | grip 2 above mint green scissors (by sightlines, in my own hand camera) | 12 pushes | ended: amount: arrived above it (it sits one hand-opening, 0.090 m, straight below where my fingers close, within 0.001 m); my fingers now point down at it
+363:beat 161 | eye 2 | grip 2 above mint green scissors (by sightlines, in my own hand camera) | 12 pushes | ended: amount: arrived above it (it sits one hand-opening, 0.090 m, straight below where my fingers close, within 0.001 m); my fingers now point down at it
+389:[身] 🧠 它交上来一段程序:
+390:do grasper close mint green scissors until settled
+391:[身] 🔎 grasper 挑第2 只手:它自己那只眼的朝向和指尖都量过(量得出东西有多远),且离点名的东西最近
+403:[身]   ⇒ I closed grip 2 until the picture stopped changing (40 steps, reading 0.054, empty-close reading 0.000); after a small lift my fingers are still held apart ⇒ held (my fingers stopped at 0.055, empty they stop at 0.000 - so something is wedged between them) (my hand moved 0.000 of a frame, it moved 0.153, the two differ by 0.153). While I closed and lifted, 21 other thing(s) I was
+413:beat 160 | eye 2 | grip 2 above mint green scissors (by sightlines, in my own hand camera) | 12 pushes | ended: amount: arrived above it (it sits one hand-opening, 0.090 m, straight below where my fingers close, within 0.001 m); my fingers now point down at it
+416:beat 161 | eye 2 | grip 2 above mint green scissors (by sightlines, in my own hand camera) | 12 pushes | ended: amount: arrived above it (it sits one hand-opening, 0.090 m, straight below where my fingers close, within 0.001 m); my fingers now point down at it
+453:beat 160 | eye 2 | grip 2 above mint green scissors (by sightlines, in my own hand camera) | 12 pushes | ended: amount: arrived above it (it sits one hand-opening, 0.090 m, straight below where my fingers close, within 0.001 m); my fingers now point down at it
+456:beat 161 | eye 2 | grip 2 above mint green scissors (by sightlines, in my own hand camera) | 12 pushes | ended: amount: arrived above it (it sits one hand-opening, 0.090 m, straight below where my fingers close, within 0.001 m); my fingers now point down at it
+485:[身] 🧠 它交上来一段程序:
+486:do grasper farther mint green scissors until settled
+487:[身] 🔎 grasper 挑第2 只手:它自己那只眼的朝向和指尖都量过(量得出东西有多远),且离点名的东西最近
+496:[链] 线断了 ⇒ 在同一个口上等对方重新接上(身体量到的东西都留着)…

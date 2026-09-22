@@ -57,6 +57,13 @@ package Geom is
    procedure Fit_Fixed (G : in out Cam_Geo; O : Mark_Vectors.Vector; Ok : out Boolean);
    --  视线与一个面的交点(面 = 过 P0、法向 N);视线和面平行或交在身后 ⇒ Ok = False
    function Hit_Plane (Origin, Dir, P0, N : V3; Ok : out Boolean) return V3;
+   --  ── 几条视线同一时刻交在哪 ──:每条视线 = 世界系里的起点 + 单位方向,来自哪只眼都行(不动的眼、任何一只手上的眼)。
+   --  两只眼同时看见 ⇒ 距离当场出来,东西动不动都一样;只有一只眼 ⇒ 交不出来(Ok = False),调用方得靠自己挪、并如实说前提是它没动。
+   type Sight is record
+      O, D : V3 := [others => 0.0];
+   end record;
+   package Sight_Vectors is new Ada.Containers.Vectors (Natural, Sight);
+   function Meet (Rays : Sight_Vectors.Vector; Ok : out Boolean; Spread : out Long_Float) return V3;   --  Spread = 交点到各视线的最远距离(米)
    procedure Save (Path : String; Gs : Geo_Vectors.Vector);
    procedure Load (Path : String; Gs : in out Geo_Vectors.Vector; N_Cams : Natural; Note : out String);
 end Geom;
