@@ -937,6 +937,48 @@ package body Act is
       return -1;
    end Boxed_Index;
 
+   --  这只眼里叫这个名字的那一件(脑点过名的);没有 ⇒ -1
+   function Boxed_By (C : Context; Cam : Natural; Name : Unbounded_String) return Integer is
+   begin
+      if Length (Name) = 0 then
+         return -1;
+      end if;
+      for Bi in 0 .. Natural (C.Boxed.Length) - 1 loop
+         if C.Boxed (Bi).Cam = Cam and then C.Boxed (Bi).Name = Name then
+            return Integer (Bi);
+         end if;
+      end loop;
+      return -1;
+   end Boxed_By;
+
+   --  清单第 N 件(1 起)叫什么:脑点过名才有名字,没点过 ⇒ 空
+   function Item_Name (C : Context; N : Natural) return Unbounded_String is
+   begin
+      if N >= 1 and then N <= Natural (C.Items.Length) then
+         declare
+            It : constant Item := C.Items (N - 1);
+            Bx : constant Integer := (if It.Kind in Thing | Thing_Remembered then Boxed_Index (C, It.Cam, It.Cu, It.Cv) else -1);
+         begin
+            if Bx >= 0 then
+               return C.Boxed (Natural (Bx)).Name;
+            end if;
+         end;
+      end if;
+      return Null_Unbounded_String;
+   end Item_Name;
+
+   --  脑说过"这只眼里没有它":按相机号记一位,记几只都行(只记最后一只会在两只看不见的眼之间来回弹)
+   function Is_Blind (C : Context; Cam : Integer) return Boolean is
+     (Cam >= 0 and then Natural (Cam) < Natural (C.Blind.Length) and then C.Blind (Natural (Cam)));
+
+   procedure Mark_Blind (C : in out Context; Cam : Natural; On : Boolean) is
+   begin
+      while Natural (C.Blind.Length) <= Cam loop
+         C.Blind.Append (False);
+      end loop;
+      C.Blind.Replace_Element (Cam, On);
+   end Mark_Blind;
+
    --  一件东西【叫什么】:脑点过名的用脑起的名字,我身上的用它是哪一块。编号不进语言(LANGUAGE §3.1),
    --  也就不该进我说给脑听的话和经历账 —— T2 2026-09-21 实测:清单每行以 "item N:" 开头、经历账全是
    --  "item 6 above item 10",Qwen 于是把 item 当成了东西的名字(`do grasper touching item item`),
@@ -5205,6 +5247,19 @@ package body Act is
       return G.Tip_Valid and then G.F > 0.0;
    end Geo_Ready;
 
+   --  长在这条胳膊上、几何常数齐的那只眼(量得出东西有多远的那只);没有 ⇒ -1
+   function Hand_Eye_Of (C : Context; Arm : Integer) return Integer is
+   begin
+      if Arm >= 0 then
+         for Cm in 0 .. C.Map.N_Cams - 1 loop
+            if Cam_Arm (C, Cm) = Arm and then Geo_Ready (C, Cm) then
+               return Integer (Cm);
+            end if;
+         end loop;
+      end if;
+      return -1;
+   end Hand_Eye_Of;
+
    --  观测里带了焦距就记进这台相机的几何(没带就留着以前存的)
    procedure Geo_Take_K (C : in out Context; F : Plug.Frame; Cam : Natural) is
       G : Geom.Cam_Geo := Geo_Of (C, Cam);
@@ -5216,7 +5271,8 @@ package body Act is
    end Geo_Take_K;
 
    --  点名的那块此刻在这台相机里的像素(这一帧还没切过就切一遍、槽号对上)
-   procedure Geo_Track (C : in out Context; F : Plug.Frame; Cam : Natural; Slot : Integer; U, V : out Long_Float; Seen : out Boolean) is
+   procedure Geo_Track (C : in out Context; F : Plug.Frame; Cam : Natural; Slot : Integer; U, V : out Long_Float; Seen : out Boolean;
+                        Name : Unbounded_String := Null_Unbounded_String) is
       Cw : constant Natural := F.Cams (Cam).W;
       Ch : constant Natural := F.Cams (Cam).H;
       Bx : Integer := -1;
@@ -5224,6 +5280,14 @@ package body Act is
       Seen := False; U := 0.0; V := 0.0;
       if not (C.Cut_Seq = F.Seq and then C.Cut_Cam = Integer (Cam)) then
          World.Observe (C.Wld, Cam, Cut_Things (C, F, Cam), Cw, Ch);
+      end if;
+      --  带着名字来的:这只眼里叫这个名字的那一件,这一帧量到了就是它(槽是脑看着的那只眼的记账,走路的眼未必有槽)
+      if Length (Name) > 0 then
+         Bx := Boxed_By (C, Cam, Name);
+         if Bx >= 0 and then C.Boxed (Natural (Bx)).Seen then
+            U := C.Boxed (Natural (Bx)).Cu * Long_Float (Cw); V := C.Boxed (Natural (Bx)).Cv * Long_Float (Ch); Seen := True;
+         end if;
+         return;
       end if;
       --  🔴 跟的是【脑点过名、我在框里重量出来的那一块】,不是槽。槽是全图切块的记账,认槽靠"就近",
       --  H23 2026-09-22 实测:框里明明量到了(离线复算 3760 px、形心 (244,381)),槽却没对上 ⇒ 报"看丢了"。
@@ -5473,9 +5537,26 @@ package body Act is
    --  这一槽里的东西此刻看得【全不全】,以及它叫什么(点过名的才有名字)。看不全(顶到窗边/被画面切掉)的那一眼,形心不是同一个物理点。
    --  Whole = 这一眼量到的是一整块(没被【画面边】切掉;挨着邻居的已在框里量时裁掉,形心照用)。
    --  Edge = 它被画面边切掉了 ⇒ 转一下眼把它整个看进来,这一眼才算数。
-   procedure Slot_Whole (C : Context; F : Plug.Frame; Cam : Natural; Slot : Integer; Whole, Edge : out Boolean; Name : out Unbounded_String) is
+   procedure Slot_Whole (C : Context; F : Plug.Frame; Cam : Natural; Slot : Integer; Whole, Edge : out Boolean; Name : out Unbounded_String;
+                         Named : Unbounded_String := Null_Unbounded_String) is
    begin
       Whole := True; Edge := False; Name := Null_Unbounded_String;
+      if Length (Named) > 0 then
+         Name := Named;
+         declare
+            Bx : constant Integer := Boxed_By (C, Cam, Named);
+         begin
+            if Bx >= 0 then
+               declare
+                  B : constant Boxed_Thing := C.Boxed (Natural (Bx));
+               begin
+                  Edge := B.X0 = 0 or else B.Y0 = 0 or else B.X1 + 1 >= F.Cams (Cam).W or else B.Y1 + 1 >= F.Cams (Cam).H;
+                  Whole := not Edge;
+               end;
+            end if;
+         end;
+         return;
+      end if;
       if Slot >= 0 and then Natural (Slot) < World.Count (C.Wld, Cam) then
          declare
             R : constant Picture.Region := World.Get (C.Wld, Cam, Natural (Slot)).R;
@@ -5802,7 +5883,8 @@ package body Act is
    --  "上" = 位姿读数系的 +z,和抬手那一条同一个约定(当它朝上;真机该由重力读数定)。
    procedure Geo_Approach (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Cam, Arm : Natural; Slot : Integer;
                            Step_Limit : Natural; Event : out Unbounded_String; Steps_Taken : out Natural; Beats : out Natural;
-                           Above : Boolean := False; Amt : Long_Float := 0.5; Until_Touch : Boolean := False) is
+                           Above : Boolean := False; Amt : Long_Float := 0.5; Until_Touch : Boolean := False;
+                           Name : Unbounded_String := Null_Unbounded_String) is
       G : constant Geom.Cam_Geo := Geo_Of (C, Cam);
       Beats0 : constant Natural := Plug.Steps (L);
       Limit : constant Natural := (if Step_Limit > 0 then Step_Limit else 12);   --  没说步数时的安全上限(次数)
@@ -5844,8 +5926,8 @@ package body Act is
       --  (H25 2026-09-22 实测:悬停 12 cm 处重新指了它,交点却算到 0.7 m 外、偏 54 cm,手往反方向走)。
       --  两只眼同时看见就一帧出数;只有一只眼就横挪一步当基线 —— 这一段自己的眼。
       C.Geo_Obs.Clear;
-      Geo_Track (C, F, Cam, Slot, U, V, Seen);
-      Slot_Whole (C, F, Cam, Slot, Whole, Edge, Its_Name);
+      Geo_Track (C, F, Cam, Slot, U, V, Seen, Name);
+      Slot_Whole (C, F, Cam, Slot, Whole, Edge, Its_Name, Name);
       --  🔴 看着它走:它被画面边切掉时形心不是同一个物理点,H21 2026-09-22 实测整段路只有开头两眼算数,
       --  一条 26 mm 的基线量 0.42 m 外的东西,落点偏了 5–8 cm。⇒ 被画面边切到就先转眼把它整个看进来。
       if Above then
@@ -5862,8 +5944,8 @@ package body Act is
             Geo_Turn (L, C, F, Arm, Want, Amt, Ev, St);
             Steps_Taken := Steps_Taken + St;
             Geo_Say ("它被画面边切着 ⇒ 转眼看着它(" & To_String (Ev) & ")");
-            Geo_Track (C, F, Cam, Slot, U, V, Seen);
-            Slot_Whole (C, F, Cam, Slot, Whole, Edge, Its_Name);
+            Geo_Track (C, F, Cam, Slot, U, V, Seen, Name);
+            Slot_Whole (C, F, Cam, Slot, Whole, Edge, Its_Name, Name);
          end;
       end if;
       if (Length (Its_Name) = 0 and then C.Geo_Slot /= Slot) or else (Length (Its_Name) > 0 and then C.Geo_Name /= Its_Name) then
@@ -5892,7 +5974,7 @@ package body Act is
          begin
             Geo_Move (L, C, F, Arm, Dw, Mok);
             Steps_Taken := Steps_Taken + 1;
-            Geo_Track (C, F, Cam, Slot, U, V, Seen);
+            Geo_Track (C, F, Cam, Slot, U, V, Seen, Name);
             if not Seen then
                Event := S ("lost: it left my sight when I stepped sideways to measure its distance");
                Beats := Plug.Steps (L) - Beats0;
@@ -5939,17 +6021,25 @@ package body Act is
             --  两个柄环合起来 0.091 m 宽 ≈ 张口 0.090 m ⇒ H15 2026-09-22 指尖正好踩在环的外沿,一合就把它推到一边)。
             --  哪一处夹得住由身体在它的像素上量(Grip_Spot:沿合爪方向的弦长 ≤ 张口的那些位置里挑最平的);
             --  形心到那一处的像素差,按它此刻的远近换成米,加到目标上。这不是任务规则,是"我的夹爪是什么"。
-            if Slot >= 0 and then Natural (Slot) < World.Count (C.Wld, Cam) and then -Pc (2) > 0.0 then
+            if -Pc (2) > 0.0 then
                declare
-                  Rg : constant Picture.Region := World.Get (C.Wld, Cam, Natural (Slot)).R;
-                  Bx : constant Integer := Boxed_Index (C, Cam, Rg.Cu, Rg.Cv);
+                  --  它这一帧的像素块:带名字来的按名字取(走路的眼里未必有槽),没名字的按槽
+                  Bx : constant Integer :=
+                    (if Length (Name) > 0 then Boxed_By (C, Cam, Name)
+                     elsif Slot >= 0 and then Natural (Slot) < World.Count (C.Wld, Cam)
+                     then Boxed_Index (C, Cam, World.Get (C.Wld, Cam, Natural (Slot)).R.Cu, World.Get (C.Wld, Cam, Natural (Slot)).R.Cv)
+                     else -1);
                   Zh : constant Zone.Hand_Zone := Zone_Of (C, Arm, Cam, 0);
                   Cw : constant Natural := F.Cams (Cam).W;
                   Ch : constant Natural := F.Cams (Cam).H;
+                  Rg : Picture.Region;
                   Su, Sv, Ti, Co : Long_Float;
                   Sok : Boolean := False;
                begin
                   if Bx >= 0 and then C.Boxed (Natural (Bx)).Seen and then Natural (C.Boxed (Natural (Bx)).Mask.Length) = Cw * Ch then
+                     Rg.X0 := C.Boxed (Natural (Bx)).X0; Rg.Y0 := C.Boxed (Natural (Bx)).Y0;
+                     Rg.X1 := C.Boxed (Natural (Bx)).X1; Rg.Y1 := C.Boxed (Natural (Bx)).Y1;
+                     Rg.Cu := C.Boxed (Natural (Bx)).Cu; Rg.Cv := C.Boxed (Natural (Bx)).Cv;
                      Grip_Spot (Zh, Rg, C.Boxed (Natural (Bx)).Mask, Cw, Ch, Su, Sv, Ti, Co, Sok);
                   end if;
                   if Sok then
@@ -6104,10 +6194,14 @@ package body Act is
                --  点过名的东西是"在上一帧量到它的地方原样再量",一步 14 cm 之后它早不在那儿了)。
                --  可我【知道】它该在哪:它的位置是我刚用两条视线交出来的(Pw),我挪了多少是位姿读数说的 ⇒
                --  把它投到新位姿的画面里,就是它这一帧该出现的像素;离我近了几成,它就大了几成。先把重量的窗挪过去、放大,再量。
-               if Slot >= 0 and then Natural (Slot) < World.Count (C.Wld, Cam) then
+               declare
+                  Have_Slot : constant Boolean := Slot >= 0 and then Natural (Slot) < World.Count (C.Wld, Cam);
+               begin
+               if Length (Name) > 0 or else Have_Slot then
                   declare
-                     Was : constant Picture.Region := World.Get (C.Wld, Cam, Natural (Slot)).R;
-                     Bx : constant Integer := Boxed_Index (C, Cam, Was.Cu, Was.Cv);
+                     Bx : constant Integer :=
+                       (if Length (Name) > 0 then Boxed_By (C, Cam, Name)
+                        else Boxed_Index (C, Cam, World.Get (C.Wld, Cam, Natural (Slot)).R.Cu, World.Get (C.Wld, Cam, Natural (Slot)).R.Cv));
                      Pu, Pv : Long_Float;
                      Front : Boolean;
                      Z_Was : constant Long_Float := -Pc (2);
@@ -6132,15 +6226,18 @@ package body Act is
                            if B.X1 > B.X0 and then B.Y1 > B.Y0 then
                               C.Boxed.Replace_Element (Natural (Bx), B);
                               --  槽里记的那一块也挪到预测处,好让这一帧量到的新块对得上同一个槽(World.Observe 按形心就近认槽)
-                              World.Shift_Slot (C.Wld, Cam, Natural (Slot), Pu / Long_Float (Cw), Pv / Long_Float (Ch), Grow);
+                              if Have_Slot then
+                                 World.Shift_Slot (C.Wld, Cam, Natural (Slot), Pu / Long_Float (Cw), Pv / Long_Float (Ch), Grow);
+                              end if;
                               Geo_Say ("它该出现在 (" & Codec.Fmt (Pu, 1) & "," & Codec.Fmt (Pv, 1) & "),大了 " & Codec.Fmt (Grow, 2) & " 倍 ⇒ 到那儿去量");
                            end if;
                         end;
                      end if;
                   end;
                end if;
-               Geo_Track (C, F, Cam, Slot, U, V, Seen);
-               Slot_Whole (C, F, Cam, Slot, Whole, Edge, Its_Name);
+               end;
+               Geo_Track (C, F, Cam, Slot, U, V, Seen, Name);
+               Slot_Whole (C, F, Cam, Slot, Whole, Edge, Its_Name, Name);
                --  手指已经指着它躺的面时,最后贴上去这一段不再为了看它而转手(转了指尖就不朝下了);看不全就按位姿读数走
                if Seen and then Edge and then not Pressing and then not (C.Fingers_Aimed and then not Above) then
                   declare
@@ -6151,8 +6248,8 @@ package body Act is
                      Geo_Turn (L, C, F, Arm, Want, Amt, Ev, St);
                      Steps_Taken := Steps_Taken + St;
                      Geo_Say ("它被画面边切着 ⇒ 转眼看着它(" & To_String (Ev) & ")");
-                     Geo_Track (C, F, Cam, Slot, U, V, Seen);
-                     Slot_Whole (C, F, Cam, Slot, Whole, Edge, Its_Name);
+                     Geo_Track (C, F, Cam, Slot, U, V, Seen, Name);
+                     Slot_Whole (C, F, Cam, Slot, Whole, Edge, Its_Name, Name);
                   end;
                end if;
                if Natural (C.Geo_Obs.Length) >= 2 and then not (Seen and then Whole) then
@@ -6549,7 +6646,7 @@ package body Act is
                      end if;
                      if not Found then
                         --  脑看着图说"这只眼里我指不出它" ⇒ 记下这只眼,选眼的时候跳过它(不记就来回弹)。
-                        C.Blind_Cam := Integer (Cam);
+                        Mark_Blind (C, Cam, True);
                         Tried := To_Unbounded_String ("我在这只眼里指不出它在哪");
                         return -1;
                      end if;
@@ -6600,9 +6697,7 @@ package body Act is
                                  It.Au := Sl.R.Au; It.Av := Sl.R.Av; It.Elong := Sl.R.Elong;
                                  It.Gray := Picture.Mean_Gray (F.Cams (Cam).Gray, Kw, Kh, Sl.R);
                                  C.Items.Append (It);
-                                 if C.Blind_Cam = Integer (Cam) then
-                                    C.Blind_Cam := -1;      --  只在【就是这只被判过"没有它"的眼】里又认出来了才解除(JA 推演过,别改回去)
-                                 end if;
+                                 Mark_Blind (C, Cam, False);   --  只在【就是这只被判过"没有它"的眼】里又认出来了才解除(JA 推演过,别改回去)
                                  C.Name_Cam := Integer (Cam);
                                  return Integer (C.Items.Length);
                               end if;
@@ -6774,12 +6869,25 @@ package body Act is
                               Pick : Integer := -1;
                               Bv : Long_Float := (if C.Eye_Want = Sinew.Ey_Still then 1.0e9 else -1.0);
                               Any : Boolean := False;
+                              --  🔴 "不动的眼"先挑【不长在任何一条胳膊上】的(开机量的 Cam_On_Arm)。H27 2026-09-22 实测:按"变得最少"挑,
+                              --  挑中的是长在【另一条】胳膊上的左腕眼(这条胳膊一动它变 0.024 幅,比头顶眼的 0.039 还静),
+                              --  而那只眼里没有剪刀、它自己一动画面又全变。一只眼都不长在胳膊上的才叫不动;没有这样的眼才退回"变得最少"。
+                              Any_Free : Boolean := False;
                            begin
+                              for Cm in 0 .. C.Map.N_Cams - 1 loop
+                                 if Cam_Arm (C, Cm) < 0 and then not Is_Blind (C, Cm)
+                                   and then Natural (Sub_Arm) * C.Map.N_Cams + Cm < Natural (C.Map.Cam_Frac.Length)
+                                 then
+                                    Any_Free := True;
+                                 end if;
+                              end loop;
                               for Cm in 0 .. C.Map.N_Cams - 1 loop
                                  declare
                                     Ix : constant Natural := Natural (Sub_Arm) * C.Map.N_Cams + Cm;
                                     Vv : constant Long_Float :=
-                                      (if Ix < Natural (C.Map.Cam_Frac.Length) then C.Map.Cam_Frac (Ix) else -1.0);
+                                      (if Ix < Natural (C.Map.Cam_Frac.Length)
+                                         and then not (C.Eye_Want = Sinew.Ey_Still and then Any_Free and then Cam_Arm (C, Cm) >= 0)
+                                       then C.Map.Cam_Frac (Ix) else -1.0);
                                  begin
                                     --  🔴 "最静"只是一半 —— 另一半是【脑在那只眼里认得出这一段要做的事】。
                                     --  JA 2026-09-15 实测:我写 with my still eye,身体按 Cam_Frac 挑了第 1 只
@@ -6788,7 +6896,7 @@ package body Act is
                                     --  ⚠️ 这不是 IH 撤回的那条("目标那只眼永远赢"—— 那条会把脑永远拽回 0 号眼,
                                     --  于是量远近永远被拒)。这里只跳过【脑自己刚说过"这儿没有"】的那只:
                                     --  是脑在决定,不是身体替它决定;脑看得见时照样答真编号,那只眼一次都不会被跳。
-                                    if Vv >= 0.0 and then Integer (Cm) /= C.Blind_Cam then
+                                    if Vv >= 0.0 and then not Is_Blind (C, Cm) then
                                        Any := True;
                                        if (C.Eye_Want = Sinew.Ey_Still and then Vv < Bv)
                                          or else (C.Eye_Want = Sinew.Ey_Moving and then Vv > Bv)
@@ -6854,7 +6962,7 @@ package body Act is
                                     then
                                        Aim_Eye_At (L, C, F, Natural (Sub_Arm), C.Cam, Pu, Pv, 0.5, Ev, Aok);
                                        Put_Line ("[身] 👁 转眼:" & To_String (Ev));
-                                       C.Blind_Cam := -1;
+                                       Mark_Blind (C, Natural (Pick), False);
                                     end if;
                                     C.Cam := Natural (Pick);
                                     C.Recent := S ("I moved to the eye you asked for. "
@@ -6897,10 +7005,31 @@ package body Act is
                                  end if;
                               end;
                            end loop;
+                           --  🔴 脑说 with my still eye 也一样要换过去问一次名(H27 2026-09-22 实测:不换,走路就落进不动的眼、掉回老路)。
+                           --  但只在【那只眼里还没点过它的名】时换:点过名的东西我每帧自己重量,走路时按名字在那只眼里跟,
+                           --  脑照样看着它点的那只眼。这不是替脑选眼,是走路的手要在自己的眼里认一次它。
+                           declare
+                              Named_There : Boolean := False;
+                           begin
+                              if Hand_Eye >= 0 then
+                                 for I2 in 0 .. Natural (Binds.Length) - 1 loop
+                                    declare
+                                       Key : constant String := To_String (Binds (I2).Key);
+                                    begin
+                                       if Key /= "me" and then Key /= "grasper" and then Key /= "pusher" and then Binds (I2).Item >= 1
+                                         and then Boxed_By (C, Natural (Hand_Eye), Item_Name (C, Natural (Binds (I2).Item))) >= 0
+                                       then
+                                          Named_There := True;
+                                       end if;
+                                    end;
+                                 end loop;
+                              end if;
                            if Hand_Eye >= 0 and then Names_A_Thing and then Natural (Hand_Eye) /= C.Cam
-                             and then Hand_Eye /= C.Blind_Cam and then Sinew."=" (C.Eye_Want, Sinew.Ey_None)
+                             and then not Is_Blind (C, Hand_Eye) and then Sinew."/=" (C.Eye_Want, Sinew.Ey_Moving)
+                             and then not Named_There
                            then
-                              Put_Line ("[身] 👁 你没点眼;这条胳膊自己的那只眼(第" & Codec.Img (Natural (Hand_Eye))
+                              Put_Line ("[身] 👁 " & (if Sinew."=" (C.Eye_Want, Sinew.Ey_None) then "你没点眼;" else "你要用不动的眼判,可走路得用")
+                                        & "这条胳膊自己的那只眼(第" & Codec.Img (Natural (Hand_Eye))
                                         & " 只)量得出东西有多远 ⇒ 换过去,在那儿再问你一次它在哪");
                               --  🔴 换过去之前先把那只眼【转向它】:现在这只是不动的眼,它量过自己在世界里的位置,
                               --  视线 ∩ 它躺着的面 = 它在哪。不转的话手眼常常根本看不见它(V3 2026-09-22:剪刀在两只手后方)。
@@ -6914,19 +7043,26 @@ package body Act is
                                  if Have and then C.Cam < Natural (C.Geo.Length) and then C.Geo (C.Cam).Fixed then
                                     Aim_Eye_At (L, C, F, Natural (Sub_Arm), C.Cam, Pu, Pv, 0.5, Ev, Aok);
                                     Put_Line ("[身] 👁 转眼:" & To_String (Ev));
-                                    C.Blind_Cam := -1;   --  那只眼现在看的是别处了,以前说的"没有它"不再算数
+                                    Mark_Blind (C, Natural (Hand_Eye), False);   --  那只眼现在看的是别处了,以前说的"没有它"不再算数
                                  end if;
                                  C.Cam := Natural (Hand_Eye);
                                  C.Eye_Chosen := True;
-                                 C.Recent := S ("you did not name an eye, so I moved to the eye that rides on the arm you are moving: "
-                                                & "it is the one through which I can measure how far away a thing is. "
+                                 C.Recent := S ((if Sinew."=" (C.Eye_Want, Sinew.Ey_None)
+                                                 then "you did not name an eye, so I moved to the eye that rides on the arm you are moving: "
+                                                   & "it is the one through which I can measure how far away a thing is. "
+                                                 else "you asked me to judge with my still eye; walking up to a thing is done through the eye that rides "
+                                                   & "on the arm I am moving (the only one that measures how far away it is), and that eye has to be shown "
+                                                   & "the thing once. I moved to it. ")
                                                 & (if Have and then Aok then "I first turned that eye toward where my still eye says the thing is. "
                                                    elsif Have then "I tried to turn that eye toward where my still eye says the thing is: " & To_String (Ev) & ". "
                                                    else "")
-                                                & "Nothing else moved. Say the same thing again. " & Mode_Line (C, "moved to the eye that can measure distance"));
+                                                & "Nothing else moved. Say the same thing again"
+                                                & (if Sinew."=" (C.Eye_Want, Sinew.Ey_None) then ". " else ", and point the thing out in this picture; after that I walk with this eye while you keep judging with the one you asked for. ")
+                                                & Mode_Line (C, "moved to the eye that can measure distance"));
                               end;
                               return;
                            end if;
+                           end;
                         end;
                         if Best_Cam /= C.Cam and then not C.Eye_Chosen
                           and then Sinew."=" (C.Eye_Want, Sinew.Ey_None)
@@ -7066,7 +7202,7 @@ package body Act is
                                        Put_Line ("[身]    它要换到第" & Natural'Image (Ci)
                                                  & " 台相机 ⇒ 下一轮在那台里列块、问、执行");
                                        C.Cam := Ci;
-                                       C.Blind_Cam := -1;
+                                       Mark_Blind (C, Ci, False);
                                        --  🔴 脑明确点了眼 ⇒ 这一段不许再被"哪只眼变化最大"那条启发式抢走。
                                        --  HB9 实测:那条启发式在【远距离伸手】时选反 —— 它挑腕眼,而贴近的目标里
                                        --  有一项是"看着多大要长到爪口那么大",腕眼里这要求手凑到极近,
@@ -7226,6 +7362,9 @@ package body Act is
          Geo_Slot_Now : Integer := -1;
          Geo_Above : Boolean := False;
          Geo_Desc : Unbounded_String;
+         Own : Integer := -1;                --  这一段要动的胳膊
+         Geo_Cam : Integer := -1;            --  它自己的眼(几何常数齐);-1 = 这条胳膊上没有这样的眼
+         Geo_Name : Unbounded_String;        --  要去的那件东西叫什么(脑点的名;走路的眼里按名字跟)
       --  2a 把脑说的话变成要求:别动的,目标就是它现在的位置;要动的,目标是格子或与某号的关系;
       --  抓某号,目标是"和我张开的那片地方重合"(位置 / 远近 / 看着多大 / 朝向)
       --  把去哪翻成目标:格子 / 与某号的关系(碰到它 · 上下左右 · 前后 · 离远点)。全是量出来的位置,没有写死的距离
@@ -7775,11 +7914,26 @@ package body Act is
                Avoid.Append (C.Items (N - 1));
             end if;
          end loop;
-         --  ── 几何走法(这只眼长在要动的那只手上时)──:贴近/瞄进 = 两条视线一交;合 = 刚算过的距离说了算;拿着离远 = 沿原路退
+         --  ── 几何走法(要动的那条胳膊上长着一只几何常数齐的眼时)──:贴近/瞄进 = 视线一交;合 = 刚算过的距离说了算;拿着离远 = 沿原路退
+         --  🔴 走路用哪只眼,由【要动的那条胳膊】定(开机量的 Cam_On_Arm),不由脑此刻看着哪只眼定。
+         --  H27 2026-09-22 实测:Qwen 每一段都写 with my still eye,脑于是留在头顶眼里;走路也跟着落到头顶眼 ⇒ 掉回逐通道推的老路,
+         --  而那只眼量不了远近 ⇒ 691 拍一步没走、1200 拍超时。脑点的眼是它【看】的眼;量远近、贴上去,只有长在这条胳膊上的眼做得到。
+         --  走路的眼未必是脑看着的眼 ⇒ 它里面未必有槽,东西按【名字】跟(脑在那只眼里点过一次名,之后每帧我自己重量)。
+         if (Say.Grip = "none" or else Length (Say.Grip) = 0) and then Natural (Say.Moves.Length) = 1 then
+            declare
+               G0 : constant Brain.Goal := Say.Moves (0);
+            begin
+               if G0.Item >= 1 and then G0.Item <= Natural (C.Items.Length) and then C.Items (G0.Item - 1).Kind in Finger | Grip then
+                  Own := Integer (C.Items (G0.Item - 1).Arm);
+               end if;
+            end;
+         elsif Say.Grip = "close" then
+            Own := Grip_Arm;
+         end if;
+         Geo_Cam := Hand_Eye_Of (C, Own);
          declare
-            Own : constant Integer := Cam_Arm (C, Cam);
          begin
-            if Own >= 0 and then Geo_Ready (C, Cam) then
+            if Own >= 0 and then Geo_Cam >= 0 then
                --  🔴 T8 2026-09-21 实测这一支没进来:程序一节翻成内部请求时,纯移动的 Grip 是【空串】(只有 close/open 才赋值),
                --  而 GB5 那个年代脑填表、填的是 "none"。两种都是"这一节不动爪子"。
                if (Say.Grip = "none" or else Length (Say.Grip) = 0) and then Natural (Say.Moves.Length) = 1 then
@@ -7787,22 +7941,20 @@ package body Act is
                      G0 : constant Brain.Goal := Say.Moves (0);
                      Rl : constant String := To_String (G0.Rel);
                   begin
-                     if G0.Item >= 1 and then G0.Item <= Natural (C.Items.Length) and then C.Items (G0.Item - 1).Kind in Finger | Grip
-                       and then Integer (C.Items (G0.Item - 1).Arm) = Own
+                     if (Rl = "at" or else Rl = "into" or else Rl = "above") and then G0.Of_Item >= 1 and then G0.Of_Item <= Natural (C.Items.Length)
+                       and then C.Items (G0.Of_Item - 1).Kind = Thing and then C.Items (G0.Of_Item - 1).Located
                      then
-                        if (Rl = "at" or else Rl = "into" or else Rl = "above") and then G0.Of_Item >= 1 and then G0.Of_Item <= Natural (C.Items.Length)
-                          and then C.Items (G0.Of_Item - 1).Kind = Thing and then C.Items (G0.Of_Item - 1).Located
-                        then
-                           --  🔴 above 在【长在手上的眼】里按"画面里的上方"没法执行也没有物理意义(那只眼跟着手转);
-                           --  这里按重力的"上"走:它正上方、高出一个张口。T5–T7 实测 Qwen 的抓法每一段都从 above 起手。
-                           --  ⚠️ 这是对语言 §4.1 的一处改义(只在手上的眼里),已记进 LAB,待 owner 认。
-                           Geo_Above := Rl = "above";
-                           Geo_Case := 1; Geo_Slot_Now := C.Items (G0.Of_Item - 1).Slot;
-                           Geo_Desc := S (Say_Item (C, G0.Item) & " " & Rl & " " & Say_Item (C, G0.Of_Item) & " (by sightlines, in my own hand camera)");
-                        elsif Rl = "back" and then C.Wld.Holding and then C.Wld.Held_Arm = Own then
-                           Geo_Case := 2;
-                           Geo_Desc := S (Say_Item (C, G0.Item) & " back the way it came, holding");
-                        end if;
+                        --  🔴 above 在【长在手上的眼】里按"画面里的上方"没法执行也没有物理意义(那只眼跟着手转);
+                        --  这里按重力的"上"走:它正上方、高出一个张口。T5–T7 实测 Qwen 的抓法每一段都从 above 起手。
+                        --  ⚠️ 这是对语言 §4.1 的一处改义(只在手上的眼里),已记进 LAB,待 owner 认。
+                        Geo_Above := Rl = "above";
+                        Geo_Case := 1;
+                        Geo_Slot_Now := (if Natural (Geo_Cam) = Cam then C.Items (G0.Of_Item - 1).Slot else -1);
+                        Geo_Name := Item_Name (C, G0.Of_Item);
+                        Geo_Desc := S (Say_Item (C, G0.Item) & " " & Rl & " " & Say_Item (C, G0.Of_Item) & " (by sightlines, in my own hand camera)");
+                     elsif Rl = "back" and then C.Wld.Holding and then C.Wld.Held_Arm = Own then
+                        Geo_Case := 2;
+                        Geo_Desc := S (Say_Item (C, G0.Item) & " back the way it came, holding");
                      end if;
                   end;
                elsif Say.Grip = "close" and then Grip_Arm = Own and then C.Geo_Dist >= 0.0 and then C.Geo_At_Arm = Own then
@@ -7821,12 +7973,12 @@ package body Act is
                end if;
             end if;
          end;
-         if Geo_Case = 1 and then not Geo_Of (C, Cam).Valid then
+         if Geo_Case = 1 and then not Geo_Of (C, Natural (Geo_Cam)).Valid then
             declare
                Cok : Boolean;
             begin
                Put_Line ("[身] 📐 这台相机的朝向还没量 ⇒ 先盯着它挪四下量出来");
-               Geo_Calibrate (L, C, F, Cam, Natural (Cam_Arm (C, Cam)), Geo_Slot_Now, Cok);
+               Geo_Calibrate (L, C, F, Natural (Geo_Cam), Natural (Own), Geo_Slot_Now, Cok);
                if not Cok then
                   Geo_Case := 0;
                   Report := S ("I tried to measure how my hand camera sits on my hand and could not. ");
@@ -7834,18 +7986,20 @@ package body Act is
             end;
          end if;
          if Geo_Case = 1 then
-            Put_Line ("[身] ⚙ 几何走法:" & To_String (Geo_Desc));
-            Geo_Approach (L, C, F, Cam, Natural (Cam_Arm (C, Cam)), Geo_Slot_Now, Step_Limit, Event, Steps_Taken, Beats,
+            Put_Line ("[身] ⚙ 几何走法:" & To_String (Geo_Desc)
+                      & (if Natural (Geo_Cam) /= Cam then "(你看着第" & Codec.Img (Cam) & " 只眼,走路用长在这条胳膊上的第" & Codec.Img (Natural (Geo_Cam)) & " 只)" else ""));
+            Geo_Approach (L, C, F, Natural (Geo_Cam), Natural (Own), Geo_Slot_Now, Step_Limit, Event, Steps_Taken, Beats,
                           Above => Geo_Above, Amt => Amount_Factor (Say.Moves (0).Amount),
-                          Until_Touch => Until_K in Monitor.U_Contact | Monitor.U_Resist);
+                          Until_Touch => Until_K in Monitor.U_Contact | Monitor.U_Resist,
+                          Name => Geo_Name);
             Feel (C, F);
             Report := Report & "you asked " & To_String (Geo_Desc) & ": " & To_String (Event) & ". I took " & Codec.Img (Steps_Taken) & " pushes; ";
             Put_Line ("[身]   这一段:" & Codec.Img (Steps_Taken) & " 推 · " & Codec.Img (Beats) & " 拍 · 这一集累计 " & Codec.Img (Plug.Steps (L)) & " 拍");
-            Codec.Append_Line (Life_Path, "beat " & Codec.Img (Plug.Steps (L)) & " | eye " & Codec.Img (Cam) & " | " & To_String (Geo_Desc)
+            Codec.Append_Line (Life_Path, "beat " & Codec.Img (Plug.Steps (L)) & " | eye " & Codec.Img (Natural (Geo_Cam)) & " | " & To_String (Geo_Desc)
                                & " | " & Codec.Img (Steps_Taken) & " pushes | ended: " & To_String (Event));
          elsif Geo_Case = 2 then
             Put_Line ("[身] ⚙ 几何走法:" & To_String (Geo_Desc));
-            Geo_Retreat (L, C, F, Natural (Cam_Arm (C, Cam)), Event, Steps_Taken, Beats);
+            Geo_Retreat (L, C, F, Natural (Own), Event, Steps_Taken, Beats);
             Feel (C, F);
             Report := Report & "you asked " & To_String (Geo_Desc) & ": " & To_String (Event) & ". I took " & Codec.Img (Steps_Taken) & " pushes; ";
             Put_Line ("[身]   这一段:" & Codec.Img (Steps_Taken) & " 推 · " & Codec.Img (Beats) & " 拍");
@@ -7991,12 +8145,12 @@ package body Act is
                if Steps_Taken > 0 then
                   C.Last_Moved := True;   --  这一段真的让身体走过步
                end if;
-               if Steps_Taken > 0 and then C.Blind_Cam >= 0
+               if Steps_Taken > 0
                  and then not Pts.Is_Empty
                  and then Pts (0).Arm < Natural (C.Map.Cam_On_Arm.Length)
-                 and then C.Map.Cam_On_Arm (Pts (0).Arm) = C.Blind_Cam
+                 and then C.Map.Cam_On_Arm (Pts (0).Arm) >= 0
                then
-                  C.Blind_Cam := -1;
+                  Mark_Blind (C, Natural (C.Map.Cam_On_Arm (Pts (0).Arm)), False);
                end if;
                C.Last_Outcome := Classify (To_String (Event));
                Feel (C, F);

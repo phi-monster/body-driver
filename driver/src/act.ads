@@ -267,7 +267,7 @@ package Act is
       Eye_Want : Sinew.Eye_Pick := Sinew.Ey_None;   --  这一节脑点了用哪只眼睛(没点 = 身体自己挑)
       Tgt_Cam : Integer := -1;         --  脑点名的那一块在哪台相机里(-1 = 这一节没点名东西)
       Name_Cam : Integer := -1;        --  脑【最近一次真的认出来】一个名字时,身体在哪只眼里(-1 = 还没认出过)
-      Blind_Cam : Integer := -1;       --  脑刚说过【这只眼里没有它】的那只眼(选眼时跳过它,不然来回弹)
+      Blind : Bools;                   --  脑说过【这只眼里没有它】的那几只眼,按相机号记(选眼时跳过;只记一只会在两只之间来回弹)
       --  这一轮最多列几件世界里的东西。0 = 不设限。
       --  🔴 不是拍的数:脑装不下时回包里写着限额和用量(实测 "maximum context length is 8192 tokens…
       --  your prompt contains at least 7493 input tokens"),驱动照着把它减半再来,减到装得下为止。
