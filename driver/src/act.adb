@@ -864,6 +864,32 @@ package body Act is
    --  为什么:没有深度时全图按明暗切,一把剪刀被切成四五个指甲盖大的碎框(09-21 头顶眼实测),腕眼一帧 191–450 件;
    --  跨帧"认号"是在这些碎片里找最近的一块,于是身份漂(HB1)、视差拿到两块不同的碎片(GC42)。
    --  在它自己的框里量,出来的是一整块、形心三个独立回合差 0.1 px。全图切块照旧留着(碰没碰到别的东西还靠它)。
+   --  这一块的像素平均多亮、它框里剩下的背景平均多亮(掩膜 = 整幅;都在它的框里数)。数不到 ⇒ -1
+   procedure Blob_Levels (G : Buf; W, H : Natural; Mask : Bools; R : Picture.Region; Thing, Back : out Long_Float) is
+      St, Sb : Long_Float := 0.0;
+      Nt, Nb : Natural := 0;
+   begin
+      Thing := -1.0; Back := -1.0;
+      if Natural (G.Length) < W * H or else Natural (Mask.Length) < W * H then
+         return;
+      end if;
+      for Y in R.Y0 .. Natural'Min (R.Y1, H - 1) loop
+         for X in R.X0 .. Natural'Min (R.X1, W - 1) loop
+            if Mask (Y * W + X) then
+               St := St + Long_Float (G.Element (Y * W + X)); Nt := Nt + 1;
+            else
+               Sb := Sb + Long_Float (G.Element (Y * W + X)); Nb := Nb + 1;
+            end if;
+         end loop;
+      end loop;
+      if Nt > 0 then
+         Thing := St / Long_Float (Nt);
+      end if;
+      if Nb > 0 then
+         Back := Sb / Long_Float (Nb);
+      end if;
+   end Blob_Levels;
+
    procedure Remeasure_Boxed (C : in out Context; F : Plug.Frame; Cam : Natural; Regs : in out Picture.Regions) is
       Cw : constant Natural := F.Cams (Cam).W;
       Ch : constant Natural := F.Cams (Cam).H;
@@ -891,6 +917,23 @@ package body Act is
                      R := R2; Iso := I2; B.Mask := M2;
                   end;
                end loop;
+               --  🔴 量到的那一块还是不是它:拿它的明暗对。脑指它那一帧记下"它多亮、它周围多亮";这一帧量到的块要是离它当初的亮度
+               --  比它和背景的差还远一半(纯数学的一半),那是别的东西(H31 2026-09-22 实测:预测窗漂到另一只手的黑爪子上,
+               --  框里"最大的一块"就成了爪子,视线交点算到 14 cm 高的空中,手往错处走)。认不出就老实说看不见,不许锁错。
+               if Found and then B.Gray >= 0.0 and then B.Bg >= 0.0 then
+                  declare
+                     Tg, Bk : Long_Float;
+                  begin
+                     Blob_Levels (F.Cams (Cam).Gray, Cw, Ch, B.Mask, R, Tg, Bk);
+                     if Tg >= 0.0 and then abs (Tg - B.Gray) * 2.0 > abs (B.Gray - B.Bg) then
+                        if B.Seen then
+                           Put_Line ("[身] 📦 " & To_String (B.Name) & "(第" & Codec.Img (Cam) & " 台):框里量到的那块平均亮 "
+                                     & Codec.Fmt (Tg, 0) & ",它当初 " & Codec.Fmt (B.Gray, 0) & "(背景 " & Codec.Fmt (B.Bg, 0) & ")⇒ 不是它,算看不见");
+                        end if;
+                        Found := False;
+                     end if;
+                  end;
+               end if;
                B.Seen := Found;
                if Found then
                   B.X0 := R.X0; B.Y0 := R.Y0; B.X1 := R.X1; B.Y1 := R.Y1;
@@ -6219,16 +6262,25 @@ package body Act is
                         if Ml > 0.0 then
                            Wall := [Miss (0) / Ml, Miss (1) / Ml, Miss (2) / Ml];
                            Held_Back := True;
-                           --  碰过的点进地图:面上的一点 = 此刻指尖的世界位置,法向 = 顶住我的方向反过来
-                           declare
-                              Tw : constant Geom.V3 := Geom.Ap (Geom.Cam_R (G, Now), G.Tip);
-                           begin
-                              C.Touch_Pt := [Now (0) + Tw (0), Now (1) + Tw (1), Now (2) + Tw (2)];
-                              C.Touch_N := [-Wall (0), -Wall (1), -Wall (2)];
-                              C.Touch_Valid := True;
-                           end;
-                           Geo_Say ("这一步要 " & Mm (Ln) & " 只到 " & Mm (Got) & " ⇒ 有个面顶着我,方向 ("
-                                    & Codec.Fmt (Wall (0), 2) & "," & Codec.Fmt (Wall (1), 2) & "," & Codec.Fmt (Wall (2), 2) & ");沿着它接着走");
+                           --  碰过的点进地图:面上的一点 = 此刻指尖的世界位置,法向 = 顶住我的方向反过来。
+                           --  🔴 只有【朝下】被顶住的才是它躺的面(东西靠着它抵住重力);顶住我的方向横着的,是墙、或是我自己够不着了
+                           --  (H31 2026-09-22 实测:右臂横跨整张桌去够,在 (-0.26,-0.97,0) 方向被自己的关节顶住,我把它记成了"面",
+                           --  于是"上方"和"指尖朝下"都朝了横向,后面全乱)。朝下 = 竖直分量比水平分量大(纯比较);"下"= 位姿系 -z,同抬手那条约定。
+                           if abs (Wall (2)) > Sqrt (Wall (0) ** 2 + Wall (1) ** 2) then
+                              declare
+                                 Tw : constant Geom.V3 := Geom.Ap (Geom.Cam_R (G, Now), G.Tip);
+                              begin
+                                 C.Touch_Pt := [Now (0) + Tw (0), Now (1) + Tw (1), Now (2) + Tw (2)];
+                                 C.Touch_N := [-Wall (0), -Wall (1), -Wall (2)];
+                                 C.Touch_Valid := True;
+                              end;
+                              Geo_Say ("这一步要 " & Mm (Ln) & " 只到 " & Mm (Got) & " ⇒ 有个面顶着我,方向 ("
+                                       & Codec.Fmt (Wall (0), 2) & "," & Codec.Fmt (Wall (1), 2) & "," & Codec.Fmt (Wall (2), 2) & ");沿着它接着走");
+                           else
+                              Geo_Say ("这一步要 " & Mm (Ln) & " 只到 " & Mm (Got) & " ⇒ 被横着顶住了,方向 ("
+                                       & Codec.Fmt (Wall (0), 2) & "," & Codec.Fmt (Wall (1), 2) & "," & Codec.Fmt (Wall (2), 2)
+                                       & "):不是它躺的面(是墙,或我自己的关节到头了),不记成面;沿着它接着走");
+                           end if;
                         end if;
                      end;
                   elsif Got + Got < Ln then              --  沿命令方向实到不到要的一半(纯数学的一半)= 命令了,身体没走
@@ -6712,6 +6764,7 @@ package body Act is
                      Found, Got, Iso : Boolean := False;
                      X0, Y0, X1, Y1 : Natural := 0;
                      R : Picture.Region;
+                     M0 : Bools;                --  脑指它那一帧它的像素(整幅掩膜)
                      E2 : Unbounded_String;
 
                      --  这件点过名的东西此刻在清单第几号(没有就是 0)
@@ -6795,7 +6848,7 @@ package body Act is
                         return -1;
                      end if;
                      --  ③ 框里哪一片是它,我自己量
-                     Picture.Measure_In_Box (F.Cams (Cam).Gray, Kw, Kh, X0, Y0, X1, Y1, Got, Iso, R);
+                     Picture.Measure_In_Box (F.Cams (Cam).Gray, Kw, Kh, X0, Y0, X1, Y1, Got, Iso, R, M0);
                      Put_Line ("[身] 📦 " & W & ":脑给的框 [" & Codec.Img (X0) & " " & Codec.Img (Y0) & " " & Codec.Img (X1) & " " & Codec.Img (Y1)
                                & "](第" & Codec.Img (Cam) & " 台相机)⇒ "
                                & (if Got then "框里量到一整块 " & Codec.Img (R.Count) & " px · 形心 ("
@@ -6815,6 +6868,8 @@ package body Act is
                         Bt.Name := To_Unbounded_String (W); Bt.Cam := Cam;
                         Bt.X0 := R.X0; Bt.Y0 := R.Y0; Bt.X1 := R.X1; Bt.Y1 := R.Y1;
                         Bt.Cu := R.Cu; Bt.Cv := R.Cv; Bt.Seen := True; Bt.Isolated := Iso;
+                        Bt.Mask := M0;
+                        Blob_Levels (F.Cams (Cam).Gray, Kw, Kh, M0, R, Bt.Gray, Bt.Bg);   --  记下它多亮、周围多亮:以后每帧认它靠这个
                         for Bi in 0 .. Natural (C.Boxed.Length) - 1 loop
                            if C.Boxed (Bi).Cam = Cam and then To_String (C.Boxed (Bi).Name) = W then
                               At_Bx := Integer (Bi);

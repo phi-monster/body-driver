@@ -202,6 +202,7 @@ package Act is
       Cu, Cv : Long_Float := 0.0;         --  上一次量到的形心(归一化画幅;认槽用)
       Seen : Boolean := False;            --  这一帧量到了吗
       Blind : Boolean := False;           --  脑看着这只眼的图说过"我指不出它"(按【这个名字 × 这只眼】记;脑再指一次就作废)
+      Gray, Bg : Long_Float := -1.0;      --  脑指它那一帧:它的像素平均多亮、它框里的背景平均多亮(< 0 = 没量);每帧重量时认它靠这个
       Isolated : Boolean := False;        --  量到的那一块是单独的吗(没顶到让出来的那一圈)
       Mask : Bools;                       --  这一帧它的像素(整幅;合手前在它身上挑夹得住的那一处要用)
    end record;
