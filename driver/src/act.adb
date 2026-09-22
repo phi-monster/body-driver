@@ -6265,11 +6265,29 @@ package body Act is
                Pm, Ph : Geom.V3;
             begin
                Pm := Geom.Meet (Rays, Mok, Spread);
+               --  🔴 交点可信的条件:几条视线离交点的最大偏差不超过【眼自己量朝向时的像素残差】换算到那个距离上的米数(量过的数,不是拍的)。
+               --  H42 2026-09-22 实测:一个偏差 0.079 m 的交点被当真记住,后面每一段都往 8 cm 高的空中走。
+               if Mok then
+                  declare
+                     Gw : constant Geom.Cam_Geo := Geo_Of (C, C.Map.World_Cam);
+                     Hp : constant Plug.Arm_Pose := F.EE (Arm);
+                     Tol_Hand : constant Long_Float := (if G.F > 0.0 then G.Rms * Geom.Norm ([Pm (0) - Hp (0), Pm (1) - Hp (1), Pm (2) - Hp (2)]) / G.F else 0.0);
+                     Tol_Still : constant Long_Float := (if Gw.Fixed and then Gw.F > 0.0 then Gw.Rms * Geom.Norm ([Pm (0) - Gw.Pos (0), Pm (1) - Gw.Pos (1), Pm (2) - Gw.Pos (2)]) / Gw.F else 0.0);
+                     Tol : constant Long_Float := Long_Float'Max (Tol_Hand, Tol_Still);
+                  begin
+                     if Spread > Tol then
+                        Geo_Say ("此刻 " & To_String (Who) & " 相机的视线交在 (" & Mm (Pm (0)) & "," & Mm (Pm (1)) & "," & Mm (Pm (2)) & "),可视线间偏差 "
+                                 & Mm (Spread) & " 比眼自己的误差(" & Mm (Tol) & ")还大 ⇒ 不信这个交点");
+                        Mok := False;
+                     end if;
+                  end;
+               end if;
                --  它在哪上一段量过(Known)、这一眼又看得见它 ⇒ 这条视线落到它躺的那个面(过它量到的位置、法向 = 面的法向)上,就是它此刻的位置。
                --  一条视线 + 它躺的面 = 不用横挪的量法(和不动的眼找它是同一条几何)。近处它比"我自己挪过的几眼"准得多
                --  (H36 2026-09-22 实测:近处单眼挪出来的估计 0.038 → 0.030 → 0.081 → 0.160 m 乱跳)。
+               --  面的高度只信两眼交出来的(H42 实测:单眼挪出来的 z=0.750 当了面,后面全在 9 cm 高的空中走)。
                Hok := False;
-               if not Mok and then Known and then Seen then
+               if not Mok and then Known and then Seen and then C.Geo_Pw_Met then
                   declare
                      Hp : constant Plug.Arm_Pose := F.EE (Arm);
                      Nn_S : constant Geom.V3 := (if C.Touch_Valid then C.Touch_N else [0.0, 0.0, 1.0]);
