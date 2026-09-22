@@ -292,6 +292,8 @@ package Act is
       Geo_Round : Natural := 0;           --  那是第几轮
       Geo_At : Plug.Arm_Pose := [others => 0.0];   --  算那个距离时手在哪(位姿读数);手没挪开,那个距离就还作数
       Geo_At_Arm : Integer := -1;
+      Geo_At_Above : Boolean := False;    --  那个距离是到【它上方一个张口】的,不是到它身上的 ⇒ 合手前得先下去
+      Geo_Pw_Met : Boolean := False;      --  记住的位置来自两眼交点(这一段里);单眼挪出来的估计不许盖掉它
       Geo_Came : Long_Float := 0.0;       --  几何逼近一共走了多远(米);"离远点"就沿原路退这么远
       Geo_Dir : Geom.V3 := [others => 0.0];   --  逼近的方向(世界系单位向量)
       Geo_Obs : Geom.Obs_Vectors.Vector;  --  这一集里点名那块在腕眼里的历次观测(位姿 + 像素)

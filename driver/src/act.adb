@@ -6168,7 +6168,9 @@ package body Act is
                            Said_Known := True;
                            Geo_Say ("这一眼的视线落到它躺的面上(面过我上一段量到的位置)⇒ 它在 (" & Mm (Pw (0)) & "," & Mm (Pw (1)) & "," & Mm (Pw (2)) & ")");
                         end if;
-                        C.Geo_Pw := Pw;   --  记住最新的
+                        if not C.Geo_Pw_Met then
+                           C.Geo_Pw := Pw;   --  记住最新的(两眼交点量过的不让单眼盖)
+                        end if;
                      else
                         Pw := C.Geo_Pw;
                         if not Said_Known then
@@ -6183,7 +6185,11 @@ package body Act is
                   exit;
                end if;
                if (Mok or else Nobs >= 2) and then Length (Its_Name) > 0 then
-                  C.Geo_Pw := Pw; C.Geo_Pw_Valid := True; C.Geo_Pw_Name := Its_Name;   --  记住它在哪:下一段看不清时凭这个走
+                  --  记住它在哪:下一段看不清时凭这个走。两眼交点(偏差毫米级)比单眼挪出来的准得多(H35 2026-09-22 实测:交点 z=0.628,
+                  --  之后手指朝下近处单眼挪出来的 z=0.745 把它盖掉了,下一段就按 12 cm 高的空中走)⇒ 这一段里有过交点就不让单眼盖
+                  if Mok or else not C.Geo_Pw_Met or else C.Geo_Pw_Name /= Its_Name then
+                     C.Geo_Pw := Pw; C.Geo_Pw_Valid := True; C.Geo_Pw_Name := Its_Name; C.Geo_Pw_Met := Mok;
+                  end if;
                end if;
             end;
             Pc := Geom.To_Cam (G, Cur, Pw);
@@ -6235,7 +6241,7 @@ package body Act is
                D := [Pc (0) - Want (0) - Down_C (0), Pc (1) - Want (1) - Down_C (1), Pc (2) - Want (2) - Down_C (2)];
             end;
             Dist := Geom.Norm (D);
-            C.Geo_Dist := Dist; C.Geo_Round := C.Round_N; C.Geo_At := Cur; C.Geo_At_Arm := Integer (Arm);
+            C.Geo_Dist := Dist; C.Geo_Round := C.Round_N; C.Geo_At := Cur; C.Geo_At_Arm := Integer (Arm); C.Geo_At_Above := Above;
             Geo_Say ("它在相机前 " & Mm (-Pc (2)) & "(左右 " & Mm (Pc (0)) & " 上下 " & Mm (Pc (1)) & "),离指尖该到的那点还差 " & Mm (Dist) &
                      "(左右 " & Mm (D (0)) & " 上下 " & Mm (D (1)) & " 前后 " & Mm (D (2)) & ")");
             if -Pc (2) <= 0.0 then
@@ -8288,7 +8294,9 @@ package body Act is
                            Moved : constant Long_Float :=
                              Geom.Norm ([Now (0) - C.Geo_At (0), Now (1) - C.Geo_At (1), Now (2) - C.Geo_At (2)]);
                         begin
-                           Fresh := Moved <= 4.0 * Geo_Base (C, Natural (Own));   --  一个量距单位之内(4 倍探针幅度,倍数,无量纲;最后那一步没走成的也在这之内)
+                           --  一个量距单位之内(4 倍探针幅度,倍数,无量纲;最后那一步没走成的也在这之内);
+                           --  而且那个距离得是到它身上的 —— 到它【上方】的距离再小也不算笼住(H35 2026-09-22 实测:above 到 0.007 m 就合,合的是 9 cm 空气)
+                           Fresh := Moved <= 4.0 * Geo_Base (C, Natural (Own)) and then not C.Geo_At_Above;
                         end;
                      end if;
                      if Fresh then
