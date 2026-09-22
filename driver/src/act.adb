@@ -5966,8 +5966,27 @@ package body Act is
                            declare
                               Pu : constant Long_Float := B.Cu * Long_Float (F.Cams (Cm).W);
                               Pv : constant Long_Float := B.Cv * Long_Float (F.Cams (Cm).H);
+                              --  🔴 这只眼里我正走路的那只手压在它上面/挨着它 ⇒ 这只眼此刻"量到的它"多半是我的手和手的影子,这条视线不算
+                              --  (H36 2026-09-22 实测:手越靠近,头顶眼的框里越是手影,两眼交点从 z=0.661 一路掉到 0.503 —— 桌面之下 15 cm,
+                              --  偏差却只有 1 cm,看着很准)。手在那只眼里的位置是身体图按此刻位姿算的,不看画面。
+                              Ti : constant Natural := Track_Idx (C, Arm, Cm);
+                              Hand_On_It : Boolean := False;
                            begin
-                              if A2 < 0 then
+                              if Ti < Natural (C.Zones.Length) and then C.Zones (Ti).Valid then
+                                 declare
+                                    Tr : constant Zone_Track := C.Zones (Ti);
+                                    Bw : constant Long_Float := Long_Float (B.X1 - B.X0 + 1);   --  它的框有多宽/多高:近到一个框之内就算压着
+                                    Bh : constant Long_Float := Long_Float (B.Y1 - B.Y0 + 1);
+                                    function Within (Hu, Hv : Long_Float) return Boolean is
+                                      (abs (Hu * Long_Float (F.Cams (Cm).W) - Pu) < Bw and then abs (Hv * Long_Float (F.Cams (Cm).H) - Pv) < Bh);
+                                 begin
+                                    Hand_On_It := Within (Tr.Cu, Tr.Cv)
+                                      or else (Tr.Has_Lobes and then (Within (Tr.Au, Tr.Av) or else Within (Tr.Bu, Tr.Bv)));
+                                 end;
+                              end if;
+                              if Hand_On_It then
+                                 null;   --  这一眼不给视线
+                              elsif A2 < 0 then
                                  Rays.Append (Geom.Sight'(O => Gm.Pos, D => Geom.Ray_Fixed (Gm, Pu, Pv)));
                               else
                                  declare
@@ -6132,15 +6151,36 @@ package body Act is
             --  只有一只眼看见时才退回"我自己挪过的那几眼"(最多 6 笔,次数),并如实说前提是它没动。
             declare
                Rays : constant Geom.Sight_Vectors.Vector := Sightlines_Now (C, F, Cam, Arm, Its_Name, Seen, Whole, U, V, Who);
-               Mok : Boolean;
+               Mok, Hok : Boolean;
                Spread : Long_Float;
-               Pm : Geom.V3;
+               Pm, Ph : Geom.V3;
             begin
                Pm := Geom.Meet (Rays, Mok, Spread);
+               --  它在哪上一段量过(Known)、这一眼又看得见它 ⇒ 这条视线落到它躺的那个面(过它量到的位置、法向 = 面的法向)上,就是它此刻的位置。
+               --  一条视线 + 它躺的面 = 不用横挪的量法(和不动的眼找它是同一条几何)。近处它比"我自己挪过的几眼"准得多
+               --  (H36 2026-09-22 实测:近处单眼挪出来的估计 0.038 → 0.030 → 0.081 → 0.160 m 乱跳)。
+               Hok := False;
+               if not Mok and then Known and then Seen then
+                  declare
+                     Hp : constant Plug.Arm_Pose := F.EE (Arm);
+                     Nn_S : constant Geom.V3 := (if C.Touch_Valid then C.Touch_N else [0.0, 0.0, 1.0]);
+                  begin
+                     Ph := Geom.Hit_Plane ([Hp (0), Hp (1), Hp (2)], Geom.Ray (G, Hp, U, V), C.Geo_Pw, Nn_S, Hok);
+                  end;
+               end if;
                if Mok then
                   Pw := Pm;
                   Geo_Say ("此刻 " & To_String (Who) & " 相机同时看见它 ⇒ 视线交在 (" & Mm (Pw (0)) & "," & Mm (Pw (1)) & "," & Mm (Pw (2))
                            & "),视线间最大偏差 " & Mm (Spread));
+               elsif Hok then
+                  Pw := Ph;
+                  if not Said_Known then
+                     Said_Known := True;
+                     Geo_Say ("这一眼的视线落到它躺的面上(面过我上一段量到的位置)⇒ 它在 (" & Mm (Pw (0)) & "," & Mm (Pw (1)) & "," & Mm (Pw (2)) & ")");
+                  end if;
+                  if not C.Geo_Pw_Met then
+                     C.Geo_Pw := Pw;   --  记住最新的(两眼交点量过的不让单眼盖)
+                  end if;
                elsif Nobs >= 2 then
                   for K in Natural'Max (0, Nobs - 6) .. Nobs - 1 loop
                      Use_Obs.Append (C.Geo_Obs (K));
@@ -6151,35 +6191,12 @@ package body Act is
                      Geo_Say ("此刻只有这一只眼看见它 ⇒ 按我自己挪过的那几眼算(前提是它没动;会动的东西这样量不出来)");
                   end if;
                elsif Known then
-                  --  它在哪上一段量过;这一眼看得见它就更好:这条视线落到它躺的那个面(过它量到的位置、法向 = 面的法向)上,就是它此刻的位置。
-                  --  一条视线 + 它躺的面 = 不用横挪的量法(和不动的眼找它是同一条几何);看不见就按记住的位置。
-                  declare
-                     Hp : constant Plug.Arm_Pose := F.EE (Arm);
-                     Nn_S : constant Geom.V3 := (if C.Touch_Valid then C.Touch_N else [0.0, 0.0, 1.0]);
-                     Hok : Boolean := False;
-                     Ph : Geom.V3;
-                  begin
-                     if Seen then
-                        Ph := Geom.Hit_Plane ([Hp (0), Hp (1), Hp (2)], Geom.Ray (G, Hp, U, V), C.Geo_Pw, Nn_S, Hok);
-                     end if;
-                     if Hok then
-                        Pw := Ph;
-                        if not Said_Known then
-                           Said_Known := True;
-                           Geo_Say ("这一眼的视线落到它躺的面上(面过我上一段量到的位置)⇒ 它在 (" & Mm (Pw (0)) & "," & Mm (Pw (1)) & "," & Mm (Pw (2)) & ")");
-                        end if;
-                        if not C.Geo_Pw_Met then
-                           C.Geo_Pw := Pw;   --  记住最新的(两眼交点量过的不让单眼盖)
-                        end if;
-                     else
-                        Pw := C.Geo_Pw;
-                        if not Said_Known then
-                           Said_Known := True;
-                           Geo_Say ("此刻没有一只眼看得清它 ⇒ 按我上一段量到的位置 (" & Mm (Pw (0)) & "," & Mm (Pw (1)) & "," & Mm (Pw (2))
-                                    & ") 走(前提是它没动)");
-                        end if;
-                     end if;
-                  end;
+                  Pw := C.Geo_Pw;
+                  if not Said_Known then
+                     Said_Known := True;
+                     Geo_Say ("此刻没有一只眼看得清它 ⇒ 按我上一段量到的位置 (" & Mm (Pw (0)) & "," & Mm (Pw (1)) & "," & Mm (Pw (2))
+                              & ") 走(前提是它没动)");
+                  end if;
                else
                   Event := S ("lost: I cannot see the thing you named in this eye right now");
                   exit;
