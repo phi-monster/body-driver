@@ -917,18 +917,19 @@ package body Act is
                      R := R2; Iso := I2; B.Mask := M2;
                   end;
                end loop;
-               --  🔴 量到的那一块还是不是它:拿它的明暗对。脑指它那一帧记下"它多亮、它周围多亮";这一帧量到的块要是离它当初的亮度
-               --  比它和背景的差还远一半(纯数学的一半),那是别的东西(H31 2026-09-22 实测:预测窗漂到另一只手的黑爪子上,
-               --  框里"最大的一块"就成了爪子,视线交点算到 14 cm 高的空中,手往错处走)。认不出就老实说看不见,不许锁错。
+               --  🔴 量到的那一块还是不是它:拿它和周围的明暗【哪边亮】对。脑指它那一帧记下"它比周围亮还是暗";这一帧量到的块要是反过来了,
+               --  那是别的东西(H31 2026-09-22 实测:预测窗漂到另一只手的黑爪子上,框里"最大的一块"就成了爪子,视线交点算到 14 cm 高的空中)。
+               --  只比方向不比幅度:H32 实测手的影子一盖,剪刀从 216 暗到 165(背景 127),按幅度就把真剪刀判成了别的东西。认不出就老实说看不见,不许锁错。
                if Found and then B.Gray >= 0.0 and then B.Bg >= 0.0 then
                   declare
                      Tg, Bk : Long_Float;
                   begin
                      Blob_Levels (F.Cams (Cam).Gray, Cw, Ch, B.Mask, R, Tg, Bk);
-                     if Tg >= 0.0 and then abs (Tg - B.Gray) * 2.0 > abs (B.Gray - B.Bg) then
+                     if Tg >= 0.0 and then Bk >= 0.0 and then (Tg - Bk) * (B.Gray - B.Bg) <= 0.0 then
                         if B.Seen then
                            Put_Line ("[身] 📦 " & To_String (B.Name) & "(第" & Codec.Img (Cam) & " 台):框里量到的那块平均亮 "
-                                     & Codec.Fmt (Tg, 0) & ",它当初 " & Codec.Fmt (B.Gray, 0) & "(背景 " & Codec.Fmt (B.Bg, 0) & ")⇒ 不是它,算看不见");
+                                     & Codec.Fmt (Tg, 0) & "、周围 " & Codec.Fmt (Bk, 0) & ",它当初 " & Codec.Fmt (B.Gray, 0) & "、周围 " & Codec.Fmt (B.Bg, 0)
+                                     & " ⇒ 明暗反了,不是它,算看不见");
                         end if;
                         Found := False;
                      end if;
@@ -7225,6 +7226,9 @@ package body Act is
                            --  脑照样看着它点的那只眼。这不是替脑选眼,是走路的手要在自己的眼里认一次它。
                            declare
                               Named_There : Boolean := False;
+                              Pu0, Pv0 : Long_Float;
+                              Have0 : Boolean := False;
+                              Can_Aim : Boolean := False;   --  不动的眼看得见它、也量过自己在哪 ⇒ 能把这只手的眼转向它
                            begin
                               if Hand_Eye >= 0 then
                                  for I2 in 0 .. Natural (Binds.Length) - 1 loop
@@ -7233,14 +7237,19 @@ package body Act is
                                     begin
                                        if Key /= "me" and then Key /= "grasper" and then Key /= "pusher" and then Binds (I2).Item >= 1
                                          and then Boxed_By (C, Natural (Hand_Eye), Item_Name (C, Natural (Binds (I2).Item))) >= 0
+                                         and then not Is_Blind (C, Hand_Eye, Item_Name (C, Natural (Binds (I2).Item)))
                                        then
                                           Named_There := True;
                                        end if;
                                     end;
                                  end loop;
+                                 Named_Pixel (Pu0, Pv0, Have0);
+                                 Can_Aim := Have0 and then C.Cam < Natural (C.Geo.Length) and then C.Geo (C.Cam).Fixed;
                               end if;
+                           --  🔴 脑说过"那只眼里没有它"只拦【不转眼就再问一遍】;能把那只眼转向它,以前说的"没有它"就不算数了
+                           --  (H32 2026-09-22 实测:腕眼还没转过去时脑在里面指不出剪刀 ⇒ 记成没有 ⇒ 这一条从此不进 ⇒ 眼永远转不过去)。
                            if Hand_Eye >= 0 and then Names_A_Thing and then Natural (Hand_Eye) /= C.Cam
-                             and then not Blind_Here (Natural (Hand_Eye)) and then Sinew."/=" (C.Eye_Want, Sinew.Ey_Moving)
+                             and then (Can_Aim or else not Blind_Here (Natural (Hand_Eye))) and then Sinew."/=" (C.Eye_Want, Sinew.Ey_Moving)
                              and then not Named_There
                            then
                               Put_Line ("[身] 👁 " & (if Sinew."=" (C.Eye_Want, Sinew.Ey_None) then "你没点眼;" else "你要用不动的眼判,可走路得用")
@@ -7277,22 +7286,11 @@ package body Act is
                            end if;
                            end;
                         end;
-                        if Best_Cam /= C.Cam and then not C.Eye_Chosen
-                          and then Sinew."=" (C.Eye_Want, Sinew.Ey_None)
-                          and then (Sub_Arm < 0
-                                    or else Zone_Of (C, Natural (Sub_Arm), Best_Cam, 0).Valid)
-                        then
-                           Put_Line ("[身] 👁 这条胳膊一动,第" & Codec.Img (Best_Cam) & " 只眼睛的画面变 "
-                                     & Codec.Fmt (Best_V, 3) & " 幅,比现在这只多 ⇒ 换过去再看"
-                                     & "(我自己换的,你没说,也不用说)");
-                           C.Cam := Best_Cam;
-                           C.Eye_Chosen := True;   --  一段任务只换一次:再换就是来回弹
-                           C.Recent := S ("I looked with a different eye of mine: when that arm moves, that eye's "
-                                          & "picture changes the most, so it is the one that can actually see how far "
-                                          & "off I am. Nothing moved. Say the same thing again. "
-                                          & Mode_Line (C, "changed which eye I judge with"));
-                           return;
-                        end if;
+                        --  🔴 撤掉"我自己换到变化最大的那只眼"(H32 2026-09-22 实测:脑第一轮只写了几句 say、没点名,这条就把脑换到腕眼,
+                        --  而腕眼没转过去、里面根本没有剪刀 ⇒ 脑在那只眼里指不出它 ⇒ 记成"没有它" ⇒ 后面每一段都以此为由不走)。
+                        --  它是逐像素推那条老路的需要(哪只眼看得见我差多少);走路的眼现在由要动的胳膊定(Hand_Eye_Of),
+                        --  脑看哪只眼只为了点名,换眼只在"要把这只手的眼转向它、再问一次名"时发生(上面那一条)。
+                        pragma Unreferenced (Best_Cam, Best_V);
                      end if;
                   end;
                   --  🔴 兑现身体自己印过的那句承诺:"Answer 0 if it is not visible there and I will go
