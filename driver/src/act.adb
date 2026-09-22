@@ -5391,6 +5391,41 @@ package body Act is
       end if;
    end Geo_Track;
 
+   --  这只眼转过/挪过之后,点过名的那件东西在画面里【该】到哪:把它的世界位置(或它所在的方向上的一点)投进此刻的位姿,
+   --  把重量的窗挪过去(大小不变)。不挪的话窗还留在转眼前的地方,里面是别的东西
+   --  (H33 2026-09-22 实测:转 0.4 rad 把它整个看进来,旧窗里剩下的是黑手指 ⇒ "明暗反了,不是它" ⇒ 看丢 ⇒ 十轮一步不走)。
+   procedure Retarget_Box (C : in out Context; F : Plug.Frame; Cam, Arm : Natural; Name : Unbounded_String; P : Geom.V3) is
+      Bx : constant Integer := Boxed_By (C, Cam, Name);
+      G : constant Geom.Cam_Geo := Geo_Of (C, Cam);
+      Pu, Pv : Long_Float;
+      Front : Boolean;
+   begin
+      if Bx < 0 or else Cam >= Natural (F.Cams.Length) or else Arm >= Natural (F.EE.Length) then
+         return;
+      end if;
+      Geom.Project (G, F.EE (Arm), P, Pu, Pv, Front);
+      declare
+         Cw : constant Natural := F.Cams (Cam).W;
+         Ch : constant Natural := F.Cams (Cam).H;
+         B : Boxed_Thing := C.Boxed (Natural (Bx));
+         Hw : constant Integer := (Integer (B.X1) - Integer (B.X0)) / 2;   --  半宽(纯数学的一半)
+         Hh : constant Integer := (Integer (B.Y1) - Integer (B.Y0)) / 2;
+         function Px (V2 : Long_Float; Span : Natural) return Natural is
+           (Natural (Long_Float'Max (0.0, Long_Float'Min (Long_Float (Span - 1), V2))));
+      begin
+         if Front and then Pu >= 0.0 and then Pv >= 0.0 and then Pu < Long_Float (Cw) and then Pv < Long_Float (Ch)
+           and then Hw > 0 and then Hh > 0
+         then
+            B.X0 := Px (Pu - Long_Float (Hw), Cw); B.X1 := Px (Pu + Long_Float (Hw), Cw);
+            B.Y0 := Px (Pv - Long_Float (Hh), Ch); B.Y1 := Px (Pv + Long_Float (Hh), Ch);
+            B.Blind := False;   --  这只眼看的地方变了,以前"这儿没有它"不再算数
+            C.Boxed.Replace_Element (Natural (Bx), B);
+            C.Cut_Cam := -1;    --  这一帧按挪过的窗重量
+            Geo_Say ("它该出现在 (" & Codec.Fmt (Pu, 1) & "," & Codec.Fmt (Pv, 1) & ")(按转过/挪过的眼算)⇒ 窗挪过去再量");
+         end if;
+      end;
+   end Retarget_Box;
+
    --  只平移(世界系),不转
    --  🔴 这里的量全是【米】。09-20 搬回来时为了不碰棘轮把"×1000"删了,标签却还写着 mm ⇒ 横挪 25.6 毫米显示成 "0.0 mm",
    --  "它在相机前 -0.8 mm"其实是负 0.8 米(算到相机背后去了)—— T10 2026-09-21 差点被这个标签骗过去。量的是米,就按米说,三位小数到毫米。
@@ -6004,6 +6039,10 @@ package body Act is
       --  (H25 2026-09-22 实测:悬停 12 cm 处重新指了它,交点却算到 0.7 m 外、偏 54 cm,手往反方向走)。
       --  两只眼同时看见就一帧出数;只有一只眼就横挪一步当基线 —— 这一段自己的眼。
       C.Geo_Obs.Clear;
+      --  上一段末尾转过手/挪过手(指尖朝下那一转尤其大)⇒ 它在这只眼里早不在旧窗那儿了;它在哪我量过 ⇒ 先把窗投到它该在的地方
+      if Length (Name) > 0 and then C.Geo_Pw_Valid and then C.Geo_Pw_Name = Name then
+         Retarget_Box (C, F, Cam, Arm, Name, C.Geo_Pw);
+      end if;
       Geo_Track (C, F, Cam, Slot, U, V, Seen, Name);
       Slot_Whole (C, F, Cam, Slot, Whole, Edge, Its_Name, Name);
       --  🔴 看着它走:它被画面边切掉时形心不是同一个物理点,H21 2026-09-22 实测整段路只有开头两眼算数,
@@ -6022,6 +6061,14 @@ package body Act is
             Geo_Turn (L, C, F, Arm, Want, Amt, Ev, St);
             Steps_Taken := Steps_Taken + St;
             Geo_Say ("它被画面边切着 ⇒ 转眼看着它(" & To_String (Ev) & ")");
+            --  转过之后它的方向没变(世界系那条视线),把窗投到这条视线在新位姿画面里的落点
+            declare
+               Pn : constant Plug.Arm_Pose := F.EE (Arm);
+            begin
+               Retarget_Box (C, F, Cam, Arm, Name,
+                             (if C.Geo_Pw_Valid and then C.Geo_Pw_Name = Name then C.Geo_Pw
+                              else [Pn (0) + Want (0), Pn (1) + Want (1), Pn (2) + Want (2)]));
+            end;
             Geo_Track (C, F, Cam, Slot, U, V, Seen, Name);
             Slot_Whole (C, F, Cam, Slot, Whole, Edge, Its_Name, Name);
          end;
@@ -6224,6 +6271,7 @@ package body Act is
                   begin
                      Geo_Turn (L, C, F, Arm, [-Nn (0), -Nn (1), -Nn (2)], Amt, Ev, St, Along => G.Tip);
                      Steps_Taken := Steps_Taken + St;
+                     Retarget_Box (C, F, Cam, Arm, Name, Pw);   --  指尖朝下这一转很大:把它的窗投进转过的眼,下一段才认得出它
                      C.Fingers_Aimed := Index (Ev, "amount: arrived") > 0;
                      Append (Event, (if C.Fingers_Aimed then "; my fingers now point down at it"
                                      else "; I tried to point my fingers down at it: " & To_String (Ev)));
@@ -6353,6 +6401,7 @@ package body Act is
                      Geo_Turn (L, C, F, Arm, Want, Amt, Ev, St);
                      Steps_Taken := Steps_Taken + St;
                      Geo_Say ("它被画面边切着 ⇒ 转眼看着它(" & To_String (Ev) & ")");
+                     Retarget_Box (C, F, Cam, Arm, Name, Pw);   --  它在哪这一步刚算过(Pw)⇒ 投进转过的眼
                      Geo_Track (C, F, Cam, Slot, U, V, Seen, Name);
                      Slot_Whole (C, F, Cam, Slot, Whole, Edge, Its_Name, Name);
                   end;
