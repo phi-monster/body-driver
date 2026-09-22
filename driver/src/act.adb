@@ -869,7 +869,7 @@ package body Act is
       Ch : constant Natural := F.Cams (Cam).H;
    begin
       for Bi in 0 .. Natural (C.Boxed.Length) - 1 loop
-         if C.Boxed (Bi).Cam = Cam then
+         if C.Boxed (Bi).Cam = Cam and then not C.Boxed (Bi).Blind then   --  脑说"这只眼里没有它"的那一条没有框可量
             declare
                B : Boxed_Thing := C.Boxed (Bi);
                Found, Iso : Boolean;
@@ -967,17 +967,47 @@ package body Act is
       return Null_Unbounded_String;
    end Item_Name;
 
-   --  脑说过"这只眼里没有它":按相机号记一位,记几只都行(只记最后一只会在两只看不见的眼之间来回弹)
-   function Is_Blind (C : Context; Cam : Integer) return Boolean is
-     (Cam >= 0 and then Natural (Cam) < Natural (C.Blind.Length) and then C.Blind (Natural (Cam)));
-
-   procedure Mark_Blind (C : in out Context; Cam : Natural; On : Boolean) is
+   --  脑说过"这只眼里没有【它】":按名字 × 眼记(H29 2026-09-22 实测:只按眼记,脑写个 it 绑不上,整只腕眼就被判死,再也换不过去)
+   function Is_Blind (C : Context; Cam : Integer; Name : Unbounded_String) return Boolean is
+      Bx : constant Integer := (if Cam >= 0 then Boxed_By (C, Natural (Cam), Name) else -1);
    begin
-      while Natural (C.Blind.Length) <= Cam loop
-         C.Blind.Append (False);
-      end loop;
-      C.Blind.Replace_Element (Cam, On);
+      return Bx >= 0 and then C.Boxed (Natural (Bx)).Blind;
+   end Is_Blind;
+
+   procedure Mark_Blind (C : in out Context; Cam : Natural; Name : Unbounded_String) is
+      Bx : constant Integer := Boxed_By (C, Cam, Name);
+   begin
+      if Bx >= 0 then
+         declare
+            B : Boxed_Thing := C.Boxed (Natural (Bx));
+         begin
+            B.Blind := True; B.Seen := False;
+            C.Boxed.Replace_Element (Natural (Bx), B);
+         end;
+      elsif Length (Name) > 0 then
+         declare
+            B : Boxed_Thing;
+         begin
+            B.Name := Name; B.Cam := Cam; B.Blind := True;
+            C.Boxed.Append (B);
+         end;
+      end if;
    end Mark_Blind;
+
+   --  这只眼看的地方变了(转过了 / 脑明确换过来了)⇒ 以前说的"没有它"不再算数
+   procedure Clear_Blind (C : in out Context; Cam : Natural) is
+   begin
+      for Bi in 0 .. Natural (C.Boxed.Length) - 1 loop
+         if C.Boxed (Bi).Cam = Cam and then C.Boxed (Bi).Blind then
+            declare
+               B : Boxed_Thing := C.Boxed (Bi);
+            begin
+               B.Blind := False;
+               C.Boxed.Replace_Element (Bi, B);
+            end;
+         end if;
+      end loop;
+   end Clear_Blind;
 
    --  一件东西【叫什么】:脑点过名的用脑起的名字,我身上的用它是哪一块。编号不进语言(LANGUAGE §3.1),
    --  也就不该进我说给脑听的话和经历账 —— T2 2026-09-21 实测:清单每行以 "item N:" 开头、经历账全是
@@ -6687,8 +6717,8 @@ package body Act is
                         return -1;
                      end if;
                      if not Found then
-                        --  脑看着图说"这只眼里我指不出它" ⇒ 记下这只眼,选眼的时候跳过它(不记就来回弹)。
-                        Mark_Blind (C, Cam, True);
+                        --  脑看着图说"这只眼里我指不出它" ⇒ 记下【这个名字在这只眼里】,选眼的时候跳过它(不记就来回弹)。
+                        Mark_Blind (C, Cam, To_Unbounded_String (W));
                         Tried := To_Unbounded_String ("我在这只眼里指不出它在哪");
                         return -1;
                      end if;
@@ -6739,7 +6769,7 @@ package body Act is
                                  It.Au := Sl.R.Au; It.Av := Sl.R.Av; It.Elong := Sl.R.Elong;
                                  It.Gray := Picture.Mean_Gray (F.Cams (Cam).Gray, Kw, Kh, Sl.R);
                                  C.Items.Append (It);
-                                 Mark_Blind (C, Cam, False);   --  只在【就是这只被判过"没有它"的眼】里又认出来了才解除(JA 推演过,别改回去)
+                                 --  (刚记进去的那一条 Blind = False:只在【就是这只被判过"没有它"的眼】里又认出来了才解除 —— JA 推演过,别改回去)
                                  C.Name_Cam := Integer (Cam);
                                  return Integer (C.Items.Length);
                               end if;
@@ -6881,6 +6911,22 @@ package body Act is
                      Sub_Arm : Integer := -1;
                      Best_Cam : Natural := C.Cam;
                      Best_V : Long_Float := -1.0;
+                     --  脑说过"这只眼里没有【这一段点了名的东西】"(按名字记:脑写个 it 绑不上,不等于剪刀在那只眼里看不见)
+                     function Blind_Here (Cm : Natural) return Boolean is
+                     begin
+                        for I3 in 0 .. Natural (Binds.Length) - 1 loop
+                           declare
+                              Key : constant String := To_String (Binds (I3).Key);
+                           begin
+                              if Key /= "me" and then Key /= "grasper" and then Key /= "pusher"
+                                and then Is_Blind (C, Integer (Cm), Binds (I3).Key)
+                              then
+                                 return True;
+                              end if;
+                           end;
+                        end loop;
+                        return False;
+                     end Blind_Here;
                   begin
                      for I2 in 0 .. Natural (Binds.Length) - 1 loop
                         if To_String (Binds (I2).Key) = "grasper" and then Binds (I2).Item > 0
@@ -6917,7 +6963,7 @@ package body Act is
                               Any_Free : Boolean := False;
                            begin
                               for Cm in 0 .. C.Map.N_Cams - 1 loop
-                                 if Cam_Arm (C, Cm) < 0 and then not Is_Blind (C, Cm)
+                                 if Cam_Arm (C, Cm) < 0 and then not Blind_Here (Cm)
                                    and then Natural (Sub_Arm) * C.Map.N_Cams + Cm < Natural (C.Map.Cam_Frac.Length)
                                  then
                                     Any_Free := True;
@@ -6938,7 +6984,7 @@ package body Act is
                                     --  ⚠️ 这不是 IH 撤回的那条("目标那只眼永远赢"—— 那条会把脑永远拽回 0 号眼,
                                     --  于是量远近永远被拒)。这里只跳过【脑自己刚说过"这儿没有"】的那只:
                                     --  是脑在决定,不是身体替它决定;脑看得见时照样答真编号,那只眼一次都不会被跳。
-                                    if Vv >= 0.0 and then not Is_Blind (C, Cm) then
+                                    if Vv >= 0.0 and then not Blind_Here (Cm) then
                                        Any := True;
                                        if (C.Eye_Want = Sinew.Ey_Still and then Vv < Bv)
                                          or else (C.Eye_Want = Sinew.Ey_Moving and then Vv > Bv)
@@ -7004,7 +7050,7 @@ package body Act is
                                     then
                                        Aim_Eye_At (L, C, F, Natural (Sub_Arm), C.Cam, Pu, Pv, 0.5, Ev, Aok);
                                        Put_Line ("[身] 👁 转眼:" & To_String (Ev));
-                                       Mark_Blind (C, Natural (Pick), False);
+                                       Clear_Blind (C, Natural (Pick));
                                     end if;
                                     C.Cam := Natural (Pick);
                                     C.Recent := S ("I moved to the eye you asked for. "
@@ -7067,7 +7113,7 @@ package body Act is
                                  end loop;
                               end if;
                            if Hand_Eye >= 0 and then Names_A_Thing and then Natural (Hand_Eye) /= C.Cam
-                             and then not Is_Blind (C, Hand_Eye) and then Sinew."/=" (C.Eye_Want, Sinew.Ey_Moving)
+                             and then not Blind_Here (Natural (Hand_Eye)) and then Sinew."/=" (C.Eye_Want, Sinew.Ey_Moving)
                              and then not Named_There
                            then
                               Put_Line ("[身] 👁 " & (if Sinew."=" (C.Eye_Want, Sinew.Ey_None) then "你没点眼;" else "你要用不动的眼判,可走路得用")
@@ -7085,22 +7131,20 @@ package body Act is
                                  if Have and then C.Cam < Natural (C.Geo.Length) and then C.Geo (C.Cam).Fixed then
                                     Aim_Eye_At (L, C, F, Natural (Sub_Arm), C.Cam, Pu, Pv, 0.5, Ev, Aok);
                                     Put_Line ("[身] 👁 转眼:" & To_String (Ev));
-                                    Mark_Blind (C, Natural (Hand_Eye), False);   --  那只眼现在看的是别处了,以前说的"没有它"不再算数
+                                    Clear_Blind (C, Natural (Hand_Eye));   --  那只眼现在看的是别处了,以前说的"没有它"不再算数
                                  end if;
                                  C.Cam := Natural (Hand_Eye);
                                  C.Eye_Chosen := True;
+                                 --  🔴 这句话要和"没点眼"那句一个样子(H29 2026-09-22 实测:我多写了一句"把它在这张图里指出来",
+                                 --  Qwen 从此不再写 do,改写 remember/run/请告诉我怎么动手 —— 脑对话里多一句要求,它就以为该做别的事)。
                                  C.Recent := S ((if Sinew."=" (C.Eye_Want, Sinew.Ey_None)
                                                  then "you did not name an eye, so I moved to the eye that rides on the arm you are moving: "
-                                                   & "it is the one through which I can measure how far away a thing is. "
-                                                 else "you asked me to judge with my still eye; walking up to a thing is done through the eye that rides "
-                                                   & "on the arm I am moving (the only one that measures how far away it is), and that eye has to be shown "
-                                                   & "the thing once. I moved to it. ")
+                                                 else "to walk up to a thing I use the eye that rides on the arm I am moving, so I moved to it: ")
+                                                & "it is the one through which I can measure how far away a thing is. "
                                                 & (if Have and then Aok then "I first turned that eye toward where my still eye says the thing is. "
                                                    elsif Have then "I tried to turn that eye toward where my still eye says the thing is: " & To_String (Ev) & ". "
                                                    else "")
-                                                & "Nothing else moved. Say the same thing again"
-                                                & (if Sinew."=" (C.Eye_Want, Sinew.Ey_None) then ". " else ", and point the thing out in this picture; after that I walk with this eye while you keep judging with the one you asked for. ")
-                                                & Mode_Line (C, "moved to the eye that can measure distance"));
+                                                & "Nothing else moved. Say the same thing again. " & Mode_Line (C, "moved to the eye that can measure distance"));
                               end;
                               return;
                            end if;
@@ -7244,7 +7288,7 @@ package body Act is
                                        Put_Line ("[身]    它要换到第" & Natural'Image (Ci)
                                                  & " 台相机 ⇒ 下一轮在那台里列块、问、执行");
                                        C.Cam := Ci;
-                                       Mark_Blind (C, Ci, False);
+                                       Clear_Blind (C, Ci);
                                        --  🔴 脑明确点了眼 ⇒ 这一段不许再被"哪只眼变化最大"那条启发式抢走。
                                        --  HB9 实测:那条启发式在【远距离伸手】时选反 —— 它挑腕眼,而贴近的目标里
                                        --  有一项是"看着多大要长到爪口那么大",腕眼里这要求手凑到极近,
@@ -7985,7 +8029,8 @@ package body Act is
                   begin
                      --  nearer(front)也是朝它走:同一条视线走法,走到脑说的步数/到位/碰到为止(H28 2026-09-22 实测:Qwen 写 nearer,
                      --  掉回老路,逐通道量表 60 拍一步没走)。farther(back)手里没东西时 = 沿来时的方向反着走(Geo_Away)。
-                     if (Rl = "at" or else Rl = "into" or else Rl = "above" or else Rl = "front") and then G0.Of_Item >= 1 and then G0.Of_Item <= Natural (C.Items.Length)
+                     if (Rl = "at" or else Rl = "into" or else Rl = "onto" or else Rl = "above" or else Rl = "front")
+                       and then G0.Of_Item >= 1 and then G0.Of_Item <= Natural (C.Items.Length)
                        and then C.Items (G0.Of_Item - 1).Kind = Thing and then C.Items (G0.Of_Item - 1).Located
                      then
                         --  🔴 above 在【长在手上的眼】里按"画面里的上方"没法执行也没有物理意义(那只眼跟着手转);
@@ -8205,7 +8250,7 @@ package body Act is
                  and then Pts (0).Arm < Natural (C.Map.Cam_On_Arm.Length)
                  and then C.Map.Cam_On_Arm (Pts (0).Arm) >= 0
                then
-                  Mark_Blind (C, Natural (C.Map.Cam_On_Arm (Pts (0).Arm)), False);
+                  Clear_Blind (C, Natural (C.Map.Cam_On_Arm (Pts (0).Arm)));
                end if;
                C.Last_Outcome := Classify (To_String (Event));
                Feel (C, F);
