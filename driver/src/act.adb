@@ -8059,6 +8059,29 @@ package body Act is
       end Build_Goals;
 
       --  2c 抓握:先看笼住没有,合到画面不再变,再抬一截量结果(跟我走了没有 / 我没推的东西动了几件 / 原地剩几块)
+      --  🔴 往一件躺在面上的东西走 = 先到它上方一个张口、指尖转向它躺的面,再顺着法向贴上去(手从面的自由一侧进场)。
+      --  这是两指夹爪对【任何】躺着的东西的几何,不是哪个任务的规矩:08-15 架构 §1.2b"手从哪个方向进场"就是四格定不下来、
+      --  要由看得见空隙的一方填的那一个自由度;09-05 owner 判"从形状算从哪边进不算作弊"。
+      --  H26 2026-09-22 我当脑分两句说的(above,再 touching)⇒ 夹住了;H28/H30 Qwen 不说 above 直接 nearer ⇒ 手平着到,指尖悬在剪刀上方合空。
+      --  脑要是自己说 above,照样只到上方;它说 touching/nearer/onto、或直接说 close X,进场那一段由我来。
+      procedure Walk_Onto (Amt : Long_Float; Touch : Boolean) is
+         Ev1 : Unbounded_String;
+         St1, Bt1, St2, Bt2 : Natural;
+      begin
+         Geo_Approach (L, C, F, Natural (Geo_Cam), Natural (Own), Geo_Slot_Now, 0, Ev1, St1, Bt1,
+                       Above => True, Amt => Amt, Until_Touch => False, Name => Geo_Name);
+         Put_Line ("[身] 📐 进场:先到它上方 ⇒ " & To_String (Ev1) & "(" & Codec.Img (St1) & " 推)");
+         if Index (Ev1, "amount: arrived") > 0 then
+            Geo_Approach (L, C, F, Natural (Geo_Cam), Natural (Own), Geo_Slot_Now, Step_Limit, Event, St2, Bt2,
+                          Above => False, Amt => Amt, Until_Touch => Touch, Name => Geo_Name);
+            Steps_Taken := St1 + St2; Beats := Bt1 + Bt2;
+            Append (Event, " (I first came to one hand-opening above it with my fingers pointed at it, then came down onto it)");
+         else
+            Event := S ("on the way to a point above it: ") & Ev1;
+            Steps_Taken := St1; Beats := Bt1;
+         end if;
+      end Walk_Onto;
+
       procedure Do_Grip is
       begin
             --  ── 抓握 ──
@@ -8252,17 +8275,35 @@ package body Act is
                         Geo_Desc := S (Say_Item (C, G0.Item) & " away from " & Say_Item (C, G0.Of_Item) & " along the line I came in on");
                      end if;
                   end;
-               elsif Say.Grip = "close" and then Grip_Arm = Own and then C.Geo_Dist >= 0.0 and then C.Geo_At_Arm = Own then
+               elsif Say.Grip = "close" and then Grip_Arm = Own then
                   --  🔴 "刚算的距离还作不作数"不按轮数判(H11 2026-09-22 实测:main 上每段程序跑完多一轮记账,close 落在两轮之后,
                   --  条件 ≤ 1 轮不成立 ⇒ 掉回老路,手正压在剪刀上却开始逐通道推着量响应表)。
                   --  该问的是:算完之后我的手挪开过没有。没挪开(不超过一个探针幅度 —— 身体量过的最小一档)就还作数。
                   declare
-                     Now : constant Plug.Arm_Pose := F.EE (Natural (Own));
-                     Moved : constant Long_Float :=
-                       Geom.Norm ([Now (0) - C.Geo_At (0), Now (1) - C.Geo_At (1), Now (2) - C.Geo_At (2)]);
+                     Fresh : Boolean := False;
                   begin
-                     if Moved <= 4.0 * Geo_Base (C, Natural (Own)) then   --  一个量距单位之内(4 倍探针幅度,倍数,无量纲;最后那一步没走成的也在这之内)
+                     if C.Geo_Dist >= 0.0 and then C.Geo_At_Arm = Own then
+                        declare
+                           Now : constant Plug.Arm_Pose := F.EE (Natural (Own));
+                           Moved : constant Long_Float :=
+                             Geom.Norm ([Now (0) - C.Geo_At (0), Now (1) - C.Geo_At (1), Now (2) - C.Geo_At (2)]);
+                        begin
+                           Fresh := Moved <= 4.0 * Geo_Base (C, Natural (Own));   --  一个量距单位之内(4 倍探针幅度,倍数,无量纲;最后那一步没走成的也在这之内)
+                        end;
+                     end if;
+                     if Fresh then
                         Geo_Case := 3;   --  合:不再先走一段
+                     elsif Say.Grip_On >= 1 and then Say.Grip_On <= Natural (C.Items.Length)
+                       and then C.Items (Say.Grip_On - 1).Kind in Thing | Thing_Remembered and then C.Items (Say.Grip_On - 1).Located
+                     then
+                        --  🔴 "合在 X 上"= 先把合拢点送到 X 身上(从它躺的面的上方进场),再合。H34 2026-09-22 实测:Qwen 的计划永远是
+                        --  above → close,到了上方就合 ⇒ 合的是 9 cm 高的空气。八月 §1.2:抓 = 相对的两点向内使劲、物体跟着手走 ——
+                        --  进场是抓的一部分,不是另一个词。脑说的是"合在它上",身体就把合拢点送到它上再合。
+                        Geo_Case := 5;
+                        Geo_Name := Item_Name (C, Say.Grip_On);
+                        Geo_Slot_Now := (if Natural (Geo_Cam) = Cam then C.Items (Say.Grip_On - 1).Slot else -1);
+                        Geo_Desc := S ("grip " & Codec.Img (Natural (Own) + 1) & " onto " & Say_Item (C, Say.Grip_On)
+                                       & " before closing (by sightlines, in my own hand camera)");
                      end if;
                   end;
                end if;
@@ -8289,30 +8330,7 @@ package body Act is
                              Until_Touch => Until_K in Monitor.U_Contact | Monitor.U_Resist,
                              Name => Geo_Name);
             else
-               --  🔴 往一件躺在面上的东西走 = 先到它上方一个张口、指尖转向它躺的面,再顺着法向贴上去(手从面的自由一侧进场)。
-               --  这是两指夹爪对【任何】躺着的东西的几何,不是哪个任务的规矩:08-15 架构 §1.2b"手从哪个方向进场"就是四格定不下来、
-               --  要由看得见空隙的一方填的那一个自由度;09-05 owner 判"从形状算从哪边进不算作弊"。
-               --  H26 2026-09-22 我当脑分两句说的(above,再 touching)⇒ 夹住了;H28/H30 Qwen 不说 above 直接 nearer ⇒ 手平着到,指尖悬在剪刀上方合空。
-               --  脑要是自己说 above,照样走上面那一支;它说 touching/nearer/onto,进场那一段由我来。
-               declare
-                  Ev1 : Unbounded_String;
-                  St1, Bt1, St2, Bt2 : Natural;
-               begin
-                  Geo_Approach (L, C, F, Natural (Geo_Cam), Natural (Own), Geo_Slot_Now, 0, Ev1, St1, Bt1,
-                                Above => True, Amt => Amount_Factor (Say.Moves (0).Amount), Until_Touch => False, Name => Geo_Name);
-                  Put_Line ("[身] 📐 进场:先到它上方 ⇒ " & To_String (Ev1) & "(" & Codec.Img (St1) & " 推)");
-                  if Index (Ev1, "amount: arrived") > 0 then
-                     Geo_Approach (L, C, F, Natural (Geo_Cam), Natural (Own), Geo_Slot_Now, Step_Limit, Event, St2, Bt2,
-                                   Above => False, Amt => Amount_Factor (Say.Moves (0).Amount),
-                                   Until_Touch => Until_K in Monitor.U_Contact | Monitor.U_Resist,
-                                   Name => Geo_Name);
-                     Steps_Taken := St1 + St2; Beats := Bt1 + Bt2;
-                     Append (Event, " (I first came to one hand-opening above it with my fingers pointed at it, then came down onto it)");
-                  else
-                     Event := S ("on the way to a point above it: ") & Ev1;
-                     Steps_Taken := St1; Beats := Bt1;
-                  end if;
-               end;
+               Walk_Onto (Amount_Factor (Say.Moves (0).Amount), Until_K in Monitor.U_Contact | Monitor.U_Resist);
             end if;
             Feel (C, F);
             Report := Report & "you asked " & To_String (Geo_Desc) & ": " & To_String (Event) & ". I took " & Codec.Img (Steps_Taken) & " pushes; ";
@@ -8333,6 +8351,15 @@ package body Act is
             Feel (C, F);
             Report := Report & "you asked " & To_String (Geo_Desc) & ": " & To_String (Event) & ". I took " & Codec.Img (Steps_Taken) & " pushes; ";
             Put_Line ("[身]   这一段:" & Codec.Img (Steps_Taken) & " 推 · " & Codec.Img (Beats) & " 拍");
+            Codec.Append_Line (Life_Path, "beat " & Codec.Img (Plug.Steps (L)) & " | eye " & Codec.Img (Natural (Geo_Cam)) & " | " & To_String (Geo_Desc)
+                               & " | " & Codec.Img (Steps_Taken) & " pushes | ended: " & To_String (Event));
+         elsif Geo_Case = 5 then
+            Put_Line ("[身] ⚙ 几何走法:" & To_String (Geo_Desc)
+                      & (if Natural (Geo_Cam) /= Cam then "(你看着第" & Codec.Img (Cam) & " 只眼,走路用长在这条胳膊上的第" & Codec.Img (Natural (Geo_Cam)) & " 只)" else ""));
+            Walk_Onto (Amount_Factor (Null_Unbounded_String), True);
+            Feel (C, F);
+            Report := Report & "before closing I brought my fingers onto " & Say_Item (C, Say.Grip_On) & ": " & To_String (Event) & ". I took " & Codec.Img (Steps_Taken) & " pushes; ";
+            Put_Line ("[身]   这一段:" & Codec.Img (Steps_Taken) & " 推 · " & Codec.Img (Beats) & " 拍 · 这一集累计 " & Codec.Img (Plug.Steps (L)) & " 拍");
             Codec.Append_Line (Life_Path, "beat " & Codec.Img (Plug.Steps (L)) & " | eye " & Codec.Img (Natural (Geo_Cam)) & " | " & To_String (Geo_Desc)
                                & " | " & Codec.Img (Steps_Taken) & " pushes | ended: " & To_String (Event));
          elsif Geo_Case = 3 then
