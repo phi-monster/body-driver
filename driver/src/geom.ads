@@ -21,6 +21,10 @@ package Geom is
       Tip_Valid : Boolean := False;
       Tip : V3 := [others => 0.0];     --  指尖中点在相机系(米)
       Gap : Long_Float := 0.0;         --  张开时两指尖间距(米)
+      --  不长在任何胳膊上的眼(头顶眼):它在世界里的位置和朝向,由身体看着【自己的手】挪出来(Fit_Fixed)。
+      --  Fixed = True 时 R_Ce 就是 相机 → 世界,Pos 是相机在世界里的位置(米)。
+      Fixed : Boolean := False;
+      Pos : V3 := [others => 0.0];
    end record;
    No_Geo : constant Cam_Geo := (others => <>);
    package Geo_Vectors is new Ada.Containers.Vectors (Natural, Cam_Geo);
@@ -41,6 +45,18 @@ package Geom is
    procedure Project (G : Cam_Geo; P : Plug.Arm_Pose; Pw : V3; U, V : out Long_Float; In_Front : out Boolean);
    --  量相机朝向:手做几次【平移】,同一个不动的东西在画面里的像素 ⇒ 解朝向 + 那东西的位置。盲搜初值 + 最小二乘。
    procedure Fit (G : in out Cam_Geo; O : Obs_Vectors.Vector; Ok : out Boolean);
+   --  ── 不动的眼 ──:它看见我身上一个【世界位置已知】的点(指尖:手的位姿读数 + 量过的指尖偏置)落在画面哪儿
+   type Mark is record
+      Pw : V3 := [others => 0.0];
+      U, V : Long_Float := 0.0;
+   end record;
+   package Mark_Vectors is new Ada.Containers.Vectors (Natural, Mark);
+   function Ray_Fixed (G : Cam_Geo; U, V : Long_Float) return V3;        --  世界系单位视线,从 G.Pos 出发
+   procedure Project_Fixed (G : Cam_Geo; Pw : V3; U, V : out Long_Float; In_Front : out Boolean);
+   --  量不动的眼:几次看见指尖在哪(世界位置 + 像素)⇒ 解它的位置和朝向。盲搜初值 + 最小二乘,和 Fit 同一套。
+   procedure Fit_Fixed (G : in out Cam_Geo; O : Mark_Vectors.Vector; Ok : out Boolean);
+   --  视线与一个面的交点(面 = 过 P0、法向 N);视线和面平行或交在身后 ⇒ Ok = False
+   function Hit_Plane (Origin, Dir, P0, N : V3; Ok : out Boolean) return V3;
    procedure Save (Path : String; Gs : Geo_Vectors.Vector);
    procedure Load (Path : String; Gs : in out Geo_Vectors.Vector; N_Cams : Natural; Note : out String);
 end Geom;

@@ -202,6 +202,7 @@ package Act is
       Cu, Cv : Long_Float := 0.0;         --  上一次量到的形心(归一化画幅;认槽用)
       Seen : Boolean := False;            --  这一帧量到了吗
       Isolated : Boolean := False;        --  量到的那一块是单独的吗(没顶到让出来的那一圈)
+      Mask : Bools;                       --  这一帧它的像素(整幅;合手前在它身上挑夹得住的那一处要用)
    end record;
    package Boxed_Vectors is new Ada.Containers.Vectors (Natural, Boxed_Thing);
 
@@ -294,10 +295,17 @@ package Act is
       Geo_Obs : Geom.Obs_Vectors.Vector;  --  这一集里点名那块在腕眼里的历次观测(位姿 + 像素)
       Geo_Slot : Integer := -1;
       Geo_Name : Unbounded_String;        --  这些观测是哪件【点过名的东西】的(按名字记,不按槽:近处重新指一次会换槽,远处那几眼好观测不能因此作废)
+      --  我最后一次被一个面顶住的地方:面上的一点(指尖世界位置)和它的法向(指向我这边)。
+      --  不动的眼只给方向不给远近;东西躺在它靠着的面上 ⇒ 视线和这个面一交就是它在哪(LAB D2:碰过的点进地图)。
+      Touch_Valid : Boolean := False;
+      Touch_Pt, Touch_N : Geom.V3 := [others => 0.0];
    end record;
 
    procedure Init_Tracks (C : in out Context);
    --  开机装回几何常数(身体文件旁边的 .geo.json:焦距、相机在手上的朝向、指尖在相机里的位置);缺的当场量。
    procedure Geo_Boot (F : Plug.Frame; C : in out Context; Body_Path : String);
+   --  量【不动的眼】:看着自己的手挪几下(每停一处合空一次,看指尖落在画面哪儿),解出它在世界里的位置和朝向。
+   --  只在它还没量过时做;量过就存进几何文件,下一炮直接装回。
+   procedure Geo_Boot_Fixed (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);
    procedure Round (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);
 end Act;

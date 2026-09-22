@@ -21,6 +21,7 @@ with Runtime;
 with Plan;
 with Layout;
 with Act;
+with Geom;
 with Selfmap;
 with Learned;
 with Exam;
@@ -373,6 +374,65 @@ begin
       Check (Has (Sinew.Grammar ("touching", "", Outs), "cannot find any part of me")
              and then not Has (Sinew.Grammar ("touching", "", Outs), "<who>"),
              "语法:给脑看的那张纸和键盘同一张 —— 角色表空时纸上也没有 <who>");
+   end;
+   --  🔴 不动的眼(2026-09-22):已知世界点 + 它们在画面里的像素 ⇒ 解出相机位置和朝向。正反两条。
+   declare
+      use type Geom.V3;
+      Gt, Gf : Geom.Cam_Geo;
+      Marks : Geom.Mark_Vectors.Vector;
+      Ok : Boolean;
+      Pts : constant array (1 .. 8) of Geom.V3 :=
+        [[-0.35, -0.25, 0.80], [0.35, -0.25, 0.80], [-0.35, -0.10, 0.90], [0.35, -0.10, 0.90],
+         [-0.25, -0.05, 0.85], [0.25, -0.30, 0.95], [0.0, -0.20, 0.82], [0.1, 0.05, 0.88]];
+   begin
+      Gt.F := 288.0; Gt.Cx := 320.0; Gt.Cy := 240.0;
+      --  相机约定 -z 朝前:朝向取单位阵就是笔直朝下看(世界 z 朝上),再歪 0.3 rad 像真的头顶眼那样斜着看桌子
+      Gt.R_Ce := Geom.Rodrigues ([0.3, 0.1, 0.0]);
+      Gt.Pos := [0.05, -0.45, 1.75]; Gt.Fixed := True;
+      declare
+         All_Front : Boolean := True;
+      begin
+         for P of Pts loop
+            declare
+               U, V : Long_Float;
+               Fr : Boolean;
+            begin
+               Geom.Project_Fixed (Gt, P, U, V, Fr);
+               All_Front := All_Front and then Fr and then U > 0.0 and then U < 640.0 and then V > 0.0 and then V < 480.0;
+               Marks.Append (Geom.Mark'(Pw => P, U => U, V => V));
+            end;
+         end loop;
+         Check (All_Front, "不动的眼:合成的 8 个点都在相机前面、画面里(测试数据自己先得成立)");
+      end;
+      Gf.F := Gt.F; Gf.Cx := Gt.Cx; Gf.Cy := Gt.Cy;
+      Geom.Fit_Fixed (Gf, Marks, Ok);
+      declare
+         Dp : constant Long_Float := (if Ok then Geom.Norm ([Gf.Pos (0) - Gt.Pos (0), Gf.Pos (1) - Gt.Pos (1), Gf.Pos (2) - Gt.Pos (2)]) else 1.0);
+         Da : constant Long_Float := (if Ok then Geom.Norm (Geom.Rot_Vec (Geom.Mul (Geom.Tr (Gt.R_Ce), Gf.R_Ce))) else 1.0);
+      begin
+         Check (Ok and then Gf.Rms < 0.01 and then Dp < 0.001 and then Da < 0.001,
+                "不动的眼:8 个指尖观测 ⇒ 位置差 " & Codec.Fmt (Dp, 5) & " m · 朝向差 " & Codec.Fmt (Da, 4) & " rad · 残差 " & Codec.Fmt (Gf.Rms, 3) & " px");
+      end;
+      declare
+         Few : Geom.Mark_Vectors.Vector;
+         G3 : Geom.Cam_Geo := Gf;
+         Ok3 : Boolean;
+      begin
+         for I in 0 .. 2 loop
+            Few.Append (Marks (I));
+         end loop;
+         Geom.Fit_Fixed (G3, Few, Ok3);
+         Check (not Ok3, "不动的眼:只有 3 个观测 ⇒ 不解,如实说");
+      end;
+      declare
+         Hit : Geom.V3;
+         Hok : Boolean;
+      begin
+         Hit := Geom.Hit_Plane ([0.0, 0.0, 1.0], [0.0, 0.6, -0.8], [0.0, 0.0, 0.5], [0.0, 0.0, 1.0], Hok);
+         Check (Hok and then abs (Hit (2) - 0.5) < 1.0e-9 and then abs (Hit (1) - 0.375) < 1.0e-9, "视线与面相交:落在面上,位置对");
+         Hit := Geom.Hit_Plane ([0.0, 0.0, 1.0], [0.0, 0.6, 0.8], [0.0, 0.0, 0.5], [0.0, 0.0, 1.0], Hok);
+         Check (not Hok, "视线背对着面 ⇒ 不交,如实说");
+      end;
    end;
    --  🔴 框里量(2026-09-21):脑只说"它在这一框里",哪些像素是它由身体自己量。四条焊点,正反都要有。
    --  合成画面:木纹桌面(灰度 80 上下抖 ±6 的条纹)上放一根亮的长条(像剪刀那样细长)。

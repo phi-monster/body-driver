@@ -748,11 +748,19 @@ package body Picture is
    --  棒球四个回合 (439.1,183.0)、695 px,对 LAB 08-28 手量的真值 (440,183)·半径约 15 差不到 1 px。
    procedure Measure_In_Box (G : Buf; W, H : Natural; BX0, BY0, BX1, BY1 : Natural;
                              Found, Isolated : out Boolean; R : out Region) is
+      M : Bools;
+   begin
+      Measure_In_Box (G, W, H, BX0, BY0, BX1, BY1, Found, Isolated, R, M);
+   end Measure_In_Box;
+
+   procedure Measure_In_Box (G : Buf; W, H : Natural; BX0, BY0, BX1, BY1 : Natural;
+                             Found, Isolated : out Boolean; R : out Region; Mask : out Bools) is
       Ring_W : constant := 2;      --  当背景的那一圈有多厚(像素行数,次数,无量纲)
    begin
       Found := False;
       Isolated := False;
       R := (others => <>);
+      Mask.Clear;
       if W = 0 or else H = 0 or else Natural (G.Length) < W * H
         or else BX1 <= BX0 or else BY1 <= BY0 or else BX0 >= W or else BY0 >= H
       then
@@ -879,9 +887,9 @@ package body Picture is
             end if;
             --  形心、主轴、长宽比交给 Components 算(全仓只有那一份算法),这里只把选中的那一块描进整幅掩膜
             declare
-               Mask : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (W * H));
                Regs : Regions;
             begin
+               Mask := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (W * H));
                --  ⑥ 它不是单独的一块(连到了让出来的那一圈)⇒ 只取它落在【脑那一框里】的部分:脑指的就是那一框,
                --     框外连着的是邻居。真帧实测(剪刀紧贴风扇,左腕眼):连成一片 2546 px、长轴被风扇带歪 ⇒
                --     只取框内 1352 px,出来的是整把剪刀、长宽比 5.6,贴着风扇的地方正好断开。

@@ -274,6 +274,7 @@ begin
    --  🔴 抓起过球的那三炮(GB5/GC2/GC4)开机都有这一行;09-20 把几何驾驶搬回 main 时漏了它,
    --  于是几何常数从不装回、Geo_Ready 恒假、整条几何走法是死代码。
    Act.Geo_Boot (F, C, To_String (Body_Path));
+   Act.Geo_Boot_Fixed (L, F, C);
    Put_Line ("[身] 身体量完 ⇒ 开始干活(脑在 " & To_String (C.Eye_Host) & ":" & Codec.Img (C.Eye_Port) & (if C.Look_Only then ",只看不动" else "") & ")");
    --  ── 干活循环 ──
    loop
