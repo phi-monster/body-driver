@@ -5887,7 +5887,9 @@ package body Act is
                            Name : Unbounded_String := Null_Unbounded_String) is
       G : constant Geom.Cam_Geo := Geo_Of (C, Cam);
       Beats0 : constant Natural := Plug.Steps (L);
-      Limit : constant Natural := (if Step_Limit > 0 then Step_Limit else 12);   --  没说步数时的安全上限(次数)
+      --  🔴 没说步数 ⇒ 我不设上限:走到到位 / 碰到 / 被顶住 / 看丢为止(身体不许自己收工)。H28 2026-09-22 实测:我自设的 12 推上限
+      --  (其中 5 推是转眼)让 above 停在离合拢点 0.111 m 处,还报"你要的步数走完了"—— 脑根本没要过步数,接着就合了个空。
+      Limit : constant Natural := (if Step_Limit > 0 then Step_Limit else Natural'Last);
       Tol : constant Long_Float := 0.1 * G.Gap;      --  到位容差 = 张口的一成(比例,无量纲)
       Inward : constant Long_Float := 0.15 * G.Gap;  --  指尖中点再往手心里一点 = 张口的 15%(比例,无量纲):别咬在皮上
       Want : Geom.V3 := G.Tip;
@@ -6301,6 +6303,46 @@ package body Act is
       Event := S ("amount: arrived (I went back the way I came, " & Mm (Dist) & ")");
       Beats := Plug.Steps (L) - Beats0;
    end Geo_Retreat;
+
+   --  离远点(手里没东西):沿我来时走向它的方向【反着】走。一步多长 = 脑那一档的步子(和贴近时同一把尺);走几步 = 脑说的步数,没说就一步。
+   --  没朝它走过就说不出哪边是"远" ⇒ 如实拒,不猜。
+   procedure Geo_Away (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Arm : Natural; Step_Limit : Natural; Amt : Long_Float;
+                       Event : out Unbounded_String; Steps_Taken : out Natural; Beats : out Natural) is
+      Beats0 : constant Natural := Plug.Steps (L);
+      Ln : constant Long_Float := 4.0 * Geo_Base (C, Arm) * (4.0 * Amt);   --  一步 = 4 倍探针幅度 × 脑的档位(倍数,无量纲;同 Geo_Approach 的 Step_Cap)
+      N : constant Natural := (if Step_Limit > 0 then Step_Limit else 1);
+      Mok : Boolean;
+      Went : Long_Float := 0.0;
+   begin
+      Steps_Taken := 0; Beats := 0;
+      if Geom.Norm (C.Geo_Dir) <= 0.0 or else Ln <= 0.0 then
+         Event := S ("refused: I have not walked toward it yet, so I do not know which way is away from it");
+         return;
+      end if;
+      for K in 1 .. N loop
+         declare
+            Cur : constant Plug.Arm_Pose := F.EE (Arm);
+            Dw : constant Geom.V3 := [-C.Geo_Dir (0) * Ln, -C.Geo_Dir (1) * Ln, -C.Geo_Dir (2) * Ln];
+         begin
+            Geo_Move (L, C, F, Arm, Dw, Mok);
+            Steps_Taken := Steps_Taken + 1;
+            declare
+               Now : constant Plug.Arm_Pose := F.EE (Arm);
+               Got : constant Long_Float := ((Now (0) - Cur (0)) * Dw (0) + (Now (1) - Cur (1)) * Dw (1) + (Now (2) - Cur (2)) * Dw (2)) / Ln;
+            begin
+               Went := Went + Got;
+               C.Geo_Dist := C.Geo_Dist + Got; C.Geo_At := Now;   --  离它远了这么多;刚算的"笼住"距离跟着变
+               if Got + Got < Ln then   --  实到不到要的一半(纯数学的一半)= 被顶住了
+                  Event := S ("resist: I commanded a step of " & Mm (Ln) & " away from it and my hand only went " & Mm (Got));
+                  Beats := Plug.Steps (L) - Beats0;
+                  return;
+               end if;
+            end;
+         end;
+      end loop;
+      Event := S ("amount: arrived (I moved " & Mm (Went) & " away from it, along the line I had come in on)");
+      Beats := Plug.Steps (L) - Beats0;
+   end Geo_Away;
 
    --  ── 一轮 ──
    procedure Round (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context) is
@@ -7941,7 +7983,9 @@ package body Act is
                      G0 : constant Brain.Goal := Say.Moves (0);
                      Rl : constant String := To_String (G0.Rel);
                   begin
-                     if (Rl = "at" or else Rl = "into" or else Rl = "above") and then G0.Of_Item >= 1 and then G0.Of_Item <= Natural (C.Items.Length)
+                     --  nearer(front)也是朝它走:同一条视线走法,走到脑说的步数/到位/碰到为止(H28 2026-09-22 实测:Qwen 写 nearer,
+                     --  掉回老路,逐通道量表 60 拍一步没走)。farther(back)手里没东西时 = 沿来时的方向反着走(Geo_Away)。
+                     if (Rl = "at" or else Rl = "into" or else Rl = "above" or else Rl = "front") and then G0.Of_Item >= 1 and then G0.Of_Item <= Natural (C.Items.Length)
                        and then C.Items (G0.Of_Item - 1).Kind = Thing and then C.Items (G0.Of_Item - 1).Located
                      then
                         --  🔴 above 在【长在手上的眼】里按"画面里的上方"没法执行也没有物理意义(那只眼跟着手转);
@@ -7955,6 +7999,9 @@ package body Act is
                      elsif Rl = "back" and then C.Wld.Holding and then C.Wld.Held_Arm = Own then
                         Geo_Case := 2;
                         Geo_Desc := S (Say_Item (C, G0.Item) & " back the way it came, holding");
+                     elsif Rl = "back" and then G0.Of_Item >= 1 and then G0.Of_Item <= Natural (C.Items.Length) then
+                        Geo_Case := 4;
+                        Geo_Desc := S (Say_Item (C, G0.Item) & " away from " & Say_Item (C, G0.Of_Item) & " along the line I came in on");
                      end if;
                   end;
                elsif Say.Grip = "close" and then Grip_Arm = Own and then C.Geo_Dist >= 0.0 and then C.Geo_At_Arm = Own then
@@ -8004,6 +8051,14 @@ package body Act is
             Report := Report & "you asked " & To_String (Geo_Desc) & ": " & To_String (Event) & ". I took " & Codec.Img (Steps_Taken) & " pushes; ";
             Put_Line ("[身]   这一段:" & Codec.Img (Steps_Taken) & " 推 · " & Codec.Img (Beats) & " 拍");
             Codec.Append_Line (Life_Path, "beat " & Codec.Img (Plug.Steps (L)) & " | eye " & Codec.Img (Cam) & " | " & To_String (Geo_Desc)
+                               & " | " & Codec.Img (Steps_Taken) & " pushes | ended: " & To_String (Event));
+         elsif Geo_Case = 4 then
+            Put_Line ("[身] ⚙ 几何走法:" & To_String (Geo_Desc));
+            Geo_Away (L, C, F, Natural (Own), Step_Limit, Amount_Factor (Say.Moves (0).Amount), Event, Steps_Taken, Beats);
+            Feel (C, F);
+            Report := Report & "you asked " & To_String (Geo_Desc) & ": " & To_String (Event) & ". I took " & Codec.Img (Steps_Taken) & " pushes; ";
+            Put_Line ("[身]   这一段:" & Codec.Img (Steps_Taken) & " 推 · " & Codec.Img (Beats) & " 拍");
+            Codec.Append_Line (Life_Path, "beat " & Codec.Img (Plug.Steps (L)) & " | eye " & Codec.Img (Natural (Geo_Cam)) & " | " & To_String (Geo_Desc)
                                & " | " & Codec.Img (Steps_Taken) & " pushes | ended: " & To_String (Event));
          elsif Geo_Case = 3 then
             Put_Line ("[身] ⚙ 几何走法:合手前不再走,笼住与否由刚算的 " & Mm (C.Geo_Dist) & " 说");
