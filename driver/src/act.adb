@@ -6090,18 +6090,26 @@ package body Act is
       if Seen and then (Whole or else Natural (C.Geo_Obs.Length) < 2) then
          C.Geo_Obs.Append (Geom.Obs'(Pose => F.EE (Arm), U => U, V => V));
       end if;
-      if Seen and then Natural (C.Geo_Obs.Length) < 2
+      if Seen and then not Known and then Natural (C.Geo_Obs.Length) < 2
         and then Natural (Sightlines_Now (C, F, Cam, Arm, Its_Name, Seen, Whole, U, V, Who).Length) < 2
       then
-         --  只有一笔观测 ⇒ 先横挪一步当基线(拇指测距的"换只眼")
+         --  只有一笔观测 ⇒ 先横挪一步当基线(拇指测距的"换只眼")。它在哪已经量过的(Known)不用横挪:一条视线落到它躺的面上就够
          declare
-            Rc : constant Geom.M3 := Geom.Cam_R (G, F.EE (Arm));
+            P0 : constant Plug.Arm_Pose := F.EE (Arm);
+            Rc : constant Geom.M3 := Geom.Cam_R (G, P0);
             B : constant Long_Float := 4.0 * Geo_Base (C, Arm);   --  同量朝向那一档(倍数,无量纲)
             Dw : constant Geom.V3 := Geom.Ap (Rc, [B, 0.0, 0.0]);
             U0 : constant Long_Float := U;
+            D0 : constant Geom.V3 := Geom.Ray (G, P0, U, V);     --  横挪前它所在的方向(世界系)
          begin
             Geo_Move (L, C, F, Arm, Dw, Mok);
             Steps_Taken := Steps_Taken + 1;
+            --  横挪之后它在画面里跳了一截(这正是要量的),重量的窗得跟着跳:按原方向投进新位姿(H34 2026-09-22 实测:近处一横挪就"看丢")
+            declare
+               Pn : constant Plug.Arm_Pose := F.EE (Arm);
+            begin
+               Retarget_Box (C, F, Cam, Arm, Name, [Pn (0) + D0 (0), Pn (1) + D0 (1), Pn (2) + D0 (2)]);
+            end;
             Geo_Track (C, F, Cam, Slot, U, V, Seen, Name);
             if not Seen then
                Event := S ("lost: it left my sight when I stepped sideways to measure its distance");
@@ -6143,12 +6151,33 @@ package body Act is
                      Geo_Say ("此刻只有这一只眼看见它 ⇒ 按我自己挪过的那几眼算(前提是它没动;会动的东西这样量不出来)");
                   end if;
                elsif Known then
-                  Pw := C.Geo_Pw;
-                  if not Said_Known then
-                     Said_Known := True;
-                     Geo_Say ("此刻没有一只眼看得清它 ⇒ 按我上一段量到的位置 (" & Mm (Pw (0)) & "," & Mm (Pw (1)) & "," & Mm (Pw (2))
-                              & ") 走(前提是它没动)");
-                  end if;
+                  --  它在哪上一段量过;这一眼看得见它就更好:这条视线落到它躺的那个面(过它量到的位置、法向 = 面的法向)上,就是它此刻的位置。
+                  --  一条视线 + 它躺的面 = 不用横挪的量法(和不动的眼找它是同一条几何);看不见就按记住的位置。
+                  declare
+                     Hp : constant Plug.Arm_Pose := F.EE (Arm);
+                     Nn_S : constant Geom.V3 := (if C.Touch_Valid then C.Touch_N else [0.0, 0.0, 1.0]);
+                     Hok : Boolean := False;
+                     Ph : Geom.V3;
+                  begin
+                     if Seen then
+                        Ph := Geom.Hit_Plane ([Hp (0), Hp (1), Hp (2)], Geom.Ray (G, Hp, U, V), C.Geo_Pw, Nn_S, Hok);
+                     end if;
+                     if Hok then
+                        Pw := Ph;
+                        if not Said_Known then
+                           Said_Known := True;
+                           Geo_Say ("这一眼的视线落到它躺的面上(面过我上一段量到的位置)⇒ 它在 (" & Mm (Pw (0)) & "," & Mm (Pw (1)) & "," & Mm (Pw (2)) & ")");
+                        end if;
+                        C.Geo_Pw := Pw;   --  记住最新的
+                     else
+                        Pw := C.Geo_Pw;
+                        if not Said_Known then
+                           Said_Known := True;
+                           Geo_Say ("此刻没有一只眼看得清它 ⇒ 按我上一段量到的位置 (" & Mm (Pw (0)) & "," & Mm (Pw (1)) & "," & Mm (Pw (2))
+                                    & ") 走(前提是它没动)");
+                        end if;
+                     end if;
+                  end;
                else
                   Event := S ("lost: I cannot see the thing you named in this eye right now");
                   exit;
