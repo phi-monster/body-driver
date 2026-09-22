@@ -4,6 +4,9 @@
 with Ada.Command_Line; use Ada.Command_Line;
 with Ada.Text_IO; use Ada.Text_IO;
 with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
+with Ada.Streams.Stream_IO;
+with Bytes;
+with Picture;
 with Json;
 with Bodyfile;
 with Selfmap;
@@ -25,8 +28,70 @@ procedure Bodyexam is
    Sch : Schema.Map;
 begin
    if Argument_Count < 1 then
-      Put_Line ("用法:bodyexam <身体文件路径>");
+      Put_Line ("用法:bodyexam <身体文件路径> [程序文件]");
+      Put_Line ("      bodyexam --box <落盘的灰度帧.pgm> x0 y0 x1 y1   (脑给的框,像素;离线量框里那一块)");
       Set_Exit_Status (Failure);
+      return;
+   end if;
+   --  离线打出【递给解码器的那份语法】原文:bodyexam --grammar "<角色表>" "<关系词表>"
+   --  用来拿真的推理服务验"这份语法它收不收"(空表那几种尤其要验),只打印。
+   if Argument (1) = "--grammar" then
+      Put_Line (Sinew.EBNF ((if Argument_Count >= 3 then Argument (3) else ""),
+                            (if Argument_Count >= 2 then Argument (2) else ""),
+                            "touched stuck slipped lost settled stalled timeout"));
+      return;
+   end if;
+   --  离线量"框里那一块":拿炮里落盘的原始灰度帧(BL_VID 的 P5 pgm)和一个框,原样走 Picture.Measure_In_Box。
+   --  只打印,不连仿真。用来核对 Ada 这一份和定型时的读数一致。
+   if Argument (1) = "--box" then
+      if Argument_Count < 6 then
+         Put_Line ("用法:bodyexam --box <pgm> x0 y0 x1 y1");
+         Set_Exit_Status (Failure);
+         return;
+      end if;
+      declare
+         use Ada.Streams.Stream_IO;
+         Fs : Ada.Streams.Stream_IO.File_Type;
+         Ch : Character;
+         W, H, Maxv : Natural := 0;
+         G : Bytes.Buf;
+         function Next_Int return Natural is
+            V : Natural := 0;
+            Got : Boolean := False;
+         begin
+            loop
+               Character'Read (Stream (Fs), Ch);
+               if Ch in '0' .. '9' then
+                  V := V * 10 + (Character'Pos (Ch) - Character'Pos ('0'));
+                  Got := True;
+               elsif Got then
+                  return V;
+               end if;
+            end loop;
+         end Next_Int;
+         Found, Isolated : Boolean;
+         R : Picture.Region;
+      begin
+         Open (Fs, In_File, Argument (2));
+         Character'Read (Stream (Fs), Ch);   --  'P'
+         Character'Read (Stream (Fs), Ch);   --  '5'
+         W := Next_Int; H := Next_Int; Maxv := Next_Int;
+         for I in 1 .. W * H loop
+            Character'Read (Stream (Fs), Ch);
+            G.Append (Bytes.U8 (Character'Pos (Ch)));
+         end loop;
+         Close (Fs);
+         Picture.Measure_In_Box (G, W, H, Natural'Value (Argument (3)), Natural'Value (Argument (4)),
+                                 Natural'Value (Argument (5)), Natural'Value (Argument (6)), Found, Isolated, R);
+         Ada.Text_IO.Put_Line ("帧 " & Natural'Image (W) & " x" & Natural'Image (H) & "(灰度上限" & Natural'Image (Maxv) & ")· 量到了吗 "
+           & Boolean'Image (Found) & " · 单独框出来了吗 " & Boolean'Image (Isolated));
+         if Found then
+            Ada.Text_IO.Put_Line ("  " & Natural'Image (R.Count) & " px · 形心 (" & Codec.Fmt (R.Cu * Long_Float (W), 1) & ","
+              & Codec.Fmt (R.Cv * Long_Float (H), 1) & ") · 框 [" & Natural'Image (R.X0) & Natural'Image (R.Y0)
+              & Natural'Image (R.X1) & Natural'Image (R.Y1) & " ] · 长轴 (" & Codec.Fmt (R.Au, 3) & "," & Codec.Fmt (R.Av, 3)
+              & ") · 长宽比 " & Codec.Fmt (R.Elong, 1));
+         end if;
+      end;
       return;
    end if;
    declare
@@ -73,6 +138,18 @@ begin
       Put_Line ("  act.adb 造键盘时的调用 Usable_Rels(R, -1, True)  = [" & Plan.Usable_Rels (R, -1, True) & "]");
       Put_Line ("  同一份报告,换成第 0 块当靶子 (R, 0, True)        = [" & Plan.Usable_Rels (R, 0, True) & "]");
       Put_Line ("  同一份报告,不认为有支撑面 (R, 0, False)          = [" & Plan.Usable_Rels (R, 0, False) & "]");
+      --  act.adb 现在造键盘用的是 Usable_Rels_Any:拿此刻绑得上的每一个"我"去问。
+      --  这里摆一个【还没量过响应的我】(Thing_Idx = -1)—— 编译器对它放行,键盘也得给;原样打出来好核对。
+      declare
+         Me : Plan.Item_Facts;
+         Subjects : Plan.Facts_Vectors.Vector;
+      begin
+         Me.Exists := True;
+         Me.Mine := True;
+         Subjects.Append (Me);
+         Put_Line ("  一个还没量过的我 Usable_Rels_Any(R, [我], True)   = [" & Plan.Usable_Rels_Any (R, Subjects, True) & "]");
+         Put_Line ("  同上,不认为有支撑面 Usable_Rels_Any(R, [我], False) = [" & Plan.Usable_Rels_Any (R, Subjects, False) & "]");
+      end;
       --  五行各自"这具身体上有没有哪一块量得出它" —— 键盘就是从这五个是/否推出来的。
       --  只打印,不参与任何判定。
       Put_Line ("");

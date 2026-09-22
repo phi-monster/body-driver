@@ -28,5 +28,8 @@ package World is
    procedure Observe (S : in out State; Cam : Natural; Regs : Picture.Regions; W, H : Natural);
    function Count (S : State; Cam : Natural) return Natural;
    function Get (S : State; Cam : Natural; I : Natural) return Slot;
+   --  我自己挪了一大步,这一槽里的东西在画面里【该】到哪、该大几成,由调用方按几何算好告诉我;
+   --  我把槽里记的样子挪过去、放大,这一帧新量到的块才对得上同一个槽(Observe 按形心就近认槽)。
+   procedure Shift_Slot (S : in out State; Cam, I : Natural; Cu, Cv, Grow : Long_Float);
    function Vanished (Regs : Picture.Regions; Origin : Picture.Region; W, H : Natural) return Boolean;
 end World;

@@ -192,6 +192,19 @@ package Act is
    end record;
    package Place_Vectors is new Ada.Containers.Vectors (Natural, Place);
 
+   --  脑点过名的一件东西:它说"在这一框里",我在框里量出了它。之后每一帧,我在【上一帧量到它的地方】
+   --  原样再量一遍(Picture.Measure_In_Box)—— 跟住它靠的是重新量,不是靠全图切块里碰巧有一块像它。
+   --  名字是脑起的,框和像素留在身体里;编号照旧不进语言。
+   type Boxed_Thing is record
+      Name : Unbounded_String;
+      Cam : Natural := 0;
+      X0, Y0, X1, Y1 : Natural := 0;      --  上一次量到它的像素框(闭区间)
+      Cu, Cv : Long_Float := 0.0;         --  上一次量到的形心(归一化画幅;认槽用)
+      Seen : Boolean := False;            --  这一帧量到了吗
+      Isolated : Boolean := False;        --  量到的那一块是单独的吗(没顶到让出来的那一圈)
+   end record;
+   package Boxed_Vectors is new Ada.Containers.Vectors (Natural, Boxed_Thing);
+
    package Buf_Vectors is new Ada.Containers.Vectors (Natural, Buf, U8_Vectors."=");
    type Context is record
       Map : Selfmap.Body_Map;
@@ -237,6 +250,7 @@ package Act is
       Cut_Seq : Natural := 0;      --  切块缓存:这一帧的编号(同一帧同一台相机不重切,颜色切块很贵)
       Cut_Cam : Integer := -1;
       Cut_Regs : Picture.Regions;
+      Boxed : Boxed_Vectors.Vector;    --  脑点过名、我在框里量出来的那几件东西(每帧原地重量,见 Boxed_Thing)
       --  🔴 脑不再一轮填一张表,而是交【一段程序】。程序编译过了就存在这里,一轮跑一小节,
       --  跑完才回去问下一段 —— 这才是"少问几百次"的来源。
       Prog : Sinew.Program;            --  脑交的那一段程序(带循环/分支/定义)
@@ -273,12 +287,17 @@ package Act is
       Geo_Path : Unbounded_String;        --  几何常数存哪(身体文件旁边)
       Geo_Dist : Long_Float := -1.0;      --  上一次几何逼近结束时,它离"指尖该到的那一点"还差多少米(< 0 = 没有)
       Geo_Round : Natural := 0;           --  那是第几轮
+      Geo_At : Plug.Arm_Pose := [others => 0.0];   --  算那个距离时手在哪(位姿读数);手没挪开,那个距离就还作数
+      Geo_At_Arm : Integer := -1;
       Geo_Came : Long_Float := 0.0;       --  几何逼近一共走了多远(米);"离远点"就沿原路退这么远
       Geo_Dir : Geom.V3 := [others => 0.0];   --  逼近的方向(世界系单位向量)
       Geo_Obs : Geom.Obs_Vectors.Vector;  --  这一集里点名那块在腕眼里的历次观测(位姿 + 像素)
       Geo_Slot : Integer := -1;
+      Geo_Name : Unbounded_String;        --  这些观测是哪件【点过名的东西】的(按名字记,不按槽:近处重新指一次会换槽,远处那几眼好观测不能因此作废)
    end record;
 
    procedure Init_Tracks (C : in out Context);
+   --  开机装回几何常数(身体文件旁边的 .geo.json:焦距、相机在手上的朝向、指尖在相机里的位置);缺的当场量。
+   procedure Geo_Boot (F : Plug.Frame; C : in out Context; Body_Path : String);
    procedure Round (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);
 end Act;

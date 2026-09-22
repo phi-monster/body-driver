@@ -353,6 +353,79 @@ begin
       Check (Natural (Rs.Length) = 2 and then Rs (0).Count = 225 and then Rs (1).Count = 9,
              "连通块:大的排前面(" & Codec.Img (Rs (0).Count) & " 然后 " & Codec.Img (Rs (1).Count) & ")");
    end;
+   --  🔴 语法永远得是合法的(T1 2026-09-21):角色表空了,`who ::= ` 后面什么都没有 ⇒ 推理服务整份拒收 ⇒ 再也问不到脑。
+   declare
+      Outs : constant String := "touched stuck slipped lost settled stalled timeout";
+      function Has (Text, Pat : String) return Boolean is (Ada.Strings.Fixed.Index (Text, Pat) > 0);
+      Full : constant String := Sinew.EBNF ("touching above", "grasper", Outs);
+      No_Who : constant String := Sinew.EBNF ("touching above", "", Outs);
+      No_Rel : constant String := Sinew.EBNF ("(一个都没有)", "grasper", Outs);
+   begin
+      Check (Has (Full, "who ::= ") and then Has (Full, "rel ::= ") and then Has (Full, "who "" "" rel"),
+             "语法:角色和关系都有 ⇒ 整份都在");
+      Check (not Has (No_Who, "who ::=") and then not Has (No_Who, "cons") and then Has (No_Who, "word ::=")
+             and then Has (No_Who, "root ::="),
+             "语法:角色表空 ⇒ 没有空规则,只剩 say / done(脑仍然问得到)");
+      Check (Has (No_Rel, "who ::= ") and then not Has (No_Rel, "rel ::=") and then not Has (No_Rel, "who "" "" rel")
+             and then Has (No_Rel, "close"),
+             "语法:关系表空、角色不空 ⇒ 拿掉 <who> <relation> 那一支,close / open / still 还在");
+      Check (Has (Full, "0-9") and then Has (Full, "="), "语法:say 那一句打得出数字和等号(look = k 这个键按得动)");
+      Check (Has (Sinew.Grammar ("touching", "", Outs), "cannot find any part of me")
+             and then not Has (Sinew.Grammar ("touching", "", Outs), "<who>"),
+             "语法:给脑看的那张纸和键盘同一张 —— 角色表空时纸上也没有 <who>");
+   end;
+   --  🔴 框里量(2026-09-21):脑只说"它在这一框里",哪些像素是它由身体自己量。四条焊点,正反都要有。
+   --  合成画面:木纹桌面(灰度 80 上下抖 ±6 的条纹)上放一根亮的长条(像剪刀那样细长)。
+   declare
+      W : constant Natural := 200;
+      H : constant Natural := 160;
+      function Table_Gray return Buf is
+         G : Buf;
+      begin
+         for Y in 0 .. H - 1 loop
+            for X in 0 .. W - 1 loop
+               G.Append (U8 (80 + ((X / 3 + Y / 7) mod 3) * 6 - 6));
+            end loop;
+         end loop;
+         return G;
+      end Table_Gray;
+      procedure Paint (G : in out Buf; X0, Y0, X1, Y1 : Natural; V : U8) is
+      begin
+         for Y in Y0 .. Y1 loop
+            for X in X0 .. X1 loop
+               G.Replace_Element (Y * W + X, V);
+            end loop;
+         end loop;
+      end Paint;
+      G : Buf;
+      Found, Alone : Boolean;
+      R : Picture.Region;
+   begin
+      --  ① 正例:一根 12x60 的亮条,脑的框比它略大 ⇒ 量到一整块、是单独的、形心在条的正中、细长
+      G := Table_Gray;
+      Paint (G, 94, 50, 105, 109, 210);
+      Picture.Measure_In_Box (G, W, H, 90, 46, 109, 113, Found, Alone, R);
+      Check (Found and then Alone and then R.Count = 12 * 60
+             and then abs (R.Cu * Long_Float (W) - 99.5) < 0.6 and then abs (R.Cv * Long_Float (H) - 79.5) < 0.6
+             and then R.Elong > 3.0 and then abs R.Av > abs R.Au,
+             "框里量:亮条量成一整块,形心在正中,长轴竖着(" & Codec.Img (R.Count) & " px,长宽比 " & Codec.Fmt (R.Elong, 1) & ")");
+      --  ② 反例:同一张桌面上一块什么都没有的地方 ⇒ 如实说量不到,不许从木纹里硬凑一块
+      Picture.Measure_In_Box (G, W, H, 20, 20, 60, 50, Found, Alone, R);
+      Check (not Found, "框里量:空桌面 ⇒ 量不到(木纹分不成两拨)");
+      --  ③ 挨着邻物:亮条旁边紧贴一大块同样亮的东西,压进让出来的那一圈 ⇒ 量得到,但如实说"不是单独的一块"
+      G := Table_Gray;
+      Paint (G, 94, 50, 105, 109, 210);
+      Paint (G, 106, 30, 160, 130, 205);
+      Picture.Measure_In_Box (G, W, H, 90, 46, 109, 113, Found, Alone, R);
+      Check (Found and then not Alone, "框里量:挨着邻物 ⇒ 量得到但说【不是单独的】(不把连在一起的一大片当成它的形心去信)");
+      --  ④ 手指伸进框边:一小块亮东西只伸进让出来的那一圈、形心在脑的框【外】⇒ 选中的仍是亮条,不是它
+      G := Table_Gray;
+      Paint (G, 94, 50, 105, 109, 210);
+      Paint (G, 80, 118, 120, 128, 230);
+      Picture.Measure_In_Box (G, W, H, 90, 46, 109, 113, Found, Alone, R);
+      Check (Found and then R.Count = 12 * 60 and then abs (R.Cv * Long_Float (H) - 79.5) < 0.6,
+             "框里量:伸进框边的另一块(形心在框外)不顶替它(" & Codec.Img (R.Count) & " px)");
+   end;
    --  身体图:最近样本按探针幅度归一;同位姿(噪声内)再看一次 = 顶替不是新增
    declare
       M : Schema.Map;
@@ -520,8 +593,11 @@ begin
                   & "  do grasper touching the ball small until touched" & ASCII.LF & "end").Ok,
              "空转:循环等的结局这一节真产得出 ⇒ 放行");
       Set_Size (0.5);
-      Check (not Dry ("do grasper close on the ball until stuck").Ok,
-             "空转:那个东西比我张得开的还大 ⇒ 合了也是空的,不通电就拦住");
+      --  🔴 这条断言以前是反的("比我张得开的还大 ⇒ 拦住")。它比的是整块外廓,而爪子夹的是窄的那一向:
+      --  剪刀永远比爪口长 ⇒ `close 剪刀` 永远编译不过(T5 2026-09-21 实测被它挡在动手之前)。
+      --  总规矩:身体不许自称"物理上做不到";成没成由合完提一提来判。
+      Check (Dry ("do grasper close on the ball until stuck").Ok,
+             "空转:东西的外廓比爪口大【不是】拒绝的理由 ⇒ 放行(夹得住夹不住,合完提一提才知道)");
       Set_Size (0.04);
       Check (not Dry ("run nothing").Ok, "空转:叫一个没 to 过的名字 ⇒ 拦住");
    end;

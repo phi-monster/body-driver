@@ -1,0 +1,42 @@
+sc1_head_gray | scissors | ```json [ 	{"bbox_2d": [748, 366, 798, 541], "label": "scissors"} ] ```
+sc1_head_gray | baseball | ```json [ 	{"bbox_2d": [670, 354, 722, 420], "label": "baseball"} ] ```
+sc1_head_gray | jeans | ```json [ 	{"bbox_2d": [485, 424, 646, 616], "label": "jeans"} ] ```
+sc1_head_gray | toy figure | ```json [ 	{"bbox_2d": [581, 309, 628, 387], "label": "toy figure"} ] ```
+sc1_head_gray | banana | {"found": false}
+sc1_head_gray | hammer | ```json [ 	{"bbox_2d": [584, 310, 628, 390], "label": "hammer"} ] ```
+sc2_head_gray | scissors | ```json [ 	{"bbox_2d": [745, 366, 798, 541], "label": "scissors"} ] ```
+sc2_head_gray | baseball | ```json [ 	{"bbox_2d": [666, 351, 716, 414], "label": "baseball"} ] ```
+sc2_head_gray | jeans | ```json [ 	{"bbox_2d": [486, 424, 644, 616], "label": "jeans"} ] ```
+sc2_head_gray | toy figure | ```json [ 	{"bbox_2d": [580, 310, 628, 384], "label": "toy figure"} ] ```
+sc2_head_gray | banana | {"found": false}
+sc2_head_gray | hammer | ```json [ 	{"bbox_2d": [581, 310, 626, 382], "label": "hammer"} ] ```
+sc3_head_gray | scissors | ```json [ 	{"bbox_2d": [750, 366, 800, 541], "label": "scissors"} ] ```
+sc3_head_gray | baseball | ```json [ 	{"bbox_2d": [671, 358, 724, 422], "label": "baseball"} ] ```
+sc3_head_gray | jeans | ```json [ 	{"bbox_2d": [488, 424, 646, 619], "label": "jeans"} ] ```
+sc3_head_gray | toy figure | ```json [ 	{"bbox_2d": [584, 310, 634, 388], "label": "toy figure"} ] ```
+sc3_head_gray | banana | {"found": false}
+sc3_head_gray | hammer | ```json [ 	{"bbox_2d": [584, 312, 632, 388], "label": "hammer"} ] ```
+sc4_head_gray | scissors | ```json [ 	{"bbox_2d": [134, 218, 208, 320], "label": "scissors"} ] ```
+sc4_head_gray | baseball | ```json [ 	{"bbox_2d": [660, 356, 714, 420], "label": "baseball"} ] ```
+sc4_head_gray | jeans | ```json [ 	{"bbox_2d": [488, 430, 644, 618], "label": "jeans"} ] ```
+sc4_head_gray | toy figure | ```json [ 	{"bbox_2d": [580, 310, 630, 390], "label": "toy figure"} ] ```
+sc4_head_gray | banana | {"found": false}
+sc4_head_gray | hammer | ```json [ 	{"bbox_2d": [580, 311, 626, 388], "label": "hammer"} ] ```
+sc4_wristR_gray | scissors | {"found": false}
+sc4_wristR_gray | baseball | ```json {     "bbox_2d": [399, 424, 518, 586] } ```
+sc4_wristR_gray | jeans | ```json {     "image_id": "Picture 20241028 195140.008",     "bbox_2d": [202, 477, 290, 558] } ```
+sc4_wristR_gray | toy figure | ```json {     "bbox_2d": [171, 282, 298, 558] } ```
+sc4_wristR_gray | banana | {"found": false}
+sc4_wristR_gray | hammer | {"found": false}
+sc4_wristL_gray | scissors | ```json [ 	{"bbox_2d": [84, 320, 234, 462], "label": "scissors"} ] ```
+sc4_wristL_gray | baseball | {"found": false}
+sc4_wristL_gray | jeans | {"found": false}
+sc4_wristL_gray | toy figure | ```json {     "image_id": "Picture 1",     "bbox_2d": [         748,         441,         970,         628     ] } ```
+sc4_wristL_gray | banana | ```json {     "image_id": "Picture 1",     "bbox_2d": [         810,         444,         970,         604     ] } ```
+sc4_wristL_gray | hammer | ```json {     "image_id": "Picture 1",     "bbox_2d": [         748,         448,         970,         628     ] } ```
+sc4_head_overlay_color | scissors | ```json [ 	{"bbox_2d": [113, 168, 172, 210], "label": "scissors"} ] ```
+sc4_head_overlay_color | baseball | ```json [ 	{"bbox_2d": [839, 400, 950, 510], "label": "baseball"} ] ```
+sc4_head_overlay_color | jeans | ```json [ 	{"bbox_2d": [470, 436, 608, 620], "label": "jeans"} ] ```
+sc4_head_overlay_color | toy figure | ```json [ 	{"bbox_2d": [580, 312, 628, 404], "label": "toy figure"} ] ```
+sc4_head_overlay_color | banana | ```json [ 	{"bbox_2d": [170, 164, 208, 191], "label": "banana"} ] ```
+sc4_head_overlay_color | hammer | ```json [ 	{"bbox_2d": [709, 550, 766, 684], "label": "hammer"} ] ```

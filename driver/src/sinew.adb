@@ -373,18 +373,49 @@ package body Sinew is
    --  名字用前缀树补集挡掉语言自己的词(GBNF 没有负向断言)——
    --  不挡的话 `do grasper close until touched or and ...` 里「until touched or」会被整个吞成一个名字,
    --  每个 token 都合语法,而真解析器读成完全另一句。
+   --  这张表里有没有哪怕一个真的键(小写词)。"(一个都没有)"和空串都算没有。
+   function Has_Key (S : String) return Boolean is
+   begin
+      for Ch of S loop
+         if Ch in 'a' .. 'z' then
+            return True;
+         end if;
+      end loop;
+      return False;
+   end Has_Key;
+
    function EBNF (Rels_Usable, Roles_Usable, Outs_Usable : String) return String is
+      --  🔴 一条没有任何候选的规则(`who ::= ` 后面是空的)不是"窄的键盘",是【坏掉的语法】:
+      --  T1 2026-09-21 实测,脑点了 `with my moving eye`,身体照办换到一只绑不上任何"我"的眼 ⇒ 角色表为空
+      --  ⇒ vLLM 原话 "Invalid grammar specification … Expected name at line 8 'who ::= '" ⇒ 这一轮问不了脑,
+      --  下一轮还是这只眼、还是问不了 ⇒ 脑再也没机会把眼换回来(第 9 轮起每一轮都是"问不通")。
+      --  ⇒ 哪张表空了,就把用到它的产生式整条拿掉,语法永远是合法的:
+      --     角色空 ⇒ 这一轮只剩 say / done(说话、换眼都走 say)—— 脑仍然问得到、仍然能说 look = k;
+      --     关系空、角色不空 ⇒ 只是没有"<who> <relation> <what>"那一支,close / open / still 还在。
+      Has_Who : constant Boolean := Has_Key (Roles_Usable);
+      Has_Rel : constant Boolean := Has_Key (Rels_Usable);
+      --  🔴 say 后面那一句必须打得出数字和等号:提示词每一轮都印着 "say look = k",而以前这里只许字母、逗号、句号
+      --  ⇒ 受限解码下这个键【按不动】(人当脑时不走掩膜所以一直没暴露)。纸上有的键,键盘上必须有。
+      Sent_Rule : constant String := "sent ::= [a-zA-Z] ([a-zA-Z0-9 ,.=\'])*";
       function Body_Text (W_Rule : String) return String is
       begin
+         if not Has_Who then
+            return
+              "root ::= line (line)? (line)? (line)?" & ASCII.LF &
+              "line ::= word ""\n""" & ASCII.LF &
+              "word ::= ""say "" sent | ""done""" & ASCII.LF &
+              Sent_Rule;
+         end if;
          return
            "root ::= line (line)? (line)? (line)?" & ASCII.LF &
            "line ::= (interval | control | decl | word) ""\n""" & ASCII.LF &
            "simple ::= (interval | decl1 | word) ""\n""" & ASCII.LF &
            "interval ::= ""do "" cons ("" and "" cons)? "" until "" outc ("" or "" num "" steps"")? (eye)?" & ASCII.LF &
            "eye ::= "" with my still eye"" | "" with my moving eye""" & ASCII.LF &
-           "cons ::= who "" "" rel "" "" name (step)? | who "" close "" name | who "" open"" | who "" still""" & ASCII.LF &
+           "cons ::= " & (if Has_Rel then "who "" "" rel "" "" name (step)? | " else "")
+                       & "who "" close "" name | who "" open"" | who "" still""" & ASCII.LF &
            "who ::= " & Quoted_List (Roles_Usable) & ASCII.LF &
-           "rel ::= " & Quoted_List (Rels_Usable) & ASCII.LF &
+           (if Has_Rel then "rel ::= " & Quoted_List (Rels_Usable) & ASCII.LF else "") &
            "outcome ::= " & Quoted_List (All_Outcomes) & ASCII.LF &
            "outc ::= " & Quoted_List (Outs_Usable) & ASCII.LF &
            "step ::= "" small"" | "" medium"" | "" large""" & ASCII.LF &
@@ -395,11 +426,12 @@ package body Sinew is
            "decl ::= ""to "" name "":\n"" simple (simple)? ""end"" | decl1" & ASCII.LF &
            "decl1 ::= ""run "" name | ""remember where "" who "" is as "" name" & ASCII.LF &
            "word ::= ""say "" sent | ""done""" & ASCII.LF &
-           "sent ::= [a-zA-Z] ([a-zA-Z ,.\'])*";
+           Sent_Rule;
       end Body_Text;
       Draft : constant String := Body_Text ("[a-z] ([a-z])*");
    begin
-      return Body_Text (Complement (Literal_Words (Draft), True));
+      --  名字里也打不出 item:那是我清单上的记账词,不是任何东西的名字(T2 实测 Qwen 拿它当名字用)
+      return Body_Text (Complement (Literal_Words (Draft) & " item", True));
    end EBNF;
 
    function Grammar (Rels_Usable, Roles_Usable, Outs_Usable : String) return String is
@@ -421,19 +453,29 @@ package body Sinew is
          return To_String (R);
       end Bar;
    begin
+      --  和 EBNF 同一张纸:角色表空了,这一轮能按的键就只有 say / done,纸上也只印这两个,并照实说为什么。
+      if not Has_Key (Roles_Usable) then
+         return
+           "<program>   ::= <line> (up to four lines)" & ASCII.LF &
+           "<line>      ::= <word>" & ASCII.LF &
+           "<word>      ::= say <one sentence in your own words> | done" & ASCII.LF &
+           "(In the eye I am looking through right now I cannot find any part of me that I can command, " &
+           "so this turn there is nothing I could be told to move. Speaking still works, and so does changing eyes.)";
+      end if;
       return
         "<program>   ::= <line> (up to four lines)" & ASCII.LF &
         "<line>      ::= <interval> | <control> | <decl> | <word>" & ASCII.LF &
         "<interval>  ::= do <constraint> (and <constraint>)? until <outcome> [or <n> steps] [<eye>]" & ASCII.LF &
         "<eye>       ::= with my still eye | with my moving eye" & ASCII.LF &
-        "<constraint>::= <who> <relation> <what> [<step>]" & ASCII.LF &
-        "              | <who> close <what> | <who> open | <who> still" & ASCII.LF &
+        (if Has_Key (Rels_Usable)
+         then "<constraint>::= <who> <relation> <what> [<step>]" & ASCII.LF &
+              "              | <who> close <what> | <who> open | <who> still" & ASCII.LF
+         else "<constraint>::= <who> close <what> | <who> open | <who> still" & ASCII.LF) &
         "<who>       ::= " & Bar (Roles_Usable) & "   (roles; I bind them by measuring myself)" & ASCII.LF &
         "<what>      ::= <a name in your words> | <a name you told me to remember> | <who>" & ASCII.LF &
-        "              (a name is one to three plain words; it may NOT be any of the words in this grammar)" & ASCII.LF &
-        "<relation>  ::= " & Bar (Rels_Usable) & ASCII.LF &
+        "              (a name is one to three plain words; it may NOT be any of the words in this grammar, nor the word item - that is only my label for list entries, not a name of anything)" & ASCII.LF &
         --  每个键标上它是干什么的(含义来自驱动自己那张表,不是我写的说明书)
-        Rel_Gloss (Rels_Usable) &
+        (if Has_Key (Rels_Usable) then "<relation>  ::= " & Bar (Rels_Usable) & ASCII.LF & Rel_Gloss (Rels_Usable) else "") &
         "<step>      ::= small | medium | large" & ASCII.LF &
         "<outcome>   ::= " & Bar (Outs_Usable) & ASCII.LF &
         "<control>   ::= repeat <n> times: <line> [<line>] end" & ASCII.LF &

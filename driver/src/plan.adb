@@ -181,6 +181,45 @@ package body Plan is
       return (if Length (S) = 0 then "(一个都没有)" else To_String (S));
    end Usable_Rels;
 
+   --  🔴🔴 键盘和编译器必须是【同一个口径】,以前不是(SC4 2026-09-21 实测,离线体检打出原文):
+   --    编译器(Check)对"还没量过响应的那个我"是【放行】的 —— `Unknown := Ti < 0` 跳过逐行检查,
+   --    执行器(Run_Segment 的 Need 分支)当场推一遍量出来,量完补判;
+   --    键盘却拿 -1 去问 Usable_Rels ⇒ Row_Ok 的负号分支 = "扫一遍【量过的】每一块"。
+   --  身体文件里一张响应表都没有时(`装回来了 … 0 张响应表`)扫出来恒为空 ⇒ 递给解码器的关系词表
+   --  = (一个都没有) ⇒ 脑一条移动命令都写不出来;而响应表【只有执行移动命令时】才会去量
+   --  ⇒ 死锁:没表 ⇒ 没键 ⇒ 没命令 ⇒ 永远没表。谁当脑都一样,一步都走不了。
+   --  "没量过"不是"做不到"。⇒ 键盘 = 此刻绑得上的每一个"我",各按编译器那一套判,取并集:
+   --    量过的(Thing_Idx ≥ 0)⇒ Rel_Ok 逐行判,量死的行照样不给("零死键"那条不受影响);
+   --    没量过的(Thing_Idx < 0)⇒ 编译器会放行 ⇒ 键盘也给;只有靠"面"的那几个词仍按 Surface 拦
+   --    (和 Check 里 `not Surface ⇒ Reject` 是同一个条件)。
+   function Usable_Rels_Any (R : Exam.Report; Subjects : Facts_Vectors.Vector; Surface : Boolean) return String is
+      S : Unbounded_String;
+   begin
+      for Rl in Sinew.Rel loop
+         if Rl not in Sinew.Re_None | Sinew.Re_Still | Sinew.Re_Close | Sinew.Re_Open then
+            declare
+               Any : Boolean := False;
+            begin
+               for I in 0 .. Natural (Subjects.Length) - 1 loop
+                  if Subjects (I).Exists and then Subjects (I).Mine then
+                     if Subjects (I).Thing_Idx < 0 then
+                        Any := not (Rl in Sinew.Re_Onto | Sinew.Re_Off | Sinew.Re_Into | Sinew.Re_Press
+                                    and then not Surface);
+                     else
+                        Any := Rel_Ok (R, Subjects (I).Thing_Idx, Rl, Surface);
+                     end if;
+                  end if;
+                  exit when Any;
+               end loop;
+               if Any then
+                  Append (S, (if Length (S) > 0 then " " else "") & Sinew.Rel_Word (Rl));
+               end if;
+            end;
+         end if;
+      end loop;
+      return (if Length (S) = 0 then "(一个都没有)" else To_String (S));
+   end Usable_Rels_Any;
+
    function Why_Row (R : Exam.Report; Thing_Idx : Integer; Row : Exam.Row_Id) return String is
    begin
       if Thing_Idx < 0 or else Thing_Idx >= Integer (R.Things.Length) then
@@ -383,24 +422,13 @@ package body Plan is
       --  这一节里有没有"心里就走不通"的事。有 ⇒ 直接判死,不绕结局
       --  (until stuck 本来就是合手的正常写法,绕结局绕不出来)。
       function Impossible (Ins : Sinew.Instr) return String is
+         pragma Unreferenced (Ins);
       begin
-         for Ci in 0 .. Natural (Ins.Cons.Length) - 1 loop
-            declare
-               C : constant Constraint := Ins.Cons (Ci);
-               Sub : constant Integer := Look_Up (B, C.Subj);
-               Obj : constant Integer := Look_Up (B, C.Obj);
-            begin
-               if C.R = Re_Close and then Sub > 0 and then Sub < Integer (Facts.Length)
-                 and then Obj > 0 and then Obj < Integer (Facts.Length)
-                 and then Facts (Natural (Sub)).Span > 0.0
-                 and then Facts (Natural (Obj)).Size > Facts (Natural (Sub)).Span
-               then
-                  return "我张得开 " & Codec.Fmt (Facts (Natural (Sub)).Span, 3)
-                    & " 幅,而它有 " & Codec.Fmt (Facts (Natural (Obj)).Size, 3)
-                    & " 幅那么宽 —— 合下去也是空的";
-               end if;
-            end;
-         end loop;
+         --  🔴 这里原来有一条"整块比爪口宽 ⇒ 这一节判死"。删了。
+         --  T5 2026-09-21 实测:Qwen 写 `close mint green scissors`,被它挡在动手之前 —— 它比的是整块的【外廓】
+         --  (剪刀 = 它的全长,那一集还连着旁边的风扇),而爪子夹的是它【窄】的那一向:剪刀永远比爪口长,
+         --  于是"合上剪刀"这句话在这具身体上永远编译不过。闸门棘轮的注释 09-18 就点过它的名(把抓剪刀整段挡在动手之前)。
+         --  总规矩(LAB 09-13):身体只准因为【量过期 / 依赖失效 / 量不出来】拒绝;成没成由合完提一提来判,不由我事先断言。
          return "";
       end Impossible;
 

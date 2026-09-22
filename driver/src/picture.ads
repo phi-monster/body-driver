@@ -43,6 +43,12 @@ package Picture is
    function Fraction (Mask : Bools) return Long_Float;
    function Max_Diff (A, B : Buf) return Natural;
    function Mean_Gray (G : Buf; W, H : Natural; R : Region) return Long_Float;   --  这一块框里的平均灰度(0..255)
+   --  脑说"它在这一框里"(BX0..BY1,像素,闭区间);框里【哪些像素】是它,由我自己量。不要深度,不要全图切块。
+   --  Found = False:框里没有哪一片和周围分得开(如实说,不硬凑)。
+   --  Isolated = False:量到的那一块顶到了让出来的那一圈 ⇒ 它在这一框里没被单独框出来(挨着别的东西,或被画面切掉)
+   --  ⇒ 这只眼里它的形心和长轴不可信。这一位只是如实报,不拦任何动作。
+   procedure Measure_In_Box (G : Buf; W, H : Natural; BX0, BY0, BX1, BY1 : Natural;
+                             Found, Isolated : out Boolean; R : out Region);
    function Quantile (F : in out Floats; Q : Long_Float) return Long_Float;
    function Region_Depth (Depth : Floats; W, H : Natural; Mask : Bools; Q : Long_Float) return Long_Float;  --  掩膜上的深度分位;NaN = 无
    function Inside (R : Region; U, V : Long_Float; W, H : Natural; Grow : Long_Float) return Boolean;

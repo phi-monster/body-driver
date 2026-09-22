@@ -62,5 +62,8 @@ package Plan is
    function Waitable_Outcomes (Surface : Boolean) return String;
 
    function Usable_Rels (R : Exam.Report; Thing_Idx : Integer; Surface : Boolean) return String;
+   --  键盘用:此刻脑【绑得上】的每一个"我"(Subjects:执行层挑好的那几条 Facts)各按编译器那一套判一遍,取并集。
+   --  量过的按体检逐行判;还没量过的 —— 编译器本来就放行(执行器当场量)⇒ 键盘也得给。说明见 plan.adb。
+   function Usable_Rels_Any (R : Exam.Report; Subjects : Facts_Vectors.Vector; Surface : Boolean) return String;
    function Say (V : Verdict) return String;
 end Plan;

@@ -108,67 +108,100 @@ package body Brain is
       return To_String (R);
    end Extract_Content;
 
-   function Find (Host : String; Port : Natural; Word, Body_Text : String; N_Items : Natural;
-                  RGB : Buf; W, H : Natural; Which : out Natural; Err : out Unbounded_String) return Boolean is
+   function Locate (Host : String; Port : Natural; Word : String; RGB : Buf; W, H : Natural;
+                    Found : out Boolean; X0, Y0, X1, Y1 : out Natural; Err : out Unbounded_String) return Boolean is
       NL : constant String := "" & ASCII.LF;
       Prompt : constant String :=
-        "Everything I can see right now is already cut out and NUMBERED for you, boxed on the picture:" & NL &
-        Body_Text & NL & NL &
-        "Which one of those numbers is what someone would call: " & Word & NL &
-        "Answer with that number. Answer 0 if none of them is that thing, or if two of them look equally like it - " &
-        "0 is a normal answer and I will say so plainly rather than guess." & NL &
-        "Do not give me coordinates. Only one of the numbers that are already on the picture.";
+        "Locate what someone would call: " & Word & NL &
+        "If you can see it in this picture, answer with the box around it. If you cannot see it here, say so - " &
+        "that is a normal answer and I will look with another eye rather than guess.";
+      --  键名 bbox_2d 是这个模型自己给框时用的那个名字;四个数 = 左、上、右、下,千分比
       Schema : constant String :=
-        "{""type"":""json_schema"",""json_schema"":{""name"":""which_one"",""strict"":true,""schema"":{""type"":""object"",""additionalProperties"":false," &
-        """required"":[""which""],""properties"":{""which"":{""type"":""integer"",""minimum"":0,""maximum"":" & Codec.Img (Natural'Max (1, N_Items)) & "}}}}}";
-      B64 : constant String := Codec.Base64 (Codec.BMP24 (RGB, W, H));
-      Body_Json : constant String :=
-        "{""model"":""eye"",""max_tokens"":80,""temperature"":0,""chat_template_kwargs"":{""enable_thinking"":false},""response_format"":" & Schema &
-        ",""messages"":[{""role"":""user"",""content"":[{""type"":""image_url"",""image_url"":{""url"":""data:image/bmp;base64," & B64 &
-        """}},{""type"":""text"",""text"":""" & Json.Escape (Prompt) & """}]}]}";
+        "{""type"":""json_schema"",""json_schema"":{""name"":""where_is_it"",""strict"":true,""schema"":{""type"":""object"",""additionalProperties"":false," &
+        """required"":[""found"",""bbox_2d""],""properties"":{""found"":{""type"":""boolean""},""bbox_2d"":{""type"":""array"",""minItems"":4,""maxItems"":4," &
+        """items"":{""type"":""integer"",""minimum"":0,""maximum"":1000}}}}}}";
       Reply : Unbounded_String;
+
+      --  千分比(画幅的比例,无量纲)→ 像素(闭区间),并保证左<右、上<下
+      procedure To_Pixels (A, B, C2, D2 : Long_Float) is
+         function Px (V : Long_Float; Span : Natural) return Natural is
+           (Natural'Min (Span - 1, Natural (Long_Float'Floor (Long_Float'Max (0.0, Long_Float'Min (1000.0, V)) / 1000.0 * Long_Float (Span)))));
+      begin
+         X0 := Px (Long_Float'Min (A, C2), W); X1 := Px (Long_Float'Max (A, C2), W);
+         Y0 := Px (Long_Float'Min (B, D2), H); Y1 := Px (Long_Float'Max (B, D2), H);
+      end To_Pixels;
    begin
-      Which := 0;
+      Found := False;
+      X0 := 0; Y0 := 0; X1 := 0; Y1 := 0;
       Err := Null_Unbounded_String;
-      if Brain_Dir /= "" then
-         declare
-            A : Unbounded_String;
-            N : Integer := 0;
-         begin
-            if not Ask_Human (Brain_Dir, "which", Prompt, RGB, W, H, A) then
-               Err := To_Unbounded_String ("人没回哪一块");
-               return False;
-            end if;
-            begin
-               N := Integer'Value (Ada.Strings.Fixed.Trim (To_String (A), Ada.Strings.Both));
-            exception
-               when others => N := 0;
-            end;
-            Which := Natural (Integer'Max (0, N));
-            return True;
-         end;
-      end if;
-      if Natural (RGB.Length) < W * H * 3 then
+      if W = 0 or else H = 0 or else Natural (RGB.Length) < W * H * 3 then
          Err := To_Unbounded_String ("画面短了");
          return False;
       end if;
-      if not Http_Client.Post (Host, Port, "/v1/chat/completions", Body_Json, Reply) then
-         Err := To_Unbounded_String ("连不上脑 " & Host & ":" & Codec.Img (Port));
-         return False;
+      if Brain_Dir /= "" then
+         declare
+            A : Unbounded_String;
+            D : Json.Doc;
+            Perr : Unbounded_String;
+         begin
+            if not Ask_Human (Brain_Dir, "where", Prompt & NL & NL &
+                              "Answer with JSON: {""found"": true, ""bbox_2d"": [left, top, right, bottom]} in thousandths of the picture (0..1000), " &
+                              "or {""found"": false, ""bbox_2d"": [0,0,0,0]}.", RGB, W, H, A)
+            then
+               Err := To_Unbounded_String ("人没回它在哪");
+               return False;
+            end if;
+            if not Json.Parse (To_String (A), D, Perr) then
+               Err := To_Unbounded_String ("回的不是 JSON");
+               return False;
+            end if;
+            declare
+               Fn : constant Integer := Json.Get (D, 0, "found");
+               Bn : constant Integer := Json.Get (D, 0, "bbox_2d");
+            begin
+               if Fn >= 0 and then Json.Bool (D, Fn) and then Bn >= 0 and then Json.Count (D, Bn) = 4 then
+                  To_Pixels (Json.Num (D, Json.Child (D, Bn, 0)), Json.Num (D, Json.Child (D, Bn, 1)),
+                             Json.Num (D, Json.Child (D, Bn, 2)), Json.Num (D, Json.Child (D, Bn, 3)));
+                  Found := X1 > X0 and then Y1 > Y0;
+               end if;
+               return True;
+            end;
+         end;
       end if;
+      declare
+         B64 : constant String := Codec.Base64 (Codec.BMP24 (RGB, W, H));
+         Body_Json : constant String :=
+           "{""model"":""eye"",""max_tokens"":80,""temperature"":0,""chat_template_kwargs"":{""enable_thinking"":false},""response_format"":" & Schema &
+           ",""messages"":[{""role"":""user"",""content"":[{""type"":""image_url"",""image_url"":{""url"":""data:image/bmp;base64," & B64 &
+           """}},{""type"":""text"",""text"":""" & Json.Escape (Prompt) & """}]}]}";
+      begin
+         if not Http_Client.Post (Host, Port, "/v1/chat/completions", Body_Json, Reply) then
+            Err := To_Unbounded_String ("连不上脑 " & Host & ":" & Codec.Img (Port));
+            return False;
+         end if;
+      end;
       declare
          Inner : constant String := Extract_Content (To_String (Reply));
          D : Json.Doc;
          Perr : Unbounded_String;
       begin
          if Inner = "" or else not Json.Parse (Inner, D, Perr) then
-            Err := To_Unbounded_String ("认名字的回包读不出来");
+            Err := To_Unbounded_String ("问它在哪的回包读不出来");
             return False;
          end if;
-         Which := Natural (Long_Float'Max (0.0, Json.Num (D, Json.Get (D, 0, "which"))));
+         declare
+            Fn : constant Integer := Json.Get (D, 0, "found");
+            Bn : constant Integer := Json.Get (D, 0, "bbox_2d");
+         begin
+            if Fn >= 0 and then Json.Bool (D, Fn) and then Bn >= 0 and then Json.Count (D, Bn) = 4 then
+               To_Pixels (Json.Num (D, Json.Child (D, Bn, 0)), Json.Num (D, Json.Child (D, Bn, 1)),
+                          Json.Num (D, Json.Child (D, Bn, 2)), Json.Num (D, Json.Child (D, Bn, 3)));
+               Found := X1 > X0 and then Y1 > Y0;
+            end if;
+         end;
          return True;
       end;
-   end Find;
+   end Locate;
 
    function Ask (Host : String; Port : Natural; Task_Text, Body_Text, Recent, Grammar, Refused : String;
                  Rels_Usable, Roles_Usable, Outs_Usable : String;
@@ -193,9 +226,10 @@ package body Brain is
         "A program can hold several things at once and run several lines in order, so you do not have to be called back after every single push." & NL &
         "hold means that line must not be given up while the rest runs. reach means go that way. never means do not enter that. " &
         "until says when to call me back. Lines run in the order you write them." & NL & NL &
-        "Do NOT give distances, angles, speeds or any numbers other than item numbers, camera numbers and step counts - I measure those myself. " &
+        "Do NOT give distances, angles or speeds - I measure those myself. The only numbers I understand are camera numbers and step counts. " &
+        "Things out in the world have no numbers: you point at a thing by calling it what it is, in your own plain words, and I then ask you where in the picture it is. " &
         "If there is a strip of smaller pictures under the numbered one, those are my OTHER eyes right now, each boxed with its camera number in white. " &
-        "Every eye is numbered: an item number means the same thing wherever I say it, and a thing only one eye can see still has a number you can point at. " &
+        "The bracketed numbers on the pictures are only my own labels for the list above, so that you can tell which box is which. " &
         "The grid of cells belongs to the BIG picture on top only.";
       --  🔴 原来这里是 json_schema + "program": string —— 自由字符串,脑想写什么写什么。
       --  实测 GC9:587 段里 0 段合语法。换成【受限解码】:把驱动当场生成的文法交给解码器,

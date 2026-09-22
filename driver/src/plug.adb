@@ -357,6 +357,17 @@ package body Plug is
                         end if;
                      end;
                   end if;
+                  --  内参:开机按形状认出来、配到这台相机的那个 3×3(见 Layout.Is_Intrinsic);没有就留给身体自己量
+                  if Ci < Natural (L.Lay.Intr.Length) and then not L.Lay.Intr (Ci).Segs.Is_Empty then
+                     declare
+                        Kn : constant Integer := Layout.Find (L.Last, L.Last_Obs, L.Lay.Intr (Ci));
+                        Kf, Kcx, Kcy : Long_Float;
+                     begin
+                        if Kn >= 0 and then Layout.Is_Intrinsic (L.Last, Kn, Kf, Kcx, Kcy) then
+                           C.Focal := Kf; C.Cx := Kcx; C.Cy := Kcy; C.Has_K := True;
+                        end if;
+                     end;
+                  end if;
                   F.Cams.Append (C);
                end if;
             end if;

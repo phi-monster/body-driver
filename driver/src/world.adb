@@ -64,6 +64,29 @@ package body World is
       end;
    end Observe;
 
+   procedure Shift_Slot (S : in out State; Cam, I : Natural; Cu, Cv, Grow : Long_Float) is
+   begin
+      if Cam < Natural (S.Cams.Length) and then I < Natural (S.Cams (Cam).Slots.Length) and then Grow > 0.0 then
+         declare
+            Cs : Cam_State := S.Cams (Cam);
+            Sl : Slot := Cs.Slots (I);
+            procedure Move (R : in out Picture.Region) is
+               Wd : constant Long_Float := Long_Float (R.X1 - R.X0) * Grow;   --  新的宽、高(像素)
+               Ht : constant Long_Float := Long_Float (R.Y1 - R.Y0) * Grow;
+            begin
+               R.Cu := Cu; R.Cv := Cv;
+               --  外框在这里只用来定"就近"的容差(半个框宽),所以只要大小对;像素坐标下一帧重量时会被覆盖
+               R.X1 := R.X0 + Natural (Long_Float'Max (1.0, Wd));
+               R.Y1 := R.Y0 + Natural (Long_Float'Max (1.0, Ht));
+            end Move;
+         begin
+            Move (Sl.R); Move (Sl.Shadow);
+            Cs.Slots.Replace_Element (I, Sl);
+            S.Cams.Replace_Element (Cam, Cs);
+         end;
+      end if;
+   end Shift_Slot;
+
    function Count (S : State; Cam : Natural) return Natural is
      (if Cam < Natural (S.Cams.Length) then Natural (S.Cams (Cam).Slots.Length) else 0);
 

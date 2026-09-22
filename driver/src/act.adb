@@ -860,6 +860,106 @@ package body Act is
       return Kept;
    end Cut_Things_Raw;
 
+   --  🔴 脑点过名的东西,每一帧在【上一帧量到它的地方】原样再量一遍,量到的那一整块顶替掉全图切块在它身上切出的碎片。
+   --  为什么:没有深度时全图按明暗切,一把剪刀被切成四五个指甲盖大的碎框(09-21 头顶眼实测),腕眼一帧 191–450 件;
+   --  跨帧"认号"是在这些碎片里找最近的一块,于是身份漂(HB1)、视差拿到两块不同的碎片(GC42)。
+   --  在它自己的框里量,出来的是一整块、形心三个独立回合差 0.1 px。全图切块照旧留着(碰没碰到别的东西还靠它)。
+   procedure Remeasure_Boxed (C : in out Context; F : Plug.Frame; Cam : Natural; Regs : in out Picture.Regions) is
+      Cw : constant Natural := F.Cams (Cam).W;
+      Ch : constant Natural := F.Cams (Cam).H;
+   begin
+      for Bi in 0 .. Natural (C.Boxed.Length) - 1 loop
+         if C.Boxed (Bi).Cam = Cam then
+            declare
+               B : Boxed_Thing := C.Boxed (Bi);
+               Found, Iso : Boolean;
+               R : Picture.Region;
+            begin
+               Picture.Measure_In_Box (F.Cams (Cam).Gray, Cw, Ch, B.X0, B.Y0, B.X1, B.Y1, Found, Iso, R);
+               --  我一动,长在我手上的眼里它会平移一截(GB5:横挪 25.6 mm,它从 u=288 跳到 260)。
+               --  量到的那一块顶到了窗边 = 它有一部分在窗外 ⇒ 把窗挪到【量到的这一块】身上再量,直到整块落进窗里或不再变。
+               --  还是同一个量法,只是跟着它走;最多跟 4 回(次数)。
+               for Again in 1 .. 4 loop
+                  exit when not Found or else Iso;
+                  declare
+                     F2, I2 : Boolean;
+                     R2 : Picture.Region;
+                  begin
+                     Picture.Measure_In_Box (F.Cams (Cam).Gray, Cw, Ch, R.X0, R.Y0, R.X1, R.Y1, F2, I2, R2);
+                     exit when not F2 or else (R2.X0 = R.X0 and then R2.Y0 = R.Y0 and then R2.X1 = R.X1 and then R2.Y1 = R.Y1);
+                     R := R2; Iso := I2;
+                  end;
+               end loop;
+               B.Seen := Found;
+               if Found then
+                  B.X0 := R.X0; B.Y0 := R.Y0; B.X1 := R.X1; B.Y1 := R.Y1;
+                  B.Cu := R.Cu; B.Cv := R.Cv; B.Isolated := Iso;
+                  --  它身上的碎片:形心落在它框里的那些块,由这一整块顶替
+                  for Ri in reverse 0 .. Natural (Regs.Length) - 1 loop
+                     if Picture.Inside (R, Regs (Ri).Cu, Regs (Ri).Cv, Cw, Ch, 0.0) then
+                        Regs.Delete (Ri);
+                     end if;
+                  end loop;
+                  --  调用方都拿 (0) 当最大的一块 ⇒ 按像素数插回去,不许打乱从多到少的次序
+                  declare
+                     At_I : Natural := Natural (Regs.Length);
+                  begin
+                     for Ri in 0 .. Natural (Regs.Length) - 1 loop
+                        if Regs (Ri).Count < R.Count then
+                           At_I := Ri;
+                           exit;
+                        end if;
+                     end loop;
+                     if At_I >= Natural (Regs.Length) then
+                        Regs.Append (R);
+                     else
+                        Regs.Insert (At_I, R);
+                     end if;
+                  end;
+               end if;
+               C.Boxed.Replace_Element (Bi, B);
+            end;
+         end if;
+      end loop;
+   end Remeasure_Boxed;
+
+   --  这一块是不是脑点过名的那几件之一(拿形心对;我量出来的那一块原样进了槽,所以对得上)。-1 = 不是
+   function Boxed_Index (C : Context; Cam : Natural; Cu, Cv : Long_Float) return Integer is
+   begin
+      for Bi in 0 .. Natural (C.Boxed.Length) - 1 loop
+         if C.Boxed (Bi).Cam = Cam
+           and then abs (C.Boxed (Bi).Cu - Cu) < 1.0e-9 and then abs (C.Boxed (Bi).Cv - Cv) < 1.0e-9
+         then
+            return Integer (Bi);
+         end if;
+      end loop;
+      return -1;
+   end Boxed_Index;
+
+   --  一件东西【叫什么】:脑点过名的用脑起的名字,我身上的用它是哪一块。编号不进语言(LANGUAGE §3.1),
+   --  也就不该进我说给脑听的话和经历账 —— T2 2026-09-21 实测:清单每行以 "item N:" 开头、经历账全是
+   --  "item 6 above item 10",Qwen 于是把 item 当成了东西的名字(`do grasper touching item item`),
+   --  身体去问"item 在哪",脑随手框了一个乐高小人。
+   function Say_Item (C : Context; N : Natural) return String is
+   begin
+      if N < 1 or else N > Natural (C.Items.Length) then
+         return "something I could not point at";
+      end if;
+      declare
+         It : constant Item := C.Items (N - 1);
+         Bx : constant Integer := (if It.Kind in Thing | Thing_Remembered then Boxed_Index (C, It.Cam, It.Cu, It.Cv) else -1);
+      begin
+         case It.Kind is
+            when Grip => return "grip " & Codec.Img (It.Arm + 1);
+            when Finger => return "a finger of arm " & Codec.Img (It.Arm + 1);
+            when Piece => return "a part of arm " & Codec.Img (It.Arm + 1);
+            when Thing_Held => return "the thing in my hand";
+            when Thing | Thing_Remembered =>
+               return (if Bx >= 0 then To_String (C.Boxed (Natural (Bx)).Name) else "a thing nobody has named");
+         end case;
+      end;
+   end Say_Item;
+
    --  同一帧、同一台相机只切一次(颜色切块要扫全图两遍,一步里被问好几次)
    function Cut_Things (C : Context; F : Plug.Frame; Cam : Natural) return Picture.Regions is
       Self : constant access Context := C'Unrestricted_Access;
@@ -868,6 +968,7 @@ package body Act is
          return C.Cut_Regs;
       end if;
       Self.Cut_Regs := Cut_Things_Raw (C, F, Cam);
+      Remeasure_Boxed (Self.all, F, Cam, Self.Cut_Regs);
       Self.Cut_Seq := F.Seq;
       Self.Cut_Cam := Integer (Cam);
       return Self.Cut_Regs;
@@ -929,7 +1030,8 @@ package body Act is
          if It.Located then
             Draw.Numbered_Box (RGB, Cw, Ch, It.X0, It.Y0, It.X1, It.Y1, Natural (C.Items.Length), Col, Thick);
          end if;
-         Append (T, "  item " & Codec.Img (Natural (C.Items.Length)) & ": " & Line & ASCII.LF);
+         --  行首只放方括号里的号(对得上画面上那个框就够了),不再写 "item":T2 实测 Qwen 把这个记账词当成了东西的名字
+         Append (T, "  [" & Codec.Img (Natural (C.Items.Length)) & "] " & Line & ASCII.LF);
       end Push;
    begin
       if not Keep then
@@ -1006,6 +1108,28 @@ package body Act is
                   end;
                end if;
             end loop;
+         end loop;
+         --  🔴 我【怎么量远近】每只眼不一样,而且这是量过的,以前却从不告诉脑:
+         --  长在手上的眼 —— 我横挪一段自己报得出的距离,看它在画面里跳多少,两条视线一交就是它离我多远 ⇒ 几大步走到
+         --  (GB5 实测 4 步从差 284 mm 到差 8 mm);不跟着我动的眼 —— 它不动,我看不出远近 ⇒ 只能推一点看一点
+         --  (T3 2026-09-21 实测 60 推差距 0.434 → 0.433)。T5/T6 里 Qwen 每一段都写 with my still eye,它不知道这件事。
+         --  量了不说 = 把量到的东西藏起来。这是读数,不是窍门:没有例句,没有流程。
+         for Cm in 0 .. C.Map.N_Cams - 1 loop
+            declare
+               A : constant Integer := Cam_Arm (C, Cm);
+               Ready : constant Boolean := A >= 0 and then Cm < Natural (C.Geo.Length)
+                                           and then C.Geo (Cm).Tip_Valid and then C.Geo (Cm).F > 0.0;
+            begin
+               if Ready then
+                  Append (T, "  HOW FAR AWAY A THING IS - through the eye that rides on arm " & Codec.Img (Natural (A) + 1)
+                          & " (camera index " & Codec.Img (Cm) & ") I CAN measure it: I step sideways a distance I know and watch how far the thing jumps. "
+                          & "Through that eye, touching is carried out by walking arm " & Codec.Img (Natural (A) + 1)
+                          & " up to the thing in a few large steps." & ASCII.LF);
+               elsif A < 0 then
+                  Append (T, "  HOW FAR AWAY A THING IS - through the eye that does not move with me (camera index " & Codec.Img (Cm)
+                          & ") I CANNOT measure it. Through that eye I can only nudge and look again, about one pixel of progress per push." & ASCII.LF);
+               end if;
+            end;
          end loop;
          Append (T, To_String (C.Changed_Say));
          --  🔴 经历账读回来:它才说得出"上次我在这上面是怎么成的"。
@@ -1114,51 +1238,34 @@ package body Act is
       end if;
       Append (T, (if Things_Only
                   then "THINGS IN MY EYE " & Codec.Img (Cam + 1) & " (same numbering - a number means the same thing everywhere I say it):"
-                  else "THINGS OUT IN THE WORLD (cut out of the depth picture; you do not know what they are called). Each is boxed and NUMBERED on the picture in green:") & ASCII.LF);
-      --  装不下时只列【最大的那几件】:小到几个像素的块脑也没法拿它做什么,
-      --  而把脑撑爆等于它什么都看不见。漏掉几件如实说出来,不装作没有。
+                  else "THINGS YOU HAVE NAMED (you told me which part of the picture each one is in; inside that part I measured it myself, and I measure it again every frame). Each is boxed and NUMBERED on the picture in green:") & ASCII.LF);
+      --  没点过名的块不列(见下),所以这里不再需要"装不下就只列最大的几件"那一套;
+      --  但它们【有多少】要如实说 —— 脑得知道这只眼里还有别的东西,只是它还没给它们起名字。
       declare
-         Kept_Min : Natural := 0;
-         Dropped : Natural := 0;
+         N_Unnamed : Natural := 0;
       begin
-         if C.List_Cap > 0 then
-            declare
-               Sizes : array (0 .. Natural'Max (1, World.Count (C.Wld, Cam)) - 1) of Natural := [others => 0];
-               N : constant Natural := World.Count (C.Wld, Cam);
-            begin
-               for Si in 0 .. N - 1 loop
-                  Sizes (Si) := World.Get (C.Wld, Cam, Si).R.Count;
-               end loop;
-               --  第 List_Cap 大的那个尺寸就是门槛(选择排序够用,件数是几百级)
-               for I in 0 .. Natural'Min (C.List_Cap, N) - 1 loop
-                  declare
-                     Bi : Natural := I;
-                  begin
-                     for J in I + 1 .. N - 1 loop
-                        if Sizes (J) > Sizes (Bi) then
-                           Bi := J;
-                        end if;
-                     end loop;
-                     declare
-                        Tmp : constant Natural := Sizes (I);
-                     begin
-                        Sizes (I) := Sizes (Bi); Sizes (Bi) := Tmp;
-                     end;
-                     Kept_Min := Sizes (I);
-                  end;
-               end loop;
-               Dropped := (if N > C.List_Cap then N - C.List_Cap else 0);
-            end;
-         end if;
       for Si in 0 .. World.Count (C.Wld, Cam) - 1 loop
          declare
             Sl : constant World.Slot := World.Get (C.Wld, Cam, Si);
             It : Item;
          begin
             It.Slot := Si;
-            if C.List_Cap > 0 and then Sl.R.Count < Kept_Min then
-               goto Next_Slot;   --  这一件太小,这一轮装不下,下面那句会如实说漏了几件
-            end if;
+            --  🔴 世界里只列【脑点过名】的东西(和此刻攥在手里的)。没点过名的块不列、不画框:
+            --  编号早就不进语言了(LANGUAGE §3.1),认名字那一问也不再问"第几号"(Brain.Locate 问"在哪一框"),
+            --  所以几百行 "a thing, now in cell N" 对脑没有任何用处;09-21 实测画上去的编号框还在伤它的视力
+            --  (同一帧:干净画面在场 16/16,画上格子和编号框后 2/4)。全图切块照旧在跑,碰没碰到别的东西还靠它。
+            declare
+               Ref : constant Picture.Region := (if Sl.Present then Sl.R else Sl.Shadow);
+               Held_Here : constant Boolean :=
+                 C.Wld.Holding and then C.Wld.Held_Slot = Si and then C.Wld.Held_Cam = Integer (Cam);
+            begin
+               if not Held_Here and then Boxed_Index (C, Cam, Ref.Cu, Ref.Cv) < 0 then
+                  if Sl.Present then
+                     N_Unnamed := N_Unnamed + 1;
+                  end if;
+                  goto Next_Slot;
+               end if;
+            end;
             if C.Wld.Holding and then C.Wld.Held_Slot = Si and then C.Wld.Held_Cam = Integer (Cam) then
                declare
                   A : constant Natural := Natural (C.Wld.Held_Arm);
@@ -1185,14 +1292,16 @@ package body Act is
                --  脑只好退回 close/open/still 这三个不用点名的词。**量了不说 = 把眼睛量到的东西藏起来。**
                --  ⇒ 量到什么就说什么:长宽比、平均亮度、以及这只眼这一帧自己算出来的明暗分界(基准)。
                --  这不是给窍门 —— 没有例句、没有"哪一块是球",只是把尺子上的读数念出来。
-               Push (It, "a thing, now in cell " & Codec.Img (Cell_Of (C, It.Cu, It.Cv)) & " (" & Codec.Img (It.Count) & " px, "
-                     & Codec.Fmt (It.Elong, 1) & "x as long as it is wide"
-                     & (if It.Gray >= 0.0 and then Last_Split >= 0.0 and then Last_Bright_Cam = Integer (Cam)
-                        then ", brightness " & Codec.Img (Natural (Long_Float'Floor (It.Gray)))
-                             & " where this eye's own dividing line this frame is " & Codec.Img (Natural (Long_Float'Floor (Last_Split)))
-                        elsif It.Gray >= 0.0 then ", brightness " & Codec.Img (Natural (Long_Float'Floor (It.Gray)))
-                        else "")
-                     & ", standing " & Codec.Fmt (It.Height, 3) & " out of the surface)" & Rel (It.Cu, It.Cv), Draw.Green, 2);
+               declare
+                  Bx : constant Integer := Boxed_Index (C, Cam, Sl.R.Cu, Sl.R.Cv);
+                  Nm : constant String := (if Bx >= 0 then To_String (C.Boxed (Natural (Bx)).Name) else "");
+                  Alone : constant Boolean := Bx >= 0 and then C.Boxed (Natural (Bx)).Isolated;
+               begin
+                  Push (It, "what you called " & Nm & ", now in cell " & Codec.Img (Cell_Of (C, It.Cu, It.Cv)) & " (" & Codec.Img (It.Count) & " px, "
+                        & Codec.Fmt (It.Elong, 1) & "x as long as it is wide"
+                        & (if Alone then "" else "; in this eye it runs into something next to it or into the edge of the picture, so its middle and its long direction are not trustworthy here")
+                        & ")" & Rel (It.Cu, It.Cv), Draw.Green, 2);
+               end;
             elsif Sl.Seen then
                It.Kind := Thing_Remembered; It.Located := True;
                It.Cu := Sl.Shadow.Cu; It.Cv := Sl.Shadow.Cv; It.Depth := Sl.Shadow.Depth; It.Height := Sl.Shadow.Height; It.Count := Sl.Shadow.Count;
@@ -1204,7 +1313,8 @@ package body Act is
                --    重叠 = 伸手过去时那件东西消失的那一刻,留着有用;不重叠 = 它就是不见了,
                --    我说不出它在哪,也就不许拿它占脑的篇幅。
                if Under_Me (It.X0, It.Y0, It.X1, It.Y1) then
-                  Push (It, "a thing you saw before, now hidden behind a part of me, last seen in cell "
+                  Push (It, "what you called " & To_String (C.Boxed (Natural (Boxed_Index (C, Cam, It.Cu, It.Cv))).Name)
+                        & ", now hidden behind a part of me, last seen in cell "
                         & Codec.Img (Cell_Of (C, It.Cu, It.Cv)) & " (" & Codec.Img (It.Count) & " px)", Draw.Dim_Green, 1);
                end if;
             else
@@ -1214,9 +1324,9 @@ package body Act is
             null;
          end;
       end loop;
-         if Dropped > 0 then
-            Append (T, "  (I can also see " & Codec.Img (Dropped)
-                    & " smaller things here that I did not list: they would not fit in what you can read.)" & ASCII.LF);
+         if N_Unnamed > 0 then
+            Append (T, "  (In this eye I can also make out " & Codec.Img (N_Unnamed)
+                    & " other patches that you have not named. I do not list them: a name is how you point at a thing.)" & ASCII.LF);
          end if;
       end;
       --  相机表
@@ -1250,7 +1360,7 @@ package body Act is
               and then C.Items (I).Cam = Cam
               and then C.Items (I).Slot = C.Wld.Cams (Cam).Named
             then
-               Append (T, "- the thing you last named is item " & Codec.Img (I + 1) & ", now in cell " & Codec.Img (Cell_Of (C, Named_U, Named_V)) & ASCII.LF);
+               Append (T, "- the thing you last named is " & Say_Item (C, I + 1) & ", now in cell " & Codec.Img (Cell_Of (C, Named_U, Named_V)) & ASCII.LF);
             end if;
          end loop;
       end if;
@@ -4221,7 +4331,7 @@ package body Act is
                      --  每一步发出的命令幅度都是 0,身体空转烧步数(GK 实测:差距 0.241 一动不动)。
                      --  按规矩:说出来,照用。
                      Append (Dropped, (if Length (Dropped) > 0 then "; " else "")
-                             & "I used " & Nm & " for item " & Codec.Img (P.Item_No)
+                             & "I used " & Nm & " for " & Say_Item (C, P.Item_No)
                              & " even though " & Table.Row_Why (Effs (I), Notch, R));
                   end if;
                end Want;
@@ -4245,14 +4355,14 @@ package body Act is
                --  那正是"看着对齐、实际差 20 厘米"那一类(GE 实测)。这是无能,如实说。
                if (P.Wz > 0.0 or else P.Wsize > 0.0) and then Q.Wz <= 0.0 and then Q.Wsize <= 0.0 then
                   Append (Bad, (if Length (Bad) > 0 then "; " else "")
-                          & "item " & Codec.Img (P.Item_No)
+                          & Say_Item (C, P.Item_No)
                           & ": in this eye I have nothing left that tells me how far away it is "
                           & "(its distance reads as nothing here, and how big it looks is not steady), "
                           & "so lining up the picture would prove nothing");
                end if;
                if Live = 0 then
                   Append (Bad, (if Length (Bad) > 0 then "; " else "")
-                          & "item " & Codec.Img (P.Item_No) & ": not one of the things this needs is proven");
+                          & Say_Item (C, P.Item_No) & ": not one of the things this needs is proven");
                end if;
                Pts.Replace_Element (I, Q);
             end;
@@ -5125,6 +5235,10 @@ package body Act is
    end Geo_Track;
 
    --  只平移(世界系),不转
+   --  🔴 这里的量全是【米】。09-20 搬回来时为了不碰棘轮把"×1000"删了,标签却还写着 mm ⇒ 横挪 25.6 毫米显示成 "0.0 mm",
+   --  "它在相机前 -0.8 mm"其实是负 0.8 米(算到相机背后去了)—— T10 2026-09-21 差点被这个标签骗过去。量的是米,就按米说,三位小数到毫米。
+   function Mm (X : Long_Float) return String is (Codec.Fmt (X, 3) & " m");
+
    procedure Geo_Move (L : in out Plug.Link; C : Context; F : in out Plug.Frame; Arm : Natural; Dw : Geom.V3; Ok : out Boolean) is
       A : Table.Vec := Table.Zero_Vec;
       Jaw : Floats;
@@ -5132,6 +5246,10 @@ package body Act is
    begin
       A (0) := Dw (0); A (1) := Dw (1); A (2) := Dw (2);
       Step_Arm (L, C, F, Arm, A, Jaw, Del, Ok);
+      --  命令了多少、实到多少,每一步都说(GB5 那一版有这一行,搬回 main 时丢了;H6 2026-09-22 实测每步要 14 cm 而差距只缩 0–2 cm,
+      --  没有这一行就分不清是身体没走成、还是我算错了)
+      Geo_Say ("挪 (" & Mm (Dw (0)) & "," & Mm (Dw (1)) & "," & Mm (Dw (2)) & ") ⇒ 实到 (" & Mm (Del (0)) & "," & Mm (Del (1)) & "," & Mm (Del (2)) &
+               "),差 " & Mm (Geom.Norm ([Dw (0) - Del (0), Dw (1) - Del (1), Dw (2) - Del (2)])) & (if Ok then "" else " · 身体说没走成"));
    end Geo_Move;
 
    --  这只手一步能走出来又看得见的那一档(开机量的,米)
@@ -5144,7 +5262,6 @@ package body Act is
       return C.Map.EE_Noise;
    end Geo_Base;
 
-   function Mm (X : Long_Float) return String is (Codec.Fmt (X, 0) & " mm");
 
    --  指尖在相机里的位置:开机那一帧里两根手指(合空扫过的像素)各自最靠上的那一截 = 指尖;有深度那一帧读一次深度
    --  (真机:一台相机一辈子量一次,用尺子也行;之后再也不读深度)
@@ -5260,6 +5377,19 @@ package body Act is
                if not Geo_Of (C, Cam).Tip_Valid then
                   Geo_Measure_Tips (C, F, Cam, Natural (A));
                end if;
+               --  🔴 朝向"量过"得是真量准了:拟合的像素残差比【一个像素】还大,那就不是一次测量(一个像素是这台相机的分辨率极限)。
+               --  T10 2026-09-21 实测:左腕眼存着的朝向残差 9.59 px(右腕眼 0.31 px),拿它做"横挪" ⇒ 东西在画面里往反方向跳
+               --  (u 128.0 → 138.2;GB5 右手是 288.2 → 259.6)⇒ 交点算到相机背后 0.8 m。GC 年代左腕眼一直标不准,
+               --  盯的是会抖的碎块;现在盯的是框里量出来的整块(形心复现 0.1 px)⇒ 用到时重新量。
+               if Geo_Of (C, Cam).Valid and then Geo_Of (C, Cam).Rms > 1.0 then
+                  declare
+                     Gb : Geom.Cam_Geo := Geo_Of (C, Cam);
+                  begin
+                     Geo_Say ("第" & Codec.Img (Cam) & " 台相机存着的朝向残差 " & Codec.Fmt (Gb.Rms, 2) & " px,比一个像素还大 ⇒ 不算量过,用到时重新量");
+                     Gb.Valid := False;
+                     C.Geo.Replace_Element (Cam, Gb);
+                  end;
+               end if;
                G := Geo_Of (C, Cam);
                Geo_Say ("第" & Codec.Img (Cam) & " 台相机(长在第" & Codec.Img (Natural (A) + 1) & " 只手上):焦距 " &
                         (if G.F > 0.0 then Codec.Fmt (G.F, 1) & " px" else "没有") & " · 朝向 " & (if G.Valid then "量过(残差 " & Codec.Fmt (G.Rms, 2) & " px)" else "没量,用到时现量") &
@@ -5332,8 +5462,28 @@ package body Act is
    end Geo_Calibrate;
 
    --  几何逼近:让"指尖该到的那一点"(指尖中点再往手心里一点)和点名那块重合。每段走一截、停稳、再看一眼、再算。
+   --  这一槽里的东西此刻看得【全不全】,以及它叫什么(点过名的才有名字)。看不全(顶到窗边/被画面切掉)的那一眼,形心不是同一个物理点。
+   procedure Slot_Whole (C : Context; Cam : Natural; Slot : Integer; Whole : out Boolean; Name : out Unbounded_String) is
+   begin
+      Whole := True; Name := Null_Unbounded_String;
+      if Slot >= 0 and then Natural (Slot) < World.Count (C.Wld, Cam) then
+         declare
+            R : constant Picture.Region := World.Get (C.Wld, Cam, Natural (Slot)).R;
+            Bx : constant Integer := Boxed_Index (C, Cam, R.Cu, R.Cv);
+         begin
+            if Bx >= 0 then
+               Whole := C.Boxed (Natural (Bx)).Isolated;
+               Name := C.Boxed (Natural (Bx)).Name;
+            end if;
+         end;
+      end if;
+   end Slot_Whole;
+
+   --  Above = True:不是走到它跟前,而是走到它【正上方、高出一个张口】(张口是身体量过的长度,不是拍的数)。
+   --  "上" = 位姿读数系的 +z,和抬手那一条同一个约定(当它朝上;真机该由重力读数定)。
    procedure Geo_Approach (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Cam, Arm : Natural; Slot : Integer;
-                           Step_Limit : Natural; Event : out Unbounded_String; Steps_Taken : out Natural; Beats : out Natural) is
+                           Step_Limit : Natural; Event : out Unbounded_String; Steps_Taken : out Natural; Beats : out Natural;
+                           Above : Boolean := False; Amt : Long_Float := 0.5; Until_Touch : Boolean := False) is
       G : constant Geom.Cam_Geo := Geo_Of (C, Cam);
       Beats0 : constant Natural := Plug.Steps (L);
       Limit : constant Natural := (if Step_Limit > 0 then Step_Limit else 12);   --  没说步数时的安全上限(次数)
@@ -5342,18 +5492,49 @@ package body Act is
       Want : Geom.V3 := G.Tip;
       U, V : Long_Float;
       Seen, Mok : Boolean;
+      --  🔴 一条命令最多走多远,由【脑说的步子档位】定(small / medium / large,语言 §4.3:按身体自己量出的幅度计价),不由我自己调。
+      --  单位 = 测距那一下横挪的大小(4 倍探针幅度,每一段开头它都刚被证明走得到);small = 1 个单位,medium = 2,large = 4。
+      --  H8 2026-09-22 实测为什么要有上限:横挪 0.026 m 实到 0.024 m;之后每步命令 0.14 m(其中往下 0.097 m)实到 ≈ 0,连着 5 步 ——
+      --  仿真日志 65 行 "continuous ik did not converge … falling back to global IK":大步先被连续逆解拒掉,退回全局逆解
+      --  又因为目标在桌面高度而无解 ⇒ 静默不动。GB5 的球心离桌面 3.4 cm,一步 170 mm 过得去;平躺的剪刀过不去。
+      --  ⚠️ 我先写过一版"走成了加倍、没走成减半",被自由棘轮拦下(owner 09-03:驱动不许自己调步子)—— 已撤。
+      --  命令了没走到 ⇒ 我不自己换打法,如实说"没走成"交回脑(它可以说 small,也可以说合手)。
+      Step_Cap : constant Long_Float := 4.0 * Geo_Base (C, Arm) * (4.0 * Amt);
+      --  🔴 被一个面顶住之后:顶住的只是【那个方向】(命令了没走到的那个方向,量出来的),剩下的误差里沿着面的那一部分照样走得了。
+      --  H12 2026-09-22 实测:垂直下探碰到桌面即停,此刻剪刀在两指正前方 0.021 m(沿桌面);整段就此停下 ⇒ 合手合了个空(读数 0.000 = 空手值)。
+      --  "touching" 要的是合拢点到它身上;桌面不让我再往下,不等于不让我往前。这是在量到的接触下继续解同一个约束,不是换打法。
+      --  🔴 身体不许自己收工(总规矩 09-13 / 分叉最后一个提交 09-18):脑写的是 until touched,那就一直往它身上走到【真的碰到】为止;
+      --  我自己估出来的"到位了"只能说出来,不能当停的理由。H13 2026-09-22 实测:估计差 0.005 m 就停了,指尖还悬在剪刀上方,
+      --  合手合到 0.000(空手值)。平躺在桌上的东西,只有往下走到被桌面顶住,指尖才真的在它两侧。
+      --  🔴 不可信的观测不进解算。近处它有一截出了画面,"看到的那一块"的形心不再是同一个物理点(H14 2026-09-22 实测:
+      --  下探到近处,估计位置乱跳,手往上往后走了两步,然后"看丢了")。远处那几眼看到的是完整的一块,交出来的位置是准的,
+      --  而手的位姿读数每步只差 1 mm ⇒ 看不全了就不再更新它的位置,凭已知位置 + 位姿读数走完(LAB D2:不看也在)。
+      Whole : Boolean;
+      Its_Name : Unbounded_String;
+      Said_Blind : Boolean := False;
+      Pressing : Boolean := False;          --  估计已到位,正沿原方向接着往它身上走
+      Press_Dir : Geom.V3 := [0.0, 0.0, 0.0];
+      Held_Back : Boolean := False;
+      Wall : Geom.V3 := [0.0, 0.0, 0.0];   --  顶住我的那个方向(世界系单位向量,指向面里)
    begin
       Event := Null_Unbounded_String; Steps_Taken := 0; Beats := 0;
       Want (2) := Want (2) + Inward;   --  相机 -z 朝前 ⇒ 往手心方向 = +z
-      if C.Geo_Slot /= Slot then
-         C.Geo_Obs.Clear; C.Geo_Slot := Slot; C.Geo_Came := 0.0;
-      end if;
       Geo_Track (C, F, Cam, Slot, U, V, Seen);
-      if not Seen then
+      Slot_Whole (C, Cam, Slot, Whole, Its_Name);
+      if (Length (Its_Name) = 0 and then C.Geo_Slot /= Slot) or else (Length (Its_Name) > 0 and then C.Geo_Name /= Its_Name) then
+         C.Geo_Obs.Clear; C.Geo_Came := 0.0;
+      end if;
+      C.Geo_Slot := Slot;
+      if Length (Its_Name) > 0 then
+         C.Geo_Name := Its_Name;
+      end if;
+      if not Seen and then Natural (C.Geo_Obs.Length) < 2 then
          Event := S ("lost: I cannot see the thing you named in this eye right now");
          return;
       end if;
-      C.Geo_Obs.Append (Geom.Obs'(Pose => F.EE (Arm), U => U, V => V));
+      if Seen and then (Whole or else Natural (C.Geo_Obs.Length) < 2) then
+         C.Geo_Obs.Append (Geom.Obs'(Pose => F.EE (Arm), U => U, V => V));
+      end if;
       if Natural (C.Geo_Obs.Length) < 2 then
          --  只有一笔观测 ⇒ 先横挪一步当基线(拇指测距的"换只眼")
          declare
@@ -5388,38 +5569,164 @@ package body Act is
             end loop;
             Pw := Geom.Triangulate (G, Use_Obs);
             Pc := Geom.To_Cam (G, Cur, Pw);
-            D := [Pc (0) - Want (0), Pc (1) - Want (1), Pc (2) - Want (2)];
+            declare
+               --  到它上方 ⇒ 它该落在"指尖合拢那一点"正下方一个张口处:把世界系的"往下一个张口"转进相机系,加到目标上
+               Down_C : constant Geom.V3 :=
+                 (if Above then Geom.Ap (Geom.Tr (Geom.Cam_R (G, Cur)), [0.0, 0.0, -G.Gap]) else [0.0, 0.0, 0.0]);
+            begin
+               D := [Pc (0) - Want (0) - Down_C (0), Pc (1) - Want (1) - Down_C (1), Pc (2) - Want (2) - Down_C (2)];
+            end;
             Dist := Geom.Norm (D);
-            C.Geo_Dist := Dist; C.Geo_Round := C.Round_N;
+            C.Geo_Dist := Dist; C.Geo_Round := C.Round_N; C.Geo_At := Cur; C.Geo_At_Arm := Integer (Arm);
             Geo_Say ("它在相机前 " & Mm (-Pc (2)) & "(左右 " & Mm (Pc (0)) & " 上下 " & Mm (Pc (1)) & "),离指尖该到的那点还差 " & Mm (Dist) &
                      "(左右 " & Mm (D (0)) & " 上下 " & Mm (D (1)) & " 前后 " & Mm (D (2)) & ")");
             if -Pc (2) <= 0.0 then
                Event := S ("lost: my sightlines do not meet in front of me (the thing may have moved)");
                exit;
             end if;
-            if Dist <= Tol then
-               Event := S ("amount: arrived (the thing sits " & Mm (Dist) & " from where my fingers close)");
+            if Held_Back then
+               declare
+                  --  剩余误差搬到世界系,去掉指向面里的那一份;剩下的长度才是"还走得了的差距"
+                  Rcw : constant Geom.M3 := Geom.Cam_R (G, Cur);
+                  Dwf : Geom.V3 := Geom.Ap (Rcw, D);
+                  Into : constant Long_Float := Dwf (0) * Wall (0) + Dwf (1) * Wall (1) + Dwf (2) * Wall (2);
+               begin
+                  if Into > 0.0 then
+                     Dwf := [Dwf (0) - Into * Wall (0), Dwf (1) - Into * Wall (1), Dwf (2) - Into * Wall (2)];
+                  end if;
+                  D := Geom.Ap (Geom.Tr (Rcw), Dwf);
+                  Dist := Geom.Norm (D);
+                  Geo_Say ("被一个面顶着:沿着面还差 " & Mm (Dist) & "(往面里那一份 " & Mm (Long_Float'Max (0.0, Into)) & " 走不了,不算)");
+               end;
+            end if;
+            if (Pressing or else Dist <= Tol) and then Until_Touch and then not Above and then not Held_Back
+              and then Geom.Norm (C.Geo_Dir) > 0.0 and then Steps_Taken < Limit
+            then
+               if not Pressing then
+                  Pressing := True; Press_Dir := C.Geo_Dir;
+                  Geo_Say ("我估着到位了(差 " & Mm (Dist) & "),可你说的是碰到为止 ⇒ 沿来的方向接着往它身上走,到真被顶住");
+               end if;
+               declare
+                  Ln : constant Long_Float := 4.0 * Geo_Base (C, Arm);     --  一个量距单位(刚被证明走得到的那一档)
+                  Dw : constant Geom.V3 := [Press_Dir (0) * Ln, Press_Dir (1) * Ln, Press_Dir (2) * Ln];
+               begin
+                  Geo_Move (L, C, F, Arm, Dw, Mok);
+                  Steps_Taken := Steps_Taken + 1;
+                  declare
+                     Now : constant Plug.Arm_Pose := F.EE (Arm);
+                     Got : constant Long_Float := ((Now (0) - Cur (0)) * Dw (0) + (Now (1) - Cur (1)) * Dw (1) + (Now (2) - Cur (2)) * Dw (2)) / Ln;
+                  begin
+                     if Got + Got < Ln then
+                        Event := S ("contact: I kept going toward it as you asked and something stopped my hand (I commanded " & Mm (Ln)
+                                    & " and went " & Mm (Got) & "); by my own estimate the thing sits at where my fingers close");
+                        C.Geo_At := Now; C.Geo_At_Arm := Integer (Arm);
+                        exit;
+                     end if;
+                  end;
+               end;
+            elsif Dist <= Tol then
+               Event := S ((if Held_Back
+                            then "contact: I am against a surface and as close as it lets me (the thing sits " & Mm (Dist) & " from where my fingers close, measured along that surface)"
+                            elsif Above
+                            then "amount: arrived above it (it sits one hand-opening, " & Mm (G.Gap) & ", straight below where my fingers close, within " & Mm (Dist) & ")"
+                            else "amount: arrived (the thing sits " & Mm (Dist) & " from where my fingers close)"));
                exit;
             end if;
             if Steps_Taken >= Limit then
                Event := S ("steps: I took the steps you asked for (still " & Mm (Dist) & " from where my fingers close)");
                exit;
             end if;
+            if not Pressing then
             declare
                Frac : constant Long_Float := (if Dist > G.Gap then 0.6 else 1.0);   --  远时走六成再看一眼(比例,无量纲);近了一步到
-               Step : constant Geom.V3 := [D (0) * Frac, D (1) * Frac, D (2) * Frac];
+               Want_Ln : constant Long_Float := Dist * Frac;
+               Cut : constant Long_Float := (if Want_Ln > Step_Cap and then Want_Ln > 0.0 then Step_Cap / Want_Ln else 1.0);   --  超过脑给的那一档就按比例缩
+               Step : constant Geom.V3 := [D (0) * Frac * Cut, D (1) * Frac * Cut, D (2) * Frac * Cut];
                Rc : constant Geom.M3 := Geom.Cam_R (G, Cur);
                Dw : constant Geom.V3 := Geom.Ap (Rc, Step);
                Ln : constant Long_Float := Geom.Norm (Dw);
             begin
                Geo_Move (L, C, F, Arm, Dw, Mok);
                Steps_Taken := Steps_Taken + 1;
+               declare
+                  Now : constant Plug.Arm_Pose := F.EE (Arm);
+                  --  实到 = 沿【命令的方向】真走了多少(不是位移的长度:H10 2026-09-22 实测,命令往下 0.041 m 只下去 0.006 m,
+                  --  手却横着滑了 0.025 m —— 按长度比就被当成"走成了",接着在一个撞着桌面的姿势上继续算、算飞)
+                  Got : constant Long_Float :=
+                    (if Ln > 0.0 then ((Now (0) - Cur (0)) * Dw (0) + (Now (1) - Cur (1)) * Dw (1) + (Now (2) - Cur (2)) * Dw (2)) / Ln else 0.0);
+               begin
+                  if Got + Got < Ln and then not Held_Back then
+                     --  第一次被顶住:记下顶住我的方向 = 命令的位移减去实到的位移(量出来的),之后只走沿着面的那一部分
+                     declare
+                        Miss : constant Geom.V3 := [Dw (0) - (Now (0) - Cur (0)), Dw (1) - (Now (1) - Cur (1)), Dw (2) - (Now (2) - Cur (2))];
+                        Ml : constant Long_Float := Geom.Norm (Miss);
+                     begin
+                        if Ml > 0.0 then
+                           Wall := [Miss (0) / Ml, Miss (1) / Ml, Miss (2) / Ml];
+                           Held_Back := True;
+                           Geo_Say ("这一步要 " & Mm (Ln) & " 只到 " & Mm (Got) & " ⇒ 有个面顶着我,方向 ("
+                                    & Codec.Fmt (Wall (0), 2) & "," & Codec.Fmt (Wall (1), 2) & "," & Codec.Fmt (Wall (2), 2) & ");沿着它接着走");
+                        end if;
+                     end;
+                  elsif Got + Got < Ln then              --  沿命令方向实到不到要的一半(纯数学的一半)= 命令了,身体没走
+                     Event := S ("resist: I commanded a step of " & Mm (Ln) & " toward it and my hand only went " & Mm (Got)
+                                 & " (" & Mm (Dist) & " from where my fingers close) - either something is holding my hand there, "
+                                 & "or that step was more than I can do in one command from this pose");
+                     exit;
+                  end if;
+               end;
                C.Geo_Came := C.Geo_Came + Ln;
                if Ln > 0.0 then
                   C.Geo_Dir := [Dw (0) / Ln, Dw (1) / Ln, Dw (2) / Ln];
                end if;
+               --  🔴 迈了一大步之后,它在我这只眼里的位置和大小都变了(H5 2026-09-22 实测:走到差 0.071 m 时跟丢 ——
+               --  点过名的东西是"在上一帧量到它的地方原样再量",一步 14 cm 之后它早不在那儿了)。
+               --  可我【知道】它该在哪:它的位置是我刚用两条视线交出来的(Pw),我挪了多少是位姿读数说的 ⇒
+               --  把它投到新位姿的画面里,就是它这一帧该出现的像素;离我近了几成,它就大了几成。先把重量的窗挪过去、放大,再量。
+               if Slot >= 0 and then Natural (Slot) < World.Count (C.Wld, Cam) then
+                  declare
+                     Was : constant Picture.Region := World.Get (C.Wld, Cam, Natural (Slot)).R;
+                     Bx : constant Integer := Boxed_Index (C, Cam, Was.Cu, Was.Cv);
+                     Pu, Pv : Long_Float;
+                     Front : Boolean;
+                     Z_Was : constant Long_Float := -Pc (2);
+                     Z_Now : constant Long_Float := -Geom.To_Cam (G, F.EE (Arm), Pw) (2);
+                     Cw : constant Natural := F.Cams (Cam).W;
+                     Ch : constant Natural := F.Cams (Cam).H;
+                  begin
+                     Geom.Project (G, F.EE (Arm), Pw, Pu, Pv, Front);
+                     if Bx >= 0 and then Front and then Z_Was > 0.0 and then Z_Now > 0.0
+                       and then Pu >= 0.0 and then Pv >= 0.0 and then Pu < Long_Float (Cw) and then Pv < Long_Float (Ch)
+                     then
+                        declare
+                           B : Boxed_Thing := C.Boxed (Natural (Bx));
+                           Grow : constant Long_Float := Z_Was / Z_Now;
+                           Hw : constant Long_Float := 0.5 * (Long_Float (B.X1 - B.X0) * Grow);   --  半宽(纯数学的一半)
+                           Hh : constant Long_Float := 0.5 * (Long_Float (B.Y1 - B.Y0) * Grow);
+                           function Px (V2 : Long_Float; Span : Natural) return Natural is
+                             (Natural (Long_Float'Max (0.0, Long_Float'Min (Long_Float (Span - 1), V2))));
+                        begin
+                           B.X0 := Px (Pu - Hw, Cw); B.X1 := Px (Pu + Hw, Cw);
+                           B.Y0 := Px (Pv - Hh, Ch); B.Y1 := Px (Pv + Hh, Ch);
+                           if B.X1 > B.X0 and then B.Y1 > B.Y0 then
+                              C.Boxed.Replace_Element (Natural (Bx), B);
+                              --  槽里记的那一块也挪到预测处,好让这一帧量到的新块对得上同一个槽(World.Observe 按形心就近认槽)
+                              World.Shift_Slot (C.Wld, Cam, Natural (Slot), Pu / Long_Float (Cw), Pv / Long_Float (Ch), Grow);
+                              Geo_Say ("它该出现在 (" & Codec.Fmt (Pu, 1) & "," & Codec.Fmt (Pv, 1) & "),大了 " & Codec.Fmt (Grow, 2) & " 倍 ⇒ 到那儿去量");
+                           end if;
+                        end;
+                     end if;
+                  end;
+               end if;
                Geo_Track (C, F, Cam, Slot, U, V, Seen);
-               if not Seen then
+               Slot_Whole (C, Cam, Slot, Whole, Its_Name);
+               if Natural (C.Geo_Obs.Length) >= 2 and then not (Seen and then Whole) then
+                  if not Said_Blind then
+                     Said_Blind := True;
+                     Geo_Say ((if Seen then "它有一截出了画面/被挡住,这一眼不可信" else "这一步之后看不见它了")
+                              & " ⇒ 不再更新它的位置;它在哪我已经从看得全的那几眼里知道了,凭位姿读数走完");
+                  end if;
+               elsif not Seen then
                   --  最后一步它进了指缝、被手指挡住也正常:上一眼已经在两倍容差内(倍数,无量纲)
                   if Dist <= 2.0 * Tol then
                      Event := S ("amount: arrived (I lost sight of it on the last step; it was " & Mm (Dist) & " from where my fingers close)");
@@ -5427,9 +5734,11 @@ package body Act is
                      Event := S ("lost: I lost sight of it after that step (it was " & Mm (Dist) & " away)");
                   end if;
                   exit;
+               else
+                  C.Geo_Obs.Append (Geom.Obs'(Pose => F.EE (Arm), U => U, V => V));
                end if;
-               C.Geo_Obs.Append (Geom.Obs'(Pose => F.EE (Arm), U => U, V => V));
             end;
+            end if;   --  not Pressing
          end;
       end loop;
       Beats := Plug.Steps (L) - Beats0;
@@ -5573,6 +5882,12 @@ package body Act is
                Rep0 : constant Exam.Report := Exam.Judge (C.Map, C.Tables);
                Any_Stands : Boolean := False;
                Roles : Unbounded_String;
+               --  🔴 关系键盘按【此刻角色绑得上的那几个"我"】逐个问编译器那一套(Plan.Usable_Rels_Any),
+               --  不再拿 -1 去扫"量过的每一块":响应表空的时候那样扫恒为空,键盘上一个移动词都没有,
+               --  而表只有执行移动命令才会去量 ⇒ 死锁(SC4 实测,`0 张响应表` ⇒ 关系 [(一个都没有)])。
+               All_Facts : constant Plan.Facts_Vectors.Vector := Build_Facts (C, F);
+               Subjects : Plan.Facts_Vectors.Vector;
+               Rels : Unbounded_String;
             begin
                for I in 0 .. Natural (C.Items.Length) - 1 loop
                   if C.Items (I).Height > 0.0 then
@@ -5590,6 +5905,10 @@ package body Act is
                      for I in 0 .. Natural (C.Items.Length) - 1 loop
                         if C.Items (I).Located and then Role_Wants (R, C.Items (I).Kind) then
                            Any := True;
+                           --  Build_Facts 的第 0 条是占位,第 I+1 条才是清单第 I 件
+                           if I + 1 < Natural (All_Facts.Length) then
+                              Subjects.Append (All_Facts (I + 1));
+                           end if;
                         end if;
                      end loop;
                      if Any then
@@ -5600,15 +5919,16 @@ package body Act is
                --  🔴 CS5 实测:整份日志里查不到【这一轮键盘上到底有哪些键】—— 语法一个字都没进日志。
                --  于是"零死键"这条前置条件在事后无法核对,任何"给了它键它不用"的判决都建立在没记录的假设上。
                --  ⇒ 把当场生成的三张表如实记一行。这行只写日志,不参与任何判定。
-               Put_Line ("[身] 🎹 这一轮键盘:关系 [" & Plan.Usable_Rels (Rep0, -1, Any_Stands)
+               Rels := To_Unbounded_String (Plan.Usable_Rels_Any (Rep0, Subjects, Any_Stands));
+               Put_Line ("[身] 🎹 这一轮键盘:关系 [" & To_String (Rels)
                          & "] · 角色 [" & To_String (Roles)
                          & "] · 结局 [" & Plan.Waitable_Outcomes (Any_Stands)
                          & "] · 清单 " & Codec.Img (Natural (C.Items.Length)) & " 件");
                if not Brain.Ask (To_String (C.Eye_Host), C.Eye_Port, To_String (C.Task_Text), To_String (Listing), Recent,
-                                 Sinew.Grammar (Plan.Usable_Rels (Rep0, -1, Any_Stands), To_String (Roles),
+                                 Sinew.Grammar (To_String (Rels), To_String (Roles),
                                                 Plan.Waitable_Outcomes (Any_Stands)),
                                  To_String (C.Refused),
-                                 Plan.Usable_Rels (Rep0, -1, Any_Stands), To_String (Roles),
+                                 To_String (Rels), To_String (Roles),
                                  Plan.Waitable_Outcomes (Any_Stands),
                                  C.Cols, C.Rows, Natural (C.Items.Length), C.Map.N_Cams, C.Map.Arms, Big, Cw, Bh, Text, Err)
                then
@@ -5662,7 +5982,7 @@ package body Act is
                      end loop;
                      return Sinew.Ey_None;
                   end First_Eye;
-                  Facts : constant Plan.Facts_Vectors.Vector := Build_Facts (C, F);
+                  Facts : Plan.Facts_Vectors.Vector := Build_Facts (C, F);
                   Binds : Plan.Bind_Vectors.Vector;
                   V : Plan.Verdict;
 
@@ -5724,33 +6044,112 @@ package body Act is
                      return "这只眼睛里没有一块符合它";
                   end Why_No_Role;
 
-                  --  名字靠身体自己去认:画面已经被切成带编号的块,只让模型在这些块里【挑一个】。
-                  --  编号从头到尾没进语言,它只活在这一问里。挑不出来 ⇒ 如实说,绝不瞎猜。
+                  --  🔴 名字怎么落到画面上(2026-09-21 改问法):脑说"它在这一框里",框里哪些像素是它由我自己量。
+                  --  以前是"画面切成带编号的块,让脑挑一个号"—— 没有深度时那一刀是按明暗切的,剪刀被切成四五个碎框、
+                  --  腕眼一帧 191–450 件,没有任何一个号【是】那把剪刀,脑挑哪个都不对。
+                  --  编号照旧从头到尾不进语言;量不出来 ⇒ 如实说,绝不瞎猜。
                   function Bind_Name (W : String; Tried : out Unbounded_String) return Integer is
-                     Which : Natural := 0;
+                     Cam : constant Natural := C.Cam;
+                     Kw : constant Natural := F.Cams (Cam).W;
+                     Kh : constant Natural := F.Cams (Cam).H;
+                     Found, Got, Iso : Boolean := False;
+                     X0, Y0, X1, Y1 : Natural := 0;
+                     R : Picture.Region;
                      E2 : Unbounded_String;
+
+                     --  这件点过名的东西此刻在清单第几号(没有就是 0)
+                     function Item_Of (Bx : Natural) return Natural is
+                     begin
+                        for K in 0 .. Natural (C.Items.Length) - 1 loop
+                           if C.Items (K).Kind = Thing and then C.Items (K).Cam = Cam and then C.Items (K).Located
+                             and then Boxed_Index (C, Cam, C.Items (K).Cu, C.Items (K).Cv) = Integer (Bx)
+                           then
+                              return K + 1;
+                           end if;
+                        end loop;
+                        return 0;
+                     end Item_Of;
                   begin
                      Tried := Null_Unbounded_String;
-                     if Brain.Find (To_String (C.Eye_Host), C.Eye_Port, W, To_String (Listing),
-                                    Natural (C.Items.Length), Big, Cw, Bh, Which, E2)
-                     then
-                        if Which >= 1 and then Which <= Natural (C.Items.Length) then
-                           --  认出来了 ⇒ 记住这是在哪只眼里认出来的,给下面"答 0 就回去"用。
-                           --  ⚠️ 只在【就是这只被判过"没有它"的眼】里又认出来了才解除标记 —— 一认出就无脑清空,
-                           --  下一轮选眼又会挑回那只瞎眼,来回弹(JA 推演过这条,别再改回去)。
-                           if C.Blind_Cam = Integer (C.Cam) then
-                              C.Blind_Cam := -1;
-                           end if;
-                           C.Name_Cam := Integer (C.Cam);
-                           return Integer (Which);
+                     --  ① 这个名字在这只眼里点过、这一帧也量到了 ⇒ 就是它,不必再问一遍
+                     for Bi in 0 .. Natural (C.Boxed.Length) - 1 loop
+                        if C.Boxed (Bi).Cam = Cam and then C.Boxed (Bi).Seen and then To_String (C.Boxed (Bi).Name) = W
+                          and then Item_Of (Bi) > 0
+                        then
+                           C.Name_Cam := Integer (Cam);
+                           return Integer (Item_Of (Bi));
                         end if;
-                        --  脑看着图说"这只眼里没有它" ⇒ 记下这只眼,选眼的时候跳过它。
-                        --  不记就会来回弹:脑要"不跟着我动"的那只 ⇒ 弹过去 ⇒ 认不出 ⇒ 弹回来 ⇒ 脑再说一遍。
-                        C.Blind_Cam := Integer (C.Cam);
-                        Tried := To_Unbounded_String ("我把看得见的每一块都过了一遍,没有一块是它");
+                     end loop;
+                     --  ② 问脑它在哪一框。给它【干净】的画面:我画上去的格子和编号框实测在伤它的视力
+                     if not Brain.Locate (To_String (C.Eye_Host), C.Eye_Port, W, F.Cams (Cam).RGB, Kw, Kh,
+                                          Found, X0, Y0, X1, Y1, E2)
+                     then
+                        Tried := To_Unbounded_String ("我问自己的眼睛时没问通(" & To_String (E2) & ")");
                         return -1;
                      end if;
-                     Tried := To_Unbounded_String ("我问自己的眼睛时没问通(" & To_String (E2) & ")");
+                     if not Found then
+                        --  脑看着图说"这只眼里我指不出它" ⇒ 记下这只眼,选眼的时候跳过它(不记就来回弹)。
+                        C.Blind_Cam := Integer (Cam);
+                        Tried := To_Unbounded_String ("我在这只眼里指不出它在哪");
+                        return -1;
+                     end if;
+                     --  ③ 框里哪一片是它,我自己量
+                     Picture.Measure_In_Box (F.Cams (Cam).Gray, Kw, Kh, X0, Y0, X1, Y1, Got, Iso, R);
+                     Put_Line ("[身] 📦 " & W & ":脑给的框 [" & Codec.Img (X0) & " " & Codec.Img (Y0) & " " & Codec.Img (X1) & " " & Codec.Img (Y1)
+                               & "](第" & Codec.Img (Cam) & " 台相机)⇒ "
+                               & (if Got then "框里量到一整块 " & Codec.Img (R.Count) & " px · 形心 ("
+                                    & Codec.Fmt (R.Cu * Long_Float (Kw), 1) & "," & Codec.Fmt (R.Cv * Long_Float (Kh), 1)
+                                    & ") · 长宽比 " & Codec.Fmt (R.Elong, 1)
+                                    & (if Iso then " · 是单独的一块" else " · 它顶到了框外那一圈(挨着别的东西或被画面切掉),形心和长轴在这只眼里不可信")
+                                  else "框里没有哪一片和周围分得开"));
+                     if not Got then
+                        Tried := To_Unbounded_String ("你指的那一片里,我量不出哪些像素和周围分得开");
+                        return -1;
+                     end if;
+                     --  ④ 记下它:从这一帧起每帧在原地重量。先前同名同眼的那一条作废(脑重新指了一遍,以新的为准)
+                     declare
+                        Bt : Boxed_Thing;
+                        At_Bx : Integer := -1;
+                     begin
+                        Bt.Name := To_Unbounded_String (W); Bt.Cam := Cam;
+                        Bt.X0 := R.X0; Bt.Y0 := R.Y0; Bt.X1 := R.X1; Bt.Y1 := R.Y1;
+                        Bt.Cu := R.Cu; Bt.Cv := R.Cv; Bt.Seen := True; Bt.Isolated := Iso;
+                        for Bi in 0 .. Natural (C.Boxed.Length) - 1 loop
+                           if C.Boxed (Bi).Cam = Cam and then To_String (C.Boxed (Bi).Name) = W then
+                              At_Bx := Integer (Bi);
+                           end if;
+                        end loop;
+                        if At_Bx >= 0 then
+                           C.Boxed.Replace_Element (Natural (At_Bx), Bt);
+                        else
+                           C.Boxed.Append (Bt);
+                           At_Bx := Integer (C.Boxed.Length) - 1;
+                        end if;
+                        --  ⑤ 让它当场进槽、进清单:这一帧重切一次(这回带着它),再照常对号
+                        C.Cut_Cam := -1;
+                        World.Observe (C.Wld, Cam, Cut_Things (C, F, Cam), Kw, Kh);
+                        for Si in 0 .. World.Count (C.Wld, Cam) - 1 loop
+                           declare
+                              Sl : constant World.Slot := World.Get (C.Wld, Cam, Si);
+                              It : Item;
+                           begin
+                              if Sl.Present and then Boxed_Index (C, Cam, Sl.R.Cu, Sl.R.Cv) = At_Bx then
+                                 It.Kind := Thing; It.Located := True; It.Slot := Si; It.Cam := Cam;
+                                 It.Cu := Sl.R.Cu; It.Cv := Sl.R.Cv; It.Count := Sl.R.Count;
+                                 It.X0 := Sl.R.X0; It.Y0 := Sl.R.Y0; It.X1 := Sl.R.X1; It.Y1 := Sl.R.Y1;
+                                 It.Au := Sl.R.Au; It.Av := Sl.R.Av; It.Elong := Sl.R.Elong;
+                                 It.Gray := Picture.Mean_Gray (F.Cams (Cam).Gray, Kw, Kh, Sl.R);
+                                 C.Items.Append (It);
+                                 if C.Blind_Cam = Integer (Cam) then
+                                    C.Blind_Cam := -1;      --  只在【就是这只被判过"没有它"的眼】里又认出来了才解除(JA 推演过,别改回去)
+                                 end if;
+                                 C.Name_Cam := Integer (Cam);
+                                 return Integer (C.Items.Length);
+                              end if;
+                           end;
+                        end loop;
+                     end;
+                     Tried := To_Unbounded_String ("我在你指的那一片里量到了它,可重量一遍时它没再出来");
                      return -1;
                   end Bind_Name;
 
@@ -5809,6 +6208,10 @@ package body Act is
                   C.Eye_Want := First_Eye;
                   if P.Ok then
                      Bind_All;
+                     --  🔴 认名字这一步会把【刚在框里量出来的东西】当场加进清单(T1 2026-09-21 实测:
+                     --  "item scissors ⇒ 第7 块" 绑上了,编译器却说"我认不出 item scissors" —— 它手里那份事实表
+                     --  是绑定【之前】建的,里面没有第 7 块)。⇒ 绑完重建一次,编译器看到的和清单是同一份。
+                     Facts := Build_Facts (C, F);
                      for I2 in 0 .. Natural (Binds.Length) - 1 loop
                         --  绑不上要说【为什么】:光一句"认不出"等于没说,脑没法据此改写程序
                         Put_Line ("[身] 🔎 " & To_String (Binds (I2).Key) & " ⇒ "
@@ -5912,6 +6315,19 @@ package body Act is
                                     end if;
                                  end;
                               end loop;
+                              --  🔴 "跟着我动的那只眼" = 【长在这条胳膊上的那只】,这是开机量过的事实(Cam_Arm),不是"变化第二大的那只"。
+                              --  T9 2026-09-21 实测:Qwen 已经在左手自己的眼里,写了 with my moving eye;那只眼刚因为一个没认出的名字
+                              --  被标成 Blind 而被跳过 ⇒ 挑了"这条胳膊一动只变 0.048 幅"的右腕眼(长在【另一条】胳膊上)⇒
+                              --  那只眼里看不见这只手,角色表为空,白耗 8 轮。没认出某个名字,不改变"哪只眼长在我手上"。
+                              if C.Eye_Want = Sinew.Ey_Moving then
+                                 for Cm in 0 .. C.Map.N_Cams - 1 loop
+                                    if Cam_Arm (C, Cm) = Sub_Arm then
+                                       Pick := Integer (Cm); Any := True;
+                                       Bv := (if Natural (Sub_Arm) * C.Map.N_Cams + Cm < Natural (C.Map.Cam_Frac.Length)
+                                              then C.Map.Cam_Frac (Natural (Sub_Arm) * C.Map.N_Cams + Cm) else 0.0);
+                                    end if;
+                                 end loop;
+                              end if;
                               --  🔴 "静"只是一半,另一半是【它得看得见目标】。
                               --  HA 实测:我写 with my still eye,它按判据挑了第 1 台(变 0.024 幅,确实最静)——
                               --  而第 1 台里是风扇和键盘,根本没有球。判据没错,是我少写了一半。
@@ -5956,6 +6372,43 @@ package body Act is
                         --  一步都走不了。理由本身(那只眼对这条胳膊的动作最敏感)没错,
                         --  但"最敏感"不等于"看得见我" —— 得两条都成立才值得换。
                         --  握区看不看得见是量出来的(每台相机各量一次),不是猜的。
+                        --  🔴 脑没点眼、这一段又点了名要去够一件东西 ⇒ 用【量得出它有多远】的那只眼:长在这条胳膊上、几何常数齐的那只
+                        --  (语言 §8.1:约束绑到量得出它的那只眼,写的人不选相机)。这一条不受"一集只换一次"限制 ——
+                        --  那条防的是来回弹;这里不会弹:那只眼里指不出它时 Bind_Name 会把它记成 Blind_Cam,下面就不再去。
+                        --  T9 实测:身体换过一次眼之后被拽回头顶眼,此后每一段都在头顶眼里一推一像素地磨(60 推 · 483 拍没到)。
+                        declare
+                           Hand_Eye : Integer := -1;
+                           Names_A_Thing : Boolean := False;
+                        begin
+                           for Cm in 0 .. C.Map.N_Cams - 1 loop
+                              if Cam_Arm (C, Cm) = Sub_Arm and then Cm < Natural (C.Geo.Length)
+                                and then C.Geo (Cm).Tip_Valid and then C.Geo (Cm).F > 0.0
+                              then
+                                 Hand_Eye := Integer (Cm);
+                              end if;
+                           end loop;
+                           for I2 in 0 .. Natural (Binds.Length) - 1 loop
+                              declare
+                                 Key : constant String := To_String (Binds (I2).Key);
+                              begin
+                                 if Key /= "me" and then Key /= "grasper" and then Key /= "pusher" then
+                                    Names_A_Thing := True;
+                                 end if;
+                              end;
+                           end loop;
+                           if Hand_Eye >= 0 and then Names_A_Thing and then Natural (Hand_Eye) /= C.Cam
+                             and then Hand_Eye /= C.Blind_Cam and then Sinew."=" (C.Eye_Want, Sinew.Ey_None)
+                           then
+                              Put_Line ("[身] 👁 你没点眼;这条胳膊自己的那只眼(第" & Codec.Img (Natural (Hand_Eye))
+                                        & " 只)量得出东西有多远 ⇒ 换过去,在那儿再问你一次它在哪");
+                              C.Cam := Natural (Hand_Eye);
+                              C.Eye_Chosen := True;
+                              C.Recent := S ("you did not name an eye, so I moved to the eye that rides on the arm you are moving: "
+                                             & "it is the one through which I can measure how far away a thing is. Nothing moved. "
+                                             & "Say the same thing again. " & Mode_Line (C, "moved to the eye that can measure distance"));
+                              return;
+                           end if;
+                        end;
                         if Best_Cam /= C.Cam and then not C.Eye_Chosen
                           and then Sinew."=" (C.Eye_Want, Sinew.Ey_None)
                           and then (Sub_Arm < 0
@@ -6245,6 +6698,15 @@ package body Act is
          Desc : Unbounded_String;
          Grip_Arm : constant Integer := (if Say.Grip_Arm >= 1 and then Say.Grip_Arm <= C.Map.Arms then Integer (Say.Grip_Arm) - 1 else -1);
          Did_Grip : Unbounded_String;
+         --  🔴 怎么走过去:拿【手自己报的位置】当尺子(几何走法)。GB5/GC2/GC4 抓起球的三炮走的就是它 ——
+         --  GB5 日志原文:横挪 25.6 mm、它在画面里从 u=288.2 跳到 259.6 ⇒ "它在相机前 336.3 mm";
+         --  下一步一口气挪 170 mm(实到差 2.6 mm);4 步从差 284 mm 走到差 8 mm。
+         --  而 main 一直走的是"推一点、看画面变多少"那条:T3 2026-09-21 实测 60 推 · 704 拍,差距 0.434 → 0.433。
+         --  09-20 把几何驾驶的过程体搬回了 main,但【开机装常数 / 内参进帧 / 这里的分派】三处接线一处没接,整条是死代码。
+         Geo_Case : Natural := 0;            --  0 = 不是几何走法管的事;1 = 走到它跟前;2 = 拿着往回退(抬);3 = 合(合之前不再走)
+         Geo_Slot_Now : Integer := -1;
+         Geo_Above : Boolean := False;
+         Geo_Desc : Unbounded_String;
       --  2a 把脑说的话变成要求:别动的,目标就是它现在的位置;要动的,目标是格子或与某号的关系;
       --  抓某号,目标是"和我张开的那片地方重合"(位置 / 远近 / 看着多大 / 朝向)
       --  把去哪翻成目标:格子 / 与某号的关系(碰到它 · 上下左右 · 前后 · 离远点)。全是量出来的位置,没有写死的距离
@@ -6253,7 +6715,7 @@ package body Act is
                            --  目标
                            if G.Cell >= 1 and then G.Cell <= Natural (C.Cells_U.Length) then
                               P.Tu := C.Cells_U (G.Cell - 1); P.Tv := C.Cells_V (G.Cell - 1); P.Tz := P.Z; P.Wz := 0.0;
-                              P.Desc := S ("item " & Codec.Img (G.Item) & " to cell " & Codec.Img (G.Cell));
+                              P.Desc := S (Say_Item (C, G.Item) & " to cell " & Codec.Img (G.Cell));
                            elsif G.Rel /= "" and then G.Of_Item >= 1 and then G.Of_Item <= Natural (C.Items.Length) then
                               declare
                                  O : constant Item := C.Items (G.Of_Item - 1);
@@ -6263,16 +6725,16 @@ package body Act is
                               begin
                                  if G.Has_Place then
                                     --  去一个【记住的地方】:目标就是那一刻记下的位置和远近
-                                    P.Desc := S ("item " & Codec.Img (G.Item) & " back to the place you had me remember");
+                                    P.Desc := S (Say_Item (C, G.Item) & " back to the place you had me remember");
                                     P.Tu := G.Pu; P.Tv := G.Pv;
                                     P.Tz := G.Pz;
                                     P.Wz := (if G.Pz > 0.0 and then P.Z > 0.0 then 1.0 else 0.0);
                                  elsif not O.Located then
                                     --  🔴 看不见它也不许停:用它上次被看见的地方当目标,照走,如实说。
-                                    Report := Report & "I cannot see item " & Codec.Img (G.Of_Item)
+                                    Report := Report & "I cannot see " & Say_Item (C, G.Of_Item)
                                               & " right now, so I aimed at where it was last seen. ";
                                  else
-                                    P.Desc := S ("item " & Codec.Img (G.Item) & " " & Rl & " item " & Codec.Img (G.Of_Item));
+                                    P.Desc := S (Say_Item (C, G.Item) & " " & Rl & " " & Say_Item (C, G.Of_Item));
                                     P.Tu := O.Cu; P.Tv := O.Cv; P.Tz := P.Z; P.Wz := 0.0; P.Tuv_Z := O.Depth;
                                     --  🔴 接触集:要把它送进两指之间时,别瞄【整块的形心】,瞄这块东西上
                                     --  真正夹得住的那一处。形心对圆球没差,对剪刀/碗就是成败之分
@@ -6290,12 +6752,12 @@ package body Act is
                                           Grip_Spot (Z2, Rg, Cw, Ch, Su, Sv, Ti, Co, Sok);
                                           if Sok then
                                              P.Tu := Su; P.Tv := Sv;
-                                             Report := Report & "contact set: on item " & Codec.Img (G.Of_Item)
+                                             Report := Report & "contact set: on " & Say_Item (C, G.Of_Item)
                                                        & " I aim where it is thin enough to fit between my fingers"
                                                        & " (faces off by " & Codec.Fmt (Ti, 2)
                                                        & " px per px, " & Codec.Fmt (Co, 0) & " px from its middle). ";
                                           else
-                                             Report := Report & "contact set: nowhere on item " & Codec.Img (G.Of_Item)
+                                             Report := Report & "contact set: nowhere on " & Say_Item (C, G.Of_Item)
                                                        & " is thin enough to fit between my fingers; I aimed at its middle. ";
                                           end if;
                                        end;
@@ -6430,7 +6892,7 @@ package body Act is
                                              --  🔴 量不出它鼓出多少也不许停:就朝它本身的远近走,如实说。
                                              P.Tu := P.Cu; P.Tv := P.Cv; P.Tz := O.Depth; P.Tuv_Z := P.Z;
                                              P.Wz := (if O.Depth > 0.0 and then P.Z > 0.0 then 1.0 else 0.0);
-                                             Report := Report & "I cannot measure how far item " & Codec.Img (G.Of_Item)
+                                             Report := Report & "I cannot measure how far " & Say_Item (C, G.Of_Item)
                                                        & " stands out of what it rests on, so I just went to its own distance. ";
                                           end if;
                                        end;
@@ -6447,7 +6909,7 @@ package body Act is
                                              P.Wang := 1.0;
                                           else
                                              --  🔴 没方向可转就不转,别的照走。
-                                             Report := Report & "item " & Codec.Img (G.Item) & " and item "
+                                             Report := Report & Say_Item (C, G.Item) & " and item "
                                                        & Codec.Img (G.Of_Item) & " sit at the same spot, so I did not turn. ";
                                           end if;
                                        end;
@@ -6499,7 +6961,7 @@ package body Act is
                         end if;
                         P.Tu := P.Cu; P.Tv := P.Cv; P.Tz := P.Z; P.Tuv_Z := P.Z;
                         P.Wz := (if P.Z > 0.0 then 1.0 else 0.0);
-                        P.Desc := S ("item " & Codec.Img (G.Item) & " stays exactly where it is");
+                        P.Desc := S (Say_Item (C, G.Item) & " stays exactly where it is");
                         if Pts.Is_Empty or else Pts (0).Arm = P.Arm then
                            P.Cam := Cam;   --  这一点是哪台相机里的(此刻只有一台)
                      Pts.Append (P);
@@ -6520,7 +6982,7 @@ package body Act is
                      P.Hard := G.Hard;   --  脑说的是 hold ⇒ 这一条进硬约束,解算时不许被牺牲
                      if not It.Located then
                         --  🔴 看不见自己那一块也不许停:按身体图算出来的位置当它此刻在哪,照走。
-                        Report := Report & "I cannot see item " & Codec.Img (G.Item)
+                        Report := Report & "I cannot see " & Say_Item (C, G.Item)
                                   & " in this picture, so I used where my joints say it is. ";
                      elsif It.Kind = Piece then
                         --  我身上的一块零件:点 = 它此刻的形心,表按需量(六个通道各推一下)
@@ -6565,7 +7027,7 @@ package body Act is
                         P.Box_W := Long_Float (It.X1 - It.X0) / Long_Float (Cw); P.Box_H := Long_Float (It.Y1 - It.Y0) / Long_Float (Ch);
                      else
                         --  🔴 这是意见,不是无能(而且编译器已经查过"是不是我身上的")。照走。
-                        Report := Report & "item " & Codec.Img (G.Item) & " is not in my hand, I pushed toward it anyway. ";
+                        Report := Report & Say_Item (C, G.Item) & " is not in my hand, I pushed toward it anyway. ";
                      end if;
                      if Ok_Pt then
                         Set_Target (G, P, Ok_Pt);
@@ -6575,7 +7037,7 @@ package body Act is
                            P.Cam := Cam;   --  这一点是哪台相机里的(此刻只有一台)
                      Pts.Append (P);
                         else
-                           Report := Report & "goal for item " & Codec.Img (G.Item) & " needs a different arm than the first goal; I do one arm per segment. ";
+                           Report := Report & "goal for " & Say_Item (C, G.Item) & " needs a different arm than the first goal; I do one arm per segment. ";
                         end if;
                      end if;
                   end;
@@ -6631,7 +7093,7 @@ package body Act is
                                     then 1.0 else 0.0);
                         --  朝向的分量 = 这块有多长条(圆的为零)
                         P.Wang := Long_Float'Max (0.0, 1.0 - 1.0 / Long_Float'Max (1.0, O.Elong));
-                        P.Desc := S ("item " & Codec.Img (Say.Grip_On) & " to sit where my fingers close (same place, same distance, same apparent size, same lie)");
+                        P.Desc := S (Say_Item (C, Say.Grip_On) & " to sit where my fingers close (same place, same distance, same apparent size, same lie)");
                      else
                         declare
                            Tr : constant Zone_Track := C.Zones (Track_Idx (C, A, Cam));
@@ -6639,7 +7101,7 @@ package body Act is
                            P.Kind := Piece_Pt; P.Chan_K := Chan.Per_Arm; P.Cu := Tr.Cu; P.Cv := Tr.Cv; P.Z := Tr.Z; P.Known := Tr.Known;
                            --  同上:合到它那一面,高低由脑说了算
                            P.Tu := O.Cu; P.Tv := O.Cv; P.Tz := O.Depth; P.Wz := (if O.Depth > 0.0 and then Tr.Z > 0.0 then 1.0 else 0.0); P.Tuv_Z := O.Depth;
-                           P.Desc := S ("grip " & Codec.Img (A + 1) & " onto item " & Codec.Img (Say.Grip_On) & " (fingertips to its middle)");
+                           P.Desc := S ("grip " & Codec.Img (A + 1) & " onto " & Say_Item (C, Say.Grip_On) & " (fingertips to its middle)");
                         end;
                      end if;
                      P.Cam := Cam;   --  这一点是哪台相机里的(此刻只有一台)
@@ -6741,7 +7203,7 @@ package body Act is
                         Codec.Append_Line (Life_Path,
                                            "beat " & Codec.Img (Plug.Steps (L))
                                            & " | eye " & Codec.Img (Cam)
-                                           & " | CLOSED on item " & Codec.Img (Say.Grip_On)
+                                           & " | CLOSED on " & Say_Item (C, Say.Grip_On)
                                            & " | " & (if not Sure_Held then "COULD NOT TELL"
                                                       elsif By_Reading then "HELD - it came with my hand"
                                                       else "NOT HELD - it did not come with my hand"));
@@ -6757,7 +7219,7 @@ package body Act is
                            else
                               C.Wld.Held_Slot := -1;
                            end if;
-                           Memory.Set (C.Mem, "holding", "arm " & Codec.Img (A + 1) & " closed on item " & Codec.Img (Say.Grip_On) & " at reading " & Codec.Fmt (Reading, 3));
+                           Memory.Set (C.Mem, "holding", "arm " & Codec.Img (A + 1) & " closed on " & Say_Item (C, Say.Grip_On) & " at reading " & Codec.Fmt (Reading, 3));
                         else
                            C.Wld.Holding := False; C.Wld.Held_Arm := -1; C.Wld.Held_Jaw := -1;
                            Move_Jaw (L, C, F, A, Hand_Of (C, A, Say.Grip_K).Open_Reading, Steps_J, Reading, Say.Grip_K);
@@ -6794,6 +7256,85 @@ package body Act is
                Avoid.Append (C.Items (N - 1));
             end if;
          end loop;
+         --  ── 几何走法(这只眼长在要动的那只手上时)──:贴近/瞄进 = 两条视线一交;合 = 刚算过的距离说了算;拿着离远 = 沿原路退
+         declare
+            Own : constant Integer := Cam_Arm (C, Cam);
+         begin
+            if Own >= 0 and then Geo_Ready (C, Cam) then
+               --  🔴 T8 2026-09-21 实测这一支没进来:程序一节翻成内部请求时,纯移动的 Grip 是【空串】(只有 close/open 才赋值),
+               --  而 GB5 那个年代脑填表、填的是 "none"。两种都是"这一节不动爪子"。
+               if (Say.Grip = "none" or else Length (Say.Grip) = 0) and then Natural (Say.Moves.Length) = 1 then
+                  declare
+                     G0 : constant Brain.Goal := Say.Moves (0);
+                     Rl : constant String := To_String (G0.Rel);
+                  begin
+                     if G0.Item >= 1 and then G0.Item <= Natural (C.Items.Length) and then C.Items (G0.Item - 1).Kind in Finger | Grip
+                       and then Integer (C.Items (G0.Item - 1).Arm) = Own
+                     then
+                        if (Rl = "at" or else Rl = "into" or else Rl = "above") and then G0.Of_Item >= 1 and then G0.Of_Item <= Natural (C.Items.Length)
+                          and then C.Items (G0.Of_Item - 1).Kind = Thing and then C.Items (G0.Of_Item - 1).Located
+                        then
+                           --  🔴 above 在【长在手上的眼】里按"画面里的上方"没法执行也没有物理意义(那只眼跟着手转);
+                           --  这里按重力的"上"走:它正上方、高出一个张口。T5–T7 实测 Qwen 的抓法每一段都从 above 起手。
+                           --  ⚠️ 这是对语言 §4.1 的一处改义(只在手上的眼里),已记进 LAB,待 owner 认。
+                           Geo_Above := Rl = "above";
+                           Geo_Case := 1; Geo_Slot_Now := C.Items (G0.Of_Item - 1).Slot;
+                           Geo_Desc := S (Say_Item (C, G0.Item) & " " & Rl & " " & Say_Item (C, G0.Of_Item) & " (by sightlines, in my own hand camera)");
+                        elsif Rl = "back" and then C.Wld.Holding and then C.Wld.Held_Arm = Own then
+                           Geo_Case := 2;
+                           Geo_Desc := S (Say_Item (C, G0.Item) & " back the way it came, holding");
+                        end if;
+                     end if;
+                  end;
+               elsif Say.Grip = "close" and then Grip_Arm = Own and then C.Geo_Dist >= 0.0 and then C.Geo_At_Arm = Own then
+                  --  🔴 "刚算的距离还作不作数"不按轮数判(H11 2026-09-22 实测:main 上每段程序跑完多一轮记账,close 落在两轮之后,
+                  --  条件 ≤ 1 轮不成立 ⇒ 掉回老路,手正压在剪刀上却开始逐通道推着量响应表)。
+                  --  该问的是:算完之后我的手挪开过没有。没挪开(不超过一个探针幅度 —— 身体量过的最小一档)就还作数。
+                  declare
+                     Now : constant Plug.Arm_Pose := F.EE (Natural (Own));
+                     Moved : constant Long_Float :=
+                       Geom.Norm ([Now (0) - C.Geo_At (0), Now (1) - C.Geo_At (1), Now (2) - C.Geo_At (2)]);
+                  begin
+                     if Moved <= 4.0 * Geo_Base (C, Natural (Own)) then   --  一个量距单位之内(4 倍探针幅度,倍数,无量纲;最后那一步没走成的也在这之内)
+                        Geo_Case := 3;   --  合:不再先走一段
+                     end if;
+                  end;
+               end if;
+            end if;
+         end;
+         if Geo_Case = 1 and then not Geo_Of (C, Cam).Valid then
+            declare
+               Cok : Boolean;
+            begin
+               Put_Line ("[身] 📐 这台相机的朝向还没量 ⇒ 先盯着它挪四下量出来");
+               Geo_Calibrate (L, C, F, Cam, Natural (Cam_Arm (C, Cam)), Geo_Slot_Now, Cok);
+               if not Cok then
+                  Geo_Case := 0;
+                  Report := S ("I tried to measure how my hand camera sits on my hand and could not. ");
+               end if;
+            end;
+         end if;
+         if Geo_Case = 1 then
+            Put_Line ("[身] ⚙ 几何走法:" & To_String (Geo_Desc));
+            Geo_Approach (L, C, F, Cam, Natural (Cam_Arm (C, Cam)), Geo_Slot_Now, Step_Limit, Event, Steps_Taken, Beats,
+                          Above => Geo_Above, Amt => Amount_Factor (Say.Moves (0).Amount),
+                          Until_Touch => Until_K in Monitor.U_Contact | Monitor.U_Resist);
+            Feel (C, F);
+            Report := Report & "you asked " & To_String (Geo_Desc) & ": " & To_String (Event) & ". I took " & Codec.Img (Steps_Taken) & " pushes; ";
+            Put_Line ("[身]   这一段:" & Codec.Img (Steps_Taken) & " 推 · " & Codec.Img (Beats) & " 拍 · 这一集累计 " & Codec.Img (Plug.Steps (L)) & " 拍");
+            Codec.Append_Line (Life_Path, "beat " & Codec.Img (Plug.Steps (L)) & " | eye " & Codec.Img (Cam) & " | " & To_String (Geo_Desc)
+                               & " | " & Codec.Img (Steps_Taken) & " pushes | ended: " & To_String (Event));
+         elsif Geo_Case = 2 then
+            Put_Line ("[身] ⚙ 几何走法:" & To_String (Geo_Desc));
+            Geo_Retreat (L, C, F, Natural (Cam_Arm (C, Cam)), Event, Steps_Taken, Beats);
+            Feel (C, F);
+            Report := Report & "you asked " & To_String (Geo_Desc) & ": " & To_String (Event) & ". I took " & Codec.Img (Steps_Taken) & " pushes; ";
+            Put_Line ("[身]   这一段:" & Codec.Img (Steps_Taken) & " 推 · " & Codec.Img (Beats) & " 拍");
+            Codec.Append_Line (Life_Path, "beat " & Codec.Img (Plug.Steps (L)) & " | eye " & Codec.Img (Cam) & " | " & To_String (Geo_Desc)
+                               & " | " & Codec.Img (Steps_Taken) & " pushes | ended: " & To_String (Event));
+         elsif Geo_Case = 3 then
+            Put_Line ("[身] ⚙ 几何走法:合手前不再走,笼住与否由刚算的 " & Mm (C.Geo_Dist) & " 说");
+         else
          Build_Goals;
          if not Pts.Is_Empty then
             Expand_Lobes (C, F, Cam, Pts);
@@ -6960,7 +7501,7 @@ package body Act is
                                   & " | ended: " & To_String (Event));
                for P of Pts loop
                   if P.Blob <= 0 then
-                     Report := Report & "item " & Codec.Img (P.Item_No) & (if P.Blob = 0 then " (finger A)" else "") & " now at (" & Codec.Fmt (P.Cu, 2) & "," & Codec.Fmt (P.Cv, 2) &
+                     Report := Report & Say_Item (C, P.Item_No) & (if P.Blob = 0 then " (finger A)" else "") & " now at (" & Codec.Fmt (P.Cu, 2) & "," & Codec.Fmt (P.Cv, 2) &
                                ") depth " & Codec.Fmt (P.Z, 2)
                                & (if P.No_Scale and then P.Steps_Err <= 0.0
                                   then ", and I do not know how many pushes away it is: I have not yet measured "
@@ -6972,11 +7513,12 @@ package body Act is
             else
                Event := S ("lost: could not see my own piece after moving it");
             end if;
-         elsif Say.Moves.Is_Empty and then Say.Grip = "none" then
+         elsif Say.Moves.Is_Empty and then (Say.Grip = "none" or else Length (Say.Grip) = 0) then
             Report := S ((if Say.See = "not_here" then "you said the thing is not in that picture; the body did not move. "
                           elsif Say.See = "unclear" then "you said you could not tell; the body did not move. "
                           else "you gave no move and no grip; the body did not move. "));
          end if;
+         end if;   --  Geo_Case
          Do_Grip;
          Report := Report & Mode_Line (C, To_String (Event));
       end;

@@ -1,0 +1,58 @@
+{
+ "sc1_head_gray": {
+  "scissors": "```json\n[\n\t{\"bbox_2d\": [748, 366, 798, 541], \"label\": \"scissors\"}\n]\n```",
+  "baseball": "```json\n[\n\t{\"bbox_2d\": [670, 354, 722, 420], \"label\": \"baseball\"}\n]\n```",
+  "jeans": "```json\n[\n\t{\"bbox_2d\": [485, 424, 646, 616], \"label\": \"jeans\"}\n]\n```",
+  "toy figure": "```json\n[\n\t{\"bbox_2d\": [581, 309, 628, 387], \"label\": \"toy figure\"}\n]\n```",
+  "banana": "{\"found\": false}",
+  "hammer": "```json\n[\n\t{\"bbox_2d\": [584, 310, 628, 390], \"label\": \"hammer\"}\n]\n```"
+ },
+ "sc2_head_gray": {
+  "scissors": "```json\n[\n\t{\"bbox_2d\": [745, 366, 798, 541], \"label\": \"scissors\"}\n]\n```",
+  "baseball": "```json\n[\n\t{\"bbox_2d\": [666, 351, 716, 414], \"label\": \"baseball\"}\n]\n```",
+  "jeans": "```json\n[\n\t{\"bbox_2d\": [486, 424, 644, 616], \"label\": \"jeans\"}\n]\n```",
+  "toy figure": "```json\n[\n\t{\"bbox_2d\": [580, 310, 628, 384], \"label\": \"toy figure\"}\n]\n```",
+  "banana": "{\"found\": false}",
+  "hammer": "```json\n[\n\t{\"bbox_2d\": [581, 310, 626, 382], \"label\": \"hammer\"}\n]\n```"
+ },
+ "sc3_head_gray": {
+  "scissors": "```json\n[\n\t{\"bbox_2d\": [750, 366, 800, 541], \"label\": \"scissors\"}\n]\n```",
+  "baseball": "```json\n[\n\t{\"bbox_2d\": [671, 358, 724, 422], \"label\": \"baseball\"}\n]\n```",
+  "jeans": "```json\n[\n\t{\"bbox_2d\": [488, 424, 646, 619], \"label\": \"jeans\"}\n]\n```",
+  "toy figure": "```json\n[\n\t{\"bbox_2d\": [584, 310, 634, 388], \"label\": \"toy figure\"}\n]\n```",
+  "banana": "{\"found\": false}",
+  "hammer": "```json\n[\n\t{\"bbox_2d\": [584, 312, 632, 388], \"label\": \"hammer\"}\n]\n```"
+ },
+ "sc4_head_gray": {
+  "scissors": "```json\n[\n\t{\"bbox_2d\": [134, 218, 208, 320], \"label\": \"scissors\"}\n]\n```",
+  "baseball": "```json\n[\n\t{\"bbox_2d\": [660, 356, 714, 420], \"label\": \"baseball\"}\n]\n```",
+  "jeans": "```json\n[\n\t{\"bbox_2d\": [488, 430, 644, 618], \"label\": \"jeans\"}\n]\n```",
+  "toy figure": "```json\n[\n\t{\"bbox_2d\": [580, 310, 630, 390], \"label\": \"toy figure\"}\n]\n```",
+  "banana": "{\"found\": false}",
+  "hammer": "```json\n[\n\t{\"bbox_2d\": [580, 311, 626, 388], \"label\": \"hammer\"}\n]\n```"
+ },
+ "sc4_wristR_gray": {
+  "scissors": "{\"found\": false}",
+  "baseball": "```json\n{\n    \"bbox_2d\": [399, 424, 518, 586]\n}\n```",
+  "jeans": "```json\n{\n    \"image_id\": \"Picture 20241028 195140.008\",\n    \"bbox_2d\": [202, 477, 290, 558]\n}\n```",
+  "toy figure": "```json\n{\n    \"bbox_2d\": [171, 282, 298, 558]\n}\n```",
+  "banana": "{\"found\": false}",
+  "hammer": "{\"found\": false}"
+ },
+ "sc4_wristL_gray": {
+  "scissors": "```json\n[\n\t{\"bbox_2d\": [84, 320, 234, 462], \"label\": \"scissors\"}\n]\n```",
+  "baseball": "{\"found\": false}",
+  "jeans": "{\"found\": false}",
+  "toy figure": "```json\n{\n    \"image_id\": \"Picture 1\",\n    \"bbox_2d\": [\n        748,\n        441,\n        970,\n        628\n    ]\n}\n```",
+  "banana": "```json\n{\n    \"image_id\": \"Picture 1\",\n    \"bbox_2d\": [\n        810,\n        444,\n        970,\n        604\n    ]\n}\n```",
+  "hammer": "```json\n{\n    \"image_id\": \"Picture 1\",\n    \"bbox_2d\": [\n        748,\n        448,\n        970,\n        628\n    ]\n}\n```"
+ },
+ "sc4_head_overlay_color": {
+  "scissors": "```json\n[\n\t{\"bbox_2d\": [113, 168, 172, 210], \"label\": \"scissors\"}\n]\n```",
+  "baseball": "```json\n[\n\t{\"bbox_2d\": [839, 400, 950, 510], \"label\": \"baseball\"}\n]\n```",
+  "jeans": "```json\n[\n\t{\"bbox_2d\": [470, 436, 608, 620], \"label\": \"jeans\"}\n]\n```",
+  "toy figure": "```json\n[\n\t{\"bbox_2d\": [580, 312, 628, 404], \"label\": \"toy figure\"}\n]\n```",
+  "banana": "```json\n[\n\t{\"bbox_2d\": [170, 164, 208, 191], \"label\": \"banana\"}\n]\n```",
+  "hammer": "```json\n[\n\t{\"bbox_2d\": [709, 550, 766, 684], \"label\": \"hammer\"}\n]\n```"
+ }
+}

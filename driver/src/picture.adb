@@ -734,6 +734,182 @@ package body Picture is
       return Best_T;
    end Split;
 
+   --  认东西是脑的活(它说"在这一框里"),量东西是我的活(框里哪些像素是它、形心、长轴)。
+   --  做法,没有一个拍出来的门槛:
+   --    ① 框往外让出一圈(框长边的四分之一 —— 比例,无量纲;只为让那一圈落在它【外面】的桌面上);
+   --    ② 最外面那一圈像素的灰度中位数 = 它周围的背景(中位数:旁边挨着别的东西压到一段圈,只要不过半就不受影响);
+   --    ③ 让出来的整片里每个像素偏离背景多少,这些偏离【自己】分成两拨(Split,分不开就如实说没有);
+   --    ④ 那一圈按定义是背景:它要是过半都落在"偏得多"那一拨,那一拨就是桌面自己的纹理,不是东西 ⇒ 如实说没有
+   --       (自检逮到的:规则条纹的木纹,偏离能干干净净分成两拨,前三条会从纹理里硬凑出一块);
+   --    ⑤ "偏得多"那一拨的连通块里,【落在脑那一框里的像素最多】的那一块就是它。
+   --       不看形心:它挨着一大块邻物连成一片时形心会被邻物拖出框外(自检逮到的),而它自己的像素仍在框里;
+   --       只伸进让出来那一圈、框里一个像素都没有的块(伸过来的手指、邻物的边)不算。
+   --  实测(2026-09-21,四炮的原始灰度帧):剪刀三个独立回合形心 (492.3,210.1)、长轴 79.6°,互差 0.1 px;
+   --  棒球四个回合 (439.1,183.0)、695 px,对 LAB 08-28 手量的真值 (440,183)·半径约 15 差不到 1 px。
+   procedure Measure_In_Box (G : Buf; W, H : Natural; BX0, BY0, BX1, BY1 : Natural;
+                             Found, Isolated : out Boolean; R : out Region) is
+      Ring_W : constant := 2;      --  当背景的那一圈有多厚(像素行数,次数,无量纲)
+   begin
+      Found := False;
+      Isolated := False;
+      R := (others => <>);
+      if W = 0 or else H = 0 or else Natural (G.Length) < W * H
+        or else BX1 <= BX0 or else BY1 <= BY0 or else BX0 >= W or else BY0 >= H
+      then
+         return;
+      end if;
+      declare
+         Cx1 : constant Natural := Natural'Min (BX1, W - 1);
+         Cy1 : constant Natural := Natural'Min (BY1, H - 1);
+         Long : constant Natural := Natural'Max (Cx1 - BX0, Cy1 - BY0) + 1;
+         Pad : constant Natural := Natural'Max (Ring_W + 1, Long / 4);
+         X0 : constant Natural := (if BX0 > Pad then BX0 - Pad else 0);
+         Y0 : constant Natural := (if BY0 > Pad then BY0 - Pad else 0);
+         X1 : constant Natural := Natural'Min (W - 1, Cx1 + Pad);
+         Y1 : constant Natural := Natural'Min (H - 1, Cy1 + Pad);
+         Ww : constant Natural := X1 - X0 + 1;      --  让出来的那一片(窗)的宽高
+         Wh : constant Natural := Y1 - Y0 + 1;
+         function On_Ring (X, Y : Natural) return Boolean is
+           (X < X0 + Ring_W or else X + Ring_W > X1 or else Y < Y0 + Ring_W or else Y + Ring_W > Y1);
+         Ring, Dev : Floats;
+         Med, T : Long_Float;
+         Ring_N, Ring_Hi : Natural := 0;
+      begin
+         if Ww < 2 * Ring_W + 2 or else Wh < 2 * Ring_W + 2 then
+            return;
+         end if;
+         for Y in Y0 .. Y1 loop
+            for X in X0 .. X1 loop
+               if On_Ring (X, Y) then
+                  Ring.Append (Long_Float (G.Element (Y * W + X)));
+               end if;
+            end loop;
+         end loop;
+         Med := Quantile (Ring, 0.5);
+         if Is_Nan (Med) then
+            return;
+         end if;
+         for Y in Y0 .. Y1 loop
+            for X in X0 .. X1 loop
+               Dev.Append (abs (Long_Float (G.Element (Y * W + X)) - Med));
+            end loop;
+         end loop;
+         T := Split (Dev);
+         if Is_Nan (T) then
+            return;      --  这一片里没有哪一拨和背景分得开
+         end if;
+         for Y in Y0 .. Y1 loop
+            for X in X0 .. X1 loop
+               if On_Ring (X, Y) then
+                  Ring_N := Ring_N + 1;
+                  if abs (Long_Float (G.Element (Y * W + X)) - Med) > T then
+                     Ring_Hi := Ring_Hi + 1;
+                  end if;
+               end if;
+            end loop;
+         end loop;
+         if Ring_Hi * 2 > Ring_N then
+            return;      --  ④ 背景那一圈过半都"偏得多" ⇒ 分出来的是纹理,不是东西
+         end if;
+         --  ⑤ 在窗里逐块数:每一块有多少像素落在脑的框里;要框里最多的那一块
+         declare
+            Lab : Ints := Int_Vectors.To_Vector (-1, Ada.Containers.Count_Type (Ww * Wh));
+            Stack : Ints;
+            N_Lab : Natural := 0;
+            Best_Lab : Integer := -1;
+            Best_In : Natural := 0;
+            Best_Edge : Boolean := False;
+            function Hi (Wx, Wy : Natural) return Boolean is
+              (abs (Long_Float (G.Element ((Y0 + Wy) * W + X0 + Wx)) - Med) > T);
+         begin
+            for Sy in 0 .. Wh - 1 loop
+               for Sx in 0 .. Ww - 1 loop
+                  if Lab.Element (Sy * Ww + Sx) < 0 and then Hi (Sx, Sy) then
+                     declare
+                        In_Box : Natural := 0;
+                        Edge : Boolean := False;
+                     begin
+                        Stack.Clear;
+                        Stack.Append (Sy * Ww + Sx);
+                        Lab.Replace_Element (Sy * Ww + Sx, N_Lab);
+                        while not Stack.Is_Empty loop
+                           declare
+                              I : constant Natural := Stack.Last_Element;
+                              Wx : constant Natural := I mod Ww;
+                              Wy : constant Natural := I / Ww;
+                              procedure Visit (Vx, Vy : Natural) is
+                              begin
+                                 if Lab.Element (Vy * Ww + Vx) < 0 and then Hi (Vx, Vy) then
+                                    Lab.Replace_Element (Vy * Ww + Vx, N_Lab);
+                                    Stack.Append (Vy * Ww + Vx);
+                                 end if;
+                              end Visit;
+                           begin
+                              Stack.Delete_Last;
+                              if X0 + Wx >= BX0 and then X0 + Wx <= Cx1 and then Y0 + Wy >= BY0 and then Y0 + Wy <= Cy1 then
+                                 In_Box := In_Box + 1;
+                              end if;
+                              if Wx = 0 or else Wy = 0 or else Wx = Ww - 1 or else Wy = Wh - 1 then
+                                 Edge := True;
+                              end if;
+                              if Wx > 0 then
+                                 Visit (Wx - 1, Wy);
+                              end if;
+                              if Wx + 1 < Ww then
+                                 Visit (Wx + 1, Wy);
+                              end if;
+                              if Wy > 0 then
+                                 Visit (Wx, Wy - 1);
+                              end if;
+                              if Wy + 1 < Wh then
+                                 Visit (Wx, Wy + 1);
+                              end if;
+                           end;
+                        end loop;
+                        if In_Box > Best_In then
+                           Best_In := In_Box; Best_Lab := N_Lab; Best_Edge := Edge;
+                        end if;
+                        N_Lab := N_Lab + 1;
+                     end;
+                  end if;
+               end loop;
+            end loop;
+            if Best_Lab < 0 or else Best_In < Min_Pixels (W, H) then
+               return;
+            end if;
+            --  形心、主轴、长宽比交给 Components 算(全仓只有那一份算法),这里只把选中的那一块描进整幅掩膜
+            declare
+               Mask : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (W * H));
+               Regs : Regions;
+            begin
+               --  ⑥ 它不是单独的一块(连到了让出来的那一圈)⇒ 只取它落在【脑那一框里】的部分:脑指的就是那一框,
+               --     框外连着的是邻居。真帧实测(剪刀紧贴风扇,左腕眼):连成一片 2546 px、长轴被风扇带歪 ⇒
+               --     只取框内 1352 px,出来的是整把剪刀、长宽比 5.6,贴着风扇的地方正好断开。
+               --     单独的一块不裁(脑的框常常略紧:SC1 剪刀 914 px 里有 40 px 在框外,那也是它)。
+               --     试过又作废的另一条:把"偏得多"那一拨再按亮度分一次 —— 真帧上它分开的是阴影和亮面,不是风扇和剪刀,
+               --     还把量得好好的棒球从 695 px 削到 551 px、形心偏 1.6 px。
+               for Wy in 0 .. Wh - 1 loop
+                  for Wx in 0 .. Ww - 1 loop
+                     if Lab.Element (Wy * Ww + Wx) = Best_Lab
+                       and then (not Best_Edge
+                                 or else (X0 + Wx >= BX0 and then X0 + Wx <= Cx1 and then Y0 + Wy >= BY0 and then Y0 + Wy <= Cy1))
+                     then
+                        Mask.Replace_Element ((Y0 + Wy) * W + X0 + Wx, True);
+                     end if;
+                  end loop;
+               end loop;
+               Regs := Components (Mask, W, H, 1);
+               if Regs.Is_Empty then
+                  return;
+               end if;
+               R := Regs (0);
+               Found := True;
+               Isolated := not Best_Edge;
+            end;
+         end;
+      end;
+   end Measure_In_Box;
+
    function Inside (R : Region; U, V : Long_Float; W, H : Natural; Grow : Long_Float) return Boolean is
       X0 : constant Long_Float := Long_Float (R.X0) / Long_Float (W);
       X1 : constant Long_Float := Long_Float (R.X1 + 1) / Long_Float (W);
