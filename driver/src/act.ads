@@ -296,6 +296,10 @@ package Act is
       Geo_Obs : Geom.Obs_Vectors.Vector;  --  这一集里点名那块在腕眼里的历次观测(位姿 + 像素)
       Geo_Slot : Integer := -1;
       Geo_Name : Unbounded_String;        --  这些观测是哪件【点过名的东西】的(按名字记,不按槽:近处重新指一次会换槽,远处那几眼好观测不能因此作废)
+      --  它最后一次被量到的世界位置(视线交点 / 我自己挪过的几眼)。手贴近时它在腕眼里糊了、被切了,脑指不出 ⇒ 凭这个走(前提是它没动,并如实说)
+      Geo_Pw : Geom.V3 := [others => 0.0];
+      Geo_Pw_Valid : Boolean := False;
+      Geo_Pw_Name : Unbounded_String;
       --  我最后一次被一个面顶住的地方:面上的一点(指尖世界位置)和它的法向(指向我这边)。
       --  不动的眼只给方向不给远近;东西躺在它靠着的面上 ⇒ 视线和这个面一交就是它在哪(LAB D2:碰过的点进地图)。
       Fingers_Aimed : Boolean := False;   --  上一段"到它上方"末尾已把手指指向它躺的面 ⇒ 接下来贴上去的那一段不再为了看它而转手

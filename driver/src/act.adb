@@ -5946,6 +5946,8 @@ package body Act is
       Its_Name : Unbounded_String;
       Said_Blind : Boolean := False;
       Said_One_Eye : Boolean := False;
+      Known : Boolean := False;             --  此刻没眼看得清它,但它在哪我量过(C.Geo_Pw)
+      Said_Known : Boolean := False;
       Who : Unbounded_String;
       Pressing : Boolean := False;          --  估计已到位,正沿原方向接着往它身上走
       Press_Dir : Geom.V3 := [0.0, 0.0, 0.0];
@@ -5987,14 +5989,17 @@ package body Act is
       if Length (Its_Name) > 0 then
          C.Geo_Name := Its_Name;
       end if;
-      if not Seen and then Natural (C.Geo_Obs.Length) < 2 then
+      --  🔴 此刻没有一只眼看得清它,但它在哪我上一段刚量过 ⇒ 凭记住的位置走,并如实说前提是它没动。
+      --  H30 2026-09-22 实测:手贴到剪刀 8 mm 时腕眼里它糊了、被切了,脑指不出 ⇒ 我报"看不见"、一步不走,而它在哪我明明知道。
+      Known := Length (Its_Name) > 0 and then C.Geo_Pw_Valid and then C.Geo_Pw_Name = Its_Name;
+      if not Seen and then Natural (C.Geo_Obs.Length) < 2 and then not Known then
          Event := S ("lost: I cannot see the thing you named in this eye right now");
          return;
       end if;
       if Seen and then (Whole or else Natural (C.Geo_Obs.Length) < 2) then
          C.Geo_Obs.Append (Geom.Obs'(Pose => F.EE (Arm), U => U, V => V));
       end if;
-      if Natural (C.Geo_Obs.Length) < 2
+      if Seen and then Natural (C.Geo_Obs.Length) < 2
         and then Natural (Sightlines_Now (C, F, Cam, Arm, Its_Name, Seen, Whole, U, V, Who).Length) < 2
       then
          --  只有一笔观测 ⇒ 先横挪一步当基线(拇指测距的"换只眼")
@@ -6037,7 +6042,7 @@ package body Act is
                   Pw := Pm;
                   Geo_Say ("此刻 " & To_String (Who) & " 相机同时看见它 ⇒ 视线交在 (" & Mm (Pw (0)) & "," & Mm (Pw (1)) & "," & Mm (Pw (2))
                            & "),视线间最大偏差 " & Mm (Spread));
-               else
+               elsif Nobs >= 2 then
                   for K in Natural'Max (0, Nobs - 6) .. Nobs - 1 loop
                      Use_Obs.Append (C.Geo_Obs (K));
                   end loop;
@@ -6046,6 +6051,19 @@ package body Act is
                      Said_One_Eye := True;
                      Geo_Say ("此刻只有这一只眼看见它 ⇒ 按我自己挪过的那几眼算(前提是它没动;会动的东西这样量不出来)");
                   end if;
+               elsif Known then
+                  Pw := C.Geo_Pw;
+                  if not Said_Known then
+                     Said_Known := True;
+                     Geo_Say ("此刻没有一只眼看得清它 ⇒ 按我上一段量到的位置 (" & Mm (Pw (0)) & "," & Mm (Pw (1)) & "," & Mm (Pw (2))
+                              & ") 走(前提是它没动)");
+                  end if;
+               else
+                  Event := S ("lost: I cannot see the thing you named in this eye right now");
+                  exit;
+               end if;
+               if (Mok or else Nobs >= 2) and then Length (Its_Name) > 0 then
+                  C.Geo_Pw := Pw; C.Geo_Pw_Valid := True; C.Geo_Pw_Name := Its_Name;   --  记住它在哪:下一段看不清时凭这个走
                end if;
             end;
             Pc := Geom.To_Cam (G, Cur, Pw);
@@ -6088,9 +6106,11 @@ package body Act is
                end;
             end if;
             declare
-               --  到它上方 ⇒ 它该落在"指尖合拢那一点"正下方一个张口处:把世界系的"往下一个张口"转进相机系,加到目标上
+               --  到它上方 ⇒ 它该落在"指尖合拢那一点"正下方一个张口处:把世界系的"往下一个张口"转进相机系,加到目标上。
+               --  "上方" = 它躺的那个面的自由一侧:碰过的面按量到的法向,没碰过按重力的上(和转指尖那一条同一个约定)
+               Nn_Up : constant Geom.V3 := (if C.Touch_Valid then C.Touch_N else [0.0, 0.0, 1.0]);
                Down_C : constant Geom.V3 :=
-                 (if Above then Geom.Ap (Geom.Tr (Geom.Cam_R (G, Cur)), [0.0, 0.0, -G.Gap]) else [0.0, 0.0, 0.0]);
+                 (if Above then Geom.Ap (Geom.Tr (Geom.Cam_R (G, Cur)), [-G.Gap * Nn_Up (0), -G.Gap * Nn_Up (1), -G.Gap * Nn_Up (2)]) else [0.0, 0.0, 0.0]);
             begin
                D := [Pc (0) - Want (0) - Down_C (0), Pc (1) - Want (1) - Down_C (1), Pc (2) - Want (2) - Down_C (2)];
             end;
@@ -6294,10 +6314,18 @@ package body Act is
                   --  最后一步它进了指缝、被手指挡住也正常:上一眼已经在两倍容差内(倍数,无量纲)
                   if Dist <= 2.0 * Tol then
                      Event := S ("amount: arrived (I lost sight of it on the last step; it was " & Mm (Dist) & " from where my fingers close)");
+                     exit;
+                  elsif Known or else C.Geo_Pw_Valid then
+                     --  看不见了,可它在哪我这一段(或上一段)量过 ⇒ 凭记住的位置走完
+                     Known := True;
+                     if not Said_Known then
+                        Said_Known := True;
+                        Geo_Say ("这一步之后看不见它了 ⇒ 按我量到的位置走完(前提是它没动)");
+                     end if;
                   else
                      Event := S ("lost: I lost sight of it after that step (it was " & Mm (Dist) & " away)");
+                     exit;
                   end if;
-                  exit;
                else
                   C.Geo_Obs.Append (Geom.Obs'(Pose => F.EE (Arm), U => U, V => V));
                end if;
@@ -6717,6 +6745,50 @@ package body Act is
                         return -1;
                      end if;
                      if not Found then
+                        --  🔴 这只眼里指不出它,但它在哪我上一段刚量过(视线交点 / 我自己挪过的几眼)⇒ 按记住的位置绑上,走路凭记住的位置走。
+                        --  H30 2026-09-22 实测:手贴到剪刀 8 mm 时腕眼里它糊了、被切了,Qwen 指不出 ⇒ 名字绑不上、程序编不过、一步不走,
+                        --  而它在哪我明明知道。这不是替脑认东西:名字是脑起的、位置是我量的,只是不再要脑在糊掉的图上再指一次。
+                        if C.Geo_Pw_Valid and then To_String (C.Geo_Pw_Name) = W then
+                           declare
+                              Gc : constant Geom.Cam_Geo := Geo_Of (C, Cam);
+                              A2 : constant Integer := Cam_Arm (C, Cam);
+                              Pu : Long_Float := Long_Float (Kw / 2);   --  投不进这只眼时先记在画面中央(只是个占位,走路不用它)
+                              Pv : Long_Float := Long_Float (Kh / 2);
+                              Front : Boolean := False;
+                              Bt : Boxed_Thing;
+                              It : Item;
+                              At_Bx : Integer := -1;
+                           begin
+                              if A2 < 0 and then Gc.Fixed then
+                                 Geom.Project_Fixed (Gc, C.Geo_Pw, Pu, Pv, Front);
+                              elsif A2 >= 0 and then Gc.Valid and then Gc.F > 0.0 and then A2 < Integer (F.EE.Length) then
+                                 Geom.Project (Gc, F.EE (Natural (A2)), C.Geo_Pw, Pu, Pv, Front);
+                              end if;
+                              if not Front or else Pu < 0.0 or else Pv < 0.0 or else Pu >= Long_Float (Kw) or else Pv >= Long_Float (Kh) then
+                                 Pu := Long_Float (Kw / 2); Pv := Long_Float (Kh / 2);
+                              end if;
+                              Bt.Name := To_Unbounded_String (W); Bt.Cam := Cam;
+                              Bt.Cu := Pu / Long_Float (Kw); Bt.Cv := Pv / Long_Float (Kh);
+                              Bt.Seen := False; Bt.Blind := True;   --  这只眼里确实指不出它;走路按名字用记住的位置,不用这只眼的像素
+                              for Bi in 0 .. Natural (C.Boxed.Length) - 1 loop
+                                 if C.Boxed (Bi).Cam = Cam and then To_String (C.Boxed (Bi).Name) = W then
+                                    At_Bx := Integer (Bi);
+                                 end if;
+                              end loop;
+                              if At_Bx >= 0 then
+                                 C.Boxed.Replace_Element (Natural (At_Bx), Bt);
+                              else
+                                 C.Boxed.Append (Bt);
+                              end if;
+                              It.Kind := Thing_Remembered; It.Located := True; It.Cam := Cam;
+                              It.Cu := Bt.Cu; It.Cv := Bt.Cv;
+                              C.Items.Append (It);
+                              Put_Line ("[身] 📦 " & W & ":这只眼里指不出它,可它在哪我上一段量过 (" & Mm (C.Geo_Pw (0)) & "," & Mm (C.Geo_Pw (1)) & ","
+                                        & Mm (C.Geo_Pw (2)) & ") ⇒ 按记住的位置绑上(前提是它没动)");
+                              C.Name_Cam := Integer (Cam);
+                              return Integer (C.Items.Length);
+                           end;
+                        end if;
                         --  脑看着图说"这只眼里我指不出它" ⇒ 记下【这个名字在这只眼里】,选眼的时候跳过它(不记就来回弹)。
                         Mark_Blind (C, Cam, To_Unbounded_String (W));
                         Tried := To_Unbounded_String ("我在这只眼里指不出它在哪");
@@ -8031,7 +8103,7 @@ package body Act is
                      --  掉回老路,逐通道量表 60 拍一步没走)。farther(back)手里没东西时 = 沿来时的方向反着走(Geo_Away)。
                      if (Rl = "at" or else Rl = "into" or else Rl = "onto" or else Rl = "above" or else Rl = "front")
                        and then G0.Of_Item >= 1 and then G0.Of_Item <= Natural (C.Items.Length)
-                       and then C.Items (G0.Of_Item - 1).Kind = Thing and then C.Items (G0.Of_Item - 1).Located
+                       and then C.Items (G0.Of_Item - 1).Kind in Thing | Thing_Remembered and then C.Items (G0.Of_Item - 1).Located
                      then
                         --  🔴 above 在【长在手上的眼】里按"画面里的上方"没法执行也没有物理意义(那只眼跟着手转);
                         --  这里按重力的"上"走:它正上方、高出一个张口。T5–T7 实测 Qwen 的抓法每一段都从 above 起手。
@@ -8080,10 +8152,37 @@ package body Act is
          if Geo_Case = 1 then
             Put_Line ("[身] ⚙ 几何走法:" & To_String (Geo_Desc)
                       & (if Natural (Geo_Cam) /= Cam then "(你看着第" & Codec.Img (Cam) & " 只眼,走路用长在这条胳膊上的第" & Codec.Img (Natural (Geo_Cam)) & " 只)" else ""));
-            Geo_Approach (L, C, F, Natural (Geo_Cam), Natural (Own), Geo_Slot_Now, Step_Limit, Event, Steps_Taken, Beats,
-                          Above => Geo_Above, Amt => Amount_Factor (Say.Moves (0).Amount),
-                          Until_Touch => Until_K in Monitor.U_Contact | Monitor.U_Resist,
-                          Name => Geo_Name);
+            if Geo_Above then
+               Geo_Approach (L, C, F, Natural (Geo_Cam), Natural (Own), Geo_Slot_Now, Step_Limit, Event, Steps_Taken, Beats,
+                             Above => True, Amt => Amount_Factor (Say.Moves (0).Amount),
+                             Until_Touch => Until_K in Monitor.U_Contact | Monitor.U_Resist,
+                             Name => Geo_Name);
+            else
+               --  🔴 往一件躺在面上的东西走 = 先到它上方一个张口、指尖转向它躺的面,再顺着法向贴上去(手从面的自由一侧进场)。
+               --  这是两指夹爪对【任何】躺着的东西的几何,不是哪个任务的规矩:08-15 架构 §1.2b"手从哪个方向进场"就是四格定不下来、
+               --  要由看得见空隙的一方填的那一个自由度;09-05 owner 判"从形状算从哪边进不算作弊"。
+               --  H26 2026-09-22 我当脑分两句说的(above,再 touching)⇒ 夹住了;H28/H30 Qwen 不说 above 直接 nearer ⇒ 手平着到,指尖悬在剪刀上方合空。
+               --  脑要是自己说 above,照样走上面那一支;它说 touching/nearer/onto,进场那一段由我来。
+               declare
+                  Ev1 : Unbounded_String;
+                  St1, Bt1, St2, Bt2 : Natural;
+               begin
+                  Geo_Approach (L, C, F, Natural (Geo_Cam), Natural (Own), Geo_Slot_Now, 0, Ev1, St1, Bt1,
+                                Above => True, Amt => Amount_Factor (Say.Moves (0).Amount), Until_Touch => False, Name => Geo_Name);
+                  Put_Line ("[身] 📐 进场:先到它上方 ⇒ " & To_String (Ev1) & "(" & Codec.Img (St1) & " 推)");
+                  if Index (Ev1, "amount: arrived") > 0 then
+                     Geo_Approach (L, C, F, Natural (Geo_Cam), Natural (Own), Geo_Slot_Now, Step_Limit, Event, St2, Bt2,
+                                   Above => False, Amt => Amount_Factor (Say.Moves (0).Amount),
+                                   Until_Touch => Until_K in Monitor.U_Contact | Monitor.U_Resist,
+                                   Name => Geo_Name);
+                     Steps_Taken := St1 + St2; Beats := Bt1 + Bt2;
+                     Append (Event, " (I first came to one hand-opening above it with my fingers pointed at it, then came down onto it)");
+                  else
+                     Event := S ("on the way to a point above it: ") & Ev1;
+                     Steps_Taken := St1; Beats := Bt1;
+                  end if;
+               end;
+            end if;
             Feel (C, F);
             Report := Report & "you asked " & To_String (Geo_Desc) & ": " & To_String (Event) & ". I took " & Codec.Img (Steps_Taken) & " pushes; ";
             Put_Line ("[身]   这一段:" & Codec.Img (Steps_Taken) & " 推 · " & Codec.Img (Beats) & " 拍 · 这一集累计 " & Codec.Img (Plug.Steps (L)) & " 拍");
