@@ -330,8 +330,11 @@ package body Geom is
       N : constant Natural := Natural (O.Length);
       Fit_F : constant Boolean := G.F <= 0.0;          --  焦距没给 ⇒ 一起解(官方 RoboDojo 观测就没有内参)
       Np : constant Natural := (if Fit_F then 7 else 6);   --  转向量 3 + 那东西的世界位置 3 (+ 焦距)
-      --  焦距的起点:没给时按"画幅宽 = 焦距"起步(约 53° 视场,只是搜索起点,最小二乘会把它改掉)
-      F0 : constant Long_Float := (if Fit_F then 2.0 * G.Cx else G.F);
+      --  仪器给了焦距先验(带不确定度)⇒ 残差多一条,和像素残差一起最小二乘
+      Use_Prior : constant Boolean := Fit_F and then G.F_Prior > 0.0 and then G.F_Prior_Sd > 0.0;
+      Nr : constant Natural := N + (if Use_Prior then 1 else 0);   --  残差槽数:每停一个 + 先验一个
+      --  焦距的起点:仪器给了就从仪器的值起步;没给时按"画幅宽 = 焦距"起步(约 53° 视场,只是搜索起点,最小二乘会把它改掉)
+      F0 : constant Long_Float := (if not Fit_F then G.F elsif Use_Prior then G.F_Prior else 2.0 * G.Cx);
       Gen : Ada.Numerics.Float_Random.Generator;
       Best_Cost : Long_Float := Long_Float'Last;
       Best_P : Param_Vec (0 .. Np - 1) := [others => 0.0];
@@ -364,6 +367,16 @@ package body Geom is
                end if;
             end;
          end loop;
+         if Use_Prior then
+            declare
+               Dp : constant Long_Float := (Gt.F - G.F_Prior) / G.F_Prior_Sd;   --  先验那一条残差(以不确定度为单位,无量纲;像素残差按 1 px 噪声计)
+            begin
+               Sum := Sum + Dp * Dp;
+               if Fill /= null then
+                  Fill (N, Dp, 0.0);
+               end if;
+            end;
+         end if;
          R := Sqrt (Sum / Long_Float (Natural'Max (1, N)));
       end Resid;
       function Cost (P : Param_Vec) return Long_Float is
@@ -441,7 +454,7 @@ package body Geom is
          Cur : Long_Float := Best_Cost;
          Steps : constant Param_Vec (0 .. 6) := [1.0e-4, 1.0e-4, 1.0e-4, 1.0e-4, 1.0e-4, 1.0e-4, 1.0];   --  差分步(弧度 / 米 / 像素,极小量)
       begin
-         LM_Refine (P, N, Steps (0 .. Np - 1), 40, Resid'Access, Cur);
+         LM_Refine (P, Nr, Steps (0 .. Np - 1), 40, Resid'Access, Cur);
          G.R_Ce := Rodrigues ([P (0), P (1), P (2)]);
          if Fit_F then
             G.F := P (6);
@@ -578,7 +591,9 @@ package body Geom is
       N : constant Natural := Natural (O.Length);
       Fit_F : constant Boolean := G.F <= 0.0;          --  焦距没给 ⇒ 一起解
       Np : constant Natural := (if Fit_F then 7 else 6);   --  转向量 3 + 相机位置 3 (+ 焦距)
-      F0 : constant Long_Float := (if Fit_F then 2.0 * G.Cx else G.F);
+      Use_Prior : constant Boolean := Fit_F and then G.F_Prior > 0.0 and then G.F_Prior_Sd > 0.0;   --  仪器的焦距先验,同 Fit
+      Nr : constant Natural := N + (if Use_Prior then 1 else 0);   --  残差槽数:每停一个 + 先验一个
+      F0 : constant Long_Float := (if not Fit_F then G.F elsif Use_Prior then G.F_Prior else 2.0 * G.Cx);
       Gen : Ada.Numerics.Float_Random.Generator;
       Best_Cost : Long_Float := Long_Float'Last;
       Best_P : Param_Vec (0 .. Np - 1) := [others => 0.0];
@@ -610,6 +625,16 @@ package body Geom is
                end if;
             end;
          end loop;
+         if Use_Prior then
+            declare
+               Dp : constant Long_Float := (Gt.F - G.F_Prior) / G.F_Prior_Sd;   --  先验那一条残差(以不确定度为单位,无量纲;像素残差按 1 px 噪声计)
+            begin
+               Sum := Sum + Dp * Dp;
+               if Fill /= null then
+                  Fill (N, Dp, 0.0);
+               end if;
+            end;
+         end if;
          R := Sqrt (Sum / Long_Float (Natural'Max (1, N)));
       end Resid;
       function Cost (P : Param_Vec) return Long_Float is
@@ -672,7 +697,7 @@ package body Geom is
          Cur : Long_Float := Best_Cost;
          Steps : constant Param_Vec (0 .. 6) := [1.0e-4, 1.0e-4, 1.0e-4, 1.0e-4, 1.0e-4, 1.0e-4, 1.0];   --  差分步(弧度 / 米 / 像素,极小量)
       begin
-         LM_Refine (P, N, Steps (0 .. Np - 1), 60, Resid'Access, Cur);
+         LM_Refine (P, Nr, Steps (0 .. Np - 1), 60, Resid'Access, Cur);
          G.R_Ce := Rodrigues ([P (0), P (1), P (2)]);
          G.Pos := [P (3), P (4), P (5)];
          if Fit_F then
@@ -757,6 +782,7 @@ package body Geom is
             end loop;
             Append (B, "],""tip_valid"":" & (if G.Tip_Valid then "true" else "false") & ",""tip"":[" & Codec.Fmt (G.Tip (0), 5) & "," & Codec.Fmt (G.Tip (1), 5) & "," &
                       Codec.Fmt (G.Tip (2), 5) & "],""gap"":" & Codec.Fmt (G.Gap, 5) & ",""stride"":" & Codec.Fmt (G.Stride, 5) &
+                      ",""f_meas"":" & Codec.Fmt (G.F_Meas, 3) & ",""f_prior"":" & Codec.Fmt (G.F_Prior, 3) & ",""f_prior_sd"":" & Codec.Fmt (G.F_Prior_Sd, 3) &
                       ",""fixed"":" & (if G.Fixed then "true" else "false") & ",""pos"":[" & Codec.Fmt (G.Pos (0), 5) & "," & Codec.Fmt (G.Pos (1), 5) & "," & Codec.Fmt (G.Pos (2), 5) & "]}");
          end;
       end loop;
@@ -836,9 +862,18 @@ package body Geom is
                   G.Gap := Json.Num (D, Json.Get (D, Nd, "gap"));
                   declare
                      Sn : constant Integer := Json.Get (D, Nd, "stride");   --  老文件没有这一项 ⇒ 0,开机再量
+                     Fm : constant Integer := Json.Get (D, Nd, "f_meas");
+                     Fp : constant Integer := Json.Get (D, Nd, "f_prior");
+                     Fs : constant Integer := Json.Get (D, Nd, "f_prior_sd");
                   begin
                      if Sn >= 0 then
                         G.Stride := Json.Num (D, Sn);
+                     end if;
+                     if Fm >= 0 then
+                        G.F_Meas := Json.Num (D, Fm);
+                     end if;
+                     if Fp >= 0 and then Fs >= 0 then
+                        G.F_Prior := Json.Num (D, Fp); G.F_Prior_Sd := Json.Num (D, Fs);
                      end if;
                   end;
                   declare

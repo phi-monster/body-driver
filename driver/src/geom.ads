@@ -17,6 +17,9 @@ package Geom is
       Valid : Boolean := False;        --  相机朝向量过了
       F, Cx, Cy : Long_Float := 0.0;   --  焦距(像素)、主点。焦距:身体给了就用;没给(官方 RoboDojo 观测就没有)就在量朝向时一起解出来
       F_Meas : Long_Float := 0.0;      --  量朝向时顺带解出来的焦距(和给的那份对账用;没给时它就是 F)
+      --  仪器看一张图报的焦距 ± 不确定度(像素;0 = 没有)。没给内参时联合解里当一条残差 (F - 先验) / 不确定度:
+      --  基线短、焦距和距离分不开时把焦距按在仪器的范围里;基线够长时观测压过它(V1B 2026-09-24:2.6 cm 星形基线把 397 解成 992 / 59)
+      F_Prior, F_Prior_Sd : Long_Float := 0.0;
       R_Ce : M3 := Identity;           --  相机 → 手(列 = 相机轴在手坐标系里)
       Rms : Long_Float := 0.0;         --  量朝向时的像素残差
       Tip_Valid : Boolean := False;

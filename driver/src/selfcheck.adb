@@ -551,6 +551,61 @@ begin
                 "焦距一起解:6 停 ⇒ 焦距 " & Codec.Fmt (Gf.F, 1) & " px(真 400)· 朝向差 " & Codec.Fmt (Da, 4) & " rad · 残差 " & Codec.Fmt (Gf.Rms, 3) & " px");
       end;
    end;
+   --  🔴 焦距先验(2026-09-24):仪器看一张图报 440 ± 40 px(像 GeoCalib 在真身上那样偏一成),真值 400。
+   --  基线只有 1 cm、每停 1 px 抖动时焦距和距离分不开:没先验解飞,有先验按在仪器的范围里;基线 5 cm 时观测压过先验,仍解回 400 附近
+   declare
+      Gt : Geom.Cam_Geo;
+      Pw : constant Geom.V3 := [0.05, 0.4, 0.2];   --  盯着的那块东西在世界里的位置(合成)
+      Seed : Long_Long_Integer := 3;
+      function Jit return Long_Float is   --  确定性伪随机 ±1 px(测试数据自己的抖动,不是驱动里的常数)
+      begin
+         Seed := (Seed * 1103515245 + 12345) mod 2147483648;
+         return Long_Float (Integer ((Seed / 65536) mod 2001) - 1000) / 1000.0;
+      end Jit;
+      type Stops is array (Positive range <>) of Geom.V3;
+      Star : constant Stops := [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 1.0], [1.0, 1.0, 0.0]];   --  星形:从原处各挪一步(单位步,乘 Amp)
+      --  驱动真实走的 8 步累计路径(Geo_Calibrate):原处 + 每步相对上一停,三根轴各两步、再回一半 ⇒ 每根轴最远 2 步
+      Path : constant Stops := [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0], [2.0, 0.0, 1.0], [2.0, 0.0, 2.0], [2.0, 1.0, 2.0], [2.0, 2.0, 2.0], [1.0, 2.0, 2.0], [0.0, 2.0, 2.0]];
+      procedure Synth (Moves : Stops; Amp : Long_Float; Obs : out Geom.Obs_Vectors.Vector) is
+      begin
+         Obs.Clear;
+         for M of Moves loop
+            declare
+               P : constant Plug.Arm_Pose := [Amp * M (0), Amp * M (1), Amp * M (2) + 0.6, 1.0, 0.0, 0.0, 0.0];   --  离东西约 0.6 m(合成)
+               U, V : Long_Float;
+               Fr : Boolean;
+            begin
+               Geom.Project (Gt, P, Pw, U, V, Fr);
+               Obs.Append (Geom.Obs'(Pose => P, U => U + Jit, V => V + Jit));
+            end;
+         end loop;
+      end Synth;
+      Obs : Geom.Obs_Vectors.Vector;
+      G_No, G_Pr, G_Long : Geom.Cam_Geo;
+      Ok_No, Ok_Pr, Ok_Long : Boolean;
+   begin
+      Gt.F := 400.0; Gt.Cx := 320.0; Gt.Cy := 240.0; Gt.R_Ce := Geom.Rodrigues ([0.2, -0.3, 0.1]); Gt.Valid := True;
+      Synth (Star, 0.01, Obs);   --  短基线:星形、每停挪 1 cm
+      G_No.F := 0.0; G_No.Cx := 320.0; G_No.Cy := 240.0;
+      Geom.Fit (G_No, Obs, Ok_No);
+      G_Pr.F := 0.0; G_Pr.Cx := 320.0; G_Pr.Cy := 240.0; G_Pr.F_Prior := 440.0; G_Pr.F_Prior_Sd := 40.0;
+      Geom.Fit (G_Pr, Obs, Ok_Pr);
+      Check (Ok_Pr and then abs (G_Pr.F - 400.0) < 40.0 and then (not Ok_No or else abs (G_No.F - 400.0) > abs (G_Pr.F - 400.0)),
+             "焦距先验:短基线(星形 1 cm)+ 1 px 抖动 ⇒ 没先验 " & (if Ok_No then Codec.Fmt (G_No.F, 0) else "解不出") & " px,有先验(440±40)" & Codec.Fmt (G_Pr.F, 0)
+             & " px(真 400,该在先验一个不确定度内、比没先验近)");
+      Synth (Star, 0.05, Obs);   --  星形、每停挪 5 cm:观测还是压不过偏一成的先验(2026-09-24 实测 433)—— 这就是为什么要走累计路径
+      G_Long.F := 0.0; G_Long.Cx := 320.0; G_Long.Cy := 240.0; G_Long.F_Prior := 440.0; G_Long.F_Prior_Sd := 40.0;
+      Geom.Fit (G_Long, Obs, Ok_Long);
+      Put_Line ("     · 焦距先验:星形 5 cm + 偏一成的先验 ⇒ " & Codec.Fmt (G_Long.F, 1) & " px(真 400;信息量不够,不当闸)");
+      Synth (Path, 0.06, Obs);   --  8 步累计路径、每步 6 cm(每根轴最远 12 cm):没先验、有偏先验各解一次
+      G_No.F := 0.0; G_No.Cx := 320.0; G_No.Cy := 240.0; G_No.F_Prior := 0.0; G_No.F_Prior_Sd := 0.0;
+      Geom.Fit (G_No, Obs, Ok_No);
+      G_Long.F := 0.0; G_Long.Cx := 320.0; G_Long.Cy := 240.0; G_Long.F_Prior := 440.0; G_Long.F_Prior_Sd := 40.0;
+      Geom.Fit (G_Long, Obs, Ok_Long);
+      Check (Ok_No and then Ok_Long and then abs (G_No.F - 400.0) < 12.0 and then abs (G_Long.F - 400.0) < 12.0,
+             "焦距先验:8 步累计路径(每步 6 cm)+ 1 px 抖动 ⇒ 没先验 " & Codec.Fmt (G_No.F, 1) & " px,偏一成的先验也压不歪 " & Codec.Fmt (G_Long.F, 1)
+             & " px(真 400,都该在 3% 内)· 残差 " & Codec.Fmt (G_Long.Rms, 2) & " px");
+   end;
    --  🔴 没有深度时量指尖(2026-09-23):指尖 = 自己眼里那条视线上离眼 S 米处;不动的眼两停看见指尖 ⇒ 解 S。合成数据:真值 0.12 m
    declare
       Gf : Geom.Cam_Geo;
