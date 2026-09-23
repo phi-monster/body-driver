@@ -4,6 +4,7 @@
 --  相机约定与 USD 一致:-z 朝前,+y 朝上;像素 u = cx + f·x/(-z),v = cy - f·y/(-z)。
 with Plug;
 with Ada.Containers.Vectors;
+with Ada.Strings.Unbounded;
 package Geom is
    type V3 is array (0 .. 2) of Long_Float;
    type M3 is array (0 .. 2, 0 .. 2) of Long_Float;
@@ -78,6 +79,8 @@ package Geom is
    --  量不动的眼:几次看见指尖在哪(世界位置 + 像素)⇒ 解它的位置和朝向。盲搜初值 + 最小二乘,和 Fit 同一套。
    procedure Fit_Fixed (G : in out Cam_Geo; O : Mark_Vectors.Vector; Ok : out Boolean);
    package V3_Vectors is new Ada.Containers.Vectors (Natural, V3);
+   --  上一次 Fit_Rig / Fit_Fixed_Rig 没解出来的原因(解出来时是空);开机日志原样打出来,不猜
+   Why : Ada.Strings.Unbounded.Unbounded_String;
    --  不动的眼,连指尖一起解(2026-09-25):相机在世界里的朝向 + 位置、焦距(没给就解)、每条臂的指尖离自己那只眼多远(S,米)。
    --  指尖在腕眼里的像素是固定的、量过的 ⇒ 手系里一条已知视线(起点 Ray_O = 相机离手腕原点的偏移,方向 Ray_D 单位向量),指尖 = Ray_O + S · Ray_D,
    --  只差 S 一个数。V1J 2026-09-25 实测:把指尖偏移当 3 个未知数解,手几乎只平移时"指尖偏移"和"相机在哪"完全等价,互相顶替 ⇒ 相机差 24 cm、焦距 204/288。

@@ -610,6 +610,7 @@ package body Geom is
       Nk : Natural := 0;
    begin
       Ok := False; Used := 0;
+      Why := Ada.Strings.Unbounded.To_Unbounded_String ("观测不到 4 笔");
       if N_Pts = 0 or else N < 4 then
          return;
       end if;
@@ -625,6 +626,7 @@ package body Geom is
          end if;
       end loop;
       if Best_Pt < 0 then
+         Why := Ada.Strings.Unbounded.To_Unbounded_String ("没有一个点在 4 停以上都看见");
          return;
       end if;
       declare
@@ -639,6 +641,7 @@ package body Geom is
          Gi.Off := [others => 0.0];
          Fit (Gi, Sub, Fok);
          if not Fok then
+            Why := Ada.Strings.Unbounded.To_Unbounded_String ("起点那一个点单独解不出(" & Codec.Img (Natural (Sub.Length)) & " 停)");
             return;
          end if;
       end;
@@ -671,6 +674,7 @@ package body Geom is
          end if;
       end loop;
       if Nk = 0 then
+         Why := Ada.Strings.Unbounded.To_Unbounded_String ("按起点三角化后没有一个点在相机前面");
          return;
       end if;
       declare
@@ -801,6 +805,7 @@ package body Geom is
          end;
          Resid (P, Cur, null);
          if Behind > 0 then
+            Why := Ada.Strings.Unbounded.To_Unbounded_String ("解出来还有 " & Codec.Img (Behind) & " 笔观测的点跑到相机后面(残差 " & Codec.Fmt (Cur, 2) & " px)");
             return;   --  解出来还有点跑到相机后面 ⇒ 不是解,不存
          end if;
          declare
@@ -812,14 +817,19 @@ package body Geom is
             G.F_Sd := (if Fit_F then Sd (6) else 0.0);
             --  不确定度比量本身还大 = 方程分不开它(横着挪、不转:焦距和远近绑着)⇒ 不算解出来
             if (Fit_F and then G.F_Sd >= P (6)) or else G.Rot_Sd >= 1.0 then   --  朝向的不确定度 ≥ 1 弧度 = 根本没定(无量纲)
+               Why := Ada.Strings.Unbounded.To_Unbounded_String ("不确定度比量本身还大:焦距 " & Codec.Fmt (P (Base - 1), 1) & " ± " & Codec.Fmt (G.F_Sd, 1)
+                                                                & " px,朝向 ± " & Codec.Fmt (G.Rot_Sd, 3) & " rad,偏移 ± " & Codec.Fmt (G.Off_Sd, 3) & " m(残差 "
+                                                                & Codec.Fmt (Cur, 2) & " px," & Codec.Img (Nk) & " 点," & Codec.Img (Nr) & " 笔)");
                return;
             end if;
-            --  这套几何是无畸变针孔:焦距短到半幅宽 ÷ 焦距 > tan 60°(视场 > 120°)时针孔模型本身不成立,
+            --  这套几何是无畸变针孔:焦距短到半幅宽 ÷ 焦距 > tan 60°(视场 > 120°)时针孔假设本身不成立,
             --  这样的"解"是拟合把错数据凑平的结果(G1M 2026-09-25 左眼:5 个点解出 47.8 px),不存
             if Fit_F and then G.Cx > 1.732 * P (6) then
+               Why := Ada.Strings.Unbounded.To_Unbounded_String ("焦距解成 " & Codec.Fmt (P (6), 1) & " px,视场超过 120°,针孔假设不成立(残差 " & Codec.Fmt (Cur, 2) & " px)");
                return;
             end if;
          end;
+         Why := Ada.Strings.Unbounded.Null_Unbounded_String;
          G.R_Ce := Rodrigues ([P (0), P (1), P (2)]);
          G.Off := [P (3), P (4), P (5)];
          if Fit_F then
@@ -1099,6 +1109,7 @@ package body Geom is
       end Tip_World;
    begin
       Ok := False; Tip_H.Clear;
+      Why := Ada.Strings.Unbounded.To_Unbounded_String ("观测不到 4 笔");
       if N_Arms = 0 or else N < 4 then
          return;
       end if;
@@ -1116,7 +1127,12 @@ package body Geom is
          end if;
       end loop;
       --  方程数(每笔观测两条)不到未知数的两倍就是在猜(V1I 2026-09-24:10 笔观测解 13 个未知数,解出相机在 2.8 m 外、残差 0.27 px)
-      if Best_Arm < 0 or else 2 * N_Used < 2 * ((if Fit_F then 7 else 6) + Nk) then
+      if Best_Arm < 0 then
+         Why := Ada.Strings.Unbounded.To_Unbounded_String ("没有一条臂既有视线又在 4 停以上看见指尖");
+         return;
+      end if;
+      if 2 * N_Used < 2 * ((if Fit_F then 7 else 6) + Nk) then
+         Why := Ada.Strings.Unbounded.To_Unbounded_String ("方程数(" & Codec.Img (2 * N_Used) & ")不到未知数的两倍");
          return;
       end if;
       --  起点:观测最多的那条臂,先把指尖当成就在视线起点(S = 0),用老的单点法(盲搜 + 精修)给相机位姿和焦距一个像样的起点
@@ -1131,6 +1147,7 @@ package body Geom is
          end loop;
          Fit_Fixed (Gi, Marks, Fok);
          if not Fok then
+            Why := Ada.Strings.Unbounded.To_Unbounded_String ("起点那条臂单独解不出(" & Codec.Img (Natural (Marks.Length)) & " 笔)");
             return;
          end if;
       end;
@@ -1254,6 +1271,7 @@ package body Geom is
          end;
          Resid (P, Cur, null);
          if Behind > 0 then
+            Why := Ada.Strings.Unbounded.To_Unbounded_String ("解出来还有 " & Codec.Img (Behind) & " 笔指尖跑到相机后面(残差 " & Codec.Fmt (Cur, 2) & " px)");
             return;   --  解出来还有指尖跑到相机后面 ⇒ 不是解,不存
          end if;
          declare
@@ -1277,9 +1295,13 @@ package body Geom is
             --  位置的不确定度比手挪过的量程还大、或焦距的不确定度比焦距还大 = 方程分不开 ⇒ 不算解出来
             --  (V1I / G1K 2026-09-25:相机解到 2.8 m / 120 m 外、残差却只有零点几像素,就是这种"解")
             if G.Pos_Sd >= Span or else (Fit_F and then G.F_Sd >= P (6)) or else G.Rot_Sd >= 1.0 then
+               Why := Ada.Strings.Unbounded.To_Unbounded_String ("不确定度比量本身还大:位置 ± " & Codec.Fmt (G.Pos_Sd, 3) & " m(手挪过 " & Codec.Fmt (Span, 3) & " m),焦距 "
+                                                                & Codec.Fmt (P (Base - 1), 1) & " ± " & Codec.Fmt (G.F_Sd, 1) & " px,朝向 ± " & Codec.Fmt (G.Rot_Sd, 3)
+                                                                & " rad(残差 " & Codec.Fmt (Cur, 2) & " px," & Codec.Img (Nr) & " 笔)");
                return;
             end if;
          end;
+         Why := Ada.Strings.Unbounded.Null_Unbounded_String;
          G.R_Ce := Rodrigues ([P (0), P (1), P (2)]);
          G.Pos := [P (3), P (4), P (5)];
          if Fit_F then

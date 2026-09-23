@@ -6060,6 +6060,24 @@ package body Act is
          Instrument.Track_End (To_String (C.Inst_Host), C.Inst_Port, Tid);
       end if;
       Head_Watch_End (C);
+      --  观测落盘(BL_DUMP):离线用 geoexam 重解,不用再开一小时的炮(G1N 2026-09-25:两只眼都"解不出",日志没说为什么)
+      if Dump /= "" then
+         declare
+            Fo : Ada.Text_IO.File_Type;
+         begin
+            Ada.Text_IO.Create (Fo, Ada.Text_IO.Out_File, Dump & "/geo_cam" & Codec.Img (Cam) & "_obs.txt");
+            Ada.Text_IO.Put_Line (Fo, Codec.Img (Cw) & " " & Codec.Img (Ch) & " " & Codec.Fmt (G.Cx, 3) & " " & Codec.Fmt (G.Cy, 3) & " "
+                                  & Codec.Fmt ((if F.Cams (Cam).Has_K then G.F else 0.0), 3) & " " & Codec.Img (Natural (Cur.Length)));
+            for Ob of Obs loop
+               Ada.Text_IO.Put_Line (Fo, Codec.Img (Ob.Pt) & " " & Codec.Fmt (Ob.U, 3) & " " & Codec.Fmt (Ob.V, 3) & " " & Codec.Fmt (Ob.Pose (0), 6) & " " & Codec.Fmt (Ob.Pose (1), 6)
+                                     & " " & Codec.Fmt (Ob.Pose (2), 6) & " " & Codec.Fmt (Ob.Pose (3), 7) & " " & Codec.Fmt (Ob.Pose (4), 7) & " " & Codec.Fmt (Ob.Pose (5), 7)
+                                     & " " & Codec.Fmt (Ob.Pose (6), 7));
+            end loop;
+            Ada.Text_IO.Close (Fo);
+         exception
+            when others => null;
+         end;
+      end if;
       declare
          Used : Natural;
       begin
@@ -6073,7 +6091,7 @@ package body Act is
                      & " · 朝向 ± " & Codec.Fmt (G.Rot_Sd * Deg, 2) & "° · 相机离手腕原点 (" & Mm (G.Off (0)) & "," & Mm (G.Off (1)) & "," & Mm (G.Off (2)) & ") ± "
                      & Mm (G.Off_Sd) & ",存进 " & To_String (C.Geo_Path));
          else
-            Geo_Say ("朝向解不出来(记了 " & Codec.Img (Natural (Obs.Length)) & " 笔观测,没有一个点在 4 停以上都看见)");
+            Geo_Say ("朝向解不出来(记了 " & Codec.Img (Natural (Obs.Length)) & " 笔观测):" & To_String (Geom.Why));
          end if;
       end;
    end Geo_Calibrate;
@@ -6209,10 +6227,31 @@ package body Act is
                   Ray_O.Append (Oh); Ray_D.Append (Dh);
                end;
             end loop;
+            if Codec.Env ("BL_DUMP") /= "" then
+               declare
+                  Fo : Ada.Text_IO.File_Type;
+               begin
+                  Ada.Text_IO.Create (Fo, Ada.Text_IO.Out_File, Codec.Env ("BL_DUMP") & "/head_obs.txt");
+                  Ada.Text_IO.Put_Line (Fo, Codec.Img (F.Cams (Wc).W) & " " & Codec.Img (F.Cams (Wc).H) & " " & Codec.Fmt (G.Cx, 3) & " " & Codec.Fmt (G.Cy, 3) & " "
+                                        & Codec.Fmt (G.F, 3) & " " & Codec.Img (C.Map.Arms));
+                  for A in 0 .. C.Map.Arms - 1 loop
+                     Ada.Text_IO.Put_Line (Fo, "ray " & Codec.Img (A) & " " & Codec.Fmt (Ray_O (A) (0), 6) & " " & Codec.Fmt (Ray_O (A) (1), 6) & " " & Codec.Fmt (Ray_O (A) (2), 6)
+                                           & " " & Codec.Fmt (Ray_D (A) (0), 7) & " " & Codec.Fmt (Ray_D (A) (1), 7) & " " & Codec.Fmt (Ray_D (A) (2), 7));
+                  end loop;
+                  for Ob of C.Fixed_Obs loop
+                     Ada.Text_IO.Put_Line (Fo, "obs " & Codec.Img (Ob.Pt) & " " & Codec.Fmt (Ob.U, 3) & " " & Codec.Fmt (Ob.V, 3) & " " & Codec.Fmt (Ob.Pose (0), 6) & " "
+                                           & Codec.Fmt (Ob.Pose (1), 6) & " " & Codec.Fmt (Ob.Pose (2), 6) & " " & Codec.Fmt (Ob.Pose (3), 7) & " " & Codec.Fmt (Ob.Pose (4), 7)
+                                           & " " & Codec.Fmt (Ob.Pose (5), 7) & " " & Codec.Fmt (Ob.Pose (6), 7));
+                  end loop;
+                  Ada.Text_IO.Close (Fo);
+               exception
+                  when others => null;
+               end;
+            end if;
             Geom.Fit_Fixed_Rig (G, C.Fixed_Obs, Ray_O, Ray_D, Tip_H, Fok);
          end;
          if not Fok then
-            Geo_Say ("不动的眼解不出来(" & Codec.Img (Natural (C.Fixed_Obs.Length)) & " 笔指尖观测:要么没有一条臂在 4 停以上都看见指尖,要么那条臂的眼还没量、没有视线,要么方程数不到未知数的两倍,要么解出来有指尖跑到相机后面,要么位置/焦距的不确定度比量本身还大)");
+            Geo_Say ("不动的眼解不出来(" & Codec.Img (Natural (C.Fixed_Obs.Length)) & " 笔指尖观测):" & To_String (Geom.Why));
             return;
          end if;
          C.Geo.Replace_Element (Wc, G);
