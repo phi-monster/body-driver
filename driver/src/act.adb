@@ -1109,6 +1109,10 @@ package body Act is
       T : Unbounded_String;
       Named_U, Named_V : Long_Float := -1.0;
       Have_Named : Boolean := False;
+      --  语言的根(2026-09-23):有能合拢的手 ⇒ 脑的句子只说【东西的量往哪变】,我身上的零件它点不到、也不该看见
+      --  (H45 实测:纸上列着 "a finger of arm 1 … grip 2",9B 的脑就把 "reach arm leftwards"、"grip above …" 填进东西的位置)。
+      --  零件照旧进清单(绑 grasper 要用),只是不写给脑、不画框。
+      Qmode : constant Boolean := C.Map.Arms > 0 and then Jaws_Of (C, 0) > 0;
       function Rel (U, V : Long_Float) return String is
          Half : constant String := (if U < 0.5 then "LEFT" else "RIGHT");
       begin
@@ -1144,6 +1148,9 @@ package body Act is
       begin
          It.Cam := Cam;   --  这一块是在哪台相机里看见的:清单跨相机之后,这一位是它唯一的落脚点
          C.Items.Append (It);
+         if Qmode and then It.Kind in Finger | Grip | Piece then
+            return;   --  零件进清单不进纸(见 Qmode)
+         end if;
          if It.Located then
             Draw.Numbered_Box (RGB, Cw, Ch, It.X0, It.Y0, It.X1, It.Y1, Natural (C.Items.Length), Col, Thick);
          end if;
@@ -1260,7 +1267,9 @@ package body Act is
                Append (T, "  WHAT I HAVE DONE BEFORE: nothing - this is the first stretch I can remember." & ASCII.LF);
             end if;
          end;
-      Append (T, "PIECES OF YOURSELF (measured just now: you moved one channel at a time and watched which part of the picture followed; you closed each hand on nothing and watched which pixels swept). Each is boxed and NUMBERED on the picture in orange:" & ASCII.LF);
+      if not Qmode then
+         Append (T, "PIECES OF YOURSELF (measured just now: you moved one channel at a time and watched which part of the picture followed; you closed each hand on nothing and watched which pixels swept). Each is boxed and NUMBERED on the picture in orange:" & ASCII.LF);
+      end if;
       for A in 0 .. C.Map.Arms - 1 loop
        --  一条臂上量到几个抓握通道就列几组:两指手 1 组,五指手 5 组。代码里没有"一只手一个夹爪"这个假设。
        for Jk in 0 .. Jaws_Of (C, A) - 1 loop
@@ -1309,7 +1318,7 @@ package body Act is
                     Sqrt ((Z.A.Cu - Z.B.Cu) ** 2 + (Z.A.Cv - Z.B.Cv) ** 2);
                begin
                   --  比的是两个量出来的量,没有人拍的系数:隔得比张幅还远 ⇒ 对不上
-                  if Sep > Z.Span + Z.Span then
+                  if Sep > Z.Span + Z.Span and then not Qmode then
                      Append (T, "  (careful: I placed the two jaws of arm " & Codec.Img (A + 1)
                              & " " & Codec.Fmt (Sep, 3) & " of the picture apart, but the jaw span I measured on myself is only "
                              & Codec.Fmt (Z.Span, 3) & " - they cannot both be right, so where I think my hand is in this"
@@ -7060,9 +7069,32 @@ package body Act is
                      for Bi in 0 .. Natural (C.Boxed.Length) - 1 loop
                         declare
                            Old : constant String := To_String (C.Boxed (Bi).Name);
+                           --  反过来也算:脑这回写的名字里最长的那个词,整个落在它起过的名字里("mintgreensc" 落在 "mintgreenscissors" 里)
+                           function Longest_Word (S : String) return String is
+                              Bs, Be : Natural := 0;
+                              I : Natural := S'First;
+                           begin
+                              while I <= S'Last loop
+                                 declare
+                                    J : Natural := I;
+                                 begin
+                                    while J <= S'Last and then S (J) /= ' ' loop
+                                       J := J + 1;
+                                    end loop;
+                                    if J - I > Be - Bs then
+                                       Bs := I; Be := J;
+                                    end if;
+                                    I := J + 1;
+                                 end;
+                              end loop;
+                              return (if Be > Bs then S (Bs .. Be - 1) else "");
+                           end Longest_Word;
+                           Lw : constant String := Longest_Word (W);
                         begin
                            if C.Boxed (Bi).Cam = Cam and then C.Boxed (Bi).Seen and then Old'Length > 0 and then Old /= W
-                             and then Ada.Strings.Fixed.Index (W, Old) > 0 and then Item_Of (Bi) > 0
+                             and then (Ada.Strings.Fixed.Index (W, Old) > 0
+                                       or else (Lw'Length > 0 and then Lw /= Old and then Ada.Strings.Fixed.Index (Old, Lw) > 0))
+                             and then Item_Of (Bi) > 0
                            then
                               Put_Line ("[身] 📦 你写的「" & W & "」里含着你起过的名字「" & Old & "」⇒ 当同一件东西");
                               C.Name_Cam := Integer (Cam);

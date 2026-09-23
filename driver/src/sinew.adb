@@ -457,7 +457,7 @@ package body Sinew is
       begin
          while I <= G'Last loop
             if I + Pat'Length - 1 <= G'Last and then G (I .. I + Pat'Length - 1) = Pat then
-               Append (R, Word_Tail (11));
+               Append (R, Word_Tail (23));   --  一个词最多 24 个字母("mintgreenscissors" 17 个;H45 实测 12 个把它自己的名字截断了)
                I := I + Pat'Length;
             else
                Append (R, G (I));
@@ -529,7 +529,7 @@ package body Sinew is
            "<program>   ::= <line> (up to four lines)" & ASCII.LF &
            "<line>      ::= <interval> | <word>" & ASCII.LF &
            "<interval>  ::= do <what> <quantity> <direction> until <outcome>" & ASCII.LF &
-           "<what>      ::= <a name in your words> (one to three plain words, the name you gave the thing; it may NOT be any of the words in this grammar, nor the word item)" & ASCII.LF &
+           "<what>      ::= <the thing's name only> (one to three plain words: the name you use when you point the thing out; not an action, not a part of me; it may NOT be any of the words in this grammar, nor the word item)" & ASCII.LF &
            "<quantity>  ::= " & Bar (Qtys_Usable) & "   (a quantity of that thing that I measure myself and can change)" & ASCII.LF &
            Qty_Gloss (Qtys_Usable) &
            "<direction> ::= up | down" & ASCII.LF &
