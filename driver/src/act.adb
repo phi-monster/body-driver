@@ -5967,6 +5967,7 @@ package body Act is
          declare
             Before : Instrument.Track_Vectors.Vector;
             Shifts : Param_Pixels;
+            Each : Param_Pixels;   --  每个候选在转过去那一停的位移(没看见 = -1);转回来之前记下,转回来后世界点也都回原处了(G1P 2026-09-25:14 个世界点被误判成自己)
          begin
             if Plug.Reset_Pending (L) then
                On_Reset;
@@ -5976,6 +5977,9 @@ package body Act is
             for I in 0 .. Natural (Cur.Length) - 1 loop
                if Cur (I).Seen and then I < Natural (Before.Length) and then Before (I).Seen then
                   Shifts.Append (Sqrt ((Cur (I).U - Before (I).U) ** 2 + (Cur (I).V - Before (I).V) ** 2));
+                  Each.Append (Sqrt ((Cur (I).U - Before (I).U) ** 2 + (Cur (I).V - Before (I).V) ** 2));
+               else
+                  Each.Append (-1.0);
                end if;
             end loop;
             Rot_Stop ([0.0, 0.0, 1.0], -1.0);
@@ -5989,9 +5993,7 @@ package body Act is
                --  剔出去(G1O 2026-09-25 左眼:食指立在画面中间,4 个"不动的点"把焦距拽到 61;离线剔掉后 381 ± 22,和右眼 382 一致)
                if Med > 0.0 then
                   for I in 0 .. Natural (Cur.Length) - 1 loop
-                     if Cur (I).Seen and then I < Natural (Before.Length) and then Before (I).Seen
-                       and then Sqrt ((Cur (I).U - Before (I).U) ** 2 + (Cur (I).V - Before (I).V) ** 2) < Med * Quarter
-                     then
+                     if I < Natural (Each.Length) and then Each (I) >= 0.0 and then Each (I) < Med * Quarter then
                         Dead.Replace_Element (I, True);
                         Cur.Replace_Element (I, Instrument.Track_Pt'(U => Cur (I).U, V => Cur (I).V, Seen => False, Conf => 0.0));
                         N_Self := N_Self + 1;
