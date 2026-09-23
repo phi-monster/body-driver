@@ -306,10 +306,12 @@ begin
    if Plug.Take_Reset (L) then
       Put_Line ("[身] 对方在开机前复位过一次(第一集开始)⇒ 清掉标记,接着量身体");
    end if;
+   --  步幅先量(每条臂只要几拍):标定变长后开机会顶到一集的步数上限,对方复位打断的应该是后面能"量到几停算几停"的段,不是步幅
+   --  (V1F/V1G 2026-09-24:两条臂都"复位打断,一档没试")
+   Act.Geo_Boot_Stride (L, F, C);
    Act.Geo_Boot_Eyes (L, F, C);      --  腕眼:转、探、走,多点连相机偏移一起解;不动的眼顺便记指尖
    Act.Geo_Boot_Fixed (L, F, C);     --  不动的眼:拿记下的指尖观测连它的位姿、焦距、各臂指尖偏移一起解
    Act.Geo_Boot_Support (L, F, C);
-   Act.Geo_Boot_Stride (L, F, C);
    Put_Line ("[身] 身体量完 ⇒ 开始干活(脑在 " & To_String (C.Eye_Host) & ":" & Codec.Img (C.Eye_Port) & (if C.Look_Only then ",只看不动" else "") & ")");
    --  ── 干活循环 ──
    loop
