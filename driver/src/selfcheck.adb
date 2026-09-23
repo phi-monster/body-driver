@@ -630,6 +630,11 @@ begin
                                      Tried => To_Unbounded_String ("我把看得见的每一块都过了一遍,没有一块是它")));
 
       Check (Comp ("do grasper touching the ball small until touched").Ok, "编译:能用的行 ⇒ 收");
+      --  语言的根:「<东西> height up until <结局>」—— 主语是外面的东西,不查手的那几行(H44–H46 实测这一句一直被当"谁去哪"退回)
+      Check (Comp ("do the ball height up until settled").Ok, "编译:「the ball height up」⇒ 收(主语是外面的东西)");
+      Check (not Comp ("do grasper height up until settled").Ok, "编译:「grasper height up」⇒ 退回(量说的是外面的东西)");
+      Check (not Comp ("do the moon height up until settled").Ok, "编译:认不出的东西 height up ⇒ 退回");
+      Check (not Comp ("do the ball weight up until settled").Ok, "编译:不是我量得出的量 ⇒ 退回");
       declare
          V : constant Plan.Verdict := Comp ("do grasper facing the ball must until arrived");
       begin

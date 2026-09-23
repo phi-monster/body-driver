@@ -339,6 +339,25 @@ package body Plan is
                      C : constant Sinew.Constraint := I.Cons (Ci);
                      Sub, Obj : Natural := 0;
                   begin
+                     --  语言的根(2026-09-23):「<东西> <量> up|down」—— 主语是【外面的一件东西】,不是我身上的零件;
+                     --  量的名字是身体列的(现在只有 height)。其余那些行(远近/左右/朝向)的检查都是手的关系词的事,这一句不走。
+                     --  H44–H46 实测:这一句一直被当成"谁去哪"来查,主语是剪刀 ⇒ "不是我身上的东西" ⇒ 三炮一句都没跑。
+                     if C.R = Sinew.Re_Qty then
+                        if not Resolve (C.Subj, I.Line, "【哪件东西】", Sub) then
+                           exit;
+                        end if;
+                        if Facts (Sub).Mine then
+                           Reject (I.Line, "「" & Key_Of (C.Subj) & "」是我身上的零件,不是一件东西 —— 「量往哪变」说的是外面的东西",
+                                   "写你给那件东西起的名字,再写 height up 或 height down");
+                           exit;
+                        end if;
+                        if To_String (C.Obj.Word) /= "height" then
+                           Reject (I.Line, "「" & To_String (C.Obj.Word) & "」不是我量得出的量",
+                                   "我量得出的量:height(它离它躺的面多高)");
+                           exit;
+                        end if;
+                        goto Next_Constraint;
+                     end if;
                      if not Resolve (C.Subj, I.Line, "【谁】", Sub) then
                         exit;
                      end if;
@@ -402,6 +421,8 @@ package body Plan is
                            end if;
                         end if;
                      end;
+                     <<Next_Constraint>>
+                     null;
                   end;
                end loop;
             end if;
