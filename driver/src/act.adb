@@ -6052,8 +6052,10 @@ package body Act is
             C.Geo.Replace_Element (Cam, G);
             Geom.Save (To_String (C.Geo_Path), C.Geo);
             Geo_Say ("相机朝向量好:" & Codec.Img (Stop_N + 1) & " 停" & (if Resets > 0 then "(中间复位 " & Codec.Img (Resets) & " 次)" else "") & " · " & Codec.Img (Used) & "/"
-                     & Codec.Img (Natural (Cur.Length)) & " 个点进了解(踢掉 " & Codec.Img (G.Dropped) & " 笔离群)· 像素残差 " & Codec.Fmt (G.Rms, 2) & " px" & (if G.F_Meas > 0.0 then " · 焦距一起解出来 " & Codec.Fmt (G.F, 1) & " px" else "")
-                     & " · 相机离手腕原点 (" & Mm (G.Off (0)) & "," & Mm (G.Off (1)) & "," & Mm (G.Off (2)) & "),存进 " & To_String (C.Geo_Path));
+                     & Codec.Img (Natural (Cur.Length)) & " 个点进了解(踢掉 " & Codec.Img (G.Dropped) & " 笔离群)· 像素残差 " & Codec.Fmt (G.Rms, 2) & " px"
+                     & (if G.F_Meas > 0.0 then " · 焦距一起解出来 " & Codec.Fmt (G.F, 1) & " ± " & Codec.Fmt (G.F_Sd, 1) & " px" else "")
+                     & " · 朝向 ± " & Codec.Fmt (G.Rot_Sd * Deg, 2) & "° · 相机离手腕原点 (" & Mm (G.Off (0)) & "," & Mm (G.Off (1)) & "," & Mm (G.Off (2)) & ") ± "
+                     & Mm (G.Off_Sd) & ",存进 " & To_String (C.Geo_Path));
          else
             Geo_Say ("朝向解不出来(记了 " & Codec.Img (Natural (Obs.Length)) & " 笔观测,没有一个点在 4 停以上都看见)");
          end if;
@@ -6194,13 +6196,13 @@ package body Act is
             Geom.Fit_Fixed_Rig (G, C.Fixed_Obs, Ray_O, Ray_D, Tip_H, Fok);
          end;
          if not Fok then
-            Geo_Say ("不动的眼解不出来(" & Codec.Img (Natural (C.Fixed_Obs.Length)) & " 笔指尖观测:要么没有一条臂在 4 停以上都看见指尖,要么那条臂的眼还没量、没有视线,要么方程数不到未知数的两倍,要么解出来有指尖跑到相机后面)");
+            Geo_Say ("不动的眼解不出来(" & Codec.Img (Natural (C.Fixed_Obs.Length)) & " 笔指尖观测:要么没有一条臂在 4 停以上都看见指尖,要么那条臂的眼还没量、没有视线,要么方程数不到未知数的两倍,要么解出来有指尖跑到相机后面,要么位置/焦距的不确定度比量本身还大)");
             return;
          end if;
          C.Geo.Replace_Element (Wc, G);
          Geo_Say ("不动的眼量好:" & Codec.Img (Natural (C.Fixed_Obs.Length)) & " 笔指尖观测(踢掉 " & Codec.Img (G.Dropped) & " 笔),像素残差 " & Codec.Fmt (G.Rms, 2)
-                  & " px,它在 (" & Mm (G.Pos (0)) & "," & Mm (G.Pos (1)) & "," & Mm (G.Pos (2)) & ")"
-                  & (if G.F_Meas > 0.0 then ",焦距一起解出来 " & Codec.Fmt (G.F, 1) & " px" else ""));
+                  & " px,它在 (" & Mm (G.Pos (0)) & "," & Mm (G.Pos (1)) & "," & Mm (G.Pos (2)) & ") ± " & Mm (G.Pos_Sd)
+                  & (if G.F_Meas > 0.0 then ",焦距一起解出来 " & Codec.Fmt (G.F, 1) & " ± " & Codec.Fmt (G.F_Sd, 1) & " px" else ""));
          for A in 0 .. C.Map.Arms - 1 loop
             declare
                Hc : constant Integer := (if A < Natural (C.Map.Cam_On_Arm.Length) then C.Map.Cam_On_Arm (A) else -1);

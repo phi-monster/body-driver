@@ -332,6 +332,106 @@ package body Geom is
       end loop;
    end LM_Refine;
 
+   --  ── 解完之后每个参数的不确定度 ──:在解处再算一次数值雅可比 J,σ² = 残差平方和 ÷ (方程数 − 未知数),协方差 = σ² (JᵀJ)⁻¹,
+   --  Sd = 对角线开方(和参数同单位)。"解不出"从此按它判:不确定度比量本身还大 = 方程分不开这个量,而不是拍一个阈值
+   procedure Param_Sd (P : Param_Vec; N_Obs : Natural; Steps : Param_Vec;
+                       Resid : access procedure (P : Param_Vec; R : out Long_Float; Fill : access procedure (I : Natural; Du, Dv : Long_Float));
+                       Sd : out Param_Vec) is
+      Np : constant Natural := P'Length;
+      Rv : array (0 .. 2 * N_Obs - 1) of Long_Float := [others => 0.0];
+      J : array (0 .. 2 * N_Obs - 1, 0 .. Np - 1) of Long_Float := [others => [others => 0.0]];
+      A : array (0 .. Np - 1, 0 .. 2 * Np - 1) of Long_Float := [others => [others => 0.0]];   --  [JᵀJ | I],高斯-约当求逆
+      procedure Fill_R (I : Natural; Du, Dv : Long_Float) is
+      begin
+         Rv (2 * I) := Du; Rv (2 * I + 1) := Dv;
+      end Fill_R;
+      Sum : Long_Float := 0.0;
+      Sigma2 : Long_Float;
+      R0 : Long_Float;
+   begin
+      Sd := [others => 0.0];
+      if Np = 0 or else 2 * N_Obs <= Np then
+         Sd := [others => Long_Float'Last];   --  方程比未知数还少:什么都定不了
+         return;
+      end if;
+      Resid (P, R0, Fill_R'Access);
+      for I in 0 .. 2 * N_Obs - 1 loop
+         Sum := Sum + Rv (I) * Rv (I);
+      end loop;
+      Sigma2 := Sum / Long_Float (2 * N_Obs - Np);
+      for K in 0 .. Np - 1 loop
+         declare
+            Pp : Param_Vec := P;
+            Rp : array (0 .. 2 * N_Obs - 1) of Long_Float := [others => 0.0];
+            procedure Fill_P (I : Natural; Du, Dv : Long_Float) is
+            begin
+               Rp (2 * I) := Du; Rp (2 * I + 1) := Dv;
+            end Fill_P;
+            Dummy : Long_Float;
+            H : constant Long_Float := Steps (Steps'First + K);
+         begin
+            Pp (P'First + K) := Pp (P'First + K) + H;
+            Resid (Pp, Dummy, Fill_P'Access);
+            for I in 0 .. 2 * N_Obs - 1 loop
+               J (I, K) := (Rp (I) - Rv (I)) / H;
+            end loop;
+         end;
+      end loop;
+      for K in 0 .. Np - 1 loop
+         for M in 0 .. Np - 1 loop
+            for I in 0 .. 2 * N_Obs - 1 loop
+               A (K, M) := A (K, M) + J (I, K) * J (I, M);
+            end loop;
+         end loop;
+         A (K, Np + K) := 1.0;
+      end loop;
+      for Col in 0 .. Np - 1 loop
+         declare
+            Piv : Natural := Col;
+         begin
+            for Rw in Col + 1 .. Np - 1 loop
+               if abs (A (Rw, Col)) > abs (A (Piv, Col)) then
+                  Piv := Rw;
+               end if;
+            end loop;
+            if Piv /= Col then
+               for M in 0 .. 2 * Np - 1 loop
+                  declare
+                     T : constant Long_Float := A (Col, M);
+                  begin
+                     A (Col, M) := A (Piv, M); A (Piv, M) := T;
+                  end;
+               end loop;
+            end if;
+            if abs (A (Col, Col)) <= 1.0e-18 then
+               Sd := [others => Long_Float'Last];   --  奇异:有参数完全分不开
+               return;
+            end if;
+            declare
+               D : constant Long_Float := A (Col, Col);
+            begin
+               for M in 0 .. 2 * Np - 1 loop
+                  A (Col, M) := A (Col, M) / D;
+               end loop;
+            end;
+            for Rw in 0 .. Np - 1 loop
+               if Rw /= Col and then A (Rw, Col) /= 0.0 then
+                  declare
+                     Fct : constant Long_Float := A (Rw, Col);
+                  begin
+                     for M in 0 .. 2 * Np - 1 loop
+                        A (Rw, M) := A (Rw, M) - Fct * A (Col, M);
+                     end loop;
+                  end;
+               end if;
+            end loop;
+         end;
+      end loop;
+      for K in 0 .. Np - 1 loop
+         Sd (Sd'First + K) := Sqrt (Long_Float'Max (0.0, Sigma2 * A (K, Np + K)));
+      end loop;
+   end Param_Sd;
+
    procedure Fit (G : in out Cam_Geo; O : Obs_Vectors.Vector; Ok : out Boolean) is
       N : constant Natural := Natural (O.Length);
       Fit_F : constant Boolean := G.F <= 0.0;          --  焦距没给 ⇒ 一起解(官方 RoboDojo 观测就没有内参)
@@ -703,6 +803,18 @@ package body Geom is
          if Behind > 0 then
             return;   --  解出来还有点跑到相机后面 ⇒ 不是解,不存
          end if;
+         declare
+            Sd : Param_Vec (0 .. Np - 1);
+         begin
+            Param_Sd (P, Nr, Steps, Resid'Access, Sd);
+            G.Rot_Sd := Sqrt (Sd (0) ** 2 + Sd (1) ** 2 + Sd (2) ** 2);
+            G.Off_Sd := Sqrt (Sd (3) ** 2 + Sd (4) ** 2 + Sd (5) ** 2);
+            G.F_Sd := (if Fit_F then Sd (6) else 0.0);
+            --  不确定度比量本身还大 = 方程分不开它(横着挪、不转:焦距和远近绑着)⇒ 不算解出来
+            if (Fit_F and then G.F_Sd >= P (6)) or else G.Rot_Sd >= 1.0 then   --  朝向的不确定度 ≥ 1 弧度 = 根本没定(无量纲)
+               return;
+            end if;
+         end;
          G.R_Ce := Rodrigues ([P (0), P (1), P (2)]);
          G.Off := [P (3), P (4), P (5)];
          if Fit_F then
@@ -1139,6 +1251,30 @@ package body Geom is
          if Behind > 0 then
             return;   --  解出来还有指尖跑到相机后面 ⇒ 不是解,不存
          end if;
+         declare
+            Sd : Param_Vec (0 .. Np - 1);
+            Lo : V3 := [others => Long_Float'Last];
+            Hi : V3 := [others => Long_Float'First];
+            Span : Long_Float := 0.0;   --  手在这些观测里挪过的量程(米)
+         begin
+            for Ob of O loop
+               if Ob.Pt < N_Arms and then Keep (Ob.Pt) then
+                  for I in 0 .. 2 loop
+                     Lo (I) := Long_Float'Min (Lo (I), Ob.Pose (I)); Hi (I) := Long_Float'Max (Hi (I), Ob.Pose (I));
+                  end loop;
+               end if;
+            end loop;
+            Span := Sqrt ((Hi (0) - Lo (0)) ** 2 + (Hi (1) - Lo (1)) ** 2 + (Hi (2) - Lo (2)) ** 2);
+            Param_Sd (P, Nr, Steps, Resid'Access, Sd);
+            G.Rot_Sd := Sqrt (Sd (0) ** 2 + Sd (1) ** 2 + Sd (2) ** 2);
+            G.Pos_Sd := Sqrt (Sd (3) ** 2 + Sd (4) ** 2 + Sd (5) ** 2);
+            G.F_Sd := (if Fit_F then Sd (6) else 0.0);
+            --  位置的不确定度比手挪过的量程还大、或焦距的不确定度比焦距还大 = 方程分不开 ⇒ 不算解出来
+            --  (V1I / G1K 2026-09-25:相机解到 2.8 m / 120 m 外、残差却只有零点几像素,就是这种"解")
+            if G.Pos_Sd >= Span or else (Fit_F and then G.F_Sd >= P (6)) or else G.Rot_Sd >= 1.0 then
+               return;
+            end if;
+         end;
          G.R_Ce := Rodrigues ([P (0), P (1), P (2)]);
          G.Pos := [P (3), P (4), P (5)];
          if Fit_F then

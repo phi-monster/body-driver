@@ -583,6 +583,7 @@ begin
       Obs : Geom.Obs_Vectors.Vector;
       G_No, G_Pr, G_Long : Geom.Cam_Geo;
       Ok_No, Ok_Pr, Ok_Long : Boolean;
+      Per_Mm : constant Long_Float := 1000.0;   --  米 → 毫米(换算,无量纲)
    begin
       Gt.F := 400.0; Gt.Cx := 320.0; Gt.Cy := 240.0; Gt.R_Ce := Geom.Rodrigues ([0.2, -0.3, 0.1]); Gt.Valid := True;
       Synth (Star, 0.01, Obs);   --  短基线:星形、每停挪 1 cm
@@ -719,6 +720,31 @@ begin
             Geom.Fit_Rig (Gb, Bad, 3, Ok_B, Used_B);
             Check (Ok_B and then abs (Gb.F - 400.0) < 8.0 and then Gb.Dropped >= 4,
                    "多点连偏移·踢离群:每 7 笔 1 笔错 40 px ⇒ 踢掉 " & Codec.Img (Gb.Dropped) & " 笔,焦距 " & Codec.Fmt (Gb.F, 1) & " px(真 400,该在 2% 内)· 残差 " & Codec.Fmt (Gb.Rms, 2) & " px");
+         end;
+         --  不确定度从雅可比来:转过、多点、长基线 ⇒ 焦距 ± 几个像素;只横挪 1 cm 不转(星形)⇒ 焦距和远近分不开,不确定度该比焦距本身还大 ⇒ 判解不出
+         Check (Ok_R and then Gs.F_Sd > 0.0 and then Gs.F_Sd < 6.0 and then Gs.Off_Sd < 0.02 and then Gs.Rot_Sd < 0.01,
+                "不确定度:15 停 × 3 点 ⇒ 焦距 ± " & Codec.Fmt (Gs.F_Sd, 2) & " px · 偏移 ± " & Codec.Fmt (Gs.Off_Sd * Per_Mm, 1) & " mm · 朝向 ± " & Codec.Fmt (Gs.Rot_Sd, 4)
+                & " rad(该:焦距 < 6 px、偏移 < 2 cm、朝向 < 0.01 rad)");
+         declare
+            Obs_S : Geom.Obs_Pt_Vectors.Vector;
+            Gd : Geom.Cam_Geo;
+            Ok_D : Boolean;
+            Used_D : Natural;
+         begin
+            for S in 0 .. 5 loop   --  星形 1 cm 的 6 停,只有近的那个点
+               declare
+                  Amp : constant Long_Float := 0.01;   --  1 cm(合成)
+                  Ps : constant Plug.Arm_Pose := [Amp * Star (S + 1) (0), Amp * Star (S + 1) (1), 0.6 + Amp * Star (S + 1) (2), 1.0, 0.0, 0.0, 0.0];
+                  U, V : Long_Float;
+                  Fr : Boolean;
+               begin
+                  Geom.Project (Gr, Ps, Pts (0), U, V, Fr);
+                  Obs_S.Append (Geom.Obs_Pt'(Pt => 0, Pose => Ps, U => U + Jit, V => V + Jit));
+               end;
+            end loop;
+            Gd.F := 0.0; Gd.Cx := 320.0; Gd.Cy := 240.0;
+            Geom.Fit_Rig (Gd, Obs_S, 1, Ok_D, Used_D);
+            Check (not Ok_D, "不确定度:只横挪 1 cm、不转 ⇒ 焦距和远近分不开 ⇒ 判解不出(不再吐一个看着像样的数)");
          end;
       end;
    end;

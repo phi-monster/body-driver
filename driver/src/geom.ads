@@ -30,6 +30,10 @@ package Geom is
       R_Ce : M3 := Identity;           --  相机 → 手(列 = 相机轴在手坐标系里)
       Off : V3 := [others => 0.0];     --  相机中心离手的位姿原点的偏移(手系,米;转手时近处的东西才分得出它,没量就是 0)
       Rms : Long_Float := 0.0;         --  量朝向时的像素残差
+      F_Sd : Long_Float := 0.0;        --  焦距的不确定度(像素;解焦距时从 JᵀJ 算出,0 = 没解焦距)
+      Rot_Sd : Long_Float := 0.0;      --  朝向的不确定度(弧度)
+      Off_Sd : Long_Float := 0.0;      --  相机偏移的不确定度(米;手上的眼)
+      Pos_Sd : Long_Float := 0.0;      --  相机位置的不确定度(米;不动的眼)
       Dropped : Natural := 0;          --  量朝向时被判离群踢掉的观测笔数(记账)
       Tip_Valid : Boolean := False;
       Tip : V3 := [others => 0.0];     --  指尖中点在相机系(米)
