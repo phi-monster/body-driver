@@ -12,7 +12,7 @@ def side(s, P):
     return dict(ee_joints=f"{s}_wrist_yaw_joint", ee_link=f"{s}_wrist_yaw_link", arm_joints_name=arm(s), gripper_joints_name=hand(P),
                 gripper_move=dict(base=hand(P)[0], sign=-1.0, mimic=[[j, 1.0, 0.0] for j in hand(P)[1:]]),
                 gripper_bias=0.0, gripper_scale=[0.0, 1.5], curobo=f"curobo_{s}.yml",
-                camera=[dict(link=f"{s}_wrist_yaw_link", name="cam_wrist", type="d435", mesh="pinhole", pos=[0.0, 0.0, 0.08], ori=[0, -90, 0])])
+                camera=[dict(link=f"{s}_wrist_yaw_link", name="cam_wrist", type="d435", mesh="pinhole", pos=[0.0, 0.0, 0.08], ori=[90, -90, 0])])   # 2026-09-25 看图定的:沿手指看,画面上 = 链接 z;[0,-90,0] 是转了 90° 的侧视
 cfg = dict(urdf_path="./g1.urdf", base_link="pelvis", ee_type="gripper", dual_arm=True, delta_matrix=[[1, 0, 0], [0, 1, 0], [0, 0, 1]],
            global_trans_matrix=[[1, 0, 0], [0, -1, 0], [0, 0, -1]], grasp_camera_reference_axis=[1, 0, 0],
            sides=dict(left=side("left", "L"), right=side("right", "R")))
@@ -131,11 +131,12 @@ def get_robot_config():
             joint_pos={
                 # no ".*" here: Isaac Lab rejects overlapping patterns; unlisted joints start at 0
                 ".*_elbow_joint": 1.2,
+                ".*_shoulder_pitch_joint": -0.4,   # 2026-09-25:手抬到桌面之上,腕眼才看得到桌面、头顶眼才看得到手
                 "left_shoulder_roll_joint": 0.25,
                 "right_shoulder_roll_joint": -0.25,
             },
             joint_vel={".*": 0.0},
-            pos=(0.0, -0.75, 0.8),
+            pos=(0.0, -0.75, 0.92),
             rot=(0.707, 0.0, 0.0, 0.707),
         ),
         actuators={
@@ -145,7 +146,7 @@ def get_robot_config():
             ),
             "arms": ImplicitActuatorCfg(
                 joint_names_expr=[".*_shoulder_.*", ".*_elbow_joint", ".*_wrist_.*"],
-                effort_limit_sim=300.0, velocity_limit_sim=10.0, stiffness=3000.0, damping=100.0, armature=0.001,
+                effort_limit_sim=300.0, velocity_limit_sim=10.0, stiffness=3000.0, damping=600.0, armature=0.001,
             ),
             "hands": ImplicitActuatorCfg(
                 joint_names_expr=[".*_index_.*", ".*_middle_.*", ".*_thumb_.*", ".*_ring_.*", ".*_pinky_.*"],
@@ -228,7 +229,7 @@ robots:
     robot_type: arm,
     robot_name: g1,
     coupled: True,
-    default_root_pos: [0.0, -0.75, 0.8],
+    default_root_pos: [0.0, -0.75, 0.92],
     default_root_rot: [0.707, 0, 0, 0.707],
     grasp_perfect_direction: "top_down",
     enabled_self_collisions: False
