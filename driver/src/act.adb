@@ -5181,7 +5181,8 @@ package body Act is
                      Bound_Arm : constant Natural := (if Gi >= 1 and then Gi <= Integer (C.Items.Length) then C.Items (Natural (Gi) - 1).Arm + 1 else 1);
                      --  哪只手去:离它近的那只(PLAN 第 2 步)。它在哪只腕眼里被点了名就是那条臂;在不动的眼里就比"它在画面里的位置"和"两只手在那只眼里各在哪"(握区量过的)
                      --  (H50/H56 2026-09-23 实测:右臂横跨整桌去够,关节到头,三把都合空)
-                     Near_Arm : constant Integer := Nearer_Arm (C, Sub);
+                     --  手里已经拿着它 ⇒ 改它的量的就是拿着它的那只手,不再按远近选(H58 2026-09-23 实测:右手举着剪刀,头顶眼里它离左手近,左手去量眼、没动,还报"不在我手里")
+                     Near_Arm : constant Integer := (if C.Wld.Holding and then C.Wld.Held_Arm >= 0 then C.Wld.Held_Arm else Nearer_Arm (C, Sub));
                      Arm1 : constant Natural := (if Near_Arm >= 0 then Natural (Near_Arm) + 1 else Bound_Arm);
                      Jk : Natural := 0;
                   begin
