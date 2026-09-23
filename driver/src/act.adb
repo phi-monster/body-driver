@@ -5964,18 +5964,24 @@ package body Act is
       end if;
       declare
          Pitch : constant Long_Float := Contact.Gen.Sampling_Gap (Pts);
-         --  已有的那份还作数吗:同一件、面的高度没变(沿法向差不到一个采样间距)。作数就只让更细的盖它
+         --  这份点的预期误差:那只眼量朝向时的像素残差 ÷ 焦距 × 眼到面的距离(全是量过的数)。H57 2026-09-23 实测:头顶眼残差 11 px、离桌 1 m ⇒ 4 cm,
+         --  腕眼 0.3 px、离桌 0.3 m ⇒ 0.2 mm;"留最细的一份"留下了头顶眼那份(3 mm 间距但整片偏了几厘米),三把合空 ⇒ 留【误差最小】的那份
+         Eye_O : constant Geom.V3 := (if A2 >= 0 then [F.EE (Natural (A2)) (0), F.EE (Natural (A2)) (1), F.EE (Natural (A2)) (2)] else G.Pos);
+         Sp0 : constant Geom.V3 := Pts.First_Element;
+         Dist : constant Long_Float := Geom.Norm ([Sp0 (0) - Eye_O (0), Sp0 (1) - Eye_O (1), Sp0 (2) - Eye_O (2)]);
+         Err : constant Long_Float := (if G.F > 0.0 then G.Rms * Dist / G.F else Dist);
+         --  已有的那份还作数吗:同一件、面的高度没变(沿法向差不到一个采样间距)。作数就只让误差更小(相同则更细)的盖它
          Fresh : constant Boolean := C.Sil_Valid and then C.Sil_Name = Name
            and then abs ((P0 (0) - C.Sil_P0 (0)) * N (0) + (P0 (1) - C.Sil_P0 (1)) * N (1) + (P0 (2) - C.Sil_P0 (2)) * N (2)) <= C.Sil_Pitch;
       begin
-         if Pitch <= 0.0 or else (Fresh and then Pitch > C.Sil_Pitch) then
+         if Pitch <= 0.0 or else (Fresh and then (Err > C.Sil_Err or else (Err = C.Sil_Err and then Pitch > C.Sil_Pitch))) then
             return;
          end if;
-         C.Sil_Pts := Pts; C.Sil_Valid := True; C.Sil_Name := Name; C.Sil_Cam := Integer (Cam); C.Sil_N := N; C.Sil_Pitch := Pitch;
-         C.Sil_P0 := Pts.First_Element;   --  面过的点:就取这份点里的一个(它们全在那张面上)
+         C.Sil_Pts := Pts; C.Sil_Valid := True; C.Sil_Name := Name; C.Sil_Cam := Integer (Cam); C.Sil_N := N; C.Sil_Pitch := Pitch; C.Sil_Err := Err;
+         C.Sil_P0 := Sp0;   --  面过的点:就取这份点里的一个(它们全在那张面上)
          C.Sil_Rays := Rays;
          Geo_Say ("第" & Codec.Img (Cam) & " 台眼看全了它 ⇒ 记下它顶面的 " & Codec.Img (Natural (Pts.Length)) & " 个点(轮廓像素隔 " & Codec.Img (Stride)
-                  & " 个取一个,落到它躺的面上,采样间距 " & Mm (Pitch) & ";" & Codec.Img (Dropped) & " 条视线落不到面上)");
+                  & " 个取一个,落到它躺的面上,采样间距 " & Mm (Pitch) & ",预期误差 " & Mm (Err) & ";" & Codec.Img (Dropped) & " 条视线落不到面上)");
       end;
    end Take_Silhouette;
 
@@ -6252,7 +6258,8 @@ package body Act is
                return;
             end if;
             Note := S ("contact set on " & To_String (Name) & ": of " & Codec.Img (Natural (Cands.Length)) & " sections (from " & Codec.Img (Natural (C.Sil_Pts.Length))
-                       & " surface points at " & Mm (Pitch) & " pitch" & (if Reprojected then ", re-laid on the surface I touched" else "")
+                       & " surface points at " & Mm (Pitch) & " pitch from eye " & Codec.Img (Natural (Integer'Max (0, C.Sil_Cam))) & ", expected error " & Mm (C.Sil_Err)
+                       & (if Reprojected then ", re-laid on the surface I touched" else "")
                        & (if Known_Thick then ", thickness " & Mm (Thick) & " measured by touch" else ", thickness not measured yet")
                        & ") I take #" & Codec.Img (Natural (Pick) + 1) & (if Beyond > 0 then " (" & Codec.Img (Beyond) & " ranked higher lie beyond where this arm got stopped)" else "")
                        & ": " & Mm (Cd.Width_M) & " wide, " & Mm (Cd.Depth_M) & " deep, faces off by "
