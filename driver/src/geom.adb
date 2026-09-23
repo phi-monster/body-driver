@@ -814,6 +814,11 @@ package body Geom is
             if (Fit_F and then G.F_Sd >= P (6)) or else G.Rot_Sd >= 1.0 then   --  朝向的不确定度 ≥ 1 弧度 = 根本没定(无量纲)
                return;
             end if;
+            --  这套几何是无畸变针孔:焦距短到半幅宽 ÷ 焦距 > tan 60°(视场 > 120°)时针孔模型本身不成立,
+            --  这样的"解"是拟合把错数据凑平的结果(G1M 2026-09-25 左眼:5 个点解出 47.8 px),不存
+            if Fit_F and then G.Cx > 1.732 * P (6) then
+               return;
+            end if;
          end;
          G.R_Ce := Rodrigues ([P (0), P (1), P (2)]);
          G.Off := [P (3), P (4), P (5)];

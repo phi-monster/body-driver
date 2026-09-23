@@ -5730,7 +5730,7 @@ package body Act is
       pragma Unreferenced (Slot);   --  点名的那块只是提示;盯谁按视差定
       G : Geom.Cam_Geo;
       Home : constant Plug.Arm_Pose := F.EE (Arm);
-      B : constant Long_Float := 4.0 * Geo_Base (C, Arm);   --  探针一步 = 四倍那一档(倍数,无量纲):远处一步要跳得过跟踪噪声
+      B : constant Long_Float := Geo_Base (C, Arm);   --  探针一步 = 最小能动的那一档:只为量视差,越小越不惊动候选(G1M 2026-09-25:四档 = 8 cm 一探就把视野挪了小半幅)
       Notch : constant Long_Float := (if Arm * Chan.Per_Arm + 3 < Natural (C.Map.Amp.Length) then C.Map.Amp (Arm * Chan.Per_Arm + 3) else 0.0);
       Theta : Long_Float := 4.0 * Notch;   --  转动一停的角:起步四倍转动探针那一档(倍数,无量纲;没量过转动就是 0 ⇒ 不转),阶梯探到的最大一档为准
       Cw : constant Natural := (if Cam < Natural (F.Cams.Length) then F.Cams (Cam).W else 0);
@@ -6014,7 +6014,7 @@ package body Act is
          if Target >= 0 then
             --  步长:让它每步在画面里挪画幅的 1/16(比例,无量纲);探到的视差 = 每步多少像素 ⇒ 反推每步几米;
             --  上限 = 这条臂量过的步幅(没量就阶梯的下一档 = 4 倍探针步,倍数无量纲),下限 = 探针步
-            Step := B * (Long_Float (Cw) / 16.0) / Best;
+            Step := B * (Long_Float (Cw) / 24.0) / Best;   --  每步让它挪画幅的 1/24(比例,无量纲):路径要走两步再回,累计不能出画面
             --  下限一档(G1K 2026-09-25:四档 = 8.1 cm 一步,3 停内把点全甩出画面),上限量过的步幅(没量就阶梯的下一档)
             Step := Long_Float'Max (Geo_Base (C, Arm), Long_Float'Min (Step, (if G.Stride > 0.0 then G.Stride else 4.0 * B)));
             Geo_Say ("探一步 " & Mm (B) & ":视差最大的是第 " & Codec.Img (Natural (Cand (Target))) & " 槽(" & Codec.Fmt (Best, 1) & " px,起点 ("
@@ -6025,14 +6025,30 @@ package body Act is
       end;
       --  剩下的路:累计走,三根轴都有、再转回来一半
       declare
-         Moves : constant array (1 .. 7) of Geom.V3 :=
-           [[Step, 0.0, 0.0], [0.0, 0.0, Step], [0.0, 0.0, Step], [0.0, Step, 0.0], [0.0, Step, 0.0], [-Step, 0.0, 0.0], [-Step, 0.0, 0.0]];
+         Dirs7 : constant array (1 .. 7) of Geom.V3 :=
+           [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0], [-1.0, 0.0, 0.0]];   --  单位方向
+         Floor : constant Long_Float := Geo_Base (C, Arm);
+         Shrink : constant Long_Float := 0.5;   --  缩到一半(比例,无量纲)
       begin
-         for M of Moves loop
+         for D of Dirs7 loop
             if Plug.Reset_Pending (L) then
                On_Reset;
             end if;
-            Stop (M);
+            Stop ([D (0) * Step, D (1) * Step, D (2) * Step]);
+            --  这一停跟住的不到三分之二(比例,无量纲)⇒ 步子缩到一半(不低于一档):候选正在出画面或被自己的手挡住(G1M 左眼:22 个只剩 5 个)
+            declare
+               Kept : Natural := 0;
+            begin
+               for I in 0 .. Natural (Cur.Length) - 1 loop
+                  if Cur (I).Seen then
+                     Kept := Kept + 1;
+                  end if;
+               end loop;
+               if Kept * 3 < Natural (Cur.Length) * 2 and then Step > Floor then
+                  Step := Long_Float'Max (Floor, Step * Shrink);
+                  Geo_Say ("跟住的只剩 " & Codec.Img (Kept) & "/" & Codec.Img (Natural (Cur.Length)) & " ⇒ 步子缩到 " & Mm (Step));
+               end if;
+            end;
          end loop;
       end;
       declare
