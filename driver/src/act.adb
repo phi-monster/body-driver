@@ -5663,7 +5663,7 @@ package body Act is
       G : Geom.Cam_Geo;
       Home : constant Plug.Arm_Pose := F.EE (Arm);
       B : constant Long_Float := 4.0 * Geo_Base (C, Arm);   --  四倍那一档(倍数,无量纲):远处一步要跳得过跟踪噪声
-      Moves : constant array (1 .. 4) of Geom.V3 := [[B, 0.0, 0.0], [0.0, 0.0, B], [0.0, B, 0.0], [-B, 0.0, B]];
+      Moves : constant array (1 .. 5) of Geom.V3 := [[B, 0.0, 0.0], [0.0, 0.0, B], [0.0, B, 0.0], [-B, 0.0, B], [B, B, 0.0]];   --  五停:丢一两停还够解
       Obs : Geom.Obs_Vectors.Vector;
       U, V : Long_Float;
       Seen, Mok : Boolean;
@@ -6402,8 +6402,10 @@ package body Act is
             --  顶着画面边的块也不盯:它只露了一截,形心不是它的,手一挪就跟丢(S3 2026-09-23 实测:左眼盯了贴边的一块,一挪就没了)
             Mine : constant Boolean := A2 >= 0 and then Zone.Is_Self (Zone_Of (C, Natural (A2), Cam), Sl.R, F.Cams (Cam).W, F.Cams (Cam).H);
             On_Edge : constant Boolean := Sl.R.X0 = 0 or else Sl.R.Y0 = 0 or else Sl.R.X1 + 1 >= F.Cams (Cam).W or else Sl.R.Y1 + 1 >= F.Cams (Cam).H;
+            --  形心要在画幅中间那一半里(比例,无量纲):贴着画幅边上的大块(墙、桌沿)手一挪就变形、出画(S4 2026-09-23 实测:左眼盯了右上角的墙面,四停丢两停)
+            Central : constant Boolean := Sl.R.Cu >= 0.25 and then Sl.R.Cu <= 0.75 and then Sl.R.Cv >= 0.25 and then Sl.R.Cv <= 0.75;
          begin
-            if Sl.Present and then not Mine and then not On_Edge and then Sl.R.Count > Bc then
+            if Sl.Present and then not Mine and then not On_Edge and then Central and then Sl.R.Count > Bc then
                Bc := Sl.R.Count;
                Best := Si;
             end if;
@@ -9896,6 +9898,35 @@ package body Act is
                      Geo_Go (L, C, F, A, Tp, Geo_Base (C, A), 1.0, True, Down, Ev, St, Press_Cap => 8);
                   end;
                   Geo_Say ("⇒ " & To_String (Ev));
+                  --  🔴 顶住我的是面还是我自己的关节:面只拦一个方向,沿着面滑一步该走得了;关节到头了连滑都滑不动
+                  --  (S4 2026-09-23 实测:从原处直下 8 mm 就被顶住、方向歪 30°,是折着的胳膊到头了,不是桌面;当成面会把所有轮廓抬高 7 cm)
+                  if C.Touch_Valid and then C.Touch_Fresh and then Index (Ev, "contact") > 0 then
+                     declare
+                        N : constant Geom.V3 := C.Touch_N;
+                        Ax : constant Geom.V3 := (if abs (N (0)) < abs (N (1)) then [1.0, 0.0, 0.0] else [0.0, 1.0, 0.0]);
+                        T0 : constant Geom.V3 := [N (1) * Ax (2) - N (2) * Ax (1), N (2) * Ax (0) - N (0) * Ax (2), N (0) * Ax (1) - N (1) * Ax (0)];
+                        Tn : constant Long_Float := Geom.Norm (T0);
+                        Ln : constant Long_Float := 4.0 * Geo_Base (C, A);   --  一个量距单位(倍数,无量纲;同压面那一步)
+                        Av, Del, Back : Table.Vec := Table.Zero_Vec;
+                        Jaw : Floats;
+                        Ok : Boolean;
+                        Got : Long_Float;
+                     begin
+                        if Tn > 0.0 then
+                           Av (0) := T0 (0) / Tn * Ln; Av (1) := T0 (1) / Tn * Ln; Av (2) := T0 (2) / Tn * Ln;
+                           Step_Arm (L, C, F, A, Av, Jaw, Del, Ok);
+                           Got := (Del (0) * Av (0) + Del (1) * Av (1) + Del (2) * Av (2)) / Ln;
+                           Back (0) := -Del (0); Back (1) := -Del (1); Back (2) := -Del (2);
+                           Step_Arm (L, C, F, A, Back, Jaw, Del, Ok);
+                           if Got + Got < Ln then
+                              C.Touch_Valid := False; C.Touch_Fresh := False;
+                              Geo_Say ("沿着那张「面」滑 " & Mm (Ln) & " 只走了 " & Mm (Got) & " ⇒ 顶住我的不是面,是我自己的胳膊到头了;不记面,东西躺的面等第一次真碰到再量");
+                           else
+                              Geo_Say ("沿着面滑 " & Mm (Ln) & " 走了 " & Mm (Got) & " ⇒ 确实是一张面");
+                           end if;
+                        end if;
+                     end;
+                  end if;
                   declare
                      Cur : constant Plug.Arm_Pose := F.EE (A);
                   begin
