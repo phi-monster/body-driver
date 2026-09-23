@@ -6380,10 +6380,12 @@ package body Act is
       for Si in 0 .. World.Count (C.Wld, Cam) - 1 loop
          declare
             Sl : constant World.Slot := World.Get (C.Wld, Cam, Si);
-            --  长在手上的眼里我自己的手指跟着眼走,盯着它量不出朝向(握区量过的那几瓣不算)
+            --  长在手上的眼里我自己的手指跟着眼走,盯着它量不出朝向(握区量过的那几瓣不算);
+            --  顶着画面边的块也不盯:它只露了一截,形心不是它的,手一挪就跟丢(S3 2026-09-23 实测:左眼盯了贴边的一块,一挪就没了)
             Mine : constant Boolean := A2 >= 0 and then Zone.Is_Self (Zone_Of (C, Natural (A2), Cam), Sl.R, F.Cams (Cam).W, F.Cams (Cam).H);
+            On_Edge : constant Boolean := Sl.R.X0 = 0 or else Sl.R.Y0 = 0 or else Sl.R.X1 + 1 >= F.Cams (Cam).W or else Sl.R.Y1 + 1 >= F.Cams (Cam).H;
          begin
-            if Sl.Present and then not Mine and then Sl.R.Count > Bc then
+            if Sl.Present and then not Mine and then not On_Edge and then Sl.R.Count > Bc then
                Bc := Sl.R.Count;
                Best := Si;
             end if;
@@ -9864,7 +9866,13 @@ package body Act is
                begin
                   Geo_Say ("第" & Codec.Img (A + 1) & " 只手:指尖朝下往下压,压到被顶住 ⇒ 量出它下面的面");
                   Geo_Turn (L, C, F, A, Down, 1.0, Ev, St, Along => G.Tip);
-                  Geo_Go (L, C, F, A, Tip_World (C, A, F.EE (A)), Geo_Base (C, A), 1.0, True, Down, Ev, St, Press_Cap => 8);
+                  declare
+                     --  先算成具名对象再传:F.EE (A) 直接写在实参里会在整条调用期间锁住 F 的容器,Geo_Go 里 Sense 换帧时就崩
+                     --  (S3 2026-09-23 实测:adjust/finalize raised PROGRAM_ERROR)
+                     Tp : constant Geom.V3 := Tip_World (C, A, F.EE (A));
+                  begin
+                     Geo_Go (L, C, F, A, Tp, Geo_Base (C, A), 1.0, True, Down, Ev, St, Press_Cap => 8);
+                  end;
                   Geo_Say ("⇒ " & To_String (Ev));
                   declare
                      Cur : constant Plug.Arm_Pose := F.EE (A);
