@@ -10152,35 +10152,47 @@ package body Act is
                declare
                   G : Geom.Cam_Geo := C.Geo (Natural (Hc));
                   Best : Long_Float := 0.0;
+                  Tried : Natural := 0;   --  真试过几档(对方复位打断时一档没试就不许下"走不了路"的结论:V1C/V1E 右臂就是这么被冤枉的)
+                  --  先往上探(离桌面远,安全);第一档往上就走不到(手在上限)⇒ 往下探。哪个方向走得到就记哪个
+                  Dirs : constant array (1 .. 2) of Long_Float := [1.0, -1.0];
                begin
-                  for R of Rungs loop
-                     exit when Plug.Reset_Pending (L);
-                     declare
-                        Ln : constant Long_Float := R * Amp;
-                        Av : Table.Vec := Table.Zero_Vec;
-                        Jaw : Floats;
-                        Del : Table.Vec;
-                        Ok : Boolean;
-                        Got : Long_Float;
-                     begin
-                        Av (2) := Ln;
-                        Step_Arm (L, C, F, A, Av, Jaw, Del, Ok);
-                        Got := Del (2);
-                        Geo_Say ("第" & Codec.Img (A + 1) & " 只手:一条命令往上 " & Mm (Ln) & " ⇒ 实到 " & Mm (Got));
+                  for Dir of Dirs loop
+                     exit when Best > 0.0;
+                     for R of Rungs loop
+                        exit when Plug.Reset_Pending (L);
                         declare
-                           Back : Table.Vec := Table.Zero_Vec;
+                           Ln : constant Long_Float := R * Amp;
+                           Av : Table.Vec := Table.Zero_Vec;
+                           Jaw : Floats;
+                           Del : Table.Vec;
+                           Ok : Boolean;
+                           Got : Long_Float;
                         begin
-                           Back (0) := -Del (0); Back (1) := -Del (1); Back (2) := -Del (2);
-                           Step_Arm (L, C, F, A, Back, Jaw, Del, Ok);
+                           Av (2) := Dir * Ln;
+                           Step_Arm (L, C, F, A, Av, Jaw, Del, Ok);
+                           Got := Dir * Del (2);
+                           Tried := Tried + 1;
+                           Geo_Say ("第" & Codec.Img (A + 1) & " 只手:一条命令往" & (if Dir > 0.0 then "上 " else "下 ") & Mm (Ln) & " ⇒ 实到 " & Mm (Got));
+                           declare
+                              Back : Table.Vec := Table.Zero_Vec;
+                           begin
+                              Back (0) := -Del (0); Back (1) := -Del (1); Back (2) := -Del (2);
+                              Step_Arm (L, C, F, A, Back, Jaw, Del, Ok);
+                           end;
+                           exit when Got + Got < Ln;
+                           Best := Ln;
                         end;
-                        exit when Got + Got < Ln;
-                        Best := Ln;
-                     end;
+                     end loop;
                   end loop;
-                  G.Stride := Best;
-                  C.Geo.Replace_Element (Natural (Hc), G);
-                  Geom.Save (To_String (C.Geo_Path), C.Geo);
-                  Geo_Say ("第" & Codec.Img (A + 1) & " 只手:一条命令走得到的最大一档 = " & Mm (Best) & (if Best <= 0.0 then "(一档都走不到 ⇒ 这条臂走不了路)" else "") & ",存进几何文件");
+                  if Tried = 0 then
+                     Geo_Say ("第" & Codec.Img (A + 1) & " 只手:步幅没量成(对方复位打断,一档都没试)⇒ 下次开机再量");
+                  else
+                     G.Stride := Best;
+                     C.Geo.Replace_Element (Natural (Hc), G);
+                     Geom.Save (To_String (C.Geo_Path), C.Geo);
+                     Geo_Say ("第" & Codec.Img (A + 1) & " 只手:一条命令走得到的最大一档 = " & Mm (Best)
+                              & (if Best <= 0.0 then "(上下都走不到 ⇒ 这条臂走不了路)" else "") & ",存进几何文件");
+                  end if;
                end;
             end if;
          end;
