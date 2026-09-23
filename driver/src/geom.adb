@@ -961,17 +961,25 @@ package body Geom is
       end;
    end Fit_Fixed;
 
-   procedure Fit_Fixed_Rig (G : in out Cam_Geo; O : Obs_Pt_Vectors.Vector; N_Arms : Natural; Tip_H : out V3_Vectors.Vector; Ok : out Boolean) is
+   procedure Fit_Fixed_Rig (G : in out Cam_Geo; O : Obs_Pt_Vectors.Vector; Ray_O, Ray_D : V3_Vectors.Vector; Tip_H : out V3_Vectors.Vector; Ok : out Boolean) is
       Fit_F : constant Boolean := G.F <= 0.0;
       Use_Prior : constant Boolean := Fit_F and then G.F_Prior > 0.0 and then G.F_Prior_Sd > 0.0;
       N : constant Natural := Natural (O.Length);
+      N_Arms : constant Natural := Natural'Min (Natural (Ray_O.Length), Natural (Ray_D.Length));
       Cnt : array (0 .. N_Arms) of Natural := [others => 0];
-      Keep : array (0 .. N_Arms) of Boolean := [others => False];   --  看见 4 停以上的点才进(次数)
+      Keep : array (0 .. N_Arms) of Boolean := [others => False];   --  看见 4 停以上、有视线的臂才进(次数)
       Slot : array (0 .. N_Arms) of Integer := [others => -1];
       Nk : Natural := 0;
       N_Used : Natural := 0;
       Gi : Cam_Geo := G;
       Best_Arm : Integer := -1;
+      --  第 K 条臂的指尖在世界里(手系视线上离眼 S 米处)
+      function Tip_World (K : Natural; Pose : Plug.Arm_Pose; S : Long_Float) return V3 is
+         Th : constant V3 := [Ray_O (K) (0) + S * Ray_D (K) (0), Ray_O (K) (1) + S * Ray_D (K) (1), Ray_O (K) (2) + S * Ray_D (K) (2)];
+         Tw : constant V3 := Ap (Quat_To_R (Pose), Th);
+      begin
+         return [Pose (0) + Tw (0), Pose (1) + Tw (1), Pose (2) + Tw (2)];
+      end Tip_World;
    begin
       Ok := False; Tip_H.Clear;
       if N_Arms = 0 or else N < 4 then
@@ -983,7 +991,7 @@ package body Geom is
          end if;
       end loop;
       for K in 0 .. N_Arms - 1 loop
-         if Cnt (K) >= 4 then
+         if Cnt (K) >= 4 and then Norm (Ray_D (K)) > 0.0 then
             Keep (K) := True; Slot (K) := Integer (Nk); Nk := Nk + 1; N_Used := N_Used + Cnt (K);
             if Best_Arm < 0 or else Cnt (K) > Cnt (Best_Arm) then
                Best_Arm := K;
@@ -991,17 +999,17 @@ package body Geom is
          end if;
       end loop;
       --  方程数(每笔观测两条)不到未知数的两倍就是在猜(V1I 2026-09-24:10 笔观测解 13 个未知数,解出相机在 2.8 m 外、残差 0.27 px)
-      if Best_Arm < 0 or else 2 * N_Used < 2 * ((if Fit_F then 7 else 6) + 3 * Nk) then
+      if Best_Arm < 0 or else 2 * N_Used < 2 * ((if Fit_F then 7 else 6) + Nk) then
          return;
       end if;
-      --  起点:观测最多的那条臂,先把指尖当成就在手的位姿点上(偏移 0),用老的单点法(盲搜 + 精修)给相机位姿和焦距一个像样的起点
+      --  起点:观测最多的那条臂,先把指尖当成就在视线起点(S = 0),用老的单点法(盲搜 + 精修)给相机位姿和焦距一个像样的起点
       declare
          Marks : Mark_Vectors.Vector;
          Fok : Boolean;
       begin
          for Ob of O loop
             if Ob.Pt = Best_Arm then
-               Marks.Append (Mark'(Pw => [Ob.Pose (0), Ob.Pose (1), Ob.Pose (2)], U => Ob.U, V => Ob.V));
+               Marks.Append (Mark'(Pw => Tip_World (Best_Arm, Ob.Pose, 0.0), U => Ob.U, V => Ob.V));
             end if;
          end loop;
          Fit_Fixed (Gi, Marks, Fok);
@@ -1011,7 +1019,7 @@ package body Geom is
       end;
       declare
          Base : constant Natural := (if Fit_F then 7 else 6);   --  转向量 3 + 位置 3 (+ 焦距)
-         Np : constant Natural := Base + 3 * Nk;
+         Np : constant Natural := Base + Nk;                     --  + 每条臂一个 S
          P : Param_Vec (0 .. Np - 1) := [others => 0.0];
          Steps : Param_Vec (0 .. Np - 1) := [others => 1.0e-4];   --  差分步(弧度 / 米,极小量)
          Rv : constant V3 := Rot_Vec (Gi.R_Ce);
@@ -1036,9 +1044,7 @@ package body Geom is
                begin
                if Ob.Pt < N_Arms and then Keep (Ob.Pt) and then not Skip (J) then
                   declare
-                     B : constant Natural := Base + 3 * Natural (Slot (Ob.Pt));
-                     Tw : constant V3 := Ap (Quat_To_R (Ob.Pose), [P (B), P (B + 1), P (B + 2)]);   --  指尖偏移转到世界
-                     Pw : constant V3 := [Ob.Pose (0) + Tw (0), Ob.Pose (1) + Tw (1), Ob.Pose (2) + Tw (2)];
+                     Pw : constant V3 := Tip_World (Ob.Pt, Ob.Pose, P (Base + Natural (Slot (Ob.Pt))));
                      U, V, Du, Dv : Long_Float;
                      Front : Boolean;
                   begin
@@ -1131,7 +1137,7 @@ package body Geom is
          end;
          Resid (P, Cur, null);
          if Behind > 0 then
-            return;   --  解出来还有指尖跑到相机后面 ⇒ 不是解,不存(V1H 2026-09-24:11 笔观测解到残差 953 px)
+            return;   --  解出来还有指尖跑到相机后面 ⇒ 不是解,不存
          end if;
          G.R_Ce := Rodrigues ([P (0), P (1), P (2)]);
          G.Pos := [P (3), P (4), P (5)];
@@ -1145,12 +1151,12 @@ package body Geom is
          for K in 0 .. N_Arms - 1 loop
             if Keep (K) then
                declare
-                  B : constant Natural := Base + 3 * Natural (Slot (K));
+                  S : constant Long_Float := P (Base + Natural (Slot (K)));
                begin
-                  Tip_H.Append (V3'[P (B), P (B + 1), P (B + 2)]);
+                  Tip_H.Append (V3'[Ray_O (K) (0) + S * Ray_D (K) (0), Ray_O (K) (1) + S * Ray_D (K) (1), Ray_O (K) (2) + S * Ray_D (K) (2)]);
                end;
             else
-               Tip_H.Append (V3'[0.0, 0.0, 0.0]);   --  没解的点:0 向量(调用方按范数 > 0 认)
+               Tip_H.Append (V3'[0.0, 0.0, 0.0]);   --  没解的臂:0 向量(调用方按范数 > 0 认)
             end if;
          end loop;
          Ok := True;

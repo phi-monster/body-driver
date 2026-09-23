@@ -727,7 +727,13 @@ begin
    --  该解出:焦距 2% 内、相机位置差 < 1.5 cm、朝向差 < 0.01 rad、两条臂的指尖偏移差 < 5 mm
    declare
       Gt, Gs : Geom.Cam_Geo;
-      Tips : constant array (0 .. 1) of Geom.V3 := [[0.0, 0.12, -0.03], [0.0, 0.11, -0.03]];   --  指尖偏移(手系,米,合成)
+      --  每条臂的腕眼:装在手上的朝向 + 离手腕原点的偏移(合成);指尖 = 偏移 + S × (相机系单位视线转到手系),真值 S = 0.12 / 0.11 m
+      Gw : constant array (0 .. 1) of Geom.M3 := [Geom.Rodrigues ([0.2, -0.3, 0.1]), Geom.Rodrigues ([-0.2, -0.3, -0.1])];
+      Ofs : constant array (0 .. 1) of Geom.V3 := [[0.08, 0.0, 0.05], [0.08, 0.0, 0.05]];   --  相机离手腕原点(手系,米,合成)
+      Dcs : constant array (0 .. 1) of Geom.V3 := [[0.1, -0.5, -0.86], [-0.1, -0.5, -0.86]];   --  指尖在自己眼里的视线(相机系,合成,下面归一化)
+      S_True : constant array (0 .. 1) of Long_Float := [0.12, 0.11];   --  指尖离眼(米,合成)
+      Tips : array (0 .. 1) of Geom.V3;
+      Ray_O, Ray_D : Geom.V3_Vectors.Vector;
       Homes : constant array (0 .. 1) of Geom.V3 := [[-0.3, 0.2, 0.85], [0.3, 0.2, 0.85]];   --  两只手的起点(米,合成)
       Obs : Geom.Obs_Pt_Vectors.Vector;
       Tip_H : Geom.V3_Vectors.Vector;
@@ -746,6 +752,16 @@ begin
       --  相机 → 世界:x 列 = 世界 x;y 列 = (0, sin30, cos30)(画面的上朝前上);z 列 = (0, −cos30, sin30)(视线 −z 朝前下)
       Gt.R_Ce := [[1.0, 0.0, 0.0], [0.0, Sn, -Cs], [0.0, Cs, Sn]];
       Gt.Pos := [0.0, -0.41, 1.308]; Gt.F := 288.0; Gt.Cx := 320.0; Gt.Cy := 240.0; Gt.Fixed := True; Gt.Valid := True;
+      for A in 0 .. 1 loop
+         declare
+            Nn : constant Long_Float := Geom.Norm (Dcs (A));
+            Dc : constant Geom.V3 := [Dcs (A) (0) / Nn, Dcs (A) (1) / Nn, Dcs (A) (2) / Nn];
+            Dh : constant Geom.V3 := Geom.Ap (Gw (A), Dc);
+         begin
+            Tips (A) := [Ofs (A) (0) + S_True (A) * Dh (0), Ofs (A) (1) + S_True (A) * Dh (1), Ofs (A) (2) + S_True (A) * Dh (2)];
+            Ray_O.Append (Ofs (A)); Ray_D.Append (Dh);
+         end;
+      end loop;
       for A in 0 .. 1 loop
          declare
             H : constant Geom.V3 := Homes (A);
@@ -775,16 +791,16 @@ begin
          end;
       end loop;
       Gs.F := 0.0; Gs.Cx := 320.0; Gs.Cy := 240.0;
-      Geom.Fit_Fixed_Rig (Gs, Obs, 2, Tip_H, Ok_F);
+      Geom.Fit_Fixed_Rig (Gs, Obs, Ray_O, Ray_D, Tip_H, Ok_F);
       declare
          Da : constant Long_Float := (if Ok_F then Geom.Norm (Geom.Rot_Vec (Geom.Mul (Geom.Tr (Gt.R_Ce), Gs.R_Ce))) else 1.0);
          Dp : constant Long_Float := (if Ok_F then Geom.Norm ([Gs.Pos (0) - Gt.Pos (0), Gs.Pos (1) - Gt.Pos (1), Gs.Pos (2) - Gt.Pos (2)]) else 1.0);
          Dt0 : constant Long_Float := (if Ok_F and then Natural (Tip_H.Length) = 2 then Geom.Norm ([Tip_H (0) (0) - Tips (0) (0), Tip_H (0) (1) - Tips (0) (1), Tip_H (0) (2) - Tips (0) (2)]) else 1.0);
          Dt1 : constant Long_Float := (if Ok_F and then Natural (Tip_H.Length) = 2 then Geom.Norm ([Tip_H (1) (0) - Tips (1) (0), Tip_H (1) (1) - Tips (1) (1), Tip_H (1) (2) - Tips (1) (2)]) else 1.0);
       begin
-         Check (Ok_F and then abs (Gs.F - 288.0) < 6.0 and then Dp < 0.015 and then Da < 0.01 and then Dt0 < 0.012 and then Dt1 < 0.012,   --  指尖偏移 1 px 抖动下解到 1 cm 级(米)
-                "不动的眼连指尖:2 臂 × 13 停 ⇒ 焦距 " & Codec.Fmt (Gs.F, 1) & " px(真 288)· 相机位置差 " & Codec.Fmt (Dp * Per_Mm, 1) & " mm · 朝向差 "
-                & Codec.Fmt (Da, 4) & " rad · 指尖偏移差 " & Codec.Fmt (Dt0 * Per_Mm, 1) & " / " & Codec.Fmt (Dt1 * Per_Mm, 1) & " mm(该在 1.2 cm 内)· 残差 " & Codec.Fmt (Gs.Rms, 2) & " px");
+         Check (Ok_F and then abs (Gs.F - 288.0) < 6.0 and then Dp < 0.015 and then Da < 0.01 and then Dt0 < 0.005 and then Dt1 < 0.005,
+                "不动的眼连指尖:2 臂 × 13 停,指尖 = 腕眼视线上一个距离 ⇒ 焦距 " & Codec.Fmt (Gs.F, 1) & " px(真 288)· 相机位置差 " & Codec.Fmt (Dp * Per_Mm, 1) & " mm · 朝向差 "
+                & Codec.Fmt (Da, 4) & " rad · 指尖差 " & Codec.Fmt (Dt0 * Per_Mm, 1) & " / " & Codec.Fmt (Dt1 * Per_Mm, 1) & " mm(该在 5 mm 内;当 3 个未知数解时手只平移分不出,V1J 差 33 cm)· 残差 " & Codec.Fmt (Gs.Rms, 2) & " px");
       end;
    end;
    --  🔴 没有深度时量指尖(2026-09-23):指尖 = 自己眼里那条视线上离眼 S 米处;不动的眼两停看见指尖 ⇒ 解 S。合成数据:真值 0.12 m

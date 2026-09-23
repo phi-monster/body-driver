@@ -5661,13 +5661,21 @@ package body Act is
             end if;
             R := Instrument.Track_Step (To_String (C.Inst_Host), C.Inst_Port, C.Head_Id, F.Cams (Wc).RGB, Hw, Hh, Err);
          end if;
-         if Natural (R.Length) = C.Head_Pts then
-            for K in 0 .. C.Head_Pts - 1 loop
-               if R (K).Seen then
-                  C.Fixed_Obs.Append (Geom.Obs_Pt'(Pt => Arm * 2 + K, Pose => F.EE (Arm), U => R (K).U, V => R (K).V));
+         --  记的是指尖中点(两根都看见才记;段里只有一个点就记它):腕眼里同一个中点的像素是固定的、量过的 ⇒ 一条已知视线,只差离眼多远
+         if Natural (R.Length) = C.Head_Pts and then C.Head_Pts > 0 then
+            declare
+               All_Seen : Boolean := True;
+               Su, Sv : Long_Float := 0.0;
+            begin
+               for K in 0 .. C.Head_Pts - 1 loop
+                  All_Seen := All_Seen and then R (K).Seen;
+                  Su := Su + R (K).U; Sv := Sv + R (K).V;
+               end loop;
+               if All_Seen then
+                  C.Fixed_Obs.Append (Geom.Obs_Pt'(Pt => Arm, Pose => F.EE (Arm), U => Su / Long_Float (C.Head_Pts), V => Sv / Long_Float (C.Head_Pts)));
                   C.Head_N := C.Head_N + 1;
                end if;
-            end loop;
+            end;
          end if;
       end;
    end Head_Watch;
@@ -6075,9 +6083,57 @@ package body Act is
          if not F.Cams (Wc).Has_K then
             G.F := 0.0;   --  身体没给 ⇒ 一起解
          end if;
-         Geom.Fit_Fixed_Rig (G, C.Fixed_Obs, 2 * C.Map.Arms, Tip_H, Fok);
+         --  每条臂:指尖中点在自己眼里的像素(握区量的)⇒ 相机系单位视线 ⇒ 手系(起点 = 相机离手腕原点的偏移)。眼没量好的臂没有视线,不进解
+         declare
+            Ray_O, Ray_D : Geom.V3_Vectors.Vector;
+         begin
+            for A in 0 .. C.Map.Arms - 1 loop
+               declare
+                  Hc : constant Integer := (if A < Natural (C.Map.Cam_On_Arm.Length) then C.Map.Cam_On_Arm (A) else -1);
+                  Oh : Geom.V3 := [0.0, 0.0, 0.0];
+                  Dh : Geom.V3 := [0.0, 0.0, 0.0];
+               begin
+                  if Hc >= 0 and then Natural (Hc) < Natural (C.Geo.Length) and then Natural (Hc) < Natural (F.Cams.Length)
+                    and then C.Geo (Natural (Hc)).Valid and then C.Geo (Natural (Hc)).F > 0.0
+                  then
+                     declare
+                        Gh : constant Geom.Cam_Geo := C.Geo (Natural (Hc));
+                        Z : constant Zone.Hand_Zone := Zone_Of (C, A, Natural (Hc));
+                        W2 : constant Natural := F.Cams (Natural (Hc)).W;
+                        H2 : constant Natural := F.Cams (Natural (Hc)).H;
+                        Ua, Va, Ub, Vb, U, V : Long_Float;
+                        Oa, Ob : Boolean;
+                     begin
+                        if Z.Valid then
+                           Zone.Tip_Px (Z, Z.A, W2, H2, Ua, Va, Oa);
+                           Zone.Tip_Px (Z, Z.B, W2, H2, Ub, Vb, Ob);
+                           if Oa and then Ob then
+                              U := 0.5 * (Ua + Ub); V := 0.5 * (Va + Vb);   --  两指尖的中点(纯数学的一半)
+                           elsif Oa then
+                              U := Ua; V := Va;
+                           else
+                              U := Z.Cu * Long_Float (W2); V := Z.Cv * Long_Float (H2);
+                           end if;
+                           declare
+                              Dc : Geom.V3 := [(U - Gh.Cx) / Gh.F, -(V - Gh.Cy) / Gh.F, -1.0];   --  相机系视线(驱动的相机系:z 朝后 ⇒ 前方 -1)
+                              Nn : constant Long_Float := Geom.Norm (Dc);
+                           begin
+                              for I in 0 .. 2 loop
+                                 Dc (I) := Dc (I) / Nn;
+                              end loop;
+                              Dh := Geom.Ap (Gh.R_Ce, Dc);
+                              Oh := Gh.Off;
+                           end;
+                        end if;
+                     end;
+                  end if;
+                  Ray_O.Append (Oh); Ray_D.Append (Dh);
+               end;
+            end loop;
+            Geom.Fit_Fixed_Rig (G, C.Fixed_Obs, Ray_O, Ray_D, Tip_H, Fok);
+         end;
          if not Fok then
-            Geo_Say ("不动的眼解不出来(" & Codec.Img (Natural (C.Fixed_Obs.Length)) & " 笔指尖观测:要么没有一根指尖在 4 停以上都看见,要么方程数不到未知数的两倍,要么解出来有指尖跑到相机后面)");
+            Geo_Say ("不动的眼解不出来(" & Codec.Img (Natural (C.Fixed_Obs.Length)) & " 笔指尖观测:要么没有一条臂在 4 停以上都看见指尖,要么那条臂的眼还没量、没有视线,要么方程数不到未知数的两倍,要么解出来有指尖跑到相机后面)");
             return;
          end if;
          C.Geo.Replace_Element (Wc, G);
@@ -6087,26 +6143,12 @@ package body Act is
          for A in 0 .. C.Map.Arms - 1 loop
             declare
                Hc : constant Integer := (if A < Natural (C.Map.Cam_On_Arm.Length) then C.Map.Cam_On_Arm (A) else -1);
-               --  两根指尖各自的偏移(解出来的才算;没解出来的是 0 向量)⇒ 指尖中点 = 有解的那几根的平均
-               Th : Geom.V3 := [0.0, 0.0, 0.0];
+               Th : constant Geom.V3 := (if A < Natural (Tip_H.Length) then Tip_H (A) else [0.0, 0.0, 0.0]);   --  解出来的指尖(手系);0 向量 = 没解
                N_A : Natural := 0;
-               N_Tip : Natural := 0;
+               N_Tip : constant Natural := (if Geom.Norm (Th) > 0.0 then 1 else 0);
             begin
-               for K in 0 .. 1 loop
-                  if A * 2 + K < Natural (Tip_H.Length) and then Geom.Norm (Tip_H (A * 2 + K)) > 0.0 then
-                     for I in 0 .. 2 loop
-                        Th (I) := Th (I) + Tip_H (A * 2 + K) (I);
-                     end loop;
-                     N_Tip := N_Tip + 1;
-                  end if;
-               end loop;
-               if N_Tip > 0 then
-                  for I in 0 .. 2 loop
-                     Th (I) := Th (I) / Long_Float (N_Tip);
-                  end loop;
-               end if;
                for Ob of C.Fixed_Obs loop
-                  if Ob.Pt / 2 = A then
+                  if Ob.Pt = A then
                      N_A := N_A + 1;
                   end if;
                end loop;
@@ -6118,8 +6160,8 @@ package body Act is
                      Gh.Tip := Geom.Ap (Geom.Tr (Gh.R_Ce), [Th (0) - Gh.Off (0), Th (1) - Gh.Off (1), Th (2) - Gh.Off (2)]);
                      Gh.Tip_Valid := True;
                      C.Geo.Replace_Element (Natural (Hc), Gh);
-                     Geo_Say ("第" & Codec.Img (A + 1) & " 只手:指尖在手系里偏 (" & Mm (Th (0)) & "," & Mm (Th (1)) & "," & Mm (Th (2)) & ")(" & Codec.Img (N_Tip) & " 根指尖、"
-                              & Codec.Img (N_A) & " 笔观测),换到它自己眼里 (" & Mm (Gh.Tip (0)) & "," & Mm (Gh.Tip (1)) & "," & Mm (Gh.Tip (2)) & ")");
+                     Geo_Say ("第" & Codec.Img (A + 1) & " 只手:指尖在手系里偏 (" & Mm (Th (0)) & "," & Mm (Th (1)) & "," & Mm (Th (2)) & ")(" & Codec.Img (N_A)
+                              & " 笔观测),离自己的眼 " & Mm (Geom.Norm (Gh.Tip)) & ",在它自己眼里 (" & Mm (Gh.Tip (0)) & "," & Mm (Gh.Tip (1)) & "," & Mm (Gh.Tip (2)) & ")");
                   end;
                elsif N_A > 0 then
                   Geo_Say ("第" & Codec.Img (A + 1) & " 只手:不动的眼只看见它的指尖 " & Codec.Img (N_A) & " 停,或它的眼还没量 ⇒ 指尖偏移这回没定");
