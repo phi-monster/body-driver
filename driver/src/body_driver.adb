@@ -302,13 +302,12 @@ begin
    --  🔴 抓起过球的那三炮(GB5/GC2/GC4)开机都有这一行;09-20 把几何驾驶搬回 main 时漏了它,
    --  于是几何常数从不装回、Geo_Ready 恒假、整条几何走法是死代码。
    Act.Geo_Boot (F, C, To_String (Body_Path));
-   Act.Geo_Boot_Fixed (L, F, C);
    --  对方在我连上时复位过一次(第一集开始):这个标记在这儿清掉,不然开机量身体的那几段会把它当成"段中间复位"当场收段(S2 2026-09-23 实测:左眼一停没挪就退了)
    if Plug.Take_Reset (L) then
       Put_Line ("[身] 对方在开机前复位过一次(第一集开始)⇒ 清掉标记,接着量身体");
    end if;
-   Act.Geo_Boot_Eyes (L, F, C);
-   Act.Geo_Boot_Tips (L, F, C);
+   Act.Geo_Boot_Eyes (L, F, C);      --  腕眼:转、探、走,多点连相机偏移一起解;不动的眼顺便记指尖
+   Act.Geo_Boot_Fixed (L, F, C);     --  不动的眼:拿记下的指尖观测连它的位姿、焦距、各臂指尖偏移一起解
    Act.Geo_Boot_Support (L, F, C);
    Act.Geo_Boot_Stride (L, F, C);
    Put_Line ("[身] 身体量完 ⇒ 开始干活(脑在 " & To_String (C.Eye_Host) & ":" & Codec.Img (C.Eye_Port) & (if C.Look_Only then ",只看不动" else "") & ")");

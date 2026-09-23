@@ -255,6 +255,7 @@ package Act is
       Eye_Port : Natural := 8079;
       Inst_Host : Unbounded_String;    --  仪器进程(空 = 没配,几何全靠身体自己量)
       Inst_Port : Natural := 8077;
+      Fixed_Obs : Geom.Obs_Pt_Vectors.Vector;   --  腕眼标定时不动的眼看见各条臂指尖的观测(Pt = 臂号),开机末尾一起解不动的眼
       Dump_Dir : Unbounded_String;
       Round_N : Natural := 0;
       Fast : Boolean := False;
@@ -353,7 +354,6 @@ package Act is
    --  ② 每只能合拢的手:指尖偏置没量过的(没有深度就量不了),借不动的眼在两停里看它指尖落在哪,解出指尖离眼多远;
    --  ③ 每只手:指尖朝下压到被顶住,量出它下面那张面在哪(东西躺的面;先量了,第一句话就不用猜高度)
    procedure Geo_Boot_Eyes (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);
-   procedure Geo_Boot_Tips (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);
    procedure Geo_Boot_Support (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);
    --  ④ 每条臂一条命令能走多远还走得到(阶梯探)
    procedure Geo_Boot_Stride (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);
