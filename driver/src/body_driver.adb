@@ -186,11 +186,18 @@ begin
                   Reuse := Reuse and then Any_Zone;
                   --  存的握区少了哪台相机的(H53 2026-09-23 实测:第 2 只手只存了 0、1 两台,它自己那只眼(第 2 台)没有 ⇒ 合爪方向、指头都量不出)
                   --  ⇒ 不照用,合空一次把每台相机的都量上
-                  if Natural (Stored_Hands (Natural (Old)).Zones.Length) < C.Map.N_Cams then
-                     Reuse := False;
-                     Put_Line ("[装] 第" & Natural'Image (A + 1) & " 只手第" & Natural'Image (Jk) & " 号抓握通道:存的握区只有 "
-                               & Codec.Img (Natural (Stored_Hands (Natural (Old)).Zones.Length)) & " 台相机的,少了 ⇒ 合空一次补量");
-                  end if;
+                  --  (装回时握区表按相机数补齐了空位,所以要看的是它自己那只眼的那一格量过没有,不是表有多长 —— H54 实测表长 3、第 2 台那格是空的)
+                  declare
+                     Hc : constant Integer := (if A < Natural (C.Map.Cam_On_Arm.Length) then C.Map.Cam_On_Arm (A) else -1);
+                  begin
+                     if Hc >= 0 and then (Natural (Hc) >= Natural (Stored_Hands (Natural (Old)).Zones.Length)
+                                          or else not Stored_Hands (Natural (Old)).Zones (Natural (Hc)).Valid)
+                     then
+                        Reuse := False;
+                        Put_Line ("[装] 第" & Natural'Image (A + 1) & " 只手第" & Natural'Image (Jk) & " 号抓握通道:存的握区里没有它自己那只眼(第"
+                                  & Codec.Img (Natural (Hc)) & " 台)的那一格 ⇒ 合空一次补量");
+                     end if;
+                  end;
                end;
             end if;
             if Reuse then
