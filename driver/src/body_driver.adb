@@ -289,6 +289,10 @@ begin
    --  于是几何常数从不装回、Geo_Ready 恒假、整条几何走法是死代码。
    Act.Geo_Boot (F, C, To_String (Body_Path));
    Act.Geo_Boot_Fixed (L, F, C);
+   --  对方在我连上时复位过一次(第一集开始):这个标记在这儿清掉,不然开机量身体的那几段会把它当成"段中间复位"当场收段(S2 2026-09-23 实测:左眼一停没挪就退了)
+   if Plug.Take_Reset (L) then
+      Put_Line ("[身] 对方在开机前复位过一次(第一集开始)⇒ 清掉标记,接着量身体");
+   end if;
    Act.Geo_Boot_Eyes (L, F, C);
    Act.Geo_Boot_Tips (L, F, C);
    Act.Geo_Boot_Support (L, F, C);
