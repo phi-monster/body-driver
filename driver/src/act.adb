@@ -5102,6 +5102,17 @@ package body Act is
    --  把 Sinew 的一段区间落成执行器内部那一小节。角色在这儿变成具体的那一块。
    --  离第 N 件东西(1 起)近的那条臂(0 起);说不出就 -1。它在哪只腕眼里被量到 ⇒ 那条臂;在不动的眼里 ⇒ 比它和各只手在那只眼里的画面距离
    --  (各只手在不动的眼里在哪,是开机合空时量出来的握区中心)
+   --  这一点在这条臂横着被顶住过的那一侧吗(那一侧它够不着,量出来的)
+   function Beyond_Wall (C : Context; Arm : Natural; P : Geom.V3) return Boolean is
+   begin
+      for Wm of C.Walls loop
+         if Wm.Arm = Arm and then (P (0) - Wm.P (0)) * Wm.W (0) + (P (1) - Wm.P (1)) * Wm.W (1) + (P (2) - Wm.P (2)) * Wm.W (2) > 0.0 then
+            return True;
+         end if;
+      end loop;
+      return False;
+   end Beyond_Wall;
+
    function Nearer_Arm (C : Context; N : Natural) return Integer is
    begin
       if N < 1 or else N > Natural (C.Items.Length) then
@@ -5112,11 +5123,18 @@ package body Act is
          A2 : constant Integer := Cam_Arm (C, It.Cam);
          Best : Integer := -1;
          Best_D : Long_Float := 0.0;
+         --  它在哪(有量到的位置才有):两眼交点,没有就用它顶面点里的一个
+         Pos_Known : constant Boolean := C.Geo_Pw_Valid or else C.Sil_Valid;
+         Pos : constant Geom.V3 := (if C.Geo_Pw_Valid then C.Geo_Pw elsif C.Sil_Valid then C.Sil_P0 else [others => 0.0]);
       begin
          if It.Kind not in Thing | Thing_Remembered then
             return -1;
          end if;
+         --  在哪只腕眼里被点了名就是那条臂 —— 除非它落在那条臂横着被顶住过的那一侧(H60 2026-09-23 实测:右臂在 y≈-0.43 到头,剪刀在 -0.46),那就换另一条
          if A2 >= 0 then
+            if Pos_Known and then Beyond_Wall (C, Natural (A2), Pos) and then C.Map.Arms = 2 then
+               return 1 - A2;
+            end if;
             return A2;
          end if;
          for A in 0 .. C.Map.Arms - 1 loop
@@ -5124,7 +5142,7 @@ package body Act is
                Z : constant Zone.Hand_Zone := Zone_Of (C, A, It.Cam, 0);
                D : constant Long_Float := Sqrt ((Z.Cu - It.Cu) ** 2 + (Z.Cv - It.Cv) ** 2);
             begin
-               if Z.Valid and then (Best < 0 or else D < Best_D) then
+               if Z.Valid and then not (Pos_Known and then Beyond_Wall (C, A, Pos)) and then (Best < 0 or else D < Best_D) then
                   Best := Integer (A);
                   Best_D := D;
                end if;
@@ -5960,9 +5978,9 @@ package body Act is
          Sp0 : constant Geom.V3 := Pts.First_Element;
          Dist : constant Long_Float := Geom.Norm ([Sp0 (0) - Eye_O (0), Sp0 (1) - Eye_O (1), Sp0 (2) - Eye_O (2)]);
          Err : constant Long_Float := (if G.F > 0.0 then G.Rms * Dist / G.F else Dist);
-         --  已有的那份还作数吗:同一件、面的高度没变(沿法向差不到一个采样间距)。作数就只让误差更小(相同则更细)的盖它
-         Fresh : constant Boolean := C.Sil_Valid and then C.Sil_Name = Name
-           and then abs ((P0 (0) - C.Sil_P0 (0)) * N (0) + (P0 (1) - C.Sil_P0 (1)) * N (1) + (P0 (2) - C.Sil_P0 (2)) * N (2)) <= C.Sil_Pitch;
+         --  已有的那份(同一件)只让误差更小(相同则更细)的盖它。面的高度变了不算数:视线存着,碰到面后会按真高度重投
+         --  (H60 2026-09-23 实测:交点高度一抖,头顶眼那份 2.5 cm 误差的把腕眼 0.2 mm 的盖掉了)
+         Fresh : constant Boolean := C.Sil_Valid and then C.Sil_Name = Name;
       begin
          if Pitch <= 0.0 or else (Fresh and then (Err > C.Sil_Err or else (Err = C.Sil_Err and then Pitch > C.Sil_Pitch))) then
             return;
@@ -6268,6 +6286,25 @@ package body Act is
       end;
    end Pick_Contact;
 
+   --  这只眼这一帧里最大的那一块(槽号);没有 ⇒ -1。量朝向要盯着一个不动的东西挪四下,随便什么东西都行
+   function Largest_Slot (C : in out Context; F : Plug.Frame; Cam : Natural) return Integer is
+      Best : Integer := -1;
+      Bc : Natural := 0;
+   begin
+      World.Observe (C.Wld, Cam, Cut_Things (C, F, Cam), F.Cams (Cam).W, F.Cams (Cam).H);
+      for Si in 0 .. World.Count (C.Wld, Cam) - 1 loop
+         declare
+            Sl : constant World.Slot := World.Get (C.Wld, Cam, Si);
+         begin
+            if Sl.Present and then Sl.R.Count > Bc then
+               Bc := Sl.R.Count;
+               Best := Si;
+            end if;
+         end;
+      end loop;
+      return Best;
+   end Largest_Slot;
+
    --  转这只手,让它自己那只眼的正前方对准世界里的一个方向(Want,单位向量)。
    --  转最少的角度:转轴 = 现在的正前方 × 要的方向。指尖不许甩走(08-28 那次甩出 20 cm):每一步先按要转的角度算出
    --  指尖会挪到哪,再用平移把它补回原处 —— 指尖偏置是量过的。一条命令最多转多少 = 4 倍转动探针幅度(量过的那一档)× 脑的档位;
@@ -6528,6 +6565,60 @@ package body Act is
       end loop;
    end Unify_By_Sight;
 
+   --  这只眼里没有它的窗(脑没在这只眼里点过它的名),可它顶面的点我量过 ⇒ 把那些点投进这只眼,外接框就是窗;窗里哪一片是它照常每帧重量。
+   --  名字是脑起的、点是我量的:这不是替脑认东西,是把量到的东西送进另一只眼(换手之后左手的眼里本来什么都没有)
+   procedure Window_From_Outline (C : in out Context; F : Plug.Frame; Cam : Natural; Name : Unbounded_String) is
+      G : constant Geom.Cam_Geo := Geo_Of (C, Cam);
+      A2 : constant Integer := Cam_Arm (C, Cam);
+      Cw : constant Natural := F.Cams (Cam).W;
+      Ch : constant Natural := F.Cams (Cam).H;
+      X0 : Integer := Integer'Last;
+      Y0 : Integer := Integer'Last;
+      X1 : Integer := -1;
+      Y1 : Integer := -1;
+      N : Natural := 0;
+      Bt : Boxed_Thing;
+   begin
+      if Boxed_By (C, Cam, Name) >= 0 or else not C.Sil_Valid or else C.Sil_Name /= Name then
+         return;
+      end if;
+      if not ((A2 < 0 and then G.Fixed) or else (A2 >= 0 and then G.Valid and then G.F > 0.0 and then A2 < Integer (F.EE.Length))) then
+         return;
+      end if;
+      for P of C.Sil_Pts loop
+         declare
+            U, V : Long_Float;
+            Front : Boolean;
+         begin
+            if A2 < 0 then
+               Geom.Project_Fixed (G, P, U, V, Front);
+            else
+               Geom.Project (G, F.EE (Natural (A2)), P, U, V, Front);
+            end if;
+            if Front and then U >= 0.0 and then V >= 0.0 and then U < Long_Float (Cw) and then V < Long_Float (Ch) then
+               X0 := Integer'Min (X0, Integer (U));
+               X1 := Integer'Max (X1, Integer (U));
+               Y0 := Integer'Min (Y0, Integer (V));
+               Y1 := Integer'Max (Y1, Integer (V));
+               N := N + 1;
+            end if;
+         end;
+      end loop;
+      if N < 8 or else X1 <= X0 or else Y1 <= Y0 then   --  点数
+         return;
+      end if;
+      Bt.Name := Name;
+      Bt.Cam := Cam;
+      Bt.X0 := X0; Bt.Y0 := Y0; Bt.X1 := X1; Bt.Y1 := Y1;
+      Bt.Cu := Long_Float (X0 + X1) / 2.0 / Long_Float (Cw);
+      Bt.Cv := Long_Float (Y0 + Y1) / 2.0 / Long_Float (Ch);
+      Bt.Seen := False;
+      C.Boxed.Append (Bt);
+      C.Cut_Cam := -1;
+      Geo_Say ("第" & Codec.Img (Cam) & " 台眼里没有它的窗 ⇒ 把它顶面的点投进这只眼:窗 [" & Codec.Img (X0) & " " & Codec.Img (Y0) & " " & Codec.Img (X1) & " " & Codec.Img (Y1)
+               & "](" & Codec.Img (N) & " 个点落在画面里),窗里哪一片是它照常重量");
+   end Window_From_Outline;
+
    --  ── 此刻每一只看得见它的眼给一条视线 ──(它叫 Its_Name,脑点过名的)
    --  眼可以是:正在走路的这只手自己的眼(Seen 且整块)、不动的眼(量过自己在哪)、另一只手的眼(朝向量过)。
    --  两条以上 ⇒ 交点就是它此刻的位置,它动不动都一样;这是抓会动的东西唯一诚实的量法(owner 09-22)。
@@ -6648,6 +6739,9 @@ package body Act is
       --  上一段末尾转过手/挪过手(指尖朝下那一转尤其大)⇒ 它在这只眼里早不在旧窗那儿了;它在哪我量过 ⇒ 先把窗投到它该在的地方
       if Length (Name) > 0 and then C.Geo_Pw_Valid and then C.Geo_Pw_Name = Name then
          Retarget_Box (C, F, Cam, Arm, Name, C.Geo_Pw);
+      end if;
+      if Length (Name) > 0 then
+         Window_From_Outline (C, F, Cam, Name);
       end if;
       Geo_Track (C, F, Cam, Slot, U, V, Seen, Name);
       Slot_Whole (C, F, Cam, Slot, Whole, Edge, Its_Name, Name);
@@ -9213,8 +9307,13 @@ package body Act is
             declare
                Cok : Boolean;
             begin
-               Put_Line ("[身] 📐 这台相机的朝向还没量 ⇒ 先盯着它挪四下量出来");
-               Geo_Calibrate (L, C, F, Natural (Geo_Cam), Natural (Own), Geo_Slot_Now, Cok);
+               --  盯着谁挪:脑点名的那块在这只眼里有槽就盯它;没有(脑在别的眼里点的名)就盯这只眼里最大的一块(随便什么都行,只要它不动)
+               declare
+                  Sl : constant Integer := (if Geo_Slot_Now >= 0 then Geo_Slot_Now else Largest_Slot (C, F, Natural (Geo_Cam)));
+               begin
+                  Put_Line ("[身] 📐 这台相机的朝向还没量 ⇒ 先盯着" & (if Geo_Slot_Now >= 0 then "它" else "这只眼里最大的一块") & "挪四下量出来");
+                  Geo_Calibrate (L, C, F, Natural (Geo_Cam), Natural (Own), Sl, Cok);
+               end;
                if not Cok then
                   Report := S ("I tried to measure how my hand camera sits on my hand and could not. ");
                   if Geo_Case = 5 then
