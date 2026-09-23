@@ -312,6 +312,15 @@ begin
          end loop;
          Check (Cnt >= 300 and then Cnt <= 420, "握区(无深度):手指像素 " & Codec.Img (Cnt) & "(该 ≈ 384 = 4 段 × 8 × 12,抖动的桌面一个都不算)");
       end;
+      declare
+         Ua, Va, Ub, Vb : Long_Float;
+         Oa, Ob : Boolean;
+      begin
+         Zone.Tip_Px (Z, Z.A, W, H, Ua, Va, Oa);
+         Zone.Tip_Px (Z, Z.B, W, H, Ub, Vb, Ob);
+         Check (Oa and then Ob and then abs (Ua - 11.0) < 1.0 and then abs (Ub - 52.0) < 1.0 and then abs (Va - 41.5) < 1.0 and then abs (Vb - 41.5) < 1.0,
+                "指尖 = 伸向合拢处的那一头:左瓣 (" & Codec.Fmt (Ua, 1) & "," & Codec.Fmt (Va, 1) & ") 右瓣 (" & Codec.Fmt (Ub, 1) & "," & Codec.Fmt (Vb, 1) & ")(该 ≈ (11,41.5) / (52,41.5),不是最靠上的那一截)");
+      end;
       Z := Zone.From_Frames (Open_G, Open_G, W, H);
       Check (not Z.Valid, "握区(无深度):两张一样的图 ⇒ 看不见这只手合拢,如实说");
    end;

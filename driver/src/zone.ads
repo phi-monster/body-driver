@@ -51,6 +51,9 @@ package Zone is
    --  S5 2026-09-23 实测 12.7 万像素被记成手指)。变暗的一拨和变亮的一拨是两类:一类是手指离开露出背景,一类是手指到来盖住背景;
    --  张开时的手指分得开、合上时挤在一起 ⇒ 几块形心散得开的那一类是"张开时的手指"(瓣),另一类是手指合到的地方(区)
    function From_Frames (Open_G, Closed_G : Buf; W, Hh : Natural) return Hand_Zone;
+   --  一瓣手指的指尖落在画面哪个像素(纯函数):指尖 = 这根手指【伸向手指合拢处】的那一头 —— 从这瓣的形心指向区框中心(手指合到的地方)的方向上,
+   --  投影最远的那一小截(1/80 画幅高,比例无量纲)的形心。不假设指尖在画面上方或下方:腕上的眼、头顶的眼、任何身体同一条定义
+   procedure Tip_Px (Z : Hand_Zone; Lb : Lobe; W, Hh : Natural; U, V : out Long_Float; Ok : out Boolean);
    --  把手指像素从深度切块结果里剔掉(块心落在手指框或区框里 = 我自己)
    function Is_Self (Z : Hand_Zone; R : Picture.Region; W, Hh : Natural) return Boolean;
 end Zone;

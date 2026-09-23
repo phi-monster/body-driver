@@ -208,6 +208,52 @@ package body Zone is
       return Z;
    end From_Sweep;
 
+   procedure Tip_Px (Z : Hand_Zone; Lb : Lobe; W, Hh : Natural; U, V : out Long_Float; Ok : out Boolean) is
+      --  方向:瓣心 → 区框中心(手指合到的地方);两者重合时(单瓣、区就是它自己)按瓣的主轴
+      Mx : constant Long_Float := 0.5 * Long_Float (Z.X0 + Z.X1);
+      My : constant Long_Float := 0.5 * Long_Float (Z.Y0 + Z.Y1);
+      Dx : Long_Float := Mx - Lb.Cu * Long_Float (W);
+      Dy : Long_Float := My - Lb.Cv * Long_Float (Hh);
+      Dn : constant Long_Float := Sqrt (Dx * Dx + Dy * Dy);
+      Band : constant Long_Float := Long_Float (Hh) / 80.0;   --  最远的那一小截有多厚(比例,无量纲)
+      Best : Long_Float := Long_Float'First;
+      Su, Sv : Long_Float := 0.0;
+      Cnt : Natural := 0;
+   begin
+      U := 0.0; V := 0.0; Ok := False;
+      if not Lb.Valid or else Natural (Z.Fingers.Length) < W * Hh then
+         return;
+      end if;
+      if Dn > 0.0 then
+         Dx := Dx / Dn; Dy := Dy / Dn;
+      else
+         Dx := Z.Au; Dy := Z.Av;
+         if Dx = 0.0 and then Dy = 0.0 then
+            return;
+         end if;
+      end if;
+      for Y in Lb.Y0 .. Lb.Y1 loop
+         for X in Lb.X0 .. Lb.X1 loop
+            if Z.Fingers.Element (Y * W + X) then
+               Best := Long_Float'Max (Best, Long_Float (X) * Dx + Long_Float (Y) * Dy);
+            end if;
+         end loop;
+      end loop;
+      if Best = Long_Float'First then
+         return;
+      end if;
+      for Y in Lb.Y0 .. Lb.Y1 loop
+         for X in Lb.X0 .. Lb.X1 loop
+            if Z.Fingers.Element (Y * W + X) and then Long_Float (X) * Dx + Long_Float (Y) * Dy >= Best - Band then
+               Su := Su + Long_Float (X); Sv := Sv + Long_Float (Y); Cnt := Cnt + 1;
+            end if;
+         end loop;
+      end loop;
+      if Cnt > 0 then
+         U := Su / Long_Float (Cnt); V := Sv / Long_Float (Cnt); Ok := True;
+      end if;
+   end Tip_Px;
+
    function From_Frames (Open_G, Closed_G : Buf; W, Hh : Natural) return Hand_Zone is
       Z : Hand_Zone;
       N : constant Natural := W * Hh;

@@ -5504,39 +5504,6 @@ package body Act is
 
    --  指尖在相机里的位置:开机那一帧里两根手指(合空扫过的像素)各自最靠上的那一截 = 指尖;有深度那一帧读一次深度
    --  (真机:一台相机一辈子量一次,用尺子也行;之后再也不读深度)
-   --  一瓣手指的指尖落在自己眼里哪个像素:那一瓣最靠上的 1/80 画幅高那一截的形心(比例,无量纲)。指尖从画面下方伸进来,最靠上的就是尖
-   procedure Lobe_Tip_Px (Z : Zone.Hand_Zone; Lb : Zone.Lobe; Cw, Ch : Natural; U, V : out Long_Float; Ok : out Boolean) is
-      Top : Integer := -1;
-      Su, Sv : Long_Float := 0.0;
-      Cnt : Natural := 0;
-   begin
-      U := 0.0; V := 0.0; Ok := False;
-      if not Lb.Valid then
-         return;
-      end if;
-      for Y in Lb.Y0 .. Lb.Y1 loop
-         for X in Lb.X0 .. Lb.X1 loop
-            if Y * Cw + X < Natural (Z.Fingers.Length) and then Z.Fingers (Y * Cw + X) then
-               Top := Y;
-               exit;
-            end if;
-         end loop;
-         exit when Top >= 0;
-      end loop;
-      if Top < 0 then
-         return;
-      end if;
-      for Y in Top .. Natural'Min (Lb.Y1, Top + Ch / 80) loop
-         for X in Lb.X0 .. Lb.X1 loop
-            if Y * Cw + X < Natural (Z.Fingers.Length) and then Z.Fingers (Y * Cw + X) then
-               Su := Su + Long_Float (X); Sv := Sv + Long_Float (Y); Cnt := Cnt + 1;
-            end if;
-         end loop;
-      end loop;
-      if Cnt > 0 then
-         U := Su / Long_Float (Cnt); V := Sv / Long_Float (Cnt); Ok := True;
-      end if;
-   end Lobe_Tip_Px;
 
    procedure Geo_Measure_Tips (C : in out Context; F : Plug.Frame; Cam, Arm : Natural) is
       G : Geom.Cam_Geo := Geo_Of (C, Cam);
@@ -5669,7 +5636,9 @@ package body Act is
       G : Geom.Cam_Geo;
       Home : constant Plug.Arm_Pose := F.EE (Arm);
       B : constant Long_Float := 4.0 * Geo_Base (C, Arm);   --  四倍那一档(倍数,无量纲):远处一步要跳得过跟踪噪声
-      Moves : constant array (1 .. 5) of Geom.V3 := [[B, 0.0, 0.0], [0.0, 0.0, B], [0.0, B, 0.0], [-B, 0.0, B], [B, B, 0.0]];   --  五停:丢一两停还够解
+      --  一条小步走出来的长基线:每步 B、每步都跟着看,累计 8 步(三根轴都有、还转回来一半);比从原处星形挪四下基线长一倍、丢一两停也够解
+      --  (S5 2026-09-23 实测:星形五下里两下跟丢,残差 17 px)
+      Moves : constant array (1 .. 8) of Geom.V3 := [[B, 0.0, 0.0], [B, 0.0, 0.0], [0.0, 0.0, B], [0.0, 0.0, B], [0.0, B, 0.0], [0.0, B, 0.0], [-B, 0.0, 0.0], [-B, 0.0, 0.0]];
       Obs : Geom.Obs_Vectors.Vector;
       U, V : Long_Float;
       Seen, Mok : Boolean;
@@ -5693,8 +5662,7 @@ package body Act is
       for M of Moves loop
          exit when Plug.Reset_Pending (L);   --  段中间对方复位:停,量到几停算几停
          declare
-            Cur : constant Plug.Arm_Pose := F.EE (Arm);
-            Dw : constant Geom.V3 := [Home (0) + M (0) - Cur (0), Home (1) + M (1) - Cur (1), Home (2) + M (2) - Cur (2)];
+            Dw : constant Geom.V3 := M;   --  累计走:每一步相对上一停
          begin
             Geo_Move (L, C, F, Arm, Dw, Mok);
             Geo_Track (C, F, Cam, Slot, U, V, Seen);
@@ -5798,10 +5766,28 @@ package body Act is
       Seen_Any : array (0 .. C.Map.N_Cams - 1) of Boolean := [others => False];
       Need_Still : Boolean := True;
       --  这一停里第 A 只手的指尖在每只眼里落在哪:不动的眼记进 Marks;别的手上的眼记进 EM
-      procedure Take_Marks (A : Natural; Zs : Zone.Zone_Vectors.Vector; Pw : Geom.V3; Pose : Plug.Arm_Pose) is
+      --  不动的眼里这只手的【指尖中点】落在哪:两瓣各取"伸向合拢处的那一头"的像素,取中点;只有一瓣就用它的那一头。
+      --  和腕眼量指尖是同一条定义(H61 头顶眼残差 11 px 的一半来自以前拿握区中心 = 手指重心当指尖)
+      function Tip_Mid (Z : Zone.Hand_Zone; W, H : Natural; U, V : out Long_Float) return Boolean is
+         Ua, Va, Ub, Vb : Long_Float;
+         Oa, Ob : Boolean;
       begin
-         if Need_Still and then Wc < Natural (Zs.Length) and then Zs (Wc).Valid then
-            Marks.Append (Geom.Mark'(Pw => Pw, U => Zs (Wc).Cu * Long_Float (Cw), V => Zs (Wc).Cv * Long_Float (Ch)));
+         Zone.Tip_Px (Z, Z.A, W, H, Ua, Va, Oa);
+         Zone.Tip_Px (Z, Z.B, W, H, Ub, Vb, Ob);
+         if Oa and then Ob then
+            U := 0.5 * (Ua + Ub); V := 0.5 * (Va + Vb);   --  两指尖的中点(纯数学的一半)
+         elsif Oa then
+            U := Ua; V := Va;
+         else
+            U := Z.Cu * Long_Float (W); V := Z.Cv * Long_Float (H);
+         end if;
+         return Oa or else Z.Valid;
+      end Tip_Mid;
+      procedure Take_Marks (A : Natural; Zs : Zone.Zone_Vectors.Vector; Pw : Geom.V3; Pose : Plug.Arm_Pose) is
+         U, V : Long_Float;
+      begin
+         if Need_Still and then Wc < Natural (Zs.Length) and then Zs (Wc).Valid and then Tip_Mid (Zs (Wc), Cw, Ch, U, V) then
+            Marks.Append (Geom.Mark'(Pw => Pw, U => U, V => V));
          end if;
          for Cm in 0 .. C.Map.N_Cams - 1 loop
             if Cm /= Wc and then Cam_Arm (C, Cm) >= 0 and then Cam_Arm (C, Cm) /= Integer (A)
@@ -5845,8 +5831,13 @@ package body Act is
                if Need_Still then
                   for H of C.Hands loop
                      if H.Arm = A and then H.K = 0 and then Wc < Natural (H.Zones.Length) and then H.Zones (Wc).Valid then
-                        Marks.Append (Geom.Mark'(Pw => Tip_World (C, A, H.Pose),
-                                                 U => H.Zones (Wc).Cu * Long_Float (Cw), V => H.Zones (Wc).Cv * Long_Float (Ch)));
+                        declare
+                           U, V : Long_Float;
+                        begin
+                           if Tip_Mid (H.Zones (Wc), Cw, Ch, U, V) then
+                              Marks.Append (Geom.Mark'(Pw => Tip_World (C, A, H.Pose), U => U, V => V));
+                           end if;
+                        end;
                      end if;
                   end loop;
                end if;
@@ -9791,6 +9782,24 @@ package body Act is
    --  两停 = 开机合空那一停(已量)+ 抬一个量距单位再合空一次。不抄另一只手的数
    procedure Geo_Boot_Tips (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context) is
       Wc : constant Natural := C.Map.World_Cam;
+      --  不动的眼里的指尖中点(和腕眼、和 Geo_Boot_Fixed 同一条定义)
+      function Still_Tip (Z : Zone.Hand_Zone; U, V : out Long_Float) return Boolean is
+         W : constant Natural := F.Cams (Wc).W;
+         H : constant Natural := F.Cams (Wc).H;
+         Ua, Va, Ub, Vb : Long_Float;
+         Oa, Ob : Boolean;
+      begin
+         Zone.Tip_Px (Z, Z.A, W, H, Ua, Va, Oa);
+         Zone.Tip_Px (Z, Z.B, W, H, Ub, Vb, Ob);
+         if Oa and then Ob then
+            U := 0.5 * (Ua + Ub); V := 0.5 * (Va + Vb);   --  两指尖的中点(纯数学的一半)
+         elsif Oa then
+            U := Ua; V := Va;
+         else
+            U := Z.Cu * Long_Float (W); V := Z.Cv * Long_Float (H);
+         end if;
+         return Oa or else Z.Valid;
+      end Still_Tip;
    begin
       if Wc >= Natural (C.Geo.Length) or else Wc >= Natural (F.Cams.Length) or else not C.Geo (Wc).Fixed then
          return;
@@ -9818,14 +9827,20 @@ package body Act is
                      return [D (0) / Nd, D (1) / Nd, D (2) / Nd];
                   end Dir_Of;
                begin
-                  Lobe_Tip_Px (Z, Z.A, Cw, Ch, Ua, Va, Oa);
-                  Lobe_Tip_Px (Z, Z.B, Cw, Ch, Ub, Vb, Ob);
+                  Zone.Tip_Px (Z, Z.A, Cw, Ch, Ua, Va, Oa);
+                  Zone.Tip_Px (Z, Z.B, Cw, Ch, Ub, Vb, Ob);
                   if not (Oa and then Ob) then
                      Geo_Say ("第" & Codec.Img (A + 1) & " 只手:自己眼里认不全两根指尖 ⇒ 指尖量不了");
                   else
                      for H of C.Hands loop
                         if H.Arm = A and then H.K = 0 and then Wc < Natural (H.Zones.Length) and then H.Zones (Wc).Valid then
-                           Obs.Append (Geom.Obs'(Pose => H.Pose, U => H.Zones (Wc).Cu * Long_Float (F.Cams (Wc).W), V => H.Zones (Wc).Cv * Long_Float (F.Cams (Wc).H)));
+                           declare
+                              U, V : Long_Float;
+                           begin
+                              if Still_Tip (H.Zones (Wc), U, V) then
+                                 Obs.Append (Geom.Obs'(Pose => H.Pose, U => U, V => V));
+                              end if;
+                           end;
                         end if;
                      end loop;
                      declare
@@ -9838,7 +9853,13 @@ package body Act is
                         Geo_Move (L, C, F, A, [0.0, 0.0, B], Mok);
                         Zone.Measure (L, C.Map, A, 0, F, Hz, Zok);
                         if Zok and then Wc < Natural (Hz.Zones.Length) and then Hz.Zones (Wc).Valid then
-                           Obs.Append (Geom.Obs'(Pose => F.EE (A), U => Hz.Zones (Wc).Cu * Long_Float (F.Cams (Wc).W), V => Hz.Zones (Wc).Cv * Long_Float (F.Cams (Wc).H)));
+                           declare
+                              U, V : Long_Float;
+                           begin
+                              if Still_Tip (Hz.Zones (Wc), U, V) then
+                                 Obs.Append (Geom.Obs'(Pose => F.EE (A), U => U, V => V));
+                              end if;
+                           end;
                         end if;
                         declare
                            Cur : constant Plug.Arm_Pose := F.EE (A);
