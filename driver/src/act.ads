@@ -253,6 +253,8 @@ package Act is
       Look_Only : Boolean := False;
       Eye_Host : Unbounded_String;
       Eye_Port : Natural := 8079;
+      Inst_Host : Unbounded_String;    --  仪器进程(空 = 没配,几何全靠身体自己量)
+      Inst_Port : Natural := 8077;
       Dump_Dir : Unbounded_String;
       Round_N : Natural := 0;
       Fast : Boolean := False;

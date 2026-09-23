@@ -20,6 +20,10 @@ package Geom is
       --  仪器看一张图报的焦距 ± 不确定度(像素;0 = 没有)。没给内参时联合解里当一条残差 (F - 先验) / 不确定度:
       --  基线短、焦距和距离分不开时把焦距按在仪器的范围里;基线够长时观测压过它(V1B 2026-09-24:2.6 cm 星形基线把 397 解成 992 / 59)
       F_Prior, F_Prior_Sd : Long_Float := 0.0;
+      --  仪器看一张图报的"上"的方向(相机系单位向量:x 右、y 上、z 朝后)± 不确定度(弧度);只在开机对账用,不存文件
+      Up_Valid : Boolean := False;
+      Up : V3 := [others => 0.0];
+      Up_Sd : Long_Float := 0.0;
       R_Ce : M3 := Identity;           --  相机 → 手(列 = 相机轴在手坐标系里)
       Rms : Long_Float := 0.0;         --  量朝向时的像素残差
       Tip_Valid : Boolean := False;

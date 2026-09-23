@@ -20,6 +20,7 @@ with Contact;
 with Contact.Gen;
 with Contact.Exec;
 with Contact.Surface;
+with Instrument;
 package body Act is
    Sigma_Mult : constant Long_Float := 3.0;   --  鼓出来超过背景自己稳健 σ 的几倍才算一块(在真实深度图上验过:3 中,5 杀光);无量纲
    Track_Win : constant Long_Float := 0.10;   --  一步里任何被跟踪的点在画面里最多跑十分之一画幅(跟踪窗,比例,无量纲)
@@ -5601,6 +5602,63 @@ package body Act is
       end if;
    end Geo_Measure_Tips;
 
+   --  仪器(学习型、任务无关)看这台相机此刻的一帧:焦距 ± 不确定度 ⇒ 联合解的先验(身体给了内参就只对账不当先验);
+   --  "上"的方向记下来,朝向量好后和协议里"上 = z"的假设对账。没配仪器就什么都不做,几何全靠身体自己量
+   procedure Geo_Instrument (C : in out Context; F : Plug.Frame; Cam : Natural) is
+      G : Geom.Cam_Geo := Geo_Of (C, Cam);
+      Err : Unbounded_String;
+      Deg : constant Long_Float := 180.0 / Ada.Numerics.Pi;   --  弧度 → 度(换算,无量纲)
+      Pct : constant Long_Float := 100.0;                     --  比例 → 百分比(换算,无量纲)
+   begin
+      if Length (C.Inst_Host) = 0 or else Cam >= Natural (F.Cams.Length) or else Cam >= Natural (C.Geo.Length) then
+         return;
+      end if;
+      declare
+         Cm : constant Plug.Cam := F.Cams (Cam);
+         R : constant Instrument.Calib := Instrument.Calibrate (To_String (C.Inst_Host), C.Inst_Port, Cm.RGB, Cm.W, Cm.H, Err);
+      begin
+         if not R.Ok then
+            Geo_Say ("仪器没量出第" & Codec.Img (Cam) & " 台相机:" & To_String (Err));
+            return;
+         end if;
+         if not Cm.Has_K then
+            G.F_Prior := R.F; G.F_Prior_Sd := R.F_Sd;
+         end if;
+         G.Up_Valid := Geom.Norm (R.Up) > 0.5; G.Up := R.Up; G.Up_Sd := R.Up_Sd;   --  单位向量才算数(比例,无量纲)
+         C.Geo.Replace_Element (Cam, G);
+         Geo_Say ("仪器(" & To_String (R.Model) & ")看第" & Codec.Img (Cam) & " 台相机一帧:焦距 " & Codec.Fmt (R.F, 1) & " ± " & Codec.Fmt (R.F_Sd, 1) & " px"
+                  & (if Cm.Has_K and then Cm.Focal > 0.0
+                     then "(身体给的是 " & Codec.Fmt (Cm.Focal, 1) & ",差 " & Codec.Fmt (Pct * (R.F - Cm.Focal) / Cm.Focal, 1) & "%,只对账)"
+                     else "(当联合解的先验)")
+                  & " · 图里的上 (" & Codec.Fmt (R.Up (0), 2) & "," & Codec.Fmt (R.Up (1), 2) & "," & Codec.Fmt (R.Up (2), 2) & ") ± "
+                  & Codec.Fmt (R.Up_Sd * Deg, 1) & "° · " & Codec.Fmt (R.Ms, 0) & " ms");
+      end;
+   end Geo_Instrument;
+
+   --  对账:仪器看图说的"上" vs 协议里"上 = z"的假设,经这只眼量好的朝向换到相机系里比;差多少度、仪器自己几度不确定,都如实报。
+   --  不动的眼 R_Ce 就是相机 → 世界;手上的眼还要经过手 → 世界(Hand = 仪器看那一帧时手的位姿)
+   procedure Geo_Up_Check (C : Context; Cam : Natural; Hand : Plug.Arm_Pose; Fixed : Boolean) is
+      G : constant Geom.Cam_Geo := Geo_Of (C, Cam);
+      Deg : constant Long_Float := 180.0 / Ada.Numerics.Pi;   --  弧度 → 度(换算,无量纲)
+   begin
+      if not (G.Valid and then G.Up_Valid) then
+         return;
+      end if;
+      declare
+         Up_C : constant Geom.V3 := (if Fixed then Geom.Ap (Geom.Tr (G.R_Ce), Protocol_Up)
+                                     else Geom.Ap (Geom.Tr (G.R_Ce), Geom.Ap (Geom.Tr (Geom.Quat_To_R (Hand)), Protocol_Up)));
+         Dot : Long_Float := 0.0;
+      begin
+         for I in 0 .. 2 loop
+            Dot := Dot + Up_C (I) * G.Up (I);
+         end loop;
+         Dot := Long_Float'Max (-1.0, Long_Float'Min (1.0, Dot / Long_Float'Max (1.0e-9, Geom.Norm (G.Up))));   --  夹到 [-1,1] 才能取反余弦(无量纲)
+         Geo_Say ("对账:第" & Codec.Img (Cam) & " 台相机按量好的朝向,协议的上在相机里该是 (" & Codec.Fmt (Up_C (0), 2) & "," & Codec.Fmt (Up_C (1), 2) & ","
+                  & Codec.Fmt (Up_C (2), 2) & "),仪器看图说是 (" & Codec.Fmt (G.Up (0), 2) & "," & Codec.Fmt (G.Up (1), 2) & "," & Codec.Fmt (G.Up (2), 2)
+                  & ") ⇒ 差 " & Codec.Fmt (Arccos (Dot) * Deg, 1) & "°(仪器自己 ±" & Codec.Fmt (G.Up_Sd * Deg, 1) & "°)");
+      end;
+   end Geo_Up_Check;
+
    procedure Geo_Boot (F : Plug.Frame; C : in out Context; Body_Path : String) is
       Note : String (1 .. 160);
    begin
@@ -5609,6 +5667,7 @@ package body Act is
       Geo_Say (Ada.Strings.Fixed.Trim (Note, Ada.Strings.Both));
       for Cam in 0 .. C.Map.N_Cams - 1 loop
          Geo_Take_K (C, F, Cam);
+         Geo_Instrument (C, F, Cam);   --  每台眼开机让仪器看一眼:焦距先验 + 图里的上(没配仪器就跳过)
          declare
             A : constant Integer := Cam_Arm (C, Cam);
             G : Geom.Cam_Geo;
@@ -5653,6 +5712,8 @@ package body Act is
       if G.F <= 0.0 then
          Geo_Say ("这台相机没给焦距 ⇒ 和朝向一起解");
       end if;
+      Geo_Instrument (C, F, Cam);
+      G := Geo_Of (C, Cam);
       Geo_Track (C, F, Cam, Slot, U, V, Seen);
       if not Seen then
          Geo_Say ("起点就看不见点名的那块 ⇒ 量不了朝向");
@@ -5690,7 +5751,9 @@ package body Act is
          C.Geo.Replace_Element (Cam, G);
          Geom.Save (To_String (C.Geo_Path), C.Geo);
          Geo_Say ("相机朝向量好:" & Codec.Img (Natural (Obs.Length)) & " 停,像素残差 " & Codec.Fmt (G.Rms, 2) & " px"
-                  & (if G.F_Meas > 0.0 then ",焦距一起解出来 " & Codec.Fmt (G.F, 1) & " px" else "") & ",存进 " & To_String (C.Geo_Path));
+                  & (if G.F_Meas > 0.0 then ",焦距一起解出来 " & Codec.Fmt (G.F, 1) & " px" else "")
+                  & (if G.F_Prior > 0.0 then "(仪器先验 " & Codec.Fmt (G.F_Prior, 1) & " ± " & Codec.Fmt (G.F_Prior_Sd, 1) & ")" else "") & ",存进 " & To_String (C.Geo_Path));
+         Geo_Up_Check (C, Cam, Home, False);
       else
          Geo_Say ("朝向解不出来(能用的停只有 " & Codec.Img (Natural (Obs.Length)) & " 个)");
       end if;
@@ -5921,7 +5984,10 @@ package body Act is
                C.Geo.Replace_Element (Wc, G);
                Geom.Save (To_String (C.Geo_Path), C.Geo);
                Geo_Say ("不动的眼量好:" & Codec.Img (Natural (Marks.Length)) & " 个观测,像素残差 " & Codec.Fmt (G.Rms, 2) & " px,它在 ("
-                        & Mm (G.Pos (0)) & "," & Mm (G.Pos (1)) & "," & Mm (G.Pos (2)) & "),存进 " & To_String (C.Geo_Path));
+                        & Mm (G.Pos (0)) & "," & Mm (G.Pos (1)) & "," & Mm (G.Pos (2)) & ")"
+                        & (if G.F_Meas > 0.0 then ",焦距一起解出来 " & Codec.Fmt (G.F, 1) & " px" else "")
+                        & (if G.F_Prior > 0.0 then "(仪器先验 " & Codec.Fmt (G.F_Prior, 1) & " ± " & Codec.Fmt (G.F_Prior_Sd, 1) & ")" else "") & ",存进 " & To_String (C.Geo_Path));
+               Geo_Up_Check (C, Wc, [others => 0.0], True);
             else
                Geo_Say ("不动的眼解不出来(观测只有 " & Codec.Img (Natural (Marks.Length)) & " 个,要 4 个以上)");
             end if;

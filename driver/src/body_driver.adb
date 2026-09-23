@@ -22,6 +22,7 @@ procedure Body_Driver is
    Body_Path : Unbounded_String;   --  身体文件(--in/--out;同一具身体越用越强)
    --  脑的默认端点(接线协议,不是身体量)
    Eye : Unbounded_String := To_Unbounded_String ("127.0.0.1:8079");
+   Inst : Unbounded_String := To_Unbounded_String (Codec.Env ("BL_INST"));   --  仪器进程 host:port(空 = 没配)
    L : Plug.Link;
    F : Plug.Frame;
    C : Act.Context;
@@ -37,6 +38,8 @@ begin
             Port := Natural'Value (Ada.Command_Line.Argument (I + 1)); I := I + 1;
          elsif A = "--eye" and then I < Ada.Command_Line.Argument_Count then
             Eye := To_Unbounded_String (Ada.Command_Line.Argument (I + 1)); I := I + 1;
+         elsif A = "--inst" and then I < Ada.Command_Line.Argument_Count then
+            Inst := To_Unbounded_String (Ada.Command_Line.Argument (I + 1)); I := I + 1;
          elsif (A = "--in" or else A = "--out") and then I < Ada.Command_Line.Argument_Count then
             Body_Path := To_Unbounded_String (Ada.Command_Line.Argument (I + 1)); I := I + 1;   --  身体文件:装回、核对、合成、写回
          else
@@ -49,7 +52,7 @@ begin
       Eye := To_Unbounded_String (Codec.Env ("BL_EYE"));
    end if;
    if Port = 0 then
-      Put_Line ("用法:body_driver --listen <端口> [--eye host:port]");
+      Put_Line ("用法:body_driver --listen <端口> [--eye host:port] [--inst host:port]");
       Ada.Command_Line.Set_Exit_Status (2);
       return;
    end if;
@@ -62,6 +65,17 @@ begin
          C.Eye_Port := Natural'Value (E (P + 1 .. E'Last));
       else
          C.Eye_Host := Eye;
+      end if;
+   end;
+   declare
+      E : constant String := To_String (Inst);
+      P : constant Natural := Ada.Strings.Fixed.Index (E, ":");
+   begin
+      if P > 0 then
+         C.Inst_Host := To_Unbounded_String (E (E'First .. P - 1));
+         C.Inst_Port := Natural'Value (E (P + 1 .. E'Last));
+      else
+         C.Inst_Host := Inst;
       end if;
    end;
    C.Look_Only := Codec.Env ("BL_LOOK") /= "";
