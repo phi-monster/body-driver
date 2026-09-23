@@ -5430,13 +5430,14 @@ package body Act is
    --  "它在相机前 -0.8 mm"其实是负 0.8 米(算到相机背后去了)—— T10 2026-09-21 差点被这个标签骗过去。量的是米,就按米说,三位小数到毫米。
    function Mm (X : Long_Float) return String is (Codec.Fmt (X, 3) & " m");
 
-   procedure Geo_Move (L : in out Plug.Link; C : Context; F : in out Plug.Frame; Arm : Natural; Dw : Geom.V3; Ok : out Boolean) is
+   procedure Geo_Move (L : in out Plug.Link; C : Context; F : in out Plug.Frame; Arm : Natural; Dw : Geom.V3; Ok : out Boolean;
+                       Watch : Selfmap.Watcher := null) is
       A : Table.Vec := Table.Zero_Vec;
       Jaw : Floats;
       Del : Table.Vec;
    begin
       A (0) := Dw (0); A (1) := Dw (1); A (2) := Dw (2);
-      Step_Arm (L, C, F, Arm, A, Jaw, Del, Ok);
+      Step_Arm (L, C, F, Arm, A, Jaw, Del, Ok, Watch => Watch);
       --  命令了多少、实到多少,每一步都说(GB5 那一版有这一行,搬回 main 时丢了;H6 2026-09-22 实测每步要 14 cm 而差距只缩 0–2 cm,
       --  没有这一行就分不清是身体没走成、还是我算错了)
       Geo_Say ("挪 (" & Mm (Dw (0)) & "," & Mm (Dw (1)) & "," & Mm (Dw (2)) & ") ⇒ 实到 (" & Mm (Del (0)) & "," & Mm (Del (1)) & "," & Mm (Del (2)) &
@@ -5744,9 +5745,37 @@ package body Act is
       Dump : constant String := Codec.Env ("BL_DUMP");
       Stop_N : Natural := 0;
       Deg : constant Long_Float := 180.0 / Ada.Numerics.Pi;   --  弧度 → 度(换算,无量纲)
+      package Param_Pixels_P is new Ada.Containers.Vectors (Natural, Long_Float);
+      subtype Param_Pixels is Param_Pixels_P.Vector;
+      function Median_Px (Xs : Param_Pixels) return Long_Float is   --  中位数(拷一份插入排序;几十个点)
+         A : Param_Pixels := Xs;
+         N : constant Natural := Natural (A.Length);
+      begin
+         if N = 0 then
+            return 0.0;
+         end if;
+         for I in 1 .. N - 1 loop
+            declare
+               X : constant Long_Float := A (I);
+               J : Integer := I - 1;
+            begin
+               while J >= 0 and then A (J) > X loop
+                  A.Replace_Element (J + 1, A (J)); J := J - 1;
+               end loop;
+               A.Replace_Element (J + 1, X);
+            end;
+         end loop;
+         return A (N / 2);
+      end Median_Px;
       Live_From : Natural := 0;   --  这一段跟踪从第几个候选起(复位之后眼里的东西换了:老候选退出,新候选接上,各算各的点)
       Resets : Natural := 0;
-      --  不动的眼(头顶眼)顺便看着这只手的指尖(Head_Watch):每停记一笔(位姿 + 像素)进 C.Fixed_Obs,开机末尾连它的位姿、焦距、指尖偏移一起解
+      --  不动的眼(头顶眼)顺便看着这只手的指尖(Head_Watch):手挪的每一帧都记一笔(位姿 + 像素)进 C.Fixed_Obs,不只在停点
+      --  (G1K 2026-09-25:只在停点记,整个开机 21 笔,头顶眼解成焦距 46),开机末尾连它的位姿、焦距、指尖偏移一起解
+      function Head_Frame (Fr : Plug.Frame) return Boolean is
+      begin
+         Head_Watch (C, Fr, Arm, False);
+         return False;   --  不打断走
+      end Head_Frame;
       --  候选:画幅中间那一半里(比例,无量纲)不贴边、不是自己手指的每一块;开一段跟踪。起点和每次复位之后各来一遍(新候选算新的点)
          procedure Open_Segment is
             N_Before : constant Natural := Natural (Cur.Length);
@@ -5870,7 +5899,7 @@ package body Act is
          Prev_V : constant Long_Float := (if Target >= 0 then Cur (Target).V else 0.0);
          K : Natural := 0;
       begin
-         Geo_Move (L, C, F, Arm, M, Mok);
+         Geo_Move (L, C, F, Arm, M, Mok, Head_Frame'Unrestricted_Access);
          Where;
          Head_Watch (C, F, Arm, False);
          Dump_Stop;
@@ -5895,7 +5924,7 @@ package body Act is
          K : Natural := 0;
       begin
          A (3) := Sign * Theta * Axis (0); A (4) := Sign * Theta * Axis (1); A (5) := Sign * Theta * Axis (2);
-         Step_Arm (L, C, F, Arm, A, Jaw, Del, Mok);
+         Step_Arm (L, C, F, Arm, A, Jaw, Del, Mok, Watch => Head_Frame'Unrestricted_Access);
          Where;
          Head_Watch (C, F, Arm, False);
          Dump_Stop;
@@ -5929,39 +5958,42 @@ package body Act is
          Geo_Say ("量朝向:起点 " & Codec.Img (K0) & " 个候选" & (if Tid >= 0 then " · 仪器逐帧跟点" else " · 按槽号重切")
                   & (if C.Head_Id >= 0 then " · 不动的眼跟着指尖" else ""));
       end;
-      --  转动的停:转角按阶梯量出来(像步幅):4 / 16 / 64 倍转动探针档,一档一档往上,"转过去之后还有一半以上的候选跟得住"的最大一档就是转角
-      --  (焦距精度和转角成正比:V1G–V1J 只转 5.9°,焦距炮与炮之间飘 ±4%)。每一档都是去一下、回一下,记的观测全进解。绕世界 z 探阶梯,绕世界 x 用探到的那一档
+      --  转动的停:转角由眼定,不由关节定。先按四倍转动探针档探一转,看跟住的点在画面里中位挪了几像素,按"每转挪画幅的 1/16"缩放
+      --  (比例,无量纲;下限一档、上限 64 档)。G1K 2026-09-25:关节一档是 x5 的三倍,四档 = 17.7° 一转就把点全甩出画面;x5 上四档只有 5.9°,又嫌小
       if Theta > 0.0 then
          declare
-            Rungs : constant array (1 .. 3) of Long_Float := [4.0, 16.0, 64.0];   --  倍数(和步幅阶梯同一套,无量纲)
-            Best : Long_Float := 0.0;
-            Half : constant Natural := (Natural (Cur.Length) + 1) / 2;   --  一半的候选(次数)
+            Before : Instrument.Track_Vectors.Vector;
+            Shifts : Param_Pixels;
          begin
-            for R of Rungs loop
-               declare
-                  Th : constant Long_Float := R * Notch;
-                  Kept : Natural := 0;
-               begin
-                  if Plug.Reset_Pending (L) then
-                     On_Reset;
-                  end if;
-                  Theta := Th;
-                  Rot_Stop ([0.0, 0.0, 1.0], 1.0);
-                  for I in 0 .. Natural (Cur.Length) - 1 loop
-                     if Cur (I).Seen then
-                        Kept := Kept + 1;
-                     end if;
-                  end loop;
-                  Rot_Stop ([0.0, 0.0, 1.0], -1.0);
-                  exit when Kept < Half;
-                  Best := Th;
-               end;
-            end loop;
-            Theta := (if Best > 0.0 then Best else Rungs (1) * Notch);
-            Geo_Say ("转角阶梯:转过去还跟得住一半候选的最大一档 = " & Codec.Fmt (Theta * Deg, 1) & "°");
             if Plug.Reset_Pending (L) then
                On_Reset;
             end if;
+            Before := Cur;
+            Rot_Stop ([0.0, 0.0, 1.0], 1.0);
+            for I in 0 .. Natural (Cur.Length) - 1 loop
+               if Cur (I).Seen and then I < Natural (Before.Length) and then Before (I).Seen then
+                  Shifts.Append (Sqrt ((Cur (I).U - Before (I).U) ** 2 + (Cur (I).V - Before (I).V) ** 2));
+               end if;
+            end loop;
+            Rot_Stop ([0.0, 0.0, 1.0], -1.0);
+            declare
+               Med : constant Long_Float := Median_Px (Shifts);
+               Want : constant Long_Float := Long_Float (Cw) / 16.0;   --  每转该挪的像素(画幅比例,无量纲)
+            begin
+               if Med > 0.0 then
+                  Theta := Long_Float'Max (Notch, Long_Float'Min (Theta * Want / Med, 64.0 * Notch));   --  64 档 = 阶梯顶(倍数,无量纲)
+                  Geo_Say ("转角由眼定:探一转挪了 " & Codec.Fmt (Med, 1) & " px(" & Codec.Img (Natural (Shifts.Length)) & " 个点),该挪 " & Codec.Fmt (Want, 0)
+                           & " px ⇒ 每转 " & Codec.Fmt (Theta * Deg, 1) & "°");
+               else
+                  Theta := Notch;
+                  Geo_Say ("转角由眼定:探一转一个点都没跟住 ⇒ 退到一档 " & Codec.Fmt (Theta * Deg, 1) & "°");
+               end if;
+            end;
+            if Plug.Reset_Pending (L) then
+               On_Reset;
+            end if;
+            Rot_Stop ([0.0, 0.0, 1.0], 1.0);
+            Rot_Stop ([0.0, 0.0, 1.0], -1.0);
             Rot_Stop ([1.0, 0.0, 0.0], 1.0);
             Rot_Stop ([1.0, 0.0, 0.0], -1.0);
          end;
@@ -5983,7 +6015,8 @@ package body Act is
             --  步长:让它每步在画面里挪画幅的 1/16(比例,无量纲);探到的视差 = 每步多少像素 ⇒ 反推每步几米;
             --  上限 = 这条臂量过的步幅(没量就阶梯的下一档 = 4 倍探针步,倍数无量纲),下限 = 探针步
             Step := B * (Long_Float (Cw) / 16.0) / Best;
-            Step := Long_Float'Max (B, Long_Float'Min (Step, (if G.Stride > 0.0 then G.Stride else 4.0 * B)));
+            --  下限一档(G1K 2026-09-25:四档 = 8.1 cm 一步,3 停内把点全甩出画面),上限量过的步幅(没量就阶梯的下一档)
+            Step := Long_Float'Max (Geo_Base (C, Arm), Long_Float'Min (Step, (if G.Stride > 0.0 then G.Stride else 4.0 * B)));
             Geo_Say ("探一步 " & Mm (B) & ":视差最大的是第 " & Codec.Img (Natural (Cand (Target))) & " 槽(" & Codec.Fmt (Best, 1) & " px,起点 ("
                      & Codec.Fmt (P0 (Target).U, 0) & "," & Codec.Fmt (P0 (Target).V, 0) & "))⇒ 每步 " & Mm (Step));
          else
@@ -10103,6 +10136,13 @@ package body Act is
                   Dirs : constant array (1 .. 2) of Long_Float := [1.0, -1.0];
                begin
                   Head_Watch (C, F, A, True);
+                  declare
+                     function Head_Frame (Fr : Plug.Frame) return Boolean is
+                     begin
+                        Head_Watch (C, Fr, A, False);
+                        return False;
+                     end Head_Frame;
+                  begin
                   for Dir of Dirs loop
                      exit when Best > 0.0;
                      for R of Rungs loop
@@ -10118,7 +10158,7 @@ package body Act is
                            Got : Long_Float;
                         begin
                            Av (2) := Dir * Ln;
-                           Step_Arm (L, C, F, A, Av, Jaw, Del, Ok);
+                           Step_Arm (L, C, F, A, Av, Jaw, Del, Ok, Watch => Head_Frame'Unrestricted_Access);
                            Got := Dir * Del (2);
                            Tried := Tried + 1;
                            Head_Watch (C, F, A, False);
@@ -10127,7 +10167,7 @@ package body Act is
                               Back : Table.Vec := Table.Zero_Vec;
                            begin
                               Back (0) := -Del (0); Back (1) := -Del (1); Back (2) := -Del (2);
-                              Step_Arm (L, C, F, A, Back, Jaw, Del, Ok);
+                              Step_Arm (L, C, F, A, Back, Jaw, Del, Ok, Watch => Head_Frame'Unrestricted_Access);
                               Head_Watch (C, F, A, False);
                            end;
                            exit when Got + Got < Ln;
@@ -10135,6 +10175,7 @@ package body Act is
                         end;
                      end loop;
                   end loop;
+                  end;
                   Head_Watch_End (C);
                   if Tried = 0 then
                      Geo_Say ("第" & Codec.Img (A + 1) & " 只手:步幅没量成(对方复位打断,一档都没试)⇒ 下次开机再量");
