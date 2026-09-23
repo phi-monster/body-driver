@@ -5846,7 +5846,9 @@ package body Act is
    --  这只眼这一帧看全了它、它的位置又是两眼交出来的 ⇒ 轮廓像素各发一条视线,落到它躺的面(过它的位置,法向 = 碰过的面的法向,没碰过按上)上,
    --  记成它顶面的点。每次看全都重记(最新的一份离得最近、最准)。像素多就隔几个取一个(采样密度是可观测性参数),最多约 Keep 个;
    --  我自己的手指像素(握区量过的)不算
-   procedure Take_Silhouette (C : in out Context; F : Plug.Frame; Cam, Arm : Natural; Name : Unbounded_String) is
+   --  P0 = 它此刻的位置估计:两眼交点最好;只有一只眼时是"我自己挪过的几眼"算出来的(H55 2026-09-23 实测:头顶眼没认出它,整炮只有腕眼看见它,
+   --  两眼交点一次都没有 ⇒ 只认交点就永远没有轮廓)。单眼估计只用在这一段里,取的点碰到面之后还会按真高度重投(视线存着)
+   procedure Take_Silhouette (C : in out Context; F : Plug.Frame; Cam, Arm : Natural; Name : Unbounded_String; P0 : Geom.V3) is
       Bx : constant Integer := Boxed_By (C, Cam, Name);
       G : constant Geom.Cam_Geo := Geo_Of (C, Cam);
       Cw : constant Natural := F.Cams (Cam).W;
@@ -5861,7 +5863,7 @@ package body Act is
       K : Natural := 0;
       Stride : Positive := 1;
    begin
-      if Bx < 0 or else not C.Geo_Pw_Valid or else C.Geo_Pw_Name /= Name or else (A2 < 0 and then not G.Fixed) then
+      if Bx < 0 or else (A2 < 0 and then not G.Fixed) then
          return;
       end if;
       declare
@@ -5909,7 +5911,7 @@ package body Act is
       --  面过哪一点:它量到的位置(两眼交点)。可它躺在我碰过的那个面上:交点不可能在那个面之下,也不可能比我的张口还高出面(那样我也夹不住它)
       --  —— 两条视线都近乎竖直时交点的深度是病态的(H53 2026-09-23 实测:交点在桌面之下 9–28 cm)。出了这个范围就把面贴回碰过的那一点
       --  (当它厚度为零),并说出来;范围之内照用(那一截就是它的厚度)
-      Contact.Surface.On_Plane (Rays, Plane_Point (C, C.Geo_Pw, N, Say => True), N, Pts, Dropped);
+      Contact.Surface.On_Plane (Rays, Plane_Point (C, P0, N, Say => True), N, Pts, Dropped);
       if Natural (Pts.Length) < 8 then   --  点数
          return;
       end if;
@@ -5917,7 +5919,7 @@ package body Act is
          Pitch : constant Long_Float := Contact.Gen.Sampling_Gap (Pts);
          --  已有的那份还作数吗:同一件、面的高度没变(沿法向差不到一个采样间距)。作数就只让更细的盖它
          Fresh : constant Boolean := C.Sil_Valid and then C.Sil_Name = Name
-           and then abs ((C.Geo_Pw (0) - C.Sil_P0 (0)) * N (0) + (C.Geo_Pw (1) - C.Sil_P0 (1)) * N (1) + (C.Geo_Pw (2) - C.Sil_P0 (2)) * N (2)) <= C.Sil_Pitch;
+           and then abs ((P0 (0) - C.Sil_P0 (0)) * N (0) + (P0 (1) - C.Sil_P0 (1)) * N (1) + (P0 (2) - C.Sil_P0 (2)) * N (2)) <= C.Sil_Pitch;
       begin
          if Pitch <= 0.0 or else (Fresh and then Pitch > C.Sil_Pitch) then
             return;
@@ -6661,9 +6663,9 @@ package body Act is
             Pc := Geom.To_Cam (G, Cur, Pw);
             --  它的位置是两眼交出来的 ⇒ 每只看全了它的眼都记一份它顶面的点(留最细的);哪儿夹得住由接触集从这上面算(PLAN 1.5),不再在像素上扫弦。
             --  腕眼里它常常顶着画面边(H48 的框就贴着 y=479)⇒ 那一眼的轮廓不完整、不记;不动的眼/另一只手的眼看全了它、我的手又没压在它上面 ⇒ 记
-            if Length (Its_Name) > 0 and then C.Geo_Pw_Valid and then C.Geo_Pw_Name = Its_Name then
+            if Length (Its_Name) > 0 then
                if Seen and then Whole then
-                  Take_Silhouette (C, F, Cam, Arm, Its_Name);
+                  Take_Silhouette (C, F, Cam, Arm, Its_Name, Pw);
                elsif Seen and then not Said_Cut then
                   Said_Cut := True;
                   Geo_Say ("这只眼里它顶着画面边,轮廓不完整 ⇒ 这一眼不记它的顶面点,看别的眼");
@@ -6679,7 +6681,7 @@ package body Act is
                               Edge2 : constant Boolean := B2.X0 = 0 or else B2.Y0 = 0 or else B2.X1 + 1 >= F.Cams (Cm).W or else B2.Y1 + 1 >= F.Cams (Cm).H;
                            begin
                               if B2.Seen and then not Edge2 and then not Hand_Covers (C, F, Arm, Cm, B2) then
-                                 Take_Silhouette (C, F, Cm, Arm, Its_Name);
+                                 Take_Silhouette (C, F, Cm, Arm, Its_Name, Pw);
                               end if;
                            end;
                         end if;
