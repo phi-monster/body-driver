@@ -605,6 +605,100 @@ begin
       Check (Ok_No and then Ok_Long and then abs (G_No.F - 400.0) < 12.0 and then abs (G_Long.F - 400.0) < 12.0,
              "焦距先验:8 步累计路径(每步 6 cm)+ 1 px 抖动 ⇒ 没先验 " & Codec.Fmt (G_No.F, 1) & " px,偏一成的先验也压不歪 " & Codec.Fmt (G_Long.F, 1)
              & " px(真 400,都该在 3% 内)· 残差 " & Codec.Fmt (G_Long.Rms, 2) & " px");
+      --  🔴 转眼量焦距(2026-09-24):横着挪只能量出 焦距/远近 的比;转一个已知的角,像素位移 = 焦距 × 转角,和远近无关。
+      --  星形 1 cm(本来解飞到 528)+ 四停纯转动(绕 z、绕 x 各 ±0.1 rad,位姿读数给角度)⇒ 焦距该回到 400 附近
+      declare
+         Rot_Stops : constant array (1 .. 4) of Plug.Arm_Pose :=
+           [[0.0, 0.0, 0.6, 0.99875, 0.0, 0.0, 0.04998], [0.0, 0.0, 0.6, 0.99875, 0.0, 0.0, -0.04998],
+            [0.0, 0.0, 0.6, 0.99875, 0.04998, 0.0, 0.0], [0.0, 0.0, 0.6, 0.99875, -0.04998, 0.0, 0.0]];   --  cos/sin(0.05):±0.1 rad 的四元数(合成)
+         G_Rot : Geom.Cam_Geo;
+         Ok_Rot : Boolean;
+      begin
+         Synth (Star, 0.01, Obs);
+         for P of Rot_Stops loop
+            declare
+               U, V : Long_Float;
+               Fr : Boolean;
+            begin
+               Geom.Project (Gt, P, Pw, U, V, Fr);
+               Check (Fr, "转眼量焦距:转过之后东西还在相机前面(测试数据自己先得成立)");
+               Obs.Append (Geom.Obs'(Pose => P, U => U + Jit, V => V + Jit));
+            end;
+         end loop;
+         G_Rot.F := 0.0; G_Rot.Cx := 320.0; G_Rot.Cy := 240.0;
+         Geom.Fit (G_Rot, Obs, Ok_Rot);
+         Check (Ok_Rot and then abs (G_Rot.F - 400.0) < 8.0,
+                "转眼量焦距:星形 1 cm + 四停各转 0.1 rad + 1 px 抖动,不用先验 ⇒ 焦距 " & Codec.Fmt (G_Rot.F, 1) & " px(真 400,该在 2% 内;不转是 528)· 残差 "
+                & Codec.Fmt (G_Rot.Rms, 2) & " px");
+      end;
+      --  🔴 多点连相机偏移一起解(2026-09-24,Fit_Rig):真相机离手腕原点 (3,0,5) cm;近 / 中 / 远三个点(0.4 / 0.8 / 3 m);
+      --  停 = 起点 + 四停转动(±0.1 rad 绕 z、绕 x)+ 探一步 2.6 cm + 7 步累计路径(每步 6 cm);近的点有 3 停跟丢;1 px 抖动。
+      --  该解出:焦距 2% 内、偏移差 < 1 cm、朝向差 < 0.01 rad、三个点都进
+      declare
+         Gr : Geom.Cam_Geo;
+         Gs : Geom.Cam_Geo;
+         Home : constant Plug.Arm_Pose := [0.0, 0.0, 0.6, 1.0, 0.0, 0.0, 0.0];
+         Pts : array (0 .. 2) of Geom.V3;
+         Obs : Geom.Obs_Pt_Vectors.Vector;
+         Poses : Geom.Obs_Vectors.Vector;   --  只用 Pose 字段:停的位姿序列
+         Ok_R : Boolean;
+         Used : Natural;
+         Stop_No : Natural := 0;
+      begin
+         Gr.F := 400.0; Gr.Cx := 320.0; Gr.Cy := 240.0; Gr.R_Ce := Geom.Rodrigues ([0.2, -0.3, 0.1]); Gr.Off := [0.03, 0.0, 0.05]; Gr.Valid := True;
+         --  三个点放在起点那一停的相机正前方(相机系 z 朝后 ⇒ 前方是 -z),稍微错开
+         declare
+            Rc : constant Geom.M3 := Geom.Cam_R (Gr, Home);
+            Cp : constant Geom.V3 := Geom.Cam_Pos (Gr, Home);
+            Depths : constant array (0 .. 2) of Long_Float := [0.4, 0.8, 3.0];   --  近 / 中 / 远(米,合成)
+            Side : constant array (0 .. 2) of Long_Float := [0.05, -0.1, 0.3];   --  横向错开(米,合成)
+         begin
+            for K in 0 .. 2 loop
+               declare
+                  D : constant Geom.V3 := Geom.Ap (Rc, [Side (K), 0.02 * Long_Float (K), -Depths (K)]);
+               begin
+                  Pts (K) := [Cp (0) + D (0), Cp (1) + D (1), Cp (2) + D (2)];
+               end;
+            end loop;
+         end;
+         Poses.Append (Geom.Obs'(Pose => Home, U => 0.0, V => 0.0));
+         Poses.Append (Geom.Obs'(Pose => [0.0, 0.0, 0.6, 0.99875, 0.0, 0.0, 0.04998], U => 0.0, V => 0.0));    --  绕 z +0.1 rad(cos/sin 0.05,合成)
+         Poses.Append (Geom.Obs'(Pose => [0.0, 0.0, 0.6, 0.99875, 0.0, 0.0, -0.04998], U => 0.0, V => 0.0));
+         Poses.Append (Geom.Obs'(Pose => [0.0, 0.0, 0.6, 0.99875, 0.04998, 0.0, 0.0], U => 0.0, V => 0.0));    --  绕 x
+         Poses.Append (Geom.Obs'(Pose => [0.0, 0.0, 0.6, 0.99875, -0.04998, 0.0, 0.0], U => 0.0, V => 0.0));
+         Poses.Append (Geom.Obs'(Pose => [0.026, 0.0, 0.6, 1.0, 0.0, 0.0, 0.0], U => 0.0, V => 0.0));            --  探一步
+         for M of Path loop
+            exit when M (0) = 0.0 and then M (1) = 0.0 and then M (2) = 0.0 and then Stop_No > 0;
+            Stop_No := Stop_No + 1;
+            Poses.Append (Geom.Obs'(Pose => [0.026 + 0.06 * M (0), 0.06 * M (1), 0.6 + 0.06 * M (2), 1.0, 0.0, 0.0, 0.0], U => 0.0, V => 0.0));
+         end loop;
+         for S in 0 .. Natural (Poses.Length) - 1 loop
+            for K in 0 .. 2 loop
+               declare
+                  U, V : Long_Float;
+                  Fr : Boolean;
+               begin
+                  Geom.Project (Gr, Poses (S).Pose, Pts (K), U, V, Fr);
+                  Check (Fr, "多点连偏移:合成的点在相机前面(测试数据自己先得成立)");
+                  --  近的点在第 7、8、9 停跟丢
+                  if not (K = 0 and then S in 7 .. 9) then
+                     Obs.Append (Geom.Obs_Pt'(Pt => K, Pose => Poses (S).Pose, U => U + Jit, V => V + Jit));
+                  end if;
+               end;
+            end loop;
+         end loop;
+         Gs.F := 0.0; Gs.Cx := 320.0; Gs.Cy := 240.0;
+         Geom.Fit_Rig (Gs, Obs, 3, Ok_R, Used);
+         declare
+            Da : constant Long_Float := (if Ok_R then Geom.Norm (Geom.Rot_Vec (Geom.Mul (Geom.Tr (Gr.R_Ce), Gs.R_Ce))) else 1.0);
+            Doff : constant Long_Float := (if Ok_R then Geom.Norm ([Gs.Off (0) - 0.03, Gs.Off (1), Gs.Off (2) - 0.05]) else 1.0);
+         begin
+            Check (Ok_R and then Used = 3 and then abs (Gs.F - 400.0) < 8.0 and then Doff < 0.015 and then Da < 0.01,   --  偏移沿视线那一维最难看出来:1 px 抖动下解到 1 cm 级(米)
+                   "多点连偏移:" & Codec.Img (Natural (Poses.Length)) & " 停 × 3 点(近的丢 3 停)⇒ 焦距 " & Codec.Fmt (Gs.F, 1) & " px(真 400)· 偏移 ("
+                   & Codec.Fmt (Gs.Off (0) * 1000.0, 0) & "," & Codec.Fmt (Gs.Off (1) * 1000.0, 0) & "," & Codec.Fmt (Gs.Off (2) * 1000.0, 0)
+                   & ") mm(真 (30,0,50),该在 1.5 cm 内)· 朝向差 " & Codec.Fmt (Da, 4) & " rad · 残差 " & Codec.Fmt (Gs.Rms, 2) & " px · 进了 " & Codec.Img (Used) & " 点");
+         end;
+      end;
    end;
    --  🔴 没有深度时量指尖(2026-09-23):指尖 = 自己眼里那条视线上离眼 S 米处;不动的眼两停看见指尖 ⇒ 解 S。合成数据:真值 0.12 m
    declare

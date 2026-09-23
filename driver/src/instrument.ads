@@ -4,20 +4,8 @@
 --  和自己量的那份在同一套最小二乘里对账,不是另一条路。
 with Bytes; use Bytes;
 with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
-with Geom;
 with Ada.Containers.Vectors;
 package Instrument is
-   type Calib is record
-      Ok : Boolean := False;
-      F, F_Sd : Long_Float := 0.0;        --  焦距 ± 不确定度(像素)
-      Up : Geom.V3 := [others => 0.0];    --  图里"上"的方向(驱动的相机系:x 右、y 上、z 朝后;单位向量)
-      Up_Sd : Long_Float := 0.0;          --  弧度
-      Ms : Long_Float := 0.0;             --  仪器那边花的毫秒
-      Model : Unbounded_String;           --  哪个模型、哪个版本(钉死的)
-   end record;
-   --  一张图 ⇒ 焦距 + "上"的方向。Err 说清为什么没量到(没配 / 连不上 / 它说量不了)
-   function Calibrate (Host : String; Port : Natural; RGB : Buf; W, H : Natural; Err : out Unbounded_String) return Calib;
-
    --  一段跟踪:在这一帧里点几个像素,之后每来一帧问一次它们到哪了(记忆在仪器那边,驱动只拿段号)。
    --  换帧重切块会对不上号(V1C 2026-09-24:标定 8 停丢 5 停),跟点不重切
    type Track_Pt is record

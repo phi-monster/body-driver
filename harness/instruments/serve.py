@@ -8,14 +8,10 @@
   POST /track/start {"image": ..., "points": [[u,v],...]}   → {"ok": true, "id": n}   开一段跟踪,查询点 = 这一帧里的像素
   POST /track/step  {"id": n, "image": ...}                 → {"ok": true, "points": [[u,v,vis,conf],...]}  下一帧里这些点在哪、看不看得见、有多确定
   POST /track/end   {"id": n}                               → {"ok": true}
-  POST /calib  {"image": "<base64 BMP/PNG>"}
-       → {"ok": true, "f": 焦距(px), "f_sd": 焦距不确定度(px), "cx","cy": 主点,
-          "up": [x,y,z] 图里"上"的方向(= 重力反向;驱动的相机系:x 右、y 上、z 朝后;单位向量), "up_sd": 弧度,
-          "roll","pitch": 弧度, "ms": 毫秒, "model": "geocalib-pinhole-v1.0"}
 
-模型:GeoCalib(Veicht et al. 2024,https://github.com/cvg/GeoCalib;代码 Apache-2.0,权重 CC-BY-4.0)。
-      Track-On2(Aydemir et al. 2025,https://github.com/gorkaydemir/track_on 分支 track-on2,DINOv2 版;代码 MIT,权重 MIT,DINOv2 Apache-2.0)。
-权重钉死:v1.0 geocalib-pinhole.tar、trackon2_dinov2_checkpoint.pt(sha256 见 WEIGHTS)。
+模型:Track-On2(Aydemir et al. 2025,https://github.com/gorkaydemir/track_on 分支 track-on2,DINOv2 版;代码 MIT,权重 MIT,DINOv2 Apache-2.0)。
+权重钉死:trackon2_dinov2_checkpoint.pt(sha256 见 WEIGHTS)。
+拆掉的(2026-09-24,owner:焦距不准的不留):GeoCalib(单图焦距偏一成、头眼"上"方向反了)、MoGe-2(单目猜深度,尺度核对不了)。
 """
 import base64, io, json, os, sys, time, threading, hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -27,32 +23,15 @@ from PIL import Image
 PORT = int(os.environ.get("INST_PORT", "8077"))
 WEIGHTS = {
     # 文件名 → sha256(装好后第一次跑校一次;对不上就拒绝起来,不许悄悄换权重)
-    "geocalib/pinhole.tar": os.environ.get("GEOCALIB_SHA256", ""),
     "trackon2_dinov2_checkpoint.pt": "34c35ea64ea68f3c633c901c2d7876964c34212455dfbb2d508aaea1c4978973",
 }
 TRACKON_DIR = os.environ.get("TRACKON_DIR", "/root/instruments/track_on")
 TRACKON_CKPT = os.environ.get("TRACKON_CKPT", "/root/instruments/weights/trackon2_dinov2_checkpoint.pt")
 
 _lock = threading.Lock()
-_geocalib = None
 _trackon = None
 _sessions = {}      # id → 跟踪状态(一个模型,多段各自的记忆)
 _next_id = [1]
-
-
-def _load_geocalib():
-    global _geocalib
-    if _geocalib is None:
-        from geocalib import GeoCalib
-        _geocalib = GeoCalib(weights="pinhole").to("cuda").eval()
-        hub = os.path.join(torch.hub.get_dir(), "geocalib", "pinhole.tar")
-        want = WEIGHTS["geocalib/pinhole.tar"]
-        if os.path.exists(hub):
-            h = hashlib.sha256(open(hub, "rb").read()).hexdigest()
-            if want and h != want:
-                raise RuntimeError("GeoCalib 权重哈希对不上:%s != %s" % (h, want))
-            print("[仪器] geocalib pinhole.tar sha256=%s" % h, flush=True)
-    return _geocalib
 
 
 def _load_trackon():
@@ -142,32 +121,6 @@ def _decode(b64):
     return torch.from_numpy(arr).permute(2, 0, 1).contiguous()  # 3 H W, 0..1
 
 
-def calib(b64):
-    t0 = time.time()
-    m = _load_geocalib()
-    img = _decode(b64).to("cuda")
-    with torch.no_grad():
-        r = m.calibrate(img)
-    cam = r["camera"]
-    g = r["gravity"]
-    f = float(cam.f.flatten()[0])
-    cx, cy = [float(x) for x in cam.c.flatten()[:2]] if hasattr(cam, "c") else (0.0, 0.0)
-    f_sd = float(r["focal_uncertainty"].flatten()[0]) if "focal_uncertainty" in r else 0.0
-    g_sd = float(r["gravity_uncertainty"].flatten()[0]) if "gravity_uncertainty" in r else 0.0
-    roll, pitch = [float(x) for x in g.rp.flatten()[:2]]
-    # GeoCalib 的 Gravity.vec3d 是图里"上"的方向(roll=pitch=0 时 = (0,-1,0),OpenCV 相机系:x 右、y 下、z 朝前;
-    # 2026-09-24 用头眼验过:低头 30° 的相机给 (0,-0.87,+0.5),上方向朝前倾 ⇒ 是"上"不是"下")。
-    # 驱动的相机系 x 右、y 上、z 朝后 ⇒ y、z 取反
-    v = g.vec3d.flatten().tolist() if hasattr(g, "vec3d") else None
-    if v is None:
-        import math
-        sr, cr, sp, cp = math.sin(roll), math.cos(roll), math.sin(pitch), math.cos(pitch)
-        v = [-sr * cp, -cr * cp, sp]
-    up = [v[0], -v[1], -v[2]]
-    return {"ok": True, "f": f, "f_sd": f_sd, "cx": cx, "cy": cy, "up": up, "up_sd": g_sd,
-            "roll": roll, "pitch": pitch, "ms": (time.time() - t0) * 1000.0, "model": "geocalib-pinhole-v1.0"}
-
-
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
@@ -182,7 +135,7 @@ class H(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            self._send(200, {"instruments": ["calib", "track"], "device": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu"})
+            self._send(200, {"instruments": ["track"], "device": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu"})
         else:
             self._send(404, {"ok": False, "err": "no such instrument"})
 
@@ -195,9 +148,7 @@ class H(BaseHTTPRequestHandler):
             return
         try:
             with _lock:
-                if self.path == "/calib":
-                    out = calib(req["image"])
-                elif self.path == "/track/start":
+                if self.path == "/track/start":
                     out = track_start(req["image"], req["points"])
                 elif self.path == "/track/step":
                     out = track_step(int(req["id"]), req["image"])
@@ -214,10 +165,6 @@ class H(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    _load_geocalib()   # 起来就把模型装进显存,第一帧不慢
-    try:
-        _load_trackon()
-    except Exception as e:
-        print("[仪器] 🔴 Track-On2 没装上:%s" % e, flush=True)
-    print("[仪器] 听 %d · calib=geocalib · track=%s" % (PORT, "trackon2" if _trackon is not None else "无"), flush=True)
+    _load_trackon()   # 起来就把模型装进显存,第一帧不慢
+    print("[仪器] 听 %d · track=trackon2" % PORT, flush=True)
     ThreadingHTTPServer(("0.0.0.0", PORT), H).serve_forever()

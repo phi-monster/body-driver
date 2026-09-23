@@ -5602,63 +5602,6 @@ package body Act is
       end if;
    end Geo_Measure_Tips;
 
-   --  仪器(学习型、任务无关)看这台相机此刻的一帧:焦距 ± 不确定度 ⇒ 联合解的先验(身体给了内参就只对账不当先验);
-   --  "上"的方向记下来,朝向量好后和协议里"上 = z"的假设对账。没配仪器就什么都不做,几何全靠身体自己量
-   procedure Geo_Instrument (C : in out Context; F : Plug.Frame; Cam : Natural) is
-      G : Geom.Cam_Geo := Geo_Of (C, Cam);
-      Err : Unbounded_String;
-      Deg : constant Long_Float := 180.0 / Ada.Numerics.Pi;   --  弧度 → 度(换算,无量纲)
-      Pct : constant Long_Float := 100.0;                     --  比例 → 百分比(换算,无量纲)
-   begin
-      if Length (C.Inst_Host) = 0 or else Cam >= Natural (F.Cams.Length) or else Cam >= Natural (C.Geo.Length) then
-         return;
-      end if;
-      declare
-         Cm : constant Plug.Cam := F.Cams (Cam);
-         R : constant Instrument.Calib := Instrument.Calibrate (To_String (C.Inst_Host), C.Inst_Port, Cm.RGB, Cm.W, Cm.H, Err);
-      begin
-         if not R.Ok then
-            Geo_Say ("仪器没量出第" & Codec.Img (Cam) & " 台相机:" & To_String (Err));
-            return;
-         end if;
-         if not Cm.Has_K then
-            G.F_Prior := R.F; G.F_Prior_Sd := R.F_Sd;
-         end if;
-         G.Up_Valid := Geom.Norm (R.Up) > 0.5; G.Up := R.Up; G.Up_Sd := R.Up_Sd;   --  单位向量才算数(比例,无量纲)
-         C.Geo.Replace_Element (Cam, G);
-         Geo_Say ("仪器(" & To_String (R.Model) & ")看第" & Codec.Img (Cam) & " 台相机一帧:焦距 " & Codec.Fmt (R.F, 1) & " ± " & Codec.Fmt (R.F_Sd, 1) & " px"
-                  & (if Cm.Has_K and then Cm.Focal > 0.0
-                     then "(身体给的是 " & Codec.Fmt (Cm.Focal, 1) & ",差 " & Codec.Fmt (Pct * (R.F - Cm.Focal) / Cm.Focal, 1) & "%,只对账)"
-                     else "(当联合解的先验)")
-                  & " · 图里的上 (" & Codec.Fmt (R.Up (0), 2) & "," & Codec.Fmt (R.Up (1), 2) & "," & Codec.Fmt (R.Up (2), 2) & ") ± "
-                  & Codec.Fmt (R.Up_Sd * Deg, 1) & "° · " & Codec.Fmt (R.Ms, 0) & " ms");
-      end;
-   end Geo_Instrument;
-
-   --  对账:仪器看图说的"上" vs 协议里"上 = z"的假设,经这只眼量好的朝向换到相机系里比;差多少度、仪器自己几度不确定,都如实报。
-   --  不动的眼 R_Ce 就是相机 → 世界;手上的眼还要经过手 → 世界(Hand = 仪器看那一帧时手的位姿)
-   procedure Geo_Up_Check (C : Context; Cam : Natural; Hand : Plug.Arm_Pose; Fixed : Boolean) is
-      G : constant Geom.Cam_Geo := Geo_Of (C, Cam);
-      Deg : constant Long_Float := 180.0 / Ada.Numerics.Pi;   --  弧度 → 度(换算,无量纲)
-   begin
-      if not (G.Valid and then G.Up_Valid) then
-         return;
-      end if;
-      declare
-         Up_C : constant Geom.V3 := (if Fixed then Geom.Ap (Geom.Tr (G.R_Ce), Protocol_Up)
-                                     else Geom.Ap (Geom.Tr (G.R_Ce), Geom.Ap (Geom.Tr (Geom.Quat_To_R (Hand)), Protocol_Up)));
-         Dot : Long_Float := 0.0;
-      begin
-         for I in 0 .. 2 loop
-            Dot := Dot + Up_C (I) * G.Up (I);
-         end loop;
-         Dot := Long_Float'Max (-1.0, Long_Float'Min (1.0, Dot / Long_Float'Max (1.0e-9, Geom.Norm (G.Up))));   --  夹到 [-1,1] 才能取反余弦(无量纲)
-         Geo_Say ("对账:第" & Codec.Img (Cam) & " 台相机按量好的朝向,协议的上在相机里该是 (" & Codec.Fmt (Up_C (0), 2) & "," & Codec.Fmt (Up_C (1), 2) & ","
-                  & Codec.Fmt (Up_C (2), 2) & "),仪器看图说是 (" & Codec.Fmt (G.Up (0), 2) & "," & Codec.Fmt (G.Up (1), 2) & "," & Codec.Fmt (G.Up (2), 2)
-                  & ") ⇒ 差 " & Codec.Fmt (Arccos (Dot) * Deg, 1) & "°(仪器自己 ±" & Codec.Fmt (G.Up_Sd * Deg, 1) & "°)");
-      end;
-   end Geo_Up_Check;
-
    procedure Geo_Boot (F : Plug.Frame; C : in out Context; Body_Path : String) is
       Note : String (1 .. 160);
    begin
@@ -5667,7 +5610,6 @@ package body Act is
       Geo_Say (Ada.Strings.Fixed.Trim (Note, Ada.Strings.Both));
       for Cam in 0 .. C.Map.N_Cams - 1 loop
          Geo_Take_K (C, F, Cam);
-         Geo_Instrument (C, F, Cam);   --  每台眼开机让仪器看一眼:焦距先验 + 图里的上(没配仪器就跳过)
          declare
             A : constant Integer := Cam_Arm (C, Cam);
             G : Geom.Cam_Geo;
@@ -5690,23 +5632,26 @@ package body Act is
       end if;
    end Geo_Boot;
 
-   --  量相机朝向(R3b 2026-09-24):盯着眼里的东西,手走一条累计路径,每停记它在画面里的位置,回起点,解朝向(+焦距)。
-   --  盯谁、步子多大都是量出来的:先沿第一根轴探一步,眼里每一块挪了多少像素 = 它的视差;挪得最多的那块离眼最近、信息量最大,就盯它
-   --  (V1C 实测:盯"最大的一块"盯到了远处的棒球,每步 2.6 cm 只挪 3 px,焦距解成 558 / 真 397);之后每步多长按
-   --  "让它每步在画面里挪画幅的 1/16"从探到的视差反推,上限是这条臂量过的步幅。
-   --  位置来源:配了仪器就让仪器逐帧跟这些点(换帧重切块会对不上号:V1C 8 停丢 5 停);没配就按槽号重切(身体自己量)。
+   --  量相机朝向(R3c 2026-09-24):盯着眼里的东西,手先转几下、再走一条累计路径,每停记下眼里每个点在画面里的位置,回起点,多点一起解。
+   --  横着挪只能量出 焦距/远近 的比(V1B/V1C/V1D 三次都撞在这上面:992 / 558 / 431,真 397);转一个已知角,像素位移 = 焦距 × 转角,和远近无关。
+   --  盯谁、步子多大都是量出来的:候选 = 画幅中间那一半里不贴边、不是自己手指的每一块(V1E 实测:挑到下沿的东西下一步就出画面);
+   --  探一步看谁视差最大 ⇒ 步长按"让它每步挪画幅的 1/16"反推,上限是量过的步幅。解的时候所有跟住的点一起进,谁丢了谁缺席,不押一个目标;
+   --  相机离手腕转轴的偏移一起解出来(不解它,转动时近处的东西会把焦距带偏)。
+   --  位置来源:配了仪器就让仪器逐帧跟点;没配就按槽号重切(身体自己量)。
    procedure Geo_Calibrate (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Cam, Arm : Natural; Slot : Integer; Ok : out Boolean) is
       pragma Unreferenced (Slot);   --  点名的那块只是提示;盯谁按视差定
       G : Geom.Cam_Geo;
       Home : constant Plug.Arm_Pose := F.EE (Arm);
       B : constant Long_Float := 4.0 * Geo_Base (C, Arm);   --  探针一步 = 四倍那一档(倍数,无量纲):远处一步要跳得过跟踪噪声
+      Notch : constant Long_Float := (if Arm * Chan.Per_Arm + 3 < Natural (C.Map.Amp.Length) then C.Map.Amp (Arm * Chan.Per_Arm + 3) else 0.0);
+      Theta : constant Long_Float := 4.0 * Notch;   --  转动一停的角 = 四倍转动探针那一档(倍数,无量纲;没量过转动就是 0 ⇒ 不转)
       Cw : constant Natural := (if Cam < Natural (F.Cams.Length) then F.Cams (Cam).W else 0);
       Ch : constant Natural := (if Cam < Natural (F.Cams.Length) then F.Cams (Cam).H else 0);
-      Obs : Geom.Obs_Vectors.Vector;
+      Obs : Geom.Obs_Pt_Vectors.Vector;
       Cand : Ints;                               --  候选的槽号
       P0, Cur : Instrument.Track_Vectors.Vector; --  候选在起点、此刻的位置
       Tid : Integer := -1;                       --  仪器的跟踪段号(-1 = 没用仪器,按槽号重切)
-      Target : Integer := -1;                    --  盯的那一块(候选序号)
+      Target : Integer := -1;                    --  视差最大的那一块(只用来定步长)
       Step : Long_Float := B;
       Mok : Boolean;
       Dump : constant String := Codec.Env ("BL_DUMP");
@@ -5742,38 +5687,65 @@ package body Act is
             end;
          end loop;
       end Where;
+      --  这一停里每个还看得见的点记一笔;返回记了几个
+      function Record_All return Natural is
+         K : Natural := 0;
+      begin
+         for I in 0 .. Natural (Cur.Length) - 1 loop
+            if Cur (I).Seen then
+               Obs.Append (Geom.Obs_Pt'(Pt => I, Pose => F.EE (Arm), U => Cur (I).U, V => Cur (I).V));
+               K := K + 1;
+            end if;
+         end loop;
+         return K;
+      end Record_All;
       function Shift (I : Natural) return Long_Float is   --  第 I 块从起点到此刻挪了多少像素(两头都看见才算)
         (if I < Natural (Cur.Length) and then Cur (I).Seen and then P0 (I).Seen
          then Sqrt ((Cur (I).U - P0 (I).U) ** 2 + (Cur (I).V - P0 (I).V) ** 2) else -1.0);
-      --  一停:走、看、记(转过头的那一停不算:转动引起的相机位移和平移之比 > 一成就扔,比例无量纲)
-      procedure Stop (M : Geom.V3) is
-         Prev_U : constant Long_Float := (if Target >= 0 then Cur (Target).U else 0.0);
-         Prev_V : constant Long_Float := (if Target >= 0 then Cur (Target).V else 0.0);
+      procedure Dump_Stop is
       begin
-         Geo_Move (L, C, F, Arm, M, Mok);
-         Where;
          Stop_N := Stop_N + 1;
          if Dump /= "" then
             Codec.Write_PGM (Dump & "/geo_cam" & Codec.Img (Cam) & "_stop" & Codec.Img (Stop_N) & ".pgm", F.Cams (Cam).Gray, Cw, Ch);
          end if;
-         if Target >= 0 then
-            declare
-               Rot : constant Long_Float := Geom.Angle_Between (Home, F.EE (Arm));
-               Turned : constant Boolean := Rot > 0.1;   --  转动引起的相机位移和平移之比 > 一成就扔(比例,无量纲)
-               T : constant Instrument.Track_Pt := Cur (Target);
-            begin
-               if T.Seen and then not Turned then
-                  Obs.Append (Geom.Obs'(Pose => F.EE (Arm), U => T.U, V => T.V));
-               end if;
-               Geo_Say ("量朝向:挪 (" & Mm (M (0)) & "," & Mm (M (1)) & "," & Mm (M (2)) & ") ⇒ " &
-                        (if T.Seen then "它在 (" & Codec.Fmt (T.U, 1) & "," & Codec.Fmt (T.V, 1) & "),比上一停挪 "
-                           & Codec.Fmt (Sqrt ((T.U - Prev_U) ** 2 + (T.V - Prev_V) ** 2), 1) & " px"
-                           & (if Tid >= 0 then "(仪器把握 " & Codec.Fmt (T.Conf, 2) & ")" else "")
-                         else "没看见它" & (if Tid >= 0 then "(仪器把握 " & Codec.Fmt (T.Conf, 2) & ")" else ""))
-                        & " · 手转了 " & Codec.Fmt (Rot * Deg, 1) & "°" & (if Turned then ",这一停不算" else ""));
-            end;
-         end if;
+      end Dump_Stop;
+      --  平移一停:走、看、记(手拿转动凑平移的那一停不算:转动引起的相机位移和平移之比 > 一成就扔,比例无量纲)
+      procedure Stop (M : Geom.V3) is
+         Prev_U : constant Long_Float := (if Target >= 0 then Cur (Target).U else 0.0);
+         Prev_V : constant Long_Float := (if Target >= 0 then Cur (Target).V else 0.0);
+         K : Natural := 0;
+      begin
+         Geo_Move (L, C, F, Arm, M, Mok);
+         Where;
+         Dump_Stop;
+         declare
+            Rot : constant Long_Float := Geom.Angle_Between (Home, F.EE (Arm));
+            Turned : constant Boolean := Rot > 0.1;   --  转动引起的相机位移和平移之比 > 一成就扔(比例,无量纲)
+         begin
+            if not Turned then
+               K := Record_All;
+            end if;
+            Geo_Say ("量朝向:挪 (" & Mm (M (0)) & "," & Mm (M (1)) & "," & Mm (M (2)) & ") ⇒ 跟住 " & Codec.Img (K) & "/" & Codec.Img (Natural (Cur.Length)) & " 点"
+                     & (if Target >= 0 and then Cur (Target).Seen then ",视差最大的那块挪 " & Codec.Fmt (Sqrt ((Cur (Target).U - Prev_U) ** 2 + (Cur (Target).V - Prev_V) ** 2), 1) & " px" else "")
+                     & " · 手转了 " & Codec.Fmt (Rot * Deg, 1) & "°" & (if Turned then ",这一停不算" else ""));
+         end;
       end Stop;
+      --  转动一停:绕世界系的一根轴转 Theta(位姿读数给实到的角),看、记(转动是故意的,照记)
+      procedure Rot_Stop (Axis : Geom.V3; Sign : Long_Float) is
+         A : Table.Vec := Table.Zero_Vec;
+         Jaw : Floats;
+         Del : Table.Vec;
+         Before : constant Plug.Arm_Pose := F.EE (Arm);
+         K : Natural := 0;
+      begin
+         A (3) := Sign * Theta * Axis (0); A (4) := Sign * Theta * Axis (1); A (5) := Sign * Theta * Axis (2);
+         Step_Arm (L, C, F, Arm, A, Jaw, Del, Mok);
+         Where;
+         Dump_Stop;
+         K := Record_All;
+         Geo_Say ("量朝向:转 " & Codec.Fmt (Sign * Theta * Deg, 1) & "° ⇒ 实到 " & Codec.Fmt (Geom.Angle_Between (Before, F.EE (Arm)) * Deg, 1) & "°,跟住 "
+                  & Codec.Img (K) & "/" & Codec.Img (Natural (Cur.Length)) & " 点" & (if Mok then "" else " · 身体说没转成"));
+      end Rot_Stop;
    begin
       Ok := False;
       Geo_Take_K (C, F, Cam);
@@ -5783,26 +5755,25 @@ package body Act is
          return;
       end if;
       if G.F <= 0.0 then
-         Geo_Say ("这台相机没给焦距 ⇒ 和朝向一起解");
+         Geo_Say ("这台相机没给焦距 ⇒ 和朝向一起解" & (if Theta > 0.0 then "(转 " & Codec.Fmt (Theta * Deg, 1) & "° 让焦距和远近分开)" else ";转动通道没量过 ⇒ 不转,焦距只能靠横挪,分不开远近"));
       end if;
-      Geo_Instrument (C, F, Cam);
-      G := Geo_Of (C, Cam);
-      --  候选:这只眼里每一块不贴边、不是自己手指的东西
+      --  候选:画幅中间那一半里(比例,无量纲)不贴边、不是自己手指的每一块
       World.Observe (C.Wld, Cam, Cut_Things (C, F, Cam), Cw, Ch);
       for Si in 0 .. World.Count (C.Wld, Cam) - 1 loop
          declare
             Sl : constant World.Slot := World.Get (C.Wld, Cam, Si);
             Mine : constant Boolean := Zone.Is_Self (Zone_Of (C, Arm, Cam), Sl.R, Cw, Ch);
             On_Edge : constant Boolean := Sl.R.X0 = 0 or else Sl.R.Y0 = 0 or else Sl.R.X1 + 1 >= Cw or else Sl.R.Y1 + 1 >= Ch;
+            Central : constant Boolean := Sl.R.Cu >= 0.25 and then Sl.R.Cu <= 0.75 and then Sl.R.Cv >= 0.25 and then Sl.R.Cv <= 0.75;
          begin
-            if Sl.Present and then not Mine and then not On_Edge then
+            if Sl.Present and then not Mine and then not On_Edge and then Central then
                Cand.Append (Si);
                Cur.Append (Instrument.Track_Pt'(U => Sl.R.Cu * Long_Float (Cw), V => Sl.R.Cv * Long_Float (Ch), Seen => True, Conf => 1.0));
             end if;
          end;
       end loop;
       if Cur.Is_Empty then
-         Geo_Say ("眼里没有一块不贴边、不是自己的东西 ⇒ 量不了朝向");
+         Geo_Say ("画幅中间没有一块不贴边、不是自己的东西 ⇒ 量不了朝向");
          return;
       end if;
       if Length (C.Inst_Host) > 0 then
@@ -5824,7 +5795,19 @@ package body Act is
       if Dump /= "" then
          Codec.Write_PGM (Dump & "/geo_cam" & Codec.Img (Cam) & "_stop0.pgm", F.Cams (Cam).Gray, Cw, Ch);
       end if;
-      --  探一步:沿第一根轴挪 B,谁挪得最多谁最近
+      declare
+         K0 : constant Natural := Record_All;   --  起点那一停
+      begin
+         Geo_Say ("量朝向:起点 " & Codec.Img (K0) & " 个候选" & (if Tid >= 0 then " · 仪器逐帧跟点" else " · 按槽号重切"));
+      end;
+      --  转动的停:绕世界 z、绕世界 x 各去一下、回一下
+      if Theta > 0.0 then
+         Rot_Stop ([0.0, 0.0, 1.0], 1.0);
+         Rot_Stop ([0.0, 0.0, 1.0], -1.0);
+         Rot_Stop ([1.0, 0.0, 0.0], 1.0);
+         Rot_Stop ([1.0, 0.0, 0.0], -1.0);
+      end if;
+      --  探一步:沿第一根轴挪 B,谁挪得最多谁最近(只用来定步长)
       Stop ([B, 0.0, 0.0]);
       declare
          Best : Long_Float := 0.0;
@@ -5834,24 +5817,16 @@ package body Act is
                Best := Shift (I); Target := I;
             end if;
          end loop;
-         if Target < 0 then
-            Geo_Say ("探一步之后 " & Codec.Img (Natural (Cur.Length)) & " 块候选一块都没跟住 ⇒ 量不了朝向");
-            if Tid >= 0 then
-               Instrument.Track_End (To_String (C.Inst_Host), C.Inst_Port, Tid);
-            end if;
-            return;
+         if Target >= 0 then
+            --  步长:让它每步在画面里挪画幅的 1/16(比例,无量纲);探到的视差 = 每步多少像素 ⇒ 反推每步几米;
+            --  上限 = 这条臂量过的步幅(没量就阶梯的下一档 = 4 倍探针步,倍数无量纲),下限 = 探针步
+            Step := B * (Long_Float (Cw) / 16.0) / Best;
+            Step := Long_Float'Max (B, Long_Float'Min (Step, (if G.Stride > 0.0 then G.Stride else 4.0 * B)));
+            Geo_Say ("探一步 " & Mm (B) & ":视差最大的是第 " & Codec.Img (Natural (Cand (Target))) & " 槽(" & Codec.Fmt (Best, 1) & " px,起点 ("
+                     & Codec.Fmt (P0 (Target).U, 0) & "," & Codec.Fmt (P0 (Target).V, 0) & "))⇒ 每步 " & Mm (Step));
+         else
+            Geo_Say ("探一步之后一块都没跟住 ⇒ 后面按探针步走");
          end if;
-         --  步长:让它每步在画面里挪画幅的 1/16(比例,无量纲);探到的视差 = 每步多少像素 ⇒ 反推每步几米;
-         --  上限 = 这条臂量过的步幅(没量就阶梯的下一档 = 4 倍探针步,倍数无量纲),下限 = 探针步
-         Step := B * (Long_Float (Cw) / 16.0) / Best;
-         Step := Long_Float'Max (B, Long_Float'Min (Step, (if G.Stride > 0.0 then G.Stride else 4.0 * B)));
-         Obs.Append (Geom.Obs'(Pose => Home, U => P0 (Target).U, V => P0 (Target).V));
-         if Cur (Target).Seen and then Geom.Angle_Between (Home, F.EE (Arm)) <= 0.1 then
-            Obs.Append (Geom.Obs'(Pose => F.EE (Arm), U => Cur (Target).U, V => Cur (Target).V));
-         end if;
-         Geo_Say ("探一步 " & Mm (B) & ":" & Codec.Img (Natural (Cur.Length)) & " 块候选里挪得最多的是第 " & Codec.Img (Natural (Cand (Target)))
-                  & " 槽(" & Codec.Fmt (Best, 1) & " px,起点 (" & Codec.Fmt (P0 (Target).U, 0) & "," & Codec.Fmt (P0 (Target).V, 0) & "))⇒ 盯它;每步 " & Mm (Step)
-                  & (if Tid >= 0 then " · 仪器逐帧跟点" else " · 按槽号重切"));
       end;
       --  剩下的路:累计走,三根轴都有、再转回来一半
       declare
@@ -5871,17 +5846,20 @@ package body Act is
       if Tid >= 0 then
          Instrument.Track_End (To_String (C.Inst_Host), C.Inst_Port, Tid);
       end if;
-      Geom.Fit (G, Obs, Ok);
-      if Ok then
-         C.Geo.Replace_Element (Cam, G);
-         Geom.Save (To_String (C.Geo_Path), C.Geo);
-         Geo_Say ("相机朝向量好:" & Codec.Img (Natural (Obs.Length)) & " 停,像素残差 " & Codec.Fmt (G.Rms, 2) & " px"
-                  & (if G.F_Meas > 0.0 then ",焦距一起解出来 " & Codec.Fmt (G.F, 1) & " px" else "")
-                  & (if G.F_Prior > 0.0 then "(仪器先验 " & Codec.Fmt (G.F_Prior, 1) & " ± " & Codec.Fmt (G.F_Prior_Sd, 1) & ")" else "") & ",存进 " & To_String (C.Geo_Path));
-         Geo_Up_Check (C, Cam, Home, False);
-      else
-         Geo_Say ("朝向解不出来(能用的停只有 " & Codec.Img (Natural (Obs.Length)) & " 个)");
-      end if;
+      declare
+         Used : Natural;
+      begin
+         Geom.Fit_Rig (G, Obs, Natural (Cur.Length), Ok, Used);
+         if Ok then
+            C.Geo.Replace_Element (Cam, G);
+            Geom.Save (To_String (C.Geo_Path), C.Geo);
+            Geo_Say ("相机朝向量好:" & Codec.Img (Stop_N + 1) & " 停 · " & Codec.Img (Used) & "/" & Codec.Img (Natural (Cur.Length)) & " 个点进了解 · 像素残差 "
+                     & Codec.Fmt (G.Rms, 2) & " px" & (if G.F_Meas > 0.0 then " · 焦距一起解出来 " & Codec.Fmt (G.F, 1) & " px" else "")
+                     & " · 相机离手腕原点 (" & Mm (G.Off (0)) & "," & Mm (G.Off (1)) & "," & Mm (G.Off (2)) & "),存进 " & To_String (C.Geo_Path));
+         else
+            Geo_Say ("朝向解不出来(记了 " & Codec.Img (Natural (Obs.Length)) & " 笔观测,没有一个点在 4 停以上都看见)");
+         end if;
+      end;
    end Geo_Calibrate;
 
    --  几何逼近:让"指尖该到的那一点"(指尖中点再往手心里一点)和点名那块重合。每段走一截、停稳、再看一眼、再算。
@@ -6110,9 +6088,7 @@ package body Act is
                Geom.Save (To_String (C.Geo_Path), C.Geo);
                Geo_Say ("不动的眼量好:" & Codec.Img (Natural (Marks.Length)) & " 个观测,像素残差 " & Codec.Fmt (G.Rms, 2) & " px,它在 ("
                         & Mm (G.Pos (0)) & "," & Mm (G.Pos (1)) & "," & Mm (G.Pos (2)) & ")"
-                        & (if G.F_Meas > 0.0 then ",焦距一起解出来 " & Codec.Fmt (G.F, 1) & " px" else "")
-                        & (if G.F_Prior > 0.0 then "(仪器先验 " & Codec.Fmt (G.F_Prior, 1) & " ± " & Codec.Fmt (G.F_Prior_Sd, 1) & ")" else "") & ",存进 " & To_String (C.Geo_Path));
-               Geo_Up_Check (C, Wc, [others => 0.0], True);
+                        & (if G.F_Meas > 0.0 then ",焦距一起解出来 " & Codec.Fmt (G.F, 1) & " px" else "") & ",存进 " & To_String (C.Geo_Path));
             else
                Geo_Say ("不动的眼解不出来(观测只有 " & Codec.Img (Natural (Marks.Length)) & " 个,要 4 个以上)");
             end if;

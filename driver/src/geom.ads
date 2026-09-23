@@ -13,6 +13,13 @@ package Geom is
       U, V : Long_Float := 0.0;                  --  它在画面里的像素
    end record;
    package Obs_Vectors is new Ada.Containers.Vectors (Natural, Obs);
+   --  多点观测:第 Pt 个点在这一停里的像素(标定时仪器跟着的所有点,谁丢了谁缺席)
+   type Obs_Pt is record
+      Pt : Natural := 0;
+      Pose : Plug.Arm_Pose := [others => 0.0];
+      U, V : Long_Float := 0.0;
+   end record;
+   package Obs_Pt_Vectors is new Ada.Containers.Vectors (Natural, Obs_Pt);
    type Cam_Geo is record
       Valid : Boolean := False;        --  相机朝向量过了
       F, Cx, Cy : Long_Float := 0.0;   --  焦距(像素)、主点。焦距:身体给了就用;没给(官方 RoboDojo 观测就没有)就在量朝向时一起解出来
@@ -20,11 +27,8 @@ package Geom is
       --  仪器看一张图报的焦距 ± 不确定度(像素;0 = 没有)。没给内参时联合解里当一条残差 (F - 先验) / 不确定度:
       --  基线短、焦距和距离分不开时把焦距按在仪器的范围里;基线够长时观测压过它(V1B 2026-09-24:2.6 cm 星形基线把 397 解成 992 / 59)
       F_Prior, F_Prior_Sd : Long_Float := 0.0;
-      --  仪器看一张图报的"上"的方向(相机系单位向量:x 右、y 上、z 朝后)± 不确定度(弧度);只在开机对账用,不存文件
-      Up_Valid : Boolean := False;
-      Up : V3 := [others => 0.0];
-      Up_Sd : Long_Float := 0.0;
       R_Ce : M3 := Identity;           --  相机 → 手(列 = 相机轴在手坐标系里)
+      Off : V3 := [others => 0.0];     --  相机中心离手的位姿原点的偏移(手系,米;转手时近处的东西才分得出它,没量就是 0)
       Rms : Long_Float := 0.0;         --  量朝向时的像素残差
       Tip_Valid : Boolean := False;
       Tip : V3 := [others => 0.0];     --  指尖中点在相机系(米)
@@ -47,6 +51,7 @@ package Geom is
    function Norm (X : V3) return Long_Float;
    function Angle_Between (P, Q : Plug.Arm_Pose) return Long_Float;   --  两个位姿的姿态差(弧度)
    function Cam_R (G : Cam_Geo; P : Plug.Arm_Pose) return M3;         --  相机 → 世界 = R_e · R_ce
+   function Cam_Pos (G : Cam_Geo; P : Plug.Arm_Pose) return V3;       --  相机中心在世界里 = 手的位置 + R_e · Off
    function Ray (G : Cam_Geo; P : Plug.Arm_Pose; U, V : Long_Float) return V3;   --  世界系里的单位视线
    --  几条视线的最小二乘交点(相机原点 = 手的位置;只走平移时相机在手上的偏移对结果没影响)
    function Triangulate (G : Cam_Geo; O : Obs_Vectors.Vector) return V3;
@@ -54,6 +59,9 @@ package Geom is
    procedure Project (G : Cam_Geo; P : Plug.Arm_Pose; Pw : V3; U, V : out Long_Float; In_Front : out Boolean);
    --  量相机朝向:手做几次【平移】,同一个不动的东西在画面里的像素 ⇒ 解朝向 + 那东西的位置(+ 焦距,当 G.F 没给时)。盲搜初值 + 最小二乘。
    procedure Fit (G : in out Cam_Geo; O : Obs_Vectors.Vector; Ok : out Boolean);
+   --  手上的眼,多点一起解(2026-09-24):朝向 R_Ce、相机偏移 Off、焦距(没给就一起解)、每个点的世界位置。
+   --  横着挪只给 焦距/远近 的比;转动的停让焦距和远近分开;转动下近处的点让 Off 分得出来。观测不足 4 停的点不进;Used = 进了几个点
+   procedure Fit_Rig (G : in out Cam_Geo; O : Obs_Pt_Vectors.Vector; N_Pts : Natural; Ok : out Boolean; Used : out Natural);
    --  ── 不动的眼 ──:它看见我身上一个【世界位置已知】的点(指尖:手的位姿读数 + 量过的指尖偏置)落在画面哪儿
    type Mark is record
       Pw : V3 := [others => 0.0];

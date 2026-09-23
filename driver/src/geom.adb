@@ -101,6 +101,11 @@ package body Geom is
    end Angle_Between;
 
    function Cam_R (G : Cam_Geo; P : Plug.Arm_Pose) return M3 is (Mul (Quat_To_R (P), G.R_Ce));
+   function Cam_Pos (G : Cam_Geo; P : Plug.Arm_Pose) return V3 is
+      Ow : constant V3 := Ap (Quat_To_R (P), G.Off);
+   begin
+      return [P (0) + Ow (0), P (1) + Ow (1), P (2) + Ow (2)];
+   end Cam_Pos;
 
    function Ray (G : Cam_Geo; P : Plug.Arm_Pose; U, V : Long_Float) return V3 is
       Dc : constant V3 := [(U - G.Cx) / G.F, -(V - G.Cy) / G.F, -1.0];
@@ -186,7 +191,8 @@ package body Geom is
    end Triangulate;
 
    function To_Cam (G : Cam_Geo; P : Plug.Arm_Pose; Pw : V3) return V3 is
-      D : constant V3 := [Pw (0) - P (0), Pw (1) - P (1), Pw (2) - P (2)];
+      Cp : constant V3 := Cam_Pos (G, P);
+      D : constant V3 := [Pw (0) - Cp (0), Pw (1) - Cp (1), Pw (2) - Cp (2)];
    begin
       return Ap (Tr (Cam_R (G, P)), D);
    end To_Cam;
@@ -465,6 +471,172 @@ package body Geom is
          Ok := True;
       end;
    end Fit;
+
+   procedure Fit_Rig (G : in out Cam_Geo; O : Obs_Pt_Vectors.Vector; N_Pts : Natural; Ok : out Boolean; Used : out Natural) is
+      Fit_F : constant Boolean := G.F <= 0.0;
+      Use_Prior : constant Boolean := Fit_F and then G.F_Prior > 0.0 and then G.F_Prior_Sd > 0.0;
+      N : constant Natural := Natural (O.Length);
+      Min_Seen : constant := 3;   --  一个点至少在几停里看见才进(次数)
+      Cnt : array (0 .. N_Pts) of Natural := [others => 0];
+      Keep : array (0 .. N_Pts) of Boolean := [others => False];
+      Slot : array (0 .. N_Pts) of Integer := [others => -1];
+      Pw0 : array (0 .. N_Pts) of V3 := [others => [others => 0.0]];
+      Gi : Cam_Geo := G;
+      Best_Pt : Integer := -1;
+      Nk : Natural := 0;
+   begin
+      Ok := False; Used := 0;
+      if N_Pts = 0 or else N < 4 then
+         return;
+      end if;
+      for Ob of O loop
+         if Ob.Pt < N_Pts then
+            Cnt (Ob.Pt) := Cnt (Ob.Pt) + 1;
+         end if;
+      end loop;
+      --  起点:看见最多次的那个点单独解一遍(盲搜 + 精修),给朝向和焦距一个像样的起点
+      for K in 0 .. N_Pts - 1 loop
+         if Cnt (K) >= 4 and then (Best_Pt < 0 or else Cnt (K) > Cnt (Best_Pt)) then
+            Best_Pt := K;
+         end if;
+      end loop;
+      if Best_Pt < 0 then
+         return;
+      end if;
+      declare
+         Sub : Obs_Vectors.Vector;
+         Fok : Boolean;
+      begin
+         for Ob of O loop
+            if Ob.Pt = Best_Pt then
+               Sub.Append (Obs'(Pose => Ob.Pose, U => Ob.U, V => Ob.V));
+            end if;
+         end loop;
+         Gi.Off := [others => 0.0];
+         Fit (Gi, Sub, Fok);
+         if not Fok then
+            return;
+         end if;
+      end;
+      --  其余的点按这个起点三角化;在相机后面的不要
+      for K in 0 .. N_Pts - 1 loop
+         if Cnt (K) >= Min_Seen then
+            declare
+               Sub : Obs_Vectors.Vector;
+               Front : Boolean := True;
+            begin
+               for Ob of O loop
+                  if Ob.Pt = K then
+                     Sub.Append (Obs'(Pose => Ob.Pose, U => Ob.U, V => Ob.V));
+                  end if;
+               end loop;
+               Pw0 (K) := Triangulate (Gi, Sub);
+               for Ob of Sub loop
+                  declare
+                     Pc : constant V3 := To_Cam (Gi, Ob.Pose, Pw0 (K));
+                  begin
+                     if -Pc (2) <= 0.0 then
+                        Front := False;
+                     end if;
+                  end;
+               end loop;
+               if Front then
+                  Keep (K) := True; Slot (K) := Integer (Nk); Nk := Nk + 1;
+               end if;
+            end;
+         end if;
+      end loop;
+      if Nk = 0 then
+         return;
+      end if;
+      declare
+         Base : constant Natural := (if Fit_F then 7 else 6);   --  转向量 3 + 偏移 3 (+ 焦距)
+         Np : constant Natural := Base + 3 * Nk;
+         P : Param_Vec (0 .. Np - 1) := [others => 0.0];
+         Steps : Param_Vec (0 .. Np - 1) := [others => 1.0e-4];   --  差分步(弧度 / 米,极小量)
+         Rv : constant V3 := Rot_Vec (Gi.R_Ce);
+         Nr : Natural := 0;
+         Cur : Long_Float := 0.0;
+         procedure Resid (P : Param_Vec; R : out Long_Float; Fill : access procedure (I : Natural; Du, Dv : Long_Float)) is
+            Gt : Cam_Geo := G;
+            Sum : Long_Float := 0.0;
+            I : Natural := 0;
+         begin
+            Gt.R_Ce := Rodrigues ([P (0), P (1), P (2)]);
+            Gt.Off := [P (3), P (4), P (5)];
+            if Fit_F then
+               Gt.F := P (6);
+            end if;
+            for Ob of O loop
+               if Ob.Pt < N_Pts and then Keep (Ob.Pt) then
+                  declare
+                     B : constant Natural := Base + 3 * Natural (Slot (Ob.Pt));
+                     U, V, Du, Dv : Long_Float;
+                     Front : Boolean;
+                  begin
+                     Project (Gt, Ob.Pose, [P (B), P (B + 1), P (B + 2)], U, V, Front);
+                     if Front and then Gt.F > 0.0 then
+                        Du := U - Ob.U; Dv := V - Ob.V;
+                     else
+                        Du := 1.0e3; Dv := 1.0e3;   --  跑到相机后面:远大于画幅的罚(像素数,无量纲哨兵)
+                     end if;
+                     Sum := Sum + Du * Du + Dv * Dv;
+                     if Fill /= null then
+                        Fill (I, Du, Dv);
+                     end if;
+                     I := I + 1;
+                  end;
+               end if;
+            end loop;
+            if Use_Prior then
+               declare
+                  Dp : constant Long_Float := (Gt.F - G.F_Prior) / G.F_Prior_Sd;   --  先验那一条残差(以不确定度为单位,无量纲)
+               begin
+                  Sum := Sum + Dp * Dp;
+                  if Fill /= null then
+                     Fill (I, Dp, 0.0);
+                  end if;
+                  I := I + 1;
+               end;
+            end if;
+            R := Sqrt (Sum / Long_Float (Natural'Max (1, I)));
+         end Resid;
+      begin
+         P (0) := Rv (0); P (1) := Rv (1); P (2) := Rv (2);
+         if Fit_F then
+            P (6) := Gi.F; Steps (6) := 1.0;   --  焦距的差分步(像素,极小量)
+         end if;
+         for K in 0 .. N_Pts - 1 loop
+            if Keep (K) then
+               declare
+                  B : constant Natural := Base + 3 * Natural (Slot (K));
+               begin
+                  P (B) := Pw0 (K) (0); P (B + 1) := Pw0 (K) (1); P (B + 2) := Pw0 (K) (2);
+               end;
+            end if;
+         end loop;
+         for Ob of O loop
+            if Ob.Pt < N_Pts and then Keep (Ob.Pt) then
+               Nr := Nr + 1;
+            end if;
+         end loop;
+         if Use_Prior then
+            Nr := Nr + 1;
+         end if;
+         Resid (P, Cur, null);
+         LM_Refine (P, Nr, Steps, 40, Resid'Access, Cur);
+         G.R_Ce := Rodrigues ([P (0), P (1), P (2)]);
+         G.Off := [P (3), P (4), P (5)];
+         if Fit_F then
+            G.F := P (6);
+         end if;
+         G.F_Meas := (if Fit_F then P (6) else 0.0);
+         G.Rms := Cur;
+         G.Valid := True;
+         Ok := True;
+         Used := Nk;
+      end;
+   end Fit_Rig;
 
    --  ── 不动的眼 ──
    function Ray_Fixed (G : Cam_Geo; U, V : Long_Float) return V3 is
@@ -783,6 +955,7 @@ package body Geom is
             Append (B, "],""tip_valid"":" & (if G.Tip_Valid then "true" else "false") & ",""tip"":[" & Codec.Fmt (G.Tip (0), 5) & "," & Codec.Fmt (G.Tip (1), 5) & "," &
                       Codec.Fmt (G.Tip (2), 5) & "],""gap"":" & Codec.Fmt (G.Gap, 5) & ",""stride"":" & Codec.Fmt (G.Stride, 5) &
                       ",""f_meas"":" & Codec.Fmt (G.F_Meas, 3) & ",""f_prior"":" & Codec.Fmt (G.F_Prior, 3) & ",""f_prior_sd"":" & Codec.Fmt (G.F_Prior_Sd, 3) &
+                      ",""off"":[" & Codec.Fmt (G.Off (0), 5) & "," & Codec.Fmt (G.Off (1), 5) & "," & Codec.Fmt (G.Off (2), 5) & "]" &
                       ",""fixed"":" & (if G.Fixed then "true" else "false") & ",""pos"":[" & Codec.Fmt (G.Pos (0), 5) & "," & Codec.Fmt (G.Pos (1), 5) & "," & Codec.Fmt (G.Pos (2), 5) & "]}");
          end;
       end loop;
@@ -875,6 +1048,15 @@ package body Geom is
                      if Fp >= 0 and then Fs >= 0 then
                         G.F_Prior := Json.Num (D, Fp); G.F_Prior_Sd := Json.Num (D, Fs);
                      end if;
+                     declare
+                        On : constant Integer := Json.Get (D, Nd, "off");   --  老文件没有 ⇒ 0
+                     begin
+                        if On >= 0 and then Json.Count (D, On) = 3 then
+                           for A in 0 .. 2 loop
+                              G.Off (A) := Json.Num (D, Json.Child (D, On, A));
+                           end loop;
+                        end if;
+                     end;
                   end;
                   declare
                      Fx : constant Integer := Json.Get (D, Nd, "fixed");
