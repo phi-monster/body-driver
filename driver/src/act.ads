@@ -314,6 +314,7 @@ package Act is
       Sil_Cam : Integer := -1;
       Sil_N : Geom.V3 := [0.0, 0.0, 1.0];    --  取点时用的面法向(碰过的面按量到的,没碰过按上)
       Sil_P0 : Geom.V3 := [others => 0.0];   --  面过的那一点 = 它量到的位置
+      Sil_Pitch : Long_Float := 0.0;         --  这份点的采样间距(米):几只眼都看全了它就留最细的那份
       --  合上时交出去的那个接触集(手里东西的接触点 + 锥);拿住之后锥放开(拿住 = 摩擦够,这就是身体量 μ 的办法)
       Held_Set : Contact.Set;
       Held_Set_Valid : Boolean := False;

@@ -5839,7 +5839,8 @@ package body Act is
       end if;
       declare
          B : constant Boxed_Thing := C.Boxed (Natural (Bx));
-         Self_Px : constant Boolean := Z.Valid and then Natural (Z.Fingers.Length) = Cw * Ch;
+         --  我自己的手指像素只在"这只眼长在正走路的这条胳膊上"时才剔:别的眼里我的手随位姿到处走,握区那张手指图不是此刻的
+         Self_Px : constant Boolean := A2 = Integer (Arm) and then Z.Valid and then Natural (Z.Fingers.Length) = Cw * Ch;
       begin
          if not B.Seen or else Natural (B.Mask.Length) /= Cw * Ch then
             return;
@@ -5878,13 +5879,36 @@ package body Act is
             end if;
          end loop;
       end;
-      Contact.Surface.On_Plane (Rays, C.Geo_Pw, N, Pts, Dropped);
+      --  面过哪一点:它量到的位置(两眼交点)。可它躺在我碰过的那个面上,交点不可能在那个面之下(H36 那种交点一路掉到桌面之下 15 cm 的病)
+      --  ⇒ 交点在面之下就把面挪到碰过的那一点(当它厚度为零),并说出来;面之上照用(那一截就是它的厚度)
+      declare
+         Below : constant Boolean := C.Touch_Valid
+           and then (C.Geo_Pw (0) - C.Touch_Pt (0)) * N (0) + (C.Geo_Pw (1) - C.Touch_Pt (1)) * N (1) + (C.Geo_Pw (2) - C.Touch_Pt (2)) * N (2) < 0.0;
+         P0 : constant Geom.V3 := (if Below then C.Touch_Pt else C.Geo_Pw);
+      begin
+         if Below then
+            Geo_Say ("它量到的位置在我碰过的面之下 " & Mm (-((C.Geo_Pw (0) - C.Touch_Pt (0)) * N (0) + (C.Geo_Pw (1) - C.Touch_Pt (1)) * N (1) + (C.Geo_Pw (2) - C.Touch_Pt (2)) * N (2)))
+                     & " ⇒ 轮廓落到碰过的面上(它躺在那个面上,不可能在面下)");
+         end if;
+         Contact.Surface.On_Plane (Rays, P0, N, Pts, Dropped);
+      end;
       if Natural (Pts.Length) < 8 then   --  点数
          return;
       end if;
-      C.Sil_Pts := Pts; C.Sil_Valid := True; C.Sil_Name := Name; C.Sil_Cam := Integer (Cam); C.Sil_N := N; C.Sil_P0 := C.Geo_Pw;
-      Geo_Say ("看全了它 ⇒ 记下它顶面的 " & Codec.Img (Natural (Pts.Length)) & " 个点(轮廓像素隔 " & Codec.Img (Stride) & " 个取一个,落到它躺的面上;"
-               & Codec.Img (Dropped) & " 条视线落不到面上)");
+      declare
+         Pitch : constant Long_Float := Contact.Gen.Sampling_Gap (Pts);
+         --  已有的那份还作数吗:同一件、面的高度没变(沿法向差不到一个采样间距)。作数就只让更细的盖它
+         Fresh : constant Boolean := C.Sil_Valid and then C.Sil_Name = Name
+           and then abs ((C.Geo_Pw (0) - C.Sil_P0 (0)) * N (0) + (C.Geo_Pw (1) - C.Sil_P0 (1)) * N (1) + (C.Geo_Pw (2) - C.Sil_P0 (2)) * N (2)) <= C.Sil_Pitch;
+      begin
+         if Pitch <= 0.0 or else (Fresh and then Pitch > C.Sil_Pitch) then
+            return;
+         end if;
+         C.Sil_Pts := Pts; C.Sil_Valid := True; C.Sil_Name := Name; C.Sil_Cam := Integer (Cam); C.Sil_N := N; C.Sil_Pitch := Pitch;
+         C.Sil_P0 := Pts.First_Element;   --  面过的点:就取这份点里的一个(它们全在那张面上)
+         Geo_Say ("第" & Codec.Img (Cam) & " 台眼看全了它 ⇒ 记下它顶面的 " & Codec.Img (Natural (Pts.Length)) & " 个点(轮廓像素隔 " & Codec.Img (Stride)
+                  & " 个取一个,落到它躺的面上,采样间距 " & Mm (Pitch) & ";" & Codec.Img (Dropped) & " 条视线落不到面上)");
+      end;
    end Take_Silhouette;
 
    --  合爪轴在这只眼里的方向(单位向量,相机系):两瓣心的连线(像素 → 相机:x 向右、y 向上,同投影约定)。量出来的,不是推的
@@ -6270,6 +6294,28 @@ package body Act is
       end;
    end Aim_Eye_At;
 
+   --  这只眼里我正走路的那只手压在它上面/挨着它 ⇒ 这只眼此刻"量到的它"多半是我的手和手的影子。
+   --  (H36 2026-09-22 实测:手越靠近,头顶眼的框里越是手影,两眼交点从 z=0.661 一路掉到 0.503 —— 桌面之下 15 cm,偏差却只有 1 cm,看着很准)。
+   --  手在那只眼里的位置是身体图按此刻位姿算的,不看画面。近到一个框之内就算压着
+   function Hand_Covers (C : Context; F : Plug.Frame; Arm, Cm : Natural; B : Boxed_Thing) return Boolean is
+      Ti : constant Natural := Track_Idx (C, Arm, Cm);
+      Pu : constant Long_Float := B.Cu * Long_Float (F.Cams (Cm).W);
+      Pv : constant Long_Float := B.Cv * Long_Float (F.Cams (Cm).H);
+      Bw : constant Long_Float := Long_Float (B.X1 - B.X0 + 1);
+      Bh : constant Long_Float := Long_Float (B.Y1 - B.Y0 + 1);
+      function Within (Hu, Hv : Long_Float) return Boolean is
+        (abs (Hu * Long_Float (F.Cams (Cm).W) - Pu) < Bw and then abs (Hv * Long_Float (F.Cams (Cm).H) - Pv) < Bh);
+   begin
+      if Ti < Natural (C.Zones.Length) and then C.Zones (Ti).Valid then
+         declare
+            Tr : constant Zone_Track := C.Zones (Ti);
+         begin
+            return Within (Tr.Cu, Tr.Cv) or else (Tr.Has_Lobes and then (Within (Tr.Au, Tr.Av) or else Within (Tr.Bu, Tr.Bv)));
+         end;
+      end if;
+      return False;
+   end Hand_Covers;
+
    --  ── 此刻每一只看得见它的眼给一条视线 ──(它叫 Its_Name,脑点过名的)
    --  眼可以是:正在走路的这只手自己的眼(Seen 且整块)、不动的眼(量过自己在哪)、另一只手的眼(朝向量过)。
    --  两条以上 ⇒ 交点就是它此刻的位置,它动不动都一样;这是抓会动的东西唯一诚实的量法(owner 09-22)。
@@ -6309,24 +6355,8 @@ package body Act is
                            declare
                               Pu : constant Long_Float := B.Cu * Long_Float (F.Cams (Cm).W);
                               Pv : constant Long_Float := B.Cv * Long_Float (F.Cams (Cm).H);
-                              --  🔴 这只眼里我正走路的那只手压在它上面/挨着它 ⇒ 这只眼此刻"量到的它"多半是我的手和手的影子,这条视线不算
-                              --  (H36 2026-09-22 实测:手越靠近,头顶眼的框里越是手影,两眼交点从 z=0.661 一路掉到 0.503 —— 桌面之下 15 cm,
-                              --  偏差却只有 1 cm,看着很准)。手在那只眼里的位置是身体图按此刻位姿算的,不看画面。
-                              Ti : constant Natural := Track_Idx (C, Arm, Cm);
-                              Hand_On_It : Boolean := False;
+                              Hand_On_It : constant Boolean := Hand_Covers (C, F, Arm, Cm, B);
                            begin
-                              if Ti < Natural (C.Zones.Length) and then C.Zones (Ti).Valid then
-                                 declare
-                                    Tr : constant Zone_Track := C.Zones (Ti);
-                                    Bw : constant Long_Float := Long_Float (B.X1 - B.X0 + 1);   --  它的框有多宽/多高:近到一个框之内就算压着
-                                    Bh : constant Long_Float := Long_Float (B.Y1 - B.Y0 + 1);
-                                    function Within (Hu, Hv : Long_Float) return Boolean is
-                                      (abs (Hu * Long_Float (F.Cams (Cm).W) - Pu) < Bw and then abs (Hv * Long_Float (F.Cams (Cm).H) - Pv) < Bh);
-                                 begin
-                                    Hand_On_It := Within (Tr.Cu, Tr.Cv)
-                                      or else (Tr.Has_Lobes and then (Within (Tr.Au, Tr.Av) or else Within (Tr.Bu, Tr.Bv)));
-                                 end;
-                              end if;
                               if Hand_On_It then
                                  null;   --  这一眼不给视线
                               elsif A2 < 0 then
@@ -6389,6 +6419,7 @@ package body Act is
       Said_One_Eye : Boolean := False;
       Known : Boolean := False;             --  此刻没眼看得清它,但它在哪我量过(C.Geo_Pw)
       Said_Known : Boolean := False;
+      Said_Cut : Boolean := False;          --  说过一次"这只眼里它顶着画面边,轮廓不记"
       Who : Unbounded_String;
       Pressing : Boolean := False;          --  估计已到位,正沿原方向接着往它身上走
       Press_Dir : Geom.V3 := [0.0, 0.0, 0.0];
@@ -6573,9 +6604,33 @@ package body Act is
                end if;
             end;
             Pc := Geom.To_Cam (G, Cur, Pw);
-            --  这一眼看全了它、它的位置又是两眼交出来的 ⇒ 记一份它顶面的点;哪儿夹得住由接触集从这上面算(PLAN 1.5),不再在像素上扫弦
-            if Seen and then Whole and then Length (Its_Name) > 0 and then C.Geo_Pw_Valid and then C.Geo_Pw_Name = Its_Name then
-               Take_Silhouette (C, F, Cam, Arm, Its_Name);
+            --  它的位置是两眼交出来的 ⇒ 每只看全了它的眼都记一份它顶面的点(留最细的);哪儿夹得住由接触集从这上面算(PLAN 1.5),不再在像素上扫弦。
+            --  腕眼里它常常顶着画面边(H48 的框就贴着 y=479)⇒ 那一眼的轮廓不完整、不记;不动的眼/另一只手的眼看全了它、我的手又没压在它上面 ⇒ 记
+            if Length (Its_Name) > 0 and then C.Geo_Pw_Valid and then C.Geo_Pw_Name = Its_Name then
+               if Seen and then Whole then
+                  Take_Silhouette (C, F, Cam, Arm, Its_Name);
+               elsif Seen and then not Said_Cut then
+                  Said_Cut := True;
+                  Geo_Say ("这只眼里它顶着画面边,轮廓不完整 ⇒ 这一眼不记它的顶面点,看别的眼");
+               end if;
+               for Cm in 0 .. C.Map.N_Cams - 1 loop
+                  if Cm /= Cam and then Cm < Natural (C.Geo.Length) and then Cm < Natural (F.Cams.Length) then
+                     declare
+                        Bx2 : constant Integer := Boxed_By (C, Cm, Its_Name);
+                     begin
+                        if Bx2 >= 0 then
+                           declare
+                              B2 : constant Boxed_Thing := C.Boxed (Natural (Bx2));
+                              Edge2 : constant Boolean := B2.X0 = 0 or else B2.Y0 = 0 or else B2.X1 + 1 >= F.Cams (Cm).W or else B2.Y1 + 1 >= F.Cams (Cm).H;
+                           begin
+                              if B2.Seen and then not Edge2 and then not Hand_Covers (C, F, Arm, Cm, B2) then
+                                 Take_Silhouette (C, F, Cm, Arm, Its_Name);
+                              end if;
+                           end;
+                        end if;
+                     end;
+                  end if;
+               end loop;
             end if;
             declare
                --  到它上方 ⇒ 它该落在"指尖合拢那一点"正下方一个张口处:把世界系的"往下一个张口"转进相机系,加到目标上。
