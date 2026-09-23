@@ -166,18 +166,13 @@ if '"g1"' not in s:
     open(p, "w").write(s)
 assert '"g1"' in open(p).read()
 
-# ---- control_manager: N mimic joints + sign-aware command
+# ---- control_manager: N mimic joints (the eval client already maps the normalised command to a joint position)
 p = f"{R}/env/robot_manager/control_manager.py"; s = open(p).read()
-old = ('        def process_gripper_val(robot_manager, robot, position, gripper_eps=0.2, env_idx=None):\n'
-       '            real_gripper_val = robot_manager.get_end_effector_real_val(robot, env_idx_list=[env_idx])[env_idx]\n'
-       '            real_gripper_val = real_gripper_val[0]\n'
-       '            scale = robot.gripper_scale')
-new = old + ('\n            # [bd] hands whose joint closes toward the upper limit (sign -1) are observed normalised (1 = open, 0 = closed);\n'
-             '            # the command arrives in that same normalised space, so map it back to a joint position here.\n'
-             '            if robot.gripper_move.get("sign", 1) == -1:\n'
-             '                position = scale[1] - float(position) * (scale[1] - scale[0])')
-if "[bd] hands whose joint closes" not in s:
-    assert s.count(old) == 1; s = s.replace(old, new)
+bad = ('            # [bd] hands whose joint closes toward the upper limit (sign -1) are observed normalised (1 = open, 0 = closed);\n'
+       '            # the command arrives in that same normalised space, so map it back to a joint position here.\n'
+       '            if robot.gripper_move.get("sign", 1) == -1:\n'
+       '                position = scale[1] - float(position) * (scale[1] - scale[0])')
+s = s.replace(bad, "")   # undo the earlier double conversion if present
 old2 = '            return [val, val * robot.gripper_move["mimic"][1] + robot.gripper_move["mimic"][2]]'
 new2 = ('            mimic = robot.gripper_move["mimic"]\n'
         '            if mimic and isinstance(mimic[0], (list, tuple)):   # [bd] N mimic joints: [[name, scale, offset], ...]\n'
@@ -186,6 +181,31 @@ new2 = ('            mimic = robot.gripper_move["mimic"]\n'
 if "[bd] N mimic joints" not in s:
     assert s.count(old2) == 1; s = s.replace(old2, new2)
 open(p, "w").write(s)
+assert "[bd] hands whose joint closes" not in open(p).read()
+
+# ---- every other two-joint gripper literal (robot_manager.py, eval_env.py): one helper, N mimic joints
+import re
+HELPER = ("\n\ndef _bd_gripper_targets(robot, val):\n"
+          "    # [bd] joint targets of a gripper/hand from its base value: 2-joint mimic [name, scale, offset] or N mimic joints [[...], ...]\n"
+          "    mimic = robot.gripper_move[\"mimic\"]\n"
+          "    if mimic and isinstance(mimic[0], (list, tuple)):\n"
+          "        return [val] + [val * m[1] + m[2] for m in mimic]\n"
+          "    return [val, val * mimic[1] + mimic[2]]\n")
+pat = re.compile(r"\[\s*(\w+),\s*\1 \* robot\.gripper_move\[\"mimic\"\]\[1\] \+ robot\.gripper_move\[\"mimic\"\]\[2\],?\s*\]")
+for f in (f"{R}/env/robot_manager/robot_manager.py", f"{R}/src/eval_client/eval_env.py"):
+    s = open(f).read()
+    n = len(pat.findall(s))
+    s = pat.sub(lambda m: f"_bd_gripper_targets(robot, {m.group(1)})", s)
+    if "_bd_gripper_targets" in s and "def _bd_gripper_targets" not in s:
+        # insert the helper after the last top-level import line
+        lines = s.split("\n"); last = 0
+        for i, l in enumerate(lines):
+            if l.startswith("import ") or l.startswith("from "):
+                last = i
+        lines.insert(last + 1, HELPER)
+        s = "\n".join(lines)
+    open(f, "w").write(s)
+    print("gripper literals replaced:", f.split("/")[-1], n)
 
 # ---- robot_manager: initial gripper state with N mimic joints
 p = f"{R}/env/robot_manager/robot_manager.py"; s = open(p).read()
