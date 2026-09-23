@@ -25,6 +25,11 @@ with Geom;
 with Selfmap;
 with Learned;
 with Exam;
+with Contact;
+with Contact.Gen;
+with Contact.Exec;
+with Contact.Surface;
+with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Containers;
 with Interfaces; use type Interfaces.Unsigned_8;
 procedure Selfcheck is
@@ -2240,6 +2245,872 @@ begin
       --  🔴 撤回:第一版要求"甩另一条胳膊"。一条胳膊的机器没有另一条,无人机连胳膊都没有。
       Check (Act.Distance_Now (Went, S1, S2, Ran_Floor) > 0.0,
              "撤回:量距离不需要第二条胳膊、不需要第二只眼 —— 只要会动、知道走了多远、拨得出同样的一下");
+   end;
+
+   --  ===== 接触集:四格 + 集合级判据 —— 2026-08 的十三个动词逐条搬回(commit ef10664 contact-set 的单元测试,数一个没改) =====
+   declare
+      package Ct renames Contact;
+      use type Ct.Gap_Kind;
+      use type Ct.Many_Kind;
+      use Ada.Numerics.Long_Elementary_Functions;
+      MM : constant Long_Float := 0.002;        --  碰到的地方:毫米级
+      CM : constant Long_Float := 0.02;         --  路过的地方:厘米级
+      Mu_Half : constant Long_Float := 0.4636;  --  atan(0.5):μ = 0.5 的摩擦锥半张角
+      Z_Up : constant Ct.V3 := [0.0, 0.0, 1.0];
+      Z_Dn : constant Ct.V3 := [0.0, 0.0, -1.0];
+      function Cone (Axis : Ct.V3; Half : Long_Float) return Ct.Cone is ((Axis => Axis, Half_Angle => Half));
+      function Pt (Pos, Normal : Ct.V3; K : Ct.Cone; Tol : Long_Float := MM; Pad : Boolean := False) return Ct.Point is
+        ((By => (Ct.Hand, 0), Pos => Pos, Normal => Normal, Push => K, Pull => False, Torsion => Pad, Peel => False, Tol_M => Tol));
+      --  桌子在支点那儿顶着物体的那个接触:它一直都在,只是①以前没地方记
+      function Table_Holds (Pivot : Ct.V3; Mu_Atan : Long_Float) return Ct.Point is
+        ((By => (Ct.World, 0), Pos => Pivot, Normal => Z_Dn, Push => Cone (Z_Up, Mu_Atan), Pull => False, Torsion => False, Peel => False, Tol_M => MM));
+      --  两个相对的点:抓的最小形状。物体在原点、宽 W
+      function Two (W, Half : Long_Float) return Ct.Point_Vectors.Vector is
+         V : Ct.Point_Vectors.Vector;
+      begin
+         V.Append (Pt ([-0.5 * W, 0.0, 0.10], [-1.0, 0.0, 0.0], Cone ([1.0, 0.0, 0.0], Half)));
+         V.Append (Pt ([0.5 * W, 0.0, 0.10], [1.0, 0.0, 0.0], Cone ([-1.0, 0.0, 0.0], Half)));
+         return V;
+      end Two;
+      function Single (P : Ct.Point) return Ct.Point_Vectors.Vector is
+         V : Ct.Point_Vectors.Vector;
+      begin
+         V.Append (P);
+         return V;
+      end Single;
+      function Mk (Pts : Ct.Point_Vectors.Vector; Mo : Ct.Twist) return Ct.Set is
+        ((Points => Pts, Motion => Mo, Has_Approach => False, Approach => [others => 0.0]));
+      function Mk (Pts : Ct.Point_Vectors.Vector; Mo : Ct.Twist; Ap : Ct.V3) return Ct.Set is
+        ((Points => Pts, Motion => Mo, Has_Approach => True, Approach => Ap));
+      function Turn (Axis : Ct.V3; Rad : Long_Float; Pivot : Ct.V3) return Ct.Twist is
+         Ok : Boolean;
+         T : constant Ct.Twist := Ct.Turn (Axis, Rad, Pivot, Ok);
+      begin
+         pragma Assert (Ok, "转轴非零");
+         return T;
+      end Turn;
+      Pivot : constant Ct.V3 := [0.05, 0.0, 0.0];
+      Lever : constant Ct.V3 := [-0.04, 0.0, 0.02];
+   begin
+      Check (Ct.Admits (Cone (Z_Up, 0.5), [0.1, 0.0, 1.0]) and then not Ct.Admits (Cone (Z_Up, 0.5), [1.0, 0.0, 0.2]),
+             "接触集·锥:判据是角度不是力 —— 偏 5.7° 在半张角 0.5 rad 里,偏 78.7° 不在");
+      declare
+         R : constant Ct.V3 := Ct.Apply (Turn (Z_Up, 0.5 * Ada.Numerics.Pi, [others => 0.0]), [1.0, 0.0, 0.0]);
+      begin
+         Check (abs R (0) < 1.0e-9 and then abs (R (1) - 1.0) < 1.0e-9, "接触集·旋量:绕 z 转 90° 把 x 轴上的点搬到 y 轴上(罗德里格斯)");
+      end;
+      Check (Ct.Check (Mk (Two (0.05, 0.5), Ct.Still ([0.0, 0.0, 0.10])), False).Kind = Ct.Fine,
+             "接触集·抓:两个相对的点向内使劲、物体不动 ⇒ 四格齐(松:同样的点、物体不动,同样过)");
+      Check (Ct.Check (Mk (Single (Pt ([0.0, 0.0, 0.10], Z_Up, Cone (Z_Dn, 0.2))), Ct.Still ([0.0, 0.0, 0.10])), False).Kind = Ct.Fine,
+             "接触集·压:一个点沿法向使劲、物体不动是一个合法答案,不是缺省值");
+      Check (Ct.Check (Mk (Single (Pt ([0.03, 0.0, 0.05], [1.0, 0.0, 0.0], Cone ([-1.0, 0.0, 0.0], 0.6))), Ct.Slide ([-0.10, 0.0, 0.0])), True).Kind = Ct.Fine,
+             "接触集·推:一个点横向力、物体在支撑面上平移");
+      declare
+         Hand_Only : constant Ct.Point_Vectors.Vector := Single (Pt (Lever, Z_Up, Cone (Z_Dn, Mu_Half)));
+         With_Table : Ct.Point_Vectors.Vector := Hand_Only;
+      begin
+         With_Table.Append (Table_Holds (Pivot, 0.46));
+         Check (Ct.Check (Mk (With_Table, Turn ([0.0, 1.0, 0.0], -0.4, Pivot)), True).Kind = Ct.Fine,
+                "接触集·撬:手一个点 + 桌子在支点顶着的那个接触(世界接触)⇒ 物体绕那条边转");
+         Check (Ct.Check (Mk (Hand_Only, Turn ([0.0, 1.0, 0.0], -0.4, Pivot)), True).Kind = Ct.Cannot_Drive,
+                "接触集·撬:不给支反力就该判死 —— 单个接触力产生不出纯力矩(反例:台子有没有牙)");
+         Check (Ct.Check (Mk (With_Table, Turn ([0.0, 1.0, 0.0], -0.9 * Ada.Numerics.Pi, Pivot)), True).Kind = Ct.Fine,
+                "接触集·翻:同一形状、更大的角");
+      end;
+      Check (Ct.Check (Mk (Two (0.05, Mu_Half), Turn ([0.0, 1.0, 0.0], 1.8, [0.0, 0.0, 0.10])), True).Kind = Ct.Fine,
+             "接触集·倒:握着绕一条水平轴转");
+      Check (Ct.Check (Mk (Two (0.05, Mu_Half), Turn ([0.0, 0.0, 1.0], 1.5, [0.0, 0.0, 0.10])), True).Kind = Ct.Fine,
+             "接触集·拧:握着绕物体自己的轴转 —— 与倒的差别只在第③格的轴,四格结构一个字没变");
+      Check (Ct.Check (Mk (Two (0.05, Mu_Half), Ct.Slide ([0.0, 0.06, 0.0])), True).Kind = Ct.Fine, "接触集·插:握着沿一条轴往里走");
+      Check (Ct.Check (Mk (Two (0.05, Mu_Half), Ct.Slide ([0.20, 0.30, -0.10])), True).Kind = Ct.Fine,
+             "接触集·放:握着搬到目标位姿(两指横向搬运:任何单指都做不到,两指一起可以 —— 判据必须在集合上);松手是下一个接触集");
+      Check (Ct.Check (Mk (Single (Pt ([0.0, 0.0, 0.10], Z_Up, Cone (Z_Up, 0.0))), Ct.Slide ([0.0, 0.0, 0.05])), True).Kind = Ct.Fine,
+             "接触集·吸盘:1 个点 + 只允许法向的锥,填同一张表");
+      declare
+         Ns : constant array (1 .. 2) of Positive := [3, 5];
+      begin
+         for N of Ns loop
+            declare
+               V : Ct.Point_Vectors.Vector;
+            begin
+               for I in 0 .. N - 1 loop
+                  declare
+                     A : constant Long_Float := 2.0 * Ada.Numerics.Pi * Long_Float (I) / Long_Float (N);
+                     C : constant Long_Float := Cos (A);
+                     Sn : constant Long_Float := Sin (A);
+                  begin
+                     V.Append (Pt ([0.03 * C, 0.03 * Sn, 0.10], [C, Sn, 0.0], Cone ([-C, -Sn, 0.0], 0.5)));
+                  end;
+               end loop;
+               Check (Ct.Check (Mk (V, Ct.Still ([0.0, 0.0, 0.10])), False).Kind = Ct.Fine and then Natural (V.Length) = N,
+                      "接触集·" & Codec.Img (N) & " 指:只是点数不同,填得满同一张表");
+            end;
+         end loop;
+      end;
+      Check (Ct.Check (Mk (Single (Pt ([0.0, 0.0, 0.10], Z_Up, Cone (Z_Dn, 0.1))), Ct.Slide ([0.10, 0.0, 0.0])), True).Kind = Ct.Cannot_Drive,
+             "接触集·锥与物体运动矛盾(只能往下压,却要它横着走)⇒ 当场点名 CannotDrive");
+      --  四格各自缺失都点得出名
+      declare
+         Good : constant Ct.Point := Pt ([0.0, 0.0, 0.1], Z_Up, Cone (Z_Dn, 0.3));
+         Nil : Ct.Point_Vectors.Vector;
+         Bad : Ct.Point := Good;
+         G : Ct.Gap;
+      begin
+         Check (Ct.Check (Mk (Nil, Ct.Still ([others => 0.0])), False).Kind = Ct.No_Points, "接触集·① 一个点都没有 ⇒ NoPoints");
+         Bad.Normal := [others => 0.0];
+         G := Ct.Check (Mk (Single (Bad), Ct.Still ([others => 0.0])), False);
+         Check (G.Kind = Ct.Bad_Normal and then G.Index = 0, "接触集·② 法向不是方向 ⇒ BadNormal(0):" & Ct.Img (G));
+         Bad := Good;
+         Bad.Push := Cone ([others => 0.0], 0.3);
+         G := Ct.Check (Mk (Single (Bad), Ct.Still ([others => 0.0])), False);
+         Check (G.Kind = Ct.Bad_Cone and then G.Index = 0, "接触集·② 锥轴不是方向 ⇒ BadCone(0):" & Ct.Img (G));
+         Bad := Good;
+         Bad.Tol_M := 0.0;
+         G := Ct.Check (Mk (Single (Bad), Ct.Still ([others => 0.0])), False);
+         Check (G.Kind = Ct.Bad_Tolerance and then G.Index = 0, "接触集·④ 容差不是正数 ⇒ BadTolerance(0):" & Ct.Img (G));
+         Check (Ct.Check (Mk (Single (Good), Ct.Still ([others => 0.0])), True).Kind = Ct.Motion_Still, "接触集·③ 动词要求动而旋量不动 ⇒ MotionStill");
+         declare
+            Mixed : Ct.Point_Vectors.Vector := Single (Good);
+            Far : Ct.Point := Good;
+         begin
+            Far.Pos := [0.0, 0.0, 0.3];
+            Far.Tol_M := CM;
+            Mixed.Append (Far);
+            Check (Ct.Check (Mk (Mixed, Ct.Still ([others => 0.0])), False).Kind = Ct.Fine and then Mixed (0).Tol_M < Mixed (1).Tol_M,
+                   "接触集·④ 容差是每点各一个:碰到的毫米级、路过的厘米级,同一个集里并存");
+         end;
+         Check (Ct.Check (Mk (Nil, Ct.Slide ([0.1, 0.0, 0.0])), True).Kind = Ct.No_Points,
+                "接触集·够(Reach):物体不参与 ⇒ 第①格无从填起 ⇒ NoPoints;它由执行层在两段之间自己产生,接口里没有条目");
+      end;
+      --  擦:握着抹布来回 —— 一串,而且全程不松手
+      declare
+         function Wipe_Seg (From, D : Ct.V3) return Ct.Move is
+            V : Ct.Point_Vectors.Vector;
+         begin
+            V.Append (Pt ([From (0), From (1) - 0.02, From (2)], [0.0, -1.0, 0.0], Cone ([0.0, 1.0, 0.0], Mu_Half)));
+            V.Append (Pt ([From (0), From (1) + 0.02, From (2)], [0.0, 1.0, 0.0], Cone ([0.0, -1.0, 0.0], Mu_Half)));
+            return Ct.One_Of (Mk (V, Ct.Slide (D), Z_Dn));
+         end Wipe_Seg;
+         Segs, Broken : Ct.Move_Vectors.Vector;
+         Mg : Ct.Many_Gap;
+      begin
+         Segs.Append (Wipe_Seg ([0.0, 0.0, 0.02], [0.20, 0.0, 0.0]));
+         Segs.Append (Wipe_Seg ([0.20, 0.0, 0.02], [0.0, 0.05, 0.0]));
+         Segs.Append (Wipe_Seg ([0.20, 0.05, 0.02], [-0.20, 0.0, 0.0]));
+         Mg := Ct.Check (Ct.Chain (Ct.Keep, Segs), True);
+         Check (Mg.Kind = Ct.Fine and then Natural (Ct.Flatten (Ct.Chain (Ct.Keep, Segs)).Length) = 3,
+                "接触集·擦:一串不松手的接触集,每段都填得满、段段接得上:" & Ct.Img (Mg));
+         Broken.Append (Wipe_Seg ([0.0, 0.0, 0.02], [0.20, 0.0, 0.0]));
+         Broken.Append (Wipe_Seg ([0.30, 0.0, 0.02], [0.0, 0.05, 0.0]));
+         Mg := Ct.Check (Ct.Chain (Ct.Keep, Broken), True);
+         Check (Mg.Kind = Ct.Keep_Breaks_Contact and then Mg.Seg = 1 and then abs (Mg.Off_M - 0.10) < 1.0e-9,
+                "接触集·擦:说了不松手却接不上,必须点名是第几段、差多少(第 1 段、差 10 cm):" & Ct.Img (Mg));
+      end;
+      --  舀:插进去(平移)→ 兜起来(绕勺口转)→ 抬出来(平移),全程不松手。指腹是一片面(Torsion)
+      declare
+         function Hold (At_P : Ct.V3; Pad : Boolean) return Ct.Point_Vectors.Vector is
+            V : Ct.Point_Vectors.Vector;
+         begin
+            V.Append (Pt ([At_P (0), At_P (1) - 0.012, At_P (2)], [0.0, -1.0, 0.0], Cone ([0.0, 1.0, 0.0], Mu_Half), Pad => Pad));
+            V.Append (Pt ([At_P (0), At_P (1) + 0.012, At_P (2)], [0.0, 1.0, 0.0], Cone ([0.0, -1.0, 0.0], Mu_Half), Pad => Pad));
+            return V;
+         end Hold;
+         Dip : constant Ct.Move := Ct.One_Of (Mk (Hold ([0.0, 0.0, 0.10], True), Ct.Slide ([0.0, 0.0, -0.04]), Z_Dn));
+         Scoop : constant Ct.Move := Ct.One_Of (Mk (Hold ([0.0, 0.0, 0.06], True), Turn ([0.0, 1.0, 0.0], 0.7, [0.0, 0.0, 0.06]), Z_Dn));
+         After : constant Ct.V3_Vectors.Vector := Ct.End_Points (Scoop);
+         Lift_Pts : Ct.Point_Vectors.Vector := Hold ([0.0, 0.0, 0.06], True);
+         Segs : Ct.Move_Vectors.Vector;
+         Mg : Ct.Many_Gap;
+      begin
+         for J in 0 .. Natural (After.Length) - 1 loop
+            declare
+               P : Ct.Point := Lift_Pts (J);
+            begin
+               P.Pos := After (J);
+               Lift_Pts.Replace_Element (J, P);
+            end;
+         end loop;
+         Segs.Append (Dip);
+         Segs.Append (Scoop);
+         Segs.Append (Ct.One_Of (Mk (Lift_Pts, Ct.Slide ([0.0, 0.0, 0.08]), Z_Dn)));
+         Mg := Ct.Check (Ct.Chain (Ct.Keep, Segs), True);
+         Check (Mg.Kind = Ct.Fine, "接触集·舀:插进去 → 兜起来 → 抬出来,三段不松手,段段填得满且接得上:" & Ct.Img (Mg));
+         Check (Ct.Check (Mk (Hold ([0.0, 0.0, 0.06], False), Turn ([0.0, 1.0, 0.0], 0.7, [0.0, 0.0, 0.06]), Z_Dn), True).Kind = Ct.Cannot_Drive
+                and then Ct.Check (Mk (Hold ([0.0, 0.0, 0.06], True), Turn ([0.0, 1.0, 0.0], 0.7, [0.0, 0.0, 0.06]), Z_Dn), True).Kind = Ct.Fine,
+                "接触集·兜起来:针尖(点接触)绕两指连线的转产生不出来 ⇒ CannotDrive;指腹(面接触)放行 —— Torsion 是承重的,不是装饰");
+      end;
+      --  握着扣扳机:一个在维持,一个在动
+      declare
+         Grip : constant Ct.Set := Mk (Two (0.06, Mu_Half), Ct.Still ([0.0, 0.0, 0.1]), Z_Dn);
+         Trigger : constant Ct.Set := Mk (Single (Pt ([0.0, 0.02, 0.10], [0.0, 1.0, 0.0], Cone ([0.0, -1.0, 0.0], 0.3))), Ct.Slide ([0.0, -0.01, 0.0]), [0.0, -1.0, 0.0]);
+         Both, Rev, Alone : Ct.Move_Vectors.Vector;
+      begin
+         Check (Ct.Check (Grip, False).Kind = Ct.Fine and then Ct.Check (Trigger, True).Kind = Ct.Fine, "接触集·握 + 扣扳机:各自四格填得满");
+         Both.Append (Ct.One_Of (Grip));
+         Both.Append (Ct.One_Of (Trigger));
+         Check (Ct.Check (Ct.Chain (Ct.Meanwhile, Both), True).Kind = Ct.Fine, "接触集·并存:握住不动 + 扣扳机在动 ⇒ 两件事同时成立");
+         Rev.Append (Ct.One_Of (Trigger));
+         Rev.Append (Ct.One_Of (Grip));
+         Check (Ct.Check (Ct.Chain (Ct.Meanwhile, Rev), True).Kind = Ct.Holder_Moves, "接触集·并存:拿在动的那个当维持,当场点名 HolderMoves");
+         Alone.Append (Ct.One_Of (Grip));
+         Check (Ct.Check (Ct.Chain (Ct.Meanwhile, Alone), False).Kind = Ct.Nothing_To_Pair_With, "接触集·并存:只有一段就不叫并存 ⇒ NothingToPairWith");
+      end;
+   end;
+
+   --  ===== 下手点生成器(②a):每一条排序规矩都是 2026-08 真抓失败逼出来的,单元测试逐条搬回(commit ef10664 contact-gen) =====
+   declare
+      package Ct renames Contact;
+      package Cg renames Contact.Gen;
+      use type Cg.Refusal;
+      use type Cg.Handoff_Kind;
+      use type Cg.No_Hand_Kind;
+      use type Ct.Gap_Kind;
+      use Ada.Numerics.Long_Elementary_Functions;
+      --  八月测试台的观测参数(分辨率 + 当年拿来当参数的三个身体量),不是这具身体的数
+      Grid_Aug : constant Cg.Grid := (Bands => 6, Dirs => 16, Min_Pts => 6, Jaw_H_M => 0.03, Min_Above_M => 0.005, Finger_W_M => 0.02, Gap_M => 0.01);
+      function Hand_Of (Src : Cg.Span_Source; M : Long_Float) return Cg.Gripper is
+        ((Jaw => (Src, M), Reach_Lo => 0.15, Reach_Hi => 0.75, Base_X => 0.0, Base_Y => 0.0));
+      --  一根竖着的实心方杆,按 5 mm 采样(40 层)。早先只放四个角点 / 只放四个侧面(零厚度壳),两次都是夹具假,不是算法错
+      function Rod (W, H, At_X : Long_Float) return Ct.V3_Vectors.Vector is
+         V : Ct.V3_Vectors.Vector;
+         N : constant Natural := Natural'Max (2, Natural (Long_Float'Rounding (200.0 * W)));
+      begin
+         for I in 0 .. 39 loop
+            for A in 0 .. N loop
+               for B in 0 .. N loop
+                  V.Append (Ct.V3'([At_X - 0.5 * W + W * Long_Float (A) / Long_Float (N), -0.5 * W + W * Long_Float (B) / Long_Float (N), H * Long_Float (I) / 39.0]));
+               end loop;
+            end loop;
+         end loop;
+         return V;
+      end Rod;
+      --  剪刀:两片 9 mm 厚的刃,相距 7 cm,实心采样
+      function Scissors return Ct.V3_Vectors.Vector is
+         V : Ct.V3_Vectors.Vector;
+         Blades : constant array (1 .. 2) of Long_Float := [-0.035, 0.035];
+      begin
+         for I in 0 .. 59 loop
+            for Bl of Blades loop
+               for A in 0 .. 5 loop
+                  for B in 0 .. 3 loop
+                     V.Append (Ct.V3'([0.4 - 0.015 + 0.03 * Long_Float (A) / 5.0, Bl - 0.0045 + 0.009 * Long_Float (B) / 3.0, 0.01 + 0.02 * Long_Float (I) / 59.0]));
+                  end loop;
+               end loop;
+            end loop;
+         end loop;
+         return V;
+      end Scissors;
+      --  一根竖着的圆柱(半径 3 cm、高 8 cm),顶面是平的;Half_Only = 只留角度在 [90°, 270°] 的那半圈壳(开口朝 +x)
+      function Cylinder (With_Top, Half_Only : Boolean) return Ct.V3_Vectors.Vector is
+         V : Ct.V3_Vectors.Vector;
+      begin
+         for I in 0 .. 35 loop
+            declare
+               A : constant Long_Float := 2.0 * Ada.Numerics.Pi * Long_Float (I) / 36.0;
+            begin
+               if not Half_Only or else (A >= 0.5 * Ada.Numerics.Pi and then A <= 1.5 * Ada.Numerics.Pi) then
+                  for K in 0 .. 16 loop
+                     V.Append (Ct.V3'([0.03 * Cos (A), 0.03 * Sin (A), 0.90 + 0.08 * Long_Float (K) / 16.0]));
+                  end loop;
+               end if;
+            end;
+         end loop;
+         if With_Top then
+            for I in 0 .. 8 loop
+               for J in 0 .. 8 loop
+                  declare
+                     X : constant Long_Float := -0.03 + 0.06 * Long_Float (I) / 8.0;
+                     Y : constant Long_Float := -0.03 + 0.06 * Long_Float (J) / 8.0;
+                  begin
+                     if X * X + Y * Y <= 0.03 * 0.03 + 1.0e-12 then
+                        V.Append (Ct.V3'([X, Y, 0.98]));
+                     end if;
+                  end;
+               end loop;
+            end loop;
+         end if;
+         return V;
+      end Cylinder;
+      Cs : Cg.Cand_Vectors.Vector;
+      Why : Cg.Refusal;
+      Ok : Boolean;
+      T : Long_Float;
+   begin
+      T := Cg.Thickness_At (Scissors, 0.4, -0.035, 0.02, Ada.Numerics.Pi, 0.01, 0.02, Ok);
+      Check (Ok and then abs (T - 0.079) < 0.004, "②a·料厚:在一片刃上横着合爪,跨的是两片刃的外缘 7.9 cm,不是单片刃的 9 mm(读到 " & Codec.Fmt (T, 4) & ")");
+      T := Cg.Thickness_At (Scissors, 0.4, -0.035, 0.02, 0.5 * Ada.Numerics.Pi, 0.01, 0.02, Ok);
+      Check (Ok and then abs (T - 0.030) < 0.004, "②a·料厚:顺着刃的长边合爪,同一条上只有那一片刃,跨 3 cm(读到 " & Codec.Fmt (T, 4) & ")");
+      T := Cg.Thickness_At (Scissors, 0.4, 0.0, 0.02, Ada.Numerics.Pi, 0.01, 0.02, Ok);
+      Check (Ok and then abs (T - 0.079) < 0.004, "②a·料厚:站在两片刃中间的缝上照样跨两片刃 —— 爪子的中心在缝里不等于指头在缝里");
+      T := Cg.Thickness_At (Scissors, 1.0, 0.0, 0.02, Ada.Numerics.Pi, 0.01, 0.02, Ok);
+      Check (not Ok, "②a·料厚:那一条上根本没有料 ⇒ 说没有,不是 0(合到空气里和夹住零毫米是两件事)");
+      T := Cg.Thickness_At (Scissors, 0.4, -0.035, 0.5, Ada.Numerics.Pi, 0.01, 0.02, Ok);
+      Check (not Ok, "②a·料厚:高度不对(物体在 z 0.01–0.03,问 z 0.5)同样是没有料");
+      declare
+         Pts : Ct.V3_Vectors.Vector := Rod (0.02, 0.10, 0.35);
+      begin
+         --  又高又浅的一根细刺(0.14–0.20 m),沿指头方向只有一条:这条测的是「下限 vs 最大化」本身
+         for I in 0 .. 39 loop
+            for A in 0 .. 2 loop
+               for B in 0 .. 2 loop
+                  Pts.Append (Ct.V3'([0.35 + 0.004 * Long_Float (A) / 2.0 - 0.002, 0.004 * Long_Float (B) / 2.0 - 0.002, 0.14 + 0.06 * Long_Float (I) / 39.0]));
+               end loop;
+            end loop;
+         end loop;
+         Cg.Candidates (Pts, Hand_Of (Cg.Measured, 0.088), 0.0, Grid_Aug, Cs, Why);
+         Check (Why = Cg.Fine and then not Cs.Is_Empty and then Cs (0).Pos (2) < 0.12 and then Cs (0).Depth_M > Grid_Aug.Finger_W_M
+                and then Cs (0).Above_Support_M >= Grid_Aug.Min_Above_M,
+                "②a·离桌面高是下限不是最大化:又深又匀的矮杆排在又高又薄的细刺前面(2026-08-12 鞋腰 vs 鞋口那圈软皮)");
+      end;
+      declare
+         Pts : Ct.V3_Vectors.Vector := Rod (0.03, 0.10, 0.30);
+         Com_X : Long_Float := 0.0;
+         Any_Com, Any_Tilt : Boolean := False;
+      begin
+         Pts.Append (Rod (0.03, 0.10, 0.42));
+         for P of Pts loop
+            Com_X := Com_X + P (0) / Long_Float (Pts.Length);
+         end loop;
+         Cg.Candidates (Pts, Hand_Of (Cg.Measured, 0.088), 0.0, Grid_Aug, Cs, Why);
+         for C of Cs loop
+            if C.Com_Offset_M > 1.0e-6 then
+               Any_Com := True;
+            end if;
+            if C.Face_Tilt_Rad > 0.0 then
+               Any_Tilt := True;
+            end if;
+         end loop;
+         Check (Why = Cg.Fine and then abs (Cs.First_Element.Pos (0) - Com_X) <= abs (Cs.Last_Element.Pos (0) - Com_X) and then Any_Com and then Any_Tilt,
+                "②a·抓点离重心远的排在后面(管「提起来会不会转出去」:剪刀抓在手柄圆环上,重量全在刀刃那头),而且面歪、离重心两格真的被算了");
+      end;
+      declare
+         Pts : Ct.V3_Vectors.Vector := Rod (0.02, 0.2, 0.35);
+         Corner_Deeper : Boolean := False;
+      begin
+         Pts.Append (Rod (0.12, 0.2, 0.60));
+         Cg.Candidates (Pts, Hand_Of (Cg.Measured, 0.088), 0.0, Grid_Aug, Cs, Why);
+         --  八月原话:大块上排得最前的那一条(角上的薄片)不许比杆还深;大块中间那些放不下的宽段更深,但它们垫底,不在这一条里
+         for C of Cs loop
+            if abs (C.Pos (0) - 0.60) < 0.06 then
+               Corner_Deeper := C.Depth_M > Cs (0).Depth_M;
+               exit;
+            end if;
+         end loop;
+         for I in 0 .. Natural'Min (2, Natural (Cs.Length) - 1) loop
+            Put_Line ("     · 第 " & Codec.Img (I) & " 名:x=" & Codec.Fmt (Cs (I).Pos (0), 3) & " z=" & Codec.Fmt (Cs (I).Pos (2), 3) & " 宽=" & Codec.Fmt (Cs (I).Width_M, 4)
+                      & " 深=" & Codec.Fmt (Cs (I).Depth_M, 3) & " 歪=" & Codec.Fmt (Cs (I).Face_Tilt_Rad, 3) & " 离心=" & Codec.Fmt (Cs (I).Com_Offset_M, 3)
+                      & " 夹得下=" & Cs (I).Within_Jaw'Image & " 够高=" & Cs (I).Off_Ok'Image & " 面正=" & Cs (I).Tilt_Ok'Image & " 近心=" & Cs (I).Com_Ok'Image);
+         end loop;
+         Check (Why = Cg.Fine and then Cs (0).Within_Jaw and then abs (Cs (0).Pos (0) - 0.35) < 0.03 and then Cs (0).Depth_M > Grid_Aug.Finger_W_M and then not Corner_Deeper,
+                "②a·又深又匀的杆胜过大块的尖角(旧排序按余量最大 = 最窄,把最尖的角排最前:抓取率 19/48 → 26/96)");
+      end;
+      Cg.Candidates (Rod (0.02, 0.2, 0.4), Hand_Of (Cg.Unknown, 0.0), 0.0, Grid_Aug, Cs, Why);
+      Check (Why = Cg.Jaw_Span_Unknown, "②a·爪张开度没量过就拒绝,不许猜一个数出来(本仓最贵的一次手填就在这个量上)");
+      Cg.Candidates (Rod (0.02, 0.2, 0.4), Hand_Of (Cg.Declared, 0.088), 0.0, Grid_Aug, Cs, Why);
+      declare
+         All_Stamped : Boolean := Why = Cg.Fine and then not Cs.Is_Empty;
+      begin
+         for C of Cs loop
+            if not C.Jaw_Declared then
+               All_Stamped := False;
+            end if;
+         end loop;
+         Check (All_Stamped, "②a·声明值能用,但每一条候选都背着「这是声明值」的标记,出处不许在中途消失");
+      end;
+      Cg.Candidates (Rod (0.12, 0.2, 0.4), Hand_Of (Cg.Measured, 0.088), 0.0, Grid_Aug, Cs, Why);
+      declare
+         First_Bad : Integer := -1;
+         Last_Good : Integer := -1;
+      begin
+         for I in 0 .. Natural (Cs.Length) - 1 loop
+            if not Cs (I).Within_Jaw and then First_Bad < 0 then
+               First_Bad := I;
+            end if;
+            if Cs (I).Within_Jaw then
+               Last_Good := I;
+            end if;
+         end loop;
+         Check (Why = Cg.Fine and then First_Bad >= 0 and then Last_Good >= 0 and then Last_Good < First_Bad,
+                "②a·放不下的段只排最后、永远不删(仓里唯一那条可抓性规矩:不许拿钳口张开度当阈值筛物体)");
+      end;
+      declare
+         Pts : Ct.V3_Vectors.Vector := Rod (0.02, 0.2, 0.4);
+         Mid_Air, Any_Far : Boolean := False;
+      begin
+         Pts.Append (Rod (0.02, 0.2, 1.6));
+         Cg.Candidates (Pts, Hand_Of (Cg.Measured, 0.088), 0.0, Grid_Aug, Cs, Why);
+         for C of Cs loop
+            if not (abs (C.Pos (0) - 0.4) < 0.05 or else abs (C.Pos (0) - 1.6) < 0.05) then
+               Mid_Air := True;
+            end if;
+            if not C.Reachable then
+               Any_Far := True;
+            end if;
+         end loop;
+         Check (Why = Cg.Fine and then not Mid_Air, "②a·两根相距 1.2 m 的杆,落点一条都不落在半空(先分块再量宽度;单元测试自己逮出来的真 bug)");
+         Check (Cs (0).Reachable and then Any_Far, "②a·够不到的排在够得到的后面,但留在表里让上面看得见");
+      end;
+      Cg.Candidates (Rod (0.02, 0.2, 0.4), Hand_Of (Cg.Measured, 0.088), 0.0, Grid_Aug, Cs, Why);
+      Check (Why = Cg.Fine and then Cs.First_Element.Above_Support_M >= Cs.Last_Element.Above_Support_M,
+             "②a·贴着支撑面的那一层排在后面:爪子伸不到它下面(平躺薄件合爪停在 0,指间是空的)");
+      declare
+         V : Ct.V3_Vectors.Vector;
+      begin
+         for I in 0 .. 9 loop
+            for J in 0 .. 9 loop
+               V.Append (Ct.V3'([0.4 + 0.005 * Long_Float (I), 0.005 * Long_Float (J), 0.0]));
+            end loop;
+         end loop;
+         Cg.Candidates (V, Hand_Of (Cg.Measured, 0.088), 0.0, Grid_Aug, Cs, Why);
+         Check (Why = Cg.Flat, "②a·一张平面切不出层 ⇒ 拒绝并说 Flat,不许静默返回空表");
+      end;
+      Cg.Candidates (Scissors, Hand_Of (Cg.Measured, 0.088), 0.0, Grid_Aug, Cs, Why);
+      declare
+         Narrow : Boolean := False;
+      begin
+         for C of Cs loop
+            if C.Width_M < 0.02 then
+               Narrow := True;
+            end if;
+         end loop;
+         Check (Why = Cg.Fine and then Narrow, "②a·剪刀:包围盒说「整体 8 cm 能夹」,表面点量到每片刃自己的 9 mm —— 找得到刃上那条窄段");
+      end;
+      declare
+         V : Ct.V3_Vectors.Vector;
+         Gp : constant Cg.Gripper := (Jaw => (Cg.Measured, 0.08), Reach_Lo => 0.05, Reach_Hi => 1.0, Base_X => 0.0, Base_Y => -0.4);
+         Gd : constant Cg.Grid := (Bands => 4, Dirs => 12, Min_Pts => 8, Jaw_H_M => 0.02, Min_Above_M => 0.001, Finger_W_M => 0.02, Gap_M => 0.01);
+         S : Ct.Set;
+         H : Cg.Handoff;
+         Pick : Natural := 0;
+      begin
+         for I in 0 .. 11 loop
+            for J in 0 .. 11 loop
+               for K in 0 .. 5 loop
+                  V.Append (Ct.V3'([-0.03 + 0.06 * Long_Float (I) / 11.0, -0.02 + 0.04 * Long_Float (J) / 11.0, 0.90 + 0.05 * Long_Float (K) / 5.0]));
+               end loop;
+            end loop;
+         end loop;
+         Cg.Candidates (V, Gp, 0.90, Gd, Cs, Why);
+         Check (Why = Cg.Fine and then not Cs.Is_Empty, "②a·一块方料给得出候选:" & Cg.Img (Why));
+         for I in 0 .. Natural (Cs.Length) - 1 loop
+            if Cs (I).Reachable then
+               Pick := I;
+               exit;
+            end if;
+         end loop;
+         declare
+            C : constant Cg.Candidate := Cs (Pick);
+         begin
+            Cg.To_Set (C, 0.5, Ct.Still (C.Pos), 0.002, S, H);
+            Check (H.Kind = Cg.Fine and then Natural (S.Points.Length) = 2 and then Ct.Check (S, False).Kind = Ct.Fine,
+                   "②a→接触集:中心 + 宽度 + 合爪方向 ⇒ 两个相对的接触点,四格自检就过:" & Cg.Img (H));
+            Check (abs (Ct.Norm ([S.Points (1).Pos (0) - S.Points (0).Pos (0), S.Points (1).Pos (1) - S.Points (0).Pos (1), S.Points (1).Pos (2) - S.Points (0).Pos (2)]) - C.Width_M) < 1.0e-12
+                   and then Ct.Dot (S.Points (0).Push.Axis, S.Points (1).Push.Axis) < -0.999 and then S.Has_Approach
+                   and then abs (S.Points (0).Push.Half_Angle - Arctan (0.5)) < 1.0e-12,
+                   "②a→接触集:两点间距 = 段宽,两个锥朝里且相反,进场方向由看得见空隙的这一层填,锥 = 摩擦锥 atan(μ)(不是 Face_Tilt:那是要多大,不是有多大)");
+         end;
+      end;
+      declare
+         Bad : Cg.Candidate;
+         S : Ct.Set;
+         H : Cg.Handoff;
+      begin
+         Bad.Pos := [0.0, 0.0, 0.95];
+         Bad.Width_M := 0.04;
+         Bad.Face_Tilt_Rad := 0.60;
+         Cg.To_Set (Bad, 0.5, Ct.Still ([0.0, 0.0, 0.95]), 0.002, S, H);
+         Check (H.Kind = Cg.Would_Slip and then abs (H.Need_Rad - 0.60) < 1.0e-12 and then abs (H.Have_Rad - Arctan (0.5)) < 1.0e-12 and then H.Need_Rad > H.Have_Rad,
+                "②a→接触集:两个面歪了 34.4° 而 μ=0.5 的摩擦锥只有 26.6° ⇒ 会滑,拒绝并点名差多少:" & Cg.Img (H));
+         Cg.To_Set (Bad, 1.0, Ct.Still ([0.0, 0.0, 0.95]), 0.002, S, H);
+         Check (H.Kind = Cg.Fine, "②a→接触集:μ=1.0 的摩擦锥 45° > 34.4° ⇒ 同一把就交得出去了 —— 差别只在 μ,不在几何");
+         Cg.To_Set (Bad, 0.0, Ct.Still ([0.0, 0.0, 0.95]), 0.002, S, H);
+         Check (H.Kind = Cg.Mu_Unknown, "②a→接触集:μ 没量过就不许瞎填 ⇒ MuUnknown");
+      end;
+      declare
+         S : Ct.Set;
+         Nh : Cg.No_Hand;
+      begin
+         Cg.Suction (Cylinder (True, False), 0.012, 0.001, 0.5, Ct.Still ([0.0, 0.0, 0.94]), 0.002, S, Nh);
+         Check (Nh.Kind = Cg.Fine and then Natural (S.Points.Length) = 1 and then abs (S.Points (0).Pos (2) - 0.98) < 1.0e-9 and then S.Points (0).Normal (2) > 0.99
+                and then abs (S.Points (0).Push.Half_Angle - Arctan (0.5)) < 1.0e-12 and then S.Points (0).Torsion and then Ct.Check (S, False).Kind = Ct.Fine,
+                "②a·吸盘:从点云里真的找到那片平顶面(z=0.98、法向朝上),锥 = 摩擦锥不是 0,吸住了拧得动,四格自检就过:" & Cg.Img (Nh));
+         Cg.Suction (Cylinder (True, False), 0.06, 0.001, 0.5, Ct.Still ([others => 0.0]), 0.002, S, Nh);
+         Check (Nh.Kind = Cg.No_Flat_Patch and then abs (Nh.Need_R - 0.06) < 1.0e-12 and then Nh.Found_R < 0.06,
+                "②a·吸盘比那片平面还大就必须拒绝,并报实测的最大平坦半径:" & Cg.Img (Nh));
+         declare
+            Ns : constant array (1 .. 2) of Positive := [3, 5];
+         begin
+            for N of Ns loop
+               Cg.Ring (Cylinder (True, False), 0.94, 0.02, N, 0.5, Ct.Still ([0.0, 0.0, 0.94]), 0.002, S, Nh);
+               declare
+                  On_Surface : Boolean := Nh.Kind = Cg.Fine and then Natural (S.Points.Length) = N;
+               begin
+                  for P of S.Points loop
+                     if abs (Sqrt (P.Pos (0) ** 2 + P.Pos (1) ** 2) - 0.03) >= 0.004 or else abs (P.Push.Half_Angle - Arctan (0.5)) >= 1.0e-12 then
+                        On_Surface := False;
+                     end if;
+                  end loop;
+                  Check (On_Surface and then Ct.Check (S, False).Kind = Ct.Fine,
+                         "②a·" & Codec.Img (N) & " 指环抓:绕一圈每个接触点都落在真表面上(r=3 cm),锥 = 摩擦锥,填得满同一张表:" & Cg.Img (Nh));
+               end;
+            end loop;
+         end;
+         Cg.Ring (Cylinder (False, True), 0.94, 0.02, 5, 0.5, Ct.Still ([others => 0.0]), 0.002, S, Nh);
+         Check (Nh.Kind = Cg.Nothing_In_Direction and then Nh.Direction = 0,
+                "②a·环抓:开口的 C 形壳,开口正对 +x = 第 0 个方向摸不到料 ⇒ 点名是哪个方向(半个圆柱当反例是错的:切面本身也是面):" & Cg.Img (Nh));
+         Cg.Ring (Cylinder (True, False), 0.94, 0.02, 3, 0.0, Ct.Still ([others => 0.0]), 0.002, S, Nh);
+         Check (Nh.Kind = Cg.Handed_Off and then Nh.H.Kind = Cg.Mu_Unknown, "②a·环抓:μ 没量过就不许调:" & Cg.Img (Nh));
+      end;
+      declare
+         Cloud : Ct.V3_Vectors.Vector;
+         Back : Cg.Rot;
+         Ok2 : Boolean;
+         S0, S1 : Ct.Set;
+      begin
+         Cloud.Append (Ct.V3'([1.0, 0.0, 0.0]));
+         Cg.To_Upright (Cloud, [1.0, 0.0, 0.0], Back, Ok2);
+         Check (Ok2 and then abs (Cloud (0) (2) - 1.0) < 1.0e-9 and then abs (Cloud (0) (0)) < 1.0e-9,
+                "②a·支撑面立起来(法向 = +x)的机器:点云转到「法向 = +z」的系里算,x 轴上的点到了 z 轴上");
+         S0.Points.Append (Ct.Point'(By => (Ct.Hand, 0), Pos => [0.1, 0.2, 0.3], Normal => [0.0, 0.0, 1.0], Push => (Axis => [0.0, 0.0, -1.0], Half_Angle => 0.3),
+                                     Pull => False, Torsion => False, Peel => False, Tol_M => 0.002));
+         S0.Motion := Ct.Slide ([0.0, 0.0, 0.05]);
+         S0.Has_Approach := True;
+         S0.Approach := [0.0, 0.0, -1.0];
+         S1 := Cg.Rotate (Back, Cg.Rotate (Cg.Inverse (Back), S0));
+         declare
+            P0 : constant Ct.Point := S0.Points (0);
+            P1 : constant Ct.Point := S1.Points (0);
+         begin
+            Check (Ct.Norm ([P1.Pos (0) - P0.Pos (0), P1.Pos (1) - P0.Pos (1), P1.Pos (2) - P0.Pos (2)]) < 1.0e-9
+                   and then Ct.Norm ([P1.Push.Axis (0) - P0.Push.Axis (0), P1.Push.Axis (1) - P0.Push.Axis (1), P1.Push.Axis (2) - P0.Push.Axis (2)]) < 1.0e-9
+                   and then Ct.Norm ([S1.Approach (0) - S0.Approach (0), S1.Approach (1) - S0.Approach (1), S1.Approach (2) - S0.Approach (2)]) < 1.0e-9,
+                   "②a·转过去再转回来:点、法向、锥轴、旋量、进场方向一个都不漏(漏了就是「点转过去了而面还朝着老方向」)");
+         end;
+      end;
+   end;
+
+   --  ===== 执行层(②b):接触集 → 一串航点,闭式、不认识动词(commit ef10664 contact-exec/plan.rs 的航点级验收) =====
+   declare
+      package Ct renames Contact;
+      package Cx renames Contact.Exec;
+      use type Cx.No_Plan_Kind;
+      use type Ct.Gap_Kind;
+      use type Cx.Step_Kind;
+      use Ada.Numerics.Long_Elementary_Functions;
+      MM : constant Long_Float := 0.002;
+      Lim : constant Cx.Hand_Limits := (Standoff_M => 0.04, Repeat_M => 0.001);   --  两个数都该由驱动量出来;这里是测试台,取一个明显合法的组合
+      Z_Dn : constant Ct.V3 := [0.0, 0.0, -1.0];
+      function Pt (Pos, Normal, Axis : Ct.V3; Half : Long_Float; Tol : Long_Float := MM) return Ct.Point is
+        ((By => (Ct.Hand, 0), Pos => Pos, Normal => Normal, Push => (Axis => Axis, Half_Angle => Half), Pull => False, Torsion => False, Peel => False, Tol_M => Tol));
+      function Two return Ct.Point_Vectors.Vector is
+         V : Ct.Point_Vectors.Vector;
+      begin
+         V.Append (Pt ([-0.025, 0.0, 0.10], [-1.0, 0.0, 0.0], [1.0, 0.0, 0.0], 0.5 * Ada.Numerics.Pi));
+         V.Append (Pt ([0.025, 0.0, 0.10], [1.0, 0.0, 0.0], [-1.0, 0.0, 0.0], 0.5 * Ada.Numerics.Pi));
+         return V;
+      end Two;
+      function Single (P : Ct.Point) return Ct.Point_Vectors.Vector is
+         V : Ct.Point_Vectors.Vector;
+      begin
+         V.Append (P);
+         return V;
+      end Single;
+      function Mk (Pts : Ct.Point_Vectors.Vector; Mo : Ct.Twist; Ap : Ct.V3) return Ct.Set is
+        ((Points => Pts, Motion => Mo, Has_Approach => True, Approach => Ap));
+      function Mk (Pts : Ct.Point_Vectors.Vector; Mo : Ct.Twist) return Ct.Set is
+        ((Points => Pts, Motion => Mo, Has_Approach => False, Approach => [others => 0.0]));
+      function Turn (Axis : Ct.V3; Rad : Long_Float; Pivot : Ct.V3) return Ct.Twist is
+         Ok : Boolean;
+         T : constant Ct.Twist := Ct.Turn (Axis, Rad, Pivot, Ok);
+      begin
+         pragma Assert (Ok, "转轴非零");
+         return T;
+      end Turn;
+      --  两个朝向之间的夹角(弧度)
+      function Angle_Of (A, B : Cx.M3) return Long_Float is (Geom.Norm (Geom.Rot_Vec (Geom.Mul (Geom.Tr (A), B))));
+      --  先把第 I 步拷成具名变量再取第 J 个点/朝向:对函数返回的临时值直接下标取容器元素,GNAT 会在析构时报 PROGRAM_ERROR(H24 2026-09-22 同一个坑)
+      function Frame_At (V : Cx.Step_Vectors.Vector; I, J : Natural) return Cx.M3 is
+         St : constant Cx.Step := V (I);
+      begin
+         return St.Frame (J);
+      end Frame_At;
+      function Pos_At (V : Cx.Step_Vectors.Vector; I, J : Natural) return Ct.V3 is
+         St : constant Cx.Step := V (I);
+      begin
+         return St.Pos (J);
+      end Pos_At;
+      function Last_Of (V : Cx.Step_Vectors.Vector) return Natural is (Natural (V.Length) - 1);
+      Steps : Cx.Step_Vectors.Vector;
+      Why : Cx.No_Plan;
+   begin
+      declare
+         S : constant Ct.Set := Mk (Two, Ct.Still ([0.0, 0.0, 0.10]), Z_Dn);
+         Good : Boolean;
+      begin
+         Cx.Steps (S, Lim, False, 1, Steps, Why);
+         Good := Why.Kind = Cx.Fine and then Natural (Steps.Length) = 2 and then not Steps (0).Touching and then Steps (1).Touching;
+         if Good then
+            for I in 0 .. 1 loop
+               declare
+                  Z : constant Ct.V3 := Cx.Tool_Axis (Frame_At (Steps, 0, 0));
+                  Hv : constant Ct.V3 := Pos_At (Steps, 0, I);
+                  Pq : constant Ct.Point := S.Points (I);
+                  D : constant Ct.V3 := [Pq.Pos (0) - Hv (0), Pq.Pos (1) - Hv (1), Pq.Pos (2) - Hv (2)];
+                  Ok : Boolean;
+                  U : constant Ct.V3 := Ct.Unit (D, Ok);
+               begin
+                  if abs (Ct.Norm (D) - Lim.Standoff_M) > 1.0e-9 or else not Ok or else Ct.Dot (U, Z) < 0.999 then
+                     Good := False;
+                  end if;
+               end;
+            end loop;
+         end if;
+         Check (Good, "②b·抓:不动的动词 = 悬停 + 贴上,两步就完;悬停沿工具轴反方向退开一个进场余量,不是「往上退」(那是把 z 当特权方向):" & Cx.Img (Why));
+         Check (Good and then Steps (0).Tol_M > Steps (1).Tol_M and then abs (Steps (1).Tol_M - MM) < 1.0e-12,
+                "②b·容差:悬停那一步比贴上那一步松(路过的地方厘米级、碰到的地方毫米级),贴上用最严的那个点的容差");
+      end;
+      declare
+         Pts : Ct.Point_Vectors.Vector := Two;
+         P1 : Ct.Point := Pts (1);
+      begin
+         P1.Tol_M := 0.0005;
+         Pts.Replace_Element (1, P1);
+         Cx.Steps (Mk (Pts, Ct.Still ([0.0, 0.0, 0.10]), Z_Dn), Lim, False, 1, Steps, Why);
+         Check (Why.Kind = Cx.Tol_Tighter_Than_Body and then Why.Index = 1, "②b·容差比这具身体的重复精度还紧就拒绝,点名是哪一点:" & Cx.Img (Why));
+      end;
+      declare
+         Pivot : constant Ct.V3 := [0.05, 0.0, 0.0];
+         Pts : Ct.Point_Vectors.Vector := Single (Pt ([-0.04, 0.0, 0.02], [0.0, 0.0, 1.0], [0.0, 0.0, -1.0], 0.4636));
+         Good : Boolean;
+      begin
+         Pts.Append (Ct.Point'(By => (Ct.World, 0), Pos => Pivot, Normal => Z_Dn, Push => (Axis => [0.0, 0.0, 1.0], Half_Angle => 0.46),
+                               Pull => False, Torsion => False, Peel => False, Tol_M => MM));
+         Cx.Steps (Mk (Pts, Turn ([0.0, 1.0, 0.0], -0.8, Pivot)), Lim, True, 8, Steps, Why);
+         Good := Why.Kind = Cx.Fine and then Natural (Steps.Length) = 10;
+         if Good then
+            for St of Steps loop
+               if Natural (St.Pos.Length) /= 1 then
+                  Good := False;
+               end if;
+            end loop;
+         end if;
+         if Good then
+            declare
+               A : constant Ct.V3 := Pos_At (Steps, 2, 0);
+               B : constant Ct.V3 := Pos_At (Steps, 9, 0);
+               Mid : constant Ct.V3 := Pos_At (Steps, 6, 0);
+               Ok : Boolean;
+               Chord : constant Ct.V3 := Ct.Unit ([B (0) - A (0), B (1) - A (1), B (2) - A (2)], Ok);
+               V : constant Ct.V3 := [Mid (0) - A (0), Mid (1) - A (1), Mid (2) - A (2)];
+               Along : constant Long_Float := Ct.Dot (V, Chord);
+               Off : constant Long_Float := Ct.Norm ([V (0) - Chord (0) * Along, V (1) - Chord (1) * Along, V (2) - Chord (2) * Along]);
+               R0 : constant Long_Float := Ct.Norm ([A (0) - Pivot (0), A (1) - Pivot (1), A (2) - Pivot (2)]);
+            begin
+               Good := Ok and then Off > 1.0e-3;
+               for I in 2 .. 9 loop
+                  declare
+                     P : constant Ct.V3 := Pos_At (Steps, I, 0);
+                  begin
+                     if abs (Ct.Norm ([P (0) - Pivot (0), P (1) - Pivot (1), P (2) - Pivot (2)]) - R0) > 1.0e-9 then
+                        Good := False;
+                     end if;
+                  end;
+               end loop;
+            end;
+         end if;
+         Check (Good, "②b·撬:悬停 + 贴上 + 8 段弧;航点里只有手那一个点(桌子那条边不进航点,只进判据);弧中点离弦有实打实的距离、到支点的半径全程不变:" & Cx.Img (Why));
+      end;
+      Cx.Steps (Mk (Two, Turn ([0.0, 0.0, 1.0], 1.2, [0.0, 0.0, 0.10]), Z_Dn), Lim, True, 6, Steps, Why);
+      Check (Why.Kind = Cx.Fine and then abs (Angle_Of (Frame_At (Steps, 1, 0), Frame_At (Steps, Last_Of (Steps), 0)) - 1.2) < 1.0e-6,
+             "②b·拧:手转过的角等于物体转过的角(转的时候朝向也要跟着走,否则就是「握着的东西被拧脱手」的形状)");
+      Cx.Steps (Mk (Single (Pt ([0.03, 0.0, 0.05], [1.0, 0.0, 0.0], [-1.0, 0.0, 0.0], 0.6)), Ct.Slide ([-0.10, 0.0, 0.0])), Lim, True, 4, Steps, Why);
+      declare
+         Same : Boolean := Why.Kind = Cx.Fine;
+      begin
+         for I in 0 .. Last_Of (Steps) loop
+            if Angle_Of (Frame_At (Steps, 0, 0), Frame_At (Steps, I, 0)) > 1.0e-9 then
+               Same := False;
+            end if;
+         end loop;
+         Check (Same and then abs (Pos_At (Steps, Last_Of (Steps), 0) (0) - (0.03 - 0.10)) < 1.0e-9, "②b·推:不转的时候朝向不许自己动;走完整段平移");
+      end;
+      Cx.Steps (Mk (Single (Pt ([0.0, 0.0, 0.10], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], 0.0)), Ct.Slide ([0.0, 0.0, 0.05])), Lim, True, 1, Steps, Why);
+      Check (Why.Kind = Cx.Fine and then Natural (Steps (0).Pos.Length) = 1 and then Ct.Dot (Cx.Tool_Axis (Frame_At (Steps, 0, 0)), [0.0, 0.0, 1.0]) > 0.999,
+             "②b·吸盘:一个点就是一个位置;只有一个锥时工具轴就是它");
+      declare
+         V : Ct.Point_Vectors.Vector;
+         All5 : Boolean;
+      begin
+         for I in 0 .. 4 loop
+            declare
+               A : constant Long_Float := 2.0 * Ada.Numerics.Pi * Long_Float (I) / 5.0;
+               C : constant Long_Float := Cos (A);
+               Sn : constant Long_Float := Sin (A);
+            begin
+               V.Append (Pt ([0.03 * C, 0.03 * Sn, 0.10], [C, Sn, 0.0], [-C, -Sn, 0.0], 0.5));
+            end;
+         end loop;
+         Cx.Steps (Mk (V, Ct.Still ([0.0, 0.0, 0.10]), Z_Dn), Lim, False, 1, Steps, Why);
+         All5 := Why.Kind = Cx.Fine;
+         for St of Steps loop
+            if Natural (St.Pos.Length) /= 5 then
+               All5 := False;
+            end if;
+         end loop;
+         Check (All5, "②b·五指:五个接触点 ⇒ 每一步五个位置(上一版只有一个 tcp,放不下)");
+      end;
+      Cx.Steps (Mk (Ct.Point_Vectors.Empty_Vector, Ct.Still ([others => 0.0])), Lim, False, 1, Steps, Why);
+      Check (Why.Kind = Cx.Bad and then Why.G.Kind = Ct.No_Points, "②b·接触集自己不合格时把那一格原样转发:" & Cx.Img (Why));
+      declare
+         function Hold (At_P : Ct.V3) return Ct.Point_Vectors.Vector is
+            V : Ct.Point_Vectors.Vector;
+            P : Ct.Point;
+         begin
+            P := Pt ([At_P (0), At_P (1) - 0.012, At_P (2)], [0.0, -1.0, 0.0], [0.0, 1.0, 0.0], 0.4636);
+            P.Torsion := True;
+            V.Append (P);
+            P := Pt ([At_P (0), At_P (1) + 0.012, At_P (2)], [0.0, 1.0, 0.0], [0.0, -1.0, 0.0], 0.4636);
+            P.Torsion := True;
+            V.Append (P);
+            return V;
+         end Hold;
+         Dip : constant Ct.Move := Ct.One_Of (Mk (Hold ([0.0, 0.0, 0.10]), Ct.Slide ([0.0, 0.0, -0.04]), Z_Dn));
+         Scoop : constant Ct.Move := Ct.One_Of (Mk (Hold ([0.0, 0.0, 0.06]), Turn ([0.0, 1.0, 0.0], 0.7, [0.0, 0.0, 0.06]), Z_Dn));
+         Lift : constant Ct.Move := Ct.One_Of (Mk (Hold ([0.0, 0.0, 0.06]), Ct.Slide ([0.0, 0.0, 0.08]), Z_Dn));
+         Segs : Ct.Move_Vectors.Vector;
+         Hovers : Natural := 0;
+      begin
+         Segs.Append (Dip);
+         Segs.Append (Scoop);
+         Segs.Append (Lift);
+         Cx.Script (Ct.Chain (Ct.Keep, Segs), Lim, True, 4, Steps, Why);
+         for St of Steps loop
+            if St.Kind = Cx.Hover then
+               Hovers := Hovers + 1;
+            end if;
+         end loop;
+         Check (Why.Kind = Cx.Fine and then Hovers = 1 and then abs (Angle_Of (Frame_At (Steps, 1, 0), Frame_At (Steps, Last_Of (Steps), 0)) - 0.7) < 1.0e-6,
+                "②b·舀(不松手的一串):除第一段外悬停都扔掉(手已经握着东西在那儿),兜起来转过的 0.7 rad 带进抬那一段 —— 不带的话末了手腕转角是 0:" & Cx.Img (Why));
+      end;
+      declare
+         Grip : constant Ct.Set := Mk (Two, Ct.Still ([0.0, 0.0, 0.1]), Z_Dn);
+         Trigger : constant Ct.Set := Mk (Single (Pt ([0.0, 0.02, 0.10], [0.0, 1.0, 0.0], [0.0, -1.0, 0.0], 0.3)), Ct.Slide ([0.0, -0.01, 0.0]), [0.0, -1.0, 0.0]);
+         Both : Ct.Move_Vectors.Vector;
+      begin
+         Both.Append (Ct.One_Of (Grip));
+         Both.Append (Ct.One_Of (Trigger));
+         Cx.Script (Ct.Chain (Ct.Meanwhile, Both), Lim, True, 1, Steps, Why);
+         Check (Why.Kind = Cx.Fine and then Natural (Steps.Length) = 5 and then Natural (Steps (2).Pos.Length) = 3 and then Natural (Steps (Last_Of (Steps)).Pos.Length) = 3,
+                "②b·并存:维持段的两步先发,之后每一步 = 握着的两点 + 扣扳机那一点(三个位置),握点不动、朝向由维持段定:" & Cx.Img (Why));
+      end;
+      declare
+         Ko, From : Ct.V3_Vectors.Vector;
+         Q : Ct.V3;
+         Ok : Boolean;
+      begin
+         Ko.Append (Ct.V3'([-0.15, 0.0, 0.0]));
+         Ko.Append (Ct.V3'([0.15, 0.0, 0.0]));
+         Q := Cx.Dodge_To ([0.0, 0.0, 0.0], Ko, 0.20, Ok);
+         Check (Ok and then Ct.Norm ([Q (0) + 0.15, Q (1), Q (2)]) >= 0.20 - 1.0e-9 and then Ct.Norm ([Q (0) - 0.15, Q (1), Q (2)]) >= 0.20 - 1.0e-9 and then Ct.Norm (Q) < 0.14,
+                "②b·躲:推开最近那个会推向另一个(沿 x 推开一个离另一个只剩 10 cm,上一版当成功返回了);往侧面让 13.2 cm 才同时满足两个,实得 " & Codec.Fmt (Ct.Norm (Q), 4));
+         From.Append (Ct.V3'([0.0, 0.0, 0.0]));
+         Cx.Script (Ct.Clear_Of (Ko, 0.20, From), Lim, False, 1, Steps, Why);
+         Check (Why.Kind = Cx.Fine and then Natural (Steps.Length) = 1 and then not Steps (0).Touching and then Steps (0).Kind = Cx.Dodge,
+                "②b·「不要碰」= 零接触点 + 一个净空:一步、永远不接触,身体层看见 Dodge 保持当前朝向");
+         Check (not Cx.Off_Course (Lim, Steps (0), 0.30)
+                and then Cx.Off_Course (Lim, (Pos => Ct.V3_Vectors.Empty_Vector, Frame => Cx.M3_Vectors.Empty_Vector, Hand => Ct.Nat_Vectors.Empty_Vector, Touching => True, Tol_M => MM, Kind => Cx.Touch), 0.0511)
+                and then not Cx.Off_Course (Lim, (Pos => Ct.V3_Vectors.Empty_Vector, Frame => Cx.M3_Vectors.Empty_Vector, Hand => Ct.Nat_Vectors.Empty_Vector, Touching => True, Tol_M => MM, Kind => Cx.Touch), 0.0015),
+                "②b·「偏了没有」:路过的点无论差多少都不算偏(悬停差 5 cm 被判偏正是白跑一夜的那个 bug);要碰的点门槛 = 这具身体重复精度的两倍");
+      end;
+   end;
+
+   --  ===== 两只普通相机 → 表面点(无深度那条路,架构底线) =====
+   declare
+      package Ct renames Contact;
+      package Sf renames Contact.Surface;
+      Ok : Boolean;
+      Miss : Long_Float;
+      Tgt : constant Ct.V3 := [0.5, 0.2, 0.1];
+      function Toward (From, To : Ct.V3) return Geom.Sight is
+         Ok2 : Boolean;
+         D : constant Ct.V3 := Ct.Unit ([To (0) - From (0), To (1) - From (1), To (2) - From (2)], Ok2);
+      begin
+         pragma Assert (Ok2);
+         return (O => From, D => D);
+      end Toward;
+      P : Ct.V3;
+   begin
+      P := Sf.Pair (Toward ([0.0, 0.0, 0.0], Tgt), Toward ([0.0, 1.0, 0.0], Tgt), 0.001, Ok, Miss);
+      Check (Ok and then Ct.Norm ([P (0) - Tgt (0), P (1) - Tgt (1), P (2) - Tgt (2)]) < 1.0e-9, "表面点·两条视线交出一个点(取最近那一段的中点),不需要深度");
+      P := Sf.Pair (Toward ([0.0, 0.0, 0.0], Tgt), Toward ([0.0, 1.0, 0.0], [0.5, 0.2, 0.13]), 0.001, Ok, Miss);
+      Check (not Ok and then Miss > 0.001, "表面点·两条视线差得太远 = 左右眼配错了点,当场拒绝,不许当成一个点收下(差 " & Codec.Fmt (Miss, 4) & ")");
+      P := Sf.Pair (Toward ([0.0, 0.0, 0.0], Tgt), Toward ([0.0, 1.0, 0.0], [-0.5, 1.8, -0.1]), 0.001, Ok, Miss);
+      Check (not Ok, "表面点·交在身后的不算");
+      declare
+         Rays : Geom.Sight_Vectors.Vector;
+         Pts : Ct.V3_Vectors.Vector;
+         Dropped : Natural;
+         Good : Boolean := True;
+      begin
+         for I in 0 .. 4 loop
+            for J in 0 .. 4 loop
+               Rays.Append (Toward ([0.0, 0.0, 1.0], [0.01 * Long_Float (I), 0.01 * Long_Float (J), 0.0]));
+            end loop;
+         end loop;
+         Rays.Append (Geom.Sight'(O => [0.0, 0.0, 1.0], D => [1.0, 0.0, 0.0]));   --  和面平行 ⇒ 落不到面上
+         Sf.On_Plane (Rays, [0.0, 0.0, 0.0], [0.0, 0.0, 1.0], Pts, Dropped);
+         for K in 0 .. Natural (Pts.Length) - 1 loop
+            declare
+               Q : constant Ct.V3 := Pts (K);
+               I : constant Natural := K / 5;
+               J : constant Natural := K mod 5;
+            begin
+               if abs (Q (0) - 0.01 * Long_Float (I)) > 1.0e-9 or else abs (Q (1) - 0.01 * Long_Float (J)) > 1.0e-9 or else abs Q (2) > 1.0e-9 then
+                  Good := False;
+               end if;
+            end;
+         end loop;
+         Check (Good and then Natural (Pts.Length) = 25 and then Dropped = 1,
+                "表面点·轮廓像素各发一条视线落到它躺的面上 = 顶面的点;和面平行的那条丢掉并报数(丢 " & Codec.Img (Dropped) & ")");
+         Sf.Extrude_To_Support (Pts, 0.0, 0.01);
+         Check (Natural (Pts.Length) = 25, "表面点·顶面就在支撑面上(高度 0)⇒ 往下拉不出任何点");
+      end;
+      declare
+         Top : Ct.V3_Vectors.Vector;
+      begin
+         for I in 0 .. 3 loop
+            Top.Append (Ct.V3'([0.01 * Long_Float (I), 0.0, 0.03]));
+         end loop;
+         Sf.Extrude_To_Support (Top, 0.0, 0.01);
+         Check (Natural (Top.Length) = 12, "表面点·把看得见的顶面朝支撑面拉下去补出侧面(显式假设:实心、从顶面连到支撑面):4 个顶点 ⇒ 每个再补 2 层 = 12 点");
+      end;
+      declare
+         Pts : Ct.V3_Vectors.Vector;
+         Nrm : Ct.V3;
+         Cnt : Natural;
+         Off_Table : Boolean := True;
+      begin
+         for I in 0 .. 19 loop
+            for J in 0 .. 19 loop
+               Pts.Append (Ct.V3'([0.01 * Long_Float (I), 0.01 * Long_Float (J), 0.0]));
+            end loop;
+         end loop;
+         for I in 0 .. 4 loop
+            for J in 0 .. 4 loop
+               for K in 1 .. 3 loop
+                  Pts.Append (Ct.V3'([0.05 + 0.005 * Long_Float (I), 0.05 + 0.005 * Long_Float (J), 0.01 * Long_Float (K)]));
+               end loop;
+            end loop;
+         end loop;
+         Sf.Drop_Support_Plane (Pts, 0.002, Nrm, Cnt);
+         for Q of Pts loop
+            if Q (2) < 0.005 then
+               Off_Table := False;
+            end if;
+         end loop;
+         Check (Cnt = 400 and then Natural (Pts.Length) = 75 and then Off_Table and then abs Nrm (2) > 0.999,
+                "表面点·把支撑面那张平面上的点扔掉(确定性 RANSAC):桌面 400 点全走,盒子 75 点全留,法向朝上");
+      end;
    end;
 
    Put_Line ((if Fails = 0 then "🟢 自检全过" else "🔴 自检失败" & Natural'Image (Fails) & " 条"));
