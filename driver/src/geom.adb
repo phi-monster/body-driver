@@ -462,6 +462,57 @@ package body Geom is
       V := G.Cy - G.F * Pc (1) / Z;
    end Project_Fixed;
 
+   procedure Fit_Tip_Scale (Fixed, Hand : Cam_Geo; Dir_C : V3; O : Obs_Vectors.Vector; S, Rms_Px : out Long_Float; Ok : out Boolean) is
+      Num, Den, Sum : Long_Float := 0.0;
+      N : Natural := 0;
+      function Cross (A, B : V3) return V3 is
+        ([A (1) * B (2) - A (2) * B (1), A (2) * B (0) - A (0) * B (2), A (0) * B (1) - A (1) * B (0)]);
+   begin
+      S := 0.0; Rms_Px := 0.0; Ok := False;
+      if not Fixed.Fixed or else Fixed.F <= 0.0 or else Norm (Dir_C) <= 0.0 then
+         return;
+      end if;
+      for Ob of O loop
+         declare
+            Pos : constant V3 := [Ob.Pose (0), Ob.Pose (1), Ob.Pose (2)];
+            W : constant V3 := Ap (Cam_R (Hand, Ob.Pose), Dir_C);        --  指尖那条视线在世界里的方向
+            D : constant V3 := Ray_Fixed (Fixed, Ob.U, Ob.V);            --  不动的眼看指尖的那条视线
+            A : constant V3 := Cross (W, D);
+            B : constant V3 := Cross ([Fixed.Pos (0) - Pos (0), Fixed.Pos (1) - Pos (1), Fixed.Pos (2) - Pos (2)], D);
+         begin
+            --  (Pos + S·W − O) × D = 0  ⇒  S · (W × D) = (O − Pos) × D
+            Num := Num + A (0) * B (0) + A (1) * B (1) + A (2) * B (2);
+            Den := Den + A (0) * A (0) + A (1) * A (1) + A (2) * A (2);
+            N := N + 1;
+         end;
+      end loop;
+      if N = 0 or else Den <= 1.0e-12 then
+         return;
+      end if;
+      S := Num / Den;
+      if S <= 0.0 then
+         return;   --  指尖跑到相机背后:两只眼的说法对不上
+      end if;
+      for Ob of O loop
+         declare
+            Pos : constant V3 := [Ob.Pose (0), Ob.Pose (1), Ob.Pose (2)];
+            W : constant V3 := Ap (Cam_R (Hand, Ob.Pose), Dir_C);
+            Pw : constant V3 := [Pos (0) + S * W (0), Pos (1) + S * W (1), Pos (2) + S * W (2)];
+            U, V : Long_Float;
+            Front : Boolean;
+         begin
+            Project_Fixed (Fixed, Pw, U, V, Front);
+            if Front then
+               Sum := Sum + (U - Ob.U) ** 2 + (V - Ob.V) ** 2;
+            else
+               return;
+            end if;
+         end;
+      end loop;
+      Rms_Px := Sqrt (Sum / Long_Float (N));
+      Ok := True;
+   end Fit_Tip_Scale;
+
    function Hit_Plane (Origin, Dir, P0, N : V3; Ok : out Boolean) return V3 is
       Den : constant Long_Float := Dir (0) * N (0) + Dir (1) * N (1) + Dir (2) * N (2);
       Num : constant Long_Float := (P0 (0) - Origin (0)) * N (0) + (P0 (1) - Origin (1)) * N (1) + (P0 (2) - Origin (2)) * N (2);

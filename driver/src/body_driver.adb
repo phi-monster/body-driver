@@ -289,6 +289,9 @@ begin
    --  于是几何常数从不装回、Geo_Ready 恒假、整条几何走法是死代码。
    Act.Geo_Boot (F, C, To_String (Body_Path));
    Act.Geo_Boot_Fixed (L, F, C);
+   Act.Geo_Boot_Eyes (L, F, C);
+   Act.Geo_Boot_Tips (L, F, C);
+   Act.Geo_Boot_Support (L, F, C);
    Put_Line ("[身] 身体量完 ⇒ 开始干活(脑在 " & To_String (C.Eye_Host) & ":" & Codec.Img (C.Eye_Port) & (if C.Look_Only then ",只看不动" else "") & ")");
    --  ── 干活循环 ──
    loop
@@ -302,10 +305,11 @@ begin
          Memory.Clear (C.Mem);
          C.Recent := Null_Unbounded_String;
          C.Cam := C.Map.World_Cam;
-         --  脑起的名字、脑说过"这只眼里没有它"、碰过的面、手指指向 —— 都是上一集的世界,一起清;量过的身体留着
+         --  脑起的名字、脑说过"这只眼里没有它"、手指指向 —— 都是上一集的世界,一起清;量过的身体留着。
+         --  碰过的面留着但标成"上一集的":桌子一般不动,第一句话就有高度可用;新一集第一次朝下被顶住就换成新量的
          C.Boxed.Clear;
-         C.Touch_Valid := False; C.Fingers_Aimed := False; C.Geo_Pw_Valid := False; C.Geo_Pw_Met := False; C.Geo_At_Above := False;
-         C.Sil_Valid := False; C.Held_Set_Valid := False; C.Tried.Clear; C.Tried_W.Clear; C.Walls.Clear;
+         C.Touch_Fresh := False; C.Bumps.Clear; C.Fingers_Aimed := False; C.Geo_Pw_Valid := False; C.Geo_Pw_Met := False; C.Geo_At_Above := False;
+         C.Sil_Valid := False; C.Held_Set_Valid := False; C.Tried.Clear; C.Tried_W.Clear; C.Walls.Clear; C.No_Reach_Arm := -1;
          Act.Init_Tracks (C);
       end if;
       if Order /= "" then

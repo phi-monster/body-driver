@@ -466,6 +466,51 @@ begin
          Check (not Hok, "视线背对着面 ⇒ 不交,如实说");
       end;
    end;
+   --  🔴 没有深度时量指尖(2026-09-23):指尖 = 自己眼里那条视线上离眼 S 米处;不动的眼两停看见指尖 ⇒ 解 S。合成数据:真值 0.12 m
+   declare
+      Gf : Geom.Cam_Geo;
+      Gh : Geom.Cam_Geo;
+      Dir : constant Geom.V3 := [0.1 / 1.0247, -0.2 / 1.0247, -1.0 / 1.0247];   --  单位视线(分母 = 模长,纯数学)
+      S_True : constant Long_Float := 0.12;   --  合成真值(测试数据,无量纲意义上的"给定")
+      Obs, One_Obs : Geom.Obs_Vectors.Vector;
+      S_Got, Rms : Long_Float;
+      Ok : Boolean;
+   begin
+      Gf.Fixed := True; Gf.F := 400.0; Gf.Cx := 320.0; Gf.Cy := 240.0; Gf.Pos := [0.3, 0.2, 1.5]; Gf.R_Ce := Geom.Identity;   --  不动的眼:朝下看
+      Gh.Valid := True; Gh.F := 400.0; Gh.Cx := 320.0; Gh.Cy := 240.0; Gh.R_Ce := Geom.Rodrigues ([0.3, -0.2, 0.1]);   --  手上的眼:随便一个朝向
+      for I in 0 .. 2 loop
+         declare
+            P : Plug.Arm_Pose := [0.05 * Long_Float (I), 0.1 - 0.03 * Long_Float (I), 0.9 + 0.05 * Long_Float (I), 1.0, 0.0, 0.0, 0.0];
+            Tw : constant Geom.V3 := Geom.Ap (Geom.Cam_R (Gh, P), [S_True * Dir (0), S_True * Dir (1), S_True * Dir (2)]);
+            U, V : Long_Float;
+            Fr : Boolean;
+         begin
+            Geom.Project_Fixed (Gf, [P (0) + Tw (0), P (1) + Tw (1), P (2) + Tw (2)], U, V, Fr);
+            Check (Fr, "量指尖:合成的指尖在不动的眼前面(测试数据自己先得成立)");
+            Obs.Append (Geom.Obs'(Pose => P, U => U, V => V));
+            if I = 0 then
+               One_Obs.Append (Geom.Obs'(Pose => P, U => U, V => V));
+            end if;
+         end;
+      end loop;
+      Geom.Fit_Tip_Scale (Gf, Gh, Dir, Obs, S_Got, Rms, Ok);
+      Check (Ok and then abs (S_Got - S_True) < 1.0e-6 and then Rms < 1.0e-6,
+             "量指尖:三停 ⇒ 离眼 " & Codec.Fmt (S_Got, 5) & " m(真 0.12)· 残差 " & Codec.Fmt (Rms, 4) & " px");
+      Geom.Fit_Tip_Scale (Gf, Gh, Dir, One_Obs, S_Got, Rms, Ok);
+      Check (Ok and then abs (S_Got - S_True) < 1.0e-6, "量指尖:一停也够(两条视线不平行时一个未知数两条方程)⇒ " & Codec.Fmt (S_Got, 5) & " m");
+      declare
+         Par : Geom.Obs_Vectors.Vector;
+         Gd : Geom.Cam_Geo := Gh;
+         P : constant Plug.Arm_Pose := [0.3, 0.2, 0.9, 1.0, 0.0, 0.0, 0.0];   --  指尖正好在不动眼的正下方
+      begin
+         Gd.R_Ce := Geom.Identity;
+         Par.Append (Geom.Obs'(Pose => P, U => 320.0, V => 240.0));
+         Geom.Fit_Tip_Scale (Gf, Gd, [0.0, 0.0, -1.0], Par, S_Got, Rms, Ok);
+         Check (not Ok, "量指尖:指尖视线和不动眼的视线平行 ⇒ 解不出,如实说");
+         Geom.Fit_Tip_Scale (Gf, Gh, Dir, Geom.Obs_Vectors.Empty_Vector, S_Got, Rms, Ok);
+         Check (not Ok, "量指尖:一停都没有 ⇒ 不解");
+      end;
+   end;
    --  🔴 两眼同时交点(2026-09-22):两条视线 ⇒ 交点;一条 ⇒ 不解;两条平行 ⇒ 不解;交在眼后 ⇒ 不解
    declare
       Rs : Geom.Sight_Vectors.Vector;

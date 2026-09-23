@@ -55,6 +55,10 @@ package Geom is
    procedure Project_Fixed (G : Cam_Geo; Pw : V3; U, V : out Long_Float; In_Front : out Boolean);
    --  量不动的眼:几次看见指尖在哪(世界位置 + 像素)⇒ 解它的位置和朝向。盲搜初值 + 最小二乘,和 Fit 同一套。
    procedure Fit_Fixed (G : in out Cam_Geo; O : Mark_Vectors.Vector; Ok : out Boolean);
+   --  ── 没有深度时量指尖 ──:指尖在这只手自己眼里的像素给出相机系里的一条视线 Dir_C(单位向量,从手的位姿点出发);指尖 = S · Dir_C,只差 S(米)。
+   --  不动的眼在几停里看见这只手的指尖落在 (U,V)(O 里的 Pose = 那一停手的位姿读数):指尖的世界位置必须落在不动眼那条视线上
+   --  ⇒ 每停两条线性方程、一个未知数 S,最小二乘。两条视线平行(解不出)或一停都没有 ⇒ Ok = False。Rms_Px = 解出来之后指尖投回不动眼的像素残差。
+   procedure Fit_Tip_Scale (Fixed, Hand : Cam_Geo; Dir_C : V3; O : Obs_Vectors.Vector; S, Rms_Px : out Long_Float; Ok : out Boolean);
    --  视线与一个面的交点(面 = 过 P0、法向 N);视线和面平行或交在身后 ⇒ Ok = False
    function Hit_Plane (Origin, Dir, P0, N : V3; Ok : out Boolean) return V3;
    --  ── 几条视线同一时刻交在哪 ──:每条视线 = 世界系里的起点 + 单位方向,来自哪只眼都行(不动的眼、任何一只手上的眼)。

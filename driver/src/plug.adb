@@ -20,6 +20,8 @@ package body Plug is
 
    function Steps (L : Link) return Natural is (if L.Seq >= L.Ep_Seq0 then L.Seq - L.Ep_Seq0 else L.Seq);
 
+   function Reset_Pending (L : Link) return Boolean is (L.Reset_Flag);
+
    function Take_Reset (L : in out Link) return Boolean is
       R : constant Boolean := L.Reset_Flag;
    begin

@@ -206,6 +206,7 @@ package Act is
       Gray, Bg : Long_Float := -1.0;      --  脑指它那一帧:它的像素平均多亮、它框里的背景平均多亮(< 0 = 没量);每帧重量时认它靠这个
       Isolated : Boolean := False;        --  量到的那一块是单独的吗(没顶到让出来的那一圈)
       Mask : Bools;                       --  这一帧它的像素(整幅;合手前在它身上挑夹得住的那一处要用)
+      Count : Natural := 0;               --  上一次认出它时它有多少像素(窗挪到预测处时按远近比例缩放):这一帧量到的块小到不足它的四分之一就不是它
    end record;
    package Boxed_Vectors is new Ada.Containers.Vectors (Natural, Boxed_Thing);
 
@@ -331,9 +332,12 @@ package Act is
       Tried : Contact.V3_Vectors.Vector;
       Tried_W : Floats;                      --  那一把的段宽:离滑过的落点不到一个段宽的候选算同一处
       Walls : Wall_Vectors.Vector;           --  这一集里各条臂横着被顶住过的地方(见 Wall_Mark)
+      No_Reach_Arm : Integer := -1;          --  这一集里"它身上一段都在够不着那侧"的那条臂(-1 = 没有):下次选手绕开它
       Fingers_Aimed : Boolean := False;   --  上一段"到它上方"末尾已把手指指向它躺的面 ⇒ 接下来贴上去的那一段不再为了看它而转手
       Touch_Valid : Boolean := False;
       Touch_Pt, Touch_N : Geom.V3 := [others => 0.0];
+      Touch_Fresh : Boolean := False;        --  这张面是这一集里碰出来的(False = 上一集留下的,新一集第一次朝下被顶住就换成新的,再往后只让更低的换)
+      Bumps : Contact.V3_Vectors.Vector;     --  这一集里朝下被顶住、却比它躺的面高的地方(躺在面上的别的东西,或它自己):记进地图,不当成面
    end record;
 
    procedure Init_Tracks (C : in out Context);
@@ -342,5 +346,12 @@ package Act is
    --  量【不动的眼】:看着自己的手挪几下(每停一处合空一次,看指尖落在画面哪儿),解出它在世界里的位置和朝向。
    --  只在它还没量过时做;量过就存进几何文件,下一炮直接装回。
    procedure Geo_Boot_Fixed (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);
+   --  开机把身体量全(任何身体同一套,不分左右、不抄数):
+   --  ① 长在通道组(臂)上的每一只眼:朝向没量过的,盯着它眼里最大的一块不动的东西挪四下量出来;
+   --  ② 每只能合拢的手:指尖偏置没量过的(没有深度就量不了),借不动的眼在两停里看它指尖落在哪,解出指尖离眼多远;
+   --  ③ 每只手:指尖朝下压到被顶住,量出它下面那张面在哪(东西躺的面;先量了,第一句话就不用猜高度)
+   procedure Geo_Boot_Eyes (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);
+   procedure Geo_Boot_Tips (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);
+   procedure Geo_Boot_Support (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);
    procedure Round (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);
 end Act;

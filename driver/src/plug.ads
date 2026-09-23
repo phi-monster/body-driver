@@ -63,6 +63,8 @@ package Plug is
    function Sense (L : in out Link; F : out Frame) return Boolean;
    function Act (L : in out Link; C : Cmd) return Boolean;
    function Take_Reset (L : in out Link) return Boolean;
+   --  只看不清:对方是不是刚复位了(新的一集)。走路的那些段每一步看一眼,复位了就当场收段,不把这一段的动作发到新的一集里
+   function Reset_Pending (L : Link) return Boolean;
    function Steps (L : Link) return Natural;            --  这一集到现在收了几拍画面(一拍 = 对方走一步;只数,不停)
    function Arms (L : Link) return Natural;
    function Joint_Mode (L : Link) return Boolean;     --  没有末端位姿、只有关节角
