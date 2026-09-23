@@ -5731,7 +5731,7 @@ package body Act is
       Home : constant Plug.Arm_Pose := F.EE (Arm);
       B : constant Long_Float := 4.0 * Geo_Base (C, Arm);   --  探针一步 = 四倍那一档(倍数,无量纲):远处一步要跳得过跟踪噪声
       Notch : constant Long_Float := (if Arm * Chan.Per_Arm + 3 < Natural (C.Map.Amp.Length) then C.Map.Amp (Arm * Chan.Per_Arm + 3) else 0.0);
-      Theta : constant Long_Float := 4.0 * Notch;   --  转动一停的角 = 四倍转动探针那一档(倍数,无量纲;没量过转动就是 0 ⇒ 不转)
+      Theta : Long_Float := 4.0 * Notch;   --  转动一停的角:起步四倍转动探针那一档(倍数,无量纲;没量过转动就是 0 ⇒ 不转),阶梯探到的最大一档为准
       Cw : constant Natural := (if Cam < Natural (F.Cams.Length) then F.Cams (Cam).W else 0);
       Ch : constant Natural := (if Cam < Natural (F.Cams.Length) then F.Cams (Cam).H else 0);
       Obs : Geom.Obs_Pt_Vectors.Vector;
@@ -5929,14 +5929,42 @@ package body Act is
          Geo_Say ("量朝向:起点 " & Codec.Img (K0) & " 个候选" & (if Tid >= 0 then " · 仪器逐帧跟点" else " · 按槽号重切")
                   & (if C.Head_Id >= 0 then " · 不动的眼跟着指尖" else ""));
       end;
-      --  转动的停:绕世界 z、绕世界 x 各去一下、回一下
+      --  转动的停:转角按阶梯量出来(像步幅):4 / 16 / 64 倍转动探针档,一档一档往上,"转过去之后还有一半以上的候选跟得住"的最大一档就是转角
+      --  (焦距精度和转角成正比:V1G–V1J 只转 5.9°,焦距炮与炮之间飘 ±4%)。每一档都是去一下、回一下,记的观测全进解。绕世界 z 探阶梯,绕世界 x 用探到的那一档
       if Theta > 0.0 then
-         for K in 1 .. 4 loop
+         declare
+            Rungs : constant array (1 .. 3) of Long_Float := [4.0, 16.0, 64.0];   --  倍数(和步幅阶梯同一套,无量纲)
+            Best : Long_Float := 0.0;
+            Half : constant Natural := (Natural (Cur.Length) + 1) / 2;   --  一半的候选(次数)
+         begin
+            for R of Rungs loop
+               declare
+                  Th : constant Long_Float := R * Notch;
+                  Kept : Natural := 0;
+               begin
+                  if Plug.Reset_Pending (L) then
+                     On_Reset;
+                  end if;
+                  Theta := Th;
+                  Rot_Stop ([0.0, 0.0, 1.0], 1.0);
+                  for I in 0 .. Natural (Cur.Length) - 1 loop
+                     if Cur (I).Seen then
+                        Kept := Kept + 1;
+                     end if;
+                  end loop;
+                  Rot_Stop ([0.0, 0.0, 1.0], -1.0);
+                  exit when Kept < Half;
+                  Best := Th;
+               end;
+            end loop;
+            Theta := (if Best > 0.0 then Best else Rungs (1) * Notch);
+            Geo_Say ("转角阶梯:转过去还跟得住一半候选的最大一档 = " & Codec.Fmt (Theta * Deg, 1) & "°");
             if Plug.Reset_Pending (L) then
                On_Reset;
             end if;
-            Rot_Stop ((if K <= 2 then [0.0, 0.0, 1.0] else [1.0, 0.0, 0.0]), (if K mod 2 = 1 then 1.0 else -1.0));
-         end loop;
+            Rot_Stop ([1.0, 0.0, 0.0], 1.0);
+            Rot_Stop ([1.0, 0.0, 0.0], -1.0);
+         end;
       end if;
       if Plug.Reset_Pending (L) then
          On_Reset;
