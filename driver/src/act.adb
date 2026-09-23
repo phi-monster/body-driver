@@ -6357,8 +6357,10 @@ package body Act is
                if (Mok or else Nobs >= 2) and then Length (Its_Name) > 0 then
                   --  记住它在哪:下一段看不清时凭这个走。两眼交点(偏差毫米级)比单眼挪出来的准得多(H35 2026-09-22 实测:交点 z=0.628,
                   --  之后手指朝下近处单眼挪出来的 z=0.745 把它盖掉了,下一段就按 12 cm 高的空中走)⇒ 这一段里有过交点就不让单眼盖
-                  if Mok or else not C.Geo_Pw_Met or else C.Geo_Pw_Name /= Its_Name then
-                     C.Geo_Pw := Pw; C.Geo_Pw_Valid := True; C.Geo_Pw_Name := Its_Name; C.Geo_Pw_Met := Mok;
+                  --  H47 2026-09-23 实测:单眼挪出来的一个坏位置 (0.43, −0.21, 0.90) 被记住,之后十几段全按它走、一步没走。
+                  --  ⇒ 只记两眼交出来的;单眼的估计只在这一段里用,不进记忆
+                  if Mok then
+                     C.Geo_Pw := Pw; C.Geo_Pw_Valid := True; C.Geo_Pw_Name := Its_Name; C.Geo_Pw_Met := True;
                   end if;
                end if;
             end;
@@ -7096,7 +7098,25 @@ package body Act is
                                        or else (Lw'Length > 0 and then Lw /= Old and then Ada.Strings.Fixed.Index (Old, Lw) > 0))
                              and then Item_Of (Bi) > 0
                            then
-                              Put_Line ("[身] 📦 你写的「" & W & "」里含着你起过的名字「" & Old & "」⇒ 当同一件东西");
+                              Put_Line ("[身] 📦 你写的「" & W & "」里含着你起过的名字「" & Old & "」⇒ 当同一件东西,以后都叫它「" & W & "」");
+                              --  同一件东西在每只眼里、在记忆里都得叫一个名(H47 实测:头顶眼里它叫那个乱名,腕眼里叫 scissors,
+                              --  两眼的视线就对不上号,交点算不出来)⇒ 把旧名全改成脑现在用的这个
+                              for Bj in 0 .. Natural (C.Boxed.Length) - 1 loop
+                                 if To_String (C.Boxed (Bj).Name) = Old then
+                                    declare
+                                       B2 : Boxed_Thing := C.Boxed (Bj);
+                                    begin
+                                       B2.Name := To_Unbounded_String (W);
+                                       C.Boxed.Replace_Element (Bj, B2);
+                                    end;
+                                 end if;
+                              end loop;
+                              if To_String (C.Geo_Pw_Name) = Old then
+                                 C.Geo_Pw_Name := To_Unbounded_String (W);
+                              end if;
+                              if To_String (C.Geo_Name) = Old then
+                                 C.Geo_Name := To_Unbounded_String (W);
+                              end if;
                               C.Name_Cam := Integer (Cam);
                               return Integer (Item_Of (Bi));
                            end if;
