@@ -7067,61 +7067,70 @@ package body Act is
                         end if;
                      end loop;
                      --  ①b 脑这回写的名字里【含着】它以前起过的名字(H44 2026-09-23 实测:它写 "grip mintgreenscissors"、"reach cell mintgreenscissors",
-                     --  前面挂个动词)⇒ 按字面就是同一件东西,不用再问、也不会把它当成新东西记成"没有"。只按字面包含,不猜别的。
-                     for Bi in 0 .. Natural (C.Boxed.Length) - 1 loop
-                        declare
-                           Old : constant String := To_String (C.Boxed (Bi).Name);
-                           --  反过来也算:脑这回写的名字里最长的那个词,整个落在它起过的名字里("mintgreensc" 落在 "mintgreenscissors" 里)
-                           function Longest_Word (S : String) return String is
-                              Bs, Be : Natural := 0;
-                              I : Natural := S'First;
-                           begin
-                              while I <= S'Last loop
-                                 declare
-                                    J : Natural := I;
-                                 begin
-                                    while J <= S'Last and then S (J) /= ' ' loop
-                                       J := J + 1;
-                                    end loop;
-                                    if J - I > Be - Bs then
-                                       Bs := I; Be := J;
-                                    end if;
-                                    I := J + 1;
-                                 end;
-                              end loop;
-                              return (if Be > Bs then S (Bs .. Be - 1) else "");
-                           end Longest_Word;
-                           Lw : constant String := Longest_Word (W);
+                     --  前面挂个动词;H48 实测头顶眼里叫 "scissor"、腕眼里叫 "scissors")⇒ 按字面就是同一件东西。
+                     --  同一件东西在每只眼里、在记忆里都得叫一个名(H47 实测:两眼名字不同,视线就对不上号,交点算不出来)
+                     --  ⇒ 不管在哪只眼里起的,旧名全改成脑现在用的这个;然后这只眼里要是已经量到它就直接用,没有再去问。只按字面包含,不猜别的。
+                     declare
+                        function Longest_Word (S : String) return String is
+                           Bs, Be : Natural := 0;
+                           I : Natural := S'First;
                         begin
-                           if C.Boxed (Bi).Cam = Cam and then C.Boxed (Bi).Seen and then Old'Length > 0 and then Old /= W
-                             and then (Ada.Strings.Fixed.Index (W, Old) > 0
-                                       or else (Lw'Length > 0 and then Lw /= Old and then Ada.Strings.Fixed.Index (Old, Lw) > 0))
-                             and then Item_Of (Bi) > 0
-                           then
-                              Put_Line ("[身] 📦 你写的「" & W & "」里含着你起过的名字「" & Old & "」⇒ 当同一件东西,以后都叫它「" & W & "」");
-                              --  同一件东西在每只眼里、在记忆里都得叫一个名(H47 实测:头顶眼里它叫那个乱名,腕眼里叫 scissors,
-                              --  两眼的视线就对不上号,交点算不出来)⇒ 把旧名全改成脑现在用的这个
-                              for Bj in 0 .. Natural (C.Boxed.Length) - 1 loop
-                                 if To_String (C.Boxed (Bj).Name) = Old then
-                                    declare
-                                       B2 : Boxed_Thing := C.Boxed (Bj);
-                                    begin
-                                       B2.Name := To_Unbounded_String (W);
-                                       C.Boxed.Replace_Element (Bj, B2);
-                                    end;
+                           while I <= S'Last loop
+                              declare
+                                 J : Natural := I;
+                              begin
+                                 while J <= S'Last and then S (J) /= ' ' loop
+                                    J := J + 1;
+                                 end loop;
+                                 if J - I > Be - Bs then
+                                    Bs := I; Be := J;
                                  end if;
-                              end loop;
-                              if To_String (C.Geo_Pw_Name) = Old then
-                                 C.Geo_Pw_Name := To_Unbounded_String (W);
+                                 I := J + 1;
+                              end;
+                           end loop;
+                           return (if Be > Bs then S (Bs .. Be - 1) else "");
+                        end Longest_Word;
+                        Lw : constant String := Longest_Word (W);
+                        Renamed : Boolean := False;
+                     begin
+                        for Bi in 0 .. Natural (C.Boxed.Length) - 1 loop
+                           declare
+                              Old : constant String := To_String (C.Boxed (Bi).Name);
+                           begin
+                              if Old'Length > 0 and then Old /= W
+                                and then (Ada.Strings.Fixed.Index (W, Old) > 0
+                                          or else (Lw'Length > 0 and then Lw /= Old and then Ada.Strings.Fixed.Index (Old, Lw) > 0))
+                              then
+                                 if not Renamed then
+                                    Put_Line ("[身] 📦 你写的「" & W & "」和你起过的名字「" & Old & "」是同一件东西 ⇒ 以后都叫它「" & W & "」");
+                                 end if;
+                                 Renamed := True;
+                                 declare
+                                    B2 : Boxed_Thing := C.Boxed (Bi);
+                                 begin
+                                    B2.Name := To_Unbounded_String (W);
+                                    C.Boxed.Replace_Element (Bi, B2);
+                                 end;
+                                 if To_String (C.Geo_Pw_Name) = Old then
+                                    C.Geo_Pw_Name := To_Unbounded_String (W);
+                                 end if;
+                                 if To_String (C.Geo_Name) = Old then
+                                    C.Geo_Name := To_Unbounded_String (W);
+                                 end if;
                               end if;
-                              if To_String (C.Geo_Name) = Old then
-                                 C.Geo_Name := To_Unbounded_String (W);
+                           end;
+                        end loop;
+                        if Renamed then
+                           for Bi in 0 .. Natural (C.Boxed.Length) - 1 loop
+                              if C.Boxed (Bi).Cam = Cam and then C.Boxed (Bi).Seen and then To_String (C.Boxed (Bi).Name) = W
+                                and then Item_Of (Bi) > 0
+                              then
+                                 C.Name_Cam := Integer (Cam);
+                                 return Integer (Item_Of (Bi));
                               end if;
-                              C.Name_Cam := Integer (Cam);
-                              return Integer (Item_Of (Bi));
-                           end if;
-                        end;
-                     end loop;
+                           end loop;
+                        end if;
+                     end;
                      --  ② 问脑它在哪一框。给它【干净】的画面:我画上去的格子和编号框实测在伤它的视力
                      if not Brain.Locate (To_String (C.Eye_Host), C.Eye_Port, W, F.Cams (Cam).RGB, Kw, Kh,
                                           Found, X0, Y0, X1, Y1, E2)
@@ -8353,6 +8362,11 @@ package body Act is
          Cur : constant Plug.Arm_Pose := F.EE (Arm);
          Dw : constant Geom.V3 := [Nn (0) * Ln, Nn (1) * Ln, Nn (2) * Ln];
          Mok : Boolean;
+         --  抬了多高:沿它躺的面的法向量(不是位移的长度)
+         function Rise (From, To : Plug.Arm_Pose) return Long_Float is
+           ((To (0) - From (0)) * Nn (0) + (To (1) - From (1)) * Nn (1) + (To (2) - From (2)) * Nn (2));
+         Went : Long_Float := 0.0;
+         Note : Unbounded_String;
       begin
          if Ln <= 0.0 then
             Event := S ("refused: I have not measured how far one push moves this arm, so I cannot lift by a known amount");
@@ -8362,7 +8376,43 @@ package body Act is
          Steps_Taken := Steps_Taken + 1;
          declare
             Now : constant Plug.Arm_Pose := F.EE (Arm);
-            Got : constant Long_Float := ((Now (0) - Cur (0)) * Dw (0) + (Now (1) - Cur (1)) * Dw (1) + (Now (2) - Cur (2)) * Dw (2)) / Ln;
+            Got : constant Long_Float := Rise (Cur, Now);
+         begin
+            Went := Got;
+            --  🔴 直着往上被顶住 = 胳膊伸到头了(H50 2026-09-23 实测:右臂横跨整桌夹住剪刀,抬到 8 cm 后"命令 0.051 只走 0.000",仿真要 10 cm)。
+            --  顶住我的方向是量出来的(命令的位移减实到的位移);把"上"里顺着那个方向的那一份去掉,剩下的还走得了 ——
+            --  和贴近时"被一个面顶着就沿着面走"是同一条:胳膊的边界也是一个面。
+            if Got + Got < Ln then
+               declare
+                  Miss : constant Geom.V3 := [Dw (0) - (Now (0) - Cur (0)), Dw (1) - (Now (1) - Cur (1)), Dw (2) - (Now (2) - Cur (2))];
+                  Ml : constant Long_Float := Geom.Norm (Miss);
+               begin
+                  if Ml > 0.0 then
+                     declare
+                        Wall : constant Geom.V3 := [Miss (0) / Ml, Miss (1) / Ml, Miss (2) / Ml];
+                        Into : constant Long_Float := Nn (0) * Wall (0) + Nn (1) * Wall (1) + Nn (2) * Wall (2);
+                        D2 : constant Geom.V3 := [Nn (0) - Into * Wall (0), Nn (1) - Into * Wall (1), Nn (2) - Into * Wall (2)];
+                        L2 : constant Long_Float := Geom.Norm (D2);
+                     begin
+                        if L2 > 0.0 then
+                           declare
+                              Dw2 : constant Geom.V3 := [D2 (0) / L2 * Ln, D2 (1) / L2 * Ln, D2 (2) / L2 * Ln];
+                              Mid : constant Plug.Arm_Pose := F.EE (Arm);
+                           begin
+                              Geo_Say ("直着往上被顶住(方向 (" & Codec.Fmt (Wall (0), 2) & "," & Codec.Fmt (Wall (1), 2) & "," & Codec.Fmt (Wall (2), 2)
+                                       & "),是胳膊的边界)⇒ 沿着边界往上走一步");
+                              Geo_Move (L, C, F, Arm, Dw2, Mok);
+                              Steps_Taken := Steps_Taken + 1;
+                              Went := Went + Rise (Mid, F.EE (Arm));
+                              Note := S (" (straight up was blocked by my own reach, so I rose along the edge of it)");
+                           end;
+                        end if;
+                     end;
+                  end if;
+               end;
+            end if;
+         end;
+         declare
             Jk : constant Natural := Natural (Integer'Max (0, C.Wld.Held_Jaw));
             R_Now : constant Long_Float := Selfmap.Jaw_Of (F, Arm, Jk);
             Emp : Long_Float := -1.0;
@@ -8373,13 +8423,13 @@ package body Act is
                end if;
             end loop;
             if Emp >= 0.0 and then R_Now <= Emp + C.Map.Jaw_Noise then
-               Event := S ("slipped: I raised my hand " & Mm (Got) & " and my fingers closed to their empty reading - it is no longer between them");
+               Event := S ("slipped: I raised my hand " & Mm (Went) & " and my fingers closed to their empty reading - it is no longer between them");
                C.Wld.Holding := False;
-            elsif Got + Got < Ln then   --  实到不到要的一半(纯数学的一半)
-               Event := S ("resist: I commanded " & Mm (Ln) & " up and my hand only went " & Mm (Got) & " - my arm cannot go further this way; it is still between my fingers");
+            elsif Went + Went < Ln then   --  两下加起来还不到要的一半(纯数学的一半)
+               Event := S ("resist: I commanded " & Mm (Ln) & " up and rose only " & Mm (Went) & " - my arm cannot go higher from here; it is still between my fingers") & Note;
             else
-               Event := S ("settled: I raised it " & Mm (Got) & " along the normal of the surface it lay on; it is still between my fingers (reading "
-                           & Codec.Fmt (R_Now, 3) & ", empty would be " & Codec.Fmt (Emp, 3) & ")");
+               Event := S ("settled: I raised it " & Mm (Went) & " along the normal of the surface it lay on; it is still between my fingers (reading "
+                           & Codec.Fmt (R_Now, 3) & ", empty would be " & Codec.Fmt (Emp, 3) & ")") & Note;
             end if;
          end;
       end Lift_Held;
@@ -8667,6 +8717,13 @@ package body Act is
             Walk_Onto (Amount_Factor (Null_Unbounded_String), True);
             Feel (C, F);
             Report := Report & "before closing I brought my fingers onto " & Say_Item (C, Say.Grip_On) & ": " & To_String (Event) & ". I took " & Codec.Img (Steps_Taken) & " pushes; ";
+            --  没到它身上(看丢 / 顶住 / 上方都没到)就不合:合上的是空气,白花四十拍,还要试抬一次(H48 2026-09-23 实测)。
+            --  这不是我自己收工:脑要的是合在它上,我到不了它上,如实说,合这一下就没有意义。
+            if Index (Event, "amount: arrived") = 0 and then Index (Event, "contact") = 0 then
+               Say.Grip := Null_Unbounded_String;
+               Report := Report & "I did not close: my fingers are not on it. ";
+               Put_Line ("[身]   没到它身上 ⇒ 这回不合");
+            end if;
             Put_Line ("[身]   这一段:" & Codec.Img (Steps_Taken) & " 推 · " & Codec.Img (Beats) & " 拍 · 这一集累计 " & Codec.Img (Plug.Steps (L)) & " 拍");
             Codec.Append_Line (Life_Path, "beat " & Codec.Img (Plug.Steps (L)) & " | eye " & Codec.Img (Natural (Geo_Cam)) & " | " & To_String (Geo_Desc)
                                & " | " & Codec.Img (Steps_Taken) & " pushes | ended: " & To_String (Event));
