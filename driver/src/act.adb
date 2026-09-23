@@ -4519,6 +4519,14 @@ package body Act is
       Prev_Cams : Plug.Cam_Vectors.Vector := F.Cams;
       Still : Natural := 0;
       Cm : Plug.Cmd;
+      --  "停住"只看读数和【这条臂自己那只眼】(手指就在它里面);别的眼里别的东西在动跟合爪无关
+      --  (S1 2026-09-23 实测:等三台相机全静止,一次合爪 35 拍,官方一集只有 200 拍)。没有自己的眼就看全部
+      Hc : constant Integer := (if Arm < Natural (C.Map.Cam_On_Arm.Length) then C.Map.Cam_On_Arm (Arm) else -1);
+      function Own_Eye_Still return Boolean is
+        (if Hc >= 0 and then Natural (Hc) < Natural (F.Cams.Length) and then Natural (Hc) < Natural (Prev_Cams.Length)
+            and then Natural (Hc) < Natural (C.Map.Floors.Length)
+         then Selfmap.Picture_Still (C.Map, Prev_Cams (Natural (Hc)), F.Cams (Natural (Hc)), Natural (Hc))
+         else Selfmap.Pictures_Still (C.Map, Prev_Cams, F.Cams));
    begin
       --  只动点名的那一个抓握通道,其余保持它们此刻的读数(五指手:合一根不牵动另外四根)
       declare
@@ -4539,7 +4547,7 @@ package body Act is
          if Sweep_Cam >= 0 and then Natural (Sweep_Cam) < Natural (F.Cams.Length) and then Natural (Sweep_Cam) < Natural (C.Map.Floors.Length) then
             Sweep := Picture.Either (Sweep, Picture.Moved (Prev_Cams (Natural (Sweep_Cam)).Gray, F.Cams (Natural (Sweep_Cam)).Gray, C.Map.Floors (Natural (Sweep_Cam))));
          end if;
-         if abs (Reading - Prev) <= C.Map.Jaw_Noise and then Selfmap.Pictures_Still (C.Map, Prev_Cams, F.Cams) then
+         if abs (Reading - Prev) <= C.Map.Jaw_Noise and then Own_Eye_Still then
             Still := Still + 1;
          else
             Still := 0;
@@ -5467,6 +5475,16 @@ package body Act is
       Geo_Say ("有个面顶着我(" & How & ")⇒ 是它躺的面,记进地图;沿着它接着走");
    end Note_Support;
 
+   --  这条臂一条命令能走多远还走得到(米):开机按阶梯探出来的(存在它那只眼的几何记录里);0 = 没量 ⇒ 走路的段如实拒
+   function Stride_Of (C : Context; Arm : Natural) return Long_Float is
+      Hc : constant Integer := (if Arm < Natural (C.Map.Cam_On_Arm.Length) then C.Map.Cam_On_Arm (Arm) else -1);
+   begin
+      if Hc >= 0 and then Natural (Hc) < Natural (C.Geo.Length) then
+         return C.Geo (Natural (Hc)).Stride;
+      end if;
+      return 0.0;
+   end Stride_Of;
+
    --  这只手一步能走出来又看得见的那一档(开机量的,米)
    function Geo_Base (C : Context; Arm : Natural) return Long_Float is
       K : constant Natural := Arm * C.Map.Per_Arm;
@@ -6087,7 +6105,7 @@ package body Act is
    procedure Geo_Go (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Arm : Natural; Target : Geom.V3; Tol, Amt : Long_Float;
                      Until_Touch : Boolean; Press_Along : Geom.V3; Event : out Unbounded_String; Steps_Taken : out Natural;
                      Press_Cap : Natural := 0) is
-      Step_Cap : constant Long_Float := 4.0 * Geo_Base (C, Arm) * (4.0 * Amt);   --  倍数,无量纲;同 Geo_Approach 的 Step_Cap
+      Step_Cap : constant Long_Float := Stride_Of (C, Arm) * Amt;   --  一条命令最多走多远 = 量出来的最大一档 × 脑的档位
       Held_Back : Boolean := False;
       Presses : Natural := 0;   --  Press_Cap > 0 时最多压这么多下(次数):开机摸面用,免得往下什么都没有时一直压到关节尽头
       Wall : Geom.V3 := [others => 0.0];
@@ -6799,7 +6817,7 @@ package body Act is
       --  又因为目标在桌面高度而无解 ⇒ 静默不动。GB5 的球心离桌面 3.4 cm,一步 170 mm 过得去;平躺的剪刀过不去。
       --  ⚠️ 我先写过一版"走成了加倍、没走成减半",被自由棘轮拦下(owner 09-03:驱动不许自己调步子)—— 已撤。
       --  命令了没走到 ⇒ 我不自己换打法,如实说"没走成"交回脑(它可以说 small,也可以说合手)。
-      Step_Cap : constant Long_Float := 4.0 * Geo_Base (C, Arm) * (4.0 * Amt);
+      Step_Cap : constant Long_Float := Stride_Of (C, Arm) * Amt;   --  一条命令最多走多远 = 量出来的最大一档 × 脑的档位
       --  🔴 被一个面顶住之后:顶住的只是【那个方向】(命令了没走到的那个方向,量出来的),剩下的误差里沿着面的那一部分照样走得了。
       --  H12 2026-09-22 实测:垂直下探碰到桌面即停,此刻剪刀在两指正前方 0.021 m(沿桌面);整段就此停下 ⇒ 合手合了个空(读数 0.000 = 空手值)。
       --  "touching" 要的是合拢点到它身上;桌面不让我再往下,不等于不让我往前。这是在量到的接触下继续解同一个约束,不是换打法。
@@ -6912,6 +6930,10 @@ package body Act is
             C.Geo_Obs.Append (Geom.Obs'(Pose => F.EE (Arm), U => U, V => V));
             Geo_Say ("视差基线:横挪 " & Mm (B) & ",它在画面里从 u=" & Codec.Fmt (U0, 1) & " 跳到 u=" & Codec.Fmt (U, 1));
          end;
+      end if;
+      if Step_Cap <= 0.0 then
+         Event := S ("refused: I have not measured how far one command moves this arm, so I cannot walk toward it");
+         return;
       end if;
       loop
          if Plug.Reset_Pending (L) then
@@ -7325,7 +7347,7 @@ package body Act is
    procedure Geo_Away (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Arm : Natural; Step_Limit : Natural; Amt : Long_Float;
                        Event : out Unbounded_String; Steps_Taken : out Natural; Beats : out Natural) is
       Beats0 : constant Natural := Plug.Steps (L);
-      Ln : constant Long_Float := 4.0 * Geo_Base (C, Arm) * (4.0 * Amt);   --  一步 = 4 倍探针幅度 × 脑的档位(倍数,无量纲;同 Geo_Approach 的 Step_Cap)
+      Ln : constant Long_Float := Stride_Of (C, Arm) * Amt;   --  一步 = 量出来的最大一档 × 脑的档位
       N : constant Natural := (if Step_Limit > 0 then Step_Limit else 1);
       Mok : Boolean;
       Went : Long_Float := 0.0;
@@ -9071,7 +9093,7 @@ package body Act is
       --  改手里东西的一个量:沿"让它变的方向"(Axis,单位向量)平移一个单位 —— 任何量同一条路;抬只是 height 这个量往上
       procedure Change_Held_Qty (Arm : Natural; Amt : Long_Float; Axis : Geom.V3; Qty : String) is
          Nn : constant Geom.V3 := Axis;
-         Ln : constant Long_Float := 4.0 * Geo_Base (C, Arm) * (4.0 * Amt);   --  一个单位(倍数,无量纲;同 Geo_Approach 的 Step_Cap)
+         Ln : constant Long_Float := Stride_Of (C, Arm) * Amt;   --  一个单位 = 量出来的最大一档 × 脑的档位
          Cur : constant Plug.Arm_Pose := F.EE (Arm);
          Dw : constant Geom.V3 := [Nn (0) * Ln, Nn (1) * Ln, Nn (2) * Ln];
          Mok : Boolean;
@@ -9884,5 +9906,56 @@ package body Act is
          end;
       end loop;
    end Geo_Boot_Support;
+
+   --  ④ 每条臂:一条命令能走多远还走得到 —— 从原处往上走 4、16、64 倍探针幅度(倍数,无量纲的阶梯),每档走完退回;
+   --  实到不足命令一半(纯数学的一半)就是这条臂在这一档走不到(关节到头或控制器不跟),取走得到的最大一档。量一次存进几何文件
+   procedure Geo_Boot_Stride (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context) is
+      Rungs : constant array (1 .. 3) of Long_Float := [4.0, 16.0, 64.0];
+   begin
+      for A in 0 .. C.Map.Arms - 1 loop
+         declare
+            Hc : constant Integer := (if A < Natural (C.Map.Cam_On_Arm.Length) then C.Map.Cam_On_Arm (A) else -1);
+            Amp : constant Long_Float := Geo_Base (C, A);
+         begin
+            if Hc >= 0 and then Natural (Hc) < Natural (C.Geo.Length) and then A < Natural (F.EE.Length) and then Amp > 0.0
+              and then C.Geo (Natural (Hc)).Stride <= 0.0
+            then
+               declare
+                  G : Geom.Cam_Geo := C.Geo (Natural (Hc));
+                  Best : Long_Float := 0.0;
+               begin
+                  for R of Rungs loop
+                     exit when Plug.Reset_Pending (L);
+                     declare
+                        Ln : constant Long_Float := R * Amp;
+                        Av : Table.Vec := Table.Zero_Vec;
+                        Jaw : Floats;
+                        Del : Table.Vec;
+                        Ok : Boolean;
+                        Got : Long_Float;
+                     begin
+                        Av (2) := Ln;
+                        Step_Arm (L, C, F, A, Av, Jaw, Del, Ok);
+                        Got := Del (2);
+                        Geo_Say ("第" & Codec.Img (A + 1) & " 只手:一条命令往上 " & Mm (Ln) & " ⇒ 实到 " & Mm (Got));
+                        declare
+                           Back : Table.Vec := Table.Zero_Vec;
+                        begin
+                           Back (0) := -Del (0); Back (1) := -Del (1); Back (2) := -Del (2);
+                           Step_Arm (L, C, F, A, Back, Jaw, Del, Ok);
+                        end;
+                        exit when Got + Got < Ln;
+                        Best := Ln;
+                     end;
+                  end loop;
+                  G.Stride := Best;
+                  C.Geo.Replace_Element (Natural (Hc), G);
+                  Geom.Save (To_String (C.Geo_Path), C.Geo);
+                  Geo_Say ("第" & Codec.Img (A + 1) & " 只手:一条命令走得到的最大一档 = " & Mm (Best) & (if Best <= 0.0 then "(一档都走不到 ⇒ 这条臂走不了路)" else "") & ",存进几何文件");
+               end;
+            end if;
+         end;
+      end loop;
+   end Geo_Boot_Stride;
 
 end Act;

@@ -21,6 +21,7 @@ package Geom is
       Tip_Valid : Boolean := False;
       Tip : V3 := [others => 0.0];     --  指尖中点在相机系(米)
       Gap : Long_Float := 0.0;         --  张开时两指尖间距(米)
+      Stride : Long_Float := 0.0;      --  长着这只眼的那条臂一条命令能走多远还走得到(米;开机按阶梯探出来的最大一档,0 = 没量)
       --  不长在任何胳膊上的眼(头顶眼):它在世界里的位置和朝向,由身体看着【自己的手】挪出来(Fit_Fixed)。
       --  Fixed = True 时 R_Ce 就是 相机 → 世界,Pos 是相机在世界里的位置(米)。
       Fixed : Boolean := False;

@@ -353,5 +353,7 @@ package Act is
    procedure Geo_Boot_Eyes (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);
    procedure Geo_Boot_Tips (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);
    procedure Geo_Boot_Support (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);
+   --  ④ 每条臂一条命令能走多远还走得到(阶梯探)
+   procedure Geo_Boot_Stride (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);
    procedure Round (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);
 end Act;

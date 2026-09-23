@@ -296,6 +296,7 @@ begin
    Act.Geo_Boot_Eyes (L, F, C);
    Act.Geo_Boot_Tips (L, F, C);
    Act.Geo_Boot_Support (L, F, C);
+   Act.Geo_Boot_Stride (L, F, C);
    Put_Line ("[身] 身体量完 ⇒ 开始干活(脑在 " & To_String (C.Eye_Host) & ":" & Codec.Img (C.Eye_Port) & (if C.Look_Only then ",只看不动" else "") & ")");
    --  ── 干活循环 ──
    loop

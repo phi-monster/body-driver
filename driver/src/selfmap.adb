@@ -30,24 +30,24 @@ package body Selfmap is
       end loop;
    end Idle;
 
+   function Picture_Still (M : Body_Map; Before, After : Plug.Cam; Cam : Natural) return Boolean is
+      --  静止 = 超过各自噪声地板的像素凑不成一团(最少像素数的几倍,倍数无量纲;去噪闪烁是撒开的单点)
+      Mv : constant Bools := Picture.Moved (Before.Gray, After.Gray, M.Floors (Cam));
+      Cnt : Natural := 0;
+   begin
+      for B of Mv loop
+         if B then
+            Cnt := Cnt + 1;
+         end if;
+      end loop;
+      return Cnt <= 4 * Picture.Min_Pixels (Before.W, Before.H);
+   end Picture_Still;
+
    function Pictures_Still (M : Body_Map; Before, After : Plug.Cam_Vectors.Vector) return Boolean is
    begin
       for C in 0 .. Natural'Min (Natural (Before.Length), Natural (After.Length)) - 1 loop
-         if C < Natural (M.Floors.Length) then
-            declare
-               --  静止 = 超过各自噪声地板的像素凑不成一团(最少像素数的几倍,倍数无量纲;去噪闪烁是撒开的单点)
-               Mv : constant Bools := Picture.Moved (Before (C).Gray, After (C).Gray, M.Floors (C));
-               Cnt : Natural := 0;
-            begin
-               for B of Mv loop
-                  if B then
-                     Cnt := Cnt + 1;
-                  end if;
-               end loop;
-               if Cnt > 4 * Picture.Min_Pixels (Before (C).W, Before (C).H) then
-                  return False;
-               end if;
-            end;
+         if C < Natural (M.Floors.Length) and then not Picture_Still (M, Before (C), After (C), C) then
+            return False;
          end if;
       end loop;
       return True;
