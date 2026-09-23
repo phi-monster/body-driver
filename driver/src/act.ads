@@ -210,6 +210,13 @@ package Act is
    package Boxed_Vectors is new Ada.Containers.Vectors (Natural, Boxed_Thing);
 
    package Buf_Vectors is new Ada.Containers.Vectors (Natural, Buf, U8_Vectors."=");
+   --  这条臂横着被顶住过的地方:面上一点(那一刻的指尖)+ 顶住我的方向(指向面里)。不是它躺的面(那种记成 Touch),是墙、或我自己的关节到头
+   --  ⇒ 这一集里,这条臂再选落点时,顶住方向那一侧的都算"够不着"(量出来的无能,不是意见)
+   type Wall_Mark is record
+      Arm : Natural := 0;
+      P, W : Geom.V3 := [others => 0.0];
+   end record;
+   package Wall_Vectors is new Ada.Containers.Vectors (Natural, Wall_Mark);
    type Context is record
       Map : Selfmap.Body_Map;
       Hands : Zone.Hand_Vectors.Vector;
@@ -322,6 +329,7 @@ package Act is
       --  这一集里合过又没拿住的那些落点(中心,世界系):同一处不再试 —— 那是量出来的"这儿滑",不是猜
       Tried : Contact.V3_Vectors.Vector;
       Tried_W : Floats;                      --  那一把的段宽:离滑过的落点不到一个段宽的候选算同一处
+      Walls : Wall_Vectors.Vector;           --  这一集里各条臂横着被顶住过的地方(见 Wall_Mark)
       Fingers_Aimed : Boolean := False;   --  上一段"到它上方"末尾已把手指指向它躺的面 ⇒ 接下来贴上去的那一段不再为了看它而转手
       Touch_Valid : Boolean := False;
       Touch_Pt, Touch_N : Geom.V3 := [others => 0.0];

@@ -5100,6 +5100,40 @@ package body Act is
    end Build_Facts;
 
    --  把 Sinew 的一段区间落成执行器内部那一小节。角色在这儿变成具体的那一块。
+   --  离第 N 件东西(1 起)近的那条臂(0 起);说不出就 -1。它在哪只腕眼里被量到 ⇒ 那条臂;在不动的眼里 ⇒ 比它和各只手在那只眼里的画面距离
+   --  (各只手在不动的眼里在哪,是开机合空时量出来的握区中心)
+   function Nearer_Arm (C : Context; N : Natural) return Integer is
+   begin
+      if N < 1 or else N > Natural (C.Items.Length) then
+         return -1;
+      end if;
+      declare
+         It : constant Item := C.Items (N - 1);
+         A2 : constant Integer := Cam_Arm (C, It.Cam);
+         Best : Integer := -1;
+         Best_D : Long_Float := 0.0;
+      begin
+         if It.Kind not in Thing | Thing_Remembered then
+            return -1;
+         end if;
+         if A2 >= 0 then
+            return A2;
+         end if;
+         for A in 0 .. C.Map.Arms - 1 loop
+            declare
+               Z : constant Zone.Hand_Zone := Zone_Of (C, A, It.Cam, 0);
+               D : constant Long_Float := Sqrt ((Z.Cu - It.Cu) ** 2 + (Z.Cv - It.Cv) ** 2);
+            begin
+               if Z.Valid and then (Best < 0 or else D < Best_D) then
+                  Best := Integer (A);
+                  Best_D := D;
+               end if;
+            end;
+         end loop;
+         return Best;
+      end;
+   end Nearer_Arm;
+
    procedure Fill_Say (C : in out Context; I : Sinew.Instr; Answer : out Brain.Say) is
       use Sinew;
       function Old_Rel (R : Rel) return String is (Rel_Cmd (R));   --  唯一那张表,不许在这儿再抄一份
@@ -5144,11 +5178,24 @@ package body Act is
                   declare
                      Gn : constant Noun := (K => Nk_Role, R => Rl_Grasper, Word => Null_Unbounded_String);
                      Gi : constant Integer := Plan.Look_Up (C.Binds, Gn);
-                     Arm1 : constant Natural := (if Gi >= 1 and then Gi <= Integer (C.Items.Length) then C.Items (Natural (Gi) - 1).Arm + 1 else 1);
+                     Bound_Arm : constant Natural := (if Gi >= 1 and then Gi <= Integer (C.Items.Length) then C.Items (Natural (Gi) - 1).Arm + 1 else 1);
+                     --  哪只手去:离它近的那只(PLAN 第 2 步)。它在哪只腕眼里被点了名就是那条臂;在不动的眼里就比"它在画面里的位置"和"两只手在那只眼里各在哪"(握区量过的)
+                     --  (H50/H56 2026-09-23 实测:右臂横跨整桌去够,关节到头,三把都合空)
+                     Near_Arm : constant Integer := Nearer_Arm (C, Sub);
+                     Arm1 : constant Natural := (if Near_Arm >= 0 then Natural (Near_Arm) + 1 else Bound_Arm);
+                     Jk : Natural := 0;
                   begin
+                     for It of C.Items loop
+                        if It.Kind = Grip and then It.Arm + 1 = Arm1 then
+                           Jk := It.Jaw_K;
+                        end if;
+                     end loop;
+                     if Near_Arm >= 0 and then Arm1 /= Bound_Arm then
+                        Put_Line ("[身] ✋ 离它近的是第" & Codec.Img (Arm1) & " 只手(不是绑到的第" & Codec.Img (Bound_Arm) & " 只)⇒ 用它");
+                     end if;
                      Answer.Qty := Cn.Obj.Word; Answer.Qty_Dir := Cn.Dir; Answer.Qty_Of := Sub;
                      Answer.Grip_Arm := Arm1;
-                     Answer.Grip_K := (if Gi >= 1 and then Gi <= Integer (C.Items.Length) then C.Items (Natural (Gi) - 1).Jaw_K else 0);
+                     Answer.Grip_K := Jk;
                      if not (C.Wld.Holding and then C.Wld.Held_Arm = Integer (Arm1) - 1) then
                         Answer.Grip := To_Unbounded_String ("close");
                         Answer.Grip_On := Sub;
@@ -5973,7 +6020,9 @@ package body Act is
             C.Touch_Valid := True;
             Geo_Say ("有个面顶着我,方向 (" & Codec.Fmt (Wall (0), 2) & "," & Codec.Fmt (Wall (1), 2) & "," & Codec.Fmt (Wall (2), 2) & "),朝下 ⇒ 是它躺的面,记进地图;沿着它接着走");
          else
-            Geo_Say ("被横着顶住了,方向 (" & Codec.Fmt (Wall (0), 2) & "," & Codec.Fmt (Wall (1), 2) & "," & Codec.Fmt (Wall (2), 2) & "):是墙或我自己的关节到头了,不记成面;沿着它接着走");
+            C.Walls.Append (Wall_Mark'(Arm => Arm, P => Tip_World (C, Arm, Now), W => Wall));
+            Geo_Say ("被横着顶住了,方向 (" & Codec.Fmt (Wall (0), 2) & "," & Codec.Fmt (Wall (1), 2) & "," & Codec.Fmt (Wall (2), 2)
+                     & "):是墙或我自己的关节到头了,不记成面;记下「这条臂到这儿为止」,沿着它接着走");
          end if;
       end Note_Wall;
    begin
@@ -6135,6 +6184,7 @@ package body Act is
          Cands : Contact.Gen.Cand_Vectors.Vector;
          Why : Contact.Gen.Refusal;
          Pick : Integer := -1;
+         Beyond : Natural := 0;
       begin
          if Pitch <= 0.0 then
             Note := S ("the outline has no measurable sampling pitch");
@@ -6168,6 +6218,13 @@ package body Act is
                      end if;
                   end;
                end loop;
+               --  这条臂横着被顶住过的那一侧够不着(H56 2026-09-23 实测:右臂在 y≈-0.43 被关节顶住,候选全在 -0.44 以外,三把都合空)
+               for Wm of C.Walls loop
+                  if Wm.Arm = Arm and then (Cw (0) - Wm.P (0)) * Wm.W (0) + (Cw (1) - Wm.P (1)) * Wm.W (1) + (Cw (2) - Wm.P (2)) * Wm.W (2) > 0.0 then
+                     Tried := True;
+                     Beyond := Beyond + 1;
+                  end if;
+               end loop;
                if not Tried then
                   Pick := I;
                   exit;
@@ -6175,7 +6232,9 @@ package body Act is
             end;
          end loop;
          if Pick < 0 then
-            Note := S ("every one of the " & Codec.Img (Natural (Cands.Length)) & " sections I could hold on " & To_String (Name) & " has already slipped from my fingers in this episode");
+            Note := S ("every one of the " & Codec.Img (Natural (Cands.Length)) & " sections I could hold on " & To_String (Name)
+                       & (if Beyond > 0 then " is beyond where this arm got stopped (" & Codec.Img (Beyond) & " of them) or" else "")
+                       & " has already slipped from my fingers in this episode");
             return;
          end if;
          declare
@@ -6195,7 +6254,8 @@ package body Act is
             Note := S ("contact set on " & To_String (Name) & ": of " & Codec.Img (Natural (Cands.Length)) & " sections (from " & Codec.Img (Natural (C.Sil_Pts.Length))
                        & " surface points at " & Mm (Pitch) & " pitch" & (if Reprojected then ", re-laid on the surface I touched" else "")
                        & (if Known_Thick then ", thickness " & Mm (Thick) & " measured by touch" else ", thickness not measured yet")
-                       & ") I take #" & Codec.Img (Natural (Pick) + 1) & ": " & Mm (Cd.Width_M) & " wide, " & Mm (Cd.Depth_M) & " deep, faces off by "
+                       & ") I take #" & Codec.Img (Natural (Pick) + 1) & (if Beyond > 0 then " (" & Codec.Img (Beyond) & " ranked higher lie beyond where this arm got stopped)" else "")
+                       & ": " & Mm (Cd.Width_M) & " wide, " & Mm (Cd.Depth_M) & " deep, faces off by "
                        & Codec.Fmt (Cd.Face_Tilt_Rad, 2) & " rad, " & Mm (Cd.Com_Offset_M) & " from its middle, jaw " & Mm (G.Gap)
                        & "; finger width unmeasured (strips one sample wide); friction unmeasured, so the cone is the least this pinch needs - the lift will tell");
             Ok := True;
@@ -6831,9 +6891,10 @@ package body Act is
                               Geo_Say ("这一步要 " & Mm (Ln) & " 只到 " & Mm (Got) & " ⇒ 有个面顶着我,方向 ("
                                        & Codec.Fmt (Wall (0), 2) & "," & Codec.Fmt (Wall (1), 2) & "," & Codec.Fmt (Wall (2), 2) & ");沿着它接着走");
                            else
+                              C.Walls.Append (Wall_Mark'(Arm => Arm, P => Tip_World (C, Arm, Now), W => Wall));
                               Geo_Say ("这一步要 " & Mm (Ln) & " 只到 " & Mm (Got) & " ⇒ 被横着顶住了,方向 ("
                                        & Codec.Fmt (Wall (0), 2) & "," & Codec.Fmt (Wall (1), 2) & "," & Codec.Fmt (Wall (2), 2)
-                                       & "):不是它躺的面(是墙,或我自己的关节到头了),不记成面;沿着它接着走");
+                                       & "):不是它躺的面(是墙,或我自己的关节到头了),不记成面;记下「这条臂到这儿为止」,沿着它接着走");
                            end if;
                         end if;
                      end;
@@ -9011,15 +9072,19 @@ package body Act is
                end if;
             end if;
          end;
-         if Geo_Case = 1 and then not Geo_Of (C, Natural (Geo_Cam)).Valid then
+         --  这条臂的眼朝向还没量(左腕眼一直没量过)⇒ 第一次用它时当场量:盯着它眼里最大的一块挪四下(PLAN 第 2 步)。走到它跟前(1)和合在它上(5)都要
+         if Geo_Case in 1 | 5 and then not Geo_Of (C, Natural (Geo_Cam)).Valid then
             declare
                Cok : Boolean;
             begin
                Put_Line ("[身] 📐 这台相机的朝向还没量 ⇒ 先盯着它挪四下量出来");
                Geo_Calibrate (L, C, F, Natural (Geo_Cam), Natural (Own), Geo_Slot_Now, Cok);
                if not Cok then
-                  Geo_Case := 0;
                   Report := S ("I tried to measure how my hand camera sits on my hand and could not. ");
+                  if Geo_Case = 5 then
+                     Say.Grip := Null_Unbounded_String;   --  眼都量不出,合拢点送不到它身上,合了也是空
+                  end if;
+                  Geo_Case := 0;
                end if;
             end;
          end if;
