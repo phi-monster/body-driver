@@ -50,7 +50,7 @@ procedure Geoexam is
    G : Geom.Cam_Geo;
 begin
    if Mode = "" or else Path = "" then
-      Put_Line ("用法:geoexam wrist geo_camK_obs.txt | geoexam head head_obs.txt");
+      Put_Line ("用法:geoexam wrist geo_camK_obs.txt | geoexam head head_obs.txt [geo_cam1_obs.txt geo_cam2_obs.txt …]");
       return;
    end if;
    Open (Fi, In_File, Path);
@@ -106,6 +106,68 @@ begin
                      begin
                         Ray_O.Replace_Element (A, Geom.V3'[Num (L, 3), Num (L, 4), Num (L, 5)]);
                         Ray_D.Replace_Element (A, Geom.V3'[Num (L, 6), Num (L, 7), Num (L, 8)]);
+                     end;
+                  elsif Field (L, 1) = "tip" then
+                     --  炮里这只眼没量好 ⇒ 视线是零向量;后面的参数给了这只眼的观测文件(geo_camK_obs.txt)就在这儿离线解它、重建视线
+                     declare
+                        A : constant Natural := Natural (Num (L, 2));
+                        Kc : constant Integer := Integer (Num (L, 3));
+                        Tu : constant Long_Float := Num (L, 4);
+                        Tv : constant Long_Float := Num (L, 5);
+                     begin
+                        if Kc >= 0 and then Tu >= 0.0 and then Geom.Norm (Ray_D (A)) = 0.0 then
+                           for K in 3 .. Ada.Command_Line.Argument_Count loop
+                              declare
+                                 Wf : constant String := Ada.Command_Line.Argument (K);
+                                 Tag : constant String := "geo_cam" & Codec.Img (Kc) & "_obs";
+                              begin
+                                 if Ada.Strings.Fixed.Index (Wf, Tag) > 0 then
+                                    declare
+                                       Wi : File_Type;
+                                       Gw : Geom.Cam_Geo;
+                                       Wobs : Geom.Obs_Pt_Vectors.Vector;
+                                       Wok : Boolean;
+                                       Wused : Natural;
+                                    begin
+                                       Open (Wi, In_File, Wf);
+                                       declare
+                                          Wh : constant String := Get_Line (Wi);
+                                          Npts : constant Natural := Natural (Num (Wh, 6));
+                                       begin
+                                          Gw.Cx := Num (Wh, 3); Gw.Cy := Num (Wh, 4); Gw.F := Num (Wh, 5);
+                                          while not End_Of_File (Wi) loop
+                                             declare
+                                                Wl : constant String := Get_Line (Wi);
+                                             begin
+                                                if Ada.Strings.Fixed.Trim (Wl, Ada.Strings.Both) /= "" then
+                                                   Wobs.Append (Geom.Obs_Pt'(Pt => Natural (Num (Wl, 1)), Pose => Pose_Of (Wl, 4), U => Num (Wl, 2), V => Num (Wl, 3)));
+                                                end if;
+                                             end;
+                                          end loop;
+                                          Close (Wi);
+                                          Geom.Fit_Rig (Gw, Wobs, Npts, Wok, Wused);
+                                       end;
+                                       if Wok then
+                                          declare
+                                             Dc : Geom.V3 := [(Tu - Gw.Cx) / Gw.F, -(Tv - Gw.Cy) / Gw.F, -1.0];
+                                             Nn : constant Long_Float := Geom.Norm (Dc);
+                                          begin
+                                             for I in 0 .. 2 loop
+                                                Dc (I) := Dc (I) / Nn;
+                                             end loop;
+                                             Ray_D.Replace_Element (A, Geom.Ap (Gw.R_Ce, Dc));
+                                             Ray_O.Replace_Element (A, Gw.Off);
+                                             Put_Line ("  臂 " & Codec.Img (A) & " 的眼(第 " & Codec.Img (Kc) & " 台)离线解了:焦距 " & Codec.Fmt (Gw.F, 1) & " ± " & Codec.Fmt (Gw.F_Sd, 1)
+                                                       & ",视线按指尖像素 (" & Codec.Fmt (Tu, 0) & "," & Codec.Fmt (Tv, 0) & ") 重建");
+                                          end;
+                                       else
+                                          Put_Line ("  臂 " & Codec.Img (A) & " 的眼离线也解不出:" & To_String (Geom.Why));
+                                       end if;
+                                    end;
+                                 end if;
+                              end;
+                           end loop;
+                        end if;
                      end;
                   elsif Field (L, 1) = "obs" then
                      Obs.Append (Geom.Obs_Pt'(Pt => Natural (Num (L, 2)), Pose => Pose_Of (L, 5), U => Num (L, 3), V => Num (L, 4)));

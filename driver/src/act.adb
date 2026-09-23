@@ -5738,6 +5738,7 @@ package body Act is
       Obs : Geom.Obs_Pt_Vectors.Vector;
       Cand : Ints;                               --  候选的槽号
       P0, Cur : Instrument.Track_Vectors.Vector; --  候选在起点、此刻的位置
+      Dead : Bools;                              --  判成"自己身上的"(转眼时不跟着世界挪)的候选:不记、不进解
       Tid : Integer := -1;                       --  仪器的跟踪段号(-1 = 没用仪器,按槽号重切)
       Target : Integer := -1;                    --  视差最大的那一块(只用来定步长)
       Step : Long_Float := B;
@@ -5791,6 +5792,7 @@ package body Act is
                begin
                   if Sl.Present and then not Mine and then not On_Edge and then Central then
                      Cand.Append (Si);
+                     Dead.Append (False);
                      Fresh.Append (Instrument.Track_Pt'(U => Sl.R.Cu * Long_Float (Cw), V => Sl.R.Cv * Long_Float (Ch), Seen => True, Conf => 1.0));
                   end if;
                end;
@@ -5848,7 +5850,7 @@ package body Act is
                   Geo_Say ("仪器这一停没答上来:" & To_String (Err));
                end if;
                for I in 0 .. Natural (Cur.Length) - 1 loop
-                  if Good and then I >= Live_From then
+                  if Good and then I >= Live_From and then not Dead (I) then
                      declare
                         Pt : constant Instrument.Track_Pt := R.Element (I - Live_From);
                      begin
@@ -5867,6 +5869,7 @@ package body Act is
                Seen : Boolean;
             begin
                Geo_Track (C, F, Cam, Cand (I), U, V, Seen);
+               Seen := Seen and then not Dead (I);
                Cur.Replace_Element (I, Instrument.Track_Pt'(U => U, V => V, Seen => Seen, Conf => (if Seen then 1.0 else 0.0)));
             end;
          end loop;
@@ -5979,7 +5982,25 @@ package body Act is
             declare
                Med : constant Long_Float := Median_Px (Shifts);
                Want : constant Long_Float := Long_Float (Cw) / 16.0;   --  每转该挪的像素(画幅比例,无量纲)
+               N_Self : Natural := 0;
+               Quarter : constant Long_Float := 0.25;   --  四分之一(比例,无量纲)
             begin
+               --  转眼时世界里的点不管远近都挪 焦距×角,自己身上的点(立在画面里的手指、机身)一动不动:挪得不到中位数四分之一(比例,无量纲)的就是自己,
+               --  剔出去(G1O 2026-09-25 左眼:食指立在画面中间,4 个"不动的点"把焦距拽到 61;离线剔掉后 381 ± 22,和右眼 382 一致)
+               if Med > 0.0 then
+                  for I in 0 .. Natural (Cur.Length) - 1 loop
+                     if Cur (I).Seen and then I < Natural (Before.Length) and then Before (I).Seen
+                       and then Sqrt ((Cur (I).U - Before (I).U) ** 2 + (Cur (I).V - Before (I).V) ** 2) < Med * Quarter
+                     then
+                        Dead.Replace_Element (I, True);
+                        Cur.Replace_Element (I, Instrument.Track_Pt'(U => Cur (I).U, V => Cur (I).V, Seen => False, Conf => 0.0));
+                        N_Self := N_Self + 1;
+                     end if;
+                  end loop;
+                  if N_Self > 0 then
+                     Geo_Say ("转眼时不跟着世界挪的候选 " & Codec.Img (N_Self) & " 个 = 我自己身上的 ⇒ 不进解");
+                  end if;
+               end if;
                if Med > 0.0 then
                   Theta := Long_Float'Max (Notch, Long_Float'Min (Theta * Want / Med, 64.0 * Notch));   --  64 档 = 阶梯顶(倍数,无量纲)
                   Geo_Say ("转角由眼定:探一转挪了 " & Codec.Fmt (Med, 1) & " px(" & Codec.Img (Natural (Shifts.Length)) & " 个点),该挪 " & Codec.Fmt (Want, 0)
@@ -6183,13 +6204,41 @@ package body Act is
          --  每条臂:指尖中点在自己眼里的像素(握区量的)⇒ 相机系单位视线 ⇒ 手系(起点 = 相机离手腕原点的偏移)。眼没量好的臂没有视线,不进解
          declare
             Ray_O, Ray_D : Geom.V3_Vectors.Vector;
+            Tip_U, Tip_V : Floats;   --  每条臂指尖中点在自己眼里的像素(落盘用;没量到 = -1)
+            Tip_Cam : Ints;
          begin
+            for A in 0 .. C.Map.Arms - 1 loop
+               Tip_U.Append (-1.0); Tip_V.Append (-1.0); Tip_Cam.Append (-1);
+            end loop;
             for A in 0 .. C.Map.Arms - 1 loop
                declare
                   Hc : constant Integer := (if A < Natural (C.Map.Cam_On_Arm.Length) then C.Map.Cam_On_Arm (A) else -1);
                   Oh : Geom.V3 := [0.0, 0.0, 0.0];
                   Dh : Geom.V3 := [0.0, 0.0, 0.0];
                begin
+                  --  指尖像素(不管这只眼量没量好都记下来,离线好重建视线)
+                  if Hc >= 0 and then Natural (Hc) < Natural (F.Cams.Length) then
+                     declare
+                        Z2 : constant Zone.Hand_Zone := Zone_Of (C, A, Natural (Hc));
+                        W2 : constant Natural := F.Cams (Natural (Hc)).W;
+                        H2 : constant Natural := F.Cams (Natural (Hc)).H;
+                        Ua, Va, Ub, Vb : Long_Float;
+                        Oa, Ob : Boolean;
+                     begin
+                        if Z2.Valid then
+                           Zone.Tip_Px (Z2, Z2.A, W2, H2, Ua, Va, Oa);
+                           Zone.Tip_Px (Z2, Z2.B, W2, H2, Ub, Vb, Ob);
+                           Tip_Cam.Replace_Element (A, Hc);
+                           if Oa and then Ob then
+                              Tip_U.Replace_Element (A, 0.5 * (Ua + Ub)); Tip_V.Replace_Element (A, 0.5 * (Va + Vb));   --  两指尖的中点(纯数学的一半)
+                           elsif Oa then
+                              Tip_U.Replace_Element (A, Ua); Tip_V.Replace_Element (A, Va);
+                           else
+                              Tip_U.Replace_Element (A, Z2.Cu * Long_Float (W2)); Tip_V.Replace_Element (A, Z2.Cv * Long_Float (H2));
+                           end if;
+                        end if;
+                     end;
+                  end if;
                   if Hc >= 0 and then Natural (Hc) < Natural (C.Geo.Length) and then Natural (Hc) < Natural (F.Cams.Length)
                     and then C.Geo (Natural (Hc)).Valid and then C.Geo (Natural (Hc)).F > 0.0
                   then
@@ -6237,6 +6286,7 @@ package body Act is
                   for A in 0 .. C.Map.Arms - 1 loop
                      Ada.Text_IO.Put_Line (Fo, "ray " & Codec.Img (A) & " " & Codec.Fmt (Ray_O (A) (0), 6) & " " & Codec.Fmt (Ray_O (A) (1), 6) & " " & Codec.Fmt (Ray_O (A) (2), 6)
                                            & " " & Codec.Fmt (Ray_D (A) (0), 7) & " " & Codec.Fmt (Ray_D (A) (1), 7) & " " & Codec.Fmt (Ray_D (A) (2), 7));
+                     Ada.Text_IO.Put_Line (Fo, "tip " & Codec.Img (A) & " " & Codec.Img (Tip_Cam (A)) & " " & Codec.Fmt (Tip_U (A), 3) & " " & Codec.Fmt (Tip_V (A), 3));
                   end loop;
                   for Ob of C.Fixed_Obs loop
                      Ada.Text_IO.Put_Line (Fo, "obs " & Codec.Img (Ob.Pt) & " " & Codec.Fmt (Ob.U, 3) & " " & Codec.Fmt (Ob.V, 3) & " " & Codec.Fmt (Ob.Pose (0), 6) & " "

@@ -348,6 +348,7 @@ package body Geom is
       Sum : Long_Float := 0.0;
       Sigma2 : Long_Float;
       R0 : Long_Float;
+      Undet : array (0 .. Np - 1) of Boolean := [others => False];   --  没有信息的参数
    begin
       Sd := [others => 0.0];
       if Np = 0 or else 2 * N_Obs <= Np then
@@ -404,31 +405,33 @@ package body Geom is
                end loop;
             end if;
             if abs (A (Col, Col)) <= 1.0e-18 then
-               Sd := [others => Long_Float'Last];   --  奇异:有参数完全分不开
-               return;
-            end if;
-            declare
-               D : constant Long_Float := A (Col, Col);
-            begin
-               for M in 0 .. 2 * Np - 1 loop
-                  A (Col, M) := A (Col, M) / D;
+               --  这一列没有信息(比如一个点的观测全被踢成离群,它的三列全零):这个参数不确定度无穷,别的参数照算
+               --  (G1O 2026-09-25 右眼:残差 0.64 px 的好解被"± inf"整个否掉)
+               Undet (Col) := True;
+            else
+               declare
+                  D : constant Long_Float := A (Col, Col);
+               begin
+                  for M in 0 .. 2 * Np - 1 loop
+                     A (Col, M) := A (Col, M) / D;
+                  end loop;
+               end;
+               for Rw in 0 .. Np - 1 loop
+                  if Rw /= Col and then A (Rw, Col) /= 0.0 then
+                     declare
+                        Fct : constant Long_Float := A (Rw, Col);
+                     begin
+                        for M in 0 .. 2 * Np - 1 loop
+                           A (Rw, M) := A (Rw, M) - Fct * A (Col, M);
+                        end loop;
+                     end;
+                  end if;
                end loop;
-            end;
-            for Rw in 0 .. Np - 1 loop
-               if Rw /= Col and then A (Rw, Col) /= 0.0 then
-                  declare
-                     Fct : constant Long_Float := A (Rw, Col);
-                  begin
-                     for M in 0 .. 2 * Np - 1 loop
-                        A (Rw, M) := A (Rw, M) - Fct * A (Col, M);
-                     end loop;
-                  end;
-               end if;
-            end loop;
+            end if;
          end;
       end loop;
       for K in 0 .. Np - 1 loop
-         Sd (Sd'First + K) := Sqrt (Long_Float'Max (0.0, Sigma2 * A (K, Np + K)));
+         Sd (Sd'First + K) := (if Undet (K) then Long_Float'Last else Sqrt (Long_Float'Max (0.0, Sigma2 * A (K, Np + K))));
       end loop;
    end Param_Sd;
 
