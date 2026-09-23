@@ -129,7 +129,7 @@ def get_robot_config():
         ),
         init_state=ArticulationCfg.InitialStateCfg(
             joint_pos={
-                ".*": 0.0,
+                # no ".*" here: Isaac Lab rejects overlapping patterns; unlisted joints start at 0
                 ".*_elbow_joint": 1.2,
                 "left_shoulder_roll_joint": 0.25,
                 "right_shoulder_roll_joint": -0.25,
