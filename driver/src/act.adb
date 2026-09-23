@@ -6191,6 +6191,8 @@ package body Act is
          Why : Contact.Gen.Refusal;
          Pick : Integer := -1;
          Beyond : Natural := 0;
+         Holes : Natural := 0;
+         use type Contact.Gen.Pair_Kind;
       begin
          if Pitch <= 0.0 then
             Note := S ("the outline has no measurable sampling pitch");
@@ -6224,6 +6226,11 @@ package body Act is
                      end if;
                   end;
                end loop;
+               --  往里捏的抓法用不了"从里面撑开"型(两指伸进洞里往外撑的那种):落上去就是合空(H58:剪刀手柄环的洞排第一)
+               if Cd.Kind = Contact.Gen.Inside then
+                  Tried := True;
+                  Holes := Holes + 1;
+               end if;
                --  这条臂横着被顶住过的那一侧够不着(H56 2026-09-23 实测:右臂在 y≈-0.43 被关节顶住,候选全在 -0.44 以外,三把都合空)
                for Wm of C.Walls loop
                   if Wm.Arm = Arm and then (Cw (0) - Wm.P (0)) * Wm.W (0) + (Cw (1) - Wm.P (1)) * Wm.W (1) + (Cw (2) - Wm.P (2)) * Wm.W (2) > 0.0 then
@@ -6262,6 +6269,7 @@ package body Act is
                        & (if Reprojected then ", re-laid on the surface I touched" else "")
                        & (if Known_Thick then ", thickness " & Mm (Thick) & " measured by touch" else ", thickness not measured yet")
                        & ") I take #" & Codec.Img (Natural (Pick) + 1) & (if Beyond > 0 then " (" & Codec.Img (Beyond) & " ranked higher lie beyond where this arm got stopped)" else "")
+                       & (if Holes > 0 then " (" & Codec.Img (Holes) & " ranked higher are holes to spread, not material to pinch)" else "")
                        & ": " & Mm (Cd.Width_M) & " wide, " & Mm (Cd.Depth_M) & " deep, faces off by "
                        & Codec.Fmt (Cd.Face_Tilt_Rad, 2) & " rad, " & Mm (Cd.Com_Offset_M) & " from its middle, jaw " & Mm (G.Gap)
                        & "; finger width unmeasured (strips one sample wide); friction unmeasured, so the cone is the least this pinch needs - the lift will tell");

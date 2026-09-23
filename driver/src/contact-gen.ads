@@ -29,8 +29,14 @@ package Contact.Gen is
       Finger_W_M : Long_Float := 0.0;
       Gap_M : Long_Float := 0.0;
    end record;
+   --  一条带子里料和洞排成一串,配对有三种(三种在几何上一模一样,区别只在接触集那一栏的运动方向):
+   --  Single = 夹住一段料(两个接触点是同一段料的两侧)· Outside = 从外面捏拢(料 i 的外面 ~ 料 j 的外面,把中间的东西捏住)
+   --  · Inside = 从里面撑开(料 i 的里面 ~ 料 j 的里面,手指在洞里往外撑 ⇒ 驱动机构)。往里捏的抓法只能用前两种 —— 落到 Inside 上就是两指伸进洞里合空
+   --  (H58 2026-09-23 实测:剪刀手柄环的洞按"料越深越前"排到第一,落点差 1 mm,合上读数 0)
+   type Pair_Kind is (Single, Outside, Inside);
    --  一条下手点候选 —— 接触集的几何那一半。剩下那一半(往哪使劲 · 物体怎么动)由动词和眼睛填,不在这一层。
    type Candidate is record
+      Kind : Pair_Kind := Single;
       Pos : V3 := [others => 0.0];        --  这一段截面的中心,世界坐标,米
       Close_Yaw : Long_Float := 0.0;      --  合爪方向在水平面里的朝向,弧度;爪面垂直于它
       Width_M : Long_Float := 0.0;        --  这一段沿合爪方向有多宽(料的一段有多厚,不是最左到最右有多远:甜甜圈量出来是圈边,不是外径)

@@ -2664,6 +2664,35 @@ begin
          Cg.Candidates (V, Hand_Of (Cg.Measured, 0.088), 0.0, Grid_Aug, Cs, Why);
          Check (Why = Cg.Flat, "②a·一张平面切不出层 ⇒ 拒绝并说 Flat,不许静默返回空表");
       end;
+      --  一个圈(外径 6 cm、壁厚 6 mm):候选里既有"夹住环壁"(Single,~6 mm),也有"从里面撑开"(Inside,洞的跨度),两种都在,种类标得出来
+      declare
+         Ring : Ct.V3_Vectors.Vector;
+         Walls, Holes : Natural := 0;
+         use type Cg.Pair_Kind;
+      begin
+         for I in 0 .. 71 loop
+            for R in 0 .. 2 loop
+               for K in 0 .. 3 loop
+                  declare
+                     A : constant Long_Float := 2.0 * Ada.Numerics.Pi * Long_Float (I) / 72.0;
+                     Rr : constant Long_Float := 0.024 + 0.003 * Long_Float (R);
+                  begin
+                     Ring.Append (Ct.V3'([0.4 + Rr * Cos (A), Rr * Sin (A), 0.01 + 0.01 * Long_Float (K) / 3.0]));
+                  end;
+               end loop;
+            end loop;
+         end loop;
+         Cg.Candidates (Ring, Hand_Of (Cg.Measured, 0.088), 0.0, Grid_Aug, Cs, Why);
+         for C of Cs loop
+            if C.Kind = Cg.Single and then C.Width_M < 0.012 then
+               Walls := Walls + 1;
+            elsif C.Kind = Cg.Inside and then C.Width_M > 0.03 then
+               Holes := Holes + 1;
+            end if;
+         end loop;
+         Check (Why = Cg.Fine and then Walls > 0 and then Holes > 0,
+                "②a·圈:夹住环壁(Single,壁厚)和从里面撑开(Inside,洞的跨度)两种候选都生出来、种类标得出来(壁 " & Codec.Img (Walls) & " · 洞 " & Codec.Img (Holes) & ")");
+      end;
       Cg.Candidates (Scissors, Hand_Of (Cg.Measured, 0.088), 0.0, Grid_Aug, Cs, Why);
       declare
          Narrow : Boolean := False;

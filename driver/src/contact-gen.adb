@@ -103,6 +103,7 @@ package body Contact.Gen is
    type Pair is record
       Mn, Mx, Sx, Sy : Long_Float;
       K : Natural;
+      Kind : Pair_Kind;
    end record;
    package Pair_Vectors is new Ada.Containers.Vectors (Natural, Pair);
 
@@ -291,11 +292,11 @@ package body Contact.Gen is
                                           Sb : constant Seg := Segs (J);
                                        begin
                                           if I = J then
-                                             Pairs.Append (Pair'(Mn => Sa.Lo, Mx => Sa.Hi, Sx => Sa.Sx, Sy => Sa.Sy, K => Sa.K));
+                                             Pairs.Append (Pair'(Mn => Sa.Lo, Mx => Sa.Hi, Sx => Sa.Sx, Sy => Sa.Sy, K => Sa.K, Kind => Single));
                                           else
-                                             Pairs.Append (Pair'(Mn => Sa.Lo, Mx => Sb.Hi, Sx => Sa.Sx + Sb.Sx, Sy => Sa.Sy + Sb.Sy, K => Sa.K + Sb.K));
+                                             Pairs.Append (Pair'(Mn => Sa.Lo, Mx => Sb.Hi, Sx => Sa.Sx + Sb.Sx, Sy => Sa.Sy + Sb.Sy, K => Sa.K + Sb.K, Kind => Outside));
                                              if Sb.Lo > Sa.Hi then
-                                                Pairs.Append (Pair'(Mn => Sa.Hi, Mx => Sb.Lo, Sx => Sa.Sx + Sb.Sx, Sy => Sa.Sy + Sb.Sy, K => Sa.K + Sb.K));
+                                                Pairs.Append (Pair'(Mn => Sa.Hi, Mx => Sb.Lo, Sx => Sa.Sx + Sb.Sx, Sy => Sa.Sy + Sb.Sy, K => Sa.K + Sb.K, Kind => Inside));
                                              end if;
                                           end if;
                                        end;
@@ -388,6 +389,7 @@ package body Contact.Gen is
                                                 end;
                                              end if;
                                           end;
+                                          C.Kind := Pr.Kind;
                                           C.Pos := [Px, Py, 0.5 * (Lo + Hi)];
                                           C.Close_Yaw := Th + 0.5 * Pi;
                                           C.Width_M := Width;
