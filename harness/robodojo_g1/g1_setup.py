@@ -187,6 +187,17 @@ if "[bd] N mimic joints" not in s:
     assert s.count(old2) == 1; s = s.replace(old2, new2)
 open(p, "w").write(s)
 
+# ---- robot_manager: initial gripper state with N mimic joints
+p = f"{R}/env/robot_manager/robot_manager.py"; s = open(p).read()
+old3 = "                    gripper_list = [[val, val * mimic[1] + mimic[2]] for _ in range(len(joint_list))]"
+new3 = ("                    if mimic and isinstance(mimic[0], (list, tuple)):   # [bd] N mimic joints\n"
+        "                        gripper_list = [[val] + [val * m[1] + m[2] for m in mimic] for _ in range(len(joint_list))]\n"
+        "                    else:\n"
+        "                        gripper_list = [[val, val * mimic[1] + mimic[2]] for _ in range(len(joint_list))]")
+if "[bd] N mimic joints\n" not in s and old3 in s:
+    s = s.replace(old3, new3); open(p, "w").write(s)
+assert "[bd] N mimic joints" in open(p).read()
+
 # ---- _robot_info.json
 p = f"{R}/env_cfg/robot/_robot_info.json"; d = json.load(open(p)); d["g1"] = {"arm_dim": [7, 7], "ee_dim": [1, 1]}; json.dump(d, open(p, "w"), indent=4)
 
