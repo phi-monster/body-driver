@@ -6211,7 +6211,7 @@ package body Act is
                            declare
                               P : constant Plug.Arm_Pose := F.EE (Natural (A2));
                            begin
-                              Rays.Append (Geom.Sight'(O => [P (0), P (1), P (2)], D => Geom.Ray (G, P, U, V)));
+                              Rays.Append (Geom.Sight'(O => Geom.Cam_Pos (G, P), D => Geom.Ray (G, P, U, V)));
                            end;
                         else
                            Rays.Append (Geom.Sight'(O => G.Pos, D => Geom.Ray_Fixed (G, U, V)));
@@ -6768,7 +6768,7 @@ package body Act is
          declare
             P : constant Plug.Arm_Pose := F.EE (Natural (A1));
          begin
-            S1 := (O => [P (0), P (1), P (2)], D => Geom.Ray (G, P, R.Cu * Long_Float (Kw), R.Cv * Long_Float (Kh)));
+            S1 := (O => Geom.Cam_Pos (G, P), D => Geom.Ray (G, P, R.Cu * Long_Float (Kw), R.Cv * Long_Float (Kh)));
             Ok1 := True;
          end;
       end if;
@@ -6795,7 +6795,7 @@ package body Act is
                      declare
                         P2 : constant Plug.Arm_Pose := F.EE (Natural (A2));
                      begin
-                        S2 := (O => [P2 (0), P2 (1), P2 (2)], D => Geom.Ray (Gm, P2, B.Cu * Long_Float (W2), B.Cv * Long_Float (H2)));
+                        S2 := (O => Geom.Cam_Pos (Gm, P2), D => Geom.Ray (Gm, P2, B.Cu * Long_Float (W2), B.Cv * Long_Float (H2)));
                         Ok2 := True;
                      end;
                   end if;
@@ -6913,7 +6913,7 @@ package body Act is
          declare
             P : constant Plug.Arm_Pose := F.EE (Arm);
          begin
-            Rays.Append (Geom.Sight'(O => [P (0), P (1), P (2)], D => Geom.Ray (G, P, U, V)));
+            Rays.Append (Geom.Sight'(O => Geom.Cam_Pos (G, P), D => Geom.Ray (G, P, U, V)));
             Append (Who, "第" & Codec.Img (Cam) & " 台");
          end;
       end if;
@@ -6949,7 +6949,7 @@ package body Act is
                                  declare
                                     P2 : constant Plug.Arm_Pose := F.EE (Natural (A2));
                                  begin
-                                    Rays.Append (Geom.Sight'(O => [P2 (0), P2 (1), P2 (2)], D => Geom.Ray (Gm, P2, Pu, Pv)));
+                                    Rays.Append (Geom.Sight'(O => Geom.Cam_Pos (Gm, P2), D => Geom.Ray (Gm, P2, Pu, Pv)));
                                  end;
                               end if;
                               Append (Who, (if Length (Who) > 0 then "+" else "") & "第" & Codec.Img (Cm) & " 台");
@@ -7152,7 +7152,7 @@ package body Act is
                      Hp : constant Plug.Arm_Pose := F.EE (Arm);
                      Nn_S : constant Geom.V3 := Up_Dir (C);
                   begin
-                     Ph := Geom.Hit_Plane ([Hp (0), Hp (1), Hp (2)], Geom.Ray (G, Hp, U, V), C.Geo_Pw, Nn_S, Hok);
+                     Ph := Geom.Hit_Plane (Geom.Cam_Pos (G, Hp), Geom.Ray (G, Hp, U, V), C.Geo_Pw, Nn_S, Hok);
                   end;
                end if;
                if Mok then
