@@ -184,6 +184,13 @@ begin
                      end if;
                   end loop;
                   Reuse := Reuse and then Any_Zone;
+                  --  存的握区少了哪台相机的(H53 2026-09-23 实测:第 2 只手只存了 0、1 两台,它自己那只眼(第 2 台)没有 ⇒ 合爪方向、指头都量不出)
+                  --  ⇒ 不照用,合空一次把每台相机的都量上
+                  if Natural (Stored_Hands (Natural (Old)).Zones.Length) < C.Map.N_Cams then
+                     Reuse := False;
+                     Put_Line ("[装] 第" & Natural'Image (A + 1) & " 只手第" & Natural'Image (Jk) & " 号抓握通道:存的握区只有 "
+                               & Codec.Img (Natural (Stored_Hands (Natural (Old)).Zones.Length)) & " 台相机的,少了 ⇒ 合空一次补量");
+                  end if;
                end;
             end if;
             if Reuse then
@@ -291,7 +298,7 @@ begin
          --  脑起的名字、脑说过"这只眼里没有它"、碰过的面、手指指向 —— 都是上一集的世界,一起清;量过的身体留着
          C.Boxed.Clear;
          C.Touch_Valid := False; C.Fingers_Aimed := False; C.Geo_Pw_Valid := False; C.Geo_Pw_Met := False; C.Geo_At_Above := False;
-         C.Sil_Valid := False; C.Held_Set_Valid := False; C.Tried.Clear;
+         C.Sil_Valid := False; C.Held_Set_Valid := False; C.Tried.Clear; C.Tried_W.Clear;
          Act.Init_Tracks (C);
       end if;
       if Order /= "" then
