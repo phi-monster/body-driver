@@ -581,6 +581,7 @@ package body Geom is
          Rv : constant V3 := Rot_Vec (Gi.R_Ce);
          Nr : Natural := 0;
          Cur : Long_Float := 0.0;
+         Behind : Natural := 0;   --  最近一次算残差时跑到相机后面的观测数
          Skip : array (0 .. N - 1) of Boolean := [others => False];   --  被判离群、不再进解的观测(按观测序号)
          procedure Resid (P : Param_Vec; R : out Long_Float; Fill : access procedure (I : Natural; Du, Dv : Long_Float)) is
             Gt : Cam_Geo := G;
@@ -592,6 +593,7 @@ package body Geom is
             if Fit_F then
                Gt.F := P (6);
             end if;
+            Behind := 0;
             for J in 0 .. N - 1 loop
                declare
                   Ob : constant Obs_Pt := O (J);
@@ -607,6 +609,7 @@ package body Geom is
                         Du := U - Ob.U; Dv := V - Ob.V;
                      else
                         Du := 1.0e3; Dv := 1.0e3;   --  跑到相机后面:远大于画幅的罚(像素数,无量纲哨兵)
+                        Behind := Behind + 1;
                      end if;
                      Sum := Sum + Du * Du + Dv * Dv;
                      if Fill /= null then
@@ -696,6 +699,10 @@ package body Geom is
                G.Dropped := Dropped;
             end if;
          end;
+         Resid (P, Cur, null);
+         if Behind > 0 then
+            return;   --  解出来还有点跑到相机后面 ⇒ 不是解,不存
+         end if;
          G.R_Ce := Rodrigues ([P (0), P (1), P (2)]);
          G.Off := [P (3), P (4), P (5)];
          if Fit_F then
@@ -1002,6 +1009,8 @@ package body Geom is
          Rv : constant V3 := Rot_Vec (Gi.R_Ce);
          Nr : Natural := 0;
          Cur : Long_Float := 0.0;
+         Behind : Natural := 0;   --  最近一次算残差时跑到相机后面的观测数(解出来还有 ⇒ 不算解出来)
+         Skip : array (0 .. N - 1) of Boolean := [others => False];   --  被判离群、不再进解的观测(按观测序号)
          procedure Resid (P : Param_Vec; R : out Long_Float; Fill : access procedure (I : Natural; Du, Dv : Long_Float)) is
             Gt : Cam_Geo := G;
             Sum : Long_Float := 0.0;
@@ -1012,8 +1021,12 @@ package body Geom is
             if Fit_F then
                Gt.F := P (6);
             end if;
-            for Ob of O loop
-               if Ob.Pt < N_Arms then
+            Behind := 0;
+            for J in 0 .. N - 1 loop
+               declare
+                  Ob : constant Obs_Pt := O (J);
+               begin
+               if Ob.Pt < N_Arms and then not Skip (J) then
                   declare
                      B : constant Natural := Base + 3 * Ob.Pt;
                      Tw : constant V3 := Ap (Quat_To_R (Ob.Pose), [P (B), P (B + 1), P (B + 2)]);   --  指尖偏移转到世界
@@ -1026,6 +1039,7 @@ package body Geom is
                         Du := U - Ob.U; Dv := V - Ob.V;
                      else
                         Du := 1.0e3; Dv := 1.0e3;   --  跑到相机后面:远大于画幅的罚(像素数,无量纲哨兵)
+                        Behind := Behind + 1;
                      end if;
                      Sum := Sum + Du * Du + Dv * Dv;
                      if Fill /= null then
@@ -1034,6 +1048,7 @@ package body Geom is
                      I := I + 1;
                   end;
                end if;
+               end;
             end loop;
             if Use_Prior then
                declare
@@ -1064,6 +1079,52 @@ package body Geom is
          end if;
          Resid (P, Cur, null);
          LM_Refine (P, Nr, Steps, 60, Resid'Access, Cur);
+         --  离群观测(指尖跟错了)踢掉再解:每笔残差比中位数大 3 倍(比例,无量纲)的不要;踢掉的不到四分之一才算离群
+         declare
+            Rs : Param_Vec (0 .. Natural'Max (0, Nr - 1)) := [others => 0.0];
+            procedure Grab (I : Natural; Du, Dv : Long_Float) is
+            begin
+               if I < Nr then
+                  Rs (I) := Sqrt (Du * Du + Dv * Dv);
+               end if;
+            end Grab;
+            Med : Long_Float := 0.0;
+            Dropped : Natural := 0;
+            Rtmp : Long_Float;
+         begin
+            Resid (P, Rtmp, Grab'Access);
+            Med := Median (Rs, Nr - (if Use_Prior then 1 else 0));
+            if Med > 0.0 then
+               declare
+                  I : Natural := 0;
+               begin
+                  for J in 0 .. N - 1 loop
+                     if O (J).Pt < N_Arms and then not Skip (J) then
+                        if Rs (I) > 3.0 * Med then
+                           Skip (J) := True;
+                           Dropped := Dropped + 1;
+                        end if;
+                        I := I + 1;
+                     end if;
+                  end loop;
+               end;
+               if Dropped > 0 and then Dropped * 4 < Nr then
+                  Nr := Nr - Dropped;
+                  Resid (P, Cur, null);
+                  LM_Refine (P, Nr, Steps, 60, Resid'Access, Cur);
+               else
+                  for K in Skip'Range loop
+                     Skip (K) := False;
+                  end loop;
+                  Dropped := 0;
+               end if;
+               G.Dropped := Dropped;
+            end if;
+         end;
+         Resid (P, Cur, null);
+         if Behind > 0 then
+            return;   --  解出来还有指尖跑到相机后面 ⇒ 不是解,不存(V1H 2026-09-24:11 笔观测解到残差 953 px)
+         end if;
          G.R_Ce := Rodrigues ([P (0), P (1), P (2)]);
          G.Pos := [P (3), P (4), P (5)];
          if Fit_F then

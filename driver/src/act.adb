@@ -5661,6 +5661,8 @@ package body Act is
       Wc : constant Integer := (if C.Map.World_Cam < Natural (F.Cams.Length) and then C.Map.World_Cam /= Cam then Integer (C.Map.World_Cam) else -1);
       Hid : Integer := -1;
       Head_N : Natural := 0;
+      Live_From : Natural := 0;   --  这一段跟踪从第几个候选起(复位之后眼里的东西换了:老候选退出,新候选接上,各算各的点)
+      Resets : Natural := 0;
       procedure Head_Look (First : Boolean) is
          Err : Unbounded_String;
       begin
@@ -5710,6 +5712,68 @@ package body Act is
             end if;
          end;
       end Head_Look;
+      --  候选:画幅中间那一半里(比例,无量纲)不贴边、不是自己手指的每一块;开一段跟踪。起点和每次复位之后各来一遍(新候选算新的点)
+         procedure Open_Segment is
+            N_Before : constant Natural := Natural (Cur.Length);
+            Fresh : Instrument.Track_Vectors.Vector;
+         begin
+            World.Observe (C.Wld, Cam, Cut_Things (C, F, Cam), Cw, Ch);
+            for Si in 0 .. World.Count (C.Wld, Cam) - 1 loop
+               declare
+                  Sl : constant World.Slot := World.Get (C.Wld, Cam, Si);
+                  Mine : constant Boolean := Zone.Is_Self (Zone_Of (C, Arm, Cam), Sl.R, Cw, Ch);
+                  On_Edge : constant Boolean := Sl.R.X0 = 0 or else Sl.R.Y0 = 0 or else Sl.R.X1 + 1 >= Cw or else Sl.R.Y1 + 1 >= Ch;
+                  Central : constant Boolean := Sl.R.Cu >= 0.25 and then Sl.R.Cu <= 0.75 and then Sl.R.Cv >= 0.25 and then Sl.R.Cv <= 0.75;
+               begin
+                  if Sl.Present and then not Mine and then not On_Edge and then Central then
+                     Cand.Append (Si);
+                     Fresh.Append (Instrument.Track_Pt'(U => Sl.R.Cu * Long_Float (Cw), V => Sl.R.Cv * Long_Float (Ch), Seen => True, Conf => 1.0));
+                  end if;
+               end;
+            end loop;
+            for I in 0 .. N_Before - 1 loop   --  老候选退出这一段
+               Cur.Replace_Element (I, Instrument.Track_Pt'(U => Cur (I).U, V => Cur (I).V, Seen => False, Conf => 0.0));
+            end loop;
+            for Pt of Fresh loop
+               Cur.Append (Pt);
+            end loop;
+            Live_From := N_Before;
+            Tid := -1;
+            if Length (C.Inst_Host) > 0 and then not Fresh.Is_Empty then
+               declare
+                  Err : Unbounded_String;
+                  R : constant Instrument.Track_Vectors.Vector :=
+                    Instrument.Track_Start (To_String (C.Inst_Host), C.Inst_Port, F.Cams (Cam).RGB, Cw, Ch, Fresh, Tid, Err);
+               begin
+                  if Tid < 0 then
+                     Geo_Say ("仪器不跟点(" & To_String (Err) & ")⇒ 按槽号重切");
+                  elsif Natural (R.Length) /= Natural (Fresh.Length) then
+                     Geo_Say ("仪器跟的点数对不上 ⇒ 按槽号重切");
+                     Instrument.Track_End (To_String (C.Inst_Host), C.Inst_Port, Tid);
+                     Tid := -1;
+                  end if;
+               end;
+            end if;
+            P0 := Cur;
+         end Open_Segment;
+         --  对方复位 = 新的一集:手回了原处、眼里的东西换了。清掉标记,重开一段跟踪(眼里的、头顶眼里的指尖都重开),路径接着走。
+         --  以前一碰到复位就"量到几停算几停"、标记还留着 ⇒ 后面每一段开头就退(V1H 2026-09-24:两只眼各只走了 7 / 6 停,头顶眼 11 笔)
+         procedure On_Reset is
+         begin
+            if Plug.Take_Reset (L) then
+               Resets := Resets + 1;
+            end if;
+            if Tid >= 0 then
+               Instrument.Track_End (To_String (C.Inst_Host), C.Inst_Port, Tid);
+            end if;
+            if Hid >= 0 then
+               Instrument.Track_End (To_String (C.Inst_Host), C.Inst_Port, Hid);
+               Hid := -1;
+            end if;
+            Geo_Say ("对方复位(新的一集)⇒ 手回了原处、眼里的东西换了:重开一段跟踪,路径接着走");
+            Open_Segment;
+            Head_Look (True);
+         end On_Reset;
       --  候选此刻在画面里的位置:仪器跟着就问仪器;没有仪器就按槽号重切。仪器这一停没答上来 ⇒ 全算没看见(不混两种来源)
       procedure Where is
          Err : Unbounded_String;
@@ -5718,19 +5782,22 @@ package body Act is
             declare
                R : constant Instrument.Track_Vectors.Vector :=
                  Instrument.Track_Step (To_String (C.Inst_Host), C.Inst_Port, Tid, F.Cams (Cam).RGB, Cw, Ch, Err);
+               Good : constant Boolean := Natural (R.Length) = Natural (Cur.Length) - Live_From;
             begin
-               if Natural (R.Length) = Natural (Cur.Length) then
-                  Cur := R;
-               else
+               if not Good then
                   Geo_Say ("仪器这一停没答上来:" & To_String (Err));
-                  for I in 0 .. Natural (Cur.Length) - 1 loop
-                     Cur.Replace_Element (I, Instrument.Track_Pt'(U => Cur (I).U, V => Cur (I).V, Seen => False, Conf => 0.0));
-                  end loop;
                end if;
+               for I in 0 .. Natural (Cur.Length) - 1 loop
+                  if Good and then I >= Live_From then
+                     Cur.Replace_Element (I, R (I - Live_From));
+                  else
+                     Cur.Replace_Element (I, Instrument.Track_Pt'(U => Cur (I).U, V => Cur (I).V, Seen => False, Conf => 0.0));
+                  end if;
+               end loop;
             end;
             return;
          end if;
-         for I in 0 .. Natural (Cur.Length) - 1 loop
+         for I in Live_From .. Natural (Cur.Length) - 1 loop
             declare
                U, V : Long_Float;
                Seen : Boolean;
@@ -5812,41 +5879,11 @@ package body Act is
       if G.F <= 0.0 then
          Geo_Say ("这台相机没给焦距 ⇒ 和朝向一起解" & (if Theta > 0.0 then "(转 " & Codec.Fmt (Theta * Deg, 1) & "° 让焦距和远近分开)" else ";转动通道没量过 ⇒ 不转,焦距只能靠横挪,分不开远近"));
       end if;
-      --  候选:画幅中间那一半里(比例,无量纲)不贴边、不是自己手指的每一块
-      World.Observe (C.Wld, Cam, Cut_Things (C, F, Cam), Cw, Ch);
-      for Si in 0 .. World.Count (C.Wld, Cam) - 1 loop
-         declare
-            Sl : constant World.Slot := World.Get (C.Wld, Cam, Si);
-            Mine : constant Boolean := Zone.Is_Self (Zone_Of (C, Arm, Cam), Sl.R, Cw, Ch);
-            On_Edge : constant Boolean := Sl.R.X0 = 0 or else Sl.R.Y0 = 0 or else Sl.R.X1 + 1 >= Cw or else Sl.R.Y1 + 1 >= Ch;
-            Central : constant Boolean := Sl.R.Cu >= 0.25 and then Sl.R.Cu <= 0.75 and then Sl.R.Cv >= 0.25 and then Sl.R.Cv <= 0.75;
-         begin
-            if Sl.Present and then not Mine and then not On_Edge and then Central then
-               Cand.Append (Si);
-               Cur.Append (Instrument.Track_Pt'(U => Sl.R.Cu * Long_Float (Cw), V => Sl.R.Cv * Long_Float (Ch), Seen => True, Conf => 1.0));
-            end if;
-         end;
-      end loop;
+      Open_Segment;
       if Cur.Is_Empty then
          Geo_Say ("画幅中间没有一块不贴边、不是自己的东西 ⇒ 量不了朝向");
          return;
       end if;
-      if Length (C.Inst_Host) > 0 then
-         declare
-            Err : Unbounded_String;
-            R : constant Instrument.Track_Vectors.Vector :=
-              Instrument.Track_Start (To_String (C.Inst_Host), C.Inst_Port, F.Cams (Cam).RGB, Cw, Ch, Cur, Tid, Err);
-         begin
-            if Tid < 0 then
-               Geo_Say ("仪器不跟点(" & To_String (Err) & ")⇒ 按槽号重切");
-            elsif Natural (R.Length) /= Natural (Cur.Length) then
-               Geo_Say ("仪器跟的点数对不上 ⇒ 按槽号重切");
-               Instrument.Track_End (To_String (C.Inst_Host), C.Inst_Port, Tid);
-               Tid := -1;
-            end if;
-         end;
-      end if;
-      P0 := Cur;
       if Dump /= "" then
          Codec.Write_PGM (Dump & "/geo_cam" & Codec.Img (Cam) & "_stop0.pgm", F.Cams (Cam).Gray, Cw, Ch);
       end if;
@@ -5859,10 +5896,15 @@ package body Act is
       end;
       --  转动的停:绕世界 z、绕世界 x 各去一下、回一下
       if Theta > 0.0 then
-         Rot_Stop ([0.0, 0.0, 1.0], 1.0);
-         Rot_Stop ([0.0, 0.0, 1.0], -1.0);
-         Rot_Stop ([1.0, 0.0, 0.0], 1.0);
-         Rot_Stop ([1.0, 0.0, 0.0], -1.0);
+         for K in 1 .. 4 loop
+            if Plug.Reset_Pending (L) then
+               On_Reset;
+            end if;
+            Rot_Stop ((if K <= 2 then [0.0, 0.0, 1.0] else [1.0, 0.0, 0.0]), (if K mod 2 = 1 then 1.0 else -1.0));
+         end loop;
+      end if;
+      if Plug.Reset_Pending (L) then
+         On_Reset;
       end if;
       --  探一步:沿第一根轴挪 B,谁挪得最多谁最近(只用来定步长)
       Stop ([B, 0.0, 0.0]);
@@ -5891,7 +5933,9 @@ package body Act is
            [[Step, 0.0, 0.0], [0.0, 0.0, Step], [0.0, 0.0, Step], [0.0, Step, 0.0], [0.0, Step, 0.0], [-Step, 0.0, 0.0], [-Step, 0.0, 0.0]];
       begin
          for M of Moves loop
-            exit when Plug.Reset_Pending (L);   --  段中间对方复位:停,量到几停算几停
+            if Plug.Reset_Pending (L) then
+               On_Reset;
+            end if;
             Stop (M);
          end loop;
       end;
@@ -5914,8 +5958,8 @@ package body Act is
          if Ok then
             C.Geo.Replace_Element (Cam, G);
             Geom.Save (To_String (C.Geo_Path), C.Geo);
-            Geo_Say ("相机朝向量好:" & Codec.Img (Stop_N + 1) & " 停 · " & Codec.Img (Used) & "/" & Codec.Img (Natural (Cur.Length)) & " 个点进了解(踢掉 "
-                     & Codec.Img (G.Dropped) & " 笔离群)· 像素残差 " & Codec.Fmt (G.Rms, 2) & " px" & (if G.F_Meas > 0.0 then " · 焦距一起解出来 " & Codec.Fmt (G.F, 1) & " px" else "")
+            Geo_Say ("相机朝向量好:" & Codec.Img (Stop_N + 1) & " 停" & (if Resets > 0 then "(中间复位 " & Codec.Img (Resets) & " 次)" else "") & " · " & Codec.Img (Used) & "/"
+                     & Codec.Img (Natural (Cur.Length)) & " 个点进了解(踢掉 " & Codec.Img (G.Dropped) & " 笔离群)· 像素残差 " & Codec.Fmt (G.Rms, 2) & " px" & (if G.F_Meas > 0.0 then " · 焦距一起解出来 " & Codec.Fmt (G.F, 1) & " px" else "")
                      & " · 相机离手腕原点 (" & Mm (G.Off (0)) & "," & Mm (G.Off (1)) & "," & Mm (G.Off (2)) & "),存进 " & To_String (C.Geo_Path));
          else
             Geo_Say ("朝向解不出来(记了 " & Codec.Img (Natural (Obs.Length)) & " 笔观测,没有一个点在 4 停以上都看见)");
@@ -9866,10 +9910,11 @@ package body Act is
             Have : constant Boolean := Hc >= 0 and then Natural (Hc) < Natural (C.Geo.Length) and then A < Natural (F.EE.Length)
               and then C.Geo (Natural (Hc)).Valid and then C.Geo (Natural (Hc)).Tip_Valid;
          begin
+            if Plug.Reset_Pending (L) and then Plug.Take_Reset (L) then
+               Geo_Say ("对方复位(新的一集)⇒ 手回了原处,接着摸面");
+            end if;
             if not Have then
                Geo_Say ("第" & Codec.Img (A + 1) & " 只手:眼的朝向或指尖没量 ⇒ 这只手先不去摸它下面的面");
-            elsif Plug.Reset_Pending (L) then
-               return;
             else
                declare
                   G : constant Geom.Cam_Geo := C.Geo (Natural (Hc));
@@ -9951,7 +9996,9 @@ package body Act is
                   for Dir of Dirs loop
                      exit when Best > 0.0;
                      for R of Rungs loop
-                        exit when Plug.Reset_Pending (L);
+                        if Plug.Reset_Pending (L) and then Plug.Take_Reset (L) then
+                           Geo_Say ("对方复位(新的一集)⇒ 手回了原处,步幅接着量");
+                        end if;
                         declare
                            Ln : constant Long_Float := R * Amp;
                            Av : Table.Vec := Table.Zero_Vec;
