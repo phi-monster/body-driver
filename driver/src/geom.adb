@@ -205,37 +205,158 @@ package body Geom is
    end Project;
 
    --  ── 量朝向 ──
-   procedure Fit (G : in out Cam_Geo; O : Obs_Vectors.Vector; Ok : out Boolean) is
-      --  LM 阻尼的升降倍数(次数,无量纲;只管求解器迭代,不管身体)
+   --  ── Levenberg–Marquardt 精修(数值雅可比、正规方程高斯消元)──:参数个数由调用方定(6 = 朝向 + 点/位置;7 = 再加焦距)。
+   --  Resid 把每个观测的两个像素差填进 Fill;Steps 是各参数的差分步(弧度 / 米 / 像素,极小量)。
+   --  阻尼升降的两个倍数不是门槛、不影响身体动不动,只管这次拟合怎么迭代
+   type Param_Vec is array (Natural range <>) of Long_Float;
+   procedure LM_Refine (P : in out Param_Vec; N_Obs : Natural; Steps : Param_Vec; Iters : Positive;
+                        Resid : access procedure (P : Param_Vec; R : out Long_Float; Fill : access procedure (I : Natural; Du, Dv : Long_Float));
+                        Cur : in out Long_Float) is
       Lm_Loosen : constant := 3;
       Lm_Tighten : constant := 10;
+      Np : constant Natural := P'Length;
+      Lam : Long_Float := 1.0e-3;   --  阻尼(无量纲)
+      Rv : array (0 .. 2 * N_Obs - 1) of Long_Float := [others => 0.0];
+      J : array (0 .. 2 * N_Obs - 1, 0 .. Np - 1) of Long_Float := [others => [others => 0.0]];
+      procedure Fill_R (I : Natural; Du, Dv : Long_Float) is
+      begin
+         Rv (2 * I) := Du; Rv (2 * I + 1) := Dv;
+      end Fill_R;
+   begin
+      for It in 1 .. Iters loop
+         declare
+            R0 : Long_Float;
+         begin
+            Resid (P, R0, Fill_R'Access);
+         end;
+         for K in 0 .. Np - 1 loop
+            declare
+               Pp : Param_Vec := P;
+               Rp : array (0 .. 2 * N_Obs - 1) of Long_Float := [others => 0.0];
+               procedure Fill_P (I : Natural; Du, Dv : Long_Float) is
+               begin
+                  Rp (2 * I) := Du; Rp (2 * I + 1) := Dv;
+               end Fill_P;
+               Dummy : Long_Float;
+               H : constant Long_Float := Steps (Steps'First + K);
+            begin
+               Pp (P'First + K) := Pp (P'First + K) + H;
+               Resid (Pp, Dummy, Fill_P'Access);
+               for I in 0 .. 2 * N_Obs - 1 loop
+                  J (I, K) := (Rp (I) - Rv (I)) / H;
+               end loop;
+            end;
+         end loop;
+         declare
+            A : array (0 .. Np - 1, 0 .. Np - 1) of Long_Float := [others => [others => 0.0]];
+            B : array (0 .. Np - 1) of Long_Float := [others => 0.0];
+            Dlt : array (0 .. Np - 1) of Long_Float := [others => 0.0];
+         begin
+            for K in 0 .. Np - 1 loop
+               for M in 0 .. Np - 1 loop
+                  for I in 0 .. 2 * N_Obs - 1 loop
+                     A (K, M) := A (K, M) + J (I, K) * J (I, M);
+                  end loop;
+               end loop;
+               for I in 0 .. 2 * N_Obs - 1 loop
+                  B (K) := B (K) - J (I, K) * Rv (I);
+               end loop;
+            end loop;
+            for K in 0 .. Np - 1 loop
+               A (K, K) := A (K, K) * (1.0 + Lam) + 1.0e-12;
+            end loop;
+            for Col in 0 .. Np - 1 loop
+               declare
+                  Piv : Natural := Col;
+               begin
+                  for Rw in Col + 1 .. Np - 1 loop
+                     if abs (A (Rw, Col)) > abs (A (Piv, Col)) then
+                        Piv := Rw;
+                     end if;
+                  end loop;
+                  if Piv /= Col then
+                     for M in 0 .. Np - 1 loop
+                        declare
+                           T : constant Long_Float := A (Col, M);
+                        begin
+                           A (Col, M) := A (Piv, M); A (Piv, M) := T;
+                        end;
+                     end loop;
+                     declare
+                        T : constant Long_Float := B (Col);
+                     begin
+                        B (Col) := B (Piv); B (Piv) := T;
+                     end;
+                  end if;
+                  if abs (A (Col, Col)) > 1.0e-18 then
+                     for Rw in 0 .. Np - 1 loop
+                        if Rw /= Col then
+                           declare
+                              Fct : constant Long_Float := A (Rw, Col) / A (Col, Col);
+                           begin
+                              for M in 0 .. Np - 1 loop
+                                 A (Rw, M) := A (Rw, M) - Fct * A (Col, M);
+                              end loop;
+                              B (Rw) := B (Rw) - Fct * B (Col);
+                           end;
+                        end if;
+                     end loop;
+                  end if;
+               end;
+            end loop;
+            for K in 0 .. Np - 1 loop
+               Dlt (K) := (if abs (A (K, K)) > 1.0e-18 then B (K) / A (K, K) else 0.0);
+            end loop;
+            declare
+               Pn : Param_Vec := P;
+               Cn : Long_Float;
+            begin
+               for K in 0 .. Np - 1 loop
+                  Pn (P'First + K) := Pn (P'First + K) + Dlt (K);
+               end loop;
+               Resid (Pn, Cn, null);
+               if Cn < Cur then
+                  P := Pn; Cur := Cn; Lam := Lam / Long_Float (Lm_Loosen);
+               else
+                  Lam := Lam * Long_Float (Lm_Tighten);
+               end if;
+            end;
+         end;
+         exit when Lam > 1.0e6;
+      end loop;
+   end LM_Refine;
+
+   procedure Fit (G : in out Cam_Geo; O : Obs_Vectors.Vector; Ok : out Boolean) is
       N : constant Natural := Natural (O.Length);
-      type Params is array (0 .. 5) of Long_Float;   --  转向量 3 + 那东西的世界位置 3
+      Fit_F : constant Boolean := G.F <= 0.0;          --  焦距没给 ⇒ 一起解(官方 RoboDojo 观测就没有内参)
+      Np : constant Natural := (if Fit_F then 7 else 6);   --  转向量 3 + 那东西的世界位置 3 (+ 焦距)
+      --  焦距的起点:没给时按"画幅宽 = 焦距"起步(约 53° 视场,只是搜索起点,最小二乘会把它改掉)
+      F0 : constant Long_Float := (if Fit_F then 2.0 * G.Cx else G.F);
       Gen : Ada.Numerics.Float_Random.Generator;
       Best_Cost : Long_Float := Long_Float'Last;
-      Best_P : Params := [others => 0.0];
+      Best_P : Param_Vec (0 .. Np - 1) := [others => 0.0];
       Have_Best : Boolean := False;
-
       function Rnd return Long_Float is (Long_Float (Ada.Numerics.Float_Random.Random (Gen)));
-
       --  残差:每个观测两个像素差;东西跑到相机后面就给一个大罚(1e3 像素,无量纲哨兵)
-      procedure Resid (P : Params; R : out Long_Float; Fill : access procedure (I : Natural; Du, Dv : Long_Float)) is
+      procedure Resid (P : Param_Vec; R : out Long_Float; Fill : access procedure (I : Natural; Du, Dv : Long_Float)) is
          Gt : Cam_Geo := G;
          Sum : Long_Float := 0.0;
       begin
-         Gt.R_Ce := Rodrigues ([P (0), P (1), P (2)]);
+         Gt.R_Ce := Rodrigues ([P (P'First), P (P'First + 1), P (P'First + 2)]);
+         if P'Length > 6 then
+            Gt.F := P (P'First + 6);
+         end if;
          for I in 0 .. N - 1 loop
             declare
                U, V : Long_Float;
                Front : Boolean;
                Du, Dv : Long_Float;
             begin
-               Project (Gt, O (I).Pose, [P (3), P (4), P (5)], U, V, Front);
-               if Front then
+               Project (Gt, O (I).Pose, [P (P'First + 3), P (P'First + 4), P (P'First + 5)], U, V, Front);
+               if Front and then Gt.F > 0.0 then
                   Du := U - O (I).U; Dv := V - O (I).V;
                else
-                  --  跑到相机后面:给一个远大于画幅的罚(像素数,无量纲哨兵)
-                  Du := 1.0e3; Dv := 1.0e3;
+                  Du := 1.0e3; Dv := 1.0e3;   --  跑到相机后面:远大于画幅的罚(像素数,无量纲哨兵)
                end if;
                Sum := Sum + Du * Du + Dv * Dv;
                if Fill /= null then
@@ -245,8 +366,7 @@ package body Geom is
          end loop;
          R := Sqrt (Sum / Long_Float (Natural'Max (1, N)));
       end Resid;
-
-      function Cost (P : Params) return Long_Float is
+      function Cost (P : Param_Vec) return Long_Float is
          R : Long_Float;
       begin
          Resid (P, R, null);
@@ -254,7 +374,7 @@ package body Geom is
       end Cost;
    begin
       Ok := False;
-      if N < 4 or else G.F <= 0.0 then
+      if N < 4 or else F0 <= 0.0 then
          return;
       end if;
       Ada.Numerics.Float_Random.Reset (Gen, 7);
@@ -265,7 +385,7 @@ package body Geom is
             Nq : Long_Float := 0.0;
             Gt : Cam_Geo := G;
             Pw : V3;
-            P : Params;
+            P : Param_Vec (0 .. Np - 1) := [others => 0.0];
             Front_All : Boolean := True;
          begin
             for K in 3 .. 6 loop
@@ -283,6 +403,7 @@ package body Geom is
                Q (K) := Q (K) / Nq;
             end loop;
             Gt.R_Ce := Quat_To_R (Q);
+            Gt.F := F0;
             Pw := Triangulate (Gt, O);
             for I in 0 .. N - 1 loop
                declare
@@ -297,7 +418,10 @@ package body Geom is
                declare
                   Rv : constant V3 := Rot_Vec (Gt.R_Ce);
                begin
-                  P := [Rv (0), Rv (1), Rv (2), Pw (0), Pw (1), Pw (2)];
+                  P (0) := Rv (0); P (1) := Rv (1); P (2) := Rv (2); P (3) := Pw (0); P (4) := Pw (1); P (5) := Pw (2);
+                  if Fit_F then
+                     P (6) := F0;
+                  end if;
                   declare
                      C : constant Long_Float := Cost (P);
                   begin
@@ -312,125 +436,17 @@ package body Geom is
       if not Have_Best then
          return;
       end if;
-      --  Levenberg–Marquardt 精修:数值雅可比,6 个参数
       declare
-         P : Params := Best_P;
-         Lam : Long_Float := 1.0e-3;   --  阻尼(无量纲)
+         P : Param_Vec (0 .. Np - 1) := Best_P;
          Cur : Long_Float := Best_Cost;
-         type Jac is array (0 .. 2 * N - 1, 0 .. 5) of Long_Float;
-         J : Jac;
-         Rv : array (0 .. 2 * N - 1) of Long_Float;
-         procedure Fill_R (I : Natural; Du, Dv : Long_Float) is
-         begin
-            Rv (2 * I) := Du; Rv (2 * I + 1) := Dv;
-         end Fill_R;
+         Steps : constant Param_Vec (0 .. 6) := [1.0e-4, 1.0e-4, 1.0e-4, 1.0e-4, 1.0e-4, 1.0e-4, 1.0];   --  差分步(弧度 / 米 / 像素,极小量)
       begin
-         for It in 1 .. 40 loop
-            declare
-               R0 : Long_Float;
-            begin
-               Resid (P, R0, Fill_R'Access);
-               for K in 0 .. 5 loop
-                  declare
-                     H : constant Long_Float := (if K < 3 then 1.0e-4 else 1.0e-4);   --  差分步(弧度 / 米,极小量)
-                     Pp : Params := P;
-                     Rp : array (0 .. 2 * N - 1) of Long_Float;
-                     procedure Fill_P (I : Natural; Du, Dv : Long_Float) is
-                     begin
-                        Rp (2 * I) := Du; Rp (2 * I + 1) := Dv;
-                     end Fill_P;
-                     Dummy : Long_Float;
-                  begin
-                     Pp (K) := Pp (K) + H;
-                     Resid (Pp, Dummy, Fill_P'Access);
-                     for I in 0 .. 2 * N - 1 loop
-                        J (I, K) := (Rp (I) - Rv (I)) / H;
-                     end loop;
-                  end;
-               end loop;
-               --  正规方程 (JᵀJ + λ diag) δ = -Jᵀr,6×6 高斯消元
-               declare
-                  A : array (0 .. 5, 0 .. 5) of Long_Float := [others => [others => 0.0]];
-                  B : Params := [others => 0.0];
-                  Dlt : Params := [others => 0.0];
-               begin
-                  for K in 0 .. 5 loop
-                     for M in 0 .. 5 loop
-                        for I in 0 .. 2 * N - 1 loop
-                           A (K, M) := A (K, M) + J (I, K) * J (I, M);
-                        end loop;
-                     end loop;
-                     for I in 0 .. 2 * N - 1 loop
-                        B (K) := B (K) - J (I, K) * Rv (I);
-                     end loop;
-                  end loop;
-                  for K in 0 .. 5 loop
-                     A (K, K) := A (K, K) * (1.0 + Lam) + 1.0e-12;
-                  end loop;
-                  for Col in 0 .. 5 loop
-                     declare
-                        Piv : Natural := Col;
-                     begin
-                        for Rw in Col + 1 .. 5 loop
-                           if abs (A (Rw, Col)) > abs (A (Piv, Col)) then
-                              Piv := Rw;
-                           end if;
-                        end loop;
-                        if Piv /= Col then
-                           for M in 0 .. 5 loop
-                              declare
-                                 T : constant Long_Float := A (Col, M);
-                              begin
-                                 A (Col, M) := A (Piv, M); A (Piv, M) := T;
-                              end;
-                           end loop;
-                           declare
-                              T : constant Long_Float := B (Col);
-                           begin
-                              B (Col) := B (Piv); B (Piv) := T;
-                           end;
-                        end if;
-                        if abs (A (Col, Col)) > 1.0e-18 then
-                           for Rw in 0 .. 5 loop
-                              if Rw /= Col then
-                                 declare
-                                    Fct : constant Long_Float := A (Rw, Col) / A (Col, Col);
-                                 begin
-                                    for M in 0 .. 5 loop
-                                       A (Rw, M) := A (Rw, M) - Fct * A (Col, M);
-                                    end loop;
-                                    B (Rw) := B (Rw) - Fct * B (Col);
-                                 end;
-                              end if;
-                           end loop;
-                        end if;
-                     end;
-                  end loop;
-                  for K in 0 .. 5 loop
-                     Dlt (K) := (if abs (A (K, K)) > 1.0e-18 then B (K) / A (K, K) else 0.0);
-                  end loop;
-                  declare
-                     Pn : Params := P;
-                     Cn : Long_Float;
-                  begin
-                     for K in 0 .. 5 loop
-                        Pn (K) := Pn (K) + Dlt (K);
-                     end loop;
-                     Cn := Cost (Pn);
-                     --  🔴 这两个数不是门槛,也不影响身体动不动:它们只管【这次拟合怎么迭代】——
-                     --  Levenberg-Marquardt 的阻尼升降(这一步让残差变小就松一点,变大就收紧)。
-                     --  写成具名常数,好让读的人和棘轮都看得出它不是一个可调的物理系数。
-                     if Cn < Cur then
-                        P := Pn; Cur := Cn; Lam := Lam / Long_Float (Lm_Loosen);
-                     else
-                        Lam := Lam * Long_Float (Lm_Tighten);
-                     end if;
-                  end;
-               end;
-            end;
-            exit when Lam > 1.0e6;
-         end loop;
+         LM_Refine (P, N, Steps (0 .. Np - 1), 40, Resid'Access, Cur);
          G.R_Ce := Rodrigues ([P (0), P (1), P (2)]);
+         if Fit_F then
+            G.F := P (6);
+         end if;
+         G.F_Meas := (if Fit_F then P (6) else 0.0);
          G.Rms := Cur;
          G.Valid := True;
          Ok := True;
@@ -559,28 +575,31 @@ package body Geom is
    end Pos_For;
 
    procedure Fit_Fixed (G : in out Cam_Geo; O : Mark_Vectors.Vector; Ok : out Boolean) is
-      Lm_Loosen : constant := 3;     --  LM 阻尼的升降倍数(次数,无量纲;只管求解器迭代,不管身体)
-      Lm_Tighten : constant := 10;
       N : constant Natural := Natural (O.Length);
-      type Params is array (0 .. 5) of Long_Float;   --  转向量 3 + 相机位置 3
+      Fit_F : constant Boolean := G.F <= 0.0;          --  焦距没给 ⇒ 一起解
+      Np : constant Natural := (if Fit_F then 7 else 6);   --  转向量 3 + 相机位置 3 (+ 焦距)
+      F0 : constant Long_Float := (if Fit_F then 2.0 * G.Cx else G.F);
       Gen : Ada.Numerics.Float_Random.Generator;
       Best_Cost : Long_Float := Long_Float'Last;
-      Best_P : Params := [others => 0.0];
+      Best_P : Param_Vec (0 .. Np - 1) := [others => 0.0];
       Have_Best : Boolean := False;
       function Rnd return Long_Float is (Long_Float (Ada.Numerics.Float_Random.Random (Gen)));
-      procedure Resid (P : Params; R : out Long_Float; Fill : access procedure (I : Natural; Du, Dv : Long_Float)) is
+      procedure Resid (P : Param_Vec; R : out Long_Float; Fill : access procedure (I : Natural; Du, Dv : Long_Float)) is
          Gt : Cam_Geo := G;
          Sum : Long_Float := 0.0;
       begin
-         Gt.R_Ce := Rodrigues ([P (0), P (1), P (2)]);
-         Gt.Pos := [P (3), P (4), P (5)];
+         Gt.R_Ce := Rodrigues ([P (P'First), P (P'First + 1), P (P'First + 2)]);
+         Gt.Pos := [P (P'First + 3), P (P'First + 4), P (P'First + 5)];
+         if P'Length > 6 then
+            Gt.F := P (P'First + 6);
+         end if;
          for I in 0 .. N - 1 loop
             declare
                U, V, Du, Dv : Long_Float;
                Front : Boolean;
             begin
                Project_Fixed (Gt, O (I).Pw, U, V, Front);
-               if Front then
+               if Front and then Gt.F > 0.0 then
                   Du := U - O (I).U; Dv := V - O (I).V;
                else
                   Du := 1.0e3; Dv := 1.0e3;   --  跑到相机后面:远大于画幅的罚(像素数,无量纲哨兵)
@@ -593,7 +612,7 @@ package body Geom is
          end loop;
          R := Sqrt (Sum / Long_Float (Natural'Max (1, N)));
       end Resid;
-      function Cost (P : Params) return Long_Float is
+      function Cost (P : Param_Vec) return Long_Float is
          R : Long_Float;
       begin
          Resid (P, R, null);
@@ -601,7 +620,7 @@ package body Geom is
       end Cost;
    begin
       Ok := False;
-      if N < 4 or else G.F <= 0.0 then
+      if N < 4 or else F0 <= 0.0 then
          return;
       end if;
       Ada.Numerics.Float_Random.Reset (Gen, 11);
@@ -611,7 +630,8 @@ package body Geom is
             Nq : Long_Float := 0.0;
             R : M3;
             Ps : V3;
-            P : Params;
+            Gt : Cam_Geo := G;
+            P : Param_Vec (0 .. Np - 1) := [others => 0.0];
          begin
             for K in 3 .. 6 loop
                declare
@@ -627,12 +647,16 @@ package body Geom is
                Q (K) := Q (K) / Nq;
             end loop;
             R := Quat_To_R (Q);
-            Ps := Pos_For (R, G, O);
+            Gt.F := F0;
+            Ps := Pos_For (R, Gt, O);
             declare
                Rv : constant V3 := Rot_Vec (R);
                C : Long_Float;
             begin
-               P := [Rv (0), Rv (1), Rv (2), Ps (0), Ps (1), Ps (2)];
+               P (0) := Rv (0); P (1) := Rv (1); P (2) := Rv (2); P (3) := Ps (0); P (4) := Ps (1); P (5) := Ps (2);
+               if Fit_F then
+                  P (6) := F0;
+               end if;
                C := Cost (P);
                if C < Best_Cost then
                   Best_Cost := C; Best_P := P; Have_Best := True;
@@ -644,120 +668,17 @@ package body Geom is
          return;
       end if;
       declare
-         P : Params := Best_P;
-         Lam : Long_Float := 1.0e-3;   --  阻尼(无量纲)
+         P : Param_Vec (0 .. Np - 1) := Best_P;
          Cur : Long_Float := Best_Cost;
-         type Jac is array (0 .. 2 * N - 1, 0 .. 5) of Long_Float;
-         J : Jac;
-         Rv : array (0 .. 2 * N - 1) of Long_Float;
-         procedure Fill_R (I : Natural; Du, Dv : Long_Float) is
-         begin
-            Rv (2 * I) := Du; Rv (2 * I + 1) := Dv;
-         end Fill_R;
+         Steps : constant Param_Vec (0 .. 6) := [1.0e-4, 1.0e-4, 1.0e-4, 1.0e-4, 1.0e-4, 1.0e-4, 1.0];   --  差分步(弧度 / 米 / 像素,极小量)
       begin
-         for It in 1 .. 60 loop
-            declare
-               R0 : Long_Float;
-            begin
-               Resid (P, R0, Fill_R'Access);
-               for K in 0 .. 5 loop
-                  declare
-                     H : constant Long_Float := 1.0e-4;   --  差分步(弧度 / 米,极小量)
-                     Pp : Params := P;
-                     Rp : array (0 .. 2 * N - 1) of Long_Float;
-                     procedure Fill_P (I : Natural; Du, Dv : Long_Float) is
-                     begin
-                        Rp (2 * I) := Du; Rp (2 * I + 1) := Dv;
-                     end Fill_P;
-                     Dummy : Long_Float;
-                  begin
-                     Pp (K) := Pp (K) + H;
-                     Resid (Pp, Dummy, Fill_P'Access);
-                     for I in 0 .. 2 * N - 1 loop
-                        J (I, K) := (Rp (I) - Rv (I)) / H;
-                     end loop;
-                  end;
-               end loop;
-               declare
-                  A : array (0 .. 5, 0 .. 5) of Long_Float := [others => [others => 0.0]];
-                  B : Params := [others => 0.0];
-                  Dlt : Params := [others => 0.0];
-               begin
-                  for K in 0 .. 5 loop
-                     for M in 0 .. 5 loop
-                        for I in 0 .. 2 * N - 1 loop
-                           A (K, M) := A (K, M) + J (I, K) * J (I, M);
-                        end loop;
-                     end loop;
-                     for I in 0 .. 2 * N - 1 loop
-                        B (K) := B (K) - J (I, K) * Rv (I);
-                     end loop;
-                  end loop;
-                  for K in 0 .. 5 loop
-                     A (K, K) := A (K, K) * (1.0 + Lam) + 1.0e-12;
-                  end loop;
-                  for Col in 0 .. 5 loop
-                     declare
-                        Piv : Natural := Col;
-                     begin
-                        for Rw in Col + 1 .. 5 loop
-                           if abs (A (Rw, Col)) > abs (A (Piv, Col)) then
-                              Piv := Rw;
-                           end if;
-                        end loop;
-                        if Piv /= Col then
-                           for M in 0 .. 5 loop
-                              declare
-                                 T : constant Long_Float := A (Col, M);
-                              begin
-                                 A (Col, M) := A (Piv, M); A (Piv, M) := T;
-                              end;
-                           end loop;
-                           declare
-                              T : constant Long_Float := B (Col);
-                           begin
-                              B (Col) := B (Piv); B (Piv) := T;
-                           end;
-                        end if;
-                        if abs (A (Col, Col)) > 1.0e-18 then
-                           for Rw in 0 .. 5 loop
-                              if Rw /= Col then
-                                 declare
-                                    Fct : constant Long_Float := A (Rw, Col) / A (Col, Col);
-                                 begin
-                                    for M in 0 .. 5 loop
-                                       A (Rw, M) := A (Rw, M) - Fct * A (Col, M);
-                                    end loop;
-                                    B (Rw) := B (Rw) - Fct * B (Col);
-                                 end;
-                              end if;
-                           end loop;
-                        end if;
-                     end;
-                  end loop;
-                  for K in 0 .. 5 loop
-                     Dlt (K) := (if abs (A (K, K)) > 1.0e-18 then B (K) / A (K, K) else 0.0);
-                  end loop;
-                  declare
-                     Pn : Params := P;
-                     Cn : Long_Float;
-                  begin
-                     for K in 0 .. 5 loop
-                        Pn (K) := Pn (K) + Dlt (K);
-                     end loop;
-                     Cn := Cost (Pn);
-                     if Cn < Cur then
-                        P := Pn; Cur := Cn; Lam := Lam / Long_Float (Lm_Loosen);
-                     else
-                        Lam := Lam * Long_Float (Lm_Tighten);
-                     end if;
-                  end;
-               end;
-            end;
-            exit when Lam > 1.0e6;
-         end loop;
+         LM_Refine (P, N, Steps (0 .. Np - 1), 60, Resid'Access, Cur);
          G.R_Ce := Rodrigues ([P (0), P (1), P (2)]);
          G.Pos := [P (3), P (4), P (5)];
+         if Fit_F then
+            G.F := P (6);
+         end if;
+         G.F_Meas := (if Fit_F then P (6) else 0.0);
          G.Rms := Cur;
          G.Fixed := True;
          G.Valid := True;

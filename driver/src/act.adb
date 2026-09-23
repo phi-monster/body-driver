@@ -5330,9 +5330,15 @@ package body Act is
    procedure Geo_Take_K (C : in out Context; F : Plug.Frame; Cam : Natural) is
       G : Geom.Cam_Geo := Geo_Of (C, Cam);
    begin
-      if Cam < Natural (F.Cams.Length) and then F.Cams (Cam).Has_K and then Cam < Natural (C.Geo.Length) then
-         G.F := F.Cams (Cam).Focal; G.Cx := F.Cams (Cam).Cx; G.Cy := F.Cams (Cam).Cy;
-         C.Geo.Replace_Element (Cam, G);
+      if Cam < Natural (F.Cams.Length) and then Cam < Natural (C.Geo.Length) then
+         if F.Cams (Cam).Has_K then
+            G.F := F.Cams (Cam).Focal; G.Cx := F.Cams (Cam).Cx; G.Cy := F.Cams (Cam).Cy;
+            C.Geo.Replace_Element (Cam, G);
+         elsif G.Cx <= 0.0 and then F.Cams (Cam).W > 0 then
+            --  身体没给内参(官方 RoboDojo 观测就没有):主点按画幅中心(纯几何的一半),焦距留 0 = 量朝向时一起解出来、存进几何文件
+            G.Cx := 0.5 * Long_Float (F.Cams (Cam).W); G.Cy := 0.5 * Long_Float (F.Cams (Cam).H);
+            C.Geo.Replace_Element (Cam, G);
+         end if;
       end if;
    end Geo_Take_K;
 
@@ -5648,7 +5654,7 @@ package body Act is
                --  朝向好不好,把残差说出来就行;走路那一段自己量得出视差对不对。)
                G := Geo_Of (C, Cam);
                Geo_Say ("第" & Codec.Img (Cam) & " 台相机(长在第" & Codec.Img (Natural (A) + 1) & " 只手上):焦距 " &
-                        (if G.F > 0.0 then Codec.Fmt (G.F, 1) & " px" else "没有") & " · 朝向 " & (if G.Valid then "量过(残差 " & Codec.Fmt (G.Rms, 2) & " px)" else "没量,用到时现量") &
+                        (if G.F > 0.0 then Codec.Fmt (G.F, 1) & " px" & (if F.Cams (Cam).Has_K then "(身体给的)" else "(自己量的)") else "没给,量朝向时一起解") & " · 朝向 " & (if G.Valid then "量过(残差 " & Codec.Fmt (G.Rms, 2) & " px)" else "没量,用到时现量") &
                         " · 指尖 " & (if G.Tip_Valid then "有" else "没有"));
             end if;
          end;
@@ -5671,9 +5677,12 @@ package body Act is
       Ok := False;
       Geo_Take_K (C, F, Cam);
       G := Geo_Of (C, Cam);
-      if G.F <= 0.0 then
-         Geo_Say ("这台相机没有焦距(观测里没带、也没量过)⇒ 量不了朝向");
+      if G.Cx <= 0.0 then
+         Geo_Say ("这台相机连画幅都没有 ⇒ 量不了朝向");
          return;
+      end if;
+      if G.F <= 0.0 then
+         Geo_Say ("这台相机没给焦距 ⇒ 和朝向一起解");
       end if;
       Geo_Track (C, F, Cam, Slot, U, V, Seen);
       if not Seen then
@@ -5712,7 +5721,8 @@ package body Act is
       if Ok then
          C.Geo.Replace_Element (Cam, G);
          Geom.Save (To_String (C.Geo_Path), C.Geo);
-         Geo_Say ("相机朝向量好:" & Codec.Img (Natural (Obs.Length)) & " 停,像素残差 " & Codec.Fmt (G.Rms, 2) & " px,存进 " & To_String (C.Geo_Path));
+         Geo_Say ("相机朝向量好:" & Codec.Img (Natural (Obs.Length)) & " 停,像素残差 " & Codec.Fmt (G.Rms, 2) & " px"
+                  & (if G.F_Meas > 0.0 then ",焦距一起解出来 " & Codec.Fmt (G.F, 1) & " px" else "") & ",存进 " & To_String (C.Geo_Path));
       else
          Geo_Say ("朝向解不出来(能用的停只有 " & Codec.Img (Natural (Obs.Length)) & " 个)");
       end if;
@@ -5810,8 +5820,8 @@ package body Act is
       if C.Geo (Wc).Fixed then
          Geo_Say ("第" & Codec.Img (Wc) & " 台相机(不动的眼):位置和朝向量过(残差 " & Codec.Fmt (C.Geo (Wc).Rms, 2) & " px)");
          Need_Still := False;
-      elsif C.Geo (Wc).F <= 0.0 then
-         Geo_Say ("第" & Codec.Img (Wc) & " 台相机(不动的眼)没有焦距 ⇒ 量不了它在哪");
+      elsif C.Geo (Wc).Cx <= 0.0 then
+         Geo_Say ("第" & Codec.Img (Wc) & " 台相机(不动的眼)连画幅都没有 ⇒ 量不了它在哪");
          Need_Still := False;
       end if;
       --  🔴 这几停只为不动的眼而挪(每停合空要 30 多拍,八停 600 拍 = 半集;H41 2026-09-22 实测:为左腕眼白挪了 600 拍,它一次都没看见指尖)。
@@ -9757,8 +9767,8 @@ package body Act is
             A : constant Integer := Cam_Arm (C, Cam);
          begin
             if A >= 0 and then Cam < Natural (C.Geo.Length) and then Cam < Natural (F.Cams.Length) and then not C.Geo (Cam).Valid then
-               if C.Geo (Cam).F <= 0.0 then
-                  Geo_Say ("第" & Codec.Img (Cam) & " 台相机(长在第" & Codec.Img (Natural (A) + 1) & " 只手上)没有焦距 ⇒ 量不了它的朝向");
+               if C.Geo (Cam).Cx <= 0.0 then
+                  Geo_Say ("第" & Codec.Img (Cam) & " 台相机(长在第" & Codec.Img (Natural (A) + 1) & " 只手上)连画幅都没有 ⇒ 量不了它的朝向");
                else
                   declare
                      Sl : constant Integer := Largest_Slot (C, F, Cam);

@@ -512,6 +512,36 @@ begin
          Check (not Hok, "视线背对着面 ⇒ 不交,如实说");
       end;
    end;
+   --  🔴 焦距一起解(2026-09-24,官方 RoboDojo 观测没有内参):手上的眼 F 不给(0),从 6 停里把朝向和焦距一起量出来;真值 F = 400
+   declare
+      Gt : Geom.Cam_Geo;
+      Gf : Geom.Cam_Geo;
+      Obs : Geom.Obs_Vectors.Vector;
+      Pw : constant Geom.V3 := [0.05, 0.4, 0.2];   --  盯着的那块东西在世界里的位置(合成)
+      Ok : Boolean;
+      Moves : constant array (1 .. 6) of Geom.V3 := [[0.0, 0.0, 0.0], [0.05, 0.0, 0.0], [0.0, 0.0, 0.05], [0.0, 0.05, 0.0], [-0.05, 0.0, 0.05], [0.05, 0.05, 0.0]];
+   begin
+      Gt.F := 400.0; Gt.Cx := 320.0; Gt.Cy := 240.0; Gt.R_Ce := Geom.Rodrigues ([0.2, -0.3, 0.1]); Gt.Valid := True;
+      for M of Moves loop
+         declare
+            P : constant Plug.Arm_Pose := [M (0), M (1), M (2) + 0.6, 1.0, 0.0, 0.0, 0.0];
+            U, V : Long_Float;
+            Fr : Boolean;
+         begin
+            Geom.Project (Gt, P, Pw, U, V, Fr);
+            Check (Fr, "焦距一起解:合成的东西在相机前面(测试数据自己先得成立)");
+            Obs.Append (Geom.Obs'(Pose => P, U => U, V => V));
+         end;
+      end loop;
+      Gf.F := 0.0; Gf.Cx := 320.0; Gf.Cy := 240.0;   --  焦距没给
+      Geom.Fit (Gf, Obs, Ok);
+      declare
+         Da : constant Long_Float := (if Ok then Geom.Norm (Geom.Rot_Vec (Geom.Mul (Geom.Tr (Gt.R_Ce), Gf.R_Ce))) else 1.0);
+      begin
+         Check (Ok and then abs (Gf.F - 400.0) < 4.0 and then Da < 0.01 and then Gf.Rms < 0.5,
+                "焦距一起解:6 停 ⇒ 焦距 " & Codec.Fmt (Gf.F, 1) & " px(真 400)· 朝向差 " & Codec.Fmt (Da, 4) & " rad · 残差 " & Codec.Fmt (Gf.Rms, 3) & " px");
+      end;
+   end;
    --  🔴 没有深度时量指尖(2026-09-23):指尖 = 自己眼里那条视线上离眼 S 米处;不动的眼两停看见指尖 ⇒ 解 S。合成数据:真值 0.12 m
    declare
       Gf : Geom.Cam_Geo;

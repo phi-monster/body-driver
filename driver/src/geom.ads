@@ -15,7 +15,8 @@ package Geom is
    package Obs_Vectors is new Ada.Containers.Vectors (Natural, Obs);
    type Cam_Geo is record
       Valid : Boolean := False;        --  相机朝向量过了
-      F, Cx, Cy : Long_Float := 0.0;   --  焦距(像素)、主点
+      F, Cx, Cy : Long_Float := 0.0;   --  焦距(像素)、主点。焦距:身体给了就用;没给(官方 RoboDojo 观测就没有)就在量朝向时一起解出来
+      F_Meas : Long_Float := 0.0;      --  量朝向时顺带解出来的焦距(和给的那份对账用;没给时它就是 F)
       R_Ce : M3 := Identity;           --  相机 → 手(列 = 相机轴在手坐标系里)
       Rms : Long_Float := 0.0;         --  量朝向时的像素残差
       Tip_Valid : Boolean := False;
@@ -44,7 +45,7 @@ package Geom is
    function Triangulate (G : Cam_Geo; O : Obs_Vectors.Vector) return V3;
    function To_Cam (G : Cam_Geo; P : Plug.Arm_Pose; Pw : V3) return V3;         --  世界点 → 相机系
    procedure Project (G : Cam_Geo; P : Plug.Arm_Pose; Pw : V3; U, V : out Long_Float; In_Front : out Boolean);
-   --  量相机朝向:手做几次【平移】,同一个不动的东西在画面里的像素 ⇒ 解朝向 + 那东西的位置。盲搜初值 + 最小二乘。
+   --  量相机朝向:手做几次【平移】,同一个不动的东西在画面里的像素 ⇒ 解朝向 + 那东西的位置(+ 焦距,当 G.F 没给时)。盲搜初值 + 最小二乘。
    procedure Fit (G : in out Cam_Geo; O : Obs_Vectors.Vector; Ok : out Boolean);
    --  ── 不动的眼 ──:它看见我身上一个【世界位置已知】的点(指尖:手的位姿读数 + 量过的指尖偏置)落在画面哪儿
    type Mark is record
