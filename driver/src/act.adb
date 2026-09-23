@@ -5864,31 +5864,20 @@ package body Act is
 
    --  ── 接触集接线(PLAN.md 1.5)──:身体量的数全从这只眼和握区来,一个字面量都没有;哪儿夹得住由 Contact.Gen 从形状里算,不由我挑
 
-   --  它躺的面过哪一点:量到的位置 P,可它躺在我碰过的面上 ⇒ P 不可能在那面之下,也不可能比张口还高出那面(那样我也夹不住它)。
-   --  出了范围就贴回碰过的那一点(当它厚度为零);没碰过面就只能信 P
+   --  它躺的面过哪一点:碰过它躺的面之后,就是那个面上离 P 最近的点(当它厚度为零)。量到的位置 P 的高度是视线交出来/挪眼估出来的,
+   --  两条视线都近乎竖直时深度病态(H53:桌面之下 9–28 cm),而腕眼近乎竖直向下看时,面的高度错 5 cm 就把整片轮廓横着投歪 5 cm
+   --  (H58/H59 2026-09-23 实测:落点准到 1 mm 却合空;第三把又把估高了 3.3 cm 的面当成"量到的厚度")。零厚度只错它自己的厚度那么一点。没碰过面就只能信 P
    function Plane_Point (C : Context; P, N : Geom.V3; Say : Boolean) return Geom.V3 is
-      Hc : constant Integer := (if C.Wld.Held_Arm >= 0 then -1 else -1);
-      pragma Unreferenced (Hc);
-      Gap : Long_Float := 0.0;
       H : Long_Float;
    begin
       if not C.Touch_Valid then
          return P;
       end if;
-      for Gm of C.Geo loop
-         if Gm.Tip_Valid and then Gm.Gap > Gap then
-            Gap := Gm.Gap;
-         end if;
-      end loop;
       H := (P (0) - C.Touch_Pt (0)) * N (0) + (P (1) - C.Touch_Pt (1)) * N (1) + (P (2) - C.Touch_Pt (2)) * N (2);
-      if H < 0.0 or else (Gap > 0.0 and then H > Gap) then
-         if Say then
-            Geo_Say ("它量到的位置" & (if H < 0.0 then "在我碰过的面之下 " & Mm (-H) else "高出我碰过的面 " & Mm (H) & "(比张口还高)")
-                     & " ⇒ 当它贴在那个面上(它躺在面上,不可能在面下;比张口还厚的我也夹不住)");
-         end if;
-         return [P (0) - H * N (0), P (1) - H * N (1), P (2) - H * N (2)];
+      if Say and then abs H > C.Map.EE_Noise then
+         Geo_Say ("它量到的位置" & (if H < 0.0 then "在我碰过的面之下 " & Mm (-H) else "高出我碰过的面 " & Mm (H)) & " ⇒ 当它贴在那个面上(它躺在面上;厚度当零,只错它自己那么厚)");
       end if;
-      return P;
+      return [P (0) - H * N (0), P (1) - H * N (1), P (2) - H * N (2)];
    end Plane_Point;
 
    --  这只眼这一帧看全了它、它的位置又是两眼交出来的 ⇒ 轮廓像素各发一条视线,落到它躺的面(过它的位置,法向 = 碰过的面的法向,没碰过按上)上,
@@ -6442,6 +6431,102 @@ package body Act is
       end if;
       return False;
    end Hand_Covers;
+
+   --  同一件东西在两只眼里被脑起了不同的名字(H55/H58 2026-09-23:头顶眼里叫「the mint green」、腕眼里叫「scissors」)⇒ 两眼视线永远配不成对、没有交点,
+   --  只剩单眼估计,窗口跟丢后落到别的亮东西上(H58 举起了机器人跟前的小白块,剪刀原封不动)。同一性是量得出来的:这只眼到这块的视线,和别的眼到它那块的
+   --  视线交在一点(偏差不超过那块东西自己的一半大)⇒ 同一件,名字统一到脑现在的叫法 —— 和"按字面包含统一"是同一条规矩的另一半:那条看字,这条看视线
+   procedure Unify_By_Sight (C : in out Context; F : Plug.Frame; Cam : Natural; W : String; R : Picture.Region) is
+      G : constant Geom.Cam_Geo := Geo_Of (C, Cam);
+      A1 : constant Integer := Cam_Arm (C, Cam);
+      Kw : constant Natural := F.Cams (Cam).W;
+      Kh : constant Natural := F.Cams (Cam).H;
+      Ok1 : Boolean := False;
+      S1 : Geom.Sight;
+   begin
+      if A1 < 0 and then G.Fixed then
+         S1 := (O => G.Pos, D => Geom.Ray_Fixed (G, R.Cu * Long_Float (Kw), R.Cv * Long_Float (Kh)));
+         Ok1 := True;
+      elsif A1 >= 0 and then G.Valid and then G.F > 0.0 and then A1 < Integer (F.EE.Length) then
+         declare
+            P : constant Plug.Arm_Pose := F.EE (Natural (A1));
+         begin
+            S1 := (O => [P (0), P (1), P (2)], D => Geom.Ray (G, P, R.Cu * Long_Float (Kw), R.Cv * Long_Float (Kh)));
+            Ok1 := True;
+         end;
+      end if;
+      if not Ok1 then
+         return;
+      end if;
+      for Bi in 0 .. Natural (C.Boxed.Length) - 1 loop
+         declare
+            B : constant Boxed_Thing := C.Boxed (Bi);
+         begin
+            if B.Cam /= Cam and then B.Seen and then To_String (B.Name) /= W and then B.Cam < Natural (C.Geo.Length) and then B.Cam < Natural (F.Cams.Length) then
+               declare
+                  Gm : constant Geom.Cam_Geo := C.Geo (B.Cam);
+                  A2 : constant Integer := Cam_Arm (C, B.Cam);
+                  W2 : constant Natural := F.Cams (B.Cam).W;
+                  H2 : constant Natural := F.Cams (B.Cam).H;
+                  S2 : Geom.Sight;
+                  Ok2 : Boolean := False;
+               begin
+                  if A2 < 0 and then Gm.Fixed then
+                     S2 := (O => Gm.Pos, D => Geom.Ray_Fixed (Gm, B.Cu * Long_Float (W2), B.Cv * Long_Float (H2)));
+                     Ok2 := True;
+                  elsif A2 >= 0 and then Gm.Valid and then Gm.F > 0.0 and then A2 < Integer (F.EE.Length) then
+                     declare
+                        P2 : constant Plug.Arm_Pose := F.EE (Natural (A2));
+                     begin
+                        S2 := (O => [P2 (0), P2 (1), P2 (2)], D => Geom.Ray (Gm, P2, B.Cu * Long_Float (W2), B.Cv * Long_Float (H2)));
+                        Ok2 := True;
+                     end;
+                  end if;
+                  if Ok2 then
+                     declare
+                        Rays : Geom.Sight_Vectors.Vector;
+                        Mok : Boolean;
+                        Spread : Long_Float;
+                        Pm : Geom.V3;
+                     begin
+                        Rays.Append (S1);
+                        Rays.Append (S2);
+                        Pm := Geom.Meet (Rays, Mok, Spread);
+                        if Mok then
+                           declare
+                              --  那块东西自己有多大(米):它在那只眼里框的对角线 × 那只眼到交点的距离 ÷ 焦距(全是量出来的);两条视线差得不超过它的一半(纯比例)就是同一件
+                              D2 : constant Long_Float := Geom.Norm ([Pm (0) - S2.O (0), Pm (1) - S2.O (1), Pm (2) - S2.O (2)]);
+                              Diag : constant Long_Float := Sqrt (Long_Float (B.X1 - B.X0 + 1) ** 2 + Long_Float (B.Y1 - B.Y0 + 1) ** 2);
+                              Size : constant Long_Float := (if Gm.F > 0.0 then Diag * D2 / Gm.F else 0.0);
+                           begin
+                              if Spread <= 0.5 * Size then
+                                 declare
+                                    Old : constant String := To_String (B.Name);
+                                    B2 : Boxed_Thing := B;
+                                 begin
+                                    Put_Line ("[身] 📦 第" & Codec.Img (B.Cam) & " 台里你叫「" & Old & "」的和这只眼里你叫「" & W & "」的,视线交在一点(偏差 "
+                                              & Mm (Spread) & ",它本身约 " & Mm (Size) & ")⇒ 同一件,以后都叫它「" & W & "」");
+                                    B2.Name := To_Unbounded_String (W);
+                                    C.Boxed.Replace_Element (Bi, B2);
+                                    if To_String (C.Geo_Pw_Name) = Old then
+                                       C.Geo_Pw_Name := To_Unbounded_String (W);
+                                    end if;
+                                    if To_String (C.Geo_Name) = Old then
+                                       C.Geo_Name := To_Unbounded_String (W);
+                                    end if;
+                                    if To_String (C.Sil_Name) = Old then
+                                       C.Sil_Name := To_Unbounded_String (W);
+                                    end if;
+                                 end;
+                              end if;
+                           end;
+                        end if;
+                     end;
+                  end if;
+               end;
+            end if;
+         end;
+      end loop;
+   end Unify_By_Sight;
 
    --  ── 此刻每一只看得见它的眼给一条视线 ──(它叫 Its_Name,脑点过名的)
    --  眼可以是:正在走路的这只手自己的眼(Seen 且整块)、不动的眼(量过自己在哪)、另一只手的眼(朝向量过)。
@@ -7588,6 +7673,8 @@ package body Act is
                            C.Boxed.Append (Bt);
                            At_Bx := Integer (C.Boxed.Length) - 1;
                         end if;
+                        --  ④b 别的眼里已经起过名的那块和它是不是同一件:看视线交不交在一点(名字对不上也认得出)
+                        Unify_By_Sight (C, F, Cam, W, R);
                         --  ⑤ 让它当场进槽、进清单:这一帧重切一次(这回带着它),再照常对号
                         C.Cut_Cam := -1;
                         World.Observe (C.Wld, Cam, Cut_Things (C, F, Cam), Kw, Kh);
@@ -8737,6 +8824,39 @@ package body Act is
             Put_Line ("[身] 📐 悬停点 ⇒ " & To_String (Ev2));
             Geo_Go (L, C, F, Arm, T_Pt, Touch.Tol_M, Amt, True, Along, Event, St4);
             Steps_Taken := Steps_Taken + St4;
+            --  压下去碰到了它躺的面,而取轮廓时面的高度只是估的(第一句时还没碰过面)⇒ 按真的面重投轮廓、重算落点,沿着面挪过去再合。
+            --  这是在量到的接触下继续解同一个约束,不是换打法(H58/H59:第一句的面估低 5 cm,落点横着偏 5 cm,合空)
+            if C.Touch_Valid and then Index (Event, "contact") > 0 then
+               declare
+                  Set2 : Contact.Set;
+                  Center2 : Geom.V3;
+                  Width2 : Long_Float;
+                  Steps2 : Contact.Exec.Step_Vectors.Vector;
+                  Note2 : Unbounded_String;
+                  Pok2 : Boolean;
+               begin
+                  Pick_Contact (C, F, Arm, Cam1, Say.Grip_K, Geo_Name, Set2, Center2, Width2, Steps2, Note2, Pok2);
+                  if Pok2 and then Index (Note2, "re-laid on the surface I touched") > 0 then
+                     declare
+                        T2 : constant Contact.Exec.Step := Steps2 (1);
+                        T_Pt2 : constant Geom.V3 := Mid (T2);
+                        Moved : constant Long_Float := Geom.Norm ([T_Pt2 (0) - T_Pt (0), T_Pt2 (1) - T_Pt (1), T_Pt2 (2) - T_Pt (2)]);
+                        Ev3 : Unbounded_String;
+                        St5 : Natural;
+                     begin
+                        Put_Line ("[身] ✋ 碰到面之后按真高度重投:" & To_String (Note2));
+                        Put_Line ("[身] ✋ 落点从 (" & Mm (T_Pt (0)) & "," & Mm (T_Pt (1)) & ") 挪到 (" & Mm (T_Pt2 (0)) & "," & Mm (T_Pt2 (1)) & "),差 " & Mm (Moved));
+                        if Moved > Touch.Tol_M then
+                           Grasp_Set := Set2; Grasp_Center := Center2; Grasp_Width := Width2;
+                           Geo_Go (L, C, F, Arm, T_Pt2, T2.Tol_M, Amt, True, Along, Ev3, St5);
+                           Steps_Taken := Steps_Taken + St5;
+                           Event := Ev3;
+                           Report := Report & "after touching the surface I re-laid the outline on it and moved my fingers " & Mm (Moved) & " along it. ";
+                        end if;
+                     end;
+                  end if;
+               end;
+            end if;
             Grasp_Valid := Index (Event, "contact") > 0 or else Index (Event, "amount: arrived") > 0;
             Append (Event, " (I laid the hold out from its measured outline, turned my jaw to it, came to the hover point and then down onto it)");
          end;
