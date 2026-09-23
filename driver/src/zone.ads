@@ -46,6 +46,11 @@ package Zone is
    --  从"合空扫过的像素 + 张开时的深度 + 合上时的深度"算出握区(纯函数,可离线测):
    --  近的那一拨(张开时就在近处)= 手指;扫过但张开时是远处 = 手指合拢时要盖过的地方 = 能装东西的区。
    function From_Sweep (Swept : Bools; Depth_Open, Depth_Closed : Floats; Has_Depth : Boolean; W, Hh : Natural) return Hand_Zone;
+   --  没有深度时的握区(纯函数,可离线测):只看两张停住的画面(张开 vs 合上)。
+   --  变化大的像素才是手指来去(分界 = 变化量的两拨分界,算出来的;不用噪声地板 —— 腕上的相机一合爪整幅画面都抖,按地板算下半幅全"动了",
+   --  S5 2026-09-23 实测 12.7 万像素被记成手指)。变暗的一拨和变亮的一拨是两类:一类是手指离开露出背景,一类是手指到来盖住背景;
+   --  张开时的手指分得开、合上时挤在一起 ⇒ 几块形心散得开的那一类是"张开时的手指"(瓣),另一类是手指合到的地方(区)
+   function From_Frames (Open_G, Closed_G : Buf; W, Hh : Natural) return Hand_Zone;
    --  把手指像素从深度切块结果里剔掉(块心落在手指框或区框里 = 我自己)
    function Is_Self (Z : Hand_Zone; R : Picture.Region; W, Hh : Natural) return Boolean;
 end Zone;

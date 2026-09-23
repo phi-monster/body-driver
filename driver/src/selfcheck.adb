@@ -269,6 +269,52 @@ begin
       Check (abs (Z.Depth - 0.2) < 1.0e-6, "握区:手指深 " & Codec.Fmt (Z.Depth, 3));
       Check (Z.X0 >= 10 and then Z.X1 <= 53, "握区:区框在两瓣之间 " & Codec.Img (Z.X0) & ".." & Codec.Img (Z.X1));
    end;
+   --  🔴 没有深度的握区(2026-09-24):只比张开/合上两张停住的灰度图。桌面木纹 100±8 逐像素乱抖(相机一合爪就抖,合成成整幅噪声),
+   --  两根黑手指(20)张开时在下沿左右两角、合上时在下沿中间相遇。老量法按噪声地板把整个下半幅记成手指;新量法要认出两瓣、区心在正中
+   declare
+      W : constant := 64;
+      H : constant := 48;
+      Open_G, Closed_G : Buf := U8_Vectors.To_Vector (100, Ada.Containers.Count_Type (W * H));
+      Z : Zone.Hand_Zone;
+      Seed : Long_Long_Integer := 7;
+      function Noise return Integer is   --  确定性伪随机 ±8(测试数据自己的抖动,不是驱动里的常数)
+      begin
+         Seed := (Seed * 1103515245 + 12345) mod 2147483648;
+         return Integer ((Seed / 65536) mod 17) - 8;
+      end Noise;
+   begin
+      for I in 0 .. W * H - 1 loop
+         Open_G.Replace_Element (I, Interfaces.Unsigned_8 (Integer'Max (0, Integer'Min (255, 100 + Noise))));
+         Closed_G.Replace_Element (I, Interfaces.Unsigned_8 (Integer'Max (0, Integer'Min (255, 100 + Noise))));
+      end loop;
+      for Y in 36 .. 47 loop
+         for X in 0 .. 63 loop
+            if X in 4 .. 11 or else X in 52 .. 59 then
+               Open_G.Replace_Element (Y * W + X, 20);
+            end if;
+            if X in 26 .. 37 then
+               Closed_G.Replace_Element (Y * W + X, 20);
+            end if;
+         end loop;
+      end loop;
+      Z := Zone.From_Frames (Open_G, Closed_G, W, H);
+      Check (Z.Valid and then Z.N_Lobes = 2, "握区(无深度):认出两瓣(" & Natural'Image (Z.N_Lobes) & ")");
+      Check (Z.Valid and then Z.A.X0 >= 2 and then Z.A.X1 <= 13 and then Z.B.X0 >= 50 and then Z.B.X1 <= 61,
+             "握区(无深度):两瓣是张开时的手指(左 " & Codec.Img (Z.A.X0) & ".." & Codec.Img (Z.A.X1) & " 右 " & Codec.Img (Z.B.X0) & ".." & Codec.Img (Z.B.X1) & ")");
+      Check (Z.Valid and then abs (Z.Cu - 32.0 / 64.0) < 0.05 and then Z.Cv > 0.7, "握区(无深度):区心在下沿正中 (" & Codec.Fmt (Z.Cu, 2) & "," & Codec.Fmt (Z.Cv, 2) & ")");
+      declare
+         Cnt : Natural := 0;
+      begin
+         for B of Z.Fingers loop
+            if B then
+               Cnt := Cnt + 1;
+            end if;
+         end loop;
+         Check (Cnt >= 300 and then Cnt <= 420, "握区(无深度):手指像素 " & Codec.Img (Cnt) & "(该 ≈ 384 = 4 段 × 8 × 12,抖动的桌面一个都不算)");
+      end;
+      Z := Zone.From_Frames (Open_G, Open_G, W, H);
+      Check (not Z.Valid, "握区(无深度):两张一样的图 ⇒ 看不见这只手合拢,如实说");
+   end;
    --  颜色切块:两根细杆在深度上鼓不出来,但颜色分得开 —— 各自成一块,而且是细长的
    declare
       W : constant Natural := 60;

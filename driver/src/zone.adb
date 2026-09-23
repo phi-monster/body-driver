@@ -24,6 +24,100 @@ package body Zone is
       return False;
    end Is_Self;
 
+   --  从三张掩膜拼出握区:瓣 = "张开时是手指"的连通块(最大的一两块),区 = 手指合到的地方 / 扫过而张开时不是手指的那片
+   procedure Assemble (Z : in out Hand_Zone; Left, Arrived, Gap : Bools; W, Hh : Natural;
+                       Has_Depth : Boolean; Depth_Open, Depth_Closed : Floats; Clean : Bools) is
+      procedure Fill (Lb : in out Lobe; R : Picture.Region) is
+      begin
+         Lb.Valid := True; Lb.X0 := R.X0; Lb.Y0 := R.Y0; Lb.X1 := R.X1; Lb.Y1 := R.Y1;
+         Lb.Cu := R.Cu; Lb.Cv := R.Cv; Lb.Count := R.Count;
+      end Fill;
+   begin
+      declare
+         Lobes : constant Picture.Regions := Picture.Components (Left, W, Hh, Picture.Min_Pixels (W, Hh));
+         Arr : constant Picture.Regions := Picture.Components (Arrived, W, Hh, Picture.Min_Pixels (W, Hh));
+         Gaps : constant Picture.Regions := Picture.Components (Gap, W, Hh, Picture.Min_Pixels (W, Hh));
+      begin
+         if Lobes.Is_Empty then
+            return;
+         end if;
+         Fill (Z.A, Lobes (0));
+         Z.N_Lobes := 1;
+         if Natural (Lobes.Length) >= 2 and then Lobes (1).Count * 4 >= Lobes (0).Count then
+            Fill (Z.B, Lobes (1));
+            Z.N_Lobes := 2;
+         end if;
+         if Z.N_Lobes = 2 then
+            declare
+               Du : constant Long_Float := Z.B.Cu - Z.A.Cu;
+               Dv : constant Long_Float := Z.B.Cv - Z.A.Cv;
+               Ln : constant Long_Float := Sqrt (Du * Du + Dv * Dv);
+            begin
+               if Ln > 1.0e-9 then
+                  Z.Au := Du / Ln; Z.Av := Dv / Ln;
+               end if;
+            end;
+         else
+            Z.Au := Lobes (0).Au; Z.Av := Lobes (0).Av;
+         end if;
+         --  区心:两瓣时 = 两瓣心的中点(EE3 实测"合到处"的形心在手上相机里落到扫过带的上沿,不可靠);
+         --  一瓣时 = 手指合到的地方的形心(没有就用扫过区的形心);区框 = 扫过而张开时不是手指的那片;张幅 = 它沿瓣到瓣方向的伸展
+         if Z.N_Lobes = 2 then
+            Z.Cu := 0.5 * (Z.A.Cu + Z.B.Cu); Z.Cv := 0.5 * (Z.A.Cv + Z.B.Cv);
+         elsif not Arr.Is_Empty then
+            Z.Cu := Arr (0).Cu; Z.Cv := Arr (0).Cv;
+         elsif not Gaps.Is_Empty then
+            Z.Cu := Gaps (0).Cu; Z.Cv := Gaps (0).Cv;
+         else
+            Z.Cu := Z.A.Cu; Z.Cv := Z.A.Cv;
+         end if;
+         if not Gaps.Is_Empty then
+            declare
+               Lo : Long_Float := 1.0e30;
+               Hi : Long_Float := -1.0e30;
+               X0 : Natural := W; Y0 : Natural := Hh; X1 : Natural := 0; Y1 : Natural := 0;
+            begin
+               for K in 0 .. Natural (Gaps.Length) - 1 loop
+                  if Gaps (K).Count * 10 >= Gaps (0).Count then
+                     declare
+                        G : constant Picture.Region := Gaps (K);
+                     begin
+                        X0 := Natural'Min (X0, G.X0); Y0 := Natural'Min (Y0, G.Y0);
+                        X1 := Natural'Max (X1, G.X1); Y1 := Natural'Max (Y1, G.Y1);
+                        for Y in G.Y0 .. G.Y1 loop
+                           for X in G.X0 .. G.X1 loop
+                              if Gap.Element (Y * W + X) then
+                                 declare
+                                    P : constant Long_Float := (Long_Float (X) / Long_Float (W)) * Z.Au + (Long_Float (Y) / Long_Float (Hh)) * Z.Av;
+                                 begin
+                                    Lo := Long_Float'Min (Lo, P);
+                                    Hi := Long_Float'Max (Hi, P);
+                                 end;
+                              end if;
+                           end loop;
+                        end loop;
+                     end;
+                  end if;
+               end loop;
+               Z.X0 := X0; Z.Y0 := Y0; Z.X1 := X1; Z.Y1 := Y1;
+               Z.Span := Long_Float'Max (0.0, Hi - Lo);
+            end;
+         else
+            Z.X0 := Z.A.X0; Z.Y0 := Z.A.Y0; Z.X1 := Z.A.X1; Z.Y1 := Z.A.Y1;
+            Z.Span := Long_Float (Z.A.X1 - Z.A.X0) / Long_Float (W);
+         end if;
+         if Has_Depth then
+            Z.Depth := Picture.Region_Depth (Depth_Open, W, Hh, Left, 0.5);
+            if Picture.Is_Nan (Z.Depth) then
+               Z.Depth := Picture.Region_Depth (Depth_Closed, W, Hh, Clean, 0.25);
+            end if;
+         else
+            Z.Depth := 0.0;
+         end if;
+         Z.Valid := True;
+      end;
+   end Assemble;
+
    function From_Sweep (Swept : Bools; Depth_Open, Depth_Closed : Floats; Has_Depth : Boolean; W, Hh : Natural) return Hand_Zone is
       Z : Hand_Zone;
       N : constant Natural := W * Hh;
@@ -32,11 +126,6 @@ package body Zone is
       Arrived : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (N));   --  合上后是手指、张开时不是:手指合到的地方
       Gap : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (N));       --  扫过但张开时不是手指:能装东西的区
       Tol : Long_Float := 0.0;
-      procedure Fill (Lb : in out Lobe; R : Picture.Region) is
-      begin
-         Lb.Valid := True; Lb.X0 := R.X0; Lb.Y0 := R.Y0; Lb.X1 := R.X1; Lb.Y1 := R.Y1;
-         Lb.Cu := R.Cu; Lb.Cv := R.Cv; Lb.Count := R.Count;
-      end Fill;
    begin
       Z.Fingers := Swept;
       if Natural (Swept.Length) < N then
@@ -115,91 +204,107 @@ package body Zone is
          Left := Clean;
          Gap := Clean;
       end if;
-      declare
-         Lobes : constant Picture.Regions := Picture.Components (Left, W, Hh, Picture.Min_Pixels (W, Hh));
-         Arr : constant Picture.Regions := Picture.Components (Arrived, W, Hh, Picture.Min_Pixels (W, Hh));
-         Gaps : constant Picture.Regions := Picture.Components (Gap, W, Hh, Picture.Min_Pixels (W, Hh));
-      begin
-         if Lobes.Is_Empty then
-            return Z;
-         end if;
-         Fill (Z.A, Lobes (0));
-         Z.N_Lobes := 1;
-         if Natural (Lobes.Length) >= 2 and then Lobes (1).Count * 4 >= Lobes (0).Count then
-            Fill (Z.B, Lobes (1));
-            Z.N_Lobes := 2;
-         end if;
-         if Z.N_Lobes = 2 then
-            declare
-               Du : constant Long_Float := Z.B.Cu - Z.A.Cu;
-               Dv : constant Long_Float := Z.B.Cv - Z.A.Cv;
-               Ln : constant Long_Float := Sqrt (Du * Du + Dv * Dv);
-            begin
-               if Ln > 1.0e-9 then
-                  Z.Au := Du / Ln; Z.Av := Dv / Ln;
-               end if;
-            end;
-         else
-            Z.Au := Lobes (0).Au; Z.Av := Lobes (0).Av;
-         end if;
-         --  区心:两瓣时 = 两瓣心的中点(EE3 实测"合到处"的形心在手上相机里落到扫过带的上沿,不可靠);
-         --  一瓣时 = 手指合到的地方的形心(没有就用扫过区的形心);区框 = 扫过而张开时不是手指的那片;张幅 = 它沿瓣到瓣方向的伸展
-         if Z.N_Lobes = 2 then
-            Z.Cu := 0.5 * (Z.A.Cu + Z.B.Cu); Z.Cv := 0.5 * (Z.A.Cv + Z.B.Cv);
-         elsif not Arr.Is_Empty then
-            Z.Cu := Arr (0).Cu; Z.Cv := Arr (0).Cv;
-         elsif not Gaps.Is_Empty then
-            Z.Cu := Gaps (0).Cu; Z.Cv := Gaps (0).Cv;
-         else
-            Z.Cu := Z.A.Cu; Z.Cv := Z.A.Cv;
-         end if;
-         if not Gaps.Is_Empty then
-            declare
-               Lo : Long_Float := 1.0e30;
-               Hi : Long_Float := -1.0e30;
-               X0 : Natural := W; Y0 : Natural := Hh; X1 : Natural := 0; Y1 : Natural := 0;
-            begin
-               for K in 0 .. Natural (Gaps.Length) - 1 loop
-                  if Gaps (K).Count * 10 >= Gaps (0).Count then
-                     declare
-                        G : constant Picture.Region := Gaps (K);
-                     begin
-                        X0 := Natural'Min (X0, G.X0); Y0 := Natural'Min (Y0, G.Y0);
-                        X1 := Natural'Max (X1, G.X1); Y1 := Natural'Max (Y1, G.Y1);
-                        for Y in G.Y0 .. G.Y1 loop
-                           for X in G.X0 .. G.X1 loop
-                              if Gap.Element (Y * W + X) then
-                                 declare
-                                    P : constant Long_Float := (Long_Float (X) / Long_Float (W)) * Z.Au + (Long_Float (Y) / Long_Float (Hh)) * Z.Av;
-                                 begin
-                                    Lo := Long_Float'Min (Lo, P);
-                                    Hi := Long_Float'Max (Hi, P);
-                                 end;
-                              end if;
-                           end loop;
-                        end loop;
-                     end;
-                  end if;
-               end loop;
-               Z.X0 := X0; Z.Y0 := Y0; Z.X1 := X1; Z.Y1 := Y1;
-               Z.Span := Long_Float'Max (0.0, Hi - Lo);
-            end;
-         else
-            Z.X0 := Z.A.X0; Z.Y0 := Z.A.Y0; Z.X1 := Z.A.X1; Z.Y1 := Z.A.Y1;
-            Z.Span := Long_Float (Z.A.X1 - Z.A.X0) / Long_Float (W);
-         end if;
-         if Has_Depth then
-            Z.Depth := Picture.Region_Depth (Depth_Open, W, Hh, Left, 0.5);
-            if Picture.Is_Nan (Z.Depth) then
-               Z.Depth := Picture.Region_Depth (Depth_Closed, W, Hh, Clean, 0.25);
-            end if;
-         else
-            Z.Depth := 0.0;
-         end if;
-         Z.Valid := True;
-      end;
+      Assemble (Z, Left, Arrived, Gap, W, Hh, Has_Depth, Depth_Open, Depth_Closed, Clean);
       return Z;
    end From_Sweep;
+
+   function From_Frames (Open_G, Closed_G : Buf; W, Hh : Natural) return Hand_Zone is
+      Z : Hand_Zone;
+      N : constant Natural := W * Hh;
+      Changed : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (N));
+      Clean : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (N));
+      Darker : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (N));    --  合上后变暗的
+      Lighter : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (N));   --  合上后变亮的
+      Ds : Floats;
+      T : Long_Float;
+      I : Natural := 0;
+      --  一类里几块(不比最大块小四倍的,倍数无量纲)的形心散得多开:最远的两个形心之间的距离(归一化画幅)
+      function Spread (Mask : Bools) return Long_Float is
+         Comps : constant Picture.Regions := Picture.Components (Mask, W, Hh, Picture.Min_Pixels (W, Hh));
+         Best : Long_Float := 0.0;
+      begin
+         for A in 0 .. Natural (Comps.Length) - 1 loop
+            for B in A + 1 .. Natural (Comps.Length) - 1 loop
+               if Comps (A).Count * 4 >= Comps (0).Count and then Comps (B).Count * 4 >= Comps (0).Count then
+                  Best := Long_Float'Max (Best, Sqrt ((Comps (A).Cu - Comps (B).Cu) ** 2 + (Comps (A).Cv - Comps (B).Cv) ** 2));
+               end if;
+            end loop;
+         end loop;
+         return Best;
+      end Spread;
+      function Count_Of (Mask : Bools) return Natural is
+         C : Natural := 0;
+      begin
+         for B of Mask loop
+            if B then
+               C := C + 1;
+            end if;
+         end loop;
+         return C;
+      end Count_Of;
+   begin
+      if Natural (Open_G.Length) < N or else Natural (Closed_G.Length) < N or else N = 0 then
+         return Z;
+      end if;
+      --  变化量分两拨(抽样每 7 个像素取一个:次数,无量纲,只为省时间)
+      while I < N loop
+         Ds.Append (abs (Long_Float (Open_G.Element (I)) - Long_Float (Closed_G.Element (I))));
+         I := I + 7;
+      end loop;
+      T := Picture.Split (Ds);
+      if Picture.Is_Nan (T) then
+         return Z;   --  两张画面分不出"变了很多"的一拨 ⇒ 这只眼里看不见这只手合拢
+      end if;
+      for K in 0 .. N - 1 loop
+         Changed.Replace_Element (K, abs (Integer (Open_G.Element (K)) - Integer (Closed_G.Element (K))) > Integer (T));
+      end loop;
+      --  散点扫掉:只留像素数不少于最大块十分之一的连通块(比例,无量纲;同 From_Sweep)
+      declare
+         Comps : constant Picture.Regions := Picture.Components (Changed, W, Hh, Picture.Min_Pixels (W, Hh));
+      begin
+         if Comps.Is_Empty then
+            return Z;
+         end if;
+         for K in 0 .. Natural (Comps.Length) - 1 loop
+            if Comps (K).Count * 10 >= Comps (0).Count then
+               declare
+                  R : constant Picture.Region := Comps (K);
+               begin
+                  for Y in R.Y0 .. R.Y1 loop
+                     for X in R.X0 .. R.X1 loop
+                        if Changed.Element (Y * W + X) then
+                           Clean.Replace_Element (Y * W + X, True);
+                        end if;
+                     end loop;
+                  end loop;
+               end;
+            end if;
+         end loop;
+      end;
+      for K in 0 .. N - 1 loop
+         if Clean.Element (K) then
+            if Integer (Closed_G.Element (K)) < Integer (Open_G.Element (K)) then
+               Darker.Replace_Element (K, True);
+            else
+               Lighter.Replace_Element (K, True);
+            end if;
+         end if;
+      end loop;
+      declare
+         Sd : constant Long_Float := Spread (Darker);
+         Sl : constant Long_Float := Spread (Lighter);
+         Dark_Is_Open : constant Boolean := (if Sd /= Sl then Sd > Sl else Count_Of (Darker) >= Count_Of (Lighter));
+         None : constant Floats := F64_Vectors.Empty_Vector;
+      begin
+         if Dark_Is_Open then
+            Assemble (Z, Darker, Lighter, Lighter, W, Hh, False, None, None, Clean);
+         else
+            Assemble (Z, Lighter, Darker, Darker, W, Hh, False, None, None, Clean);
+         end if;
+      end;
+      Z.Fingers := Clean;
+      return Z;
+   end From_Frames;
 
    procedure Measure (L : in out Plug.Link; M : Selfmap.Body_Map; Arm, K : Natural; F : in out Plug.Frame; H : out Hand; Ok : out Boolean) is
       N_Cams : constant Natural := Natural (F.Cams.Length);
@@ -329,7 +434,11 @@ package body Zone is
                   Codec.Write_PGM (Codec.Env ("BL_DUMP") & "/zone_arm" & Codec.Img (Arm + 1) & "_cam" & Codec.Img (C) & "_open.pgm", F0 (C).Gray, Cw, Ch);
                end;
             end if;
-            Z := From_Sweep (Swept (C), F0 (C).Depth, Closed_Frame (C).Depth, F0 (C).Has_Depth and then Closed_Frame (C).Has_Depth, Cw, Ch);
+            if F0 (C).Has_Depth and then Closed_Frame (C).Has_Depth then
+               Z := From_Sweep (Swept (C), F0 (C).Depth, Closed_Frame (C).Depth, True, Cw, Ch);
+            else
+               Z := From_Frames (F0 (C).Gray, Closed_Frame (C).Gray, Cw, Ch);
+            end if;
             if Z.Valid then
                if Codec.Env ("BL_DUMP") /= "" then
                   declare
