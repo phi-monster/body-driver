@@ -30,6 +30,7 @@ package Geom is
       R_Ce : M3 := Identity;           --  相机 → 手(列 = 相机轴在手坐标系里)
       Off : V3 := [others => 0.0];     --  相机中心离手的位姿原点的偏移(手系,米;转手时近处的东西才分得出它,没量就是 0)
       Rms : Long_Float := 0.0;         --  量朝向时的像素残差
+      Dropped : Natural := 0;          --  量朝向时被判离群踢掉的观测笔数(记账)
       Tip_Valid : Boolean := False;
       Tip : V3 := [others => 0.0];     --  指尖中点在相机系(米)
       Gap : Long_Float := 0.0;         --  张开时两指尖间距(米)
@@ -72,6 +73,11 @@ package Geom is
    procedure Project_Fixed (G : Cam_Geo; Pw : V3; U, V : out Long_Float; In_Front : out Boolean);
    --  量不动的眼:几次看见指尖在哪(世界位置 + 像素)⇒ 解它的位置和朝向。盲搜初值 + 最小二乘,和 Fit 同一套。
    procedure Fit_Fixed (G : in out Cam_Geo; O : Mark_Vectors.Vector; Ok : out Boolean);
+   package V3_Vectors is new Ada.Containers.Vectors (Natural, V3);
+   --  不动的眼,连指尖偏移一起解(2026-09-24):相机在世界里的朝向 + 位置、焦距(没给就解)、每条臂指尖中点在手系里的偏移。
+   --  观测 = 这只眼里指尖中点的像素 + 那一刻手的位姿读数(Pt = 臂号)。手在深浅上拉开 ⇒ 焦距分得开;手转时指尖跟着甩 ⇒ 偏移分得出。
+   --  以前要先有指尖才能定这只眼、先有这只眼才能量指尖(官方配置下死循环:V1C 头顶眼 0 个观测),现在一起解。Tip_H (k) = 第 k 条臂的指尖偏移(手系,米)
+   procedure Fit_Fixed_Rig (G : in out Cam_Geo; O : Obs_Pt_Vectors.Vector; N_Arms : Natural; Tip_H : out V3_Vectors.Vector; Ok : out Boolean);
    --  ── 没有深度时量指尖 ──:指尖在这只手自己眼里的像素给出相机系里的一条视线 Dir_C(单位向量,从手的位姿点出发);指尖 = S · Dir_C,只差 S(米)。
    --  不动的眼在几停里看见这只手的指尖落在 (U,V)(O 里的 Pose = 那一停手的位姿读数):指尖的世界位置必须落在不动眼那条视线上
    --  ⇒ 每停两条线性方程、一个未知数 S,最小二乘。两条视线平行(解不出)或一停都没有 ⇒ Ok = False。Rms_Px = 解出来之后指尖投回不动眼的像素残差。

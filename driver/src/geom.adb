@@ -472,6 +472,30 @@ package body Geom is
       end;
    end Fit;
 
+   --  前 K 个数的中位数(拷一份排序;标定的观测最多几百笔)
+   function Median (Xs : Param_Vec; K : Natural) return Long_Float is
+      A : Param_Vec (0 .. Natural'Max (0, K - 1)) := [others => 0.0];
+   begin
+      if K = 0 then
+         return 0.0;
+      end if;
+      for I in 0 .. K - 1 loop
+         A (I) := Xs (Xs'First + I);
+      end loop;
+      for I in 1 .. K - 1 loop   --  插入排序
+         declare
+            X : constant Long_Float := A (I);
+            J : Integer := I - 1;
+         begin
+            while J >= 0 and then A (J) > X loop
+               A (J + 1) := A (J); J := J - 1;
+            end loop;
+            A (J + 1) := X;
+         end;
+      end loop;
+      return A (K / 2);
+   end Median;
+
    procedure Fit_Rig (G : in out Cam_Geo; O : Obs_Pt_Vectors.Vector; N_Pts : Natural; Ok : out Boolean; Used : out Natural) is
       Fit_F : constant Boolean := G.F <= 0.0;
       Use_Prior : constant Boolean := Fit_F and then G.F_Prior > 0.0 and then G.F_Prior_Sd > 0.0;
@@ -557,6 +581,7 @@ package body Geom is
          Rv : constant V3 := Rot_Vec (Gi.R_Ce);
          Nr : Natural := 0;
          Cur : Long_Float := 0.0;
+         Skip : array (0 .. N - 1) of Boolean := [others => False];   --  被判离群、不再进解的观测(按观测序号)
          procedure Resid (P : Param_Vec; R : out Long_Float; Fill : access procedure (I : Natural; Du, Dv : Long_Float)) is
             Gt : Cam_Geo := G;
             Sum : Long_Float := 0.0;
@@ -567,8 +592,11 @@ package body Geom is
             if Fit_F then
                Gt.F := P (6);
             end if;
-            for Ob of O loop
-               if Ob.Pt < N_Pts and then Keep (Ob.Pt) then
+            for J in 0 .. N - 1 loop
+               declare
+                  Ob : constant Obs_Pt := O (J);
+               begin
+               if Ob.Pt < N_Pts and then Keep (Ob.Pt) and then not Skip (J) then
                   declare
                      B : constant Natural := Base + 3 * Natural (Slot (Ob.Pt));
                      U, V, Du, Dv : Long_Float;
@@ -587,6 +615,7 @@ package body Geom is
                      I := I + 1;
                   end;
                end if;
+               end;
             end loop;
             if Use_Prior then
                declare
@@ -625,6 +654,48 @@ package body Geom is
          end if;
          Resid (P, Cur, null);
          LM_Refine (P, Nr, Steps, 40, Resid'Access, Cur);
+         --  跟错的观测(仪器说看见、其实认错了)会把焦距带偏(V1F 右眼:残差 8.4 px、焦距 446 / 真 397):
+         --  每笔观测的残差比中位数大 3 倍(比例,无量纲)的踢出去,再解一遍
+         declare
+            Rs : Param_Vec (0 .. Natural'Max (0, Nr - 1)) := [others => 0.0];
+            procedure Grab (I : Natural; Du, Dv : Long_Float) is
+            begin
+               if I < Nr then
+                  Rs (I) := Sqrt (Du * Du + Dv * Dv);
+               end if;
+            end Grab;
+            Med : Long_Float := 0.0;
+            Dropped : Natural := 0;
+            Rtmp : Long_Float;
+         begin
+            Resid (P, Rtmp, Grab'Access);
+            Med := Median (Rs, Nr - (if Use_Prior then 1 else 0));
+            if Med > 0.0 then
+               declare
+                  I : Natural := 0;
+               begin
+                  for J in 0 .. N - 1 loop
+                     if O (J).Pt < N_Pts and then Keep (O (J).Pt) and then not Skip (J) then
+                        if Rs (I) > 3.0 * Med then
+                           Skip (J) := True;
+                           Dropped := Dropped + 1;
+                        end if;
+                        I := I + 1;
+                     end if;
+                  end loop;
+               end;
+               if Dropped > 0 and then Dropped * 4 < Nr then   --  踢掉的不到四分之一才算离群,再多就是整体不对(比例,无量纲)
+                  Nr := Nr - Dropped;
+                  Resid (P, Cur, null);
+                  LM_Refine (P, Nr, Steps, 40, Resid'Access, Cur);
+               else
+                  for K in Skip'Range loop
+                     Skip (K) := False;
+                  end loop;
+               end if;
+               G.Dropped := Dropped;
+            end if;
+         end;
          G.R_Ce := Rodrigues ([P (0), P (1), P (2)]);
          G.Off := [P (3), P (4), P (5)];
          if Fit_F then
@@ -882,6 +953,136 @@ package body Geom is
          Ok := True;
       end;
    end Fit_Fixed;
+
+   procedure Fit_Fixed_Rig (G : in out Cam_Geo; O : Obs_Pt_Vectors.Vector; N_Arms : Natural; Tip_H : out V3_Vectors.Vector; Ok : out Boolean) is
+      Fit_F : constant Boolean := G.F <= 0.0;
+      Use_Prior : constant Boolean := Fit_F and then G.F_Prior > 0.0 and then G.F_Prior_Sd > 0.0;
+      N : constant Natural := Natural (O.Length);
+      Cnt : array (0 .. N_Arms) of Natural := [others => 0];
+      Gi : Cam_Geo := G;
+      Best_Arm : Integer := -1;
+   begin
+      Ok := False; Tip_H.Clear;
+      if N_Arms = 0 or else N < 4 then
+         return;
+      end if;
+      for Ob of O loop
+         if Ob.Pt < N_Arms then
+            Cnt (Ob.Pt) := Cnt (Ob.Pt) + 1;
+         end if;
+      end loop;
+      for K in 0 .. N_Arms - 1 loop
+         if Cnt (K) >= 4 and then (Best_Arm < 0 or else Cnt (K) > Cnt (Best_Arm)) then
+            Best_Arm := K;
+         end if;
+      end loop;
+      if Best_Arm < 0 then
+         return;
+      end if;
+      --  起点:观测最多的那条臂,先把指尖当成就在手的位姿点上(偏移 0),用老的单点法(盲搜 + 精修)给相机位姿和焦距一个像样的起点
+      declare
+         Marks : Mark_Vectors.Vector;
+         Fok : Boolean;
+      begin
+         for Ob of O loop
+            if Ob.Pt = Best_Arm then
+               Marks.Append (Mark'(Pw => [Ob.Pose (0), Ob.Pose (1), Ob.Pose (2)], U => Ob.U, V => Ob.V));
+            end if;
+         end loop;
+         Fit_Fixed (Gi, Marks, Fok);
+         if not Fok then
+            return;
+         end if;
+      end;
+      declare
+         Base : constant Natural := (if Fit_F then 7 else 6);   --  转向量 3 + 位置 3 (+ 焦距)
+         Np : constant Natural := Base + 3 * N_Arms;
+         P : Param_Vec (0 .. Np - 1) := [others => 0.0];
+         Steps : Param_Vec (0 .. Np - 1) := [others => 1.0e-4];   --  差分步(弧度 / 米,极小量)
+         Rv : constant V3 := Rot_Vec (Gi.R_Ce);
+         Nr : Natural := 0;
+         Cur : Long_Float := 0.0;
+         procedure Resid (P : Param_Vec; R : out Long_Float; Fill : access procedure (I : Natural; Du, Dv : Long_Float)) is
+            Gt : Cam_Geo := G;
+            Sum : Long_Float := 0.0;
+            I : Natural := 0;
+         begin
+            Gt.R_Ce := Rodrigues ([P (0), P (1), P (2)]);
+            Gt.Pos := [P (3), P (4), P (5)];
+            if Fit_F then
+               Gt.F := P (6);
+            end if;
+            for Ob of O loop
+               if Ob.Pt < N_Arms then
+                  declare
+                     B : constant Natural := Base + 3 * Ob.Pt;
+                     Tw : constant V3 := Ap (Quat_To_R (Ob.Pose), [P (B), P (B + 1), P (B + 2)]);   --  指尖偏移转到世界
+                     Pw : constant V3 := [Ob.Pose (0) + Tw (0), Ob.Pose (1) + Tw (1), Ob.Pose (2) + Tw (2)];
+                     U, V, Du, Dv : Long_Float;
+                     Front : Boolean;
+                  begin
+                     Project_Fixed (Gt, Pw, U, V, Front);
+                     if Front and then Gt.F > 0.0 then
+                        Du := U - Ob.U; Dv := V - Ob.V;
+                     else
+                        Du := 1.0e3; Dv := 1.0e3;   --  跑到相机后面:远大于画幅的罚(像素数,无量纲哨兵)
+                     end if;
+                     Sum := Sum + Du * Du + Dv * Dv;
+                     if Fill /= null then
+                        Fill (I, Du, Dv);
+                     end if;
+                     I := I + 1;
+                  end;
+               end if;
+            end loop;
+            if Use_Prior then
+               declare
+                  Dp : constant Long_Float := (Gt.F - G.F_Prior) / G.F_Prior_Sd;   --  先验那一条残差(以不确定度为单位,无量纲)
+               begin
+                  Sum := Sum + Dp * Dp;
+                  if Fill /= null then
+                     Fill (I, Dp, 0.0);
+                  end if;
+                  I := I + 1;
+               end;
+            end if;
+            R := Sqrt (Sum / Long_Float (Natural'Max (1, I)));
+         end Resid;
+      begin
+         P (0) := Rv (0); P (1) := Rv (1); P (2) := Rv (2);
+         P (3) := Gi.Pos (0); P (4) := Gi.Pos (1); P (5) := Gi.Pos (2);
+         if Fit_F then
+            P (6) := Gi.F; Steps (6) := 1.0;   --  焦距的差分步(像素,极小量)
+         end if;
+         for Ob of O loop
+            if Ob.Pt < N_Arms then
+               Nr := Nr + 1;
+            end if;
+         end loop;
+         if Use_Prior then
+            Nr := Nr + 1;
+         end if;
+         Resid (P, Cur, null);
+         LM_Refine (P, Nr, Steps, 60, Resid'Access, Cur);
+         G.R_Ce := Rodrigues ([P (0), P (1), P (2)]);
+         G.Pos := [P (3), P (4), P (5)];
+         if Fit_F then
+            G.F := P (6);
+         end if;
+         G.F_Meas := (if Fit_F then P (6) else 0.0);
+         G.Rms := Cur;
+         G.Fixed := True;
+         G.Valid := True;
+         for K in 0 .. N_Arms - 1 loop
+            declare
+               B : constant Natural := Base + 3 * K;
+            begin
+               Tip_H.Append (V3'[P (B), P (B + 1), P (B + 2)]);
+            end;
+         end loop;
+         Ok := True;
+      end;
+   end Fit_Fixed_Rig;
 
    function Meet (Rays : Sight_Vectors.Vector; Ok : out Boolean; Spread : out Long_Float) return V3 is
       A : M3 := [others => [others => 0.0]];
