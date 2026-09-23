@@ -966,6 +966,10 @@ package body Geom is
       Use_Prior : constant Boolean := Fit_F and then G.F_Prior > 0.0 and then G.F_Prior_Sd > 0.0;
       N : constant Natural := Natural (O.Length);
       Cnt : array (0 .. N_Arms) of Natural := [others => 0];
+      Keep : array (0 .. N_Arms) of Boolean := [others => False];   --  看见 4 停以上的点才进(次数)
+      Slot : array (0 .. N_Arms) of Integer := [others => -1];
+      Nk : Natural := 0;
+      N_Used : Natural := 0;
       Gi : Cam_Geo := G;
       Best_Arm : Integer := -1;
    begin
@@ -979,11 +983,15 @@ package body Geom is
          end if;
       end loop;
       for K in 0 .. N_Arms - 1 loop
-         if Cnt (K) >= 4 and then (Best_Arm < 0 or else Cnt (K) > Cnt (Best_Arm)) then
-            Best_Arm := K;
+         if Cnt (K) >= 4 then
+            Keep (K) := True; Slot (K) := Integer (Nk); Nk := Nk + 1; N_Used := N_Used + Cnt (K);
+            if Best_Arm < 0 or else Cnt (K) > Cnt (Best_Arm) then
+               Best_Arm := K;
+            end if;
          end if;
       end loop;
-      if Best_Arm < 0 then
+      --  方程数(每笔观测两条)不到未知数的两倍就是在猜(V1I 2026-09-24:10 笔观测解 13 个未知数,解出相机在 2.8 m 外、残差 0.27 px)
+      if Best_Arm < 0 or else 2 * N_Used < 2 * ((if Fit_F then 7 else 6) + 3 * Nk) then
          return;
       end if;
       --  起点:观测最多的那条臂,先把指尖当成就在手的位姿点上(偏移 0),用老的单点法(盲搜 + 精修)给相机位姿和焦距一个像样的起点
@@ -1003,7 +1011,7 @@ package body Geom is
       end;
       declare
          Base : constant Natural := (if Fit_F then 7 else 6);   --  转向量 3 + 位置 3 (+ 焦距)
-         Np : constant Natural := Base + 3 * N_Arms;
+         Np : constant Natural := Base + 3 * Nk;
          P : Param_Vec (0 .. Np - 1) := [others => 0.0];
          Steps : Param_Vec (0 .. Np - 1) := [others => 1.0e-4];   --  差分步(弧度 / 米,极小量)
          Rv : constant V3 := Rot_Vec (Gi.R_Ce);
@@ -1026,9 +1034,9 @@ package body Geom is
                declare
                   Ob : constant Obs_Pt := O (J);
                begin
-               if Ob.Pt < N_Arms and then not Skip (J) then
+               if Ob.Pt < N_Arms and then Keep (Ob.Pt) and then not Skip (J) then
                   declare
-                     B : constant Natural := Base + 3 * Ob.Pt;
+                     B : constant Natural := Base + 3 * Natural (Slot (Ob.Pt));
                      Tw : constant V3 := Ap (Quat_To_R (Ob.Pose), [P (B), P (B + 1), P (B + 2)]);   --  指尖偏移转到世界
                      Pw : constant V3 := [Ob.Pose (0) + Tw (0), Ob.Pose (1) + Tw (1), Ob.Pose (2) + Tw (2)];
                      U, V, Du, Dv : Long_Float;
@@ -1070,7 +1078,7 @@ package body Geom is
             P (6) := Gi.F; Steps (6) := 1.0;   --  焦距的差分步(像素,极小量)
          end if;
          for Ob of O loop
-            if Ob.Pt < N_Arms then
+            if Ob.Pt < N_Arms and then Keep (Ob.Pt) then
                Nr := Nr + 1;
             end if;
          end loop;
@@ -1099,7 +1107,7 @@ package body Geom is
                   I : Natural := 0;
                begin
                   for J in 0 .. N - 1 loop
-                     if O (J).Pt < N_Arms and then not Skip (J) then
+                     if O (J).Pt < N_Arms and then Keep (O (J).Pt) and then not Skip (J) then
                         if Rs (I) > 3.0 * Med then
                            Skip (J) := True;
                            Dropped := Dropped + 1;
@@ -1135,11 +1143,15 @@ package body Geom is
          G.Fixed := True;
          G.Valid := True;
          for K in 0 .. N_Arms - 1 loop
-            declare
-               B : constant Natural := Base + 3 * K;
-            begin
-               Tip_H.Append (V3'[P (B), P (B + 1), P (B + 2)]);
-            end;
+            if Keep (K) then
+               declare
+                  B : constant Natural := Base + 3 * Natural (Slot (K));
+               begin
+                  Tip_H.Append (V3'[P (B), P (B + 1), P (B + 2)]);
+               end;
+            else
+               Tip_H.Append (V3'[0.0, 0.0, 0.0]);   --  没解的点:0 向量(调用方按范数 > 0 认)
+            end if;
          end loop;
          Ok := True;
       end;

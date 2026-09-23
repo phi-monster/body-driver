@@ -255,7 +255,11 @@ package Act is
       Eye_Port : Natural := 8079;
       Inst_Host : Unbounded_String;    --  仪器进程(空 = 没配,几何全靠身体自己量)
       Inst_Port : Natural := 8077;
-      Fixed_Obs : Geom.Obs_Pt_Vectors.Vector;   --  腕眼标定时不动的眼看见各条臂指尖的观测(Pt = 臂号),开机末尾一起解不动的眼
+      Fixed_Obs : Geom.Obs_Pt_Vectors.Vector;   --  开机时不动的眼看见各条臂指尖的观测(Pt = 臂号 × 2 + 第几根指尖),开机末尾一起解不动的眼
+      Head_Id : Integer := -1;                   --  不动的眼正开着的跟踪段(-1 = 没开)
+      Head_Arm : Integer := -1;                  --  它正跟着哪条臂的指尖
+      Head_Pts : Natural := 0;                   --  这一段跟几个指尖(1 或 2)
+      Head_N : Natural := 0;                     --  这条臂攒了几笔
       Dump_Dir : Unbounded_String;
       Round_N : Natural := 0;
       Fast : Boolean := False;
