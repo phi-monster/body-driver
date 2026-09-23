@@ -7055,6 +7055,21 @@ package body Act is
                            return Integer (Item_Of (Bi));
                         end if;
                      end loop;
+                     --  ①b 脑这回写的名字里【含着】它以前起过的名字(H44 2026-09-23 实测:它写 "grip mintgreenscissors"、"reach cell mintgreenscissors",
+                     --  前面挂个动词)⇒ 按字面就是同一件东西,不用再问、也不会把它当成新东西记成"没有"。只按字面包含,不猜别的。
+                     for Bi in 0 .. Natural (C.Boxed.Length) - 1 loop
+                        declare
+                           Old : constant String := To_String (C.Boxed (Bi).Name);
+                        begin
+                           if C.Boxed (Bi).Cam = Cam and then C.Boxed (Bi).Seen and then Old'Length > 0 and then Old /= W
+                             and then Ada.Strings.Fixed.Index (W, Old) > 0 and then Item_Of (Bi) > 0
+                           then
+                              Put_Line ("[身] 📦 你写的「" & W & "」里含着你起过的名字「" & Old & "」⇒ 当同一件东西");
+                              C.Name_Cam := Integer (Cam);
+                              return Integer (Item_Of (Bi));
+                           end if;
+                        end;
+                     end loop;
                      --  ② 问脑它在哪一框。给它【干净】的画面:我画上去的格子和编号框实测在伤它的视力
                      if not Brain.Locate (To_String (C.Eye_Host), C.Eye_Port, W, F.Cams (Cam).RGB, Kw, Kh,
                                           Found, X0, Y0, X1, Y1, E2)

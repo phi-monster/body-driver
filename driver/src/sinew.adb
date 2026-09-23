@@ -397,7 +397,11 @@ package body Sinew is
       Has_Rel : constant Boolean := Has_Key (Rels_Usable);
       --  🔴 say 后面那一句必须打得出数字和等号:提示词每一轮都印着 "say look = k",而以前这里只许字母、逗号、句号
       --  ⇒ 受限解码下这个键【按不动】(人当脑时不走掩膜所以一直没暴露)。纸上有的键,键盘上必须有。
-      Sent_Rule : constant String := "sent ::= [a-zA-Z] ([a-zA-Z0-9 ,.=\'])*";
+      --  🔴 自由填的槽要有长度上限(H44 2026-09-23 实测:名字槽里生成了 "untiltimeoutuntiltimeout…" 一整行,say 也会无限重复)。
+      --  GBNF 没有 {n,m},用嵌套的可选项写出"最多几个字符":一个名字的词最多 12 个字母,一句话最多 80 个字符。
+      function Sent_Tail (N : Natural) return String is
+        (if N = 0 then "" else "([a-zA-Z0-9 ,.=\'] " & Sent_Tail (N - 1) & ")?");
+      Sent_Rule : constant String := "sent ::= [a-zA-Z] " & Sent_Tail (80);
       function Body_Text (W_Rule : String) return String is
       begin
          if not Has_Who then
@@ -443,16 +447,35 @@ package body Sinew is
          "w ::= " & W_Rule & ASCII.LF &
          "word ::= ""say "" sent | ""done""" & ASCII.LF &
          Sent_Rule);
+      --  把词尾的 "([a-z])*" 换成最多 11 个字母的嵌套可选项(见上)
+      function Word_Tail (N : Natural) return String is
+        (if N = 0 then "" else "([a-z] " & Word_Tail (N - 1) & ")?");
+      function Bound_Tails (G : String) return String is
+         Pat : constant String := "([a-z])*";
+         R : Unbounded_String;
+         I : Natural := G'First;
+      begin
+         while I <= G'Last loop
+            if I + Pat'Length - 1 <= G'Last and then G (I .. I + Pat'Length - 1) = Pat then
+               Append (R, Word_Tail (11));
+               I := I + Pat'Length;
+            else
+               Append (R, G (I));
+               I := I + 1;
+            end if;
+         end loop;
+         return To_String (R);
+      end Bound_Tails;
    begin
       if Has_Key (Qtys_Usable) then
          declare
             Dq : constant String := Qty_Text ("[a-z] ([a-z])*");
          begin
-            return Qty_Text (Complement (Literal_Words (Dq) & " item", True));
+            return Bound_Tails (Qty_Text (Complement (Literal_Words (Dq) & " item", True)));
          end;
       end if;
       --  名字里也打不出 item:那是我清单上的记账词,不是任何东西的名字(T2 实测 Qwen 拿它当名字用)
-      return Body_Text (Complement (Literal_Words (Draft) & " item", True));
+      return Bound_Tails (Body_Text (Complement (Literal_Words (Draft) & " item", True)));
    end EBNF;
 
    --  每个量配一句它是什么(含义来自身体怎么量它,不是说明书)

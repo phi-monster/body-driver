@@ -172,7 +172,7 @@ package body Plan is
       S : Unbounded_String;
    begin
       for Rl in Sinew.Rel loop
-         if Rl not in Sinew.Re_None | Sinew.Re_Still | Sinew.Re_Close | Sinew.Re_Open
+         if Rl not in Sinew.Re_None | Sinew.Re_Still | Sinew.Re_Close | Sinew.Re_Open | Sinew.Re_Qty
            and then Rel_Ok (R, Thing_Idx, Rl, Surface)
          then
             Append (S, (if Length (S) > 0 then " " else "") & Sinew.Rel_Word (Rl));
@@ -196,7 +196,7 @@ package body Plan is
       S : Unbounded_String;
    begin
       for Rl in Sinew.Rel loop
-         if Rl not in Sinew.Re_None | Sinew.Re_Still | Sinew.Re_Close | Sinew.Re_Open then
+         if Rl not in Sinew.Re_None | Sinew.Re_Still | Sinew.Re_Close | Sinew.Re_Open | Sinew.Re_Qty then
             declare
                Any : Boolean := False;
             begin
