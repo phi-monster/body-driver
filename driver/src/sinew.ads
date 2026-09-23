@@ -25,9 +25,13 @@ package Sinew is
    --  (吸盘瞄进去照样先碰到皮就停)。owner 2026-09-08 判过"身体不许自己挑高低",
    --  所以这件事必须由【脑说得出口】—— 而 touching(皮) / onto(桌面) / press(穿过桌面)
    --  三个词都不是那一层,球就卡在这儿:FO 瞄了皮,夹在球的很偏上处,一合把球撞飞。
+   --  Re_Qty(2026-09-23,owner 定的语言根):脑不再说手该去哪,只说【某件东西的某个量往哪变】——
+   --  "哪个量"由身体量出来列给脑(现在只有 height:它离它躺的面多高),"往哪变"= up / down。
+   --  身体收到"量要变",自己推出先粘上它(碰哪、从哪边进,从它的形状算),再让它按要求动。
+   --  上面那些手的关系词是快捷键,不是地基;有可用的量时键盘上只给这一句。
    type Rel is (Re_None, Re_Touching, Re_Above, Re_Below, Re_Left, Re_Right,
                 Re_Nearer, Re_Farther, Re_Onto, Re_Off, Re_Into, Re_Facing, Re_Clear,
-                Re_Still, Re_Press, Re_Close, Re_Open);
+                Re_Still, Re_Press, Re_Close, Re_Open, Re_Qty);
 
    --  ── 用哪只眼睛判这一段 ──
    --  🔴 十二炮里每一炮开头我都在【用手工做这件事】:先发一条只说话的命令把"一集只换一次眼"
@@ -62,6 +66,7 @@ package Sinew is
       Sp : Step := Sp_None;
       Ef : Effort := Ef_None;
       Rk : Rank := Rk_Prefer;
+      Dir : Integer := 0;             --  Re_Qty:+1 = up,-1 = down;Subj = 那件东西,Obj.Word = 量的名字
    end record;
    package Constraint_Vectors is new Ada.Containers.Vectors (Natural, Constraint);
 
@@ -112,11 +117,11 @@ package Sinew is
    --  给脑【看】的那一份。参数和 EBNF 完全一样 ⇒ 看到的和被掩码允许的不可能分岔。
    --  (分岔的代价实测过:脑照着读到的宽语法造句,写到一半被掩码掐断,只能滑进剩下能走的那条路,
    --   连着三炮全写成 `do grasper close grip …`,合自己的爪心。)
-   function Grammar (Rels_Usable, Roles_Usable, Outs_Usable : String) return String;
+   function Grammar (Rels_Usable, Roles_Usable, Outs_Usable : String; Qtys_Usable : String := "") return String;
 
    --  交给受限解码器的那份文法(GBNF)。三张表都由驱动当场生成,和给脑【看】的那份同源。
    --  没有它,脑交上来的是自由字符串 —— GC9 实测 587 段里 0 段合语法。
-   function EBNF (Rels_Usable, Roles_Usable, Outs_Usable : String) return String;
+   function EBNF (Rels_Usable, Roles_Usable, Outs_Usable : String; Qtys_Usable : String := "") return String;
 
    function Role_Word (R : Role) return String;
    function Rel_Word (R : Rel) return String;

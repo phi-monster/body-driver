@@ -38,7 +38,8 @@ begin
    if Argument (1) = "--grammar" then
       Put_Line (Sinew.EBNF ((if Argument_Count >= 3 then Argument (3) else ""),
                             (if Argument_Count >= 2 then Argument (2) else ""),
-                            "touched stuck slipped lost settled stalled timeout"));
+                            "touched stuck slipped lost settled stalled timeout",
+                            (if Argument_Count >= 4 then Argument (4) else "")));   --  第 4 个参数:量表(有 = 只给"量往哪变"那一句)
       return;
    end if;
    --  离线量"框里那一块":拿炮里落盘的原始灰度帧(BL_VID 的 P5 pgm)和一个框,原样走 Picture.Measure_In_Box。

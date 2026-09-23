@@ -12,7 +12,7 @@ package body Sinew is
          when Re_Nearer => "nearer", when Re_Farther => "farther", when Re_Onto => "onto", when Re_Into => "into",
          when Re_Off => "off", when Re_Facing => "facing", when Re_Clear => "clear",
          when Re_Still => "still", when Re_Press => "press", when Re_Close => "close",
-         when Re_Open => "open");
+         when Re_Open => "open", when Re_Qty => "qty");
 
    function Rel_Cn (R : Rel) return String is
      (case R is
@@ -22,7 +22,7 @@ package body Sinew is
          when Re_Onto => "朝它靠着的那个面压过去", when Re_Into => "瞄进它身子里(皮和它站的面正中间)", when Re_Off => "离开那个面",
          when Re_Facing => "转到我这一块指着它", when Re_Clear => "不许靠得比这更近",
          when Re_Still => "这一段不许动", when Re_Press => "朝它压,只说劲不说位置",
-         when Re_Close => "合拢", when Re_Open => "张开");
+         when Re_Close => "合拢", when Re_Open => "张开", when Re_Qty => "让它的这个量变");
 
    --  把"这只眼里说得出口的关系"逐个配上它的含义,一行一个
    function Rel_Gloss (Rels_Usable : String) return String is
@@ -69,7 +69,8 @@ package body Sinew is
          when Re_Still => "do not move at all during this stretch",
          when Re_Press => "push against it, saying only how hard, not where to go",
          when Re_Close => "close my fingers",
-         when Re_Open => "open my fingers");
+         when Re_Open => "open my fingers",
+         when Re_Qty => "change a quantity of that thing (I work out how)");
 
    function Step_Word (S : Step) return String is
      (case S is when Sp_None => "", when Sp_Small => "small",
@@ -384,7 +385,7 @@ package body Sinew is
       return False;
    end Has_Key;
 
-   function EBNF (Rels_Usable, Roles_Usable, Outs_Usable : String) return String is
+   function EBNF (Rels_Usable, Roles_Usable, Outs_Usable : String; Qtys_Usable : String := "") return String is
       --  🔴 一条没有任何候选的规则(`who ::= ` 后面是空的)不是"窄的键盘",是【坏掉的语法】:
       --  T1 2026-09-21 实测,脑点了 `with my moving eye`,身体照办换到一只绑不上任何"我"的眼 ⇒ 角色表为空
       --  ⇒ vLLM 原话 "Invalid grammar specification … Expected name at line 8 'who ::= '" ⇒ 这一轮问不了脑,
@@ -429,12 +430,58 @@ package body Sinew is
            Sent_Rule;
       end Body_Text;
       Draft : constant String := Body_Text ("[a-z] ([a-z])*");
+      --  语言的根(2026-09-23):有可用的量时,键盘上只有这一句 —— <东西> <量> up|down until <结局>,外加 say / done。
+      --  手的关系词、眼、步子、控制块全不在键盘上:它们是 9B 的脑乱按的地方(09-22 十七炮里四炮乱码),不是地基。
+      function Qty_Text (W_Rule : String) return String is
+        ("root ::= line (line)? (line)? (line)?" & ASCII.LF &
+         "line ::= (interval | word) ""\n""" & ASCII.LF &
+         "interval ::= ""do "" name "" "" qty "" "" dir "" until "" outc" & ASCII.LF &
+         "qty ::= " & Quoted_List (Qtys_Usable) & ASCII.LF &
+         "dir ::= ""up"" | ""down""" & ASCII.LF &
+         "outc ::= " & Quoted_List (Outs_Usable) & ASCII.LF &
+         "name ::= w ("" "" w)? ("" "" w)?" & ASCII.LF &
+         "w ::= " & W_Rule & ASCII.LF &
+         "word ::= ""say "" sent | ""done""" & ASCII.LF &
+         Sent_Rule);
    begin
+      if Has_Key (Qtys_Usable) then
+         declare
+            Dq : constant String := Qty_Text ("[a-z] ([a-z])*");
+         begin
+            return Qty_Text (Complement (Literal_Words (Dq) & " item", True));
+         end;
+      end if;
       --  名字里也打不出 item:那是我清单上的记账词,不是任何东西的名字(T2 实测 Qwen 拿它当名字用)
       return Body_Text (Complement (Literal_Words (Draft) & " item", True));
    end EBNF;
 
-   function Grammar (Rels_Usable, Roles_Usable, Outs_Usable : String) return String is
+   --  每个量配一句它是什么(含义来自身体怎么量它,不是说明书)
+   function Qty_Gloss (Qtys_Usable : String) return String is
+      R : Unbounded_String;
+      I : Natural := Qtys_Usable'First;
+      J : Natural;
+   begin
+      while I <= Qtys_Usable'Last loop
+         J := I;
+         while J <= Qtys_Usable'Last and then Qtys_Usable (J) /= ' ' loop
+            J := J + 1;
+         end loop;
+         if J > I then
+            declare
+               Wd : constant String := Qtys_Usable (I .. J - 1);
+            begin
+               Append (R, "              " & Wd & " = "
+                       & (if Wd = "height" then "how far the thing is above the surface it lies on (I measure it with my own eyes; up means lift it off that surface)"
+                          else "a reading of it I can change")
+                       & ASCII.LF);
+            end;
+         end if;
+         I := J + 1;
+      end loop;
+      return To_String (R);
+   end Qty_Gloss;
+
+   function Grammar (Rels_Usable, Roles_Usable, Outs_Usable : String; Qtys_Usable : String := "") return String is
       function Bar (S : String) return String is
          R : Unbounded_String;
          I : Natural := S'First;
@@ -453,6 +500,20 @@ package body Sinew is
          return To_String (R);
       end Bar;
    begin
+      --  语言的根(2026-09-23):有可用的量 ⇒ 纸上只印这一句(和 EBNF 同一张纸)
+      if Has_Key (Qtys_Usable) then
+         return
+           "<program>   ::= <line> (up to four lines)" & ASCII.LF &
+           "<line>      ::= <interval> | <word>" & ASCII.LF &
+           "<interval>  ::= do <what> <quantity> <direction> until <outcome>" & ASCII.LF &
+           "<what>      ::= <a name in your words> (one to three plain words, the name you gave the thing; it may NOT be any of the words in this grammar, nor the word item)" & ASCII.LF &
+           "<quantity>  ::= " & Bar (Qtys_Usable) & "   (a quantity of that thing that I measure myself and can change)" & ASCII.LF &
+           Qty_Gloss (Qtys_Usable) &
+           "<direction> ::= up | down" & ASCII.LF &
+           "<outcome>   ::= " & Bar (Outs_Usable) & ASCII.LF &
+           "<word>      ::= say <one sentence in your own words> | done" & ASCII.LF &
+           "(You never say where my hand should go or when to close it: given the thing and the quantity, I work out from its shape where to take hold of it, come in from the free side, close, and move it.)";
+      end if;
       --  和 EBNF 同一张纸:角色表空了,这一轮能按的键就只有 say / done,纸上也只印这两个,并照实说为什么。
       if not Has_Key (Roles_Usable) then
          return
@@ -850,6 +911,20 @@ package body Sinew is
                         exit;
                      end if;
                   end loop;
+                  --  ── 语言的根(2026-09-23):<东西> <量> up|down ──  一条约束只说某件东西的某个量往哪变
+                  if Stop >= K + 2 and then (Lw (Stop) = "up" or else Lw (Stop) = "down") then
+                     C.R := Re_Qty;
+                     C.Dir := (if Lw (Stop) = "up" then 1 else -1);
+                     C.Obj.K := Nk_None; C.Obj.Word := To_Unbounded_String (Lw (Stop - 1));   --  量的名字(身体列的,不绑成东西)
+                     C.Subj := Make_Noun (K, Stop - 2);
+                     if C.Subj.K /= Nk_Thing then
+                        Fail ("「" & Lw (Stop - 1) & " " & Lw (Stop) & "」前面要说的是【哪件东西】(你给它起的名字)", Line_No);
+                        return;
+                     end if;
+                     I.Cons.Append (C);
+                     K := Stop + 1;
+                     goto Next_Cons;
+                  end if;
                   for M in K .. Stop loop
                      if To_Rel (Lw (M)) /= Re_None then
                         Rel_At := M;
@@ -909,6 +984,8 @@ package body Sinew is
                   end if;
                   I.Cons.Append (C);
                   K := Stop + 1;
+                  <<Next_Cons>>
+                  null;
                end;
                exit when K > N or else Lw (K) /= "and";
                K := K + 1;

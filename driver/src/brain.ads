@@ -30,6 +30,10 @@ package Brain is
       Steps : Natural := 0;
       Fast, Done : Boolean := False;
       Avoid : Ints;
+      --  语言的根(2026-09-23):某件东西(清单第 Qty_Of 件)的量 Qty 往 Qty_Dir(+1 上 / -1 下)变
+      Qty : Unbounded_String;
+      Qty_Dir : Integer := 0;
+      Qty_Of : Natural := 0;
    end record;
 
    --  🔴 认名字,改问法(2026-09-21):问脑"它在【哪一框】里",不再问"第几号"。
@@ -48,5 +52,6 @@ package Brain is
    function Ask (Host : String; Port : Natural; Task_Text, Body_Text, Recent, Grammar, Refused : String;
                  Rels_Usable, Roles_Usable, Outs_Usable : String;
                  Cols, Rows, N_Items, N_Cams, N_Arms : Natural; RGB : Buf; W, H : Natural;
-                 Program : out Unbounded_String; Err : out Unbounded_String) return Boolean;
+                 Program : out Unbounded_String; Err : out Unbounded_String;
+                 Qtys_Usable : String := "") return Boolean;
 end Brain;

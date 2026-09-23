@@ -374,6 +374,33 @@ begin
       Check (Has (Sinew.Grammar ("touching", "", Outs), "cannot find any part of me")
              and then not Has (Sinew.Grammar ("touching", "", Outs), "<who>"),
              "语法:给脑看的那张纸和键盘同一张 —— 角色表空时纸上也没有 <who>");
+      --  语言的根(2026-09-23):有量的时候,键盘上只剩 <东西> <量> up|down until <结局> 和 say / done;
+      --  手的关系词、眼、步子、控制块一个都不在(它们是 9B 的脑乱按的地方)。纸上和键盘上同一张。
+      declare
+         Q : constant String := Sinew.EBNF ("touching above", "grasper", Outs, "height");
+         Qt : constant String := Sinew.Grammar ("touching above", "grasper", Outs, "height");
+      begin
+         Check (Has (Q, "qty ::= ""height""") and then Has (Q, "dir ::= ""up"" | ""down""")
+                and then not Has (Q, "who ::=") and then not Has (Q, "rel ::=") and then not Has (Q, "eye ::=")
+                and then not Has (Q, "control ::=") and then Has (Q, "word ::="),
+                "语法:有量 ⇒ 键盘上只有「东西 量 up|down until 结局」和 say/done");
+         Check (Has (Qt, "<quantity>  ::= height") and then not Has (Qt, "<who>") and then not Has (Qt, "<relation>"),
+                "语法:有量 ⇒ 纸上也只有那一句");
+      end;
+   end;
+   --  语言的根:那一句解析出来是"某件东西的某个量往哪变",东西是名字、量是身体列的词、方向 ±1
+   declare
+      use Sinew;
+      P1 : constant Program := Sinew.Parse ("do mint green scissors height up until settled");
+      P2 : constant Program := Sinew.Parse ("do height up until settled");
+   begin
+      Check (P1.Ok and then Natural (P1.Code.Length) >= 1 and then P1.Code (0).O = Op_Interval
+             and then Natural (P1.Code (0).Cons.Length) = 1
+             and then P1.Code (0).Cons (0).R = Re_Qty and then P1.Code (0).Cons (0).Dir = 1
+             and then P1.Code (0).Cons (0).Subj.K = Nk_Thing and then To_String (P1.Code (0).Cons (0).Subj.Word) = "mint green scissors"
+             and then To_String (P1.Code (0).Cons (0).Obj.Word) = "height" and then P1.Code (0).Until_Oc = Oc_Settled,
+             "语言:「do mint green scissors height up until settled」= 剪刀的 height 往上,到 settled 为止");
+      Check (not P2.Ok, "语言:量前面没说哪件东西 ⇒ 退回");
    end;
    --  🔴 不动的眼(2026-09-22):已知世界点 + 它们在画面里的像素 ⇒ 解出相机位置和朝向。正反两条。
    declare

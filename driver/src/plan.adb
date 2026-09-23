@@ -36,7 +36,7 @@ package body Plan is
             N (Exam.Facing) := True;
          when Sinew.Re_Clear =>
             N (Exam.Sideways) := True; N (Exam.Updown) := True;
-         when Sinew.Re_Still | Sinew.Re_Close | Sinew.Re_Open | Sinew.Re_None =>
+         when Sinew.Re_Still | Sinew.Re_Close | Sinew.Re_Open | Sinew.Re_None | Sinew.Re_Qty =>
             null;
       end case;
       return N;

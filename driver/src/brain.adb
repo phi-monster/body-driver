@@ -206,7 +206,8 @@ package body Brain is
    function Ask (Host : String; Port : Natural; Task_Text, Body_Text, Recent, Grammar, Refused : String;
                  Rels_Usable, Roles_Usable, Outs_Usable : String;
                  Cols, Rows, N_Items, N_Cams, N_Arms : Natural; RGB : Buf; W, H : Natural;
-                 Program : out Unbounded_String; Err : out Unbounded_String) return Boolean is
+                 Program : out Unbounded_String; Err : out Unbounded_String;
+                 Qtys_Usable : String := "") return Boolean is
       Cells : constant Natural := Cols * Rows;
       NL : constant String := "" & ASCII.LF;
       Prompt : constant String :=
@@ -242,7 +243,7 @@ package body Brain is
         --  温度是【解码器设置】,不是给它的暗示:要判"它会不会想",至少得是独立抽样。
         --  代价照记:同一炮不再逐字可复现(认名字那一问仍然温度 0,那是要稳)。
         "{""model"":""eye"",""max_tokens"":700,""temperature"":0.7,""chat_template_kwargs"":{""enable_thinking"":false}," &
-        """structured_outputs"":{""grammar"":""" & Json.Escape (Sinew.EBNF (Rels_Usable, Roles_Usable, Outs_Usable)) & """}" &
+        """structured_outputs"":{""grammar"":""" & Json.Escape (Sinew.EBNF (Rels_Usable, Roles_Usable, Outs_Usable, Qtys_Usable)) & """}" &
         ",""messages"":[{""role"":""user"",""content"":[{""type"":""image_url"",""image_url"":{""url"":""data:image/bmp;base64," & B64 &
         """}},{""type"":""text"",""text"":""" & Json.Escape (Prompt) & """}]}]}";
       Reply : Unbounded_String;

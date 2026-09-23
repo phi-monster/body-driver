@@ -330,7 +330,7 @@ package body Act is
          when Sinew.Re_Press => "press",   when Sinew.Re_Still => "",
          when others => "?");   --  close / open / clear 各有各的分支,够得着这里的只有 Re_None
    function Rel_Has_Own_Branch (R : Sinew.Rel) return Boolean is
-     (case R is when Sinew.Re_Close | Sinew.Re_Open | Sinew.Re_Clear | Sinew.Re_Still => True,
+     (case R is when Sinew.Re_Close | Sinew.Re_Open | Sinew.Re_Clear | Sinew.Re_Still | Sinew.Re_Qty => True,
                 when others => False);
 
    --  🔴 结局词 → 判法,唯一的一处(见 act.ads 的说明)
@@ -1417,7 +1417,9 @@ package body Act is
                   Push (It, "what you called " & Nm & ", now in cell " & Codec.Img (Cell_Of (C, It.Cu, It.Cv)) & " (" & Codec.Img (It.Count) & " px, "
                         & Codec.Fmt (It.Elong, 1) & "x as long as it is wide"
                         & (if Alone then "" else "; in this eye it runs into something next to it or into the edge of the picture, so its middle and its long direction are not trustworthy here")
-                        & ")" & Rel (It.Cu, It.Cv), Draw.Green, 2);
+                        & ")" & Rel (It.Cu, It.Cv)
+                        --  身体列它量得到的量(语言的根):脑要改的是这个量,不是我的手
+                        & "; a quantity of it I measure and can change: height (how far it is above the surface it lies on)", Draw.Green, 2);
                end;
             elsif Sl.Seen then
                It.Kind := Thing_Remembered; It.Located := True;
@@ -5234,6 +5236,21 @@ package body Act is
             Obj : constant Natural := Item_Of (Cn.Obj);
          begin
             case Cn.R is
+               when Re_Qty =>
+                  --  语言的根:某件东西的某个量往哪变。手由身体选(grasper 那一绑);没拿着它 ⇒ 先合在它上(合的定义含从上方进场),再抬
+                  declare
+                     Gn : constant Noun := (K => Nk_Role, R => Rl_Grasper, Word => Null_Unbounded_String);
+                     Gi : constant Integer := Plan.Look_Up (C.Binds, Gn);
+                     Arm1 : constant Natural := (if Gi >= 1 and then Gi <= Integer (C.Items.Length) then C.Items (Natural (Gi) - 1).Arm + 1 else 1);
+                  begin
+                     Answer.Qty := Cn.Obj.Word; Answer.Qty_Dir := Cn.Dir; Answer.Qty_Of := Sub;
+                     Answer.Grip_Arm := Arm1;
+                     Answer.Grip_K := (if Gi >= 1 and then Gi <= Integer (C.Items.Length) then C.Items (Natural (Gi) - 1).Jaw_K else 0);
+                     if not (C.Wld.Holding and then C.Wld.Held_Arm = Integer (Arm1) - 1) then
+                        Answer.Grip := To_Unbounded_String ("close");
+                        Answer.Grip_On := Sub;
+                     end if;
+                  end;
                when Re_Close =>
                   Answer.Grip := To_Unbounded_String ("close");
                   Answer.Grip_Arm := (if Sub >= 1 and then Sub <= Natural (C.Items.Length)
@@ -6813,6 +6830,7 @@ package body Act is
                All_Facts : constant Plan.Facts_Vectors.Vector := Build_Facts (C, F);
                Subjects : Plan.Facts_Vectors.Vector;
                Rels : Unbounded_String;
+               Qtys : Unbounded_String;   --  这一轮能说的【东西的量】(身体列的;有 = 键盘上只给"量往哪变"那一句)
             begin
                for I in 0 .. Natural (C.Items.Length) - 1 loop
                   if C.Items (I).Height > 0.0 then
@@ -6845,17 +6863,23 @@ package body Act is
                --  于是"零死键"这条前置条件在事后无法核对,任何"给了它键它不用"的判决都建立在没记录的假设上。
                --  ⇒ 把当场生成的三张表如实记一行。这行只写日志,不参与任何判定。
                Rels := To_Unbounded_String (Plan.Usable_Rels_Any (Rep0, Subjects, Any_Stands));
-               Put_Line ("[身] 🎹 这一轮键盘:关系 [" & To_String (Rels)
+               --  语言的根(2026-09-23):清单里有点过名的东西、我又有能合拢的手 ⇒ 键盘上只给"它的量往哪变"这一句;
+               --  量的名字是身体列的(现在只有 height:离它躺的面多高 —— 两眼视线交点对它躺的面量出来)
+               --  东西由脑在句子里点名(名字是自由的,身体去认);所以只要我有一只能合拢的手,这一句就在键盘上
+               Qtys := To_Unbounded_String ((if Index (Roles, "grasper") > 0 then "height" else ""));
+               Put_Line ("[身] 🎹 这一轮键盘:" & (if Length (Qtys) > 0 then "量 [" & To_String (Qtys) & "] · " else "")
+                         & "关系 [" & To_String (Rels)
                          & "] · 角色 [" & To_String (Roles)
                          & "] · 结局 [" & Plan.Waitable_Outcomes (Any_Stands)
                          & "] · 清单 " & Codec.Img (Natural (C.Items.Length)) & " 件");
                if not Brain.Ask (To_String (C.Eye_Host), C.Eye_Port, To_String (C.Task_Text), To_String (Listing), Recent,
                                  Sinew.Grammar (To_String (Rels), To_String (Roles),
-                                                Plan.Waitable_Outcomes (Any_Stands)),
+                                                Plan.Waitable_Outcomes (Any_Stands), To_String (Qtys)),
                                  To_String (C.Refused),
                                  To_String (Rels), To_String (Roles),
                                  Plan.Waitable_Outcomes (Any_Stands),
-                                 C.Cols, C.Rows, Natural (C.Items.Length), C.Map.N_Cams, C.Map.Arms, Big, Cw, Bh, Text, Err)
+                                 C.Cols, C.Rows, Natural (C.Items.Length), C.Map.N_Cams, C.Map.Arms, Big, Cw, Bh, Text, Err,
+                                 Qtys_Usable => To_String (Qtys))
                then
                   --  🔴 装不下是【量得到的事实】,不是猜:回包里就写着限额和用量。
                   --  照着把清单上限减半再来,减到装得下为止;以前只会一股脑全给,
@@ -8254,6 +8278,45 @@ package body Act is
          end if;
       end Walk_Onto;
 
+      --  拿着它抬:沿它躺的面的法向(碰过的面按量到的法向,没碰过按"上")走一个单位(4 倍探针幅度 × 脑的档位,同贴近时那把尺)。
+      --  抬完看手指读数:掉回空手值 = 它掉了(slipped);命令了没走到一半 = 胳膊到头(resist);否则 settled,并说它还在手里。
+      procedure Lift_Held (Arm : Natural; Amt : Long_Float) is
+         Nn : constant Geom.V3 := (if C.Touch_Valid then C.Touch_N else [0.0, 0.0, 1.0]);
+         Ln : constant Long_Float := 4.0 * Geo_Base (C, Arm) * (4.0 * Amt);   --  一个单位(倍数,无量纲;同 Geo_Approach 的 Step_Cap)
+         Cur : constant Plug.Arm_Pose := F.EE (Arm);
+         Dw : constant Geom.V3 := [Nn (0) * Ln, Nn (1) * Ln, Nn (2) * Ln];
+         Mok : Boolean;
+      begin
+         if Ln <= 0.0 then
+            Event := S ("refused: I have not measured how far one push moves this arm, so I cannot lift by a known amount");
+            return;
+         end if;
+         Geo_Move (L, C, F, Arm, Dw, Mok);
+         Steps_Taken := Steps_Taken + 1;
+         declare
+            Now : constant Plug.Arm_Pose := F.EE (Arm);
+            Got : constant Long_Float := ((Now (0) - Cur (0)) * Dw (0) + (Now (1) - Cur (1)) * Dw (1) + (Now (2) - Cur (2)) * Dw (2)) / Ln;
+            Jk : constant Natural := Natural (Integer'Max (0, C.Wld.Held_Jaw));
+            R_Now : constant Long_Float := Selfmap.Jaw_Of (F, Arm, Jk);
+            Emp : Long_Float := -1.0;
+         begin
+            for H of C.Hands loop
+               if H.Arm = Arm and then H.K = Jk then
+                  Emp := H.Empty_Close;
+               end if;
+            end loop;
+            if Emp >= 0.0 and then R_Now <= Emp + C.Map.Jaw_Noise then
+               Event := S ("slipped: I raised my hand " & Mm (Got) & " and my fingers closed to their empty reading - it is no longer between them");
+               C.Wld.Holding := False;
+            elsif Got + Got < Ln then   --  实到不到要的一半(纯数学的一半)
+               Event := S ("resist: I commanded " & Mm (Ln) & " up and my hand only went " & Mm (Got) & " - my arm cannot go further this way; it is still between my fingers");
+            else
+               Event := S ("settled: I raised it " & Mm (Got) & " along the normal of the surface it lay on; it is still between my fingers (reading "
+                           & Codec.Fmt (R_Now, 3) & ", empty would be " & Codec.Fmt (Emp, 3) & ")");
+            end if;
+         end;
+      end Lift_Held;
+
       procedure Do_Grip is
       begin
             --  ── 抓握 ──
@@ -8413,6 +8476,8 @@ package body Act is
             end;
          elsif Say.Grip = "close" then
             Own := Grip_Arm;
+         elsif Length (Say.Qty) > 0 then
+            Own := Grip_Arm;   --  东西的量要变、我已经拿着它 ⇒ 动的是拿着它的那只手
          end if;
          Geo_Cam := Hand_Eye_Of (C, Own);
          declare
@@ -8465,7 +8530,7 @@ package body Act is
                            Fresh := Moved <= 4.0 * Geo_Base (C, Natural (Own)) and then not C.Geo_At_Above;
                         end;
                      end if;
-                     if Fresh then
+                     if Fresh and then Length (Say.Qty) = 0 then
                         Geo_Case := 3;   --  合:不再先走一段
                      elsif Say.Grip_On >= 1 and then Say.Grip_On <= Natural (C.Items.Length)
                        and then C.Items (Say.Grip_On - 1).Kind in Thing | Thing_Remembered and then C.Items (Say.Grip_On - 1).Located
@@ -8480,6 +8545,8 @@ package body Act is
                                        & " before closing (by sightlines, in my own hand camera)");
                      end if;
                   end;
+               elsif Length (Say.Qty) > 0 and then C.Wld.Holding and then C.Wld.Held_Arm = Own then
+                  Geo_Case := 7;   --  拿着它了,这一段只改它的量(抬),不走
                end if;
             end if;
          end;
@@ -8538,6 +8605,8 @@ package body Act is
                                & " | " & Codec.Img (Steps_Taken) & " pushes | ended: " & To_String (Event));
          elsif Geo_Case = 3 then
             Put_Line ("[身] ⚙ 几何走法:合手前不再走,笼住与否由刚算的 " & Mm (C.Geo_Dist) & " 说");
+         elsif Geo_Case = 7 then
+            Put_Line ("[身] ⚙ 几何走法:它已经在我手里,这一段只改它的量");
          else
          Build_Goals;
          if not Pts.Is_Empty then
@@ -8724,6 +8793,21 @@ package body Act is
          end if;
          end if;   --  Geo_Case
          Do_Grip;
+         --  语言的根:脑说的是"它的高度往上"。合完(或本来就拿着)⇒ 沿它躺的面的法向抬一个单位;没拿住就说没拿住,不抬
+         if Say.Qty = "height" and then Say.Qty_Dir > 0 then
+            if Own >= 0 and then C.Wld.Holding and then C.Wld.Held_Arm = Own then
+               Lift_Held (Natural (Own), Amount_Factor (Null_Unbounded_String));
+               Put_Line ("[身] ⚙ 抬:" & To_String (Event));
+               Report := Report & " Then, holding it, I raised it: " & To_String (Event) & ". ";
+               Codec.Append_Line (Life_Path, "beat " & Codec.Img (Plug.Steps (L)) & " | " & Say_Item (C, Say.Qty_Of) & " height up | " & To_String (Event));
+            else
+               Event := S ("lost: I could not raise " & Say_Item (C, Say.Qty_Of) & " - it is not in my hand");
+               Report := Report & " I did not raise it: it is not in my hand. ";
+            end if;
+         elsif Say.Qty = "height" and then Say.Qty_Dir < 0 then
+            Event := S ("refused: lowering a thing is not something I have measured yet");
+            Report := Report & " Lowering is not something I can do yet. ";
+         end if;
          Report := Report & Mode_Line (C, To_String (Event));
       end;
       --  这一节的结果攒进这一段程序的账上;跑完一整段才一次交给脑
