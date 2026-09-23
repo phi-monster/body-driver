@@ -11,7 +11,7 @@
 - 九月:驱动重写,学会了量准自己(相机长在哪只手、指尖在哪、不动的眼在世界里哪儿、东西 = 几只眼视线的交点),今天能走到毫米级;但重写时把"从哪边进"那一步删了,变成要 Qwen 想,Qwen 想不出。
 - 现在:把八月那一步搬回九月的驱动。不是回滚,是移植。深度和这件事无关(09-11 死命令:不许依赖深度相机;八月那套本来就有不用深度的路)。
 
-**09-23 凌晨:Qwen 独自第一次抓起来了(H48,仿真自己判 Success)。** 键盘换成了一句话:`do scissors height up until touched`——脑只说哪件东西的哪个量往哪变,身体自己从形状算怎么下手、从上面进、合、抬。视频 `results/grounding-sep2026/H48_qwen_first_hold/`。这一集里第一次合是空的、第二次才合住;验收线要 3 次里 ≥2 次,H49 在跑。
+**09-23 凌晨:Qwen 独自第一次抓起来了(H48,仿真自己判 Success)。** 键盘换成了一句话:`do scissors height up until touched`——脑只说哪件东西的哪个量往哪变,身体自己从形状算怎么下手、从上面进、合、抬。视频 `results/grounding-sep2026/H48_qwen_first_hold/`。H49 又成了一次(2/2,视频 `results/grounding-sep2026/H49_qwen_second_hold/`);验收线要 3 次里 ≥2 次,H50 在跑。
 
 **昨天(09-22)的账**
 - 剪刀被夹住并抬起 1 次(H26),仿真自己判 Success,视频在 `results/grounding-sep2026/H26_first_hold/`。**脑是我,不算验收。**

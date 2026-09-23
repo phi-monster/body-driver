@@ -1,0 +1,31 @@
+74:[身] 🎹 这一轮键盘:量 [height] · 关系 [touching above below left right nearer farther facing clear] · 角色 [grasper] · 结局 [touched stuck slipped lost settled stalled timeout] · 清单 6 件
+76:do the mint green height up until touched
+77:do the mint green height up until settled
+78:say done
+81:[身] 📦 the mint green:脑给的框 [299 278 344 409](第0 台相机)⇒ 框里量到一整块 1421 px · 形心 (317.5,333.9) · 长宽比 5.1 · 它顶到了框外那一圈(挨着别的东西或被画面切掉),形心和长轴在这只眼里不可信
+87:[身] 👁 你没点眼;这条胳膊自己的那只眼(第2 只)量得出东西有多远 ⇒ 换过去,在那儿再问你一次它在哪
+96:[身] 👁 转眼:resist: I commanded a turn of 0.205 rad and my hand only turned 0.094 (still 0.697 rad from pointing there) - a joint is at its end or the pose is not reachable
+121:[身] 🎹 这一轮键盘:量 [height] · 关系 [touching above below left right nearer farther facing clear] · 角色 [grasper] · 结局 [touched stuck slipped lost settled stalled timeout] · 清单 7 件
+123:do mint green scissors height up until touched
+124:say I am reaching for the mint green scissors.
+127:[身] 📦 mint green scissors:脑给的框 [120 307 293 479](第2 台相机)⇒ 框里量到一整块 3192 px · 形心 (224.8,382.9) · 长宽比 6.4 · 它顶到了框外那一圈(挨着别的东西或被画面切掉),形心和长轴在这只眼里不可信
+133:[身] ⚖ 编译过了,空转也走得通
+136:[身] ⚙ 几何走法:grip 2 onto mint green scissors before closing (by sightlines, in my own hand camera)
+163:[身] 📦 the mint green(第0 台):框里量到的那块平均亮 29.0、周围 122.8,它当初 220.1、周围 127.5 ⇒ 明暗反了,不是它,算看不见
+174:[身] 📐 进场:先到它上方 ⇒ amount: arrived above it (it sits one hand-opening, 0.090 m, straight below where my fingers close, within 0.005 m); my fingers now point down at it(14 推)
+175:[身]   没到它身上 ⇒ 这回不合
+253:[身] 🎹 这一轮键盘:量 [height] · 关系 [touching above below left right nearer farther facing clear] · 角色 [grasper] · 结局 [touched stuck slipped lost settled stalled timeout] · 清单 6 件
+261:[身] ⚖ 编译过了,空转也走得通
+311:[身] 🎹 这一轮键盘:量 [height] · 关系 [touching above below left right nearer farther facing clear] · 角色 [grasper] · 结局 [touched stuck slipped lost settled stalled timeout] · 清单 6 件
+313:do pick upmint greenscissors height up until settled
+314:say I am reaching for the scissors with arm 2.
+315:do pick upmint greenscissors height up until settled
+316:say I am lifting the scissors.
+318:[身] 📦 pick upmint greenscissors:脑给的框 [0 0 252 474](第2 台相机)⇒ 框里量到一整块 45869 px · 形心 (82.1,262.4) · 长宽比 2.4 · 它顶到了框外那一圈(挨着别的东西或被画面切掉),形心和长轴在这只眼里不可信
+324:[身] ⚖ 编译过了,空转也走得通
+327:[身] ⚙ 几何走法:grip 2 onto pick upmint greenscissors before closing (by sightlines, in my own hand camera)
+353:[身] 📐 进场:先到它上方 ⇒ amount: arrived above it (it sits one hand-opening, 0.090 m, straight below where my fingers close, within 0.003 m); my fingers now point down at it(10 推)
+361:[身] 📦 mint green scissors(第2 台):框里量到的那块平均亮 71.5、周围 174.1,它当初 198.2、周围 111.2 ⇒ 明暗反了,不是它,算看不见
+372:[身] ⚙ 抬:settled: I raised it 0.050 m along the normal of the surface it lay on; it is still between my fingers (reading 0.664, empty would be 0.000)
+386:beat 479 | eye 2 | CLOSED on a thing nobody has named | HELD - it came with my hand
+409:[身] ⚙ 几何走法:它已经在我手里,这一段只改它的量
