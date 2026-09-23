@@ -20,6 +20,7 @@ with Plan;
 with Sinew;
 with Runtime;
 with Monitor;
+with Contact;
 package Act is
    --  🔴 脑写的结局词 → 身体的判法。**只有这一处**。
    --  以前它散在两个局部函数里(Outcome → 字符串 → Until_Kind),中间那一跳把 lost / free / refused
@@ -305,6 +306,19 @@ package Act is
       Geo_Pw_Name : Unbounded_String;
       --  我最后一次被一个面顶住的地方:面上的一点(指尖世界位置)和它的法向(指向我这边)。
       --  不动的眼只给方向不给远近;东西躺在它靠着的面上 ⇒ 视线和这个面一交就是它在哪(LAB D2:碰过的点进地图)。
+      --  ── 接触集(PLAN 1.5)──
+      --  每次这只眼看全了它、它的位置又是两眼交出来的,就把它顶面的点记一份:轮廓像素各发一条视线落到它躺的面上(Contact.Surface.On_Plane)
+      Sil_Pts : Contact.V3_Vectors.Vector;
+      Sil_Valid : Boolean := False;
+      Sil_Name : Unbounded_String;
+      Sil_Cam : Integer := -1;
+      Sil_N : Geom.V3 := [0.0, 0.0, 1.0];    --  取点时用的面法向(碰过的面按量到的,没碰过按上)
+      Sil_P0 : Geom.V3 := [others => 0.0];   --  面过的那一点 = 它量到的位置
+      --  合上时交出去的那个接触集(手里东西的接触点 + 锥);拿住之后锥放开(拿住 = 摩擦够,这就是身体量 μ 的办法)
+      Held_Set : Contact.Set;
+      Held_Set_Valid : Boolean := False;
+      --  这一集里合过又没拿住的那些落点(中心,世界系):同一处不再试 —— 那是量出来的"这儿滑",不是猜
+      Tried : Contact.V3_Vectors.Vector;
       Fingers_Aimed : Boolean := False;   --  上一段"到它上方"末尾已把手指指向它躺的面 ⇒ 接下来贴上去的那一段不再为了看它而转手
       Touch_Valid : Boolean := False;
       Touch_Pt, Touch_N : Geom.V3 := [others => 0.0];

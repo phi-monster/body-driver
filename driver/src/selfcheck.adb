@@ -2725,6 +2725,9 @@ begin
          Check (H.Kind = Cg.Fine, "②a→接触集:μ=1.0 的摩擦锥 45° > 34.4° ⇒ 同一把就交得出去了 —— 差别只在 μ,不在几何");
          Cg.To_Set (Bad, 0.0, Ct.Still ([0.0, 0.0, 0.95]), 0.002, S, H);
          Check (H.Kind = Cg.Mu_Unknown, "②a→接触集:μ 没量过就不许瞎填 ⇒ MuUnknown");
+         Cg.To_Set_Least_Mu (Bad, Ct.Still ([0.0, 0.0, 0.95]), 0.002, S);
+         Check (Natural (S.Points.Length) = 2 and then abs (S.Points (0).Push.Half_Angle - 0.60) < 1.0e-12 and then Ct.Check (S, False).Kind = Ct.Fine,
+                "②a→接触集:μ 没量过 ⇒ 锥 = 这一把需要的最小值(0.60 rad)并明说;合上(物体不动)这一格照样自洽,能不能提由抬手验");
       end;
       declare
          S : Ct.Set;

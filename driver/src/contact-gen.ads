@@ -63,6 +63,9 @@ package Contact.Gen is
    --  把一条候选变成一个接触集(四格 + 进场方向):两个接触点 = 中心 ± (宽/2) × 合爪方向,法向朝外,锥朝里、半张角 = atan(μ)。
    --  μ 必须由调用方给(身体×世界的耦合,拿指头在参考面上蹭一下量得出来);没量过就 Mu_Unknown;Face_Tilt > atan(μ) 就 Would_Slip 并报差多少
    procedure To_Set (C : Candidate; Mu : Long_Float; Motion : Twist; Tol_M : Long_Float; S : out Set; Why : out Handoff);
+   --  μ 没量过时的交接:锥半张角取这一把【需要】的最小值(Face_Tilt)并如实标出 —— 不是编一个 μ,是把"这一把至少要多少摩擦"原样交出去。
+   --  交出去的集只保证"物体不动"(合上)那一格自洽;能不能提起来由抬手验:拿住了 ⇒ 摩擦够(那正是这具身体量 μ 的办法),验过之后调用方把锥放开
+   procedure To_Set_Least_Mu (C : Candidate; Motion : Twist; Tol_M : Long_Float; S : out Set);
 
    --  支撑面不水平的机器:把点云转到"支撑面法向 = +z"的那个系里算,算完再转回来。算法一个字不用动,假设变成显式输入。
    --  它买到的是朝向无关,不是重力无关:哪一面是支撑面仍然由调用方说(这一层不知道重力往哪儿,也不该知道)

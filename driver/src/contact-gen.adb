@@ -486,6 +486,26 @@ package body Contact.Gen is
       return Mx - Mn;
    end Thickness_At;
 
+   --  两个接触点 = 中心 ± (宽/2) × 合爪方向。这不是假设两根手指 —— 它是"沿这个方向、隔这么宽,有两个相对的面"这件几何事实;三指五指由别的生成器给更多点。
+   --  锥 = 摩擦锥,半张角 = Half(有多大),不是 Face_Tilt(要多大):上一版填反了,越差的抓取在判据里看起来越可行
+   procedure Build (C : Candidate; Half : Long_Float; Motion : Twist; Tol_M : Long_Float; S : out Set) is
+      Cy : constant Long_Float := Cos (C.Close_Yaw);
+      Sy : constant Long_Float := Sin (C.Close_Yaw);
+      Hw : constant Long_Float := 0.5 * C.Width_M;
+      function Mk (Sign : Long_Float) return Point is
+        ((By => (Hand, 0),
+          Pos => [C.Pos (0) + Cy * Hw * Sign, C.Pos (1) + Sy * Hw * Sign, C.Pos (2)],
+          Normal => [Cy * Sign, Sy * Sign, 0.0],
+          Push => (Axis => [-Cy * Sign, -Sy * Sign, 0.0], Half_Angle => Half),
+          Pull => False, Torsion => False, Peel => False, Tol_M => Tol_M));
+   begin
+      S := (Points => Point_Vectors.Empty_Vector, Motion => Motion, Has_Approach => True, Approach => [0.0, 0.0, -1.0]);
+      S.Points.Append (Mk (-1.0));
+      S.Points.Append (Mk (1.0));
+      --  进场方向 = 支撑面法向的反向:②a 本来就建立在"有一张支撑面"之上(按水平层切片、按 Min_Above 判伸不伸得进去)。
+      --  换一台把支撑面立起来的机器,先 To_Upright 把点云转过来,算完 Rotate 回去 —— 这一项就跟着支撑面走了
+   end Build;
+
    procedure To_Set (C : Candidate; Mu : Long_Float; Motion : Twist; Tol_M : Long_Float; S : out Set; Why : out Handoff) is
    begin
       S := (Points => Point_Vectors.Empty_Vector, Motion => Motion, Has_Approach => False, Approach => [others => 0.0]);
@@ -496,30 +516,19 @@ package body Contact.Gen is
       end if;
       declare
          Have : constant Long_Float := Arctan (Mu);
-         Cy : constant Long_Float := Cos (C.Close_Yaw);
-         Sy : constant Long_Float := Sin (C.Close_Yaw);
-         Half : constant Long_Float := 0.5 * C.Width_M;
-         --  两个接触点 = 中心 ± (宽/2) × 合爪方向。这不是假设两根手指 —— 它是"沿这个方向、隔这么宽,有两个相对的面"这件几何事实;三指五指由别的生成器给更多点。
-         --  锥 = 摩擦锥,半张角 = atan(μ)(有多大),不是 Face_Tilt(要多大):上一版填反了,越差的抓取在判据里看起来越可行
-         function Mk (Sign : Long_Float) return Point is
-           ((By => (Hand, 0),
-             Pos => [C.Pos (0) + Cy * Half * Sign, C.Pos (1) + Sy * Half * Sign, C.Pos (2)],
-             Normal => [Cy * Sign, Sy * Sign, 0.0],
-             Push => (Axis => [-Cy * Sign, -Sy * Sign, 0.0], Half_Angle => Have),
-             Pull => False, Torsion => False, Peel => False, Tol_M => Tol_M));
       begin
          if C.Face_Tilt_Rad > Have then
             Why := (Kind => Would_Slip, Need_Rad => C.Face_Tilt_Rad, Have_Rad => Have);
             return;
          end if;
-         S.Points.Append (Mk (-1.0));
-         S.Points.Append (Mk (1.0));
-         --  进场方向 = 支撑面法向的反向:②a 本来就建立在"有一张支撑面"之上(按水平层切片、按 Min_Above 判伸不伸得进去)。
-         --  换一台把支撑面立起来的机器,先 To_Upright 把点云转过来,算完 Rotate 回去 —— 这一项就跟着支撑面走了
-         S.Has_Approach := True;
-         S.Approach := [0.0, 0.0, -1.0];
+         Build (C, Have, Motion, Tol_M, S);
       end;
    end To_Set;
+
+   procedure To_Set_Least_Mu (C : Candidate; Motion : Twist; Tol_M : Long_Float; S : out Set) is
+   begin
+      Build (C, C.Face_Tilt_Rad, Motion, Tol_M, S);
+   end To_Set_Least_Mu;
 
    --  ── 支撑面在哪,变成一个参数 ──
 

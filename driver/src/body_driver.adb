@@ -291,6 +291,7 @@ begin
          --  脑起的名字、脑说过"这只眼里没有它"、碰过的面、手指指向 —— 都是上一集的世界,一起清;量过的身体留着
          C.Boxed.Clear;
          C.Touch_Valid := False; C.Fingers_Aimed := False; C.Geo_Pw_Valid := False; C.Geo_Pw_Met := False; C.Geo_At_Above := False;
+         C.Sil_Valid := False; C.Held_Set_Valid := False; C.Tried.Clear;
          Act.Init_Tracks (C);
       end if;
       if Order /= "" then
