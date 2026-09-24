@@ -10286,6 +10286,43 @@ package body Act is
                   end loop;
                   end;
                   Head_Watch_End (C);
+                  --  横着也探(前后左右各一段,4 / 16 档):一是量各方向能走多远,二是不动的眼要的是手在它视野里横着扫
+                  --  (G1Q 2026-09-25:手在头顶眼正下方,抬 30 cm 是沿它的视线动,画面只挪 28 px,652 笔观测也定不了它;横扫一次就是几百像素)
+                  declare
+                     Sides : constant array (1 .. 4) of Geom.V3 := [[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, -1.0, 0.0]];
+                  begin
+                     Head_Watch (C, F, A, True);
+                     for Sd of Sides loop
+                        for R of Rungs (1 .. 2) loop
+                           if Plug.Reset_Pending (L) and then Plug.Take_Reset (L) then
+                              Geo_Say ("对方复位(新的一集)⇒ 手回了原处,接着探");
+                           end if;
+                           declare
+                              Ln : constant Long_Float := R * Amp;
+                              Av : Table.Vec := Table.Zero_Vec;
+                              Jaw : Floats;
+                              Del : Table.Vec;
+                              Ok : Boolean;
+                              Got : Long_Float;
+                           begin
+                              Av (0) := Sd (0) * Ln; Av (1) := Sd (1) * Ln;
+                              Step_Arm (L, C, F, A, Av, Jaw, Del, Ok, Watch => Head_Frame'Unrestricted_Access);
+                              Got := Del (0) * Sd (0) + Del (1) * Sd (1);
+                              Head_Watch (C, F, A, False);
+                              Geo_Say ("第" & Codec.Img (A + 1) & " 只手:一条命令往 (" & Codec.Fmt (Sd (0), 0) & "," & Codec.Fmt (Sd (1), 0) & ") " & Mm (Ln) & " ⇒ 实到 " & Mm (Got));
+                              declare
+                                 Back : Table.Vec := Table.Zero_Vec;
+                              begin
+                                 Back (0) := -Del (0); Back (1) := -Del (1); Back (2) := -Del (2);
+                                 Step_Arm (L, C, F, A, Back, Jaw, Del, Ok, Watch => Head_Frame'Unrestricted_Access);
+                                 Head_Watch (C, F, A, False);
+                              end;
+                              exit when Got + Got < Ln;
+                           end;
+                        end loop;
+                     end loop;
+                     Head_Watch_End (C);
+                  end;
                   if Tried = 0 then
                      Geo_Say ("第" & Codec.Img (A + 1) & " 只手:步幅没量成(对方复位打断,一档都没试)⇒ 下次开机再量");
                   else
