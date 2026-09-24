@@ -1376,6 +1376,25 @@ package body Geom is
             Why := To_Unbounded_String ("解出来还有 " & Codec.Img (Behind) & " 笔跑到相机后面(残差 " & Codec.Fmt (Cur, 2) & " px)");
             return;   --  解出来还有点跑到相机后面 ⇒ 不是解,不存
          end if;
+         --  点在手上 ⇒ 它离手腕原点不可能比手腕离这只眼还远(几何,不是常数);解发散到手外面的不是解
+         --  (X5A 2026-09-26:粗解里一个点发散,驱动照着它算出"把手往眼那边送 86721 m")
+         for I in 0 .. Nk - 1 loop
+            declare
+               T : constant V3 := Tip_P (P, I);
+               Nearest : Long_Float := Long_Float'Last;
+            begin
+               for J in 0 .. N - 1 loop
+                  if Of_Obs (J) = Integer (I) then
+                     Nearest := Long_Float'Min (Nearest, Norm ([P (3) - O (J).Pose (0), P (4) - O (J).Pose (1), P (5) - O (J).Pose (2)]));
+                  end if;
+               end loop;
+               if not (Norm (T) < Nearest) then
+                  Why := To_Unbounded_String ("第" & Codec.Img (Tips (I).Arm + 1) & " 只手上的一个点解到离手腕 " & Codec.Fmt (Norm (T), 3) & " m,比手腕离这只眼(" & Codec.Fmt (Nearest, 3)
+                                              & " m)还远 ⇒ 不在手上,不是解(残差 " & Codec.Fmt (Cur, 2) & " px)");
+                  return;
+               end if;
+            end;
+         end loop;
          --  同 Fit_Rig 那一条:无畸变针孔的视场不超过 120°(半幅宽 ÷ 焦距 ≤ tan 60° = 1.732,无量纲)——焦距比这还短就不是针孔的解
          --  (X5A 2026-09-26:头顶眼粗解成焦距 140、残差 21 px,驱动照着它把手往错的方向送了 25 cm)
          if Fit_F and then G.Cx > 1.732 * P (6) then

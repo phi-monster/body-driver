@@ -6392,7 +6392,15 @@ package body Act is
                               Tw : constant Geom.V3 := Geom.Ap (Geom.Quat_To_R (Home), Tips0 (Natural (Best)).Tip);
                               Dv : constant Geom.V3 := [G.Pos (0) - Home (0) - Tw (0), G.Pos (1) - Home (1) - Tw (1), G.Pos (2) - Home (2) - Tw (2)];
                               Mok : Boolean;
+                              Reach : constant Long_Float := Stride_Of (C, A);   --  这条臂一条命令走得到的最大一档(量过的)
+                              Far : constant Long_Float := Fracs (Fracs'Last) * Geom.Norm (Dv);   --  最远那一段离原处多远
                            begin
+                              --  粗解里这只手的点或眼的位置不可信时,算出来的"往眼那边送"会是几十公里(X5A 2026-09-26:命令挪 86721 m)⇒
+                              --  最远那一段比这条臂量过的步幅还远、或不是有限数 = 粗解靠不住,就不送这只手
+                              if not (Far <= Reach) then
+                                 Geo_Say ("第" & Codec.Img (A + 1) & " 只手:按粗解往不动的眼那边送最远要 " & Mm (Far) & ",比它量过的一条命令的最大一档 " & Mm (Reach) & " 还远 ⇒ 粗解靠不住,这只手不送");
+                                 goto Next_Arm;
+                              end if;
                               for Fr of Fracs loop
                                  declare
                                     Cur : constant Plug.Arm_Pose := F.EE (A);
@@ -6406,6 +6414,7 @@ package body Act is
                               begin
                                  Geo_Move (L, C, F, A, [Home (0) - Cur (0), Home (1) - Cur (1), Home (2) - Cur (2)], Mok);
                               end;
+                              <<Next_Arm>>
                            end;
                         end if;
                      end;
