@@ -367,7 +367,10 @@ package body Zone is
       Once : array (0 .. Natural'Max (0, N_Cams - 1)) of Bools;
       J0 : constant Long_Float := Selfmap.Jaw_Of (F, Arm, K);
       Rest : constant Floats := Selfmap.Jaw_All (F, Arm);   --  其余通道保持它们此刻的读数
-      Pose : constant Plug.Arm_Pose := (if Arm < Natural (F.EE.Length) then F.EE (Arm) else [others => 0.0]);
+      --  合空时手要停着的位姿 = 等画面静止【之后】的读数(不是刚进来时的):手还在慢慢挪时进来,按进来那一刻的位姿发"停住"命令会把手拽回去,
+      --  合爪那几拍整条胳膊跟着动,扫出来的"手指"连着胳膊贴到画面边,记下的位姿也不是画面里那一刻的(G2A 2026-09-25:人形每挪一下要 ~40 拍才停稳,
+      --  头顶眼 16 笔里 7 笔因手指贴画面边被拒)
+      Pose : Plug.Arm_Pose := (if Arm < Natural (F.EE.Length) then F.EE (Arm) else [others => 0.0]);
       Prev_J : Long_Float := J0;
       Prev_Cams : Plug.Cam_Vectors.Vector;
       Still : Natural := 0;
@@ -399,6 +402,8 @@ package body Zone is
          if not Ok2 then
             return;
          end if;
+         Pose := F.EE (Arm);
+         H.Pose := Pose;
          Put_Line ("[身] 第" & Natural'Image (Arm + 1) & " 只手第" & Natural'Image (K) & " 号抓握通道合空一次(先等画面静止:" & Natural'Image (Used) & " 拍;读数从 " & Codec.Fmt (J0, 3) & " 起)…");
       end;
       F0 := F.Cams;

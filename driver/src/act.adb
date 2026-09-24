@@ -5877,12 +5877,21 @@ package body Act is
          end if;
       end Dump_Stop;
       --  平移一停:走、看、记(手拿转动凑平移的那一停不算:转动引起的相机位移和平移之比 > 一成就扔,比例无量纲)
+      --  每一停先等画面静止再记:手还在慢慢挪时记下的那一停,位姿读数和画面未必是同一刻(静止噪声为 0 的身体上 Selfmap.Go 等不到"位姿不变",
+      --  到拍数上限就返回;G2A 2026-09-25 实测停下之后还要 13–27 拍画面才静止)。最多等 30 拍(次数,同合空前的等法)
+      procedure Settle is
+         Used : Natural;
+         Ok2 : Boolean;
+      begin
+         Selfmap.Wait_Still (L, C.Map, F, 30, Used, Ok2);
+      end Settle;
       procedure Stop (M : Geom.V3) is
          Prev_U : constant Long_Float := (if Target >= 0 then Cur (Target).U else 0.0);
          Prev_V : constant Long_Float := (if Target >= 0 then Cur (Target).V else 0.0);
          K : Natural := 0;
       begin
          Geo_Move (L, C, F, Arm, M, Mok);
+         Settle;
          Where;
          Dump_Stop;
          declare
@@ -5908,6 +5917,7 @@ package body Act is
       begin
          A (3) := Sign * Theta * Axis (0); A (4) := Sign * Theta * Axis (1); A (5) := Sign * Theta * Axis (2);
          Step_Arm (L, C, F, Arm, A, Jaw, Del, Mok);
+         Settle;
          Where;
          Dump_Stop;
          K := Record_All;

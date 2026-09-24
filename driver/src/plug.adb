@@ -381,6 +381,30 @@ package body Plug is
          Film : constant String := Codec.Env ("BL_FILM");
       begin
          if Vid /= "" then
+            --  每一帧的位姿读数都落盘(poses.txt:帧号、这一帧存下的画面编号或 -1、每条臂 xyz + wxyz),离线能核"画面和位姿是不是同一刻"
+            --  (2026-09-25:人形腕眼焦距几炮都偏低 1–6%,x5 上在 1% 以内;要量的是画面是不是比位姿晚)
+            declare
+               Fo : File_Type;
+               Pth : constant String := Vid & "/poses.txt";
+               Saved : constant Boolean := L.Seq <= 2000 or else L.Seq mod 20 = 0;
+            begin
+               Codec.Make_Dir (Vid);
+               begin
+                  Open (Fo, Append_File, Pth);
+               exception
+                  when others => Create (Fo, Out_File, Pth);
+               end;
+               Put (Fo, Codec.Img (L.Seq) & " " & (if Saved then Codec.Img (L.Vid_N) else "-1"));
+               for P of F.EE loop
+                  for I in P'Range loop
+                     Put (Fo, " " & Codec.Fmt (P (I), 6));
+                  end loop;
+               end loop;
+               New_Line (Fo);
+               Close (Fo);
+            exception
+               when others => null;
+            end;
             --  2000 / 20 是帧计数(无量纲),只管落图密度
             if L.Seq <= 2000 or else L.Seq mod 20 = 0 then
                Codec.Make_Dir (Vid);
