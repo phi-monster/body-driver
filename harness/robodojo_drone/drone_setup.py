@@ -55,7 +55,10 @@ open(f"{D}/robot_config.yml", "w").write("# body-driver drone rig (2026-09-25): 
 links = chain + ["body_link"]
 spheres = {l: [dict(center=[0.0, 0.0, 0.0], radius=0.02)] for l in links}
 spheres["body_link"] = [dict(center=[0.0, 0.0, 0.0], radius=0.07)]
-ignore = {l: [m for m in links if m != l] for l in links}
+# curobo 要至少一对自碰撞要查,否则它的调试日志除以零(DR1 2026-09-26 实测 ZeroDivisionError);虚拟龙门吊的各节都叠在机身上,
+# 查哪对都会把机身拦住 ⇒ 底座的球挪到 5 m 外(永远碰不到),只留"底座 × 机身"这一对要查
+spheres["base_link"] = [dict(center=[0.0, 0.0, 5.0], radius=0.02)]
+ignore = {l: [m for m in links if m != l and not ({l, m} == {"base_link", "body_link"})] for l in links}
 n = 6
 kin = dict(add_object_link=False, asset_root_path=D, base_link="base_link", collision_link_names=links, collision_sphere_buffer=0.0,
            collision_spheres=spheres,
@@ -65,7 +68,7 @@ kin = dict(add_object_link=False, asset_root_path=D, base_link="base_link", coll
                        velocity_scale=[1.0] * n, retract_config=[0.0] * n),
            debug=None, ee_link="body_link", external_asset_path=None, external_robot_configs_path=None,
            extra_collision_spheres=None, extra_links={}, format_version=2.0, grasp_contact_link_names=None, load_meshes=False,
-           load_tool_frames_with_mesh=False, lock_joints={"grip_joint": 0.0},
+           load_tool_frames_with_mesh=False, lock_joints={},   # 假夹爪关节长在机身外、不在 curobo 的链上,锁它会 KeyError(DR1 2026-09-26)
            mesh_link_names=links, self_collision_buffer={l: -0.01 for l in links}, self_collision_ignore=ignore,
            tool_frames=["body_link"], urdf_path=f"{D}/drone.urdf", use_external_assets=False, use_global_cumul=True)
 open(f"{D}/curobo_left.yml", "w").write(yaml.safe_dump(dict(robot_cfg=dict(kinematics=kin), planner=dict(frame_bias=[0.0, 0.0, 0.0])), sort_keys=False))
