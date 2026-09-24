@@ -10290,6 +10290,11 @@ package body Act is
                   --  (G1Q 2026-09-25:手在头顶眼正下方,抬 30 cm 是沿它的视线动,画面只挪 28 px,652 笔观测也定不了它;横扫一次就是几百像素)
                   declare
                      Sides : constant array (1 .. 4) of Geom.V3 := [[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, -1.0, 0.0]];
+                     function Head_Frame (Fr : Plug.Frame) return Boolean is
+                     begin
+                        Head_Watch (C, Fr, A, False);
+                        return False;
+                     end Head_Frame;
                   begin
                      Head_Watch (C, F, A, True);
                      for Sd of Sides loop
