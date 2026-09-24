@@ -5673,7 +5673,7 @@ package body Act is
                   Su := Su + R (K).U; Sv := Sv + R (K).V;
                end loop;
                if All_Seen then
-                  C.Fixed_Obs.Append (Geom.Obs_Pt'(Pt => Arm, Pose => F.EE (Arm), U => Su / Long_Float (C.Head_Pts), V => Sv / Long_Float (C.Head_Pts)));
+                  C.Fixed_Obs.Append (Geom.Obs_Pt'(Pt => Arm, Pose => F.EE (Arm), U => Su / Long_Float (C.Head_Pts), V => Sv / Long_Float (C.Head_Pts), Seq => F.Seq));
                   C.Head_N := C.Head_N + 1;
                end if;
             end;
@@ -5880,7 +5880,7 @@ package body Act is
       begin
          for I in 0 .. Natural (Cur.Length) - 1 loop
             if Cur (I).Seen then
-               Obs.Append (Geom.Obs_Pt'(Pt => I, Pose => F.EE (Arm), U => Cur (I).U, V => Cur (I).V));
+               Obs.Append (Geom.Obs_Pt'(Pt => I, Pose => F.EE (Arm), U => Cur (I).U, V => Cur (I).V, Seq => F.Seq));
                K := K + 1;
             end if;
          end loop;
@@ -5973,15 +5973,42 @@ package body Act is
                On_Reset;
             end if;
             Before := Cur;
-            Rot_Stop ([0.0, 0.0, 1.0], 1.0);
-            for I in 0 .. Natural (Cur.Length) - 1 loop
-               if Cur (I).Seen and then I < Natural (Before.Length) and then Before (I).Seen then
-                  Shifts.Append (Sqrt ((Cur (I).U - Before (I).U) ** 2 + (Cur (I).V - Before (I).V) ** 2));
-                  Each.Append (Sqrt ((Cur (I).U - Before (I).U) ** 2 + (Cur (I).V - Before (I).V) ** 2));
-               else
-                  Each.Append (-1.0);
+            declare
+               Pose_Before : constant Plug.Arm_Pose := F.EE (Arm);
+               Turned_By : Long_Float := 0.0;   --  实到的转角(位姿读数,弧度)
+            begin
+               Rot_Stop ([0.0, 0.0, 1.0], 1.0);
+               Turned_By := Geom.Angle_Between (Pose_Before, F.EE (Arm));
+               for I in 0 .. Natural (Cur.Length) - 1 loop
+                  if Cur (I).Seen and then I < Natural (Before.Length) and then Before (I).Seen then
+                     Shifts.Append (Sqrt ((Cur (I).U - Before (I).U) ** 2 + (Cur (I).V - Before (I).V) ** 2));
+                     Each.Append (Sqrt ((Cur (I).U - Before (I).U) ** 2 + (Cur (I).V - Before (I).V) ** 2));
+                  else
+                     Each.Append (-1.0);
+                  end if;
+               end loop;
+               --  转一个已知角,画面挪的像素 ÷ 角 = 焦距的粗值(远近不在式子里)。当先验带进联合解:盲搜有时落进错的盆
+               --  (G1R 2026-09-25 右眼:焦距 1133、偏移 −0.89 m、残差 1.18 px;焦距钉回 388 残差反而 0.57 px)。
+               --  不确定度:各点位移的离散 ÷ 角,再不小于十分之一(比例,无量纲):转的是手腕,相机离转轴有偏移,转动里混着几个百分点的平移
+               if Turned_By > 0.0 and then Natural (Shifts.Length) >= 3 then
+                  declare
+                     Med0 : constant Long_Float := Median_Px (Shifts);
+                     Dev : Param_Pixels;
+                     Tenth : constant Long_Float := 0.1;   --  十分之一(比例,无量纲)
+                  begin
+                     for X of Shifts loop
+                        Dev.Append (abs (X - Med0));
+                     end loop;
+                     if Med0 > 0.0 then
+                        G.F_Prior := Med0 / Turned_By;
+                        G.F_Prior_Sd := Long_Float'Max (Median_Px (Dev) / Turned_By, G.F_Prior * Tenth);
+                        C.Geo.Replace_Element (Cam, G);
+                        Geo_Say ("转 " & Codec.Fmt (Turned_By * Deg, 1) & "° 画面挪 " & Codec.Fmt (Med0, 1) & " px ⇒ 焦距粗值 " & Codec.Fmt (G.F_Prior, 0) & " ± "
+                                 & Codec.Fmt (G.F_Prior_Sd, 0) & " px,当联合解的先验");
+                     end if;
+                  end;
                end if;
-            end loop;
+            end;
             Rot_Stop ([0.0, 0.0, 1.0], -1.0);
             declare
                Med : constant Long_Float := Median_Px (Shifts);
@@ -6293,7 +6320,7 @@ package body Act is
                   for Ob of C.Fixed_Obs loop
                      Ada.Text_IO.Put_Line (Fo, "obs " & Codec.Img (Ob.Pt) & " " & Codec.Fmt (Ob.U, 3) & " " & Codec.Fmt (Ob.V, 3) & " " & Codec.Fmt (Ob.Pose (0), 6) & " "
                                            & Codec.Fmt (Ob.Pose (1), 6) & " " & Codec.Fmt (Ob.Pose (2), 6) & " " & Codec.Fmt (Ob.Pose (3), 7) & " " & Codec.Fmt (Ob.Pose (4), 7)
-                                           & " " & Codec.Fmt (Ob.Pose (5), 7) & " " & Codec.Fmt (Ob.Pose (6), 7));
+                                           & " " & Codec.Fmt (Ob.Pose (5), 7) & " " & Codec.Fmt (Ob.Pose (6), 7) & " " & Codec.Img (Ob.Seq));
                   end loop;
                   Ada.Text_IO.Close (Fo);
                exception

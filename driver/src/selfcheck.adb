@@ -683,7 +683,7 @@ begin
                   Check (Fr, "多点连偏移:合成的点在相机前面(测试数据自己先得成立)");
                   --  近的点在第 7、8、9 停跟丢
                   if not (K = 0 and then S in 7 .. 9) then
-                     Obs.Append (Geom.Obs_Pt'(Pt => K, Pose => Poses (S).Pose, U => U + Jit, V => V + Jit));
+                     Obs.Append (Geom.Obs_Pt'(Pt => K, Pose => Poses (S).Pose, U => U + Jit, V => V + Jit, Seq => 0));
                   end if;
                end;
             end loop;
@@ -739,7 +739,7 @@ begin
                   Fr : Boolean;
                begin
                   Geom.Project (Gr, Ps, Pts (0), U, V, Fr);
-                  Obs_S.Append (Geom.Obs_Pt'(Pt => 0, Pose => Ps, U => U + Jit, V => V + Jit));
+                  Obs_S.Append (Geom.Obs_Pt'(Pt => 0, Pose => Ps, U => U + Jit, V => V + Jit, Seq => 0));
                end;
             end loop;
             Gd.F := 0.0; Gd.Cx := 320.0; Gd.Cy := 240.0;
@@ -811,7 +811,7 @@ begin
                begin
                   Geom.Project_Fixed (Gt, Pw, U, V, Fr);
                   Check (Fr and then U > 0.0 and then U < 640.0 and then V > 0.0 and then V < 480.0, "不动的眼连指尖:合成的指尖在画面里(测试数据自己先得成立)");
-                  Obs.Append (Geom.Obs_Pt'(Pt => A, Pose => Ps.Pose, U => U + Jit2, V => V + Jit2));
+                  Obs.Append (Geom.Obs_Pt'(Pt => A, Pose => Ps.Pose, U => U + Jit2, V => V + Jit2, Seq => 0));
                end;
             end loop;
          end;

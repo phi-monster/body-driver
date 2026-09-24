@@ -72,7 +72,7 @@ begin
                   L : constant String := Get_Line (Fi);
                begin
                   if Ada.Strings.Fixed.Trim (L, Ada.Strings.Both) /= "" then
-                     Obs.Append (Geom.Obs_Pt'(Pt => Natural (Num (L, 1)), Pose => Pose_Of (L, 4), U => Num (L, 2), V => Num (L, 3)));
+                     Obs.Append (Geom.Obs_Pt'(Pt => Natural (Num (L, 1)), Pose => Pose_Of (L, 4), U => Num (L, 2), V => Num (L, 3), Seq => 0));
                   end if;
                end;
             end loop;
@@ -140,7 +140,7 @@ begin
                                                 Wl : constant String := Get_Line (Wi);
                                              begin
                                                 if Ada.Strings.Fixed.Trim (Wl, Ada.Strings.Both) /= "" then
-                                                   Wobs.Append (Geom.Obs_Pt'(Pt => Natural (Num (Wl, 1)), Pose => Pose_Of (Wl, 4), U => Num (Wl, 2), V => Num (Wl, 3)));
+                                                   Wobs.Append (Geom.Obs_Pt'(Pt => Natural (Num (Wl, 1)), Pose => Pose_Of (Wl, 4), U => Num (Wl, 2), V => Num (Wl, 3), Seq => 0));
                                                 end if;
                                              end;
                                           end loop;
@@ -170,7 +170,7 @@ begin
                         end if;
                      end;
                   elsif Field (L, 1) = "obs" then
-                     Obs.Append (Geom.Obs_Pt'(Pt => Natural (Num (L, 2)), Pose => Pose_Of (L, 5), U => Num (L, 3), V => Num (L, 4)));
+                     Obs.Append (Geom.Obs_Pt'(Pt => Natural (Num (L, 2)), Pose => Pose_Of (L, 5), U => Num (L, 3), V => Num (L, 4), Seq => 0));
                   end if;
                end;
             end loop;

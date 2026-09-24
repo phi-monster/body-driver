@@ -19,6 +19,7 @@ package Geom is
       Pt : Natural := 0;
       Pose : Plug.Arm_Pose := [others => 0.0];
       U, V : Long_Float := 0.0;
+      Seq : Natural := 0;    --  哪一帧看见的(落盘对图用)
    end record;
    package Obs_Pt_Vectors is new Ada.Containers.Vectors (Natural, Obs_Pt);
    type Cam_Geo is record
