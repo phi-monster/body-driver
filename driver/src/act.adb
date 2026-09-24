@@ -6703,6 +6703,14 @@ package body Act is
                   Geo_Move (L, C, F, Arm, Dw, Mok);
                   Steps_Taken := Steps_Taken + 1;
                   Presses := Presses + 1;
+                  --  等画面静止了再量这一压实到了多少:身体慢的手在返回那一刻还在往下挪,按那一刻算"不到一半"就误判成被顶住
+                  --  (G2D 2026-09-26 人形:在桌面上方十几厘米处压了两下,每下命令 2.6 cm、返回时只走 1.2–1.4 cm,记成了"它躺的面",横着还滑得动所以没拦下)
+                  declare
+                     Used : Natural;
+                     Ok2 : Boolean;
+                  begin
+                     Selfmap.Wait_Still (L, C.Map, F, 30, Used, Ok2);   --  最多等 30 拍(次数,同合空前的等法)
+                  end;
                   declare
                      Now : constant Plug.Arm_Pose := F.EE (Arm);
                      Went : constant Geom.V3 := [Now (0) - Cur (0), Now (1) - Cur (1), Now (2) - Cur (2)];
