@@ -1436,6 +1436,105 @@ package body Geom is
       end;
    end Fit_Fixed_Rig;
 
+   function Tips_On_Rays (Fixed : Cam_Geo; O : Obs_Pt_Vectors.Vector; Ray_O : V3; Ray_D : V3_Vectors.Vector; Gate_Px : Long_Float) return Ray_Tip_Vectors.Vector is
+      package LF_Vectors is new Ada.Containers.Vectors (Natural, Long_Float);
+      Nr : constant Natural := Natural (Ray_D.Length);
+      Ss : array (0 .. Natural'Max (1, Nr) - 1) of LF_Vectors.Vector;
+      Res : Ray_Tip_Vectors.Vector;
+      function Med (V : LF_Vectors.Vector) return Long_Float is   --  中位数(拷一份插入排序;几十个数)
+         A : LF_Vectors.Vector := V;
+         N : constant Natural := Natural (A.Length);
+      begin
+         if N = 0 then
+            return 0.0;
+         end if;
+         for I in 1 .. N - 1 loop
+            declare
+               X : constant Long_Float := A (I);
+               J : Integer := I - 1;
+            begin
+               while J >= 0 and then A (J) > X loop
+                  A.Replace_Element (J + 1, A (J)); J := J - 1;
+               end loop;
+               A.Replace_Element (J + 1, X);
+            end;
+         end loop;
+         return A (N / 2);
+      end Med;
+   begin
+      if Fixed.F > 0.0 then
+         for Ob of O loop
+            declare
+               Rh : constant M3 := Quat_To_R (Ob.Pose);
+               Ow : constant V3 := Ap (Rh, Ray_O);
+               A : constant V3 := [Ob.Pose (0) + Ow (0), Ob.Pose (1) + Ow (1), Ob.Pose (2) + Ow (2)];   --  这只手的眼在世界里
+               E0 : constant V3 := Ap (Fixed.R_Ce, [(Ob.U - Fixed.Cx) / Fixed.F, -(Ob.V - Fixed.Cy) / Fixed.F, -1.0]);
+               En : constant Long_Float := Norm (E0);
+               E : constant V3 := [E0 (0) / En, E0 (1) / En, E0 (2) / En];   --  不动的眼过这个尖的视线(单位)
+               W0 : constant V3 := [A (0) - Fixed.Pos (0), A (1) - Fixed.Pos (1), A (2) - Fixed.Pos (2)];
+               Best_K : Integer := -1;
+               Best_Gap : Long_Float := Long_Float'Last;
+               Best_S : Long_Float := 0.0;
+            begin
+               for K in 0 .. Nr - 1 loop
+                  declare
+                     B0 : constant V3 := Ap (Rh, Ray_D (K));
+                     Bn : constant Long_Float := Norm (B0);
+                  begin
+                     if Bn > 0.0 then
+                        declare
+                           B : constant V3 := [B0 (0) / Bn, B0 (1) / Bn, B0 (2) / Bn];
+                           Bb : constant Long_Float := B (0) * E (0) + B (1) * E (1) + B (2) * E (2);
+                           Dd : constant Long_Float := B (0) * W0 (0) + B (1) * W0 (1) + B (2) * W0 (2);
+                           Ee : constant Long_Float := E (0) * W0 (0) + E (1) * W0 (1) + E (2) * W0 (2);
+                           Den : constant Long_Float := 1.0 - Bb * Bb;   --  两条单位方向的 1 − cos²(纯数学)
+                        begin
+                           if Den > 0.0 then
+                              declare
+                                 S : constant Long_Float := (Bb * Ee - Dd) / Den;   --  两条直线最近点在这条视线上的参数(纯数学)
+                                 P : constant V3 := [A (0) + S * B (0), A (1) + S * B (1), A (2) + S * B (2)];
+                                 U, V : Long_Float;
+                                 Front : Boolean;
+                              begin
+                                 Project_Fixed (Fixed, P, U, V, Front);
+                                 if Front and then S > 0.0 then
+                                    declare
+                                       Gap : constant Long_Float := Sqrt ((U - Ob.U) ** 2 + (V - Ob.V) ** 2);
+                                    begin
+                                       if Gap < Best_Gap then
+                                          Best_Gap := Gap; Best_K := Integer (K); Best_S := S;
+                                       end if;
+                                    end;
+                                 end if;
+                              end;
+                           end if;
+                        end;
+                     end if;
+                  end;
+               end loop;
+               if Best_K >= 0 and then Best_Gap <= Gate_Px then
+                  Ss (Natural (Best_K)).Append (Best_S);
+               end if;
+            end;
+         end loop;
+      end if;
+      for K in 0 .. Nr - 1 loop
+         declare
+            R : Ray_Tip;
+            Dev : LF_Vectors.Vector;
+         begin
+            R.N := Natural (Ss (K).Length);
+            R.S := Med (Ss (K));
+            for X of Ss (K) loop
+               Dev.Append (abs (X - R.S));
+            end loop;
+            R.Spread := Med (Dev);
+            Res.Append (R);
+         end;
+      end loop;
+      return Res;
+   end Tips_On_Rays;
+
    function Meet (Rays : Sight_Vectors.Vector; Ok : out Boolean; Spread : out Long_Float) return V3 is
       A : M3 := [others => [others => 0.0]];
       B : V3 := [others => 0.0];

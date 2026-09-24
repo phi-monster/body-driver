@@ -885,6 +885,85 @@ begin
       Check (Ok_F and then ((not Ok_M) or else Gm.Rms > 3.0 * Gs.Rms),   --  3 = 倍数(无量纲)
              "不动的眼连手上的点·反面:两个点当一个点解 ⇒ " & (if Ok_M then "残差 " & Codec.Fmt (Gm.Rms, 2) & " px(分开解 " & Codec.Fmt (Gs.Rms, 2) & " px)" else "解不出:" & To_String (Geom.Why)));
    end;
+   --  🔴 认指尖:瓣尖落在哪条腕眼瓣视线上(2026-09-26,Geom.Tips_On_Rays)。不动的眼已知(合成:(0,−0.41,1.308) 低头 30°、焦距 288);腕眼在手系 (0.08,0,0.05)。
+   --  ① 五指手:自己眼里 1 瓣(四根手指),指尖在视线上 0.20 m;不动的眼每笔看见 2 瓣,另一瓣是大拇指(离指尖 5 cm,不在视线上)
+   --  ⇒ 手指的尖全归视线、大拇指一个都不归,S 差 < 2 mm(G2C 实拍:手指那一瓣离视线 5.5 px、大拇指 25 px)。
+   --  ② 两指夹爪:自己眼里 2 瓣,两条视线上各 0.15 / 0.16 m ⇒ 每条归一半的尖,两个 S 都差 < 2 mm。1 px 抖动,15 停(转 ±0.1 rad + 平移),门槛 3 px
+   declare
+      Gt : Geom.Cam_Geo;
+      Sn : constant Long_Float := 0.5;                --  sin 30°(合成)
+      Cs : constant Long_Float := 0.8660254;          --  cos 30°(合成)
+      Off : constant Geom.V3 := [0.08, 0.0, 0.05];    --  腕眼离手腕原点(手系,米,合成)
+      function Unit (X : Geom.V3) return Geom.V3 is
+         N : constant Long_Float := Geom.Norm (X);
+      begin
+         return [X (0) / N, X (1) / N, X (2) / N];
+      end Unit;
+      D0 : constant Geom.V3 := Unit ([0.9, -0.2, -0.3]);   --  第一瓣的视线(手系,合成)
+      D1 : constant Geom.V3 := Unit ([0.9, 0.2, -0.3]);    --  第二瓣的视线(手系,合成)
+      Thumb_Off : constant Geom.V3 := [-0.04, 0.03, -0.02];   --  大拇指的尖离手指的尖(手系,米,合成)
+      Per_Mm : constant Long_Float := 1000.0;         --  米 → 毫米(换算,无量纲)
+      Seed3 : Long_Long_Integer := 11;
+      function Jit3 return Long_Float is   --  确定性伪随机 ±1 px(测试数据自己的抖动)
+      begin
+         Seed3 := (Seed3 * 1103515245 + 12345) mod 2147483648;
+         return Long_Float (Integer ((Seed3 / 65536) mod 2001) - 1000) / 1000.0;
+      end Jit3;
+      Poses : Geom.Obs_Vectors.Vector;
+      H : constant Geom.V3 := [-0.2, 0.25, 0.85];   --  手的起点(世界,米,合成;在不动的眼前下方)
+      Obs1, Obs2 : Geom.Obs_Pt_Vectors.Vector;
+      function At_Pose (Ps : Plug.Arm_Pose; T : Geom.V3) return Geom.V3 is
+         Tw : constant Geom.V3 := Geom.Ap (Geom.Quat_To_R (Ps), T);
+      begin
+         return [Ps (0) + Tw (0), Ps (1) + Tw (1), Ps (2) + Tw (2)];
+      end At_Pose;
+      procedure Mark (Into : in out Geom.Obs_Pt_Vectors.Vector; Ps : Plug.Arm_Pose; T : Geom.V3) is
+         U, V : Long_Float;
+         Fr : Boolean;
+      begin
+         Geom.Project_Fixed (Gt, At_Pose (Ps, T), U, V, Fr);
+         Check (Fr and then U > 0.0 and then U < 640.0 and then V > 0.0 and then V < 480.0, "认指尖:合成的尖在画面里(测试数据自己先得成立)");
+         Into.Append (Geom.Obs_Pt'(Pt => 0, Pose => Ps, U => U + Jit3, V => V + Jit3, Seq => 0, Kind => 2));
+      end Mark;
+   begin
+      Gt.R_Ce := [[1.0, 0.0, 0.0], [0.0, Sn, -Cs], [0.0, Cs, Sn]];
+      Gt.Pos := [0.0, -0.41, 1.308]; Gt.F := 288.0; Gt.Cx := 320.0; Gt.Cy := 240.0; Gt.Fixed := True; Gt.Valid := True;
+      Poses.Append (Geom.Obs'(Pose => [H (0), H (1), H (2), 1.0, 0.0, 0.0, 0.0], U => 0.0, V => 0.0));
+      Poses.Append (Geom.Obs'(Pose => [H (0), H (1), H (2), 0.99875, 0.0, 0.0, 0.04998], U => 0.0, V => 0.0));    --  ±0.1 rad 的四元数(cos/sin 0.05,合成)
+      Poses.Append (Geom.Obs'(Pose => [H (0), H (1), H (2), 0.99875, 0.0, 0.0, -0.04998], U => 0.0, V => 0.0));
+      Poses.Append (Geom.Obs'(Pose => [H (0), H (1), H (2), 0.99875, 0.04998, 0.0, 0.0], U => 0.0, V => 0.0));
+      Poses.Append (Geom.Obs'(Pose => [H (0), H (1), H (2), 0.99875, -0.04998, 0.0, 0.0], U => 0.0, V => 0.0));
+      for I in 1 .. 10 loop
+         Poses.Append (Geom.Obs'(Pose => [H (0) + 0.02 * Long_Float (I mod 3), H (1) + 0.03 * Long_Float (I mod 4), H (2) + 0.02 * Long_Float (I mod 5), 1.0, 0.0, 0.0, 0.0], U => 0.0, V => 0.0));   --  平移(米,合成)
+      end loop;
+      for Ps of Poses loop
+         declare
+            Tip : constant Geom.V3 := [Off (0) + 0.20 * D0 (0), Off (1) + 0.20 * D0 (1), Off (2) + 0.20 * D0 (2)];   --  0.20 m(合成真值)
+         begin
+            Mark (Obs1, Ps.Pose, Tip);
+            Mark (Obs1, Ps.Pose, [Tip (0) + Thumb_Off (0), Tip (1) + Thumb_Off (1), Tip (2) + Thumb_Off (2)]);
+            Mark (Obs2, Ps.Pose, [Off (0) + 0.15 * D0 (0), Off (1) + 0.15 * D0 (1), Off (2) + 0.15 * D0 (2)]);   --  0.15 m(合成真值)
+            Mark (Obs2, Ps.Pose, [Off (0) + 0.16 * D1 (0), Off (1) + 0.16 * D1 (1), Off (2) + 0.16 * D1 (2)]);   --  0.16 m(合成真值)
+         end;
+      end loop;
+      declare
+         R1 : constant Geom.Ray_Tip_Vectors.Vector := Geom.Tips_On_Rays (Gt, Obs1, Off, Geom.V3_Vectors.To_Vector (D0, 1), 3.0);   --  门槛 3 px(合成)
+         Rays2 : Geom.V3_Vectors.Vector;
+      begin
+         Check (Natural (R1.Length) = 1 and then R1 (0).N = Natural (Poses.Length) and then abs (R1 (0).S - 0.20) < 0.002,
+                "认指尖·五指手:" & Codec.Img (Natural (Poses.Length)) & " 笔 × 2 瓣 ⇒ 归视线 " & Codec.Img (R1 (0).N) & " 个(该 " & Codec.Img (Natural (Poses.Length))
+                & ",大拇指一个不归)· 离眼 " & Codec.Fmt (R1 (0).S * Per_Mm, 1) & " mm(真 200)± " & Codec.Fmt (R1 (0).Spread * Per_Mm, 1) & " mm");
+         Rays2.Append (D0); Rays2.Append (D1);
+         declare
+            R2 : constant Geom.Ray_Tip_Vectors.Vector := Geom.Tips_On_Rays (Gt, Obs2, Off, Rays2, 3.0);   --  门槛 3 px(合成)
+         begin
+            Check (Natural (R2.Length) = 2 and then R2 (0).N = Natural (Poses.Length) and then R2 (1).N = Natural (Poses.Length)
+                   and then abs (R2 (0).S - 0.15) < 0.002 and then abs (R2 (1).S - 0.16) < 0.002,
+                   "认指尖·两指夹爪:两条视线各归 " & Codec.Img (R2 (0).N) & " / " & Codec.Img (R2 (1).N) & " 个 ⇒ 离眼 " & Codec.Fmt (R2 (0).S * Per_Mm, 1) & " / "
+                   & Codec.Fmt (R2 (1).S * Per_Mm, 1) & " mm(真 150 / 160)");
+         end;
+      end;
+   end;
    --  🔴 没有深度时量指尖(2026-09-23):指尖 = 自己眼里那条视线上离眼 S 米处;不动的眼两停看见指尖 ⇒ 解 S。合成数据:真值 0.12 m
    declare
       Gf : Geom.Cam_Geo;

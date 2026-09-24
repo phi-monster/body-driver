@@ -102,6 +102,17 @@ package Geom is
    --  先把所有点当在 Ray_O(腕眼离手腕原点;没有就 0),用单点法定一个相机的起点;再按这个相机把每个点在手上三角出来;最后全部一起精修。Tips = 笔数够的每个点
    procedure Fit_Fixed_Rig (G : in out Cam_Geo; O : Obs_Pt_Vectors.Vector; Ray_O, Ray_D : V3_Vectors.Vector; Own_Kind : Nat_Vectors.Vector;
                             Tips : out Tip_Class_Vectors.Vector; Ok : out Boolean);
+   --  手上的点按"落不落在它自己那只眼的某条瓣视线上"来认(2026-09-26):不动的眼已经解好(Fixed);O = 它每一笔里每一瓣手指的尖(Pose = 那一停手的位姿);
+   --  这条臂自己那只眼里每一瓣的尖在手系里是一条视线(起点 Ray_O,单位方向 Ray_D (k))。每个尖和每条视线:两条空间直线求最近点,视线上那个最近点投回不动的眼,
+   --  离这个尖不到 Gate_Px 像素、又在眼前面的,归最近的那条视线,给出离眼多远 S;每条视线取归给它的 S 的中位数。
+   --  (G2C 2026-09-26:手 1 的 18 笔,四根手指那一瓣的尖离腕眼指尖视线中位 5.5 px、大拇指那一瓣 25 px、两瓣中点 15 px ⇒ 瓣数不是点的身份,视线才是)
+   type Ray_Tip is record
+      S : Long_Float := 0.0;        --  离眼多远(米)
+      Spread : Long_Float := 0.0;   --  归给它的 S 的中位绝对偏差(米)
+      N : Natural := 0;             --  归给它几个尖
+   end record;
+   package Ray_Tip_Vectors is new Ada.Containers.Vectors (Natural, Ray_Tip);
+   function Tips_On_Rays (Fixed : Cam_Geo; O : Obs_Pt_Vectors.Vector; Ray_O : V3; Ray_D : V3_Vectors.Vector; Gate_Px : Long_Float) return Ray_Tip_Vectors.Vector;
    --  ── 没有深度时量指尖 ──:指尖在这只手自己眼里的像素给出相机系里的一条视线 Dir_C(单位向量,从手的位姿点出发);指尖 = S · Dir_C,只差 S(米)。
    --  不动的眼在几停里看见这只手的指尖落在 (U,V)(O 里的 Pose = 那一停手的位姿读数):指尖的世界位置必须落在不动眼那条视线上
    --  ⇒ 每停两条线性方程、一个未知数 S,最小二乘。两条视线平行(解不出)或一停都没有 ⇒ Ok = False。Rms_Px = 解出来之后指尖投回不动眼的像素残差。

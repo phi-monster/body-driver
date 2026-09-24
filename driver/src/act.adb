@@ -5707,6 +5707,17 @@ package body Act is
       end;
       Dump_Lobes ("mark");
       C.Fixed_Obs.Append (Geom.Obs_Pt'(Pt => Arm, Pose => H.Pose, U => U, V => V, Seq => F.Seq, Kind => H.Zones (Wc).N_Lobes));
+      for I in 0 .. H.Zones (Wc).N_Lobes - 1 loop   --  每一瓣各自的尖另记一份(认指尖用)
+         declare
+            Tu, Tv : Long_Float;
+            Tok : Boolean;
+         begin
+            Zone.Tip_Px (H.Zones (Wc), Zone.Lobe_Of (H.Zones (Wc), I), F.Cams (Wc).W, F.Cams (Wc).H, Tu, Tv, Tok);
+            if Tok then
+               C.Lobe_Obs.Append (Geom.Obs_Pt'(Pt => Arm, Pose => H.Pose, U => Tu, V => Tv, Seq => F.Seq, Kind => H.Zones (Wc).N_Lobes));
+            end if;
+         end;
+      end loop;
       for Ob of C.Fixed_Obs loop
          if Ob.Pt = Arm then
             N := N + 1;
@@ -6391,32 +6402,86 @@ package body Act is
             Geo_Say ("  第" & Codec.Img (T.Arm + 1) & " 只手上的点(它看见手指 " & Codec.Img (T.Kind) & " 瓣时标的那个):手系里 (" & Mm (T.Tip (0)) & "," & Mm (T.Tip (1)) & ","
                      & Mm (T.Tip (2)) & "),离手腕原点 " & Mm (Geom.Norm (T.Tip)) & " · " & Codec.Img (T.N) & " 笔,残差 " & Codec.Fmt (T.Rms, 2) & " px");
          end loop;
-         --  每只手的指尖偏移 = 和它自己那只眼里瓣数一样的那个点(腕眼认指尖用的就是那个结构;瓣数不同是手上别的点)
+         --  每只手的指尖偏移:它自己那只眼里每一瓣手指的尖是手系里一条视线;不动的眼每笔里每一瓣的尖,落在哪条视线上就是那一瓣的指尖
+         --  (Geom.Tips_On_Rays,门槛 = 不动的眼解出来的像素残差的 3 倍,倍数无量纲,同踢离群那一条);指尖 = 各瓣指尖的中点,和腕眼认指尖同一条定义(Zone_Tip)。
+         --  以前按"瓣数一样的点"认:G2C 2026-09-26 两只手自己眼里 1 瓣、头顶眼里 2 瓣占 25/27,一个都没认上;离线看,四根手指那一瓣的尖正落在腕眼指尖视线上
          for A in 0 .. C.Map.Arms - 1 loop
             declare
                Hc : constant Integer := (if A < Natural (C.Map.Cam_On_Arm.Length) then C.Map.Cam_On_Arm (A) else -1);
-               Own : constant Natural := (if Hc >= 0 then Zone_Of (C, A, Natural (Hc)).N_Lobes else 0);
-               Hit : Integer := -1;
             begin
-               for I in 0 .. Natural (Tips.Length) - 1 loop
-                  if Tips (I).Arm = A and then Tips (I).Kind = Own then
-                     Hit := Integer (I);
-                  end if;
-               end loop;
-               if Hit >= 0 and then Hc >= 0 and then Natural (Hc) < Natural (C.Geo.Length) and then C.Geo (Natural (Hc)).Valid then
+               if Hc >= 0 and then Natural (Hc) < Natural (C.Geo.Length) and then Natural (Hc) < Natural (F.Cams.Length) and then C.Geo (Natural (Hc)).Valid
+                 and then C.Geo (Natural (Hc)).F > 0.0
+               then
                   declare
-                     Th : constant Geom.V3 := Tips (Natural (Hit)).Tip;
                      Gh : Geom.Cam_Geo := C.Geo (Natural (Hc));
+                     Z : constant Zone.Hand_Zone := Zone_Of (C, A, Natural (Hc));
+                     Rays : Geom.V3_Vectors.Vector;
+                     Lo : Geom.Obs_Pt_Vectors.Vector;
+                     Min_Marks : constant := 4;   --  一条视线至少归给它几个尖才算定了(次数)
                   begin
-                     --  手系里的指尖偏移 → 腕眼相机系(先扣掉相机离手腕原点的偏移,再转到相机轴)
-                     Gh.Tip := Geom.Ap (Geom.Tr (Gh.R_Ce), [Th (0) - Gh.Off (0), Th (1) - Gh.Off (1), Th (2) - Gh.Off (2)]);
-                     Gh.Tip_Valid := True;
-                     C.Geo.Replace_Element (Natural (Hc), Gh);
-                     Geo_Say ("第" & Codec.Img (A + 1) & " 只手:指尖(" & Codec.Img (Own) & " 瓣,同它自己眼里)在手系里偏 (" & Mm (Th (0)) & "," & Mm (Th (1)) & "," & Mm (Th (2))
-                              & "),离自己的眼 " & Mm (Geom.Norm (Gh.Tip)) & ",在它自己眼里 (" & Mm (Gh.Tip (0)) & "," & Mm (Gh.Tip (1)) & "," & Mm (Gh.Tip (2)) & ")");
+                     for K in 0 .. Z.N_Lobes - 1 loop
+                        declare
+                           Tu, Tv : Long_Float;
+                           Tok : Boolean;
+                        begin
+                           Zone.Tip_Px (Z, Zone.Lobe_Of (Z, K), F.Cams (Natural (Hc)).W, F.Cams (Natural (Hc)).H, Tu, Tv, Tok);
+                           if Tok then
+                              declare
+                                 Dc : Geom.V3 := [(Tu - Gh.Cx) / Gh.F, -(Tv - Gh.Cy) / Gh.F, -1.0];   --  相机系视线(驱动的相机系:z 朝后 ⇒ 前方 -1)
+                                 Nn : constant Long_Float := Geom.Norm (Dc);
+                              begin
+                                 for I in 0 .. 2 loop
+                                    Dc (I) := Dc (I) / Nn;
+                                 end loop;
+                                 Rays.Append (Geom.Ap (Gh.R_Ce, Dc));
+                              end;
+                           end if;
+                        end;
+                     end loop;
+                     for Ob of C.Lobe_Obs loop
+                        if Ob.Pt = A then
+                           Lo.Append (Ob);
+                        end if;
+                     end loop;
+                     if Rays.Is_Empty then
+                        Geo_Say ("第" & Codec.Img (A + 1) & " 只手:它自己眼里没量到手指的尖 ⇒ 指尖偏移这回没定");
+                     else
+                        declare
+                           R : constant Geom.Ray_Tip_Vectors.Vector := Geom.Tips_On_Rays (G, Lo, Gh.Off, Rays, 3.0 * G.Rms);
+                           All_Ok : Boolean := True;
+                           Th : Geom.V3 := [0.0, 0.0, 0.0];
+                           Pts : Geom.V3_Vectors.Vector;
+                        begin
+                           for K in 0 .. Natural (R.Length) - 1 loop
+                              Geo_Say ("第" & Codec.Img (A + 1) & " 只手第 " & Codec.Img (K + 1) & " 瓣:不动的眼 " & Codec.Img (Natural (Lo.Length)) & " 个瓣尖里有 " & Codec.Img (R (K).N)
+                                       & " 个落在它自己眼里这一瓣的视线上(" & Codec.Fmt (3.0 * G.Rms, 1) & " px 内)" & (if R (K).N > 0 then ",离眼 " & Mm (R (K).S) & " ± " & Mm (R (K).Spread) else ""));
+                              if R (K).N < Min_Marks then
+                                 All_Ok := False;
+                              else
+                                 Pts.Append (Geom.V3'[Gh.Off (0) + R (K).S * Rays (K) (0), Gh.Off (1) + R (K).S * Rays (K) (1), Gh.Off (2) + R (K).S * Rays (K) (2)]);
+                              end if;
+                           end loop;
+                           if All_Ok and then not Pts.Is_Empty then
+                              for P of Pts loop
+                                 for I in 0 .. 2 loop
+                                    Th (I) := Th (I) + P (I) / Long_Float (Pts.Length);
+                                 end loop;
+                              end loop;
+                              --  手系里的指尖偏移 → 腕眼相机系(先扣掉相机离手腕原点的偏移,再转到相机轴)
+                              Gh.Tip := Geom.Ap (Geom.Tr (Gh.R_Ce), [Th (0) - Gh.Off (0), Th (1) - Gh.Off (1), Th (2) - Gh.Off (2)]);
+                              Gh.Tip_Valid := True;
+                              if Natural (Pts.Length) = 2 then
+                                 Gh.Gap := Geom.Norm ([Pts (0) (0) - Pts (1) (0), Pts (0) (1) - Pts (1) (1), Pts (0) (2) - Pts (1) (2)]);   --  两指尖相距 = 张口
+                              end if;
+                              C.Geo.Replace_Element (Natural (Hc), Gh);
+                              Geo_Say ("第" & Codec.Img (A + 1) & " 只手:指尖在手系里偏 (" & Mm (Th (0)) & "," & Mm (Th (1)) & "," & Mm (Th (2)) & "),离自己的眼 " & Mm (Geom.Norm (Gh.Tip))
+                                       & (if Natural (Pts.Length) = 2 then ",两指尖相距 " & Mm (Gh.Gap) else ""));
+                           else
+                              Geo_Say ("第" & Codec.Img (A + 1) & " 只手:有一瓣归给它的尖不到 4 个 ⇒ 指尖偏移这回没定");
+                           end if;
+                        end;
+                     end if;
                   end;
-               elsif Hc >= 0 then
-                  Geo_Say ("第" & Codec.Img (A + 1) & " 只手:它自己眼里手指 " & Codec.Img (Own) & " 瓣,不动的眼里这样的标记不够 4 笔(或它的眼还没量)⇒ 指尖偏移这回没定");
                end if;
             end;
          end loop;

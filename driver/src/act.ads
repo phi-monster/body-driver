@@ -256,6 +256,7 @@ package Act is
       Inst_Host : Unbounded_String;    --  仪器进程(空 = 没配,几何全靠身体自己量)
       Inst_Port : Natural := 8077;
       Fixed_Obs : Geom.Obs_Pt_Vectors.Vector;   --  开机各停里不动的眼给各条臂指尖做的合空标记(Pt = 臂号;像素 + 那一停的位姿),开机末尾一起解不动的眼
+      Lobe_Obs : Geom.Obs_Pt_Vectors.Vector;    --  同一批标记里每一瓣手指各自的尖(Pt = 臂号,Kind = 这一笔的瓣数):解完不动的眼后认哪一瓣落在腕眼哪条瓣视线上 = 指尖
       Dump_Dir : Unbounded_String;
       Round_N : Natural := 0;
       Fast : Boolean := False;
