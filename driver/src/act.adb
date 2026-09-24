@@ -6291,7 +6291,6 @@ package body Act is
    --  相机在世界里的位姿、焦距(没给就解)、每条臂指尖在手系里的偏移一起解(Fit_Fixed_Rig)。以前要先有指尖才能定它、先有它才能量指尖,
    --  官方配置(无深度无内参)下是死循环(V1C:头顶眼 0 个观测)。指尖偏移换到腕眼相机系存进几何文件(G.Tip),量指尖那条路不再需要
    procedure Geo_Boot_Fixed (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context) is
-      pragma Unreferenced (L);
       Wc : constant Natural := C.Map.World_Cam;
    begin
       if Wc >= Natural (C.Geo.Length) or else Wc >= Natural (F.Cams.Length) then
@@ -6365,6 +6364,57 @@ package body Act is
                   Own_Kind.Append (if Hc >= 0 and then Natural (Hc) < Natural (F.Cams.Length) then Zone_Of (C, A, Natural (Hc)).N_Lobes else 0);
                end;
             end loop;
+            --  ① 先按已有的标记粗解一遍;② 每只手顺着"手上的点 → 不动的眼"那条线往眼那边送两段(到眼距离的四分之一、一半,比例无量纲),每段停稳记一笔;
+            --  ③ 全部标记从头重解(下面)。手只在离眼差不多远的地方挪时,焦距和远近一起缩放画面几乎不变(G2D 2026-09-26:三炮焦距 294 / 300 / 326,每炮 ± 6%);
+            --  顺着视线往眼那边走,点在画面里基本不动、只变远近 ⇒ 焦距和远近分开(离线估:± 3.4% ⇒ ± 1.1%)。直着往上抬不行:手在眼的斜下方,抬 9 cm 就贴画面边。走不到就按实到的算
+            declare
+               G0 : constant Geom.Cam_Geo := G;
+               Tips0 : Geom.Tip_Class_Vectors.Vector;
+               Ok0 : Boolean;
+               Fracs : constant array (1 .. 2) of Long_Float := [0.25, 0.5];   --  到眼距离的四分之一、一半(比例,无量纲)
+            begin
+               Geom.Fit_Fixed_Rig (G, C.Fixed_Obs, Ray_O, Ray_D, Own_Kind, Tips0, Ok0);
+               if Ok0 then
+                  Geo_Say ("不动的眼粗解:" & Codec.Img (Natural (C.Fixed_Obs.Length)) & " 笔,残差 " & Codec.Fmt (G.Rms, 2) & " px,焦距 " & Codec.Fmt (G.F, 1) & " ± " & Codec.Fmt (G.F_Sd, 1)
+                           & " px ⇒ 每只手顺着视线往它那边送两段再记,把焦距和远近分开");
+                  for A in 0 .. C.Map.Arms - 1 loop
+                     declare
+                        Best : Integer := -1;
+                     begin
+                        for I in 0 .. Natural (Tips0.Length) - 1 loop
+                           if Tips0 (I).Arm = A and then (Best < 0 or else Tips0 (I).N > Tips0 (Natural (Best)).N) then
+                              Best := Integer (I);
+                           end if;
+                        end loop;
+                        if Best >= 0 and then A < Natural (F.EE.Length) then
+                           declare
+                              Home : constant Plug.Arm_Pose := F.EE (A);
+                              Tw : constant Geom.V3 := Geom.Ap (Geom.Quat_To_R (Home), Tips0 (Natural (Best)).Tip);
+                              Dv : constant Geom.V3 := [G.Pos (0) - Home (0) - Tw (0), G.Pos (1) - Home (1) - Tw (1), G.Pos (2) - Home (2) - Tw (2)];
+                              Mok : Boolean;
+                           begin
+                              for Fr of Fracs loop
+                                 declare
+                                    Cur : constant Plug.Arm_Pose := F.EE (A);
+                                 begin
+                                    Geo_Move (L, C, F, A, [Home (0) + Fr * Dv (0) - Cur (0), Home (1) + Fr * Dv (1) - Cur (1), Home (2) + Fr * Dv (2) - Cur (2)], Mok);
+                                    Head_Mark (L, C, F, A);
+                                 end;
+                              end loop;
+                              declare
+                                 Cur : constant Plug.Arm_Pose := F.EE (A);
+                              begin
+                                 Geo_Move (L, C, F, A, [Home (0) - Cur (0), Home (1) - Cur (1), Home (2) - Cur (2)], Mok);
+                              end;
+                           end;
+                        end if;
+                     end;
+                  end loop;
+               else
+                  Geo_Say ("不动的眼粗解不出来(" & To_String (Geom.Why) & ")⇒ 不往它那边送,直接全部重解");
+               end if;
+               G := G0;   --  重解从头来(焦距没给就再一起解)
+            end;
             if Codec.Env ("BL_DUMP") /= "" then
                declare
                   Fo : Ada.Text_IO.File_Type;

@@ -864,6 +864,41 @@ begin
                 & " mm(自报 ± " & Codec.Fmt (G1.Pos_Sd * Per_Mm, 1) & ")· 朝向差 " & Codec.Fmt (Da, 4) & " rad · 指尖差 " & Codec.Fmt (D0 * Per_Mm, 1) & " / " & Codec.Fmt (D1 * Per_Mm, 1)
                 & " mm · 残差 " & Codec.Fmt (G1.Rms, 2) & " px");
       end;
+      --  顺着"手上的点 → 不动的眼"那条线往眼那边送 1/4、1/2(比例,无量纲)各记一笔(驱动开机的第②步):焦距的不确定度该至少缩到一半(倍数,无量纲)
+      --  (手只在离眼差不多远处挪,焦距和远近一起缩放画面几乎不变;沿视线走,点在画面里不动、只变远近)
+      declare
+         Obs_Sw : Geom.Obs_Pt_Vectors.Vector := Obs_One;
+         Gw2 : Geom.Cam_Geo;
+         Got_W : Geom.Tip_Class_Vectors.Vector;
+         Ok_W : Boolean;
+         Fr2 : constant array (1 .. 2) of Long_Float := [0.25, 0.5];   --  四分之一、一半(比例,无量纲)
+      begin
+         for A in 0 .. 1 loop
+            declare
+               H0 : constant Plug.Arm_Pose := [Homes (A) (0), Homes (A) (1), Homes (A) (2), 1.0, 0.0, 0.0, 0.0];
+               Tw : constant Geom.V3 := Geom.Ap (Geom.Quat_To_R (H0), Tips (A));
+               Dv : constant Geom.V3 := [Gt.Pos (0) - H0 (0) - Tw (0), Gt.Pos (1) - H0 (1) - Tw (1), Gt.Pos (2) - H0 (2) - Tw (2)];
+            begin
+               for Fr of Fr2 loop
+                  declare
+                     Ps : constant Plug.Arm_Pose := [H0 (0) + Fr * Dv (0), H0 (1) + Fr * Dv (1), H0 (2) + Fr * Dv (2), 1.0, 0.0, 0.0, 0.0];
+                     Tw2 : constant Geom.V3 := Geom.Ap (Geom.Quat_To_R (Ps), Tips (A));
+                     U, V : Long_Float;
+                     Fr1 : Boolean;
+                  begin
+                     for K in 1 .. 2 loop   --  每处两笔(次数)
+                        Geom.Project_Fixed (Gt, [Ps (0) + Tw2 (0), Ps (1) + Tw2 (1), Ps (2) + Tw2 (2)], U, V, Fr1);
+                        Obs_Sw.Append (Geom.Obs_Pt'(Pt => A, Pose => Ps, U => U + Jit2, V => V + Jit2, Seq => 0, Kind => 1));
+                     end loop;
+                  end;
+               end loop;
+            end;
+         end loop;
+         Gw2.F := 0.0; Gw2.Cx := 320.0; Gw2.Cy := 240.0;
+         Geom.Fit_Fixed_Rig (Gw2, Obs_Sw, Ray_O, Ray_D, Own_Kind, Got_W, Ok_W);
+         Check (Ok_1 and then Ok_W and then Gw2.F_Sd + Gw2.F_Sd < G1.F_Sd and then abs (Gw2.F - 288.0) < 3.0 * Gw2.F_Sd,   --  两倍(纯数学)/ 3 = 倍数(无量纲)
+                "不动的眼·往眼那边送两段:焦距 ± " & Codec.Fmt (G1.F_Sd, 1) & " ⇒ ± " & Codec.Fmt (Gw2.F_Sd, 1) & " px(该至少缩一半)· 解出 " & Codec.Fmt (Gw2.F, 1) & " px(真 288)");
+      end;
       Gs.F := 0.0; Gs.Cx := 320.0; Gs.Cy := 240.0;
       Geom.Fit_Fixed_Rig (Gs, Obs, Ray_O, Ray_D, Own_Kind, Got, Ok_F);
       declare
