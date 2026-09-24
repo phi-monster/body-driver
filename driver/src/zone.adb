@@ -480,11 +480,25 @@ package body Zone is
                   Codec.Write_PGM (Codec.Env ("BL_DUMP") & "/zone_arm" & Codec.Img (Arm + 1) & "_cam" & Codec.Img (C) & "_open.pgm", F0 (C).Gray, Cw, Ch);
                end;
             end if;
-            if F0 (C).Has_Depth and then Closed_Frame (C).Has_Depth then
-               Z := From_Sweep (Swept (C), F0 (C).Depth, Closed_Frame (C).Depth, True, Cw, Ch);
-            else
-               Z := From_Frames (F0 (C).Gray, Closed_Frame (C).Gray, Cw, Ch);
-            end if;
+            --  合上前后这只眼里得真有像素动过(超过它自己量的静止噪声地板,像素数不少于一块最小连通块 —— 同 Components 的下限)才算看见手指来去。
+            --  一动没动时"变化量分两拨"分的是噪声,会把一撮噪声点当成一瓣(G1S 2026-09-25:手抬出画面、缩回身前时,头顶眼各记了一笔落在空桌面上的"指尖")
+            declare
+               Mv : constant Bools := Picture.Moved (F0 (C).Gray, Closed_Frame (C).Gray, M.Floors (C));
+               N_Mv : Natural := 0;
+            begin
+               for B of Mv loop
+                  if B then
+                     N_Mv := N_Mv + 1;
+                  end if;
+               end loop;
+               if N_Mv < Picture.Min_Pixels (Cw, Ch) then
+                  Z := (others => <>);   --  这只眼里没看见手指来去
+               elsif F0 (C).Has_Depth and then Closed_Frame (C).Has_Depth then
+                  Z := From_Sweep (Swept (C), F0 (C).Depth, Closed_Frame (C).Depth, True, Cw, Ch);
+               else
+                  Z := From_Frames (F0 (C).Gray, Closed_Frame (C).Gray, Cw, Ch);
+               end if;
+            end;
             if Z.Valid then
                if Codec.Env ("BL_DUMP") /= "" then
                   declare

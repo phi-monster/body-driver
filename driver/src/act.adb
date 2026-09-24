@@ -5652,16 +5652,22 @@ package body Act is
       declare
          W : constant Natural := F.Cams (Wc).W;
          Hh : constant Natural := F.Cams (Wc).H;
-         Edge : constant Long_Float := Long_Float (Hh) / 80.0;   --  贴边的厚度(比例,无量纲;同 Tip_Px 里"最远的那一小截")
       begin
          if not Ok or else Wc >= Natural (H.Zones.Length) or else not Zone_Tip (H.Zones (Wc), W, Hh, U, V) then
             Geo_Say ("不动的眼这一停没看见第" & Codec.Img (Arm + 1) & " 只手的手指来去 ⇒ 不记");
             return;
          end if;
-         if U < Edge or else V < Edge or else U > Long_Float (W) - Edge or else V > Long_Float (Hh) - Edge then
-            Geo_Say ("不动的眼这一停里第" & Codec.Img (Arm + 1) & " 只手的指尖贴着画面边 (" & Codec.Fmt (U, 1) & "," & Codec.Fmt (V, 1) & ")= 被画面切了 ⇒ 不记");
-            return;
-         end if;
+         --  哪一瓣的框贴着画面边 = 手指被画面切了,指尖在画面外(G1S 2026-09-25:手抬高到画面右边、缩到画面底边时各记了一笔掌心当指尖)
+         for I in 0 .. H.Zones (Wc).N_Lobes - 1 loop
+            declare
+               Lb : constant Zone.Lobe := Zone.Lobe_Of (H.Zones (Wc), I);
+            begin
+               if Lb.Valid and then (Lb.X0 = 0 or else Lb.Y0 = 0 or else Lb.X1 + 1 >= W or else Lb.Y1 + 1 >= Hh) then
+                  Geo_Say ("不动的眼这一停里第" & Codec.Img (Arm + 1) & " 只手的手指贴着画面边 = 被画面切了 ⇒ 不记");
+                  return;
+               end if;
+            end;
+         end loop;
       end;
       C.Fixed_Obs.Append (Geom.Obs_Pt'(Pt => Arm, Pose => H.Pose, U => U, V => V, Seq => F.Seq));
       for Ob of C.Fixed_Obs loop

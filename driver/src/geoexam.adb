@@ -8,6 +8,7 @@ with Ada.Strings.Fixed;
 with Geom;
 with Plug;
 with Codec;
+with Ada.Numerics.Long_Elementary_Functions; use Ada.Numerics.Long_Elementary_Functions;
 procedure Geoexam is
    package V3s renames Geom.V3_Vectors;
    --  按空格切一行
@@ -170,7 +171,8 @@ begin
                         end if;
                      end;
                   elsif Field (L, 1) = "obs" then
-                     Obs.Append (Geom.Obs_Pt'(Pt => Natural (Num (L, 2)), Pose => Pose_Of (L, 5), U => Num (L, 3), V => Num (L, 4), Seq => 0));
+                     Obs.Append (Geom.Obs_Pt'(Pt => Natural (Num (L, 2)), Pose => Pose_Of (L, 5), U => Num (L, 3), V => Num (L, 4),
+                                              Seq => (if Field (L, 12) /= "" then Natural (Num (L, 12)) else 0)));
                   end if;
                end;
             end loop;
@@ -186,6 +188,23 @@ begin
                          & Codec.Fmt (G.Rot_Sd, 4) & " rad");
                for A in 0 .. Natural (Tip_H.Length) - 1 loop
                   Put_Line ("  臂 " & Codec.Img (A) & " 指尖(手系)(" & Codec.Fmt (Tip_H (A) (0), 3) & "," & Codec.Fmt (Tip_H (A) (1), 3) & "," & Codec.Fmt (Tip_H (A) (2), 3) & ")");
+               end loop;
+               --  每一笔:解出来的指尖投回不动的眼,和记下的像素差多少(哪一笔坏了一眼看出来;G1S 2026-09-25:5 笔落在空桌面上的标记把解拖到 0.5 m 外)
+               for Ob of Obs loop
+                  if Ob.Pt < Natural (Tip_H.Length) then
+                     declare
+                        Th : constant Geom.V3 := Tip_H (Ob.Pt);
+                        Tw : constant Geom.V3 := Geom.Ap (Geom.Quat_To_R (Ob.Pose), Th);
+                        Pw : constant Geom.V3 := [Ob.Pose (0) + Tw (0), Ob.Pose (1) + Tw (1), Ob.Pose (2) + Tw (2)];
+                        U, V : Long_Float;
+                        Front : Boolean;
+                     begin
+                        Geom.Project_Fixed (G, Pw, U, V, Front);
+                        Put_Line ("    臂 " & Codec.Img (Ob.Pt) & " 帧 " & Codec.Img (Ob.Seq) & " 记 (" & Codec.Fmt (Ob.U, 1) & "," & Codec.Fmt (Ob.V, 1) & ") 投 ("
+                                  & Codec.Fmt (U, 1) & "," & Codec.Fmt (V, 1) & ") 差 " & Codec.Fmt (Sqrt ((U - Ob.U) ** 2 + (V - Ob.V) ** 2), 1) & " px"
+                                  & (if Front then "" else " 在相机后面"));
+                     end;
+                  end if;
                end loop;
             else
                Put_Line ("解不出来:" & To_String (Geom.Why));
