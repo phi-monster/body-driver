@@ -73,7 +73,7 @@ begin
                   L : constant String := Get_Line (Fi);
                begin
                   if Ada.Strings.Fixed.Trim (L, Ada.Strings.Both) /= "" then
-                     Obs.Append (Geom.Obs_Pt'(Pt => Natural (Num (L, 1)), Pose => Pose_Of (L, 4), U => Num (L, 2), V => Num (L, 3), Seq => 0));
+                     Obs.Append (Geom.Obs_Pt'(Pt => Natural (Num (L, 1)), Pose => Pose_Of (L, 4), U => Num (L, 2), V => Num (L, 3), Seq => 0, Kind => 0));
                   end if;
                end;
             end loop;
@@ -90,12 +90,14 @@ begin
       else
          declare
             Obs : Geom.Obs_Pt_Vectors.Vector;
-            Ray_O, Ray_D, Tip_H : V3s.Vector;
+            Ray_O, Ray_D : V3s.Vector;
+            Tips : Geom.Tip_Class_Vectors.Vector;
+            Own_Kind : Geom.Nat_Vectors.Vector;
             Arms : constant Natural := Natural (Num (Head, 6));
             Ok : Boolean;
          begin
             for A in 0 .. Arms - 1 loop
-               Ray_O.Append (Geom.V3'[0.0, 0.0, 0.0]); Ray_D.Append (Geom.V3'[0.0, 0.0, 0.0]);
+               Ray_O.Append (Geom.V3'[0.0, 0.0, 0.0]); Ray_D.Append (Geom.V3'[0.0, 0.0, 0.0]); Own_Kind.Append (0);
             end loop;
             while not End_Of_File (Fi) loop
                declare
@@ -116,6 +118,9 @@ begin
                         Tu : constant Long_Float := Num (L, 4);
                         Tv : constant Long_Float := Num (L, 5);
                      begin
+                        if Field (L, 6) /= "" then
+                           Own_Kind.Replace_Element (A, Natural (Num (L, 6)));   --  第 6 列 = 它自己那只眼里手指几瓣(老文件没有 ⇒ 0,点都自由)
+                        end if;
                         if Kc >= 0 and then Tu >= 0.0 and then Geom.Norm (Ray_D (A)) = 0.0 then
                            for K in 3 .. Ada.Command_Line.Argument_Count loop
                               declare
@@ -141,7 +146,7 @@ begin
                                                 Wl : constant String := Get_Line (Wi);
                                              begin
                                                 if Ada.Strings.Fixed.Trim (Wl, Ada.Strings.Both) /= "" then
-                                                   Wobs.Append (Geom.Obs_Pt'(Pt => Natural (Num (Wl, 1)), Pose => Pose_Of (Wl, 4), U => Num (Wl, 2), V => Num (Wl, 3), Seq => 0));
+                                                   Wobs.Append (Geom.Obs_Pt'(Pt => Natural (Num (Wl, 1)), Pose => Pose_Of (Wl, 4), U => Num (Wl, 2), V => Num (Wl, 3), Seq => 0, Kind => 0));
                                                 end if;
                                              end;
                                           end loop;
@@ -171,8 +176,10 @@ begin
                         end if;
                      end;
                   elsif Field (L, 1) = "obs" then
+                     --  第 13 列 = 这一笔里不动的眼看见的手指瓣数(老文件没有 ⇒ 0,同一只手的标记全当一个点)
                      Obs.Append (Geom.Obs_Pt'(Pt => Natural (Num (L, 2)), Pose => Pose_Of (L, 5), U => Num (L, 3), V => Num (L, 4),
-                                              Seq => (if Field (L, 12) /= "" then Natural (Num (L, 12)) else 0)));
+                                              Seq => (if Field (L, 12) /= "" then Natural (Num (L, 12)) else 0),
+                                              Kind => (if Field (L, 13) /= "" then Natural (Num (L, 13)) else 0)));
                   end if;
                end;
             end loop;
@@ -181,30 +188,33 @@ begin
                Put_Line ("  臂 " & Codec.Img (A) & " 视线起点 (" & Codec.Fmt (Ray_O (A) (0), 3) & "," & Codec.Fmt (Ray_O (A) (1), 3) & "," & Codec.Fmt (Ray_O (A) (2), 3)
                          & ") 方向 (" & Codec.Fmt (Ray_D (A) (0), 3) & "," & Codec.Fmt (Ray_D (A) (1), 3) & "," & Codec.Fmt (Ray_D (A) (2), 3) & ")");
             end loop;
-            Geom.Fit_Fixed_Rig (G, Obs, Ray_O, Ray_D, Tip_H, Ok);
+            Geom.Fit_Fixed_Rig (G, Obs, Ray_O, Ray_D, Own_Kind, Tips, Ok);
             if Ok then
                Put_Line ("解出来:踢掉 " & Codec.Img (G.Dropped) & " 笔 · 残差 " & Codec.Fmt (G.Rms, 2) & " px · 它在 (" & Codec.Fmt (G.Pos (0), 3) & "," & Codec.Fmt (G.Pos (1), 3) & ","
                          & Codec.Fmt (G.Pos (2), 3) & ") ± " & Codec.Fmt (G.Pos_Sd, 3) & " m · 焦距 " & Codec.Fmt (G.F, 1) & " ± " & Codec.Fmt (G.F_Sd, 1) & " px · 朝向 ± "
                          & Codec.Fmt (G.Rot_Sd, 4) & " rad");
-               for A in 0 .. Natural (Tip_H.Length) - 1 loop
-                  Put_Line ("  臂 " & Codec.Img (A) & " 指尖(手系)(" & Codec.Fmt (Tip_H (A) (0), 3) & "," & Codec.Fmt (Tip_H (A) (1), 3) & "," & Codec.Fmt (Tip_H (A) (2), 3) & ")");
+               for T of Tips loop
+                  Put_Line ("  臂 " & Codec.Img (T.Arm) & " · " & Codec.Img (T.Kind) & " 瓣的点(手系)(" & Codec.Fmt (T.Tip (0), 3) & "," & Codec.Fmt (T.Tip (1), 3) & "," & Codec.Fmt (T.Tip (2), 3)
+                            & ") 离手腕原点 " & Codec.Fmt (Geom.Norm (T.Tip), 3) & " m · " & Codec.Img (T.N) & " 笔 · 残差 " & Codec.Fmt (T.Rms, 2) & " px"
+                            & (if T.On_Ray then " · 在腕眼视线上" else " · 自由"));
                end loop;
-               --  每一笔:解出来的指尖投回不动的眼,和记下的像素差多少(哪一笔坏了一眼看出来;G1S 2026-09-25:5 笔落在空桌面上的标记把解拖到 0.5 m 外)
+               --  每一笔:它那个点投回不动的眼,和记下的像素差多少(哪一笔坏了一眼看出来;G1S 2026-09-25:5 笔落在空桌面上的标记把解拖到 0.5 m 外)
                for Ob of Obs loop
-                  if Ob.Pt < Natural (Tip_H.Length) then
-                     declare
-                        Th : constant Geom.V3 := Tip_H (Ob.Pt);
-                        Tw : constant Geom.V3 := Geom.Ap (Geom.Quat_To_R (Ob.Pose), Th);
-                        Pw : constant Geom.V3 := [Ob.Pose (0) + Tw (0), Ob.Pose (1) + Tw (1), Ob.Pose (2) + Tw (2)];
-                        U, V : Long_Float;
-                        Front : Boolean;
-                     begin
-                        Geom.Project_Fixed (G, Pw, U, V, Front);
-                        Put_Line ("    臂 " & Codec.Img (Ob.Pt) & " 帧 " & Codec.Img (Ob.Seq) & " 记 (" & Codec.Fmt (Ob.U, 1) & "," & Codec.Fmt (Ob.V, 1) & ") 投 ("
-                                  & Codec.Fmt (U, 1) & "," & Codec.Fmt (V, 1) & ") 差 " & Codec.Fmt (Sqrt ((U - Ob.U) ** 2 + (V - Ob.V) ** 2), 1) & " px"
-                                  & (if Front then "" else " 在相机后面"));
-                     end;
-                  end if;
+                  for T of Tips loop
+                     if T.Arm = Ob.Pt and then T.Kind = Ob.Kind then
+                        declare
+                           Tw : constant Geom.V3 := Geom.Ap (Geom.Quat_To_R (Ob.Pose), T.Tip);
+                           Pw : constant Geom.V3 := [Ob.Pose (0) + Tw (0), Ob.Pose (1) + Tw (1), Ob.Pose (2) + Tw (2)];
+                           U, V : Long_Float;
+                           Front : Boolean;
+                        begin
+                           Geom.Project_Fixed (G, Pw, U, V, Front);
+                           Put_Line ("    臂 " & Codec.Img (Ob.Pt) & " 瓣 " & Codec.Img (Ob.Kind) & " 帧 " & Codec.Img (Ob.Seq) & " 记 (" & Codec.Fmt (Ob.U, 1) & "," & Codec.Fmt (Ob.V, 1) & ") 投 ("
+                                     & Codec.Fmt (U, 1) & "," & Codec.Fmt (V, 1) & ") 差 " & Codec.Fmt (Sqrt ((U - Ob.U) ** 2 + (V - Ob.V) ** 2), 1) & " px"
+                                     & (if Front then "" else " 在相机后面"));
+                        end;
+                     end if;
+                  end loop;
                end loop;
             else
                Put_Line ("解不出来:" & To_String (Geom.Why));

@@ -20,6 +20,7 @@ package Geom is
       Pose : Plug.Arm_Pose := [others => 0.0];
       U, V : Long_Float := 0.0;
       Seq : Natural := 0;    --  哪一帧看见的(落盘对图用)
+      Kind : Natural := 0;   --  不动的眼给指尖做的标记:这一笔里它看见这只手的手指分成几瓣(和 Pt 一起定"手上哪个点");别的观测不用,0
    end record;
    package Obs_Pt_Vectors is new Ada.Containers.Vectors (Natural, Obs_Pt);
    type Cam_Geo is record
@@ -82,11 +83,25 @@ package Geom is
    package V3_Vectors is new Ada.Containers.Vectors (Natural, V3);
    --  上一次 Fit_Rig / Fit_Fixed_Rig 没解出来的原因(解出来时是空);开机日志原样打出来,不猜
    Why : Ada.Strings.Unbounded.Unbounded_String;
-   --  不动的眼,连指尖一起解(2026-09-25):相机在世界里的朝向 + 位置、焦距(没给就解)、每条臂的指尖离自己那只眼多远(S,米)。
-   --  指尖在腕眼里的像素是固定的、量过的 ⇒ 手系里一条已知视线(起点 Ray_O = 相机离手腕原点的偏移,方向 Ray_D 单位向量),指尖 = Ray_O + S · Ray_D,
-   --  只差 S 一个数。V1J 2026-09-25 实测:把指尖偏移当 3 个未知数解,手几乎只平移时"指尖偏移"和"相机在哪"完全等价,互相顶替 ⇒ 相机差 24 cm、焦距 204/288。
-   --  观测 = 这只眼里指尖中点的像素 + 那一刻手的位姿读数(Pt = 臂号)。Ray_D 为零向量的臂没有视线,不进解。Tip_H (k) = 解出来的指尖(手系,米;没解的 0 向量)
-   procedure Fit_Fixed_Rig (G : in out Cam_Geo; O : Obs_Pt_Vectors.Vector; Ray_O, Ray_D : V3_Vectors.Vector; Tip_H : out V3_Vectors.Vector; Ok : out Boolean);
+   --  不动的眼给手上的一个点做的标记解出来的那个点(手系,米):哪条臂、它看见几瓣手指时的那个点、用了几笔、这些笔的像素残差
+   type Tip_Class is record
+      Arm, Kind : Natural := 0;
+      Tip : V3 := [others => 0.0];
+      N : Natural := 0;
+      Rms : Long_Float := 0.0;
+      On_Ray : Boolean := False;   --  这个点按定义在这条臂腕眼的视线上(瓣数同它自己眼里的),只解离眼多远
+   end record;
+   package Tip_Class_Vectors is new Ada.Containers.Vectors (Natural, Tip_Class);
+   package Nat_Vectors is new Ada.Containers.Vectors (Natural, Natural);
+   --  不动的眼,连手上被它标记的点一起解(2026-09-25):相机在世界里的朝向 + 位置、焦距(没给就解)、每个被标记的点在手系里的位置。
+   --  点的身份 = (Pt = 臂号, Kind = 这一笔里它看见这只手的手指分成几瓣):瓣数不同是手上不同的点(G1S 2026-09-25:同一只手一瓣、两瓣的标记当一个点解,
+   --  残差 7.5 px;分开解 1.7 px)。一个点至少 4 笔才进(次数)。
+   --  瓣数和这条臂自己那只眼里一样的点(Own_Kind (k)),就是腕眼认的那个指尖,按定义落在腕眼那条视线上(手系里起点 Ray_O、单位方向 Ray_D)⇒ 只解离眼多远;
+   --  别的点在手系里 3 个数都解。只有自由的点时"点在手上哪儿"和"相机在哪"能一起平移、分不太开(合成:自报 ± 1.7 cm);视线上的点把这个方向钉住。
+   --  手几乎只平移时分不开(V1J 2026-09-25:相机差 24 cm)——不确定度比手挪过的量程还大 ⇒ 判解不出。Ray_D 为零向量的臂没有视线,它的点都自由。
+   --  先把所有点当在 Ray_O(腕眼离手腕原点;没有就 0),用单点法定一个相机的起点;再按这个相机把每个点在手上三角出来;最后全部一起精修。Tips = 笔数够的每个点
+   procedure Fit_Fixed_Rig (G : in out Cam_Geo; O : Obs_Pt_Vectors.Vector; Ray_O, Ray_D : V3_Vectors.Vector; Own_Kind : Nat_Vectors.Vector;
+                            Tips : out Tip_Class_Vectors.Vector; Ok : out Boolean);
    --  ── 没有深度时量指尖 ──:指尖在这只手自己眼里的像素给出相机系里的一条视线 Dir_C(单位向量,从手的位姿点出发);指尖 = S · Dir_C,只差 S(米)。
    --  不动的眼在几停里看见这只手的指尖落在 (U,V)(O 里的 Pose = 那一停手的位姿读数):指尖的世界位置必须落在不动眼那条视线上
    --  ⇒ 每停两条线性方程、一个未知数 S,最小二乘。两条视线平行(解不出)或一停都没有 ⇒ Ok = False。Rms_Px = 解出来之后指尖投回不动眼的像素残差。

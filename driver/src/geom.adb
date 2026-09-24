@@ -1091,72 +1091,151 @@ package body Geom is
       end;
    end Fit_Fixed;
 
-   procedure Fit_Fixed_Rig (G : in out Cam_Geo; O : Obs_Pt_Vectors.Vector; Ray_O, Ray_D : V3_Vectors.Vector; Tip_H : out V3_Vectors.Vector; Ok : out Boolean) is
+   procedure Fit_Fixed_Rig (G : in out Cam_Geo; O : Obs_Pt_Vectors.Vector; Ray_O, Ray_D : V3_Vectors.Vector; Own_Kind : Nat_Vectors.Vector;
+                            Tips : out Tip_Class_Vectors.Vector; Ok : out Boolean) is
+      use Ada.Strings.Unbounded;
       Fit_F : constant Boolean := G.F <= 0.0;
       Use_Prior : constant Boolean := Fit_F and then G.F_Prior > 0.0 and then G.F_Prior_Sd > 0.0;
       N : constant Natural := Natural (O.Length);
-      N_Arms : constant Natural := Natural'Min (Natural (Ray_O.Length), Natural (Ray_D.Length));
-      Cnt : array (0 .. N_Arms) of Natural := [others => 0];
-      Keep : array (0 .. N_Arms) of Boolean := [others => False];   --  看见 4 停以上、有视线的臂才进(次数)
-      Slot : array (0 .. N_Arms) of Integer := [others => -1];
+      Min_Marks : constant := 4;   --  一个点至少几笔才进(次数)
+      All_Cls : Tip_Class_Vectors.Vector;   --  出现过的每个点(臂, 瓣数)和它的笔数
+      Of_Obs : array (0 .. Natural'Max (1, N) - 1) of Integer := [others => -1];   --  每笔观测属于进解的第几个点(-1 = 不进)
       Nk : Natural := 0;
       N_Used : Natural := 0;
+      Best : Integer := -1;   --  笔数最多的那个点(Tips 里的序号)
       Gi : Cam_Geo := G;
-      Best_Arm : Integer := -1;
-      --  第 K 条臂的指尖在世界里(手系视线上离眼 S 米处)
-      function Tip_World (K : Natural; Pose : Plug.Arm_Pose; S : Long_Float) return V3 is
-         Th : constant V3 := [Ray_O (K) (0) + S * Ray_D (K) (0), Ray_O (K) (1) + S * Ray_D (K) (1), Ray_O (K) (2) + S * Ray_D (K) (2)];
-         Tw : constant V3 := Ap (Quat_To_R (Pose), Th);
+      function Init_Of (A : Natural) return V3 is (if A < Natural (Ray_O.Length) then Ray_O (A) else [0.0, 0.0, 0.0]);
+      function Has_Ray (A : Natural) return Boolean is (A < Natural (Ray_D.Length) and then Norm (Ray_D (A)) > 0.0);
+      function On_Ray_Of (A, K : Natural) return Boolean is (Has_Ray (A) and then A < Natural (Own_Kind.Length) and then Own_Kind (A) = K);
+      N_Unk : Natural := 0;   --  所有点的未知数(视线上的点 1 个,自由的 3 个)
+      function World_Of (Pose : Plug.Arm_Pose; T : V3) return V3 is
+         Tw : constant V3 := Ap (Quat_To_R (Pose), T);
       begin
          return [Pose (0) + Tw (0), Pose (1) + Tw (1), Pose (2) + Tw (2)];
-      end Tip_World;
+      end World_Of;
+      function Finite (X : V3) return Boolean is
+        (abs X (0) <= Long_Float'Last and then abs X (1) <= Long_Float'Last and then abs X (2) <= Long_Float'Last);
    begin
-      Ok := False; Tip_H.Clear;
-      Why := Ada.Strings.Unbounded.To_Unbounded_String ("观测不到 4 笔");
-      if N_Arms = 0 or else N < 4 then
+      Ok := False; Tips.Clear;
+      Why := To_Unbounded_String ("观测不到 4 笔");
+      if N < Min_Marks then
          return;
       end if;
-      for Ob of O loop
-         if Ob.Pt < N_Arms then
-            Cnt (Ob.Pt) := Cnt (Ob.Pt) + 1;
-         end if;
+      --  认点:(臂, 瓣数) 一样的是手上同一个点
+      for J in 0 .. N - 1 loop
+         declare
+            Found : Integer := -1;
+         begin
+            for I in 0 .. Natural (All_Cls.Length) - 1 loop
+               if All_Cls (I).Arm = O (J).Pt and then All_Cls (I).Kind = O (J).Kind then
+                  Found := Integer (I);
+               end if;
+            end loop;
+            if Found < 0 then
+               All_Cls.Append (Tip_Class'(Arm => O (J).Pt, Kind => O (J).Kind, Tip => Init_Of (O (J).Pt), N => 0, Rms => 0.0,
+                                          On_Ray => On_Ray_Of (O (J).Pt, O (J).Kind)));
+               Found := Integer (All_Cls.Length) - 1;
+            end if;
+            All_Cls (Natural (Found)).N := All_Cls (Natural (Found)).N + 1;
+         end;
       end loop;
-      for K in 0 .. N_Arms - 1 loop
-         if Cnt (K) >= 4 and then Norm (Ray_D (K)) > 0.0 then
-            Keep (K) := True; Slot (K) := Integer (Nk); Nk := Nk + 1; N_Used := N_Used + Cnt (K);
-            if Best_Arm < 0 or else Cnt (K) > Cnt (Best_Arm) then
-               Best_Arm := K;
+      for C of All_Cls loop
+         if C.N >= Min_Marks then
+            Tips.Append (C);
+            N_Used := N_Used + C.N;
+            N_Unk := N_Unk + (if C.On_Ray then 1 else 3);
+            if Best < 0 or else C.N > Tips (Natural (Best)).N then
+               Best := Integer (Tips.Length) - 1;
             end if;
          end if;
       end loop;
-      --  方程数(每笔观测两条)不到未知数的两倍就是在猜(V1I 2026-09-24:10 笔观测解 13 个未知数,解出相机在 2.8 m 外、残差 0.27 px)
-      if Best_Arm < 0 then
-         Why := Ada.Strings.Unbounded.To_Unbounded_String ("没有一条臂既有视线又在 4 停以上看见指尖");
+      Nk := Natural (Tips.Length);
+      if Nk = 0 then
+         Why := To_Unbounded_String ("没有一个点被看见 4 笔以上");
          return;
       end if;
-      if 2 * N_Used < 2 * ((if Fit_F then 7 else 6) + Nk) then
-         Why := Ada.Strings.Unbounded.To_Unbounded_String ("方程数(" & Codec.Img (2 * N_Used) & ")不到未知数的两倍");
+      for J in 0 .. N - 1 loop
+         for I in 0 .. Nk - 1 loop
+            if Tips (I).Arm = O (J).Pt and then Tips (I).Kind = O (J).Kind then
+               Of_Obs (J) := Integer (I);
+            end if;
+         end loop;
+      end loop;
+      --  方程数(每笔两条)不到未知数的两倍就是在猜(V1I 2026-09-24:10 笔观测解 13 个未知数,解出相机在 2.8 m 外、残差 0.27 px)
+      if N_Used < (if Fit_F then 7 else 6) + N_Unk then
+         Why := To_Unbounded_String ("方程数(" & Codec.Img (2 * N_Used) & ")不到未知数(" & Codec.Img ((if Fit_F then 7 else 6) + N_Unk) & ")的两倍");
          return;
       end if;
-      --  起点:观测最多的那条臂,先把指尖当成就在视线起点(S = 0),用老的单点法(盲搜 + 精修)给相机位姿和焦距一个像样的起点
+      --  ① 起点:笔数最多的那个点,先当它就在起始猜测那儿,用单点法(盲搜 + 精修)给相机位姿和焦距一个起点
       declare
          Marks : Mark_Vectors.Vector;
          Fok : Boolean;
       begin
-         for Ob of O loop
-            if Ob.Pt = Best_Arm then
-               Marks.Append (Mark'(Pw => Tip_World (Best_Arm, Ob.Pose, 0.0), U => Ob.U, V => Ob.V));
+         for J in 0 .. N - 1 loop
+            if Of_Obs (J) = Best then
+               Marks.Append (Mark'(Pw => World_Of (O (J).Pose, Tips (Natural (Best)).Tip), U => O (J).U, V => O (J).V));
             end if;
          end loop;
          Fit_Fixed (Gi, Marks, Fok);
          if not Fok then
-            Why := Ada.Strings.Unbounded.To_Unbounded_String ("起点那条臂单独解不出(" & Codec.Img (Natural (Marks.Length)) & " 笔)");
+            Why := To_Unbounded_String ("起点那个点单独解不出(" & Codec.Img (Natural (Marks.Length)) & " 笔)");
             return;
          end if;
       end;
+      --  ② 按这个相机把每个点在手上三角出来:第 j 笔里点在世界里 = p_j + R_j t,必须落在相机过 (u_j, v_j) 的视线上
+      --  ⇒ (I − d dᵀ)(p_j + R_j t − C) = 0,对 t 线性;这个点的全部笔一起解 3×3。解出来不是有限数就留起始猜测
+      for I in 0 .. Nk - 1 loop
+         declare
+            A : M3 := [others => [others => 0.0]];
+            B : V3 := [others => 0.0];
+         begin
+            for J in 0 .. N - 1 loop
+               if Of_Obs (J) = Integer (I) then
+                  declare
+                     Dw : V3 := Ap (Gi.R_Ce, [(O (J).U - Gi.Cx) / Gi.F, -(O (J).V - Gi.Cy) / Gi.F, -1.0]);
+                     Nn : constant Long_Float := Norm (Dw);
+                     Rj : constant M3 := Quat_To_R (O (J).Pose);
+                     Pr : M3;
+                     Q : M3;
+                     Bj : V3;
+                  begin
+                     for K in 0 .. 2 loop
+                        Dw (K) := Dw (K) / Nn;
+                     end loop;
+                     for R in 0 .. 2 loop
+                        for Cc in 0 .. 2 loop
+                           Pr (R, Cc) := (if R = Cc then 1.0 else 0.0) - Dw (R) * Dw (Cc);   --  I − d dᵀ(纯数学)
+                        end loop;
+                     end loop;
+                     Q := Mul (Pr, Rj);
+                     Bj := Ap (Pr, [Gi.Pos (0) - O (J).Pose (0), Gi.Pos (1) - O (J).Pose (1), Gi.Pos (2) - O (J).Pose (2)]);
+                     for R in 0 .. 2 loop
+                        for Cc in 0 .. 2 loop
+                           for K in 0 .. 2 loop
+                              A (R, Cc) := A (R, Cc) + Q (K, R) * Q (K, Cc);
+                           end loop;
+                        end loop;
+                        for K in 0 .. 2 loop
+                           B (R) := B (R) + Q (K, R) * Bj (K);
+                        end loop;
+                     end loop;
+                  end;
+               end if;
+            end loop;
+            declare
+               T : constant V3 := Solve3 (A, B);
+            begin
+               if Finite (T) then
+                  Tips (I).Tip := T;
+               end if;
+            end;
+         end;
+      end loop;
+      --  ③ 全部一起精修:相机朝向 3 + 位置 3 (+ 焦距) + 每个点 3
       declare
          Base : constant Natural := (if Fit_F then 7 else 6);   --  转向量 3 + 位置 3 (+ 焦距)
-         Np : constant Natural := Base + Nk;                     --  + 每条臂一个 S
+         Np : constant Natural := Base + N_Unk;
+         Off : array (0 .. Nk - 1) of Natural;   --  每个点的未知数从 P 的第几个起
          P : Param_Vec (0 .. Np - 1) := [others => 0.0];
          Steps : Param_Vec (0 .. Np - 1) := [others => 1.0e-4];   --  差分步(弧度 / 米,极小量)
          Rv : constant V3 := Rot_Vec (Gi.R_Ce);
@@ -1164,30 +1243,37 @@ package body Geom is
          Cur : Long_Float := 0.0;
          Behind : Natural := 0;   --  最近一次算残差时跑到相机后面的观测数(解出来还有 ⇒ 不算解出来)
          Skip : array (0 .. N - 1) of Boolean := [others => False];   --  被判离群、不再进解的观测(按观测序号)
-         procedure Resid (P : Param_Vec; R : out Long_Float; Fill : access procedure (I : Natural; Du, Dv : Long_Float)) is
+         function Tip_P (P : Param_Vec; I : Natural) return V3 is
+           (if Tips (I).On_Ray
+            then [Ray_O (Tips (I).Arm) (0) + P (Off (I)) * Ray_D (Tips (I).Arm) (0), Ray_O (Tips (I).Arm) (1) + P (Off (I)) * Ray_D (Tips (I).Arm) (1),
+                  Ray_O (Tips (I).Arm) (2) + P (Off (I)) * Ray_D (Tips (I).Arm) (2)]
+            else [P (Off (I)), P (Off (I) + 1), P (Off (I) + 2)]);
+         function Cam_Of (P : Param_Vec) return Cam_Geo is
             Gt : Cam_Geo := G;
-            Sum : Long_Float := 0.0;
-            I : Natural := 0;
          begin
             Gt.R_Ce := Rodrigues ([P (0), P (1), P (2)]);
             Gt.Pos := [P (3), P (4), P (5)];
             if Fit_F then
                Gt.F := P (6);
             end if;
+            return Gt;
+         end Cam_Of;
+         procedure Resid (P : Param_Vec; R : out Long_Float; Fill : access procedure (I : Natural; Du, Dv : Long_Float)) is
+            Gt : constant Cam_Geo := Cam_Of (P);
+            Sum : Long_Float := 0.0;
+            I : Natural := 0;
+         begin
             Behind := 0;
             for J in 0 .. N - 1 loop
-               declare
-                  Ob : constant Obs_Pt := O (J);
-               begin
-               if Ob.Pt < N_Arms and then Keep (Ob.Pt) and then not Skip (J) then
+               if Of_Obs (J) >= 0 and then not Skip (J) then
                   declare
-                     Pw : constant V3 := Tip_World (Ob.Pt, Ob.Pose, P (Base + Natural (Slot (Ob.Pt))));
+                     Pw : constant V3 := World_Of (O (J).Pose, Tip_P (P, Natural (Of_Obs (J))));
                      U, V, Du, Dv : Long_Float;
                      Front : Boolean;
                   begin
                      Project_Fixed (Gt, Pw, U, V, Front);
                      if Front and then Gt.F > 0.0 then
-                        Du := U - Ob.U; Dv := V - Ob.V;
+                        Du := U - O (J).U; Dv := V - O (J).V;
                      else
                         Du := 1.0e3; Dv := 1.0e3;   --  跑到相机后面:远大于画幅的罚(像素数,无量纲哨兵)
                         Behind := Behind + 1;
@@ -1199,7 +1285,6 @@ package body Geom is
                      I := I + 1;
                   end;
                end if;
-               end;
             end loop;
             if Use_Prior then
                declare
@@ -1220,17 +1305,31 @@ package body Geom is
          if Fit_F then
             P (6) := Gi.F; Steps (6) := 1.0;   --  焦距的差分步(像素,极小量)
          end if;
-         for Ob of O loop
-            if Ob.Pt < N_Arms and then Keep (Ob.Pt) then
-               Nr := Nr + 1;
-            end if;
-         end loop;
-         if Use_Prior then
-            Nr := Nr + 1;
-         end if;
+         declare
+            K : Natural := Base;
+         begin
+            for I in 0 .. Nk - 1 loop
+               Off (I) := K;
+               if Tips (I).On_Ray then
+                  declare
+                     A : constant Natural := Tips (I).Arm;
+                     Dn : constant Long_Float := Norm (Ray_D (A));
+                  begin
+                     --  三角出来的点在视线上的投影 = 离眼多远的起点
+                     P (K) := ((Tips (I).Tip (0) - Ray_O (A) (0)) * Ray_D (A) (0) + (Tips (I).Tip (1) - Ray_O (A) (1)) * Ray_D (A) (1)
+                               + (Tips (I).Tip (2) - Ray_O (A) (2)) * Ray_D (A) (2)) / (Dn * Dn);
+                     K := K + 1;
+                  end;
+               else
+                  P (K) := Tips (I).Tip (0); P (K + 1) := Tips (I).Tip (1); P (K + 2) := Tips (I).Tip (2);
+                  K := K + 3;
+               end if;
+            end loop;
+         end;
+         Nr := N_Used + (if Use_Prior then 1 else 0);
          Resid (P, Cur, null);
-         LM_Refine (P, Nr, Steps, 60, Resid'Access, Cur);
-         --  离群观测(指尖跟错了)踢掉再解:每笔残差比中位数大 3 倍(比例,无量纲)的不要;踢掉的不到四分之一才算离群
+         LM_Refine (P, Nr, Steps, 100, Resid'Access, Cur);   --  100 = 迭代次数上限(次数)
+         --  离群观测踢掉再解:每笔残差比中位数大 3 倍(比例,无量纲)的不要;踢掉的不到四分之一才算离群
          declare
             Rs : Param_Vec (0 .. Natural'Max (0, Nr - 1)) := [others => 0.0];
             procedure Grab (I : Natural; Du, Dv : Long_Float) is
@@ -1250,7 +1349,7 @@ package body Geom is
                   I : Natural := 0;
                begin
                   for J in 0 .. N - 1 loop
-                     if O (J).Pt < N_Arms and then Keep (O (J).Pt) and then not Skip (J) then
+                     if Of_Obs (J) >= 0 and then not Skip (J) then
                         if Rs (I) > 3.0 * Med then
                            Skip (J) := True;
                            Dropped := Dropped + 1;
@@ -1262,7 +1361,7 @@ package body Geom is
                if Dropped > 0 and then Dropped * 4 < Nr then
                   Nr := Nr - Dropped;
                   Resid (P, Cur, null);
-                  LM_Refine (P, Nr, Steps, 60, Resid'Access, Cur);
+                  LM_Refine (P, Nr, Steps, 100, Resid'Access, Cur);   --  100 = 迭代次数上限(次数)
                else
                   for K in Skip'Range loop
                      Skip (K) := False;
@@ -1274,8 +1373,8 @@ package body Geom is
          end;
          Resid (P, Cur, null);
          if Behind > 0 then
-            Why := Ada.Strings.Unbounded.To_Unbounded_String ("解出来还有 " & Codec.Img (Behind) & " 笔指尖跑到相机后面(残差 " & Codec.Fmt (Cur, 2) & " px)");
-            return;   --  解出来还有指尖跑到相机后面 ⇒ 不是解,不存
+            Why := To_Unbounded_String ("解出来还有 " & Codec.Img (Behind) & " 笔跑到相机后面(残差 " & Codec.Fmt (Cur, 2) & " px)");
+            return;   --  解出来还有点跑到相机后面 ⇒ 不是解,不存
          end if;
          declare
             Sd : Param_Vec (0 .. Np - 1);
@@ -1283,10 +1382,10 @@ package body Geom is
             Hi : V3 := [others => Long_Float'First];
             Span : Long_Float := 0.0;   --  手在这些观测里挪过的量程(米)
          begin
-            for Ob of O loop
-               if Ob.Pt < N_Arms and then Keep (Ob.Pt) then
+            for J in 0 .. N - 1 loop
+               if Of_Obs (J) >= 0 then
                   for I in 0 .. 2 loop
-                     Lo (I) := Long_Float'Min (Lo (I), Ob.Pose (I)); Hi (I) := Long_Float'Max (Hi (I), Ob.Pose (I));
+                     Lo (I) := Long_Float'Min (Lo (I), O (J).Pose (I)); Hi (I) := Long_Float'Max (Hi (I), O (J).Pose (I));
                   end loop;
                end if;
             end loop;
@@ -1298,32 +1397,40 @@ package body Geom is
             --  位置的不确定度比手挪过的量程还大、或焦距的不确定度比焦距还大 = 方程分不开 ⇒ 不算解出来
             --  (V1I / G1K 2026-09-25:相机解到 2.8 m / 120 m 外、残差却只有零点几像素,就是这种"解")
             if G.Pos_Sd >= Span or else (Fit_F and then G.F_Sd >= P (6)) or else G.Rot_Sd >= 1.0 then
-               Why := Ada.Strings.Unbounded.To_Unbounded_String ("不确定度比量本身还大:位置 ± " & Codec.Fmt (G.Pos_Sd, 3) & " m(手挪过 " & Codec.Fmt (Span, 3) & " m),焦距 "
-                                                                & Codec.Fmt (P (Base - 1), 1) & " ± " & Codec.Fmt (G.F_Sd, 1) & " px,朝向 ± " & Codec.Fmt (G.Rot_Sd, 3)
-                                                                & " rad(残差 " & Codec.Fmt (Cur, 2) & " px," & Codec.Img (Nr) & " 笔)");
+               Why := To_Unbounded_String ("不确定度比量本身还大:位置 ± " & Codec.Fmt (G.Pos_Sd, 3) & " m(手挪过 " & Codec.Fmt (Span, 3) & " m),焦距 "
+                                           & Codec.Fmt (P (Base - 1), 1) & " ± " & Codec.Fmt (G.F_Sd, 1) & " px,朝向 ± " & Codec.Fmt (G.Rot_Sd, 3)
+                                           & " rad(残差 " & Codec.Fmt (Cur, 2) & " px," & Codec.Img (Nr) & " 笔," & Codec.Img (Nk) & " 个点)");
                return;
             end if;
          end;
-         Why := Ada.Strings.Unbounded.Null_Unbounded_String;
-         G.R_Ce := Rodrigues ([P (0), P (1), P (2)]);
-         G.Pos := [P (3), P (4), P (5)];
-         if Fit_F then
-            G.F := P (6);
-         end if;
+         Why := Null_Unbounded_String;
+         G := Cam_Of (P);
          G.F_Meas := (if Fit_F then P (6) else 0.0);
          G.Rms := Cur;
          G.Fixed := True;
          G.Valid := True;
-         for K in 0 .. N_Arms - 1 loop
-            if Keep (K) then
-               declare
-                  S : constant Long_Float := P (Base + Natural (Slot (K)));
-               begin
-                  Tip_H.Append (V3'[Ray_O (K) (0) + S * Ray_D (K) (0), Ray_O (K) (1) + S * Ray_D (K) (1), Ray_O (K) (2) + S * Ray_D (K) (2)]);
-               end;
-            else
-               Tip_H.Append (V3'[0.0, 0.0, 0.0]);   --  没解的臂:0 向量(调用方按范数 > 0 认)
-            end if;
+         --  每个点:解出来的位置 + 它自己那几笔(没被踢的)的像素残差
+         for I in 0 .. Nk - 1 loop
+            declare
+               Sum : Long_Float := 0.0;
+               Cnt : Natural := 0;
+            begin
+               Tips (I).Tip := Tip_P (P, I);
+               for J in 0 .. N - 1 loop
+                  if Of_Obs (J) = Integer (I) and then not Skip (J) then
+                     declare
+                        U, V : Long_Float;
+                        Front : Boolean;
+                     begin
+                        Project_Fixed (G, World_Of (O (J).Pose, Tips (I).Tip), U, V, Front);
+                        Sum := Sum + (U - O (J).U) ** 2 + (V - O (J).V) ** 2;
+                        Cnt := Cnt + 1;
+                     end;
+                  end if;
+               end loop;
+               Tips (I).N := Cnt;
+               Tips (I).Rms := (if Cnt > 0 then Sqrt (Sum / Long_Float (Cnt)) else 0.0);
+            end;
          end loop;
          Ok := True;
       end;

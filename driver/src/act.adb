@@ -5430,13 +5430,14 @@ package body Act is
    --  "它在相机前 -0.8 mm"其实是负 0.8 米(算到相机背后去了)—— T10 2026-09-21 差点被这个标签骗过去。量的是米,就按米说,三位小数到毫米。
    function Mm (X : Long_Float) return String is (Codec.Fmt (X, 3) & " m");
 
-   procedure Geo_Move (L : in out Plug.Link; C : Context; F : in out Plug.Frame; Arm : Natural; Dw : Geom.V3; Ok : out Boolean) is
+   procedure Geo_Move (L : in out Plug.Link; C : Context; F : in out Plug.Frame; Arm : Natural; Dw : Geom.V3; Ok : out Boolean;
+                       Watch : Selfmap.Watcher := null) is
       A : Table.Vec := Table.Zero_Vec;
       Jaw : Floats;
       Del : Table.Vec;
    begin
       A (0) := Dw (0); A (1) := Dw (1); A (2) := Dw (2);
-      Step_Arm (L, C, F, Arm, A, Jaw, Del, Ok);
+      Step_Arm (L, C, F, Arm, A, Jaw, Del, Ok, Watch => Watch);
       --  命令了多少、实到多少,每一步都说(GB5 那一版有这一行,搬回 main 时丢了;H6 2026-09-22 实测每步要 14 cm 而差距只缩 0–2 cm,
       --  没有这一行就分不清是身体没走成、还是我算错了)
       Geo_Say ("挪 (" & Mm (Dw (0)) & "," & Mm (Dw (1)) & "," & Mm (Dw (2)) & ") ⇒ 实到 (" & Mm (Del (0)) & "," & Mm (Del (1)) & "," & Mm (Del (2)) &
@@ -5669,13 +5670,14 @@ package body Act is
             end;
          end loop;
       end;
-      C.Fixed_Obs.Append (Geom.Obs_Pt'(Pt => Arm, Pose => H.Pose, U => U, V => V, Seq => F.Seq));
+      C.Fixed_Obs.Append (Geom.Obs_Pt'(Pt => Arm, Pose => H.Pose, U => U, V => V, Seq => F.Seq, Kind => H.Zones (Wc).N_Lobes));
       for Ob of C.Fixed_Obs loop
          if Ob.Pt = Arm then
             N := N + 1;
          end if;
       end loop;
-      Geo_Say ("不动的眼:第" & Codec.Img (Arm + 1) & " 只手的指尖在它眼里 (" & Codec.Fmt (U, 1) & "," & Codec.Fmt (V, 1) & ")(第 " & Codec.Img (N) & " 笔)");
+      Geo_Say ("不动的眼:第" & Codec.Img (Arm + 1) & " 只手的指尖在它眼里 (" & Codec.Fmt (U, 1) & "," & Codec.Fmt (V, 1) & "),手指 " & Codec.Img (H.Zones (Wc).N_Lobes)
+               & " 瓣(第 " & Codec.Img (N) & " 笔)");
    end Head_Mark;
 
    procedure Geo_Boot (F : Plug.Frame; C : in out Context; Body_Path : String) is
@@ -5854,13 +5856,28 @@ package body Act is
             end;
          end loop;
       end Where;
+      --  手动的每一帧都喂给跟点仪器(不只停点):一转十几度,一停之间画面跳几十上百像素,只看停点的跟点器把桌上的点全跟丢
+      --  (G2B 2026-09-25 左眼:探一转 15 个点只跟住 3 个,还都是自己手上的)。逐帧喂,帧间只挪几个像素;位置仍在停点那一步(Where)取
+      function Track_Frame (Fr : Plug.Frame) return Boolean is
+         Err : Unbounded_String;
+      begin
+         if Tid >= 0 and then Cam < Natural (Fr.Cams.Length) then
+            declare
+               R : constant Instrument.Track_Vectors.Vector := Instrument.Track_Step (To_String (C.Inst_Host), C.Inst_Port, Tid, Fr.Cams (Cam).RGB, Cw, Ch, Err);
+               pragma Unreferenced (R);
+            begin
+               null;
+            end;
+         end if;
+         return False;   --  不打断走
+      end Track_Frame;
       --  这一停里每个还看得见的点记一笔;返回记了几个
       function Record_All return Natural is
          K : Natural := 0;
       begin
          for I in 0 .. Natural (Cur.Length) - 1 loop
             if Cur (I).Seen then
-               Obs.Append (Geom.Obs_Pt'(Pt => I, Pose => F.EE (Arm), U => Cur (I).U, V => Cur (I).V, Seq => F.Seq));
+               Obs.Append (Geom.Obs_Pt'(Pt => I, Pose => F.EE (Arm), U => Cur (I).U, V => Cur (I).V, Seq => F.Seq, Kind => 0));
                K := K + 1;
             end if;
          end loop;
@@ -5890,7 +5907,7 @@ package body Act is
          Prev_V : constant Long_Float := (if Target >= 0 then Cur (Target).V else 0.0);
          K : Natural := 0;
       begin
-         Geo_Move (L, C, F, Arm, M, Mok);
+         Geo_Move (L, C, F, Arm, M, Mok, Track_Frame'Unrestricted_Access);
          Settle;
          Where;
          Dump_Stop;
@@ -5916,7 +5933,7 @@ package body Act is
          K : Natural := 0;
       begin
          A (3) := Sign * Theta * Axis (0); A (4) := Sign * Theta * Axis (1); A (5) := Sign * Theta * Axis (2);
-         Step_Arm (L, C, F, Arm, A, Jaw, Del, Mok);
+         Step_Arm (L, C, F, Arm, A, Jaw, Del, Mok, Watch => Track_Frame'Unrestricted_Access);
          Settle;
          Where;
          Dump_Stop;
@@ -5925,6 +5942,24 @@ package body Act is
                   & Codec.Img (K) & "/" & Codec.Img (Natural (Cur.Length)) & " 点" & (if Mok then "" else " · 身体说没转成"));
          Head_Mark (L, C, F, Arm);   --  转过之后手停着,不动的眼记一笔
       end Rot_Stop;
+      --  转回起点的朝向:转动那几停命令 ±θ、实到的各不相同时,手会一直歪着,后面的平移停全作废
+      --  (G2B 2026-09-25:转完手歪着 74°,7 停平移全扔)。按位姿读数算出差的那个转动(世界轴)转回去;剩下不到一档转动探针就停,最多三次(次数)
+      procedure Face_Home is
+      begin
+         for Try in 1 .. 3 loop
+            declare
+               Rv : constant Geom.V3 := Geom.Rot_Vec (Geom.Mul (Geom.Quat_To_R (Home), Geom.Tr (Geom.Quat_To_R (F.EE (Arm)))));
+               A : Table.Vec := Table.Zero_Vec;
+               Jaw : Floats;
+               Del : Table.Vec;
+            begin
+               exit when Geom.Norm (Rv) <= Notch;
+               A (3) := Rv (0); A (4) := Rv (1); A (5) := Rv (2);
+               Step_Arm (L, C, F, Arm, A, Jaw, Del, Mok, Watch => Track_Frame'Unrestricted_Access);
+               Geo_Say ("转回起点的朝向:差 " & Codec.Fmt (Geom.Norm (Rv) * Deg, 1) & "° ⇒ 转完还差 " & Codec.Fmt (Geom.Angle_Between (Home, F.EE (Arm)) * Deg, 1) & "°");
+            end;
+         end loop;
+      end Face_Home;
    begin
       Ok := False;
       Geo_Take_K (C, F, Cam);
@@ -5955,7 +5990,9 @@ package body Act is
       if Theta > 0.0 then
          declare
             Before : Instrument.Track_Vectors.Vector;
-            Shifts : Param_Pixels;
+            Shifts : Param_Pixels;   --  挪得够"世界里的点"那条界的那些
+            Min_World : Long_Float := 0.0;   --  这一转世界里的点至少挪几像素
+            Sqrt3 : constant Long_Float := Sqrt (3.0);   --  √3(纯数学:tan 60°,视场 120° 的半角)
             Each : Param_Pixels;   --  每个候选在转过去那一停的位移(没看见 = -1);转回来之前记下,转回来后世界点也都回原处了(G1P 2026-09-25:14 个世界点被误判成自己)
          begin
             if Plug.Reset_Pending (L) then
@@ -5968,10 +6005,20 @@ package body Act is
             begin
                Rot_Stop ([0.0, 0.0, 1.0], 1.0);
                Turned_By := Geom.Angle_Between (Pose_Before, F.EE (Arm));
+               --  针孔相机的视场不超过 120°(同 Fit_Rig 里那条界)⇒ 焦距至少 半幅 / √3 ⇒ 转 θ 时世界里的点至少挪 (半幅 / √3)·θ 像素;
+               --  挪得比这还少的不是世界里的点(自己身上的、或跟错的),不拿来算焦距、不拿来定转角
+               --  (G2B 2026-09-25 左眼:跟住的 3 个点都只挪 0.5 px,当成世界算出焦距 2.4 px,转角放大到 188°,手拧了半圈)
+               Min_World := G.Cx / Sqrt3 * Turned_By;
                for I in 0 .. Natural (Cur.Length) - 1 loop
                   if Cur (I).Seen and then I < Natural (Before.Length) and then Before (I).Seen then
-                     Shifts.Append (Sqrt ((Cur (I).U - Before (I).U) ** 2 + (Cur (I).V - Before (I).V) ** 2));
-                     Each.Append (Sqrt ((Cur (I).U - Before (I).U) ** 2 + (Cur (I).V - Before (I).V) ** 2));
+                     declare
+                        D : constant Long_Float := Sqrt ((Cur (I).U - Before (I).U) ** 2 + (Cur (I).V - Before (I).V) ** 2);
+                     begin
+                        Each.Append (D);
+                        if D >= Min_World then
+                           Shifts.Append (D);
+                        end if;
+                     end;
                   else
                      Each.Append (-1.0);
                   end if;
@@ -6007,9 +6054,9 @@ package body Act is
             begin
                --  转眼时世界里的点不管远近都挪 焦距×角,自己身上的点(立在画面里的手指、机身)一动不动:挪得不到中位数四分之一(比例,无量纲)的就是自己,
                --  剔出去(G1O 2026-09-25 左眼:食指立在画面中间,4 个"不动的点"把焦距拽到 61;离线剔掉后 381 ± 22,和右眼 382 一致)
-               if Med > 0.0 then
+               if Med > 0.0 or else Min_World > 0.0 then
                   for I in 0 .. Natural (Cur.Length) - 1 loop
-                     if I < Natural (Each.Length) and then Each (I) >= 0.0 and then Each (I) < Med * Quarter then
+                     if I < Natural (Each.Length) and then Each (I) >= 0.0 and then (Each (I) < Med * Quarter or else Each (I) < Min_World) then
                         Dead.Replace_Element (I, True);
                         Cur.Replace_Element (I, Instrument.Track_Pt'(U => Cur (I).U, V => Cur (I).V, Seen => False, Conf => 0.0));
                         N_Self := N_Self + 1;
@@ -6025,7 +6072,7 @@ package body Act is
                            & " px ⇒ 每转 " & Codec.Fmt (Theta * Deg, 1) & "°");
                else
                   Theta := Notch;
-                  Geo_Say ("转角由眼定:探一转一个点都没跟住 ⇒ 退到一档 " & Codec.Fmt (Theta * Deg, 1) & "°");
+                  Geo_Say ("转角由眼定:探一转没有一个跟住的点挪得够世界里的点(至少 " & Codec.Fmt (Min_World, 1) & " px)⇒ 退到一档 " & Codec.Fmt (Theta * Deg, 1) & "°");
                end if;
             end;
             if Plug.Reset_Pending (L) then
@@ -6035,6 +6082,7 @@ package body Act is
             Rot_Stop ([0.0, 0.0, 1.0], -1.0);
             Rot_Stop ([1.0, 0.0, 0.0], 1.0);
             Rot_Stop ([1.0, 0.0, 0.0], -1.0);
+            Face_Home;
          end;
       end if;
       if Plug.Reset_Pending (L) then
@@ -6212,7 +6260,7 @@ package body Act is
       Geo_Take_K (C, F, Wc);
       declare
          G : Geom.Cam_Geo := Geo_Of (C, Wc);
-         Tip_H : Geom.V3_Vectors.Vector;
+         Tips : Geom.Tip_Class_Vectors.Vector;
          Fok : Boolean;
       begin
          if not F.Cams (Wc).Has_K then
@@ -6221,6 +6269,7 @@ package body Act is
          --  每条臂:指尖中点在自己眼里的像素(握区量的)⇒ 相机系单位视线 ⇒ 手系(起点 = 相机离手腕原点的偏移)。眼没量好的臂没有视线,不进解
          declare
             Ray_O, Ray_D : Geom.V3_Vectors.Vector;
+            Own_Kind : Geom.Nat_Vectors.Vector;   --  每条臂自己那只眼里手指分几瓣(没长眼的臂 0):瓣数一样的那个点才在它的视线上
             Tip_U, Tip_V : Floats;   --  每条臂指尖中点在自己眼里的像素(落盘用;没量到 = -1)
             Tip_Cam : Ints;
          begin
@@ -6266,6 +6315,7 @@ package body Act is
                      end;
                   end if;
                   Ray_O.Append (Oh); Ray_D.Append (Dh);
+                  Own_Kind.Append (if Hc >= 0 and then Natural (Hc) < Natural (F.Cams.Length) then Zone_Of (C, A, Natural (Hc)).N_Lobes else 0);
                end;
             end loop;
             if Codec.Env ("BL_DUMP") /= "" then
@@ -6278,19 +6328,20 @@ package body Act is
                   for A in 0 .. C.Map.Arms - 1 loop
                      Ada.Text_IO.Put_Line (Fo, "ray " & Codec.Img (A) & " " & Codec.Fmt (Ray_O (A) (0), 6) & " " & Codec.Fmt (Ray_O (A) (1), 6) & " " & Codec.Fmt (Ray_O (A) (2), 6)
                                            & " " & Codec.Fmt (Ray_D (A) (0), 7) & " " & Codec.Fmt (Ray_D (A) (1), 7) & " " & Codec.Fmt (Ray_D (A) (2), 7));
-                     Ada.Text_IO.Put_Line (Fo, "tip " & Codec.Img (A) & " " & Codec.Img (Tip_Cam (A)) & " " & Codec.Fmt (Tip_U (A), 3) & " " & Codec.Fmt (Tip_V (A), 3));
+                     Ada.Text_IO.Put_Line (Fo, "tip " & Codec.Img (A) & " " & Codec.Img (Tip_Cam (A)) & " " & Codec.Fmt (Tip_U (A), 3) & " " & Codec.Fmt (Tip_V (A), 3)
+                                           & " " & Codec.Img (Own_Kind (A)));
                   end loop;
                   for Ob of C.Fixed_Obs loop
                      Ada.Text_IO.Put_Line (Fo, "obs " & Codec.Img (Ob.Pt) & " " & Codec.Fmt (Ob.U, 3) & " " & Codec.Fmt (Ob.V, 3) & " " & Codec.Fmt (Ob.Pose (0), 6) & " "
                                            & Codec.Fmt (Ob.Pose (1), 6) & " " & Codec.Fmt (Ob.Pose (2), 6) & " " & Codec.Fmt (Ob.Pose (3), 7) & " " & Codec.Fmt (Ob.Pose (4), 7)
-                                           & " " & Codec.Fmt (Ob.Pose (5), 7) & " " & Codec.Fmt (Ob.Pose (6), 7) & " " & Codec.Img (Ob.Seq));
+                                           & " " & Codec.Fmt (Ob.Pose (5), 7) & " " & Codec.Fmt (Ob.Pose (6), 7) & " " & Codec.Img (Ob.Seq) & " " & Codec.Img (Ob.Kind));
                   end loop;
                   Ada.Text_IO.Close (Fo);
                exception
                   when others => null;
                end;
             end if;
-            Geom.Fit_Fixed_Rig (G, C.Fixed_Obs, Ray_O, Ray_D, Tip_H, Fok);
+            Geom.Fit_Fixed_Rig (G, C.Fixed_Obs, Ray_O, Ray_D, Own_Kind, Tips, Fok);
          end;
          if not Fok then
             Geo_Say ("不动的眼解不出来(" & Codec.Img (Natural (C.Fixed_Obs.Length)) & " 笔指尖观测):" & To_String (Geom.Why));
@@ -6300,31 +6351,36 @@ package body Act is
          Geo_Say ("不动的眼量好:" & Codec.Img (Natural (C.Fixed_Obs.Length)) & " 笔指尖观测(踢掉 " & Codec.Img (G.Dropped) & " 笔),像素残差 " & Codec.Fmt (G.Rms, 2)
                   & " px,它在 (" & Mm (G.Pos (0)) & "," & Mm (G.Pos (1)) & "," & Mm (G.Pos (2)) & ") ± " & Mm (G.Pos_Sd)
                   & (if G.F_Meas > 0.0 then ",焦距一起解出来 " & Codec.Fmt (G.F, 1) & " ± " & Codec.Fmt (G.F_Sd, 1) & " px" else ""));
+         for T of Tips loop
+            Geo_Say ("  第" & Codec.Img (T.Arm + 1) & " 只手上的点(它看见手指 " & Codec.Img (T.Kind) & " 瓣时标的那个):手系里 (" & Mm (T.Tip (0)) & "," & Mm (T.Tip (1)) & ","
+                     & Mm (T.Tip (2)) & "),离手腕原点 " & Mm (Geom.Norm (T.Tip)) & " · " & Codec.Img (T.N) & " 笔,残差 " & Codec.Fmt (T.Rms, 2) & " px");
+         end loop;
+         --  每只手的指尖偏移 = 和它自己那只眼里瓣数一样的那个点(腕眼认指尖用的就是那个结构;瓣数不同是手上别的点)
          for A in 0 .. C.Map.Arms - 1 loop
             declare
                Hc : constant Integer := (if A < Natural (C.Map.Cam_On_Arm.Length) then C.Map.Cam_On_Arm (A) else -1);
-               Th : constant Geom.V3 := (if A < Natural (Tip_H.Length) then Tip_H (A) else [0.0, 0.0, 0.0]);   --  解出来的指尖(手系);0 向量 = 没解
-               N_A : Natural := 0;
-               N_Tip : constant Natural := (if Geom.Norm (Th) > 0.0 then 1 else 0);
+               Own : constant Natural := (if Hc >= 0 then Zone_Of (C, A, Natural (Hc)).N_Lobes else 0);
+               Hit : Integer := -1;
             begin
-               for Ob of C.Fixed_Obs loop
-                  if Ob.Pt = A then
-                     N_A := N_A + 1;
+               for I in 0 .. Natural (Tips.Length) - 1 loop
+                  if Tips (I).Arm = A and then Tips (I).Kind = Own then
+                     Hit := Integer (I);
                   end if;
                end loop;
-               if N_Tip > 0 and then Hc >= 0 and then Natural (Hc) < Natural (C.Geo.Length) and then C.Geo (Natural (Hc)).Valid then
+               if Hit >= 0 and then Hc >= 0 and then Natural (Hc) < Natural (C.Geo.Length) and then C.Geo (Natural (Hc)).Valid then
                   declare
+                     Th : constant Geom.V3 := Tips (Natural (Hit)).Tip;
                      Gh : Geom.Cam_Geo := C.Geo (Natural (Hc));
                   begin
                      --  手系里的指尖偏移 → 腕眼相机系(先扣掉相机离手腕原点的偏移,再转到相机轴)
                      Gh.Tip := Geom.Ap (Geom.Tr (Gh.R_Ce), [Th (0) - Gh.Off (0), Th (1) - Gh.Off (1), Th (2) - Gh.Off (2)]);
                      Gh.Tip_Valid := True;
                      C.Geo.Replace_Element (Natural (Hc), Gh);
-                     Geo_Say ("第" & Codec.Img (A + 1) & " 只手:指尖在手系里偏 (" & Mm (Th (0)) & "," & Mm (Th (1)) & "," & Mm (Th (2)) & ")(" & Codec.Img (N_A)
-                              & " 笔观测),离自己的眼 " & Mm (Geom.Norm (Gh.Tip)) & ",在它自己眼里 (" & Mm (Gh.Tip (0)) & "," & Mm (Gh.Tip (1)) & "," & Mm (Gh.Tip (2)) & ")");
+                     Geo_Say ("第" & Codec.Img (A + 1) & " 只手:指尖(" & Codec.Img (Own) & " 瓣,同它自己眼里)在手系里偏 (" & Mm (Th (0)) & "," & Mm (Th (1)) & "," & Mm (Th (2))
+                              & "),离自己的眼 " & Mm (Geom.Norm (Gh.Tip)) & ",在它自己眼里 (" & Mm (Gh.Tip (0)) & "," & Mm (Gh.Tip (1)) & "," & Mm (Gh.Tip (2)) & ")");
                   end;
-               elsif N_A > 0 then
-                  Geo_Say ("第" & Codec.Img (A + 1) & " 只手:不动的眼只看见它的指尖 " & Codec.Img (N_A) & " 停,或它的眼还没量 ⇒ 指尖偏移这回没定");
+               elsif Hc >= 0 then
+                  Geo_Say ("第" & Codec.Img (A + 1) & " 只手:它自己眼里手指 " & Codec.Img (Own) & " 瓣,不动的眼里这样的标记不够 4 笔(或它的眼还没量)⇒ 指尖偏移这回没定");
                end if;
             end;
          end loop;

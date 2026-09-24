@@ -683,7 +683,7 @@ begin
                   Check (Fr, "多点连偏移:合成的点在相机前面(测试数据自己先得成立)");
                   --  近的点在第 7、8、9 停跟丢
                   if not (K = 0 and then S in 7 .. 9) then
-                     Obs.Append (Geom.Obs_Pt'(Pt => K, Pose => Poses (S).Pose, U => U + Jit, V => V + Jit, Seq => 0));
+                     Obs.Append (Geom.Obs_Pt'(Pt => K, Pose => Poses (S).Pose, U => U + Jit, V => V + Jit, Seq => 0, Kind => 0));
                   end if;
                end;
             end loop;
@@ -739,7 +739,7 @@ begin
                   Fr : Boolean;
                begin
                   Geom.Project (Gr, Ps, Pts (0), U, V, Fr);
-                  Obs_S.Append (Geom.Obs_Pt'(Pt => 0, Pose => Ps, U => U + Jit, V => V + Jit, Seq => 0));
+                  Obs_S.Append (Geom.Obs_Pt'(Pt => 0, Pose => Ps, U => U + Jit, V => V + Jit, Seq => 0, Kind => 0));
                end;
             end loop;
             Gd.F := 0.0; Gd.Cx := 320.0; Gd.Cy := 240.0;
@@ -748,22 +748,29 @@ begin
          end;
       end;
    end;
-   --  🔴 不动的眼连指尖偏移一起解(2026-09-24,Fit_Fixed_Rig):头顶眼在 (0,−0.41,1.308) 低头 30°、焦距 288(合成);两条臂各走标定路径
-   --  (起点 + 四停转 ±0.1 rad + 探一步 + 7 步 6 cm),指尖在手系里偏 (0,0.12,−0.03) / (0,0.11,−0.03),1 px 抖动;焦距没给。
-   --  该解出:焦距 2% 内、相机位置差 < 1.5 cm、朝向差 < 0.01 rad、两条臂的指尖偏移差 < 5 mm
+   --  🔴 不动的眼连手上被标的点一起解(2026-09-25,Fit_Fixed_Rig):头顶眼在 (0,−0.41,1.308) 低头 30°、焦距 288(合成);两条臂各走标定路径
+   --  (起点 + 探转 ±15.6° + 四停转 ±0.1 rad + 探一步 + 8 步 6 cm,同驱动实走的路径),1 px 抖动,焦距没给。第 1 条臂上有两个被标的点:它看见手指 1 瓣时标在指尖、2 瓣时标在另一处
+   --  (隔一停换一次,两点相距 3.7 cm,合成);第 2 条臂一个点。每个点在手系里 3 个数,(臂, 瓣数) 分开解 ⇒ 焦距 2% 内、相机位置差 < 1.5 cm、
+   --  朝向差 < 0.01 rad、每个点差 < 5 mm。反面:同样的笔把两个点当成一个点解(瓣数全记成一样),残差该大 3 倍以上(G1S 实拍:7.5 px 对 1.7 px)。
+   --  两个点那一条:多了一个自由的点(3 个未知数),手上的点又都挤在离相机 1 m 的一小团里 ⇒ 焦距和远近互相顶,相机位置自报 ± 1 cm 级;
+   --  要的是误差落在它自报不确定度的 3 倍以内(自报是真话)、焦距在 3% 内(V1 的线)、视线上的点 5 mm 内、自由的点 1 cm 内
    declare
-      Gt, Gs : Geom.Cam_Geo;
-      --  每条臂的腕眼:装在手上的朝向 + 离手腕原点的偏移(合成);指尖 = 偏移 + S × (相机系单位视线转到手系),真值 S = 0.12 / 0.11 m
+      Gt, Gs, Gm : Geom.Cam_Geo;
+      --  每条臂的腕眼:装在手上的朝向 + 离手腕原点的偏移(合成);第一个点 = 偏移 + S × (相机系单位视线转到手系),真值 S = 0.12 / 0.11 m
       Gw : constant array (0 .. 1) of Geom.M3 := [Geom.Rodrigues ([0.2, -0.3, 0.1]), Geom.Rodrigues ([-0.2, -0.3, -0.1])];
       Ofs : constant array (0 .. 1) of Geom.V3 := [[0.08, 0.0, 0.05], [0.08, 0.0, 0.05]];   --  相机离手腕原点(手系,米,合成)
       Dcs : constant array (0 .. 1) of Geom.V3 := [[0.1, -0.5, -0.86], [-0.1, -0.5, -0.86]];   --  指尖在自己眼里的视线(相机系,合成,下面归一化)
       S_True : constant array (0 .. 1) of Long_Float := [0.12, 0.11];   --  指尖离眼(米,合成)
+      Shift_B : constant Geom.V3 := [0.02, -0.03, 0.01];   --  第 1 条臂第二个点离第一个点(手系,米,合成)
       Tips : array (0 .. 1) of Geom.V3;
+      Tip_B : Geom.V3;
       Ray_O, Ray_D : Geom.V3_Vectors.Vector;
+      Own_Kind : Geom.Nat_Vectors.Vector;   --  两只手自己眼里都是 1 瓣(合成):1 瓣的点在各自腕眼的视线上,第 1 臂 2 瓣的那个点自由
       Homes : constant array (0 .. 1) of Geom.V3 := [[-0.3, 0.2, 0.85], [0.3, 0.2, 0.85]];   --  两只手的起点(米,合成)
-      Obs : Geom.Obs_Pt_Vectors.Vector;
-      Tip_H : Geom.V3_Vectors.Vector;
-      Ok_F : Boolean;
+      Obs, Obs_Same, Obs_One : Geom.Obs_Pt_Vectors.Vector;
+      Got, Got_M, Got_1 : Geom.Tip_Class_Vectors.Vector;
+      Ok_F, Ok_M, Ok_1 : Boolean;
+      G1 : Geom.Cam_Geo;
       Seed2 : Long_Long_Integer := 5;
       function Jit2 return Long_Float is   --  确定性伪随机 ±1 px(测试数据自己的抖动)
       begin
@@ -774,6 +781,15 @@ begin
       Per_Mm : constant Long_Float := 1000.0;         --  米 → 毫米(换算,无量纲)
       Sn : constant Long_Float := 0.5;                --  sin 30°(合成)
       Cs : constant Long_Float := 0.8660254;          --  cos 30°(合成)
+      function Err_Of (Cls : Geom.Tip_Class_Vectors.Vector; A, K : Natural; T : Geom.V3) return Long_Float is
+      begin
+         for C of Cls loop
+            if C.Arm = A and then C.Kind = K then
+               return Geom.Norm ([C.Tip (0) - T (0), C.Tip (1) - T (1), C.Tip (2) - T (2)]);
+            end if;
+         end loop;
+         return 1.0;   --  没解出这个点:按 1 米错算(远大于门槛,合成)
+      end Err_Of;
    begin
       --  相机 → 世界:x 列 = 世界 x;y 列 = (0, sin30, cos30)(画面的上朝前上);z 列 = (0, −cos30, sin30)(视线 −z 朝前下)
       Gt.R_Ce := [[1.0, 0.0, 0.0], [0.0, Sn, -Cs], [0.0, Cs, Sn]];
@@ -785,15 +801,19 @@ begin
             Dh : constant Geom.V3 := Geom.Ap (Gw (A), Dc);
          begin
             Tips (A) := [Ofs (A) (0) + S_True (A) * Dh (0), Ofs (A) (1) + S_True (A) * Dh (1), Ofs (A) (2) + S_True (A) * Dh (2)];
-            Ray_O.Append (Ofs (A)); Ray_D.Append (Dh);
+            Ray_O.Append (Ofs (A)); Ray_D.Append (Dh); Own_Kind.Append (1);
          end;
       end loop;
+      Tip_B := [Tips (0) (0) + Shift_B (0), Tips (0) (1) + Shift_B (1), Tips (0) (2) + Shift_B (2)];
       for A in 0 .. 1 loop
          declare
             H : constant Geom.V3 := Homes (A);
             Poses : Geom.Obs_Vectors.Vector;
          begin
             Poses.Append (Geom.Obs'(Pose => [H (0), H (1), H (2), 1.0, 0.0, 0.0, 0.0], U => 0.0, V => 0.0));
+            --  探转:绕 z 转 ±0.27 rad(≈ 15.6°,G1R/G1S 实拍的探一转;四元数 cos/sin 0.135,合成)——驱动每一停都给头顶眼一笔,探转这两停也有
+            Poses.Append (Geom.Obs'(Pose => [H (0), H (1), H (2), 0.99090, 0.0, 0.0, 0.13459], U => 0.0, V => 0.0));
+            Poses.Append (Geom.Obs'(Pose => [H (0), H (1), H (2), 0.99090, 0.0, 0.0, -0.13459], U => 0.0, V => 0.0));
             Poses.Append (Geom.Obs'(Pose => [H (0), H (1), H (2), 0.99875, 0.0, 0.0, 0.04998], U => 0.0, V => 0.0));    --  ±0.1 rad 的四元数(cos/sin 0.05,合成)
             Poses.Append (Geom.Obs'(Pose => [H (0), H (1), H (2), 0.99875, 0.0, 0.0, -0.04998], U => 0.0, V => 0.0));
             Poses.Append (Geom.Obs'(Pose => [H (0), H (1), H (2), 0.99875, 0.04998, 0.0, 0.0], U => 0.0, V => 0.0));
@@ -802,32 +822,68 @@ begin
             for M of Path2 loop
                Poses.Append (Geom.Obs'(Pose => [H (0) + 0.026 + 0.06 * M (0), H (1) + 0.06 * M (1), H (2) + 0.06 * M (2), 1.0, 0.0, 0.0, 0.0], U => 0.0, V => 0.0));
             end loop;
-            for Ps of Poses loop
+            for S in 0 .. Natural (Poses.Length) - 1 loop
                declare
-                  Tw : constant Geom.V3 := Geom.Ap (Geom.Quat_To_R (Ps.Pose), Tips (A));
+                  Ps : constant Geom.Obs := Poses (S);
+                  Two : constant Boolean := A = 0 and then S mod 2 = 1;   --  第 1 条臂隔一停标在第二个点上(合成)
+                  T : constant Geom.V3 := (if Two then Tip_B else Tips (A));
+                  Tw : constant Geom.V3 := Geom.Ap (Geom.Quat_To_R (Ps.Pose), T);
                   Pw : constant Geom.V3 := [Ps.Pose (0) + Tw (0), Ps.Pose (1) + Tw (1), Ps.Pose (2) + Tw (2)];
-                  U, V : Long_Float;
+                  U, V, Ju, Jv : Long_Float;
                   Fr : Boolean;
+                  Tw1 : constant Geom.V3 := Geom.Ap (Geom.Quat_To_R (Ps.Pose), Tips (A));   --  一只手一个点的那一条:永远标在第一个点上
+                  U1, V1 : Long_Float;
+                  Fr1 : Boolean;
                begin
                   Geom.Project_Fixed (Gt, Pw, U, V, Fr);
-                  Check (Fr and then U > 0.0 and then U < 640.0 and then V > 0.0 and then V < 480.0, "不动的眼连指尖:合成的指尖在画面里(测试数据自己先得成立)");
-                  Obs.Append (Geom.Obs_Pt'(Pt => A, Pose => Ps.Pose, U => U + Jit2, V => V + Jit2, Seq => 0));
+                  Geom.Project_Fixed (Gt, [Ps.Pose (0) + Tw1 (0), Ps.Pose (1) + Tw1 (1), Ps.Pose (2) + Tw1 (2)], U1, V1, Fr1);
+                  Check (Fr and then Fr1 and then U > 0.0 and then U < 640.0 and then V > 0.0 and then V < 480.0, "不动的眼连手上的点:合成的点在画面里(测试数据自己先得成立)");
+                  Ju := Jit2; Jv := Jit2;
+                  Obs.Append (Geom.Obs_Pt'(Pt => A, Pose => Ps.Pose, U => U + Ju, V => V + Jv, Seq => 0, Kind => (if Two then 2 else 1)));
+                  Obs_Same.Append (Geom.Obs_Pt'(Pt => A, Pose => Ps.Pose, U => U + Ju, V => V + Jv, Seq => 0, Kind => 1));
+                  Obs_One.Append (Geom.Obs_Pt'(Pt => A, Pose => Ps.Pose, U => U1 + Ju, V => V1 + Jv, Seq => 0, Kind => 1));
                end;
             end loop;
          end;
       end loop;
+      --  一只手一个点(都在各自腕眼视线上)。手上的点离相机 1 m、挤在十几厘米一团里 ⇒ 1 px 抖动就让焦距和远近互相顶出 ~1.5 cm(自报 ± 1.35 cm);
+      --  换解法之前这一条按"位置 1.5 cm 内"判,只有 1 倍标准差,是碰运气过的(2026-09-25 加了探转那两停、抖动换了一组就不过)⇒ 改按:
+      --  误差在自报不确定度的 3 倍内(自报是真话)、自报本身够小(焦距 ± 3% 内、位置 ± 3 cm 内)、焦距差 3% 内(V1 的线)、指尖 5 mm 内
+      G1.F := 0.0; G1.Cx := 320.0; G1.Cy := 240.0;
+      Geom.Fit_Fixed_Rig (G1, Obs_One, Ray_O, Ray_D, Own_Kind, Got_1, Ok_1);
+      declare
+         Da : constant Long_Float := (if Ok_1 then Geom.Norm (Geom.Rot_Vec (Geom.Mul (Geom.Tr (Gt.R_Ce), G1.R_Ce))) else 1.0);
+         Dp : constant Long_Float := (if Ok_1 then Geom.Norm ([G1.Pos (0) - Gt.Pos (0), G1.Pos (1) - Gt.Pos (1), G1.Pos (2) - Gt.Pos (2)]) else 1.0);
+         D0 : constant Long_Float := Err_Of (Got_1, 0, 1, Tips (0));
+         D1 : constant Long_Float := Err_Of (Got_1, 1, 1, Tips (1));
+      begin
+         Check (Ok_1 and then Dp < 3.0 * G1.Pos_Sd and then abs (G1.F - 288.0) < 3.0 * G1.F_Sd   --  3 = 倍数(无量纲)
+                and then G1.Pos_Sd < 0.03 and then G1.F_Sd < 0.03 * 288.0 and then abs (G1.F - 288.0) < 0.03 * 288.0   --  0.03 m / 0.03 = 位置(米)/ 比例(V1 的线)
+                and then Da < 0.01 and then D0 < 0.005 and then D1 < 0.005,
+                "不动的眼连手上的点·一只手一个点:2 臂 × 17 停 ⇒ 焦距 " & Codec.Fmt (G1.F, 1) & " ± " & Codec.Fmt (G1.F_Sd, 1) & " px(真 288)· 相机位置差 " & Codec.Fmt (Dp * Per_Mm, 1)
+                & " mm(自报 ± " & Codec.Fmt (G1.Pos_Sd * Per_Mm, 1) & ")· 朝向差 " & Codec.Fmt (Da, 4) & " rad · 指尖差 " & Codec.Fmt (D0 * Per_Mm, 1) & " / " & Codec.Fmt (D1 * Per_Mm, 1)
+                & " mm · 残差 " & Codec.Fmt (G1.Rms, 2) & " px");
+      end;
       Gs.F := 0.0; Gs.Cx := 320.0; Gs.Cy := 240.0;
-      Geom.Fit_Fixed_Rig (Gs, Obs, Ray_O, Ray_D, Tip_H, Ok_F);
+      Geom.Fit_Fixed_Rig (Gs, Obs, Ray_O, Ray_D, Own_Kind, Got, Ok_F);
       declare
          Da : constant Long_Float := (if Ok_F then Geom.Norm (Geom.Rot_Vec (Geom.Mul (Geom.Tr (Gt.R_Ce), Gs.R_Ce))) else 1.0);
          Dp : constant Long_Float := (if Ok_F then Geom.Norm ([Gs.Pos (0) - Gt.Pos (0), Gs.Pos (1) - Gt.Pos (1), Gs.Pos (2) - Gt.Pos (2)]) else 1.0);
-         Dt0 : constant Long_Float := (if Ok_F and then Natural (Tip_H.Length) = 2 then Geom.Norm ([Tip_H (0) (0) - Tips (0) (0), Tip_H (0) (1) - Tips (0) (1), Tip_H (0) (2) - Tips (0) (2)]) else 1.0);
-         Dt1 : constant Long_Float := (if Ok_F and then Natural (Tip_H.Length) = 2 then Geom.Norm ([Tip_H (1) (0) - Tips (1) (0), Tip_H (1) (1) - Tips (1) (1), Tip_H (1) (2) - Tips (1) (2)]) else 1.0);
+         D01 : constant Long_Float := Err_Of (Got, 0, 1, Tips (0));
+         D02 : constant Long_Float := Err_Of (Got, 0, 2, Tip_B);
+         D11 : constant Long_Float := Err_Of (Got, 1, 1, Tips (1));
+         Honest : constant Boolean := Ok_F and then Dp < 3.0 * Gs.Pos_Sd and then abs (Gs.F - 288.0) < 3.0 * Gs.F_Sd;   --  3 = 倍数(无量纲)
       begin
-         Check (Ok_F and then abs (Gs.F - 288.0) < 6.0 and then Dp < 0.015 and then Da < 0.01 and then Dt0 < 0.005 and then Dt1 < 0.005,
-                "不动的眼连指尖:2 臂 × 13 停,指尖 = 腕眼视线上一个距离 ⇒ 焦距 " & Codec.Fmt (Gs.F, 1) & " px(真 288)· 相机位置差 " & Codec.Fmt (Dp * Per_Mm, 1) & " mm · 朝向差 "
-                & Codec.Fmt (Da, 4) & " rad · 指尖差 " & Codec.Fmt (Dt0 * Per_Mm, 1) & " / " & Codec.Fmt (Dt1 * Per_Mm, 1) & " mm(该在 5 mm 内;当 3 个未知数解时手只平移分不出,V1J 差 33 cm)· 残差 " & Codec.Fmt (Gs.Rms, 2) & " px");
+         Check (Ok_F and then Honest and then Gs.Pos_Sd < 0.03 and then Gs.F_Sd < 0.03 * 288.0 and then abs (Gs.F - 288.0) < 0.03 * 288.0   --  0.03 m / 0.03 = 位置(米)/ 比例(V1 的线)
+                and then Da < 0.01 and then D01 < 0.005 and then D11 < 0.005 and then D02 < 0.01,
+                "不动的眼连手上的点·第 1 臂两个点(按瓣数分开)⇒ 焦距 " & Codec.Fmt (Gs.F, 1) & " ± " & Codec.Fmt (Gs.F_Sd, 1) & " px(真 288)· 相机位置差 " & Codec.Fmt (Dp * Per_Mm, 1)
+                & " mm(自报 ± " & Codec.Fmt (Gs.Pos_Sd * Per_Mm, 1) & ")· 朝向差 " & Codec.Fmt (Da, 4) & " rad · 视线上的点差 " & Codec.Fmt (D01 * Per_Mm, 1) & " / "
+                & Codec.Fmt (D11 * Per_Mm, 1) & " mm · 自由的点差 " & Codec.Fmt (D02 * Per_Mm, 1) & " mm · 残差 " & Codec.Fmt (Gs.Rms, 2) & " px · 解出 " & Codec.Img (Natural (Got.Length)) & " 个点");
       end;
+      Gm.F := 0.0; Gm.Cx := 320.0; Gm.Cy := 240.0;
+      Geom.Fit_Fixed_Rig (Gm, Obs_Same, Ray_O, Ray_D, Own_Kind, Got_M, Ok_M);
+      Check (Ok_F and then ((not Ok_M) or else Gm.Rms > 3.0 * Gs.Rms),   --  3 = 倍数(无量纲)
+             "不动的眼连手上的点·反面:两个点当一个点解 ⇒ " & (if Ok_M then "残差 " & Codec.Fmt (Gm.Rms, 2) & " px(分开解 " & Codec.Fmt (Gs.Rms, 2) & " px)" else "解不出:" & To_String (Geom.Why)));
    end;
    --  🔴 没有深度时量指尖(2026-09-23):指尖 = 自己眼里那条视线上离眼 S 米处;不动的眼两停看见指尖 ⇒ 解 S。合成数据:真值 0.12 m
    declare
