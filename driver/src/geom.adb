@@ -1376,6 +1376,12 @@ package body Geom is
             Why := To_Unbounded_String ("解出来还有 " & Codec.Img (Behind) & " 笔跑到相机后面(残差 " & Codec.Fmt (Cur, 2) & " px)");
             return;   --  解出来还有点跑到相机后面 ⇒ 不是解,不存
          end if;
+         --  同 Fit_Rig 那一条:无畸变针孔的视场不超过 120°(半幅宽 ÷ 焦距 ≤ tan 60° = 1.732,无量纲)——焦距比这还短就不是针孔的解
+         --  (X5A 2026-09-26:头顶眼粗解成焦距 140、残差 21 px,驱动照着它把手往错的方向送了 25 cm)
+         if Fit_F and then G.Cx > 1.732 * P (6) then
+            Why := To_Unbounded_String ("焦距解成 " & Codec.Fmt (P (6), 1) & " px,视场超过 120°,针孔假设不成立(残差 " & Codec.Fmt (Cur, 2) & " px)");
+            return;
+         end if;
          declare
             Sd : Param_Vec (0 .. Np - 1);
             Lo : V3 := [others => Long_Float'Last];
