@@ -5642,6 +5642,40 @@ package body Act is
       Ok : Boolean;
       U, V : Long_Float;
       N : Natural := 0;
+      --  每一笔(记下的、拒掉的)的每一瓣各自的指尖像素、大小、框落盘(BL_DUMP/head_lobes.txt):换一种认点办法(比如总认最大那一瓣的尖)离线就能试,
+      --  不用再开一炮(G2C 2026-09-26:同一只手换个姿势,"几瓣"在 1 和 2 之间跳,拿瓣数当点的身份不稳)
+      procedure Dump_Lobes (Tag : String) is
+         Dump : constant String := Codec.Env ("BL_DUMP");
+         Fo : Ada.Text_IO.File_Type;
+      begin
+         if Dump = "" or else Wc >= Natural (H.Zones.Length) or else Wc >= Natural (F.Cams.Length) then
+            return;
+         end if;
+         begin
+            Ada.Text_IO.Open (Fo, Ada.Text_IO.Append_File, Dump & "/head_lobes.txt");
+         exception
+            when others => Ada.Text_IO.Create (Fo, Ada.Text_IO.Out_File, Dump & "/head_lobes.txt");
+         end;
+         Ada.Text_IO.Put (Fo, Tag & " " & Codec.Img (F.Seq) & " " & Codec.Img (Arm) & " " & Codec.Img (H.Zones (Wc).N_Lobes));
+         for I in H.Pose'Range loop
+            Ada.Text_IO.Put (Fo, " " & Codec.Fmt (H.Pose (I), 6));
+         end loop;
+         for I in 0 .. H.Zones (Wc).N_Lobes - 1 loop
+            declare
+               Lb : constant Zone.Lobe := Zone.Lobe_Of (H.Zones (Wc), I);
+               Tu, Tv : Long_Float;
+               Tok : Boolean;
+            begin
+               Zone.Tip_Px (H.Zones (Wc), Lb, F.Cams (Wc).W, F.Cams (Wc).H, Tu, Tv, Tok);
+               Ada.Text_IO.Put (Fo, " | " & Codec.Fmt ((if Tok then Tu else -1.0), 1) & " " & Codec.Fmt ((if Tok then Tv else -1.0), 1) & " " & Codec.Img (Lb.Count)
+                                & " " & Codec.Img (Lb.X0) & " " & Codec.Img (Lb.Y0) & " " & Codec.Img (Lb.X1) & " " & Codec.Img (Lb.Y1));
+            end;
+         end loop;
+         Ada.Text_IO.New_Line (Fo);
+         Ada.Text_IO.Close (Fo);
+      exception
+         when others => null;
+      end Dump_Lobes;
    begin
       if Wc >= Natural (F.Cams.Length) or else Arm >= Natural (F.EE.Length) or else Plug.Reset_Pending (L) then
          return;
@@ -5665,11 +5699,13 @@ package body Act is
             begin
                if Lb.Valid and then (Lb.X0 = 0 or else Lb.Y0 = 0 or else Lb.X1 + 1 >= W or else Lb.Y1 + 1 >= Hh) then
                   Geo_Say ("不动的眼这一停里第" & Codec.Img (Arm + 1) & " 只手的手指贴着画面边 = 被画面切了 ⇒ 不记");
+                  Dump_Lobes ("edge");
                   return;
                end if;
             end;
          end loop;
       end;
+      Dump_Lobes ("mark");
       C.Fixed_Obs.Append (Geom.Obs_Pt'(Pt => Arm, Pose => H.Pose, U => U, V => V, Seq => F.Seq, Kind => H.Zones (Wc).N_Lobes));
       for Ob of C.Fixed_Obs loop
          if Ob.Pt = Arm then
