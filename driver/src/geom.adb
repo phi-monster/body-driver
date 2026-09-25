@@ -2579,7 +2579,28 @@ package body Geom is
       if (if Base_Now >= 0 then 2 * Base_Now else 2 * Rep.Consistent_Now) < Rep.Consistent and then 4 * Rep.Consistent >= Best and then Rep.Shift_Px > Rep.Gate then
          Rep.Moved := True;
          Gn.F := G.F; Gn.F_Meas := G.F_Meas; Gn.F_Sd := G.F_Sd;   --  焦距照旧
-         Gn.Rms := Fr.Scene_Rms;   --  以后按新解配得多细来判
+         --  以后按新解配得多细来判:新位姿解释得了的那些点(新门内)像素误差的中位 × 1.2(换算,无量纲:二维高斯误差中位 ≈ 均方根 ÷ 1.2)。
+         --  不拿解的时候那份没加权的均方根:加权挑点留下了三角得不准的点,它们的大误差把均方根抬到 1.31 px(标定时 0.16),门跟着放到 3.9 px(X5E2 2026-09-26)
+         declare
+            Es : Param_Vec (0 .. Natural'Max (1, Natural (Cur.Length)) - 1) := [others => 0.0];
+            Ne : Natural := 0;
+            Gate_New : constant Long_Float := Long_Float'Max (3.0 * Long_Float'Max (1.0e-9, G.Rms), 3.0 * Turn_Sd);
+         begin
+            for P of Cur loop
+               declare
+                  U, V : Long_Float;
+                  Front : Boolean;
+               begin
+                  Project_Fixed (Gn, P.Pw, U, V, Front);
+                  if Front and then Sqrt ((U - P.U) ** 2 + (V - P.V) ** 2) <= Gate_New then
+                     Es (Ne) := Sqrt ((U - P.U) ** 2 + (V - P.V) ** 2);
+                     Ne := Ne + 1;
+                  end if;
+               end;
+            end loop;
+            Gn.Rms := (if Ne > 0 then 1.2 * Median (Es, Ne) else Fr.Scene_Rms);   --  误差中位 → 均方根(换算,无量纲)
+            Rep.Rms := Gn.Rms;
+         end;
          G := Gn;
          Best := Rep.Consistent;   --  重新放好了:从这一刻起重记"看见过的最多"
       else

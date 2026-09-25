@@ -6916,40 +6916,61 @@ package body Act is
          for S of C.Board loop
             Q.Append (Instrument.Match_Pt'(U => S.U, V => S.V, Cert => 0.0));
          end loop;
-         Now := Matched (0, Ok);
-         if not Ok then
-            Geo_Say ("核对不动的眼:仪器没配成(" & To_String (Err) & ")⇒ 这一轮不核");
-            return;
-         end if;
-         Geom.Check_Fixed (G, C.Board, Now, C.Fixed_Best, R, Turn_Sd => C.Fixed_Turn_Sd);
-         --  看不全的时候:画面可能被转了 —— RoMa 转 90° 配上六成、转 180° 一个都配不上(实测)⇒ 把此刻的图转 90°/180°/270° 各配一次,
-         --  哪个转法能按同样三条被采纳成新位姿,就是它被转成了那样;都不行 ⇒ 还是挡住了。刚看不全那一轮试,之后隔 1、2、4、8……轮再试
-         --  (次数翻倍:挡着的时候也可能被转,X5E 2026-09-26 挡着时转到 180° 就一直没发现;代价随挡的时长只按对数涨)
-         if R.Covered and then (not C.Fixed_Covered or else C.Round_N >= C.Fixed_Turn_Next) then
-            if not C.Fixed_Covered then
-               C.Fixed_Turn_Gap := 1;
-            else
-               C.Fixed_Turn_Gap := 2 * C.Fixed_Turn_Gap;
+         declare
+            B0 : constant Natural := C.Fixed_Best;   --  这一轮之前的"放好以来最多"(别的转法各自从它起算)
+         begin
+            Now := Matched (C.Fixed_Turn, Ok);
+            if not Ok then
+               Geo_Say ("核对不动的眼:仪器没配成(" & To_String (Err) & ")⇒ 这一轮不核");
+               return;
             end if;
-            C.Fixed_Turn_Next := C.Round_N + C.Fixed_Turn_Gap;
-            for T in 1 .. 3 loop
+            Geom.Check_Fixed (G, C.Board, Now, C.Fixed_Best, R, Turn_Sd => C.Fixed_Turn_Sd);
+            Turned := C.Fixed_Turn;
+            --  挪过,或看不全(看不全只在刚变的那一轮、之后隔 1、2、4、8……轮:次数翻倍,挡着的时候也可能被转,代价随挡的时长按对数涨):
+            --  此刻的图按四个转法(转 0/90/180/270°)各配一次,挑新门里解释点最多的那个 —— 转正的那个配得最细、点最多
+            --  (RoMa 转 90° 配上六成、配得糙,转 180° 一个都配不上;X5E2 2026-09-26 第一个过关的是转 180° 那个,相对还差 90°,采纳了一份差 2.9 cm、4.75 px 的位姿)。
+            --  采纳之后每轮就按这个转法配(C.Fixed_Turn),配点一直是转正的精度,细门不被糙解抬高
+            if R.Moved or else (R.Covered and then (not C.Fixed_Covered or else C.Round_N >= C.Fixed_Turn_Next)) then
+               if R.Covered then
+                  if not C.Fixed_Covered then
+                     C.Fixed_Turn_Gap := 1;
+                  else
+                     C.Fixed_Turn_Gap := 2 * C.Fixed_Turn_Gap;
+                  end if;
+                  C.Fixed_Turn_Next := C.Round_N + C.Fixed_Turn_Gap;
+               end if;
                declare
-                  Gt : Geom.Cam_Geo := C.Geo (Wc);
-                  Bt : Natural := C.Fixed_Best;
-                  Rt : Geom.Fixed_Check;
-                  Okt : Boolean;
-                  Nt : constant Geom.Scene_Pt_Vectors.Vector := Matched (T, Okt);
+                  Base : constant Natural := R.Consistent_Now;
+                  Have : Boolean := R.Moved;
+                  Best_G : Geom.Cam_Geo := G;
+                  Best_R : Geom.Fixed_Check := R;
+                  Best_B : Natural := C.Fixed_Best;
+                  Best_T : Natural := C.Fixed_Turn;
                begin
-                  if Okt then
-                     Geom.Check_Fixed (Gt, C.Board, Nt, Bt, Rt, Turn_Sd => C.Fixed_Turn_Sd, Base_Now => R.Consistent_Now);
-                     if Rt.Moved then
-                        G := Gt; R := Rt; C.Fixed_Best := Bt; Turned := T;
-                        exit;
+                  for T in 0 .. 3 loop
+                     if T /= C.Fixed_Turn then
+                        declare
+                           Gt : Geom.Cam_Geo := C.Geo (Wc);
+                           Bt : Natural := B0;
+                           Rt : Geom.Fixed_Check;
+                           Okt : Boolean;
+                           Nt : constant Geom.Scene_Pt_Vectors.Vector := Matched (T, Okt);
+                        begin
+                           if Okt then
+                              Geom.Check_Fixed (Gt, C.Board, Nt, Bt, Rt, Turn_Sd => C.Fixed_Turn_Sd, Base_Now => Base);
+                              if Rt.Moved and then (not Have or else Rt.Consistent > Best_R.Consistent) then
+                                 Best_G := Gt; Best_R := Rt; Best_B := Bt; Best_T := T; Have := True;
+                              end if;
+                           end if;
+                        end;
                      end if;
+                  end loop;
+                  if Have then
+                     G := Best_G; R := Best_R; C.Fixed_Best := Best_B; Turned := Best_T; C.Fixed_Turn := Best_T;
                   end if;
                end;
-            end loop;
-         end if;
+            end if;
+         end;
          if R.Moved then
             C.Geo.Replace_Element (Wc, G);
             --  参考图和板上的点在参考图里的像素都不换(一直是标好那一刻的):换成此刻的,一挡住参考图就跟着坏,错一轮接一轮地叠(X5B 2026-09-25)。
@@ -6961,7 +6982,7 @@ package body Act is
             Board_Save (C);
             Geo_Say ("核对不动的眼:它被挪过 —— 转了 " & Codec.Fmt (R.Turn_Deg, 1) & Deg_Say & "、挪了 " & Mm (R.Move_M) & ",板上的点在画面里挪了 " & Codec.Fmt (R.Shift_Px, 1)
                      & " px(" & Codec.Fmt (R.Shift_Sd, 1) & " 个配点噪声)"
-                     & (if Turned > 0 then ",此刻的图顺时针转 " & Codec.Img (90 * Turned) & Deg_Say & " 才配得上" else "")
+                     & (if Turned > 0 then ",此刻的图顺时针转 " & Codec.Img (90 * Turned) & Deg_Say & " 配得最好(以后每轮都这么转了再配)" else "")
                      & " ⇒ 按板重新标好(" & Codec.Img (R.Consistent) & "/" & Codec.Img (R.Asked) & " 个点对得上,残差 " & Codec.Fmt (R.Rms, 2) & " px),接着干");
          elsif R.Covered then
             if not C.Fixed_Covered then

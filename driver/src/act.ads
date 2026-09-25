@@ -290,6 +290,7 @@ package Act is
       Fixed_Covered : Boolean := False;         --  上一次核对判成挡住了
       Fixed_Turn_Next : Natural := 0;           --  挡住期间下一次"把画面转回去再配"在第几轮试(间隔每试一次翻倍:越挡越久试得越少)
       Fixed_Turn_Gap : Natural := 1;
+      Fixed_Turn : Natural := 0;                --  每轮核对先把此刻的图顺时针转几个 90° 再配(相机被转过之后,转正了再配,配点一直是转正的精度)
       Dump_Dir : Unbounded_String;
       Round_N : Natural := 0;
       Fast : Boolean := False;
