@@ -12,10 +12,17 @@
        → {"ok": true, "samples": [[ua,va,ub,vb,cert],...], "points": [[ub,vb,cert],...]}
        两台相机(或同一台相机两个位置)的两帧里,哪两个像素是同一个真实的点:num > 0 抽 num 对对应点;points = A 里的像素,问它们在 B 里在哪。
        cert = 模型自己给的可信度(0..1),驱动不拿它当真,只拿几何去核(三角重投、两停交叉)
+  POST /segment {"image": ..., "box": [x0,y0,x1,y1], "points": [[u,v,label],...]}
+       → {"ok": true, "w": W, "h": H, "area": n, "box": [x0,y0,x1,y1], "score": s, "runs": [r0, r1, ...]}
+       框(脑给的)/ 点(label 1 = 在它身上、0 = 不在)⇒ 那件东西的像素:runs = 整幅按行展开的游程,先"不是"一段、再"是"一段……交替。
+       score = 模型自报的 IoU(0..1),驱动只报数、不拿它当门
 
 模型:Track-On2(Aydemir et al. 2025,https://github.com/gorkaydemir/track_on 分支 track-on2,DINOv2 版;代码 MIT,权重 MIT,DINOv2 Apache-2.0)。
       RoMa(Edstedt et al., CVPR 2024,https://github.com/Parskatt/RoMa commit 77f8d68,代码 MIT;权重 roma_outdoor.pth + DINOv2 ViT-L/14)。
       2026-09-25 owner 批准装 RoMa:固定的头顶眼只靠看手定不准焦距(分割出来的指尖不是手上一个固定的点),拿腕眼三角出来的桌面点当标定板,要在头顶眼里认出同一批点。
+      SAM 2.1(Ravi et al. 2024,https://github.com/facebookresearch/sam2 commit 2b90b9f,代码 + 权重 Apache-2.0;hiera-small 46M)。
+      2026-09-26 owner 批准装 SAM("装 sam"):驱动自己按明暗切的块常常只是东西的一截、或连着别的东西(SHOT1 剪刀被画面边切着,两只眼的"中心"差 1.7 cm);
+      脑给框 ⇒ SAM 出这件东西的整片像素。实测(SHOT1 存图):头顶眼 1725 px、腕眼 6238 px 正好是整把剪刀,一次 0.04 s,显存 0.55 GB。
 权重钉死:见 WEIGHTS(sha256);对不上就拒绝起来。
 拆掉的(2026-09-24,owner:焦距不准的不留):GeoCalib(单图焦距偏一成、头眼"上"方向反了)、MoGe-2(单目猜深度,尺度核对不了)。
 """
@@ -32,16 +39,20 @@ WEIGHTS = {
     "trackon2_dinov2_checkpoint.pt": "34c35ea64ea68f3c633c901c2d7876964c34212455dfbb2d508aaea1c4978973",
     "roma_outdoor.pth": "c7a45c80d41ad788a63c641d1b686d7cb3f297f40097c6f4e75039889e5cc8ba",
     "dinov2_vitl14_pretrain.pth": "d5383ea8f4877b2472eb973e0fd72d557c7da5d3611bd527ceeb1d7162cbf428",
+    "sam2.1_hiera_small.pt": "6d1aa6f30de5c92224f8172114de081d104bbd23dd9dc5c58996f0cad5dc4d38",
 }
 ROMA_DIR = os.environ.get("ROMA_DIR", "/root/instruments/RoMa")
 ROMA_W = os.environ.get("ROMA_W", os.path.expanduser("~/.cache/torch/hub/checkpoints/roma_outdoor.pth"))
 ROMA_DINO = os.environ.get("ROMA_DINO", os.path.expanduser("~/.cache/torch/hub/checkpoints/dinov2_vitl14_pretrain.pth"))
 TRACKON_DIR = os.environ.get("TRACKON_DIR", "/root/instruments/track_on")
 TRACKON_CKPT = os.environ.get("TRACKON_CKPT", "/root/instruments/weights/trackon2_dinov2_checkpoint.pt")
+SAM_CKPT = os.environ.get("SAM_CKPT", "/root/instruments/weights/sam2.1_hiera_small.pt")
+SAM_CFG = os.environ.get("SAM_CFG", "configs/sam2.1/sam2.1_hiera_s.yaml")   # 仓库在 /root/instruments/sam2_repo(不许放在本文件同级叫 sam2:会遮住包)
 
 _lock = threading.Lock()
 _trackon = None
 _roma = None
+_sam = None
 _sessions = {}      # id → 跟踪状态(一个模型,多段各自的记忆)
 _next_id = [1]
 
@@ -80,6 +91,50 @@ def _load_roma():
         _roma = roma_outdoor(device="cuda", weights=w, dinov2_weights=d, use_custom_corr=False)
         print("[仪器] roma_outdoor 权重已核", flush=True)
     return _roma
+
+
+def _load_sam():
+    global _sam
+    if _sam is None:
+        h = hashlib.sha256(open(SAM_CKPT, "rb").read()).hexdigest()
+        if h != WEIGHTS["sam2.1_hiera_small.pt"]:
+            raise RuntimeError("SAM 2.1 权重哈希对不上:%s" % h)
+        from sam2.build_sam import build_sam2
+        from sam2.sam2_image_predictor import SAM2ImagePredictor
+        _sam = SAM2ImagePredictor(build_sam2(SAM_CFG, SAM_CKPT, device="cuda"))
+        print("[仪器] sam2.1_hiera_small sha256=%s" % h, flush=True)
+    return _sam
+
+
+def segment(b64, box, points):
+    m = _load_sam()
+    img = np.asarray(Image.open(io.BytesIO(base64.b64decode(b64))).convert("RGB"))
+    H, W = img.shape[0], img.shape[1]
+    kw = {}
+    if box:
+        kw["box"] = np.array(box, dtype=np.float32)
+    if points:
+        kw["point_coords"] = np.array([[p[0], p[1]] for p in points], dtype=np.float32)
+        kw["point_labels"] = np.array([int(p[2]) if len(p) > 2 else 1 for p in points], dtype=np.int32)
+    if not kw:
+        return {"ok": False, "err": "no box / points"}
+    with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
+        m.set_image(img)
+        masks, scores, _ = m.predict(multimask_output=False, **kw)
+    mk = np.asarray(masks[0]).astype(bool).reshape(-1)
+    # 游程:先"不是"一段,再"是"一段……交替(第一段可以是 0)
+    change = np.flatnonzero(np.diff(mk.astype(np.int8))) + 1
+    edges = np.concatenate([[0], change, [mk.size]])
+    runs = np.diff(edges).tolist()
+    if mk.size > 0 and mk[0]:
+        runs = [0] + runs
+    area = int(mk.sum())
+    if area > 0:
+        ys, xs = np.nonzero(mk.reshape(H, W))
+        bb = [int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())]
+    else:
+        bb = [-1, -1, -1, -1]
+    return {"ok": True, "w": W, "h": H, "area": area, "box": bb, "score": _num(float(scores[0]), 4), "runs": runs}
 
 
 def _num(x, nd):
@@ -196,7 +251,7 @@ class H(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            self._send(200, {"instruments": ["track", "match"], "device": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu"})
+            self._send(200, {"instruments": ["track", "match", "segment"], "device": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu"})
         else:
             self._send(404, {"ok": False, "err": "no such instrument"})
 
@@ -217,6 +272,8 @@ class H(BaseHTTPRequestHandler):
                     out = track_end(int(req["id"]))
                 elif self.path == "/match":
                     out = match(req["a"], req["b"], int(req.get("num", 0)), req.get("points", []))
+                elif self.path == "/segment":
+                    out = segment(req["image"], req.get("box", []), req.get("points", []))
                 else:
                     self._send(404, {"ok": False, "err": "no such instrument"})
                     return
@@ -230,5 +287,6 @@ class H(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     _load_trackon()   # 起来就把模型装进显存,第一帧不慢
     _load_roma()
-    print("[仪器] 听 %d · track=trackon2 · match=roma" % PORT, flush=True)
+    _load_sam()
+    print("[仪器] 听 %d · track=trackon2 · match=roma · segment=sam2.1" % PORT, flush=True)
     ThreadingHTTPServer(("0.0.0.0", PORT), H).serve_forever()
