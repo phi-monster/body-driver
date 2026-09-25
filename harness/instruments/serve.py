@@ -8,9 +8,15 @@
   POST /track/start {"image": ..., "points": [[u,v],...]}   → {"ok": true, "id": n}   开一段跟踪,查询点 = 这一帧里的像素
   POST /track/step  {"id": n, "image": ...}                 → {"ok": true, "points": [[u,v,vis,conf],...]}  下一帧里这些点在哪、看不看得见、有多确定
   POST /track/end   {"id": n}                               → {"ok": true}
+  POST /match {"a": ..., "b": ..., "num": N, "points": [[u,v],...]}
+       → {"ok": true, "samples": [[ua,va,ub,vb,cert],...], "points": [[ub,vb,cert],...]}
+       两台相机(或同一台相机两个位置)的两帧里,哪两个像素是同一个真实的点:num > 0 抽 num 对对应点;points = A 里的像素,问它们在 B 里在哪。
+       cert = 模型自己给的可信度(0..1),驱动不拿它当真,只拿几何去核(三角重投、两停交叉)
 
 模型:Track-On2(Aydemir et al. 2025,https://github.com/gorkaydemir/track_on 分支 track-on2,DINOv2 版;代码 MIT,权重 MIT,DINOv2 Apache-2.0)。
-权重钉死:trackon2_dinov2_checkpoint.pt(sha256 见 WEIGHTS)。
+      RoMa(Edstedt et al., CVPR 2024,https://github.com/Parskatt/RoMa commit 77f8d68,代码 MIT;权重 roma_outdoor.pth + DINOv2 ViT-L/14)。
+      2026-09-25 owner 批准装 RoMa:固定的头顶眼只靠看手定不准焦距(分割出来的指尖不是手上一个固定的点),拿腕眼三角出来的桌面点当标定板,要在头顶眼里认出同一批点。
+权重钉死:见 WEIGHTS(sha256);对不上就拒绝起来。
 拆掉的(2026-09-24,owner:焦距不准的不留):GeoCalib(单图焦距偏一成、头眼"上"方向反了)、MoGe-2(单目猜深度,尺度核对不了)。
 """
 import base64, io, json, os, sys, time, threading, hashlib
@@ -24,12 +30,18 @@ PORT = int(os.environ.get("INST_PORT", "8077"))
 WEIGHTS = {
     # 文件名 → sha256(装好后第一次跑校一次;对不上就拒绝起来,不许悄悄换权重)
     "trackon2_dinov2_checkpoint.pt": "34c35ea64ea68f3c633c901c2d7876964c34212455dfbb2d508aaea1c4978973",
+    "roma_outdoor.pth": "c7a45c80d41ad788a63c641d1b686d7cb3f297f40097c6f4e75039889e5cc8ba",
+    "dinov2_vitl14_pretrain.pth": "d5383ea8f4877b2472eb973e0fd72d557c7da5d3611bd527ceeb1d7162cbf428",
 }
+ROMA_DIR = os.environ.get("ROMA_DIR", "/root/instruments/RoMa")
+ROMA_W = os.environ.get("ROMA_W", os.path.expanduser("~/.cache/torch/hub/checkpoints/roma_outdoor.pth"))
+ROMA_DINO = os.environ.get("ROMA_DINO", os.path.expanduser("~/.cache/torch/hub/checkpoints/dinov2_vitl14_pretrain.pth"))
 TRACKON_DIR = os.environ.get("TRACKON_DIR", "/root/instruments/track_on")
 TRACKON_CKPT = os.environ.get("TRACKON_CKPT", "/root/instruments/weights/trackon2_dinov2_checkpoint.pt")
 
 _lock = threading.Lock()
 _trackon = None
+_roma = None
 _sessions = {}      # id → 跟踪状态(一个模型,多段各自的记忆)
 _next_id = [1]
 
@@ -51,6 +63,49 @@ def _load_trackon():
             os.chdir(cwd)
         print("[仪器] trackon2_dinov2 sha256=%s" % h, flush=True)
     return _trackon
+
+
+def _load_roma():
+    """RoMa:两份权重先核 sha256 再交给它(不让它自己去网上下);推理走纯 PyTorch 的局部相关(没装 fused local_corr 扩展)"""
+    global _roma
+    if _roma is None:
+        for fn, path in (("roma_outdoor.pth", ROMA_W), ("dinov2_vitl14_pretrain.pth", ROMA_DINO)):
+            h = hashlib.sha256(open(path, "rb").read()).hexdigest()
+            if h != WEIGHTS[fn]:
+                raise RuntimeError("RoMa 权重 %s 哈希对不上:%s" % (fn, h))
+        sys.path.insert(0, ROMA_DIR)
+        torch.set_float32_matmul_precision("highest")   # RoMa 自己要求
+        from romatch import roma_outdoor
+        w = torch.load(ROMA_W, map_location="cuda"); d = torch.load(ROMA_DINO, map_location="cuda")
+        _roma = roma_outdoor(device="cuda", weights=w, dinov2_weights=d, use_custom_corr=False)
+        print("[仪器] roma_outdoor 权重已核", flush=True)
+    return _roma
+
+
+def match(a_b64, b_b64, num, points):
+    m = _load_roma()
+    t0 = time.time()
+    A = Image.open(io.BytesIO(base64.b64decode(a_b64))).convert("RGB")
+    B = Image.open(io.BytesIO(base64.b64decode(b_b64))).convert("RGB")
+    Wa, Ha = A.size; Wb, Hb = B.size
+    with torch.no_grad():
+        warp, cert = m.match(A, B, device="cuda")
+        out = {"ok": True, "samples": [], "points": [], "model": "roma-outdoor"}
+        if num and num > 0:
+            mt, ct = m.sample(warp, cert, num=int(num))
+            ka, kb = m.to_pixel_coordinates(mt, Ha, Wa, Hb, Wb)
+            ka = ka.cpu().numpy(); kb = kb.cpu().numpy(); ct = ct.cpu().numpy()
+            out["samples"] = [[float(ka[i, 0]), float(ka[i, 1]), float(kb[i, 0]), float(kb[i, 1]), float(ct[i])] for i in range(len(ct))]
+        if points:
+            Ww = warp.shape[2] // 2   # 对称 warp:左半是 A → B
+            wAB = warp[0, :, :Ww, 2:].permute(2, 0, 1)[None].float(); cA = cert[0, :, :Ww][None, None].float()
+            uv = np.asarray(points, dtype=np.float32).reshape(-1, 2)
+            g = torch.tensor(np.stack([2 * uv[:, 0] / Wa - 1, 2 * uv[:, 1] / Ha - 1], 1)[None, :, None, :], device="cuda", dtype=torch.float32)
+            xb = torch.nn.functional.grid_sample(wAB, g, align_corners=False)[0, :, :, 0].T.cpu().numpy()
+            cb = torch.nn.functional.grid_sample(cA, g, align_corners=False)[0, 0, :, 0].cpu().numpy()
+            out["points"] = [[float(Wb * (xb[i, 0] + 1) / 2), float(Hb * (xb[i, 1] + 1) / 2), float(cb[i])] for i in range(len(uv))]
+    out["ms"] = (time.time() - t0) * 1000.0
+    return out
 
 
 def _trk_state(m):
@@ -135,7 +190,7 @@ class H(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            self._send(200, {"instruments": ["track"], "device": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu"})
+            self._send(200, {"instruments": ["track", "match"], "device": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu"})
         else:
             self._send(404, {"ok": False, "err": "no such instrument"})
 
@@ -154,6 +209,8 @@ class H(BaseHTTPRequestHandler):
                     out = track_step(int(req["id"]), req["image"])
                 elif self.path == "/track/end":
                     out = track_end(int(req["id"]))
+                elif self.path == "/match":
+                    out = match(req["a"], req["b"], int(req.get("num", 0)), req.get("points", []))
                 else:
                     self._send(404, {"ok": False, "err": "no such instrument"})
                     return
@@ -166,5 +223,6 @@ class H(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     _load_trackon()   # 起来就把模型装进显存,第一帧不慢
-    print("[仪器] 听 %d · track=trackon2" % PORT, flush=True)
+    _load_roma()
+    print("[仪器] 听 %d · track=trackon2 · match=roma" % PORT, flush=True)
     ThreadingHTTPServer(("0.0.0.0", PORT), H).serve_forever()
