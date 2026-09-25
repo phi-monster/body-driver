@@ -6518,6 +6518,91 @@ package body Act is
       end;
    end Fit_Board_Plane;
 
+   --  位姿读数当尺子用靠不靠得住(2026-09-26,PLAN §2b):每只腕眼每一停,按板上的点(三维按一起解好的几何三角)自己解出这一停相机在哪
+   --  (Geom.Fit_Fixed_Board,从"位姿读数 + 量过的相机偏移"预测的那个位姿起步,内参用一起解好的),和预测的比 ⇒ 差 = 这一停位姿读数的错里
+   --  随姿态变的那部分(关节零位、连杆长度);整条臂一致的偏差被这条臂自己的板一起吸收,要两条臂和不动的眼对账才看得出。只报数,不改任何量
+   procedure Pose_Check (C : Context) is
+      package Sorting is new F64_Vectors.Generic_Sorting;
+      Deg : constant Long_Float := 180.0 / Ada.Numerics.Pi;   --  弧度 → 度(换算,无量纲)
+      Cams : Geom.Nat_Vectors.Vector;
+   begin
+      for T of C.Board_Tracks loop
+         if not Cams.Contains (T.Cam) then
+            Cams.Append (T.Cam);
+         end if;
+      end loop;
+      for Cm of Cams loop
+         declare
+            G : constant Geom.Cam_Geo := C.Geo (Cm);
+            Xs : Geom.V3_Vectors.Vector;   --  每条点的三维(三角不了的 Ok = False)
+            Xok : Bools;
+            Covs : array (0 .. Natural'Max (1, Natural (C.Board_Tracks.Length)) - 1) of Geom.M3;
+            Poses : Plug.Pose_Vectors.Vector;
+            Dp, Dr, Rs : Floats;
+            Npts : Natural := 0;
+         begin
+            for K in 0 .. Natural (C.Board_Tracks.Length) - 1 loop
+               declare
+                  T : constant Geom.Board_Track := C.Board_Tracks (K);
+                  X : Geom.V3 := [others => 0.0];
+                  Cv : Geom.M3 := [others => [others => 0.0]];
+                  Ok : Boolean := False;
+               begin
+                  if T.Cam = Cm then
+                     Geom.Tri_Views (G, T.Views, T.Sw, X, Cv, Ok);
+                     for Vw of T.Views loop
+                        if not Poses.Contains (Vw.Pose) then
+                           Poses.Append (Vw.Pose);
+                        end if;
+                     end loop;
+                  end if;
+                  Xs.Append (X); Xok.Append (Ok); Covs (K) := Cv;
+               end;
+            end loop;
+            for P of Poses loop
+               declare
+                  Sc : Geom.Scene_Pt_Vectors.Vector;
+                  Gp : Geom.Cam_Geo := G;
+                  Rp : Geom.Fixed_Report;
+                  Okp : Boolean;
+               begin
+                  for K in 0 .. Natural (C.Board_Tracks.Length) - 1 loop
+                     if Xok (K) and then C.Board_Tracks (K).Cam = Cm then
+                        for Vw of C.Board_Tracks (K).Views loop
+                           if Plug."=" (Vw.Pose, P) then
+                              Sc.Append (Geom.Scene_Pt'(Pw => Xs (K), Cov => Covs (K), U => Vw.U, V => Vw.V, Sh => C.Board_Tracks (K).Sw,
+                                                        Views => Natural (C.Board_Tracks (K).Views.Length)));
+                           end if;
+                        end loop;
+                     end if;
+                  end loop;
+                  Gp.Fixed := True; Gp.Valid := True; Gp.R_Ce := Geom.Cam_R (G, P); Gp.Pos := Geom.Cam_Pos (G, P);
+                  Geom.Fit_Fixed_Board (Gp, Sc, Rp, Okp, Start_Here => True);
+                  if Okp then
+                     declare
+                        Pp : constant Geom.V3 := Geom.Cam_Pos (G, P);
+                     begin
+                        Dp.Append (Geom.Norm ([Gp.Pos (0) - Pp (0), Gp.Pos (1) - Pp (1), Gp.Pos (2) - Pp (2)]));
+                        Dr.Append (Geom.Norm (Geom.Rot_Vec (Geom.Mul (Geom.Tr (Geom.Cam_R (G, P)), Gp.R_Ce))) * Deg);
+                        Rs.Append (Rp.Scene_Rms);
+                        Npts := Npts + Rp.Scene_Used;
+                     end;
+                  end if;
+               end;
+            end loop;
+            if Dp.Is_Empty then
+               Geo_Say ("位姿读数对账 · 第" & Codec.Img (Cm) & " 台腕眼:" & Codec.Img (Natural (Poses.Length)) & " 停没有一停按板解得出相机位姿");
+            else
+               Sorting.Sort (Dp); Sorting.Sort (Dr); Sorting.Sort (Rs);
+               Geo_Say ("位姿读数对账 · 第" & Codec.Img (Cm) & " 台腕眼:" & Codec.Img (Natural (Dp.Length)) & "/" & Codec.Img (Natural (Poses.Length))
+                        & " 停按板自己解出相机在哪(每停 " & Codec.Img (Npts / Natural (Dp.Length)) & " 个点,残差中位 " & Codec.Fmt (Rs (Natural (Rs.Length) / 2), 2)
+                        & " px),和位姿读数 + 量过的偏移比:位置差 中位 " & Mm (Dp (Natural (Dp.Length) / 2)) & "、最大 " & Mm (Dp (Natural (Dp.Length) - 1))
+                        & ";朝向差 中位 " & Codec.Fmt (Dr (Natural (Dr.Length) / 2), 2) & "°、最大 " & Codec.Fmt (Dr (Natural (Dr.Length) - 1), 2) & "°");
+            end if;
+         end;
+      end loop;
+   end Pose_Check;
+
    procedure Geo_Board_Solve (C : in out Context; G : in out Geom.Cam_Geo; Rep : out Geom.Fixed_Report; Ok : out Boolean) is
       Dump : constant String := Codec.Env ("BL_DUMP");
       Deg : constant Long_Float := 180.0 / Ada.Numerics.Pi;   --  弧度 → 度(换算,无量纲)
@@ -6554,6 +6639,7 @@ package body Act is
                      & Codec.Fmt (Rr.Head_Rms, 2) & " px · 它在 (" & Mm (G.Pos (0)) & "," & Mm (G.Pos (1)) & "," & Mm (G.Pos (2)) & ") ± " & Mm (G.Pos_Sd) & " · 焦距 "
                      & Codec.Fmt (G.F, 1) & " ± " & Codec.Fmt (G.F_Sd, 1) & " px · 镜头畸变 K1 " & Codec.Fmt (G.K1, 3) & " ± " & Codec.Fmt (G.K1_Sd, 3) & "、K2 " & Codec.Fmt (G.K2, 3));
             Geom.Board_Points (C.Geo, C.Board_Tracks, C.Board);   --  板上的点按新几何重新三角
+            Pose_Check (C);
             Rep.Scene_Used := Rr.Head_Used; Rep.Scene_Rms := Rr.Head_Rms;   --  报数按一起解之后的
             Geom.Save (To_String (C.Geo_Path), C.Geo);
          else

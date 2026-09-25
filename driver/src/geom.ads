@@ -147,6 +147,8 @@ package Geom is
                           Tracks : in out Board_Track_Vectors.Vector; St : out Board_Stats);
    --  按给定的腕眼几何(Geos,按相机号)把 Tracks 重新三角成板上的点(协方差同 Build_Board)
    procedure Board_Points (Geos : Geo_Vectors.Vector; Tracks : Board_Track_Vectors.Vector; Scene : out Scene_Pt_Vectors.Vector);
+   --  一条点在这只手上的眼里几停的视线最小二乘交点 + 它的协方差(Sw = 配点噪声,像素);交不出来 ⇒ Ok = False
+   procedure Tri_Views (G : Cam_Geo; Views : Board_View_Vectors.Vector; Sw : Long_Float; X : out V3; Cov : out M3; Ok : out Boolean);
    --  腕眼 + 不动的眼 + 板上的点一起解(2026-09-25):参数 = 每台腕眼(朝向改正 3、偏移改正 3、焦距 1,焦距是身体给的就不动)+ 不动的眼(朝向 3、位置 3、焦距 1);
    --  板上的点不是未知数:每换一次参数,按它在腕眼里的几停重新三角。残差 = 腕眼各停的重投 ÷ 腕眼配点噪声 + 不动的眼里的像素 ÷ 它的配点噪声
    --  + 腕眼标定(Fit_Rig)量到的偏移、焦距当先验(÷ 它们自己报的不确定度;没报就不加)。
