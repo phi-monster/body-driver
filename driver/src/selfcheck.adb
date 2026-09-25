@@ -1238,6 +1238,127 @@ begin
                          & Codec.Img (Best2) & ")⇒ " & (if R4.Moved then "算挪了(错)" else "没挪") & (if R4.Covered then "、算挡了" else "、没发现挡(错)"));
                end;
             end;
+            --  ②c 转完、重标好之后再挡住左半边,而仪器整幅都没配上(X5C4 2026-09-26:转 90° 本来就只配上六成,再挡一半就全配飞了):
+            --  每个点都配到一个错得离谱的位姿(转 80°、挪 0.8 m)附近、再乱 ±7 px(合成;X5C4 实测那份错位姿在门里解释了 35/782 个、残差 18.9 px)⇒ 此刻的位姿一个都解释不了
+            --  ⇒ 不许算挪(X5C4 就这样把位姿换成了"挪了 0.84 m"那份),要算挡
+            declare
+               G2c : Geom.Cam_Geo := G0;
+               Gbad : Geom.Cam_Geo := G0;
+               Now2c : Geom.Scene_Pt_Vectors.Vector;
+               R2c : Geom.Fixed_Check;
+               Best2c : Natural;
+               Rgo : Geom.Fixed_Check;
+               Gtmp : Geom.Cam_Geo := G0;
+               Bt : Natural := Natural (Base.Length);
+               Gr2 : Geom.Cam_Geo := G0;
+               Now_R : Geom.Scene_Pt_Vectors.Vector;
+            begin
+               Gr2.R_Ce := Geom.Mul (G0.R_Ce, Geom.Rodrigues ([0.0, 0.0, 0.5 * Ada.Numerics.Pi]));   --  先真转 90° 并重标(同 ②)
+               for B of Base loop
+                  declare
+                     N : Geom.Scene_Pt := B;
+                     U, V : Long_Float;
+                     Fr : Boolean;
+                  begin
+                     Geom.Project_Fixed (Gr2, B.Pw, U, V, Fr);
+                     if Fr and then U >= 0.0 and then U < 640.0 and then V >= 0.0 and then V < 480.0 then
+                        N.U := U + 0.5 * Jit6; N.V := V + 0.5 * Jit6;
+                     else
+                        N.U := -1.0; N.V := -1.0;
+                     end if;
+                     Now_R.Append (N);
+                  end;
+               end loop;
+               Geom.Check_Fixed (Gtmp, Base, Now_R, Bt, Rgo);
+               G2c := Gtmp; Best2c := Bt;
+               Gbad.R_Ce := Geom.Mul (G0.R_Ce, Geom.Rodrigues ([0.0, 0.0, 1.396]));   --  80°(弧度,合成)
+               Gbad.Pos := [G0.Pos (0) + 0.6, G0.Pos (1) - 0.4, G0.Pos (2) - 0.4];      --  挪 0.8 m(合成)
+               for B of Base loop
+                  declare
+                     N : Geom.Scene_Pt := B;
+                     U, V : Long_Float;
+                     Fr : Boolean;
+                  begin
+                     Geom.Project_Fixed (Gbad, B.Pw, U, V, Fr);
+                     N.U := U + 7.0 * Jit6; N.V := V + 7.0 * Jit6;
+                     if not Fr or else N.U < 0.0 or else N.U >= 640.0 or else N.V < 0.0 or else N.V >= 480.0 then
+                        N.U := -1.0; N.V := -1.0;
+                     end if;
+                     Now2c.Append (N);
+                  end;
+               end loop;
+               declare
+                  P_Before : constant Geom.V3 := G2c.Pos;
+               begin
+                  Geom.Check_Fixed (G2c, Base, Now2c, Best2c, R2c);
+                  Check (Rgo.Moved and then not R2c.Moved and then R2c.Covered and then Geom.Norm ([G2c.Pos (0) - P_Before (0), G2c.Pos (1) - P_Before (1), G2c.Pos (2) - P_Before (2)]) = 0.0,
+                         "不动的眼核对·转 90° 重标后再挡一半、仪器整幅配飞:此刻的位姿对得上 " & Codec.Img (R2c.Consistent_Now) & "、最好的新解 " & Codec.Img (R2c.Consistent)
+                         & "(重标时 " & Codec.Img (Rgo.Consistent) & ")⇒ " & (if R2c.Moved then "算挪了(错,挪 " & Codec.Fmt (R2c.Move_M, 2) & " m)" else "没挪")
+                         & (if R2c.Covered then "、算挡了" else "、没发现挡(错)"));
+               end;
+            end;
+            --  ②d 标定时配得极细(残差 0.16 px,X5B 的数)、真被绕光轴转 90°,而仪器转着看时配点噪声约 0.8 px(实测)⇒ 按细门(0.48 px)只数得到两成的点,
+            --  过不了"至少四分之一";给了转着看的噪声(Turn_Sd = 0.8,开机量的)⇒ 新位姿按 2.4 px 数 ⇒ 算挪、新位姿离真的 0.5° / 5 mm 内;
+            --  同一个 Turn_Sd 下 ②c 那种整幅配飞仍然不许算挪
+            declare
+               G2d : Geom.Cam_Geo := G0;
+               Gr : Geom.Cam_Geo := G0;
+               Now2d : Geom.Scene_Pt_Vectors.Vector;
+               R2d : Geom.Fixed_Check;
+               Best2d : Natural := Natural (Base.Length);
+               G2e : Geom.Cam_Geo := G0;
+               Gbad : Geom.Cam_Geo := G0;
+               Now2e : Geom.Scene_Pt_Vectors.Vector;
+               R2e : Geom.Fixed_Check;
+               Best2e : Natural := Natural (Base.Length);
+            begin
+               G2d.Rms := 0.16;   --  合成
+               Gr.R_Ce := Geom.Mul (G0.R_Ce, Geom.Rodrigues ([0.0, 0.0, 0.5 * Ada.Numerics.Pi]));
+               for B of Base loop
+                  declare
+                     N : Geom.Scene_Pt := B;
+                     U, V : Long_Float;
+                     Fr : Boolean;
+                  begin
+                     Geom.Project_Fixed (Gr, B.Pw, U, V, Fr);
+                     if Fr and then U >= 0.0 and then U < 640.0 and then V >= 0.0 and then V < 480.0 then
+                        N.U := U + Jit6; N.V := V + Jit6;   --  每轴 ±1 px(均方根约 0.8,合成)
+                     else
+                        N.U := -1.0; N.V := -1.0;
+                     end if;
+                     Now2d.Append (N);
+                  end;
+               end loop;
+               Geom.Check_Fixed (G2d, Base, Now2d, Best2d, R2d, Turn_Sd => 0.8);
+               G2e.Rms := 0.16;
+               Gbad.R_Ce := Geom.Mul (G0.R_Ce, Geom.Rodrigues ([0.0, 0.0, 1.396]));   --  80°(弧度,合成)
+               Gbad.Pos := [G0.Pos (0) + 0.6, G0.Pos (1) - 0.4, G0.Pos (2) - 0.4];      --  0.8 m(合成)
+               for B of Base loop
+                  declare
+                     N : Geom.Scene_Pt := B;
+                     U, V : Long_Float;
+                     Fr : Boolean;
+                  begin
+                     Geom.Project_Fixed (Gbad, B.Pw, U, V, Fr);
+                     N.U := U + 7.0 * Jit6; N.V := V + 7.0 * Jit6;
+                     if not Fr or else N.U < 0.0 or else N.U >= 640.0 or else N.V < 0.0 or else N.V >= 480.0 then
+                        N.U := -1.0; N.V := -1.0;
+                     end if;
+                     Now2e.Append (N);
+                  end;
+               end loop;
+               Geom.Check_Fixed (G2e, Base, Now2e, Best2e, R2e, Turn_Sd => 0.8);
+               declare
+                  Da : constant Long_Float := Geom.Norm (Geom.Rot_Vec (Geom.Mul (Geom.Tr (Gr.R_Ce), G2d.R_Ce))) * 57.29578;   --  弧度 → 度(换算,无量纲)
+                  Dp : constant Long_Float := Geom.Norm ([G2d.Pos (0) - Gr.Pos (0), G2d.Pos (1) - Gr.Pos (1), G2d.Pos (2) - Gr.Pos (2)]);
+               begin
+                  Check (R2d.Moved and then Da < 0.5 and then Dp < 0.005 and then not R2e.Moved and then R2e.Covered,
+                         "不动的眼核对·标定残差 0.16 px 的眼真转 90°、转着看配点噪声 0.8 px:新解 " & Codec.Img (R2d.Consistent) & " 个点 ⇒ "
+                         & (if R2d.Moved then "算挪了,新位姿离真的 " & Codec.Fmt (Da, 2) & "° / " & Codec.Fmt (Dp * Per_Mm, 1) & " mm" else "没发现(错)")
+                         & " · 同样的门下整幅配飞:新解 " & Codec.Img (R2e.Consistent) & " ⇒ " & (if R2e.Moved then "算挪了(错)" else "没挪")
+                         & (if R2e.Covered then "、算挡了" else "、没发现挡(错)"));
+               end;
+            end;
             --  ③b 挡住左半边,但挡住的那半边不是乱配,是一片平滑的"编出来的"配点(照着一个偏了 7° 的位姿投、再抖 ±4 px,合成):
             --  X5C 2026-09-25 就是这样被判成"挪了 7.6°、10.6 cm"的 ⇒ 不许算挪,要算挡
             declare
@@ -1469,6 +1590,32 @@ begin
       Check (Got and then Same and then Ok1 and then Ok2 and then U1 = U2 and then V1 = V2,
              "握区的手指像素随身体文件存、装回:" & (if Got then "装上了" else "没装上(" & To_String (Note) & ")") & " · 每一格" & (if Same then "一样" else "不一样")
              & " · 指尖像素 (" & Codec.Fmt (U1, 2) & "," & Codec.Fmt (V1, 2) & ") → (" & Codec.Fmt (U2, 2) & "," & Codec.Fmt (V2, 2) & ")");
+   end;
+   --  🔴 图顺时针转 90°(Act.Turn_90):原图 (u, v) 的那个像素落在新图 (H − 1 − v, u)(合成 5×3 的图,每个像素三个字节各不相同)
+   declare
+      Im : Buf;
+      Wd : constant Natural := 5;
+      Ht : constant Natural := 3;
+      Ok_All : Boolean := True;
+   begin
+      for I in 0 .. Wd * Ht * 3 - 1 loop
+         Im.Append (U8 (I));
+      end loop;
+      declare
+         R : constant Buf := Act.Turn_90 (Im, Wd, Ht);
+      begin
+         Ok_All := Natural (R.Length) = Wd * Ht * 3;
+         for V in 0 .. Ht - 1 loop
+            for U in 0 .. Wd - 1 loop
+               for Ch in 0 .. 2 loop
+                  if Ok_All and then R (((U) * Ht + (Ht - 1 - V)) * 3 + Ch) /= Im ((V * Wd + U) * 3 + Ch) then
+                     Ok_All := False;
+                  end if;
+               end loop;
+            end loop;
+         end loop;
+         Check (Ok_All, "图顺时针转 90°:原图 (u, v) 落在新图 (H − 1 − v, u)" & (if Ok_All then ",15 个像素全对" else "(错)"));
+      end;
    end;
    --  🔴 碰桌面量指尖(2026-09-26,Geom.Tips_On_Plane):手上那只眼朝下,第 1 瓣的尖碰在面上 ⇒ 它的视线 ∩ 面 = 它的指尖(离眼 0.120 m,一分不差);
    --  第 2 瓣的尖比面高 2 mm(没碰着)⇒ 交出来只会更远;不确定度 = 面的离散 ÷ |视线·法向|。面在眼的上方 ⇒ 交不到(Ok = False)

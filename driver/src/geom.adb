@@ -2395,7 +2395,8 @@ package body Geom is
       end;
    end Refine_Board;
 
-   procedure Check_Fixed (G : in out Cam_Geo; Scene : Scene_Pt_Vectors.Vector; Now : Scene_Pt_Vectors.Vector; Best : in out Natural; Rep : out Fixed_Check) is
+   procedure Check_Fixed (G : in out Cam_Geo; Scene : Scene_Pt_Vectors.Vector; Now : Scene_Pt_Vectors.Vector; Best : in out Natural; Rep : out Fixed_Check;
+                          Turn_Sd : Long_Float := 0.0) is
       Cur : Scene_Pt_Vectors.Vector;
       Gn : Cam_Geo := G;
       Fr : Fixed_Report;
@@ -2421,9 +2422,12 @@ package body Geom is
       --  门 = 3 倍(倍数无量纲)"原来那份标定自己的像素残差"(它是按多细的配点解出来的,就按多细判;数值精度兜底 1e-9 px)。
       --  不按新解自己的残差定门:挡住的那半边 RoMa 不是乱配,是顺着看得见的那半边"编"出一片平滑的配点,一个错的位姿能以 4 px 的残差把它们全吃下,
       --  门跟着放到 12 px,就把"挡住"判成"挪了 7.6°、10.6 cm"(X5C 2026-09-25)。按原来那份的精度判,编出来的那片只有粗解得了,细的门里没有它
+      --  新位姿的门另按"仪器转着看时配得多细"放宽到 max(细门, 3 倍 Turn_Sd):RoMa 转 90° 配点噪声约 0.8 px,标定时残差只有 0.16 px 的眼
+      --  真被转了,按细门只数得到三成的点,会被"至少四分之一"那条挡掉(X5B 的数)。原来的位姿仍按细门数:小挪也抓得到
       declare
          Gate : constant Long_Float := 3.0 * Long_Float'Max (1.0e-9, G.Rms);
-         function Count (Pg : Cam_Geo) return Natural is
+         Gate_New : constant Long_Float := Long_Float'Max (Gate, 3.0 * Turn_Sd);
+         function Count (Pg : Cam_Geo; Gt : Long_Float) return Natural is
             K : Natural := 0;
          begin
             for P of Cur loop
@@ -2432,7 +2436,7 @@ package body Geom is
                   Front : Boolean;
                begin
                   Project_Fixed (Pg, P.Pw, U, V, Front);
-                  if Front and then Sqrt ((U - P.U) ** 2 + (V - P.V) ** 2) <= Gate then
+                  if Front and then Sqrt ((U - P.U) ** 2 + (V - P.V) ** 2) <= Gt then
                      K := K + 1;
                   end if;
                end;
@@ -2444,14 +2448,15 @@ package body Geom is
          Oka, Okb : Boolean;
          Na, Nb : Natural := 0;
       begin
-         Rep.Consistent_Now := Count (G);
+         Rep.Consistent_Now := Count (G, Gate);
+         Rep.Gate := Gate;
          Fit_Fixed_Board (Ga, Cur, Fa, Oka, Start_Here => True);
          Fit_Fixed_Board (Gn, Cur, Fb, Okb);
          if Oka then
-            Na := Count (Ga);
+            Na := Count (Ga, Gate_New);
          end if;
          if Okb then
-            Nb := Count (Gn);
+            Nb := Count (Gn, Gate_New);
          end if;
          if Oka and then (not Okb or else Na >= Nb) then
             Gn := Ga; Fr := Fa; Ok := True; Rep.Consistent := Na;
@@ -2489,7 +2494,11 @@ package body Geom is
          Rep.Shift_Px := Median (Px, N);
          Rep.Shift_Sd := (if G.Rms > 0.0 then Rep.Shift_Px / G.Rms else 0.0);
       end;
-      if Rep.Consistent_Now + Rep.Consistent_Now < Rep.Consistent then   --  原来的位姿解释得不到新解一半(比例)
+      --  挪过 = 三条都成立:原来的位姿解释得不到新解一半(比例);新解至少解释得了放好以来最多那次的四分之一(比例,同"挡住"那条的四分之三);
+      --  新旧位姿投出来的板点差得比细门远(差不到门里 = 同一个位姿,只是这会儿配得糙)。
+      --  看得见、配得上的不到四分之一时解出来的位姿不可信 —— X5C4 2026-09-26 转 90° 重标后再挡一半,仪器整幅配飞,此刻的位姿一个点都解释不了,
+      --  一份错得离谱的位姿以 18.9 px 的残差在门里凑到 35/782 个,就被当成"挪了 0.84 m"换上了。三条不全 ⇒ 按挡没挡报,位姿不动
+      if Rep.Consistent_Now + Rep.Consistent_Now < Rep.Consistent and then 4 * Rep.Consistent >= Best and then Rep.Shift_Px > Rep.Gate then
          Rep.Moved := True;
          Gn.F := G.F; Gn.F_Meas := G.F_Meas; Gn.F_Sd := G.F_Sd;   --  焦距照旧
          Gn.Rms := Fr.Scene_Rms;   --  以后按新解配得多细来判

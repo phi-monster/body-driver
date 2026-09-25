@@ -167,8 +167,12 @@ package Geom is
       Turn_Deg, Move_M : Long_Float := 0.0;        --  新解离原来的:转了几度、挪了多远
       Shift_Px, Shift_Sd : Long_Float := 0.0;      --  新解把板上的点投到的地方比原来挪了多少(中位,像素 / 以每个点自己的预测噪声为单位)
       Rms : Long_Float := 0.0;                     --  新解的像素残差
+      Gate : Long_Float := 0.0;                    --  数原来的位姿用的细门(像素)
    end record;
-   procedure Check_Fixed (G : in out Cam_Geo; Scene : Scene_Pt_Vectors.Vector; Now : Scene_Pt_Vectors.Vector; Best : in out Natural; Rep : out Fixed_Check);
+   --  Turn_Sd:仪器把这张参考图配到"它自己转了 90°"那张时的配点噪声(像素,均方根;开机标好时量一次、随板存,0 = 没量)。
+   --  原来的位姿按标定时的细门数点(小挪也抓得到);新位姿按 max(细门, 转着看的噪声)数(真被转了也数得全)
+   procedure Check_Fixed (G : in out Cam_Geo; Scene : Scene_Pt_Vectors.Vector; Now : Scene_Pt_Vectors.Vector; Best : in out Natural; Rep : out Fixed_Check;
+                          Turn_Sd : Long_Float := 0.0);
    --  碰到桌面那一刻量指尖(2026-09-26):手上那只眼里每一瓣手指尖的像素是一条视线(Views 里的 Pose = 碰到那一刻手的位姿);
    --  指尖碰在面上(过 P0、单位法向 N、面内离散 Sd_Plane 米)⇒ 视线和面的交点就是那一瓣的指尖:离眼 S(米),不确定度 Sd_Plane ÷ |视线·法向|。
    --  视线不朝着面(平行或背着)⇒ 那一瓣 Ok = False。指尖本来就是"手碰到东西的那一点";面是标定板量的(1 mm 级),不用深度、不用尺子
