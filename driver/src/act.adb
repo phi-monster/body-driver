@@ -6964,8 +6964,32 @@ package body Act is
    begin
       Geo_Board (C);   --  标定板(和它躺的那张面)不靠不动的眼,先做
       if Wc >= Natural (C.Geo.Length) or else Wc >= Natural (F.Cams.Length) or else Cam_Arm (C, Wc) >= 0 then
-         --  没有不动的眼(主相机也长在某条臂上):板只靠手上的眼三角 ⇒ 东西躺的面照样按板的点拟合(2026-09-26)
+         --  没有不动的眼(主相机也长在某条臂上):板只靠手上的眼三角 ⇒ 腕眼按板一起解(焦距、偏移、畸变;板里的转动停就定得住焦距),
+         --  板上的点按新几何重三角,东西躺的面照样按板的点拟合(2026-09-26)
          if not C.Board_Stops.Is_Empty and then not C.Board.Is_Empty then
+            declare
+               Before : constant Geom.Geo_Vectors.Vector := C.Geo;
+               Hn : Geom.Cam_Geo := Geom.No_Geo;
+               Rr : Geom.Refine_Report;
+               Rok : Boolean;
+            begin
+               Geom.Refine_Board (C.Geo, Hn, C.Board_Tracks, Rr, Rok);
+               if Rok then
+                  for K in 0 .. Natural (C.Geo.Length) - 1 loop
+                     if K < Natural (Before.Length) and then not Geom."=" (C.Geo (K).R_Ce, Before (K).R_Ce) then
+                        Geo_Say ("  第" & Codec.Img (K) & " 台腕眼按板一起解(没有不动的眼):焦距 " & Codec.Fmt (Before (K).F, 1) & " → " & Codec.Fmt (C.Geo (K).F, 1) & " ± "
+                                 & Codec.Fmt (C.Geo (K).F_Sd, 1) & " px · 离手腕原点 (" & Mm (C.Geo (K).Off (0)) & "," & Mm (C.Geo (K).Off (1)) & "," & Mm (C.Geo (K).Off (2))
+                                 & ") · 镜头畸变 K1 " & Codec.Fmt (C.Geo (K).K1, 3) & " ± " & Codec.Fmt (C.Geo (K).K1_Sd, 3));
+                     end if;
+                  end loop;
+                  Geo_Say ("  一起解:" & Codec.Img (Rr.Tracks) & " 条点 · 腕眼重投 " & Codec.Fmt (Rr.Wrist_Rms, 2) & " px");
+                  Geom.Board_Points (C.Geo, C.Board_Tracks, C.Board);
+                  Pose_Check (C);
+                  Geom.Save (To_String (C.Geo_Path), C.Geo);
+               else
+                  Geo_Say ("  腕眼按板一起解没收下(" & To_String (Geom.Why) & ")⇒ 几何按腕眼单独标的");
+               end if;
+            end;
             Fit_Board_Plane (C);
          end if;
          return;

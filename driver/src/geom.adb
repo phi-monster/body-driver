@@ -2131,16 +2131,18 @@ package body Geom is
       end Slot_Of;
       Base : constant Geo_Vectors.Vector := Geos;
       Fit_Fh : constant Boolean := Head.F_Meas > 0.0;   --  不动的眼的焦距是解出来的(没给)才接着解
+      --  没有不动的眼(2026-09-26):只解腕眼(朝向、偏移、焦距、畸变),板上的点照样每步按腕眼几停重新三角;不动的眼那几个参数不进解、Head 不动
+      Has_Head : constant Boolean := Head.Valid and then Head.Fixed;
       Use_H : array (0 .. Natural'Max (1, Nt) - 1) of Boolean := [others => True];   --  这条点进不动的眼的残差
       N_Views : Natural := 0;
    begin
       Ok := False;
       Rep := (Tracks => Nt, others => <>);
       for K in 0 .. Nt - 1 loop
-         Use_H (K) := Tracks (K).Hu >= 0.0 and then Tracks (K).Hv >= 0.0;   --  不动的眼里没配到的点(−1)不进它的残差
+         Use_H (K) := Has_Head and then Tracks (K).Hu >= 0.0 and then Tracks (K).Hv >= 0.0;   --  不动的眼里没配到的点(−1)不进它的残差
       end loop;
-      if Nt < 4 or else not Head.Valid or else not Head.Fixed then   --  单点法的下限(次数)
-         Why := To_Unbounded_String ("板上的点不到 4 条,或不动的眼还没按板解出来");
+      if Nt < 4 then   --  单点法的下限(次数)
+         Why := To_Unbounded_String ("板上的点不到 4 条");
          return;
       end if;
       for T of Tracks loop
@@ -2153,7 +2155,7 @@ package body Geom is
          Nc : constant Natural := Natural (Cams.Length);
          Per : constant := 9;   --  每台眼的参数个数(格式)
          Hb : constant Natural := Per * Nc;   --  不动的眼的参数从这儿起:朝向 3、位置 3、焦距 1、畸变 2
-         Np : constant Natural := Hb + Per;
+         Np : constant Natural := Hb + (if Has_Head then Per else 0);
          P : Param_Vec (0 .. Np - 1) := [others => 0.0];
          Steps : Param_Vec (0 .. Np - 1) := [others => 1.0e-4];   --  差分步(弧度 / 米 / 比例,极小量)
          Cur : Long_Float := 0.0;
@@ -2174,6 +2176,9 @@ package body Geom is
          function Head_Of (P : Param_Vec) return Cam_Geo is
             G : Cam_Geo := Head;
          begin
+            if not Has_Head then
+               return G;
+            end if;
             G.R_Ce := Rodrigues ([P (Hb), P (Hb + 1), P (Hb + 2)]);
             G.Pos := [P (Hb + 3), P (Hb + 4), P (Hb + 5)];
             if Fit_Fh then
@@ -2301,13 +2306,15 @@ package body Geom is
             Hr := (if Hn > 0 then Sqrt (Sh2 / Long_Float (Hn)) else 0.0);
          end Px;
       begin
-         declare
-            Rv : constant V3 := Rot_Vec (Head.R_Ce);
-         begin
-            P (Hb) := Rv (0); P (Hb + 1) := Rv (1); P (Hb + 2) := Rv (2);
-            P (Hb + 3) := Head.Pos (0); P (Hb + 4) := Head.Pos (1); P (Hb + 5) := Head.Pos (2);
-            P (Hb + 6) := Head.F; Steps (Hb + 6) := 1.0;   --  焦距的差分步(像素,极小量)
-         end;
+         if Has_Head then
+            declare
+               Rv : constant V3 := Rot_Vec (Head.R_Ce);
+            begin
+               P (Hb) := Rv (0); P (Hb + 1) := Rv (1); P (Hb + 2) := Rv (2);
+               P (Hb + 3) := Head.Pos (0); P (Hb + 4) := Head.Pos (1); P (Hb + 5) := Head.Pos (2);
+               P (Hb + 6) := Head.F; Steps (Hb + 6) := 1.0;   --  焦距的差分步(像素,极小量)
+            end;
+         end if;
          for C in 0 .. Nc - 1 loop
             if Base (Cams (C)).Off_Sd > 0.0 then
                N_Prior := N_Prior + 2;
@@ -2359,7 +2366,7 @@ package body Geom is
                   end;
                end loop;
                Med := Median (Kept, Nk);
-               if Med > 0.0 then
+               if Has_Head and then Med > 0.0 then
                   for K in 0 .. Nt - 1 loop
                      Use_H (K) := Rs (K) <= 3.0 * Med;
                   end loop;
@@ -2404,15 +2411,15 @@ package body Geom is
             end loop;
             Span := Sqrt ((Hi (0) - Lo (0)) ** 2 + (Hi (1) - Lo (1)) ** 2 + (Hi (2) - Lo (2)) ** 2);
             --  同 Fit_Fixed_Board:视场界、不确定度界;任何一台腕眼的焦距 ± 比焦距还大、偏移 ± 比板铺开的量程还大,也不算
-            if Fit_Fh and then Gh.Cx > 1.732 * Gh.F then   --  tan 60°(半幅宽 ÷ 焦距,无量纲)
+            if Has_Head and then Fit_Fh and then Gh.Cx > 1.732 * Gh.F then   --  tan 60°(半幅宽 ÷ 焦距,无量纲)
                Why := To_Unbounded_String ("一起解之后不动的眼焦距 " & Codec.Fmt (Gh.F, 1) & " px,视场超过 120°");
                return;
             end if;
             declare
-               Pos_Sd : constant Long_Float := Sqrt (Sd (Hb + 3) ** 2 + Sd (Hb + 4) ** 2 + Sd (Hb + 5) ** 2);
-               Fh_Sd : constant Long_Float := (if Fit_Fh then Sd (Hb + 6) else 0.0);
+               Pos_Sd : constant Long_Float := (if Has_Head then Sqrt (Sd (Hb + 3) ** 2 + Sd (Hb + 4) ** 2 + Sd (Hb + 5) ** 2) else 0.0);
+               Fh_Sd : constant Long_Float := (if Has_Head and then Fit_Fh then Sd (Hb + 6) else 0.0);
             begin
-               if Pos_Sd >= Span or else Fh_Sd >= Gh.F then
+               if Has_Head and then (Pos_Sd >= Span or else Fh_Sd >= Gh.F) then
                   Why := To_Unbounded_String ("一起解之后不动的眼的不确定度比量本身还大:位置 ± " & Codec.Fmt (Pos_Sd, 3) & " m(板铺开 " & Codec.Fmt (Span, 3) & " m),焦距 ± "
                                               & Codec.Fmt (Fh_Sd, 1) & " px");
                   return;
@@ -2448,14 +2455,16 @@ package body Geom is
                   end;
                end loop;
                Px (P, Wr, Hr, Hn);
-               Head := Gh;
-               Head.Pos_Sd := Pos_Sd; Head.F_Sd := Fh_Sd;
-               Head.Rot_Sd := Sqrt (Sd (Hb) ** 2 + Sd (Hb + 1) ** 2 + Sd (Hb + 2) ** 2);
-               Head.K1_Sd := Sd (Hb + 7);
-               if Fit_Fh then
-                  Head.F_Meas := Gh.F;
+               if Has_Head then
+                  Head := Gh;
+                  Head.Pos_Sd := Pos_Sd; Head.F_Sd := Fh_Sd;
+                  Head.Rot_Sd := Sqrt (Sd (Hb) ** 2 + Sd (Hb + 1) ** 2 + Sd (Hb + 2) ** 2);
+                  Head.K1_Sd := Sd (Hb + 7);
+                  if Fit_Fh then
+                     Head.F_Meas := Gh.F;
+                  end if;
+                  Head.Rms := Hr;
                end if;
-               Head.Rms := Hr;
                Rep.Head_Used := Hn; Rep.Head_Rms := Hr; Rep.Wrist_Rms := Wr;
                Why := Null_Unbounded_String;
                Ok := True;

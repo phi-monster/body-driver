@@ -1531,6 +1531,26 @@ begin
                Gh.F := 0.0; Gh.Cx := 320.0; Gh.Cy := 240.0;
                Geom.Fit_Fixed_Board (Gh, Sc2, Rh, Okh);
                Gh0 := Gh;
+               --  没有不动的眼(2026-09-26):同一批腕眼的板、不给不动的眼 ⇒ 只解腕眼,焦距、偏移照样拉回来(0.5% / 5 mm 内,合成)
+               declare
+                  Geos_Nh : Geom.Geo_Vectors.Vector := Geos;
+                  Hn : Geom.Cam_Geo := Geom.No_Geo;
+                  Rn : Geom.Refine_Report;
+                  Okn : Boolean;
+               begin
+                  Geom.Refine_Board (Geos_Nh, Hn, Trk2, Rn, Okn);
+                  declare
+                     function Off_Err_N (K : Natural) return Long_Float is
+                       (Geom.Norm ([Geos_Nh (K).Off (0) - Gwr.Off (0), Geos_Nh (K).Off (1) - Gwr.Off (1), Geos_Nh (K).Off (2) - Gwr.Off (2)]));
+                  begin
+                     Check (Okn and then abs (Geos_Nh (1).F - 397.0) < 0.005 * 397.0 and then abs (Geos_Nh (2).F - 397.0) < 0.005 * 397.0   --  0.5%(合成)
+                            and then Off_Err_N (1) < 0.005 and then Off_Err_N (2) < 0.005 and then not Hn.Valid,   --  5 mm(合成)
+                            "腕眼一起解·没有不动的眼" & Label & ":" & (if Okn then "焦距 " & Codec.Fmt (Gwr.F * Bad_F, 1) & " → " & Codec.Fmt (Geos_Nh (1).F, 1) & " / "
+                            & Codec.Fmt (Geos_Nh (2).F, 1) & "(真 397)· 偏移差 " & Codec.Fmt (Off_Err_N (1) * Per_Mm, 1) & " / " & Codec.Fmt (Off_Err_N (2) * Per_Mm, 1)
+                            & " mm · 畸变 K1 " & Codec.Fmt (Geos_Nh (1).K1, 3) & " / " & Codec.Fmt (Geos_Nh (2).K1, 3) & " · 腕眼 " & Codec.Fmt (Rn.Wrist_Rms, 2) & " px"
+                            else "没收下:" & To_String (Geom.Why)));
+                  end;
+               end;
                if Okh then
                   Geom.Refine_Board (Geos, Gh, Trk2, Rr, Okr);
                else
