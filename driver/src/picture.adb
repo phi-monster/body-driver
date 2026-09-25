@@ -928,4 +928,69 @@ package body Picture is
    begin
       return U >= X0 - Gw and then U <= X1 + Gw and then V >= Y0 - Gh and then V <= Y1 + Gh;
    end Inside;
+   procedure Region_Of_Mask (M : Bools; W, H : Natural; R : out Region; Ok : out Boolean) is
+      Cnt : Natural := 0;
+      Sx, Sy, Sxx, Syy, Sxy : Long_Float := 0.0;
+      X0, Y0 : Natural := Natural'Last;
+      X1, Y1 : Natural := 0;
+   begin
+      R := (others => <>);
+      Ok := False;
+      if W = 0 or else H = 0 or else Natural (M.Length) /= W * H then
+         return;
+      end if;
+      for Y in 0 .. H - 1 loop
+         for X in 0 .. W - 1 loop
+            if M (Y * W + X) then
+               Cnt := Cnt + 1;
+               Sx := Sx + Long_Float (X); Sy := Sy + Long_Float (Y);
+               Sxx := Sxx + Long_Float (X) * Long_Float (X); Syy := Syy + Long_Float (Y) * Long_Float (Y); Sxy := Sxy + Long_Float (X) * Long_Float (Y);
+               X0 := Natural'Min (X0, X); Y0 := Natural'Min (Y0, Y); X1 := Natural'Max (X1, X); Y1 := Natural'Max (Y1, Y);
+            end if;
+         end loop;
+      end loop;
+      if Cnt = 0 then
+         return;
+      end if;
+      declare
+         N : constant Long_Float := Long_Float (Cnt);
+         Mx : constant Long_Float := Sx / N;
+         My : constant Long_Float := Sy / N;
+         Vxx : constant Long_Float := Long_Float'Max (0.0, Sxx / N - Mx * Mx);
+         Vyy : constant Long_Float := Long_Float'Max (0.0, Syy / N - My * My);
+         Vxy : constant Long_Float := Sxy / N - Mx * My;
+         Tr : constant Long_Float := Vxx + Vyy;
+         Det : constant Long_Float := Long_Float'Max (0.0, Vxx * Vyy - Vxy * Vxy);
+         Disc : constant Long_Float := Long_Float'Max (0.0, 0.25 * Tr * Tr - Det);
+         L1 : constant Long_Float := 0.5 * Tr + Sqrt (Disc);
+         L2 : constant Long_Float := Long_Float'Max (0.0, 0.5 * Tr - Sqrt (Disc));
+         Ax, Ay : Long_Float;
+      begin
+         R.X0 := X0; R.Y0 := Y0; R.X1 := X1; R.Y1 := Y1;
+         R.Count := Cnt;
+         R.Cu := Mx / Long_Float (W);
+         R.Cv := My / Long_Float (H);
+         R.Sig_U := Sqrt (Vxx) / Long_Float (W);
+         R.Sig_V := Sqrt (Vyy) / Long_Float (H);
+         if abs Vxy > 1.0e-12 then
+            Ax := L1 - Vyy; Ay := Vxy;
+         elsif Vxx >= Vyy then
+            Ax := 1.0; Ay := 0.0;
+         else
+            Ax := 0.0; Ay := 1.0;
+         end if;
+         declare
+            Ln : constant Long_Float := Sqrt (Ax * Ax + Ay * Ay);
+         begin
+            if Ln > 0.0 then
+               R.Au := Ax / Ln; R.Av := Ay / Ln;
+            else
+               R.Au := 1.0; R.Av := 0.0;
+            end if;
+         end;
+         R.Elong := (if L2 > 1.0e-9 then Sqrt (L1 / L2) else 1.0e3);   --  短轴为零时伸长比记成一个大数(无量纲)
+      end;
+      Ok := True;
+   end Region_Of_Mask;
+
 end Picture;

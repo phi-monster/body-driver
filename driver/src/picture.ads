@@ -52,6 +52,8 @@ package Picture is
    --  同上,并交出它的像素(整幅掩膜)
    procedure Measure_In_Box (G : Buf; W, H : Natural; BX0, BY0, BX1, BY1 : Natural;
                              Found, Isolated : out Boolean; R : out Region; Mask : out Bools);
+   --  一张整幅掩膜(W*H,是 = 它)⇒ 它的框、像素数、形心、主轴、伸长比(同 Measure_In_Box 的算法;2026-09-26 分割仪器 SAM 出掩膜后用)。一个像素都没有 ⇒ Ok = False
+   procedure Region_Of_Mask (M : Bools; W, H : Natural; R : out Region; Ok : out Boolean);
    function Quantile (F : in out Floats; Q : Long_Float) return Long_Float;
    function Region_Depth (Depth : Floats; W, H : Natural; Mask : Bools; Q : Long_Float) return Long_Float;  --  掩膜上的深度分位;NaN = 无
    function Inside (R : Region; U, V : Long_Float; W, H : Natural; Grow : Long_Float) return Boolean;

@@ -786,6 +786,37 @@ package body Act is
       end if;
    end Blob_Levels;
 
+   --  脑框出来的那件东西在这一帧里的像素(2026-09-26 owner 批准装 SAM):配了仪器 ⇒ SAM 按框出整片像素(驱动自己按明暗切,一把剪刀常常只切出一截、
+   --  或连着别的东西;SHOT1 腕眼里剪刀被画面下边切着,两只眼的"中心"差 1.7 cm);没配仪器 ⇒ 身体自己在框里按明暗量(Picture.Measure_In_Box)。
+   --  Iso = 这一片没顶到画面边(顶到 = 被画面切了一截,形心和长轴不可信)
+   procedure Seg_In_Box (C : Context; F : Plug.Frame; Cam : Natural; X0, Y0, X1, Y1 : Natural; Got, Iso : out Boolean; R : out Picture.Region; M : out Bools) is
+      Cw : constant Natural := F.Cams (Cam).W;
+      Ch : constant Natural := F.Cams (Cam).H;
+   begin
+      if Length (C.Inst_Host) = 0 then
+         Picture.Measure_In_Box (F.Cams (Cam).Gray, Cw, Ch, X0, Y0, X1, Y1, Got, Iso, R, M);
+         return;
+      end if;
+      declare
+         Area : Natural;
+         Score : Long_Float;
+         Ok : Boolean;
+         Err : Unbounded_String;
+         No_Pts : Instrument.Seg_Pt_Vectors.Vector;
+      begin
+         Instrument.Segment (To_String (C.Inst_Host), C.Inst_Port, F.Cams (Cam).RGB, Cw, Ch, X0, Y0, X1, Y1, No_Pts, M, Area, Score, Ok, Err);
+         if not Ok or else Area = 0 then
+            Got := False; Iso := False; R := (others => <>);
+            if not Ok then
+               Put_Line ("[身] 📦 分割仪器没回来(" & To_String (Err) & ")");
+            end if;
+            return;
+         end if;
+         Picture.Region_Of_Mask (M, Cw, Ch, R, Got);
+         Iso := Got and then R.X0 > 0 and then R.Y0 > 0 and then R.X1 + 1 < Cw and then R.Y1 + 1 < Ch;
+      end;
+   end Seg_In_Box;
+
    procedure Remeasure_Boxed (C : in out Context; F : Plug.Frame; Cam : Natural; Regs : in out Picture.Regions) is
       Cw : constant Natural := F.Cams (Cam).W;
       Ch : constant Natural := F.Cams (Cam).H;
@@ -797,7 +828,7 @@ package body Act is
                Found, Iso : Boolean;
                R : Picture.Region;
             begin
-               Picture.Measure_In_Box (F.Cams (Cam).Gray, Cw, Ch, B.X0, B.Y0, B.X1, B.Y1, Found, Iso, R, B.Mask);
+               Seg_In_Box (C, F, Cam, B.X0, B.Y0, B.X1, B.Y1, Found, Iso, R, B.Mask);
                --  我一动,长在我手上的眼里它会平移一截(GB5:横挪 25.6 mm,它从 u=288 跳到 260)。
                --  量到的那一块顶到了窗边 = 它有一部分在窗外 ⇒ 把窗挪到【量到的这一块】身上再量,直到整块落进窗里或不再变。
                --  还是同一个量法,只是跟着它走;最多跟 4 回(次数)。
@@ -808,7 +839,7 @@ package body Act is
                      R2 : Picture.Region;
                      M2 : Bools;
                   begin
-                     Picture.Measure_In_Box (F.Cams (Cam).Gray, Cw, Ch, R.X0, R.Y0, R.X1, R.Y1, F2, I2, R2, M2);
+                     Seg_In_Box (C, F, Cam, R.X0, R.Y0, R.X1, R.Y1, F2, I2, R2, M2);
                      exit when not F2 or else (R2.X0 = R.X0 and then R2.Y0 = R.Y0 and then R2.X1 = R.X1 and then R2.Y1 = R.Y1);
                      R := R2; Iso := I2; B.Mask := M2;
                   end;
@@ -821,13 +852,11 @@ package body Act is
                      Tg, Bk : Long_Float;
                   begin
                      Blob_Levels (F.Cams (Cam).Gray, Cw, Ch, B.Mask, R, Tg, Bk);
-                     if Tg >= 0.0 and then Bk >= 0.0 and then (Tg - Bk) * (B.Gray - B.Bg) <= 0.0 then
-                        if B.Seen then
-                           Put_Line ("[身] 📦 " & To_String (B.Name) & "(第" & Codec.Img (Cam) & " 台):框里量到的那块平均亮 "
-                                     & Codec.Fmt (Tg, 0) & "、周围 " & Codec.Fmt (Bk, 0) & ",它当初 " & Codec.Fmt (B.Gray, 0) & "、周围 " & Codec.Fmt (B.Bg, 0)
-                                     & " ⇒ 明暗反了,不是它,算看不见");
-                        end if;
-                        Found := False;
+                     --  09-13 总规矩:动起来之后身体不许有闸 ⇒ 说出来、照走(2026-09-26 以前这里判"不是它,算看不见")
+                     if Tg >= 0.0 and then Bk >= 0.0 and then (Tg - Bk) * (B.Gray - B.Bg) <= 0.0 and then B.Seen then
+                        Put_Line ("[身] 📦 " & To_String (B.Name) & "(第" & Codec.Img (Cam) & " 台):框里量到的那块平均亮 "
+                                  & Codec.Fmt (Tg, 0) & "、周围 " & Codec.Fmt (Bk, 0) & ",它当初 " & Codec.Fmt (B.Gray, 0) & "、周围 " & Codec.Fmt (B.Bg, 0)
+                                  & " ⇒ 明暗反了(可能不是它,也可能是影子盖住了);照这块跟");
                      end if;
                   end;
                end if;
@@ -835,12 +864,9 @@ package body Act is
                --  这一帧量到的是单独的一块、却不到预期的四分之一(线尺寸的一半,纯数学)⇒ 那是窗底下的别的东西,不是它
                --  (H61 2026-09-23 实测:交点算深了 14 cm,窗一路漂到桌面上,540 px 的一小块桌纹当成了 7000 px 的剪刀,合空)。
                --  顶着窗边的块不判(它可能只露了一截);更大也不判(它可能刚露全)
-               if Found and then Iso and then B.Count > 0 and then R.Count * 4 < B.Count then
-                  if B.Seen then
-                     Put_Line ("[身] 📦 " & To_String (B.Name) & "(第" & Codec.Img (Cam) & " 台):框里量到的那块只有 " & Codec.Img (R.Count)
-                               & " px,它该有约 " & Codec.Img (B.Count) & " px ⇒ 小得不像它,不是它,算看不见");
-                  end if;
-                  Found := False;
+               if Found and then Iso and then B.Count > 0 and then R.Count * 4 < B.Count and then B.Seen then   --  说出来、照走(同上)
+                  Put_Line ("[身] 📦 " & To_String (B.Name) & "(第" & Codec.Img (Cam) & " 台):框里量到的那块只有 " & Codec.Img (R.Count)
+                            & " px,它该有约 " & Codec.Img (B.Count) & " px ⇒ 小得不像它(可能不是它);照这块跟");
                end if;
                B.Seen := Found;
                if Found then
@@ -8276,10 +8302,12 @@ package body Act is
                      Tol_Still : constant Long_Float := (if Gw.Fixed and then Gw.F > 0.0 then Gw.Rms * Geom.Norm ([Pm (0) - Gw.Pos (0), Pm (1) - Gw.Pos (1), Pm (2) - Gw.Pos (2)]) / Gw.F else 0.0);
                      Tol : constant Long_Float := Long_Float'Max (Tol_Hand, Tol_Still);
                   begin
+                     --  09-13 总规矩:动起来之后身体不许有闸 ⇒ 交点照用,偏差说出来(它就是这个位置有多不准)。
+                     --  以前偏差超过眼的误差就扔掉交点(H42 之后加的):标定准到 1 mm 之后,长条的东西被画面边切着、两只眼的"中心"不是同一点,
+                     --  1.7 cm 的偏差回回被扔,SHOT1 一集扔了 32 次、一次都没走到它身上
                      if Spread > Tol then
-                        Geo_Say ("此刻 " & To_String (Who) & " 相机的视线交在 (" & Mm (Pm (0)) & "," & Mm (Pm (1)) & "," & Mm (Pm (2)) & "),可视线间偏差 "
-                                 & Mm (Spread) & " 比眼自己的误差(" & Mm (Tol) & ")还大 ⇒ 不信这个交点");
-                        Mok := False;
+                        Geo_Say ("此刻 " & To_String (Who) & " 相机的视线交在 (" & Mm (Pm (0)) & "," & Mm (Pm (1)) & "," & Mm (Pm (2)) & "),视线间偏差 "
+                                 & Mm (Spread) & ",比眼自己的误差(" & Mm (Tol) & ")大 —— 两只眼看到的中心可能不是同一点;照这个交点走,它的位置按差 " & Mm (Spread) & " 算");
                      end if;
                   end;
                end if;
@@ -9162,7 +9190,7 @@ package body Act is
                         return -1;
                      end if;
                      --  ③ 框里哪一片是它,我自己量
-                     Picture.Measure_In_Box (F.Cams (Cam).Gray, Kw, Kh, X0, Y0, X1, Y1, Got, Iso, R, M0);
+                     Seg_In_Box (C, F, Cam, X0, Y0, X1, Y1, Got, Iso, R, M0);
                      Put_Line ("[身] 📦 " & W & ":脑给的框 [" & Codec.Img (X0) & " " & Codec.Img (Y0) & " " & Codec.Img (X1) & " " & Codec.Img (Y1)
                                & "](第" & Codec.Img (Cam) & " 台相机)⇒ "
                                & (if Got then "框里量到一整块 " & Codec.Img (R.Count) & " px · 形心 ("

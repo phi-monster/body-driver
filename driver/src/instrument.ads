@@ -30,4 +30,13 @@ package Instrument is
    package Match_Vectors is new Ada.Containers.Vectors (Natural, Match_Pt);
    function Match (Host : String; Port : Natural; RGB_A : Buf; W_A, H_A : Natural; RGB_B : Buf; W_B, H_B : Natural;
                    Pts : Match_Vectors.Vector; Err : out Unbounded_String) return Match_Vectors.Vector;
+   --  分割(SAM 2.1,2026-09-26 owner 批准):脑给一个框(X1 < X0 = 没有框)、或几个点(在它身上 / 不在)⇒ 那件东西在这一帧里的整片像素。
+   --  Mask 按行展开(W*H 个,是 = 它);Score = 模型自报的 IoU(只报数、不当门);Area = 像素数。没配仪器 / 没问到 ⇒ Ok = False(Err 说为什么)
+   type Seg_Pt is record
+      U, V : Long_Float := 0.0;
+      On : Boolean := True;
+   end record;
+   package Seg_Pt_Vectors is new Ada.Containers.Vectors (Natural, Seg_Pt);
+   procedure Segment (Host : String; Port : Natural; RGB : Buf; W, H : Natural; X0, Y0, X1, Y1 : Integer; Pts : Seg_Pt_Vectors.Vector;
+                      Mask : out Bools; Area : out Natural; Score : out Long_Float; Ok : out Boolean; Err : out Unbounded_String);
 end Instrument;

@@ -1791,6 +1791,28 @@ begin
       Check (Worst < 1.0e-6 and then Corner_Deg > 1.0,
              "镜头畸变:像素 → 视线 → 像素,最大差 " & Codec.Fmt (Worst, 9) & " px · 角上那一点去畸变的视线比理想针孔的偏 " & Codec.Fmt (Corner_Deg, 2) & "°");
    end;
+   --  🔴 整幅掩膜 ⇒ 框、像素数、形心、主轴(Picture.Region_Of_Mask,SAM 出掩膜后用):合成 40×30 画幅里一条 20×4 的横条(x 10..29、y 5..8)
+   --  ⇒ 框 [10 5 29 8]、80 px、形心 (19.5, 6.5)、主轴水平、伸长比 = √(方差比) ≈ 5.8;空掩膜 ⇒ 不成
+   declare
+      Mk : Bools;
+      Rg : Picture.Region;
+      Okm, Ok0 : Boolean;
+      Rg0 : Picture.Region;
+      Mk0 : Bools;
+   begin
+      for Y in 0 .. 29 loop
+         for X in 0 .. 39 loop
+            Mk.Append (X in 10 .. 29 and then Y in 5 .. 8);
+            Mk0.Append (False);
+         end loop;
+      end loop;
+      Picture.Region_Of_Mask (Mk, 40, 30, Rg, Okm);
+      Picture.Region_Of_Mask (Mk0, 40, 30, Rg0, Ok0);
+      Check (Okm and then Rg.X0 = 10 and then Rg.Y0 = 5 and then Rg.X1 = 29 and then Rg.Y1 = 8 and then Rg.Count = 80
+             and then abs (40.0 * Rg.Cu - 19.5) < 1.0e-9 and then abs (30.0 * Rg.Cv - 6.5) < 1.0e-9 and then abs (Rg.Av) < 1.0e-9 and then Rg.Elong > 5.0 and then not Ok0,
+             "整幅掩膜 ⇒ 框 [" & Codec.Img (Rg.X0) & " " & Codec.Img (Rg.Y0) & " " & Codec.Img (Rg.X1) & " " & Codec.Img (Rg.Y1) & "]、" & Codec.Img (Rg.Count)
+             & " px、形心 (" & Codec.Fmt (40.0 * Rg.Cu, 2) & "," & Codec.Fmt (30.0 * Rg.Cv, 2) & ")、伸长比 " & Codec.Fmt (Rg.Elong, 2) & " · 空掩膜 ⇒ " & (if Ok0 then "成了(错)" else "不成"));
+   end;
    --  🔴 碰桌面量指尖(2026-09-26,Geom.Tips_On_Plane):手上那只眼朝下,第 1 瓣的尖碰在面上 ⇒ 它的视线 ∩ 面 = 它的指尖(离眼 0.120 m,一分不差);
    --  第 2 瓣的尖比面高 2 mm(没碰着)⇒ 交出来只会更远;不确定度 = 面的离散 ÷ |视线·法向|。面在眼的上方 ⇒ 交不到(Ok = False)
    declare

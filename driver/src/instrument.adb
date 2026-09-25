@@ -170,4 +170,78 @@ package body Instrument is
       end;
       return Res;
    end Match;
+   procedure Segment (Host : String; Port : Natural; RGB : Buf; W, H : Natural; X0, Y0, X1, Y1 : Integer; Pts : Seg_Pt_Vectors.Vector;
+                      Mask : out Bools; Area : out Natural; Score : out Long_Float; Ok : out Boolean; Err : out Unbounded_String) is
+      Req, Reply, Jerr : Unbounded_String;
+      D : Json.Doc;
+   begin
+      Mask.Clear; Area := 0; Score := 0.0; Ok := False; Err := Null_Unbounded_String;
+      if Host = "" or else Port = 0 then
+         Err := To_Unbounded_String ("没配仪器");
+         return;
+      end if;
+      if W = 0 or else H = 0 or else (X1 < X0 and then Pts.Is_Empty) then
+         Err := To_Unbounded_String ("没有图,或既没有框也没有点");
+         return;
+      end if;
+      Append (Req, "{""image"":""");
+      Append (Req, Codec.Base64 (Codec.BMP24 (RGB, W, H)));
+      Append (Req, """");
+      if X1 >= X0 then
+         Append (Req, ",""box"":[" & Codec.Img (Natural'Max (0, X0)) & "," & Codec.Img (Natural'Max (0, Y0)) & "," & Codec.Img (Natural'Max (0, X1)) & ","
+                 & Codec.Img (Natural'Max (0, Y1)) & "]");
+      end if;
+      if not Pts.Is_Empty then
+         Append (Req, ",""points"":[");
+         for I in 0 .. Natural (Pts.Length) - 1 loop
+            Append (Req, (if I > 0 then "," else "") & "[" & Codec.Fmt (Pts (I).U, 2) & "," & Codec.Fmt (Pts (I).V, 2) & "," & (if Pts (I).On then "1" else "0") & "]");
+         end loop;
+         Append (Req, "]");
+      end if;
+      Append (Req, "}");
+      if not Http_Client.Post (Host, Port, "/segment", Req, Reply) then
+         Err := To_Unbounded_String ("连不上仪器 " & Host & ":" & Codec.Img (Port));
+         return;
+      end if;
+      if not Json.Parse (To_String (Reply), D, Jerr) then
+         Err := To_Unbounded_String ("仪器回的不是 JSON:" & To_String (Jerr));
+         return;
+      end if;
+      declare
+         Okn : constant Integer := Json.Get (D, 0, "ok");
+         En : constant Integer := Json.Get (D, 0, "err");
+         Rn : constant Integer := Json.Get (D, 0, "runs");
+         Cur : Boolean := False;
+      begin
+         if Okn < 0 or else not Json.Bool (D, Okn) then
+            Err := To_Unbounded_String ("仪器说不行" & (if En >= 0 then ":" & Json.Text (D, En) else ""));
+            return;
+         end if;
+         if Rn < 0 then
+            Err := To_Unbounded_String ("仪器没回像素");
+            return;
+         end if;
+         for I in 0 .. Json.Count (D, Rn) - 1 loop
+            declare
+               N : constant Natural := Natural (Long_Float'Max (0.0, Json.Num (D, Json.Child (D, Rn, I))));
+            begin
+               for K in 1 .. N loop
+                  Mask.Append (Cur);
+               end loop;
+               if Cur then
+                  Area := Area + N;
+               end if;
+               Cur := not Cur;
+            end;
+         end loop;
+         if Natural (Mask.Length) /= W * H then
+            Err := To_Unbounded_String ("仪器回的像素数 " & Codec.Img (Natural (Mask.Length)) & " ≠ 画幅 " & Codec.Img (W * H));
+            Mask.Clear; Area := 0;
+            return;
+         end if;
+         Score := Json.Num (D, Json.Get (D, 0, "score"));
+         Ok := True;
+      end;
+   end Segment;
+
 end Instrument;
