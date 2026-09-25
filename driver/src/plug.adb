@@ -402,6 +402,22 @@ package body Plug is
                end loop;
                New_Line (Fo);
                Close (Fo);
+               --  同一帧的关节读数(joints.txt:帧号、画面编号或 -1、每组关节 "| v…";组的顺序同开机 [认] 关节角那一行)。
+               --  2026-09-26 V1b:离线量"关节转多少、手到哪" —— 只记录,不改行为
+               begin
+                  Open (Fo, Append_File, Vid & "/joints.txt");
+               exception
+                  when others => Create (Fo, Out_File, Vid & "/joints.txt");
+               end;
+               Put (Fo, Codec.Img (L.Seq) & " " & (if Saved then Codec.Img (L.Vid_N) else "-1"));
+               for Q of F.Joints loop
+                  Put (Fo, " |");
+                  for X of Q loop
+                     Put (Fo, " " & Codec.Fmt (X, 6));
+                  end loop;
+               end loop;
+               New_Line (Fo);
+               Close (Fo);
             exception
                when others => null;
             end;
