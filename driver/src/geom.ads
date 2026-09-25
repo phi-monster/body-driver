@@ -57,6 +57,7 @@ package Geom is
    function Rodrigues (R : V3) return M3;
    function Rot_Vec (A : M3) return V3;
    function Norm (X : V3) return Long_Float;
+   function Solve3 (A : M3; B : V3) return V3;                       --  3×3 线性方程组(列主元;奇异 ⇒ 零向量)
    function Angle_Between (P, Q : Plug.Arm_Pose) return Long_Float;   --  两个位姿的姿态差(弧度)
    function Cam_R (G : Cam_Geo; P : Plug.Arm_Pose) return M3;         --  相机 → 世界 = R_e · R_ce
    function Cam_Pos (G : Cam_Geo; P : Plug.Arm_Pose) return V3;       --  相机中心在世界里 = 手的位置 + R_e · Off
@@ -93,15 +94,58 @@ package Geom is
    end record;
    package Tip_Class_Vectors is new Ada.Containers.Vectors (Natural, Tip_Class);
    package Nat_Vectors is new Ada.Containers.Vectors (Natural, Natural);
-   --  不动的眼,连手上被它标记的点一起解(2026-09-24):相机在世界里的朝向 + 位置、焦距(没给就解)、每个被标记的点在手系里的位置。
-   --  点的身份 = (Pt = 臂号, Kind = 这一笔里它看见这只手的手指分成几瓣):瓣数不同是手上不同的点(G1S 2026-09-24:同一只手一瓣、两瓣的标记当一个点解,
-   --  残差 7.5 px;分开解 1.7 px)。一个点至少 4 笔才进(次数)。
-   --  瓣数和这条臂自己那只眼里一样的点(Own_Kind (k)),就是腕眼认的那个指尖,按定义落在腕眼那条视线上(手系里起点 Ray_O、单位方向 Ray_D)⇒ 只解离眼多远;
-   --  别的点在手系里 3 个数都解。只有自由的点时"点在手上哪儿"和"相机在哪"能一起平移、分不太开(合成:自报 ± 1.7 cm);视线上的点把这个方向钉住。
-   --  手几乎只平移时分不开(V1J 2026-09-24:相机差 24 cm)——不确定度比手挪过的量程还大 ⇒ 判解不出。Ray_D 为零向量的臂没有视线,它的点都自由。
-   --  先把所有点当在 Ray_O(腕眼离手腕原点;没有就 0),用单点法定一个相机的起点;再按这个相机把每个点在手上三角出来;最后全部一起精修。Tips = 笔数够的每个点
-   procedure Fit_Fixed_Rig (G : in out Cam_Geo; O : Obs_Pt_Vectors.Vector; Ray_O, Ray_D : V3_Vectors.Vector; Own_Kind : Nat_Vectors.Vector;
-                            Tips : out Tip_Class_Vectors.Vector; Ok : out Boolean);
+   --  ── 桌面当标定板(2026-09-25)──:手上那只眼已经解好,它在几停里看同一个桌上的点(仪器配点),每停手的位姿读数已知
+   --  ⇒ 三角出这个点在世界里的位置和不确定度;同一批停里不动的眼也各拍一张,每停的图和它自己那一刻不动的眼配一次 ⇒ 这个点在不动的眼里的像素。
+   --  只靠看手定不动的眼,焦距在 ±8% 里翻(分割出来的指尖不是手上一个固定的点,G2E 2026-09-24);桌上的点是真点
+   type Board_Obs is record
+      Pt : Natural := 0;                        --  哪一个点(参考停里的第几个查询点)
+      Pose : Plug.Arm_Pose := [others => 0.0];  --  这一停手的位姿读数
+      U, V : Long_Float := 0.0;                 --  它在手上那只眼里的像素
+      Hu, Hv : Long_Float := -1.0;              --  这一停不动的眼里它在哪(负 = 没配到)
+   end record;
+   package Board_Obs_Vectors is new Ada.Containers.Vectors (Natural, Board_Obs);
+   type Scene_Pt is record
+      Pw : V3 := [others => 0.0];                  --  世界位置(米)
+      Cov : M3 := [others => [others => 0.0]];     --  它的协方差(米²):手上那只眼的配点噪声经三角传过来
+      U, V : Long_Float := 0.0;                    --  不动的眼里的像素(各停配到的中位)
+      Sh : Long_Float := 0.0;                      --  不动的眼里配点的噪声(像素,每轴;同一批点量出来的)
+      Views : Natural := 0;                        --  几停三角的
+   end record;
+   package Scene_Pt_Vectors is new Ada.Containers.Vectors (Natural, Scene_Pt);
+   type Board_Stats is record
+      Tracks : Natural := 0;       --  查了几个点
+      Tri_Ok : Natural := 0;       --  三角成了(至少两停、各停重投都在门内、远近定得住)
+      Kept : Natural := 0;         --  再加上各停在不动的眼里配到同一处 ⇒ 进标定板
+      Sigma_W : Long_Float := 0.0; --  手上那只眼的配点噪声(像素,每轴)
+      Sigma_H : Long_Float := 0.0; --  不动的眼里各停配到的离散(像素,每轴)
+   end record;
+   --  一只手上的眼、同一集里的几停(O = 每个点在每一停里的观测)⇒ 进标定板的点追加到 Scene。门槛全从这批点自己量:
+   --  重投超过全体中位 3 倍的那一停不要;远近的不确定度比远近本身还大的点不要(同"不确定度比量本身还大 = 分不开");
+   --  各停在不动的眼里配到的像素离它们的中位,超过全体这个离散的中位 3 倍的点不要(倍数无量纲,同踢离群那一条)
+   procedure Build_Board (G : Cam_Geo; O : Board_Obs_Vectors.Vector; Scene : in out Scene_Pt_Vectors.Vector; St : out Board_Stats);
+   --  不动的眼解完之后每组观测各自的像素残差(记账、给认指尖定门槛)
+   type Fixed_Report is record
+      Scene_N, Scene_Used : Natural := 0;   --  标定板的点:给了几个、进解几个
+      Scene_Rms : Long_Float := 0.0;        --  它们的像素残差
+      Hand_N, Hand_Used : Natural := 0;     --  手上的标记:给了几笔、进解几笔
+      Hand_Rms : Long_Float := 0.0;
+   end record;
+   --  不动的眼按标定板解(2026-09-25):相机在世界里的朝向 + 位置、焦距(没给就解)。板上的点世界位置已知 ⇒ 单点法(盲搜 + 精修)起步,
+   --  再按每个点自己的噪声加权精修(Scene_Var:配点噪声 ⊕ 三角的不确定度投进这只眼);加权残差超过中位 3 倍的踢掉再解(倍数无量纲)。
+   --  视场界(焦距 ≥ 半幅宽 / √3)、不确定度界(位置 ± 比板铺开的量程还大、焦距 ± 比焦距还大 = 分不开)同手上的眼。板不到 4 个点 ⇒ 解不出
+   procedure Fit_Fixed_Board (G : in out Cam_Geo; Scene : Scene_Pt_Vectors.Vector; Rep : in out Fixed_Report; Ok : out Boolean);
+   --  不动的眼已知 ⇒ 手上被它标记的点在手系里在哪。点的身份 = (Pt = 臂号, Kind = 这一笔里它看见这只手的手指分成几瓣)
+   --  (G1S 2026-09-24:同一只手一瓣、两瓣的标记当一个点解,残差 7.5 px;分开解 1.7 px)。一个点至少 4 笔(次数)。
+   --  瓣数和这条臂自己那只眼里一样的点(Own_Kind (k))按定义在腕眼那条视线上(手系起点 Ray_O、单位方向 Ray_D)⇒ 只解离眼多远;别的点 3 个数都解。
+   --  每笔:点在世界里 = p_j + R_j t 必须落在不动的眼过 (u_j, v_j) 的视线上 ⇒ 对 t 线性,最小二乘;像素残差超过这个点中位 3 倍的那笔踢掉再解一次。
+   --  解到离手腕原点比手腕离这只眼还远的点不在手上 ⇒ 不要。Rep 的手那一半 = 进解的笔数和它们的像素残差
+   procedure Hand_Points (G : Cam_Geo; O : Obs_Pt_Vectors.Vector; Ray_O, Ray_D : V3_Vectors.Vector; Own_Kind : Nat_Vectors.Vector;
+                          Tips : out Tip_Class_Vectors.Vector; Rep : in out Fixed_Report);
+   --  开机用的两步:先按板解不动的眼,再按解好的眼认手上的点。手上的点不进眼的解 —— 分割出来的指尖在手换角度、换远近时会在手上滑,
+   --  而每个点在手系里的位置是自由的,滑出来的偏差被点的位置吃掉、残差看着很小,却顺着"焦距 ↔ 远近"把相机拽走
+   --  (G2E 2026-09-24:只靠它们,焦距随放进哪几笔在 ±8% 里翻;合成:板 + 放大 2% 的手上标记一起解,焦距 275.5,比板单独 289.5、手单独 287.0 都偏)
+   procedure Fit_Fixed_Rig (G : in out Cam_Geo; O : Obs_Pt_Vectors.Vector; Scene : Scene_Pt_Vectors.Vector; Ray_O, Ray_D : V3_Vectors.Vector;
+                            Own_Kind : Nat_Vectors.Vector; Tips : out Tip_Class_Vectors.Vector; Rep : out Fixed_Report; Ok : out Boolean);
    --  手上的点按"落不落在它自己那只眼的某条瓣视线上"来认(2026-09-24):不动的眼已经解好(Fixed);O = 它每一笔里每一瓣手指的尖(Pose = 那一停手的位姿);
    --  这条臂自己那只眼里每一瓣的尖在手系里是一条视线(起点 Ray_O,单位方向 Ray_D (k))。每个尖和每条视线:两条空间直线求最近点,视线上那个最近点投回不动的眼,
    --  离这个尖不到 Gate_Px 像素、又在眼前面的,归最近的那条视线,给出离眼多远 S;每条视线取归给它的 S 的中位数。

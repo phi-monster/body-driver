@@ -748,14 +748,14 @@ begin
          end;
       end;
    end;
-   --  🔴 不动的眼连手上被标的点一起解(2026-09-24,Fit_Fixed_Rig):头顶眼在 (0,−0.41,1.308) 低头 30°、焦距 288(合成);两条臂各走标定路径
+   --  🔴 手上被不动的眼标的点(2026-09-24 起;09-25 起眼只按标定板解,这里拿真相机验 Hand_Points,板的几条在后面):头顶眼在 (0,−0.41,1.308) 低头 30°、焦距 288(合成);两条臂各走标定路径
    --  (起点 + 探转 ±15.6° + 四停转 ±0.1 rad + 探一步 + 8 步 6 cm,同驱动实走的路径),1 px 抖动,焦距没给。第 1 条臂上有两个被标的点:它看见手指 1 瓣时标在指尖、2 瓣时标在另一处
    --  (隔一停换一次,两点相距 3.7 cm,合成);第 2 条臂一个点。每个点在手系里 3 个数,(臂, 瓣数) 分开解 ⇒ 焦距 2% 内、相机位置差 < 1.5 cm、
    --  朝向差 < 0.01 rad、每个点差 < 5 mm。反面:同样的笔把两个点当成一个点解(瓣数全记成一样),残差该大 3 倍以上(G1S 实拍:7.5 px 对 1.7 px)。
    --  两个点那一条:多了一个自由的点(3 个未知数),手上的点又都挤在离相机 1 m 的一小团里 ⇒ 焦距和远近互相顶,相机位置自报 ± 1 cm 级;
    --  要的是误差落在它自报不确定度的 3 倍以内(自报是真话)、焦距在 3% 内(V1 的线)、视线上的点 5 mm 内、自由的点 1 cm 内
    declare
-      Gt, Gs, Gm : Geom.Cam_Geo;
+      Gt : Geom.Cam_Geo;
       --  每条臂的腕眼:装在手上的朝向 + 离手腕原点的偏移(合成);第一个点 = 偏移 + S × (相机系单位视线转到手系),真值 S = 0.12 / 0.11 m
       Gw : constant array (0 .. 1) of Geom.M3 := [Geom.Rodrigues ([0.2, -0.3, 0.1]), Geom.Rodrigues ([-0.2, -0.3, -0.1])];
       Ofs : constant array (0 .. 1) of Geom.V3 := [[0.08, 0.0, 0.05], [0.08, 0.0, 0.05]];   --  相机离手腕原点(手系,米,合成)
@@ -769,8 +769,7 @@ begin
       Homes : constant array (0 .. 1) of Geom.V3 := [[-0.3, 0.2, 0.85], [0.3, 0.2, 0.85]];   --  两只手的起点(米,合成)
       Obs, Obs_Same, Obs_One : Geom.Obs_Pt_Vectors.Vector;
       Got, Got_M, Got_1 : Geom.Tip_Class_Vectors.Vector;
-      Ok_F, Ok_M, Ok_1 : Boolean;
-      G1 : Geom.Cam_Geo;
+      Rep_1, Rep_F, Rep_M : Geom.Fixed_Report;
       Seed2 : Long_Long_Integer := 5;
       function Jit2 return Long_Float is   --  确定性伪随机 ±1 px(测试数据自己的抖动)
       begin
@@ -849,76 +848,276 @@ begin
       --  一只手一个点(都在各自腕眼视线上)。手上的点离相机 1 m、挤在十几厘米一团里 ⇒ 1 px 抖动就让焦距和远近互相顶出 ~1.5 cm(自报 ± 1.35 cm);
       --  换解法之前这一条按"位置 1.5 cm 内"判,只有 1 倍标准差,是碰运气过的(2026-09-24 加了探转那两停、抖动换了一组就不过)⇒ 改按:
       --  误差在自报不确定度的 3 倍内(自报是真话)、自报本身够小(焦距 ± 3% 内、位置 ± 3 cm 内)、焦距差 3% 内(V1 的线)、指尖 5 mm 内
-      G1.F := 0.0; G1.Cx := 320.0; G1.Cy := 240.0;
-      Geom.Fit_Fixed_Rig (G1, Obs_One, Ray_O, Ray_D, Own_Kind, Got_1, Ok_1);
+      --  2026-09-25 起不动的眼只按标定板解(手上的尖会滑,不进眼的解);手上的点在眼已知时认 ⇒ 这几条拿真相机(Gt)验 Hand_Points
+      Geom.Hand_Points (Gt, Obs_One, Ray_O, Ray_D, Own_Kind, Got_1, Rep_1);
       declare
-         Da : constant Long_Float := (if Ok_1 then Geom.Norm (Geom.Rot_Vec (Geom.Mul (Geom.Tr (Gt.R_Ce), G1.R_Ce))) else 1.0);
-         Dp : constant Long_Float := (if Ok_1 then Geom.Norm ([G1.Pos (0) - Gt.Pos (0), G1.Pos (1) - Gt.Pos (1), G1.Pos (2) - Gt.Pos (2)]) else 1.0);
          D0 : constant Long_Float := Err_Of (Got_1, 0, 1, Tips (0));
          D1 : constant Long_Float := Err_Of (Got_1, 1, 1, Tips (1));
       begin
-         Check (Ok_1 and then Dp < 3.0 * G1.Pos_Sd and then abs (G1.F - 288.0) < 3.0 * G1.F_Sd   --  3 = 倍数(无量纲)
-                and then G1.Pos_Sd < 0.03 and then G1.F_Sd < 0.03 * 288.0 and then abs (G1.F - 288.0) < 0.03 * 288.0   --  0.03 m / 0.03 = 位置(米)/ 比例(V1 的线)
-                and then Da < 0.01 and then D0 < 0.005 and then D1 < 0.005,
-                "不动的眼连手上的点·一只手一个点:2 臂 × 17 停 ⇒ 焦距 " & Codec.Fmt (G1.F, 1) & " ± " & Codec.Fmt (G1.F_Sd, 1) & " px(真 288)· 相机位置差 " & Codec.Fmt (Dp * Per_Mm, 1)
-                & " mm(自报 ± " & Codec.Fmt (G1.Pos_Sd * Per_Mm, 1) & ")· 朝向差 " & Codec.Fmt (Da, 4) & " rad · 指尖差 " & Codec.Fmt (D0 * Per_Mm, 1) & " / " & Codec.Fmt (D1 * Per_Mm, 1)
-                & " mm · 残差 " & Codec.Fmt (G1.Rms, 2) & " px");
+         Check (D0 < 0.005 and then D1 < 0.005 and then Rep_1.Hand_Used = Natural (Obs_One.Length),   --  5 mm(合成)
+                "手上的点(眼已知)·一只手一个点:2 臂 × 17 停 ⇒ 指尖差 " & Codec.Fmt (D0 * Per_Mm, 1) & " / " & Codec.Fmt (D1 * Per_Mm, 1) & " mm · "
+                & Codec.Img (Rep_1.Hand_Used) & "/" & Codec.Img (Natural (Obs_One.Length)) & " 笔 · 残差 " & Codec.Fmt (Rep_1.Hand_Rms, 2) & " px");
       end;
-      --  顺着"手上的点 → 不动的眼"那条线往眼那边送 1/4、1/2(比例,无量纲)各记一笔(驱动开机的第②步):焦距的不确定度该至少缩到一半(倍数,无量纲)
-      --  (手只在离眼差不多远处挪,焦距和远近一起缩放画面几乎不变;沿视线走,点在画面里不动、只变远近)
+      Geom.Hand_Points (Gt, Obs, Ray_O, Ray_D, Own_Kind, Got, Rep_F);
       declare
-         Obs_Sw : Geom.Obs_Pt_Vectors.Vector := Obs_One;
-         Gw2 : Geom.Cam_Geo;
-         Got_W : Geom.Tip_Class_Vectors.Vector;
-         Ok_W : Boolean;
-         Fr2 : constant array (1 .. 2) of Long_Float := [0.25, 0.5];   --  四分之一、一半(比例,无量纲)
-      begin
-         for A in 0 .. 1 loop
-            declare
-               H0 : constant Plug.Arm_Pose := [Homes (A) (0), Homes (A) (1), Homes (A) (2), 1.0, 0.0, 0.0, 0.0];
-               Tw : constant Geom.V3 := Geom.Ap (Geom.Quat_To_R (H0), Tips (A));
-               Dv : constant Geom.V3 := [Gt.Pos (0) - H0 (0) - Tw (0), Gt.Pos (1) - H0 (1) - Tw (1), Gt.Pos (2) - H0 (2) - Tw (2)];
-            begin
-               for Fr of Fr2 loop
-                  declare
-                     Ps : constant Plug.Arm_Pose := [H0 (0) + Fr * Dv (0), H0 (1) + Fr * Dv (1), H0 (2) + Fr * Dv (2), 1.0, 0.0, 0.0, 0.0];
-                     Tw2 : constant Geom.V3 := Geom.Ap (Geom.Quat_To_R (Ps), Tips (A));
-                     U, V : Long_Float;
-                     Fr1 : Boolean;
-                  begin
-                     for K in 1 .. 2 loop   --  每处两笔(次数)
-                        Geom.Project_Fixed (Gt, [Ps (0) + Tw2 (0), Ps (1) + Tw2 (1), Ps (2) + Tw2 (2)], U, V, Fr1);
-                        Obs_Sw.Append (Geom.Obs_Pt'(Pt => A, Pose => Ps, U => U + Jit2, V => V + Jit2, Seq => 0, Kind => 1));
-                     end loop;
-                  end;
-               end loop;
-            end;
-         end loop;
-         Gw2.F := 0.0; Gw2.Cx := 320.0; Gw2.Cy := 240.0;
-         Geom.Fit_Fixed_Rig (Gw2, Obs_Sw, Ray_O, Ray_D, Own_Kind, Got_W, Ok_W);
-         Check (Ok_1 and then Ok_W and then Gw2.F_Sd + Gw2.F_Sd < G1.F_Sd and then abs (Gw2.F - 288.0) < 3.0 * Gw2.F_Sd,   --  两倍(纯数学)/ 3 = 倍数(无量纲)
-                "不动的眼·往眼那边送两段:焦距 ± " & Codec.Fmt (G1.F_Sd, 1) & " ⇒ ± " & Codec.Fmt (Gw2.F_Sd, 1) & " px(该至少缩一半)· 解出 " & Codec.Fmt (Gw2.F, 1) & " px(真 288)");
-      end;
-      Gs.F := 0.0; Gs.Cx := 320.0; Gs.Cy := 240.0;
-      Geom.Fit_Fixed_Rig (Gs, Obs, Ray_O, Ray_D, Own_Kind, Got, Ok_F);
-      declare
-         Da : constant Long_Float := (if Ok_F then Geom.Norm (Geom.Rot_Vec (Geom.Mul (Geom.Tr (Gt.R_Ce), Gs.R_Ce))) else 1.0);
-         Dp : constant Long_Float := (if Ok_F then Geom.Norm ([Gs.Pos (0) - Gt.Pos (0), Gs.Pos (1) - Gt.Pos (1), Gs.Pos (2) - Gt.Pos (2)]) else 1.0);
          D01 : constant Long_Float := Err_Of (Got, 0, 1, Tips (0));
          D02 : constant Long_Float := Err_Of (Got, 0, 2, Tip_B);
          D11 : constant Long_Float := Err_Of (Got, 1, 1, Tips (1));
-         Honest : constant Boolean := Ok_F and then Dp < 3.0 * Gs.Pos_Sd and then abs (Gs.F - 288.0) < 3.0 * Gs.F_Sd;   --  3 = 倍数(无量纲)
       begin
-         Check (Ok_F and then Honest and then Gs.Pos_Sd < 0.03 and then Gs.F_Sd < 0.03 * 288.0 and then abs (Gs.F - 288.0) < 0.03 * 288.0   --  0.03 m / 0.03 = 位置(米)/ 比例(V1 的线)
-                and then Da < 0.01 and then D01 < 0.005 and then D11 < 0.005 and then D02 < 0.01,
-                "不动的眼连手上的点·第 1 臂两个点(按瓣数分开)⇒ 焦距 " & Codec.Fmt (Gs.F, 1) & " ± " & Codec.Fmt (Gs.F_Sd, 1) & " px(真 288)· 相机位置差 " & Codec.Fmt (Dp * Per_Mm, 1)
-                & " mm(自报 ± " & Codec.Fmt (Gs.Pos_Sd * Per_Mm, 1) & ")· 朝向差 " & Codec.Fmt (Da, 4) & " rad · 视线上的点差 " & Codec.Fmt (D01 * Per_Mm, 1) & " / "
-                & Codec.Fmt (D11 * Per_Mm, 1) & " mm · 自由的点差 " & Codec.Fmt (D02 * Per_Mm, 1) & " mm · 残差 " & Codec.Fmt (Gs.Rms, 2) & " px · 解出 " & Codec.Img (Natural (Got.Length)) & " 个点");
+         Check (Natural (Got.Length) = 3 and then D01 < 0.005 and then D11 < 0.005 and then D02 < 0.01,   --  5 mm / 1 cm(合成)
+                "手上的点(眼已知)·第 1 臂两个点(按瓣数分开)⇒ 解出 " & Codec.Img (Natural (Got.Length)) & " 个点 · 视线上的点差 " & Codec.Fmt (D01 * Per_Mm, 1) & " / "
+                & Codec.Fmt (D11 * Per_Mm, 1) & " mm · 自由的点差 " & Codec.Fmt (D02 * Per_Mm, 1) & " mm · 残差 " & Codec.Fmt (Rep_F.Hand_Rms, 2) & " px");
       end;
-      Gm.F := 0.0; Gm.Cx := 320.0; Gm.Cy := 240.0;
-      Geom.Fit_Fixed_Rig (Gm, Obs_Same, Ray_O, Ray_D, Own_Kind, Got_M, Ok_M);
-      Check (Ok_F and then ((not Ok_M) or else Gm.Rms > 3.0 * Gs.Rms),   --  3 = 倍数(无量纲)
-             "不动的眼连手上的点·反面:两个点当一个点解 ⇒ " & (if Ok_M then "残差 " & Codec.Fmt (Gm.Rms, 2) & " px(分开解 " & Codec.Fmt (Gs.Rms, 2) & " px)" else "解不出:" & To_String (Geom.Why)));
+      Geom.Hand_Points (Gt, Obs_Same, Ray_O, Ray_D, Own_Kind, Got_M, Rep_M);
+      Check (Rep_F.Hand_Used > 0 and then (Rep_M.Hand_Used = 0 or else Rep_M.Hand_Rms > 3.0 * Rep_F.Hand_Rms),   --  3 = 倍数(无量纲)
+             "手上的点(眼已知)·反面:两个点当一个点解 ⇒ 残差 " & Codec.Fmt (Rep_M.Hand_Rms, 2) & " px(" & Codec.Img (Rep_M.Hand_Used) & " 笔;分开解 "
+             & Codec.Fmt (Rep_F.Hand_Rms, 2) & " px)");
+      --  🔴 标定板(2026-09-25,Geom.Build_Board + Fit_Fixed_Rig 吃板上的点 + Contact.Surface.Support_Plane)。
+      --  两只腕眼(焦距 397,视线朝前下 60°,离手腕原点 (0,0.04,0.02),合成)各从 (∓0.2, 0.2, 0.95) 走 9 停平移(每步 3 cm,同驱动的累计路径),
+      --  参考停铺 40 px 的格子;格点打到桌面(z = 0.765)或一块 10 cm 见方、高 4 cm 的盒子顶上;画面最底下一行格点是自己的夹爪(跟着眼走)。
+      --  腕眼像素抖 ±0.5 px、不动的眼里抖 ±0.8 px(均匀分布,每轴 σ = 0.29 / 0.46 px);每 13 笔有一笔在不动的眼里配错 25 px,每 17 笔有一笔在腕眼里配错 12 px;
+      --  出了画面的那一停给一个乱的像素(仪器总会回一个数)。
+      --  ⇒ ① 量出来的两个噪声在真值的一半到两倍之间;② 进板的点全在真点 1 cm 内(夹爪一个不进);③ 只靠板解不动的眼(焦距没给):焦距 1% 内、位置 1 cm 内、
+      --  误差在自报的 3 倍内;④ 板 + 手上的标记整体放大 2%(相当于"手上的尖在滑",焦距该偏 2%):焦距仍在 1% 内(板说了算);
+      --  ⑤ 板上的点拟合的面:高差 < 1 mm、法向差 < 0.5°;⑥ 反面:不动的眼里的像素各停一致地换成别的点的(交叉核不出来)⇒ 解不出,或板的像素残差大于配点噪声的 5 倍
+      declare
+         Rw : constant Geom.M3 := [[1.0, 0.0, 0.0], [0.0, 0.8660254, -0.5], [0.0, 0.5, 0.8660254]];   --  腕眼 → 手:视线 −z 朝前下 60°(合成)
+         Gwr : Geom.Cam_Geo;
+         Starts : constant array (0 .. 1) of Geom.V3 := [[-0.2, 0.2, 0.95], [0.2, 0.2, 0.95]];   --  两只腕眼的起点(米,合成)
+         Table_Z : constant Long_Float := 0.765;   --  桌面高(米,合成)
+         Box_Top : constant Long_Float := 0.805;   --  盒子顶(米,合成)
+         Step_M : constant Long_Float := 0.03;     --  每步(米,合成)
+         Cell : constant Long_Float := 40.0;       --  格点间距(像素,合成)
+         Nq_Row : constant Natural := 16;          --  640 / 40(合成)
+         Nq_Col : constant Natural := 12;          --  480 / 40(合成)
+         Nq : constant Natural := Nq_Row * Nq_Col;
+         Scene, Scene_Bad : Geom.Scene_Pt_Vectors.Vector;
+         Truth : Geom.V3_Vectors.Vector;           --  两只眼的真点(桌面、盒顶;夹爪不算)
+         Shh : Long_Float := 0.0;                  --  两只眼量出来的不动的眼配点噪声(取大的那个)
+         Seed4 : Long_Long_Integer := 17;
+         function Jit4 return Long_Float is   --  确定性伪随机 [−1, 1](测试数据自己的抖动)
+         begin
+            Seed4 := (Seed4 * 1103515245 + 12345) mod 2147483648;
+            return Long_Float (Integer ((Seed4 / 65536) mod 2001) - 1000) / 1000.0;
+         end Jit4;
+         No_Obs : Geom.Obs_Pt_Vectors.Vector;
+      begin
+         Gwr.R_Ce := Rw; Gwr.Off := [0.0, 0.04, 0.02]; Gwr.F := 397.0; Gwr.Cx := 320.0; Gwr.Cy := 240.0; Gwr.Valid := True;
+         for E in 0 .. 1 loop
+            declare
+               H0 : constant Plug.Arm_Pose := [Starts (E) (0), Starts (E) (1), Starts (E) (2), 1.0, 0.0, 0.0, 0.0];
+               C0 : constant Geom.V3 := Geom.Cam_Pos (Gwr, H0);
+               Ax : constant Geom.V3 := Geom.Ray (Gwr, H0, 320.0, 240.0);
+               Hit_T : constant Long_Float := (C0 (2) - Table_Z) / (-Ax (2));
+               Bx : constant Long_Float := C0 (0) + Hit_T * Ax (0);   --  盒子中心 = 光轴打到桌面那一点(合成)
+               By : constant Long_Float := C0 (1) + Hit_T * Ax (1);
+               Half : constant Long_Float := 0.05;   --  盒子半边(米,合成)
+               Xq : array (0 .. Nq - 1) of Geom.V3;
+               Self_Q : array (0 .. Nq - 1) of Boolean := [others => False];
+               Hd_Of : array (1 .. 9, 0 .. Nq - 1) of Geom.V3;   --  每停每点在不动的眼里的像素(u, v, 看得见 1 / 0),反面那一条要拿来换
+               O, O_Bad : Geom.Board_Obs_Vectors.Vector;
+               St, St_Bad : Geom.Board_Stats;
+               K : Natural := 0;
+            begin
+               for Iv in 0 .. Nq_Col - 1 loop
+                  for Iu in 0 .. Nq_Row - 1 loop
+                     declare
+                        U : constant Long_Float := 0.5 * Cell + Cell * Long_Float (Iu);
+                        V : constant Long_Float := 0.5 * Cell + Cell * Long_Float (Iv);
+                        D : constant Geom.V3 := Geom.Ray (Gwr, H0, U, V);
+                        Tb : constant Long_Float := (C0 (2) - Box_Top) / (-D (2));
+                        Pb : constant Geom.V3 := [C0 (0) + Tb * D (0), C0 (1) + Tb * D (1), Box_Top];
+                        Tt : constant Long_Float := (C0 (2) - Table_Z) / (-D (2));
+                     begin
+                        if Iv = Nq_Col - 1 then
+                           Self_Q (K) := True;   --  最底下一行 = 自己的夹爪:离眼 8 cm,跟着眼走(合成)
+                           Xq (K) := [C0 (0) + 0.08 * D (0), C0 (1) + 0.08 * D (1), C0 (2) + 0.08 * D (2)];
+                        elsif abs (Pb (0) - Bx) <= Half and then abs (Pb (1) - By) <= Half then
+                           Xq (K) := Pb;
+                        else
+                           Xq (K) := [C0 (0) + Tt * D (0), C0 (1) + Tt * D (1), Table_Z];
+                        end if;
+                        if not Self_Q (K) then
+                           Truth.Append (Xq (K));
+                        end if;
+                        K := K + 1;
+                     end;
+                  end loop;
+               end loop;
+               for S in 1 .. 9 loop
+                  declare
+                     M : constant Geom.V3 := Path2 (S);
+                     Ps : constant Plug.Arm_Pose := [H0 (0) + Step_M * M (0), H0 (1) + Step_M * M (1), H0 (2) + Step_M * M (2), 1.0, 0.0, 0.0, 0.0];
+                     Dsh : constant Geom.V3 := [Ps (0) - H0 (0), Ps (1) - H0 (1), Ps (2) - H0 (2)];
+                  begin
+                     for Q in 0 .. Nq - 1 loop
+                        declare
+                           Xw : constant Geom.V3 := (if Self_Q (Q) then [Xq (Q) (0) + Dsh (0), Xq (Q) (1) + Dsh (1), Xq (Q) (2) + Dsh (2)] else Xq (Q));
+                           U, V, Hu, Hv : Long_Float;
+                           Fr, Fh : Boolean;
+                           Nth : constant Natural := (S - 1) * Nq + Q;   --  第几笔(配错按笔数挑)
+                        begin
+                           Geom.Project (Gwr, Ps, Xw, U, V, Fr);
+                           if S = 1 then
+                              U := 0.5 * Cell + Cell * Long_Float (Q mod Nq_Row);   --  参考停:就是格点本身
+                              V := 0.5 * Cell + Cell * Long_Float (Q / Nq_Row);
+                           elsif not Fr or else U < 0.0 or else U >= 640.0 or else V < 0.0 or else V >= 480.0 then
+                              U := Long_Float ((Q * 53) mod 640); V := Long_Float ((Q * 29) mod 480);   --  出了画面:仪器照样回一个乱的像素(合成)
+                           else
+                              U := U + 0.5 * Jit4; V := V + 0.5 * Jit4;
+                              if Nth mod 17 = 5 then
+                                 U := U + 12.0;   --  腕眼里配错 12 px(合成)
+                              end if;
+                           end if;
+                           Geom.Project_Fixed (Gt, Xw, Hu, Hv, Fh);
+                           if Fh and then Hu >= 0.0 and then Hu < 640.0 and then Hv >= 0.0 and then Hv < 480.0 then
+                              Hu := Hu + 0.8 * Jit4; Hv := Hv + 0.8 * Jit4;
+                              if Nth mod 13 = 7 then
+                                 Hv := Hv + 25.0;   --  不动的眼里配错 25 px(合成)
+                              end if;
+                           else
+                              Hu := Long_Float ((Q * 31) mod 640); Hv := Long_Float ((Q * 41) mod 480);   --  不动的眼里看不见:乱的像素(合成)
+                           end if;
+                           Hd_Of (S, Q) := [Hu, Hv, 1.0];
+                           O.Append (Geom.Board_Obs'(Pt => Q, Pose => Ps, U => U, V => V, Hu => Hu, Hv => Hv));
+                        end;
+                     end loop;
+                  end;
+               end loop;
+               --  反面那一份:各停里每个点在不动的眼里的像素都换成第 (37q mod N) 个点的(各停一致,交叉核不出来)
+               for I in 0 .. Natural (O.Length) - 1 loop   --  O 按"停在外、点在内"追加 ⇒ 第 I 笔是第 I / Nq + 1 停
+                  declare
+                     Bad : Geom.Board_Obs := O (I);
+                     Swap : constant Natural := (Bad.Pt * 37) mod Nq;
+                  begin
+                     Bad.Hu := Hd_Of (I / Nq + 1, Swap) (0); Bad.Hv := Hd_Of (I / Nq + 1, Swap) (1);
+                     O_Bad.Append (Bad);
+                  end;
+               end loop;
+               Geom.Build_Board (Gwr, O, Scene, St);
+               Geom.Build_Board (Gwr, O_Bad, Scene_Bad, St_Bad);
+               Shh := Long_Float'Max (Shh, St.Sigma_H);
+               Check (St.Sigma_W > 0.5 * 0.29 and then St.Sigma_W < 2.0 * 0.29 and then St.Sigma_H > 0.5 * 0.46 and then St.Sigma_H < 2.0 * 0.46,   --  一半到两倍(纯数学)× 合成的 σ
+                      "标定板·第 " & Codec.Img (E + 1) & " 只腕眼量出来的配点噪声:腕眼 " & Codec.Fmt (St.Sigma_W, 2) & " px(真 0.29)、不动的眼 " & Codec.Fmt (St.Sigma_H, 2)
+                      & " px(真 0.46)· 格点 " & Codec.Img (St.Tracks) & " 个,三角定住 " & Codec.Img (St.Tri_Ok) & ",进板 " & Codec.Img (St.Kept));
+            end;
+         end loop;
+         declare
+            Worst : Long_Float := 0.0;
+         begin
+            for S of Scene loop
+               declare
+                  Best : Long_Float := Long_Float'Last;
+               begin
+                  for T of Truth loop
+                     Best := Long_Float'Min (Best, Geom.Norm ([S.Pw (0) - T (0), S.Pw (1) - T (1), S.Pw (2) - T (2)]));
+                  end loop;
+                  Worst := Long_Float'Max (Worst, Best);
+               end;
+            end loop;
+            Check (Natural (Scene.Length) > Natural (Truth.Length) / 2 and then Worst < 0.01,   --  一半(纯数学)/ 1 cm(合成)
+                   "标定板·进板 " & Codec.Img (Natural (Scene.Length)) & " 个点(真点 " & Codec.Img (Natural (Truth.Length)) & " 个,夹爪 32 个不该进)⇒ 离最近真点最远 "
+                   & Codec.Fmt (Worst * Per_Mm, 1) & " mm");
+         end;
+         declare
+            Gb, Gj : Geom.Cam_Geo;
+            Tb, Tj : Geom.Tip_Class_Vectors.Vector;
+            Rb, Rj : Geom.Fixed_Report;
+            Okb, Okj : Boolean;
+            Obs_Big : Geom.Obs_Pt_Vectors.Vector;
+            Big : constant Long_Float := 1.02;   --  手上的标记整体放大 2%(比例,合成)
+         begin
+            Gb.F := 0.0; Gb.Cx := 320.0; Gb.Cy := 240.0;
+            Geom.Fit_Fixed_Rig (Gb, No_Obs, Scene, Ray_O, Ray_D, Own_Kind, Tb, Rb, Okb);
+            declare
+               Dp : constant Long_Float := (if Okb then Geom.Norm ([Gb.Pos (0) - Gt.Pos (0), Gb.Pos (1) - Gt.Pos (1), Gb.Pos (2) - Gt.Pos (2)]) else 1.0);
+            begin
+               Check (Okb and then abs (Gb.F - 288.0) < 0.01 * 288.0 and then Dp < 0.01 and then abs (Gb.F - 288.0) < 3.0 * Gb.F_Sd + 0.1 and then Dp < 3.0 * Gb.Pos_Sd + 0.001,   --  1% / 1 cm(合成)/ 3 = 倍数;0.1 px、1 mm = 合成数据的舍入余量
+                      "标定板·只靠板解不动的眼:" & (if Okb then Codec.Img (Rb.Scene_Used) & " 个点 ⇒ 焦距 " & Codec.Fmt (Gb.F, 1) & " ± " & Codec.Fmt (Gb.F_Sd, 1) & " px(真 288)· 位置差 "
+                      & Codec.Fmt (Dp * Per_Mm, 1) & " mm(自报 ± " & Codec.Fmt (Gb.Pos_Sd * Per_Mm, 1) & ")· 残差 " & Codec.Fmt (Rb.Scene_Rms, 2) & " px" else "解不出:" & To_String (Geom.Why)));
+            end;
+            --  ③b 板里混进 15 个远处的点(3 m 外),它们在不动的眼里的像素各停一致地错 40 px(交叉核不出来;G2E 离线 327 个里有 14 个这样的)
+            --  ⇒ 一次最小二乘被它们拽走,连踢三遍后焦距仍在 1% 内、这 15 个全不进解
+            declare
+               Scene_G : Geom.Scene_Pt_Vectors.Vector := Scene;
+               Gg : Geom.Cam_Geo;
+               Tg : Geom.Tip_Class_Vectors.Vector;
+               Rg : Geom.Fixed_Report;
+               Okg : Boolean;
+            begin
+               for K in 0 .. 14 loop
+                  declare
+                     Pw : constant Geom.V3 := [-1.5 + 0.2 * Long_Float (K), 2.6, 0.3];   --  桌子远处的地上(米,合成)
+                     U, V : Long_Float;
+                     Fr : Boolean;
+                     Far : Geom.Scene_Pt := Scene.First_Element;
+                  begin
+                     Geom.Project_Fixed (Gt, Pw, U, V, Fr);
+                     Far.Pw := Pw; Far.U := U + 40.0; Far.V := V - 25.0;   --  一致地配错(像素,合成)
+                     Scene_G.Append (Far);
+                  end;
+               end loop;
+               Gg.F := 0.0; Gg.Cx := 320.0; Gg.Cy := 240.0;
+               Geom.Fit_Fixed_Rig (Gg, No_Obs, Scene_G, Ray_O, Ray_D, Own_Kind, Tg, Rg, Okg);
+               declare
+                  use Ada.Numerics.Long_Elementary_Functions;
+                  Min_Far : Long_Float := Long_Float'Last;   --  配错的点在解出来的眼里最小的像素残差:解没有迁就它们 ⇒ 个个都远大于板的残差
+                  Dp : constant Long_Float := (if Okg and then Okb then Geom.Norm ([Gg.Pos (0) - Gb.Pos (0), Gg.Pos (1) - Gb.Pos (1), Gg.Pos (2) - Gb.Pos (2)]) else 1.0);
+               begin
+                  for K in Natural (Scene.Length) .. Natural (Scene_G.Length) - 1 loop
+                     declare
+                        U, V : Long_Float;
+                        Fr : Boolean;
+                     begin
+                        Geom.Project_Fixed (Gg, Scene_G (K).Pw, U, V, Fr);
+                        Min_Far := Long_Float'Min (Min_Far, (if Fr then Sqrt ((U - Scene_G (K).U) ** 2 + (V - Scene_G (K).V) ** 2) else Long_Float'Last));
+                     end;
+                  end loop;
+                  --  和干净的板(③)比:焦距、位置都在它自报不确定度的 3 倍内(倍数无量纲);配错的点残差个个超过板残差的 10 倍(倍数,合成)
+                  Check (Okg and then Okb and then abs (Gg.F - Gb.F) < 3.0 * Gb.F_Sd and then Dp < 3.0 * Gb.Pos_Sd and then Min_Far > 10.0 * Rg.Scene_Rms,
+                         "标定板·混进 15 个一致配错的远处点:" & (if Okg then "焦距 " & Codec.Fmt (Gg.F, 1) & " px(干净的板 " & Codec.Fmt (Gb.F, 1) & " ± " & Codec.Fmt (Gb.F_Sd, 1)
+                         & ")· 位置离干净的解 " & Codec.Fmt (Dp * Per_Mm, 1) & " mm(± " & Codec.Fmt (Gb.Pos_Sd * Per_Mm, 1) & ")· 配错的点最小残差 " & Codec.Fmt (Min_Far, 1)
+                         & " px(板 " & Codec.Fmt (Rg.Scene_Rms, 2) & " px)· 进解 " & Codec.Img (Rg.Scene_Used) & "/" & Codec.Img (Natural (Scene_G.Length)) else "解不出:" & To_String (Geom.Why)));
+               end;
+            end;
+            for Ob of Obs_One loop
+               Obs_Big.Append (Geom.Obs_Pt'(Pt => Ob.Pt, Pose => Ob.Pose, U => 320.0 + Big * (Ob.U - 320.0), V => 240.0 + Big * (Ob.V - 240.0), Seq => 0, Kind => Ob.Kind));
+            end loop;
+            Gj.F := 0.0; Gj.Cx := 320.0; Gj.Cy := 240.0;
+            Geom.Fit_Fixed_Rig (Gj, Obs_Big, Scene, Ray_O, Ray_D, Own_Kind, Tj, Rj, Okj);
+            Check (Okj and then abs (Gj.F - 288.0) < 0.01 * 288.0 and then Rj.Hand_Used > 0,   --  1%(合成)
+                   "标定板·板 + 放大 2% 的手上标记(手上的点不进眼的解):焦距 " & (if Okj then Codec.Fmt (Gj.F, 1) else "解不出") & " px(真 288)· 板 "
+                   & Codec.Fmt (Rj.Scene_Rms, 2) & " px、手 " & Codec.Fmt (Rj.Hand_Rms, 2) & " px(" & Codec.Img (Rj.Hand_Used) & " 笔)");
+         end;
+         declare
+            Pts : Contact.V3_Vectors.Vector;
+            P0, N0 : Geom.V3;
+            Cnt : Natural;
+            Rms : Long_Float;
+            Deg_Per_Rad : constant Long_Float := 57.29578;   --  弧度 → 度(换算,无量纲)
+            use Ada.Numerics.Long_Elementary_Functions;
+         begin
+            for S of Scene loop
+               Pts.Append (S.Pw);
+            end loop;
+            Contact.Surface.Support_Plane (Pts, 0.01, [0.0, 0.0, 1.0], P0, N0, Cnt, Rms);   --  门 1 cm(合成;盒顶高 4 cm)
+            Check (Cnt > 0 and then abs (P0 (2) - Table_Z) < 0.001 and then Arccos (Long_Float'Min (1.0, N0 (2))) * Deg_Per_Rad < 0.5,   --  1 mm / 0.5°(合成)
+                   "标定板·板上的点拟合的面:" & Codec.Img (Cnt) & "/" & Codec.Img (Natural (Pts.Length)) & " 个点 ⇒ 高 " & Codec.Fmt (P0 (2), 4) & " m(真 0.765)· 法向偏 "
+                   & Codec.Fmt (Arccos (Long_Float'Min (1.0, N0 (2))) * Deg_Per_Rad, 2) & "° · 面内离散 " & Codec.Fmt (Rms * Per_Mm, 2) & " mm");
+         end;
+         declare
+            Gx : Geom.Cam_Geo;
+            Tx : Geom.Tip_Class_Vectors.Vector;
+            Rx : Geom.Fixed_Report;
+            Okx : Boolean;
+         begin
+            Gx.F := 0.0; Gx.Cx := 320.0; Gx.Cy := 240.0;
+            Geom.Fit_Fixed_Rig (Gx, No_Obs, Scene_Bad, Ray_O, Ray_D, Own_Kind, Tx, Rx, Okx);
+            Check ((not Okx) or else Rx.Scene_Rms > 5.0 * Shh,   --  5 = 倍数(无量纲)
+                   "标定板·反面:不动的眼里的像素各停一致地换成别的点的 ⇒ " & (if Okx then "板的残差 " & Codec.Fmt (Rx.Scene_Rms, 1) & " px(配点噪声 " & Codec.Fmt (Shh, 2) & " px)"
+                   else "解不出:" & To_String (Geom.Why)));
+         end;
+      end;
    end;
    --  🔴 认指尖:瓣尖落在哪条腕眼瓣视线上(2026-09-24,Geom.Tips_On_Rays)。不动的眼已知(合成:(0,−0.41,1.308) 低头 30°、焦距 288);腕眼在手系 (0.08,0,0.05)。
    --  ① 五指手:自己眼里 1 瓣(四根手指),指尖在视线上 0.20 m;不动的眼每笔看见 2 瓣,另一瓣是大拇指(离指尖 5 cm,不在视线上)

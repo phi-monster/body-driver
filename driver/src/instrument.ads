@@ -20,4 +20,14 @@ package Instrument is
    --  下一帧:返回同样多的点(顺序不变);空 = 这一帧没问到(Err 说为什么)
    function Track_Step (Host : String; Port : Natural; Id : Integer; RGB : Buf; W, H : Natural; Err : out Unbounded_String) return Track_Vectors.Vector;
    procedure Track_End (Host : String; Port : Natural; Id : Integer);
+   --  配点:两帧(两台相机,或同一台相机两个位置)里哪两个像素是同一个真实的点。Pts = A 里的像素(Cert 不看),
+   --  返回每个点在 B 里落在哪(顺序不变)和模型自己给的可信度(0..1)。驱动不拿可信度当真,只拿几何去核(多停三角的重投、各停交叉)。
+   --  空 = 这一对没问到(Err 说为什么)
+   type Match_Pt is record
+      U, V : Long_Float := 0.0;
+      Cert : Long_Float := 0.0;
+   end record;
+   package Match_Vectors is new Ada.Containers.Vectors (Natural, Match_Pt);
+   function Match (Host : String; Port : Natural; RGB_A : Buf; W_A, H_A : Natural; RGB_B : Buf; W_B, H_B : Natural;
+                   Pts : Match_Vectors.Vector; Err : out Unbounded_String) return Match_Vectors.Vector;
 end Instrument;

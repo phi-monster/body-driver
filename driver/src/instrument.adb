@@ -105,4 +105,69 @@ package body Instrument is
          null;
       end if;
    end Track_End;
+
+   function Match (Host : String; Port : Natural; RGB_A : Buf; W_A, H_A : Natural; RGB_B : Buf; W_B, H_B : Natural;
+                   Pts : Match_Vectors.Vector; Err : out Unbounded_String) return Match_Vectors.Vector is
+      Empty, Res : Match_Vectors.Vector;
+      Req, Reply, Jerr : Unbounded_String;
+      D : Json.Doc;
+   begin
+      Err := Null_Unbounded_String;
+      if Host = "" or else Port = 0 then
+         Err := To_Unbounded_String ("没配仪器");
+         return Empty;
+      end if;
+      if W_A = 0 or else H_A = 0 or else W_B = 0 or else H_B = 0 or else Pts.Is_Empty then
+         Err := To_Unbounded_String ("没有图或没有点可配");
+         return Empty;
+      end if;
+      --  请求体在堆上拼(两张图 ≈ 2.5 MB)
+      Append (Req, "{""a"":""");
+      Append (Req, Codec.Base64 (Codec.BMP24 (RGB_A, W_A, H_A)));
+      Append (Req, """,""b"":""");
+      Append (Req, Codec.Base64 (Codec.BMP24 (RGB_B, W_B, H_B)));
+      Append (Req, """,""num"":0,""points"":[");
+      for I in 0 .. Natural (Pts.Length) - 1 loop
+         Append (Req, (if I > 0 then "," else "") & "[" & Codec.Fmt (Pts (I).U, 2) & "," & Codec.Fmt (Pts (I).V, 2) & "]");
+      end loop;
+      Append (Req, "]}");
+      if not Http_Client.Post (Host, Port, "/match", Req, Reply) then
+         Err := To_Unbounded_String ("连不上仪器 " & Host & ":" & Codec.Img (Port));
+         return Empty;
+      end if;
+      if not Json.Parse (To_String (Reply), D, Jerr) then
+         Err := To_Unbounded_String ("仪器回的不是 JSON:" & To_String (Jerr));
+         return Empty;
+      end if;
+      declare
+         Okn : constant Integer := Json.Get (D, 0, "ok");
+         En : constant Integer := Json.Get (D, 0, "err");
+         Pn : constant Integer := Json.Get (D, 0, "points");
+      begin
+         if Okn < 0 or else not Json.Bool (D, Okn) then
+            Err := To_Unbounded_String ("仪器说不行" & (if En >= 0 then ":" & Json.Text (D, En) else ""));
+            return Empty;
+         end if;
+         if Pn < 0 or else Json.Count (D, Pn) /= Natural (Pts.Length) then
+            Err := To_Unbounded_String ("仪器回的点数对不上");
+            return Empty;
+         end if;
+         for I in 0 .. Json.Count (D, Pn) - 1 loop
+            declare
+               Qn : constant Integer := Json.Child (D, Pn, I);
+               M : Match_Pt;
+            begin
+               if Qn < 0 or else Json.Count (D, Qn) < 3 then
+                  Err := To_Unbounded_String ("仪器回的点不是 [u,v,可信度]");
+                  return Empty;
+               end if;
+               M.U := Json.Num (D, Json.Child (D, Qn, 0));
+               M.V := Json.Num (D, Json.Child (D, Qn, 1));
+               M.Cert := Json.Num (D, Json.Child (D, Qn, 2));
+               Res.Append (M);
+            end;
+         end loop;
+      end;
+      return Res;
+   end Match;
 end Instrument;

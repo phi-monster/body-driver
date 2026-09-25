@@ -82,6 +82,12 @@ def _load_roma():
     return _roma
 
 
+def _num(x, nd):
+    """JSON 里的数一律定点小数(驱动的读数器吃不下 1e-05、NaN):非有限数记 -1(像素、可信度都不会是负的)"""
+    x = float(x)
+    return round(x, nd) if np.isfinite(x) else -1.0
+
+
 def match(a_b64, b_b64, num, points):
     m = _load_roma()
     t0 = time.time()
@@ -95,7 +101,7 @@ def match(a_b64, b_b64, num, points):
             mt, ct = m.sample(warp, cert, num=int(num))
             ka, kb = m.to_pixel_coordinates(mt, Ha, Wa, Hb, Wb)
             ka = ka.cpu().numpy(); kb = kb.cpu().numpy(); ct = ct.cpu().numpy()
-            out["samples"] = [[float(ka[i, 0]), float(ka[i, 1]), float(kb[i, 0]), float(kb[i, 1]), float(ct[i])] for i in range(len(ct))]
+            out["samples"] = [[_num(ka[i, 0], 3), _num(ka[i, 1], 3), _num(kb[i, 0], 3), _num(kb[i, 1], 3), _num(ct[i], 4)] for i in range(len(ct))]
         if points:
             Ww = warp.shape[2] // 2   # 对称 warp:左半是 A → B
             wAB = warp[0, :, :Ww, 2:].permute(2, 0, 1)[None].float(); cA = cert[0, :, :Ww][None, None].float()
@@ -103,7 +109,7 @@ def match(a_b64, b_b64, num, points):
             g = torch.tensor(np.stack([2 * uv[:, 0] / Wa - 1, 2 * uv[:, 1] / Ha - 1], 1)[None, :, None, :], device="cuda", dtype=torch.float32)
             xb = torch.nn.functional.grid_sample(wAB, g, align_corners=False)[0, :, :, 0].T.cpu().numpy()
             cb = torch.nn.functional.grid_sample(cA, g, align_corners=False)[0, 0, :, 0].cpu().numpy()
-            out["points"] = [[float(Wb * (xb[i, 0] + 1) / 2), float(Hb * (xb[i, 1] + 1) / 2), float(cb[i])] for i in range(len(uv))]
+            out["points"] = [[_num(Wb * (xb[i, 0] + 1) / 2, 3), _num(Hb * (xb[i, 1] + 1) / 2, 3), _num(cb[i], 4)] for i in range(len(uv))]
     out["ms"] = (time.time() - t0) * 1000.0
     return out
 

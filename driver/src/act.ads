@@ -218,6 +218,18 @@ package Act is
       P, W : Geom.V3 := [others => 0.0];
    end record;
    package Wall_Vectors is new Ada.Containers.Vectors (Natural, Wall_Mark);
+   --  标定板用的一停(2026-09-25):腕眼标定里只平移、手没转的那几停,手上那只眼的图 + 手的位姿 + 同一刻不动的眼的图。
+   --  Seg = 那一集开始时的帧号:复位之后桌上的东西换了,不同集的停不互相配
+   type Board_Stop is record
+      Cam, Arm : Natural := 0;
+      Seg : Natural := 0;
+      Pose : Plug.Arm_Pose := [others => 0.0];
+      W, H : Natural := 0;
+      RGB : Buf;
+      Hw, Hh : Natural := 0;
+      Head : Buf;
+   end record;
+   package Board_Stop_Vectors is new Ada.Containers.Vectors (Natural, Board_Stop);
    type Context is record
       Map : Selfmap.Body_Map;
       Hands : Zone.Hand_Vectors.Vector;
@@ -257,6 +269,10 @@ package Act is
       Inst_Port : Natural := 8077;
       Fixed_Obs : Geom.Obs_Pt_Vectors.Vector;   --  开机各停里不动的眼给各条臂指尖做的合空标记(Pt = 臂号;像素 + 那一停的位姿),开机末尾一起解不动的眼
       Lobe_Obs : Geom.Obs_Pt_Vectors.Vector;    --  同一批标记里每一瓣手指各自的尖(Pt = 臂号,Kind = 这一笔的瓣数):解完不动的眼后认哪一瓣落在腕眼哪条瓣视线上 = 指尖
+      Board_Stops : Board_Stop_Vectors.Vector;  --  腕眼标定各平移停的图和位姿(开机末尾配点做标定板)
+      Board : Geom.Scene_Pt_Vectors.Vector;     --  标定板的点:腕眼几停三角出来的桌上的点(世界位置 + 协方差)和它们在不动的眼里的像素
+      Board_Plane : Boolean := False;           --  标定板的点拟合出了它们躺的那张面
+      Board_Pt, Board_N : Geom.V3 := [others => 0.0];
       Dump_Dir : Unbounded_String;
       Round_N : Natural := 0;
       Fast : Boolean := False;
@@ -343,6 +359,9 @@ package Act is
       Touch_Fresh : Boolean := False;        --  这张面是这一集里碰出来的(False = 上一集留下的,新一集第一次朝下被顶住就换成新的,再往后只让更低的换)
       Bumps : Contact.V3_Vectors.Vector;     --  这一集里朝下被顶住、却比它躺的面高的地方(躺在面上的别的东西,或它自己):记进地图,不当成面
    end record;
+   --  标定板(2026-09-25):C.Board_Stops 里每只量好了的腕眼、同一集的那几停 ⇒ 仪器配点 ⇒ C.Board(Geom.Build_Board)⇒ 板上的点躺的那张面进地图。
+   --  开机(Geo_Boot_Fixed)调;导出只为离线工具 boardexam 拿落盘的图跑同一段代码
+   procedure Geo_Board (C : in out Context);
 
    procedure Init_Tracks (C : in out Context);
    --  开机装回几何常数(身体文件旁边的 .geo.json:焦距、相机在手上的朝向、指尖在相机里的位置);缺的当场量。

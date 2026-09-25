@@ -18,4 +18,7 @@ package Contact.Surface is
    --  把支撑面那张平面上的点扔掉:确定性 RANSAC(不引随机数,同一份数据两次给同一个答案)找内点最多的那张平面,再把内点扔掉。
    --  相机斜着看时一块 10 cm 的桌面自带 60 mm 高差,按深度筛会把整片桌面当成物体(2026-08-16 实测掩膜是个规整的圆盘)
    procedure Drop_Support_Plane (Pts : in out V3_Vectors.Vector; Tol_M : Long_Float; Normal : out V3; On_Plane_Count : out Natural);
+   --  支撑面那张平面本身:同一套确定性 RANSAC 找 Tol_M 内点最多的那张,再拿它的内点做最小二乘精修(形心 + 散布矩阵最小特征值的方向),
+   --  法向翻到 Up 那一侧。Point = 内点形心,Inliers = 内点数,Rms = 内点到面的均方根距离(米)。点不到 16 个或找不到面 ⇒ Inliers = 0
+   procedure Support_Plane (Pts : V3_Vectors.Vector; Tol_M : Long_Float; Up : V3; Point, Normal : out V3; Inliers : out Natural; Rms : out Long_Float);
 end Contact.Surface;

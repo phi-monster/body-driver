@@ -92,6 +92,8 @@ begin
             Obs : Geom.Obs_Pt_Vectors.Vector;
             Ray_O, Ray_D : V3s.Vector;
             Tips : Geom.Tip_Class_Vectors.Vector;
+            Scene : Geom.Scene_Pt_Vectors.Vector;
+            Rep : Geom.Fixed_Report;
             Own_Kind : Geom.Nat_Vectors.Vector;
             Arms : constant Natural := Natural (Num (Head, 6));
             Ok : Boolean;
@@ -183,14 +185,52 @@ begin
                   end if;
                end;
             end loop;
-            Put_Line (Codec.Img (Natural (Obs.Length)) & " 笔指尖观测 · " & Codec.Img (Arms) & " 条臂");
+            --  标定板的点(驱动 Geo_Board 落的 head_scene.txt,和 head_obs.txt 同目录):scene X Y Z u v 噪声 停数 协方差(mm²:xx xy xz yy yz zz)。参数里有 noboard 就不读
+            declare
+               Hp : constant String := Ada.Command_Line.Argument (2);
+               Cut : constant Natural := Ada.Strings.Fixed.Index (Hp, "head_obs.txt");
+               No_Board : Boolean := False;
+            begin
+               for K in 3 .. Ada.Command_Line.Argument_Count loop
+                  if Ada.Command_Line.Argument (K) = "noboard" then
+                     No_Board := True;
+                  end if;
+               end loop;
+               if Cut > 0 and then not No_Board then
+                  declare
+                     Sp : constant String := Hp (Hp'First .. Cut - 1) & "head_scene.txt";
+                     Si : File_Type;
+                  begin
+                     Open (Si, In_File, Sp);
+                     while not End_Of_File (Si) loop
+                        declare
+                           Sl : constant String := Get_Line (Si);
+                           Mm2 : constant Long_Float := 1.0e-6;   --  mm² → m²(单位换算)
+                        begin
+                           if Field (Sl, 1) = "scene" then
+                              Scene.Append (Geom.Scene_Pt'(Pw => [Num (Sl, 2), Num (Sl, 3), Num (Sl, 4)], U => Num (Sl, 5), V => Num (Sl, 6), Sh => Num (Sl, 7),
+                                                           Views => Natural (Num (Sl, 8)),
+                                                           Cov => [[Num (Sl, 9) * Mm2, Num (Sl, 10) * Mm2, Num (Sl, 11) * Mm2],
+                                                                   [Num (Sl, 10) * Mm2, Num (Sl, 12) * Mm2, Num (Sl, 13) * Mm2],
+                                                                   [Num (Sl, 11) * Mm2, Num (Sl, 13) * Mm2, Num (Sl, 14) * Mm2]]));
+                           end if;
+                        end;
+                     end loop;
+                     Close (Si);
+                  exception
+                     when others => null;   --  没有这份文件 = 那一炮没有标定板
+                  end;
+               end if;
+            end;
+            Put_Line (Codec.Img (Natural (Obs.Length)) & " 笔指尖观测 · 标定板 " & Codec.Img (Natural (Scene.Length)) & " 个点 · " & Codec.Img (Arms) & " 条臂");
             for A in 0 .. Arms - 1 loop
                Put_Line ("  臂 " & Codec.Img (A) & " 视线起点 (" & Codec.Fmt (Ray_O (A) (0), 3) & "," & Codec.Fmt (Ray_O (A) (1), 3) & "," & Codec.Fmt (Ray_O (A) (2), 3)
                          & ") 方向 (" & Codec.Fmt (Ray_D (A) (0), 3) & "," & Codec.Fmt (Ray_D (A) (1), 3) & "," & Codec.Fmt (Ray_D (A) (2), 3) & ")");
             end loop;
-            Geom.Fit_Fixed_Rig (G, Obs, Ray_O, Ray_D, Own_Kind, Tips, Ok);
+            Geom.Fit_Fixed_Rig (G, Obs, Scene, Ray_O, Ray_D, Own_Kind, Tips, Rep, Ok);
             if Ok then
-               Put_Line ("解出来:踢掉 " & Codec.Img (G.Dropped) & " 笔 · 残差 " & Codec.Fmt (G.Rms, 2) & " px · 它在 (" & Codec.Fmt (G.Pos (0), 3) & "," & Codec.Fmt (G.Pos (1), 3) & ","
+               Put_Line ("解出来:板 " & Codec.Img (Rep.Scene_Used) & "/" & Codec.Img (Rep.Scene_N) & " 点 " & Codec.Fmt (Rep.Scene_Rms, 2) & " px · 手 " & Codec.Img (Rep.Hand_Used) & "/"
+                         & Codec.Img (Rep.Hand_N) & " 笔 " & Codec.Fmt (Rep.Hand_Rms, 2) & " px · 踢掉 " & Codec.Img (G.Dropped) & " 条 · 它在 (" & Codec.Fmt (G.Pos (0), 3) & "," & Codec.Fmt (G.Pos (1), 3) & ","
                          & Codec.Fmt (G.Pos (2), 3) & ") ± " & Codec.Fmt (G.Pos_Sd, 3) & " m · 焦距 " & Codec.Fmt (G.F, 1) & " ± " & Codec.Fmt (G.F_Sd, 1) & " px · 朝向 ± "
                          & Codec.Fmt (G.Rot_Sd, 4) & " rad");
                for T of Tips loop
