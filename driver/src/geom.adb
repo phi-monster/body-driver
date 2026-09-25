@@ -2422,7 +2422,34 @@ package body Geom is
       Rep.Turn_Deg := Norm (Rot_Vec (Mul (Tr (G.R_Ce), Gn.R_Ce))) * Deg;
       Rep.Move_M := Norm ([Gn.Pos (0) - G.Pos (0), Gn.Pos (1) - G.Pos (1), Gn.Pos (2) - G.Pos (2)]);
       Rep.Covered := Rep.Consistent + Rep.Consistent < Rep.Asked;   --  对得上的不到一半(比例)
-      if Rep.Turn_Deg / Deg > 3.0 * Gn.Rot_Sd or else Rep.Move_M > 3.0 * Gn.Pos_Sd then
+      --  挪没挪按画面看:每个板上的点,新位姿投到的地方离原位姿投到的多远,除以这个点自己的预测噪声(按原位姿算),取中位
+      declare
+         Px : Param_Vec (0 .. Natural'Max (1, Natural (Cur.Length)) - 1) := [others => 0.0];
+         Ps : Param_Vec (0 .. Natural'Max (1, Natural (Cur.Length)) - 1) := [others => 0.0];
+         N : Natural := 0;
+      begin
+         for P of Cur loop
+            declare
+               U0, V0, U1, V1 : Long_Float;
+               F0, F1 : Boolean;
+               Var : constant Long_Float := Scene_Var (G, P);
+            begin
+               Project_Fixed (G, P.Pw, U0, V0, F0);
+               Project_Fixed (Gn, P.Pw, U1, V1, F1);
+               if F0 and then F1 and then Var > 0.0 then
+                  Px (N) := Sqrt ((U1 - U0) ** 2 + (V1 - V0) ** 2);
+                  Ps (N) := Px (N) / Sqrt (Var);
+                  N := N + 1;
+               elsif F0 /= F1 then
+                  Px (N) := Long_Float'Last; Ps (N) := Long_Float'Last;   --  一个在眼前、一个在眼后:挪得不能再大
+                  N := N + 1;
+               end if;
+            end;
+         end loop;
+         Rep.Shift_Px := Median (Px, N);
+         Rep.Shift_Sd := Median (Ps, N);
+      end;
+      if Rep.Shift_Sd > 3.0 then   --  3 个预测噪声(倍数无量纲)
          Rep.Moved := True;
          Gn.F := G.F; Gn.F_Meas := G.F_Meas; Gn.F_Sd := G.F_Sd;   --  焦距照旧
          G := Gn;

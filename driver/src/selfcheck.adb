@@ -1161,6 +1161,16 @@ begin
                       "不动的眼核对·没动:" & Codec.Img (R1.Consistent) & "/" & Codec.Img (R1.Asked) & " 个点对得上 · 新解离原来 " & Codec.Fmt (R1.Turn_Deg, 3) & "° / "
                       & Codec.Fmt (R1.Move_M * Per_Mm, 2) & " mm ⇒ " & (if R1.Moved then "算挪了(错)" else "没挪") & (if R1.Covered then "、算挡了(错)" else ""));
             end;
+            --  ①b 配得分毫不差(此刻的像素就是原位姿的投影,G2G 2026-09-25 里自己配自己时就是这样)⇒ 也不许算挪(以前按位姿自报不确定度判,每轮误报)
+            declare
+               G1b : Geom.Cam_Geo := G0;
+               R1b : Geom.Fixed_Check;
+            begin
+               Geom.Check_Fixed (G1b, Base, Base, R1b);
+               Check (not R1b.Moved and then not R1b.Covered,
+                      "不动的眼核对·配得分毫不差:板上的点挪了 " & Codec.Fmt (R1b.Shift_Px, 3) & " px(" & Codec.Fmt (R1b.Shift_Sd, 3) & " 个配点噪声)⇒ "
+                      & (if R1b.Moved then "算挪了(错)" else "没挪"));
+            end;
             declare
                G2 : Geom.Cam_Geo := G0;
                Gr : Geom.Cam_Geo := G0;   --  真的:绕自己的光轴(相机系 z)转 90°

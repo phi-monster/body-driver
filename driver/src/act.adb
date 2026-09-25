@@ -6497,6 +6497,7 @@ package body Act is
                      & Codec.Fmt (Rr.Head_Rms, 2) & " px · 它在 (" & Mm (G.Pos (0)) & "," & Mm (G.Pos (1)) & "," & Mm (G.Pos (2)) & ") ± " & Mm (G.Pos_Sd) & " · 焦距 "
                      & Codec.Fmt (G.F, 1) & " ± " & Codec.Fmt (G.F_Sd, 1) & " px");
             Geom.Board_Points (C.Geo, C.Board_Tracks, C.Board);   --  板上的点按新几何重新三角
+            Rep.Scene_Used := Rr.Head_Used; Rep.Scene_Rms := Rr.Head_Rms;   --  报数按一起解之后的
             Geom.Save (To_String (C.Geo_Path), C.Geo);
          else
             Geo_Say ("  腕眼和不动的眼一起解没收下(" & To_String (Geom.Why) & ")⇒ 几何按各自单独解的");
@@ -6605,8 +6606,9 @@ package body Act is
                C.Sil_Valid := False;
             end if;
             Geom.Save (To_String (C.Geo_Path), C.Geo);
-            Geo_Say ("核对不动的眼:它被挪过 —— 转了 " & Codec.Fmt (R.Turn_Deg, 1) & Deg_Say & "、挪了 " & Mm (R.Move_M) & " ⇒ 按板重新标好(板上 " & Codec.Img (R.Consistent) & "/"
-                     & Codec.Img (R.Asked) & " 个点对得上,残差 " & Codec.Fmt (R.Rms, 2) & " px),接着干");
+            Geo_Say ("核对不动的眼:它被挪过 —— 转了 " & Codec.Fmt (R.Turn_Deg, 1) & Deg_Say & "、挪了 " & Mm (R.Move_M) & ",板上的点在画面里挪了 " & Codec.Fmt (R.Shift_Px, 1)
+                     & " px(" & Codec.Fmt (R.Shift_Sd, 1) & " 个配点噪声)⇒ 按板重新标好(" & Codec.Img (R.Consistent) & "/" & Codec.Img (R.Asked) & " 个点对得上,残差 "
+                     & Codec.Fmt (R.Rms, 2) & " px),接着干");
          elsif R.Covered then
             Geo_Say ("核对不动的眼:板上 " & Codec.Img (R.Asked) & " 个点只有 " & Codec.Img (R.Consistent) & " 个还对得上 ⇒ 它被挡住了一大块(或看不见了);位姿照旧,它这会儿看见的东西先别全信");
          end if;
