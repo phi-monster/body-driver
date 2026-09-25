@@ -11348,6 +11348,198 @@ package body Act is
    --  (X5B 2026-09-25:x5 手 2 离眼 0.33 m、张口 0.58 m,拿它顶住的点比板的面低 20.8 cm)。
    --  没有板的面、指尖量过(身体文件里的)⇒ 碰一下量面(顶住点 = 位姿 + 指尖:同一条"指尖碰在面上"反过来解);两样都没有 ⇒ 不碰,如实说。
    --  压的下数:有板的面 = 眼离面的高度 ÷ 一压 + 1(指尖在眼和面之间);没有 = 最多 8 下(次数)。完了回到原处
+   --  V1b 第 2 步(2026-09-26):每只手的每个关节单独扫一遍,量"关节转多少、手上那只眼到哪"用(这一版只记,不改任何量)。
+   --  ① 哪组关节读数是这只手的:这只手往上挪一个探针幅度,读数跟着变的那组(按量的,不按名字);挪回去。
+   --  ② 每个关节、两个方向:从此刻的读数起一格一格转(一格 = 此刻读数量级的百分之一起步,按画面挪了多少放大 / 缩小,
+   --     目标是每格画面挪画幅宽的 1/16 —— 比例,无量纲);每格停稳后落盘画面 + 关节读数(+ 身体报的手的位姿,只给离线打分,驱动不用)。
+   --     这一格关节没转到命令的三分之一(到头 / 被顶住,比例)或者走满 12 格(次数)就停,转回起点。
+   procedure Geo_Boot_Sweep (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context) is
+      Dump : constant String := Codec.Env ("BL_DUMP");
+      Host : constant String := To_String (C.Inst_Host);
+      N_Img : Natural := 0;
+      --  关节目标也走唯一那条挪手的路(Selfmap.Go),等它稳的办法同一种
+      procedure Go_Joints (G : Natural; A : Natural; Q : Floats; Ok : out Boolean) is
+         Dl : Table.Vec;
+         Fr : Natural;
+         Hold : constant Plug.Arm_Pose := (if A < Natural (F.EE.Length) then F.EE (A) else [others => 0.0]);
+      begin
+         Selfmap.Go (L, C.Map, A, Hold, F64_Vectors.Empty_Vector, F, Dl, Fr, Ok, Joints => Q, Group => G);
+      end Go_Joints;
+      procedure Log_Step (A, J : Natural; D : Integer; K : Natural; Cam : Natural) is
+         Fo : Ada.Text_IO.File_Type;
+         Nm : constant String := "sweep_" & Codec.Img (N_Img) & ".bmp";
+      begin
+         if Dump = "" or else Cam >= Natural (F.Cams.Length) then
+            return;
+         end if;
+         Codec.Write_BMP (Dump & "/" & Nm, F.Cams (Cam).RGB, F.Cams (Cam).W, F.Cams (Cam).H);
+         N_Img := N_Img + 1;
+         begin
+            Ada.Text_IO.Open (Fo, Ada.Text_IO.Append_File, Dump & "/sweep.txt");
+         exception
+            when others => Ada.Text_IO.Create (Fo, Ada.Text_IO.Out_File, Dump & "/sweep.txt");
+         end;
+         Ada.Text_IO.Put (Fo, Nm & " " & Codec.Img (A) & " " & Codec.Img (J) & " " & Codec.Img (D) & " " & Codec.Img (K) & " " & Codec.Img (Plug.Steps (L)));
+         for Q of F.Joints loop
+            Ada.Text_IO.Put (Fo, " |");
+            for X of Q loop
+               Ada.Text_IO.Put (Fo, " " & Codec.Fmt (X, 7));
+            end loop;
+         end loop;
+         Ada.Text_IO.Put (Fo, " ||");
+         if A < Natural (F.EE.Length) then
+            for I in 0 .. 6 loop
+               Ada.Text_IO.Put (Fo, " " & Codec.Fmt (F.EE (A) (I), 7));   --  身体报的手的位姿:只给离线打分,驱动不用
+            end loop;
+         end if;
+         Ada.Text_IO.New_Line (Fo);
+         Ada.Text_IO.Close (Fo);
+      exception
+         when others => null;
+      end Log_Step;
+      --  两张图之间画面挪了多少(像素):上一格那张图上铺一张格点(手指那一截之上),仪器配到这一张,取挪动的中位数
+      function Flow_Px (Prev : Plug.Cam; Now : Plug.Cam; Top : Natural) return Long_Float is
+         Pts : Instrument.Match_Vectors.Vector;
+         Err : Unbounded_String;
+         D : Floats;
+         Gx : constant Natural := 16;   --  格点 16 × 8(采样密度,次数)
+         Gy : constant Natural := 8;
+         package Sorting is new F64_Vectors.Generic_Sorting;
+      begin
+         if Host = "" or else Prev.W = 0 or else Top = 0 then
+            return -1.0;
+         end if;
+         for Iy in 0 .. Gy - 1 loop
+            for Ix in 0 .. Gx - 1 loop
+               Pts.Append (Instrument.Match_Pt'(U => (Long_Float (Ix) + 0.5) * Long_Float (Prev.W) / Long_Float (Gx),
+                                                V => (Long_Float (Iy) + 0.5) * Long_Float (Top) / Long_Float (Gy), Cert => 0.0));
+            end loop;
+         end loop;
+         declare
+            R : constant Instrument.Match_Vectors.Vector :=
+              Instrument.Match (Host, C.Inst_Port, Prev.RGB, Prev.W, Prev.H, Now.RGB, Now.W, Now.H, Pts, Err);
+         begin
+            if Natural (R.Length) /= Natural (Pts.Length) then
+               return -1.0;
+            end if;
+            for I in 0 .. Natural (Pts.Length) - 1 loop
+               if R (I).U >= 0.0 and then R (I).U < Long_Float (Now.W) and then R (I).V >= 0.0 and then R (I).V < Long_Float (Now.H) then
+                  D.Append (Geom.Norm ([R (I).U - Pts (I).U, R (I).V - Pts (I).V, 0.0]));
+               end if;
+            end loop;
+         end;
+         if D.Is_Empty then
+            return -1.0;
+         end if;
+         Sorting.Sort (D);
+         return D (Natural (D.Length) / 2);
+      end Flow_Px;
+   begin
+      if C.Board_Stops.Is_Empty then
+         Geo_Say ("关节扫描:这次开机没从零标(身体文件装回来)⇒ 不扫");
+         return;
+      end if;
+      if Host = "" then
+         Geo_Say ("关节扫描:没配配点仪器 ⇒ 量不出每一格画面挪了多少,不扫(扫描只有这一种量法)");
+         return;
+      end if;
+      for A in 0 .. C.Map.Arms - 1 loop
+         declare
+            Cam_I : constant Integer := (if A < Natural (C.Map.Cam_On_Arm.Length) then C.Map.Cam_On_Arm (A) else -1);
+         begin
+            if Cam_I < 0 or else Natural (Cam_I) >= Natural (F.Cams.Length) then
+               Geo_Say ("关节扫描 · 第" & Codec.Img (A + 1) & " 只手:手上没有眼 ⇒ 不扫");
+            elsif F.Joints.Is_Empty then
+               Geo_Say ("关节扫描:身体不报关节读数 ⇒ 不扫");
+               return;
+            else
+               declare
+                  Cam : constant Natural := Natural (Cam_I);
+                  --  手指在画面下部:握区框的上沿以上才是外面的世界(量过的;没量到就用整幅)
+                  Zt : constant Zone.Hand_Zone := Zone_Of (C, A, Cam);
+                  Top : constant Natural := (if Zt.Valid and then Zt.Y0 > 0 then Zt.Y0 else F.Cams (Cam).H);
+                  J0 : constant Plug.Floats_Vectors.Vector := F.Joints;
+                  Up : constant Long_Float := Geo_Base (C, A);
+                  Mok : Boolean;
+                  G : Integer := -1;
+               begin
+                  --  ① 哪组读数是这只手的
+                  Geo_Move (L, C, F, A, [0.0, 0.0, Up], Mok);
+                  for Gi in 0 .. Natural (J0.Length) - 1 loop
+                     if G < 0 and then Gi < Natural (F.Joints.Length) and then Natural (F.Joints (Gi).Length) = Natural (J0 (Gi).Length) then
+                        for X in 0 .. Natural (J0 (Gi).Length) - 1 loop
+                           if abs (F.Joints (Gi) (X) - J0 (Gi) (X)) > 0.0 then
+                              G := Gi;
+                           end if;
+                        end loop;
+                     end if;
+                  end loop;
+                  Geo_Move (L, C, F, A, [0.0, 0.0, -Up], Mok);
+                  if G < 0 then
+                     Geo_Say ("关节扫描 · 第" & Codec.Img (A + 1) & " 只手:挪了一下,哪组关节读数都没变 ⇒ 不扫");
+                  else
+                     declare
+                        Q0 : constant Floats := F.Joints (G);
+                        Gw : constant Long_Float := Long_Float (F.Cams (Cam).W) / 16.0;   --  每格画面挪画幅宽的 1/16(比例,无量纲)
+                        Okc : Boolean;
+                     begin
+                        Geo_Say ("关节扫描 · 第" & Codec.Img (A + 1) & " 只手:它的关节读数是第" & Codec.Img (G) & " 组(" & Codec.Img (Natural (Q0.Length))
+                                 & " 个),眼 = 第" & Codec.Img (Cam) & " 台;每个关节两个方向一格一格转");
+                        Log_Step (A, 0, 0, 0, Cam);
+                        for J in 0 .. Natural (Q0.Length) - 1 loop
+                           for D in -1 .. 1 loop
+                              if D /= 0 then
+                                 declare
+                                    Step : Long_Float := 0.01 * Long_Float'Max (1.0, abs Q0 (J));   --  起步 = 读数量级的百分之一(比例,无量纲),按画面挪动放大
+                                    Off : Long_Float := 0.0;
+                                    Prev : Plug.Cam := F.Cams (Cam);
+                                    Q_Prev : Long_Float := F.Joints (G) (J);
+                                    K : Natural := 0;
+                                    Tgt : Floats := Q0;
+                                    Why : Unbounded_String := S ("走满 12 格");
+                                 begin
+                                    while K < 12 loop   --  最多 12 格(次数)
+                                       K := K + 1;
+                                       Off := Off + Step;
+                                       Tgt.Replace_Element (J, Q0 (J) + Long_Float (D) * Off);
+                                       Go_Joints (Natural (G), A, Tgt, Okc);
+                                       if not Okc then
+                                          Why := S ("插头发不出关节命令");
+                                          exit;
+                                       end if;
+                                       declare
+                                          Got : constant Long_Float := abs (F.Joints (G) (J) - Q_Prev);
+                                          Fl : constant Long_Float := Flow_Px (Prev, F.Cams (Cam), Top);
+                                       begin
+                                          Log_Step (A, J, D, K, Cam);
+                                          if 3.0 * Got < Step then   --  没转到命令的三分之一(比例):到头 / 被顶住
+                                             Why := S ("关节到头或被顶住(命令 " & Codec.Fmt (Step, 4) & ",实到 " & Codec.Fmt (Got, 4) & ")");
+                                             exit;
+                                          end if;
+                                          if Fl > 0.0 then
+                                             --  下一格按这一格的画面挪动放大 / 缩小,一次最多两倍(倍数,无量纲)
+                                             Step := Step * Long_Float'Max (0.5, Long_Float'Min (2.0, Gw / Fl));
+                                          end if;
+                                          Q_Prev := F.Joints (G) (J);
+                                          Prev := F.Cams (Cam);
+                                       end;
+                                    end loop;
+                                    Geo_Say ("  第" & Codec.Img (J) & " 个关节往" & (if D > 0 then "正" else "负") & "转了 " & Codec.Img (K) & " 格(累计 "
+                                             & Codec.Fmt (Off, 3) & ")⇒ 停:" & To_String (Why));
+                                    Go_Joints (Natural (G), A, Q0, Okc);   --  转回起点
+                                 end;
+                              end if;
+                           end loop;
+                        end loop;
+                     end;
+                  end if;
+               end;
+            end if;
+         end;
+      end loop;
+      Geo_Say ("关节扫描完:落盘 " & Codec.Img (N_Img) & " 张(look/sweep.txt)");
+   end Geo_Boot_Sweep;
+
    procedure Geo_Boot_Support (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context) is
       Down : constant Geom.V3 := [-Protocol_Up (0), -Protocol_Up (1), -Protocol_Up (2)];
 

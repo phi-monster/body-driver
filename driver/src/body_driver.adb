@@ -318,6 +318,7 @@ begin
    Act.Geo_Boot_Eyes (L, F, C);      --  腕眼:转、探、走,多点连相机偏移一起解;不动的眼顺便记指尖
    Act.Geo_Boot_Fixed (L, F, C);     --  不动的眼:拿记下的指尖观测连它的位姿、焦距、各臂指尖偏移一起解
    Act.Geo_Boot_Support (L, F, C);
+   Act.Geo_Boot_Sweep (L, F, C);     --  V1b:每只手每个关节单独扫一遍(只记,量"关节转多少、手到哪"用)
    Put_Line ("[身] 身体量完 ⇒ 开始干活(脑在 " & To_String (C.Eye_Host) & ":" & Codec.Img (C.Eye_Port) & (if C.Look_Only then ",只看不动" else "") & ")");
    --  ── 干活循环 ──
    loop

@@ -77,7 +77,7 @@ package body Selfmap is
 
    procedure Go (L : in out Plug.Link; M : Body_Map; Arm : Natural; Target : Plug.Arm_Pose; Jaw : Floats;
                  F : in out Plug.Frame; Delivered : out Table.Vec; Frames : out Natural; Ok : out Boolean; Quick : Boolean := False;
-                 Watch : Watcher := null) is
+                 Watch : Watcher := null; Joints : Floats := F64_Vectors.Empty_Vector; Group : Integer := -1) is
       C : Plug.Cmd;
       P0 : constant Plug.Arm_Pose := (if Arm < Natural (F.EE.Length) then F.EE (Arm) else [others => 0.0]);
       Prev : Plug.Arm_Pose := P0;
@@ -88,6 +88,9 @@ package body Selfmap is
       Delivered := Table.Zero_Vec;
       Frames := 0;
       C.Kind := Plug.Ee; C.Arm := Arm; C.Pose := Target; C.Jaw := Jaw;
+      if Group >= 0 then
+         C.Kind := Plug.Joint; C.Q := Joints; C.Group := Group;
+      end if;
       loop
          if Send then
             Ok := Plug.Act (L, C);
@@ -106,6 +109,9 @@ package body Selfmap is
          if Watch /= null and then not Halted and then Watch (F) then
             Halted := True;
             C.Pose := F.EE (Arm);
+            if Group >= 0 and then Group < Natural (F.Joints.Length) then
+               C.Q := F.Joints (Group);
+            end if;
             Send := True;
             Still := 0;
          end if;

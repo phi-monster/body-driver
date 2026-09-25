@@ -414,6 +414,9 @@ package Act is
    --  ③ 每只手:指尖朝下压到被顶住,量出它下面那张面在哪(东西躺的面;先量了,第一句话就不用猜高度)
    procedure Geo_Boot_Eyes (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);
    procedure Geo_Boot_Support (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);
+   --  V1b 第 2 步(2026-09-26):开机把每只手的每个关节单独扫一遍 —— 一格一格转,每格停稳后记下手上那只眼的画面和关节读数
+   --  (BL_DUMP 下落盘 look/sweep.txt + sweep_*.bmp),供量"关节转多少、手到哪"。只在这次开机从零标过(记下了板停)时做
+   procedure Geo_Boot_Sweep (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);
    --  ④ 每条臂一条命令能走多远还走得到(阶梯探)
    procedure Geo_Boot_Stride (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);
    procedure Round (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);

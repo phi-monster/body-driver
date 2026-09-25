@@ -462,6 +462,68 @@ package body Plug is
          L.Pending := S; L.Has_Pending := True;
          return True;
       end if;
+      --  身体也报位姿,但开机量胳膊要一个关节一个关节地转(V1b,2026-09-26):发一条【只有关节】的动作。
+      --  每个不同名字的关节组发一份(名字相同的读数组 / 命令回声组只发一次,取第一个):C.Group 那一组的名字发 C.Q,其余照此刻的读数保持;
+      --  抓握通道同样按名字去重、照此刻的读数保持。一条动作里只有关节这一类,不混位姿(对方按键名认动作类型)
+      if C.Kind = Joint and then not Joint_Mode (L) and then C.Group >= 0 then
+         if C.Group >= Natural (L.Lay.Joints.Length) then
+            return False;
+         end if;
+         declare
+            Target : constant String := Layout.Last_Seg (L.Lay.Joints (C.Group));
+            J_Names, W_Names : Strs;
+            J_First, W_First : Ints;
+            function Has (V : Strs; X : String) return Boolean is
+            begin
+               for Y of V loop
+                  if Y = X then
+                     return True;
+                  end if;
+               end loop;
+               return False;
+            end Has;
+         begin
+            for I in 0 .. Natural (L.Lay.Joints.Length) - 1 loop
+               if not Has (J_Names, Layout.Last_Seg (L.Lay.Joints (I))) then
+                  J_Names.Append (Layout.Last_Seg (L.Lay.Joints (I))); J_First.Append (I);
+               end if;
+            end loop;
+            for I in 0 .. Natural (L.Lay.Jaw.Length) - 1 loop
+               if not Has (W_Names, Layout.Last_Seg (L.Lay.Jaw (I))) then
+                  W_Names.Append (Layout.Last_Seg (L.Lay.Jaw (I))); W_First.Append (I);
+               end if;
+            end loop;
+            Put_Map (S, Natural (J_Names.Length) + Natural (W_Names.Length));
+            for K in 0 .. Natural (J_Names.Length) - 1 loop
+               Put_Str (S, J_Names (K));
+               declare
+                  Q : constant Floats := (if J_Names (K) = Target then C.Q else Nums_At (L, L.Lay.Joints (J_First (K))));
+               begin
+                  Put_Array (S, Natural (Q.Length));
+                  for X of Q loop
+                     Put_Float (S, X);
+                  end loop;
+               end;
+            end loop;
+            for K in 0 .. Natural (W_Names.Length) - 1 loop
+               Put_Str (S, W_Names (K));
+               declare
+                  J : constant Floats := Nums_At (L, L.Lay.Jaw (W_First (K)));
+               begin
+                  Put_Array (S, Natural'Max (1, Natural (J.Length)));
+                  if J.Is_Empty then
+                     Put_Float (S, 1.0);
+                  else
+                     for X of J loop
+                        Put_Float (S, Long_Float'Max (0.0, Long_Float'Min (1.0, X)));
+                     end loop;
+                  end if;
+               end;
+            end loop;
+         end;
+         L.Pending := S; L.Has_Pending := True;
+         return True;
+      end if;
       if (C.Kind = Joint) /= Joint_Mode (L) then
          return False;    --  关节命令只在关节模式,位姿命令只在位姿模式:一条动作里不许混两种类型
       end if;
