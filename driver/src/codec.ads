@@ -9,6 +9,8 @@ package Codec is
    procedure Write_File (Path : String; B : Buf);
    procedure Write_PGM (Path : String; Gray : Buf; W, H : Natural);
    procedure Write_BMP (Path : String; RGB : Buf; W, H : Natural);
+   --  读回 24 位 BMP(自上而下或自下而上都认)成 RGB;不是这种文件 ⇒ Ok = False
+   procedure Read_BMP (Path : String; RGB : out Buf; W, H : out Natural; Ok : out Boolean);
    procedure Make_Dir (Path : String);
    --  数字排版:定点小数、整数、六位补零(录像帧名)。
    function Fmt (X : Long_Float; Aft : Natural := 3) return String;

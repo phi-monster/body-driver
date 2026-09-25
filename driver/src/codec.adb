@@ -150,6 +150,64 @@ package body Codec is
       Write_File (Path, BMP24 (RGB, W, H));
    end Write_BMP;
 
+   procedure Read_BMP (Path : String; RGB : out Buf; W, H : out Natural; Ok : out Boolean) is
+      use Ada.Streams.Stream_IO;
+      F : File_Type;
+   begin
+      RGB := U8_Vectors.Empty_Vector; W := 0; H := 0; Ok := False;
+      Open (F, In_File, Path);
+      declare
+         N : constant Natural := Natural (Size (F));
+         A : Ada.Streams.Stream_Element_Array (1 .. Ada.Streams.Stream_Element_Offset (N));
+         Last : Ada.Streams.Stream_Element_Offset;
+         function B (I : Natural) return Natural is (Natural (A (Ada.Streams.Stream_Element_Offset (I + 1))));
+         function U32 (I : Natural) return Long_Long_Integer is   --  小端(格式)
+           (Long_Long_Integer (B (I)) + 256 * Long_Long_Integer (B (I + 1)) + 65536 * Long_Long_Integer (B (I + 2)) + 16777216 * Long_Long_Integer (B (I + 3)));
+      begin
+         Read (F, A, Last);
+         Close (F);
+         if N < 54 or else B (0) /= Character'Pos ('B') or else B (1) /= Character'Pos ('M') or else B (28) + 256 * B (29) /= 24 then
+            return;   --  不是 24 位 BMP
+         end if;
+         declare
+            Off : constant Natural := Natural (U32 (10));
+            Wd : constant Natural := Natural (U32 (18));
+            Hs : Long_Long_Integer := U32 (22);
+            Top_Down : Boolean := False;
+         begin
+            if Hs >= 2147483648 then   --  负高度(二补码)= 自上而下(格式)
+               Hs := 4294967296 - Hs; Top_Down := True;
+            end if;
+            declare
+               Hd : constant Natural := Natural (Hs);
+               Row : constant Natural := Wd * 3;
+               Pad : constant Natural := (4 - Row mod 4) mod 4;
+            begin
+               if Off + (Row + Pad) * Hd > N then
+                  return;
+               end if;
+               RGB.Reserve_Capacity (Ada.Containers.Count_Type (Row * Hd));
+               for Y in 0 .. Hd - 1 loop
+                  declare
+                     Base : constant Natural := Off + (if Top_Down then Y else Hd - 1 - Y) * (Row + Pad);
+                  begin
+                     for X in 0 .. Wd - 1 loop
+                        RGB.Append (U8 (B (Base + 3 * X + 2))); RGB.Append (U8 (B (Base + 3 * X + 1))); RGB.Append (U8 (B (Base + 3 * X)));
+                     end loop;
+                  end;
+               end loop;
+               W := Wd; H := Hd; Ok := True;
+            end;
+         end;
+      end;
+   exception
+      when others =>
+         if Is_Open (F) then
+            Close (F);
+         end if;
+         RGB := U8_Vectors.Empty_Vector; W := 0; H := 0; Ok := False;
+   end Read_BMP;
+
    procedure Make_Dir (Path : String) is
    begin
       if Path /= "" and then not Ada.Directories.Exists (Path) then

@@ -370,6 +370,10 @@ package Act is
    --  不动的眼每轮核一次(V1:被转了、被挡了一半 ⇒ 身体自己发现、重新标、接着干):Fixed_Ref → 此刻的图,仪器把板上的点配过来 ⇒ Geom.Check_Fixed。
    --  挪过 ⇒ 位姿换成按板重解的、说出来、存几何文件;挡住一大块 ⇒ 说出来(位姿照旧)。没配仪器、没有板 ⇒ 不核(量不出来)
    procedure Check_Fixed_Eye (F : Plug.Frame; C : in out Context);
+   --  标定板随身体文件存、随身体文件装回(<几何文件>.board.txt + .board_ref.bmp):下一次开机装回身体时板和参考图也回来,每轮核对照常;
+   --  两次开机之间相机被挪过 ⇒ 第一轮核对就发现、重标
+   procedure Board_Save (C : Context);
+   procedure Board_Load (C : in out Context);
 
    procedure Init_Tracks (C : in out Context);
    --  开机装回几何常数(身体文件旁边的 .geo.json:焦距、相机在手上的朝向、指尖在相机里的位置);缺的当场量。

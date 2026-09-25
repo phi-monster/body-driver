@@ -1329,6 +1329,39 @@ begin
          end;
       end;
    end;
+   --  🔴 标定板随身体文件存、装回(Act.Board_Save / Board_Load,2026-09-25):存一份再装回,点、协方差、参考图一个不差(存的是 6 位小数、协方差按 mm²)
+   declare
+      C1, C2 : Act.Context;
+      Img : Buf;
+      Worst : Long_Float := 0.0;
+   begin
+      C1.Geo_Path := To_Unbounded_String ("/tmp/bd_selfcheck_board.geo.json");
+      for I in 0 .. 5 loop
+         C1.Board.Append (Geom.Scene_Pt'(Pw => [0.1 * Long_Float (I) - 0.25, -0.2, 0.765], U => 100.0 + Long_Float (I), V => 200.5, Sh => 0.25, Views => 9,
+                                         Cov => [[1.0e-6, 0.0, 0.0], [0.0, 2.0e-6, 0.0], [0.0, 0.0, 3.0e-6]]));   --  合成
+      end loop;
+      for I in 0 .. 8 * 6 * 3 - 1 loop
+         Img.Append (U8 ((I * 37) mod 256));
+      end loop;
+      C1.Fixed_Ref := Img; C1.Fixed_Ref_W := 8; C1.Fixed_Ref_H := 6;
+      Act.Board_Save (C1);
+      C2.Geo_Path := C1.Geo_Path;
+      Act.Board_Load (C2);
+      if Natural (C2.Board.Length) = Natural (C1.Board.Length) then
+         for I in 0 .. Natural (C1.Board.Length) - 1 loop
+            for K in 0 .. 2 loop
+               Worst := Long_Float'Max (Worst, abs (C2.Board (I).Pw (K) - C1.Board (I).Pw (K)));
+               Worst := Long_Float'Max (Worst, 1.0e3 * abs (C2.Board (I).Cov (K, K) - C1.Board (I).Cov (K, K)));   --  协方差按 m² 比(乘 1000 = 同样按 mm 级的门,换算)
+            end loop;
+            Worst := Long_Float'Max (Worst, 1.0e-3 * abs (C2.Board (I).U - C1.Board (I).U));   --  像素按 1/1000 折成同一个门(换算)
+         end loop;
+      end if;
+      Check (Natural (C2.Board.Length) = Natural (C1.Board.Length) and then Bytes.U8_Vectors."=" (C2.Fixed_Ref, C1.Fixed_Ref) and then C2.Fixed_Ref_W = 8
+             and then C2.Fixed_Ref_H = 6 and then Worst < 1.0e-5,
+             "标定板随身体文件存、装回:" & Codec.Img (Natural (C2.Board.Length)) & "/" & Codec.Img (Natural (C1.Board.Length)) & " 个点、参考图 "
+             & Codec.Img (C2.Fixed_Ref_W) & "×" & Codec.Img (C2.Fixed_Ref_H) & (if Bytes.U8_Vectors."=" (C2.Fixed_Ref, C1.Fixed_Ref) then " 一样" else " 不一样")
+             & " · 最大差 " & Codec.Fmt (Worst, 8));
+   end;
    --  🔴 认指尖:瓣尖落在哪条腕眼瓣视线上(2026-09-24,Geom.Tips_On_Rays)。不动的眼已知(合成:(0,−0.41,1.308) 低头 30°、焦距 288);腕眼在手系 (0.08,0,0.05)。
    --  ① 五指手:自己眼里 1 瓣(四根手指),指尖在视线上 0.20 m;不动的眼每笔看见 2 瓣,另一瓣是大拇指(离指尖 5 cm,不在视线上)
    --  ⇒ 手指的尖全归视线、大拇指一个都不归,S 差 < 2 mm(G2C 实拍:手指那一瓣离视线 5.5 px、大拇指 25 px)。

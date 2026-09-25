@@ -5743,6 +5743,9 @@ package body Act is
       C.Geo_Path := S (Body_Path & ".geo.json");
       Geom.Load (To_String (C.Geo_Path), C.Geo, C.Map.N_Cams, Note);
       Geo_Say (Ada.Strings.Fixed.Trim (Note, Ada.Strings.Both));
+      if C.Map.World_Cam < Natural (C.Geo.Length) and then C.Geo (C.Map.World_Cam).Valid and then C.Geo (C.Map.World_Cam).Fixed then
+         Board_Load (C);
+      end if;
       for Cam in 0 .. C.Map.N_Cams - 1 loop
          Geo_Take_K (C, F, Cam);
          declare
@@ -6551,6 +6554,87 @@ package body Act is
       end if;
    end Geo_Board_Solve;
 
+   procedure Board_Save (C : Context) is
+      Base : constant String := To_String (C.Geo_Path);
+      Fo : Ada.Text_IO.File_Type;
+   begin
+      if Base = "" or else C.Board.Is_Empty or else C.Fixed_Ref.Is_Empty then
+         return;
+      end if;
+      Codec.Write_BMP (Base & ".board_ref.bmp", C.Fixed_Ref, C.Fixed_Ref_W, C.Fixed_Ref_H);
+      Ada.Text_IO.Create (Fo, Ada.Text_IO.Out_File, Base & ".board.txt");
+      Ada.Text_IO.Put_Line (Fo, "board " & Codec.Img (Natural (C.Board.Length)));
+      for S of C.Board loop
+         Ada.Text_IO.Put_Line (Fo, Codec.Fmt (S.Pw (0), 6) & " " & Codec.Fmt (S.Pw (1), 6) & " " & Codec.Fmt (S.Pw (2), 6) & " " & Codec.Fmt (S.U, 3) & " " & Codec.Fmt (S.V, 3)
+                               & " " & Codec.Fmt (S.Sh, 4) & " " & Codec.Img (S.Views) & " " & Codec.Fmt (S.Cov (0, 0) * 1.0e6, 6) & " " & Codec.Fmt (S.Cov (0, 1) * 1.0e6, 6)
+                               & " " & Codec.Fmt (S.Cov (0, 2) * 1.0e6, 6) & " " & Codec.Fmt (S.Cov (1, 1) * 1.0e6, 6) & " " & Codec.Fmt (S.Cov (1, 2) * 1.0e6, 6)
+                               & " " & Codec.Fmt (S.Cov (2, 2) * 1.0e6, 6));   --  协方差按 mm² 存(单位换算)
+      end loop;
+      Ada.Text_IO.Close (Fo);
+   exception
+      when others => null;
+   end Board_Save;
+
+   procedure Board_Load (C : in out Context) is
+      Base : constant String := To_String (C.Geo_Path);
+      Fi : Ada.Text_IO.File_Type;
+      Ok : Boolean;
+      Mm2 : constant Long_Float := 1.0e-6;   --  mm² → m²(单位换算)
+      --  一行里空格分开的数
+      function Nums (L : String) return Floats is
+         R : Floats;
+         I : Natural := L'First;
+      begin
+         while I <= L'Last loop
+            while I <= L'Last and then L (I) = ' ' loop
+               I := I + 1;
+            end loop;
+            exit when I > L'Last;
+            declare
+               J : Natural := I;
+            begin
+               while J <= L'Last and then L (J) /= ' ' loop
+                  J := J + 1;
+               end loop;
+               R.Append (Long_Float'Value (L (I .. J - 1)));
+               I := J;
+            end;
+         end loop;
+         return R;
+      end Nums;
+   begin
+      C.Board.Clear;
+      if Base = "" then
+         return;
+      end if;
+      Codec.Read_BMP (Base & ".board_ref.bmp", C.Fixed_Ref, C.Fixed_Ref_W, C.Fixed_Ref_H, Ok);
+      if not Ok then
+         C.Fixed_Ref.Clear;
+         return;
+      end if;
+      Ada.Text_IO.Open (Fi, Ada.Text_IO.In_File, Base & ".board.txt");
+      Ada.Text_IO.Skip_Line (Fi);
+      while not Ada.Text_IO.End_Of_File (Fi) loop
+         declare
+            X : constant Floats := Nums (Ada.Text_IO.Get_Line (Fi));
+         begin
+            if Natural (X.Length) >= 13 then   --  一行 13 个数(格式)
+               C.Board.Append (Geom.Scene_Pt'(Pw => [X (0), X (1), X (2)], U => X (3), V => X (4), Sh => X (5), Views => Natural (X (6)),
+                                              Cov => [[X (7) * Mm2, X (8) * Mm2, X (9) * Mm2], [X (8) * Mm2, X (10) * Mm2, X (11) * Mm2],
+                                                      [X (9) * Mm2, X (11) * Mm2, X (12) * Mm2]]));
+            end if;
+         end;
+      end loop;
+      Ada.Text_IO.Close (Fi);
+      Geo_Say ("装回标定板:" & Codec.Img (Natural (C.Board.Length)) & " 个点 + 不动的眼的参考图 ⇒ 每轮照常核它挪没挪、挡没挡");
+   exception
+      when others =>
+         if Ada.Text_IO.Is_Open (Fi) then
+            Ada.Text_IO.Close (Fi);
+         end if;
+         C.Board.Clear; C.Fixed_Ref.Clear;
+   end Board_Load;
+
    procedure Check_Fixed_Eye (F : Plug.Frame; C : in out Context) is
       Wc : constant Natural := C.Map.World_Cam;
       Deg_Say : constant String := "°";
@@ -6606,6 +6690,7 @@ package body Act is
                C.Sil_Valid := False;
             end if;
             Geom.Save (To_String (C.Geo_Path), C.Geo);
+            Board_Save (C);
             Geo_Say ("核对不动的眼:它被挪过 —— 转了 " & Codec.Fmt (R.Turn_Deg, 1) & Deg_Say & "、挪了 " & Mm (R.Move_M) & ",板上的点在画面里挪了 " & Codec.Fmt (R.Shift_Px, 1)
                      & " px(" & Codec.Fmt (R.Shift_Sd, 1) & " 个配点噪声)⇒ 按板重新标好(" & Codec.Img (R.Consistent) & "/" & Codec.Img (R.Asked) & " 个点对得上,残差 "
                      & Codec.Fmt (R.Rms, 2) & " px),接着干");
@@ -6729,6 +6814,7 @@ package body Act is
          end;
          C.Geo.Replace_Element (Wc, G);
          C.Fixed_Ref := F.Cams (Wc).RGB; C.Fixed_Ref_W := F.Cams (Wc).W; C.Fixed_Ref_H := F.Cams (Wc).H;   --  以后每轮核对拿它当"标好那一刻"
+         Board_Save (C);
          Geo_Say ("不动的眼量好:标定板 " & Codec.Img (Rep.Scene_Used) & "/" & Codec.Img (Rep.Scene_N) & " 个点(像素残差 " & Codec.Fmt (Rep.Scene_Rms, 2) & " px)· 手上的标记 "
                   & Codec.Img (Rep.Hand_Used) & "/" & Codec.Img (Rep.Hand_N) & " 笔(" & Codec.Fmt (Rep.Hand_Rms, 2) & " px)· 踢掉 " & Codec.Img (G.Dropped)
                   & " 条 · 它在 (" & Mm (G.Pos (0)) & "," & Mm (G.Pos (1)) & "," & Mm (G.Pos (2)) & ") ± " & Mm (G.Pos_Sd)
