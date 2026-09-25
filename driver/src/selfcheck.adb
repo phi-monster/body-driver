@@ -1132,6 +1132,7 @@ begin
             Base : Geom.Scene_Pt_Vectors.Vector;
          begin
             G0.Rot_Sd := 0.0; G0.Pos_Sd := 0.0;
+            G0.Rms := 0.5;   --  标定时它的像素残差(合成,同配点抖动)
             for S of Scene loop
                declare
                   B : Geom.Scene_Pt := S;
@@ -1205,7 +1206,7 @@ begin
                          "不动的眼核对·绕光轴转 90°:配到 " & Codec.Img (R2.Matched) & "/" & Codec.Img (R2.Asked) & "、对得上 " & Codec.Img (R2.Consistent) & " ⇒ "
                          & (if R2.Moved then "算挪了(转 " & Codec.Fmt (R2.Turn_Deg, 1) & "°),新位姿离真的 " & Codec.Fmt (Da, 2) & "° / " & Codec.Fmt (Dp * Per_Mm, 1) & " mm" else "没发现(错)"));
                end;
-               --  ②b 转完、重标好之后再挡住左半边(X5B 2026-09-25 那种):转过的画面配得粗(配点抖 ±1.5 px,合成),左半边配成乱的
+               --  ②b 转完、重标好之后再挡住左半边(X5B 2026-09-25 那种):左半边配成乱的
                --  ⇒ 不许算挪(位姿不动),要算挡
                declare
                   G4 : Geom.Cam_Geo := G2;
@@ -1222,7 +1223,7 @@ begin
                      begin
                         Geom.Project_Fixed (Gr, B.Pw, U, V, Fr);
                         if Fr and then U >= 320.0 and then U < 640.0 and then V >= 0.0 and then V < 480.0 then
-                           N.U := U + 1.5 * Jit6; N.V := V + 1.5 * Jit6;
+                           N.U := U + 0.5 * Jit6; N.V := V + 0.5 * Jit6;
                         else
                            N.U := Long_Float ((K * 97) mod 640); N.V := Long_Float ((K * 61) mod 480);   --  挡住的那半边:乱配(合成)
                         end if;
@@ -1235,6 +1236,36 @@ begin
                          "不动的眼核对·转 90° 之后再挡住左半边:现在的位姿对得上 " & Codec.Img (R4.Consistent_Now) & "、新解 " & Codec.Img (R4.Consistent) & "(重标时 "
                          & Codec.Img (Best2) & ")⇒ " & (if R4.Moved then "算挪了(错)" else "没挪") & (if R4.Covered then "、算挡了" else "、没发现挡(错)"));
                end;
+            end;
+            --  ③b 挡住左半边,但挡住的那半边不是乱配,是一片平滑的"编出来的"配点(照着一个偏了 7° 的位姿投、再抖 ±4 px,合成):
+            --  X5C 2026-09-25 就是这样被判成"挪了 7.6°、10.6 cm"的 ⇒ 不许算挪,要算挡
+            declare
+               G5 : Geom.Cam_Geo := G0;
+               Gw : Geom.Cam_Geo := G0;   --  编出来的那片对应的错位姿
+               Now5 : Geom.Scene_Pt_Vectors.Vector;
+               R5 : Geom.Fixed_Check;
+               Best5 : Natural := Natural (Base.Length);   --  挡之前看得全
+            begin
+               Gw.R_Ce := Geom.Mul (G0.R_Ce, Geom.Rodrigues ([0.0, 0.122, 0.0]));   --  7°(弧度,合成)
+               for B of Base loop
+                  declare
+                     N : Geom.Scene_Pt := B;
+                     U, V : Long_Float;
+                     Fr : Boolean;
+                  begin
+                     if B.U < 320.0 then   --  左半边被挡:编出来的(合成)
+                        Geom.Project_Fixed (Gw, B.Pw, U, V, Fr);
+                        N.U := U + 4.0 * Jit6; N.V := V + 4.0 * Jit6;
+                     else
+                        N.U := B.U + 0.5 * Jit6; N.V := B.V + 0.5 * Jit6;
+                     end if;
+                     Now5.Append (N);
+                  end;
+               end loop;
+               Geom.Check_Fixed (G5, Base, Now5, Best5, R5);
+               Check (not R5.Moved and then R5.Covered,
+                      "不动的眼核对·挡住左半边、那半边配成一片编出来的:原位姿对得上 " & Codec.Img (R5.Consistent_Now) & "、最好的新解 " & Codec.Img (R5.Consistent) & " ⇒ "
+                      & (if R5.Moved then "算挪了(错,转 " & Codec.Fmt (R5.Turn_Deg, 1) & "°)" else "没挪") & (if R5.Covered then "、算挡了" else "、没发现挡(错)"));
             end;
             declare
                G3 : Geom.Cam_Geo := G0;

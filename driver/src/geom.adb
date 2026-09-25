@@ -2417,72 +2417,82 @@ package body Geom is
       if Gn.F <= 0.0 then
          return;   --  焦距都没有:没法核
       end if;
-      --  两份:从原来的位姿起步 / 从零盲搜(焦距已知 ⇒ 只解位姿),对得上的点多的那份算(一样多取残差小的)
+      --  三个候选:原来的位姿本身、从原位姿起步重解的、从零盲搜的(焦距已知 ⇒ 只解位姿)。拿同一道门数每个候选解释得了几个点:
+      --  门 = 3 倍(倍数无量纲)"原来那份标定自己的像素残差"(它是按多细的配点解出来的,就按多细判;数值精度兜底 1e-9 px)。
+      --  不按新解自己的残差定门:挡住的那半边 RoMa 不是乱配,是顺着看得见的那半边"编"出一片平滑的配点,一个错的位姿能以 4 px 的残差把它们全吃下,
+      --  门跟着放到 12 px,就把"挡住"判成"挪了 7.6°、10.6 cm"(X5C 2026-09-25)。按原来那份的精度判,编出来的那片只有粗解得了,细的门里没有它
       declare
+         Gate : constant Long_Float := 3.0 * Long_Float'Max (1.0e-9, G.Rms);
+         function Count (Pg : Cam_Geo) return Natural is
+            K : Natural := 0;
+         begin
+            for P of Cur loop
+               declare
+                  U, V : Long_Float;
+                  Front : Boolean;
+               begin
+                  Project_Fixed (Pg, P.Pw, U, V, Front);
+                  if Front and then Sqrt ((U - P.U) ** 2 + (V - P.V) ** 2) <= Gate then
+                     K := K + 1;
+                  end if;
+               end;
+            end loop;
+            return K;
+         end Count;
          Ga : Cam_Geo := G;
-         Fa : Fixed_Report;
-         Oka : Boolean;
+         Fa, Fb : Fixed_Report;
+         Oka, Okb : Boolean;
+         Na, Nb : Natural := 0;
       begin
+         Rep.Consistent_Now := Count (G);
          Fit_Fixed_Board (Ga, Cur, Fa, Oka, Start_Here => True);
-         Fit_Fixed_Board (Gn, Cur, Fr, Ok);
-         if Oka and then (not Ok or else Fa.Scene_Used > Fr.Scene_Used or else (Fa.Scene_Used = Fr.Scene_Used and then Fa.Scene_Rms <= Fr.Scene_Rms)) then
-            Gn := Ga; Fr := Fa; Ok := True;
+         Fit_Fixed_Board (Gn, Cur, Fb, Okb);
+         if Oka then
+            Na := Count (Ga);
+         end if;
+         if Okb then
+            Nb := Count (Gn);
+         end if;
+         if Oka and then (not Okb or else Na >= Nb) then
+            Gn := Ga; Fr := Fa; Ok := True; Rep.Consistent := Na;
+         elsif Okb then
+            Fr := Fb; Ok := True; Rep.Consistent := Nb;
+         else
+            Ok := False;
          end if;
       end;
       if not Ok then
          Rep.Covered := True;   --  配到的点和任何一个位姿都对不上:看不见了 / 挡住了
          return;
       end if;
-      Rep.Consistent := Fr.Scene_Used;
       Rep.Rms := Fr.Scene_Rms;
       Rep.Turn_Deg := Norm (Rot_Vec (Mul (Tr (G.R_Ce), Gn.R_Ce))) * Deg;
       Rep.Move_M := Norm ([Gn.Pos (0) - G.Pos (0), Gn.Pos (1) - G.Pos (1), Gn.Pos (2) - G.Pos (2)]);
-      --  现在的位姿对得上几个:门 = 3 倍(倍数无量纲)的"这一次核对的配点噪声",取新解残差和这只眼标定时残差里大的那个(数值精度兜底 1e-9 px)
-      declare
-         Gate : constant Long_Float := 3.0 * Long_Float'Max (1.0e-9, Long_Float'Max (Fr.Scene_Rms, G.Rms));
-      begin
-         for P of Cur loop
-            declare
-               U, V : Long_Float;
-               Front : Boolean;
-            begin
-               Project_Fixed (G, P.Pw, U, V, Front);
-               if Front and then Sqrt ((U - P.U) ** 2 + (V - P.V) ** 2) <= Gate then
-                  Rep.Consistent_Now := Rep.Consistent_Now + 1;
-               end if;
-            end;
-         end loop;
-      end;
-      --  挪没挪按画面看:每个板上的点,新位姿投到的地方离原位姿投到的多远,除以这个点自己的预测噪声(按原位姿算),取中位
+      --  新解把板上的点投到的地方比原位姿投到的挪了多少(报数用)
       declare
          Px : Param_Vec (0 .. Natural'Max (1, Natural (Cur.Length)) - 1) := [others => 0.0];
-         Ps : Param_Vec (0 .. Natural'Max (1, Natural (Cur.Length)) - 1) := [others => 0.0];
          N : Natural := 0;
       begin
          for P of Cur loop
             declare
                U0, V0, U1, V1 : Long_Float;
                F0, F1 : Boolean;
-               Var : constant Long_Float := Scene_Var (G, P);
             begin
                Project_Fixed (G, P.Pw, U0, V0, F0);
                Project_Fixed (Gn, P.Pw, U1, V1, F1);
-               if F0 and then F1 and then Var > 0.0 then
+               if F0 and then F1 then
                   Px (N) := Sqrt ((U1 - U0) ** 2 + (V1 - V0) ** 2);
-                  Ps (N) := Px (N) / Sqrt (Var);
-                  N := N + 1;
-               elsif F0 /= F1 then
-                  Px (N) := Long_Float'Last; Ps (N) := Long_Float'Last;   --  一个在眼前、一个在眼后:挪得不能再大
                   N := N + 1;
                end if;
             end;
          end loop;
          Rep.Shift_Px := Median (Px, N);
-         Rep.Shift_Sd := Median (Ps, N);
+         Rep.Shift_Sd := (if G.Rms > 0.0 then Rep.Shift_Px / G.Rms else 0.0);
       end;
-      if Rep.Consistent_Now + Rep.Consistent_Now < Rep.Consistent then   --  现在的位姿解释得不到新解一半(比例)
+      if Rep.Consistent_Now + Rep.Consistent_Now < Rep.Consistent then   --  原来的位姿解释得不到新解一半(比例)
          Rep.Moved := True;
          Gn.F := G.F; Gn.F_Meas := G.F_Meas; Gn.F_Sd := G.F_Sd;   --  焦距照旧
+         Gn.Rms := Fr.Scene_Rms;   --  以后按新解配得多细来判
          G := Gn;
          Best := Rep.Consistent;   --  重新放好了:从这一刻起重记"看见过的最多"
       else
