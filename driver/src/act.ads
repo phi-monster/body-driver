@@ -218,6 +218,12 @@ package Act is
       P, W : Geom.V3 := [others => 0.0];
    end record;
    package Wall_Vectors is new Ada.Containers.Vectors (Natural, Wall_Mark);
+   --  不动的眼一笔合空标记里它看见的手指像素(2026-09-26,V1"头顶眼按指尖"的量法:碰出来的指尖投进它眼里,离这片像素最近多远)
+   type Px2 is record
+      U, V : Natural := 0;
+   end record;
+   package Px2_Vectors is new Ada.Containers.Vectors (Natural, Px2);
+   package Px_List_Vectors is new Ada.Containers.Vectors (Natural, Px2_Vectors.Vector, Px2_Vectors."=");
    --  标定板用的一停(2026-09-25):腕眼标定里只平移、手没转的那几停,手上那只眼的图 + 手的位姿 + 同一刻不动的眼的图。
    --  Seg = 那一集开始时的帧号:复位之后桌上的东西换了,不同集的停不互相配
    type Board_Stop is record
@@ -268,6 +274,7 @@ package Act is
       Inst_Host : Unbounded_String;    --  仪器进程(空 = 没配,几何全靠身体自己量)
       Inst_Port : Natural := 8077;
       Fixed_Obs : Geom.Obs_Pt_Vectors.Vector;   --  开机各停里不动的眼给各条臂指尖做的合空标记(Pt = 臂号;像素 + 那一停的位姿),开机末尾一起解不动的眼
+      Mark_Px : Px_List_Vectors.Vector;         --  和 Fixed_Obs 一一对应:那一笔里不动的眼看见的手指像素
       Lobe_Obs : Geom.Obs_Pt_Vectors.Vector;    --  同一批标记里每一瓣手指各自的尖(Pt = 臂号,Kind = 这一笔的瓣数):解完不动的眼后认哪一瓣落在腕眼哪条瓣视线上 = 指尖
       Board_Stops : Board_Stop_Vectors.Vector;  --  腕眼标定各平移停的图和位姿(开机末尾配点做标定板)
       Board : Geom.Scene_Pt_Vectors.Vector;     --  标定板的点:腕眼几停三角出来的桌上的点(世界位置 + 协方差)和它们在不动的眼里的像素
