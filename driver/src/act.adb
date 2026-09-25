@@ -6590,6 +6590,23 @@ package body Act is
       return R;
    end Turn_90;
 
+   --  原图(宽 W、高 H)顺时针转了 Turns 个 90° 之后那张图里的 (U, V),换算回原图:每退一步,转之前高 h 的图里 (u, v) = (v', h − 1 − u')
+   procedure Unturn (U, V : Long_Float; Turns, W, H : Natural; U0, V0 : out Long_Float) is
+      Uc : Long_Float := U;
+      Vc : Long_Float := V;
+   begin
+      for T in reverse 1 .. Turns loop
+         declare
+            H_Before : constant Natural := (if T mod 2 = 1 then H else W);   --  第 T 步转之前那张图的高:奇数步前是原图朝向
+            U1 : constant Long_Float := Vc;
+            V1 : constant Long_Float := Long_Float (H_Before) - 1.0 - Uc;
+         begin
+            Uc := U1; Vc := V1;
+         end;
+      end loop;
+      U0 := Uc; V0 := Vc;
+   end Unturn;
+
    --  仪器转着看时配得多细(2026-09-26):参考图配到"它自己转了 90°"那张,板上的点该落在哪是算得出来的 ⇒ 配点误差的中位 × 1.2
    --  (换算,无量纲:二维高斯的误差中位 ≈ 均方根 ÷ 1.2)= 转着看的配点噪声。RoMa 不转时配自己 0.03 px、转 90° 约 0.8 px(X5C4 重标残差 0.82 px);
    --  标定时残差 0.16 px 的眼真被转了,按标定时的细门只数得到两成的点 ⇒ 核对时新位姿按它放宽(Geom.Check_Fixed)
@@ -6740,30 +6757,78 @@ package body Act is
          return;
       end if;
       declare
-         Q, M : Instrument.Match_Vectors.Vector;
+         Q : Instrument.Match_Vectors.Vector;
          Err : Unbounded_String;
          Now : Geom.Scene_Pt_Vectors.Vector;
          G : Geom.Cam_Geo := C.Geo (Wc);
          R : Geom.Fixed_Check;
+         Ok : Boolean;
+         Turned : Natural := 0;   --  此刻的图转回几个 90° 才配上的
+         --  此刻的图先顺时针转 Turns 个 90°(Turn_90)再配;配到的像素一步步换算回没转的画面:转一步前高 h 的图里 (u, v) ← 转后的 (u', v') = (v', h − 1 − u')
+         function Matched (Turns : Natural; Got : out Boolean) return Geom.Scene_Pt_Vectors.Vector is
+            Img : Buf := F.Cams (Wc).RGB;
+            W : Natural := F.Cams (Wc).W;
+            H : Natural := F.Cams (Wc).H;
+            M : Instrument.Match_Vectors.Vector;
+            Res : Geom.Scene_Pt_Vectors.Vector;
+         begin
+            for T in 1 .. Turns loop
+               Img := Turn_90 (Img, W, H);
+               declare
+                  W0 : constant Natural := W;
+               begin
+                  W := H; H := W0;
+               end;
+            end loop;
+            M := Instrument.Match (To_String (C.Inst_Host), C.Inst_Port, C.Fixed_Ref, C.Fixed_Ref_W, C.Fixed_Ref_H, Img, W, H, Q, Err);
+            Got := Natural (M.Length) = Natural (Q.Length);
+            if not Got then
+               return Res;
+            end if;
+            for I in 0 .. Natural (M.Length) - 1 loop
+               declare
+                  P : Geom.Scene_Pt := C.Board (I);
+                  In_Pic : constant Boolean := M (I).U >= 0.0 and then M (I).V >= 0.0 and then M (I).U < Long_Float (W) and then M (I).V < Long_Float (H);
+                  U, V : Long_Float;
+               begin
+                  Unturn (M (I).U, M (I).V, Turns, F.Cams (Wc).W, F.Cams (Wc).H, U, V);
+                  P.U := (if In_Pic then U else -1.0); P.V := (if In_Pic then V else -1.0);
+                  Res.Append (P);
+               end;
+            end loop;
+            return Res;
+         end Matched;
       begin
          for S of C.Board loop
             Q.Append (Instrument.Match_Pt'(U => S.U, V => S.V, Cert => 0.0));
          end loop;
-         M := Instrument.Match (To_String (C.Inst_Host), C.Inst_Port, C.Fixed_Ref, C.Fixed_Ref_W, C.Fixed_Ref_H, F.Cams (Wc).RGB, F.Cams (Wc).W, F.Cams (Wc).H, Q, Err);
-         if Natural (M.Length) /= Natural (Q.Length) then
+         Now := Matched (0, Ok);
+         if not Ok then
             Geo_Say ("核对不动的眼:仪器没配成(" & To_String (Err) & ")⇒ 这一轮不核");
             return;
          end if;
-         for I in 0 .. Natural (M.Length) - 1 loop
-            declare
-               P : Geom.Scene_Pt := C.Board (I);
-               In_Pic : constant Boolean := M (I).U >= 0.0 and then M (I).V >= 0.0 and then M (I).U < Long_Float (F.Cams (Wc).W) and then M (I).V < Long_Float (F.Cams (Wc).H);
-            begin
-               P.U := (if In_Pic then M (I).U else -1.0); P.V := (if In_Pic then M (I).V else -1.0);
-               Now.Append (P);
-            end;
-         end loop;
          Geom.Check_Fixed (G, C.Board, Now, C.Fixed_Best, R, Turn_Sd => C.Fixed_Turn_Sd);
+         --  看不全的那一轮(只在变的那一轮):画面可能被转了 —— RoMa 转 90° 配上六成、转 180° 一个都配不上(实测)⇒ 把此刻的图转 90°/180°/270° 各配一次,
+         --  哪个转法能按同样三条被采纳成新位姿,就是它被转成了那样;都不行 ⇒ 还是挡住了
+         if R.Covered and then not C.Fixed_Covered then
+            for T in 1 .. 3 loop
+               declare
+                  Gt : Geom.Cam_Geo := C.Geo (Wc);
+                  Bt : Natural := C.Fixed_Best;
+                  Rt : Geom.Fixed_Check;
+                  Okt : Boolean;
+                  Nt : constant Geom.Scene_Pt_Vectors.Vector := Matched (T, Okt);
+               begin
+                  if Okt then
+                     Geom.Check_Fixed (Gt, C.Board, Nt, Bt, Rt, Turn_Sd => C.Fixed_Turn_Sd);
+                     if Rt.Moved then
+                        G := Gt; R := Rt; C.Fixed_Best := Bt; Turned := T;
+                        exit;
+                     end if;
+                  end if;
+               end;
+            end loop;
+         end if;
          if R.Moved then
             C.Geo.Replace_Element (Wc, G);
             --  参考图和板上的点在参考图里的像素都不换(一直是标好那一刻的):换成此刻的,一挡住参考图就跟着坏,错一轮接一轮地叠(X5B 2026-09-25)。
@@ -6774,8 +6839,9 @@ package body Act is
             Geom.Save (To_String (C.Geo_Path), C.Geo);
             Board_Save (C);
             Geo_Say ("核对不动的眼:它被挪过 —— 转了 " & Codec.Fmt (R.Turn_Deg, 1) & Deg_Say & "、挪了 " & Mm (R.Move_M) & ",板上的点在画面里挪了 " & Codec.Fmt (R.Shift_Px, 1)
-                     & " px(" & Codec.Fmt (R.Shift_Sd, 1) & " 个配点噪声)⇒ 按板重新标好(" & Codec.Img (R.Consistent) & "/" & Codec.Img (R.Asked) & " 个点对得上,残差 "
-                     & Codec.Fmt (R.Rms, 2) & " px),接着干");
+                     & " px(" & Codec.Fmt (R.Shift_Sd, 1) & " 个配点噪声)"
+                     & (if Turned > 0 then ",此刻的图顺时针转 " & Codec.Img (90 * Turned) & Deg_Say & " 才配得上" else "")
+                     & " ⇒ 按板重新标好(" & Codec.Img (R.Consistent) & "/" & Codec.Img (R.Asked) & " 个点对得上,残差 " & Codec.Fmt (R.Rms, 2) & " px),接着干");
          elsif R.Covered then
             if not C.Fixed_Covered then
                Geo_Say ("核对不动的眼:板上 " & Codec.Img (R.Asked) & " 个点这会儿只有 " & Codec.Img (R.Consistent_Now) & " 个还对得上(放好以来最多 " & Codec.Img (C.Fixed_Best)

@@ -384,6 +384,8 @@ package Act is
    procedure Note_Support (C : in out Context; P, N : Geom.V3; How : String);
    --  RGB 图顺时针转 90°(W×H → 宽 H、高 W):原图的 (u, v) 落到新图的 (H − 1 − v, u)。量仪器转着看时配得多细用;导出只为自检
    function Turn_90 (Img : Buf; W, H : Natural) return Buf;
+   --  原图(宽 W、高 H)顺时针转了 Turns 个 90° 之后那张图里的 (U, V) 换算回原图的像素。核对时画面可能被转了,转回去配完再换算回来;导出只为自检
+   procedure Unturn (U, V : Long_Float; Turns, W, H : Natural; U0, V0 : out Long_Float);
    function Board_Free_Spot (C : Context; Lp : Geom.V3_Vectors.Vector; R : Long_Float; Delta_Out : out Geom.V3) return Boolean;
 
    procedure Init_Tracks (C : in out Context);

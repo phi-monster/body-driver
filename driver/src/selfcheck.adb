@@ -1615,6 +1615,37 @@ begin
             end loop;
          end loop;
          Check (Ok_All, "图顺时针转 90°:原图 (u, v) 落在新图 (H − 1 − v, u)" & (if Ok_All then ",15 个像素全对" else "(错)"));
+         --  转 1、2、3 次之后的图里每个像素换算回原图(Act.Unturn)= 它本来的位置:按像素值认(每个像素的第一个字节各不相同)
+         declare
+            Img_T : Buf := Im;
+            Wt : Natural := Wd;
+            Htt : Natural := Ht;
+            Back_Ok : Boolean := True;
+         begin
+            for T in 1 .. 3 loop
+               Img_T := Act.Turn_90 (Img_T, Wt, Htt);
+               declare
+                  W0 : constant Natural := Wt;
+               begin
+                  Wt := Htt; Htt := W0;
+               end;
+               for Y in 0 .. Htt - 1 loop
+                  for X in 0 .. Wt - 1 loop
+                     declare
+                        U0, V0 : Long_Float;
+                     begin
+                        Act.Unturn (Long_Float (X), Long_Float (Y), T, Wd, Ht, U0, V0);
+                        if U0 < 0.0 or else V0 < 0.0 or else Natural (U0) >= Wd or else Natural (V0) >= Ht
+                          or else Img_T ((Y * Wt + X) * 3) /= Im ((Natural (V0) * Wd + Natural (U0)) * 3)
+                        then
+                           Back_Ok := False;
+                        end if;
+                     end;
+                  end loop;
+               end loop;
+            end loop;
+            Check (Back_Ok, "转了 1/2/3 个 90° 的图里的像素换算回原图:" & (if Back_Ok then "每个都回到本来的位置" else "有回错的(错)"));
+         end;
       end;
    end;
    --  🔴 碰桌面量指尖(2026-09-26,Geom.Tips_On_Plane):手上那只眼朝下,第 1 瓣的尖碰在面上 ⇒ 它的视线 ∩ 面 = 它的指尖(离眼 0.120 m,一分不差);
