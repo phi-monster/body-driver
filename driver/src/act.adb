@@ -11270,6 +11270,18 @@ package body Act is
                   Geo_Move (L, C, F, A, Mv, Mok);
                end if;
             end;
+            --  挪到了没有:按此刻的位姿重算压的那一瓣落在面上哪儿,离挑好的那块超过手指宽上限 ⇒ 没挪到(够不着那么远),不在没核过的地方压
+            declare
+               P2 : constant Plug.Arm_Pose := F.EE (A);
+               Hok : Boolean;
+               Q2 : constant Geom.V3 := Geom.Hit_Plane (Geom.Cam_Pos (Gk, P2), Geom.Ray (Gk, P2, Tu (K), Tv (K)), C.Board_Pt, C.Board_N, Hok);
+               Off_By : constant Long_Float := Geom.Norm ([Q2 (0) - Spot (0), Q2 (1) - Spot (1), Q2 (2) - Spot (2)]);
+            begin
+               if not Hok or else Off_By > R then
+                  Geo_Say ("  没挪到那块空的面(落点差 " & Mm (Off_By) & ",手指宽上限 " & Mm (R) & ")⇒ 这一下不压");
+                  return;
+               end if;
+            end;
             declare
                Start : constant Plug.Arm_Pose := F.EE (A);
                Ln : constant Long_Float := 4.0 * Geo_Base (C, A);   --  一压(同 Geo_Go 里压的那一步)
