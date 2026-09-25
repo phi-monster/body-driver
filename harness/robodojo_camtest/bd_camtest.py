@@ -6,6 +6,8 @@
 #   {"distort": {"k1": -0.15, "k2": 0.03, "f": {"cam_head": 288.1, "cam_left_wrist": 397.0, "cam_right_wrist": 397.0}}}
 #                                                   ⇒ 从这一帧起每台相机的彩色图都按径向畸变重采样(归一化平面:畸变后 = 理想 × (1 + k1 r² + k2 r⁴),
 #                                                     主点 = 画幅中心,f = 这台相机的真焦距,测试的人给):仿真是理想针孔,真机都有畸变 ⇒ 验驱动能不能自己解出来
+#   {"delay": 3}                                    ⇒ 每台相机的彩色图晚 3 帧到(位姿读数照旧是这一帧的):真机相机比关节读数慢几十到上百毫秒
+#   {"blur": 1.5, "noise": 6, "gain": 0.7}          ⇒ 每台相机的彩色图:高斯模糊 σ 1.5 px、加高斯噪声 σ 6 灰度、亮度乘 0.7(便宜摄像头、跑焦、光线变)
 #   删掉文件 ⇒ 挡的那条撤掉(转过的不回去)
 # 转之前、转之后各存一张这台相机的彩色图(/root/camtest_<tag>_before.png / _after.png),核对画面真转了。
 # 为什么转渲染用的那台相机、写 Fabric:渲染读的是 Fabric 里的变换;只改 USD 里它上一层 xform 的位姿,画面不变(G2G 2026-09-25 实测)
@@ -14,6 +16,8 @@ import numpy as np
 
 _rolled = set()
 _maps = {}   # (cam, w, h, k1, k2, f) → (取样的 u, v 整数下标):畸变图的每个像素从理想图哪儿取
+_hist = {}   # (env_idx, cam) → 最近几帧的彩色图(延迟用)
+_rng = np.random.default_rng(7)
 _pending_after = {}   # tag → 还要存"转之后"那张的剩余帧数(隔几帧再存,等渲染跟上)
 
 
@@ -80,6 +84,40 @@ def _apply_distort(obs, env_idx_list, cfg):
             v["color"] = out
 
 
+def _blur(img, sigma):
+    r = int(max(1, round(3 * sigma)))
+    x = np.arange(-r, r + 1, dtype=np.float64)
+    k = np.exp(-0.5 * (x / sigma) ** 2); k /= k.sum()
+    f = img.astype(np.float64)
+    pad = np.pad(f, ((r, r), (0, 0), (0, 0)), mode="edge")
+    f = sum(k[i] * pad[i:i + f.shape[0]] for i in range(2 * r + 1))
+    pad = np.pad(f, ((0, 0), (r, r), (0, 0)), mode="edge")
+    f = sum(k[i] * pad[:, i:i + img.shape[1]] for i in range(2 * r + 1))
+    return f
+
+
+def _degrade(obs, env_idx_list, cfg):
+    blur = float(cfg.get("blur", 0.0)); noise = float(cfg.get("noise", 0.0)); gain = float(cfg.get("gain", 1.0)); delay = int(cfg.get("delay", 0))
+    for env_idx in env_idx_list:
+        for cam, v in obs[env_idx]["vision"].items():
+            if v is None or "color" not in v:
+                continue
+            img = np.asarray(v["color"])
+            if delay > 0:
+                h = _hist.setdefault((env_idx, cam), [])
+                h.append(img.copy())
+                if len(h) > delay + 1:
+                    h.pop(0)
+                img = h[0]   # delay 帧之前那张(还没攒够就是最早那张)
+            if blur > 0 or noise > 0 or gain != 1.0:
+                f = _blur(img, blur) if blur > 0 else img.astype(np.float64)
+                f = f * gain
+                if noise > 0:
+                    f = f + _rng.normal(0.0, noise, f.shape)
+                img = np.clip(np.rint(f), 0, 255).astype(np.uint8)
+            v["color"] = img
+
+
 def apply(om, obs, env_idx_list):
     for tag in list(_pending_after):
         _pending_after[tag] -= 1
@@ -122,6 +160,8 @@ def apply(om, obs, env_idx_list):
                 _pending_after[cam + "|" + tag] = 5   # 5 帧之后存"转之后"那张(次数)
     if isinstance(cfg.get("distort"), dict):
         _apply_distort(obs, env_idx_list, cfg["distort"])
+    if any(k in cfg for k in ("delay", "blur", "noise", "gain")):
+        _degrade(obs, env_idx_list, cfg)
     side = cfg.get("cover")
     if side in ("left", "right"):
         for env_idx in env_idx_list:
