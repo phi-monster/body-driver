@@ -998,6 +998,39 @@ begin
                end loop;
                Geom.Build_Board (Gwr, 1 + E, O, Scene, Trk, St);
                Geom.Build_Board (Gwr, 1 + E, O_Bad, Scene_Bad, Trk_Bad, St_Bad);
+               --  没有不动的眼的身体(2026-09-26):同一批腕眼观测、不动的眼里的像素全抹成 −1 ⇒ 板照样只靠腕眼三角进点,离真点照样 1 cm 内,不动的眼的像素都是 −1
+               declare
+                  O_Nh : Geom.Board_Obs_Vectors.Vector;
+                  Sc_Nh : Geom.Scene_Pt_Vectors.Vector;
+                  Tr_Nh : Geom.Board_Track_Vectors.Vector;
+                  St_Nh : Geom.Board_Stats;
+                  Worst_Nh : Long_Float := 0.0;
+                  All_Neg : Boolean := True;
+               begin
+                  for Ob of O loop
+                     declare
+                        B : Geom.Board_Obs := Ob;
+                     begin
+                        B.Hu := -1.0; B.Hv := -1.0;
+                        O_Nh.Append (B);
+                     end;
+                  end loop;
+                  Geom.Build_Board (Gwr, 1 + E, O_Nh, Sc_Nh, Tr_Nh, St_Nh);
+                  for S of Sc_Nh loop
+                     All_Neg := All_Neg and then S.U < 0.0;
+                     declare
+                        Best : Long_Float := Long_Float'Last;
+                     begin
+                        for T of Truth loop
+                           Best := Long_Float'Min (Best, Geom.Norm ([S.Pw (0) - T (0), S.Pw (1) - T (1), S.Pw (2) - T (2)]));
+                        end loop;
+                        Worst_Nh := Long_Float'Max (Worst_Nh, Best);
+                     end;
+                  end loop;
+                  Check (St_Nh.Kept > 0 and then St_Nh.Kept >= St.Kept and then All_Neg and then Worst_Nh < 0.01,   --  1 cm(合成)
+                         "标定板·没有不动的眼的身体:第 " & Codec.Img (E + 1) & " 只腕眼照样进板 " & Codec.Img (St_Nh.Kept) & " 个点(有不动的眼时 " & Codec.Img (St.Kept)
+                         & ")⇒ 离最近真点最远 " & Codec.Fmt (Worst_Nh * Per_Mm, 1) & " mm");
+               end;
                Shh := Long_Float'Max (Shh, St.Sigma_H);
                Check (St.Sigma_W > 0.5 * 0.29 and then St.Sigma_W < 2.0 * 0.29 and then St.Sigma_H > 0.5 * 0.46 and then St.Sigma_H < 2.0 * 0.46,   --  一半到两倍(纯数学)× 合成的 σ
                       "标定板·第 " & Codec.Img (E + 1) & " 只腕眼量出来的配点噪声:腕眼 " & Codec.Fmt (St.Sigma_W, 2) & " px(真 0.29)、不动的眼 " & Codec.Fmt (St.Sigma_H, 2)

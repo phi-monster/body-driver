@@ -5975,10 +5975,15 @@ package body Act is
       --  不动的眼 = 不长在任何一条臂上的那台主相机;没有就不记
       procedure Board_Keep is
          Wc : constant Natural := C.Map.World_Cam;
+         Fixed_Eye : constant Boolean := Wc /= Cam and then Wc < Natural (F.Cams.Length) and then Cam_Arm (C, Wc) < 0 and then F.Cams (Wc).W > 0;
       begin
-         if Wc /= Cam and then Wc < Natural (F.Cams.Length) and then Cam_Arm (C, Wc) < 0 and then F.Cams (Wc).W > 0 and then Cw > 0 then
+         if Cw > 0 and then Fixed_Eye then
             C.Board_Stops.Append (Board_Stop'(Cam => Cam, Arm => Arm, Seg => L.Ep_Seq0, Pose => F.EE (Arm), W => Cw, H => Ch, RGB => F.Cams (Cam).RGB,
                                               Hw => F.Cams (Wc).W, Hh => F.Cams (Wc).H, Head => F.Cams (Wc).RGB));
+         elsif Cw > 0 then
+            --  没有不动的眼的身体:这一停照样记(板只靠手上的眼三角,2026-09-26)
+            C.Board_Stops.Append (Board_Stop'(Cam => Cam, Arm => Arm, Seg => L.Ep_Seq0, Pose => F.EE (Arm), W => Cw, H => Ch, RGB => F.Cams (Cam).RGB,
+                                              Hw => 0, Hh => 0, Head => Bytes.U8_Vectors.Empty_Vector));
             --  落盘(BL_DUMP):这一停两张彩色图 + 位姿,离线 boardexam stops 原样重跑配点和一起解(录像到 2000 帧之后每 20 帧才存一帧,凑不齐同一刻的那两张)
             if Dump /= "" then
                declare
@@ -6436,10 +6441,12 @@ package body Act is
                            Failed := Failed + 1;
                            Geo_Say (Who & ":仪器没把第 " & Codec.Img (K + 1) & " 停配上(" & To_String (Err) & ")");
                         else
-                           Hd := Instrument.Match (Host, C.Inst_Port, S.RGB, S.W, S.H, S.Head, S.Hw, S.Hh, Px, Err);
-                           Asked := Asked + 1;
-                           Head_Ok := Natural (Hd.Length) = Natural (Px.Length);
-                           if not Head_Ok then
+                           if S.Hw > 0 then
+                              Hd := Instrument.Match (Host, C.Inst_Port, S.RGB, S.W, S.H, S.Head, S.Hw, S.Hh, Px, Err);
+                              Asked := Asked + 1;
+                           end if;
+                           Head_Ok := S.Hw > 0 and then Natural (Hd.Length) = Natural (Px.Length);   --  没有不动的眼的身体:不配(像素记 −1)
+                           if S.Hw > 0 and then not Head_Ok then
                               Failed := Failed + 1;
                               Geo_Say (Who & ":仪器没把第 " & Codec.Img (K + 1) & " 停配到不动的眼(" & To_String (Err) & ")");
                            end if;
@@ -6956,7 +6963,11 @@ package body Act is
       Wc : constant Natural := C.Map.World_Cam;
    begin
       Geo_Board (C);   --  标定板(和它躺的那张面)不靠不动的眼,先做
-      if Wc >= Natural (C.Geo.Length) or else Wc >= Natural (F.Cams.Length) then
+      if Wc >= Natural (C.Geo.Length) or else Wc >= Natural (F.Cams.Length) or else Cam_Arm (C, Wc) >= 0 then
+         --  没有不动的眼(主相机也长在某条臂上):板只靠手上的眼三角 ⇒ 东西躺的面照样按板的点拟合(2026-09-26)
+         if not C.Board_Stops.Is_Empty and then not C.Board.Is_Empty then
+            Fit_Board_Plane (C);
+         end if;
          return;
       end if;
       if C.Geo (Wc).Valid and then C.Geo (Wc).Fixed then

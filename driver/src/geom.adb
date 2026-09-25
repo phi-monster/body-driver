@@ -1935,7 +1935,9 @@ package body Geom is
                                     Var_D := Var_D + Dm (Ii) / Dn * C3 (Ii, Kk) * Dm (Kk) / Dn;
                                  end loop;
                               end loop;
-                              if Var_D >= 0.0 and then Sqrt (Var_D) < Rm then
+                              --  远近定得住 = 远近的不确定度的 3 倍(倍数无量纲,同踢离群)还小于远近本身。以前是 1 倍:有不动的眼时各停交叉核对把漏进来的踢掉,
+                              --  没有不动的眼的身体就靠这一道 —— 跟着眼走的夹爪上的点几停视线几乎平行,1 倍的门让它们三角到二三十米外还进了板(焊点实测)
+                              if Var_D >= 0.0 and then 3.0 * Sqrt (Var_D) < Rm then
                                  Good (T) := True; Cv (T) := C3; Nv (T) := K;
                                  St.Tri_Ok := St.Tri_Ok + 1;
                               end if;
@@ -1978,6 +1980,26 @@ package body Geom is
                end if;
             end loop;
             if N_Ss = 0 then
+               --  一个点都没有不动的眼里的像素 = 这具身体没有不动的眼(2026-09-26,PLAN §2b):板只靠这只手上的眼几停三角,点照样进板
+               --  (东西躺的面照样拟合得出来,碰桌面量指尖照样做得了);不动的眼里的像素记成 −1(没有)
+               for T in 0 .. Nt - 1 loop
+                  if Good (T) then
+                     Scene.Append (Scene_Pt'(Pw => X (T), Cov => Cv (T), U => -1.0, V => -1.0, Sh => 0.0, Views => Nv (T)));
+                     declare
+                        Tr : Board_Track := (Cam => Cam, Hu => -1.0, Hv => -1.0, Sw => St.Sigma_W, Sh => 0.0, others => <>);
+                        J : Integer := First (T);
+                     begin
+                        while J >= 0 loop
+                           if Keep (J) then
+                              Tr.Views.Append (Board_View'(Pose => O (J).Pose, U => O (J).U, V => O (J).V));
+                           end if;
+                           J := Next (J);
+                        end loop;
+                        Tracks.Append (Tr);
+                     end;
+                     St.Kept := St.Kept + 1;
+                  end if;
+               end loop;
                return;
             end if;
             declare
@@ -2114,6 +2136,9 @@ package body Geom is
    begin
       Ok := False;
       Rep := (Tracks => Nt, others => <>);
+      for K in 0 .. Nt - 1 loop
+         Use_H (K) := Tracks (K).Hu >= 0.0 and then Tracks (K).Hv >= 0.0;   --  不动的眼里没配到的点(−1)不进它的残差
+      end loop;
       if Nt < 4 or else not Head.Valid or else not Head.Fixed then   --  单点法的下限(次数)
          Why := To_Unbounded_String ("板上的点不到 4 条,或不动的眼还没按板解出来");
          return;
