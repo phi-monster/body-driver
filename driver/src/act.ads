@@ -207,6 +207,10 @@ package Act is
       Isolated : Boolean := False;        --  量到的那一块是单独的吗(没顶到让出来的那一圈)
       Mask : Bools;                       --  这一帧它的像素(整幅;合手前在它身上挑夹得住的那一处要用)
       Count : Natural := 0;               --  上一次认出它时它有多少像素(窗挪到预测处时按远近比例缩放):这一帧量到的块小到不足它的四分之一就不是它
+      --  它身上离形心最近的那个像素(< 0 = 没有):窗挪到预测处时跟着平移、缩放,给分割仪器当"就是这一点"。
+      --  只给框不给点,框一放大 SAM 就抠了框里别的东西(SHOT2 2026-09-26:窗大了 2 倍,抠出来的块亮 110、剪刀本来 198);
+      --  不用形心本身:剪刀这种中间空的东西,形心落在桌面上
+      Pu_On, Pv_On : Long_Float := -1.0;
    end record;
    package Boxed_Vectors is new Ada.Containers.Vectors (Natural, Boxed_Thing);
 

@@ -786,10 +786,37 @@ package body Act is
       end if;
    end Blob_Levels;
 
+   --  掩膜里离形心最近的那个像素(它身上的一点;剪刀这种中间空的东西形心本身不在它身上)。没有 ⇒ -1
+   procedure On_Pixel (M : Bools; W, H : Natural; R : Picture.Region; U, V : out Long_Float) is
+      Cx : constant Long_Float := R.Cu * Long_Float (W);
+      Cy : constant Long_Float := R.Cv * Long_Float (H);
+      Best : Long_Float := Long_Float'Last;
+   begin
+      U := -1.0; V := -1.0;
+      if Natural (M.Length) /= W * H or else R.Count = 0 then
+         return;
+      end if;
+      for Y in R.Y0 .. Natural'Min (R.Y1, H - 1) loop
+         for X in R.X0 .. Natural'Min (R.X1, W - 1) loop
+            if M (Y * W + X) then
+               declare
+                  D2 : constant Long_Float := (Long_Float (X) - Cx) ** 2 + (Long_Float (Y) - Cy) ** 2;
+               begin
+                  if D2 < Best then
+                     Best := D2; U := Long_Float (X); V := Long_Float (Y);
+                  end if;
+               end;
+            end if;
+         end loop;
+      end loop;
+   end On_Pixel;
+
    --  脑框出来的那件东西在这一帧里的像素(2026-09-26 owner 批准装 SAM):配了仪器 ⇒ SAM 按框出整片像素(驱动自己按明暗切,一把剪刀常常只切出一截、
    --  或连着别的东西;SHOT1 腕眼里剪刀被画面下边切着,两只眼的"中心"差 1.7 cm);没配仪器 ⇒ 身体自己在框里按明暗量(Picture.Measure_In_Box)。
    --  Iso = 这一片没顶到画面边(顶到 = 被画面切了一截,形心和长轴不可信)
-   procedure Seg_In_Box (C : Context; F : Plug.Frame; Cam : Natural; X0, Y0, X1, Y1 : Natural; Got, Iso : out Boolean; R : out Picture.Region; M : out Bools) is
+   --  Pu_On/Pv_On ≥ 0:它身上的一点(给仪器当"就是这一点",和框一起给)
+   procedure Seg_In_Box (C : Context; F : Plug.Frame; Cam : Natural; X0, Y0, X1, Y1 : Natural; Got, Iso : out Boolean; R : out Picture.Region; M : out Bools;
+                         Pu_On, Pv_On : Long_Float := -1.0) is
       Cw : constant Natural := F.Cams (Cam).W;
       Ch : constant Natural := F.Cams (Cam).H;
    begin
@@ -802,9 +829,12 @@ package body Act is
          Score : Long_Float;
          Ok : Boolean;
          Err : Unbounded_String;
-         No_Pts : Instrument.Seg_Pt_Vectors.Vector;
+         On_Pts : Instrument.Seg_Pt_Vectors.Vector;
       begin
-         Instrument.Segment (To_String (C.Inst_Host), C.Inst_Port, F.Cams (Cam).RGB, Cw, Ch, X0, Y0, X1, Y1, No_Pts, M, Area, Score, Ok, Err);
+         if Pu_On >= 0.0 and then Pv_On >= 0.0 and then Pu_On < Long_Float (Cw) and then Pv_On < Long_Float (Ch) then
+            On_Pts.Append (Instrument.Seg_Pt'(U => Pu_On, V => Pv_On, On => True));
+         end if;
+         Instrument.Segment (To_String (C.Inst_Host), C.Inst_Port, F.Cams (Cam).RGB, Cw, Ch, X0, Y0, X1, Y1, On_Pts, M, Area, Score, Ok, Err);
          if not Ok or else Area = 0 then
             Got := False; Iso := False; R := (others => <>);
             if not Ok then
@@ -828,7 +858,7 @@ package body Act is
                Found, Iso : Boolean;
                R : Picture.Region;
             begin
-               Seg_In_Box (C, F, Cam, B.X0, B.Y0, B.X1, B.Y1, Found, Iso, R, B.Mask);
+               Seg_In_Box (C, F, Cam, B.X0, B.Y0, B.X1, B.Y1, Found, Iso, R, B.Mask, B.Pu_On, B.Pv_On);
                --  我一动,长在我手上的眼里它会平移一截(GB5:横挪 25.6 mm,它从 u=288 跳到 260)。
                --  量到的那一块顶到了窗边 = 它有一部分在窗外 ⇒ 把窗挪到【量到的这一块】身上再量,直到整块落进窗里或不再变。
                --  还是同一个量法,只是跟着它走;最多跟 4 回(次数)。
@@ -839,7 +869,7 @@ package body Act is
                      R2 : Picture.Region;
                      M2 : Bools;
                   begin
-                     Seg_In_Box (C, F, Cam, R.X0, R.Y0, R.X1, R.Y1, F2, I2, R2, M2);
+                     Seg_In_Box (C, F, Cam, R.X0, R.Y0, R.X1, R.Y1, F2, I2, R2, M2, B.Pu_On, B.Pv_On);
                      exit when not F2 or else (R2.X0 = R.X0 and then R2.Y0 = R.Y0 and then R2.X1 = R.X1 and then R2.Y1 = R.Y1);
                      R := R2; Iso := I2; B.Mask := M2;
                   end;
@@ -872,6 +902,7 @@ package body Act is
                if Found then
                   B.X0 := R.X0; B.Y0 := R.Y0; B.X1 := R.X1; B.Y1 := R.Y1;
                   B.Cu := R.Cu; B.Cv := R.Cv; B.Isolated := Iso; B.Count := R.Count;
+                  On_Pixel (B.Mask, Cw, Ch, R, B.Pu_On, B.Pv_On);
                   --  它身上的碎片:形心落在它框里的那些块,由这一整块顶替
                   for Ri in reverse 0 .. Natural (Regs.Length) - 1 loop
                      if Picture.Inside (R, Regs (Ri).Cu, Regs (Ri).Cv, Cw, Ch, 0.0) then
@@ -5442,6 +5473,10 @@ package body Act is
          if Front and then Pu >= 0.0 and then Pv >= 0.0 and then Pu < Long_Float (Cw) and then Pv < Long_Float (Ch)
            and then Hw > 0 and then Hh > 0
          then
+            if B.Pu_On >= 0.0 then   --  它身上那一点跟着框平移(框心从旧的挪到预测处)
+               B.Pu_On := Pu + (B.Pu_On - 0.5 * Long_Float (B.X0 + B.X1));
+               B.Pv_On := Pv + (B.Pv_On - 0.5 * Long_Float (B.Y0 + B.Y1));
+            end if;
             B.X0 := Px (Pu - Long_Float (Hw), Cw); B.X1 := Px (Pu + Long_Float (Hw), Cw);
             B.Y0 := Px (Pv - Long_Float (Hh), Ch); B.Y1 := Px (Pv + Long_Float (Hh), Ch);
             B.Blind := False;   --  这只眼看的地方变了,以前"这儿没有它"不再算数
@@ -8590,6 +8625,10 @@ package body Act is
                            function Px (V2 : Long_Float; Span : Natural) return Natural is
                              (Natural (Long_Float'Max (0.0, Long_Float'Min (Long_Float (Span - 1), V2))));
                         begin
+                           if B.Pu_On >= 0.0 then   --  它身上那一点跟着框平移、按远近缩放
+                              B.Pu_On := Pu + Grow * (B.Pu_On - 0.5 * Long_Float (B.X0 + B.X1));
+                              B.Pv_On := Pv + Grow * (B.Pv_On - 0.5 * Long_Float (B.Y0 + B.Y1));
+                           end if;
                            B.X0 := Px (Pu - Hw, Cw); B.X1 := Px (Pu + Hw, Cw);
                            B.Y0 := Px (Pv - Hh, Ch); B.Y1 := Px (Pv + Hh, Ch);
                            B.Count := Natural (Long_Float (B.Count) * Grow * Grow);   --  它该有的像素数跟着远近变(面积 = 线尺寸的平方,纯数学)
@@ -9211,6 +9250,7 @@ package body Act is
                         Bt.X0 := R.X0; Bt.Y0 := R.Y0; Bt.X1 := R.X1; Bt.Y1 := R.Y1;
                         Bt.Cu := R.Cu; Bt.Cv := R.Cv; Bt.Seen := True; Bt.Isolated := Iso;
                         Bt.Mask := M0; Bt.Count := R.Count;
+                        On_Pixel (M0, Kw, Kh, R, Bt.Pu_On, Bt.Pv_On);
                         Blob_Levels (F.Cams (Cam).Gray, Kw, Kh, M0, R, Bt.Gray, Bt.Bg);   --  记下它多亮、周围多亮:以后每帧认它靠这个
                         for Bi in 0 .. Natural (C.Boxed.Length) - 1 loop
                            if C.Boxed (Bi).Cam = Cam and then To_String (C.Boxed (Bi).Name) = W then
