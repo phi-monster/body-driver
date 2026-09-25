@@ -43,6 +43,7 @@ package Geom is
       Pos_Sd : Long_Float := 0.0;      --  相机位置的不确定度(米;不动的眼)
       Dropped : Natural := 0;          --  量朝向时被判离群踢掉的观测笔数(记账)
       Tip_Valid : Boolean := False;
+      Tip_Touch : Boolean := False;    --  指尖是碰桌面量的(2026-09-26 起的量法;旧文件里按头顶眼交的不算)
       Tip : V3 := [others => 0.0];     --  指尖中点在相机系(米)
       Gap : Long_Float := 0.0;         --  张开时两指尖间距(米)
       Stride : Long_Float := 0.0;      --  长着这只眼的那条臂一条命令能走多远还走得到(米;开机按阶梯探出来的最大一档,0 = 没量)

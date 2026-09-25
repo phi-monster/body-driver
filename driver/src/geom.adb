@@ -2746,7 +2746,7 @@ package body Geom is
                   Append (B, (if I + J > 0 then "," else "") & Codec.Fmt (G.R_Ce (I, J), 7));
                end loop;
             end loop;
-            Append (B, "],""tip_valid"":" & (if G.Tip_Valid then "true" else "false") & ",""tip"":[" & Codec.Fmt (G.Tip (0), 5) & "," & Codec.Fmt (G.Tip (1), 5) & "," &
+            Append (B, "],""tip_valid"":" & (if G.Tip_Valid then "true" else "false") & ",""tip_touch"":" & (if G.Tip_Touch then "true" else "false") & ",""tip"":[" & Codec.Fmt (G.Tip (0), 5) & "," & Codec.Fmt (G.Tip (1), 5) & "," &
                       Codec.Fmt (G.Tip (2), 5) & "],""gap"":" & Codec.Fmt (G.Gap, 5) & ",""stride"":" & Codec.Fmt (G.Stride, 5) &
                       ",""f_meas"":" & Codec.Fmt (G.F_Meas, 3) & ",""f_prior"":" & Codec.Fmt (G.F_Prior, 3) & ",""f_prior_sd"":" & Codec.Fmt (G.F_Prior_Sd, 3) &
                       ",""off"":[" & Codec.Fmt (G.Off (0), 5) & "," & Codec.Fmt (G.Off (1), 5) & "," & Codec.Fmt (G.Off (2), 5) & "]" &
@@ -2820,6 +2820,7 @@ package body Geom is
                      G.Valid := False;
                   end if;
                   G.Tip_Valid := Json.Bool (D, Json.Get (D, Nd, "tip_valid"));
+                  G.Tip_Touch := Json.Bool (D, Json.Get (D, Nd, "tip_touch"));   --  旧文件没有 ⇒ False(按头顶眼交的,不算)
                   if Tn >= 0 and then Json.Count (D, Tn) = 3 then
                      for A in 0 .. 2 loop
                         G.Tip (A) := Json.Num (D, Json.Child (D, Tn, A));

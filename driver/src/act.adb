@@ -11321,7 +11321,7 @@ package body Act is
                         Tip (I) := Tip (I) + Sk (K) * D (K) (I) / Long_Float (Nl);
                      end loop;
                   end loop;
-                  G.Tip := Tip; G.Tip_Valid := True;
+                  G.Tip := Tip; G.Tip_Valid := True; G.Tip_Touch := True;
                   if Nl = 2 then
                      G.Gap := Geom.Norm ([Sk (0) * D (0) (0) - Sk (1) * D (1) (0), Sk (0) * D (0) (1) - Sk (1) * D (1) (1), Sk (0) * D (0) (2) - Sk (1) * D (1) (2)]);
                   end if;
@@ -11400,6 +11400,11 @@ package body Act is
             end if;
             if not Have then
                Geo_Say ("第" & Codec.Img (A + 1) & " 只手:眼的朝向没量 ⇒ 这只手先不去摸它下面的面");
+            elsif C.Board_Plane and then C.Geo (Natural (Hc)).Tip_Valid and then C.Geo (Natural (Hc)).Tip_Touch then
+               --  缺什么才量什么:指尖是碰桌面量过的(几何文件里存着)、东西躺的面是板的(随板装回)⇒ 这回不碰
+               --  (X5C4 2026-09-26:装回身体干活,开机每瓣碰一次用掉 900 多拍,官方一集只有 200 步)
+               Geo_Say ("第" & Codec.Img (A + 1) & " 只手:指尖是碰桌面量过的(离眼 " & Mm (Geom.Norm (C.Geo (Natural (Hc)).Tip)) & "、张口 " & Mm (C.Geo (Natural (Hc)).Gap)
+                        & "),桌面是板的 ⇒ 这回不碰");
             elsif C.Board_Plane then
                Touch_Tips (A, Natural (Hc));
             elsif C.Geo (Natural (Hc)).Tip_Valid then
