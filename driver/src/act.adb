@@ -10662,6 +10662,8 @@ package body Act is
                   Ev : Unbounded_String;
                   St : Natural;
                   Mok : Boolean;
+                  Prev_Valid, Prev_Fresh : Boolean;   --  压之前已有的面(标定板拟合的、或前一只手碰出来的)
+                  Prev_Pt, Prev_N : Geom.V3;
                begin
                   Geo_Say ("第" & Codec.Img (A + 1) & " 只手:指尖朝下往下压,压到被顶住 ⇒ 量出它下面的面");
                   Geo_Turn (L, C, F, A, Down, 1.0, Ev, St, Along => G.Tip);
@@ -10670,12 +10672,17 @@ package body Act is
                      --  (S3 2026-09-23 实测:adjust/finalize raised PROGRAM_ERROR)
                      Tp : constant Geom.V3 := Tip_World (C, A, F.EE (A));
                   begin
+                     Prev_Valid := C.Touch_Valid; Prev_Fresh := C.Touch_Fresh; Prev_Pt := C.Touch_Pt; Prev_N := C.Touch_N;
                      Geo_Go (L, C, F, A, Tp, Geo_Base (C, A), 1.0, True, Down, Ev, St, Press_Cap => 8);
                   end;
                   Geo_Say ("⇒ " & To_String (Ev));
                   --  🔴 顶住我的是面还是我自己的关节:面只拦一个方向,沿着面滑一步该走得了;关节到头了连滑都滑不动
                   --  (S4 2026-09-23 实测:从原处直下 8 mm 就被顶住、方向歪 30°,是折着的胳膊到头了,不是桌面;当成面会把所有轮廓抬高 7 cm)
-                  if C.Touch_Valid and then C.Touch_Fresh and then Index (Ev, "contact") > 0 then
+                  --  只核"这一下顶住的点成了面"的那种;顶住点比已有的面高(记成了躺在面上的东西)就不核,更不许把已有的面(标定板拟合的)清掉
+                  --  (G2F 2026-09-25:第 1 只手在面上方 8.7 cm 够不着了,滑不动 ⇒ 把标定板的面一起清掉;第 2 只手在上方 11.6 cm 够不着,横着滑得动 ⇒ 被当成了面)
+                  if C.Touch_Valid and then C.Touch_Fresh and then Index (Ev, "contact") > 0
+                    and then not (Prev_Valid and then Geom."=" (C.Touch_Pt, Prev_Pt))
+                  then
                      declare
                         N : constant Geom.V3 := C.Touch_N;
                         Ax : constant Geom.V3 := (if abs (N (0)) < abs (N (1)) then [1.0, 0.0, 0.0] else [0.0, 1.0, 0.0]);
@@ -10694,8 +10701,9 @@ package body Act is
                            Back (0) := -Del (0); Back (1) := -Del (1); Back (2) := -Del (2);
                            Step_Arm (L, C, F, A, Back, Jaw, Del, Ok);
                            if Got + Got < Ln then
-                              C.Touch_Valid := False; C.Touch_Fresh := False;
-                              Geo_Say ("沿着那张「面」滑 " & Mm (Ln) & " 只走了 " & Mm (Got) & " ⇒ 顶住我的不是面,是我自己的胳膊到头了;不记面,东西躺的面等第一次真碰到再量");
+                              C.Touch_Valid := Prev_Valid; C.Touch_Fresh := Prev_Fresh; C.Touch_Pt := Prev_Pt; C.Touch_N := Prev_N;   --  回到先前那张(没有就还是没有)
+                              Geo_Say ("沿着那张「面」滑 " & Mm (Ln) & " 只走了 " & Mm (Got) & " ⇒ 顶住我的不是面,是我自己的胳膊到头了;不记它"
+                                       & (if Prev_Valid then ",东西躺的面还是先前那张" else ",东西躺的面等第一次真碰到再量"));
                            else
                               Geo_Say ("沿着面滑 " & Mm (Ln) & " 走了 " & Mm (Got) & " ⇒ 确实是一张面");
                            end if;
