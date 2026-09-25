@@ -26,6 +26,10 @@ package Geom is
    type Cam_Geo is record
       Valid : Boolean := False;        --  相机朝向量过了
       F, Cx, Cy : Long_Float := 0.0;   --  焦距(像素)、主点。焦距:身体给了就用;没给(官方 RoboDojo 观测就没有)就在量朝向时一起解出来
+      --  镜头径向畸变(2026-09-26):归一化平面上畸变后的点 = 理想的点 × (1 + K1 r² + K2 r⁴)。0 = 理想针孔(仿真就是);真机的镜头都有,
+      --  腕眼 + 不动的眼 + 板一起解时按板上铺满画面的几百个点解出来(Refine_Board)。投影 / 视线全走 Project / Ray / Cam_Dir,不许在别处按针孔自己算
+      K1, K2 : Long_Float := 0.0;
+      K1_Sd : Long_Float := 0.0;       --  K1 的不确定度(一起解时从 JᵀJ 算出;0 = 没解)
       F_Meas : Long_Float := 0.0;      --  量朝向时顺带解出来的焦距(和给的那份对账用;没给时它就是 F)
       --  仪器看一张图报的焦距 ± 不确定度(像素;0 = 没有)。没给内参时联合解里当一条残差 (F - 先验) / 不确定度:
       --  基线短、焦距和距离分不开时把焦距按在仪器的范围里;基线够长时观测压过它(V1B 2026-09-24:2.6 cm 星形基线把 397 解成 992 / 59)
@@ -62,6 +66,8 @@ package Geom is
    function Cam_R (G : Cam_Geo; P : Plug.Arm_Pose) return M3;         --  相机 → 世界 = R_e · R_ce
    function Cam_Pos (G : Cam_Geo; P : Plug.Arm_Pose) return V3;       --  相机中心在世界里 = 手的位置 + R_e · Off
    function Ray (G : Cam_Geo; P : Plug.Arm_Pose; U, V : Long_Float) return V3;   --  世界系里的单位视线
+   function Cam_Dir (G : Cam_Geo; U, V : Long_Float) return V3;                    --  相机系里的单位视线(去掉畸变;驱动的相机系 z 朝后 ⇒ 前方 -1)
+   procedure Cam_Pixel (G : Cam_Geo; Pc : V3; U, V : out Long_Float; In_Front : out Boolean);   --  相机系的点 → 像素(加上畸变)
    --  几条视线的最小二乘交点(相机原点 = 手的位置;只走平移时相机在手上的偏移对结果没影响)
    function Triangulate (G : Cam_Geo; O : Obs_Vectors.Vector) return V3;
    function To_Cam (G : Cam_Geo; P : Plug.Arm_Pose; Pw : V3) return V3;         --  世界点 → 相机系

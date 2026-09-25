@@ -1419,100 +1419,114 @@ begin
          --  但"腕眼标定"给的几何是歪的(焦距 −1.5%、偏移差 (4,−3,5) mm、朝向差 0.5°,合成;自报 ± 6 px / 1 cm)——板按歪的几何建,不动的眼按歪的板解,
          --  再一起解 ⇒ 腕眼焦距 0.3% 内、偏移 3 mm 内,不动的眼焦距 0.5% 内、位置 5 mm 内(一起解之前:头跟着腕眼一起错)
          declare
-            Geos : Geom.Geo_Vectors.Vector;
-            Trk2 : Geom.Board_Track_Vectors.Vector;
-            Sc2 : Geom.Scene_Pt_Vectors.Vector;
-            Seed5 : Long_Long_Integer := 29;
-            function Jit5 return Long_Float is   --  确定性伪随机 [−1, 1](测试数据自己的抖动)
-            begin
-               Seed5 := (Seed5 * 1103515245 + 12345) mod 2147483648;
-               return Long_Float (Integer ((Seed5 / 65536) mod 2001) - 1000) / 1000.0;
-            end Jit5;
-            Bad_Off : constant Geom.V3 := [0.004, -0.003, 0.005];   --  腕眼标定给的偏移差(米,合成)
-            Bad_F : constant Long_Float := 0.985;                    --  腕眼标定给的焦距比例(合成)
-            Bad_R : constant Geom.M3 := Geom.Rodrigues ([0.0087, 0.0, 0.0]);   --  0.5° 的朝向差(弧度,合成)
-            Gh : Geom.Cam_Geo;
-            Rh : Geom.Fixed_Report;
-            Okh, Okr : Boolean;
-            Rr : Geom.Refine_Report;
-            Gh0 : Geom.Cam_Geo;
-         begin
-            for K in 0 .. 2 loop
-               Geos.Append (Geom.No_Geo);
-            end loop;
-            for E in 0 .. 1 loop
-               declare
-                  H0 : constant Plug.Arm_Pose := [Starts (E) (0), Starts (E) (1), Starts (E) (2), 1.0, 0.0, 0.0, 0.0];
-                  C0 : constant Geom.V3 := Geom.Cam_Pos (Gwr, H0);
-                  Gbad : Geom.Cam_Geo := Gwr;
-                  O : Geom.Board_Obs_Vectors.Vector;
-                  St : Geom.Board_Stats;
-                  Q_Rot : constant array (1 .. 4) of Plug.Arm_Pose :=
-                    [[H0 (0), H0 (1), H0 (2), 0.99875, 0.0, 0.0, 0.04998], [H0 (0), H0 (1), H0 (2), 0.99875, 0.0, 0.0, -0.04998],
-                     [H0 (0), H0 (1), H0 (2), 0.99875, 0.04998, 0.0, 0.0], [H0 (0), H0 (1), H0 (2), 0.99875, -0.04998, 0.0, 0.0]];   --  ±0.1 rad(cos/sin 0.05,合成)
-                  Poses : Plug.Pose_Vectors.Vector;
+            procedure Joint (Kt1, Kt2 : Long_Float; Label : String) is
+               Geos : Geom.Geo_Vectors.Vector;
+               Trk2 : Geom.Board_Track_Vectors.Vector;
+               Sc2 : Geom.Scene_Pt_Vectors.Vector;
+               Seed5 : Long_Long_Integer := 29;
+               function Jit5 return Long_Float is   --  确定性伪随机 [−1, 1](测试数据自己的抖动)
                begin
-                  for S in 1 .. 9 loop
-                     Poses.Append (Plug.Arm_Pose'[H0 (0) + Step_M * Path2 (S) (0), H0 (1) + Step_M * Path2 (S) (1), H0 (2) + Step_M * Path2 (S) (2), 1.0, 0.0, 0.0, 0.0]);
-                  end loop;
-                  for Qr of Q_Rot loop
-                     Poses.Append (Qr);
-                  end loop;
-                  for Iv in 0 .. Nq_Col - 2 loop   --  不要夹爪那一行
-                     for Iu in 0 .. Nq_Row - 1 loop
-                        declare
-                           Q : constant Natural := Iv * Nq_Row + Iu;
-                           U0 : constant Long_Float := 0.5 * Cell + Cell * Long_Float (Iu);
-                           V0 : constant Long_Float := 0.5 * Cell + Cell * Long_Float (Iv);
-                           D : constant Geom.V3 := Geom.Ray (Gwr, H0, U0, V0);
-                           Tt : constant Long_Float := (C0 (2) - Table_Z) / (-D (2));
-                           Xw : constant Geom.V3 := [C0 (0) + Tt * D (0), C0 (1) + Tt * D (1), Table_Z + 0.03 * Long_Float ((Iu + Iv) mod 3)];   --  桌面上几层高低(米,合成)
-                        begin
-                           for K in 0 .. Natural (Poses.Length) - 1 loop
-                              declare
-                                 Ps : constant Plug.Arm_Pose := Poses (K);
-                                 U, V, Hu, Hv : Long_Float;
-                                 Fr, Fh : Boolean;
-                              begin
-                                 Geom.Project (Gwr, Ps, Xw, U, V, Fr);
-                                 Geom.Project_Fixed (Gt, Xw, Hu, Hv, Fh);
-                                 if Fr and then Fh and then U >= 0.0 and then U < 640.0 and then V >= 0.0 and then V < 480.0 and then Hu >= 0.0 and then Hu < 640.0 then
-                                    O.Append (Geom.Board_Obs'(Pt => Q, Pose => Ps, U => U + 0.5 * Jit5, V => V + 0.5 * Jit5, Hu => Hu + 0.8 * Jit5, Hv => Hv + 0.8 * Jit5));
-                                 end if;
-                              end;
-                           end loop;
-                        end;
-                     end loop;
-                  end loop;
-                  Gbad.F := Gwr.F * Bad_F; Gbad.F_Meas := Gbad.F; Gbad.F_Sd := 6.0;   --  自报 ± 6 px(合成)
-                  Gbad.Off := [Gwr.Off (0) + Bad_Off (0), Gwr.Off (1) + Bad_Off (1), Gwr.Off (2) + Bad_Off (2)]; Gbad.Off_Sd := 0.01;   --  自报 ± 1 cm(合成)
-                  Gbad.R_Ce := Geom.Mul (Bad_R, Gwr.R_Ce);
-                  Geos.Replace_Element (1 + E, Gbad);
-                  Geom.Build_Board (Gbad, 1 + E, O, Sc2, Trk2, St);
-               end;
-            end loop;
-            Gh.F := 0.0; Gh.Cx := 320.0; Gh.Cy := 240.0;
-            Geom.Fit_Fixed_Board (Gh, Sc2, Rh, Okh);
-            Gh0 := Gh;
-            if Okh then
-               Geom.Refine_Board (Geos, Gh, Trk2, Rr, Okr);
-            else
-               Okr := False;
-            end if;
-            declare
-               function Off_Err (K : Natural) return Long_Float is
-                 (Geom.Norm ([Geos (K).Off (0) - Gwr.Off (0), Geos (K).Off (1) - Gwr.Off (1), Geos (K).Off (2) - Gwr.Off (2)]));
-               Dp : constant Long_Float := Geom.Norm ([Gh.Pos (0) - Gt.Pos (0), Gh.Pos (1) - Gt.Pos (1), Gh.Pos (2) - Gt.Pos (2)]);
-               Dp0 : constant Long_Float := Geom.Norm ([Gh0.Pos (0) - Gt.Pos (0), Gh0.Pos (1) - Gt.Pos (1), Gh0.Pos (2) - Gt.Pos (2)]);
+                  Seed5 := (Seed5 * 1103515245 + 12345) mod 2147483648;
+                  return Long_Float (Integer ((Seed5 / 65536) mod 2001) - 1000) / 1000.0;
+               end Jit5;
+               Bad_Off : constant Geom.V3 := [0.004, -0.003, 0.005];   --  腕眼标定给的偏移差(米,合成)
+               Bad_F : constant Long_Float := 0.985;                    --  腕眼标定给的焦距比例(合成)
+               Bad_R : constant Geom.M3 := Geom.Rodrigues ([0.0087, 0.0, 0.0]);   --  0.5° 的朝向差(弧度,合成)
+               Gh : Geom.Cam_Geo;
+               Rh : Geom.Fixed_Report;
+               Okh, Okr : Boolean;
+               Rr : Geom.Refine_Report;
+               Gh0 : Geom.Cam_Geo;
+               Gwr_K : Geom.Cam_Geo := Gwr;   --  真的腕眼(带这一遍的畸变)
+               Gt_K : Geom.Cam_Geo := Gt;     --  真的不动的眼(同上)
             begin
-               Check (Okh and then Okr and then abs (Geos (1).F - 397.0) < 0.003 * 397.0 and then abs (Geos (2).F - 397.0) < 0.003 * 397.0   --  0.3%(合成)
-                      and then Off_Err (1) < 0.003 and then Off_Err (2) < 0.003 and then abs (Gh.F - 288.0) < 0.005 * 288.0 and then Dp < 0.005,   --  3 mm / 0.5% / 5 mm(合成)
-                      "腕眼 + 不动的眼一起解:" & (if Okr then "腕眼焦距 " & Codec.Fmt (Gwr.F * Bad_F, 1) & " → " & Codec.Fmt (Geos (1).F, 1) & " / " & Codec.Fmt (Geos (2).F, 1)
-                      & "(真 397)· 偏移差 → " & Codec.Fmt (Off_Err (1) * Per_Mm, 1) & " / " & Codec.Fmt (Off_Err (2) * Per_Mm, 1) & " mm · 不动的眼焦距 " & Codec.Fmt (Gh0.F, 1)
-                      & " → " & Codec.Fmt (Gh.F, 1) & "(真 288)· 位置差 " & Codec.Fmt (Dp0 * Per_Mm, 1) & " → " & Codec.Fmt (Dp * Per_Mm, 1) & " mm · " & Codec.Img (Rr.Tracks)
-                      & " 条点,腕眼 " & Codec.Fmt (Rr.Wrist_Rms, 2) & " px、头 " & Codec.Fmt (Rr.Head_Rms, 2) & " px"
-                      else "没收下:" & To_String (Geom.Why)));
-            end;
+               Gwr_K.K1 := Kt1; Gwr_K.K2 := Kt2; Gt_K.K1 := Kt1; Gt_K.K2 := Kt2;
+               for K in 0 .. 2 loop
+                  Geos.Append (Geom.No_Geo);
+               end loop;
+               for E in 0 .. 1 loop
+                  declare
+                     H0 : constant Plug.Arm_Pose := [Starts (E) (0), Starts (E) (1), Starts (E) (2), 1.0, 0.0, 0.0, 0.0];
+                     C0 : constant Geom.V3 := Geom.Cam_Pos (Gwr_K, H0);
+                     Gbad : Geom.Cam_Geo := Gwr;
+                     O : Geom.Board_Obs_Vectors.Vector;
+                     St : Geom.Board_Stats;
+                     Q_Rot : constant array (1 .. 4) of Plug.Arm_Pose :=
+                       [[H0 (0), H0 (1), H0 (2), 0.99875, 0.0, 0.0, 0.04998], [H0 (0), H0 (1), H0 (2), 0.99875, 0.0, 0.0, -0.04998],
+                        [H0 (0), H0 (1), H0 (2), 0.99875, 0.04998, 0.0, 0.0], [H0 (0), H0 (1), H0 (2), 0.99875, -0.04998, 0.0, 0.0]];   --  ±0.1 rad(cos/sin 0.05,合成)
+                     Poses : Plug.Pose_Vectors.Vector;
+                  begin
+                     for S in 1 .. 9 loop
+                        Poses.Append (Plug.Arm_Pose'[H0 (0) + Step_M * Path2 (S) (0), H0 (1) + Step_M * Path2 (S) (1), H0 (2) + Step_M * Path2 (S) (2), 1.0, 0.0, 0.0, 0.0]);
+                     end loop;
+                     for Qr of Q_Rot loop
+                        Poses.Append (Qr);
+                     end loop;
+                     for Iv in 0 .. Nq_Col - 2 loop   --  不要夹爪那一行
+                        for Iu in 0 .. Nq_Row - 1 loop
+                           declare
+                              Q : constant Natural := Iv * Nq_Row + Iu;
+                              U0 : constant Long_Float := 0.5 * Cell + Cell * Long_Float (Iu);
+                              V0 : constant Long_Float := 0.5 * Cell + Cell * Long_Float (Iv);
+                              D : constant Geom.V3 := Geom.Ray (Gwr_K, H0, U0, V0);
+                              Tt : constant Long_Float := (C0 (2) - Table_Z) / (-D (2));
+                              Xw : constant Geom.V3 := [C0 (0) + Tt * D (0), C0 (1) + Tt * D (1), Table_Z + 0.03 * Long_Float ((Iu + Iv) mod 3)];   --  桌面上几层高低(米,合成)
+                           begin
+                              for K in 0 .. Natural (Poses.Length) - 1 loop
+                                 declare
+                                    Ps : constant Plug.Arm_Pose := Poses (K);
+                                    U, V, Hu, Hv : Long_Float;
+                                    Fr, Fh : Boolean;
+                                 begin
+                                    Geom.Project (Gwr_K, Ps, Xw, U, V, Fr);
+                                    Geom.Project_Fixed (Gt_K, Xw, Hu, Hv, Fh);
+                                    if Fr and then Fh and then U >= 0.0 and then U < 640.0 and then V >= 0.0 and then V < 480.0 and then Hu >= 0.0 and then Hu < 640.0 then
+                                       O.Append (Geom.Board_Obs'(Pt => Q, Pose => Ps, U => U + 0.5 * Jit5, V => V + 0.5 * Jit5, Hu => Hu + 0.8 * Jit5, Hv => Hv + 0.8 * Jit5));
+                                    end if;
+                                 end;
+                              end loop;
+                           end;
+                        end loop;
+                     end loop;
+                     Gbad.F := Gwr.F * Bad_F; Gbad.F_Meas := Gbad.F; Gbad.F_Sd := 6.0;   --  自报 ± 6 px(合成)
+                     Gbad.Off := [Gwr.Off (0) + Bad_Off (0), Gwr.Off (1) + Bad_Off (1), Gwr.Off (2) + Bad_Off (2)]; Gbad.Off_Sd := 0.01;   --  自报 ± 1 cm(合成)
+                     Gbad.R_Ce := Geom.Mul (Bad_R, Gwr.R_Ce);
+                     Geos.Replace_Element (1 + E, Gbad);
+                     Geom.Build_Board (Gbad, 1 + E, O, Sc2, Trk2, St);
+                  end;
+               end loop;
+               Gh.F := 0.0; Gh.Cx := 320.0; Gh.Cy := 240.0;
+               Geom.Fit_Fixed_Board (Gh, Sc2, Rh, Okh);
+               Gh0 := Gh;
+               if Okh then
+                  Geom.Refine_Board (Geos, Gh, Trk2, Rr, Okr);
+               else
+                  Okr := False;
+               end if;
+               declare
+                  function Off_Err (K : Natural) return Long_Float is
+                    (Geom.Norm ([Geos (K).Off (0) - Gwr.Off (0), Geos (K).Off (1) - Gwr.Off (1), Geos (K).Off (2) - Gwr.Off (2)]));
+                  Dp : constant Long_Float := Geom.Norm ([Gh.Pos (0) - Gt.Pos (0), Gh.Pos (1) - Gt.Pos (1), Gh.Pos (2) - Gt.Pos (2)]);
+                  Dp0 : constant Long_Float := Geom.Norm ([Gh0.Pos (0) - Gt.Pos (0), Gh0.Pos (1) - Gt.Pos (1), Gh0.Pos (2) - Gt.Pos (2)]);
+               begin
+                  Check (Okh and then Okr and then abs (Geos (1).F - 397.0) < 0.003 * 397.0 and then abs (Geos (2).F - 397.0) < 0.003 * 397.0   --  0.3%(合成)
+                         and then Off_Err (1) < 0.003 and then Off_Err (2) < 0.003 and then abs (Gh.F - 288.0) < 0.005 * 288.0 and then Dp < 0.005   --  3 mm / 0.5% / 5 mm(合成)
+                         and then abs (Geos (1).K1 - Kt1) < 3.0 * Geos (1).K1_Sd + 0.005 and then abs (Geos (2).K1 - Kt1) < 3.0 * Geos (2).K1_Sd + 0.005
+                         and then abs (Gh.K1 - Kt1) < 3.0 * Gh.K1_Sd + 0.005,   --  畸变 K1 差在它自报的 3 倍不确定度 + 0.005 内(合成)
+                         "腕眼 + 不动的眼一起解" & Label & ":" & (if Okr then "畸变 K1 " & Codec.Fmt (Geos (1).K1, 3) & " ± " & Codec.Fmt (Geos (1).K1_Sd, 3) & " / "
+                         & Codec.Fmt (Geos (2).K1, 3) & " ± " & Codec.Fmt (Geos (2).K1_Sd, 3) & " / 头 " & Codec.Fmt (Gh.K1, 3) & " ± " & Codec.Fmt (Gh.K1_Sd, 3)
+                         & "(真 " & Codec.Fmt (Kt1, 2) & ")· 腕眼焦距 " & Codec.Fmt (Gwr.F * Bad_F, 1) & " → " & Codec.Fmt (Geos (1).F, 1) & " / " & Codec.Fmt (Geos (2).F, 1)
+                         & "(真 397)· 偏移差 → " & Codec.Fmt (Off_Err (1) * Per_Mm, 1) & " / " & Codec.Fmt (Off_Err (2) * Per_Mm, 1) & " mm · 不动的眼焦距 " & Codec.Fmt (Gh0.F, 1)
+                         & " → " & Codec.Fmt (Gh.F, 1) & "(真 288)· 位置差 " & Codec.Fmt (Dp0 * Per_Mm, 1) & " → " & Codec.Fmt (Dp * Per_Mm, 1) & " mm · " & Codec.Img (Rr.Tracks)
+                         & " 条点,腕眼 " & Codec.Fmt (Rr.Wrist_Rms, 2) & " px、头 " & Codec.Fmt (Rr.Head_Rms, 2) & " px"
+                         else "没收下:" & To_String (Geom.Why)));
+               end;
+
+            end Joint;
+         begin
+            Joint (0.0, 0.0, "");
+            --  镜头有畸变(真机都有;K1 −0.15、K2 0.03,合成)、腕眼标定和板都按理想针孔起步 ⇒ 一起解把畸变也解出来,焦距、偏移、位置照样到线内
+            Joint (-0.15, 0.03, "·镜头有畸变(K1 −0.15、K2 0.03)");
          end;
       end;
    end;
@@ -1647,6 +1661,40 @@ begin
             Check (Back_Ok, "转了 1/2/3 个 90° 的图里的像素换算回原图:" & (if Back_Ok then "每个都回到本来的位置" else "有回错的(错)"));
          end;
       end;
+   end;
+   --  🔴 镜头畸变(2026-09-26,Geom.Cam_Dir / Cam_Pixel):K1 −0.25、K2 0.05(强广角,合成)⇒ 像素 → 视线 → 投回像素,整幅 640×480 每隔 40 px 一点,差 < 1e-6 px;
+   --  畸变是真的起作用了:角上那一点按理想针孔的视线和去畸变的视线差得出来(> 1°)
+   declare
+      use Ada.Numerics.Long_Elementary_Functions;
+      Gd : Geom.Cam_Geo;
+      Worst : Long_Float := 0.0;
+      Corner_Deg : Long_Float := 0.0;
+   begin
+      Gd.F := 397.0; Gd.Cx := 320.0; Gd.Cy := 240.0; Gd.K1 := -0.25; Gd.K2 := 0.05;
+      for Yi in 0 .. 12 loop
+         for Xi in 0 .. 16 loop
+            declare
+               U0 : constant Long_Float := 40.0 * Long_Float (Xi);
+               V0 : constant Long_Float := 40.0 * Long_Float (Yi);
+               D : constant Geom.V3 := Geom.Cam_Dir (Gd, U0, V0);
+               U, V : Long_Float;
+               Fr : Boolean;
+            begin
+               Geom.Cam_Pixel (Gd, D, U, V, Fr);
+               Worst := Long_Float'Max (Worst, (if Fr then abs (U - U0) + abs (V - V0) else 1.0e9));
+            end;
+         end loop;
+      end loop;
+      declare
+         Dd : constant Geom.V3 := Geom.Cam_Dir (Gd, 0.0, 0.0);
+         Dp0 : constant Geom.V3 := [(0.0 - 320.0) / 397.0, -(0.0 - 240.0) / 397.0, -1.0];
+         Np : constant Long_Float := Geom.Norm (Dp0);
+         Cs : constant Long_Float := (Dd (0) * Dp0 (0) + Dd (1) * Dp0 (1) + Dd (2) * Dp0 (2)) / Np;
+      begin
+         Corner_Deg := Arccos (Long_Float'Min (1.0, Cs)) * 57.29578;   --  弧度 → 度(换算,无量纲)
+      end;
+      Check (Worst < 1.0e-6 and then Corner_Deg > 1.0,
+             "镜头畸变:像素 → 视线 → 像素,最大差 " & Codec.Fmt (Worst, 9) & " px · 角上那一点去畸变的视线比理想针孔的偏 " & Codec.Fmt (Corner_Deg, 2) & "°");
    end;
    --  🔴 碰桌面量指尖(2026-09-26,Geom.Tips_On_Plane):手上那只眼朝下,第 1 瓣的尖碰在面上 ⇒ 它的视线 ∩ 面 = 它的指尖(离眼 0.120 m,一分不差);
    --  第 2 瓣的尖比面高 2 mm(没碰着)⇒ 交出来只会更远;不确定度 = 面的离散 ÷ |视线·法向|。面在眼的上方 ⇒ 交不到(Ok = False)

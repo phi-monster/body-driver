@@ -108,8 +108,63 @@ package body Geom is
       return [P (0) + Ow (0), P (1) + Ow (1), P (2) + Ow (2)];
    end Cam_Pos;
 
+   --  径向畸变(归一化平面,r² = x² + y²):畸变后 = 理想 × (1 + K1 r² + K2 r⁴)
+   procedure Distort (G : Cam_Geo; X, Y : Long_Float; Xd, Yd : out Long_Float) is
+      R2 : constant Long_Float := X * X + Y * Y;
+      D : constant Long_Float := 1.0 + G.K1 * R2 + G.K2 * R2 * R2;
+   begin
+      Xd := X * D; Yd := Y * D;
+   end Distort;
+
+   --  反过来:从畸变后的点迭代回理想的点(不动点迭代 x = x畸 ÷ (1 + K1 r² + K2 r⁴);畸变不到三成时几步就收敛,50 次封顶)。
+   --  迭代到来回差不到 1e-12(归一化坐标,纯数值精度)就停
+   procedure Undistort (G : Cam_Geo; Xd, Yd : Long_Float; X, Y : out Long_Float) is
+   begin
+      X := Xd; Y := Yd;
+      if G.K1 = 0.0 and then G.K2 = 0.0 then
+         return;
+      end if;
+      for It in 1 .. 50 loop
+         declare
+            R2 : constant Long_Float := X * X + Y * Y;
+            D : constant Long_Float := 1.0 + G.K1 * R2 + G.K2 * R2 * R2;
+            Xn, Yn : Long_Float;
+         begin
+            exit when D <= 0.0;   --  这么远的地方畸变已经折回来了:停在上一步
+            Xn := Xd / D; Yn := Yd / D;
+            exit when abs (Xn - X) + abs (Yn - Y) < 1.0e-12;
+            X := Xn; Y := Yn;
+         end;
+      end loop;
+   end Undistort;
+
+   function Cam_Dir (G : Cam_Geo; U, V : Long_Float) return V3 is
+      X, Y : Long_Float;
+   begin
+      Undistort (G, (U - G.Cx) / G.F, -(V - G.Cy) / G.F, X, Y);
+      declare
+         N : constant Long_Float := Sqrt (X * X + Y * Y + 1.0);
+      begin
+         return [X / N, Y / N, -1.0 / N];
+      end;
+   end Cam_Dir;
+
+   procedure Cam_Pixel (G : Cam_Geo; Pc : V3; U, V : out Long_Float; In_Front : out Boolean) is
+      Z : constant Long_Float := -Pc (2);
+      Xd, Yd : Long_Float;
+   begin
+      In_Front := Z > 1.0e-6;
+      if not In_Front then
+         U := 0.0; V := 0.0;
+         return;
+      end if;
+      Distort (G, Pc (0) / Z, Pc (1) / Z, Xd, Yd);
+      U := G.Cx + G.F * Xd;
+      V := G.Cy - G.F * Yd;
+   end Cam_Pixel;
+
    function Ray (G : Cam_Geo; P : Plug.Arm_Pose; U, V : Long_Float) return V3 is
-      Dc : constant V3 := [(U - G.Cx) / G.F, -(V - G.Cy) / G.F, -1.0];
+      Dc : constant V3 := Cam_Dir (G, U, V);
       Dw : V3 := Ap (Cam_R (G, P), Dc);
       N : constant Long_Float := Norm (Dw);
    begin
@@ -199,16 +254,8 @@ package body Geom is
    end To_Cam;
 
    procedure Project (G : Cam_Geo; P : Plug.Arm_Pose; Pw : V3; U, V : out Long_Float; In_Front : out Boolean) is
-      Pc : constant V3 := To_Cam (G, P, Pw);
-      Z : constant Long_Float := -Pc (2);
    begin
-      In_Front := Z > 1.0e-6;
-      if not In_Front then
-         U := 0.0; V := 0.0;
-         return;
-      end if;
-      U := G.Cx + G.F * Pc (0) / Z;
-      V := G.Cy - G.F * Pc (1) / Z;
+      Cam_Pixel (G, To_Cam (G, P, Pw), U, V, In_Front);
    end Project;
 
    --  ── 量朝向 ──
@@ -866,7 +913,7 @@ package body Geom is
 
    --  ── 不动的眼 ──
    function Ray_Fixed (G : Cam_Geo; U, V : Long_Float) return V3 is
-      Dc : constant V3 := [(U - G.Cx) / G.F, -(V - G.Cy) / G.F, -1.0];
+      Dc : constant V3 := Cam_Dir (G, U, V);
       Dw : V3 := Ap (G.R_Ce, Dc);
       N : constant Long_Float := Norm (Dw);
    begin
@@ -877,16 +924,8 @@ package body Geom is
    end Ray_Fixed;
 
    procedure Project_Fixed (G : Cam_Geo; Pw : V3; U, V : out Long_Float; In_Front : out Boolean) is
-      Pc : constant V3 := Ap (Tr (G.R_Ce), [Pw (0) - G.Pos (0), Pw (1) - G.Pos (1), Pw (2) - G.Pos (2)]);
-      Z : constant Long_Float := -Pc (2);
    begin
-      In_Front := Z > 1.0e-6;
-      if not In_Front then
-         U := 0.0; V := 0.0;
-         return;
-      end if;
-      U := G.Cx + G.F * Pc (0) / Z;
-      V := G.Cy - G.F * Pc (1) / Z;
+      Cam_Pixel (G, Ap (Tr (G.R_Ce), [Pw (0) - G.Pos (0), Pw (1) - G.Pos (1), Pw (2) - G.Pos (2)]), U, V, In_Front);
    end Project_Fixed;
 
    procedure Fit_Tip_Scale (Fixed, Hand : Cam_Geo; Dir_C : V3; O : Obs_Vectors.Vector; S, Rms_Px : out Long_Float; Ok : out Boolean) is
@@ -2057,7 +2096,7 @@ package body Geom is
 
    procedure Refine_Board (Geos : in out Geo_Vectors.Vector; Head : in out Cam_Geo; Tracks : Board_Track_Vectors.Vector; Rep : out Refine_Report; Ok : out Boolean) is
       Nt : constant Natural := Natural (Tracks.Length);
-      --  出现过的腕眼(相机号),各占参数里的 7 个:朝向改正 3(手系里左乘的小转动)、偏移改正 3(米)、焦距比例改正 1
+      --  出现过的腕眼(相机号),各占参数里的 9 个:朝向改正 3(手系里左乘的小转动)、偏移改正 3(米)、焦距比例改正 1、镜头畸变改正 2(K1、K2)
       Cams : Nat_Vectors.Vector;
       function Slot_Of (Cam : Natural) return Natural is
       begin
@@ -2087,8 +2126,9 @@ package body Geom is
       end loop;
       declare
          Nc : constant Natural := Natural (Cams.Length);
-         Hb : constant Natural := 7 * Nc;   --  不动的眼的参数从这儿起
-         Np : constant Natural := Hb + 7;
+         Per : constant := 9;   --  每台眼的参数个数(格式)
+         Hb : constant Natural := Per * Nc;   --  不动的眼的参数从这儿起:朝向 3、位置 3、焦距 1、畸变 2
+         Np : constant Natural := Hb + Per;
          P : Param_Vec (0 .. Np - 1) := [others => 0.0];
          Steps : Param_Vec (0 .. Np - 1) := [others => 1.0e-4];   --  差分步(弧度 / 米 / 比例,极小量)
          Cur : Long_Float := 0.0;
@@ -2096,13 +2136,14 @@ package body Geom is
          function Fit_F (C : Natural) return Boolean is (Base (Cams (C)).F_Meas > 0.0);   --  这台腕眼的焦距是解出来的(没给)
          function Wrist_Of (P : Param_Vec; C : Natural) return Cam_Geo is
             G : Cam_Geo := Base (Cams (C));
-            I : constant Natural := 7 * C;
+            I : constant Natural := Per * C;
          begin
             G.R_Ce := Mul (Rodrigues ([P (I), P (I + 1), P (I + 2)]), Base (Cams (C)).R_Ce);
             G.Off := [Base (Cams (C)).Off (0) + P (I + 3), Base (Cams (C)).Off (1) + P (I + 4), Base (Cams (C)).Off (2) + P (I + 5)];
             if Fit_F (C) then
                G.F := Base (Cams (C)).F * (1.0 + P (I + 6));
             end if;
+            G.K1 := Base (Cams (C)).K1 + P (I + 7); G.K2 := Base (Cams (C)).K2 + P (I + 8);
             return G;
          end Wrist_Of;
          function Head_Of (P : Param_Vec) return Cam_Geo is
@@ -2113,6 +2154,7 @@ package body Geom is
             if Fit_Fh then
                G.F := P (Hb + 6);
             end if;
+            G.K1 := Head.K1 + P (Hb + 7); G.K2 := Head.K2 + P (Hb + 8);
             return G;
          end Head_Of;
          N_Prior : Natural := 0;   --  先验的残差条数(偏移三轴 + 焦距,按腕眼)
@@ -2182,7 +2224,7 @@ package body Geom is
             for C in 0 .. Nc - 1 loop
                declare
                   G0 : constant Cam_Geo := Base (Cams (C));
-                  Ix : constant Natural := 7 * C;
+                  Ix : constant Natural := Per * C;
                   Axis_Sd : constant Long_Float := G0.Off_Sd / Sqrt (3.0);
                begin
                   if G0.Off_Sd > 0.0 then
@@ -2353,7 +2395,7 @@ package body Geom is
                for C in 0 .. Nc - 1 loop
                   declare
                      Gw : constant Cam_Geo := Wrist_Of (P, C);
-                     I : constant Natural := 7 * C;
+                     I : constant Natural := Per * C;
                      Fw_Sd : constant Long_Float := (if Fit_F (C) then Sd (I + 6) * Base (Cams (C)).F else 0.0);
                      Off_Sd : constant Long_Float := Sqrt (Sd (I + 3) ** 2 + Sd (I + 4) ** 2 + Sd (I + 5) ** 2);
                   begin
@@ -2368,7 +2410,7 @@ package body Geom is
                for C in 0 .. Nc - 1 loop
                   declare
                      Gw : Cam_Geo := Wrist_Of (P, C);
-                     I : constant Natural := 7 * C;
+                     I : constant Natural := Per * C;
                   begin
                      Gw.F_Sd := (if Fit_F (C) then Sd (I + 6) * Base (Cams (C)).F else Gw.F_Sd);
                      if Fit_F (C) then
@@ -2376,6 +2418,7 @@ package body Geom is
                      end if;
                      Gw.Off_Sd := Sqrt (Sd (I + 3) ** 2 + Sd (I + 4) ** 2 + Sd (I + 5) ** 2);
                      Gw.Rot_Sd := Sqrt (Sd (I) ** 2 + Sd (I + 1) ** 2 + Sd (I + 2) ** 2);
+                     Gw.K1_Sd := Sd (I + 7);
                      Geos.Replace_Element (Cams (C), Gw);
                   end;
                end loop;
@@ -2383,6 +2426,7 @@ package body Geom is
                Head := Gh;
                Head.Pos_Sd := Pos_Sd; Head.F_Sd := Fh_Sd;
                Head.Rot_Sd := Sqrt (Sd (Hb) ** 2 + Sd (Hb + 1) ** 2 + Sd (Hb + 2) ** 2);
+               Head.K1_Sd := Sd (Hb + 7);
                if Fit_Fh then
                   Head.F_Meas := Gh.F;
                end if;
@@ -2565,7 +2609,7 @@ package body Geom is
                Rh : constant M3 := Quat_To_R (Ob.Pose);
                Ow : constant V3 := Ap (Rh, Ray_O);
                A : constant V3 := [Ob.Pose (0) + Ow (0), Ob.Pose (1) + Ow (1), Ob.Pose (2) + Ow (2)];   --  这只手的眼在世界里
-               E0 : constant V3 := Ap (Fixed.R_Ce, [(Ob.U - Fixed.Cx) / Fixed.F, -(Ob.V - Fixed.Cy) / Fixed.F, -1.0]);
+               E0 : constant V3 := Ap (Fixed.R_Ce, Cam_Dir (Fixed, Ob.U, Ob.V));
                En : constant Long_Float := Norm (E0);
                E : constant V3 := [E0 (0) / En, E0 (1) / En, E0 (2) / En];   --  不动的眼过这个尖的视线(单位)
                W0 : constant V3 := [A (0) - Fixed.Pos (0), A (1) - Fixed.Pos (1), A (2) - Fixed.Pos (2)];
@@ -2695,7 +2739,8 @@ package body Geom is
                Append (B, ",");
             end if;
             Append (B, "{""cam"":" & Codec.Img (K) & ",""valid"":" & (if G.Valid then "true" else "false") &
-                      ",""f"":" & Codec.Fmt (G.F, 4) & ",""cx"":" & Codec.Fmt (G.Cx, 3) & ",""cy"":" & Codec.Fmt (G.Cy, 3) & ",""rms"":" & Codec.Fmt (G.Rms, 3) & ",""r_ce"":[");
+                      ",""f"":" & Codec.Fmt (G.F, 4) & ",""cx"":" & Codec.Fmt (G.Cx, 3) & ",""cy"":" & Codec.Fmt (G.Cy, 3) & ",""k1"":" & Codec.Fmt (G.K1, 6)
+                      & ",""k2"":" & Codec.Fmt (G.K2, 6) & ",""rms"":" & Codec.Fmt (G.Rms, 3) & ",""r_ce"":[");
             for I in 0 .. 2 loop
                for J in 0 .. 2 loop
                   Append (B, (if I + J > 0 then "," else "") & Codec.Fmt (G.R_Ce (I, J), 7));
@@ -2763,6 +2808,7 @@ package body Geom is
                if K >= 0 and then K < N_Cams then
                   G.Valid := Json.Bool (D, Json.Get (D, Nd, "valid"));
                   G.F := Json.Num (D, Json.Get (D, Nd, "f")); G.Cx := Json.Num (D, Json.Get (D, Nd, "cx")); G.Cy := Json.Num (D, Json.Get (D, Nd, "cy"));
+                  G.K1 := Json.Num (D, Json.Get (D, Nd, "k1")); G.K2 := Json.Num (D, Json.Get (D, Nd, "k2"));   --  旧文件没有 ⇒ 0(理想针孔)
                   G.Rms := Json.Num (D, Json.Get (D, Nd, "rms"));
                   if Rn >= 0 and then Json.Count (D, Rn) = 9 then
                      for A in 0 .. 2 loop

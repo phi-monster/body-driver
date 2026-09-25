@@ -157,7 +157,7 @@ begin
                                        end;
                                        if Wok then
                                           declare
-                                             Dc : Geom.V3 := [(Tu - Gw.Cx) / Gw.F, -(Tv - Gw.Cy) / Gw.F, -1.0];
+                                             Dc : Geom.V3 := Geom.Cam_Dir (Gw, Tu, Tv);   --  相机系单位视线(去掉镜头畸变)
                                              Nn : constant Long_Float := Geom.Norm (Dc);
                                           begin
                                              for I in 0 .. 2 loop

@@ -5601,7 +5601,11 @@ package body Act is
                end;
             end loop;
             Dm := Arr (Arr'Length / 2);
-            Tips (Nt) := [(U - G.Cx) / G.F * Dm, -(V - G.Cy) / G.F * Dm, -Dm];
+            declare
+               Dd : constant Geom.V3 := Geom.Cam_Dir (G, U, V);   --  相机系单位视线(去掉镜头畸变),按深度 Dm 伸到那一点
+            begin
+               Tips (Nt) := [-Dd (0) / Dd (2) * Dm, -Dd (1) / Dd (2) * Dm, -Dm];
+            end;
             Nt := Nt + 1;
             Geo_Say ("指尖:像素 (" & Codec.Fmt (U, 1) & "," & Codec.Fmt (V, 1) & ") 离相机 " & Mm (Dm));
          end;
@@ -6541,13 +6545,14 @@ package body Act is
                   begin
                      Geo_Say ("  第" & Codec.Img (K) & " 台腕眼:焦距 " & Codec.Fmt (A.F, 1) & " → " & Codec.Fmt (B.F, 1) & " ± " & Codec.Fmt (B.F_Sd, 1) & " px · 离手腕原点 ("
                               & Mm (A.Off (0)) & "," & Mm (A.Off (1)) & "," & Mm (A.Off (2)) & ") → (" & Mm (B.Off (0)) & "," & Mm (B.Off (1)) & "," & Mm (B.Off (2)) & ") ± "
-                              & Mm (B.Off_Sd) & " · 朝向改了 " & Codec.Fmt (Geom.Norm (Geom.Rot_Vec (Geom.Mul (Geom.Tr (A.R_Ce), B.R_Ce))) * Deg, 2) & "°");
+                              & Mm (B.Off_Sd) & " · 朝向改了 " & Codec.Fmt (Geom.Norm (Geom.Rot_Vec (Geom.Mul (Geom.Tr (A.R_Ce), B.R_Ce))) * Deg, 2) & "° · 镜头畸变 K1 "
+                              & Codec.Fmt (B.K1, 3) & " ± " & Codec.Fmt (B.K1_Sd, 3) & "、K2 " & Codec.Fmt (B.K2, 3));
                   end;
                end if;
             end loop;
             Geo_Say ("  一起解:" & Codec.Img (Rr.Tracks) & " 条点 · 腕眼重投 " & Codec.Fmt (Rr.Wrist_Rms, 2) & " px · 不动的眼 " & Codec.Img (Rr.Head_Used) & " 个点 "
                      & Codec.Fmt (Rr.Head_Rms, 2) & " px · 它在 (" & Mm (G.Pos (0)) & "," & Mm (G.Pos (1)) & "," & Mm (G.Pos (2)) & ") ± " & Mm (G.Pos_Sd) & " · 焦距 "
-                     & Codec.Fmt (G.F, 1) & " ± " & Codec.Fmt (G.F_Sd, 1) & " px");
+                     & Codec.Fmt (G.F, 1) & " ± " & Codec.Fmt (G.F_Sd, 1) & " px · 镜头畸变 K1 " & Codec.Fmt (G.K1, 3) & " ± " & Codec.Fmt (G.K1_Sd, 3) & "、K2 " & Codec.Fmt (G.K2, 3));
             Geom.Board_Points (C.Geo, C.Board_Tracks, C.Board);   --  板上的点按新几何重新三角
             Rep.Scene_Used := Rr.Head_Used; Rep.Scene_Rms := Rr.Head_Rms;   --  报数按一起解之后的
             Geom.Save (To_String (C.Geo_Path), C.Geo);
@@ -6937,7 +6942,7 @@ package body Act is
                      begin
                         if Zone_Tip (Zone_Of (C, A, Natural (Hc)), F.Cams (Natural (Hc)).W, F.Cams (Natural (Hc)).H, U, V) then
                            declare
-                              Dc : Geom.V3 := [(U - Gh.Cx) / Gh.F, -(V - Gh.Cy) / Gh.F, -1.0];   --  相机系视线(驱动的相机系:z 朝后 ⇒ 前方 -1)
+                              Dc : Geom.V3 := Geom.Cam_Dir (Gh, U, V);   --  相机系单位视线(去掉镜头畸变)
                               Nn : constant Long_Float := Geom.Norm (Dc);
                            begin
                               for I in 0 .. 2 loop
@@ -7017,7 +7022,7 @@ package body Act is
                            Zone.Tip_Px (Z, Zone.Lobe_Of (Z, K), F.Cams (Natural (Hc)).W, F.Cams (Natural (Hc)).H, Tu, Tv, Tok);
                            if Tok then
                               declare
-                                 Dc : Geom.V3 := [(Tu - Gh.Cx) / Gh.F, -(Tv - Gh.Cy) / Gh.F, -1.0];   --  相机系视线(驱动的相机系:z 朝后 ⇒ 前方 -1)
+                                 Dc : Geom.V3 := Geom.Cam_Dir (Gh, Tu, Tv);   --  相机系单位视线(去掉镜头畸变)
                                  Nn : constant Long_Float := Geom.Norm (Dc);
                               begin
                                  for I in 0 .. 2 loop
@@ -11136,7 +11141,7 @@ package body Act is
                Zone.Tip_Px (Z, Lb, Cw, Ch, U, V, Ok);
                if Ok and then Z.Valid then
                   declare
-                     Dc : Geom.V3 := [(U - G0.Cx) / G0.F, -(V - G0.Cy) / G0.F, -1.0];   --  相机系视线(驱动的相机系:z 朝后 ⇒ 前方 -1)
+                     Dc : Geom.V3 := Geom.Cam_Dir (G0, U, V);   --  相机系单位视线(去掉镜头畸变)
                      Nn : constant Long_Float := Geom.Norm (Dc);
                   begin
                      for I in 0 .. 2 loop
