@@ -281,6 +281,8 @@ package Act is
       Fixed_Turn_Sd : Long_Float := 0.0;        --  仪器把参考图配到"它自己转了 90°"那张时的配点噪声(像素,均方根;核对时判新位姿用,0 = 没量)
       Fixed_Said : Boolean := False;            --  这一次开机第一次核对的结果说过了(以后只在挪了、挡了、又看全了时说)
       Fixed_Covered : Boolean := False;         --  上一次核对判成挡住了
+      Fixed_Turn_Next : Natural := 0;           --  挡住期间下一次"把画面转回去再配"在第几轮试(间隔每试一次翻倍:越挡越久试得越少)
+      Fixed_Turn_Gap : Natural := 1;
       Dump_Dir : Unbounded_String;
       Round_N : Natural := 0;
       Fast : Boolean := False;

@@ -6906,9 +6906,16 @@ package body Act is
             return;
          end if;
          Geom.Check_Fixed (G, C.Board, Now, C.Fixed_Best, R, Turn_Sd => C.Fixed_Turn_Sd);
-         --  看不全的那一轮(只在变的那一轮):画面可能被转了 —— RoMa 转 90° 配上六成、转 180° 一个都配不上(实测)⇒ 把此刻的图转 90°/180°/270° 各配一次,
-         --  哪个转法能按同样三条被采纳成新位姿,就是它被转成了那样;都不行 ⇒ 还是挡住了
-         if R.Covered and then not C.Fixed_Covered then
+         --  看不全的时候:画面可能被转了 —— RoMa 转 90° 配上六成、转 180° 一个都配不上(实测)⇒ 把此刻的图转 90°/180°/270° 各配一次,
+         --  哪个转法能按同样三条被采纳成新位姿,就是它被转成了那样;都不行 ⇒ 还是挡住了。刚看不全那一轮试,之后隔 1、2、4、8……轮再试
+         --  (次数翻倍:挡着的时候也可能被转,X5E 2026-09-26 挡着时转到 180° 就一直没发现;代价随挡的时长只按对数涨)
+         if R.Covered and then (not C.Fixed_Covered or else C.Round_N >= C.Fixed_Turn_Next) then
+            if not C.Fixed_Covered then
+               C.Fixed_Turn_Gap := 1;
+            else
+               C.Fixed_Turn_Gap := 2 * C.Fixed_Turn_Gap;
+            end if;
+            C.Fixed_Turn_Next := C.Round_N + C.Fixed_Turn_Gap;
             for T in 1 .. 3 loop
                declare
                   Gt : Geom.Cam_Geo := C.Geo (Wc);
@@ -6952,6 +6959,25 @@ package body Act is
          --  挡没挡只在变的那一轮说(X5C 每轮报一遍"挡住了")
          C.Fixed_Covered := R.Covered and then not R.Moved;
          C.Fixed_Said := True;
+         --  每一轮核对的数落盘(BL_DUMP/check.txt):轮、配到、原位姿对得上、新解对得上、放好以来最多、挪没挪、挡没挡、转回几个 90°、细门(像素)
+         if Length (C.Dump_Dir) > 0 then
+            declare
+               Fo : Ada.Text_IO.File_Type;
+               Path : constant String := To_String (C.Dump_Dir) & "/check.txt";
+            begin
+               begin
+                  Ada.Text_IO.Open (Fo, Ada.Text_IO.Append_File, Path);
+               exception
+                  when others => Ada.Text_IO.Create (Fo, Ada.Text_IO.Out_File, Path);
+               end;
+               Ada.Text_IO.Put_Line (Fo, Codec.Img (C.Round_N) & " " & Codec.Img (R.Matched) & " " & Codec.Img (R.Consistent_Now) & " " & Codec.Img (R.Consistent) & " "
+                                     & Codec.Img (C.Fixed_Best) & " " & (if R.Moved then "1" else "0") & " " & (if R.Covered then "1" else "0") & " " & Codec.Img (Turned)
+                                     & " " & Codec.Fmt (R.Gate, 3));
+               Ada.Text_IO.Close (Fo);
+            exception
+               when others => null;
+            end;
+         end if;
       end;
    end Check_Fixed_Eye;
 
