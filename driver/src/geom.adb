@@ -1141,7 +1141,7 @@ package body Geom is
       return S.Sh * S.Sh + 0.5 * (Quad (Ju) + Quad (Jv));
    end Scene_Var;
 
-   procedure Fit_Fixed_Board (G : in out Cam_Geo; Scene : Scene_Pt_Vectors.Vector; Rep : in out Fixed_Report; Ok : out Boolean) is
+   procedure Fit_Fixed_Board (G : in out Cam_Geo; Scene : Scene_Pt_Vectors.Vector; Rep : in out Fixed_Report; Ok : out Boolean; Start_Here : Boolean := False) is
       Fit_F : constant Boolean := G.F <= 0.0;
       Use_Prior : constant Boolean := Fit_F and then G.F_Prior > 0.0 and then G.F_Prior_Sd > 0.0;
       Ns : constant Natural := Natural (Scene.Length);
@@ -1157,20 +1157,27 @@ package body Geom is
          Why := To_Unbounded_String ("标定板不到 4 个点(" & Codec.Img (Ns) & ")");
          return;
       end if;
-      --  ① 起点:单点法(盲搜 + 精修),板上的点世界位置已知
-      declare
-         Marks : Mark_Vectors.Vector;
-         Fok : Boolean;
-      begin
-         for S of Scene loop
-            Marks.Append (Mark'(Pw => S.Pw, U => S.U, V => S.V));
-         end loop;
-         Fit_Fixed (Gi, Marks, Fok);
-         if not Fok then
-            Why := To_Unbounded_String ("标定板的点单独解不出(" & Codec.Img (Ns) & " 个)");
+      --  ① 起点:单点法(盲搜 + 精修),板上的点世界位置已知;Start_Here 就从 G 现在的位姿起步
+      if Start_Here then
+         if not (G.Valid and then G.Fixed) then
+            Why := To_Unbounded_String ("要从现在的位姿起步,可它还没有位姿");
             return;
          end if;
-      end;
+      else
+         declare
+            Marks : Mark_Vectors.Vector;
+            Fok : Boolean;
+         begin
+            for S of Scene loop
+               Marks.Append (Mark'(Pw => S.Pw, U => S.U, V => S.V));
+            end loop;
+            Fit_Fixed (Gi, Marks, Fok);
+            if not Fok then
+               Why := To_Unbounded_String ("标定板的点单独解不出(" & Codec.Img (Ns) & " 个)");
+               return;
+            end if;
+         end;
+      end if;
       --  ② 权:按起点处的相机算每个点在这只眼里的每轴像素方差(配点噪声² + 三角的协方差投进来)
       for I in 0 .. Ns - 1 loop
          declare
@@ -1270,6 +1277,31 @@ package body Geom is
             P (6) := Gi.F; Steps (6) := 1.0;   --  焦距的差分步(像素,极小量)
          end if;
          Nr := Ns + (if Use_Prior then 1 else 0);
+         if Start_Here then
+            --  起点就是真值附近:每个点加权残差(以它自己的预测噪声为单位)超过 3 的先不要(倍数无量纲),挡住多少都不影响这条门
+            declare
+               Gt : constant Cam_Geo := Cam_Of (P);
+               Dropped : Natural := 0;
+            begin
+               for S in 0 .. Ns - 1 loop
+                  declare
+                     U, V : Long_Float;
+                     Front : Boolean;
+                  begin
+                     Project_Fixed (Gt, Scene (S).Pw, U, V, Front);
+                     Skip (S) := not Front or else Ws (S) * Sqrt ((U - Scene (S).U) ** 2 + (V - Scene (S).V) ** 2) > 3.0;
+                     if Skip (S) then
+                        Dropped := Dropped + 1;
+                     end if;
+                  end;
+               end loop;
+               if Ns - Dropped < Min_Pts then
+                  Why := To_Unbounded_String ("从现在的位姿起步,对得上的点不到 4 个(" & Codec.Img (Ns - Dropped) & "/" & Codec.Img (Ns) & ")");
+                  return;
+               end if;
+               Nr := Ns - Dropped + (if Use_Prior then 1 else 0);
+            end;
+         end if;
          Resid (P, Cur, null);
          LM_Refine (P, Nr, Steps, 100, Resid'Access, Cur);   --  100 = 迭代次数上限(次数)
          --  离群的点踢掉再解,来回三遍(次数):加权残差比进解的那些的中位数大 3 倍(比例,无量纲)的不要,每遍都从全体重挑(先前踢错的能回来)。
@@ -1298,7 +1330,7 @@ package body Geom is
                         end if;
                      end;
                   end loop;
-                  Med := Median (Kept, Nk);
+                  Med := (if Start_Here then 1.0 else Median (Kept, Nk));   --  起步在真值附近:门 = 3 个预测噪声;从零:门 = 3 倍中位
                   exit when Med <= 0.0;
                   Dropped := 0;
                   for S in 0 .. Ns - 1 loop
@@ -2346,6 +2378,56 @@ package body Geom is
          end;
       end;
    end Refine_Board;
+
+   procedure Check_Fixed (G : in out Cam_Geo; Scene : Scene_Pt_Vectors.Vector; Now : Scene_Pt_Vectors.Vector; Rep : out Fixed_Check) is
+      Cur : Scene_Pt_Vectors.Vector;
+      Gn : Cam_Geo := G;
+      Fr : Fixed_Report;
+      Ok : Boolean;
+      Deg : constant Long_Float := 180.0 / Ada.Numerics.Pi;   --  弧度 → 度(换算,无量纲)
+   begin
+      Rep := (Asked => Natural (Scene.Length), others => <>);
+      for I in 0 .. Natural'Min (Natural (Scene.Length), Natural (Now.Length)) - 1 loop
+         if Now (I).U >= 0.0 and then Now (I).V >= 0.0 then
+            declare
+               P : Scene_Pt := Scene (I);
+            begin
+               P.U := Now (I).U; P.V := Now (I).V;
+               Cur.Append (P);
+            end;
+         end if;
+      end loop;
+      Rep.Matched := Natural (Cur.Length);
+      if Gn.F <= 0.0 then
+         return;   --  焦距都没有:没法核
+      end if;
+      --  两份:从原来的位姿起步 / 从零盲搜(焦距已知 ⇒ 只解位姿),对得上的点多的那份算(一样多取残差小的)
+      declare
+         Ga : Cam_Geo := G;
+         Fa : Fixed_Report;
+         Oka : Boolean;
+      begin
+         Fit_Fixed_Board (Ga, Cur, Fa, Oka, Start_Here => True);
+         Fit_Fixed_Board (Gn, Cur, Fr, Ok);
+         if Oka and then (not Ok or else Fa.Scene_Used > Fr.Scene_Used or else (Fa.Scene_Used = Fr.Scene_Used and then Fa.Scene_Rms <= Fr.Scene_Rms)) then
+            Gn := Ga; Fr := Fa; Ok := True;
+         end if;
+      end;
+      if not Ok then
+         Rep.Covered := True;   --  配到的点和任何一个位姿都对不上:看不见了 / 挡住了
+         return;
+      end if;
+      Rep.Consistent := Fr.Scene_Used;
+      Rep.Rms := Fr.Scene_Rms;
+      Rep.Turn_Deg := Norm (Rot_Vec (Mul (Tr (G.R_Ce), Gn.R_Ce))) * Deg;
+      Rep.Move_M := Norm ([Gn.Pos (0) - G.Pos (0), Gn.Pos (1) - G.Pos (1), Gn.Pos (2) - G.Pos (2)]);
+      Rep.Covered := Rep.Consistent + Rep.Consistent < Rep.Asked;   --  对得上的不到一半(比例)
+      if Rep.Turn_Deg / Deg > 3.0 * Gn.Rot_Sd or else Rep.Move_M > 3.0 * Gn.Pos_Sd then
+         Rep.Moved := True;
+         Gn.F := G.F; Gn.F_Meas := G.F_Meas; Gn.F_Sd := G.F_Sd;   --  焦距照旧
+         G := Gn;
+      end if;
+   end Check_Fixed;
 
    function Tips_On_Rays (Fixed : Cam_Geo; O : Obs_Pt_Vectors.Vector; Ray_O : V3; Ray_D : V3_Vectors.Vector; Gate_Px : Long_Float) return Ray_Tip_Vectors.Vector is
       package LF_Vectors is new Ada.Containers.Vectors (Natural, Long_Float);

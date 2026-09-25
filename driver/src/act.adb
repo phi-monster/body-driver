@@ -6550,6 +6550,69 @@ package body Act is
       end if;
    end Geo_Board_Solve;
 
+   procedure Check_Fixed_Eye (F : Plug.Frame; C : in out Context) is
+      Wc : constant Natural := C.Map.World_Cam;
+      Deg_Say : constant String := "°";
+   begin
+      if Length (C.Inst_Host) = 0 or else C.Board.Is_Empty or else C.Fixed_Ref.Is_Empty or else Wc >= Natural (C.Geo.Length) or else Wc >= Natural (F.Cams.Length)
+        or else not (C.Geo (Wc).Valid and then C.Geo (Wc).Fixed) or else F.Cams (Wc).W = 0
+      then
+         return;
+      end if;
+      declare
+         Q, M : Instrument.Match_Vectors.Vector;
+         Err : Unbounded_String;
+         Now : Geom.Scene_Pt_Vectors.Vector;
+         G : Geom.Cam_Geo := C.Geo (Wc);
+         R : Geom.Fixed_Check;
+      begin
+         for S of C.Board loop
+            Q.Append (Instrument.Match_Pt'(U => S.U, V => S.V, Cert => 0.0));
+         end loop;
+         M := Instrument.Match (To_String (C.Inst_Host), C.Inst_Port, C.Fixed_Ref, C.Fixed_Ref_W, C.Fixed_Ref_H, F.Cams (Wc).RGB, F.Cams (Wc).W, F.Cams (Wc).H, Q, Err);
+         if Natural (M.Length) /= Natural (Q.Length) then
+            Geo_Say ("核对不动的眼:仪器没配成(" & To_String (Err) & ")⇒ 这一轮不核");
+            return;
+         end if;
+         for I in 0 .. Natural (M.Length) - 1 loop
+            declare
+               P : Geom.Scene_Pt := C.Board (I);
+               In_Pic : constant Boolean := M (I).U >= 0.0 and then M (I).V >= 0.0 and then M (I).U < Long_Float (F.Cams (Wc).W) and then M (I).V < Long_Float (F.Cams (Wc).H);
+            begin
+               P.U := (if In_Pic then M (I).U else -1.0); P.V := (if In_Pic then M (I).V else -1.0);
+               Now.Append (P);
+            end;
+         end loop;
+         Geom.Check_Fixed (G, C.Board, Now, R);
+         if R.Moved then
+            C.Geo.Replace_Element (Wc, G);
+            --  板上的点在它眼里的像素、参考图都换成此刻的(以后跟新的位姿比);它按旧位姿做的轮廓作废
+            for I in 0 .. Natural (C.Board.Length) - 1 loop
+               declare
+                  P : Geom.Scene_Pt := C.Board (I);
+                  U, V : Long_Float;
+                  Front : Boolean;
+               begin
+                  Geom.Project_Fixed (G, P.Pw, U, V, Front);
+                  if Front then
+                     P.U := U; P.V := V;
+                     C.Board.Replace_Element (I, P);
+                  end if;
+               end;
+            end loop;
+            C.Fixed_Ref := F.Cams (Wc).RGB; C.Fixed_Ref_W := F.Cams (Wc).W; C.Fixed_Ref_H := F.Cams (Wc).H;
+            if C.Sil_Valid and then C.Sil_Cam = Integer (Wc) then
+               C.Sil_Valid := False;
+            end if;
+            Geom.Save (To_String (C.Geo_Path), C.Geo);
+            Geo_Say ("核对不动的眼:它被挪过 —— 转了 " & Codec.Fmt (R.Turn_Deg, 1) & Deg_Say & "、挪了 " & Mm (R.Move_M) & " ⇒ 按板重新标好(板上 " & Codec.Img (R.Consistent) & "/"
+                     & Codec.Img (R.Asked) & " 个点对得上,残差 " & Codec.Fmt (R.Rms, 2) & " px),接着干");
+         elsif R.Covered then
+            Geo_Say ("核对不动的眼:板上 " & Codec.Img (R.Asked) & " 个点只有 " & Codec.Img (R.Consistent) & " 个还对得上 ⇒ 它被挡住了一大块(或看不见了);位姿照旧,它这会儿看见的东西先别全信");
+         end if;
+      end;
+   end Check_Fixed_Eye;
+
    --  不动的眼:2026-09-25 起按标定板解(Geo_Board:腕眼几停三角出来的桌上的点,世界位置已知)⇒ 相机在世界里的位姿、焦距(没给就解)。
    --  以前(R4 2026-09-24)是拿开机各停的合空标记(Head_Mark,C.Fixed_Obs)连手上的点一起解,焦距随放进哪几笔在 ±8% 里翻(G2E):分割出来的指尖在手上会滑。
    --  合空标记现在只用来认手上的点和指尖(眼已知之后):指尖偏移换到腕眼相机系存进几何文件(G.Tip)
@@ -6663,6 +6726,7 @@ package body Act is
             Geom.Hand_Points (G, C.Fixed_Obs, Ray_O, Ray_D, Own_Kind, Tips, Rep);   --  眼已知 ⇒ 手上被标的点
          end;
          C.Geo.Replace_Element (Wc, G);
+         C.Fixed_Ref := F.Cams (Wc).RGB; C.Fixed_Ref_W := F.Cams (Wc).W; C.Fixed_Ref_H := F.Cams (Wc).H;   --  以后每轮核对拿它当"标好那一刻"
          Geo_Say ("不动的眼量好:标定板 " & Codec.Img (Rep.Scene_Used) & "/" & Codec.Img (Rep.Scene_N) & " 个点(像素残差 " & Codec.Fmt (Rep.Scene_Rms, 2) & " px)· 手上的标记 "
                   & Codec.Img (Rep.Hand_Used) & "/" & Codec.Img (Rep.Hand_N) & " 笔(" & Codec.Fmt (Rep.Hand_Rms, 2) & " px)· 踢掉 " & Codec.Img (G.Dropped)
                   & " 条 · 它在 (" & Mm (G.Pos (0)) & "," & Mm (G.Pos (1)) & "," & Mm (G.Pos (2)) & ") ± " & Mm (G.Pos_Sd)

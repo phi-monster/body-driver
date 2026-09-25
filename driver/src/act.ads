@@ -273,6 +273,8 @@ package Act is
       Board : Geom.Scene_Pt_Vectors.Vector;     --  标定板的点:腕眼几停三角出来的桌上的点(世界位置 + 协方差)和它们在不动的眼里的像素
       Board_Tracks : Geom.Board_Track_Vectors.Vector;   --  同一批点在腕眼里的几停原样(一起解腕眼和不动的眼时按新几何重新三角)
       Board_Plane : Boolean := False;           --  标定板的点拟合出了它们躺的那张面
+      Fixed_Ref : Buf;                          --  不动的眼标好(或上一次核对)那一刻的图:每轮拿它和此刻的图配板上的点,核它挪没挪、挡没挡
+      Fixed_Ref_W, Fixed_Ref_H : Natural := 0;
       Board_Pt, Board_N : Geom.V3 := [others => 0.0];
       Dump_Dir : Unbounded_String;
       Round_N : Natural := 0;
@@ -365,6 +367,9 @@ package Act is
    --  开机(Geo_Boot_Fixed)调;导出只为离线工具 boardexam 拿落盘的图跑同一段代码
    procedure Geo_Board (C : in out Context);
    procedure Geo_Board_Solve (C : in out Context; G : in out Geom.Cam_Geo; Rep : out Geom.Fixed_Report; Ok : out Boolean);
+   --  不动的眼每轮核一次(V1:被转了、被挡了一半 ⇒ 身体自己发现、重新标、接着干):Fixed_Ref → 此刻的图,仪器把板上的点配过来 ⇒ Geom.Check_Fixed。
+   --  挪过 ⇒ 位姿换成按板重解的、说出来、存几何文件;挡住一大块 ⇒ 说出来(位姿照旧)。没配仪器、没有板 ⇒ 不核(量不出来)
+   procedure Check_Fixed_Eye (F : Plug.Frame; C : in out Context);
 
    procedure Init_Tracks (C : in out Context);
    --  开机装回几何常数(身体文件旁边的 .geo.json:焦距、相机在手上的朝向、指尖在相机里的位置);缺的当场量。

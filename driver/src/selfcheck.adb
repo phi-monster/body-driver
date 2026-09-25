@@ -1118,6 +1118,106 @@ begin
                    "标定板·反面:不动的眼里的像素各停一致地换成别的点的 ⇒ " & (if Okx then "板的残差 " & Codec.Fmt (Rx.Scene_Rms, 1) & " px(配点噪声 " & Codec.Fmt (Shh, 2) & " px)"
                    else "解不出:" & To_String (Geom.Why)));
          end;
+         --  🔴 不动的眼被挪了 / 被挡了(Geom.Check_Fixed,V1):按板解出来的眼(③)当"标定时",板上的点此刻在画面里配到哪 ——
+         --  ① 没动(配点抖 ±0.5 px)⇒ 不算挪、不算挡;② 绕自己的光轴转 90°(出了画面的点配不到)⇒ 算挪、新位姿离真的 0.5° / 5 mm 内;
+         --  ③ 六成的点配成乱的(挡住了)⇒ 算挡、不算挪、位姿不动
+         declare
+            Seed6 : Long_Long_Integer := 41;
+            function Jit6 return Long_Float is   --  确定性伪随机 [−1, 1](测试数据自己的抖动)
+            begin
+               Seed6 := (Seed6 * 1103515245 + 12345) mod 2147483648;
+               return Long_Float (Integer ((Seed6 / 65536) mod 2001) - 1000) / 1000.0;
+            end Jit6;
+            G0 : Geom.Cam_Geo := Gt;   --  标定时的眼(拿真相机,合成;焦距已知)
+            Base : Geom.Scene_Pt_Vectors.Vector;
+         begin
+            G0.Rot_Sd := 0.0; G0.Pos_Sd := 0.0;
+            for S of Scene loop
+               declare
+                  B : Geom.Scene_Pt := S;
+                  U, V : Long_Float;
+                  Fr : Boolean;
+               begin
+                  Geom.Project_Fixed (G0, S.Pw, U, V, Fr);
+                  B.U := U; B.V := V;
+                  Base.Append (B);
+               end;
+            end loop;
+            declare
+               G1 : Geom.Cam_Geo := G0;
+               Now : Geom.Scene_Pt_Vectors.Vector;
+               R1 : Geom.Fixed_Check;
+            begin
+               for B of Base loop
+                  declare
+                     N : Geom.Scene_Pt := B;
+                  begin
+                     N.U := B.U + 0.5 * Jit6; N.V := B.V + 0.5 * Jit6;
+                     Now.Append (N);
+                  end;
+               end loop;
+               Geom.Check_Fixed (G1, Base, Now, R1);
+               Check (not R1.Moved and then not R1.Covered,
+                      "不动的眼核对·没动:" & Codec.Img (R1.Consistent) & "/" & Codec.Img (R1.Asked) & " 个点对得上 · 新解离原来 " & Codec.Fmt (R1.Turn_Deg, 3) & "° / "
+                      & Codec.Fmt (R1.Move_M * Per_Mm, 2) & " mm ⇒ " & (if R1.Moved then "算挪了(错)" else "没挪") & (if R1.Covered then "、算挡了(错)" else ""));
+            end;
+            declare
+               G2 : Geom.Cam_Geo := G0;
+               Gr : Geom.Cam_Geo := G0;   --  真的:绕自己的光轴(相机系 z)转 90°
+               Now : Geom.Scene_Pt_Vectors.Vector;
+               R2 : Geom.Fixed_Check;
+            begin
+               Gr.R_Ce := Geom.Mul (G0.R_Ce, Geom.Rodrigues ([0.0, 0.0, 0.5 * Ada.Numerics.Pi]));
+               for B of Base loop
+                  declare
+                     N : Geom.Scene_Pt := B;
+                     U, V : Long_Float;
+                     Fr : Boolean;
+                  begin
+                     Geom.Project_Fixed (Gr, B.Pw, U, V, Fr);
+                     if Fr and then U >= 0.0 and then U < 640.0 and then V >= 0.0 and then V < 480.0 then
+                        N.U := U + 0.5 * Jit6; N.V := V + 0.5 * Jit6;
+                     else
+                        N.U := -1.0; N.V := -1.0;   --  出了画面:配不到
+                     end if;
+                     Now.Append (N);
+                  end;
+               end loop;
+               Geom.Check_Fixed (G2, Base, Now, R2);
+               declare
+                  Da : constant Long_Float := Geom.Norm (Geom.Rot_Vec (Geom.Mul (Geom.Tr (Gr.R_Ce), G2.R_Ce))) * 57.29578;   --  弧度 → 度(换算,无量纲)
+                  Dp : constant Long_Float := Geom.Norm ([G2.Pos (0) - Gr.Pos (0), G2.Pos (1) - Gr.Pos (1), G2.Pos (2) - Gr.Pos (2)]);
+               begin
+                  Check (R2.Moved and then Da < 0.5 and then Dp < 0.005,   --  0.5° / 5 mm(合成)
+                         "不动的眼核对·绕光轴转 90°:配到 " & Codec.Img (R2.Matched) & "/" & Codec.Img (R2.Asked) & "、对得上 " & Codec.Img (R2.Consistent) & " ⇒ "
+                         & (if R2.Moved then "算挪了(转 " & Codec.Fmt (R2.Turn_Deg, 1) & "°),新位姿离真的 " & Codec.Fmt (Da, 2) & "° / " & Codec.Fmt (Dp * Per_Mm, 1) & " mm" else "没发现(错)"));
+               end;
+            end;
+            declare
+               G3 : Geom.Cam_Geo := G0;
+               Now : Geom.Scene_Pt_Vectors.Vector;
+               R3 : Geom.Fixed_Check;
+               K : Natural := 0;
+            begin
+               for B of Base loop
+                  declare
+                     N : Geom.Scene_Pt := B;
+                  begin
+                     if K mod 5 < 3 then   --  五个里三个(六成)配成乱的(合成)
+                        N.U := Long_Float ((K * 97) mod 640); N.V := Long_Float ((K * 61) mod 480);
+                     else
+                        N.U := B.U + 0.5 * Jit6; N.V := B.V + 0.5 * Jit6;
+                     end if;
+                     Now.Append (N);
+                     K := K + 1;
+                  end;
+               end loop;
+               Geom.Check_Fixed (G3, Base, Now, R3);
+               Check (R3.Covered and then not R3.Moved and then Geom.Norm ([G3.Pos (0) - G0.Pos (0), G3.Pos (1) - G0.Pos (1), G3.Pos (2) - G0.Pos (2)]) = 0.0,
+                      "不动的眼核对·挡住六成:对得上 " & Codec.Img (R3.Consistent) & "/" & Codec.Img (R3.Asked) & " ⇒ " & (if R3.Covered then "算挡了" else "没发现挡(错)")
+                      & (if R3.Moved then "、算挪了(错)" else "、位姿不动"));
+            end;
+         end;
          --  🔴 腕眼 + 不动的眼 + 板上的点一起解(Geom.Refine_Board):同样两只腕眼,每只 9 停平移 + 4 停转动(绕 z、x 各 ±0.1 rad,合成),
          --  但"腕眼标定"给的几何是歪的(焦距 −1.5%、偏移差 (4,−3,5) mm、朝向差 0.5°,合成;自报 ± 6 px / 1 cm)——板按歪的几何建,不动的眼按歪的板解,
          --  再一起解 ⇒ 腕眼焦距 0.3% 内、偏移 3 mm 内,不动的眼焦距 0.5% 内、位置 5 mm 内(一起解之前:头跟着腕眼一起错)

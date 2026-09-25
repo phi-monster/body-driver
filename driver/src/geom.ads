@@ -152,6 +152,18 @@ package Geom is
       Wrist_Rms, Head_Rms : Long_Float := 0.0;   --  像素
    end record;
    procedure Refine_Board (Geos : in out Geo_Vectors.Vector; Head : in out Cam_Geo; Tracks : Board_Track_Vectors.Vector; Rep : out Refine_Report; Ok : out Boolean);
+   --  不动的眼还是不是标定时那样(2026-09-25,V1:头顶眼被转了、被挡了一半 ⇒ 身体自己发现、重新标、接着干):
+   --  Scene = 板上的点(世界位置已知,U/V = 它们在上一次核对时的像素),Now = 同一批点此刻在画面里配到的像素(同序;负 = 没配到)。
+   --  按板再解一次它的位姿(焦距不动:转一下、挡一下都不改焦距):一份从原来的位姿起步(Start_Here)、一份从零盲搜,对得上的点多的那份算数
+   --  (位姿 = 最多的点同意的那一个)。和原来的比:转角或位移超过新解自报不确定度的 3 倍(倍数无量纲)= 它被挪过 ⇒ Moved,G 换成新解;
+   --  对得上的点不到问的一半(比例)= 被挡住了一大块或看不见了 ⇒ Covered
+   type Fixed_Check is record
+      Asked, Matched, Consistent : Natural := 0;   --  问了几个点、配到几个、和一个位姿对得上几个
+      Moved, Covered : Boolean := False;
+      Turn_Deg, Move_M : Long_Float := 0.0;        --  新解离原来的:转了几度、挪了多远
+      Rms : Long_Float := 0.0;                     --  新解的像素残差
+   end record;
+   procedure Check_Fixed (G : in out Cam_Geo; Scene : Scene_Pt_Vectors.Vector; Now : Scene_Pt_Vectors.Vector; Rep : out Fixed_Check);
    --  不动的眼解完之后每组观测各自的像素残差(记账、给认指尖定门槛)
    type Fixed_Report is record
       Scene_N, Scene_Used : Natural := 0;   --  标定板的点:给了几个、进解几个
@@ -162,7 +174,9 @@ package Geom is
    --  不动的眼按标定板解(2026-09-25):相机在世界里的朝向 + 位置、焦距(没给就解)。板上的点世界位置已知 ⇒ 单点法(盲搜 + 精修)起步,
    --  再按每个点自己的噪声加权精修(Scene_Var:配点噪声 ⊕ 三角的不确定度投进这只眼);加权残差超过中位 3 倍的踢掉再解(倍数无量纲)。
    --  视场界(焦距 ≥ 半幅宽 / √3)、不确定度界(位置 ± 比板铺开的量程还大、焦距 ± 比焦距还大 = 分不开)同手上的眼。板不到 4 个点 ⇒ 解不出
-   procedure Fit_Fixed_Board (G : in out Cam_Geo; Scene : Scene_Pt_Vectors.Vector; Rep : in out Fixed_Report; Ok : out Boolean);
+   --  Start_Here = 从 G 现在的位姿起步(不盲搜):挑点按每个点自己的预测噪声的 3 倍(倍数无量纲)——起点就在真值附近时这条门和挡住多少无关;
+   --  从零盲搜时起点离得远,只能按全体残差中位的 3 倍挑(超过一半是乱点就失灵)
+   procedure Fit_Fixed_Board (G : in out Cam_Geo; Scene : Scene_Pt_Vectors.Vector; Rep : in out Fixed_Report; Ok : out Boolean; Start_Here : Boolean := False);
    --  不动的眼已知 ⇒ 手上被它标记的点在手系里在哪。点的身份 = (Pt = 臂号, Kind = 这一笔里它看见这只手的手指分成几瓣)
    --  (G1S 2026-09-24:同一只手一瓣、两瓣的标记当一个点解,残差 7.5 px;分开解 1.7 px)。一个点至少 4 笔(次数)。
    --  瓣数和这条臂自己那只眼里一样的点(Own_Kind (k))按定义在腕眼那条视线上(手系起点 Ray_O、单位方向 Ray_D)⇒ 只解离眼多远;别的点 3 个数都解。

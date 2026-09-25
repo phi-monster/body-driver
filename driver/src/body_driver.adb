@@ -344,6 +344,7 @@ begin
       if F.Cams.Is_Empty then
          Put_Line ("[身] 这一帧没有相机画面");
       else
+         Act.Check_Fixed_Eye (F, C);   --  不动的眼挪没挪、挡没挡(V1),每轮核一次
          Act.Round (L, F, C);
          if Body_Path /= "" then
             Bodyfile.Save (To_String (Body_Path), Bodyfile.Fingerprint (L, F), C.Map, C.Hands, C.Tables, C.Sch);
