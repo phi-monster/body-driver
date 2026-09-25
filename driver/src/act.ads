@@ -275,6 +275,7 @@ package Act is
       Board_Plane : Boolean := False;           --  标定板的点拟合出了它们躺的那张面
       Fixed_Ref : Buf;                          --  不动的眼标好(或上一次核对)那一刻的图:每轮拿它和此刻的图配板上的点,核它挪没挪、挡没挡
       Fixed_Ref_W, Fixed_Ref_H : Natural := 0;
+      Fixed_Best : Natural := 0;                --  不动的眼这一次放好以来,核对时对得上的最多点数(挡没挡按它比;挪过就重记)
       Board_Pt, Board_N : Geom.V3 := [others => 0.0];
       Dump_Dir : Unbounded_String;
       Round_N : Natural := 0;

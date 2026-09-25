@@ -155,17 +155,20 @@ package Geom is
    --  不动的眼还是不是标定时那样(2026-09-25,V1:头顶眼被转了、被挡了一半 ⇒ 身体自己发现、重新标、接着干):
    --  Scene = 板上的点(世界位置已知,U/V = 它们在上一次核对时的像素),Now = 同一批点此刻在画面里配到的像素(同序;负 = 没配到)。
    --  按板再解一次它的位姿(焦距不动:转一下、挡一下都不改焦距):一份从原来的位姿起步(Start_Here)、一份从零盲搜,对得上的点多的那份算数
-   --  (位姿 = 最多的点同意的那一个)。挪没挪按画面看:新位姿把板上的点投到的地方比原位姿投到的挪了多少,以每个点自己的预测噪声为单位取中位,
-   --  超过 3(倍数无量纲)= 画面里看得出来的挪动 ⇒ Moved,G 换成新解。不拿位姿的自报不确定度判:配得几乎完美时它小得离谱,数值上的一点抖动都算"挪了"
-   --  (G2G 2026-09-25:每轮报"被挪过,转了 0.0°",1586 次)。对得上的点不到问的一半(比例)= 被挡住了一大块或看不见了 ⇒ Covered
+   --  (位姿 = 最多的点同意的那一个)。挪没挪按点数判:拿现在的位姿去投,离此刻配到的像素在"这一次核对自己的配点噪声"3 倍内(倍数无量纲)的点数,
+   --  不到新解对得上的一半(比例)= 现在的位姿已经解释不了这只眼看见的东西 ⇒ Moved,G 换成新解。噪声 = 新解的像素残差和这只眼标定时的残差里大的那个:
+   --  转过、挡过的画面配得比标定时粗,按标定时的噪声判会把配点的抖动当成挪动(X5B 2026-09-25:挡住左半边后每轮报"挪了 1°、2 cm");
+   --  按位姿自报的不确定度判则相反,配得几乎完美时它小得离谱(G2G:每轮报"挪了 0.0°",1586 次)。
+   --  Best = 这只眼这一次放好以来看见过的最多对得上的点数(调用方存着,挪过就重来):此刻对得上的比它少了四分之一以上(比例)= 被挡住了一大块或看不见了 ⇒ Covered
    type Fixed_Check is record
-      Asked, Matched, Consistent : Natural := 0;   --  问了几个点、配到几个、和一个位姿对得上几个
+      Asked, Matched, Consistent : Natural := 0;   --  问了几个点、配到几个、和新解对得上几个
+      Consistent_Now : Natural := 0;               --  和现在的位姿对得上几个
       Moved, Covered : Boolean := False;
       Turn_Deg, Move_M : Long_Float := 0.0;        --  新解离原来的:转了几度、挪了多远
       Shift_Px, Shift_Sd : Long_Float := 0.0;      --  新解把板上的点投到的地方比原来挪了多少(中位,像素 / 以每个点自己的预测噪声为单位)
       Rms : Long_Float := 0.0;                     --  新解的像素残差
    end record;
-   procedure Check_Fixed (G : in out Cam_Geo; Scene : Scene_Pt_Vectors.Vector; Now : Scene_Pt_Vectors.Vector; Rep : out Fixed_Check);
+   procedure Check_Fixed (G : in out Cam_Geo; Scene : Scene_Pt_Vectors.Vector; Now : Scene_Pt_Vectors.Vector; Best : in out Natural; Rep : out Fixed_Check);
    --  不动的眼解完之后每组观测各自的像素残差(记账、给认指尖定门槛)
    type Fixed_Report is record
       Scene_N, Scene_Used : Natural := 0;   --  标定板的点:给了几个、进解几个

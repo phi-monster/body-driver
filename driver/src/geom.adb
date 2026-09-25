@@ -1278,28 +1278,44 @@ package body Geom is
          end if;
          Nr := Ns + (if Use_Prior then 1 else 0);
          if Start_Here then
-            --  起点就是真值附近:每个点加权残差(以它自己的预测噪声为单位)超过 3 的先不要(倍数无量纲),挡住多少都不影响这条门
+            --  起点就在真值附近:门从粗到细 —— 先放画幅宽的 1/16(比例,无量纲;挡住的那片配成乱的,乱点散在几百像素里,门外),
+            --  解一次,再收到"门内这些点自己的像素离散"的 3 倍(倍数无量纲),来回三遍(次数)。门的尺度是这一次配点自己量的:
+            --  转过、挡过的画面配得比标定时粗得多,按标定时的噪声挑,好点也全挑没了(X5B 2026-09-25)
             declare
-               Gt : constant Cam_Geo := Cam_Of (P);
-               Dropped : Natural := 0;
+               Gate : Long_Float := 0.125 * G.Cx;   --  半幅宽的八分之一 = 画幅宽的 1/16(比例,无量纲)
             begin
-               for S in 0 .. Ns - 1 loop
+               for Round in 1 .. 3 loop
                   declare
-                     U, V : Long_Float;
-                     Front : Boolean;
+                     Gt : constant Cam_Geo := Cam_Of (P);
+                     Dropped : Natural := 0;
+                     Sum : Long_Float := 0.0;
                   begin
-                     Project_Fixed (Gt, Scene (S).Pw, U, V, Front);
-                     Skip (S) := not Front or else Ws (S) * Sqrt ((U - Scene (S).U) ** 2 + (V - Scene (S).V) ** 2) > 3.0;
-                     if Skip (S) then
-                        Dropped := Dropped + 1;
+                     for S in 0 .. Ns - 1 loop
+                        declare
+                           U, V : Long_Float;
+                           Front : Boolean;
+                           E : Long_Float;
+                        begin
+                           Project_Fixed (Gt, Scene (S).Pw, U, V, Front);
+                           E := (if Front then Sqrt ((U - Scene (S).U) ** 2 + (V - Scene (S).V) ** 2) else Long_Float'Last);
+                           Skip (S) := E > Gate;
+                           if Skip (S) then
+                              Dropped := Dropped + 1;
+                           else
+                              Sum := Sum + E * E;
+                           end if;
+                        end;
+                     end loop;
+                     if Ns - Dropped < Min_Pts then
+                        Why := To_Unbounded_String ("从现在的位姿起步,门 " & Codec.Fmt (Gate, 1) & " px 内的点不到 4 个(" & Codec.Img (Ns - Dropped) & "/" & Codec.Img (Ns) & ")");
+                        return;
                      end if;
+                     Nr := Ns - Dropped + (if Use_Prior then 1 else 0);
+                     Resid (P, Cur, null);
+                     LM_Refine (P, Nr, Steps, 100, Resid'Access, Cur);   --  100 = 迭代次数上限(次数)
+                     Gate := 3.0 * Sqrt (Sum / Long_Float (Ns - Dropped));
                   end;
                end loop;
-               if Ns - Dropped < Min_Pts then
-                  Why := To_Unbounded_String ("从现在的位姿起步,对得上的点不到 4 个(" & Codec.Img (Ns - Dropped) & "/" & Codec.Img (Ns) & ")");
-                  return;
-               end if;
-               Nr := Ns - Dropped + (if Use_Prior then 1 else 0);
             end;
          end if;
          Resid (P, Cur, null);
@@ -1311,7 +1327,7 @@ package body Geom is
             Rs : Param_Vec (0 .. Natural'Max (0, Ns - 1)) := [others => 0.0];
             Dropped : Natural := 0;
          begin
-            for Round in 1 .. 3 loop
+            for Round in 1 .. (if Start_Here then 0 else 3) loop   --  从现位姿起步的已经按门挑过了
                declare
                   Gt : constant Cam_Geo := Cam_Of (P);
                   Kept : Param_Vec (0 .. Natural'Max (0, Ns - 1)) := [others => 0.0];
@@ -1330,7 +1346,7 @@ package body Geom is
                         end if;
                      end;
                   end loop;
-                  Med := (if Start_Here then 1.0 else Median (Kept, Nk));   --  起步在真值附近:门 = 3 个预测噪声;从零:门 = 3 倍中位
+                  Med := Median (Kept, Nk);
                   exit when Med <= 0.0;
                   Dropped := 0;
                   for S in 0 .. Ns - 1 loop
@@ -2379,7 +2395,7 @@ package body Geom is
       end;
    end Refine_Board;
 
-   procedure Check_Fixed (G : in out Cam_Geo; Scene : Scene_Pt_Vectors.Vector; Now : Scene_Pt_Vectors.Vector; Rep : out Fixed_Check) is
+   procedure Check_Fixed (G : in out Cam_Geo; Scene : Scene_Pt_Vectors.Vector; Now : Scene_Pt_Vectors.Vector; Best : in out Natural; Rep : out Fixed_Check) is
       Cur : Scene_Pt_Vectors.Vector;
       Gn : Cam_Geo := G;
       Fr : Fixed_Report;
@@ -2421,7 +2437,22 @@ package body Geom is
       Rep.Rms := Fr.Scene_Rms;
       Rep.Turn_Deg := Norm (Rot_Vec (Mul (Tr (G.R_Ce), Gn.R_Ce))) * Deg;
       Rep.Move_M := Norm ([Gn.Pos (0) - G.Pos (0), Gn.Pos (1) - G.Pos (1), Gn.Pos (2) - G.Pos (2)]);
-      Rep.Covered := Rep.Consistent + Rep.Consistent < Rep.Asked;   --  对得上的不到一半(比例)
+      --  现在的位姿对得上几个:门 = 3 倍(倍数无量纲)的"这一次核对的配点噪声",取新解残差和这只眼标定时残差里大的那个(数值精度兜底 1e-9 px)
+      declare
+         Gate : constant Long_Float := 3.0 * Long_Float'Max (1.0e-9, Long_Float'Max (Fr.Scene_Rms, G.Rms));
+      begin
+         for P of Cur loop
+            declare
+               U, V : Long_Float;
+               Front : Boolean;
+            begin
+               Project_Fixed (G, P.Pw, U, V, Front);
+               if Front and then Sqrt ((U - P.U) ** 2 + (V - P.V) ** 2) <= Gate then
+                  Rep.Consistent_Now := Rep.Consistent_Now + 1;
+               end if;
+            end;
+         end loop;
+      end;
       --  挪没挪按画面看:每个板上的点,新位姿投到的地方离原位姿投到的多远,除以这个点自己的预测噪声(按原位姿算),取中位
       declare
          Px : Param_Vec (0 .. Natural'Max (1, Natural (Cur.Length)) - 1) := [others => 0.0];
@@ -2449,10 +2480,14 @@ package body Geom is
          Rep.Shift_Px := Median (Px, N);
          Rep.Shift_Sd := Median (Ps, N);
       end;
-      if Rep.Shift_Sd > 3.0 then   --  3 个预测噪声(倍数无量纲)
+      if Rep.Consistent_Now + Rep.Consistent_Now < Rep.Consistent then   --  现在的位姿解释得不到新解一半(比例)
          Rep.Moved := True;
          Gn.F := G.F; Gn.F_Meas := G.F_Meas; Gn.F_Sd := G.F_Sd;   --  焦距照旧
          G := Gn;
+         Best := Rep.Consistent;   --  重新放好了:从这一刻起重记"看见过的最多"
+      else
+         Best := Natural'Max (Best, Rep.Consistent_Now);
+         Rep.Covered := 4 * Rep.Consistent_Now < 3 * Best;   --  比放好以来最多的少了四分之一以上(比例)
       end if;
    end Check_Fixed;
 

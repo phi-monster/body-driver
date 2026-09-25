@@ -6668,24 +6668,11 @@ package body Act is
                Now.Append (P);
             end;
          end loop;
-         Geom.Check_Fixed (G, C.Board, Now, R);
+         Geom.Check_Fixed (G, C.Board, Now, C.Fixed_Best, R);
          if R.Moved then
             C.Geo.Replace_Element (Wc, G);
-            --  板上的点在它眼里的像素、参考图都换成此刻的(以后跟新的位姿比);它按旧位姿做的轮廓作废
-            for I in 0 .. Natural (C.Board.Length) - 1 loop
-               declare
-                  P : Geom.Scene_Pt := C.Board (I);
-                  U, V : Long_Float;
-                  Front : Boolean;
-               begin
-                  Geom.Project_Fixed (G, P.Pw, U, V, Front);
-                  if Front then
-                     P.U := U; P.V := V;
-                     C.Board.Replace_Element (I, P);
-                  end if;
-               end;
-            end loop;
-            C.Fixed_Ref := F.Cams (Wc).RGB; C.Fixed_Ref_W := F.Cams (Wc).W; C.Fixed_Ref_H := F.Cams (Wc).H;
+            --  参考图和板上的点在参考图里的像素都不换(一直是标好那一刻的):换成此刻的,一挡住参考图就跟着坏,错一轮接一轮地叠(X5B 2026-09-25)。
+            --  它按旧位姿做的轮廓作废
             if C.Sil_Valid and then C.Sil_Cam = Integer (Wc) then
                C.Sil_Valid := False;
             end if;
@@ -6695,7 +6682,8 @@ package body Act is
                      & " px(" & Codec.Fmt (R.Shift_Sd, 1) & " 个配点噪声)⇒ 按板重新标好(" & Codec.Img (R.Consistent) & "/" & Codec.Img (R.Asked) & " 个点对得上,残差 "
                      & Codec.Fmt (R.Rms, 2) & " px),接着干");
          elsif R.Covered then
-            Geo_Say ("核对不动的眼:板上 " & Codec.Img (R.Asked) & " 个点只有 " & Codec.Img (R.Consistent) & " 个还对得上 ⇒ 它被挡住了一大块(或看不见了);位姿照旧,它这会儿看见的东西先别全信");
+            Geo_Say ("核对不动的眼:板上 " & Codec.Img (R.Asked) & " 个点这会儿只有 " & Codec.Img (R.Consistent_Now) & " 个还对得上(放好以来最多 " & Codec.Img (C.Fixed_Best)
+                     & " 个)⇒ 它被挡住了一大块(或看不见了);位姿照旧,它这会儿看见的东西先别全信");
          end if;
       end;
    end Check_Fixed_Eye;
