@@ -5634,7 +5634,7 @@ package body Act is
 
    --  不动的眼(头顶眼)在这一停给第 Arm 只手的指尖做一笔标记:合空一次(开机量握区的同一个办法,Zone.Measure),它眼里"合拢通道扫过的像素"
    --  = 这只手的手指,指尖按握区同一条定义(Zone_Tip),连这一停的位姿读数记进 C.Fixed_Obs;开机末尾连它的位姿、焦距、各臂指尖偏移一起解(Geo_Boot_Fixed)。
-   --  以前是仪器逐帧跟指尖:G1R 2026-09-25 实测白手没纹理、一帧挪几十像素,跟点器把指尖钉在桌面上还报"看得见"(955 笔里 v 一动不动)⇒ 解不出。
+   --  以前是仪器逐帧跟指尖:G1R 2026-09-24 实测白手没纹理、一帧挪几十像素,跟点器把指尖钉在桌面上还报"看得见"(955 笔里 v 一动不动)⇒ 解不出。
    --  合空标记不认纹理只认"手指来去",一停一笔。指尖贴着画面边 = 手指被画面切了,不记。手上长着这只"不动的眼"、没有世界相机、对方正要复位 ⇒ 不做
    procedure Head_Mark (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Arm : Natural) is
       Wc : constant Natural := C.Map.World_Cam;
@@ -5643,7 +5643,7 @@ package body Act is
       U, V : Long_Float;
       N : Natural := 0;
       --  每一笔(记下的、拒掉的)的每一瓣各自的指尖像素、大小、框落盘(BL_DUMP/head_lobes.txt):换一种认点办法(比如总认最大那一瓣的尖)离线就能试,
-      --  不用再开一炮(G2C 2026-09-26:同一只手换个姿势,"几瓣"在 1 和 2 之间跳,拿瓣数当点的身份不稳)
+      --  不用再开一炮(G2C 2026-09-24:同一只手换个姿势,"几瓣"在 1 和 2 之间跳,拿瓣数当点的身份不稳)
       procedure Dump_Lobes (Tag : String) is
          Dump : constant String := Codec.Env ("BL_DUMP");
          Fo : Ada.Text_IO.File_Type;
@@ -5692,7 +5692,7 @@ package body Act is
             Geo_Say ("不动的眼这一停没看见第" & Codec.Img (Arm + 1) & " 只手的手指来去 ⇒ 不记");
             return;
          end if;
-         --  哪一瓣的框贴着画面边 = 手指被画面切了,指尖在画面外(G1S 2026-09-25:手抬高到画面右边、缩到画面底边时各记了一笔掌心当指尖)
+         --  哪一瓣的框贴着画面边 = 手指被画面切了,指尖在画面外(G1S 2026-09-24:手抬高到画面右边、缩到画面底边时各记了一笔掌心当指尖)
          for I in 0 .. H.Zones (Wc).N_Lobes - 1 loop
             declare
                Lb : constant Zone.Lobe := Zone.Lobe_Of (H.Zones (Wc), I);
@@ -5767,7 +5767,7 @@ package body Act is
       pragma Unreferenced (Slot);   --  点名的那块只是提示;盯谁按视差定
       G : Geom.Cam_Geo;
       Home : constant Plug.Arm_Pose := F.EE (Arm);
-      B : constant Long_Float := Geo_Base (C, Arm);   --  探针一步 = 最小能动的那一档:只为量视差,越小越不惊动候选(G1M 2026-09-25:四档 = 8 cm 一探就把视野挪了小半幅)
+      B : constant Long_Float := Geo_Base (C, Arm);   --  探针一步 = 最小能动的那一档:只为量视差,越小越不惊动候选(G1M 2026-09-24:四档 = 8 cm 一探就把视野挪了小半幅)
       Notch : constant Long_Float := (if Arm * Chan.Per_Arm + 3 < Natural (C.Map.Amp.Length) then C.Map.Amp (Arm * Chan.Per_Arm + 3) else 0.0);
       Theta : Long_Float := 4.0 * Notch;   --  转动一停的角:起步四倍转动探针那一档(倍数,无量纲;没量过转动就是 0 ⇒ 不转),阶梯探到的最大一档为准
       Cw : constant Natural := (if Cam < Natural (F.Cams.Length) then F.Cams (Cam).W else 0);
@@ -5904,7 +5904,7 @@ package body Act is
          end loop;
       end Where;
       --  手动的每一帧都喂给跟点仪器(不只停点):一转十几度,一停之间画面跳几十上百像素,只看停点的跟点器把桌上的点全跟丢
-      --  (G2B 2026-09-25 左眼:探一转 15 个点只跟住 3 个,还都是自己手上的)。逐帧喂,帧间只挪几个像素;位置仍在停点那一步(Where)取
+      --  (G2B 2026-09-24 左眼:探一转 15 个点只跟住 3 个,还都是自己手上的)。逐帧喂,帧间只挪几个像素;位置仍在停点那一步(Where)取
       function Track_Frame (Fr : Plug.Frame) return Boolean is
          Err : Unbounded_String;
       begin
@@ -5942,7 +5942,7 @@ package body Act is
       end Dump_Stop;
       --  平移一停:走、看、记(手拿转动凑平移的那一停不算:转动引起的相机位移和平移之比 > 一成就扔,比例无量纲)
       --  每一停先等画面静止再记:手还在慢慢挪时记下的那一停,位姿读数和画面未必是同一刻(静止噪声为 0 的身体上 Selfmap.Go 等不到"位姿不变",
-      --  到拍数上限就返回;G2A 2026-09-25 实测停下之后还要 13–27 拍画面才静止)。最多等 30 拍(次数,同合空前的等法)
+      --  到拍数上限就返回;G2A 2026-09-24 实测停下之后还要 13–27 拍画面才静止)。最多等 30 拍(次数,同合空前的等法)
       procedure Settle is
          Used : Natural;
          Ok2 : Boolean;
@@ -5990,7 +5990,7 @@ package body Act is
          Head_Mark (L, C, F, Arm);   --  转过之后手停着,不动的眼记一笔
       end Rot_Stop;
       --  转回起点的朝向:转动那几停命令 ±θ、实到的各不相同时,手会一直歪着,后面的平移停全作废
-      --  (G2B 2026-09-25:转完手歪着 74°,7 停平移全扔)。按位姿读数算出差的那个转动(世界轴)转回去;剩下不到一档转动探针就停,最多三次(次数)
+      --  (G2B 2026-09-24:转完手歪着 74°,7 停平移全扔)。按位姿读数算出差的那个转动(世界轴)转回去;剩下不到一档转动探针就停,最多三次(次数)
       procedure Face_Home is
       begin
          for Try in 1 .. 3 loop
@@ -6033,14 +6033,14 @@ package body Act is
       end;
       Head_Mark (L, C, F, Arm);   --  原处一笔
       --  转动的停:转角由眼定,不由关节定。先按四倍转动探针档探一转,看跟住的点在画面里中位挪了几像素,按"每转挪画幅的 1/16"缩放
-      --  (比例,无量纲;下限一档、上限 64 档)。G1K 2026-09-25:关节一档是 x5 的三倍,四档 = 17.7° 一转就把点全甩出画面;x5 上四档只有 5.9°,又嫌小
+      --  (比例,无量纲;下限一档、上限 64 档)。G1K 2026-09-24:关节一档是 x5 的三倍,四档 = 17.7° 一转就把点全甩出画面;x5 上四档只有 5.9°,又嫌小
       if Theta > 0.0 then
          declare
             Before : Instrument.Track_Vectors.Vector;
             Shifts : Param_Pixels;   --  挪得够"世界里的点"那条界的那些
             Min_World : Long_Float := 0.0;   --  这一转世界里的点至少挪几像素
             Sqrt3 : constant Long_Float := Sqrt (3.0);   --  √3(纯数学:tan 60°,视场 120° 的半角)
-            Each : Param_Pixels;   --  每个候选在转过去那一停的位移(没看见 = -1);转回来之前记下,转回来后世界点也都回原处了(G1P 2026-09-25:14 个世界点被误判成自己)
+            Each : Param_Pixels;   --  每个候选在转过去那一停的位移(没看见 = -1);转回来之前记下,转回来后世界点也都回原处了(G1P 2026-09-24:14 个世界点被误判成自己)
          begin
             if Plug.Reset_Pending (L) then
                On_Reset;
@@ -6054,7 +6054,7 @@ package body Act is
                Turned_By := Geom.Angle_Between (Pose_Before, F.EE (Arm));
                --  针孔相机的视场不超过 120°(同 Fit_Rig 里那条界)⇒ 焦距至少 半幅 / √3 ⇒ 转 θ 时世界里的点至少挪 (半幅 / √3)·θ 像素;
                --  挪得比这还少的不是世界里的点(自己身上的、或跟错的),不拿来算焦距、不拿来定转角
-               --  (G2B 2026-09-25 左眼:跟住的 3 个点都只挪 0.5 px,当成世界算出焦距 2.4 px,转角放大到 188°,手拧了半圈)
+               --  (G2B 2026-09-24 左眼:跟住的 3 个点都只挪 0.5 px,当成世界算出焦距 2.4 px,转角放大到 188°,手拧了半圈)
                Min_World := G.Cx / Sqrt3 * Turned_By;
                for I in 0 .. Natural (Cur.Length) - 1 loop
                   if Cur (I).Seen and then I < Natural (Before.Length) and then Before (I).Seen then
@@ -6071,7 +6071,7 @@ package body Act is
                   end if;
                end loop;
                --  转一个已知角,画面挪的像素 ÷ 角 = 焦距的粗值(远近不在式子里)。当先验带进联合解:盲搜有时落进错的盆
-               --  (G1R 2026-09-25 右眼:焦距 1133、偏移 −0.89 m、残差 1.18 px;焦距钉回 388 残差反而 0.57 px)。
+               --  (G1R 2026-09-24 右眼:焦距 1133、偏移 −0.89 m、残差 1.18 px;焦距钉回 388 残差反而 0.57 px)。
                --  不确定度:各点位移的离散 ÷ 角,再不小于十分之一(比例,无量纲):转的是手腕,相机离转轴有偏移,转动里混着几个百分点的平移
                if Turned_By > 0.0 and then Natural (Shifts.Length) >= 3 then
                   declare
@@ -6100,7 +6100,7 @@ package body Act is
                Quarter : constant Long_Float := 0.25;   --  四分之一(比例,无量纲)
             begin
                --  转眼时世界里的点不管远近都挪 焦距×角,自己身上的点(立在画面里的手指、机身)一动不动:挪得不到中位数四分之一(比例,无量纲)的就是自己,
-               --  剔出去(G1O 2026-09-25 左眼:食指立在画面中间,4 个"不动的点"把焦距拽到 61;离线剔掉后 381 ± 22,和右眼 382 一致)
+               --  剔出去(G1O 2026-09-24 左眼:食指立在画面中间,4 个"不动的点"把焦距拽到 61;离线剔掉后 381 ± 22,和右眼 382 一致)
                if Med > 0.0 or else Min_World > 0.0 then
                   for I in 0 .. Natural (Cur.Length) - 1 loop
                      if I < Natural (Each.Length) and then Each (I) >= 0.0 and then (Each (I) < Med * Quarter or else Each (I) < Min_World) then
@@ -6149,7 +6149,7 @@ package body Act is
             --  步长:让它每步在画面里挪画幅的 1/16(比例,无量纲);探到的视差 = 每步多少像素 ⇒ 反推每步几米;
             --  上限 = 这条臂量过的步幅(没量就阶梯的下一档 = 4 倍探针步,倍数无量纲),下限 = 探针步
             Step := B * (Long_Float (Cw) / 24.0) / Best;   --  每步让它挪画幅的 1/24(比例,无量纲):路径要走两步再回,累计不能出画面
-            --  下限一档(G1K 2026-09-25:四档 = 8.1 cm 一步,3 停内把点全甩出画面),上限量过的步幅(没量就阶梯的下一档)
+            --  下限一档(G1K 2026-09-24:四档 = 8.1 cm 一步,3 停内把点全甩出画面),上限量过的步幅(没量就阶梯的下一档)
             Step := Long_Float'Max (Geo_Base (C, Arm), Long_Float'Min (Step, (if G.Stride > 0.0 then G.Stride else 4.0 * B)));
             Geo_Say ("探一步 " & Mm (B) & ":视差最大的是第 " & Codec.Img (Natural (Cand (Target))) & " 槽(" & Codec.Fmt (Best, 1) & " px,起点 ("
                      & Codec.Fmt (P0 (Target).U, 0) & "," & Codec.Fmt (P0 (Target).V, 0) & "))⇒ 每步 " & Mm (Step));
@@ -6193,7 +6193,7 @@ package body Act is
       if Tid >= 0 then
          Instrument.Track_End (To_String (C.Inst_Host), C.Inst_Port, Tid);
       end if;
-      --  观测落盘(BL_DUMP):离线用 geoexam 重解,不用再开一小时的炮(G1N 2026-09-25:两只眼都"解不出",日志没说为什么)
+      --  观测落盘(BL_DUMP):离线用 geoexam 重解,不用再开一小时的炮(G1N 2026-09-24:两只眼都"解不出",日志没说为什么)
       if Dump /= "" then
          declare
             Fo : Ada.Text_IO.File_Type;
@@ -6365,7 +6365,7 @@ package body Act is
                end;
             end loop;
             --  ① 先按已有的标记粗解一遍;② 每只手顺着"手上的点 → 不动的眼"那条线往眼那边送两段(到眼距离的四分之一、一半,比例无量纲),每段停稳记一笔;
-            --  ③ 全部标记从头重解(下面)。手只在离眼差不多远的地方挪时,焦距和远近一起缩放画面几乎不变(G2D 2026-09-26:三炮焦距 294 / 300 / 326,每炮 ± 6%);
+            --  ③ 全部标记从头重解(下面)。手只在离眼差不多远的地方挪时,焦距和远近一起缩放画面几乎不变(G2D 2026-09-24:三炮焦距 294 / 300 / 326,每炮 ± 6%);
             --  顺着视线往眼那边走,点在画面里基本不动、只变远近 ⇒ 焦距和远近分开(离线估:± 3.4% ⇒ ± 1.1%)。直着往上抬不行:手在眼的斜下方,抬 9 cm 就贴画面边。走不到就按实到的算
             declare
                G0 : constant Geom.Cam_Geo := G;
@@ -6395,7 +6395,7 @@ package body Act is
                               Reach : constant Long_Float := Stride_Of (C, A);   --  这条臂一条命令走得到的最大一档(量过的)
                               Far : constant Long_Float := Fracs (Fracs'Last) * Geom.Norm (Dv);   --  最远那一段离原处多远
                            begin
-                              --  粗解里这只手的点或眼的位置不可信时,算出来的"往眼那边送"会是几十公里(X5A 2026-09-26:命令挪 86721 m)⇒
+                              --  粗解里这只手的点或眼的位置不可信时,算出来的"往眼那边送"会是几十公里(X5A 2026-09-24:命令挪 86721 m)⇒
                               --  最远那一段比这条臂量过的步幅还远、或不是有限数 = 粗解靠不住,就不送这只手
                               if not (Far <= Reach) then
                                  Geo_Say ("第" & Codec.Img (A + 1) & " 只手:按粗解往不动的眼那边送最远要 " & Mm (Far) & ",比它量过的一条命令的最大一档 " & Mm (Reach) & " 还远 ⇒ 粗解靠不住,这只手不送");
@@ -6463,7 +6463,7 @@ package body Act is
          end loop;
          --  每只手的指尖偏移:它自己那只眼里每一瓣手指的尖是手系里一条视线;不动的眼每笔里每一瓣的尖,落在哪条视线上就是那一瓣的指尖
          --  (Geom.Tips_On_Rays,门槛 = 不动的眼解出来的像素残差的 3 倍,倍数无量纲,同踢离群那一条);指尖 = 各瓣指尖的中点,和腕眼认指尖同一条定义(Zone_Tip)。
-         --  以前按"瓣数一样的点"认:G2C 2026-09-26 两只手自己眼里 1 瓣、头顶眼里 2 瓣占 25/27,一个都没认上;离线看,四根手指那一瓣的尖正落在腕眼指尖视线上
+         --  以前按"瓣数一样的点"认:G2C 2026-09-24 两只手自己眼里 1 瓣、头顶眼里 2 瓣占 25/27,一个都没认上;离线看,四根手指那一瓣的尖正落在腕眼指尖视线上
          for A in 0 .. C.Map.Arms - 1 loop
             declare
                Hc : constant Integer := (if A < Natural (C.Map.Cam_On_Arm.Length) then C.Map.Cam_On_Arm (A) else -1);
@@ -6763,7 +6763,7 @@ package body Act is
                   Steps_Taken := Steps_Taken + 1;
                   Presses := Presses + 1;
                   --  等画面静止了再量这一压实到了多少:身体慢的手在返回那一刻还在往下挪,按那一刻算"不到一半"就误判成被顶住
-                  --  (G2D 2026-09-26 人形:在桌面上方十几厘米处压了两下,每下命令 2.6 cm、返回时只走 1.2–1.4 cm,记成了"它躺的面",横着还滑得动所以没拦下)
+                  --  (G2D 2026-09-24 人形:在桌面上方十几厘米处压了两下,每下命令 2.6 cm、返回时只走 1.2–1.4 cm,记成了"它躺的面",横着还滑得动所以没拦下)
                   declare
                      Used : Natural;
                      Ok2 : Boolean;
@@ -10491,7 +10491,7 @@ package body Act is
                      end loop;
                   end loop;
                   --  横着也探(前后左右各一段,4 / 16 档):一是量各方向能走多远,二是不动的眼要的是手在它视野里横着扫
-                  --  (G1Q 2026-09-25:手在头顶眼正下方,抬 30 cm 是沿它的视线动,画面只挪 28 px,652 笔观测也定不了它;横扫一次就是几百像素)
+                  --  (G1Q 2026-09-24:手在头顶眼正下方,抬 30 cm 是沿它的视线动,画面只挪 28 px,652 笔观测也定不了它;横扫一次就是几百像素)
                   declare
                      Sides : constant array (1 .. 4) of Geom.V3 := [[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, -1.0, 0.0]];
                   begin

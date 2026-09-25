@@ -1,4 +1,4 @@
---  离线重解开机标定(2026-09-25):拿炮里落盘的观测(BL_DUMP 下的 geo_cam<k>_obs.txt / head_obs.txt)原样跑 Fit_Rig / Fit_Fixed_Rig,
+--  离线重解开机标定(2026-09-24):拿炮里落盘的观测(BL_DUMP 下的 geo_cam<k>_obs.txt / head_obs.txt)原样跑 Fit_Rig / Fit_Fixed_Rig,
 --  打出焦距、朝向、偏移和各自的 ±、残差、踢掉几笔、没解出来时的原因。改拟合不用再开一小时的炮。
 --  用法:geoexam wrist geo_cam1_obs.txt | geoexam head head_obs.txt
 with Ada.Command_Line;
@@ -198,7 +198,7 @@ begin
                             & ") 离手腕原点 " & Codec.Fmt (Geom.Norm (T.Tip), 3) & " m · " & Codec.Img (T.N) & " 笔 · 残差 " & Codec.Fmt (T.Rms, 2) & " px"
                             & (if T.On_Ray then " · 在腕眼视线上" else " · 自由"));
                end loop;
-               --  每一笔:它那个点投回不动的眼,和记下的像素差多少(哪一笔坏了一眼看出来;G1S 2026-09-25:5 笔落在空桌面上的标记把解拖到 0.5 m 外)
+               --  每一笔:它那个点投回不动的眼,和记下的像素差多少(哪一笔坏了一眼看出来;G1S 2026-09-24:5 笔落在空桌面上的标记把解拖到 0.5 m 外)
                for Ob of Obs loop
                   for T of Tips loop
                      if T.Arm = Ob.Pt and then T.Kind = Ob.Kind then

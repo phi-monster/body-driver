@@ -368,7 +368,7 @@ package body Zone is
       J0 : constant Long_Float := Selfmap.Jaw_Of (F, Arm, K);
       Rest : constant Floats := Selfmap.Jaw_All (F, Arm);   --  其余通道保持它们此刻的读数
       --  合空时手要停着的位姿 = 等画面静止【之后】的读数(不是刚进来时的):手还在慢慢挪时进来,按进来那一刻的位姿发"停住"命令会把手拽回去,
-      --  合爪那几拍整条胳膊跟着动,扫出来的"手指"连着胳膊贴到画面边,记下的位姿也不是画面里那一刻的(G2A 2026-09-25:人形每挪一下要 ~40 拍才停稳,
+      --  合爪那几拍整条胳膊跟着动,扫出来的"手指"连着胳膊贴到画面边,记下的位姿也不是画面里那一刻的(G2A 2026-09-24:人形每挪一下要 ~40 拍才停稳,
       --  头顶眼 16 笔里 7 笔因手指贴画面边被拒)
       Pose : Plug.Arm_Pose := (if Arm < Natural (F.EE.Length) then F.EE (Arm) else [others => 0.0]);
       Prev_J : Long_Float := J0;
@@ -486,7 +486,7 @@ package body Zone is
                end;
             end if;
             --  合上前后这只眼里得真有像素动过(超过它自己量的静止噪声地板,像素数不少于一块最小连通块 —— 同 Components 的下限)才算看见手指来去。
-            --  一动没动时"变化量分两拨"分的是噪声,会把一撮噪声点当成一瓣(G1S 2026-09-25:手抬出画面、缩回身前时,头顶眼各记了一笔落在空桌面上的"指尖")
+            --  一动没动时"变化量分两拨"分的是噪声,会把一撮噪声点当成一瓣(G1S 2026-09-24:手抬出画面、缩回身前时,头顶眼各记了一笔落在空桌面上的"指尖")
             declare
                Mv : constant Bools := Picture.Moved (F0 (C).Gray, Closed_Frame (C).Gray, M.Floors (C));
                N_Mv : Natural := 0;

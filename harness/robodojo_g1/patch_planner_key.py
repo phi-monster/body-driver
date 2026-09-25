@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# 一具身体两条链(人形左右臂共用 robot_name)⇒ 规划器/逆解器按"名字/侧"分开存,不然后建的把先建的盖掉,两条臂用同一条链(G1K 2026-09-25:右臂的目标用左链正解,常量差 15–30 cm,右臂不动)
+# 一具身体两条链(人形左右臂共用 robot_name)⇒ 规划器/逆解器按"名字/侧"分开存,不然后建的把先建的盖掉,两条臂用同一条链(G1K 2026-09-24:右臂的目标用左链正解,常量差 15–30 cm,右臂不动)
 import io
 p = "/root/RoboDojo/env/robot_manager/robot_manager.py"
 s = io.open(p, encoding="utf-8").read()

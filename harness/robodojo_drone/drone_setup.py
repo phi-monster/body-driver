@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# body-driver drone test rig (2026-09-25): a flying camera in RoboDojo, built the same way as the humanoid rig (sim-side shim, zero driver code).
+# body-driver drone test rig (2026-09-24): a flying camera in RoboDojo, built the same way as the humanoid rig (sim-side shim, zero driver code).
 # The "drone" is a small body hanging from a virtual 6-DoF gantry (x/y/z prismatic + yaw/pitch/roll revolute) fixed above the table:
 # RoboDojo/curobo see a 6-joint arm whose end link IS the body; the driver sees one "arm" that reports a pose and takes pose commands,
 # one camera on the body, and one grip channel that moves nothing (a drone has no fingers - the driver must live with that).
@@ -49,13 +49,13 @@ side = dict(ee_joints="roll_joint", ee_link="body_link", arm_joints_name=JOINTS,
             camera=[dict(link="body_link", name="cam_wrist", type="d435", mesh="pinhole", pos=[0.0, 0.0, -0.03], ori=[0, -90, 0])])
 cfg = dict(urdf_path="./drone.urdf", base_link="base_link", ee_type="gripper", dual_arm=False, delta_matrix=[[1, 0, 0], [0, 1, 0], [0, 0, 1]],
            global_trans_matrix=[[1, 0, 0], [0, 1, 0], [0, 0, 1]], grasp_camera_reference_axis=[1, 0, 0], sides=dict(left=side))
-open(f"{D}/robot_config.yml", "w").write("# body-driver drone rig (2026-09-25): a body on a virtual 6-DoF gantry above the table; one camera on the body; no fingers.\n" + yaml.safe_dump(cfg, sort_keys=False))
+open(f"{D}/robot_config.yml", "w").write("# body-driver drone rig (2026-09-24): a body on a virtual 6-DoF gantry above the table; one camera on the body; no fingers.\n" + yaml.safe_dump(cfg, sort_keys=False))
 
 # ---- curobo (6-joint chain, prismatic + revolute)
 links = chain + ["body_link"]
 spheres = {l: [dict(center=[0.0, 0.0, 0.0], radius=0.02)] for l in links}
 spheres["body_link"] = [dict(center=[0.0, 0.0, 0.0], radius=0.07)]
-# curobo 要至少一对自碰撞要查,否则它的调试日志除以零(DR1 2026-09-26 实测 ZeroDivisionError);虚拟龙门吊的各节都叠在机身上,
+# curobo 要至少一对自碰撞要查,否则它的调试日志除以零(DR1 2026-09-24 实测 ZeroDivisionError);虚拟龙门吊的各节都叠在机身上,
 # 查哪对都会把机身拦住 ⇒ 底座的球挪到 5 m 外(永远碰不到),只留"底座 × 机身"这一对要查
 spheres["base_link"] = [dict(center=[0.0, 0.0, 5.0], radius=0.02)]
 ignore = {l: [m for m in links if m != l and not ({l, m} == {"base_link", "body_link"})] for l in links}
@@ -68,7 +68,7 @@ kin = dict(add_object_link=False, asset_root_path=D, base_link="base_link", coll
                        velocity_scale=[1.0] * n, retract_config=[0.0] * n),
            debug=None, ee_link="body_link", external_asset_path=None, external_robot_configs_path=None,
            extra_collision_spheres=None, extra_links={}, format_version=2.0, grasp_contact_link_names=None, load_meshes=False,
-           load_tool_frames_with_mesh=False, lock_joints={},   # 假夹爪关节长在机身外、不在 curobo 的链上,锁它会 KeyError(DR1 2026-09-26)
+           load_tool_frames_with_mesh=False, lock_joints={},   # 假夹爪关节长在机身外、不在 curobo 的链上,锁它会 KeyError(DR1 2026-09-24)
            mesh_link_names=links, self_collision_buffer={l: -0.01 for l in links}, self_collision_ignore=ignore,
            tool_frames=["body_link"], urdf_path=f"{D}/drone.urdf", use_external_assets=False, use_global_cumul=True)
 open(f"{D}/curobo_left.yml", "w").write(yaml.safe_dump(dict(robot_cfg=dict(kinematics=kin), planner=dict(frame_bias=[0.0, 0.0, 0.0])), sort_keys=False))

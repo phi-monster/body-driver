@@ -406,7 +406,7 @@ package body Geom is
             end if;
             if abs (A (Col, Col)) <= 1.0e-18 then
                --  这一列没有信息(比如一个点的观测全被踢成离群,它的三列全零):这个参数不确定度无穷,别的参数照算
-               --  (G1O 2026-09-25 右眼:残差 0.64 px 的好解被"± inf"整个否掉)
+               --  (G1O 2026-09-24 右眼:残差 0.64 px 的好解被"± inf"整个否掉)
                Undet (Col) := True;
             else
                declare
@@ -826,7 +826,7 @@ package body Geom is
                return;
             end if;
             --  这套几何是无畸变针孔:焦距短到半幅宽 ÷ 焦距 > tan 60°(视场 > 120°)时针孔假设本身不成立,
-            --  这样的"解"是拟合把错数据凑平的结果(G1M 2026-09-25 左眼:5 个点解出 47.8 px),不存
+            --  这样的"解"是拟合把错数据凑平的结果(G1M 2026-09-24 左眼:5 个点解出 47.8 px),不存
             if Fit_F and then G.Cx > 1.732 * P (6) then
                Why := Ada.Strings.Unbounded.To_Unbounded_String ("焦距解成 " & Codec.Fmt (P (6), 1) & " px,视场超过 120°,针孔假设不成立(残差 " & Codec.Fmt (Cur, 2) & " px)");
                return;
@@ -1377,7 +1377,7 @@ package body Geom is
             return;   --  解出来还有点跑到相机后面 ⇒ 不是解,不存
          end if;
          --  点在手上 ⇒ 它离手腕原点不可能比手腕离这只眼还远(几何,不是常数);解发散到手外面的不是解
-         --  (X5A 2026-09-26:粗解里一个点发散,驱动照着它算出"把手往眼那边送 86721 m")
+         --  (X5A 2026-09-24:粗解里一个点发散,驱动照着它算出"把手往眼那边送 86721 m")
          for I in 0 .. Nk - 1 loop
             declare
                T : constant V3 := Tip_P (P, I);
@@ -1396,7 +1396,7 @@ package body Geom is
             end;
          end loop;
          --  同 Fit_Rig 那一条:无畸变针孔的视场不超过 120°(半幅宽 ÷ 焦距 ≤ tan 60° = 1.732,无量纲)——焦距比这还短就不是针孔的解
-         --  (X5A 2026-09-26:头顶眼粗解成焦距 140、残差 21 px,驱动照着它把手往错的方向送了 25 cm)
+         --  (X5A 2026-09-24:头顶眼粗解成焦距 140、残差 21 px,驱动照着它把手往错的方向送了 25 cm)
          if Fit_F and then G.Cx > 1.732 * P (6) then
             Why := To_Unbounded_String ("焦距解成 " & Codec.Fmt (P (6), 1) & " px,视场超过 120°,针孔假设不成立(残差 " & Codec.Fmt (Cur, 2) & " px)");
             return;
@@ -1420,7 +1420,7 @@ package body Geom is
             G.Pos_Sd := Sqrt (Sd (3) ** 2 + Sd (4) ** 2 + Sd (5) ** 2);
             G.F_Sd := (if Fit_F then Sd (6) else 0.0);
             --  位置的不确定度比手挪过的量程还大、或焦距的不确定度比焦距还大 = 方程分不开 ⇒ 不算解出来
-            --  (V1I / G1K 2026-09-25:相机解到 2.8 m / 120 m 外、残差却只有零点几像素,就是这种"解")
+            --  (V1I / G1K 2026-09-24:相机解到 2.8 m / 120 m 外、残差却只有零点几像素,就是这种"解")
             if G.Pos_Sd >= Span or else (Fit_F and then G.F_Sd >= P (6)) or else G.Rot_Sd >= 1.0 then
                Why := To_Unbounded_String ("不确定度比量本身还大:位置 ± " & Codec.Fmt (G.Pos_Sd, 3) & " m(手挪过 " & Codec.Fmt (Span, 3) & " m),焦距 "
                                            & Codec.Fmt (P (Base - 1), 1) & " ± " & Codec.Fmt (G.F_Sd, 1) & " px,朝向 ± " & Codec.Fmt (G.Rot_Sd, 3)

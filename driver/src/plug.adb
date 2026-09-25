@@ -382,7 +382,7 @@ package body Plug is
       begin
          if Vid /= "" then
             --  每一帧的位姿读数都落盘(poses.txt:帧号、这一帧存下的画面编号或 -1、每条臂 xyz + wxyz),离线能核"画面和位姿是不是同一刻"
-            --  (2026-09-25:人形腕眼焦距几炮都偏低 1–6%,x5 上在 1% 以内;要量的是画面是不是比位姿晚)
+            --  (2026-09-24:人形腕眼焦距几炮都偏低 1–6%,x5 上在 1% 以内;要量的是画面是不是比位姿晚)
             declare
                Fo : File_Type;
                Pth : constant String := Vid & "/poses.txt";
