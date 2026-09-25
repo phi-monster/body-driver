@@ -1392,6 +1392,48 @@ begin
                          & (if R2e.Covered then "、算挡了" else "、没发现挡(错)"));
                end;
             end;
+            --  ②e 没转、只挡住左半边(X5E 2026-09-26):没转的画面里原位姿解释得了看得见的那半边;把画面转 90° 再配(看全不看全那一轮会这么试),
+            --  配点糙到 1 px 左右(转着看的噪声),重解的位姿只差零点几度 —— 按"原位姿在转过的配点里数"比,原位姿吃亏,就被当成挪过;
+            --  按没转的画面里数的那份比(Base_Now)⇒ 不许算挪
+            declare
+               Gc : Geom.Cam_Geo := G0;
+               Nc0, Nct : Geom.Scene_Pt_Vectors.Vector;
+               Rc0, Rct, Rct_Bad : Geom.Fixed_Check;
+               Bc0 : Natural := Natural (Base.Length);
+               Bct, Bct2 : Natural;
+               K : Natural := 0;
+            begin
+               Gc.Rms := 0.16;   --  标定时配得很细(X5E 的数,合成)
+               for B of Base loop
+                  declare
+                     N0 : Geom.Scene_Pt := B;
+                     Nt : Geom.Scene_Pt := B;
+                  begin
+                     if B.U < 320.0 then   --  左半边被挡:乱配(合成)
+                        N0.U := Long_Float ((K * 97) mod 640); N0.V := Long_Float ((K * 61) mod 480);
+                        Nt.U := Long_Float ((K * 53) mod 640); Nt.V := Long_Float ((K * 29) mod 480);
+                     else
+                        N0.U := B.U + 0.1 * Jit6; N0.V := B.V + 0.1 * Jit6;   --  没转的画面:配得细(合成)
+                        Nt.U := B.U + 1.2 + 1.7 * Jit6; Nt.V := B.V + 1.7 * Jit6;   --  转 90° 再配:整体偏 1.2 px、再糙到约 1 px(合成;X5E 实测重解的位姿挪了 1.0 px)
+                     end if;
+                     Nc0.Append (N0); Nct.Append (Nt);
+                     K := K + 1;
+                  end;
+               end loop;
+               declare
+                  G_Plain : Geom.Cam_Geo := Gc;
+                  G_T, G_T_Bad : Geom.Cam_Geo := Gc;
+               begin
+                  Geom.Check_Fixed (G_Plain, Base, Nc0, Bc0, Rc0, Turn_Sd => 0.99);
+                  Bct := Bc0; Bct2 := Bc0;
+                  Geom.Check_Fixed (G_T, Base, Nct, Bct, Rct, Turn_Sd => 0.99, Base_Now => Rc0.Consistent_Now);
+                  Geom.Check_Fixed (G_T_Bad, Base, Nct, Bct2, Rct_Bad, Turn_Sd => 0.99);
+                  Check (Rc0.Covered and then not Rc0.Moved and then not Rct.Moved and then Rct_Bad.Moved,
+                         "不动的眼核对·没转只挡左半、再把画面转 90° 配:没转的画面里原位姿对得上 " & Codec.Img (Rc0.Consistent_Now) & " ⇒ " & (if Rc0.Covered then "算挡了" else "没发现挡(错)")
+                         & " · 转过的配点里重解的位姿 " & Codec.Img (Rct.Consistent) & " 个点、挪了 " & Codec.Fmt (Rct.Shift_Px, 2) & " px ⇒ 按没转的那份比:"
+                         & (if Rct.Moved then "算挪了(错)" else "没挪") & "(不按它比:" & (if Rct_Bad.Moved then "会算成挪了" else "也没挪") & ")");
+               end;
+            end;
             --  ③b 挡住左半边,但挡住的那半边不是乱配,是一片平滑的"编出来的"配点(照着一个偏了 7° 的位姿投、再抖 ±4 px,合成):
             --  X5C 2026-09-25 就是这样被判成"挪了 7.6°、10.6 cm"的 ⇒ 不许算挪,要算挡
             declare

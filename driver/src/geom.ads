@@ -180,8 +180,10 @@ package Geom is
    end record;
    --  Turn_Sd:仪器把这张参考图配到"它自己转了 90°"那张时的配点噪声(像素,均方根;开机标好时量一次、随板存,0 = 没量)。
    --  原来的位姿按标定时的细门数点(小挪也抓得到);新位姿按 max(细门, 转着看的噪声)数(真被转了也数得全)
+   --  Base_Now ≥ 0:"原来的位姿能解释几个点"不按这一份 Now 数,按调用方给的(画面转过再配时:转过的配点天生更糙,原来的位姿按它数吃亏,
+   --  要按没转的画面里数的那份比;X5E 2026-09-26 挡左半时转 90° 再配出一份只差 0.3°、6 mm 的位姿就被当成挪过)
    procedure Check_Fixed (G : in out Cam_Geo; Scene : Scene_Pt_Vectors.Vector; Now : Scene_Pt_Vectors.Vector; Best : in out Natural; Rep : out Fixed_Check;
-                          Turn_Sd : Long_Float := 0.0);
+                          Turn_Sd : Long_Float := 0.0; Base_Now : Integer := -1);
    --  碰到桌面那一刻量指尖(2026-09-26):手上那只眼里每一瓣手指尖的像素是一条视线(Views 里的 Pose = 碰到那一刻手的位姿);
    --  指尖碰在面上(过 P0、单位法向 N、面内离散 Sd_Plane 米)⇒ 视线和面的交点就是那一瓣的指尖:离眼 S(米),不确定度 Sd_Plane ÷ |视线·法向|。
    --  视线不朝着面(平行或背着)⇒ 那一瓣 Ok = False。指尖本来就是"手碰到东西的那一点";面是标定板量的(1 mm 级),不用深度、不用尺子

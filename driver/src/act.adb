@@ -6918,7 +6918,7 @@ package body Act is
                   Nt : constant Geom.Scene_Pt_Vectors.Vector := Matched (T, Okt);
                begin
                   if Okt then
-                     Geom.Check_Fixed (Gt, C.Board, Nt, Bt, Rt, Turn_Sd => C.Fixed_Turn_Sd);
+                     Geom.Check_Fixed (Gt, C.Board, Nt, Bt, Rt, Turn_Sd => C.Fixed_Turn_Sd, Base_Now => R.Consistent_Now);
                      if Rt.Moved then
                         G := Gt; R := Rt; C.Fixed_Best := Bt; Turned := T;
                         exit;

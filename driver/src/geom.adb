@@ -2474,7 +2474,7 @@ package body Geom is
    end Refine_Board;
 
    procedure Check_Fixed (G : in out Cam_Geo; Scene : Scene_Pt_Vectors.Vector; Now : Scene_Pt_Vectors.Vector; Best : in out Natural; Rep : out Fixed_Check;
-                          Turn_Sd : Long_Float := 0.0) is
+                          Turn_Sd : Long_Float := 0.0; Base_Now : Integer := -1) is
       Cur : Scene_Pt_Vectors.Vector;
       Gn : Cam_Geo := G;
       Fr : Fixed_Report;
@@ -2576,7 +2576,7 @@ package body Geom is
       --  新旧位姿投出来的板点差得比细门远(差不到门里 = 同一个位姿,只是这会儿配得糙)。
       --  看得见、配得上的不到四分之一时解出来的位姿不可信 —— X5C4 2026-09-26 转 90° 重标后再挡一半,仪器整幅配飞,此刻的位姿一个点都解释不了,
       --  一份错得离谱的位姿以 18.9 px 的残差在门里凑到 35/782 个,就被当成"挪了 0.84 m"换上了。三条不全 ⇒ 按挡没挡报,位姿不动
-      if Rep.Consistent_Now + Rep.Consistent_Now < Rep.Consistent and then 4 * Rep.Consistent >= Best and then Rep.Shift_Px > Rep.Gate then
+      if (if Base_Now >= 0 then 2 * Base_Now else 2 * Rep.Consistent_Now) < Rep.Consistent and then 4 * Rep.Consistent >= Best and then Rep.Shift_Px > Rep.Gate then
          Rep.Moved := True;
          Gn.F := G.F; Gn.F_Meas := G.F_Meas; Gn.F_Sd := G.F_Sd;   --  焦距照旧
          Gn.Rms := Fr.Scene_Rms;   --  以后按新解配得多细来判
