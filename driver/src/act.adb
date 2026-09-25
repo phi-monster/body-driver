@@ -11217,6 +11217,86 @@ package body Act is
          begin
             return (O (0) - C.Board_Pt (0)) * C.Board_N (0) + (O (1) - C.Board_Pt (1)) * C.Board_N (1) + (O (2) - C.Board_Pt (2)) * C.Board_N (2);
          end Cam_Height;
+         --  在板上一块空的面上压一下:先按此刻各瓣视线落在面上的点(再平移 Shift)找一块空的面、挪过去,压到被顶住;
+         --  Got = 真顶住了、沿面滑得动、压的这一瓣的视线交得到面;Row = 这一下每一瓣视线交面的结果;Spot = 压的那一瓣落的那一点
+         procedure Press_At (K : Natural; Shift : Geom.V3; Row : out Geom.Plane_Tip_Vectors.Vector; Spot : out Geom.V3; Got : out Boolean) is
+            P : constant Plug.Arm_Pose := F.EE (A);
+            Gk : constant Geom.Cam_Geo := C.Geo (Hc);
+            O : constant Geom.V3 := Geom.Cam_Pos (Gk, P);
+            H : constant Long_Float := (O (0) - C.Board_Pt (0)) * C.Board_N (0) + (O (1) - C.Board_Pt (1)) * C.Board_N (1) + (O (2) - C.Board_Pt (2)) * C.Board_N (2);
+            Lp : Geom.V3_Vectors.Vector;
+            Dl : Geom.V3;
+            All_Hit : Boolean := True;
+            R : constant Long_Float := Nw (K) * Long_Float'Max (0.0, H) / Gk.F;   --  这一瓣手指的宽(像素)落到面那么远的上限(指尖在眼和面之间)
+         begin
+            Got := False; Spot := [0.0, 0.0, 0.0];
+            Row := Geom.Plane_Tip_Vectors.Empty_Vector;
+            for J in 0 .. Nl - 1 loop
+               declare
+                  Jj : constant Natural := (if J = 0 then K elsif J <= K then J - 1 else J);   --  压的那一瓣排第一
+                  Hok : Boolean;
+                  Q : constant Geom.V3 := Geom.Hit_Plane (O, Geom.Ray (Gk, P, Tu (Jj), Tv (Jj)), C.Board_Pt, C.Board_N, Hok);
+               begin
+                  All_Hit := All_Hit and then Hok;
+                  Lp.Append (Geom.V3'[Q (0) + Shift (0), Q (1) + Shift (1), Q (2) + Shift (2)]);
+               end;
+            end loop;
+            if H <= 0.0 or else not All_Hit then
+               Geo_Say ("  眼在板的面之下、或手指的视线落不到面上(眼离面 " & Mm (H) & ")⇒ 指尖这回量不成");
+               return;
+            end if;
+            if not Board_Free_Spot (C, Lp, R, Dl) then
+               Geo_Say ("  板上找不到一块空的面(手指宽上限 " & Mm (R) & ")⇒ 指尖这回量不成");
+               return;
+            end if;
+            Spot := [Lp (0) (0) + Dl (0), Lp (0) (1) + Dl (1), Lp (0) (2) + Dl (2)];
+            declare
+               Mv : constant Geom.V3 := [Shift (0) + Dl (0), Shift (1) + Dl (1), Shift (2) + Dl (2)];
+               Mok : Boolean;
+            begin
+               if Geom.Norm (Mv) > 0.0 then
+                  Geo_Say ("  挪到板上空的那块(手指宽上限 " & Mm (R) & ",眼离面 " & Mm (H) & ")");
+                  Geo_Move (L, C, F, A, Mv, Mok);
+               end if;
+            end;
+            declare
+               Start : constant Plug.Arm_Pose := F.EE (A);
+               Ln : constant Long_Float := 4.0 * Geo_Base (C, A);   --  一压(同 Geo_Go 里压的那一步)
+               Cap : constant Natural := (if Ln > 0.0 then Natural (Long_Float'Ceiling (H / Ln)) + 1 else 0);
+               Tp : constant Geom.V3 := Tip_World (C, A, F.EE (A));   --  具名对象再传(F.EE 直接写进实参会锁住容器,S3 2026-09-23)
+            begin
+               if Start (2) > Top_Z then
+                  Top_Z := Start (2);
+               end if;
+               Geo_Go (L, C, F, A, Tp, Geo_Base (C, A), 1.0, True, Down, Ev, St, Press_Cap => Cap, Note_Contacts => False);
+               Geo_Say ("  ⇒ " & To_String (Ev));
+               if Index (Ev, "contact") = 1 then
+                  declare
+                     Pc : constant Plug.Arm_Pose := F.EE (A);
+                     Vs : Geom.Board_View_Vectors.Vector;
+                     Sl_Ln, Sl_Got : Long_Float;
+                     Slid : Boolean;
+                  begin
+                     for J in 0 .. Nl - 1 loop
+                        Vs.Append (Geom.Board_View'(Pose => Pc, U => Tu (J), V => Tv (J)));
+                     end loop;
+                     Row := Geom.Tips_On_Plane (C.Geo (Hc), Vs, C.Board_Pt, C.Board_N, C.Board_Rms);
+                     Slide_Test (L, C, F, A, C.Board_N, Sl_Ln, Sl_Got, Slid);
+                     if not Slid then
+                        Geo_Say ("  沿着板的面滑 " & Mm (Sl_Ln) & " 只走了 " & Mm (Sl_Got) & " ⇒ 顶住我的不是桌面,是我自己的胳膊到头了;这一下不算");
+                     elsif not Row (K).Ok then
+                        Geo_Say ("  这一瓣的视线交不到面上 ⇒ 这一下不算");
+                     else
+                        Got := True;
+                        for J in 0 .. Nl - 1 loop
+                           Geo_Say ("  第 " & Codec.Img (J + 1) & " 瓣的视线交面:" & (if Row (J).Ok then "离眼 " & Mm (Row (J).S) & " ± " & Mm (Row (J).Sd) else "交不到"));
+                        end loop;
+                     end if;
+                  end;
+               end if;
+               Go_Back (A, Start);
+            end;
+         end Press_At;
       begin
          for K in 0 .. Z.N_Lobes - 1 loop
             declare
@@ -11297,82 +11377,42 @@ package body Act is
                   Geo_Say ("  转不到朝下(" & To_String (Ev) & ")⇒ 指尖这回量不成");
                   Failed := True;
                else
+                  --  两处碰(2026-09-26):胳膊够不着时"到头了"也会被当成碰到(G2G 人形一只手在桌面上方 7.8 cm 停住),那样视线交面交出来的指尖长出几厘米;
+                  --  真碰到桌面时两处量出的指尖一样长,胳膊到头停的高度随位置变 ⇒ 第二处挪开 4 倍一压(倍数,无量纲)再碰,两处差超过
+                  --  "两边不确定度的 3 倍 + 这只手一推走得出来的最小一档"(量的)⇒ 不收
                   declare
-                     P : constant Plug.Arm_Pose := F.EE (A);
-                     Gk : constant Geom.Cam_Geo := C.Geo (Hc);
-                     O : constant Geom.V3 := Geom.Cam_Pos (Gk, P);
-                     H : constant Long_Float := (O (0) - C.Board_Pt (0)) * C.Board_N (0) + (O (1) - C.Board_Pt (1)) * C.Board_N (1) + (O (2) - C.Board_Pt (2)) * C.Board_N (2);
-                     Lp : Geom.V3_Vectors.Vector;
-                     Dl : Geom.V3;
-                     All_Hit : Boolean := True;
-                     R : constant Long_Float := Nw (K) * Long_Float'Max (0.0, H) / Gk.F;   --  这一瓣手指的宽(像素)落到面那么远的上限(指尖在眼和面之间)
+                     Row1, Row2 : Geom.Plane_Tip_Vectors.Vector;
+                     Sp1, Sp2 : Geom.V3;
+                     G1, G2 : Boolean := False;
+                     N : constant Geom.V3 := C.Board_N;
+                     Ax : constant Geom.V3 := (if abs (N (0)) < abs (N (1)) then [1.0, 0.0, 0.0] else [0.0, 1.0, 0.0]);
+                     T0 : constant Geom.V3 := [N (1) * Ax (2) - N (2) * Ax (1), N (2) * Ax (0) - N (0) * Ax (2), N (0) * Ax (1) - N (1) * Ax (0)];
+                     Tn : constant Long_Float := Geom.Norm (T0);
+                     Far : constant Long_Float := 4.0 * 4.0 * Geo_Base (C, A);   --  4 倍一压(一压 = 4 倍探针幅度,同 Geo_Go)
+                     Shift2 : constant Geom.V3 := (if Tn > 0.0 then [Far * T0 (0) / Tn, Far * T0 (1) / Tn, Far * T0 (2) / Tn] else [0.0, 0.0, 0.0]);
                   begin
-                     for J in 0 .. Nl - 1 loop
-                        declare
-                           Jj : constant Natural := (if J = 0 then K elsif J <= K then J - 1 else J);   --  压的那一瓣排第一
-                           Hok : Boolean;
-                           Q : constant Geom.V3 := Geom.Hit_Plane (O, Geom.Ray (Gk, P, Tu (Jj), Tv (Jj)), C.Board_Pt, C.Board_N, Hok);
-                        begin
-                           All_Hit := All_Hit and then Hok;
-                           Lp.Append (Q);
-                        end;
-                     end loop;
-                     if H <= 0.0 or else not All_Hit then
-                        Geo_Say ("  眼在板的面之下、或手指的视线落不到面上(眼离面 " & Mm (H) & ")⇒ 指尖这回量不成");
-                        Failed := True;
-                     elsif not Board_Free_Spot (C, Lp, R, Dl) then
-                        Geo_Say ("  板上找不到一块空的面(手指宽上限 " & Mm (R) & ")⇒ 指尖这回量不成");
+                     Press_At (K, [0.0, 0.0, 0.0], Row1, Sp1, G1);
+                     if G1 then
+                        Press_At (K, Shift2, Row2, Sp2, G2);
+                     end if;
+                     if not (G1 and then G2) then
                         Failed := True;
                      else
-                        if Geom.Norm (Dl) > 0.0 then
-                           declare
-                              Mok : Boolean;
-                           begin
-                              Geo_Say ("  挪到板上空的那块(手指宽上限 " & Mm (R) & ",眼离面 " & Mm (H) & ")");
-                              Geo_Move (L, C, F, A, Dl, Mok);
-                           end;
-                        end if;
                         declare
-                           Start : constant Plug.Arm_Pose := F.EE (A);
-                           Ln : constant Long_Float := 4.0 * Geo_Base (C, A);   --  一压(同 Geo_Go 里压的那一步)
-                           Top_Here : constant Boolean := Start (2) > Top_Z;
-                           Cap : constant Natural := (if Ln > 0.0 then Natural (Long_Float'Ceiling (H / Ln)) + 1 else 0);
-                           Tp : constant Geom.V3 := Tip_World (C, A, F.EE (A));   --  具名对象再传(同下面那一段的缘故)
+                           S1 : constant Long_Float := Row1 (K).S;
+                           S2 : constant Long_Float := Row2 (K).S;
+                           Gate : constant Long_Float := 3.0 * Sqrt (Row1 (K).Sd ** 2 + Row2 (K).Sd ** 2) + Geo_Base (C, A);
+                           Apart : constant Long_Float := Geom.Norm ([Sp1 (0) - Sp2 (0), Sp1 (1) - Sp2 (1), Sp1 (2) - Sp2 (2)]);
                         begin
-                           if Top_Here then
-                              Top_Z := Start (2);
-                           end if;
-                           Geo_Go (L, C, F, A, Tp, Geo_Base (C, A), 1.0, True, Down, Ev, St, Press_Cap => Cap, Note_Contacts => False);
-                           Geo_Say ("  ⇒ " & To_String (Ev));
-                           if Index (Ev, "contact") /= 1 then
+                           Geo_Say ("  两处碰出来这一瓣离眼 " & Mm (S1) & " / " & Mm (S2) & "(两处相距 " & Mm (Apart) & ",门 " & Mm (Gate) & ")");
+                           if abs (S1 - S2) > Gate then
+                              Geo_Say ("  两处对不上(差 " & Mm (abs (S1 - S2)) & ")⇒ 至少一处不是真碰到桌面(多半是胳膊到头了);指尖这回量不成");
                               Failed := True;
                            else
-                              declare
-                                 Pc : constant Plug.Arm_Pose := F.EE (A);
-                                 Vs : Geom.Board_View_Vectors.Vector;
-                                 Sl_Ln, Sl_Got : Long_Float;
-                                 Slid : Boolean;
-                              begin
-                                 for J in 0 .. Nl - 1 loop
-                                    Vs.Append (Geom.Board_View'(Pose => Pc, U => Tu (J), V => Tv (J)));
-                                 end loop;
-                                 Rows (K) := Geom.Tips_On_Plane (C.Geo (Hc), Vs, C.Board_Pt, C.Board_N, C.Board_Rms);
-                                 Slide_Test (L, C, F, A, C.Board_N, Sl_Ln, Sl_Got, Slid);
-                                 if not Slid then
-                                    Geo_Say ("  沿着板的面滑 " & Mm (Sl_Ln) & " 只走了 " & Mm (Sl_Got) & " ⇒ 顶住我的不是桌面,是我自己的胳膊到头了;这一下不算");
-                                    Failed := True;
-                                 elsif not Rows (K) (K).Ok then
-                                    Geo_Say ("  这一瓣的视线交不到面上 ⇒ 这一下不算");
-                                    Failed := True;
-                                 else
-                                    Done.Replace_Element (K, True);
-                                    for J in 0 .. Nl - 1 loop
-                                       Geo_Say ("  第 " & Codec.Img (J + 1) & " 瓣的视线交面:" & (if Rows (K) (J).Ok then "离眼 " & Mm (Rows (K) (J).S) & " ± " & Mm (Rows (K) (J).Sd) else "交不到"));
-                                    end loop;
-                                 end if;
-                              end;
+                              Rows (K) := Row1;
+                              Rows (K) (K).S := 0.5 * (S1 + S2);
+                              Done.Replace_Element (K, True);
                            end if;
-                           Go_Back (A, Start);
                         end;
                      end if;
                   end;
