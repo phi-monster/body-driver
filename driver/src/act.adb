@@ -5950,7 +5950,7 @@ package body Act is
             Codec.Write_PGM (Dump & "/geo_cam" & Codec.Img (Cam) & "_stop" & Codec.Img (Stop_N) & ".pgm", F.Cams (Cam).Gray, Cw, Ch);
          end if;
       end Dump_Stop;
-      --  标定板用(2026-09-25):这一停(只平移、手没转)手上这只眼的图、手的位姿、同一刻不动的眼的图记下来,开机末尾配点(Geo_Board)。
+      --  标定板用(2026-09-25):这一停手上这只眼的图、手的位姿、同一刻不动的眼的图记下来,开机末尾配点(Geo_Board)。
       --  不动的眼 = 不长在任何一条臂上的那台主相机;没有就不记
       procedure Board_Keep is
          Wc : constant Natural := C.Map.World_Cam;
@@ -6006,6 +6006,7 @@ package body Act is
          Where;
          Dump_Stop;
          K := Record_All;
+         Board_Keep;   --  转动停也进标定板:只平移定不住相机离手腕原点的偏移,转一下才定得住
          Geo_Say ("量朝向:转 " & Codec.Fmt (Sign * Theta * Deg, 1) & "° ⇒ 实到 " & Codec.Fmt (Geom.Angle_Between (Before, F.EE (Arm)) * Deg, 1) & "°,跟住 "
                   & Codec.Img (K) & "/" & Codec.Img (Natural (Cur.Length)) & " 点" & (if Mok then "" else " · 身体说没转成"));
          Head_Mark (L, C, F, Arm);   --  转过之后手停着,不动的眼记一笔
@@ -6319,9 +6320,9 @@ package body Act is
       Grid_Div : constant Long_Float := 32.0;   --  格点间距 = 画幅宽的 1/32(采样密度,比例无量纲;640 宽 = 20 px,一只眼最多 768 个点)
       Done : Bools;   --  哪些停已经归进某一组(同一台眼、同一集)
       Dump : constant String := Codec.Env ("BL_DUMP");
-      package Sorting is new F64_Vectors.Generic_Sorting;
    begin
       C.Board.Clear;
+      C.Board_Tracks.Clear;
       C.Board_Plane := False;
       if C.Board_Stops.Is_Empty then
          return;
@@ -6426,7 +6427,7 @@ package body Act is
                         when others => null;
                      end;
                   end if;
-                  Geom.Build_Board (Gk, O, C.Board, St);
+                  Geom.Build_Board (Gk, Ref.Cam, O, C.Board, C.Board_Tracks, St);
                   Geo_Say (Who & " · " & Codec.Img (Natural (Idx.Length)) & " 停:格点 " & Codec.Img (St.Tracks) & " 个,三角定住 " & Codec.Img (St.Tri_Ok)
                            & " 个,各停在不动的眼里配到同一处 " & Codec.Img (St.Kept) & " 个进板;配点噪声 腕眼 " & Codec.Fmt (St.Sigma_W, 2) & " px、不动的眼 "
                            & Codec.Fmt (St.Sigma_H, 2) & " px · 仪器配了 " & Codec.Img (Asked) & " 对" & (if Failed > 0 then "(没配成 " & Codec.Img (Failed) & ")" else "")
@@ -6435,6 +6436,49 @@ package body Act is
             end;
          end if;
       end loop;
+   end Geo_Board;
+
+   procedure Geo_Board_Solve (C : in out Context; G : in out Geom.Cam_Geo; Rep : out Geom.Fixed_Report; Ok : out Boolean) is
+      Dump : constant String := Codec.Env ("BL_DUMP");
+      package Sorting is new F64_Vectors.Generic_Sorting;
+      Deg : constant Long_Float := 180.0 / Ada.Numerics.Pi;   --  弧度 → 度(换算,无量纲)
+   begin
+      Rep := (others => <>);
+      Geom.Fit_Fixed_Board (G, C.Board, Rep, Ok);
+      if not Ok then
+         return;
+      end if;
+      Geo_Say ("不动的眼按板解:" & Codec.Img (Rep.Scene_Used) & "/" & Codec.Img (Rep.Scene_N) & " 个点(像素残差 " & Codec.Fmt (Rep.Scene_Rms, 2) & " px)· 焦距 "
+               & Codec.Fmt (G.F, 1) & " px · 在 (" & Mm (G.Pos (0)) & "," & Mm (G.Pos (1)) & "," & Mm (G.Pos (2)) & ")· 接着腕眼和它一起解");
+      --  腕眼 + 不动的眼 + 板上的点一起解(Geom.Refine_Board):板上的点的远近随腕眼焦距缩放,只按腕眼自己的标定,不动的眼的焦距跟着错
+      declare
+         Before : constant Geom.Geo_Vectors.Vector := C.Geo;
+         Rr : Geom.Refine_Report;
+         Rok : Boolean;
+      begin
+         Geom.Refine_Board (C.Geo, G, C.Board_Tracks, Rr, Rok);
+         if Rok then
+            for K in 0 .. Natural (C.Geo.Length) - 1 loop
+               if K < Natural (Before.Length) and then not Geom."=" (C.Geo (K).R_Ce, Before (K).R_Ce) then
+                  declare
+                     A : constant Geom.Cam_Geo := Before (K);
+                     B : constant Geom.Cam_Geo := C.Geo (K);
+                  begin
+                     Geo_Say ("  第" & Codec.Img (K) & " 台腕眼:焦距 " & Codec.Fmt (A.F, 1) & " → " & Codec.Fmt (B.F, 1) & " ± " & Codec.Fmt (B.F_Sd, 1) & " px · 离手腕原点 ("
+                              & Mm (A.Off (0)) & "," & Mm (A.Off (1)) & "," & Mm (A.Off (2)) & ") → (" & Mm (B.Off (0)) & "," & Mm (B.Off (1)) & "," & Mm (B.Off (2)) & ") ± "
+                              & Mm (B.Off_Sd) & " · 朝向改了 " & Codec.Fmt (Geom.Norm (Geom.Rot_Vec (Geom.Mul (Geom.Tr (A.R_Ce), B.R_Ce))) * Deg, 2) & "°");
+                  end;
+               end if;
+            end loop;
+            Geo_Say ("  一起解:" & Codec.Img (Rr.Tracks) & " 条点 · 腕眼重投 " & Codec.Fmt (Rr.Wrist_Rms, 2) & " px · 不动的眼 " & Codec.Img (Rr.Head_Used) & " 个点 "
+                     & Codec.Fmt (Rr.Head_Rms, 2) & " px · 它在 (" & Mm (G.Pos (0)) & "," & Mm (G.Pos (1)) & "," & Mm (G.Pos (2)) & ") ± " & Mm (G.Pos_Sd) & " · 焦距 "
+                     & Codec.Fmt (G.F, 1) & " ± " & Codec.Fmt (G.F_Sd, 1) & " px");
+            Geom.Board_Points (C.Geo, C.Board_Tracks, C.Board);   --  板上的点按新几何重新三角
+            Geom.Save (To_String (C.Geo_Path), C.Geo);
+         else
+            Geo_Say ("  腕眼和不动的眼一起解没收下(" & To_String (Geom.Why) & ")⇒ 几何按各自单独解的");
+         end if;
+      end;
       if Dump /= "" then
          declare
             Fo : Ada.Text_IO.File_Type;
@@ -6481,7 +6525,7 @@ package body Act is
             end;
          end;
       end if;
-   end Geo_Board;
+   end Geo_Board_Solve;
 
    --  不动的眼:2026-09-25 起按标定板解(Geo_Board:腕眼几停三角出来的桌上的点,世界位置已知)⇒ 相机在世界里的位姿、焦距(没给就解)。
    --  以前(R4 2026-09-24)是拿开机各停的合空标记(Head_Mark,C.Fixed_Obs)连手上的点一起解,焦距随放进哪几笔在 ±8% 里翻(G2E):分割出来的指尖在手上会滑。
@@ -6511,7 +6555,14 @@ package body Act is
          if not F.Cams (Wc).Has_K then
             G.F := 0.0;   --  身体没给 ⇒ 一起解
          end if;
+         --  先按板解它、再腕眼和它一起解(Geo_Board_Solve);手上的点等眼定了再认(手上的尖会滑,不进眼的解)
+         Geo_Board_Solve (C, G, Rep, Fok);
+         if not Fok then
+            Geo_Say ("不动的眼解不出来(标定板 " & Codec.Img (Natural (C.Board.Length)) & " 个点):" & To_String (Geom.Why));
+            return;
+         end if;
          --  每条臂:指尖中点在自己眼里的像素(握区量的)⇒ 相机系单位视线 ⇒ 手系(起点 = 相机离手腕原点的偏移)。眼没量好的臂没有视线,不进解
+         --  (腕眼几何这时已经是和不动的眼一起解过的)
          declare
             Ray_O, Ray_D : Geom.V3_Vectors.Vector;
             Own_Kind : Geom.Nat_Vectors.Vector;   --  每条臂自己那只眼里手指分几瓣(没长眼的臂 0):瓣数一样的那个点才在它的视线上
@@ -6586,14 +6637,8 @@ package body Act is
                   when others => null;
                end;
             end if;
-            --  先按标定板解眼,再按解好的眼认手上的点(手上的尖会滑,不进眼的解;Fit_Fixed_Rig)
-            Geom.Fit_Fixed_Rig (G, C.Fixed_Obs, C.Board, Ray_O, Ray_D, Own_Kind, Tips, Rep, Fok);
+            Geom.Hand_Points (G, C.Fixed_Obs, Ray_O, Ray_D, Own_Kind, Tips, Rep);   --  眼已知 ⇒ 手上被标的点
          end;
-         if not Fok then
-            Geo_Say ("不动的眼解不出来(标定板 " & Codec.Img (Natural (C.Board.Length)) & " 个点、" & Codec.Img (Natural (C.Fixed_Obs.Length)) & " 笔指尖观测):"
-                     & To_String (Geom.Why));
-            return;
-         end if;
          C.Geo.Replace_Element (Wc, G);
          Geo_Say ("不动的眼量好:标定板 " & Codec.Img (Rep.Scene_Used) & "/" & Codec.Img (Rep.Scene_N) & " 个点(像素残差 " & Codec.Fmt (Rep.Scene_Rms, 2) & " px)· 手上的标记 "
                   & Codec.Img (Rep.Hand_Used) & "/" & Codec.Img (Rep.Hand_N) & " 笔(" & Codec.Fmt (Rep.Hand_Rms, 2) & " px)· 踢掉 " & Codec.Img (G.Dropped)

@@ -122,7 +122,36 @@ package Geom is
    --  一只手上的眼、同一集里的几停(O = 每个点在每一停里的观测)⇒ 进标定板的点追加到 Scene。门槛全从这批点自己量:
    --  重投超过全体中位 3 倍的那一停不要;远近的不确定度比远近本身还大的点不要(同"不确定度比量本身还大 = 分不开");
    --  各停在不动的眼里配到的像素离它们的中位,超过全体这个离散的中位 3 倍的点不要(倍数无量纲,同踢离群那一条)
-   procedure Build_Board (G : Cam_Geo; O : Board_Obs_Vectors.Vector; Scene : in out Scene_Pt_Vectors.Vector; St : out Board_Stats);
+   --  一条进了板的点:它在那只腕眼里门内的几停(位姿 + 像素)和它在不动的眼里的像素。腕眼几何一变,就按这几停重新三角(Refine_Board / Board_Points)
+   type Board_View is record
+      Pose : Plug.Arm_Pose := [others => 0.0];
+      U, V : Long_Float := 0.0;
+   end record;
+   package Board_View_Vectors is new Ada.Containers.Vectors (Natural, Board_View);
+   type Board_Track is record
+      Cam : Natural := 0;                  --  哪台腕眼(相机号)
+      Views : Board_View_Vectors.Vector;
+      Hu, Hv : Long_Float := 0.0;          --  不动的眼里的像素(各停配到的中位)
+      Sw, Sh : Long_Float := 0.0;          --  这台腕眼、不动的眼的配点噪声(像素,每轴)
+   end record;
+   package Board_Track_Vectors is new Ada.Containers.Vectors (Natural, Board_Track);
+   --  Cam = 这台腕眼的相机号;进板的点同时追加到 Scene(按 G 三角好的世界点)和 Tracks(几停原样,留着一起解时重新三角)
+   procedure Build_Board (G : Cam_Geo; Cam : Natural; O : Board_Obs_Vectors.Vector; Scene : in out Scene_Pt_Vectors.Vector;
+                          Tracks : in out Board_Track_Vectors.Vector; St : out Board_Stats);
+   --  按给定的腕眼几何(Geos,按相机号)把 Tracks 重新三角成板上的点(协方差同 Build_Board)
+   procedure Board_Points (Geos : Geo_Vectors.Vector; Tracks : Board_Track_Vectors.Vector; Scene : out Scene_Pt_Vectors.Vector);
+   --  腕眼 + 不动的眼 + 板上的点一起解(2026-09-25):参数 = 每台腕眼(朝向改正 3、偏移改正 3、焦距 1,焦距是身体给的就不动)+ 不动的眼(朝向 3、位置 3、焦距 1);
+   --  板上的点不是未知数:每换一次参数,按它在腕眼里的几停重新三角。残差 = 腕眼各停的重投 ÷ 腕眼配点噪声 + 不动的眼里的像素 ÷ 它的配点噪声
+   --  + 腕眼标定(Fit_Rig)量到的偏移、焦距当先验(÷ 它们自己报的不确定度;没报就不加)。
+   --  为什么要一起解:板上的点的远近随腕眼焦距缩放,不动的眼的焦距跟着错(G2E 离线:腕眼 −1.2% ⇒ 头 −2.8%;把腕眼焦距换成真值 ⇒ 头 +0.2%);
+   --  而不动的眼从另一个方向看同一批点,点的形状对不上就把腕眼焦距拉回来(离线一起解:腕眼 392.2 → 396.9、头 281.7 → 288.4,真 397 / 288.1)。
+   --  只平移的停定不住偏移(整块板跟着平移,不动的眼一起挪),转动的停定得住 ⇒ 板里要有转动停。不动的眼的点每遍按 3 倍中位重挑,两遍(次数)。
+   --  不确定度比量本身还大(焦距 ± 比焦距大、位置 ± 比板铺开的量程大)⇒ 不改几何,Ok = False
+   type Refine_Report is record
+      Tracks, Head_Used : Natural := 0;
+      Wrist_Rms, Head_Rms : Long_Float := 0.0;   --  像素
+   end record;
+   procedure Refine_Board (Geos : in out Geo_Vectors.Vector; Head : in out Cam_Geo; Tracks : Board_Track_Vectors.Vector; Rep : out Refine_Report; Ok : out Boolean);
    --  不动的眼解完之后每组观测各自的像素残差(记账、给认指尖定门槛)
    type Fixed_Report is record
       Scene_N, Scene_Used : Natural := 0;   --  标定板的点:给了几个、进解几个

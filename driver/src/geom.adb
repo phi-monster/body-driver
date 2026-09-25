@@ -1,3 +1,4 @@
+with Ada.Unchecked_Deallocation;
 with Ada.Numerics.Long_Elementary_Functions; use Ada.Numerics.Long_Elementary_Functions;
 with Ada.Numerics.Float_Random;
 with Ada.Text_IO;
@@ -215,6 +216,20 @@ package body Geom is
    --  Resid 把每个观测的两个像素差填进 Fill;Steps 是各参数的差分步(弧度 / 米 / 像素,极小量)。
    --  阻尼升降的两个倍数不是门槛、不影响身体动不动,只管这次拟合怎么迭代
    type Param_Vec is array (Natural range <>) of Long_Float;
+   --  雅可比和残差放在堆上:标定板一起解时 2 万多条残差 × 20 多个未知数,摆在 8 MB 的栈上不稳(一份雅可比就 4 MB)
+   type Big_Mat is array (Natural range <>, Natural range <>) of Long_Float;
+   type Big_Mat_Ptr is access Big_Mat;
+   procedure Free_Mat is new Ada.Unchecked_Deallocation (Big_Mat, Big_Mat_Ptr);
+   type Big_Vec_Ptr is access Param_Vec;
+   procedure Free_Vec is new Ada.Unchecked_Deallocation (Param_Vec, Big_Vec_Ptr);
+   function New_Vec (N : Natural) return Big_Vec_Ptr is
+      V : constant Big_Vec_Ptr := new Param_Vec (0 .. Integer (N) - 1);
+   begin
+      for I in V'Range loop
+         V (I) := 0.0;
+      end loop;
+      return V;
+   end New_Vec;
    procedure LM_Refine (P : in out Param_Vec; N_Obs : Natural; Steps : Param_Vec; Iters : Positive;
                         Resid : access procedure (P : Param_Vec; R : out Long_Float; Fill : access procedure (I : Natural; Du, Dv : Long_Float));
                         Cur : in out Long_Float) is
@@ -222,8 +237,9 @@ package body Geom is
       Lm_Tighten : constant := 10;
       Np : constant Natural := P'Length;
       Lam : Long_Float := 1.0e-3;   --  阻尼(无量纲)
-      Rv : array (0 .. 2 * N_Obs - 1) of Long_Float := [others => 0.0];
-      J : array (0 .. 2 * N_Obs - 1, 0 .. Np - 1) of Long_Float := [others => [others => 0.0]];
+      Rv : Big_Vec_Ptr := New_Vec (2 * N_Obs);
+      Rp : Big_Vec_Ptr := New_Vec (2 * N_Obs);
+      J : Big_Mat_Ptr := new Big_Mat (0 .. Integer (2 * N_Obs) - 1, 0 .. Integer (Np) - 1);
       procedure Fill_R (I : Natural; Du, Dv : Long_Float) is
       begin
          Rv (2 * I) := Du; Rv (2 * I + 1) := Dv;
@@ -238,7 +254,6 @@ package body Geom is
          for K in 0 .. Np - 1 loop
             declare
                Pp : Param_Vec := P;
-               Rp : array (0 .. 2 * N_Obs - 1) of Long_Float := [others => 0.0];
                procedure Fill_P (I : Natural; Du, Dv : Long_Float) is
                begin
                   Rp (2 * I) := Du; Rp (2 * I + 1) := Dv;
@@ -330,6 +345,7 @@ package body Geom is
          end;
          exit when Lam > 1.0e6;
       end loop;
+      Free_Vec (Rv); Free_Vec (Rp); Free_Mat (J);
    end LM_Refine;
 
    --  ── 解完之后每个参数的不确定度 ──:在解处再算一次数值雅可比 J,σ² = 残差平方和 ÷ (方程数 − 未知数),协方差 = σ² (JᵀJ)⁻¹,
@@ -338,8 +354,9 @@ package body Geom is
                        Resid : access procedure (P : Param_Vec; R : out Long_Float; Fill : access procedure (I : Natural; Du, Dv : Long_Float));
                        Sd : out Param_Vec) is
       Np : constant Natural := P'Length;
-      Rv : array (0 .. 2 * N_Obs - 1) of Long_Float := [others => 0.0];
-      J : array (0 .. 2 * N_Obs - 1, 0 .. Np - 1) of Long_Float := [others => [others => 0.0]];
+      Rv : Big_Vec_Ptr := New_Vec (2 * N_Obs);
+      Rp : Big_Vec_Ptr := New_Vec (2 * N_Obs);
+      J : Big_Mat_Ptr := new Big_Mat (0 .. Integer (2 * N_Obs) - 1, 0 .. Integer (Np) - 1);
       A : array (0 .. Np - 1, 0 .. 2 * Np - 1) of Long_Float := [others => [others => 0.0]];   --  [JᵀJ | I],高斯-约当求逆
       procedure Fill_R (I : Natural; Du, Dv : Long_Float) is
       begin
@@ -353,6 +370,7 @@ package body Geom is
       Sd := [others => 0.0];
       if Np = 0 or else 2 * N_Obs <= Np then
          Sd := [others => Long_Float'Last];   --  方程比未知数还少:什么都定不了
+         Free_Vec (Rv); Free_Vec (Rp); Free_Mat (J);
          return;
       end if;
       Resid (P, R0, Fill_R'Access);
@@ -363,7 +381,6 @@ package body Geom is
       for K in 0 .. Np - 1 loop
          declare
             Pp : Param_Vec := P;
-            Rp : array (0 .. 2 * N_Obs - 1) of Long_Float := [others => 0.0];
             procedure Fill_P (I : Natural; Du, Dv : Long_Float) is
             begin
                Rp (2 * I) := Du; Rp (2 * I + 1) := Dv;
@@ -433,6 +450,7 @@ package body Geom is
       for K in 0 .. Np - 1 loop
          Sd (Sd'First + K) := (if Undet (K) then Long_Float'Last else Sqrt (Long_Float'Max (0.0, Sigma2 * A (K, Np + K))));
       end loop;
+      Free_Vec (Rv); Free_Vec (Rp); Free_Mat (J);
    end Param_Sd;
 
    procedure Fit (G : in out Cam_Geo; O : Obs_Vectors.Vector; Ok : out Boolean) is
@@ -1546,7 +1564,8 @@ package body Geom is
       end if;
    end Fit_Fixed_Rig;
 
-   procedure Build_Board (G : Cam_Geo; O : Board_Obs_Vectors.Vector; Scene : in out Scene_Pt_Vectors.Vector; St : out Board_Stats) is
+   procedure Build_Board (G : Cam_Geo; Cam : Natural; O : Board_Obs_Vectors.Vector; Scene : in out Scene_Pt_Vectors.Vector;
+                          Tracks : in out Board_Track_Vectors.Vector; St : out Board_Stats) is
       N : constant Natural := Natural (O.Length);
       --  二维高斯噪声(每轴 σ)下径向误差的中位数 = σ·√(2 ln 2)(纯数学)⇒ 由中位数反推每轴 σ
       Rayleigh_Med : constant Long_Float := Sqrt (2.0 * Log (2.0));
@@ -1881,6 +1900,18 @@ package body Geom is
                for T in 0 .. Nt - 1 loop
                   if Has_H (T) and then Spread (T) <= 3.0 * Ms then   --  各停配到的离散超过全体中位 3 倍 = 有一停配错了(倍数无量纲)
                      Scene.Append (Scene_Pt'(Pw => X (T), Cov => Cv (T), U => Mu (T), V => Mv (T), Sh => St.Sigma_H, Views => Nv (T)));
+                     declare
+                        Tr : Board_Track := (Cam => Cam, Hu => Mu (T), Hv => Mv (T), Sw => St.Sigma_W, Sh => St.Sigma_H, others => <>);
+                        J : Integer := First (T);
+                     begin
+                        while J >= 0 loop
+                           if Keep (J) then
+                              Tr.Views.Append (Board_View'(Pose => O (J).Pose, U => O (J).U, V => O (J).V));
+                           end if;
+                           J := Next (J);
+                        end loop;
+                        Tracks.Append (Tr);
+                     end;
                      St.Kept := St.Kept + 1;
                   end if;
                end loop;
@@ -1888,6 +1919,433 @@ package body Geom is
          end;
       end;
    end Build_Board;
+
+   --  一条点的几停视线求最小二乘交点(到各条视线垂直距离平方和最小)和它的协方差(每条视线角噪声 Sw / F,同 Build_Board)
+   procedure Tri_Views (G : Cam_Geo; Views : Board_View_Vectors.Vector; Sw : Long_Float; X : out V3; Cov : out M3; Ok : out Boolean) is
+      A : M3 := [others => [others => 0.0]];
+      B : V3 := [others => 0.0];
+      S : M3 := [others => [others => 0.0]];
+      Sig : constant Long_Float := (if G.F > 0.0 then Sw / G.F else 0.0);   --  每条视线的角噪声(弧度)
+   begin
+      X := [others => 0.0]; Cov := [others => [others => 0.0]]; Ok := False;
+      if Natural (Views.Length) < 2 or else G.F <= 0.0 then
+         return;
+      end if;
+      for Vw of Views loop
+         declare
+            C0 : constant V3 := Cam_Pos (G, Vw.Pose);
+            D : constant V3 := Ray (G, Vw.Pose, Vw.U, Vw.V);
+         begin
+            for R in 0 .. 2 loop
+               for Cc in 0 .. 2 loop
+                  declare
+                     Pm : constant Long_Float := (if R = Cc then 1.0 else 0.0) - D (R) * D (Cc);   --  I − d dᵀ(纯数学)
+                  begin
+                     A (R, Cc) := A (R, Cc) + Pm;
+                     B (R) := B (R) + Pm * C0 (Cc);
+                  end;
+               end loop;
+            end loop;
+         end;
+      end loop;
+      X := Solve3 (A, B);
+      if Norm (X) = 0.0 or else not (abs X (0) <= Long_Float'Last and then abs X (1) <= Long_Float'Last and then abs X (2) <= Long_Float'Last) then
+         return;   --  奇异(视线全平行)或不是有限数
+      end if;
+      for Vw of Views loop
+         declare
+            C0 : constant V3 := Cam_Pos (G, Vw.Pose);
+            D : constant V3 := Ray (G, Vw.Pose, Vw.U, Vw.V);
+            R : constant Long_Float := Norm ([X (0) - C0 (0), X (1) - C0 (1), X (2) - C0 (2)]);
+         begin
+            for Ii in 0 .. 2 loop
+               for Kk in 0 .. 2 loop
+                  S (Ii, Kk) := S (Ii, Kk) + (Sig * R) ** 2 * ((if Ii = Kk then 1.0 else 0.0) - D (Ii) * D (Kk));
+               end loop;
+            end loop;
+         end;
+      end loop;
+      declare
+         Ai : M3;
+      begin
+         for Col in 0 .. 2 loop
+            declare
+               E : V3 := [others => 0.0];
+               Xc : V3;
+            begin
+               E (Col) := 1.0;
+               Xc := Solve3 (A, E);
+               if Norm (Xc) = 0.0 then
+                  return;
+               end if;
+               for Rw in 0 .. 2 loop
+                  Ai (Rw, Col) := Xc (Rw);
+               end loop;
+            end;
+         end loop;
+         Cov := Mul (Mul (Ai, S), Ai);
+      end;
+      Ok := True;
+   end Tri_Views;
+
+   procedure Board_Points (Geos : Geo_Vectors.Vector; Tracks : Board_Track_Vectors.Vector; Scene : out Scene_Pt_Vectors.Vector) is
+   begin
+      Scene.Clear;
+      for T of Tracks loop
+         if T.Cam < Natural (Geos.Length) then
+            declare
+               X : V3;
+               Cv : M3;
+               Ok : Boolean;
+            begin
+               Tri_Views (Geos (T.Cam), T.Views, T.Sw, X, Cv, Ok);
+               if Ok then
+                  Scene.Append (Scene_Pt'(Pw => X, Cov => Cv, U => T.Hu, V => T.Hv, Sh => T.Sh, Views => Natural (T.Views.Length)));
+               end if;
+            end;
+         end if;
+      end loop;
+   end Board_Points;
+
+   procedure Refine_Board (Geos : in out Geo_Vectors.Vector; Head : in out Cam_Geo; Tracks : Board_Track_Vectors.Vector; Rep : out Refine_Report; Ok : out Boolean) is
+      Nt : constant Natural := Natural (Tracks.Length);
+      --  出现过的腕眼(相机号),各占参数里的 7 个:朝向改正 3(手系里左乘的小转动)、偏移改正 3(米)、焦距比例改正 1
+      Cams : Nat_Vectors.Vector;
+      function Slot_Of (Cam : Natural) return Natural is
+      begin
+         for I in 0 .. Natural (Cams.Length) - 1 loop
+            if Cams (I) = Cam then
+               return I;
+            end if;
+         end loop;
+         return 0;
+      end Slot_Of;
+      Base : constant Geo_Vectors.Vector := Geos;
+      Fit_Fh : constant Boolean := Head.F_Meas > 0.0;   --  不动的眼的焦距是解出来的(没给)才接着解
+      Use_H : array (0 .. Natural'Max (1, Nt) - 1) of Boolean := [others => True];   --  这条点进不动的眼的残差
+      N_Views : Natural := 0;
+   begin
+      Ok := False;
+      Rep := (Tracks => Nt, others => <>);
+      if Nt < 4 or else not Head.Valid or else not Head.Fixed then   --  单点法的下限(次数)
+         Why := To_Unbounded_String ("板上的点不到 4 条,或不动的眼还没按板解出来");
+         return;
+      end if;
+      for T of Tracks loop
+         if not Cams.Contains (T.Cam) then
+            Cams.Append (T.Cam);
+         end if;
+         N_Views := N_Views + Natural (T.Views.Length);
+      end loop;
+      declare
+         Nc : constant Natural := Natural (Cams.Length);
+         Hb : constant Natural := 7 * Nc;   --  不动的眼的参数从这儿起
+         Np : constant Natural := Hb + 7;
+         P : Param_Vec (0 .. Np - 1) := [others => 0.0];
+         Steps : Param_Vec (0 .. Np - 1) := [others => 1.0e-4];   --  差分步(弧度 / 米 / 比例,极小量)
+         Cur : Long_Float := 0.0;
+         Nr : Natural := 0;
+         function Fit_F (C : Natural) return Boolean is (Base (Cams (C)).F_Meas > 0.0);   --  这台腕眼的焦距是解出来的(没给)
+         function Wrist_Of (P : Param_Vec; C : Natural) return Cam_Geo is
+            G : Cam_Geo := Base (Cams (C));
+            I : constant Natural := 7 * C;
+         begin
+            G.R_Ce := Mul (Rodrigues ([P (I), P (I + 1), P (I + 2)]), Base (Cams (C)).R_Ce);
+            G.Off := [Base (Cams (C)).Off (0) + P (I + 3), Base (Cams (C)).Off (1) + P (I + 4), Base (Cams (C)).Off (2) + P (I + 5)];
+            if Fit_F (C) then
+               G.F := Base (Cams (C)).F * (1.0 + P (I + 6));
+            end if;
+            return G;
+         end Wrist_Of;
+         function Head_Of (P : Param_Vec) return Cam_Geo is
+            G : Cam_Geo := Head;
+         begin
+            G.R_Ce := Rodrigues ([P (Hb), P (Hb + 1), P (Hb + 2)]);
+            G.Pos := [P (Hb + 3), P (Hb + 4), P (Hb + 5)];
+            if Fit_Fh then
+               G.F := P (Hb + 6);
+            end if;
+            return G;
+         end Head_Of;
+         N_Prior : Natural := 0;   --  先验的残差条数(偏移三轴 + 焦距,按腕眼)
+         procedure Resid (P : Param_Vec; R : out Long_Float; Fill : access procedure (I : Natural; Du, Dv : Long_Float)) is
+            Gh : constant Cam_Geo := Head_Of (P);
+            Ws : array (0 .. Nc - 1) of Cam_Geo;
+            Sum : Long_Float := 0.0;
+            I : Natural := 0;
+            procedure Put (Du, Dv : Long_Float) is
+            begin
+               Sum := Sum + Du * Du + Dv * Dv;
+               if Fill /= null then
+                  Fill (I, Du, Dv);
+               end if;
+               I := I + 1;
+            end Put;
+         begin
+            for C in 0 .. Nc - 1 loop
+               Ws (C) := Wrist_Of (P, C);
+            end loop;
+            for K in 0 .. Nt - 1 loop
+               declare
+                  T : constant Board_Track := Tracks (K);
+                  Gw : Cam_Geo renames Ws (Slot_Of (T.Cam));
+                  X : V3;
+                  Cv : M3;
+                  Tok : Boolean;
+               begin
+                  Tri_Views (Gw, T.Views, T.Sw, X, Cv, Tok);
+                  for Vw of T.Views loop
+                     declare
+                        U, V : Long_Float;
+                        Front : Boolean;
+                     begin
+                        if Tok then
+                           Project (Gw, Vw.Pose, X, U, V, Front);
+                        else
+                           Front := False;
+                        end if;
+                        if Front then
+                           Put ((U - Vw.U) / T.Sw, (V - Vw.V) / T.Sw);
+                        else
+                           Put (1.0e3, 1.0e3);   --  三角不了 / 在眼后:远大于任何一条加权残差的罚(无量纲哨兵)
+                        end if;
+                     end;
+                  end loop;
+                  if Use_H (K) then
+                     declare
+                        U, V : Long_Float;
+                        Front : Boolean;
+                     begin
+                        if Tok then
+                           Project_Fixed (Gh, X, U, V, Front);
+                        else
+                           Front := False;
+                        end if;
+                        if Front and then Gh.F > 0.0 then
+                           Put ((U - T.Hu) / T.Sh, (V - T.Hv) / T.Sh);
+                        else
+                           Put (1.0e3, 1.0e3);   --  同上(无量纲哨兵)
+                        end if;
+                     end;
+                  end if;
+               end;
+            end loop;
+            --  腕眼标定量到的偏移、焦距当先验:改正量 ÷ 它们自己报的不确定度(偏移的 ± 是三轴合起来的,每轴分 √3;没报就不加)
+            for C in 0 .. Nc - 1 loop
+               declare
+                  G0 : constant Cam_Geo := Base (Cams (C));
+                  Ix : constant Natural := 7 * C;
+                  Axis_Sd : constant Long_Float := G0.Off_Sd / Sqrt (3.0);
+               begin
+                  if G0.Off_Sd > 0.0 then
+                     Put (P (Ix + 3) / Axis_Sd, P (Ix + 4) / Axis_Sd);
+                     Put (P (Ix + 5) / Axis_Sd, 0.0);
+                  end if;
+                  if Fit_F (C) and then G0.F_Sd > 0.0 then
+                     Put (G0.F * P (Ix + 6) / G0.F_Sd, 0.0);
+                  end if;
+               end;
+            end loop;
+            R := Sqrt (Sum / Long_Float (Natural'Max (1, I)));
+         end Resid;
+         --  按像素的残差(报数用):腕眼各停、不动的眼
+         procedure Px (P : Param_Vec; Wr, Hr : out Long_Float; Hn : out Natural) is
+            Gh : constant Cam_Geo := Head_Of (P);
+            Sw2, Sh2 : Long_Float := 0.0;
+            Nw : Natural := 0;
+         begin
+            Hn := 0;
+            for K in 0 .. Nt - 1 loop
+               declare
+                  T : constant Board_Track := Tracks (K);
+                  Gw : constant Cam_Geo := Wrist_Of (P, Slot_Of (T.Cam));
+                  X : V3;
+                  Cv : M3;
+                  Tok : Boolean;
+                  U, V : Long_Float;
+                  Front : Boolean;
+               begin
+                  Tri_Views (Gw, T.Views, T.Sw, X, Cv, Tok);
+                  if Tok then
+                     for Vw of T.Views loop
+                        Project (Gw, Vw.Pose, X, U, V, Front);
+                        if Front then
+                           Sw2 := Sw2 + (U - Vw.U) ** 2 + (V - Vw.V) ** 2; Nw := Nw + 1;
+                        end if;
+                     end loop;
+                     if Use_H (K) then
+                        Project_Fixed (Gh, X, U, V, Front);
+                        if Front then
+                           Sh2 := Sh2 + (U - T.Hu) ** 2 + (V - T.Hv) ** 2; Hn := Hn + 1;
+                        end if;
+                     end if;
+                  end if;
+               end;
+            end loop;
+            Wr := (if Nw > 0 then Sqrt (Sw2 / Long_Float (Nw)) else 0.0);
+            Hr := (if Hn > 0 then Sqrt (Sh2 / Long_Float (Hn)) else 0.0);
+         end Px;
+      begin
+         declare
+            Rv : constant V3 := Rot_Vec (Head.R_Ce);
+         begin
+            P (Hb) := Rv (0); P (Hb + 1) := Rv (1); P (Hb + 2) := Rv (2);
+            P (Hb + 3) := Head.Pos (0); P (Hb + 4) := Head.Pos (1); P (Hb + 5) := Head.Pos (2);
+            P (Hb + 6) := Head.F; Steps (Hb + 6) := 1.0;   --  焦距的差分步(像素,极小量)
+         end;
+         for C in 0 .. Nc - 1 loop
+            if Base (Cams (C)).Off_Sd > 0.0 then
+               N_Prior := N_Prior + 2;
+            end if;
+            if Fit_F (C) and then Base (Cams (C)).F_Sd > 0.0 then
+               N_Prior := N_Prior + 1;
+            end if;
+         end loop;
+         --  两遍(次数):解 → 不动的眼里的点按 3 倍中位重挑(倍数无量纲,每遍从全体重挑)→ 再解
+         for Round in 1 .. 2 loop
+            declare
+               N_H : Natural := 0;
+            begin
+               for K in 0 .. Nt - 1 loop
+                  if Use_H (K) then
+                     N_H := N_H + 1;
+                  end if;
+               end loop;
+               Nr := N_Views + N_H + N_Prior;
+               Resid (P, Cur, null);
+               LM_Refine (P, Nr, Steps, 60, Resid'Access, Cur);   --  60 = 迭代次数上限(次数)
+            end;
+            declare
+               Gh : constant Cam_Geo := Head_Of (P);
+               Rs : Param_Vec (0 .. Nt - 1) := [others => Long_Float'Last];
+               Kept : Param_Vec (0 .. Nt - 1) := [others => 0.0];
+               Nk : Natural := 0;
+               Med : Long_Float;
+            begin
+               for K in 0 .. Nt - 1 loop
+                  declare
+                     T : constant Board_Track := Tracks (K);
+                     X : V3;
+                     Cv : M3;
+                     Tok : Boolean;
+                     U, V : Long_Float;
+                     Front : Boolean;
+                  begin
+                     Tri_Views (Wrist_Of (P, Slot_Of (T.Cam)), T.Views, T.Sw, X, Cv, Tok);
+                     if Tok then
+                        Project_Fixed (Gh, X, U, V, Front);
+                        if Front then
+                           Rs (K) := Sqrt ((U - T.Hu) ** 2 + (V - T.Hv) ** 2) / T.Sh;
+                        end if;
+                     end if;
+                     if Use_H (K) then
+                        Kept (Nk) := Rs (K); Nk := Nk + 1;
+                     end if;
+                  end;
+               end loop;
+               Med := Median (Kept, Nk);
+               if Med > 0.0 then
+                  for K in 0 .. Nt - 1 loop
+                     Use_H (K) := Rs (K) <= 3.0 * Med;
+                  end loop;
+               end if;
+            end;
+         end loop;
+         declare
+            N_H : Natural := 0;
+         begin
+            for K in 0 .. Nt - 1 loop
+               if Use_H (K) then
+                  N_H := N_H + 1;
+               end if;
+            end loop;
+            Nr := N_Views + N_H + N_Prior;
+            Resid (P, Cur, null);
+            LM_Refine (P, Nr, Steps, 60, Resid'Access, Cur);   --  按最后挑的那批再解一次(次数)
+         end;
+         declare
+            Sd : Param_Vec (0 .. Np - 1);
+            Gh : constant Cam_Geo := Head_Of (P);
+            Lo : V3 := [others => Long_Float'Last];
+            Hi : V3 := [others => Long_Float'First];
+            Span : Long_Float;
+            Scene : Scene_Pt_Vectors.Vector;
+            Wr, Hr : Long_Float;
+            Hn : Natural;
+         begin
+            Param_Sd (P, Nr, Steps, Resid'Access, Sd);
+            declare
+               Gs : Geo_Vectors.Vector := Base;
+            begin
+               for C in 0 .. Nc - 1 loop
+                  Gs.Replace_Element (Cams (C), Wrist_Of (P, C));
+               end loop;
+               Board_Points (Gs, Tracks, Scene);
+            end;
+            for S of Scene loop
+               for I in 0 .. 2 loop
+                  Lo (I) := Long_Float'Min (Lo (I), S.Pw (I)); Hi (I) := Long_Float'Max (Hi (I), S.Pw (I));
+               end loop;
+            end loop;
+            Span := Sqrt ((Hi (0) - Lo (0)) ** 2 + (Hi (1) - Lo (1)) ** 2 + (Hi (2) - Lo (2)) ** 2);
+            --  同 Fit_Fixed_Board:视场界、不确定度界;任何一台腕眼的焦距 ± 比焦距还大、偏移 ± 比板铺开的量程还大,也不算
+            if Fit_Fh and then Gh.Cx > 1.732 * Gh.F then   --  tan 60°(半幅宽 ÷ 焦距,无量纲)
+               Why := To_Unbounded_String ("一起解之后不动的眼焦距 " & Codec.Fmt (Gh.F, 1) & " px,视场超过 120°");
+               return;
+            end if;
+            declare
+               Pos_Sd : constant Long_Float := Sqrt (Sd (Hb + 3) ** 2 + Sd (Hb + 4) ** 2 + Sd (Hb + 5) ** 2);
+               Fh_Sd : constant Long_Float := (if Fit_Fh then Sd (Hb + 6) else 0.0);
+            begin
+               if Pos_Sd >= Span or else Fh_Sd >= Gh.F then
+                  Why := To_Unbounded_String ("一起解之后不动的眼的不确定度比量本身还大:位置 ± " & Codec.Fmt (Pos_Sd, 3) & " m(板铺开 " & Codec.Fmt (Span, 3) & " m),焦距 ± "
+                                              & Codec.Fmt (Fh_Sd, 1) & " px");
+                  return;
+               end if;
+               for C in 0 .. Nc - 1 loop
+                  declare
+                     Gw : constant Cam_Geo := Wrist_Of (P, C);
+                     I : constant Natural := 7 * C;
+                     Fw_Sd : constant Long_Float := (if Fit_F (C) then Sd (I + 6) * Base (Cams (C)).F else 0.0);
+                     Off_Sd : constant Long_Float := Sqrt (Sd (I + 3) ** 2 + Sd (I + 4) ** 2 + Sd (I + 5) ** 2);
+                  begin
+                     if Fw_Sd >= Gw.F or else Off_Sd >= Span then
+                        Why := To_Unbounded_String ("一起解之后第 " & Codec.Img (Cams (C)) & " 台腕眼的不确定度比量本身还大:焦距 ± " & Codec.Fmt (Fw_Sd, 1) & " px,偏移 ± "
+                                                    & Codec.Fmt (Off_Sd, 3) & " m");
+                        return;
+                     end if;
+                  end;
+               end loop;
+               --  收下:腕眼的朝向、偏移、焦距(和各自的 ±),不动的眼的朝向、位置、焦距
+               for C in 0 .. Nc - 1 loop
+                  declare
+                     Gw : Cam_Geo := Wrist_Of (P, C);
+                     I : constant Natural := 7 * C;
+                  begin
+                     Gw.F_Sd := (if Fit_F (C) then Sd (I + 6) * Base (Cams (C)).F else Gw.F_Sd);
+                     if Fit_F (C) then
+                        Gw.F_Meas := Gw.F;
+                     end if;
+                     Gw.Off_Sd := Sqrt (Sd (I + 3) ** 2 + Sd (I + 4) ** 2 + Sd (I + 5) ** 2);
+                     Gw.Rot_Sd := Sqrt (Sd (I) ** 2 + Sd (I + 1) ** 2 + Sd (I + 2) ** 2);
+                     Geos.Replace_Element (Cams (C), Gw);
+                  end;
+               end loop;
+               Px (P, Wr, Hr, Hn);
+               Head := Gh;
+               Head.Pos_Sd := Pos_Sd; Head.F_Sd := Fh_Sd;
+               Head.Rot_Sd := Sqrt (Sd (Hb) ** 2 + Sd (Hb + 1) ** 2 + Sd (Hb + 2) ** 2);
+               if Fit_Fh then
+                  Head.F_Meas := Gh.F;
+               end if;
+               Head.Rms := Hr;
+               Rep.Head_Used := Hn; Rep.Head_Rms := Hr; Rep.Wrist_Rms := Wr;
+               Why := Null_Unbounded_String;
+               Ok := True;
+            end;
+         end;
+      end;
+   end Refine_Board;
 
    function Tips_On_Rays (Fixed : Cam_Geo; O : Obs_Pt_Vectors.Vector; Ray_O : V3; Ray_D : V3_Vectors.Vector; Gate_Px : Long_Float) return Ray_Tip_Vectors.Vector is
       package LF_Vectors is new Ada.Containers.Vectors (Natural, Long_Float);

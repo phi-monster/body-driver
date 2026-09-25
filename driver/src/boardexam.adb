@@ -2,7 +2,7 @@
 --  同一刻的不动的眼的帧(vid/f<n>_c<m>.pgm:vid/poses.txt 里那只手的位姿和这一停一样、画面已经静止的那一帧)、那一炮解好的腕眼几何(<身体文件>.geo.json),
 --  走驱动同一段代码:Act.Geo_Board(仪器配点 → Geom.Build_Board → 板上的点躺的面)再 Geom.Fit_Fixed_Rig(按板解不动的眼),打出结果。
 --  灰度图复制成三通道交给仪器(驱动里是彩色图)。平移停 = 朝向和同组其它停差不到 0.02 rad 的那一组里最大的那组(转动停各自朝向不同)。
---  用法:boardexam <look 目录> <vid 目录> <几何文件> <仪器 host> <仪器 port> [不动的眼的相机号,默认 0]
+--  用法:boardexam <look 目录> <vid 目录> <几何文件> <仪器 host> <仪器 port> [不动的眼的相机号,默认 0] [all = 转动停也进] [board = 只按板解、不一起解]
 with Ada.Command_Line; use Ada.Command_Line;
 with Ada.Containers.Vectors;
 with Ada.Containers;
@@ -123,6 +123,7 @@ procedure Boardexam is
    Vids : Vid_Vectors.Vector;
    C : Act.Context;
    Head_Cam : Natural := 0;
+   All_Stops : Boolean := False;
    Same_Turn : constant Long_Float := 0.02;   --  平移停之间朝向几乎不变(弧度;转动停差一整档,这是认"没转"的协议)
 begin
    if Argument_Count < 5 then
@@ -131,6 +132,9 @@ begin
    end if;
    if Argument_Count >= 6 then
       Head_Cam := Natural'Value (Argument (6));
+   end if;
+   if Argument_Count >= 7 and then Argument (7) = "all" then
+      All_Stops := True;
    end if;
    declare
       Note : String (1 .. 160);
@@ -197,7 +201,7 @@ begin
          end loop;
          Put_Line ("第" & Codec.Img (K) & " 台腕眼:" & Codec.Img (Natural (Stops.Length)) & " 停,平移停 " & Codec.Img (Best_N) & " 个");
          for I in 0 .. Natural (Stops.Length) - 1 loop
-            if Geom.Angle_Between (Stops (Best_I), Stops (I)) < Same_Turn then
+            if All_Stops or else Geom.Angle_Between (Stops (Best_I), Stops (I)) < Same_Turn then
                declare
                   Arm : Integer := -1;
                   Hit : Integer := -1;
@@ -255,7 +259,11 @@ begin
       Hh : constant Natural := (if C.Board_Stops.Is_Empty then 480 else C.Board_Stops.First_Element.Hh);
    begin
       G.F := 0.0; G.Cx := Long_Float (Hw) / 2.0; G.Cy := Long_Float (Hh) / 2.0;
-      Geom.Fit_Fixed_Rig (G, No_Obs, C.Board, Ro, Rd, Ok_K, Tips, Rep, Ok);
+      if Argument_Count >= 8 and then Argument (8) = "board" then
+         Geom.Fit_Fixed_Rig (G, No_Obs, C.Board, Ro, Rd, Ok_K, Tips, Rep, Ok);   --  只按板解(不一起解),对照用
+      else
+         Act.Geo_Board_Solve (C, G, Rep, Ok);   --  驱动同一段:按板解 → 腕眼和它一起解 → 重三角 → 面
+      end if;
       if Ok then
          Put_Line ("不动的眼按板解:" & Codec.Img (Rep.Scene_Used) & "/" & Codec.Img (Rep.Scene_N) & " 个点 · 残差 " & Codec.Fmt (Rep.Scene_Rms, 2) & " px · 踢掉 " & Codec.Img (G.Dropped)
                    & " · 它在 (" & Codec.Fmt (G.Pos (0), 4) & "," & Codec.Fmt (G.Pos (1), 4) & "," & Codec.Fmt (G.Pos (2), 4) & ") ± " & Codec.Fmt (G.Pos_Sd, 4) & " m · 焦距 "

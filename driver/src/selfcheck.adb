@@ -892,6 +892,7 @@ begin
          Nq_Col : constant Natural := 12;          --  480 / 40(合成)
          Nq : constant Natural := Nq_Row * Nq_Col;
          Scene, Scene_Bad : Geom.Scene_Pt_Vectors.Vector;
+         Trk, Trk_Bad : Geom.Board_Track_Vectors.Vector;
          Truth : Geom.V3_Vectors.Vector;           --  两只眼的真点(桌面、盒顶;夹爪不算)
          Shh : Long_Float := 0.0;                  --  两只眼量出来的不动的眼配点噪声(取大的那个)
          Seed4 : Long_Long_Integer := 17;
@@ -994,8 +995,8 @@ begin
                      O_Bad.Append (Bad);
                   end;
                end loop;
-               Geom.Build_Board (Gwr, O, Scene, St);
-               Geom.Build_Board (Gwr, O_Bad, Scene_Bad, St_Bad);
+               Geom.Build_Board (Gwr, 1 + E, O, Scene, Trk, St);
+               Geom.Build_Board (Gwr, 1 + E, O_Bad, Scene_Bad, Trk_Bad, St_Bad);
                Shh := Long_Float'Max (Shh, St.Sigma_H);
                Check (St.Sigma_W > 0.5 * 0.29 and then St.Sigma_W < 2.0 * 0.29 and then St.Sigma_H > 0.5 * 0.46 and then St.Sigma_H < 2.0 * 0.46,   --  一半到两倍(纯数学)× 合成的 σ
                       "标定板·第 " & Codec.Img (E + 1) & " 只腕眼量出来的配点噪声:腕眼 " & Codec.Fmt (St.Sigma_W, 2) & " px(真 0.29)、不动的眼 " & Codec.Fmt (St.Sigma_H, 2)
@@ -1116,6 +1117,105 @@ begin
             Check ((not Okx) or else Rx.Scene_Rms > 5.0 * Shh,   --  5 = 倍数(无量纲)
                    "标定板·反面:不动的眼里的像素各停一致地换成别的点的 ⇒ " & (if Okx then "板的残差 " & Codec.Fmt (Rx.Scene_Rms, 1) & " px(配点噪声 " & Codec.Fmt (Shh, 2) & " px)"
                    else "解不出:" & To_String (Geom.Why)));
+         end;
+         --  🔴 腕眼 + 不动的眼 + 板上的点一起解(Geom.Refine_Board):同样两只腕眼,每只 9 停平移 + 4 停转动(绕 z、x 各 ±0.1 rad,合成),
+         --  但"腕眼标定"给的几何是歪的(焦距 −1.5%、偏移差 (4,−3,5) mm、朝向差 0.5°,合成;自报 ± 6 px / 1 cm)——板按歪的几何建,不动的眼按歪的板解,
+         --  再一起解 ⇒ 腕眼焦距 0.3% 内、偏移 3 mm 内,不动的眼焦距 0.5% 内、位置 5 mm 内(一起解之前:头跟着腕眼一起错)
+         declare
+            Geos : Geom.Geo_Vectors.Vector;
+            Trk2 : Geom.Board_Track_Vectors.Vector;
+            Sc2 : Geom.Scene_Pt_Vectors.Vector;
+            Seed5 : Long_Long_Integer := 29;
+            function Jit5 return Long_Float is   --  确定性伪随机 [−1, 1](测试数据自己的抖动)
+            begin
+               Seed5 := (Seed5 * 1103515245 + 12345) mod 2147483648;
+               return Long_Float (Integer ((Seed5 / 65536) mod 2001) - 1000) / 1000.0;
+            end Jit5;
+            Bad_Off : constant Geom.V3 := [0.004, -0.003, 0.005];   --  腕眼标定给的偏移差(米,合成)
+            Bad_F : constant Long_Float := 0.985;                    --  腕眼标定给的焦距比例(合成)
+            Bad_R : constant Geom.M3 := Geom.Rodrigues ([0.0087, 0.0, 0.0]);   --  0.5° 的朝向差(弧度,合成)
+            Gh : Geom.Cam_Geo;
+            Rh : Geom.Fixed_Report;
+            Okh, Okr : Boolean;
+            Rr : Geom.Refine_Report;
+            Gh0 : Geom.Cam_Geo;
+         begin
+            for K in 0 .. 2 loop
+               Geos.Append (Geom.No_Geo);
+            end loop;
+            for E in 0 .. 1 loop
+               declare
+                  H0 : constant Plug.Arm_Pose := [Starts (E) (0), Starts (E) (1), Starts (E) (2), 1.0, 0.0, 0.0, 0.0];
+                  C0 : constant Geom.V3 := Geom.Cam_Pos (Gwr, H0);
+                  Gbad : Geom.Cam_Geo := Gwr;
+                  O : Geom.Board_Obs_Vectors.Vector;
+                  St : Geom.Board_Stats;
+                  Q_Rot : constant array (1 .. 4) of Plug.Arm_Pose :=
+                    [[H0 (0), H0 (1), H0 (2), 0.99875, 0.0, 0.0, 0.04998], [H0 (0), H0 (1), H0 (2), 0.99875, 0.0, 0.0, -0.04998],
+                     [H0 (0), H0 (1), H0 (2), 0.99875, 0.04998, 0.0, 0.0], [H0 (0), H0 (1), H0 (2), 0.99875, -0.04998, 0.0, 0.0]];   --  ±0.1 rad(cos/sin 0.05,合成)
+                  Poses : Plug.Pose_Vectors.Vector;
+               begin
+                  for S in 1 .. 9 loop
+                     Poses.Append (Plug.Arm_Pose'[H0 (0) + Step_M * Path2 (S) (0), H0 (1) + Step_M * Path2 (S) (1), H0 (2) + Step_M * Path2 (S) (2), 1.0, 0.0, 0.0, 0.0]);
+                  end loop;
+                  for Qr of Q_Rot loop
+                     Poses.Append (Qr);
+                  end loop;
+                  for Iv in 0 .. Nq_Col - 2 loop   --  不要夹爪那一行
+                     for Iu in 0 .. Nq_Row - 1 loop
+                        declare
+                           Q : constant Natural := Iv * Nq_Row + Iu;
+                           U0 : constant Long_Float := 0.5 * Cell + Cell * Long_Float (Iu);
+                           V0 : constant Long_Float := 0.5 * Cell + Cell * Long_Float (Iv);
+                           D : constant Geom.V3 := Geom.Ray (Gwr, H0, U0, V0);
+                           Tt : constant Long_Float := (C0 (2) - Table_Z) / (-D (2));
+                           Xw : constant Geom.V3 := [C0 (0) + Tt * D (0), C0 (1) + Tt * D (1), Table_Z + 0.03 * Long_Float ((Iu + Iv) mod 3)];   --  桌面上几层高低(米,合成)
+                        begin
+                           for K in 0 .. Natural (Poses.Length) - 1 loop
+                              declare
+                                 Ps : constant Plug.Arm_Pose := Poses (K);
+                                 U, V, Hu, Hv : Long_Float;
+                                 Fr, Fh : Boolean;
+                              begin
+                                 Geom.Project (Gwr, Ps, Xw, U, V, Fr);
+                                 Geom.Project_Fixed (Gt, Xw, Hu, Hv, Fh);
+                                 if Fr and then Fh and then U >= 0.0 and then U < 640.0 and then V >= 0.0 and then V < 480.0 and then Hu >= 0.0 and then Hu < 640.0 then
+                                    O.Append (Geom.Board_Obs'(Pt => Q, Pose => Ps, U => U + 0.5 * Jit5, V => V + 0.5 * Jit5, Hu => Hu + 0.8 * Jit5, Hv => Hv + 0.8 * Jit5));
+                                 end if;
+                              end;
+                           end loop;
+                        end;
+                     end loop;
+                  end loop;
+                  Gbad.F := Gwr.F * Bad_F; Gbad.F_Meas := Gbad.F; Gbad.F_Sd := 6.0;   --  自报 ± 6 px(合成)
+                  Gbad.Off := [Gwr.Off (0) + Bad_Off (0), Gwr.Off (1) + Bad_Off (1), Gwr.Off (2) + Bad_Off (2)]; Gbad.Off_Sd := 0.01;   --  自报 ± 1 cm(合成)
+                  Gbad.R_Ce := Geom.Mul (Bad_R, Gwr.R_Ce);
+                  Geos.Replace_Element (1 + E, Gbad);
+                  Geom.Build_Board (Gbad, 1 + E, O, Sc2, Trk2, St);
+               end;
+            end loop;
+            Gh.F := 0.0; Gh.Cx := 320.0; Gh.Cy := 240.0;
+            Geom.Fit_Fixed_Board (Gh, Sc2, Rh, Okh);
+            Gh0 := Gh;
+            if Okh then
+               Geom.Refine_Board (Geos, Gh, Trk2, Rr, Okr);
+            else
+               Okr := False;
+            end if;
+            declare
+               function Off_Err (K : Natural) return Long_Float is
+                 (Geom.Norm ([Geos (K).Off (0) - Gwr.Off (0), Geos (K).Off (1) - Gwr.Off (1), Geos (K).Off (2) - Gwr.Off (2)]));
+               Dp : constant Long_Float := Geom.Norm ([Gh.Pos (0) - Gt.Pos (0), Gh.Pos (1) - Gt.Pos (1), Gh.Pos (2) - Gt.Pos (2)]);
+               Dp0 : constant Long_Float := Geom.Norm ([Gh0.Pos (0) - Gt.Pos (0), Gh0.Pos (1) - Gt.Pos (1), Gh0.Pos (2) - Gt.Pos (2)]);
+            begin
+               Check (Okh and then Okr and then abs (Geos (1).F - 397.0) < 0.003 * 397.0 and then abs (Geos (2).F - 397.0) < 0.003 * 397.0   --  0.3%(合成)
+                      and then Off_Err (1) < 0.003 and then Off_Err (2) < 0.003 and then abs (Gh.F - 288.0) < 0.005 * 288.0 and then Dp < 0.005,   --  3 mm / 0.5% / 5 mm(合成)
+                      "腕眼 + 不动的眼一起解:" & (if Okr then "腕眼焦距 " & Codec.Fmt (Gwr.F * Bad_F, 1) & " → " & Codec.Fmt (Geos (1).F, 1) & " / " & Codec.Fmt (Geos (2).F, 1)
+                      & "(真 397)· 偏移差 → " & Codec.Fmt (Off_Err (1) * Per_Mm, 1) & " / " & Codec.Fmt (Off_Err (2) * Per_Mm, 1) & " mm · 不动的眼焦距 " & Codec.Fmt (Gh0.F, 1)
+                      & " → " & Codec.Fmt (Gh.F, 1) & "(真 288)· 位置差 " & Codec.Fmt (Dp0 * Per_Mm, 1) & " → " & Codec.Fmt (Dp * Per_Mm, 1) & " mm · " & Codec.Img (Rr.Tracks)
+                      & " 条点,腕眼 " & Codec.Fmt (Rr.Wrist_Rms, 2) & " px、头 " & Codec.Fmt (Rr.Head_Rms, 2) & " px"
+                      else "没收下:" & To_String (Geom.Why)));
+            end;
          end;
       end;
    end;
