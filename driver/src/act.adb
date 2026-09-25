@@ -811,17 +811,32 @@ package body Act is
       end loop;
    end On_Pixel;
 
-   --  脑框出来的那件东西在这一帧里的像素(2026-09-26 owner 批准装 SAM):配了仪器 ⇒ SAM 按框出整片像素(驱动自己按明暗切,一把剪刀常常只切出一截、
-   --  或连着别的东西;SHOT1 腕眼里剪刀被画面下边切着,两只眼的"中心"差 1.7 cm);没配仪器 ⇒ 身体自己在框里按明暗量(Picture.Measure_In_Box)。
+   --  脑框出来的那件东西在这一帧里的像素(2026-09-26 owner 批准装 SAM):SAM 按框出整片像素 —— 这件量只有这一种量法。
+   --  (驱动自己按明暗切,一把剪刀常常只切出一截、或连着别的东西;SHOT1 腕眼里剪刀被画面下边切着,两只眼的"中心"差 1.7 cm。
+   --  以前没配仪器时退回按明暗量,09-26 owner:一个量只许一种量法 ⇒ 删了;没配仪器 / 仪器没回来 = 这一样量不出来,如实说)
    --  Iso = 这一片没顶到画面边(顶到 = 被画面切了一截,形心和长轴不可信)
    --  Pu_On/Pv_On ≥ 0:它身上的一点(给仪器当"就是这一点",和框一起给)
+   Said_No_Seg : Boolean := False;
+   --  不动的眼每轮核对要配点仪器(板上的点从参考图配到此刻的图)。没配 ⇒ 核不了,开机说一次(以前悄悄跳过 = 日志全绿而世界没发生)
+   Said_No_Check_Done : Boolean := False;
+   procedure Say_No_Check is
+   begin
+      if not Said_No_Check_Done then
+         Said_No_Check_Done := True;
+         Put_Line ("[身] 📐 没配配点仪器 ⇒ 不动的眼挪没挪、挡没挡,这次核不了(核对只有配点这一种量法)");
+      end if;
+   end Say_No_Check;
    procedure Seg_In_Box (C : Context; F : Plug.Frame; Cam : Natural; X0, Y0, X1, Y1 : Natural; Got, Iso : out Boolean; R : out Picture.Region; M : out Bools;
                          Pu_On, Pv_On : Long_Float := -1.0) is
       Cw : constant Natural := F.Cams (Cam).W;
       Ch : constant Natural := F.Cams (Cam).H;
    begin
       if Length (C.Inst_Host) = 0 then
-         Picture.Measure_In_Box (F.Cams (Cam).Gray, Cw, Ch, X0, Y0, X1, Y1, Got, Iso, R, M);
+         Got := False; Iso := False; R := (others => <>); M := Bool_Vectors.Empty_Vector;
+         if not Said_No_Seg then
+            Said_No_Seg := True;
+            Put_Line ("[身] 📦 没配分割仪器 ⇒ 量不出脑框出来的东西是哪些像素(这一样只有仪器这一种量法)");
+         end if;
          return;
       end if;
       declare
@@ -5385,15 +5400,13 @@ package body Act is
       return -1;
    end Hand_Eye_Of;
 
-   --  观测里带了焦距就记进这台相机的几何(没带就留着以前存的)
+   --  这台相机的主点:按画幅中心(纯几何的一半);焦距留着以前量的(没量过 = 0 = 量朝向时一起解出来、存进几何文件)。
+   --  观测里带的内参驱动不读(铁律 1,09-26:一种量法)
    procedure Geo_Take_K (C : in out Context; F : Plug.Frame; Cam : Natural) is
       G : Geom.Cam_Geo := Geo_Of (C, Cam);
    begin
       if Cam < Natural (F.Cams.Length) and then Cam < Natural (C.Geo.Length) then
-         if F.Cams (Cam).Has_K then
-            G.F := F.Cams (Cam).Focal; G.Cx := F.Cams (Cam).Cx; G.Cy := F.Cams (Cam).Cy;
-            C.Geo.Replace_Element (Cam, G);
-         elsif G.Cx <= 0.0 and then F.Cams (Cam).W > 0 then
+         if G.Cx <= 0.0 and then F.Cams (Cam).W > 0 then
             --  身体没给内参(官方 RoboDojo 观测就没有):主点按画幅中心(纯几何的一半),焦距留 0 = 量朝向时一起解出来、存进几何文件
             G.Cx := 0.5 * Long_Float (F.Cams (Cam).W); G.Cy := 0.5 * Long_Float (F.Cams (Cam).H);
             C.Geo.Replace_Element (Cam, G);
@@ -5855,7 +5868,7 @@ package body Act is
                --  朝向好不好,把残差说出来就行;走路那一段自己量得出视差对不对。)
                G := Geo_Of (C, Cam);
                Geo_Say ("第" & Codec.Img (Cam) & " 台相机(长在第" & Codec.Img (Natural (A) + 1) & " 只手上):焦距 " &
-                        (if G.F > 0.0 then Codec.Fmt (G.F, 1) & " px" & (if F.Cams (Cam).Has_K then "(身体给的)" else "(自己量的)") else "没给,量朝向时一起解") & " · 朝向 " & (if G.Valid then "量过(残差 " & Codec.Fmt (G.Rms, 2) & " px)" else "没量,用到时现量") &
+                        (if G.F > 0.0 then Codec.Fmt (G.F, 1) & " px" & "(自己量的)" else "没给,量朝向时一起解") & " · 朝向 " & (if G.Valid then "量过(残差 " & Codec.Fmt (G.Rms, 2) & " px)" else "没量,用到时现量") &
                         " · 指尖 " & (if G.Tip_Valid then "有" else "没有"));
             end if;
          end;
@@ -5870,7 +5883,7 @@ package body Act is
    --  盯谁、步子多大都是量出来的:候选 = 画幅中间那一半里不贴边、不是自己手指的每一块(V1E 实测:挑到下沿的东西下一步就出画面);
    --  探一步看谁视差最大 ⇒ 步长按"让它每步挪画幅的 1/16"反推,上限是量过的步幅。解的时候所有跟住的点一起进,谁丢了谁缺席,不押一个目标;
    --  相机离手腕转轴的偏移一起解出来(不解它,转动时近处的东西会把焦距带偏)。
-   --  位置来源:配了仪器就让仪器逐帧跟点;没配就按槽号重切(身体自己量)。
+   --  位置来源:只有跟点仪器逐帧跟点(一种量法;没配仪器 ⇒ 量不到,如实说)。
    procedure Geo_Calibrate (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Cam, Arm : Natural; Slot : Integer; Ok : out Boolean) is
       pragma Unreferenced (Slot);   --  点名的那块只是提示;盯谁按视差定
       G : Geom.Cam_Geo;
@@ -5884,7 +5897,7 @@ package body Act is
       Cand : Ints;                               --  候选的槽号
       P0, Cur : Instrument.Track_Vectors.Vector; --  候选在起点、此刻的位置
       Dead : Bools;                              --  判成"自己身上的"(转眼时不跟着世界挪)的候选:不记、不进解
-      Tid : Integer := -1;                       --  仪器的跟踪段号(-1 = 没用仪器,按槽号重切)
+      Tid : Integer := -1;                       --  仪器的跟踪段号(-1 = 仪器没在跟 ⇒ 量不到点的位置)
       Target : Integer := -1;                    --  视差最大的那一块(只用来定步长)
       Step : Long_Float := B;
       Mok : Boolean;
@@ -5950,9 +5963,9 @@ package body Act is
                     Instrument.Track_Start (To_String (C.Inst_Host), C.Inst_Port, F.Cams (Cam).RGB, Cw, Ch, Fresh, Tid, Err);
                begin
                   if Tid < 0 then
-                     Geo_Say ("仪器不跟点(" & To_String (Err) & ")⇒ 按槽号重切");
+                     Geo_Say ("仪器不跟点(" & To_String (Err) & ")⇒ 这一段量不到候选点的位置");
                   elsif Natural (R.Length) /= Natural (Fresh.Length) then
-                     Geo_Say ("仪器跟的点数对不上 ⇒ 按槽号重切");
+                     Geo_Say ("仪器跟的点数对不上 ⇒ 这一段量不到候选点的位置");
                      Instrument.Track_End (To_String (C.Inst_Host), C.Inst_Port, Tid);
                      Tid := -1;
                   end if;
@@ -5973,10 +5986,18 @@ package body Act is
             Geo_Say ("对方复位(新的一集)⇒ 手回了原处、眼里的东西换了:重开一段跟踪,路径接着走");
             Open_Segment;
          end On_Reset;
-      --  候选此刻在画面里的位置:仪器跟着就问仪器;没有仪器就按槽号重切。仪器这一停没答上来 ⇒ 全算没看见(不混两种来源)
+      --  候选此刻在画面里的位置:只问跟点仪器(这件量只有这一种量法)。没有仪器 / 仪器这一停没答上来 ⇒ 全算没看见、如实说。
+      --  (以前没有仪器时退回按槽号重切,09-26 owner:一个量只许一种量法 ⇒ 删了;按块认的办法 09-24 几炮都量飞,仪器跟 400 帧一个没丢)
       procedure Where is
          Err : Unbounded_String;
       begin
+         if Tid < 0 then
+            for I in 0 .. Natural (Cur.Length) - 1 loop
+               Cur.Replace_Element (I, Instrument.Track_Pt'(U => Cur (I).U, V => Cur (I).V, Seen => False, Conf => 0.0));
+            end loop;
+            Geo_Say ("没有跟点仪器在跟 ⇒ 这一停量不到候选点在画面里的位置");
+            return;
+         end if;
          if Tid >= 0 then
             declare
                R : constant Instrument.Track_Vectors.Vector :=
@@ -6000,16 +6021,6 @@ package body Act is
             end;
             return;
          end if;
-         for I in Live_From .. Natural (Cur.Length) - 1 loop
-            declare
-               U, V : Long_Float;
-               Seen : Boolean;
-            begin
-               Geo_Track (C, F, Cam, Cand (I), U, V, Seen);
-               Seen := Seen and then not Dead (I);
-               Cur.Replace_Element (I, Instrument.Track_Pt'(U => U, V => V, Seen => Seen, Conf => (if Seen then 1.0 else 0.0)));
-            end;
-         end loop;
       end Where;
       --  手动的每一帧都喂给跟点仪器(不只停点):一转十几度,一停之间画面跳几十上百像素,只看停点的跟点器把桌上的点全跟丢
       --  (G2B 2026-09-24 左眼:探一转 15 个点只跟住 3 个,还都是自己手上的)。逐帧喂,帧间只挪几个像素;位置仍在停点那一步(Where)取
@@ -6199,7 +6210,7 @@ package body Act is
       declare
          K0 : constant Natural := Record_All;   --  起点那一停
       begin
-         Geo_Say ("量朝向:起点 " & Codec.Img (K0) & " 个候选" & (if Tid >= 0 then " · 仪器逐帧跟点" else " · 按槽号重切"));
+         Geo_Say ("量朝向:起点 " & Codec.Img (K0) & " 个候选" & (if Tid >= 0 then " · 仪器逐帧跟点" else " · 没有仪器在跟 ⇒ 量不到"));
       end;
       Head_Mark (L, C, F, Arm);   --  原处一笔
       --  转动的停:转角由眼定,不由关节定。先按四倍转动探针档探一转,看跟住的点在画面里中位挪了几像素,按"每转挪画幅的 1/16"缩放
@@ -6370,7 +6381,7 @@ package body Act is
          begin
             Ada.Text_IO.Create (Fo, Ada.Text_IO.Out_File, Dump & "/geo_cam" & Codec.Img (Cam) & "_obs.txt");
             Ada.Text_IO.Put_Line (Fo, Codec.Img (Cw) & " " & Codec.Img (Ch) & " " & Codec.Fmt (G.Cx, 3) & " " & Codec.Fmt (G.Cy, 3) & " "
-                                  & Codec.Fmt ((if F.Cams (Cam).Has_K then G.F else 0.0), 3) & " " & Codec.Img (Natural (Cur.Length)));
+                                  & Codec.Fmt (0.0, 3) & " " & Codec.Img (Natural (Cur.Length)));
             for Ob of Obs loop
                Ada.Text_IO.Put_Line (Fo, Codec.Img (Ob.Pt) & " " & Codec.Fmt (Ob.U, 3) & " " & Codec.Fmt (Ob.V, 3) & " " & Codec.Fmt (Ob.Pose (0), 6) & " " & Codec.Fmt (Ob.Pose (1), 6)
                                      & " " & Codec.Fmt (Ob.Pose (2), 6) & " " & Codec.Fmt (Ob.Pose (3), 7) & " " & Codec.Fmt (Ob.Pose (4), 7) & " " & Codec.Fmt (Ob.Pose (5), 7)
@@ -6475,7 +6486,7 @@ package body Act is
       C.Board_Tracks.Clear;
       C.Board_Plane := False;
       if Host = "" then
-         Geo_Say ("标定板:没配仪器 ⇒ 配不了点;不动的眼只能靠看手");
+         Geo_Say ("标定板:没配配点仪器 ⇒ 配不了点 ⇒ 这次标不了不动的眼(它只有板这一种量法)");
          return;
       end if;
       for I in 0 .. Natural (C.Board_Stops.Length) - 1 loop
@@ -6814,7 +6825,11 @@ package body Act is
       H : constant Natural := C.Fixed_Ref_H;
    begin
       C.Fixed_Turn_Sd := 0.0;
-      if Length (C.Inst_Host) = 0 or else C.Board.Is_Empty or else C.Fixed_Ref.Is_Empty or else Natural (C.Fixed_Ref.Length) /= W * H * 3 then
+      if Length (C.Inst_Host) = 0 then
+         Say_No_Check;
+         return;
+      end if;
+      if C.Board.Is_Empty or else C.Fixed_Ref.Is_Empty or else Natural (C.Fixed_Ref.Length) /= W * H * 3 then
          return;
       end if;
       for S of C.Board loop
@@ -6946,7 +6961,11 @@ package body Act is
       Wc : constant Natural := C.Map.World_Cam;
       Deg_Say : constant String := "°";
    begin
-      if Length (C.Inst_Host) = 0 or else C.Board.Is_Empty or else C.Fixed_Ref.Is_Empty or else Wc >= Natural (C.Geo.Length) or else Wc >= Natural (F.Cams.Length)
+      if Length (C.Inst_Host) = 0 then
+         Say_No_Check;
+         return;
+      end if;
+      if C.Board.Is_Empty or else C.Fixed_Ref.Is_Empty or else Wc >= Natural (C.Geo.Length) or else Wc >= Natural (F.Cams.Length)
         or else not (C.Geo (Wc).Valid and then C.Geo (Wc).Fixed) or else F.Cams (Wc).W = 0
       then
          return;
@@ -7161,9 +7180,7 @@ package body Act is
          Rep : Geom.Fixed_Report;
          Fok : Boolean;
       begin
-         if not F.Cams (Wc).Has_K then
-            G.F := 0.0;   --  身体没给 ⇒ 一起解
-         end if;
+         G.F := 0.0;   --  焦距一律自己解(观测里带的内参驱动不读,铁律 1)
          --  先按板解它、再腕眼和它一起解(Geo_Board_Solve);手上的点等眼定了再认(手上的尖会滑,不进眼的解)
          Geo_Board_Solve (C, G, Rep, Fok);
          if not Fok then
@@ -8222,7 +8239,6 @@ package body Act is
       Whole, Edge : Boolean;
       Its_Name : Unbounded_String;
       Said_Blind : Boolean := False;
-      Said_One_Eye : Boolean := False;
       Known : Boolean := False;             --  此刻没眼看得清它,但它在哪我量过(C.Geo_Pw)
       Said_Known : Boolean := False;
       Said_Cut : Boolean := False;          --  说过一次"这只眼里它顶着画面边,轮廓不记"
@@ -8286,42 +8302,11 @@ package body Act is
       --  🔴 此刻没有一只眼看得清它,但它在哪我上一段刚量过 ⇒ 凭记住的位置走,并如实说前提是它没动。
       --  H30 2026-09-22 实测:手贴到剪刀 8 mm 时腕眼里它糊了、被切了,脑指不出 ⇒ 我报"看不见"、一步不走,而它在哪我明明知道。
       Known := Length (Its_Name) > 0 and then C.Geo_Pw_Valid and then C.Geo_Pw_Name = Its_Name;
-      if not Seen and then Natural (C.Geo_Obs.Length) < 2 and then not Known then
+      --  它在哪只有一种量法:两只眼同一刻的视线交点(09-22 owner 定的地基;09-26 owner:一个量只许一种量法 ⇒
+      --  以前的"一条视线落到它躺的面上""我自己横挪几眼算视差(前提是它没动)"都删了)。此刻交不上 ⇒ 用上一次交出来的位置并说出来
+      if not Seen and then not Known then
          Event := S ("lost: I cannot see the thing you named in this eye right now");
          return;
-      end if;
-      if Seen and then (Whole or else Natural (C.Geo_Obs.Length) < 2) then
-         C.Geo_Obs.Append (Geom.Obs'(Pose => F.EE (Arm), U => U, V => V));
-      end if;
-      if Seen and then not Known and then Natural (C.Geo_Obs.Length) < 2
-        and then Natural (Sightlines_Now (C, F, Cam, Arm, Its_Name, Seen, Whole, U, V, Who).Length) < 2
-      then
-         --  只有一笔观测 ⇒ 先横挪一步当基线(拇指测距的"换只眼")。它在哪已经量过的(Known)不用横挪:一条视线落到它躺的面上就够
-         declare
-            P0 : constant Plug.Arm_Pose := F.EE (Arm);
-            Rc : constant Geom.M3 := Geom.Cam_R (G, P0);
-            B : constant Long_Float := 4.0 * Geo_Base (C, Arm);   --  同量朝向那一档(倍数,无量纲)
-            Dw : constant Geom.V3 := Geom.Ap (Rc, [B, 0.0, 0.0]);
-            U0 : constant Long_Float := U;
-            D0 : constant Geom.V3 := Geom.Ray (G, P0, U, V);     --  横挪前它所在的方向(世界系)
-         begin
-            Geo_Move (L, C, F, Arm, Dw, Mok);
-            Steps_Taken := Steps_Taken + 1;
-            --  横挪之后它在画面里跳了一截(这正是要量的),重量的窗得跟着跳:按原方向投进新位姿(H34 2026-09-22 实测:近处一横挪就"看丢")
-            declare
-               Pn : constant Plug.Arm_Pose := F.EE (Arm);
-            begin
-               Retarget_Box (C, F, Cam, Arm, Name, [Pn (0) + D0 (0), Pn (1) + D0 (1), Pn (2) + D0 (2)]);
-            end;
-            Geo_Track (C, F, Cam, Slot, U, V, Seen, Name);
-            if not Seen then
-               Event := S ("lost: it left my sight when I stepped sideways to measure its distance");
-               Beats := Beats_Since (L, Beats0);
-               return;
-            end if;
-            C.Geo_Obs.Append (Geom.Obs'(Pose => F.EE (Arm), U => U, V => V));
-            Geo_Say ("视差基线:横挪 " & Mm (B) & ",它在画面里从 u=" & Codec.Fmt (U0, 1) & " 跳到 u=" & Codec.Fmt (U, 1));
-         end;
       end if;
       if Step_Cap <= 0.0 then
          Event := S ("refused: I have not measured how far one command moves this arm, so I cannot walk toward it");
@@ -8333,18 +8318,16 @@ package body Act is
             exit;
          end if;         declare
             Cur : constant Plug.Arm_Pose := F.EE (Arm);
-            Nobs : constant Natural := Natural (C.Geo_Obs.Length);
-            Use_Obs : Geom.Obs_Vectors.Vector;
             Pw, Pc, D : Geom.V3;
             Dist : Long_Float;
          begin
-            --  🔴 它此刻在哪:先问【此刻】每一只看得见它的眼 —— 两条以上视线一交就是它,它动不动都一样。
-            --  只有一只眼看见时才退回"我自己挪过的那几眼"(最多 6 笔,次数),并如实说前提是它没动。
+            --  🔴 它此刻在哪:问【此刻】每一只看得见它的眼 —— 两条以上视线一交就是它,它动不动都一样。这是唯一的量法;
+            --  交不上 ⇒ 用上一次两眼交出来的位置并说出来(09-26 删了"我自己挪过的那几眼"和"一条视线落到它躺的面上"两种)。
             declare
                Rays : constant Geom.Sight_Vectors.Vector := Sightlines_Now (C, F, Cam, Arm, Its_Name, Seen, Whole, U, V, Who);
-               Mok, Hok : Boolean;
+               Mok : Boolean;
                Spread : Long_Float;
-               Pm, Ph : Geom.V3;
+               Pm : Geom.V3;
             begin
                Pm := Geom.Meet (Rays, Mok, Spread);
                --  🔴 交点可信的条件:几条视线离交点的最大偏差不超过【眼自己量朝向时的像素残差】换算到那个距离上的米数(量过的数,不是拍的)。
@@ -8366,57 +8349,26 @@ package body Act is
                      end if;
                   end;
                end if;
-               --  它在哪上一段量过(Known)、这一眼又看得见它 ⇒ 这条视线落到它躺的那个面(过它量到的位置、法向 = 面的法向)上,就是它此刻的位置。
-               --  一条视线 + 它躺的面 = 不用横挪的量法(和不动的眼找它是同一条几何)。近处它比"我自己挪过的几眼"准得多
-               --  (H36 2026-09-22 实测:近处单眼挪出来的估计 0.038 → 0.030 → 0.081 → 0.160 m 乱跳)。
-               --  面的高度只信两眼交出来的(H42 实测:单眼挪出来的 z=0.750 当了面,后面全在 9 cm 高的空中走)。
-               Hok := False;
-               if not Mok and then Known and then Seen and then C.Geo_Pw_Met then
-                  declare
-                     Hp : constant Plug.Arm_Pose := F.EE (Arm);
-                     Nn_S : constant Geom.V3 := Up_Dir (C);
-                  begin
-                     Ph := Geom.Hit_Plane (Geom.Cam_Pos (G, Hp), Geom.Ray (G, Hp, U, V), C.Geo_Pw, Nn_S, Hok);
-                  end;
-               end if;
                if Mok then
                   Pw := Pm;
                   Geo_Say ("此刻 " & To_String (Who) & " 相机同时看见它 ⇒ 视线交在 (" & Mm (Pw (0)) & "," & Mm (Pw (1)) & "," & Mm (Pw (2))
                            & "),视线间最大偏差 " & Mm (Spread));
-               elsif Hok then
-                  Pw := Ph;
-                  if not Said_Known then
-                     Said_Known := True;
-                     Geo_Say ("这一眼的视线落到它躺的面上(面过我上一段量到的位置)⇒ 它在 (" & Mm (Pw (0)) & "," & Mm (Pw (1)) & "," & Mm (Pw (2)) & ")");
-                  end if;
-                  if not C.Geo_Pw_Met then
-                     C.Geo_Pw := Pw;   --  记住最新的(两眼交点量过的不让单眼盖)
-                  end if;
-               elsif Nobs >= 2 then
-                  for K in Natural'Max (0, Nobs - 6) .. Nobs - 1 loop
-                     Use_Obs.Append (C.Geo_Obs (K));
-                  end loop;
-                  Pw := Geom.Triangulate (G, Use_Obs);
-                  if not Said_One_Eye then
-                     Said_One_Eye := True;
-                     Geo_Say ("此刻只有这一只眼看见它 ⇒ 按我自己挪过的那几眼算(前提是它没动;会动的东西这样量不出来)");
-                  end if;
                elsif Known then
                   Pw := C.Geo_Pw;
                   if not Said_Known then
                      Said_Known := True;
-                     Geo_Say ("此刻没有一只眼看得清它 ⇒ 按我上一段量到的位置 (" & Mm (Pw (0)) & "," & Mm (Pw (1)) & "," & Mm (Pw (2))
+                     Geo_Say ("此刻没有两只眼同时看见它 ⇒ 按上一次两眼交出来的位置 (" & Mm (Pw (0)) & "," & Mm (Pw (1)) & "," & Mm (Pw (2))
                               & ") 走(前提是它没动)");
                   end if;
                else
-                  Event := S ("lost: I cannot see the thing you named in this eye right now");
+                  Event := S ("lost: two of my eyes have not seen it at the same moment, so I cannot tell where it is");
                   exit;
                end if;
-               if (Mok or else Nobs >= 2) and then Length (Its_Name) > 0 then
+               if Mok and then Length (Its_Name) > 0 then
                   --  记住它在哪:下一段看不清时凭这个走。两眼交点(偏差毫米级)比单眼挪出来的准得多(H35 2026-09-22 实测:交点 z=0.628,
                   --  之后手指朝下近处单眼挪出来的 z=0.745 把它盖掉了,下一段就按 12 cm 高的空中走)⇒ 这一段里有过交点就不让单眼盖
                   --  H47 2026-09-23 实测:单眼挪出来的一个坏位置 (0.43, −0.21, 0.90) 被记住,之后十几段全按它走、一步没走。
-                  --  ⇒ 只记两眼交出来的;单眼的估计只在这一段里用,不进记忆
+                  --  ⇒ 只记两眼交出来的(09-26 起也只有这一种估计)
                   if Mok then
                      C.Geo_Pw := Pw; C.Geo_Pw_Valid := True; C.Geo_Pw_Name := Its_Name; C.Geo_Pw_Met := True;
                   end if;
@@ -8682,11 +8634,10 @@ package body Act is
                      Slot_Whole (C, F, Cam, Slot, Whole, Edge, Its_Name, Name);
                   end;
                end if;
-               if Natural (C.Geo_Obs.Length) >= 2 and then not (Seen and then Whole) then
+               if (Known or else C.Geo_Pw_Valid) and then Seen and then not Whole then
                   if not Said_Blind then
                      Said_Blind := True;
-                     Geo_Say ((if Seen then "它有一截出了画面/被挡住,这一眼不可信" else "这一步之后看不见它了")
-                              & " ⇒ 不再更新它的位置;它在哪我已经从看得全的那几眼里知道了,凭位姿读数走完");
+                     Geo_Say ("它有一截出了画面/被挡住,这一眼不可信 ⇒ 不再更新它的位置;凭上一次两眼交出来的位置走完");
                   end if;
                elsif not Seen then
                   --  最后一步它进了指缝、被手指挡住也正常:上一眼已经在两倍容差内(倍数,无量纲)
@@ -8704,8 +8655,6 @@ package body Act is
                      Event := S ("lost: I lost sight of it after that step (it was " & Mm (Dist) & " away)");
                      exit;
                   end if;
-               else
-                  C.Geo_Obs.Append (Geom.Obs'(Pose => F.EE (Arm), U => U, V => V));
                end if;
             end;
             end if;   --  not Pressing
@@ -9510,8 +9459,10 @@ package body Act is
                                  declare
                                     Ix : constant Natural := Natural (Sub_Arm) * C.Map.N_Cams + Cm;
                                     Vv : constant Long_Float :=
+                                      --  "不动的眼"只认不长在任何一条胳膊上的(09-26 owner:一种量法;以前没有这样的眼时退回"变得最少",
+                                      --  会把长在另一条胳膊上的眼当成不动的 —— H27 就栽在这上面)⇒ 没有就是没有
                                       (if Ix < Natural (C.Map.Cam_Frac.Length)
-                                         and then not (C.Eye_Want = Sinew.Ey_Still and then Any_Free and then Cam_Arm (C, Cm) >= 0)
+                                         and then not (C.Eye_Want = Sinew.Ey_Still and then Cam_Arm (C, Cm) >= 0)
                                        then C.Map.Cam_Frac (Ix) else -1.0);
                                  begin
                                     --  🔴 "最静"只是一半 —— 另一半是【脑在那只眼里认得出这一段要做的事】。

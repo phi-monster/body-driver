@@ -330,46 +330,8 @@ package body Plug is
                         C.Gray.Replace_Element (I, U8 ((R * 299 + G * 587 + B * 114) / 1000));
                      end;
                   end loop;
-                  if Ci < Natural (L.Lay.Depth.Length) then
-                     declare
-                        Dn : constant Integer := Layout.Find (L.Last, L.Last_Obs, L.Lay.Depth (Ci));
-                        Dw, Dh : Natural;
-                        Df, Dl : Natural;
-                        T : constant String := Nd_Type (L.Last, Dn);
-                     begin
-                        if Layout.Is_Depth (L.Last, Dn, Dw, Dh) and then Dw = W and then Dh = H then
-                           Nd_Data (L.Last, Dn, Df, Dl);
-                           if T'Length >= 2 and then T (T'Last - 1 .. T'Last) = "f4" and then T (T'First) /= '>' and then Dl >= W * H * 4 then
-                              C.Depth := F64_Vectors.To_Vector (0.0, Ada.Containers.Count_Type (W * H));
-                              for I in 0 .. W * H - 1 loop
-                                 declare
-                                    O : constant Natural := Df + 4 * I;
-                                    V : constant Unsigned_32 :=
-                                      Unsigned_32 (L.Last.Raw.Element (O)) or Shift_Left (Unsigned_32 (L.Last.Raw.Element (O + 1)), 8)
-                                      or Shift_Left (Unsigned_32 (L.Last.Raw.Element (O + 2)), 16) or Shift_Left (Unsigned_32 (L.Last.Raw.Element (O + 3)), 24);
-                                 begin
-                                    C.Depth.Replace_Element (I, Long_Float (U32_To_F32 (V)));
-                                 end;
-                              end loop;
-                              C.Has_Depth := True;
-                           else
-                              C.Depth := Numbers (L.Last, Dn);
-                              C.Has_Depth := Natural (C.Depth.Length) = W * H;
-                           end if;
-                        end if;
-                     end;
-                  end if;
-                  --  内参:开机按形状认出来、配到这台相机的那个 3×3(见 Layout.Is_Intrinsic);没有就留给身体自己量
-                  if Ci < Natural (L.Lay.Intr.Length) and then not L.Lay.Intr (Ci).Segs.Is_Empty then
-                     declare
-                        Kn : constant Integer := Layout.Find (L.Last, L.Last_Obs, L.Lay.Intr (Ci));
-                        Kf, Kcx, Kcy : Long_Float;
-                     begin
-                        if Kn >= 0 and then Layout.Is_Intrinsic (L.Last, Kn, Kf, Kcx, Kcy) then
-                           C.Focal := Kf; C.Cx := Kcx; C.Cy := Kcy; C.Has_K := True;
-                        end if;
-                     end;
-                  end if;
+                  --  身体另外给的深度图、相机内参:认得出(Layout 按形状认,免得当成别的读数),但驱动不读(铁律 1,2026-09-26 owner:
+                  --  每个量只有一种量法 —— 远近、焦距都由身体自己量;以前"给了就用、没给就量"是两种量法)。Has_Depth / Has_K 永远是 False
                   F.Cams.Append (C);
                end if;
             end if;
