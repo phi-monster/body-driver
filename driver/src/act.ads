@@ -277,6 +277,9 @@ package Act is
       Fixed_Ref_W, Fixed_Ref_H : Natural := 0;
       Fixed_Best : Natural := 0;                --  不动的眼这一次放好以来,核对时对得上的最多点数(挡没挡按它比;挪过就重记)
       Board_Pt, Board_N : Geom.V3 := [others => 0.0];
+      Board_Rms : Long_Float := 0.0;            --  板上躺在面上的那些点离面的离散(米)
+      Fixed_Said : Boolean := False;            --  这一次开机第一次核对的结果说过了(以后只在挪了、挡了、又看全了时说)
+      Fixed_Covered : Boolean := False;         --  上一次核对判成挡住了
       Dump_Dir : Unbounded_String;
       Round_N : Natural := 0;
       Fast : Boolean := False;
@@ -375,6 +378,10 @@ package Act is
    --  两次开机之间相机被挪过 ⇒ 第一轮核对就发现、重标
    procedure Board_Save (C : Context);
    procedure Board_Load (C : in out Context);
+   --  朝下被顶住的一点进地图(有板的面时只和它对账、不换它);开机碰桌面时在板上找一块空的面(压的那一瓣和别的瓣落点连成的几段 R 之内没有高出面的板点)。
+   --  导出只为自检
+   procedure Note_Support (C : in out Context; P, N : Geom.V3; How : String);
+   function Board_Free_Spot (C : Context; Lp : Geom.V3_Vectors.Vector; R : Long_Float; Delta_Out : out Geom.V3) return Boolean;
 
    procedure Init_Tracks (C : in out Context);
    --  开机装回几何常数(身体文件旁边的 .geo.json:焦距、相机在手上的朝向、指尖在相机里的位置);缺的当场量。

@@ -2501,6 +2501,29 @@ package body Geom is
       end if;
    end Check_Fixed;
 
+   function Tips_On_Plane (G : Cam_Geo; Views : Board_View_Vectors.Vector; P0, N : V3; Sd_Plane : Long_Float) return Plane_Tip_Vectors.Vector is
+      R : Plane_Tip_Vectors.Vector;
+   begin
+      for Vw of Views loop
+         declare
+            O : constant V3 := Cam_Pos (G, Vw.Pose);
+            D : constant V3 := Ray (G, Vw.Pose, Vw.U, Vw.V);
+            Dn : constant Long_Float := D (0) * N (0) + D (1) * N (1) + D (2) * N (2);
+            H : constant Long_Float := (P0 (0) - O (0)) * N (0) + (P0 (1) - O (1)) * N (1) + (P0 (2) - O (2)) * N (2);
+            T : Plane_Tip;
+         begin
+            if Dn /= 0.0 and then H / Dn > 0.0 then   --  朝着面、交在眼前
+               T.S := H / Dn;
+               T.Sd := Sd_Plane / abs Dn;
+               T.Pw := [O (0) + T.S * D (0), O (1) + T.S * D (1), O (2) + T.S * D (2)];
+               T.Ok := True;
+            end if;
+            R.Append (T);
+         end;
+      end loop;
+      return R;
+   end Tips_On_Plane;
+
    function Tips_On_Rays (Fixed : Cam_Geo; O : Obs_Pt_Vectors.Vector; Ray_O : V3; Ray_D : V3_Vectors.Vector; Gate_Px : Long_Float) return Ray_Tip_Vectors.Vector is
       package LF_Vectors is new Ada.Containers.Vectors (Natural, Long_Float);
       Nr : constant Natural := Natural (Ray_D.Length);

@@ -169,6 +169,16 @@ package Geom is
       Rms : Long_Float := 0.0;                     --  新解的像素残差
    end record;
    procedure Check_Fixed (G : in out Cam_Geo; Scene : Scene_Pt_Vectors.Vector; Now : Scene_Pt_Vectors.Vector; Best : in out Natural; Rep : out Fixed_Check);
+   --  碰到桌面那一刻量指尖(2026-09-26):手上那只眼里每一瓣手指尖的像素是一条视线(Views 里的 Pose = 碰到那一刻手的位姿);
+   --  指尖碰在面上(过 P0、单位法向 N、面内离散 Sd_Plane 米)⇒ 视线和面的交点就是那一瓣的指尖:离眼 S(米),不确定度 Sd_Plane ÷ |视线·法向|。
+   --  视线不朝着面(平行或背着)⇒ 那一瓣 Ok = False。指尖本来就是"手碰到东西的那一点";面是标定板量的(1 mm 级),不用深度、不用尺子
+   type Plane_Tip is record
+      S, Sd : Long_Float := 0.0;
+      Pw : V3 := [others => 0.0];   --  世界里落在面上的那一点
+      Ok : Boolean := False;
+   end record;
+   package Plane_Tip_Vectors is new Ada.Containers.Vectors (Natural, Plane_Tip);
+   function Tips_On_Plane (G : Cam_Geo; Views : Board_View_Vectors.Vector; P0, N : V3; Sd_Plane : Long_Float) return Plane_Tip_Vectors.Vector;
    --  不动的眼解完之后每组观测各自的像素残差(记账、给认指尖定门槛)
    type Fixed_Report is record
       Scene_N, Scene_Used : Natural := 0;   --  标定板的点:给了几个、进解几个

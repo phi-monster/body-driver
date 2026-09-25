@@ -1409,6 +1409,7 @@ begin
          Img.Append (U8 ((I * 37) mod 256));
       end loop;
       C1.Fixed_Ref := Img; C1.Fixed_Ref_W := 8; C1.Fixed_Ref_H := 6;
+      C1.Fixed_Best := 5;
       Act.Board_Save (C1);
       C2.Geo_Path := C1.Geo_Path;
       Act.Board_Load (C2);
@@ -1422,10 +1423,120 @@ begin
          end loop;
       end if;
       Check (Natural (C2.Board.Length) = Natural (C1.Board.Length) and then Bytes.U8_Vectors."=" (C2.Fixed_Ref, C1.Fixed_Ref) and then C2.Fixed_Ref_W = 8
-             and then C2.Fixed_Ref_H = 6 and then Worst < 1.0e-5,
+             and then C2.Fixed_Ref_H = 6 and then Worst < 1.0e-5 and then C2.Fixed_Best = 5,
              "标定板随身体文件存、装回:" & Codec.Img (Natural (C2.Board.Length)) & "/" & Codec.Img (Natural (C1.Board.Length)) & " 个点、参考图 "
              & Codec.Img (C2.Fixed_Ref_W) & "×" & Codec.Img (C2.Fixed_Ref_H) & (if Bytes.U8_Vectors."=" (C2.Fixed_Ref, C1.Fixed_Ref) then " 一样" else " 不一样")
              & " · 最大差 " & Codec.Fmt (Worst, 8));
+   end;
+   --  🔴 碰桌面量指尖(2026-09-26,Geom.Tips_On_Plane):手上那只眼朝下,第 1 瓣的尖碰在面上 ⇒ 它的视线 ∩ 面 = 它的指尖(离眼 0.120 m,一分不差);
+   --  第 2 瓣的尖比面高 2 mm(没碰着)⇒ 交出来只会更远;不确定度 = 面的离散 ÷ |视线·法向|。面在眼的上方 ⇒ 交不到(Ok = False)
+   declare
+      Gt : Geom.Cam_Geo;
+      P : constant Plug.Arm_Pose := [0.1, -0.2, 1.0, 1.0, 0.0, 0.0, 0.0];   --  合成:手在 (0.1,−0.2,1.0),朝向不转 ⇒ 眼朝下
+      Vs : Geom.Board_View_Vectors.Vector;
+      S1 : constant Long_Float := 0.12;    --  第 1 瓣指尖离眼(米,合成)
+      S2 : constant Long_Float := 0.118;   --  第 2 瓣(米,合成)
+   begin
+      Gt.Valid := True; Gt.F := 397.0; Gt.Cx := 320.0; Gt.Cy := 240.0; Gt.Off := [0.08, 0.0, 0.05];
+      Vs.Append (Geom.Board_View'(Pose => P, U => 260.0, V => 260.0));
+      Vs.Append (Geom.Board_View'(Pose => P, U => 375.0, V => 265.0));
+      declare
+         O : constant Geom.V3 := Geom.Cam_Pos (Gt, P);
+         D1 : constant Geom.V3 := Geom.Ray (Gt, P, 260.0, 260.0);
+         D2 : constant Geom.V3 := Geom.Ray (Gt, P, 375.0, 265.0);
+         P0 : constant Geom.V3 := [O (0) + S1 * D1 (0), O (1) + S1 * D1 (1), O (2) + S1 * D1 (2)];
+         Tip2_Z : constant Long_Float := O (2) + S2 * D2 (2);
+         R : constant Geom.Plane_Tip_Vectors.Vector := Geom.Tips_On_Plane (Gt, Vs, P0, [0.0, 0.0, 1.0], 0.001);
+         Up : constant Geom.Plane_Tip_Vectors.Vector := Geom.Tips_On_Plane (Gt, Vs, [0.0, 0.0, 1.3], [0.0, 0.0, 1.0], 0.001);
+      begin
+         Check (Natural (R.Length) = 2 and then R (0).Ok and then abs (R (0).S - S1) < 1.0e-9 and then abs (R (0).Sd - 0.001 / abs D1 (2)) < 1.0e-12
+                and then R (1).Ok and then R (1).S > S2 and then Tip2_Z > P0 (2) and then not Up (0).Ok and then not Up (1).Ok,
+                "碰桌面量指尖:碰着的那一瓣视线交面 = 它的指尖(" & Codec.Fmt (R (0).S, 6) & " m,真 0.120)、不确定度 " & Codec.Fmt (1000.0 * R (0).Sd, 3)
+                & " mm;没碰着的那一瓣交出来更远(" & Codec.Fmt (R (1).S, 4) & " > 0.118)· 面在眼上方 ⇒ 交不到");
+      end;
+   end;
+   --  🔴 开机碰桌面挑一块空的面(Act.Board_Free_Spot):板 21×21 个点铺在 0.765 m 的面上(2 cm 一格、离散 1 mm),中间 5×5 格是一块 5 cm 高的东西。
+   --  压的那一瓣落在 (0,0)、另一瓣落在 (0.05,0),手指宽上限 1 cm ⇒ 挪到的地方:压的那一瓣落在一个躺在面上的板点上,两个落点连线 1 cm 内没有东西上的点,
+   --  挪得不远(< 0.1 m);拿掉那块东西 ⇒ 不用挪;板上全是东西 ⇒ 找不到
+   declare
+      use Ada.Numerics.Long_Elementary_Functions;
+      C1 : Act.Context;
+      Lp : Geom.V3_Vectors.Vector;
+      Dl : Geom.V3;
+      Ok1, Ok2, Ok3 : Boolean;
+      Dl2, Dl3 : Geom.V3;
+      Clear_Ok : Boolean := True;
+      On_Pt : Boolean := False;
+      Cell : constant Long_Float := 0.02;       --  格距(米,合成)
+      Hgt : constant Long_Float := 0.05;        --  东西高(米,合成)
+      Rw : constant Long_Float := 0.01;         --  手指宽上限(米,合成)
+      function Pt (I, J : Integer; Z : Long_Float) return Geom.Scene_Pt is
+        (Geom.Scene_Pt'(Pw => [Cell * Long_Float (I), Cell * Long_Float (J), Z], U => 0.0, V => 0.0, Sh => 0.0, Views => 9,
+                        Cov => [[1.0e-6, 0.0, 0.0], [0.0, 1.0e-6, 0.0], [0.0, 0.0, 1.0e-6]]));
+   begin
+      C1.Board_Plane := True; C1.Board_Pt := [0.0, 0.0, 0.765]; C1.Board_N := [0.0, 0.0, 1.0]; C1.Board_Rms := 0.001;
+      for I in -10 .. 10 loop
+         for J in -10 .. 10 loop
+            C1.Board.Append (Pt (I, J, (if abs I <= 2 and then abs J <= 2 then 0.765 + Hgt else 0.765)));
+         end loop;
+      end loop;
+      Lp.Append (Geom.V3'[0.0, 0.0, 0.765]);
+      Lp.Append (Geom.V3'[0.05, 0.0, 0.765]);
+      Ok1 := Act.Board_Free_Spot (C1, Lp, Rw, Dl);
+      if Ok1 then
+         for S of C1.Board loop
+            declare
+               Ax : constant Long_Float := Dl (0); Ay : constant Long_Float := Dl (1);
+               Bx : constant Long_Float := 0.05 + Dl (0);
+               Qx : constant Long_Float := S.Pw (0); Qy : constant Long_Float := S.Pw (1);
+               T : constant Long_Float := Long_Float'Max (0.0, Long_Float'Min (1.0, (Qx - Ax) / (Bx - Ax)));
+               Dd : constant Long_Float := Sqrt ((Qx - (Ax + T * (Bx - Ax))) ** 2 + (Qy - Ay) ** 2);
+            begin
+               if S.Pw (2) > 0.78 and then Dd <= Rw then
+                  Clear_Ok := False;
+               end if;
+               if S.Pw (2) < 0.78 and then Sqrt ((Qx - Ax) ** 2 + (Qy - Ay) ** 2) < 1.0e-9 then
+                  On_Pt := True;
+               end if;
+            end;
+         end loop;
+      end if;
+      declare
+         C2 : Act.Context := C1;
+         C3 : Act.Context := C1;
+      begin
+         C2.Board.Clear;
+         for I in -10 .. 10 loop
+            for J in -10 .. 10 loop
+               C2.Board.Append (Pt (I, J, 0.765));
+               C3.Board.Replace_Element (Natural ((I + 10) * 21 + J + 10), Pt (I, J, 0.765 + Hgt));
+            end loop;
+         end loop;
+         Ok2 := Act.Board_Free_Spot (C2, Lp, Rw, Dl2);
+         Ok3 := Act.Board_Free_Spot (C3, Lp, Rw, Dl3);
+      end;
+      Check (Ok1 and then Clear_Ok and then On_Pt and then Geom.Norm (Dl) < 0.1 and then Ok2 and then Geom.Norm (Dl2) = 0.0 and then not Ok3,
+             "开机碰桌面挑空的面:避开 5 cm 高的那块东西挪了 (" & Codec.Fmt (Dl (0), 3) & "," & Codec.Fmt (Dl (1), 3) & ") m,落点在躺在面上的板点上、"
+             & "连线 1 cm 内没有东西 · 拿掉东西 ⇒ 不挪 · 板上全是东西 ⇒ 找不到");
+   end;
+   --  🔴 有板的面时,朝下顶住的点只对账、不换面(Act.Note_Support,2026-09-26):X5B 指尖错了的那只手顶住的点比板的面低 20.8 cm,"最低的赢"把它当成了桌面。
+   --  低 20 cm ⇒ 面还是板的、不记东西;高 5 cm ⇒ 记成"这儿有东西"、面不变;差 0.5 mm(门 = 3 倍 1 mm ⊕ 0.5 mm)⇒ 对得上
+   declare
+      C1 : Act.Context;
+      B0 : constant Geom.V3 := [0.0, 0.0, 0.765];
+      Low_Ok, High_Ok, Near_Ok : Boolean;
+   begin
+      C1.Board_Plane := True; C1.Board_Pt := B0; C1.Board_N := [0.0, 0.0, 1.0]; C1.Board_Rms := 0.001; C1.Map.EE_Noise := 0.0005;
+      Act.Note_Support (C1, B0, [0.0, 0.0, 1.0], "合成:板的面");
+      Act.Note_Support (C1, [0.3, 0.1, 0.565], [0.27, -0.25, 0.93], "合成:低 20 cm");
+      Low_Ok := C1.Touch_Valid and then Geom."=" (C1.Touch_Pt, B0) and then C1.Bumps.Is_Empty;
+      Act.Note_Support (C1, [0.3, 0.1, 0.815], [0.0, 0.0, 1.0], "合成:高 5 cm");
+      High_Ok := Geom."=" (C1.Touch_Pt, B0) and then Natural (C1.Bumps.Length) = 1;
+      Act.Note_Support (C1, [0.3, 0.1, 0.7655], [0.0, 0.0, 1.0], "合成:差 0.5 mm");
+      Near_Ok := Geom."=" (C1.Touch_Pt, B0) and then Natural (C1.Bumps.Length) = 1 and then Geom."=" (C1.Touch_N, [0.0, 0.0, 1.0]);
+      Check (Low_Ok and then High_Ok and then Near_Ok,
+             "有板的面时顶住的点只对账:低 20 cm 不换面、不记东西" & (if Low_Ok then "" else "(错)") & " · 高 5 cm 记成东西" & (if High_Ok then "" else "(错)")
+             & " · 差 0.5 mm 对得上" & (if Near_Ok then "" else "(错)"));
    end;
    --  🔴 认指尖:瓣尖落在哪条腕眼瓣视线上(2026-09-24,Geom.Tips_On_Rays)。不动的眼已知(合成:(0,−0.41,1.308) 低头 30°、焦距 288);腕眼在手系 (0.08,0,0.05)。
    --  ① 五指手:自己眼里 1 瓣(四根手指),指尖在视线上 0.20 m;不动的眼每笔看见 2 瓣,另一瓣是大拇指(离指尖 5 cm,不在视线上)
