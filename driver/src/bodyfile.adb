@@ -54,6 +54,28 @@ package body Bodyfile is
       return Picture.Quantile (C, 0.5);
    end Median;
 
+   --  手指像素(握区合空扫过的,整幅画面一格一个)按游程存:先"不是"的一段、再"是"的一段……交替,只存段长。
+   --  以前不存 ⇒ 装回身体后 Zone.Tip_Px 一个指尖都认不出(Zone_Tip 悄悄退成区心、自己的手指也剔不掉),开机碰桌面量指尖直接说"没量到"(X5C3 2026-09-26)
+   function Runs (M : Bools) return String is
+      R : Unbounded_String;
+      Cur : Boolean := False;
+      N : Natural := 0;
+      First : Boolean := True;
+   begin
+      for X of M loop
+         if X /= Cur then
+            Append (R, (if First then "" else ",") & Codec.Img (N));
+            First := False;
+            Cur := X; N := 0;
+         end if;
+         N := N + 1;
+      end loop;
+      if not M.Is_Empty then
+         Append (R, (if First then "" else ",") & Codec.Img (N));
+      end if;
+      return To_String (R);
+   end Runs;
+
    procedure Save (Path : String; Key : String; M : Selfmap.Body_Map; Hands : Zone.Hand_Vectors.Vector; Tables : Act.Effect_Vectors.Vector; Sch : Schema.Map) is
       B : Unbounded_String;
       Seen : Ints;
@@ -115,7 +137,8 @@ package body Bodyfile is
                              ",""au"":" & Codec.Fmt (Z.Au, 5) & ",""av"":" & Codec.Fmt (Z.Av, 5) & ",""span"":" & Codec.Fmt (Z.Span, 5) & ",""depth"":" & Codec.Fmt (Z.Depth, 5) &
                              ",""n_lobes"":" & Codec.Img (Z.N_Lobes) & ",""box"":[" & Codec.Img (Z.X0) & "," & Codec.Img (Z.Y0) & "," & Codec.Img (Z.X1) & "," & Codec.Img (Z.Y1) & "]" &
                              ",""a"":[" & Codec.Img (Z.A.X0) & "," & Codec.Img (Z.A.Y0) & "," & Codec.Img (Z.A.X1) & "," & Codec.Img (Z.A.Y1) & "," & Codec.Fmt (Z.A.Cu, 5) & "," & Codec.Fmt (Z.A.Cv, 5) & "," & Codec.Img (Z.A.Count) & "]" &
-                             ",""b"":[" & Codec.Img (Z.B.X0) & "," & Codec.Img (Z.B.Y0) & "," & Codec.Img (Z.B.X1) & "," & Codec.Img (Z.B.Y1) & "," & Codec.Fmt (Z.B.Cu, 5) & "," & Codec.Fmt (Z.B.Cv, 5) & "," & Codec.Img (Z.B.Count) & "]}");
+                             ",""b"":[" & Codec.Img (Z.B.X0) & "," & Codec.Img (Z.B.Y0) & "," & Codec.Img (Z.B.X1) & "," & Codec.Img (Z.B.Y1) & "," & Codec.Fmt (Z.B.Cu, 5) & "," & Codec.Fmt (Z.B.Cv, 5) & "," & Codec.Img (Z.B.Count) & "]" &
+                             ",""fingers"":[" & Runs (Z.Fingers) & "]}");
                      First := False;
                   end;
                end if;
@@ -338,6 +361,17 @@ package body Bodyfile is
                         if Natural (Bb.Length) = 7 and then Z.N_Lobes = 2 then
                            Z.B := (True, Natural (Bb (0)), Natural (Bb (1)), Natural (Bb (2)), Natural (Bb (3)), Bb (4), Bb (5), Natural (Bb (6)));
                         end if;
+                        declare
+                           Fr : constant Floats := Arr (Json.Get (D, Zn, "fingers"));   --  游程(见 Runs)
+                           Cur : Boolean := False;
+                        begin
+                           for R of Fr loop
+                              for I in 1 .. Natural (Long_Float'Max (0.0, R)) loop
+                                 Z.Fingers.Append (Cur);
+                              end loop;
+                              Cur := not Cur;
+                           end loop;
+                        end;
                         if Cm < Natural (H.Zones.Length) then
                            H.Zones.Replace_Element (Cm, Z);
                         end if;

@@ -210,6 +210,12 @@ begin
                         Reuse := False;
                         Put_Line ("[装] 第" & Natural'Image (A + 1) & " 只手第" & Natural'Image (Jk) & " 号抓握通道:存的握区里没有它自己那只眼(第"
                                   & Codec.Img (Natural (Hc)) & " 台)的那一格 ⇒ 合空一次补量");
+                     elsif Hc >= 0 and then Natural (Hc) < Natural (F.Cams.Length)
+                       and then Natural (Stored_Hands (Natural (Old)).Zones (Natural (Hc)).Fingers.Length) /= F.Cams (Natural (Hc)).W * F.Cams (Natural (Hc)).H
+                     then
+                        --  旧的身体文件不存手指像素 ⇒ 指尖认不出(Zone.Tip_Px 要按手指像素找;X5C3 2026-09-26)⇒ 合空一次补量
+                        Reuse := False;
+                        Put_Line ("[装] 第" & Natural'Image (A + 1) & " 只手第" & Natural'Image (Jk) & " 号抓握通道:存的握区里没有手指像素(旧的身体文件不存)⇒ 合空一次补量");
                      end if;
                   end;
                end;

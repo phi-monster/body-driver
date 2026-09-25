@@ -21,6 +21,7 @@ with Runtime;
 with Plan;
 with Layout;
 with Act;
+with Bodyfile;
 with Geom;
 with Selfmap;
 with Learned;
@@ -1427,6 +1428,47 @@ begin
              "标定板随身体文件存、装回:" & Codec.Img (Natural (C2.Board.Length)) & "/" & Codec.Img (Natural (C1.Board.Length)) & " 个点、参考图 "
              & Codec.Img (C2.Fixed_Ref_W) & "×" & Codec.Img (C2.Fixed_Ref_H) & (if Bytes.U8_Vectors."=" (C2.Fixed_Ref, C1.Fixed_Ref) then " 一样" else " 不一样")
              & " · 最大差 " & Codec.Fmt (Worst, 8));
+   end;
+   --  🔴 握区的手指像素随身体文件存、装回(Bodyfile,游程,2026-09-26):以前不存 ⇒ 装回身体后一个指尖都认不出,开机碰桌面量指尖直接"没量到"(X5C3)。
+   --  合成:8×6 画面里两块手指(左上 2×3、右下 3×2)⇒ 存了再装回,每一格一样;指尖像素(Zone.Tip_Px)也一样
+   declare
+      M1, M2 : Selfmap.Body_Map;
+      H1, H2 : Zone.Hand_Vectors.Vector;
+      T1, T2 : Act.Effect_Vectors.Vector;
+      S1, S2 : Schema.Map;
+      H : Zone.Hand;
+      Z : Zone.Hand_Zone;
+      Note : Unbounded_String;
+      Got : Boolean;
+      Path : constant String := "/tmp/bd_selfcheck_body.json";
+      Same : Boolean := False;
+      U1, V1, U2, V2 : Long_Float := -1.0;
+      Ok1, Ok2 : Boolean := False;
+   begin
+      M1.Arms := 1; M1.N_Cams := 1; M1.Per_Arm := Chan.Per_Arm; M1.Channels := Chan.Per_Arm;
+      for Ch in 0 .. Chan.Per_Arm - 1 loop
+         M1.Amp.Append (0.0065); M1.Delivered.Append (0.005);   --  合成
+      end loop;
+      M1.Cam_On_Arm.Append (0);
+      for I in 0 .. 8 * 6 - 1 loop
+         Z.Fingers.Append ((I / 8 in 0 .. 2 and then I mod 8 in 0 .. 1) or else (I / 8 in 4 .. 5 and then I mod 8 in 5 .. 7));
+      end loop;
+      Z.Valid := True; Z.N_Lobes := 2; Z.Cu := 0.5; Z.Cv := 0.5; Z.X0 := 0; Z.Y0 := 0; Z.X1 := 7; Z.Y1 := 5;
+      Z.A := (True, 0, 0, 1, 2, 0.1, 0.2, 6);
+      Z.B := (True, 5, 4, 7, 5, 0.8, 0.9, 6);
+      H.Arm := 0; H.Zones.Append (Z);
+      H1.Append (H);
+      Bodyfile.Save (Path, "selfcheck", M1, H1, T1, S1);
+      M2 := M1;
+      Got := Bodyfile.Load (Path, "selfcheck", M2, H2, T2, S2, Note);
+      if Got and then not H2.Is_Empty and then not H2 (0).Zones.Is_Empty then
+         Same := Bytes.Bool_Vectors."=" (H2 (0).Zones (0).Fingers, Z.Fingers);
+         Zone.Tip_Px (Z, Z.A, 8, 6, U1, V1, Ok1);
+         Zone.Tip_Px (H2 (0).Zones (0), H2 (0).Zones (0).A, 8, 6, U2, V2, Ok2);
+      end if;
+      Check (Got and then Same and then Ok1 and then Ok2 and then U1 = U2 and then V1 = V2,
+             "握区的手指像素随身体文件存、装回:" & (if Got then "装上了" else "没装上(" & To_String (Note) & ")") & " · 每一格" & (if Same then "一样" else "不一样")
+             & " · 指尖像素 (" & Codec.Fmt (U1, 2) & "," & Codec.Fmt (V1, 2) & ") → (" & Codec.Fmt (U2, 2) & "," & Codec.Fmt (V2, 2) & ")");
    end;
    --  🔴 碰桌面量指尖(2026-09-26,Geom.Tips_On_Plane):手上那只眼朝下,第 1 瓣的尖碰在面上 ⇒ 它的视线 ∩ 面 = 它的指尖(离眼 0.120 m,一分不差);
    --  第 2 瓣的尖比面高 2 mm(没碰着)⇒ 交出来只会更远;不确定度 = 面的离散 ÷ |视线·法向|。面在眼的上方 ⇒ 交不到(Ok = False)
