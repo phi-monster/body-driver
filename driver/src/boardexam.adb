@@ -61,6 +61,41 @@ procedure Boardexam is
       end loop;
       SIO.Close (Fi);
    end Read_PGM;
+   procedure Read_BMP (Path : String; RGB : out Buf; W, H : out Natural) is
+      package SIO renames Ada.Streams.Stream_IO;
+      Fi : SIO.File_Type;
+      S : SIO.Stream_Access;
+      Hd : array (0 .. 53) of Character;
+      function U32 (At_B : Natural) return Long_Long_Integer is
+        (Long_Long_Integer (Character'Pos (Hd (At_B))) + 256 * Long_Long_Integer (Character'Pos (Hd (At_B + 1)))
+         + 65536 * Long_Long_Integer (Character'Pos (Hd (At_B + 2))) + 16777216 * Long_Long_Integer (Character'Pos (Hd (At_B + 3))));   --  小端(格式)
+      Hs : Long_Long_Integer;
+      C1, C2, C3 : Character;
+   begin
+      SIO.Open (Fi, SIO.In_File, Path);
+      S := SIO.Stream (Fi);
+      for I in Hd'Range loop
+         Character'Read (S, Hd (I));
+      end loop;
+      W := Natural (U32 (18));
+      Hs := U32 (22);
+      if Hs >= 2147483648 then   --  负高度(二补码)= 自上而下(格式)
+         Hs := 4294967296 - Hs;
+      end if;
+      H := Natural (Hs);
+      RGB := U8_Vectors.Empty_Vector;
+      RGB.Reserve_Capacity (Ada.Containers.Count_Type (3 * W * H));
+      for Y in 0 .. H - 1 loop
+         for X in 0 .. W - 1 loop
+            Character'Read (S, C1); Character'Read (S, C2); Character'Read (S, C3);   --  B G R
+            RGB.Append (U8 (Character'Pos (C3))); RGB.Append (U8 (Character'Pos (C2))); RGB.Append (U8 (Character'Pos (C1)));
+         end loop;
+         for K in 1 .. (4 - (3 * W) mod 4) mod 4 loop   --  行尾补齐(格式)
+            Character'Read (S, C1);
+         end loop;
+      end loop;
+      SIO.Close (Fi);
+   end Read_BMP;
    function To_RGB (G : Buf) return Buf is
       R : Buf;
    begin
@@ -126,10 +161,42 @@ procedure Boardexam is
    All_Stops : Boolean := False;
    Same_Turn : constant Long_Float := 0.02;   --  平移停之间朝向几乎不变(弧度;转动停差一整档,这是认"没转"的协议)
 begin
-   if Argument_Count < 5 then
-      Put_Line ("用法:boardexam <look 目录> <vid 目录> <几何文件> <仪器 host> <仪器 port> [不动的眼的相机号]");
+   if Argument_Count >= 5 and then Argument (1) = "stops" then
+      --  boardexam stops <落盘目录> <几何文件> <仪器 host> <仪器 port> [board]:驱动 Board_Keep 落的每一停两张彩色图 + 位姿,原样重跑
+      declare
+         Note : String (1 .. 160);
+         Fi : File_Type;
+         D : constant String := Argument (2);
+      begin
+         Geom.Load (Argument (3), C.Geo, 3, Note);   --  三台相机(这几具身体的落盘布局)
+         Put_Line (Ada.Strings.Fixed.Trim (Note, Ada.Strings.Both));
+         C.Inst_Host := To_Unbounded_String (Argument (4));
+         C.Inst_Port := Natural'Value (Argument (5));
+         Open (Fi, In_File, D & "/board_stops.txt");
+         while not End_Of_File (Fi) loop
+            declare
+               L : constant String := Get_Line (Fi);
+               N : constant String := Field (L, 1);
+               Wr, Hr : Buf;
+               W, H, Hw, Hh : Natural;
+            begin
+               if Field (L, 15) /= "" then
+                  Read_BMP (D & "/board_" & N & "_w.bmp", Wr, W, H);
+                  Read_BMP (D & "/board_" & N & "_h.bmp", Hr, Hw, Hh);
+                  C.Board_Stops.Append (Act.Board_Stop'(Cam => Natural'Value (Field (L, 2)), Arm => Natural'Value (Field (L, 3)), Seg => Natural'Value (Field (L, 4)),
+                                                        Pose => Pose_Of (L, 5), W => W, H => H, RGB => Wr, Hw => Hw, Hh => Hh, Head => Hr));
+               end if;
+            end;
+         end loop;
+         Close (Fi);
+         Put_Line ("落盘的停 " & Codec.Img (Natural (C.Board_Stops.Length)) & " 个");
+      end;
+   elsif Argument_Count < 5 then
+      Put_Line ("用法:boardexam <look 目录> <vid 目录> <几何文件> <仪器 host> <仪器 port> [不动的眼的相机号] [all] [board]");
+      Put_Line ("      boardexam stops <落盘目录> <几何文件> <仪器 host> <仪器 port> [board]");
       return;
    end if;
+   if Argument (1) /= "stops" then
    if Argument_Count >= 6 then
       Head_Cam := Natural'Value (Argument (6));
    end if;
@@ -246,6 +313,7 @@ begin
          end loop;
       end;
    end loop;
+   end if;
    Act.Geo_Board (C);
    declare
       G : Geom.Cam_Geo;
@@ -259,7 +327,7 @@ begin
       Hh : constant Natural := (if C.Board_Stops.Is_Empty then 480 else C.Board_Stops.First_Element.Hh);
    begin
       G.F := 0.0; G.Cx := Long_Float (Hw) / 2.0; G.Cy := Long_Float (Hh) / 2.0;
-      if Argument_Count >= 8 and then Argument (8) = "board" then
+      if Argument (Argument_Count) = "board" then
          Geom.Fit_Fixed_Rig (G, No_Obs, C.Board, Ro, Rd, Ok_K, Tips, Rep, Ok);   --  只按板解(不一起解),对照用
       else
          Act.Geo_Board_Solve (C, G, Rep, Ok);   --  驱动同一段:按板解 → 腕眼和它一起解 → 重三角 → 面

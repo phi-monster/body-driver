@@ -5958,6 +5958,29 @@ package body Act is
          if Wc /= Cam and then Wc < Natural (F.Cams.Length) and then Cam_Arm (C, Wc) < 0 and then F.Cams (Wc).W > 0 and then Cw > 0 then
             C.Board_Stops.Append (Board_Stop'(Cam => Cam, Arm => Arm, Seg => L.Ep_Seq0, Pose => F.EE (Arm), W => Cw, H => Ch, RGB => F.Cams (Cam).RGB,
                                               Hw => F.Cams (Wc).W, Hh => F.Cams (Wc).H, Head => F.Cams (Wc).RGB));
+            --  落盘(BL_DUMP):这一停两张彩色图 + 位姿,离线 boardexam stops 原样重跑配点和一起解(录像到 2000 帧之后每 20 帧才存一帧,凑不齐同一刻的那两张)
+            if Dump /= "" then
+               declare
+                  N : constant Natural := Natural (C.Board_Stops.Length) - 1;
+                  Fo : Ada.Text_IO.File_Type;
+               begin
+                  Codec.Write_BMP (Dump & "/board_" & Codec.Img (N) & "_w.bmp", F.Cams (Cam).RGB, Cw, Ch);
+                  Codec.Write_BMP (Dump & "/board_" & Codec.Img (N) & "_h.bmp", F.Cams (Wc).RGB, F.Cams (Wc).W, F.Cams (Wc).H);
+                  begin
+                     Ada.Text_IO.Open (Fo, Ada.Text_IO.Append_File, Dump & "/board_stops.txt");
+                  exception
+                     when others => Ada.Text_IO.Create (Fo, Ada.Text_IO.Out_File, Dump & "/board_stops.txt");
+                  end;
+                  Ada.Text_IO.Put (Fo, Codec.Img (N) & " " & Codec.Img (Cam) & " " & Codec.Img (Arm) & " " & Codec.Img (L.Ep_Seq0));
+                  for I in 0 .. 6 loop
+                     Ada.Text_IO.Put (Fo, " " & Codec.Fmt (F.EE (Arm) (I), 7));
+                  end loop;
+                  Ada.Text_IO.Put_Line (Fo, " " & Codec.Img (Cw) & " " & Codec.Img (Ch) & " " & Codec.Img (F.Cams (Wc).W) & " " & Codec.Img (F.Cams (Wc).H));
+                  Ada.Text_IO.Close (Fo);
+               exception
+                  when others => null;
+               end;
+            end if;
          end if;
       end Board_Keep;
       --  平移一停:走、看、记(手拿转动凑平移的那一停不算:转动引起的相机位移和平移之比 > 一成就扔,比例无量纲)
