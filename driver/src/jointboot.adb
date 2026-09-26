@@ -1,4 +1,5 @@
 with Ada.Text_IO;
+with Ada.Numerics.Long_Elementary_Functions; use Ada.Numerics.Long_Elementary_Functions;
 with Ada.Containers;
 with Ada.Calendar;
 with Codec;
@@ -17,6 +18,7 @@ package body Jointboot is
    Max_Doublings : constant := 12;              --  次数
    Grow : constant := 2.0;                      --  探针每次翻一倍(次数:同 Selfmap 的探针协议)
    Third : constant := 1.0 / 3.0;               --  三分之一(比例:"没转到命令的三分之一 = 被顶住",到没到目标用同一个比例)
+   Ramp : constant := 3.0;                      --  扫描下一格最多放大三倍(次数)
 
    --  一组关节读数一起挪到 Q(关节目标走唯一那条挪手的路 Selfmap.Go,停稳看这组读数)
    procedure Go_Group (L : in out Plug.Link; F : in out Plug.Frame; M : Selfmap.Body_Map; A, G : Natural; Q : Floats; Tol : Long_Float; Ok : out Boolean) is
@@ -170,7 +172,8 @@ package body Jointboot is
                         Host : String; Port : Natural; Dump : String; Ds : out Sweep_Vectors.Vector; Css : out Corr_Set_Vectors.Vector) is
       Na : constant Natural := Natural (Arms.Length);
       N_Img : Natural := 0;
-      --  ── 后台配点:扫描的时候仿真每走一步要等 0.37 秒,GPU 空着 ⇒ 一个线程边扫边让配点仪器配(一对 0.85 秒)──
+      --  ── 配点:扫描时把要配的对攒着,扫完再让配点仪器一对一对配(粗配一对 0.39 秒)。
+      --  边扫边配试过(V1B6 2026-09-26):仿真和配点仪器在同一块 GPU 上抢,一拍从 0.67 秒变 1.17 秒,比扫完再配还慢 ──
       type Job is record
          A, I, J : Natural := 0;
          Ia, Ib : Natural := 0;       --  两帧在仪器那边的编号
@@ -194,7 +197,7 @@ package body Jointboot is
          begin
             Closed := True;
          end Close;
-         entry Get (X : out Job; Done : out Boolean) when Head < Natural (Q.Length) or else Closed is
+         entry Get (X : out Job; Done : out Boolean) when Closed is   --  扫完(Close)才开始配
          begin
             if Head < Natural (Q.Length) then
                X := Q (Head); Head := Head + 1; Done := False;
@@ -277,8 +280,8 @@ package body Jointboot is
             Jobs.Put ((A => A, I => 0, J => Natural (D.Frames.Length) - 1, Ia => Natural (Sa.Ids (0)), Ib => Natural (Id)));
             N_Jobs := N_Jobs + 1;
          end if;
-         --  每段头三格之间也配(转角小的对:每根轴单独起步时网格只用转角 ≤ 16° 的对;V1B5 只配起点 ↔ 每一格,两根轴没有够用的小转角对)
-         if K >= 2 and then K <= 3 and then Id >= 0 and then Natural (Sa.Ids.Length) >= 2 and then Sa.Ids (Natural (Sa.Ids.Length) - 2) >= 0 then
+         --  每段头两格之间也配(转角小的对:每根轴单独起步时网格只用转角 ≤ 16° 的对;V1B5 只配起点 ↔ 每一格,两根轴没有够用的小转角对)
+         if K = 2 and then Id >= 0 and then Natural (Sa.Ids.Length) >= 2 and then Sa.Ids (Natural (Sa.Ids.Length) - 2) >= 0 then
             Jobs.Put ((A => A, I => Natural (D.Frames.Length) - 2, J => Natural (D.Frames.Length) - 1,
                        Ia => Natural (Sa.Ids (Natural (Sa.Ids.Length) - 2)), Ib => Natural (Id)));
             N_Jobs := N_Jobs + 1;
@@ -361,7 +364,7 @@ package body Jointboot is
                D.W := Sa.W; D.H := Sa.H;
                Ds.Replace_Element (A, D);
                Nj := Natural'Max (Nj, Natural (Sa.Q0.Length));
-               Gw := Long_Float (Sa.W) / 16.0;   --  每格画面挪画幅宽的 1/16(比例,无量纲)
+               Gw := Long_Float (Sa.W) / 10.0;   --  每格画面挪画幅宽的 1/10(比例,无量纲)
                for Iy in 0 .. Gy - 1 loop
                   for Ix in 0 .. Gx - 1 loop
                      Sa.Pts.Append (Instrument.Track_Pt'(U => (Long_Float (Ix) + 0.5) * Long_Float (Sa.W) / Long_Float (Gx),
@@ -384,9 +387,9 @@ package body Jointboot is
                   begin
                      Sa.Done := not Sa.Live or else J >= Natural (Sa.Q0.Length);
                      if not Sa.Done then
-                        Sa.Step := 0.02 * Long_Float'Max (1.0, abs Sa.Q0 (J));   --  起步 = 读数量级的 2%(比例,无量纲),按画面挪动放大
+                        Sa.Step := 0.03 * Long_Float'Max (1.0, abs Sa.Q0 (J));   --  起步 = 读数量级的 3%(比例,无量纲),按画面挪动放大
                         Sa.Off := 0.0; Sa.K := 0; Sa.Tgt := Sa.Q0; Sa.Q_Prev := F.Joints (Sa.G) (J);
-                        Sa.Why := To_Unbounded_String ("走满 8 格");
+                        Sa.Why := To_Unbounded_String ("走满 5 格");
                         Sa.Prev_Pos := Instrument.Track_Start (Host, Port, F.Cams (Sa.Cam).RGB, Sa.W, Sa.H, Sa.Pts, Sa.Tid, Err);
                      end if;
                   end;
@@ -454,12 +457,12 @@ package body Jointboot is
                                  elsif 3.0 * Pushed > Sa.Step then   --  别的关节被顶偏超过这一格的三分之一(比例,同上一条):碰上东西了,不再往里压
                                     Sa.Why := To_Unbounded_String ("碰上东西了:第" & Codec.Img (Kp) & " 个关节被顶偏 " & Codec.Fmt (Pushed, 4) & "(这一格命令 " & Codec.Fmt (Sa.Step, 4) & ")");
                                     Sa.Done := True;
-                                 elsif Sa.K >= 8 then   --  最多 8 格(次数)
+                                 elsif Sa.K >= 5 then   --  最多 5 格(次数;5 分钟一炮)
                                     Sa.Done := True;
                                  else
                                     if Fl > 0.0 then
-                                       --  下一格按这一格的画面挪动放大 / 缩小,一次最多两倍(倍数,无量纲)
-                                       Sa.Step := Sa.Step * Long_Float'Max (0.5, Long_Float'Min (Grow, Gw / Fl));
+                                       --  下一格按这一格的画面挪动放大 / 缩小,一次最多三倍(倍数,无量纲)
+                                       Sa.Step := Sa.Step * Long_Float'Max (0.5, Long_Float'Min (Ramp, Gw / Fl));
                                     end if;
                                     Sa.Q_Prev := F.Joints (Sa.G) (J);
                                  end if;
@@ -689,56 +692,88 @@ package body Jointboot is
       end if;
    end Fit_Arm;
 
-   --  这只手起点那一格的格点三角:同一个格点在别的格子里配到的像素 + 各格的位姿(按运动学)⇒ 多条视线交一点(参照眼系)
+   --  这只手起点那一格里的点三角:"起点 ↔ 某一格"的每个配点,两条视线(起点那只眼、那一格的眼,位姿按运动学)直接交一点(参照眼系)。
+   --  配点是仪器抽样出来的(每一对是不同的点),不能按格子把几对的配点当同一个点(V1B6 2026-09-26:那样三角出来桌面点离面中位 0.98 单位)。
+   --  只收:两条视线夹角 ≥ 20 / 焦距 弧度(配点差 1 像素时远近误差不到二十分之一,比例)、在两只眼前面、模型下对得上(< 3 px);
+   --  先用离起点挪得最远的格子,每一对最多 40 个(次数),一共不超过 X 放得下的
    procedure Tri_Start (M : Kinem.Model; D : Sweep_Data; Cs : Kinem.Corr_Vectors.Vector; Us, Vs : out Floats; X : out Kinem.V3_Array; N : out Natural) is
-      Np : constant Natural := Gx * Gy;
-      type Ray_List is record
-         O, Dd : Kinem.V3_Array (0 .. 15);   --  每个格点最多 16 条视线(次数)
-         K : Natural := 0;
-         U, V : Long_Float := 0.0;
-      end record;
-      type Ray_Lists is array (0 .. Np - 1) of Ray_List;
-      type Ray_Lists_Ptr is access Ray_Lists;
-      Rl : constant Ray_Lists_Ptr := new Ray_Lists;
-      Poses_R : array (0 .. Natural (D.Frames.Length) - 1) of Geom.M3;
-      Poses_T : array (0 .. Natural (D.Frames.Length) - 1) of Geom.V3;
+      use Geom;
+      Nf : constant Natural := Natural (D.Frames.Length);
+      Pr : array (0 .. Natural'Max (1, Nf) - 1) of M3;
+      Pt : array (0 .. Natural'Max (1, Nf) - 1) of V3;
+      Used : array (0 .. Natural'Max (1, Nf) - 1) of Natural := [others => 0];
+      Order : Ints;
+      Min_Par : constant Long_Float := 20.0 / M.F;   --  视线夹角下限(弧度):20 像素 / 焦距(比例,见上)
    begin
       Us.Clear; Vs.Clear; N := 0;
-      for Fr in Poses_R'Range loop
-         Kinem.FK (M, D.Frames (Fr).Q, Poses_R (Fr), Poses_T (Fr));
+      for Fr in 0 .. Nf - 1 loop
+         Kinem.FK (M, D.Frames (Fr).Q, Pr (Fr), Pt (Fr));
       end loop;
-      for C of Cs loop
-         if C.I = 0 and then C.J > 0 and then abs Kinem.Residual (M, D.Frames, C) < 3.0 then   --  这个配点在模型下对得上(3 px,协议:配点残差按像素记)
+      --  格子按离起点多远排(远的先用)
+      for Fr in 1 .. Nf - 1 loop
+         declare
+            Pos : Natural := Natural (Order.Length);
+         begin
+            for K in 0 .. Natural (Order.Length) - 1 loop
+               if Norm (Pt (Fr)) > Norm (Pt (Natural (Order (K)))) then
+                  Pos := K;
+                  exit;
+               end if;
+            end loop;
+            Order.Insert (Pos, Fr);
+         end;
+      end loop;
+      --  起点那一格的配点按另一格分桶(只扫一遍)
+      declare
+         package Idx_Vectors is new Ada.Containers.Vectors (Natural, Ints, Int_Vectors."=");
+         Bucket : Idx_Vectors.Vector;
+      begin
+         for Fr in 0 .. Nf - 1 loop
+            Bucket.Append (Int_Vectors.Empty_Vector);
+         end loop;
+         for K in 0 .. Natural (Cs.Length) - 1 loop
+            if Cs (K).I = 0 and then Cs (K).J < Nf then
+               declare
+                  B : Ints := Bucket (Cs (K).J);
+               begin
+                  B.Append (K);
+                  Bucket.Replace_Element (Cs (K).J, B);
+               end;
+            end if;
+         end loop;
+      for Fr of Order loop
+         exit when N >= X'Length;
+         for Ki of Bucket (Natural (Fr)) loop
+            exit when N >= X'Length;
             declare
-               Ix : constant Natural := Natural'Min (Gx - 1, Natural (Long_Float'Floor (C.Ua / (Long_Float (D.W) / Long_Float (Gx)))));
-               Iy : constant Natural := Natural'Min (Gy - 1, Natural (Long_Float'Floor (C.Va / (Long_Float (D.H) / Long_Float (Gy)))));
-               P : constant Natural := Iy * Gx + Ix;
+               C : constant Kinem.Corr := Cs (Natural (Ki));
             begin
-               if Rl (P).K = 0 then
-                  Rl (P).O (0) := [0.0, 0.0, 0.0]; Rl (P).Dd (0) := Dir_Of (M, C.Ua, C.Va); Rl (P).K := 1; Rl (P).U := C.Ua; Rl (P).V := C.Va;
-               end if;
-               if Rl (P).K < 16 then
-                  Rl (P).O (Rl (P).K) := Poses_T (C.J);
-                  Rl (P).Dd (Rl (P).K) := Geom.Ap (Poses_R (C.J), Dir_Of (M, C.Ub, C.Vb));
-                  Rl (P).K := Rl (P).K + 1;
-               end if;
+            if Used (C.J) < 40 and then abs Kinem.Residual (M, D.Frames, C) < 3.0 then   --  3 px(协议)
+               declare
+                  D0 : constant V3 := Dir_Of (M, C.Ua, C.Va);
+                  Dk : constant V3 := Ap (Pr (C.J), Dir_Of (M, C.Ub, C.Vb));
+                  Cosang : constant Long_Float := D0 (0) * Dk (0) + D0 (1) * Dk (1) + D0 (2) * Dk (2);
+               begin
+                  if Cosang < Cos (Min_Par) then
+                     declare
+                        Xp : V3;
+                        Okm : Boolean;
+                     begin
+                        Kinem.Meet_Rays ([[0.0, 0.0, 0.0], Pt (C.J)], [D0, Dk], Xp, Okm);
+                        --  在两只眼前面(-z 朝前):参照眼系里 z < 0;那一格的眼系里 z < 0
+                        if Okm and then Xp (2) < 0.0 and then Ap (Tr (Pr (C.J)), [Xp (0) - Pt (C.J) (0), Xp (1) - Pt (C.J) (1), Xp (2) - Pt (C.J) (2)]) (2) < 0.0 then
+                           X (X'First + N) := Xp; Us.Append (C.Ua); Vs.Append (C.Va);
+                           N := N + 1;
+                           Used (C.J) := Used (C.J) + 1;
+                        end if;
+                     end;
+                  end if;
+               end;
+            end if;
             end;
-         end if;
+         end loop;
       end loop;
-      for P in 0 .. Np - 1 loop
-         if Rl (P).K >= 3 then   --  至少三条视线(次数)
-            declare
-               Xp : Geom.V3;
-               Okm : Boolean;
-            begin
-               Kinem.Meet_Rays (Rl (P).O (0 .. Rl (P).K - 1), Rl (P).Dd (0 .. Rl (P).K - 1), Xp, Okm);
-               if Okm and then Xp (2) < 0.0 then   --  在参照眼前面(-z 朝前)
-                  X (X'First + N) := Xp; Us.Append (Rl (P).U); Vs.Append (Rl (P).V);
-                  N := N + 1;
-               end if;
-            end;
-         end if;
-      end loop;
+      end;
    end Tri_Start;
 
    procedure Align (Ds : Sweep_Vectors.Vector; Worlds : in out Arm_World_Vectors.Vector; Css : Corr_Set_Vectors.Vector;
