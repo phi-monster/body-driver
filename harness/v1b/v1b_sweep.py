@@ -46,8 +46,12 @@ def main():
             print("臂 %d 扫描时,另一组 %s 最多漂 %.3f°" % (arm, groups[j], dr))
         print("\n===== 臂 %d(%s,眼 %d):扫描 %d 帧 + 板停 %d;扫描里每个关节转过的范围(度):%s" % (
             arm, side, cam, nb0, len(BS), np.round(np.degrees(dQ[:nb0].max(0) - dQ[:nb0].min(0)), 1).tolist()))
-        # 考试:板停每三停留一停
-        test = [nb0 + k for k in range(len(BS)) if k % 3 == 2]
+        # 考试:板停每三停留一停;ONLY_SWEEP=1 ⇒ 只拿扫描帧拟合,板停全部当考试(只读关节的身体开机时没有板停:板停要先会挪手)
+        if os.environ.get("ONLY_SWEEP", "0") != "0":
+            test = [nb0 + k for k in range(len(BS))]
+            print("只拿扫描帧拟合,板停 %d 个全部当考试" % len(test))
+        else:
+            test = [nb0 + k for k in range(len(BS)) if k % 3 == 2]
         train = [i for i in range(len(S)) if i not in test]
         # 配对:每个关节 起点↔每格、相邻两格;全部训练帧 关节最近邻 NN 个
         pairs = set()
@@ -120,11 +124,14 @@ def main():
         Pw = [(s["pose"][:3], V.quat_to_R(s["pose"][3:])) for s in S]
         Rg, tg, s_, Rx, tx, etr, atr, ete, ate = V.align_eval(Wp, Pp, dQ, train, test, Pw, np.random.default_rng(0))
         mp = dict(W=Wp, P=Pp, Rg=Rg, tg=tg, s=s_, Rx=Rx, tx=tx)
+        # 存模型(转轴、焦距、参照读数 + 打分用的对齐),给跨炮考试用:别的炮只给关节读数,这份一个数不改
+        np.savez(os.path.join(V.OUT, "model_arm%d%s.npz" % (arm, "_sweeponly" if os.environ.get("ONLY_SWEEP", "0") != "0" else "")), W=Wp, P=Pp, f=fp, cx=cx, cy=cy, q0=q0, Rg=Rg, tg=tg, s=s_, Rx=Rx, tx=tx,
+                 Qtrain=Q[train], gi=gi)
         ex = V.eval_frames(arm, gi, q0, Q[train], mp)
         report[arm] = dict(focal_start=f0, focal_joints=[float(x) for x in fj], focal=float(fp), train_med_mm=float(np.median(etr)),
                            test_med_mm=float(np.median(ete)), test_max_mm=float(ete.max()), extrap=ex, rho=rho.tolist(), ref=ref,
                            range_deg=np.degrees(dQ[:nb0].max(0) - dQ[:nb0].min(0)).round(1).tolist(), pairs=len(meas))
-    json.dump(report, open(os.path.join(V.OUT, "report_sweep.json"), "w"), indent=1, ensure_ascii=False)
+    json.dump(report, open(os.path.join(V.OUT, "report_sweep%s.json" % ("_sweeponly" if os.environ.get("ONLY_SWEEP", "0") != "0" else "")), "w"), indent=1, ensure_ascii=False)
     print("\n结果存在", os.path.join(V.OUT, "report_sweep.json"))
 
 

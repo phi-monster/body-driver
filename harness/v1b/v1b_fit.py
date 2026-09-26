@@ -359,10 +359,10 @@ def fit_arm(dQ, meas, train, test, Pw, n, rng, starts=30):
 
 
 
-def eval_frames(arm, gi, q0, Qfit, model):
+def eval_frames(arm, gi, q0, Qfit, model, run=None):
     """外推考试:录像里每一帧只给关节读数 ⇒ 按量出来的转轴算眼在哪,和仿真报的手的位姿(真值,经同一个对齐)比。
     按"这一帧离最近的标定停,关节最多差几度"分档报。只用静止帧(前后帧关节读数不变)"""
-    vid = os.path.join(RUN, "vid")
+    vid = os.path.join(run or RUN, "vid")
     pj = os.path.join(vid, "joints.txt"); pp = os.path.join(vid, "poses.txt")
     if not (os.path.exists(pj) and os.path.exists(pp)):
         print("没有录像的关节 / 位姿,外推考试跳过"); return None
@@ -389,13 +389,17 @@ def eval_frames(arm, gi, q0, Qfit, model):
     true = pw + np.einsum('nab,b->na', Rw, model["tx"])
     e = np.linalg.norm(pred - true, axis=1) * 1000
     dist = np.degrees(np.min(np.max(np.abs(Q[:, None, :] - Qfit[None, :, :]), axis=2), axis=1))
-    print("外推考试:%d 个静止帧(只给关节读数)" % len(still))
+    # 静止帧里很多是同一个姿势停着 ⇒ 按"不同姿势"数(关节读数取到 0.001 弧度一样的算一个),每个姿势取一帧
+    key = np.round(Q / 1e-3).astype(np.int64)
+    _, first = np.unique(key, axis=0, return_index=True)
+    uniq = np.zeros(len(Q), bool); uniq[first] = True
+    print("外推考试:%d 个静止帧(只给关节读数),其中不同姿势 %d 个" % (len(still), int(uniq.sum())))
     out = []
     for lo, hi in ((0, 2), (2, 5), (5, 10), (10, 20), (20, 40), (40, 180)):
-        m = (dist >= lo) & (dist < hi)
+        m = (dist >= lo) & (dist < hi) & uniq
         if m.sum():
             out.append(dict(lo=lo, hi=hi, n=int(m.sum()), med_mm=float(np.median(e[m])), max_mm=float(e[m].max())))
-            print("  离标定停 %2d–%3d°:%5d 帧,眼的位置误差 中位 %7.2f mm、最大 %7.2f mm" % (lo, hi, m.sum(), np.median(e[m]), e[m].max()))
+            print("  离标定停 %2d–%3d°:不同姿势 %4d 个,眼的位置误差 中位 %7.2f mm、最大 %7.2f mm" % (lo, hi, m.sum(), np.median(e[m]), e[m].max()))
     return out
 
 
