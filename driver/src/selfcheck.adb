@@ -30,6 +30,8 @@ with Contact;
 with Contact.Gen;
 with Contact.Exec;
 with Contact.Surface;
+with Kinem;
+with Ada.Numerics.Float_Random;
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Containers;
 with Interfaces; use type Interfaces.Unsigned_8;
@@ -4723,6 +4725,267 @@ begin
          end loop;
          Check (Cnt = 400 and then Natural (Pts.Length) = 75 and then Off_Table and then abs Nrm (2) > 0.999,
                 "表面点·把支撑面那张平面上的点扔掉(确定性 RANSAC):桌面 400 点全走,盒子 75 点全留,法向朝上");
+      end;
+   end;
+
+   --  🔴 运动学(V1b 第三步,Kinem.Fit):合成的 6 关节胳膊(像 x5:底座转、肩 / 肘 / 腕三根平行的俯仰、腕转、腕滚),手上的眼在参照读数时
+   --  离底座 0.6 m、朝前下方看桌面;开机扫描 = 每个关节单独两个方向转到 ±45°(8 格);桌面 3000 个点投进每一格(像素噪声 0.3 px、5% 乱配)。
+   --  不给焦距(真 400),只给关节读数 + 配点 ⇒ 焦距要回到 1% 内;全部关节同时随机转 ±30° 的 30 个姿势(没参与拟合),只给关节读数算眼在哪,
+   --  按训练帧定一个倍数(量不出米)后中位 < 1 mm、最大 < 5 mm(离线 Python 同一套:中位 0.69、最大 1.73 mm)
+   declare
+      use Geom;
+      use Ada.Numerics.Long_Elementary_Functions;
+      package FR renames Ada.Numerics.Float_Random;
+      Gen : FR.Generator;
+      function U01 return Long_Float is (Long_Float (FR.Random (Gen)));
+      function Gauss return Long_Float is
+         A : constant Long_Float := Long_Float'Max (1.0e-12, U01);
+         B : constant Long_Float := U01;
+      begin
+         return Sqrt (-2.0 * Log (A)) * Cos (2.0 * Ada.Numerics.Pi * B);
+      end Gauss;
+      Deg : constant := 0.0174532925199433;   --  1° 的弧度(换算)
+      F_True : constant Long_Float := 400.0;
+      Cx : constant Long_Float := 320.0;
+      Cy : constant Long_Float := 240.0;
+      --  世界系(z 朝上)里的 6 根轴
+      Wax : constant array (0 .. 5) of V3 := [[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]];
+      Pax : constant array (0 .. 5) of V3 := [[0.0, 0.0, 0.05], [0.0, 0.0, 0.12], [0.25, 0.0, 0.12], [0.45, 0.0, 0.16], [0.5, 0.0, 0.16], [0.55, 0.0, 0.16]];
+      C0 : constant V3 := [0.6, 0.0, 0.22];
+      Fwd0 : constant V3 := [0.5, 0.0, -0.87];
+      Fwd : constant V3 := [Fwd0 (0) / Norm (Fwd0), Fwd0 (1) / Norm (Fwd0), Fwd0 (2) / Norm (Fwd0)];
+      Xc : constant V3 := [0.0, -1.0, 0.0];                          --  眼的 x = 右
+      Zc : constant V3 := [-Fwd (0), -Fwd (1), -Fwd (2)];            --  眼的 z 朝后
+      Yc : constant V3 := [Zc (1) * Xc (2) - Zc (2) * Xc (1), Zc (2) * Xc (0) - Zc (0) * Xc (2), Zc (0) * Xc (1) - Zc (1) * Xc (0)];
+      R0 : constant M3 := [[Xc (0), Yc (0), Zc (0)], [Xc (1), Yc (1), Zc (1)], [Xc (2), Yc (2), Zc (2)]];   --  眼系 → 世界
+      Truth : Kinem.Model;
+      Frames : Kinem.Frame_Vectors.Vector;
+      Cs : Kinem.Corr_Vectors.Vector;
+      Npt : constant := 3000;
+      Xw : array (0 .. Npt - 1) of V3;
+      Steps : constant array (0 .. 7) of Long_Float := [2.0, 4.0, 8.0, 14.0, 20.0, 28.0, 36.0, 45.0];
+      function Zeros6 return Floats is
+         Q : Floats;
+      begin
+         for I in 0 .. 5 loop
+            Q.Append (0.0);
+         end loop;
+         return Q;
+      end Zeros6;
+      --  第 K 帧里每个点落在哪(看不见 = U < 0)
+      type Uv is record
+         U, V : Long_Float := -1.0;
+      end record;
+      type Uv_Array is array (0 .. Npt - 1) of Uv;
+      function Project_All (Q : Floats) return Uv_Array is
+         Rr : M3;
+         Tt : V3;
+         Out_Uv : Uv_Array;
+      begin
+         Kinem.FK (Truth, Q, Rr, Tt);
+         for I in 0 .. Npt - 1 loop
+            declare
+               D : constant V3 := [Xw (I) (0) - Tt (0), Xw (I) (1) - Tt (1), Xw (I) (2) - Tt (2)];
+               Pc : constant V3 := Ap (Tr (Rr), D);
+               Z : constant Long_Float := -Pc (2);
+            begin
+               if Z > 0.05 then
+                  declare
+                     U : constant Long_Float := Cx + F_True * Pc (0) / Z;
+                     V : constant Long_Float := Cy - F_True * Pc (1) / Z;
+                  begin
+                     if U >= 0.0 and then U < 640.0 and then V >= 0.0 and then V < 270.0 then
+                        Out_Uv (I) := (U, V);
+                     end if;
+                  end;
+               end if;
+            end;
+         end loop;
+         return Out_Uv;
+      end Project_All;
+      type Uv_Ptr is access Uv_Array;
+      Views : array (0 .. 96) of Uv_Ptr;
+      Paired : array (0 .. 96, 0 .. 96) of Boolean := [others => [others => False]];
+      procedure Add_Pair (I, J : Natural) is
+         Cnt : Natural := 0;
+      begin
+         Paired (I, J) := True;
+         for P in 0 .. Npt - 1 loop
+            exit when Cnt >= 200;
+            if Views (I) (P).U >= 0.0 and then Views (J) (P).U >= 0.0 then
+               declare
+                  C : Kinem.Corr := (I => I, J => J, Ua => Views (I) (P).U + 0.3 * Gauss, Va => Views (I) (P).V + 0.3 * Gauss,
+                                     Ub => Views (J) (P).U + 0.3 * Gauss, Vb => Views (J) (P).V + 0.3 * Gauss);
+               begin
+                  if U01 < 0.05 then   --  5% 乱配
+                     C.Ub := 640.0 * U01; C.Vb := 270.0 * U01;
+                  end if;
+                  Cs.Append (C);
+                  Cnt := Cnt + 1;
+               end;
+            end if;
+         end loop;
+      end Add_Pair;
+      Fit_M : Kinem.Model;
+      Rep : Kinem.Fit_Report;
+      Okf : Boolean;
+   begin
+      FR.Reset (Gen, 20260926);
+      Truth.N := 6; Truth.F := F_True; Truth.Cx := Cx; Truth.Cy := Cy; Truth.Q0 := Zeros6; Truth.Valid := True;
+      for I in 0 .. 5 loop
+         Truth.Ax (I).W := Ap (Tr (R0), Wax (I));
+         Truth.Ax (I).P := Ap (Tr (R0), [Pax (I) (0) - C0 (0), Pax (I) (1) - C0 (1), Pax (I) (2) - C0 (2)]);
+      end loop;
+      for I in 0 .. Npt - 1 loop
+         --  桌面(世界 z = 0)换到参照眼系
+         declare
+            Pw : constant V3 := [0.2 + 1.2 * U01, -0.8 + 1.6 * U01, 0.0];
+         begin
+            Xw (I) := Ap (Tr (R0), [Pw (0) - C0 (0), Pw (1) - C0 (1), Pw (2) - C0 (2)]);
+         end;
+      end loop;
+      Frames.Append (Kinem.Frame_Info'(Q => Zeros6, Joint => -1));
+      for J in 0 .. 5 loop
+         for D in 0 .. 1 loop
+            for K in Steps'Range loop
+               declare
+                  Q : Floats := Zeros6;
+               begin
+                  Q.Replace_Element (J, (if D = 0 then -1.0 else 1.0) * Steps (K) * Deg);
+                  Frames.Append (Kinem.Frame_Info'(Q => Q, Joint => J));
+               end;
+            end loop;
+         end loop;
+      end loop;
+      for K in 0 .. Natural (Frames.Length) - 1 loop
+         Views (K) := new Uv_Array'(Project_All (Frames (K).Q));
+      end loop;
+      --  配对:每一格和起点、和同一方向的上一格;每一帧和关节上最近的 4 帧
+      for K in 1 .. Natural (Frames.Length) - 1 loop
+         Add_Pair (0, K);
+         if (K - 1) mod 8 /= 0 then
+            Add_Pair (K - 1, K);
+         end if;
+      end loop;
+      for K in 0 .. Natural (Frames.Length) - 1 loop
+         declare
+            type Dk is record
+               D : Long_Float := Long_Float'Last;
+               J : Natural := 0;
+            end record;
+            Best : array (0 .. 3) of Dk;
+         begin
+            for J in 0 .. Natural (Frames.Length) - 1 loop
+               if J /= K then
+                  declare
+                     Dm : Long_Float := 0.0;
+                  begin
+                     for X in 0 .. 5 loop
+                        Dm := Long_Float'Max (Dm, abs (Frames (K).Q (X) - Frames (J).Q (X)));
+                     end loop;
+                     for B in Best'Range loop
+                        if Dm < Best (B).D then
+                           for C in reverse B + 1 .. Best'Last loop
+                              Best (C) := Best (C - 1);
+                           end loop;
+                           Best (B) := (Dm, J);
+                           exit;
+                        end if;
+                     end loop;
+                  end;
+               end if;
+            end loop;
+            for B of Best loop
+               declare
+                  Lo : constant Natural := Natural'Min (K, B.J);
+                  Hi : constant Natural := Natural'Max (K, B.J);
+               begin
+                  if not Paired (Lo, Hi) then
+                     Add_Pair (Lo, Hi);
+                  end if;
+               end;
+            end loop;
+         end;
+      end loop;
+      Kinem.Fit (Frames, 0, Cs, Cx, Cy, 640.0, Fit_M, Rep, Okf);
+      declare
+         --  考试:全部关节同时 ±30°,只给读数;按训练帧的眼的位置定一个倍数(模型单位 → 米)
+         Sxy, Sxx : Long_Float := 0.0;
+         Errs : Floats;
+         Rt, Rf : M3;
+         Tt, Tf : V3;
+         Emax, Emed : Long_Float := 0.0;
+      begin
+         if Okf then
+            for K in 0 .. Natural (Frames.Length) - 1 loop
+               Kinem.FK (Truth, Frames (K).Q, Rt, Tt);
+               Kinem.FK (Fit_M, Frames (K).Q, Rf, Tf);
+               for X in 0 .. 2 loop
+                  Sxy := Sxy + Tf (X) * Tt (X); Sxx := Sxx + Tf (X) * Tf (X);
+               end loop;
+            end loop;
+            for T in 1 .. 30 loop
+               declare
+                  Q : Floats;
+               begin
+                  for X in 0 .. 5 loop
+                     Q.Append ((2.0 * U01 - 1.0) * 30.0 * Deg);
+                  end loop;
+                  Kinem.FK (Truth, Q, Rt, Tt);
+                  Kinem.FK (Fit_M, Q, Rf, Tf);
+                  declare
+                     S : constant Long_Float := (if Sxx > 0.0 then Sxy / Sxx else 0.0);
+                     E : constant Long_Float := Sqrt ((S * Tf (0) - Tt (0)) ** 2 + (S * Tf (1) - Tt (1)) ** 2 + (S * Tf (2) - Tt (2)) ** 2);
+                  begin
+                     Errs.Append (1000.0 * E);
+                     Emax := Long_Float'Max (Emax, 1000.0 * E);
+                  end;
+               end;
+            end loop;
+            declare
+               package Sorting is new F64_Vectors.Generic_Sorting;
+               Ss : Floats := Errs;
+            begin
+               Sorting.Sort (Ss);
+               Emed := Ss (Natural (Ss.Length) / 2);
+            end;
+         end if;
+         if Okf then
+            for J in 0 .. 5 loop
+               declare
+                  Wt : constant V3 := Truth.Ax (J).W;
+                  Wf : constant V3 := Fit_M.Ax (J).W;
+                  Cw : constant Long_Float := Wt (0) * Wf (0) + Wt (1) * Wf (1) + Wt (2) * Wf (2);
+                  --  轴上离参照眼最近那点(去掉沿轴的分量)
+                  function Foot (A : Kinem.Axis) return V3 is
+                     D : constant Long_Float := A.P (0) * A.W (0) + A.P (1) * A.W (1) + A.P (2) * A.W (2);
+                  begin
+                     return [A.P (0) - D * A.W (0), A.P (1) - D * A.W (1), A.P (2) - D * A.W (2)];
+                  end Foot;
+                  Pt : constant V3 := Foot (Truth.Ax (J));
+                  Pf : constant V3 := Foot (Fit_M.Ax (J));
+               begin
+                  Put_Line ("      轴" & Natural'Image (J) & ":方向 cos " & Codec.Fmt (Cw, 5) & " · 真的轴离眼 (" & Codec.Fmt (Pt (0), 3) & "," & Codec.Fmt (Pt (1), 3) & ","
+                            & Codec.Fmt (Pt (2), 3) & ") · 解的 (" & Codec.Fmt (Pf (0), 3) & "," & Codec.Fmt (Pf (1), 3) & "," & Codec.Fmt (Pf (2), 3) & ")"
+                            & (if J < Natural (Rep.Joint_Med.Length) then " · 起步残差 " & Codec.Fmt (Rep.Joint_Med (J), 3) else "")
+                            & (if J < Natural (Rep.Rho.Length) then " · ρ " & Codec.Fmt (Rep.Rho (J), 3) else ""));
+               end;
+            end loop;
+         end if;
+         Put_Line ("    运动学:配点 " & Natural'Image (Rep.N_Corr) & " · 内点 " & Natural'Image (Rep.N_Used) & " · 起步焦距 " & Codec.Fmt (Rep.F_Start, 1)
+                   & " → " & Codec.Fmt (Rep.F, 1) & " · 残差中位 " & Codec.Fmt (Rep.Med_Px, 3) & " px · 考试中位 " & Codec.Fmt (Emed, 3)
+                   & " mm、最大 " & Codec.Fmt (Emax, 3) & " mm" & (if Rep.Flipped then " · 平移反过一次号" else ""));
+         declare
+            T : Unbounded_String;
+         begin
+            for X of Rep.Secs loop
+               Append (T, " " & Codec.Fmt (X, 1));
+            end loop;
+            Put_Line ("    运动学各步用时(秒:网格 / 精修 / 比例 / 一起解):" & To_String (T));
+         end;
+         Check (Okf and then abs (Rep.F - F_True) < 0.01 * F_True and then Emed < 1.0 and then Emax < 5.0,
+                "运动学·只给关节读数 + 腕眼配点量出 6 根轴和焦距:焦距 " & Codec.Fmt (Rep.F, 1) & "(真 400,要 1% 内),全关节 ±30° 考试中位 "
+                & Codec.Fmt (Emed, 2) & " mm、最大 " & Codec.Fmt (Emax, 2) & " mm(要 < 1 / < 5 mm)");
       end;
    end;
 
