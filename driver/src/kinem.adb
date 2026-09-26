@@ -629,6 +629,8 @@ package body Kinem is
    Per_Pair_Grid : constant := 30; --  网格上每一对最多取几个配点(次数)
    Per_Pair_All : constant := 200; --  精修 / 定比例时每一对最多取几个配点(次数)
    Per_Pair_BA : constant := 60;   --  最后一起解时每一对最多取几个内点(次数)
+   Grid_Target : constant := 1200; --  每根轴单独起步时网格一共用多少个配点(次数)
+   All_Target : constant := 8000;  --  每根轴单独精修时一共用多少个配点(次数)
 
    procedure Fit (Frames : Frame_Vectors.Vector; Ref : Natural; Cs : Corr_Vectors.Vector; Cx, Cy, Width : Long_Float;
                   M : out Model; Rep : out Fit_Report; Ok : out Boolean) is
@@ -689,8 +691,28 @@ package body Kinem is
       --  配点分到各根轴
       declare
          Pos, Size : Nat_Vectors.Vector;
+         --  每根轴有几对、其中转角小的有几对 ⇒ 每对拿几个:这根轴一共要 Grid_Target / All_Target 个,按对数平均分,每对至少 Per_Pair_Grid / Per_Pair_All
+         --  (V1B7 2026-09-26:一段只扫 5 格,转角小的对一根轴只剩 6 对,每对 30 个凑不满 200 个,两根轴没量成)
+         N_Pairs, N_Small : array (0 .. Max_Joints - 1) of Natural := [others => 0];
+         K_Grid, K_All : array (0 .. Max_Joints - 1) of Natural := [others => 0];
       begin
          Pair_Pos (Cs, Pos, Size);
+         for Ci in 0 .. Natural (Cs.Length) - 1 loop
+            if Pos (Ci) = 0 then
+               for J in 0 .. N - 1 loop
+                  if Clean (Cs (Ci).I, J) and then Clean (Cs (Ci).J, J) and then (Frames (Cs (Ci).I).Joint = Integer (J) or else Frames (Cs (Ci).J).Joint = Integer (J)) then
+                     N_Pairs (J) := N_Pairs (J) + 1;
+                     if abs (Dq (Cs (Ci).I, J) - Dq (Cs (Ci).J, J)) <= Grid_Rad then
+                        N_Small (J) := N_Small (J) + 1;
+                     end if;
+                  end if;
+               end loop;
+            end if;
+         end loop;
+         for J in 0 .. N - 1 loop
+            K_Grid (J) := Natural'Max (Per_Pair_Grid, Grid_Target / Natural'Max (1, N_Small (J)));
+            K_All (J) := Natural'Max (Per_Pair_All, All_Target / Natural'Max (1, N_Pairs (J)));
+         end loop;
          for Ci in 0 .. Natural (Cs.Length) - 1 loop
             declare
                C : constant Corr := Cs (Ci);
@@ -700,10 +722,10 @@ package body Kinem is
                      declare
                         R : constant Jc_Rec := (Ta => Dq (C.I, J), Tb => Dq (C.J, J), C => C);
                      begin
-                        if Take (Pos (Ci), Size (Ci), Per_Pair_All) then
+                        if Take (Pos (Ci), Size (Ci), K_All (J)) then
                            Js (J).Append (R);
                         end if;
-                        if abs (R.Ta - R.Tb) <= Grid_Rad and then Take (Pos (Ci), Size (Ci), Per_Pair_Grid) then
+                        if abs (R.Ta - R.Tb) <= Grid_Rad and then Take (Pos (Ci), Size (Ci), K_Grid (J)) then
                            Jg (J).Append (R);
                         end if;
                      end;
