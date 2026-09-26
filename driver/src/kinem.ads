@@ -45,6 +45,7 @@ package Kinem is
 
    type Fit_Report is record
       F_Start : Long_Float := 0.0;     --  ① 各轴一起定的焦距(网格那一档)
+      F_Axes : Long_Float := 0.0;      --  ①b 焦距和各轴一起精修以后
       F : Long_Float := 0.0;           --  ③ 最后一起解的焦距
       Joint_Med : Floats;              --  ① 每根轴单独精修后的残差中位(像素;不能量的轴 = -1)
       Joint_Frames : Nat_Vectors.Vector;   --  ① 每根轴用了几帧(别的关节被顶偏的格子不用)
@@ -55,7 +56,7 @@ package Kinem is
       Med_Px, P90_Px : Long_Float := 0.0;   --  ③ 最后一起解的 Sampson 残差(像素)中位 / 九成
       N_Corr, N_Used : Natural := 0;   --  配点总数 / 进最后一起解的内点数
       Flipped : Boolean := False;      --  平移整体反了一次号(Sampson 分不出,按点在不在两只眼前面定)
-      Secs : Floats;                   --  各步用了几秒(墙上时间):① 网格、① 精修、② 比例、③ 一起解(两轮)
+      Secs : Floats;                   --  各步用了几秒(墙上时间):① 网格、① 精修、①b 焦距和各轴一起、② 比例、③ 一起解(两轮)
    end record;
 
    --  Frames(Ref) = 参照帧(扫描起点);Width = 画幅宽(像素,焦距网格按它铺:视场 30°–110°)。

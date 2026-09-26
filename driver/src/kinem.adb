@@ -768,6 +768,7 @@ package body Kinem is
       end Lap;
       Wj : array (0 .. Max_Joints - 1) of V3 := [others => [0.0, 0.0, 1.0]];
       Pj : array (0 .. Max_Joints - 1) of V3 := [others => [1.0, 0.0, 0.0]];
+      Xj : array (0 .. Max_Joints - 1) of Vec (0 .. 2) := [others => [0.0, 0.0, 0.0]];   --  每根轴单独精修完的(两个方向角, φ)
       F0 : Long_Float := 0.0;
    begin
       Ok := False;
@@ -952,6 +953,7 @@ package body Kinem is
                   end loop;
                   Free (Ga); Free (Sa);
                   Rep.Joint_Med.Append (Bm);
+                  Xj (J) := Bx;
                   Wj (J) := Ang_W (Bx (0), Bx (1));
                   declare
                      E1, E2 : V3;
@@ -969,6 +971,47 @@ package body Kinem is
             return;   --  有一根轴量不了 ⇒ 整只手的模型不完整;Rep.Joint_Frames / Joint_Med 里照实写着是哪根
          end if;
       end loop;
+      --  ①b 焦距和各轴一起精修(焦距是几根轴共用的):网格那一档到真焦距最多差半档(约 3.5%),各轴在那一档上各自精修会一起歪
+      --  (V1B13 2026-09-26:起步挑到 419.7、真 397 ⇒ 每根轴单独的残差翻倍,后面定比例解错,运动学差 14 mm;V1B12 同样的起步,碰巧解回来)
+      declare
+         Nx : constant Natural := 1 + 3 * N;
+         X : Vec (0 .. Nx - 1);
+         Steps : constant Vec (0 .. Nx - 1) := [others => 1.0e-6];   --  差分步(弧度 / 对数焦距,极小量,无量纲)
+         Arrs : array (0 .. Max_Joints - 1) of Jc_Array_Ptr;
+         Ns : array (0 .. Max_Joints - 1) of Natural := [others => 0];
+         N_Tot : Natural := 0;
+         procedure R_All (Xx : Vec; R : out Vec) is
+            Fx : constant Long_Float := Exp (Xx (Xx'First));
+            K : Natural := R'First;
+         begin
+            for J in 0 .. N - 1 loop
+               Joint_Res (Arrs (J).all, Ns (J), Xx (Xx'First + 1 + 3 * J .. Xx'First + 3 + 3 * J), Fx, Cx, Cy, R (K .. K + Ns (J) - 1));
+               K := K + Ns (J);
+            end loop;
+         end R_All;
+      begin
+         for J in 0 .. N - 1 loop
+            Arrs (J) := To_Array (Js (J)); Ns (J) := Natural (Js (J).Length); N_Tot := N_Tot + Ns (J);
+            X (1 + 3 * J .. 3 + 3 * J) := Xj (J);
+         end loop;
+         X (0) := Log (F0);
+         if N_Tot > Nx then
+            Robust_LM (X, N_Tot, N_Tot, 60, Steps, R_All'Access);
+         end if;
+         F0 := Exp (X (0));
+         for J in 0 .. N - 1 loop
+            Wj (J) := Ang_W (X (1 + 3 * J), X (2 + 3 * J));
+            declare
+               E1, E2 : V3;
+            begin
+               Perp (Wj (J), E1, E2);
+               Pj (J) := Add (Scl (E1, Cos (X (3 + 3 * J))), Scl (E2, Sin (X (3 + 3 * J))));
+            end;
+            Free (Arrs (J));
+         end loop;
+         Rep.F_Axes := F0;
+      end;
+      Lap;
       --  ② 各轴离眼远近的比例 ρ(可正可负:Sampson 分不出轴在眼的这边还是那边)。
       --  ① 定了每根轴的方向 W、"轴在眼哪边"的方向 p̂ ⇒ 眼的位置 t(q) = Σ ρ_j a_j(q)(a_j = 前面各轴的转动 ·(I − 这根轴的转动)· p̂_j)对 ρ 是线性的:
       --  两帧之间的平移 Tij = Σ ρ_j b_j,每个配点的对极约束 Tij · (y × h2) = 0 就是一条 g · ρ = 0(g_j = b_j · (y × h2)),Sampson 的分母 |E ρ| 也对 ρ 线性。

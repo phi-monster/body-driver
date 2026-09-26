@@ -151,7 +151,7 @@ begin
       for X of Rep.Rho loop
          Append (T, " " & Codec.Fmt (X, 3));
       end loop;
-      Put_Line ("焦距 起步 " & Codec.Fmt (Rep.F_Start, 1) & " → " & Codec.Fmt (Rep.F, 1) & " · 一起解的残差中位 " & Codec.Fmt (Rep.Med_Px, 3) & " px、九成 "
+      Put_Line ("焦距 起步 " & Codec.Fmt (Rep.F_Start, 1) & " → " & Codec.Fmt (Rep.F_Axes, 1) & " → " & Codec.Fmt (Rep.F, 1) & " · 一起解的残差中位 " & Codec.Fmt (Rep.Med_Px, 3) & " px、九成 "
                 & Codec.Fmt (Rep.P90_Px, 3) & " px · 内点 " & Codec.Img (Rep.N_Used) & " · 各轴比例(以第" & Codec.Img (Rep.Ref_Joint) & " 根为 1):" & To_String (T)
                 & " · 定比例用了 " & Codec.Img (Rep.Rho_Pairs) & " 对(三对起步 " & Codec.Fmt (Rep.Rho_Start_Px, 3) & " px → 全部重解中位 " & Codec.Fmt (Rep.Rho_Px, 3) & " px)");
       T := Null_Unbounded_String;
