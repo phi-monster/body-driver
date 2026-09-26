@@ -39,6 +39,7 @@ package body Kinem is
    end Sphere;
    function Ang_W (A, B : Long_Float) return V3 is ([Sin (A) * Cos (B), Sin (A) * Sin (B), Cos (A)]);
 
+   type Unsigned_Seed is mod 2 ** 64;
    type Vec is array (Natural range <>) of Long_Float;
    type Vec_Ptr is access Vec;
    procedure Free is new Ada.Unchecked_Deallocation (Vec, Vec_Ptr);
@@ -1200,6 +1201,312 @@ package body Kinem is
          Ok := True;
       end;
    end Fit;
+   procedure Meet_Rays (O, D : V3_Array; X : out V3; Ok : out Boolean) is
+      A : M3 := [others => [others => 0.0]];
+      B : V3 := [0.0, 0.0, 0.0];
+   begin
+      Ok := False; X := [0.0, 0.0, 0.0];
+      if O'Length < 2 then
+         return;
+      end if;
+      for I in O'Range loop
+         declare
+            Dd : constant V3 := Unit (D (I));
+         begin
+            for R in 0 .. 2 loop
+               for C in 0 .. 2 loop
+                  declare
+                     Pr : constant Long_Float := (if R = C then 1.0 else 0.0) - Dd (R) * Dd (C);   --  I − d dᵀ
+                  begin
+                     A (R, C) := A (R, C) + Pr;
+                     B (R) := B (R) + Pr * O (I) (C);
+                  end;
+               end loop;
+            end loop;
+         end;
+      end loop;
+      X := Solve3 (A, B);
+      Ok := Norm (X) > 0.0 or else Norm (B) = 0.0;
+   end Meet_Rays;
+
+   --  4×4 对称阵的特征分解(循环 Jacobi):返回最大特征值的特征向量
+   function Max_Eigvec4 (N0 : Mat) return Vec is
+      A : Mat := N0;
+      V : Mat (0 .. 3, 0 .. 3) := [others => [others => 0.0]];
+      Best : Natural := 0;
+      Out_V : Vec (0 .. 3);
+   begin
+      for I in 0 .. 3 loop
+         V (I, I) := 1.0;
+      end loop;
+      for Sweep in 1 .. 100 loop   --  最多 100 遍(次数)
+         declare
+            Off : Long_Float := 0.0;
+         begin
+            for P in 0 .. 2 loop
+               for Q in P + 1 .. 3 loop
+                  Off := Off + A (P, Q) ** 2;
+               end loop;
+            end loop;
+            exit when Off < 1.0e-30;   --  非对角元已经是零(数值,无量纲)
+            for P in 0 .. 2 loop
+               for Q in P + 1 .. 3 loop
+                  if abs A (P, Q) > 1.0e-300 then   --  数值保护(无量纲)
+                     declare
+                        Th : constant Long_Float := 0.5 * Arctan (2.0 * A (P, Q), A (Q, Q) - A (P, P));
+                        C : constant Long_Float := Cos (Th);
+                        Sn : constant Long_Float := Sin (Th);
+                     begin
+                        for K in 0 .. 3 loop
+                           declare
+                              Akp : constant Long_Float := A (K, P);
+                              Akq : constant Long_Float := A (K, Q);
+                           begin
+                              A (K, P) := C * Akp - Sn * Akq;
+                              A (K, Q) := Sn * Akp + C * Akq;
+                           end;
+                        end loop;
+                        for K in 0 .. 3 loop
+                           declare
+                              Apk : constant Long_Float := A (P, K);
+                              Aqk : constant Long_Float := A (Q, K);
+                           begin
+                              A (P, K) := C * Apk - Sn * Aqk;
+                              A (Q, K) := Sn * Apk + C * Aqk;
+                           end;
+                        end loop;
+                        for K in 0 .. 3 loop
+                           declare
+                              Vkp : constant Long_Float := V (K, P);
+                              Vkq : constant Long_Float := V (K, Q);
+                           begin
+                              V (K, P) := C * Vkp - Sn * Vkq;
+                              V (K, Q) := Sn * Vkp + C * Vkq;
+                           end;
+                        end loop;
+                     end;
+                  end if;
+               end loop;
+            end loop;
+         end;
+      end loop;
+      for I in 1 .. 3 loop
+         if A (I, I) > A (Best, Best) then
+            Best := I;
+         end if;
+      end loop;
+      for I in 0 .. 3 loop
+         Out_V (I) := V (I, Best);
+      end loop;
+      return Out_V;
+   end Max_Eigvec4;
+
+   procedure Similarity (A, B : V3_Array; S : out Long_Float; R : out M3; T : out V3) is
+      Ca, Cb : V3 := [0.0, 0.0, 0.0];
+      N : constant Long_Float := Long_Float (A'Length);
+      Sm : M3 := [others => [others => 0.0]];
+      Saa, Sba : Long_Float := 0.0;
+   begin
+      S := 1.0; R := Identity; T := [0.0, 0.0, 0.0];
+      if A'Length = 0 then
+         return;
+      end if;
+      for I in A'Range loop
+         Ca := Add (Ca, A (I)); Cb := Add (Cb, B (I - A'First + B'First));
+      end loop;
+      Ca := Scl (Ca, 1.0 / N); Cb := Scl (Cb, 1.0 / N);
+      for I in A'Range loop
+         declare
+            Pa : constant V3 := Sub (A (I), Ca);
+            Pb : constant V3 := Sub (B (I - A'First + B'First), Cb);
+         begin
+            for X in 0 .. 2 loop
+               for Y in 0 .. 2 loop
+                  Sm (X, Y) := Sm (X, Y) + Pa (X) * Pb (Y);
+               end loop;
+            end loop;
+            Saa := Saa + Dot (Pa, Pa);
+         end;
+      end loop;
+      declare
+         Nm : constant Mat (0 .. 3, 0 .. 3) :=
+           [[Sm (0, 0) + Sm (1, 1) + Sm (2, 2), Sm (1, 2) - Sm (2, 1), Sm (2, 0) - Sm (0, 2), Sm (0, 1) - Sm (1, 0)],
+            [Sm (1, 2) - Sm (2, 1), Sm (0, 0) - Sm (1, 1) - Sm (2, 2), Sm (0, 1) + Sm (1, 0), Sm (2, 0) + Sm (0, 2)],
+            [Sm (2, 0) - Sm (0, 2), Sm (0, 1) + Sm (1, 0), -Sm (0, 0) + Sm (1, 1) - Sm (2, 2), Sm (1, 2) + Sm (2, 1)],
+            [Sm (0, 1) - Sm (1, 0), Sm (2, 0) + Sm (0, 2), Sm (1, 2) + Sm (2, 1), -Sm (0, 0) - Sm (1, 1) + Sm (2, 2)]];
+         Q : constant Vec := Max_Eigvec4 (Nm);
+      begin
+         R := Quat_To_R ([0.0, 0.0, 0.0, Q (0), Q (1), Q (2), Q (3)]);
+      end;
+      for I in A'Range loop
+         Sba := Sba + Dot (Sub (B (I - A'First + B'First), Cb), Ap (R, Sub (A (I), Ca)));
+      end loop;
+      S := (if Saa > 0.0 then Sba / Saa else 1.0);
+      T := Sub (Cb, Scl (Ap (R, Ca), S));
+   end Similarity;
+
+   --  确定性的伪随机(同一份数据同一个结果):线性同余
+   procedure Next (Seed : in out Unsigned_Seed; K : Natural; Out_I : out Natural) is
+   begin
+      Seed := Seed * 6364136223846793005 + 1442695040888963407;   --  线性同余的乘数 / 增量(Knuth MMIX,协议)
+      Out_I := Natural ((Seed / 2 ** 33) mod Unsigned_Seed (K));
+   end Next;
+
+   procedure Robust_Similarity (A, B : V3_Array; S : out Long_Float; R : out M3; T : out V3; Inliers : out Natural; Med : out Long_Float) is
+      N : constant Natural := A'Length;
+      Seed : Unsigned_Seed := 20260926;
+      Best_Med : Long_Float := Long_Float'Last;
+      Res : Vec (0 .. Natural'Max (1, N) - 1);
+      Trials : constant := 500;   --  抽 500 次(次数)
+      function Med_Of (Ss : Long_Float; Rr : M3; Tt : V3) return Long_Float is
+      begin
+         for I in 0 .. N - 1 loop
+            Res (I) := Norm (Sub (B (B'First + I), Add (Scl (Ap (Rr, A (A'First + I)), Ss), Tt)));
+         end loop;
+         return Median_Abs (Res (0 .. N - 1));
+      end Med_Of;
+   begin
+      S := 1.0; R := Identity; T := [0.0, 0.0, 0.0]; Inliers := 0; Med := 0.0;
+      if N < 3 then
+         return;
+      end if;
+      for Tr_I in 1 .. Trials loop
+         declare
+            I1, I2, I3 : Natural;
+            Ss : Long_Float;
+            Rr : M3;
+            Tt : V3;
+         begin
+            Next (Seed, N, I1); Next (Seed, N, I2); Next (Seed, N, I3);
+            if I1 /= I2 and then I2 /= I3 and then I1 /= I3 then
+               Similarity ([A (A'First + I1), A (A'First + I2), A (A'First + I3)], [B (B'First + I1), B (B'First + I2), B (B'First + I3)], Ss, Rr, Tt);
+               declare
+                  Md : constant Long_Float := Med_Of (Ss, Rr, Tt);
+               begin
+                  if Md < Best_Med then
+                     Best_Med := Md; S := Ss; R := Rr; T := Tt;
+                  end if;
+               end;
+            end if;
+         end;
+      end loop;
+      --  拿"残差 < 2.5 × 1.4826 × 中位数"的那些重解(统计常数,无量纲,见规格说明)
+      declare
+         Gate : constant Long_Float := 2.5 * 1.4826 * Best_Med;
+         Cnt : Natural := 0;
+      begin
+         Med := Med_Of (S, R, T);
+         for I in 0 .. N - 1 loop
+            if Res (I) <= Gate then
+               Cnt := Cnt + 1;
+            end if;
+         end loop;
+         if Cnt >= 3 then
+            declare
+               Ai, Bi : V3_Array (0 .. Cnt - 1);
+               K : Natural := 0;
+            begin
+               for I in 0 .. N - 1 loop
+                  if Res (I) <= Gate then
+                     Ai (K) := A (A'First + I); Bi (K) := B (B'First + I); K := K + 1;
+                  end if;
+               end loop;
+               Similarity (Ai, Bi, S, R, T);
+            end;
+         end if;
+         Inliers := Cnt;
+         Med := Med_Of (S, R, T);
+      end;
+   end Robust_Similarity;
+
+   procedure Robust_Plane (X : V3_Array; P0, Nrm : out V3; Inliers : out Natural; Med : out Long_Float) is
+      N : constant Natural := X'Length;
+      Seed : Unsigned_Seed := 20260926;
+      Best_Med : Long_Float := Long_Float'Last;
+      Res : Vec (0 .. Natural'Max (1, N) - 1);
+      Trials : constant := 500;   --  抽 500 次(次数)
+      function Med_Of (Pp, Nn : V3) return Long_Float is
+      begin
+         for I in 0 .. N - 1 loop
+            Res (I) := Dot (Sub (X (X'First + I), Pp), Nn);
+         end loop;
+         return Median_Abs (Res (0 .. N - 1));
+      end Med_Of;
+   begin
+      P0 := [0.0, 0.0, 0.0]; Nrm := [0.0, 0.0, 1.0]; Inliers := 0; Med := 0.0;
+      if N < 3 then
+         return;
+      end if;
+      for Tr_I in 1 .. Trials loop
+         declare
+            I1, I2, I3 : Natural;
+         begin
+            Next (Seed, N, I1); Next (Seed, N, I2); Next (Seed, N, I3);
+            if I1 /= I2 and then I2 /= I3 and then I1 /= I3 then
+               declare
+                  Nn : constant V3 := Cross (Sub (X (X'First + I2), X (X'First + I1)), Sub (X (X'First + I3), X (X'First + I1)));
+               begin
+                  if Norm (Nn) > 0.0 then
+                     declare
+                        Nu : constant V3 := Unit (Nn);
+                        Md : constant Long_Float := Med_Of (X (X'First + I1), Nu);
+                     begin
+                        if Md < Best_Med then
+                           Best_Med := Md; P0 := X (X'First + I1); Nrm := Nu;
+                        end if;
+                     end;
+                  end if;
+               end;
+            end if;
+         end;
+      end loop;
+      --  内点(同上的统计常数,无量纲)按最小二乘重拟合:中心 + 协方差最小特征向量(用 4×4 那个求解器:补一行一列 0)
+      declare
+         Gate : constant Long_Float := 2.5 * 1.4826 * Best_Med;
+         Cnt : Natural := 0;
+         Ctr : V3 := [0.0, 0.0, 0.0];
+      begin
+         Med := Med_Of (P0, Nrm);
+         for I in 0 .. N - 1 loop
+            if abs Res (I) <= Gate then
+               Cnt := Cnt + 1; Ctr := Add (Ctr, X (X'First + I));
+            end if;
+         end loop;
+         if Cnt >= 3 then
+            Ctr := Scl (Ctr, 1.0 / Long_Float (Cnt));
+            declare
+               Cv : Mat (0 .. 3, 0 .. 3) := [others => [others => 0.0]];
+            begin
+               for I in 0 .. N - 1 loop
+                  if abs Res (I) <= Gate then
+                     declare
+                        D : constant V3 := Sub (X (X'First + I), Ctr);
+                     begin
+                        for Rr in 0 .. 2 loop
+                           for Cc in 0 .. 2 loop
+                              Cv (Rr, Cc) := Cv (Rr, Cc) - D (Rr) * D (Cc);   --  取负:最大特征值 = 原来最小的那个
+                           end loop;
+                        end loop;
+                     end;
+                  end if;
+               end loop;
+               Cv (3, 3) := -1.0e300;   --  第四维不许被选中(无量纲)
+               declare
+                  E : constant Vec := Max_Eigvec4 (Cv);
+                  Nn : constant V3 := [E (0), E (1), E (2)];
+               begin
+                  if Norm (Nn) > 0.0 then
+                     Nrm := Unit (Nn);
+                     P0 := Ctr;
+                  end if;
+               end;
+            end;
+         end if;
+         Inliers := Cnt;
+         Med := Med_Of (P0, Nrm);
+      end;
+   end Robust_Plane;
+
    procedure IK (M : Model; Rt : M3; Tt : V3; Q_Start : Floats; Lo, Hi : Floats; Q : out Floats; Pos_Err, Rot_Err : out Long_Float) is
       N : constant Natural := M.N;
       Lam : Long_Float := 1.0e-3;    --  阻尼(无量纲)

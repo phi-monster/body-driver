@@ -63,6 +63,18 @@ package Kinem is
    --  一个配点在模型下的 Sampson 残差(像素)
    function Residual (M : Model; Frames : Frame_Vectors.Vector; C : Corr) return Long_Float;
 
+   --  ── 两只手的系对齐到一个世界(V1b 3c)──
+   type V3_Array is array (Natural range <>) of V3;
+   --  多条视线交一点(最小二乘):第 I 条 = 起点 O (I) + 单位方向 D (I)
+   procedure Meet_Rays (O, D : V3_Array; X : out V3; Ok : out Boolean);
+   --  两团一一对应的点 ⇒ B ≈ S · R · A + T(相似变换,Horn 四元数法:4×4 对称阵最大特征值的特征向量)
+   procedure Similarity (A, B : V3_Array; S : out Long_Float; R : out M3; T : out V3);
+   --  抗野点(最小中位数:随机抽 3 对解一次、取残差中位数最小的那个,再拿残差 < 2.5 × 1.4826 × 中位数的那些重解 ——
+   --  2.5 和 1.4826 是正态分布下中位数换标准差、2.5 倍标准差的统计常数,不是拍的门槛)
+   procedure Robust_Similarity (A, B : V3_Array; S : out Long_Float; R : out M3; T : out V3; Inliers : out Natural; Med : out Long_Float);
+   --  一团点里的那张面(同样的最小中位数):面上一点 P0、单位法向 Nrm
+   procedure Robust_Plane (X : V3_Array; P0, Nrm : out V3; Inliers : out Natural; Med : out Long_Float);
+
    --  反解(V1b 3c):想让那只眼到 (Rt, Tt)(参照眼系)⇒ 从 Q_Start 起用阻尼最小二乘解关节读数。
    --  残差 = 位置差(模型单位)+ 朝向差(弧度 × 模型单位的 1,两者同一个量级:眼的位置均方根钉在 1)。
    --  Lo / Hi 空 = 不限;不空 = 每个关节的读数不出这个范围(扫描时实际到过的两头)。

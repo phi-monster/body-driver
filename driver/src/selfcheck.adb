@@ -5013,6 +5013,73 @@ begin
       end;
    end;
 
+   --  🔴 两只手的系对齐要用的三样(Kinem,V1b 3c):多条视线交一点、两团点之间的相似变换(30% 野点)、一团点里的面(30% 野点)
+   declare
+      use Geom;
+      package FR renames Ada.Numerics.Float_Random;
+      Gen : FR.Generator;
+      function U01 return Long_Float is (Long_Float (FR.Random (Gen)));
+      Pt : constant V3 := [0.3, -0.2, 1.5];
+      O : constant Kinem.V3_Array (0 .. 2) := [[0.0, 0.0, 0.0], [0.4, 0.0, 0.1], [-0.2, 0.3, 0.0]];
+      D : Kinem.V3_Array (0 .. 2);
+      X : V3;
+      Okm : Boolean;
+      Na : constant := 60;
+      A, B : Kinem.V3_Array (0 .. Na - 1);
+      S_True : constant Long_Float := 0.37;
+      R_True : constant M3 := Rodrigues ([0.3, -0.5, 0.8]);
+      T_True : constant V3 := [0.5, -1.2, 2.0];
+      S : Long_Float;
+      R : M3;
+      T : V3;
+      Inl : Natural;
+      Md : Long_Float;
+      Pl : Kinem.V3_Array (0 .. Na - 1);
+      P0, Nrm : V3;
+      N_True : constant V3 := [0.0, 0.6, 0.8];
+   begin
+      FR.Reset (Gen, 7);
+      for I in O'Range loop
+         D (I) := [Pt (0) - O (I) (0), Pt (1) - O (I) (1), Pt (2) - O (I) (2)];
+      end loop;
+      Kinem.Meet_Rays (O, D, X, Okm);
+      Check (Okm and then Norm ([X (0) - Pt (0), X (1) - Pt (1), X (2) - Pt (2)]) < 1.0e-9, "对齐·三条视线交一点:差 " & Long_Float'Image (Norm ([X (0) - Pt (0), X (1) - Pt (1), X (2) - Pt (2)])));
+      for I in A'Range loop
+         A (I) := [U01 - 0.5, U01 - 0.5, U01 * 0.3];
+         declare
+            Ra : constant V3 := Ap (R_True, A (I));
+         begin
+            B (I) := [S_True * Ra (0) + T_True (0), S_True * Ra (1) + T_True (1), S_True * Ra (2) + T_True (2)];
+         end;
+         if I mod 10 < 3 then   --  30% 野点
+            B (I) := [U01 * 3.0, U01 * 3.0, U01 * 3.0];
+         end if;
+      end loop;
+      Kinem.Robust_Similarity (A, B, S, R, T, Inl, Md);
+      declare
+         Er : constant Long_Float := Norm (Rot_Vec (Mul (Tr (R), R_True)));
+      begin
+         Check (abs (S - S_True) < 1.0e-6 and then Er < 1.0e-6 and then Norm ([T (0) - T_True (0), T (1) - T_True (1), T (2) - T_True (2)]) < 1.0e-6 and then Inl = 42,
+                "对齐·两团点的相似变换(60 对、30% 野点):倍数 " & Codec.Fmt (S, 6) & "(真 0.37)、转动差 " & Long_Float'Image (Er) & " rad、内点" & Natural'Image (Inl) & "(真 42)");
+      end;
+      for I in Pl'Range loop
+         declare
+            U : constant Long_Float := U01 - 0.5;
+            V : constant Long_Float := U01 - 0.5;
+         begin
+            --  面 = 过 (0, 0, 1)、法向 N_True;面内两个方向 (1,0,0) 和 (0,0.8,-0.6)
+            Pl (I) := [U, 0.8 * V, 1.0 - 0.6 * V];
+            if I mod 10 < 3 then
+               Pl (I) := [Pl (I) (0), Pl (I) (1) + 0.5 * U01, Pl (I) (2) + 0.5 * U01];
+            end if;
+         end;
+      end loop;
+      Kinem.Robust_Plane (Pl, P0, Nrm, Inl, Md);
+      Check (abs (abs (Nrm (0) * N_True (0) + Nrm (1) * N_True (1) + Nrm (2) * N_True (2)) - 1.0) < 1.0e-9 and then Inl >= 42,
+             "对齐·一团点里的面(60 点、30% 野点):法向差 " & Long_Float'Image (1.0 - abs (Nrm (0) * N_True (0) + Nrm (1) * N_True (1) + Nrm (2) * N_True (2)))
+             & "、内点" & Natural'Image (Inl));
+   end;
+
    Put_Line ((if Fails = 0 then "🟢 自检全过" else "🔴 自检失败" & Natural'Image (Fails) & " 条"));
    if Fails > 0 then
       raise Program_Error;
