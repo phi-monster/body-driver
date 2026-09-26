@@ -20,8 +20,9 @@ package Jointboot is
    end record;
    package Arm_Vectors is new Ada.Containers.Vectors (Natural, Arm_Info);
 
+   --  World_Cam = 不长在哪只手上的相机里、手动时变得最少的那台(每台都长在手上 ⇒ -1)
    procedure Find_Arms (L : in out Plug.Link; F : in out Plug.Frame; M : in out Selfmap.Body_Map;
-                        Arms : out Arm_Vectors.Vector; World_Cam : out Natural; Ok : out Boolean);
+                        Arms : out Arm_Vectors.Vector; World_Cam : out Integer; Ok : out Boolean);
 
    --  一只手扫描下来的全部格子
    type Sweep_Data is record
@@ -30,6 +31,9 @@ package Jointboot is
       Runs : Ints;                           --  第几段(同一个关节同一个方向算一段;起点 = 0)
       Mask : Bools;                          --  手指遮罩(W × H,按行;是 = 整段扫描里一次都没变过)
       W, H : Natural := 0;
+      Ids : Ints;                            --  每一格在配点仪器那边存的编号(Instrument.Frame_Put;-1 = 没存成)
+      World_Img : Plug.Cam;                  --  不动的眼(头顶眼)在扫描起点那一刻的画面(没有不动的眼 = 空)
+      World_Id : Integer := -1;              --  它在配点仪器那边的编号
    end record;
    package Sweep_Vectors is new Ada.Containers.Vectors (Natural, Sweep_Data);
    package Corr_Set_Vectors is new Ada.Containers.Vectors (Natural, Kinem.Corr_Vectors.Vector, Kinem.Corr_Vectors."=");
@@ -38,16 +42,23 @@ package Jointboot is
    --  每一段开头在每只手的眼里铺一片格点(认出来那一下动过的像素里)交给跟点仪器,每一格问一次它们到哪了:
    --  配点(起点 ↔ 每一格、相邻两格、不同关节头两格之间)全从这批格点来,每格画面挪了多少也从它读(按它放大 / 缩小下一格)。
    --  Host / Port = 仪器;Dump 非空 = 落盘 sweep_*.bmp + sweep.txt。Ds / Css 和 Arms 里有眼的手一一对应(没眼的那只 Ds 空)
+   --  World_Cam = 不动的眼是第几台(Find_Arms 认的;-1 = 没有):起点那一刻它的画面也存下,对齐几只手用
    procedure Sweep_All (L : in out Plug.Link; F : in out Plug.Frame; M : Selfmap.Body_Map; Arms : Arm_Vectors.Vector;
-                        Host : String; Port : Natural; Dump : String; Ds : out Sweep_Vectors.Vector; Css : out Corr_Set_Vectors.Vector);
+                        Host : String; Port : Natural; Dump : String; Ds : out Sweep_Vectors.Vector; Css : out Corr_Set_Vectors.Vector;
+                        World_Cam : Integer := -1);
 
    --  ④ 这只手的运动学:Kinem.Fit(配点来自扫描时的跟点;手指遮罩里的不要)
    --  Note = 这一步的报告(几只手各开一个线程同时解 ⇒ 不在这里打印,解完由调用方按顺序打)
    procedure Fit_Arm (A : Natural; D : Sweep_Data; Cs : Kinem.Corr_Vectors.Vector; Dump : String; M : out Kinem.Model; Ok : out Boolean;
                       Note : out Ada.Strings.Unbounded.Unbounded_String);
 
-   --  ⑤ 世界:每只手的运动学在它自己参照读数时那只眼的系里 ⇒ 用两只眼都看得见的桌面点对齐(各自三角、跨手配点、相似变换);
-   --  "上" = 桌面法向(朝第一只手的眼那边),原点 = 第一只手参照眼在桌面上的垂足,x = 那只眼的 x 轴投到桌面上;长度单位 = 第一只手的模型单位
+   --  ⑤ 世界:每只手的运动学在它自己参照读数时那只眼的系里 ⇒ 拿看得见整张桌子的不动的眼(头顶眼)当桥对到一个系:
+   --  每只手从自己扫描的格子里三角出桌面点;这些点在头顶眼里的像素 = 腕眼那一格配到头顶眼、再配回来,往返 1 px 内的才算;
+   --  第一只手的点当板解头顶眼(焦距 + 在第一只手系里的位姿,Geom.Fit_Fixed_Board);别的手:落在它自己桌面上的点,
+   --  头顶眼那条视线交第一只手系里的桌面 ⇒ 同一个点在两个系里 ⇒ 相似变换(抗野点)。长度倍数靠同一张桌面(只靠一只不动的眼,绕它缩放分不出来)。
+   --  (V1B11 2026-09-26:原来用两只腕眼起点那一格互相配 —— 两只眼看桌子两头、一点不重叠,倍数解成 0.72、真 1.007)
+   --  "上" = 桌面法向(朝第一只手的眼那边),原点 = 第一只手参照眼在桌面上的垂足,x = 那只眼的 x 轴投到桌面上;长度单位 = 第一只手的模型单位。
+   --  Fixed_Eye = 解出来的头顶眼(世界系:R_Ce = 相机 → 世界,Pos;Valid = False 就是没解成)
    type Arm_World is record
       Group : Natural := 0;
       Model : Kinem.Model;
@@ -58,10 +69,11 @@ package Jointboot is
       Valid : Boolean := False;
    end record;
    package Arm_World_Vectors is new Ada.Containers.Vectors (Natural, Arm_World);
-   --  Dump 非空 = 落盘 align_arm<k>.txt(每一对:第一只手起点那一格的像素、这只手起点那一格的像素、往返差、两边三角出的点;第一行 = 相似变换)
-   --  和 world.txt(世界系:Rw、O),离线回放 / 打分用
+   --  Dump 非空 = 落盘 align_arm<k>.txt(第一行 = 相似变换;每一条配点:世界里哪只眼(第几只手、第几格;-1 = 不长在手上的眼)、这只手的第几个三角点、
+   --  那只眼里的像素、这只手那一格里的像素、往返差、放进世界后的点、这只手系里的点)、
+   --  fixed_eye.txt(头顶眼,第一只手的系里)、world.txt(世界系:Rw、O),离线回放 / 打分用
    procedure Align (Ds : Sweep_Vectors.Vector; Worlds : in out Arm_World_Vectors.Vector; Css : Corr_Set_Vectors.Vector;
-                    Host : String; Port : Natural; Rw : out Geom.M3; O : out Geom.V3; Ok : out Boolean; Dump : String := "");
+                    Host : String; Port : Natural; Rw : out Geom.M3; O : out Geom.V3; Ok : out Boolean; Fixed_Eye : out Geom.Cam_Geo; Dump : String := "");
 
    --  ⑥ 装上:从此插头每一帧的手的位姿 = 按关节读数算出的世界里的腕眼位姿;位姿命令 = 在量过的范围里解关节目标
    procedure Install (Worlds : Arm_World_Vectors.Vector; Rw : Geom.M3; O : Geom.V3);

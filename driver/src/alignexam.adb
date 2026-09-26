@@ -1,6 +1,7 @@
 --  离线回放两只手对齐(2026-09-26,V1B11:第 2 只手对到第 1 只手的系,长度倍数 0.73、残差中位 0.96 单位 —— 两只手的模型单位按真值只差 0.8%)。
 --  拿一炮落盘的扫描格(look/sweep.txt)、画面(sweep_*.bmp)、运动学(kinem_arm<k>.txt)、配点(corrs_arm<k>.txt)、手指遮罩(mask_arm<k>.bmp,没有就不遮)
 --  原样跑驱动那一份 Jointboot.Align(要配点仪器在线),打出报告,落盘 align_arm<k>.txt / world.txt 到输出目录。真值不进解,只在打分脚本里用。
+--  不动的眼的画面 = look/world_cam.bmp(扫描起点那一刻;没有这个文件 = 这具身体没有不长在手上的眼)。
 --  用法:alignexam <look 目录> <输出目录> <仪器主机> <仪器端口> [第 0 只手的读数组号 第 1 只手的 …](不给 = 第 k 只手用第 k 组)
 with Ada.Command_Line; use Ada.Command_Line;
 with Ada.Text_IO; use Ada.Text_IO;
@@ -13,6 +14,7 @@ with Kinem;
 with Plug;
 with Geom;
 with Jointboot;
+with Instrument;
 procedure Alignexam is
    Dir : constant String := Argument (1);
    Out_Dir : constant String := Argument (2);
@@ -46,6 +48,7 @@ procedure Alignexam is
    Rw : Geom.M3;
    O : Geom.V3;
    Ok : Boolean;
+   Fixed_Eye : Geom.Cam_Geo;
    N_Arms : Natural := 0;
    function Group_Of (A : Natural) return Natural is (if Argument_Count >= 5 + A then Natural'Value (Argument (5 + A)) else A);
 begin
@@ -185,6 +188,31 @@ begin
       Put_Line ("手" & Natural'Image (A) & ":" & Codec.Img (Natural (Ds (A).Frames.Length)) & " 格(读数第" & Natural'Image (Group_Of (A)) & " 组)· 配点 "
                 & Codec.Img (Natural (Css (A).Length)) & " · 遮罩 " & (if Ds (A).Mask.Is_Empty then "没有" else "有") & " · 焦距 " & Codec.Fmt (Worlds (A).Model.F, 1));
    end loop;
-   Jointboot.Align (Ds, Worlds, Css, Host, Port, Rw, O, Ok, Dump => Out_Dir);
+   --  每一格、不动的眼的画面存到配点仪器那边(驱动扫描时就是这么存的,对齐按编号配)
+   declare
+      Err : Unbounded_String;
+      Id : Integer;
+      Wi : Plug.Cam;
+      Okb : Boolean;
+      Has_World : constant Boolean := Ada.Directories.Exists (Dir & "/world_cam.bmp");
+   begin
+      if Has_World then
+         Codec.Read_BMP (Dir & "/world_cam.bmp", Wi.RGB, Wi.W, Wi.H, Okb);
+         if Okb then
+            Instrument.Frame_Put (Host, Port, Wi.RGB, Wi.W, Wi.H, Id, Err);
+            for A in 0 .. N_Arms - 1 loop
+               Ds (A).World_Img := Wi; Ds (A).World_Id := Id;
+            end loop;
+         end if;
+      end if;
+      for A in 0 .. N_Arms - 1 loop
+         for C of Ds (A).Imgs loop
+            Instrument.Frame_Put (Host, Port, C.RGB, C.W, C.H, Id, Err);
+            Ds (A).Ids.Append (Id);
+         end loop;
+      end loop;
+      Put_Line ("不动的眼:" & (if Has_World then "有(world_cam.bmp)" else "没有"));
+   end;
+   Jointboot.Align (Ds, Worlds, Css, Host, Port, Rw, O, Ok, Fixed_Eye, Dump => Out_Dir);
    Put_Line (if Ok then "对齐做完(报告见上面 [身] 那几行;点对落盘在输出目录)" else "对齐没做成");
 end Alignexam;

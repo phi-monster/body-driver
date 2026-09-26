@@ -164,9 +164,50 @@ for arm in range(1, 4):
           (arm, S, St, 100 * (S / St - 1), ang, *T, *Tt, 1000 * s0 * np.linalg.norm(T - Tt)))
     # 第 k 只手扫描格上的眼按驱动的对齐搬到第 0 只手的系、再按第 0 只手的(s, Rg, tg)搬到世界 vs 真值
     L_ = np.loadtxt(ap, skiprows=1)
+    if L_.ndim == 2 and len(L_) and L_.shape[1] >= 14:
+        # 每条配点投回世界里那只眼:按驱动的对齐 vs 按真值的对齐(像素)⇒ 分得清是"配点 / 各自的点错了"还是"解错了"
+        k0 = os.path.join(KDIR, "kinem_arm0.txt"); Lm = open(k0).read().split("\n"); hm = Lm[0].split()
+        f0, cx0, cy0 = float(hm[5]), float(hm[7]), float(hm[9]); q00 = np.array([float(x) for x in Lm[1].split()[1:]])
+        W0 = np.array([[float(x) for x in l.split()[2:5]] for l in Lm[2:] if l.startswith("axis")])
+        P0_ = np.array([[float(x) for x in l.split()[5:8]] for l in Lm[2:] if l.startswith("axis")])
+        Q0r = [np.array([float(x) for x in l.split("||")[0].split("|")[1].split()]) for l in rows if int(l.split("|")[0].split()[1]) == 0]
+        fe_ = open(os.path.join(KDIR, "fixed_eye.txt")).read().split() if os.path.exists(os.path.join(KDIR, "fixed_eye.txt")) else None
+        def proj(Rc, pc, f, cx, cy, X):
+            Xc = Rc.T @ (X - pc)
+            return np.array([f * Xc[0] / -Xc[2] + cx, -f * Xc[1] / -Xc[2] + cy]) if Xc[2] < 0 else np.array([1e4, 1e4])
+        ed, et, kinds = [], [], []
+        for r in L_:
+            va, vf = int(r[0]), int(r[1]); uv = r[3:5]; Xb = r[11:14]
+            if va == 0:
+                Rc, pc = kinem_fk(W0, P0_, q00, Q0r[vf]); f, cx, cy = f0, cx0, cy0
+            elif fe_ is not None:
+                f = float(fe_[1]); cx = float(fe_[3]); cy = float(fe_[5])
+                pc = np.array([float(v) for v in fe_[fe_.index("pos") + 1: fe_.index("pos") + 4]]); Rc = np.array([float(v) for v in fe_[fe_.index("R") + 1: fe_.index("R") + 10]]).reshape(3, 3)
+            else:
+                continue
+            ed.append(np.linalg.norm(proj(Rc, pc, f, cx, cy, S * (R @ Xb) + T) - uv))
+            et.append(np.linalg.norm(proj(Rc, pc, f, cx, cy, St * (Rt_ @ Xb) + Tt) - uv))
+            kinds.append(va)
+        ed, et, kinds = np.array(ed), np.array(et), np.array(kinds)
+        for kk, nm in ((0, "第一只手的格子"), (-1, "不动的眼")):
+            m = kinds == kk
+            if m.any():
+                print("   配点投回%s(%d 条):按驱动的对齐 中位 %.1f px、<3px %.0f%% · 按真值的对齐 中位 %.1f px、<3px %.0f%%" %
+                      (nm, m.sum(), np.median(ed[m]), 100 * np.mean(ed[m] < 3), np.median(et[m]), 100 * np.mean(et[m] < 3)))
+        L_ = L_[:, 3:]
     if L_.ndim == 2 and len(L_):
         Xa = L_[:, 5:8]; Xb = L_[:, 8:11]
         pred = (S * (R @ Xb.T)).T + T; true_ = (St * (Rt_ @ Xb.T)).T + Tt
         e_drv = 1000 * s0 * np.linalg.norm(pred - Xa, axis=1); e_true = 1000 * s0 * np.linalg.norm(true_ - Xa, axis=1)
         print("   点对 %d:按驱动的对齐 两边点差 中位 %.1f mm;按真值的对齐 中位 %.1f mm、<10 mm 的占 %.0f%%(= 两只手三角出的点本身对得上的比例)" %
               (len(L_), np.median(e_drv), np.median(e_true), 100 * np.mean(e_true < 10)))
+
+# ── 第四种考法:不长在手上的那只眼(look/fixed_eye.txt:焦距、第一只手系里的位置)⇒ 按第一只手"模型 → 世界"的相似变换搬到仿真世界(米)──
+fp = os.path.join(KDIR, "fixed_eye.txt")
+if os.path.exists(fp) and 0 in FITS:
+    f_ = open(fp).read().split()
+    fx = float(f_[1]); pos = np.array([float(v) for v in f_[f_.index("pos") + 1:f_.index("pos") + 4]])
+    s0, Rg0, tg0 = FITS[0]
+    pw = s0 * (Rg0 @ pos) + tg0
+    print("不动的眼:焦距 %.1f(仿真 x5 头顶眼 288.1)· 位置 (%.3f, %.3f, %.3f) m(X5E 读位姿那一版标的 (0.000, -0.412, 1.310))· 残差 %s px · 进解 %s / %s" %
+          (fx, pw[0], pw[1], pw[2], f_[f_.index("rms") + 1], f_[f_.index("used") + 1], f_[f_.index("of") + 1]))

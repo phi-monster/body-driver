@@ -32,7 +32,8 @@ procedure Body_Driver is
    C : Act.Context;
    Ok : Boolean;
    Kin_Eyes : Bytes.Ints;          --  开机前半段认出来的:每只(量成了运动学的)手上的眼
-   Kin_World_Cam : Natural := 0;   --  开机前半段认出来的世界相机
+   Kin_World_Cam : Integer := -1;  --  开机前半段认出来的世界相机(不长在手上的;没有 = -1)
+   Kin_Fixed : Geom.Cam_Geo;       --  开机前半段按第一只手的桌面点解出的不动的眼(世界系;Valid = False 就是没解成)
    I : Natural := 1;
    Order : constant String := Codec.Env ("BL_ORDER");
 begin
@@ -129,7 +130,7 @@ begin
          return;
       end if;
       --  有眼的几只手同时扫(一条命令带几组目标),扫的时候跟点仪器一路跟
-      Jointboot.Sweep_All (L, F, M0, Found, Host, C.Inst_Port, Dump, Ds, Css);
+      Jointboot.Sweep_All (L, F, M0, Found, Host, C.Inst_Port, Dump, Ds, Css, World_Cam => Kin_World_Cam);
       --  每只手各自解运动学(两只手的解互不相干 ⇒ 一只手一个线程)
       declare
          Ms : array (0 .. Natural (Found.Length) - 1) of Kinem.Model;
@@ -189,7 +190,7 @@ begin
             end;
          end loop;
       end;
-      Jointboot.Align (Ds, Worlds, Css, Host, C.Inst_Port, Rw, O, Okj, Dump => Dump);
+      Jointboot.Align (Ds, Worlds, Css, Host, C.Inst_Port, Rw, O, Okj, Kin_Fixed, Dump => Dump);
       if not Okj then
          Put_Line ("[身] 定不了世界(第一只手的眼没三角出桌面),量不了身体,退出");
          return;
@@ -252,7 +253,7 @@ begin
          C.Tables := Stored_Tables;
          C.Sch := Stored_Sch;   --  身体没变 ⇒ 身体图照用(位姿 → 手指在画面哪儿)
       else
-         Selfmap.Measure (L, F, C.Map, Ok, Eyes => Kin_Eyes, World => Integer (Kin_World_Cam));
+         Selfmap.Measure (L, F, C.Map, Ok, Eyes => Kin_Eyes, World => Kin_World_Cam);
          if not Ok then
             Put_Line ("[身] 身体量不了,退出");
             return;

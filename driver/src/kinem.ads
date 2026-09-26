@@ -78,6 +78,12 @@ package Kinem is
    --  一团点里的那张面(同样的最小中位数):面上一点 P0、单位法向 Nrm
    procedure Robust_Plane (X : V3_Array; P0, Nrm : out V3; Inliers : out Natural; Med : out Long_Float);
 
+   --  抗野点的 LM(数值雅可比):Resid 把全部残差填进 R(长度 N_R);前 N_Rob 个按 Huber(1,残差要先按自己的噪声归一)迭代加权,后面的原样。
+   --  拿出来给别的包用(几只手放进一个世界,2026-09-26)
+   type Vec is array (Natural range <>) of Long_Float;
+   procedure Robust_LM (X : in out Vec; N_R, N_Rob : Natural; Iters : Positive; Step : Vec;
+                        Resid : not null access procedure (X : Vec; R : out Vec));
+
    --  转动 + 平移 ⇒ 驱动的位姿格式 [x, y, z, qw, qx, qy, qz](四元数取 w ≥ 0 那一半)
    function To_Pose (R : M3; T : V3) return Plug.Arm_Pose;
 

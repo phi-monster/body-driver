@@ -6526,7 +6526,7 @@ package body Act is
                            U : Long_Float := 0.5 * Sp;
                         begin
                            while U < Long_Float (Ref.W) loop
-                              Grid.Append (Instrument.Match_Pt'(U => U, V => V, Cert => 0.0));
+                              Grid.Append (Instrument.Match_Pt'(U => U, V => V, Cert => 0.0, others => <>));
                               U := U + Sp;
                            end loop;
                         end;
@@ -6833,7 +6833,7 @@ package body Act is
          return;
       end if;
       for S of C.Board loop
-         Q.Append (Instrument.Match_Pt'(U => S.U, V => S.V, Cert => 0.0));
+         Q.Append (Instrument.Match_Pt'(U => S.U, V => S.V, Cert => 0.0, others => <>));
       end loop;
       M := Instrument.Match (To_String (C.Inst_Host), C.Inst_Port, C.Fixed_Ref, W, H, Turn_90 (C.Fixed_Ref, W, H), H, W, Q, Err);
       if Natural (M.Length) /= Natural (Q.Length) then
@@ -7014,7 +7014,7 @@ package body Act is
          end Matched;
       begin
          for S of C.Board loop
-            Q.Append (Instrument.Match_Pt'(U => S.U, V => S.V, Cert => 0.0));
+            Q.Append (Instrument.Match_Pt'(U => S.U, V => S.V, Cert => 0.0, others => <>));
          end loop;
          declare
             B0 : constant Natural := C.Fixed_Best;   --  这一轮之前的"放好以来最多"(别的转法各自从它起算)

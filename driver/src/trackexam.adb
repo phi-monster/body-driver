@@ -48,7 +48,7 @@ begin
             V : constant Long_Float := (Long_Float (Iy) + 0.5) * Long_Float (H) / Long_Float (Gy);
          begin
             Pts.Append (Instrument.Track_Pt'(U => U, V => V, Seen => True, Conf => 1.0));
-            Qpts.Append (Instrument.Match_Pt'(U => U, V => V, Cert => 0.0));
+            Qpts.Append (Instrument.Match_Pt'(U => U, V => V, Cert => 0.0, others => <>));
          end;
       end loop;
    end loop;
@@ -81,7 +81,7 @@ begin
                if Natural (R.Length) = Natural (Qpts.Length) then
                   for P in 0 .. Natural (Qpts.Length) - 1 loop
                      if R (P).U >= 0.0 and then R (P).U < Long_Float (Wk) and then R (P).V >= 0.0 and then R (P).V < Long_Float (Hk) then
-                        Back_Q.Append (Instrument.Match_Pt'(U => R (P).U, V => R (P).V, Cert => 0.0));
+                        Back_Q.Append (Instrument.Match_Pt'(U => R (P).U, V => R (P).V, Cert => 0.0, others => <>));
                         Idx.Append (P);
                      end if;
                   end loop;

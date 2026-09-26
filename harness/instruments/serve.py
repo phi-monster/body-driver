@@ -13,8 +13,11 @@
        比配点本身还慢(2026-09-26 实测:一对 1.9 秒,里面配点 0.8 秒)。只留最近 1200 帧
   POST /match {"a": ..., "b": ..., "num": N, "points": [[u,v],...]}   (或者 "a_id" / "b_id" 代替 "a" / "b":用 /frame 存过的帧)
        → {"ok": true, "samples": [[ua,va,ub,vb,cert],...], "points": [[ub,vb,cert],...]}
+       "back": true ⇒ 另给 "back": [[ua2,va2],...]:每个查询点配到 B 以后再配回 A 落在哪(同一次配点的反向 warp,不另配;往返差 = 配点自己对不对得上)
        两台相机(或同一台相机两个位置)的两帧里,哪两个像素是同一个真实的点:num > 0 抽 num 对对应点;points = A 里的像素,问它们在 B 里在哪。
        cert = 模型自己给的可信度(0..1),驱动不拿它当真,只拿几何去核(三角重投、两停交叉)
+  POST /describe {"ids": [n,...]}  → {"ok": true, "vectors": [[...1024 个数...],...]}
+       每张存过的帧(/frame 的编号)一个整体特征(DINOv2 图块特征的平均,归一):两张图看起来多像 = 两个向量的点积。驱动只拿它挑先配哪几对
   POST /segment {"image": ..., "box": [x0,y0,x1,y1], "points": [[u,v,label],...]}
        → {"ok": true, "w": W, "h": H, "area": n, "box": [x0,y0,x1,y1], "score": s, "runs": [r0, r1, ...]}
        框(脑给的)/ 点(label 1 = 在它身上、0 = 不在)⇒ 那件东西的像素:runs = 整幅按行展开的游程,先"不是"一段、再"是"一段……交替。
@@ -176,7 +179,7 @@ def frame_get(req, key):
     return Image.open(io.BytesIO(base64.b64decode(req[key]))).convert("RGB")
 
 
-def match(A, B, num, points, coarse=False):
+def match(A, B, num, points, coarse=False, back=False):
     m = _load_roma()
     t0 = time.time()
     Wa, Ha = A.size; Wb, Hb = B.size
@@ -201,8 +204,38 @@ def match(A, B, num, points, coarse=False):
             xb = torch.nn.functional.grid_sample(wAB, g, align_corners=False)[0, :, :, 0].T.cpu().numpy()
             cb = torch.nn.functional.grid_sample(cA, g, align_corners=False)[0, 0, :, 0].cpu().numpy()
             out["points"] = [[_num(Wb * (xb[i, 0] + 1) / 2, 3), _num(Hb * (xb[i, 1] + 1) / 2, 3), _num(cb[i], 4)] for i in range(len(uv))]
+            if back:
+                # 往返:同一次配点的 warp 右半是 B → A(对称配点本来就算了),在配过去的那一点上取它 ⇒ 配回 A 的哪里(不必再配一次)
+                wBA = warp[0, :, Ww:, :2].permute(2, 0, 1)[None].float()
+                gb = torch.tensor(xb[None, :, None, :].astype(np.float32), device="cuda")
+                xa = torch.nn.functional.grid_sample(wBA, gb, align_corners=False)[0, :, :, 0].T.cpu().numpy()
+                out["back"] = [[_num(Wa * (xa[i, 0] + 1) / 2, 3), _num(Ha * (xa[i, 1] + 1) / 2, 3)] for i in range(len(uv))]
     out["ms"] = (time.time() - t0) * 1000.0
     return out
+
+
+def describe(ids):
+    """每张存过的帧一个整体特征:RoMa 自带的 DINOv2(ViT-L/14)在 448×448 上的图块特征取平均、归一(1024 维)。
+    驱动拿它挑"哪几对画面去配"(看起来最像的先配),配上没有照样按几何核;它自己不进任何量"""
+    m = _load_roma()
+    if next(m.encoder.dinov2_vitl14[0].parameters()).device.type != "cuda":   # RoMa 第一次配点时才把它搬上 GPU(同它自己的做法)
+        m.encoder.dinov2_vitl14[0] = m.encoder.dinov2_vitl14[0].to("cuda").to(m.encoder.amp_dtype)
+    enc = m.encoder.dinov2_vitl14[0]
+    mean = torch.tensor([0.485, 0.456, 0.406], device="cuda").view(1, 3, 1, 1)
+    std = torch.tensor([0.229, 0.224, 0.225], device="cuda").view(1, 3, 1, 1)
+    out = []
+    with torch.no_grad():
+        for i in ids:
+            with _frames_lock:
+                img = _frames.get(int(i))
+            if img is None:
+                raise KeyError("没有存过的帧 %s" % i)
+            x = torch.from_numpy(np.asarray(img.resize((448, 448)), dtype=np.float32) / 255.0).permute(2, 0, 1)[None].cuda()
+            x = (x - mean) / std
+            f = enc.forward_features(x.to(next(enc.parameters()).dtype))["x_norm_patchtokens"].float().mean(1)[0]
+            f = f / (f.norm() + 1e-12)
+            out.append([_num(v, 5) for v in f.cpu().numpy()])
+    return {"ok": True, "vectors": out}
 
 
 def _trk_state(m):
@@ -304,7 +337,7 @@ class H(BaseHTTPRequestHandler):
                 return
             if self.path == "/match":   # 图先解好(不占锁),再排队用模型
                 A = frame_get(req, "a"); B = frame_get(req, "b")
-            lk = _lock_match if self.path == "/match" else (_lock_seg if self.path == "/segment" else _lock)
+            lk = _lock_match if self.path in ("/match", "/describe") else (_lock_seg if self.path == "/segment" else _lock)
             with lk:
                 if self.path == "/track/start":
                     out = track_start(req["image"], req["points"])
@@ -313,9 +346,11 @@ class H(BaseHTTPRequestHandler):
                 elif self.path == "/track/end":
                     out = track_end(int(req["id"]))
                 elif self.path == "/match":
-                    out = match(A, B, int(req.get("num", 0)), req.get("points", []), bool(req.get("coarse", False)))
+                    out = match(A, B, int(req.get("num", 0)), req.get("points", []), bool(req.get("coarse", False)), bool(req.get("back", False)))
                 elif self.path == "/segment":
                     out = segment(req["image"], req.get("box", []), req.get("points", []))
+                elif self.path == "/describe":
+                    out = describe(req.get("ids", []))
                 else:
                     self._send(404, {"ok": False, "err": "no such instrument"})
                     return

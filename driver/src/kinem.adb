@@ -40,7 +40,6 @@ package body Kinem is
    function Ang_W (A, B : Long_Float) return V3 is ([Sin (A) * Cos (B), Sin (A) * Sin (B), Cos (A)]);
 
    type Unsigned_Seed is mod 2 ** 64;
-   type Vec is array (Natural range <>) of Long_Float;
    type Vec_Ptr is access Vec;
    procedure Free is new Ada.Unchecked_Deallocation (Vec, Vec_Ptr);
    type Mat is array (Natural range <>, Natural range <>) of Long_Float;
