@@ -8,7 +8,10 @@
   POST /track/start {"image": ..., "points": [[u,v],...]}   → {"ok": true, "id": n}   开一段跟踪,查询点 = 这一帧里的像素
   POST /track/step  {"id": n, "image": ...}                 → {"ok": true, "points": [[u,v,vis,conf],...]}  下一帧里这些点在哪、看不看得见、有多确定
   POST /track/end   {"id": n}                               → {"ok": true}
-  POST /match {"a": ..., "b": ..., "num": N, "points": [[u,v],...]}
+  POST /frame {"image": ...}                                 → {"ok": true, "id": n}
+       一帧先存在这边(解码一次),之后配点只报编号 —— 开机扫描同一帧要和几十帧配,每次都把 1 MB 的图转成文字再传一遍,
+       比配点本身还慢(2026-09-26 实测:一对 1.9 秒,里面配点 0.8 秒)。只留最近 1200 帧
+  POST /match {"a": ..., "b": ..., "num": N, "points": [[u,v],...]}   (或者 "a_id" / "b_id" 代替 "a" / "b":用 /frame 存过的帧)
        → {"ok": true, "samples": [[ua,va,ub,vb,cert],...], "points": [[ub,vb,cert],...]}
        两台相机(或同一台相机两个位置)的两帧里,哪两个像素是同一个真实的点:num > 0 抽 num 对对应点;points = A 里的像素,问它们在 B 里在哪。
        cert = 模型自己给的可信度(0..1),驱动不拿它当真,只拿几何去核(三角重投、两停交叉)
@@ -143,11 +146,36 @@ def _num(x, nd):
     return round(x, nd) if np.isfinite(x) else -1.0
 
 
-def match(a_b64, b_b64, num, points):
+_frames = {}
+_frames_lock = threading.Lock()
+_frame_next = [0]
+FRAMES_KEEP = 1200   # 存帧上限(次数)
+
+
+def frame_put(b64):
+    img = Image.open(io.BytesIO(base64.b64decode(b64))).convert("RGB")
+    with _frames_lock:
+        n = _frame_next[0]
+        _frame_next[0] += 1
+        _frames[n] = img
+        for k in [k for k in _frames if k <= n - FRAMES_KEEP]:
+            del _frames[k]
+    return {"ok": True, "id": n}
+
+
+def frame_get(req, key):
+    if key + "_id" in req:
+        with _frames_lock:
+            img = _frames.get(int(req[key + "_id"]))
+        if img is None:
+            raise KeyError("没有存过的帧 %s" % req[key + "_id"])
+        return img
+    return Image.open(io.BytesIO(base64.b64decode(req[key]))).convert("RGB")
+
+
+def match(A, B, num, points):
     m = _load_roma()
     t0 = time.time()
-    A = Image.open(io.BytesIO(base64.b64decode(a_b64))).convert("RGB")
-    B = Image.open(io.BytesIO(base64.b64decode(b_b64))).convert("RGB")
     Wa, Ha = A.size; Wb, Hb = B.size
     with torch.no_grad():
         warp, cert = m.match(A, B, device="cuda")
@@ -263,6 +291,11 @@ class H(BaseHTTPRequestHandler):
             self._send(400, {"ok": False, "err": "bad json: %s" % e})
             return
         try:
+            if self.path == "/frame":   # 只解码,不用模型 ⇒ 不排那把锁
+                self._send(200, frame_put(req["image"]))
+                return
+            if self.path == "/match":   # 图先解好(不占锁),再排队用模型
+                A = frame_get(req, "a"); B = frame_get(req, "b")
             with _lock:
                 if self.path == "/track/start":
                     out = track_start(req["image"], req["points"])
@@ -271,7 +304,7 @@ class H(BaseHTTPRequestHandler):
                 elif self.path == "/track/end":
                     out = track_end(int(req["id"]))
                 elif self.path == "/match":
-                    out = match(req["a"], req["b"], int(req.get("num", 0)), req.get("points", []))
+                    out = match(A, B, int(req.get("num", 0)), req.get("points", []))
                 elif self.path == "/segment":
                     out = segment(req["image"], req.get("box", []), req.get("points", []))
                 else:

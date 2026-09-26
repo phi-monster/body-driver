@@ -170,6 +170,78 @@ package body Instrument is
       end;
       return Res;
    end Match;
+   procedure Frame_Put (Host : String; Port : Natural; RGB : Buf; W, H : Natural; Id : out Integer; Err : out Unbounded_String) is
+      Req, Reply, Jerr : Unbounded_String;
+      D : Json.Doc;
+   begin
+      Id := -1; Err := Null_Unbounded_String;
+      if Host = "" or else Port = 0 or else W = 0 or else H = 0 then
+         Err := To_Unbounded_String ("没配仪器或没有图");
+         return;
+      end if;
+      Append (Req, "{""image"":""");
+      Append (Req, Codec.Base64 (Codec.BMP24 (RGB, W, H)));
+      Append (Req, """}");
+      if not Http_Client.Post (Host, Port, "/frame", Req, Reply) then
+         Err := To_Unbounded_String ("连不上仪器 " & Host & ":" & Codec.Img (Port));
+         return;
+      end if;
+      if not Json.Parse (To_String (Reply), D, Jerr) then
+         Err := To_Unbounded_String ("仪器回的不是 JSON:" & To_String (Jerr));
+         return;
+      end if;
+      declare
+         Okn : constant Integer := Json.Get (D, 0, "ok");
+         In_N : constant Integer := Json.Get (D, 0, "id");
+      begin
+         if Okn >= 0 and then Json.Bool (D, Okn) and then In_N >= 0 then
+            Id := Integer (Json.Num (D, In_N));
+         else
+            Err := To_Unbounded_String ("仪器没存成这一帧");
+         end if;
+      end;
+   end Frame_Put;
+
+   function Sample_Ids (Host : String; Port : Natural; Ia, Ib : Natural; Num : Natural; Err : out Unbounded_String) return Pair_Vectors.Vector is
+      Empty, Res : Pair_Vectors.Vector;
+      Reply, Jerr : Unbounded_String;
+      D : Json.Doc;
+   begin
+      Err := Null_Unbounded_String;
+      if Host = "" or else Port = 0 then
+         Err := To_Unbounded_String ("没配仪器");
+         return Empty;
+      end if;
+      if not Http_Client.Post (Host, Port, "/match", "{""a_id"":" & Codec.Img (Ia) & ",""b_id"":" & Codec.Img (Ib) & ",""num"":" & Codec.Img (Num) & "}", Reply) then
+         Err := To_Unbounded_String ("连不上仪器 " & Host & ":" & Codec.Img (Port));
+         return Empty;
+      end if;
+      if not Json.Parse (To_String (Reply), D, Jerr) then
+         Err := To_Unbounded_String ("仪器回的不是 JSON:" & To_String (Jerr));
+         return Empty;
+      end if;
+      declare
+         Okn : constant Integer := Json.Get (D, 0, "ok");
+         Sn : constant Integer := Json.Get (D, 0, "samples");
+      begin
+         if Okn < 0 or else not Json.Bool (D, Okn) or else Sn < 0 then
+            Err := To_Unbounded_String ("仪器说不行");
+            return Empty;
+         end if;
+         for I in 0 .. Json.Count (D, Sn) - 1 loop
+            declare
+               Qn : constant Integer := Json.Child (D, Sn, I);
+            begin
+               if Qn >= 0 and then Json.Count (D, Qn) >= 4 then
+                  Res.Append (Pair_Pt'(Ua => Json.Num (D, Json.Child (D, Qn, 0)), Va => Json.Num (D, Json.Child (D, Qn, 1)),
+                                       Ub => Json.Num (D, Json.Child (D, Qn, 2)), Vb => Json.Num (D, Json.Child (D, Qn, 3))));
+               end if;
+            end;
+         end loop;
+      end;
+      return Res;
+   end Sample_Ids;
+
    procedure Segment (Host : String; Port : Natural; RGB : Buf; W, H : Natural; X0, Y0, X1, Y1 : Integer; Pts : Seg_Pt_Vectors.Vector;
                       Mask : out Bools; Area : out Natural; Score : out Long_Float; Ok : out Boolean; Err : out Unbounded_String) is
       Req, Reply, Jerr : Unbounded_String;

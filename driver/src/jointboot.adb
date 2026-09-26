@@ -7,7 +7,6 @@ with Table;
 with Instrument;
 with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
 package body Jointboot is
-   package Mask_Vectors is new Ada.Containers.Vectors (Natural, Bools, Bool_Vectors."=");
 
    procedure Say (S : String) is
    begin
@@ -47,7 +46,6 @@ package body Jointboot is
                Amp : Long_Float := Long_Float'Max (Start_Amp, 4.0 * M.Joint_Noise);
                Info : Arm_Info;
                Found : Boolean := False;
-               Mv : Mask_Vectors.Vector;   --  这一次探针每台相机里动过的像素
             begin
                Info.Group := G;
                for Try in 0 .. Max_Doublings loop
@@ -73,7 +71,6 @@ package body Jointboot is
                      for K in 0 .. Natural'Min (Natural (J1 (G).Length), Natural (J0 (G).Length)) - 1 loop
                         Got := Long_Float'Min (Got, J1 (G) (K) - J0 (G) (K));   --  这组读数里跟得最少的那个关节
                      end loop;
-                     Mv.Clear;
                      for C in 0 .. Nc - 1 loop
                         declare
                            Fl : Picture.Floor_Map renames M.Floors (C);
@@ -83,7 +80,6 @@ package body Jointboot is
                              Picture.Components (Picture.Both (M1, M2), F.Cams (C).W, F.Cams (C).H, Picture.Min_Pixels (F.Cams (C).W, F.Cams (C).H));
                         begin
                            Fr.Append (Picture.Fraction (Picture.Either (M1, M2)));
-                           Mv.Append (Picture.Either (M1, M2));
                            if not Comps.Is_Empty then
                               Visible := True;
                            end if;
@@ -131,9 +127,6 @@ package body Jointboot is
                      end loop;
                      if Best >= 0 and then Bv > 0.0 and then Bv >= 2.0 * Second then
                         Info.Eye := Best;
-                        if Natural (Best) < Natural (Mv.Length) then
-                           Info.Moved := Mv (Natural (Best));
-                        end if;
                      end if;
                      Say ("第" & Codec.Img (Natural (Arms.Length) + 1) & " 只手 = 第" & Codec.Img (G) & " 组关节读数(" & Codec.Img (Natural (Q0.Length))
                           & " 个,每个一起转 " & Codec.Fmt (Amp, 4) & " 就看得见)"
@@ -177,10 +170,67 @@ package body Jointboot is
                         Host : String; Port : Natural; Dump : String; Ds : out Sweep_Vectors.Vector; Css : out Corr_Set_Vectors.Vector) is
       Na : constant Natural := Natural (Arms.Length);
       N_Img : Natural := 0;
-      --  一段的头两格(给不同关节之间配点用):帧号 + 每个格点那时在哪
+      --  ── 后台配点:扫描的时候仿真每走一步要等 0.37 秒,GPU 空着 ⇒ 一个线程边扫边让配点仪器配(一对 0.85 秒)──
+      type Job is record
+         A, I, J : Natural := 0;
+         Ia, Ib : Natural := 0;       --  两帧在仪器那边的编号
+      end record;
+      package Job_Vectors is new Ada.Containers.Vectors (Natural, Job);
+      protected type Queue is
+         procedure Put (X : Job);
+         procedure Close;
+         entry Get (X : out Job; Done : out Boolean);
+      private
+         Q : Job_Vectors.Vector;
+         Head : Natural := 0;
+         Closed : Boolean := False;
+      end Queue;
+      protected body Queue is
+         procedure Put (X : Job) is
+         begin
+            Q.Append (X);
+         end Put;
+         procedure Close is
+         begin
+            Closed := True;
+         end Close;
+         entry Get (X : out Job; Done : out Boolean) when Head < Natural (Q.Length) or else Closed is
+         begin
+            if Head < Natural (Q.Length) then
+               X := Q (Head); Head := Head + 1; Done := False;
+            else
+               X := (others => <>); Done := True;
+            end if;
+         end Get;
+      end Queue;
+      Jobs : Queue;
+      Res : array (0 .. Natural'Max (1, Na) - 1) of Kinem.Corr_Vectors.Vector;   --  只有配点线程写;它结束以后才读
+      N_Jobs, N_Empty : Natural := 0;
+      Per_Pair : constant := 2500;   --  每一对让仪器抽 2500 对(次数;同 V1B2 离线过线的那一版)
+      task Matcher with Storage_Size => 16 * 1024 * 1024;
+      task body Matcher is
+         X : Job;
+         Done : Boolean;
+         Err : Unbounded_String;
+      begin
+         loop
+            Jobs.Get (X, Done);
+            exit when Done;
+            declare
+               P : constant Instrument.Pair_Vectors.Vector := Instrument.Sample_Ids (Host, Port, X.Ia, X.Ib, Per_Pair, Err);
+            begin
+               if P.Is_Empty then
+                  N_Empty := N_Empty + 1;
+               end if;
+               for Pp of P loop
+                  Res (X.A).Append (Kinem.Corr'(I => X.I, J => X.J, Ua => Pp.Ua, Va => Pp.Va, Ub => Pp.Ub, Vb => Pp.Vb));
+               end loop;
+            end;
+         end loop;
+      end Matcher;
+      --  一段的头一格(给相邻关节之间配点用)
       type Head is record
-         Frame : Natural := 0;
-         Pos : Instrument.Track_Vectors.Vector;
+         Frame, Joint : Natural := 0;
       end record;
       package Head_Vectors is new Ada.Containers.Vectors (Natural, Head);
       type Arm_State is record
@@ -188,7 +238,8 @@ package body Jointboot is
          G, Cam : Natural := 0;
          Q0 : Floats;
          W, H : Natural := 0;
-         Pts : Instrument.Track_Vectors.Vector;   --  格点(每段都从这些像素起跟)
+         Pts : Instrument.Track_Vectors.Vector;   --  跟点的格点(只拿来估每格画面挪多少、认哪些点跟着眼一起动)
+         Max_Disp : Floats;                       --  每个格点整段扫描里离它起点最远挪过多少(像素)
          Tid : Integer := -1;
          Step, Off, Q_Prev : Long_Float := 0.0;
          Tgt : Floats;
@@ -196,10 +247,12 @@ package body Jointboot is
          Done : Boolean := True;
          Why : Unbounded_String;
          Prev_Pos : Instrument.Track_Vectors.Vector;
-         Prev_Frame : Natural := 0;
+         Ids : Ints;                              --  每一格在仪器那边的编号
          Heads : Head_Vectors.Vector;
       end record;
       St : array (0 .. Natural'Max (1, Na) - 1) of Arm_State;
+      --  这一格在仪器那边存成了没有
+      function Sa_Id_Ok (A, Fr : Natural) return Boolean is (Fr < Natural (St (A).Ids.Length) and then St (A).Ids (Fr) >= 0);
       Gw : Long_Float := 0.0;
       Nj : Natural := 0;
       Okc : Boolean;
@@ -210,11 +263,19 @@ package body Jointboot is
          Fo : Ada.Text_IO.File_Type;
          D : Sweep_Data := Ds (A);
          Sa : Arm_State renames St (A);
+         Id : Integer;
       begin
          D.Frames.Append (Kinem.Frame_Info'(Q => F.Joints (Sa.G), Joint => (if K = 0 then -1 else Integer (J))));
          D.Imgs.Append (F.Cams (Sa.Cam));
          D.Runs.Append (if K = 0 then 0 else 1 + 2 * Integer (J) + (if Dd > 0 then 1 else 0));
          Ds.Replace_Element (A, D);
+         --  存到仪器那边,起点 ↔ 这一格交给后台配
+         Instrument.Frame_Put (Host, Port, F.Cams (Sa.Cam).RGB, Sa.W, Sa.H, Id, Err);
+         Sa.Ids.Append (Id);
+         if K > 0 and then Id >= 0 and then Sa.Ids (0) >= 0 then
+            Jobs.Put ((A => A, I => 0, J => Natural (D.Frames.Length) - 1, Ia => Natural (Sa.Ids (0)), Ib => Natural (Id)));
+            N_Jobs := N_Jobs + 1;
+         end if;
          if Dump = "" then
             return;
          end if;
@@ -247,20 +308,6 @@ package body Jointboot is
             when others => null;
          end;
       end Keep;
-      --  配点:格点 P 在 I 帧的像素(Ua, Va)↔ 在 J 帧的(Ub, Vb)
-      procedure Add_Corrs (A : Natural; I, J : Natural; Pa, Pb : Instrument.Track_Vectors.Vector; Max_N : Natural) is
-         Cs : Kinem.Corr_Vectors.Vector := Css (A);
-         N : Natural := 0;
-      begin
-         for P in 0 .. Natural'Min (Natural (Pa.Length), Natural (Pb.Length)) - 1 loop
-            exit when N >= Max_N;
-            if Pa (P).Seen and then Pb (P).Seen then
-               Cs.Append (Kinem.Corr'(I => I, J => J, Ua => Pa (P).U, Va => Pa (P).V, Ub => Pb (P).U, Vb => Pb (P).V));
-               N := N + 1;
-            end if;
-         end loop;
-         Css.Replace_Element (A, Cs);
-      end Add_Corrs;
       --  一格画面挪了多少(像素):这一格和上一格都看得见的格点挪动的中位数
       function Flow (Pa, Pb : Instrument.Track_Vectors.Vector) return Long_Float is
          package Sorting is new F64_Vectors.Generic_Sorting;
@@ -310,18 +357,13 @@ package body Jointboot is
                Gw := Long_Float (Sa.W) / 16.0;   --  每格画面挪画幅宽的 1/16(比例,无量纲)
                for Iy in 0 .. Gy - 1 loop
                   for Ix in 0 .. Gx - 1 loop
-                     declare
-                        U : constant Long_Float := (Long_Float (Ix) + 0.5) * Long_Float (Sa.W) / Long_Float (Gx);
-                        V : constant Long_Float := (Long_Float (Iy) + 0.5) * Long_Float (Sa.H) / Long_Float (Gy);
-                     begin
-                        --  整幅铺满;手指那块(整段扫描一次都没变过的像素)扫完用遮罩剔掉
-                        --  (V1B4 2026-09-26:只铺在认手那一下动过的地方,探针只转了 0.0001,只剩 5 个格点)
-                        Sa.Pts.Append (Instrument.Track_Pt'(U => U, V => V, Seen => True, Conf => 1.0));
-                     end;
+                     Sa.Pts.Append (Instrument.Track_Pt'(U => (Long_Float (Ix) + 0.5) * Long_Float (Sa.W) / Long_Float (Gx),
+                                                         V => (Long_Float (Iy) + 0.5) * Long_Float (Sa.H) / Long_Float (Gy), Seen => True, Conf => 1.0));
+                     Sa.Max_Disp.Append (0.0);
                   end loop;
                end loop;
                Say ("关节扫描 · 第" & Codec.Img (A + 1) & " 只手(第" & Codec.Img (Sa.G) & " 组读数," & Codec.Img (Natural (Sa.Q0.Length)) & " 个关节,眼 = 第"
-                    & Codec.Img (Sa.Cam) & " 台):跟 " & Codec.Img (Natural (Sa.Pts.Length)) & " 个格点(整幅)");
+                    & Codec.Img (Sa.Cam) & " 台)");
             end;
             Keep (A, 0, 0, 0);
          end if;
@@ -329,7 +371,6 @@ package body Jointboot is
       for J in 0 .. Nj - 1 loop
          for Dd in -1 .. 1 loop
             if Dd /= 0 then
-               --  这一段开头:每只有这个关节的手,从起点起跟
                for A in 0 .. Na - 1 loop
                   declare
                      Sa : Arm_State renames St (A);
@@ -339,12 +380,7 @@ package body Jointboot is
                         Sa.Step := 0.02 * Long_Float'Max (1.0, abs Sa.Q0 (J));   --  起步 = 读数量级的 2%(比例,无量纲),按画面挪动放大
                         Sa.Off := 0.0; Sa.K := 0; Sa.Tgt := Sa.Q0; Sa.Q_Prev := F.Joints (Sa.G) (J);
                         Sa.Why := To_Unbounded_String ("走满 8 格");
-                        Sa.Prev_Frame := 0;
                         Sa.Prev_Pos := Instrument.Track_Start (Host, Port, F.Cams (Sa.Cam).RGB, Sa.W, Sa.H, Sa.Pts, Sa.Tid, Err);
-                        if Sa.Tid < 0 then
-                           Sa.Done := True;
-                           Sa.Why := To_Unbounded_String ("跟点仪器没开成:" & To_String (Err));
-                        end if;
                      end if;
                   end;
                end loop;
@@ -378,8 +414,6 @@ package body Jointboot is
                                  Got : constant Long_Float := abs (F.Joints (Sa.G) (J) - Sa.Q_Prev);
                                  Pushed : Long_Float := 0.0;
                                  Kp : Natural := 0;
-                                 Pos : constant Instrument.Track_Vectors.Vector := Instrument.Track_Step (Host, Port, Sa.Tid, F.Cams (Sa.Cam).RGB, Sa.W, Sa.H, Err);
-                                 Fr_Now : Natural;
                                  Fl : Long_Float := -1.0;
                               begin
                                  for X in 0 .. Natural (Sa.Q0.Length) - 1 loop
@@ -388,19 +422,25 @@ package body Jointboot is
                                     end if;
                                  end loop;
                                  Keep (A, J, Dd, Sa.K);
-                                 Fr_Now := Natural (Ds (A).Frames.Length) - 1;
-                                 if Natural (Pos.Length) = Natural (Sa.Pts.Length) then
-                                    Add_Corrs (A, 0, Fr_Now, Sa.Pts, Pos, Natural'Last);
-                                    if Sa.Prev_Frame /= 0 then
-                                       Add_Corrs (A, Sa.Prev_Frame, Fr_Now, Sa.Prev_Pos, Pos, Natural'Last);
-                                    end if;
-                                    if Sa.K <= 2 then   --  头两格留着,给不同关节之间配点(次数)
-                                       Sa.Heads.Append (Head'(Frame => Fr_Now, Pos => Pos));
-                                    end if;
-                                    Fl := Flow (Sa.Prev_Pos, Pos);
-                                    Sa.Prev_Pos := Pos;
+                                 if Sa.K = 1 then
+                                    Sa.Heads.Append (Head'(Frame => Natural (Ds (A).Frames.Length) - 1, Joint => J));
                                  end if;
-                                 Sa.Prev_Frame := Fr_Now;
+                                 if Sa.Tid >= 0 then
+                                    declare
+                                       Pos : constant Instrument.Track_Vectors.Vector := Instrument.Track_Step (Host, Port, Sa.Tid, F.Cams (Sa.Cam).RGB, Sa.W, Sa.H, Err);
+                                    begin
+                                       if Natural (Pos.Length) = Natural (Sa.Pts.Length) then
+                                          for P in 0 .. Natural (Pos.Length) - 1 loop
+                                             if Pos (P).Seen then
+                                                Sa.Max_Disp.Replace_Element (P, Long_Float'Max (Sa.Max_Disp (P),
+                                                  Geom.Norm ([Pos (P).U - Sa.Pts (P).U, Pos (P).V - Sa.Pts (P).V, 0.0])));
+                                             end if;
+                                          end loop;
+                                          Fl := Flow (Sa.Prev_Pos, Pos);
+                                          Sa.Prev_Pos := Pos;
+                                       end if;
+                                    end;
+                                 end if;
                                  if 3.0 * Got < Sa.Step then   --  没转到命令的三分之一(比例):到头 / 被顶住
                                     Sa.Why := To_Unbounded_String ("关节到头或被顶住(命令 " & Codec.Fmt (Sa.Step, 4) & ",实到 " & Codec.Fmt (Got, 4) & ")");
                                     Sa.Done := True;
@@ -447,54 +487,67 @@ package body Jointboot is
             end if;
          end loop;
       end loop;
-      --  不同关节头两格之间的配点(比例定"各轴离眼远近"要用;每对最多 60 个,次数)
+      --  相邻关节头一格之间也配(各轴离眼远近的比例要一根接一根连起来)
       for A in 0 .. Na - 1 loop
          if St (A).Live then
-            for H1 in 0 .. Natural (St (A).Heads.Length) - 1 loop
-               for H2 in H1 + 1 .. Natural (St (A).Heads.Length) - 1 loop
-                  if Ds (A).Frames (St (A).Heads (H1).Frame).Joint /= Ds (A).Frames (St (A).Heads (H2).Frame).Joint then
-                     Add_Corrs (A, St (A).Heads (H1).Frame, St (A).Heads (H2).Frame, St (A).Heads (H1).Pos, St (A).Heads (H2).Pos, 60);
+            for H1 of St (A).Heads loop
+               for H2 of St (A).Heads loop
+                  if H2.Joint = H1.Joint + 1 and then Sa_Id_Ok (A, H1.Frame) and then Sa_Id_Ok (A, H2.Frame) then
+                     Jobs.Put ((A => A, I => H1.Frame, J => H2.Frame, Ia => Natural (St (A).Ids (H1.Frame)), Ib => Natural (St (A).Ids (H2.Frame))));
+                     N_Jobs := N_Jobs + 1;
                   end if;
                end loop;
             end loop;
          end if;
       end loop;
-      --  ③ 手指遮罩:整段扫描里画面一次都没变过的像素;两头任一落在遮罩里的配点不要
+      declare
+         T1 : constant Ada.Calendar.Time := Ada.Calendar.Clock;
+      begin
+         Say ("关节扫描走完:" & Codec.Img (Plug.Steps (L) - S0) & " 拍、" & Codec.Fmt (Long_Float (Ada.Calendar."-" (T1, T0)), 0) & " 秒;配点 " & Codec.Img (N_Jobs)
+              & " 对在后台配,等它配完");
+         Jobs.Close;
+         while not Matcher'Terminated loop
+            delay 0.2;   --  等后台配完(秒,协议:只是轮询间隔)
+         end loop;
+         Say ("  配点配完:再等了 " & Codec.Fmt (Long_Float (Ada.Calendar."-" (Ada.Calendar.Clock, T1)), 0) & " 秒(" & Codec.Img (N_Empty) & " 对配不上)");
+      end;
+      --  ③ 手指遮罩:跟点那批格点里,整段扫描离起点挪不到画幅宽 1/64 的 = 跟着眼一起动的自己(比例);落在这些格子里的配点不要
       for A in 0 .. Na - 1 loop
          if St (A).Live then
             declare
                D : Sweep_Data := Ds (A);
                W : constant Natural := D.W;
                Hh : constant Natural := D.H;
-               Moved_Any : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (W * Hh));
-               Fl : Picture.Floor_Map renames M.Floors (St (A).Cam);
-               Cnt : Natural := 0;
+               Cw : constant Long_Float := Long_Float (W) / Long_Float (Gx);
+               Ch : constant Long_Float := Long_Float (Hh) / Long_Float (Gy);
+               Self : array (0 .. Gx * Gy - 1) of Boolean := [others => False];
+               N_Self : Natural := 0;
                Kept : Kinem.Corr_Vectors.Vector;
                function Masked (U, V : Long_Float) return Boolean is
-                  Iu : constant Integer := Integer (Long_Float'Floor (U));
-                  Iv : constant Integer := Integer (Long_Float'Floor (V));
+                  Ix : constant Integer := Integer (Long_Float'Floor (U / Cw));
+                  Iy : constant Integer := Integer (Long_Float'Floor (V / Ch));
                begin
-                  return Iu < 0 or else Iu >= W or else Iv < 0 or else Iv >= Hh or else D.Mask (Natural (Iv) * W + Natural (Iu));
+                  return Ix < 0 or else Ix >= Gx or else Iy < 0 or else Iy >= Gy or else Self (Natural (Iy) * Gx + Natural (Ix));
                end Masked;
             begin
-               for K in 1 .. Natural (D.Imgs.Length) - 1 loop
-                  Moved_Any := Picture.Either (Moved_Any, Picture.Moved (D.Imgs (0).Gray, D.Imgs (K).Gray, Fl));
+               for P in Self'Range loop
+                  if P < Natural (St (A).Max_Disp.Length) and then St (A).Max_Disp (P) < Long_Float (W) / 64.0 then   --  画幅宽 1/64(比例)
+                     Self (P) := True; N_Self := N_Self + 1;
+                  end if;
                end loop;
                D.Mask := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (W * Hh));
                for P in 0 .. W * Hh - 1 loop
-                  if not Moved_Any (P) then
+                  if Masked (Long_Float (P mod W) + 0.5, Long_Float (P / W) + 0.5) then
                      D.Mask.Replace_Element (P, True);
-                     Cnt := Cnt + 1;
                   end if;
                end loop;
-               for C of Css (A) loop
+               for C of Res (A) loop
                   if not Masked (C.Ua, C.Va) and then not Masked (C.Ub, C.Vb) then
                      Kept.Append (C);
                   end if;
                end loop;
-               Say ("  第" & Codec.Img (A + 1) & " 只手:扫了 " & Codec.Img (Natural (D.Frames.Length)) & " 格;手指遮罩(整段一次都没变过的像素)占 "
-                    & Codec.Fmt (100.0 * Long_Float (Cnt) / Long_Float (Natural'Max (1, W * Hh)), 1) & "%;配点 " & Codec.Img (Natural (Kept.Length))
-                    & " / " & Codec.Img (Natural (Css (A).Length)) & " 个留下");
+               Say ("  第" & Codec.Img (A + 1) & " 只手:扫了 " & Codec.Img (Natural (D.Frames.Length)) & " 格;跟着眼一起动的格子(手指)" & Codec.Img (N_Self) & " / "
+                    & Codec.Img (Gx * Gy) & ";配点 " & Codec.Img (Natural (Kept.Length)) & " / " & Codec.Img (Natural (Res (A).Length)) & " 个留下");
                Ds.Replace_Element (A, D);
                Css.Replace_Element (A, Kept);
             end;

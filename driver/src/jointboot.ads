@@ -17,7 +17,6 @@ package Jointboot is
       Frac : Floats;                 --  这只手一动,每台相机变了多少画面(比例)
       Probe : Long_Float := 0.0;     --  认出来时每个关节一起转了多少(读数的单位)
       Echoes : Ints;                 --  跟着一起变的别的组(回声)
-      Moved : Bools;                 --  认出来那一下,它的眼里动过的像素(W × H;没动的 = 跟着眼一起动的手指 / 空白 ⇒ 跟点不往那儿铺)
    end record;
    package Arm_Vectors is new Ada.Containers.Vectors (Natural, Arm_Info);
 
