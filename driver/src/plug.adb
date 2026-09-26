@@ -1,5 +1,6 @@
 with Ada.Text_IO; use Ada.Text_IO;
 with Ada.Calendar;
+with Ada.Numerics.Long_Elementary_Functions; use Ada.Numerics.Long_Elementary_Functions;
 with Ada.Unchecked_Conversion;
 with Interfaces; use Interfaces;
 with Codec;
@@ -26,6 +27,69 @@ package body Plug is
    function Joint_Mode (L : Link) return Boolean is (L.Lay.EE.Is_Empty);
 
    function Steps (L : Link) return Natural is (if L.Seq >= L.Ep_Seq0 then L.Seq - L.Ep_Seq0 else L.Seq);
+
+   function Beat_Index (L : Link; Seq : Natural) return Integer is
+   begin
+      if L.Beats.Is_Empty or else Seq < L.Beats.First_Element.Seq or else Seq > L.Beats.Last_Element.Seq then
+         return -1;
+      end if;
+      return Seq - L.Beats.First_Element.Seq;   --  帧号连着(每收一帧记一拍)
+   end Beat_Index;
+   function Joints_At (L : Link; Seq : Natural) return Floats_Vectors.Vector is
+      K : constant Integer := Beat_Index (L, Seq);
+   begin
+      return (if K >= 0 then L.Beats (K).Joints else Floats_Vectors.Empty_Vector);
+   end Joints_At;
+   function Reported_At (L : Link; Seq : Natural) return Pose_Vectors.Vector is
+      K : constant Integer := Beat_Index (L, Seq);
+   begin
+      return (if K >= 0 then L.Beats (K).Reported_EE else Pose_Vectors.Empty_Vector);
+   end Reported_At;
+   function Image_Lag (L : Link; Cam, Group, From_Seq : Natural; Corr : out Floats) return Integer is
+      Best : Integer := 0;
+      Best_C : Long_Float := Long_Float'First;
+   begin
+      Corr := Zeros (2 * Max_Lag + 1);
+      for Lag in -Max_Lag .. Max_Lag loop
+         declare
+            Sx, Sy, Sxx, Syy, Sxy : Long_Float := 0.0;
+            N : Natural := 0;
+         begin
+            for K in 0 .. Natural (L.Beats.Length) - 1 loop
+               declare
+                  Kq : constant Integer := K - Lag;
+               begin
+                  if Kq >= 0 and then Kq < Natural (L.Beats.Length) and then L.Beats (K).Seq >= From_Seq and then L.Beats (Kq).Seq >= From_Seq
+                    and then Cam < Natural (L.Beats (K).Img_Chg.Length) and then Group < Natural (L.Beats (Kq).Q_Chg.Length)
+                  then
+                     declare
+                        X : constant Long_Float := L.Beats (K).Img_Chg (Cam);
+                        Y : constant Long_Float := L.Beats (Kq).Q_Chg (Group);
+                     begin
+                        Sx := Sx + X; Sy := Sy + Y; Sxx := Sxx + X * X; Syy := Syy + Y * Y; Sxy := Sxy + X * Y;
+                        N := N + 1;
+                     end;
+                  end if;
+               end;
+            end loop;
+            if N >= 2 then
+               declare
+                  Nn : constant Long_Float := Long_Float (N);
+                  Vx : constant Long_Float := Sxx - Sx * Sx / Nn;
+                  Vy : constant Long_Float := Syy - Sy * Sy / Nn;
+               begin
+                  if Vx > 0.0 and then Vy > 0.0 then
+                     Corr.Replace_Element (Lag + Max_Lag, (Sxy - Sx * Sy / Nn) / Sqrt (Vx * Vy));
+                     if Corr (Lag + Max_Lag) > Best_C then
+                        Best_C := Corr (Lag + Max_Lag); Best := Lag;
+                     end if;
+                  end if;
+               end;
+            end if;
+         end;
+      end loop;
+      return Best;
+   end Image_Lag;
 
    function Reset_Pending (L : Link) return Boolean is (L.Reset_Flag);
 
@@ -344,6 +408,63 @@ package body Plug is
             end if;
          end;
       end loop;
+      --  这一拍记下来(量画面比读数晚几拍用;见 Beat)
+      declare
+         B : Beat;
+      begin
+         B.Seq := L.Seq; B.Joints := F.Joints; B.Reported_EE := F.Reported_EE;
+         for Ci in 0 .. Natural (F.Cams.Length) - 1 loop
+            declare
+               W : constant Natural := F.Cams (Ci).W;
+               H : constant Natural := F.Cams (Ci).H;
+               Sum : Long_Float := 0.0;
+               Cnt : Natural := 0;
+            begin
+               if Ci < Natural (L.Prev_Gray.Length) and then Natural (L.Prev_Gray (Ci).Length) = W * H and then Natural (F.Cams (Ci).Gray.Length) = W * H then
+                  declare
+                     G0 : Buf renames L.Prev_Gray (Ci);
+                     G1 : Buf renames F.Cams (Ci).Gray;
+                  begin
+                     for Y in 0 .. (H - 1) / Img_Stride loop
+                        for X in 0 .. (W - 1) / Img_Stride loop
+                           declare
+                              I : constant Natural := Y * Img_Stride * W + X * Img_Stride;
+                           begin
+                              Sum := Sum + abs (Long_Float (G1 (I)) - Long_Float (G0 (I)));
+                              Cnt := Cnt + 1;
+                           end;
+                        end loop;
+                     end loop;
+                  end;
+               end if;
+               B.Img_Chg.Append (if Cnt > 0 then Sum / Long_Float (Cnt) else 0.0);
+            end;
+         end loop;
+         for Gi in 0 .. Natural (F.Joints.Length) - 1 loop
+            declare
+               Mx : Long_Float := 0.0;
+            begin
+               if not L.Beats.Is_Empty and then Gi < Natural (L.Beats.Last_Element.Joints.Length) then
+                  declare
+                     Q0 : constant Floats := L.Beats.Last_Element.Joints (Gi);
+                  begin
+                     for K in 0 .. Natural'Min (Natural (Q0.Length), Natural (F.Joints (Gi).Length)) - 1 loop
+                        Mx := Long_Float'Max (Mx, abs (F.Joints (Gi) (K) - Q0 (K)));
+                     end loop;
+                  end;
+               end if;
+               B.Q_Chg.Append (Mx);
+            end;
+         end loop;
+         L.Beats.Append (B);
+         if Natural (L.Beats.Length) > Keep_Beats then
+            L.Beats.Delete_First (Ada.Containers.Count_Type (Natural (L.Beats.Length) - Keep_Beats));
+         end if;
+         L.Prev_Gray.Clear;
+         for C of F.Cams loop
+            L.Prev_Gray.Append (C.Gray);
+         end loop;
+      end;
       --  录像:BL_VID 全分辨率灰度(开头密、后面疏,编号连续 ⇒ mkvid 能拼);BL_FILM 半分辨率抽帧。
       declare
          Vid : constant String := Codec.Env ("BL_VID");

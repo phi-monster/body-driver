@@ -31,6 +31,23 @@ package Plug is
       Instruction : Unbounded_String;    --  观测里带的任务句
    end record;
 
+   --  逐拍记下的东西(2026-09-26 V1B10:仿真的画面比关节读数晚一拍 —— 扫描时手还在转就存了格子,画面和读数不是同一刻,
+   --  第 5 个关节那几格差到 4°,解出来的运动学一只手整组错;要量"画面晚几拍",再按它给每一格配读数)。
+   --  每一拍:帧号、各组关节读数、身体报的位姿(只落盘打分)、各台相机这一拍画面变了多少(和上一拍比的灰度差平均,隔 Img_Stride 个像素取一个)、
+   --  各组读数这一拍变了多少(变得最多的那个关节)
+   type Beat is record
+      Seq : Natural := 0;
+      Joints : Floats_Vectors.Vector;
+      Reported_EE : Pose_Vectors.Vector;
+      Img_Chg : Floats;
+      Q_Chg : Floats;
+   end record;
+   package Beat_Vectors is new Ada.Containers.Vectors (Natural, Beat);
+   package Buf_Vectors is new Ada.Containers.Vectors (Natural, Buf, U8_Vectors."=");
+   Img_Stride : constant := 4;     --  量画面变了多少时隔几个像素取一个(采样密度,次数)
+   Keep_Beats : constant := 4096;  --  最多记最近几拍(次数)
+   Max_Lag : constant := 4;        --  画面和读数最多查到差几拍(前后各 4 拍,次数)
+
    type Cmd_Kind is (Hold, Ee, Joint, Base);
    type Cmd is record
       Kind : Cmd_Kind := Hold;
@@ -62,6 +79,8 @@ package Plug is
       Film_N : Natural := 0;
       Wait_Us, Parse_Us : Long_Float := 0.0;
       Frame_S : Long_Float := 0.0;      --  量出来的帧时(秒/帧)
+      Beats : Beat_Vectors.Vector;      --  最近 Keep_Beats 拍(帧号连着)
+      Prev_Gray : Buf_Vectors.Vector;   --  上一拍各台相机的灰度图
    end record;
 
    procedure Boot (Port : Natural; L : in out Link; Ok : out Boolean);
@@ -77,6 +96,12 @@ package Plug is
    --  只看不清:对方是不是刚复位了(新的一集)。走路的那些段每一步看一眼,复位了就当场收段,不把这一段的动作发到新的一集里
    function Reset_Pending (L : Link) return Boolean;
    function Steps (L : Link) return Natural;            --  这一集到现在收了几拍画面(一拍 = 对方走一步;只数,不停)
+   --  画面比读数晚几拍:帧号 ≥ From_Seq 的那些拍里,第 Cam 台相机每拍画面变了多少 和 lag 拍之前第 Group 组读数变了多少 的相关系数,
+   --  lag = −Max_Lag … Max_Lag(Corr (lag + Max_Lag));返回相关最大的 lag(负 = 读数比画面晚)。拍数不够 / 没动过 ⇒ 0,Corr 全 0
+   function Image_Lag (L : Link; Cam, Group, From_Seq : Natural; Corr : out Floats) return Integer;
+   --  帧号 Seq 那一拍记下的关节读数 / 身体报的位姿(不在记着的那些拍里 ⇒ 空)
+   function Joints_At (L : Link; Seq : Natural) return Floats_Vectors.Vector;
+   function Reported_At (L : Link; Seq : Natural) return Pose_Vectors.Vector;
    function Arms (L : Link) return Natural;
    function Joint_Mode (L : Link) return Boolean;     --  没有末端位姿、只有关节角
 end Plug;

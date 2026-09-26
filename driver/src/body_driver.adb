@@ -189,7 +189,7 @@ begin
             end;
          end loop;
       end;
-      Jointboot.Align (Ds, Worlds, Css, Host, C.Inst_Port, Rw, O, Okj);
+      Jointboot.Align (Ds, Worlds, Css, Host, C.Inst_Port, Rw, O, Okj, Dump => Dump);
       if not Okj then
          Put_Line ("[身] 定不了世界(第一只手的眼没三角出桌面),量不了身体,退出");
          return;

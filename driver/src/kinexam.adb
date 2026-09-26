@@ -1,7 +1,8 @@
 --  离线回放运动学(2026-09-26,V1b 5 分钟一炮):拿一炮落盘的扫描格子(look/sweep.txt:每行 图名 臂 关节 方向 第几格 拍数 | 各组读数 … || 真值)
 --  和配点(look/corrs_arm<k>.txt:每行 I J Ua Va Ub Vb)原样跑驱动那一份 Kinem.Fit,打出报告、把模型写成 kinem_arm<k>.txt(格式同驱动落盘)。
 --  改解法不用再开一炮;真值不进解,只在打分脚本里用。这只手的读数是哪一组:这只手各格之间变了的第一组(同驱动认手的判法)。
---  用法:kinexam <look 目录> <臂号> <输出目录>
+--  用法:kinexam <look 目录> <臂号> <输出目录> [读数组号]
+--  (几只手同时扫:这只手的格子里别的手的读数也在变 ⇒ 按"变了的第一组"会认错;给了组号就用它 —— 驱动开机日志里"第 k 只手 = 第 g 组关节读数")
 with Ada.Command_Line; use Ada.Command_Line;
 with Ada.Text_IO; use Ada.Text_IO;
 with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
@@ -92,7 +93,10 @@ begin
       end;
    end loop;
    Close (Fi);
-   --  这只手的读数组:各格之间变了的第一组
+   --  这只手的读数组:给了就用;没给 = 各格之间变了的第一组
+   if Argument_Count >= 4 then
+      G := Integer'Value (Argument (4));
+   end if;
    for Gi in 0 .. Natural (All_Groups (0).Length) - 1 loop
       if G < 0 then
          for Fr in 1 .. Nf - 1 loop
@@ -148,7 +152,13 @@ begin
          Append (T, " " & Codec.Fmt (X, 3));
       end loop;
       Put_Line ("焦距 起步 " & Codec.Fmt (Rep.F_Start, 1) & " → " & Codec.Fmt (Rep.F, 1) & " · 一起解的残差中位 " & Codec.Fmt (Rep.Med_Px, 3) & " px、九成 "
-                & Codec.Fmt (Rep.P90_Px, 3) & " px · 内点 " & Codec.Img (Rep.N_Used) & " · 各轴比例(以第" & Codec.Img (Rep.Ref_Joint) & " 根为 1):" & To_String (T));
+                & Codec.Fmt (Rep.P90_Px, 3) & " px · 内点 " & Codec.Img (Rep.N_Used) & " · 各轴比例(以第" & Codec.Img (Rep.Ref_Joint) & " 根为 1):" & To_String (T)
+                & " · 定比例用了 " & Codec.Img (Rep.Rho_Pairs) & " 对(三对起步 " & Codec.Fmt (Rep.Rho_Start_Px, 3) & " px → 全部重解中位 " & Codec.Fmt (Rep.Rho_Px, 3) & " px)");
+      T := Null_Unbounded_String;
+      for X of Rep.Secs loop
+         Append (T, " " & Codec.Fmt (X, 1));
+      end loop;
+      Put_Line ("各步秒数(网格、精修、定比例、一起解):" & To_String (T));
    end;
    if Ok then
       declare

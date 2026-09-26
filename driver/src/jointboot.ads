@@ -58,8 +58,10 @@ package Jointboot is
       Valid : Boolean := False;
    end record;
    package Arm_World_Vectors is new Ada.Containers.Vectors (Natural, Arm_World);
+   --  Dump 非空 = 落盘 align_arm<k>.txt(每一对:第一只手起点那一格的像素、这只手起点那一格的像素、往返差、两边三角出的点;第一行 = 相似变换)
+   --  和 world.txt(世界系:Rw、O),离线回放 / 打分用
    procedure Align (Ds : Sweep_Vectors.Vector; Worlds : in out Arm_World_Vectors.Vector; Css : Corr_Set_Vectors.Vector;
-                    Host : String; Port : Natural; Rw : out Geom.M3; O : out Geom.V3; Ok : out Boolean);
+                    Host : String; Port : Natural; Rw : out Geom.M3; O : out Geom.V3; Ok : out Boolean; Dump : String := "");
 
    --  ⑥ 装上:从此插头每一帧的手的位姿 = 按关节读数算出的世界里的腕眼位姿;位姿命令 = 在量过的范围里解关节目标
    procedure Install (Worlds : Arm_World_Vectors.Vector; Rw : Geom.M3; O : Geom.V3);

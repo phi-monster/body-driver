@@ -632,6 +632,105 @@ package body Kinem is
    Grid_Target : constant := 1200; --  每根轴单独起步时网格一共用多少个配点(次数)
    All_Target : constant := 8000;  --  每根轴单独精修时一共用多少个配点(次数)
 
+   --  ── ② 定比例用 ──
+   type V12 is array (0 .. Max_Joints - 1) of Long_Float;
+   type Nat_Array is array (Natural range <>) of Natural;
+   --  一个配点:对极约束 g · ρ = 0,Sampson 的分母 = |(E0, E1, E2, E3) · ρ|(Ex1、Etx2 的前两个分量,同 Samp)
+   type Rho_Row is record
+      G, E0, E1, E2, E3 : V12 := [others => 0.0];
+   end record;
+   type Rho_Rows is array (Natural range <>) of Rho_Row;
+   type Rho_Rows_Ptr is access Rho_Rows;
+   procedure Free is new Ada.Unchecked_Deallocation (Rho_Rows, Rho_Rows_Ptr);
+   function Rho_Res (R : Rho_Row; Rho : V12; N : Natural; F : Long_Float; Den : out Long_Float) return Long_Float is
+      Num, D0, D1, D2, D3 : Long_Float := 0.0;
+   begin
+      for J in 0 .. N - 1 loop
+         Num := Num + R.G (J) * Rho (J);
+         D0 := D0 + R.E0 (J) * Rho (J);
+         D1 := D1 + R.E1 (J) * Rho (J);
+         D2 := D2 + R.E2 (J) * Rho (J);
+         D3 := D3 + R.E3 (J) * Rho (J);
+      end loop;
+      Den := Sqrt (D0 * D0 + D1 * D1 + D2 * D2 + D3 * D3) + 1.0e-18;
+      return F * Num / Den;
+   end Rho_Res;
+   --  对称阵(前 N × N)最小特征值的特征向量(循环 Jacobi,同 Max_Eigvec4 的转法)
+   function Min_Eig (A0 : Mat; N : Natural) return V12 is
+      A : Mat (0 .. N - 1, 0 .. N - 1);
+      V : Mat (0 .. N - 1, 0 .. N - 1) := [others => [others => 0.0]];
+      Best : Natural := 0;
+      Out_V : V12 := [others => 0.0];
+   begin
+      for I in 0 .. N - 1 loop
+         for J in 0 .. N - 1 loop
+            A (I, J) := A0 (A0'First (1) + I, A0'First (2) + J);
+         end loop;
+         V (I, I) := 1.0;
+      end loop;
+      for Sweep in 1 .. 100 loop   --  最多 100 遍(次数)
+         declare
+            Off, Dg : Long_Float := 0.0;
+         begin
+            for P in 0 .. N - 1 loop
+               Dg := Dg + A (P, P) ** 2;
+               for Q in P + 1 .. N - 1 loop
+                  Off := Off + A (P, Q) ** 2;
+               end loop;
+            end loop;
+            exit when Off <= 1.0e-30 * Long_Float'Max (Dg, 1.0e-300);   --  非对角元相对已经是零(数值,无量纲)
+            for P in 0 .. N - 2 loop
+               for Q in P + 1 .. N - 1 loop
+                  if abs A (P, Q) > 1.0e-300 then   --  数值保护(无量纲)
+                     declare
+                        Th : constant Long_Float := 0.5 * Arctan (2.0 * A (P, Q), A (Q, Q) - A (P, P));
+                        C : constant Long_Float := Cos (Th);
+                        Sn : constant Long_Float := Sin (Th);
+                     begin
+                        for K in 0 .. N - 1 loop
+                           declare
+                              Akp : constant Long_Float := A (K, P);
+                              Akq : constant Long_Float := A (K, Q);
+                           begin
+                              A (K, P) := C * Akp - Sn * Akq;
+                              A (K, Q) := Sn * Akp + C * Akq;
+                           end;
+                        end loop;
+                        for K in 0 .. N - 1 loop
+                           declare
+                              Apk : constant Long_Float := A (P, K);
+                              Aqk : constant Long_Float := A (Q, K);
+                           begin
+                              A (P, K) := C * Apk - Sn * Aqk;
+                              A (Q, K) := Sn * Apk + C * Aqk;
+                           end;
+                        end loop;
+                        for K in 0 .. N - 1 loop
+                           declare
+                              Vkp : constant Long_Float := V (K, P);
+                              Vkq : constant Long_Float := V (K, Q);
+                           begin
+                              V (K, P) := C * Vkp - Sn * Vkq;
+                              V (K, Q) := Sn * Vkp + C * Vkq;
+                           end;
+                        end loop;
+                     end;
+                  end if;
+               end loop;
+            end loop;
+         end;
+      end loop;
+      for I in 1 .. N - 1 loop
+         if A (I, I) < A (Best, Best) then
+            Best := I;
+         end if;
+      end loop;
+      for I in 0 .. N - 1 loop
+         Out_V (I) := V (I, Best);
+      end loop;
+      return Out_V;
+   end Min_Eig;
+
    procedure Fit (Frames : Frame_Vectors.Vector; Ref : Natural; Cs : Corr_Vectors.Vector; Cx, Cy, Width : Long_Float;
                   M : out Model; Rep : out Fit_Report; Ok : out Boolean) is
       Q0 : constant Floats := Frames (Ref).Q;
@@ -871,182 +970,292 @@ package body Kinem is
             return;   --  有一根轴量不了 ⇒ 整只手的模型不完整;Rep.Joint_Frames / Joint_Med 里照实写着是哪根
          end if;
       end loop;
-      --  ② 各轴离眼远近的比例 ρ(可正可负:Sampson 分不出轴在眼的这边还是那边)
+      --  ② 各轴离眼远近的比例 ρ(可正可负:Sampson 分不出轴在眼的这边还是那边)。
+      --  ① 定了每根轴的方向 W、"轴在眼哪边"的方向 p̂ ⇒ 眼的位置 t(q) = Σ ρ_j a_j(q)(a_j = 前面各轴的转动 ·(I − 这根轴的转动)· p̂_j)对 ρ 是线性的:
+      --  两帧之间的平移 Tij = Σ ρ_j b_j,每个配点的对极约束 Tij · (y × h2) = 0 就是一条 g · ρ = 0(g_j = b_j · (y × h2)),Sampson 的分母 |E ρ| 也对 ρ 线性。
+      --  只用两帧加起来至少有两个关节离开参照读数的对(只转一个关节的对跟 ρ 无关)。全局解,不从哪根轴一根接一根定:
+      --  任取三对(一对管两个数,三对管得住五个比例)解一次(最小特征向量,各列先按大小归一),拿全部这些配点打分、取最好的:
+      --  分数 = Σ min(r², (3 px)²)(截断平方和,3 px 同 ③ 挑内点的门)—— 不用中位数:这些配点多数来自相邻关节头一格那几对(各转 1.7°、平移很小,
+      --  比例怎么取残差都小),中位数被它们占住分不出好坏(V1B10 回放:第 1 只手按中位挑到错的比例);乱配的对每个 ρ 都是满额,不影响比较。
+      --  再在门里(max(3 px, 3 × 中位))按 Sampson 加权反复重解。
+      --  (V1B10 2026-09-26:原来从相邻关节头一格一根接一根定、再局部精修,第 2 只手落进错的坑:各轴比例 −0.97 0.35 1 0.33 0.65 0.001,真的约 0.42 0.45 1 0.43 0.26 0.11)
       declare
          Cs_Thin : constant Corr_Vectors.Vector := Thin (Cs, Per_Pair_All);
-         Cross_Cnt : array (0 .. Max_Joints - 1) of Natural := [others => 0];
+         Af : array (0 .. Nf - 1, 0 .. Max_Joints - 1) of V3;   --  每一帧各轴的 a_j(q)(参照眼系,p̂ 为单位长)
+         Rq : array (0 .. Nf - 1) of M3;                         --  每一帧整串的转动
+         Seen : array (0 .. Max_Joints - 1) of Boolean := [others => False];
+         Rows : Rho_Rows_Ptr;
+         N_Rows : Natural := 0;
+         P_First, P_Count : Nat_Vectors.Vector;   --  每一对:在 Rows 里从第几行起、几行
+         Rho, Best_Rho : V12 := [others => 0.0];
          Rf : Natural := 0;
-         Rho : array (0 .. Max_Joints - 1) of Long_Float := [others => 1.0];
-         function Model_Of (Rh : Vec) return Model is
-            Mm : Model := M;
+         function Away (Fr, J : Natural) return Boolean is (abs Dq (Fr, J) >= Dmax);
+         function Informative (I, J : Natural) return Boolean is
+            K : Natural := 0;
          begin
-            Mm.F := F0;
-            for J in 0 .. N - 1 loop
-               Mm.Ax (J) := (W => Wj (J), P => Scl (Pj (J), Rh (Rh'First + J)));
+            for X in 0 .. N - 1 loop
+               if Away (I, X) or else Away (J, X) then
+                  K := K + 1;
+               end if;
             end loop;
-            return Mm;
-         end Model_Of;
-      begin
-         for C of Cs loop
+            return K >= 2;
+         end Informative;
+         --  按选中的行、权解一次:各列先按加权均方根归一(不然哪根轴的列小,解就全落到那根轴上)
+         procedure Solve (Sel : Nat_Array; Wt : Vec; Out_Rho : out V12) is
+            A : Mat (0 .. N - 1, 0 .. N - 1) := [others => [others => 0.0]];
+            D : V12 := [others => 0.0];
+            Sw : Long_Float := 0.0;
+         begin
+            for K in Sel'Range loop
+               for X in 0 .. N - 1 loop
+                  D (X) := D (X) + Wt (Wt'First + K - Sel'First) * Rows (Sel (K)).G (X) ** 2;
+               end loop;
+               Sw := Sw + Wt (Wt'First + K - Sel'First);
+            end loop;
+            for X in 0 .. N - 1 loop
+               D (X) := (if D (X) > 0.0 and then Sw > 0.0 then Sqrt (D (X) / Sw) else 1.0);
+            end loop;
+            for K in Sel'Range loop
+               declare
+                  W : constant Long_Float := Wt (Wt'First + K - Sel'First);
+                  Gs : V12 := [others => 0.0];
+               begin
+                  if W > 0.0 then
+                     for X in 0 .. N - 1 loop
+                        Gs (X) := Rows (Sel (K)).G (X) / D (X);
+                     end loop;
+                     for X in 0 .. N - 1 loop
+                        for Y in X .. N - 1 loop
+                           A (X, Y) := A (X, Y) + W * Gs (X) * Gs (Y);
+                        end loop;
+                     end loop;
+                  end if;
+               end;
+            end loop;
+            for X in 0 .. N - 1 loop
+               for Y in 0 .. X - 1 loop
+                  A (X, Y) := A (Y, X);
+               end loop;
+            end loop;
             declare
-               A : constant Integer := Frames (C.I).Joint;
-               B : constant Integer := Frames (C.J).Joint;
+               E : constant V12 := Min_Eig (A, N);
+               Nr : Long_Float := 0.0;
             begin
-               if A >= 0 and then B >= 0 and then A /= B and then A < Integer (N) and then B < Integer (N) then
-                  Cross_Cnt (Natural (A)) := Cross_Cnt (Natural (A)) + 1;
-                  Cross_Cnt (Natural (B)) := Cross_Cnt (Natural (B)) + 1;
+               Out_Rho := [others => 0.0];
+               for X in 0 .. N - 1 loop
+                  Out_Rho (X) := E (X) / D (X);
+                  Nr := Nr + Out_Rho (X) ** 2;
+               end loop;
+               if Nr > 0.0 then
+                  for X in 0 .. N - 1 loop
+                     Out_Rho (X) := Out_Rho (X) / Sqrt (Nr);
+                  end loop;
                end if;
             end;
+         end Solve;
+         --  按 Sampson 加权反复重解(Huber 1 px;Gated = 门外的不要,门 = max(3 px, 3 × 中位),每遍重算)
+         procedure Refine (Sel : Nat_Array; R : in out V12; Iters : Natural; Gated : Boolean) is
+            Cnt : constant Natural := Sel'Length;
+            Wt : Vec_Ptr := new Vec (0 .. Natural'Max (1, Cnt) - 1);
+            Rs : Vec_Ptr := new Vec (0 .. Natural'Max (1, Cnt) - 1);
+            Tmp : Vec_Ptr := new Vec (0 .. Natural'Max (1, Cnt) - 1);
+         begin
+            for It in 1 .. Iters loop
+               declare
+                  Den : Long_Float;
+                  Gate : Long_Float := Long_Float'Last;
+                  New_R : V12;
+                  Dot_R, Ch : Long_Float := 0.0;
+               begin
+                  for K in 0 .. Cnt - 1 loop
+                     Rs (K) := Rho_Res (Rows (Sel (Sel'First + K)), R, N, F0, Den);
+                     Wt (K) := (F0 / Den) ** 2;
+                  end loop;
+                  if Gated then
+                     Gate := Long_Float'Max (3.0, 3.0 * Median_In (Rs.all, Cnt, Tmp));   --  3 px / 3 倍中位(协议,同 ③)
+                  end if;
+                  for K in 0 .. Cnt - 1 loop
+                     Wt (K) := (if abs Rs (K) >= Gate then 0.0 elsif abs Rs (K) <= 1.0 then Wt (K) else Wt (K) / abs Rs (K));
+                  end loop;
+                  Solve (Sel, Wt (0 .. Cnt - 1), New_R);
+                  for X in 0 .. N - 1 loop
+                     Dot_R := Dot_R + New_R (X) * R (X);
+                  end loop;
+                  if Dot_R < 0.0 then
+                     for X in 0 .. N - 1 loop
+                        New_R (X) := -New_R (X);
+                     end loop;
+                  end if;
+                  for X in 0 .. N - 1 loop
+                     Ch := Ch + (New_R (X) - R (X)) ** 2;
+                  end loop;
+                  R := New_R;
+                  exit when Ch < 1.0e-20;   --  不再变了(数值,无量纲)
+               end;
+            end loop;
+            Free (Wt); Free (Rs); Free (Tmp);
+         end Refine;
+      begin
+         for Fr in 0 .. Nf - 1 loop
+            declare
+               R : M3 := Identity;
+            begin
+               for J in 0 .. N - 1 loop
+                  declare
+                     Rj : constant M3 := Rot (Wj (J), Dq (Fr, J));
+                  begin
+                     Af (Fr, J) := Ap (R, Sub (Pj (J), Ap (Rj, Pj (J))));
+                     R := Mul (R, Rj);
+                  end;
+               end loop;
+               Rq (Fr) := R;
+            end;
          end loop;
+         for C of Cs_Thin loop
+            if Informative (C.I, C.J) then
+               N_Rows := N_Rows + 1;
+            end if;
+         end loop;
+         Rows := new Rho_Rows (0 .. Natural'Max (1, N_Rows) - 1);
+         declare
+            K : Natural := 0;
+            Last_I, Last_J : Integer := -1;
+         begin
+            for C of Cs_Thin loop
+               if Informative (C.I, C.J) then
+                  if Integer (C.I) /= Last_I or else Integer (C.J) /= Last_J then
+                     P_First.Append (K); P_Count.Append (0);
+                     Last_I := Integer (C.I); Last_J := Integer (C.J);
+                     for X in 0 .. N - 1 loop
+                        if Away (C.I, X) or else Away (C.J, X) then
+                           Seen (X) := True;
+                        end if;
+                     end loop;
+                  end if;
+                  P_Count.Replace_Element (P_Count.Last_Index, P_Count.Last_Element + 1);
+                  declare
+                     Rij : constant M3 := Mul (Tr (Rq (C.J)), Rq (C.I));
+                     H1 : constant V3 := [(C.Ua - Cx) / F0, -(C.Va - Cy) / F0, -1.0];
+                     H2 : constant V3 := [(C.Ub - Cx) / F0, -(C.Vb - Cy) / F0, -1.0];
+                     Y : constant V3 := Ap (Rij, H1);
+                     Yh : constant V3 := Cross (Y, H2);
+                  begin
+                     for X in 0 .. N - 1 loop
+                        declare
+                           B : constant V3 := ApT (Rq (C.J), Sub (Af (C.I, X), Af (C.J, X)));
+                           Ex : constant V3 := Cross (B, Y);
+                           Et : constant V3 := ApT (Rij, Cross (H2, B));
+                        begin
+                           Rows (K).G (X) := Dot (B, Yh);
+                           Rows (K).E0 (X) := Ex (0); Rows (K).E1 (X) := Ex (1);
+                           Rows (K).E2 (X) := Et (0); Rows (K).E3 (X) := Et (1);
+                        end;
+                     end loop;
+                  end;
+                  K := K + 1;
+               end if;
+            end loop;
+         end;
+         Rep.Rho_Pairs := Natural (P_First.Length);
+         for X in 0 .. N - 1 loop
+            if not Seen (X) then
+               Rep.Rho.Clear;
+               for I in 0 .. N - 1 loop
+                  Rep.Rho.Append (if Seen (I) then 1.0 else 0.0);   --  0 = 这根轴在哪一对里都没离开参照读数,比例定不了
+               end loop;
+               Free (Rows);
+               return;
+            end if;
+         end loop;
+         --  任取三对:每对最多 Per_Pair_Grid 行来解、来打分
+         declare
+            Np : constant Natural := Natural (P_First.Length);
+            Sc : Nat_Array (0 .. Natural'Max (1, N_Rows) - 1);
+            Sc_First, Sc_Cnt : Nat_Vectors.Vector;
+            Nsc : Natural := 0;
+            Best_Score : Long_Float := Long_Float'Last;
+            Tau : constant := 3.0;   --  截断的门(像素,协议:同 ③ 挑内点的 3 px)
+            Rs : Vec_Ptr;
+            Tmp : Vec_Ptr;
+         begin
+            for P in 0 .. Np - 1 loop
+               Sc_First.Append (Nsc);
+               for K in 0 .. P_Count (P) - 1 loop
+                  if Take (K, P_Count (P), Per_Pair_Grid) then
+                     Sc (Nsc) := P_First (P) + K; Nsc := Nsc + 1;
+                  end if;
+               end loop;
+               Sc_Cnt.Append (Nsc - Sc_First (P));
+            end loop;
+            Rs := new Vec (0 .. Natural'Max (1, Nsc) - 1);
+            Tmp := new Vec (0 .. Natural'Max (1, Nsc) - 1);
+            for Pa in 0 .. Np - 1 loop
+               for Pb in Pa + 1 .. Np - 1 loop
+                  for Pc in Pb + 1 .. Np - 1 loop
+                     declare
+                        Nt : constant Natural := Sc_Cnt (Pa) + Sc_Cnt (Pb) + Sc_Cnt (Pc);
+                        Tri : Nat_Array (0 .. Natural'Max (1, Nt) - 1);
+                        K : Natural := 0;
+                        R0 : V12;
+                        Den : Long_Float;
+                     begin
+                        for P of Nat_Array'[Pa, Pb, Pc] loop
+                           for I in 0 .. Sc_Cnt (P) - 1 loop
+                              Tri (K) := Sc (Sc_First (P) + I); K := K + 1;
+                           end loop;
+                        end loop;
+                        if Nt > 0 then
+                           Solve (Tri (0 .. Nt - 1), Vec'(0 .. Nt - 1 => 1.0), R0);
+                           Refine (Tri (0 .. Nt - 1), R0, 2, Gated => False);   --  两遍 Sampson 加权(次数)
+                           declare
+                              Sm : Long_Float := 0.0;
+                           begin
+                              for I in 0 .. Nsc - 1 loop
+                                 Sm := Sm + Long_Float'Min (Rho_Res (Rows (Sc (I)), R0, N, F0, Den) ** 2, Tau ** 2);
+                              end loop;
+                              if Sm < Best_Score then
+                                 Best_Score := Sm; Best_Rho := R0;
+                              end if;
+                           end;
+                        end if;
+                     end;
+                  end loop;
+               end loop;
+            end loop;
+            Free (Rs); Free (Tmp);
+            Rep.Rho_Start_Px := Sqrt (Best_Score / Long_Float (Natural'Max (1, Nsc)));
+         end;
+         --  全部这些配点,门里按 Sampson 加权反复重解
+         declare
+            All_Sel : Nat_Array (0 .. Natural'Max (1, N_Rows) - 1);
+            Rs : Vec_Ptr := new Vec (0 .. Natural'Max (1, N_Rows) - 1);
+            Tmp : Vec_Ptr := new Vec (0 .. Natural'Max (1, N_Rows) - 1);
+            Den : Long_Float;
+         begin
+            for K in All_Sel'Range loop
+               All_Sel (K) := K;
+            end loop;
+            Rho := Best_Rho;
+            if N_Rows > 0 then
+               Refine (All_Sel (0 .. N_Rows - 1), Rho, 30, Gated => True);   --  最多 30 遍(次数)
+               for K in 0 .. N_Rows - 1 loop
+                  Rs (K) := Rho_Res (Rows (K), Rho, N, F0, Den);
+               end loop;
+               Rep.Rho_Px := Median_In (Rs.all, N_Rows, Tmp);
+            end if;
+            Free (Rs); Free (Tmp);
+         end;
+         Free (Rows);
          for J in 1 .. N - 1 loop
-            if Cross_Cnt (J) > Cross_Cnt (Rf) then
+            if abs Rho (J) > abs Rho (Rf) then
                Rf := J;
             end if;
          end loop;
          Rep.Ref_Joint := Rf;
-         --  顺着"哪两根轴的格子之间有配点"一根接一根定:从参照轴出发,每一根相对一根已经定好的轴,只用这两根轴的格子之间的配点,
-         --  一维网格(±0.01…10 倍,对数 31 档)。跟定好的哪一根都没有配点的轴定不了 ⇒ 如实报(Ok = False),不拿初值往下算
-         --  (自检 2026-09-26:四根轴跟参照轴没有配点,比例停在初值 1,一起精修时没东西管,跑到几十万倍)
-         declare
-            Done : array (0 .. Max_Joints - 1) of Boolean := [others => False];
-            Progress : Boolean := True;
-            function Link_Cs (A, B : Natural) return Corr_Vectors.Vector is
-               Sub_Cs : Corr_Vectors.Vector;
-            begin
-               for C of Cs_Thin loop
-                  if (Frames (C.I).Joint = Integer (A) and then Frames (C.J).Joint = Integer (B))
-                    or else (Frames (C.I).Joint = Integer (B) and then Frames (C.J).Joint = Integer (A))
-                  then
-                     Sub_Cs.Append (C);
-                  end if;
-               end loop;
-               return Sub_Cs;
-            end Link_Cs;
-         begin
-            Done (Rf) := True;
-            while Progress loop
-               Progress := False;
-               for J in 0 .. N - 1 loop
-                  if not Done (J) then
-                     --  和已经定好的哪一根配点最多,就相对它定
-                     declare
-                        Best_Link : Corr_Vectors.Vector;
-                     begin
-                        for I in 0 .. N - 1 loop
-                           if Done (I) then
-                              declare
-                                 L : constant Corr_Vectors.Vector := Link_Cs (J, I);
-                              begin
-                                 if Natural (L.Length) > Natural (Best_Link.Length) then
-                                    Best_Link := L;
-                                 end if;
-                              end;
-                           end if;
-                        end loop;
-                        if Natural (Best_Link.Length) >= 30 then   --  至少 30 个配点才定比例(次数)
-                           declare
-                              Best : Long_Float := Long_Float'Last;
-                              Bg : Long_Float := 1.0;
-                           begin
-                              for Sg in 0 .. 1 loop
-                                 for K in 0 .. 30 loop
-                                    declare
-                                       G : constant Long_Float := (if Sg = 0 then -1.0 else 1.0) * 0.01 * Exp (Long_Float (K) / 30.0 * Log (1000.0));
-                                       Rh : Vec (0 .. N - 1);
-                                       Mm : Model;
-                                       R : Vec_Ptr := new Vec (0 .. Natural (Best_Link.Length) - 1);
-                                       Md : Long_Float;
-                                    begin
-                                       for I in 0 .. N - 1 loop
-                                          Rh (I) := Rho (I);
-                                       end loop;
-                                       Rh (J) := G;
-                                       Mm := Model_Of (Rh);
-                                       declare
-                                          Pc : Pose_Array (0 .. Nf - 1);
-                                       begin
-                                          All_Poses (Mm, Frames, Pc);
-                                          for I in 0 .. Natural (Best_Link.Length) - 1 loop
-                                             R (I) := Res_Cached (Mm, Pc, Best_Link (I));
-                                          end loop;
-                                       end;
-                                       Md := Median_Abs (R.all);
-                                       Free (R);
-                                       if Md < Best then
-                                          Best := Md; Bg := G;
-                                       end if;
-                                    end;
-                                 end loop;
-                              end loop;
-                              Rho (J) := Bg;
-                              Done (J) := True;
-                              Progress := True;
-                           end;
-                        end if;
-                     end;
-                  end if;
-               end loop;
-            end loop;
-            for J in 0 .. N - 1 loop
-               if not Done (J) then
-                  Rep.Rho.Clear;
-                  for I in 0 .. N - 1 loop
-                     Rep.Rho.Append (if Done (I) then Rho (I) else 0.0);   --  0 = 这根轴跟别的轴的格子之间没有配点,比例定不了
-                  end loop;
-                  return;
-               end if;
-            end loop;
-         end;
-         --  全部一起精修 ρ(参照轴那个钉 1)
-         declare
-            Nx : constant Natural := N - 1;
-            X : Vec (0 .. Nx - 1);
-            Steps : constant Vec (0 .. Nx - 1) := [others => 1.0e-7];   --  差分步(比例的极小量,无量纲)
-            Nc : constant Natural := Natural (Cs_Thin.Length);
-            procedure R_Rho (Xx : Vec; R : out Vec) is
-               Rh : Vec (0 .. N - 1);
-               K : Natural := Xx'First;
-               Mm : Model;
-               Pc : Pose_Array (0 .. Nf - 1);
-            begin
-               for J in 0 .. N - 1 loop
-                  if J = Rf then
-                     Rh (J) := 1.0;
-                  else
-                     Rh (J) := Xx (K); K := K + 1;
-                  end if;
-               end loop;
-               Mm := Model_Of (Rh);
-               All_Poses (Mm, Frames, Pc);
-               for I in 0 .. Nc - 1 loop
-                  R (R'First + I) := Res_Cached (Mm, Pc, Cs_Thin (I));
-               end loop;
-            end R_Rho;
-         begin
-            declare
-               K : Natural := 0;
-            begin
-               for J in 0 .. N - 1 loop
-                  if J /= Rf then
-                     X (K) := Rho (J); K := K + 1;
-                  end if;
-               end loop;
-            end;
-            if Nx > 0 and then Nc > 0 then
-               Robust_LM (X, Nc, Nc, 60, Steps, R_Rho'Access);
-            end if;
-            declare
-               K : Natural := 0;
-            begin
-               for J in 0 .. N - 1 loop
-                  if J /= Rf then
-                     Rho (J) := X (K); K := K + 1;
-                  end if;
-                  Rep.Rho.Append (Rho (J));
-                  Pj (J) := Scl (Pj (J), Rho (J));
-               end loop;
-            end;
-         end;
+         for J in 0 .. N - 1 loop
+            Rep.Rho.Append (if Rho (Rf) /= 0.0 then Rho (J) / Rho (Rf) else 0.0);
+            Pj (J) := Scl (Pj (J), Rho (J));
+         end loop;
       end;
       Lap;
       --  ③ 挑内点(按起步模型:残差 < max(3 px, 3 倍中位)),全部一起按像素解(焦距放开;尺度钉"参与的各帧眼的位置均方根 = 1")

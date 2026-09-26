@@ -264,62 +264,44 @@ package body Jointboot is
       T0 : constant Ada.Calendar.Time := Ada.Calendar.Clock;
       S0 : constant Natural := Plug.Steps (L);
       Multi_J : constant := 99;   --  落盘时"几个关节一起动"的格子记成第 99 个关节(协议:只是个记号)
+      --  存下的每一格:哪只手、第几格、存它那一拍的帧号、落盘那一行的开头(读数和真值等量出"画面晚几拍"再按那一拍写)
+      type Kept_Rec is record
+         A, Frame, Seq : Natural := 0;
+         Head : Unbounded_String;
+      end record;
+      package Kept_Vectors is new Ada.Containers.Vectors (Natural, Kept_Rec);
+      Kept : Kept_Vectors.Vector;
+      Seq0 : constant Natural := L.Seq;
       procedure Keep (A, J : Natural; Dd : Integer; K : Natural; Multi : Boolean := False) is
-         Fo : Ada.Text_IO.File_Type;
-         D : Sweep_Data := Ds (A);
          Sa : Arm_State renames St (A);
          Id : Integer;
+         Nm : constant String := "sweep_" & Codec.Img (N_Img) & ".bmp";
       begin
-         D.Frames.Append (Kinem.Frame_Info'(Q => F.Joints (Sa.G), Joint => (if K = 0 or else Multi then -1 else Integer (J))));
-         D.Imgs.Append (F.Cams (Sa.Cam));
-         D.Runs.Append (if Multi then 2 * Nj + 1 else (if K = 0 then 0 else 1 + 2 * Integer (J) + (if Dd > 0 then 1 else 0)));
-         Ds.Replace_Element (A, D);
+         --  就地加(不把整只手的格子连画面拷一遍再放回去:一格一张 640 × 480 的图,拷来拷去比扫描本身还费)
+         Ds (A).Frames.Append (Kinem.Frame_Info'(Q => F.Joints (Sa.G), Joint => (if K = 0 or else Multi then -1 else Integer (J))));
+         Ds (A).Imgs.Append (F.Cams (Sa.Cam));
+         Ds (A).Runs.Append (if Multi then 2 * Nj + 1 else (if K = 0 then 0 else 1 + 2 * Integer (J) + (if Dd > 0 then 1 else 0)));
+         Kept.Append (Kept_Rec'(A => A, Frame => Natural (Ds (A).Frames.Length) - 1, Seq => F.Seq,
+                       Head => To_Unbounded_String (Nm & " " & Codec.Img (A) & " " & Codec.Img (if Multi then Multi_J else J) & " " & Codec.Img (Dd) & " "
+                                                    & Codec.Img (K) & " " & Codec.Img (Plug.Steps (L)))));
          --  存到仪器那边,起点 ↔ 这一格交给后台配
          Instrument.Frame_Put (Host, Port, F.Cams (Sa.Cam).RGB, Sa.W, Sa.H, Id, Err);
          Sa.Ids.Append (Id);
          if K > 0 and then Id >= 0 and then Sa.Ids (0) >= 0 then
-            Jobs.Put ((A => A, I => 0, J => Natural (D.Frames.Length) - 1, Ia => Natural (Sa.Ids (0)), Ib => Natural (Id)));
+            Jobs.Put ((A => A, I => 0, J => Natural (Ds (A).Frames.Length) - 1, Ia => Natural (Sa.Ids (0)), Ib => Natural (Id)));
             N_Jobs := N_Jobs + 1;
          end if;
          --  每段头两格之间也配(转角小的对:每根轴单独起步时网格只用转角 ≤ 16° 的对;V1B5 只配起点 ↔ 每一格,两根轴没有够用的小转角对);
          --  几个关节一起动的格子:相邻两格也配
          if (K = 2 or else (Multi and then K >= 2)) and then Id >= 0 and then Natural (Sa.Ids.Length) >= 2 and then Sa.Ids (Natural (Sa.Ids.Length) - 2) >= 0 then
-            Jobs.Put ((A => A, I => Natural (D.Frames.Length) - 2, J => Natural (D.Frames.Length) - 1,
+            Jobs.Put ((A => A, I => Natural (Ds (A).Frames.Length) - 2, J => Natural (Ds (A).Frames.Length) - 1,
                        Ia => Natural (Sa.Ids (Natural (Sa.Ids.Length) - 2)), Ib => Natural (Id)));
             N_Jobs := N_Jobs + 1;
          end if;
-         if Dump = "" then
-            return;
-         end if;
-         declare
-            Nm : constant String := "sweep_" & Codec.Img (N_Img) & ".bmp";
-         begin
+         if Dump /= "" then
             Codec.Write_BMP (Dump & "/" & Nm, F.Cams (Sa.Cam).RGB, Sa.W, Sa.H);
             N_Img := N_Img + 1;
-            begin
-               Ada.Text_IO.Open (Fo, Ada.Text_IO.Append_File, Dump & "/sweep.txt");
-            exception
-               when others => Ada.Text_IO.Create (Fo, Ada.Text_IO.Out_File, Dump & "/sweep.txt");
-            end;
-            Ada.Text_IO.Put (Fo, Nm & " " & Codec.Img (A) & " " & Codec.Img (if Multi then Multi_J else J) & " " & Codec.Img (Dd) & " " & Codec.Img (K) & " "
-                             & Codec.Img (Plug.Steps (L)));
-            for Qg of F.Joints loop
-               Ada.Text_IO.Put (Fo, " |");
-               for X of Qg loop
-                  Ada.Text_IO.Put (Fo, " " & Codec.Fmt (X, 7));
-               end loop;
-            end loop;
-            Ada.Text_IO.Put (Fo, " ||");
-            if A < Natural (F.Reported_EE.Length) then
-               for I in 0 .. 6 loop
-                  Ada.Text_IO.Put (Fo, " " & Codec.Fmt (F.Reported_EE (A) (I), 7));   --  身体报的手的位姿:只给离线打分,驱动不读
-               end loop;
-            end if;
-            Ada.Text_IO.New_Line (Fo);
-            Ada.Text_IO.Close (Fo);
-         exception
-            when others => null;
-         end;
+         end if;
       end Keep;
       --  一格画面挪了多少(像素):这一格和上一格都看得见的格点挪动的中位数
       function Flow (Pa, Pb : Instrument.Track_Vectors.Vector) return Long_Float is
@@ -571,6 +553,80 @@ package body Jointboot is
          end loop;
          Move_All (0.0);
       end;
+      --  ④ 画面比读数晚几拍(见 Plug.Beat):这一段扫描里,每只手的眼每拍画面变了多少 和 几拍之前它那组读数变了多少 的相关,几只手加起来取最大的那个;
+      --  每一格改配"画面那一刻"的读数(存格那一拍的帧号 − 晚的拍数)。V1B10 离线回放:配晚一拍的读数,扫描格上考试中位 0.71 → 0.11 mm,焦距 391.9 → 396.7(真 397)
+      declare
+         Sum : array (-Plug.Max_Lag .. Plug.Max_Lag) of Long_Float := [others => 0.0];
+         Lag : Integer := 0;
+         N_Live : Natural := 0;
+         Txt : Unbounded_String;
+      begin
+         for A in 0 .. Na - 1 loop
+            if St (A).Live then
+               declare
+                  Cr : Floats;
+                  Lg : constant Integer := Plug.Image_Lag (L, St (A).Cam, St (A).G, Seq0, Cr);
+               begin
+                  N_Live := N_Live + 1;
+                  for K in Sum'Range loop
+                     Sum (K) := Sum (K) + Cr (K + Plug.Max_Lag);
+                  end loop;
+                  Append (Txt, (if N_Live > 1 then ";" else "") & "第" & Codec.Img (A + 1) & " 只手 " & Codec.Img (Lg) & " 拍");
+               end;
+            end if;
+         end loop;
+         for K in Sum'Range loop
+            if Sum (K) > Sum (Lag) then
+               Lag := K;
+            end if;
+         end loop;
+         Append (Txt, " · 相关(几只手平均):");
+         for K in Sum'Range loop
+            Append (Txt, " " & Codec.Img (K) & " 拍 " & Codec.Fmt (Sum (K) / Long_Float (Natural'Max (1, N_Live)), 2));
+         end loop;
+         Say ("画面比关节读数晚 " & Codec.Img (Lag) & " 拍(" & To_String (Txt) & ")⇒ 每一格配晚这么多拍之前的读数");
+         for Kp of Kept loop
+            declare
+               Qa : constant Plug.Floats_Vectors.Vector := Plug.Joints_At (L, Natural (Integer'Max (0, Integer (Kp.Seq) - Lag)));
+            begin
+               if St (Kp.A).G < Natural (Qa.Length) then
+                  Ds (Kp.A).Frames (Kp.Frame).Q := Qa (St (Kp.A).G);
+               end if;
+            end;
+         end loop;
+         if Dump /= "" then
+            declare
+               Fo : Ada.Text_IO.File_Type;
+            begin
+               Ada.Text_IO.Create (Fo, Ada.Text_IO.Out_File, Dump & "/sweep.txt");
+               for Kp of Kept loop
+                  declare
+                     Sq : constant Natural := Natural (Integer'Max (0, Integer (Kp.Seq) - Lag));
+                     Qa : constant Plug.Floats_Vectors.Vector := Plug.Joints_At (L, Sq);
+                     Ea : constant Plug.Pose_Vectors.Vector := Plug.Reported_At (L, Sq);
+                  begin
+                     Ada.Text_IO.Put (Fo, To_String (Kp.Head));
+                     for Qg of Qa loop
+                        Ada.Text_IO.Put (Fo, " |");
+                        for X of Qg loop
+                           Ada.Text_IO.Put (Fo, " " & Codec.Fmt (X, 7));
+                        end loop;
+                     end loop;
+                     Ada.Text_IO.Put (Fo, " ||");
+                     if Kp.A < Natural (Ea.Length) then
+                        for I in 0 .. 6 loop
+                           Ada.Text_IO.Put (Fo, " " & Codec.Fmt (Ea (Kp.A) (I), 7));   --  身体报的手的位姿(同一拍):只给离线打分,驱动不读
+                        end loop;
+                     end if;
+                     Ada.Text_IO.New_Line (Fo);
+                  end;
+               end loop;
+               Ada.Text_IO.Close (Fo);
+            exception
+               when others => null;
+            end;
+         end if;
+      end;
       --  相邻关节头一格之间也配(各轴离眼远近的比例要一根接一根连起来)
       for A in 0 .. Na - 1 loop
          if St (A).Live then
@@ -606,7 +662,7 @@ package body Jointboot is
                Ch : constant Long_Float := Long_Float (Hh) / Long_Float (Gy);
                Self : array (0 .. Gx * Gy - 1) of Boolean := [others => False];
                N_Self : Natural := 0;
-               Kept : Kinem.Corr_Vectors.Vector;
+               Kept_C : Kinem.Corr_Vectors.Vector;
                function Masked (U, V : Long_Float) return Boolean is
                   Ix : constant Integer := Integer (Long_Float'Floor (U / Cw));
                   Iy : constant Integer := Integer (Long_Float'Floor (V / Ch));
@@ -627,16 +683,29 @@ package body Jointboot is
                end loop;
                for C of Res (A) loop
                   if not Masked (C.Ua, C.Va) and then not Masked (C.Ub, C.Vb) then
-                     Kept.Append (C);
+                     Kept_C.Append (C);
                   end if;
                end loop;
+               if Dump /= "" then
+                  --  手指遮罩落盘(mask_arm<k>.bmp:白 = 跟着眼一起动的格子):离线回放对齐用
+                  declare
+                     Img : Buf := U8_Vectors.To_Vector (0, Ada.Containers.Count_Type (3 * W * Hh));
+                  begin
+                     for P in 0 .. W * Hh - 1 loop
+                        if D.Mask (P) then
+                           Img.Replace_Element (3 * P, 255); Img.Replace_Element (3 * P + 1, 255); Img.Replace_Element (3 * P + 2, 255);
+                        end if;
+                     end loop;
+                     Codec.Write_BMP (Dump & "/mask_arm" & Codec.Img (A) & ".bmp", Img, W, Hh);
+                  end;
+               end if;
                if Dump /= "" then
                   --  配点落盘(corrs_arm<k>.txt:每行 I J Ua Va Ub Vb,帧号同 sweep.txt 里这只手的格子顺序):离线回放解法用
                   declare
                      Fo : Ada.Text_IO.File_Type;
                   begin
                      Ada.Text_IO.Create (Fo, Ada.Text_IO.Out_File, Dump & "/corrs_arm" & Codec.Img (A) & ".txt");
-                     for C of Kept loop
+                     for C of Kept_C loop
                         Ada.Text_IO.Put_Line (Fo, Codec.Img (C.I) & " " & Codec.Img (C.J) & " " & Codec.Fmt (C.Ua, 3) & " " & Codec.Fmt (C.Va, 3) & " "
                                               & Codec.Fmt (C.Ub, 3) & " " & Codec.Fmt (C.Vb, 3));
                      end loop;
@@ -646,9 +715,9 @@ package body Jointboot is
                   end;
                end if;
                Say ("  第" & Codec.Img (A + 1) & " 只手:扫了 " & Codec.Img (Natural (D.Frames.Length)) & " 格;跟着眼一起动的格子(手指)" & Codec.Img (N_Self) & " / "
-                    & Codec.Img (Gx * Gy) & ";配点 " & Codec.Img (Natural (Kept.Length)) & " / " & Codec.Img (Natural (Res (A).Length)) & " 个留下");
+                    & Codec.Img (Gx * Gy) & ";配点 " & Codec.Img (Natural (Kept_C.Length)) & " / " & Codec.Img (Natural (Res (A).Length)) & " 个留下");
                Ds.Replace_Element (A, D);
-               Css.Replace_Element (A, Kept);
+               Css.Replace_Element (A, Kept_C);
             end;
          end if;
       end loop;
@@ -750,6 +819,7 @@ package body Jointboot is
          for X of Rep.Rho loop
             Append (T, " " & Codec.Fmt (X, 3));
          end loop;
+         Append (T, " · 定比例用了 " & Codec.Img (Rep.Rho_Pairs) & " 对(三对起步 " & Codec.Fmt (Rep.Rho_Start_Px, 3) & " px → 全部重解中位 " & Codec.Fmt (Rep.Rho_Px, 3) & " px)");
          Append (T, " · 各步秒数");
          for X of Rep.Secs loop
             Append (T, " " & Codec.Fmt (X, 1));
@@ -866,7 +936,7 @@ package body Jointboot is
    end Tri_Start;
 
    procedure Align (Ds : Sweep_Vectors.Vector; Worlds : in out Arm_World_Vectors.Vector; Css : Corr_Set_Vectors.Vector;
-                    Host : String; Port : Natural; Rw : out Geom.M3; O : out Geom.V3; Ok : out Boolean) is
+                    Host : String; Port : Natural; Rw : out Geom.M3; O : out Geom.V3; Ok : out Boolean; Dump : String := "") is
       use Geom;
       X0 : Kinem.V3_Array (0 .. Gx * Gy - 1);
       U0, V0 : Floats;
@@ -902,6 +972,22 @@ package body Jointboot is
             O := [Ph * Nrm (0), Ph * Nrm (1), Ph * Nrm (2)];
             Say ("世界:第一只手起点那一格三角出 " & Codec.Img (N0) & " 个点,桌面拟合了 " & Codec.Img (Inl) & " 个(离面中位 " & Codec.Fmt (Md, 4)
                  & " 单位)⇒ 上 = 桌面法向;眼离桌面 " & Codec.Fmt (abs Ph, 3) & " 单位(长度单位 = 第一只手的模型单位)");
+            if Dump /= "" then
+               declare
+                  Fo : Ada.Text_IO.File_Type;
+               begin
+                  Ada.Text_IO.Create (Fo, Ada.Text_IO.Out_File, Dump & "/world.txt");
+                  for I in 0 .. 2 loop
+                     for J in 0 .. 2 loop
+                        Ada.Text_IO.Put (Fo, Codec.Fmt (Rw (I, J), 9) & " ");
+                     end loop;
+                  end loop;
+                  Ada.Text_IO.Put_Line (Fo, Codec.Fmt (O (0), 9) & " " & Codec.Fmt (O (1), 9) & " " & Codec.Fmt (O (2), 9));
+                  Ada.Text_IO.Close (Fo);
+               exception
+                  when others => null;
+               end;
+            end if;
          end;
       end;
       Ok := True;
@@ -915,6 +1001,8 @@ package body Jointboot is
                Ub, Vb, E : Floats;
                Pa, Pb : Kinem.V3_Array (0 .. Gx * Gy - 1);
                Npair : Natural := 0;
+               Pix : array (0 .. Gx * Gy - 1) of Kinem.Corr;   --  落盘用:每一对的两个像素(Ua Va = 第一只手起点,Ub Vb = 这只手起点)
+               Trip : array (0 .. Gx * Gy - 1) of Long_Float := [others => 0.0];
             begin
                for I in 0 .. N0 - 1 loop
                   Q_Pts.Append (Instrument.Match_Pt'(U => U0 (I), V => V0 (I), Cert => 0.0));
@@ -999,7 +1087,10 @@ package body Jointboot is
                            begin
                               Kinem.Meet_Rays (Rs (I).Oo (0 .. Rs (I).K - 1), Rs (I).Dd (0 .. Rs (I).K - 1), Xb, Okm);
                               if Okm and then Xb (2) < 0.0 then
-                                 Pa (Npair) := Xb; Pb (Npair) := X0 (Natural (Bi (I))); Npair := Npair + 1;
+                                 Pa (Npair) := Xb; Pb (Npair) := X0 (Natural (Bi (I)));
+                                 Pix (Npair) := (I => 0, J => 0, Ua => U0 (Natural (Bi (I))), Va => V0 (Natural (Bi (I))), Ub => Bq (I).U, Vb => Bq (I).V);
+                                 Trip (Npair) := E (Natural (Bi (I)));
+                                 Npair := Npair + 1;
                               end if;
                            end;
                         end if;
@@ -1020,6 +1111,28 @@ package body Jointboot is
                      Worlds.Replace_Element (B, Wb);
                      Say ("世界:第" & Codec.Img (B + 1) & " 只手对到第一只手的系:两只眼都三角出来的点 " & Codec.Img (Npair) & " 对(内点 " & Codec.Img (Inl)
                           & ",残差中位 " & Codec.Fmt (Md, 4) & " 单位)· 长度倍数 " & Codec.Fmt (S, 4));
+                     if Dump /= "" then
+                        declare
+                           Fo : Ada.Text_IO.File_Type;
+                        begin
+                           Ada.Text_IO.Create (Fo, Ada.Text_IO.Out_File, Dump & "/align_arm" & Codec.Img (B) & ".txt");
+                           Ada.Text_IO.Put (Fo, "S " & Codec.Fmt (S, 9) & " R");
+                           for I in 0 .. 2 loop
+                              for J in 0 .. 2 loop
+                                 Ada.Text_IO.Put (Fo, " " & Codec.Fmt (R (I, J), 9));
+                              end loop;
+                           end loop;
+                           Ada.Text_IO.Put_Line (Fo, " T " & Codec.Fmt (T (0), 9) & " " & Codec.Fmt (T (1), 9) & " " & Codec.Fmt (T (2), 9));
+                           for K in 0 .. Npair - 1 loop
+                              Ada.Text_IO.Put_Line (Fo, Codec.Fmt (Pix (K).Ua, 3) & " " & Codec.Fmt (Pix (K).Va, 3) & " " & Codec.Fmt (Pix (K).Ub, 3) & " " & Codec.Fmt (Pix (K).Vb, 3)
+                                                    & " " & Codec.Fmt (Trip (K), 3) & " " & Codec.Fmt (Pb (K) (0), 6) & " " & Codec.Fmt (Pb (K) (1), 6) & " " & Codec.Fmt (Pb (K) (2), 6)
+                                                    & " " & Codec.Fmt (Pa (K) (0), 6) & " " & Codec.Fmt (Pa (K) (1), 6) & " " & Codec.Fmt (Pa (K) (2), 6));
+                           end loop;
+                           Ada.Text_IO.Close (Fo);
+                        exception
+                           when others => null;
+                        end;
+                     end if;
                   end;
                else
                   declare
