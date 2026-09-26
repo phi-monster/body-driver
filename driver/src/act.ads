@@ -405,6 +405,12 @@ package Act is
    procedure Init_Tracks (C : in out Context);
    --  开机装回几何常数(身体文件旁边的 .geo.json:焦距、相机在手上的朝向、指尖在相机里的位置);缺的当场量。
    procedure Geo_Boot (F : Plug.Frame; C : in out Context; Body_Path : String);
+   --  开机后半段的几何从前半段来(V1b 09-27):每台相机一份(Geo:手上那只眼 = 运动学量的焦距、主点,插头给的手的位姿就是它的位姿 ⇒ 不转、不偏;
+   --  不动的眼 = 对齐量的,世界系)、标定板(Board:放进世界的手三角出、配进不动的眼的点)、世界系的桌面(Plane_*)、不动的眼那一刻的画面(Ref:
+   --  板上的点在它里面的像素就是在这张图里配的,每轮核对拿它比)。这几样前半段量过,后半段不再量(朝向、不动的眼);指尖、步幅后面照量。
+   --  长度单位 = 第一只手运动学的单位(每一炮不一样 ⇒ 不装回上一炮的几何文件)
+   procedure Geo_Install (F : Plug.Frame; C : in out Context; Body_Path : String; Geo : Geom.Geo_Vectors.Vector; Board : Geom.Scene_Pt_Vectors.Vector;
+                          Plane_Pt, Plane_N : Geom.V3; Plane_Rms : Long_Float; Ref : Plug.Cam);
    --  量【不动的眼】:看着自己的手挪几下(每停一处合空一次,看指尖落在画面哪儿),解出它在世界里的位置和朝向。
    --  只在它还没量过时做;量过就存进几何文件,下一炮直接装回。
    procedure Geo_Boot_Fixed (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);

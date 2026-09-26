@@ -3,8 +3,6 @@ with Codec;
 with Chan;
 with Ada.Numerics.Long_Elementary_Functions; use Ada.Numerics.Long_Elementary_Functions;
 package body Selfmap is
-   Start_Amp : constant Long_Float := 1.0e-4;   --  探针协议的起点(极小,翻倍到走得出来又看得见为止;起点多小不影响结果),无量纲协议
-   Max_Doublings : constant := 12;              --  次数,无量纲
 
    function Jaw_Index (F : Plug.Frame; Arm : Natural) return Natural is
      (if Natural (F.Jaw.Length) > Arm then Arm else 0);
@@ -301,6 +299,7 @@ package body Selfmap is
    end Measure_Idle;
 
    procedure Measure (L : in out Plug.Link; F : in out Plug.Frame; M : out Body_Map; Ok : out Boolean;
+                      Step_Px : Plug.Floats_Vectors.Vector;
                       Eyes : Ints := Int_Vectors.Empty_Vector; World : Integer := -1) is
       N_Cams : constant Natural := Natural (F.Cams.Length);
       Arms : constant Natural := Natural (F.EE.Length);
@@ -333,8 +332,6 @@ package body Selfmap is
       M.Amp := Zeros (M.Channels); M.Delivered := Zeros (M.Channels);
       M.Seen := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (M.Channels));
       M.Cam_On_Arm := Int_Vectors.To_Vector (-1, Ada.Containers.Count_Type (Arms));
-      declare
-         Last_Trans, Last_Rot : Long_Float := 0.0;
       begin
       for A in 0 .. Arms - 1 loop
          for K in 0 .. Chan.Per_Arm - 1 loop
@@ -342,14 +339,13 @@ package body Selfmap is
                Ch : constant Natural := A * Chan.Per_Arm + K;
                P0 : constant Plug.Arm_Pose := F.EE (A);
                F0 : constant Plug.Cam_Vectors.Vector := F.Cams;
-               Noise : constant Long_Float := (if K < 3 then M.EE_Noise else M.Rot_Noise);
-               --  起点:同类通道(平移/转动)上一次被接受的幅度的一半(协议:从已知能走的档往下试一档),没有就从极小起
-               Amp : Long_Float := Long_Float'Max (Start_Amp, Long_Float'Max (4.0 * Noise, (if K < 3 then Last_Trans else Last_Rot) * 0.5));
+               Has_Step : constant Boolean := A < Natural (Step_Px.Length) and then Natural (Step_Px (A).Length) >= 2;
+               Amp : constant Long_Float := (if Has_Step then Step_Px (A) (if K < 3 then 0 else 1) else 0.0);
                Accepted : Boolean := False;
                Jaw0 : Floats;
             begin
                Jaw0.Append (Jaw_Of (F, A));
-               for Try in 0 .. Max_Doublings loop
+               for Try in 1 .. (if Has_Step and then Amp > 0.0 then 1 else 0) loop
                   declare
                      A_Cmd : Table.Vec := Table.Zero_Vec;
                      Deliv, Back : Table.Vec;
@@ -403,27 +399,20 @@ package body Selfmap is
                            end if;
                         end;
                      end loop;
-                     if abs Got >= Amp * 0.5 and then Visible then
-                        Accepted := True;
-                        M.Amp.Replace_Element (Ch, Amp);
-                        M.Delivered.Replace_Element (Ch, Got);
-                        M.Seen.Replace_Element (Ch, True);
-                        if K < 3 then
-                           Last_Trans := Amp;
-                        else
-                           Last_Rot := Amp;
-                        end if;
-                        Put_Line ("[身]   通道" & Natural'Image (Ch) & "(第" & Natural'Image (A + 1) & " 只手第" & Natural'Image (K) &
-                                  " 轴):命令 " & Codec.Fmt (Amp, 4) & " 实到 " & Codec.Fmt (Got, 4) & " · " & Natural'Image (Frames) & " 拍稳 · 画面里看见了");
-                        exit;
-                     end if;
                      M.Amp.Replace_Element (Ch, Amp);
                      M.Delivered.Replace_Element (Ch, Got);
-                     Amp := Amp * 2.0;
+                     if abs Got >= Amp * 0.5 then   --  走到一半以上(纯数学的一半)
+                        Accepted := True;
+                        M.Seen.Replace_Element (Ch, True);
+                        Put_Line ("[身]   通道" & Natural'Image (Ch) & "(第" & Natural'Image (A + 1) & " 只手第" & Natural'Image (K) &
+                                  " 轴):一步 = 它自己那只眼里画面挪 1 像素 = " & Codec.Fmt (Amp, 4) & ",实到 " & Codec.Fmt (Got, 4) & " · " & Natural'Image (Frames) & " 拍稳"
+                                  & (if Visible then " · 画面里看见了跟着动的一块" else ""));
+                     end if;
                   end;
                end loop;
                if not Accepted then
-                  Put_Line ("[身]   通道" & Natural'Image (Ch) & ":探到 " & Codec.Fmt (M.Amp (Ch), 4) & " 仍走不出来或看不见(实到 " & Codec.Fmt (M.Delivered (Ch), 4) & ")");
+                  Put_Line ("[身]   通道" & Natural'Image (Ch) & (if Has_Step then ":推 " & Codec.Fmt (Amp, 4) & " 走不到一半(实到 " & Codec.Fmt (M.Delivered (Ch), 4) & ")"
+                            else ":这只手没量成运动学 ⇒ 量不了"));
                end if;
             end;
          end loop;

@@ -34,6 +34,13 @@ procedure Body_Driver is
    Kin_Eyes : Bytes.Ints;          --  开机前半段认出来的:每只(量成了运动学的)手上的眼
    Kin_World_Cam : Integer := -1;  --  开机前半段认出来的世界相机(不长在手上的;没有 = -1)
    Kin_Fixed : Geom.Cam_Geo;       --  开机前半段按第一只手的桌面点解出的不动的眼(世界系;Valid = False 就是没解成)
+   --  开机前半段交给后半段的几何(V1b 09-27):每台相机一份(手上那只眼 = 运动学的焦距、主点;不动的眼 = 对齐量的)、标定板、世界系的桌面、
+   --  不动的眼那一刻的画面(板上的点在它里面的像素就是在这张图里配的)
+   Kin_Geo : Geom.Geo_Vectors.Vector;
+   Kin_Board : Geom.Scene_Pt_Vectors.Vector;
+   Kin_Plane_Pt, Kin_Plane_N : Geom.V3 := [0.0, 0.0, 0.0];
+   Kin_Plane_Rms : Long_Float := 0.0;
+   Kin_Ref : Plug.Cam;
    I : Natural := 1;
    Order : constant String := Codec.Env ("BL_ORDER");
 begin
@@ -191,7 +198,7 @@ begin
             end;
          end loop;
       end;
-      Jointboot.Align (Ds, Worlds, Css, Host, C.Inst_Port, Rw, O, Okj, Kin_Fixed, Dump => Dump);
+      Jointboot.Align (Ds, Worlds, Css, Host, C.Inst_Port, Rw, O, Okj, Kin_Fixed, Kin_Board, Kin_Plane_Pt, Kin_Plane_N, Kin_Plane_Rms, Dump => Dump);
       if not Okj then
          Put_Line ("[身] 定不了世界(第一只手的眼没三角出桌面),量不了身体,退出");
          return;
@@ -201,6 +208,28 @@ begin
             Kin_Eyes.Append (Found (A).Eye);
          end if;
       end loop;
+      --  每台相机的几何:手上那只眼 = 运动学量的焦距、主点;插头给的手的位姿就是这只眼的位姿 ⇒ 眼在手上不转、不偏;
+      --  不动的眼 = 对齐量的(世界系);别的相机只有画幅中心当主点(量不了)
+      for Cm in 0 .. Natural (F.Cams.Length) - 1 loop
+         declare
+            G : Geom.Cam_Geo := Geom.No_Geo;
+         begin
+            G.Cx := 0.5 * Long_Float (F.Cams (Cm).W); G.Cy := 0.5 * Long_Float (F.Cams (Cm).H);   --  画幅中心(纯几何的一半)
+            for A in 0 .. Natural (Worlds.Length) - 1 loop
+               if Worlds (A).Valid and then Found (A).Eye = Integer (Cm) then
+                  G.F := Worlds (A).Model.F; G.F_Meas := G.F; G.Cx := Worlds (A).Model.Cx; G.Cy := Worlds (A).Model.Cy;
+                  G.R_Ce := Geom.Identity; G.Off := [0.0, 0.0, 0.0]; G.Valid := True;
+               end if;
+            end loop;
+            if Kin_World_Cam = Integer (Cm) and then Kin_Fixed.F > 0.0 then
+               G := Kin_Fixed; G.Valid := True; G.Fixed := True;
+            end if;
+            Kin_Geo.Append (G);
+         end;
+      end loop;
+      if not Ds.Is_Empty then
+         Kin_Ref := Ds (0).World_Img;
+      end if;
       Jointboot.Install (Worlds, Rw, O);
       if not Plug.Sense (L, F) then
          Put_Line ("[链] 装上以后取不到画面,退出");
@@ -255,7 +284,24 @@ begin
          C.Tables := Stored_Tables;
          C.Sch := Stored_Sch;   --  身体没变 ⇒ 身体图照用(位姿 → 手指在画面哪儿)
       else
-         Selfmap.Measure (L, F, C.Map, Ok, Eyes => Kin_Eyes, World => Kin_World_Cam);
+         --  每只手"一步看得见" = 在它自己那只眼里画面挪 1 像素:平移 = 眼离桌面的高度(世界 z,桌面 z = 0)÷ 焦距,转动 = 1 ÷ 焦距 弧度
+         declare
+            Step_Px : Plug.Floats_Vectors.Vector;
+         begin
+            for A in 0 .. Natural (F.EE.Length) - 1 loop
+               declare
+                  Fa : constant Long_Float := (if A < Natural (Kin_Eyes.Length) and then Kin_Eyes (A) >= 0 and then Natural (Kin_Eyes (A)) < Natural (Kin_Geo.Length)
+                                               then Kin_Geo (Natural (Kin_Eyes (A))).F else 0.0);
+                  St : Bytes.Floats;
+               begin
+                  if Fa > 0.0 and then F.EE (A) (2) > 0.0 then
+                     St.Append (F.EE (A) (2) / Fa); St.Append (1.0 / Fa);
+                  end if;
+                  Step_Px.Append (St);
+               end;
+            end loop;
+            Selfmap.Measure (L, F, C.Map, Ok, Step_Px, Eyes => Kin_Eyes, World => Kin_World_Cam);
+         end;
          if not Ok then
             Put_Line ("[身] 身体量不了,退出");
             return;
@@ -421,16 +467,15 @@ begin
    C.Cam := C.Map.World_Cam;
    --  🔴 抓起过球的那三炮(GB5/GC2/GC4)开机都有这一行;09-20 把几何驾驶搬回 main 时漏了它,
    --  于是几何常数从不装回、Geo_Ready 恒假、整条几何走法是死代码。
-   Act.Geo_Boot (F, C, To_String (Body_Path));
+   Act.Geo_Install (F, C, To_String (Body_Path), Kin_Geo, Kin_Board, Kin_Plane_Pt, Kin_Plane_N, Kin_Plane_Rms, Kin_Ref);
    --  对方在我连上时复位过一次(第一集开始):这个标记在这儿清掉,不然开机量身体的那几段会把它当成"段中间复位"当场收段(S2 2026-09-23 实测:左眼一停没挪就退了)
    if Plug.Take_Reset (L) then
       Put_Line ("[身] 对方在开机前复位过一次(第一集开始)⇒ 清掉标记,接着量身体");
    end if;
    --  步幅先量(每条臂只要几拍):标定变长后开机会顶到一集的步数上限,对方复位打断的应该是后面能"量到几停算几停"的段,不是步幅
    --  (V1F/V1G 2026-09-24:两条臂都"复位打断,一档没试")
+   --  腕眼的焦距、朝向和不动的眼前半段已经量了(Geo_Install);这里只量前半段没量的:每条臂一条命令能走多远(步幅)、碰桌面量指尖
    Act.Geo_Boot_Stride (L, F, C);
-   Act.Geo_Boot_Eyes (L, F, C);      --  腕眼:转、探、走,多点连相机偏移一起解;不动的眼顺便记指尖
-   Act.Geo_Boot_Fixed (L, F, C);     --  不动的眼:拿记下的指尖观测连它的位姿、焦距、各臂指尖偏移一起解
    Act.Geo_Boot_Support (L, F, C);
    Put_Line ("[身] 身体量完 ⇒ 开始干活(脑在 " & To_String (C.Eye_Host) & ":" & Codec.Img (C.Eye_Port) & (if C.Look_Only then ",只看不动" else "") & ")");
    --  ── 干活循环 ──

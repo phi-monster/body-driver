@@ -198,6 +198,12 @@ begin
       end loop;
       Put_Line ("不动的眼:" & (if Has_World then "有(world_cam.bmp)" else "没有"));
    end;
-   Jointboot.Align (Ds, Worlds, Css, Host, Port, Rw, O, Ok, Fixed_Eye, Dump => Out_Dir);
+   declare
+      Board : Geom.Scene_Pt_Vectors.Vector;
+      Pp, Pn : Geom.V3;
+      Pr : Long_Float;
+   begin
+      Jointboot.Align (Ds, Worlds, Css, Host, Port, Rw, O, Ok, Fixed_Eye, Board, Pp, Pn, Pr, Dump => Out_Dir);
+   end;
    Put_Line (if Ok then "对齐做完(报告见上面 [身] 那几行;点对落盘在输出目录)" else "对齐没做成");
 end Alignexam;

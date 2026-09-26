@@ -883,7 +883,8 @@ package body Jointboot is
    Min_Inl : constant := 10;    --  至少 10 个内点才放进世界(次数)
 
    procedure Align (Ds : Sweep_Vectors.Vector; Worlds : in out Arm_World_Vectors.Vector; Css : Corr_Set_Vectors.Vector;
-                    Host : String; Port : Natural; Rw : out Geom.M3; O : out Geom.V3; Ok : out Boolean; Fixed_Eye : out Geom.Cam_Geo; Dump : String := "") is
+                    Host : String; Port : Natural; Rw : out Geom.M3; O : out Geom.V3; Ok : out Boolean; Fixed_Eye : out Geom.Cam_Geo;
+                    Board : out Geom.Scene_Pt_Vectors.Vector; Plane_Pt, Plane_N : out Geom.V3; Plane_Rms : out Long_Float; Dump : String := "") is
       use Geom;
       Max_Pts : constant := Gx * Gy;   --  每只手最多三角几个点(同扫描格点数,次数)
       T0 : constant Ada.Calendar.Time := Ada.Calendar.Clock;
@@ -894,6 +895,7 @@ package body Jointboot is
       Sig_Px : array (0 .. Natural'Max (1, Na) - 1) of Long_Float := [others => 0.0];   --  每只手自己配点的噪声(像素,Tri_Pts 量的;给它的三角点定不确定度)
       Placed : array (0 .. Natural'Max (1, Na) - 1) of Boolean := [others => False];
       Pl0, N0 : V3 := [0.0, 0.0, 1.0];  --  世界的桌面(第一只手系里)
+      Pl0_Md : Long_Float := 0.0;       --  第一只手三角出、拟合进桌面的点离面的中位
       --  世界里的眼
       type World_View is record
          Id : Integer := -1;
@@ -1837,6 +1839,7 @@ package body Jointboot is
       end Joint_Refine;
    begin
       Rw := Identity; O := [0.0, 0.0, 0.0]; Ok := False; Fixed_Eye := No_Geo;
+      Board.Clear; Plane_Pt := [0.0, 0.0, 0.0]; Plane_N := [0.0, 0.0, 1.0]; Plane_Rms := 0.0;
       if Worlds.Is_Empty or else not Worlds (0).Valid then
          return;
       end if;
@@ -1855,6 +1858,7 @@ package body Jointboot is
          Md : Long_Float;
       begin
          Plane_Of (Ps (0), Pl0, N0, Gates (0), Inl, Md);
+         Pl0_Md := Md;
          if Dist ([0.0, 0.0, 0.0], Pl0, N0) < 0.0 then
             N0 := [-N0 (0), -N0 (1), -N0 (2)];
          end if;
@@ -2229,6 +2233,66 @@ package body Jointboot is
          Fixed_Eye := G;
          Fixed_Eye.R_Ce := Mul (Rw, G.R_Ce);
          Fixed_Eye.Pos := Ap (Rw, [G.Pos (0) - O (0), G.Pos (1) - O (1), G.Pos (2) - O (2)]);
+      end if;
+      --  交给开机后半段:世界系的桌面(原点在桌面上、法向 +z,见上面定世界那一段),离散 = 离面中位换标准差
+      Plane_Pt := Ap (Rw, [Pl0 (0) - O (0), Pl0 (1) - O (1), Pl0 (2) - O (2)]);
+      Plane_N := Ap (Rw, N0);
+      Plane_Rms := 1.4826 * Pl0_Md;   --  正态下中位绝对偏差 → 标准差(统计常数,无量纲)
+      --  板:配进不动的眼的每个点(同一个点从几格配进来的,留往返差最小的那一笔),按一起精修以后的放法搬进世界;
+      --  每轴噪声 = 这一批往返差的中位 ÷ 1.1774(二维正态下距离的中位 = 1.1774 σ,统计常数)
+      if Fx_Placed and then not Cam_Obs.Is_Empty then
+         declare
+            package Sorting is new F64_Vectors.Generic_Sorting;
+            Es : Floats;
+            Sh : Long_Float;
+            package Key_Maps is new Ada.Containers.Vectors (Natural, Integer);
+            Best : array (0 .. Natural'Max (1, Na) - 1) of Key_Maps.Vector;
+         begin
+            for X of Cam_Obs loop
+               Es.Append (X.E);
+            end loop;
+            Sorting.Sort (Es);
+            Sh := Long_Float'Max (Es (Natural (Es.Length) / 2) / 1.1774, 1.0e-6);   --  数值保护(无量纲)
+            for A in 0 .. Na - 1 loop
+               Best (A) := Key_Maps.To_Vector (-1, Ada.Containers.Count_Type (Natural'Max (1, Natural (Ps (A).Length))));
+            end loop;
+            for I in 0 .. Natural (Cam_Obs.Length) - 1 loop
+               declare
+                  X : constant Cam_Ob := Cam_Obs (I);
+               begin
+                  if X.Pa < Na and then (X.Pa = 0 or else Placed (X.Pa)) and then X.Pk < Natural (Best (X.Pa).Length)
+                    and then (Best (X.Pa) (X.Pk) < 0 or else X.E < Cam_Obs (Natural (Best (X.Pa) (X.Pk))).E)
+                  then
+                     Best (X.Pa).Replace_Element (X.Pk, Integer (I));
+                  end if;
+               end;
+            end loop;
+            for A in 0 .. Na - 1 loop
+               for K in 0 .. Natural (Best (A).Length) - 1 loop
+                  if Best (A) (K) >= 0 then
+                     declare
+                        X : constant Cam_Ob := Cam_Obs (Natural (Best (A) (K)));
+                        Sa : constant Long_Float := (if A = 0 then 1.0 else Worlds (A).S);
+                        Ra : constant M3 := (if A = 0 then Identity else Worlds (A).Ra);
+                        Ta : constant V3 := (if A = 0 then [0.0, 0.0, 0.0] else Worlds (A).Ta);
+                        Rx : constant V3 := Ap (Ra, Ps (A) (K).X);
+                        X0 : constant V3 := [Sa * Rx (0) + Ta (0) - O (0), Sa * Rx (1) + Ta (1) - O (1), Sa * Rx (2) + Ta (2) - O (2)];
+                        Rc : constant M3 := Mul (Mul (Mul (Rw, Ra), Ps (A) (K).Cov), Tr (Mul (Rw, Ra)));
+                        Cw : M3;
+                     begin
+                        for I in 0 .. 2 loop
+                           for J in 0 .. 2 loop
+                              Cw (I, J) := Sa * Sa * Rc (I, J);
+                           end loop;
+                        end loop;
+                        Board.Append (Scene_Pt'(Pw => Ap (Rw, X0), Cov => Cw, U => X.U, V => X.V, Sh => Sh, Views => 2));
+                     end;
+                  end if;
+               end loop;
+            end loop;
+            Say ("交给开机后半段:板 " & Codec.Img (Natural (Board.Length)) & " 个点(配进不动的眼的,每轴噪声 " & Codec.Fmt (Sh, 2) & " px)· 桌面离散 "
+                 & Codec.Fmt (Plane_Rms, 4) & " 单位");
+         end;
       end if;
       if Dump /= "" then
          declare

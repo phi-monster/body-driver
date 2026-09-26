@@ -5878,6 +5878,37 @@ package body Act is
       end if;
    end Geo_Boot;
 
+   procedure Geo_Install (F : Plug.Frame; C : in out Context; Body_Path : String; Geo : Geom.Geo_Vectors.Vector; Board : Geom.Scene_Pt_Vectors.Vector;
+                          Plane_Pt, Plane_N : Geom.V3; Plane_Rms : Long_Float; Ref : Plug.Cam) is
+      pragma Unreferenced (F);
+   begin
+      C.Geo_Path := S (Body_Path & ".geo.json");
+      C.Geo := Geo;
+      C.Board := Board;
+      C.Board_Pt := Plane_Pt; C.Board_N := Plane_N; C.Board_Rms := Plane_Rms;
+      C.Board_Plane := not Board.Is_Empty;
+      C.Fixed_Ref := Ref.RGB; C.Fixed_Ref_W := Ref.W; C.Fixed_Ref_H := Ref.H;
+      C.Fixed_Best := 0;
+      for Cam in 0 .. Natural (C.Geo.Length) - 1 loop
+         declare
+            G : constant Geom.Cam_Geo := C.Geo (Cam);
+            A : constant Integer := Cam_Arm (C, Cam);
+         begin
+            if G.Fixed then
+               Geo_Say ("第" & Codec.Img (Cam) & " 台相机(不长在手上):焦距 " & Codec.Fmt (G.F, 1) & " px、在世界 (" & Codec.Fmt (G.Pos (0), 3) & ", " & Codec.Fmt (G.Pos (1), 3) & ", "
+                        & Codec.Fmt (G.Pos (2), 3) & ") 单位(开机前半段对齐量的)");
+            elsif A >= 0 and then G.Valid then
+               Geo_Say ("第" & Codec.Img (Cam) & " 台相机(长在第" & Codec.Img (Natural (A) + 1) & " 只手上):焦距 " & Codec.Fmt (G.F, 1) & " px(运动学量的)· 手的位姿就是它的位姿 · 指尖 待碰桌面量");
+            end if;
+         end;
+      end loop;
+      Geo_Say ("标定板 " & Codec.Img (Natural (C.Board.Length)) & " 个点(开机前半段三角出、配进不动的眼的)· 桌面 = 世界 z = 0、离散 " & Codec.Fmt (C.Board_Rms, 4)
+               & " 单位(长度单位 = 第一只手运动学的单位)");
+      if not C.Geo.Is_Empty then
+         Geom.Save (To_String (C.Geo_Path), C.Geo);
+      end if;
+   end Geo_Install;
+
    --  量相机朝向(R3c 2026-09-24):盯着眼里的东西,手先转几下、再走一条累计路径,每停记下眼里每个点在画面里的位置,回起点,多点一起解。
    --  横着挪只能量出 焦距/远近 的比(V1B/V1C/V1D 三次都撞在这上面:992 / 558 / 431,真 397);转一个已知角,像素位移 = 焦距 × 转角,和远近无关。
    --  盯谁、步子多大都是量出来的:候选 = 画幅中间那一半里不贴边、不是自己手指的每一块(V1E 实测:挑到下沿的东西下一步就出画面);
@@ -11737,7 +11768,7 @@ package body Act is
                   --  先往上探(离桌面远,安全);第一档往上就走不到(手在上限)⇒ 往下探。哪个方向走得到就记哪个
                   Dirs : constant array (1 .. 2) of Long_Float := [1.0, -1.0];
                begin
-                  Head_Mark (L, C, F, A);   --  原处一笔
+                  --  (09-27 起不再每停给不动的眼打指尖标记:不动的眼由开机前半段对齐量了,那些标记只给旧的标法用;一笔要合一次爪、约 11 拍)
                   for Dir of Dirs loop
                      exit when Best > 0.0;
                      for R of Rungs loop
@@ -11756,7 +11787,6 @@ package body Act is
                            Step_Arm (L, C, F, A, Av, Jaw, Del, Ok);
                            Got := Dir * Del (2);
                            Tried := Tried + 1;
-                           Head_Mark (L, C, F, A);   --  这一档的顶头一笔
                            Geo_Say ("第" & Codec.Img (A + 1) & " 只手:一条命令往" & (if Dir > 0.0 then "上 " else "下 ") & Mm (Ln) & " ⇒ 实到 " & Mm (Got));
                            declare
                               Back : Table.Vec := Table.Zero_Vec;
@@ -11769,40 +11799,6 @@ package body Act is
                         end;
                      end loop;
                   end loop;
-                  --  横着也探(前后左右各一段,4 / 16 档):一是量各方向能走多远,二是不动的眼要的是手在它视野里横着扫
-                  --  (G1Q 2026-09-24:手在头顶眼正下方,抬 30 cm 是沿它的视线动,画面只挪 28 px,652 笔观测也定不了它;横扫一次就是几百像素)
-                  declare
-                     Sides : constant array (1 .. 4) of Geom.V3 := [[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, -1.0, 0.0]];
-                  begin
-                     for Sd of Sides loop
-                        for R of Rungs (1 .. 2) loop
-                           if Plug.Reset_Pending (L) and then Plug.Take_Reset (L) then
-                              Geo_Say ("对方复位(新的一集)⇒ 手回了原处,接着探");
-                           end if;
-                           declare
-                              Ln : constant Long_Float := R * Amp;
-                              Av : Table.Vec := Table.Zero_Vec;
-                              Jaw : Floats;
-                              Del : Table.Vec;
-                              Ok : Boolean;
-                              Got : Long_Float;
-                           begin
-                              Av (0) := Sd (0) * Ln; Av (1) := Sd (1) * Ln;
-                              Step_Arm (L, C, F, A, Av, Jaw, Del, Ok);
-                              Got := Del (0) * Sd (0) + Del (1) * Sd (1);
-                              Head_Mark (L, C, F, A);   --  横着到头一笔
-                              Geo_Say ("第" & Codec.Img (A + 1) & " 只手:一条命令往 (" & Codec.Fmt (Sd (0), 0) & "," & Codec.Fmt (Sd (1), 0) & ") " & Mm (Ln) & " ⇒ 实到 " & Mm (Got));
-                              declare
-                                 Back : Table.Vec := Table.Zero_Vec;
-                              begin
-                                 Back (0) := -Del (0); Back (1) := -Del (1); Back (2) := -Del (2);
-                                 Step_Arm (L, C, F, A, Back, Jaw, Del, Ok);
-                              end;
-                              exit when Got + Got < Ln;
-                           end;
-                        end loop;
-                     end loop;
-                  end;
                   if Tried = 0 then
                      Geo_Say ("第" & Codec.Img (A + 1) & " 只手:步幅没量成(对方复位打断,一档都没试)⇒ 下次开机再量");
                   else

@@ -71,7 +71,12 @@ package Selfmap is
    function Picture_Still (M : Body_Map; Before, After : Plug.Cam; Cam : Natural) return Boolean;
    --  Eyes / World:开机前半段只用关节命令已经认出了"哪台相机长在哪只手上、哪台是世界相机"(Jointboot.Find_Arms)⇒ 照用,
    --  这里不再按位姿探针另认一遍(一个量一种量法);空 = 这里认
+   --  Step_Px:每只手"一步看得见"的幅度 = 在它自己那只眼里画面挪 1 像素(V1b 09-27;第 A 个 = [平移, 转动]:平移 = 眼离桌面的距离 ÷ 焦距,
+   --  转动 = 1 ÷ 焦距 弧度,开机前半段量的)。每个通道按它推一次再推回来:量走没走到(Delivered)、哪块跟着动(零件)。
+   --  原来从极小起翻倍、推过去推回来两张图都变了一块就算看见 —— V1B17 仿真渲染噪声下第 1 只手推 0.0003 单位(约 0.016 mm)就被噪声凑成"看见了"。
+   --  没有这一项的手(没量成运动学)⇒ 它的通道量不了
    procedure Measure (L : in out Plug.Link; F : in out Plug.Frame; M : out Body_Map; Ok : out Boolean;
+                      Step_Px : Plug.Floats_Vectors.Vector;
                       Eyes : Ints := Int_Vectors.Empty_Vector; World : Integer := -1);
    function Jaw_Of (F : Plug.Frame; Arm : Natural; K : Natural := 0) return Long_Float;
    function Jaw_Count (F : Plug.Frame; Arm : Natural) return Natural;   --  这条臂量到几个抓握通道
