@@ -263,15 +263,16 @@ package body Jointboot is
       Err : Unbounded_String;
       T0 : constant Ada.Calendar.Time := Ada.Calendar.Clock;
       S0 : constant Natural := Plug.Steps (L);
-      procedure Keep (A, J : Natural; Dd : Integer; K : Natural) is
+      Multi_J : constant := 99;   --  落盘时"几个关节一起动"的格子记成第 99 个关节(协议:只是个记号)
+      procedure Keep (A, J : Natural; Dd : Integer; K : Natural; Multi : Boolean := False) is
          Fo : Ada.Text_IO.File_Type;
          D : Sweep_Data := Ds (A);
          Sa : Arm_State renames St (A);
          Id : Integer;
       begin
-         D.Frames.Append (Kinem.Frame_Info'(Q => F.Joints (Sa.G), Joint => (if K = 0 then -1 else Integer (J))));
+         D.Frames.Append (Kinem.Frame_Info'(Q => F.Joints (Sa.G), Joint => (if K = 0 or else Multi then -1 else Integer (J))));
          D.Imgs.Append (F.Cams (Sa.Cam));
-         D.Runs.Append (if K = 0 then 0 else 1 + 2 * Integer (J) + (if Dd > 0 then 1 else 0));
+         D.Runs.Append (if Multi then 2 * Nj + 1 else (if K = 0 then 0 else 1 + 2 * Integer (J) + (if Dd > 0 then 1 else 0)));
          Ds.Replace_Element (A, D);
          --  存到仪器那边,起点 ↔ 这一格交给后台配
          Instrument.Frame_Put (Host, Port, F.Cams (Sa.Cam).RGB, Sa.W, Sa.H, Id, Err);
@@ -280,8 +281,9 @@ package body Jointboot is
             Jobs.Put ((A => A, I => 0, J => Natural (D.Frames.Length) - 1, Ia => Natural (Sa.Ids (0)), Ib => Natural (Id)));
             N_Jobs := N_Jobs + 1;
          end if;
-         --  每段头两格之间也配(转角小的对:每根轴单独起步时网格只用转角 ≤ 16° 的对;V1B5 只配起点 ↔ 每一格,两根轴没有够用的小转角对)
-         if K = 2 and then Id >= 0 and then Natural (Sa.Ids.Length) >= 2 and then Sa.Ids (Natural (Sa.Ids.Length) - 2) >= 0 then
+         --  每段头两格之间也配(转角小的对:每根轴单独起步时网格只用转角 ≤ 16° 的对;V1B5 只配起点 ↔ 每一格,两根轴没有够用的小转角对);
+         --  几个关节一起动的格子:相邻两格也配
+         if (K = 2 or else (Multi and then K >= 2)) and then Id >= 0 and then Natural (Sa.Ids.Length) >= 2 and then Sa.Ids (Natural (Sa.Ids.Length) - 2) >= 0 then
             Jobs.Put ((A => A, I => Natural (D.Frames.Length) - 2, J => Natural (D.Frames.Length) - 1,
                        Ia => Natural (Sa.Ids (Natural (Sa.Ids.Length) - 2)), Ib => Natural (Id)));
             N_Jobs := N_Jobs + 1;
@@ -299,7 +301,8 @@ package body Jointboot is
             exception
                when others => Ada.Text_IO.Create (Fo, Ada.Text_IO.Out_File, Dump & "/sweep.txt");
             end;
-            Ada.Text_IO.Put (Fo, Nm & " " & Codec.Img (A) & " " & Codec.Img (J) & " " & Codec.Img (Dd) & " " & Codec.Img (K) & " " & Codec.Img (Plug.Steps (L)));
+            Ada.Text_IO.Put (Fo, Nm & " " & Codec.Img (A) & " " & Codec.Img (if Multi then Multi_J else J) & " " & Codec.Img (Dd) & " " & Codec.Img (K) & " "
+                             & Codec.Img (Plug.Steps (L)));
             for Qg of F.Joints loop
                Ada.Text_IO.Put (Fo, " |");
                for X of Qg loop
@@ -497,6 +500,77 @@ package body Jointboot is
             end if;
          end loop;
       end loop;
+      --  ② 几个关节一起动的 8 格(次数):每个关节转到它这次扫到过的那一头的一半(正负按格子号排开),每格和起点、和上一格配。
+      --  只一个关节一个关节扫,各轴离眼远近的比例只靠相邻关节头一格那几对连,约束太弱:V1B6 / V1B8 驱动自己解的运动学在扫描格上
+      --  中位 4–8 mm、最大 26–116 mm(像素残差却只有 0.2 px)。V1B2 离线能过线,靠的是板停 —— 几个关节一起动的姿势把各轴的比例绑在一起
+      declare
+         Lo, Hi : array (0 .. Natural'Max (1, Na) - 1) of Floats;
+      begin
+         for A in 0 .. Na - 1 loop
+            if St (A).Live then
+               for Jx in 0 .. Natural (St (A).Q0.Length) - 1 loop
+                  Lo (A).Append (St (A).Q0 (Jx)); Hi (A).Append (St (A).Q0 (Jx));
+               end loop;
+               for Fr of Ds (A).Frames loop
+                  for Jx in 0 .. Natural'Min (Natural (Fr.Q.Length), Natural (Lo (A).Length)) - 1 loop
+                     Lo (A).Replace_Element (Jx, Long_Float'Min (Lo (A) (Jx), Fr.Q (Jx)));
+                     Hi (A).Replace_Element (Jx, Long_Float'Max (Hi (A) (Jx), Fr.Q (Jx)));
+                  end loop;
+               end loop;
+            end if;
+         end loop;
+         for Cb in 1 .. 8 loop
+            declare
+               Tol : Long_Float := Long_Float'Last;
+            begin
+               for A in 0 .. Na - 1 loop
+                  if St (A).Live then
+                     for Jx in 0 .. Natural (St (A).Q0.Length) - 1 loop
+                        declare
+                           --  正负按格子号和关节号排开(确定的,不随机):(格子号 × 37 + 关节号 × 11) 除以 16 的余数前一半为正(次数,只是排列)
+                           Up : constant Boolean := ((Cb * 37 + Jx * 11) mod 16) < 8;
+                           Tq : constant Long_Float :=
+                             (if Up then St (A).Q0 (Jx) + 0.5 * (Hi (A) (Jx) - St (A).Q0 (Jx)) else St (A).Q0 (Jx) - 0.5 * (St (A).Q0 (Jx) - Lo (A) (Jx)));
+                           Dq_Now : constant Long_Float := abs (Tq - St (A).Tgt (Jx));
+                        begin
+                           St (A).Tgt.Replace_Element (Jx, Tq);
+                           if Dq_Now > 0.0 then
+                              Tol := Long_Float'Min (Tol, Dq_Now * Third);
+                           end if;
+                        end;
+                     end loop;
+                  end if;
+               end loop;
+               Move_All ((if Tol < Long_Float'Last then Tol else 0.0));
+               exit when not Okc;
+               for A in 0 .. Na - 1 loop
+                  if St (A).Live then
+                     declare
+                        Miss : Long_Float := 0.0;
+                        Span : Long_Float := 0.0;
+                     begin
+                        for Jx in 0 .. Natural (St (A).Q0.Length) - 1 loop
+                           Miss := Long_Float'Max (Miss, abs (F.Joints (St (A).G) (Jx) - St (A).Tgt (Jx)));
+                           Span := Long_Float'Max (Span, abs (St (A).Tgt (Jx) - St (A).Q0 (Jx)));
+                        end loop;
+                        --  有关节没跟上(差超过它这次要走的三分之一 = 碰上东西 / 到头,比例同上)⇒ 这一格不要
+                        if 3.0 * Miss <= Span then
+                           Keep (A, 0, 0, Cb, Multi => True);   --  起点 ↔ 这一格、上一格 ↔ 这一格都在 Keep 里交给配点
+                        else
+                           Say ("  第" & Codec.Img (A + 1) & " 只手几个关节一起动的第" & Codec.Img (Cb) & " 格:有关节没跟上(差 " & Codec.Fmt (Miss, 4) & ")⇒ 不要这一格");
+                        end if;
+                     end;
+                  end if;
+               end loop;
+            end;
+         end loop;
+         for A in 0 .. Na - 1 loop
+            if St (A).Live then
+               St (A).Tgt := St (A).Q0;
+            end if;
+         end loop;
+         Move_All (0.0);
+      end;
       --  相邻关节头一格之间也配(各轴离眼远近的比例要一根接一根连起来)
       for A in 0 .. Na - 1 loop
          if St (A).Live then
@@ -556,6 +630,21 @@ package body Jointboot is
                      Kept.Append (C);
                   end if;
                end loop;
+               if Dump /= "" then
+                  --  配点落盘(corrs_arm<k>.txt:每行 I J Ua Va Ub Vb,帧号同 sweep.txt 里这只手的格子顺序):离线回放解法用
+                  declare
+                     Fo : Ada.Text_IO.File_Type;
+                  begin
+                     Ada.Text_IO.Create (Fo, Ada.Text_IO.Out_File, Dump & "/corrs_arm" & Codec.Img (A) & ".txt");
+                     for C of Kept loop
+                        Ada.Text_IO.Put_Line (Fo, Codec.Img (C.I) & " " & Codec.Img (C.J) & " " & Codec.Fmt (C.Ua, 3) & " " & Codec.Fmt (C.Va, 3) & " "
+                                              & Codec.Fmt (C.Ub, 3) & " " & Codec.Fmt (C.Vb, 3));
+                     end loop;
+                     Ada.Text_IO.Close (Fo);
+                  exception
+                     when others => null;
+                  end;
+               end if;
                Say ("  第" & Codec.Img (A + 1) & " 只手:扫了 " & Codec.Img (Natural (D.Frames.Length)) & " 格;跟着眼一起动的格子(手指)" & Codec.Img (N_Self) & " / "
                     & Codec.Img (Gx * Gy) & ";配点 " & Codec.Img (Natural (Kept.Length)) & " / " & Codec.Img (Natural (Res (A).Length)) & " 个留下");
                Ds.Replace_Element (A, D);
