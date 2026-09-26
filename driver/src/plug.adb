@@ -513,12 +513,24 @@ package body Plug is
       --  身体也报位姿,但开机量胳膊要一个关节一个关节地转(V1b,2026-09-26):发一条【只有关节】的动作。
       --  每个不同名字的关节组发一份(名字相同的读数组 / 命令回声组只发一次,取第一个):C.Group 那一组的名字发 C.Q,其余照此刻的读数保持;
       --  抓握通道同样按名字去重、照此刻的读数保持。一条动作里只有关节这一类,不混位姿(对方按键名认动作类型)
-      if C.Kind = Joint and then not Joint_Mode (L) and then C.Group >= 0 then
+      if C.Kind = Joint and then not Joint_Mode (L) and then (C.Group >= 0 or else not C.Groups.Is_Empty) then
          if C.Group >= Natural (L.Lay.Joints.Length) then
             return False;
          end if;
          declare
-            Target : constant String := Layout.Last_Seg (L.Lay.Joints (C.Group));
+            Target : constant String := (if C.Group >= 0 then Layout.Last_Seg (L.Lay.Joints (C.Group)) else "");
+            --  这个名字的关节组在 C.Groups 里排第几(-1 = 不在)
+            function In_Groups (Nm : String) return Integer is
+            begin
+               for K in 0 .. Natural (C.Groups.Length) - 1 loop
+                  if C.Groups (K) >= 0 and then C.Groups (K) < Natural (L.Lay.Joints.Length)
+                    and then Layout.Last_Seg (L.Lay.Joints (Natural (C.Groups (K)))) = Nm and then K < Natural (C.Qs.Length)
+                  then
+                     return Integer (K);
+                  end if;
+               end loop;
+               return -1;
+            end In_Groups;
             J_Names, W_Names : Strs;
             J_First, W_First : Ints;
             function Has (V : Strs; X : String) return Boolean is
@@ -545,7 +557,8 @@ package body Plug is
             for K in 0 .. Natural (J_Names.Length) - 1 loop
                Put_Str (S, J_Names (K));
                declare
-                  Q : constant Floats := (if J_Names (K) = Target then C.Q else Nums_At (L, L.Lay.Joints (J_First (K))));
+                  Kg : constant Integer := In_Groups (J_Names (K));
+                  Q : constant Floats := (if Kg >= 0 then C.Qs (Natural (Kg)) elsif J_Names (K) = Target then C.Q else Nums_At (L, L.Lay.Joints (J_First (K))));
                begin
                   Put_Array (S, Natural (Q.Length));
                   for X of Q loop
@@ -584,12 +597,21 @@ package body Plug is
             declare
                --  发给第几组:给了 Group 就按它(开机前半段按读数组认手,V1b 3c),没给按臂
                Tg : constant Natural := (if C.Group >= 0 then Natural (C.Group) else C.Arm);
-               Q : constant Floats := (if I = Tg then C.Q else Nums_At (L, L.Lay.Joints (I)));
+               Kg : Integer := -1;
             begin
-               Put_Array (S, Natural (Q.Length));
-               for X of Q loop
-                  Put_Float (S, X);
+               for K in 0 .. Natural'Min (Natural (C.Groups.Length), Natural (C.Qs.Length)) - 1 loop
+                  if C.Groups (K) = I then
+                     Kg := Integer (K);
+                  end if;
                end loop;
+               declare
+                  Q : constant Floats := (if Kg >= 0 then C.Qs (Natural (Kg)) elsif C.Groups.Is_Empty and then I = Tg then C.Q else Nums_At (L, L.Lay.Joints (I)));
+               begin
+                  Put_Array (S, Natural (Q.Length));
+                  for X of Q loop
+                     Put_Float (S, X);
+                  end loop;
+               end;
             end;
          else
             Put_Str (S, Layout.Last_Seg (L.Lay.EE (I)));

@@ -77,21 +77,34 @@ package body Selfmap is
 
    procedure Go (L : in out Plug.Link; M : Body_Map; Arm : Natural; Target : Plug.Arm_Pose; Jaw : Floats;
                  F : in out Plug.Frame; Delivered : out Table.Vec; Frames : out Natural; Ok : out Boolean; Quick : Boolean := False;
-                 Watch : Watcher := null; Joints : Floats := F64_Vectors.Empty_Vector; Group : Integer := -1) is
+                 Watch : Watcher := null; Joints : Floats := F64_Vectors.Empty_Vector; Group : Integer := -1;
+                 Groups : Ints := Int_Vectors.Empty_Vector; Qs : Plug.Floats_Vectors.Vector := Plug.Floats_Vectors.Empty_Vector;
+                 Tol : Long_Float := 0.0) is
       C : Plug.Cmd;
       P0 : constant Plug.Arm_Pose := (if Arm < Natural (F.EE.Length) then F.EE (Arm) else [others => 0.0]);
       Prev : Plug.Arm_Pose := P0;
       Still : Natural := 0;
       Send : Boolean := True;
       Halted : Boolean := False;
-      Prev_Q : Floats := (if Group >= 0 and then Group < Natural (F.Joints.Length) then F.Joints (Group) else F64_Vectors.Empty_Vector);
+      --  关节目标:看哪几组读数、各自的目标
+      W_G : Ints;
+      W_Q : Plug.Floats_Vectors.Vector;
+      Prev_All : Plug.Floats_Vectors.Vector;
+      Is_Joint : constant Boolean := Group >= 0 or else not Groups.Is_Empty;
    begin
       Delivered := Table.Zero_Vec;
       Frames := 0;
       C.Kind := Plug.Ee; C.Arm := Arm; C.Pose := Target; C.Jaw := Jaw;
-      if Group >= 0 then
+      if not Groups.Is_Empty then
+         C.Kind := Plug.Joint; C.Groups := Groups; C.Qs := Qs;
+         W_G := Groups; W_Q := Qs;
+      elsif Group >= 0 then
          C.Kind := Plug.Joint; C.Q := Joints; C.Group := Group;
+         W_G.Append (Group); W_Q.Append (Joints);
       end if;
+      for G of W_G loop
+         Prev_All.Append (if G >= 0 and then G < Natural (F.Joints.Length) then F.Joints (Natural (G)) else F64_Vectors.Empty_Vector);
+      end loop;
       loop
          if Send then
             Ok := Plug.Act (L, C);
@@ -105,29 +118,39 @@ package body Selfmap is
             return;
          end if;
          Frames := Frames + 1;
-         --  关节目标(Group >= 0):"停稳"看这一组关节读数(不看位姿:只报关节的身体没有位姿读数)
-         if Group >= 0 and then Group < Natural (F.Joints.Length) then
+         --  关节目标:"停稳"看这几组关节读数(不看位姿:只报关节的身体没有位姿读数)。
+         --  到了目标附近(差 ≤ Tol,调用方按这一格的步子定)再有一拍不动 ⇒ 到了;没到目标就等连着两拍不动(被顶住 / 到头)
+         --  (5 分钟一炮,2026-09-26:原来每格都等"连着两拍不动 + 量出来的稳定拍数",V1B3 扫描一格 9 拍)
+         if Is_Joint then
             declare
-               Moved : Long_Float := 0.0;
+               Moved, Miss : Long_Float := 0.0;
             begin
-               if Natural (Prev_Q.Length) = Natural (F.Joints (Group).Length) then
-                  for K in 0 .. Natural (Prev_Q.Length) - 1 loop
-                     Moved := Long_Float'Max (Moved, abs (F.Joints (Group) (K) - Prev_Q (K)));
-                  end loop;
-                  Still := (if Moved <= M.Joint_Noise then Still + 1 else 0);
-               end if;
-               Prev_Q := F.Joints (Group);
+               for Gi in 0 .. Natural (W_G.Length) - 1 loop
+                  declare
+                     G : constant Integer := W_G (Gi);
+                  begin
+                     if G >= 0 and then G < Natural (F.Joints.Length) and then Natural (Prev_All (Gi).Length) = Natural (F.Joints (Natural (G)).Length) then
+                        for K in 0 .. Natural (Prev_All (Gi).Length) - 1 loop
+                           Moved := Long_Float'Max (Moved, abs (F.Joints (Natural (G)) (K) - Prev_All (Gi) (K)));
+                           if K < Natural (W_Q (Gi).Length) then
+                              Miss := Long_Float'Max (Miss, abs (F.Joints (Natural (G)) (K) - W_Q (Gi) (K)));
+                           end if;
+                        end loop;
+                        Prev_All.Replace_Element (Gi, F.Joints (Natural (G)));
+                     end if;
+                  end;
+               end loop;
+               Still := (if Moved <= M.Joint_Noise then Still + 1 else 0);
+               exit when (Tol > 0.0 and then Miss <= Tol and then Still >= 1) or else (Still >= 2 and then Frames >= M.Settle)
+                 or else Frames >= 12 + M.Settle or else (Quick and then Frames >= M.Settle);
             end;
-            exit when (Still >= 2 and then Frames >= M.Settle) or else Frames >= 12 + M.Settle or else (Quick and then Frames >= M.Settle);
          else
          exit when Arm >= Natural (F.EE.Length);
          --  途中每一拍看一眼:出事就把目标改成"停在此刻的位姿",同一条发命令的路再发一次
          if Watch /= null and then not Halted and then Watch (F) then
             Halted := True;
             C.Pose := F.EE (Arm);
-            if Group >= 0 and then Group < Natural (F.Joints.Length) then
-               C.Q := F.Joints (Group);
-            end if;
+
             Send := True;
             Still := 0;
          end if;

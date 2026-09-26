@@ -182,19 +182,38 @@ package body Kinem is
       return Samp (Rij, Tij, M.F, M.Cx, M.Cy, C);
    end Res_Cached;
 
-   --  每一对最多留 K 个配点(配点按对挨着放)
+   --  配点按对挨着放:每个配点在它那一对里排第几、那一对一共几个
+   procedure Pair_Pos (Cs : Corr_Vectors.Vector; Pos, Size : out Nat_Vectors.Vector) is
+      Start : Natural := 0;
+   begin
+      Pos.Clear; Size.Clear;
+      for K in 0 .. Natural (Cs.Length) - 1 loop
+         if K > 0 and then (Cs (K).I /= Cs (K - 1).I or else Cs (K).J /= Cs (K - 1).J) then
+            for X in Start .. K - 1 loop
+               Size.Append (K - Start);
+            end loop;
+            Start := K;
+         end if;
+         Pos.Append (K - Start);
+      end loop;
+      for X in Start .. Natural (Cs.Length) - 1 loop
+         Size.Append (Natural (Cs.Length) - Start);
+      end loop;
+   end Pair_Pos;
+   --  这一对里要不要这个(一对最多 K 个,在对里均匀隔着取 —— 格点是一行一行排的,取前 K 个就全挤在画面最上面几行)
+   function Take (Pos, Size, K : Natural) return Boolean is
+      Stride : constant Positive := Positive'Max (1, (Size + K - 1) / Natural'Max (1, K));
+   begin
+      return Pos mod Stride = 0 and then Pos / Stride < K;
+   end Take;
    function Thin (Cs : Corr_Vectors.Vector; K : Natural) return Corr_Vectors.Vector is
       Out_Cs : Corr_Vectors.Vector;
-      Li, Lj : Natural := Natural'Last;
-      Cnt : Natural := 0;
+      Pos, Size : Nat_Vectors.Vector;
    begin
-      for C of Cs loop
-         if C.I /= Li or else C.J /= Lj then
-            Li := C.I; Lj := C.J; Cnt := 0;
-         end if;
-         if Cnt < K then
-            Out_Cs.Append (C);
-            Cnt := Cnt + 1;
+      Pair_Pos (Cs, Pos, Size);
+      for I in 0 .. Natural (Cs.Length) - 1 loop
+         if Take (Pos (I), Size (I), K) then
+            Out_Cs.Append (Cs (I));
          end if;
       end loop;
       return Out_Cs;
@@ -608,7 +627,8 @@ package body Kinem is
    N_Sph : constant := 3000;       --  轴方向网格点数(次数;相邻约 3.7°)
    Grid_Rad : constant := 0.279252680319093;   --  网格只用两帧之间转角 ≤ 16°(= 0.2793 弧度)的配点(协议:坑宽 —— 转角大的对坑太窄,网格点落不进去,LAB 09-26)
    Per_Pair_Grid : constant := 30; --  网格上每一对最多取几个配点(次数)
-   Per_Pair_All : constant := 200; --  精修 / 定比例时每一对最多取几个配点(次数;最后一起解用全部内点)
+   Per_Pair_All : constant := 200; --  精修 / 定比例时每一对最多取几个配点(次数)
+   Per_Pair_BA : constant := 60;   --  最后一起解时每一对最多取几个内点(次数)
 
    procedure Fit (Frames : Frame_Vectors.Vector; Ref : Natural; Cs : Corr_Vectors.Vector; Cx, Cy, Width : Long_Float;
                   M : out Model; Rep : out Fit_Report; Ok : out Boolean) is
@@ -668,30 +688,23 @@ package body Kinem is
       Dmax := 1.0 / Fg (Fg'Last);
       --  配点分到各根轴
       declare
-         Cnt : array (0 .. Max_Joints - 1) of Natural := [others => 0];
-         Cnt_All : array (0 .. Max_Joints - 1) of Natural := [others => 0];
-         Last_Pair : array (0 .. Max_Joints - 1) of Natural := [others => Natural'Last];
+         Pos, Size : Nat_Vectors.Vector;
       begin
+         Pair_Pos (Cs, Pos, Size);
          for Ci in 0 .. Natural (Cs.Length) - 1 loop
             declare
                C : constant Corr := Cs (Ci);
-               Key : constant Natural := C.I * Nf + C.J;
             begin
                for J in 0 .. N - 1 loop
                   if Clean (C.I, J) and then Clean (C.J, J) and then (Frames (C.I).Joint = Integer (J) or else Frames (C.J).Joint = Integer (J)) then
                      declare
                         R : constant Jc_Rec := (Ta => Dq (C.I, J), Tb => Dq (C.J, J), C => C);
                      begin
-                        if Last_Pair (J) /= Key then
-                           Last_Pair (J) := Key; Cnt (J) := 0; Cnt_All (J) := 0;
-                        end if;
-                        if Cnt_All (J) < Per_Pair_All then
+                        if Take (Pos (Ci), Size (Ci), Per_Pair_All) then
                            Js (J).Append (R);
-                           Cnt_All (J) := Cnt_All (J) + 1;
                         end if;
-                        if abs (R.Ta - R.Tb) <= Grid_Rad and then Cnt (J) < Per_Pair_Grid then
+                        if abs (R.Ta - R.Tb) <= Grid_Rad and then Take (Pos (Ci), Size (Ci), Per_Pair_Grid) then
                            Jg (J).Append (R);
-                           Cnt (J) := Cnt (J) + 1;
                         end if;
                      end;
                   end if;
@@ -1049,6 +1062,8 @@ package body Kinem is
                end loop;
                Free (R);
             end;
+            --  一起解的时候每一对最多 Per_Pair_BA 个(均匀隔着取;5 分钟一炮:V1B3 一起解用了 11 万个配点、75–146 秒)
+            Inl := Thin (Inl, Per_Pair_BA);
             Rep.N_Used := Natural (Inl.Length);
             if Inl.Is_Empty then
                return;

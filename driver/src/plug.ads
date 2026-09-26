@@ -38,6 +38,8 @@ package Plug is
       Pose : Arm_Pose := [others => 0.0];   --  Ee:绝对位姿
       Jaw : Floats;                          --  这条臂全部抓握通道的目标(空 = 保持读数)
       Q : Floats;                            --  Joint:这一组的绝对关节角
+      Groups : Ints;                         --  Joint:一条命令同时给几组关节读数的目标(开机几只手一起扫,V1b 2026-09-26);空 = 只看 Group / Arm
+      Qs : Floats_Vectors.Vector;            --  和 Groups 一一对应:每组的绝对关节角
       Group : Integer := -1;                 --  Joint 且身体也报位姿时:Q 是第几组关节读数(Lay.Joints 里的下标)的目标;
                                              --  开机量胳膊一个关节一个关节转用(V1b,2026-09-26)。-1 = 按臂(只报关节的身体)
       V : Floats;                            --  Base:速度

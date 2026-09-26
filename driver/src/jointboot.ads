@@ -9,6 +9,7 @@ with Kinem;
 with Geom;
 with Bytes; use Bytes;
 with Ada.Containers.Vectors;
+with Ada.Strings.Unbounded;
 package Jointboot is
    type Arm_Info is record
       Group : Natural := 0;          --  这只手的关节读数是第几组(F.Joints 的下标)
@@ -16,6 +17,7 @@ package Jointboot is
       Frac : Floats;                 --  这只手一动,每台相机变了多少画面(比例)
       Probe : Long_Float := 0.0;     --  认出来时每个关节一起转了多少(读数的单位)
       Echoes : Ints;                 --  跟着一起变的别的组(回声)
+      Moved : Bools;                 --  认出来那一下,它的眼里动过的像素(W × H;没动的 = 跟着眼一起动的手指 / 空白 ⇒ 跟点不往那儿铺)
    end record;
    package Arm_Vectors is new Ada.Containers.Vectors (Natural, Arm_Info);
 
@@ -30,15 +32,20 @@ package Jointboot is
       Mask : Bools;                          --  手指遮罩(W × H,按行;是 = 整段扫描里一次都没变过)
       W, H : Natural := 0;
    end record;
+   package Sweep_Vectors is new Ada.Containers.Vectors (Natural, Sweep_Data);
+   package Corr_Set_Vectors is new Ada.Containers.Vectors (Natural, Kinem.Corr_Vectors.Vector, Kinem.Corr_Vectors."=");
 
-   --  ② 关节扫描(一只手)。Host / Port = 配点仪器(量每格画面挪了多少,按它放大 / 缩小下一格);Dump 非空 = 落盘 sweep_*.bmp + sweep.txt
-   procedure Sweep_Arm (L : in out Plug.Link; F : in out Plug.Frame; M : Selfmap.Body_Map; A : Natural; Info : Arm_Info;
-                        Host : String; Port : Natural; Dump : String; N_Img : in out Natural; D : out Sweep_Data);
+   --  ② 关节扫描:有眼的几只手同时扫(一条命令带几组目标),每个关节两个方向一格一格转;到头 / 被顶住 / 别的关节被顶偏 / 走满 8 格就停,转回起点。
+   --  每一段开头在每只手的眼里铺一片格点(认出来那一下动过的像素里)交给跟点仪器,每一格问一次它们到哪了:
+   --  配点(起点 ↔ 每一格、相邻两格、不同关节头两格之间)全从这批格点来,每格画面挪了多少也从它读(按它放大 / 缩小下一格)。
+   --  Host / Port = 仪器;Dump 非空 = 落盘 sweep_*.bmp + sweep.txt。Ds / Css 和 Arms 里有眼的手一一对应(没眼的那只 Ds 空)
+   procedure Sweep_All (L : in out Plug.Link; F : in out Plug.Frame; M : Selfmap.Body_Map; Arms : Arm_Vectors.Vector;
+                        Host : String; Port : Natural; Dump : String; Ds : out Sweep_Vectors.Vector; Css : out Corr_Set_Vectors.Vector);
 
-   --  ④ 这只手的运动学:扫描的格子两两配点(起点 ↔ 每一格、同一段相邻两格、关节读数上最近的 4 格)+ Kinem.Fit。
-   --  配点:格点(遮罩外)在另一张里在哪,再配回来 —— 回不到原处的不要(A → B → A,门 = 全部往返差的中位数的 3 倍:按这一次量出来的配点噪声)
-   procedure Fit_Arm (A : Natural; D : Sweep_Data; Host : String; Port : Natural; Dump : String;
-                      M : out Kinem.Model; Cs : out Kinem.Corr_Vectors.Vector; Ok : out Boolean);
+   --  ④ 这只手的运动学:Kinem.Fit(配点来自扫描时的跟点;手指遮罩里的不要)
+   --  Note = 这一步的报告(几只手各开一个线程同时解 ⇒ 不在这里打印,解完由调用方按顺序打)
+   procedure Fit_Arm (A : Natural; D : Sweep_Data; Cs : Kinem.Corr_Vectors.Vector; Dump : String; M : out Kinem.Model; Ok : out Boolean;
+                      Note : out Ada.Strings.Unbounded.Unbounded_String);
 
    --  ⑤ 世界:每只手的运动学在它自己参照读数时那只眼的系里 ⇒ 用两只眼都看得见的桌面点对齐(各自三角、跨手配点、相似变换);
    --  "上" = 桌面法向(朝第一只手的眼那边),原点 = 第一只手参照眼在桌面上的垂足,x = 那只眼的 x 轴投到桌面上;长度单位 = 第一只手的模型单位
@@ -52,8 +59,6 @@ package Jointboot is
       Valid : Boolean := False;
    end record;
    package Arm_World_Vectors is new Ada.Containers.Vectors (Natural, Arm_World);
-   package Sweep_Vectors is new Ada.Containers.Vectors (Natural, Sweep_Data);
-   package Corr_Set_Vectors is new Ada.Containers.Vectors (Natural, Kinem.Corr_Vectors.Vector, Kinem.Corr_Vectors."=");
    procedure Align (Ds : Sweep_Vectors.Vector; Worlds : in out Arm_World_Vectors.Vector; Css : Corr_Set_Vectors.Vector;
                     Host : String; Port : Natural; Rw : out Geom.M3; O : out Geom.V3; Ok : out Boolean);
 

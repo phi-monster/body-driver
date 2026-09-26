@@ -1,6 +1,7 @@
 --  body_driver --listen <口> [--eye host:port]:装上之后跑的唯一一条命令。
 --  开机:认布局 → 量身体(逐通道推、合空)→ 循环:看 → 列块 → 问脑 → 执行 → 报。不读不写任何标定文件。
 with Ada.Text_IO; use Ada.Text_IO;
+with Ada.Calendar;
 with Ada.Command_Line;
 with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
 with Ada.Strings.Fixed;
@@ -112,7 +113,6 @@ begin
       Css : Jointboot.Corr_Set_Vectors.Vector;
       Rw : Geom.M3;
       O : Geom.V3;
-      N_Img : Natural := 0;
       Host : constant String := To_String (C.Inst_Host);
       Dump : constant String := To_String (C.Dump_Dir);
    begin
@@ -128,38 +128,67 @@ begin
          Put_Line ("[身] 只用关节命令认不出一只手,量不了身体,退出");
          return;
       end if;
-      for A in 0 .. Natural (Found.Length) - 1 loop
-         declare
-            D : Jointboot.Sweep_Data;
-            M : Kinem.Model;
-            Cs : Kinem.Corr_Vectors.Vector;
-            Okf : Boolean := False;
-            W : Jointboot.Arm_World;
+      --  有眼的几只手同时扫(一条命令带几组目标),扫的时候跟点仪器一路跟
+      Jointboot.Sweep_All (L, F, M0, Found, Host, C.Inst_Port, Dump, Ds, Css);
+      --  每只手各自解运动学(两只手的解互不相干 ⇒ 一只手一个线程)
+      declare
+         Ms : array (0 .. Natural (Found.Length) - 1) of Kinem.Model;
+         Oks : array (0 .. Natural (Found.Length) - 1) of Boolean := [others => False];
+         Notes : array (0 .. Natural (Found.Length) - 1) of Unbounded_String;
+         --  解一只手的运动学要几百 KB 的栈(各轴的候选表)⇒ 每个线程给 64 MB(次数)
+         task type Fit_Task with Storage_Size => 64 * 1024 * 1024 is
+            entry Start (A : Natural);
+         end Fit_Task;
+         task body Fit_Task is
+            Aa : Natural := 0;
          begin
-            W.Group := Found (A).Group;
-            if Found (A).Eye >= 0 then
-               Jointboot.Sweep_Arm (L, F, M0, A, Found (A), Host, C.Inst_Port, Dump, N_Img, D);
-               Jointboot.Fit_Arm (A, D, Host, C.Inst_Port, Dump, M, Cs, Okf);
-               --  反解只在扫描实际到过的范围里解(只去量过的地方)
-               for J in 0 .. Natural (D.Frames (0).Q.Length) - 1 loop
-                  declare
-                     Lo : Long_Float := Long_Float'Last;
-                     Hi : Long_Float := Long_Float'First;
-                  begin
-                     for Fr of D.Frames loop
-                        Lo := Long_Float'Min (Lo, Fr.Q (J)); Hi := Long_Float'Max (Hi, Fr.Q (J));
-                     end loop;
-                     W.Lo.Append (Lo); W.Hi.Append (Hi);
-                  end;
-               end loop;
-            else
-               Put_Line ("[身] 📐 第" & Codec.Img (A + 1) & " 只手上没有眼 ⇒ 这一版量不了它的运动学(要一只看得见它的眼),先不用");
+            accept Start (A : Natural) do
+               Aa := A;
+            end Start;
+            if Found (Aa).Eye >= 0 and then not Ds (Aa).Frames.Is_Empty then
+               Jointboot.Fit_Arm (Aa, Ds (Aa), Css (Aa), Dump, Ms (Aa), Oks (Aa), Notes (Aa));
             end if;
-            W.Model := M;
-            W.Valid := Okf;
-            Ds.Append (D); Css.Append (Cs); Worlds.Append (W);
+         end Fit_Task;
+         T0 : constant Ada.Calendar.Time := Ada.Calendar.Clock;
+      begin
+         declare
+            Workers : array (0 .. Natural (Found.Length) - 1) of Fit_Task;
+         begin
+            for A in Workers'Range loop
+               Workers (A).Start (A);
+            end loop;
          end;
-      end loop;
+         for A in Notes'Range loop
+            Put (To_String (Notes (A)));
+         end loop;
+         Put_Line ("[身] 📐 运动学解完(" & Codec.Fmt (Long_Float (Ada.Calendar."-" (Ada.Calendar.Clock, T0)), 0) & " 秒)");
+         for A in 0 .. Natural (Found.Length) - 1 loop
+            declare
+               W : Jointboot.Arm_World;
+            begin
+               W.Group := Found (A).Group;
+               W.Model := Ms (A);
+               W.Valid := Oks (A);
+               if Found (A).Eye < 0 then
+                  Put_Line ("[身] 📐 第" & Codec.Img (A + 1) & " 只手上没有眼 ⇒ 这一版量不了它的运动学(要一只看得见它的眼),先不用");
+               elsif not Ds (A).Frames.Is_Empty then
+                  --  反解只在扫描实际到过的范围里解(只去量过的地方)
+                  for J in 0 .. Natural (Ds (A).Frames (0).Q.Length) - 1 loop
+                     declare
+                        Lo : Long_Float := Long_Float'Last;
+                        Hi : Long_Float := Long_Float'First;
+                     begin
+                        for Fr of Ds (A).Frames loop
+                           Lo := Long_Float'Min (Lo, Fr.Q (J)); Hi := Long_Float'Max (Hi, Fr.Q (J));
+                        end loop;
+                        W.Lo.Append (Lo); W.Hi.Append (Hi);
+                     end;
+                  end loop;
+               end if;
+               Worlds.Append (W);
+            end;
+         end loop;
+      end;
       Jointboot.Align (Ds, Worlds, Css, Host, C.Inst_Port, Rw, O, Okj);
       if not Okj then
          Put_Line ("[身] 定不了世界(第一只手的眼没三角出桌面),量不了身体,退出");
