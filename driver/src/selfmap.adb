@@ -215,21 +215,11 @@ package body Selfmap is
       Note.Text := T;
    end Verify;
 
-   procedure Measure (L : in out Plug.Link; F : in out Plug.Frame; M : out Body_Map; Ok : out Boolean) is
+   procedure Measure_Idle (L : in out Plug.Link; F : in out Plug.Frame; M : in out Body_Map; Ok : out Boolean) is
       N_Cams : constant Natural := Natural (F.Cams.Length);
-      Arms : constant Natural := Natural (F.EE.Length);
+      Arms : constant Natural := Natural'Min (Natural (F.EE.Length), M.Arms);
    begin
-      M := (others => <>);
-      M.Arms := Arms; M.N_Cams := N_Cams; M.Per_Arm := Chan.Per_Arm; M.Channels := Arms * Chan.Per_Arm;
-      M.Jaws.Clear;
-      for A in 0 .. Arms - 1 loop
-         M.Jaws.Append (Integer (Natural'Max (1, Jaw_Count (F, A))));
-      end loop;
-      Ok := False;
-      if Arms = 0 or else N_Cams = 0 then
-         Put_Line ("[身] 没有末端位姿或没有相机,量不了身体");
-         return;
-      end if;
+      Ok := True;
       --  ① 什么都不做时读数抖多少、画面抖多少(静止对)
       declare
          Prev_EE : Plug.Pose_Vectors.Vector := F.EE;
@@ -239,6 +229,7 @@ package body Selfmap is
       begin
          for K in 1 .. 4 loop
             if not Plug.Sense (L, F) then
+               Ok := False;
                return;
             end if;
             for A in 0 .. Arms - 1 loop
@@ -276,6 +267,32 @@ package body Selfmap is
                M.Pic_Floor.Append (Picture.Max_Diff (Prev_Gray (C).Gray, F.Cams (C).Gray));
             end;
          end loop;
+      end;
+   end Measure_Idle;
+
+   procedure Measure (L : in out Plug.Link; F : in out Plug.Frame; M : out Body_Map; Ok : out Boolean;
+                      Eyes : Ints := Int_Vectors.Empty_Vector; World : Integer := -1) is
+      N_Cams : constant Natural := Natural (F.Cams.Length);
+      Arms : constant Natural := Natural (F.EE.Length);
+   begin
+      M := (others => <>);
+      M.Arms := Arms; M.N_Cams := N_Cams; M.Per_Arm := Chan.Per_Arm; M.Channels := Arms * Chan.Per_Arm;
+      M.Jaws.Clear;
+      for A in 0 .. Arms - 1 loop
+         M.Jaws.Append (Integer (Natural'Max (1, Jaw_Count (F, A))));
+      end loop;
+      Ok := False;
+      if Arms = 0 or else N_Cams = 0 then
+         Put_Line ("[身] 没有末端位姿或没有相机,量不了身体");
+         return;
+      end if;
+      declare
+         Ok2 : Boolean;
+      begin
+         Measure_Idle (L, F, M, Ok2);
+         if not Ok2 then
+            return;
+         end if;
       end;
       Put_Line ("[身] 静止噪声:本体位置 " & Codec.Fmt (M.EE_Noise, 5) & " m · 姿态 " & Codec.Fmt (M.Rot_Noise, 5) &
                 " rad · 抓握读数 " & Codec.Fmt (M.Jaw_Noise, 4) & " · 各相机灰度地板 " &
@@ -382,7 +399,16 @@ package body Selfmap is
          end loop;
       end loop;
       end;
-      --  ③ 哪台相机长在哪只手上:这只手一动它整幅都变,而且比第二名多一倍(倍数,无量纲);世界相机 = 变得最少的
+      --  ③ 哪台相机长在哪只手上:这只手一动它整幅都变,而且比第二名多一倍(倍数,无量纲);世界相机 = 变得最少的。
+      --  开机前半段已经认过(Eyes 不空)⇒ 照用
+      if not Eyes.Is_Empty then
+         for A in 0 .. Natural'Min (Arms, Natural (Eyes.Length)) - 1 loop
+            M.Cam_On_Arm.Replace_Element (A, Eyes (A));
+         end loop;
+         M.World_Cam := (if World >= 0 then Natural (World) else 0);
+         Ok := True;
+         return;
+      end if;
       for A in 0 .. Arms - 1 loop
          declare
             Best : Integer := -1;

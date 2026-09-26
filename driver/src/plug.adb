@@ -296,7 +296,7 @@ package body Plug is
                   Pose (I) := A (I);
                end loop;
             end if;
-            F.EE.Append (Pose);
+            F.Reported_EE.Append (Pose);   --  V1b 3c:身体报的位姿驱动不读(F.EE 由运动学按关节读数算,Pose_Hook 填)
          end;
       end loop;
       for P of L.Lay.Jaw loop
@@ -364,7 +364,7 @@ package body Plug is
                   when others => Create (Fo, Out_File, Pth);
                end;
                Put (Fo, Codec.Img (L.Seq) & " " & (if Saved then Codec.Img (L.Vid_N) else "-1"));
-               for P of F.EE loop
+               for P of F.Reported_EE loop   --  身体自己报的(只给离线打分)
                   for I in P'Range loop
                      Put (Fo, " " & Codec.Fmt (P (I), 6));
                   end loop;
@@ -439,6 +439,29 @@ package body Plug is
       end if;
       if Hook_P /= null then
          Hook_P (F);
+         --  按关节读数算出来的手的位姿也落盘(fk_poses.txt,格式同 poses.txt):离线和身体报的比,驱动不读这个文件
+         declare
+            Vid : constant String := Codec.Env ("BL_VID");
+            Fo : File_Type;
+         begin
+            if Vid /= "" then
+               begin
+                  Open (Fo, Append_File, Vid & "/fk_poses.txt");
+               exception
+                  when others => Create (Fo, Out_File, Vid & "/fk_poses.txt");
+               end;
+               Put (Fo, Codec.Img (L.Seq) & " -1");
+               for P of F.EE loop
+                  for I in P'Range loop
+                     Put (Fo, " " & Codec.Fmt (P (I), 6));
+                  end loop;
+               end loop;
+               New_Line (Fo);
+               Close (Fo);
+            end if;
+         exception
+            when others => null;
+         end;
       end if;
       return True;
    end Sense;
@@ -534,13 +557,15 @@ package body Plug is
                Put_Str (S, W_Names (K));
                declare
                   J : constant Floats := Nums_At (L, L.Lay.Jaw (W_First (K)));
+                  --  这条臂自己的抓握通道给了目标就发目标(位姿命令解成关节目标时带着,V1b 3c),别的保持此刻的读数
+                  Mine : constant Boolean := W_First (K) = C.Arm and then not C.Jaw.Is_Empty;
                begin
                   Put_Array (S, Natural'Max (1, Natural (J.Length)));
                   if J.Is_Empty then
-                     Put_Float (S, 1.0);
+                     Put_Float (S, (if Mine then Long_Float'Max (0.0, Long_Float'Min (1.0, C.Jaw (0))) else 1.0));
                   else
-                     for X of J loop
-                        Put_Float (S, Long_Float'Max (0.0, Long_Float'Min (1.0, X)));
+                     for X in 0 .. Natural (J.Length) - 1 loop
+                        Put_Float (S, Long_Float'Max (0.0, Long_Float'Min (1.0, (if Mine and then X < Natural (C.Jaw.Length) then C.Jaw (X) else J (X)))));
                      end loop;
                   end if;
                end;
@@ -557,7 +582,9 @@ package body Plug is
          if Joint_Mode (L) then
             Put_Str (S, Layout.Last_Seg (L.Lay.Joints (I)));
             declare
-               Q : constant Floats := (if I = C.Arm then C.Q else Nums_At (L, L.Lay.Joints (I)));
+               --  发给第几组:给了 Group 就按它(开机前半段按读数组认手,V1b 3c),没给按臂
+               Tg : constant Natural := (if C.Group >= 0 then Natural (C.Group) else C.Arm);
+               Q : constant Floats := (if I = Tg then C.Q else Nums_At (L, L.Lay.Joints (I)));
             begin
                Put_Array (S, Natural (Q.Length));
                for X of Q loop

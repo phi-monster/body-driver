@@ -22,7 +22,8 @@ package Plug is
    package Cam_Vectors is new Ada.Containers.Vectors (Natural, Cam);
    type Frame is record
       Joints : Floats_Vectors.Vector;   --  每个关节组一串
-      EE : Pose_Vectors.Vector;          --  每条臂 xyz + wxyz
+      EE : Pose_Vectors.Vector;          --  每条臂 xyz + wxyz(V1b 3c 之后:由运动学按关节读数算出来的腕眼位姿,Pose_Hook 填)
+      Reported_EE : Pose_Vectors.Vector; --  身体自己报的位姿(有的身体报):只落盘给离线打分,驱动不读
       Jaw : Floats_Vectors.Vector;       --  每条臂一串:这条臂【全部】抓握通道的读数
                                          --  (以前只留第一个 ⇒ 五指手的后四根手指整组丢掉)
       Cams : Cam_Vectors.Vector;

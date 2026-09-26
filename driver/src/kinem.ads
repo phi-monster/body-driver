@@ -8,6 +8,7 @@
 --  ② 各轴离眼远近的比例(不同轴的格子之间的配点);③ 全部配点按像素一起解(焦距放开)。离线同一套在 x5 仿真上:焦距 396.5 / 396.9(真 397),
 --  只给关节读数算手的位置,离标定点 40° 以上最大 2.47 mm(LAB 09-26 V1B2;离线脚本 harness/v1b/sweep_init.py + v1b_sweep.py)
 with Geom; use Geom;
+with Plug;
 with Bytes; use Bytes;
 with Ada.Containers.Vectors;
 package Kinem is
@@ -74,6 +75,9 @@ package Kinem is
    procedure Robust_Similarity (A, B : V3_Array; S : out Long_Float; R : out M3; T : out V3; Inliers : out Natural; Med : out Long_Float);
    --  一团点里的那张面(同样的最小中位数):面上一点 P0、单位法向 Nrm
    procedure Robust_Plane (X : V3_Array; P0, Nrm : out V3; Inliers : out Natural; Med : out Long_Float);
+
+   --  转动 + 平移 ⇒ 驱动的位姿格式 [x, y, z, qw, qx, qy, qz](四元数取 w ≥ 0 那一半)
+   function To_Pose (R : M3; T : V3) return Plug.Arm_Pose;
 
    --  反解(V1b 3c):想让那只眼到 (Rt, Tt)(参照眼系)⇒ 从 Q_Start 起用阻尼最小二乘解关节读数。
    --  残差 = 位置差(模型单位)+ 朝向差(弧度 × 模型单位的 1,两者同一个量级:眼的位置均方根钉在 1)。

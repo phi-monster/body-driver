@@ -17,6 +17,9 @@ with Picture;
 with Schema;
 with Chan;
 with Table;
+with Jointboot;
+with Kinem;
+with Geom;
 procedure Body_Driver is
    Port : Natural := 0;
    Body_Path : Unbounded_String;   --  身体文件(--in/--out;同一具身体越用越强)
@@ -27,6 +30,8 @@ procedure Body_Driver is
    F : Plug.Frame;
    C : Act.Context;
    Ok : Boolean;
+   Kin_Eyes : Bytes.Ints;          --  开机前半段认出来的:每只(量成了运动学的)手上的眼
+   Kin_World_Cam : Natural := 0;   --  开机前半段认出来的世界相机
    I : Natural := 1;
    Order : constant String := Codec.Env ("BL_ORDER");
 begin
@@ -95,6 +100,83 @@ begin
    end if;
    Put_Line ("[装] 第一帧:" & Natural'Image (Natural (F.EE.Length)) & " 条臂 ·" & Natural'Image (Natural (F.Jaw.Length)) & " 个抓握通道 ·" &
              Natural'Image (Natural (F.Cams.Length)) & " 台相机" & (if F.Cams.Is_Empty then "" else "(" & Codec.Img (F.Cams (0).W) & "x" & Codec.Img (F.Cams (0).H) & (if F.Cams (0).Has_Depth then ",带深度" else ",无深度") & ")"));
+   --  ── 开机前半段(V1b 第三步,2026-09-26):只用关节命令。身体报的"手在哪"驱动不读 ——
+   --  认手认眼(每组关节一起转一小格)→ 每只有眼的手扫关节、两两配点、量运动学 → 两只手对到一个世界("上" = 桌面法向)→ 装上:
+   --  从此每一帧手的位姿 = 按关节读数算出的腕眼位姿,位姿命令 = 在扫描量过的范围里解关节目标。后面量身体的每一步都在这个世界里 ──
+   declare
+      M0 : Selfmap.Body_Map;
+      Found : Jointboot.Arm_Vectors.Vector;
+      Okj : Boolean;
+      Ds : Jointboot.Sweep_Vectors.Vector;
+      Worlds : Jointboot.Arm_World_Vectors.Vector;
+      Css : Jointboot.Corr_Set_Vectors.Vector;
+      Rw : Geom.M3;
+      O : Geom.V3;
+      N_Img : Natural := 0;
+      Host : constant String := To_String (C.Inst_Host);
+      Dump : constant String := To_String (C.Dump_Dir);
+   begin
+      M0.N_Cams := Natural (F.Cams.Length);
+      Selfmap.Measure_Idle (L, F, M0, Okj);
+      if not Okj then
+         Put_Line ("[链] 量静止噪声时线断了,退出");
+         return;
+      end if;
+      Put_Line ("[身] 静止噪声(开机前半段):关节读数 " & Codec.Fmt (M0.Joint_Noise, 6) & " · 各相机灰度地板 " & (if M0.Pic_Floor.Is_Empty then "-" else Codec.Img (M0.Pic_Floor (0))));
+      Jointboot.Find_Arms (L, F, M0, Found, Kin_World_Cam, Okj);
+      if not Okj then
+         Put_Line ("[身] 只用关节命令认不出一只手,量不了身体,退出");
+         return;
+      end if;
+      for A in 0 .. Natural (Found.Length) - 1 loop
+         declare
+            D : Jointboot.Sweep_Data;
+            M : Kinem.Model;
+            Cs : Kinem.Corr_Vectors.Vector;
+            Okf : Boolean := False;
+            W : Jointboot.Arm_World;
+         begin
+            W.Group := Found (A).Group;
+            if Found (A).Eye >= 0 then
+               Jointboot.Sweep_Arm (L, F, M0, A, Found (A), Host, C.Inst_Port, Dump, N_Img, D);
+               Jointboot.Fit_Arm (A, D, Host, C.Inst_Port, Dump, M, Cs, Okf);
+               --  反解只在扫描实际到过的范围里解(只去量过的地方)
+               for J in 0 .. Natural (D.Frames (0).Q.Length) - 1 loop
+                  declare
+                     Lo : Long_Float := Long_Float'Last;
+                     Hi : Long_Float := Long_Float'First;
+                  begin
+                     for Fr of D.Frames loop
+                        Lo := Long_Float'Min (Lo, Fr.Q (J)); Hi := Long_Float'Max (Hi, Fr.Q (J));
+                     end loop;
+                     W.Lo.Append (Lo); W.Hi.Append (Hi);
+                  end;
+               end loop;
+            else
+               Put_Line ("[身] 📐 第" & Codec.Img (A + 1) & " 只手上没有眼 ⇒ 这一版量不了它的运动学(要一只看得见它的眼),先不用");
+            end if;
+            W.Model := M;
+            W.Valid := Okf;
+            Ds.Append (D); Css.Append (Cs); Worlds.Append (W);
+         end;
+      end loop;
+      Jointboot.Align (Ds, Worlds, Css, Host, C.Inst_Port, Rw, O, Okj);
+      if not Okj then
+         Put_Line ("[身] 定不了世界(第一只手的眼没三角出桌面),量不了身体,退出");
+         return;
+      end if;
+      for A in 0 .. Natural (Worlds.Length) - 1 loop
+         if Worlds (A).Valid then
+            Kin_Eyes.Append (Found (A).Eye);
+         end if;
+      end loop;
+      Jointboot.Install (Worlds, Rw, O);
+      if not Plug.Sense (L, F) then
+         Put_Line ("[链] 装上以后取不到画面,退出");
+         return;
+      end if;
+      Put_Line ("[装] 开机前半段完:" & Codec.Img (Natural (F.EE.Length)) & " 只手的位姿按关节读数算(用了 " & Codec.Img (Plug.Steps (L)) & " 拍)");
+   end;
    --  ── 量身体:先装回身体文件(钥匙 = 这具身体报的形状),推一下核对;对不上或没有 ⇒ 从零量;量到的合进历史再写回 ──
    declare
       Key : constant String := Bodyfile.Fingerprint (L, F);
@@ -141,7 +223,7 @@ begin
          C.Tables := Stored_Tables;
          C.Sch := Stored_Sch;   --  身体没变 ⇒ 身体图照用(位姿 → 手指在画面哪儿)
       else
-         Selfmap.Measure (L, F, C.Map, Ok);
+         Selfmap.Measure (L, F, C.Map, Ok, Eyes => Kin_Eyes, World => Integer (Kin_World_Cam));
          if not Ok then
             Put_Line ("[身] 身体量不了,退出");
             return;
@@ -318,7 +400,6 @@ begin
    Act.Geo_Boot_Eyes (L, F, C);      --  腕眼:转、探、走,多点连相机偏移一起解;不动的眼顺便记指尖
    Act.Geo_Boot_Fixed (L, F, C);     --  不动的眼:拿记下的指尖观测连它的位姿、焦距、各臂指尖偏移一起解
    Act.Geo_Boot_Support (L, F, C);
-   Act.Geo_Boot_Sweep (L, F, C);     --  V1b:每只手每个关节单独扫一遍(只记,量"关节转多少、手到哪"用)
    Put_Line ("[身] 身体量完 ⇒ 开始干活(脑在 " & To_String (C.Eye_Host) & ":" & Codec.Img (C.Eye_Port) & (if C.Look_Only then ",只看不动" else "") & ")");
    --  ── 干活循环 ──
    loop

@@ -1507,6 +1507,42 @@ package body Kinem is
       end;
    end Robust_Plane;
 
+   function To_Pose (R : M3; T : V3) return Plug.Arm_Pose is
+      --  Shepperd:按迹和对角线里最大的那一项取根,数值最稳
+      Tr0 : constant Long_Float := R (0, 0) + R (1, 1) + R (2, 2);
+      W, X, Y, Z : Long_Float;
+   begin
+      if Tr0 > 0.0 then
+         declare
+            S : constant Long_Float := 2.0 * Sqrt (1.0 + Tr0);
+         begin
+            W := 0.25 * S; X := (R (2, 1) - R (1, 2)) / S; Y := (R (0, 2) - R (2, 0)) / S; Z := (R (1, 0) - R (0, 1)) / S;
+         end;
+      elsif R (0, 0) > R (1, 1) and then R (0, 0) > R (2, 2) then
+         declare
+            S : constant Long_Float := 2.0 * Sqrt (Long_Float'Max (0.0, 1.0 + R (0, 0) - R (1, 1) - R (2, 2)));
+         begin
+            W := (R (2, 1) - R (1, 2)) / S; X := 0.25 * S; Y := (R (0, 1) + R (1, 0)) / S; Z := (R (0, 2) + R (2, 0)) / S;
+         end;
+      elsif R (1, 1) > R (2, 2) then
+         declare
+            S : constant Long_Float := 2.0 * Sqrt (Long_Float'Max (0.0, 1.0 + R (1, 1) - R (0, 0) - R (2, 2)));
+         begin
+            W := (R (0, 2) - R (2, 0)) / S; X := (R (0, 1) + R (1, 0)) / S; Y := 0.25 * S; Z := (R (1, 2) + R (2, 1)) / S;
+         end;
+      else
+         declare
+            S : constant Long_Float := 2.0 * Sqrt (Long_Float'Max (0.0, 1.0 + R (2, 2) - R (0, 0) - R (1, 1)));
+         begin
+            W := (R (1, 0) - R (0, 1)) / S; X := (R (0, 2) + R (2, 0)) / S; Y := (R (1, 2) + R (2, 1)) / S; Z := 0.25 * S;
+         end;
+      end if;
+      if W < 0.0 then
+         W := -W; X := -X; Y := -Y; Z := -Z;
+      end if;
+      return [T (0), T (1), T (2), W, X, Y, Z];
+   end To_Pose;
+
    procedure IK (M : Model; Rt : M3; Tt : V3; Q_Start : Floats; Lo, Hi : Floats; Q : out Floats; Pos_Err, Rot_Err : out Long_Float) is
       N : constant Natural := M.N;
       Lam : Long_Float := 1.0e-3;    --  阻尼(无量纲)

@@ -5074,6 +5074,21 @@ begin
             end if;
          end;
       end loop;
+      --  转动 ⇒ 四元数 ⇒ 转动(四种分支各一个:迹为正、x / y / z 最大)
+      declare
+         Worst : Long_Float := 0.0;
+      begin
+         for Rv of Kinem.V3_Array'([0.3, -0.2, 0.1], [3.0, 0.1, 0.0], [0.05, 3.0, 0.1], [0.0, 0.2, 3.1]) loop
+            declare
+               Rr : constant M3 := Rodrigues (Rv);
+               Pz : constant Plug.Arm_Pose := Kinem.To_Pose (Rr, [1.0, 2.0, 3.0]);
+               Rb : constant M3 := Quat_To_R (Pz);
+            begin
+               Worst := Long_Float'Max (Worst, Norm (Rot_Vec (Mul (Tr (Rr), Rb))));
+            end;
+         end loop;
+         Check (Worst < 1.0e-12, "对齐·转动 → 四元数 → 转动(四种分支):最差差 " & Long_Float'Image (Worst) & " rad");
+      end;
       Kinem.Robust_Plane (Pl, P0, Nrm, Inl, Md);
       Check (abs (abs (Nrm (0) * N_True (0) + Nrm (1) * N_True (1) + Nrm (2) * N_True (2)) - 1.0) < 1.0e-9 and then Inl >= 42,
              "对齐·一团点里的面(60 点、30% 野点):法向差 " & Long_Float'Image (1.0 - abs (Nrm (0) * N_True (0) + Nrm (1) * N_True (1) + Nrm (2) * N_True (2)))
