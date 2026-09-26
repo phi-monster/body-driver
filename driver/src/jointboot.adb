@@ -176,7 +176,7 @@ package body Jointboot is
                         World_Cam : Integer := -1) is
       Na : constant Natural := Natural (Arms.Length);
       N_Img : Natural := 0;
-      --  ── 配点:扫描时把要配的对攒着,扫完再让配点仪器一对一对配(粗配、单向,一对 0.23 秒)。
+      --  ── 配点:扫描时把要配的对攒着,扫完再让配点仪器一对一对配(粗配,一对约 0.33 秒)。
       --  边扫边配试过(V1B6 2026-09-26):仿真和配点仪器在同一块 GPU 上抢,一拍从 0.67 秒变 1.17 秒,比扫完再配还慢。
       --  只有"起点 ↔ 每段头一格"那一对在扫描时当场配(仿真等着,不抢):下一格的步子要按它定;配出来的点留给运动学,不再配一遍 ──
       type Job is record
@@ -226,7 +226,7 @@ package body Jointboot is
             Jobs.Get (X, Done);
             exit when Done;
             declare
-               --  粗配:一对 0.39 秒对 0.83 秒,和完整配点只差中位 0.07–0.13 px、九成 0.2–0.6 px(trackexam 2026-09-26,V1B4 两段扫描);单向见 Instrument.Sample_Ids
+               --  粗配:一对 0.39 秒对 0.83 秒,和完整配点只差中位 0.07–0.13 px、九成 0.2–0.6 px(trackexam 2026-09-26,V1B4 两段扫描)
                P : constant Instrument.Pair_Vectors.Vector := Instrument.Sample_Ids (Host, Port, X.Ia, X.Ib, Per_Pair, Err, Coarse => True);
             begin
                if P.Is_Empty then

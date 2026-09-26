@@ -44,8 +44,8 @@ package Instrument is
    procedure Frame_Put (Host : String; Port : Natural; RGB : Buf; W, H : Natural; Id : out Integer; Err : out Unbounded_String);
    --  两帧(按编号)之间让仪器抽 Num 对对应点:每对 = A 里的像素、B 里的像素。仪器按它自己的把握抽(抽得多的地方它有把握),
    --  驱动不拿可信度当真,只拿几何去核。空 = 这一对没问到(Err 说为什么)。
-   --  只配 A → B(抽样用不着反方向那一半):2026-09-27 V1B14 一对 0.33 → 0.23 秒;按同样的配对重配,运动学考试最大 0.30 / 0.43 mm、
-   --  两只手对齐倍数差 0.3%、平移差 2.9 mm(对称配 0.35 / 0.20 mm、0.2%、1.4 mm,都离 5 mm 线很远)
+   --  对称配(两边的格点都抽;09-27 试过只配 A → B,一对快三成,可抽样只落在起点那一格看得见的地方:V1B16 第 2 只手运动学最大
+   --  1.41 mm、同样的配对单向重抽一遍 1.47 mm,对称配 0.20 mm;V1B14 第 2 只手单向 0.43、对称 0.20 ⇒ 改回对称)
    type Pair_Pt is record
       Ua, Va, Ub, Vb : Long_Float := 0.0;
    end record;

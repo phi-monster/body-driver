@@ -14,7 +14,6 @@
   POST /match {"a": ..., "b": ..., "num": N, "points": [[u,v],...]}   (或者 "a_id" / "b_id" 代替 "a" / "b":用 /frame 存过的帧)
        → {"ok": true, "samples": [[ua,va,ub,vb,cert],...], "points": [[ub,vb,cert],...]}
        "back": true ⇒ 另给 "back": [[ua2,va2],...]:每个查询点配到 B 以后再配回 A 落在哪(同一次配点的反向 warp,不另配;往返差 = 配点自己对不对得上)
-       "oneway": true ⇒ 只配 A → B(不算反方向那一半,快三成;抽样只从 A 这边抽;不能和 "back" 一起要)
        两台相机(或同一台相机两个位置)的两帧里,哪两个像素是同一个真实的点:num > 0 抽 num 对对应点;points = A 里的像素,问它们在 B 里在哪。
        cert = 模型自己给的可信度(0..1),驱动不拿它当真,只拿几何去核(三角重投、两停交叉)
   POST /describe {"ids": [n,...]}  → {"ok": true, "vectors": [[...1024 个数...],...]}
@@ -180,21 +179,17 @@ def frame_get(req, key):
     return Image.open(io.BytesIO(base64.b64decode(req[key]))).convert("RGB")
 
 
-def match(A, B, num, points, coarse=False, back=False, oneway=False):
+def match(A, B, num, points, coarse=False, back=False):
     m = _load_roma()
     t0 = time.time()
     Wa, Ha = A.size; Wb, Hb = B.size
-    if back and oneway:
-        raise ValueError("往返要反方向那一半:back 和 oneway 不能一起要")
     with torch.no_grad():
-        up = m.upsample_preds; sym = m.symmetric
+        up = m.upsample_preds
         m.upsample_preds = not coarse   # coarse = 只在粗分辨率上配(不做最后那一层细化;量快多少、准多少用)
-        # oneway = 只配 A → B(不算反方向那一半):只抽样的用。2026-09-27 V1B14 的 16 对:0.33 → 0.23 s/对,问点和对称配差中位 0.002 px、最大 0.22 px
-        m.symmetric = not oneway
         try:
             warp, cert = m.match(A, B, device="cuda")
         finally:
-            m.upsample_preds = up; m.symmetric = sym
+            m.upsample_preds = up
         out = {"ok": True, "samples": [], "points": [], "model": "roma-outdoor"}
         if num and num > 0:
             mt, ct = m.sample(warp, cert, num=int(num))
@@ -202,7 +197,7 @@ def match(A, B, num, points, coarse=False, back=False, oneway=False):
             ka = ka.cpu().numpy(); kb = kb.cpu().numpy(); ct = ct.cpu().numpy()
             out["samples"] = [[_num(ka[i, 0], 3), _num(ka[i, 1], 3), _num(kb[i, 0], 3), _num(kb[i, 1], 3), _num(ct[i], 4)] for i in range(len(ct))]
         if points:
-            Ww = warp.shape[2] if oneway else warp.shape[2] // 2   # 对称 warp:左半是 A → B
+            Ww = warp.shape[2] // 2   # 对称 warp:左半是 A → B
             wAB = warp[0, :, :Ww, 2:].permute(2, 0, 1)[None].float(); cA = cert[0, :, :Ww][None, None].float()
             uv = np.asarray(points, dtype=np.float32).reshape(-1, 2)
             g = torch.tensor(np.stack([2 * uv[:, 0] / Wa - 1, 2 * uv[:, 1] / Ha - 1], 1)[None, :, None, :], device="cuda", dtype=torch.float32)
@@ -351,8 +346,7 @@ class H(BaseHTTPRequestHandler):
                 elif self.path == "/track/end":
                     out = track_end(int(req["id"]))
                 elif self.path == "/match":
-                    out = match(A, B, int(req.get("num", 0)), req.get("points", []), bool(req.get("coarse", False)), bool(req.get("back", False)),
-                                bool(req.get("oneway", False)))
+                    out = match(A, B, int(req.get("num", 0)), req.get("points", []), bool(req.get("coarse", False)), bool(req.get("back", False)))
                 elif self.path == "/segment":
                     out = segment(req["image"], req.get("box", []), req.get("points", []))
                 elif self.path == "/describe":
