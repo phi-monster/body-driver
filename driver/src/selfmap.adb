@@ -91,6 +91,8 @@ package body Selfmap is
       W_Q : Plug.Floats_Vectors.Vector;
       Prev_All : Plug.Floats_Vectors.Vector;
       Is_Joint : constant Boolean := Group >= 0 or else not Groups.Is_Empty;
+      Arrived : Natural := 0;
+      Still_Frac : constant := 0.01;   --  百分之一(比例,见下)
    begin
       Delivered := Table.Zero_Vec;
       Frames := 0;
@@ -124,6 +126,9 @@ package body Selfmap is
          if Is_Joint then
             declare
                Moved, Miss : Long_Float := 0.0;
+               --  一拍挪不到"到了"那个范围的百分之一 = 停了(比例;动作做完以后读数还会有极小的抖动,空闲时量的噪声是 0 ⇒ 不能拿它当"不动"的门,
+               --  V1B4 2026-09-26:每格都等满 14 拍)
+               Still_Gate : constant Long_Float := Long_Float'Max (M.Joint_Noise, Tol * Still_Frac);
             begin
                for Gi in 0 .. Natural (W_G.Length) - 1 loop
                   declare
@@ -140,8 +145,10 @@ package body Selfmap is
                      end if;
                   end;
                end loop;
-               Still := (if Moved <= M.Joint_Noise then Still + 1 else 0);
-               exit when (Tol > 0.0 and then Miss <= Tol and then Still >= 1) or else (Still >= 2 and then Frames >= M.Settle)
+               Still := (if Moved <= Still_Gate then Still + 1 else 0);
+               Arrived := (if Tol > 0.0 and then Miss <= Tol then Arrived + 1 else 0);
+               --  连着两拍都到了目标附近 = 到了;没到目标就等连着两拍不动(被顶住 / 到头)
+               exit when Arrived >= 2 or else (Still >= 2 and then Frames >= M.Settle)
                  or else Frames >= 12 + M.Settle or else (Quick and then Frames >= M.Settle);
             end;
          else

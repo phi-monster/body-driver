@@ -20,11 +20,11 @@ package body Jointboot is
    Third : constant := 1.0 / 3.0;               --  三分之一(比例:"没转到命令的三分之一 = 被顶住",到没到目标用同一个比例)
 
    --  一组关节读数一起挪到 Q(关节目标走唯一那条挪手的路 Selfmap.Go,停稳看这组读数)
-   procedure Go_Group (L : in out Plug.Link; F : in out Plug.Frame; M : Selfmap.Body_Map; A, G : Natural; Q : Floats; Ok : out Boolean) is
+   procedure Go_Group (L : in out Plug.Link; F : in out Plug.Frame; M : Selfmap.Body_Map; A, G : Natural; Q : Floats; Tol : Long_Float; Ok : out Boolean) is
       Dl : Table.Vec;
       Fr : Natural;
    begin
-      Selfmap.Go (L, M, A, [others => 0.0], F64_Vectors.Empty_Vector, F, Dl, Fr, Ok, Joints => Q, Group => G);
+      Selfmap.Go (L, M, A, [others => 0.0], F64_Vectors.Empty_Vector, F, Dl, Fr, Ok, Joints => Q, Group => G, Tol => Tol);
    end Go_Group;
 
    procedure Find_Arms (L : in out Plug.Link; F : in out Plug.Frame; M : in out Selfmap.Body_Map;
@@ -65,10 +65,10 @@ package body Jointboot is
                      for K in 0 .. Natural (Tgt.Length) - 1 loop
                         Tgt.Replace_Element (K, Q0 (K) + Amp);
                      end loop;
-                     Go_Group (L, F, M, Natural (Arms.Length), G, Tgt, Okg);
+                     Go_Group (L, F, M, Natural (Arms.Length), G, Tgt, Amp * Third, Okg);
                      exit when not Okg;
                      F1 := F.Cams; J1 := F.Joints;
-                     Go_Group (L, F, M, Natural (Arms.Length), G, Q0, Okg);
+                     Go_Group (L, F, M, Natural (Arms.Length), G, Q0, Amp * Third, Okg);
                      exit when not Okg;
                      for K in 0 .. Natural'Min (Natural (J1 (G).Length), Natural (J0 (G).Length)) - 1 loop
                         Got := Long_Float'Min (Got, J1 (G) (K) - J0 (G) (K));   --  这组读数里跟得最少的那个关节
@@ -313,16 +313,15 @@ package body Jointboot is
                      declare
                         U : constant Long_Float := (Long_Float (Ix) + 0.5) * Long_Float (Sa.W) / Long_Float (Gx);
                         V : constant Long_Float := (Long_Float (Iy) + 0.5) * Long_Float (Sa.H) / Long_Float (Gy);
-                        Px : constant Natural := Natural (Long_Float'Floor (V)) * Sa.W + Natural (Long_Float'Floor (U));
                      begin
-                        if Arms (A).Moved.Is_Empty or else (Px < Natural (Arms (A).Moved.Length) and then Arms (A).Moved (Px)) then
-                           Sa.Pts.Append (Instrument.Track_Pt'(U => U, V => V, Seen => True, Conf => 1.0));
-                        end if;
+                        --  整幅铺满;手指那块(整段扫描一次都没变过的像素)扫完用遮罩剔掉
+                        --  (V1B4 2026-09-26:只铺在认手那一下动过的地方,探针只转了 0.0001,只剩 5 个格点)
+                        Sa.Pts.Append (Instrument.Track_Pt'(U => U, V => V, Seen => True, Conf => 1.0));
                      end;
                   end loop;
                end loop;
                Say ("关节扫描 · 第" & Codec.Img (A + 1) & " 只手(第" & Codec.Img (Sa.G) & " 组读数," & Codec.Img (Natural (Sa.Q0.Length)) & " 个关节,眼 = 第"
-                    & Codec.Img (Sa.Cam) & " 台):跟 " & Codec.Img (Natural (Sa.Pts.Length)) & " 个格点(认出来那一下动过的地方)");
+                    & Codec.Img (Sa.Cam) & " 台):跟 " & Codec.Img (Natural (Sa.Pts.Length)) & " 个格点(整幅)");
             end;
             Keep (A, 0, 0, 0);
          end if;
@@ -427,17 +426,24 @@ package body Jointboot is
                      end loop;
                   end;
                end loop;
-               --  转回起点、收掉跟点
-               for A in 0 .. Na - 1 loop
-                  if St (A).Live then
-                     St (A).Tgt := St (A).Q0;
-                     if St (A).Tid >= 0 then
-                        Instrument.Track_End (Host, Port, St (A).Tid);
-                        St (A).Tid := -1;
+               --  转回起点、收掉跟点(到没到按最后一格步子的三分之一判,同上)
+               declare
+                  Tol_Back : Long_Float := Long_Float'Last;
+               begin
+                  for A in 0 .. Na - 1 loop
+                     if St (A).Live then
+                        St (A).Tgt := St (A).Q0;
+                        if St (A).Step > 0.0 then
+                           Tol_Back := Long_Float'Min (Tol_Back, St (A).Step * Third);
+                        end if;
+                        if St (A).Tid >= 0 then
+                           Instrument.Track_End (Host, Port, St (A).Tid);
+                           St (A).Tid := -1;
+                        end if;
                      end if;
-                  end if;
-               end loop;
-               Move_All (0.0);
+                  end loop;
+                  Move_All ((if Tol_Back < Long_Float'Last then Tol_Back else 0.0));
+               end;
             end if;
          end loop;
       end loop;
