@@ -251,3 +251,36 @@ if os.path.exists(ip) and os.path.exists(wp) and 0 in FITS:
         print("V1b ② · 第 %d 只手走到没去过的 %d 处:真的眼离目标 %s mm(最大 %.1f)· 朝向差 %s° · 按读数算的位置离真的眼 %s mm" %
               (sw, len(v), " ".join("%.1f" % x for x in v[:, 0]), v[:, 0].max(), " ".join("%.2f" % x for x in v[:, 2]), " ".join("%.1f" % x for x in v[:, 1])))
         print("   这几处离扫描时去过的最近一格:%s mm(那一格朝向差 %s°)" % (" ".join("%.1f" % x for x in v[:, 3]), " ".join("%.1f" % x for x in v[:, 4])))
+
+# ── 第六种考法:指尖(身体文件旁边的几何文件 <身体文件>.geo.json:每只腕眼的 tip = 两瓣指尖中点、gap = 两瓣相距,眼的系、模型单位)
+#    ⇒ 乘"米 / 单位"、按拟合的"眼离手"换到手腕(link6)系,和 x5 模型文件里两根手指网格沿夹爪方向最远那一点的中点比(手指对称 ⇒ 中点和张开多少无关)──
+try:
+    import re, json, struct
+    logtxt = open(os.path.join(RUN, "cal.log"), encoding="utf-8", errors="ignore").read()
+    mb = re.search(r"身体写进 (/\S+?\.json)", logtxt)
+    X5 = "/root/RoboDojo/Assets/Robots/x5"
+    if mb and os.path.exists(mb.group(1) + ".geo.json") and os.path.exists(X5 + "/meshes/link7.STL"):
+        geo = json.load(open(mb.group(1) + ".geo.json"))
+        def stl(p):
+            d = open(p, "rb").read(); n = struct.unpack("<I", d[80:84])[0]
+            return np.array([struct.unpack("<12f", d[84 + 50 * i:84 + 50 * i + 48])[3:12] for i in range(n)]).reshape(-1, 3)
+        tips = []
+        for mesh, org in (("link7", np.array([0.08657, 0.024896, -0.0002436])), ("link8", np.array([0.08657, -0.0249, -0.00024366]))):
+            V = stl(X5 + "/meshes/%s.STL" % mesh) + org
+            tips.append(V[np.argmax(V[:, 0])])
+        truth_mid = 0.5 * (tips[0] + tips[1])
+        cam_arm = {int(c): int(a) - 1 for c, a in re.findall(r"第(\d+) 台相机\(长在第(\d+) 只手上\)", logtxt)}
+        for g in geo["cams"]:
+            c = g["cam"]
+            if c not in cam_arm or cam_arm[c] not in FITS:
+                continue
+            a = cam_arm[c]; s_, Rg_, tg_, RxA, txA = FITS[a]
+            if not g.get("tip_valid"):
+                print("指尖 · 第 %d 只手(第 %d 台眼):没量成" % (a, c)); continue
+            tc = np.array(g["tip"]) * s_
+            tee = RxA @ tc + txA
+            print("指尖 · 第 %d 只手:碰出来的两瓣中点(手腕系)(%.1f, %.1f, %.1f) mm · 模型文件 (%.1f, %.1f, %.1f) mm · 差 %.1f mm · 离眼 %.1f mm · 张口 %.1f mm(%s)" %
+                  (a, *(1000 * tee), *(1000 * truth_mid), 1000 * np.linalg.norm(tee - truth_mid), 1000 * np.linalg.norm(tc), 1000 * g["gap"] * s_,
+                   "碰桌面量的" if g.get("tip_touch") else "不是碰桌面量的"))
+except Exception as e:
+    print("指尖:打不了分(%s)" % e)

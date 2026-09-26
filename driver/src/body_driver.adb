@@ -111,7 +111,7 @@ begin
              Natural'Image (Natural (F.Cams.Length)) & " 台相机" & (if F.Cams.Is_Empty then "" else "(" & Codec.Img (F.Cams (0).W) & "x" & Codec.Img (F.Cams (0).H) & (if F.Cams (0).Has_Depth then ",带深度" else ",无深度") & ")"));
    --  ── 开机前半段(V1b 第三步,2026-09-26):只用关节命令。身体报的"手在哪"驱动不读 ——
    --  认手认眼(每组关节一起转一小格)→ 每只有眼的手扫关节、两两配点、量运动学 → 两只手对到一个世界("上" = 桌面法向)→ 装上:
-   --  从此每一帧手的位姿 = 按关节读数算出的腕眼位姿,位姿命令 = 在扫描量过的范围里解关节目标。后面量身体的每一步都在这个世界里 ──
+   --  从此每一帧手的位姿 = 按关节读数算出的腕眼位姿,位姿命令 = 在量到的关节限位里解关节目标。后面量身体的每一步都在这个世界里 ──
    declare
       M0 : Selfmap.Body_Map;
       Found : Jointboot.Arm_Vectors.Vector;
@@ -181,16 +181,20 @@ begin
                if Found (A).Eye < 0 then
                   Put_Line ("[身] 📐 第" & Codec.Img (A + 1) & " 只手上没有眼 ⇒ 这一版量不了它的运动学(要一只看得见它的眼),先不用");
                elsif not Ds (A).Frames.Is_Empty then
-                  --  反解只在扫描实际到过的范围里解(只去量过的地方)
+                  --  反解的界 = 量到的关节限位:扫描时这一边是"到头或被顶住 / 碰上东西了"停的,以扫到的最远那一格为界;
+                  --  走满格数停的这一边没量到头,不设界(V1B18 2026-09-27:只在扫到过的范围里解,碰桌面前转手转到 0.32 弧度就解不出更远的了)
                   for J in 0 .. Natural (Ds (A).Frames (0).Q.Length) - 1 loop
                      declare
                         Lo : Long_Float := Long_Float'Last;
                         Hi : Long_Float := Long_Float'First;
+                        Lim_Lo : constant Boolean := J < Natural (Ds (A).Has_Lo.Length) and then Ds (A).Has_Lo (J);
+                        Lim_Hi : constant Boolean := J < Natural (Ds (A).Has_Hi.Length) and then Ds (A).Has_Hi (J);
                      begin
                         for Fr of Ds (A).Frames loop
                            Lo := Long_Float'Min (Lo, Fr.Q (J)); Hi := Long_Float'Max (Hi, Fr.Q (J));
                         end loop;
-                        W.Lo.Append (Lo); W.Hi.Append (Hi);
+                        W.Lo.Append (if Lim_Lo then Lo else Long_Float'First);
+                        W.Hi.Append (if Lim_Hi then Hi else Long_Float'Last);
                      end;
                   end loop;
                end if;

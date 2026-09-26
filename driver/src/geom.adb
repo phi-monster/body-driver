@@ -2802,7 +2802,7 @@ package body Geom is
                end loop;
             end loop;
             Append (B, "],""tip_valid"":" & (if G.Tip_Valid then "true" else "false") & ",""tip_touch"":" & (if G.Tip_Touch then "true" else "false") & ",""tip"":[" & Codec.Fmt (G.Tip (0), 5) & "," & Codec.Fmt (G.Tip (1), 5) & "," &
-                      Codec.Fmt (G.Tip (2), 5) & "],""gap"":" & Codec.Fmt (G.Gap, 5) & ",""stride"":" & Codec.Fmt (G.Stride, 5) &
+                      Codec.Fmt (G.Tip (2), 5) & "],""gap"":" & Codec.Fmt (G.Gap, 5) & ",""stride"":" & Codec.Fmt (G.Stride, 5) & ",""stride_rot"":" & Codec.Fmt (G.Stride_Rot, 5) &
                       ",""f_meas"":" & Codec.Fmt (G.F_Meas, 3) & ",""f_prior"":" & Codec.Fmt (G.F_Prior, 3) & ",""f_prior_sd"":" & Codec.Fmt (G.F_Prior_Sd, 3) &
                       ",""off"":[" & Codec.Fmt (G.Off (0), 5) & "," & Codec.Fmt (G.Off (1), 5) & "," & Codec.Fmt (G.Off (2), 5) & "]" &
                       ",""fixed"":" & (if G.Fixed then "true" else "false") & ",""pos"":[" & Codec.Fmt (G.Pos (0), 5) & "," & Codec.Fmt (G.Pos (1), 5) & "," & Codec.Fmt (G.Pos (2), 5) & "]}");
@@ -2886,12 +2886,16 @@ package body Geom is
                   G.Gap := Json.Num (D, Json.Get (D, Nd, "gap"));
                   declare
                      Sn : constant Integer := Json.Get (D, Nd, "stride");   --  老文件没有这一项 ⇒ 0,开机再量
+                     Sr : constant Integer := Json.Get (D, Nd, "stride_rot");
                      Fm : constant Integer := Json.Get (D, Nd, "f_meas");
                      Fp : constant Integer := Json.Get (D, Nd, "f_prior");
                      Fs : constant Integer := Json.Get (D, Nd, "f_prior_sd");
                   begin
                      if Sn >= 0 then
                         G.Stride := Json.Num (D, Sn);
+                     end if;
+                     if Sr >= 0 then
+                        G.Stride_Rot := Json.Num (D, Sr);
                      end if;
                      if Fm >= 0 then
                         G.F_Meas := Json.Num (D, Fm);

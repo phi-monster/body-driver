@@ -358,6 +358,8 @@ package body Jointboot is
                Sa.Q0 := F.Joints (Sa.G); Sa.Tgt := Sa.Q0;
                Sa.W := F.Cams (Sa.Cam).W; Sa.H := F.Cams (Sa.Cam).H;
                D.W := Sa.W; D.H := Sa.H;
+               D.Has_Lo := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (Natural (Sa.Q0.Length)));
+               D.Has_Hi := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (Natural (Sa.Q0.Length)));
                Ds.Replace_Element (A, D);
                Nj := Natural'Max (Nj, Natural (Sa.Q0.Length));
                --  每格画面挪画幅宽的 1/5(比例,无量纲;每个方向停 3 格,转开的总量同原来 5 格 × 1/10:V1B14 挑格回放,停 3 格最大 0.73 mm)
@@ -443,12 +445,19 @@ package body Jointboot is
                                  if Sa.K = 1 then
                                     Sa.Heads.Append (Head'(Frame => Natural (Ds (A).Frames.Length) - 1, Joint => J));
                                  end if;
-                                 if 3.0 * Got < Sa.Step then   --  没转到命令的三分之一(比例):到头 / 被顶住
-                                    Sa.Why := To_Unbounded_String ("关节到头或被顶住(命令 " & Codec.Fmt (Sa.Step, 4) & ",实到 " & Codec.Fmt (Got, 4) & ")");
+                                 if 3.0 * Got < Sa.Step or else 3.0 * Pushed > Sa.Step then
+                                    --  没转到命令的三分之一(比例):到头 / 被顶住;别的关节被顶偏超过这一格的三分之一(比例,同上):碰上东西了,不再往里压。
+                                    --  这一边的界量到了(反解不过这儿)
+                                    Sa.Why := To_Unbounded_String (if 3.0 * Got < Sa.Step then "关节到头或被顶住(命令 " & Codec.Fmt (Sa.Step, 4) & ",实到 " & Codec.Fmt (Got, 4) & ")"
+                                                                   else "碰上东西了:第" & Codec.Img (Kp) & " 个关节被顶偏 " & Codec.Fmt (Pushed, 4) & "(这一格命令 " & Codec.Fmt (Sa.Step, 4) & ")");
                                     Sa.Done := True;
-                                 elsif 3.0 * Pushed > Sa.Step then   --  别的关节被顶偏超过这一格的三分之一(比例,同上一条):碰上东西了,不再往里压
-                                    Sa.Why := To_Unbounded_String ("碰上东西了:第" & Codec.Img (Kp) & " 个关节被顶偏 " & Codec.Fmt (Pushed, 4) & "(这一格命令 " & Codec.Fmt (Sa.Step, 4) & ")");
-                                    Sa.Done := True;
+                                    if J < Natural (Ds (A).Has_Lo.Length) then
+                                       if Dd < 0 then
+                                          Ds (A).Has_Lo.Replace_Element (J, True);
+                                       else
+                                          Ds (A).Has_Hi.Replace_Element (J, True);
+                                       end if;
+                                    end if;
                                  elsif Sa.K >= 3 then   --  最多 3 格(次数;5 分钟一炮)
                                     Sa.Done := True;
                                  else
@@ -2369,7 +2378,7 @@ package body Jointboot is
       end loop;
       St_Rw := Rw; St_O := O;
       Plug.Set_Hooks (Pose_Hook'Access, Cmd_Hook'Access);
-      Say ("装上:从此每一帧手的位姿 = 按关节读数算出的腕眼位姿(" & Codec.Img (Natural (St_Worlds.Length)) & " 只手),位姿命令 = 在扫描量过的范围里解关节目标");
+      Say ("装上:从此每一帧手的位姿 = 按关节读数算出的腕眼位姿(" & Codec.Img (Natural (St_Worlds.Length)) & " 只手),位姿命令 = 在量到的关节限位里解关节目标");
    end Install;
 
    procedure Pose_Hook (F : in out Plug.Frame) is
@@ -2399,7 +2408,7 @@ package body Jointboot is
       end loop;
    end Pose_Hook;
 
-   --  世界里的一个腕眼位姿 ⇒ 第 A 只手的关节目标(在扫描量过的范围里反解;位姿命令和开机自检都走这一条)。
+   --  世界里的一个腕眼位姿 ⇒ 第 A 只手的关节目标(在量到的关节限位里反解;位姿命令和开机自检都走这一条)。
    --  Pe / Re = 解完还差多少(位置:第一只手的模型单位 = 世界的单位;朝向:弧度)
    procedure Pose_To_Q (A : Natural; Pose : Plug.Arm_Pose; Q : out Floats; Pe, Re : out Long_Float) is
       use Geom;
