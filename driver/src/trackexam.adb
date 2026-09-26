@@ -71,6 +71,8 @@ begin
             declare
                T : constant Instrument.Track_Vectors.Vector := Instrument.Track_Step (Host, Port, Id, Rgb, Wk, Hk, Err);
                R : constant Instrument.Match_Vectors.Vector := Instrument.Match (Host, Port, Rgb0, W, H, Rgb, Wk, Hk, Qpts, Err);
+               Rc : constant Instrument.Match_Vectors.Vector := Instrument.Match (Host, Port, Rgb0, W, H, Rgb, Wk, Hk, Qpts, Err, Coarse => True);
+               Dc : Floats;
                Back_Q : Instrument.Match_Vectors.Vector;
                Idx : Ints;
                Diffs, Disp : Floats;
@@ -99,6 +101,9 @@ begin
                               Diffs.Append (Geom.Norm ([T (P).U - R (P).U, T (P).V - R (P).V, 0.0]));
                               Disp.Append (Geom.Norm ([R (P).U - Qpts (P).U, R (P).V - Qpts (P).V, 0.0]));
                            end if;
+                           if P < Natural (Rc.Length) then
+                              Dc.Append (Geom.Norm ([Rc (P).U - R (P).U, Rc (P).V - R (P).V, 0.0]));
+                           end if;
                         end if;
                      end;
                   end loop;
@@ -110,7 +115,8 @@ begin
                end loop;
                Put_Line (Argument (A) & ":跟点说看得见 " & Codec.Img (N_Seen) & " / " & Codec.Img (Natural (T.Length)) & " · 配点配得回来 " & Codec.Img (N_Ref)
                          & " · 两边都有 " & Codec.Img (Natural (Diffs.Length)) & ",离第一张挪了 中位 " & Codec.Fmt (Q (Disp, 0.5), 1) & " px · 跟点和配点差 中位 "
-                         & Codec.Fmt (Q (Diffs, 0.5), 2) & " px、九成 " & Codec.Fmt (Q (Diffs, 0.9), 2) & " px");
+                         & Codec.Fmt (Q (Diffs, 0.5), 2) & " px、九成 " & Codec.Fmt (Q (Diffs, 0.9), 2) & " px · 粗配和完整配点差 中位 "
+                         & Codec.Fmt (Q (Dc, 0.5), 2) & " px、九成 " & Codec.Fmt (Q (Dc, 0.9), 2) & " px");
             end;
          end if;
       end;

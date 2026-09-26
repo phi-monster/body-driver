@@ -217,7 +217,8 @@ package body Jointboot is
             Jobs.Get (X, Done);
             exit when Done;
             declare
-               P : constant Instrument.Pair_Vectors.Vector := Instrument.Sample_Ids (Host, Port, X.Ia, X.Ib, Per_Pair, Err);
+               --  粗配:一对 0.39 秒对 0.83 秒,和完整配点只差中位 0.07–0.13 px、九成 0.2–0.6 px(trackexam 2026-09-26,V1B4 两段扫描)
+               P : constant Instrument.Pair_Vectors.Vector := Instrument.Sample_Ids (Host, Port, X.Ia, X.Ib, Per_Pair, Err, Coarse => True);
             begin
                if P.Is_Empty then
                   N_Empty := N_Empty + 1;
@@ -274,6 +275,12 @@ package body Jointboot is
          Sa.Ids.Append (Id);
          if K > 0 and then Id >= 0 and then Sa.Ids (0) >= 0 then
             Jobs.Put ((A => A, I => 0, J => Natural (D.Frames.Length) - 1, Ia => Natural (Sa.Ids (0)), Ib => Natural (Id)));
+            N_Jobs := N_Jobs + 1;
+         end if;
+         --  每段头三格之间也配(转角小的对:每根轴单独起步时网格只用转角 ≤ 16° 的对;V1B5 只配起点 ↔ 每一格,两根轴没有够用的小转角对)
+         if K >= 2 and then K <= 3 and then Id >= 0 and then Natural (Sa.Ids.Length) >= 2 and then Sa.Ids (Natural (Sa.Ids.Length) - 2) >= 0 then
+            Jobs.Put ((A => A, I => Natural (D.Frames.Length) - 2, J => Natural (D.Frames.Length) - 1,
+                       Ia => Natural (Sa.Ids (Natural (Sa.Ids.Length) - 2)), Ib => Natural (Id)));
             N_Jobs := N_Jobs + 1;
          end if;
          if Dump = "" then

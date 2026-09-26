@@ -52,7 +52,10 @@ TRACKON_CKPT = os.environ.get("TRACKON_CKPT", "/root/instruments/weights/trackon
 SAM_CKPT = os.environ.get("SAM_CKPT", "/root/instruments/weights/sam2.1_hiera_small.pt")
 SAM_CFG = os.environ.get("SAM_CFG", "configs/sam2.1/sam2.1_hiera_s.yaml")   # 仓库在 /root/instruments/sam2_repo(不许放在本文件同级叫 sam2:会遮住包)
 
-_lock = threading.Lock()
+_lock = threading.Lock()   # 跟点(Track-On2)用
+# 每个模型一把锁(2026-09-26):原来三件仪器共用 _lock,开机扫描时跟点要排在配点后面等(一对配点 0.4–0.85 秒),扫描慢了一倍
+_lock_match = threading.Lock()
+_lock_seg = threading.Lock()
 _trackon = None
 _roma = None
 _sam = None
@@ -173,12 +176,17 @@ def frame_get(req, key):
     return Image.open(io.BytesIO(base64.b64decode(req[key]))).convert("RGB")
 
 
-def match(A, B, num, points):
+def match(A, B, num, points, coarse=False):
     m = _load_roma()
     t0 = time.time()
     Wa, Ha = A.size; Wb, Hb = B.size
     with torch.no_grad():
-        warp, cert = m.match(A, B, device="cuda")
+        up = m.upsample_preds
+        m.upsample_preds = not coarse   # coarse = 只在粗分辨率上配(不做最后那一层细化;量快多少、准多少用)
+        try:
+            warp, cert = m.match(A, B, device="cuda")
+        finally:
+            m.upsample_preds = up
         out = {"ok": True, "samples": [], "points": [], "model": "roma-outdoor"}
         if num and num > 0:
             mt, ct = m.sample(warp, cert, num=int(num))
@@ -296,7 +304,8 @@ class H(BaseHTTPRequestHandler):
                 return
             if self.path == "/match":   # 图先解好(不占锁),再排队用模型
                 A = frame_get(req, "a"); B = frame_get(req, "b")
-            with _lock:
+            lk = _lock_match if self.path == "/match" else (_lock_seg if self.path == "/segment" else _lock)
+            with lk:
                 if self.path == "/track/start":
                     out = track_start(req["image"], req["points"])
                 elif self.path == "/track/step":
@@ -304,7 +313,7 @@ class H(BaseHTTPRequestHandler):
                 elif self.path == "/track/end":
                     out = track_end(int(req["id"]))
                 elif self.path == "/match":
-                    out = match(A, B, int(req.get("num", 0)), req.get("points", []))
+                    out = match(A, B, int(req.get("num", 0)), req.get("points", []), bool(req.get("coarse", False)))
                 elif self.path == "/segment":
                     out = segment(req["image"], req.get("box", []), req.get("points", []))
                 else:

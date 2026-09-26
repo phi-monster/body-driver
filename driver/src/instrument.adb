@@ -107,7 +107,7 @@ package body Instrument is
    end Track_End;
 
    function Match (Host : String; Port : Natural; RGB_A : Buf; W_A, H_A : Natural; RGB_B : Buf; W_B, H_B : Natural;
-                   Pts : Match_Vectors.Vector; Err : out Unbounded_String) return Match_Vectors.Vector is
+                   Pts : Match_Vectors.Vector; Err : out Unbounded_String; Coarse : Boolean := False) return Match_Vectors.Vector is
       Empty, Res : Match_Vectors.Vector;
       Req, Reply, Jerr : Unbounded_String;
       D : Json.Doc;
@@ -126,7 +126,7 @@ package body Instrument is
       Append (Req, Codec.Base64 (Codec.BMP24 (RGB_A, W_A, H_A)));
       Append (Req, """,""b"":""");
       Append (Req, Codec.Base64 (Codec.BMP24 (RGB_B, W_B, H_B)));
-      Append (Req, """,""num"":0,""points"":[");
+      Append (Req, """,""num"":0," & (if Coarse then """coarse"":true," else "") & """points"":[");
       for I in 0 .. Natural (Pts.Length) - 1 loop
          Append (Req, (if I > 0 then "," else "") & "[" & Codec.Fmt (Pts (I).U, 2) & "," & Codec.Fmt (Pts (I).V, 2) & "]");
       end loop;
@@ -202,7 +202,8 @@ package body Instrument is
       end;
    end Frame_Put;
 
-   function Sample_Ids (Host : String; Port : Natural; Ia, Ib : Natural; Num : Natural; Err : out Unbounded_String) return Pair_Vectors.Vector is
+   function Sample_Ids (Host : String; Port : Natural; Ia, Ib : Natural; Num : Natural; Err : out Unbounded_String;
+                        Coarse : Boolean := False) return Pair_Vectors.Vector is
       Empty, Res : Pair_Vectors.Vector;
       Reply, Jerr : Unbounded_String;
       D : Json.Doc;
@@ -212,7 +213,9 @@ package body Instrument is
          Err := To_Unbounded_String ("没配仪器");
          return Empty;
       end if;
-      if not Http_Client.Post (Host, Port, "/match", "{""a_id"":" & Codec.Img (Ia) & ",""b_id"":" & Codec.Img (Ib) & ",""num"":" & Codec.Img (Num) & "}", Reply) then
+      if not Http_Client.Post (Host, Port, "/match", "{""a_id"":" & Codec.Img (Ia) & ",""b_id"":" & Codec.Img (Ib) & ",""num"":" & Codec.Img (Num)
+                               & (if Coarse then ",""coarse"":true" else "") & "}", Reply)
+      then
          Err := To_Unbounded_String ("连不上仪器 " & Host & ":" & Codec.Img (Port));
          return Empty;
       end if;
