@@ -2015,6 +2015,34 @@ package body Jointboot is
                   Fit_Cam (G, G_Rep, Inl);
                   Fx_Placed := True;
                   Wv.Append (World_View'(Id => Fx_Id, Cam => G, Arm => -1, Frame => 0, W => Ds (0).World_Img.W, H => Ds (0).World_Img.H));
+                  --  已经放进世界的别的手,也和这只新放进来的眼配一次(用它最像这只眼的一格;先后不同,证据不能不同)
+                  for P in 1 .. Na - 1 loop
+                     if Placed (P) then
+                        declare
+                           Bf : Integer := -1;
+                           Bs : Long_Float := Long_Float'First;
+                           Idx, Keep : Ints;
+                           Q : Instrument.Match_Vectors.Vector;
+                           U, V, E : Floats;
+                           K_New : constant Natural := Natural (Wv.Length) - 1;
+                        begin
+                           for F of Frames_Of (P) loop
+                              if Id_Of (P, Natural (F)) >= 0 and then Desc_Dot (Id_Of (P, Natural (F)), Fx_Id) > Bs then
+                                 Bs := Desc_Dot (Id_Of (P, Natural (F)), Fx_Id); Bf := F;
+                              end if;
+                           end loop;
+                           if Bf >= 0 then
+                              Pts_In (P, Natural (Bf), Idx, Q);
+                              Match_Pair (Id_Of (P, Natural (Bf)), Fx_Id, Ds (0).World_Img.W, Ds (0).World_Img.H, Q, Keep, U, V, E);
+                              N_Pairs_Of (P) := N_Pairs_Of (P) + 1;
+                              for I in 0 .. Natural (Keep.Length) - 1 loop
+                                 Arm_Obs (P).Append (Arm_Ob'(K => Natural (Idx (Natural (Keep (I)))), Bf => Natural (Bf), Wk => K_New, Ro => G.Pos, Rd => Ray_Fixed (G, U (I), V (I)),
+                                                             U => U (I), V => V (I), Uw => Q (Natural (Keep (I))).U, Vw => Q (Natural (Keep (I))).V, E => E (I)));
+                              end loop;
+                           end if;
+                        end;
+                     end if;
+                  end loop;
                   Say ("放进世界:不长在手上的那只眼 —— 配了 " & Codec.Img (N_Pairs_Fx) & " 对画面,往返 1 px 内共同看见的点 " & Codec.Img (Natural (Cam_Obs.Length))
                        & " 个 ⇒ 焦距 " & Codec.Fmt (G.F, 1) & "、残差 " & Codec.Fmt (G_Rep.Scene_Rms, 2) & " px(进解 " & Codec.Img (G_Rep.Scene_Used) & " / "
                        & Codec.Img (G_Rep.Scene_N) & ")、离桌面 " & Codec.Fmt (abs Dist (G.Pos, Pl0, N0), 3) & " 单位");
@@ -2032,7 +2060,35 @@ package body Jointboot is
                   Wb.S := S; Wb.Ra := R; Wb.Ta := T;
                   Worlds.Replace_Element (Natural (Best), Wb);
                   Placed (Natural (Best)) := True;
-                  Add_Arm_Views (Natural (Best));
+                  declare
+                     K0 : constant Natural := Natural (Wv.Length);
+                  begin
+                     Add_Arm_Views (Natural (Best));
+                     --  已经放进世界的不长在手上的眼,也和这只手新带进来的每一格配一次(同它放进世界时的配法;先后不同,证据不能不同)
+                     if Fx_Placed then
+                        for K in K0 .. Natural (Wv.Length) - 1 loop
+                           declare
+                              Vw : constant World_View := Wv (K);
+                              Idx, Keep : Ints;
+                              Q : Instrument.Match_Vectors.Vector;
+                              U, V, E : Floats;
+                           begin
+                              Pts_In (Natural (Vw.Arm), Vw.Frame, Idx, Q);
+                              Match_Pair (Vw.Id, Fx_Id, Ds (0).World_Img.W, Ds (0).World_Img.H, Q, Keep, U, V, E);
+                              N_Pairs_Fx := N_Pairs_Fx + 1;
+                              for I in 0 .. Natural (Keep.Length) - 1 loop
+                                 declare
+                                    Pt : constant Tri_Pt := Ps (Natural (Vw.Arm)) (Natural (Idx (Natural (Keep (I)))));
+                                 begin
+                                    Cam_Obs.Append (Cam_Ob'(Pa => Natural (Vw.Arm), Pk => Natural (Idx (Natural (Keep (I)))), Wk => K, Uw => Q (Natural (Keep (I))).U,
+                                                            Vw => Q (Natural (Keep (I))).V, Xw => To_World (Natural (Vw.Arm), Pt.X), Cw => Cov_World (Natural (Vw.Arm), Pt.Cov),
+                                                            U => U (I), V => V (I), E => E (I)));
+                                 end;
+                              end loop;
+                           end;
+                        end loop;
+                     end if;
+                  end;
                   for P of Tried loop
                      if Ds (Natural (Best)).Ids.Contains (P.A) then
                         if P.B = Fx_Id then
