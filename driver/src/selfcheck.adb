@@ -4983,6 +4983,30 @@ begin
             end loop;
             Put_Line ("    运动学各步用时(秒:网格 / 精修 / 比例 / 一起解):" & To_String (T));
          end;
+         --  反解:真模型上 20 个随机够得着的位姿(全关节 ±30°),从零位起解,解出的关节角算回去要正好到那儿
+         declare
+            Worst_P, Worst_R : Long_Float := 0.0;
+            Empty : Floats;
+         begin
+            for T in 1 .. 20 loop
+               declare
+                  Qt, Qs : Floats;
+                  Rt2 : M3;
+                  Tt2 : V3;
+                  Pe, Re : Long_Float;
+               begin
+                  for X in 0 .. 5 loop
+                     Qt.Append ((2.0 * U01 - 1.0) * 30.0 * Deg);
+                  end loop;
+                  Kinem.FK (Truth, Qt, Rt2, Tt2);
+                  Kinem.IK (Truth, Rt2, Tt2, Zeros6, Empty, Empty, Qs, Pe, Re);
+                  Worst_P := Long_Float'Max (Worst_P, Pe); Worst_R := Long_Float'Max (Worst_R, Re);
+               end;
+            end loop;
+            Check (Worst_P < 1.0e-6 and then Worst_R < 1.0e-6,
+                   "运动学·反解:20 个随机够得着的位姿(全关节 ±30°)从零位起解,最差还差位置 " & Long_Float'Image (Worst_P) & " m、朝向 "
+                   & Long_Float'Image (Worst_R) & " rad(要 < 1e-6)");
+         end;
          Check (Okf and then abs (Rep.F - F_True) < 0.01 * F_True and then Emed < 1.0 and then Emax < 5.0,
                 "运动学·只给关节读数 + 腕眼配点量出 6 根轴和焦距:焦距 " & Codec.Fmt (Rep.F, 1) & "(真 400,要 1% 内),全关节 ±30° 考试中位 "
                 & Codec.Fmt (Emed, 2) & " mm、最大 " & Codec.Fmt (Emax, 2) & " mm(要 < 1 / < 5 mm)");

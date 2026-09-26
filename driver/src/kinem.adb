@@ -1200,4 +1200,158 @@ package body Kinem is
          Ok := True;
       end;
    end Fit;
+   procedure IK (M : Model; Rt : M3; Tt : V3; Q_Start : Floats; Lo, Hi : Floats; Q : out Floats; Pos_Err, Rot_Err : out Long_Float) is
+      N : constant Natural := M.N;
+      Lam : Long_Float := 1.0e-3;    --  阻尼(无量纲)
+      Up : constant := 10.0;         --  阻尼放大倍数(次数)
+      Dn : constant := 3.0;          --  阻尼缩小倍数(次数)
+      H : constant := 1.0e-6;        --  差分步(弧度,极小量;无量纲)
+      procedure Res (Qq : Floats; R : out Vec) is
+         Rr : M3;
+         Tq : V3;
+      begin
+         FK (M, Qq, Rr, Tq);
+         declare
+            E : constant V3 := Rot_Vec (Mul (Tr (Rr), Rt));
+         begin
+            for K in 0 .. 2 loop
+               R (K) := Tq (K) - Tt (K);
+               R (3 + K) := -E (K);
+            end loop;
+         end;
+      end Res;
+      function Clamp (Qq : Floats) return Floats is
+         Out_Q : Floats := Qq;
+      begin
+         if Natural (Lo.Length) >= N and then Natural (Hi.Length) >= N then
+            for J in 0 .. N - 1 loop
+               Out_Q.Replace_Element (J, Long_Float'Max (Lo (J), Long_Float'Min (Hi (J), Qq (J))));
+            end loop;
+         end if;
+         return Out_Q;
+      end Clamp;
+      function Sq (R : Vec) return Long_Float is
+         S : Long_Float := 0.0;
+      begin
+         for X of R loop
+            S := S + X * X;
+         end loop;
+         return S;
+      end Sq;
+      R0 : Vec (0 .. 5);
+      C0 : Long_Float;
+   begin
+      Q := Clamp (Q_Start);
+      Res (Q, R0);
+      C0 := Sq (R0);
+      for It in 1 .. 200 loop   --  最多 200 步(次数)
+         exit when C0 < 1.0e-20;   --  到了(数值,无量纲)
+         declare
+            Jc : Mat (0 .. 5, 0 .. N - 1);
+            Improved : Boolean := False;
+         begin
+            for J in 0 .. N - 1 loop
+               declare
+                  Qp : Floats := Q;
+                  Rp : Vec (0 .. 5);
+               begin
+                  Qp.Replace_Element (J, Q (J) + H);
+                  Res (Qp, Rp);
+                  for K in 0 .. 5 loop
+                     Jc (K, J) := (Rp (K) - R0 (K)) / H;
+                  end loop;
+               end;
+            end loop;
+            for Try in 1 .. 12 loop   --  一步里最多调 12 次阻尼(次数)
+               declare
+                  A : Mat (0 .. N - 1, 0 .. N - 1) := [others => [others => 0.0]];
+                  B : Vec (0 .. N - 1) := [others => 0.0];
+                  D : Vec (0 .. N - 1) := [others => 0.0];
+                  Qn : Floats;
+                  Rn : Vec (0 .. 5);
+                  Cn : Long_Float;
+               begin
+                  for I in 0 .. N - 1 loop
+                     for J in 0 .. N - 1 loop
+                        for K in 0 .. 5 loop
+                           A (I, J) := A (I, J) + Jc (K, I) * Jc (K, J);
+                        end loop;
+                     end loop;
+                     for K in 0 .. 5 loop
+                        B (I) := B (I) - Jc (K, I) * R0 (K);
+                     end loop;
+                     A (I, I) := A (I, I) * (1.0 + Lam) + Lam;
+                  end loop;
+                  --  高斯消元(列主元)
+                  for Col in 0 .. N - 1 loop
+                     declare
+                        Pv : Natural := Col;
+                     begin
+                        for Rw in Col + 1 .. N - 1 loop
+                           if abs A (Rw, Col) > abs A (Pv, Col) then
+                              Pv := Rw;
+                           end if;
+                        end loop;
+                        if Pv /= Col then
+                           for Cc in 0 .. N - 1 loop
+                              declare
+                                 T : constant Long_Float := A (Col, Cc);
+                              begin
+                                 A (Col, Cc) := A (Pv, Cc); A (Pv, Cc) := T;
+                              end;
+                           end loop;
+                           declare
+                              T : constant Long_Float := B (Col);
+                           begin
+                              B (Col) := B (Pv); B (Pv) := T;
+                           end;
+                        end if;
+                        if abs A (Col, Col) > 1.0e-300 then   --  主元为零保护(数值,无量纲)
+                           for Rw in Col + 1 .. N - 1 loop
+                              declare
+                                 Fct : constant Long_Float := A (Rw, Col) / A (Col, Col);
+                              begin
+                                 for Cc in Col .. N - 1 loop
+                                    A (Rw, Cc) := A (Rw, Cc) - Fct * A (Col, Cc);
+                                 end loop;
+                                 B (Rw) := B (Rw) - Fct * B (Col);
+                              end;
+                           end loop;
+                        end if;
+                     end;
+                  end loop;
+                  for K in reverse 0 .. N - 1 loop
+                     declare
+                        S : Long_Float := B (K);
+                     begin
+                        for Cc in K + 1 .. N - 1 loop
+                           S := S - A (K, Cc) * D (Cc);
+                        end loop;
+                        D (K) := (if abs A (K, K) > 1.0e-300 then S / A (K, K) else 0.0);   --  同上(数值,无量纲)
+                     end;
+                  end loop;
+                  Qn := Q;
+                  for J in 0 .. N - 1 loop
+                     Qn.Replace_Element (J, Q (J) + D (J));
+                  end loop;
+                  Qn := Clamp (Qn);
+                  Res (Qn, Rn);
+                  Cn := Sq (Rn);
+                  if Cn < C0 then
+                     Q := Qn; R0 := Rn;
+                     Improved := C0 - Cn > 1.0e-15 * C0;   --  还在降(比例)
+                     C0 := Cn;
+                     Lam := Long_Float'Max (1.0e-9, Lam / Dn);
+                     exit;
+                  else
+                     Lam := Lam * Up;
+                  end if;
+               end;
+            end loop;
+            exit when not Improved;
+         end;
+      end loop;
+      Pos_Err := Sqrt (R0 (0) ** 2 + R0 (1) ** 2 + R0 (2) ** 2);
+      Rot_Err := Sqrt (R0 (3) ** 2 + R0 (4) ** 2 + R0 (5) ** 2);
+   end IK;
 end Kinem;

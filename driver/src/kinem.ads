@@ -62,4 +62,10 @@ package Kinem is
 
    --  一个配点在模型下的 Sampson 残差(像素)
    function Residual (M : Model; Frames : Frame_Vectors.Vector; C : Corr) return Long_Float;
+
+   --  反解(V1b 3c):想让那只眼到 (Rt, Tt)(参照眼系)⇒ 从 Q_Start 起用阻尼最小二乘解关节读数。
+   --  残差 = 位置差(模型单位)+ 朝向差(弧度 × 模型单位的 1,两者同一个量级:眼的位置均方根钉在 1)。
+   --  Lo / Hi 空 = 不限;不空 = 每个关节的读数不出这个范围(扫描时实际到过的两头)。
+   --  Pos_Err / Rot_Err = 解完还差多少(够不着的目标 = 最近能到的那一个)
+   procedure IK (M : Model; Rt : M3; Tt : V3; Q_Start : Floats; Lo, Hi : Floats; Q : out Floats; Pos_Err, Rot_Err : out Long_Float);
 end Kinem;
