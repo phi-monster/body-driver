@@ -79,6 +79,28 @@ def load_stops():
     return [stops[k] for k in sorted(stops) if "groups" in stops[k]]
 
 
+def load_sweep():
+    """开机关节扫描(V1b 第 2 步):look/sweep.txt 每行 = 图名 臂 关节 方向 第几格 拍数 | 各组关节读数 … || 身体报的手的位姿(只打分)"""
+    p = os.path.join(RUN, "look", "sweep.txt")
+    out = []
+    if not os.path.exists(p):
+        return out
+    for line in open(p):
+        if "||" not in line:
+            continue
+        left, right = line.split("||", 1)
+        parts = left.strip().split("|")
+        h = parts[0].split()
+        nm = h[0]
+        ee = [float(x) for x in right.split()]
+        if len(ee) != 7:
+            continue
+        out.append(dict(n="s" + nm.split("_")[1].split(".")[0], img=os.path.join(RUN, "look", nm), arm=int(h[1]), J=int(h[2]),
+                        D=int(h[3]), K=int(h[4]), steps=int(h[5]), groups=[np.array([float(x) for x in g.split()]) for g in parts[1:]],
+                        pose=np.array(ee), sweep=True))
+    return out
+
+
 def b64(path):
     return base64.b64encode(open(path, "rb").read()).decode()
 
@@ -176,6 +198,94 @@ def rotvec(x):
     return rot(x, a) if a > 1e-12 else np.eye(3)
 
 
+
+def align_eval(W, P, dQ, train, test, Pw, rng):
+    R, t = fk_all(W, P, dQ)
+    # 4) 打分:模型系 → 仿真世界(转 Rg、移 tg、倍数 s)+ 眼相对手的偏移(Rx, tx),只用训练停的真值
+    pw = np.array([p_ for p_, _ in Pw]); Rw = np.array([R_ for _, R_ in Pw])
+    tr = np.array(train)
+    def res_align(x):
+        Rg = rotvec(x[0:3]); Rx = rotvec(x[3:6])
+        s_, tg, tx = x[6], x[7:10], x[10:13]
+        rot_e = log_batch(np.transpose(Rw[tr] @ Rx, (0, 2, 1)) @ (Rg[None] @ R[tr]))
+        pos_e = (s_ * np.einsum('ab,nb->na', Rg, t[tr]) + tg) - (pw[tr] + np.einsum('nab,b->na', Rw[tr], tx))
+        return np.concatenate([0.05 * rot_e.ravel(), pos_e.ravel()])
+    bestA = None
+    for trial in range(40):
+        x0 = np.concatenate([rng.normal(size=3) * math.pi / 2, rng.normal(size=3) * math.pi / 2, [0.1], np.zeros(3), np.zeros(3)])
+        ra = least_squares(res_align, x0, method="lm", max_nfev=4000)
+        if bestA is None or ra.cost < bestA.cost:
+            bestA = ra
+    x = bestA.x
+    Rg = rotvec(x[0:3]); Rx = rotvec(x[3:6])
+    s_, tg, tx = x[6], x[7:10], x[10:13]
+    def err(idx):
+        idx = np.array(idx)
+        dp = (s_ * np.einsum('ab,nb->na', Rg, t[idx]) + tg) - (pw[idx] + np.einsum('nab,b->na', Rw[idx], tx))
+        da = np.degrees(np.linalg.norm(log_batch(np.transpose(Rw[idx] @ Rx, (0, 2, 1)) @ (Rg[None] @ R[idx])), axis=1))
+        return np.linalg.norm(dp, axis=1) * 1000, da
+    etr, atr = err(train); ete, ate = err(test)
+    print("对齐:倍数 %.4f(模型单位 → 米),眼离手 (%.1f, %.1f, %.1f) mm" % (s_, *(1000 * tx)))
+    print("训练停(%d):眼的位置差 中位 %.2f mm、最大 %.2f mm;朝向差 中位 %.3f°" % (len(train), np.median(etr), etr.max(), np.median(atr)))
+    print("考试停(%d,只给关节读数):眼的位置差 中位 %.2f mm、最大 %.2f mm;朝向差 中位 %.3f°、最大 %.3f°" % (len(test), np.median(ete), ete.max(), np.median(ate), ate.max()))
+    print("考试逐停(mm):", np.round(ete, 2).tolist())
+    return Rg, tg, s_, Rx, tx, etr, atr, ete, ate
+
+
+def fit_px(dQ, meas, train, n, W0, P0, f0, cx, cy, per_pair=300):
+    """所有配对的内点像素一起:x_j^T [t_ij]x R_ij x_i = 0,R/t 由转轴 + 关节读数给;焦距是未知数之一。
+    视差太小的对(近乎纯转)只给转动残差(乘焦距换成像素)。尺度按"训练停眼的位置均方根 = 1"钉住"""
+    rs = np.random.default_rng(0)
+    PI, A, B, rot_pairs = [], [], [], []
+    for k, m in enumerate(meas):
+        if m["par"] > 0.3 and "a" in m:
+            idx = np.arange(len(m["a"]))
+            if len(idx) > per_pair:
+                idx = rs.choice(idx, per_pair, replace=False)
+            PI.append(np.full(len(idx), k)); A.append(m["a"][idx]); B.append(m["b"][idx])
+        else:
+            rot_pairs.append(k)
+    PI = np.concatenate(PI); A = np.vstack(A); B = np.vstack(B)
+    I = np.array([m["i"] for m in meas]); J = np.array([m["j"] for m in meas])
+    Rm = np.array([m["R"] for m in meas])
+    rot_pairs = np.array(rot_pairs, int)
+    def res(x):
+        W = x[:3 * n].reshape(n, 3); P = x[3 * n:6 * n].reshape(n, 3); f = math.exp(x[6 * n])
+        R, t = fk_all(W, P, dQ)
+        Rij = np.transpose(R[J], (0, 2, 1)) @ R[I]
+        tij = np.einsum('mab,mb->ma', np.transpose(R[J], (0, 2, 1)), t[I] - t[J])
+        tn = tij / np.maximum(np.linalg.norm(tij, axis=1, keepdims=True), 1e-12)
+        Tx = np.zeros((len(meas), 3, 3))
+        Tx[:, 0, 1] = -tn[:, 2]; Tx[:, 0, 2] = tn[:, 1]; Tx[:, 1, 0] = tn[:, 2]
+        Tx[:, 1, 2] = -tn[:, 0]; Tx[:, 2, 0] = -tn[:, 1]; Tx[:, 2, 1] = tn[:, 0]
+        E = Tx @ Rij
+        x1 = np.c_[(A[:, 0] - cx) / f, (A[:, 1] - cy) / f, np.ones(len(A))]
+        x2 = np.c_[(B[:, 0] - cx) / f, (B[:, 1] - cy) / f, np.ones(len(B))]
+        Ep = E[PI]
+        Ex1 = np.einsum('mab,mb->ma', Ep, x1)
+        Etx2 = np.einsum('mba,mb->ma', Ep, x2)
+        num = np.sum(x2 * Ex1, 1)
+        den = np.sqrt(Ex1[:, 0] ** 2 + Ex1[:, 1] ** 2 + Etx2[:, 0] ** 2 + Etx2[:, 1] ** 2) + 1e-12
+        samp = f * num / den
+        out = [samp]
+        if len(rot_pairs):
+            Er = np.transpose(Rm[rot_pairs], (0, 2, 1)) @ Rij[rot_pairs]
+            out.append(f * log_batch(Er).ravel())
+        reg = np.concatenate([np.linalg.norm(W, axis=1) - 1, np.sum(W * P, 1),
+                              [math.sqrt(np.mean(np.sum(t[train] ** 2, 1))) - 1.0]])
+        out.append(1e3 * reg)
+        return np.concatenate(out)
+    x0 = np.concatenate([W0.ravel(), P0.ravel(), [math.log(f0)]])
+    r = least_squares(res, x0, method="trf", loss="soft_l1", f_scale=1.0, max_nfev=int(os.environ.get("PX_NFEV", "300")), x_scale="jac")
+    print("按像素一起解:迭代 %d 次(%s),代价 %.6g" % (r.nfev, r.message, r.cost))
+    W = r.x[:3 * n].reshape(n, 3); P = r.x[3 * n:6 * n].reshape(n, 3); f = math.exp(r.x[6 * n])
+    W = W / np.linalg.norm(W, axis=1, keepdims=True)
+    rr = res(r.x)
+    samp = np.abs(rr[:len(PI)])
+    print("按像素一起解:%d 个配点、%d 对只给转动;Sampson 残差 中位 %.3f px、九成 %.3f px;焦距 %.1f → %.1f px" %
+          (len(PI), len(rot_pairs), np.median(samp), np.quantile(samp, 0.9), f0, f))
+    return W, P, f
+
 def fit_arm(dQ, meas, train, test, Pw, n, rng, starts=30):
     """一只手:配对量到的相对转动 / 平移方向 ⇒ 转轴;再用训练停的真值对齐,报考试停的误差(毫米)"""
     I = np.array([m["i"] for m in meas]); J = np.array([m["j"] for m in meas])
@@ -241,34 +351,7 @@ def fit_arm(dQ, meas, train, test, Pw, n, rng, starts=30):
     tt = np.degrees(np.arccos(np.clip(cosang[good_t], -1, 1)))
     print("精修后:转动残差中位 %.3f° 最大 %.3f°;平移方向残差中位 %.2f° 最大 %.2f°" % (np.median(rr), rr.max(), np.median(tt) if len(tt) else -1, tt.max() if len(tt) else -1))
 
-    # 4) 打分:模型系 → 仿真世界(转 Rg、移 tg、倍数 s)+ 眼相对手的偏移(Rx, tx),只用训练停的真值
-    pw = np.array([p_ for p_, _ in Pw]); Rw = np.array([R_ for _, R_ in Pw])
-    tr = np.array(train)
-    def res_align(x):
-        Rg = rotvec(x[0:3]); Rx = rotvec(x[3:6])
-        s_, tg, tx = x[6], x[7:10], x[10:13]
-        rot_e = log_batch(np.transpose(Rw[tr] @ Rx, (0, 2, 1)) @ (Rg[None] @ R[tr]))
-        pos_e = (s_ * np.einsum('ab,nb->na', Rg, t[tr]) + tg) - (pw[tr] + np.einsum('nab,b->na', Rw[tr], tx))
-        return np.concatenate([0.05 * rot_e.ravel(), pos_e.ravel()])
-    bestA = None
-    for trial in range(40):
-        x0 = np.concatenate([rng.normal(size=3) * math.pi / 2, rng.normal(size=3) * math.pi / 2, [0.1], np.zeros(3), np.zeros(3)])
-        ra = least_squares(res_align, x0, method="lm", max_nfev=4000)
-        if bestA is None or ra.cost < bestA.cost:
-            bestA = ra
-    x = bestA.x
-    Rg = rotvec(x[0:3]); Rx = rotvec(x[3:6])
-    s_, tg, tx = x[6], x[7:10], x[10:13]
-    def err(idx):
-        idx = np.array(idx)
-        dp = (s_ * np.einsum('ab,nb->na', Rg, t[idx]) + tg) - (pw[idx] + np.einsum('nab,b->na', Rw[idx], tx))
-        da = np.degrees(np.linalg.norm(log_batch(np.transpose(Rw[idx] @ Rx, (0, 2, 1)) @ (Rg[None] @ R[idx])), axis=1))
-        return np.linalg.norm(dp, axis=1) * 1000, da
-    etr, atr = err(train); ete, ate = err(test)
-    print("对齐:倍数 %.4f(模型单位 → 米),眼离手 (%.1f, %.1f, %.1f) mm" % (s_, *(1000 * tx)))
-    print("训练停(%d):眼的位置差 中位 %.2f mm、最大 %.2f mm;朝向差 中位 %.3f°" % (len(train), np.median(etr), etr.max(), np.median(atr)))
-    print("考试停(%d,只给关节读数):眼的位置差 中位 %.2f mm、最大 %.2f mm;朝向差 中位 %.3f°、最大 %.3f°" % (len(test), np.median(ete), ete.max(), np.median(ate), ate.max()))
-    print("考试逐停(mm):", np.round(ete, 2).tolist())
+    Rg, tg, s_, Rx, tx, etr, atr, ete, ate = align_eval(W, P, dQ, train, test, Pw, rng)
     model = dict(W=W, P=P, Rg=Rg, tg=tg, s=s_, Rx=Rx, tx=tx)
     return dict(model=model, fit_rot_med_deg=float(np.median(rr)), fit_dir_med_deg=float(np.median(tt)) if len(tt) else -1.0,
                 train_med_mm=float(np.median(etr)), test_med_mm=float(np.median(ete)), test_max_mm=float(ete.max()),
@@ -358,6 +441,9 @@ def main():
     os.makedirs(OUT, exist_ok=True)
     groups = load_groups()
     stops = load_stops()
+    global sweep
+    sweep = load_sweep()
+    print("扫描帧:", len(sweep))
     geo = json.load(open(GEO))["cams"]
     print("关节组:", groups)
     print("板上的停:", len(stops))
@@ -370,7 +456,23 @@ def main():
         gi = gi[0]
         S = [s for s in stops if s["arm"] == arm]
         cam = S[0]["cam"]
+        SW = [s_ for s_ in sweep if s_["arm"] == arm]
+        if SW:
+            others = [j for j in range(len(SW[0]["groups"])) if j != gi]
+            drift = {j: float(np.degrees(np.max(np.abs(np.array([s_["groups"][j] for s_ in SW]) - SW[0]["groups"][j])))) for j in others}
+            print("扫描帧 %d 张;扫这只手时别的关节组最多漂了(度):%s" % (len(SW), {groups[j]: round(v, 3) for j, v in drift.items()}))
+            runs = {}
+            for s_ in SW:
+                runs.setdefault((s_["J"], s_["D"]), []).append(s_)
+            for (j_, d_), rr in sorted(runs.items()):
+                if j_ == 0 and d_ == 0:
+                    continue
+                q = np.array([r_["groups"][gi][j_] for r_ in rr])
+                print("  关节 %d 往%s:%d 格,读数从起点转了 %.1f°(最后一格)" % (j_, "正" if d_ > 0 else "负", len(rr), np.degrees(q[-1] - SW[0]["groups"][gi][j_])))
         f, cx, cy = geo[cam]["f"], geo[cam]["cx"], geo[cam]["cy"]
+        if os.environ.get("F0"):
+            print("焦距起点改成 %s(驱动量的是 %.1f,只当对照)" % (os.environ["F0"], f))
+            f = float(os.environ["F0"])
         K = np.array([[f, 0, cx], [0, f, cy], [0, 0, 1.0]])
         Q = np.array([s["groups"][gi] for s in S])
         n = Q.shape[1]
@@ -382,9 +484,16 @@ def main():
         nb = len(S)
         idx = list(range(nb))
         test = [i for i in idx if i % 3 == 2]
+        n_board = len(S)
+        for s_ in SW:
+            S.append(s_)
         extra = extra_frames(arm, gi, cam, S, int(os.environ.get("EXTRA", "0")))
         for e in extra:
             S.append(e)
+        if SW:
+            Q = np.array([s["groups"][gi] for s in S]); dQ = Q - q0
+            print("加进扫描帧 %d 张 ⇒ 训练里每个关节转过的范围(度):" % len(SW),
+                  np.round(np.degrees(dQ[[i for i in range(len(S)) if i not in test]].max(0) - dQ[[i for i in range(len(S)) if i not in test]].min(0)), 1).tolist())
         if extra:
             Q = np.array([s["groups"][gi] for s in S]); dQ = Q - q0
             print("加进录像里关节离得远的静止帧 %d 个 ⇒ 训练停里每个关节转过的范围(度):" % len(extra),
@@ -397,9 +506,24 @@ def main():
             dd = sorted(((np.max(np.abs(dQ[i] - dQ[j])), j) for j in train if j != i))
             for _, j in dd[:NN]:
                 pairs.add((min(i, j), max(i, j)))
+        # 扫描:每一格和上一格(同一个关节同一个方向)、每一格和扫描起点
+        sw_idx = [i for i in range(len(S)) if S[i].get("sweep")]
+        if sw_idx:
+            start = [i for i in sw_idx if S[i]["J"] == 0 and S[i]["D"] == 0 and S[i]["K"] == 0]
+            st = start[0] if start else sw_idx[0]
+            prev = {}
+            for i in sw_idx:
+                if i == st:
+                    continue
+                key = (S[i]["J"], S[i]["D"])
+                a_ = prev.get(key, st)
+                pairs.add((min(a_, i), max(a_, i)))
+                pairs.add((min(st, i), max(st, i)))
+                prev[key] = i
         pairs = sorted(pairs)
         random.Random(SEED).shuffle(pairs)
         pairs = pairs[:MAXPAIRS]
+        print("配对候选 %d" % len(pairs))
         t0 = time.time()
         raw = {}
         for k, (i, j) in enumerate(pairs):
@@ -430,7 +554,7 @@ def main():
                 ra = np.c_[xa, np.ones(len(xa))]; rb = np.c_[xb, np.ones(len(xb))]
                 ra /= np.linalg.norm(ra, axis=1, keepdims=True); rb /= np.linalg.norm(rb, axis=1, keepdims=True)
                 par = np.degrees(np.median(np.arccos(np.clip(np.sum((ra @ R.T) * rb, 1), -1, 1))))
-                out.append(dict(i=i, j=j, R=R, t=t.ravel() / np.linalg.norm(t), ninl=int(ninl), par=par))
+                out.append(dict(i=i, j=j, R=R, t=t.ravel() / np.linalg.norm(t), ninl=int(ninl), par=par, a=a[m], b=b[m]))
             return out
         meas = build_meas(K)
         print("可用配对:%d / %d" % (len(meas), len(pairs)))
@@ -450,6 +574,13 @@ def main():
             print("  焦距 %.1f:拟合残差 转动 %.4f° / 平移方向 %.3f°(不看真值) · 考试停误差 中位 %.2f mm(看真值)" % (Kf[0, 0], rf["fit_rot_med_deg"], rf["fit_dir_med_deg"], rf["test_med_mm"]), flush=True)
         res["focal_scan"] = scan
         res["extrap"] = eval_frames(arm, gi, q0, Q[train], res["model"])
+        if os.environ.get("PX", "0") != "0":
+            print("—— 按像素一起解(转轴 + 焦距),从两两那一份起步 ——")
+            Wp, Pp, fp = fit_px(dQ, meas, train, n, res["model"]["W"], res["model"]["P"], f, cx, cy)
+            Rg, tg, s_, Rx, tx, etr, atr, ete, ate = align_eval(Wp, Pp, dQ, train, test, Pw, rng)
+            mp = dict(W=Wp, P=Pp, Rg=Rg, tg=tg, s=s_, Rx=Rx, tx=tx)
+            res["px"] = dict(focal=fp, train_med_mm=float(np.median(etr)), test_med_mm=float(np.median(ete)), test_max_mm=float(ete.max()),
+                             extrap=eval_frames(arm, gi, q0, Q[train], mp))
         res.pop("model")
         res.update(stops=len(S), pairs=len(meas), train=len(train), test=len(test), joint_range_deg=np.degrees(dQ.max(0) - dQ.min(0)).round(2).tolist())
         report[arm] = res

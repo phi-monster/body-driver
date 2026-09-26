@@ -11352,7 +11352,8 @@ package body Act is
    --  ① 哪组关节读数是这只手的:这只手往上挪一个探针幅度,读数跟着变的那组(按量的,不按名字);挪回去。
    --  ② 每个关节、两个方向:从此刻的读数起一格一格转(一格 = 此刻读数量级的百分之一起步,按画面挪了多少放大 / 缩小,
    --     目标是每格画面挪画幅宽的 1/16 —— 比例,无量纲);每格停稳后落盘画面 + 关节读数(+ 身体报的手的位姿,只给离线打分,驱动不用)。
-   --     这一格关节没转到命令的三分之一(到头 / 被顶住,比例)或者走满 12 格(次数)就停,转回起点。
+   --     这一格关节没转到命令的三分之一(到头 / 被顶住,比例)、别的关节被顶离起点超过这一格的三分之一(碰上东西,同一个比例)、
+   --     或者走满 12 格(次数)就停,转回起点。
    procedure Geo_Boot_Sweep (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context) is
       Dump : constant String := Codec.Env ("BL_DUMP");
       Host : constant String := To_String (C.Inst_Host);
@@ -11510,10 +11511,23 @@ package body Act is
                                        declare
                                           Got : constant Long_Float := abs (F.Joints (G) (J) - Q_Prev);
                                           Fl : constant Long_Float := Flow_Px (Prev, F.Cams (Cam), Top);
+                                          --  别的关节离它们的目标(起点读数)最远多少:碰上东西时被扫的关节还在转、别的关节被顶偏
+                                          --  (V1B2 2026-09-26:扫肩往前,手降到最低以后肘一格一格被顶偏到 22°,原来只看被扫的那个关节,没停)
+                                          Pushed : Long_Float := 0.0;
+                                          Kp : Natural := 0;
                                        begin
+                                          for X in 0 .. Natural (Q0.Length) - 1 loop
+                                             if X /= J and then X < Natural (F.Joints (G).Length) and then abs (F.Joints (G) (X) - Q0 (X)) > Pushed then
+                                                Pushed := abs (F.Joints (G) (X) - Q0 (X)); Kp := X;
+                                             end if;
+                                          end loop;
                                           Log_Step (A, J, D, K, Cam);
                                           if 3.0 * Got < Step then   --  没转到命令的三分之一(比例):到头 / 被顶住
                                              Why := S ("关节到头或被顶住(命令 " & Codec.Fmt (Step, 4) & ",实到 " & Codec.Fmt (Got, 4) & ")");
+                                             exit;
+                                          end if;
+                                          if 3.0 * Pushed > Step then   --  别的关节被顶偏超过这一格的三分之一(比例,同上一条):碰上东西了,不再往里压
+                                             Why := S ("碰上东西了:第" & Codec.Img (Kp) & " 个关节被顶偏 " & Codec.Fmt (Pushed, 4) & "(这一格命令 " & Codec.Fmt (Step, 4) & ")");
                                              exit;
                                           end if;
                                           if Fl > 0.0 then
