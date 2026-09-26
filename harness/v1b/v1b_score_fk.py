@@ -112,7 +112,7 @@ if os.path.exists(sp):
             if best is None or r.cost < best.cost: best = r
         x = best.x
         Rg = rv(x[0:3]); s = x[6]; tg = x[7:10]; tx = x[10:13]
-        FITS[arm] = (s, Rg, tg)
+        FITS[arm] = (s, Rg, tg, rv(x[3:6]), x[10:13])
         def e2(idx):
             return np.linalg.norm((s * (Tf[idx] @ Rg.T) + tg) - (Tp[idx] + np.einsum('nab,b->na', Rt[idx], tx)), axis=1) * 1000
         et, ee_ = e2(trn), e2(tst)
@@ -157,7 +157,7 @@ for arm in range(1, 4):
         continue
     h = open(ap).readline().split()
     S = float(h[1]); R = np.array([float(v) for v in h[3:12]]).reshape(3, 3); T = np.array([float(v) for v in h[13:16]])
-    s0, Rg0, tg0 = FITS[0]; sk, Rgk, tgk = FITS[arm]
+    s0, Rg0, tg0 = FITS[0][:3]; sk, Rgk, tgk = FITS[arm][:3]
     St = sk / s0; Rt_ = Rg0.T @ Rgk; Tt = Rg0.T @ (tgk - tg0) / s0
     ang = math.degrees(np.linalg.norm(logR(R.T @ Rt_)))
     print("对齐 · 第 %d 只手 → 第 0 只手:长度倍数 驱动 %.4f / 真 %.4f(差 %.1f%%)· 转动差 %.2f° · 平移 驱动 (%.3f, %.3f, %.3f) / 真 (%.3f, %.3f, %.3f) 单位(差 %.1f mm)" %
@@ -207,7 +207,32 @@ fp = os.path.join(KDIR, "fixed_eye.txt")
 if os.path.exists(fp) and 0 in FITS:
     f_ = open(fp).read().split()
     fx = float(f_[1]); pos = np.array([float(v) for v in f_[f_.index("pos") + 1:f_.index("pos") + 4]])
-    s0, Rg0, tg0 = FITS[0]
+    s0, Rg0, tg0 = FITS[0][:3]
     pw = s0 * (Rg0 @ pos) + tg0
     print("不动的眼:焦距 %.1f(仿真 x5 头顶眼 288.1)· 位置 (%.3f, %.3f, %.3f) m(X5E 读位姿那一版标的 (0.000, -0.412, 1.310))· 残差 %s px · 进解 %s / %s" %
           (fx, pw[0], pw[1], pw[2], f_[f_.index("rms") + 1], f_[f_.index("used") + 1], f_[f_.index("of") + 1]))
+
+# ── 第五种考法(V1b ②):开机自检让手走到没去过的地方(look/ik_check.txt:世界系的目标、按读数算到的、身体报的真值)⇒ 目标换到仿真米,和真的眼比 ──
+ip = os.path.join(KDIR, "ik_check.txt"); wp = os.path.join(KDIR, "world.txt")
+if os.path.exists(ip) and os.path.exists(wp) and 0 in FITS:
+    wv = [float(v) for v in open(wp).read().split()]; Rw = np.array(wv[:9]).reshape(3, 3); Ow = np.array(wv[9:12])
+    s0, Rg0, tg0 = FITS[0][:3]
+    w2s = lambda p: s0 * (Rg0 @ (Rw.T @ p + Ow)) + tg0
+    per = {}
+    for l in open(ip):
+        if "||" not in l: continue
+        left, right = l.split("||", 1); parts = left.split("|"); h = parts[0].split()
+        a, sw = int(h[0]), int(h[1])
+        tgt = np.array([float(v) for v in parts[1].split()]); got = np.array([float(v) for v in parts[2].split()])
+        tr = np.array([float(v) for v in right.split()])
+        if len(tr) != 7 or sw not in FITS: continue
+        RxA, txA = FITS[sw][3], FITS[sw][4]
+        cam = tr[:3] + qR(tr[3:]) @ txA
+        e_t = 1000 * np.linalg.norm(w2s(tgt[:3]) - cam); e_g = 1000 * np.linalg.norm(w2s(got[:3]) - cam)
+        Rt_sim = Rg0 @ Rw.T @ qR(tgt[3:]); Rc = qR(tr[3:]) @ RxA
+        ang = math.degrees(np.linalg.norm(logR(Rc.T @ Rt_sim)))
+        per.setdefault(sw, []).append((e_t, e_g, ang))
+    for sw, v in sorted(per.items()):
+        v = np.array(v)
+        print("V1b ② · 第 %d 只手走到没去过的 %d 处:真的眼离目标 %s mm(最大 %.1f)· 朝向差 %s° · 按读数算的位置离真的眼 %s mm" %
+              (sw, len(v), " ".join("%.1f" % x for x in v[:, 0]), v[:, 0].max(), " ".join("%.2f" % x for x in v[:, 2]), " ".join("%.1f" % x for x in v[:, 1])))

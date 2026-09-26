@@ -67,6 +67,7 @@ package Jointboot is
       Ta : Geom.V3 := [0.0, 0.0, 0.0];
       Lo, Hi : Floats;                        --  扫描时每个关节实际到过的两头(反解不出这个范围:只去量过的地方)
       Valid : Boolean := False;
+      Sweep : Natural := 0;                   --  扫描数据(Sweep_All 的 Ds)里是第几只手
    end record;
    package Arm_World_Vectors is new Ada.Containers.Vectors (Natural, Arm_World);
    --  Dump 非空 = 落盘 align_arm<k>.txt(第一行 = 相似变换;每一条配点:世界里哪只眼(第几只手、第几格;-1 = 不长在手上的眼)、这只手的第几个三角点、
@@ -80,4 +81,8 @@ package Jointboot is
    --  插头的两个钩子(Install 登记)
    procedure Pose_Hook (F : in out Plug.Frame);
    procedure Cmd_Hook (C : in out Plug.Cmd; Ok : out Boolean);
+   --  开机自检(V1b 的 ②):每只装上的手走到扫描时没去过的几处 —— 两格"几个关节一起动"的读数的正中(每个关节都在量过的范围里),
+   --  按运动学算出那一处眼的位姿当位姿命令发(插头按运动学解成关节目标,同干活时那条路),停稳后记:目标、反解还差多少、实到的读数。
+   --  身体报的位姿只落盘给离线打分(Dump/ik_check.txt),驱动不读
+   procedure Self_Check (L : in out Plug.Link; F : in out Plug.Frame; M : Selfmap.Body_Map; Ds : Sweep_Vectors.Vector; Dump : String);
 end Jointboot;

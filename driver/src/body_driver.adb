@@ -168,6 +168,7 @@ begin
                W : Jointboot.Arm_World;
             begin
                W.Group := Found (A).Group;
+               W.Sweep := A;
                W.Model := Ms (A);
                W.Valid := Oks (A);
                if Found (A).Eye < 0 then
@@ -205,6 +206,7 @@ begin
          Put_Line ("[链] 装上以后取不到画面,退出");
          return;
       end if;
+      Jointboot.Self_Check (L, F, M0, Ds, Dump);
       Put_Line ("[装] 开机前半段完:" & Codec.Img (Natural (F.EE.Length)) & " 只手的位姿按关节读数算(用了 " & Codec.Img (Plug.Steps (L)) & " 拍)");
    end;
    --  ── 量身体:先装回身体文件(钥匙 = 这具身体报的形状),推一下核对;对不上或没有 ⇒ 从零量;量到的合进历史再写回 ──
