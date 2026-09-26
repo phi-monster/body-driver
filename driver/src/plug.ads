@@ -64,6 +64,12 @@ package Plug is
    procedure Boot (Port : Natural; L : in out Link; Ok : out Boolean);
    function Sense (L : in out Link; F : out Frame) return Boolean;
    function Act (L : in out Link; C : Cmd) return Boolean;
+   --  V1b 3c(2026-09-26):身体报的"手在哪"驱动不读。运动学量好以后,每一帧手的位姿由上面按关节读数算好填进来(Pose_Hook,
+   --  Sense 收完一帧最后调它),发下来的位姿命令由上面解成关节目标(Cmd_Hook:把 Kind 换成 Joint、填好 Arm / Group / Q / Jaw;
+   --  Ok = False = 解不出来,这条命令不发)。Plug 不认识运动学(Kinem 用 Geom,Geom 用 Plug)⇒ 由上面登记;null = 不换
+   type Pose_Hook is access procedure (F : in out Frame);
+   type Cmd_Hook is access procedure (C : in out Cmd; Ok : out Boolean);
+   procedure Set_Hooks (P : Pose_Hook; Q : Cmd_Hook);
    function Take_Reset (L : in out Link) return Boolean;
    --  只看不清:对方是不是刚复位了(新的一集)。走路的那些段每一步看一眼,复位了就当场收段,不把这一段的动作发到新的一集里
    function Reset_Pending (L : Link) return Boolean;

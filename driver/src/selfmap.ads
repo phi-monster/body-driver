@@ -31,6 +31,7 @@ package Selfmap is
       EE_Noise : Long_Float := 0.0;        --  本体位置读数抖多少(米)
       Rot_Noise : Long_Float := 0.0;       --  本体姿态读数抖多少(弧度)
       Jaw_Noise : Long_Float := 0.0;
+      Joint_Noise : Long_Float := 0.0;     --  关节读数不动时抖多少(读数的单位;V1b 2026-09-26:按关节目标挪手时"停稳"看它)
 
       Floors : Floor_Vectors.Vector;       --  每台相机的静止噪声地板
       Pic_Floor : Ints;                    --  每台相机:整幅画静止时最大灰度差

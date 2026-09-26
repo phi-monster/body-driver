@@ -8,6 +8,13 @@ package body Plug is
    function U32_To_F32 is new Ada.Unchecked_Conversion (Unsigned_32, Float);
    use type Websocket.Op;
 
+   Hook_P : Pose_Hook := null;
+   Hook_C : Cmd_Hook := null;
+   procedure Set_Hooks (P : Pose_Hook; Q : Cmd_Hook) is
+   begin
+      Hook_P := P; Hook_C := Q;
+   end Set_Hooks;
+
    function Arms (L : Link) return Natural is
    begin
       if not L.Lay.EE.Is_Empty then
@@ -430,10 +437,28 @@ package body Plug is
                    " s · 相机" & Natural'Image (Natural (F.Cams.Length)) & " 台");
          L.Wait_Us := 0.0; L.Parse_Us := 0.0;
       end if;
+      if Hook_P /= null then
+         Hook_P (F);
+      end if;
       return True;
    end Sense;
 
+   function Act_Raw (L : in out Link; C : Cmd) return Boolean;
    function Act (L : in out Link; C : Cmd) return Boolean is
+   begin
+      if C.Kind = Ee and then Hook_C /= null then
+         declare
+            Cj : Cmd := C;
+            Ok : Boolean;
+         begin
+            Hook_C (Cj, Ok);
+            return Ok and then Act_Raw (L, Cj);
+         end;
+      end if;
+      return Act_Raw (L, C);
+   end Act;
+
+   function Act_Raw (L : in out Link; C : Cmd) return Boolean is
       S : Buf;
       N : constant Natural := Arms (L);
    begin
@@ -579,5 +604,5 @@ package body Plug is
       end loop;
       L.Pending := S; L.Has_Pending := True;
       return True;
-   end Act;
+   end Act_Raw;
 end Plug;

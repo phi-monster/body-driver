@@ -84,6 +84,7 @@ package body Selfmap is
       Still : Natural := 0;
       Send : Boolean := True;
       Halted : Boolean := False;
+      Prev_Q : Floats := (if Group >= 0 and then Group < Natural (F.Joints.Length) then F.Joints (Group) else F64_Vectors.Empty_Vector);
    begin
       Delivered := Table.Zero_Vec;
       Frames := 0;
@@ -104,6 +105,21 @@ package body Selfmap is
             return;
          end if;
          Frames := Frames + 1;
+         --  关节目标(Group >= 0):"停稳"看这一组关节读数(不看位姿:只报关节的身体没有位姿读数)
+         if Group >= 0 and then Group < Natural (F.Joints.Length) then
+            declare
+               Moved : Long_Float := 0.0;
+            begin
+               if Natural (Prev_Q.Length) = Natural (F.Joints (Group).Length) then
+                  for K in 0 .. Natural (Prev_Q.Length) - 1 loop
+                     Moved := Long_Float'Max (Moved, abs (F.Joints (Group) (K) - Prev_Q (K)));
+                  end loop;
+                  Still := (if Moved <= M.Joint_Noise then Still + 1 else 0);
+               end if;
+               Prev_Q := F.Joints (Group);
+            end;
+            exit when (Still >= 2 and then Frames >= M.Settle) or else Frames >= 12 + M.Settle or else (Quick and then Frames >= M.Settle);
+         else
          exit when Arm >= Natural (F.EE.Length);
          --  途中每一拍看一眼:出事就把目标改成"停在此刻的位姿",同一条发命令的路再发一次
          if Watch /= null and then not Halted and then Watch (F) then
@@ -128,6 +144,7 @@ package body Selfmap is
             Prev := F.EE (Arm);
          end;
          exit when (Still >= 2 and then Frames >= M.Settle) or else Frames >= 12 + M.Settle or else (Quick and then Frames >= M.Settle);
+         end if;
       end loop;
       if Arm < Natural (F.EE.Length) then
          Delivered := Chan.Delivered (P0, F.EE (Arm));
@@ -217,6 +234,7 @@ package body Selfmap is
       declare
          Prev_EE : Plug.Pose_Vectors.Vector := F.EE;
          Prev_Jaw : Plug.Floats_Vectors.Vector := F.Jaw;
+         Prev_Q : Plug.Floats_Vectors.Vector := F.Joints;
          Prev_Gray : Plug.Cam_Vectors.Vector := F.Cams;
       begin
          for K in 1 .. 4 loop
@@ -238,7 +256,12 @@ package body Selfmap is
                   end loop;
                end if;
             end loop;
-            Prev_EE := F.EE; Prev_Jaw := F.Jaw;
+            for G in 0 .. Natural'Min (Natural (F.Joints.Length), Natural (Prev_Q.Length)) - 1 loop
+               for K2 in 0 .. Natural'Min (Natural (F.Joints (G).Length), Natural (Prev_Q (G).Length)) - 1 loop
+                  M.Joint_Noise := Long_Float'Max (M.Joint_Noise, abs (F.Joints (G) (K2) - Prev_Q (G) (K2)));
+               end loop;
+            end loop;
+            Prev_EE := F.EE; Prev_Jaw := F.Jaw; Prev_Q := F.Joints;
             if K < 4 then
                Prev_Gray := F.Cams;
             end if;
