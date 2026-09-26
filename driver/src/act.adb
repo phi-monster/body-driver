@@ -11358,6 +11358,18 @@ package body Act is
       Dump : constant String := Codec.Env ("BL_DUMP");
       Host : constant String := To_String (C.Inst_Host);
       N_Img : Natural := 0;
+      --  这只手扫描的每一格(V1b 3b):关节读数 + 扫的是哪个关节(起点 = -1)+ 手上那只眼的画面 + 第几段(同一个关节同一个方向算一段,起点 = 0)
+      Kf : Kinem.Frame_Vectors.Vector;
+      Ki : Plug.Cam_Vectors.Vector;
+      Kr : Int_Vectors.Vector;
+      procedure Keep_Frame (G : Natural; J : Natural; D : Integer; K : Natural; Cam : Natural) is
+      begin
+         if G < Natural (F.Joints.Length) and then Cam < Natural (F.Cams.Length) then
+            Kf.Append (Kinem.Frame_Info'(Q => F.Joints (G), Joint => (if K = 0 then -1 else Integer (J))));
+            Ki.Append (F.Cams (Cam));
+            Kr.Append (if K = 0 then 0 else 1 + 2 * Integer (J) + (if D > 0 then 1 else 0));
+         end if;
+      end Keep_Frame;
       --  关节目标也走唯一那条挪手的路(Selfmap.Go),等它稳的办法同一种
       procedure Go_Joints (G : Natural; A : Natural; Q : Floats; Ok : out Boolean) is
          Dl : Table.Vec;
@@ -11435,6 +11447,149 @@ package body Act is
          Sorting.Sort (D);
          return D (Natural (D.Length) / 2);
       end Flow_Px;
+      --  V1b 3b:这只手扫描的全部格子两两配点(起点 ↔ 每一格、同一段相邻两格、关节读数上最近的 4 格),交给 Kinem.Fit 量它的运动学。
+      --  只记、不用(C.Kins);落盘 kinem_arm<k>.txt 给离线拿仿真真值打分。手指那一截(握区框的上沿以下)跟着眼一起不动,配点不要它
+      procedure Fit_Arm (A, Cam, Top : Natural) is
+         Nf : constant Natural := Natural (Kf.Length);
+         Cs : Kinem.Corr_Vectors.Vector;
+         Pts : Instrument.Match_Vectors.Vector;
+         Gx : constant Natural := 32;   --  每一对配 32 × 12 个格点(采样密度,次数)
+         Gy : constant Natural := 12;
+         Done : array (0 .. Natural'Max (1, Nf) - 1, 0 .. Natural'Max (1, Nf) - 1) of Boolean := [others => [others => False]];
+         N_Pairs, N_Empty : Natural := 0;
+         T0 : constant Ada.Calendar.Time := Ada.Calendar.Clock;
+         procedure Pair (I0, J0 : Natural) is
+            I : constant Natural := Natural'Min (I0, J0);
+            J : constant Natural := Natural'Max (I0, J0);
+            Err : Unbounded_String;
+         begin
+            if I = J or else Done (I, J) then
+               return;
+            end if;
+            Done (I, J) := True;
+            N_Pairs := N_Pairs + 1;
+            declare
+               R : constant Instrument.Match_Vectors.Vector :=
+                 Instrument.Match (Host, C.Inst_Port, Ki (I).RGB, Ki (I).W, Ki (I).H, Ki (J).RGB, Ki (J).W, Ki (J).H, Pts, Err);
+               Got : Natural := 0;
+            begin
+               if Natural (R.Length) = Natural (Pts.Length) then
+                  for P in 0 .. Natural (Pts.Length) - 1 loop
+                     if R (P).U >= 0.0 and then R (P).U < Long_Float (Ki (J).W) and then R (P).V >= 0.0 and then R (P).V < Long_Float (Top) then
+                        Cs.Append (Kinem.Corr'(I => I, J => J, Ua => Pts (P).U, Va => Pts (P).V, Ub => R (P).U, Vb => R (P).V));
+                        Got := Got + 1;
+                     end if;
+                  end loop;
+               end if;
+               if Got = 0 then
+                  N_Empty := N_Empty + 1;
+               end if;
+            end;
+         end Pair;
+         M : Kinem.Model;
+         Rep : Kinem.Fit_Report;
+         Okf : Boolean;
+      begin
+         if Nf < 3 or else Host = "" or else Top = 0 then
+            Geo_Say ("  运动学 · 第" & Codec.Img (A + 1) & " 只手:扫描格子太少 / 没配配点仪器 ⇒ 不量");
+            return;
+         end if;
+         for Iy in 0 .. Gy - 1 loop
+            for Ix in 0 .. Gx - 1 loop
+               Pts.Append (Instrument.Match_Pt'(U => (Long_Float (Ix) + 0.5) * Long_Float (Ki (0).W) / Long_Float (Gx),
+                                                V => (Long_Float (Iy) + 0.5) * Long_Float (Top) / Long_Float (Gy), Cert => 0.0));
+            end loop;
+         end loop;
+         for K in 1 .. Nf - 1 loop
+            Pair (0, K);
+            if Kr (K) = Kr (K - 1) then
+               Pair (K - 1, K);
+            end if;
+         end loop;
+         for K in 0 .. Nf - 1 loop
+            declare
+               type Dk is record
+                  D : Long_Float := Long_Float'Last;
+                  J : Natural := 0;
+               end record;
+               Best : array (0 .. 3) of Dk;   --  最近的 4 格(次数)
+            begin
+               for J in 0 .. Nf - 1 loop
+                  if J /= K then
+                     declare
+                        Dm : Long_Float := 0.0;
+                     begin
+                        for X in 0 .. Natural'Min (Natural (Kf (K).Q.Length), Natural (Kf (J).Q.Length)) - 1 loop
+                           Dm := Long_Float'Max (Dm, abs (Kf (K).Q (X) - Kf (J).Q (X)));
+                        end loop;
+                        for B in Best'Range loop
+                           if Dm < Best (B).D then
+                              for Cc in reverse B + 1 .. Best'Last loop
+                                 Best (Cc) := Best (Cc - 1);
+                              end loop;
+                              Best (B) := (Dm, J);
+                              exit;
+                           end if;
+                        end loop;
+                     end;
+                  end if;
+               end loop;
+               for B of Best loop
+                  if B.D < Long_Float'Last then
+                     Pair (K, B.J);
+                  end if;
+               end loop;
+            end;
+         end loop;
+         Geo_Say ("  运动学 · 第" & Codec.Img (A + 1) & " 只手:" & Codec.Img (Nf) & " 格两两配了 " & Codec.Img (N_Pairs) & " 对(" & Codec.Img (N_Empty)
+                  & " 对配不上),配点 " & Codec.Img (Natural (Cs.Length)) & " 个(" & Codec.Fmt (Long_Float (Ada.Calendar.Clock - T0), 0) & " 秒)⇒ 解");
+         Kinem.Fit (Kf, 0, Cs, Long_Float (Ki (0).W) / 2.0, Long_Float (Ki (0).H) / 2.0, Long_Float (Ki (0).W), M, Rep, Okf);
+         declare
+            T : Unbounded_String;
+         begin
+            for J in 0 .. Natural (Rep.Joint_Med.Length) - 1 loop
+               Append (T, " " & Codec.Fmt (Rep.Joint_Med (J), 3) & "(" & Codec.Img (Rep.Joint_Frames (J)) & " 格)");
+            end loop;
+            Geo_Say ("  运动学 · 第" & Codec.Img (A + 1) & " 只手:" & (if Okf then "量成" else "没量成") & " · 每根轴单独的残差中位(像素):" & To_String (T));
+            T := Null_Unbounded_String;
+            for X of Rep.Rho loop
+               Append (T, " " & Codec.Fmt (X, 3));
+            end loop;
+            Append (T, " · 各步秒数");
+            for X of Rep.Secs loop
+               Append (T, " " & Codec.Fmt (X, 1));
+            end loop;
+            Geo_Say ("    焦距 起步 " & Codec.Fmt (Rep.F_Start, 1) & " → " & Codec.Fmt (Rep.F, 1) & " · 一起解的残差中位 " & Codec.Fmt (Rep.Med_Px, 3) & " px、九成 "
+                     & Codec.Fmt (Rep.P90_Px, 3) & " px · 内点 " & Codec.Img (Rep.N_Used) & " / " & Codec.Img (Rep.N_Corr) & " · 各轴远近比例(以第"
+                     & Codec.Img (Rep.Ref_Joint) & " 根为 1):" & To_String (T) & (if Rep.Flipped then " · 平移反过一次号" else ""));
+         end;
+         while Natural (C.Kins.Length) <= A loop
+            C.Kins.Append (Kinem.Model'(others => <>));
+         end loop;
+         C.Kins.Replace_Element (A, M);
+         if Dump /= "" and then Okf then
+            declare
+               Fo : Ada.Text_IO.File_Type;
+            begin
+               Ada.Text_IO.Create (Fo, Ada.Text_IO.Out_File, Dump & "/kinem_arm" & Codec.Img (A) & ".txt");
+               Ada.Text_IO.Put_Line (Fo, "arm " & Codec.Img (A) & " cam " & Codec.Img (Cam) & " n " & Codec.Img (M.N) & " f " & Codec.Fmt (M.F, 6)
+                                     & " cx " & Codec.Fmt (M.Cx, 3) & " cy " & Codec.Fmt (M.Cy, 3));
+               Ada.Text_IO.Put (Fo, "q0");
+               for X of M.Q0 loop
+                  Ada.Text_IO.Put (Fo, " " & Codec.Fmt (X, 9));
+               end loop;
+               Ada.Text_IO.New_Line (Fo);
+               for J in 0 .. M.N - 1 loop
+                  Ada.Text_IO.Put_Line (Fo, "axis " & Codec.Img (J) & " " & Codec.Fmt (M.Ax (J).W (0), 9) & " " & Codec.Fmt (M.Ax (J).W (1), 9) & " "
+                                        & Codec.Fmt (M.Ax (J).W (2), 9) & " " & Codec.Fmt (M.Ax (J).P (0), 9) & " " & Codec.Fmt (M.Ax (J).P (1), 9) & " "
+                                        & Codec.Fmt (M.Ax (J).P (2), 9));
+               end loop;
+               Ada.Text_IO.Close (Fo);
+            exception
+               when others => null;
+            end;
+         end if;
+      end Fit_Arm;
    begin
       if C.Board_Stops.Is_Empty then
          Geo_Say ("关节扫描:这次开机没从零标(身体文件装回来)⇒ 不扫");
@@ -11486,7 +11641,9 @@ package body Act is
                      begin
                         Geo_Say ("关节扫描 · 第" & Codec.Img (A + 1) & " 只手:它的关节读数是第" & Codec.Img (G) & " 组(" & Codec.Img (Natural (Q0.Length))
                                  & " 个),眼 = 第" & Codec.Img (Cam) & " 台;每个关节两个方向一格一格转");
+                        Kf.Clear; Ki.Clear; Kr.Clear;
                         Log_Step (A, 0, 0, 0, Cam);
+                        Keep_Frame (Natural (G), 0, 0, 0, Cam);
                         for J in 0 .. Natural (Q0.Length) - 1 loop
                            for D in -1 .. 1 loop
                               if D /= 0 then
@@ -11522,6 +11679,7 @@ package body Act is
                                              end if;
                                           end loop;
                                           Log_Step (A, J, D, K, Cam);
+                                          Keep_Frame (Natural (G), J, D, K, Cam);
                                           if 3.0 * Got < Step then   --  没转到命令的三分之一(比例):到头 / 被顶住
                                              Why := S ("关节到头或被顶住(命令 " & Codec.Fmt (Step, 4) & ",实到 " & Codec.Fmt (Got, 4) & ")");
                                              exit;
@@ -11545,6 +11703,7 @@ package body Act is
                               end if;
                            end loop;
                         end loop;
+                        Fit_Arm (A, Cam, Top);
                      end;
                   end if;
                end;

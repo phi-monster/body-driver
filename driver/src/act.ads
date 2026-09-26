@@ -6,6 +6,7 @@ with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
 with Ada.Containers.Vectors;
 with Plug;
 with Geom;
+with Kinem;
 with Selfmap;
 with Zone;
 with World;
@@ -240,6 +241,7 @@ package Act is
       Head : Buf;
    end record;
    package Board_Stop_Vectors is new Ada.Containers.Vectors (Natural, Board_Stop);
+   package Kin_Vectors is new Ada.Containers.Vectors (Natural, Kinem.Model);
    type Context is record
       Map : Selfmap.Body_Map;
       Hands : Zone.Hand_Vectors.Vector;
@@ -281,6 +283,7 @@ package Act is
       Mark_Px : Px_List_Vectors.Vector;         --  和 Fixed_Obs 一一对应:那一笔里不动的眼看见的手指像素
       Lobe_Obs : Geom.Obs_Pt_Vectors.Vector;    --  同一批标记里每一瓣手指各自的尖(Pt = 臂号,Kind = 这一笔的瓣数):解完不动的眼后认哪一瓣落在腕眼哪条瓣视线上 = 指尖
       Board_Stops : Board_Stop_Vectors.Vector;  --  腕眼标定各平移停的图和位姿(开机末尾配点做标定板)
+      Kins : Kin_Vectors.Vector;                --  每只手按开机关节扫描量出来的运动学(V1b 3b,2026-09-26:只记、不用;没量成的那只 Valid = False)
       Board : Geom.Scene_Pt_Vectors.Vector;     --  标定板的点:腕眼几停三角出来的桌上的点(世界位置 + 协方差)和它们在不动的眼里的像素
       Board_Tracks : Geom.Board_Track_Vectors.Vector;   --  同一批点在腕眼里的几停原样(一起解腕眼和不动的眼时按新几何重新三角)
       Board_Plane : Boolean := False;           --  标定板的点拟合出了它们躺的那张面
