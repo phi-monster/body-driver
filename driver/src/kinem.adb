@@ -606,7 +606,7 @@ package body Kinem is
    end Insert;
 
    N_Sph : constant := 3000;       --  轴方向网格点数(次数;相邻约 3.7°)
-   Grid_Rad : constant := 0.279252680319093;   --  网格只用两帧之间转角 ≤ 16°(= 0.2793 弧度)的配点(协议:坑宽,见 sweep_init.py 的量法)
+   Grid_Rad : constant := 0.279252680319093;   --  网格只用两帧之间转角 ≤ 16°(= 0.2793 弧度)的配点(协议:坑宽 —— 转角大的对坑太窄,网格点落不进去,LAB 09-26)
    Per_Pair_Grid : constant := 30; --  网格上每一对最多取几个配点(次数)
    Per_Pair_All : constant := 200; --  精修 / 定比例时每一对最多取几个配点(次数;最后一起解用全部内点)
 
