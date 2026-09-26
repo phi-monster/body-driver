@@ -922,6 +922,9 @@ package body Kinem is
                   Sa : Jc_Array_Ptr := To_Array (Js (J));
                begin
                   for Ci in 0 .. Keep - 1 loop
+                     --  空位 = 后面没有候选了(无量纲)。先判再取:空位的方向是占位的 (0, 0, 1),方位角算不出来(Arctan (0, 0) 抛异常;
+                     --  原来先取后判,表一直是满的才没碰上 —— 09-27 试网格切份并行时,并表把彼此不到 10° 的两个并成一个,表不满,崩了)
+                     exit when Tab (J) (Kb) (Ci).Score >= 1.0e17;
                      declare
                         Cd : constant Cand := Tab (J) (Kb) (Ci);
                         X : Vec (0 .. 2) := [Arccos (Long_Float'Max (-1.0, Long_Float'Min (1.0, Cd.W (2)))), Arctan (Cd.W (1), Cd.W (0)), Cd.Phi];
@@ -935,7 +938,6 @@ package body Kinem is
                            Joint_Res (Sa.all, Natural (Js (J).Length), Xx, F0, Cx, Cy, R);
                         end R_All;
                      begin
-                        exit when Cd.Score >= 1.0e17;   --  空位,后面没有候选了(无量纲)
                         Robust_LM (X, Natural (Jg (J).Length), Natural (Jg (J).Length), 60, Steps, R_Small'Access);
                         Robust_LM (X, Natural (Js (J).Length), Natural (Js (J).Length), 60, Steps, R_All'Access);
                         declare

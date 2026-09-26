@@ -231,8 +231,23 @@ if os.path.exists(ip) and os.path.exists(wp) and 0 in FITS:
         e_t = 1000 * np.linalg.norm(w2s(tgt[:3]) - cam); e_g = 1000 * np.linalg.norm(w2s(got[:3]) - cam)
         Rt_sim = Rg0 @ Rw.T @ qR(tgt[3:]); Rc = qR(tr[3:]) @ RxA
         ang = math.degrees(np.linalg.norm(logR(Rc.T @ Rt_sim)))
-        per.setdefault(sw, []).append((e_t, e_g, ang))
+        # 这一处离扫描时去过的地方多远(真的眼;同一只手扫描各格的真值):最近那一格差几 mm、那一格朝向差几度
+        near_d, near_a = float("nan"), float("nan")
+        if os.path.exists(sp):
+            best = None
+            for l2 in open(sp):
+                if "||" not in l2: continue
+                h2 = l2.split("||", 1)[0].split("|")[0].split(); t2 = np.array([float(x) for x in l2.split("||", 1)[1].split()])
+                if int(h2[1]) != sw or len(t2) != 7: continue
+                cam2 = t2[:3] + qR(t2[3:]) @ txA
+                d2 = 1000 * np.linalg.norm(cam2 - cam)
+                if best is None or d2 < best[0]:
+                    best = (d2, math.degrees(np.linalg.norm(logR((qR(t2[3:]) @ RxA).T @ Rc))))
+            if best is not None:
+                near_d, near_a = best
+        per.setdefault(sw, []).append((e_t, e_g, ang, near_d, near_a))
     for sw, v in sorted(per.items()):
         v = np.array(v)
         print("V1b ② · 第 %d 只手走到没去过的 %d 处:真的眼离目标 %s mm(最大 %.1f)· 朝向差 %s° · 按读数算的位置离真的眼 %s mm" %
               (sw, len(v), " ".join("%.1f" % x for x in v[:, 0]), v[:, 0].max(), " ".join("%.2f" % x for x in v[:, 2]), " ".join("%.1f" % x for x in v[:, 1])))
+        print("   这几处离扫描时去过的最近一格:%s mm(那一格朝向差 %s°)" % (" ".join("%.1f" % x for x in v[:, 3]), " ".join("%.1f" % x for x in v[:, 4])))

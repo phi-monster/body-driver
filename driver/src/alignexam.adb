@@ -1,5 +1,5 @@
 --  离线回放两只手对齐(2026-09-26,V1B11:第 2 只手对到第 1 只手的系,长度倍数 0.73、残差中位 0.96 单位 —— 两只手的模型单位按真值只差 0.8%)。
---  拿一炮落盘的扫描格(look/sweep.txt)、画面(sweep_*.bmp)、运动学(kinem_arm<k>.txt)、配点(corrs_arm<k>.txt)、手指遮罩(mask_arm<k>.bmp,没有就不遮)
+--  拿一炮落盘的扫描格(look/sweep.txt)、画面(sweep_*.bmp)、运动学(kinem_arm<k>.txt)、配点(corrs_arm<k>.txt)
 --  原样跑驱动那一份 Jointboot.Align(要配点仪器在线),打出报告,落盘 align_arm<k>.txt / world.txt 到输出目录。真值不进解,只在打分脚本里用。
 --  不动的眼的画面 = look/world_cam.bmp(扫描起点那一刻;没有这个文件 = 这具身体没有不长在手上的眼)。
 --  用法:alignexam <look 目录> <输出目录> <仪器主机> <仪器端口> [第 0 只手的读数组号 第 1 只手的 …](不给 = 第 k 只手用第 k 组)
@@ -123,21 +123,6 @@ begin
       Close (Fi);
    end;
    for A in 0 .. N_Arms - 1 loop
-      --  手指遮罩
-      declare
-         Rgb : Buf;
-         W, Hh : Natural;
-         Okb : Boolean;
-      begin
-         if Ada.Directories.Exists (Dir & "/mask_arm" & Codec.Img (A) & ".bmp") then
-            Codec.Read_BMP (Dir & "/mask_arm" & Codec.Img (A) & ".bmp", Rgb, W, Hh, Okb);
-            if Okb then
-               for P in 0 .. W * Hh - 1 loop
-                  Ds (A).Mask.Append (Boolean'(Natural (Rgb (3 * P)) > 127));   --  白 = 遮住(落盘时写 255,读回按一半分;协议)
-               end loop;
-            end if;
-         end if;
-      end;
       --  运动学
       declare
          Fi : File_Type;
@@ -186,7 +171,7 @@ begin
          Close (Fi);
       end;
       Put_Line ("手" & Natural'Image (A) & ":" & Codec.Img (Natural (Ds (A).Frames.Length)) & " 格(读数第" & Natural'Image (Group_Of (A)) & " 组)· 配点 "
-                & Codec.Img (Natural (Css (A).Length)) & " · 遮罩 " & (if Ds (A).Mask.Is_Empty then "没有" else "有") & " · 焦距 " & Codec.Fmt (Worlds (A).Model.F, 1));
+                & Codec.Img (Natural (Css (A).Length)) & " · 焦距 " & Codec.Fmt (Worlds (A).Model.F, 1));
    end loop;
    --  每一格、不动的眼的画面存到配点仪器那边(驱动扫描时就是这么存的,对齐按编号配)
    declare

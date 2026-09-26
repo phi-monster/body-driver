@@ -29,7 +29,6 @@ package Jointboot is
       Frames : Kinem.Frame_Vectors.Vector;   --  每一格的读数 + 扫的是哪个关节(起点 = -1)
       Imgs : Plug.Cam_Vectors.Vector;        --  每一格手上那只眼的画面
       Runs : Ints;                           --  第几段(同一个关节同一个方向算一段;起点 = 0)
-      Mask : Bools;                          --  手指遮罩(W × H,按行;是 = 整段扫描里一次都没变过)
       W, H : Natural := 0;
       Ids : Ints;                            --  每一格在配点仪器那边存的编号(Instrument.Frame_Put;-1 = 没存成)
       World_Img : Plug.Cam;                  --  不动的眼(头顶眼)在扫描起点那一刻的画面(没有不动的眼 = 空)
@@ -38,16 +37,17 @@ package Jointboot is
    package Sweep_Vectors is new Ada.Containers.Vectors (Natural, Sweep_Data);
    package Corr_Set_Vectors is new Ada.Containers.Vectors (Natural, Kinem.Corr_Vectors.Vector, Kinem.Corr_Vectors."=");
 
-   --  ② 关节扫描:有眼的几只手同时扫(一条命令带几组目标),每个关节两个方向一格一格转;到头 / 被顶住 / 别的关节被顶偏 / 走满 8 格就停,转回起点。
-   --  每一段开头在每只手的眼里铺一片格点(认出来那一下动过的像素里)交给跟点仪器,每一格问一次它们到哪了:
-   --  配点(起点 ↔ 每一格、相邻两格、不同关节头两格之间)全从这批格点来,每格画面挪了多少也从它读(按它放大 / 缩小下一格)。
+   --  ② 关节扫描:有眼的几只手同时扫(一条命令带几组目标),每个关节两个方向一格一格转;到头 / 被顶住 / 别的关节被顶偏 / 走满 3 格就停,
+   --  直接去下一段的头一格(回起点和下一段头一格是同一个动作)。每一段头一格和起点那一对当场配点:画面挪了多少 ÷ 实到的转角 = 这个关节
+   --  每个读数单位挪几像素,往后每格按它定步子(一格挪画幅宽的 1/5)。配点(起点 ↔ 每一格、每段头两格、相邻关节头一格之间、几个关节一起动的相邻两格)
+   --  由配点仪器配(粗配、单向);头一格那几对扫描时配,别的扫完再配。
    --  Host / Port = 仪器;Dump 非空 = 落盘 sweep_*.bmp + sweep.txt。Ds / Css 和 Arms 里有眼的手一一对应(没眼的那只 Ds 空)
    --  World_Cam = 不动的眼是第几台(Find_Arms 认的;-1 = 没有):起点那一刻它的画面也存下,对齐几只手用
    procedure Sweep_All (L : in out Plug.Link; F : in out Plug.Frame; M : Selfmap.Body_Map; Arms : Arm_Vectors.Vector;
                         Host : String; Port : Natural; Dump : String; Ds : out Sweep_Vectors.Vector; Css : out Corr_Set_Vectors.Vector;
                         World_Cam : Integer := -1);
 
-   --  ④ 这只手的运动学:Kinem.Fit(配点来自扫描时的跟点;手指遮罩里的不要)
+   --  ④ 这只手的运动学:Kinem.Fit(配点来自扫描的配对)
    --  Note = 这一步的报告(几只手各开一个线程同时解 ⇒ 不在这里打印,解完由调用方按顺序打)
    procedure Fit_Arm (A : Natural; D : Sweep_Data; Cs : Kinem.Corr_Vectors.Vector; Dump : String; M : out Kinem.Model; Ok : out Boolean;
                       Note : out Ada.Strings.Unbounded.Unbounded_String);
@@ -82,7 +82,7 @@ package Jointboot is
    procedure Pose_Hook (F : in out Plug.Frame);
    procedure Cmd_Hook (C : in out Plug.Cmd; Ok : out Boolean);
    --  开机自检(V1b 的 ②):每只装上的手走到扫描时没去过的几处 —— 两格"几个关节一起动"的读数的正中(每个关节都在量过的范围里),
-   --  按运动学算出那一处眼的位姿当位姿命令发(插头按运动学解成关节目标,同干活时那条路),停稳后记:目标、反解还差多少、实到的读数。
-   --  身体报的位姿只落盘给离线打分(Dump/ik_check.txt),驱动不读
+   --  按运动学算出那一处眼的位姿当目标,按位姿命令同一条路(Pose_To_Q:在量过的范围里反解)解成关节目标;几只手同时走(一条命令带几组目标),
+   --  停稳后记:目标、反解还差多少、实到的读数。身体报的位姿只落盘给离线打分(Dump/ik_check.txt),驱动不读
    procedure Self_Check (L : in out Plug.Link; F : in out Plug.Frame; M : Selfmap.Body_Map; Ds : Sweep_Vectors.Vector; Dump : String);
 end Jointboot;

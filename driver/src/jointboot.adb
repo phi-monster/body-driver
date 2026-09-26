@@ -18,7 +18,7 @@ package body Jointboot is
    Max_Doublings : constant := 12;              --  次数
    Grow : constant := 2.0;                      --  探针每次翻一倍(次数:同 Selfmap 的探针协议)
    Third : constant := 1.0 / 3.0;               --  三分之一(比例:"没转到命令的三分之一 = 被顶住",到没到目标用同一个比例)
-   Ramp : constant := 3.0;                      --  扫描下一格最多放大三倍(次数)
+   Ramp : constant := 4.0;                      --  扫描下一格最多放大四倍(次数;每个方向只停 3 格,头一格之后两格就要转开)
 
    --  一组关节读数一起挪到 Q(关节目标走唯一那条挪手的路 Selfmap.Go,停稳看这组读数)
    procedure Go_Group (L : in out Plug.Link; F : in out Plug.Frame; M : Selfmap.Body_Map; A, G : Natural; Q : Floats; Tol : Long_Float; Ok : out Boolean) is
@@ -176,8 +176,9 @@ package body Jointboot is
                         World_Cam : Integer := -1) is
       Na : constant Natural := Natural (Arms.Length);
       N_Img : Natural := 0;
-      --  ── 配点:扫描时把要配的对攒着,扫完再让配点仪器一对一对配(粗配一对 0.39 秒)。
-      --  边扫边配试过(V1B6 2026-09-26):仿真和配点仪器在同一块 GPU 上抢,一拍从 0.67 秒变 1.17 秒,比扫完再配还慢 ──
+      --  ── 配点:扫描时把要配的对攒着,扫完再让配点仪器一对一对配(粗配、单向,一对 0.23 秒)。
+      --  边扫边配试过(V1B6 2026-09-26):仿真和配点仪器在同一块 GPU 上抢,一拍从 0.67 秒变 1.17 秒,比扫完再配还慢。
+      --  只有"起点 ↔ 每段头一格"那一对在扫描时当场配(仿真等着,不抢):下一格的步子要按它定;配出来的点留给运动学,不再配一遍 ──
       type Job is record
          A, I, J : Natural := 0;
          Ia, Ib : Natural := 0;       --  两帧在仪器那边的编号
@@ -211,8 +212,9 @@ package body Jointboot is
          end Get;
       end Queue;
       Jobs : Queue;
-      Res : array (0 .. Natural'Max (1, Na) - 1) of Kinem.Corr_Vectors.Vector;   --  只有配点线程写;它结束以后才读
-      N_Jobs, N_Empty : Natural := 0;
+      Res : array (0 .. Natural'Max (1, Na) - 1) of Kinem.Corr_Vectors.Vector;   --  扫描时只有扫描自己写(配点线程扫完才开始);之后只有配点线程写,它结束以后才读
+      N_Jobs, N_Empty, N_Now : Natural := 0;
+      T_Now : Duration := 0.0;   --  扫描时当场配花的时间(秒)
       Per_Pair : constant := 2500;   --  每一对让仪器抽 2500 对(次数;同 V1B2 离线过线的那一版)
       task Matcher with Storage_Size => 16 * 1024 * 1024;
       task body Matcher is
@@ -224,7 +226,7 @@ package body Jointboot is
             Jobs.Get (X, Done);
             exit when Done;
             declare
-               --  粗配:一对 0.39 秒对 0.83 秒,和完整配点只差中位 0.07–0.13 px、九成 0.2–0.6 px(trackexam 2026-09-26,V1B4 两段扫描)
+               --  粗配:一对 0.39 秒对 0.83 秒,和完整配点只差中位 0.07–0.13 px、九成 0.2–0.6 px(trackexam 2026-09-26,V1B4 两段扫描);单向见 Instrument.Sample_Ids
                P : constant Instrument.Pair_Vectors.Vector := Instrument.Sample_Ids (Host, Port, X.Ia, X.Ib, Per_Pair, Err, Coarse => True);
             begin
                if P.Is_Empty then
@@ -246,15 +248,12 @@ package body Jointboot is
          G, Cam : Natural := 0;
          Q0 : Floats;
          W, H : Natural := 0;
-         Pts : Instrument.Track_Vectors.Vector;   --  跟点的格点(只拿来估每格画面挪多少、认哪些点跟着眼一起动)
-         Max_Disp : Floats;                       --  每个格点整段扫描里离它起点最远挪过多少(像素)
-         Tid : Integer := -1;
          Step, Off, Q_Prev : Long_Float := 0.0;
+         Px_Per : Long_Float := 0.0;              --  这个关节每转一个读数单位画面挪几像素(这一段头一格和起点那一对配点量的;0 = 没量到)
          Tgt : Floats;
          K : Natural := 0;
          Done : Boolean := True;
          Why : Unbounded_String;
-         Prev_Pos : Instrument.Track_Vectors.Vector;
          Ids : Ints;                              --  每一格在仪器那边的编号
          Heads : Head_Vectors.Vector;
       end record;
@@ -266,7 +265,6 @@ package body Jointboot is
       Okc : Boolean;
       Err : Unbounded_String;
       T0 : constant Ada.Calendar.Time := Ada.Calendar.Clock;
-      S0 : constant Natural := Plug.Steps (L);
       Multi_J : constant := 99;   --  落盘时"几个关节一起动"的格子记成第 99 个关节(协议:只是个记号)
       --  存下的每一格:哪只手、第几格、存它那一拍的帧号、落盘那一行的开头(读数和真值等量出"画面晚几拍"再按那一拍写)
       type Kept_Rec is record
@@ -288,10 +286,35 @@ package body Jointboot is
          Kept.Append (Kept_Rec'(A => A, Frame => Natural (Ds (A).Frames.Length) - 1, Seq => F.Seq,
                        Head => To_Unbounded_String (Nm & " " & Codec.Img (A) & " " & Codec.Img (if Multi then Multi_J else J) & " " & Codec.Img (Dd) & " "
                                                     & Codec.Img (K) & " " & Codec.Img (Plug.Steps (L)))));
-         --  存到仪器那边,起点 ↔ 这一格交给后台配
+         --  存到仪器那边;起点 ↔ 这一格:一段的头一格当场配(下一格的步子按它定),别的交给后台配
          Instrument.Frame_Put (Host, Port, F.Cams (Sa.Cam).RGB, Sa.W, Sa.H, Id, Err);
          Sa.Ids.Append (Id);
-         if K > 0 and then Id >= 0 and then Sa.Ids (0) >= 0 then
+         if K = 1 and then not Multi and then Id >= 0 and then Sa.Ids (0) >= 0 then
+            declare
+               package Sorting is new F64_Vectors.Generic_Sorting;
+               Tn : constant Ada.Calendar.Time := Ada.Calendar.Clock;
+               P : constant Instrument.Pair_Vectors.Vector := Instrument.Sample_Ids (Host, Port, Natural (Sa.Ids (0)), Natural (Id), Per_Pair, Err, Coarse => True);
+               Fr : constant Natural := Natural (Ds (A).Frames.Length) - 1;
+               Dv : Floats;
+               Dq : constant Long_Float := abs (F.Joints (Sa.G) (J) - Sa.Q0 (J));
+            begin
+               for Pp of P loop
+                  Res (A).Append (Kinem.Corr'(I => 0, J => Fr, Ua => Pp.Ua, Va => Pp.Va, Ub => Pp.Ub, Vb => Pp.Vb));
+                  Dv.Append (Geom.Norm ([Pp.Ub - Pp.Ua, Pp.Vb - Pp.Va, 0.0]));
+               end loop;
+               N_Now := N_Now + 1;
+               if P.Is_Empty then
+                  N_Empty := N_Empty + 1;
+               end if;
+               --  这一段画面挪了多少 = 这一对配点挪动的中位数;÷ 实到的转角 = 每个读数单位挪几像素
+               Sa.Px_Per := 0.0;
+               if not Dv.Is_Empty and then Dq > 0.0 then
+                  Sorting.Sort (Dv);
+                  Sa.Px_Per := Dv (Natural (Dv.Length) / 2) / Dq;
+               end if;
+               T_Now := T_Now + Ada.Calendar."-" (Ada.Calendar.Clock, Tn);
+            end;
+         elsif K > 0 and then Id >= 0 and then Sa.Ids (0) >= 0 then
             Jobs.Put ((A => A, I => 0, J => Natural (Ds (A).Frames.Length) - 1, Ia => Natural (Sa.Ids (0)), Ib => Natural (Id)));
             N_Jobs := N_Jobs + 1;
          end if;
@@ -307,22 +330,6 @@ package body Jointboot is
             N_Img := N_Img + 1;
          end if;
       end Keep;
-      --  一格画面挪了多少(像素):这一格和上一格都看得见的格点挪动的中位数
-      function Flow (Pa, Pb : Instrument.Track_Vectors.Vector) return Long_Float is
-         package Sorting is new F64_Vectors.Generic_Sorting;
-         Dv : Floats;
-      begin
-         for P in 0 .. Natural'Min (Natural (Pa.Length), Natural (Pb.Length)) - 1 loop
-            if Pa (P).Seen and then Pb (P).Seen then
-               Dv.Append (Geom.Norm ([Pb (P).U - Pa (P).U, Pb (P).V - Pa (P).V, 0.0]));
-            end if;
-         end loop;
-         if Dv.Is_Empty then
-            return -1.0;
-         end if;
-         Sorting.Sort (Dv);
-         return Dv (Natural (Dv.Length) / 2);
-      end Flow;
       procedure Move_All (Tol : Long_Float) is
          Gs : Ints;
          Qs : Plug.Floats_Vectors.Vector;
@@ -353,14 +360,8 @@ package body Jointboot is
                D.W := Sa.W; D.H := Sa.H;
                Ds.Replace_Element (A, D);
                Nj := Natural'Max (Nj, Natural (Sa.Q0.Length));
-               Gw := Long_Float (Sa.W) / 10.0;   --  每格画面挪画幅宽的 1/10(比例,无量纲)
-               for Iy in 0 .. Gy - 1 loop
-                  for Ix in 0 .. Gx - 1 loop
-                     Sa.Pts.Append (Instrument.Track_Pt'(U => (Long_Float (Ix) + 0.5) * Long_Float (Sa.W) / Long_Float (Gx),
-                                                         V => (Long_Float (Iy) + 0.5) * Long_Float (Sa.H) / Long_Float (Gy), Seen => True, Conf => 1.0));
-                     Sa.Max_Disp.Append (0.0);
-                  end loop;
-               end loop;
+               --  每格画面挪画幅宽的 1/5(比例,无量纲;每个方向停 3 格,转开的总量同原来 5 格 × 1/10:V1B14 挑格回放,停 3 格最大 0.73 mm)
+               Gw := Long_Float (Sa.W) / 5.0;
                Say ("关节扫描 · 第" & Codec.Img (A + 1) & " 只手(第" & Codec.Img (Sa.G) & " 组读数," & Codec.Img (Natural (Sa.Q0.Length)) & " 个关节,眼 = 第"
                     & Codec.Img (Sa.Cam) & " 台)");
             end;
@@ -394,10 +395,11 @@ package body Jointboot is
                   begin
                      Sa.Done := not Sa.Live or else J >= Natural (Sa.Q0.Length);
                      if not Sa.Done then
-                        Sa.Step := 0.03 * Long_Float'Max (1.0, abs Sa.Q0 (J));   --  起步 = 读数量级的 3%(比例,无量纲),按画面挪动放大
-                        Sa.Off := 0.0; Sa.K := 0; Sa.Tgt := Sa.Q0; Sa.Q_Prev := F.Joints (Sa.G) (J);
-                        Sa.Why := To_Unbounded_String ("走满 5 格");
-                        Sa.Prev_Pos := Instrument.Track_Start (Host, Port, F.Cams (Sa.Cam).RGB, Sa.W, Sa.H, Sa.Pts, Sa.Tid, Err);
+                        --  起步 = 读数量级的 3%(比例,无量纲),按画面挪动放大。目标里别的关节都回起点:上一段转完不单独回起点,
+                        --  回去和这一段的头一格是同一个动作(到没到按这一格的三分之一判,所有关节一起看)
+                        Sa.Step := 0.03 * Long_Float'Max (1.0, abs Sa.Q0 (J));
+                        Sa.Off := 0.0; Sa.K := 0; Sa.Tgt := Sa.Q0; Sa.Q_Prev := F.Joints (Sa.G) (J); Sa.Px_Per := 0.0;
+                        Sa.Why := To_Unbounded_String ("走满 3 格");
                      end if;
                   end;
                end loop;
@@ -431,7 +433,6 @@ package body Jointboot is
                                  Got : constant Long_Float := abs (F.Joints (Sa.G) (J) - Sa.Q_Prev);
                                  Pushed : Long_Float := 0.0;
                                  Kp : Natural := 0;
-                                 Fl : Long_Float := -1.0;
                               begin
                                  for X in 0 .. Natural (Sa.Q0.Length) - 1 loop
                                     if X /= J and then abs (F.Joints (Sa.G) (X) - Sa.Q0 (X)) > Pushed then
@@ -442,34 +443,19 @@ package body Jointboot is
                                  if Sa.K = 1 then
                                     Sa.Heads.Append (Head'(Frame => Natural (Ds (A).Frames.Length) - 1, Joint => J));
                                  end if;
-                                 if Sa.Tid >= 0 then
-                                    declare
-                                       Pos : constant Instrument.Track_Vectors.Vector := Instrument.Track_Step (Host, Port, Sa.Tid, F.Cams (Sa.Cam).RGB, Sa.W, Sa.H, Err);
-                                    begin
-                                       if Natural (Pos.Length) = Natural (Sa.Pts.Length) then
-                                          for P in 0 .. Natural (Pos.Length) - 1 loop
-                                             if Pos (P).Seen then
-                                                Sa.Max_Disp.Replace_Element (P, Long_Float'Max (Sa.Max_Disp (P),
-                                                  Geom.Norm ([Pos (P).U - Sa.Pts (P).U, Pos (P).V - Sa.Pts (P).V, 0.0])));
-                                             end if;
-                                          end loop;
-                                          Fl := Flow (Sa.Prev_Pos, Pos);
-                                          Sa.Prev_Pos := Pos;
-                                       end if;
-                                    end;
-                                 end if;
                                  if 3.0 * Got < Sa.Step then   --  没转到命令的三分之一(比例):到头 / 被顶住
                                     Sa.Why := To_Unbounded_String ("关节到头或被顶住(命令 " & Codec.Fmt (Sa.Step, 4) & ",实到 " & Codec.Fmt (Got, 4) & ")");
                                     Sa.Done := True;
                                  elsif 3.0 * Pushed > Sa.Step then   --  别的关节被顶偏超过这一格的三分之一(比例,同上一条):碰上东西了,不再往里压
                                     Sa.Why := To_Unbounded_String ("碰上东西了:第" & Codec.Img (Kp) & " 个关节被顶偏 " & Codec.Fmt (Pushed, 4) & "(这一格命令 " & Codec.Fmt (Sa.Step, 4) & ")");
                                     Sa.Done := True;
-                                 elsif Sa.K >= 5 then   --  最多 5 格(次数;5 分钟一炮)
+                                 elsif Sa.K >= 3 then   --  最多 3 格(次数;5 分钟一炮)
                                     Sa.Done := True;
                                  else
-                                    if Fl > 0.0 then
-                                       --  下一格按这一格的画面挪动放大 / 缩小,一次最多三倍(倍数,无量纲)
-                                       Sa.Step := Sa.Step * Long_Float'Max (0.5, Long_Float'Min (Ramp, Gw / Fl));
+                                    if Sa.Px_Per > 0.0 then
+                                       --  下一格按这一格画面挪的(头一格那一对配点量的"每个读数单位挪几像素" × 这一格的步子)放大 / 缩小,
+                                       --  一次最多四倍、最少减半(倍数,无量纲);没量到就不改
+                                       Sa.Step := Sa.Step * Long_Float'Max (0.5, Long_Float'Min (Ramp, Gw / (Sa.Step * Sa.Px_Per)));
                                     end if;
                                     Sa.Q_Prev := F.Joints (Sa.G) (J);
                                  end if;
@@ -483,24 +469,6 @@ package body Jointboot is
                      end loop;
                   end;
                end loop;
-               --  转回起点、收掉跟点(到没到按最后一格步子的三分之一判,同上)
-               declare
-                  Tol_Back : Long_Float := Long_Float'Last;
-               begin
-                  for A in 0 .. Na - 1 loop
-                     if St (A).Live then
-                        St (A).Tgt := St (A).Q0;
-                        if St (A).Step > 0.0 then
-                           Tol_Back := Long_Float'Min (Tol_Back, St (A).Step * Third);
-                        end if;
-                        if St (A).Tid >= 0 then
-                           Instrument.Track_End (Host, Port, St (A).Tid);
-                           St (A).Tid := -1;
-                        end if;
-                     end if;
-                  end loop;
-                  Move_All ((if Tol_Back < Long_Float'Last then Tol_Back else 0.0));
-               end;
             end if;
          end loop;
       end loop;
@@ -665,62 +633,32 @@ package body Jointboot is
       declare
          T1 : constant Ada.Calendar.Time := Ada.Calendar.Clock;
       begin
-         Say ("关节扫描走完:" & Codec.Img (Plug.Steps (L) - S0) & " 拍、" & Codec.Fmt (Long_Float (Ada.Calendar."-" (T1, T0)), 0) & " 秒;配点 " & Codec.Img (N_Jobs)
-              & " 对在后台配,等它配完");
+         Say ("关节扫描走完:" & Codec.Img (L.Seq - Seq0) & " 拍、" & Codec.Fmt (Long_Float (Ada.Calendar."-" (T1, T0)), 0) & " 秒(其中当场配 " & Codec.Img (N_Now)
+              & " 对 " & Codec.Fmt (Long_Float (T_Now), 1) & " 秒);配点 " & Codec.Img (N_Jobs) & " 对在后台配,等它配完");
          Jobs.Close;
          while not Matcher'Terminated loop
             delay 0.2;   --  等后台配完(秒,协议:只是轮询间隔)
          end loop;
          Say ("  配点配完:再等了 " & Codec.Fmt (Long_Float (Ada.Calendar."-" (Ada.Calendar.Clock, T1)), 0) & " 秒(" & Codec.Img (N_Empty) & " 对配不上)");
       end;
-      --  ③ 手指遮罩:跟点那批格点里,整段扫描离起点挪不到画幅宽 1/64 的 = 跟着眼一起动的自己(比例);落在这些格子里的配点不要
+      --  ③ 配点进运动学。不再遮"跟着眼一起动的手指"(09-27):原来按跟点仪器认手指(整段扫描挪不到画幅宽 1/64 的格点),要在扫描时每格跟一次
+      --  (V1B14:178 次 × 0.225 秒 ≈ 40 秒);按同样的配对单向重配、不遮,运动学最大 0.30 / 0.43 mm(遮了 0.41 / 0.62 mm),
+      --  两只手对齐倍数差 0.3%、平移差 2.9 mm —— 手指上的配点按运动学一起解时的门就被当野点去掉了。配点仪器在手指那一小块上
+      --  是跟着背景一起配的(手指格子里"不动的配点"占 0–87%),拿配点认手指也认不准,所以不认。只去掉落在画面外的点
       for A in 0 .. Na - 1 loop
          if St (A).Live then
             declare
                D : Sweep_Data := Ds (A);
-               W : constant Natural := D.W;
-               Hh : constant Natural := D.H;
-               Cw : constant Long_Float := Long_Float (W) / Long_Float (Gx);
-               Ch : constant Long_Float := Long_Float (Hh) / Long_Float (Gy);
-               Self : array (0 .. Gx * Gy - 1) of Boolean := [others => False];
-               N_Self : Natural := 0;
+               W : constant Long_Float := Long_Float (D.W);
+               Hh : constant Long_Float := Long_Float (D.H);
                Kept_C : Kinem.Corr_Vectors.Vector;
-               function Masked (U, V : Long_Float) return Boolean is
-                  Ix : constant Integer := Integer (Long_Float'Floor (U / Cw));
-                  Iy : constant Integer := Integer (Long_Float'Floor (V / Ch));
-               begin
-                  return Ix < 0 or else Ix >= Gx or else Iy < 0 or else Iy >= Gy or else Self (Natural (Iy) * Gx + Natural (Ix));
-               end Masked;
+               function Inside (U, V : Long_Float) return Boolean is (U >= 0.0 and then U < W and then V >= 0.0 and then V < Hh);
             begin
-               for P in Self'Range loop
-                  if P < Natural (St (A).Max_Disp.Length) and then St (A).Max_Disp (P) < Long_Float (W) / 64.0 then   --  画幅宽 1/64(比例)
-                     Self (P) := True; N_Self := N_Self + 1;
-                  end if;
-               end loop;
-               D.Mask := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (W * Hh));
-               for P in 0 .. W * Hh - 1 loop
-                  if Masked (Long_Float (P mod W) + 0.5, Long_Float (P / W) + 0.5) then
-                     D.Mask.Replace_Element (P, True);
-                  end if;
-               end loop;
                for C of Res (A) loop
-                  if not Masked (C.Ua, C.Va) and then not Masked (C.Ub, C.Vb) then
+                  if Inside (C.Ua, C.Va) and then Inside (C.Ub, C.Vb) then
                      Kept_C.Append (C);
                   end if;
                end loop;
-               if Dump /= "" then
-                  --  手指遮罩落盘(mask_arm<k>.bmp:白 = 跟着眼一起动的格子):离线回放对齐用
-                  declare
-                     Img : Buf := U8_Vectors.To_Vector (0, Ada.Containers.Count_Type (3 * W * Hh));
-                  begin
-                     for P in 0 .. W * Hh - 1 loop
-                        if D.Mask (P) then
-                           Img.Replace_Element (3 * P, 255); Img.Replace_Element (3 * P + 1, 255); Img.Replace_Element (3 * P + 2, 255);
-                        end if;
-                     end loop;
-                     Codec.Write_BMP (Dump & "/mask_arm" & Codec.Img (A) & ".bmp", Img, W, Hh);
-                  end;
-               end if;
                if Dump /= "" then
                   --  配点落盘(corrs_arm<k>.txt:每行 I J Ua Va Ub Vb,帧号同 sweep.txt 里这只手的格子顺序):离线回放解法用
                   declare
@@ -736,15 +674,15 @@ package body Jointboot is
                      when others => null;
                   end;
                end if;
-               Say ("  第" & Codec.Img (A + 1) & " 只手:扫了 " & Codec.Img (Natural (D.Frames.Length)) & " 格;跟着眼一起动的格子(手指)" & Codec.Img (N_Self) & " / "
-                    & Codec.Img (Gx * Gy) & ";配点 " & Codec.Img (Natural (Kept_C.Length)) & " / " & Codec.Img (Natural (Res (A).Length)) & " 个留下");
+               Say ("  第" & Codec.Img (A + 1) & " 只手:扫了 " & Codec.Img (Natural (D.Frames.Length)) & " 格;配点 " & Codec.Img (Natural (Kept_C.Length)) & " / "
+                    & Codec.Img (Natural (Res (A).Length)) & " 个留下(落在画面外的不要)");
                D.Ids := St (A).Ids;
                Ds.Replace_Element (A, D);
                Css.Replace_Element (A, Kept_C);
             end;
          end if;
       end loop;
-      Say ("关节扫描完:" & Codec.Img (Plug.Steps (L) - S0) & " 拍、" & Codec.Fmt (Long_Float (Ada.Calendar."-" (Ada.Calendar.Clock, T0)), 0) & " 秒");
+      Say ("关节扫描完:" & Codec.Img (L.Seq - Seq0) & " 拍、" & Codec.Fmt (Long_Float (Ada.Calendar."-" (Ada.Calendar.Clock, T0)), 0) & " 秒");
    end Sweep_All;
 
    --  相机系里的单位视线(同 Geom 的约定:-z 朝前、+y 朝上)
@@ -1029,18 +967,53 @@ package body Jointboot is
          return Long_Float'Max (Es (Natural (Es.Length) / 2), 1.0e-6);   --  数值保护(无量纲)
       end Cross_Sig;
       N_Pairs_Of : array (0 .. Natural'Max (1, Na) - 1) of Natural := [others => 0];
+      --  这一轮给每只候选的手算出来的放法(真放进世界时直接用,证据没变,不再算一遍)
+      Cand_S, Cand_Md : array (0 .. Natural'Max (1, Na) - 1) of Long_Float := [others => 1.0];
+      Cand_R : array (0 .. Natural'Max (1, Na) - 1) of M3 := [others => Identity];
+      Cand_T : array (0 .. Natural'Max (1, Na) - 1) of V3 := [others => [0.0, 0.0, 0.0]];
+      Cand_Inl : array (0 .. Natural'Max (1, Na) - 1) of Natural := [others => 0];
       N_Pairs_Fx : Natural := 0;
       Round_Note : Unbounded_String;
-      --  第 A 只手第 F 格里看得见的三角点:下标和像素
+      --  第 A 只手第 F 格里看得见的三角点:下标和像素 = 这只手的全部三角点按运动学投进这一格,在眼前面、落在画面里的
+      --  (09-27 V1B15:原来只给"在这一格三角出来的"那 ≤ 40 个,第 2 只手 22 格去配头顶眼只有 1 格配上 18 个点,两只手对齐差 11 mm;
+      --  离线拿整片 768 个格点去问,40 / 44 格每格往返 1 px 内配上 100–250 个 —— 缺的是问的点,不是配不上)
+      package M3_Vectors is new Ada.Containers.Vectors (Natural, M3);
+      Fk_R : array (0 .. Natural'Max (1, Na) - 1) of M3_Vectors.Vector;   --  每只手每一格的腕眼位姿(参照眼系里;按读数算一次存着)
+      Fk_T : array (0 .. Natural'Max (1, Na) - 1) of V3_Vectors.Vector;
       procedure Pts_In (A, F : Natural; Idx : out Ints; Q : out Instrument.Match_Vectors.Vector) is
+         M : Kinem.Model renames Worlds (A).Model;
       begin
          Idx.Clear; Q.Clear;
+         if Fk_R (A).Is_Empty then
+            for Fr of Ds (A).Frames loop
+               declare
+                  Rr : M3;
+                  Tt : V3;
+               begin
+                  Kinem.FK (M, Fr.Q, Rr, Tt);
+                  Fk_R (A).Append (Rr); Fk_T (A).Append (Tt);
+               end;
+            end loop;
+         end if;
+         if F >= Natural (Fk_R (A).Length) then
+            return;
+         end if;
          for K in 0 .. Natural (Ps (A).Length) - 1 loop
-            if F = 0 then
-               Idx.Append (K); Q.Append (Instrument.Match_Pt'(U => Ps (A) (K).U0, V => Ps (A) (K).V0, others => <>));
-            elsif Ps (A) (K).Fr = F then
-               Idx.Append (K); Q.Append (Instrument.Match_Pt'(U => Ps (A) (K).Uk, V => Ps (A) (K).Vk, others => <>));
-            end if;
+            declare
+               X : constant V3 := Ps (A) (K).X;
+               Xc : constant V3 := Ap (Tr (Fk_R (A) (F)), [X (0) - Fk_T (A) (F) (0), X (1) - Fk_T (A) (F) (1), X (2) - Fk_T (A) (F) (2)]);
+            begin
+               if Xc (2) < 0.0 then   --  在眼前面(-z 朝前,同 Dir_Of)
+                  declare
+                     U : constant Long_Float := M.Cx + M.F * Xc (0) / (-Xc (2));
+                     V : constant Long_Float := M.Cy - M.F * Xc (1) / (-Xc (2));
+                  begin
+                     if U >= 0.0 and then U < Long_Float (Ds (A).W) and then V >= 0.0 and then V < Long_Float (Ds (A).H) then
+                        Idx.Append (K); Q.Append (Instrument.Match_Pt'(U => U, V => V, others => <>));
+                     end if;
+                  end;
+               end if;
+            end;
          end loop;
       end Pts_In;
       --  第 A 只手的格子里用得上的(有三角点的):起点 + 三角用到的每一格
@@ -1091,11 +1064,15 @@ package body Jointboot is
          return Out_C;
       end Cov_World;
       --  配一对(Src 里的点 Q ⇒ Dst 那张图),往返 1 px 内的留下:返回每个留下的点在 Q 里是第几个、在 Dst 里的像素、往返差
+      T_Match : Duration := 0.0;   --  对齐里花在配点仪器上的时间(秒;只记账)
+      N_Match : Natural := 0;
       procedure Match_Pair (Src, Dst : Integer; Dw, Dh : Natural; Q : Instrument.Match_Vectors.Vector; Keep : out Ints; U, V, E : out Floats) is
          Err : Unbounded_String;
+         Tm : constant Ada.Calendar.Time := Ada.Calendar.Clock;
       begin
          Keep.Clear; U.Clear; V.Clear; E.Clear;
          Tried.Append (Pair'(A => Src, B => Dst));
+         N_Match := N_Match + 1;
          if Q.Is_Empty or else Src < 0 or else Dst < 0 then
             return;
          end if;
@@ -1116,8 +1093,13 @@ package body Jointboot is
                end loop;
             end if;
          end;
+         T_Match := T_Match + Ada.Calendar."-" (Ada.Calendar.Clock, Tm);
       end Match_Pair;
       function Was_Tried (A, B : Integer) return Boolean is (Tried.Contains (Pair'(A => A, B => B)));
+      --  到这一步用了多少秒、其中配点仪器多少(只记账)
+      function Lap return String is
+        ("(到这儿 " & Codec.Fmt (Long_Float (Ada.Calendar."-" (Ada.Calendar.Clock, T0)), 1) & " 秒,其中配点 " & Codec.Img (N_Match) & " 对 "
+         & Codec.Fmt (Long_Float (T_Match), 1) & " 秒)");
       function Dist (X, Pl, Nrm : V3) return Long_Float is ((X (0) - Pl (0)) * Nrm (0) + (X (1) - Pl (1)) * Nrm (1) + (X (2) - Pl (2)) * Nrm (2));
       function Cross (A, B : V3) return V3 is ([A (1) * B (2) - A (2) * B (1), A (2) * B (0) - A (0) * B (2), A (0) * B (1) - A (1) * B (0)]);
       --  一个点投进世界里一只眼的像素残差,按"配点噪声 ⊕ 这个点自己三角的不确定度投进这只眼"白化(2 条,以标准差为单位;同 Geom.Scene_Var 的做法):
@@ -1293,6 +1275,8 @@ package body Jointboot is
       --  再全部一起抗野点精修两轮(门 max(3 px, 3 × 中位))。Inl = 投回去差不到 3 px 的配点数,Md = 它们的像素残差中位
       N_Theta : constant := 360;   --  绕法向每 1° 一档(次数)
       N_Scale : constant := 41;    --  长度倍数 0.1–10 按对数分 41 档(每档约 12%;倍数范围是比例,无量纲)
+      Coarse_T : constant := 5;    --  网格先粗找:转角 5 档并 1 档(5°)、倍数 2 档并 1 档(约 26%),再在最好那格周围按细档补(次数)
+      Coarse_S : constant := 2;
       procedure Place_Arm (B : Natural; S : out Long_Float; R : out M3; T : out V3; Inl : out Natural; Md : out Long_Float) is
          Nr : constant Natural := Natural (Arm_Obs (B).Length);
          Sig_B : constant Long_Float := Cross_Sig (B);
@@ -1301,11 +1285,24 @@ package body Jointboot is
          function Grp (Ob : Arm_Ob) return Natural is (if Wv (Ob.Wk).Arm < 0 then 1 else 0);
          R0 : M3 := Identity;
          function Rz (Th : Long_Float) return M3 is (Rodrigues ([N0 (0) * Th, N0 (1) * Th, N0 (2) * Th]));
-         --  给定倍数、转动 ⇒ 平移(视线的线性最小二乘:点到视线的距离)
+         --  放进世界只是给一起精修找起点 ⇒ 网格的分数和这里的精修每组按顺序等间隔最多取 Sub_Max 条(次数);每一格的平移用全部
+         --  (平移按普通最小二乘解,子集里错配那组占的份量变大,09-27 V1B15 回放起点从倍数 1.0060 偏到 1.0394);数门里有几条用全部。
+         --  一起精修(Joint_Refine)用全部
+         Sub_Max : constant := 400;
+         In_Sub : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (Nr));
+         --  给定倍数、转动 ⇒ 平移:沿世界法向那一分量由"它的桌面落在世界的桌面上"定死(桌面是几百个点拟合的,高度的标准误差很小;
+         --  精修时再按标准误差放软,见 Plane_Res),平面里那两个分量按视线的线性最小二乘(点到视线的距离)。
+         --  (09-27 V1B15 回放:配进头顶眼的点来自同一格、大多在桌面上,只按视线解时"放大再挪远"投回头顶眼一样,网格挑到倍数 1.2952)
          function Solve_T (Sx : Long_Float; Rx : M3) return V3 is
             A : M3 := [others => [others => 0.0]];
             Bb : V3 := [0.0, 0.0, 0.0];
+            Rc : constant V3 := Ap (Rx, Pl_Cb (B));
+            H : constant Long_Float := Pl0 (0) * N0 (0) + Pl0 (1) * N0 (1) + Pl0 (2) * N0 (2) - Sx * (Rc (0) * N0 (0) + Rc (1) * N0 (1) + Rc (2) * N0 (2));
+            E1 : V3 := Cross (N0, (if abs N0 (0) < 0.9 then [1.0, 0.0, 0.0] else [0.0, 1.0, 0.0]));   --  垂直于世界法向的一对方向(纯数学,无量纲)
+            E2 : V3;
          begin
+            E1 := [E1 (0) / Norm (E1), E1 (1) / Norm (E1), E1 (2) / Norm (E1)];
+            E2 := Cross (N0, E1);
             for Ob of Arm_Obs (B) loop
                declare
                   D : constant V3 := Ob.Rd;
@@ -1321,7 +1318,24 @@ package body Jointboot is
                   end loop;
                end;
             end loop;
-            return Solve3 (A, Bb);
+            --  T = H · 法向 + a · E1 + b · E2:(a, b) 的 2×2 正规方程
+            declare
+               An : constant V3 := Ap (A, N0);
+               Ae1 : constant V3 := Ap (A, E1);
+               Ae2 : constant V3 := Ap (A, E2);
+               R1 : constant Long_Float := (Bb (0) - H * An (0)) * E1 (0) + (Bb (1) - H * An (1)) * E1 (1) + (Bb (2) - H * An (2)) * E1 (2);
+               R2 : constant Long_Float := (Bb (0) - H * An (0)) * E2 (0) + (Bb (1) - H * An (1)) * E2 (1) + (Bb (2) - H * An (2)) * E2 (2);
+               M11 : constant Long_Float := E1 (0) * Ae1 (0) + E1 (1) * Ae1 (1) + E1 (2) * Ae1 (2);
+               M12 : constant Long_Float := E1 (0) * Ae2 (0) + E1 (1) * Ae2 (1) + E1 (2) * Ae2 (2);
+               M22 : constant Long_Float := E2 (0) * Ae2 (0) + E2 (1) * Ae2 (1) + E2 (2) * Ae2 (2);
+               Dt : constant Long_Float := M11 * M22 - M12 * M12;
+               Ya, Yb : Long_Float := 0.0;
+            begin
+               if abs Dt > 1.0e-18 then   --  数值保护(无量纲)
+                  Ya := (M22 * R1 - M12 * R2) / Dt; Yb := (M11 * R2 - M12 * R1) / Dt;
+               end if;
+               return [H * N0 (0) + Ya * E1 (0) + Yb * E2 (0), H * N0 (1) + Ya * E1 (1) + Yb * E2 (1), H * N0 (2) + Ya * E1 (2) + Yb * E2 (2)];
+            end;
          end Solve_T;
          --  一条配点:它的点按(Sx, Rx, Tx)放进世界、投回世界里那只眼,白化残差两条
          procedure Res2 (Ob : Arm_Ob; Cg : Cam_Geo; Sx : Long_Float; Rx : M3; Tx : V3; E1, E2 : out Long_Float) is
@@ -1344,19 +1358,24 @@ package body Jointboot is
             Res2 (Ob, Wv (Ob.Wk).Cam, Sx, Rx, Tx, E1, E2);
             return Sqrt (E1 * E1 + E2 * E2);
          end Epi;
-         --  网格那一步的分数 = 每组配点白化残差的中位加起来(和噪声估大估小无关的排名;人少的那组也有份;精修再按门挑)
+         --  网格那一步的分数 = 每组(条数 × 这一组白化残差中位的对数)加起来 = 每组噪声各自不知道时的最大似然(同精修里按组重估噪声倍数:
+         --  一组的噪声倍数按它自己的中位估,代回去似然只剩 −Σ 条数 · log 中位)。一组整体大小(噪声估大估小)只差一个常数,不影响排名;
+         --  原来直接把各组中位相加(09-27 V1B15 回放:配进第 1 只手格子的 331 条 84% 是木纹上的错配,中位几百像素,随网格变一点就压过
+         --  配进头顶眼那 192 条 0.4 px 的信号,放进世界时倍数解成 1.2957,靠一起精修才拉回 1.0066)
          function Score (Sx : Long_Float; Rx : M3; Tx : V3) return Long_Float is
             package Sorting is new F64_Vectors.Generic_Sorting;
             Es : array (0 .. 1) of Floats;
             Sm : Long_Float := 0.0;
          begin
-            for Ob of Arm_Obs (B) loop
-               Es (Grp (Ob)).Append (Epi (Ob, Sx, Rx, Tx));
+            for K in 0 .. Nr - 1 loop
+               if In_Sub (K) then
+                  Es (Grp (Arm_Obs (B) (K))).Append (Epi (Arm_Obs (B) (K), Sx, Rx, Tx));
+               end if;
             end loop;
             for G in Es'Range loop
                if not Es (G).Is_Empty then
                   Sorting.Sort (Es (G));
-                  Sm := Sm + Es (G) (Natural (Es (G).Length) / 2);
+                  Sm := Sm + Long_Float (Es (G).Length) * Log (Long_Float'Max (Es (G) (Natural (Es (G).Length) / 2), 1.0e-9));   --  数值保护(无量纲)
                end if;
             end loop;
             return Sm;
@@ -1402,25 +1421,60 @@ package body Jointboot is
          end;
          --  网格起步
          declare
-            Best : Long_Float := Long_Float'Last;
+            N_Grp, Seen : array (0 .. 1) of Natural := [others => 0];
          begin
-            for It in 0 .. N_Theta - 1 loop
+            for Ob of Arm_Obs (B) loop
+               N_Grp (Grp (Ob)) := N_Grp (Grp (Ob)) + 1;
+            end loop;
+            for K in 0 .. Nr - 1 loop
                declare
-                  Rx : constant M3 := Mul (Rz (2.0 * Ada.Numerics.Pi * Long_Float (It) / Long_Float (N_Theta)), R0);
+                  G : constant Natural := Grp (Arm_Obs (B) (K));
                begin
-                  for Ks in 0 .. N_Scale - 1 loop
-                     declare
-                        Sx : constant Long_Float := 0.1 * Exp (Long_Float (Ks) / Long_Float (N_Scale - 1) * Log (100.0));   --  0.1–10(比例,无量纲)
-                        Tx : constant V3 := Solve_T (Sx, Rx);
-                        Sc : constant Long_Float := Score (Sx, Rx, Tx);
-                     begin
-                        if Sc < Best then
-                           Best := Sc; S := Sx; R := Rx; T := Tx;
-                        end if;
-                     end;
-                  end loop;
+                  In_Sub.Replace_Element (K, Seen (G) mod Natural'Max (1, (N_Grp (G) + Sub_Max - 1) / Sub_Max) = 0);
+                  Seen (G) := Seen (G) + 1;
                end;
             end loop;
+         end;
+         --  两级网格(09-27:一格要把几百条配点白化一遍,360 × 41 格放一次 8–20 秒):粗档挑出最好那格,再在它周围按细档补;
+         --  最后落点的细度同原来(1°、约 12%)
+         declare
+            Best : Long_Float := Long_Float'Last;
+            It_B, Ks_B : Integer := 0;
+            procedure Try (It, Ks : Integer) is
+               Itm : constant Integer := It mod N_Theta;
+            begin
+               if Ks < 0 or else Ks > N_Scale - 1 then
+                  return;
+               end if;
+               declare
+                  Rx : constant M3 := Mul (Rz (2.0 * Ada.Numerics.Pi * Long_Float (Itm) / Long_Float (N_Theta)), R0);
+                  Sx : constant Long_Float := 0.1 * Exp (Long_Float (Ks) / Long_Float (N_Scale - 1) * Log (100.0));   --  0.1–10(比例,无量纲)
+                  Tx : constant V3 := Solve_T (Sx, Rx);
+                  Sc : constant Long_Float := Score (Sx, Rx, Tx);
+               begin
+                  if Sc < Best then
+                     Best := Sc; S := Sx; R := Rx; T := Tx; It_B := Itm; Ks_B := Ks;
+                  end if;
+               end;
+            end Try;
+         begin
+            for It in 0 .. N_Theta / Coarse_T - 1 loop
+               for Ks in 0 .. (N_Scale - 1) / Coarse_S loop
+                  Try (It * Coarse_T, Ks * Coarse_S);
+               end loop;
+            end loop;
+            declare
+               It_C : constant Integer := It_B;
+               Ks_C : constant Integer := Ks_B;
+            begin
+               for Dt in -(Coarse_T - 1) .. Coarse_T - 1 loop
+                  for Dk in -(Coarse_S - 1) .. Coarse_S - 1 loop
+                     if Dt /= 0 or else Dk /= 0 then
+                        Try (It_C + Dt, Ks_C + Dk);
+                     end if;
+                  end loop;
+               end loop;
+            end;
          end;
          --  一起精修三轮(每轮先按各组自己的残差重估噪声倍数,再挑门里的、解)
          for Round in 1 .. 3 loop
@@ -1436,7 +1490,7 @@ package body Jointboot is
                end loop;
                Gate := Gate_Of (Es);
                for K in 0 .. Nr - 1 loop
-                  if Es (K) < Gate then
+                  if Es (K) < Gate and then In_Sub (K) then
                      Use_R.Replace_Element (K, True); Nu := Nu + 1;
                   end if;
                end loop;
@@ -1996,9 +2050,10 @@ package body Jointboot is
                         Inl : Natural;
                      begin
                         Place_Arm (B, S, R, T, Inl, Md);
+                        Cand_S (B) := S; Cand_R (B) := R; Cand_T (B) := T; Cand_Inl (B) := Inl; Cand_Md (B) := Md;
                         Say ("  第" & Codec.Img (B + 1) & " 只手这一轮配了(它的第几格 → 世界里的哪只眼:问几个点 / 往返配上几个 / 其中在它桌面上的):" & To_String (Round_Note)
                              & " ⇒ 一共配上 " & Codec.Img (Natural (Arm_Obs (B).Length)) & " 次,放进世界后投回去在门里的 " & Codec.Img (Inl) & " 次(残差中位 "
-                             & Codec.Fmt (Md, 2) & " 倍标准差)· 长度倍数 " & Codec.Fmt (S, 4));
+                             & Codec.Fmt (Md, 2) & " 倍标准差)· 长度倍数 " & Codec.Fmt (S, 4) & " " & Lap);
                         Round_Note := Null_Unbounded_String;
                         if Inl >= Min_Inl and then Inl > Best_Inl then
                            Best_Inl := Inl; Best := B;
@@ -2045,7 +2100,7 @@ package body Jointboot is
                   end loop;
                   Say ("放进世界:不长在手上的那只眼 —— 配了 " & Codec.Img (N_Pairs_Fx) & " 对画面,往返 1 px 内共同看见的点 " & Codec.Img (Natural (Cam_Obs.Length))
                        & " 个 ⇒ 焦距 " & Codec.Fmt (G.F, 1) & "、残差 " & Codec.Fmt (G_Rep.Scene_Rms, 2) & " px(进解 " & Codec.Img (G_Rep.Scene_Used) & " / "
-                       & Codec.Img (G_Rep.Scene_N) & ")、离桌面 " & Codec.Fmt (abs Dist (G.Pos, Pl0, N0), 3) & " 单位");
+                       & Codec.Img (G_Rep.Scene_N) & ")、离桌面 " & Codec.Fmt (abs Dist (G.Pos, Pl0, N0), 3) & " 单位 " & Lap);
                end;
             else
                declare
@@ -2056,7 +2111,9 @@ package body Jointboot is
                   Wb : Arm_World := Worlds (Natural (Best));
                   N_Fx, N_Arm : Natural := 0;
                begin
-                  Place_Arm (Natural (Best), S, R, T, Inl, Md);
+                  S := Cand_S (Natural (Best)); R := Cand_R (Natural (Best)); T := Cand_T (Natural (Best));
+                  Inl := Cand_Inl (Natural (Best)); Md := Cand_Md (Natural (Best));
+                  Say ("  [计时] 放进世界 " & Lap);
                   Wb.S := S; Wb.Ra := R; Wb.Ta := T;
                   Worlds.Replace_Element (Natural (Best), Wb);
                   Placed (Natural (Best)) := True;
@@ -2089,6 +2146,43 @@ package body Jointboot is
                         end loop;
                      end if;
                   end;
+                  --  按它全部的配点重放一遍:刚才加密配进不动的眼的那些格也当它的证据(同一批配点,不再配)。放进世界那一步手里只有
+                  --  "最像那只眼的一格"(09-27 V1B15 回放:配进头顶眼的只有一格 192 个点,网格挑到倍数 1.31,靠一起精修才拉回 1.0066)。
+                  --  只在重放时借用;放好就撤掉,一起精修里它们只在不动的眼那一组算一次
+                  if Fx_Placed then
+                     declare
+                        Bi : constant Natural := Natural (Best);
+                        N_Before : constant Natural := Natural (Arm_Obs (Bi).Length);
+                        Fk : Natural := 0;
+                        Have : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (Natural'Max (1, Natural (Ds (Bi).Frames.Length))));
+                     begin
+                        for K in 0 .. Natural (Wv.Length) - 1 loop
+                           if Wv (K).Arm < 0 then
+                              Fk := K;
+                           end if;
+                        end loop;
+                        for Ob of Arm_Obs (Bi) loop
+                           if Ob.Wk = Fk and then Ob.Bf < Natural (Have.Length) then
+                              Have.Replace_Element (Ob.Bf, True);   --  这一格和不动的眼放进世界之前就配过了,已经在它的证据里
+                           end if;
+                        end loop;
+                        for X of Cam_Obs loop
+                           if X.Pa = Bi and then Wv (X.Wk).Arm = Integer (Bi) and then Wv (X.Wk).Frame < Natural (Have.Length) and then not Have (Wv (X.Wk).Frame) then
+                              Arm_Obs (Bi).Append (Arm_Ob'(K => X.Pk, Bf => Wv (X.Wk).Frame, Wk => Fk, Ro => G.Pos, Rd => Ray_Fixed (G, X.U, X.V),
+                                                          U => X.U, V => X.V, Uw => X.Uw, Vw => X.Vw, E => X.E));
+                           end if;
+                        end loop;
+                        Say ("  [计时] 加密完 " & Lap);
+                        if Natural (Arm_Obs (Bi).Length) > N_Before then
+                           Place_Arm (Bi, S, R, T, Inl, Md);
+                           Wb.S := S; Wb.Ra := R; Wb.Ta := T;
+                           Worlds.Replace_Element (Bi, Wb);
+                           Say ("  第" & Codec.Img (Bi + 1) & " 只手按全部配点重放(加上加密配进不长在手上的眼的 " & Codec.Img (Natural (Arm_Obs (Bi).Length) - N_Before)
+                                & " 个):放进世界后投回去在门里的 " & Codec.Img (Inl) & " 次 ⇒ 长度倍数 " & Codec.Fmt (S, 4) & " " & Lap);
+                        end if;
+                        Arm_Obs (Bi).Set_Length (Ada.Containers.Count_Type (N_Before));
+                     end;
+                  end if;
                   for P of Tried loop
                      if Ds (Natural (Best)).Ids.Contains (P.A) then
                         if P.B = Fx_Id then
@@ -2100,11 +2194,12 @@ package body Jointboot is
                   end loop;
                   Say ("放进世界:第" & Codec.Img (Natural (Best) + 1) & " 只手 —— 配了 " & Codec.Img (N_Pairs_Of (Natural (Best))) & " 对画面(对不长在手上的眼 " & Codec.Img (N_Fx)
                        & " 对、对别的手的格子 " & Codec.Img (N_Arm) & " 对),往返 1 px 内配上 " & Codec.Img (Natural (Arm_Obs (Natural (Best)).Length))
-                       & " 次,放进世界后投回去在门里的 " & Codec.Img (Inl) & " 次(残差中位 " & Codec.Fmt (Md, 2) & " 倍标准差)⇒ 长度倍数 " & Codec.Fmt (S, 4));
+                       & " 次,放进世界后投回去在门里的 " & Codec.Img (Inl) & " 次(残差中位 " & Codec.Fmt (Md, 2) & " 倍标准差)⇒ 长度倍数 " & Codec.Fmt (S, 4) & " " & Lap);
                end;
             end if;
          end;
       end loop;
+      Say ("  一起精修之前 " & Lap);
       Joint_Refine;
       for B in 1 .. Na - 1 loop
          if Placed (B) then
@@ -2189,7 +2284,7 @@ package body Jointboot is
             when others => null;
          end;
       end if;
-      Say ("  对齐用了 " & Codec.Fmt (Long_Float (Ada.Calendar."-" (Ada.Calendar.Clock, T0)), 1) & " 秒");
+      Say ("  对齐用了 " & Codec.Fmt (Long_Float (Ada.Calendar."-" (Ada.Calendar.Clock, T0)), 1) & " 秒 " & Lap);
    end Align;
 
    --  ── 装上以后插头用的状态 ──
@@ -2197,7 +2292,6 @@ package body Jointboot is
    St_Rw : Geom.M3 := Geom.Identity;
    St_O : Geom.V3 := [0.0, 0.0, 0.0];
    St_Last : Plug.Floats_Vectors.Vector;   --  每只手最近一帧的关节读数(反解从这儿起)
-   St_Pe, St_Re : Long_Float := 0.0;       --  最近一次反解解完还差多少(位置:模型单位;朝向:弧度)
 
    procedure Install (Worlds : Arm_World_Vectors.Vector; Rw : Geom.M3; O : Geom.V3) is
    begin
@@ -2241,41 +2335,52 @@ package body Jointboot is
       end loop;
    end Pose_Hook;
 
-   procedure Cmd_Hook (C : in out Plug.Cmd; Ok : out Boolean) is
+   --  世界里的一个腕眼位姿 ⇒ 第 A 只手的关节目标(在扫描量过的范围里反解;位姿命令和开机自检都走这一条)。
+   --  Pe / Re = 解完还差多少(位置:第一只手的模型单位 = 世界的单位;朝向:弧度)
+   procedure Pose_To_Q (A : Natural; Pose : Plug.Arm_Pose; Q : out Floats; Pe, Re : out Long_Float) is
       use Geom;
+      W : Arm_World renames St_Worlds (A);
+      Rt_W : constant M3 := Quat_To_R (Pose);
+      Tt_W : constant V3 := [Pose (0), Pose (1), Pose (2)];
+      --  世界 → 第一只手参照眼系 → 这只手参照眼系
+      R0 : constant M3 := Mul (Tr (St_Rw), Rt_W);
+      T0w : constant V3 := Ap (Tr (St_Rw), Tt_W);
+      T0 : constant V3 := [T0w (0) + St_O (0), T0w (1) + St_O (1), T0w (2) + St_O (2)];
+      Ra_T : constant M3 := Tr (W.Ra);
+      Ra_Arm : constant M3 := Mul (Ra_T, R0);
+      Ta_D : constant V3 := Ap (Ra_T, [T0 (0) - W.Ta (0), T0 (1) - W.Ta (1), T0 (2) - W.Ta (2)]);
+      Ta_Arm : constant V3 := [Ta_D (0) / W.S, Ta_D (1) / W.S, Ta_D (2) / W.S];
+   begin
+      Kinem.IK (W.Model, Ra_Arm, Ta_Arm, St_Last (A), W.Lo, W.Hi, Q, Pe, Re);
+      Pe := Pe * W.S;   --  换成第一只手的模型单位(= 世界的单位)
+   end Pose_To_Q;
+
+   procedure Cmd_Hook (C : in out Plug.Cmd; Ok : out Boolean) is
+      Q : Floats;
+      Pe, Re : Long_Float;
    begin
       Ok := False;
       if C.Arm >= Natural (St_Worlds.Length) then
          return;
       end if;
-      declare
-         W : Arm_World renames St_Worlds (C.Arm);
-         Rt_W : constant M3 := Quat_To_R (C.Pose);
-         Tt_W : constant V3 := [C.Pose (0), C.Pose (1), C.Pose (2)];
-         --  世界 → 第一只手参照眼系 → 这只手参照眼系
-         R0 : constant M3 := Mul (Tr (St_Rw), Rt_W);
-         T0w : constant V3 := Ap (Tr (St_Rw), Tt_W);
-         T0 : constant V3 := [T0w (0) + St_O (0), T0w (1) + St_O (1), T0w (2) + St_O (2)];
-         Ra_T : constant M3 := Tr (W.Ra);
-         Ra_Arm : constant M3 := Mul (Ra_T, R0);
-         Ta_D : constant V3 := Ap (Ra_T, [T0 (0) - W.Ta (0), T0 (1) - W.Ta (1), T0 (2) - W.Ta (2)]);
-         Ta_Arm : constant V3 := [Ta_D (0) / W.S, Ta_D (1) / W.S, Ta_D (2) / W.S];
-         Q : Floats;
-         Pe, Re : Long_Float;
-      begin
-         Kinem.IK (W.Model, Ra_Arm, Ta_Arm, St_Last (C.Arm), W.Lo, W.Hi, Q, Pe, Re);
-         St_Pe := Pe * W.S; St_Re := Re;   --  换成第一只手的模型单位(= 世界的单位)
-         C.Kind := Plug.Joint;
-         C.Group := W.Group;
-         C.Q := Q;
-         Ok := True;
-      end;
+      Pose_To_Q (C.Arm, C.Pose, Q, Pe, Re);
+      C.Kind := Plug.Joint;
+      C.Group := St_Worlds (C.Arm).Group;
+      C.Q := Q;
+      Ok := True;
    end Cmd_Hook;
    N_Check : constant := 3;   --  每只手走几处(次数)
    procedure Self_Check (L : in out Plug.Link; F : in out Plug.Frame; M : Selfmap.Body_Map; Ds : Sweep_Vectors.Vector; Dump : String) is
       use Geom;
       Fo : Ada.Text_IO.File_Type;
       Have_Fo : Boolean := False;
+      Na : constant Natural := Natural (St_Worlds.Length);
+      --  每只手的目标:两格"几个关节一起动"的读数正中(扫描时没去过的地方)按运动学算到的腕眼位姿,搬到世界里
+      Cmb : array (0 .. Natural'Max (1, Na) - 1) of Ints;
+      N_Done : array (0 .. Natural'Max (1, Na) - 1) of Natural := [others => 0];
+      Sum_P, Max_P, Max_Pe : array (0 .. Natural'Max (1, Na) - 1) of Long_Float := [others => 0.0];
+      T0c : constant Ada.Calendar.Time := Ada.Calendar.Clock;
+      Seq0 : constant Natural := L.Seq;
    begin
       if Dump /= "" then
          begin
@@ -2285,80 +2390,114 @@ package body Jointboot is
             when others => null;
          end;
       end if;
-      for A in 0 .. Natural (St_Worlds.Length) - 1 loop
+      for A in 0 .. Na - 1 loop
+         for K in 1 .. Natural (Ds (St_Worlds (A).Sweep).Frames.Length) - 1 loop
+            if Ds (St_Worlds (A).Sweep).Frames (K).Joint < 0 then
+               Cmb (A).Append (K);
+            end if;
+         end loop;
+      end loop;
+      --  几只手同时走:每一处一条关节命令带几只手的目标(每只手的目标按位姿命令同一条路 Pose_To_Q 解)
+      for I in 0 .. N_Check - 1 loop
          declare
-            W : constant Arm_World := St_Worlds (A);
-            Cmb : Ints;
-            N_Done : Natural := 0;
-            Sum_P, Max_P, Max_Pe : Long_Float := 0.0;
+            Targets : Plug.Pose_Vectors.Vector;
+            Pes, Rrs : Floats;
+            Gs : Ints;
+            Qs : Plug.Floats_Vectors.Vector;
+            Tol : Long_Float := Long_Float'Last;
+            Dl : Table.Vec;
+            Fr : Natural;
+            Okg : Boolean;
          begin
-            for K in 1 .. Natural (Ds (W.Sweep).Frames.Length) - 1 loop
-               if Ds (W.Sweep).Frames (K).Joint < 0 then
-                  Cmb.Append (K);
-               end if;
-            end loop;
-            for I in 0 .. Natural (Cmb.Length) - 2 loop
-               exit when N_Done >= N_Check;
+            for A in 0 .. Na - 1 loop
                declare
-                  Qa : constant Floats := Ds (W.Sweep).Frames (Natural (Cmb (I))).Q;
-                  Qb : constant Floats := Ds (W.Sweep).Frames (Natural (Cmb (I + 1))).Q;
-                  Qm : Floats;
-                  Rr : M3;
-                  Tt : V3;
+                  W : constant Arm_World := St_Worlds (A);
+                  Target : Plug.Arm_Pose := [others => 0.0];
+                  Q : Floats;
+                  Pe, Re : Long_Float := 0.0;
                begin
-                  for J in 0 .. Natural'Min (Natural (Qa.Length), Natural (Qb.Length)) - 1 loop
-                     Qm.Append (0.5 * (Qa (J) + Qb (J)));
-                  end loop;
-                  Kinem.FK (W.Model, Qm, Rr, Tt);
-                  declare
-                     R0 : constant M3 := Mul (W.Ra, Rr);
-                     Rt : constant V3 := Ap (W.Ra, Tt);
-                     T0 : constant V3 := [W.S * Rt (0) + W.Ta (0) - St_O (0), W.S * Rt (1) + W.Ta (1) - St_O (1), W.S * Rt (2) + W.Ta (2) - St_O (2)];
-                     Target : constant Plug.Arm_Pose := Kinem.To_Pose (Mul (St_Rw, R0), Ap (St_Rw, T0));
-                     Dl : Table.Vec;
-                     Fr : Natural;
-                     Okg : Boolean;
-                  begin
-                     Selfmap.Go (L, M, A, Target, F64_Vectors.Empty_Vector, F, Dl, Fr, Okg);
-                     exit when not Okg or else A >= Natural (F.EE.Length);
+                  if I + 1 < Natural (Cmb (A).Length) then
                      declare
-                        Got : constant Plug.Arm_Pose := F.EE (A);
-                        Dp : constant Long_Float := Norm ([Got (0) - Target (0), Got (1) - Target (1), Got (2) - Target (2)]);
+                        Qa : constant Floats := Ds (W.Sweep).Frames (Natural (Cmb (A) (I))).Q;
+                        Qb : constant Floats := Ds (W.Sweep).Frames (Natural (Cmb (A) (I + 1))).Q;
+                        Qm : Floats;
+                        Rr : M3;
+                        Tt : V3;
                      begin
-                        N_Done := N_Done + 1;
-                        Sum_P := Sum_P + Dp; Max_P := Long_Float'Max (Max_P, Dp); Max_Pe := Long_Float'Max (Max_Pe, St_Pe);
-                        if Have_Fo then
-                           Ada.Text_IO.Put (Fo, Codec.Img (A) & " " & Codec.Img (W.Sweep) & " " & Codec.Img (Fr) & " |");
-                           for X of Target loop
-                              Ada.Text_IO.Put (Fo, " " & Codec.Fmt (X, 7));
+                        for J in 0 .. Natural'Min (Natural (Qa.Length), Natural (Qb.Length)) - 1 loop
+                           Qm.Append (0.5 * (Qa (J) + Qb (J)));
+                        end loop;
+                        Kinem.FK (W.Model, Qm, Rr, Tt);
+                        declare
+                           R0 : constant M3 := Mul (W.Ra, Rr);
+                           Rt : constant V3 := Ap (W.Ra, Tt);
+                           T0 : constant V3 := [W.S * Rt (0) + W.Ta (0) - St_O (0), W.S * Rt (1) + W.Ta (1) - St_O (1), W.S * Rt (2) + W.Ta (2) - St_O (2)];
+                        begin
+                           Target := Kinem.To_Pose (Mul (St_Rw, R0), Ap (St_Rw, T0));
+                        end;
+                        Pose_To_Q (A, Target, Q, Pe, Re);
+                        Gs.Append (W.Group); Qs.Append (Q);
+                        --  到了 = 每个关节差不到它这一下要走的三分之一(比例,同扫描)
+                        if W.Group < Natural (F.Joints.Length) then
+                           for J in 0 .. Natural'Min (Natural (Q.Length), Natural (F.Joints (W.Group).Length)) - 1 loop
+                              if abs (Q (J) - F.Joints (W.Group) (J)) > 0.0 then
+                                 Tol := Long_Float'Min (Tol, Third * abs (Q (J) - F.Joints (W.Group) (J)));
+                              end if;
                            end loop;
-                           Ada.Text_IO.Put (Fo, " |");
-                           for X of Got loop
-                              Ada.Text_IO.Put (Fo, " " & Codec.Fmt (X, 7));
-                           end loop;
-                           Ada.Text_IO.Put (Fo, " | " & Codec.Fmt (St_Pe, 7) & " " & Codec.Fmt (St_Re, 7) & " |");
-                           if W.Group < Natural (F.Joints.Length) then
-                              for X of F.Joints (W.Group) loop
-                                 Ada.Text_IO.Put (Fo, " " & Codec.Fmt (X, 7));
-                              end loop;
-                           end if;
-                           Ada.Text_IO.Put (Fo, " ||");
-                           if W.Sweep < Natural (F.Reported_EE.Length) then
-                              for X of F.Reported_EE (W.Sweep) loop
-                                 Ada.Text_IO.Put (Fo, " " & Codec.Fmt (X, 7));   --  身体报的手的位姿:只给离线打分,驱动不读
-                              end loop;
-                           end if;
-                           Ada.Text_IO.New_Line (Fo);
                         end if;
                      end;
-                  end;
+                  end if;
+                  Targets.Append (Target); Pes.Append (Pe); Rrs.Append (Re);
                end;
             end loop;
-            Say ("开机自检(V1b ②):第" & Codec.Img (A + 1) & " 只手走到 " & Codec.Img (N_Done) & " 处扫描时没去过的地方(两格""几个关节一起动""的读数正中)⇒ "
-                 & "按关节读数算到的离目标 平均 " & Codec.Fmt ((if N_Done > 0 then Sum_P / Long_Float (N_Done) else 0.0), 4) & "、最大 " & Codec.Fmt (Max_P, 4)
-                 & " 单位;反解最多还差 " & Codec.Fmt (Max_Pe, 4) & " 单位(真值只落盘打分)");
+            exit when Gs.Is_Empty;
+            Selfmap.Go (L, M, 0, [others => 0.0], F64_Vectors.Empty_Vector, F, Dl, Fr, Okg, Groups => Gs, Qs => Qs,
+                        Tol => (if Tol < Long_Float'Last then Tol else 0.0));
+            exit when not Okg;
+            for A in 0 .. Na - 1 loop
+               if I + 1 < Natural (Cmb (A).Length) and then A < Natural (F.EE.Length) then
+                  declare
+                     W : constant Arm_World := St_Worlds (A);
+                     Target : constant Plug.Arm_Pose := Targets (A);
+                     Got : constant Plug.Arm_Pose := F.EE (A);
+                     Dp : constant Long_Float := Norm ([Got (0) - Target (0), Got (1) - Target (1), Got (2) - Target (2)]);
+                  begin
+                     N_Done (A) := N_Done (A) + 1;
+                     Sum_P (A) := Sum_P (A) + Dp; Max_P (A) := Long_Float'Max (Max_P (A), Dp); Max_Pe (A) := Long_Float'Max (Max_Pe (A), Pes (A));
+                     if Have_Fo then
+                        Ada.Text_IO.Put (Fo, Codec.Img (A) & " " & Codec.Img (W.Sweep) & " " & Codec.Img (Fr) & " |");
+                        for X of Target loop
+                           Ada.Text_IO.Put (Fo, " " & Codec.Fmt (X, 7));
+                        end loop;
+                        Ada.Text_IO.Put (Fo, " |");
+                        for X of Got loop
+                           Ada.Text_IO.Put (Fo, " " & Codec.Fmt (X, 7));
+                        end loop;
+                        Ada.Text_IO.Put (Fo, " | " & Codec.Fmt (Pes (A), 7) & " " & Codec.Fmt (Rrs (A), 7) & " |");
+                        if W.Group < Natural (F.Joints.Length) then
+                           for X of F.Joints (W.Group) loop
+                              Ada.Text_IO.Put (Fo, " " & Codec.Fmt (X, 7));
+                           end loop;
+                        end if;
+                        Ada.Text_IO.Put (Fo, " ||");
+                        if W.Sweep < Natural (F.Reported_EE.Length) then
+                           for X of F.Reported_EE (W.Sweep) loop
+                              Ada.Text_IO.Put (Fo, " " & Codec.Fmt (X, 7));   --  身体报的手的位姿:只给离线打分,驱动不读
+                           end loop;
+                        end if;
+                        Ada.Text_IO.New_Line (Fo);
+                     end if;
+                  end;
+               end if;
+            end loop;
          end;
       end loop;
+      for A in 0 .. Na - 1 loop
+         Say ("开机自检(V1b ②):第" & Codec.Img (A + 1) & " 只手走到 " & Codec.Img (N_Done (A)) & " 处扫描时没去过的地方(两格""几个关节一起动""的读数正中)⇒ "
+              & "按关节读数算到的离目标 平均 " & Codec.Fmt ((if N_Done (A) > 0 then Sum_P (A) / Long_Float (N_Done (A)) else 0.0), 4) & "、最大 " & Codec.Fmt (Max_P (A), 4)
+              & " 单位;反解最多还差 " & Codec.Fmt (Max_Pe (A), 4) & " 单位(真值只落盘打分)");
+      end loop;
+      Say ("  自检 " & Codec.Img (L.Seq - Seq0) & " 拍、" & Codec.Fmt (Long_Float (Ada.Calendar."-" (Ada.Calendar.Clock, T0c)), 1) & " 秒(几只手同时走)");
       if Have_Fo then
          Ada.Text_IO.Close (Fo);
       end if;

@@ -314,7 +314,7 @@ package body Instrument is
          return Empty;
       end if;
       if not Http_Client.Post (Host, Port, "/match", "{""a_id"":" & Codec.Img (Ia) & ",""b_id"":" & Codec.Img (Ib) & ",""num"":" & Codec.Img (Num)
-                               & (if Coarse then ",""coarse"":true" else "") & "}", Reply)
+                               & (if Coarse then ",""coarse"":true" else "") & ",""oneway"":true}", Reply)
       then
          Err := To_Unbounded_String ("连不上仪器 " & Host & ":" & Codec.Img (Port));
          return Empty;
