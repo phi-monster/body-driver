@@ -241,7 +241,7 @@ package Act is
       Head : Buf;
    end record;
    package Board_Stop_Vectors is new Ada.Containers.Vectors (Natural, Board_Stop);
-   package Kin_Vectors is new Ada.Containers.Vectors (Natural, Kinem.Model);
+   package Kin_Vectors is new Ada.Containers.Vectors (Natural, Kinem.Model, Kinem."=");
    type Context is record
       Map : Selfmap.Body_Map;
       Hands : Zone.Hand_Vectors.Vector;
