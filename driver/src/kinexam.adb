@@ -42,6 +42,7 @@ procedure Kinexam is
    All_Groups : array (0 .. 4095) of Group_Vectors.Vector;   --  每一格的各组读数(格子数上限,次数)
    Jf, Kf : array (0 .. 4095) of Integer := [others => 0];
    Nf : Natural := 0;
+   First_Img : Unbounded_String;
    G : Integer := -1;
    Fi : File_Type;
    M : Kinem.Model;
@@ -61,6 +62,9 @@ begin
                H : constant Strs := Fields (Left (Left'First .. First_Bar - 1));
             begin
                if Natural'Value (H (1)) = Arm and then Nf <= All_Groups'Last then
+                  if Nf = 0 then
+                     First_Img := To_Unbounded_String (H (0));
+                  end if;
                   Jf (Nf) := Integer'Value (H (2)); Kf (Nf) := Integer'Value (H (4));
                   declare
                      Rest : constant String := Left (First_Bar + 1 .. Left'Last);
@@ -119,7 +123,19 @@ begin
    end loop;
    Close (Fi);
    Put_Line ("臂" & Natural'Image (Arm) & ":" & Codec.Img (Nf) & " 格(读数第" & Integer'Image (G) & " 组)· 配点 " & Codec.Img (Natural (Cs.Length)));
-   Kinem.Fit (Frames, 0, Cs, 320.0, 240.0, 640.0, M, Rep, Ok);
+   --  画幅按落盘的第一张扫描图量(主点 = 画幅中心,同驱动)
+   declare
+      Rgb : Buf;
+      W, H : Natural;
+      Okb : Boolean;
+   begin
+      Codec.Read_BMP (Dir & "/" & To_String (First_Img), Rgb, W, H, Okb);
+      if not Okb then
+         Put_Line ("读不了 " & To_String (First_Img));
+         return;
+      end if;
+      Kinem.Fit (Frames, 0, Cs, Long_Float (W) / 2.0, Long_Float (H) / 2.0, Long_Float (W), M, Rep, Ok);
+   end;
    declare
       T : Unbounded_String;
    begin
