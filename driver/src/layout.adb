@@ -122,10 +122,12 @@ package body Layout is
          end;
          if Is_Image (D, F.N, W, H) then
             L.Cams.Append (F.P);
+         elsif Is_Intrinsic (D, F.N, Kf, Kcx, Kcy) then
+            --  先认内参再认深度:3×3 浮点也是"浮点 + 二维",Is_Depth 在前会把它收成一张尺寸对不上的深度图然后丢掉
+            --  (09-28 硬件组 PR #1,真 SO-101 + 合成机体实测;驱动本来就不读身体给的内参,这里只管别认错)
+            Intr_Raw.Append (F.P);
          elsif Is_Depth (D, F.N, W, H) then
             L.Depth.Append (F.P);
-         elsif Is_Intrinsic (D, F.N, Kf, Kcx, Kcy) then
-            Intr_Raw.Append (F.P);
          else
             declare
                Xs : constant Floats := Numbers (D, F.N);

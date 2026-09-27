@@ -2902,6 +2902,48 @@ begin
       Check (Natural (L5.Joints.Length) = 1 and then Natural (L1.Joints.Length) = 1,
              "认身体:六个不在 [0,1] 的数仍然算关节角,没被抢走");
    end;
+   --  ── 认身体:身体给的 3×3 内参认成内参(09-28 硬件组 PR #1)。3×3 浮点也满足"浮点 + 二维",原来 Is_Depth 在前、把它收成一张
+   --  尺寸对不上的深度图再丢掉;驱动本来就不读身体给的内参(焦距自己量),可认错了就是认错了 ⇒ 先认内参再认深度 ──
+   declare
+      S : Buf;
+      D : Msgpack.Doc;
+      Lk : Layout.Body_Layout;
+      Img, Kb : Buf;
+      procedure F4 (B : in out Buf; B0, B1, B2, B3 : Interfaces.Unsigned_8) is
+      begin
+         B.Append (B0); B.Append (B1); B.Append (B2); B.Append (B3);
+      end F4;
+   begin
+      for I in 1 .. 12 loop   --  2×2×3 的图
+         Img.Append (100);
+      end loop;
+      --  [300 0 1; 0 300 1; 0 0 1](float32 小端:300 = 43960000,1 = 3F800000)
+      F4 (Kb, 0, 0, 16#96#, 16#43#); F4 (Kb, 0, 0, 0, 0); F4 (Kb, 0, 0, 16#80#, 16#3F#);
+      F4 (Kb, 0, 0, 0, 0); F4 (Kb, 0, 0, 16#96#, 16#43#); F4 (Kb, 0, 0, 16#80#, 16#3F#);
+      F4 (Kb, 0, 0, 0, 0); F4 (Kb, 0, 0, 0, 0); F4 (Kb, 0, 0, 16#80#, 16#3F#);
+      Msgpack.Put_Map (S, 1);
+      Msgpack.Put_Str (S, "obs"); Msgpack.Put_Map (S, 2);
+      Msgpack.Put_Str (S, "cam"); Msgpack.Put_Map (S, 2);
+      Msgpack.Put_Str (S, "color"); Msgpack.Put_Map (S, 4);
+      Msgpack.Put_Str (S, "nd"); Msgpack.Put_Bool (S, True);
+      Msgpack.Put_Str (S, "type"); Msgpack.Put_Str (S, "|u1");
+      Msgpack.Put_Str (S, "shape"); Msgpack.Put_Array (S, 3); Msgpack.Put_Int (S, 2); Msgpack.Put_Int (S, 2); Msgpack.Put_Int (S, 3);
+      Msgpack.Put_Str (S, "data"); Msgpack.Put_Bin (S, Img, 0, 12);
+      Msgpack.Put_Str (S, "intrinsic"); Msgpack.Put_Map (S, 4);
+      Msgpack.Put_Str (S, "nd"); Msgpack.Put_Bool (S, True);
+      Msgpack.Put_Str (S, "type"); Msgpack.Put_Str (S, "<f4");
+      Msgpack.Put_Str (S, "shape"); Msgpack.Put_Array (S, 2); Msgpack.Put_Int (S, 3); Msgpack.Put_Int (S, 3);
+      Msgpack.Put_Str (S, "data"); Msgpack.Put_Bin (S, Kb, 0, 36);
+      Msgpack.Put_Str (S, "elbow"); Msgpack.Put_Array (S, 6);
+      for I in 1 .. 6 loop
+         Msgpack.Put_Float (S, 0.1);
+      end loop;
+      Check (Msgpack.Decode (S, D), "认身体:带 3×3 内参的那一帧解得开");
+      Layout.Recognise (D, Msgpack.Key (D, 0, "obs"), Lk);
+      Check (Natural (Lk.Cams.Length) = 1 and then Natural (Lk.Intr.Length) = 1 and then not Lk.Intr (0).Segs.Is_Empty and then Lk.Depth.Is_Empty,
+             "认身体:身体给的 3×3 内参配到它那台相机上(" & (if Natural (Lk.Intr.Length) = 1 and then not Lk.Intr (0).Segs.Is_Empty then "配上了" else "没配上")
+             & "),没被当成深度图(驱动照样不读它,焦距自己量)");
+   end;
    --  ── Sinew:第二版语言 ──
    declare
       use Sinew;
