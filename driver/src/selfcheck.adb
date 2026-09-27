@@ -329,6 +329,27 @@ begin
       Z := Zone.From_Frames (Open_G, Open_G, W, H);
       Check (not Z.Valid, "握区(无深度):两张一样的图 ⇒ 看不见这只手合拢,如实说");
    end;
+   --  🔴 没点名的抓握通道发这一集给过它的最后一个目标,不发此刻的读数(Plug.Jaw_Value,V1B24 2026-09-27:碰桌面时手指被沿滑轨往里推,
+   --  "保持此刻的读数"把推合了的读数锁住,爪子合上,后一瓣量短 13 mm)。给了 0.3 ⇒ 发 0.3;下一条没给、读数被推到 0.8 ⇒ 还发 0.3;
+   --  对方复位(清空)⇒ 发读数 0.8;一次没给过的通道 ⇒ 发读数
+   declare
+      L : Plug.Link;
+      C1, C2 : Plug.Cmd;
+      Cur : Bytes.Floats;
+      V1, V2, V3, V4 : Long_Float;
+   begin
+      C1.Jaw.Append (0.3);
+      Cur.Append (1.0);
+      V1 := Plug.Jaw_Value (L, 0, 0, True, C1, Cur);
+      Cur.Replace_Element (0, 0.8);
+      V2 := Plug.Jaw_Value (L, 0, 0, False, C2, Cur);
+      V4 := Plug.Jaw_Value (L, 1, 0, False, C2, Cur);
+      L.Jaw_Set.Clear;
+      V3 := Plug.Jaw_Value (L, 0, 0, False, C2, Cur);
+      Check (V1 = 0.3 and then V2 = 0.3 and then V3 = 0.8 and then V4 = 0.8,
+             "抓握通道:给了 0.3 发 " & Codec.Fmt (V1, 2) & " · 没给、读数被推到 0.8 还发 " & Codec.Fmt (V2, 2) & "(该 0.3)· 复位后发 " & Codec.Fmt (V3, 2)
+             & "(该读数 0.8)· 一次没给过的那一组发 " & Codec.Fmt (V4, 2) & "(该读数 0.8)");
+   end;
    --  🔴 指尖只按这一瓣自己那一块手指像素找(V1B21 2026-09-27):手指像素里合上时手指在的那一块落进了瓣框的一角、瓣框又只盖住手指的下半截
    --  (同一根手指按背景明暗分进了两类)。合成 48×48:手指 x 3..9、y 20..47 从下沿伸进来;合上的那一块 x 12..18、y 40..47 另成一块;
    --  瓣框只给 [3,25]–[14,47] ⇒ 尖 = 整根手指最上面那一行 (6,20),宽 7 像素;一个像素都不贴画面边的一块 ⇒ 不给尖

@@ -81,9 +81,15 @@ package Plug is
       Frame_S : Long_Float := 0.0;      --  量出来的帧时(秒/帧)
       Beats : Beat_Vectors.Vector;      --  最近 Keep_Beats 拍(帧号连着)
       Prev_Gray : Buf_Vectors.Vector;   --  上一拍各台相机的灰度图
+      --  每个抓握读数组(按 Lay.Jaw 的下标)最后一次给过的目标;空 = 这一集还没给过。没给命令的通道照发它,不照发此刻的读数:
+      --  读数会被外力推着走(V1B24 2026-09-27:碰桌面时手指被桌面顶着沿滑轨往里推,"保持此刻的读数"把推合了的读数锁住,爪子合上,
+      --  后一瓣按张开的手指去量、短了 13 mm;拿着东西时它也会把夹紧的目标换成夹着东西的读数、卸掉夹紧力)。对方复位(新的一集)时清空
+      Jaw_Set : Floats_Vectors.Vector;
    end record;
 
    procedure Boot (Port : Natural; L : in out Link; Ok : out Boolean);
+   --  第 Ji 个抓握读数组第 K 个数这回发什么:这条命令给了(Mine)⇒ 发它并记进 L.Jaw_Set;没给 ⇒ 这一集给过的最后一个目标;一次没给过 ⇒ 此刻的读数 Cur。导出只为自检
+   function Jaw_Value (L : in out Link; Ji : Natural; K : Natural; Mine : Boolean; C : Cmd; Cur : Floats) return Long_Float;
    function Sense (L : in out Link; F : out Frame) return Boolean;
    function Act (L : in out Link; C : Cmd) return Boolean;
    --  V1b 3c(2026-09-26):身体报的"手在哪"驱动不读。运动学量好以后,每一帧手的位姿由上面按关节读数算好填进来(Pose_Hook,

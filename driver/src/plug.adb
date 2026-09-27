@@ -253,6 +253,7 @@ package body Plug is
                      if MT = "reset" then
                         L.Reset_Flag := True;
                         L.Ep_Seq0 := L.Seq;   --  新的一集从零数拍
+                        L.Jaw_Set.Clear;      --  新的一集爪子回到对方的初始状态,上一集给过的目标作废
                      end if;
                      if Ack /= "" then
                         if Obs < 0 then
@@ -614,6 +615,31 @@ package body Plug is
       return Act_Raw (L, C);
    end Act;
 
+   --  第 Ji 个抓握读数组第 K 个数这回发什么:这条命令给了 ⇒ 发它并记下;没给 ⇒ 这一集给过的最后一个目标;一次没给过 ⇒ 此刻的读数
+   function Jaw_Value (L : in out Link; Ji : Natural; K : Natural; Mine : Boolean; C : Cmd; Cur : Floats) return Long_Float is
+   begin
+      while Natural (L.Jaw_Set.Length) <= Ji loop
+         L.Jaw_Set.Append (F64_Vectors.Empty_Vector);
+      end loop;
+      if Mine and then K < Natural (C.Jaw.Length) then
+         declare
+            S : Floats := L.Jaw_Set (Ji);
+         begin
+            while Natural (S.Length) <= K loop
+               S.Append ((if Natural (S.Length) < Natural (Cur.Length) then Cur (Natural (S.Length)) else 1.0));
+            end loop;
+            S.Replace_Element (K, C.Jaw (K));
+            L.Jaw_Set.Replace_Element (Ji, S);
+         end;
+         return C.Jaw (K);
+      elsif K < Natural (L.Jaw_Set (Ji).Length) then
+         return L.Jaw_Set (Ji) (K);
+      elsif K < Natural (Cur.Length) then
+         return Cur (K);
+      end if;
+      return 1.0;
+   end Jaw_Value;
+
    function Act_Raw (L : in out Link; C : Cmd) return Boolean is
       S : Buf;
       N : constant Natural := Arms (L);
@@ -703,17 +729,13 @@ package body Plug is
                Put_Str (S, W_Names (K));
                declare
                   J : constant Floats := Nums_At (L, L.Lay.Jaw (W_First (K)));
-                  --  这条臂自己的抓握通道给了目标就发目标(位姿命令解成关节目标时带着,V1b 3c),别的保持此刻的读数
+                  --  这条臂自己的抓握通道给了目标就发目标(位姿命令解成关节目标时带着,V1b 3c),别的发这一集给过的最后一个目标(见 Jaw_Set)
                   Mine : constant Boolean := W_First (K) = C.Arm and then not C.Jaw.Is_Empty;
                begin
                   Put_Array (S, Natural'Max (1, Natural (J.Length)));
-                  if J.Is_Empty then
-                     Put_Float (S, (if Mine then Long_Float'Max (0.0, Long_Float'Min (1.0, C.Jaw (0))) else 1.0));
-                  else
-                     for X in 0 .. Natural (J.Length) - 1 loop
-                        Put_Float (S, Long_Float'Max (0.0, Long_Float'Min (1.0, (if Mine and then X < Natural (C.Jaw.Length) then C.Jaw (X) else J (X)))));
-                     end loop;
-                  end if;
+                  for X in 0 .. Natural'Max (1, Natural (J.Length)) - 1 loop
+                     Put_Float (S, Long_Float'Max (0.0, Long_Float'Min (1.0, Jaw_Value (L, W_First (K), X, Mine, C, J))));
+                  end loop;
                end;
             end loop;
          end;
@@ -773,14 +795,8 @@ package body Plug is
             Put_Str (S, Layout.Last_Seg (L.Lay.Jaw (Ji)));
             Put_Array (S, Nj);
             for K in 0 .. Nj - 1 loop
-               declare
-                  --  没给命令的通道保持它此刻的读数 —— 一次只动脑点名的那一根手指
-                  V : constant Long_Float :=
-                    (if Mine and then K < Natural (C.Jaw.Length) then C.Jaw (K)
-                     elsif K < Natural (Cur.Length) then Cur (K) else 1.0);
-               begin
-                  Put_Float (S, Long_Float'Max (0.0, Long_Float'Min (1.0, V)));
-               end;
+               --  没给命令的通道发这一集给过它的最后一个目标(一次只动脑点名的那一根手指;见 Jaw_Set)
+               Put_Float (S, Long_Float'Max (0.0, Long_Float'Min (1.0, Jaw_Value (L, Ji, K, Mine, C, Cur))));
             end loop;
          end;
       end loop;
