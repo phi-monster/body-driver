@@ -122,10 +122,12 @@ package body Layout is
          end;
          if Is_Image (D, F.N, W, H) then
             L.Cams.Append (F.P);
+         elsif Is_Intrinsic (D, F.N, Kf, Kcx, Kcy) then
+            --  先认内参再认深度:3×3 浮点也是"浮点 + 二维",Is_Depth 在前会把它收成一张尺寸对不上的深度图然后丢掉,
+            --  观测里带的焦距就永远到不了 Has_K(2026-09-28 真机 + 合成机体实测:换序后 "焦距 600.0 px" 才出现)
+            Intr_Raw.Append (F.P);
          elsif Is_Depth (D, F.N, W, H) then
             L.Depth.Append (F.P);
-         elsif Is_Intrinsic (D, F.N, Kf, Kcx, Kcy) then
-            Intr_Raw.Append (F.P);
          else
             declare
                Xs : constant Floats := Numbers (D, F.N);
