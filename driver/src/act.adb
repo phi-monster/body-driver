@@ -11541,53 +11541,92 @@ package body Act is
                   return;
                end if;
             end;
-            --  量过一瓣以后(S_Known > 0):先一条命令下到"按量过的那一瓣算,指尖离面两压"的高度(眼离面 = S_Known + 两压;两压 = 次数),再照常压 ——
-            --  这根手指更长就提前被顶住(按碰到处理),更短就多压几下;起点用量过的数,不是假设它一样长(⑧ 的 (b))
-            if S_Known > 0.0 then
-               declare
-                  P3 : constant Plug.Arm_Pose := F.EE (A);
-                  O3 : constant Geom.V3 := Geom.Cam_Pos (Gk, P3);
-                  H3 : constant Long_Float := (O3 (0) - C.Board_Pt (0)) * C.Board_N (0) + (O3 (1) - C.Board_Pt (1)) * C.Board_N (1) + (O3 (2) - C.Board_Pt (2)) * C.Board_N (2);
-                  Ln0 : constant Long_Float := Stride_Of (C, A);
-                  Dn : constant Long_Float := H3 - (S_Known + 2.0 * Ln0);   --  两压(次数)
-                  Mok : Boolean;
-               begin
-                  if Ln0 > 0.0 and then Dn > Ln0 then
-                     Geo_Say ("  按量过的那一瓣(离眼 " & Mm (S_Known) & ")一条命令先下 " & Mm (Dn) & ",到指尖离面约两压的高度");
-                     Geo_Move (L, C, F, A, [Dn * Down (0), Dn * Down (1), Dn * Down (2)], Mok);
-                  end if;
-               end;
-            end if;
+            --  往下压。量过一瓣以后(S_Known > 0):先一条命令下到"按量过的那一瓣算,指尖离面两小步"的高度(眼离面 = S_Known + 两小步;两 = 次数),
+            --  直接小步压(⑧ 的 (b));这一下就被顶住了(实到比命令少一步看得见的那一档以上 = 这根手指更长)⇒ 抬一大步,按头一回的走法;
+            --  小步压到"按量过的那一瓣算的桌面以下一大步"还没碰到(这根手指更短)⇒ 从那儿接着按大步压。起点用量过的数,不是假设它一样长。
+            --  头一回:大步压到被顶住(一压 = 步幅,桌子推不动);大步压到的那一下顶得深(V1B22 仿真真值:一压 46 mm,碰到后手指陷进桌面 11–20 mm,
+            --  停住以后有一次只退回 3–4 mm,那一瓣量短了 12 mm)⇒ 退回这一压开始的地方(碰到之前、还没顶的那一处),按小步重新压到被顶住,顶进去的最多一小步
             declare
                Start : constant Plug.Arm_Pose := F.EE (A);
-               Ln : constant Long_Float := Stride_Of (C, A);   --  一压 = 步幅(桌子推不动;见 Geo_Go 的 Press_Step)
+               Ln : constant Long_Float := Stride_Of (C, A);   --  一压 = 步幅
+               Small : constant Long_Float := 4.0 * Geo_Base (C, A);   --  同 Geo_Go 默认的一压(倍数,无量纲)
                Cap : constant Natural := (if Ln > 0.0 then Natural (Long_Float'Ceiling (H / Ln)) + 1 else 0);
-               Tp : constant Geom.V3 := Tip_World (C, A, F.EE (A));   --  具名对象再传(F.EE 直接写进实参会锁住容器,S3 2026-09-23)
+               Direct : Boolean := False;
+               procedure Big_Press is
+                  Tp : constant Geom.V3 := Tip_World (C, A, F.EE (A));   --  具名对象再传(F.EE 直接写进实参会锁住容器,S3 2026-09-23)
+               begin
+                  Geo_Go (L, C, F, A, Tp, Geo_Base (C, A), 1.0, True, Down, Ev, St, Press_Cap => Cap, Note_Contacts => False, Press_Step => Ln);
+                  Geo_Say ("  ⇒ " & To_String (Ev));
+                  if Index (Ev, "contact") = 1 then
+                     declare
+                        From : constant Plug.Arm_Pose := C.Press_From;
+                        Now : constant Plug.Arm_Pose := F.EE (A);
+                        Lift : constant Geom.V3 := [From (0) - Now (0), From (1) - Now (1), From (2) - Now (2)];
+                        Cap2 : constant Natural := (if Small > 0.0 then Natural (Long_Float'Ceiling (Geom.Norm (Lift) / Small)) + 2 else 0);   --  退回的距离按小步压回去的下数再多两下(次数)
+                        Mok : Boolean;
+                     begin
+                        Geo_Move (L, C, F, A, Lift, Mok);
+                        declare
+                           Tp2 : constant Geom.V3 := Tip_World (C, A, F.EE (A));
+                        begin
+                           Geo_Go (L, C, F, A, Tp2, Geo_Base (C, A), 1.0, True, Down, Ev, St, Press_Cap => Cap2, Note_Contacts => False);
+                        end;
+                        Geo_Say ("  退回这一压开始的地方、按小步(" & Mm (Small) & ")重新压 ⇒ " & To_String (Ev));
+                     end;
+                  end if;
+               end Big_Press;
             begin
                if Start (2) > Top_Z then
                   Top_Z := Start (2);
                end if;
-               Geo_Go (L, C, F, A, Tp, Geo_Base (C, A), 1.0, True, Down, Ev, St, Press_Cap => Cap, Note_Contacts => False, Press_Step => Ln);
-               Geo_Say ("  ⇒ " & To_String (Ev));
-               --  大步压到的那一下顶得深(V1B22 仿真真值:一压 46 mm,碰到后手指陷进桌面 11–20 mm,停住以后有一次只退回 3–4 mm,那一瓣量短了 12 mm)
-               --  ⇒ 退回这一压开始的地方(碰到之前、还没顶的那一处),按小步(Geo_Go 默认的一压)重新压到被顶住,顶进去的最多一小步
-               if Index (Ev, "contact") = 1 then
+               if S_Known > 0.0 and then Small > 0.0 and then Ln > 0.0 then
                   declare
-                     From : constant Plug.Arm_Pose := C.Press_From;
-                     Now : constant Plug.Arm_Pose := F.EE (A);
-                     Lift : constant Geom.V3 := [From (0) - Now (0), From (1) - Now (1), From (2) - Now (2)];
-                     Small : constant Long_Float := 4.0 * Geo_Base (C, A);   --  同 Geo_Go 默认的一压(倍数,无量纲)
-                     Cap2 : constant Natural := (if Small > 0.0 then Natural (Long_Float'Ceiling (Geom.Norm (Lift) / Small)) + 2 else 0);   --  退回的距离按小步压回去的下数再多两下(次数)
+                     P3 : constant Plug.Arm_Pose := F.EE (A);
+                     O3 : constant Geom.V3 := Geom.Cam_Pos (Gk, P3);
+                     H3 : constant Long_Float := (O3 (0) - C.Board_Pt (0)) * C.Board_N (0) + (O3 (1) - C.Board_Pt (1)) * C.Board_N (1) + (O3 (2) - C.Board_Pt (2)) * C.Board_N (2);
+                     Dn : constant Long_Float := H3 - (S_Known + 2.0 * Small);   --  两小步(次数)
                      Mok : Boolean;
                   begin
-                     Geo_Move (L, C, F, A, Lift, Mok);
-                     declare
-                        Tp2 : constant Geom.V3 := Tip_World (C, A, F.EE (A));
-                     begin
-                        Geo_Go (L, C, F, A, Tp2, Geo_Base (C, A), 1.0, True, Down, Ev, St, Press_Cap => Cap2, Note_Contacts => False);
-                     end;
-                     Geo_Say ("  退回这一压开始的地方、按小步(" & Mm (Small) & ")重新压 ⇒ " & To_String (Ev));
+                     if Dn > 0.0 then
+                        declare
+                           Jaw : Floats;
+                           Del : Table.Vec;
+                           Av : Table.Vec := Table.Zero_Vec;
+                        begin
+                           for I in 0 .. 2 loop
+                              Av (I) := Dn * Down (I);
+                           end loop;
+                           Step_Arm (L, C, F, A, Av, Jaw, Del, Mok, Geo_Settle => True);
+                           declare
+                              Went : constant Long_Float := Del (0) * Down (0) + Del (1) * Down (1) + Del (2) * Down (2);
+                           begin
+                              Direct := Went + Geo_Base (C, A) >= Dn;
+                              Geo_Say ("  按量过的那一瓣(离眼 " & Mm (S_Known) & ")一条命令下 " & Mm (Dn) & " 到指尖离面约两小步 ⇒ 实到 " & Mm (Went)
+                                       & (if Direct then ",直接小步压" else ",这一下就被顶住了(这根手指更长)⇒ 抬一大步,按头一回的走法"));
+                              if not Direct then
+                                 Geo_Move (L, C, F, A, [Ln * Protocol_Up (0), Ln * Protocol_Up (1), Ln * Protocol_Up (2)], Mok);
+                              end if;
+                           end;
+                        end;
+                     else
+                        Direct := True;
+                     end if;
                   end;
+               end if;
+               if Direct then
+                  declare
+                     Tp : constant Geom.V3 := Tip_World (C, A, F.EE (A));
+                     Cap3 : constant Natural := Natural (Long_Float'Ceiling ((2.0 * Small + Ln) / Small)) + 1;   --  两小步 + 一大步那么深(次数)
+                  begin
+                     Geo_Go (L, C, F, A, Tp, Geo_Base (C, A), 1.0, True, Down, Ev, St, Press_Cap => Cap3, Note_Contacts => False);
+                     Geo_Say ("  小步压 ⇒ " & To_String (Ev));
+                  end;
+                  if Index (Ev, "contact") /= 1 then
+                     Geo_Say ("  压到按量过的那一瓣算的桌面以下一大步还没碰到(这根手指更短)⇒ 接着按大步压");
+                     Big_Press;
+                  end if;
+               else
+                  Big_Press;
                end if;
                if Index (Ev, "contact") = 1 then
                   --  碰到了:不再往下顶 —— 命令改成停在此刻读数的位姿、等这具身体量过的稳定拍数,手指从压进去的地方退回到刚贴着;
