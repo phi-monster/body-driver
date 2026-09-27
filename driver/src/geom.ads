@@ -218,6 +218,43 @@ package Geom is
    end record;
    package Plane_Tip_Vectors is new Ada.Containers.Vectors (Natural, Plane_Tip);
    function Tips_On_Plane (G : Cam_Geo; Views : Board_View_Vectors.Vector; P0, N : V3; Sd_Plane : Long_Float) return Plane_Tip_Vectors.Vector;
+   --  换倾角碰量指尖(2026-09-28,PLAN 开机后半段 ③)。压到被顶住、歇下来那一刻,手上最低的那一点落在桌面上(过 P0、单位法向 N 朝上):
+   --  它在手上那只眼的相机系里在 x ⇒ 世界里 = t + R x(t、R = 那一刻眼的位置、相机 → 世界)⇒ (Rᵀ N)·x = N·(P0 − t),一下一条(A·x = B)。
+   --  指尖不必在哪条像素视线上。别的东西先顶住(另一根手指、手掌、胳膊到头)只会让手停得更高 ⇒ 那一下 x 还在面之上:A·x > B(只错一边)。
+   --  Aimed = 这一下是对准这一瓣压的(可以进解);别的瓣压的那几下,这一瓣也不能在面之下 ⇒ 只当"A·x ≥ B"核
+   type Press_Eq is record
+      A : V3 := [others => 0.0];
+      B : Long_Float := 0.0;
+      Aimed : Boolean := True;
+   end record;
+   package Press_Eq_Vectors is new Ada.Containers.Vectors (Natural, Press_Eq);
+   function Press_Of (G : Cam_Geo; P : Plug.Arm_Pose; P0, N : V3) return Press_Eq;
+   --  按压过的几下解 x:找对得上的最大的一组 —— 至少 4 下(3 个未知数 + 至少 1 条自己核)、组里每一下都拿组里别的几下解、预测它,
+   --  |预测 − 它| ≤ Gate(去掉它重解的预测残差:同"两处对不对得上",差的是整个量);组外每一下(对准这一瓣没进组的、别的瓣的)
+   --  都只能是停早了:A·x − B ≥ −Gate(那一刻 x 在面之上,不许在面之下)。一样大的组不止一组、解出来互相对不上
+   --  (组里哪一下按另一组的解差过 Gate)⇒ 认不出哪一下是坏的(Ambiguous,调用方补压);一组都没有 ⇒ Ok = False。
+   --  为什么不按组里的残差收(09-28 离线,x5 手指网格):4 下只有 1 条自己核,四个残差按同一个比例摆着(朝下那一下永远最大),
+   --  斜着的一下偏 3–10 mm 时组里残差只有 1–3 mm、解却偏 6–22 mm。Sd = x 三个分量的不确定度(组里残差定的噪声 × (AᵀA)⁻¹)
+   type Press_Fit is record
+      X, Sd : V3 := [others => 0.0];
+      Ok, Ambiguous : Boolean := False;
+      Used : Nat_Vectors.Vector;     --  进解的那几下(Eqs 的下标)
+      Worst : Long_Float := 0.0;     --  组里每一下被别的几下预测、差得最多的那一下差多少
+      Low : Long_Float := 0.0;       --  组外最低的 A·x − B(没有组外的 = 0)
+   end record;
+   function Fit_Presses (Eqs : Press_Eq_Vectors.Vector; Gate : Long_Float) return Press_Fit;
+   --  换倾角碰每一下让手上哪一个方向朝正下(相机系,单位):这一瓣的视线 D(相机系,单位)朝方位 Azim 斜 Tilt(弧度)——
+   --  方位从"眼的 x 轴扣掉沿 D 的那一截"起量、绕 D 转(手自己的方向,每只手、每具身体一样的定法)。Tilt = 0 ⇒ D 本身
+   function Tilt_Dir (D : V3; Tilt, Azim : Long_Float) return V3;
+   --  换倾角碰斜多少(弧度):第 K 瓣的视线 D (K) 和最近的另一瓣视线夹角 β 的三分之一 —— 取法,不是量的:朝最近的另一瓣斜 θ 时,
+   --  它离朝下至少 β − θ = 2θ(两根一样长的手指,它一直比压的这一瓣高;θ 到 β/2 时一样高);离线按 x5 手指网格验过
+   --  (β = 54°:斜 18° 时最低点一直是这一瓣的尖;斜 25° 时最低点在刀口的两个角之间换,解差 4.8 mm)。只有一瓣 ⇒ Single(调用方给量过的那一档)
+   function Tilt_Angle (D : V3_Vectors.Vector; K : Natural; Single : Long_Float) return Long_Float;
+   --  解出来的尖是哪一瓣的:离哪一瓣的视线(相机系单位方向,过眼)最近(只算尖在它前方的那几条)。碰着的不是对准的那一瓣
+   --  (另一根手指长得多、斜着压时一直是它先碰到 ⇒ 几下照样互相对得上,解的是它的尖)时,解离它那条视线更近。没有一条在前方 ⇒ Natural'Last
+   function Ray_Owner (X : V3; D : V3_Vectors.Vector) return Natural;
+   --  把世界里的方向 Fwd(单位)转到 Down(单位)的最小转动(世界轴转动向量,绕眼转);正好反向时绕一根和它垂直的轴(同 Geo_Turn)
+   function Turn_To (Fwd, Down : V3) return V3;
    --  不动的眼解完之后每组观测各自的像素残差(记账、给认指尖定门槛)
    type Fixed_Report is record
       Scene_N, Scene_Used : Natural := 0;   --  标定板的点:给了几个、进解几个

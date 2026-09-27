@@ -2726,6 +2726,267 @@ package body Geom is
       return R;
    end Tips_On_Plane;
 
+   function Press_Of (G : Cam_Geo; P : Plug.Arm_Pose; P0, N : V3) return Press_Eq is
+      R : constant M3 := Cam_R (G, P);
+      T : constant V3 := Cam_Pos (G, P);
+      E : Press_Eq;
+   begin
+      E.A := Ap (Tr (R), N);
+      E.B := (P0 (0) - T (0)) * N (0) + (P0 (1) - T (1)) * N (1) + (P0 (2) - T (2)) * N (2);
+      return E;
+   end Press_Of;
+
+   function Fit_Presses (Eqs : Press_Eq_Vectors.Vector; Gate : Long_Float) return Press_Fit is
+      Ai : Nat_Vectors.Vector;   --  对准这一瓣的那几下
+      Max_Enum : constant := 16;   --  枚举的上限(次数:2^16 组;调用方一瓣最多压 8 下)
+      Min_Set : constant := 4;     --  3 个未知数 + 1 条自己核(次数)
+      function Dot (A, B : V3) return Long_Float is (A (0) * B (0) + A (1) * B (1) + A (2) * B (2));
+      type Cand is record
+         Fit : Press_Fit;
+      end record;
+      package Cand_Vectors is new Ada.Containers.Vectors (Natural, Cand);
+      Cs : Cand_Vectors.Vector;
+      Best_Size : Natural := 0;
+      Res : Press_Fit;
+      --  3×3 对称阵求逆(余子式);行列式相对 (迹/3)³ 太小 ⇒ 三个方向分不开(数值保护)
+      procedure Inv3 (M : M3; Mi : out M3; Ok : out Boolean) is
+         Det : Long_Float;
+         Tr3 : constant Long_Float := (M (0, 0) + M (1, 1) + M (2, 2)) / 3.0;
+      begin
+         Mi (0, 0) := M (1, 1) * M (2, 2) - M (1, 2) * M (2, 1);
+         Mi (0, 1) := M (0, 2) * M (2, 1) - M (0, 1) * M (2, 2);
+         Mi (0, 2) := M (0, 1) * M (1, 2) - M (0, 2) * M (1, 1);
+         Mi (1, 0) := M (1, 2) * M (2, 0) - M (1, 0) * M (2, 2);
+         Mi (1, 1) := M (0, 0) * M (2, 2) - M (0, 2) * M (2, 0);
+         Mi (1, 2) := M (0, 2) * M (1, 0) - M (0, 0) * M (1, 2);
+         Mi (2, 0) := M (1, 0) * M (2, 1) - M (1, 1) * M (2, 0);
+         Mi (2, 1) := M (0, 1) * M (2, 0) - M (0, 0) * M (2, 1);
+         Mi (2, 2) := M (0, 0) * M (1, 1) - M (0, 1) * M (1, 0);
+         Det := M (0, 0) * Mi (0, 0) + M (0, 1) * Mi (1, 0) + M (0, 2) * Mi (2, 0);
+         Ok := Tr3 > 0.0 and then Det > 1.0e-12 * Tr3 ** 3;
+         if Ok then
+            for I in 0 .. 2 loop
+               for J in 0 .. 2 loop
+                  Mi (I, J) := Mi (I, J) / Det;
+               end loop;
+            end loop;
+         end if;
+      end Inv3;
+      function In_Mask (Mask, K : Natural) return Boolean is ((Mask / 2 ** K) mod 2 = 1);
+      --  组里这几下(去掉 Skip 那一下;-1 = 不去)的最小二乘解
+      procedure Solve (Mask : Natural; Skip : Integer; X : out V3; Mi : out M3; Ok : out Boolean) is
+         M : M3 := [others => [others => 0.0]];
+         V : V3 := [others => 0.0];
+      begin
+         for J in 0 .. Natural (Ai.Length) - 1 loop
+            if In_Mask (Mask, J) and then J /= Skip then
+               declare
+                  E : constant Press_Eq := Eqs (Ai (J));
+               begin
+                  for R in 0 .. 2 loop
+                     for S in 0 .. 2 loop
+                        M (R, S) := M (R, S) + E.A (R) * E.A (S);
+                     end loop;
+                     V (R) := V (R) + E.A (R) * E.B;
+                  end loop;
+               end;
+            end if;
+         end loop;
+         Inv3 (M, Mi, Ok);
+         X := (if Ok then Ap (Mi, V) else [0.0, 0.0, 0.0]);
+      end Solve;
+   begin
+      for I in 0 .. Natural (Eqs.Length) - 1 loop
+         if Eqs (I).Aimed then
+            Ai.Append (I);
+         end if;
+      end loop;
+      if Natural (Ai.Length) < Min_Set or else Natural (Ai.Length) > Max_Enum then
+         return Res;
+      end if;
+      for Mask in 1 .. 2 ** Natural (Ai.Length) - 1 loop
+         declare
+            K : Natural := 0;
+         begin
+            for J in 0 .. Natural (Ai.Length) - 1 loop
+               if In_Mask (Mask, J) then
+                  K := K + 1;
+               end if;
+            end loop;
+            if K >= Min_Set and then K >= Best_Size then
+               declare
+                  Mi : M3;
+                  Inv_Ok : Boolean;
+                  F : Press_Fit;
+                  Good : Boolean := True;
+               begin
+                  Solve (Mask, -1, F.X, Mi, Inv_Ok);
+                  Good := Inv_Ok;
+                  --  组里每一下:拿别的几下解、预测它
+                  for J in 0 .. Natural (Ai.Length) - 1 loop
+                     exit when not Good;
+                     if In_Mask (Mask, J) then
+                        declare
+                           Xo : V3;
+                           Mo : M3;
+                           Oo : Boolean;
+                        begin
+                           Solve (Mask, J, Xo, Mo, Oo);
+                           if not Oo then
+                              Good := False;
+                           else
+                              F.Worst := Long_Float'Max (F.Worst, abs (Dot (Eqs (Ai (J)).A, Xo) - Eqs (Ai (J)).B));
+                              Good := F.Worst <= Gate;
+                           end if;
+                        end;
+                     end if;
+                  end loop;
+                  if Good then
+                     declare
+                        Ss : Long_Float := 0.0;
+                        Low : Long_Float := Long_Float'Last;
+                        Inside : Boolean;
+                     begin
+                        for I in 0 .. Natural (Eqs.Length) - 1 loop
+                           declare
+                              R : constant Long_Float := Dot (Eqs (I).A, F.X) - Eqs (I).B;
+                           begin
+                              Inside := False;
+                              for J in 0 .. Natural (Ai.Length) - 1 loop
+                                 if Ai (J) = I and then In_Mask (Mask, J) then
+                                    Inside := True;
+                                 end if;
+                              end loop;
+                              if Inside then
+                                 F.Used.Append (I);
+                                 Ss := Ss + R * R;
+                              else
+                                 Low := Long_Float'Min (Low, R);
+                              end if;
+                           end;
+                        end loop;
+                        F.Low := (if Low = Long_Float'Last then 0.0 else Low);
+                        declare
+                           Sig : constant Long_Float := Sqrt (Ss / Long_Float (K - 3));   --  自由度 = 下数 − 3 个未知数
+                        begin
+                           for R in 0 .. 2 loop
+                              F.Sd (R) := Sig * Sqrt (Long_Float'Max (0.0, Mi (R, R)));
+                           end loop;
+                        end;
+                        if F.Low >= -Gate then
+                           F.Ok := True;
+                           if K > Best_Size then
+                              Cs.Clear;
+                              Best_Size := K;
+                           end if;
+                           Cs.Append (Cand'(Fit => F));
+                        end if;
+                     end;
+                  end if;
+               end;
+            end if;
+         end;
+      end loop;
+      if Cs.Is_Empty then
+         return Res;
+      end if;
+      --  一样大的组不止一组:两组的解对两组里的每一下差都在 Gate 以内 = 同一个解(取预测差得最少的那组);差过 Gate = 认不出哪一下是坏的
+      declare
+         Pick : Natural := 0;
+      begin
+         for I in 0 .. Natural (Cs.Length) - 1 loop
+            for J in I + 1 .. Natural (Cs.Length) - 1 loop
+               declare
+                  Dx : constant V3 := [Cs (I).Fit.X (0) - Cs (J).Fit.X (0), Cs (I).Fit.X (1) - Cs (J).Fit.X (1), Cs (I).Fit.X (2) - Cs (J).Fit.X (2)];
+               begin
+                  for U of Cs (I).Fit.Used loop
+                     if abs Dot (Eqs (U).A, Dx) > Gate then
+                        Res.Ambiguous := True;
+                     end if;
+                  end loop;
+                  for U of Cs (J).Fit.Used loop
+                     if abs Dot (Eqs (U).A, Dx) > Gate then
+                        Res.Ambiguous := True;
+                     end if;
+                  end loop;
+               end;
+            end loop;
+            if Cs (I).Fit.Worst < Cs (Pick).Fit.Worst then
+               Pick := I;
+            end if;
+         end loop;
+         if Res.Ambiguous then
+            return Res;
+         end if;
+         return Cs (Pick).Fit;
+      end;
+   end Fit_Presses;
+
+   function Tilt_Dir (D : V3; Tilt, Azim : Long_Float) return V3 is
+      function Dot (A, B : V3) return Long_Float is (A (0) * B (0) + A (1) * B (1) + A (2) * B (2));
+      X : constant V3 := [1.0, 0.0, 0.0];
+      Y : constant V3 := [0.0, 1.0, 0.0];
+      Xp : V3 := [X (0) - Dot (X, D) * D (0), X (1) - Dot (X, D) * D (1), X (2) - Dot (X, D) * D (2)];
+   begin
+      if Norm (Xp) < 1.0e-9 then   --  数值保护:视线正好沿着眼的 x 轴(画面里看不到)⇒ 从 y 轴起量
+         Xp := [Y (0) - Dot (Y, D) * D (0), Y (1) - Dot (Y, D) * D (1), Y (2) - Dot (Y, D) * D (2)];
+      end if;
+      declare
+         L : constant Long_Float := Norm (Xp);
+         E1 : constant V3 := [Xp (0) / L, Xp (1) / L, Xp (2) / L];
+         E2 : constant V3 := [D (1) * E1 (2) - D (2) * E1 (1), D (2) * E1 (0) - D (0) * E1 (2), D (0) * E1 (1) - D (1) * E1 (0)];
+         C : constant Long_Float := Cos (Tilt);
+         S : constant Long_Float := Sin (Tilt);
+      begin
+         return [C * D (0) + S * (Cos (Azim) * E1 (0) + Sin (Azim) * E2 (0)),
+                 C * D (1) + S * (Cos (Azim) * E1 (1) + Sin (Azim) * E2 (1)),
+                 C * D (2) + S * (Cos (Azim) * E1 (2) + Sin (Azim) * E2 (2))];
+      end;
+   end Tilt_Dir;
+
+   function Tilt_Angle (D : V3_Vectors.Vector; K : Natural; Single : Long_Float) return Long_Float is
+      Beta : Long_Float := Long_Float'Last;
+   begin
+      for J in 0 .. Natural (D.Length) - 1 loop
+         if J /= K then
+            Beta := Long_Float'Min (Beta, Arccos (Long_Float'Max (-1.0, Long_Float'Min (1.0, D (K) (0) * D (J) (0) + D (K) (1) * D (J) (1) + D (K) (2) * D (J) (2)))));
+         end if;
+      end loop;
+      return (if Beta = Long_Float'Last then Single else (1.0 / 3.0) * Beta);
+   end Tilt_Angle;
+
+   function Ray_Owner (X : V3; D : V3_Vectors.Vector) return Natural is
+      Best : Natural := Natural'Last;
+      Bd : Long_Float := Long_Float'Last;
+   begin
+      for J in 0 .. Natural (D.Length) - 1 loop
+         declare
+            T : constant Long_Float := X (0) * D (J) (0) + X (1) * D (J) (1) + X (2) * D (J) (2);
+            Off : constant Long_Float := Norm ([X (0) - T * D (J) (0), X (1) - T * D (J) (1), X (2) - T * D (J) (2)]);
+         begin
+            if T > 0.0 and then Off < Bd then
+               Bd := Off; Best := J;
+            end if;
+         end;
+      end loop;
+      return Best;
+   end Ray_Owner;
+
+   function Turn_To (Fwd, Down : V3) return V3 is
+      Cr : constant V3 := [Fwd (1) * Down (2) - Fwd (2) * Down (1), Fwd (2) * Down (0) - Fwd (0) * Down (2), Fwd (0) * Down (1) - Fwd (1) * Down (0)];
+      Sn : constant Long_Float := Norm (Cr);
+      Ang : constant Long_Float := Arctan (Sn, Fwd (0) * Down (0) + Fwd (1) * Down (1) + Fwd (2) * Down (2));
+      --  正好反向(叉积为零)时随便取一根和它垂直的轴(同 Geo_Turn)
+      Az : constant V3 := [Fwd (1), -Fwd (0), 0.0];
+      Ax : constant V3 := [0.0, Fwd (2), -Fwd (1)];
+      Alt : constant V3 := (if Norm (Az) >= Norm (Ax) then Az else Ax);
+      Aln : constant Long_Float := Norm (Alt);
+      Axis : constant V3 := (if Sn > 1.0e-9 then [Cr (0) / Sn, Cr (1) / Sn, Cr (2) / Sn]
+                             elsif Aln > 1.0e-9 then [Alt (0) / Aln, Alt (1) / Aln, Alt (2) / Aln] else [0.0, 0.0, 1.0]);
+   begin
+      return [Axis (0) * Ang, Axis (1) * Ang, Axis (2) * Ang];
+   end Turn_To;
+
    function Tips_On_Rays (Fixed : Cam_Geo; O : Obs_Pt_Vectors.Vector; Ray_O : V3; Ray_D : V3_Vectors.Vector; Gate_Px : Long_Float) return Ray_Tip_Vectors.Vector is
       package LF_Vectors is new Ada.Containers.Vectors (Natural, Long_Float);
       Nr : constant Natural := Natural (Ray_D.Length);

@@ -2067,6 +2067,189 @@ begin
                 & " mm;没碰着的那一瓣交出来更远(" & Codec.Fmt (R (1).S, 4) & " > 0.118)· 面在眼上方 ⇒ 交不到");
       end;
    end;
+   --  🔴 换倾角碰量指尖(2026-09-28,Geom.Tilt_Dir / Turn_To / Press_Of / Fit_Presses):合成的手 —— 两个指尖是半径 5 mm 的球(球心在眼前 79 mm、
+   --  左右 ±45 mm,同 x5 的量级)、手掌三点;每一下让 Tilt_Dir 那个方向(这一瓣的视线朝方位 Azim 斜 θ,θ = 两瓣视线夹角的三分之一)转到朝正下,
+   --  往下落到手上真的最低那一点碰到面,接触高度加 ±0.2 mm 的噪声;一瓣压 6 下(朝下 1 下 + 方位 0 / 72 / 144 / 216 / 288° 各 1 下)。
+   --  门 1 mm:横向只靠 sin θ,±0.2 mm 的高度噪声斜 20° 时放大 2–2.5 倍(5 个斜的 / 去掉一下剩 4 个斜的)⇒ 0.4–0.9 mm。
+   --  ① 6 下全好:每瓣解回离真的尖(视线朝下时球上最低那一点)< 1 mm;② 斜着的一下被别的东西先顶住(停高 5 mm)⇒ 认出、去掉,解 < 1 mm;
+   --  ③ 朝下那一下被顶住 ⇒ 同样认出;④ 8 下里两下被顶住 ⇒ 认出(< 1 mm)或不收,不许收错的;⑤ 另一瓣压的那几下当"这一瓣不许在面之下"核:
+   --  好的解都满足,假造一下"那一刻这一瓣的尖在面之下 5 mm" ⇒ 不收;⑥ 斜 θ 的每一下里真的最低点都是压的这一瓣(另一根手指、手掌都更高,纯几何);
+   --  ⑦ 只按组里残差收会收错(原来的写法):斜着的一下被顶住 5 mm 时 4 下的组里残差都在一小步以内 —— 现在按"别的几下预测它"⇒ 不收
+   declare
+      use Ada.Numerics.Long_Elementary_Functions;
+      Gt : Geom.Cam_Geo;   --  R_Ce = 单位、Off = 0 ⇒ 手的位姿就是眼的位姿(只读关节那一路)
+      Table_Z : constant Long_Float := 0.765;   --  面高(米,合成)
+      Nn : constant Geom.V3 := [0.0, 0.0, 1.0];
+      P0 : constant Geom.V3 := [0.0, 0.0, Table_Z];
+      Down : constant Geom.V3 := [0.0, 0.0, -1.0];
+      Rt : constant Long_Float := 0.005;   --  指尖球的半径(米,合成)
+      type V3_Arr is array (Natural range <>) of Geom.V3;
+      Ctr : constant V3_Arr := [[0.045, 0.0, -0.079], [-0.045, 0.0, -0.079]];                 --  指尖球心(相机系,米,合成)
+      Palm : constant V3_Arr := [[0.0, 0.0, -0.03], [0.0, 0.02, -0.03], [0.0, -0.02, -0.03]];  --  手掌(相机系,米,合成)
+      Noise : constant array (0 .. 7) of Long_Float := [0.00015, -0.0002, 0.0001, -0.00005, 0.0002, -0.00015, 0.00005, 0.0001];   --  接触高度噪声(米,合成)
+      Gate : constant Long_Float := 0.002;   --  一小步(米,合成)
+      Block : constant Long_Float := 0.005;  --  被别的东西先顶住,停高 5 mm(米,合成)
+      Tol : constant Long_Float := 0.001;    --  解回的门 1 mm(米,见上)
+      Home : constant Plug.Arm_Pose := [0.1, -0.2, 1.0, 1.0, 0.0, 0.0, 0.0];
+      Deg : constant := 0.0174532925199433;   --  1° 的弧度(换算)
+      --  朝下那一下之后的方位:五个各差 72°,再补压两个方位中间的(36°、108°)
+      Az : constant array (0 .. 6) of Long_Float := [0.0, 72.0 * Deg, 144.0 * Deg, 216.0 * Deg, 288.0 * Deg, 36.0 * Deg, 108.0 * Deg];
+      function Dir (K : Natural) return Geom.V3 is
+        ([Ctr (K) (0) / Geom.Norm (Ctr (K)), Ctr (K) (1) / Geom.Norm (Ctr (K)), Ctr (K) (2) / Geom.Norm (Ctr (K))]);
+      Beta : constant Long_Float := Arccos (Dir (0) (0) * Dir (1) (0) + Dir (0) (1) * Dir (1) (1) + Dir (0) (2) * Dir (1) (2));
+      Dirs : Geom.V3_Vectors.Vector;
+      Theta : Long_Float;   --  同驱动:Geom.Tilt_Angle
+      Lowest_Ok : Boolean := True;   --  ⑥
+      --  一下:压第 K 瓣,斜 Tilt、方位 Azim;真的最低点碰面,Up_By = 被别的东西先顶住、停高多少
+      function Press (K : Natural; Tilt, Azim, Up_By, Nz : Long_Float) return Geom.Press_Eq is
+         Rv : constant Geom.V3 := Geom.Turn_To (Geom.Tilt_Dir (Dir (K), Tilt, Azim), Down);   --  起点的位姿不转 ⇒ 相机系 = 世界系
+         Av : Table.Vec := Table.Zero_Vec;
+         P : Plug.Arm_Pose;
+         R : Geom.M3;
+         Low : Long_Float := Long_Float'Last;
+         Who : Integer := -1;
+      begin
+         Av (3) := Rv (0); Av (4) := Rv (1); Av (5) := Rv (2);
+         P := Chan.Compose (Home, Av);
+         R := Geom.Quat_To_R (P);
+         for I in Ctr'Range loop
+            if Geom.Ap (R, Ctr (I)) (2) - Rt < Low then
+               Low := Geom.Ap (R, Ctr (I)) (2) - Rt; Who := I;
+            end if;
+         end loop;
+         for Q of Palm loop
+            if Geom.Ap (R, Q) (2) < Low then
+               Low := Geom.Ap (R, Q) (2); Who := 99;
+            end if;
+         end loop;
+         if Who /= K then
+            Lowest_Ok := False;
+         end if;
+         P (2) := Table_Z - Low + Up_By + Nz;
+         return Geom.Press_Of (Gt, P, P0, Nn);
+      end Press;
+      function Truth (K : Natural) return Geom.V3 is ([Ctr (K) (0) + Rt * Dir (K) (0), Ctr (K) (1) + Rt * Dir (K) (1), Ctr (K) (2) + Rt * Dir (K) (2)]);
+      function Err (F : Geom.Press_Fit; K : Natural) return Long_Float is
+        (Geom.Norm ([F.X (0) - Truth (K) (0), F.X (1) - Truth (K) (1), F.X (2) - Truth (K) (2)]));
+      --  第 K 瓣压 N_Press 下(第 0 下朝下,其后按 Az 的次序斜),Bad = 哪几下被顶住(下标;-1 = 没有)
+      function Presses (K, N_Press : Natural; Bad1, Bad2 : Integer := -1) return Geom.Press_Eq_Vectors.Vector is
+         E : Geom.Press_Eq_Vectors.Vector;
+      begin
+         for I in 0 .. N_Press - 1 loop
+            E.Append (Press (K, (if I = 0 then 0.0 else Theta), (if I = 0 then 0.0 else Az (I - 1)),
+                             (if I = Bad1 or else I = Bad2 then Block else 0.0), Noise ((I + 3 * K) mod Noise'Length)));
+         end loop;
+         return E;
+      end Presses;
+      F0, F1, Fb, Fn, F2b, Fo, Fx, F4 : Geom.Press_Fit;
+      With_Other, Bogus : Geom.Press_Eq_Vectors.Vector;
+      Raw_Would : Boolean := True;   --  ⑦:原来的写法(4 下、组里残差 ≤ 一小步)会不会收那一下被顶住的
+   begin
+      Gt.Valid := True; Gt.F := 397.0; Gt.Cx := 320.0; Gt.Cy := 240.0;
+      Dirs.Append (Dir (0)); Dirs.Append (Dir (1));
+      Theta := Geom.Tilt_Angle (Dirs, 0, 0.0);
+      F0 := Geom.Fit_Presses (Presses (0, 6), Gate);
+      F1 := Geom.Fit_Presses (Presses (1, 6), Gate);
+      Fb := Geom.Fit_Presses (Presses (0, 6, Bad1 => 3), Gate);
+      Fn := Geom.Fit_Presses (Presses (0, 6, Bad1 => 0), Gate);
+      F2b := Geom.Fit_Presses (Presses (0, 8, Bad1 => 2, Bad2 => 5), Gate);
+      F4 := Geom.Fit_Presses (Presses (0, 4, Bad1 => 2), Gate);
+      --  ⑦ 原来的写法:4 下一起按最小二乘解,组里每一下的残差都 ≤ 一小步就收
+      declare
+         E : constant Geom.Press_Eq_Vectors.Vector := Presses (0, 4, Bad1 => 2);
+         M : Geom.M3 := [others => [others => 0.0]];
+         V : Geom.V3 := [others => 0.0];
+         X : Geom.V3;
+      begin
+         for Q of E loop
+            for R in 0 .. 2 loop
+               for S in 0 .. 2 loop
+                  M (R, S) := M (R, S) + Q.A (R) * Q.A (S);
+               end loop;
+               V (R) := V (R) + Q.A (R) * Q.B;
+            end loop;
+         end loop;
+         X := Geom.Solve3 (M, V);
+         for Q of E loop
+            if abs (Q.A (0) * X (0) + Q.A (1) * X (1) + Q.A (2) * X (2) - Q.B) > Gate then
+               Raw_Would := False;
+            end if;
+         end loop;
+      end;
+      With_Other := Presses (0, 6);
+      for E of Presses (1, 6) loop
+         With_Other.Append (Geom.Press_Eq'(A => E.A, B => E.B, Aimed => False));
+      end loop;
+      Fo := Geom.Fit_Presses (With_Other, Gate);
+      Bogus := With_Other;
+      --  另一瓣压的第 2 下改成"那一刻这一瓣真的尖在面之下 5 mm"(B = A·真的尖 + 5 mm)
+      Bogus.Replace_Element (7, Geom.Press_Eq'(A => Bogus (7).A, B => Bogus (7).A (0) * Truth (0) (0) + Bogus (7).A (1) * Truth (0) (1) + Bogus (7).A (2) * Truth (0) (2) + Block,
+                                               Aimed => False));
+      Fx := Geom.Fit_Presses (Bogus, Gate);
+      Check (F0.Ok and then F1.Ok and then Natural (F0.Used.Length) = 6 and then Err (F0, 0) < Tol and then Err (F1, 1) < Tol,
+             "换倾角碰:两瓣视线夹角 " & Codec.Fmt (Beta / Deg, 1) & "°、斜 θ = " & Codec.Fmt (Theta / Deg, 1)
+             & "° ⇒ 6 下全好,两瓣解回离真的尖 " & Codec.Fmt (1000.0 * Err (F0, 0), 3) & " / " & Codec.Fmt (1000.0 * Err (F1, 1), 3) & " mm(< 1)· 别的几下预测每一下最多差 "
+             & Codec.Fmt (1000.0 * F0.Worst, 3) & " mm · 不确定度 (" & Codec.Fmt (1000.0 * F0.Sd (0), 2) & "," & Codec.Fmt (1000.0 * F0.Sd (1), 2) & "," & Codec.Fmt (1000.0 * F0.Sd (2), 2) & ") mm");
+      Check (Fb.Ok and then not Fb.Used.Contains (3) and then Err (Fb, 0) < Tol and then Fn.Ok and then not Fn.Used.Contains (0) and then Err (Fn, 0) < Tol,
+             "换倾角碰:一下被顶住(停高 5 mm)⇒ 认出、去掉:斜的那一下 " & (if Fb.Ok then Codec.Fmt (1000.0 * Err (Fb, 0), 3) & " mm(用了 " & Codec.Img (Natural (Fb.Used.Length)) & " 下)" else "没收")
+             & "、朝下那一下 " & (if Fn.Ok then Codec.Fmt (1000.0 * Err (Fn, 0), 3) & " mm(用了 " & Codec.Img (Natural (Fn.Used.Length)) & " 下)" else "没收"));
+      Check ((not F2b.Ok or else Err (F2b, 0) < Tol) and then (not F4.Ok or else Err (F4, 0) < Tol),
+             "换倾角碰:8 下里两下被顶住 ⇒ " & (if F2b.Ok then "认出,解 " & Codec.Fmt (1000.0 * Err (F2b, 0), 3) & " mm(用了 " & Codec.Img (Natural (F2b.Used.Length)) & " 下)" else "不收" & (if F2b.Ambiguous then "(认不出)" else ""))
+             & " · 只压 4 下、斜的一下被顶住 ⇒ " & (if F4.Ok then "收了,解 " & Codec.Fmt (1000.0 * Err (F4, 0), 2) & " mm" else "不收(补压)"));
+      Check (Fo.Ok and then Err (Fo, 0) < Tol and then Fo.Low > 0.0 and then not Fx.Ok,
+             "换倾角碰:另一瓣压的 6 下当核 ⇒ 这一瓣在那几下里都在面之上(最低 " & Codec.Fmt (1000.0 * Fo.Low, 1) & " mm)、解照样 "
+             & Codec.Fmt (1000.0 * Err (Fo, 0), 3) & " mm · 假造一下它在面之下 5 mm ⇒ " & (if Fx.Ok then "收了(错)" else "不收"));
+      Check (Lowest_Ok, "换倾角碰:斜 θ = 夹角的三分之一的每一下里,真的最低点都是压的这一瓣(另一根手指、手掌都更高)");
+      --  ⑧ 另一根手指长得多(球心沿它的视线往外挪):压第 0 瓣斜着的几下里先碰到的可能是它。长 30 mm:它只比这一瓣低一点点(比一小步小,认不出),
+      --  解照样是这一瓣的尖,差要在 V1 的考试线 5 mm 以内(或不收);长 80 mm:它先碰到时停高几厘米 ⇒ 那几下被当成停早了去掉,
+      --  解是这一瓣的尖(< 5 mm)、或不收、或解离它那条视线更近被 Ray_Owner 认出 —— 不许把它的尖当成第 0 瓣的
+      declare
+         V1_Line : constant Long_Float := 0.005;   --  V1 每瓣的考试线 5 mm(米,PLAN)
+         procedure Long_Finger (Extra : Long_Float) is
+            Long_Ctr : constant V3_Arr := [Ctr (0), [Ctr (1) (0) + Extra * Dir (1) (0), Ctr (1) (1) + Extra * Dir (1) (1), Ctr (1) (2) + Extra * Dir (1) (2)]];
+            E : Geom.Press_Eq_Vectors.Vector;
+            Fl : Geom.Press_Fit;
+            Other_Low : Natural := 0;   --  斜着的几下里另一根手指先碰到的下数
+         begin
+            for I in 0 .. 5 loop
+               declare
+                  Rv : constant Geom.V3 := Geom.Turn_To (Geom.Tilt_Dir (Dir (0), (if I = 0 then 0.0 else Theta), (if I = 0 then 0.0 else Az (I - 1))), Down);
+                  Av : Table.Vec := Table.Zero_Vec;
+                  P : Plug.Arm_Pose;
+                  R : Geom.M3;
+                  Low : Long_Float := Long_Float'Last;
+                  Who : Natural := 0;
+               begin
+                  Av (3) := Rv (0); Av (4) := Rv (1); Av (5) := Rv (2);
+                  P := Chan.Compose (Home, Av);
+                  R := Geom.Quat_To_R (P);
+                  for J in Long_Ctr'Range loop
+                     if Geom.Ap (R, Long_Ctr (J)) (2) - Rt < Low then
+                        Low := Geom.Ap (R, Long_Ctr (J)) (2) - Rt; Who := J;
+                     end if;
+                  end loop;
+                  if Who = 1 then
+                     Other_Low := Other_Low + 1;
+                  end if;
+                  P (2) := Table_Z - Low + Noise (I);
+                  E.Append (Geom.Press_Of (Gt, P, P0, Nn));
+               end;
+            end loop;
+            Fl := Geom.Fit_Presses (E, Gate);
+            Check (Other_Low > 0 and then (not Fl.Ok or else Geom.Ray_Owner (Fl.X, Dirs) /= 0 or else Err (Fl, 0) < V1_Line),
+                   "换倾角碰:另一根手指长 " & Codec.Fmt (1000.0 * Extra, 0) & " mm ⇒ 压第 0 瓣的 6 下里 " & Codec.Img (Other_Low) & " 下先碰到的是它 ⇒ "
+                   & (if not Fl.Ok then "几下对不上、不收" elsif Geom.Ray_Owner (Fl.X, Dirs) /= 0 then "收下的解离第 1 瓣的视线更近 ⇒ 认出碰着的不是这一瓣"
+                      else "解是这一瓣的尖,差 " & Codec.Fmt (1000.0 * Err (Fl, 0), 1) & " mm(用了 " & Codec.Img (Natural (Fl.Used.Length)) & " 下,自报不确定度 ("
+                           & Codec.Fmt (1000.0 * Fl.Sd (0), 2) & "," & Codec.Fmt (1000.0 * Fl.Sd (1), 2) & "," & Codec.Fmt (1000.0 * Fl.Sd (2), 2) & ") mm)"));
+         end Long_Finger;
+      begin
+         Long_Finger (0.03);
+         Long_Finger (0.08);
+      end;
+      Check (Raw_Would and then not F4.Ok,
+             "换倾角碰:原来的写法(4 下、组里残差 ≤ 一小步)" & (if Raw_Would then "会收下被顶住 5 mm 的那一组" else "不收(焊点前提不成立)")
+             & " —— 按别的几下预测它 ⇒ " & (if F4.Ok then "也收了(错)" else "不收"));
+   end;
    --  🔴 开机碰桌面挑空的面(Act.Board_Free_Spots):板 21×21 个点铺在 0.765 m 的面上(2 cm 一格、离散 1 mm),中间 5×5 格是一块 5 cm 高的东西。
    --  压的那一瓣落在 (0,0)、另一瓣落在 (0.05,0),手指宽上限 1 cm,另一瓣视线斜 90°(tan 45° = 1:离压的那一点 ρ 处手指至少高 ρ)⇒ 第一个空的:
    --  压的那一瓣落在一个躺在面上的板点上,两个落点连线 1 cm 内没有东西上的点,挪得不远(< 0.1 m);拿掉那块东西 ⇒ 不用挪;板上全是东西 ⇒ 一个都没有。

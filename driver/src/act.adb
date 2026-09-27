@@ -11270,7 +11270,7 @@ package body Act is
 
    --  V1 口径"头顶眼按指尖算的残差"(2026-09-26):开机各停里不动的眼给这只手做的合空标记(每一瓣的尖 C.Lobe_Obs、各瓣的中点 C.Fixed_Obs),
    --  和"那一停的位姿 + 碰出来的指尖"投进它眼里的那一点比。只报数、不改任何量:两边都是量的(标记是分割出来的尖,指尖是碰出来的)
-   procedure Head_Tip_Check (C : Context; A, Hc : Natural; D : Geom.V3_Vectors.Vector; Sk : Floats) is
+   procedure Head_Tip_Check (C : Context; A, Hc : Natural; Tips : Geom.V3_Vectors.Vector) is
       Wc : constant Natural := C.Map.World_Cam;
       package Sorting is new F64_Vectors.Generic_Sorting;
       procedure Report (Name : String; E : in out Floats) is
@@ -11300,7 +11300,7 @@ package body Act is
          El, Em, Eo : Floats;
          function Tip_At (P : Plug.Arm_Pose; K : Natural) return Geom.V3 is
             O : constant Geom.V3 := Geom.Cam_Pos (G, P);
-            T : constant Geom.V3 := Geom.Ap (Geom.Cam_R (G, P), [Sk (K) * D (K) (0), Sk (K) * D (K) (1), Sk (K) * D (K) (2)]);
+            T : constant Geom.V3 := Geom.Ap (Geom.Cam_R (G, P), Tips (K));
          begin
             return [O (0) + T (0), O (1) + T (1), O (2) + T (2)];
          end Tip_At;
@@ -11310,7 +11310,7 @@ package body Act is
                declare
                   Best : Long_Float := Long_Float'Last;
                begin
-                  for K in 0 .. Natural (D.Length) - 1 loop
+                  for K in 0 .. Natural (Tips.Length) - 1 loop
                      declare
                         U, V : Long_Float;
                         Front : Boolean;
@@ -11343,7 +11343,7 @@ package body Act is
                   end;
                   --  碰出来的每一瓣指尖投进它眼里,离那一笔里它看见的手指像素最近多远(落在手指上 = 0):不比分割出来的"尖"那一点(远处小夹爪的尖一会儿一个样)
                   if I < Natural (C.Mark_Px.Length) and then not C.Mark_Px (I).Is_Empty then
-                     for K in 0 .. Natural (D.Length) - 1 loop
+                     for K in 0 .. Natural (Tips.Length) - 1 loop
                         declare
                            U, V : Long_Float;
                            Front : Boolean;
@@ -11487,19 +11487,21 @@ package body Act is
       end loop;
    end Board_Free_Spots;
 
-   --  ③ 每只手:摸它下面的面,顺带量指尖(2026-09-26)。
-   --  标定板的点拟合过那张面(1 mm 级,Geo_Board)⇒ 指尖按碰量:手上那只眼里每一瓣手指的尖是一条视线(方向 = Zone.Tip_Band:
-   --  这一瓣自己那一块手指像素里离它贴画面边处最远的那一截),轮流让每一瓣的视线朝下、落到板上一块空的面(Board_Free_Spot)、
-   --  转和挪一条命令、压到被顶住、不再往下顶让手歇下来 ⇒ 这一瓣的尖碰在面上,视线 ∩ 面 = 它的指尖(Geom.Tips_On_Plane)。
-   --  别的瓣这一下不一定碰着(只会离面更高,交出来只会更远)⇒ 每一瓣取它自己朝下那一下量的;别的几下里它交出来的反而更近 ⇒ 它自己那一下碰着的不是它,如实说、取近的。
-   --  指尖 = 各瓣指尖的中点(同 Zone_Tip 的定义),张口 = 两瓣指尖相距。以前按不动的眼的合空标记交(Tips_On_Rays),远处小夹爪分割出来的尖乱跳
-   --  (X5B 2026-09-25:x5 手 2 离眼 0.33 m、张口 0.58 m,拿它顶住的点比板的面低 20.8 cm)。
+   --  ③ 每只手:摸它下面的面,顺带量指尖(2026-09-26;09-28 改成换倾角碰,PLAN 开机后半段 ③)。
+   --  标定板的点拟合过那张面(1 mm 级,Geo_Board)⇒ 指尖按碰量:每一瓣压 6 下,每一下让手上一个方向朝正下 —— 这一瓣指尖那条视线
+   --  (Zone.Tip_Band:这一瓣自己那一块手指像素里离它贴画面边处最远的那一截)本身 1 下、朝方位各差 72° 的五个方向各斜 θ 1 下
+   --  (θ = 这一瓣视线和最近的另一瓣视线夹角的三分之一:斜 θ 时另一根手指一直比它高,纯几何;只有一瓣 ⇒ 一条命令转得到的那一档,量过的),
+   --  落到板上一块空的面(Board_Free_Spots)、转和挪一条命令、压到被顶住、不再往下顶让手歇下来 ⇒ 手上最低的那一点落在面上:
+   --  关于它在手系(眼系)里位置 x 的一条线性方程(Geom.Press_Of)。几下一起解(Geom.Fit_Presses:每一下拿别的几下预测,差 ≤ 一小步;
+   --  组外的只许是停早了;对不上补压两个方位中间的,最多 2 下)⇒ 这一瓣的尖 = x,不必在哪条像素视线上(人形大拇指的尖在画面外也一样量)。
+   --  指尖 = 各瓣的尖的中点,张口 = 两瓣相距。碰的每一下爪子都按量过的张开那头发命令(09-28 V1B43:开机时对方复位一次,爪子的目标作废,
+   --  命令跟着读数走,压的时候手指被桌面顶着越压越合)。以前按"尖就在那条视线上、视线交面 = 尖"量:V1B36 错 12.7 mm、V1B43 三处对不上。
    --  没有板的面、指尖量过(身体文件里的)⇒ 碰一下量面(顶住点 = 位姿 + 指尖:同一条"指尖碰在面上"反过来解);两样都没有 ⇒ 不碰,如实说。
    --  压的下数:有板的面 = 眼离面的高度 ÷ 一压 + 1(指尖在眼和面之间);没有 = 最多 8 下(次数)。完了回到原处
 
    procedure Geo_Boot_Support (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context) is
       Down : constant Geom.V3 := [-Protocol_Up (0), -Protocol_Up (1), -Protocol_Up (2)];
-      S_Known : Long_Float := 0.0;   --  这次开机头一瓣碰出来的指尖离眼多远(世界单位):别的瓣、别的手先一条命令下到按它算的高度
+      S_Known : Long_Float := 0.0;   --  这次开机头一瓣朝下那一下视线交面离眼多远(世界单位):别的瓣、别的手先一条命令下到按它算的高度
 
       procedure Go_Back (A : Natural; To : Plug.Arm_Pose) is
          Cur : constant Plug.Arm_Pose := F.EE (A);
@@ -11508,7 +11510,7 @@ package body Act is
          Geo_Move (L, C, F, A, [To (0) - Cur (0), To (1) - Cur (1), To (2) - Cur (2)], Mok);
       end Go_Back;
 
-      --  有板的面:每一瓣朝下碰一次,量指尖
+      --  有板的面:每一瓣换倾角碰几下,量指尖
       procedure Touch_Tips (A, Hc : Natural) is
          Z : constant Zone.Hand_Zone := Zone_Of (C, A, Hc);
          Cw : constant Natural := F.Cams (Hc).W;
@@ -11517,66 +11519,105 @@ package body Act is
          Home : constant Plug.Arm_Pose := F.EE (A);
          Tu, Tv, Nw : Floats;   --  每一瓣指尖的像素、指尖那一小截的像素跨度
          D : Geom.V3_Vectors.Vector;   --  每一瓣指尖的相机系单位视线
-         type Row_Array is array (Natural range <>) of Geom.Plane_Tip_Vectors.Vector;
          Nl : Natural := 0;
          Ev : Unbounded_String;
          St : Natural;
          Who : constant String := "第" & Codec.Img (A + 1) & " 只手";
          Top_Z : Long_Float := Long_Float'First;  --  压之前到过的最高处(位姿读数的 z)
-         --  在板上一块空的面上压一下:这一瓣的视线绕眼转到朝正下(转最少),按转完以后各瓣视线落在面上的点(再平移 Shift)找一块空的面,
-         --  转和挪一条命令走完(反解在量到的关节限位里解;V1B21 2026-09-27:原来按"一条命令转得到的最大一档"一步一步转完再挪,一瓣要 7–8 条命令);
-         --  挪完核这一瓣的视线落在哪:离挑好的那块超过指尖那一小截的宽 ⇒ 没转到或没挪到(V1B21:挪 0.22 m 没走到、朝向也被带歪约 30°,
-         --  那时的门是整瓣手指的宽 90 mm,没拦下,视线斜着交面,量出的尖长了 16–20 mm)。
-         --  压到被顶住以后不再往下顶、让手歇下来再读位姿(V1B21 仿真真值:顶着的时候手指压进桌面 6.6 mm,命令一换成停在此刻两拍后回到 2.5 mm)。
-         --  Got = 真顶住了、沿面滑得动、压的这一瓣的视线交得到面;Row = 这一下每一瓣视线交面的结果;Spot = 压的那一瓣落的那一点
-         --  Away_R > 0:落点离 Away 不到 Away_R 的空的面不要(两处碰的第二处要真是另一处;V1B22 第二处按平移挪完又挑回了第一处,两处相距 0)
          Limit : Boolean := False;   --  上一次 Press_At:压到一半这一压在量到的关节限位里解不出来(停下不是碰到)
-         procedure Press_At (K : Natural; Shift : Geom.V3; Row : out Geom.Plane_Tip_Vectors.Vector; Spot : out Geom.V3; Got : out Boolean;
-                             Away : Geom.V3 := [0.0, 0.0, 0.0]; Away_R : Long_Float := 0.0) is
+         Eqs : Geom.Press_Eq_Vectors.Vector;   --  这只手压过的每一下(顶住那一刻的方程)
+         Eq_Lobe : Geom.Nat_Vectors.Vector;    --  每一下对准的是第几瓣
+         Est : Geom.V3_Vectors.Vector;         --  每一瓣的尖此刻的估计(相机系;Has_Est 为假 ⇒ 没有,按它的视线交面)
+         Has_Est : Bools;
+         Gate : constant Long_Float := 4.0 * Geo_Base (C, A);   --  一小步 = 4 倍最小一档(同 Geo_Go 默认的一压、同原来两处对不对得上的门)
+         Small : constant Long_Float := 4.0 * Geo_Base (C, A);  --  同上(压的时候的一小步)
+         Deg : constant := 0.0174532925199433;   --  1° 的弧度(换算,无量纲)
+         Az_Step : constant Long_Float := 72.0 * Deg;   --  五个方位各差 72°(360° ÷ 5,纯几何:没有正对着的两个方位)
+         N_Tilt : constant := 5;      --  斜着压的下数(次数)
+         N_Extra : constant := 2;     --  对不上时补压的下数(次数;方位取前两个方位中间的)
+         function Dot (P, Q : Geom.V3) return Long_Float is (P (0) * Q (0) + P (1) * Q (1) + P (2) * Q (2));
+         --  世界里一点沿面的法向落到面上
+         function Proj (Q : Geom.V3) return Geom.V3 is
+            Hq : constant Long_Float := Dot ([Q (0) - C.Board_Pt (0), Q (1) - C.Board_Pt (1), Q (2) - C.Board_Pt (2)], C.Board_N);
+         begin
+            return [Q (0) - Hq * C.Board_N (0), Q (1) - Hq * C.Board_N (1), Q (2) - Hq * C.Board_N (2)];
+         end Proj;
+         --  爪子张开那头的命令(每个抓握通道一个;开机推到头量的读数,Zone.Measure 停在那一头时发的就是它)。量过的通道按它,没量过的保持此刻的读数
+         function Open_Cmd return Floats is
+            Cur : constant Floats := Selfmap.Jaw_All (F, A);
+            R : Floats;
+         begin
+            for K in 0 .. Natural (Cur.Length) - 1 loop
+               declare
+                  V : Long_Float := Cur (K);
+               begin
+                  for Hh of C.Hands loop
+                     if Hh.Arm = A and then Hh.K = K then
+                        V := Hh.Open_Reading;
+                     end if;
+                  end loop;
+                  R.Append (V);
+               end;
+            end loop;
+            return R;
+         end Open_Cmd;
+         Jaw_Open : constant Floats := Open_Cmd;
+         --  在板上一块空的面上压一下:让手上 Tilt_Dir (这一瓣的视线, Tilt, Azim) 那个方向朝正下(绕眼转,转最少),
+         --  按转完以后这一瓣的尖(估计)落在面上的点、别的瓣的视线落在面上的点(再平移 Shift)找一块空的面,
+         --  转和挪一条命令走完(反解在量到的关节限位里解;V1B21 2026-09-27:原来按"一条命令转得到的最大一档"一步一步转完再挪,一瓣要 7–8 条命令);
+         --  挪完核这一瓣的尖落在哪:离挑好的那块超过指尖那一小截的宽 ⇒ 没转到或没挪到,这一下不压(V1B21:挪 0.22 m 没走到、朝向也被带歪约 30°)。
+         --  压到被顶住以后不再往下顶、让手歇下来再读位姿(V1B21 仿真真值:顶着的时候手指压进桌面 6.6 mm,命令一换成停在此刻两拍后回到 2.5 mm)。
+         --  Got = 真顶住了(那一刻的方程记进 Eqs、对准第 K 瓣);S_Ray = 此刻这一瓣的视线交面离眼多远(朝下那一下给后面几下当"尖大概在哪"的起点)
+         procedure Press_At (K : Natural; Tilt, Azim : Long_Float; Shift : Geom.V3; Got : out Boolean; S_Ray : out Long_Float) is
             P : constant Plug.Arm_Pose := F.EE (A);
             Gk : constant Geom.Cam_Geo := C.Geo (Hc);
             O : constant Geom.V3 := Geom.Cam_Pos (Gk, P);
-            H : constant Long_Float := (O (0) - C.Board_Pt (0)) * C.Board_N (0) + (O (1) - C.Board_Pt (1)) * C.Board_N (1) + (O (2) - C.Board_Pt (2)) * C.Board_N (2);
-            Fwd : constant Geom.V3 := Geom.Ray (Gk, P, Tu (K), Tv (K));
-            Cr : constant Geom.V3 := [Fwd (1) * Down (2) - Fwd (2) * Down (1), Fwd (2) * Down (0) - Fwd (0) * Down (2), Fwd (0) * Down (1) - Fwd (1) * Down (0)];
-            Sn : constant Long_Float := Geom.Norm (Cr);
-            Ang : constant Long_Float := Arctan (Sn, Fwd (0) * Down (0) + Fwd (1) * Down (1) + Fwd (2) * Down (2));
-            --  视线正好朝上(叉积为零)时随便取一根和它垂直的轴(同 Geo_Turn)
-            Az : constant Geom.V3 := [Fwd (1), -Fwd (0), 0.0];
-            Ax : constant Geom.V3 := [0.0, Fwd (2), -Fwd (1)];
-            Alt : constant Geom.V3 := (if Geom.Norm (Az) >= Geom.Norm (Ax) then Az else Ax);
-            Aln : constant Long_Float := Geom.Norm (Alt);
-            Axis : constant Geom.V3 := (if Sn > 1.0e-9 then [Cr (0) / Sn, Cr (1) / Sn, Cr (2) / Sn]
-                                        elsif Aln > 1.0e-9 then [Alt (0) / Aln, Alt (1) / Aln, Alt (2) / Aln] else [0.0, 0.0, 1.0]);
-            Rv : constant Geom.V3 := [Axis (0) * Ang, Axis (1) * Ang, Axis (2) * Ang];
+            Rp : constant Geom.M3 := Geom.Cam_R (Gk, P);
+            Nb : constant Geom.V3 := C.Board_N;
+            H : constant Long_Float := Dot ([O (0) - C.Board_Pt (0), O (1) - C.Board_Pt (1), O (2) - C.Board_Pt (2)], Nb);
+            Rv : constant Geom.V3 := Geom.Turn_To (Geom.Ap (Rp, Geom.Tilt_Dir (D (K), Tilt, Azim)), Down);
             Rr : constant Geom.M3 := Geom.Rodrigues (Rv);
+            Ang : constant Long_Float := Geom.Norm (Rv);
+            Dk : constant Geom.V3 := Geom.Ap (Rr, Geom.Ray (Gk, P, Tu (K), Tv (K)));   --  转完以后这一瓣的视线(绕眼转,眼不动)
+            Ck : constant Long_Float := -Dot (Nb, Dk);   --  它和朝下的夹角的余弦
+            --  转完以后这一瓣的尖(相对眼,世界系):有估计按估计;没有 ⇒ 按它的视线交面(视线朝正下时就是正下方那一点)
+            Tk : constant Geom.V3 := (if Has_Est (K) then Geom.Ap (Rr, Geom.Ap (Rp, Est (K)))
+                                      elsif Ck > 1.0e-9 then [H / Ck * Dk (0), H / Ck * Dk (1), H / Ck * Dk (2)] else [0.0, 0.0, 0.0]);
+            A0 : constant Geom.V3 := Proj ([O (0) + Tk (0), O (1) + Tk (1), O (2) + Tk (2)]);   --  这一瓣的尖碰到面时落在哪
             Lp : Geom.V3_Vectors.Vector;
-            Tb : Floats;   --  每一瓣转完以后的视线离朝下的角的一半的正切(Board_Free_Spots 算别的瓣的手指离面多高)
+            Tb : Floats;   --  别的瓣:从压的这一瓣的尖到它的尖那条连线的坡度(两根手指一样长时,Board_Free_Spots 算它的手指离面多高)
             Dl : Geom.V3 := [0.0, 0.0, 0.0];
-            All_Hit : Boolean := True;
+            All_Hit : Boolean := Ck > 1.0e-9;
             R : constant Long_Float := Nw (K) * Long_Float'Max (0.0, H) / Gk.F;   --  指尖那一小截的宽(像素)落到面那么远的上限(指尖在眼和面之间)
+            Spot : Geom.V3;
          begin
-            Got := False; Spot := [0.0, 0.0, 0.0]; Limit := False;
-            Row := Geom.Plane_Tip_Vectors.Empty_Vector;
+            Got := False; S_Ray := 0.0; Limit := False;
+            Lp.Append (Geom.V3'[A0 (0) + Shift (0), A0 (1) + Shift (1), A0 (2) + Shift (2)]);
+            Tb.Append (0.0);
             for J in 0 .. Nl - 1 loop
-               declare
-                  Jj : constant Natural := (if J = 0 then K elsif J <= K then J - 1 else J);   --  压的那一瓣排第一
-                  Hok : Boolean;
-                  Dr : constant Geom.V3 := Geom.Ap (Rr, Geom.Ray (Gk, P, Tu (Jj), Tv (Jj)));   --  转完以后的视线(绕眼转,眼不动)
-                  Q : constant Geom.V3 := Geom.Hit_Plane (O, Dr, C.Board_Pt, C.Board_N, Hok);
-                  Cb : constant Long_Float := Long_Float'Max (-1.0, Long_Float'Min (1.0, Dr (0) * Down (0) + Dr (1) * Down (1) + Dr (2) * Down (2)));
-               begin
-                  All_Hit := All_Hit and then Hok;
-                  Lp.Append (Geom.V3'[Q (0) + Shift (0), Q (1) + Shift (1), Q (2) + Shift (2)]);
-                  Tb.Append (Sqrt (Long_Float'Max (0.0, 1.0 - Cb * Cb)) / Long_Float'Max (1.0e-9, 1.0 + Cb));   --  tan(β/2) = sin β ÷ (1 + cos β)(纯数学)
-               end;
+               if J /= K then
+                  declare
+                     Dj : constant Geom.V3 := Geom.Ap (Rr, Geom.Ray (Gk, P, Tu (J), Tv (J)));
+                     Cj : constant Long_Float := -Dot (Nb, Dj);
+                     Vt : constant Geom.V3 := [Dj (0) - Dk (0), Dj (1) - Dk (1), Dj (2) - Dk (2)];
+                     Hz : constant Long_Float := Dot (Nb, Vt);
+                     Hv : constant Geom.V3 := [Vt (0) - Hz * Nb (0), Vt (1) - Hz * Nb (1), Vt (2) - Hz * Nb (2)];
+                     Lh : constant Long_Float := Geom.Norm (Hv);
+                     --  沿它的视线从眼到面那么远(朝正下压时这条连线的另一头就是它的视线交面那一点,同原来)
+                     Sj : constant Long_Float := (if Cj > 1.0e-9 then H / Cj else 0.0);
+                  begin
+                     All_Hit := All_Hit and then Cj > 1.0e-9;
+                     Lp.Append (Geom.V3'[A0 (0) + Sj * Hv (0) + Shift (0), A0 (1) + Sj * Hv (1) + Shift (1), A0 (2) + Sj * Hv (2) + Shift (2)]);
+                     Tb.Append ((if Lh > 0.0 then Long_Float'Max (0.0, Hz) / Lh else 0.0));
+                  end;
+               end if;
             end loop;
             if H <= 0.0 or else not All_Hit then
-               Geo_Say ("  眼在板的面之下、或手指的视线落不到面上(眼离面 " & Mm (H) & ")⇒ 指尖这回量不成");
+               Geo_Say ("  眼在板的面之下、或手指的视线落不到面上(眼离面 " & Mm (H) & ")⇒ 这一下压不成");
                return;
             end if;
             --  挑落点:空的面按离得近排,一处一处先问反解(转和挪到那儿在量到的关节限位里解不解得出来,还差一步看得见的那一档以内才去);
-            --  没有运动学(读位姿的老路,3e 删)就不问
+            --  有尖的估计时,压到"尖在面以下一小步"那么低也要解得出来(V1B31 2026-09-27:往下走到指尖离桌面 5 mm 时到了关节限位、手停住被当成碰到)
             declare
                Ds : Geom.V3_Vectors.Vector;
                Found : Boolean := False;
@@ -11590,41 +11631,36 @@ package body Act is
                      Av : Table.Vec := Table.Zero_Vec;
                      Pe, Re : Long_Float;
                      Rok : Boolean;
-                     Lz : constant Geom.V3 := [Lp (0) (0) + D1 (0) - Away (0), Lp (0) (1) + D1 (1) - Away (1), Lp (0) (2) + D1 (2) - Away (2)];
                   begin
-                     if Away_R <= 0.0 or else Geom.Norm (Lz) >= Away_R then
-                        for I in 0 .. 2 loop
-                           Av (I) := Shift (I) + D1 (I);
-                           Av (3 + I) := Rv (I);
-                        end loop;
-                        Plug.Reach (A, Chan.Compose (P, Av), Pe, Re, Rok);
-                        Asked := Asked + 1;
-                        --  量过一瓣以后,压到"眼离面 = 量过的那一瓣 − 一小步"那么低也要解得出来(V1B31 2026-09-27:这个朝向往下走到指尖离桌面 5 mm 时
-                        --  到了量到的关节限位、反解解不下去,手停住被当成碰到,两处都这样、差 5.5 mm 过了门,那一瓣长了 7 mm)
-                        if Rok and then Pe <= Tol_P and then Re <= Tol_R and then S_Known > 0.0 then
-                           declare
-                              Dz : constant Long_Float := Long_Float'Max (0.0, H - (S_Known - 4.0 * Geo_Base (C, A)));   --  一小步 = 4 倍最小一档(同 Geo_Go 默认的一压)
-                              Pe2, Re2 : Long_Float;
-                              Rok2 : Boolean;
-                              Av2 : Table.Vec := Av;
-                           begin
-                              for I in 0 .. 2 loop
-                                 Av2 (I) := Av (I) + Dz * Down (I);
-                              end loop;
-                              Plug.Reach (A, Chan.Compose (P, Av2), Pe2, Re2, Rok2);
-                              Pe := Long_Float'Max (Pe, Pe2); Re := Long_Float'Max (Re, Re2);
-                           end;
-                        end if;
-                        if not Rok or else (Pe <= Tol_P and then Re <= Tol_R) then
-                           Dl := D1; Found := True;
-                           exit;
-                        end if;
+                     for I in 0 .. 2 loop
+                        Av (I) := Shift (I) + D1 (I);
+                        Av (3 + I) := Rv (I);
+                     end loop;
+                     Plug.Reach (A, Chan.Compose (P, Av), Pe, Re, Rok);
+                     Asked := Asked + 1;
+                     if Rok and then Pe <= Tol_P and then Re <= Tol_R and then Has_Est (K) then
+                        declare
+                           Dz : constant Long_Float := Long_Float'Max (0.0, H - (-Dot (Nb, Tk) - Small));
+                           Pe2, Re2 : Long_Float;
+                           Rok2 : Boolean;
+                           Av2 : Table.Vec := Av;
+                        begin
+                           for I in 0 .. 2 loop
+                              Av2 (I) := Av (I) + Dz * Down (I);
+                           end loop;
+                           Plug.Reach (A, Chan.Compose (P, Av2), Pe2, Re2, Rok2);
+                           Pe := Long_Float'Max (Pe, Pe2); Re := Long_Float'Max (Re, Re2);
+                        end;
+                     end if;
+                     if not Rok or else (Pe <= Tol_P and then Re <= Tol_R) then
+                        Dl := D1; Found := True;
+                        exit;
                      end if;
                   end;
                end loop;
                if not Found then
                   Geo_Say ("  板上空的面 " & Codec.Img (Natural (Ds.Length)) & " 处(指尖那一小截宽的上限 " & Mm (R) & "),问了 " & Codec.Img (Asked)
-                           & " 处,转和挪到那儿在量到的关节限位里都解不出来 ⇒ 指尖这回量不成");
+                           & " 处,转和挪到那儿在量到的关节限位里都解不出来 ⇒ 这一下压不成");
                   return;
                end if;
                if Asked > 1 then
@@ -11634,7 +11670,6 @@ package body Act is
             Spot := [Lp (0) (0) + Dl (0), Lp (0) (1) + Dl (1), Lp (0) (2) + Dl (2)];
             declare
                Av : Table.Vec := Table.Zero_Vec;
-               Jaw : Floats;
                Del : Table.Vec;
                Mok : Boolean;
             begin
@@ -11642,19 +11677,23 @@ package body Act is
                   Av (I) := Shift (I) + Dl (I);
                   Av (3 + I) := Rv (I);
                end loop;
-               if Table.Norm (Av, 6) > 0.0 then
-                  Step_Arm (L, C, F, A, Av, Jaw, Del, Mok, Geo_Settle => True);
-                  Geo_Say ("  这一瓣的视线转 " & Codec.Fmt (Ang, 3) & " rad 到朝下、挪 (" & Mm (Av (0)) & "," & Mm (Av (1)) & "," & Mm (Av (2))
-                           & ") 到板上空的那块,一条命令 ⇒ 实到转 " & Codec.Fmt (Sqrt (Del (3) ** 2 + Del (4) ** 2 + Del (5) ** 2), 3) & " rad、挪 ("
-                           & Mm (Del (0)) & "," & Mm (Del (1)) & "," & Mm (Del (2)) & ")(指尖那一小截宽的上限 " & Mm (R) & ",眼离面 " & Mm (H) & ")"
-                           & (if Mok then "" else " · 身体说没走成"));
-               end if;
+               --  爪子这一条命令里按张开那头发(复位以后爪子的目标作废,不发就跟着读数走)
+               Step_Arm (L, C, F, A, Av, Jaw_Open, Del, Mok, Geo_Settle => True);
+               Geo_Say ("  让手上" & (if Tilt > 0.0 then "这一瓣的视线朝方位 " & Codec.Fmt (Azim / Deg, 0) & "° 斜 " & Codec.Fmt (Tilt / Deg, 1) & "° 那个方向" else "这一瓣的视线")
+                        & "朝下:转 " & Codec.Fmt (Ang, 3) & " rad、挪 (" & Mm (Av (0)) & "," & Mm (Av (1)) & "," & Mm (Av (2))
+                        & ") 到板上空的那块,一条命令 ⇒ 实到转 " & Codec.Fmt (Sqrt (Del (3) ** 2 + Del (4) ** 2 + Del (5) ** 2), 3) & " rad、挪 ("
+                        & Mm (Del (0)) & "," & Mm (Del (1)) & "," & Mm (Del (2)) & ")(指尖那一小截宽的上限 " & Mm (R) & ",眼离面 " & Mm (H) & ")"
+                        & (if Mok then "" else " · 身体说没走成"));
             end;
-            --  挪到了没有:按此刻的位姿重算压的那一瓣落在面上哪儿,离挑好的那块超过手指宽上限 ⇒ 没挪到(够不着那么远),不在没核过的地方压
+            --  挪到了没有:按此刻的位姿重算这一瓣的尖落在面上哪儿,离挑好的那块超过手指宽上限 ⇒ 没挪到(够不着那么远),不在没核过的地方压
             declare
                P2 : constant Plug.Arm_Pose := F.EE (A);
-               Hok : Boolean;
-               Q2 : constant Geom.V3 := Geom.Hit_Plane (Geom.Cam_Pos (Gk, P2), Geom.Ray (Gk, P2, Tu (K), Tv (K)), C.Board_Pt, C.Board_N, Hok);
+               O2 : constant Geom.V3 := Geom.Cam_Pos (Gk, P2);
+               Hok : Boolean := True;
+               Q2 : constant Geom.V3 := (if Has_Est (K)
+                                         then Proj (Geom.V3'[O2 (0) + Geom.Ap (Geom.Cam_R (Gk, P2), Est (K)) (0), O2 (1) + Geom.Ap (Geom.Cam_R (Gk, P2), Est (K)) (1),
+                                                             O2 (2) + Geom.Ap (Geom.Cam_R (Gk, P2), Est (K)) (2)])
+                                         else Geom.Hit_Plane (O2, Geom.Ray (Gk, P2, Tu (K), Tv (K)), C.Board_Pt, Nb, Hok));
                Off_By : constant Long_Float := Geom.Norm ([Q2 (0) - Spot (0), Q2 (1) - Spot (1), Q2 (2) - Spot (2)]);
             begin
                if not Hok or else Off_By > R then
@@ -11662,15 +11701,14 @@ package body Act is
                   return;
                end if;
             end;
-            --  往下压。量过一瓣以后(S_Known > 0):先一条命令下到"按量过的那一瓣算,指尖离面两小步"的高度(眼离面 = S_Known + 两小步;两 = 次数),
-            --  直接小步压(⑧ 的 (b));这一下就被顶住了(实到比命令少一步看得见的那一档以上 = 这根手指更长)⇒ 抬一大步,按头一回的走法;
-            --  小步压到"按量过的那一瓣算的桌面以下一大步"还没碰到(这根手指更短)⇒ 从那儿接着按大步压。起点用量过的数,不是假设它一样长。
-            --  头一回:大步压到被顶住(一压 = 步幅,桌子推不动);大步压到的那一下顶得深(V1B22 仿真真值:一压 46 mm,碰到后手指陷进桌面 11–20 mm,
-            --  停住以后有一次只退回 3–4 mm,那一瓣量短了 12 mm)⇒ 退回这一压开始的地方(碰到之前、还没顶的那一处),按小步重新压到被顶住,顶进去的最多一小步
+            --  往下压。有尖的估计时:先一条命令下到"按估的尖算,离面两小步"的高度(两 = 次数),直接小步压(⑧ 的 (b));
+            --  这一下就被顶住了(实到比命令少一步看得见的那一档以上 = 这一瓣比估的长)⇒ 抬一大步,按头一回的走法;
+            --  小步压到"按估的尖算的桌面以下一大步"还没碰到(比估的短)⇒ 从那儿接着按大步压。起点用量过的数,不是假设它一样长。
+            --  头一回(没有估计):大步压到被顶住(一压 = 步幅,桌子推不动);大步压到的那一下顶得深(V1B22 仿真真值:一压 46 mm,碰到后手指陷进桌面 11–20 mm)
+            --  ⇒ 退回这一压开始的地方(碰到之前、还没顶的那一处),按小步重新压到被顶住,顶进去的最多一小步
             declare
                Start : constant Plug.Arm_Pose := F.EE (A);
                Ln : constant Long_Float := Stride_Of (C, A);   --  一压 = 步幅
-               Small : constant Long_Float := 4.0 * Geo_Base (C, A);   --  同 Geo_Go 默认的一压(倍数,无量纲)
                Cap : constant Natural := (if Ln > 0.0 then Natural (Long_Float'Ceiling (H / Ln)) + 1 else 0);
                Direct : Boolean := False;
                procedure Big_Press is
@@ -11700,12 +11738,13 @@ package body Act is
                if Start (2) > Top_Z then
                   Top_Z := Start (2);
                end if;
-               if S_Known > 0.0 and then Small > 0.0 and then Ln > 0.0 then
+               if Has_Est (K) and then Small > 0.0 and then Ln > 0.0 then
                   declare
                      P3 : constant Plug.Arm_Pose := F.EE (A);
                      O3 : constant Geom.V3 := Geom.Cam_Pos (Gk, P3);
-                     H3 : constant Long_Float := (O3 (0) - C.Board_Pt (0)) * C.Board_N (0) + (O3 (1) - C.Board_Pt (1)) * C.Board_N (1) + (O3 (2) - C.Board_Pt (2)) * C.Board_N (2);
-                     Dn : constant Long_Float := H3 - (S_Known + 2.0 * Small);   --  两小步(次数)
+                     H3 : constant Long_Float := Dot ([O3 (0) - C.Board_Pt (0), O3 (1) - C.Board_Pt (1), O3 (2) - C.Board_Pt (2)], Nb);
+                     Depth3 : constant Long_Float := -Dot (Nb, Geom.Ap (Geom.Cam_R (Gk, P3), Est (K)));   --  估的尖此刻在眼下多深
+                     Dn : constant Long_Float := H3 - (Depth3 + 2.0 * Small);   --  两小步(次数)
                      Mok : Boolean;
                   begin
                      if Dn > 0.0 then
@@ -11722,8 +11761,8 @@ package body Act is
                               Went : constant Long_Float := Del (0) * Down (0) + Del (1) * Down (1) + Del (2) * Down (2);
                            begin
                               Direct := Went + Geo_Base (C, A) >= Dn;
-                              Geo_Say ("  按量过的那一瓣(离眼 " & Mm (S_Known) & ")一条命令下 " & Mm (Dn) & " 到指尖离面约两小步 ⇒ 实到 " & Mm (Went)
-                                       & (if Direct then ",直接小步压" else ",这一下就被顶住了(这根手指更长)⇒ 抬一大步,按头一回的走法"));
+                              Geo_Say ("  按估的尖(离眼 " & Mm (Geom.Norm (Est (K))) & "、此刻在眼下 " & Mm (Depth3) & ")一条命令下 " & Mm (Dn) & " 到尖离面约两小步 ⇒ 实到 " & Mm (Went)
+                                       & (if Direct then ",直接小步压" else ",这一下就被顶住了(比估的长)⇒ 抬一大步,按头一回的走法"));
                               if not Direct then
                                  Geo_Move (L, C, F, A, [Ln * Protocol_Up (0), Ln * Protocol_Up (1), Ln * Protocol_Up (2)], Mok);
                               end if;
@@ -11743,7 +11782,7 @@ package body Act is
                      Geo_Say ("  小步压 ⇒ " & To_String (Ev));
                   end;
                   if Index (Ev, "contact") /= 1 then
-                     Geo_Say ("  压到按量过的那一瓣算的桌面以下一大步还没碰到(这根手指更短)⇒ 接着按大步压");
+                     Geo_Say ("  压到按估的尖算的桌面以下一大步还没碰到(比估的短)⇒ 接着按大步压");
                      Big_Press;
                   end if;
                else
@@ -11751,7 +11790,7 @@ package body Act is
                end if;
                if Index (Ev, "reach") = 1 then
                   Limit := True;
-                  Geo_Say ("  压到这儿再往下在量到的关节限位里解不出来(停下不是碰到)⇒ 这一处不算");
+                  Geo_Say ("  压到这儿再往下在量到的关节限位里解不出来(停下不是碰到)⇒ 这一下不算");
                end if;
                if Index (Ev, "contact") = 1 then
                   --  碰到了:不再往下顶 —— 命令改成停在此刻读数的位姿、等这具身体量过的稳定拍数,手指从压进去的地方退回到刚贴着;
@@ -11767,23 +11806,27 @@ package body Act is
                         exit when Table.Norm (Del, 3) < Geo_Base (C, A);
                      end;
                   end loop;
-                  --  碰到的是桌面还是胳膊到头 / 被旁边的东西挡住,由两处(三处)对不对得上管(一件事一种办法;原来这里还沿面滑一下,⑧ 的 (c))
+                  --  顶住那一刻手上最低的那一点在面上 ⇒ 一条方程;碰到的是不是这一瓣的尖、是不是桌面,由几下对不对得上管(Fit_Presses)
                   declare
                      Pc : constant Plug.Arm_Pose := F.EE (A);
                      Vs : Geom.Board_View_Vectors.Vector;
+                     Row : Geom.Plane_Tip_Vectors.Vector;
+                     Jr : constant Floats := Selfmap.Jaw_All (F, A);
+                     Jd : Long_Float := 0.0;   --  爪子读数离张开那头最多差多少(只记账)
                   begin
-                     for J in 0 .. Nl - 1 loop
-                        Vs.Append (Geom.Board_View'(Pose => Pc, U => Tu (J), V => Tv (J)));
-                     end loop;
-                     Row := Geom.Tips_On_Plane (C.Geo (Hc), Vs, C.Board_Pt, C.Board_N, C.Board_Rms);
-                     if not Row (K).Ok then
-                        Geo_Say ("  这一瓣的视线交不到面上 ⇒ 这一下不算");
-                     else
-                        Got := True;
-                        for J in 0 .. Nl - 1 loop
-                           Geo_Say ("  第 " & Codec.Img (J + 1) & " 瓣的视线交面:" & (if Row (J).Ok then "离眼 " & Mm (Row (J).S) & " ± " & Mm (Row (J).Sd) else "交不到"));
-                        end loop;
+                     Eqs.Append (Geom.Press_Of (C.Geo (Hc), Pc, C.Board_Pt, Nb));
+                     Eq_Lobe.Append (K);
+                     Vs.Append (Geom.Board_View'(Pose => Pc, U => Tu (K), V => Tv (K)));
+                     Row := Geom.Tips_On_Plane (C.Geo (Hc), Vs, C.Board_Pt, Nb, C.Board_Rms);
+                     if Row (0).Ok then
+                        S_Ray := Row (0).S;
                      end if;
+                     for I in 0 .. Natural'Min (Natural (Jr.Length), Natural (Jaw_Open.Length)) - 1 loop
+                        Jd := Long_Float'Max (Jd, abs (Jr (I) - Jaw_Open (I)));
+                     end loop;
+                     Got := True;
+                     Geo_Say ("  碰到:眼离面 " & Mm (-Eqs.Last_Element.B) & "、这一瓣的视线交面离眼 " & (if Row (0).Ok then Mm (S_Ray) else "交不到")
+                              & " · 爪子读数离张开那头 " & Codec.Fmt (Jd, 4));
                   end;
                end if;
                --  压完抬两压(次数)就走,不回压之前的高处:下一处从这个高度横挪过去(⑧ 的 (a));最高到过哪儿照样记着,最后回原处上方
@@ -11794,6 +11837,44 @@ package body Act is
                end;
             end;
          end Press_At;
+         --  压一下;压到一半在量到的关节限位里解不出来(不是没挑到空地)⇒ 沿面挪开 4 倍一压换两边各试一处(同原来第一处的挪法)
+         Far0 : constant Long_Float := 4.0 * Small;   --  4 倍一压(倍数,无量纲)
+         function Along (Dd : Long_Float) return Geom.V3 is
+            Nb : constant Geom.V3 := C.Board_N;
+            Ax : constant Geom.V3 := (if abs (Nb (0)) < abs (Nb (1)) then [1.0, 0.0, 0.0] else [0.0, 1.0, 0.0]);
+            T0 : constant Geom.V3 := [Nb (1) * Ax (2) - Nb (2) * Ax (1), Nb (2) * Ax (0) - Nb (0) * Ax (2), Nb (0) * Ax (1) - Nb (1) * Ax (0)];
+            Tn : constant Long_Float := Geom.Norm (T0);
+         begin
+            return (if Tn > 0.0 then [Dd * T0 (0) / Tn, Dd * T0 (1) / Tn, Dd * T0 (2) / Tn] else [0.0, 0.0, 0.0]);
+         end Along;
+         procedure Press_Try (K : Natural; Tilt, Azim : Long_Float; Got : out Boolean; S_Ray : out Long_Float) is
+         begin
+            Press_At (K, Tilt, Azim, [0.0, 0.0, 0.0], Got, S_Ray);
+            for Try in 1 .. 2 loop   --  两边(次数)
+               exit when Got or else not Limit;
+               Geo_Say ("  压到一半在量到的关节限位里解不出来 ⇒ 挪开 " & Mm (Far0) & " 换一处再碰");
+               Press_At (K, Tilt, Azim, Along ((if Try = 1 then Far0 else -2.0 * Far0)), Got, S_Ray);   --  第二次挪到另一边(从第一次那儿挪两倍,纯几何)
+            end loop;
+         end Press_Try;
+         --  第 K 瓣按压过的几下解(对准它的几下进解,别的瓣的几下只当"它不许在面之下"核)
+         function Fit_Of (K : Natural) return Geom.Press_Fit is
+            E : Geom.Press_Eq_Vectors.Vector;
+         begin
+            for I in 0 .. Natural (Eqs.Length) - 1 loop
+               E.Append (Geom.Press_Eq'(A => Eqs (I).A, B => Eqs (I).B, Aimed => Eq_Lobe (I) = K));
+            end loop;
+            return Geom.Fit_Presses (E, Gate);
+         end Fit_Of;
+         function Aimed_At (K : Natural) return Natural is
+            N : Natural := 0;
+         begin
+            for Q of Eq_Lobe loop
+               if Q = K then
+                  N := N + 1;
+               end if;
+            end loop;
+            return N;
+         end Aimed_At;
       begin
          for K in 0 .. Z.N_Lobes - 1 loop
             declare
@@ -11822,9 +11903,13 @@ package body Act is
             Geo_Say (Who & ":它自己眼里没量到手指的尖 ⇒ 指尖量不了(东西躺的面用标定板的)");
             return;
          end if;
+         for K in 0 .. Nl - 1 loop
+            Est.Append (Geom.V3'[S_Known * D (K) (0), S_Known * D (K) (1), S_Known * D (K) (2)]);
+            Has_Est.Append (S_Known > 0.0);
+         end loop;
          declare
-            Rows : Row_Array (0 .. Nl - 1);
-            Done : Bools;
+            Tips : Geom.V3_Vectors.Vector;
+            Fits : array (0 .. Nl - 1) of Geom.Press_Fit;
             Failed : Boolean := False;
          begin
             --  没核过的指尖不拿来补转手时的平移:支点一直是眼本身(转的时候每个指尖都在离眼 S 的球面上,不会比眼低 S 以上)
@@ -11835,129 +11920,102 @@ package body Act is
                C.Geo.Replace_Element (Hc, G);
             end;
             for K in 0 .. Nl - 1 loop
-               Done.Append (False);
-            end loop;
-            for K in 0 .. Nl - 1 loop
                exit when Failed;
-               Geo_Say (Who & "第 " & Codec.Img (K + 1) & " 瓣:让它指尖的视线朝下,落到板上一块空的面、压到被顶住 ⇒ 视线交面 = 它的指尖");
-               --  转到朝下在压的那一下里(和挪到空的面同一条命令);转不到、挪不到都由"挪完核这一瓣的视线落在哪"拦下
-               --  两处碰(2026-09-26):胳膊够不着时"到头了"也会被当成碰到(G2G 人形一只手在桌面上方 7.8 cm 停住),那样视线交面交出来的指尖长出几厘米;
-               --  真碰到桌面时两处量出的指尖一样长,胳膊到头、或胳膊被旁边的东西挡住时停的高度随位置变 ⇒ 第二处挪开再碰,两处差超过
-               --  "两边不确定度的 3 倍 + 这只手一推走得出来的最小一档"(量的)⇒ 碰第三处(另一边),和哪一处对得上就收那两处,都对不上 ⇒ 不收。
-               --  挪开多远 = 第一处碰出来的这一瓣离眼的距离上,各瓣指尖张开的跨度(两根手指一样长时这只手在面上占的宽,纯几何;至少 4 倍一压):
-               --  V1B23 2026-09-27 两处只隔 11 mm,旁边一把美工刀和胳膊把两处都带偏了同样多(这一瓣短了 13 mm),两处照样对得上
                declare
-                  Rw1, Rw2, Rw3 : Geom.Plane_Tip_Vectors.Vector;
-                  Sp1, Sp2, Sp3 : Geom.V3;
-                  G1, G2, G3 : Boolean := False;
-                  N : constant Geom.V3 := C.Board_N;
-                  Ax : constant Geom.V3 := (if abs (N (0)) < abs (N (1)) then [1.0, 0.0, 0.0] else [0.0, 1.0, 0.0]);
-                  T0 : constant Geom.V3 := [N (1) * Ax (2) - N (2) * Ax (1), N (2) * Ax (0) - N (0) * Ax (2), N (0) * Ax (1) - N (1) * Ax (0)];
-                  Tn : constant Long_Float := Geom.Norm (T0);
-                  Far0 : constant Long_Float := 4.0 * 4.0 * Geo_Base (C, A);   --  4 倍一压(一压 = 4 倍探针幅度,同 Geo_Go)
-                  --  两处对不对得上的门 = 一小步(4 倍最小一档,同 Geo_Go 默认的一压):小步压到被顶住,碰到的地方就定在一小步以内。
-                  --  不再加"两边视线交面的不确定度"—— 那是桌面点的离散(约 2 mm / 次),两处共用同一张面、同一只手,比两处时抵掉了;
-                  --  加上它门成了 9 mm,V1B31 胳膊到限位停早了的两处差 5.5 mm 也收了(真碰到桌面的两处差 0.05–0.4 mm)
-                  function Gate_Of (Ra, Rb : Geom.Plane_Tip_Vectors.Vector) return Long_Float is
-                    (4.0 * Geo_Base (C, A));
-                  function Along (D : Long_Float) return Geom.V3 is
-                    (if Tn > 0.0 then [D * T0 (0) / Tn, D * T0 (1) / Tn, D * T0 (2) / Tn] else [0.0, 0.0, 0.0]);
-                  procedure Take (Ra, Rb : Geom.Plane_Tip_Vectors.Vector) is
-                  begin
-                     Rows (K) := Ra;
-                     Rows (K) (K).S := 0.5 * (Ra (K).S + Rb (K).S);
-                     Done.Replace_Element (K, True);
-                     if S_Known <= 0.0 then
-                        S_Known := Rows (K) (K).S;
-                     end if;
-                  end Take;
+                  --  斜多少:这一瓣视线和最近的另一瓣视线夹角的三分之一;只有一瓣 ⇒ 这只手一条命令转得到的那一档(开机量的)
+                  Theta : constant Long_Float := Geom.Tilt_Angle (D, K, C.Geo (Hc).Stride_Rot);
+                  Got : Boolean;
+                  S1 : Long_Float;
                begin
-                  Press_At (K, [0.0, 0.0, 0.0], Rw1, Sp1, G1);
-                  --  第一处是压到一半反解到了限位没碰成(不是没挑到空地):按挪开的距离换两边各试一处(同第二、三处的挪法)
-                  for Try in 1 .. 2 loop   --  两边(次数)
-                     exit when G1 or else not Limit;
-                     Geo_Say ("  第一处压到一半在量到的关节限位里解不出来 ⇒ 挪开 " & Mm (Far0) & " 换一处再碰");
-                     Press_At (K, Along ((if Try = 1 then Far0 else -2.0 * Far0)), Rw1, Sp1, G1);   --  第二次挪到另一边(从第一次那儿挪两倍,纯几何)
-                  end loop;
-                  if not G1 then
+                  if Theta <= 0.0 then
+                     Geo_Say (Who & "第 " & Codec.Img (K + 1) & " 瓣:只有这一瓣、一条命令转得到的那一档也没量 ⇒ 斜不了,这一瓣量不成");
                      Failed := True;
                   else
-                     declare
-                        S1 : constant Long_Float := Rw1 (K).S;
-                        Span : Long_Float := 0.0;
-                        Far : Long_Float;
-                     begin
-                        for J in 0 .. Nl - 1 loop
-                           Span := Long_Float'Max (Span, S1 * Geom.Norm ([D (K) (0) - D (J) (0), D (K) (1) - D (J) (1), D (K) (2) - D (J) (2)]));
-                        end loop;
-                        Far := Long_Float'Max (Far0, Span);
-                        Press_At (K, Along (Far), Rw2, Sp2, G2, Away => Sp1, Away_R => 0.5 * Far);   --  离第一处至少半个挪开的距离(一半,纯数学)
-                        if G2 then
-                           Geo_Say ("  两处碰出来这一瓣离眼 " & Mm (S1) & " / " & Mm (Rw2 (K).S) & "(两处相距 "
-                                    & Mm (Geom.Norm ([Sp1 (0) - Sp2 (0), Sp1 (1) - Sp2 (1), Sp1 (2) - Sp2 (2)])) & ",门 " & Mm (Gate_Of (Rw1, Rw2)) & ")");
+                     Geo_Say (Who & "第 " & Codec.Img (K + 1) & " 瓣:让它指尖的视线朝下压 1 下、再朝五个方位(各差 72°)各斜 " & Codec.Fmt (Theta / Deg, 1)
+                              & "° 压 1 下(" & (if Nl >= 2 then "它和最近的另一瓣视线夹角 " & Codec.Fmt (3.0 * Theta / Deg, 1) & "° 的三分之一" else "一条命令转得到的那一档")
+                              & ")⇒ 每一下手上最低那一点落在面上,几下一起解它在手系里在哪");
+                     Press_Try (K, 0.0, 0.0, Got, S1);
+                     if Got and then S1 > 0.0 then
+                        --  尖大概在哪:朝下那一下它的视线交面那一点(后面几下的起点和快下的高度按它;解出来以后换成解的)
+                        Est.Replace_Element (K, Geom.V3'[S1 * D (K) (0), S1 * D (K) (1), S1 * D (K) (2)]);
+                        Has_Est.Replace_Element (K, True);
+                        if S_Known <= 0.0 then
+                           S_Known := S1;
                         end if;
-                        if G2 and then abs (S1 - Rw2 (K).S) <= Gate_Of (Rw1, Rw2) then
-                           Take (Rw1, Rw2);
-                        else
-                           Geo_Say ("  " & (if G2 then "两处对不上(差 " & Mm (abs (S1 - Rw2 (K).S)) & ")" else "第二处没碰成")
-                                    & " ⇒ 在另一边再碰一处,和哪一处对得上就收那两处");
-                           Press_At (K, Along (-Far), Rw3, Sp3, G3, Away => Sp1, Away_R => 0.5 * Far);
-                           if G3 and then abs (Rw3 (K).S - S1) <= Gate_Of (Rw1, Rw3) then
-                              Geo_Say ("  第三处离眼 " & Mm (Rw3 (K).S) & ",和第一处对得上 ⇒ 收这两处;第二处多半被别的东西挡了");
-                              Take (Rw1, Rw3);
-                           elsif G3 and then G2 and then abs (Rw3 (K).S - Rw2 (K).S) <= Gate_Of (Rw2, Rw3) then
-                              Geo_Say ("  第三处离眼 " & Mm (Rw3 (K).S) & ",和第二处对得上 ⇒ 收这两处;第一处多半被别的东西挡了");
-                              Take (Rw2, Rw3);
-                           else
-                              Geo_Say ("  三处对不上" & (if G3 then "(第三处离眼 " & Mm (Rw3 (K).S) & ")" else "(第三处没碰成)")
-                                       & " ⇒ 至少两处不是真碰到桌面(胳膊到头了、或被旁边的东西挡了);指尖这回量不成");
-                              Failed := True;
-                           end if;
-                        end if;
-                     end;
+                     end if;
+                     for I in 0 .. N_Tilt - 1 loop
+                        Press_Try (K, Theta, Long_Float (I) * Az_Step, Got, S1);
+                     end loop;
+                     Fits (K) := Fit_Of (K);
+                     for E in 0 .. N_Extra - 1 loop
+                        exit when Fits (K).Ok;
+                        Geo_Say ("  第 " & Codec.Img (K + 1) & " 瓣压了 " & Codec.Img (Aimed_At (K)) & " 下:"
+                                 & (if Fits (K).Ambiguous then "有两组一样多、互相对不上(认不出哪一下是坏的)" else "找不到 4 下以上互相对得上的(3 个未知数 + 1 条自己核)")
+                                 & " ⇒ 补压一下(方位 " & Codec.Fmt ((0.5 + Long_Float (E)) * Az_Step / Deg, 0) & "°)");
+                        Press_Try (K, Theta, (0.5 + Long_Float (E)) * Az_Step, Got, S1);   --  两个方位中间(一半,纯数学)
+                        Fits (K) := Fit_Of (K);
+                     end loop;
+                     if not Fits (K).Ok then
+                        Geo_Say (Who & "第 " & Codec.Img (K + 1) & " 瓣:压了 " & Codec.Img (Aimed_At (K)) & " 下,"
+                                 & (if Fits (K).Ambiguous then "认不出哪几下是坏的" else "找不到 4 下以上互相对得上的") & " ⇒ 这一瓣量不成");
+                        Failed := True;
+                     else
+                        declare
+                           X : constant Geom.V3 := Fits (K).X;
+                           Along_Ray : constant Long_Float := Dot (X, D (K));
+                           Off_Ray : constant Long_Float := Geom.Norm ([X (0) - Along_Ray * D (K) (0), X (1) - Along_Ray * D (K) (1), X (2) - Along_Ray * D (K) (2)]);
+                        begin
+                           Est.Replace_Element (K, X);
+                           Has_Est.Replace_Element (K, True);
+                           Geo_Say (Who & "第 " & Codec.Img (K + 1) & " 瓣:压了 " & Codec.Img (Aimed_At (K)) & " 下、" & Codec.Img (Natural (Fits (K).Used.Length))
+                                    & " 下互相对得上(别的几下预测每一下最多差 " & Mm (Fits (K).Worst) & ",门 " & Mm (Gate) & ")⇒ 尖离眼 " & Mm (Geom.Norm (X))
+                                    & ",离它指尖那条视线 " & Mm (Off_Ray) & " · 不确定度 (" & Mm (Fits (K).Sd (0)) & "," & Mm (Fits (K).Sd (1)) & "," & Mm (Fits (K).Sd (2)) & ")");
+                        end;
+                     end if;
                   end if;
                end;
             end loop;
+            --  每一瓣再按这只手压过的全部几下核一遍:别的瓣压的那几下它也不许在面之下(Fit_Presses 的组外核);对不上 ⇒ 如实说、不收
+            if not Failed then
+               for K in 0 .. Nl - 1 loop
+                  Fits (K) := Fit_Of (K);
+                  if not Fits (K).Ok then
+                     Geo_Say (Who & "第 " & Codec.Img (K + 1) & " 瓣:按全部 " & Codec.Img (Natural (Eqs.Length)) & " 下再核 ⇒ 别的瓣压的时候它落到了面之下(或认不出坏的那一下)⇒ 指尖这回量不成");
+                     Failed := True;
+                  elsif Geom.Ray_Owner (Fits (K).X, D) /= K then
+                     --  解出来的点离别的瓣的视线比离它自己的还近 ⇒ 几下碰着的是那一瓣(它长得多,斜着压时一直是它先碰到)
+                     Geo_Say (Who & "第 " & Codec.Img (K + 1) & " 瓣:解出来的尖离" & (if Geom.Ray_Owner (Fits (K).X, D) < Nl then "第 " & Codec.Img (Geom.Ray_Owner (Fits (K).X, D) + 1) & " 瓣" else "哪一瓣")
+                              & "的视线比离它自己的还近 ⇒ 碰着的不是这一瓣;指尖这回量不成");
+                     Failed := True;
+                  else
+                     Tips.Append (Fits (K).X);
+                  end if;
+               end loop;
+            end if;
             if Failed then
                C.Geo.Replace_Element (Hc, G0);
                Geo_Say (Who & ":指尖这回没量成 ⇒ " & (if G0.Tip_Valid then "身体文件里那份照旧(没核过)" else "没有指尖"));
             else
                declare
                   G : Geom.Cam_Geo := C.Geo (Hc);
-                  Sk : Floats;
                   Tip : Geom.V3 := [0.0, 0.0, 0.0];
                begin
                   for K in 0 .. Nl - 1 loop
-                     Sk.Append (Rows (K) (K).S);
-                  end loop;
-                  --  别的几下里交出来的更近 ⇒ 它自己朝下那一下碰着的不是它(是别的瓣或手掌):取近的,说出来。门 = 3 倍两边不确定度合起来(倍数无量纲)
-                  for T in 0 .. Nl - 1 loop
-                     for K in 0 .. Nl - 1 loop
-                        if T /= K and then Rows (T) (K).Ok
-                          and then Rows (T) (K).S < Sk (K) - 3.0 * Sqrt (Rows (T) (K).Sd ** 2 + Rows (K) (K).Sd ** 2)
-                        then
-                           Geo_Say (Who & "第 " & Codec.Img (K + 1) & " 瓣:第 " & Codec.Img (T + 1) & " 下里它交出来离眼 " & Mm (Rows (T) (K).S) & ",比它自己朝下那一下("
-                                    & Mm (Sk (K)) & ")还近 ⇒ 它自己那一下碰着的不是它;按近的算");
-                           Sk.Replace_Element (K, Rows (T) (K).S);
-                        end if;
-                     end loop;
-                  end loop;
-                  for K in 0 .. Nl - 1 loop
                      for I in 0 .. 2 loop
-                        Tip (I) := Tip (I) + Sk (K) * D (K) (I) / Long_Float (Nl);
+                        Tip (I) := Tip (I) + Tips (K) (I) / Long_Float (Nl);
                      end loop;
                   end loop;
                   G.Tip := Tip; G.Tip_Valid := True; G.Tip_Touch := True;
                   if Nl = 2 then
-                     G.Gap := Geom.Norm ([Sk (0) * D (0) (0) - Sk (1) * D (1) (0), Sk (0) * D (0) (1) - Sk (1) * D (1) (1), Sk (0) * D (0) (2) - Sk (1) * D (1) (2)]);
+                     G.Gap := Geom.Norm ([Tips (0) (0) - Tips (1) (0), Tips (0) (1) - Tips (1) (1), Tips (0) (2) - Tips (1) (2)]);
                   end if;
                   C.Geo.Replace_Element (Hc, G);
                   Geom.Save (To_String (C.Geo_Path), C.Geo);
                   declare
-                     Say : Unbounded_String := To_Unbounded_String (Who & ":指尖碰桌面量好 —— 每瓣离眼");
+                     Say : Unbounded_String := To_Unbounded_String (Who & ":指尖碰桌面量好(换倾角碰,一共压了 " & Codec.Img (Natural (Eqs.Length)) & " 下)—— 每瓣离眼");
                   begin
                      for K in 0 .. Nl - 1 loop
-                        Append (Say, " " & Mm (Sk (K)) & " ± " & Mm (Rows (K) (K).Sd));
+                        Append (Say, " " & Mm (Geom.Norm (Tips (K))));
                      end loop;
                      Append (Say, " · 指尖中点离眼 " & Mm (Geom.Norm (Tip)) & (if Nl = 2 then " · 两指尖相距 " & Mm (G.Gap) else ""));
                      if G0.Tip_Valid then
@@ -11965,7 +12023,12 @@ package body Act is
                      end if;
                      Geo_Say (To_String (Say));
                   end;
-                  Head_Tip_Check (C, A, Hc, D, Sk);
+                  --  每一瓣的尖(眼系,世界单位)落一行:打分脚本按它逐瓣和网格比
+                  for K in 0 .. Nl - 1 loop
+                     Geo_Say (Who & "第 " & Codec.Img (K + 1) & " 瓣的尖在眼系 (" & Codec.Fmt (Tips (K) (0), 5) & ", " & Codec.Fmt (Tips (K) (1), 5) & ", "
+                              & Codec.Fmt (Tips (K) (2), 5) & ")");
+                  end loop;
+                  Head_Tip_Check (C, A, Hc, Tips);
                end;
             end if;
          end;

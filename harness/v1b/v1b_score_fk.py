@@ -311,6 +311,16 @@ try:
             print("指尖 · 第 %d 只手:碰出来的两瓣中点(手腕系)(%.1f, %.1f, %.1f) mm · 模型文件 最远顶点 (%.1f, %.1f, %.1f) 差 %.1f mm / 端面中心 (%.1f, %.1f, %.1f) 差 %.1f mm · 离眼 %.1f mm · 张口 %.1f mm(真 %.1f)(%s)" %
                   (a, *(1000 * tee), *(1000 * truth_mid), 1000 * np.linalg.norm(tee - truth_mid), *(1000 * face_mid), 1000 * np.linalg.norm(tee - face_mid),
                    1000 * np.linalg.norm(tc), 1000 * g["gap"] * s_, 1000 * truth_gap, "碰桌面量的" if g.get("tip_touch") else "不是碰桌面量的"))
+            #  逐瓣(09-28 换倾角碰起驱动每一瓣的尖落一行"第A 只手第 K 瓣的尖在眼系 (x, y, z)",眼系、模型单位;同一只手取最后一次)⇒ 各自配离它最近的那根手指
+            lobes = {}
+            for m in re.finditer(r"第(\d+) 只手第 (\d+) 瓣的尖在眼系 \(([-0-9.]+), ([-0-9.]+), ([-0-9.]+)\)", logtxt):
+                if int(m.group(1)) - 1 == a:
+                    lobes[int(m.group(2))] = np.array([float(m.group(3)), float(m.group(4)), float(m.group(5))])
+            for k in sorted(lobes):
+                tk = RxA @ (lobes[k] * s_) + txA
+                j = int(np.argmin([np.linalg.norm(tk - t) for t in tips]))
+                print("   第 %d 瓣(配第 %d 根手指):尖(手腕系)(%.1f, %.1f, %.1f) mm · 最远顶点 (%.1f, %.1f, %.1f) 差 %.1f mm / 端面中心 差 %.1f mm" %
+                      (k, j, *(1000 * tk), *(1000 * tips[j]), 1000 * np.linalg.norm(tk - tips[j]), 1000 * np.linalg.norm(tk - faces[j])))
 except Exception as e:
     print("指尖:打不了分(%s)" % e)
 
