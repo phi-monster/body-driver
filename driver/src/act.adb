@@ -7652,6 +7652,23 @@ package body Act is
                   --  G2D 2026-09-24 人形那次是旧的判停到了拍数上限就回来,手还在往下挪(命令 2.6 cm、返回时只走 1.2–1.4 cm)被记成了顶住;
                   --  那时补的"再等画面静止最多 30 拍"去掉(V1B21 2026-09-27:它和旧判停一起让压一下要 12–24 拍)
                   C.Press_From := Cur;
+                  --  这一压的目标在量到的关节限位里解得出来吗(有运动学才问):位置还差超过这一压的一半(同下面判"被顶住"的一半)、或朝向差超过转动一步看得见的那一档
+                  --  ⇒ 手停下来不是被顶住,是反解到了量到的限位(V1B36 2026-09-27:第一瓣两处都是往下走到关节限位、反解跟不上,手横着跑、甚至往上,停在同一个高度,
+                  --  两处对得上、那一瓣长了 16 mm;V1B31 同一类)。不压,如实报
+                  declare
+                     Av : Table.Vec := Table.Zero_Vec;
+                     Pe, Re : Long_Float;
+                     Rok : Boolean;
+                     Tol_R : constant Long_Float := (if Arm * Chan.Per_Arm + 3 < Natural (C.Map.Amp.Length) then C.Map.Amp (Arm * Chan.Per_Arm + 3) else 0.0);
+                  begin
+                     Av (0) := Dw (0); Av (1) := Dw (1); Av (2) := Dw (2);
+                     Plug.Reach (Arm, Chan.Compose (Cur, Av), Pe, Re, Rok);
+                     if Rok and then (Pe + Pe > Ln or else (Tol_R > 0.0 and then Re > Tol_R)) then
+                        Event := S ("reach: the next press of " & Mm (Ln) & " is outside my measured joint limits in this pose (my kinematics gets within " & Mm (Pe)
+                                    & " of it) - a stop here would not be a touch");
+                        exit;
+                     end if;
+                  end;
                   Geo_Move (L, C, F, Arm, Dw, Mok);
                   Steps_Taken := Steps_Taken + 1;
                   Presses := Presses + 1;
@@ -11456,6 +11473,7 @@ package body Act is
          --  压到被顶住以后不再往下顶、让手歇下来再读位姿(V1B21 仿真真值:顶着的时候手指压进桌面 6.6 mm,命令一换成停在此刻两拍后回到 2.5 mm)。
          --  Got = 真顶住了、沿面滑得动、压的这一瓣的视线交得到面;Row = 这一下每一瓣视线交面的结果;Spot = 压的那一瓣落的那一点
          --  Away_R > 0:落点离 Away 不到 Away_R 的空的面不要(两处碰的第二处要真是另一处;V1B22 第二处按平移挪完又挑回了第一处,两处相距 0)
+         Limit : Boolean := False;   --  上一次 Press_At:压到一半这一压在量到的关节限位里解不出来(停下不是碰到)
          procedure Press_At (K : Natural; Shift : Geom.V3; Row : out Geom.Plane_Tip_Vectors.Vector; Spot : out Geom.V3; Got : out Boolean;
                              Away : Geom.V3 := [0.0, 0.0, 0.0]; Away_R : Long_Float := 0.0) is
             P : constant Plug.Arm_Pose := F.EE (A);
@@ -11481,7 +11499,7 @@ package body Act is
             All_Hit : Boolean := True;
             R : constant Long_Float := Nw (K) * Long_Float'Max (0.0, H) / Gk.F;   --  指尖那一小截的宽(像素)落到面那么远的上限(指尖在眼和面之间)
          begin
-            Got := False; Spot := [0.0, 0.0, 0.0];
+            Got := False; Spot := [0.0, 0.0, 0.0]; Limit := False;
             Row := Geom.Plane_Tip_Vectors.Empty_Vector;
             for J in 0 .. Nl - 1 loop
                declare
@@ -11674,6 +11692,10 @@ package body Act is
                else
                   Big_Press;
                end if;
+               if Index (Ev, "reach") = 1 then
+                  Limit := True;
+                  Geo_Say ("  压到这儿再往下在量到的关节限位里解不出来(停下不是碰到)⇒ 这一处不算");
+               end if;
                if Index (Ev, "contact") = 1 then
                   --  碰到了:不再往下顶 —— 命令改成停在此刻读数的位姿、等这具身体量过的稳定拍数,手指从压进去的地方退回到刚贴着;
                   --  歇一下挪不到一步看得见的那一档就算歇好了,最多 3 下(次数)
@@ -11794,6 +11816,12 @@ package body Act is
                   end Take;
                begin
                   Press_At (K, [0.0, 0.0, 0.0], Rw1, Sp1, G1);
+                  --  第一处是压到一半反解到了限位没碰成(不是没挑到空地):按挪开的距离换两边各试一处(同第二、三处的挪法)
+                  for Try in 1 .. 2 loop   --  两边(次数)
+                     exit when G1 or else not Limit;
+                     Geo_Say ("  第一处压到一半在量到的关节限位里解不出来 ⇒ 挪开 " & Mm (Far0) & " 换一处再碰");
+                     Press_At (K, Along ((if Try = 1 then Far0 else -2.0 * Far0)), Rw1, Sp1, G1);   --  第二次挪到另一边(从第一次那儿挪两倍,纯几何)
+                  end loop;
                   if not G1 then
                      Failed := True;
                   else
