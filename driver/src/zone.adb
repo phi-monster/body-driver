@@ -772,13 +772,15 @@ package body Zone is
                      end if;
                   end;
                end loop;
-               --  比没跟着变的比例(瓣里 / 合到的区里各自占多少):手指那块跟着眼走、几乎全不变,背景有纹理就变;差不到两倍(倍数,无量纲)⇒ 看不出
+               --  比跟着变了的比例(瓣里 / 合到的区里各自占多少):手指那块跟着眼走、几乎不变,背景在动;差不到两倍(倍数,无量纲)⇒ 看不出。
+               --  比"变了的"不比"没变的":木纹对比低、后半段灰度地板高,背景也有一半像素算不上变,没变的比例都挤在 1 附近
+               --  (V1B29 2026-09-27:没变的 95% 对 54%,变了的 5% 对 46%)
                declare
-                  Fl : constant Long_Float := Long_Float (Stat_L) / Long_Float (Natural'Max (1, N_L));
-                  Fa : constant Long_Float := Long_Float (Stat_A) / Long_Float (Natural'Max (1, N_A));
+                  Ml : constant Long_Float := 1.0 - Long_Float (Stat_L) / Long_Float (Natural'Max (1, N_L));
+                  Ma : constant Long_Float := 1.0 - Long_Float (Stat_A) / Long_Float (Natural'Max (1, N_A));
                begin
-                  Known := N_L > 0 and then N_A > 0 and then (Fl > 2.0 * Fa or else Fa > 2.0 * Fl);
-                  Hi_Open := Fl > Fa;
+                  Known := N_L > 0 and then N_A > 0 and then (Ma > 2.0 * Ml or else Ml > 2.0 * Ma);
+                  Hi_Open := Ma > Ml;
                   Put_Line ("[身]   手绕眼转 " & Codec.Fmt (Step, 3) & " 弧度再转回来:它自己那只眼里没跟着变的手指像素 在瓣里 " & Codec.Img (Stat_L) & " / " & Codec.Img (N_L)
                             & "、在合到的区里 " & Codec.Img (Stat_A) & " / " & Codec.Img (N_A)
                             & (if Known then " ⇒ 读数 " & Codec.Fmt ((if Hi_Open then Hi_R else Lo_R), 3) & " 那头张开" else " ⇒ 看不出哪头张开(差不到两倍)"));
