@@ -289,6 +289,9 @@ package Act is
       Fixed_Best : Geom.Fixed_Best;             --  不动的眼这一次放好以来,核对时对得上的最多点数:整幅的和每一块的(挡没挡按它比;挪过就重记)
       Board_Pt, Board_N : Geom.V3 := [others => 0.0];
       Board_Rms : Long_Float := 0.0;            --  板上躺在面上的那些点离面的离散(米)
+      --  板上每个点上一回在不动的眼里重找(Board_Recheck)找没找到:和 Board 一一对应;空 = 开机量完还没重找过(按量的那一刻)。
+      --  找不到的(被挪来的东西盖住、被手挡着)挑空地时不算量过的桌面(2026-09-28 V1B47)
+      Board_Seen : Bools;
       Fixed_Turn_Sd : Long_Float := 0.0;        --  仪器把参考图配到"它自己转了 90°"那张时的配点噪声(像素,均方根;核对时判新位姿用,0 = 没量)
       Fixed_Said : Boolean := False;            --  这一次开机第一次核对的结果说过了(以后只在挪了、挡了、又看全了时说)
       Fixed_Covered : Boolean := False;         --  上一次核对判成挡住了
@@ -405,6 +408,8 @@ package Act is
    --  原图(宽 W、高 H)顺时针转了 Turns 个 90° 之后那张图里的 (U, V) 换算回原图的像素。核对时画面可能被转了,转回去配完再换算回来;导出只为自检
    procedure Unturn (U, V : Long_Float; Turns, W, H : Natural; U0, V0 : out Long_Float);
    procedure Board_Free_Spots (C : Context; Lp : Geom.V3_Vectors.Vector; Tb : Floats; R : Long_Float; Deltas : out Geom.V3_Vectors.Vector);
+   --  板上的点在不动的眼此刻的画面里重找一遍(往返配,同核对不动的眼)⇒ C.Board_Seen;没有不动的眼 / 没配仪器 / 没配成 ⇒ Board_Seen 不动,Said 说为什么
+   procedure Board_Recheck (F : Plug.Frame; C : in out Context; Found : out Natural; Said : out Unbounded_String);
    --  读数 R 离"空手合"那头往张开那头走了多远(方向按开机量的两头,不假设读数变小 = 合)。导出只为自检
    function Past_Empty (H : Zone.Hand; R : Long_Float) return Long_Float;
 

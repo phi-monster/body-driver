@@ -2379,6 +2379,74 @@ begin
              & "连线 1 cm 内没有东西 · 拿掉东西 ⇒ 不挪 · 板上全是东西 ⇒ 一个都没有 · 另一瓣连线 4 cm 处 5 mm 高的小东西不挡(手指在那儿至少高 2 cm)、"
              & "放在压的那一点就要挪(" & (if Ds5.Is_Empty then "-" else Codec.Fmt (Geom.Norm (Ds5 (0)), 3)) & " m)");
    end;
+   --  🔴 挑空地只在量过、而且此刻还找得到的桌面上(Act.Board_Free_Spots,09-28 V1B47):板 1.2 cm 一格铺在 0.765 m 的面上,
+   --  y < 0 那一半一个点都没有(没量过:开机时手自己挡着的那块,V1B47 里那儿放着电子琴);手指宽上限 2.5 cm,压的那一瓣落在 (0.3, 0.6) cm
+   --  (有点那半的边上,原来"R 之内有一个躺在面上的板点"就收)⇒ 不收、往里挪:落点圈整个在有点那半里 —— 落点 y ≥ R − 半格,也不挪得太远(≤ R + 两格);
+   --  y < 0 那半也铺满 ⇒ 不挪。板铺满、落点四周 3 cm 的点标成"此刻在不动的眼里找不到" ⇒ 当没量过、挪出去(落点离那片中心 ≥ 3 cm + R − 一格);
+   --  标记和板对不上号(个数不等 = 板重建过)⇒ 不认、按量的那一刻 ⇒ 不挪;落点那儿一个 5 mm 高的小东西标成找不到也照样挡(挪到离它 R 以外)
+   declare
+      use Ada.Numerics.Long_Elementary_Functions;
+      Cell : constant Long_Float := 0.012;   --  格距(米,合成)
+      Rw : constant Long_Float := 0.025;     --  手指宽上限(米,合成)
+      Z0 : constant Long_Float := 0.765;     --  面高(米,合成)
+      function Pt (X, Y, Z : Long_Float) return Geom.Scene_Pt is
+        (Geom.Scene_Pt'(Pw => [X, Y, Z], U => 0.0, V => 0.0, Sh => 0.0, Views => 9,
+                        Cov => [[1.0e-6, 0.0, 0.0], [0.0, 1.0e-6, 0.0], [0.0, 0.0, 1.0e-6]]));
+      procedure Base (C : in out Act.Context) is
+      begin
+         C.Board_Plane := True; C.Board_Pt := [0.0, 0.0, Z0]; C.Board_N := [0.0, 0.0, 1.0]; C.Board_Rms := 0.001;
+      end Base;
+      Lp : Geom.V3_Vectors.Vector;
+      Tb : Bytes.Floats;
+      Half, Full, Hidden, Stale, Bump : Act.Context;
+      Dh, Df, Dd, Ds, Db : Geom.V3_Vectors.Vector;
+      function Land (D : Geom.V3_Vectors.Vector) return Geom.V3 is
+        (if D.Is_Empty then [99.0, 99.0, 99.0] else [Lp (0) (0) + D (0) (0), Lp (0) (1) + D (0) (1), Lp (0) (2) + D (0) (2)]);
+      function Flat (V : Geom.V3) return Long_Float is (Sqrt (V (0) ** 2 + V (1) ** 2));
+   begin
+      Base (Half); Base (Full);
+      for I in -12 .. 12 loop
+         for J in -12 .. 12 loop
+            Full.Board.Append (Pt (Cell * Long_Float (I), Cell * Long_Float (J), Z0));
+            if J >= 0 then
+               Half.Board.Append (Pt (Cell * Long_Float (I), Cell * Long_Float (J), Z0));
+            end if;
+         end loop;
+      end loop;
+      Hidden := Full; Stale := Full; Bump := Full;
+      for P of Full.Board loop
+         Hidden.Board_Seen.Append (Sqrt (P.Pw (0) ** 2 + P.Pw (1) ** 2) > 0.03);
+         Bump.Board_Seen.Append (Sqrt (P.Pw (0) ** 2 + P.Pw (1) ** 2) > 1.0e-9);
+      end loop;
+      Stale.Board_Seen := Hidden.Board_Seen;
+      Stale.Board_Seen.Append (True);   --  多一个 = 和板对不上号
+      Bump.Board.Replace_Element (12 * 25 + 12, Pt (0.0, 0.0, Z0 + 0.005));   --  (0, 0) 那一格(I = J = 0)
+      Lp.Append (Geom.V3'[0.003, 0.006, Z0]);
+      Lp.Append (Geom.V3'[0.09, 0.006, Z0]);
+      Tb.Append (0.0); Tb.Append (1.0);
+      Act.Board_Free_Spots (Half, Lp, Tb, Rw, Dh);
+      Act.Board_Free_Spots (Full, Lp, Tb, Rw, Df);
+      Act.Board_Free_Spots (Hidden, Lp, Tb, Rw, Dd);
+      Act.Board_Free_Spots (Stale, Lp, Tb, Rw, Ds);
+      Act.Board_Free_Spots (Bump, Lp, Tb, Rw, Db);
+      declare
+         Lh : constant Geom.V3 := Land (Dh);
+         Ld : constant Geom.V3 := Land (Dd);
+         Lb : constant Geom.V3 := Land (Db);
+         H_Ok : constant Boolean := not Dh.Is_Empty and then Geom.Norm (Dh (0)) > 0.0 and then Lh (1) >= Rw - 0.5 * Cell and then Geom.Norm (Dh (0)) <= Rw + 2.0 * Cell;
+         F_Ok : constant Boolean := not Df.Is_Empty and then Geom.Norm (Df (0)) = 0.0;
+         D_Ok : constant Boolean := not Dd.Is_Empty and then Flat (Ld) >= 0.03 + Rw - Cell;
+         S_Ok : constant Boolean := not Ds.Is_Empty and then Geom.Norm (Ds (0)) = 0.0;
+         B_Ok : constant Boolean := not Db.Is_Empty and then Flat (Lb) > Rw;
+      begin
+         Check (H_Ok and then F_Ok and then D_Ok and then S_Ok and then B_Ok,
+                "挑空地只在量过、此刻还找得到的桌面上:有点那半的边上 ⇒ 挪到 (" & Codec.Fmt (Lh (0), 3) & "," & Codec.Fmt (Lh (1), 3) & ") m(要 y ≥ "
+                & Codec.Fmt (Rw - 0.5 * Cell, 3) & ")" & (if H_Ok then "" else "(错)") & " · 铺满 ⇒ 不挪" & (if F_Ok then "" else "(错)")
+                & " · 四周 3 cm 找不到 ⇒ 落点离中心 " & Codec.Fmt (Flat (Ld), 3) & " m(要 ≥ " & Codec.Fmt (0.03 + Rw - Cell, 3) & ")" & (if D_Ok then "" else "(错)")
+                & " · 标记对不上号 ⇒ 不认、不挪" & (if S_Ok then "" else "(错)")
+                & " · 5 mm 小东西标成找不到照样挡 ⇒ 落点离它 " & Codec.Fmt (Flat (Lb), 3) & " m" & (if B_Ok then "" else "(错)"));
+      end;
+   end;
    --  🔴 有板的面时,朝下顶住的点只对账、不换面(Act.Note_Support,2026-09-26):X5B 指尖错了的那只手顶住的点比板的面低 20.8 cm,"最低的赢"把它当成了桌面。
    --  低 20 cm ⇒ 面还是板的、不记东西;高 5 cm ⇒ 记成"这儿有东西"、面不变;差 0.5 mm(门 = 3 倍 1 mm ⊕ 0.5 mm)⇒ 对得上
    declare

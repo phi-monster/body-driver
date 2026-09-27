@@ -5955,7 +5955,7 @@ package body Act is
             end loop;
          end;
       end if;
-      C.Board := Board;
+      C.Board := Board; C.Board_Seen.Clear;
       C.Board_Pt := Plane_Pt; C.Board_N := Plane_N; C.Board_Rms := Plane_Rms;
       C.Board_Plane := not Board.Is_Empty;
       --  有板的面 ⇒ 东西躺的面就是它(同 Note_Support:有板时朝下顶住的点只和它对账、不换它),装上就登记;不等第一次朝下被顶住。
@@ -6610,7 +6610,7 @@ package body Act is
       if C.Board_Stops.Is_Empty then
          return;
       end if;
-      C.Board.Clear;
+      C.Board.Clear; C.Board_Seen.Clear;
       C.Board_Tracks.Clear;
       C.Board_Plane := False;
       if Host = "" then
@@ -7035,7 +7035,7 @@ package body Act is
          return R;
       end Nums;
    begin
-      C.Board.Clear;
+      C.Board.Clear; C.Board_Seen.Clear;
       if Base = "" then
          return;
       end if;
@@ -7085,7 +7085,7 @@ package body Act is
          if Ada.Text_IO.Is_Open (Fi) then
             Ada.Text_IO.Close (Fi);
          end if;
-         C.Board.Clear; C.Fixed_Ref.Clear;
+         C.Board.Clear; C.Fixed_Ref.Clear; C.Board_Seen.Clear;
    end Board_Load;
 
    procedure Check_Fixed_Eye (F : Plug.Frame; C : in out Context) is
@@ -7253,6 +7253,67 @@ package body Act is
          end if;
       end;
    end Check_Fixed_Eye;
+
+   --  板上的点在不动的眼此刻的画面里重找一遍(2026-09-28 V1B47):参考图往返配(同核对不动的眼,配过去再配回来 1 px 以内算找到),
+   --  找不到的 = 那儿被挪来的东西盖住了、或者此刻被手挡着 ⇒ 挑空地时不算量过的桌面(Board_Free_Spots)。
+   --  画面按核对定下的转法先转正再配(同核对)。只管"还找不找得到",不按位姿判:相机挪过时点照样找得到,板的世界位置不跟着变
+   procedure Board_Recheck (F : Plug.Frame; C : in out Context; Found : out Natural; Said : out Unbounded_String) is
+      Wc : constant Natural := C.Map.World_Cam;
+   begin
+      Found := 0; Said := Null_Unbounded_String;
+      if C.Board.Is_Empty then
+         Said := To_Unbounded_String ("板上没有点");
+         return;
+      end if;
+      if Length (C.Inst_Host) = 0 then
+         Said := To_Unbounded_String ("没配配点仪器");
+         return;
+      end if;
+      if C.Fixed_Ref.Is_Empty or else Wc >= Natural (C.Geo.Length) or else Wc >= Natural (F.Cams.Length)
+        or else not (C.Geo (Wc).Valid and then C.Geo (Wc).Fixed) or else F.Cams (Wc).W = 0
+      then
+         Said := To_Unbounded_String ("没有不动的眼(或者它这会儿没有画面)");
+         return;
+      end if;
+      declare
+         Q : Instrument.Match_Vectors.Vector;
+         Err : Unbounded_String;
+         Img : Buf := F.Cams (Wc).RGB;
+         W : Natural := F.Cams (Wc).W;
+         H : Natural := F.Cams (Wc).H;
+         M : Instrument.Match_Vectors.Vector;
+         Seen : Bools;
+      begin
+         for T in 1 .. C.Fixed_Turn loop
+            Img := Turn_90 (Img, W, H);
+            declare
+               W0 : constant Natural := W;
+            begin
+               W := H; H := W0;
+            end;
+         end loop;
+         for S of C.Board loop
+            Q.Append (Instrument.Match_Pt'(U => S.U, V => S.V, Cert => 0.0, others => <>));
+         end loop;
+         M := Instrument.Match (To_String (C.Inst_Host), C.Inst_Port, C.Fixed_Ref, C.Fixed_Ref_W, C.Fixed_Ref_H, Img, W, H, Q, Err, Back => True);
+         if Natural (M.Length) /= Natural (Q.Length) then
+            Said := To_Unbounded_String ("仪器没配成(" & To_String (Err) & ")");
+            return;
+         end if;
+         for I in 0 .. Natural (M.Length) - 1 loop
+            declare
+               Ok : constant Boolean := M (I).U >= 0.0 and then M (I).V >= 0.0 and then M (I).U < Long_Float (W) and then M (I).V < Long_Float (H)
+                 and then Geom.Round_Trip_Ok (Q (I).U, Q (I).V, M (I).Bu, M (I).Bv);
+            begin
+               Seen.Append (Ok);
+               if Ok then
+                  Found := Found + 1;
+               end if;
+            end;
+         end loop;
+         C.Board_Seen := Seen;
+      end;
+   end Board_Recheck;
 
    --  不动的眼:2026-09-25 起按标定板解(Geo_Board:腕眼几停三角出来的桌上的点,世界位置已知)⇒ 相机在世界里的位姿、焦距(没给就解)。
    --  以前(R4 2026-09-24)是拿开机各停的合空标记(Head_Mark,C.Fixed_Obs)连手上的点一起解,焦距随放进哪几笔在 ±8% 里翻(G2E):分割出来的指尖在手上会滑。
@@ -11411,21 +11472,119 @@ package body Act is
    end Slide_Test;
 
    --  板上空的面(开机碰桌面量指尖用):Lp = 这一下各瓣视线落在面上的点(第 0 个是朝下压的那一瓣);Tb = 每一瓣视线离朝下的角的一半的正切。
-   --  整体平移 Delta 之后:压的那一瓣的落点落在一个躺在面上的板点旁边(R 之内,板真量过那儿),R 之内没有高出面的板点;
+   --  整体平移 Delta 之后:压的那一瓣的落点那一圈(半径 R)整个在量过的桌面里(Inside),R 之内没有高出面的板点;
    --  别的每一瓣:它的手指沿自己的视线从眼往下伸,碰到面的那一刻压的那一瓣的尖在面上 —— 两根手指一样长时,离压的那一点水平 ρ 处
    --  这根手指离面至少 ρ·tan(β/2) 高(β = 它的视线离朝下的角;纯几何),所以它那条落点连线 R 之内、高出面超过这个高度的板点才挡它
    --  (V1B22 2026-09-27:原来连线旁边高出面一点点的板点都算挡,空的面挑到了 0.39 m 外)。
    --  躺在面上 / 高出面:离面在 / 超出 3 倍(倍数无量纲,同踢离群)"面内离散 ⊕ 这一点自己沿法向的不确定度"。
-   --  候选按先不挪、再按离压的那一点近排每个躺在面上的板点,返回全部空的(挑哪个由调用方按反解解不解得出来定)
+   --  量过的桌面 = 躺在面上、上回在不动的眼里重找时还找得到(C.Board_Seen;没重找过 = 按量的那一刻)的板点围成的那一片。
+   --  09-28 V1B47:原来只要"落点 R 之内有一个躺在面上的板点",落在那片的边上也收 —— 边外是开机时手自己挡着、没量过的一块,
+   --  那儿放着一台电子琴:手指压在琴上,还把琴推进了板上量过是桌面的那片,第 2 瓣接着压在琴上(按仿真真值这只手 14 下里 9 下碰的不是桌面)。
+   --  高出面的板点重找时找没找到都照样挡(东西被挪走了也不知道挪到了哪)。
+   --  候选按先不挪、再按离压的那一点近排每个量过的桌面上的板点,返回全部空的(挑哪个由调用方按反解解不解得出来定)
    procedure Board_Free_Spots (C : Context; Lp : Geom.V3_Vectors.Vector; Tb : Floats; R : Long_Float; Deltas : out Geom.V3_Vectors.Vector) is
       N : constant Geom.V3 := C.Board_N;
       Nb : constant Natural := Natural (C.Board.Length);
+      Fresh : constant Boolean := Natural (C.Board_Seen.Length) = Nb;   --  重找过(和板一一对应)
       On, Above, Tried : Bools;
       Hgt : Floats;
+      Nn : Floats;                   --  每个量过的桌面上的板点离最近一个同类的多远(面内;别的点 = 0)
       Pp : Geom.V3_Vectors.Vector;   --  板点投到面上
-      function Clear (Dl : Geom.V3; Need_On : Boolean) return Boolean is
+      E1, E2 : Geom.V3 := [others => 0.0];   --  面内两根正交的轴(排方位用)
+      package Sorting is new F64_Vectors.Generic_Sorting;
+      function Gap (A, B : Geom.V3) return Long_Float is (Geom.Norm ([A (0) - B (0), A (1) - B (1), A (2) - B (2)]));
+      --  落点 A0 那一圈(半径 R)整个在量过的桌面里:圈里每一处(按半个板点间距铺的格,采样,无量纲),离它两个板点间距以内那些量过的
+      --  桌面上的板点把它围住 —— 按方位排开,最大的空档 < 180°(在那片里面);在那片的边上、边外、里面一块没点的洞里 = 空档 ≥ 180°。
+      --  板点间距 = 离落点最近的 3 个(次数)量过的桌面上的板点各自离最近一个的中位(板自己量的;圈比间距小时圈里可能一个点都没有);
+      --  两个间距 = 缺一个点照样围得住(倍数,无量纲);量过的桌面上不到 3 个点 ⇒ 量不出间距,不算
+      function Inside (A0 : Geom.V3) return Boolean is
+         Kn : constant := 3;
+         Near : array (0 .. Kn - 1) of Long_Float := [others => Long_Float'Last];   --  最近几个的距离(从近到远)
+         Near_S : array (0 .. Kn - 1) of Long_Float := [others => 0.0];            --  它们各自离最近一个同类的距离
+         S : Long_Float;
+         Pool : Geom.Nat_Vectors.Vector;   --  离落点 R + 两个间距以内的那些量过的桌面上的板点
+      begin
+         for I in 0 .. Nb - 1 loop
+            if On (I) and then Nn (I) > 0.0 then
+               declare
+                  D : constant Long_Float := Gap (Pp (I), A0);
+                  K : Integer := Kn - 1;
+               begin
+                  if D < Near (Kn - 1) then
+                     while K > 0 and then Near (K - 1) > D loop
+                        Near (K) := Near (K - 1); Near_S (K) := Near_S (K - 1);
+                        K := K - 1;
+                     end loop;
+                     Near (K) := D; Near_S (K) := Nn (I);
+                  end if;
+               end;
+            end if;
+         end loop;
+         if Near (Kn - 1) = Long_Float'Last then
+            return False;
+         end if;
+         --  三个的中位:排一下取中间那个
+         declare
+            Ns : Floats;
+         begin
+            for V of Near_S loop
+               Ns.Append (V);
+            end loop;
+            Sorting.Sort (Ns);
+            S := Ns (Kn / 2);
+         end;
+         for I in 0 .. Nb - 1 loop
+            if On (I) and then Gap (Pp (I), A0) <= R + 2.0 * S then
+               Pool.Append (I);
+            end if;
+         end loop;
+         declare
+            Kmax : constant := 64;   --  每条半径上最多铺这么多格(算力的上限,次数;板里两点几乎重合时间距会很小)
+            Pitch : constant Long_Float := Long_Float'Max (0.5 * S, R / Long_Float (Kmax));
+            M : constant Integer := Integer (Long_Float'Floor (R / Pitch));
+         begin
+            for Ia in -M .. M loop
+               for Ib in -M .. M loop
+                  declare
+                     Xa : constant Long_Float := Long_Float (Ia) * Pitch;
+                     Xb : constant Long_Float := Long_Float (Ib) * Pitch;
+                     X : constant Geom.V3 := [A0 (0) + Xa * E1 (0) + Xb * E2 (0), A0 (1) + Xa * E1 (1) + Xb * E2 (1), A0 (2) + Xa * E1 (2) + Xb * E2 (2)];
+                     Angs : Floats;
+                     Widest : Long_Float := 0.0;
+                  begin
+                     if Xa * Xa + Xb * Xb <= R * R then
+                        for I of Pool loop
+                           declare
+                              Q : constant Geom.V3 := [Pp (I) (0) - X (0), Pp (I) (1) - X (1), Pp (I) (2) - X (2)];
+                              Qa : constant Long_Float := Q (0) * E1 (0) + Q (1) * E1 (1) + Q (2) * E1 (2);
+                              Qb : constant Long_Float := Q (0) * E2 (0) + Q (1) * E2 (1) + Q (2) * E2 (2);
+                              D2 : constant Long_Float := Qa * Qa + Qb * Qb;
+                           begin
+                              if D2 > 0.0 and then D2 <= 4.0 * S * S then
+                                 Angs.Append (Arctan (Qb, Qa));
+                              end if;
+                           end;
+                        end loop;
+                        if Angs.Is_Empty then
+                           return False;
+                        end if;
+                        Sorting.Sort (Angs);
+                        for K in 1 .. Natural (Angs.Length) - 1 loop
+                           Widest := Long_Float'Max (Widest, Angs (K) - Angs (K - 1));
+                        end loop;
+                        Widest := Long_Float'Max (Widest, Angs (0) + 2.0 * Ada.Numerics.Pi - Angs (Natural (Angs.Length) - 1));
+                        if Widest >= Ada.Numerics.Pi - 1.0e-9 then   --  正好 180°(点在两个板点连线上 = 那片的边)不算里面:数值上不许靠舍入定
+                           return False;
+                        end if;
+                     end if;
+                  end;
+               end loop;
+            end loop;
+         end;
+         return True;
+      end Inside;
+      function Clear (Dl : Geom.V3) return Boolean is
          A0 : constant Geom.V3 := [Lp (0) (0) + Dl (0), Lp (0) (1) + Dl (1), Lp (0) (2) + Dl (2)];
-         Seen_On : Boolean := not Need_On;
       begin
          for I in 0 .. Nb - 1 loop
             if Above (I) then
@@ -11445,32 +11604,62 @@ package body Act is
                      end if;
                   end;
                end loop;
-            elsif On (I) and then not Seen_On and then Geom.Norm ([Pp (I) (0) - A0 (0), Pp (I) (1) - A0 (1), Pp (I) (2) - A0 (2)]) <= R then
-               Seen_On := True;
             end if;
          end loop;
-         return Seen_On;
+         return Inside (A0);
       end Clear;
    begin
       Deltas := Geom.V3_Vectors.Empty_Vector;
       if Lp.Is_Empty or else Nb = 0 or else Natural (Tb.Length) < Natural (Lp.Length) then
          return;
       end if;
-      for S of C.Board loop
+      for I in 0 .. Nb - 1 loop
          declare
+            S : constant Geom.Scene_Pt := C.Board (I);
             H : constant Long_Float := (S.Pw (0) - C.Board_Pt (0)) * N (0) + (S.Pw (1) - C.Board_Pt (1)) * N (1) + (S.Pw (2) - C.Board_Pt (2)) * N (2);
             Cn : constant Geom.V3 := Geom.Ap (S.Cov, N);
             Sn : constant Long_Float := Long_Float'Max (0.0, Cn (0) * N (0) + Cn (1) * N (1) + Cn (2) * N (2));
             Tol : constant Long_Float := 3.0 * Sqrt (C.Board_Rms ** 2 + Sn);
          begin
-            On.Append (abs H <= Tol);
+            On.Append (abs H <= Tol and then (not Fresh or else C.Board_Seen (I)));
             Above.Append (H > Tol);
             Hgt.Append (H);
             Tried.Append (False);
             Pp.Append (Geom.V3'[S.Pw (0) - H * N (0), S.Pw (1) - H * N (1), S.Pw (2) - H * N (2)]);
          end;
       end loop;
-      if Clear ([0.0, 0.0, 0.0], Need_On => True) then
+      --  面内两根轴:法向叉上和它最不平行的那根坐标轴
+      declare
+         Ax : constant Geom.V3 := (if abs N (0) <= abs N (1) and then abs N (0) <= abs N (2) then [1.0, 0.0, 0.0]
+                                   elsif abs N (1) <= abs N (2) then [0.0, 1.0, 0.0] else [0.0, 0.0, 1.0]);
+         Cx : constant Geom.V3 := [N (1) * Ax (2) - N (2) * Ax (1), N (2) * Ax (0) - N (0) * Ax (2), N (0) * Ax (1) - N (1) * Ax (0)];
+         Cl : constant Long_Float := Geom.Norm (Cx);
+      begin
+         if Cl <= 0.0 then
+            return;
+         end if;
+         E1 := [Cx (0) / Cl, Cx (1) / Cl, Cx (2) / Cl];
+         E2 := [N (1) * E1 (2) - N (2) * E1 (1), N (2) * E1 (0) - N (0) * E1 (2), N (0) * E1 (1) - N (1) * E1 (0)];
+      end;
+      for I in 0 .. Nb - 1 loop
+         declare
+            Best : Long_Float := 0.0;
+         begin
+            if On (I) then
+               Best := Long_Float'Last;
+               for J in 0 .. Nb - 1 loop
+                  if J /= I and then On (J) then
+                     Best := Long_Float'Min (Best, Gap (Pp (I), Pp (J)));
+                  end if;
+               end loop;
+               if Best = Long_Float'Last then
+                  Best := 0.0;
+               end if;
+            end if;
+            Nn.Append (Best);
+         end;
+      end loop;
+      if Clear ([0.0, 0.0, 0.0]) then
          Deltas.Append (Geom.V3'[0.0, 0.0, 0.0]);
       end if;
       loop
@@ -11494,7 +11683,7 @@ package body Act is
             declare
                Dl : constant Geom.V3 := [Pp (Natural (Best)) (0) - Lp (0) (0), Pp (Natural (Best)) (1) - Lp (0) (1), Pp (Natural (Best)) (2) - Lp (0) (2)];
             begin
-               if Clear (Dl, Need_On => False) then
+               if Clear (Dl) then
                   Deltas.Append (Dl);
                end if;
             end;
@@ -11672,8 +11861,12 @@ package body Act is
                   end;
                end loop;
                if not Found then
-                  Geo_Say ("  板上空的面 " & Codec.Img (Natural (Ds.Length)) & " 处(指尖那一小截宽的上限 " & Mm (R) & "),问了 " & Codec.Img (Asked)
-                           & " 处,转和挪到那儿在量到的关节限位里都解不出来 ⇒ 这一下压不成");
+                  if Ds.Is_Empty then
+                     Geo_Say ("  板上量过、此刻还找得到的桌面里没有一处落点圈(半径 " & Mm (R) & ")整个在里面、又躲得开高出面的点 ⇒ 这一下压不成");
+                  else
+                     Geo_Say ("  板上空的面 " & Codec.Img (Natural (Ds.Length)) & " 处(指尖那一小截宽的上限 " & Mm (R) & "),问了 " & Codec.Img (Asked)
+                              & " 处,转和挪到那儿在量到的关节限位里都解不出来 ⇒ 这一下压不成");
+                  end if;
                   return;
                end if;
                if Asked > 1 then
@@ -12002,6 +12195,19 @@ package body Act is
                      Geo_Say (Who & "第 " & Codec.Img (K + 1) & " 瓣:让它指尖的视线朝下压 1 下、再朝五个方位(各差 72°)各斜 " & Codec.Fmt (Theta / Deg, 1)
                               & "° 压 1 下(" & (if Nl >= 2 then "它和最近的另一瓣视线夹角 " & Codec.Fmt (3.0 * Theta / Deg, 1) & "° 的三分之一" else "一条命令转得到的那一档")
                               & ")⇒ 每一下手上最低那一点落在面上,几下一起解它在手系里在哪");
+                     --  压之前板上的点在不动的眼里重找一遍:这一瓣只在此刻还找得到的那片桌面上挑落点(09-28 V1B47:手把电子琴推进了板量过的那片)
+                     declare
+                        Found : Natural;
+                        Why : Unbounded_String;
+                     begin
+                        Board_Recheck (F, C, Found, Why);
+                        if Length (Why) = 0 then
+                           Geo_Say ("  板上 " & Codec.Img (Natural (C.Board.Length)) & " 个点此刻在不动的眼里还找得到 " & Codec.Img (Found)
+                                    & " 个(找不到的当没量过:被挪来的东西盖住了、或者此刻被手挡着)");
+                        else
+                           Geo_Say ("  板这会儿没法在不动的眼里重找(" & To_String (Why) & ")⇒ 按上一回知道的那份挑落点");
+                        end if;
+                     end;
                      Press_Try (K, 0.0, 0.0, Got, S1);
                      if Got and then S1 > 0.0 then
                         --  尖大概在哪:朝下那一下它的视线交面那一点(后面几下的起点和快下的高度按它;解出来以后换成解的)
