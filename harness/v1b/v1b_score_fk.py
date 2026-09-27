@@ -113,7 +113,10 @@ if os.path.exists(sp):
             if best is None or r.cost < best.cost: best = r
         x = best.x
         Rg = rv(x[0:3]); s = x[6]; tg = x[7:10]; tx = x[10:13]
-        FITS[arm] = (s, Rg, tg, rv(x[3:6]), x[10:13])
+        # 换算(模型 → 仿真)给后面几种考法用:按【全部】扫描格拟合(09-27:模型在扫描范围里有形变时,一半格子拟合的换算自己晃 2–3 mm,V1B32 第 2 只手 ② 7.3 / 4.1 mm 两种算法)
+        ra = least_squares(lambda xx: res2(xx, np.arange(n)), x, method="lm", max_nfev=4000)
+        xa = ra.x
+        FITS[arm] = (xa[6], rv(xa[0:3]), xa[7:10], rv(xa[3:6]), xa[10:13])
         def e2(idx):
             return np.linalg.norm((s * (Tf[idx] @ Rg.T) + tg) - (Tp[idx] + np.einsum('nab,b->na', Rt[idx], tx)), axis=1) * 1000
         et, ee_ = e2(trn), e2(tst)

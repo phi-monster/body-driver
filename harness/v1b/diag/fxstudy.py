@@ -41,7 +41,7 @@ def fits(RUN, KDIR):
         x = best.x
         F[arm] = dict(s=x[6], Rg=rv(x[0:3]), tg=x[7:10], Tf=Tf, Tp=Tp)
     return F
-F = fits(RUN, os.path.join(RUN, "look"))
+F = fits(RUN, os.environ.get("KDIR", os.path.join(RUN, "look")))
 s0, Rg0, tg0 = F[0]['s'], F[0]['Rg'], F[0]['tg']
 s1, Rg1, tg1 = F[1]['s'], F[1]['Rg'], F[1]['tg']
 c30, s30 = math.cos(math.radians(30)), math.sin(math.radians(30))

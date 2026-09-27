@@ -29,10 +29,12 @@ package Kinem is
    --  只给关节读数 ⇒ 那只眼在参照眼系里的位姿
    procedure FK (M : Model; Q : Floats; R : out M3; T : out V3);
 
-   --  一对配点:第 I 帧的像素 (Ua, Va) 和第 J 帧的 (Ub, Vb) 是同一个真实的点
+   --  一对配点:第 I 帧的像素 (Ua, Va) 和第 J 帧的 (Ub, Vb) 是同一个真实的点。
+   --  Pt = 它属于哪条轨迹:同一个号 = 第 I 帧里同一个像素(仪器按问的点配)配进了好几帧,是同一个真实的点(-1 = 不成轨迹)
    type Corr is record
       I, J : Natural := 0;
       Ua, Va, Ub, Vb : Long_Float := 0.0;
+      Pt : Integer := -1;
    end record;
    package Corr_Vectors is new Ada.Containers.Vectors (Natural, Corr);
 
@@ -56,7 +58,10 @@ package Kinem is
       Med_Px, P90_Px : Long_Float := 0.0;   --  ③ 最后一起解的 Sampson 残差(像素)中位 / 九成
       N_Corr, N_Used : Natural := 0;   --  配点总数 / 进最后一起解的内点数
       Flipped : Boolean := False;      --  平移整体反了一次号(Sampson 分不出,按点在不在两只眼前面定)
-      Secs : Floats;                   --  各步用了几秒(墙上时间):① 网格、① 精修、①b 焦距和各轴一起、② 比例、③ 一起解(两轮)
+      Mv_Tracks, Mv_Obs : Natural := 0;               --  ④ 多视图一起解用了几条轨迹、几笔(轨迹在别的帧里的像素)
+      Mv_Start_Px, Mv_Px, Mv_P90_Px : Long_Float := 0.0;   --  ④ 重投影残差(像素):起步中位、解完中位 / 九成
+      Mv_Iters : Natural := 0;
+      Secs : Floats;                   --  各步用了几秒(墙上时间):① 网格、① 精修、①b 焦距和各轴一起、② 比例、③ 一起解(两轮)、④ 多视图
    end record;
 
    --  Frames(Ref) = 参照帧(扫描起点);Width = 画幅宽(像素,焦距网格按它铺:视场 30°–110°)。
@@ -67,6 +72,25 @@ package Kinem is
 
    --  一个配点在模型下的 Sampson 残差(像素)
    function Residual (M : Model; Frames : Frame_Vectors.Vector; C : Corr) return Long_Float;
+
+   --  Fit 的最后一步(④ 多视图:轨迹按重投影一起解,M 当起步)单独拿出来,给自检焊点用
+   procedure Refine_Tracks (Frames : Frame_Vectors.Vector; Cs : Corr_Vectors.Vector; M : in out Model; Rep : in out Fit_Report);
+
+   --  轨迹的点(参照眼系,模型单位):在它起点那帧(I)的视线上,远近按它进的每一帧的像素一起解(多视图三角;抗野点)
+   type Track_Pt is record
+      X : V3 := [0.0, 0.0, 0.0];
+      Var_Along : Long_Float := 0.0;   --  沿视线的方差(模型单位²):配点噪声 ÷ 这一维的曲率
+      I : Natural := 0;                --  起点那帧
+      U, V : Long_Float := 0.0;        --  在起点那帧里的像素
+      Far : Natural := 0;              --  看见它的帧里离起点那帧的眼最远的那一帧
+      Views : Natural := 0;            --  连起点那帧几帧看见
+      Med_Px : Long_Float := 0.0;      --  这条轨迹在各帧的重投影残差中位(像素)
+   end record;
+   package Track_Pt_Vectors is new Ada.Containers.Vectors (Natural, Track_Pt);
+   --  按模型把每条轨迹(Pt >= 0 的配点,按 Pt 归到一起)的点解出来;只给起点在 Only_I 那帧的(-1 = 全部)、至少 Min_Views 帧看见的;
+   --  Sig_Px = 这些轨迹重投影残差的中位 × 1.4826(正态下中位换标准差,统计常数)
+   procedure Track_Points (M : Model; Frames : Frame_Vectors.Vector; Cs : Corr_Vectors.Vector; Only_I : Integer; Min_Views : Natural;
+                           Tracks : out Track_Pt_Vectors.Vector; Sig_Px : out Long_Float);
 
    --  ── 两只手的系对齐到一个世界(V1b 3c)──
    type V3_Array is array (Natural range <>) of V3;

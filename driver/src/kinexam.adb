@@ -1,5 +1,5 @@
 --  离线回放运动学(2026-09-26,V1b 5 分钟一炮):拿一炮落盘的扫描格子(look/sweep.txt:每行 图名 臂 关节 方向 第几格 拍数 | 各组读数 … || 真值)
---  和配点(look/corrs_arm<k>.txt:每行 I J Ua Va Ub Vb)原样跑驱动那一份 Kinem.Fit,打出报告、把模型写成 kinem_arm<k>.txt(格式同驱动落盘)。
+--  和配点(look/corrs_arm<k>.txt:每行 I J Ua Va Ub Vb [轨迹号])原样跑驱动那一份 Kinem.Fit,打出报告、把模型写成 kinem_arm<k>.txt(格式同驱动落盘)。
 --  改解法不用再开一炮;真值不进解,只在打分脚本里用。这只手的读数是哪一组:这只手各格之间变了的第一组(同驱动认手的判法)。
 --  用法:kinexam <look 目录> <臂号> <输出目录> [读数组号]
 --  (几只手同时扫:这只手的格子里别的手的读数也在变 ⇒ 按"变了的第一组"会认错;给了组号就用它 —— 驱动开机日志里"第 k 只手 = 第 g 组关节读数")
@@ -121,7 +121,8 @@ begin
       begin
          if Natural (F.Length) >= 6 then
             Cs.Append (Kinem.Corr'(I => Natural'Value (F (0)), J => Natural'Value (F (1)), Ua => Long_Float'Value (F (2)), Va => Long_Float'Value (F (3)),
-                                   Ub => Long_Float'Value (F (4)), Vb => Long_Float'Value (F (5))));
+                                   Ub => Long_Float'Value (F (4)), Vb => Long_Float'Value (F (5)),
+                                   Pt => (if Natural (F.Length) >= 7 then Integer'Value (F (6)) else -1)));   --  第 7 列 = 轨迹号(旧文件没有 = 不成轨迹)
          end if;
       end;
    end loop;
@@ -159,7 +160,9 @@ begin
       for X of Rep.Secs loop
          Append (T, " " & Codec.Fmt (X, 1));
       end loop;
-      Put_Line ("各步秒数(网格、精修、定比例、一起解):" & To_String (T));
+      Put_Line ("各步秒数(网格、精修、定比例、一起解、多视图):" & To_String (T));
+      Put_Line ("多视图一起解:" & Codec.Img (Rep.Mv_Tracks) & " 条轨迹 " & Codec.Img (Rep.Mv_Obs) & " 笔 · 重投影中位 " & Codec.Fmt (Rep.Mv_Start_Px, 3) & " → "
+                & Codec.Fmt (Rep.Mv_Px, 3) & " px、九成 " & Codec.Fmt (Rep.Mv_P90_Px, 3) & " px · " & Codec.Img (Rep.Mv_Iters) & " 轮");
    end;
    if Ok then
       declare

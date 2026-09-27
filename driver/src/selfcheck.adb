@@ -4912,16 +4912,20 @@ begin
       type Uv_Ptr is access Uv_Array;
       Views : array (0 .. 96) of Uv_Ptr;
       Paired : array (0 .. 96, 0 .. 96) of Boolean := [others => [others => False]];
+      Serial : Natural := 0;
+      --  同驱动的扫描(09-27):仪器按第 I 帧上问的点配 ⇒ 问的点精确、配到的点带噪声;起点那帧出发的对共用点号 = 轨迹(同一个点跨很多帧),别的对各自编号
       procedure Add_Pair (I, J : Natural) is
          Cnt : Natural := 0;
       begin
          Paired (I, J) := True;
+         Serial := Serial + 1;
          for P in 0 .. Npt - 1 loop
             exit when Cnt >= 200;
             if Views (I) (P).U >= 0.0 and then Views (J) (P).U >= 0.0 then
                declare
-                  C : Kinem.Corr := (I => I, J => J, Ua => Views (I) (P).U + 0.3 * Gauss, Va => Views (I) (P).V + 0.3 * Gauss,
-                                     Ub => Views (J) (P).U + 0.3 * Gauss, Vb => Views (J) (P).V + 0.3 * Gauss);
+                  C : Kinem.Corr := (I => I, J => J, Ua => Views (I) (P).U, Va => Views (I) (P).V,
+                                     Ub => Views (J) (P).U + 0.3 * Gauss, Vb => Views (J) (P).V + 0.3 * Gauss,
+                                     Pt => (if I = 0 then P else Npt * Serial + P));
                begin
                   if U01 < 0.05 then   --  5% 乱配
                      C.Ub := 640.0 * U01; C.Vb := 270.0 * U01;
@@ -5079,8 +5083,9 @@ begin
             end loop;
          end if;
          Put_Line ("    运动学:配点 " & Natural'Image (Rep.N_Corr) & " · 内点 " & Natural'Image (Rep.N_Used) & " · 起步焦距 " & Codec.Fmt (Rep.F_Start, 1)
-                   & " → " & Codec.Fmt (Rep.F, 1) & " · 残差中位 " & Codec.Fmt (Rep.Med_Px, 3) & " px · 考试中位 " & Codec.Fmt (Emed, 3)
-                   & " mm、最大 " & Codec.Fmt (Emax, 3) & " mm" & (if Rep.Flipped then " · 平移反过一次号" else ""));
+                   & " → " & Codec.Fmt (Rep.F, 1) & " · 残差中位 " & Codec.Fmt (Rep.Med_Px, 3) & " px · 多视图 " & Codec.Img (Rep.Mv_Tracks) & " 条轨迹 "
+                   & Codec.Img (Rep.Mv_Obs) & " 笔、重投影中位 " & Codec.Fmt (Rep.Mv_Start_Px, 3) & " → " & Codec.Fmt (Rep.Mv_Px, 3) & " px(" & Codec.Img (Rep.Mv_Iters)
+                   & " 轮)· 考试中位 " & Codec.Fmt (Emed, 3) & " mm、最大 " & Codec.Fmt (Emax, 3) & " mm" & (if Rep.Flipped then " · 平移反过一次号" else ""));
          declare
             T : Unbounded_String;
          begin
@@ -5116,6 +5121,91 @@ begin
          Check (Okf and then abs (Rep.F - F_True) < 0.01 * F_True and then Emed < 1.0 and then Emax < 5.0,
                 "运动学·只给关节读数 + 腕眼配点量出 6 根轴和焦距:焦距 " & Codec.Fmt (Rep.F, 1) & "(真 400,要 1% 内),全关节 ±30° 考试中位 "
                 & Codec.Fmt (Emed, 2) & " mm、最大 " & Codec.Fmt (Emax, 2) & " mm(要 < 1 / < 5 mm)");
+         --  ④ 焊点(09-27 V1B32):真模型的轴故意挪开当起步 —— 肩、肘两根轴离眼远近各错 +3% / −3%、腕那根方向偏 0.3°、焦距错 1% ——
+         --  只跑多视图那一步(按轨迹重投影一起解),要回到真模型:全关节 ±30° 考试最大 < 0.5 mm、焦距 0.2% 内;起步本身考试要 > 3 mm(焊点有牙)
+         declare
+            Mp : Kinem.Model := Truth;
+            Rp : Kinem.Fit_Report;
+            procedure Exam (Mm : Kinem.Model; Med, Mx : out Long_Float) is
+               Sxy2, Sxx2 : Long_Float := 0.0;
+               Rt3, Rf3 : M3;
+               Tt3, Tf3 : V3;
+               Es : Floats;
+               package Sorting is new F64_Vectors.Generic_Sorting;
+               Gen2 : FR.Generator;
+            begin
+               FR.Reset (Gen2, 20260927);
+               for K in 0 .. Natural (Frames.Length) - 1 loop
+                  Kinem.FK (Truth, Frames (K).Q, Rt3, Tt3);
+                  Kinem.FK (Mm, Frames (K).Q, Rf3, Tf3);
+                  for X in 0 .. 2 loop
+                     Sxy2 := Sxy2 + Tf3 (X) * Tt3 (X); Sxx2 := Sxx2 + Tf3 (X) * Tf3 (X);
+                  end loop;
+               end loop;
+               Mx := 0.0;
+               for T in 1 .. 30 loop
+                  declare
+                     Q : Floats;
+                     S2 : constant Long_Float := (if Sxx2 > 0.0 then Sxy2 / Sxx2 else 0.0);
+                  begin
+                     for X in 0 .. 5 loop
+                        Q.Append ((2.0 * Long_Float (FR.Random (Gen2)) - 1.0) * 30.0 * Deg);
+                     end loop;
+                     Kinem.FK (Truth, Q, Rt3, Tt3);
+                     Kinem.FK (Mm, Q, Rf3, Tf3);
+                     Es.Append (1000.0 * Sqrt ((S2 * Tf3 (0) - Tt3 (0)) ** 2 + (S2 * Tf3 (1) - Tt3 (1)) ** 2 + (S2 * Tf3 (2) - Tt3 (2)) ** 2));
+                     Mx := Long_Float'Max (Mx, Es.Last_Element);
+                  end;
+               end loop;
+               Sorting.Sort (Es);
+               Med := Es (Natural (Es.Length) / 2);
+            end Exam;
+            E0m, E0x, E1m, E1x : Long_Float;
+         begin
+            Mp.Ax (1).P := [Mp.Ax (1).P (0) * 1.03, Mp.Ax (1).P (1) * 1.03, Mp.Ax (1).P (2) * 1.03];
+            Mp.Ax (2).P := [Mp.Ax (2).P (0) * 0.97, Mp.Ax (2).P (1) * 0.97, Mp.Ax (2).P (2) * 0.97];
+            Mp.Ax (4).W := Ap (Rodrigues ([0.3 * Deg, 0.0, 0.0]), Mp.Ax (4).W);
+            Mp.F := 1.01 * F_True;   --  焦距错 1%(比例)
+            --  尺度钉到"参与的各帧眼的位置均方根 = 1"(同 Fit 交出来的模型):真模型按米,挪开以后整体除一下
+            declare
+               S2 : Long_Float := 0.0;
+               Rr3 : M3;
+               Tt4 : V3;
+            begin
+               for K in 0 .. Natural (Frames.Length) - 1 loop
+                  Kinem.FK (Mp, Frames (K).Q, Rr3, Tt4);
+                  S2 := S2 + Tt4 (0) ** 2 + Tt4 (1) ** 2 + Tt4 (2) ** 2;
+               end loop;
+               S2 := Sqrt (S2 / Long_Float (Frames.Length));
+               for J in 0 .. 5 loop
+                  Mp.Ax (J).P := [Mp.Ax (J).P (0) / S2, Mp.Ax (J).P (1) / S2, Mp.Ax (J).P (2) / S2];
+               end loop;
+            end;
+            --  对照:真模型起步(规整到同样的约定)只跑这一步,不许走开(考试最大 < 0.5 mm):走开 = 目标函数本身偏了(09-27 查出来过:
+            --  5% 乱配没挑掉时 soft-l1 把模型拉开 24 mm;起步的尺度和这一步钉尺度的帧不是同一批时 LM 为压约束行走开 11 mm)
+            declare
+               Mt : Kinem.Model := Truth;
+               Rt4 : Kinem.Fit_Report;
+               Am, Ax, Bm, Bx : Long_Float;
+            begin
+               Exam (Mt, Am, Ax);
+               Kinem.Refine_Tracks (Frames, Cs, Mt, Rt4);
+               Exam (Mt, Bm, Bx);
+               Put_Line ("    运动学·多视图那一步(真模型起步):考试 " & Codec.Fmt (Am, 3) & " / " & Codec.Fmt (Ax, 3) & " ⇒ " & Codec.Fmt (Bm, 3) & " / " & Codec.Fmt (Bx, 3)
+                         & " mm · 重投影中位 " & Codec.Fmt (Rt4.Mv_Start_Px, 4) & " → " & Codec.Fmt (Rt4.Mv_Px, 4) & " px · " & Codec.Img (Rt4.Mv_Iters) & " 轮 · 焦距 " & Codec.Fmt (Mt.F, 2));
+               Check (Bx < 0.5 and then abs (Mt.F - F_True) < 0.002 * F_True,
+                      "运动学·多视图一步从真模型起步不走开:考试最大 " & Codec.Fmt (Bx, 3) & " mm(要 < 0.5)、焦距 " & Codec.Fmt (Mt.F, 2) & "(真 400,要 0.2% 内)");
+            end;
+            Exam (Mp, E0m, E0x);
+            Kinem.Refine_Tracks (Frames, Cs, Mp, Rp);
+            Exam (Mp, E1m, E1x);
+            Put_Line ("    运动学·多视图那一步:起步(轴挪开)考试中位 " & Codec.Fmt (E0m, 2) & " / 最大 " & Codec.Fmt (E0x, 2) & " mm、焦距 " & Codec.Fmt (1.01 * F_True, 1)
+                      & " ⇒ " & Codec.Img (Rp.Mv_Tracks) & " 条轨迹、" & Codec.Img (Rp.Mv_Iters) & " 轮、重投影中位 " & Codec.Fmt (Rp.Mv_Start_Px, 3) & " → "
+                      & Codec.Fmt (Rp.Mv_Px, 3) & " px ⇒ 考试中位 " & Codec.Fmt (E1m, 2) & " / 最大 " & Codec.Fmt (E1x, 2) & " mm、焦距 " & Codec.Fmt (Mp.F, 1));
+            Check (E0x > 3.0 and then E1x < 0.5 and then abs (Mp.F - F_True) < 0.002 * F_True,
+                   "运动学·多视图一步把挪开的轴拉回来:起步考试最大 " & Codec.Fmt (E0x, 2) & " mm(要 > 3)⇒ " & Codec.Fmt (E1x, 2) & " mm(要 < 0.5)、焦距 "
+                   & Codec.Fmt (Mp.F, 1) & "(真 400,要 0.2% 内)");
+         end;
       end;
    end;
 

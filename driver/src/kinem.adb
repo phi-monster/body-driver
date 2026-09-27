@@ -1,6 +1,7 @@
 with Ada.Numerics.Long_Elementary_Functions; use Ada.Numerics.Long_Elementary_Functions;
 with Ada.Unchecked_Deallocation;
 with Ada.Calendar;
+with Ada.Containers.Ordered_Maps;
 package body Kinem is
 
    --  ── 小向量 ──
@@ -728,6 +729,632 @@ package body Kinem is
       end loop;
       return Out_V;
    end Min_Eig;
+
+   --  ── ④ 多视图:轨迹(起点那帧里同一个像素,仪器按问的点配进了好几帧)按重投影一起解 ──
+   --  每条轨迹的点在它起点那帧(Tq)的视线上:X = T_q + λ · R_q · d(d = 那个像素的视线,z = -1);λ 随模型当场解掉(每条一维、抗野点的高斯牛顿,
+   --  按 log λ 解),外层只对运动学那 6N + 1 个数做 LM(数值差分)。③ 的两两对极只管配点垂直于对极线那一分量,轴离眼多远(= 每一帧平移多大)管不住;
+   --  同一个点跨很多帧、远近共用,就管住了(09-27 V1B32 离线同一算法:第一只手按真值最大 0.81 → 0.11 mm,不动的眼 4.0 → 1.3 mm,第 2 只手放进世界 4.0 → 1.2 mm)
+   type Nat_Ptr is access Nat_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Nat_Array, Nat_Ptr);
+   type V3_Ptr is access V3_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (V3_Array, V3_Ptr);
+   type M3_Array is array (Natural range <>) of M3;
+   type Mv_Set is record
+      Nt, No : Natural := 0;
+      Tq : Nat_Ptr;              --  每条轨迹:起点那帧
+      Du, Dv : Vec_Ptr;          --  每条轨迹:在起点那帧里的像素
+      Ot, Of_Fr : Nat_Ptr;       --  每一笔:哪条轨迹、哪一帧
+      Ou, Ov : Vec_Ptr;          --  每一笔:在那一帧里的像素
+      Live : Nat_Ptr;            --  每条轨迹:1 = 用(远近解得出、在眼前面),0 = 不用
+      Obs_In : Nat_Ptr;          --  每一笔:1 = 在门里(进解),0 = 野点(同 ③:残差 ≥ max(3 px, 3 倍中位))
+   end record;
+   procedure Free_Mv (S : in out Mv_Set) is
+   begin
+      Free (S.Tq); Free (S.Du); Free (S.Dv); Free (S.Ot); Free (S.Of_Fr); Free (S.Ou); Free (S.Ov); Free (S.Live); Free (S.Obs_In);
+   end Free_Mv;
+   --  配点里 Pt >= 0 的按 Pt 归成轨迹(Only_I >= 0:只要起点在那一帧的)
+   procedure Build_Mv (Cs : Corr_Vectors.Vector; Only_I : Integer; S : out Mv_Set) is
+      package Id_Maps is new Ada.Containers.Ordered_Maps (Integer, Natural);
+      Ids : Id_Maps.Map;
+      Nt, No : Natural := 0;
+      function Want (C : Corr) return Boolean is (C.Pt >= 0 and then C.I /= C.J and then (Only_I < 0 or else C.I = Natural (Only_I)));
+   begin
+      for C of Cs loop
+         if Want (C) then
+            if not Ids.Contains (C.Pt) then
+               Ids.Insert (C.Pt, Nt);
+               Nt := Nt + 1;
+            end if;
+            No := No + 1;
+         end if;
+      end loop;
+      S.Nt := Nt; S.No := No;
+      S.Tq := new Nat_Array (0 .. Natural'Max (1, Nt) - 1); S.Du := new Vec (0 .. Natural'Max (1, Nt) - 1); S.Dv := new Vec (0 .. Natural'Max (1, Nt) - 1);
+      S.Live := new Nat_Array'(0 .. Natural'Max (1, Nt) - 1 => 1);
+      S.Ot := new Nat_Array (0 .. Natural'Max (1, No) - 1); S.Of_Fr := new Nat_Array (0 .. Natural'Max (1, No) - 1);
+      S.Ou := new Vec (0 .. Natural'Max (1, No) - 1); S.Ov := new Vec (0 .. Natural'Max (1, No) - 1);
+      S.Obs_In := new Nat_Array'(0 .. Natural'Max (1, No) - 1 => 1);
+      declare
+         K : Natural := 0;
+      begin
+         for C of Cs loop
+            if Want (C) then
+               declare
+                  T : constant Natural := Ids.Element (C.Pt);
+               begin
+                  S.Tq (T) := C.I; S.Du (T) := C.Ua; S.Dv (T) := C.Va;
+                  S.Ot (K) := T; S.Of_Fr (K) := C.J; S.Ou (K) := C.Ub; S.Ov (K) := C.Vb;
+                  K := K + 1;
+               end;
+            end if;
+         end loop;
+      end;
+   end Build_Mv;
+   Behind_Px : constant := 1.0e3;   --  点落在那一帧眼后面:按这么大的像素残差记(远大于任何真残差的哨兵,无量纲)
+   --  soft-l1 的代价(抗野点;Tau = 尺度,像素)
+   function Rho_Sl (E2, Tau : Long_Float) return Long_Float is (2.0 * Tau * Tau * (Sqrt (1.0 + E2 / (Tau * Tau)) - 1.0));
+   --  给定各帧位姿(Pr, Pt),解每条轨迹的 log 远近(Lz,就地更新,Iters 遍高斯牛顿),回填每一笔的像素残差 (Ru, Rv)。
+   --  Wa / Wb:每一笔在那一帧眼系里 X = Wb + λ Wa(工作区);G / H:每条轨迹一维的梯度 / 曲率(工作区;出来时是最后一遍的曲率,不加权)
+   procedure Mv_Eval (S : Mv_Set; F, Cx, Cy : Long_Float; Pr : M3_Array; Pt : V3_Array; Lz : in out Vec; Iters : Natural; Tau : Long_Float;
+                      Wa, Wb : V3_Ptr; Ru, Rv, G, H, Lt : Vec_Ptr) is
+      --  Lt:每条轨迹这一遍的 λ(工作区,一条只算一次 exp)
+   begin
+      for N in 0 .. S.No - 1 loop
+         declare
+            T : constant Natural := S.Ot (N);
+            Q : constant Natural := S.Tq (T);
+            K : constant Natural := S.Of_Fr (N);
+            D : constant V3 := [(S.Du (T) - Cx) / F, -(S.Dv (T) - Cy) / F, -1.0];
+         begin
+            Wa (N) := ApT (Pr (K), Ap (Pr (Q), D));
+            Wb (N) := ApT (Pr (K), Sub (Pt (Q), Pt (K)));
+         end;
+      end loop;
+      for It in 0 .. Iters loop   --  最后一遍只算残差和曲率
+         for T in 0 .. S.Nt - 1 loop
+            G (T) := 0.0; H (T) := 0.0;
+            Lt (T) := (if S.Live (T) = 1 then Exp (Lz (Lz'First + T)) else 0.0);
+         end loop;
+         for N in 0 .. S.No - 1 loop
+            declare
+               T : constant Natural := S.Ot (N);
+            begin
+               if S.Live (T) = 1 then
+                  declare
+                     Lam : constant Long_Float := Lt (T);
+                     X : constant V3 := Add (Wb (N), Scl (Wa (N), Lam));
+                     Zp : constant Long_Float := -X (2);
+                  begin
+                     if Zp > 1.0e-9 then   --  在那一帧眼前面(数值,无量纲)
+                        Ru (N) := F * X (0) / Zp + Cx - S.Ou (N);
+                        Rv (N) := -F * X (1) / Zp + Cy - S.Ov (N);
+                        if S.Obs_In (N) = 1 then   --  门外的笔不进这一维的解(残差照算,重挑内点要用)
+                           declare
+                              Dx : constant V3 := Scl (Wa (N), Lam);   --  ∂X/∂log λ
+                              Dzp : constant Long_Float := -Dx (2);
+                              Du : constant Long_Float := F * (Dx (0) * Zp - X (0) * Dzp) / (Zp * Zp);
+                              Dv : constant Long_Float := -F * (Dx (1) * Zp - X (1) * Dzp) / (Zp * Zp);
+                              W : constant Long_Float := (if It < Iters then 1.0 / Sqrt (1.0 + (Ru (N) ** 2 + Rv (N) ** 2) / (Tau * Tau)) else 1.0);
+                           begin
+                              G (T) := G (T) + W * (Du * Ru (N) + Dv * Rv (N));
+                              H (T) := H (T) + W * (Du * Du + Dv * Dv);
+                           end;
+                        end if;
+                     else
+                        Ru (N) := Behind_Px; Rv (N) := 0.0;
+                     end if;
+                  end;
+               else
+                  Ru (N) := 0.0; Rv (N) := 0.0;
+               end if;
+            end;
+         end loop;
+         if It < Iters then
+            for T in 0 .. S.Nt - 1 loop
+               if S.Live (T) = 1 and then H (T) > 1.0e-18 then   --  数值保护(无量纲)
+                  --  一步最多挪 log λ ±0.5(远近一步最多差 1.65 倍;高斯牛顿不越过坑,无量纲)
+                  Lz (Lz'First + T) := Lz (Lz'First + T) + Long_Float'Max (-0.5, Long_Float'Min (0.5, -G (T) / H (T)));
+               end if;
+            end loop;
+         end if;
+      end loop;
+   end Mv_Eval;
+   --  起步远近:每条轨迹按"x + u z = 0、y + v z = 0"对 λ 线性最小二乘(u, v = 那一帧里像素换成视线);解出来 ≤ 0 的轨迹不用
+   procedure Mv_Init (S : Mv_Set; F, Cx, Cy : Long_Float; Pr : M3_Array; Pt : V3_Array; Lz : out Vec) is
+      Num : Vec (0 .. Natural'Max (1, S.Nt) - 1) := [others => 0.0];
+      Den : Vec (0 .. Natural'Max (1, S.Nt) - 1) := [others => 0.0];
+   begin
+      for N in 0 .. S.No - 1 loop
+         declare
+            T : constant Natural := S.Ot (N);
+            Q : constant Natural := S.Tq (T);
+            K : constant Natural := S.Of_Fr (N);
+            D : constant V3 := [(S.Du (T) - Cx) / F, -(S.Dv (T) - Cy) / F, -1.0];
+            A : constant V3 := ApT (Pr (K), Ap (Pr (Q), D));
+            B : constant V3 := ApT (Pr (K), Sub (Pt (Q), Pt (K)));
+            U : constant Long_Float := (S.Ou (N) - Cx) / F;
+            V : constant Long_Float := -(S.Ov (N) - Cy) / F;
+            A1 : constant Long_Float := A (0) + U * A (2);
+            A2 : constant Long_Float := A (1) + V * A (2);
+            B1 : constant Long_Float := B (0) + U * B (2);
+            B2 : constant Long_Float := B (1) + V * B (2);
+         begin
+            Num (T) := Num (T) - (A1 * B1 + A2 * B2);
+            Den (T) := Den (T) + A1 * A1 + A2 * A2;
+         end;
+      end loop;
+      for T in 0 .. S.Nt - 1 loop
+         declare
+            L : constant Long_Float := (if Den (T) > 1.0e-18 then Num (T) / Den (T) else 0.0);   --  数值保护(无量纲)
+         begin
+            if L > 0.0 then
+               Lz (Lz'First + T) := Log (L);
+            else
+               Lz (Lz'First + T) := 0.0; S.Live (T) := 0;
+            end if;
+         end;
+      end loop;
+   end Mv_Init;
+   --  中位数(像素残差长度,只算用着的轨迹的笔)
+   function Mv_Med (S : Mv_Set; Ru, Rv : Vec_Ptr; Q : Long_Float := 0.5) return Long_Float is
+      E : Vec_Ptr := new Vec (0 .. Natural'Max (1, S.No) - 1);
+      N : Natural := 0;
+      R : Long_Float;
+   begin
+      for K in 0 .. S.No - 1 loop
+         if S.Live (S.Ot (K)) = 1 and then S.Obs_In (K) = 1 and then Ru (K) /= Behind_Px then
+            E (N) := Sqrt (Ru (K) ** 2 + Rv (K) ** 2); N := N + 1;
+         end if;
+      end loop;
+      R := (if N = 0 then 0.0 elsif Q = 0.5 then Median_Abs (E (0 .. N - 1)) else Quantile_Abs (E (0 .. N - 1), Q));
+      Free (E);
+      return R;
+   end Mv_Med;
+
+   --  挑内点(同 ③):先把每一笔都放回门里、按当前的残差重挑 —— 残差 < max(3 px, 3 倍中位)的进解(协议:配点残差按像素记);
+   --  一笔都不剩的轨迹不用。返回门里几笔
+   procedure Mv_Gate (S : Mv_Set; Ru, Rv : Vec_Ptr; N_In : out Natural) is
+      Md : Long_Float;
+      Gate : Long_Float;
+      Cnt : Nat_Array (0 .. Natural'Max (1, S.Nt) - 1) := [others => 0];
+   begin
+      for K in 0 .. S.No - 1 loop
+         S.Obs_In (K) := 1;
+      end loop;
+      Md := Mv_Med (S, Ru, Rv);
+      Gate := Long_Float'Max (3.0, 3.0 * Md);   --  3 px / 3 倍中位(协议)
+      N_In := 0;
+      for K in 0 .. S.No - 1 loop
+         if Ru (K) = Behind_Px or else Sqrt (Ru (K) ** 2 + Rv (K) ** 2) >= Gate then
+            S.Obs_In (K) := 0;
+         else
+            Cnt (S.Ot (K)) := Cnt (S.Ot (K)) + 1;
+            if S.Live (S.Ot (K)) = 1 then
+               N_In := N_In + 1;
+            end if;
+         end if;
+      end loop;
+      for T in 0 .. S.Nt - 1 loop
+         if Cnt (T) = 0 then
+            S.Live (T) := 0;
+         end if;
+      end loop;
+   end Mv_Gate;
+
+   Mv_Iters : constant := 40;   --  ④ 外层 LM 每轮最多几次(次数;V1B32 离线 10 次后只再降 0.5%)
+   Mv_Up : constant := 10.0;   --  ④ 阻尼放大倍数(次数,同 Robust_LM)
+   Mv_Dn : constant := 3.0;    --  ④ 阻尼缩小倍数(次数,同 Robust_LM)
+
+   procedure Refine_Mv (Frames : Frame_Vectors.Vector; Cs : Corr_Vectors.Vector; M : in out Model; Rep : in out Fit_Report) is
+      Nf : constant Natural := Natural (Frames.Length);
+      N : constant Natural := M.N;
+      Np : constant Natural := 6 * N + 1;
+      S : Mv_Set;
+      Used : array (0 .. Natural'Max (1, Nf) - 1) of Boolean := [others => False];
+      T0 : constant Ada.Calendar.Time := Ada.Calendar.Clock;
+   begin
+      Build_Mv (Cs, -1, S);
+      if S.Nt = 0 or else 2 * S.No <= Np then
+         Free_Mv (S);
+         return;
+      end if;
+      for T in 0 .. S.Nt - 1 loop
+         Used (S.Tq (T)) := True;
+      end loop;
+      for K in 0 .. S.No - 1 loop
+         Used (S.Of_Fr (K)) := True;
+      end loop;
+      declare
+         Nr : constant Natural := 2 * S.No + 2 * N + 1;
+         Wa, Wb : V3_Ptr := new V3_Array (0 .. S.No - 1);
+         Ru, Rv, Ru2, Rv2 : Vec_Ptr := new Vec (0 .. S.No - 1);
+         G, H, Lt : Vec_Ptr := new Vec (0 .. S.Nt - 1);
+         Sw : Vec_Ptr := new Vec (0 .. S.No - 1);   --  外层 IRLS 的 √权(按当前残差定,求导时不动)
+         Lz, Lz2 : Vec_Ptr := new Vec (0 .. S.Nt - 1);
+         Jc : Mat_Ptr := new Mat (0 .. Nr - 1, 0 .. Np - 1);
+         R0 : Vec_Ptr := new Vec (0 .. Nr - 1);
+         X : Vec (0 .. Np - 1);
+         Tau : Long_Float := 3.0;   --  起步的抗野点尺度 3 px(协议,同 ③ 挑内点的门);起步远近解完按中位重定
+         Lam : Long_Float := 1.0e-3;   --  阻尼(无量纲)
+         C0 : Long_Float;
+         Pr : M3_Array (0 .. Nf - 1);
+         Pt : V3_Array (0 .. Nf - 1);
+         function To_Model (Xx : Vec) return Model is
+            Mm : Model := M;
+         begin
+            for J in 0 .. N - 1 loop
+               Mm.Ax (J).W := [Xx (Xx'First + 3 * J), Xx (Xx'First + 3 * J + 1), Xx (Xx'First + 3 * J + 2)];
+               Mm.Ax (J).P := [Xx (Xx'First + 3 * N + 3 * J), Xx (Xx'First + 3 * N + 3 * J + 1), Xx (Xx'First + 3 * N + 3 * J + 2)];
+            end loop;
+            Mm.F := Exp (Xx (Xx'First + 6 * N));
+            return Mm;
+         end To_Model;
+         procedure Poses (Mm : Model) is
+         begin
+            for Fr in 0 .. Nf - 1 loop
+               FK (Mm, Frames (Fr).Q, Pr (Fr), Pt (Fr));
+            end loop;
+         end Poses;
+         --  约束行(不加权,同 ③):轴是单位向量、P 取轴上离参照眼最近那点、尺度钉住"参与的各帧眼的位置均方根 = 1"(1e3 = 比像素残差重得多,比例)
+         --  (Poses 之后调:尺度那一行用 Pt)
+         procedure Reg (Mm : Model; R : out Vec) is
+            S2 : Long_Float := 0.0;
+            Cnt : Natural := 0;
+         begin
+            for J in 0 .. N - 1 loop
+               R (R'First + 2 * J) := 1.0e3 * (Norm (Mm.Ax (J).W) - 1.0);
+               R (R'First + 2 * J + 1) := 1.0e3 * Dot (Mm.Ax (J).W, Mm.Ax (J).P);
+            end loop;
+            for Fr in 0 .. Nf - 1 loop
+               if Used (Fr) then
+                  S2 := S2 + Dot (Pt (Fr), Pt (Fr)); Cnt := Cnt + 1;
+               end if;
+            end loop;
+            R (R'First + 2 * N) := 1.0e3 * ((if Cnt > 0 then Sqrt (S2 / Long_Float (Cnt)) else 1.0) - 1.0);   --  同上(比例)
+         end Reg;
+         function Cost (Rru, Rrv : Vec_Ptr; Rr : Vec) return Long_Float is
+            C : Long_Float := 0.0;
+         begin
+            for K in 0 .. S.No - 1 loop
+               if S.Live (S.Ot (K)) = 1 and then S.Obs_In (K) = 1 then
+                  C := C + Rho_Sl (Rru (K) ** 2 + Rrv (K) ** 2, Tau);
+               end if;
+            end loop;
+            for I in Rr'Range loop
+               C := C + Rr (I) ** 2;
+            end loop;
+            return C;
+         end Cost;
+         Rg0 : Vec (0 .. 2 * N);   --  当前 X 下的约束行
+         --  当前 X、Lz 下:残差、√权、加权残差向量
+         procedure Base is
+         begin
+            for K in 0 .. S.No - 1 loop
+               --  在那一帧眼后面的笔不进外层(它的残差是哨兵,不是像素)
+               Sw (K) := (if S.Live (S.Ot (K)) = 1 and then S.Obs_In (K) = 1 and then Ru (K) /= Behind_Px
+                          then Sqrt (1.0 / Sqrt (1.0 + (Ru (K) ** 2 + Rv (K) ** 2) / (Tau * Tau))) else 0.0);
+               R0 (K) := Sw (K) * Ru (K); R0 (S.No + K) := Sw (K) * Rv (K);
+            end loop;
+            for I in Rg0'Range loop
+               R0 (2 * S.No + I) := Rg0 (I);
+            end loop;
+         end Base;
+      begin
+         --  先把每根轴规整成约束行要的样子(方向归一、轴上那一点取离参照眼最近的垂足 —— 同一根轴,模型不变):
+         --  起步不合约定时约束行一上来就是千倍的违反,LM 为了压它会把模型带歪(焊点:真模型起步走开 24 mm)
+         for J in 0 .. N - 1 loop
+            M.Ax (J).W := Unit (M.Ax (J).W);
+            M.Ax (J).P := Sub (M.Ax (J).P, Scl (M.Ax (J).W, Dot (M.Ax (J).W, M.Ax (J).P)));
+         end loop;
+         --  尺度也按这一步用的帧钉成"眼的位置均方根 = 1"(整只手一起乘一个数,模型的预测不变;③ 钉尺度用的是它的内点那批帧,不一定是这一批)
+         declare
+            S2 : Long_Float := 0.0;
+            Cnt : Natural := 0;
+         begin
+            Poses (M);
+            for Fr in 0 .. Nf - 1 loop
+               if Used (Fr) then
+                  S2 := S2 + Dot (Pt (Fr), Pt (Fr)); Cnt := Cnt + 1;
+               end if;
+            end loop;
+            if Cnt > 0 and then S2 > 0.0 then
+               for J in 0 .. N - 1 loop
+                  M.Ax (J).P := Scl (M.Ax (J).P, 1.0 / Sqrt (S2 / Long_Float (Cnt)));
+               end loop;
+            end if;
+         end;
+         for J in 0 .. N - 1 loop
+            for K in 0 .. 2 loop
+               X (3 * J + K) := M.Ax (J).W (K);
+               X (3 * N + 3 * J + K) := M.Ax (J).P (K);
+            end loop;
+         end loop;
+         X (6 * N) := Log (M.F);
+         Poses (M);
+         Mv_Init (S, M.F, M.Cx, M.Cy, Pr, Pt, Lz.all);
+         Mv_Eval (S, M.F, M.Cx, M.Cy, Pr, Pt, Lz.all, 10, Tau, Wa, Wb, Ru, Rv, G, H, Lt);   --  起步远近解 10 遍(次数)
+         --  在哪一帧眼后面的笔多于一半的轨迹不用(起步模型下这条轨迹的远近解不出来)
+         declare
+            Bad : array (0 .. S.Nt - 1) of Natural := [others => 0];
+            All_N : array (0 .. S.Nt - 1) of Natural := [others => 0];
+         begin
+            for K in 0 .. S.No - 1 loop
+               All_N (S.Ot (K)) := All_N (S.Ot (K)) + 1;
+               if Ru (K) = Behind_Px then
+                  Bad (S.Ot (K)) := Bad (S.Ot (K)) + 1;
+               end if;
+            end loop;
+            for T in 0 .. S.Nt - 1 loop
+               if 2 * Bad (T) > All_N (T) then
+                  S.Live (T) := 0;
+               end if;
+            end loop;
+         end;
+         --  两轮(同 ③):每轮先按当前的残差重挑内点(门外的笔不进解)、按门里的残差中位重定抗野点尺度,再解;第二轮按第一轮解出的模型重挑
+         --  (合成焊点:5% 乱配时 soft-l1 对大残差还有恒定的拉力,几千条乱配一起把模型拉歪 24 mm —— 要先挑掉)
+         Rep.Mv_Iters := 0;
+         for Round in 1 .. 2 loop
+            declare
+               N_In : Natural;
+            begin
+               Poses (To_Model (X));
+               Mv_Gate (S, Ru, Rv, N_In);
+               Mv_Eval (S, Exp (X (6 * N)), M.Cx, M.Cy, Pr, Pt, Lz.all, 5, Tau, Wa, Wb, Ru, Rv, G, H, Lt);   --  门里的重解远近 5 遍(次数)
+               if Round = 1 then
+                  Rep.Mv_Start_Px := Mv_Med (S, Ru, Rv);
+               end if;
+               Tau := Long_Float'Max (1.4826 * Mv_Med (S, Ru, Rv), 1.0e-3);   --  抗野点尺度 = 门里残差中位换标准差(1.4826 统计常数;下限只防零,无量纲)
+               Mv_Eval (S, Exp (X (6 * N)), M.Cx, M.Cy, Pr, Pt, Lz.all, 3, Tau, Wa, Wb, Ru, Rv, G, H, Lt);
+               Rep.Mv_Obs := N_In;
+               Rep.Mv_Tracks := 0;
+               for T in 0 .. S.Nt - 1 loop
+                  Rep.Mv_Tracks := Rep.Mv_Tracks + S.Live (T);
+               end loop;
+               Reg (To_Model (X), Rg0);
+               Base;
+               C0 := Cost (Ru, Rv, Rg0);
+            for It in 1 .. Mv_Iters loop
+               Rep.Mv_Iters := Rep.Mv_Iters + 1;
+               --  数值雅可比:每个数挪一点,远近从当前解起再解 2 遍(次数),外层权不动
+               for Jp in 0 .. Np - 1 loop
+                  declare
+                     Xp : Vec := X;
+                     Hh : constant Long_Float := 1.0e-6 * Long_Float'Max (1.0, abs X (Jp));   --  差分步(相对 1e-6,无量纲)
+                     Mm : Model;
+                  begin
+                     Xp (Jp) := Xp (Jp) + Hh;
+                     Mm := To_Model (Xp);
+                     Poses (Mm);
+                     Lz2.all := Lz.all;
+                     Mv_Eval (S, Mm.F, Mm.Cx, Mm.Cy, Pr, Pt, Lz2.all, 2, Tau, Wa, Wb, Ru2, Rv2, G, H, Lt);
+                     for K in 0 .. S.No - 1 loop
+                        Jc (K, Jp) := (if Sw (K) > 0.0 and then Ru2 (K) /= Behind_Px then Sw (K) * (Ru2 (K) - Ru (K)) / Hh else 0.0);
+                        Jc (S.No + K, Jp) := (if Sw (K) > 0.0 and then Ru2 (K) /= Behind_Px then Sw (K) * (Rv2 (K) - Rv (K)) / Hh else 0.0);
+                     end loop;
+                     declare
+                        Rg : Vec (0 .. 2 * N);
+                     begin
+                        Reg (Mm, Rg);
+                        for I in Rg'Range loop
+                           Jc (2 * S.No + I, Jp) := (Rg (I) - Rg0 (I)) / Hh;
+                        end loop;
+                     end;
+                  end;
+               end loop;
+               declare
+                  A : Mat (0 .. Np - 1, 0 .. Np - 1) := [others => [others => 0.0]];
+                  B : Vec (0 .. Np - 1) := [others => 0.0];
+                  Improved : Boolean := False;
+               begin
+                  for I in 0 .. Nr - 1 loop
+                     for K in 0 .. Np - 1 loop
+                        declare
+                           Jk : constant Long_Float := Jc (I, K);
+                        begin
+                           if Jk /= 0.0 then
+                              for L in K .. Np - 1 loop
+                                 A (K, L) := A (K, L) + Jk * Jc (I, L);
+                              end loop;
+                              B (K) := B (K) - Jk * R0 (I);
+                           end if;
+                        end;
+                     end loop;
+                  end loop;
+                  for K in 0 .. Np - 1 loop
+                     for L in 0 .. K - 1 loop
+                        A (K, L) := A (L, K);
+                     end loop;
+                  end loop;
+                  for Try in 1 .. 8 loop   --  一轮里最多调 8 次阻尼(次数)
+                     declare
+                        Aa : Mat := A;
+                        Bb : Vec := B;
+                        D : Vec (0 .. Np - 1) := [others => 0.0];
+                        Xn : Vec := X;
+                        Cn : Long_Float;
+                        Mm : Model;
+                        Rg : Vec (0 .. 2 * N);
+                     begin
+                        for K in 0 .. Np - 1 loop
+                           Aa (K, K) := Aa (K, K) * (1.0 + Lam) + 1.0e-12;
+                        end loop;
+                        for Col in 0 .. Np - 1 loop
+                           declare
+                              Pv : Natural := Col;
+                           begin
+                              for Rw in Col + 1 .. Np - 1 loop
+                                 if abs Aa (Rw, Col) > abs Aa (Pv, Col) then
+                                    Pv := Rw;
+                                 end if;
+                              end loop;
+                              if Pv /= Col then
+                                 for Cc in 0 .. Np - 1 loop
+                                    declare
+                                       Tmp : constant Long_Float := Aa (Col, Cc);
+                                    begin
+                                       Aa (Col, Cc) := Aa (Pv, Cc); Aa (Pv, Cc) := Tmp;
+                                    end;
+                                 end loop;
+                                 declare
+                                    Tmp : constant Long_Float := Bb (Col);
+                                 begin
+                                    Bb (Col) := Bb (Pv); Bb (Pv) := Tmp;
+                                 end;
+                              end if;
+                              if abs Aa (Col, Col) > 1.0e-300 then   --  主元为零保护(数值,无量纲)
+                                 for Rw in Col + 1 .. Np - 1 loop
+                                    declare
+                                       Fct : constant Long_Float := Aa (Rw, Col) / Aa (Col, Col);
+                                    begin
+                                       if Fct /= 0.0 then
+                                          for Cc in Col .. Np - 1 loop
+                                             Aa (Rw, Cc) := Aa (Rw, Cc) - Fct * Aa (Col, Cc);
+                                          end loop;
+                                          Bb (Rw) := Bb (Rw) - Fct * Bb (Col);
+                                       end if;
+                                    end;
+                                 end loop;
+                              end if;
+                           end;
+                        end loop;
+                        for K in reverse 0 .. Np - 1 loop
+                           declare
+                              Sm : Long_Float := Bb (K);
+                           begin
+                              for Cc in K + 1 .. Np - 1 loop
+                                 Sm := Sm - Aa (K, Cc) * D (Cc);
+                              end loop;
+                              D (K) := (if abs Aa (K, K) > 1.0e-300 then Sm / Aa (K, K) else 0.0);   --  同上(数值,无量纲)
+                           end;
+                        end loop;
+                        for K in 0 .. Np - 1 loop
+                           Xn (K) := X (K) + D (K);
+                        end loop;
+                        Mm := To_Model (Xn);
+                        Poses (Mm);
+                        Lz2.all := Lz.all;
+                        Mv_Eval (S, Mm.F, Mm.Cx, Mm.Cy, Pr, Pt, Lz2.all, 4, Tau, Wa, Wb, Ru2, Rv2, G, H, Lt);   --  试的这一步远近再解 4 遍(次数)
+                        Reg (Mm, Rg);
+                        Cn := Cost (Ru2, Rv2, Rg);
+                        if Cn < C0 then
+                           Improved := (C0 - Cn) > 1.0e-7 * C0;   --  这一轮代价降得不到千万分之一就算到底了(比例)
+                           X := Xn; Lz.all := Lz2.all; Ru.all := Ru2.all; Rv.all := Rv2.all; Rg0 := Rg;
+                           Base;
+                           C0 := Cn;
+                           Lam := Long_Float'Max (1.0e-9, Lam / Mv_Dn);
+                           exit;
+                        else
+                           Lam := Lam * Mv_Up;
+                        end if;
+                     end;
+                  end loop;
+                  exit when not Improved;
+               end;
+            end loop;
+            end;
+         end loop;
+         M := To_Model (X);
+         for J in 0 .. N - 1 loop
+            M.Ax (J).W := Unit (M.Ax (J).W);
+         end loop;
+         Rep.Mv_Px := Mv_Med (S, Ru, Rv);
+         Rep.Mv_P90_Px := Mv_Med (S, Ru, Rv, 0.9);   --  九成分位(比例,只报数)
+         Rep.F := M.F;
+         Free (Wa); Free (Wb); Free (Ru); Free (Rv); Free (Ru2); Free (Rv2); Free (G); Free (H); Free (Lt); Free (Sw); Free (Lz); Free (Lz2); Free (Jc); Free (R0);
+      end;
+      Free_Mv (S);
+      Rep.Secs.Append (Long_Float (Ada.Calendar."-" (Ada.Calendar.Clock, T0)));
+   end Refine_Mv;
+
+   procedure Refine_Tracks (Frames : Frame_Vectors.Vector; Cs : Corr_Vectors.Vector; M : in out Model; Rep : in out Fit_Report) is
+   begin
+      Refine_Mv (Frames, Cs, M, Rep);
+   end Refine_Tracks;
+
+   procedure Track_Points (M : Model; Frames : Frame_Vectors.Vector; Cs : Corr_Vectors.Vector; Only_I : Integer; Min_Views : Natural;
+                           Tracks : out Track_Pt_Vectors.Vector; Sig_Px : out Long_Float) is
+      Nf : constant Natural := Natural (Frames.Length);
+      S : Mv_Set;
+   begin
+      Tracks.Clear; Sig_Px := 0.0;
+      Build_Mv (Cs, Only_I, S);
+      if S.Nt = 0 then
+         Free_Mv (S);
+         return;
+      end if;
+      declare
+         Wa, Wb : V3_Ptr := new V3_Array (0 .. S.No - 1);
+         Ru, Rv : Vec_Ptr := new Vec (0 .. S.No - 1);
+         G, H, Lt : Vec_Ptr := new Vec (0 .. S.Nt - 1);
+         Lz : Vec_Ptr := new Vec (0 .. S.Nt - 1);
+         Pr : M3_Array (0 .. Nf - 1);
+         Pt : V3_Array (0 .. Nf - 1);
+         Tau : Long_Float := 3.0;   --  起步的抗野点尺度 3 px(协议,同 ③ 挑内点的门)
+         Sig : Long_Float;
+      begin
+         for Fr in 0 .. Nf - 1 loop
+            FK (M, Frames (Fr).Q, Pr (Fr), Pt (Fr));
+         end loop;
+         Mv_Init (S, M.F, M.Cx, M.Cy, Pr, Pt, Lz.all);
+         Mv_Eval (S, M.F, M.Cx, M.Cy, Pr, Pt, Lz.all, 10, Tau, Wa, Wb, Ru, Rv, G, H, Lt);   --  10 遍(次数)
+         Sig := 1.4826 * Mv_Med (S, Ru, Rv);   --  正态下中位换标准差(统计常数)
+         Tau := Long_Float'Max (Sig, 1.0e-3);   --  下限只防零(无量纲)
+         Mv_Eval (S, M.F, M.Cx, M.Cy, Pr, Pt, Lz.all, 5, Tau, Wa, Wb, Ru, Rv, G, H, Lt);   --  按量到的尺度再解 5 遍(次数)
+         Sig := 1.4826 * Mv_Med (S, Ru, Rv);
+         Sig_Px := Sig;
+         --  每条轨迹:看见的帧数、残差中位、离起点那帧的眼最远的一帧
+         declare
+            type Tr is record
+               N : Natural := 0;
+               Far : Natural := 0;
+               Far_D : Long_Float := -1.0;
+               Behind : Boolean := False;
+            end record;
+            Tt : array (0 .. S.Nt - 1) of Tr;
+            Es : array (0 .. S.Nt - 1) of Floats;
+         begin
+            for K in 0 .. S.No - 1 loop
+               declare
+                  T : constant Natural := S.Ot (K);
+                  Fk : constant Natural := S.Of_Fr (K);
+                  Dd : constant Long_Float := Norm (Sub (Pt (Fk), Pt (S.Tq (T))));
+               begin
+                  if S.Live (T) = 1 then
+                     if Ru (K) = Behind_Px then
+                        Tt (T).Behind := True;
+                     else
+                        Tt (T).N := Tt (T).N + 1;
+                        Es (T).Append (Sqrt (Ru (K) ** 2 + Rv (K) ** 2));
+                        if Dd > Tt (T).Far_D then
+                           Tt (T).Far_D := Dd; Tt (T).Far := Fk;
+                        end if;
+                     end if;
+                  end if;
+               end;
+            end loop;
+            for T in 0 .. S.Nt - 1 loop
+               if S.Live (T) = 1 and then not Tt (T).Behind and then Tt (T).N + 1 >= Min_Views and then H (T) > 1.0e-18 then   --  数值保护(无量纲)
+                  declare
+                     Q : constant Natural := S.Tq (T);
+                     D : constant V3 := [(S.Du (T) - M.Cx) / M.F, -(S.Dv (T) - M.Cy) / M.F, -1.0];
+                     Lam : constant Long_Float := Exp (Lz (T));
+                     Dw : constant V3 := Ap (Pr (Q), D);
+                     E : Vec (0 .. Natural (Es (T).Length) - 1);
+                  begin
+                     for I in E'Range loop
+                        E (I) := Es (T) (I);
+                     end loop;
+                     --  沿视线:log λ 的方差 = σ² / 曲率 ⇒ λ 的方差 × |d|²(d 的 z = -1,沿视线的长度 = λ |d|)
+                     Tracks.Append (Track_Pt'(X => Add (Pt (Q), Scl (Dw, Lam)), Var_Along => Dot (D, D) * Lam * Lam * Sig * Sig / H (T),
+                                           I => Q, U => S.Du (T), V => S.Dv (T), Far => Tt (T).Far, Views => Tt (T).N + 1, Med_Px => Median_Abs (E)));
+                  end;
+               end if;
+            end loop;
+         end;
+         Free (Wa); Free (Wb); Free (Ru); Free (Rv); Free (G); Free (H); Free (Lt); Free (Lz);
+      end;
+      Free_Mv (S);
+   end Track_Points;
 
    procedure Fit (Frames : Frame_Vectors.Vector; Ref : Natural; Cs : Corr_Vectors.Vector; Cx, Cy, Width : Long_Float;
                   M : out Model; Rep : out Fit_Report; Ok : out Boolean; Per_Pair : Positive := 60) is
@@ -1486,6 +2113,8 @@ package body Kinem is
                Rep.Flipped := True;
             end if;
          end;
+         --  ④ 多视图:有轨迹就按重投影一起解(③ 的结果当起步)
+         Refine_Mv (Frames, Cs, M, Rep);
          M.Valid := True;
          Ok := True;
       end;
@@ -1749,50 +2378,96 @@ package body Kinem is
             end if;
          end;
       end loop;
-      --  内点(同上的统计常数,无量纲)按最小二乘重拟合:中心 + 协方差最小特征向量(用 4×4 那个求解器:补一行一列 0)
+      --  内点(门 = 2.5 × 1.4826 × 中位,统计常数,无量纲)按最小二乘重拟合:中心 + 协方差最小特征向量(用 4×4 那个求解器:补一行一列 0)。
+      --  散布按门里的点重估、再挑再拟合,两遍(09-27 V1B32:格点铺满全画幅以后桌面点只占五成多,全体点的中位 = 2.6 mm,真桌面点只散 0.5 mm ——
+      --  最小中位数的中位在内点不到一半多时量的是门,不是面;交出去的 Med = 门里的点离面的中位)
       declare
-         Gate : constant Long_Float := 2.5 * 1.4826 * Best_Med;
+         Sig : Long_Float := 1.4826 * Best_Med;   --  正态下中位换标准差(统计常数)
          Cnt : Natural := 0;
-         Ctr : V3 := [0.0, 0.0, 0.0];
+         Ext : Long_Float;   --  这团点多大(各点离起步那一点的距离的中位):散布的下限按它的 1e-9 算,只防精确共面的点把门算成 0
       begin
-         Med := Med_Of (P0, Nrm);
-         for I in 0 .. N - 1 loop
-            if abs Res (I) <= Gate then
-               Cnt := Cnt + 1; Ctr := Add (Ctr, X (X'First + I));
-            end if;
-         end loop;
-         if Cnt >= 3 then
-            Ctr := Scl (Ctr, 1.0 / Long_Float (Cnt));
+         declare
+            D : Vec (0 .. Natural'Max (1, N) - 1);
+         begin
+            for I in 0 .. N - 1 loop
+               D (I) := Norm (Sub (X (X'First + I), P0));
+            end loop;
+            Ext := Median_Abs (D (0 .. N - 1));
+         end;
+         Sig := Long_Float'Max (Sig, 1.0e-9 * Ext);   --  数值保护(比例,无量纲)
+         for Pass in 1 .. 2 loop   --  两遍(次数)
             declare
-               Cv : Mat (0 .. 3, 0 .. 3) := [others => [others => 0.0]];
+               Gate : constant Long_Float := 2.5 * Sig;   --  2.5 倍标准差(统计常数,无量纲)
+               Ctr : V3 := [0.0, 0.0, 0.0];
+               Nin : Natural := 0;
             begin
+               Med := Med_Of (P0, Nrm);   --  顺带把每个点的残差算进 Res
+               Cnt := 0;
                for I in 0 .. N - 1 loop
                   if abs Res (I) <= Gate then
-                     declare
-                        D : constant V3 := Sub (X (X'First + I), Ctr);
-                     begin
-                        for Rr in 0 .. 2 loop
-                           for Cc in 0 .. 2 loop
-                              Cv (Rr, Cc) := Cv (Rr, Cc) - D (Rr) * D (Cc);   --  取负:最大特征值 = 原来最小的那个
-                           end loop;
-                        end loop;
-                     end;
+                     Cnt := Cnt + 1; Ctr := Add (Ctr, X (X'First + I));
                   end if;
                end loop;
-               Cv (3, 3) := -1.0e300;   --  第四维不许被选中(无量纲)
+               exit when Cnt < 3;
+               Ctr := Scl (Ctr, 1.0 / Long_Float (Cnt));
                declare
-                  E : constant Vec := Max_Eigvec4 (Cv);
-                  Nn : constant V3 := [E (0), E (1), E (2)];
+                  Cv : Mat (0 .. 3, 0 .. 3) := [others => [others => 0.0]];
                begin
-                  if Norm (Nn) > 0.0 then
-                     Nrm := Unit (Nn);
-                     P0 := Ctr;
+                  for I in 0 .. N - 1 loop
+                     if abs Res (I) <= Gate then
+                        declare
+                           D : constant V3 := Sub (X (X'First + I), Ctr);
+                        begin
+                           for Rr in 0 .. 2 loop
+                              for Cc in 0 .. 2 loop
+                                 Cv (Rr, Cc) := Cv (Rr, Cc) - D (Rr) * D (Cc);   --  取负:最大特征值 = 原来最小的那个
+                              end loop;
+                           end loop;
+                        end;
+                     end if;
+                  end loop;
+                  Cv (3, 3) := -1.0e300;   --  第四维不许被选中(无量纲)
+                  declare
+                     E : constant Vec := Max_Eigvec4 (Cv);
+                     Nn : constant V3 := [E (0), E (1), E (2)];
+                  begin
+                     if Norm (Nn) > 0.0 then
+                        Nrm := Unit (Nn);
+                        P0 := Ctr;
+                     end if;
+                  end;
+               end;
+               --  按新的面、同一个门里的点重估散布
+               declare
+                  Ins : Vec (0 .. Natural'Max (1, N) - 1);
+               begin
+                  Med := Med_Of (P0, Nrm);
+                  for I in 0 .. N - 1 loop
+                     if abs Res (I) <= Gate then
+                        Ins (Nin) := Res (I); Nin := Nin + 1;
+                     end if;
+                  end loop;
+                  if Nin >= 3 then
+                     Sig := Long_Float'Max (1.4826 * Median_Abs (Ins (0 .. Nin - 1)), 1.0e-9 * Ext);   --  中位换标准差(统计常数);下限同上(比例,无量纲)
                   end if;
                end;
             end;
-         end if;
-         Inliers := Cnt;
-         Med := Med_Of (P0, Nrm);
+         end loop;
+         --  交出去:门里几个点、门里的点离面的中位
+         declare
+            Gate : constant Long_Float := 2.5 * Sig;   --  同上的门(统计常数,无量纲)
+            Ins : Vec (0 .. Natural'Max (1, N) - 1);
+            Nin : Natural := 0;
+         begin
+            Med := Med_Of (P0, Nrm);
+            for I in 0 .. N - 1 loop
+               if abs Res (I) <= Gate then
+                  Ins (Nin) := Res (I); Nin := Nin + 1;
+               end if;
+            end loop;
+            Inliers := Nin;
+            Med := (if Nin > 0 then Median_Abs (Ins (0 .. Nin - 1)) else Med);
+         end;
       end;
    end Robust_Plane;
 

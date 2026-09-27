@@ -164,7 +164,8 @@ begin
             begin
                if Natural (F.Length) >= 6 then
                   Css (A).Append (Kinem.Corr'(I => Natural'Value (F (0)), J => Natural'Value (F (1)), Ua => Long_Float'Value (F (2)), Va => Long_Float'Value (F (3)),
-                                              Ub => Long_Float'Value (F (4)), Vb => Long_Float'Value (F (5))));
+                                              Ub => Long_Float'Value (F (4)), Vb => Long_Float'Value (F (5)),
+                                              Pt => (if Natural (F.Length) >= 7 then Integer'Value (F (6)) else -1)));   --  第 7 列 = 轨迹号(旧文件没有 = 不成轨迹)
                end if;
             end;
          end loop;
