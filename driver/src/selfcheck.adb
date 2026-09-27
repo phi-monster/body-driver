@@ -1917,7 +1917,8 @@ begin
             end loop;
          end loop;
          Check (Ok_All, "图顺时针转 90°:原图 (u, v) 落在新图 (H − 1 − v, u)" & (if Ok_All then ",15 个像素全对" else "(错)"));
-         --  转 1、2、3 次之后的图里每个像素换算回原图(Act.Unturn)= 它本来的位置:按像素值认(每个像素的第一个字节各不相同)
+         --  转 1、2、3 次之后的图里每个像素的中心换算回原图(Act.Unturn)= 它本来那个像素的中心:按像素值认(每个像素的第一个字节各不相同)。
+         --  坐标按配点仪器的约定是连续的:下标 i 的像素中心在 i + 0.5(09-27:原来按下标验、Unturn 写成 h − 1 − u',对下标对,对仪器给的坐标每步错 1 px)
          declare
             Img_T : Buf := Im;
             Wt : Natural := Wd;
@@ -1936,8 +1937,10 @@ begin
                      declare
                         U0, V0 : Long_Float;
                      begin
-                        Act.Unturn (Long_Float (X), Long_Float (Y), T, Wd, Ht, U0, V0);
-                        if U0 < 0.0 or else V0 < 0.0 or else Natural (U0) >= Wd or else Natural (V0) >= Ht
+                        Act.Unturn (Long_Float (X) + 0.5, Long_Float (Y) + 0.5, T, Wd, Ht, U0, V0);   --  像素中心(连续坐标)
+                        U0 := U0 - 0.5; V0 := V0 - 0.5;   --  中心 → 下标
+                        if U0 < 0.0 or else V0 < 0.0 or else abs (U0 - Long_Float'Rounding (U0)) > 1.0e-9 or else abs (V0 - Long_Float'Rounding (V0)) > 1.0e-9
+                          or else Natural (U0) >= Wd or else Natural (V0) >= Ht
                           or else Img_T ((Y * Wt + X) * 3) /= Im ((Natural (V0) * Wd + Natural (U0)) * 3)
                         then
                            Back_Ok := False;
@@ -1946,7 +1949,7 @@ begin
                   end loop;
                end loop;
             end loop;
-            Check (Back_Ok, "转了 1/2/3 个 90° 的图里的像素换算回原图:" & (if Back_Ok then "每个都回到本来的位置" else "有回错的(错)"));
+            Check (Back_Ok, "转了 1/2/3 个 90° 的图里每个像素的中心(连续坐标)换算回原图:" & (if Back_Ok then "每个都回到本来那个像素的中心" else "有回错的(错)"));
          end;
       end;
    end;

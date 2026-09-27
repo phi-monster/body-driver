@@ -6890,7 +6890,10 @@ package body Act is
       return R;
    end Turn_90;
 
-   --  原图(宽 W、高 H)顺时针转了 Turns 个 90° 之后那张图里的 (U, V),换算回原图:每退一步,转之前高 h 的图里 (u, v) = (v', h − 1 − u')
+   --  原图(宽 W、高 H)顺时针转了 Turns 个 90° 之后那张图里的 (U, V),换算回原图。坐标是连续的像素坐标 —— 配点仪器的约定:下标 i 的像素占 [i, i + 1)、
+   --  中心在 i + 0.5(开机钉的主点 = 画幅中心 W / 2 就是这个约定)⇒ 每退一步,转之前高 h 的图里 (u, v) = (v', h − u')。
+   --  09-27 查出:原来按下标写成 h − 1 − u',每退一步错 1 px —— 参考图配它自己转 90° 的那张,板上 714 个点按 h − u' 误差中位 0.245 px、按 h − 1 − u' 0.883 px;
+   --  被转以后重标的那份整片偏 1 px 左右(按真值中位 1.15–1.39 px,开机那份 0.30);开机量的"转着看的配点噪声"也按它算,0.8 px 大半是这 1 px
    procedure Unturn (U, V : Long_Float; Turns, W, H : Natural; U0, V0 : out Long_Float) is
       Uc : Long_Float := U;
       Vc : Long_Float := V;
@@ -6899,7 +6902,7 @@ package body Act is
          declare
             H_Before : constant Natural := (if T mod 2 = 1 then H else W);   --  第 T 步转之前那张图的高:奇数步前是原图朝向
             U1 : constant Long_Float := Vc;
-            V1 : constant Long_Float := Long_Float (H_Before) - 1.0 - Uc;
+            V1 : constant Long_Float := Long_Float (H_Before) - Uc;
          begin
             Uc := U1; Vc := V1;
          end;
@@ -6936,7 +6939,7 @@ package body Act is
       end if;
       for I in 0 .. Natural (Q.Length) - 1 loop
          if M (I).U >= 0.0 and then M (I).V >= 0.0 then
-            E.Append (Sqrt ((M (I).U - (Long_Float (H) - 1.0 - Q (I).V)) ** 2 + (M (I).V - Q (I).U) ** 2));
+            E.Append (Sqrt ((M (I).U - (Long_Float (H) - Q (I).V)) ** 2 + (M (I).V - Q (I).U) ** 2));   --  连续坐标:原图 (u, v) 转过去在 (H − v, u)(同 Unturn)
          end if;
       end loop;
       if E.Is_Empty then
@@ -7072,7 +7075,7 @@ package body Act is
          R : Geom.Fixed_Check;
          Ok : Boolean;
          Turned : Natural := 0;   --  此刻的图转回几个 90° 才配上的
-         --  此刻的图先顺时针转 Turns 个 90°(Turn_90)再配;配到的像素一步步换算回没转的画面:转一步前高 h 的图里 (u, v) ← 转后的 (u', v') = (v', h − 1 − u')
+         --  此刻的图先顺时针转 Turns 个 90°(Turn_90)再配;配到的像素一步步换算回没转的画面:转一步前高 h 的图里 (u, v) ← 转后的 (u', v') = (v', h − u')(连续坐标,见 Unturn)
          function Matched (Turns : Natural; Got : out Boolean) return Geom.Scene_Pt_Vectors.Vector is
             Img : Buf := F.Cams (Wc).RGB;
             W : Natural := F.Cams (Wc).W;
