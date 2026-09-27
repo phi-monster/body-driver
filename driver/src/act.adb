@@ -11504,6 +11504,22 @@ package body Act is
                         end loop;
                         Plug.Reach (A, Chan.Compose (P, Av), Pe, Re, Rok);
                         Asked := Asked + 1;
+                        --  量过一瓣以后,压到"眼离面 = 量过的那一瓣 − 一小步"那么低也要解得出来(V1B31 2026-09-27:这个朝向往下走到指尖离桌面 5 mm 时
+                        --  到了量到的关节限位、反解解不下去,手停住被当成碰到,两处都这样、差 5.5 mm 过了门,那一瓣长了 7 mm)
+                        if Rok and then Pe <= Tol_P and then Re <= Tol_R and then S_Known > 0.0 then
+                           declare
+                              Dz : constant Long_Float := Long_Float'Max (0.0, H - (S_Known - 4.0 * Geo_Base (C, A)));   --  一小步 = 4 倍最小一档(同 Geo_Go 默认的一压)
+                              Pe2, Re2 : Long_Float;
+                              Rok2 : Boolean;
+                              Av2 : Table.Vec := Av;
+                           begin
+                              for I in 0 .. 2 loop
+                                 Av2 (I) := Av (I) + Dz * Down (I);
+                              end loop;
+                              Plug.Reach (A, Chan.Compose (P, Av2), Pe2, Re2, Rok2);
+                              Pe := Long_Float'Max (Pe, Pe2); Re := Long_Float'Max (Re, Re2);
+                           end;
+                        end if;
                         if not Rok or else (Pe <= Tol_P and then Re <= Tol_R) then
                            Dl := D1; Found := True;
                            exit;
@@ -11740,8 +11756,11 @@ package body Act is
                   T0 : constant Geom.V3 := [N (1) * Ax (2) - N (2) * Ax (1), N (2) * Ax (0) - N (0) * Ax (2), N (0) * Ax (1) - N (1) * Ax (0)];
                   Tn : constant Long_Float := Geom.Norm (T0);
                   Far0 : constant Long_Float := 4.0 * 4.0 * Geo_Base (C, A);   --  4 倍一压(一压 = 4 倍探针幅度,同 Geo_Go)
+                  --  两处对不对得上的门 = 一小步(4 倍最小一档,同 Geo_Go 默认的一压):小步压到被顶住,碰到的地方就定在一小步以内。
+                  --  不再加"两边视线交面的不确定度"—— 那是桌面点的离散(约 2 mm / 次),两处共用同一张面、同一只手,比两处时抵掉了;
+                  --  加上它门成了 9 mm,V1B31 胳膊到限位停早了的两处差 5.5 mm 也收了(真碰到桌面的两处差 0.05–0.4 mm)
                   function Gate_Of (Ra, Rb : Geom.Plane_Tip_Vectors.Vector) return Long_Float is
-                    (3.0 * Sqrt (Ra (K).Sd ** 2 + Rb (K).Sd ** 2) + Geo_Base (C, A));   --  3 倍两边不确定度(倍数无量纲,同踢离群)+ 一推的最小一档
+                    (4.0 * Geo_Base (C, A));
                   function Along (D : Long_Float) return Geom.V3 is
                     (if Tn > 0.0 then [D * T0 (0) / Tn, D * T0 (1) / Tn, D * T0 (2) / Tn] else [0.0, 0.0, 0.0]);
                   procedure Take (Ra, Rb : Geom.Plane_Tip_Vectors.Vector) is

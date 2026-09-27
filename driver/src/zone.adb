@@ -796,14 +796,13 @@ package body Zone is
          H.Open_Reading := (if Hi_Open then Hi_R else Lo_R);
          H.Empty_Close := (if Hi_Open then Lo_R else Hi_R);
          H.Close_Steps := (if Hi_Open then Lo_Steps else Hi_Steps);
-         if not Hi_Open then
-            declare
-               Rr : Long_Float;
-               St : Natural := 0;
-            begin
-               Go_Jaw (Lo_R, Rr, St, Okg);   --  停在张开那头
-            end;
-         end if;
+         --  停在张开那头,发的就是那一头的读数(不留推到头时 ×4 放出去的那个命令当爪子的目标)
+         declare
+            Rr : Long_Float;
+            St : Natural := 0;
+         begin
+            Go_Jaw (H.Open_Reading, Rr, St, Okg);
+         end;
       end;
       Ok := True;
    end Measure;
