@@ -138,7 +138,8 @@ begin
          Put_Line ("读不了 " & To_String (First_Img));
          return;
       end if;
-      Kinem.Fit (Frames, 0, Cs, Long_Float (W) / 2.0, Long_Float (H) / 2.0, Long_Float (W), M, Rep, Ok);
+      Kinem.Fit (Frames, 0, Cs, Long_Float (W) / 2.0, Long_Float (H) / 2.0, Long_Float (W), M, Rep, Ok,
+                 Per_Pair => (if Codec.Env ("KINEXAM_PER_PAIR") /= "" then Positive'Value (Codec.Env ("KINEXAM_PER_PAIR")) else 60));   --  对照实验:一起解每对取几个点(次数;不给 = 同驱动)
    end;
    declare
       T : Unbounded_String;

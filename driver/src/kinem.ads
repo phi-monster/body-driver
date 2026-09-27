@@ -62,7 +62,8 @@ package Kinem is
    --  Frames(Ref) = 参照帧(扫描起点);Width = 画幅宽(像素,焦距网格按它铺:视场 30°–110°)。
    --  Ok = False:能量的轴不够 / 配点不够(Rep 里照实写到哪一步)
    procedure Fit (Frames : Frame_Vectors.Vector; Ref : Natural; Cs : Corr_Vectors.Vector; Cx, Cy, Width : Long_Float;
-                  M : out Model; Rep : out Fit_Report; Ok : out Boolean);
+                  M : out Model; Rep : out Fit_Report; Ok : out Boolean; Per_Pair : Positive := 60);
+   --  Per_Pair:最后一起解时每一对最多取几个内点(次数;驱动开机永远用默认 —— 离线回放 kinexam 的 KINEXAM_PER_PAIR 才改,做对照实验)
 
    --  一个配点在模型下的 Sampson 残差(像素)
    function Residual (M : Model; Frames : Frame_Vectors.Vector; C : Corr) return Long_Float;

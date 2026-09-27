@@ -627,7 +627,6 @@ package body Kinem is
    Grid_Rad : constant := 0.279252680319093;   --  网格只用两帧之间转角 ≤ 16°(= 0.2793 弧度)的配点(协议:坑宽 —— 转角大的对坑太窄,网格点落不进去,LAB 09-26)
    Per_Pair_Grid : constant := 30; --  网格上每一对最多取几个配点(次数)
    Per_Pair_All : constant := 200; --  精修 / 定比例时每一对最多取几个配点(次数)
-   Per_Pair_BA : constant := 60;   --  最后一起解时每一对最多取几个内点(次数)
    Grid_Target : constant := 1200; --  每根轴单独起步时网格一共用多少个配点(次数)
    All_Target : constant := 8000;  --  每根轴单独精修时一共用多少个配点(次数)
 
@@ -731,7 +730,7 @@ package body Kinem is
    end Min_Eig;
 
    procedure Fit (Frames : Frame_Vectors.Vector; Ref : Natural; Cs : Corr_Vectors.Vector; Cx, Cy, Width : Long_Float;
-                  M : out Model; Rep : out Fit_Report; Ok : out Boolean) is
+                  M : out Model; Rep : out Fit_Report; Ok : out Boolean; Per_Pair : Positive := 60) is
       Q0 : constant Floats := Frames (Ref).Q;
       N : constant Natural := Natural'Min (Max_Joints, Natural (Q0.Length));
       Nf : constant Natural := Natural (Frames.Length);
@@ -1337,8 +1336,8 @@ package body Kinem is
                end loop;
                Free (R);
             end;
-            --  一起解的时候每一对最多 Per_Pair_BA 个(均匀隔着取;5 分钟一炮:V1B3 一起解用了 11 万个配点、75–146 秒)
-            Inl := Thin (Inl, Per_Pair_BA);
+            --  一起解的时候每一对最多 Per_Pair 个(均匀隔着取;5 分钟一炮:V1B3 一起解用了 11 万个配点、75–146 秒)
+            Inl := Thin (Inl, Per_Pair);
             Rep.N_Used := Natural (Inl.Length);
             if Inl.Is_Empty then
                return;

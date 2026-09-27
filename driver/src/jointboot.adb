@@ -2330,6 +2330,20 @@ package body Jointboot is
                Ada.Text_IO.New_Line (Fo);
                Ada.Text_IO.Close (Fo);
             end if;
+            --  配进不动的眼的每一笔(离线查它的位姿准不准用):哪只手、它的第几格、第几个三角点、在不动的眼里的像素、往返差、这个点在那只手自己系里的坐标和协方差、三角它的另一格
+            Ada.Text_IO.Create (Fo, Ada.Text_IO.Out_File, Dump & "/cam_obs.txt");
+            for X of Cam_Obs loop
+               declare
+                  P : constant Tri_Pt := Ps (X.Pa) (X.Pk);
+               begin
+                  Ada.Text_IO.Put_Line (Fo, Codec.Img (X.Pa) & " " & Codec.Img (Wv (X.Wk).Frame) & " " & Codec.Img (X.Pk) & " " & Codec.Fmt (X.U, 3) & " " & Codec.Fmt (X.V, 3)
+                                        & " " & Codec.Fmt (X.E, 3) & " " & Codec.Fmt (P.X (0), 6) & " " & Codec.Fmt (P.X (1), 6) & " " & Codec.Fmt (P.X (2), 6)
+                                        & " " & Codec.Fmt (P.Cov (0, 0), 9) & " " & Codec.Fmt (P.Cov (0, 1), 9) & " " & Codec.Fmt (P.Cov (0, 2), 9)
+                                        & " " & Codec.Fmt (P.Cov (1, 1), 9) & " " & Codec.Fmt (P.Cov (1, 2), 9) & " " & Codec.Fmt (P.Cov (2, 2), 9)
+                                        & " " & Codec.Img (P.Fr));
+               end;
+            end loop;
+            Ada.Text_IO.Close (Fo);
             for B in 1 .. Na - 1 loop
                if Placed (B) then
                   Ada.Text_IO.Create (Fo, Ada.Text_IO.Out_File, Dump & "/align_arm" & Codec.Img (B) & ".txt");
