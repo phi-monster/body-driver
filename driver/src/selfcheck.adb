@@ -2067,6 +2067,37 @@ begin
                 & " mm;没碰着的那一瓣交出来更远(" & Codec.Fmt (R (1).S, 4) & " > 0.118)· 面在眼上方 ⇒ 交不到");
       end;
    end;
+   --  🔴 装回身体文件(⑤,Act.Geo_Install Keep_Tips):几何文件里存的指尖、张口、步幅(一条命令走多远 / 转多远)都并回来 ——
+   --  09-28 S1A1(剪刀正式一集 200 拍):只并了指尖和张口,步幅在这一集里整套重量,吃掉 122 拍;不装回(从零量)时一样都不并
+   declare
+      C1, C2 : Act.Context;
+      Path : constant String := "/tmp/bd_selfcheck_reload";
+      Stored, Fresh : Geom.Geo_Vectors.Vector;
+      G : Geom.Cam_Geo;
+      F1 : Plug.Frame;
+      Ref : Plug.Cam;
+      No_Board, One_Board : Geom.Scene_Pt_Vectors.Vector;
+      C3 : Act.Context;
+   begin
+      One_Board.Append (Geom.Scene_Pt'(Pw => [0.1, 0.2, 0.0], U => 10.0, V => 20.0, Sh => 0.0, Views => 3, Cov => [[1.0e-6, 0.0, 0.0], [0.0, 1.0e-6, 0.0], [0.0, 0.0, 1.0e-6]]));
+      G.Valid := True; G.F := 397.0; G.Cx := 320.0; G.Cy := 240.0;
+      Fresh.Append (G);   --  前半段装回的那份:还没有指尖、步幅
+      G.Tip := [0.87, -0.24, -1.75]; G.Tip_Valid := True; G.Tip_Touch := True; G.Gap := 1.766;
+      G.Stride := 0.888; G.Stride_Rot := 0.161;
+      Stored.Append (G);
+      Geom.Save (Path & ".geo.json", Stored);
+      Act.Geo_Install (F1, C1, Path, Fresh, No_Board, [0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 0.001, Ref, Keep_Tips => True);
+      Act.Geo_Install (F1, C2, Path, Fresh, No_Board, [0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 0.001, Ref, Keep_Tips => False);
+      Check (C1.Geo (0).Tip_Valid and then abs (C1.Geo (0).Gap - 1.766) < 1.0e-4 and then abs (C1.Geo (0).Stride - 0.888) < 1.0e-4
+             and then abs (C1.Geo (0).Stride_Rot - 0.161) < 1.0e-4 and then not C2.Geo (0).Tip_Valid and then C2.Geo (0).Stride = 0.0,
+             "装回身体文件:存的指尖、张口、步幅(" & Codec.Fmt (C1.Geo (0).Stride, 3) & " / 转 " & Codec.Fmt (C1.Geo (0).Stride_Rot, 3)
+             & ")都并回来,开机不重量 · 从零量时一样都不并");
+      --  有板 ⇒ 东西躺的面装上就是板的那张(S1A1:没登记,不动的眼看见的东西被按指尖高度放到了空中);没板 ⇒ 不登记
+      Act.Geo_Install (F1, C3, Path, Fresh, One_Board, [0.0, 0.0, 0.765], [0.0, 0.0, 1.0], 0.001, Ref, Keep_Tips => True);
+      Check (C3.Touch_Valid and then abs (C3.Touch_Pt (2) - 0.765) < 1.0e-9 and then abs (C3.Touch_N (2) - 1.0) < 1.0e-9 and then not C3.Touch_Fresh
+             and then not C1.Touch_Valid,
+             "装回身体文件:有板 ⇒ 东西躺的面装上就是板的那张(还不算这一集碰过)· 没板 ⇒ 不登记");
+   end;
    --  🔴 换倾角碰量指尖(2026-09-28,Geom.Tilt_Dir / Turn_To / Press_Of / Fit_Presses):合成的手 —— 两个指尖是半径 5 mm 的球(球心在眼前 79 mm、
    --  左右 ±45 mm,同 x5 的量级)、手掌三点;每一下让 Tilt_Dir 那个方向(这一瓣的视线朝方位 Azim 斜 θ,θ = 两瓣视线夹角的三分之一)转到朝正下,
    --  往下落到手上真的最低那一点碰到面,接触高度加 ±0.2 mm 的噪声;一瓣压 6 下(朝下 1 下 + 方位 0 / 72 / 144 / 216 / 288° 各 1 下)。

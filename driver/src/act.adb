@@ -5928,18 +5928,27 @@ package body Act is
       C.Geo_Path := S (Body_Path & ".geo.json");
       C.Geo := Geo;
       if Keep_Tips and then Body_Path /= "" then
-         --  前半段装回的:存的指尖、张口(碰桌面量的,同一个世界单位)并进来
+         --  前半段装回的:存的指尖、张口(碰桌面量的)、步幅(一条命令走多远 / 转多远,开机按阶梯量的)并进来 —— 同一次从零量的结果、同一个世界单位。
+         --  09-28 S1A1:原来只并指尖和张口,步幅在记分那一集里整套重量,吃掉 122 拍(一集 200 拍)
          declare
             Old : Geom.Geo_Vectors.Vector;
             Note : String (1 .. 160);
          begin
             Geom.Load (To_String (C.Geo_Path), Old, Natural (C.Geo.Length), Note);
             for Cm in 0 .. Natural'Min (Natural (Old.Length), Natural (C.Geo.Length)) - 1 loop
-               if Old (Cm).Tip_Valid and then Old (Cm).Tip_Touch and then not C.Geo (Cm).Fixed then
+               if not C.Geo (Cm).Fixed then
                   declare
                      G : Geom.Cam_Geo := C.Geo (Cm);
                   begin
-                     G.Tip := Old (Cm).Tip; G.Gap := Old (Cm).Gap; G.Tip_Valid := True; G.Tip_Touch := True;
+                     if Old (Cm).Tip_Valid and then Old (Cm).Tip_Touch then
+                        G.Tip := Old (Cm).Tip; G.Gap := Old (Cm).Gap; G.Tip_Valid := True; G.Tip_Touch := True;
+                     end if;
+                     if Old (Cm).Stride > 0.0 then
+                        G.Stride := Old (Cm).Stride;
+                     end if;
+                     if Old (Cm).Stride_Rot > 0.0 then
+                        G.Stride_Rot := Old (Cm).Stride_Rot;
+                     end if;
                      C.Geo.Replace_Element (Cm, G);
                   end;
                end if;
@@ -5949,6 +5958,12 @@ package body Act is
       C.Board := Board;
       C.Board_Pt := Plane_Pt; C.Board_N := Plane_N; C.Board_Rms := Plane_Rms;
       C.Board_Plane := not Board.Is_Empty;
+      --  有板的面 ⇒ 东西躺的面就是它(同 Note_Support:有板时朝下顶住的点只和它对账、不换它),装上就登记;不等第一次朝下被顶住。
+      --  09-28 S1A1:装回开机不碰桌面、碰指尖那几下又不记接触 ⇒ "碰过的面"一直空着,不动的眼看见剪刀时按指尖此刻的高度当面,
+      --  剪刀被放到桌面上方 5 个单位,腕眼转了 1.7 弧度还没转到、顶到关节尽头。Touch_Fresh 不设:这一集里还没真碰过
+      if C.Board_Plane then
+         C.Touch_Pt := Plane_Pt; C.Touch_N := Plane_N; C.Touch_Valid := True;
+      end if;
       C.Fixed_Ref := Ref.RGB; C.Fixed_Ref_W := Ref.W; C.Fixed_Ref_H := Ref.H;
       C.Fixed_Best := (others => <>);
       --  不动的眼核对用的细门按板定,和重标那一份同一个算法(Geom.Board_Rms):板上每个点(参考图里的像素)按标定的位姿投回去,门以内误差的中位 × 1.2
