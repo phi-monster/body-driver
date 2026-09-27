@@ -85,6 +85,8 @@ package Jointboot is
    --  插头的两个钩子(Install 登记)
    procedure Pose_Hook (F : in out Plug.Frame);
    procedure Cmd_Hook (C : in out Plug.Cmd; Ok : out Boolean);
+   --  这个位姿在量到的关节限位里解得出来吗(不发命令):解完还差多少(位置按世界单位,朝向按弧度);同一条 Pose_To_Q
+   procedure Reach_Hook (Arm : Natural; Pose : Plug.Arm_Pose; Pos_Err, Rot_Err : out Long_Float);
    --  开机自检(V1b 的 ②):每只装上的手走到扫描时没去过的几处 —— 两格"几个关节一起动"的读数的正中(每个关节都在量过的范围里),
    --  按运动学算出那一处眼的位姿当目标,按位姿命令同一条路(Pose_To_Q:在量过的范围里反解)解成关节目标;几只手同时走(一条命令带几组目标),
    --  停稳后记:目标、反解还差多少、实到的读数。身体报的位姿只落盘给离线打分(Dump/ik_check.txt),驱动不读

@@ -77,7 +77,7 @@ package body Selfmap is
                  F : in out Plug.Frame; Delivered : out Table.Vec; Frames : out Natural; Ok : out Boolean; Quick : Boolean := False;
                  Watch : Watcher := null; Joints : Floats := F64_Vectors.Empty_Vector; Group : Integer := -1;
                  Groups : Ints := Int_Vectors.Empty_Vector; Qs : Plug.Floats_Vectors.Vector := Plug.Floats_Vectors.Empty_Vector;
-                 Tol : Long_Float := 0.0) is
+                 Tol : Long_Float := 0.0; Tol_Rot : Long_Float := 0.0) is
       C : Plug.Cmd;
       P0 : constant Plug.Arm_Pose := (if Arm < Natural (F.EE.Length) then F.EE (Arm) else [others => 0.0]);
       Prev : Plug.Arm_Pose := P0;
@@ -163,15 +163,24 @@ package body Selfmap is
             D : constant Table.Vec := Chan.Delivered (Prev, F.EE (Arm));
             Moved_P : constant Long_Float := Table.Norm (D, 3);
             Rv : constant Long_Float := D (3) ** 2 + D (4) ** 2 + D (5) ** 2;
+            --  给了这一档(Tol > 0):每拍挪不到这一条命令要走的百分之一就算"停了"(比例;慢的身体还在一拍半毫米地挪时不算停,
+            --  G2D 2026-09-24 人形返回时还在往下挪被误判成顶住);没给:挪不到读数噪声才算
+            Cmd : constant Table.Vec := Chan.Delivered (P0, C.Pose);
+            Gate_P : constant Long_Float := (if Tol > 0.0 then Long_Float'Max (M.EE_Noise, Still_Frac * Table.Norm (Cmd, 3)) else M.EE_Noise);
+            Gate_R : constant Long_Float :=
+              (if Tol > 0.0 then Long_Float'Max (M.Rot_Noise, Still_Frac * Sqrt (Cmd (3) ** 2 + Cmd (4) ** 2 + Cmd (5) ** 2)) else M.Rot_Noise);
+            Miss : constant Table.Vec := Chan.Delivered (F.EE (Arm), C.Pose);
          begin
-            if Moved_P <= M.EE_Noise and then Rv <= M.Rot_Noise * M.Rot_Noise then
+            if Moved_P <= Gate_P and then Rv <= Gate_R * Gate_R then
                Still := Still + 1;
             else
                Still := 0;
             end if;
+            Arrived := (if Tol > 0.0 and then Table.Norm (Miss, 3) <= Tol
+                          and then Miss (3) ** 2 + Miss (4) ** 2 + Miss (5) ** 2 <= Tol_Rot * Tol_Rot then Arrived + 1 else 0);
             Prev := F.EE (Arm);
          end;
-         exit when (Still >= 2 and then Frames >= M.Settle) or else Frames >= 12 + M.Settle or else (Quick and then Frames >= M.Settle);
+         exit when Arrived >= 2 or else (Still >= 2 and then Frames >= M.Settle) or else Frames >= 12 + M.Settle or else (Quick and then Frames >= M.Settle);
          end if;
       end loop;
       if Arm < Natural (F.EE.Length) then

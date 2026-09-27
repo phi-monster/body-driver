@@ -321,11 +321,35 @@ begin
       begin
          Zone.Tip_Px (Z, Z.A, W, H, Ua, Va, Oa);
          Zone.Tip_Px (Z, Z.B, W, H, Ub, Vb, Ob);
-         Check (Oa and then Ob and then abs (Ua - 11.0) < 1.0 and then abs (Ub - 52.0) < 1.0 and then abs (Va - 41.5) < 1.0 and then abs (Vb - 41.5) < 1.0,
-                "指尖 = 伸向合拢处的那一头:左瓣 (" & Codec.Fmt (Ua, 1) & "," & Codec.Fmt (Va, 1) & ") 右瓣 (" & Codec.Fmt (Ub, 1) & "," & Codec.Fmt (Vb, 1) & ")(该 ≈ (11,41.5) / (52,41.5),不是最靠上的那一截)");
+         --  两根手指从下沿伸进画面(根在画面外)⇒ 尖 = 离贴着下沿的那几个像素最远的那一截 = 最上面一行;不是伸向合拢处的内侧边、也不能沾上合上时手指在的那一块
+         --  (V1B21 2026-09-27 按 x5 网格真值:旧定义取在内侧边、瓣框里还混进合上的手指,指尖错 34 mm)
+         Check (Oa and then Ob and then abs (Ua - 7.5) < 0.5 and then abs (Ub - 55.5) < 0.5 and then abs (Va - 36.0) < 0.5 and then abs (Vb - 36.0) < 0.5,
+                "指尖 = 离手指进画面处最远的那一头:左瓣 (" & Codec.Fmt (Ua, 1) & "," & Codec.Fmt (Va, 1) & ") 右瓣 (" & Codec.Fmt (Ub, 1) & "," & Codec.Fmt (Vb, 1) & ")(该 ≈ (7.5,36) / (55.5,36))");
       end;
       Z := Zone.From_Frames (Open_G, Open_G, W, H);
       Check (not Z.Valid, "握区(无深度):两张一样的图 ⇒ 看不见这只手合拢,如实说");
+   end;
+   --  🔴 指尖只按这一瓣自己那一块手指像素找(V1B21 2026-09-27):手指像素里合上时手指在的那一块落进了瓣框的一角、瓣框又只盖住手指的下半截
+   --  (同一根手指按背景明暗分进了两类)。合成 48×48:手指 x 3..9、y 20..47 从下沿伸进来;合上的那一块 x 12..18、y 40..47 另成一块;
+   --  瓣框只给 [3,25]–[14,47] ⇒ 尖 = 整根手指最上面那一行 (6,20),宽 7 像素;一个像素都不贴画面边的一块 ⇒ 不给尖
+   declare
+      W : constant := 48;
+      H : constant := 48;
+      Z : Zone.Hand_Zone;
+      U, V, Wd : Long_Float;
+      Ok : Boolean;
+   begin
+      for I in 0 .. W * H - 1 loop
+         Z.Fingers.Append ((I mod W in 3 .. 9 and then I / W in 20 .. 47) or else (I mod W in 12 .. 18 and then I / W in 40 .. 47) or else (I mod W in 30 .. 40 and then I / W in 5 .. 15));
+      end loop;
+      Z.Valid := True; Z.N_Lobes := 1;
+      Z.A := (True, 3, 25, 14, 47, 0.2, 0.75, 200);
+      Zone.Tip_Band (Z, Z.A, W, H, U, V, Wd, Ok);
+      Check (Ok and then abs (U - 6.0) < 0.5 and then abs (V - 20.0) < 0.5 and then abs (Wd - 7.0) < 0.5,
+             "指尖只看这一瓣自己那一块:(" & Codec.Fmt (U, 1) & "," & Codec.Fmt (V, 1) & ") 宽 " & Codec.Fmt (Wd, 1) & "(该 (6,20) 宽 7;框里混进的合上那一块、框外的那一截都不许影响)");
+      Z.A := (True, 30, 5, 40, 15, 0.7, 0.2, 121);
+      Zone.Tip_Band (Z, Z.A, W, H, U, V, Wd, Ok);
+      Check (not Ok, "整根在画面里、一个像素都不贴画面边的一块 ⇒ 看不出哪头伸出去了,不给尖");
    end;
    --  颜色切块:两根细杆在深度上鼓不出来,但颜色分得开 —— 各自成一块,而且是细长的
    declare
@@ -1842,16 +1866,18 @@ begin
                 & " mm;没碰着的那一瓣交出来更远(" & Codec.Fmt (R (1).S, 4) & " > 0.118)· 面在眼上方 ⇒ 交不到");
       end;
    end;
-   --  🔴 开机碰桌面挑一块空的面(Act.Board_Free_Spot):板 21×21 个点铺在 0.765 m 的面上(2 cm 一格、离散 1 mm),中间 5×5 格是一块 5 cm 高的东西。
-   --  压的那一瓣落在 (0,0)、另一瓣落在 (0.05,0),手指宽上限 1 cm ⇒ 挪到的地方:压的那一瓣落在一个躺在面上的板点上,两个落点连线 1 cm 内没有东西上的点,
-   --  挪得不远(< 0.1 m);拿掉那块东西 ⇒ 不用挪;板上全是东西 ⇒ 找不到
+   --  🔴 开机碰桌面挑空的面(Act.Board_Free_Spots):板 21×21 个点铺在 0.765 m 的面上(2 cm 一格、离散 1 mm),中间 5×5 格是一块 5 cm 高的东西。
+   --  压的那一瓣落在 (0,0)、另一瓣落在 (0.05,0),手指宽上限 1 cm,另一瓣视线斜 90°(tan 45° = 1:离压的那一点 ρ 处手指至少高 ρ)⇒ 第一个空的:
+   --  压的那一瓣落在一个躺在面上的板点上,两个落点连线 1 cm 内没有东西上的点,挪得不远(< 0.1 m);拿掉那块东西 ⇒ 不用挪;板上全是东西 ⇒ 一个都没有。
+   --  V1B22 2026-09-27 起别的瓣只躲它真会碰到的:平板上只放一个 5 mm 高的小东西在另一瓣连线的 4 cm 处(视线斜得 tan(β/2) = 0.5,那里手指离面至少 2 cm)⇒ 不用挪;
+   --  同一个小东西放在压的那一点 ⇒ 要挪
    declare
       use Ada.Numerics.Long_Elementary_Functions;
       C1 : Act.Context;
       Lp : Geom.V3_Vectors.Vector;
-      Dl : Geom.V3;
-      Ok1, Ok2, Ok3 : Boolean;
-      Dl2, Dl3 : Geom.V3;
+      Tb : Bytes.Floats;
+      Ds1, Ds2, Ds3, Ds4, Ds5 : Geom.V3_Vectors.Vector;
+      Dl : Geom.V3 := [0.0, 0.0, 0.0];
       Clear_Ok : Boolean := True;
       On_Pt : Boolean := False;
       Cell : constant Long_Float := 0.02;       --  格距(米,合成)
@@ -1869,8 +1895,10 @@ begin
       end loop;
       Lp.Append (Geom.V3'[0.0, 0.0, 0.765]);
       Lp.Append (Geom.V3'[0.05, 0.0, 0.765]);
-      Ok1 := Act.Board_Free_Spot (C1, Lp, Rw, Dl);
-      if Ok1 then
+      Tb.Append (0.0); Tb.Append (1.0);
+      Act.Board_Free_Spots (C1, Lp, Tb, Rw, Ds1);
+      if not Ds1.Is_Empty then
+         Dl := Ds1 (0);
          for S of C1.Board loop
             declare
                Ax : constant Long_Float := Dl (0); Ay : constant Long_Float := Dl (1);
@@ -1891,20 +1919,31 @@ begin
       declare
          C2 : Act.Context := C1;
          C3 : Act.Context := C1;
+         C4 : Act.Context := C1;
+         C5 : Act.Context := C1;
+         Tb4 : Bytes.Floats;
       begin
-         C2.Board.Clear;
+         C2.Board.Clear; C4.Board.Clear; C5.Board.Clear;
          for I in -10 .. 10 loop
             for J in -10 .. 10 loop
                C2.Board.Append (Pt (I, J, 0.765));
                C3.Board.Replace_Element (Natural ((I + 10) * 21 + J + 10), Pt (I, J, 0.765 + Hgt));
+               C4.Board.Append (Pt (I, J, (if I = 2 and then J = 0 then 0.770 else 0.765)));
+               C5.Board.Append (Pt (I, J, (if I = 0 and then J = 0 then 0.770 else 0.765)));
             end loop;
          end loop;
-         Ok2 := Act.Board_Free_Spot (C2, Lp, Rw, Dl2);
-         Ok3 := Act.Board_Free_Spot (C3, Lp, Rw, Dl3);
+         Act.Board_Free_Spots (C2, Lp, Tb, Rw, Ds2);
+         Act.Board_Free_Spots (C3, Lp, Tb, Rw, Ds3);
+         Tb4.Append (0.0); Tb4.Append (0.8 / (1.0 + 0.6));   --  视线斜的角:sin 0.8、cos 0.6(合成,3-4-5 直角三角形)⇒ tan(β/2) = 0.5
+         Act.Board_Free_Spots (C4, Lp, Tb4, Rw, Ds4);
+         Act.Board_Free_Spots (C5, Lp, Tb4, Rw, Ds5);
       end;
-      Check (Ok1 and then Clear_Ok and then On_Pt and then Geom.Norm (Dl) < 0.1 and then Ok2 and then Geom.Norm (Dl2) = 0.0 and then not Ok3,
+      Check (not Ds1.Is_Empty and then Clear_Ok and then On_Pt and then Geom.Norm (Dl) < 0.1
+             and then not Ds2.Is_Empty and then Geom.Norm (Ds2 (0)) = 0.0 and then Ds3.Is_Empty
+             and then not Ds4.Is_Empty and then Geom.Norm (Ds4 (0)) = 0.0 and then not Ds5.Is_Empty and then Geom.Norm (Ds5 (0)) > 0.0,
              "开机碰桌面挑空的面:避开 5 cm 高的那块东西挪了 (" & Codec.Fmt (Dl (0), 3) & "," & Codec.Fmt (Dl (1), 3) & ") m,落点在躺在面上的板点上、"
-             & "连线 1 cm 内没有东西 · 拿掉东西 ⇒ 不挪 · 板上全是东西 ⇒ 找不到");
+             & "连线 1 cm 内没有东西 · 拿掉东西 ⇒ 不挪 · 板上全是东西 ⇒ 一个都没有 · 另一瓣连线 4 cm 处 5 mm 高的小东西不挡(手指在那儿至少高 2 cm)、"
+             & "放在压的那一点就要挪(" & (if Ds5.Is_Empty then "-" else Codec.Fmt (Geom.Norm (Ds5 (0)), 3)) & " m)");
    end;
    --  🔴 有板的面时,朝下顶住的点只对账、不换面(Act.Note_Support,2026-09-26):X5B 指尖错了的那只手顶住的点比板的面低 20.8 cm,"最低的赢"把它当成了桌面。
    --  低 20 cm ⇒ 面还是板的、不记东西;高 5 cm ⇒ 记成"这儿有东西"、面不变;差 0.5 mm(门 = 3 倍 1 mm ⊕ 0.5 mm)⇒ 对得上

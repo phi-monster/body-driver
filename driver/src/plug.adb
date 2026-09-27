@@ -15,6 +15,18 @@ package body Plug is
    begin
       Hook_P := P; Hook_C := Q;
    end Set_Hooks;
+   Hook_R : Reach_Hook := null;
+   procedure Set_Reach (R : Reach_Hook) is
+   begin
+      Hook_R := R;
+   end Set_Reach;
+   procedure Reach (Arm : Natural; Pose : Arm_Pose; Pos_Err, Rot_Err : out Long_Float; Ok : out Boolean) is
+   begin
+      Pos_Err := 0.0; Rot_Err := 0.0; Ok := Hook_R /= null;
+      if Ok then
+         Hook_R (Arm, Pose, Pos_Err, Rot_Err);
+      end if;
+   end Reach;
 
    function Arms (L : Link) return Natural is
    begin

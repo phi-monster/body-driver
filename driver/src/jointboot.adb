@@ -2378,6 +2378,7 @@ package body Jointboot is
       end loop;
       St_Rw := Rw; St_O := O;
       Plug.Set_Hooks (Pose_Hook'Access, Cmd_Hook'Access);
+      Plug.Set_Reach (Reach_Hook'Access);
       Say ("装上:从此每一帧手的位姿 = 按关节读数算出的腕眼位姿(" & Codec.Img (Natural (St_Worlds.Length)) & " 只手),位姿命令 = 在量到的关节限位里解关节目标");
    end Install;
 
@@ -2427,6 +2428,15 @@ package body Jointboot is
       Kinem.IK (W.Model, Ra_Arm, Ta_Arm, St_Last (A), W.Lo, W.Hi, Q, Pe, Re);
       Pe := Pe * W.S;   --  换成第一只手的模型单位(= 世界的单位)
    end Pose_To_Q;
+
+   procedure Reach_Hook (Arm : Natural; Pose : Plug.Arm_Pose; Pos_Err, Rot_Err : out Long_Float) is
+      Q : Floats;
+   begin
+      Pos_Err := Long_Float'Last; Rot_Err := Long_Float'Last;
+      if Arm < Natural (St_Worlds.Length) then
+         Pose_To_Q (Arm, Pose, Q, Pos_Err, Rot_Err);
+      end if;
+   end Reach_Hook;
 
    procedure Cmd_Hook (C : in out Plug.Cmd; Ok : out Boolean) is
       Q : Floats;

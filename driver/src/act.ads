@@ -376,6 +376,7 @@ package Act is
       Walls : Wall_Vectors.Vector;           --  这一集里各条臂横着被顶住过的地方(见 Wall_Mark)
       No_Reach_Arm : Integer := -1;          --  这一集里"它身上一段都在够不着那侧"的那条臂(-1 = 没有):下次选手绕开它
       Fingers_Aimed : Boolean := False;   --  上一段"到它上方"末尾已把手指指向它躺的面 ⇒ 接下来贴上去的那一段不再为了看它而转手
+      Press_From : Plug.Arm_Pose := [others => 0.0];   --  Geo_Go 压到被顶住的那一下是从哪个位姿开始压的(碰到之前、还没顶的那一处)
       Touch_Valid : Boolean := False;
       Touch_Pt, Touch_N : Geom.V3 := [others => 0.0];
       Touch_Fresh : Boolean := False;        --  这张面是这一集里碰出来的(False = 上一集留下的,新一集第一次朝下被顶住就换成新的,再往后只让更低的换)
@@ -400,7 +401,7 @@ package Act is
    function Turn_90 (Img : Buf; W, H : Natural) return Buf;
    --  原图(宽 W、高 H)顺时针转了 Turns 个 90° 之后那张图里的 (U, V) 换算回原图的像素。核对时画面可能被转了,转回去配完再换算回来;导出只为自检
    procedure Unturn (U, V : Long_Float; Turns, W, H : Natural; U0, V0 : out Long_Float);
-   function Board_Free_Spot (C : Context; Lp : Geom.V3_Vectors.Vector; R : Long_Float; Delta_Out : out Geom.V3) return Boolean;
+   procedure Board_Free_Spots (C : Context; Lp : Geom.V3_Vectors.Vector; Tb : Floats; R : Long_Float; Deltas : out Geom.V3_Vectors.Vector);
 
    procedure Init_Tracks (C : in out Context);
    --  开机装回几何常数(身体文件旁边的 .geo.json:焦距、相机在手上的朝向、指尖在相机里的位置);缺的当场量。

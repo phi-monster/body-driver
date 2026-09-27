@@ -36,6 +36,7 @@ for a in range(narm):
     _, first = np.unique(key, axis=0, return_index=True)
     first = np.sort(first)
     trn = first[0::2]; tst = first[1::2]
+    trn = trn[::max(1, len(trn) // 200)]   # 拟合最多等间隔取 200 个姿势(长的一炮上千个姿势,20 次重启在 Python 里要几十分钟);考试那一半全算
     if len(trn) < 5:   # 拟合 13 个数,每个姿势 6 个残差 ⇒ 至少 5 个姿势(次数)
         print("手 %d:按帧算的位姿只有 %d 个不同姿势,这一段不考" % (a, len(first)))
         continue
@@ -264,11 +265,18 @@ try:
         def stl(p):
             d = open(p, "rb").read(); n = struct.unpack("<I", d[80:84])[0]
             return np.array([struct.unpack("<12f", d[84 + 50 * i:84 + 50 * i + 48])[3:12] for i in range(n)]).reshape(-1, 3)
-        tips = []
-        for mesh, org in (("link7", np.array([0.08657, 0.024896, -0.0002436])), ("link8", np.array([0.08657, -0.0249, -0.00024366]))):
-            V = stl(X5 + "/meshes/%s.STL" % mesh) + org
+        #    两种真值一起报:沿夹爪方向最远的那个顶点(端面是 1.5 × 10 mm 的一条窄边,x 最大的顶点落在它的下角)、端面(x 在最大值 1 mm 内的顶点)的中心;
+        #    张口按张开到头(两根手指各 44 mm,URDF 的上限;开机碰桌面时爪是张开的)两根手指端面内侧的距离
+        tips, faces, inner = [], [], []
+        for mesh, org, ax in (("link7", np.array([0.08657, 0.024896, -0.0002436]), 1.0), ("link8", np.array([0.08657, -0.0249, -0.00024366]), -1.0)):
+            V = stl(X5 + "/meshes/%s.STL" % mesh) + org + np.array([0.0, ax * 0.044, 0.0])
             tips.append(V[np.argmax(V[:, 0])])
+            Fc = V[V[:, 0] >= V[:, 0].max() - 0.001]
+            faces.append(Fc.mean(axis=0))
+            inner.append(Fc[np.argmin(np.abs(Fc[:, 1]))])
         truth_mid = 0.5 * (tips[0] + tips[1])
+        face_mid = 0.5 * (faces[0] + faces[1])
+        truth_gap = abs(inner[0][1] - inner[1][1])
         cam_arm = {int(c): int(a) - 1 for c, a in re.findall(r"第(\d+) 台相机\(长在第(\d+) 只手上\)", logtxt)}
         for g in geo["cams"]:
             c = g["cam"]
@@ -279,8 +287,8 @@ try:
                 print("指尖 · 第 %d 只手(第 %d 台眼):没量成" % (a, c)); continue
             tc = np.array(g["tip"]) * s_
             tee = RxA @ tc + txA
-            print("指尖 · 第 %d 只手:碰出来的两瓣中点(手腕系)(%.1f, %.1f, %.1f) mm · 模型文件 (%.1f, %.1f, %.1f) mm · 差 %.1f mm · 离眼 %.1f mm · 张口 %.1f mm(%s)" %
-                  (a, *(1000 * tee), *(1000 * truth_mid), 1000 * np.linalg.norm(tee - truth_mid), 1000 * np.linalg.norm(tc), 1000 * g["gap"] * s_,
-                   "碰桌面量的" if g.get("tip_touch") else "不是碰桌面量的"))
+            print("指尖 · 第 %d 只手:碰出来的两瓣中点(手腕系)(%.1f, %.1f, %.1f) mm · 模型文件 最远顶点 (%.1f, %.1f, %.1f) 差 %.1f mm / 端面中心 (%.1f, %.1f, %.1f) 差 %.1f mm · 离眼 %.1f mm · 张口 %.1f mm(真 %.1f)(%s)" %
+                  (a, *(1000 * tee), *(1000 * truth_mid), 1000 * np.linalg.norm(tee - truth_mid), *(1000 * face_mid), 1000 * np.linalg.norm(tee - face_mid),
+                   1000 * np.linalg.norm(tc), 1000 * g["gap"] * s_, 1000 * truth_gap, "碰桌面量的" if g.get("tip_touch") else "不是碰桌面量的"))
 except Exception as e:
     print("指尖:打不了分(%s)" % e)

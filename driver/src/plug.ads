@@ -92,6 +92,12 @@ package Plug is
    type Pose_Hook is access procedure (F : in out Frame);
    type Cmd_Hook is access procedure (C : in out Cmd; Ok : out Boolean);
    procedure Set_Hooks (P : Pose_Hook; Q : Cmd_Hook);
+   --  这只手能不能到这个位姿(不发命令,只解):反解按量到的关节限位解出来以后还差多少(位置按世界单位、朝向按弧度)。
+   --  Ok = False = 上面没登记(没有运动学)。开机碰桌面量指尖挑落点时用:挑到的地方先问一句,解不出就换下一处(V1B22 2026-09-27:
+   --  挑的那处转 1.02 rad、挪 0.17 m,反解在限位里解不到,实到转 1.20 rad、挪差 3.4 单位,那一瓣没量成)
+   type Reach_Hook is access procedure (Arm : Natural; Pose : Arm_Pose; Pos_Err, Rot_Err : out Long_Float);
+   procedure Set_Reach (R : Reach_Hook);
+   procedure Reach (Arm : Natural; Pose : Arm_Pose; Pos_Err, Rot_Err : out Long_Float; Ok : out Boolean);
    function Take_Reset (L : in out Link) return Boolean;
    --  只看不清:对方是不是刚复位了(新的一集)。走路的那些段每一步看一眼,复位了就当场收段,不把这一段的动作发到新的一集里
    function Reset_Pending (L : Link) return Boolean;

@@ -2,6 +2,7 @@ with Ada.Text_IO; use Ada.Text_IO;
 with Ada.Numerics.Long_Elementary_Functions; use Ada.Numerics.Long_Elementary_Functions;
 with Codec;
 with Ada.Containers;
+with Ada.Unchecked_Deallocation;
 package body Zone is
    function Is_Self (Z : Hand_Zone; R : Picture.Region; W, Hh : Natural) return Boolean is
       --  只按瓣自己的框判(不外扩):EE2 实测外扩半个框把紧挨着右爪的剪刀当成了"我"
@@ -208,50 +209,128 @@ package body Zone is
       return Z;
    end From_Sweep;
 
-   procedure Tip_Px (Z : Hand_Zone; Lb : Lobe; W, Hh : Natural; U, V : out Long_Float; Ok : out Boolean) is
-      --  方向:瓣心 → 区框中心(手指合到的地方);两者重合时(单瓣、区就是它自己)按瓣的主轴
-      Mx : constant Long_Float := 0.5 * Long_Float (Z.X0 + Z.X1);
-      My : constant Long_Float := 0.5 * Long_Float (Z.Y0 + Z.Y1);
-      Dx : Long_Float := Mx - Lb.Cu * Long_Float (W);
-      Dy : Long_Float := My - Lb.Cv * Long_Float (Hh);
-      Dn : constant Long_Float := Sqrt (Dx * Dx + Dy * Dy);
+   procedure Tip_Band (Z : Hand_Zone; Lb : Lobe; W, Hh : Natural; U, V, Width : out Long_Float; Ok : out Boolean) is
+      N : constant Natural := W * Hh;
       Band : constant Long_Float := Long_Float (Hh) / 80.0;   --  最远的那一小截有多厚(比例,无量纲)
-      Best : Long_Float := Long_Float'First;
-      Su, Sv : Long_Float := 0.0;
-      Cnt : Natural := 0;
+      type Flag_Array is array (Natural range <>) of Boolean;
+      type Flag_Access is access Flag_Array;
+      procedure Free is new Ada.Unchecked_Deallocation (Flag_Array, Flag_Access);
+      Seen : Flag_Access;
+      Best, Cur, Stack : Ints;
+      Best_In : Natural := 0;
+      function In_Box (P : Natural) return Boolean is
+        (P mod W in Lb.X0 .. Lb.X1 and then P / W in Lb.Y0 .. Lb.Y1);
+      function On_Edge (P : Natural) return Boolean is
+        (P mod W = 0 or else P mod W = W - 1 or else P / W = 0 or else P / W = Hh - 1);
    begin
-      U := 0.0; V := 0.0; Ok := False;
-      if not Lb.Valid or else Natural (Z.Fingers.Length) < W * Hh then
+      U := 0.0; V := 0.0; Width := 0.0; Ok := False;
+      if not Lb.Valid or else N = 0 or else Natural (Z.Fingers.Length) < N then
          return;
       end if;
-      if Dn > 0.0 then
-         Dx := Dx / Dn; Dy := Dy / Dn;
-      else
-         Dx := Z.Au; Dy := Z.Av;
-         if Dx = 0.0 and then Dy = 0.0 then
-            return;
+      --  这一瓣自己那一块:框里每一块手指像素(8 邻连通)各数一数有几个像素落在框里,取最多的那块
+      Seen := new Flag_Array'(0 .. N - 1 => False);
+      for Y in Lb.Y0 .. Natural'Min (Lb.Y1, Hh - 1) loop
+         for X in Lb.X0 .. Natural'Min (Lb.X1, W - 1) loop
+            declare
+               P0 : constant Natural := Y * W + X;
+               In_Cnt : Natural := 0;
+            begin
+               if Z.Fingers.Element (P0) and then not Seen (P0) then
+                  Cur.Clear; Stack.Clear;
+                  Seen (P0) := True; Stack.Append (P0);
+                  while not Stack.Is_Empty loop
+                     declare
+                        P : constant Natural := Natural (Stack.Last_Element);
+                        Px : constant Integer := P mod W;
+                        Py : constant Integer := P / W;
+                     begin
+                        Stack.Delete_Last;
+                        Cur.Append (P);
+                        if In_Box (P) then
+                           In_Cnt := In_Cnt + 1;
+                        end if;
+                        for Dy in -1 .. 1 loop
+                           for Dx in -1 .. 1 loop
+                              if (Dx /= 0 or else Dy /= 0) and then Px + Dx in 0 .. W - 1 and then Py + Dy in 0 .. Hh - 1 then
+                                 declare
+                                    Q : constant Natural := (Py + Dy) * W + (Px + Dx);
+                                 begin
+                                    if not Seen (Q) and then Z.Fingers.Element (Q) then
+                                       Seen (Q) := True; Stack.Append (Q);
+                                    end if;
+                                 end;
+                              end if;
+                           end loop;
+                        end loop;
+                     end;
+                  end loop;
+                  if In_Cnt > Best_In then
+                     Best_In := In_Cnt; Best := Cur;
+                  end if;
+               end if;
+            end;
+         end loop;
+      end loop;
+      Free (Seen);
+      declare
+         Nb : Natural := 0;
+      begin
+         for P of Best loop
+            if On_Edge (P) then
+               Nb := Nb + 1;
+            end if;
+         end loop;
+         if Nb = 0 then
+            return;   --  这一块一个像素都不贴画面边 ⇒ 看不出哪头是从画面外伸进来的,不猜
          end if;
-      end if;
-      for Y in Lb.Y0 .. Lb.Y1 loop
-         for X in Lb.X0 .. Lb.X1 loop
-            if Z.Fingers.Element (Y * W + X) then
-               Best := Long_Float'Max (Best, Long_Float (X) * Dx + Long_Float (Y) * Dy);
+         declare
+            Ex, Ey : array (1 .. Nb) of Long_Float;
+            K : Natural := 0;
+            Dmax : Long_Float := 0.0;
+            Su, Sv : Long_Float := 0.0;
+            Cnt : Natural := 0;
+            Bx0, By0 : Natural := Natural'Last;
+            Bx1, By1 : Natural := 0;
+            function Dist (P : Natural) return Long_Float is
+               X : constant Long_Float := Long_Float (P mod W);
+               Y : constant Long_Float := Long_Float (P / W);
+               D2 : Long_Float := Long_Float'Last;
+            begin
+               for I in 1 .. Nb loop
+                  D2 := Long_Float'Min (D2, (X - Ex (I)) ** 2 + (Y - Ey (I)) ** 2);
+               end loop;
+               return Sqrt (D2);
+            end Dist;
+         begin
+            for P of Best loop
+               if On_Edge (P) then
+                  K := K + 1;
+                  Ex (K) := Long_Float (P mod W); Ey (K) := Long_Float (P / W);
+               end if;
+            end loop;
+            for P of Best loop
+               Dmax := Long_Float'Max (Dmax, Dist (P));
+            end loop;
+            for P of Best loop
+               if Dist (P) >= Dmax - Band then
+                  Su := Su + Long_Float (P mod W); Sv := Sv + Long_Float (P / W); Cnt := Cnt + 1;
+                  Bx0 := Natural'Min (Bx0, P mod W); Bx1 := Natural'Max (Bx1, P mod W);
+                  By0 := Natural'Min (By0, P / W); By1 := Natural'Max (By1, P / W);
+               end if;
+            end loop;
+            if Cnt > 0 then
+               U := Su / Long_Float (Cnt); V := Sv / Long_Float (Cnt);
+               Width := Long_Float (Natural'Max (Bx1 - Bx0, By1 - By0) + 1);
+               Ok := True;
             end if;
-         end loop;
-      end loop;
-      if Best = Long_Float'First then
-         return;
-      end if;
-      for Y in Lb.Y0 .. Lb.Y1 loop
-         for X in Lb.X0 .. Lb.X1 loop
-            if Z.Fingers.Element (Y * W + X) and then Long_Float (X) * Dx + Long_Float (Y) * Dy >= Best - Band then
-               Su := Su + Long_Float (X); Sv := Sv + Long_Float (Y); Cnt := Cnt + 1;
-            end if;
-         end loop;
-      end loop;
-      if Cnt > 0 then
-         U := Su / Long_Float (Cnt); V := Sv / Long_Float (Cnt); Ok := True;
-      end if;
+         end;
+      end;
+   end Tip_Band;
+
+   procedure Tip_Px (Z : Hand_Zone; Lb : Lobe; W, Hh : Natural; U, V : out Long_Float; Ok : out Boolean) is
+      Wd : Long_Float;
+   begin
+      Tip_Band (Z, Lb, W, Hh, U, V, Wd, Ok);
    end Tip_Px;
 
    function From_Frames (Open_G, Closed_G : Buf; W, Hh : Natural) return Hand_Zone is
