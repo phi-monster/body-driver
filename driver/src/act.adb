@@ -11520,8 +11520,6 @@ package body Act is
          Tu, Tv, Nw : Floats;   --  每一瓣指尖的像素、指尖那一小截的像素跨度
          D : Geom.V3_Vectors.Vector;   --  每一瓣指尖的相机系单位视线
          Nl : Natural := 0;
-         Ev : Unbounded_String;
-         St : Natural;
          Who : constant String := "第" & Codec.Img (A + 1) & " 只手";
          Top_Z : Long_Float := Long_Float'First;  --  压之前到过的最高处(位姿读数的 z)
          Limit : Boolean := False;   --  上一次 Press_At:压到一半这一压在量到的关节限位里解不出来(停下不是碰到)
@@ -11744,12 +11742,14 @@ package body Act is
                   end;
                end Step_Down;
                --  一步一步往下(每步 Lstep,最多 Steps 步),按上面的判法认碰到;Two_Free = 前两步都是空走的(轻碰)
-               procedure Descend (Lstep : Long_Float; Steps : Natural; Two_Free : Boolean; Got_It : out Boolean; Said : String) is
+               procedure Descend (Lstep : Long_Float; Steps : Natural; Two_Free : Boolean; Got_It : out Boolean; From : out Plug.Arm_Pose; Said : String) is
                   S1, S2, Sh : Long_Float := 0.0;
                   Lim : Boolean;
                begin
                   Got_It := False;
+                  From := F.EE (A);
                   for I in 1 .. Steps loop
+                     From := F.EE (A);   --  这一步开始的地方(碰到的那一步开始时手指还没碰到:上一步是空走的)
                      Step_Down (Lstep, Sh, Lim);
                      if Lim then
                         Limit := True;
@@ -11776,24 +11776,21 @@ package body Act is
                   end loop;
                   Geo_Say ("  " & Said & ":往下 " & Codec.Img (Steps) & " 步(一步 " & Mm (Lstep) & ")都没认出碰到");
                end Descend;
+               --  大步找:一大步一大步(一步 = 步幅)往下,同小步的判法(第一步空走当底);碰到的那一大步开始的地方手指还没碰到 ⇒ 退回那儿,
+               --  再一小步一小步找(最多一大步那么深再多两步,次数)。原来按"走不到一半"认碰、再退回"这一压开始的地方":软手指认出得晚,
+               --  退回的那一处手指还压着(V1B45 2026-09-28:第一步小步就整步被挡,底错了,8 步都没认出碰到)
                procedure Big_Press is
-                  Tp : constant Geom.V3 := Tip_World (C, A, F.EE (A));   --  具名对象再传(F.EE 直接写进实参会锁住容器,S3 2026-09-23)
+                  Fr : Plug.Arm_Pose;
+                  Hit : Boolean;
                begin
-                  Geo_Go (L, C, F, A, Tp, Geo_Base (C, A), 1.0, True, Down, Ev, St, Press_Cap => Cap, Note_Contacts => False, Press_Step => Ln);
-                  Geo_Say ("  ⇒ " & To_String (Ev));
-                  if Index (Ev, "reach") = 1 then
-                     Limit := True;
-                     Geo_Say ("  压到这儿再往下在量到的关节限位里解不出来(停下不是碰到)⇒ 这一下不算");
-                  elsif Index (Ev, "contact") = 1 then
+                  Descend (Ln, Cap, False, Hit, Fr, "一大步一大步找");
+                  if Hit then
                      declare
-                        From : constant Plug.Arm_Pose := C.Press_From;
                         Now : constant Plug.Arm_Pose := F.EE (A);
-                        Lift : constant Geom.V3 := [From (0) - Now (0), From (1) - Now (1), From (2) - Now (2)];
-                        Cap2 : constant Natural := (if Small > 0.0 then Natural (Long_Float'Ceiling (Geom.Norm (Lift) / Small)) + 2 else 0);   --  退回的距离按小步走回去的步数再多两步(次数)
                         Mok : Boolean;
                      begin
-                        Geo_Move (L, C, F, A, Lift, Mok);
-                        Descend (Small, Cap2, False, Coarse, "退回这一压开始的地方、一小步一小步找");
+                        Geo_Move (L, C, F, A, [Fr (0) - Now (0), Fr (1) - Now (1), Fr (2) - Now (2)], Mok);
+                        Descend (Small, Natural (Long_Float'Ceiling (Ln / Small)) + 2, False, Coarse, Fr, "退回碰到的那一大步开始的地方、一小步一小步找");
                      end;
                   end if;
                end Big_Press;
@@ -11807,7 +11804,7 @@ package body Act is
                      O3 : constant Geom.V3 := Geom.Cam_Pos (Gk, P3);
                      H3 : constant Long_Float := Dot ([O3 (0) - C.Board_Pt (0), O3 (1) - C.Board_Pt (1), O3 (2) - C.Board_Pt (2)], Nb);
                      Depth3 : constant Long_Float := -Dot (Nb, Geom.Ap (Geom.Cam_R (Gk, P3), Est (K)));   --  估的尖此刻在眼下多深
-                     Dn : constant Long_Float := H3 - (Depth3 + 2.0 * Small);   --  两小步(次数)
+                     Dn : constant Long_Float := H3 - (Depth3 + 3.0 * Small);   --  三小步(次数:估的尖差一两小步时第一小步照样是空走的)
                      Mok : Boolean;
                   begin
                      if Dn > 0.0 then
@@ -11824,10 +11821,11 @@ package body Act is
                               Went : constant Long_Float := Del (0) * Down (0) + Del (1) * Down (1) + Del (2) * Down (2);
                            begin
                               Direct := Went + Geo_Base (C, A) >= Dn;
-                              Geo_Say ("  按估的尖(离眼 " & Mm (Geom.Norm (Est (K))) & "、此刻在眼下 " & Mm (Depth3) & ")一条命令下 " & Mm (Dn) & " 到尖离面约两小步 ⇒ 实到 " & Mm (Went)
-                                       & (if Direct then ",一小步一小步找" else ",这一下就被顶住了(比估的长)⇒ 抬一大步,按头一回的走法"));
+                              Geo_Say ("  按估的尖(离眼 " & Mm (Geom.Norm (Est (K))) & "、此刻在眼下 " & Mm (Depth3) & ")一条命令下 " & Mm (Dn) & " 到尖离面约三小步 ⇒ 实到 " & Mm (Went)
+                                       & (if Direct then ",一小步一小步找" else ",这一下就被顶住了(比估的长)⇒ 抬两大步,按头一回的走法"));
                               if not Direct then
-                                 Geo_Move (L, C, F, A, [Ln * Protocol_Up (0), Ln * Protocol_Up (1), Ln * Protocol_Up (2)], Mok);
+                                 --  抬两大步(两 = 次数:被顶住时尖在面上或更低,抬一大步第一大步未必是空走的)
+                                 Geo_Move (L, C, F, A, [2.0 * Ln * Protocol_Up (0), 2.0 * Ln * Protocol_Up (1), 2.0 * Ln * Protocol_Up (2)], Mok);
                               end if;
                            end;
                         end;
@@ -11837,7 +11835,11 @@ package body Act is
                   end;
                end if;
                if Direct then
-                  Descend (Small, Natural (Long_Float'Ceiling ((2.0 * Small + Ln) / Small)) + 1, False, Coarse, "一小步一小步找");   --  两小步 + 一大步那么深(次数)
+                  declare
+                     Fr : Plug.Arm_Pose;
+                  begin
+                     Descend (Small, Natural (Long_Float'Ceiling ((3.0 * Small + Ln) / Small)) + 1, False, Coarse, Fr, "一小步一小步找");   --  三小步 + 一大步那么深(次数)
+                  end;
                   if not Coarse and then not Limit then
                      Geo_Say ("  下到按估的尖算的桌面以下一大步还没碰到(比估的短)⇒ 接着按大步压");
                      Big_Press;
@@ -11850,9 +11852,10 @@ package body Act is
                   declare
                      Mok : Boolean;
                      Up : constant Long_Float := Small + 2.0 * Notch;
+                     Fr : Plug.Arm_Pose;
                   begin
                      Geo_Move (L, C, F, A, [Up * Protocol_Up (0), Up * Protocol_Up (1), Up * Protocol_Up (2)], Mok);
-                     Descend (Notch, Natural (Long_Float'Ceiling ((Up + Small) / Notch)) + 1, True, Touched, "轻碰(一档一档)");
+                     Descend (Notch, Natural (Long_Float'Ceiling ((Up + Small) / Notch)) + 1, True, Touched, Fr, "轻碰(一档一档)");
                   end;
                end if;
                if Touched then
