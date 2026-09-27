@@ -179,6 +179,15 @@ package Geom is
       Region : Region_Counts := [others => 0];
    end record;
    Min_Pts : constant := 10;    --  一块里放好以来至少看见过 10 个点才判得了它(次数;同对齐 / 装回核对的"至少 10 个内点")
+   --  配点仪器配过去、再从配到的地方配回来,离问的那一点 1 px 以内才算真配上(像素,协议;扫描、对齐、核对不动的眼都按它)。
+   --  09-27 V1B41:核对不动的眼原来只配单程,镜头挡住的那半边仪器顺着看得见的半边"编"出一片平滑的配点(纯转动时编得很准,0.96 px 的细门都过得去),
+   --  往返:编出来的那半边只有 8% 在 1 px 内(往返中位 3.75 px),看得见的 87%
+   Trip_Px : constant := 1.0;
+   function Round_Trip_Ok (Qu, Qv, Bu, Bv : Long_Float) return Boolean;   --  问的点 (Qu, Qv),配回来落在 (Bu, Bv)(< 0 = 配不回来)
+   --  这只不动的眼按板配得多细:点(给的像素)按位姿投回去的像素误差,门以内的取中位 × 1.2(换算,无量纲:二维高斯误差中位 ≈ 均方根 ÷ 1.2)。
+   --  开机标完、每次重标完都按它定核对的细门(09-27 V1B41:开机那份原来用解的时候的均方根,几个坏点把它抬到 2.48 px、按真值只差 0.33 px,细门放到 7.4 px);
+   --  门以内一个都没有 ⇒ 0
+   function Board_Rms (G : Cam_Geo; Pts : Scene_Pt_Vectors.Vector; Gate : Long_Float) return Long_Float;
    function Region_Name (R : Natural) return String;
    --  给的位姿下"全都看见了"的那一份(刚标好时、焊点用):每个点按这个位姿投进画面,落在哪几块就算哪几块看见过
    function Seen_All (G : Cam_Geo; Scene : Scene_Pt_Vectors.Vector) return Fixed_Best;

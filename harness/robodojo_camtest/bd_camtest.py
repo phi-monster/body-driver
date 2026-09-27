@@ -19,6 +19,9 @@ _maps = {}   # (cam, w, h, k1, k2, f) → (取样的 u, v 整数下标):畸变�
 _hist = {}   # (env_idx, cam) → 最近几帧的彩色图(延迟用)
 _rng = np.random.default_rng(7)
 _pending_after = {}   # tag → 还要存"转之后"那张的剩余帧数(隔几帧再存,等渲染跟上)
+# 被转过的相机该是什么朝向(cam → {"fabric": 四元数, "usd": 四元数}):仿真一集结束复位时会把相机按配置摆回去,
+# 真实世界里被人转过的镜头不会自己转回来 ⇒ 每一步看一眼,被复位摆回去了就按被转过的样子转回去(09-27 V1B41:第二次转之前一集判成功、复位,相机回到原样)
+_expected = {}
 
 
 def _qmul(a, b):
@@ -118,7 +121,29 @@ def _degrade(obs, env_idx_list, cfg):
             v["color"] = img
 
 
+def _keep_rolled(om):
+    cm = om.camera_manager
+    cap = getattr(om, "capture_manager", None)
+    tcs = getattr(cap, "tiled_cameras", None) if cap is not None else None
+    if cm is None or not tcs:
+        return
+    names = cm.camera_names[0]
+    for cam, exp in _expected.items():
+        if cam not in names:
+            continue
+        tc = tcs[names.index(cam)]
+        pos, q = tc.get_world_poses(usd=False)
+        qv = _to_np(q).reshape(-1, 4)
+        if np.max(1.0 - np.abs(np.sum(qv * exp["fabric"], axis=1))) > 1e-5:   # 四元数差一个正负号算同一个朝向;差出来了 = 被复位摆回去了
+            for use_usd in (False, True):
+                p2, q2 = tc.get_world_poses(usd=use_usd)
+                tc.set_world_poses(p2, _like(exp["usd" if use_usd else "fabric"], q2), usd=use_usd)
+            print("[camtest] 一集复位把 %s 摆回了配置的朝向 ⇒ 按被转过的样子转回去(被转过的镜头不会自己转回来):四元数 %s → %s"
+                  % (cam, np.round(qv[0], 4).tolist(), np.round(exp["fabric"][0], 4).tolist()), flush=True)
+
+
 def apply(om, obs, env_idx_list):
+    _keep_rolled(om)
     for tag in list(_pending_after):
         _pending_after[tag] -= 1
         if _pending_after[tag] <= 0:
@@ -155,6 +180,7 @@ def apply(om, obs, env_idx_list):
                     qn = np.array([_qmul(r, qr) for r in qv])
                     qn /= np.linalg.norm(qn, axis=1, keepdims=True)
                     tc.set_world_poses(pos, _like(qn, q), usd=use_usd)
+                    _expected.setdefault(cam, {})["usd" if use_usd else "fabric"] = qn.copy()
                     print("[camtest] %s 绕自己的光轴转了 %.1f°(%s:四元数 %s → %s)" % (cam, float(cfg["roll_deg"]), "USD" if use_usd else "Fabric",
                                                                     np.round(qv[0], 4).tolist(), np.round(qn[0], 4).tolist()), flush=True)
                 _pending_after[cam + "|" + tag] = 5   # 5 帧之后存"转之后"那张(次数)

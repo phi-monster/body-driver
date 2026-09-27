@@ -5951,6 +5951,25 @@ package body Act is
       C.Board_Plane := not Board.Is_Empty;
       C.Fixed_Ref := Ref.RGB; C.Fixed_Ref_W := Ref.W; C.Fixed_Ref_H := Ref.H;
       C.Fixed_Best := (others => <>);
+      --  不动的眼核对用的细门按板定,和重标那一份同一个算法(Geom.Board_Rms):板上每个点(参考图里的像素)按标定的位姿投回去,门以内误差的中位 × 1.2
+      for Cam in 0 .. Natural (C.Geo.Length) - 1 loop
+         declare
+            G : Geom.Cam_Geo := C.Geo (Cam);
+         begin
+            if G.Fixed and then G.Valid and then not C.Board.Is_Empty then
+               declare
+                  Br : constant Long_Float := Geom.Board_Rms (G, C.Board, 3.0 * Long_Float'Max (1.0e-9, G.Rms));   --  解的时候的门(3 倍,协议;同核对)
+               begin
+                  if Br > 0.0 then
+                     Geo_Say ("不动的眼按板配得多细:板上 " & Codec.Img (Natural (C.Board.Length)) & " 个点投回去,误差中位 × 1.2 = " & Codec.Fmt (Br, 2)
+                              & " px(解的时候的均方根 " & Codec.Fmt (G.Rms, 2) & " px)⇒ 核对的细门按它定");
+                     G.Rms := Br;
+                     C.Geo.Replace_Element (Cam, G);
+                  end if;
+               end;
+            end if;
+         end;
+      end loop;
       for Cam in 0 .. Natural (C.Geo.Length) - 1 loop
          declare
             G : constant Geom.Cam_Geo := C.Geo (Cam);
@@ -6932,13 +6951,13 @@ package body Act is
       for S of C.Board loop
          Q.Append (Instrument.Match_Pt'(U => S.U, V => S.V, Cert => 0.0, others => <>));
       end loop;
-      M := Instrument.Match (To_String (C.Inst_Host), C.Inst_Port, C.Fixed_Ref, W, H, Turn_90 (C.Fixed_Ref, W, H), H, W, Q, Err);
+      M := Instrument.Match (To_String (C.Inst_Host), C.Inst_Port, C.Fixed_Ref, W, H, Turn_90 (C.Fixed_Ref, W, H), H, W, Q, Err, Back => True);
       if Natural (M.Length) /= Natural (Q.Length) then
          Geo_Say ("仪器没配成转了 90° 的参考图(" & To_String (Err) & ")⇒ 核对时新位姿按标定时的细门判");
          return;
       end if;
       for I in 0 .. Natural (Q.Length) - 1 loop
-         if M (I).U >= 0.0 and then M (I).V >= 0.0 then
+         if M (I).U >= 0.0 and then M (I).V >= 0.0 and then Geom.Round_Trip_Ok (Q (I).U, Q (I).V, M (I).Bu, M (I).Bv) then   --  往返配上的才算(同核对)
             E.Append (Sqrt ((M (I).U - (Long_Float (H) - Q (I).V)) ** 2 + (M (I).V - Q (I).U) ** 2));   --  连续坐标:原图 (u, v) 转过去在 (H − v, u)(同 Unturn)
          end if;
       end loop;
@@ -7091,7 +7110,8 @@ package body Act is
                   W := H; H := W0;
                end;
             end loop;
-            M := Instrument.Match (To_String (C.Inst_Host), C.Inst_Port, C.Fixed_Ref, C.Fixed_Ref_W, C.Fixed_Ref_H, Img, W, H, Q, Err);
+            --  往返配(同扫描、对齐):配过去再配回来 1 px 以内才算看见,挡住的那一块仪器编出来的点配不回来(见 Geom.Trip_Px)
+            M := Instrument.Match (To_String (C.Inst_Host), C.Inst_Port, C.Fixed_Ref, C.Fixed_Ref_W, C.Fixed_Ref_H, Img, W, H, Q, Err, Back => True);
             Got := Natural (M.Length) = Natural (Q.Length);
             if not Got then
                return Res;
@@ -7099,7 +7119,8 @@ package body Act is
             for I in 0 .. Natural (M.Length) - 1 loop
                declare
                   P : Geom.Scene_Pt := C.Board (I);
-                  In_Pic : constant Boolean := M (I).U >= 0.0 and then M (I).V >= 0.0 and then M (I).U < Long_Float (W) and then M (I).V < Long_Float (H);
+                  In_Pic : constant Boolean := M (I).U >= 0.0 and then M (I).V >= 0.0 and then M (I).U < Long_Float (W) and then M (I).V < Long_Float (H)
+                    and then Geom.Round_Trip_Ok (Q (I).U, Q (I).V, M (I).Bu, M (I).Bv);
                   U, V : Long_Float;
                begin
                   Unturn (M (I).U, M (I).V, Turns, F.Cams (Wc).W, F.Cams (Wc).H, U, V);

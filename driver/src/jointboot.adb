@@ -225,7 +225,7 @@ package body Jointboot is
       --  ── 问格点(09-27 V1B32 改):第 I 帧上铺 Gx × Gy 的格点,仪器配进第 J 帧,往返 1 px 内的留下。格点号就是轨迹号:
       --  起点那帧(I = 0)的对全问同一张格点 ⇒ 同一个格点跨很多帧 = 一条轨迹(运动学最后按重投影一起解要它:两两对极管不住轴离眼多远);
       --  别的对(相邻格、交叉格)各自编号,成两帧的轨迹。原来让仪器每对随机抽 2500 个,同一个点不跨格
-      Trip_Sweep : constant := 1.0;   --  往返 1 px 内的才算(像素,协议;同对齐的 Trip_Px)
+      Trip_Sweep : constant := Geom.Trip_Px;   --  往返 1 px 内的才算(同对齐、核对不动的眼)
       Ng : constant := Gx * Gy;
       procedure Grid_Match (I, J, Ia, Ib, W, H, Serial : Natural; Into : in out Kinem.Corr_Vectors.Vector; Disp : in out Floats; Got : out Boolean) is
          Q : Instrument.Match_Vectors.Vector;
@@ -852,7 +852,7 @@ package body Jointboot is
    --  全部放完以后所有放进世界的一起精修一遍(Joint_Refine):先放进去的也被后面的证据修正。
    --  (V1B11 2026-09-26 量:两只腕眼起点那格一点不重叠,可按整体特征挑的两手之间最像的 12 对往返配上 34–63%、随机 12 对平均 7%;
    --  头顶眼和第一只手最像的 8 格里 6 格配得上 29–36%)
-   Trip_Px : constant := 1.0;   --  往返 1 px 内的才算(像素,协议:配点残差按像素记;绝对门 —— 按中位数倍数定的门在乱配占多数时跟着放宽,V1B11)
+   Trip_Px : constant := Geom.Trip_Px;   --  往返 1 px 内的才算(绝对门 —— 按中位数倍数定的门在乱配占多数时跟着放宽,V1B11)
    Min_Inl : constant := 10;    --  至少 10 个内点才放进世界(次数)
 
    procedure Align (Ds : Sweep_Vectors.Vector; Worlds : in out Arm_World_Vectors.Vector; Css : Corr_Set_Vectors.Vector;

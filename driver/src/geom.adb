@@ -2499,6 +2499,29 @@ package body Geom is
          end loop;
       end if;
    end Add_Regions;
+   function Round_Trip_Ok (Qu, Qv, Bu, Bv : Long_Float) return Boolean is
+     (Bu >= 0.0 and then Bv >= 0.0 and then Sqrt ((Bu - Qu) ** 2 + (Bv - Qv) ** 2) < Trip_Px);
+   function Board_Rms (G : Cam_Geo; Pts : Scene_Pt_Vectors.Vector; Gate : Long_Float) return Long_Float is
+      Es : Param_Vec (0 .. Natural'Max (1, Natural (Pts.Length)) - 1) := [others => 0.0];
+      Ne : Natural := 0;
+   begin
+      for P of Pts loop
+         if P.U >= 0.0 and then P.V >= 0.0 then
+            declare
+               U, V : Long_Float;
+               Front : Boolean;
+            begin
+               Project_Fixed (G, P.Pw, U, V, Front);
+               if Front and then Sqrt ((U - P.U) ** 2 + (V - P.V) ** 2) <= Gate then
+                  Es (Ne) := Sqrt ((U - P.U) ** 2 + (V - P.V) ** 2);
+                  Ne := Ne + 1;
+               end if;
+            end;
+         end if;
+      end loop;
+      return (if Ne > 0 then 1.2 * Median (Es, Ne) else 0.0);   --  误差中位 → 均方根(换算,无量纲)
+   end Board_Rms;
+
    function Seen_All (G : Cam_Geo; Scene : Scene_Pt_Vectors.Vector) return Fixed_Best is
       B : Fixed_Best;
    begin
@@ -2644,23 +2667,10 @@ package body Geom is
          --  以后按新解配得多细来判:新位姿解释得了的那些点(新门内)像素误差的中位 × 1.2(换算,无量纲:二维高斯误差中位 ≈ 均方根 ÷ 1.2)。
          --  不拿解的时候那份没加权的均方根:加权挑点留下了三角得不准的点,它们的大误差把均方根抬到 1.31 px(标定时 0.16),门跟着放到 3.9 px(X5E2 2026-09-26)
          declare
-            Es : Param_Vec (0 .. Natural'Max (1, Natural (Cur.Length)) - 1) := [others => 0.0];
-            Ne : Natural := 0;
             Gate_New : constant Long_Float := Long_Float'Max (3.0 * Long_Float'Max (1.0e-9, G.Rms), 3.0 * Turn_Sd);
+            Br : constant Long_Float := Board_Rms (Gn, Cur, Gate_New);
          begin
-            for P of Cur loop
-               declare
-                  U, V : Long_Float;
-                  Front : Boolean;
-               begin
-                  Project_Fixed (Gn, P.Pw, U, V, Front);
-                  if Front and then Sqrt ((U - P.U) ** 2 + (V - P.V) ** 2) <= Gate_New then
-                     Es (Ne) := Sqrt ((U - P.U) ** 2 + (V - P.V) ** 2);
-                     Ne := Ne + 1;
-                  end if;
-               end;
-            end loop;
-            Gn.Rms := (if Ne > 0 then 1.2 * Median (Es, Ne) else Fr.Scene_Rms);   --  误差中位 → 均方根(换算,无量纲)
+            Gn.Rms := (if Br > 0.0 then Br else Fr.Scene_Rms);
             Rep.Rms := Gn.Rms;
          end;
          G := Gn;

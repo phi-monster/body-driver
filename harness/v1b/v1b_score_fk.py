@@ -375,6 +375,34 @@ try:
                 rolls = [float(x) for x in re.findall(r"\[camtest\] cam_head 绕自己的光轴转了 ([-0-9.]+)°\(Fabric", sl)]
                 gp = mb.group(1) + ".geo.json"
                 wc = int([l for l in Lk if l.startswith("world_cam")][0].split()[1])
+                #    几何文件的快照(harness 的 geosnap.sh:文件每变一次存一份 geosnap/geo_HHMMSS.json)× camseq 的步骤时刻(N<炮>_camseq.txt 的 "== HH:MM:SS 转 …"):
+                #    每一份按它存下那一刻之前转过几次 90° 当真相机,各按像素比(开机那份、转 90° 重标那份、转 180° 重标那份)
+                snapdir = os.path.join(RUN, "geosnap"); cs_txt = RUN.rstrip("/") + "_camseq.txt"
+                if os.path.isdir(snapdir) and os.path.exists(cs_txt):
+                    turns = [l.split()[1] for l in open(cs_txt, encoding="utf-8", errors="ignore") if l.startswith("== ") and "转" in l and "挡" not in l and "撤" not in l]
+                    tsec = lambda hms: int(hms[0:2]) * 3600 + int(hms[2:4]) * 60 + int(hms[4:6])
+                    turn_s = [tsec(t.replace(":", "")) for t in turns]
+                    for fn in sorted(os.listdir(snapdir)):
+                        if not fn.startswith("geo_"): continue
+                        ts = tsec(fn[4:10]); k = sum(1 for t in turn_s if t <= ts)
+                        #    仿真一集结束(判成功 / 失败)会复位,头顶眼跟着回到配置的朝向(09-27 V1B41:第二次转之前复位过)⇒ 按步骤时刻累加的转数不一定是真的;
+                        #    四个转法都算一遍照实印出来,哪个是真的按 sim.log 的事件(camtest 行 + "Video is saved" 的一集结束)定,不挑最小的
+                        errs4 = []
+                        gs = [g for g in json.load(open(os.path.join(snapdir, fn)))["cams"] if g["cam"] == wc][0]
+                        Rd3 = Rg0 @ Rw_k.T @ np.array(gs["r_ce"]).reshape(3, 3); pd3 = w2s_k(np.array(gs["pos"]))
+                        for kk in range(4):
+                            th = math.radians(90.0 * kk)
+                            Rt_k = Rt_c @ np.array([[math.cos(th), -math.sin(th), 0], [math.sin(th), math.cos(th), 0], [0, 0, 1]])
+                            e3 = []
+                            for gx in np.linspace(-0.7, 0.7, 57):
+                                for gy in np.linspace(-0.6, 0.5, 45):
+                                    X = np.array([gx, gy, top]); ut = proj_c(Rt_k, pt_c, ft, W_ / 2, H_ / 2, X)
+                                    if ut is None or not (0 <= ut[0] < W_ and 0 <= ut[1] < H_): continue
+                                    ud = proj_c(Rd3, pd3, gs["f"], gs["cx"], gs["cy"], X, gs.get("k1", 0.0), gs.get("k2", 0.0))
+                                    if ud is not None: e3.append(np.linalg.norm(ud - ut))
+                            e3 = np.array(e3)
+                            errs4.append("%d×90°:中位 %.2f / 九成 %.2f / 最大 %.2f px" % (kk, np.median(e3), np.quantile(e3, 0.9), e3.max()) if len(e3) else "%d×90°:—" % kk)
+                        print("头顶眼快照 %s(按步骤时刻转过 %d 次;残差自报 %.2f px;位置差 %.1f mm):%s" % (fn, k, gs.get("rms", 0.0), 1000 * np.linalg.norm(pd3 - pt_c), " · ".join(errs4)))
                 if rolls and os.path.exists(gp):
                     th = math.radians(sum(rolls))
                     Rt_r = Rt_c @ np.array([[math.cos(th), -math.sin(th), 0], [math.sin(th), math.cos(th), 0], [0, 0, 1]])

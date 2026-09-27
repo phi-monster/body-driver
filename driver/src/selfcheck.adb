@@ -1583,6 +1583,37 @@ begin
                       "不动的眼核对·挡住六成:对得上 " & Codec.Img (R3.Consistent) & "/" & Codec.Img (R3.Asked) & " ⇒ " & (if R3.Covered then "算挡了" else "没发现挡(错)")
                       & (if R3.Moved then "、算挪了(错)" else "、位姿不动"));
             end;
+            --  ⑤ 往返才算配上(Geom.Round_Trip_Ok,09-27 V1B41):配回来 0.5 px ⇒ 算;3.75 px(挡住那半边仪器编的点的往返中位)⇒ 不算;配不回来(−1)⇒ 不算;
+            --  细门按板定(Geom.Board_Rms):板上 95% 的点抖 0.3 px、5% 错 30 px ⇒ 中位 × 1.2 ≈ 0.4 px(均方根会是约 7 px)
+            declare
+               Pts_R : Geom.Scene_Pt_Vectors.Vector;
+               J : Natural := 0;
+               Sq : Long_Float := 0.0;
+            begin
+               for B of Base loop
+                  declare
+                     N : Geom.Scene_Pt := B;
+                  begin
+                     if J mod 20 = 7 then   --  二十个里一个错 30 px(合成)
+                        N.U := B.U + 30.0; N.V := B.V;
+                     else
+                        N.U := B.U + 0.3 * Jit6; N.V := B.V + 0.3 * Jit6;
+                     end if;
+                     Sq := Sq + (N.U - B.U) ** 2 + (N.V - B.V) ** 2;
+                     Pts_R.Append (N);
+                     J := J + 1;
+                  end;
+               end loop;
+               declare
+                  Br : constant Long_Float := Geom.Board_Rms (G0, Pts_R, Long_Float'Last);
+                  Rms_Plain : constant Long_Float := Ada.Numerics.Long_Elementary_Functions.Sqrt (Sq / Long_Float (Natural'Max (1, J)));
+               begin
+                  Check (Geom.Round_Trip_Ok (100.0, 200.0, 100.3, 200.4) and then not Geom.Round_Trip_Ok (100.0, 200.0, 103.0, 202.25)
+                         and then not Geom.Round_Trip_Ok (100.0, 200.0, -1.0, -1.0) and then Br > 0.2 and then Br < 0.6 and then Rms_Plain > 5.0,
+                         "不动的眼核对·往返 1 px 才算配上(0.5 px 算、3.75 px 不算、配不回来不算);细门按板定:五个百分点错 30 px 时中位 × 1.2 = "
+                         & Codec.Fmt (Br, 2) & " px(均方根 " & Codec.Fmt (Rms_Plain, 2) & " px)");
+               end;
+            end;
             --  ④ 挡住一块,按块判(09-27 V1B39:转过 90° 以后板上的点多在右边,挡住左半只挡掉整幅的 25%,整幅那条擦线没报):
             --  (a) 板上的点四分之三在右边、挡住左半 ⇒ 整幅只少了约两成(整幅那条不报),左半那一块一个不剩 ⇒ 要报挡、说是左半边、位姿不动;
             --  (b) 到处随机丢一成半 ⇒ 不许报;(c) 一小团(一只手从眼前经过那么大)丢了 ⇒ 不许报
