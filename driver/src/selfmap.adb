@@ -163,15 +163,20 @@ package body Selfmap is
             D : constant Table.Vec := Chan.Delivered (Prev, F.EE (Arm));
             Moved_P : constant Long_Float := Table.Norm (D, 3);
             Rv : constant Long_Float := D (3) ** 2 + D (4) ** 2 + D (5) ** 2;
-            --  给了这一档(Tol > 0):每拍挪不到这一条命令要走的百分之一就算"停了"(比例;慢的身体还在一拍半毫米地挪时不算停,
-            --  G2D 2026-09-24 人形返回时还在往下挪被误判成顶住);没给:挪不到读数噪声才算
+            --  给了这一档(Tol、Tol_Rot > 0):平移、转动都折成"一步看得见的那一档"的个数,这一拍挪的档数不到这条命令档数的百分之一就算"停了"
+            --  (比例;慢的身体还在一拍半毫米地挪时不算停,G2D 2026-09-24 人形返回时还在往下挪被误判成顶住;
+            --  V1B23 2026-09-27:只往下压、不转的命令,转动那一项的门原来退成读数噪声 2e-5 弧度,被东西挡住时手一晃就不算停,顶满 17 拍、一滑把手指推进桌面 19 mm);
+            --  没给:挪不到读数噪声才算
             Cmd : constant Table.Vec := Chan.Delivered (P0, C.Pose);
-            Gate_P : constant Long_Float := (if Tol > 0.0 then Long_Float'Max (M.EE_Noise, Still_Frac * Table.Norm (Cmd, 3)) else M.EE_Noise);
-            Gate_R : constant Long_Float :=
-              (if Tol > 0.0 then Long_Float'Max (M.Rot_Noise, Still_Frac * Sqrt (Cmd (3) ** 2 + Cmd (4) ** 2 + Cmd (5) ** 2)) else M.Rot_Noise);
+            Geo : constant Boolean := Tol > 0.0 and then Tol_Rot > 0.0;
+            N_Cmd : constant Long_Float := (if Geo then Table.Norm (Cmd, 3) / Tol + Sqrt (Cmd (3) ** 2 + Cmd (4) ** 2 + Cmd (5) ** 2) / Tol_Rot else 0.0);
+            N_Beat : constant Long_Float := (if Geo then Moved_P / Tol + Sqrt (Rv) / Tol_Rot else 0.0);
+            N_Noise : constant Long_Float := (if Geo then M.EE_Noise / Tol + M.Rot_Noise / Tol_Rot else 0.0);
             Miss : constant Table.Vec := Chan.Delivered (F.EE (Arm), C.Pose);
          begin
-            if Moved_P <= Gate_P and then Rv <= Gate_R * Gate_R then
+            if (if Geo then N_Beat <= Long_Float'Max (N_Noise, Still_Frac * N_Cmd)
+                else Moved_P <= M.EE_Noise and then Rv <= M.Rot_Noise * M.Rot_Noise)
+            then
                Still := Still + 1;
             else
                Still := 0;

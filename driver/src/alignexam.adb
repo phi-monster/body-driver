@@ -204,6 +204,24 @@ begin
       Pr : Long_Float;
    begin
       Jointboot.Align (Ds, Worlds, Css, Host, Port, Rw, O, Ok, Fixed_Eye, Board, Pp, Pn, Pr, Dump => Out_Dir);
+      --  交给开机后半段的板落盘(每行:世界系 x y z、离桌面多高、沿法向的不确定度、几只眼看见;单位 = 世界单位),离线看开机碰桌面挑的落点附近有什么
+      declare
+         Fo : File_Type;
+      begin
+         Create (Fo, Out_File, Out_Dir & "/board.txt");
+         Put_Line (Fo, "# 桌面点 " & Codec.Fmt (Pp (0), 5) & " " & Codec.Fmt (Pp (1), 5) & " " & Codec.Fmt (Pp (2), 5) & " 法向 "
+                   & Codec.Fmt (Pn (0), 5) & " " & Codec.Fmt (Pn (1), 5) & " " & Codec.Fmt (Pn (2), 5) & " 离散 " & Codec.Fmt (Pr, 5));
+         for S of Board loop
+            declare
+               H : constant Long_Float := (S.Pw (0) - Pp (0)) * Pn (0) + (S.Pw (1) - Pp (1)) * Pn (1) + (S.Pw (2) - Pp (2)) * Pn (2);
+               Cn : constant Geom.V3 := Geom.Ap (S.Cov, Pn);
+            begin
+               Put_Line (Fo, Codec.Fmt (S.Pw (0), 5) & " " & Codec.Fmt (S.Pw (1), 5) & " " & Codec.Fmt (S.Pw (2), 5) & " " & Codec.Fmt (H, 5) & " "
+                         & Codec.Fmt (Cn (0) * Pn (0) + Cn (1) * Pn (1) + Cn (2) * Pn (2), 8) & " " & Codec.Img (S.Views));
+            end;
+         end loop;
+         Close (Fo);
+      end;
    end;
    Put_Line (if Ok then "对齐做完(报告见上面 [身] 那几行;点对落盘在输出目录)" else "对齐没做成");
 end Alignexam;

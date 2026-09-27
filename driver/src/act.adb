@@ -11424,7 +11424,9 @@ package body Act is
          --  那时的门是整瓣手指的宽 90 mm,没拦下,视线斜着交面,量出的尖长了 16–20 mm)。
          --  压到被顶住以后不再往下顶、让手歇下来再读位姿(V1B21 仿真真值:顶着的时候手指压进桌面 6.6 mm,命令一换成停在此刻两拍后回到 2.5 mm)。
          --  Got = 真顶住了、沿面滑得动、压的这一瓣的视线交得到面;Row = 这一下每一瓣视线交面的结果;Spot = 压的那一瓣落的那一点
-         procedure Press_At (K : Natural; Shift : Geom.V3; Row : out Geom.Plane_Tip_Vectors.Vector; Spot : out Geom.V3; Got : out Boolean) is
+         --  Away_R > 0:落点离 Away 不到 Away_R 的空的面不要(两处碰的第二处要真是另一处;V1B22 第二处按平移挪完又挑回了第一处,两处相距 0)
+         procedure Press_At (K : Natural; Shift : Geom.V3; Row : out Geom.Plane_Tip_Vectors.Vector; Spot : out Geom.V3; Got : out Boolean;
+                             Away : Geom.V3 := [0.0, 0.0, 0.0]; Away_R : Long_Float := 0.0) is
             P : constant Plug.Arm_Pose := F.EE (A);
             Gk : constant Geom.Cam_Geo := C.Geo (Hc);
             O : constant Geom.V3 := Geom.Cam_Pos (Gk, P);
@@ -11482,16 +11484,19 @@ package body Act is
                      Av : Table.Vec := Table.Zero_Vec;
                      Pe, Re : Long_Float;
                      Rok : Boolean;
+                     Lz : constant Geom.V3 := [Lp (0) (0) + D1 (0) - Away (0), Lp (0) (1) + D1 (1) - Away (1), Lp (0) (2) + D1 (2) - Away (2)];
                   begin
-                     for I in 0 .. 2 loop
-                        Av (I) := Shift (I) + D1 (I);
-                        Av (3 + I) := Rv (I);
-                     end loop;
-                     Plug.Reach (A, Chan.Compose (P, Av), Pe, Re, Rok);
-                     Asked := Asked + 1;
-                     if not Rok or else (Pe <= Tol_P and then Re <= Tol_R) then
-                        Dl := D1; Found := True;
-                        exit;
+                     if Away_R <= 0.0 or else Geom.Norm (Lz) >= Away_R then
+                        for I in 0 .. 2 loop
+                           Av (I) := Shift (I) + D1 (I);
+                           Av (3 + I) := Rv (I);
+                        end loop;
+                        Plug.Reach (A, Chan.Compose (P, Av), Pe, Re, Rok);
+                        Asked := Asked + 1;
+                        if not Rok or else (Pe <= Tol_P and then Re <= Tol_R) then
+                           Dl := D1; Found := True;
+                           exit;
+                        end if;
                      end if;
                   end;
                end loop;
@@ -11654,40 +11659,65 @@ package body Act is
                Geo_Say (Who & "第 " & Codec.Img (K + 1) & " 瓣:让它指尖的视线朝下,落到板上一块空的面、压到被顶住 ⇒ 视线交面 = 它的指尖");
                --  转到朝下在压的那一下里(和挪到空的面同一条命令);转不到、挪不到都由"挪完核这一瓣的视线落在哪"拦下
                --  两处碰(2026-09-26):胳膊够不着时"到头了"也会被当成碰到(G2G 人形一只手在桌面上方 7.8 cm 停住),那样视线交面交出来的指尖长出几厘米;
-               --  真碰到桌面时两处量出的指尖一样长,胳膊到头停的高度随位置变 ⇒ 第二处挪开 4 倍一压(倍数,无量纲)再碰,两处差超过
-               --  "两边不确定度的 3 倍 + 这只手一推走得出来的最小一档"(量的)⇒ 不收
+               --  真碰到桌面时两处量出的指尖一样长,胳膊到头、或胳膊被旁边的东西挡住时停的高度随位置变 ⇒ 第二处挪开再碰,两处差超过
+               --  "两边不确定度的 3 倍 + 这只手一推走得出来的最小一档"(量的)⇒ 碰第三处(另一边),和哪一处对得上就收那两处,都对不上 ⇒ 不收。
+               --  挪开多远 = 第一处碰出来的这一瓣离眼的距离上,各瓣指尖张开的跨度(两根手指一样长时这只手在面上占的宽,纯几何;至少 4 倍一压):
+               --  V1B23 2026-09-27 两处只隔 11 mm,旁边一把美工刀和胳膊把两处都带偏了同样多(这一瓣短了 13 mm),两处照样对得上
                declare
-                  Row1, Row2 : Geom.Plane_Tip_Vectors.Vector;
-                  Sp1, Sp2 : Geom.V3;
-                  G1, G2 : Boolean := False;
+                  Rw1, Rw2, Rw3 : Geom.Plane_Tip_Vectors.Vector;
+                  Sp1, Sp2, Sp3 : Geom.V3;
+                  G1, G2, G3 : Boolean := False;
                   N : constant Geom.V3 := C.Board_N;
                   Ax : constant Geom.V3 := (if abs (N (0)) < abs (N (1)) then [1.0, 0.0, 0.0] else [0.0, 1.0, 0.0]);
                   T0 : constant Geom.V3 := [N (1) * Ax (2) - N (2) * Ax (1), N (2) * Ax (0) - N (0) * Ax (2), N (0) * Ax (1) - N (1) * Ax (0)];
                   Tn : constant Long_Float := Geom.Norm (T0);
-                  Far : constant Long_Float := 4.0 * 4.0 * Geo_Base (C, A);   --  4 倍一压(一压 = 4 倍探针幅度,同 Geo_Go)
-                  Shift2 : constant Geom.V3 := (if Tn > 0.0 then [Far * T0 (0) / Tn, Far * T0 (1) / Tn, Far * T0 (2) / Tn] else [0.0, 0.0, 0.0]);
+                  Far0 : constant Long_Float := 4.0 * 4.0 * Geo_Base (C, A);   --  4 倍一压(一压 = 4 倍探针幅度,同 Geo_Go)
+                  function Gate_Of (Ra, Rb : Geom.Plane_Tip_Vectors.Vector) return Long_Float is
+                    (3.0 * Sqrt (Ra (K).Sd ** 2 + Rb (K).Sd ** 2) + Geo_Base (C, A));   --  3 倍两边不确定度(倍数无量纲,同踢离群)+ 一推的最小一档
+                  function Along (D : Long_Float) return Geom.V3 is
+                    (if Tn > 0.0 then [D * T0 (0) / Tn, D * T0 (1) / Tn, D * T0 (2) / Tn] else [0.0, 0.0, 0.0]);
+                  procedure Take (Ra, Rb : Geom.Plane_Tip_Vectors.Vector) is
+                  begin
+                     Rows (K) := Ra;
+                     Rows (K) (K).S := 0.5 * (Ra (K).S + Rb (K).S);
+                     Done.Replace_Element (K, True);
+                  end Take;
                begin
-                  Press_At (K, [0.0, 0.0, 0.0], Row1, Sp1, G1);
-                  if G1 then
-                     Press_At (K, Shift2, Row2, Sp2, G2);
-                  end if;
-                  if not (G1 and then G2) then
+                  Press_At (K, [0.0, 0.0, 0.0], Rw1, Sp1, G1);
+                  if not G1 then
                      Failed := True;
                   else
                      declare
-                        S1 : constant Long_Float := Row1 (K).S;
-                        S2 : constant Long_Float := Row2 (K).S;
-                        Gate : constant Long_Float := 3.0 * Sqrt (Row1 (K).Sd ** 2 + Row2 (K).Sd ** 2) + Geo_Base (C, A);
-                        Apart : constant Long_Float := Geom.Norm ([Sp1 (0) - Sp2 (0), Sp1 (1) - Sp2 (1), Sp1 (2) - Sp2 (2)]);
+                        S1 : constant Long_Float := Rw1 (K).S;
+                        Span : Long_Float := 0.0;
+                        Far : Long_Float;
                      begin
-                        Geo_Say ("  两处碰出来这一瓣离眼 " & Mm (S1) & " / " & Mm (S2) & "(两处相距 " & Mm (Apart) & ",门 " & Mm (Gate) & ")");
-                        if abs (S1 - S2) > Gate then
-                           Geo_Say ("  两处对不上(差 " & Mm (abs (S1 - S2)) & ")⇒ 至少一处不是真碰到桌面(多半是胳膊到头了);指尖这回量不成");
-                           Failed := True;
+                        for J in 0 .. Nl - 1 loop
+                           Span := Long_Float'Max (Span, S1 * Geom.Norm ([D (K) (0) - D (J) (0), D (K) (1) - D (J) (1), D (K) (2) - D (J) (2)]));
+                        end loop;
+                        Far := Long_Float'Max (Far0, Span);
+                        Press_At (K, Along (Far), Rw2, Sp2, G2, Away => Sp1, Away_R => 0.5 * Far);   --  离第一处至少半个挪开的距离(一半,纯数学)
+                        if G2 then
+                           Geo_Say ("  两处碰出来这一瓣离眼 " & Mm (S1) & " / " & Mm (Rw2 (K).S) & "(两处相距 "
+                                    & Mm (Geom.Norm ([Sp1 (0) - Sp2 (0), Sp1 (1) - Sp2 (1), Sp1 (2) - Sp2 (2)])) & ",门 " & Mm (Gate_Of (Rw1, Rw2)) & ")");
+                        end if;
+                        if G2 and then abs (S1 - Rw2 (K).S) <= Gate_Of (Rw1, Rw2) then
+                           Take (Rw1, Rw2);
                         else
-                           Rows (K) := Row1;
-                           Rows (K) (K).S := 0.5 * (S1 + S2);
-                           Done.Replace_Element (K, True);
+                           Geo_Say ("  " & (if G2 then "两处对不上(差 " & Mm (abs (S1 - Rw2 (K).S)) & ")" else "第二处没碰成")
+                                    & " ⇒ 在另一边再碰一处,和哪一处对得上就收那两处");
+                           Press_At (K, Along (-Far), Rw3, Sp3, G3, Away => Sp1, Away_R => 0.5 * Far);
+                           if G3 and then abs (Rw3 (K).S - S1) <= Gate_Of (Rw1, Rw3) then
+                              Geo_Say ("  第三处离眼 " & Mm (Rw3 (K).S) & ",和第一处对得上 ⇒ 收这两处;第二处多半被别的东西挡了");
+                              Take (Rw1, Rw3);
+                           elsif G3 and then G2 and then abs (Rw3 (K).S - Rw2 (K).S) <= Gate_Of (Rw2, Rw3) then
+                              Geo_Say ("  第三处离眼 " & Mm (Rw3 (K).S) & ",和第二处对得上 ⇒ 收这两处;第一处多半被别的东西挡了");
+                              Take (Rw2, Rw3);
+                           else
+                              Geo_Say ("  三处对不上" & (if G3 then "(第三处离眼 " & Mm (Rw3 (K).S) & ")" else "(第三处没碰成)")
+                                       & " ⇒ 至少两处不是真碰到桌面(胳膊到头了、或被旁边的东西挡了);指尖这回量不成");
+                              Failed := True;
+                           end if;
                         end if;
                      end;
                   end if;
