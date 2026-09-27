@@ -501,7 +501,7 @@ package body Zone is
 
    procedure Measure (L : in out Plug.Link; M : Selfmap.Body_Map; Arm, K : Natural; F : in out Plug.Frame; H : out Hand; Ok : out Boolean) is
       --  抓握通道当关节量(V1b ②,2026-09-27):从此刻的读数起往读数变小那边推到头、再往另一边推到头(同关节扫描一个办法:
-      --  一步 = 读数量级的 3%,推动了下一步 ×4,挪不到命令的一半、或者哪台相机里都没有一块像素跟着动 = 到头);两头停住的图比出握区(瓣 = 分得开的那一类,
+      --  头一步 = 读数量级那么大,推动了下一步 ×4,挪不到命令的一半、或者手指动过以后哪台相机里都没有一块像素跟着动 = 到头);两头停住的图比出握区(瓣 = 分得开的那一类,
       --  和两张图谁先谁后无关);哪头张开:到最后那一头时胳膊挪一下再挪回来,它自己那只眼里没跟着变的手指像素(长在手上的)落在瓣里多 ⇒ 这一头张开。
       --  原来是"命令 0 = 合空、再张回开机那个读数"—— 读数在 0–1、0 = 合是 x5 的约定。最后停在张开那头(碰桌面量指尖要手指在瓣那儿)
       N_Cams : constant Natural := Natural (F.Cams.Length);
@@ -575,7 +575,9 @@ package body Zone is
       --  往 Dir 那边推到头
       procedure Sweep (Dir : Long_Float; R_End : out Long_Float; Fr : out Plug.Cam_Vectors.Vector; Steps : out Natural; Good : out Boolean) is
          R : Long_Float := Selfmap.Jaw_Of (F, Arm, K);
-         S : Long_Float := 0.03 * Long_Float'Max (1.0, abs R);   --  头一步 = 读数量级的 3%(比例,同关节扫描)
+         --  头一步 = 读数量级那么大(max(1, |读数|),同关节扫描的量级取法),推动了下一步 ×4:这里只找两头,不像关节扫描要细采样给运动学
+         --  (V1B30 2026-09-27:头一步 3% 时每只手要推七八下、每下都等停稳,一只手 80 多拍;x5 现在往每边两下)
+         S : Long_Float := Long_Float'Max (1.0, abs R);
          Rn : Long_Float;
          Seen_Move : Boolean := False;   --  这一趟里画面已经跟着动过
       begin
