@@ -411,9 +411,10 @@ package Act is
    --  开机后半段的几何从前半段来(V1b 09-27):每台相机一份(Geo:手上那只眼 = 运动学量的焦距、主点,插头给的手的位姿就是它的位姿 ⇒ 不转、不偏;
    --  不动的眼 = 对齐量的,世界系)、标定板(Board:放进世界的手三角出、配进不动的眼的点)、世界系的桌面(Plane_*)、不动的眼那一刻的画面(Ref:
    --  板上的点在它里面的像素就是在这张图里配的,每轮核对拿它比)。这几样前半段量过,后半段不再量(朝向、不动的眼);指尖、步幅后面照量。
-   --  长度单位 = 第一只手运动学的单位(每一炮不一样 ⇒ 不装回上一炮的几何文件)
+   --  长度单位 = 第一只手运动学的单位(从零量的每一炮不一样 ⇒ 不装回上一炮的几何文件;前半段按身体文件装回的是同一个单位 ⇒ Keep_Tips)
    procedure Geo_Install (F : Plug.Frame; C : in out Context; Body_Path : String; Geo : Geom.Geo_Vectors.Vector; Board : Geom.Scene_Pt_Vectors.Vector;
-                          Plane_Pt, Plane_N : Geom.V3; Plane_Rms : Long_Float; Ref : Plug.Cam);
+                          Plane_Pt, Plane_N : Geom.V3; Plane_Rms : Long_Float; Ref : Plug.Cam; Keep_Tips : Boolean := False);
+   --  Keep_Tips:前半段是装回的(同一个世界单位)⇒ 几何文件里存的指尖、张口照用(后半段"缺什么才量什么");从零量的前半段不留旧的(单位换了)
    --  量【不动的眼】:看着自己的手挪几下(每停一处合空一次,看指尖落在画面哪儿),解出它在世界里的位置和朝向。
    --  只在它还没量过时做;量过就存进几何文件,下一炮直接装回。
    procedure Geo_Boot_Fixed (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);

@@ -31,6 +31,7 @@ with Contact.Gen;
 with Contact.Exec;
 with Contact.Surface;
 with Kinem;
+with Jointboot;
 with Ada.Numerics.Float_Random;
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Containers;
@@ -5206,6 +5207,137 @@ begin
                    "运动学·多视图一步把挪开的轴拉回来:起步考试最大 " & Codec.Fmt (E0x, 2) & " mm(要 > 3)⇒ " & Codec.Fmt (E1x, 2) & " mm(要 < 0.5)、焦距 "
                    & Codec.Fmt (Mp.F, 1) & "(真 400,要 0.2% 内)");
          end;
+      end;
+   end;
+
+   --  🔴 ⑤ 前半段存 / 装回(Jointboot.Save_Kin / Load_Kin / Same_View,09-27):存了再读回来,每一个数都得一样(9 位小数);
+   --  没量到头的界存成 none、读回还是"不设界";核对的判法:配上的点少于 10 个 / 位移中位 ≥ 1 px 都算"动了"
+   declare
+      use Geom;
+      use Ada.Numerics.Long_Elementary_Functions;
+      use type Bytes.Buf;
+      K, K2 : Jointboot.Kin_Store;
+      Okl : Boolean;
+      Note : Unbounded_String;
+      Path : constant String := "/tmp/bd_selfcheck_kin.txt";
+      Worst : Long_Float := 0.0;
+      procedure Cmp (A, B : Long_Float) is
+      begin
+         Worst := Long_Float'Max (Worst, abs (A - B));
+      end Cmp;
+      Img : Plug.Cam;
+   begin
+      Img.W := 8; Img.H := 6;
+      for I in 1 .. 8 * 6 * 3 loop
+         Img.RGB.Append (Interfaces.Unsigned_8 ((I * 37) mod 256));
+      end loop;
+      K.Key := To_Unbounded_String ("cams=640x480,;groups=6,;jaws=1;joints=a,");
+      K.World_Cam := 0;
+      K.Rw := Rodrigues ([0.1, -0.2, 0.3]); K.O := [0.5, -0.25, 3.125];
+      K.Plane_Pt := [0.0, 0.0, 0.0]; K.Plane_N := [0.0, 0.0, 1.0]; K.Plane_Rms := 0.0043;
+      K.Fixed_Eye := No_Geo; K.Fixed_Eye.Valid := True; K.Fixed_Eye.Fixed := True; K.Fixed_Eye.F := 289.25; K.Fixed_Eye.Cx := 320.0; K.Fixed_Eye.Cy := 240.0;
+      K.Fixed_Eye.Pos := [5.7, -2.75, 10.35]; K.Fixed_Eye.R_Ce := Rodrigues ([1.0, 0.01, -0.02]);
+      for A in 0 .. 1 loop
+         declare
+            W : Jointboot.Arm_World;
+            D : Jointboot.Sweep_Data;
+         begin
+            W.Group := A; W.Valid := True; W.Sweep := A;
+            W.Model.Valid := True; W.Model.N := 6; W.Model.F := 397.123456789; W.Model.Cx := 320.0; W.Model.Cy := 240.0;
+            for J in 0 .. 5 loop
+               W.Model.Q0.Append (0.001 * Long_Float (J + A));
+               W.Model.Ax (J).W := [Sin (Long_Float (J)), Cos (Long_Float (J)), 0.0];
+               W.Model.Ax (J).P := [0.1 * Long_Float (J), -0.2 * Long_Float (A), 1.0 / 3.0];
+               W.Lo.Append (if J = 2 then Long_Float'First else -0.5 - Long_Float (J));
+               W.Hi.Append (if J = 3 then Long_Float'Last else 0.5 + Long_Float (J));
+            end loop;
+            W.S := (if A = 0 then 1.0 else 1.00347);
+            W.Ra := (if A = 0 then Identity else Rodrigues ([0.001, 0.002, -0.003])); W.Ta := (if A = 0 then [0.0, 0.0, 0.0] else [11.4658, -0.008, 0.0156]);
+            D.W := 8; D.H := 6;
+            for Fk in 0 .. 2 loop
+               declare
+                  Fr : Kinem.Frame_Info;
+               begin
+                  Fr.Joint := (if Fk = 0 then -1 else Fk);
+                  for J in 0 .. 5 loop
+                     Fr.Q.Append (0.01 * Long_Float (Fk * 7 + J));
+                  end loop;
+                  D.Frames.Append (Fr);
+               end;
+            end loop;
+            D.Imgs.Append (Img);
+            if A = 0 then
+               D.World_Img := Img;
+            end if;
+            K.Worlds.Append (W); K.Ds.Append (D); K.Eyes.Append (A + 1);
+         end;
+      end loop;
+      for P in 0 .. 2 loop
+         K.Board.Append (Scene_Pt'(Pw => [Long_Float (P), 0.5, -0.001], Cov => [[1.0e-4, 0.0, 0.0], [0.0, 2.0e-4, 0.0], [0.0, 0.0, 3.0e-4]],
+                                   U => 100.5 + Long_Float (P), V => 200.25, Sh => 0.36, Views => 2));
+      end loop;
+      Jointboot.Save_Kin (Path, K);
+      Jointboot.Load_Kin (Path, K2, Okl, Note);
+      if Okl then
+         for A in 0 .. 1 loop
+            Cmp (K.Worlds (A).S, K2.Worlds (A).S); Cmp (K.Worlds (A).Model.F, K2.Worlds (A).Model.F);
+            for J in 0 .. 5 loop
+               Cmp (K.Worlds (A).Model.Q0 (J), K2.Worlds (A).Model.Q0 (J));
+               for X in 0 .. 2 loop
+                  Cmp (K.Worlds (A).Model.Ax (J).W (X), K2.Worlds (A).Model.Ax (J).W (X)); Cmp (K.Worlds (A).Model.Ax (J).P (X), K2.Worlds (A).Model.Ax (J).P (X));
+               end loop;
+               if (K.Worlds (A).Lo (J) = Long_Float'First) /= (K2.Worlds (A).Lo (J) = Long_Float'First)
+                 or else (K.Worlds (A).Hi (J) = Long_Float'Last) /= (K2.Worlds (A).Hi (J) = Long_Float'Last)
+               then
+                  Worst := 1.0;
+               elsif K.Worlds (A).Lo (J) /= Long_Float'First and then K.Worlds (A).Hi (J) /= Long_Float'Last then
+                  Cmp (K.Worlds (A).Lo (J), K2.Worlds (A).Lo (J)); Cmp (K.Worlds (A).Hi (J), K2.Worlds (A).Hi (J));
+               end if;
+            end loop;
+            for I in 0 .. 2 loop
+               Cmp (K.Worlds (A).Ta (I), K2.Worlds (A).Ta (I));
+               for J in 0 .. 2 loop
+                  Cmp (K.Worlds (A).Ra (I, J), K2.Worlds (A).Ra (I, J));
+               end loop;
+            end loop;
+            for Fk in 0 .. 2 loop
+               Cmp (Long_Float (K.Ds (A).Frames (Fk).Joint), Long_Float (K2.Ds (A).Frames (Fk).Joint));
+               for J in 0 .. 5 loop
+                  Cmp (K.Ds (A).Frames (Fk).Q (J), K2.Ds (A).Frames (Fk).Q (J));
+               end loop;
+            end loop;
+            Cmp (Long_Float (K.Eyes (A)), Long_Float (K2.Eyes (A))); Cmp (Long_Float (K.Worlds (A).Group), Long_Float (K2.Worlds (A).Group));
+            if K2.Ds (A).Imgs.Is_Empty or else K2.Ds (A).Imgs (0).RGB /= Img.RGB then
+               Worst := 1.0;
+            end if;
+         end loop;
+         Cmp (K.Fixed_Eye.F, K2.Fixed_Eye.F); Cmp (K.Plane_Rms, K2.Plane_Rms);
+         for I in 0 .. 2 loop
+            Cmp (K.Fixed_Eye.Pos (I), K2.Fixed_Eye.Pos (I)); Cmp (K.O (I), K2.O (I));
+            for J in 0 .. 2 loop
+               Cmp (K.Rw (I, J), K2.Rw (I, J)); Cmp (K.Fixed_Eye.R_Ce (I, J), K2.Fixed_Eye.R_Ce (I, J));
+            end loop;
+         end loop;
+         for P in 0 .. 2 loop
+            Cmp (K.Board (P).Pw (0), K2.Board (P).Pw (0)); Cmp (K.Board (P).Cov (2, 2), K2.Board (P).Cov (2, 2)); Cmp (K.Board (P).U, K2.Board (P).U);
+         end loop;
+         if Natural (K2.Board.Length) /= 3 or else K2.Ds (0).World_Img.RGB /= Img.RGB or else To_String (K2.Key) /= To_String (K.Key) or else not K2.Fixed_Eye.Valid then
+            Worst := 1.0;
+         end if;
+      end if;
+      Check (Okl and then Worst < 1.0e-8, "⑤ 前半段存进文件再读回来:每一个数最多差 " & Long_Float'Image (Worst) & "(要 < 1e-8;没量到头的界、核对用的图、钥匙原样回来)· " & To_String (Note));
+      declare
+         D_Same, D_Moved, D_Few : Floats;
+      begin
+         for I in 1 .. 50 loop
+            D_Same.Append (0.05 * Long_Float (I mod 7));
+            D_Moved.Append (3.0 + 0.1 * Long_Float (I mod 5));
+         end loop;
+         for I in 1 .. 9 loop
+            D_Few.Append (0.1);
+         end loop;
+         Check (Jointboot.Same_View (D_Same) and then not Jointboot.Same_View (D_Moved) and then not Jointboot.Same_View (D_Few),
+                "⑤ 核对的判法:位移中位 0.15 px 的 50 个点 = 没动;挪了 3 px = 动了;只配上 9 个点 = 核对不了(算动了)");
       end;
    end;
 

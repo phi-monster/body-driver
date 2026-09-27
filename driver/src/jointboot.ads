@@ -93,4 +93,31 @@ package Jointboot is
    --  按运动学算出那一处眼的位姿当目标,按位姿命令同一条路(Pose_To_Q:在量过的范围里反解)解成关节目标;几只手同时走(一条命令带几组目标),
    --  停稳后记:目标、反解还差多少、实到的读数。身体报的位姿只落盘给离线打分(Dump/ik_check.txt),驱动不读
    procedure Self_Check (L : in out Plug.Link; F : in out Plug.Frame; M : Selfmap.Body_Map; Ds : Sweep_Vectors.Vector; Dump : String);
+
+   --  ⑦ 存 / 装回(开机后半段第 ⑤ 条,09-27):前半段量到的写进 <身体文件>.kin.txt,核对用的图写成 <身体文件>.kin.txt_arm<k>.bmp(每只手扫描起点那一格的腕眼图)
+   --  和 .kin.txt_world.bmp(不动的眼那一刻的图)。装回:钥匙对得上 ⇒ 每只手按关节命令回到存的参照读数、停稳,拍一张和存的比
+   --  (配点仪器问格点,往返 1 px 内的留下,Same_View);不动的眼同样。都过 ⇒ 不扫描、不解,直接装上;任何一项不过 ⇒ 说出哪只挪了多少,从零量
+   type Kin_Store is record
+      Key : Ada.Strings.Unbounded.Unbounded_String;
+      Worlds : Arm_World_Vectors.Vector;
+      Eyes : Ints;                               --  每只手:长在它上面的相机
+      Ds : Sweep_Vectors.Vector;                 --  每只手:扫描各格的读数(开机自检要)、画幅、起点那一格的腕眼图(Imgs 只存第 0 格);第 0 只的 World_Img = 不动的眼的图
+      Rw : Geom.M3 := Geom.Identity;
+      O : Geom.V3 := [0.0, 0.0, 0.0];
+      World_Cam : Integer := -1;
+      Fixed_Eye : Geom.Cam_Geo;
+      Board : Geom.Scene_Pt_Vectors.Vector;
+      Plane_Pt, Plane_N : Geom.V3 := [0.0, 0.0, 0.0];
+      Plane_Rms : Long_Float := 0.0;
+   end record;
+   --  钥匙:几台相机、每台画幅、几组关节读数、每组几个、几个抓握通道、关节读数的字段名(不含身体报的位姿:只报关节的身体装上以后才有位姿)
+   function Kin_Key (L : Plug.Link; F : Plug.Frame) return String;
+   procedure Save_Kin (Path : String; K : Kin_Store);
+   procedure Load_Kin (Path : String; K : out Kin_Store; Ok : out Boolean; Note : out Ada.Strings.Unbounded.Unbounded_String);
+   procedure Check_Kin (L : in out Plug.Link; F : in out Plug.Frame; M : Selfmap.Body_Map; K : Kin_Store; Host : String; Port : Natural;
+                        Ok : out Boolean; Note : out Ada.Strings.Unbounded.Unbounded_String);
+   --  核对的判法:一对图(存的 → 此刻)配上的点的位移(像素)⇒ 没动 = 至少 10 个、位移中位 < 1 px(同往返门,协议)
+   function Same_View (Disp : Floats) return Boolean;
+   --  装回时把存的几何照驱动落盘的格式写进 Dump(kinem_arm<k>.txt、align_arm<k>.txt 第一行、world.txt、fixed_eye.txt),离线打分用
+   procedure Dump_Kin (Dump : String; K : Kin_Store);
 end Jointboot;

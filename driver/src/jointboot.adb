@@ -6,6 +6,8 @@ with Codec;
 with Picture;
 with Table;
 with Instrument;
+with Layout;
+with Ada.Directories;
 with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
 package body Jointboot is
 
@@ -722,13 +724,6 @@ package body Jointboot is
    end Sweep_All;
 
    --  相机系里的单位视线(同 Geom 的约定:-z 朝前、+y 朝上)
-   function Dir_Of (M : Kinem.Model; U, V : Long_Float) return Geom.V3 is
-      X : constant Long_Float := (U - M.Cx) / M.F;
-      Y : constant Long_Float := -(V - M.Cy) / M.F;
-      N : constant Long_Float := Geom.Norm ([X, Y, -1.0]);
-   begin
-      return [X / N, Y / N, -1.0 / N];
-   end Dir_Of;
 
 
 
@@ -2565,4 +2560,498 @@ package body Jointboot is
          Ada.Text_IO.Close (Fo);
       end if;
    end Self_Check;
+
+   --  ── ⑦ 存 / 装回 ──
+   function Kin_Key (L : Plug.Link; F : Plug.Frame) return String is
+      R : Unbounded_String;
+   begin
+      Append (R, "cams=");
+      for C of F.Cams loop
+         Append (R, Codec.Img (C.W) & "x" & Codec.Img (C.H) & ",");
+      end loop;
+      Append (R, ";groups=");
+      for G of F.Joints loop
+         Append (R, Codec.Img (Natural (G.Length)) & ",");
+      end loop;
+      Append (R, ";jaws=" & Codec.Img (Natural (F.Jaw.Length)) & ";joints=");
+      for P of L.Lay.Joints loop
+         Append (R, Layout.Last_Seg (P) & ",");
+      end loop;
+      declare
+         S : String := To_String (R);
+      begin
+         for I in S'Range loop
+            if S (I) = ' ' then
+               S (I) := '_';   --  钥匙在文件里是一行里的一个词
+            end if;
+         end loop;
+         return S;
+      end;
+   end Kin_Key;
+
+   function F9 (X : Long_Float) return String is (Codec.Fmt (X, 9));
+   function Lim (X : Long_Float) return String is
+     (if X = Long_Float'First or else X = Long_Float'Last then "none" else F9 (X));   --  没量到头的界记成 none
+
+   procedure Save_Kin (Path : String; K : Kin_Store) is
+      use Ada.Text_IO;
+      Fo : File_Type;
+      procedure Put_M3 (M : Geom.M3) is
+      begin
+         for I in 0 .. 2 loop
+            for J in 0 .. 2 loop
+               Put (Fo, " " & F9 (M (I, J)));
+            end loop;
+         end loop;
+      end Put_M3;
+      procedure Put_V3 (V : Geom.V3) is
+      begin
+         Put (Fo, " " & F9 (V (0)) & " " & F9 (V (1)) & " " & F9 (V (2)));
+      end Put_V3;
+   begin
+      Create (Fo, Out_File, Path);
+      Put_Line (Fo, "kin 1");
+      Put_Line (Fo, "key " & To_String (K.Key));
+      Put_Line (Fo, "world_cam" & Integer'Image (K.World_Cam));
+      Put (Fo, "rw"); Put_M3 (K.Rw); New_Line (Fo);
+      Put (Fo, "o"); Put_V3 (K.O); New_Line (Fo);
+      Put (Fo, "plane"); Put_V3 (K.Plane_Pt); Put_V3 (K.Plane_N); Put_Line (Fo, " " & F9 (K.Plane_Rms));
+      Put (Fo, "fixed " & (if K.Fixed_Eye.Valid then "1" else "0") & " " & F9 (K.Fixed_Eye.F) & " " & F9 (K.Fixed_Eye.Cx) & " " & F9 (K.Fixed_Eye.Cy));
+      Put_V3 (K.Fixed_Eye.Pos); Put_M3 (K.Fixed_Eye.R_Ce); New_Line (Fo);
+      for A in 0 .. Natural (K.Worlds.Length) - 1 loop
+         declare
+            W : constant Arm_World := K.Worlds (A);
+            D : constant Sweep_Data := K.Ds (A);
+         begin
+            Put_Line (Fo, "arm " & Codec.Img (A) & " " & Codec.Img (W.Group) & " " & Integer'Image (K.Eyes (A)) & " " & (if W.Valid then "1" else "0") & " "
+                      & Codec.Img (W.Model.N) & " " & F9 (W.Model.F) & " " & F9 (W.Model.Cx) & " " & F9 (W.Model.Cy) & " " & F9 (W.S) & " "
+                      & Codec.Img (D.W) & " " & Codec.Img (D.H));
+            Put (Fo, "q0 " & Codec.Img (A));
+            for X of W.Model.Q0 loop
+               Put (Fo, " " & F9 (X));
+            end loop;
+            New_Line (Fo);
+            for J in 0 .. W.Model.N - 1 loop
+               Put (Fo, "axis " & Codec.Img (A) & " " & Codec.Img (J)); Put_V3 (W.Model.Ax (J).W); Put_V3 (W.Model.Ax (J).P); New_Line (Fo);
+            end loop;
+            Put (Fo, "ra " & Codec.Img (A)); Put_M3 (W.Ra); New_Line (Fo);
+            Put (Fo, "ta " & Codec.Img (A)); Put_V3 (W.Ta); New_Line (Fo);
+            Put (Fo, "lo " & Codec.Img (A));
+            for X of W.Lo loop
+               Put (Fo, " " & Lim (X));
+            end loop;
+            New_Line (Fo);
+            Put (Fo, "hi " & Codec.Img (A));
+            for X of W.Hi loop
+               Put (Fo, " " & Lim (X));
+            end loop;
+            New_Line (Fo);
+            for Fr of D.Frames loop
+               Put (Fo, "frame " & Codec.Img (A) & " " & Integer'Image (Fr.Joint));
+               for X of Fr.Q loop
+                  Put (Fo, " " & F9 (X));
+               end loop;
+               New_Line (Fo);
+            end loop;
+            if not D.Imgs.Is_Empty then
+               Codec.Write_BMP (Path & "_arm" & Codec.Img (A) & ".bmp", D.Imgs (0).RGB, D.Imgs (0).W, D.Imgs (0).H);
+            end if;
+         end;
+      end loop;
+      for P of K.Board loop
+         Put (Fo, "board"); Put_V3 (P.Pw); Put_M3 (P.Cov);
+         Put_Line (Fo, " " & F9 (P.U) & " " & F9 (P.V) & " " & F9 (P.Sh) & " " & Codec.Img (P.Views));
+      end loop;
+      Close (Fo);
+      if K.World_Cam >= 0 and then not K.Ds.Is_Empty and then K.Ds (0).World_Img.W > 0 then
+         Codec.Write_BMP (Path & "_world.bmp", K.Ds (0).World_Img.RGB, K.Ds (0).World_Img.W, K.Ds (0).World_Img.H);
+      end if;
+   end Save_Kin;
+
+   procedure Load_Kin (Path : String; K : out Kin_Store; Ok : out Boolean; Note : out Unbounded_String) is
+      use Ada.Text_IO;
+      Fi : File_Type;
+      function Fields (S : String) return Strs is
+         R : Strs;
+         I : Natural := S'First;
+      begin
+         while I <= S'Last loop
+            while I <= S'Last and then S (I) = ' ' loop
+               I := I + 1;
+            end loop;
+            exit when I > S'Last;
+            declare
+               J : Natural := I;
+            begin
+               while J <= S'Last and then S (J) /= ' ' loop
+                  J := J + 1;
+               end loop;
+               R.Append (S (I .. J - 1));
+               I := J;
+            end;
+         end loop;
+         return R;
+      end Fields;
+      function V (T : Strs; I : Natural) return Long_Float is (Long_Float'Value (T (I)));
+      function M3_At (T : Strs; I : Natural) return Geom.M3 is
+        ([[V (T, I), V (T, I + 1), V (T, I + 2)], [V (T, I + 3), V (T, I + 4), V (T, I + 5)], [V (T, I + 6), V (T, I + 7), V (T, I + 8)]]);
+      function V3_At (T : Strs; I : Natural) return Geom.V3 is ([V (T, I), V (T, I + 1), V (T, I + 2)]);
+      function Arm_Of (T : Strs) return Natural is (Natural'Value (T (1)));
+      Version_Ok : Boolean := False;
+   begin
+      K := (others => <>); Ok := False; Note := Null_Unbounded_String;
+      Open (Fi, In_File, Path);
+      while not End_Of_File (Fi) loop
+         declare
+            T : constant Strs := Fields (Get_Line (Fi));
+            Tag : constant String := (if T.Is_Empty then "" else T (0));
+         begin
+            if Tag = "kin" then
+               Version_Ok := Natural (T.Length) >= 2 and then T (1) = "1";
+            elsif Tag = "key" and then Natural (T.Length) >= 2 then
+               K.Key := To_Unbounded_String (T (1));
+            elsif Tag = "world_cam" then
+               K.World_Cam := Integer'Value (T (1));
+            elsif Tag = "rw" then
+               K.Rw := M3_At (T, 1);
+            elsif Tag = "o" then
+               K.O := V3_At (T, 1);
+            elsif Tag = "plane" then
+               K.Plane_Pt := V3_At (T, 1); K.Plane_N := V3_At (T, 4); K.Plane_Rms := V (T, 7);
+            elsif Tag = "fixed" then
+               K.Fixed_Eye := Geom.No_Geo;
+               K.Fixed_Eye.Valid := T (1) = "1"; K.Fixed_Eye.Fixed := K.Fixed_Eye.Valid;
+               K.Fixed_Eye.F := V (T, 2); K.Fixed_Eye.Cx := V (T, 3); K.Fixed_Eye.Cy := V (T, 4);
+               K.Fixed_Eye.Pos := V3_At (T, 5); K.Fixed_Eye.R_Ce := M3_At (T, 8);
+            elsif Tag = "arm" then
+               declare
+                  A : constant Natural := Arm_Of (T);
+                  W : Arm_World;
+                  D : Sweep_Data;
+               begin
+                  while Natural (K.Worlds.Length) <= A loop
+                     K.Worlds.Append (Arm_World'(others => <>)); K.Ds.Append (Sweep_Data'(others => <>)); K.Eyes.Append (-1);
+                  end loop;
+                  W := K.Worlds (A); D := K.Ds (A);
+                  W.Group := Natural'Value (T (2));
+                  K.Eyes.Replace_Element (A, Integer'Value (T (3)));
+                  W.Valid := T (4) = "1";
+                  W.Model.N := Natural'Value (T (5));
+                  W.Model.F := V (T, 6); W.Model.Cx := V (T, 7); W.Model.Cy := V (T, 8); W.S := V (T, 9);
+                  W.Model.Valid := W.Valid; W.Sweep := A;
+                  D.W := Natural'Value (T (10)); D.H := Natural'Value (T (11));
+                  K.Worlds.Replace_Element (A, W); K.Ds.Replace_Element (A, D);
+               end;
+            elsif Tag = "q0" or else Tag = "lo" or else Tag = "hi" or else Tag = "axis" or else Tag = "ra" or else Tag = "ta" or else Tag = "frame" then
+               declare
+                  A : constant Natural := Arm_Of (T);
+                  W : Arm_World := K.Worlds (A);
+                  D : Sweep_Data := K.Ds (A);
+               begin
+                  if Tag = "q0" then
+                     W.Model.Q0.Clear;
+                     for I in 2 .. Natural (T.Length) - 1 loop
+                        W.Model.Q0.Append (V (T, I));
+                     end loop;
+                  elsif Tag = "lo" or else Tag = "hi" then
+                     declare
+                        Lst : Floats;
+                     begin
+                        for I in 2 .. Natural (T.Length) - 1 loop
+                           Lst.Append (if T (I) = "none" then (if Tag = "lo" then Long_Float'First else Long_Float'Last) else V (T, I));
+                        end loop;
+                        if Tag = "lo" then
+                           W.Lo := Lst;
+                        else
+                           W.Hi := Lst;
+                        end if;
+                     end;
+                  elsif Tag = "axis" then
+                     declare
+                        J : constant Natural := Natural'Value (T (2));
+                     begin
+                        W.Model.Ax (J).W := V3_At (T, 3); W.Model.Ax (J).P := V3_At (T, 6);
+                     end;
+                  elsif Tag = "ra" then
+                     W.Ra := M3_At (T, 2);
+                  elsif Tag = "ta" then
+                     W.Ta := V3_At (T, 2);
+                  else
+                     declare
+                        Fr : Kinem.Frame_Info;
+                     begin
+                        Fr.Joint := Integer'Value (T (2));
+                        for I in 3 .. Natural (T.Length) - 1 loop
+                           Fr.Q.Append (V (T, I));
+                        end loop;
+                        D.Frames.Append (Fr);
+                     end;
+                  end if;
+                  K.Worlds.Replace_Element (A, W); K.Ds.Replace_Element (A, D);
+               end;
+            elsif Tag = "board" then
+               K.Board.Append (Geom.Scene_Pt'(Pw => V3_At (T, 1), Cov => M3_At (T, 4), U => V (T, 13), V => V (T, 14), Sh => V (T, 15),
+                                              Views => Natural'Value (T (16))));
+            end if;
+         end;
+      end loop;
+      Close (Fi);
+      if not Version_Ok or else K.Worlds.Is_Empty or else Length (K.Key) = 0 then
+         Note := To_Unbounded_String ("文件不全(" & Path & ")");
+         return;
+      end if;
+      --  核对用的图
+      for A in 0 .. Natural (K.Worlds.Length) - 1 loop
+         declare
+            D : Sweep_Data := K.Ds (A);
+            Im : Plug.Cam;
+            Okb : Boolean := False;
+         begin
+            if Ada.Directories.Exists (Path & "_arm" & Codec.Img (A) & ".bmp") then
+               Codec.Read_BMP (Path & "_arm" & Codec.Img (A) & ".bmp", Im.RGB, Im.W, Im.H, Okb);
+            end if;
+            if not Okb then
+               Note := To_Unbounded_String ("第" & Codec.Img (A + 1) & " 只手核对用的图读不了");
+               return;
+            end if;
+            D.Imgs.Append (Im);
+            K.Ds.Replace_Element (A, D);
+         end;
+      end loop;
+      if K.World_Cam >= 0 then
+         declare
+            D : Sweep_Data := K.Ds (0);
+            Okb : Boolean := False;
+         begin
+            if Ada.Directories.Exists (Path & "_world.bmp") then
+               Codec.Read_BMP (Path & "_world.bmp", D.World_Img.RGB, D.World_Img.W, D.World_Img.H, Okb);
+            end if;
+            if not Okb then
+               Note := To_Unbounded_String ("不动的眼核对用的图读不了");
+               return;
+            end if;
+            K.Ds.Replace_Element (0, D);
+         end;
+      end if;
+      Ok := True;
+      Note := To_Unbounded_String (Codec.Img (Natural (K.Worlds.Length)) & " 只手的运动学和世界、不动的眼(第" & Integer'Image (K.World_Cam) & " 台)、板 "
+                                   & Codec.Img (Natural (K.Board.Length)) & " 个点");
+   exception
+      when others =>
+         if Is_Open (Fi) then
+            Close (Fi);
+         end if;
+         Ok := False;
+         Note := To_Unbounded_String ("文件读不了(" & Path & ")");
+   end Load_Kin;
+
+   function Same_View (Disp : Floats) return Boolean is
+      package Sorting is new F64_Vectors.Generic_Sorting;
+      D : Floats := Disp;
+   begin
+      if Natural (D.Length) < Min_Inl then
+         return False;
+      end if;
+      Sorting.Sort (D);
+      return D (Natural (D.Length) / 2) < Trip_Px;
+   end Same_View;
+
+   --  一对图(存的 → 此刻)问格点、往返 1 px 内的留下 ⇒ 每个留下的点挪了多少像素
+   procedure View_Shift (Host : String; Port : Natural; A_Img, B_Img : Plug.Cam; Disp : out Floats; Err : out Unbounded_String) is
+      Ia, Ib : Integer;
+      Q : Instrument.Match_Vectors.Vector;
+   begin
+      Disp.Clear;
+      Instrument.Frame_Put (Host, Port, A_Img.RGB, A_Img.W, A_Img.H, Ia, Err);
+      Instrument.Frame_Put (Host, Port, B_Img.RGB, B_Img.W, B_Img.H, Ib, Err);
+      if Ia < 0 or else Ib < 0 then
+         return;
+      end if;
+      for Gyy in 0 .. Gy - 1 loop
+         for Gxx in 0 .. Gx - 1 loop
+            Q.Append (Instrument.Match_Pt'(U => (Long_Float (Gxx) + 0.5) * Long_Float (A_Img.W) / Long_Float (Gx),
+                                           V => (Long_Float (Gyy) + 0.5) * Long_Float (A_Img.H) / Long_Float (Gy), others => <>));
+         end loop;
+      end loop;
+      declare
+         R : constant Instrument.Match_Vectors.Vector := Instrument.Match_Ids (Host, Port, Natural (Ia), Natural (Ib), Q, Err, Coarse => True, Back => True);
+      begin
+         if Natural (R.Length) = Natural (Q.Length) then
+            for G in 0 .. Natural (Q.Length) - 1 loop
+               if R (G).Bu >= 0.0 and then R (G).U >= 0.0 and then Geom.Norm ([R (G).Bu - Q (G).U, R (G).Bv - Q (G).V, 0.0]) < Trip_Px then
+                  Disp.Append (Geom.Norm ([R (G).U - Q (G).U, R (G).V - Q (G).V, 0.0]));
+               end if;
+            end loop;
+         end if;
+      end;
+   end View_Shift;
+
+   procedure Check_Kin (L : in out Plug.Link; F : in out Plug.Frame; M : Selfmap.Body_Map; K : Kin_Store; Host : String; Port : Natural;
+                        Ok : out Boolean; Note : out Unbounded_String) is
+      Gs : Ints;
+      Qs : Plug.Floats_Vectors.Vector;
+      Tol : Long_Float := Long_Float'Last;
+      Moved : Long_Float := 0.0;
+      function Med (D : Floats) return Long_Float is
+         package Sorting is new F64_Vectors.Generic_Sorting;
+         X : Floats := D;
+      begin
+         if X.Is_Empty then
+            return -1.0;
+         end if;
+         Sorting.Sort (X);
+         return X (Natural (X.Length) / 2);
+      end Med;
+   begin
+      Ok := False; Note := Null_Unbounded_String;
+      --  存的每只手:读数组、眼都得在这具身体上
+      for A in 0 .. Natural (K.Worlds.Length) - 1 loop
+         if K.Worlds (A).Valid then
+            if K.Worlds (A).Group >= Natural (F.Joints.Length) or else K.Eyes (A) < 0 or else Natural (K.Eyes (A)) >= Natural (F.Cams.Length) then
+               Note := To_Unbounded_String ("第" & Codec.Img (A + 1) & " 只手的读数组 / 眼这具身体上没有");
+               return;
+            end if;
+            declare
+               G : constant Natural := K.Worlds (A).Group;
+               Q0 : constant Floats := K.Worlds (A).Model.Q0;
+            begin
+               for J in 0 .. Natural'Min (Natural (Q0.Length), Natural (F.Joints (G).Length)) - 1 loop
+                  declare
+                     Dq : constant Long_Float := abs (Q0 (J) - F.Joints (G) (J));
+                  begin
+                     Moved := Long_Float'Max (Moved, Dq);
+                     if Dq > 0.0 then
+                        Tol := Long_Float'Min (Tol, Third * Dq);   --  到了 = 差不到这一下要走的三分之一(比例,同开机自检)
+                     end if;
+                  end;
+               end loop;
+               Gs.Append (G); Qs.Append (Q0);
+            end;
+         end if;
+      end loop;
+      --  回到存的参照读数(已经在那儿 = 差不过关节读数的静止噪声,不动)
+      if Moved > 3.0 * M.Joint_Noise then   --  3 倍静止噪声(统计常数)
+         declare
+            Dl : Table.Vec;
+            Fr : Natural;
+            Okg : Boolean;
+         begin
+            Selfmap.Go (L, M, 0, [others => 0.0], F64_Vectors.Empty_Vector, F, Dl, Fr, Okg, Groups => Gs, Qs => Qs, Tol => (if Tol < Long_Float'Last then Tol else 0.0));
+            if not Okg then
+               Note := To_Unbounded_String ("回存的参照读数时线断了 / 走不到");
+               return;
+            end if;
+         end;
+      end if;
+      declare
+         Ok2 : Boolean;
+      begin
+         Selfmap.Idle (L, F, 2, Ok2);   --  画面比读数晚 1 拍:停两拍再拍(次数)
+         if not Ok2 then
+            Note := To_Unbounded_String ("停稳时线断了");
+            return;
+         end if;
+      end;
+      Ok := True;
+      Append (Note, "回到存的参照读数(最多差 " & Codec.Fmt (Moved, 6) & ")");
+      for A in 0 .. Natural (K.Worlds.Length) - 1 loop
+         if K.Worlds (A).Valid then
+            declare
+               Disp : Floats;
+               Err : Unbounded_String;
+               E : constant Natural := Natural (K.Eyes (A));
+            begin
+               View_Shift (Host, Port, K.Ds (A).Imgs (0), F.Cams (E), Disp, Err);
+               Append (Note, " · 第" & Codec.Img (A + 1) & " 只手的眼(第" & Codec.Img (E) & " 台)和存的图配上 " & Codec.Img (Natural (Disp.Length)) & " 个点、位移中位 "
+                       & Codec.Fmt (Med (Disp), 2) & " px ⇒ " & (if Same_View (Disp) then "没动" else "动了"));
+               Ok := Ok and then Same_View (Disp);
+            end;
+         end if;
+      end loop;
+      if K.World_Cam >= 0 then
+         if Natural (K.World_Cam) >= Natural (F.Cams.Length) then
+            Note := Note & " · 存的不动的眼这具身体上没有";
+            Ok := False;
+         else
+            declare
+               Disp : Floats;
+               Err : Unbounded_String;
+            begin
+               View_Shift (Host, Port, K.Ds (0).World_Img, F.Cams (Natural (K.World_Cam)), Disp, Err);
+               Append (Note, " · 不动的眼(第" & Integer'Image (K.World_Cam) & " 台)和存的图配上 " & Codec.Img (Natural (Disp.Length)) & " 个点、位移中位 "
+                       & Codec.Fmt (Med (Disp), 2) & " px ⇒ " & (if Same_View (Disp) then "没挪" else "挪了"));
+               Ok := Ok and then Same_View (Disp);
+            end;
+         end if;
+      end if;
+   end Check_Kin;
+
+   procedure Dump_Kin (Dump : String; K : Kin_Store) is
+      use Ada.Text_IO;
+      Fo : File_Type;
+   begin
+      if Dump = "" then
+         return;
+      end if;
+      for A in 0 .. Natural (K.Worlds.Length) - 1 loop
+         declare
+            W : constant Arm_World := K.Worlds (A);
+         begin
+            Create (Fo, Out_File, Dump & "/kinem_arm" & Codec.Img (A) & ".txt");
+            Put_Line (Fo, "arm " & Codec.Img (A) & " n " & Codec.Img (W.Model.N) & " f " & Codec.Fmt (W.Model.F, 6) & " cx " & Codec.Fmt (W.Model.Cx, 3) & " cy " & Codec.Fmt (W.Model.Cy, 3));
+            Put (Fo, "q0");
+            for X of W.Model.Q0 loop
+               Put (Fo, " " & F9 (X));
+            end loop;
+            New_Line (Fo);
+            for J in 0 .. W.Model.N - 1 loop
+               Put_Line (Fo, "axis " & Codec.Img (J) & " " & F9 (W.Model.Ax (J).W (0)) & " " & F9 (W.Model.Ax (J).W (1)) & " " & F9 (W.Model.Ax (J).W (2)) & " "
+                         & F9 (W.Model.Ax (J).P (0)) & " " & F9 (W.Model.Ax (J).P (1)) & " " & F9 (W.Model.Ax (J).P (2)));
+            end loop;
+            Close (Fo);
+            if A > 0 then
+               Create (Fo, Out_File, Dump & "/align_arm" & Codec.Img (A) & ".txt");
+               Put (Fo, "S " & F9 (W.S) & " R");
+               for I in 0 .. 2 loop
+                  for J in 0 .. 2 loop
+                     Put (Fo, " " & F9 (W.Ra (I, J)));
+                  end loop;
+               end loop;
+               Put_Line (Fo, " T " & F9 (W.Ta (0)) & " " & F9 (W.Ta (1)) & " " & F9 (W.Ta (2)));
+               Close (Fo);
+            end if;
+         end;
+      end loop;
+      Create (Fo, Out_File, Dump & "/world.txt");
+      for I in 0 .. 2 loop
+         for J in 0 .. 2 loop
+            Put (Fo, F9 (K.Rw (I, J)) & " ");
+         end loop;
+      end loop;
+      Put_Line (Fo, F9 (K.O (0)) & " " & F9 (K.O (1)) & " " & F9 (K.O (2)));
+      Close (Fo);
+      if K.Fixed_Eye.Valid then
+         --  存的不动的眼是世界系的(对齐交出来时已按 Rw、O 换过);落盘同对齐那份 = 第一只手的系:X_手 = Rwᵀ X_世界 + O
+         declare
+            Pos : constant Geom.V3 := Geom.Ap (Geom.Tr (K.Rw), K.Fixed_Eye.Pos);
+            Rc : constant Geom.M3 := Geom.Mul (Geom.Tr (K.Rw), K.Fixed_Eye.R_Ce);
+         begin
+            Create (Fo, Out_File, Dump & "/fixed_eye.txt");
+            Put (Fo, "f " & Codec.Fmt (K.Fixed_Eye.F, 6) & " cx " & Codec.Fmt (K.Fixed_Eye.Cx, 3) & " cy " & Codec.Fmt (K.Fixed_Eye.Cy, 3) & " rms 0 used 0 of 0 pos "
+                 & F9 (Pos (0) + K.O (0)) & " " & F9 (Pos (1) + K.O (1)) & " " & F9 (Pos (2) + K.O (2)) & " R");
+            for I in 0 .. 2 loop
+               for J in 0 .. 2 loop
+                  Put (Fo, " " & F9 (Rc (I, J)));
+               end loop;
+            end loop;
+            New_Line (Fo);
+            Close (Fo);
+         end;
+      end if;
+   exception
+      when others =>
+         if Is_Open (Fo) then
+            Close (Fo);
+         end if;
+   end Dump_Kin;
 end Jointboot;

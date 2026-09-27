@@ -2,6 +2,7 @@
 --  开机:认布局 → 量身体(逐通道推、合空)→ 循环:看 → 列块 → 问脑 → 执行 → 报。不读不写任何标定文件。
 with Ada.Text_IO; use Ada.Text_IO;
 with Ada.Calendar;
+with Ada.Directories;
 with Ada.Command_Line;
 with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
 with Ada.Strings.Fixed;
@@ -41,6 +42,7 @@ procedure Body_Driver is
    Kin_Plane_Pt, Kin_Plane_N : Geom.V3 := [0.0, 0.0, 0.0];
    Kin_Plane_Rms : Long_Float := 0.0;
    Kin_Ref : Plug.Cam;
+   Front_Reloaded : Boolean := False;   --  开机前半段是按身体文件旁边存的装回的(核对过):后面按同一个世界单位记的量(身体图、握区、指尖)才照用
    I : Natural := 1;
    Order : constant String := Codec.Env ("BL_ORDER");
 begin
@@ -123,6 +125,9 @@ begin
       O : Geom.V3;
       Host : constant String := To_String (C.Inst_Host);
       Dump : constant String := To_String (C.Dump_Dir);
+      Kin_Path : constant String := (if Body_Path /= "" then To_String (Body_Path) & ".kin.txt" else "");
+      K : Jointboot.Kin_Store;
+      Eyes_Of : Bytes.Ints;   --  每只手:长在它上面的相机
    begin
       M0.N_Cams := Natural (F.Cams.Length);
       Selfmap.Measure_Idle (L, F, M0, Okj);
@@ -131,6 +136,30 @@ begin
          return;
       end if;
       Put_Line ("[身] 静止噪声(开机前半段):关节读数 " & Codec.Fmt (M0.Joint_Noise, 6) & " · 各相机灰度地板 " & (if M0.Pic_Floor.Is_Empty then "-" else Codec.Img (M0.Pic_Floor (0))));
+      --  ⑤ 装回:身体文件旁边存着前半段、钥匙对得上 ⇒ 每只手回到存的参照读数、拍一张和存的比;都没动 ⇒ 不扫描、不解。一项不过 ⇒ 从零量(不修补)
+      if Kin_Path /= "" and then Ada.Directories.Exists (Kin_Path) then
+         declare
+            Loaded, Checked : Boolean := False;
+            Note : Unbounded_String;
+         begin
+            Jointboot.Load_Kin (Kin_Path, K, Loaded, Note);
+            if Loaded and then To_String (K.Key) /= Jointboot.Kin_Key (L, F) then
+               Loaded := False;
+               Note := To_Unbounded_String ("钥匙对不上(存的 " & To_String (K.Key) & " / 这具身体 " & Jointboot.Kin_Key (L, F) & ")");
+            end if;
+            Put_Line ("[装] 前半段存的(" & Kin_Path & "):" & To_String (Note));
+            if Loaded then
+               Jointboot.Check_Kin (L, F, M0, K, Host, C.Inst_Port, Checked, Note);
+               Put_Line ("[装] 核对:" & To_String (Note) & (if Checked then " ⇒ 装回,不扫描" else " ⇒ 对不上,从零量"));
+            end if;
+            Front_Reloaded := Checked;
+         end;
+      end if;
+      if Front_Reloaded then
+         Worlds := K.Worlds; Ds := K.Ds; Rw := K.Rw; O := K.O; Kin_World_Cam := K.World_Cam; Eyes_Of := K.Eyes;
+         Kin_Fixed := K.Fixed_Eye; Kin_Board := K.Board; Kin_Plane_Pt := K.Plane_Pt; Kin_Plane_N := K.Plane_N; Kin_Plane_Rms := K.Plane_Rms;
+         Jointboot.Dump_Kin (Dump, K);
+      else
       Jointboot.Find_Arms (L, F, M0, Found, Kin_World_Cam, Okj);
       if not Okj then
          Put_Line ("[身] 只用关节命令认不出一只手,量不了身体,退出");
@@ -207,9 +236,24 @@ begin
          Put_Line ("[身] 定不了世界(第一只手的眼没三角出桌面),量不了身体,退出");
          return;
       end if;
+      for A in 0 .. Natural (Found.Length) - 1 loop
+         Eyes_Of.Append (Found (A).Eye);
+      end loop;
+      if Kin_Path /= "" then
+         K := (Key => To_Unbounded_String (Jointboot.Kin_Key (L, F)), Worlds => Worlds, Eyes => Eyes_Of, Ds => Ds, Rw => Rw, O => O, World_Cam => Kin_World_Cam,
+               Fixed_Eye => Kin_Fixed, Board => Kin_Board, Plane_Pt => Kin_Plane_Pt, Plane_N => Kin_Plane_N, Plane_Rms => Kin_Plane_Rms);
+         begin
+            Jointboot.Save_Kin (Kin_Path, K);
+            Put_Line ("[装] 前半段存进 " & Kin_Path & "(下回核对过就不再扫)");
+         exception
+            when others =>
+               Put_Line ("[装] 前半段存不进 " & Kin_Path);
+         end;
+      end if;
+      end if;
       for A in 0 .. Natural (Worlds.Length) - 1 loop
          if Worlds (A).Valid then
-            Kin_Eyes.Append (Found (A).Eye);
+            Kin_Eyes.Append (Eyes_Of (A));
          end if;
       end loop;
       --  每台相机的几何:手上那只眼 = 运动学量的焦距、主点;插头给的手的位姿就是这只眼的位姿 ⇒ 眼在手上不转、不偏;
@@ -220,7 +264,7 @@ begin
          begin
             G.Cx := 0.5 * Long_Float (F.Cams (Cm).W); G.Cy := 0.5 * Long_Float (F.Cams (Cm).H);   --  画幅中心(纯几何的一半)
             for A in 0 .. Natural (Worlds.Length) - 1 loop
-               if Worlds (A).Valid and then Found (A).Eye = Integer (Cm) then
+               if Worlds (A).Valid and then Eyes_Of (A) = Integer (Cm) then
                   G.F := Worlds (A).Model.F; G.F_Meas := G.F; G.Cx := Worlds (A).Model.Cx; G.Cy := Worlds (A).Model.Cy;
                   G.R_Ce := Geom.Identity; G.Off := [0.0, 0.0, 0.0]; G.Valid := True;
                end if;
@@ -253,9 +297,12 @@ begin
       Loaded : Boolean := False;
       Use_Stored : Boolean := False;
    begin
-      if Body_Path /= "" then
+      if Body_Path /= "" and then Front_Reloaded then
          Loaded := Bodyfile.Load (To_String (Body_Path), Key, Stored, Stored_Hands, Stored_Tables, Stored_Sch, Note);
          Put_Line ("[装] " & To_String (Note));
+      elsif Body_Path /= "" and then Ada.Directories.Exists (To_String (Body_Path)) then
+         --  前半段从零量了 ⇒ 世界单位换了(运动学的单位每回不一样),身体文件里按旧单位记的量(通道步子、握区时手的位姿)不装回
+         Put_Line ("[装] 前半段是从零量的(世界单位换了)⇒ 身体文件里按旧单位记的量不装回,从零量");
       end if;
       if Loaded then
          declare
@@ -471,7 +518,7 @@ begin
    C.Cam := C.Map.World_Cam;
    --  🔴 抓起过球的那三炮(GB5/GC2/GC4)开机都有这一行;09-20 把几何驾驶搬回 main 时漏了它,
    --  于是几何常数从不装回、Geo_Ready 恒假、整条几何走法是死代码。
-   Act.Geo_Install (F, C, To_String (Body_Path), Kin_Geo, Kin_Board, Kin_Plane_Pt, Kin_Plane_N, Kin_Plane_Rms, Kin_Ref);
+   Act.Geo_Install (F, C, To_String (Body_Path), Kin_Geo, Kin_Board, Kin_Plane_Pt, Kin_Plane_N, Kin_Plane_Rms, Kin_Ref, Keep_Tips => Front_Reloaded);
    --  对方在我连上时复位过一次(第一集开始):这个标记在这儿清掉,不然开机量身体的那几段会把它当成"段中间复位"当场收段(S2 2026-09-23 实测:左眼一停没挪就退了)
    if Plug.Take_Reset (L) then
       Put_Line ("[身] 对方在开机前复位过一次(第一集开始)⇒ 清掉标记,接着量身体");

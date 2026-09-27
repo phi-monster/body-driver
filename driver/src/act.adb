@@ -5892,11 +5892,30 @@ package body Act is
    end Geo_Boot;
 
    procedure Geo_Install (F : Plug.Frame; C : in out Context; Body_Path : String; Geo : Geom.Geo_Vectors.Vector; Board : Geom.Scene_Pt_Vectors.Vector;
-                          Plane_Pt, Plane_N : Geom.V3; Plane_Rms : Long_Float; Ref : Plug.Cam) is
+                          Plane_Pt, Plane_N : Geom.V3; Plane_Rms : Long_Float; Ref : Plug.Cam; Keep_Tips : Boolean := False) is
       pragma Unreferenced (F);
    begin
       C.Geo_Path := S (Body_Path & ".geo.json");
       C.Geo := Geo;
+      if Keep_Tips and then Body_Path /= "" then
+         --  前半段装回的:存的指尖、张口(碰桌面量的,同一个世界单位)并进来
+         declare
+            Old : Geom.Geo_Vectors.Vector;
+            Note : String (1 .. 160);
+         begin
+            Geom.Load (To_String (C.Geo_Path), Old, Natural (C.Geo.Length), Note);
+            for Cm in 0 .. Natural'Min (Natural (Old.Length), Natural (C.Geo.Length)) - 1 loop
+               if Old (Cm).Tip_Valid and then Old (Cm).Tip_Touch and then not C.Geo (Cm).Fixed then
+                  declare
+                     G : Geom.Cam_Geo := C.Geo (Cm);
+                  begin
+                     G.Tip := Old (Cm).Tip; G.Gap := Old (Cm).Gap; G.Tip_Valid := True; G.Tip_Touch := True;
+                     C.Geo.Replace_Element (Cm, G);
+                  end;
+               end if;
+            end loop;
+         end;
+      end if;
       C.Board := Board;
       C.Board_Pt := Plane_Pt; C.Board_N := Plane_N; C.Board_Rms := Plane_Rms;
       C.Board_Plane := not Board.Is_Empty;
@@ -5911,7 +5930,8 @@ package body Act is
                Geo_Say ("第" & Codec.Img (Cam) & " 台相机(不长在手上):焦距 " & Codec.Fmt (G.F, 1) & " px、在世界 (" & Codec.Fmt (G.Pos (0), 3) & ", " & Codec.Fmt (G.Pos (1), 3) & ", "
                         & Codec.Fmt (G.Pos (2), 3) & ") 单位(开机前半段对齐量的)");
             elsif A >= 0 and then G.Valid then
-               Geo_Say ("第" & Codec.Img (Cam) & " 台相机(长在第" & Codec.Img (Natural (A) + 1) & " 只手上):焦距 " & Codec.Fmt (G.F, 1) & " px(运动学量的)· 手的位姿就是它的位姿 · 指尖 待碰桌面量");
+               Geo_Say ("第" & Codec.Img (Cam) & " 台相机(长在第" & Codec.Img (Natural (A) + 1) & " 只手上):焦距 " & Codec.Fmt (G.F, 1) & " px(运动学量的)· 手的位姿就是它的位姿 · 指尖 "
+                        & (if G.Tip_Valid and then G.Tip_Touch then "存的(碰桌面量过,离眼 " & Mm (Geom.Norm (G.Tip)) & ")" else "待碰桌面量"));
             end if;
          end;
       end loop;
