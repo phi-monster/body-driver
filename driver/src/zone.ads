@@ -61,6 +61,8 @@ package Zone is
    --  Width = 这一小截的像素跨度(它的框的长边 + 1)。
    procedure Tip_Band (Z : Hand_Zone; Lb : Lobe; W, Hh : Natural; U, V, Width : out Long_Float; Ok : out Boolean);
    procedure Tip_Px (Z : Hand_Zone; Lb : Lobe; W, Hh : Natural; U, V : out Long_Float; Ok : out Boolean);
+   --  每一瓣自己那一块手指像素(同 Tip_Band 的认法:手指像素里和瓣框重合最多的那一整块,8 邻连通)的并集
+   function Lobe_Pixels (Z : Hand_Zone; W, Hh : Natural) return Bools;
    --  把手指像素从深度切块结果里剔掉(块心落在手指框或区框里 = 我自己)
    function Is_Self (Z : Hand_Zone; R : Picture.Region; W, Hh : Natural) return Boolean;
 end Zone;

@@ -734,7 +734,7 @@ package body Plug is
                begin
                   Put_Array (S, Natural'Max (1, Natural (J.Length)));
                   for X in 0 .. Natural'Max (1, Natural (J.Length)) - 1 loop
-                     Put_Float (S, Long_Float'Max (0.0, Long_Float'Min (1.0, Jaw_Value (L, W_First (K), X, Mine, C, J))));
+                     Put_Float (S, Jaw_Value (L, W_First (K), X, Mine, C, J));   --  不截:读数范围是开机两头推到头量的(V1b ②;原来截在 [0, 1],x5 的约定)
                   end loop;
                end;
             end loop;
@@ -796,7 +796,7 @@ package body Plug is
             Put_Array (S, Nj);
             for K in 0 .. Nj - 1 loop
                --  没给命令的通道发这一集给过它的最后一个目标(一次只动脑点名的那一根手指;见 Jaw_Set)
-               Put_Float (S, Long_Float'Max (0.0, Long_Float'Min (1.0, Jaw_Value (L, Ji, K, Mine, C, Cur))));
+               Put_Float (S, Jaw_Value (L, Ji, K, Mine, C, Cur));   --  不截(同上)
             end loop;
          end;
       end loop;

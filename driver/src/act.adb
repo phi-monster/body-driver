@@ -58,6 +58,12 @@ package body Act is
       return (others => <>);
    end Hand_Of;
 
+   --  读数 R 离"空手合"那头往张开那头走了多远(读数单位):两头是开机推到头量的(V1b ② 2026-09-27),方向按量的 —— 不假设"读数变小 = 合"
+   function Past_Empty (H : Zone.Hand; R : Long_Float) return Long_Float is
+   begin
+      return (if H.Open_Reading >= H.Empty_Close then R - H.Empty_Close else H.Empty_Close - R);
+   end Past_Empty;
+
    --  这个点属于哪个抓握通道(不是抓握通道带的就当 0 号)
    function Jaw_K_Of (Ck : Natural) return Natural is
      (if Ck >= Chan.Per_Arm then Ck - Chan.Per_Arm else 0);
@@ -3973,8 +3979,9 @@ package body Act is
             Put_Line ("[身]     没照做这一步不算数,步幅已缩回;接着走");
          end if;
          --  没写步数就拿安全上限比,别拿 0 比(拿 0 比 = 第一步就"走完了")
-         if Monitor.Fired (Until_Kind, W, Effective_Cap (Step_Limit), Note.Blocked, Monitor.Bounded (Selfmap.Jaw_Of (F, Arm)),
-                           Monitor.Bounded (if Arm < Natural (C.Hands.Length) then C.Hands (Arm).Empty_Close else 0.0),
+         --  抓握读数先换成"离空手合那头往张开那头走了多远"再交给监视器(方向是量的;监视器按"读数 − 空手值 ≤ 抖动 = 滑掉了"判)
+         if Monitor.Fired (Until_Kind, W, Effective_Cap (Step_Limit), Note.Blocked, Monitor.Bounded (Past_Empty (Hand_Of (C, Arm), Selfmap.Jaw_Of (F, Arm))),
+                           Monitor.Bounded (0.0),
                            Monitor.Floor (C.Map.Jaw_Noise), Note.Touched,
                            Lost => Pts (0).Lost,
                            Height_Now => Monitor.Bounded (Pts (0).Height),
@@ -5103,7 +5110,7 @@ package body Act is
             Emp := C.Hands (Natural (Hi)).Empty_Close;
          end if;
          --  量得出空手值才谈得上问手指;门槛是读数自己的抖动(量出来的),不是我拍的容差。
-         Grip_Says_Held := Hi >= 0 and then R_Now > Emp + C.Map.Jaw_Noise;
+         Grip_Says_Held := Hi >= 0 and then Past_Empty (C.Hands (Natural (Hi)), R_Now) > C.Map.Jaw_Noise;
          if Hi >= 0 then
             Grip_Note := S (" (my fingers stopped at " & Codec.Fmt (R_Now, 3)
                             & ", empty they stop at " & Codec.Fmt (Emp, 3)
@@ -10556,14 +10563,16 @@ package body Act is
          declare
             Jk : constant Natural := Natural (Integer'Max (0, C.Wld.Held_Jaw));
             R_Now : constant Long_Float := Selfmap.Jaw_Of (F, Arm, Jk);
-            Emp : Long_Float := -1.0;
+            Emp : Long_Float := 0.0;
+            Hf : Zone.Hand;
+            Found : Boolean := False;
          begin
             for H of C.Hands loop
                if H.Arm = Arm and then H.K = Jk then
-                  Emp := H.Empty_Close;
+                  Emp := H.Empty_Close; Hf := H; Found := True;
                end if;
             end loop;
-            if Emp >= 0.0 and then R_Now <= Emp + C.Map.Jaw_Noise then
+            if Found and then Past_Empty (Hf, R_Now) <= C.Map.Jaw_Noise then
                Event := S ("slipped: I moved my hand " & Mm (Went) & " along that direction and my fingers closed to their empty reading - it is no longer between them");
                C.Wld.Holding := False;
             elsif Went + Went < Ln then   --  两下加起来还不到要的一半(纯数学的一半)
@@ -10637,10 +10646,11 @@ package body Act is
                   end if;
                   --  🔴 脑说合就合。这里不再有任何"我觉得还不到时候"的判断。
                   if Caged then
-                     Move_Jaw (L, C, F, A, 0.0, Steps_J, Reading, Say.Grip_K);
+                     --  合 = 发合拢那头的读数(开机两头推到头量的,V1b ②;原来写死 0.0 —— 读数在 0–1、0 = 合是 x5 的约定)
+                     Move_Jaw (L, C, F, A, Hand_Of (C, A, Say.Grip_K).Empty_Close, Steps_J, Reading, Say.Grip_K);
                      declare
-                        Empty : constant Long_Float := C.Hands (A).Empty_Close;
-                        By_Reading : Boolean := Reading - Empty > C.Map.Jaw_Noise;
+                        Empty : constant Long_Float := Hand_Of (C, A, Say.Grip_K).Empty_Close;
+                        By_Reading : Boolean := Past_Empty (Hand_Of (C, A, Say.Grip_K), Reading) > C.Map.Jaw_Noise;
                         Sure_Held : Boolean := False;
                         Note : Unbounded_String;
                         Origin : Picture.Region;

@@ -402,6 +402,8 @@ package Act is
    --  原图(宽 W、高 H)顺时针转了 Turns 个 90° 之后那张图里的 (U, V) 换算回原图的像素。核对时画面可能被转了,转回去配完再换算回来;导出只为自检
    procedure Unturn (U, V : Long_Float; Turns, W, H : Natural; U0, V0 : out Long_Float);
    procedure Board_Free_Spots (C : Context; Lp : Geom.V3_Vectors.Vector; Tb : Floats; R : Long_Float; Deltas : out Geom.V3_Vectors.Vector);
+   --  读数 R 离"空手合"那头往张开那头走了多远(方向按开机量的两头,不假设读数变小 = 合)。导出只为自检
+   function Past_Empty (H : Zone.Hand; R : Long_Float) return Long_Float;
 
    procedure Init_Tracks (C : in out Context);
    --  开机装回几何常数(身体文件旁边的 .geo.json:焦距、相机在手上的朝向、指尖在相机里的位置);缺的当场量。

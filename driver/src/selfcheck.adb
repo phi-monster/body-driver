@@ -329,6 +329,52 @@ begin
       Z := Zone.From_Frames (Open_G, Open_G, W, H);
       Check (not Z.Valid, "握区(无深度):两张一样的图 ⇒ 看不见这只手合拢,如实说");
    end;
+   --  🔴 抓握通道当关节量(V1b ② 2026-09-27):两头的图谁先谁后都一样认出瓣(瓣 = 变化里形心分得开的那一类);瓣自己那一块的像素(Zone.Lobe_Pixels)
+   --  不含合上时手指在的那一块;读数离"空手合"那头往张开那头走了多远(Act.Past_Empty)按量的方向算:x5 那样 1 张 0 合,和一只 0 那头张开、20 那头合的假手
+   declare
+      W : constant := 64;
+      H : constant := 48;
+      Open_G, Closed_G : Buf := U8_Vectors.To_Vector (100, Ada.Containers.Count_Type (W * H));
+      Z1, Z2 : Zone.Hand_Zone;
+      Hx, Hf : Zone.Hand;
+      Lp : Bools;
+      In_Open, In_Closed : Natural := 0;
+   begin
+      for Y in 36 .. 47 loop
+         for X in 0 .. 63 loop
+            if X in 4 .. 11 or else X in 52 .. 59 then
+               Open_G.Replace_Element (Y * W + X, 20);
+            end if;
+            if X in 26 .. 37 then
+               Closed_G.Replace_Element (Y * W + X, 20);
+            end if;
+         end loop;
+      end loop;
+      Z1 := Zone.From_Frames (Open_G, Closed_G, W, H);
+      Z2 := Zone.From_Frames (Closed_G, Open_G, W, H);
+      Check (Z1.Valid and then Z2.Valid and then Z1.N_Lobes = 2 and then Z2.N_Lobes = 2
+             and then ((Z1.A.X0 = Z2.A.X0 and then Z1.B.X0 = Z2.B.X0) or else (Z1.A.X0 = Z2.B.X0 and then Z1.B.X0 = Z2.A.X0)),
+             "握区:两头的图谁先谁后认出同样两瓣(" & Codec.Img (Z1.A.X0) & "," & Codec.Img (Z1.B.X0) & " / " & Codec.Img (Z2.A.X0) & "," & Codec.Img (Z2.B.X0) & ")");
+      Lp := Zone.Lobe_Pixels (Z1, W, H);
+      for Y in 36 .. 47 loop
+         for X in 0 .. 63 loop
+            if Lp.Element (Y * W + X) then
+               if X in 4 .. 11 or else X in 52 .. 59 then
+                  In_Open := In_Open + 1;
+               elsif X in 26 .. 37 then
+                  In_Closed := In_Closed + 1;
+               end if;
+            end if;
+         end loop;
+      end loop;
+      Check (In_Open = 2 * 8 * 12 and then In_Closed = 0,
+             "握区:瓣自己那一块 " & Codec.Img (In_Open) & " 像素(该 192)、混进合上的手指 " & Codec.Img (In_Closed) & "(该 0)");
+      Hx.Open_Reading := 1.0; Hx.Empty_Close := 0.0;
+      Hf.Open_Reading := 0.0; Hf.Empty_Close := 20.0;
+      Check (abs (Act.Past_Empty (Hx, 0.4) - 0.4) < 1.0e-12 and then abs (Act.Past_Empty (Hf, 12.0) - 8.0) < 1.0e-12 and then Act.Past_Empty (Hf, 20.0) = 0.0,
+             "抓握读数离空手合那头往张开那头走了多远:x5 读数 0.4 ⇒ " & Codec.Fmt (Act.Past_Empty (Hx, 0.4), 2) & "(该 0.4)· 0 张 20 合的假手读数 12 ⇒ "
+             & Codec.Fmt (Act.Past_Empty (Hf, 12.0), 2) & "(该 8)");
+   end;
    --  🔴 没点名的抓握通道发这一集给过它的最后一个目标,不发此刻的读数(Plug.Jaw_Value,V1B24 2026-09-27:碰桌面时手指被沿滑轨往里推,
    --  "保持此刻的读数"把推合了的读数锁住,爪子合上,后一瓣量短 13 mm)。给了 0.3 ⇒ 发 0.3;下一条没给、读数被推到 0.8 ⇒ 还发 0.3;
    --  对方复位(清空)⇒ 发读数 0.8;一次没给过的通道 ⇒ 发读数
