@@ -5950,7 +5950,7 @@ package body Act is
       C.Board_Pt := Plane_Pt; C.Board_N := Plane_N; C.Board_Rms := Plane_Rms;
       C.Board_Plane := not Board.Is_Empty;
       C.Fixed_Ref := Ref.RGB; C.Fixed_Ref_W := Ref.W; C.Fixed_Ref_H := Ref.H;
-      C.Fixed_Best := 0;
+      C.Fixed_Best := (others => <>);
       for Cam in 0 .. Natural (C.Geo.Length) - 1 loop
          declare
             G : constant Geom.Cam_Geo := C.Geo (Cam);
@@ -6957,7 +6957,7 @@ package body Act is
       end if;
       Codec.Write_BMP (Base & ".board_ref.bmp", C.Fixed_Ref, C.Fixed_Ref_W, C.Fixed_Ref_H);
       Ada.Text_IO.Create (Fo, Ada.Text_IO.Out_File, Base & ".board.txt");
-      Ada.Text_IO.Put_Line (Fo, "board " & Codec.Img (Natural (C.Board.Length)) & " " & Codec.Img (C.Fixed_Best) & " " & Codec.Fmt (C.Fixed_Turn_Sd, 4));
+      Ada.Text_IO.Put_Line (Fo, "board " & Codec.Img (Natural (C.Board.Length)) & " " & Codec.Img (C.Fixed_Best.All_N) & " " & Codec.Fmt (C.Fixed_Turn_Sd, 4));
       --  点数、核对时对得上最多的那次(挡没挡按它比)、转着看的配点噪声(像素)
       for S of C.Board loop
          Ada.Text_IO.Put_Line (Fo, Codec.Fmt (S.Pw (0), 6) & " " & Codec.Fmt (S.Pw (1), 6) & " " & Codec.Fmt (S.Pw (2), 6) & " " & Codec.Fmt (S.U, 3) & " " & Codec.Fmt (S.V, 3)
@@ -7017,7 +7017,7 @@ package body Act is
                X : constant Floats := Nums (Hd (Hd'First + Word'Length .. Hd'Last));
             begin
                if Natural (X.Length) >= 2 then
-                  C.Fixed_Best := Natural (X (1));
+                  C.Fixed_Best := (All_N => Natural (X (1)), others => <>);   --  每一块的最多只在一次开机里记(见 Geom.Fixed_Best),装回时重记
                end if;
                if Natural (X.Length) >= 3 then
                   C.Fixed_Turn_Sd := X (2);
@@ -7037,7 +7037,7 @@ package body Act is
          end;
       end loop;
       Ada.Text_IO.Close (Fi);
-      Geo_Say ("装回标定板:" & Codec.Img (Natural (C.Board.Length)) & " 个点 + 不动的眼的参考图(核对时对得上最多 " & Codec.Img (C.Fixed_Best)
+      Geo_Say ("装回标定板:" & Codec.Img (Natural (C.Board.Length)) & " 个点 + 不动的眼的参考图(核对时对得上最多 " & Codec.Img (C.Fixed_Best.All_N)
                & " 个)⇒ 每轮照常核它挪没挪、挡没挡");
       Fit_Board_Plane (C);   --  板的面跟着装回来:东西躺的面不用再压
       if C.Fixed_Turn_Sd <= 0.0 then
@@ -7111,7 +7111,7 @@ package body Act is
             Q.Append (Instrument.Match_Pt'(U => S.U, V => S.V, Cert => 0.0, others => <>));
          end loop;
          declare
-            B0 : constant Natural := C.Fixed_Best;   --  这一轮之前的"放好以来最多"(别的转法各自从它起算)
+            B0 : constant Geom.Fixed_Best := C.Fixed_Best;   --  这一轮之前的"放好以来最多"(别的转法各自从它起算)
          begin
             Now := Matched (C.Fixed_Turn, Ok);
             if not Ok then
@@ -7138,14 +7138,14 @@ package body Act is
                   Have : Boolean := R.Moved;
                   Best_G : Geom.Cam_Geo := G;
                   Best_R : Geom.Fixed_Check := R;
-                  Best_B : Natural := C.Fixed_Best;
+                  Best_B : Geom.Fixed_Best := C.Fixed_Best;
                   Best_T : Natural := C.Fixed_Turn;
                begin
                   for T in 0 .. 3 loop
                      if T /= C.Fixed_Turn then
                         declare
                            Gt : Geom.Cam_Geo := C.Geo (Wc);
-                           Bt : Natural := B0;
+                           Bt : Geom.Fixed_Best := B0;
                            Rt : Geom.Fixed_Check;
                            Okt : Boolean;
                            Nt : constant Geom.Scene_Pt_Vectors.Vector := Matched (T, Okt);
@@ -7180,12 +7180,14 @@ package body Act is
                      & " ⇒ 按板重新标好(" & Codec.Img (R.Consistent) & "/" & Codec.Img (R.Asked) & " 个点对得上,残差 " & Codec.Fmt (R.Rms, 2) & " px),接着干");
          elsif R.Covered then
             if not C.Fixed_Covered then
-               Geo_Say ("核对不动的眼:板上 " & Codec.Img (R.Asked) & " 个点这会儿只有 " & Codec.Img (R.Consistent_Now) & " 个还对得上(放好以来最多 " & Codec.Img (C.Fixed_Best)
+               Geo_Say ("核对不动的眼:板上 " & Codec.Img (R.Asked) & " 个点这会儿只有 " & Codec.Img (R.Consistent_Now) & " 个还对得上(放好以来最多 " & Codec.Img (C.Fixed_Best.All_N)
+                        & (if R.Dark >= 0 then ";画面" & Geom.Region_Name (Natural (R.Dark)) & "放好以来看见过 " & Codec.Img (R.Dark_Best) & " 个,这会儿只剩 "
+                           & Codec.Img (R.Dark_Now) & " 个" else "")
                         & " 个)⇒ 它被挡住了一大块(或看不见了);位姿照旧,它这会儿看见的东西先别全信");
             end if;
          elsif C.Fixed_Covered or else not C.Fixed_Said then
             Geo_Say ("核对不动的眼" & (if C.Fixed_Said then "" else "(这次开机第一次)") & ":板上 " & Codec.Img (R.Asked) & " 个点此刻 " & Codec.Img (R.Consistent_Now)
-                     & " 个对得上(放好以来最多 " & Codec.Img (C.Fixed_Best) & " 个)⇒ " & (if C.Fixed_Covered then "又看全了" else "没挪、没挡"));
+                     & " 个对得上(放好以来最多 " & Codec.Img (C.Fixed_Best.All_N) & " 个)⇒ " & (if C.Fixed_Covered then "又看全了" else "没挪、没挡"));
          end if;
          --  挡没挡只在变的那一轮说(X5C 每轮报一遍"挡住了")
          C.Fixed_Covered := R.Covered and then not R.Moved;
@@ -7202,8 +7204,9 @@ package body Act is
                   when others => Ada.Text_IO.Create (Fo, Ada.Text_IO.Out_File, Path);
                end;
                Ada.Text_IO.Put_Line (Fo, Codec.Img (C.Round_N) & " " & Codec.Img (R.Matched) & " " & Codec.Img (R.Consistent_Now) & " " & Codec.Img (R.Consistent) & " "
-                                     & Codec.Img (C.Fixed_Best) & " " & (if R.Moved then "1" else "0") & " " & (if R.Covered then "1" else "0") & " " & Codec.Img (Turned)
-                                     & " " & Codec.Fmt (R.Gate, 3));
+                                     & Codec.Img (C.Fixed_Best.All_N) & " " & (if R.Moved then "1" else "0") & " " & (if R.Covered then "1" else "0") & " " & Codec.Img (Turned)
+                                     & " " & Codec.Fmt (R.Gate, 3) & " " & Integer'Image (R.Dark) & " " & Codec.Img (R.Dark_Now) & " " & Codec.Img (R.Dark_Best));
+               --  列:轮、配到、原位姿对得上、新解对得上、放好以来最多、挪没挪、挡没挡、转回几个 90°、细门(像素)、看不见的那一块(-1 = 没有)、它此刻 / 放好以来对得上几个
                Ada.Text_IO.Close (Fo);
             exception
                when others => null;
@@ -7256,7 +7259,7 @@ package body Act is
          --  装回来的位姿对不对,第一轮核对按板查(挪过就重标)
          if not C.Board_Stops.Is_Empty and then not C.Board.Is_Empty and then F.Cams (Wc).W > 0 then
             C.Fixed_Ref := F.Cams (Wc).RGB; C.Fixed_Ref_W := F.Cams (Wc).W; C.Fixed_Ref_H := F.Cams (Wc).H;
-            C.Fixed_Best := 0;
+            C.Fixed_Best := (others => <>);
             Fit_Board_Plane (C);
             Measure_Turn_Noise (C);
             Board_Save (C);
@@ -7361,7 +7364,7 @@ package body Act is
          end;
          C.Geo.Replace_Element (Wc, G);
          C.Fixed_Ref := F.Cams (Wc).RGB; C.Fixed_Ref_W := F.Cams (Wc).W; C.Fixed_Ref_H := F.Cams (Wc).H;   --  以后每轮核对拿它当"标好那一刻"
-         C.Fixed_Best := Rep.Scene_Used;   --  标好时对得上的点数;以后核对时对得上最多的那次只会比它多
+         C.Fixed_Best := (All_N => Rep.Scene_Used, others => <>);   --  标好时对得上的点数;以后核对时对得上最多的那次只会比它多(每一块的第一轮核对时记)
          Measure_Turn_Noise (C);
          Board_Save (C);
          Geo_Say ("不动的眼量好:标定板 " & Codec.Img (Rep.Scene_Used) & "/" & Codec.Img (Rep.Scene_N) & " 个点(像素残差 " & Codec.Fmt (Rep.Scene_Rms, 2) & " px)· 手上的标记 "

@@ -170,10 +170,24 @@ package Geom is
    --  转过、挡过的画面配得比标定时粗,按标定时的噪声判会把配点的抖动当成挪动(X5B 2026-09-25:挡住左半边后每轮报"挪了 1°、2 cm");
    --  按位姿自报的不确定度判则相反,配得几乎完美时它小得离谱(G2G:每轮报"挪了 0.0°",1586 次)。
    --  Best = 这只眼这一次放好以来看见过的最多对得上的点数(调用方存着,挪过就重来):此刻对得上的比它少了四分之一以上(比例)= 被挡住了一大块或看不见了 ⇒ Covered
+   --  挡没挡按"放好以来"比(09-27 V1):整幅对得上最多的那次(All_N),和画面每一块(左 / 右 / 上 / 下半、四个四分之一)各自对得上最多的那次(Region;
+   --  按点在此刻画面里该落在哪分)。每一块的只在这一次开机里记(位姿换了,点就分到别的块了),挪过就重记
+   N_Regions : constant := 8;   --  块数(次数)
+   type Region_Counts is array (0 .. N_Regions - 1) of Natural;
+   type Fixed_Best is record
+      All_N : Natural := 0;
+      Region : Region_Counts := [others => 0];
+   end record;
+   Min_Pts : constant := 10;    --  一块里放好以来至少看见过 10 个点才判得了它(次数;同对齐 / 装回核对的"至少 10 个内点")
+   function Region_Name (R : Natural) return String;
+   --  给的位姿下"全都看见了"的那一份(刚标好时、焊点用):每个点按这个位姿投进画面,落在哪几块就算哪几块看见过
+   function Seen_All (G : Cam_Geo; Scene : Scene_Pt_Vectors.Vector) return Fixed_Best;
    type Fixed_Check is record
       Asked, Matched, Consistent : Natural := 0;   --  问了几个点、配到几个、和新解对得上几个
       Consistent_Now : Natural := 0;               --  和现在的位姿对得上几个
       Moved, Covered : Boolean := False;
+      Dark : Integer := -1;                        --  看不见了的那一块(-1 = 没有;块号见 Region_Name)
+      Dark_Now, Dark_Best : Natural := 0;          --  那一块此刻对得上几个 / 放好以来最多几个
       Turn_Deg, Move_M : Long_Float := 0.0;        --  新解离原来的:转了几度、挪了多远
       Shift_Px, Shift_Sd : Long_Float := 0.0;      --  新解把板上的点投到的地方比原来挪了多少(中位,像素 / 以每个点自己的预测噪声为单位)
       Rms : Long_Float := 0.0;                     --  新解的像素残差
@@ -183,7 +197,7 @@ package Geom is
    --  原来的位姿按标定时的细门数点(小挪也抓得到);新位姿按 max(细门, 转着看的噪声)数(真被转了也数得全)
    --  Base_Now ≥ 0:"原来的位姿能解释几个点"不按这一份 Now 数,按调用方给的(画面转过再配时:转过的配点天生更糙,原来的位姿按它数吃亏,
    --  要按没转的画面里数的那份比;X5E 2026-09-26 挡左半时转 90° 再配出一份只差 0.3°、6 mm 的位姿就被当成挪过)
-   procedure Check_Fixed (G : in out Cam_Geo; Scene : Scene_Pt_Vectors.Vector; Now : Scene_Pt_Vectors.Vector; Best : in out Natural; Rep : out Fixed_Check;
+   procedure Check_Fixed (G : in out Cam_Geo; Scene : Scene_Pt_Vectors.Vector; Now : Scene_Pt_Vectors.Vector; Best : in out Fixed_Best; Rep : out Fixed_Check;
                           Turn_Sd : Long_Float := 0.0; Base_Now : Integer := -1);
    --  碰到桌面那一刻量指尖(2026-09-26):手上那只眼里每一瓣手指尖的像素是一条视线(Views 里的 Pose = 碰到那一刻手的位姿);
    --  指尖碰在面上(过 P0、单位法向 N、面内离散 Sd_Plane 米)⇒ 视线和面的交点就是那一瓣的指尖:离眼 S(米),不确定度 Sd_Plane ÷ |视线·法向|。

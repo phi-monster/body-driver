@@ -2473,13 +2473,75 @@ package body Geom is
       end;
    end Refine_Board;
 
-   procedure Check_Fixed (G : in out Cam_Geo; Scene : Scene_Pt_Vectors.Vector; Now : Scene_Pt_Vectors.Vector; Best : in out Natural; Rep : out Fixed_Check;
+   --  画面的几块:0 左半、1 右半、2 上半、3 下半、4 左上、5 右上、6 左下、7 右下(按像素;分界 = 主点,驱动的约定里主点就是画幅中心)
+   function In_Region (R : Natural; U, V, Cx, Cy : Long_Float) return Boolean is
+     (case R is
+         when 0 => U < Cx,
+         when 1 => U >= Cx,
+         when 2 => V < Cy,
+         when 3 => V >= Cy,
+         when 4 => U < Cx and then V < Cy,
+         when 5 => U >= Cx and then V < Cy,
+         when 6 => U < Cx and then V >= Cy,
+         when others => U >= Cx and then V >= Cy);
+   function Region_Name (R : Natural) return String is
+     (case R is
+         when 0 => "左半边", when 1 => "右半边", when 2 => "上半边", when 3 => "下半边",
+         when 4 => "左上那四分之一", when 5 => "右上那四分之一", when 6 => "左下那四分之一", when others => "右下那四分之一");
+   --  点按位姿 Pg 投进画面(画幅 = 两倍主点):落在哪几块
+   procedure Add_Regions (Pg : Cam_Geo; U, V : Long_Float; Reg : in out Region_Counts) is
+   begin
+      if U >= 0.0 and then V >= 0.0 and then U < 2.0 * Pg.Cx and then V < 2.0 * Pg.Cy then
+         for R in Reg'Range loop
+            if In_Region (R, U, V, Pg.Cx, Pg.Cy) then
+               Reg (R) := Reg (R) + 1;
+            end if;
+         end loop;
+      end if;
+   end Add_Regions;
+   function Seen_All (G : Cam_Geo; Scene : Scene_Pt_Vectors.Vector) return Fixed_Best is
+      B : Fixed_Best;
+   begin
+      for P of Scene loop
+         declare
+            U, V : Long_Float;
+            Front : Boolean;
+         begin
+            Project_Fixed (G, P.Pw, U, V, Front);
+            if Front then
+               B.All_N := B.All_N + 1;
+               Add_Regions (G, U, V, B.Region);
+            end if;
+         end;
+      end loop;
+      return B;
+   end Seen_All;
+
+   procedure Check_Fixed (G : in out Cam_Geo; Scene : Scene_Pt_Vectors.Vector; Now : Scene_Pt_Vectors.Vector; Best : in out Fixed_Best; Rep : out Fixed_Check;
                           Turn_Sd : Long_Float := 0.0; Base_Now : Integer := -1) is
       Cur : Scene_Pt_Vectors.Vector;
       Gn : Cam_Geo := G;
       Fr : Fixed_Report;
       Ok : Boolean;
       Deg : constant Long_Float := 180.0 / Ada.Numerics.Pi;   --  弧度 → 度(换算,无量纲)
+      Reg_Now : Region_Counts := [others => 0];               --  此刻每一块里和现在的位姿对得上几个
+      --  和位姿 Pg 对得上的点(门 Gt 以内)数一遍,再按点在 Pg 下该落在哪块分着数
+      procedure Tally (Pg : Cam_Geo; Gt : Long_Float; Total : out Natural; Reg : out Region_Counts) is
+      begin
+         Total := 0; Reg := [others => 0];
+         for P of Cur loop
+            declare
+               U, V : Long_Float;
+               Front : Boolean;
+            begin
+               Project_Fixed (Pg, P.Pw, U, V, Front);
+               if Front and then Sqrt ((U - P.U) ** 2 + (V - P.V) ** 2) <= Gt then
+                  Total := Total + 1;
+                  Add_Regions (Pg, U, V, Reg);
+               end if;
+            end;
+         end loop;
+      end Tally;
    begin
       Rep := (Asked => Natural (Scene.Length), others => <>);
       for I in 0 .. Natural'Min (Natural (Scene.Length), Natural (Now.Length)) - 1 loop
@@ -2526,7 +2588,7 @@ package body Geom is
          Oka, Okb : Boolean;
          Na, Nb : Natural := 0;
       begin
-         Rep.Consistent_Now := Count (G, Gate);
+         Tally (G, Gate, Rep.Consistent_Now, Reg_Now);
          Rep.Gate := Gate;
          Fit_Fixed_Board (Ga, Cur, Fa, Oka, Start_Here => True);
          Fit_Fixed_Board (Gn, Cur, Fb, Okb);
@@ -2576,7 +2638,7 @@ package body Geom is
       --  新旧位姿投出来的板点差得比细门远(差不到门里 = 同一个位姿,只是这会儿配得糙)。
       --  看得见、配得上的不到四分之一时解出来的位姿不可信 —— X5C4 2026-09-26 转 90° 重标后再挡一半,仪器整幅配飞,此刻的位姿一个点都解释不了,
       --  一份错得离谱的位姿以 18.9 px 的残差在门里凑到 35/782 个,就被当成"挪了 0.84 m"换上了。三条不全 ⇒ 按挡没挡报,位姿不动
-      if (if Base_Now >= 0 then 2 * Base_Now else 2 * Rep.Consistent_Now) < Rep.Consistent and then 4 * Rep.Consistent >= Best and then Rep.Shift_Px > Rep.Gate then
+      if (if Base_Now >= 0 then 2 * Base_Now else 2 * Rep.Consistent_Now) < Rep.Consistent and then 4 * Rep.Consistent >= Best.All_N and then Rep.Shift_Px > Rep.Gate then
          Rep.Moved := True;
          Gn.F := G.F; Gn.F_Meas := G.F_Meas; Gn.F_Sd := G.F_Sd;   --  焦距照旧
          --  以后按新解配得多细来判:新位姿解释得了的那些点(新门内)像素误差的中位 × 1.2(换算,无量纲:二维高斯误差中位 ≈ 均方根 ÷ 1.2)。
@@ -2602,10 +2664,32 @@ package body Geom is
             Rep.Rms := Gn.Rms;
          end;
          G := Gn;
-         Best := Rep.Consistent;   --  重新放好了:从这一刻起重记"看见过的最多"
+         --  重新放好了:从这一刻起重记"看见过的最多"—— 按新位姿自己的门数(以后每轮按它数;09-27 以前记的是按放宽的新门数的那份,
+         --  下一轮按自己的门数就少一截,V1B39 重标后 630 → 569,凭空离"挡住了"近了一截)
+         declare
+            N_Own : Natural;
+            Reg_Own : Region_Counts;
+         begin
+            Tally (G, 3.0 * Long_Float'Max (1.0e-9, G.Rms), N_Own, Reg_Own);
+            Best := (All_N => N_Own, Region => Reg_Own);
+         end;
       else
-         Best := Natural'Max (Best, Rep.Consistent_Now);
-         Rep.Covered := 4 * Rep.Consistent_Now < 3 * Best;   --  比放好以来最多的少了四分之一以上(比例)
+         Best.All_N := Natural'Max (Best.All_N, Rep.Consistent_Now);
+         for R in Reg_Now'Range loop
+            Best.Region (R) := Natural'Max (Best.Region (R), Reg_Now (R));
+         end loop;
+         --  看不全 = 整幅比放好以来最多的少了四分之一以上(比例);或者画面的某一块(一半 / 四分之一;放好以来在那儿至少看见过 Min_Pts 个)
+         --  少了四分之三以上 —— 那一块基本看不见了(比例)。09-27 V1B39:转过 90° 以后板上的点多在右边,挡住左半只挡掉整幅的 25%,整幅那条擦线没报;
+         --  左半那一块其实一个都不剩
+         Rep.Covered := 4 * Rep.Consistent_Now < 3 * Best.All_N;
+         for R in Reg_Now'Range loop
+            if Best.Region (R) >= Min_Pts and then 4 * Reg_Now (R) < Best.Region (R)
+              and then (Rep.Dark < 0 or else Reg_Now (R) * Rep.Dark_Best < Rep.Dark_Now * Best.Region (R))   --  剩得比例最少的那块
+            then
+               Rep.Covered := True;
+               Rep.Dark := R; Rep.Dark_Now := Reg_Now (R); Rep.Dark_Best := Best.Region (R);
+            end if;
+         end loop;
       end if;
    end Check_Fixed;
 

@@ -211,7 +211,33 @@ observation:
     shape: true
 """)
 
+# ---- 没有联动关节的抓握通道(无人机:抓握通道只有 grip_joint 一个关节,mimic = [])。人形那份垫片(g1_setup.py)把 RoboDojo 里几处
+#      "一个基关节 + 联动关节"的写法改成了"一个或 N 个联动",都没管"零个":mimic 为空时下标越界,仿真一开机就崩(09-27 V1BD2)。
+#      四处都补上"没有联动 ⇒ 只有基关节那一个目标"(同一句,放在每处最前面)
+NO_MIMIC = "if not mimic:   # [bd] no mimic joints (drone grip): the base joint only"
+for f, indent, ret in ((f"{R}/env/robot_manager/control_manager.py", "            ", "return [val]"),
+                       (f"{R}/env/robot_manager/robot_manager.py", "    ", "return [val]"),
+                       (f"{R}/src/eval_client/eval_env.py", "    ", "return [val]")):
+    s2 = open(f).read()
+    if "[bd] no mimic joints" not in s2:
+        key = "\n" + indent + 'mimic = robot.gripper_move["mimic"]\n'   # 行首、正好这一档缩进(更深的那行另补,见下)
+        assert s2.count(key) == 1, (f, "mimic line not found once", s2.count(key))
+        s2 = s2.replace(key, key + indent + NO_MIMIC + "\n" + indent + "    " + ret + "\n")
+        open(f, "w").write(s2)
+    print("no-mimic patch:", f.split("/")[-1], s2.count("[bd] no mimic joints"))
+p = f"{R}/env/robot_manager/robot_manager.py"; s2 = open(p).read()
+old_init = "                    if mimic and isinstance(mimic[0], (list, tuple)):   # [bd] N mimic joints\n"
+new_init = ("                    if not mimic:   # [bd] no mimic joints (drone grip): the base joint only\n"
+            "                        gripper_list = [[val] for _ in range(len(joint_list))]\n"
+            "                    elif mimic and isinstance(mimic[0], (list, tuple)):   # [bd] N mimic joints\n")
+if "gripper_list = [[val] for _ in range(len(joint_list))]" not in s2:
+    assert s2.count(old_init) == 1, "init-state mimic line not found"
+    s2 = s2.replace(old_init, new_init); open(p, "w").write(s2)
+print("init-state no-mimic:", "gripper_list = [[val] for _ in range(len(joint_list))]" in open(p).read())
+
 # ---- layout for config drone, seed 1 (a static pickup table: the drone only calibrates over it)
 os.makedirs(f"{R}/Assets/Eval_Layout/RoboDojo/drone/1", exist_ok=True)
 shutil.copy(f"{R}/Assets/Eval_Layout/RoboDojo/arx_x5/1/general_pickup_0.json", f"{R}/Assets/Eval_Layout/RoboDojo/drone/1/general_pickup_0.json")
+# 开机长场次(bootcal = 同一个场景、同一个判据,只放开集长):同一张桌子(09-27 V1BD1 第一炮起不来:没有 bootcal 的布局)
+shutil.copy(f"{R}/Assets/Eval_Layout/RoboDojo/drone/1/general_pickup_0.json", f"{R}/Assets/Eval_Layout/RoboDojo/drone/1/bootcal_0.json")
 print("written:", sorted(os.listdir(D)), os.listdir(f"{R}/Assets/Eval_Layout/RoboDojo/drone/1"))

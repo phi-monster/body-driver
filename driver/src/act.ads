@@ -286,7 +286,7 @@ package Act is
       Board_Plane : Boolean := False;           --  标定板的点拟合出了它们躺的那张面
       Fixed_Ref : Buf;                          --  不动的眼标好(或上一次核对)那一刻的图:每轮拿它和此刻的图配板上的点,核它挪没挪、挡没挡
       Fixed_Ref_W, Fixed_Ref_H : Natural := 0;
-      Fixed_Best : Natural := 0;                --  不动的眼这一次放好以来,核对时对得上的最多点数(挡没挡按它比;挪过就重记)
+      Fixed_Best : Geom.Fixed_Best;             --  不动的眼这一次放好以来,核对时对得上的最多点数:整幅的和每一块的(挡没挡按它比;挪过就重记)
       Board_Pt, Board_N : Geom.V3 := [others => 0.0];
       Board_Rms : Long_Float := 0.0;            --  板上躺在面上的那些点离面的离散(米)
       Fixed_Turn_Sd : Long_Float := 0.0;        --  仪器把参考图配到"它自己转了 90°"那张时的配点噪声(像素,均方根;核对时判新位姿用,0 = 没量)

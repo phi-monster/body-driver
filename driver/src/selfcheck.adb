@@ -1276,7 +1276,7 @@ begin
                G1 : Geom.Cam_Geo := G0;
                Now : Geom.Scene_Pt_Vectors.Vector;
                R1 : Geom.Fixed_Check;
-               Best1 : Natural := 0;   --  刚放好:还没看见过
+               Best1 : Geom.Fixed_Best;   --  刚放好:还没看见过
             begin
                for B of Base loop
                   declare
@@ -1295,7 +1295,7 @@ begin
             declare
                G1b : Geom.Cam_Geo := G0;
                R1b : Geom.Fixed_Check;
-               Best1b : Natural := 0;
+               Best1b : Geom.Fixed_Best;
             begin
                Geom.Check_Fixed (G1b, Base, Base, Best1b, R1b);
                Check (not R1b.Moved and then not R1b.Covered,
@@ -1307,7 +1307,7 @@ begin
                Gr : Geom.Cam_Geo := G0;   --  真的:绕自己的光轴(相机系 z)转 90°
                Now : Geom.Scene_Pt_Vectors.Vector;
                R2 : Geom.Fixed_Check;
-               Best2 : Natural := Natural (Base.Length);   --  转之前看得全
+               Best2 : Geom.Fixed_Best := Geom.Seen_All (G0, Base);   --  转之前看得全
             begin
                Gr.R_Ce := Geom.Mul (G0.R_Ce, Geom.Rodrigues ([0.0, 0.0, 0.5 * Ada.Numerics.Pi]));
                for B of Base loop
@@ -1340,7 +1340,7 @@ begin
                   G4 : Geom.Cam_Geo := G2;
                   Now4 : Geom.Scene_Pt_Vectors.Vector;
                   R4 : Geom.Fixed_Check;
-                  Best4 : Natural := Best2;   --  重标那一刻看见的
+                  Best4 : Geom.Fixed_Best := Best2;   --  重标那一刻看见的
                   K : Natural := 0;
                begin
                   for B of Base loop
@@ -1362,7 +1362,7 @@ begin
                   Geom.Check_Fixed (G4, Base, Now4, Best4, R4);
                   Check (not R4.Moved and then R4.Covered and then Geom.Norm ([G4.Pos (0) - G2.Pos (0), G4.Pos (1) - G2.Pos (1), G4.Pos (2) - G2.Pos (2)]) = 0.0,
                          "不动的眼核对·转 90° 之后再挡住左半边:现在的位姿对得上 " & Codec.Img (R4.Consistent_Now) & "、新解 " & Codec.Img (R4.Consistent) & "(重标时 "
-                         & Codec.Img (Best2) & ")⇒ " & (if R4.Moved then "算挪了(错)" else "没挪") & (if R4.Covered then "、算挡了" else "、没发现挡(错)"));
+                         & Codec.Img (Best2.All_N) & ")⇒ " & (if R4.Moved then "算挪了(错)" else "没挪") & (if R4.Covered then "、算挡了" else "、没发现挡(错)"));
                end;
             end;
             --  ②c 转完、重标好之后再挡住左半边,而仪器整幅都没配上(X5C4 2026-09-26:转 90° 本来就只配上六成,再挡一半就全配飞了):
@@ -1373,10 +1373,10 @@ begin
                Gbad : Geom.Cam_Geo := G0;
                Now2c : Geom.Scene_Pt_Vectors.Vector;
                R2c : Geom.Fixed_Check;
-               Best2c : Natural;
+               Best2c : Geom.Fixed_Best;
                Rgo : Geom.Fixed_Check;
                Gtmp : Geom.Cam_Geo := G0;
-               Bt : Natural := Natural (Base.Length);
+               Bt : Geom.Fixed_Best := Geom.Seen_All (G0, Base);
                Gr2 : Geom.Cam_Geo := G0;
                Now_R : Geom.Scene_Pt_Vectors.Vector;
             begin
@@ -1432,12 +1432,12 @@ begin
                Gr : Geom.Cam_Geo := G0;
                Now2d : Geom.Scene_Pt_Vectors.Vector;
                R2d : Geom.Fixed_Check;
-               Best2d : Natural := Natural (Base.Length);
+               Best2d : Geom.Fixed_Best := Geom.Seen_All (G0, Base);
                G2e : Geom.Cam_Geo := G0;
                Gbad : Geom.Cam_Geo := G0;
                Now2e : Geom.Scene_Pt_Vectors.Vector;
                R2e : Geom.Fixed_Check;
-               Best2e : Natural := Natural (Base.Length);
+               Best2e : Geom.Fixed_Best := Geom.Seen_All (G0, Base);
             begin
                G2d.Rms := 0.16;   --  合成
                Gr.R_Ce := Geom.Mul (G0.R_Ce, Geom.Rodrigues ([0.0, 0.0, 0.5 * Ada.Numerics.Pi]));
@@ -1493,8 +1493,8 @@ begin
                Gc : Geom.Cam_Geo := G0;
                Nc0, Nct : Geom.Scene_Pt_Vectors.Vector;
                Rc0, Rct, Rct_Bad : Geom.Fixed_Check;
-               Bc0 : Natural := Natural (Base.Length);
-               Bct, Bct2 : Natural;
+               Bc0 : Geom.Fixed_Best := Geom.Seen_All (G0, Base);
+               Bct, Bct2 : Geom.Fixed_Best;
                K : Natural := 0;
             begin
                Gc.Rms := 0.16;   --  标定时配得很细(X5E 的数,合成)
@@ -1535,7 +1535,7 @@ begin
                Gw : Geom.Cam_Geo := G0;   --  编出来的那片对应的错位姿
                Now5 : Geom.Scene_Pt_Vectors.Vector;
                R5 : Geom.Fixed_Check;
-               Best5 : Natural := Natural (Base.Length);   --  挡之前看得全
+               Best5 : Geom.Fixed_Best := Geom.Seen_All (G0, Base);   --  挡之前看得全
             begin
                Gw.R_Ce := Geom.Mul (G0.R_Ce, Geom.Rodrigues ([0.0, 0.122, 0.0]));   --  7°(弧度,合成)
                for B of Base loop
@@ -1563,7 +1563,7 @@ begin
                Now : Geom.Scene_Pt_Vectors.Vector;
                R3 : Geom.Fixed_Check;
                K : Natural := 0;
-               Best3 : Natural := Natural (Base.Length);   --  挡之前看得全
+               Best3 : Geom.Fixed_Best := Geom.Seen_All (G0, Base);   --  挡之前看得全
             begin
                for B of Base loop
                   declare
@@ -1582,6 +1582,105 @@ begin
                Check (R3.Covered and then not R3.Moved and then Geom.Norm ([G3.Pos (0) - G0.Pos (0), G3.Pos (1) - G0.Pos (1), G3.Pos (2) - G0.Pos (2)]) = 0.0,
                       "不动的眼核对·挡住六成:对得上 " & Codec.Img (R3.Consistent) & "/" & Codec.Img (R3.Asked) & " ⇒ " & (if R3.Covered then "算挡了" else "没发现挡(错)")
                       & (if R3.Moved then "、算挪了(错)" else "、位姿不动"));
+            end;
+            --  ④ 挡住一块,按块判(09-27 V1B39:转过 90° 以后板上的点多在右边,挡住左半只挡掉整幅的 25%,整幅那条擦线没报):
+            --  (a) 板上的点四分之三在右边、挡住左半 ⇒ 整幅只少了约两成(整幅那条不报),左半那一块一个不剩 ⇒ 要报挡、说是左半边、位姿不动;
+            --  (b) 到处随机丢一成半 ⇒ 不许报;(c) 一小团(一只手从眼前经过那么大)丢了 ⇒ 不许报
+            declare
+               Base_R : Geom.Scene_Pt_Vectors.Vector;
+               K : Natural := 0;
+            begin
+               for B of Base loop
+                  if B.U >= 320.0 or else K mod 4 = 0 then
+                     Base_R.Append (B);
+                  end if;
+                  if B.U < 320.0 then
+                     K := K + 1;
+                  end if;
+               end loop;
+               declare
+                  Ga4 : Geom.Cam_Geo := G0;
+                  Na4 : Geom.Scene_Pt_Vectors.Vector;
+                  Ra4 : Geom.Fixed_Check;
+                  Ba4 : Geom.Fixed_Best := Geom.Seen_All (G0, Base_R);
+                  Left_N : Natural := 0;
+                  J : Natural := 0;
+               begin
+                  for B of Base_R loop
+                     declare
+                        N : Geom.Scene_Pt := B;
+                     begin
+                        if B.U < 320.0 then
+                           N.U := Long_Float ((J * 97) mod 640); N.V := Long_Float ((J * 61) mod 480);   --  挡住的那半边:乱配(合成)
+                           Left_N := Left_N + 1;
+                        else
+                           N.U := B.U + 0.5 * Jit6; N.V := B.V + 0.5 * Jit6;
+                        end if;
+                        Na4.Append (N);
+                        J := J + 1;
+                     end;
+                  end loop;
+                  Geom.Check_Fixed (Ga4, Base_R, Na4, Ba4, Ra4);
+                  Check (Ra4.Covered and then Ra4.Dark = 0 and then not Ra4.Moved and then 4 * Ra4.Consistent_Now >= 3 * Ba4.All_N
+                         and then Geom.Norm ([Ga4.Pos (0) - G0.Pos (0), Ga4.Pos (1) - G0.Pos (1), Ga4.Pos (2) - G0.Pos (2)]) = 0.0,
+                         "不动的眼核对·按块判:板上 " & Codec.Img (Natural (Base_R.Length)) & " 个点、左半只有 " & Codec.Img (Left_N) & " 个,挡住左半 ⇒ 整幅对得上 "
+                         & Codec.Img (Ra4.Consistent_Now) & " / " & Codec.Img (Ba4.All_N) & "(整幅那条不报)· "
+                         & (if Ra4.Covered then "算挡了:" & (if Ra4.Dark >= 0 then Geom.Region_Name (Natural (Ra4.Dark)) & " " & Codec.Img (Ra4.Dark_Now) & " / " & Codec.Img (Ra4.Dark_Best) else "(没说哪块)")
+                            else "没发现挡(错)") & (if Ra4.Moved then "、算挪了(错)" else "、位姿不动"));
+               end;
+               declare
+                  Gb4 : Geom.Cam_Geo := G0;
+                  Nb4 : Geom.Scene_Pt_Vectors.Vector;
+                  Rb4 : Geom.Fixed_Check;
+                  Bb4 : Geom.Fixed_Best := Geom.Seen_All (G0, Base);
+                  J : Natural := 0;
+               begin
+                  for B of Base loop
+                     declare
+                        N : Geom.Scene_Pt := B;
+                     begin
+                        if J mod 7 = 3 then   --  七个里丢一个(一成半,合成)
+                           N.U := Long_Float ((J * 97) mod 640); N.V := Long_Float ((J * 61) mod 480);
+                        else
+                           N.U := B.U + 0.5 * Jit6; N.V := B.V + 0.5 * Jit6;
+                        end if;
+                        Nb4.Append (N);
+                        J := J + 1;
+                     end;
+                  end loop;
+                  Geom.Check_Fixed (Gb4, Base, Nb4, Bb4, Rb4);
+                  Check (not Rb4.Covered and then not Rb4.Moved,
+                         "不动的眼核对·到处随机丢一成半:对得上 " & Codec.Img (Rb4.Consistent_Now) & " / " & Codec.Img (Bb4.All_N) & " ⇒ "
+                         & (if Rb4.Covered then "算挡了(错:" & (if Rb4.Dark >= 0 then Geom.Region_Name (Natural (Rb4.Dark)) else "整幅") & ")" else "没挡") & (if Rb4.Moved then "、算挪了(错)" else ""));
+               end;
+               declare
+                  Gc4 : Geom.Cam_Geo := G0;
+                  Nc4 : Geom.Scene_Pt_Vectors.Vector;
+                  Rc4 : Geom.Fixed_Check;
+                  Bc4 : Geom.Fixed_Best := Geom.Seen_All (G0, Base);
+                  Ctr : constant Geom.Scene_Pt := Base (Natural (Base.Length) / 2);
+                  Lost : Natural := 0;
+                  J : Natural := 0;
+               begin
+                  for B of Base loop
+                     declare
+                        N : Geom.Scene_Pt := B;
+                     begin
+                        if (B.U - Ctr.U) ** 2 + (B.V - Ctr.V) ** 2 < 40.0 ** 2 then   --  半径 40 px 的一团(合成:一只手从眼前经过那么大)
+                           N.U := Long_Float ((J * 97) mod 640); N.V := Long_Float ((J * 61) mod 480);
+                           Lost := Lost + 1;
+                        else
+                           N.U := B.U + 0.5 * Jit6; N.V := B.V + 0.5 * Jit6;
+                        end if;
+                        Nc4.Append (N);
+                        J := J + 1;
+                     end;
+                  end loop;
+                  Geom.Check_Fixed (Gc4, Base, Nc4, Bc4, Rc4);
+                  Check (not Rc4.Covered and then not Rc4.Moved,
+                         "不动的眼核对·一小团(半径 40 px,丢 " & Codec.Img (Lost) & " 个)看不见了:对得上 " & Codec.Img (Rc4.Consistent_Now) & " / " & Codec.Img (Bc4.All_N) & " ⇒ "
+                         & (if Rc4.Covered then "算挡了(错:" & (if Rc4.Dark >= 0 then Geom.Region_Name (Natural (Rc4.Dark)) else "整幅") & ")" else "没挡") & (if Rc4.Moved then "、算挪了(错)" else ""));
+               end;
             end;
          end;
          --  🔴 腕眼 + 不动的眼 + 板上的点一起解(Geom.Refine_Board):同样两只腕眼,每只 9 停平移 + 4 停转动(绕 z、x 各 ±0.1 rad,合成),
@@ -1734,7 +1833,7 @@ begin
          Img.Append (U8 ((I * 37) mod 256));
       end loop;
       C1.Fixed_Ref := Img; C1.Fixed_Ref_W := 8; C1.Fixed_Ref_H := 6;
-      C1.Fixed_Best := 5;
+      C1.Fixed_Best := (All_N => 5, others => <>);
       Act.Board_Save (C1);
       C2.Geo_Path := C1.Geo_Path;
       Act.Board_Load (C2);
@@ -1748,7 +1847,7 @@ begin
          end loop;
       end if;
       Check (Natural (C2.Board.Length) = Natural (C1.Board.Length) and then Bytes.U8_Vectors."=" (C2.Fixed_Ref, C1.Fixed_Ref) and then C2.Fixed_Ref_W = 8
-             and then C2.Fixed_Ref_H = 6 and then Worst < 1.0e-5 and then C2.Fixed_Best = 5,
+             and then C2.Fixed_Ref_H = 6 and then Worst < 1.0e-5 and then C2.Fixed_Best.All_N = 5,
              "标定板随身体文件存、装回:" & Codec.Img (Natural (C2.Board.Length)) & "/" & Codec.Img (Natural (C1.Board.Length)) & " 个点、参考图 "
              & Codec.Img (C2.Fixed_Ref_W) & "×" & Codec.Img (C2.Fixed_Ref_H) & (if Bytes.U8_Vectors."=" (C2.Fixed_Ref, C1.Fixed_Ref) then " 一样" else " 不一样")
              & " · 最大差 " & Codec.Fmt (Worst, 8));
