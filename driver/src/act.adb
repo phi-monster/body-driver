@@ -11395,6 +11395,7 @@ package body Act is
 
    procedure Geo_Boot_Support (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context) is
       Down : constant Geom.V3 := [-Protocol_Up (0), -Protocol_Up (1), -Protocol_Up (2)];
+      S_Known : Long_Float := 0.0;   --  这次开机头一瓣碰出来的指尖离眼多远(世界单位):别的瓣、别的手先一条命令下到按它算的高度
 
       procedure Go_Back (A : Natural; To : Plug.Arm_Pose) is
          Cur : constant Plug.Arm_Pose := F.EE (A);
@@ -11540,6 +11541,23 @@ package body Act is
                   return;
                end if;
             end;
+            --  量过一瓣以后(S_Known > 0):先一条命令下到"按量过的那一瓣算,指尖离面两压"的高度(眼离面 = S_Known + 两压;两压 = 次数),再照常压 ——
+            --  这根手指更长就提前被顶住(按碰到处理),更短就多压几下;起点用量过的数,不是假设它一样长(⑧ 的 (b))
+            if S_Known > 0.0 then
+               declare
+                  P3 : constant Plug.Arm_Pose := F.EE (A);
+                  O3 : constant Geom.V3 := Geom.Cam_Pos (Gk, P3);
+                  H3 : constant Long_Float := (O3 (0) - C.Board_Pt (0)) * C.Board_N (0) + (O3 (1) - C.Board_Pt (1)) * C.Board_N (1) + (O3 (2) - C.Board_Pt (2)) * C.Board_N (2);
+                  Ln0 : constant Long_Float := Stride_Of (C, A);
+                  Dn : constant Long_Float := H3 - (S_Known + 2.0 * Ln0);   --  两压(次数)
+                  Mok : Boolean;
+               begin
+                  if Ln0 > 0.0 and then Dn > Ln0 then
+                     Geo_Say ("  按量过的那一瓣(离眼 " & Mm (S_Known) & ")一条命令先下 " & Mm (Dn) & ",到指尖离面约两压的高度");
+                     Geo_Move (L, C, F, A, [Dn * Down (0), Dn * Down (1), Dn * Down (2)], Mok);
+                  end if;
+               end;
+            end if;
             declare
                Start : constant Plug.Arm_Pose := F.EE (A);
                Ln : constant Long_Float := Stride_Of (C, A);   --  一压 = 步幅(桌子推不动;见 Geo_Go 的 Press_Step)
@@ -11585,20 +11603,16 @@ package body Act is
                         exit when Table.Norm (Del, 3) < Geo_Base (C, A);
                      end;
                   end loop;
+                  --  碰到的是桌面还是胳膊到头 / 被旁边的东西挡住,由两处(三处)对不对得上管(一件事一种办法;原来这里还沿面滑一下,⑧ 的 (c))
                   declare
                      Pc : constant Plug.Arm_Pose := F.EE (A);
                      Vs : Geom.Board_View_Vectors.Vector;
-                     Sl_Ln, Sl_Got : Long_Float;
-                     Slid : Boolean;
                   begin
                      for J in 0 .. Nl - 1 loop
                         Vs.Append (Geom.Board_View'(Pose => Pc, U => Tu (J), V => Tv (J)));
                      end loop;
                      Row := Geom.Tips_On_Plane (C.Geo (Hc), Vs, C.Board_Pt, C.Board_N, C.Board_Rms);
-                     Slide_Test (L, C, F, A, C.Board_N, Sl_Ln, Sl_Got, Slid);
-                     if not Slid then
-                        Geo_Say ("  沿着板的面滑 " & Mm (Sl_Ln) & " 只走了 " & Mm (Sl_Got) & " ⇒ 顶住我的不是桌面,是我自己的胳膊到头了;这一下不算");
-                     elsif not Row (K).Ok then
+                     if not Row (K).Ok then
                         Geo_Say ("  这一瓣的视线交不到面上 ⇒ 这一下不算");
                      else
                         Got := True;
@@ -11608,7 +11622,12 @@ package body Act is
                      end if;
                   end;
                end if;
-               Go_Back (A, Start);
+               --  压完抬两压(次数)就走,不回压之前的高处:下一处从这个高度横挪过去(⑧ 的 (a));最高到过哪儿照样记着,最后回原处上方
+               declare
+                  Mok : Boolean;
+               begin
+                  Geo_Move (L, C, F, A, [2.0 * Ln * Protocol_Up (0), 2.0 * Ln * Protocol_Up (1), 2.0 * Ln * Protocol_Up (2)], Mok);
+               end;
             end;
          end Press_At;
       begin
@@ -11681,6 +11700,9 @@ package body Act is
                      Rows (K) := Ra;
                      Rows (K) (K).S := 0.5 * (Ra (K).S + Rb (K).S);
                      Done.Replace_Element (K, True);
+                     if S_Known <= 0.0 then
+                        S_Known := Rows (K) (K).S;
+                     end if;
                   end Take;
                begin
                   Press_At (K, [0.0, 0.0, 0.0], Rw1, Sp1, G1);
