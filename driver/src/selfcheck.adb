@@ -2117,37 +2117,6 @@ begin
       Check (abs (R1 - 0.64) < 1.0e-9 and then R0 = 0.0,
              "一条命令转得到的最大一档按运动学问反解:反解只让转到 1.2 弧度 ⇒ " & Codec.Fmt (R1, 3) & " 弧度(翻倍的最后一档)· 没有运动学 ⇒ " & Codec.Fmt (R0, 3));
    end;
-   --  🔴 转眼对准东西按"反解够得到的那一截"转(09-28 S1A2 / S1A3,Act.Reach_Along / Turn_Pose):假反解只让朝向离起点 1.0 弧度以内 ⇒
-   --  要转 1.4 弧度给出够得到的边 ≈ 1.0(二分 12 次,差不到 1.4 ÷ 4096)、要转 0.5 整段给 0.5、没有运动学 ⇒ 0;转完指尖在世界里不挪(平移补偿)
-   declare
-      P0 : constant Plug.Arm_Pose := [0.1, -0.2, 1.0, 1.0, 0.0, 0.0, 0.0];
-      procedure Fake_Reach (Arm : Natural; Pose : Plug.Arm_Pose; Pos_Err, Rot_Err : out Long_Float) is
-         pragma Unreferenced (Arm);
-      begin
-         Pos_Err := 0.0;
-         Rot_Err := (if Geom.Angle_Between (P0, Pose) <= 1.0 then 0.0 else 1.0);
-      end Fake_Reach;
-      Ax : constant Geom.V3 := [0.0, 0.6, 0.8];
-      Tip : constant Geom.V3 := [0.02, -0.01, -0.09];
-      R_Ce : constant Geom.M3 := Geom.Identity;
-      Far, Near, None : Long_Float;
-      P1 : Plug.Arm_Pose;
-      W0, W1 : Geom.V3;
-   begin
-      Plug.Set_Reach (Fake_Reach'Unrestricted_Access);
-      Far := Act.Reach_Along (0, P0, Ax, 1.4, Tip, R_Ce, 0.001, 0.001);
-      Near := Act.Reach_Along (0, P0, Ax, 0.5, Tip, R_Ce, 0.001, 0.001);
-      Plug.Set_Reach (null);
-      None := Act.Reach_Along (0, P0, Ax, 1.4, Tip, R_Ce, 0.001, 0.001);
-      P1 := Act.Turn_Pose (P0, Ax, 0.9, Tip, R_Ce);
-      W0 := Geom.Ap (Geom.Quat_To_R (P0), Tip);
-      W1 := Geom.Ap (Geom.Quat_To_R (P1), Tip);
-      Check (abs (Far - 1.0) < 1.4 / 4096.0 + 1.0e-9 and then Far <= 1.0 and then abs (Near - 0.5) < 1.0e-12 and then None = 0.0
-             and then Geom.Norm ([P0 (0) + W0 (0) - P1 (0) - W1 (0), P0 (1) + W0 (1) - P1 (1) - W1 (1), P0 (2) + W0 (2) - P1 (2) - W1 (2)]) < 1.0e-9
-             and then abs (Geom.Angle_Between (P0, P1) - 0.9) < 1.0e-9,
-             "转眼对准东西按反解够得到的那一截:要转 1.4 弧度 ⇒ " & Codec.Fmt (Far, 4) & "(反解只让 1.0)· 要转 0.5 ⇒ " & Codec.Fmt (Near, 3)
-             & " · 没有运动学 ⇒ " & Codec.Fmt (None, 3) & " · 转 0.9 弧度指尖在世界里不挪");
-   end;
    --  🔴 换倾角碰量指尖(2026-09-28,Geom.Tilt_Dir / Turn_To / Press_Of / Fit_Presses):合成的手 —— 两个指尖是半径 5 mm 的球(球心在眼前 79 mm、
    --  左右 ±45 mm,同 x5 的量级)、手掌三点;每一下让 Tilt_Dir 那个方向(这一瓣的视线朝方位 Azim 斜 θ,θ = 两瓣视线夹角的三分之一)转到朝正下,
    --  往下落到手上真的最低那一点碰到面,接触高度加 ±0.2 mm 的噪声;一瓣压 6 下(朝下 1 下 + 方位 0 / 72 / 144 / 216 / 288° 各 1 下)。

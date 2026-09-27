@@ -432,12 +432,6 @@ package Act is
    --  从一档转动(Notch)起每次翻倍,反解位置还差不到 Tol_P、朝向还差不到 Tol_R ⇒ 转得到;第一次转不到就停、取上一档;最多到 π
    --  (转动向量过 π 是反方向的小转动,纯几何)。没有运动学 ⇒ 0(量不了)
    function Kin_Turn_Reach (Arm : Natural; P0 : Plug.Arm_Pose; Notch, Tol_P, Tol_R : Long_Float) return Long_Float;
-   --  绕 Axis(世界,单位)转 S 弧度、手指尖不动(平移补偿:指尖 Tip 在相机系,R_Ce = 相机 → 手)以后的位姿
-   function Turn_Pose (P : Plug.Arm_Pose; Axis : Geom.V3; S : Long_Float; Tip : Geom.V3; R_Ce : Geom.M3) return Plug.Arm_Pose;
-   --  朝 Axis 要转 Ang 弧度:按运动学在量到的关节限位里问反解(不动胳膊),够得到的那一截 —— 整段够得到 ⇒ Ang;
-   --  够不到 ⇒ 二分(12 次,次数)取够得到的边;反解位置差不到 Tol_P、朝向差不到 Tol_R 才算够得到;没有运动学 ⇒ 0
-   function Reach_Along (Arm : Natural; P : Plug.Arm_Pose; Axis : Geom.V3; Ang : Long_Float; Tip : Geom.V3; R_Ce : Geom.M3;
-                         Tol_P, Tol_R : Long_Float) return Long_Float;
    procedure Geo_Boot_Stride (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);
    procedure Round (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);
 end Act;

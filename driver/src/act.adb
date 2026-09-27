@@ -7979,12 +7979,9 @@ package body Act is
    --  指尖会挪到哪,再用平移把它补回原处 —— 指尖偏置是量过的。一条命令最多转多少 = 开机量出来的"一条命令转得到的最大一档"(G.Stride_Rot)× 脑的档位;
    --  转了没转到(不到一半)⇒ 如实说,不硬转。到位的判据 = 差不到一个转动探针幅度(身体量过的最小一档)。
    --  Along:我身上要拿去对准的那根方向(在这只眼的坐标里):默认是眼的正前方 [0,0,-1];要让【手指】指向某处就传指尖方向(G.Tip 归一化)。
-   --  Whole = 整段转(转眼对准东西那一处,09-28 S1A2 / S1A3):每条命令转"反解够得到的那一截"(整段够得到就整段、够不到就到够得到的边),
-   --  不按"一条命令转得到的最大一档 × 脑的档位"一步一步撞到关节尽头(那两炮 17 步 × 0.081 弧度、67 拍,最后差 0.15 弧度顶住);
-   --  脑下令的朝向(Whole = False)照旧按档位
    procedure Geo_Turn (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Arm : Natural; Want : Geom.V3;
                        Amt : Long_Float; Event : out Unbounded_String; Steps_Taken : out Natural;
-                       Along : Geom.V3 := [0.0, 0.0, -1.0]; Whole : Boolean := False) is
+                       Along : Geom.V3 := [0.0, 0.0, -1.0]) is
       Hc : constant Integer := (if Arm < Natural (C.Map.Cam_On_Arm.Length) then C.Map.Cam_On_Arm (Arm) else -1);
       Notch : constant Long_Float := (if Arm * Chan.Per_Arm + 3 < Natural (C.Map.Amp.Length) then C.Map.Amp (Arm * Chan.Per_Arm + 3) else 0.0);
       --  一条命令最多转多少 = 开机量出来的"一条命令转得到的最大一档"× 脑的档位(09-27 起;原来是 16 倍转动探针幅度)
@@ -8053,8 +8050,7 @@ package body Act is
                   Aln : constant Long_Float := Geom.Norm (Alt);
                   Axis : constant Geom.V3 := (if Sn > 1.0e-9 then [Cr (0) / Sn, Cr (1) / Sn, Cr (2) / Sn]
                                               elsif Aln > 1.0e-9 then [Alt (0) / Aln, Alt (1) / Aln, Alt (2) / Aln] else [0.0, 0.0, 1.0]);
-                  Stp : constant Long_Float := (if Whole then Reach_Along (Arm, P, Axis, Ang, G.Tip, G.R_Ce, Geo_Base (C, Arm), Notch)
-                                                else Long_Float'Min (Ang, Cap));
+                  Stp : constant Long_Float := Long_Float'Min (Ang, Cap);
                   Rv : constant Geom.V3 := [Axis (0) * Stp, Axis (1) * Stp, Axis (2) * Stp];
                   Rn : constant Geom.M3 := Geom.Mul (Geom.Rodrigues (Rv), Geom.Quat_To_R (P));
                   Tip0 : constant Geom.V3 := Geom.Ap (Rc, G.Tip);
@@ -8064,11 +8060,6 @@ package body Act is
                   Del : Table.Vec;
                   Ok : Boolean;
                begin
-                  if Whole and then Stp < Notch then
-                     Event := S ("resist: my joints end here - the closest I can point my eye there is " & Codec.Fmt (Ang, 3)
-                                 & " rad off (my kinematics cannot turn it any further within my measured joint limits)");
-                     return;
-                  end if;
                   A (0) := Tip0 (0) - Tip1 (0); A (1) := Tip0 (1) - Tip1 (1); A (2) := Tip0 (2) - Tip1 (2);
                   A (3) := Rv (0); A (4) := Rv (1); A (5) := Rv (2);
                   Step_Arm (L, C, F, Arm, A, Jaw, Del, Ok, Geo_Settle => True);
@@ -8125,7 +8116,7 @@ package body Act is
             return;
          end if;
          D := [D (0) / Ln, D (1) / Ln, D (2) / Ln];
-         Geo_Turn (L, C, F, Arm, D, Amt, Event, Steps, Whole => True);
+         Geo_Turn (L, C, F, Arm, D, Amt, Event, Steps);
          Ok := Index (Event, "amount: arrived") > 0;
       end;
    end Aim_Eye_At;
@@ -12181,52 +12172,6 @@ package body Act is
          end;
       end loop;
    end Geo_Boot_Support;
-
-   function Turn_Pose (P : Plug.Arm_Pose; Axis : Geom.V3; S : Long_Float; Tip : Geom.V3; R_Ce : Geom.M3) return Plug.Arm_Pose is
-      Rv : constant Geom.V3 := [Axis (0) * S, Axis (1) * S, Axis (2) * S];
-      R0 : constant Geom.M3 := Geom.Quat_To_R (P);
-      Rn : constant Geom.M3 := Geom.Mul (Geom.Rodrigues (Rv), R0);
-      T0 : constant Geom.V3 := Geom.Ap (Geom.Mul (R0, R_Ce), Tip);
-      T1 : constant Geom.V3 := Geom.Ap (Geom.Mul (Rn, R_Ce), Tip);
-      A : Table.Vec := Table.Zero_Vec;
-   begin
-      A (0) := T0 (0) - T1 (0); A (1) := T0 (1) - T1 (1); A (2) := T0 (2) - T1 (2);
-      A (3) := Rv (0); A (4) := Rv (1); A (5) := Rv (2);
-      return Chan.Compose (P, A);
-   end Turn_Pose;
-
-   function Reach_Along (Arm : Natural; P : Plug.Arm_Pose; Axis : Geom.V3; Ang : Long_Float; Tip : Geom.V3; R_Ce : Geom.M3;
-                         Tol_P, Tol_R : Long_Float) return Long_Float is
-      Bisect_N : constant := 12;   --  二分的次数(Ang ÷ 4096,比一档转动细)
-      function Reachable (S : Long_Float) return Boolean is
-         Pe, Re : Long_Float;
-         Ok : Boolean;
-      begin
-         Plug.Reach (Arm, Turn_Pose (P, Axis, S, Tip, R_Ce), Pe, Re, Ok);
-         return Ok and then Pe <= Tol_P and then Re <= Tol_R;
-      end Reachable;
-      Lo : Long_Float := 0.0;
-      Hi : Long_Float := Ang;
-   begin
-      if Ang <= 0.0 then
-         return 0.0;
-      end if;
-      if Reachable (Ang) then
-         return Ang;
-      end if;
-      for I in 1 .. Bisect_N loop
-         declare
-            Mid : constant Long_Float := 0.5 * (Lo + Hi);
-         begin
-            if Reachable (Mid) then
-               Lo := Mid;
-            else
-               Hi := Mid;
-            end if;
-         end;
-      end loop;
-      return Lo;
-   end Reach_Along;
 
    function Kin_Turn_Reach (Arm : Natural; P0 : Plug.Arm_Pose; Notch, Tol_P, Tol_R : Long_Float) return Long_Float is
       Best : Long_Float := 0.0;
