@@ -16,6 +16,9 @@ package body Jointboot is
       Ada.Text_IO.Put_Line ("[身] 📐 " & S);
    end Say;
 
+   --  落盘时一根轴是转还是走(格式里的一个词)
+   function Kind_Word (A : Kinem.Axis) return String is (if A.Slide then "slide" else "turn");
+
    Start_Amp : constant Long_Float := 1.0e-4;   --  探针协议的起点(同 Selfmap:极小,翻倍到走得出来又看得见为止;无量纲协议)
    Max_Doublings : constant := 12;              --  次数
    Grow : constant := 2.0;                      --  探针每次翻一倍(次数:同 Selfmap 的探针协议)
@@ -745,9 +748,16 @@ package body Jointboot is
          T : Unbounded_String;
       begin
          for J in 0 .. Natural (Rep.Joint_Med.Length) - 1 loop
-            Append (T, " " & Codec.Fmt (Rep.Joint_Med (J), 3) & "(" & Codec.Img (Rep.Joint_Frames (J)) & " 格)");
+            declare
+               function Px (X : Long_Float) return String is (if X < 0.0 then "试不了" else Codec.Fmt (X, 3));
+               Sl : constant Boolean := J < Natural (Rep.Slide.Length) and then Rep.Slide (J);
+            begin
+               Append (T, " " & (if Rep.Joint_Med (J) < 0.0 then "量不了" elsif Sl then "走 " else "转 ") & Px (Rep.Joint_Med (J))
+                       & (if J < Natural (Rep.Joint_Med_Turn.Length) then "[" & (if Sl then "按转 " & Px (Rep.Joint_Med_Turn (J)) else "按走 " & Px (Rep.Joint_Med_Slide (J))) & "]" else "")
+                       & "(" & Codec.Img (Rep.Joint_Frames (J)) & " 格)");
+            end;
          end loop;
-         Say ("  运动学 · 第" & Codec.Img (A + 1) & " 只手:" & (if Ok then "量成" else "没量成") & " · 每根轴单独的残差中位(像素):" & To_String (T));
+         Say ("  运动学 · 第" & Codec.Img (A + 1) & " 只手:" & (if Ok then "量成" else "没量成") & " · 每根轴单独(转 / 走两样各解一次,残差小的那样)的残差中位(像素):" & To_String (T));
          T := Null_Unbounded_String;
          for X of Rep.Rho loop
             Append (T, " " & Codec.Fmt (X, 3));
@@ -778,7 +788,7 @@ package body Jointboot is
             for J in 0 .. M.N - 1 loop
                Ada.Text_IO.Put_Line (Fo, "axis " & Codec.Img (J) & " " & Codec.Fmt (M.Ax (J).W (0), 9) & " " & Codec.Fmt (M.Ax (J).W (1), 9) & " "
                                      & Codec.Fmt (M.Ax (J).W (2), 9) & " " & Codec.Fmt (M.Ax (J).P (0), 9) & " " & Codec.Fmt (M.Ax (J).P (1), 9) & " "
-                                     & Codec.Fmt (M.Ax (J).P (2), 9));
+                                     & Codec.Fmt (M.Ax (J).P (2), 9) & " " & Kind_Word (M.Ax (J)));
             end loop;
             Ada.Text_IO.Close (Fo);
          exception
@@ -2610,7 +2620,7 @@ package body Jointboot is
       end Put_V3;
    begin
       Create (Fo, Out_File, Path);
-      Put_Line (Fo, "kin 2");   --  格式版本:2 = 不动的眼整份相机几何(09-27);1 的不动的眼没存像素残差,读到 1 ⇒ 从零量
+      Put_Line (Fo, "kin 3");   --  格式版本:3 = 每根轴记着是转还是走(09-27 无人机);2 = 不动的眼整份相机几何;更旧的读到 ⇒ 从零量
       Put_Line (Fo, "key " & To_String (K.Key));
       Put_Line (Fo, "world_cam" & Integer'Image (K.World_Cam));
       Put (Fo, "rw"); Put_M3 (K.Rw); New_Line (Fo);
@@ -2645,7 +2655,8 @@ package body Jointboot is
             end loop;
             New_Line (Fo);
             for J in 0 .. W.Model.N - 1 loop
-               Put (Fo, "axis " & Codec.Img (A) & " " & Codec.Img (J)); Put_V3 (W.Model.Ax (J).W); Put_V3 (W.Model.Ax (J).P); New_Line (Fo);
+               Put (Fo, "axis " & Codec.Img (A) & " " & Codec.Img (J)); Put_V3 (W.Model.Ax (J).W); Put_V3 (W.Model.Ax (J).P);
+               Put_Line (Fo, " " & Kind_Word (W.Model.Ax (J)));
             end loop;
             Put (Fo, "ra " & Codec.Img (A)); Put_M3 (W.Ra); New_Line (Fo);
             Put (Fo, "ta " & Codec.Img (A)); Put_V3 (W.Ta); New_Line (Fo);
@@ -2720,7 +2731,7 @@ package body Jointboot is
             Tag : constant String := (if T.Is_Empty then "" else T (0));
          begin
             if Tag = "kin" then
-               Version_Ok := Natural (T.Length) >= 2 and then T (1) = "2";
+               Version_Ok := Natural (T.Length) >= 2 and then T (1) = "3";
             elsif Tag = "key" and then Natural (T.Length) >= 2 then
                K.Key := To_Unbounded_String (T (1));
             elsif Tag = "world_cam" then
@@ -2787,6 +2798,11 @@ package body Jointboot is
                         J : constant Natural := Natural'Value (T (2));
                      begin
                         W.Model.Ax (J).W := V3_At (T, 3); W.Model.Ax (J).P := V3_At (T, 6);
+                        if Natural (T.Length) < 10 or else (T (9) /= "turn" and then T (9) /= "slide") then   --  axis 臂 轴 W P 转/走(格式)
+                           Version_Ok := False;
+                        else
+                           W.Model.Ax (J).Slide := T (9) = "slide";
+                        end if;
                      end;
                   elsif Tag = "ra" then
                      W.Ra := M3_At (T, 2);
@@ -2813,7 +2829,7 @@ package body Jointboot is
       end loop;
       Close (Fi);
       if not Version_Ok then
-         Note := To_Unbounded_String ("格式是旧版(" & Path & ";不动的眼没存全)");
+         Note := To_Unbounded_String ("格式是旧版(" & Path & ";存的量不全:kin 1 没存不动的眼的像素残差,kin 2 没存每根轴是转是走)");
          return;
       end if;
       if K.Worlds.Is_Empty or else Length (K.Key) = 0 then
@@ -3026,7 +3042,7 @@ package body Jointboot is
             New_Line (Fo);
             for J in 0 .. W.Model.N - 1 loop
                Put_Line (Fo, "axis " & Codec.Img (J) & " " & F9 (W.Model.Ax (J).W (0)) & " " & F9 (W.Model.Ax (J).W (1)) & " " & F9 (W.Model.Ax (J).W (2)) & " "
-                         & F9 (W.Model.Ax (J).P (0)) & " " & F9 (W.Model.Ax (J).P (1)) & " " & F9 (W.Model.Ax (J).P (2)));
+                         & F9 (W.Model.Ax (J).P (0)) & " " & F9 (W.Model.Ax (J).P (1)) & " " & F9 (W.Model.Ax (J).P (2)) & " " & Kind_Word (W.Model.Ax (J)));
             end loop;
             Close (Fo);
             if A > 0 then

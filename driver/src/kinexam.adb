@@ -146,7 +146,8 @@ begin
       T : Unbounded_String;
    begin
       for J in 0 .. Natural (Rep.Joint_Med.Length) - 1 loop
-         Append (T, " " & Codec.Fmt (Rep.Joint_Med (J), 3));
+         Append (T, " " & (if J < Natural (Rep.Slide.Length) and then Rep.Slide (J) then "走" else "转") & Codec.Fmt (Rep.Joint_Med (J), 3)
+                 & (if J < Natural (Rep.Joint_Med_Turn.Length) then "[转 " & Codec.Fmt (Rep.Joint_Med_Turn (J), 3) & " / 走 " & Codec.Fmt (Rep.Joint_Med_Slide (J), 3) & "]" else ""));
       end loop;
       Put_Line ((if Ok then "量成" else "没量成") & " · 每根轴单独的残差中位(像素):" & To_String (T));
       T := Null_Unbounded_String;
@@ -177,7 +178,8 @@ begin
          New_Line (Fo);
          for J in 0 .. M.N - 1 loop
             Put_Line (Fo, "axis " & Codec.Img (J) & " " & Codec.Fmt (M.Ax (J).W (0), 9) & " " & Codec.Fmt (M.Ax (J).W (1), 9) & " " & Codec.Fmt (M.Ax (J).W (2), 9) & " "
-                      & Codec.Fmt (M.Ax (J).P (0), 9) & " " & Codec.Fmt (M.Ax (J).P (1), 9) & " " & Codec.Fmt (M.Ax (J).P (2), 9));
+                      & Codec.Fmt (M.Ax (J).P (0), 9) & " " & Codec.Fmt (M.Ax (J).P (1), 9) & " " & Codec.Fmt (M.Ax (J).P (2), 9) & " "
+                      & (if M.Ax (J).Slide then "slide" else "turn"));
          end loop;
          Close (Fo);
       end;

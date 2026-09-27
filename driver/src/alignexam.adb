@@ -145,6 +145,7 @@ begin
                   begin
                      M.Ax (J).W := [Long_Float'Value (F (2)), Long_Float'Value (F (3)), Long_Float'Value (F (4))];
                      M.Ax (J).P := [Long_Float'Value (F (5)), Long_Float'Value (F (6)), Long_Float'Value (F (7))];
+                     M.Ax (J).Slide := Natural (F.Length) >= 9 and then F (8) = "slide";   --  第 9 列 = 转 / 走(09-27 以前的落盘没有这一列,都是转的)
                   end;
                end if;
             end;

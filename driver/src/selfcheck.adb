@@ -5122,6 +5122,17 @@ begin
          Check (Okf and then abs (Rep.F - F_True) < 0.01 * F_True and then Emed < 1.0 and then Emax < 5.0,
                 "运动学·只给关节读数 + 腕眼配点量出 6 根轴和焦距:焦距 " & Codec.Fmt (Rep.F, 1) & "(真 400,要 1% 内),全关节 ±30° 考试中位 "
                 & Codec.Fmt (Emed, 2) & " mm、最大 " & Codec.Fmt (Emax, 2) & " mm(要 < 1 / < 5 mm)");
+         --  转 / 走两样各解一次(09-27):这条全是转的胳膊,六根都要认成转;"走"那样的残差照实印出来
+         declare
+            All_Turn : Boolean := Okf and then Natural (Rep.Slide.Length) = 6;
+            T : Unbounded_String;
+         begin
+            for J in 0 .. Natural (Rep.Slide.Length) - 1 loop
+               All_Turn := All_Turn and then not Rep.Slide (J) and then not Fit_M.Ax (J).Slide;
+               Append (T, " " & Codec.Fmt (Rep.Joint_Med_Turn (J), 3) & " / " & Codec.Fmt (Rep.Joint_Med_Slide (J), 3));
+            end loop;
+            Check (All_Turn, "运动学·全是转的胳膊六根轴都认成转(每根按转 / 按走的残差中位 px:" & To_String (T) & ")");
+         end;
          --  ④ 焊点(09-27 V1B32):真模型的轴故意挪开当起步 —— 肩、肘两根轴离眼远近各错 +3% / −3%、腕那根方向偏 0.3°、焦距错 1% ——
          --  只跑多视图那一步(按轨迹重投影一起解),要回到真模型:全关节 ±30° 考试最大 < 0.5 mm、焦距 0.2% 内;起步本身考试要 > 3 mm(焊点有牙)
          declare
@@ -5210,6 +5221,248 @@ begin
       end;
    end;
 
+   --  🔴 运动学·沿轴走的关节(09-27 无人机那一半):合成的龙门架(像箱上的无人机:三个沿世界 x / y / z 走的关节,再绕机身中心 yaw / pitch / roll),
+   --  机身中心下 3 cm 的眼朝下(偏 8°)看桌面,离桌 0.6 m,读数:走的按米、转的按弧度。扫描同驱动:每个关节单独两个方向各 3 格
+   --  (走的累计 0.03 / 0.15 / 0.34、转的 0.03 / 0.15 / 0.45,同驱动"头一格 = 读数量级的 3%、之后按画面挪画幅宽 1/5 放大"的量级)+ 8 格几个关节一起动
+   --  (每个关节到它扫到的那一头的一半,正负排法同驱动);配对同驱动:起点 ↔ 每一格(轨迹)、每段头两格、相邻关节头一格之间、一起动的相邻两格;
+   --  像素噪声 0.3 px、5% 乱配。要:六根轴认对(前三根走、后三根转)、焦距 0.5% 内、全部关节在扫到的范围里随机 30 个姿势只给读数算眼在哪 ——
+   --  按训练帧定一个倍数(量不出米)后最大 < 1 mm、朝向最大 < 0.05°;反解在真模型上 20 个随机姿势从零位解回来 < 1e-6
+   declare
+      use Geom;
+      use Ada.Numerics.Long_Elementary_Functions;
+      package FR renames Ada.Numerics.Float_Random;
+      Gen : FR.Generator;
+      function U01 return Long_Float is (Long_Float (FR.Random (Gen)));
+      function Gauss return Long_Float is
+         A : constant Long_Float := Long_Float'Max (1.0e-12, U01);
+         B : constant Long_Float := U01;
+      begin
+         return Sqrt (-2.0 * Log (A)) * Cos (2.0 * Ada.Numerics.Pi * B);
+      end Gauss;
+      Deg : constant := 0.0174532925199433;   --  1° 的弧度(换算)
+      F_True : constant Long_Float := 400.0;
+      Cx : constant Long_Float := 320.0;
+      Cy : constant Long_Float := 240.0;
+      Slide_J : constant array (0 .. 5) of Boolean := [True, True, True, False, False, False];
+      Dir : constant array (0 .. 5) of V3 := [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]];
+      Cb : constant V3 := [0.0, 0.0, 0.63];   --  机身中心(转轴都过它)
+      C0 : constant V3 := [0.0, 0.0, 0.6];    --  眼(机身中心下 3 cm)
+      R0 : constant M3 := Rodrigues ([8.0 * Deg, 0.0, 0.0]);   --  眼系 → 世界:眼的 −z 朝下,再绕世界 x 偏 8°
+      Offs : constant array (0 .. 5, 1 .. 3) of Long_Float :=
+        [[0.03, 0.15, 0.34], [0.03, 0.15, 0.34], [0.03, 0.15, 0.34], [0.03, 0.15, 0.45], [0.03, 0.15, 0.45], [0.03, 0.15, 0.45]];
+      Truth : Kinem.Model;
+      Frames : Kinem.Frame_Vectors.Vector;
+      Cs : Kinem.Corr_Vectors.Vector;
+      Npt : constant := 3000;
+      Xr : array (0 .. Npt - 1) of V3;   --  桌面上的点,在参照眼系里
+      function Zeros6 return Floats is
+         Q : Floats;
+      begin
+         for I in 0 .. 5 loop
+            Q.Append (0.0);
+         end loop;
+         return Q;
+      end Zeros6;
+      type Uv is record
+         U, V : Long_Float := -1.0;
+      end record;
+      type Uv_Array is array (0 .. Npt - 1) of Uv;
+      function Project_All (Q : Floats) return Uv_Array is
+         Rr : M3;
+         Tt : V3;
+         Out_Uv : Uv_Array;
+      begin
+         Kinem.FK (Truth, Q, Rr, Tt);
+         for I in 0 .. Npt - 1 loop
+            declare
+               Pc : constant V3 := Ap (Tr (Rr), [Xr (I) (0) - Tt (0), Xr (I) (1) - Tt (1), Xr (I) (2) - Tt (2)]);
+               Z : constant Long_Float := -Pc (2);
+            begin
+               if Z > 0.05 then
+                  declare
+                     U : constant Long_Float := Cx + F_True * Pc (0) / Z;
+                     V : constant Long_Float := Cy - F_True * Pc (1) / Z;
+                  begin
+                     if U >= 0.0 and then U < 640.0 and then V >= 0.0 and then V < 480.0 then
+                        Out_Uv (I) := (U, V);
+                     end if;
+                  end;
+               end if;
+            end;
+         end loop;
+         return Out_Uv;
+      end Project_All;
+      type Uv_Ptr is access Uv_Array;
+      Views : array (0 .. 63) of Uv_Ptr;
+      Serial : Natural := 0;
+      procedure Add_Pair (I, J : Natural) is
+         Cnt : Natural := 0;
+      begin
+         Serial := Serial + 1;
+         for P in 0 .. Npt - 1 loop
+            exit when Cnt >= 200;
+            if Views (I) (P).U >= 0.0 and then Views (J) (P).U >= 0.0 then
+               declare
+                  C : Kinem.Corr := (I => I, J => J, Ua => Views (I) (P).U, Va => Views (I) (P).V,
+                                     Ub => Views (J) (P).U + 0.3 * Gauss, Vb => Views (J) (P).V + 0.3 * Gauss,
+                                     Pt => (if I = 0 then P else Npt * Serial + P));
+               begin
+                  if U01 < 0.05 then   --  5% 乱配
+                     C.Ub := 640.0 * U01; C.Vb := 480.0 * U01;
+                  end if;
+                  Cs.Append (C);
+                  Cnt := Cnt + 1;
+               end;
+            end if;
+         end loop;
+      end Add_Pair;
+      type Head is record
+         Frame, Joint : Natural := 0;
+      end record;
+      Heads : array (0 .. 11) of Head;
+      N_Heads : Natural := 0;
+      Fit_M : Kinem.Model;
+      Rep : Kinem.Fit_Report;
+      Okf : Boolean;
+   begin
+      FR.Reset (Gen, 20260927);
+      Truth.N := 6; Truth.F := F_True; Truth.Cx := Cx; Truth.Cy := Cy; Truth.Q0 := Zeros6; Truth.Valid := True;
+      for I in 0 .. 5 loop
+         Truth.Ax (I).W := Ap (Tr (R0), Dir (I));
+         Truth.Ax (I).Slide := Slide_J (I);
+         Truth.Ax (I).P := (if Slide_J (I) then [0.0, 0.0, 0.0] else Ap (Tr (R0), [Cb (0) - C0 (0), Cb (1) - C0 (1), Cb (2) - C0 (2)]));
+      end loop;
+      for I in 0 .. Npt - 1 loop
+         declare
+            Pw : constant V3 := [-1.0 + 2.0 * U01, -1.0 + 2.0 * U01, 0.0];
+         begin
+            Xr (I) := Ap (Tr (R0), [Pw (0) - C0 (0), Pw (1) - C0 (1), Pw (2) - C0 (2)]);
+         end;
+      end loop;
+      Frames.Append (Kinem.Frame_Info'(Q => Zeros6, Joint => -1));
+      Views (0) := new Uv_Array'(Project_All (Frames (0).Q));
+      for J in 0 .. 5 loop
+         for D in 0 .. 1 loop
+            for K in 1 .. 3 loop
+               declare
+                  Q : Floats := Zeros6;
+               begin
+                  Q.Replace_Element (J, (if D = 0 then -1.0 else 1.0) * Offs (J, K));
+                  Frames.Append (Kinem.Frame_Info'(Q => Q, Joint => J));
+                  Views (Natural (Frames.Length) - 1) := new Uv_Array'(Project_All (Q));
+                  Add_Pair (0, Natural (Frames.Length) - 1);
+                  if K = 1 then
+                     Heads (N_Heads) := (Frame => Natural (Frames.Length) - 1, Joint => J); N_Heads := N_Heads + 1;
+                  elsif K = 2 then
+                     Add_Pair (Natural (Frames.Length) - 2, Natural (Frames.Length) - 1);
+                  end if;
+               end;
+            end loop;
+         end loop;
+      end loop;
+      for Cb_K in 1 .. 8 loop
+         declare
+            Q : Floats := Zeros6;
+         begin
+            for J in 0 .. 5 loop
+               Q.Replace_Element (J, (if ((Cb_K * 37 + J * 11) mod 16) < 8 then 0.5 else -0.5) * Offs (J, 3));   --  同驱动的排法
+            end loop;
+            Frames.Append (Kinem.Frame_Info'(Q => Q, Joint => -1));
+            Views (Natural (Frames.Length) - 1) := new Uv_Array'(Project_All (Q));
+            Add_Pair (0, Natural (Frames.Length) - 1);
+            if Cb_K >= 2 then
+               Add_Pair (Natural (Frames.Length) - 2, Natural (Frames.Length) - 1);
+            end if;
+         end;
+      end loop;
+      for H1 in 0 .. N_Heads - 1 loop
+         for H2 in 0 .. N_Heads - 1 loop
+            if Heads (H2).Joint = Heads (H1).Joint + 1 then
+               Add_Pair (Heads (H1).Frame, Heads (H2).Frame);
+            end if;
+         end loop;
+      end loop;
+      Kinem.Fit (Frames, 0, Cs, Cx, Cy, 640.0, Fit_M, Rep, Okf);
+      declare
+         Sxy, Sxx : Long_Float := 0.0;
+         Rt, Rf : M3;
+         Tt, Tf : V3;
+         Emax, Rmax : Long_Float := 0.0;
+         Types_Ok : Boolean := Okf and then Natural (Rep.Slide.Length) = 6;
+         T : Unbounded_String;
+      begin
+         for J in 0 .. Natural (Rep.Slide.Length) - 1 loop
+            Types_Ok := Types_Ok and then Rep.Slide (J) = Slide_J (J) and then Fit_M.Ax (J).Slide = Slide_J (J);
+            Append (T, " " & (if Rep.Slide (J) then "走" else "转") & "(" & Codec.Fmt (Rep.Joint_Med_Turn (J), 2) & " / " & Codec.Fmt (Rep.Joint_Med_Slide (J), 2) & ")");
+         end loop;
+         if Okf then
+            for K in 0 .. Natural (Frames.Length) - 1 loop
+               Kinem.FK (Truth, Frames (K).Q, Rt, Tt);
+               Kinem.FK (Fit_M, Frames (K).Q, Rf, Tf);
+               for X in 0 .. 2 loop
+                  Sxy := Sxy + Tf (X) * Tt (X); Sxx := Sxx + Tf (X) * Tf (X);
+               end loop;
+            end loop;
+            for Tn in 1 .. 30 loop
+               declare
+                  Q : Floats;
+               begin
+                  for X in 0 .. 5 loop
+                     Q.Append ((2.0 * U01 - 1.0) * Offs (X, 3));
+                  end loop;
+                  Kinem.FK (Truth, Q, Rt, Tt);
+                  Kinem.FK (Fit_M, Q, Rf, Tf);
+                  declare
+                     S : constant Long_Float := (if Sxx > 0.0 then Sxy / Sxx else 0.0);
+                  begin
+                     Emax := Long_Float'Max (Emax, 1000.0 * Sqrt ((S * Tf (0) - Tt (0)) ** 2 + (S * Tf (1) - Tt (1)) ** 2 + (S * Tf (2) - Tt (2)) ** 2));
+                     Rmax := Long_Float'Max (Rmax, Norm (Rot_Vec (Mul (Tr (Rt), Rf))) / Deg);
+                  end;
+               end;
+            end loop;
+            for J in 0 .. 5 loop
+               declare
+                  Wt : constant V3 := Truth.Ax (J).W;
+                  Wf : constant V3 := Fit_M.Ax (J).W;
+                  S : constant Long_Float := (if Sxx > 0.0 then Sxy / Sxx else 0.0);
+               begin
+                  Put_Line ("      轴" & Natural'Image (J) & "(" & (if Fit_M.Ax (J).Slide then "走" else "转") & "):方向 cos "
+                            & Codec.Fmt (abs (Wt (0) * Wf (0) + Wt (1) * Wf (1) + Wt (2) * Wf (2)) / (Norm (Wt) * Norm (Wf)), 6)
+                            & (if Fit_M.Ax (J).Slide then " · 每单位读数走 " & Codec.Fmt (1000.0 * S * Norm (Wf), 2) & " mm(真 " & Codec.Fmt (1000.0 * Norm (Wt), 2) & ")" else ""));
+               end;
+            end loop;
+         end if;
+         Put_Line ("    龙门架:配点 " & Natural'Image (Rep.N_Corr) & " · 焦距 " & Codec.Fmt (Rep.F_Start, 1) & " → " & Codec.Fmt (Rep.F_Axes, 1) & " → " & Codec.Fmt (Rep.F, 1)
+                   & " · 多视图重投影中位 " & Codec.Fmt (Rep.Mv_Start_Px, 3) & " → " & Codec.Fmt (Rep.Mv_Px, 3) & " px · 考试最大 " & Codec.Fmt (Emax, 3) & " mm、朝向 "
+                   & Codec.Fmt (Rmax, 4) & "°");
+         Check (Types_Ok and then abs (Rep.F - F_True) < 0.005 * F_True and then Emax < 1.0 and then Rmax < 0.05,
+                "运动学·龙门架(三走三转,像无人机):轴的类型" & (if Types_Ok then "认对" else "认错") & "(转 / 走的残差 px:" & To_String (T) & ")· 焦距 "
+                & Codec.Fmt (Rep.F, 1) & "(真 400,要 0.5% 内)· 扫到的范围里 30 个随机姿势最大 " & Codec.Fmt (Emax, 3) & " mm(要 < 1)、朝向 " & Codec.Fmt (Rmax, 4) & "°(要 < 0.05)");
+         declare
+            Worst_P, Worst_R : Long_Float := 0.0;
+            Empty : Floats;
+         begin
+            for Tn in 1 .. 20 loop
+               declare
+                  Qt, Qs : Floats;
+                  Rt2 : M3;
+                  Tt2 : V3;
+                  Pe, Re : Long_Float;
+               begin
+                  for X in 0 .. 5 loop
+                     Qt.Append ((2.0 * U01 - 1.0) * Offs (X, 3));
+                  end loop;
+                  Kinem.FK (Truth, Qt, Rt2, Tt2);
+                  Kinem.IK (Truth, Rt2, Tt2, Zeros6, Empty, Empty, Qs, Pe, Re);
+                  Worst_P := Long_Float'Max (Worst_P, Pe); Worst_R := Long_Float'Max (Worst_R, Re);
+               end;
+            end loop;
+            Check (Worst_P < 1.0e-6 and then Worst_R < 1.0e-6,
+                   "运动学·龙门架反解:20 个随机姿势从零位解回来,最差差位置 " & Long_Float'Image (Worst_P) & "、朝向 " & Long_Float'Image (Worst_R) & "(要 < 1e-6)");
+         end;
+      end;
+   end;
+
    --  🔴 ⑤ 前半段存 / 装回(Jointboot.Save_Kin / Load_Kin / Same_View,09-27):存了再读回来,每一个数都得一样(9 位小数);
    --  没量到头的界存成 none、读回还是"不设界";核对的判法:配上的点少于 10 个 / 位移中位 ≥ 1 px 都算"动了"
    declare
@@ -5252,6 +5505,7 @@ begin
                W.Model.Q0.Append (0.001 * Long_Float (J + A));
                W.Model.Ax (J).W := [Sin (Long_Float (J)), Cos (Long_Float (J)), 0.0];
                W.Model.Ax (J).P := [0.1 * Long_Float (J), -0.2 * Long_Float (A), 1.0 / 3.0];
+               W.Model.Ax (J).Slide := J = 1;   --  一根"走"的(09-27 无人机):类型也要原样回来
                W.Lo.Append (if J = 2 then Long_Float'First else -0.5 - Long_Float (J));
                W.Hi.Append (if J = 3 then Long_Float'Last else 0.5 + Long_Float (J));
             end loop;
@@ -5290,6 +5544,9 @@ begin
                for X in 0 .. 2 loop
                   Cmp (K.Worlds (A).Model.Ax (J).W (X), K2.Worlds (A).Model.Ax (J).W (X)); Cmp (K.Worlds (A).Model.Ax (J).P (X), K2.Worlds (A).Model.Ax (J).P (X));
                end loop;
+               if K.Worlds (A).Model.Ax (J).Slide /= K2.Worlds (A).Model.Ax (J).Slide then
+                  Worst := 1.0;
+               end if;
                if (K.Worlds (A).Lo (J) = Long_Float'First) /= (K2.Worlds (A).Lo (J) = Long_Float'First)
                  or else (K.Worlds (A).Hi (J) = Long_Float'Last) /= (K2.Worlds (A).Hi (J) = Long_Float'Last)
                then
@@ -5363,7 +5620,7 @@ begin
          end if;
       end if;
       Check (Okl and then Worst < 1.0e-8, "⑤ 前半段存进文件再读回来:每一个数最多差 " & Long_Float'Image (Worst)
-             & "(要 < 1e-8;不动的眼整份相机几何、板上每个点的每一项、没量到头的界、核对用的图、钥匙原样回来)· " & To_String (Note));
+             & "(要 < 1e-8;不动的眼整份相机几何、板上每个点的每一项、每根轴是转是走、没量到头的界、核对用的图、钥匙原样回来)· " & To_String (Note));
       --  旧版文件(kin 1:不动的眼只存了五样)不装回:读到它 = 从零量,不拿缺了像素残差的那份去核
       declare
          Fo : Ada.Text_IO.File_Type;
@@ -5379,7 +5636,7 @@ begin
          Ada.Text_IO.Close (Fo);
          Ada.Text_IO.Create (Fo, Ada.Text_IO.Out_File, Path);
          for L of Lines loop
-            Ada.Text_IO.Put_Line (Fo, (if L = "kin 2" then "kin 1" else L));
+            Ada.Text_IO.Put_Line (Fo, (if L'Length >= 4 and then L (L'First .. L'First + 3) = "kin " then "kin 1" else L));
          end loop;
          Ada.Text_IO.Close (Fo);
          Jointboot.Load_Kin (Path, K3, Ok3, Note3);

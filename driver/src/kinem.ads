@@ -13,9 +13,13 @@ with Bytes; use Bytes;
 with Ada.Containers.Vectors;
 package Kinem is
    Max_Joints : constant := 12;   --  一组关节读数最多几个(次数)
+   --  一根轴是"转"还是"沿轴走"(平移)是开机扫描量出来的(① 同一批配点按两样各解一次,残差小的那样;09-27 无人机那一半):
+   --  转:W = 转轴方向(单位向量),P = 轴上一点,读数差 = 转角(弧度);
+   --  走:W = 走的方向 × 每一个读数单位走多远(模型单位 / 读数单位,长短是量出来的),P 不用(0)
    type Axis is record
-      W : V3 := [0.0, 0.0, 1.0];   --  转轴方向(单位向量,参照眼系)
-      P : V3 := [0.0, 0.0, 0.0];   --  轴上一点(参照眼系,模型单位)
+      W : V3 := [0.0, 0.0, 1.0];   --  转轴方向(单位向量,参照眼系);走的关节:方向 × 每个读数单位走多远
+      P : V3 := [0.0, 0.0, 0.0];   --  轴上一点(参照眼系,模型单位);走的关节不用
+      Slide : Boolean := False;    --  True = 沿 W 走(平移关节)
    end record;
    type Axis_Array is array (0 .. Max_Joints - 1) of Axis;
    type Model is record
@@ -49,7 +53,9 @@ package Kinem is
       F_Start : Long_Float := 0.0;     --  ① 各轴一起定的焦距(网格那一档)
       F_Axes : Long_Float := 0.0;      --  ①b 焦距和各轴一起精修以后
       F : Long_Float := 0.0;           --  ③ 最后一起解的焦距
-      Joint_Med : Floats;              --  ① 每根轴单独精修后的残差中位(像素;不能量的轴 = -1)
+      Joint_Med : Floats;              --  ① 每根轴单独精修后的残差中位(像素;不能量的轴 = -1):按它最后认的那样(转 / 走)
+      Joint_Med_Turn, Joint_Med_Slide : Floats;   --  ① 同一批配点按"转"、按"走"各解一次的残差中位(像素;这一样试不了 = -1)
+      Slide : Bools;                   --  ① 每根轴认成了"走"(平移关节)
       Joint_Frames : Nat_Vectors.Vector;   --  ① 每根轴用了几帧(别的关节被顶偏的格子不用)
       Rho : Floats;                    --  ② 各轴离眼远近的比例(以 Ref_Joint 为 1)
       Ref_Joint : Natural := 0;

@@ -136,11 +136,18 @@ package body Kinem is
       for I in 0 .. M.N - 1 loop
          declare
             Th : constant Long_Float := (if I < Natural (Q.Length) and then I < Natural (M.Q0.Length) then Q (I) - M.Q0 (I) else 0.0);
-            Ri : constant M3 := Rot (M.Ax (I).W, Th);
-            Ti : constant V3 := Sub (M.Ax (I).P, Ap (Ri, M.Ax (I).P));
          begin
-            T := Add (T, Ap (R, Ti));
-            R := Mul (R, Ri);
+            if M.Ax (I).Slide then
+               T := Add (T, Ap (R, Scl (M.Ax (I).W, Th)));   --  沿 W 走 θ 个读数单位,不转
+            else
+               declare
+                  Ri : constant M3 := Rot (M.Ax (I).W, Th);
+                  Ti : constant V3 := Sub (M.Ax (I).P, Ap (Ri, M.Ax (I).P));
+               begin
+                  T := Add (T, Ap (R, Ti));
+                  R := Mul (R, Ri);
+               end;
+            end if;
          end;
       end loop;
    end FK;
@@ -578,6 +585,15 @@ package body Kinem is
       end;
    end Joint_Res;
 
+   --  "沿轴走"那样:一根轴、一组配点、给定走的方向(两个角):两帧之间不转、只平移,平移的方向 = W(长短、正负 Sampson 分不出)⇒ 全部 Sampson 残差
+   procedure Slide_Res (Cs : Jc_Array; N : Natural; X : Vec; F, Cx, Cy : Long_Float; R : out Vec) is
+      W : constant V3 := Ang_W (X (X'First), X (X'First + 1));
+   begin
+      for K in 0 .. N - 1 loop
+         R (R'First + K) := Samp (Identity, W, F, Cx, Cy, Cs (K).C);
+      end loop;
+   end Slide_Res;
+
    type Cand is record
       Score : Long_Float := 1.0e18;   --  空位(比所有真分数都大;无量纲)
       W : V3 := [0.0, 0.0, 1.0];
@@ -588,12 +604,12 @@ package body Kinem is
    N_F : constant := 25;    --  焦距档数(次数):视场 30°–110°,每档约 7%
    type Cand_Table is array (0 .. N_F - 1) of Cand_Array;
 
-   --  候选插进一档:按分数排好,彼此差不到 10° 的只留好的那个(同一个坑只留一个)
-   procedure Insert (T : in out Cand_Array; C : Cand) is
+   --  候选插进一档:按分数排好,彼此差不到 10° 的只留好的那个(同一个坑只留一个);Axial = W 和 −W 算同一个(走的方向)
+   procedure Insert (T : in out Cand_Array; C : Cand; Axial : Boolean := False) is
       Same : constant := 0.984807753012208;   --  cos 10°(协议:同一个坑的宽度)
    begin
       for I in T'Range loop
-         if Dot (T (I).W, C.W) > Same then
+         if (if Axial then abs Dot (T (I).W, C.W) else Dot (T (I).W, C.W)) > Same then
             if C.Score < T (I).Score then
                T (I) := C;
                --  重新排
@@ -630,6 +646,26 @@ package body Kinem is
    Per_Pair_All : constant := 200; --  精修 / 定比例时每一对最多取几个配点(次数)
    Grid_Target : constant := 1200; --  每根轴单独起步时网格一共用多少个配点(次数)
    All_Target : constant := 8000;  --  每根轴单独精修时一共用多少个配点(次数)
+
+   --  "沿轴走"那样的网格:走的方向铺半个球面(斐波那契点的前一半 z > 0;W 和 −W 是同一种走法),分数 = 残差中位,焦距给定。
+   --  纯平移时焦距只改方向的斜度:像素里的对极点(平移的"消失点")不随焦距变 ⇒ 最好的分数跟焦距无关,焦距只能由"转"的轴定
+   procedure Slide_Grid (Cs : Jc_Array; N : Natural; F, Cx, Cy : Long_Float; T : out Cand_Array; Wk : Work) is
+   begin
+      T := [others => <>];
+      if N = 0 then
+         return;
+      end if;
+      for Ks in 0 .. N_Sph / 2 - 1 loop
+         declare
+            W : constant V3 := Sphere (Ks, N_Sph);
+         begin
+            for K in 0 .. N - 1 loop
+               Wk.Rs (K) := Samp (Identity, W, F, Cx, Cy, Cs (K).C);
+            end loop;
+            Insert (T, (Score => Median_In (Wk.Rs.all, N, Wk.Tmp), W => W, Phi => 0.0), Axial => True);
+         end;
+      end loop;
+   end Slide_Grid;
 
    --  ── ② 定比例用 ──
    type V12 is array (0 .. Max_Joints - 1) of Long_Float;
@@ -945,10 +981,88 @@ package body Kinem is
    Mv_Up : constant := 10.0;   --  ④ 阻尼放大倍数(次数,同 Robust_LM)
    Mv_Dn : constant := 3.0;    --  ④ 阻尼缩小倍数(次数,同 Robust_LM)
 
+   --  ③ ④ 一起解的数(09-27 加"走"的关节):X = [每根轴的 W(3 个;走的关节 = 方向 × 每单位走多远), 转的轴各自的 P(3 个,按轴的次序), 对数焦距]。
+   --  全是"转"的手:X = [W_0 … W_n−1, P_0 … P_n−1, log f],和以前一样
+   function N_Turn (M : Model) return Natural is
+      K : Natural := 0;
+   begin
+      for J in 0 .. M.N - 1 loop
+         if not M.Ax (J).Slide then
+            K := K + 1;
+         end if;
+      end loop;
+      return K;
+   end N_Turn;
+   function N_Params (M : Model) return Natural is (3 * M.N + 3 * N_Turn (M) + 1);
+   --  第 J 根(转的)轴的 P 在 X 里从第几个起:3N + 3 × 它前面转的轴有几根
+   function P_Off (M : Model; J : Natural) return Natural is
+      K : Natural := 3 * M.N;
+   begin
+      for I in 0 .. J - 1 loop
+         if not M.Ax (I).Slide then
+            K := K + 3;
+         end if;
+      end loop;
+      return K;
+   end P_Off;
+   procedure To_X (M : Model; X : out Vec) is
+   begin
+      for J in 0 .. M.N - 1 loop
+         for K in 0 .. 2 loop
+            X (X'First + 3 * J + K) := M.Ax (J).W (K);
+            if not M.Ax (J).Slide then
+               X (X'First + P_Off (M, J) + K) := M.Ax (J).P (K);
+            end if;
+         end loop;
+      end loop;
+      X (X'Last) := Log (M.F);
+   end To_X;
+   function From_X (M : Model; X : Vec) return Model is
+      Mm : Model := M;
+   begin
+      for J in 0 .. M.N - 1 loop
+         Mm.Ax (J).W := [X (X'First + 3 * J), X (X'First + 3 * J + 1), X (X'First + 3 * J + 2)];
+         if not M.Ax (J).Slide then
+            declare
+               O : constant Natural := X'First + P_Off (M, J);
+            begin
+               Mm.Ax (J).P := [X (O), X (O + 1), X (O + 2)];
+            end;
+         end if;
+      end loop;
+      Mm.F := Exp (X (X'Last));
+      return Mm;
+   end From_X;
+   --  约束行(不加权):每根转的轴两行 —— 方向是单位向量、P 取轴上离参照眼最近那点;走的关节没有(方向的长短就是每单位走多远);
+   --  最后一行 = 尺度(调用的地方填)。1e3 = 这几行比像素残差重得多(比例)
+   procedure Axis_Rows (M : Model; R : in out Vec) is
+      K : Natural := R'First;
+   begin
+      for J in 0 .. M.N - 1 loop
+         if not M.Ax (J).Slide then
+            R (K) := 1.0e3 * (Norm (M.Ax (J).W) - 1.0);
+            R (K + 1) := 1.0e3 * Dot (M.Ax (J).W, M.Ax (J).P);
+            K := K + 2;
+         end if;
+      end loop;
+   end Axis_Rows;
+   --  整只手的长度一起乘一个数(模型的预测不变,只换单位):转的轴乘 P,走的关节乘 W
+   procedure Scale_Model (M : in out Model; S : Long_Float) is
+   begin
+      for J in 0 .. M.N - 1 loop
+         if M.Ax (J).Slide then
+            M.Ax (J).W := Scl (M.Ax (J).W, S);
+         else
+            M.Ax (J).P := Scl (M.Ax (J).P, S);
+         end if;
+      end loop;
+   end Scale_Model;
+
    procedure Refine_Mv (Frames : Frame_Vectors.Vector; Cs : Corr_Vectors.Vector; M : in out Model; Rep : in out Fit_Report) is
       Nf : constant Natural := Natural (Frames.Length);
       N : constant Natural := M.N;
-      Np : constant Natural := 6 * N + 1;
+      Np : constant Natural := N_Params (M);
+      Nt_Ax : constant Natural := N_Turn (M);
       S : Mv_Set;
       Used : array (0 .. Natural'Max (1, Nf) - 1) of Boolean := [others => False];
       T0 : constant Ada.Calendar.Time := Ada.Calendar.Clock;
@@ -965,12 +1079,12 @@ package body Kinem is
          Used (S.Of_Fr (K)) := True;
       end loop;
       declare
-         Nr : constant Natural := 2 * S.No + 2 * N + 1;
+         Nr : constant Natural := 2 * S.No + 2 * Nt_Ax + 1;
          Wa, Wb : V3_Ptr := new V3_Array (0 .. S.No - 1);
          Ru, Rv, Ru2, Rv2 : Vec_Ptr := new Vec (0 .. S.No - 1);
          G, H, Lt : Vec_Ptr := new Vec (0 .. S.Nt - 1);
          Sw : Vec_Ptr := new Vec (0 .. S.No - 1);   --  外层 IRLS 的 √权(按当前残差定,求导时不动)
-         Lz, Lz2 : Vec_Ptr := new Vec (0 .. S.Nt - 1);
+         Lz, Lz2, Lz3 : Vec_Ptr := new Vec (0 .. S.Nt - 1);
          Jc : Mat_Ptr := new Mat (0 .. Nr - 1, 0 .. Np - 1);
          R0 : Vec_Ptr := new Vec (0 .. Nr - 1);
          X : Vec (0 .. Np - 1);
@@ -979,16 +1093,7 @@ package body Kinem is
          C0 : Long_Float;
          Pr : M3_Array (0 .. Nf - 1);
          Pt : V3_Array (0 .. Nf - 1);
-         function To_Model (Xx : Vec) return Model is
-            Mm : Model := M;
-         begin
-            for J in 0 .. N - 1 loop
-               Mm.Ax (J).W := [Xx (Xx'First + 3 * J), Xx (Xx'First + 3 * J + 1), Xx (Xx'First + 3 * J + 2)];
-               Mm.Ax (J).P := [Xx (Xx'First + 3 * N + 3 * J), Xx (Xx'First + 3 * N + 3 * J + 1), Xx (Xx'First + 3 * N + 3 * J + 2)];
-            end loop;
-            Mm.F := Exp (Xx (Xx'First + 6 * N));
-            return Mm;
-         end To_Model;
+         function To_Model (Xx : Vec) return Model is (From_X (M, Xx));
          procedure Poses (Mm : Model) is
          begin
             for Fr in 0 .. Nf - 1 loop
@@ -1001,16 +1106,13 @@ package body Kinem is
             S2 : Long_Float := 0.0;
             Cnt : Natural := 0;
          begin
-            for J in 0 .. N - 1 loop
-               R (R'First + 2 * J) := 1.0e3 * (Norm (Mm.Ax (J).W) - 1.0);
-               R (R'First + 2 * J + 1) := 1.0e3 * Dot (Mm.Ax (J).W, Mm.Ax (J).P);
-            end loop;
+            Axis_Rows (Mm, R);
             for Fr in 0 .. Nf - 1 loop
                if Used (Fr) then
                   S2 := S2 + Dot (Pt (Fr), Pt (Fr)); Cnt := Cnt + 1;
                end if;
             end loop;
-            R (R'First + 2 * N) := 1.0e3 * ((if Cnt > 0 then Sqrt (S2 / Long_Float (Cnt)) else 1.0) - 1.0);   --  同上(比例)
+            R (R'First + 2 * Nt_Ax) := 1.0e3 * ((if Cnt > 0 then Sqrt (S2 / Long_Float (Cnt)) else 1.0) - 1.0);   --  同上(比例)
          end Reg;
          function Cost (Rru, Rrv : Vec_Ptr; Rr : Vec) return Long_Float is
             C : Long_Float := 0.0;
@@ -1025,7 +1127,7 @@ package body Kinem is
             end loop;
             return C;
          end Cost;
-         Rg0 : Vec (0 .. 2 * N);   --  当前 X 下的约束行
+         Rg0 : Vec (0 .. 2 * Nt_Ax);   --  当前 X 下的约束行
          --  当前 X、Lz 下:残差、√权、加权残差向量
          procedure Base is
          begin
@@ -1043,8 +1145,10 @@ package body Kinem is
          --  先把每根轴规整成约束行要的样子(方向归一、轴上那一点取离参照眼最近的垂足 —— 同一根轴,模型不变):
          --  起步不合约定时约束行一上来就是千倍的违反,LM 为了压它会把模型带歪(焊点:真模型起步走开 24 mm)
          for J in 0 .. N - 1 loop
-            M.Ax (J).W := Unit (M.Ax (J).W);
-            M.Ax (J).P := Sub (M.Ax (J).P, Scl (M.Ax (J).W, Dot (M.Ax (J).W, M.Ax (J).P)));
+            if not M.Ax (J).Slide then   --  走的关节:方向的长短就是每单位走多远,不归一
+               M.Ax (J).W := Unit (M.Ax (J).W);
+               M.Ax (J).P := Sub (M.Ax (J).P, Scl (M.Ax (J).W, Dot (M.Ax (J).W, M.Ax (J).P)));
+            end if;
          end loop;
          --  尺度也按这一步用的帧钉成"眼的位置均方根 = 1"(整只手一起乘一个数,模型的预测不变;③ 钉尺度用的是它的内点那批帧,不一定是这一批)
          declare
@@ -1058,18 +1162,10 @@ package body Kinem is
                end if;
             end loop;
             if Cnt > 0 and then S2 > 0.0 then
-               for J in 0 .. N - 1 loop
-                  M.Ax (J).P := Scl (M.Ax (J).P, 1.0 / Sqrt (S2 / Long_Float (Cnt)));
-               end loop;
+               Scale_Model (M, 1.0 / Sqrt (S2 / Long_Float (Cnt)));
             end if;
          end;
-         for J in 0 .. N - 1 loop
-            for K in 0 .. 2 loop
-               X (3 * J + K) := M.Ax (J).W (K);
-               X (3 * N + 3 * J + K) := M.Ax (J).P (K);
-            end loop;
-         end loop;
-         X (6 * N) := Log (M.F);
+         To_X (M, X);
          Poses (M);
          Mv_Init (S, M.F, M.Cx, M.Cy, Pr, Pt, Lz.all);
          Mv_Eval (S, M.F, M.Cx, M.Cy, Pr, Pt, Lz.all, 10, Tau, Wa, Wb, Ru, Rv, G, H, Lt);   --  起步远近解 10 遍(次数)
@@ -1099,12 +1195,12 @@ package body Kinem is
             begin
                Poses (To_Model (X));
                Mv_Gate (S, Ru, Rv, N_In);
-               Mv_Eval (S, Exp (X (6 * N)), M.Cx, M.Cy, Pr, Pt, Lz.all, 5, Tau, Wa, Wb, Ru, Rv, G, H, Lt);   --  门里的重解远近 5 遍(次数)
+               Mv_Eval (S, Exp (X (Np - 1)), M.Cx, M.Cy, Pr, Pt, Lz.all, 5, Tau, Wa, Wb, Ru, Rv, G, H, Lt);   --  门里的重解远近 5 遍(次数)
                if Round = 1 then
                   Rep.Mv_Start_Px := Mv_Med (S, Ru, Rv);
                end if;
                Tau := Long_Float'Max (1.4826 * Mv_Med (S, Ru, Rv), 1.0e-3);   --  抗野点尺度 = 门里残差中位换标准差(1.4826 统计常数;下限只防零,无量纲)
-               Mv_Eval (S, Exp (X (6 * N)), M.Cx, M.Cy, Pr, Pt, Lz.all, 3, Tau, Wa, Wb, Ru, Rv, G, H, Lt);
+               Mv_Eval (S, Exp (X (Np - 1)), M.Cx, M.Cy, Pr, Pt, Lz.all, 3, Tau, Wa, Wb, Ru, Rv, G, H, Lt);
                Rep.Mv_Obs := N_In;
                Rep.Mv_Tracks := 0;
                for T in 0 .. S.Nt - 1 loop
@@ -1115,7 +1211,14 @@ package body Kinem is
                C0 := Cost (Ru, Rv, Rg0);
             for It in 1 .. Mv_Iters loop
                Rep.Mv_Iters := Rep.Mv_Iters + 1;
-               --  数值雅可比:每个数挪一点,远近从当前解起再解 2 遍(次数),外层权不动
+               --  数值雅可比:每个数挪一点,远近从当前解起再解 2 遍(次数),外层权不动。基准也从同一个远近起、同样解 2 遍再算:
+               --  远近还没解到底时两边一起挪,差分里就没有它(09-27 龙门架:基准用上一步的远近、挪一点的那份多解 2 遍 ⇒ 远近自己还在收的那一点
+               --  被除以 1e-6 当成导数,阻尼到了 1e-9 代价还降得很慢,多视图 800 轮才从焦距 419 爬到 410;真模型起步时远近是收好的,看不出来)
+               Lz3.all := Lz.all;
+               Poses (To_Model (X));
+               Mv_Eval (S, Exp (X (Np - 1)), M.Cx, M.Cy, Pr, Pt, Lz.all, 2, Tau, Wa, Wb, Ru, Rv, G, H, Lt);
+               Base;
+               C0 := Cost (Ru, Rv, Rg0);
                for Jp in 0 .. Np - 1 loop
                   declare
                      Xp : Vec := X;
@@ -1125,14 +1228,14 @@ package body Kinem is
                      Xp (Jp) := Xp (Jp) + Hh;
                      Mm := To_Model (Xp);
                      Poses (Mm);
-                     Lz2.all := Lz.all;
+                     Lz2.all := Lz3.all;
                      Mv_Eval (S, Mm.F, Mm.Cx, Mm.Cy, Pr, Pt, Lz2.all, 2, Tau, Wa, Wb, Ru2, Rv2, G, H, Lt);
                      for K in 0 .. S.No - 1 loop
                         Jc (K, Jp) := (if Sw (K) > 0.0 and then Ru2 (K) /= Behind_Px then Sw (K) * (Ru2 (K) - Ru (K)) / Hh else 0.0);
                         Jc (S.No + K, Jp) := (if Sw (K) > 0.0 and then Ru2 (K) /= Behind_Px then Sw (K) * (Rv2 (K) - Rv (K)) / Hh else 0.0);
                      end loop;
                      declare
-                        Rg : Vec (0 .. 2 * N);
+                        Rg : Vec (0 .. 2 * Nt_Ax);
                      begin
                         Reg (Mm, Rg);
                         for I in Rg'Range loop
@@ -1173,7 +1276,7 @@ package body Kinem is
                         Xn : Vec := X;
                         Cn : Long_Float;
                         Mm : Model;
-                        Rg : Vec (0 .. 2 * N);
+                        Rg : Vec (0 .. 2 * Nt_Ax);
                      begin
                         for K in 0 .. Np - 1 loop
                            Aa (K, K) := Aa (K, K) * (1.0 + Lam) + 1.0e-12;
@@ -1255,12 +1358,14 @@ package body Kinem is
          end loop;
          M := To_Model (X);
          for J in 0 .. N - 1 loop
-            M.Ax (J).W := Unit (M.Ax (J).W);
+            if not M.Ax (J).Slide then
+               M.Ax (J).W := Unit (M.Ax (J).W);
+            end if;
          end loop;
          Rep.Mv_Px := Mv_Med (S, Ru, Rv);
          Rep.Mv_P90_Px := Mv_Med (S, Ru, Rv, 0.9);   --  九成分位(比例,只报数)
          Rep.F := M.F;
-         Free (Wa); Free (Wb); Free (Ru); Free (Rv); Free (Ru2); Free (Rv2); Free (G); Free (H); Free (Lt); Free (Sw); Free (Lz); Free (Lz2); Free (Jc); Free (R0);
+         Free (Wa); Free (Wb); Free (Ru); Free (Rv); Free (Ru2); Free (Rv2); Free (G); Free (H); Free (Lt); Free (Sw); Free (Lz); Free (Lz2); Free (Lz3); Free (Jc); Free (R0);
       end;
       Free_Mv (S);
       Rep.Secs.Append (Long_Float (Ada.Calendar."-" (Ada.Calendar.Clock, T0)));
@@ -1365,7 +1470,11 @@ package body Kinem is
       Tab : array (0 .. Max_Joints - 1) of Cand_Table;
       Js : array (0 .. Max_Joints - 1) of Jc_Vectors.Vector;     --  每根轴起步用的配点(全部)
       Jg : array (0 .. Max_Joints - 1) of Jc_Vectors.Vector;     --  网格用的(转角小、每对抽样)
+      Jgs : array (0 .. Max_Joints - 1) of Jc_Vectors.Vector;    --  "走"那样网格用的(每对抽样;不按转角挑:按"走"解时读数差不是转角)
       Usable : array (0 .. Max_Joints - 1) of Boolean := [others => False];
+      Use_T, Use_S : array (0 .. Max_Joints - 1) of Boolean := [others => False];   --  按"转" / 按"走"试得了(至少两格、网格有 200 个配点)
+      Slide_Mid : array (0 .. Max_Joints - 1) of Long_Float := [others => 1.0e18];   --  "走"那样网格最好的分数(焦距中间那档;跟焦距无关);没试 = 空位(无量纲)
+      Sl : array (0 .. Max_Joints - 1) of Boolean := [others => False];             --  认成"走"
       Dmax : Long_Float;
       function Dq (Fr, J : Natural) return Long_Float is (Frames (Fr).Q (J) - Q0 (J));
       --  这一帧能不能给第 J 根轴起步用:它是扫 J 扫出来的(或参照帧),别的关节偏得让画面挪不到 1 像素(按最长那档焦距算,最严)
@@ -1419,7 +1528,7 @@ package body Kinem is
          --  每根轴有几对、其中转角小的有几对 ⇒ 每对拿几个:这根轴一共要 Grid_Target / All_Target 个,按对数平均分,每对至少 Per_Pair_Grid / Per_Pair_All
          --  (V1B7 2026-09-26:一段只扫 5 格,转角小的对一根轴只剩 6 对,每对 30 个凑不满 200 个,两根轴没量成)
          N_Pairs, N_Small : array (0 .. Max_Joints - 1) of Natural := [others => 0];
-         K_Grid, K_All : array (0 .. Max_Joints - 1) of Natural := [others => 0];
+         K_Grid, K_All, K_Grid_S : array (0 .. Max_Joints - 1) of Natural := [others => 0];
       begin
          Pair_Pos (Cs, Pos, Size);
          for Ci in 0 .. Natural (Cs.Length) - 1 loop
@@ -1437,6 +1546,7 @@ package body Kinem is
          for J in 0 .. N - 1 loop
             K_Grid (J) := Natural'Max (Per_Pair_Grid, Grid_Target / Natural'Max (1, N_Small (J)));
             K_All (J) := Natural'Max (Per_Pair_All, All_Target / Natural'Max (1, N_Pairs (J)));
+            K_Grid_S (J) := Natural'Max (Per_Pair_Grid, Grid_Target / Natural'Max (1, N_Pairs (J)));
          end loop;
          for Ci in 0 .. Natural (Cs.Length) - 1 loop
             declare
@@ -1452,6 +1562,9 @@ package body Kinem is
                         end if;
                         if abs (R.Ta - R.Tb) <= Grid_Rad and then Take (Pos (Ci), Size (Ci), K_Grid (J)) then
                            Jg (J).Append (R);
+                        end if;
+                        if Take (Pos (Ci), Size (Ci), K_Grid_S (J)) then
+                           Jgs (J).Append (R);
                         end if;
                      end;
                   end if;
@@ -1469,7 +1582,9 @@ package body Kinem is
                end if;
             end loop;
             Rep.Joint_Frames.Append (Nfr + 1);
-            Usable (J) := Nfr >= 2 and then Natural (Jg (J).Length) >= 200;   --  至少两格、200 个配点才铺网格(次数)
+            Use_T (J) := Nfr >= 2 and then Natural (Jg (J).Length) >= 200;   --  至少两格、200 个配点才铺网格(次数)
+            Use_S (J) := Nfr >= 2 and then Natural (Jgs (J).Length) >= 200;  --  同上(次数)
+            Usable (J) := Use_T (J) or else Use_S (J);
          end;
       end loop;
       T_Mark := Ada.Calendar.Clock;
@@ -1488,24 +1603,37 @@ package body Kinem is
                Jj := J;
             end Start;
             if Usable (Jj) then
-               Wk := New_Work (Natural (Jg (Jj).Length));
-               Ga := To_Array (Jg (Jj));
-               for Ks in 0 .. N_Sph - 1 loop
+               Wk := New_Work (Natural'Max (Natural (Jg (Jj).Length), Natural (Jgs (Jj).Length)));
+               if Use_T (Jj) then
+                  Ga := To_Array (Jg (Jj));
+                  for Ks in 0 .. N_Sph - 1 loop
+                     declare
+                        W : constant V3 := Sphere (Ks, N_Sph);
+                     begin
+                        for Kf in Fg'Range loop
+                           declare
+                              Ph, Md : Long_Float;
+                           begin
+                              Best_Phi (Ga.all, Natural (Jg (Jj).Length), W, Fg (Kf), Cx, Cy, Ph, Md, Wk);
+                              Insert (Tab (Jj) (Kf), (Score => Md, W => W, Phi => Ph));
+                           end;
+                        end loop;
+                     end;
+                  end loop;
+                  Free (Ga);
+               end if;
+               --  "走"那样:分数跟焦距无关 ⇒ 只铺中间那一档,挑焦距时每档都用它
+               if Use_S (Jj) then
                   declare
-                     W : constant V3 := Sphere (Ks, N_Sph);
+                     Gs : Jc_Array_Ptr := To_Array (Jgs (Jj));
+                     Ts : Cand_Array;
                   begin
-                     for Kf in Fg'Range loop
-                        declare
-                           Ph, Md : Long_Float;
-                        begin
-                           Best_Phi (Ga.all, Natural (Jg (Jj).Length), W, Fg (Kf), Cx, Cy, Ph, Md, Wk);
-                           Insert (Tab (Jj) (Kf), (Score => Md, W => W, Phi => Ph));
-                        end;
-                     end loop;
+                     Slide_Grid (Gs.all, Natural (Jgs (Jj).Length), Fg (N_F / 2), Cx, Cy, Ts, Wk);
+                     Slide_Mid (Jj) := Ts (0).Score;
+                     Free (Gs);
                   end;
-               end loop;
+               end if;
                Free_Work (Wk);
-               Free (Ga);
             end if;
          end Grid_Task;
          Workers : array (0 .. N - 1) of Grid_Task;
@@ -1515,7 +1643,7 @@ package body Kinem is
          end loop;
       end;   --  这里等全部线程做完
       Lap;
-      --  焦距各轴共用:每档各轴最好的分数加起来,取最小的那档
+      --  焦距各轴共用:每档各轴最好的分数加起来,取最小的那档(每根轴在每一档取"转""走"两样里好的那个:"走"的分数每档一样,不左右焦距)
       declare
          Best : Long_Float := Long_Float'Last;
          Kb : Natural := 0;
@@ -1526,7 +1654,7 @@ package body Kinem is
             begin
                for J in 0 .. N - 1 loop
                   if Usable (J) then
-                     S := S + Tab (J) (Kf) (0).Score;
+                     S := S + Long_Float'Min (Tab (J) (Kf) (0).Score, Slide_Mid (J));
                   end if;
                end loop;
                if S < Best then
@@ -1536,59 +1664,109 @@ package body Kinem is
          end loop;
          F0 := Fg (Kb);
          Rep.F_Start := F0;
-         --  焦距固定,每根轴从这一档的候选各自就地精修(先只用转角小的,再全部),按全部配点的残差中位挑
+         --  焦距固定,每根轴从这一档的候选各自就地精修(先只用网格那批,再全部),按全部配点的残差中位挑。
+         --  "转""走"两样各解一次(同一批全部配点 Js 上比):残差中位小的那样就是这根轴(一个量一种量法:两样都按同一批配点的 Sampson 残差比;
+         --  试不了的那样 = 没有)。"走"的候选按这一档焦距重铺网格(方向的斜度随焦距变)
          for J in 0 .. N - 1 loop
             if not Usable (J) then
-               Rep.Joint_Med.Append (-1.0);
+               Rep.Joint_Med.Append (-1.0); Rep.Joint_Med_Turn.Append (-1.0); Rep.Joint_Med_Slide.Append (-1.0); Rep.Slide.Append (False);
             else
                declare
-                  Bm : Long_Float := Long_Float'Last;
-                  Bx : Vec (0 .. 2) := [0.0, 0.0, 0.0];
-                  Ga : Jc_Array_Ptr := To_Array (Jg (J));
+                  Bm_T, Bm_S : Long_Float := 1.0e18;   --  空位(无量纲)
+                  Bx_T, Bx_S : Vec (0 .. 2) := [0.0, 0.0, 0.0];
                   Sa : Jc_Array_Ptr := To_Array (Js (J));
-               begin
-                  for Ci in 0 .. Keep - 1 loop
-                     --  空位 = 后面没有候选了(无量纲)。先判再取:空位的方向是占位的 (0, 0, 1),方位角算不出来(Arctan (0, 0) 抛异常;
-                     --  原来先取后判,表一直是满的才没碰上 —— 09-27 试网格切份并行时,并表把彼此不到 10° 的两个并成一个,表不满,崩了)
-                     exit when Tab (J) (Kb) (Ci).Score >= 1.0e17;
-                     declare
-                        Cd : constant Cand := Tab (J) (Kb) (Ci);
-                        X : Vec (0 .. 2) := [Arccos (Long_Float'Max (-1.0, Long_Float'Min (1.0, Cd.W (2)))), Arctan (Cd.W (1), Cd.W (0)), Cd.Phi];
-                        Steps : constant Vec (0 .. 2) := [1.0e-6, 1.0e-6, 1.0e-6];   --  差分步(弧度,极小量)
-                        procedure R_Small (Xx : Vec; R : out Vec) is
-                        begin
-                           Joint_Res (Ga.all, Natural (Jg (J).Length), Xx, F0, Cx, Cy, R);
-                        end R_Small;
-                        procedure R_All (Xx : Vec; R : out Vec) is
-                        begin
-                           Joint_Res (Sa.all, Natural (Js (J).Length), Xx, F0, Cx, Cy, R);
-                        end R_All;
+                  --  从一个起点(X 的前 Nx 个数)精修:先网格那批(Gg),再全部;返回全部配点上的残差中位
+                  generic
+                     Nx : Positive;
+                     with procedure Res (Cs : Jc_Array; N : Natural; X : Vec; F, Cx, Cy : Long_Float; R : out Vec);
+                  procedure Polish (Gg : Jc_Array_Ptr; Ng : Natural; X : in out Vec; Md : out Long_Float);
+                  procedure Polish (Gg : Jc_Array_Ptr; Ng : Natural; X : in out Vec; Md : out Long_Float) is
+                     Xx : Vec (0 .. Nx - 1) := X (X'First .. X'First + Nx - 1);
+                     Steps : constant Vec (0 .. Nx - 1) := [others => 1.0e-6];   --  差分步(弧度,极小量)
+                     procedure R_Small (Xa : Vec; R : out Vec) is
                      begin
-                        Robust_LM (X, Natural (Jg (J).Length), Natural (Jg (J).Length), 60, Steps, R_Small'Access);
-                        Robust_LM (X, Natural (Js (J).Length), Natural (Js (J).Length), 60, Steps, R_All'Access);
-                        declare
-                           R : Vec_Ptr := new Vec (0 .. Natural (Js (J).Length) - 1);
-                           Md : Long_Float;
-                        begin
-                           R_All (X, R.all);
-                           Md := Median_Abs (R.all);
-                           Free (R);
-                           if Md < Bm then
-                              Bm := Md; Bx := X;
-                           end if;
-                        end;
-                     end;
-                  end loop;
-                  Free (Ga); Free (Sa);
-                  Rep.Joint_Med.Append (Bm);
-                  Xj (J) := Bx;
-                  Wj (J) := Ang_W (Bx (0), Bx (1));
-                  declare
-                     E1, E2 : V3;
+                        Res (Gg.all, Ng, Xa, F0, Cx, Cy, R);
+                     end R_Small;
+                     procedure R_All (Xa : Vec; R : out Vec) is
+                     begin
+                        Res (Sa.all, Natural (Js (J).Length), Xa, F0, Cx, Cy, R);
+                     end R_All;
+                     R : Vec_Ptr := new Vec (0 .. Natural (Js (J).Length) - 1);
                   begin
-                     Perp (Wj (J), E1, E2);
-                     Pj (J) := Add (Scl (E1, Cos (Bx (2))), Scl (E2, Sin (Bx (2))));
-                  end;
+                     Robust_LM (Xx, Ng, Ng, 60, Steps, R_Small'Access);
+                     Robust_LM (Xx, Natural (Js (J).Length), Natural (Js (J).Length), 60, Steps, R_All'Access);
+                     R_All (Xx, R.all);
+                     Md := Median_Abs (R.all);
+                     Free (R);
+                     X (X'First .. X'First + Nx - 1) := Xx;
+                  end Polish;
+                  procedure Polish_T is new Polish (3, Joint_Res);
+                  procedure Polish_S is new Polish (2, Slide_Res);
+               begin
+                  if Use_T (J) then
+                     declare
+                        Ga : Jc_Array_Ptr := To_Array (Jg (J));
+                     begin
+                        for Ci in 0 .. Keep - 1 loop
+                           --  空位 = 后面没有候选了(无量纲)。先判再取:空位的方向是占位的 (0, 0, 1),方位角算不出来(Arctan (0, 0) 抛异常;
+                           --  原来先取后判,表一直是满的才没碰上 —— 09-27 试网格切份并行时,并表把彼此不到 10° 的两个并成一个,表不满,崩了)
+                           exit when Tab (J) (Kb) (Ci).Score >= 1.0e17;
+                           declare
+                              Cd : constant Cand := Tab (J) (Kb) (Ci);
+                              X : Vec (0 .. 2) := [Arccos (Long_Float'Max (-1.0, Long_Float'Min (1.0, Cd.W (2)))), Arctan (Cd.W (1), Cd.W (0)), Cd.Phi];
+                              Md : Long_Float;
+                           begin
+                              Polish_T (Ga, Natural (Jg (J).Length), X, Md);
+                              if Md < Bm_T then
+                                 Bm_T := Md; Bx_T := X;
+                              end if;
+                           end;
+                        end loop;
+                        Free (Ga);
+                     end;
+                  end if;
+                  if Use_S (J) then
+                     declare
+                        Gs : Jc_Array_Ptr := To_Array (Jgs (J));
+                        Ts : Cand_Array;
+                        Wk : Work := New_Work (Natural (Jgs (J).Length));
+                     begin
+                        Slide_Grid (Gs.all, Natural (Jgs (J).Length), F0, Cx, Cy, Ts, Wk);
+                        Free_Work (Wk);
+                        for Ci in 0 .. Keep - 1 loop
+                           exit when Ts (Ci).Score >= 1.0e17;   --  空位(无量纲,同上)
+                           declare
+                              Cd : constant Cand := Ts (Ci);
+                              X : Vec (0 .. 2) := [Arccos (Long_Float'Max (-1.0, Long_Float'Min (1.0, Cd.W (2)))), Arctan (Cd.W (1), Cd.W (0)), 0.0];
+                              Md : Long_Float;
+                           begin
+                              Polish_S (Gs, Natural (Jgs (J).Length), X, Md);
+                              if Md < Bm_S then
+                                 Bm_S := Md; Bx_S := X;
+                              end if;
+                           end;
+                        end loop;
+                        Free (Gs);
+                     end;
+                  end if;
+                  Free (Sa);
+                  Sl (J) := Bm_S < Bm_T;
+                  Rep.Joint_Med_Turn.Append (if Use_T (J) then Bm_T else -1.0);
+                  Rep.Joint_Med_Slide.Append (if Use_S (J) then Bm_S else -1.0);
+                  Rep.Slide.Append (Sl (J));
+                  Rep.Joint_Med.Append (if Sl (J) then Bm_S else Bm_T);
+                  Xj (J) := (if Sl (J) then Bx_S else Bx_T);
+                  Wj (J) := Ang_W (Xj (J) (0), Xj (J) (1));
+                  if Sl (J) then
+                     Pj (J) := [0.0, 0.0, 0.0];
+                  else
+                     declare
+                        E1, E2 : V3;
+                     begin
+                        Perp (Wj (J), E1, E2);
+                        Pj (J) := Add (Scl (E1, Cos (Xj (J) (2))), Scl (E2, Sin (Xj (J) (2))));
+                     end;
+                  end if;
                end;
             end if;
          end loop;
@@ -1601,43 +1779,58 @@ package body Kinem is
       end loop;
       --  ①b 焦距和各轴一起精修(焦距是几根轴共用的):网格那一档到真焦距最多差半档(约 3.5%),各轴在那一档上各自精修会一起歪
       --  (V1B13 2026-09-26:起步挑到 419.7、真 397 ⇒ 每根轴单独的残差翻倍,后面定比例解错,运动学差 14 mm;V1B12 同样的起步,碰巧解回来)
+      --  每根轴的数:"转" 3 个(方向两个角 + 轴在眼哪边),"走" 2 个(方向两个角);X = [对数焦距, 第 0 根的, 第 1 根的, …]
       declare
-         Nx : constant Natural := 1 + 3 * N;
-         X : Vec (0 .. Nx - 1);
-         Steps : constant Vec (0 .. Nx - 1) := [others => 1.0e-6];   --  差分步(弧度 / 对数焦距,极小量,无量纲)
-         Arrs : array (0 .. Max_Joints - 1) of Jc_Array_Ptr;
-         Ns : array (0 .. Max_Joints - 1) of Natural := [others => 0];
-         N_Tot : Natural := 0;
-         procedure R_All (Xx : Vec; R : out Vec) is
-            Fx : constant Long_Float := Exp (Xx (Xx'First));
-            K : Natural := R'First;
-         begin
-            for J in 0 .. N - 1 loop
-               Joint_Res (Arrs (J).all, Ns (J), Xx (Xx'First + 1 + 3 * J .. Xx'First + 3 + 3 * J), Fx, Cx, Cy, R (K .. K + Ns (J) - 1));
-               K := K + Ns (J);
-            end loop;
-         end R_All;
+         function Size_Of (J : Natural) return Positive is (if Sl (J) then 2 else 3);
+         Off : array (0 .. Max_Joints - 1) of Natural := [others => 0];
+         Nx : Natural := 1;
       begin
          for J in 0 .. N - 1 loop
-            Arrs (J) := To_Array (Js (J)); Ns (J) := Natural (Js (J).Length); N_Tot := N_Tot + Ns (J);
-            X (1 + 3 * J .. 3 + 3 * J) := Xj (J);
+            Off (J) := Nx; Nx := Nx + Size_Of (J);
          end loop;
-         X (0) := Log (F0);
-         if N_Tot > Nx then
-            Robust_LM (X, N_Tot, N_Tot, 60, Steps, R_All'Access);
-         end if;
-         F0 := Exp (X (0));
-         for J in 0 .. N - 1 loop
-            Wj (J) := Ang_W (X (1 + 3 * J), X (2 + 3 * J));
-            declare
-               E1, E2 : V3;
+         declare
+            X : Vec (0 .. Nx - 1);
+            Steps : constant Vec (0 .. Nx - 1) := [others => 1.0e-6];   --  差分步(弧度 / 对数焦距,极小量,无量纲)
+            Arrs : array (0 .. Max_Joints - 1) of Jc_Array_Ptr;
+            Ns : array (0 .. Max_Joints - 1) of Natural := [others => 0];
+            N_Tot : Natural := 0;
+            procedure R_All (Xx : Vec; R : out Vec) is
+               Fx : constant Long_Float := Exp (Xx (Xx'First));
+               K : Natural := R'First;
             begin
-               Perp (Wj (J), E1, E2);
-               Pj (J) := Add (Scl (E1, Cos (X (3 + 3 * J))), Scl (E2, Sin (X (3 + 3 * J))));
-            end;
-            Free (Arrs (J));
-         end loop;
-         Rep.F_Axes := F0;
+               for J in 0 .. N - 1 loop
+                  if Sl (J) then
+                     Slide_Res (Arrs (J).all, Ns (J), Xx (Xx'First + Off (J) .. Xx'First + Off (J) + 1), Fx, Cx, Cy, R (K .. K + Ns (J) - 1));
+                  else
+                     Joint_Res (Arrs (J).all, Ns (J), Xx (Xx'First + Off (J) .. Xx'First + Off (J) + 2), Fx, Cx, Cy, R (K .. K + Ns (J) - 1));
+                  end if;
+                  K := K + Ns (J);
+               end loop;
+            end R_All;
+         begin
+            for J in 0 .. N - 1 loop
+               Arrs (J) := To_Array (Js (J)); Ns (J) := Natural (Js (J).Length); N_Tot := N_Tot + Ns (J);
+               X (Off (J) .. Off (J) + Size_Of (J) - 1) := Xj (J) (0 .. Size_Of (J) - 1);
+            end loop;
+            X (0) := Log (F0);
+            if N_Tot > Nx then
+               Robust_LM (X, N_Tot, N_Tot, 60, Steps, R_All'Access);
+            end if;
+            F0 := Exp (X (0));
+            for J in 0 .. N - 1 loop
+               Wj (J) := Ang_W (X (Off (J)), X (Off (J) + 1));
+               if not Sl (J) then
+                  declare
+                     E1, E2 : V3;
+                  begin
+                     Perp (Wj (J), E1, E2);
+                     Pj (J) := Add (Scl (E1, Cos (X (Off (J) + 2))), Scl (E2, Sin (X (Off (J) + 2))));
+                  end;
+               end if;
+               Free (Arrs (J));
+            end loop;
+            Rep.F_Axes := F0;
+         end;
       end;
       Lap;
       --  ② 各轴离眼远近的比例 ρ(可正可负:Sampson 分不出轴在眼的这边还是那边)。
@@ -1771,12 +1964,16 @@ package body Kinem is
                R : M3 := Identity;
             begin
                for J in 0 .. N - 1 loop
-                  declare
-                     Rj : constant M3 := Rot (Wj (J), Dq (Fr, J));
-                  begin
-                     Af (Fr, J) := Ap (R, Sub (Pj (J), Ap (Rj, Pj (J))));
-                     R := Mul (R, Rj);
-                  end;
+                  if Sl (J) then
+                     Af (Fr, J) := Ap (R, Scl (Wj (J), Dq (Fr, J)));   --  走的关节:沿方向走 θ 个读数单位(每单位走多远 = ρ),不转
+                  else
+                     declare
+                        Rj : constant M3 := Rot (Wj (J), Dq (Fr, J));
+                     begin
+                        Af (Fr, J) := Ap (R, Sub (Pj (J), Ap (Rj, Pj (J))));
+                        R := Mul (R, Rj);
+                     end;
+                  end if;
                end loop;
                Rq (Fr) := R;
             end;
@@ -1924,7 +2121,11 @@ package body Kinem is
          Rep.Ref_Joint := Rf;
          for J in 0 .. N - 1 loop
             Rep.Rho.Append (if Rho (Rf) /= 0.0 then Rho (J) / Rho (Rf) else 0.0);
-            Pj (J) := Scl (Pj (J), Rho (J));
+            if Sl (J) then
+               Wj (J) := Scl (Wj (J), Rho (J));   --  走的关节:ρ = 每个读数单位走多远(带正负)
+            else
+               Pj (J) := Scl (Pj (J), Rho (J));
+            end if;
          end loop;
       end;
       Lap;
@@ -1936,7 +2137,7 @@ package body Kinem is
       begin
          M0.F := F0;
          for J in 0 .. N - 1 loop
-            M0.Ax (J) := (W => Wj (J), P => Pj (J));
+            M0.Ax (J) := (W => Wj (J), P => Pj (J), Slide => Sl (J));
          end loop;
          --  两轮:第一轮按起步模型挑内点、一起解;第二轮按第一轮解出的模型重挑内点再解(结果不靠起步准不准;自检:起步焦距差 5% 时考试中位 0.57 → 0.91 mm)
          for Round in 1 .. 2 loop
@@ -1983,27 +2184,17 @@ package body Kinem is
                   end if;
                end loop;
                if Cnt > 0 and then S2 > 0.0 then
-                  for J in 0 .. N - 1 loop
-                     M0.Ax (J).P := Scl (M0.Ax (J).P, 1.0 / Sqrt (S2 / Long_Float (Cnt)));
-                  end loop;
+                  Scale_Model (M0, 1.0 / Sqrt (S2 / Long_Float (Cnt)));
                end if;
             end;
             declare
-               Np : constant Natural := 6 * N + 1;
+               Np : constant Natural := N_Params (M0);
                X : Vec (0 .. Np - 1);
                Steps : Vec (0 .. Np - 1);
                Ni : constant Natural := Natural (Inl.Length);
-               N_Reg : constant Natural := 2 * N + 1;
-               function To_Model (Xx : Vec) return Model is
-                  Mm : Model := M0;
-               begin
-                  for J in 0 .. N - 1 loop
-                     Mm.Ax (J).W := [Xx (Xx'First + 3 * J), Xx (Xx'First + 3 * J + 1), Xx (Xx'First + 3 * J + 2)];
-                     Mm.Ax (J).P := [Xx (Xx'First + 3 * N + 3 * J), Xx (Xx'First + 3 * N + 3 * J + 1), Xx (Xx'First + 3 * N + 3 * J + 2)];
-                  end loop;
-                  Mm.F := Exp (Xx (Xx'First + 6 * N));
-                  return Mm;
-               end To_Model;
+               Nt_Ax : constant Natural := N_Turn (M0);
+               N_Reg : constant Natural := 2 * Nt_Ax + 1;
+               function To_Model (Xx : Vec) return Model is (From_X (M0, Xx));
                procedure R_All (Xx : Vec; R : out Vec) is
                   Mm : constant Model := To_Model (Xx);
                   Rf : array (0 .. Nf - 1) of M3;
@@ -2027,28 +2218,26 @@ package body Kinem is
                         R (R'First + I) := Samp (Rij, Tij, Mm.F, Cx, Cy, C);
                      end;
                   end loop;
-                  --  约束行(不加权):轴是单位向量、P 取轴上离参照眼最近那点、尺度钉住(倍数只管数值,1e3 = 这几行比像素残差重得多,比例)
-                  for J in 0 .. N - 1 loop
-                     R (R'First + Ni + 2 * J) := 1.0e3 * (Norm (Mm.Ax (J).W) - 1.0);
-                     R (R'First + Ni + 2 * J + 1) := 1.0e3 * Dot (Mm.Ax (J).W, Mm.Ax (J).P);
-                  end loop;
-                  R (R'First + Ni + 2 * N) := 1.0e3 * ((if Cnt > 0 then Sqrt (S2 / Long_Float (Cnt)) else 1.0) - 1.0);
+                  --  约束行(不加权):转的轴是单位向量、P 取轴上离参照眼最近那点;尺度钉住(倍数只管数值,1e3 = 这几行比像素残差重得多,比例)
+                  Axis_Rows (Mm, R (R'First + Ni .. R'First + Ni + 2 * Nt_Ax - 1));
+                  R (R'First + Ni + 2 * Nt_Ax) := 1.0e3 * ((if Cnt > 0 then Sqrt (S2 / Long_Float (Cnt)) else 1.0) - 1.0);
                end R_All;
             begin
                for J in 0 .. N - 1 loop
-                  for K in 0 .. 2 loop
-                     X (3 * J + K) := M0.Ax (J).W (K);
-                     X (3 * N + 3 * J + K) := M0.Ax (J).P (K) - Dot (M0.Ax (J).W, M0.Ax (J).P) * M0.Ax (J).W (K);
-                  end loop;
+                  if not M0.Ax (J).Slide then   --  转的轴:P 取轴上离参照眼最近那点
+                     M0.Ax (J).P := Sub (M0.Ax (J).P, Scl (M0.Ax (J).W, Dot (M0.Ax (J).W, M0.Ax (J).P)));
+                  end if;
                end loop;
-               X (6 * N) := Log (M0.F);
+               To_X (M0, X);
                for K in Steps'Range loop
                   Steps (K) := 1.0e-7;   --  差分步(无量纲 / 模型单位 / 对数焦距,极小量)
                end loop;
                Robust_LM (X, Ni + N_Reg, Ni, 300, Steps, R_All'Access);
                M := To_Model (X);
                for J in 0 .. N - 1 loop
-                  M.Ax (J).W := Unit (M.Ax (J).W);
+                  if not M.Ax (J).Slide then
+                     M.Ax (J).W := Unit (M.Ax (J).W);
+                  end if;
                end loop;
                declare
                   R : Vec_Ptr := new Vec (0 .. Ni + N_Reg - 1);
@@ -2107,9 +2296,7 @@ package body Kinem is
                I := I + Stride;
             end loop;
             if Back > Front then
-               for J in 0 .. N - 1 loop
-                  M.Ax (J).P := Scl (M.Ax (J).P, -1.0);
-               end loop;
+               Scale_Model (M, -1.0);   --  转的轴 P 反号、走的关节 W 反号:所有平移一起反号,转动不变
                Rep.Flipped := True;
             end if;
          end;

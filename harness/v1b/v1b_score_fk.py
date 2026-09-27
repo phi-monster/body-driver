@@ -64,14 +64,28 @@ for a in range(narm):
 
 
 # ── 第二种考法:驱动落盘的运动学(look/kinem_arm<k>.txt)在扫描各格上按关节读数算眼在哪,和扫描时记的仿真真值(sweep.txt 行尾)比 ──
-def kinem_fk(W, P, q0, q):
+def kinem_fk(W, P, q0, q, slide=None):
+    # slide[i] = 第 i 根是"走"的关节(09-27 起落盘第 9 列 turn / slide):沿 W 走 θ 个读数单位(W 的长 = 每单位走多远),不转
     R = np.eye(3); t = np.zeros(3)
     for i in range(len(W)):
-        w = W[i] / np.linalg.norm(W[i]); th = q[i] - q0[i]
+        th = q[i] - q0[i]
+        if slide is not None and slide[i]:
+            t = t + R @ (W[i] * th)
+            continue
+        w = W[i] / np.linalg.norm(W[i])
         K = np.array([[0, -w[2], w[1]], [w[2], 0, -w[0]], [-w[1], w[0], 0]])
         Ri = np.eye(3) + math.sin(th) * K + (1 - math.cos(th)) * K @ K
         t = t + R @ (P[i] - Ri @ P[i]); R = R @ Ri
     return R, t
+
+
+def read_axes(lines):
+    W, P, S = [], [], []
+    for l in lines:
+        if l.startswith("axis"):
+            f = l.split()
+            W.append([float(x) for x in f[2:5]]); P.append([float(x) for x in f[5:8]]); S.append(len(f) > 8 and f[8] == "slide")
+    return np.array(W), np.array(P), S
 KDIR = sys.argv[2] if len(sys.argv) > 2 else os.path.join(RUN, "look")   # 模型在哪(默认驱动落盘的;离线回放写到别处时给这个)
 sp = os.path.join(RUN, "look", "sweep.txt")
 FITS = {}
@@ -83,12 +97,8 @@ if os.path.exists(sp):
             continue
         L = open(kp).read().split("\n")
         q0 = np.array([float(x) for x in L[1].split()[1:]])
-        W, Pp = [], []
-        for l in L[2:]:
-            if l.startswith("axis"):
-                v = [float(x) for x in l.split()[2:]]; W.append(v[:3]); Pp.append(v[3:])
-        W = np.array(W); Pp = np.array(Pp)
-        Rf, Tf, Tp, Rt, Jr = [], [], [], [], []
+        W, Pp, Sl = read_axes(L[2:])
+        Rf, Tf, Tp, Rt, Jr, Qs = [], [], [], [], [], []
         for l in rows:
             left, right = l.split("||", 1); parts = left.strip().split("|"); h = parts[0].split()
             if int(h[1]) != arm:
@@ -97,7 +107,8 @@ if os.path.exists(sp):
             if len(ee) != 7:
                 continue
             q = np.array([float(x) for x in parts[1 + arm].split()])
-            R, t = kinem_fk(W, Pp, q0, q)
+            R, t = kinem_fk(W, Pp, q0, q, Sl)
+            Qs.append(q)
             Rf.append(R); Tf.append(t); Tp.append(np.array(ee[:3])); Rt.append(qR(np.array(ee[3:]))); Jr.append(int(h[2]) if int(h[4]) > 0 else -1)
         Rf = np.array(Rf); Tf = np.array(Tf); Tp = np.array(Tp); Rt = np.array(Rt)
         n = len(Tf); trn = np.arange(0, n, 2); tst = np.arange(1, n, 2)
@@ -132,6 +143,14 @@ if os.path.exists(sp):
         for j in range(len(W)):
             ks = np.where(Jr == j)[0]
             if len(ks) == 0:
+                continue
+            if Sl[j]:
+                # 走的关节:真值里扫它那几格 = 眼沿一条线平移 ⇒ 方向、每单位读数走多远;模型的 W 按相似变换搬到世界比
+                dq = np.array([Qs[k][j] - Qs[i0][j] for k in ks]); dp = np.array([Tp[k] - Tp[i0] for k in ks])
+                g = (dp.T @ dq) / float(dq @ dq)          # 每单位读数走的(世界,米)
+                gm = s * (Rg @ W[j])
+                ang = math.degrees(math.acos(min(1.0, abs(float(g @ gm)) / (np.linalg.norm(g) * np.linalg.norm(gm)))))
+                out.append("轴%d(走)方向差 %.2f° 每单位读数走 真 %.1f / 模型 %.1f mm" % (j, ang, 1000 * np.linalg.norm(g), 1000 * np.linalg.norm(gm)))
                 continue
             A = []; B = []; ws = []
             for k in ks:
@@ -172,8 +191,7 @@ for arm in range(1, 4):
         # 每条配点投回世界里那只眼:按驱动的对齐 vs 按真值的对齐(像素)⇒ 分得清是"配点 / 各自的点错了"还是"解错了"
         k0 = os.path.join(KDIR, "kinem_arm0.txt"); Lm = open(k0).read().split("\n"); hm = Lm[0].split()
         f0, cx0, cy0 = float(hm[5]), float(hm[7]), float(hm[9]); q00 = np.array([float(x) for x in Lm[1].split()[1:]])
-        W0 = np.array([[float(x) for x in l.split()[2:5]] for l in Lm[2:] if l.startswith("axis")])
-        P0_ = np.array([[float(x) for x in l.split()[5:8]] for l in Lm[2:] if l.startswith("axis")])
+        W0, P0_, S0_ = read_axes(Lm[2:])
         Q0r = [np.array([float(x) for x in l.split("||")[0].split("|")[1].split()]) for l in rows if int(l.split("|")[0].split()[1]) == 0]
         fe_ = open(os.path.join(KDIR, "fixed_eye.txt")).read().split() if os.path.exists(os.path.join(KDIR, "fixed_eye.txt")) else None
         def proj(Rc, pc, f, cx, cy, X):
@@ -183,7 +201,7 @@ for arm in range(1, 4):
         for r in L_:
             va, vf = int(r[0]), int(r[1]); uv = r[3:5]; Xb = r[11:14]
             if va == 0:
-                Rc, pc = kinem_fk(W0, P0_, q00, Q0r[vf]); f, cx, cy = f0, cx0, cy0
+                Rc, pc = kinem_fk(W0, P0_, q00, Q0r[vf], S0_); f, cx, cy = f0, cx0, cy0
             elif fe_ is not None:
                 f = float(fe_[1]); cx = float(fe_[3]); cy = float(fe_[5])
                 pc = np.array([float(v) for v in fe_[fe_.index("pos") + 1: fe_.index("pos") + 4]]); Rc = np.array([float(v) for v in fe_[fe_.index("R") + 1: fe_.index("R") + 10]]).reshape(3, 3)
