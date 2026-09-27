@@ -3,6 +3,8 @@ with Ada.Numerics.Long_Elementary_Functions; use Ada.Numerics.Long_Elementary_Fu
 with Codec;
 with Ada.Containers;
 with Ada.Unchecked_Deallocation;
+with Chan;
+with Table;
 package body Zone is
    function Is_Self (Z : Hand_Zone; R : Picture.Region; W, Hh : Natural) return Boolean is
       --  只按瓣自己的框判(不外扩):EE2 实测外扩半个框把紧挨着右爪的剪刀当成了"我"
@@ -575,15 +577,21 @@ package body Zone is
          R : Long_Float := Selfmap.Jaw_Of (F, Arm, K);
          S : Long_Float := 0.03 * Long_Float'Max (1.0, abs R);   --  头一步 = 读数量级的 3%(比例,同关节扫描)
          Rn : Long_Float;
+         Seen_Move : Boolean := False;   --  这一趟里画面已经跟着动过
       begin
          Steps := 0; Good := False; R_End := R;
          for Pushes in 1 .. 12 loop   --  最多推 12 下(次数;×4 放大,12 下远超任何读数量级)
             declare
                Before : constant Plug.Cam_Vectors.Vector := F.Cams;
+               Moved : Boolean;
             begin
                Go_Jaw (R + Dir * S, Rn, Steps, Good);
                exit when not Good;
-               exit when Dir * (Rn - R) < 0.5 * S or else not Any_Moved (Before, F.Cams);   --  挪不到命令的一半(纯数学的一半)、或画面里什么都没跟着动 = 到头
+               Moved := Any_Moved (Before, F.Cams);
+               --  到头 = 读数挪不到命令的一半(纯数学的一半),或者这一趟里手指已经在画面里动过、这一下画面什么都没跟着动(读数只是命令的回声的身体)。
+               --  动之前画面不动不算到头:x5 合到底以后命令 0–0.185 这一段手指不动、读数照样跟着命令走(V1B28 2026-09-27,往回推两步就被当成了到头)
+               exit when Dir * (Rn - R) < 0.5 * S or else (Seen_Move and then not Moved);
+               Seen_Move := Seen_Move or else Moved;
                R := Rn;
                S := S * Ramp;
             end;
@@ -716,7 +724,9 @@ package body Zone is
                Cw : constant Natural := F.Cams (Natural (Hc)).W;
                Ch : constant Natural := F.Cams (Natural (Hc)).H;
                Pre : constant Buf := F.Cams (Natural (Hc)).Gray;
-               Step : constant Long_Float := 4.0 * M.Amp (H.Arm * M.Per_Arm);   --  4 倍平移探针(倍数,无量纲;同 Geo_Go 的一压)
+               --  绕世界竖直轴转 64 倍转动探针(倍数,无量纲;同步幅阶梯的顶档,约 0.16 弧度):背景挪几十像素、手指跟着眼不动,眼不挪位置、碰不着东西
+               --  (V1B28 2026-09-27:平移 4 倍探针 = 2.9 mm,木纹只挪约 4 像素,后半段灰度地板 26 ⇒ 合到的区里 89% 的像素也"没变",分不开)
+               Step : constant Long_Float := 64.0 * M.Amp (H.Arm * M.Per_Arm + 3);
                In_Lobe : constant Bools := Lobe_Pixels (Z, Cw, Ch);
                Stat_L, Stat_A, N_L, N_A : Natural := 0;
                Used : Natural;
@@ -728,7 +738,12 @@ package body Zone is
                   begin
                      C.Kind := Plug.Ee; C.Arm := H.Arm; C.Pose := Pose; C.Jaw := Target;
                      if Dir = 0 then
-                        C.Pose (0) := C.Pose (0) + Step;
+                        declare
+                           Av : Table.Vec := Table.Zero_Vec;
+                        begin
+                           Av (5) := Step;
+                           C.Pose := Chan.Compose (Pose, Av);
+                        end;
                      end if;
                      if not Plug.Act (L, C) or else not Plug.Sense (L, F) then
                         return;
@@ -764,7 +779,7 @@ package body Zone is
                begin
                   Known := N_L > 0 and then N_A > 0 and then (Fl > 2.0 * Fa or else Fa > 2.0 * Fl);
                   Hi_Open := Fl > Fa;
-                  Put_Line ("[身]   胳膊挪 " & Codec.Fmt (Step, 4) & " 再挪回来:它自己那只眼里没跟着变的手指像素 在瓣里 " & Codec.Img (Stat_L) & " / " & Codec.Img (N_L)
+                  Put_Line ("[身]   手绕眼转 " & Codec.Fmt (Step, 3) & " 弧度再转回来:它自己那只眼里没跟着变的手指像素 在瓣里 " & Codec.Img (Stat_L) & " / " & Codec.Img (N_L)
                             & "、在合到的区里 " & Codec.Img (Stat_A) & " / " & Codec.Img (N_A)
                             & (if Known then " ⇒ 读数 " & Codec.Fmt ((if Hi_Open then Hi_R else Lo_R), 3) & " 那头张开" else " ⇒ 看不出哪头张开(差不到两倍)"));
                end;
