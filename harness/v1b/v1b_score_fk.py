@@ -313,3 +313,83 @@ try:
                    1000 * np.linalg.norm(tc), 1000 * g["gap"] * s_, 1000 * truth_gap, "碰桌面量的" if g.get("tip_touch") else "不是碰桌面量的"))
 except Exception as e:
     print("指尖:打不了分(%s)" % e)
+
+# ── 第七种考法:桌面高度(驱动的世界 z = 0 就是它量的桌面;板 = 三角出、落在桌面上的点,都在身体文件旁边的 .kin.txt 里,世界系)
+#    ⇒ 按第一只手的换算搬到仿真米,和场景配置里的桌面顶(env_cfg/scene/default.yml:Table 的 default_pos z + 厚度一半)比 ──
+# ── 第八种考法:头顶眼按像素错多少(V1 判据"头顶眼 < 2 px"):真桌面上铺一片格点,按仿真相机配置(env_cfg/camera/camera_config.yml 的 cam_head:
+#    pos、ori 欧拉角度数;内参按 template.py 的焦距 / 横向孔径 × 画幅宽)投一次、按驱动的头顶眼(.kin.txt 的 fixed 行,世界系)投一次,两边差几像素 ──
+try:
+    kin = (mb.group(1) + ".kin.txt") if mb else None
+    if kin and os.path.exists(kin) and 0 in FITS:
+        s0, Rg0, tg0 = FITS[0][:3]
+        Lk = open(kin).read().split("\n")
+        Rw_k = np.array([float(v) for v in [l for l in Lk if l.startswith("rw ")][0].split()[1:10]]).reshape(3, 3)
+        Ow_k = np.array([float(v) for v in [l for l in Lk if l.startswith("o ")][0].split()[1:4]])
+        w2s_k = lambda p: s0 * (Rg0 @ (Rw_k.T @ p + Ow_k)) + tg0
+        board = np.array([[float(v) for v in l.split()[1:4]] for l in Lk if l.startswith("board ")])
+        import yaml
+        sc = yaml.safe_load(open("/root/RoboDojo/env_cfg/scene/default.yml"))["Table"]
+        top = sc["default_pos"][2] + sc["scale"][2] / 2
+        if len(board):
+            Pb = np.array([w2s_k(p) for p in board]); dz = 1000 * (Pb[:, 2] - top)
+            n_s = Rg0 @ (Rw_k.T @ np.array([0.0, 0.0, 1.0])); tilt = math.degrees(math.acos(min(1.0, abs(n_s[2]) / np.linalg.norm(n_s))))
+            print("桌面:板上 %d 个点搬到仿真里,比场景配置的桌面顶 %.3f m 高 中位 %+.1f mm、九成 %.1f mm(绝对值)· 驱动的桌面法向和竖直差 %.2f°" %
+                  (len(board), top, np.median(dz), np.quantile(np.abs(dz), 0.9), tilt))
+        fl = [l for l in Lk if l.startswith("fixed ")]
+        if fl:
+            t = fl[0].split()
+            if len(t) >= 41 and t[1] == "1":
+                fd, cxd, cyd = float(t[2]), float(t[3]), float(t[4]); k1, k2 = float(t[5]), float(t[6])
+                Rce = np.array([float(v) for v in t[11:20]]).reshape(3, 3); pos_w = np.array([float(v) for v in t[38:41]])
+                Rd = Rg0 @ Rw_k.T @ Rce; pd = w2s_k(pos_w)
+                cc = yaml.safe_load(open("/root/RoboDojo/env_cfg/camera/camera_config.yml"))["cam_head"]["camera"]
+                src = open("/root/RoboDojo/env_cfg/camera/template.py").read()
+                blk = src[src.index(cc["type"].upper() + " = {"):]; blk = blk[:blk.index("}")]
+                fl_mm = float(re.search(r'"focal_length":\s*([0-9.]+)', blk).group(1)); ha = float(re.search(r'"horizontal_aperture":\s*([0-9.]+)', blk).group(1))
+                W_, H_ = [int(v) for v in re.search(r'"resolution":\s*\((\d+),\s*(\d+)\)', blk).groups()]
+                ft = fl_mm / ha * W_
+                ex, ey, ez = [math.radians(a) for a in cc["ori"]]
+                Rx_ = np.array([[1, 0, 0], [0, math.cos(ex), -math.sin(ex)], [0, math.sin(ex), math.cos(ex)]])
+                Ry_ = np.array([[math.cos(ey), 0, math.sin(ey)], [0, 1, 0], [-math.sin(ey), 0, math.cos(ey)]])
+                Rz_ = np.array([[math.cos(ez), -math.sin(ez), 0], [math.sin(ez), math.cos(ez), 0], [0, 0, 1]])
+                Rt_c = Rz_ @ Ry_ @ Rx_; pt_c = np.array(cc["pos"], dtype=float)
+                def proj_c(R, p, f, cx, cy, X, k1=0.0, k2=0.0):
+                    Xc = R.T @ (X - p)
+                    if Xc[2] >= 0: return None
+                    x, y = Xc[0] / -Xc[2], Xc[1] / -Xc[2]; r2 = x * x + y * y; d = 1 + k1 * r2 + k2 * r2 * r2
+                    return np.array([cx + f * x * d, cy - f * y * d])
+                errs = []
+                for gx in np.linspace(-0.7, 0.7, 57):
+                    for gy in np.linspace(-0.6, 0.5, 45):
+                        X = np.array([gx, gy, top]); ut = proj_c(Rt_c, pt_c, ft, W_ / 2, H_ / 2, X)
+                        if ut is None or not (0 <= ut[0] < W_ and 0 <= ut[1] < H_): continue
+                        ud = proj_c(Rd, pd, fd, cxd, cyd, X, k1, k2)
+                        if ud is not None: errs.append(np.linalg.norm(ud - ut))
+                errs = np.array(errs)
+                ang = math.degrees(np.linalg.norm(logR(Rt_c.T @ Rd)))
+                print("头顶眼(按像素):真桌面上 %d 个格点,按驱动的头顶眼投和按仿真相机投 差 中位 %.2f px、九成 %.2f px、最大 %.2f px · 焦距 %.1f / 真 %.1f · 位置差 %.1f mm · 朝向差 %.3f°" %
+                      (len(errs), np.median(errs), np.quantile(errs, 0.9), errs.max(), fd, ft, 1000 * np.linalg.norm(pd - pt_c), ang))
+                #    被测试钩子转过(sim.log 里 "[camtest] cam_head 绕自己的光轴转了 X°(Fabric" 每次一行)⇒ 真相机 = 配置的朝向再绕自己的光轴(本地 z)转那么多;
+                #    驱动重标以后的头顶眼在几何文件(<身体文件>.geo.json 的第 world_cam 台,世界系)里 ⇒ 同样按像素比
+                sl = open(os.path.join(RUN, "sim.log"), encoding="utf-8", errors="ignore").read() if os.path.exists(os.path.join(RUN, "sim.log")) else ""
+                rolls = [float(x) for x in re.findall(r"\[camtest\] cam_head 绕自己的光轴转了 ([-0-9.]+)°\(Fabric", sl)]
+                gp = mb.group(1) + ".geo.json"
+                wc = int([l for l in Lk if l.startswith("world_cam")][0].split()[1])
+                if rolls and os.path.exists(gp):
+                    th = math.radians(sum(rolls))
+                    Rt_r = Rt_c @ np.array([[math.cos(th), -math.sin(th), 0], [math.sin(th), math.cos(th), 0], [0, 0, 1]])
+                    gg = [g for g in json.load(open(gp))["cams"] if g["cam"] == wc][0]
+                    Rd2 = Rg0 @ Rw_k.T @ np.array(gg["r_ce"]).reshape(3, 3); pd2 = w2s_k(np.array(gg["pos"]))
+                    e2 = []
+                    for gx in np.linspace(-0.7, 0.7, 57):
+                        for gy in np.linspace(-0.6, 0.5, 45):
+                            X = np.array([gx, gy, top]); ut = proj_c(Rt_r, pt_c, ft, W_ / 2, H_ / 2, X)
+                            if ut is None or not (0 <= ut[0] < W_ and 0 <= ut[1] < H_): continue
+                            ud = proj_c(Rd2, pd2, gg["f"], gg["cx"], gg["cy"], X, gg.get("k1", 0.0), gg.get("k2", 0.0))
+                            if ud is not None: e2.append(np.linalg.norm(ud - ut))
+                    e2 = np.array(e2)
+                    print("头顶眼被转了 %s°(共 %.0f°)以后驱动重标的那份:真桌面上 %d 个格点差 中位 %.2f px、九成 %.2f px、最大 %.2f px · 位置差 %.1f mm · 朝向差 %.3f°" %
+                          (" + ".join("%.0f" % r for r in rolls), sum(rolls), len(e2), np.median(e2), np.quantile(e2, 0.9), e2.max(),
+                           1000 * np.linalg.norm(pd2 - pt_c), math.degrees(np.linalg.norm(logR(Rt_r.T @ Rd2)))))
+except Exception as e:
+    print("桌面 / 头顶眼按像素:打不了分(%s)" % e)
