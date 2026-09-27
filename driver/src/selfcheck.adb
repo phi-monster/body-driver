@@ -5235,8 +5235,12 @@ begin
       K.World_Cam := 0;
       K.Rw := Rodrigues ([0.1, -0.2, 0.3]); K.O := [0.5, -0.25, 3.125];
       K.Plane_Pt := [0.0, 0.0, 0.0]; K.Plane_N := [0.0, 0.0, 1.0]; K.Plane_Rms := 0.0043;
-      K.Fixed_Eye := No_Geo; K.Fixed_Eye.Valid := True; K.Fixed_Eye.Fixed := True; K.Fixed_Eye.F := 289.25; K.Fixed_Eye.Cx := 320.0; K.Fixed_Eye.Cy := 240.0;
-      K.Fixed_Eye.Pos := [5.7, -2.75, 10.35]; K.Fixed_Eye.R_Ce := Rodrigues ([1.0, 0.01, -0.02]);
+      --  不动的眼:记录里每个字段都给一个不是缺省的数(09-27 V1B38:原来只存了五样,像素残差没存,装回后核对的门成了 0)
+      K.Fixed_Eye := (Valid => True, F => 289.25, Cx => 320.5, Cy => 239.75, K1 => -0.0123, K2 => 0.00456, K1_Sd => 0.0007, F_Meas => 289.125,
+                      F_Prior => 300.5, F_Prior_Sd => 45.25, R_Ce => Rodrigues ([1.0, 0.01, -0.02]), Off => [0.011, -0.022, 0.033], Rms => 1.376,
+                      F_Sd => 0.61, Rot_Sd => 0.0021, Off_Sd => 0.0033, Pos_Sd => 0.0144, Dropped => 17, Tip_Valid => True, Tip_Touch => True,
+                      Tip => [0.1, -0.2, -1.7], Gap => 1.75, Stride => 0.888, Stride_Rot => 0.161, Fixed => True, Pos => [5.7, -2.75, 10.35]);
+      K.Plane_Pt := [0.001, -0.002, 0.003]; K.Plane_N := [0.0, 0.6, 0.8];
       for A in 0 .. 1 loop
          declare
             W : Jointboot.Arm_World;
@@ -5311,21 +5315,76 @@ begin
                Worst := 1.0;
             end if;
          end loop;
-         Cmp (K.Fixed_Eye.F, K2.Fixed_Eye.F); Cmp (K.Plane_Rms, K2.Plane_Rms);
+         declare
+            A : Cam_Geo renames K.Fixed_Eye;
+            B : Cam_Geo renames K2.Fixed_Eye;
+         begin
+            Cmp (A.F, B.F); Cmp (A.Cx, B.Cx); Cmp (A.Cy, B.Cy); Cmp (A.K1, B.K1); Cmp (A.K2, B.K2); Cmp (A.K1_Sd, B.K1_Sd); Cmp (A.F_Meas, B.F_Meas);
+            Cmp (A.F_Prior, B.F_Prior); Cmp (A.F_Prior_Sd, B.F_Prior_Sd); Cmp (A.Rms, B.Rms); Cmp (A.F_Sd, B.F_Sd); Cmp (A.Rot_Sd, B.Rot_Sd);
+            Cmp (A.Off_Sd, B.Off_Sd); Cmp (A.Pos_Sd, B.Pos_Sd); Cmp (Long_Float (A.Dropped), Long_Float (B.Dropped)); Cmp (A.Gap, B.Gap);
+            Cmp (A.Stride, B.Stride); Cmp (A.Stride_Rot, B.Stride_Rot);
+            for I in 0 .. 2 loop
+               Cmp (A.Pos (I), B.Pos (I)); Cmp (A.Off (I), B.Off (I)); Cmp (A.Tip (I), B.Tip (I));
+               for J in 0 .. 2 loop
+                  Cmp (A.R_Ce (I, J), B.R_Ce (I, J));
+               end loop;
+            end loop;
+            if A.Valid /= B.Valid or else A.Fixed /= B.Fixed or else A.Tip_Valid /= B.Tip_Valid or else A.Tip_Touch /= B.Tip_Touch then
+               Worst := 1.0;
+            end if;
+         end;
+         Cmp (K.Plane_Rms, K2.Plane_Rms); Cmp (Long_Float (K.World_Cam), Long_Float (K2.World_Cam));
          for I in 0 .. 2 loop
-            Cmp (K.Fixed_Eye.Pos (I), K2.Fixed_Eye.Pos (I)); Cmp (K.O (I), K2.O (I));
+            Cmp (K.O (I), K2.O (I)); Cmp (K.Plane_Pt (I), K2.Plane_Pt (I)); Cmp (K.Plane_N (I), K2.Plane_N (I));
             for J in 0 .. 2 loop
-               Cmp (K.Rw (I, J), K2.Rw (I, J)); Cmp (K.Fixed_Eye.R_Ce (I, J), K2.Fixed_Eye.R_Ce (I, J));
+               Cmp (K.Rw (I, J), K2.Rw (I, J));
             end loop;
          end loop;
-         for P in 0 .. 2 loop
-            Cmp (K.Board (P).Pw (0), K2.Board (P).Pw (0)); Cmp (K.Board (P).Cov (2, 2), K2.Board (P).Cov (2, 2)); Cmp (K.Board (P).U, K2.Board (P).U);
+         for P in 0 .. Natural'Min (Natural (K.Board.Length), Natural (K2.Board.Length)) - 1 loop
+            Cmp (K.Board (P).U, K2.Board (P).U); Cmp (K.Board (P).V, K2.Board (P).V); Cmp (K.Board (P).Sh, K2.Board (P).Sh);
+            Cmp (Long_Float (K.Board (P).Views), Long_Float (K2.Board (P).Views));
+            for I in 0 .. 2 loop
+               Cmp (K.Board (P).Pw (I), K2.Board (P).Pw (I));
+               for J in 0 .. 2 loop
+                  Cmp (K.Board (P).Cov (I, J), K2.Board (P).Cov (I, J));
+               end loop;
+            end loop;
          end loop;
-         if Natural (K2.Board.Length) /= 3 or else K2.Ds (0).World_Img.RGB /= Img.RGB or else To_String (K2.Key) /= To_String (K.Key) or else not K2.Fixed_Eye.Valid then
+         for A in 0 .. 1 loop
+            Cmp (K.Worlds (A).Model.Cx, K2.Worlds (A).Model.Cx); Cmp (K.Worlds (A).Model.Cy, K2.Worlds (A).Model.Cy);
+            Cmp (Long_Float (K.Worlds (A).Model.N), Long_Float (K2.Worlds (A).Model.N));
+            Cmp (Long_Float (K.Ds (A).W), Long_Float (K2.Ds (A).W)); Cmp (Long_Float (K.Ds (A).H), Long_Float (K2.Ds (A).H));
+            if K.Worlds (A).Valid /= K2.Worlds (A).Valid or else K.Worlds (A).Model.Valid /= K2.Worlds (A).Model.Valid then
+               Worst := 1.0;
+            end if;
+         end loop;
+         if Natural (K2.Board.Length) /= 3 or else K2.Ds (0).World_Img.RGB /= Img.RGB or else To_String (K2.Key) /= To_String (K.Key) then
             Worst := 1.0;
          end if;
       end if;
-      Check (Okl and then Worst < 1.0e-8, "⑤ 前半段存进文件再读回来:每一个数最多差 " & Long_Float'Image (Worst) & "(要 < 1e-8;没量到头的界、核对用的图、钥匙原样回来)· " & To_String (Note));
+      Check (Okl and then Worst < 1.0e-8, "⑤ 前半段存进文件再读回来:每一个数最多差 " & Long_Float'Image (Worst)
+             & "(要 < 1e-8;不动的眼整份相机几何、板上每个点的每一项、没量到头的界、核对用的图、钥匙原样回来)· " & To_String (Note));
+      --  旧版文件(kin 1:不动的眼只存了五样)不装回:读到它 = 从零量,不拿缺了像素残差的那份去核
+      declare
+         Fo : Ada.Text_IO.File_Type;
+         Lines : Strs;
+         K3 : Jointboot.Kin_Store;
+         Ok3 : Boolean;
+         Note3 : Unbounded_String;
+      begin
+         Ada.Text_IO.Open (Fo, Ada.Text_IO.In_File, Path);
+         while not Ada.Text_IO.End_Of_File (Fo) loop
+            Lines.Append (Ada.Text_IO.Get_Line (Fo));
+         end loop;
+         Ada.Text_IO.Close (Fo);
+         Ada.Text_IO.Create (Fo, Ada.Text_IO.Out_File, Path);
+         for L of Lines loop
+            Ada.Text_IO.Put_Line (Fo, (if L = "kin 2" then "kin 1" else L));
+         end loop;
+         Ada.Text_IO.Close (Fo);
+         Jointboot.Load_Kin (Path, K3, Ok3, Note3);
+         Check (not Ok3, "⑤ 旧版前半段文件(kin 1)不装回 ⇒ 从零量:" & To_String (Note3));
+      end;
       declare
          D_Same, D_Moved, D_Few : Floats;
       begin

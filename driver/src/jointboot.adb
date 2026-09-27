@@ -2610,14 +2610,27 @@ package body Jointboot is
       end Put_V3;
    begin
       Create (Fo, Out_File, Path);
-      Put_Line (Fo, "kin 1");
+      Put_Line (Fo, "kin 2");   --  格式版本:2 = 不动的眼整份相机几何(09-27);1 的不动的眼没存像素残差,读到 1 ⇒ 从零量
       Put_Line (Fo, "key " & To_String (K.Key));
       Put_Line (Fo, "world_cam" & Integer'Image (K.World_Cam));
       Put (Fo, "rw"); Put_M3 (K.Rw); New_Line (Fo);
       Put (Fo, "o"); Put_V3 (K.O); New_Line (Fo);
       Put (Fo, "plane"); Put_V3 (K.Plane_Pt); Put_V3 (K.Plane_N); Put_Line (Fo, " " & F9 (K.Plane_Rms));
-      Put (Fo, "fixed " & (if K.Fixed_Eye.Valid then "1" else "0") & " " & F9 (K.Fixed_Eye.F) & " " & F9 (K.Fixed_Eye.Cx) & " " & F9 (K.Fixed_Eye.Cy));
-      Put_V3 (K.Fixed_Eye.Pos); Put_M3 (K.Fixed_Eye.R_Ce); New_Line (Fo);
+      --  不动的眼:整份相机几何按记录的次序一个字段不落(读回是不带 others 的整份聚合,记录加了字段那边编译不过)。
+      --  09-27 V1B35 / V1B38:原来只存焦距、主点、位置、朝向,没存像素残差 ⇒ 装回后每轮核对的门 = 3 × 0 px,板上一个点都对不上,核对瞎了还报"没挪、没挡"
+      declare
+         G : Geom.Cam_Geo renames K.Fixed_Eye;
+         function B (X : Boolean) return String is (if X then "1" else "0");
+      begin
+         Put (Fo, "fixed " & B (G.Valid) & " " & F9 (G.F) & " " & F9 (G.Cx) & " " & F9 (G.Cy) & " " & F9 (G.K1) & " " & F9 (G.K2) & " " & F9 (G.K1_Sd)
+              & " " & F9 (G.F_Meas) & " " & F9 (G.F_Prior) & " " & F9 (G.F_Prior_Sd));
+         Put_M3 (G.R_Ce); Put_V3 (G.Off);
+         Put (Fo, " " & F9 (G.Rms) & " " & F9 (G.F_Sd) & " " & F9 (G.Rot_Sd) & " " & F9 (G.Off_Sd) & " " & F9 (G.Pos_Sd) & " " & Codec.Img (G.Dropped)
+              & " " & B (G.Tip_Valid) & " " & B (G.Tip_Touch));
+         Put_V3 (G.Tip);
+         Put (Fo, " " & F9 (G.Gap) & " " & F9 (G.Stride) & " " & F9 (G.Stride_Rot) & " " & B (G.Fixed));
+         Put_V3 (G.Pos); New_Line (Fo);
+      end;
       for A in 0 .. Natural (K.Worlds.Length) - 1 loop
          declare
             W : constant Arm_World := K.Worlds (A);
@@ -2707,7 +2720,7 @@ package body Jointboot is
             Tag : constant String := (if T.Is_Empty then "" else T (0));
          begin
             if Tag = "kin" then
-               Version_Ok := Natural (T.Length) >= 2 and then T (1) = "1";
+               Version_Ok := Natural (T.Length) >= 2 and then T (1) = "2";
             elsif Tag = "key" and then Natural (T.Length) >= 2 then
                K.Key := To_Unbounded_String (T (1));
             elsif Tag = "world_cam" then
@@ -2718,11 +2731,14 @@ package body Jointboot is
                K.O := V3_At (T, 1);
             elsif Tag = "plane" then
                K.Plane_Pt := V3_At (T, 1); K.Plane_N := V3_At (T, 4); K.Plane_Rms := V (T, 7);
+            elsif Tag = "fixed" and then Natural (T.Length) < 41 then   --  整份相机几何 = 标签 + 40 个字段(格式);少了 = 不是这一版
+               Version_Ok := False;
             elsif Tag = "fixed" then
-               K.Fixed_Eye := Geom.No_Geo;
-               K.Fixed_Eye.Valid := T (1) = "1"; K.Fixed_Eye.Fixed := K.Fixed_Eye.Valid;
-               K.Fixed_Eye.F := V (T, 2); K.Fixed_Eye.Cx := V (T, 3); K.Fixed_Eye.Cy := V (T, 4);
-               K.Fixed_Eye.Pos := V3_At (T, 5); K.Fixed_Eye.R_Ce := M3_At (T, 8);
+               K.Fixed_Eye := Geom.Cam_Geo'(Valid => T (1) = "1", F => V (T, 2), Cx => V (T, 3), Cy => V (T, 4), K1 => V (T, 5), K2 => V (T, 6), K1_Sd => V (T, 7),
+                                           F_Meas => V (T, 8), F_Prior => V (T, 9), F_Prior_Sd => V (T, 10), R_Ce => M3_At (T, 11), Off => V3_At (T, 20),
+                                           Rms => V (T, 23), F_Sd => V (T, 24), Rot_Sd => V (T, 25), Off_Sd => V (T, 26), Pos_Sd => V (T, 27),
+                                           Dropped => Natural'Value (T (28)), Tip_Valid => T (29) = "1", Tip_Touch => T (30) = "1", Tip => V3_At (T, 31),
+                                           Gap => V (T, 34), Stride => V (T, 35), Stride_Rot => V (T, 36), Fixed => T (37) = "1", Pos => V3_At (T, 38));
             elsif Tag = "arm" then
                declare
                   A : constant Natural := Arm_Of (T);
@@ -2796,7 +2812,11 @@ package body Jointboot is
          end;
       end loop;
       Close (Fi);
-      if not Version_Ok or else K.Worlds.Is_Empty or else Length (K.Key) = 0 then
+      if not Version_Ok then
+         Note := To_Unbounded_String ("格式是旧版(" & Path & ";不动的眼没存全)");
+         return;
+      end if;
+      if K.Worlds.Is_Empty or else Length (K.Key) = 0 then
          Note := To_Unbounded_String ("文件不全(" & Path & ")");
          return;
       end if;
@@ -3037,7 +3057,7 @@ package body Jointboot is
             Rc : constant Geom.M3 := Geom.Mul (Geom.Tr (K.Rw), K.Fixed_Eye.R_Ce);
          begin
             Create (Fo, Out_File, Dump & "/fixed_eye.txt");
-            Put (Fo, "f " & Codec.Fmt (K.Fixed_Eye.F, 6) & " cx " & Codec.Fmt (K.Fixed_Eye.Cx, 3) & " cy " & Codec.Fmt (K.Fixed_Eye.Cy, 3) & " rms 0 used 0 of 0 pos "
+            Put (Fo, "f " & Codec.Fmt (K.Fixed_Eye.F, 6) & " cx " & Codec.Fmt (K.Fixed_Eye.Cx, 3) & " cy " & Codec.Fmt (K.Fixed_Eye.Cy, 3) & " rms " & Codec.Fmt (K.Fixed_Eye.Rms, 4) & " used 0 of 0 pos "
                  & F9 (Pos (0) + K.O (0)) & " " & F9 (Pos (1) + K.O (1)) & " " & F9 (Pos (2) + K.O (2)) & " R");
             for I in 0 .. 2 loop
                for J in 0 .. 2 loop
