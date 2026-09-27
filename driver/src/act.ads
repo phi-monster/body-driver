@@ -428,6 +428,10 @@ package Act is
    procedure Geo_Boot_Eyes (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);
    procedure Geo_Boot_Support (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);
    --  ④ 每条臂一条命令能走多远还走得到(阶梯探)
+   --  这只手一条命令转得到的最大一档(弧度):按运动学在量到的关节限位里问反解(Plug.Reach,不动胳膊)—— 从位姿 P0 绕世界 x 轴转,
+   --  从一档转动(Notch)起每次翻倍,反解位置还差不到 Tol_P、朝向还差不到 Tol_R ⇒ 转得到;第一次转不到就停、取上一档;最多到 π
+   --  (转动向量过 π 是反方向的小转动,纯几何)。没有运动学 ⇒ 0(量不了)
+   function Kin_Turn_Reach (Arm : Natural; P0 : Plug.Arm_Pose; Notch, Tol_P, Tol_R : Long_Float) return Long_Float;
    procedure Geo_Boot_Stride (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);
    procedure Round (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);
 end Act;

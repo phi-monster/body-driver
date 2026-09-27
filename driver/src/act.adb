@@ -12173,11 +12173,52 @@ package body Act is
       end loop;
    end Geo_Boot_Support;
 
+   function Kin_Turn_Reach (Arm : Natural; P0 : Plug.Arm_Pose; Notch, Tol_P, Tol_R : Long_Float) return Long_Float is
+      Best : Long_Float := 0.0;
+      Ang : Long_Float := Notch;
+      Pe, Re : Long_Float;
+      Ok : Boolean;
+      Av : Table.Vec := Table.Zero_Vec;
+   begin
+      if Notch <= 0.0 then
+         return 0.0;
+      end if;
+      while Ang <= Ada.Numerics.Pi loop
+         Av (3) := Ang;
+         Plug.Reach (Arm, Chan.Compose (P0, Av), Pe, Re, Ok);
+         exit when not Ok or else Pe > Tol_P or else Re > Tol_R;
+         Best := Ang;
+         Ang := Ang + Ang;
+      end loop;
+      return Best;
+   end Kin_Turn_Reach;
+
    --  ④ 每条臂:一条命令能走多远还走得到 —— 从原处往上走 4、16、64 倍探针幅度(倍数,无量纲的阶梯),每档走完退回;
-   --  实到不足命令一半(纯数学的一半)就是这条臂在这一档走不到(关节到头或控制器不跟),取走得到的最大一档。量一次存进几何文件
+   --  实到不足命令一半(纯数学的一半)就是这条臂在这一档走不到(关节到头或控制器不跟),取走得到的最大一档。量一次存进几何文件。
+   --  转动那一档不再推阶梯,每次开机按运动学算(Kin_Turn_Reach,09-28)
    procedure Geo_Boot_Stride (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context) is
       Rungs : constant array (1 .. 3) of Long_Float := [4.0, 16.0, 64.0];
    begin
+      --  转动那一档:每次开机按运动学算(09-28 S1A2:阶梯只推到第三档 0.161 弧度就停,那是阶梯的顶,不是身体的顶 —— 碰指尖时一条命令
+      --  转 1.36 弧度;转眼看剪刀要 17 步、67 拍,一集 200 拍)。不动胳膊、不占拍数;平移那一档照旧按阶梯量(脑的"一个单位"按它)
+      for A in 0 .. C.Map.Arms - 1 loop
+         declare
+            Hc : constant Integer := (if A < Natural (C.Map.Cam_On_Arm.Length) then C.Map.Cam_On_Arm (A) else -1);
+            Notch_R : constant Long_Float := (if A * Chan.Per_Arm + 3 < Natural (C.Map.Amp.Length) then C.Map.Amp (A * Chan.Per_Arm + 3) else 0.0);
+         begin
+            if Hc >= 0 and then Natural (Hc) < Natural (C.Geo.Length) and then A < Natural (F.EE.Length) then
+               declare
+                  G : Geom.Cam_Geo := C.Geo (Natural (Hc));
+                  P0 : constant Plug.Arm_Pose := F.EE (A);
+               begin
+                  G.Stride_Rot := Kin_Turn_Reach (A, P0, Notch_R, Geo_Base (C, A), Notch_R);
+                  C.Geo.Replace_Element (Natural (Hc), G);
+                  Geo_Say ("第" & Codec.Img (A + 1) & " 只手:一条命令转得到的最大一档 = " & Codec.Fmt (G.Stride_Rot, 3)
+                           & " 弧度(按运动学在量到的关节限位里问反解,不动胳膊;一档转动 " & Codec.Fmt (Notch_R, 4) & " 弧度起翻倍)");
+               end;
+            end if;
+         end;
+      end loop;
       for A in 0 .. C.Map.Arms - 1 loop
          declare
             Hc : constant Integer := (if A < Natural (C.Map.Cam_On_Arm.Length) then C.Map.Cam_On_Arm (A) else -1);
@@ -12224,39 +12265,7 @@ package body Act is
                         end;
                      end loop;
                   end loop;
-                  --  转也探一遍(同一个阶梯,绕世界 x 轴,转动那一档是"它自己那只眼里画面挪 1 像素"的转角):一条命令能转多远还转得到
-                  --  (09-27 V1B18:转手一次按 16 倍探针幅度 = 0.04 弧度,碰桌面前要转 0.96 弧度就是 24 步)
-                  declare
-                     Notch : constant Long_Float := (if A * Chan.Per_Arm + 3 < Natural (C.Map.Amp.Length) then C.Map.Amp (A * Chan.Per_Arm + 3) else 0.0);
-                     Best_R : Long_Float := 0.0;
-                  begin
-                     if Notch > 0.0 then
-                        for R of Rungs loop
-                           declare
-                              Ln : constant Long_Float := R * Notch;
-                              Av : Table.Vec := Table.Zero_Vec;
-                              Jaw : Floats;
-                              Del : Table.Vec;
-                              Ok : Boolean;
-                              Got : Long_Float;
-                           begin
-                              Av (3) := Ln;
-                              Step_Arm (L, C, F, A, Av, Jaw, Del, Ok, Geo_Settle => True);
-                              Got := Del (3);
-                              Geo_Say ("第" & Codec.Img (A + 1) & " 只手:一条命令转 " & Codec.Fmt (Ln, 3) & " 弧度 ⇒ 实到 " & Codec.Fmt (Got, 3));
-                              declare
-                                 Back : Table.Vec := Table.Zero_Vec;
-                              begin
-                                 Back (3) := -Del (3); Back (4) := -Del (4); Back (5) := -Del (5);
-                                 Step_Arm (L, C, F, A, Back, Jaw, Del, Ok, Geo_Settle => True);
-                              end;
-                              exit when Got + Got < Ln;
-                              Best_R := Ln;
-                           end;
-                        end loop;
-                     end if;
-                     G.Stride_Rot := Best_R;
-                  end;
+
                   if Tried = 0 then
                      Geo_Say ("第" & Codec.Img (A + 1) & " 只手:步幅没量成(对方复位打断,一档都没试)⇒ 下次开机再量");
                   else
@@ -12264,8 +12273,7 @@ package body Act is
                      C.Geo.Replace_Element (Natural (Hc), G);
                      Geom.Save (To_String (C.Geo_Path), C.Geo);
                      Geo_Say ("第" & Codec.Img (A + 1) & " 只手:一条命令走得到的最大一档 = " & Mm (Best)
-                              & (if Best <= 0.0 then "(上下都走不到 ⇒ 这条臂走不了路)" else "") & "、转得到的最大一档 = " & Codec.Fmt (G.Stride_Rot, 3)
-                              & " 弧度,存进几何文件");
+                              & (if Best <= 0.0 then "(上下都走不到 ⇒ 这条臂走不了路)" else "") & ",存进几何文件");
                   end if;
                end;
             end if;

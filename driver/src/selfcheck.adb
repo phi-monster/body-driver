@@ -2098,6 +2098,25 @@ begin
              and then not C1.Touch_Valid,
              "装回身体文件:有板 ⇒ 东西躺的面装上就是板的那张(还不算这一集碰过)· 没板 ⇒ 不登记");
    end;
+   --  🔴 一条命令转得到的最大一档按运动学算(09-28 S1A2,Act.Kin_Turn_Reach):假反解只让从起点转到 1.2 弧度以内 ⇒ 从一档 0.01 起翻倍,
+   --  最后一档转得到的是 0.64(1.28 转不到就停);没有运动学(没挂反解)⇒ 0。原来按阶梯只推到第三档(64 倍一档)就停,阶梯的顶当成了身体的顶
+   declare
+      P0 : constant Plug.Arm_Pose := [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0];
+      procedure Fake_Reach (Arm : Natural; Pose : Plug.Arm_Pose; Pos_Err, Rot_Err : out Long_Float) is
+         pragma Unreferenced (Arm);
+      begin
+         Pos_Err := 0.0;
+         Rot_Err := (if Geom.Angle_Between (P0, Pose) <= 1.2 then 0.0 else 1.0);
+      end Fake_Reach;
+      R1, R0 : Long_Float;
+   begin
+      Plug.Set_Reach (Fake_Reach'Unrestricted_Access);
+      R1 := Act.Kin_Turn_Reach (0, P0, 0.01, 0.001, 0.001);
+      Plug.Set_Reach (null);
+      R0 := Act.Kin_Turn_Reach (0, P0, 0.01, 0.001, 0.001);
+      Check (abs (R1 - 0.64) < 1.0e-9 and then R0 = 0.0,
+             "一条命令转得到的最大一档按运动学问反解:反解只让转到 1.2 弧度 ⇒ " & Codec.Fmt (R1, 3) & " 弧度(翻倍的最后一档)· 没有运动学 ⇒ " & Codec.Fmt (R0, 3));
+   end;
    --  🔴 换倾角碰量指尖(2026-09-28,Geom.Tilt_Dir / Turn_To / Press_Of / Fit_Presses):合成的手 —— 两个指尖是半径 5 mm 的球(球心在眼前 79 mm、
    --  左右 ±45 mm,同 x5 的量级)、手掌三点;每一下让 Tilt_Dir 那个方向(这一瓣的视线朝方位 Azim 斜 θ,θ = 两瓣视线夹角的三分之一)转到朝正下,
    --  往下落到手上真的最低那一点碰到面,接触高度加 ±0.2 mm 的噪声;一瓣压 6 下(朝下 1 下 + 方位 0 / 72 / 144 / 216 / 288° 各 1 下)。
