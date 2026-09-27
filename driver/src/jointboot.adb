@@ -893,7 +893,8 @@ package body Jointboot is
 
    procedure Align (Ds : Sweep_Vectors.Vector; Worlds : in out Arm_World_Vectors.Vector; Css : Corr_Set_Vectors.Vector;
                     Host : String; Port : Natural; Rw : out Geom.M3; O : out Geom.V3; Ok : out Boolean; Fixed_Eye : out Geom.Cam_Geo;
-                    Board : out Geom.Scene_Pt_Vectors.Vector; Plane_Pt, Plane_N : out Geom.V3; Plane_Rms : out Long_Float; Dump : String := "") is
+                    Board : out Geom.Scene_Pt_Vectors.Vector; Plane_Pt, Plane_N : out Geom.V3; Plane_Rms : out Long_Float; Dump : String := "";
+                    Pin_Fixed_F : Long_Float := 0.0) is
       use Geom;
       Max_Pts : constant := Gx * Gy;   --  每只手最多三角几个点(同扫描格点数,次数)
       T0 : constant Ada.Calendar.Time := Ada.Calendar.Clock;
@@ -1198,7 +1199,7 @@ package body Jointboot is
          for X of Cam_Obs loop
             Scene.Append (Scene_Pt'(Pw => X.Xw, Cov => X.Cw, U => X.U, V => X.V, Sh => Sh, Views => 2));
          end loop;
-         Gt.Cx := Long_Float (Ds (0).World_Img.W) / 2.0; Gt.Cy := Long_Float (Ds (0).World_Img.H) / 2.0; Gt.F := 0.0;   --  焦距一起解
+         Gt.Cx := Long_Float (Ds (0).World_Img.W) / 2.0; Gt.Cy := Long_Float (Ds (0).World_Img.H) / 2.0; Gt.F := Pin_Fixed_F;   --  焦距一起解(Pin_Fixed_F = 0;离线对照实验才钉)
          Fit_Fixed_Board (Gt, Scene, Rp, Okf);
          Inl := (if Okf then Rp.Scene_Used else 0);
       end Fit_Cam;
@@ -1593,7 +1594,7 @@ package body Jointboot is
                begin
                   Cg.R_Ce := Rodrigues ([Xx (J), Xx (J + 1), Xx (J + 2)]);
                   Cg.Pos := [Xx (J + 3), Xx (J + 4), Xx (J + 5)];
-                  Cg.F := Exp (Xx (J + 6));
+                  Cg.F := (if Pin_Fixed_F > 0.0 then Pin_Fixed_F else Exp (Xx (J + 6)));
                end;
             end if;
             return Cg;
@@ -1833,7 +1834,8 @@ package body Jointboot is
                declare
                   K : constant Natural := Natural (Cam_Slot);
                begin
-                  G.R_Ce := Rodrigues ([X (K), X (K + 1), X (K + 2)]); G.Pos := [X (K + 3), X (K + 4), X (K + 5)]; G.F := Exp (X (K + 6));
+                  G.R_Ce := Rodrigues ([X (K), X (K + 1), X (K + 2)]); G.Pos := [X (K + 3), X (K + 4), X (K + 5)];
+                  G.F := (if Pin_Fixed_F > 0.0 then Pin_Fixed_F else Exp (X (K + 6)));
                end;
             end if;
             for K in 0 .. Nv - 1 loop

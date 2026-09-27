@@ -203,7 +203,8 @@ begin
       Pp, Pn : Geom.V3;
       Pr : Long_Float;
    begin
-      Jointboot.Align (Ds, Worlds, Css, Host, Port, Rw, O, Ok, Fixed_Eye, Board, Pp, Pn, Pr, Dump => Out_Dir);
+      Jointboot.Align (Ds, Worlds, Css, Host, Port, Rw, O, Ok, Fixed_Eye, Board, Pp, Pn, Pr, Dump => Out_Dir,
+                       Pin_Fixed_F => (if Codec.Env ("ALIGNEXAM_PIN_F") /= "" then Long_Float'Value (Codec.Env ("ALIGNEXAM_PIN_F")) else 0.0));   --  对照实验:钉住不动的眼的焦距
       --  交给开机后半段的板落盘(每行:世界系 x y z、离桌面多高、沿法向的不确定度、几只眼看见;单位 = 世界单位),离线看开机碰桌面挑的落点附近有什么
       declare
          Fo : File_Type;
