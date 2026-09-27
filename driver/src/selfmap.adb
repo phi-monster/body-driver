@@ -337,7 +337,7 @@ package body Selfmap is
             return;
          end if;
       end;
-      Put_Line ("[身] 静止噪声:本体位置 " & Codec.Fmt (M.EE_Noise, 5) & " m · 姿态 " & Codec.Fmt (M.Rot_Noise, 5) &
+      Put_Line ("[身] 静止噪声:本体位置 " & Codec.Fmt (M.EE_Noise, 5) & " 单位 · 姿态 " & Codec.Fmt (M.Rot_Noise, 5) &
                 " rad · 抓握读数 " & Codec.Fmt (M.Jaw_Noise, 4) & " · 各相机灰度地板 " &
                 (if M.Pic_Floor.Is_Empty then "-" else Codec.Img (M.Pic_Floor (0))));
       --  ② 逐通道推一下再推回来

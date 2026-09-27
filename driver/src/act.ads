@@ -397,6 +397,9 @@ package Act is
    --  朝下被顶住的一点进地图(有板的面时只和它对账、不换它);开机碰桌面时在板上找一块空的面(压的那一瓣和别的瓣落点连成的几段 R 之内没有高出面的板点)。
    --  导出只为自检
    procedure Note_Support (C : in out Context; P, N : Geom.V3; How : String);
+   --  身体的尺子(④):第一只碰桌面量过指尖的手,眼到两瓣指尖中点的距离(世界单位;没量过 = 0);给脑的长度按它说("X hand-lengths")
+   function Hand_Len (C : Context) return Long_Float;
+   function Len (C : Context; X : Long_Float) return String;
    --  RGB 图顺时针转 90°(W×H → 宽 H、高 W):原图的 (u, v) 落到新图的 (H − 1 − v, u)。量仪器转着看时配得多细用;导出只为自检
    function Turn_90 (Img : Buf; W, H : Natural) return Buf;
    --  原图(宽 W、高 H)顺时针转了 Turns 个 90° 之后那张图里的 (U, V) 换算回原图的像素。核对时画面可能被转了,转回去配完再换算回来;导出只为自检

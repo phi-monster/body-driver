@@ -886,7 +886,7 @@ package body Geom is
             --  不确定度比量本身还大 = 方程分不开它(横着挪、不转:焦距和远近绑着)⇒ 不算解出来
             if (Fit_F and then G.F_Sd >= P (6)) or else G.Rot_Sd >= 1.0 then   --  朝向的不确定度 ≥ 1 弧度 = 根本没定(无量纲)
                Why := Ada.Strings.Unbounded.To_Unbounded_String ("不确定度比量本身还大:焦距 " & Codec.Fmt (P (Base - 1), 1) & " ± " & Codec.Fmt (G.F_Sd, 1)
-                                                                & " px,朝向 ± " & Codec.Fmt (G.Rot_Sd, 3) & " rad,偏移 ± " & Codec.Fmt (G.Off_Sd, 3) & " m(残差 "
+                                                                & " px,朝向 ± " & Codec.Fmt (G.Rot_Sd, 3) & " rad,偏移 ± " & Codec.Fmt (G.Off_Sd, 3) & " 单位(残差 "
                                                                 & Codec.Fmt (Cur, 2) & " px," & Codec.Img (Nk) & " 点," & Codec.Img (Nr) & " 笔)");
                return;
             end if;
@@ -1434,7 +1434,7 @@ package body Geom is
             --  位置的不确定度比板铺开的量程还大、或焦距的不确定度比焦距还大 = 方程分不开 ⇒ 不算解出来
             --  (V1I / G1K 2026-09-24:相机解到 2.8 m / 120 m 外、残差却只有零点几像素,就是这种"解")
             if G.Pos_Sd >= Span or else (Fit_F and then G.F_Sd >= P (6)) or else G.Rot_Sd >= 1.0 then
-               Why := To_Unbounded_String ("不确定度比量本身还大:位置 ± " & Codec.Fmt (G.Pos_Sd, 3) & " m(板铺开 " & Codec.Fmt (Span, 3) & " m),焦距 "
+               Why := To_Unbounded_String ("不确定度比量本身还大:位置 ± " & Codec.Fmt (G.Pos_Sd, 3) & " 单位(板铺开 " & Codec.Fmt (Span, 3) & " 单位),焦距 "
                                            & Codec.Fmt (P (Np - 1), 1) & " ± " & Codec.Fmt (G.F_Sd, 1) & " px,朝向 ± " & Codec.Fmt (G.Rot_Sd, 3) & " rad(" & Px_Note (P) & ")");
                return;
             end if;
@@ -2420,7 +2420,7 @@ package body Geom is
                Fh_Sd : constant Long_Float := (if Has_Head and then Fit_Fh then Sd (Hb + 6) else 0.0);
             begin
                if Has_Head and then (Pos_Sd >= Span or else Fh_Sd >= Gh.F) then
-                  Why := To_Unbounded_String ("一起解之后不动的眼的不确定度比量本身还大:位置 ± " & Codec.Fmt (Pos_Sd, 3) & " m(板铺开 " & Codec.Fmt (Span, 3) & " m),焦距 ± "
+                  Why := To_Unbounded_String ("一起解之后不动的眼的不确定度比量本身还大:位置 ± " & Codec.Fmt (Pos_Sd, 3) & " 单位(板铺开 " & Codec.Fmt (Span, 3) & " 单位),焦距 ± "
                                               & Codec.Fmt (Fh_Sd, 1) & " px");
                   return;
                end if;
@@ -2433,7 +2433,7 @@ package body Geom is
                   begin
                      if Fw_Sd >= Gw.F or else Off_Sd >= Span then
                         Why := To_Unbounded_String ("一起解之后第 " & Codec.Img (Cams (C)) & " 台腕眼的不确定度比量本身还大:焦距 ± " & Codec.Fmt (Fw_Sd, 1) & " px,偏移 ± "
-                                                    & Codec.Fmt (Off_Sd, 3) & " m");
+                                                    & Codec.Fmt (Off_Sd, 3) & " 单位");
                         return;
                      end if;
                   end;

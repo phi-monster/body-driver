@@ -1087,6 +1087,32 @@ package body Act is
    --  Keep = True:不清空清单,编号接着往下排 —— 这样【每一台相机】都能各切各的、各编各的号,
    --  而号是全局唯一的。以前只有当前那一台有号:GM 里我答"一个都不是",而头顶相机里球一直看得见,
    --  只是它没有号可点。
+   --  日志里的长度(④,09-27):世界单位 = 第一只手运动学的单位(x5 约 52 mm;每具身体按身体文件固定),不是米 —— 印"单位"。
+   --  原来这里印"X m",给脑的话里"jaw 1.752 m"其实是张口 91 mm;给脑的长度一律走 Len(按身体自己的尺子)
+   function Mm (X : Long_Float) return String is (Codec.Fmt (X, 3) & " 单位");
+   --  身体的尺子(④,09-27):第一只碰桌面量过指尖的手,眼到两瓣指尖中点的距离(世界单位;一只都没量过 = 0)
+   function Hand_Len (C : Context) return Long_Float is
+   begin
+      for A in 0 .. C.Map.Arms - 1 loop
+         if A < Natural (C.Map.Cam_On_Arm.Length) and then C.Map.Cam_On_Arm (A) >= 0 and then Natural (C.Map.Cam_On_Arm (A)) < Natural (C.Geo.Length) then
+            declare
+               G : constant Geom.Cam_Geo := C.Geo (Natural (C.Map.Cam_On_Arm (A)));
+            begin
+               if G.Tip_Valid and then G.Tip_Touch and then Geom.Norm (G.Tip) > 0.0 then
+                  return Geom.Norm (G.Tip);
+               end if;
+            end;
+         end if;
+      end loop;
+      return 0.0;
+   end Hand_Len;
+   --  给脑的长度:按指尖长说;没量过指尖就照实说是我自己的比例
+   function Len (C : Context; X : Long_Float) return String is
+      H : constant Long_Float := Hand_Len (C);
+   begin
+      return (if H > 0.0 then Codec.Fmt (X / H, 2) & " hand-lengths" else Codec.Fmt (X, 3) & " units of my own scale");
+   end Len;
+
    procedure Build_Listing (C : in out Context; F : Plug.Frame; Cam : Natural; RGB : in out Buf; Text : out Unbounded_String;
                             Keep : Boolean := False; Things_Only : Boolean := False) is
       Cw : constant Natural := F.Cams (Cam).W;
@@ -1165,6 +1191,12 @@ package body Act is
       --  没有这个,"我很有把握"和"我瞎猜的"在脑那边长得一模一样。
       if not Things_Only then
          Append (T, ASCII.LF & "ABOUT MYSELF (measured by me, on this body, with how much I trust each line):" & ASCII.LF);
+         --  尺子(④ 09-27):给脑的长度按指尖长说,在这儿说一次单位是什么
+         Append (T, (if Hand_Len (C) > 0.0
+                     then "  MY RULER: every length I tell you is in hand-lengths. One hand-length is the distance from my eye to my fingertips, "
+                          & "which I measured myself by touching the table. I have no other ruler and I do not know centimetres."
+                     else "  MY RULER: I have not measured my own size yet, so any length I tell you is only in my own scale, "
+                          & "which means nothing outside this body.") & ASCII.LF);
          declare
             Said : Natural := 0;
          begin
@@ -3471,8 +3503,8 @@ package body Act is
                      if Jump > abs (Most (2)) + Long_Float'Max (0.0, P.Z_Noise) then
                         C.Blind_Say := S ("the thing I am tracking jumped further in one push than any push of mine could move it"
                                           & " - I have probably locked onto something else, and I kept going");
-                        Put_Line ("[身]     认错了?这一步它跑了 " & Codec.Fmt (Jump, 3) & " m,而用满额度最多也只跑得动 "
-                                  & Codec.Fmt (abs (Most (2)), 3) & " m(读深抖动 " & Codec.Fmt (P.Z_Noise, 3) & " m)");
+                        Put_Line ("[身]     认错了?这一步它跑了 " & Mm (Jump) & ",而用满额度最多也只跑得动 "
+                                  & Mm (abs (Most (2))) & "(读深抖动 " & Mm (P.Z_Noise) & ")");
                      end if;
                   end;
                end if;
@@ -3882,12 +3914,11 @@ package body Act is
          Mu : constant Long_Float := (if Su > 1.0e-9 then Eu / Su else 0.0);
          Mv : constant Long_Float := (if Sv > 1.0e-9 then Ev / Sv else 0.0);
       begin
-         --  报【米】不报厘米:米换厘米那个 ×100 会被 check_gates 当成"量 × 人拍的系数"计一处,
-         --  而它只是换单位。单位就用米,读数一样能和历史炮的厘米数对上(8.4 cm = 0.084 m)。
+         --  报世界单位(④ 09-27:原来印"m";只读关节以后世界单位是运动学的单位,不是米)
          if Su <= 1.0e-9 and then Sv <= 1.0e-9 then
-            return "左右上下折不出米(平移三列还没量到);远近 " & Codec.Fmt (Ez, 3) & " m";
+            return "左右上下折不出长度(平移三列还没量到);远近 " & Mm (Ez);
          end if;
-         return Codec.Fmt (Sqrt (Mu * Mu + Mv * Mv + Ez * Ez), 3) & " m"
+         return Mm (Sqrt (Mu * Mu + Mv * Mv + Ez * Ez))
            & "(左右 " & Codec.Fmt (Mu, 3) & " 上下 " & Codec.Fmt (Mv, 3)
            & " 远近 " & Codec.Fmt (Ez, 3) & ")";
       end Cm_Gap;
@@ -4242,8 +4273,8 @@ package body Act is
                end;
             end loop;
             Put_Line ("[身]   📏 再大就跟丢了 ⇒ 退回还跟得住的最大一档:拨 "
-                      & Codec.Fmt (Good_Amp, 4) & " ⇒ 挪 " & Codec.Fmt (Good_Moved, 4)
-                      & " m · 最能滑的滑了 " & Codec.Fmt (Good_Slid, 4) & " 幅");
+                      & Codec.Fmt (Good_Amp, 4) & " ⇒ 挪 " & Mm (Good_Moved)
+                      & " · 最能滑的滑了 " & Codec.Fmt (Good_Slid, 4) & " 幅");
          end if;
          if Slid <= Long_Float (Fl.Track) then
             Put_Line ("[身]   📏 量不了远近:拨到 " & Codec.Fmt (Best_Amp, 4)
@@ -4256,10 +4287,10 @@ package body Act is
             return;
          end if;
          if Moved <= C.Map.EE_Noise then
-            Put_Line ("[身]   📏 量不了远近:这一拨我只挪了 " & Codec.Fmt (Moved, 4)
-                      & " m,没过我自己的位置读数抖动 " & Codec.Fmt (C.Map.EE_Noise, 4) & " m");
+            Put_Line ("[身]   📏 量不了远近:这一拨我只挪了 " & Mm (Moved)
+                      & ",没过我自己的位置读数抖动 " & Mm (C.Map.EE_Noise));
             C.Blind_Say := S ("I tried to measure how far things are by nudging myself, but I only travelled "
-                              & Codec.Fmt (Moved, 4) & " m, inside my own position-reading jitter. "
+                              & Len (C, Moved) & ", inside my own position-reading jitter. "
                               & "Too small a nudge makes the answer worthless, so I am giving you no number at all.");
             return;
          end if;
@@ -4331,16 +4362,16 @@ package body Act is
                                               Long_Float'Max (Long_Float (Fl.Track) / Moved, Q.Near_Jit));
                         if Zd > 0.0 and then Zd < Lim then
                            Q.Dist := Zd;
-                           Append (Said, " ⇒ 离我 " & Codec.Fmt (Zd, 3) & " m");
+                           Append (Said, " ⇒ 离我 " & Mm (Zd));
                         elsif Lim > 0.0 then
                            --  🔴🔴 撤回(IT 2026-09-15 实测):这个数【不是"球有多远"】,是"我能分辨到多远" ——
                            --  它随着我走动一直变大(走得越远、分辨得越远)。我一度拿它当"还差多少米"去驱动
                            --  ⇒ 身体在追一个越走越远的目标。实测自相矛盾:球在画面里 78 px → 334 px(近了四倍多),
                            --  而这个数 0.203 → 0.748 m。⇒ 它只当【说明】给脑听,不当驱动量。
                            Q.Dist := 0.0;
-                           Append (Said, " ⇒ 这一段我只走了 " & Codec.Fmt (Trav, 3)
-                                   & " m,再远就分辨不出来了 —— " & Codec.Fmt (Lim, 3)
-                                   & " m 以外我说不准(这是我看得多清楚,不是它有多远)");
+                           Append (Said, " ⇒ 这一段我只走了 " & Mm (Trav)
+                                   & ",再远就分辨不出来了 —— " & Mm (Lim)
+                                   & " 以外我说不准(这是我看得多清楚,不是它有多远)");
                            Q.Dist := 0.0;
                            Append (Said, " ⇒ 说不准(这一段我没真的走近它)");
                         end if;
@@ -4358,8 +4389,8 @@ package body Act is
                   Pts.Replace_Element (I, Q);
                end;
             end loop;
-            Put_Line ("[身]   📏 量远近:这一拨我挪了 " & Codec.Fmt (Moved, 4) & " m"
-                      & (if Probe_Have then " · 上次量到现在走了 " & Codec.Fmt (Trav, 3) & " m" else " · 这是第一次量,还没有米数")
+            Put_Line ("[身]   📏 量远近:这一拨我挪了 " & Mm (Moved)
+                      & (if Probe_Have then " · 上次量到现在走了 " & Mm (Trav) else " · 这是第一次量,还没有走过的长度")
                       & " ⇒ " & To_String (Said));
             if Turned > C.Map.Rot_Noise then
                Put_Line ("[身]   📏 ⚠️ 这一拨还转了 " & Codec.Fmt (Turned, 4)
@@ -5516,7 +5547,6 @@ package body Act is
    --  只平移(世界系),不转
    --  🔴 这里的量全是【米】。09-20 搬回来时为了不碰棘轮把"×1000"删了,标签却还写着 mm ⇒ 横挪 25.6 毫米显示成 "0.0 mm",
    --  "它在相机前 -0.8 mm"其实是负 0.8 米(算到相机背后去了)—— T10 2026-09-21 差点被这个标签骗过去。量的是米,就按米说,三位小数到毫米。
-   function Mm (X : Long_Float) return String is (Codec.Fmt (X, 3) & " m");
 
    procedure Geo_Move (L : in out Plug.Link; C : Context; F : in out Plug.Frame; Arm : Natural; Dw : Geom.V3; Ok : out Boolean;
                        Watch : Selfmap.Watcher := null) is
@@ -7627,11 +7657,11 @@ package body Act is
             end if;
             if Pressing or else Dist <= Tol then
                if not Until_Touch then
-                  Event := S ("amount: arrived (my fingertips are " & Mm (Dist) & " from where they should be)");
+                  Event := S ("amount: arrived (my fingertips are " & Len (C, Dist) & " from where they should be)");
                   exit;
                end if;
                if Held_Back and then not Pressing then
-                  Event := S ("contact: I am against a surface there, as close as it lets me (" & Mm (Dist) & " from the point, measured along that surface)");
+                  Event := S ("contact: I am against a surface there, as close as it lets me (" & Len (C, Dist) & " from the point, measured along that surface)");
                   exit;
                end if;
                if not Pressing then
@@ -7639,7 +7669,7 @@ package body Act is
                   Geo_Say ("到了贴上点(差 " & Mm (Dist) & "),你说的是碰到为止 ⇒ 顺着进场方向接着压,到真被顶住");
                end if;
                if Press_Cap > 0 and then Presses >= Press_Cap then
-                  Event := S ("amount: nothing stopped my hand within " & Mm (Long_Float (Presses) * (if Press_Step > 0.0 then Press_Step else 4.0 * Geo_Base (C, Arm)))
+                  Event := S ("amount: nothing stopped my hand within " & Len (C, Long_Float (Presses) * (if Press_Step > 0.0 then Press_Step else 4.0 * Geo_Base (C, Arm)))
                               & " of pressing");
                   exit;
                end if;
@@ -7664,7 +7694,7 @@ package body Act is
                      Av (0) := Dw (0); Av (1) := Dw (1); Av (2) := Dw (2);
                      Plug.Reach (Arm, Chan.Compose (Cur, Av), Pe, Re, Rok);
                      if Rok and then (Pe + Pe > Ln or else (Tol_R > 0.0 and then Re > Tol_R)) then
-                        Event := S ("reach: the next press of " & Mm (Ln) & " is outside my measured joint limits in this pose (my kinematics gets within " & Mm (Pe)
+                        Event := S ("reach: the next press of " & Len (C, Ln) & " is outside my measured joint limits in this pose (my kinematics gets within " & Len (C, Pe)
                                     & " of it) - a stop here would not be a touch");
                         exit;
                      end if;
@@ -7679,7 +7709,7 @@ package body Act is
                   begin
                      if Got + Got < Ln then   --  实到不到要的一半(纯数学的一半)= 被顶住了
                         Note_Wall (Dw, Went, Now);
-                        Event := S ("contact: I kept pressing on as you asked and something stopped my hand (I commanded " & Mm (Ln) & " and went " & Mm (Got) & ")");
+                        Event := S ("contact: I kept pressing on as you asked and something stopped my hand (I commanded " & Len (C, Ln) & " and went " & Len (C, Got) & ")");
                         exit;
                      end if;
                   end;
@@ -7700,8 +7730,8 @@ package body Act is
                      if Got + Got < Ln and then not Held_Back then
                         Note_Wall (Dw, Went, Now);
                      elsif Got + Got < Ln then
-                        Event := S ("resist: I commanded a step of " & Mm (Ln) & " toward the point and my hand only went " & Mm (Got)
-                                    & " (" & Mm (Dist) & " from it) - either something is holding my hand there, or that step was more than I can do in one command from this pose");
+                        Event := S ("resist: I commanded a step of " & Len (C, Ln) & " toward the point and my hand only went " & Len (C, Got)
+                                    & " (" & Len (C, Dist) & " from it) - either something is holding my hand there, or that step was more than I can do in one command from this pose");
                         exit;
                      end if;
                   end;
@@ -7739,8 +7769,8 @@ package body Act is
          return;
       end if;
       if not G.Tip_Valid or else G.F <= 0.0 or else Depth <= 0.0 or else G.Gap <= 0.0 or else not Z.Valid or else Rep <= 0.0 then
-         Note := S ("I have not measured my fingertips, my jaw or my stride in this eye (" & (if G.Tip_Valid then "tips yes" else "tips no") & ", jaw " & Mm (G.Gap)
-                    & ", grip zone " & (if Z.Valid then "yes" else "no") & ", stride " & Mm (Rep) & "), so I cannot lay out a hold");
+         Note := S ("I have not measured my fingertips, my jaw or my stride in this eye (" & (if G.Tip_Valid then "tips yes" else "tips no") & ", jaw " & Len (C, G.Gap)
+                    & ", grip zone " & (if Z.Valid then "yes" else "no") & ", stride " & Len (C, Rep) & "), so I cannot lay out a hold");
          return;
       end if;
       --  取轮廓时面的高度可能只是交点估的;之后碰到了它躺的面 ⇒ 按真的面重投一遍那些视线(交点在面之下 / 比张口还高出面的都贴回面上)
@@ -7863,13 +7893,13 @@ package body Act is
                return;
             end if;
             Note := S ("contact set on " & To_String (Name) & ": of " & Codec.Img (Natural (Cands.Length)) & " sections (from " & Codec.Img (Natural (C.Sil_Pts.Length))
-                       & " surface points at " & Mm (Pitch) & " pitch from eye " & Codec.Img (Natural (Integer'Max (0, C.Sil_Cam))) & ", expected error " & Mm (C.Sil_Err)
+                       & " surface points at " & Len (C, Pitch) & " pitch from eye " & Codec.Img (Natural (Integer'Max (0, C.Sil_Cam))) & ", expected error " & Len (C, C.Sil_Err)
                        & (if Reprojected then ", re-laid on the surface I touched" else "")
-                       & (if Known_Thick then ", thickness " & Mm (Thick) & " measured by touch" else ", thickness not measured yet")
+                       & (if Known_Thick then ", thickness " & Len (C, Thick) & " measured by touch" else ", thickness not measured yet")
                        & ") I take #" & Codec.Img (Natural (Pick) + 1) & (if Beyond > 0 then " (" & Codec.Img (Beyond) & " ranked higher lie beyond where this arm got stopped)" else "")
                        & (if Holes > 0 then " (" & Codec.Img (Holes) & " ranked higher are holes to spread, not material to pinch)" else "")
-                       & ": " & Mm (Cd.Width_M) & " wide, " & Mm (Cd.Depth_M) & " deep, faces off by "
-                       & Codec.Fmt (Cd.Face_Tilt_Rad, 2) & " rad, " & Mm (Cd.Com_Offset_M) & " from its middle, jaw " & Mm (G.Gap)
+                       & ": " & Len (C, Cd.Width_M) & " wide, " & Len (C, Cd.Depth_M) & " deep, faces off by "
+                       & Codec.Fmt (Cd.Face_Tilt_Rad, 2) & " rad, " & Len (C, Cd.Com_Offset_M) & " from its middle, jaw " & Len (C, G.Gap)
                        & "; finger width unmeasured (strips one sample wide); friction unmeasured, so the cone is the least this pinch needs - the lift will tell");
             Ok := True;
          end;
@@ -8540,8 +8570,8 @@ package body Act is
                      Got : constant Long_Float := ((Now (0) - Cur (0)) * Dw (0) + (Now (1) - Cur (1)) * Dw (1) + (Now (2) - Cur (2)) * Dw (2)) / Ln;
                   begin
                      if Got + Got < Ln then
-                        Event := S ("contact: I kept going toward it as you asked and something stopped my hand (I commanded " & Mm (Ln)
-                                    & " and went " & Mm (Got) & "); by my own estimate the thing sits at where my fingers close");
+                        Event := S ("contact: I kept going toward it as you asked and something stopped my hand (I commanded " & Len (C, Ln)
+                                    & " and went " & Len (C, Got) & "); by my own estimate the thing sits at where my fingers close");
                         C.Geo_At := Now; C.Geo_At_Arm := Integer (Arm); C.Geo_At_Above := False;   --  压到它身上了:接下来合手不用再下去
                         exit;
                      end if;
@@ -8549,10 +8579,10 @@ package body Act is
                end;
             elsif Dist <= Tol then
                Event := S ((if Held_Back
-                            then "contact: I am against a surface and as close as it lets me (the thing sits " & Mm (Dist) & " from where my fingers close, measured along that surface)"
+                            then "contact: I am against a surface and as close as it lets me (the thing sits " & Len (C, Dist) & " from where my fingers close, measured along that surface)"
                             elsif Above
-                            then "amount: arrived above it (it sits one hand-opening, " & Mm (G.Gap) & ", straight below where my fingers close, within " & Mm (Dist) & ")"
-                            else "amount: arrived (the thing sits " & Mm (Dist) & " from where my fingers close)"));
+                            then "amount: arrived above it (it sits one hand-opening, " & Len (C, G.Gap) & ", straight below where my fingers close, within " & Len (C, Dist) & ")"
+                            else "amount: arrived (the thing sits " & Len (C, Dist) & " from where my fingers close)"));
                --  🔴 到了它上方,顺手把【手指】指向它躺着的那个面(面 = 我碰过的那个面的法向;没碰过就按"上"的反向)。
                --  这不是抓剪刀的规矩,是"在它上方"对一副夹爪的含义:两指要能落到它两侧,指尖得朝着它来。
                --  H15/H19 2026-09-22 实测:手指斜着伸,合拢点到了它身上 3–5 mm 内,指尖却还悬在它上方 ⇒ 合空。
@@ -8586,7 +8616,7 @@ package body Act is
                end if;
             end if;
             if Steps_Taken >= Limit then
-               Event := S ("steps: I took the steps you asked for (still " & Mm (Dist) & " from where my fingers close)");
+               Event := S ("steps: I took the steps you asked for (still " & Len (C, Dist) & " from where my fingers close)");
                exit;
             end if;
             if not Pressing then
@@ -8638,8 +8668,8 @@ package body Act is
                         end if;
                      end;
                   elsif Got + Got < Ln then              --  沿命令方向实到不到要的一半(纯数学的一半)= 命令了,身体没走
-                     Event := S ("resist: I commanded a step of " & Mm (Ln) & " toward it and my hand only went " & Mm (Got)
-                                 & " (" & Mm (Dist) & " from where my fingers close) - either something is holding my hand there, "
+                     Event := S ("resist: I commanded a step of " & Len (C, Ln) & " toward it and my hand only went " & Len (C, Got)
+                                 & " (" & Len (C, Dist) & " from where my fingers close) - either something is holding my hand there, "
                                  & "or that step was more than I can do in one command from this pose");
                      exit;
                   end if;
@@ -8724,7 +8754,7 @@ package body Act is
                elsif not Seen then
                   --  最后一步它进了指缝、被手指挡住也正常:上一眼已经在两倍容差内(倍数,无量纲)
                   if Dist <= 2.0 * Tol then
-                     Event := S ("amount: arrived (I lost sight of it on the last step; it was " & Mm (Dist) & " from where my fingers close)");
+                     Event := S ("amount: arrived (I lost sight of it on the last step; it was " & Len (C, Dist) & " from where my fingers close)");
                      exit;
                   elsif Known or else C.Geo_Pw_Valid then
                      --  看不见了,可它在哪我这一段(或上一段)量过 ⇒ 凭记住的位置走完
@@ -8734,7 +8764,7 @@ package body Act is
                         Geo_Say ("这一步之后看不见它了 ⇒ 按我量到的位置走完(前提是它没动)");
                      end if;
                   else
-                     Event := S ("lost: I lost sight of it after that step (it was " & Mm (Dist) & " away)");
+                     Event := S ("lost: I lost sight of it after that step (it was " & Len (C, Dist) & " away)");
                      exit;
                   end if;
                end if;
@@ -8767,7 +8797,7 @@ package body Act is
          Steps_Taken := Steps_Taken + 1;
       end loop;
       end;
-      Event := S ("amount: arrived (I went back the way I came, " & Mm (Dist) & ")");
+      Event := S ("amount: arrived (I went back the way I came, " & Len (C, Dist) & ")");
       Beats := Beats_Since (L, Beats0);
    end Geo_Retreat;
 
@@ -8800,14 +8830,14 @@ package body Act is
                Went := Went + Got;
                C.Geo_Dist := C.Geo_Dist + Got; C.Geo_At := Now;   --  离它远了这么多;刚算的"笼住"距离跟着变
                if Got + Got < Ln then   --  实到不到要的一半(纯数学的一半)= 被顶住了
-                  Event := S ("resist: I commanded a step of " & Mm (Ln) & " away from it and my hand only went " & Mm (Got));
+                  Event := S ("resist: I commanded a step of " & Len (C, Ln) & " away from it and my hand only went " & Len (C, Got));
                   Beats := Beats_Since (L, Beats0);
                   return;
                end if;
             end;
          end;
       end loop;
-      Event := S ("amount: arrived (I moved " & Mm (Went) & " away from it, along the line I had come in on)");
+      Event := S ("amount: arrived (I moved " & Len (C, Went) & " away from it, along the line I had come in on)");
       Beats := Beats_Since (L, Beats0);
    end Geo_Away;
 
@@ -10509,7 +10539,7 @@ package body Act is
                            Geo_Go (L, C, F, Arm, T_Pt2, T2.Tol_M, Amt, True, Along, Ev3, St5);
                            Steps_Taken := Steps_Taken + St5;
                            Event := Ev3;
-                           Report := Report & "after touching the surface I re-laid the outline on it and moved my fingers " & Mm (Moved) & " along it. ";
+                           Report := Report & "after touching the surface I re-laid the outline on it and moved my fingers " & Len (C, Moved) & " along it. ";
                         end if;
                      end;
                   end if;
@@ -10610,12 +10640,12 @@ package body Act is
                end if;
             end loop;
             if Found and then Past_Empty (Hf, R_Now) <= C.Map.Jaw_Noise then
-               Event := S ("slipped: I moved my hand " & Mm (Went) & " along that direction and my fingers closed to their empty reading - it is no longer between them");
+               Event := S ("slipped: I moved my hand " & Len (C, Went) & " along that direction and my fingers closed to their empty reading - it is no longer between them");
                C.Wld.Holding := False;
             elsif Went + Went < Ln then   --  两下加起来还不到要的一半(纯数学的一半)
-               Event := S ("resist: I commanded " & Mm (Ln) & " along the direction that changes its " & Qty & " and moved only " & Mm (Went) & " - my arm cannot go further that way from here; it is still between my fingers") & Note;
+               Event := S ("resist: I commanded " & Len (C, Ln) & " along the direction that changes its " & Qty & " and moved only " & Len (C, Went) & " - my arm cannot go further that way from here; it is still between my fingers") & Note;
             else
-               Event := S ("settled: I moved it " & Mm (Went) & " along the direction that changes its " & Qty & "; it is still between my fingers (reading "
+               Event := S ("settled: I moved it " & Len (C, Went) & " along the direction that changes its " & Qty & "; it is still between my fingers (reading "
                            & Codec.Fmt (R_Now, 3) & ", empty would be " & Codec.Fmt (Emp, 3) & ")") & Note;
             end if;
          end;

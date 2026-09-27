@@ -5341,6 +5341,29 @@ begin
       end;
    end;
 
+   --  🔴 ④ 说出去的长度(Act.Hand_Len / Len,09-27):尺子 = 第一只碰桌面量过指尖的手,眼到两瓣指尖中点的距离;给脑的长度按它说。
+   --  没量过指尖 ⇒ 照实说"我自己的比例";只有第二只手量过 ⇒ 用第二只手的;头顶眼那种按别的办法量的指尖(不是碰桌面量的)不算
+   declare
+      Cx : Act.Context;
+      G1, G2 : Geom.Cam_Geo := Geom.No_Geo;
+      L0, L1, L2 : Unbounded_String;
+      H0, H1, H2 : Long_Float;
+   begin
+      Cx.Map.Arms := 2; Cx.Map.Cam_On_Arm.Append (1); Cx.Map.Cam_On_Arm.Append (2);
+      Cx.Geo.Append (Geom.No_Geo); Cx.Geo.Append (Geom.No_Geo); Cx.Geo.Append (Geom.No_Geo);
+      H0 := Act.Hand_Len (Cx); L0 := To_Unbounded_String (Act.Len (Cx, 0.872));
+      G2.Tip := [0.0, 0.0, -2.0]; G2.Tip_Valid := True; G2.Tip_Touch := True;
+      G1.Tip := [0.0, 0.0, -1.744]; G1.Tip_Valid := True; G1.Tip_Touch := False;   --  不是碰桌面量的:不算
+      Cx.Geo.Replace_Element (1, G1); Cx.Geo.Replace_Element (2, G2);
+      H1 := Act.Hand_Len (Cx); L1 := To_Unbounded_String (Act.Len (Cx, 0.872));
+      G1.Tip_Touch := True; Cx.Geo.Replace_Element (1, G1);
+      H2 := Act.Hand_Len (Cx); L2 := To_Unbounded_String (Act.Len (Cx, 0.872));
+      Check (H0 = 0.0 and then Index (L0, "own scale") > 0 and then H1 = 2.0 and then To_String (L1) = "0.44 hand-lengths"
+             and then abs (H2 - 1.744) < 1.0e-12 and then To_String (L2) = "0.50 hand-lengths",
+             "④ 给脑的长度按指尖长说:没量过 → """ & To_String (L0) & """;只有第二只手碰桌面量过(2.0)→ """ & To_String (L1)
+             & """;第一只手也量过(1.744)→ """ & To_String (L2) & """(0.872 单位要说成 0.50)");
+   end;
+
    --  🔴 两只手的系对齐要用的三样(Kinem,V1b 3c):多条视线交一点、两团点之间的相似变换(30% 野点)、一团点里的面(30% 野点)
    declare
       use Geom;

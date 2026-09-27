@@ -27,5 +27,9 @@ chk act.adb 'Geom\.Triangulate[[:space:]]*\(G,[[:space:]]*Use_Obs' '东西在哪
 chk act.adb 'Geo_Track[[:space:]]*\(C,[[:space:]]*F,[[:space:]]*Cam,[[:space:]]*Cand' '标定跟点又退回按槽号重切(只许跟点仪器)'
 chk act.adb 'Hit_Plane[[:space:]]*\(Geom\.Cam_Pos[[:space:]]*\(G,[[:space:]]*Hp\)' '东西在哪又退回"一条视线落到它躺的面上"(只许两眼同一刻的交点)'
 if [ -n "$second" ]; then echo -e "🔴 同一个量出现了第二种量法:$second"; bad=1; fi
-[ "$bad" = 0 ] && echo "🟢 驱动:没有 benchmark 名字 · 零 Python · 命令里没有写死的机器人字段名 · 每个量一种量法(六条已删的退路没回来)"
+# 🔴 ④(09-27):给脑的话里的长度只许按身体自己的尺子说(Act.Len,"hand-lengths")。Act.Mm 印的是日志的"单位"(世界单位 ≠ 米),
+#    进了英文句子就是给脑说了一个它对不上号的数(原来印"m":"jaw 1.752 m"其实是张口 91 mm)。按语句查:用了 Mm、字面量全是英文 = 给脑的
+mmhit=$(sed 's/--.*$//' "$ROOT/driver/src/act.adb" | perl -CSD -Mutf8 -0777 -ne 'while (/((?:[^;"]|"[^"]*")*);/g) { my $s = $1; next unless $s =~ /\bMm \(/; my @l = ($s =~ /"([^"]*)"/g); my $eng = grep { /[A-Za-z]{3,}/ } @l; my $han = grep { /[\x{4e00}-\x{9fff}]/ } @l; if ($eng && !$han) { (my $t = $s) =~ s/\s+/ /g; print substr($t, 0, 160), "\n"; } }')
+if [ -n "$mmhit" ]; then echo "🔴 给脑的英文句子里用了 Mm(日志单位),要用 Len(指尖长):"; echo "$mmhit"; bad=1; fi
+[ "$bad" = 0 ] && echo "🟢 驱动:没有 benchmark 名字 · 零 Python · 命令里没有写死的机器人字段名 · 每个量一种量法(六条已删的退路没回来)· 给脑的长度按指尖长说"
 exit $bad
