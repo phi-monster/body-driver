@@ -5552,13 +5552,13 @@ package body Act is
    --  "它在相机前 -0.8 mm"其实是负 0.8 米(算到相机背后去了)—— T10 2026-09-21 差点被这个标签骗过去。量的是米,就按米说,三位小数到毫米。
 
    procedure Geo_Move (L : in out Plug.Link; C : Context; F : in out Plug.Frame; Arm : Natural; Dw : Geom.V3; Ok : out Boolean;
-                       Watch : Selfmap.Watcher := null) is
+                       Watch : Selfmap.Watcher := null; Quick : Boolean := False) is
       A : Table.Vec := Table.Zero_Vec;
       Jaw : Floats;
       Del : Table.Vec;
    begin
       A (0) := Dw (0); A (1) := Dw (1); A (2) := Dw (2);
-      Step_Arm (L, C, F, Arm, A, Jaw, Del, Ok, Watch => Watch, Geo_Settle => Selfmap."=" (Watch, null));
+      Step_Arm (L, C, F, Arm, A, Jaw, Del, Ok, Quick => Quick, Watch => Watch, Geo_Settle => Selfmap."=" (Watch, null));
       --  命令了多少、实到多少,每一步都说(GB5 那一版有这一行,搬回 main 时丢了;H6 2026-09-22 实测每步要 14 cm 而差距只缩 0–2 cm,
       --  没有这一行就分不清是身体没走成、还是我算错了)
       Geo_Say ("挪 (" & Mm (Dw (0)) & "," & Mm (Dw (1)) & "," & Mm (Dw (2)) & ") ⇒ 实到 (" & Mm (Del (0)) & "," & Mm (Del (1)) & "," & Mm (Del (2)) &
@@ -11945,7 +11945,10 @@ package body Act is
                      At_Limit := True;
                      return;
                   end if;
-                  Geo_Move (L, C, F, A, [Av (0), Av (1), Av (2)], Mok);
+                  --  到了这只手量出来的"一条命令稳下来要几拍"还没走到 = 被顶住,就读(Quick):不等软手指被顶着的那点蠕动慢下来
+                  --  (09-28 V1B50 逐拍真值:空走一步两拍到;碰到的那一步每拍还往里让 0.02 mm、0.004°,按"一拍挪不到命令的百分之一"要等 10–11 拍)。
+                  --  这一步的读数只判碰没碰到、不进解(进解的是轻碰那一下);慢身体被当成碰到 ⇒ 轻碰没碰着、接着找(上面的虚碰到那一条)
+                  Geo_Move (L, C, F, A, [Av (0), Av (1), Av (2)], Mok, Quick => True);
                   declare
                      Now : constant Plug.Arm_Pose := F.EE (A);
                   begin
