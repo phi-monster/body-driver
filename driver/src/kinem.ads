@@ -95,6 +95,9 @@ package Kinem is
    function Eye_Pixels (Frames : Frame_Vectors.Vector; Ref : Natural; Cs : Corr_Vectors.Vector; Width : Long_Float) return Px_Vectors.Vector;
    --  配点里去掉从 Eye 这些像素出发的(不管哪一对)
    function Off_Eye (Eye : Px_Vectors.Vector; Cs : Corr_Vectors.Vector) return Corr_Vectors.Vector;
+   --  (U, V) 落在 W × H 画面、Gx × Gy 格子(扫描问的那张)的哪一格,那一格的格点是不是 Eye 里的(长在眼上的 ⇒ 这一处被自己的手挡着)。
+   --  配进一只手的腕眼时落在这儿的不可能是桌面上的点(09-28 H4 / H5:第二只手的桌面点配到第一只手画面里它自己那只白手上的 69 / 29 对,按真值全错、差 300–450 px)
+   function On_Eye_Grid (Eye : Px_Vectors.Vector; U, V : Long_Float; W, H, Gx, Gy : Positive) return Boolean;
    --  Frames(Ref) = 参照帧(扫描起点);Width = 画幅宽(像素,焦距网格按它铺:视场 30°–110°)。
    --  先按 Eye_Pixels 认出长在眼上的像素(记进 M.Eye、Rep.Eye_Px / Eye_Corrs),从它们出发的配点不进解。
    --  Ok = False:能量的轴不够 / 配点不够(Rep 里照实写到哪一步)

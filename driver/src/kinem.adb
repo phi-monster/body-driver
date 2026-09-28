@@ -1600,6 +1600,27 @@ package body Kinem is
       return R;
    end Off_Eye;
 
+   function On_Eye_Grid (Eye : Px_Vectors.Vector; U, V : Long_Float; W, H, Gx, Gy : Positive) return Boolean is
+      Iu : constant Integer := Integer (Long_Float'Floor (U * Long_Float (Gx) / Long_Float (W)));
+      Iv : constant Integer := Integer (Long_Float'Floor (V * Long_Float (Gy) / Long_Float (H)));
+   begin
+      if Iu < 0 or else Iv < 0 or else Iu >= Gx or else Iv >= Gy then
+         return False;
+      end if;
+      declare
+         --  同 Jointboot 问格点的写法(同一个式子 ⇒ 同一个数)
+         Pu : constant Long_Float := (Long_Float (Iu) + 0.5) * Long_Float (W) / Long_Float (Gx);
+         Pv : constant Long_Float := (Long_Float (Iv) + 0.5) * Long_Float (H) / Long_Float (Gy);
+      begin
+         for P of Eye loop
+            if P.U = Pu and then P.V = Pv then
+               return True;
+            end if;
+         end loop;
+      end;
+      return False;
+   end On_Eye_Grid;
+
    procedure Fit_World (Frames : Frame_Vectors.Vector; Ref : Natural; Cs : Corr_Vectors.Vector; Cx, Cy, Width : Long_Float;
                         M : out Model; Rep : out Fit_Report; Ok : out Boolean; Per_Pair : Positive) is
       Q0 : constant Floats := Frames (Ref).Q;

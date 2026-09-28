@@ -1066,7 +1066,9 @@ package body Jointboot is
       --  配一对(Src 里的点 Q ⇒ Dst 那张图),往返 1 px 内的留下:返回每个留下的点在 Q 里是第几个、在 Dst 里的像素、往返差
       T_Match : Duration := 0.0;   --  对齐里花在配点仪器上的时间(秒;只记账)
       N_Match : Natural := 0;
-      procedure Match_Pair (Src, Dst : Integer; Dw, Dh : Natural; Q : Instrument.Match_Vectors.Vector; Keep : out Ints; U, V, E : out Floats) is
+      --  Dst_Arm ≥ 0:Dst 是这只手某一格的腕眼 ⇒ 落在它长在眼上的像素那一格的不要(被自己的手挡着,不是这个点;Kinem.On_Eye_Grid)
+      procedure Match_Pair (Src, Dst : Integer; Dw, Dh : Natural; Q : Instrument.Match_Vectors.Vector; Keep : out Ints; U, V, E : out Floats;
+                            Dst_Arm : Integer := -1) is
          Err : Unbounded_String;
          Tm : constant Ada.Calendar.Time := Ada.Calendar.Clock;
       begin
@@ -1085,7 +1087,9 @@ package body Jointboot is
                      declare
                         Ei : constant Long_Float := Norm ([R (I).Bu - Q (I).U, R (I).Bv - Q (I).V, 0.0]);
                      begin
-                        if Ei < Trip_Px then
+                        if Ei < Trip_Px and then not (Dst_Arm >= 0 and then Dw > 0 and then Dh > 0
+                                                      and then Kinem.On_Eye_Grid (Worlds (Natural (Dst_Arm)).Model.Eye, R (I).U, R (I).V, Dw, Dh, Gx, Gy))
+                        then
                            Keep.Append (I); U.Append (R (I).U); V.Append (R (I).V); E.Append (Ei);
                         end if;
                      end;
@@ -2032,7 +2036,7 @@ package body Jointboot is
                            U, V, E : Floats;
                         begin
                            Pts_In (B, C.F, Idx, Q);
-                           Match_Pair (Id_Of (B, C.F), Vw.Id, Vw.W, Vw.H, Q, Keep, U, V, E);
+                           Match_Pair (Id_Of (B, C.F), Vw.Id, Vw.W, Vw.H, Q, Keep, U, V, E, Dst_Arm => Vw.Arm);
                            N_Pairs_Of (B) := N_Pairs_Of (B) + 1;
                            declare
                               N_On : Natural := 0;
