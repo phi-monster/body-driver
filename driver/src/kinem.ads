@@ -70,6 +70,9 @@ package Kinem is
       Secs : Floats;                   --  各步用了几秒(墙上时间):① 网格、① 精修、①b 焦距和各轴一起、② 比例、③ 一起解(两轮)、④ 多视图
    end record;
 
+   --  每根轴单独起步收格子的门:别的关节偏得让画面挪不到 1 像素(按焦距网格最长那档算,最严)= 1 ÷ 最长焦距(弧度 / 读数单位)。
+   --  开机扫描"到了"时别的关节也按这道门等(Jointboot,H1 2026-09-28:人形别的关节偏 0.001–0.009 就读,格子全不干净,两只手运动学没量成)
+   function Clean_Tol (Width : Long_Float) return Long_Float;
    --  Frames(Ref) = 参照帧(扫描起点);Width = 画幅宽(像素,焦距网格按它铺:视场 30°–110°)。
    --  Ok = False:能量的轴不够 / 配点不够(Rep 里照实写到哪一步)
    procedure Fit (Frames : Frame_Vectors.Vector; Ref : Natural; Cs : Corr_Vectors.Vector; Cx, Cy, Width : Long_Float;

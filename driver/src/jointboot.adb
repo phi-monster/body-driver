@@ -366,18 +366,29 @@ package body Jointboot is
             N_Img := N_Img + 1;
          end if;
       end Keep;
-      procedure Move_All (Tol : Long_Float) is
+      --  Swept ≥ 0 = 单关节扫描这一格:扫的那根到了按 Tol(这一格的三分之一);别的关节要差不到每根轴单独起步收格子的门(Kinem.Clean_Tol)才算到 ——
+      --  读的这一帧才用得上(H1 2026-09-28:人形别的关节还偏 0.001–0.009 就读了,格子全不干净,两只手运动学没量成;x5 每只手 35 格里 7 格同样不干净)
+      procedure Move_All (Tol : Long_Float; Swept : Integer := -1) is
          Gs : Ints;
-         Qs : Plug.Floats_Vectors.Vector;
+         Qs, Ts : Plug.Floats_Vectors.Vector;
          Dl : Table.Vec;
          Fr : Natural;
       begin
          for A in 0 .. Na - 1 loop
             if St (A).Live then
                Gs.Append (St (A).G); Qs.Append (St (A).Tgt);
+               declare
+                  Tj : Floats;
+               begin
+                  for Jx in 0 .. Natural (St (A).Tgt.Length) - 1 loop
+                     Tj.Append (if Jx = Swept then Tol else Kinem.Clean_Tol (Long_Float (St (A).W)));
+                  end loop;
+                  Ts.Append (Tj);
+               end;
             end if;
          end loop;
-         Selfmap.Go (L, M, 0, [others => 0.0], F64_Vectors.Empty_Vector, F, Dl, Fr, Okc, Groups => Gs, Qs => Qs, Tol => Tol);
+         Selfmap.Go (L, M, 0, [others => 0.0], F64_Vectors.Empty_Vector, F, Dl, Fr, Okc, Groups => Gs, Qs => Qs, Tol => Tol,
+                     Tols => (if Swept >= 0 then Ts else Plug.Floats_Vectors.Empty_Vector));
       end Move_All;
    begin
       Ds.Clear; Css.Clear;
@@ -460,7 +471,7 @@ package body Jointboot is
                         end;
                      end loop;
                      exit when not Any;
-                     Move_All (Tol);
+                     Move_All (Tol, Swept => Integer (J));
                      exit when not Okc;
                      for A in 0 .. Na - 1 loop
                         declare

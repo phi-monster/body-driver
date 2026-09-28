@@ -77,11 +77,26 @@ package body Selfmap is
       end loop;
    end Wait_Still;
 
+   function Joints_Arrived (Now, Target, Tols : Floats; Tol : Long_Float) return Boolean is
+   begin
+      for K in 0 .. Natural'Min (Natural (Now.Length), Natural (Target.Length)) - 1 loop
+         declare
+            Gate : constant Long_Float := (if K < Natural (Tols.Length) and then Tols (K) > 0.0 then Tols (K) else Tol);
+         begin
+            if Gate <= 0.0 or else abs (Now (K) - Target (K)) > Gate then
+               return False;
+            end if;
+         end;
+      end loop;
+      return True;
+   end Joints_Arrived;
+
    procedure Go (L : in out Plug.Link; M : Body_Map; Arm : Natural; Target : Plug.Arm_Pose; Jaw : Floats;
                  F : in out Plug.Frame; Delivered : out Table.Vec; Frames : out Natural; Ok : out Boolean; Quick : Boolean := False;
                  Watch : Watcher := null; Joints : Floats := F64_Vectors.Empty_Vector; Group : Integer := -1;
                  Groups : Ints := Int_Vectors.Empty_Vector; Qs : Plug.Floats_Vectors.Vector := Plug.Floats_Vectors.Empty_Vector;
-                 Tol : Long_Float := 0.0; Tol_Rot : Long_Float := 0.0) is
+                 Tol : Long_Float := 0.0; Tol_Rot : Long_Float := 0.0;
+                 Tols : Plug.Floats_Vectors.Vector := Plug.Floats_Vectors.Empty_Vector) is
       C : Plug.Cmd;
       P0 : constant Plug.Arm_Pose := (if Arm < Natural (F.EE.Length) then F.EE (Arm) else [others => 0.0]);
       Prev : Plug.Arm_Pose := P0;
@@ -127,7 +142,9 @@ package body Selfmap is
          --  (5 分钟一炮,2026-09-26:原来每格都等"连着两拍不动 + 量出来的稳定拍数",V1B3 扫描一格 9 拍)
          if Is_Joint then
             declare
-               Moved, Miss : Long_Float := 0.0;
+               Moved : Long_Float := 0.0;
+               Arr : Boolean := True;          --  这一拍每一组读得到的关节都到了(Joints_Arrived)
+               Any_Read : Boolean := False;    --  至少有一组读得到(读不到的组不算,同原来)
                --  一拍挪不到"到了"那个范围的百分之一 = 停了(比例;动作做完以后读数还会有极小的抖动,空闲时量的噪声是 0 ⇒ 不能拿它当"不动"的门,
                --  V1B4 2026-09-26:每格都等满 14 拍)
                Still_Gate : constant Long_Float := Long_Float'Max (M.Joint_Noise, Tol * Still_Frac);
@@ -139,16 +156,16 @@ package body Selfmap is
                      if G >= 0 and then G < Natural (F.Joints.Length) and then Natural (Prev_All (Gi).Length) = Natural (F.Joints (Natural (G)).Length) then
                         for K in 0 .. Natural (Prev_All (Gi).Length) - 1 loop
                            Moved := Long_Float'Max (Moved, abs (F.Joints (Natural (G)) (K) - Prev_All (Gi) (K)));
-                           if K < Natural (W_Q (Gi).Length) then
-                              Miss := Long_Float'Max (Miss, abs (F.Joints (Natural (G)) (K) - W_Q (Gi) (K)));
-                           end if;
                         end loop;
+                        Any_Read := True;
+                        Arr := Arr and then Joints_Arrived (F.Joints (Natural (G)), W_Q (Gi),
+                                                            (if Gi < Natural (Tols.Length) then Tols (Gi) else F64_Vectors.Empty_Vector), Tol);
                         Prev_All.Replace_Element (Gi, F.Joints (Natural (G)));
                      end if;
                   end;
                end loop;
                Still := (if Moved <= Still_Gate then Still + 1 else 0);
-               Arrived := (if Tol > 0.0 and then Miss <= Tol then Arrived + 1 else 0);
+               Arrived := (if Any_Read and then Arr then Arrived + 1 else 0);
                --  连着两拍都到了目标附近 = 到了;没到目标就等连着两拍不动(被顶住 / 到头)
                exit when Arrived >= 2 or else (Still >= 2 and then Frames >= M.Settle)
                  or else Frames >= 12 + M.Settle or else (Quick and then Frames >= M.Settle);

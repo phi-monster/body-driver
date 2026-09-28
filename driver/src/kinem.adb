@@ -1461,6 +1461,10 @@ package body Kinem is
       Free_Mv (S);
    end Track_Points;
 
+   --  最长那档焦距 = 半幅宽 ÷ tan(15°)(焦距网格的上头,见 Fit;视场 30° 是协议:针孔相机的常见范围)
+   function Clean_Tol (Width : Long_Float) return Long_Float is
+     (Tan (0.261799387799490) / (0.5 * Width));
+
    procedure Fit (Frames : Frame_Vectors.Vector; Ref : Natural; Cs : Corr_Vectors.Vector; Cx, Cy, Width : Long_Float;
                   M : out Model; Rep : out Fit_Report; Ok : out Boolean; Per_Pair : Positive := 60) is
       Q0 : constant Floats := Frames (Ref).Q;
@@ -1521,7 +1525,7 @@ package body Kinem is
             Fg (K) := F_Lo * Exp (Long_Float (K) / Long_Float (N_F - 1) * Log (F_Hi / F_Lo));
          end loop;
       end;
-      Dmax := 1.0 / Fg (Fg'Last);
+      Dmax := Clean_Tol (Width);
       --  配点分到各根轴
       declare
          Pos, Size : Nat_Vectors.Vector;

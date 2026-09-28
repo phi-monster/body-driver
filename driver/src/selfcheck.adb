@@ -200,6 +200,41 @@ begin
              & Codec.Img (Natural (Old_Shared.Length)) & " 块)、新比法 " & Codec.Img (Natural (New_Shared.Length)) & " 块 · 四帧各闪各的 "
              & Codec.Img (Natural (Each.Length)) & " 块 · 真动的 + 一帧闪:" & Codec.Img (Natural (Real_And_Flick.Length)) & " 块");
    end;
+   --  🔴 扫描时"到了"按每个关节各自的门(Selfmap.Joints_Arrived + Kinem.Clean_Tol;09-28 H1:人形别的关节还偏 0.001–0.009 rad 就读了格子,
+   --  每根轴单独起步只收偏不到 Clean_Tol 的格子,两只手运动学都没量成)。按 H1 量到的收法造:扫的那根一拍就到目标(0.221),
+   --  上一段那根从 +0.304 rad 回起点(−0.4),每拍剩 0.64;这一格一步 0.0295 ⇒ 老门 = 三分之一格 ≈ 0.0098,新门:别的关节按 Clean_Tol(640 宽 ≈ 0.00084)
+   declare
+      Tgt : Bytes.Floats;
+      Now : Bytes.Floats;
+      Tol : constant Long_Float := 0.0295 / 3.0;   --  这一格一步 0.0295 的三分之一(合成数,同 H1 那一格)
+      Ct : constant Long_Float := Kinem.Clean_Tol (640.0);
+      Tols : Bytes.Floats;
+      Old_Beat, New_Beat : Natural := 0;
+      Old_Off, New_Off : Long_Float := 0.0;
+      A_Old, A_New : Natural := 0;
+   begin
+      Tgt.Append (-0.4); Tgt.Append (0.221); Tgt.Append (0.1);
+      Tols.Append (Ct); Tols.Append (Tol); Tols.Append (Ct);
+      for K in 1 .. 30 loop
+         declare
+            E0 : constant Long_Float := 0.304 * 0.64 ** K;
+         begin
+            Now.Clear; Now.Append (-0.4 + E0); Now.Append (0.221); Now.Append (0.1);
+            A_Old := (if Selfmap.Joints_Arrived (Now, Tgt, Bytes.F64_Vectors.Empty_Vector, Tol) then A_Old + 1 else 0);
+            A_New := (if Selfmap.Joints_Arrived (Now, Tgt, Tols, Tol) then A_New + 1 else 0);
+            if A_Old = 2 and then Old_Beat = 0 then
+               Old_Beat := K; Old_Off := E0;
+            end if;
+            if A_New = 2 and then New_Beat = 0 then
+               New_Beat := K; New_Off := E0;
+            end if;
+         end;
+      end loop;
+      Check (Old_Beat = 9 and then Old_Off > Ct and then New_Beat = 15 and then New_Off < Ct,
+             "扫描按各关节自己的门算到:老门(三分之一格 " & Codec.Fmt (Tol, 4) & ")第 " & Codec.Img (Old_Beat) & " 拍就读,那一刻别的关节还偏 "
+             & Codec.Fmt (Old_Off, 4) & "(> 收格子的门 " & Codec.Fmt (Ct, 5) & ",格子不干净,同 H1)· 新门第 " & Codec.Img (New_Beat)
+             & " 拍读,偏 " & Codec.Fmt (New_Off, 5) & "(在门里)");
+   end;
    --  🔴 抓握通道带不带手指是量出来的(Act.Has_Fingers;09-28 DR1 / DR2:无人机开机说了"握区量不了",干活时照样列两瓣手指一组爪心):
    --  一条臂一个抓握通道,两台相机的握区都没量成 ⇒ 没手指;其中一台量成 ⇒ 有;两条臂只有第 2 条量成 ⇒ 第 1 条没有、第 2 条有、整具有
    declare
