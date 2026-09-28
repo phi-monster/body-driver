@@ -43,10 +43,14 @@ urdf += joint("grip_joint", "body_link", "grip_link", "revolute", "0 0 1", "0.0"
 urdf += "</robot>\n"
 open(f"{D}/drone.urdf", "w").write(urdf)
 
-# ---- robot_config.yml (one side; the body is the end link; camera on the body looking down-forward)
+# ---- robot_config.yml (one side; the body is the end link; camera on the body looking straight down)
+# ori: RoboDojo builds the mount with euler_angles_to_quat(ori, degrees) on a USD camera, which looks along its own -Z
+# (franka robot_config.yml measured it: ori [45,0,0] puts the +Z axis at (0,-0.707,0.707)). body_link is level at joint zero, so
+# [0,0,0] looks straight down at the table. The first version had [0,-90,0] = looking along +x, level: DR1 (09-28) saw only the room wall
+# and the driver fitted its "table" to that wall (normal 79 deg off vertical).
 side = dict(ee_joints="roll_joint", ee_link="body_link", arm_joints_name=JOINTS, gripper_joints_name=["grip_joint"],
             gripper_move=dict(base="grip_joint", sign=1.0, mimic=[]), gripper_bias=0.0, gripper_scale=[0.0, 0.01], curobo="curobo_left.yml",
-            camera=[dict(link="body_link", name="cam_wrist", type="d435", mesh="pinhole", pos=[0.0, 0.0, -0.03], ori=[0, -90, 0])])
+            camera=[dict(link="body_link", name="cam_wrist", type="d435", mesh="pinhole", pos=[0.0, 0.0, -0.03], ori=[0, 0, 0])])
 cfg = dict(urdf_path="./drone.urdf", base_link="base_link", ee_type="gripper", dual_arm=False, delta_matrix=[[1, 0, 0], [0, 1, 0], [0, 0, 1]],
            global_trans_matrix=[[1, 0, 0], [0, 1, 0], [0, 0, 1]], grasp_camera_reference_axis=[1, 0, 0], sides=dict(left=side))
 open(f"{D}/robot_config.yml", "w").write("# body-driver drone rig (2026-09-24): a body on a virtual 6-DoF gantry above the table; one camera on the body; no fingers.\n" + yaml.safe_dump(cfg, sort_keys=False))

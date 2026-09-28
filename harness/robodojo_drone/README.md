@@ -9,4 +9,9 @@ RoboDojo 和 curobo 看到的是一条 6 关节的"手臂",驱动看到的是:�
 - USD:`convert_urdf.py Assets/Robots/drone/drone.urdf Assets/Robots/drone/drone.usd --fix-base --headless`(Isaac Lab 自带的转换器)。
 - 起炮:`SEED=1 CAL=/root/cal_drone.json BL_NO_DEPTH=1 BL_MDE_OFF=1 ROBODOJO_RUN_ID=DR1 BL_LIFE=/root/经历_dr1.txt CFG=drone_rgb DRVMODE=work BD_STEP_LIM=3000 BL_INST=127.0.0.1:8077 bash /root/qiall.sh DR1 general_pickup`
 
-要验的(owner 的规矩:相机装法先看图再信):相机朝向(`ori` 的约定和 G1 腕眼一样是 `[0,-90,0]`,第一炮落一帧看)、驱动对"没有手指的臂"怎么办、"上"没有桌面可摸时从哪来。
+要验的(owner 的规矩:相机装法先看图再信):相机朝向、驱动对"没有手指的臂"怎么办、"上"没有桌面可摸时从哪来。
+
+- 09-28 DR1(第一次开机)第一帧:机身相机拍到的是房间的墙,不是桌面 —— `ori [0,-90,0]` 把相机转成水平朝 +x 看(RoboDojo 的相机朝自己的 −Z 看,
+  `ori` 是 XYZ 欧拉角,franka 那份配置里实测过)。驱动于是把墙当成桌面拟合(法向和竖直差 79°)。改成 `[0,0,0]` = 机身水平时正朝下。
+- `pos [0,0,-0.03]`(相机在机身中心下 3 cm)仿真里有没有真生效没有独立真值:打分脚本的"眼离手"是拟合出来的,DR1 两种考法都是 0–2 mm,
+  而对着几米外的墙转动看不出 3 cm 的偏;相机朝下看 0.6 m 处的桌面时能看出来,看驱动量到的转轴离眼多远。
