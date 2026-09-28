@@ -1436,6 +1436,10 @@ package body Act is
          end;
        end loop;
       end loop;
+      --  一块都没列出来就照实说一句(DR4 / DR5 2026-09-28:无人机这一行底下什么都没有,"每一块都框了编号"对着一张空单子)
+      if not Qmode and then (for all It of C.Items => It.Cam /= Cam or else It.Kind not in Finger | Grip | Piece) then
+         Append (T, "  (none: I found no piece of myself in this picture)" & ASCII.LF);
+      end if;
       end if;
       Append (T, (if Things_Only
                   then "THINGS IN MY EYE " & Codec.Img (Cam + 1) & " (same numbering - a number means the same thing everywhere I say it):"
