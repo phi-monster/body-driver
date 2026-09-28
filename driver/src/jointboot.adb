@@ -699,7 +699,7 @@ package body Jointboot is
          Say ("  配点配完:再等了 " & Codec.Fmt (Long_Float (Ada.Calendar."-" (Ada.Calendar.Clock, T1)), 0) & " 秒(" & Codec.Img (N_Empty) & " 对配不上)");
       end;
       --  ③ 配点进运动学,这里只去掉落在画面外的点。长在眼上的像素(自己的手、夹爪)由 Kinem.Fit 按这批配点自己认(Eye_Pixels:
-      --  两个以上关节各自单独转的每一格里都没挪的格点),不再另跟一遍:09-27 以前按跟点仪器认手指,扫描时每格跟一次(V1B14 约 40 秒),
+      --  两个以上关节各自单独转时各有一格没挪的格点),不再另跟一遍:09-27 以前按跟点仪器认手指,扫描时每格跟一次(V1B14 约 40 秒),
       --  x5 上遮了反而更差(最大 0.41 / 0.62 mm 对不遮 0.30 / 0.43 mm)就撤了 —— x5 的手指只占画面边上一小块,解法自己当野点去掉;
       --  09-28 人形 H2 腕眼三分之一是自己的手,解法去不掉,两只手错 16–20 mm ⇒ 按配点认、不多花时间(LAB H2)
       for A in 0 .. Na - 1 loop
@@ -774,7 +774,7 @@ package body Jointboot is
             end;
          end loop;
          Say ("  运动学 · 第" & Codec.Img (A + 1) & " 只手:" & (if Ok then "量成" else "没量成") & " · 长在眼上的像素 " & Codec.Img (Rep.Eye_Px)
-              & " 个(两个以上关节单独转的每一格都没挪 = 自己身上的),从它们出发的配点 " & Codec.Img (Rep.Eye_Corrs) & " / " & Codec.Img (Rep.N_Corr)
+              & " 个(两个以上关节单独转时各有一格没挪 = 自己身上的),从它们出发的配点 " & Codec.Img (Rep.Eye_Corrs) & " / " & Codec.Img (Rep.N_Corr)
               & " 笔不进解 · 每根轴单独(转 / 走两样各解一次,残差小的那样)的残差中位(像素):" & To_String (T));
          T := Null_Unbounded_String;
          for X of Rep.Rho loop

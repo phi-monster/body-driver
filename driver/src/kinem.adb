@@ -1372,9 +1372,51 @@ package body Kinem is
       Rep.Secs.Append (Long_Float (Ada.Calendar."-" (Ada.Calendar.Clock, T0)));
    end Refine_Mv;
 
+   --  ④ 做到不再变好(09-28 龙门架焊点):一遍 Refine_Mv 在平谷里会停早 —— 约束行是软的(轴单位长、轴上点取垂足、尺度钉 1,千倍权),
+   --  平谷里模型一边往下走一边偏离约束,约束把步子顶回来,阻尼越调越大就判"降不动"停了(同一份数据多去掉一个点,焦距就停在 415.5 或走到 400;
+   --  停在 415.5 那份接着再做一遍 409.9、再一遍 400.1,残差 0.365 → 0.343 → 0.287 px ⇒ 不是另一个坑,是没走完)。
+   --  再做一遍 = 把轴和尺度重新规整到约束上、远近从头三角、重挑内点、阻尼归位 ⇒ 从它自己的结果再做,直到残差中位不再降,留最好的那遍。
+   --  最多 8 遍(次数;龙门架 3 遍到底,x5 / 人形实测 2 遍 —— 第二遍只是确认不再降)
+   procedure Refine_Until_Done (Frames : Frame_Vectors.Vector; Cs : Corr_Vectors.Vector; M : in out Model; Rep : in out Fit_Report) is
+      T0 : constant Ada.Calendar.Time := Ada.Calendar.Clock;
+      Secs0 : constant Floats := Rep.Secs;   --  前几步的秒数;④ 记一个数 = 几遍加起来
+      Best_M : Model := M;
+      Best_R : Fit_Report := Rep;
+      Passes, Iters : Natural := 0;
+   begin
+      for Pass in 1 .. 8 loop
+         declare
+            Mm : Model := Best_M;
+            Rr : Fit_Report := Best_R;
+         begin
+            Rr.Mv_Tracks := 0;
+            Refine_Mv (Frames, Cs, Mm, Rr);
+            exit when Rr.Mv_Tracks = 0;   --  没有轨迹:这一步做不了
+            Passes := Passes + 1;
+            Iters := Iters + Rr.Mv_Iters;
+            if Pass = 1 then
+               Best_M := Mm; Best_R := Rr;
+            elsif Rr.Mv_Px < Best_R.Mv_Px then
+               Rr.Mv_Start_Px := Best_R.Mv_Start_Px;   --  起步中位报第一遍的
+               Best_M := Mm; Best_R := Rr;
+            else
+               exit;
+            end if;
+         end;
+      end loop;
+      if Passes > 0 then
+         M := Best_M;
+         Rep := Best_R;
+         Rep.Mv_Iters := Iters;
+         Rep.Mv_Passes := Passes;
+         Rep.Secs := Secs0;
+         Rep.Secs.Append (Long_Float (Ada.Calendar."-" (Ada.Calendar.Clock, T0)));
+      end if;
+   end Refine_Until_Done;
+
    procedure Refine_Tracks (Frames : Frame_Vectors.Vector; Cs : Corr_Vectors.Vector; M : in out Model; Rep : in out Fit_Report) is
    begin
-      Refine_Mv (Frames, Off_Eye (M.Eye, Cs), M, Rep);
+      Refine_Until_Done (Frames, Off_Eye (M.Eye, Cs), M, Rep);
    end Refine_Tracks;
 
    procedure Track_Points (M : Model; Frames : Frame_Vectors.Vector; Cs : Corr_Vectors.Vector; Only_I : Integer; Min_Views : Natural;
@@ -1491,11 +1533,8 @@ package body Kinem is
       Sj : array (0 .. Nf - 1) of Integer := [others => -1];                  --  只动了一个关节的帧 ⇒ 那个关节
       Still_N, Moved_N : array (0 .. Nf - 1) of Natural := [others => 0];     --  参照帧 ↔ 这一帧那一对里没挪 / 挪了的配点(笔数)
       function Moved (C : Corr) return Boolean is (Norm ([C.Ub - C.Ua, C.Vb - C.Va, 0.0]) >= Trip_Px);
-      --  这个像素在第 J 个关节单独转的格子里:配上过 / 有一格挪了
-      type Joint_Seen is record
-         Seen, Moved : Boolean := False;
-      end record;
-      type Px_Seen is array (0 .. Max_Joints - 1) of Joint_Seen;
+      --  这个像素在第 J 个关节单独转的格子里有一格没挪
+      type Px_Seen is array (0 .. Max_Joints - 1) of Boolean;
       package Seen_Maps is new Ada.Containers.Ordered_Maps (Px, Px_Seen);
       Ev : Seen_Maps.Map;
       R : Px_Vectors.Vector;
@@ -1517,11 +1556,10 @@ package body Kinem is
             declare
                P : constant Px := (C.Ua, C.Va);
                Cur : constant Seen_Maps.Cursor := Ev.Find (P);
-               E : Px_Seen := (if Seen_Maps.Has_Element (Cur) then Seen_Maps.Element (Cur) else [others => <>]);
+               E : Px_Seen := (if Seen_Maps.Has_Element (Cur) then Seen_Maps.Element (Cur) else [others => False]);
                J : constant Natural := Natural (Sj (C.J));
             begin
-               E (J).Seen := True;
-               E (J).Moved := E (J).Moved or else Moved (C);
+               E (J) := E (J) or else not Moved (C);
                Ev.Include (P, E);
             end;
          end if;
@@ -1529,10 +1567,10 @@ package body Kinem is
       for Cur in Ev.Iterate loop
          declare
             E : constant Px_Seen := Seen_Maps.Element (Cur);
-            Stay : Natural := 0;   --  每一格都没挪的关节几个
+            Stay : Natural := 0;   --  有一格没挪的关节几个
          begin
             for J in 0 .. N - 1 loop
-               if E (J).Seen and then not E (J).Moved then
+               if E (J) then
                   Stay := Stay + 1;
                end if;
             end loop;
@@ -2387,8 +2425,8 @@ package body Kinem is
                Rep.Flipped := True;
             end if;
          end;
-         --  ④ 多视图:有轨迹就按重投影一起解(③ 的结果当起步)
-         Refine_Mv (Frames, Cs, M, Rep);
+         --  ④ 多视图:有轨迹就按重投影一起解(③ 的结果当起步),做到不再变好
+         Refine_Until_Done (Frames, Cs, M, Rep);
          M.Valid := True;
          Ok := True;
       end;
