@@ -189,7 +189,8 @@ bl-calibrate --listen 9080 --eye 127.0.0.1:8079   # 脑桥在 :8079;BL_ORDER 覆
 
 ## 许可证
 
-**GNU AGPL v3**(见 `LICENSE`;版权与商业授权见 `NOTICE`)。
+Body Driver 按 **GNU AGPL-3.0-only**(只限第 3 版)开源:原文见 [`LICENSE`](LICENSE),版权说明见 [`NOTICE`](NOTICE)。
 
-- **学术 / 研究:直接用,不用问,不设审批。**
-- **公司:** AGPL 要求你把自己的源码一并开放。做不到就来信谈商业授权。
+- **研究、个人、爱好、比赛,还有能接受 AGPL 的公司:直接用,不用登记,不用问。** AGPL 的要求:把 Body Driver 或它的修改版交给别人(包括装在机器人里卖出去),要按 AGPL 把完整源码一起给;改过的版本让别人通过网络用,也要把源码给他们(第 13 条)。
+- **公司要用在闭源的产品或服务里:在网站上登记,拿免费的商业授权。** 不收钱、不审批,登记即生效,不用开放源码。要做到三件事:产品文档或"关于"页面里写上 "Powered by Body Driver";不起诉 phi-monster 说 Body Driver 侵犯专利;不拿它做成竞争的身体驱动 / 自标定产品提供给别人。授权覆盖新一版商业授权生效前发布的所有版本;以后的版本可能换条款,已经拿到的不收回。条款见 [`LICENSE-COMMERCIAL.md`](LICENSE-COMMERCIAL.md)(《Body Driver 免费商业授权》1.0)。现在还是草稿:网站上线、律师审过以后开放登记。
+- **给项目贡献代码:** 要先同意贡献者许可协议 [`CLA.md`](CLA.md)(版本 1.0),在 pull request 里写一句话就行;步骤见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
