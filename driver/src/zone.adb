@@ -514,6 +514,10 @@ package body Zone is
       Pose : Plug.Arm_Pose := (if Arm < Natural (F.EE.Length) then F.EE (Arm) else [others => 0.0]);
       Target : Floats;
       Lo_Frame, Hi_Frame : Plug.Cam_Vectors.Vector;
+      --  每一头停稳时最后一帧之前那一帧(看没看见动了:两次比较、不共用一帧,Picture.Seen_Twice)
+      Lo_Prev, Hi_Prev : Plug.Cam_Vectors.Vector;
+      Last_Prev : Plug.Cam_Vectors.Vector;   --  最近一次读画面之前那一帧(Go_Jaw、Wait_Still 走完时 = 停稳的倒数第二帧)
+      S_Prev : aliased Plug.Cam_Vectors.Vector;
       Lo_R, Hi_R : Long_Float := J0;
       Lo_Steps, Hi_Steps : Natural := 0;
       Moved_Px : array (0 .. Natural'Max (1, N_Cams) - 1) of Natural := [others => 0];   --  整个行程里每台相机跟着动的像素(两头的图比)
@@ -531,6 +535,7 @@ package body Zone is
                C : Plug.Cmd;
             begin
                C.Kind := Plug.Ee; C.Arm := Arm; C.Pose := Pose; C.Jaw := Target;
+               Last_Prev := F.Cams;
                if not Plug.Act (L, C) or else not Plug.Sense (L, F) then
                   return;
                end if;
@@ -552,28 +557,19 @@ package body Zone is
          R := Selfmap.Jaw_Of (F, Arm, K);
          Good := True;
       end Go_Jaw;
-      --  这一步有没有哪台相机里一块像素跟着动(超过它自己量的静止噪声地板、不少于一块最小连通块 —— 同 Components 的下限)
-      function Any_Moved (A, B : Plug.Cam_Vectors.Vector) return Boolean is
+      --  这一步有没有哪台相机看见一块像素跟着动:推之前停稳的两帧 A1 / A2、推完停稳的两帧 B1 / B2,两次比较、不共用一帧(Picture.Seen_Twice,
+      --  同开机认手、逐通道推;原来只数一次比较里超过地板的像素够不够一块,DR1 2026-09-28 头顶眼的渲染闪烁就够)
+      function Any_Moved (A1, B1, A2, B2 : Plug.Cam_Vectors.Vector) return Boolean is
       begin
          for C in 0 .. N_Cams - 1 loop
-            declare
-               Mv : constant Bools := Picture.Moved (A (C).Gray, B (C).Gray, M.Floors (C));
-               N_Mv : Natural := 0;
-            begin
-               for Bb of Mv loop
-                  if Bb then
-                     N_Mv := N_Mv + 1;
-                  end if;
-               end loop;
-               if N_Mv >= Picture.Min_Pixels (F.Cams (C).W, F.Cams (C).H) then
-                  return True;
-               end if;
-            end;
+            if not Picture.Seen_Twice (A1 (C).Gray, B1 (C).Gray, A2 (C).Gray, B2 (C).Gray, M.Floors (C), F.Cams (C).W, F.Cams (C).H).Is_Empty then
+               return True;
+            end if;
          end loop;
          return False;
       end Any_Moved;
       --  往 Dir 那边推到头
-      procedure Sweep (Dir : Long_Float; R_End : out Long_Float; Fr : out Plug.Cam_Vectors.Vector; Steps : out Natural; Good : out Boolean) is
+      procedure Sweep (Dir : Long_Float; R_End : out Long_Float; Fr, Fr_Prev : out Plug.Cam_Vectors.Vector; Steps : out Natural; Good : out Boolean) is
          R : Long_Float := Selfmap.Jaw_Of (F, Arm, K);
          --  头一步 = 读数量级那么大(max(1, |读数|),同关节扫描的量级取法),推动了下一步 ×4:这里只找两头,不像关节扫描要细采样给运动学
          --  (V1B30 2026-09-27:头一步 3% 时每只手要推七八下、每下都等停稳,一只手 80 多拍;x5 现在往每边两下)
@@ -585,11 +581,12 @@ package body Zone is
          for Pushes in 1 .. 12 loop   --  最多推 12 下(次数;×4 放大,12 下远超任何读数量级)
             declare
                Before : constant Plug.Cam_Vectors.Vector := F.Cams;
+               Before_Prev : constant Plug.Cam_Vectors.Vector := Last_Prev;
                Moved : Boolean;
             begin
                Go_Jaw (R + Dir * S, Rn, Steps, Good);
                exit when not Good;
-               Moved := Any_Moved (Before, F.Cams);
+               Moved := Any_Moved (Before_Prev, Last_Prev, Before, F.Cams);
                --  到头 = 读数挪不到命令的一半(纯数学的一半),或者这一趟里手指已经在画面里动过、这一下画面什么都没跟着动(读数只是命令的回声的身体)。
                --  动之前画面不动不算到头:x5 合到底以后命令 0–0.185 这一段手指不动、读数照样跟着命令走(V1B28 2026-09-27,往回推两步就被当成了到头)
                exit when Dir * (Rn - R) < 0.5 * S or else (Seen_Move and then not Moved);
@@ -600,6 +597,7 @@ package body Zone is
          end loop;
          R_End := Selfmap.Jaw_Of (F, Arm, K);
          Fr := F.Cams;
+         Fr_Prev := Last_Prev;
       end Sweep;
    begin
       H := (others => <>);
@@ -618,19 +616,20 @@ package body Zone is
          Used : Natural;
          Ok2 : Boolean;
       begin
-         Selfmap.Wait_Still (L, M, F, 30, Used, Ok2);
+         Selfmap.Wait_Still (L, M, F, 30, Used, Ok2, Prev_Pic => S_Prev'Access);
          if not Ok2 then
             return;
          end if;
+         Last_Prev := S_Prev;
          Pose := F.EE (Arm);
          H.Pose := Pose;
          Put_Line ("[身] 第" & Natural'Image (Arm + 1) & " 只手第" & Natural'Image (K) & " 号抓握通道往两头各推到头(先等画面静止:" & Natural'Image (Used) & " 拍;读数从 " & Codec.Fmt (J0, 3) & " 起)…");
       end;
-      Sweep (-1.0, Lo_R, Lo_Frame, Lo_Steps, Okg);
+      Sweep (-1.0, Lo_R, Lo_Frame, Lo_Prev, Lo_Steps, Okg);
       if not Okg then
          return;
       end if;
-      Sweep (1.0, Hi_R, Hi_Frame, Hi_Steps, Okg);
+      Sweep (1.0, Hi_R, Hi_Frame, Hi_Prev, Hi_Steps, Okg);
       if not Okg then
          return;
       end if;
@@ -644,20 +643,29 @@ package body Zone is
             Z : Hand_Zone;
             Mv : constant Bools := Picture.Moved (Lo_Frame (C).Gray, Hi_Frame (C).Gray, M.Floors (C));
             N_Mv : Natural := 0;
+            --  两头各停稳两帧:两次比较、不共用一帧都变了的像素连成的块(Picture.Seen_Twice)
+            Seen : constant Picture.Regions :=
+              Picture.Seen_Twice (Lo_Prev (C).Gray, Hi_Prev (C).Gray, Lo_Frame (C).Gray, Hi_Frame (C).Gray, M.Floors (C), Cw, Ch);
+            N_Seen : Natural := 0;
          begin
             for B of Mv loop
                if B then
                   N_Mv := N_Mv + 1;
                end if;
             end loop;
-            Moved_Px (C) := N_Mv;
+            for Rg of Seen loop
+               N_Seen := N_Seen + Rg.Count;
+            end loop;
+            Moved_Px (C) := N_Seen;
             if Codec.Env ("BL_DUMP") /= "" then
                Codec.Write_PGM (Codec.Env ("BL_DUMP") & "/zone_arm" & Codec.Img (Arm + 1) & "_cam" & Codec.Img (C) & "_lo.pgm", Lo_Frame (C).Gray, Cw, Ch);
                Codec.Write_PGM (Codec.Env ("BL_DUMP") & "/zone_arm" & Codec.Img (Arm + 1) & "_cam" & Codec.Img (C) & "_hi.pgm", Hi_Frame (C).Gray, Cw, Ch);
             end if;
-            --  两头之间这只眼里得真有像素动过才算看见手指来去(一动没动时"变化量分两拨"分的是噪声,会把一撮噪声点当成一瓣;
-            --  G1S 2026-09-24:手抬出画面、缩回身前时,头顶眼各记了一笔落在空桌面上的"指尖")
-            if N_Mv < Picture.Min_Pixels (Cw, Ch) then
+            --  两头之间这只眼里得真看见东西动过才算看见手指来去(一动没动时"变化量分两拨"分的是噪声,会把一撮噪声点当成一瓣;
+            --  G1S 2026-09-24:手抬出画面、缩回身前时,头顶眼各记了一笔落在空桌面上的"指尖")。
+            --  看见 = 两次比较、不共用一帧都变了的像素连成块。原来的门是"一次比较里超过地板的像素够一块最小连通块":
+            --  DR1 2026-09-28 无人机的抓握通道什么都不带,头顶眼里渲染闪的 0.04% 画面(123 个散点)过了这道门,被当成两瓣手指存进身体图
+            if Seen.Is_Empty then
                Z := (others => <>);
             else
                Z := From_Frames (Lo_Frame (C).Gray, Hi_Frame (C).Gray, Cw, Ch);
@@ -687,9 +695,11 @@ package body Zone is
                end if;
                Put_Line ("[身]   第" & Natural'Image (C) & " 台相机里:" & Natural'Image (Z.N_Lobes) & " 瓣 · 区心 (" &
                          Codec.Fmt (Z.Cu, 3) & "," & Codec.Fmt (Z.Cv, 3) & ") · 区框 " & Codec.Img (Z.X0) & "," & Codec.Img (Z.Y0) & "-" & Codec.Img (Z.X1) & "," & Codec.Img (Z.Y1) &
-                         " · 张幅 " & Codec.Fmt (Z.Span, 3) & " 画幅 · 两头之间动过 " & Codec.Fmt (100.0 * Long_Float (N_Mv) / Long_Float (Natural'Max (1, Cw * Ch)), 2) & "% 画面");
+                         " · 张幅 " & Codec.Fmt (Z.Span, 3) & " 画幅 · 两头之间动过 " & Codec.Fmt (100.0 * Long_Float (N_Mv) / Long_Float (Natural'Max (1, Cw * Ch)), 2) & "% 画面"
+                         & " · 两次比较都动的 " & Codec.Img (N_Seen) & " 像素");
             else
-               Put_Line ("[身]   第" & Natural'Image (C) & " 台相机里看不见这只手合拢");
+               Put_Line ("[身]   第" & Natural'Image (C) & " 台相机里看不见这只手合拢(两头之间超过地板的 " & Codec.Img (N_Mv) & " 个像素,"
+                         & (if Seen.Is_Empty then "两次比较、不共用一帧都变的连不成一块)" else "变的那几块分不出手指)"));
             end if;
             H.Zones.Append (Z);
          end;

@@ -49,6 +49,47 @@ package body Act is
    function Jaws_Of (C : Context; Arm : Natural) return Natural is
      (if Arm < Natural (C.Map.Jaws.Length) then Natural'Max (1, C.Map.Jaws (Arm)) else 1);
 
+   --  这条臂第 K 个抓握通道带不带手指 = 开机把它推到头时,有没有哪台相机量出了握区(Zone.Measure:两次比较、不共用一帧都看见东西动了)。
+   --  哪台都没有 ⇒ 这个通道什么都不带,不列手指 / 爪心、不数、不说"你的手指之间"(无人机 DR1 / DR2 2026-09-28:
+   --  开机说了"握区量不了",干活时清单照样按抓握通道个数列了两瓣手指一组爪心,拒 me 时还说"我身上量得出 2 瓣手指、1 组爪心")
+   function Has_Fingers (C : Context; Arm : Natural; K : Natural := 0) return Boolean is
+   begin
+      for I in 0 .. Natural (C.Hands.Length) - 1 loop
+         if C.Hands (I).Arm = Arm and then C.Hands (I).K = K then
+            for Z of C.Hands (I).Zones loop
+               if Z.Valid then
+                  return True;
+               end if;
+            end loop;
+         end if;
+      end loop;
+      return False;
+   end Has_Fingers;
+
+   --  这具身体上有没有哪个抓握通道带手指
+   function Any_Fingers (C : Context) return Boolean is
+   begin
+      for A in 0 .. C.Map.Arms - 1 loop
+         for K in 0 .. Jaws_Of (C, A) - 1 loop
+            if Has_Fingers (C, A, K) then
+               return True;
+            end if;
+         end loop;
+      end loop;
+      return False;
+   end Any_Fingers;
+
+   --  这条臂上有没有哪个抓握通道带手指
+   function Arm_Has_Fingers (C : Context; Arm : Natural) return Boolean is
+   begin
+      for K in 0 .. Jaws_Of (C, Arm) - 1 loop
+         if Has_Fingers (C, Arm, K) then
+            return True;
+         end if;
+      end loop;
+      return False;
+   end Arm_Has_Fingers;
+
    --  按(第几只手,第几个抓握通道)取那只"手"。一条臂可以有好几个,拿臂号当下标是错的。
    function Hand_Of (C : Context; Arm : Natural; K : Natural := 0) return Zone.Hand is
    begin
@@ -1125,7 +1166,9 @@ package body Act is
       --  语言的根(2026-09-23):有能合拢的手 ⇒ 脑的句子只说【东西的量往哪变】,我身上的零件它点不到、也不该看见
       --  (H45 实测:纸上列着 "a finger of arm 1 … grip 2",9B 的脑就把 "reach arm leftwards"、"grip above …" 填进东西的位置)。
       --  零件照旧进清单(绑 grasper 要用),只是不写给脑、不画框。
-      Qmode : constant Boolean := C.Map.Arms > 0 and then Jaws_Of (C, 0) > 0;
+      --  "有能合拢的手"是量出来的:哪个抓握通道推到头时有相机看见手指来去(Has_Fingers);原来按抓握通道的个数(至少 1),
+      --  什么都不带的抓握通道(无人机)也算 ⇒ 脑只能说"东西的量往哪变",可身体根本没有能拿起东西的零件(DR2 2026-09-28)
+      Qmode : constant Boolean := Any_Fingers (C);
       function Rel (U, V : Long_Float) return String is
          Half : constant String := (if U < 0.5 then "LEFT" else "RIGHT");
       begin
@@ -1197,8 +1240,18 @@ package body Act is
          Append (T, (if Hand_Len (C) > 0.0
                      then "  MY RULER: every length I tell you is in hand-lengths. One hand-length is the distance from my eye to my fingertips, "
                           & "which I measured myself by touching the table. I have no other ruler and I do not know centimetres."
+                     elsif not Any_Fingers (C)
+                     then "  MY RULER: I have no fingers, so I have no hand-length to measure; any length I tell you is only in my own scale, "
+                          & "which means nothing outside this body."
                      else "  MY RULER: I have not measured my own size yet, so any length I tell you is only in my own scale, "
                           & "which means nothing outside this body.") & ASCII.LF);
+         --  没有手指的臂照实说一句(PLAN V1b 无人机第 2 条:"我没有手指,长度只有我自己的比例")
+         for A in 0 .. C.Map.Arms - 1 loop
+            if not Arm_Has_Fingers (C, A) then
+               Append (T, "  I HAVE NO FINGERS on arm " & Codec.Img (A + 1) & ": I pushed its grip channel from one end to the other and nothing in any of my pictures moved. "
+                       & "I cannot hold, pinch or lift anything with it." & ASCII.LF);
+            end if;
+         end loop;
          declare
             Said : Natural := 0;
          begin
@@ -1324,40 +1377,43 @@ package body Act is
             end Finger;
             G : Item;
          begin
-            Finger (Z.A, 0);
-            Finger (Z.B, 1);
-            --  🔴🔴 同一个爪的两瓣,在画面里应该只隔【量到的钳口张幅】那么远。
-            --  差得离谱 = 我按关节推出来的位置在这台相机里根本不对,而这条我自己量得出来。
-            --  GW 实测:arm 2(右臂)的两根手指被放到画面【左】边的第 2 格和第 19 格,相隔四分之三个画面,
-            --  而它自己标着"我还没在这儿看过我的手"。位置错 ⇒ 误差错 ⇒ 往错的方向推 ⇒
-            --  十炮里七炮"靠近→停在错的稳定点→退开"。必须说出来,别让脑拿它当真。
-            if Z.Valid and then Z.A.Valid and then Z.B.Valid and then Z.Span > 0.0 then
-               declare
-                  Sep : constant Long_Float :=
-                    Sqrt ((Z.A.Cu - Z.B.Cu) ** 2 + (Z.A.Cv - Z.B.Cv) ** 2);
-               begin
-                  --  比的是两个量出来的量,没有人拍的系数:隔得比张幅还远 ⇒ 对不上
-                  if Sep > Z.Span + Z.Span and then not Qmode then
-                     Append (T, "  (careful: I placed the two jaws of arm " & Codec.Img (A + 1)
-                             & " " & Codec.Fmt (Sep, 3) & " of the picture apart, but the jaw span I measured on myself is only "
-                             & Codec.Fmt (Z.Span, 3) & " - they cannot both be right, so where I think my hand is in this"
-                             & " picture is not to be trusted)" & ASCII.LF);
-                  end if;
-               end;
-            end if;
-            G.Kind := Grip; G.Arm := A; G.Jaw_K := Jk;
-            if Z.Valid and then Tr.Valid then
-               G.Located := True;
-               G.Cu := Tr.Cu; G.Cv := Tr.Cv; G.Depth := Tr.Z;
-               G.X0 := Natural (Long_Float'Max (0.0, Long_Float (Z.X0) + Du * Long_Float (Cw)));
-               G.X1 := Natural (Long_Float'Max (0.0, Long_Float'Min (Long_Float (Cw - 1), Long_Float (Z.X1) + Du * Long_Float (Cw))));
-               G.Y0 := Natural (Long_Float'Max (0.0, Long_Float (Z.Y0) + Dv * Long_Float (Ch)));
-               G.Y1 := Natural (Long_Float'Max (0.0, Long_Float'Min (Long_Float (Ch - 1), Long_Float (Z.Y1) + Dv * Long_Float (Ch))));
-               Push (G, "grip " & Codec.Img (A + 1) & " - the space between the fingers of arm " & Codec.Img (A + 1) &
-                     " (closing = grip close with grip_arm " & Codec.Img (A + 1) & "; a thing must sit in this box to be held), now in cell " &
-                     Codec.Img (Cell_Of (C, G.Cu, G.Cv)) & Rel (G.Cu, G.Cv), Draw.Pink, 2);
-            else
-               Push (G, "grip " & Codec.Img (A + 1) & " (the space between the fingers of arm " & Codec.Img (A + 1) & ") - not locatable in this picture right now", Draw.Pink, 0);
+            --  这个抓握通道开机推到头时哪台相机里都没看见东西跟着动 ⇒ 它不带手指:不列手指 / 爪心(零件照列,见下)
+            if Has_Fingers (C, A, Jk) then
+               Finger (Z.A, 0);
+               Finger (Z.B, 1);
+               --  🔴🔴 同一个爪的两瓣,在画面里应该只隔【量到的钳口张幅】那么远。
+               --  差得离谱 = 我按关节推出来的位置在这台相机里根本不对,而这条我自己量得出来。
+               --  GW 实测:arm 2(右臂)的两根手指被放到画面【左】边的第 2 格和第 19 格,相隔四分之三个画面,
+               --  而它自己标着"我还没在这儿看过我的手"。位置错 ⇒ 误差错 ⇒ 往错的方向推 ⇒
+               --  十炮里七炮"靠近→停在错的稳定点→退开"。必须说出来,别让脑拿它当真。
+               if Z.Valid and then Z.A.Valid and then Z.B.Valid and then Z.Span > 0.0 then
+                  declare
+                     Sep : constant Long_Float :=
+                       Sqrt ((Z.A.Cu - Z.B.Cu) ** 2 + (Z.A.Cv - Z.B.Cv) ** 2);
+                  begin
+                     --  比的是两个量出来的量,没有人拍的系数:隔得比张幅还远 ⇒ 对不上
+                     if Sep > Z.Span + Z.Span and then not Qmode then
+                        Append (T, "  (careful: I placed the two jaws of arm " & Codec.Img (A + 1)
+                                & " " & Codec.Fmt (Sep, 3) & " of the picture apart, but the jaw span I measured on myself is only "
+                                & Codec.Fmt (Z.Span, 3) & " - they cannot both be right, so where I think my hand is in this"
+                                & " picture is not to be trusted)" & ASCII.LF);
+                     end if;
+                  end;
+               end if;
+               G.Kind := Grip; G.Arm := A; G.Jaw_K := Jk;
+               if Z.Valid and then Tr.Valid then
+                  G.Located := True;
+                  G.Cu := Tr.Cu; G.Cv := Tr.Cv; G.Depth := Tr.Z;
+                  G.X0 := Natural (Long_Float'Max (0.0, Long_Float (Z.X0) + Du * Long_Float (Cw)));
+                  G.X1 := Natural (Long_Float'Max (0.0, Long_Float'Min (Long_Float (Cw - 1), Long_Float (Z.X1) + Du * Long_Float (Cw))));
+                  G.Y0 := Natural (Long_Float'Max (0.0, Long_Float (Z.Y0) + Dv * Long_Float (Ch)));
+                  G.Y1 := Natural (Long_Float'Max (0.0, Long_Float'Min (Long_Float (Ch - 1), Long_Float (Z.Y1) + Dv * Long_Float (Ch))));
+                  Push (G, "grip " & Codec.Img (A + 1) & " - the space between the fingers of arm " & Codec.Img (A + 1) &
+                        " (closing = grip close with grip_arm " & Codec.Img (A + 1) & "; a thing must sit in this box to be held), now in cell " &
+                        Codec.Img (Cell_Of (C, G.Cu, G.Cv)) & Rel (G.Cu, G.Cv), Draw.Pink, 2);
+               else
+                  Push (G, "grip " & Codec.Img (A + 1) & " (the space between the fingers of arm " & Codec.Img (A + 1) & ") - not locatable in this picture right now", Draw.Pink, 0);
+               end if;
             end if;
             --  全身零件:每个通道带的那一块(从那个关节往外的全部),位置按此刻位姿从身体图来
             if not Own_Cam and then Jk = 0 then
@@ -1497,7 +1553,10 @@ package body Act is
          A : constant Integer := Cam_Arm (C, Cam);
       begin
          if A >= 0 then
-            Append (T, "- this picture rides on arm " & Codec.Img (Natural (A) + 1) & ": its fingers and grip stay put in this picture, the world moves when that arm moves" & ASCII.LF);
+            Append (T, "- this picture rides on arm " & Codec.Img (Natural (A) + 1)
+                    & (if Arm_Has_Fingers (C, Natural (A)) then ": its fingers and grip stay put in this picture, the world moves when that arm moves"
+                       else ": the world moves in this picture when that arm moves (arm " & Codec.Img (Natural (A) + 1) & " has no fingers)")
+                    & ASCII.LF);
          end if;
       end;
       if Have_Named then
@@ -1511,7 +1570,12 @@ package body Act is
             end if;
          end loop;
       end if;
-      Append (T, "- there is " & (if C.Wld.Holding then "ALREADY something" else "NOTHING") & " between your fingers right now" & ASCII.LF);
+      --  没有手指的身体不说"你的手指之间"(DR2 2026-09-28:无人机每一轮都被告知 "there is NOTHING between your fingers right now")
+      if Any_Fingers (C) then
+         Append (T, "- there is " & (if C.Wld.Holding then "ALREADY something" else "NOTHING") & " between your fingers right now" & ASCII.LF);
+      else
+         Append (T, "- I have no fingers: when I pushed my grip channel from one end to the other, nothing in any of my pictures moved" & ASCII.LF);
+      end if;
       Text := T;
    end Build_Listing;
 
@@ -9242,9 +9306,16 @@ package body Act is
                            end case;
                         end if;
                      end loop;
-                     if Key = "pusher" then
+                     --  手指 / 爪心只数带手指的抓握通道(清单里没手指的通道根本不列,见 Has_Fingers)
+                     if not Any_Fingers (C) and then (Key = "grasper" or else Key = "pusher") then
+                        return "我没有手指:抓握通道推到头,哪台相机里都没有东西跟着动"
+                          & (if Key = "pusher" then ";也没量到【推得动东西又合不拢】的零件" else "");
+                     elsif Key = "pusher" then
                         return "我身上没量到【推得动东西又合不拢】的零件(合得拢的爪心"
                           & Codec.Img (N_Grip) & " 组不算);要用手,写 grasper";
+                     elsif Key = "me" and then N_Finger + N_Grip = 0 then
+                        --  没有手指的身体(无人机)"我"本该就是整个机身;这一版还没接上(PLAN V1b 无人机 (c)),照实说
+                        return "me 是【整个我】:我身上没量出手指和爪心,本该就是它 —— 可这一版还不会按整个机身走(me 没接上)";
                      elsif Key = "me" then
                         return "me 是【整个我】,只有推一下整幅画面跟着变、身上又分不出零件的机体才有它;"
                           & "我身上量得出 " & Codec.Img (N_Finger) & " 瓣手指、" & Codec.Img (N_Grip)

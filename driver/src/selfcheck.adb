@@ -156,6 +156,79 @@ begin
       Check (Natural (Comps.Length) = 2, "两瓣:切出" & Natural'Image (Natural (Comps.Length)) & " 块");
       Check (Fl.Global = 0, "静止对地板 = 0");
    end;
+   --  🔴 看没看见动了 = 两次比较、不共用一帧(Picture.Seen_Twice;09-28 DR1:无人机的抓握通道什么都不带,头顶眼里渲染闪的像素被当成两瓣手指)。
+   --  64×48、底 30、静止对地板 0:A1 / A2 = 动之前那头的两帧,B1 / B2 = 动之后那头的两帧
+   declare
+      W : constant := 64;
+      H : constant := 48;
+      Bg : Buf;
+      Fl : Picture.Floor_Map;
+      function With_Block (Img : Buf; X0, Y0, S : Natural; V : U8) return Buf is
+         R : Buf := Img;
+      begin
+         for Y in Y0 .. Y0 + S - 1 loop
+            for X in X0 .. X0 + S - 1 loop
+               R.Replace_Element (Y * W + X, V);
+            end loop;
+         end loop;
+         return R;
+      end With_Block;
+      Real, Old_Shared, New_Shared, Each, Real_And_Flick : Picture.Regions;
+   begin
+      for I in 1 .. W * H loop
+         Bg.Append (30);
+      end loop;
+      Fl := Picture.Null_Floor (Bg, Bg, W, H, Picture.Min_Pixels (W, H));
+      --  ① 真动的:动之后那头两帧同一处都多了一块 8×8
+      Real := Picture.Seen_Twice (Bg, With_Block (Bg, 10, 10, 8, 200), Bg, With_Block (Bg, 10, 10, 8, 200), Fl, W, H);
+      --  ② 只在一帧里闪一块 3×3:原来"推过去、推回来"共用这一帧,两次比较都算变了;不共用一帧就看不见
+      declare
+         Fk : constant Buf := With_Block (Bg, 40, 30, 3, 70);
+      begin
+         Old_Shared := Picture.Components (Picture.Both (Picture.Moved (Bg, Fk, Fl), Picture.Moved (Fk, Bg, Fl)), W, H, Picture.Min_Pixels (W, H));
+         New_Shared := Picture.Seen_Twice (Bg, Fk, Bg, Bg, Fl, W, H);
+      end;
+      --  ③ 四帧各在各的地方闪
+      Each := Picture.Seen_Twice (With_Block (Bg, 2, 2, 3, 70), With_Block (Bg, 20, 5, 3, 70),
+                                  With_Block (Bg, 50, 40, 3, 70), With_Block (Bg, 30, 25, 3, 70), Fl, W, H);
+      --  ④ 真动的 + 其中一帧另有一处闪:只认真动的那块
+      Real_And_Flick := Picture.Seen_Twice (Bg, With_Block (With_Block (Bg, 10, 10, 8, 200), 40, 30, 3, 70), Bg, With_Block (Bg, 10, 10, 8, 200), Fl, W, H);
+      Check (Natural (Real.Length) = 1 and then Real (0).Count = 64
+             and then Natural (Old_Shared.Length) = 1 and then New_Shared.Is_Empty and then Each.Is_Empty
+             and then Natural (Real_And_Flick.Length) = 1 and then Real_And_Flick (0).Count = 64,
+             "看没看见动了(两次比较、不共用一帧):真动的 8×8 看见(" & Codec.Img (Natural (Real.Length)) & " 块)· 只在一帧里闪的 3×3:共用那一帧的老比法当成动了("
+             & Codec.Img (Natural (Old_Shared.Length)) & " 块)、新比法 " & Codec.Img (Natural (New_Shared.Length)) & " 块 · 四帧各闪各的 "
+             & Codec.Img (Natural (Each.Length)) & " 块 · 真动的 + 一帧闪:" & Codec.Img (Natural (Real_And_Flick.Length)) & " 块");
+   end;
+   --  🔴 抓握通道带不带手指是量出来的(Act.Has_Fingers;09-28 DR1 / DR2:无人机开机说了"握区量不了",干活时照样列两瓣手指一组爪心):
+   --  一条臂一个抓握通道,两台相机的握区都没量成 ⇒ 没手指;其中一台量成 ⇒ 有;两条臂只有第 2 条量成 ⇒ 第 1 条没有、第 2 条有、整具有
+   declare
+      C : Act.Context;
+      Hd : Zone.Hand;
+      Zv : Zone.Hand_Zone;
+      None_Ok, One_Ok, Two_Arms_Ok : Boolean;
+   begin
+      C.Map.Arms := 1;
+      C.Map.Jaws.Append (1);
+      Hd.Arm := 0; Hd.K := 0;
+      Hd.Zones.Append (Zone.Hand_Zone'(others => <>));
+      Hd.Zones.Append (Zone.Hand_Zone'(others => <>));
+      C.Hands.Append (Hd);
+      None_Ok := not Act.Has_Fingers (C, 0) and then not Act.Arm_Has_Fingers (C, 0) and then not Act.Any_Fingers (C);
+      Zv.Valid := True;
+      C.Hands (0).Zones.Replace_Element (1, Zv);
+      One_Ok := Act.Has_Fingers (C, 0) and then Act.Any_Fingers (C);
+      C.Map.Arms := 2;
+      C.Map.Jaws.Append (1);
+      C.Hands (0).Zones.Replace_Element (1, Zone.Hand_Zone'(others => <>));
+      Hd.Arm := 1;
+      Hd.Zones.Replace_Element (0, Zv);
+      C.Hands.Append (Hd);
+      Two_Arms_Ok := not Act.Arm_Has_Fingers (C, 0) and then Act.Arm_Has_Fingers (C, 1) and then Act.Any_Fingers (C);
+      Check (None_Ok and then One_Ok and then Two_Arms_Ok,
+             "抓握通道带不带手指按量的:哪台相机都没量出握区 ⇒ 没有(" & Boolean'Image (None_Ok) & ")· 一台量出 ⇒ 有(" & Boolean'Image (One_Ok)
+             & ")· 两条臂只有第 2 条量出 ⇒ 分得开(" & Boolean'Image (Two_Arms_Ok) & ")");
+   end;
    --  响应表:已知 B(2 通道 → 3 读数),解算要把误差解成正确的命令,且不越上限
    declare
       E : Table.Effect;

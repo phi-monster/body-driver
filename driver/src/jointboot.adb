@@ -26,11 +26,12 @@ package body Jointboot is
    Ramp : constant := 4.0;                      --  扫描下一格最多放大四倍(次数;每个方向只停 3 格,头一格之后两格就要转开)
 
    --  一组关节读数一起挪到 Q(关节目标走唯一那条挪手的路 Selfmap.Go,停稳看这组读数)
-   procedure Go_Group (L : in out Plug.Link; F : in out Plug.Frame; M : Selfmap.Body_Map; A, G : Natural; Q : Floats; Tol : Long_Float; Ok : out Boolean) is
+   procedure Go_Group (L : in out Plug.Link; F : in out Plug.Frame; M : Selfmap.Body_Map; A, G : Natural; Q : Floats; Tol : Long_Float; Ok : out Boolean;
+                       Prev_Pic : access Plug.Cam_Vectors.Vector := null) is
       Dl : Table.Vec;
       Fr : Natural;
    begin
-      Selfmap.Go (L, M, A, [others => 0.0], F64_Vectors.Empty_Vector, F, Dl, Fr, Ok, Joints => Q, Group => G, Tol => Tol);
+      Selfmap.Go (L, M, A, [others => 0.0], F64_Vectors.Empty_Vector, F, Dl, Fr, Ok, Joints => Q, Group => G, Tol => Tol, Prev_Pic => Prev_Pic);
    end Go_Group;
 
    procedure Find_Arms (L : in out Plug.Link; F : in out Plug.Frame; M : in out Selfmap.Body_Map;
@@ -61,6 +62,7 @@ package body Jointboot is
                      F0 : constant Plug.Cam_Vectors.Vector := F.Cams;
                      J0 : constant Plug.Floats_Vectors.Vector := F.Joints;
                      F1 : Plug.Cam_Vectors.Vector;
+                     F1_Prev : aliased Plug.Cam_Vectors.Vector;   --  转到那头停稳时最后一帧之前那一帧
                      J1 : Plug.Floats_Vectors.Vector;
                      Okg : Boolean;
                      Got : Long_Float := Long_Float'Last;
@@ -70,7 +72,7 @@ package body Jointboot is
                      for K in 0 .. Natural (Tgt.Length) - 1 loop
                         Tgt.Replace_Element (K, Q0 (K) + Amp);
                      end loop;
-                     Go_Group (L, F, M, Natural (Arms.Length), G, Tgt, Amp * Third, Okg);
+                     Go_Group (L, F, M, Natural (Arms.Length), G, Tgt, Amp * Third, Okg, Prev_Pic => F1_Prev'Access);
                      exit when not Okg;
                      F1 := F.Cams; J1 := F.Joints;
                      Go_Group (L, F, M, Natural (Arms.Length), G, Q0, Amp * Third, Okg);
@@ -83,8 +85,9 @@ package body Jointboot is
                            Fl : Picture.Floor_Map renames M.Floors (C);
                            M1 : constant Bools := Picture.Moved (F0 (C).Gray, F1 (C).Gray, Fl);
                            M2 : constant Bools := Picture.Moved (F1 (C).Gray, F.Cams (C).Gray, Fl);
+                           --  看没看见动了:两次比较、不共用一帧(同逐通道推、抓握通道推到头:Picture.Seen_Twice)
                            Comps : constant Picture.Regions :=
-                             Picture.Components (Picture.Both (M1, M2), F.Cams (C).W, F.Cams (C).H, Picture.Min_Pixels (F.Cams (C).W, F.Cams (C).H));
+                             Picture.Seen_Twice (F0 (C).Gray, F1_Prev (C).Gray, F1 (C).Gray, F.Cams (C).Gray, Fl, F.Cams (C).W, F.Cams (C).H);
                         begin
                            Fr.Append (Picture.Fraction (Picture.Either (M1, M2)));
                            if not Comps.Is_Empty then

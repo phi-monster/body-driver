@@ -51,24 +51,28 @@ package body Selfmap is
       return True;
    end Pictures_Still;
 
-   procedure Wait_Still (L : in out Plug.Link; M : Body_Map; F : in out Plug.Frame; Max : Natural; Used : out Natural; Ok : out Boolean) is
-      Prev : Plug.Cam_Vectors.Vector := F.Cams;
+   procedure Wait_Still (L : in out Plug.Link; M : Body_Map; F : in out Plug.Frame; Max : Natural; Used : out Natural; Ok : out Boolean;
+                         Prev_Pic : access Plug.Cam_Vectors.Vector := null) is
+      Last : Plug.Cam_Vectors.Vector := F.Cams;
       Still : Natural := 0;
    begin
       Used := 0;
       Ok := True;
       for I in 1 .. Max loop
+         if Prev_Pic /= null then
+            Prev_Pic.all := F.Cams;
+         end if;
          if not Plug.Sense (L, F) then
             Ok := False;
             return;
          end if;
          Used := I;
-         if Pictures_Still (M, Prev, F.Cams) then
+         if Pictures_Still (M, Last, F.Cams) then
             Still := Still + 1;
          else
             Still := 0;
          end if;
-         Prev := F.Cams;
+         Last := F.Cams;
          exit when Still >= 2;
       end loop;
    end Wait_Still;
@@ -77,7 +81,8 @@ package body Selfmap is
                  F : in out Plug.Frame; Delivered : out Table.Vec; Frames : out Natural; Ok : out Boolean; Quick : Boolean := False;
                  Watch : Watcher := null; Joints : Floats := F64_Vectors.Empty_Vector; Group : Integer := -1;
                  Groups : Ints := Int_Vectors.Empty_Vector; Qs : Plug.Floats_Vectors.Vector := Plug.Floats_Vectors.Empty_Vector;
-                 Tol : Long_Float := 0.0; Tol_Rot : Long_Float := 0.0) is
+                 Tol : Long_Float := 0.0; Tol_Rot : Long_Float := 0.0;
+                 Prev_Pic : access Plug.Cam_Vectors.Vector := null) is
       C : Plug.Cmd;
       P0 : constant Plug.Arm_Pose := (if Arm < Natural (F.EE.Length) then F.EE (Arm) else [others => 0.0]);
       Prev : Plug.Arm_Pose := P0;
@@ -112,6 +117,9 @@ package body Selfmap is
                return;
             end if;
             Send := False;
+         end if;
+         if Prev_Pic /= null then
+            Prev_Pic.all := F.Cams;
          end if;
          if not Plug.Sense (L, F) then
             Ok := False;
@@ -257,11 +265,44 @@ package body Selfmap is
       Note.Text := T;
    end Verify;
 
-   procedure Measure_Idle (L : in out Plug.Link; F : in out Plug.Frame; M : in out Body_Map; Ok : out Boolean) is
+   procedure Measure_Idle (L : in out Plug.Link; F : in out Plug.Frame; M : in out Body_Map; Ok : out Boolean; Rest_Noise : Long_Float := -1.0) is
       N_Cams : constant Natural := Natural (F.Cams.Length);
       Arms : constant Natural := Natural'Min (Natural (F.EE.Length), M.Arms);
+      Rest_Max : constant := 30;   --  等身体停下最多几拍(次数,同 Wait_Still 的上限)
    begin
       Ok := True;
+      --  ⓪ 先等关节读数停下(见 spec):连着两拍每个读数都挪不过开机前半段一开头量的读数噪声
+      if Rest_Noise >= 0.0 then
+         declare
+            Prev_Q : Plug.Floats_Vectors.Vector := F.Joints;
+            Still, Used : Natural := 0;
+            Last_Move : Long_Float := 0.0;
+         begin
+            for I in 1 .. Rest_Max loop
+               if not Plug.Sense (L, F) then
+                  Ok := False;
+                  return;
+               end if;
+               Used := I;
+               declare
+                  Mv : Long_Float := 0.0;
+               begin
+                  for G in 0 .. Natural'Min (Natural (F.Joints.Length), Natural (Prev_Q.Length)) - 1 loop
+                     for K2 in 0 .. Natural'Min (Natural (F.Joints (G).Length), Natural (Prev_Q (G).Length)) - 1 loop
+                        Mv := Long_Float'Max (Mv, abs (F.Joints (G) (K2) - Prev_Q (G) (K2)));
+                     end loop;
+                  end loop;
+                  Last_Move := Mv;
+                  Still := (if Mv <= Rest_Noise then Still + 1 else 0);
+               end;
+               Prev_Q := F.Joints;
+               exit when Still >= 2;
+            end loop;
+            Put_Line ("[身] 量静止噪声之前等身体停下:" & Codec.Img (Used) & " 拍"
+                      & (if Still >= 2 then "(关节读数连着两拍挪不过开机前半段量的读数噪声 " & Codec.Fmt (Rest_Noise, 6) & ")"
+                         else "(等满了,最后一拍读数还挪 " & Codec.Fmt (Last_Move, 6) & ",照这样量)"));
+         end;
+      end if;
       --  ① 什么都不做时读数抖多少、画面抖多少(静止对)
       declare
          Prev_EE : Plug.Pose_Vectors.Vector := F.EE;
@@ -314,7 +355,8 @@ package body Selfmap is
 
    procedure Measure (L : in out Plug.Link; F : in out Plug.Frame; M : out Body_Map; Ok : out Boolean;
                       Step_Px : Plug.Floats_Vectors.Vector;
-                      Eyes : Ints := Int_Vectors.Empty_Vector; World : Integer := -1) is
+                      Eyes : Ints := Int_Vectors.Empty_Vector; World : Integer := -1;
+                      Joint_Rest : Long_Float := -1.0) is
       N_Cams : constant Natural := Natural (F.Cams.Length);
       Arms : constant Natural := Natural (F.EE.Length);
    begin
@@ -332,7 +374,7 @@ package body Selfmap is
       declare
          Ok2 : Boolean;
       begin
-         Measure_Idle (L, F, M, Ok2);
+         Measure_Idle (L, F, M, Ok2, Rest_Noise => Joint_Rest);
          if not Ok2 then
             return;
          end if;
@@ -368,10 +410,11 @@ package body Selfmap is
                      Frames_Back : Natural;
                      Got : Long_Float;
                      F1 : Plug.Cam_Vectors.Vector;
+                     F1_Prev : aliased Plug.Cam_Vectors.Vector;   --  推到那头停稳时最后一帧之前那一帧
                      Visible : Boolean := False;
                   begin
                      A_Cmd (K) := Amp;
-                     Go (L, M, A, Chan.Compose (P0, A_Cmd), Jaw0, F, Deliv, Frames, Ok2);
+                     Go (L, M, A, Chan.Compose (P0, A_Cmd), Jaw0, F, Deliv, Frames, Ok2, Prev_Pic => F1_Prev'Access);
                      if not Ok2 then
                         return;
                      end if;
@@ -387,10 +430,11 @@ package body Selfmap is
                            Fl : Picture.Floor_Map renames M.Floors (C);
                            M1 : constant Bools := Picture.Moved (F0 (C).Gray, F1 (C).Gray, Fl);
                            M2 : constant Bools := Picture.Moved (F1 (C).Gray, F.Cams (C).Gray, Fl);
-                           Here : constant Bools := Picture.Both (M1, M2);
                            Cw : constant Natural := F.Cams (C).W;
                            Ch2 : constant Natural := F.Cams (C).H;
-                           Comps : constant Picture.Regions := Picture.Components (Here, Cw, Ch2, Picture.Min_Pixels (Cw, Ch2));
+                           --  跟着动的一块 = 两次比较、不共用一帧都变了的(推之前 → 推到那头的前一帧;推到那头的最后一帧 → 推回来):Picture.Seen_Twice
+                           Comps : constant Picture.Regions :=
+                             Picture.Seen_Twice (F0 (C).Gray, F1_Prev (C).Gray, F1 (C).Gray, F.Cams (C).Gray, Fl, Cw, Ch2);
                            Fr : constant Long_Float := Picture.Fraction (Picture.Either (M1, M2));
                         begin
                            if not Comps.Is_Empty then

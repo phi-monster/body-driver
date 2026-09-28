@@ -40,6 +40,12 @@ package Picture is
    function Both (M1, M2 : Bools) return Bools;
    function Either (M1, M2 : Bools) return Bools;
    function Components (Mask : Bools; W, H : Natural; Min_Count : Natural) return Regions;
+   --  这台相机看没看见一样东西动了(一种判法:开机认手、逐通道推、抓握通道推到头三处都用它):两次比较、不共用一帧 ——
+   --  A1 对 B1、A2 对 B2(A1 / A2 = 动之前那头的两帧,B1 / B2 = 动之后那头的两帧),两次都超过静止地板的像素连成的块(≥ 最小连通块,大的在前);空 = 没看见。
+   --  真东西每次都变同一片像素;渲染闪烁各帧各闪各的,几乎不会落进同一块。原来"推过去、推回来"两次比较共用推过去那一帧,那一帧自己闪一下两次都算变了
+   --  (DR1 2026-09-28:无人机的抓握通道什么都不带,头顶眼里闪的 0.04% 画面被当成两瓣手指存进身体图;离线按这个判法 DR1 那段最大一块 9 像素,
+   --  x5 V1B57 真手指头顶眼 6358 以上、自己那只眼 2.5 万、另一只手的眼 0–1)
+   function Seen_Twice (A1, B1, A2, B2 : Buf; F : Floor_Map; W, H : Natural) return Regions;
    function Fraction (Mask : Bools) return Long_Float;
    function Max_Diff (A, B : Buf) return Natural;
    function Mean_Gray (G : Buf; W, H : Natural; R : Region) return Long_Float;   --  这一块框里的平均灰度(0..255)

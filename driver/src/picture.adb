@@ -473,6 +473,9 @@ package body Picture is
       return M;
    end Moved;
 
+   function Seen_Twice (A1, B1, A2, B2 : Buf; F : Floor_Map; W, H : Natural) return Regions is
+     (Components (Both (Moved (A1, B1, F), Moved (A2, B2, F)), W, H, Min_Pixels (W, H)));
+
    function Both (M1, M2 : Bools) return Bools is
       N : constant Natural := Natural'Min (Natural (M1.Length), Natural (M2.Length));
       M : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (N));

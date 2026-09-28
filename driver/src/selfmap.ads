@@ -61,13 +61,20 @@ package Selfmap is
                  F : in out Plug.Frame; Delivered : out Table.Vec; Frames : out Natural; Ok : out Boolean; Quick : Boolean := False;
                  Watch : Watcher := null; Joints : Floats := F64_Vectors.Empty_Vector; Group : Integer := -1;
                  Groups : Ints := Int_Vectors.Empty_Vector; Qs : Plug.Floats_Vectors.Vector := Plug.Floats_Vectors.Empty_Vector;
-                 Tol : Long_Float := 0.0; Tol_Rot : Long_Float := 0.0);
+                 Tol : Long_Float := 0.0; Tol_Rot : Long_Float := 0.0;
+                 Prev_Pic : access Plug.Cam_Vectors.Vector := null);
+   --  Prev_Pic 给了 ⇒ 走完时里面是最后一帧之前那一帧的画面(停稳时的两帧,给"看没看见动了"两次比较、不共用一帧用:Picture.Seen_Twice)
    procedure Idle (L : in out Plug.Link; F : in out Plug.Frame; N : Natural; Ok : out Boolean);   --  不下命令空等 N 拍
    --  什么都不做时读数抖多少、画面抖多少(静止对,4 拍):位姿 / 姿态 / 抓握 / 关节读数的噪声 + 每台相机的灰度地板。
    --  Measure 开头用它;只报关节的身体开机前半段(还没有位姿)也用它(同一种量法)。M.Arms 条臂的位姿噪声(没有位姿 = 0)
-   procedure Measure_Idle (L : in out Plug.Link; F : in out Plug.Frame; M : in out Body_Map; Ok : out Boolean);
+   --  Rest_Noise ≥ 0 ⇒ 先等关节读数停下:连着两拍每个读数都挪不过它(开机前半段一开头、身体还没动过时量的读数噪声),最多 30 拍,再量
+   --  (DR2 2026-09-28:开机后半段一开头就量,无人机还在往前半段最后一个目标收(每拍剩 0.56),位姿噪声量成约 1.8 mm/拍,"停了"的门跟着松,
+   --  逐通道推只走到 2/3 就读);< 0 = 开机前半段那一次,身体还没动过,不等
+   procedure Measure_Idle (L : in out Plug.Link; F : in out Plug.Frame; M : in out Body_Map; Ok : out Boolean; Rest_Noise : Long_Float := -1.0);
    --  等到每台相机的画面连着两拍都不再变(各自的灰度地板以内),最多 Max 拍;返回用了几拍
-   procedure Wait_Still (L : in out Plug.Link; M : Body_Map; F : in out Plug.Frame; Max : Natural; Used : out Natural; Ok : out Boolean);
+   --  Prev_Pic 给了 ⇒ 等完时里面是最后一帧之前那一帧(同 Go)
+   procedure Wait_Still (L : in out Plug.Link; M : Body_Map; F : in out Plug.Frame; Max : Natural; Used : out Natural; Ok : out Boolean;
+                         Prev_Pic : access Plug.Cam_Vectors.Vector := null);
    function Pictures_Still (M : Body_Map; Before, After : Plug.Cam_Vectors.Vector) return Boolean;
    --  只看第 Cam 台:两帧之间超过噪声地板的像素凑不成一团
    function Picture_Still (M : Body_Map; Before, After : Plug.Cam; Cam : Natural) return Boolean;
@@ -79,7 +86,8 @@ package Selfmap is
    --  没有这一项的手(没量成运动学)⇒ 它的通道量不了
    procedure Measure (L : in out Plug.Link; F : in out Plug.Frame; M : out Body_Map; Ok : out Boolean;
                       Step_Px : Plug.Floats_Vectors.Vector;
-                      Eyes : Ints := Int_Vectors.Empty_Vector; World : Integer := -1);
+                      Eyes : Ints := Int_Vectors.Empty_Vector; World : Integer := -1;
+                      Joint_Rest : Long_Float := -1.0);   --  开机前半段一开头量的关节读数噪声:量静止噪声之前等读数在它以内停下(见 Measure_Idle)
    function Jaw_Of (F : Plug.Frame; Arm : Natural; K : Natural := 0) return Long_Float;
    function Jaw_Count (F : Plug.Frame; Arm : Natural) return Natural;   --  这条臂量到几个抓握通道
    function Jaw_All (F : Plug.Frame; Arm : Natural) return Floats;      --  这条臂全部抓握通道此刻的读数

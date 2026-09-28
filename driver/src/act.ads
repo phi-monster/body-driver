@@ -403,6 +403,11 @@ package Act is
    --  身体的尺子(④):第一只碰桌面量过指尖的手,眼到两瓣指尖中点的距离(世界单位;没量过 = 0);给脑的长度按它说("X hand-lengths")
    function Hand_Len (C : Context) return Long_Float;
    function Len (C : Context; X : Long_Float) return String;
+   --  这条臂第 K 个抓握通道带不带手指 = 开机推到头时有没有哪台相机量出了握区(看见东西跟着动);没带手指的通道不列手指 / 爪心、不说"你的手指之间"。
+   --  Arm_Has_Fingers = 这条臂上有没有;Any_Fingers = 这具身体上有没有(= 进不进"只说东西的量"那种说法)。导出给自检
+   function Has_Fingers (C : Context; Arm : Natural; K : Natural := 0) return Boolean;
+   function Arm_Has_Fingers (C : Context; Arm : Natural) return Boolean;
+   function Any_Fingers (C : Context) return Boolean;
    --  RGB 图顺时针转 90°(W×H → 宽 H、高 W):原图的 (u, v) 落到新图的 (H − 1 − v, u)。量仪器转着看时配得多细用;导出只为自检
    function Turn_90 (Img : Buf; W, H : Natural) return Buf;
    --  原图(宽 W、高 H)顺时针转了 Turns 个 90° 之后那张图里的 (U, V) 换算回原图的像素。核对时画面可能被转了,转回去配完再换算回来;导出只为自检

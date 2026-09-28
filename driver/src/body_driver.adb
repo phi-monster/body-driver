@@ -34,6 +34,8 @@ procedure Body_Driver is
    Ok : Boolean;
    Kin_Eyes : Bytes.Ints;          --  开机前半段认出来的:每只(量成了运动学的)手上的眼
    Kin_World_Cam : Integer := -1;  --  开机前半段认出来的世界相机(不长在手上的;没有 = -1)
+   --  开机前半段一开头(身体还没动过)量的关节读数噪声:开机后半段量静止噪声之前,等读数在它以内停下(Selfmap.Measure 的 Joint_Rest)
+   Joint_Rest : Long_Float := -1.0;
    Kin_Fixed : Geom.Cam_Geo;       --  开机前半段按第一只手的桌面点解出的不动的眼(世界系;Valid = False 就是没解成)
    --  开机前半段交给后半段的几何(V1b 09-27):每台相机一份(手上那只眼 = 运动学的焦距、主点;不动的眼 = 对齐量的)、标定板、世界系的桌面、
    --  不动的眼那一刻的画面(板上的点在它里面的像素就是在这张图里配的)
@@ -135,6 +137,7 @@ begin
          Put_Line ("[链] 量静止噪声时线断了,退出");
          return;
       end if;
+      Joint_Rest := M0.Joint_Noise;
       Put_Line ("[身] 静止噪声(开机前半段):关节读数 " & Codec.Fmt (M0.Joint_Noise, 6) & " · 各相机灰度地板 " & (if M0.Pic_Floor.Is_Empty then "-" else Codec.Img (M0.Pic_Floor (0))));
       --  ⑤ 装回:身体文件旁边存着前半段、钥匙对得上 ⇒ 每只手回到存的参照读数、拍一张和存的比;都没动 ⇒ 不扫描、不解。一项不过 ⇒ 从零量(不修补)
       if Kin_Path /= "" and then Ada.Directories.Exists (Kin_Path) then
@@ -351,7 +354,7 @@ begin
                   Step_Px.Append (St);
                end;
             end loop;
-            Selfmap.Measure (L, F, C.Map, Ok, Step_Px, Eyes => Kin_Eyes, World => Kin_World_Cam);
+            Selfmap.Measure (L, F, C.Map, Ok, Step_Px, Eyes => Kin_Eyes, World => Kin_World_Cam, Joint_Rest => Joint_Rest);
          end;
          if not Ok then
             Put_Line ("[身] 身体量不了,退出");
