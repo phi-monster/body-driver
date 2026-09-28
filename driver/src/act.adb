@@ -11805,6 +11805,27 @@ package body Act is
          Who : constant String := "第" & Codec.Img (A + 1) & " 只手";
          Top_Z : Long_Float := Long_Float'First;  --  压之前到过的最高处(位姿读数的 z)
          Limit : Boolean := False;   --  上一次 Press_At:压到一半这一压在量到的关节限位里解不出来(停下不是碰到)
+         --  这只手每种步长(大步 / 小步 / 一档)空走两步少走的量相差多少,几下里量到的最大(Descend 的门用;没量过 = 0)
+         Jit_Step, Jit_Val : Floats;
+         function Step_Jit_Of (Lstep : Long_Float) return Long_Float is
+         begin
+            for I in 0 .. Natural (Jit_Step.Length) - 1 loop
+               if Jit_Step (I) = Lstep then
+                  return Jit_Val (I);
+               end if;
+            end loop;
+            return 0.0;
+         end Step_Jit_Of;
+         procedure Step_Jit_Put (Lstep, J : Long_Float) is
+         begin
+            for I in 0 .. Natural (Jit_Step.Length) - 1 loop
+               if Jit_Step (I) = Lstep then
+                  Jit_Val.Replace_Element (I, Long_Float'Max (Jit_Val (I), J));
+                  return;
+               end if;
+            end loop;
+            Jit_Step.Append (Lstep); Jit_Val.Append (J);
+         end Step_Jit_Put;
          Eqs : Geom.Press_Eq_Vectors.Vector;   --  这只手压过的每一下(顶住那一刻的方程)
          Eq_Lobe : Geom.Nat_Vectors.Vector;    --  每一下对准的是第几瓣
          Est : Geom.V3_Vectors.Vector;         --  每一瓣的尖此刻的估计(相机系;Has_Est 为假 ⇒ 没有,按它的视线交面)
@@ -12058,10 +12079,21 @@ package body Act is
                      Short := Lstep - ((Now (0) - Cur (0)) * Down (0) + (Now (1) - Cur (1)) * Down (1) + (Now (2) - Cur (2)) * Down (2));
                   end;
                end Step_Down;
-               --  一步一步往下(每步 Lstep,最多 Steps 步),按上面的判法认碰到;Two_Free = 前两步都是空走的(轻碰)
+               --  一步一步往下(每步 Lstep,最多 Steps 步),按上面的判法认碰到;Two_Free = 前两步按设计就是空走的(轻碰:离面至少两档起步)。
+               --  门 = 底 + 3 倍抖动(倍数无量纲,同踢离群)。底:第一步少走的量;前两步都空走以后 = 两步的平均。抖动 = 前两步之差,粗找再加上同一只手
+               --  同样步长以前几下量到的抖动(Step_Jit),取最大;静止噪声只当下限(09-28 V1B60:它量对了是整 0,x5 空走一步少走的量本身有约
+               --  0.0001 的起伏,原来量在上一个动作尾巴上的 0.00004 碰巧当了余量;量对以后粗找虚认 37 次、碰指尖 1544 拍,还收下一瓣错的尖)。
+               --  粗找第 2 步:以前量过这个步长的抖动才判(还不知道空走会抖多少就不判);第 3 步起照上面
                procedure Descend (Lstep : Long_Float; Steps : Natural; Two_Free : Boolean; Got_It : out Boolean; From : out Plug.Arm_Pose; Said : String) is
                   S1, S2, Sh : Long_Float := 0.0;
                   Lim : Boolean;
+                  Known : constant Long_Float := Step_Jit_Of (Lstep);
+                  procedure Remember (N_Free : Natural) is
+                  begin
+                     if N_Free >= 2 then
+                        Step_Jit_Put (Lstep, abs (S1 - S2));
+                     end if;
+                  end Remember;
                begin
                   Got_It := False;
                   From := F.EE (A);
@@ -12071,26 +12103,36 @@ package body Act is
                      if Lim then
                         Limit := True;
                         Geo_Say ("  " & Said & ":再往下一步在量到的关节限位里解不出来(停下不是碰到)⇒ 这一下不算");
+                        Remember (Natural'Min (I - 1, 2));
                         return;
                      end if;
-                     if I = 1 then
-                        S1 := Sh;
-                     elsif I = 2 and then Two_Free then
-                        S2 := Sh;
+                     if I = 1 or else (I = 2 and then (Two_Free or else Known <= 0.0)) then
+                        if I = 1 then
+                           S1 := Sh;
+                        else
+                           S2 := Sh;
+                        end if;
                      else
                         declare
-                           Base : constant Long_Float := (if Two_Free then 0.5 * (S1 + S2) else S1);
-                           Jit : constant Long_Float := (if Two_Free then Long_Float'Max (C.Map.EE_Noise, abs (S1 - S2)) else C.Map.EE_Noise);
+                           Base : constant Long_Float := (if I = 2 then S1 else 0.5 * (S1 + S2));
+                           --  轻碰照原来的门(两档之差;以前几下的抖动只增不减,加进来会越压越松、认得晚);粗找再拿以前量过的抖动当下限
+                           Jit : constant Long_Float := Long_Float'Max (C.Map.EE_Noise, (if Two_Free then abs (S1 - S2)
+                                                                                        else Long_Float'Max (Known, (if I = 2 then 0.0 else abs (S1 - S2)))));
                         begin
                            if Sh > Base + 3.0 * Jit then
                               Got_It := True;
                               Geo_Say ("  " & Said & ":第 " & Codec.Img (I) & " 步(一步 " & Mm (Lstep) & ")少走 " & Mm (Sh) & ",空走时少走 " & Mm (Base)
                                        & "(门 " & Mm (Base + 3.0 * Jit) & ")⇒ 碰到");
+                              Remember (Natural'Min (I - 1, 2));
                               return;
+                           end if;
+                           if I = 2 then
+                              S2 := Sh;
                            end if;
                         end;
                      end if;
                   end loop;
+                  Remember (Natural'Min (Steps, 2));
                   Geo_Say ("  " & Said & ":往下 " & Codec.Img (Steps) & " 步(一步 " & Mm (Lstep) & ")都没认出碰到");
                end Descend;
                --  大步找:一大步一大步(一步 = 步幅)往下,同小步的判法(第一步空走当底);碰到的那一大步开始的地方手指还没碰到 ⇒ 退回那儿,
