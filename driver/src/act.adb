@@ -12015,8 +12015,9 @@ package body Act is
                      O3 : constant Geom.V3 := Geom.Cam_Pos (Gk, P3);
                      H3 : constant Long_Float := Dot ([O3 (0) - C.Board_Pt (0), O3 (1) - C.Board_Pt (1), O3 (2) - C.Board_Pt (2)], Nb);
                      Depth3 : constant Long_Float := -Dot (Nb, Geom.Ap (Geom.Cam_R (Gk, P3), Est (K)));   --  估的尖此刻在眼下多深
-                     --  两小步(次数):09-28 V1B48–50 快下以后 22 下斜着压都在第 3、4 小步碰到(原来离面三小步)= 估的尖差不到一小步 ⇒ 离面两小步第一小步照样是空走的
-                     Dn : constant Long_Float := H3 - (Depth3 + 2.0 * Small);
+                     --  三小步(次数:估的尖差一两小步时第一小步照样是空走的)。09-28 V1B51 试过两小步:第 1 只手第 2 瓣斜 216° 那一下第一小步就碰着了
+                     --  (当底的那一步坏了)⇒ 粗找多压、软手指被顶开没回位,轻碰在手指离桌面还有 2.8 mm 时认成碰到(仿真真值),这一瓣差到 4.3 mm ⇒ 改回三小步
+                     Dn : constant Long_Float := H3 - (Depth3 + 3.0 * Small);
                      Mok : Boolean;
                   begin
                      if Dn > 0.0 then
@@ -12033,7 +12034,7 @@ package body Act is
                               Went : constant Long_Float := Del (0) * Down (0) + Del (1) * Down (1) + Del (2) * Down (2);
                            begin
                               Direct := Went + Geo_Base (C, A) >= Dn;
-                              Geo_Say ("  按估的尖(离眼 " & Mm (Geom.Norm (Est (K))) & "、此刻在眼下 " & Mm (Depth3) & ")一条命令下 " & Mm (Dn) & " 到尖离面约两小步 ⇒ 实到 " & Mm (Went)
+                              Geo_Say ("  按估的尖(离眼 " & Mm (Geom.Norm (Est (K))) & "、此刻在眼下 " & Mm (Depth3) & ")一条命令下 " & Mm (Dn) & " 到尖离面约三小步 ⇒ 实到 " & Mm (Went)
                                        & (if Direct then ",一小步一小步找" else ",这一下就被顶住了(比估的长)⇒ 抬两大步,按头一回的走法"));
                               if not Direct then
                                  --  抬两大步(两 = 次数:被顶住时尖在面上或更低,抬一大步第一大步未必是空走的)
@@ -12050,7 +12051,7 @@ package body Act is
                   declare
                      Fr : Plug.Arm_Pose;
                   begin
-                     Descend (Small, Natural (Long_Float'Ceiling ((2.0 * Small + Ln) / Small)) + 1, False, Coarse, Fr, "一小步一小步找");   --  两小步 + 一大步那么深(次数)
+                     Descend (Small, Natural (Long_Float'Ceiling ((3.0 * Small + Ln) / Small)) + 1, False, Coarse, Fr, "一小步一小步找");   --  三小步 + 一大步那么深(次数)
                   end;
                   if not Coarse and then not Limit then
                      Geo_Say ("  下到按估的尖算的桌面以下一大步还没碰到(比估的短)⇒ 接着按大步压");
