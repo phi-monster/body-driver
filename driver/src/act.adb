@@ -12060,7 +12060,13 @@ package body Act is
                else
                   Big_Press;
                end if;
-               if Coarse then
+               --  粗找认成碰到、轻碰往下一小步那么深都没碰着 ⇒ 粗找那一下是虚的:粗找只有一步当底、门按静止时的读数噪声定,
+               --  空走一步本身少走的量就差这么多(09-28 V1B53 第 1 只手第 1 瓣:少走 0.001 单位、底 0.000 就认成碰到,手指离桌面还有一大截,
+               --  轻碰 11 档都没碰着,6 下里 4 下这么作废)⇒ 细的(轻碰)否掉粗的,从这儿接着一小步一小步往下找(还没碰到 ⇒ 大步),
+               --  直到轻碰真碰着、到了量到的关节限位、或者眼走到面那么低(眼到不了面以下,纯几何)。门不放宽:漏认一次真碰到,手指多压一截,
+               --  轻碰当底的两档就不是空走的(V1B51 那样),比虚认一次坏
+               loop
+                  exit when not Coarse;
                   --  轻碰:抬一小步 + 两档,再一档一档往下(最多抬的那么多再加一小步,纯几何:粗找多压不到一小步)
                   declare
                      Mok : Boolean;
@@ -12070,7 +12076,21 @@ package body Act is
                      Geo_Move (L, C, F, A, [Up * Protocol_Up (0), Up * Protocol_Up (1), Up * Protocol_Up (2)], Mok);
                      Descend (Notch, Natural (Long_Float'Ceiling ((Up + Small) / Notch)) + 1, True, Touched, Fr, "轻碰(一档一档)");
                   end;
-               end if;
+                  exit when Touched or else Limit;
+                  declare
+                     On : constant Geom.V3 := Geom.Cam_Pos (Gk, F.EE (A));
+                     Hn : constant Long_Float := Dot ([On (0) - C.Board_Pt (0), On (1) - C.Board_Pt (1), On (2) - C.Board_Pt (2)], Nb);
+                     Fr : Plug.Arm_Pose;
+                  begin
+                     exit when Hn <= 0.0;
+                     Geo_Say ("  轻碰往下一小步那么深都没碰着 ⇒ 粗找那一下是虚的(少走的量在空走的抖动里)⇒ 从这儿接着一小步一小步找(眼离面 " & Mm (Hn) & ")");
+                     Descend (Small, Natural (Long_Float'Ceiling (Ln / Small)) + 2, False, Coarse, Fr, "接着一小步一小步找");   --  一大步那么深再多两步(次数)
+                  end;
+                  if not Coarse and then not Limit then
+                     Geo_Say ("  一大步那么深还没碰到 ⇒ 接着按大步压");
+                     Big_Press;
+                  end if;
+               end loop;
                if Touched then
                   --  碰到那一刻手上最低的那一点在面上 ⇒ 一条方程;碰到的是不是这一瓣的尖、是不是桌面,由几下对不对得上管(Fit_Presses)
                   declare
