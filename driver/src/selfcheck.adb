@@ -235,6 +235,101 @@ begin
              & Codec.Fmt (Old_Off, 4) & "(> 收格子的门 " & Codec.Fmt (Ct, 5) & ",格子不干净,同 H1)· 新门第 " & Codec.Img (New_Beat)
              & " 拍读,偏 " & Codec.Fmt (New_Off, 5) & "(在门里)");
    end;
+   --  🔴 "停了"按命令大小、静止噪声等真停了再量(Selfmap.Pose_Still / Still_Settling;09-28 H4 人形指尖):按 H4 逐拍读数量到的收法造 ——
+   --  人形每拍剩 0.64(一条命令第一拍走 36%)、x5 每拍剩约 0.13,读数都不抖(仿真)。1 像素 = 平移 0.0094 单位 / 转动 0.0025 弧度(H4 第一只手的一步)。
+   --  ① 量静止噪声:上一个动作第一拍挪 0.05 单位 / 0.005 弧度,之后按比例收、收到整 0;从命令后第 4 拍开始量(人形这样量出 0.013,H4 实测 0.0121;
+   --  x5 量出 0.00011,实测 0.00004 那个量级)。老量法接着读 4 拍取最大 = 尾巴;新量法还在变小就等(最多 12 + 2 拍)再读 4 拍;
+   --  ② 推一步(1 像素)判停:老判法按尾巴噪声(人形 H4 量成 0.0121 / 0.00124)第 2 拍就算停(实到 59%,同 H4 "2 拍稳");新判法噪声 0 时挪到不足一步的百分之一才算停;
+   --  ③ 一条大命令(转 0.824 弧度 + 挪 2 单位)也按它自己的百分之一
+   declare
+      Fp : constant Long_Float := 0.0094;    --  1 像素的平移(单位,同 H4 第一只手)
+      Fr : constant Long_Float := 0.0025;    --  1 像素的转动(弧度)
+      --  按收法 Rho 造第 K 拍(K ≥ 1)这一拍挪了多少:第一拍挪 Frac0 × 总量,之后每拍是上一拍的 Rho;小于 1e-9 记 0(读数是有限位的)
+      function Beat (Total, Rho, Frac0 : Long_Float; K : Positive) return Long_Float is
+         V : constant Long_Float := Total * Frac0 * Rho ** (K - 1);
+      begin
+         return (if V < 1.0e-9 then 0.0 else V);
+      end Beat;
+      --  量静止噪声:Wait = 新量法(还在收就等,最多 Cap 拍),不等 = 老量法;返回量到的平移噪声
+      function Idle (Rho : Long_Float; Wait : Boolean; Cap : Natural; Waited : out Natural) return Long_Float is
+         K : Positive := 4;   --  命令后第 4 拍开始量(见上)
+         Last_P, Last_R : Long_Float := Long_Float'Last;
+         Mx : Long_Float := 0.0;
+      begin
+         Waited := 0;
+         if Wait then
+            for W in 1 .. Cap loop
+               declare
+                  Dp : constant Long_Float := Beat (0.05 / (1.0 - Rho), Rho, 1.0 - Rho, K);
+                  Dr : constant Long_Float := Beat (0.005 / (1.0 - Rho), Rho, 1.0 - Rho, K);
+               begin
+                  K := K + 1; Waited := W;
+                  exit when not Selfmap.Still_Settling (Dp, Dr, Last_P, Last_R);
+                  Last_P := Dp; Last_R := Dr;
+               end;
+            end loop;
+         end if;
+         for R in 1 .. 4 loop
+            Mx := Long_Float'Max (Mx, Beat (0.05 / (1.0 - Rho), Rho, 1.0 - Rho, K));
+            K := K + 1;
+         end loop;
+         return Mx;
+      end Idle;
+      --  推一步(1 像素平移):第几拍起连着两拍算停、那时走了几成
+      procedure Push (Rho, Noise_P, Noise_R : Long_Float; Beat_Still : out Natural; Done : out Long_Float) is
+         Cmd : Table.Vec := Table.Zero_Vec;
+         Still : Natural := 0;
+         Gone : Long_Float := 0.0;
+      begin
+         Cmd (0) := Fp;
+         Beat_Still := 0; Done := 0.0;
+         for K in 1 .. 40 loop
+            declare
+               Mv : constant Long_Float := Beat (Fp, Rho, 1.0 - Rho, K);
+            begin
+               Gone := Gone + Mv;
+               Still := (if Selfmap.Pose_Still (Mv, 0.0, Cmd, Fp, Fr, Noise_P, Noise_R) then Still + 1 else 0);
+               if Still >= 2 then
+                  Beat_Still := K; Done := Gone / Fp;
+                  return;
+               end if;
+            end;
+         end loop;
+      end Push;
+      W_H, W_X : Natural;
+      Old_H : constant Long_Float := Idle (0.64, False, 14, W_H);
+      New_H : constant Long_Float := Idle (0.64, True, 14, W_H);
+      Old_X : constant Long_Float := Idle (0.13, False, 14, W_X);
+      New_X : constant Long_Float := Idle (0.13, True, 14, W_X);
+      Old_B, New_B, X_B : Natural;
+      Old_D, New_D, X_D : Long_Float;
+      Big : Table.Vec := Table.Zero_Vec;
+      Big_Beat : Natural := 0;
+   begin
+      Push (0.64, 0.0121, 0.00124, Old_B, Old_D);   --  老:按 H4 量在尾巴上的噪声
+      Push (0.64, New_H, 0.0, New_B, New_D);          --  新:按新量法量到的噪声
+      Push (0.13, New_X, 0.0, X_B, X_D);
+      --  ③ 大命令:转 0.824 弧度、挪 2 单位,人形收法;按命令的百分之一判停
+      Big (1) := 2.0; Big (3) := 0.824;
+      declare
+         Still : Natural := 0;
+      begin
+         for K in 1 .. 60 loop
+            Still := (if Selfmap.Pose_Still (Beat (2.0, 0.64, 0.36, K), Beat (0.824, 0.64, 0.36, K), Big, Fp, Fr, New_H, 0.0) then Still + 1 else 0);
+            if Still >= 2 then
+               Big_Beat := K;
+               exit;
+            end if;
+         end loop;
+      end;
+      Check (Old_H > 0.1 * Fp and then New_H < 0.01 * Fp and then New_X = 0.0 and then Old_X < 0.02 * Fp
+             and then Old_B <= 2 and then Old_D < 0.7 and then New_D > 0.97 and then X_D > 0.97 and then Big_Beat > 0 and then Big_Beat <= 14,
+             "停了按命令的百分之一、静止噪声等收住再量:人形(每拍剩 0.64)老量法 " & Codec.Fmt (Old_H, 5) & " 单位(尾巴)⇒ 新量法等 " & Codec.Img (W_H)
+             & " 拍后 " & Codec.Fmt (New_H, 7) & ";x5(每拍剩 0.13)老 " & Codec.Fmt (Old_X, 6) & " ⇒ 新 " & Codec.Fmt (New_X, 6) & "(等 " & Codec.Img (W_X)
+             & " 拍)· 推一步:老判法第 " & Codec.Img (Old_B) & " 拍算停、走了 " & Codec.Fmt (100.0 * Old_D, 0) & "%(同 H4 两拍稳)⇒ 新判法第 " & Codec.Img (New_B)
+             & " 拍、" & Codec.Fmt (100.0 * New_D, 1) & "%;x5 第 " & Codec.Img (X_B) & " 拍、" & Codec.Fmt (100.0 * X_D, 1) & "% · 转 0.824 弧度的大命令第 "
+             & Codec.Img (Big_Beat) & " 拍算停");
+   end;
    --  🔴 抓握通道带不带手指是量出来的(Act.Has_Fingers;09-28 DR1 / DR2:无人机开机说了"握区量不了",干活时照样列两瓣手指一组爪心):
    --  一条臂一个抓握通道,两台相机的握区都没量成 ⇒ 没手指;其中一台量成 ⇒ 有;两条臂只有第 2 条量成 ⇒ 第 1 条没有、第 2 条有、整具有
    declare

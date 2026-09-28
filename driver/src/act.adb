@@ -11848,7 +11848,9 @@ package body Act is
          --  挪完核这一瓣的尖落在哪:离挑好的那块超过指尖那一小截的宽 ⇒ 没转到或没挪到,这一下不压(V1B21:挪 0.22 m 没走到、朝向也被带歪约 30°)。
          --  压到被顶住以后不再往下顶、让手歇下来再读位姿(V1B21 仿真真值:顶着的时候手指压进桌面 6.6 mm,命令一换成停在此刻两拍后回到 2.5 mm)。
          --  Got = 真顶住了(那一刻的方程记进 Eqs、对准第 K 瓣);S_Ray = 此刻这一瓣的视线交面离眼多远(朝下那一下给后面几下当"尖大概在哪"的起点)
-         procedure Press_At (K : Natural; Tilt, Azim : Long_Float; Shift : Geom.V3; Got : out Boolean; S_Ray : out Long_Float) is
+         --  Lifted / H_First:转的时候手指撑在面上、抬起来再转的那几回(09-28 H4,见下面"挪到了没有"),已经抬了多少、第一回那一刻眼离面多高
+         procedure Press_At (K : Natural; Tilt, Azim : Long_Float; Shift : Geom.V3; Got : out Boolean; S_Ray : out Long_Float;
+                             Lifted : Long_Float := 0.0; H_First : Long_Float := -1.0) is
             P : constant Plug.Arm_Pose := F.EE (A);
             Gk : constant Geom.Cam_Geo := C.Geo (Hc);
             O : constant Geom.V3 := Geom.Cam_Pos (Gk, P);
@@ -11870,6 +11872,7 @@ package body Act is
             All_Hit : Boolean := Ck > 1.0e-9;
             R : constant Long_Float := Nw (K) * Long_Float'Max (0.0, H) / Gk.F;   --  指尖那一小截的宽(像素)落到面那么远的上限(指尖在眼和面之间)
             Spot : Geom.V3;
+            Aim_O : Geom.V3 := [0.0, 0.0, 0.0];
          begin
             Got := False; S_Ray := 0.0; Limit := False;
             Lp.Append (Geom.V3'[A0 (0) + Shift (0), A0 (1) + Shift (1), A0 (2) + Shift (2)]);
@@ -11961,6 +11964,7 @@ package body Act is
                   Av (I) := Shift (I) + Dl (I);
                   Av (3 + I) := Rv (I);
                end loop;
+               Aim_O := Geom.Cam_Pos (Gk, Chan.Compose (P, Av));   --  这条命令要眼到的地方(下面核它有没有被顶高)
                --  爪子这一条命令里按张开那头发(复位以后爪子的目标作废,不发就跟着读数走)
                Step_Arm (L, C, F, A, Av, Jaw_Open, Del, Mok, Geo_Settle => True);
                Geo_Say ("  让手上" & (if Tilt > 0.0 then "这一瓣的视线朝方位 " & Codec.Fmt (Azim / Deg, 0) & "° 斜 " & Codec.Fmt (Tilt / Deg, 1) & "° 那个方向" else "这一瓣的视线")
@@ -11979,9 +11983,27 @@ package body Act is
                                                              O2 (2) + Geom.Ap (Geom.Cam_R (Gk, P2), Est (K)) (2)])
                                          else Geom.Hit_Plane (O2, Geom.Ray (Gk, P2, Tu (K), Tv (K)), C.Board_Pt, Nb, Hok));
                Off_By : constant Long_Float := Geom.Norm ([Q2 (0) - Spot (0), Q2 (1) - Spot (1), Q2 (2) - Spot (2)]);
+               --  眼比命令的高多少(沿面的法向):手指一转就撑在面上、把手顶起来了(09-28 H4:人形手指约和眼离桌一样长,原地转向下,
+               --  腕俯仰要到 1.60 只到 1.17、眼被顶高约 5 cm)
+               Up_By : constant Long_Float := Dot ([O2 (0) - Aim_O (0), O2 (1) - Aim_O (1), O2 (2) - Aim_O (2)], Nb);
+               H0 : constant Long_Float := (if H_First > 0.0 then H_First else H);
+               Ln : constant Long_Float := Stride_Of (C, A);
             begin
                if not Hok or else Off_By > R then
-                  Geo_Say ("  没挪到那块空的面(落点差 " & Mm (Off_By) & ",手指宽上限 " & Mm (R) & ")⇒ 这一下不压");
+                  if Up_By > Small and then Ln > 0.0 and then Lifted + Ln <= H0 then
+                     --  被面顶起来了 ⇒ 沿法向抬一大步(步幅),从那儿把这一下重算一遍再转(抬的总量不超过第一回眼离面的高度:
+                     --  手指比那还长的身体这样碰不出来,下面照实说)
+                     Geo_Say ("  转的时候手指撑在面上了(眼比命令的高 " & Mm (Up_By) & ")⇒ 抬一大步(" & Mm (Ln) & ")再转");
+                     declare
+                        Mok : Boolean;
+                     begin
+                        Geo_Move (L, C, F, A, [Ln * Nb (0), Ln * Nb (1), Ln * Nb (2)], Mok);
+                     end;
+                     Press_At (K, Tilt, Azim, Shift, Got, S_Ray, Lifted + Ln, H0);
+                     return;
+                  end if;
+                  Geo_Say ("  没挪到那块空的面(落点差 " & Mm (Off_By) & ",手指宽上限 " & Mm (R) & (if Up_By > Small then ",眼比命令的高 " & Mm (Up_By) & ",已经抬过 " & Mm (Lifted)
+                           & "、再抬就超过眼离面的高度 " & Mm (H0) else "") & ")⇒ 这一下不压");
                   return;
                end if;
             end;
