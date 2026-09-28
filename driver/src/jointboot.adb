@@ -698,10 +698,10 @@ package body Jointboot is
          end loop;
          Say ("  配点配完:再等了 " & Codec.Fmt (Long_Float (Ada.Calendar."-" (Ada.Calendar.Clock, T1)), 0) & " 秒(" & Codec.Img (N_Empty) & " 对配不上)");
       end;
-      --  ③ 配点进运动学。不再遮"跟着眼一起动的手指"(09-27):原来按跟点仪器认手指(整段扫描挪不到画幅宽 1/64 的格点),要在扫描时每格跟一次
-      --  (V1B14:178 次 × 0.225 秒 ≈ 40 秒);按同样的配对单向重配、不遮,运动学最大 0.30 / 0.43 mm(遮了 0.41 / 0.62 mm),
-      --  两只手对齐倍数差 0.3%、平移差 2.9 mm —— 手指上的配点按运动学一起解时的门就被当野点去掉了。配点仪器在手指那一小块上
-      --  是跟着背景一起配的(手指格子里"不动的配点"占 0–87%),拿配点认手指也认不准,所以不认。只去掉落在画面外的点
+      --  ③ 配点进运动学,这里只去掉落在画面外的点。长在眼上的像素(自己的手、夹爪)由 Kinem.Fit 按这批配点自己认(Eye_Pixels:
+      --  两个以上关节各自单独转的每一格里都没挪的格点),不再另跟一遍:09-27 以前按跟点仪器认手指,扫描时每格跟一次(V1B14 约 40 秒),
+      --  x5 上遮了反而更差(最大 0.41 / 0.62 mm 对不遮 0.30 / 0.43 mm)就撤了 —— x5 的手指只占画面边上一小块,解法自己当野点去掉;
+      --  09-28 人形 H2 腕眼三分之一是自己的手,解法去不掉,两只手错 16–20 mm ⇒ 按配点认、不多花时间(LAB H2)
       for A in 0 .. Na - 1 loop
          if St (A).Live then
             declare
@@ -773,7 +773,9 @@ package body Jointboot is
                        & "(" & Codec.Img (Rep.Joint_Frames (J)) & " 格)");
             end;
          end loop;
-         Say ("  运动学 · 第" & Codec.Img (A + 1) & " 只手:" & (if Ok then "量成" else "没量成") & " · 每根轴单独(转 / 走两样各解一次,残差小的那样)的残差中位(像素):" & To_String (T));
+         Say ("  运动学 · 第" & Codec.Img (A + 1) & " 只手:" & (if Ok then "量成" else "没量成") & " · 长在眼上的像素 " & Codec.Img (Rep.Eye_Px)
+              & " 个(两个以上关节单独转的每一格都没挪 = 自己身上的),从它们出发的配点 " & Codec.Img (Rep.Eye_Corrs) & " / " & Codec.Img (Rep.N_Corr)
+              & " 笔不进解 · 每根轴单独(转 / 走两样各解一次,残差小的那样)的残差中位(像素):" & To_String (T));
          T := Null_Unbounded_String;
          for X of Rep.Rho loop
             Append (T, " " & Codec.Fmt (X, 3));
@@ -805,6 +807,9 @@ package body Jointboot is
                Ada.Text_IO.Put_Line (Fo, "axis " & Codec.Img (J) & " " & Codec.Fmt (M.Ax (J).W (0), 9) & " " & Codec.Fmt (M.Ax (J).W (1), 9) & " "
                                      & Codec.Fmt (M.Ax (J).W (2), 9) & " " & Codec.Fmt (M.Ax (J).P (0), 9) & " " & Codec.Fmt (M.Ax (J).P (1), 9) & " "
                                      & Codec.Fmt (M.Ax (J).P (2), 9) & " " & Kind_Word (M.Ax (J)));
+            end loop;
+            for P of M.Eye loop   --  长在眼上的像素(离线回放 alignexam 读回,三角时同样不用)
+               Ada.Text_IO.Put_Line (Fo, "eye " & Codec.Fmt (P.U, 3) & " " & Codec.Fmt (P.V, 3));
             end loop;
             Ada.Text_IO.Close (Fo);
          exception
@@ -3059,6 +3064,9 @@ package body Jointboot is
             for J in 0 .. W.Model.N - 1 loop
                Put_Line (Fo, "axis " & Codec.Img (J) & " " & F9 (W.Model.Ax (J).W (0)) & " " & F9 (W.Model.Ax (J).W (1)) & " " & F9 (W.Model.Ax (J).W (2)) & " "
                          & F9 (W.Model.Ax (J).P (0)) & " " & F9 (W.Model.Ax (J).P (1)) & " " & F9 (W.Model.Ax (J).P (2)) & " " & Kind_Word (W.Model.Ax (J)));
+            end loop;
+            for P of W.Model.Eye loop   --  长在眼上的像素(身体文件不存 ⇒ 读回来的没有)
+               Put_Line (Fo, "eye " & Codec.Fmt (P.U, 3) & " " & Codec.Fmt (P.V, 3));
             end loop;
             Close (Fo);
             if A > 0 then

@@ -147,6 +147,8 @@ begin
                      M.Ax (J).P := [Long_Float'Value (F (5)), Long_Float'Value (F (6)), Long_Float'Value (F (7))];
                      M.Ax (J).Slide := Natural (F.Length) >= 9 and then F (8) = "slide";   --  第 9 列 = 转 / 走(09-27 以前的落盘没有这一列,都是转的)
                   end;
+               elsif Natural (F.Length) >= 3 and then F (0) = "eye" then   --  长在眼上的像素(09-28 起落盘;三角时同驱动不用)
+                  M.Eye.Append (Kinem.Px'(U => Long_Float'Value (F (1)), V => Long_Float'Value (F (2))));
                end if;
             end;
          end loop;

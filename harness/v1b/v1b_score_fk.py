@@ -89,8 +89,20 @@ def read_axes(lines):
 KDIR = sys.argv[2] if len(sys.argv) > 2 else os.path.join(RUN, "look")   # 模型在哪(默认驱动落盘的;离线回放写到别处时给这个)
 sp = os.path.join(RUN, "look", "sweep.txt")
 FITS = {}
+# 被顶偏的格子(09-28 人形 H2):单独扫一个关节时别的关节离起点偏过驱动的"干净"门(Kinem.Clean_Tol = tan 15° ÷ 半幅宽,画面挪不到 1 像素)
+# = 手碰上了东西、身体被压着,读数以外的地方(腰、躯干)也变了形,运动学按读数算不出来 ⇒ 不进对齐、不按关节分、不估真轴,单独照实报
+def clean_tol():
+    import struct
+    for l in open(sp):
+        if "||" in l:
+            bmp = os.path.join(RUN, "look", l.split()[0])
+            if os.path.exists(bmp):
+                w = struct.unpack("<i", open(bmp, "rb").read(26)[18:22])[0]
+                return math.tan(math.radians(15.0)) / (0.5 * w)
+    return math.tan(math.radians(15.0)) / 320.0
 if os.path.exists(sp):
     rows = [l for l in open(sp) if "||" in l]
+    CT = clean_tol()
     for arm in range(2):
         kp = os.path.join(KDIR, "kinem_arm%d.txt" % arm)
         if not os.path.exists(kp):
@@ -111,7 +123,11 @@ if os.path.exists(sp):
             Qs.append(q)
             Rf.append(R); Tf.append(t); Tp.append(np.array(ee[:3])); Rt.append(qR(np.array(ee[3:]))); Jr.append(int(h[2]) if int(h[4]) > 0 else -1)
         Rf = np.array(Rf); Tf = np.array(Tf); Tp = np.array(Tp); Rt = np.array(Rt)
-        n = len(Tf); trn = np.arange(0, n, 2); tst = np.arange(1, n, 2)
+        n = len(Tf)
+        i00 = int(np.where(np.array(Jr) == -1)[0][0]) if -1 in Jr else 0
+        pushed = np.array([0 <= Jr[k] < 99 and np.delete(np.abs(Qs[k] - Qs[i00]), Jr[k]).max() >= CT for k in range(n)])
+        good = np.where(~pushed)[0]
+        trn = good[0::2]; tst = good[1::2]
         def res2(x, idx):
             Rg = rv(x[0:3]); Rx = rv(x[3:6]); s = x[6]; tg = x[7:10]; tx = x[10:13]
             pe = (s * (Tf[idx] @ Rg.T) + tg) - (Tp[idx] + np.einsum('nab,b->na', Rt[idx], tx))
@@ -125,23 +141,26 @@ if os.path.exists(sp):
         x = best.x
         Rg = rv(x[0:3]); s = x[6]; tg = x[7:10]; tx = x[10:13]
         # 换算(模型 → 仿真)给后面几种考法用:按【全部】扫描格拟合(09-27:模型在扫描范围里有形变时,一半格子拟合的换算自己晃 2–3 mm,V1B32 第 2 只手 ② 7.3 / 4.1 mm 两种算法)
-        ra = least_squares(lambda xx: res2(xx, np.arange(n)), x, method="lm", max_nfev=4000)
+        ra = least_squares(lambda xx: res2(xx, good), x, method="lm", max_nfev=4000)
         xa = ra.x
         FITS[arm] = (xa[6], rv(xa[0:3]), xa[7:10], rv(xa[3:6]), xa[10:13])
         def e2(idx):
             return np.linalg.norm((s * (Tf[idx] @ Rg.T) + tg) - (Tp[idx] + np.einsum('nab,b->na', Rt[idx], tx)), axis=1) * 1000
         et, ee_ = e2(trn), e2(tst)
-        print("运动学(驱动落盘)· 手 %d:扫描 %d 格(拟合 %d、考试 %d)· 倍数 %.4f m/单位 · 眼离手 (%.1f, %.1f, %.1f) mm" % (arm, n, len(trn), len(tst), s, *(1000 * tx)))
+        print("运动学(驱动落盘)· 手 %d:扫描 %d 格(被顶偏的 %d 格不算;拟合 %d、考试 %d)· 倍数 %.4f m/单位 · 眼离手 (%.1f, %.1f, %.1f) mm" % (arm, n, pushed.sum(), len(trn), len(tst), s, *(1000 * tx)))
         print("   拟合那一半:中位 %.2f mm、最大 %.2f mm;考试那一半:中位 %.2f mm、九成 %.2f mm、最大 %.2f mm" %
               (np.median(et), et.max(), np.median(ee_), np.quantile(ee_, 0.9), ee_.max()))
         ea = e2(np.arange(n)); Jr = np.array(Jr)
-        print("   按扫的是哪个关节分(全部格子,mm):" + " · ".join("%s %.1f/%.1f" % ("多关节" if j == 99 else ("起点" if j < 0 else "关节%d" % j), np.median(ea[Jr == j]), ea[Jr == j].max())
-                                                       for j in sorted(set(Jr.tolist()))))
+        print("   按扫的是哪个关节分(干净格子,中位/最大 mm):" + " · ".join("%s %.1f/%.1f" % ("多关节" if j == 99 else ("起点" if j < 0 else "关节%d" % j), np.median(ea[(Jr == j) & ~pushed]), ea[(Jr == j) & ~pushed].max())
+                                                       for j in sorted(set(Jr[~pushed].tolist()))))
+        if pushed.any():
+            print("   被顶偏的格子(别的关节偏过 %.5f):%s" % (CT, " · ".join("第%d格 扫关节%d 别的关节最多偏 %.3f 误差 %.1f mm" % (k, Jr[k], np.delete(np.abs(Qs[k] - Qs[i00]), Jr[k]).max(), ea[k])
+                                                                        for k in np.where(pushed)[0])))
         # 每根轴对不对:真值里扫第 j 个关节那几格 = 手绕一条固定的线转(世界系)⇒ 线的方向、位置;模型的轴按上面拟合的相似变换搬到世界里比
         i0 = int(np.where(Jr == -1)[0][0]) if (Jr == -1).any() else 0
         out = []
         for j in range(len(W)):
-            ks = np.where(Jr == j)[0]
+            ks = np.where((Jr == j) & ~pushed)[0]
             if len(ks) == 0:
                 continue
             if Sl[j]:

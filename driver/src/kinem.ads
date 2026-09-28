@@ -22,12 +22,18 @@ package Kinem is
       Slide : Boolean := False;    --  True = 沿 W 走(平移关节)
    end record;
    type Axis_Array is array (0 .. Max_Joints - 1) of Axis;
+   --  一个像素位置(配点在它那一帧里问的那个格点)
+   type Px is record
+      U, V : Long_Float := 0.0;
+   end record;
+   package Px_Vectors is new Ada.Containers.Vectors (Natural, Px);
    type Model is record
       Valid : Boolean := False;
       N : Natural := 0;                --  几根轴(= 这组关节读数几个)
       Ax : Axis_Array;
       F, Cx, Cy : Long_Float := 0.0;   --  手上那只眼的焦距(像素)、主点
       Q0 : Floats;                     --  参照读数
+      Eye : Px_Vectors.Vector;         --  长在这只眼上的像素(Fit 按 Eye_Pixels 量;解、三角都不用从它们出发的配点);身体文件不存(开机以后用不着)
    end record;
 
    --  只给关节读数 ⇒ 那只眼在参照眼系里的位姿
@@ -63,6 +69,7 @@ package Kinem is
       Rho_Start_Px, Rho_Px : Long_Float := 0.0;   --  ② 三对起步最好的那个(截断到 3 px 的均方根)、全部重解以后(中位):这些配点的 Sampson 残差(像素)
       Med_Px, P90_Px : Long_Float := 0.0;   --  ③ 最后一起解的 Sampson 残差(像素)中位 / 九成
       N_Corr, N_Used : Natural := 0;   --  配点总数 / 进最后一起解的内点数
+      Eye_Px, Eye_Corrs : Natural := 0;   --  长在眼上的像素几个、从它们出发的配点几笔(不进解;见 Eye_Pixels)
       Flipped : Boolean := False;      --  平移整体反了一次号(Sampson 分不出,按点在不在两只眼前面定)
       Mv_Tracks, Mv_Obs : Natural := 0;               --  ④ 多视图一起解用了几条轨迹、几笔(轨迹在别的帧里的像素)
       Mv_Start_Px, Mv_Px, Mv_P90_Px : Long_Float := 0.0;   --  ④ 重投影残差(像素):起步中位、解完中位 / 九成
@@ -73,7 +80,20 @@ package Kinem is
    --  每根轴单独起步收格子的门:别的关节偏得让画面挪不到 1 像素(按焦距网格最长那档算,最严)= 1 ÷ 最长焦距(弧度 / 读数单位)。
    --  开机扫描"到了"时别的关节也按这道门等(Jointboot,H1 2026-09-28:人形别的关节偏 0.001–0.009 就读,格子全不干净,两只手运动学没量成)
    function Clean_Tol (Width : Long_Float) return Long_Float;
+   --  这一帧是不是只动了一个关节:是扫那个关节扫出来的(Frames (Fr).Joint),别的关节离参照读数都不到 Dmax(画面挪不到 1 像素)⇒ 那个关节;
+   --  参照帧自己、几个关节一起动的帧、别的关节偏了的帧 ⇒ -1。每根轴单独起步收格子(Fit)、认长在眼上的像素(Eye_Pixels)都按它
+   function Single_Joint (Frames : Frame_Vectors.Vector; Ref, Fr : Natural; Dmax : Long_Float) return Integer;
+   --  长在眼上的像素(2026-09-28 人形 H2):参照帧上问的一个格点,在【两个以上关节】各自单独转的【每一格】里
+   --  (参照帧 ↔ 只动了这一个关节的帧;这一对里挪了的配点比没挪的多 = 眼确实动了)都没挪过配点精度(Geom.Trip_Px)⇒ 它跟着眼走
+   --  (自己的手、夹爪),不是静止的世界。世界里的点只有落在一根转轴的方向上、而且转得小时才可能不挪(转大了照样挪);
+   --  两个关节、每一格都不挪的只有长在眼上的。"这一对眼动了没有"按多数:相机下游的关节转时世界不动、手在动 ⇒ 那几对不算数,背景不会被认成手。
+   --  人形腕眼画面三分之一是自己的手:这些配点满足"眼没转"的解,把定比例那一步拉歪,两只手运动学错 16–20 mm(去掉以后 0.14–0.16 mm);
+   --  x5 同一条规则只认出两边的夹爪,运动学不变(LAB H2)。扫描每一对问的是同一张格子(Jointboot)⇒ 同一个像素在哪一对里都是它
+   function Eye_Pixels (Frames : Frame_Vectors.Vector; Ref : Natural; Cs : Corr_Vectors.Vector; Width : Long_Float) return Px_Vectors.Vector;
+   --  配点里去掉从 Eye 这些像素出发的(不管哪一对)
+   function Off_Eye (Eye : Px_Vectors.Vector; Cs : Corr_Vectors.Vector) return Corr_Vectors.Vector;
    --  Frames(Ref) = 参照帧(扫描起点);Width = 画幅宽(像素,焦距网格按它铺:视场 30°–110°)。
+   --  先按 Eye_Pixels 认出长在眼上的像素(记进 M.Eye、Rep.Eye_Px / Eye_Corrs),从它们出发的配点不进解。
    --  Ok = False:能量的轴不够 / 配点不够(Rep 里照实写到哪一步)
    procedure Fit (Frames : Frame_Vectors.Vector; Ref : Natural; Cs : Corr_Vectors.Vector; Cx, Cy, Width : Long_Float;
                   M : out Model; Rep : out Fit_Report; Ok : out Boolean; Per_Pair : Positive := 60);
@@ -82,7 +102,7 @@ package Kinem is
    --  一个配点在模型下的 Sampson 残差(像素)
    function Residual (M : Model; Frames : Frame_Vectors.Vector; C : Corr) return Long_Float;
 
-   --  Fit 的最后一步(④ 多视图:轨迹按重投影一起解,M 当起步)单独拿出来,给自检焊点用
+   --  Fit 的最后一步(④ 多视图:轨迹按重投影一起解,M 当起步)单独拿出来,给自检焊点用;从 M.Eye 那些像素出发的配点不用(同 Fit)
    procedure Refine_Tracks (Frames : Frame_Vectors.Vector; Cs : Corr_Vectors.Vector; M : in out Model; Rep : in out Fit_Report);
 
    --  轨迹的点(参照眼系,模型单位):在它起点那帧(I)的视线上,远近按它进的每一帧的像素一起解(多视图三角;抗野点)
@@ -97,7 +117,7 @@ package Kinem is
    end record;
    package Track_Pt_Vectors is new Ada.Containers.Vectors (Natural, Track_Pt);
    --  按模型把每条轨迹(Pt >= 0 的配点,按 Pt 归到一起)的点解出来;只给起点在 Only_I 那帧的(-1 = 全部)、至少 Min_Views 帧看见的;
-   --  Sig_Px = 这些轨迹重投影残差的中位 × 1.4826(正态下中位换标准差,统计常数)
+   --  Sig_Px = 这些轨迹重投影残差的中位 × 1.4826(正态下中位换标准差,统计常数);从 M.Eye 那些像素出发的配点不用(同 Fit)
    procedure Track_Points (M : Model; Frames : Frame_Vectors.Vector; Cs : Corr_Vectors.Vector; Only_I : Integer; Min_Views : Natural;
                            Tracks : out Track_Pt_Vectors.Vector; Sig_Px : out Long_Float);
 

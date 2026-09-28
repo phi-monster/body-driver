@@ -5670,6 +5670,41 @@ begin
          Rt, Rf : M3;
          Tt, Tf : V3;
          Emax, Emed : Long_Float := 0.0;
+         --  考试(09-28 从 ④ 挪上来,长在眼上那条也用):全关节 ±30° 随机 30 个姿势,按训练帧定倍数,中位 / 最大(mm)
+         procedure Exam (Mm : Kinem.Model; Med, Mx : out Long_Float) is
+            Sxy2, Sxx2 : Long_Float := 0.0;
+            Rt3, Rf3 : M3;
+            Tt3, Tf3 : V3;
+            Es : Floats;
+            package Sorting is new F64_Vectors.Generic_Sorting;
+            Gen2 : FR.Generator;
+         begin
+            FR.Reset (Gen2, 20260927);
+            for K in 0 .. Natural (Frames.Length) - 1 loop
+               Kinem.FK (Truth, Frames (K).Q, Rt3, Tt3);
+               Kinem.FK (Mm, Frames (K).Q, Rf3, Tf3);
+               for X in 0 .. 2 loop
+                  Sxy2 := Sxy2 + Tf3 (X) * Tt3 (X); Sxx2 := Sxx2 + Tf3 (X) * Tf3 (X);
+               end loop;
+            end loop;
+            Mx := 0.0;
+            for T in 1 .. 30 loop
+               declare
+                  Q : Floats;
+                  S2 : constant Long_Float := (if Sxx2 > 0.0 then Sxy2 / Sxx2 else 0.0);
+               begin
+                  for X in 0 .. 5 loop
+                     Q.Append ((2.0 * Long_Float (FR.Random (Gen2)) - 1.0) * 30.0 * Deg);
+                  end loop;
+                  Kinem.FK (Truth, Q, Rt3, Tt3);
+                  Kinem.FK (Mm, Q, Rf3, Tf3);
+                  Es.Append (1000.0 * Sqrt ((S2 * Tf3 (0) - Tt3 (0)) ** 2 + (S2 * Tf3 (1) - Tt3 (1)) ** 2 + (S2 * Tf3 (2) - Tt3 (2)) ** 2));
+                  Mx := Long_Float'Max (Mx, Es.Last_Element);
+               end;
+            end loop;
+            Sorting.Sort (Es);
+            Med := Es (Natural (Es.Length) / 2);
+         end Exam;
       begin
          if Okf then
             for K in 0 .. Natural (Frames.Length) - 1 loop
@@ -5782,40 +5817,6 @@ begin
          declare
             Mp : Kinem.Model := Truth;
             Rp : Kinem.Fit_Report;
-            procedure Exam (Mm : Kinem.Model; Med, Mx : out Long_Float) is
-               Sxy2, Sxx2 : Long_Float := 0.0;
-               Rt3, Rf3 : M3;
-               Tt3, Tf3 : V3;
-               Es : Floats;
-               package Sorting is new F64_Vectors.Generic_Sorting;
-               Gen2 : FR.Generator;
-            begin
-               FR.Reset (Gen2, 20260927);
-               for K in 0 .. Natural (Frames.Length) - 1 loop
-                  Kinem.FK (Truth, Frames (K).Q, Rt3, Tt3);
-                  Kinem.FK (Mm, Frames (K).Q, Rf3, Tf3);
-                  for X in 0 .. 2 loop
-                     Sxy2 := Sxy2 + Tf3 (X) * Tt3 (X); Sxx2 := Sxx2 + Tf3 (X) * Tf3 (X);
-                  end loop;
-               end loop;
-               Mx := 0.0;
-               for T in 1 .. 30 loop
-                  declare
-                     Q : Floats;
-                     S2 : constant Long_Float := (if Sxx2 > 0.0 then Sxy2 / Sxx2 else 0.0);
-                  begin
-                     for X in 0 .. 5 loop
-                        Q.Append ((2.0 * Long_Float (FR.Random (Gen2)) - 1.0) * 30.0 * Deg);
-                     end loop;
-                     Kinem.FK (Truth, Q, Rt3, Tt3);
-                     Kinem.FK (Mm, Q, Rf3, Tf3);
-                     Es.Append (1000.0 * Sqrt ((S2 * Tf3 (0) - Tt3 (0)) ** 2 + (S2 * Tf3 (1) - Tt3 (1)) ** 2 + (S2 * Tf3 (2) - Tt3 (2)) ** 2));
-                     Mx := Long_Float'Max (Mx, Es.Last_Element);
-                  end;
-               end loop;
-               Sorting.Sort (Es);
-               Med := Es (Natural (Es.Length) / 2);
-            end Exam;
             E0m, E0x, E1m, E1x : Long_Float;
          begin
             Mp.Ax (1).P := [Mp.Ax (1).P (0) * 1.03, Mp.Ax (1).P (1) * 1.03, Mp.Ax (1).P (2) * 1.03];
@@ -5862,7 +5863,127 @@ begin
                    "运动学·多视图一步把挪开的轴拉回来:起步考试最大 " & Codec.Fmt (E0x, 2) & " mm(要 > 3)⇒ " & Codec.Fmt (E1x, 2) & " mm(要 < 0.5)、焦距 "
                    & Codec.Fmt (Mp.F, 1) & "(真 400,要 0.2% 内)");
          end;
+         --  🔴 长在眼上的像素(09-28 人形 H2):同一条胳膊、同一批配点,每一对再加 12 × 10 个钉在画面同一处的格点(像腕眼里自己的手:
+         --  下半幅中间一块,每一对都只带 0.3 px 噪声,占全部配点近一半;人形实测 26%)⇒ 要:正好认出这 120 个像素、焦距 1% 内、
+         --  考试中位 < 1 mm / 最大 < 5 mm(同上面那条)。起点那帧出发的给轨迹号(同驱动:问同一张格点)
+         declare
+            Cs_E : Kinem.Corr_Vectors.Vector := Cs;
+            M_E : Kinem.Model;
+            Rep_E : Kinem.Fit_Report;
+            Ok_E : Boolean;
+            Em, Ex : Long_Float := 0.0;
+         begin
+            for I in 0 .. Natural (Frames.Length) - 1 loop
+               for J in 0 .. Natural (Frames.Length) - 1 loop
+                  if Paired (I, J) then
+                     for Gu in 0 .. 11 loop
+                        for Gv in 0 .. 9 loop
+                           declare
+                              U : constant Long_Float := 210.0 + 20.0 * Long_Float (Gu);
+                              V : constant Long_Float := 170.0 + 10.0 * Long_Float (Gv);
+                           begin
+                              Cs_E.Append (Kinem.Corr'(I => I, J => J, Ua => U, Va => V, Ub => U + 0.3 * Gauss, Vb => V + 0.3 * Gauss,
+                                                       Pt => (if I = 0 then 1_000_000 + 10 * Gu + Gv else -1)));
+                           end;
+                        end loop;
+                     end loop;
+                  end if;
+               end loop;
+            end loop;
+            Kinem.Fit (Frames, 0, Cs_E, Cx, Cy, 640.0, M_E, Rep_E, Ok_E);
+            if Ok_E then
+               Exam (M_E, Em, Ex);
+            end if;
+            Put_Line ("    运动学·画面里钉着自己的手:配点 " & Codec.Img (Rep_E.N_Corr) & "(钉住的 " & Codec.Img (Natural (Cs_E.Length) - Natural (Cs.Length))
+                      & ")· 认出长在眼上的像素 " & Codec.Img (Rep_E.Eye_Px) & " 个、去掉 " & Codec.Img (Rep_E.Eye_Corrs) & " 笔 · 焦距 " & Codec.Fmt (Rep_E.F, 1)
+                      & " · 定比例三对起步 " & Codec.Fmt (Rep_E.Rho_Start_Px, 3) & " → " & Codec.Fmt (Rep_E.Rho_Px, 3) & " px · 考试中位 " & Codec.Fmt (Em, 2)
+                      & " / 最大 " & Codec.Fmt (Ex, 2) & " mm");
+            Check (Ok_E and then Rep_E.Eye_Px = 120 and then Rep_E.Eye_Corrs = Natural (Cs_E.Length) - Natural (Cs.Length)
+                   and then abs (Rep_E.F - F_True) < 0.01 * F_True and then Em < 1.0 and then Ex < 5.0,
+                   "运动学·腕眼画面近一半配点钉住不动(自己的手):正好认出 120 个长在眼上的像素(认出 " & Codec.Img (Rep_E.Eye_Px) & ")、焦距 " & Codec.Fmt (Rep_E.F, 1)
+                   & "(要 1% 内)、考试中位 " & Codec.Fmt (Em, 2) & " / 最大 " & Codec.Fmt (Ex, 2) & " mm(要 < 1 / < 5)");
+         end;
       end;
+   end;
+
+   --  🔴 长在眼上的像素 · 判法本身(09-28 人形 H2,Kinem.Eye_Pixels / Off_Eye / Single_Joint):手做的一段扫描 ——
+   --  参照帧 0;关节 0、1 各单独转两格(0.1 / 0.3);关节 2 单独转两格但它在相机下游(眼没动:世界不挪);帧 7 两个关节一起动(关节 1 转得多);
+   --  帧 8 扫关节 1 时关节 0 被顶偏 0.01。12 个世界格点按转角挪;要认出的只有 A(每一对都不挪)。不许认的,每个只留一种诱惑(少哪条规则哪个就被认进来):
+   --  P 在两个关节的转轴方向上(转 0.1 不挪、转 0.3 挪 3.5 px ⇒ 要"每一格"都不挪才算);C 只有关节 0 不挪(要两个关节);
+   --  D 除了关节 0 只在一起动的帧 7(0 → 7、交叉对 1 → 7)里不挪、E 只在相机下游的关节 2 里不挪(那几对多数没挪 = 眼没动,不算数)、
+   --  F 只在被顶偏的帧 8 里不挪 —— D、E、F 在关节 1 单独转的格子里没配上。去掉:从 A 出发的配点不管哪一对都去掉(交叉对里那一笔也去掉)
+   declare
+      function Q3 (A, B, C : Long_Float) return Floats is
+         Q : Floats;
+      begin
+         Q.Append (A); Q.Append (B); Q.Append (C);
+         return Q;
+      end Q3;
+      Frames : Kinem.Frame_Vectors.Vector;
+      Cs : Kinem.Corr_Vectors.Vector;
+      Eye : Kinem.Px_Vectors.Vector;
+      Kept : Kinem.Corr_Vectors.Vector;
+      N_A : Natural := 0;
+      type Kind is (World, A, P, C, D, E, F);
+      --  这个像素在参照帧 → 第 Fr 帧里挪多少(像素,朝 +u)
+      function Flow (Kd : Kind; Fr : Natural) return Long_Float is
+         Q : constant Floats := Frames (Fr).Q;
+      begin
+         case Kd is
+            when World => return 200.0 * (abs Q (0) + abs Q (1));   --  相机下游的关节 2 不挪
+            when A => return 0.2;
+            when P => return (if abs Q (0) + abs Q (1) > 0.2 then 3.5 else 0.4);
+            when C => return (if abs Q (1) > 0.0 then 10.0 else 0.3);
+            when D => return (if Fr = 7 then 0.1 else 0.3);
+            when E => return 0.3;
+            when F => return (if Fr in 1 .. 2 | 8 then 0.3 else 9.0);
+         end case;
+      end Flow;
+      procedure Add (Kd : Kind; U, V : Long_Float; I, J : Natural) is
+      begin
+         if Kd in D .. F and then (I in 3 .. 4 or else J in 3 .. 4) then
+            return;   --  关节 1 单独转的格子里没配上
+         end if;
+         Cs.Append (Kinem.Corr'(I => I, J => J, Ua => U, Va => V, Ub => U + Flow (Kd, J) - (if I = 0 then 0.0 else Flow (Kd, I)), Vb => V, Pt => -1));
+      end Add;
+      procedure Add_All (I, J : Natural) is
+      begin
+         for K in 0 .. 11 loop
+            Add (World, 100.0 + 20.0 * Long_Float (K), 100.0, I, J);
+         end loop;
+         Add (A, 400.0, 300.0, I, J); Add (P, 300.0, 50.0, I, J); Add (C, 250.0, 200.0, I, J);
+         Add (D, 260.0, 220.0, I, J); Add (E, 270.0, 240.0, I, J); Add (F, 280.0, 260.0, I, J);
+      end Add_All;
+      Dmax : constant Long_Float := Kinem.Clean_Tol (640.0);
+      Only_A : Boolean;
+   begin
+      Frames.Append (Kinem.Frame_Info'(Q => Q3 (0.0, 0.0, 0.0), Joint => -1));
+      Frames.Append (Kinem.Frame_Info'(Q => Q3 (0.1, 0.0, 0.0), Joint => 0));
+      Frames.Append (Kinem.Frame_Info'(Q => Q3 (0.3, 0.0, 0.0), Joint => 0));
+      Frames.Append (Kinem.Frame_Info'(Q => Q3 (0.0, 0.1, 0.0), Joint => 1));
+      Frames.Append (Kinem.Frame_Info'(Q => Q3 (0.0, 0.3, 0.0), Joint => 1));
+      Frames.Append (Kinem.Frame_Info'(Q => Q3 (0.0, 0.0, 0.1), Joint => 2));
+      Frames.Append (Kinem.Frame_Info'(Q => Q3 (0.0, 0.0, 0.3), Joint => 2));
+      Frames.Append (Kinem.Frame_Info'(Q => Q3 (0.1, 0.2, 0.0), Joint => -1));
+      Frames.Append (Kinem.Frame_Info'(Q => Q3 (0.01, 0.2, 0.0), Joint => 1));
+      for J in 1 .. 8 loop
+         Add_All (0, J);
+      end loop;
+      Add_All (1, 7);
+      Eye := Kinem.Eye_Pixels (Frames, 0, Cs, 640.0);
+      Kept := Kinem.Off_Eye (Eye, Cs);
+      for Cc of Cs loop
+         if Cc.Ua = 400.0 and then Cc.Va = 300.0 then
+            N_A := N_A + 1;
+         end if;
+      end loop;
+      Only_A := Natural (Eye.Length) = 1 and then Eye (0).U = 400.0 and then Eye (0).V = 300.0;
+      Check (Only_A and then Natural (Kept.Length) = Natural (Cs.Length) - N_A and then N_A = 9
+             and then Kinem.Single_Joint (Frames, 0, 5, Dmax) = 2 and then Kinem.Single_Joint (Frames, 0, 7, Dmax) = -1
+             and then Kinem.Single_Joint (Frames, 0, 8, Dmax) = -1 and then Kinem.Single_Joint (Frames, 0, 0, Dmax) = -1,
+             "长在眼上的像素:只认出每一对都不挪的 A(认出 " & Codec.Img (Natural (Eye.Length)) & " 个" & (if Only_A then "、就是 A" else "") & ");转轴方向上的、"
+             & "只一个关节不挪的、交叉对 / 一起动 / 被顶偏的帧里不挪的、相机下游关节里不挪的都不认;从 A 出发的 " & Codec.Img (N_A) & " 笔(连交叉对那一笔)都去掉(剩 "
+             & Codec.Img (Natural (Kept.Length)) & " / " & Codec.Img (Natural (Cs.Length)) & ");只动了一个关节的帧认得对");
    end;
 
    --  🔴 运动学·沿轴走的关节(09-27 无人机那一半):合成的龙门架(像箱上的无人机:三个沿世界 x / y / z 走的关节,再绕机身中心 yaw / pitch / roll),

@@ -2,6 +2,7 @@ with Ada.Numerics.Long_Elementary_Functions; use Ada.Numerics.Long_Elementary_Fu
 with Ada.Unchecked_Deallocation;
 with Ada.Calendar;
 with Ada.Containers.Ordered_Maps;
+with Ada.Containers.Ordered_Sets;
 package body Kinem is
 
    --  ── 小向量 ──
@@ -1373,7 +1374,7 @@ package body Kinem is
 
    procedure Refine_Tracks (Frames : Frame_Vectors.Vector; Cs : Corr_Vectors.Vector; M : in out Model; Rep : in out Fit_Report) is
    begin
-      Refine_Mv (Frames, Cs, M, Rep);
+      Refine_Mv (Frames, Off_Eye (M.Eye, Cs), M, Rep);
    end Refine_Tracks;
 
    procedure Track_Points (M : Model; Frames : Frame_Vectors.Vector; Cs : Corr_Vectors.Vector; Only_I : Integer; Min_Views : Natural;
@@ -1382,7 +1383,7 @@ package body Kinem is
       S : Mv_Set;
    begin
       Tracks.Clear; Sig_Px := 0.0;
-      Build_Mv (Cs, Only_I, S);
+      Build_Mv (Off_Eye (M.Eye, Cs), Only_I, S);
       if S.Nt = 0 then
          Free_Mv (S);
          return;
@@ -1465,8 +1466,104 @@ package body Kinem is
    function Clean_Tol (Width : Long_Float) return Long_Float is
      (Tan (0.261799387799490) / (0.5 * Width));
 
-   procedure Fit (Frames : Frame_Vectors.Vector; Ref : Natural; Cs : Corr_Vectors.Vector; Cx, Cy, Width : Long_Float;
-                  M : out Model; Rep : out Fit_Report; Ok : out Boolean; Per_Pair : Positive := 60) is
+   function Single_Joint (Frames : Frame_Vectors.Vector; Ref, Fr : Natural; Dmax : Long_Float) return Integer is
+      Q0 : constant Floats := Frames (Ref).Q;
+      N : constant Natural := Natural'Min (Max_Joints, Natural (Q0.Length));
+      J : constant Integer := Frames (Fr).Joint;
+   begin
+      if Fr = Ref or else J < 0 or else J >= Integer (N) then
+         return -1;
+      end if;
+      for K in 0 .. N - 1 loop
+         if K /= Natural (J) and then abs (Frames (Fr).Q (K) - Q0 (K)) >= Dmax then
+            return -1;
+         end if;
+      end loop;
+      return J;
+   end Single_Joint;
+
+   function "<" (A, B : Px) return Boolean is (A.U < B.U or else (A.U = B.U and then A.V < B.V));
+   package Px_Sets is new Ada.Containers.Ordered_Sets (Px);
+
+   function Eye_Pixels (Frames : Frame_Vectors.Vector; Ref : Natural; Cs : Corr_Vectors.Vector; Width : Long_Float) return Px_Vectors.Vector is
+      Nf : constant Natural := Natural (Frames.Length);
+      N : constant Natural := Natural'Min (Max_Joints, Natural (Frames (Ref).Q.Length));
+      Sj : array (0 .. Nf - 1) of Integer := [others => -1];                  --  只动了一个关节的帧 ⇒ 那个关节
+      Still_N, Moved_N : array (0 .. Nf - 1) of Natural := [others => 0];     --  参照帧 ↔ 这一帧那一对里没挪 / 挪了的配点(笔数)
+      function Moved (C : Corr) return Boolean is (Norm ([C.Ub - C.Ua, C.Vb - C.Va, 0.0]) >= Trip_Px);
+      --  这个像素在第 J 个关节单独转的格子里:配上过 / 有一格挪了
+      type Joint_Seen is record
+         Seen, Moved : Boolean := False;
+      end record;
+      type Px_Seen is array (0 .. Max_Joints - 1) of Joint_Seen;
+      package Seen_Maps is new Ada.Containers.Ordered_Maps (Px, Px_Seen);
+      Ev : Seen_Maps.Map;
+      R : Px_Vectors.Vector;
+   begin
+      for Fr in 0 .. Nf - 1 loop
+         Sj (Fr) := Single_Joint (Frames, Ref, Fr, Clean_Tol (Width));
+      end loop;
+      for C of Cs loop
+         if C.I = Ref and then C.J < Nf and then Sj (C.J) >= 0 then
+            if Moved (C) then
+               Moved_N (C.J) := Moved_N (C.J) + 1;
+            else
+               Still_N (C.J) := Still_N (C.J) + 1;
+            end if;
+         end if;
+      end loop;
+      for C of Cs loop
+         if C.I = Ref and then C.J < Nf and then Sj (C.J) >= 0 and then Moved_N (C.J) > Still_N (C.J) then
+            declare
+               P : constant Px := (C.Ua, C.Va);
+               Cur : constant Seen_Maps.Cursor := Ev.Find (P);
+               E : Px_Seen := (if Seen_Maps.Has_Element (Cur) then Seen_Maps.Element (Cur) else [others => <>]);
+               J : constant Natural := Natural (Sj (C.J));
+            begin
+               E (J).Seen := True;
+               E (J).Moved := E (J).Moved or else Moved (C);
+               Ev.Include (P, E);
+            end;
+         end if;
+      end loop;
+      for Cur in Ev.Iterate loop
+         declare
+            E : constant Px_Seen := Seen_Maps.Element (Cur);
+            Stay : Natural := 0;   --  每一格都没挪的关节几个
+         begin
+            for J in 0 .. N - 1 loop
+               if E (J).Seen and then not E (J).Moved then
+                  Stay := Stay + 1;
+               end if;
+            end loop;
+            if Stay >= 2 then
+               R.Append (Seen_Maps.Key (Cur));
+            end if;
+         end;
+      end loop;
+      return R;
+   end Eye_Pixels;
+
+   function Off_Eye (Eye : Px_Vectors.Vector; Cs : Corr_Vectors.Vector) return Corr_Vectors.Vector is
+      Set : Px_Sets.Set;
+      R : Corr_Vectors.Vector;
+   begin
+      if Eye.Is_Empty then
+         return Cs;
+      end if;
+      for P of Eye loop
+         Set.Include (P);
+      end loop;
+      for C of Cs loop
+         if not Set.Contains (Px'(C.Ua, C.Va)) then
+            R.Append (C);
+         end if;
+      end loop;
+      return R;
+   end Off_Eye;
+
+   procedure Fit_World (Frames : Frame_Vectors.Vector; Ref : Natural; Cs : Corr_Vectors.Vector; Cx, Cy, Width : Long_Float;
+                        M : out Model; Rep : out Fit_Report; Ok : out Boolean; Per_Pair : Positive) is
       Q0 : constant Floats := Frames (Ref).Q;
       N : constant Natural := Natural'Min (Max_Joints, Natural (Q0.Length));
       Nf : constant Natural := Natural (Frames.Length);
@@ -1481,22 +1578,8 @@ package body Kinem is
       Sl : array (0 .. Max_Joints - 1) of Boolean := [others => False];             --  认成"走"
       Dmax : Long_Float;
       function Dq (Fr, J : Natural) return Long_Float is (Frames (Fr).Q (J) - Q0 (J));
-      --  这一帧能不能给第 J 根轴起步用:它是扫 J 扫出来的(或参照帧),别的关节偏得让画面挪不到 1 像素(按最长那档焦距算,最严)
-      function Clean (Fr, J : Natural) return Boolean is
-      begin
-         if Fr = Ref then
-            return True;
-         end if;
-         if Frames (Fr).Joint /= Integer (J) then
-            return False;
-         end if;
-         for K in 0 .. N - 1 loop
-            if K /= J and then abs Dq (Fr, K) >= Dmax then
-               return False;
-            end if;
-         end loop;
-         return True;
-      end Clean;
+      --  这一帧能不能给第 J 根轴起步用:它是参照帧,或者只动了 J(Single_Joint:别的关节偏得让画面挪不到 1 像素,按最长那档焦距算,最严)
+      function Clean (Fr, J : Natural) return Boolean is (Fr = Ref or else Single_Joint (Frames, Ref, Fr, Dmax) = Integer (J));
       T_Mark : Ada.Calendar.Time := Ada.Calendar.Clock;
       procedure Lap is
          use type Ada.Calendar.Time;
@@ -2309,6 +2392,18 @@ package body Kinem is
          M.Valid := True;
          Ok := True;
       end;
+   end Fit_World;
+
+   procedure Fit (Frames : Frame_Vectors.Vector; Ref : Natural; Cs : Corr_Vectors.Vector; Cx, Cy, Width : Long_Float;
+                  M : out Model; Rep : out Fit_Report; Ok : out Boolean; Per_Pair : Positive := 60) is
+      Eye : constant Px_Vectors.Vector := Eye_Pixels (Frames, Ref, Cs, Width);
+      Kept : constant Corr_Vectors.Vector := Off_Eye (Eye, Cs);
+   begin
+      Fit_World (Frames, Ref, Kept, Cx, Cy, Width, M, Rep, Ok, Per_Pair);
+      M.Eye := Eye;
+      Rep.N_Corr := Natural (Cs.Length);
+      Rep.Eye_Px := Natural (Eye.Length);
+      Rep.Eye_Corrs := Natural (Cs.Length) - Natural (Kept.Length);
    end Fit;
    procedure Meet_Rays (O, D : V3_Array; X : out V3; Ok : out Boolean) is
       A : M3 := [others => [others => 0.0]];
