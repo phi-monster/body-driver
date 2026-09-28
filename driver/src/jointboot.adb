@@ -492,13 +492,16 @@ package body Jointboot is
                                  if Sa.K = 1 then
                                     Sa.Heads.Append (Head'(Frame => Natural (Ds (A).Frames.Length) - 1, Joint => J));
                                  end if;
-                                 if 3.0 * Got < Sa.Step or else 3.0 * Pushed > Sa.Step then
-                                    --  没转到命令的三分之一(比例):到头 / 被顶住;别的关节被顶偏超过这一格的三分之一(比例,同上):碰上东西了,不再往里压。
-                                    --  这一边的界量到了(反解不过这儿)
-                                    Sa.Why := To_Unbounded_String (if 3.0 * Got < Sa.Step then "关节到头或被顶住(命令 " & Codec.Fmt (Sa.Step, 4) & ",实到 " & Codec.Fmt (Got, 4) & ")"
-                                                                   else "碰上东西了:第" & Codec.Img (Kp) & " 个关节被顶偏 " & Codec.Fmt (Pushed, 4) & "(这一格命令 " & Codec.Fmt (Sa.Step, 4) & ")");
+                                 if Sweep_Stops (Got, Pushed, Sa.Step) then
+                                    --  没转到命令的三分之一(比例):到头;别的关节被顶偏超过这一格的三分之一(比例,同上):碰上东西了 —— 都不再往里压。
+                                    --  只有"这个关节自己停住、别的关节没被顶偏"才是它这一边的界(反解不过这儿)。碰上东西了 = 手压在桌子 / 东西上,
+                                    --  换个姿势这个关节照样转得过去,不记界(owner 09-28 岔路二:"被桌子挡住这种'转不过去'本来就不是关节尽头";
+                                    --  H4:人形第 0、3 关节往正碰桌记成了界,第二只手手指朝下再往前伸 15 cm 按这两道界解不出来,按仿真的真尽头解得出)
+                                    Sa.Why := To_Unbounded_String (if not Sweep_Stop_Is_End (Got, Pushed, Sa.Step)
+                                                                   then "碰上东西了:第" & Codec.Img (Kp) & " 个关节被顶偏 " & Codec.Fmt (Pushed, 4) & "(这一格命令 " & Codec.Fmt (Sa.Step, 4) & ";不是关节到头,不记界)"
+                                                                   else "关节到头(命令 " & Codec.Fmt (Sa.Step, 4) & ",实到 " & Codec.Fmt (Got, 4) & ";这一边记界)");
                                     Sa.Done := True;
-                                    if J < Natural (Ds (A).Has_Lo.Length) then
+                                    if Sweep_Stop_Is_End (Got, Pushed, Sa.Step) and then J < Natural (Ds (A).Has_Lo.Length) then
                                        if Dd < 0 then
                                           Ds (A).Has_Lo.Replace_Element (J, True);
                                        else

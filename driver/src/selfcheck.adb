@@ -330,6 +330,14 @@ begin
              & " 拍、" & Codec.Fmt (100.0 * New_D, 1) & "%;x5 第 " & Codec.Img (X_B) & " 拍、" & Codec.Fmt (100.0 * X_D, 1) & "% · 转 0.824 弧度的大命令第 "
              & Codec.Img (Big_Beat) & " 拍算停");
    end;
+   --  🔴 扫描时碰上东西不是关节尽头(Jointboot.Sweep_Stops / Sweep_Stop_Is_End;09-28 H4 + owner 岔路二):用在线量到的数 ——
+   --  H4 人形第 0 关节往正:这一格命令 0.2011 走满、第 5 关节被顶偏 0.139 ⇒ 停、不记界;x5 V1B59 第 1 关节往负:命令 0.2602 只到 0.0822、别的关节偏 0.001 ⇒ 停、记界;
+   --  关节自己没转到三分之一、同时别的关节被顶偏 ⇒ 仍是碰上东西、不记界;走满、谁也没被顶 ⇒ 不停
+   Check (Jointboot.Sweep_Stops (0.2011, 0.139, 0.2011) and then not Jointboot.Sweep_Stop_Is_End (0.2011, 0.139, 0.2011)
+          and then Jointboot.Sweep_Stops (0.0822, 0.001, 0.2602) and then Jointboot.Sweep_Stop_Is_End (0.0822, 0.001, 0.2602)
+          and then Jointboot.Sweep_Stops (0.02, 0.139, 0.2011) and then not Jointboot.Sweep_Stop_Is_End (0.02, 0.139, 0.2011)
+          and then not Jointboot.Sweep_Stops (0.2, 0.001, 0.2011),
+          "扫描停下记不记界:碰桌(别的关节被顶偏 0.139)停、不记界;x5 真到头(实到 0.0822 / 0.2602、别的只偏 0.001)停、记界;自己停住又顶偏别人仍不记;走满没顶偏不停");
    --  🔴 抓握通道带不带手指是量出来的(Act.Has_Fingers;09-28 DR1 / DR2:无人机开机说了"握区量不了",干活时照样列两瓣手指一组爪心):
    --  一条臂一个抓握通道,两台相机的握区都没量成 ⇒ 没手指;其中一台量成 ⇒ 有;两条臂只有第 2 条量成 ⇒ 第 1 条没有、第 2 条有、整具有
    declare

@@ -31,7 +31,7 @@ package Jointboot is
       Runs : Ints;                           --  第几段(同一个关节同一个方向算一段;起点 = 0)
       W, H : Natural := 0;
       Ids : Ints;                            --  每一格在配点仪器那边存的编号(Instrument.Frame_Put;-1 = 没存成)
-      Has_Lo, Has_Hi : Bools;                --  每个关节:往负 / 往正扫的时候是"到头或被顶住 / 碰上东西了"停的(量到了这一边的界;没有 = 走满格数停的,这一边没量到头)
+      Has_Lo, Has_Hi : Bools;                --  每个关节:往负 / 往正扫的时候是"关节到头"停的(量到了这一边的界;没有 = 走满格数停的,或碰上东西了 —— 不是关节尽头,09-28 H4)
       World_Img : Plug.Cam;                  --  不动的眼(头顶眼)在扫描起点那一刻的画面(没有不动的眼 = 空)
       World_Id : Integer := -1;              --  它在配点仪器那边的编号
    end record;
@@ -50,6 +50,10 @@ package Jointboot is
 
    --  ④ 这只手的运动学:Kinem.Fit(配点来自扫描的配对)
    --  Note = 这一步的报告(几只手各开一个线程同时解 ⇒ 不在这里打印,解完由调用方按顺序打)
+   --  单独扫一个关节时这一格停不停、停了记不记界(纯函数,导出给自检):这一格命令 Step、这个关节实到 Got、别的关节离起点最多偏 Pushed。
+   --  停 = 没转到命令的三分之一(到头)或别的关节被顶偏超过这一格的三分之一(碰上东西了);记界 = 到头而别的关节没被顶偏(碰上东西不是关节尽头,09-28 H4)
+   function Sweep_Stops (Got, Pushed, Step : Long_Float) return Boolean is (3.0 * Got < Step or else 3.0 * Pushed > Step);
+   function Sweep_Stop_Is_End (Got, Pushed, Step : Long_Float) return Boolean is (3.0 * Got < Step and then 3.0 * Pushed <= Step);
    procedure Fit_Arm (A : Natural; D : Sweep_Data; Cs : Kinem.Corr_Vectors.Vector; Dump : String; M : out Kinem.Model; Ok : out Boolean;
                       Note : out Ada.Strings.Unbounded.Unbounded_String);
 
@@ -66,7 +70,7 @@ package Jointboot is
       S : Long_Float := 1.0;                  --  这只手参照眼系 → 第一只手参照眼系:X0 = S · Ra · X + Ta
       Ra : Geom.M3 := Geom.Identity;
       Ta : Geom.V3 := [0.0, 0.0, 0.0];
-      Lo, Hi : Floats;                        --  每个关节量到的界(扫描时这一边到头 / 碰上东西了 = 扫到的最远那一格;没量到头 = 不设界)
+      Lo, Hi : Floats;                        --  每个关节量到的界(扫描时这一边关节到头 = 扫到的最远那一格;没量到头 / 碰上东西了 = 不设界)
       Valid : Boolean := False;
       Sweep : Natural := 0;                   --  扫描数据(Sweep_All 的 Ds)里是第几只手
    end record;
