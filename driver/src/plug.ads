@@ -97,6 +97,8 @@ package Plug is
    --  再收一帧给大家。Lock_Begin / Lock_End 清掉记下的(一段开始 / 结束;最后发出去的那条动作照旧每拍重发 = 每只手停在最后的目标)
    procedure Lock_Begin;
    procedure Lock_Beat (L : in out Link; F : in out Frame; Ok : out Boolean);
+   --  自检用:假身体在主线程里给这一拍的帧(代替 Lock_Beat 从链路收的那一帧;帧里手的位姿由调用方按关节读数算好)
+   procedure Lock_Feed (F : Frame; Ok : Boolean := True);
    procedure Lock_End;
    --  记下的目标合成的那条关节动作(Groups / Qs;爪子另按手记,不在这条里)。导出只为自检
    function Lock_Merged return Cmd;
@@ -112,12 +114,14 @@ package Plug is
    type Reach_Hook is access procedure (Arm : Natural; Pose : Arm_Pose; Pos_Err, Rot_Err : out Long_Float);
    procedure Set_Reach (R : Reach_Hook);
    procedure Reach (Arm : Natural; Pose : Arm_Pose; Pos_Err, Rot_Err : out Long_Float; Ok : out Boolean);
-   --  岔路二(09-29):上一条位姿命令的反解是不是被"到过的范围往外一步"卡住了(没解到目标、有关节停在这道界上而那不是记下的尽头,
-   --  这一条又是去一个新地方)⇒ 手走到那儿、到过的范围长了,同一个目标再解一次还能往前(Selfmap.Go 据此重发:大转拆成几条命令)。
-   --  没登记(没有运动学)⇒ False
-   type Limit_Hook is access function (Arm : Natural) return Boolean;
+   --  岔路二(09-29):上一条位姿命令的反解是不是被"到过的范围往外一步"截住了(没解到目标、有关节停在这道界上而那不是记下的尽头):
+   --  Free = 没截住;Held = 截住了、从那一条以来到过的范围还没长(手还没动起来:命令隔一两拍才起效)⇒ 先别收;
+   --  Held_Grown = 截住了、范围长了 ⇒ 同一个目标按此刻的读数再解一次还能往前 ⇒ Selfmap.Go 这一拍就重发(大转跟着手连着走完)。
+   --  手停在真的尽头 / 碰上东西 ⇒ 范围不再长 ⇒ 一直是 Held,照常等停下、核尽头。没登记(没有运动学)⇒ Free
+   type Limit_State is (Free, Held, Held_Grown);
+   type Limit_Hook is access function (Arm : Natural) return Limit_State;
    procedure Set_Limit (H : Limit_Hook);
-   function Held_Back (Arm : Natural) return Boolean;
+   function Held_Back (Arm : Natural) return Limit_State;
    function Take_Reset (L : in out Link) return Boolean;
    --  只看不清:对方是不是刚复位了(新的一集)。走路的那些段每一步看一眼,复位了就当场收段,不把这一段的动作发到新的一集里
    function Reset_Pending (L : Link) return Boolean;

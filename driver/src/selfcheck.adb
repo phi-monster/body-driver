@@ -29,6 +29,8 @@ with Learned;
 with Exam;
 with Contact;
 with Contact.Gen;
+with Contact.Grasp;
+with Contact.Hold;
 with Contact.Exec;
 with Contact.Surface;
 with Kinem;
@@ -248,15 +250,305 @@ begin
              and then not Kinem.On_Eye_Grid (Eye, 10.0, 25.0, 640, 480, 32, 24) and then not Kinem.On_Eye_Grid (Eye, -1.0, 5.0, 640, 480, 32, 24),
              "落在自己手上的那一格:格点 (10,10)、(30,10) 那两格里的点(连 19.99 / 20.0 格子边)算,邻格 (50,10)、(10,30) 和画面外不算");
    end;
+   --  🔴 接触集重写(09-29):托住它要多大的摩擦、每单位重量最少要夹多紧(Contact.Hold)—— 能手算的几条:
+   --  ① 两处正对的点接触夹在重心两侧,抬 = 托住单位重量:法向力之和 = 1/μ(每边 1/(2μ));不靠摩擦做不到、靠一点摩擦就做得到(要的摩擦 → 0);
+   --  ② 重心偏出夹持线 0.05、指肚能拧(半径 0.01):竖着的摩擦 1/μ + 拧住 0.05/(μ·0.01) = 6/μ;点接触(不能拧)⇒ 托不住;
+   --  ③ 两个面各歪 0.3 rad(同向):要的摩擦 = tan 0.3;④ 线性规划本身:min x1 + x2、x1 + 2 x2 = 4 ⇒ 2;x1 = -1 ⇒ 做不到
+   declare
+      use Ada.Numerics.Long_Elementary_Functions;
+      package Hd renames Contact.Hold;
+      Ts : Hd.Touch_Vectors.Vector;
+      L : constant Hd.Load := (F => [0.0, 0.0, 1.0], C => [0.0, 0.0, 0.0], M => [0.0, 0.0, 0.0]);
+      L_Off : constant Hd.Load := (F => [0.0, 0.0, 1.0], C => [0.0, 0.05, 0.0], M => [0.0, 0.0, 0.0]);
+      S1, M1, S2, S2p, M3 : Long_Float;
+      Al : constant Long_Float := 0.3;
+      Obj1, Obj2 : Long_Float;
+      Ok1, Ok2 : Boolean;
+   begin
+      Ts.Append (Hd.Touch'(P => [-0.02, 0.0, 0.0], N => [1.0, 0.0, 0.0], Twist_R => 0.0));
+      Ts.Append (Hd.Touch'(P => [0.02, 0.0, 0.0], N => [-1.0, 0.0, 0.0], Twist_R => 0.0));
+      S1 := Hd.Squeeze (Ts, L, 0.5);
+      M1 := Hd.Mu_Need (Ts, L);
+      S2p := Hd.Squeeze (Ts, L_Off, 0.5);
+      for I in 0 .. 1 loop
+         declare
+            T : Hd.Touch := Ts (I);
+         begin
+            T.Twist_R := 0.01;
+            Ts.Replace_Element (I, T);
+         end;
+      end loop;
+      S2 := Hd.Squeeze (Ts, L_Off, 0.5);
+      Ts.Clear;
+      Ts.Append (Hd.Touch'(P => [-0.02, 0.0, 0.0], N => [Cos (Al), Sin (Al), 0.0], Twist_R => 0.0));
+      Ts.Append (Hd.Touch'(P => [0.02, 0.0, 0.0], N => [-Cos (Al), Sin (Al), 0.0], Twist_R => 0.0));
+      M3 := Hd.Mu_Need (Ts, L);
+      Hd.Min_Sum ([1.0, 2.0], 1, 2, [4.0], Obj1, Ok1);
+      Hd.Min_Sum ([1.0, 0.0], 1, 2, [-1.0], Obj2, Ok2);
+      Check (abs (S1 - 2.0) < 1.0e-6 and then M1 < 1.0e-6 and then abs (S2 - 12.0) < 1.0e-4 and then S2p = Hd.No_Way
+             and then abs (M3 - Tan (Al)) < 1.0e-3 * Tan (Al) and then Ok1 and then abs (Obj1 - 2.0) < 1.0e-9 and then not Ok2,
+             "接触集·托住要多紧:正对夹在重心两侧 μ=0.5 ⇒ 法向力之和 " & Codec.Fmt (S1, 4) & "(要 2)、要的摩擦 " & Codec.Fmt (M1, 7)
+             & " · 重心偏 0.05、指肚能拧 0.01 ⇒ " & Codec.Fmt (S2, 4) & "(要 12)、点接触 ⇒ " & (if S2p = Hd.No_Way then "托不住" else Codec.Fmt (S2p, 4))
+             & " · 两面各歪 0.3 rad ⇒ 要的摩擦 " & Codec.Fmt (M3, 4) & "(tan 0.3 = " & Codec.Fmt (Tan (Al), 4) & ")· 线性规划 " & Codec.Fmt (Obj1, 4)
+             & " / 做不到的那一条 " & (if Ok2 then "说做得到(错)" else "说做不到"));
+   end;
+   --  🔴 接触集重写(09-29):几何上让量出来的手真合一次挑下手处(Contact.Grasp)。手 = x5 这种两块相向合:两个尖在眼前 9 cm、相距 9 cm,
+   --  手指沿合拢方向厚 1 cm(碰东西的两面相距 8 cm),指肚宽 1.5 cm,手落位的误差 2 mm;
+   --  东西都平躺在桌上(z = 0,上 = +z),表面点 2 mm 一个(顶面 + 往下补到桌面)。
+   --  ① 平条(沿 x 宽 2 cm、沿 y 长 20 cm、厚 1 cm):两个接触点落在条的两条长边上(x = ±1 cm)、法向 ±x、从上面进(竖着或斜着都行,由那个数定)、
+   --     候选里交出去的手的朝向合出来的方向 = 两个接触点的连线(PLAN 的"故意转 90° ⇒ 红":离线把候选的朝向绕工具轴转 90° 存,这一条红)、
+   --     两个面正对 ⇒ 要的摩擦 < 0.1、夹在重心附近(< 半个指肚宽);前 5 名里没有一个接触点落在条面中间(顺着长边夹 = 两块落在条上,一个都不许有);
+   --  ② 一根 1 cm 宽的刀刃 + 一头一个把手圈(外径 4 cm、内径 2.5 cm,厚 4 mm):前 3 名打出来看,第 1 名两个接触点在料的两侧、相距 < 张口;
+   --  ③ 12 cm 见方的板(张口 8 cm):只有斜着夹一个角那几把(两条边各歪 45° ⇒ 要的摩擦约 1、离中心 > 4 cm),这一批里最不要摩擦的就是它们,照实交出去;
+   --     每处接触的法向 = 它所在那面墙朝里的法向(指肚的边擦在斜墙上:力沿墙的法向,不沿指肚);
+   --  ④ 直径 4 cm 的圆柱:两点正对、要的摩擦很小;⑤ 全都够不着 ⇒ 一个都不给,账上记"够不着";
+   --  ⑥ 边长 6 cm 的正三角形(高 5.2 cm):第 1 名一块压顶点(尖顶在指肚面上 ⇒ 法向 = 那一块合拢的方向)、一块压底面(法向 +y);
+   --     交出去的所有候选里压在三个尖上的接触,法向都 = 那一块合拢的方向;
+   --  ⑦ 边长 1 cm 的正六棱柱(每条边比 1.5 cm 的指肚窄):第 1 名夹在两条对边上(x = ±0.8 cm)、法向 ±x、要的摩擦 < 0.1
+   --     (最先碰到的那一点落在对边的一头时,旁边那条斜边往后退,不许把它的斜率当成接触法向)。
+   --  牙(09-29 离线各拆一处跑过,每一处都有焊点变红):法向一律按指肚的朝向 / 不看指肚边外面 ⇒ ③⑥ 红;斜率反号 ⇒ ③ 红;按格取最近点 ⇒ ③⑥ 红;
+   --  旧的"一边在往后退、另一边平或没点就按退的那边的斜率" ⇒ ⑦ 红;尖按陡的那一边的斜率 ⇒ ⑥ 红;候选的朝向绕工具轴转 90° 存 ⇒ ① 红;
+   --  不看旁边的东西 / 手指厚当 0 ⇒ ⑧ 厚手指那半红;不先合、张到头下去 ⇒ ⑧ 薄手指那半红;
+   --  ⑧ 两件挨着放:平条 + 右边 1 cm 外一个方块(x 2–5 cm、y ±3 cm、高 3 cm,当"旁边的东西"给):手指厚 1 cm 塞不进那道 1 cm 的缝 ⇒
+   --     第 1 名的两处接触都在方块的 y 范围外(再让半个指肚宽),账上有"旁边的东西挡着";反面对照:手指厚 4 mm 塞得进 ⇒ 第 1 名夹在条的正中(离重心 < 半个指肚宽)
+   declare
+      use Ada.Numerics.Long_Elementary_Functions;
+      package Cg2 renames Contact.Grasp;
+      Hm : constant Cg2.Hand_Model := Cg2.Two_Pads ([-0.045, 0.0, -0.09], [0.045, 0.0, -0.09], 0.015, 0.01, 0.002);
+      Hm_Thin : constant Cg2.Hand_Model := Cg2.Two_Pads ([-0.042, 0.0, -0.09], [0.042, 0.0, -0.09], 0.015, 0.004, 0.002);
+      None : Contact.V3_Vectors.Vector;
+      function Always (R : Geom.M3; T : Contact.V3) return Boolean is (True);
+      function Never (R : Geom.M3; T : Contact.V3) return Boolean is (False);
+      Pitch : constant Long_Float := 0.002;
+      --  平躺的东西的表面点:顶面 z = Thick 上按 In_Shape 取点(2 mm 一格);轮廓边上的点(上下左右有一个不在形状里)往下每 2 mm 补一层侧壁到桌面
+      function Slab (X0, X1, Y0, Y1, Thick : Long_Float; In_Shape : access function (X, Y : Long_Float) return Boolean) return Contact.V3_Vectors.Vector is
+         V : Contact.V3_Vectors.Vector;
+         Nx : constant Natural := Natural ((X1 - X0) / Pitch);
+         Ny : constant Natural := Natural ((Y1 - Y0) / Pitch);
+         Nz : constant Natural := Natural (Thick / Pitch);
+      begin
+         for I in 0 .. Nx loop
+            for J in 0 .. Ny loop
+               declare
+                  X : constant Long_Float := X0 + Pitch * Long_Float (I);
+                  Y : constant Long_Float := Y0 + Pitch * Long_Float (J);
+               begin
+                  if In_Shape (X, Y) then
+                     V.Append (Contact.V3'([X, Y, Thick]));
+                     if not In_Shape (X - Pitch, Y) or else not In_Shape (X + Pitch, Y) or else not In_Shape (X, Y - Pitch) or else not In_Shape (X, Y + Pitch) then
+                        for K in 0 .. Nz - 1 loop
+                           V.Append (Contact.V3'([X, Y, Pitch * Long_Float (K)]));
+                        end loop;
+                     end if;
+                  end if;
+               end;
+            end loop;
+         end loop;
+         return V;
+      end Slab;
+      function Bar (X, Y : Long_Float) return Boolean is (abs X <= 0.01 and then abs Y <= 0.1);
+      function Blade (X, Y : Long_Float) return Boolean is
+        ((abs X <= 0.005 and then Y >= -0.06 and then Y <= 0.06) or else (X * X + (Y - 0.08) ** 2 <= 0.02 ** 2 and then X * X + (Y - 0.08) ** 2 >= 0.0125 ** 2));
+      function Plate (X, Y : Long_Float) return Boolean is (abs X <= 0.06 and then abs Y <= 0.06);
+      function Disc (X, Y : Long_Float) return Boolean is (X * X + Y * Y <= 0.02 ** 2);
+      --  边长 6 cm 的正三角形(高 3√3 cm):顶点朝 +y、在 (0, 2√3 cm),底边在 y = −√3 cm,形心在原点
+      Tri_Top : constant Long_Float := 0.02 * Sqrt (3.0);
+      Tri_Base : constant Long_Float := -0.01 * Sqrt (3.0);
+      function Tri (X, Y : Long_Float) return Boolean is (Y >= Tri_Base and then Y <= Tri_Top - Sqrt (3.0) * abs X);
+      function Hex (X, Y : Long_Float) return Boolean is (abs X <= 0.005 * Sqrt (3.0) and then abs Y <= 0.01 - abs X / Sqrt (3.0));   --  边长 1 cm、两条对边竖着
+      function Sg (X : Long_Float) return Long_Float is (if X < 0.0 then -1.0 else 1.0);
+      Fd : Cg2.Cand_Vectors.Vector;
+      Stt : Cg2.Plan_Stats;
+   begin
+      --  ①
+      Cg2.Plan (Slab (-0.012, 0.012, -0.102, 0.102, 0.01, Bar'Access), None, Pitch, 0.0005, [0.0, 0.0, 1.0], [0.0, 0.0, 0.0], Hm, 0.0, 0.09, Always'Access, 5, Fd, Stt);
+      declare
+         Ok : Boolean := not Fd.Is_Empty;
+      begin
+         if Ok then
+            declare
+               C0 : constant Cg2.Candidate := Fd (0);
+               P0 : constant Contact.V3 := C0.Touches (0).P;
+               P1 : constant Contact.V3 := C0.Touches (1).P;
+               Ok_U : Boolean;
+            begin
+               Ok := Natural (C0.Touches.Length) = 2 and then abs (abs P0 (0) - 0.01) <= 1.5 * Pitch and then abs (abs P1 (0) - 0.01) <= 1.5 * Pitch
+                 and then P0 (0) * P1 (0) < 0.0 and then -C0.Touches (0).N (0) * Sg (P0 (0)) > 0.95 and then -C0.Touches (1).N (0) * Sg (P1 (0)) > 0.95
+                 and then C0.Approach (2) < -0.49 and then C0.Mu_Nom < 0.1 and then C0.Com_Off < 0.0075
+                 and then abs Contact.Dot (Contact.Unit (Contact.V3'([P1 (0) - P0 (0), P1 (1) - P0 (1), P1 (2) - P0 (2)]), Ok_U), Geom.Ap (C0.R, Hm.Pads (0).Dir)) > 0.95;
+               Put_Line ("     · 平条第 1 名:接触 (" & Codec.Fmt (P0 (0), 4) & "," & Codec.Fmt (P0 (1), 4) & "," & Codec.Fmt (P0 (2), 4) & ") / (" & Codec.Fmt (P1 (0), 4) & ","
+                         & Codec.Fmt (P1 (1), 4) & "," & Codec.Fmt (P1 (2), 4) & ") · 进场 (" & Codec.Fmt (C0.Approach (0), 2) & "," & Codec.Fmt (C0.Approach (1), 2) & ","
+                         & Codec.Fmt (C0.Approach (2), 2) & ") · 要的摩擦 " & Codec.Fmt (C0.Mu_Nom, 4) & " / 最坏 " & Codec.Fmt (C0.Mu_Worst, 4) & " · 每单位重量要夹 "
+                         & Codec.Fmt (C0.Squeeze, 3) & " · 离重心 " & Codec.Fmt (C0.Com_Off, 4) & " · 试了 " & Codec.Img (Stt.Poses) & " 个位姿,落在料上 "
+                         & Codec.Img (Stt.Landed_On) & "、合空 " & Codec.Img (Stt.Air) & "、顶到手掌 " & Codec.Img (Stt.Palm_Hit) & "、没对中 " & Codec.Img (Stt.Unbalanced)
+                         & " · 摩擦按 " & Codec.Fmt (Stt.Mu_Ref, 4));
+            end;
+            for C of Fd loop
+               for T of C.Touches loop
+                  if abs T.P (0) < 0.005 then
+                     Ok := False;   --  有接触点落在条的中间(顺着长边夹的那种)
+                  end if;
+               end loop;
+            end loop;
+         end if;
+         Check (Ok, "接触集·平条:两个接触点落在条的两条长边上(x = ±1 cm)、法向 ±x 朝里、手的朝向合出来的方向 = 两点的连线、从上面进、要的摩擦 < 0.1、离重心 < 半个指肚宽;"
+                & "前 5 名里没有一个接触点落在条面中间");
+      end;
+      --  ②
+      Cg2.Plan (Slab (-0.022, 0.022, -0.062, 0.102, 0.004, Blade'Access), None, Pitch, 0.0005, [0.0, 0.0, 1.0], [0.0, 0.0, 0.0], Hm, 0.0, 0.09, Always'Access, 5, Fd, Stt);
+      for I in 0 .. Natural'Min (3, Natural (Fd.Length)) - 1 loop
+         Put_Line ("     · 刀刃 + 把手圈第 " & Codec.Img (I + 1) & " 名:接触 (" & Codec.Fmt (Fd (I).Touches (0).P (0), 4) & "," & Codec.Fmt (Fd (I).Touches (0).P (1), 4) & ") / ("
+                   & Codec.Fmt (Fd (I).Touches (1).P (0), 4) & "," & Codec.Fmt (Fd (I).Touches (1).P (1), 4) & ") 相距 " & Codec.Fmt (Fd (I).Width, 4) & " · 进场 ("
+                   & Codec.Fmt (Fd (I).Approach (0), 2) & "," & Codec.Fmt (Fd (I).Approach (1), 2) & "," & Codec.Fmt (Fd (I).Approach (2), 2) & ") · 要的摩擦 "
+                   & Codec.Fmt (Fd (I).Mu_Nom, 4) & " / 最坏 " & Codec.Fmt (Fd (I).Mu_Worst, 4) & " · 要夹 " & Codec.Fmt (Fd (I).Squeeze, 3) & " · 离重心 "
+                   & Codec.Fmt (Fd (I).Com_Off, 4) & " · 重心 (" & Codec.Fmt (Stt.Com (0), 4) & "," & Codec.Fmt (Stt.Com (1), 4) & ")");
+      end loop;
+      Check (not Fd.Is_Empty and then Fd (0).Width < 0.08,
+             "接触集·刀刃 + 把手圈:第 1 名两个接触点在料的两侧、相距 " & (if Fd.Is_Empty then "-" else Codec.Fmt (Fd (0).Width, 4)) & "(< 张口 8 cm)");
+      --  ③
+      Cg2.Plan (Slab (-0.062, 0.062, -0.062, 0.062, 0.01, Plate'Access), None, Pitch, 0.0005, [0.0, 0.0, 1.0], [0.0, 0.0, 0.0], Hm, 0.0, 0.09, Always'Access, 5, Fd, Stt);
+      for I in 0 .. Natural'Min (2, Natural (Fd.Length)) - 1 loop
+         Put_Line ("     · 板第 " & Codec.Img (I + 1) & " 名:接触 (" & Codec.Fmt (Fd (I).Touches (0).P (0), 4) & "," & Codec.Fmt (Fd (I).Touches (0).P (1), 4) & ","
+                   & Codec.Fmt (Fd (I).Touches (0).P (2), 4) & ") 法向 (" & Codec.Fmt (Fd (I).Touches (0).N (0), 2) & "," & Codec.Fmt (Fd (I).Touches (0).N (1), 2) & ","
+                   & Codec.Fmt (Fd (I).Touches (0).N (2), 2) & ") / (" & Codec.Fmt (Fd (I).Touches (1).P (0), 4) & "," & Codec.Fmt (Fd (I).Touches (1).P (1), 4) & ","
+                   & Codec.Fmt (Fd (I).Touches (1).P (2), 4) & ") 法向 (" & Codec.Fmt (Fd (I).Touches (1).N (0), 2) & "," & Codec.Fmt (Fd (I).Touches (1).N (1), 2) & ","
+                   & Codec.Fmt (Fd (I).Touches (1).N (2), 2) & ") · 进场 (" & Codec.Fmt (Fd (I).Approach (0), 2) & "," & Codec.Fmt (Fd (I).Approach (1), 2) & ","
+                   & Codec.Fmt (Fd (I).Approach (2), 2) & ") · 眼 (" & Codec.Fmt (Fd (I).T (0), 3) & "," & Codec.Fmt (Fd (I).T (1), 3) & "," & Codec.Fmt (Fd (I).T (2), 3) & ")");
+      end loop;
+      declare
+         Corner : Boolean := not Fd.Is_Empty;
+         Wall_N : Boolean := not Fd.Is_Empty;
+      begin
+         for C of Fd loop
+            if C.Mu_Nom < 0.8 or else C.Com_Off < 0.04 then
+               Corner := False;
+            end if;
+            --  接触在哪面墙上(离中心哪个坐标大)⇒ 法向该是那面墙朝里的法向
+            for T of C.Touches loop
+               if Contact.Dot (T.N, (if abs T.P (0) > abs T.P (1) then Contact.V3'([-Sg (T.P (0)), 0.0, 0.0]) else Contact.V3'([0.0, -Sg (T.P (1)), 0.0]))) < 0.95 then
+                  Wall_N := False;
+               end if;
+            end loop;
+         end loop;
+         Check (Corner and then Wall_N and then Stt.Landed_On > 0 and then Stt.Mu_Ref >= 0.8,
+                "接触集·12 cm 见方的板(张口 8 cm):只有斜着夹一个角的(" & Codec.Img (Natural (Fd.Length)) & " 个,每处法向"
+                & (if Wall_N then "都是它那面墙朝里的法向" else "有不是它那面墙朝里的法向的") & ",第 1 名要的摩擦 "
+                & (if Fd.Is_Empty then "-" else Codec.Fmt (Fd (0).Mu_Nom, 3)) & "、离中心 " & (if Fd.Is_Empty then "-" else Codec.Fmt (Fd (0).Com_Off, 3))
+                & "),摩擦按这一批最不要摩擦的那一把算 " & Codec.Fmt (Stt.Mu_Ref, 3) & ";试了 " & Codec.Img (Stt.Poses) & " 个位姿、落在料上 " & Codec.Img (Stt.Landed_On));
+      end;
+      --  ④
+      Cg2.Plan (Slab (-0.022, 0.022, -0.022, 0.022, 0.03, Disc'Access), None, Pitch, 0.0005, [0.0, 0.0, 1.0], [0.0, 0.0, 0.0], Hm, 0.0, 0.09, Always'Access, 5, Fd, Stt);
+      Check (not Fd.Is_Empty and then abs (Fd (0).Width - 0.04) < 3.0 * Pitch and then Fd (0).Mu_Nom < 0.2,
+             "接触集·直径 4 cm 的圆柱:两点相距 " & (if Fd.Is_Empty then "-" else Codec.Fmt (Fd (0).Width, 4)) & "(要约 0.04),要的摩擦 "
+             & (if Fd.Is_Empty then "-" else Codec.Fmt (Fd (0).Mu_Nom, 4)));
+      --  ⑤
+      Cg2.Plan (Slab (-0.012, 0.012, -0.102, 0.102, 0.01, Bar'Access), None, Pitch, 0.0005, [0.0, 0.0, 1.0], [0.0, 0.0, 0.0], Hm, 0.0, 0.09, Never'Access, 5, Fd, Stt);
+      Check (Fd.Is_Empty and then Stt.Unreachable > 0, "接触集·按量到的关节范围一个都反解不出来 ⇒ 一个都不给,账上 " & Codec.Img (Stt.Unreachable) & " 个反解不出来");
+      --  ⑥ 正三角形:要全部候选(最多 200 个)看尖上的接触
+      Cg2.Plan (Slab (-0.032, 0.032, -0.022, 0.038, 0.01, Tri'Access), None, Pitch, 0.0005, [0.0, 0.0, 1.0], [0.0, 0.0, 0.0], Hm, 0.0, 0.09, Always'Access, 200, Fd, Stt);
+      declare
+         --  采样以后的三个尖(2 mm 一格里还在三角形里的最外那一点)
+         Vx : constant array (0 .. 2) of Contact.V3 := [[0.0, 0.034, 0.0], [-0.028, -0.016, 0.0], [0.028, -0.016, 0.0]];
+         N_V, Bad_V : Natural := 0;
+         First_Ok : Boolean := False;
+      begin
+         for C of Fd loop
+            for I in 0 .. Natural (C.Touches.Length) - 1 loop
+               for V of Vx loop
+                  if (C.Touches (I).P (0) - V (0)) ** 2 + (C.Touches (I).P (1) - V (1)) ** 2 < (1.5 * Pitch) ** 2 then
+                     N_V := N_V + 1;
+                     if Contact.Dot (C.Touches (I).N, Geom.Ap (C.R, Hm.Pads (I).Dir)) < 0.95 then
+                        Bad_V := Bad_V + 1;
+                     end if;
+                  end if;
+               end loop;
+            end loop;
+         end loop;
+         if not Fd.Is_Empty then
+            declare
+               C : constant Cg2.Candidate := Fd (0);
+            begin
+               for Iv in 0 .. 1 loop
+                  if (C.Touches (Iv).P (0) - Vx (0) (0)) ** 2 + (C.Touches (Iv).P (1) - Vx (0) (1)) ** 2 < (1.5 * Pitch) ** 2
+                    and then Contact.Dot (C.Touches (Iv).N, Geom.Ap (C.R, Hm.Pads (Iv).Dir)) >= 0.95
+                    and then abs (C.Touches (1 - Iv).P (1) - Vx (1) (1)) <= 1.5 * Pitch and then C.Touches (1 - Iv).N (1) >= 0.95
+                  then
+                     First_Ok := True;
+                  end if;
+               end loop;
+               Put_Line ("     · 三角形第 1 名:接触 (" & Codec.Fmt (C.Touches (0).P (0), 4) & "," & Codec.Fmt (C.Touches (0).P (1), 4) & ") 法向 (" & Codec.Fmt (C.Touches (0).N (0), 2) & ","
+                         & Codec.Fmt (C.Touches (0).N (1), 2) & ") / (" & Codec.Fmt (C.Touches (1).P (0), 4) & "," & Codec.Fmt (C.Touches (1).P (1), 4) & ") 法向 ("
+                         & Codec.Fmt (C.Touches (1).N (0), 2) & "," & Codec.Fmt (C.Touches (1).N (1), 2) & ") · 进场 (" & Codec.Fmt (C.Approach (0), 2) & ","
+                         & Codec.Fmt (C.Approach (1), 2) & "," & Codec.Fmt (C.Approach (2), 2) & ") · 要的摩擦 " & Codec.Fmt (C.Mu_Nom, 4) & " / 最坏 " & Codec.Fmt (C.Mu_Worst, 4));
+            end;
+         end if;
+         Check (First_Ok and then N_V > 0 and then Bad_V = 0,
+                "接触集·正三角形:第 1 名" & (if First_Ok then "一块压顶点(法向 = 那一块合拢的方向)、一块压底面(法向 +y)" else "不是压顶点 + 压底面那一把")
+                & ";" & Codec.Img (Natural (Fd.Length)) & " 个候选里压在尖上的接触 " & Codec.Img (N_V) & " 处,法向不是那一块合拢方向的 " & Codec.Img (Bad_V) & " 处");
+      end;
+      --  ⑦ 正六棱柱
+      Cg2.Plan (Slab (-0.012, 0.012, -0.012, 0.012, 0.02, Hex'Access), None, Pitch, 0.0005, [0.0, 0.0, 1.0], [0.0, 0.0, 0.0], Hm, 0.0, 0.09, Always'Access, 5, Fd, Stt);
+      declare
+         Ok : Boolean := not Fd.Is_Empty and then Fd (0).Mu_Nom < 0.1;
+      begin
+         if not Fd.Is_Empty then
+            for T of Fd (0).Touches loop
+               if abs (abs T.P (0) - 0.008) > 1.5 * Pitch or else -T.N (0) * Sg (T.P (0)) < 0.95 then
+                  Ok := False;
+               end if;
+            end loop;
+            Put_Line ("     · 六棱柱第 1 名:接触 (" & Codec.Fmt (Fd (0).Touches (0).P (0), 4) & "," & Codec.Fmt (Fd (0).Touches (0).P (1), 4) & ") 法向 ("
+                      & Codec.Fmt (Fd (0).Touches (0).N (0), 2) & "," & Codec.Fmt (Fd (0).Touches (0).N (1), 2) & ") / (" & Codec.Fmt (Fd (0).Touches (1).P (0), 4) & ","
+                      & Codec.Fmt (Fd (0).Touches (1).P (1), 4) & ") 法向 (" & Codec.Fmt (Fd (0).Touches (1).N (0), 2) & "," & Codec.Fmt (Fd (0).Touches (1).N (1), 2)
+                      & ") · 要的摩擦 " & Codec.Fmt (Fd (0).Mu_Nom, 4) & " / 最坏 " & Codec.Fmt (Fd (0).Mu_Worst, 4));
+         end if;
+         Check (Ok, "接触集·边长 1 cm 的六棱柱(每条边比指肚窄):第 1 名夹在两条对边上(x = ±0.8 cm)、法向 ±x 朝里、要的摩擦 < 0.1");
+      end;
+      --  ⑧ 两件挨着放
+      declare
+         function Box (X, Y : Long_Float) return Boolean is (X >= 0.02 and then X <= 0.05 and then abs Y <= 0.03);
+         Nb : constant Contact.V3_Vectors.Vector := Slab (0.018, 0.052, -0.032, 0.032, 0.03, Box'Access);
+         Bar_P : constant Contact.V3_Vectors.Vector := Slab (-0.012, 0.012, -0.102, 0.102, 0.01, Bar'Access);
+         Fd_T : Cg2.Cand_Vectors.Vector;
+         St_T : Cg2.Plan_Stats;
+         Clear_Y : constant Long_Float := 0.03 + 0.0075 - Pitch;   --  方块的 y 范围再让半个指肚宽(留一个采样间距)
+         Ok_Thick, Ok_Thin : Boolean;
+      begin
+         Cg2.Plan (Bar_P, Nb, Pitch, 0.0005, [0.0, 0.0, 1.0], [0.0, 0.0, 0.0], Hm, 0.0, 0.09, Always'Access, 5, Fd, Stt);
+         Cg2.Plan (Bar_P, Nb, Pitch, 0.0005, [0.0, 0.0, 1.0], [0.0, 0.0, 0.0], Hm_Thin, 0.0, 0.09, Always'Access, 5, Fd_T, St_T);
+         Ok_Thick := not Fd.Is_Empty and then Stt.Blocked > 0;
+         if not Fd.Is_Empty then
+            for T of Fd (0).Touches loop
+               if abs T.P (1) < Clear_Y then
+                  Ok_Thick := False;
+               end if;
+            end loop;
+         end if;
+         Ok_Thin := not Fd_T.Is_Empty and then Fd_T (0).Com_Off < 0.0075;
+         Check (Ok_Thick and then Ok_Thin,
+                "接触集·两件挨着放(条右边 1 cm 外一个方块):手指厚 1 cm ⇒ 第 1 名接触在 y = " & (if Fd.Is_Empty then "-" else Codec.Fmt (Fd (0).Touches (0).P (1), 4) & " / "
+                & Codec.Fmt (Fd (0).Touches (1).P (1), 4)) & "(要 |y| ≥ " & Codec.Fmt (Clear_Y, 4) & ")、被旁边的东西挡掉 " & Codec.Img (Stt.Blocked)
+                & " 个位姿;手指厚 4 mm ⇒ 第 1 名离重心 " & (if Fd_T.Is_Empty then "-" else Codec.Fmt (Fd_T (0).Com_Off, 4)) & "(要 < 0.0075)");
+      end;
+   end;
    --  🔴 岔路二(Jointboot:到过的范围 + 往外一步、记尽头、碰上东西不记、越过尽头删掉;09-29 owner"已知范围,越用越大"):合成的 6 关节胳膊装上
    --  (同上面运动学那条的几何),假身体只按关节命令走 —— 第 4 个关节真尽头 0.9 弧度(反解不知道);到过的范围一开始每个关节 ±0.3、往外一步 0.2。
    --  ① 要去一个第 4 个关节得转到 1.3 的位姿:每条命令都只到"到过的范围 + 一步"里,手到了那儿范围长了才再往前(重发的旗子 Held_Back);
    --     走到 0.9 卡住、别的关节都到了 ⇒ 记下这一头(之后问"够不够得着"那个位姿就解不到了);
    --  ② 手压在东西上:要到范围外的那个关节没走到一半,同时别的关节被顶偏 ⇒ 不记;同样没走到一半、别的关节都到了 ⇒ 记(正反对照);
    --  ③ 读数越过了记下的尽头 ⇒ 删掉(那个位姿又够得着了);④ 纯函数:两个关节都没走到 ⇒ 分不清、不记;只出范围一丝(不到一档)⇒ 当范围里;
-   --  ⑤ 开机扫描 ⇒ 尽头 / 到过的范围 / 往外一步(Set_Ranges)
+   --  ⑤ 开机扫描 ⇒ 尽头 / 到过的范围 / 往外一步(Set_Ranges);
+   --  ⑥ 走真的 Selfmap.Go(锁步里一只假手发命令,主线程当假身体):命令隔一拍才起效、每拍每个关节最多转 0.1 弧度、第 4 个关节真尽头 0.9,
+   --     读数噪声 1 µm(真 x5 4e-5 m;反解每次重解的数值抖动约 1e-8 弧度,在它下面)——
+   --     (a) 要转到 1.3(慢步,等停):先按记下的尽头解出要到的关节、每个关节夹到"到过的范围 + 一步"里发;截住以后手一动、范围一长就重发,
+   --         一条 Go 里走到 0.9、停下、记下这一头;拍数 ≤ 走的 9 拍 + 起效 1 拍 + 停下 2 拍 = 12;
+   --     (b) 同样 1.3,快步(不等停):截住时不许先收,照样 12 拍走到 0.9、记下;(c) 要到 0.8:8 + 1 + 2 = 11 拍走到、不记尽头;
+   --     三条里别的关节一直不动(< 1e-6 弧度)。牙(09-29 离线各拆一处跑过):直接在夹过的范围里反解(c629b87 那一版)⇒
+   --     被夹住的那一点由别的关节凑、别的关节被拉出去 0.557 弧度、14 / 14 / 13 拍,红;只在停稳以后才重发(V1B63 那一版)⇒ 27 / 22 / 17 拍,红;
+   --     截住时快步照样先收 ⇒ 快步第 2 拍停在 0.1,红
    declare
       use Geom;
+      use type Plug.Limit_State;
       Wax : constant array (0 .. 5) of V3 := [[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]];
       Pax : constant array (0 .. 5) of V3 := [[0.0, 0.0, 0.05], [0.0, 0.0, 0.12], [0.25, 0.0, 0.12], [0.45, 0.0, 0.16], [0.5, 0.0, 0.16], [0.55, 0.0, 0.16]];
       C0 : constant V3 := [0.6, 0.0, 0.22];
@@ -361,7 +653,7 @@ begin
                end if;
             end loop;
             Max_4 := Long_Float'Max (Max_4, Q (4));
-            exit when not Jointboot.Held_Back (0) or else Cmds >= 40;
+            exit when Jointboot.Held_Back (0) /= Plug.Held_Grown or else Cmds >= 40;
          end;
       end loop;
       Plug.Reach (0, Goal, Pe1, Re1, Okr);
@@ -391,6 +683,100 @@ begin
          Check (not Q.Is_Empty and then Pe_C < 1.0e-6 and then Re_C < 1.0e-6 and then (Pe_E > 1.0e-4 or else Re_E > 1.0e-4),
                 "岔路二·碰上东西 vs 关节到头:第 4 个关节只走到 0.35(要 0.5)—— 别的关节被顶偏 0.14 ⇒ 不记(还够得着,差 " & Codec.Fmt (Pe_C, 7)
                 & ");别的关节都到了 ⇒ 记下 0.35(那个位姿解不到了,差 " & Codec.Fmt (Pe_E, 4) & " / " & Codec.Fmt (Re_E, 4) & " rad)");
+      end;
+      --  ⑥
+      declare
+         Lk : Plug.Link;
+         Mp : Selfmap.Body_Map;
+         Fr0 : Plug.Frame;
+         Goal_G : Plug.Arm_Pose;
+         Quick_G : Boolean := False;
+         Go_Frames : Natural := 0;
+         Go_Ok : Boolean := False;
+         Body_Q, Act_Q, Pend_Q : Floats;   --  假身体此刻的关节 / 正在走向的目标 / 这一拍收到、下一拍才起效的目标
+         Max_Other : Long_Float := 0.0;    --  三条里第 4 个以外的关节离开 0 最远到过多少
+         task type Go_Hand;
+         task body Go_Hand is
+            Fr : Plug.Frame := Fr0;
+            Dl : Table.Vec;
+         begin
+            Lockstep.Begin_Hand (0);
+            Selfmap.Go (Lk, Mp, 0, Goal_G, Bytes.F64_Vectors.Empty_Vector, Fr, Dl, Go_Frames, Go_Ok, Quick => Quick_G);
+            Lockstep.Done;
+         end Go_Hand;
+         --  走一条 Go;返回主线程走了几拍
+         function Run_Go (Goal : Plug.Arm_Pose; Quick : Boolean) return Natural is
+            Beats : Natural := 0;
+         begin
+            Setup;
+            Goal_G := Goal; Quick_G := Quick;
+            Body_Q := Q6 (0, 0.0); Act_Q := Body_Q; Pend_Q := Body_Q;
+            Fr0.Joints.Clear; Fr0.Joints.Append (Body_Q);
+            Jointboot.Pose_Hook (Fr0);
+            Lockstep.Clear;
+            Plug.Lock_Begin;
+            declare
+               Hd : Go_Hand;
+            begin
+               Lockstep.Start (0, Hd'Identity);
+               loop
+                  Lockstep.Run (0);
+                  exit when Lockstep.Finished (0);
+                  Beats := Beats + 1;
+                  Act_Q := Pend_Q;
+                  declare
+                     Mg : constant Plug.Cmd := Plug.Lock_Merged;
+                  begin
+                     if not Mg.Qs.Is_Empty then
+                        Pend_Q := Mg.Qs (0);
+                     end if;
+                  end;
+                  for J in 0 .. 5 loop
+                     Body_Q.Replace_Element (J, Body_Q (J) + Long_Float'Max (-0.1, Long_Float'Min (0.1, Act_Q (J) - Body_Q (J))));
+                  end loop;
+                  if Body_Q (4) > True_End then
+                     Body_Q.Replace_Element (4, True_End);
+                  end if;
+                  for J in 0 .. 5 loop
+                     if J /= 4 then
+                        Max_Other := Long_Float'Max (Max_Other, abs Body_Q (J));
+                     end if;
+                  end loop;
+                  declare
+                     Ff : Plug.Frame;
+                  begin
+                     Ff.Joints.Append (Body_Q);
+                     Jointboot.Pose_Hook (Ff);
+                     Plug.Lock_Feed (Ff);
+                  end;
+               end loop;
+            end;
+            Plug.Lock_End;
+            Lockstep.Clear;
+            return Beats;
+         end Run_Go;
+         Ba, Bb, Bc : Natural;
+         Ea, Eb : Long_Float;
+         Q4c : Long_Float;
+         Pe_A, Re_A, Pe_C, Re_C : Long_Float;
+         Oka : Boolean;
+      begin
+         Mp.Settle := 2; Mp.EE_Noise := 1.0e-6; Mp.Rot_Noise := 1.0e-6;
+         Ba := Run_Go (Pose_Of (Q6 (4, 1.3)), False);
+         Ea := Body_Q (4);
+         Plug.Reach (0, Pose_Of (Q6 (4, 1.3)), Pe_A, Re_A, Oka);
+         Bb := Run_Go (Pose_Of (Q6 (4, 1.3)), True);
+         Eb := Body_Q (4);
+         Bc := Run_Go (Pose_Of (Q6 (4, 0.8)), False);
+         Q4c := Body_Q (4);
+         Plug.Reach (0, Pose_Of (Q6 (4, 0.85)), Pe_C, Re_C, Oka);   --  没记尽头 ⇒ 比 0.8 再远一点(真尽头以内)照样解得到
+         Check (abs (Ea - True_End) < 1.0e-9 and then Ba <= 12 and then (Pe_A > 1.0e-4 or else Re_A > 1.0e-4)
+                and then abs (Eb - True_End) < 1.0e-9 and then Bb <= 12
+                and then abs (Q4c - 0.8) < 1.0e-6 and then Bc <= 11 and then Pe_C < 1.0e-6 and then Re_C < 1.0e-6 and then Max_Other < 1.0e-6,
+                "岔路二·走真的 Go(命令隔一拍起效、每拍最多 0.1 弧度、真尽头 0.9):要 1.3 慢步 ⇒ 一条 Go " & Codec.Img (Ba) & " 拍停在 " & Codec.Fmt (Ea, 3)
+                & "、记下尽头(之后问够不够得着差 " & Codec.Fmt (Re_A, 3) & " rad);快步 ⇒ " & Codec.Img (Bb) & " 拍停在 " & Codec.Fmt (Eb, 3)
+                & ";要 0.8 ⇒ " & Codec.Img (Bc) & " 拍走到 " & Codec.Fmt (Q4c, 4) & "、不记尽头(问 0.85 差 " & Codec.Fmt (Pe_C, 7) & ")(拍数要 ≤ 12 / 12 / 11)"
+                & " · 别的关节最远离开 0 " & Codec.Fmt (Max_Other, 9) & " 弧度(要 < 1e-6)");
       end;
       Plug.Set_Hooks (null, null); Plug.Set_Reach (null); Plug.Set_Limit (null);
       --  ④ 纯函数

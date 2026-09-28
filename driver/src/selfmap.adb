@@ -208,15 +208,20 @@ package body Selfmap is
                           and then Miss (3) ** 2 + Miss (4) ** 2 + Miss (5) ** 2 <= Tol_Rot * Tol_Rot then Arrived + 1 else 0);
             Prev := F.EE (Arm);
          end;
-         --  岔路二(09-29):停下了、没到,而反解是被"到过的范围往外一步"卡住的(手已经走到那道界、范围跟着长了)⇒ 同一个目标再解一次、再往前一步
-         --  (大转拆成几条命令;每条都只到走过的地方边上。范围没长 = 再解还是同一处 ⇒ Plug.Held_Back 为假,照常停)。每一条各有自己的拍数上限
+         --  岔路二(09-29):反解被"到过的范围 + 往外一步"截住了(Plug.Held_Back)⇒ 不等停稳:手一动、到过的范围一长(Held_Grown),
+         --  这一拍就按此刻的读数重解、重发 —— 目标跟着手往前一步,大转一条 Go 里连着走完(V1B63:等停稳再发,碰指尖 520 → 1012 拍;
+         --  快步不重发,一大步只走三成、被认成碰到)。截住了但手还没动起来(Held:命令隔一两拍才起效)⇒ 等,快步也不许先收;
+         --  手停在真的尽头 / 碰上东西 ⇒ 范围不再长、一直 Held ⇒ 照常等停下(尽头由 Jointboot 核)。每重发一次拍数重新数;另有一道总拍数上限防万一
          declare
+            use type Plug.Limit_State;
+            Ls : constant Plug.Limit_State := (if Arrived < 2 then Plug.Held_Back (Arm) else Plug.Free);
             Stop : constant Boolean := (Still >= 2 and then Sub_Frames >= M.Settle) or else Sub_Frames >= 12 + M.Settle;
+            Cap : constant Natural := 20 * (12 + M.Settle);   --  总拍数上限(次数:防万一,正常的大转十几拍走完)
          begin
-            if Arrived < 2 and then Stop and then not Quick and then Plug.Held_Back (Arm) then
+            if Ls = Plug.Held_Grown and then Frames < Cap then
                Send := True; Still := 0; Sub_Frames := 0;
             else
-               exit when Arrived >= 2 or else Stop or else (Quick and then Frames >= M.Settle);
+               exit when Arrived >= 2 or else Stop or else (Quick and then Ls = Plug.Free and then Sub_Frames >= M.Settle) or else Frames >= Cap;
             end if;
          end;
          end if;

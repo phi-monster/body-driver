@@ -74,7 +74,8 @@ package Jointboot is
       Lo, Hi : Floats;                        --  每个关节记下的尽头(扫描时这一边关节到头 = 扫到的最远那一格;干活时"往范围外走、走不到一半、别的关节都到了"也记;
                                               --  没记 = 不设界;读数越过它 ⇒ 删掉)
       --  岔路二(09-29,owner:"已知范围,越用越大"):到过的范围 = 开机扫描的各格起、之后每一帧的读数并进来(只会变大);往外一步 = 扫描时那一边最后一格的步子。
-      --  发命令时反解只在"到过的范围 + 往外一步"里解、不越过记下的尽头(大转拆成几条命令,每条都在走过的地方边上);问"够不够得着"(Reach)只按记下的尽头
+      --  发命令时按记下的尽头解出关节目标,每个关节再夹到"到过的范围 + 往外一步"里(大转拆成几条命令、每条都在走过的地方边上,手走过去范围长了就跟着往前);
+      --  问"够不够得着"(Reach)只按记下的尽头
       Got_Lo, Got_Hi : Floats;
       Step_Lo, Step_Hi : Floats;
       Eye_W : Natural := 0;                   --  长在它上面那只眼的画幅宽(判"到了"的最小一档 = Kinem.Clean_Tol)
@@ -96,7 +97,7 @@ package Jointboot is
    --  岔路二(09-29):开机扫描的一只手 ⇒ 记下的尽头(Lo / Hi:这一边是关节到头停的 ⇒ 扫到的最远那一格,否则不设界)、到过的范围(各格读数的两头)、
    --  往外一步(Step_Lo / Step_Hi)、眼的画幅宽
    procedure Set_Ranges (D : Sweep_Data; W : in out Arm_World);
-   --  发命令时反解的界 = 到过的范围往外一步,不越过记下的尽头(纯函数,导出给自检)
+   --  发命令时每个关节夹到的界 = 到过的范围往外一步,不越过记下的尽头(纯函数,导出给自检)
    procedure Cmd_Bounds (W : Arm_World; Lo, Hi : out Floats);
    --  一条命令走完、停下以后,有没有碰到关节的尽头(纯函数,导出给自检)。Q_Cmd = 这条命令的关节目标,Q_At = 发命令时的读数,Q_Now = 停下时的读数,
    --  Got_Lo / Got_Hi = 发命令时到过的范围,Tol = 判"到了"的最小一档(Kinem.Clean_Tol)。
@@ -109,12 +110,11 @@ package Jointboot is
    --  读数越过了记下的尽头(超过 Tol)⇒ 那个尽头记错了,J / Hi_Side = 哪一个(纯函数,导出给自检)
    function End_Passed (Q, Lo, Hi : Floats; Tol : Long_Float; J : out Integer; Hi_Side : out Boolean) return Boolean;
 
-   --  ⑥ 装上:从此插头每一帧的手的位姿 = 按关节读数算出的世界里的腕眼位姿;位姿命令 = 在"到过的范围 + 往外一步"里解关节目标(岔路二)。
+   --  ⑥ 装上:从此插头每一帧的手的位姿 = 按关节读数算出的世界里的腕眼位姿;位姿命令 = 按记下的尽头解出关节目标、每个关节夹到"到过的范围 + 往外一步"里(岔路二)。
    --  Joint_Noise = 开机量的关节读数噪声(判"停下了"的下限)
    procedure Install (Worlds : Arm_World_Vectors.Vector; Rw : Geom.M3; O : Geom.V3; Joint_Noise : Long_Float := 0.0);
-   --  上一条位姿命令的反解被"到过的范围往外一步"卡住了(没解到目标、有关节停在这道界上而那不是记下的尽头,这一条的目标又和上一条不一样)
-   --  ⇒ 手走到那儿、范围长了,同一个目标再解一次还能往前(Selfmap.Go 据此重发;插头的 Held_Back 钩子)
-   function Held_Back (Arm : Natural) return Boolean;
+   --  上一条位姿命令的反解被"到过的范围往外一步"截住了没有、之后范围长了没有(Plug.Limit_State;Selfmap.Go 据此重发;插头的 Held_Back 钩子)
+   function Held_Back (Arm : Natural) return Plug.Limit_State;
    --  插头的两个钩子(Install 登记)
    procedure Pose_Hook (F : in out Plug.Frame);
    procedure Cmd_Hook (C : in out Plug.Cmd; Ok : out Boolean);

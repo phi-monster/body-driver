@@ -21,7 +21,7 @@ package body Plug is
    begin
       Hook_L := H;
    end Set_Limit;
-   function Held_Back (Arm : Natural) return Boolean is (Hook_L /= null and then Hook_L (Arm));
+   function Held_Back (Arm : Natural) return Limit_State is (if Hook_L = null then Free else Hook_L (Arm));
    Hook_R : Reach_Hook := null;
    procedure Set_Reach (R : Reach_Hook) is
    begin
@@ -879,6 +879,13 @@ package body Plug is
    begin
       Lock_Q.Clear; Lock_Jaw.Clear; Lock_Changed := False;
    end Lock_Begin;
+
+   procedure Lock_Feed (F : Frame; Ok : Boolean := True) is
+   begin
+      Lock_F := F;
+      Lock_Ok := Ok;
+      Lock_Changed := False;
+   end Lock_Feed;
 
    procedure Lock_End is
    begin

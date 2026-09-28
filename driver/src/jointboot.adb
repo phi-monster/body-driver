@@ -2502,14 +2502,13 @@ package body Jointboot is
    St_Last : Plug.Floats_Vectors.Vector;   --  每只手最近一帧的关节读数(反解从这儿起)
    St_Noise : Long_Float := 0.0;           --  开机量的关节读数噪声(判"停下了"的下限)
    Still_Frac : constant := 0.01;          --  停下了 = 一拍挪的不到这条命令的百分之一(比例;同 Selfmap.Go 判关节目标停了)
-   Ik_Eps : constant := 1.0e-6;            --  反解解完还差这么多以上 = 没解到目标(数值:解到的时候残差在 1e-10 量级)
    --  每只手上一条位姿命令:要不要等它停下核有没有碰到尽头、反解是不是被"往外一步"卡住了
    type Pend_State is record
       Live : Boolean := False;             --  有一条要到范围外的命令还没核
       Q_Cmd, Q_At, Glo, Ghi : Floats;      --  它的关节目标、发命令时的读数、发命令时到过的范围
       Still : Natural := 0;                --  停下了几拍
-      Prev_Q : Floats;                     --  上一条命令的关节目标(这一条是不是去一个新地方)
-      Held_Back : Boolean := False;
+      Held_Back : Boolean := False;        --  上一条命令有关节被夹到"到过的范围 + 往外一步"(没发到解出来的那一处)
+      Cmd_Glo, Cmd_Ghi : Floats;           --  发上一条命令时到过的范围(之后长了,重解才会往前走)
    end record;
    package Pend_Vectors is new Ada.Containers.Vectors (Natural, Pend_State);
    St_Pend : Pend_Vectors.Vector;
@@ -2541,11 +2540,30 @@ package body Jointboot is
       Plug.Set_Hooks (Pose_Hook'Access, Cmd_Hook'Access);
       Plug.Set_Reach (Reach_Hook'Access);
       Plug.Set_Limit (Held_Back'Access);
-      Say ("装上:从此每一帧手的位姿 = 按关节读数算出的腕眼位姿(" & Codec.Img (Natural (St_Worlds.Length)) & " 只手),位姿命令 = 在到过的关节范围往外一步里解关节目标、"
-           & "不越过记下的尽头(岔路二;问够不够得着只按尽头)");
+      Say ("装上:从此每一帧手的位姿 = 按关节读数算出的腕眼位姿(" & Codec.Img (Natural (St_Worlds.Length)) & " 只手),位姿命令 = 按记下的尽头解出关节目标、"
+           & "每个关节夹到到过的范围往外一步里发(岔路二;问够不够得着只按尽头)");
    end Install;
 
-   function Held_Back (Arm : Natural) return Boolean is (Arm < Natural (St_Pend.Length) and then St_Pend (Arm).Held_Back);
+   --  上一条被截住了没有;截住了,从那一条以来到过的范围长了没有(不止一档)—— 手还没动(命令要隔一两拍才起效)⇒ Held,截住的状态留着;
+   --  手一动、范围一长 ⇒ Held_Grown,重解重发。手停在真的尽头 / 碰上东西 ⇒ 范围不再长 ⇒ 一直 Held,照常停下、核尽头
+   function Held_Back (Arm : Natural) return Plug.Limit_State is
+   begin
+      if Arm >= Natural (St_Pend.Length) or else Arm >= Natural (St_Worlds.Length) or else not St_Pend (Arm).Held_Back then
+         return Plug.Free;
+      end if;
+      declare
+         P : constant Pend_State := St_Pend (Arm);
+         W : constant Arm_World := St_Worlds (Arm);
+         Tol : constant Long_Float := Tol_Of (W);
+      begin
+         for J in 0 .. Natural'Min (Natural (W.Got_Hi.Length), Natural'Min (Natural (P.Cmd_Ghi.Length), Natural (P.Cmd_Glo.Length))) - 1 loop
+            if W.Got_Hi (J) > P.Cmd_Ghi (J) + Tol or else W.Got_Lo (J) < P.Cmd_Glo (J) - Tol then
+               return Plug.Held_Grown;
+            end if;
+         end loop;
+         return Plug.Held;
+      end;
+   end Held_Back;
 
    --  到过的范围长了一步以上、或者尽头变了 ⇒ 写回身体文件(只写字)
    procedure Save_If_Grown (Changed_End : Boolean) is
@@ -2687,9 +2705,27 @@ package body Jointboot is
    end Pose_Hook;
 
    --  世界里的一个腕眼位姿 ⇒ 第 A 只手的关节目标(位姿命令、开机自检、问够不够得着都走这一条)。
-   --  For_Command = 真要发出去:在"到过的范围 + 往外一步"里解、不越过记下的尽头(岔路二);否则(问够不够得着)只按记下的尽头。
-   --  Pe / Re = 解完还差多少(位置:第一只手的模型单位 = 世界的单位;朝向:弧度)
-   procedure Pose_To_Q (A : Natural; Pose : Plug.Arm_Pose; For_Command : Boolean; Q : out Floats; Pe, Re : out Long_Float) is
+   --  每个关节夹到"到过的范围 + 往外一步"里(Cmd_Bounds);Clamped = 有关节被夹住了
+   procedure Clamp_Cmd (W : Arm_World; Q : in out Floats; Clamped : out Boolean) is
+      Lo, Hi : Floats;
+   begin
+      Clamped := False;
+      Cmd_Bounds (W, Lo, Hi);
+      for J in 0 .. Natural'Min (Natural (Q.Length), Natural'Min (Natural (Lo.Length), Natural (Hi.Length))) - 1 loop
+         if Q (J) > Hi (J) then
+            Q.Replace_Element (J, Hi (J)); Clamped := True;
+         elsif Q (J) < Lo (J) then
+            Q.Replace_Element (J, Lo (J)); Clamped := True;
+         end if;
+      end loop;
+   end Clamp_Cmd;
+
+   --  先只按记下的尽头解出这个位姿要的关节(Pe / Re = 解完还差多少:位置按第一只手的模型单位 = 世界的单位,朝向按弧度)。
+   --  For_Command = 真要发出去(岔路二):每个关节再夹到"到过的范围 + 往外一步"里 —— 每个关节直接朝那个解走、一条命令最多走出到过的地方一步;
+   --  Clamped = 有关节被夹住了(这一条到不了那个解,手走过去、范围长了再往前)。
+   --  (09-29 离线接真 Go 查出来的:原来直接在"到过的范围 + 一步"里反解,被夹住的那个关节差的那点由别的关节凑 ——
+   --  只转第 4 个关节到 0.8,第 0、2 个关节中途被拉出去 0.23 弧度再转回来;到不了时停在一个扭着的姿势)
+   procedure Pose_To_Q (A : Natural; Pose : Plug.Arm_Pose; For_Command : Boolean; Q : out Floats; Pe, Re : out Long_Float; Clamped : out Boolean) is
       use Geom;
       W : Arm_World renames St_Worlds (A);
       Rt_W : constant M3 := Quat_To_R (Pose);
@@ -2702,55 +2738,55 @@ package body Jointboot is
       Ra_Arm : constant M3 := Mul (Ra_T, R0);
       Ta_D : constant V3 := Ap (Ra_T, [T0 (0) - W.Ta (0), T0 (1) - W.Ta (1), T0 (2) - W.Ta (2)]);
       Ta_Arm : constant V3 := [Ta_D (0) / W.S, Ta_D (1) / W.S, Ta_D (2) / W.S];
-      Lo, Hi : Floats;
    begin
-      if For_Command then
-         Cmd_Bounds (W, Lo, Hi);
-      else
-         Lo := W.Lo; Hi := W.Hi;
-      end if;
-      Kinem.IK (W.Model, Ra_Arm, Ta_Arm, St_Last (A), Lo, Hi, Q, Pe, Re);
+      Clamped := False;
+      Kinem.IK (W.Model, Ra_Arm, Ta_Arm, St_Last (A), W.Lo, W.Hi, Q, Pe, Re);
       Pe := Pe * W.S;   --  换成第一只手的模型单位(= 世界的单位)
+      if For_Command then
+         Clamp_Cmd (W, Q, Clamped);
+      end if;
    end Pose_To_Q;
 
    procedure Reach_Hook (Arm : Natural; Pose : Plug.Arm_Pose; Pos_Err, Rot_Err : out Long_Float) is
       Q : Floats;
+      Cl : Boolean;
    begin
       Pos_Err := Long_Float'Last; Rot_Err := Long_Float'Last;
       if Arm < Natural (St_Worlds.Length) then
-         Pose_To_Q (Arm, Pose, False, Q, Pos_Err, Rot_Err);
+         Pose_To_Q (Arm, Pose, False, Q, Pos_Err, Rot_Err, Cl);
       end if;
    end Reach_Hook;
 
-   --  一条要发出去的位姿命令解成了 Q:记下要不要等它停下核尽头(有关节的目标出了到过的范围)、反解是不是被"往外一步"卡住了
-   --  (停在那道界上、那不是记下的尽头、没解到目标,而且这一条是去一个新地方 —— 同一个目标再解出同一处 = 范围没长,不再重发)
-   procedure Note_Command (A : Natural; Q : Floats; Pe, Re : Long_Float) is
+   --  一条要发出去的位姿命令解成了 Q(Full = 只按记下的尽头解出来的那一个,Q = 夹到"到过的范围 + 往外一步"里以后真发的):
+   --  记下要不要等它停下核尽头(有关节的目标出了到过的范围)、有没有被夹住(重不重发看之后范围长没长,见 Held_Back)
+   procedure Note_Command (A : Natural; Q, Full : Floats; Clamped : Boolean) is
       W : constant Arm_World := St_Worlds (A);
       P : Pend_State := St_Pend (A);
       Tol : constant Long_Float := Tol_Of (W);
-      Lo, Hi : Floats;
-      Binding, Beyond : Boolean := False;
-      New_Target : Boolean := P.Prev_Q.Is_Empty or else Natural (P.Prev_Q.Length) /= Natural (Q.Length);
-      Edge : constant := 1.0e-9;   --  "停在界上"(反解按界截断时正好等于界;数值)
+      Beyond : Boolean := False;
    begin
-      Cmd_Bounds (W, Lo, Hi);
-      for J in 0 .. Natural'Min (Natural (Q.Length), Natural'Min (Natural (Lo.Length), Natural (Hi.Length))) - 1 loop
-         if (Q (J) >= Hi (J) - Edge and then Hi (J) < W.Hi (J)) or else (Q (J) <= Lo (J) + Edge and then Lo (J) > W.Lo (J)) then
-            Binding := True;
-         end if;
-         if J < Natural (W.Got_Hi.Length) and then (Q (J) > W.Got_Hi (J) + Tol or else Q (J) < W.Got_Lo (J) - Tol) then
+      for J in 0 .. Natural'Min (Natural (Q.Length), Natural (W.Got_Hi.Length)) - 1 loop
+         if Q (J) > W.Got_Hi (J) + Tol or else Q (J) < W.Got_Lo (J) - Tol then
             Beyond := True;
          end if;
-         if not New_Target and then abs (Q (J) - P.Prev_Q (J)) > Tol then
-            New_Target := True;
-         end if;
       end loop;
-      P.Held_Back := Binding and then (Pe > Ik_Eps or else Re > Ik_Eps) and then New_Target;
-      if P.Held_Back then
-         Say ("第" & Codec.Img (A + 1) & " 只手:这条命令的反解被「到过的关节范围 + 往外一步」截住(离目标还差 " & Codec.Fmt (Pe, 4) & " 单位 / " & Codec.Fmt (Re, 4)
-              & " rad)⇒ 先走到那儿,范围长了再往前(岔路二)");
+      --  只在"开始被夹住"那一刻说一句(之后跟着往前重发的都还是它,不重复说):夹得最多的那个关节要到哪、这一条只到哪
+      if Clamped and then not P.Held_Back then
+         declare
+            Jm : Natural := 0;
+            Dm : Long_Float := -1.0;
+         begin
+            for J in 0 .. Natural'Min (Natural (Q.Length), Natural (Full.Length)) - 1 loop
+               if abs (Full (J) - Q (J)) > Dm then
+                  Dm := abs (Full (J) - Q (J)); Jm := J;
+               end if;
+            end loop;
+            Say ("第" & Codec.Img (A + 1) & " 只手:第 " & Codec.Img (Jm) & " 个关节要到 " & Codec.Fmt (Full (Jm), 4) & ",这一条只发到 " & Codec.Fmt (Q (Jm), 4)
+                 & "(到过的范围 + 往外一步)⇒ 手走过去、范围长了就跟着往前重发(岔路二)");
+         end;
       end if;
-      P.Prev_Q := Q;
+      P.Held_Back := Clamped;
+      P.Cmd_Glo := W.Got_Lo; P.Cmd_Ghi := W.Got_Hi;
       --  上一条还没核就来了新的 = 被打断了,不核(岔路二原话)
       P.Live := Beyond;
       if Beyond then
@@ -2760,15 +2796,18 @@ package body Jointboot is
    end Note_Command;
 
    procedure Cmd_Hook (C : in out Plug.Cmd; Ok : out Boolean) is
-      Q : Floats;
+      Q, Full : Floats;
       Pe, Re : Long_Float;
+      Cl : Boolean;
    begin
       Ok := False;
       if C.Arm >= Natural (St_Worlds.Length) then
          return;
       end if;
-      Pose_To_Q (C.Arm, C.Pose, True, Q, Pe, Re);
-      Note_Command (C.Arm, Q, Pe, Re);
+      Pose_To_Q (C.Arm, C.Pose, False, Full, Pe, Re, Cl);
+      Q := Full;
+      Clamp_Cmd (St_Worlds (C.Arm), Q, Cl);
+      Note_Command (C.Arm, Q, Full, Cl);
       C.Kind := Plug.Joint;
       C.Group := St_Worlds (C.Arm).Group;
       C.Q := Q;
@@ -2840,7 +2879,11 @@ package body Jointboot is
                         begin
                            Target := Kinem.To_Pose (Mul (St_Rw, R0), Ap (St_Rw, T0));
                         end;
-                        Pose_To_Q (A, Target, True, Q, Pe, Re);
+                        declare
+                           Cl : Boolean;
+                        begin
+                           Pose_To_Q (A, Target, True, Q, Pe, Re, Cl);
+                        end;
                         Gs.Append (W.Group); Qs.Append (Q);
                         --  到了 = 每个关节差不到它这一下要走的三分之一(比例,同扫描)
                         if W.Group < Natural (F.Joints.Length) then
