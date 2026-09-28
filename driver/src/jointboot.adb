@@ -26,12 +26,11 @@ package body Jointboot is
    Ramp : constant := 4.0;                      --  扫描下一格最多放大四倍(次数;每个方向只停 3 格,头一格之后两格就要转开)
 
    --  一组关节读数一起挪到 Q(关节目标走唯一那条挪手的路 Selfmap.Go,停稳看这组读数)
-   procedure Go_Group (L : in out Plug.Link; F : in out Plug.Frame; M : Selfmap.Body_Map; A, G : Natural; Q : Floats; Tol : Long_Float; Ok : out Boolean;
-                       Prev_Pic : access Plug.Cam_Vectors.Vector := null) is
+   procedure Go_Group (L : in out Plug.Link; F : in out Plug.Frame; M : Selfmap.Body_Map; A, G : Natural; Q : Floats; Tol : Long_Float; Ok : out Boolean) is
       Dl : Table.Vec;
       Fr : Natural;
    begin
-      Selfmap.Go (L, M, A, [others => 0.0], F64_Vectors.Empty_Vector, F, Dl, Fr, Ok, Joints => Q, Group => G, Tol => Tol, Prev_Pic => Prev_Pic);
+      Selfmap.Go (L, M, A, [others => 0.0], F64_Vectors.Empty_Vector, F, Dl, Fr, Ok, Joints => Q, Group => G, Tol => Tol);
    end Go_Group;
 
    procedure Find_Arms (L : in out Plug.Link; F : in out Plug.Frame; M : in out Selfmap.Body_Map;
@@ -61,8 +60,7 @@ package body Jointboot is
                      Tgt : Floats := Q0;
                      F0 : constant Plug.Cam_Vectors.Vector := F.Cams;
                      J0 : constant Plug.Floats_Vectors.Vector := F.Joints;
-                     F1 : Plug.Cam_Vectors.Vector;
-                     F1_Prev : aliased Plug.Cam_Vectors.Vector;   --  转到那头停稳时最后一帧之前那一帧
+                     F1, F1b : Plug.Cam_Vectors.Vector;   --  转到那头:走完那一帧、再读的一帧
                      J1 : Plug.Floats_Vectors.Vector;
                      Okg : Boolean;
                      Got : Long_Float := Long_Float'Last;
@@ -72,9 +70,13 @@ package body Jointboot is
                      for K in 0 .. Natural (Tgt.Length) - 1 loop
                         Tgt.Replace_Element (K, Q0 (K) + Amp);
                      end loop;
-                     Go_Group (L, F, M, Natural (Arms.Length), G, Tgt, Amp * Third, Okg, Prev_Pic => F1_Prev'Access);
+                     Go_Group (L, F, M, Natural (Arms.Length), G, Tgt, Amp * Third, Okg);
                      exit when not Okg;
                      F1 := F.Cams; J1 := F.Joints;
+                     --  转到那头再读一帧:画面比读数晚一拍(开机量的),"读数到了"那一刻的前一帧画面还没到那头(V1B58 2026-09-28:拿它当第二帧,
+                     --  x5 第 1 只手 0.0001 / 0.0002 两档都判成没看见、第 2 只手认不出眼);走完那一帧和再读的这一帧都是到了以后的画面
+                     exit when not Plug.Sense (L, F);
+                     F1b := F.Cams;
                      Go_Group (L, F, M, Natural (Arms.Length), G, Q0, Amp * Third, Okg);
                      exit when not Okg;
                      for K in 0 .. Natural'Min (Natural (J1 (G).Length), Natural (J0 (G).Length)) - 1 loop
@@ -85,9 +87,9 @@ package body Jointboot is
                            Fl : Picture.Floor_Map renames M.Floors (C);
                            M1 : constant Bools := Picture.Moved (F0 (C).Gray, F1 (C).Gray, Fl);
                            M2 : constant Bools := Picture.Moved (F1 (C).Gray, F.Cams (C).Gray, Fl);
-                           --  看没看见动了:两次比较、不共用一帧(同逐通道推、抓握通道推到头:Picture.Seen_Twice)
+                           --  看没看见动了:两次比较、不共用一帧(转之前 → 走完那一帧;再读的那一帧 → 转回来;同逐通道推、抓握通道推到头:Picture.Seen_Twice)
                            Comps : constant Picture.Regions :=
-                             Picture.Seen_Twice (F0 (C).Gray, F1_Prev (C).Gray, F1 (C).Gray, F.Cams (C).Gray, Fl, F.Cams (C).W, F.Cams (C).H);
+                             Picture.Seen_Twice (F0 (C).Gray, F1 (C).Gray, F1b (C).Gray, F.Cams (C).Gray, Fl, F.Cams (C).W, F.Cams (C).H);
                         begin
                            Fr.Append (Picture.Fraction (Picture.Either (M1, M2)));
                            if not Comps.Is_Empty then

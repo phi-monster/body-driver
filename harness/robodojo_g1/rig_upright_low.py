@@ -50,8 +50,12 @@ if '"_wrist_pitch_joint"' not in s and '".*_wrist_pitch_joint"' not in s:
 s = re.sub(r'"\.\*_wrist_pitch_joint": [0-9.\-]+,', '".*_wrist_pitch_joint": 0.3,', s)
 s = re.sub(r"(joint_names_expr=\[\"\.\*_hip_\.\*\", \"\.\*_knee_joint\", \"\.\*_ankle_\.\*\", \"waist_\.\*\"\],\n\s*effort_limit_sim=300\.0, velocity_limit_sim=10\.0, )stiffness=[0-9.]+, damping=[0-9.]+,",
            r"\1stiffness=20000.0, damping=1000.0,", s)
+# 手臂驱动提到腰 / 腿那一档(PLAN V1b 人形第 1 条,09-28):3000 / 600 时每挪一下约 40 拍才停稳(G2 那几炮),只读关节的扫描每只手约 22 格要近一小时;
+# 真 G1 的位置环不到一秒停稳。驱动不改,停稳要几拍按驱动自己的静止噪声那一行量
+s = re.sub(r"(joint_names_expr=\[\"\.\*_shoulder_\.\*\", \"\.\*_elbow_joint\", \"\.\*_wrist_\.\*\"\],\n\s*effort_limit_sim=300\.0, velocity_limit_sim=10\.0, )stiffness=[0-9.]+, damping=[0-9.]+,",
+           r"\1stiffness=20000.0, damping=1000.0,", s)
 open(p, "w").write(s); print("改了", p)
 for f in ("curobo_left.yml", "curobo_right.yml", "curobo.yml"):
     p = f"{R}/Assets/Robots/g1/{f}"; s = open(p).read()
     open(p, "w").write(re.sub(r"waist_pitch_joint: [0-9.\-]+", "waist_pitch_joint: 0.0", s))
-print("完成:直立 · 骨盆 (0,-0.72,0.70) · 腰 0 · 歇姿 肩 -0.4 肘 0.1 腕 +0.3 · 腰腿 20000/1000 · 规划器用真桌子盒")
+print("完成:直立 · 骨盆 (0,-0.72,0.70) · 腰 0 · 歇姿 肩 -0.4 肘 0.1 腕 +0.3 · 腰腿 20000/1000 · 手臂 20000/1000 · 规划器用真桌子盒")
