@@ -159,6 +159,7 @@ begin
          Worlds := K.Worlds; Ds := K.Ds; Rw := K.Rw; O := K.O; Kin_World_Cam := K.World_Cam; Eyes_Of := K.Eyes;
          Kin_Fixed := K.Fixed_Eye; Kin_Board := K.Board; Kin_Plane_Pt := K.Plane_Pt; Kin_Plane_N := K.Plane_N; Kin_Plane_Rms := K.Plane_Rms;
          Jointboot.Dump_Kin (Dump, K);
+         Jointboot.Remember_Kin (Kin_Path, K);
       else
       Jointboot.Find_Arms (L, F, M0, Found, Kin_World_Cam, Okj);
       if not Okj then
@@ -210,22 +211,8 @@ begin
                if Found (A).Eye < 0 then
                   Put_Line ("[身] 📐 第" & Codec.Img (A + 1) & " 只手上没有眼 ⇒ 这一版量不了它的运动学(要一只看得见它的眼),先不用");
                elsif not Ds (A).Frames.Is_Empty then
-                  --  反解的界 = 量到的关节限位:扫描时这一边是"到头或被顶住 / 碰上东西了"停的,以扫到的最远那一格为界;
-                  --  走满格数停的这一边没量到头,不设界(V1B18 2026-09-27:只在扫到过的范围里解,碰桌面前转手转到 0.32 弧度就解不出更远的了)
-                  for J in 0 .. Natural (Ds (A).Frames (0).Q.Length) - 1 loop
-                     declare
-                        Lo : Long_Float := Long_Float'Last;
-                        Hi : Long_Float := Long_Float'First;
-                        Lim_Lo : constant Boolean := J < Natural (Ds (A).Has_Lo.Length) and then Ds (A).Has_Lo (J);
-                        Lim_Hi : constant Boolean := J < Natural (Ds (A).Has_Hi.Length) and then Ds (A).Has_Hi (J);
-                     begin
-                        for Fr of Ds (A).Frames loop
-                           Lo := Long_Float'Min (Lo, Fr.Q (J)); Hi := Long_Float'Max (Hi, Fr.Q (J));
-                        end loop;
-                        W.Lo.Append (if Lim_Lo then Lo else Long_Float'First);
-                        W.Hi.Append (if Lim_Hi then Hi else Long_Float'Last);
-                     end;
-                  end loop;
+                  --  记下的尽头、到过的范围、往外一步(岔路二,09-29):发命令时反解只在到过的范围往外一步里解,问够不够得着只按尽头
+                  Jointboot.Set_Ranges (Ds (A), W);
                end if;
                Worlds.Append (W);
             end;
@@ -244,7 +231,8 @@ begin
                Fixed_Eye => Kin_Fixed, Board => Kin_Board, Plane_Pt => Kin_Plane_Pt, Plane_N => Kin_Plane_N, Plane_Rms => Kin_Plane_Rms);
          begin
             Jointboot.Save_Kin (Kin_Path, K);
-            Put_Line ("[装] 前半段存进 " & Kin_Path & "(下回核对过就不再扫)");
+            Jointboot.Remember_Kin (Kin_Path, K);
+            Put_Line ("[装] 前半段存进 " & Kin_Path & "(下回核对过就不再扫;干活时关节到过的范围长了 / 记下尽头就写回)");
          exception
             when others =>
                Put_Line ("[装] 前半段存不进 " & Kin_Path);
@@ -278,7 +266,7 @@ begin
       if not Ds.Is_Empty then
          Kin_Ref := Ds (0).World_Img;
       end if;
-      Jointboot.Install (Worlds, Rw, O);
+      Jointboot.Install (Worlds, Rw, O, Joint_Noise => M0.Joint_Noise);
       if not Plug.Sense (L, F) then
          Put_Line ("[链] 装上以后取不到画面,退出");
          return;

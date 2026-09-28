@@ -407,6 +407,8 @@ package body Jointboot is
                D.W := Sa.W; D.H := Sa.H;
                D.Has_Lo := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (Natural (Sa.Q0.Length)));
                D.Has_Hi := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (Natural (Sa.Q0.Length)));
+               D.Step_Lo := F64_Vectors.To_Vector (0.0, Ada.Containers.Count_Type (Natural (Sa.Q0.Length)));
+               D.Step_Hi := F64_Vectors.To_Vector (0.0, Ada.Containers.Count_Type (Natural (Sa.Q0.Length)));
                Ds.Replace_Element (A, D);
                Nj := Natural'Max (Nj, Natural (Sa.Q0.Length));
                --  每格画面挪画幅宽的 1/5(比例,无量纲;每个方向停 3 格,转开的总量同原来 5 格 × 1/10:V1B14 挑格回放,停 3 格最大 0.73 mm)
@@ -521,6 +523,14 @@ package body Jointboot is
                                  if Sa.Done then
                                     Say ("  第" & Codec.Img (A + 1) & " 只手第" & Codec.Img (J) & " 个关节往" & (if Dd > 0 then "正" else "负") & "转了 " & Codec.Img (Sa.K)
                                          & " 格(累计 " & Codec.Fmt (Sa.Off, 3) & ")⇒ 停:" & To_String (Sa.Why));
+                                    --  这一边最后一格命令的步子 = 往到过的范围外最多走的那一步(岔路二:身体开机时一条命令走过的量)
+                                    if J < Natural (Ds (A).Step_Lo.Length) then
+                                       if Dd < 0 then
+                                          Ds (A).Step_Lo.Replace_Element (J, Sa.Step);
+                                       else
+                                          Ds (A).Step_Hi.Replace_Element (J, Sa.Step);
+                                       end if;
+                                    end if;
                                  end if;
                               end;
                            end if;
@@ -2373,33 +2383,287 @@ package body Jointboot is
       Say ("  对齐用了 " & Codec.Fmt (Long_Float (Ada.Calendar."-" (Ada.Calendar.Clock, T0)), 1) & " 秒 " & Lap);
    end Align;
 
+   --  ── 岔路二(09-29,owner:"已知范围,越用越大"):到过的范围、往外一步、尽头 ──
+
+   procedure Set_Ranges (D : Sweep_Data; W : in out Arm_World) is
+   begin
+      W.Lo.Clear; W.Hi.Clear; W.Got_Lo.Clear; W.Got_Hi.Clear; W.Step_Lo.Clear; W.Step_Hi.Clear;
+      W.Eye_W := D.W;
+      if D.Frames.Is_Empty then
+         return;
+      end if;
+      for J in 0 .. Natural (D.Frames (0).Q.Length) - 1 loop
+         declare
+            Lo : Long_Float := Long_Float'Last;
+            Hi : Long_Float := Long_Float'First;
+            Lim_Lo : constant Boolean := J < Natural (D.Has_Lo.Length) and then D.Has_Lo (J);
+            Lim_Hi : constant Boolean := J < Natural (D.Has_Hi.Length) and then D.Has_Hi (J);
+         begin
+            for Fr of D.Frames loop
+               if J < Natural (Fr.Q.Length) then
+                  Lo := Long_Float'Min (Lo, Fr.Q (J)); Hi := Long_Float'Max (Hi, Fr.Q (J));
+               end if;
+            end loop;
+            --  记下的尽头:扫描时这一边是"关节到头"停的,以扫到的最远那一格为界;走满格数 / 碰上东西了停的这一边没量到头,不设界
+            --  (V1B18 2026-09-27:问"够不够得着"时只按扫到过的范围解,碰桌面前转手转到 0.32 弧度就解不出更远的了 ⇒ 问够不够得着只按尽头)
+            W.Lo.Append (if Lim_Lo then Lo else Long_Float'First);
+            W.Hi.Append (if Lim_Hi then Hi else Long_Float'Last);
+            W.Got_Lo.Append (Lo); W.Got_Hi.Append (Hi);
+            W.Step_Lo.Append (if J < Natural (D.Step_Lo.Length) then D.Step_Lo (J) else 0.0);
+            W.Step_Hi.Append (if J < Natural (D.Step_Hi.Length) then D.Step_Hi (J) else 0.0);
+         end;
+      end loop;
+   end Set_Ranges;
+
+   procedure Cmd_Bounds (W : Arm_World; Lo, Hi : out Floats) is
+      N : constant Natural := Natural'Min (Natural (W.Lo.Length), Natural (W.Hi.Length));
+   begin
+      Lo.Clear; Hi.Clear;
+      for J in 0 .. N - 1 loop
+         declare
+            Has : constant Boolean := J < Natural (W.Got_Lo.Length) and then J < Natural (W.Got_Hi.Length)
+              and then J < Natural (W.Step_Lo.Length) and then J < Natural (W.Step_Hi.Length);
+         begin
+            Lo.Append (if Has then Long_Float'Max (W.Lo (J), W.Got_Lo (J) - W.Step_Lo (J)) else W.Lo (J));
+            Hi.Append (if Has then Long_Float'Min (W.Hi (J), W.Got_Hi (J) + W.Step_Hi (J)) else W.Hi (J));
+         end;
+      end loop;
+   end Cmd_Bounds;
+
+   function Judge_End (Q_Cmd, Q_At, Q_Now, Got_Lo, Got_Hi : Floats; Tol : Long_Float; J : out Integer; Hi_Side : out Boolean) return End_Verdict is
+      N : constant Natural := Natural'Min (Natural'Min (Natural (Q_Cmd.Length), Natural (Q_At.Length)),
+                                           Natural'Min (Natural (Q_Now.Length), Natural'Min (Natural (Got_Lo.Length), Natural (Got_Hi.Length))));
+      Shorts : Natural := 0;
+      Blocked_Any : Boolean := False;
+      --  到了 = 差不到 Tol,或者差不到它这一下要走的三分之一(比例,同扫描"到了")
+      function Arrived (K : Natural) return Boolean is
+        (abs (Q_Now (K) - Q_Cmd (K)) <= Long_Float'Max (Tol, abs (Q_Cmd (K) - Q_At (K)) * Third));
+   begin
+      J := -1; Hi_Side := False;
+      for K in 0 .. N - 1 loop
+         declare
+            Up : constant Boolean := Q_Cmd (K) > Got_Hi (K) + Tol;
+            Down : constant Boolean := Q_Cmd (K) < Got_Lo (K) - Tol;
+         begin
+            if Up or else Down then
+               declare
+                  B : constant Long_Float := (if Up then Got_Hi (K) else Got_Lo (K));
+                  Ext : constant Long_Float := abs (Q_Cmd (K) - B);
+                  Prog : constant Long_Float := (if Up then Q_Now (K) - B else B - Q_Now (K));
+               begin
+                  if Prog + Prog < Ext then   --  走到的不到要往外走的那一截的一半(纯数学的一半,同扫描)
+                     Shorts := Shorts + 1;
+                     J := K; Hi_Side := Up;
+                  elsif not Arrived (K) then
+                     Blocked_Any := True;
+                  end if;
+               end;
+            elsif not Arrived (K) then
+               Blocked_Any := True;   --  范围里的关节没到 / 被顶偏
+            end if;
+         end;
+      end loop;
+      if Blocked_Any then
+         if Shorts /= 1 then
+            J := -1;
+         end if;
+         return Blocked;
+      elsif Shorts = 1 then
+         return End_Hit;
+      elsif Shorts > 1 then
+         J := -1;
+         return Ambiguous;
+      end if;
+      return Reached;
+   end Judge_End;
+
+   function End_Passed (Q, Lo, Hi : Floats; Tol : Long_Float; J : out Integer; Hi_Side : out Boolean) return Boolean is
+   begin
+      J := -1; Hi_Side := False;
+      for K in 0 .. Natural'Min (Natural (Q.Length), Natural'Min (Natural (Lo.Length), Natural (Hi.Length))) - 1 loop
+         if Hi (K) /= Long_Float'Last and then Q (K) > Hi (K) + Tol then
+            J := K; Hi_Side := True;
+            return True;
+         elsif Lo (K) /= Long_Float'First and then Q (K) < Lo (K) - Tol then
+            J := K; Hi_Side := False;
+            return True;
+         end if;
+      end loop;
+      return False;
+   end End_Passed;
+
+   --  判"到了 / 停在界上"的最小一档:这只手那只眼里画面挪不到 1 像素的转角(Kinem.Clean_Tol,同扫描收格子);画幅不知道 ⇒ 0(只认正好相等,宁可不记)
+   function Tol_Of (W : Arm_World) return Long_Float is (if W.Eye_W > 0 then Kinem.Clean_Tol (Long_Float (W.Eye_W)) else 0.0);
+
    --  ── 装上以后插头用的状态 ──
    St_Worlds : Arm_World_Vectors.Vector;
    St_Rw : Geom.M3 := Geom.Identity;
    St_O : Geom.V3 := [0.0, 0.0, 0.0];
    St_Last : Plug.Floats_Vectors.Vector;   --  每只手最近一帧的关节读数(反解从这儿起)
+   St_Noise : Long_Float := 0.0;           --  开机量的关节读数噪声(判"停下了"的下限)
+   Still_Frac : constant := 0.01;          --  停下了 = 一拍挪的不到这条命令的百分之一(比例;同 Selfmap.Go 判关节目标停了)
+   Ik_Eps : constant := 1.0e-6;            --  反解解完还差这么多以上 = 没解到目标(数值:解到的时候残差在 1e-10 量级)
+   --  每只手上一条位姿命令:要不要等它停下核有没有碰到尽头、反解是不是被"往外一步"卡住了
+   type Pend_State is record
+      Live : Boolean := False;             --  有一条要到范围外的命令还没核
+      Q_Cmd, Q_At, Glo, Ghi : Floats;      --  它的关节目标、发命令时的读数、发命令时到过的范围
+      Still : Natural := 0;                --  停下了几拍
+      Prev_Q : Floats;                     --  上一条命令的关节目标(这一条是不是去一个新地方)
+      Held_Back : Boolean := False;
+   end record;
+   package Pend_Vectors is new Ada.Containers.Vectors (Natural, Pend_State);
+   St_Pend : Pend_Vectors.Vector;
+   --  身体文件(Remember_Kin):干活时范围长了 / 尽头变了写回
+   St_Kin_Path : Unbounded_String;
+   St_Kin : Kin_Store;
+   St_Kin_Idx : Ints;                      --  St_Worlds 第 i 只手是 St_Kin.Worlds 的第几只
+   St_Saved_Glo, St_Saved_Ghi : Plug.Floats_Vectors.Vector;   --  上回写文件时每只手到过的范围
 
-   procedure Install (Worlds : Arm_World_Vectors.Vector; Rw : Geom.M3; O : Geom.V3) is
+   procedure Remember_Kin (Path : String; K : Kin_Store) is
    begin
-      St_Worlds.Clear;
-      St_Last.Clear;
-      for W of Worlds loop
-         if W.Valid then
-            St_Worlds.Append (W);
-            St_Last.Append (W.Model.Q0);
+      St_Kin_Path := To_Unbounded_String (Path);
+      St_Kin := K;
+   end Remember_Kin;
+
+   procedure Install (Worlds : Arm_World_Vectors.Vector; Rw : Geom.M3; O : Geom.V3; Joint_Noise : Long_Float := 0.0) is
+   begin
+      St_Worlds.Clear; St_Last.Clear; St_Pend.Clear; St_Kin_Idx.Clear; St_Saved_Glo.Clear; St_Saved_Ghi.Clear;
+      for I in 0 .. Natural (Worlds.Length) - 1 loop
+         if Worlds (I).Valid then
+            St_Worlds.Append (Worlds (I));
+            St_Last.Append (Worlds (I).Model.Q0);
+            St_Pend.Append (Pend_State'(others => <>));
+            St_Kin_Idx.Append (I);
+            St_Saved_Glo.Append (Worlds (I).Got_Lo); St_Saved_Ghi.Append (Worlds (I).Got_Hi);
          end if;
       end loop;
-      St_Rw := Rw; St_O := O;
+      St_Rw := Rw; St_O := O; St_Noise := Joint_Noise;
       Plug.Set_Hooks (Pose_Hook'Access, Cmd_Hook'Access);
       Plug.Set_Reach (Reach_Hook'Access);
-      Say ("装上:从此每一帧手的位姿 = 按关节读数算出的腕眼位姿(" & Codec.Img (Natural (St_Worlds.Length)) & " 只手),位姿命令 = 在量到的关节限位里解关节目标");
+      Plug.Set_Limit (Held_Back'Access);
+      Say ("装上:从此每一帧手的位姿 = 按关节读数算出的腕眼位姿(" & Codec.Img (Natural (St_Worlds.Length)) & " 只手),位姿命令 = 在到过的关节范围往外一步里解关节目标、"
+           & "不越过记下的尽头(岔路二;问够不够得着只按尽头)");
    end Install;
+
+   function Held_Back (Arm : Natural) return Boolean is (Arm < Natural (St_Pend.Length) and then St_Pend (Arm).Held_Back);
+
+   --  到过的范围长了一步以上、或者尽头变了 ⇒ 写回身体文件(只写字)
+   procedure Save_If_Grown (Changed_End : Boolean) is
+      Grown : Boolean := False;
+   begin
+      if Length (St_Kin_Path) = 0 then
+         return;
+      end if;
+      for A in 0 .. Natural (St_Worlds.Length) - 1 loop
+         declare
+            W : Arm_World renames St_Worlds (A);
+         begin
+            for J in 0 .. Natural'Min (Natural (W.Got_Hi.Length), Natural (St_Saved_Ghi (A).Length)) - 1 loop
+               if (W.Step_Hi (J) > 0.0 and then W.Got_Hi (J) - St_Saved_Ghi (A) (J) >= W.Step_Hi (J))
+                 or else (W.Step_Lo (J) > 0.0 and then St_Saved_Glo (A) (J) - W.Got_Lo (J) >= W.Step_Lo (J))
+               then
+                  Grown := True;
+               end if;
+            end loop;
+         end;
+      end loop;
+      if not (Changed_End or else Grown) then
+         return;
+      end if;
+      for I in 0 .. Natural (St_Worlds.Length) - 1 loop
+         if St_Kin_Idx (I) < Natural (St_Kin.Worlds.Length) then
+            declare
+               Kw : Arm_World := St_Kin.Worlds (St_Kin_Idx (I));
+            begin
+               Kw.Lo := St_Worlds (I).Lo; Kw.Hi := St_Worlds (I).Hi;
+               Kw.Got_Lo := St_Worlds (I).Got_Lo; Kw.Got_Hi := St_Worlds (I).Got_Hi;
+               St_Kin.Worlds.Replace_Element (St_Kin_Idx (I), Kw);
+            end;
+         end if;
+         St_Saved_Glo.Replace_Element (I, St_Worlds (I).Got_Lo); St_Saved_Ghi.Replace_Element (I, St_Worlds (I).Got_Hi);
+      end loop;
+      begin
+         Save_Kin (To_String (St_Kin_Path), St_Kin, Images => False);
+      exception
+         when others =>
+            Say ("到过的关节范围 / 尽头写不回 " & To_String (St_Kin_Path));
+      end;
+   end Save_If_Grown;
+
+   --  这一帧第 A 只手的读数:到过的范围并进来;越过记下的尽头 ⇒ 删掉那个尽头;有一条要到范围外的命令 ⇒ 等它停下(连着两拍一拍挪不到这条命令的百分之一)
+   --  核有没有碰到尽头(Judge_End):正好一个关节没走到一半、别的都到了 ⇒ 这一头到了,记下;别的关节没到 / 被顶偏 ⇒ 碰上东西了,不记
+   procedure Track (A : Natural; Prev, Qn : Floats) is
+      W : Arm_World := St_Worlds (A);
+      P : Pend_State := St_Pend (A);
+      Tol : constant Long_Float := Tol_Of (W);
+      Changed_End : Boolean := False;
+      Jx : Integer;
+      Hs : Boolean;
+      Who : constant String := "第" & Codec.Img (A + 1) & " 只手";
+   begin
+      for J in 0 .. Natural'Min (Natural (Qn.Length), Natural'Min (Natural (W.Got_Lo.Length), Natural (W.Got_Hi.Length))) - 1 loop
+         W.Got_Lo.Replace_Element (J, Long_Float'Min (W.Got_Lo (J), Qn (J)));
+         W.Got_Hi.Replace_Element (J, Long_Float'Max (W.Got_Hi (J), Qn (J)));
+      end loop;
+      while End_Passed (Qn, W.Lo, W.Hi, Tol, Jx, Hs) loop
+         Say (Who & "第" & Codec.Img (Jx) & " 个关节读数 " & Codec.Fmt (Qn (Jx), 4) & " 越过了记下的" & (if Hs then "正" else "负") & "那一头 "
+              & Codec.Fmt ((if Hs then W.Hi (Jx) else W.Lo (Jx)), 4) & " ⇒ 那个尽头记错了,删掉");
+         if Hs then
+            W.Hi.Replace_Element (Jx, Long_Float'Last);
+         else
+            W.Lo.Replace_Element (Jx, Long_Float'First);
+         end if;
+         Changed_End := True;
+      end loop;
+      if P.Live then
+         declare
+            Mv, Big : Long_Float := 0.0;
+         begin
+            for J in 0 .. Natural'Min (Natural (Qn.Length), Natural (Prev.Length)) - 1 loop
+               Mv := Long_Float'Max (Mv, abs (Qn (J) - Prev (J)));
+            end loop;
+            for J in 0 .. Natural'Min (Natural (P.Q_Cmd.Length), Natural (P.Q_At.Length)) - 1 loop
+               Big := Long_Float'Max (Big, abs (P.Q_Cmd (J) - P.Q_At (J)));
+            end loop;
+            P.Still := (if Mv <= Long_Float'Max (St_Noise, Still_Frac * Big) then P.Still + 1 else 0);
+            if P.Still >= 2 then
+               P.Live := False;
+               case Judge_End (P.Q_Cmd, P.Q_At, Qn, P.Glo, P.Ghi, Tol, Jx, Hs) is
+                  when End_Hit =>
+                     Say (Who & "第" & Codec.Img (Jx) & " 个关节往" & (if Hs then "正" else "负") & "走:要到 " & Codec.Fmt (P.Q_Cmd (Jx), 4) & "(到过的范围只到 "
+                          & Codec.Fmt ((if Hs then P.Ghi (Jx) else P.Glo (Jx)), 4) & "),停在 " & Codec.Fmt (Qn (Jx), 4) & ",往外走的不到一半,别的关节都到了"
+                          & " ⇒ 这一头到了,记下(以后反解不往那边算;哪天真走过去了再删)");
+                     if Hs then
+                        W.Hi.Replace_Element (Jx, Qn (Jx));
+                     else
+                        W.Lo.Replace_Element (Jx, Qn (Jx));
+                     end if;
+                     Changed_End := True;
+                  when Blocked =>
+                     if Jx >= 0 then
+                        Say (Who & "第" & Codec.Img (Jx) & " 个关节往范围外走不到一半,可别的关节也没到 / 被顶偏了 ⇒ 是手碰上东西了,不是关节到头,不记");
+                     end if;
+                  when Ambiguous =>
+                     Say (Who & "好几个关节往范围外都走不到一半 ⇒ 分不清是哪一个到头了,不记");
+                  when Reached =>
+                     null;
+               end case;
+            end if;
+         end;
+      end if;
+      St_Worlds.Replace_Element (A, W);
+      St_Pend.Replace_Element (A, P);
+      Save_If_Grown (Changed_End);
+   end Track;
 
    procedure Pose_Hook (F : in out Plug.Frame) is
       use Geom;
    begin
       F.EE.Clear;
       for A in 0 .. Natural (St_Worlds.Length) - 1 loop
+         if St_Worlds (A).Group < Natural (F.Joints.Length) then
+            Track (A, St_Last (A), F.Joints (St_Worlds (A).Group));
+         end if;
          declare
             W : Arm_World renames St_Worlds (A);
             Rr : M3;
@@ -2422,9 +2686,10 @@ package body Jointboot is
       end loop;
    end Pose_Hook;
 
-   --  世界里的一个腕眼位姿 ⇒ 第 A 只手的关节目标(在量到的关节限位里反解;位姿命令和开机自检都走这一条)。
+   --  世界里的一个腕眼位姿 ⇒ 第 A 只手的关节目标(位姿命令、开机自检、问够不够得着都走这一条)。
+   --  For_Command = 真要发出去:在"到过的范围 + 往外一步"里解、不越过记下的尽头(岔路二);否则(问够不够得着)只按记下的尽头。
    --  Pe / Re = 解完还差多少(位置:第一只手的模型单位 = 世界的单位;朝向:弧度)
-   procedure Pose_To_Q (A : Natural; Pose : Plug.Arm_Pose; Q : out Floats; Pe, Re : out Long_Float) is
+   procedure Pose_To_Q (A : Natural; Pose : Plug.Arm_Pose; For_Command : Boolean; Q : out Floats; Pe, Re : out Long_Float) is
       use Geom;
       W : Arm_World renames St_Worlds (A);
       Rt_W : constant M3 := Quat_To_R (Pose);
@@ -2437,8 +2702,14 @@ package body Jointboot is
       Ra_Arm : constant M3 := Mul (Ra_T, R0);
       Ta_D : constant V3 := Ap (Ra_T, [T0 (0) - W.Ta (0), T0 (1) - W.Ta (1), T0 (2) - W.Ta (2)]);
       Ta_Arm : constant V3 := [Ta_D (0) / W.S, Ta_D (1) / W.S, Ta_D (2) / W.S];
+      Lo, Hi : Floats;
    begin
-      Kinem.IK (W.Model, Ra_Arm, Ta_Arm, St_Last (A), W.Lo, W.Hi, Q, Pe, Re);
+      if For_Command then
+         Cmd_Bounds (W, Lo, Hi);
+      else
+         Lo := W.Lo; Hi := W.Hi;
+      end if;
+      Kinem.IK (W.Model, Ra_Arm, Ta_Arm, St_Last (A), Lo, Hi, Q, Pe, Re);
       Pe := Pe * W.S;   --  换成第一只手的模型单位(= 世界的单位)
    end Pose_To_Q;
 
@@ -2447,9 +2718,46 @@ package body Jointboot is
    begin
       Pos_Err := Long_Float'Last; Rot_Err := Long_Float'Last;
       if Arm < Natural (St_Worlds.Length) then
-         Pose_To_Q (Arm, Pose, Q, Pos_Err, Rot_Err);
+         Pose_To_Q (Arm, Pose, False, Q, Pos_Err, Rot_Err);
       end if;
    end Reach_Hook;
+
+   --  一条要发出去的位姿命令解成了 Q:记下要不要等它停下核尽头(有关节的目标出了到过的范围)、反解是不是被"往外一步"卡住了
+   --  (停在那道界上、那不是记下的尽头、没解到目标,而且这一条是去一个新地方 —— 同一个目标再解出同一处 = 范围没长,不再重发)
+   procedure Note_Command (A : Natural; Q : Floats; Pe, Re : Long_Float) is
+      W : constant Arm_World := St_Worlds (A);
+      P : Pend_State := St_Pend (A);
+      Tol : constant Long_Float := Tol_Of (W);
+      Lo, Hi : Floats;
+      Binding, Beyond : Boolean := False;
+      New_Target : Boolean := P.Prev_Q.Is_Empty or else Natural (P.Prev_Q.Length) /= Natural (Q.Length);
+      Edge : constant := 1.0e-9;   --  "停在界上"(反解按界截断时正好等于界;数值)
+   begin
+      Cmd_Bounds (W, Lo, Hi);
+      for J in 0 .. Natural'Min (Natural (Q.Length), Natural'Min (Natural (Lo.Length), Natural (Hi.Length))) - 1 loop
+         if (Q (J) >= Hi (J) - Edge and then Hi (J) < W.Hi (J)) or else (Q (J) <= Lo (J) + Edge and then Lo (J) > W.Lo (J)) then
+            Binding := True;
+         end if;
+         if J < Natural (W.Got_Hi.Length) and then (Q (J) > W.Got_Hi (J) + Tol or else Q (J) < W.Got_Lo (J) - Tol) then
+            Beyond := True;
+         end if;
+         if not New_Target and then abs (Q (J) - P.Prev_Q (J)) > Tol then
+            New_Target := True;
+         end if;
+      end loop;
+      P.Held_Back := Binding and then (Pe > Ik_Eps or else Re > Ik_Eps) and then New_Target;
+      if P.Held_Back then
+         Say ("第" & Codec.Img (A + 1) & " 只手:这条命令的反解被「到过的关节范围 + 往外一步」截住(离目标还差 " & Codec.Fmt (Pe, 4) & " 单位 / " & Codec.Fmt (Re, 4)
+              & " rad)⇒ 先走到那儿,范围长了再往前(岔路二)");
+      end if;
+      P.Prev_Q := Q;
+      --  上一条还没核就来了新的 = 被打断了,不核(岔路二原话)
+      P.Live := Beyond;
+      if Beyond then
+         P.Q_Cmd := Q; P.Q_At := St_Last (A); P.Glo := W.Got_Lo; P.Ghi := W.Got_Hi; P.Still := 0;
+      end if;
+      St_Pend.Replace_Element (A, P);
+   end Note_Command;
 
    procedure Cmd_Hook (C : in out Plug.Cmd; Ok : out Boolean) is
       Q : Floats;
@@ -2459,7 +2767,8 @@ package body Jointboot is
       if C.Arm >= Natural (St_Worlds.Length) then
          return;
       end if;
-      Pose_To_Q (C.Arm, C.Pose, Q, Pe, Re);
+      Pose_To_Q (C.Arm, C.Pose, True, Q, Pe, Re);
+      Note_Command (C.Arm, Q, Pe, Re);
       C.Kind := Plug.Joint;
       C.Group := St_Worlds (C.Arm).Group;
       C.Q := Q;
@@ -2531,7 +2840,7 @@ package body Jointboot is
                         begin
                            Target := Kinem.To_Pose (Mul (St_Rw, R0), Ap (St_Rw, T0));
                         end;
-                        Pose_To_Q (A, Target, Q, Pe, Re);
+                        Pose_To_Q (A, Target, True, Q, Pe, Re);
                         Gs.Append (W.Group); Qs.Append (Q);
                         --  到了 = 每个关节差不到它这一下要走的三分之一(比例,同扫描)
                         if W.Group < Natural (F.Joints.Length) then
@@ -2631,7 +2940,7 @@ package body Jointboot is
    function Lim (X : Long_Float) return String is
      (if X = Long_Float'First or else X = Long_Float'Last then "none" else F9 (X));   --  没量到头的界记成 none
 
-   procedure Save_Kin (Path : String; K : Kin_Store) is
+   procedure Save_Kin (Path : String; K : Kin_Store; Images : Boolean := True) is
       use Ada.Text_IO;
       Fo : File_Type;
       procedure Put_M3 (M : Geom.M3) is
@@ -2648,7 +2957,7 @@ package body Jointboot is
       end Put_V3;
    begin
       Create (Fo, Out_File, Path);
-      Put_Line (Fo, "kin 3");   --  格式版本:3 = 每根轴记着是转还是走(09-27 无人机);2 = 不动的眼整份相机几何;更旧的读到 ⇒ 从零量
+      Put_Line (Fo, "kin 4");   --  格式版本:4 = 每个关节到过的范围和往外一步(岔路二,09-29);3 = 每根轴记着是转还是走(09-27 无人机);2 = 不动的眼整份相机几何;更旧的读到 ⇒ 从零量
       Put_Line (Fo, "key " & To_String (K.Key));
       Put_Line (Fo, "world_cam" & Integer'Image (K.World_Cam));
       Put (Fo, "rw"); Put_M3 (K.Rw); New_Line (Fo);
@@ -2698,6 +3007,19 @@ package body Jointboot is
                Put (Fo, " " & Lim (X));
             end loop;
             New_Line (Fo);
+            --  岔路二:到过的范围(两头)、往外一步(两边)
+            declare
+               procedure Row (Tag : String; V : Floats) is
+               begin
+                  Put (Fo, Tag & " " & Codec.Img (A));
+                  for X of V loop
+                     Put (Fo, " " & F9 (X));
+                  end loop;
+                  New_Line (Fo);
+               end Row;
+            begin
+               Row ("glo", W.Got_Lo); Row ("ghi", W.Got_Hi); Row ("slo", W.Step_Lo); Row ("shi", W.Step_Hi);
+            end;
             for Fr of D.Frames loop
                Put (Fo, "frame " & Codec.Img (A) & " " & Integer'Image (Fr.Joint));
                for X of Fr.Q loop
@@ -2705,7 +3027,7 @@ package body Jointboot is
                end loop;
                New_Line (Fo);
             end loop;
-            if not D.Imgs.Is_Empty then
+            if Images and then not D.Imgs.Is_Empty then
                Codec.Write_BMP (Path & "_arm" & Codec.Img (A) & ".bmp", D.Imgs (0).RGB, D.Imgs (0).W, D.Imgs (0).H);
             end if;
          end;
@@ -2715,7 +3037,7 @@ package body Jointboot is
          Put_Line (Fo, " " & F9 (P.U) & " " & F9 (P.V) & " " & F9 (P.Sh) & " " & Codec.Img (P.Views));
       end loop;
       Close (Fo);
-      if K.World_Cam >= 0 and then not K.Ds.Is_Empty and then K.Ds (0).World_Img.W > 0 then
+      if Images and then K.World_Cam >= 0 and then not K.Ds.Is_Empty and then K.Ds (0).World_Img.W > 0 then
          Codec.Write_BMP (Path & "_world.bmp", K.Ds (0).World_Img.RGB, K.Ds (0).World_Img.W, K.Ds (0).World_Img.H);
       end if;
    end Save_Kin;
@@ -2759,7 +3081,7 @@ package body Jointboot is
             Tag : constant String := (if T.Is_Empty then "" else T (0));
          begin
             if Tag = "kin" then
-               Version_Ok := Natural (T.Length) >= 2 and then T (1) = "3";
+               Version_Ok := Natural (T.Length) >= 2 and then T (1) = "4";
             elsif Tag = "key" and then Natural (T.Length) >= 2 then
                K.Key := To_Unbounded_String (T (1));
             elsif Tag = "world_cam" then
@@ -2795,9 +3117,12 @@ package body Jointboot is
                   W.Model.F := V (T, 6); W.Model.Cx := V (T, 7); W.Model.Cy := V (T, 8); W.S := V (T, 9);
                   W.Model.Valid := W.Valid; W.Sweep := A;
                   D.W := Natural'Value (T (10)); D.H := Natural'Value (T (11));
+                  W.Eye_W := D.W;
                   K.Worlds.Replace_Element (A, W); K.Ds.Replace_Element (A, D);
                end;
-            elsif Tag = "q0" or else Tag = "lo" or else Tag = "hi" or else Tag = "axis" or else Tag = "ra" or else Tag = "ta" or else Tag = "frame" then
+            elsif Tag = "q0" or else Tag = "lo" or else Tag = "hi" or else Tag = "axis" or else Tag = "ra" or else Tag = "ta" or else Tag = "frame"
+              or else Tag = "glo" or else Tag = "ghi" or else Tag = "slo" or else Tag = "shi"
+            then
                declare
                   A : constant Natural := Arm_Of (T);
                   W : Arm_World := K.Worlds (A);
@@ -2808,6 +3133,23 @@ package body Jointboot is
                      for I in 2 .. Natural (T.Length) - 1 loop
                         W.Model.Q0.Append (V (T, I));
                      end loop;
+                  elsif Tag = "glo" or else Tag = "ghi" or else Tag = "slo" or else Tag = "shi" then
+                     declare
+                        Lst : Floats;
+                     begin
+                        for I in 2 .. Natural (T.Length) - 1 loop
+                           Lst.Append (V (T, I));
+                        end loop;
+                        if Tag = "glo" then
+                           W.Got_Lo := Lst;
+                        elsif Tag = "ghi" then
+                           W.Got_Hi := Lst;
+                        elsif Tag = "slo" then
+                           W.Step_Lo := Lst;
+                        else
+                           W.Step_Hi := Lst;
+                        end if;
+                     end;
                   elsif Tag = "lo" or else Tag = "hi" then
                      declare
                         Lst : Floats;
@@ -2857,7 +3199,7 @@ package body Jointboot is
       end loop;
       Close (Fi);
       if not Version_Ok then
-         Note := To_Unbounded_String ("格式是旧版(" & Path & ";存的量不全:kin 1 没存不动的眼的像素残差,kin 2 没存每根轴是转是走)");
+         Note := To_Unbounded_String ("格式是旧版(" & Path & ";存的量不全:kin 1 没存不动的眼的像素残差,kin 2 没存每根轴是转是走,kin 3 没存关节到过的范围)");
          return;
       end if;
       if K.Worlds.Is_Empty or else Length (K.Key) = 0 then

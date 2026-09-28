@@ -32,6 +32,7 @@ package Jointboot is
       W, H : Natural := 0;
       Ids : Ints;                            --  每一格在配点仪器那边存的编号(Instrument.Frame_Put;-1 = 没存成)
       Has_Lo, Has_Hi : Bools;                --  每个关节:往负 / 往正扫的时候是"关节到头"停的(量到了这一边的界;没有 = 走满格数停的,或碰上东西了 —— 不是关节尽头,09-28 H4)
+      Step_Lo, Step_Hi : Floats;             --  每个关节往负 / 往正扫的最后一格命令的步子(身体开机时一条命令走过的量):反解往到过的范围外最多走这么一步(岔路二,09-29)
       World_Img : Plug.Cam;                  --  不动的眼(头顶眼)在扫描起点那一刻的画面(没有不动的眼 = 空)
       World_Id : Integer := -1;              --  它在配点仪器那边的编号
    end record;
@@ -70,7 +71,13 @@ package Jointboot is
       S : Long_Float := 1.0;                  --  这只手参照眼系 → 第一只手参照眼系:X0 = S · Ra · X + Ta
       Ra : Geom.M3 := Geom.Identity;
       Ta : Geom.V3 := [0.0, 0.0, 0.0];
-      Lo, Hi : Floats;                        --  每个关节量到的界(扫描时这一边关节到头 = 扫到的最远那一格;没量到头 / 碰上东西了 = 不设界)
+      Lo, Hi : Floats;                        --  每个关节记下的尽头(扫描时这一边关节到头 = 扫到的最远那一格;干活时"往范围外走、走不到一半、别的关节都到了"也记;
+                                              --  没记 = 不设界;读数越过它 ⇒ 删掉)
+      --  岔路二(09-29,owner:"已知范围,越用越大"):到过的范围 = 开机扫描的各格起、之后每一帧的读数并进来(只会变大);往外一步 = 扫描时那一边最后一格的步子。
+      --  发命令时反解只在"到过的范围 + 往外一步"里解、不越过记下的尽头(大转拆成几条命令,每条都在走过的地方边上);问"够不够得着"(Reach)只按记下的尽头
+      Got_Lo, Got_Hi : Floats;
+      Step_Lo, Step_Hi : Floats;
+      Eye_W : Natural := 0;                   --  长在它上面那只眼的画幅宽(判"到了"的最小一档 = Kinem.Clean_Tol)
       Valid : Boolean := False;
       Sweep : Natural := 0;                   --  扫描数据(Sweep_All 的 Ds)里是第几只手
    end record;
@@ -86,8 +93,28 @@ package Jointboot is
                     Pin_Fixed_F : Long_Float := 0.0);
    --  Pin_Fixed_F > 0:不动的眼的焦距钉在这个值上不解(只给离线回放做对照实验用 —— alignexam 的 ALIGNEXAM_PIN_F;驱动开机永远不给,焦距一起解)
 
-   --  ⑥ 装上:从此插头每一帧的手的位姿 = 按关节读数算出的世界里的腕眼位姿;位姿命令 = 在量过的范围里解关节目标
-   procedure Install (Worlds : Arm_World_Vectors.Vector; Rw : Geom.M3; O : Geom.V3);
+   --  岔路二(09-29):开机扫描的一只手 ⇒ 记下的尽头(Lo / Hi:这一边是关节到头停的 ⇒ 扫到的最远那一格,否则不设界)、到过的范围(各格读数的两头)、
+   --  往外一步(Step_Lo / Step_Hi)、眼的画幅宽
+   procedure Set_Ranges (D : Sweep_Data; W : in out Arm_World);
+   --  发命令时反解的界 = 到过的范围往外一步,不越过记下的尽头(纯函数,导出给自检)
+   procedure Cmd_Bounds (W : Arm_World; Lo, Hi : out Floats);
+   --  一条命令走完、停下以后,有没有碰到关节的尽头(纯函数,导出给自检)。Q_Cmd = 这条命令的关节目标,Q_At = 发命令时的读数,Q_Now = 停下时的读数,
+   --  Got_Lo / Got_Hi = 发命令时到过的范围,Tol = 判"到了"的最小一档(Kinem.Clean_Tol)。
+   --  "要到范围外"= 目标出了到过的范围 Tol 以上。End_Hit = 正好一个这样的关节走到的不到它要往外走的那一截的一半,别的关节都到了
+   --  (差不到 Tol 或它这一下要走的三分之一,同扫描)⇒ J = 那个关节,Hi_Side = 正那一边,记尽头;Blocked = 有关节没到 / 被顶偏 = 手碰上东西了,
+   --  不是关节尽头(同 Sweep_Stop_Is_End;J = 那个没走到的关节,没有则 -1);Ambiguous = 两个以上要到范围外的关节都没走到,分不清是哪一个;
+   --  Reached = 都到了。只有 End_Hit 记
+   type End_Verdict is (Reached, End_Hit, Blocked, Ambiguous);
+   function Judge_End (Q_Cmd, Q_At, Q_Now, Got_Lo, Got_Hi : Floats; Tol : Long_Float; J : out Integer; Hi_Side : out Boolean) return End_Verdict;
+   --  读数越过了记下的尽头(超过 Tol)⇒ 那个尽头记错了,J / Hi_Side = 哪一个(纯函数,导出给自检)
+   function End_Passed (Q, Lo, Hi : Floats; Tol : Long_Float; J : out Integer; Hi_Side : out Boolean) return Boolean;
+
+   --  ⑥ 装上:从此插头每一帧的手的位姿 = 按关节读数算出的世界里的腕眼位姿;位姿命令 = 在"到过的范围 + 往外一步"里解关节目标(岔路二)。
+   --  Joint_Noise = 开机量的关节读数噪声(判"停下了"的下限)
+   procedure Install (Worlds : Arm_World_Vectors.Vector; Rw : Geom.M3; O : Geom.V3; Joint_Noise : Long_Float := 0.0);
+   --  上一条位姿命令的反解被"到过的范围往外一步"卡住了(没解到目标、有关节停在这道界上而那不是记下的尽头,这一条的目标又和上一条不一样)
+   --  ⇒ 手走到那儿、范围长了,同一个目标再解一次还能往前(Selfmap.Go 据此重发;插头的 Held_Back 钩子)
+   function Held_Back (Arm : Natural) return Boolean;
    --  插头的两个钩子(Install 登记)
    procedure Pose_Hook (F : in out Plug.Frame);
    procedure Cmd_Hook (C : in out Plug.Cmd; Ok : out Boolean);
@@ -116,7 +143,10 @@ package Jointboot is
    end record;
    --  钥匙:几台相机、每台画幅、几组关节读数、每组几个、几个抓握通道、关节读数的字段名(不含身体报的位姿:只报关节的身体装上以后才有位姿)
    function Kin_Key (L : Plug.Link; F : Plug.Frame) return String;
-   procedure Save_Kin (Path : String; K : Kin_Store);
+   --  Images = False:只写字(干活时范围长了 / 尽头变了写回,核对用的图开机时已经写过)
+   procedure Save_Kin (Path : String; K : Kin_Store; Images : Boolean := True);
+   --  装上以后记住身体文件和这一份:干活时到过的范围长了一步以上、或者记下 / 删掉一个尽头,就写回去(越用越准,装回接着用)
+   procedure Remember_Kin (Path : String; K : Kin_Store);
    procedure Load_Kin (Path : String; K : out Kin_Store; Ok : out Boolean; Note : out Ada.Strings.Unbounded.Unbounded_String);
    procedure Check_Kin (L : in out Plug.Link; F : in out Plug.Frame; M : Selfmap.Body_Map; K : Kin_Store; Host : String; Port : Natural;
                         Ok : out Boolean; Note : out Ada.Strings.Unbounded.Unbounded_String);

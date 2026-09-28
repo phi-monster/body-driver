@@ -109,6 +109,7 @@ package body Selfmap is
       Prev_All : Plug.Floats_Vectors.Vector;
       Is_Joint : constant Boolean := Group >= 0 or else not Groups.Is_Empty;
       Arrived : Natural := 0;
+      Sub_Frames : Natural := 0;       --  这一条(岔路二重发以后的那一条)走了几拍
       Still_Frac : constant := 0.01;   --  百分之一(比例,见下)
    begin
       Delivered := Table.Zero_Vec;
@@ -137,6 +138,7 @@ package body Selfmap is
             return;
          end if;
          Frames := Frames + 1;
+         Sub_Frames := Sub_Frames + 1;
          --  关节目标:"停稳"看这几组关节读数(不看位姿:只报关节的身体没有位姿读数)。
          --  到了目标附近(差 ≤ Tol,调用方按这一格的步子定)再有一拍不动 ⇒ 到了;没到目标就等连着两拍不动(被顶住 / 到头)
          --  (5 分钟一炮,2026-09-26:原来每格都等"连着两拍不动 + 量出来的稳定拍数",V1B3 扫描一格 9 拍)
@@ -206,7 +208,17 @@ package body Selfmap is
                           and then Miss (3) ** 2 + Miss (4) ** 2 + Miss (5) ** 2 <= Tol_Rot * Tol_Rot then Arrived + 1 else 0);
             Prev := F.EE (Arm);
          end;
-         exit when Arrived >= 2 or else (Still >= 2 and then Frames >= M.Settle) or else Frames >= 12 + M.Settle or else (Quick and then Frames >= M.Settle);
+         --  岔路二(09-29):停下了、没到,而反解是被"到过的范围往外一步"卡住的(手已经走到那道界、范围跟着长了)⇒ 同一个目标再解一次、再往前一步
+         --  (大转拆成几条命令;每条都只到走过的地方边上。范围没长 = 再解还是同一处 ⇒ Plug.Held_Back 为假,照常停)。每一条各有自己的拍数上限
+         declare
+            Stop : constant Boolean := (Still >= 2 and then Sub_Frames >= M.Settle) or else Sub_Frames >= 12 + M.Settle;
+         begin
+            if Arrived < 2 and then Stop and then not Quick and then Plug.Held_Back (Arm) then
+               Send := True; Still := 0; Sub_Frames := 0;
+            else
+               exit when Arrived >= 2 or else Stop or else (Quick and then Frames >= M.Settle);
+            end if;
+         end;
          end if;
       end loop;
       if Arm < Natural (F.EE.Length) then

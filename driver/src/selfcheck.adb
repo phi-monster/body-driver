@@ -248,6 +248,198 @@ begin
              and then not Kinem.On_Eye_Grid (Eye, 10.0, 25.0, 640, 480, 32, 24) and then not Kinem.On_Eye_Grid (Eye, -1.0, 5.0, 640, 480, 32, 24),
              "落在自己手上的那一格:格点 (10,10)、(30,10) 那两格里的点(连 19.99 / 20.0 格子边)算,邻格 (50,10)、(10,30) 和画面外不算");
    end;
+   --  🔴 岔路二(Jointboot:到过的范围 + 往外一步、记尽头、碰上东西不记、越过尽头删掉;09-29 owner"已知范围,越用越大"):合成的 6 关节胳膊装上
+   --  (同上面运动学那条的几何),假身体只按关节命令走 —— 第 4 个关节真尽头 0.9 弧度(反解不知道);到过的范围一开始每个关节 ±0.3、往外一步 0.2。
+   --  ① 要去一个第 4 个关节得转到 1.3 的位姿:每条命令都只到"到过的范围 + 一步"里,手到了那儿范围长了才再往前(重发的旗子 Held_Back);
+   --     走到 0.9 卡住、别的关节都到了 ⇒ 记下这一头(之后问"够不够得着"那个位姿就解不到了);
+   --  ② 手压在东西上:要到范围外的那个关节没走到一半,同时别的关节被顶偏 ⇒ 不记;同样没走到一半、别的关节都到了 ⇒ 记(正反对照);
+   --  ③ 读数越过了记下的尽头 ⇒ 删掉(那个位姿又够得着了);④ 纯函数:两个关节都没走到 ⇒ 分不清、不记;只出范围一丝(不到一档)⇒ 当范围里;
+   --  ⑤ 开机扫描 ⇒ 尽头 / 到过的范围 / 往外一步(Set_Ranges)
+   declare
+      use Geom;
+      Wax : constant array (0 .. 5) of V3 := [[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]];
+      Pax : constant array (0 .. 5) of V3 := [[0.0, 0.0, 0.05], [0.0, 0.0, 0.12], [0.25, 0.0, 0.12], [0.45, 0.0, 0.16], [0.5, 0.0, 0.16], [0.55, 0.0, 0.16]];
+      C0 : constant V3 := [0.6, 0.0, 0.22];
+      M : Kinem.Model;
+      True_End : constant Long_Float := 0.9;
+      Step : constant Long_Float := 0.2;
+      Got0 : constant Long_Float := 0.3;
+      Fr : Plug.Frame;
+      type Six is array (0 .. 5) of Long_Float;
+      Lo_Seen, Hi_Seen : Six;
+      function Q6 (J : Natural; V : Long_Float) return Floats is
+         Q : Floats;
+      begin
+         for K in 0 .. 5 loop
+            Q.Append (if K = J then V else 0.0);
+         end loop;
+         return Q;
+      end Q6;
+      function Pose_Of (Q : Floats) return Plug.Arm_Pose is
+         R : M3;
+         T : V3;
+      begin
+         Kinem.FK (M, Q, R, T);
+         return Kinem.To_Pose (R, T);
+      end Pose_Of;
+      --  假身体停在 Q 上:喂 N 拍(第一拍是动,后面是停着)
+      procedure Feed (Q : Floats; N : Positive) is
+      begin
+         for I in 1 .. N loop
+            Fr.Joints.Clear; Fr.Joints.Append (Q);
+            Jointboot.Pose_Hook (Fr);
+         end loop;
+         for J in 0 .. 5 loop
+            Lo_Seen (J) := Long_Float'Min (Lo_Seen (J), Q (J)); Hi_Seen (J) := Long_Float'Max (Hi_Seen (J), Q (J));
+         end loop;
+      end Feed;
+      procedure Setup is
+         W : Jointboot.Arm_World;
+         Ws : Jointboot.Arm_World_Vectors.Vector;
+      begin
+         W.Group := 0; W.Valid := True; W.Model := M; W.S := 1.0; W.Eye_W := 640;
+         for J in 0 .. 5 loop
+            W.Lo.Append (Long_Float'First); W.Hi.Append (Long_Float'Last);
+            W.Got_Lo.Append (-Got0); W.Got_Hi.Append (Got0); W.Step_Lo.Append (Step); W.Step_Hi.Append (Step);
+            Lo_Seen (J) := -Got0; Hi_Seen (J) := Got0;
+         end loop;
+         Ws.Append (W);
+         Jointboot.Install (Ws, Identity, [0.0, 0.0, 0.0], Joint_Noise => 0.0);
+         Feed (Q6 (0, 0.0), 3);
+      end Setup;
+      --  发一条位姿命令,假身体照关节目标走(第 4 个关节到 0.9 为止;Push = 另把第 Pj 个关节顶偏 Pv);返回关节目标
+      function Command (Goal : Plug.Arm_Pose; Pj : Integer := -1; Pv : Long_Float := 0.0; Short_J : Integer := -1; Short_At : Long_Float := 0.0) return Floats is
+         C : Plug.Cmd;
+         Ok : Boolean;
+         Qb : Floats;
+      begin
+         C.Kind := Plug.Ee; C.Arm := 0; C.Pose := Goal;
+         Jointboot.Cmd_Hook (C, Ok);
+         if not Ok then
+            return Qb;
+         end if;
+         Qb := C.Q;
+         if Qb (4) > True_End then
+            Qb.Replace_Element (4, True_End);
+         end if;
+         if Short_J >= 0 then
+            Qb.Replace_Element (Short_J, Short_At);
+         end if;
+         if Pj >= 0 then
+            Qb.Replace_Element (Pj, Qb (Pj) + Pv);
+         end if;
+         Feed (Qb, 3);
+         return C.Q;
+      end Command;
+      Goal : Plug.Arm_Pose;
+      Pe0, Re0, Pe1, Re1, Pe2, Re2 : Long_Float;
+      Okr : Boolean;
+      Cmds : Natural := 0;
+      In_Step : Boolean := True;
+      Max_4 : Long_Float := 0.0;
+   begin
+      M.N := 6; M.F := 400.0; M.Cx := 320.0; M.Cy := 240.0; M.Valid := True; M.Q0 := Q6 (0, 0.0);
+      for I in 0 .. 5 loop
+         M.Ax (I).W := Wax (I);
+         M.Ax (I).P := [Pax (I) (0) - C0 (0), Pax (I) (1) - C0 (1), Pax (I) (2) - C0 (2)];
+      end loop;
+      --  ①
+      Setup;
+      Goal := Pose_Of (Q6 (4, 1.3));
+      Plug.Reach (0, Goal, Pe0, Re0, Okr);
+      loop
+         declare
+            Before_Lo : constant Six := Lo_Seen;
+            Before_Hi : constant Six := Hi_Seen;
+            Q : constant Floats := Command (Goal);
+         begin
+            exit when Q.Is_Empty;
+            Cmds := Cmds + 1;
+            for J in 0 .. 5 loop
+               if Q (J) > Before_Hi (J) + Step + 1.0e-9 or else Q (J) < Before_Lo (J) - Step - 1.0e-9 then
+                  In_Step := False;
+               end if;
+            end loop;
+            Max_4 := Long_Float'Max (Max_4, Q (4));
+            exit when not Jointboot.Held_Back (0) or else Cmds >= 40;
+         end;
+      end loop;
+      Plug.Reach (0, Goal, Pe1, Re1, Okr);
+      Check (Okr and then In_Step and then Cmds >= 4 and then Cmds < 40 and then Pe0 < 1.0e-6 and then Re0 < 1.0e-6 and then (Pe1 > 1.0e-4 or else Re1 > 1.0e-4)
+             and then abs (Hi_Seen (4) - True_End) < 1.0e-12,
+             "岔路二·大转拆开、卡住那一头记下:要把第 4 个关节转到 1.3(真尽头 0.9、到过 ±0.3、往外一步 0.2)," & Codec.Img (Cmds)
+             & " 条命令、每条都在到过的范围 + 一步里(第 4 个关节最远要到 " & Codec.Fmt (Max_4, 3) & ");停在 0.9 以后记下这一头 ⇒ 问够不够得着:记之前差 "
+             & Codec.Fmt (Pe0, 7) & " / " & Codec.Fmt (Re0, 7) & ",记之后 " & Codec.Fmt (Pe1, 4) & " / " & Codec.Fmt (Re1, 4) & " rad");
+      --  ③ 读数越过了记下的尽头(真尽头其实更远)⇒ 删掉
+      Feed (Q6 (4, 0.95), 3);
+      Plug.Reach (0, Goal, Pe2, Re2, Okr);
+      Check (Pe2 < 1.0e-6 and then Re2 < 1.0e-6,
+             "岔路二·读数到了 0.95、越过记下的 0.9 ⇒ 那个尽头删掉,那个位姿又够得着了(差 " & Codec.Fmt (Pe2, 7) & " / " & Codec.Fmt (Re2, 7) & ")");
+      --  ② 正反对照:第 4 个关节要到 0.5(到过 0.3、往外一步正好 0.5),只走到 0.35(不到要往外走的 0.2 的一半)。
+      --  用第 4 个(腕转)不用第 2 个:第 1–3 个是三根平行的俯仰轴,第 2 个记了尽头,反解换成手肘翻过去的那个解照样到得了,"够不着了"判不出来
+      declare
+         Goal2 : constant Plug.Arm_Pose := Pose_Of (Q6 (4, 0.5));
+         Q : Floats;
+         Pe_C, Re_C, Pe_E, Re_E : Long_Float;
+      begin
+         Setup;
+         Q := Command (Goal2, Pj => 1, Pv => 0.14, Short_J => 4, Short_At => 0.35);   --  别的关节(第 1 个)被顶偏 0.14 = 手压在东西上
+         Plug.Reach (0, Goal2, Pe_C, Re_C, Okr);
+         Setup;
+         Q := Command (Goal2, Short_J => 4, Short_At => 0.35);                       --  别的关节都到了 = 关节到头
+         Plug.Reach (0, Goal2, Pe_E, Re_E, Okr);
+         Check (not Q.Is_Empty and then Pe_C < 1.0e-6 and then Re_C < 1.0e-6 and then (Pe_E > 1.0e-4 or else Re_E > 1.0e-4),
+                "岔路二·碰上东西 vs 关节到头:第 4 个关节只走到 0.35(要 0.5)—— 别的关节被顶偏 0.14 ⇒ 不记(还够得着,差 " & Codec.Fmt (Pe_C, 7)
+                & ");别的关节都到了 ⇒ 记下 0.35(那个位姿解不到了,差 " & Codec.Fmt (Pe_E, 4) & " / " & Codec.Fmt (Re_E, 4) & " rad)");
+      end;
+      Plug.Set_Hooks (null, null); Plug.Set_Reach (null); Plug.Set_Limit (null);
+      --  ④ 纯函数
+      declare
+         use type Jointboot.End_Verdict;
+         Glo, Ghi, Qc, Qa, Qn : Floats;
+         Jx : Integer;
+         Hs : Boolean;
+         V1, V2 : Jointboot.End_Verdict;
+         Tol : constant Long_Float := Kinem.Clean_Tol (640.0);
+      begin
+         for J in 0 .. 5 loop
+            Glo.Append (-Got0); Ghi.Append (Got0); Qa.Append (0.0);
+         end loop;
+         Qc := Q6 (0, 0.5); Qc.Replace_Element (1, 0.5);
+         Qn := Q6 (0, 0.31); Qn.Replace_Element (1, 0.32);
+         V1 := Jointboot.Judge_End (Qc, Qa, Qn, Glo, Ghi, Tol, Jx, Hs);
+         Qc := Q6 (0, Got0 + 0.5 * Tol);
+         Qn := Q6 (0, Got0);
+         V2 := Jointboot.Judge_End (Qc, Qa, Qn, Glo, Ghi, Tol, Jx, Hs);
+         Check (V1 = Jointboot.Ambiguous and then V2 = Jointboot.Reached,
+                "岔路二·判尽头:两个关节都要到范围外、都没走到一半 ⇒ 分不清是哪一个(" & V1'Image & ",不记);只出范围半档(" & Codec.Fmt (0.5 * Tol, 5)
+                & ")⇒ 当在范围里、到了(" & V2'Image & ")");
+      end;
+      --  ⑤ 开机扫描 ⇒ 尽头、到过的范围、往外一步
+      declare
+         D : Jointboot.Sweep_Data;
+         W : Jointboot.Arm_World;
+      begin
+         D.W := 640; D.H := 480;
+         for Fk in 0 .. 2 loop
+            declare
+               Fi : Kinem.Frame_Info;
+            begin
+               Fi.Joint := (if Fk = 0 then -1 else 1);
+               Fi.Q := Q6 (1, (if Fk = 0 then 0.0 elsif Fk = 1 then -0.4 else 0.25));
+               D.Frames.Append (Fi);
+            end;
+         end loop;
+         for J in 0 .. 5 loop
+            D.Has_Lo.Append (False); D.Has_Hi.Append (J = 1);
+            D.Step_Lo.Append (0.1); D.Step_Hi.Append (0.05);
+         end loop;
+         Jointboot.Set_Ranges (D, W);
+         Check (W.Hi (1) = 0.25 and then W.Lo (1) = Long_Float'First and then W.Hi (0) = Long_Float'Last and then W.Got_Lo (1) = -0.4 and then W.Got_Hi (1) = 0.25
+                and then W.Got_Lo (0) = 0.0 and then W.Step_Lo (1) = 0.1 and then W.Step_Hi (1) = 0.05 and then W.Eye_W = 640,
+                "岔路二·开机扫描 ⇒ 第 1 个关节往正是关节到头停的:尽头 0.25、往负没尽头;到过的范围 [-0.4, 0.25];往外一步 0.1 / 0.05;画幅 640");
+      end;
+   end;
    --  🔴 扫描时碰上东西不是关节尽头(Jointboot.Sweep_Stops / Sweep_Stop_Is_End;09-28 H4 + owner 岔路二):用在线量到的数 ——
    --  H4 人形第 0 关节往正:这一格命令 0.2011 走满、第 5 关节被顶偏 0.139 ⇒ 停、不记界;x5 V1B59 第 1 关节往负:命令 0.2602 只到 0.0822、别的关节偏 0.001 ⇒ 停、记界;
    --  关节自己没转到三分之一、同时别的关节被顶偏 ⇒ 仍是碰上东西、不记界;走满、谁也没被顶 ⇒ 不停
@@ -6362,7 +6554,10 @@ begin
                W.Model.Ax (J).Slide := J = 1;   --  一根"走"的(09-27 无人机):类型也要原样回来
                W.Lo.Append (if J = 2 then Long_Float'First else -0.5 - Long_Float (J));
                W.Hi.Append (if J = 3 then Long_Float'Last else 0.5 + Long_Float (J));
+               W.Got_Lo.Append (-0.25 - 0.01 * Long_Float (J)); W.Got_Hi.Append (0.35 + 0.02 * Long_Float (J + A));   --  岔路二:到过的范围、往外一步
+               W.Step_Lo.Append (0.0123 * Long_Float (J + 1)); W.Step_Hi.Append (0.0456 * Long_Float (J + 1));
             end loop;
+            W.Eye_W := 8;
             W.S := (if A = 0 then 1.0 else 1.00347);
             W.Ra := (if A = 0 then Identity else Rodrigues ([0.001, 0.002, -0.003])); W.Ta := (if A = 0 then [0.0, 0.0, 0.0] else [11.4658, -0.008, 0.0156]);
             D.W := 8; D.H := 6;
@@ -6408,6 +6603,14 @@ begin
                elsif K.Worlds (A).Lo (J) /= Long_Float'First and then K.Worlds (A).Hi (J) /= Long_Float'Last then
                   Cmp (K.Worlds (A).Lo (J), K2.Worlds (A).Lo (J)); Cmp (K.Worlds (A).Hi (J), K2.Worlds (A).Hi (J));
                end if;
+               if Natural (K2.Worlds (A).Got_Lo.Length) /= 6 or else Natural (K2.Worlds (A).Got_Hi.Length) /= 6
+                 or else Natural (K2.Worlds (A).Step_Lo.Length) /= 6 or else Natural (K2.Worlds (A).Step_Hi.Length) /= 6
+               then
+                  Worst := 1.0;
+               else
+                  Cmp (K.Worlds (A).Got_Lo (J), K2.Worlds (A).Got_Lo (J)); Cmp (K.Worlds (A).Got_Hi (J), K2.Worlds (A).Got_Hi (J));
+                  Cmp (K.Worlds (A).Step_Lo (J), K2.Worlds (A).Step_Lo (J)); Cmp (K.Worlds (A).Step_Hi (J), K2.Worlds (A).Step_Hi (J));
+               end if;
             end loop;
             for I in 0 .. 2 loop
                Cmp (K.Worlds (A).Ta (I), K2.Worlds (A).Ta (I));
@@ -6422,6 +6625,7 @@ begin
                end loop;
             end loop;
             Cmp (Long_Float (K.Eyes (A)), Long_Float (K2.Eyes (A))); Cmp (Long_Float (K.Worlds (A).Group), Long_Float (K2.Worlds (A).Group));
+            Cmp (Long_Float (K.Worlds (A).Eye_W), Long_Float (K2.Worlds (A).Eye_W));
             if K2.Ds (A).Imgs.Is_Empty or else K2.Ds (A).Imgs (0).RGB /= Img.RGB then
                Worst := 1.0;
             end if;
@@ -6474,7 +6678,7 @@ begin
          end if;
       end if;
       Check (Okl and then Worst < 1.0e-8, "⑤ 前半段存进文件再读回来:每一个数最多差 " & Long_Float'Image (Worst)
-             & "(要 < 1e-8;不动的眼整份相机几何、板上每个点的每一项、每根轴是转是走、没量到头的界、核对用的图、钥匙原样回来)· " & To_String (Note));
+             & "(要 < 1e-8;不动的眼整份相机几何、板上每个点的每一项、每根轴是转是走、没量到头的界、到过的范围和往外一步、画幅、核对用的图、钥匙原样回来)· " & To_String (Note));
       --  旧版文件(kin 1:不动的眼只存了五样)不装回:读到它 = 从零量,不拿缺了像素残差的那份去核
       declare
          Fo : Ada.Text_IO.File_Type;
@@ -6490,11 +6694,11 @@ begin
          Ada.Text_IO.Close (Fo);
          Ada.Text_IO.Create (Fo, Ada.Text_IO.Out_File, Path);
          for L of Lines loop
-            Ada.Text_IO.Put_Line (Fo, (if L'Length >= 4 and then L (L'First .. L'First + 3) = "kin " then "kin 1" else L));
+            Ada.Text_IO.Put_Line (Fo, (if L'Length >= 4 and then L (L'First .. L'First + 3) = "kin " then "kin 3" else L));
          end loop;
          Ada.Text_IO.Close (Fo);
          Jointboot.Load_Kin (Path, K3, Ok3, Note3);
-         Check (not Ok3, "⑤ 旧版前半段文件(kin 1)不装回 ⇒ 从零量:" & To_String (Note3));
+         Check (not Ok3, "⑤ 旧版前半段文件(kin 3:没存关节到过的范围)不装回 ⇒ 从零量:" & To_String (Note3));
       end;
       declare
          D_Same, D_Moved, D_Few : Floats;

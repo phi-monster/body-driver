@@ -16,6 +16,12 @@ package body Plug is
    begin
       Hook_P := P; Hook_C := Q;
    end Set_Hooks;
+   Hook_L : Limit_Hook := null;
+   procedure Set_Limit (H : Limit_Hook) is
+   begin
+      Hook_L := H;
+   end Set_Limit;
+   function Held_Back (Arm : Natural) return Boolean is (Hook_L /= null and then Hook_L (Arm));
    Hook_R : Reach_Hook := null;
    procedure Set_Reach (R : Reach_Hook) is
    begin
