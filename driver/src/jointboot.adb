@@ -2430,7 +2430,7 @@ package body Jointboot is
       end loop;
    end Cmd_Bounds;
 
-   function Judge_End (Q_Cmd, Q_At, Q_Now, Got_Lo, Got_Hi : Floats; Tol : Long_Float; J : out Integer; Hi_Side : out Boolean) return End_Verdict is
+   function Judge_End (Q_Cmd, Q_At, Q_Now, Got_Lo, Got_Hi, Step_Lo, Step_Hi : Floats; Tol : Long_Float; J : out Integer; Hi_Side : out Boolean) return End_Verdict is
       N : constant Natural := Natural'Min (Natural'Min (Natural (Q_Cmd.Length), Natural (Q_At.Length)),
                                            Natural'Min (Natural (Q_Now.Length), Natural'Min (Natural (Got_Lo.Length), Natural (Got_Hi.Length))));
       Shorts : Natural := 0;
@@ -2442,10 +2442,18 @@ package body Jointboot is
       J := -1; Hi_Side := False;
       for K in 0 .. N - 1 loop
          declare
-            Up : constant Boolean := Q_Cmd (K) > Got_Hi (K) + Tol;
-            Down : constant Boolean := Q_Cmd (K) < Got_Lo (K) - Tol;
+            --  要往范围外走的那一截不到半步(这个关节那一边量过的步子;没量过 = 0)⇒ 这个关节不核:走没走到都判不准,
+            --  和手爬到位的误差一个量级(V1B64:只多要 0.0057 弧度、停在一半不到 ⇒ 记成尽头,第 2 只手接着 11 回"在量到的关节限位里解不出来",
+            --  读数越过它才删掉)。每拍跟着重发时,真碰到尽头的那一条多要的正好一整步(范围不长了、界还在一步开外)⇒ 照样核得到
+            Half_Hi : constant Long_Float := (if K < Natural (Step_Hi.Length) then 0.5 * Step_Hi (K) else 0.0);
+            Half_Lo : constant Long_Float := (if K < Natural (Step_Lo.Length) then 0.5 * Step_Lo (K) else 0.0);
+            Up : constant Boolean := Q_Cmd (K) > Got_Hi (K) + Long_Float'Max (Tol, Half_Hi);
+            Down : constant Boolean := Q_Cmd (K) < Got_Lo (K) - Long_Float'Max (Tol, Half_Lo);
+            Small : constant Boolean := not Up and then not Down and then (Q_Cmd (K) > Got_Hi (K) + Tol or else Q_Cmd (K) < Got_Lo (K) - Tol);
          begin
-            if Up or else Down then
+            if Small then
+               null;
+            elsif Up or else Down then
                declare
                   B : constant Long_Float := (if Up then Got_Hi (K) else Got_Lo (K));
                   Ext : constant Long_Float := abs (Q_Cmd (K) - B);
@@ -2646,7 +2654,7 @@ package body Jointboot is
             P.Still := (if Mv <= Long_Float'Max (St_Noise, Still_Frac * Big) then P.Still + 1 else 0);
             if P.Still >= 2 then
                P.Live := False;
-               case Judge_End (P.Q_Cmd, P.Q_At, Qn, P.Glo, P.Ghi, Tol, Jx, Hs) is
+               case Judge_End (P.Q_Cmd, P.Q_At, Qn, P.Glo, P.Ghi, W.Step_Lo, W.Step_Hi, Tol, Jx, Hs) is
                   when End_Hit =>
                      Say (Who & "第" & Codec.Img (Jx) & " 个关节往" & (if Hs then "正" else "负") & "走:要到 " & Codec.Fmt (P.Q_Cmd (Jx), 4) & "(到过的范围只到 "
                           & Codec.Fmt ((if Hs then P.Ghi (Jx) else P.Glo (Jx)), 4) & "),停在 " & Codec.Fmt (Qn (Jx), 4) & ",往外走的不到一半,别的关节都到了"

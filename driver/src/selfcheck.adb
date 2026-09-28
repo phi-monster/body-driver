@@ -782,24 +782,31 @@ begin
       --  ④ 纯函数
       declare
          use type Jointboot.End_Verdict;
-         Glo, Ghi, Qc, Qa, Qn : Floats;
+         Glo, Ghi, Qc, Qa, Qn, Stp : Floats;
          Jx : Integer;
          Hs : Boolean;
-         V1, V2 : Jointboot.End_Verdict;
+         V1, V2, V3, V4 : Jointboot.End_Verdict;
          Tol : constant Long_Float := Kinem.Clean_Tol (640.0);
       begin
          for J in 0 .. 5 loop
-            Glo.Append (-Got0); Ghi.Append (Got0); Qa.Append (0.0);
+            Glo.Append (-Got0); Ghi.Append (Got0); Qa.Append (0.0); Stp.Append (Step);
          end loop;
          Qc := Q6 (0, 0.5); Qc.Replace_Element (1, 0.5);
          Qn := Q6 (0, 0.31); Qn.Replace_Element (1, 0.32);
-         V1 := Jointboot.Judge_End (Qc, Qa, Qn, Glo, Ghi, Tol, Jx, Hs);
+         V1 := Jointboot.Judge_End (Qc, Qa, Qn, Glo, Ghi, Stp, Stp, Tol, Jx, Hs);
          Qc := Q6 (0, Got0 + 0.5 * Tol);
          Qn := Q6 (0, Got0);
-         V2 := Jointboot.Judge_End (Qc, Qa, Qn, Glo, Ghi, Tol, Jx, Hs);
-         Check (V1 = Jointboot.Ambiguous and then V2 = Jointboot.Reached,
+         V2 := Jointboot.Judge_End (Qc, Qa, Qn, Glo, Ghi, Stp, Stp, Tol, Jx, Hs);
+         --  V1B64 那一幕:只多要 0.05(不到半步 0.1)、只走到 0.31(不到一半)⇒ 不核;同一处多要一整步 0.2、只走到 0.31 ⇒ 记(正反对照)
+         Qc := Q6 (0, Got0 + 0.05); Qa := Q6 (0, Got0);
+         Qn := Q6 (0, 0.31);
+         V3 := Jointboot.Judge_End (Qc, Qa, Qn, Glo, Ghi, Stp, Stp, Tol, Jx, Hs);
+         Qc := Q6 (0, Got0 + Step);
+         V4 := Jointboot.Judge_End (Qc, Qa, Qn, Glo, Ghi, Stp, Stp, Tol, Jx, Hs);
+         Check (V1 = Jointboot.Ambiguous and then V2 = Jointboot.Reached and then V3 = Jointboot.Reached and then V4 = Jointboot.End_Hit,
                 "岔路二·判尽头:两个关节都要到范围外、都没走到一半 ⇒ 分不清是哪一个(" & V1'Image & ",不记);只出范围半档(" & Codec.Fmt (0.5 * Tol, 5)
-                & ")⇒ 当在范围里、到了(" & V2'Image & ")");
+                & ")⇒ 当在范围里、到了(" & V2'Image & ");只多要 0.05(不到半步)、只走到 0.31 ⇒ 不核(" & V3'Image & ",V1B64 那种假尽头不记);"
+                & "多要一整步、同样只到 0.31 ⇒ " & V4'Image & "(记)");
       end;
       --  ⑤ 开机扫描 ⇒ 尽头、到过的范围、往外一步
       declare

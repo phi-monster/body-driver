@@ -106,7 +106,8 @@ package Jointboot is
    --  不是关节尽头(同 Sweep_Stop_Is_End;J = 那个没走到的关节,没有则 -1);Ambiguous = 两个以上要到范围外的关节都没走到,分不清是哪一个;
    --  Reached = 都到了。只有 End_Hit 记
    type End_Verdict is (Reached, End_Hit, Blocked, Ambiguous);
-   function Judge_End (Q_Cmd, Q_At, Q_Now, Got_Lo, Got_Hi : Floats; Tol : Long_Float; J : out Integer; Hi_Side : out Boolean) return End_Verdict;
+   --  Step_Lo / Step_Hi = 每个关节那一边量过的步子:要往范围外走的不到半步的关节不核(走没走到都判不准)
+   function Judge_End (Q_Cmd, Q_At, Q_Now, Got_Lo, Got_Hi, Step_Lo, Step_Hi : Floats; Tol : Long_Float; J : out Integer; Hi_Side : out Boolean) return End_Verdict;
    --  读数越过了记下的尽头(超过 Tol)⇒ 那个尽头记错了,J / Hi_Side = 哪一个(纯函数,导出给自检)
    function End_Passed (Q, Lo, Hi : Floats; Tol : Long_Float; J : out Integer; Hi_Side : out Boolean) return Boolean;
 
