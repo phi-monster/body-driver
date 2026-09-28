@@ -91,36 +91,13 @@ package body Selfmap is
       return True;
    end Joints_Arrived;
 
-   Still_Frac : constant := 0.01;   --  "停了" = 一拍挪的不到命令 / 到了那个范围的百分之一(比例;Go、Pose_Still 共用)
-
-   function Pose_Still (Moved_P, Rot : Long_Float; Cmd : Table.Vec; Fp, Fr, Noise_P, Noise_R : Long_Float) return Boolean is
-   begin
-      if Fp > 0.0 and then Fr > 0.0 then
-         declare
-            N_Cmd : constant Long_Float := Table.Norm (Cmd, 3) / Fp + Sqrt (Cmd (3) ** 2 + Cmd (4) ** 2 + Cmd (5) ** 2) / Fr;
-            N_Beat : constant Long_Float := Moved_P / Fp + Rot / Fr;
-            N_Noise : constant Long_Float := Noise_P / Fp + Noise_R / Fr;
-         begin
-            return N_Beat <= Long_Float'Max (N_Noise, Still_Frac * N_Cmd);
-         end;
-      end if;
-      return Moved_P <= Noise_P and then Rot <= Noise_R;
-   end Pose_Still;
-
    procedure Go (L : in out Plug.Link; M : Body_Map; Arm : Natural; Target : Plug.Arm_Pose; Jaw : Floats;
                  F : in out Plug.Frame; Delivered : out Table.Vec; Frames : out Natural; Ok : out Boolean; Quick : Boolean := False;
                  Watch : Watcher := null; Joints : Floats := F64_Vectors.Empty_Vector; Group : Integer := -1;
                  Groups : Ints := Int_Vectors.Empty_Vector; Qs : Plug.Floats_Vectors.Vector := Plug.Floats_Vectors.Empty_Vector;
                  Tol : Long_Float := 0.0; Tol_Rot : Long_Float := 0.0;
-                 Tols : Plug.Floats_Vectors.Vector := Plug.Floats_Vectors.Empty_Vector;
-                 Fold_P : Long_Float := 0.0; Fold_R : Long_Float := 0.0) is
+                 Tols : Plug.Floats_Vectors.Vector := Plug.Floats_Vectors.Empty_Vector) is
       C : Plug.Cmd;
-      --  这只手第 K 个通道量过的"一步看得见的那一档"(没量过 = 0)
-      function Amp_Of (K : Natural) return Long_Float is
-        (if Arm * Chan.Per_Arm + K < Natural (M.Amp.Length) then M.Amp (Arm * Chan.Per_Arm + K) else 0.0);
-      --  折成像素的单位:给了档用档,没给用 Fold,再没给用量过的一步(见 spec)
-      Fp : constant Long_Float := (if Tol > 0.0 then Tol elsif Fold_P > 0.0 then Fold_P else Amp_Of (0));
-      Fr : constant Long_Float := (if Tol_Rot > 0.0 then Tol_Rot elsif Fold_R > 0.0 then Fold_R else Amp_Of (3));
       P0 : constant Plug.Arm_Pose := (if Arm < Natural (F.EE.Length) then F.EE (Arm) else [others => 0.0]);
       Prev : Plug.Arm_Pose := P0;
       Still : Natural := 0;
@@ -132,6 +109,7 @@ package body Selfmap is
       Prev_All : Plug.Floats_Vectors.Vector;
       Is_Joint : constant Boolean := Group >= 0 or else not Groups.Is_Empty;
       Arrived : Natural := 0;
+      Still_Frac : constant := 0.01;   --  百分之一(比例,见下)
    begin
       Delivered := Table.Zero_Vec;
       Frames := 0;
@@ -206,14 +184,20 @@ package body Selfmap is
             D : constant Table.Vec := Chan.Delivered (Prev, F.EE (Arm));
             Moved_P : constant Long_Float := Table.Norm (D, 3);
             Rv : constant Long_Float := D (3) ** 2 + D (4) ** 2 + D (5) ** 2;
-            --  平移、转动都折成"一步看得见的那一档"(自己那只眼里 1 像素)的个数,这一拍挪的档数不到这条命令档数的百分之一就算"停了"
+            --  给了这一档(Tol、Tol_Rot > 0):平移、转动都折成"一步看得见的那一档"的个数,这一拍挪的档数不到这条命令档数的百分之一就算"停了"
             --  (比例;慢的身体还在一拍半毫米地挪时不算停,G2D 2026-09-24 人形返回时还在往下挪被误判成顶住;
             --  V1B23 2026-09-27:只往下压、不转的命令,转动那一项的门原来退成读数噪声 2e-5 弧度,被东西挡住时手一晃就不算停,顶满 17 拍、一滑把手指推进桌面 19 mm);
-            --  没有像素单位(这只手一步都没量出来):挪不到读数噪声才算
+            --  没给:挪不到读数噪声才算
             Cmd : constant Table.Vec := Chan.Delivered (P0, C.Pose);
+            Geo : constant Boolean := Tol > 0.0 and then Tol_Rot > 0.0;
+            N_Cmd : constant Long_Float := (if Geo then Table.Norm (Cmd, 3) / Tol + Sqrt (Cmd (3) ** 2 + Cmd (4) ** 2 + Cmd (5) ** 2) / Tol_Rot else 0.0);
+            N_Beat : constant Long_Float := (if Geo then Moved_P / Tol + Sqrt (Rv) / Tol_Rot else 0.0);
+            N_Noise : constant Long_Float := (if Geo then M.EE_Noise / Tol + M.Rot_Noise / Tol_Rot else 0.0);
             Miss : constant Table.Vec := Chan.Delivered (F.EE (Arm), C.Pose);
          begin
-            if Pose_Still (Moved_P, Sqrt (Rv), Cmd, Fp, Fr, M.EE_Noise, M.Rot_Noise) then
+            if (if Geo then N_Beat <= Long_Float'Max (N_Noise, Still_Frac * N_Cmd)
+                else Moved_P <= M.EE_Noise and then Rv <= M.Rot_Noise * M.Rot_Noise)
+            then
                Still := Still + 1;
             else
                Still := 0;
@@ -299,36 +283,10 @@ package body Selfmap is
       Arms : constant Natural := Natural'Min (Natural (F.EE.Length), M.Arms);
    begin
       Ok := True;
-      --  ⓪ 先等上一个动作收住(09-28 H4):相邻两拍的变化还在一拍比一拍小,就是还在收,接着读;不再变小了才量 ——
-      --  真机收到噪声那一层就不再变小,量到的是噪声;仿真读数不抖,量到 0。原来接着上一个动作就读,人形每拍剩 0.64、要约 15 拍才收住,
-      --  量成 0.012 单位(比一步还大),x5 3–4 拍收到整 0、量成 0.00004。最多等 12 + 稳定拍数(同 Go 的上限)
-      declare
-         Last_P, Last_R : Long_Float := Long_Float'Last;
-         Prev0 : Plug.Pose_Vectors.Vector := F.EE;
-      begin
-         for Wait in 1 .. 12 + M.Settle loop
-            if not Plug.Sense (L, F) then
-               Ok := False;
-               return;
-            end if;
-            declare
-               Dp, Dr : Long_Float := 0.0;
-            begin
-               for A in 0 .. Arms - 1 loop
-                  declare
-                     D : constant Table.Vec := Chan.Delivered (Prev0 (A), F.EE (A));
-                  begin
-                     Dp := Long_Float'Max (Dp, Table.Norm (D, 3));
-                     Dr := Long_Float'Max (Dr, Sqrt (D (3) ** 2 + D (4) ** 2 + D (5) ** 2));
-                  end;
-               end loop;
-               Prev0 := F.EE;
-               exit when not Still_Settling (Dp, Dr, Last_P, Last_R);   --  平移、转动都不再变小
-               Last_P := Dp; Last_R := Dr;
-            end;
-         end loop;
-      end;
       --  ① 什么都不做时读数抖多少、画面抖多少(静止对)
+      --  🔴 已知欠账(PLAN 2b):接着上一个动作就读,慢的身体读到的是还在收的尾巴(人形 H4 0.0121 单位,x5 0.00004;仿真读数本身不抖)。
+      --  09-28 改成"等收住再量"(H5 / H6)把 x5 碰桌面粗找的门带坏了(V1B60 / V1B61,门的余量碰巧就是这个尾巴,见 Act.Descend)⇒ 撤回;
+      --  要和粗找的门一起改,先离线验两台身体
       declare
          Prev_EE : Plug.Pose_Vectors.Vector := F.EE;
          Prev_Jaw : Plug.Floats_Vectors.Vector := F.Jaw;
@@ -437,9 +395,7 @@ package body Selfmap is
                      Visible : Boolean := False;
                   begin
                      A_Cmd (K) := Amp;
-                     --  这只手的 Amp 这会儿还没量 ⇒ 按这一步本身(1 像素)折算判停
-                     Go (L, M, A, Chan.Compose (P0, A_Cmd), Jaw0, F, Deliv, Frames, Ok2,
-                         Fold_P => Step_Px (A) (0), Fold_R => Step_Px (A) (1));
+                     Go (L, M, A, Chan.Compose (P0, A_Cmd), Jaw0, F, Deliv, Frames, Ok2);
                      if not Ok2 then
                         return;
                      end if;
@@ -452,7 +408,7 @@ package body Selfmap is
                         return;
                      end if;
                      F1b := F.Cams;
-                     Go (L, M, A, P0, Jaw0, F, Back, Frames_Back, Ok2, Fold_P => Step_Px (A) (0), Fold_R => Step_Px (A) (1));
+                     Go (L, M, A, P0, Jaw0, F, Back, Frames_Back, Ok2);
                      if not Ok2 then
                         return;
                      end if;

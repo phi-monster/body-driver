@@ -54,28 +54,19 @@ package Selfmap is
    --  Group >= 0:这一条发的不是位姿,是第 Group 组关节读数的目标 Joints(开机一个关节一个关节扫,V1b 2026-09-26);
    --  Groups / Qs 非空:同一条命令给几组读数各自的目标(几只手一起扫)。同一条发命令的路(Target / Jaw 这时不用)。
    --  关节目标的"停稳":读数到了目标 Tol 以内再有一拍不动就算到(Tol = 0 不这样判),否则连着两拍不动
-   --  位姿目标:"停了" = 连着两拍,这一拍挪的不到这条命令的百分之一 —— 平移、转动都折成"在自己那只眼里挪几个像素"来比
-   --  (1 像素 = 给了的 Tol / Tol_Rot;没给 ⇒ Fold_P / Fold_R;再没给 ⇒ 这只手量过的"一步看得见的那一档" M.Amp),静止噪声只当下限;
-   --  给了 Tol(平移)/ Tol_Rot(转动)还判"到了":位姿到了目标这么近连着两拍就算到(没给不判:一步那么小的命令一开始就在"一步以内")。
-   --  09-28 H4:原来没给档时按"连着两拍挪不到读数噪声"判停 —— x5 上停下以后十几微米的蠕动要等 13–24 拍(V1B21),
-   --  人形的静止噪声量在上一个动作的尾巴上(0.012 单位)、比一步还大,推一步 2 拍就算停(实到 61%)。都没有像素单位 ⇒ 只能按读数噪声判
+   --  位姿目标给了 Tol(平移)/ Tol_Rot(转动)⇒ 位姿到了目标这么近连着两拍就算到;没到 ⇒ 连着两拍每拍挪不到这一档就算停(被顶住 / 到头);
+   --  Tol = 0 照旧:连着两拍挪不到读数噪声才算停(V1B21 2026-09-27:位姿读数按关节算,停下以后还有十几微米的蠕动,空中一步要等 13 拍、压到桌面那一步 24 拍)
    type Watcher is access function (F : Plug.Frame) return Boolean;
    procedure Go (L : in out Plug.Link; M : Body_Map; Arm : Natural; Target : Plug.Arm_Pose; Jaw : Floats;
                  F : in out Plug.Frame; Delivered : out Table.Vec; Frames : out Natural; Ok : out Boolean; Quick : Boolean := False;
                  Watch : Watcher := null; Joints : Floats := F64_Vectors.Empty_Vector; Group : Integer := -1;
                  Groups : Ints := Int_Vectors.Empty_Vector; Qs : Plug.Floats_Vectors.Vector := Plug.Floats_Vectors.Empty_Vector;
                  Tol : Long_Float := 0.0; Tol_Rot : Long_Float := 0.0;
-                 Tols : Plug.Floats_Vectors.Vector := Plug.Floats_Vectors.Empty_Vector;
-                 Fold_P : Long_Float := 0.0; Fold_R : Long_Float := 0.0);
+                 Tols : Plug.Floats_Vectors.Vector := Plug.Floats_Vectors.Empty_Vector);
    --  Tols(和 Qs 同形:每组每个关节一道门)给了 ⇒ "到了" = 每个关节差不到它自己那道门(关节目标);"停了"的门照旧按 Tol。
    --  开机扫描用:扫的那根差不到这一格的三分之一,别的关节差不到每根轴单独起步收格子的门(Kinem.Clean_Tol;H1 2026-09-28)
    --  一组关节这一拍"到了没有"(Go 里用的就是它;纯函数,导出给自检):Tols 这一位 > 0 ⇒ 这个关节按它自己的门,否则按 Tol;门 ≤ 0 的关节永远不算到
    function Joints_Arrived (Now, Target, Tols : Floats; Tol : Long_Float) return Boolean;
-   --  位姿这一拍"停了没有"(Go 里用的就是它;纯函数,导出给自检):这一拍挪的(Moved_P 平移、Rot 转动)折成像素(Fp / Fr = 1 像素的平移 / 转动)
-   --  不到这条命令(Cmd:平移三项、转动三项)折成像素的百分之一;静止噪声(Noise_P / Noise_R)折成像素只当下限。Fp 或 Fr 不 > 0 ⇒ 只按读数噪声
-   function Pose_Still (Moved_P, Rot : Long_Float; Cmd : Table.Vec; Fp, Fr, Noise_P, Noise_R : Long_Float) return Boolean;
-   --  量静止噪声之前上一个动作还在不在收(Measure_Idle 用的就是它):这一拍的变化比上一拍小(平移或转动任一样)= 还在收
-   function Still_Settling (Dp, Dr, Last_P, Last_R : Long_Float) return Boolean is (Dp < Last_P or else Dr < Last_R);
    procedure Idle (L : in out Plug.Link; F : in out Plug.Frame; N : Natural; Ok : out Boolean);   --  不下命令空等 N 拍
    --  什么都不做时读数抖多少、画面抖多少(静止对,4 拍):位姿 / 姿态 / 抓握 / 关节读数的噪声 + 每台相机的灰度地板。
    --  Measure 开头用它;只报关节的身体开机前半段(还没有位姿)也用它(同一种量法)。M.Arms 条臂的位姿噪声(没有位姿 = 0)
