@@ -4,6 +4,7 @@ with Ada.Numerics.Long_Elementary_Functions; use Ada.Numerics.Long_Elementary_Fu
 with Ada.Unchecked_Conversion;
 with Interfaces; use Interfaces;
 with Codec;
+with Lockstep;
 package body Plug is
    use Msgpack;
    function U32_To_F32 is new Ada.Unchecked_Conversion (Unsigned_32, Float);
@@ -27,6 +28,14 @@ package body Plug is
          Hook_R (Arm, Pose, Pos_Err, Rot_Err);
       end if;
    end Reach;
+
+   --  按拍对齐时记下的目标(见 spec 的 Lock_Begin):每组关节读数一个目标(空 = 没给)、每只手的爪子一个目标(空 = 没给),
+   --  这一拍有没有变;主线程收的那一帧(手的任务醒来拿它)
+   Lock_Q : Floats_Vectors.Vector;
+   Lock_Jaw : Floats_Vectors.Vector;
+   Lock_Changed : Boolean := False;
+   Lock_F : Frame;
+   Lock_Ok : Boolean := True;
 
    function Arms (L : Link) return Natural is
    begin
@@ -353,6 +362,12 @@ package body Plug is
       T0 : constant Time := Clock;
       T1 : Time;
    begin
+      if Lockstep.Current_Hand >= 0 then
+         --  手的任务:把棒交还主线程,这一拍由主线程收(Lock_Beat),醒来拿那一帧
+         Lockstep.Yield;
+         F := Lock_F;
+         return Lock_Ok;
+      end if;
       F := (others => <>);
       if not Pump (L) then
          return False;
@@ -601,8 +616,58 @@ package body Plug is
    end Sense;
 
    function Act_Raw (L : in out Link; C : Cmd) return Boolean;
+   --  手的任务里的 Act:只记下这只手的目标(位姿命令先解成关节),这一拍由主线程合起来发
+   function Lock_Act (C : Cmd) return Boolean is
+      Cj : Cmd := C;
+      Ok : Boolean := True;
+      procedure Put_Q (G : Natural; Q : Floats) is
+      begin
+         while Natural (Lock_Q.Length) <= G loop
+            Lock_Q.Append (F64_Vectors.Empty_Vector);
+         end loop;
+         Lock_Q.Replace_Element (G, Q);
+      end Put_Q;
+   begin
+      if C.Kind = Hold then
+         return True;
+      end if;
+      if C.Kind = Ee then
+         if Hook_C = null then
+            return False;   --  没有运动学:位姿命令解不成关节(按拍对齐只合关节动作)
+         end if;
+         Hook_C (Cj, Ok);
+         if not Ok then
+            return False;
+         end if;
+      end if;
+      if Cj.Kind /= Joint then
+         return False;
+      end if;
+      if not Cj.Groups.Is_Empty then
+         for K in 0 .. Natural'Min (Natural (Cj.Groups.Length), Natural (Cj.Qs.Length)) - 1 loop
+            if Cj.Groups (K) >= 0 then
+               Put_Q (Natural (Cj.Groups (K)), Cj.Qs (K));
+            end if;
+         end loop;
+      elsif Cj.Group >= 0 then
+         Put_Q (Natural (Cj.Group), Cj.Q);
+      else
+         Put_Q (Cj.Arm, Cj.Q);   --  只报关节的身体:按臂
+      end if;
+      if not C.Jaw.Is_Empty then
+         while Natural (Lock_Jaw.Length) <= C.Arm loop
+            Lock_Jaw.Append (F64_Vectors.Empty_Vector);
+         end loop;
+         Lock_Jaw.Replace_Element (C.Arm, C.Jaw);
+      end if;
+      Lock_Changed := True;
+      return True;
+   end Lock_Act;
    function Act (L : in out Link; C : Cmd) return Boolean is
    begin
+      if Lockstep.Current_Hand >= 0 then
+         return Lock_Act (C);
+      end if;
       if C.Kind = Ee and then Hook_C /= null then
          declare
             Cj : Cmd := C;
@@ -803,4 +868,61 @@ package body Plug is
       L.Pending := S; L.Has_Pending := True;
       return True;
    end Act_Raw;
+
+   procedure Lock_Begin is
+   begin
+      Lock_Q.Clear; Lock_Jaw.Clear; Lock_Changed := False;
+   end Lock_Begin;
+
+   procedure Lock_End is
+   begin
+      Lock_Q.Clear; Lock_Jaw.Clear; Lock_Changed := False;
+   end Lock_End;
+
+   function Lock_Merged return Cmd is
+      Cm : Cmd;
+   begin
+      Cm.Kind := Joint;
+      for G in 0 .. Natural (Lock_Q.Length) - 1 loop
+         if not Lock_Q (G).Is_Empty then
+            Cm.Groups.Append (G);
+            Cm.Qs.Append (Lock_Q (G));
+         end if;
+      end loop;
+      return Cm;
+   end Lock_Merged;
+
+   --  主线程走一拍:这一拍有手发了新目标 ⇒ 几只手的关节目标合成一条动作(每只给过爪子目标的手各发一遍,把它的爪子目标登记进 Jaw_Set;
+   --  最后那一遍的动作里关节是全部手的、爪子是各自最后一个目标),再收一帧,留给手的任务醒来拿
+   procedure Lock_Beat (L : in out Link; F : in out Frame; Ok : out Boolean) is
+   begin
+      if Lock_Changed then
+         declare
+            Cm : Cmd := Lock_Merged;
+            Any_Jaw : Boolean := False;
+            Sent : Boolean;
+         begin
+            if not Cm.Groups.Is_Empty then
+               for A in 0 .. Natural (Lock_Jaw.Length) - 1 loop
+                  if not Lock_Jaw (A).Is_Empty then
+                     Cm.Arm := A; Cm.Jaw := Lock_Jaw (A);
+                     Sent := Act_Raw (L, Cm);
+                     Any_Jaw := True;
+                  end if;
+               end loop;
+               if not Any_Jaw then
+                  Cm.Arm := 0; Cm.Jaw.Clear;
+                  Sent := Act_Raw (L, Cm);
+               end if;
+               if not Sent then
+                  Put_Line ("[链] 几只手合成的那条关节动作没发成(这一拍照旧重发上一条)");
+               end if;
+            end if;
+            Lock_Changed := False;
+         end;
+      end if;
+      Ok := Sense (L, F);
+      Lock_F := F;
+      Lock_Ok := Ok;
+   end Lock_Beat;
 end Plug;

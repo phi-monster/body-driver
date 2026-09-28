@@ -22,6 +22,8 @@ with Contact.Gen;
 with Contact.Exec;
 with Contact.Surface;
 with Instrument;
+with Lockstep;
+with Ada.Exceptions;
 package body Act is
    Sigma_Mult : constant Long_Float := 3.0;   --  鼓出来超过背景自己稳健 σ 的几倍才算一块(在真实深度图上验过:3 中,5 杀光);无量纲
    Track_Win : constant Long_Float := 0.10;   --  一步里任何被跟踪的点在画面里最多跑十分之一画幅(跟踪窗,比例,无量纲)
@@ -5417,8 +5419,9 @@ package body Act is
    end Classify;
 
    procedure Geo_Say (S : String) is
+      H : constant Integer := Lockstep.Current_Hand;   --  几只手按拍对齐时:哪只手说的(PLAN ⑧ (g))
    begin
-      Put_Line ("[身] 📐 " & S);
+      Put_Line ("[身] 📐 " & (if H >= 0 then "〔手" & Codec.Img (Natural (H) + 1) & "〕" else "") & S);
    end Geo_Say;
 
    function Geo_Of (C : Context; Cam : Natural) return Geom.Cam_Geo is
@@ -12012,7 +12015,8 @@ package body Act is
                      O3 : constant Geom.V3 := Geom.Cam_Pos (Gk, P3);
                      H3 : constant Long_Float := Dot ([O3 (0) - C.Board_Pt (0), O3 (1) - C.Board_Pt (1), O3 (2) - C.Board_Pt (2)], Nb);
                      Depth3 : constant Long_Float := -Dot (Nb, Geom.Ap (Geom.Cam_R (Gk, P3), Est (K)));   --  估的尖此刻在眼下多深
-                     Dn : constant Long_Float := H3 - (Depth3 + 3.0 * Small);   --  三小步(次数:估的尖差一两小步时第一小步照样是空走的)
+                     --  两小步(次数):09-28 V1B48–50 快下以后 22 下斜着压都在第 3、4 小步碰到(原来离面三小步)= 估的尖差不到一小步 ⇒ 离面两小步第一小步照样是空走的
+                     Dn : constant Long_Float := H3 - (Depth3 + 2.0 * Small);
                      Mok : Boolean;
                   begin
                      if Dn > 0.0 then
@@ -12029,7 +12033,7 @@ package body Act is
                               Went : constant Long_Float := Del (0) * Down (0) + Del (1) * Down (1) + Del (2) * Down (2);
                            begin
                               Direct := Went + Geo_Base (C, A) >= Dn;
-                              Geo_Say ("  按估的尖(离眼 " & Mm (Geom.Norm (Est (K))) & "、此刻在眼下 " & Mm (Depth3) & ")一条命令下 " & Mm (Dn) & " 到尖离面约三小步 ⇒ 实到 " & Mm (Went)
+                              Geo_Say ("  按估的尖(离眼 " & Mm (Geom.Norm (Est (K))) & "、此刻在眼下 " & Mm (Depth3) & ")一条命令下 " & Mm (Dn) & " 到尖离面约两小步 ⇒ 实到 " & Mm (Went)
                                        & (if Direct then ",一小步一小步找" else ",这一下就被顶住了(比估的长)⇒ 抬两大步,按头一回的走法"));
                               if not Direct then
                                  --  抬两大步(两 = 次数:被顶住时尖在面上或更低,抬一大步第一大步未必是空走的)
@@ -12046,7 +12050,7 @@ package body Act is
                   declare
                      Fr : Plug.Arm_Pose;
                   begin
-                     Descend (Small, Natural (Long_Float'Ceiling ((3.0 * Small + Ln) / Small)) + 1, False, Coarse, Fr, "一小步一小步找");   --  三小步 + 一大步那么深(次数)
+                     Descend (Small, Natural (Long_Float'Ceiling ((2.0 * Small + Ln) / Small)) + 1, False, Coarse, Fr, "一小步一小步找");   --  两小步 + 一大步那么深(次数)
                   end;
                   if not Coarse and then not Limit then
                      Geo_Say ("  下到按估的尖算的桌面以下一大步还没碰到(比估的短)⇒ 接着按大步压");
@@ -12351,6 +12355,54 @@ package body Act is
          end if;
          Go_Back (A, Home);
       end Touch_Plane;
+      --  几只手同时碰(2026-09-28 PLAN ⑧ (g)):每只手一个任务照原样做它那一段(Touch_Tips),按拍对齐(Lockstep:同一时刻只有一个线程在跑);
+      --  主线程每拍把几只手的目标合成一条关节命令发出去(Plug.Lock_Beat)。V1B50 两只手一只一只碰用了 975 拍
+      procedure Touch_Tips_Together (Arms, Cams : Geom.Nat_Vectors.Vector) is
+         N : constant Natural := Natural (Arms.Length);
+         Seq0 : constant Natural := L.Seq;
+         T0 : constant Ada.Calendar.Time := Ada.Calendar.Clock;
+         task type Hand_Task (H, Hc : Natural) with Storage_Size => 64 * 1024 * 1024;
+         task body Hand_Task is
+         begin
+            Lockstep.Begin_Hand (H);
+            begin
+               Touch_Tips (H, Hc);
+            exception
+               when E : others =>
+                  Put_Line ("[身] 📐 〔手" & Codec.Img (H + 1) & "〕碰指尖这一段出错 ⇒ 这只手这回没有指尖:" & Ada.Exceptions.Exception_Information (E));
+            end;
+            Lockstep.Done;
+         end Hand_Task;
+         type Hand_Ref is access Hand_Task;
+         Hands : array (0 .. N - 1) of Hand_Ref;
+         Ok : Boolean := True;
+      begin
+         Geo_Say (Codec.Img (N) & " 只手同时碰桌面量指尖:每一拍一条关节命令带几只手的目标,各按各的步子走、各自判碰到(日志里〔手K〕是哪只手说的)");
+         Lockstep.Clear;
+         Plug.Lock_Begin;
+         for I in 0 .. N - 1 loop
+            Hands (I) := new Hand_Task (Arms (I), Cams (I));
+            Lockstep.Start (Arms (I), Hands (I).all'Identity);
+         end loop;
+         loop
+            declare
+               All_Done : Boolean := True;
+            begin
+               for I in 0 .. N - 1 loop
+                  Lockstep.Run (Arms (I));
+                  if not Lockstep.Finished (Arms (I)) then
+                     All_Done := False;
+                  end if;
+               end loop;
+               exit when All_Done;
+            end;
+            Plug.Lock_Beat (L, F, Ok);
+         end loop;
+         Plug.Lock_End;
+         Lockstep.Clear;
+         Geo_Say (Codec.Img (N) & " 只手同时碰完:" & Codec.Img (L.Seq - Seq0) & " 拍、" & Codec.Fmt (Long_Float (Ada.Calendar."-" (Ada.Calendar.Clock, T0)), 1) & " 秒");
+      end Touch_Tips_Together;
+      Tip_Arms, Tip_Cams : Geom.Nat_Vectors.Vector;   --  要碰桌面量指尖的手、它们各自的眼
    begin
       for A in 0 .. C.Map.Arms - 1 loop
          declare
@@ -12369,7 +12421,11 @@ package body Act is
                Geo_Say ("第" & Codec.Img (A + 1) & " 只手:指尖是碰桌面量过的(离眼 " & Mm (Geom.Norm (C.Geo (Natural (Hc)).Tip)) & "、张口 " & Mm (C.Geo (Natural (Hc)).Gap)
                         & "),桌面是板的 ⇒ 这回不碰");
             elsif C.Board_Plane then
-               Touch_Tips (A, Natural (Hc));
+               if A < Lockstep.Max_Hands then
+                  Tip_Arms.Append (A); Tip_Cams.Append (Natural (Hc));
+               else
+                  Touch_Tips (A, Natural (Hc));
+               end if;
             elsif C.Geo (Natural (Hc)).Tip_Valid then
                Touch_Plane (A, Natural (Hc));
             else
@@ -12377,6 +12433,11 @@ package body Act is
             end if;
          end;
       end loop;
+      if Natural (Tip_Arms.Length) = 1 then
+         Touch_Tips (Tip_Arms (0), Tip_Cams (0));
+      elsif Natural (Tip_Arms.Length) > 1 then
+         Touch_Tips_Together (Tip_Arms, Tip_Cams);
+      end if;
    end Geo_Boot_Support;
 
    function Kin_Turn_Reach (Arm : Natural; P0 : Plug.Arm_Pose; Notch, Tol_P, Tol_R : Long_Float) return Long_Float is

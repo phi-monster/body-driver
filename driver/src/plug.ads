@@ -92,6 +92,14 @@ package Plug is
    function Jaw_Value (L : in out Link; Ji : Natural; K : Natural; Mine : Boolean; C : Cmd; Cur : Floats) return Long_Float;
    function Sense (L : in out Link; F : out Frame) return Boolean;
    function Act (L : in out Link; C : Cmd) return Boolean;
+   --  几只手按拍对齐(Lockstep,2026-09-28 PLAN ⑧ (g)):在手的任务里 Act 只记下目标(位姿命令先按 Cmd_Hook 解成关节;每组关节一个目标、
+   --  每只手的爪子一个目标),Sense 把棒交还主线程、醒来拿主线程收的那一帧。主线程每拍 Lock_Beat:记下的有变 ⇒ 合成一条关节动作发出去,
+   --  再收一帧给大家。Lock_Begin / Lock_End 清掉记下的(一段开始 / 结束;最后发出去的那条动作照旧每拍重发 = 每只手停在最后的目标)
+   procedure Lock_Begin;
+   procedure Lock_Beat (L : in out Link; F : in out Frame; Ok : out Boolean);
+   procedure Lock_End;
+   --  记下的目标合成的那条关节动作(Groups / Qs;爪子另按手记,不在这条里)。导出只为自检
+   function Lock_Merged return Cmd;
    --  V1b 3c(2026-09-26):身体报的"手在哪"驱动不读。运动学量好以后,每一帧手的位姿由上面按关节读数算好填进来(Pose_Hook,
    --  Sense 收完一帧最后调它),发下来的位姿命令由上面解成关节目标(Cmd_Hook:把 Kind 换成 Joint、填好 Arm / Group / Q / Jaw;
    --  Ok = False = 解不出来,这条命令不发)。Plug 不认识运动学(Kinem 用 Geom,Geom 用 Plug)⇒ 由上面登记;null = 不换

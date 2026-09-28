@@ -21,6 +21,7 @@ with Runtime;
 with Plan;
 with Layout;
 with Act;
+with Lockstep;
 with Bodyfile;
 with Geom;
 with Selfmap;
@@ -2446,6 +2447,65 @@ begin
                 & " · 标记对不上号 ⇒ 不认、不挪" & (if S_Ok then "" else "(错)")
                 & " · 5 mm 小东西标成找不到照样挡 ⇒ 落点离它 " & Codec.Fmt (Flat (Lb), 3) & " m" & (if B_Ok then "" else "(错)"));
       end;
+   end;
+   --  🔴 几只手按拍对齐(Lockstep + Plug.Lock_*,09-28 PLAN ⑧ (g)):两只假手,第 1 只走 3 条(第 0 组关节目标 1、2、3)、第 2 只走 5 条(第 1 组 11–15),
+   --  每一条走 Selfmap.Go(发命令的只有这一处;假帧里没有读数 ⇒ 等满两拍就算停)⇒ 一共 10 拍(不是 6 + 10 = 16 拍:两只手同时走);
+   --  每一拍合成的那条命令里两组都在:第 0 组是第 ⌈拍/2⌉ 条的目标(走完了停在最后的 3)、第 1 组是 10 + ⌈拍/2⌉;手的任务里认得出自己是第几只手,主线程认出自己不是
+   declare
+      Lk : Plug.Link;
+      Rounds : Natural := 0;
+      Merge_Ok : Boolean := True;
+      Main_Is : constant Integer := Lockstep.Current_Hand;
+      Seen_Me : array (0 .. 1) of Integer := [others => -9];
+      task type Fake_Hand (H, Steps, Base : Natural);
+      task body Fake_Hand is
+         Fr : Plug.Frame;
+         Mp : Selfmap.Body_Map;
+         Dl : Table.Vec;
+         Nf : Natural;
+         Ok : Boolean;
+      begin
+         Lockstep.Begin_Hand (H);
+         Seen_Me (H) := Lockstep.Current_Hand;
+         for I in 1 .. Steps loop
+            declare
+               Q : Bytes.Floats;
+            begin
+               Q.Append (Long_Float (Base + I));
+               Selfmap.Go (Lk, Mp, H, [others => 0.0], Bytes.F64_Vectors.Empty_Vector, Fr, Dl, Nf, Ok, Joints => Q, Group => H);
+            end;
+         end loop;
+         Lockstep.Done;
+      end Fake_Hand;
+   begin
+      Lockstep.Clear;
+      Plug.Lock_Begin;
+      declare
+         H0 : Fake_Hand (0, 3, 0);
+         H1 : Fake_Hand (1, 5, 10);
+      begin
+         Lockstep.Start (0, H0'Identity);
+         Lockstep.Start (1, H1'Identity);
+         loop
+            Lockstep.Run (0);
+            Lockstep.Run (1);
+            exit when Lockstep.Finished (0) and then Lockstep.Finished (1);
+            Rounds := Rounds + 1;
+            declare
+               M : constant Plug.Cmd := Plug.Lock_Merged;
+            begin
+               if Natural (M.Groups.Length) /= 2 or else M.Qs (0) (0) /= Long_Float (Natural'Min ((Rounds + 1) / 2, 3)) or else M.Qs (1) (0) /= Long_Float (10 + (Rounds + 1) / 2) then
+                  Merge_Ok := False;
+               end if;
+            end;
+         end loop;
+      end;
+      Plug.Lock_End;
+      Lockstep.Clear;
+      Check (Rounds = 10 and then Merge_Ok and then Seen_Me (0) = 0 and then Seen_Me (1) = 1 and then Main_Is = -1,
+             "几只手按拍对齐:3 条和 5 条命令(一条两拍)两只手一共走了 " & Codec.Img (Rounds) & " 拍(要 10,一只一只走是 16)· 每拍合成的命令两组目标"
+             & (if Merge_Ok then "都对" else "不对") & " · 手的任务认得出自己(" & Integer'Image (Seen_Me (0)) & "," & Integer'Image (Seen_Me (1)) & "),主线程"
+             & (if Main_Is = -1 then "不是手" else "被认成了手"));
    end;
    --  🔴 有板的面时,朝下顶住的点只对账、不换面(Act.Note_Support,2026-09-26):X5B 指尖错了的那只手顶住的点比板的面低 20.8 cm,"最低的赢"把它当成了桌面。
    --  低 20 cm ⇒ 面还是板的、不记东西;高 5 cm ⇒ 记成"这儿有东西"、面不变;差 0.5 mm(门 = 3 倍 1 mm ⊕ 0.5 mm)⇒ 对得上
