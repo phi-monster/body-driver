@@ -12096,12 +12096,16 @@ package body Act is
                --  大步找:一大步一大步(一步 = 步幅)往下,同小步的判法(第一步空走当底);碰到的那一大步开始的地方手指还没碰到 ⇒ 退回那儿,
                --  再一小步一小步找(最多一大步那么深再多两步,次数)。原来按"走不到一半"认碰、再退回"这一压开始的地方":软手指认出得晚,
                --  退回的那一处手指还压着(V1B45 2026-09-28:第一步小步就整步被挡,底错了,8 步都没认出碰到)
+               --  小步往下一大步那么深都没碰着 ⇒ 大步那一下是虚的(少走的量在空走的抖动里;09-28 H6 人形:静止噪声量对了以后粗找的门 = 底,
+               --  "少走 0.043、空走时 0.042"就认成碰到,小步 18 步都没碰着,这一下作废)⇒ 从这儿接着大步往下(同 (l) 细的否掉粗的),
+               --  直到小步真碰着、到了量到的关节限位、或者眼走到面那么低(纯几何)
                procedure Big_Press is
                   Fr : Plug.Arm_Pose;
                   Hit : Boolean;
                begin
-                  Descend (Ln, Cap, False, Hit, Fr, "一大步一大步找");
-                  if Hit then
+                  loop
+                     Descend (Ln, Cap, False, Hit, Fr, "一大步一大步找");
+                     exit when not Hit;
                      declare
                         Now : constant Plug.Arm_Pose := F.EE (A);
                         Mok : Boolean;
@@ -12109,7 +12113,15 @@ package body Act is
                         Geo_Move (L, C, F, A, [Fr (0) - Now (0), Fr (1) - Now (1), Fr (2) - Now (2)], Mok);
                         Descend (Small, Natural (Long_Float'Ceiling (Ln / Small)) + 2, False, Coarse, Fr, "退回碰到的那一大步开始的地方、一小步一小步找");
                      end;
-                  end if;
+                     exit when Coarse or else Limit;
+                     declare
+                        On : constant Geom.V3 := Geom.Cam_Pos (Gk, F.EE (A));
+                        Hn : constant Long_Float := Dot ([On (0) - C.Board_Pt (0), On (1) - C.Board_Pt (1), On (2) - C.Board_Pt (2)], Nb);
+                     begin
+                        exit when Hn <= 0.0;
+                        Geo_Say ("  小步往下一大步那么深都没碰着 ⇒ 大步那一下是虚的 ⇒ 接着按大步压(眼离面 " & Mm (Hn) & ")");
+                     end;
+                  end loop;
                end Big_Press;
             begin
                if Start (2) > Top_Z then
