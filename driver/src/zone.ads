@@ -38,6 +38,9 @@ package Zone is
       Open_Reading : Long_Float := 1.0;
       Close_Steps : Natural := 0;
       Pose : Plug.Arm_Pose := [others => 0.0];   --  合空时这只手的位姿(别的相机里的握区只在这个位姿下成立)
+      --  开机真推到两头量过(Zone.Measure 量成,或者从身体文件装回的量过的那份)。没量过的 Empty_Close / Open_Reading 没有意义,
+      --  谁都不许拿它们当目标或当门(09-30:原来缺省"合 0、张 1"= x5 的约定,找不到这只手时就被当成量过的发出去)
+      Measured : Boolean := False;
    end record;
    package Hand_Vectors is new Ada.Containers.Vectors (Natural, Hand);
 
@@ -52,18 +55,8 @@ package Zone is
    --  S5 2026-09-23 实测 12.7 万像素被记成手指)。变暗的一拨和变亮的一拨是两类:一类是手指离开露出背景,一类是手指到来盖住背景;
    --  张开时的手指分得开、合上时挤在一起 ⇒ 几块形心散得开的那一类是"张开时的手指"(瓣),另一类是手指合到的地方(区)
    function From_Frames (Open_G, Closed_G : Buf; W, Hh : Natural) return Hand_Zone;
-   --  一瓣手指的指尖落在画面哪个像素(纯函数)。这一瓣的像素 = 手指像素里和这一瓣的框重合最多的那一整块(8 邻连通);
-   --  手指像素里张开时、合上时手指在的地方都有,框里还会落进合上时的手指(V1B21 2026-09-27:两只腕眼的瓣框右下角都盖着合上的那根手指,
-   --  旧定义"伸向合拢处的那一头"取到了它身上,按仿真真值指尖错 34 mm;同一根手指按背景明暗分进了两类时,瓣框只盖住它的一截)。
-   --  指尖 = 这一块里离它贴着画面边的那几个像素最远的那一小截(1/80 画幅高,比例无量纲)的形心:手指根那头在画面外、从画面边伸进来,
-   --  伸出去的那一头是尖(离线按 x5 网格真值:沿这一截的视线压,最先碰到的就是指尖那个顶点,量出的尖离端面中心 3 mm;旧定义 5–8 mm,
-   --  不去掉合上的手指时 36–38 mm)。这一块一个像素都不贴画面边 ⇒ 这只眼里看不出哪头伸出去了 ⇒ Ok = False,如实说。
-   --  已知不够的地方:指尖伸出画面(人形腕眼里大拇指的尖出了画面顶边)时,这条定义取到的是手指根 —— 人形那一半要换"同一瓣换几个倾角各碰一次"。
-   --  Width = 这一小截的像素跨度(它的框的长边 + 1)。
-   procedure Tip_Band (Z : Hand_Zone; Lb : Lobe; W, Hh : Natural; U, V, Width : out Long_Float; Ok : out Boolean);
    --  同一小截,两个跨度都给:Wide = 宽的那个(= Tip_Band 的 Width,指肚宽的像素),Thin = 窄的那个(看得见的厚的像素)
    procedure Tip_Section (Z : Hand_Zone; Lb : Lobe; W, Hh : Natural; U, V, Wide, Thin : out Long_Float; Ok : out Boolean);
-   procedure Tip_Px (Z : Hand_Zone; Lb : Lobe; W, Hh : Natural; U, V : out Long_Float; Ok : out Boolean);
    --  每一瓣自己那一块手指像素(同 Tip_Band 的认法:手指像素里和瓣框重合最多的那一整块,8 邻连通)的并集
    function Lobe_Pixels (Z : Hand_Zone; W, Hh : Natural) return Bools;
    --  把手指像素从深度切块结果里剔掉(块心落在手指框或区框里 = 我自己)

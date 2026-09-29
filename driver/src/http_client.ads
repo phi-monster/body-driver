@@ -14,9 +14,4 @@ package Http_Client is
    --  同一件事,请求体放在堆上(两张图的配点请求 ≈ 2.5 MB:拼成一个定长字串要在栈上摆好几份,8 MB 的栈装不下)
    function Post (Host : String; Port : Natural; Path : String; Body_Text : Unbounded_String;
                   Reply_Body, Why : out Unbounded_String; Timeout_S : Duration := Default_Timeout) return Boolean;
-   --  不接 Why 的写法(仪器那几路在用):没成时把 Why 印进日志,再返回 False
-   function Post (Host : String; Port : Natural; Path : String; Body_Text : String;
-                  Reply_Body : out Unbounded_String; Timeout_S : Duration := Default_Timeout) return Boolean;
-   function Post (Host : String; Port : Natural; Path : String; Body_Text : Unbounded_String;
-                  Reply_Body : out Unbounded_String; Timeout_S : Duration := Default_Timeout) return Boolean;
 end Http_Client;

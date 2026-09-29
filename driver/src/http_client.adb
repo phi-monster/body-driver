@@ -322,25 +322,4 @@ package body Http_Client is
       return Exchange (Host, Port, Path, Length (Body_Text), Send_Body'Access, Reply_Body, Why, Timeout_S);
    end Post;
 
-   function Post (Host : String; Port : Natural; Path : String; Body_Text : String;
-                  Reply_Body : out Unbounded_String; Timeout_S : Duration := Default_Timeout) return Boolean is
-      Why : Unbounded_String;
-   begin
-      if Post (Host, Port, Path, Body_Text, Reply_Body, Why, Timeout_S) then
-         return True;
-      end if;
-      Ada.Text_IO.Put_Line ("[HTTP] " & To_String (Why));
-      return False;
-   end Post;
-
-   function Post (Host : String; Port : Natural; Path : String; Body_Text : Unbounded_String;
-                  Reply_Body : out Unbounded_String; Timeout_S : Duration := Default_Timeout) return Boolean is
-      Why : Unbounded_String;
-   begin
-      if Post (Host, Port, Path, Body_Text, Reply_Body, Why, Timeout_S) then
-         return True;
-      end if;
-      Ada.Text_IO.Put_Line ("[HTTP] " & To_String (Why));
-      return False;
-   end Post;
 end Http_Client;

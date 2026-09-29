@@ -80,10 +80,10 @@ begin
       for I in 0 .. Z.N_Lobes - 1 loop
          declare
             Lb : constant Zone.Lobe := Zone.Lobe_Of (Z, I);
-            U, V : Long_Float;
+            U, V, Wd, Th : Long_Float;
             Ok : Boolean;
          begin
-            Zone.Tip_Px (Z, Lb, W, H, U, V, Ok);
+            Zone.Tip_Section (Z, Lb, W, H, U, V, Wd, Th, Ok);   --  驱动认指尖的那一条定义(09-30:Tip_Px 没人调了、删了)
             Put (" | 瓣 " & Codec.Img (I) & " 尖 " & (if Ok then Codec.Fmt (U, 1) & " " & Codec.Fmt (V, 1) else "- -") & " 大小 " & Codec.Img (Lb.Count)
                  & " 框 " & Codec.Img (Lb.X0) & " " & Codec.Img (Lb.Y0) & " " & Codec.Img (Lb.X1) & " " & Codec.Img (Lb.Y1));
             if Ok then

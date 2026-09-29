@@ -301,17 +301,14 @@ begin
             Ok_Body, Ok_Link : Boolean;
             Vn : Selfmap.String_Note;
          begin
-            --  存的没有噪声地板图(那是当场的相机),先量一遍静止对再核
-            Stored.Floors.Clear; Stored.Pic_Floor.Clear;
+            --  存的没有噪声地板图(那是当场的相机),先量一遍静止对再核 —— 和开机前半段同一种量法(Selfmap.Measure_Idle:
+            --  只用两帧都收到了画面的静止对;09-30 原来这里自己拿一对帧算,某台相机那一拍没画面时越界,也是第二种量法)
             declare
-               Prev : constant Plug.Cam_Vectors.Vector := F.Cams;
+               Tmp : Selfmap.Body_Map;
                Ok2 : Boolean;
             begin
-               Selfmap.Idle (L, F, 1, Ok2);
-               for Cm in 0 .. Natural (F.Cams.Length) - 1 loop
-                  Stored.Floors.Append (Picture.Null_Floor (Prev (Cm).Gray, F.Cams (Cm).Gray, F.Cams (Cm).W, F.Cams (Cm).H, Picture.Min_Pixels (F.Cams (Cm).W, F.Cams (Cm).H)));
-                  Stored.Pic_Floor.Append (Picture.Max_Diff (Prev (Cm).Gray, F.Cams (Cm).Gray));
-               end loop;
+               Selfmap.Measure_Idle (L, F, Tmp, Ok2);
+               Stored.Floors := Tmp.Floors; Stored.Pic_Floor := Tmp.Pic_Floor;
             end;
             Selfmap.Verify (L, Stored, F, Ok_Body, Ok_Link, Vn);
             Put_Line ("[装] 核对身体:" & To_String (Vn.Text) & (if Ok_Body then " ⇒ 同一具身体,直接用" else " ⇒ 重量"));

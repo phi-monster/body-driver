@@ -152,6 +152,7 @@ package body Bodyfile is
          begin
             Append (B, (if A > 0 then "," else "") & "{""arm"":" & Codec.Img (H.Arm) & ",""k"":" & Codec.Img (H.K)
                     & ",""empty_close"":" & Num (Hw & "empty_close", H.Empty_Close) & ",""open"":" & Num (Hw & "open", H.Open_Reading)
+                    & ",""close_steps"":" & Codec.Img (H.Close_Steps)
                     & ",""pose"":[" & Pose_Text (Hw & "pose", H.Pose) & "],""zones"":[");
             for Cm in 0 .. Natural (H.Zones.Length) - 1 loop
                if H.Zones (Cm).Valid then
@@ -372,6 +373,13 @@ package body Bodyfile is
                   H.Arm := A;
                   H.Empty_Close := Val (Json.Get (D, Hn, "empty_close"));
                   H.Open_Reading := Val (Json.Get (D, Hn, "open"));
+                  --  合一次要几拍:09-30 起才存;以前的文件没有 ⇒ 0(抖手指重认那一处照实说"没量过合一次要几拍",不猜)
+                  declare
+                     Cs : constant Integer := Json.Get (D, Hn, "close_steps");
+                  begin
+                     H.Close_Steps := (if Cs >= 0 then Natural (Json.Num (D, Cs)) else 0);
+                  end;
+                  H.Measured := True;   --  存下来的都是开机量成的
                   for C in 0 .. M.N_Cams - 1 loop
                      H.Zones.Append (Zone.Hand_Zone'(others => <>));
                   end loop;

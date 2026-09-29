@@ -136,12 +136,6 @@ package body Zone is
       end;
    end Assemble;
 
-   procedure Tip_Band (Z : Hand_Zone; Lb : Lobe; W, Hh : Natural; U, V, Width : out Long_Float; Ok : out Boolean) is
-      Thin : Long_Float;
-   begin
-      Tip_Section (Z, Lb, W, Hh, U, V, Width, Thin, Ok);
-   end Tip_Band;
-
    procedure Tip_Section (Z : Hand_Zone; Lb : Lobe; W, Hh : Natural; U, V, Wide, Thin : out Long_Float; Ok : out Boolean) is
       N : constant Natural := W * Hh;
       Band : constant Long_Float := Long_Float (Hh) / 80.0;   --  最远的那一小截有多厚(比例,无量纲)
@@ -327,12 +321,6 @@ package body Zone is
       return R;
    end Lobe_Pixels;
 
-   procedure Tip_Px (Z : Hand_Zone; Lb : Lobe; W, Hh : Natural; U, V : out Long_Float; Ok : out Boolean) is
-      Wd : Long_Float;
-   begin
-      Tip_Band (Z, Lb, W, Hh, U, V, Wd, Ok);
-   end Tip_Px;
-
    function From_Frames (Open_G, Closed_G : Buf; W, Hh : Natural) return Hand_Zone is
       Z : Hand_Zone;
       N : constant Natural := W * Hh;
@@ -371,17 +359,18 @@ package body Zone is
       if Natural (Open_G.Length) < N or else Natural (Closed_G.Length) < N or else N = 0 then
          return Z;
       end if;
-      --  变化量分两拨(抽样每 7 个像素取一个:次数,无量纲,只为省时间)
+      --  变化量分两拨,每一个像素都进(09-30:原来每 7 个取一个,小相机、手指只占一小块时新的 Split 证不出谷)
       while I < N loop
          Ds.Append (abs (Long_Float (Open_G.Element (I)) - Long_Float (Closed_G.Element (I))));
-         I := I + 7;
+         I := I + 1;
       end loop;
       T := Picture.Split (Ds);
       if Picture.Is_Nan (T) then
          return Z;   --  两张画面分不出"变了很多"的一拨 ⇒ 这只眼里看不见这只手合拢
       end if;
       for K in 0 .. N - 1 loop
-         Changed.Replace_Element (K, abs (Integer (Open_G.Element (K)) - Integer (Closed_G.Element (K))) > Integer (T));
+         --  Split 交的分界落在两级正中(k + 0.5):按实数比,取整会进位、漏掉一级
+         Changed.Replace_Element (K, Long_Float (abs (Integer (Open_G.Element (K)) - Integer (Closed_G.Element (K)))) > T);
       end loop;
       --  散点扫掉:只留像素数不少于最大块十分之一的连通块(比例,无量纲;同 From_Sweep)
       declare
@@ -789,6 +778,7 @@ package body Zone is
             end if;
          end;
       end;
+      H.Measured := True;
       Ok := True;
    end Measure;
 end Zone;

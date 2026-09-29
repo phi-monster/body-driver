@@ -76,23 +76,17 @@ package Geom is
    function Rot_Vec (A : M3) return V3;
    function Norm (X : V3) return Long_Float;
    function Solve3 (A : M3; B : V3) return V3;                       --  3×3 线性方程组(列主元;奇异 ⇒ 零向量)
-   function Angle_Between (P, Q : Plug.Arm_Pose) return Long_Float;   --  两个位姿的姿态差(弧度)
    function Cam_R (G : Cam_Geo; P : Plug.Arm_Pose) return M3;         --  相机 → 世界 = R_e · R_ce
    function Cam_Pos (G : Cam_Geo; P : Plug.Arm_Pose) return V3;       --  相机中心在世界里 = 手的位置 + R_e · Off
    --  相机系里的单位视线(去掉畸变;驱动的相机系 z 朝后 ⇒ 前方 -1)。这个像素去不了畸变 ⇒ Ok = False,返回零向量(不是一个方向):
    --  畸变后离主点比镜头模型在折回半径处能到的还远,没有哪条视线落在这儿(09-30,见 geom.adb 的 Undistort)。
    --  不带 Ok 的那一份同样返回零向量;Meet、Hit_Plane、Tips_On_Plane、Triangulate 都不拿零向量当视线
    function Cam_Dir (G : Cam_Geo; U, V : Long_Float; Ok : out Boolean) return V3;
-   function Cam_Dir (G : Cam_Geo; U, V : Long_Float) return V3;
    function Ray (G : Cam_Geo; P : Plug.Arm_Pose; U, V : Long_Float; Ok : out Boolean) return V3;   --  世界系里的单位视线(去不了畸变同 Cam_Dir)
    function Ray (G : Cam_Geo; P : Plug.Arm_Pose; U, V : Long_Float) return V3;
    procedure Cam_Pixel (G : Cam_Geo; Pc : V3; U, V : out Long_Float; In_Front : out Boolean);   --  相机系的点 → 像素(加上畸变)
-   --  几条视线的最小二乘交点(相机原点 = 手的位置;只走平移时相机在手上的偏移对结果没影响)
-   function Triangulate (G : Cam_Geo; O : Obs_Vectors.Vector) return V3;
    function To_Cam (G : Cam_Geo; P : Plug.Arm_Pose; Pw : V3) return V3;         --  世界点 → 相机系
    procedure Project (G : Cam_Geo; P : Plug.Arm_Pose; Pw : V3; U, V : out Long_Float; In_Front : out Boolean);
-   --  量相机朝向:手做几次【平移】,同一个不动的东西在画面里的像素 ⇒ 解朝向 + 那东西的位置(+ 焦距,当 G.F 没给时)。盲搜初值 + 最小二乘。
-   procedure Fit (G : in out Cam_Geo; O : Obs_Vectors.Vector; Ok : out Boolean);
    --  ── 两种标定(Fit_Rig、Fit_Fixed_Board)共用的几样(导出给自检)──
    type Param_Vec is array (Natural range <>) of Long_Float;
    --  朝向定没定住(09-30 换掉"朝向 ± ≥ 1 弧度"):朝向差 Rot_Sd(弧度)一阶让投影挪 焦距 F × Rot_Sd 像素;挪得比半幅对角线
@@ -110,10 +104,6 @@ package Geom is
    type Reselect_End is (Settled, Broken, Stuck);
    procedure Reselect_Loop (Errs : access procedure (Rs : out Param_Vec); Solve : access procedure (Skip : Flags);
                             Skip : in out Flags; Kept, Rounds : out Natural; How : out Reselect_End);
-   --  手上的眼,多点一起解(2026-09-24):朝向 R_Ce、相机偏移 Off、焦距(没给就一起解)、每个点的世界位置。
-   --  横着挪只给 焦距/远近 的比;转动的停让焦距和远近分开;转动下近处的点让 Off 分得出来。观测不足 4 停的点不进;Used = 进了几个点。
-   --  跟错的观测按 Reselect_Loop 踢到不再变(Broken / Stuck ⇒ 解不出);不确定度比量本身还大(焦距 ± 比焦距大、Pointing_Lost)⇒ 解不出
-   procedure Fit_Rig (G : in out Cam_Geo; O : Obs_Pt_Vectors.Vector; N_Pts : Natural; Ok : out Boolean; Used : out Natural);
    --  ── 不动的眼 ──:它看见我身上一个【世界位置已知】的点(指尖:手的位姿读数 + 量过的指尖偏置)落在画面哪儿
    type Mark is record
       Pw : V3 := [others => 0.0];

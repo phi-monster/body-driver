@@ -17,6 +17,15 @@ package body Jointboot is
       Ada.Text_IO.Put_Line ("[身] 📐 " & S);
    end Say;
 
+   --  不动的眼这个像素去不去得了畸变(落在镜头模型够不到的地方 ⇒ Geom 交零向量):去不了的那一笔不进对齐(09-30,E 组)
+   function Ray_Usable (G : Geom.Cam_Geo; U, V : Long_Float) return Boolean is
+      Ok : Boolean;
+      D : constant Geom.V3 := Geom.Ray_Fixed (G, U, V, Ok);
+      pragma Unreferenced (D);
+   begin
+      return Ok;
+   end Ray_Usable;
+
    --  落盘时一根轴是转还是走(格式里的一个词)
    function Kind_Word (A : Kinem.Axis) return String is (if A.Slide then "slide" else "turn");
 
@@ -74,6 +83,7 @@ package body Jointboot is
                      F0 : constant Plug.Cam_Vectors.Vector := F.Cams;
                      J0 : constant Plug.Floats_Vectors.Vector := F.Joints;
                      F1, F1b : Plug.Cam_Vectors.Vector;   --  转到那头:走完那一帧、再读的一帧
+                     S0 : Natural := L.Seq;
                      J1 : Plug.Floats_Vectors.Vector;
                      Okg : Boolean;
                      Got : Long_Float := Long_Float'Last;
@@ -83,6 +93,7 @@ package body Jointboot is
                      for K in 0 .. Natural (Tgt.Length) - 1 loop
                         Tgt.Replace_Element (K, Q0 (K) + Amp);
                      end loop;
+                     S0 := L.Seq;   --  从发命令这一拍数起,读数几拍才停住(Settle,开机前半段就量;09-30 原来前半段不量、恒为缺省 2)
                      Go_Group (L, F, M, Natural (Arms.Length), G, Tgt, Amp * Third, Okg);
                      exit when not Okg;
                      F1 := F.Cams; J1 := F.Joints;
@@ -90,12 +101,22 @@ package body Jointboot is
                      --  x5 第 1 只手 0.0001 / 0.0002 两档都判成没看见、第 2 只手认不出眼);走完那一帧和再读的这一帧都是到了以后的画面
                      exit when not Plug.Sense (L, F);
                      F1b := F.Cams;
+                     M.Settle := Natural'Max (M.Settle, Selfmap.Settle_Since (L, S0, M.Joint_Noise));
+                     S0 := L.Seq;
                      Go_Group (L, F, M, Natural (Arms.Length), G, Q0, Amp * Third, Okg);
                      exit when not Okg;
+                     M.Settle := Natural'Max (M.Settle, Selfmap.Settle_Since (L, S0, M.Joint_Noise));
                      for K in 0 .. Natural'Min (Natural (J1 (G).Length), Natural (J0 (G).Length)) - 1 loop
                         Got := Long_Float'Min (Got, J1 (G) (K) - J0 (G) (K));   --  这组读数里跟得最少的那个关节
                      end loop;
                      for C in 0 .. Nc - 1 loop
+                        --  这台相机这四拍里有一拍没画面(插头留的空位,09-30):这一次看不出它动没动,不算它
+                        if not (Plug.Has_Picture (F0 (C)) and then Plug.Has_Picture (F1 (C)) and then Plug.Has_Picture (F1b (C))
+                                and then Plug.Has_Picture (F.Cams (C)))
+                        then
+                           Fr.Append (0.0);
+                           goto Next_Cam;
+                        end if;
                         declare
                            Fl : Picture.Floor_Map renames M.Floors (C);
                            M1 : constant Bools := Picture.Moved (F0 (C).Gray, F1 (C).Gray, Fl);
@@ -109,6 +130,7 @@ package body Jointboot is
                               Visible := True;
                            end if;
                         end;
+                        <<Next_Cam>>
                      end loop;
                      if Got >= 0.5 * Amp and then Visible then   --  读数跟上了命令的一半(比例,同 Selfmap)、有相机看见了
                         Found := True;
@@ -341,8 +363,15 @@ package body Jointboot is
          Kept.Append (Kept_Rec'(A => A, Frame => Natural (Ds (A).Frames.Length) - 1, Seq => F.Seq,
                        Head => To_Unbounded_String (Nm & " " & Codec.Img (A) & " " & Codec.Img (if Multi then Multi_J else J) & " " & Codec.Img (Dd) & " "
                                                     & Codec.Img (K) & " " & Codec.Img (Plug.Steps (L)))));
-         --  存到仪器那边;起点 ↔ 这一格:一段的头一格当场配(下一格的步子按它定),别的交给后台配
-         Instrument.Frame_Put (Host, Port, F.Cams (Sa.Cam).RGB, Sa.W, Sa.H, Id, Err);
+         --  存到仪器那边;起点 ↔ 这一格:一段的头一格当场配(下一格的步子按它定),别的交给后台配。
+         --  这只手的眼这一拍没有画面(插头留的空位,09-30):这一格照样占位(读数、帧号都留着,和别的表对得齐),只是没有图 ⇒ 编号记 −1,
+         --  配点、拟合都按"这一格没图"跳过它(同上传失败),照实记一笔
+         if Plug.Has_Picture (F.Cams (Sa.Cam)) then
+            Instrument.Frame_Put (Host, Port, F.Cams (Sa.Cam).RGB, Sa.W, Sa.H, Id, Err);
+         else
+            Id := -1;
+            Say ("第" & Codec.Img (A + 1) & " 只手这一格(关节 " & Codec.Img (J) & ")它的眼这一拍没有画面 ⇒ 这一格没图,配点时跳过");
+         end if;
          Sa.Ids.Append (Id);
          if K = 1 and then not Multi and then Id >= 0 and then Sa.Ids (0) >= 0 then
             declare
@@ -384,7 +413,7 @@ package body Jointboot is
                        Ia => Natural (Sa.Ids (Natural (Sa.Ids.Length) - 2)), Ib => Natural (Id), W => Sa.W, H => Sa.H, Serial => N_Jobs));
             N_Jobs := N_Jobs + 1;
          end if;
-         if Dump /= "" then
+         if Dump /= "" and then Id >= 0 then
             Codec.Write_BMP (Dump & "/" & Nm, F.Cams (Sa.Cam).RGB, Sa.W, Sa.H);
             N_Img := N_Img + 1;
          end if;
@@ -825,6 +854,9 @@ package body Jointboot is
          Say ("    焦距 起步 " & Codec.Fmt (Rep.F_Start, 1) & " → " & Codec.Fmt (Rep.F_Axes, 1) & " → " & Codec.Fmt (Rep.F, 1) & " · 一起解的残差中位 " & Codec.Fmt (Rep.Med_Px, 3) & " px、九成 "
               & Codec.Fmt (Rep.P90_Px, 3) & " px · 内点 " & Codec.Img (Rep.N_Used) & " / " & Codec.Img (Rep.N_Corr) & " · 各轴远近比例(以第"
               & Codec.Img (Rep.Ref_Joint) & " 根为 1):" & To_String (T) & (if Rep.Flipped then " · 平移反过一次号" else ""));
+         if Length (Rep.Unsettled) > 0 then
+            Say ("    ⚠ 碰到保险上限还没收住:" & To_String (Rep.Unsettled));
+         end if;
          Say ("    多视图一起解(起点那格的格点配进各格 = 轨迹,按重投影):" & Codec.Img (Rep.Mv_Tracks) & " 条轨迹 " & Codec.Img (Rep.Mv_Obs) & " 笔 · 重投影中位 "
               & Codec.Fmt (Rep.Mv_Start_Px, 3) & " → " & Codec.Fmt (Rep.Mv_Px, 3) & " px、九成 " & Codec.Fmt (Rep.Mv_P90_Px, 3) & " px · " & Codec.Img (Rep.Mv_Iters) & " 轮 · 焦距 "
               & Codec.Fmt (Rep.F, 1));
@@ -858,7 +890,7 @@ package body Jointboot is
    --  这只手扫描里三角出来的点(参照眼系,模型单位):起点那一格上的格点配进很多格(轨迹),按运动学在每一格里的像素一起解它的远近(多视图三角,
    --  Kinem.Track_Points;09-27 V1B32 改:原来按"起点 ↔ 某一格"一对三角,每一对自己的位姿误差让整片点成块偏 1–3.6 mm,不动的眼按它们定位偏 4 mm)。
    --  只收:至少 3 格看见(起点 + 另外两格)、重投影残差中位 < 3 px(协议)、配点差 1 像素时远近误差不到眼到它距离的二十分之一(比例,同原来"两条视线夹角 ≥ 20 / 焦距")。
-   --  协方差:垂直视线 r·σ/f,沿视线 = 那一维解的方差(σ = 这些轨迹重投影残差的中位 × 1.4826)
+   --  协方差:垂直视线 r·σ/f,沿视线 = 那一维解的方差(σ = Track_Points 量的:重投影残差垂直于对极线那一分量的 Mad_Sigma × 中位)
    type Tri_Pt is record
       X : Geom.V3 := [0.0, 0.0, 0.0];
       Cov : Geom.M3 := [others => [others => 0.0]];
@@ -1562,6 +1594,7 @@ package body Jointboot is
                end loop;
                Enough := Nu >= Min_Inl;
             end Pick;
+            Lm_Capped : Boolean := False;   --  哪一遍的 LM 做满保险的次数还在降(09-30,B 组的 Robust_LM 交出"收住没有")
             procedure Solve (Use_R : Bools) is
                Nu : Natural := 0;
             begin
@@ -1591,6 +1624,9 @@ package body Jointboot is
                   Lm_Done : Boolean;   --  LM 收住了没有(False = 做满 100 次还在降)
                begin
                   Kinem.Robust_LM (X, N_Res, N_Res, 100, Steps, Resid'Access, Lm_Done);
+                  if not Lm_Done then
+                     Lm_Capped := True;
+                  end if;
                   R := Rodrigues ([X (0), X (1), X (2)]); T := [X (3), X (4), X (5)]; S := Exp (X (6));
                end;
             end Solve;
@@ -1602,6 +1638,9 @@ package body Jointboot is
             if Verdict = Cycled or else Verdict = Capped then
                Say ("  第" & Codec.Img (B + 1) & " 只手放进世界的精修:重挑重解了 " & Codec.Img (Rounds) & " 遍,门里的那一组"
                     & (if Verdict = Cycled then "又变回了前面某一遍的样子(来回转)" else "解满保险的遍数还在变") & " ⇒ 没定下来,交的是最后一遍的解");
+            end if;
+            if Lm_Capped then
+               Say ("  第" & Codec.Img (B + 1) & " 只手放进世界的精修:有一遍的解做满保险的次数代价还在降 ⇒ 那一遍没解到底,照实交");
             end if;
          end;
          declare
@@ -1886,6 +1925,7 @@ package body Jointboot is
                   Both := Bool_Vectors."&" (Ua, Uc);
                   Enough := 2 * Nua + 2 * Nuc + 3 * N_Planes > Np;   --  残差条数(同 Solve 里的 N_Res)比参数多才解得了
                end Pick;
+               Lm_Capped : Boolean := False;   --  哪一遍的 LM 做满保险的次数还在降
                procedure Solve (Both : Bools) is
                   pragma Unreferenced (Both);   --  这一组 Pick 已经按手 / 不动的眼分开放在 Ua、Uc 里
                begin
@@ -1901,6 +1941,9 @@ package body Jointboot is
                   begin
                      if N_Res > Np then
                         Kinem.Robust_LM (X, N_Res, N_Res, 100, Steps, Resid'Access, Lm_Done);
+                        if not Lm_Done then
+                           Lm_Capped := True;
+                        end if;
                      end if;
                   end;
                end Solve;
@@ -1909,6 +1952,9 @@ package body Jointboot is
                Verdict : Settle_Verdict;
             begin
                Refine (Rounds, Verdict);
+               if Lm_Capped then
+                  Say ("  一起精修:有一遍的解做满保险的次数代价还在降 ⇒ 那一遍没解到底,照实交");
+               end if;
                Say ("  一起精修:重挑重解了 " & Codec.Img (Rounds) & " 遍,门里的那一组"
                     & (case Verdict is
                           when Settled => "不再变了",
@@ -2151,8 +2197,10 @@ package body Jointboot is
                                       & ":" & Codec.Img (Natural (Q.Length)) & "/" & Codec.Img (Natural (Keep.Length)) & "/" & Codec.Img (N_On));
                            end;
                            for I in 0 .. Natural (Keep.Length) - 1 loop
-                              Arm_Obs (B).Append (Arm_Ob'(K => Natural (Idx (Natural (Keep (I)))), Bf => C.F, Wk => C.K, Ro => Vw.Cam.Pos, Rd => Ray_Fixed (Vw.Cam, U (I), V (I)),
-                                                          U => U (I), V => V (I), Uw => Q (Natural (Keep (I))).U, Vw => Q (Natural (Keep (I))).V, E => E (I)));
+                              if Ray_Usable (Vw.Cam, U (I), V (I)) then
+                                 Arm_Obs (B).Append (Arm_Ob'(K => Natural (Idx (Natural (Keep (I)))), Bf => C.F, Wk => C.K, Ro => Vw.Cam.Pos, Rd => Ray_Fixed (Vw.Cam, U (I), V (I)),
+                                                             U => U (I), V => V (I), Uw => Q (Natural (Keep (I))).U, Vw => Q (Natural (Keep (I))).V, E => E (I)));
+                              end if;
                            end loop;
                         end;
                      end loop;
@@ -2204,8 +2252,10 @@ package body Jointboot is
                               Match_Pair (Id_Of (P, Natural (Bf)), Fx_Id, Ds (0).World_Img.W, Ds (0).World_Img.H, Q, Keep, U, V, E);
                               N_Pairs_Of (P) := N_Pairs_Of (P) + 1;
                               for I in 0 .. Natural (Keep.Length) - 1 loop
-                                 Arm_Obs (P).Append (Arm_Ob'(K => Natural (Idx (Natural (Keep (I)))), Bf => Natural (Bf), Wk => K_New, Ro => G.Pos, Rd => Ray_Fixed (G, U (I), V (I)),
-                                                             U => U (I), V => V (I), Uw => Q (Natural (Keep (I))).U, Vw => Q (Natural (Keep (I))).V, E => E (I)));
+                                 if Ray_Usable (G, U (I), V (I)) then
+                                    Arm_Obs (P).Append (Arm_Ob'(K => Natural (Idx (Natural (Keep (I)))), Bf => Natural (Bf), Wk => K_New, Ro => G.Pos, Rd => Ray_Fixed (G, U (I), V (I)),
+                                                                U => U (I), V => V (I), Uw => Q (Natural (Keep (I))).U, Vw => Q (Natural (Keep (I))).V, E => E (I)));
+                                 end if;
                               end loop;
                            end if;
                         end;
@@ -2280,7 +2330,9 @@ package body Jointboot is
                            end if;
                         end loop;
                         for X of Cam_Obs loop
-                           if X.Pa = Bi and then Wv (X.Wk).Arm = Integer (Bi) and then Wv (X.Wk).Frame < Natural (Have.Length) and then not Have (Wv (X.Wk).Frame) then
+                           if X.Pa = Bi and then Wv (X.Wk).Arm = Integer (Bi) and then Wv (X.Wk).Frame < Natural (Have.Length) and then not Have (Wv (X.Wk).Frame)
+                             and then Ray_Usable (G, X.U, X.V)
+                           then
                               Arm_Obs (Bi).Append (Arm_Ob'(K => X.Pk, Bf => Wv (X.Wk).Frame, Wk => Fk, Ro => G.Pos, Rd => Ray_Fixed (G, X.U, X.V),
                                                           U => X.U, V => X.V, Uw => X.Uw, Vw => X.Vw, E => X.E));
                            end if;
@@ -3101,7 +3153,7 @@ package body Jointboot is
       Create (Fo, Out_File, Path);
       Put_Line (Fo, "kin 4");   --  格式版本:4 = 每个关节到过的范围和往外一步(到过的范围,09-29);3 = 每根轴记着是转还是走(09-27 无人机);2 = 不动的眼整份相机几何;更旧的读到 ⇒ 从零量
       Put_Line (Fo, "key " & To_String (K.Key));
-      Put_Line (Fo, "world_cam" & Integer'Image (K.World_Cam));
+      Put_Line (Fo, "world_cam " & Codec.Img (K.World_Cam));   --  09-30:原来 Integer'Image 在 −1 时写成 "world_cam-1",读回来标签认不出
       Put (Fo, "rw"); Put_M3 (K.Rw); New_Line (Fo);
       Put (Fo, "o"); Put_V3 (K.O); New_Line (Fo);
       Put (Fo, "plane"); Put_V3 (K.Plane_Pt); Put_V3 (K.Plane_N); Put_Line (Fo, " " & F9 (K.Plane_Rms));

@@ -338,7 +338,7 @@ begin
         & "5;ext=1" & CRLF & "world" & CRLF & "0" & CRLF & CRLF;
       Ok_A, Ok_B, Ok_C, Ok_D, Ok_E, Ok_F, Ok_G : Boolean;
       Old_B, Old_C, Old_D, Old_E : Boolean;
-      G_A, G_B, G_C, G_D, G_E, G_F, W_A, W_B, W_C, W_D, W_E, W_F, Ob_B, Ob_C, Ob_D, Ob_E : Unbounded_String;
+      G_A, G_B, G_C, G_D, G_E, G_F, G_G, W_A, W_B, W_C, W_D, W_E, W_F, W_G, Ob_B, Ob_C, Ob_D, Ob_E : Unbounded_String;
       T_D : Duration;
    begin
       One (R200, 0.0, 5.0, Ok_A, G_A, W_A);
@@ -365,7 +365,7 @@ begin
          Req : Unbounded_String;
       begin
          T.Start (R500, 0.0, Port);
-         Ok_G := Http_Client.Post ("127.0.0.1", Natural (Port), "/x", To_Unbounded_String ("{}"), G_F);   --  不接 Why 的写法(仪器那几路):没成就印出为什么
+         Ok_G := Http_Client.Post ("127.0.0.1", Natural (Port), "/x", To_Unbounded_String ("{}"), G_G, W_G);   --  请求体放堆上的那一种(仪器那几路 09-30 起也带 Why)
          T.Got (Req);
       end;
       Check (Ok_A and then To_String (G_A) = "hello", "HTTP 200 带 Content-Length ⇒ 成,正文 " & To_String (G_A));
@@ -376,7 +376,7 @@ begin
              "HTTP 回一半就不吭声 ⇒ 到这边的时限 0.3 秒照实报失败(用了 " & Codec.Fmt (Long_Float (T_D), 2) & " 秒,对方 1.5 秒后才关;旧写法吞掉超时、把半截当成功):" & To_String (W_D));
       Check (Ok_E and then Old_E and then To_String (G_E) = "hello world", "HTTP 分块编码 ⇒ 按块拼回 " & To_String (G_E) & "(旧写法把块长和 CRLF 一起当正文)");
       Check (not Ok_F and then Index (W_F, "连") > 0, "HTTP 没人听的口 ⇒ 照实报:" & To_String (W_F));
-      Check (not Ok_G, "HTTP 不接 Why 的写法:500 同样报失败(原因印在日志里)");
+      Check (not Ok_G and then Index (W_G, "500") > 0, "HTTP 请求体放堆上的那一种:500 同样报失败、原因带出来:" & To_String (W_G));
    end;
    --  🔴 脑(09-30):请求里不再带 max_tokens(原来 80 / 700)、写程序那一问不再带 temperature(原来 0.7)—— 驱动替脑拍的数,交回服务端 / 模型自己的生成配置;
    --  认名字那一问仍是 temperature 0(贪心,要稳)。回包按 JSON 读;finish_reason = length(写到服务端上限被截断)照实说,不把半截话当程序;
@@ -1271,6 +1271,19 @@ begin
       Check (Natural (Out1.Length) = 64 + 96 and then Ok_Z and then Ok_T and then Natural (Out2.Length) > 64,
              "顶面补侧壁:8 × 8 个顶面点离面 3 cm ⇒ 只从轮廓那一圈 48 个往下补两层(一共 " & Codec.Img (Natural (Out1.Length)) & " 个,要 160),中间 16 个不补;"
              & "面斜着放 ⇒ " & Codec.Img (Natural (Out2.Length)) & " 个,正中那几个照样不补、补的都在顶面和面之间");
+   end;
+   --  🔴 朝向定没定住按量到的焦距和画幅判(09-30,Geom.Pointing_Lost,换掉"朝向 ± ≥ 1 弧度"):640×480(半幅对角线 400 px)。
+   --  长焦 F = 4000:朝向 ± 0.3 rad 让投影挪 1200 px(画面三倍远)⇒ 定不住;广角 F = 150:± 1.2 rad 只挪 180 px ⇒ 还在画面里、定得住;
+   --  F = 400 时两种判法一样(± 0.5 定得住、± 1.2 定不住)。牙:旧的"≥ 1 弧度"长焦那组当成定住了、广角那组当成没定
+   declare
+      Gp : Geom.Cam_Geo;
+      function Old_Lost (Rot_Sd : Long_Float) return Boolean is (Rot_Sd >= 1.0);
+   begin
+      Gp.Cx := 320.0; Gp.Cy := 240.0;
+      Check (Geom.Pointing_Lost (Gp, 4000.0, 0.3) and then not Geom.Pointing_Lost (Gp, 150.0, 1.2)
+             and then not Geom.Pointing_Lost (Gp, 400.0, 0.5) and then Geom.Pointing_Lost (Gp, 400.0, 1.2)
+             and then not Old_Lost (0.3) and then Old_Lost (1.2),
+             "朝向定没定住:长焦 4000 px ± 0.3 rad ⇒ 定不住、广角 150 px ± 1.2 rad ⇒ 定得住、400 px 时和旧判法一样 · 牙:旧的 ≥ 1 弧度两头都判反");
    end;
    --  🔴 两眼交点有多不准(Geom.Meet_Sd,09-30):视线的角度噪声到交点那么远就是垂直于视线的位置噪声,几条合起来求协方差。
    --  两条正交的视线(沿 x、沿 y,各离交点 1 单位,角度噪声 0.001)⇒ 沿 x、y 各 0.001、沿 z 0.001/√2;两条都近乎竖直、只差 2° 的视线
@@ -2711,17 +2724,6 @@ begin
          end loop;
          Check (Cnt >= 300 and then Cnt <= 420, "握区(无深度):手指像素 " & Codec.Img (Cnt) & "(该 ≈ 384 = 4 段 × 8 × 12,抖动的桌面一个都不算)");
       end;
-      declare
-         Ua, Va, Ub, Vb : Long_Float;
-         Oa, Ob : Boolean;
-      begin
-         Zone.Tip_Px (Z, Z.A, W, H, Ua, Va, Oa);
-         Zone.Tip_Px (Z, Z.B, W, H, Ub, Vb, Ob);
-         --  两根手指从下沿伸进画面(根在画面外)⇒ 尖 = 离贴着下沿的那几个像素最远的那一截 = 最上面一行;不是伸向合拢处的内侧边、也不能沾上合上时手指在的那一块
-         --  (V1B21 2026-09-27 按 x5 网格真值:旧定义取在内侧边、瓣框里还混进合上的手指,指尖错 34 mm)
-         Check (Oa and then Ob and then abs (Ua - 7.5) < 0.5 and then abs (Ub - 55.5) < 0.5 and then abs (Va - 36.0) < 0.5 and then abs (Vb - 36.0) < 0.5,
-                "指尖 = 离手指进画面处最远的那一头:左瓣 (" & Codec.Fmt (Ua, 1) & "," & Codec.Fmt (Va, 1) & ") 右瓣 (" & Codec.Fmt (Ub, 1) & "," & Codec.Fmt (Vb, 1) & ")(该 ≈ (7.5,36) / (55.5,36))");
-      end;
       Z := Zone.From_Frames (Open_G, Open_G, W, H);
       Check (not Z.Valid, "握区(无深度):两张一样的图 ⇒ 看不见这只手合拢,如实说");
    end;
@@ -3072,28 +3074,6 @@ begin
              & "、第 2 格灰度 " & Codec.Img (Natural (F2.Cams (2).Gray (0))) & "(要 30 = c2)· c1 这一拍、下一拍都记没量;c2 和它自己上一拍比 "
              & Codec.Fmt (B2.Img_Chg (2), 1) & " · 牙:原来只剩 " & Codec.Img (Natural (Old.Length)) & " 格、第 1 格是 c2(灰度 "
              & Codec.Img (Natural (Old (1).Gray (0))) & "),'c1 变了' " & Codec.Fmt (Old_Chg1, 1));
-   end;
-   --  🔴 指尖只按这一瓣自己那一块手指像素找(V1B21 2026-09-27):手指像素里合上时手指在的那一块落进了瓣框的一角、瓣框又只盖住手指的下半截
-   --  (同一根手指按背景明暗分进了两类)。合成 48×48:手指 x 3..9、y 20..47 从下沿伸进来;合上的那一块 x 12..18、y 40..47 另成一块;
-   --  瓣框只给 [3,25]–[14,47] ⇒ 尖 = 整根手指最上面那一行 (6,20),宽 7 像素;一个像素都不贴画面边的一块 ⇒ 不给尖
-   declare
-      W : constant := 48;
-      H : constant := 48;
-      Z : Zone.Hand_Zone;
-      U, V, Wd : Long_Float;
-      Ok : Boolean;
-   begin
-      for I in 0 .. W * H - 1 loop
-         Z.Fingers.Append ((I mod W in 3 .. 9 and then I / W in 20 .. 47) or else (I mod W in 12 .. 18 and then I / W in 40 .. 47) or else (I mod W in 30 .. 40 and then I / W in 5 .. 15));
-      end loop;
-      Z.Valid := True; Z.N_Lobes := 1;
-      Z.A := (True, 3, 25, 14, 47, 0.2, 0.75, 200);
-      Zone.Tip_Band (Z, Z.A, W, H, U, V, Wd, Ok);
-      Check (Ok and then abs (U - 6.0) < 0.5 and then abs (V - 20.0) < 0.5 and then abs (Wd - 7.0) < 0.5,
-             "指尖只看这一瓣自己那一块:(" & Codec.Fmt (U, 1) & "," & Codec.Fmt (V, 1) & ") 宽 " & Codec.Fmt (Wd, 1) & "(该 (6,20) 宽 7;框里混进的合上那一块、框外的那一截都不许影响)");
-      Z.A := (True, 30, 5, 40, 15, 0.7, 0.2, 121);
-      Zone.Tip_Band (Z, Z.A, W, H, U, V, Wd, Ok);
-      Check (not Ok, "整根在画面里、一个像素都不贴画面边的一块 ⇒ 看不出哪头伸出去了,不给尖");
    end;
    --  颜色切块:两根细杆在深度上鼓不出来,但颜色分得开 —— 各自成一块,而且是细长的
    declare
@@ -3965,301 +3945,8 @@ begin
       Run (Quarter);
       Run (Majority);
    end;
-   --  🔴 焦距一起解(2026-09-24,官方 RoboDojo 观测没有内参):手上的眼 F 不给(0),从 6 停里把朝向和焦距一起量出来;真值 F = 400
-   declare
-      Gt : Geom.Cam_Geo;
-      Gf : Geom.Cam_Geo;
-      Obs : Geom.Obs_Vectors.Vector;
-      Pw : constant Geom.V3 := [0.05, 0.4, 0.2];   --  盯着的那块东西在世界里的位置(合成)
-      Ok : Boolean;
-      Moves : constant array (1 .. 6) of Geom.V3 := [[0.0, 0.0, 0.0], [0.05, 0.0, 0.0], [0.0, 0.0, 0.05], [0.0, 0.05, 0.0], [-0.05, 0.0, 0.05], [0.05, 0.05, 0.0]];
-   begin
-      Gt.F := 400.0; Gt.Cx := 320.0; Gt.Cy := 240.0; Gt.R_Ce := Geom.Rodrigues ([0.2, -0.3, 0.1]); Gt.Valid := True;
-      for M of Moves loop
-         declare
-            P : constant Plug.Arm_Pose := [M (0), M (1), M (2) + 0.6, 1.0, 0.0, 0.0, 0.0];
-            U, V : Long_Float;
-            Fr : Boolean;
-         begin
-            Geom.Project (Gt, P, Pw, U, V, Fr);
-            Check (Fr, "焦距一起解:合成的东西在相机前面(测试数据自己先得成立)");
-            Obs.Append (Geom.Obs'(Pose => P, U => U, V => V));
-         end;
-      end loop;
-      Gf.F := 0.0; Gf.Cx := 320.0; Gf.Cy := 240.0;   --  焦距没给
-      Geom.Fit (Gf, Obs, Ok);
-      declare
-         Da : constant Long_Float := (if Ok then Geom.Norm (Geom.Rot_Vec (Geom.Mul (Geom.Tr (Gt.R_Ce), Gf.R_Ce))) else 1.0);
-      begin
-         Check (Ok and then abs (Gf.F - 400.0) < 4.0 and then Da < 0.01 and then Gf.Rms < 0.5,
-                "焦距一起解:6 停 ⇒ 焦距 " & Codec.Fmt (Gf.F, 1) & " px(真 400)· 朝向差 " & Codec.Fmt (Da, 4) & " rad · 残差 " & Codec.Fmt (Gf.Rms, 3) & " px");
-      end;
-   end;
-   --  🔴 焦距先验(2026-09-24):仪器看一张图报 440 ± 40 px(像 GeoCalib 在真身上那样偏一成),真值 400。
-   --  基线只有 1 cm、每停 1 px 抖动时焦距和距离分不开:没先验解飞,有先验按在仪器的范围里;基线 5 cm 时观测压过先验,仍解回 400 附近
-   declare
-      Gt : Geom.Cam_Geo;
-      Pw : constant Geom.V3 := [0.05, 0.4, 0.2];   --  盯着的那块东西在世界里的位置(合成)
-      Seed : Long_Long_Integer := 3;
-      function Jit return Long_Float is   --  确定性伪随机 ±1 px(测试数据自己的抖动,不是驱动里的常数)
-      begin
-         Seed := (Seed * 1103515245 + 12345) mod 2147483648;
-         return Long_Float (Integer ((Seed / 65536) mod 2001) - 1000) / 1000.0;
-      end Jit;
-      type Stops is array (Positive range <>) of Geom.V3;
-      Star : constant Stops := [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 1.0], [1.0, 1.0, 0.0]];   --  星形:从原处各挪一步(单位步,乘 Amp)
-      --  驱动真实走的 8 步累计路径(Geo_Calibrate):原处 + 每步相对上一停,三根轴各两步、再回一半 ⇒ 每根轴最远 2 步
-      Path : constant Stops := [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0], [2.0, 0.0, 1.0], [2.0, 0.0, 2.0], [2.0, 1.0, 2.0], [2.0, 2.0, 2.0], [1.0, 2.0, 2.0], [0.0, 2.0, 2.0]];
-      procedure Synth (Moves : Stops; Amp : Long_Float; Obs : out Geom.Obs_Vectors.Vector) is
-      begin
-         Obs.Clear;
-         for M of Moves loop
-            declare
-               P : constant Plug.Arm_Pose := [Amp * M (0), Amp * M (1), Amp * M (2) + 0.6, 1.0, 0.0, 0.0, 0.0];   --  离东西约 0.6 m(合成)
-               U, V : Long_Float;
-               Fr : Boolean;
-            begin
-               Geom.Project (Gt, P, Pw, U, V, Fr);
-               Obs.Append (Geom.Obs'(Pose => P, U => U + Jit, V => V + Jit));
-            end;
-         end loop;
-      end Synth;
-      Obs : Geom.Obs_Vectors.Vector;
-      G_No, G_Pr, G_Long : Geom.Cam_Geo;
-      Ok_No, Ok_Pr, Ok_Long : Boolean;
-      Per_Mm : constant Long_Float := 1000.0;   --  米 → 毫米(换算,无量纲)
-   begin
-      Gt.F := 400.0; Gt.Cx := 320.0; Gt.Cy := 240.0; Gt.R_Ce := Geom.Rodrigues ([0.2, -0.3, 0.1]); Gt.Valid := True;
-      Synth (Star, 0.01, Obs);   --  短基线:星形、每停挪 1 cm
-      G_No.F := 0.0; G_No.Cx := 320.0; G_No.Cy := 240.0;
-      Geom.Fit (G_No, Obs, Ok_No);
-      G_Pr.F := 0.0; G_Pr.Cx := 320.0; G_Pr.Cy := 240.0; G_Pr.F_Prior := 440.0; G_Pr.F_Prior_Sd := 40.0;
-      Geom.Fit (G_Pr, Obs, Ok_Pr);
-      Check (Ok_Pr and then abs (G_Pr.F - 400.0) < 40.0 and then (not Ok_No or else abs (G_No.F - 400.0) > abs (G_Pr.F - 400.0)),
-             "焦距先验:短基线(星形 1 cm)+ 1 px 抖动 ⇒ 没先验 " & (if Ok_No then Codec.Fmt (G_No.F, 0) else "解不出") & " px,有先验(440±40)" & Codec.Fmt (G_Pr.F, 0)
-             & " px(真 400,该在先验一个不确定度内、比没先验近)");
-      Synth (Star, 0.05, Obs);   --  星形、每停挪 5 cm:观测还是压不过偏一成的先验(2026-09-24 实测 433)—— 这就是为什么要走累计路径
-      G_Long.F := 0.0; G_Long.Cx := 320.0; G_Long.Cy := 240.0; G_Long.F_Prior := 440.0; G_Long.F_Prior_Sd := 40.0;
-      Geom.Fit (G_Long, Obs, Ok_Long);
-      Put_Line ("     · 焦距先验:星形 5 cm + 偏一成的先验 ⇒ " & Codec.Fmt (G_Long.F, 1) & " px(真 400;信息量不够,不当闸)");
-      Synth (Path, 0.06, Obs);   --  8 步累计路径、每步 6 cm(每根轴最远 12 cm):没先验、有偏先验各解一次
-      G_No.F := 0.0; G_No.Cx := 320.0; G_No.Cy := 240.0; G_No.F_Prior := 0.0; G_No.F_Prior_Sd := 0.0;
-      Geom.Fit (G_No, Obs, Ok_No);
-      G_Long.F := 0.0; G_Long.Cx := 320.0; G_Long.Cy := 240.0; G_Long.F_Prior := 440.0; G_Long.F_Prior_Sd := 40.0;
-      Geom.Fit (G_Long, Obs, Ok_Long);
-      Check (Ok_No and then Ok_Long and then abs (G_No.F - 400.0) < 12.0 and then abs (G_Long.F - 400.0) < 12.0,
-             "焦距先验:8 步累计路径(每步 6 cm)+ 1 px 抖动 ⇒ 没先验 " & Codec.Fmt (G_No.F, 1) & " px,偏一成的先验也压不歪 " & Codec.Fmt (G_Long.F, 1)
-             & " px(真 400,都该在 3% 内)· 残差 " & Codec.Fmt (G_Long.Rms, 2) & " px");
-      --  🔴 转眼量焦距(2026-09-24):横着挪只能量出 焦距/远近 的比;转一个已知的角,像素位移 = 焦距 × 转角,和远近无关。
-      --  星形 1 cm(本来解飞到 528)+ 四停纯转动(绕 z、绕 x 各 ±0.1 rad,位姿读数给角度)⇒ 焦距该回到 400 附近
-      declare
-         Rot_Stops : constant array (1 .. 4) of Plug.Arm_Pose :=
-           [[0.0, 0.0, 0.6, 0.99875, 0.0, 0.0, 0.04998], [0.0, 0.0, 0.6, 0.99875, 0.0, 0.0, -0.04998],
-            [0.0, 0.0, 0.6, 0.99875, 0.04998, 0.0, 0.0], [0.0, 0.0, 0.6, 0.99875, -0.04998, 0.0, 0.0]];   --  cos/sin(0.05):±0.1 rad 的四元数(合成)
-         G_Rot : Geom.Cam_Geo;
-         Ok_Rot : Boolean;
-      begin
-         Synth (Star, 0.01, Obs);
-         for P of Rot_Stops loop
-            declare
-               U, V : Long_Float;
-               Fr : Boolean;
-            begin
-               Geom.Project (Gt, P, Pw, U, V, Fr);
-               Check (Fr, "转眼量焦距:转过之后东西还在相机前面(测试数据自己先得成立)");
-               Obs.Append (Geom.Obs'(Pose => P, U => U + Jit, V => V + Jit));
-            end;
-         end loop;
-         G_Rot.F := 0.0; G_Rot.Cx := 320.0; G_Rot.Cy := 240.0;
-         Geom.Fit (G_Rot, Obs, Ok_Rot);
-         Check (Ok_Rot and then abs (G_Rot.F - 400.0) < 8.0,
-                "转眼量焦距:星形 1 cm + 四停各转 0.1 rad + 1 px 抖动,不用先验 ⇒ 焦距 " & Codec.Fmt (G_Rot.F, 1) & " px(真 400,该在 2% 内;不转是 528)· 残差 "
-                & Codec.Fmt (G_Rot.Rms, 2) & " px");
-      end;
-      --  🔴 多点连相机偏移一起解(2026-09-24,Fit_Rig):真相机离手腕原点 (3,0,5) cm;近 / 中 / 远三个点(0.4 / 0.8 / 3 m);
-      --  停 = 起点 + 四停转动(±0.1 rad 绕 z、绕 x)+ 探一步 2.6 cm + 7 步累计路径(每步 6 cm);近的点有 3 停跟丢;1 px 抖动。
-      --  该解出:焦距 2% 内、偏移差 < 1 cm、朝向差 < 0.01 rad、三个点都进
-      declare
-         Gr : Geom.Cam_Geo;
-         Gs : Geom.Cam_Geo;
-         Home : constant Plug.Arm_Pose := [0.0, 0.0, 0.6, 1.0, 0.0, 0.0, 0.0];
-         Pts : array (0 .. 2) of Geom.V3;
-         Obs : Geom.Obs_Pt_Vectors.Vector;
-         Poses : Geom.Obs_Vectors.Vector;   --  只用 Pose 字段:停的位姿序列
-         Ok_R : Boolean;
-         Used : Natural;
-         Stop_No : Natural := 0;
-      begin
-         Gr.F := 400.0; Gr.Cx := 320.0; Gr.Cy := 240.0; Gr.R_Ce := Geom.Rodrigues ([0.2, -0.3, 0.1]); Gr.Off := [0.03, 0.0, 0.05]; Gr.Valid := True;
-         --  三个点放在起点那一停的相机正前方(相机系 z 朝后 ⇒ 前方是 -z),稍微错开
-         declare
-            Rc : constant Geom.M3 := Geom.Cam_R (Gr, Home);
-            Cp : constant Geom.V3 := Geom.Cam_Pos (Gr, Home);
-            Depths : constant array (0 .. 2) of Long_Float := [0.4, 0.8, 3.0];   --  近 / 中 / 远(米,合成)
-            Side : constant array (0 .. 2) of Long_Float := [0.05, -0.1, 0.3];   --  横向错开(米,合成)
-         begin
-            for K in 0 .. 2 loop
-               declare
-                  D : constant Geom.V3 := Geom.Ap (Rc, [Side (K), 0.02 * Long_Float (K), -Depths (K)]);
-               begin
-                  Pts (K) := [Cp (0) + D (0), Cp (1) + D (1), Cp (2) + D (2)];
-               end;
-            end loop;
-         end;
-         Poses.Append (Geom.Obs'(Pose => Home, U => 0.0, V => 0.0));
-         Poses.Append (Geom.Obs'(Pose => [0.0, 0.0, 0.6, 0.99875, 0.0, 0.0, 0.04998], U => 0.0, V => 0.0));    --  绕 z +0.1 rad(cos/sin 0.05,合成)
-         Poses.Append (Geom.Obs'(Pose => [0.0, 0.0, 0.6, 0.99875, 0.0, 0.0, -0.04998], U => 0.0, V => 0.0));
-         Poses.Append (Geom.Obs'(Pose => [0.0, 0.0, 0.6, 0.99875, 0.04998, 0.0, 0.0], U => 0.0, V => 0.0));    --  绕 x
-         Poses.Append (Geom.Obs'(Pose => [0.0, 0.0, 0.6, 0.99875, -0.04998, 0.0, 0.0], U => 0.0, V => 0.0));
-         Poses.Append (Geom.Obs'(Pose => [0.026, 0.0, 0.6, 1.0, 0.0, 0.0, 0.0], U => 0.0, V => 0.0));            --  探一步
-         for M of Path loop
-            exit when M (0) = 0.0 and then M (1) = 0.0 and then M (2) = 0.0 and then Stop_No > 0;
-            Stop_No := Stop_No + 1;
-            Poses.Append (Geom.Obs'(Pose => [0.026 + 0.06 * M (0), 0.06 * M (1), 0.6 + 0.06 * M (2), 1.0, 0.0, 0.0, 0.0], U => 0.0, V => 0.0));
-         end loop;
-         for S in 0 .. Natural (Poses.Length) - 1 loop
-            for K in 0 .. 2 loop
-               declare
-                  U, V : Long_Float;
-                  Fr : Boolean;
-               begin
-                  Geom.Project (Gr, Poses (S).Pose, Pts (K), U, V, Fr);
-                  Check (Fr, "多点连偏移:合成的点在相机前面(测试数据自己先得成立)");
-                  --  近的点在第 7、8、9 停跟丢
-                  if not (K = 0 and then S in 7 .. 9) then
-                     Obs.Append (Geom.Obs_Pt'(Pt => K, Pose => Poses (S).Pose, U => U + Jit, V => V + Jit, Seq => 0, Kind => 0));
-                  end if;
-               end;
-            end loop;
-         end loop;
-         Gs.F := 0.0; Gs.Cx := 320.0; Gs.Cy := 240.0;
-         Geom.Fit_Rig (Gs, Obs, 3, Ok_R, Used);
-         declare
-            Da : constant Long_Float := (if Ok_R then Geom.Norm (Geom.Rot_Vec (Geom.Mul (Geom.Tr (Gr.R_Ce), Gs.R_Ce))) else 1.0);
-            Doff : constant Long_Float := (if Ok_R then Geom.Norm ([Gs.Off (0) - 0.03, Gs.Off (1), Gs.Off (2) - 0.05]) else 1.0);
-         begin
-            Check (Ok_R and then Used = 3 and then abs (Gs.F - 400.0) < 8.0 and then Doff < 0.015 and then Da < 0.01,   --  偏移沿视线那一维最难看出来:1 px 抖动下解到 1 cm 级(米)
-                   "多点连偏移:" & Codec.Img (Natural (Poses.Length)) & " 停 × 3 点(近的丢 3 停)⇒ 焦距 " & Codec.Fmt (Gs.F, 1) & " px(真 400)· 偏移 ("
-                   & Codec.Fmt (Gs.Off (0) * 1000.0, 0) & "," & Codec.Fmt (Gs.Off (1) * 1000.0, 0) & "," & Codec.Fmt (Gs.Off (2) * 1000.0, 0)
-                   & ") mm(真 (30,0,50),该在 1.5 cm 内)· 朝向差 " & Codec.Fmt (Da, 4) & " rad · 残差 " & Codec.Fmt (Gs.Rms, 2) & " px · 进了 " & Codec.Img (Used) & " 点");
-         end;
-         --  跟错的观测混进来(每 7 笔里 1 笔错 40 px,像 V1F 右眼):踢离群再解,焦距该仍在 2% 内。
-         --  09-30 起踢到进解的那一批不再变(Geom.Reselect_Loop):6 笔错的全踢掉 ⇒ 残差回到 1 px 抖动那一档;
-         --  牙:要重解不止一遍(Geom.Refits ≥ 2)= 旧写法只踢一遍不够 —— 09-30 以前这一组一遍只踢掉 5 笔,留下 1 笔 40 px 的,残差 4.91 px
-         declare
-            Bad : Geom.Obs_Pt_Vectors.Vector;
-            Gb : Geom.Cam_Geo;
-            Ok_B : Boolean;
-            Used_B : Natural;
-         begin
-            for I in 0 .. Natural (Obs.Length) - 1 loop
-               declare
-                  Ob : Geom.Obs_Pt := Obs (I);
-               begin
-                  if I mod 7 = 3 then
-                     Ob.U := Ob.U + 40.0;   --  错 40 px(合成)
-                  end if;
-                  Bad.Append (Ob);
-               end;
-            end loop;
-            Gb.F := 0.0; Gb.Cx := 320.0; Gb.Cy := 240.0;
-            Geom.Fit_Rig (Gb, Bad, 3, Ok_B, Used_B);
-            Check (Ok_B and then abs (Gb.F - 400.0) < 8.0 and then Gb.Dropped >= 6 and then Gb.Rms < 1.0 and then Geom.Refits >= 2,
-                   "多点连偏移·踢离群:每 7 笔 1 笔错 40 px ⇒ 踢掉 " & Codec.Img (Gb.Dropped) & " 笔,焦距 " & Codec.Fmt (Gb.F, 1) & " px(真 400,该在 2% 内)· 残差 " & Codec.Fmt (Gb.Rms, 2)
-                   & " px(该 < 1)· 牙:重解了 " & Codec.Img (Geom.Refits) & " 遍才定下来 —— 旧写法只踢一遍(09-30 以前:踢 5 笔、残差 4.91 px)");
-         end;
-         --  三成跟错(42 笔里 12 笔错 40 px,错的方向轮着换,挪哪个点都吃不掉):踢到不再变 ⇒ 12 笔全出去、焦距仍在 2% 内;
-         --  牙:旧写法要么一遍踢不完(要重解不止一遍),要么"踢掉的到了四分之一就全放回"(12 × 4 ≥ 42)—— 两样都把明知跟错的留在解里
-         declare
-            Bad : Geom.Obs_Pt_Vectors.Vector;
-            Gb : Geom.Cam_Geo;
-            Ok_B : Boolean;
-            Used_B : Natural;
-            N_Bad : Natural := 0;
-         begin
-            for I in 0 .. Natural (Obs.Length) - 1 loop
-               declare
-                  Ob : Geom.Obs_Pt := Obs (I);
-               begin
-                  if I mod 7 = 1 or else I mod 7 = 4 then
-                     case (I / 8) mod 4 is   --  错 40 px,方向轮着换(合成)
-                        when 0 => Ob.U := Ob.U + 40.0;
-                        when 1 => Ob.V := Ob.V - 40.0;
-                        when 2 => Ob.U := Ob.U - 40.0;
-                        when others => Ob.V := Ob.V + 40.0;
-                     end case;
-                     N_Bad := N_Bad + 1;
-                  end if;
-                  Bad.Append (Ob);
-               end;
-            end loop;
-            Gb.F := 0.0; Gb.Cx := 320.0; Gb.Cy := 240.0;
-            Geom.Fit_Rig (Gb, Bad, 3, Ok_B, Used_B);
-            Check (Ok_B and then abs (Gb.F - 400.0) < 8.0 and then Gb.Dropped >= N_Bad and then Gb.Rms < 1.0
-                   and then (Geom.Refits >= 2 or else 4 * Gb.Dropped >= Natural (Bad.Length)),
-                   "多点连偏移·三成跟错:" & Codec.Img (Natural (Bad.Length)) & " 笔里 " & Codec.Img (N_Bad) & " 笔错 40 px ⇒ 踢掉 " & Codec.Img (Gb.Dropped) & " 笔、重解 "
-                   & Codec.Img (Geom.Refits) & " 遍,焦距 " & Codec.Fmt (Gb.F, 1) & " px(真 400)· 残差 " & Codec.Fmt (Gb.Rms, 2)
-                   & " px · 牙:旧写法一遍踢不完、踢到四分之一又全放回");
-         end;
-         --  不确定度从雅可比来:转过、多点、长基线 ⇒ 焦距 ± 几个像素;只横挪 1 cm 不转(星形)⇒ 焦距和远近分不开,不确定度该比焦距本身还大 ⇒ 判解不出
-         Check (Ok_R and then Gs.F_Sd > 0.0 and then Gs.F_Sd < 6.0 and then Gs.Off_Sd < 0.02 and then Gs.Rot_Sd < 0.01,
-                "不确定度:15 停 × 3 点 ⇒ 焦距 ± " & Codec.Fmt (Gs.F_Sd, 2) & " px · 偏移 ± " & Codec.Fmt (Gs.Off_Sd * Per_Mm, 1) & " mm · 朝向 ± " & Codec.Fmt (Gs.Rot_Sd, 4)
-                & " rad(该:焦距 < 6 px、偏移 < 2 cm、朝向 < 0.01 rad)");
-         declare
-            Obs_S : Geom.Obs_Pt_Vectors.Vector;
-            Gd : Geom.Cam_Geo;
-            Ok_D : Boolean;
-            Used_D : Natural;
-         begin
-            for S in 0 .. 5 loop   --  星形 1 cm 的 6 停,只有近的那个点
-               declare
-                  Amp : constant Long_Float := 0.01;   --  1 cm(合成)
-                  Ps : constant Plug.Arm_Pose := [Amp * Star (S + 1) (0), Amp * Star (S + 1) (1), 0.6 + Amp * Star (S + 1) (2), 1.0, 0.0, 0.0, 0.0];
-                  U, V : Long_Float;
-                  Fr : Boolean;
-               begin
-                  Geom.Project (Gr, Ps, Pts (0), U, V, Fr);
-                  Obs_S.Append (Geom.Obs_Pt'(Pt => 0, Pose => Ps, U => U + Jit, V => V + Jit, Seq => 0, Kind => 0));
-               end;
-            end loop;
-            Gd.F := 0.0; Gd.Cx := 320.0; Gd.Cy := 240.0;
-            Geom.Fit_Rig (Gd, Obs_S, 1, Ok_D, Used_D);
-            Check (not Ok_D, "不确定度:只横挪 1 cm、不转 ⇒ 焦距和远近分不开 ⇒ 判解不出(不再吐一个看着像样的数)");
-            --  同一组、焦距给了(400):朝向定不住(焦距 × 朝向 ± 比半幅对角线 400 px 还大)⇒ 解不出,报原因里印的是给的焦距,不带 ±;
-            --  牙:旧写法这时印 P (5)(偏移的 z)当"焦距",后面跟着 ± 0.0 px(不解焦距时不确定度记 0)
-            declare
-               Gf : Geom.Cam_Geo;
-               Ok_F : Boolean;
-               Used_F : Natural;
-            begin
-               Gf.F := 400.0; Gf.Cx := 320.0; Gf.Cy := 240.0;
-               Geom.Fit_Rig (Gf, Obs_S, 1, Ok_F, Used_F);
-               declare
-                  W : constant String := To_String (Geom.Why);
-               begin
-                  Check (not Ok_F and then Ada.Strings.Fixed.Index (W, "焦距 400.0 px(给的") > 0 and then Ada.Strings.Fixed.Index (W, "± 0.0 px") = 0
-                         and then Ada.Strings.Fixed.Index (W, "半幅对角线 400.0 px") > 0,
-                         "不确定度:焦距给了也解不出时,报原因印给的焦距:" & W);
-               end;
-            end;
-         end;
-         --  🔴 朝向定没定住按量到的焦距和画幅判(09-30,Geom.Pointing_Lost,换掉"朝向 ± ≥ 1 弧度"):640×480(半幅对角线 400 px)。
-         --  长焦 F = 4000:朝向 ± 0.3 rad 让投影挪 1200 px(画面三倍远)⇒ 定不住;广角 F = 150:± 1.2 rad 只挪 180 px ⇒ 还在画面里、定得住;
-         --  F = 400 时两种判法一样(± 0.5 定得住、± 1.2 定不住)。牙:旧的"≥ 1 弧度"长焦那组当成定住了、广角那组当成没定
-         declare
-            Gp : Geom.Cam_Geo;
-            function Old_Lost (Rot_Sd : Long_Float) return Boolean is (Rot_Sd >= 1.0);
-         begin
-            Gp.Cx := 320.0; Gp.Cy := 240.0;
-            Check (Geom.Pointing_Lost (Gp, 4000.0, 0.3) and then not Geom.Pointing_Lost (Gp, 150.0, 1.2)
-                   and then not Geom.Pointing_Lost (Gp, 400.0, 0.5) and then Geom.Pointing_Lost (Gp, 400.0, 1.2)
-                   and then not Old_Lost (0.3) and then Old_Lost (1.2),
-                   "朝向定没定住:长焦 4000 px ± 0.3 rad ⇒ 定不住、广角 150 px ± 1.2 rad ⇒ 定得住、400 px 时和旧判法一样 · 牙:旧的 ≥ 1 弧度两头都判反");
-         end;
-      end;
-   end;
    --  🔴 握区的手指像素随身体文件存、装回(Bodyfile,游程,2026-09-26):以前不存 ⇒ 装回身体后一个指尖都认不出,开机碰桌面量指尖直接"没量到"(X5C3)。
-   --  合成:8×6 画面里两块手指(左上 2×3、右下 3×2)⇒ 存了再装回,每一格一样;指尖像素(Zone.Tip_Px)也一样
+   --  合成:8×6 画面里两块手指(左上 2×3、右下 3×2)⇒ 存了再装回,每一格一样;指尖像素(Zone.Tip_Section)也一样
    declare
       M1, M2 : Selfmap.Body_Map;
       H1, H2 : Zone.Hand_Vectors.Vector;
@@ -4272,6 +3959,7 @@ begin
       Path : constant String := "/tmp/bd_selfcheck_body.json";
       Same : Boolean := False;
       U1, V1, U2, V2 : Long_Float := -1.0;
+      Wd1, Th1, Wd2, Th2 : Long_Float := 0.0;
       Ok1, Ok2 : Boolean := False;
    begin
       M1.Arms := 1; M1.N_Cams := 1; M1.Per_Arm := Chan.Per_Arm; M1.Channels := Chan.Per_Arm;
@@ -4292,8 +3980,8 @@ begin
       Got := Bodyfile.Load (Path, "selfcheck", M2, H2, T2, S2, Note);
       if Got and then not H2.Is_Empty and then not H2 (0).Zones.Is_Empty then
          Same := Bytes.Bool_Vectors."=" (H2 (0).Zones (0).Fingers, Z.Fingers);
-         Zone.Tip_Px (Z, Z.A, 8, 6, U1, V1, Ok1);
-         Zone.Tip_Px (H2 (0).Zones (0), H2 (0).Zones (0).A, 8, 6, U2, V2, Ok2);
+         Zone.Tip_Section (Z, Z.A, 8, 6, U1, V1, Wd1, Th1, Ok1);
+         Zone.Tip_Section (H2 (0).Zones (0), H2 (0).Zones (0).A, 8, 6, U2, V2, Wd2, Th2, Ok2);
       end if;
       Check (Got and then Same and then Ok1 and then Ok2 and then U1 = U2 and then V1 = V2,
              "握区的手指像素随身体文件存、装回:" & (if Got then "装上了" else "没装上(" & To_String (Note) & ")") & " · 每一格" & (if Same then "一样" else "不一样")
@@ -4476,7 +4164,8 @@ begin
          end loop;
       end loop;
       declare
-         Dd : constant Geom.V3 := Geom.Cam_Dir (Gd, 0.0, 0.0);
+         Dd_Ok : Boolean;
+         Dd : constant Geom.V3 := Geom.Cam_Dir (Gd, 0.0, 0.0, Dd_Ok);
          Dp0 : constant Geom.V3 := [(0.0 - 320.0) / 397.0, -(0.0 - 240.0) / 397.0, -1.0];
          Np : constant Long_Float := Geom.Norm (Dp0);
          Cs : constant Long_Float := (Dd (0) * Dp0 (0) + Dd (1) * Dp0 (1) + Dd (2) * Dp0 (2)) / Np;
@@ -4658,7 +4347,9 @@ begin
          pragma Unreferenced (Arm);
       begin
          Pos_Err := 0.0;
-         Rot_Err := (if Geom.Angle_Between (P0, Pose) <= 1.2 then 0.0 else 1.0);
+         --  两个朝向的夹角 = 2·arccos|q₀·q|(四元数;自检自己算,驱动里原来那个 Geom.Angle_Between 09-30 没人调了、删了)
+         Rot_Err := (if 2.0 * Ada.Numerics.Long_Elementary_Functions.Arccos (Long_Float'Min (1.0, abs (P0 (3) * Pose (3) + P0 (4) * Pose (4) + P0 (5) * Pose (5) + P0 (6) * Pose (6))))
+                        <= 1.2 then 0.0 else 1.0);
       end Fake_Reach;
       R1, R0 : Long_Float;
    begin

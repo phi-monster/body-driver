@@ -49,8 +49,9 @@ package body Act is
       return (others => <>);
    end Zone_Of;
 
+   --  这条臂量到几个抓握通道就是几个;没有抓握通道(无人机、只有胳膊的身体)就是 0 —— 不按"至少一个"猜(09-30 原来 Max (1, …)、缺省 1)
    function Jaws_Of (C : Context; Arm : Natural) return Natural is
-     (if Arm < Natural (C.Map.Jaws.Length) then Natural'Max (1, C.Map.Jaws (Arm)) else 1);
+     (if Arm < Natural (C.Map.Jaws.Length) then C.Map.Jaws (Arm) else 0);
 
    --  这条臂第 K 个抓握通道带不带手指 = 开机把它推到头时,有没有哪台相机量出了握区(Zone.Measure:两次比较、不共用一帧都看见东西动了)。
    --  哪台都没有 ⇒ 这个通道什么都不带,不列手指 / 爪心、不数、不说"你的手指之间"(无人机 DR1 / DR2 2026-09-28:
@@ -502,10 +503,11 @@ package body Act is
       if Natural (G.Length) < Cw * Ch then
          return Out_R;
       end if;
-      --  分界用抽样算(每 7 个像素取一个:次数,无量纲,只为省时间)
+      --  分界按每一个像素算(09-30:原来每 7 个取一个 —— 新的 Split 要按置信界证出一道真谷,样本少了证不出,
+      --  头顶眼里桌上的东西和桌面并成一块丢掉;Split 按直方图算,全像素也只多一遍直方图)
       while I < Cw * Ch loop
          Samp.Append (Long_Float (G.Element (I)));
-         I := I + 7;
+         I := I + 1;
       end loop;
       T := Picture.Split (Samp);
       if Picture.Is_Nan (T) then
@@ -1888,6 +1890,11 @@ package body Act is
       Cw : constant Natural := F.Cams (Cam).W;
       Ch : constant Natural := F.Cams (Cam).H;
    begin
+      --  这台相机这一拍、或者上一拍没有画面(插头留的空位,09-30):这一拍跟不了,照实记成跟丢,不拿空图去比
+      if not Plug.Has_Picture (F.Cams (Cam)) or else Natural (Before.Length) /= Cw * Ch then
+         P.Lost := True;
+         return;
+      end if;
       P.Lost := False;
       case P.Kind is
          when Piece_Pt =>
@@ -4076,7 +4083,9 @@ package body Act is
          end if;
          --  没写步数就拿安全上限比,别拿 0 比(拿 0 比 = 第一步就"走完了")
          --  抓握读数先换成"离空手合那头往张开那头走了多远"再交给监视器(方向是量的;监视器按"读数 − 空手值 ≤ 抖动 = 滑掉了"判)
-         if Monitor.Fired (Until_Kind, W, Effective_Cap (Step_Limit), Note.Blocked, Monitor.Bounded (Past_Empty (Hand_Of (C, Arm), Selfmap.Jaw_Of (F, Arm))),
+         if Monitor.Fired (Until_Kind, W, Effective_Cap (Step_Limit), Note.Blocked, Monitor.Bounded (if Selfmap.Has_Jaw (F, Arm) and then Hand_Of (C, Arm).Measured
+                                                                   then Past_Empty (Hand_Of (C, Arm), Selfmap.Jaw_Of (F, Arm))
+                                                                   else Monitor.Bounded'Last),   --  没读数 / 手没量过:这一拍没有"滑了"的证据
                            Monitor.Bounded (0.0),
                            Monitor.Floor (C.Map.Jaw_Noise), Note.Touched,
                            Lost => Pts (0).Lost,
@@ -4698,7 +4707,7 @@ package body Act is
    procedure Jaw_Sweep (L : in out Plug.Link; C : Context; F : in out Plug.Frame; Arm, K : Natural; Target : Long_Float; Max_Iter : Natural;
                         Sweep_Cam : Integer; Sweep : in out Bools; Steps : out Natural; Reading : out Long_Float) is
       Jaw : Floats;
-      Prev : Long_Float := Selfmap.Jaw_Of (F, Arm, K);
+      Prev : Long_Float := (if Selfmap.Has_Jaw (F, Arm, K) then Selfmap.Jaw_Of (F, Arm, K) else 0.0);
       Prev_Cams : Plug.Cam_Vectors.Vector := F.Cams;
       Still : Natural := 0;
       Cm : Plug.Cmd;
@@ -4711,22 +4720,31 @@ package body Act is
          then Selfmap.Picture_Still (C.Map, Prev_Cams (Natural (Hc)), F.Cams (Natural (Hc)), Natural (Hc))
          else Selfmap.Pictures_Still (C.Map, Prev_Cams, F.Cams));
    begin
+      Steps := 0;
+      Reading := Prev;
+      if not Selfmap.Has_Jaw (F, Arm, K) then
+         --  这一拍没有这个通道的读数:不推(不拿编的数当读数、也不拿它当别的通道的目标;09-30 原来补 1.0 = x5"1 = 张开")
+         Put_Line ("[身] ✋ 第" & Codec.Img (Arm + 1) & " 只手第 " & Codec.Img (K + 1) & " 个抓握通道这一拍没有读数 ⇒ 不合不张");
+         return;
+      end if;
       --  只动点名的那一个抓握通道,其余保持它们此刻的读数(五指手:合一根不牵动另外四根)
       declare
          Rest : constant Floats := Selfmap.Jaw_All (F, Arm);
       begin
-         for I in 0 .. Natural'Max (1, Natural (Rest.Length)) - 1 loop
-            Jaw.Append (if I = K then Target elsif I < Natural (Rest.Length) then Rest (I) else 1.0);
+         for I in 0 .. Natural (Rest.Length) - 1 loop
+            Jaw.Append (if I = K then Target else Rest (I));
          end loop;
       end;
-      Steps := 0;
-      Reading := Prev;
       --  读数是命令的回声,"停住"只认画面:每台相机连着两拍不变
       for I in 1 .. Max_Iter loop
          Cm.Kind := Plug.Ee; Cm.Arm := Arm; Cm.Pose := F.EE (Arm); Cm.Jaw := Jaw;
          exit when not Plug.Act (L, Cm) or else not Plug.Sense (L, F);
          Steps := I;
-         Reading := Selfmap.Jaw_Of (F, Arm, K);
+         if Selfmap.Has_Jaw (F, Arm, K) then
+            Reading := Selfmap.Jaw_Of (F, Arm, K);
+         else
+            Still := 0;   --  这一拍没读数:算不上"停住"
+         end if;
          if Sweep_Cam >= 0 and then Natural (Sweep_Cam) < Natural (F.Cams.Length) and then Natural (Sweep_Cam) < Natural (C.Map.Floors.Length) then
             Sweep := Picture.Either (Sweep, Picture.Moved (Prev_Cams (Natural (Sweep_Cam)).Gray, F.Cams (Natural (Sweep_Cam)).Gray, C.Map.Floors (Natural (Sweep_Cam))));
          end if;
@@ -4766,7 +4784,6 @@ package body Act is
       Cw : constant Natural := F.Cams (Cam).W;
       Ch : constant Natural := F.Cams (Cam).H;
       Z : constant Zone.Hand_Zone := Zone_Of (C, Arm, Cam);
-      J0 : constant Long_Float := Selfmap.Jaw_Of (F, Arm);
       Steps_J : Natural;
       Reading : Long_Float;
       Any_Fingers : Boolean := False;
@@ -4810,7 +4827,8 @@ package body Act is
       if Pts_Empty then
          return;
       end if;
-      Jaw.Append (J0);
+      --  这条臂此刻的抓握读数原样当目标(挪手的时候手指不动);这一拍没读数就不带(插头按"这一集给过的最后一个目标"保持)
+      Jaw := Selfmap.Jaw_All (F, Arm);
       for P of Pts loop
          if P.Kind = Piece_Pt and then P.Chan_K >= Chan.Per_Arm then
             Any_Fingers := True;
@@ -4833,8 +4851,23 @@ package body Act is
                      end if;
                   end loop;
                   if Wanted then
-                     Jaw_Sweep (L, C, F, Arm, Kk, 0.0, C.Map.Settle + 1, Integer (Cam), Sweep, Steps_J, Reading);
-                     Jaw_Sweep (L, C, F, Arm, Kk, Selfmap.Jaw_Of (F, Arm, Kk), C.Map.Settle + 1, Integer (Cam), Sweep, Steps_J, Reading);
+                     declare
+                        --  抖一下手指重新认它:合到这只手量过的"合空"那头、再回到抖之前的读数(09-30:原来合的目标写死 0.0 = x5"0 = 合",
+                        --  回的目标又是合完以后才读的读数 ⇒ 手指张不回去)。拍数上限 = 开机量到的合一次要几拍(Close_Steps)
+                        Hk : constant Zone.Hand := Hand_Of (C, Arm, Kk);
+                     begin
+                        if Selfmap.Has_Jaw (F, Arm, Kk) and then Hk.Measured and then Hk.Close_Steps > 0 then
+                           declare
+                              R0 : constant Long_Float := Selfmap.Jaw_Of (F, Arm, Kk);
+                           begin
+                              Jaw_Sweep (L, C, F, Arm, Kk, Hk.Empty_Close, Hk.Close_Steps, Integer (Cam), Sweep, Steps_J, Reading);
+                              Jaw_Sweep (L, C, F, Arm, Kk, R0, Hk.Close_Steps, Integer (Cam), Sweep, Steps_J, Reading);
+                           end;
+                        else
+                           Put_Line ("[身] ✋ 第" & Codec.Img (Arm + 1) & " 只手第 " & Codec.Img (Kk + 1) & " 个抓握通道"
+                                     & (if not Selfmap.Has_Jaw (F, Arm, Kk) then "这一拍没有读数" else "没量过合一次要几拍") & " ⇒ 不抖它来重认");
+                        end if;
+                     end;
                   end if;
                end;
             end loop;
@@ -5195,19 +5228,22 @@ package body Act is
          --  这里只是【第一次把它拿来判拿住】,不新量一个。
          Hi : Integer := -1;
          Emp : Long_Float := -1.0;
-         R_Now : constant Long_Float := Selfmap.Jaw_Of (F, Arm, Jk);
+         Have_R : constant Boolean := Selfmap.Has_Jaw (F, Arm, Jk);
+         R_Now : constant Long_Float := (if Have_R then Selfmap.Jaw_Of (F, Arm, Jk) else 0.0);   --  没读数时不用它(下面都先问 Have_R)
       begin
          for I in 0 .. Natural (C.Hands.Length) - 1 loop
-            if C.Hands (I).Arm = Arm and then C.Hands (I).K = Jk then
+            if C.Hands (I).Arm = Arm and then C.Hands (I).K = Jk and then C.Hands (I).Measured then
                Hi := Integer (I);
             end if;
          end loop;
          if Hi >= 0 then
             Emp := C.Hands (Natural (Hi)).Empty_Close;
          end if;
-         --  量得出空手值才谈得上问手指;门槛是读数自己的抖动(量出来的),不是我拍的容差。
-         Grip_Says_Held := Hi >= 0 and then Past_Empty (C.Hands (Natural (Hi)), R_Now) > C.Map.Jaw_Noise;
-         if Hi >= 0 then
+         --  量得出空手值、这一拍也有读数,才谈得上问手指;门槛是读数自己的抖动(量出来的),不是我拍的容差。
+         Grip_Says_Held := Hi >= 0 and then Have_R and then Past_Empty (C.Hands (Natural (Hi)), R_Now) > C.Map.Jaw_Noise;
+         if not Have_R then
+            Grip_Note := S (" (my fingers report no reading this beat, so I cannot ask them)");
+         elsif Hi >= 0 then
             Grip_Note := S (" (my fingers stopped at " & Codec.Fmt (R_Now, 3)
                             & ", empty they stop at " & Codec.Fmt (Emp, 3)
                             & (if Grip_Says_Held then " - so something is wedged between them" else " - so there is nothing between them") & ")");
@@ -5510,20 +5546,6 @@ package body Act is
       return -1;
    end Hand_Eye_Of;
 
-   --  这台相机的主点:按画幅中心(纯几何的一半);焦距留着以前量的(没量过 = 0 = 量朝向时一起解出来、存进几何文件)。
-   --  观测里带的内参驱动不读(铁律 1,09-26:一种量法)
-   procedure Geo_Take_K (C : in out Context; F : Plug.Frame; Cam : Natural) is
-      G : Geom.Cam_Geo := Geo_Of (C, Cam);
-   begin
-      if Cam < Natural (F.Cams.Length) and then Cam < Natural (C.Geo.Length) then
-         if G.Cx <= 0.0 and then F.Cams (Cam).W > 0 then
-            --  身体没给内参(官方 RoboDojo 观测就没有):主点按画幅中心(纯几何的一半),焦距留 0 = 量朝向时一起解出来、存进几何文件
-            G.Cx := 0.5 * Long_Float (F.Cams (Cam).W); G.Cy := 0.5 * Long_Float (F.Cams (Cam).H);
-            C.Geo.Replace_Element (Cam, G);
-         end if;
-      end if;
-   end Geo_Take_K;
-
    --  点名的那块此刻在这台相机里的像素(这一帧还没切过就切一遍、槽号对上)
    procedure Geo_Track (C : in out Context; F : Plug.Frame; Cam : Natural; Slot : Integer; U, V : out Long_Float; Seen : out Boolean;
                         Name : Unbounded_String := Null_Unbounded_String) is
@@ -5716,146 +5738,6 @@ package body Act is
    --  指尖在相机里的位置:开机那一帧里两根手指(合空扫过的像素)各自最靠上的那一截 = 指尖;有深度那一帧读一次深度
    --  (真机:一台相机一辈子量一次,用尺子也行;之后再也不读深度)
 
-   --  握区里"指尖在画面哪个像素"的同一条定义:每一瓣一个指尖(Zone.Tip_Px),几瓣取中点;一瓣的指尖都没量到就取区心。
-   --  腕眼、不动的眼、两指、五指同一段代码(瓣数读 Z.N_Lobes,不写死)
-   function Zone_Tip (Z : Zone.Hand_Zone; W, H : Natural; U, V : out Long_Float) return Boolean is
-      Su, Sv : Long_Float := 0.0;
-      N : Natural := 0;
-   begin
-      U := 0.0; V := 0.0;
-      if not Z.Valid then
-         return False;
-      end if;
-      for I in 0 .. Z.N_Lobes - 1 loop
-         declare
-            Tu, Tv : Long_Float;
-            Ok : Boolean;
-         begin
-            Zone.Tip_Px (Z, Zone.Lobe_Of (Z, I), W, H, Tu, Tv, Ok);
-            if Ok then
-               Su := Su + Tu; Sv := Sv + Tv; N := N + 1;
-            end if;
-         end;
-      end loop;
-      if N > 0 then
-         U := Su / Long_Float (N); V := Sv / Long_Float (N);
-      else
-         U := Z.Cu * Long_Float (W); V := Z.Cv * Long_Float (H);
-      end if;
-      return True;
-   end Zone_Tip;
-
-   --  不动的眼(头顶眼)在这一停给第 Arm 只手的指尖做一笔标记:合空一次(开机量握区的同一个办法,Zone.Measure),它眼里"合拢通道扫过的像素"
-   --  = 这只手的手指,指尖按握区同一条定义(Zone_Tip),连这一停的位姿读数记进 C.Fixed_Obs;开机末尾连它的位姿、焦距、各臂指尖偏移一起解(Geo_Boot_Fixed)。
-   --  以前是仪器逐帧跟指尖:G1R 2026-09-24 实测白手没纹理、一帧挪几十像素,跟点器把指尖钉在桌面上还报"看得见"(955 笔里 v 一动不动)⇒ 解不出。
-   --  合空标记不认纹理只认"手指来去",一停一笔。指尖贴着画面边 = 手指被画面切了,不记。手上长着这只"不动的眼"、没有世界相机、对方正要复位 ⇒ 不做
-   procedure Head_Mark (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Arm : Natural) is
-      Wc : constant Natural := C.Map.World_Cam;
-      H : Zone.Hand;
-      Ok : Boolean;
-      U, V : Long_Float;
-      N : Natural := 0;
-      --  每一笔(记下的、拒掉的)的每一瓣各自的指尖像素、大小、框落盘(BL_DUMP/head_lobes.txt):换一种认点办法(比如总认最大那一瓣的尖)离线就能试,
-      --  不用再开一炮(G2C 2026-09-24:同一只手换个姿势,"几瓣"在 1 和 2 之间跳,拿瓣数当点的身份不稳)
-      procedure Dump_Lobes (Tag : String) is
-         Dump : constant String := Codec.Env ("BL_DUMP");
-         Fo : Ada.Text_IO.File_Type;
-      begin
-         if Dump = "" or else Wc >= Natural (H.Zones.Length) or else Wc >= Natural (F.Cams.Length) then
-            return;
-         end if;
-         begin
-            Ada.Text_IO.Open (Fo, Ada.Text_IO.Append_File, Dump & "/head_lobes.txt");
-         exception
-            when others => Ada.Text_IO.Create (Fo, Ada.Text_IO.Out_File, Dump & "/head_lobes.txt");
-         end;
-         Ada.Text_IO.Put (Fo, Tag & " " & Codec.Img (F.Seq) & " " & Codec.Img (Arm) & " " & Codec.Img (H.Zones (Wc).N_Lobes));
-         for I in H.Pose'Range loop
-            Ada.Text_IO.Put (Fo, " " & Codec.Fmt (H.Pose (I), 6));
-         end loop;
-         for I in 0 .. H.Zones (Wc).N_Lobes - 1 loop
-            declare
-               Lb : constant Zone.Lobe := Zone.Lobe_Of (H.Zones (Wc), I);
-               Tu, Tv : Long_Float;
-               Tok : Boolean;
-            begin
-               Zone.Tip_Px (H.Zones (Wc), Lb, F.Cams (Wc).W, F.Cams (Wc).H, Tu, Tv, Tok);
-               Ada.Text_IO.Put (Fo, " | " & Codec.Fmt ((if Tok then Tu else -1.0), 1) & " " & Codec.Fmt ((if Tok then Tv else -1.0), 1) & " " & Codec.Img (Lb.Count)
-                                & " " & Codec.Img (Lb.X0) & " " & Codec.Img (Lb.Y0) & " " & Codec.Img (Lb.X1) & " " & Codec.Img (Lb.Y1));
-            end;
-         end loop;
-         Ada.Text_IO.New_Line (Fo);
-         Ada.Text_IO.Close (Fo);
-      exception
-         when others => null;
-      end Dump_Lobes;
-   begin
-      if Wc >= Natural (F.Cams.Length) or else Arm >= Natural (F.EE.Length) or else Plug.Reset_Pending (L) then
-         return;
-      end if;
-      if Arm < Natural (C.Map.Cam_On_Arm.Length) and then C.Map.Cam_On_Arm (Arm) = Integer (Wc) then
-         return;   --  这只"不动的眼"其实长在这只手上
-      end if;
-      Zone.Measure (L, C.Map, Arm, 0, F, H, Ok);
-      declare
-         W : constant Natural := F.Cams (Wc).W;
-         Hh : constant Natural := F.Cams (Wc).H;
-      begin
-         if not Ok or else Wc >= Natural (H.Zones.Length) or else not Zone_Tip (H.Zones (Wc), W, Hh, U, V) then
-            Geo_Say ("不动的眼这一停没看见第" & Codec.Img (Arm + 1) & " 只手的手指来去 ⇒ 不记");
-            return;
-         end if;
-         --  哪一瓣的框贴着画面边 = 手指被画面切了,指尖在画面外(G1S 2026-09-24:手抬高到画面右边、缩到画面底边时各记了一笔掌心当指尖)
-         for I in 0 .. H.Zones (Wc).N_Lobes - 1 loop
-            declare
-               Lb : constant Zone.Lobe := Zone.Lobe_Of (H.Zones (Wc), I);
-            begin
-               if Lb.Valid and then (Lb.X0 = 0 or else Lb.Y0 = 0 or else Lb.X1 + 1 >= W or else Lb.Y1 + 1 >= Hh) then
-                  Geo_Say ("不动的眼这一停里第" & Codec.Img (Arm + 1) & " 只手的手指贴着画面边 = 被画面切了 ⇒ 不记");
-                  Dump_Lobes ("edge");
-                  return;
-               end if;
-            end;
-         end loop;
-      end;
-      Dump_Lobes ("mark");
-      C.Fixed_Obs.Append (Geom.Obs_Pt'(Pt => Arm, Pose => H.Pose, U => U, V => V, Seq => F.Seq, Kind => H.Zones (Wc).N_Lobes));
-      declare
-         Px : Px2_Vectors.Vector;
-         W : constant Natural := F.Cams (Wc).W;
-         Z : constant Zone.Hand_Zone := H.Zones (Wc);
-      begin
-         if Natural (Z.Fingers.Length) = W * F.Cams (Wc).H then
-            for Y in Z.Y0 .. Z.Y1 loop
-               for X in Z.X0 .. Z.X1 loop
-                  if Z.Fingers (Y * W + X) then
-                     Px.Append (Px2'(U => X, V => Y));
-                  end if;
-               end loop;
-            end loop;
-         end if;
-         C.Mark_Px.Append (Px);   --  和 Fixed_Obs 同序
-      end;
-      for I in 0 .. H.Zones (Wc).N_Lobes - 1 loop   --  每一瓣各自的尖另记一份(认指尖用)
-         declare
-            Tu, Tv : Long_Float;
-            Tok : Boolean;
-         begin
-            Zone.Tip_Px (H.Zones (Wc), Zone.Lobe_Of (H.Zones (Wc), I), F.Cams (Wc).W, F.Cams (Wc).H, Tu, Tv, Tok);
-            if Tok then
-               C.Lobe_Obs.Append (Geom.Obs_Pt'(Pt => Arm, Pose => H.Pose, U => Tu, V => Tv, Seq => F.Seq, Kind => H.Zones (Wc).N_Lobes));
-            end if;
-         end;
-      end loop;
-      for Ob of C.Fixed_Obs loop
-         if Ob.Pt = Arm then
-            N := N + 1;
-         end if;
-      end loop;
-      Geo_Say ("不动的眼:第" & Codec.Img (Arm + 1) & " 只手的指尖在它眼里 (" & Codec.Fmt (U, 1) & "," & Codec.Fmt (V, 1) & "),手指 " & Codec.Img (H.Zones (Wc).N_Lobes)
-               & " 瓣(第 " & Codec.Img (N) & " 笔)");
-   end Head_Mark;
-
    procedure Geo_Install (F : Plug.Frame; C : in out Context; Body_Path : String; Geo : Geom.Geo_Vectors.Vector; Board : Geom.Scene_Pt_Vectors.Vector;
                           Plane_Pt, Plane_N : Geom.V3; Plane_Rms : Long_Float; Ref : Plug.Cam; Keep_Tips : Boolean := False) is
       pragma Unreferenced (F);
@@ -5941,538 +5823,6 @@ package body Act is
          Geom.Save (To_String (C.Geo_Path), C.Geo);
       end if;
    end Geo_Install;
-
-   --  量相机朝向(R3c 2026-09-24):盯着眼里的东西,手先转几下、再走一条累计路径,每停记下眼里每个点在画面里的位置,回起点,多点一起解。
-   --  横着挪只能量出 焦距/远近 的比(V1B/V1C/V1D 三次都撞在这上面:992 / 558 / 431,真 397);转一个已知角,像素位移 = 焦距 × 转角,和远近无关。
-   --  盯谁、步子多大都是量出来的:候选 = 画幅中间那一半里不贴边、不是自己手指的每一块(V1E 实测:挑到下沿的东西下一步就出画面);
-   --  探一步看谁视差最大 ⇒ 步长按"让它每步挪画幅的 1/16"反推,上限是量过的步幅。解的时候所有跟住的点一起进,谁丢了谁缺席,不押一个目标;
-   --  相机离手腕转轴的偏移一起解出来(不解它,转动时近处的东西会把焦距带偏)。
-   --  位置来源:只有跟点仪器逐帧跟点(一种量法;没配仪器 ⇒ 量不到,如实说)。
-   procedure Geo_Calibrate (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Cam, Arm : Natural; Slot : Integer; Ok : out Boolean) is
-      pragma Unreferenced (Slot);   --  点名的那块只是提示;盯谁按视差定
-      G : Geom.Cam_Geo;
-      Home : constant Plug.Arm_Pose := F.EE (Arm);
-      B : constant Long_Float := Geo_Base (C, Arm);   --  探针一步 = 最小能动的那一档:只为量视差,越小越不惊动候选(G1M 2026-09-24:四档 = 8 cm 一探就把视野挪了小半幅)
-      Notch : constant Long_Float := (if Arm * Chan.Per_Arm + 3 < Natural (C.Map.Amp.Length) then C.Map.Amp (Arm * Chan.Per_Arm + 3) else 0.0);
-      Theta : Long_Float := 4.0 * Notch;   --  转动一停的角:起步四倍转动探针那一档(倍数,无量纲;没量过转动就是 0 ⇒ 不转),阶梯探到的最大一档为准
-      Cw : constant Natural := (if Cam < Natural (F.Cams.Length) then F.Cams (Cam).W else 0);
-      Ch : constant Natural := (if Cam < Natural (F.Cams.Length) then F.Cams (Cam).H else 0);
-      Obs : Geom.Obs_Pt_Vectors.Vector;
-      Cand : Ints;                               --  候选的槽号
-      P0, Cur : Instrument.Track_Vectors.Vector; --  候选在起点、此刻的位置
-      Dead : Bools;                              --  判成"自己身上的"(转眼时不跟着世界挪)的候选:不记、不进解
-      Tid : Integer := -1;                       --  仪器的跟踪段号(-1 = 仪器没在跟 ⇒ 量不到点的位置)
-      Target : Integer := -1;                    --  视差最大的那一块(只用来定步长)
-      Step : Long_Float := B;
-      Mok : Boolean;
-      Dump : constant String := Codec.Env ("BL_DUMP");
-      Stop_N : Natural := 0;
-      Deg : constant Long_Float := 180.0 / Ada.Numerics.Pi;   --  弧度 → 度(换算,无量纲)
-      package Param_Pixels_P is new Ada.Containers.Vectors (Natural, Long_Float);
-      subtype Param_Pixels is Param_Pixels_P.Vector;
-      function Median_Px (Xs : Param_Pixels) return Long_Float is   --  中位数(拷一份插入排序;几十个点)
-         A : Param_Pixels := Xs;
-         N : constant Natural := Natural (A.Length);
-      begin
-         if N = 0 then
-            return 0.0;
-         end if;
-         for I in 1 .. N - 1 loop
-            declare
-               X : constant Long_Float := A (I);
-               J : Integer := I - 1;
-            begin
-               while J >= 0 and then A (J) > X loop
-                  A.Replace_Element (J + 1, A (J)); J := J - 1;
-               end loop;
-               A.Replace_Element (J + 1, X);
-            end;
-         end loop;
-         return A (N / 2);
-      end Median_Px;
-      Live_From : Natural := 0;   --  这一段跟踪从第几个候选起(复位之后眼里的东西换了:老候选退出,新候选接上,各算各的点)
-      Resets : Natural := 0;
-      --  候选:画幅中间那一半里(比例,无量纲)不贴边、不是自己手指的每一块;开一段跟踪。起点和每次复位之后各来一遍(新候选算新的点)
-         procedure Open_Segment is
-            N_Before : constant Natural := Natural (Cur.Length);
-            Fresh : Instrument.Track_Vectors.Vector;
-         begin
-            World.Observe (C.Wld, Cam, Cut_Things (C, F, Cam), Cw, Ch);
-            for Si in 0 .. World.Count (C.Wld, Cam) - 1 loop
-               declare
-                  Sl : constant World.Slot := World.Get (C.Wld, Cam, Si);
-                  Mine : constant Boolean := Zone.Is_Self (Zone_Of (C, Arm, Cam), Sl.R, Cw, Ch);
-                  On_Edge : constant Boolean := Sl.R.X0 = 0 or else Sl.R.Y0 = 0 or else Sl.R.X1 + 1 >= Cw or else Sl.R.Y1 + 1 >= Ch;
-                  Central : constant Boolean := Sl.R.Cu >= 0.25 and then Sl.R.Cu <= 0.75 and then Sl.R.Cv >= 0.25 and then Sl.R.Cv <= 0.75;
-               begin
-                  if Sl.Present and then not Mine and then not On_Edge and then Central then
-                     Cand.Append (Si);
-                     Dead.Append (False);
-                     Fresh.Append (Instrument.Track_Pt'(U => Sl.R.Cu * Long_Float (Cw), V => Sl.R.Cv * Long_Float (Ch), Seen => True, Conf => 1.0));
-                  end if;
-               end;
-            end loop;
-            for I in 0 .. N_Before - 1 loop   --  老候选退出这一段
-               Cur.Replace_Element (I, Instrument.Track_Pt'(U => Cur (I).U, V => Cur (I).V, Seen => False, Conf => 0.0));
-            end loop;
-            for Pt of Fresh loop
-               Cur.Append (Pt);
-            end loop;
-            Live_From := N_Before;
-            Tid := -1;
-            if Length (C.Inst_Host) > 0 and then not Fresh.Is_Empty then
-               declare
-                  Err : Unbounded_String;
-                  R : constant Instrument.Track_Vectors.Vector :=
-                    Instrument.Track_Start (To_String (C.Inst_Host), C.Inst_Port, F.Cams (Cam).RGB, Cw, Ch, Fresh, Tid, Err);
-               begin
-                  if Tid < 0 then
-                     Geo_Say ("仪器不跟点(" & To_String (Err) & ")⇒ 这一段量不到候选点的位置");
-                  elsif Natural (R.Length) /= Natural (Fresh.Length) then
-                     Geo_Say ("仪器跟的点数对不上 ⇒ 这一段量不到候选点的位置");
-                     Instrument.Track_End (To_String (C.Inst_Host), C.Inst_Port, Tid);
-                     Tid := -1;
-                  end if;
-               end;
-            end if;
-            P0 := Cur;
-         end Open_Segment;
-         --  对方复位 = 新的一集:手回了原处、眼里的东西换了。清掉标记,重开一段跟踪(眼里的、头顶眼里的指尖都重开),路径接着走。
-         --  以前一碰到复位就"量到几停算几停"、标记还留着 ⇒ 后面每一段开头就退(V1H 2026-09-24:两只眼各只走了 7 / 6 停,头顶眼 11 笔)
-         procedure On_Reset is
-         begin
-            if Plug.Take_Reset (L) then
-               Resets := Resets + 1;
-            end if;
-            if Tid >= 0 then
-               Instrument.Track_End (To_String (C.Inst_Host), C.Inst_Port, Tid);
-            end if;
-            Geo_Say ("对方复位(新的一集)⇒ 手回了原处、眼里的东西换了:重开一段跟踪,路径接着走");
-            Open_Segment;
-         end On_Reset;
-      --  候选此刻在画面里的位置:只问跟点仪器(这件量只有这一种量法)。没有仪器 / 仪器这一停没答上来 ⇒ 全算没看见、如实说。
-      --  (以前没有仪器时退回按槽号重切,09-26 owner:一个量只许一种量法 ⇒ 删了;按块认的办法 09-24 几炮都量飞,仪器跟 400 帧一个没丢)
-      procedure Where is
-         Err : Unbounded_String;
-      begin
-         if Tid < 0 then
-            for I in 0 .. Natural (Cur.Length) - 1 loop
-               Cur.Replace_Element (I, Instrument.Track_Pt'(U => Cur (I).U, V => Cur (I).V, Seen => False, Conf => 0.0));
-            end loop;
-            Geo_Say ("没有跟点仪器在跟 ⇒ 这一停量不到候选点在画面里的位置");
-            return;
-         end if;
-         if Tid >= 0 then
-            declare
-               R : constant Instrument.Track_Vectors.Vector :=
-                 Instrument.Track_Step (To_String (C.Inst_Host), C.Inst_Port, Tid, F.Cams (Cam).RGB, Cw, Ch, Err);
-               Good : constant Boolean := Natural (R.Length) = Natural (Cur.Length) - Live_From;
-            begin
-               if not Good then
-                  Geo_Say ("仪器这一停没答上来:" & To_String (Err));
-               end if;
-               for I in 0 .. Natural (Cur.Length) - 1 loop
-                  if Good and then I >= Live_From and then not Dead (I) then
-                     declare
-                        Pt : constant Instrument.Track_Pt := R.Element (I - Live_From);
-                     begin
-                        Cur.Replace_Element (I, Pt);
-                     end;
-                  else
-                     Cur.Replace_Element (I, Instrument.Track_Pt'(U => Cur (I).U, V => Cur (I).V, Seen => False, Conf => 0.0));
-                  end if;
-               end loop;
-            end;
-            return;
-         end if;
-      end Where;
-      --  手动的每一帧都喂给跟点仪器(不只停点):一转十几度,一停之间画面跳几十上百像素,只看停点的跟点器把桌上的点全跟丢
-      --  (G2B 2026-09-24 左眼:探一转 15 个点只跟住 3 个,还都是自己手上的)。逐帧喂,帧间只挪几个像素;位置仍在停点那一步(Where)取
-      function Track_Frame (Fr : Plug.Frame) return Boolean is
-         Err : Unbounded_String;
-      begin
-         if Tid >= 0 and then Cam < Natural (Fr.Cams.Length) then
-            declare
-               R : constant Instrument.Track_Vectors.Vector := Instrument.Track_Step (To_String (C.Inst_Host), C.Inst_Port, Tid, Fr.Cams (Cam).RGB, Cw, Ch, Err);
-               pragma Unreferenced (R);
-            begin
-               null;
-            end;
-         end if;
-         return False;   --  不打断走
-      end Track_Frame;
-      --  这一停里每个还看得见的点记一笔;返回记了几个
-      function Record_All return Natural is
-         K : Natural := 0;
-      begin
-         for I in 0 .. Natural (Cur.Length) - 1 loop
-            if Cur (I).Seen then
-               Obs.Append (Geom.Obs_Pt'(Pt => I, Pose => F.EE (Arm), U => Cur (I).U, V => Cur (I).V, Seq => F.Seq, Kind => 0));
-               K := K + 1;
-            end if;
-         end loop;
-         return K;
-      end Record_All;
-      function Shift (I : Natural) return Long_Float is   --  第 I 块从起点到此刻挪了多少像素(两头都看见才算)
-        (if I < Natural (Cur.Length) and then Cur (I).Seen and then P0 (I).Seen
-         then Sqrt ((Cur (I).U - P0 (I).U) ** 2 + (Cur (I).V - P0 (I).V) ** 2) else -1.0);
-      procedure Dump_Stop is
-      begin
-         Stop_N := Stop_N + 1;
-         if Dump /= "" then
-            Codec.Write_PGM (Dump & "/geo_cam" & Codec.Img (Cam) & "_stop" & Codec.Img (Stop_N) & ".pgm", F.Cams (Cam).Gray, Cw, Ch);
-         end if;
-      end Dump_Stop;
-      --  标定板用(2026-09-25):这一停手上这只眼的图、手的位姿、同一刻不动的眼的图记下来,开机末尾配点(Geo_Board)。
-      --  不动的眼 = 不长在任何一条臂上的那台主相机;没有就不记
-      procedure Board_Keep is
-         Wc : constant Natural := C.Map.World_Cam;
-         Fixed_Eye : constant Boolean := Wc /= Cam and then Wc < Natural (F.Cams.Length) and then Cam_Arm (C, Wc) < 0 and then F.Cams (Wc).W > 0;
-      begin
-         if Cw > 0 and then Fixed_Eye then
-            C.Board_Stops.Append (Board_Stop'(Cam => Cam, Arm => Arm, Seg => L.Ep_Seq0, Pose => F.EE (Arm), W => Cw, H => Ch, RGB => F.Cams (Cam).RGB,
-                                              Hw => F.Cams (Wc).W, Hh => F.Cams (Wc).H, Head => F.Cams (Wc).RGB));
-         elsif Cw > 0 then
-            --  没有不动的眼的身体:这一停照样记(板只靠手上的眼三角,2026-09-26)
-            C.Board_Stops.Append (Board_Stop'(Cam => Cam, Arm => Arm, Seg => L.Ep_Seq0, Pose => F.EE (Arm), W => Cw, H => Ch, RGB => F.Cams (Cam).RGB,
-                                              Hw => 0, Hh => 0, Head => Bytes.U8_Vectors.Empty_Vector));
-         end if;
-         --  落盘(BL_DUMP):这一停两张彩色图 + 位姿,离线 boardexam stops 原样重跑配点和一起解(录像到 2000 帧之后每 20 帧才存一帧,凑不齐同一刻的那两张)。
-         --  两种身体都落(09-26 修:加"没有不动的眼"那一支时这段被挪进了那一支里,有不动的眼的身体从那以后一停都没落);没有不动的眼时头那张不落、尺寸写 0 0
-         if Cw > 0 and then Dump /= "" then
-            declare
-               N : constant Natural := Natural (C.Board_Stops.Length) - 1;
-               Fo : Ada.Text_IO.File_Type;
-            begin
-               Codec.Write_BMP (Dump & "/board_" & Codec.Img (N) & "_w.bmp", F.Cams (Cam).RGB, Cw, Ch);
-               if Fixed_Eye then
-                  Codec.Write_BMP (Dump & "/board_" & Codec.Img (N) & "_h.bmp", F.Cams (Wc).RGB, F.Cams (Wc).W, F.Cams (Wc).H);
-               end if;
-               begin
-                  Ada.Text_IO.Open (Fo, Ada.Text_IO.Append_File, Dump & "/board_stops.txt");
-               exception
-                  when others => Ada.Text_IO.Create (Fo, Ada.Text_IO.Out_File, Dump & "/board_stops.txt");
-               end;
-               Ada.Text_IO.Put (Fo, Codec.Img (N) & " " & Codec.Img (Cam) & " " & Codec.Img (Arm) & " " & Codec.Img (L.Ep_Seq0));
-               for I in 0 .. 6 loop
-                  Ada.Text_IO.Put (Fo, " " & Codec.Fmt (F.EE (Arm) (I), 7));
-               end loop;
-               Ada.Text_IO.Put_Line (Fo, " " & Codec.Img (Cw) & " " & Codec.Img (Ch) & " "
-                                     & (if Fixed_Eye then Codec.Img (F.Cams (Wc).W) & " " & Codec.Img (F.Cams (Wc).H) else "0 0"));
-               Ada.Text_IO.Close (Fo);
-               --  这一停的关节读数(board_joints.txt:停号、臂、每组关节 "| v…";组的顺序同开机 [认] 关节角那一行)。
-               --  2026-09-26 V1b:离线量"关节转多少、手到哪" —— 只记录,不改行为
-               begin
-                  Ada.Text_IO.Open (Fo, Ada.Text_IO.Append_File, Dump & "/board_joints.txt");
-               exception
-                  when others => Ada.Text_IO.Create (Fo, Ada.Text_IO.Out_File, Dump & "/board_joints.txt");
-               end;
-               Ada.Text_IO.Put (Fo, Codec.Img (N) & " " & Codec.Img (Arm));
-               for Q of F.Joints loop
-                  Ada.Text_IO.Put (Fo, " |");
-                  for X of Q loop
-                     Ada.Text_IO.Put (Fo, " " & Codec.Fmt (X, 7));
-                  end loop;
-               end loop;
-               Ada.Text_IO.New_Line (Fo);
-               Ada.Text_IO.Close (Fo);
-            exception
-               when others => null;
-            end;
-         end if;
-      end Board_Keep;
-      --  平移一停:走、看、记(手拿转动凑平移的那一停不算:转动引起的相机位移和平移之比 > 一成就扔,比例无量纲)
-      --  每一停先等画面静止再记:手还在慢慢挪时记下的那一停,位姿读数和画面未必是同一刻(静止噪声为 0 的身体上 Selfmap.Go 等不到"位姿不变",
-      --  到拍数上限就返回;G2A 2026-09-24 实测停下之后还要 13–27 拍画面才静止)。最多等 30 拍(次数,同合空前的等法)
-      procedure Settle is
-         Used : Natural;
-         Ok2 : Boolean;
-      begin
-         Selfmap.Wait_Still (L, C.Map, F, 30, Used, Ok2);
-      end Settle;
-      procedure Stop (M : Geom.V3) is
-         Prev_U : constant Long_Float := (if Target >= 0 then Cur (Target).U else 0.0);
-         Prev_V : constant Long_Float := (if Target >= 0 then Cur (Target).V else 0.0);
-         K : Natural := 0;
-      begin
-         Geo_Move (L, C, F, Arm, M, Mok, Track_Frame'Unrestricted_Access);
-         Settle;
-         Where;
-         Dump_Stop;
-         declare
-            Rot : constant Long_Float := Geom.Angle_Between (Home, F.EE (Arm));
-            Turned : constant Boolean := Rot > 0.1;   --  转动引起的相机位移和平移之比 > 一成就扔(比例,无量纲)
-         begin
-            if not Turned then
-               K := Record_All;
-               Board_Keep;
-            end if;
-            Geo_Say ("量朝向:挪 (" & Mm (M (0)) & "," & Mm (M (1)) & "," & Mm (M (2)) & ") ⇒ 跟住 " & Codec.Img (K) & "/" & Codec.Img (Natural (Cur.Length)) & " 点"
-                     & (if Target >= 0 and then Cur (Target).Seen then ",视差最大的那块挪 " & Codec.Fmt (Sqrt ((Cur (Target).U - Prev_U) ** 2 + (Cur (Target).V - Prev_V) ** 2), 1) & " px" else "")
-                     & " · 手转了 " & Codec.Fmt (Rot * Deg, 1) & "°" & (if Turned then ",这一停不算" else ""));
-         end;
-         Head_Mark (L, C, F, Arm);   --  不动的眼在这一停给指尖做一笔标记(手停着才准)
-      end Stop;
-      --  转动一停:绕世界系的一根轴转 Theta(位姿读数给实到的角),看、记(转动是故意的,照记)
-      procedure Rot_Stop (Axis : Geom.V3; Sign : Long_Float) is
-         A : Table.Vec := Table.Zero_Vec;
-         Jaw : Floats;
-         Del : Table.Vec;
-         Before : constant Plug.Arm_Pose := F.EE (Arm);
-         K : Natural := 0;
-      begin
-         A (3) := Sign * Theta * Axis (0); A (4) := Sign * Theta * Axis (1); A (5) := Sign * Theta * Axis (2);
-         Step_Arm (L, C, F, Arm, A, Jaw, Del, Mok, Watch => Track_Frame'Unrestricted_Access);
-         Settle;
-         Where;
-         Dump_Stop;
-         K := Record_All;
-         Board_Keep;   --  转动停也进标定板:只平移定不住相机离手腕原点的偏移,转一下才定得住
-         Geo_Say ("量朝向:转 " & Codec.Fmt (Sign * Theta * Deg, 1) & "° ⇒ 实到 " & Codec.Fmt (Geom.Angle_Between (Before, F.EE (Arm)) * Deg, 1) & "°,跟住 "
-                  & Codec.Img (K) & "/" & Codec.Img (Natural (Cur.Length)) & " 点" & (if Mok then "" else " · 身体说没转成"));
-         Head_Mark (L, C, F, Arm);   --  转过之后手停着,不动的眼记一笔
-      end Rot_Stop;
-      --  转回起点的朝向:转动那几停命令 ±θ、实到的各不相同时,手会一直歪着,后面的平移停全作废
-      --  (G2B 2026-09-24:转完手歪着 74°,7 停平移全扔)。按位姿读数算出差的那个转动(世界轴)转回去;剩下不到一档转动探针就停,最多三次(次数)
-      procedure Face_Home is
-      begin
-         for Try in 1 .. 3 loop
-            declare
-               Rv : constant Geom.V3 := Geom.Rot_Vec (Geom.Mul (Geom.Quat_To_R (Home), Geom.Tr (Geom.Quat_To_R (F.EE (Arm)))));
-               A : Table.Vec := Table.Zero_Vec;
-               Jaw : Floats;
-               Del : Table.Vec;
-            begin
-               exit when Geom.Norm (Rv) <= Notch;
-               A (3) := Rv (0); A (4) := Rv (1); A (5) := Rv (2);
-               Step_Arm (L, C, F, Arm, A, Jaw, Del, Mok, Watch => Track_Frame'Unrestricted_Access);
-               Geo_Say ("转回起点的朝向:差 " & Codec.Fmt (Geom.Norm (Rv) * Deg, 1) & "° ⇒ 转完还差 " & Codec.Fmt (Geom.Angle_Between (Home, F.EE (Arm)) * Deg, 1) & "°");
-            end;
-         end loop;
-      end Face_Home;
-   begin
-      Ok := False;
-      Geo_Take_K (C, F, Cam);
-      G := Geo_Of (C, Cam);
-      if G.Cx <= 0.0 or else Cw = 0 then
-         Geo_Say ("这台相机连画幅都没有 ⇒ 量不了朝向");
-         return;
-      end if;
-      if G.F <= 0.0 then
-         Geo_Say ("这台相机没给焦距 ⇒ 和朝向一起解" & (if Theta > 0.0 then "(转 " & Codec.Fmt (Theta * Deg, 1) & "° 让焦距和远近分开)" else ";转动通道没量过 ⇒ 不转,焦距只能靠横挪,分不开远近"));
-      end if;
-      Settle;   --  起点那一停也先等画面静止(候选、位姿、标定板的参考停都取这一刻)
-      Open_Segment;
-      if Cur.Is_Empty then
-         Geo_Say ("画幅中间没有一块不贴边、不是自己的东西 ⇒ 量不了朝向");
-         return;
-      end if;
-      if Dump /= "" then
-         Codec.Write_PGM (Dump & "/geo_cam" & Codec.Img (Cam) & "_stop0.pgm", F.Cams (Cam).Gray, Cw, Ch);
-      end if;
-      Board_Keep;   --  起点那一停也是平移停(手在原处、没转)
-      declare
-         K0 : constant Natural := Record_All;   --  起点那一停
-      begin
-         Geo_Say ("量朝向:起点 " & Codec.Img (K0) & " 个候选" & (if Tid >= 0 then " · 仪器逐帧跟点" else " · 没有仪器在跟 ⇒ 量不到"));
-      end;
-      Head_Mark (L, C, F, Arm);   --  原处一笔
-      --  转动的停:转角由眼定,不由关节定。先按四倍转动探针档探一转,看跟住的点在画面里中位挪了几像素,按"每转挪画幅的 1/16"缩放
-      --  (比例,无量纲;下限一档、上限 64 档)。G1K 2026-09-24:关节一档是 x5 的三倍,四档 = 17.7° 一转就把点全甩出画面;x5 上四档只有 5.9°,又嫌小
-      if Theta > 0.0 then
-         declare
-            Before : Instrument.Track_Vectors.Vector;
-            Shifts : Param_Pixels;   --  挪得够"世界里的点"那条界的那些
-            Min_World : Long_Float := 0.0;   --  这一转世界里的点至少挪几像素
-            Sqrt3 : constant Long_Float := Sqrt (3.0);   --  √3(纯数学:tan 60°,视场 120° 的半角)
-            Each : Param_Pixels;   --  每个候选在转过去那一停的位移(没看见 = -1);转回来之前记下,转回来后世界点也都回原处了(G1P 2026-09-24:14 个世界点被误判成自己)
-         begin
-            if Plug.Reset_Pending (L) then
-               On_Reset;
-            end if;
-            Before := Cur;
-            declare
-               Pose_Before : constant Plug.Arm_Pose := F.EE (Arm);
-               Turned_By : Long_Float := 0.0;   --  实到的转角(位姿读数,弧度)
-            begin
-               Rot_Stop ([0.0, 0.0, 1.0], 1.0);
-               Turned_By := Geom.Angle_Between (Pose_Before, F.EE (Arm));
-               --  针孔相机的视场不超过 120°(同 Fit_Rig 里那条界)⇒ 焦距至少 半幅 / √3 ⇒ 转 θ 时世界里的点至少挪 (半幅 / √3)·θ 像素;
-               --  挪得比这还少的不是世界里的点(自己身上的、或跟错的),不拿来算焦距、不拿来定转角
-               --  (G2B 2026-09-24 左眼:跟住的 3 个点都只挪 0.5 px,当成世界算出焦距 2.4 px,转角放大到 188°,手拧了半圈)
-               Min_World := G.Cx / Sqrt3 * Turned_By;
-               for I in 0 .. Natural (Cur.Length) - 1 loop
-                  if Cur (I).Seen and then I < Natural (Before.Length) and then Before (I).Seen then
-                     declare
-                        D : constant Long_Float := Sqrt ((Cur (I).U - Before (I).U) ** 2 + (Cur (I).V - Before (I).V) ** 2);
-                     begin
-                        Each.Append (D);
-                        if D >= Min_World then
-                           Shifts.Append (D);
-                        end if;
-                     end;
-                  else
-                     Each.Append (-1.0);
-                  end if;
-               end loop;
-               --  转一个已知角,画面挪的像素 ÷ 角 = 焦距的粗值(远近不在式子里)。当先验带进联合解:盲搜有时落进错的盆
-               --  (G1R 2026-09-24 右眼:焦距 1133、偏移 −0.89 m、残差 1.18 px;焦距钉回 388 残差反而 0.57 px)。
-               --  不确定度:各点位移的离散 ÷ 角,再不小于十分之一(比例,无量纲):转的是手腕,相机离转轴有偏移,转动里混着几个百分点的平移
-               if Turned_By > 0.0 and then Natural (Shifts.Length) >= 3 then
-                  declare
-                     Med0 : constant Long_Float := Median_Px (Shifts);
-                     Dev : Param_Pixels;
-                     Tenth : constant Long_Float := 0.1;   --  十分之一(比例,无量纲)
-                  begin
-                     for X of Shifts loop
-                        Dev.Append (abs (X - Med0));
-                     end loop;
-                     if Med0 > 0.0 then
-                        G.F_Prior := Med0 / Turned_By;
-                        G.F_Prior_Sd := Long_Float'Max (Median_Px (Dev) / Turned_By, G.F_Prior * Tenth);
-                        C.Geo.Replace_Element (Cam, G);
-                        Geo_Say ("转 " & Codec.Fmt (Turned_By * Deg, 1) & "° 画面挪 " & Codec.Fmt (Med0, 1) & " px ⇒ 焦距粗值 " & Codec.Fmt (G.F_Prior, 0) & " ± "
-                                 & Codec.Fmt (G.F_Prior_Sd, 0) & " px,当联合解的先验");
-                     end if;
-                  end;
-               end if;
-            end;
-            Rot_Stop ([0.0, 0.0, 1.0], -1.0);
-            declare
-               Med : constant Long_Float := Median_Px (Shifts);
-               Want : constant Long_Float := Long_Float (Cw) / 16.0;   --  每转该挪的像素(画幅比例,无量纲)
-               N_Self : Natural := 0;
-               Quarter : constant Long_Float := 0.25;   --  四分之一(比例,无量纲)
-            begin
-               --  转眼时世界里的点不管远近都挪 焦距×角,自己身上的点(立在画面里的手指、机身)一动不动:挪得不到中位数四分之一(比例,无量纲)的就是自己,
-               --  剔出去(G1O 2026-09-24 左眼:食指立在画面中间,4 个"不动的点"把焦距拽到 61;离线剔掉后 381 ± 22,和右眼 382 一致)
-               if Med > 0.0 or else Min_World > 0.0 then
-                  for I in 0 .. Natural (Cur.Length) - 1 loop
-                     if I < Natural (Each.Length) and then Each (I) >= 0.0 and then (Each (I) < Med * Quarter or else Each (I) < Min_World) then
-                        Dead.Replace_Element (I, True);
-                        Cur.Replace_Element (I, Instrument.Track_Pt'(U => Cur (I).U, V => Cur (I).V, Seen => False, Conf => 0.0));
-                        N_Self := N_Self + 1;
-                     end if;
-                  end loop;
-                  if N_Self > 0 then
-                     Geo_Say ("转眼时不跟着世界挪的候选 " & Codec.Img (N_Self) & " 个 = 我自己身上的 ⇒ 不进解");
-                  end if;
-               end if;
-               if Med > 0.0 then
-                  Theta := Long_Float'Max (Notch, Long_Float'Min (Theta * Want / Med, 64.0 * Notch));   --  64 档 = 阶梯顶(倍数,无量纲)
-                  Geo_Say ("转角由眼定:探一转挪了 " & Codec.Fmt (Med, 1) & " px(" & Codec.Img (Natural (Shifts.Length)) & " 个点),该挪 " & Codec.Fmt (Want, 0)
-                           & " px ⇒ 每转 " & Codec.Fmt (Theta * Deg, 1) & "°");
-               else
-                  Theta := Notch;
-                  Geo_Say ("转角由眼定:探一转没有一个跟住的点挪得够世界里的点(至少 " & Codec.Fmt (Min_World, 1) & " px)⇒ 退到一档 " & Codec.Fmt (Theta * Deg, 1) & "°");
-               end if;
-            end;
-            if Plug.Reset_Pending (L) then
-               On_Reset;
-            end if;
-            Rot_Stop ([0.0, 0.0, 1.0], 1.0);
-            Rot_Stop ([0.0, 0.0, 1.0], -1.0);
-            Rot_Stop ([1.0, 0.0, 0.0], 1.0);
-            Rot_Stop ([1.0, 0.0, 0.0], -1.0);
-            Face_Home;
-         end;
-      end if;
-      if Plug.Reset_Pending (L) then
-         On_Reset;
-      end if;
-      --  探一步:沿第一根轴挪 B,谁挪得最多谁最近(只用来定步长)
-      Stop ([B, 0.0, 0.0]);
-      declare
-         Best : Long_Float := 0.0;
-      begin
-         for I in 0 .. Natural (Cur.Length) - 1 loop
-            if Shift (I) > Best then
-               Best := Shift (I); Target := I;
-            end if;
-         end loop;
-         if Target >= 0 then
-            --  步长:让它每步在画面里挪画幅的 1/16(比例,无量纲);探到的视差 = 每步多少像素 ⇒ 反推每步几米;
-            --  上限 = 这条臂量过的步幅(没量就阶梯的下一档 = 4 倍探针步,倍数无量纲),下限 = 探针步
-            Step := B * (Long_Float (Cw) / 24.0) / Best;   --  每步让它挪画幅的 1/24(比例,无量纲):路径要走两步再回,累计不能出画面
-            --  下限一档(G1K 2026-09-24:四档 = 8.1 cm 一步,3 停内把点全甩出画面),上限量过的步幅(没量就阶梯的下一档)
-            Step := Long_Float'Max (Geo_Base (C, Arm), Long_Float'Min (Step, (if G.Stride > 0.0 then G.Stride else 4.0 * B)));
-            Geo_Say ("探一步 " & Mm (B) & ":视差最大的是第 " & Codec.Img (Natural (Cand (Target))) & " 槽(" & Codec.Fmt (Best, 1) & " px,起点 ("
-                     & Codec.Fmt (P0 (Target).U, 0) & "," & Codec.Fmt (P0 (Target).V, 0) & "))⇒ 每步 " & Mm (Step));
-         else
-            Geo_Say ("探一步之后一块都没跟住 ⇒ 后面按探针步走");
-         end if;
-      end;
-      --  剩下的路:累计走,三根轴都有、再转回来一半
-      declare
-         Dirs7 : constant array (1 .. 7) of Geom.V3 :=
-           [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0], [-1.0, 0.0, 0.0]];   --  单位方向
-         Floor : constant Long_Float := Geo_Base (C, Arm);
-         Shrink : constant Long_Float := 0.5;   --  缩到一半(比例,无量纲)
-      begin
-         for D of Dirs7 loop
-            if Plug.Reset_Pending (L) then
-               On_Reset;
-            end if;
-            Stop ([D (0) * Step, D (1) * Step, D (2) * Step]);
-            --  这一停跟住的不到三分之二(比例,无量纲)⇒ 步子缩到一半(不低于一档):候选正在出画面或被自己的手挡住(G1M 左眼:22 个只剩 5 个)
-            declare
-               Kept : Natural := 0;
-            begin
-               for I in 0 .. Natural (Cur.Length) - 1 loop
-                  if Cur (I).Seen then
-                     Kept := Kept + 1;
-                  end if;
-               end loop;
-               if Kept * 3 < Natural (Cur.Length) * 2 and then Step > Floor then
-                  Step := Long_Float'Max (Floor, Step * Shrink);
-                  Geo_Say ("跟住的只剩 " & Codec.Img (Kept) & "/" & Codec.Img (Natural (Cur.Length)) & " ⇒ 步子缩到 " & Mm (Step));
-               end if;
-            end;
-         end loop;
-      end;
-      declare
-         Cur_P : constant Plug.Arm_Pose := F.EE (Arm);
-      begin
-         Geo_Move (L, C, F, Arm, [Home (0) - Cur_P (0), Home (1) - Cur_P (1), Home (2) - Cur_P (2)], Mok);
-      end;
-      if Tid >= 0 then
-         Instrument.Track_End (To_String (C.Inst_Host), C.Inst_Port, Tid);
-      end if;
-      --  观测落盘(BL_DUMP):离线用 geoexam 重解,不用再开一小时的炮(G1N 2026-09-24:两只眼都"解不出",日志没说为什么)
-      if Dump /= "" then
-         declare
-            Fo : Ada.Text_IO.File_Type;
-         begin
-            Ada.Text_IO.Create (Fo, Ada.Text_IO.Out_File, Dump & "/geo_cam" & Codec.Img (Cam) & "_obs.txt");
-            Ada.Text_IO.Put_Line (Fo, Codec.Img (Cw) & " " & Codec.Img (Ch) & " " & Codec.Fmt (G.Cx, 3) & " " & Codec.Fmt (G.Cy, 3) & " "
-                                  & Codec.Fmt (0.0, 3) & " " & Codec.Img (Natural (Cur.Length)));
-            for Ob of Obs loop
-               Ada.Text_IO.Put_Line (Fo, Codec.Img (Ob.Pt) & " " & Codec.Fmt (Ob.U, 3) & " " & Codec.Fmt (Ob.V, 3) & " " & Codec.Fmt (Ob.Pose (0), 6) & " " & Codec.Fmt (Ob.Pose (1), 6)
-                                     & " " & Codec.Fmt (Ob.Pose (2), 6) & " " & Codec.Fmt (Ob.Pose (3), 7) & " " & Codec.Fmt (Ob.Pose (4), 7) & " " & Codec.Fmt (Ob.Pose (5), 7)
-                                     & " " & Codec.Fmt (Ob.Pose (6), 7));
-            end loop;
-            Ada.Text_IO.Close (Fo);
-         exception
-            when others => null;
-         end;
-      end if;
-      declare
-         Used : Natural;
-      begin
-         Geom.Fit_Rig (G, Obs, Natural (Cur.Length), Ok, Used);
-         if Ok then
-            C.Geo.Replace_Element (Cam, G);
-            Geom.Save (To_String (C.Geo_Path), C.Geo);
-            Geo_Say ("相机朝向量好:" & Codec.Img (Stop_N + 1) & " 停" & (if Resets > 0 then "(中间复位 " & Codec.Img (Resets) & " 次)" else "") & " · " & Codec.Img (Used) & "/"
-                     & Codec.Img (Natural (Cur.Length)) & " 个点进了解(踢掉 " & Codec.Img (G.Dropped) & " 笔离群)· 像素残差 " & Codec.Fmt (G.Rms, 2) & " px"
-                     & (if G.F_Meas > 0.0 then " · 焦距一起解出来 " & Codec.Fmt (G.F, 1) & " ± " & Codec.Fmt (G.F_Sd, 1) & " px" else "")
-                     & " · 朝向 ± " & Codec.Fmt (G.Rot_Sd * Deg, 2) & "° · 相机离手腕原点 (" & Mm (G.Off (0)) & "," & Mm (G.Off (1)) & "," & Mm (G.Off (2)) & ") ± "
-                     & Mm (G.Off_Sd) & ",存进 " & To_String (C.Geo_Path));
-         else
-            Geo_Say ("朝向解不出来(记了 " & Codec.Img (Natural (Obs.Length)) & " 笔观测):" & To_String (Geom.Why));
-         end if;
-      end;
-   end Geo_Calibrate;
 
    --  几何逼近:让"指尖该到的那一点"(指尖中点再往手心里一点)和点名那块重合。每段走一截、停稳、再看一眼、再算。
    --  这一槽里的东西此刻看得【全不全】,以及它叫什么(点过名的才有名字)。看不全(顶到窗边/被画面切掉)的那一眼,形心不是同一个物理点。
@@ -7072,32 +6422,6 @@ package body Act is
       end;
    end Plan_Contact;
 
-   --  这只眼这一帧里最大的那一块(槽号);没有 ⇒ -1。量朝向要盯着一个不动的东西挪四下,随便什么东西都行
-   function Largest_Slot (C : in out Context; F : Plug.Frame; Cam : Natural) return Integer is
-      Best : Integer := -1;
-      Bc : Natural := 0;
-      A2 : constant Integer := Cam_Arm (C, Cam);
-   begin
-      World.Observe (C.Wld, Cam, Cut_Things (C, F, Cam), F.Cams (Cam).W, F.Cams (Cam).H);
-      for Si in 0 .. World.Count (C.Wld, Cam) - 1 loop
-         declare
-            Sl : constant World.Slot := World.Get (C.Wld, Cam, Si);
-            --  长在手上的眼里我自己的手指跟着眼走,盯着它量不出朝向(握区量过的那几瓣不算);
-            --  顶着画面边的块也不盯:它只露了一截,形心不是它的,手一挪就跟丢(S3 2026-09-23 实测:左眼盯了贴边的一块,一挪就没了)
-            Mine : constant Boolean := A2 >= 0 and then Zone.Is_Self (Zone_Of (C, Natural (A2), Cam), Sl.R, F.Cams (Cam).W, F.Cams (Cam).H);
-            On_Edge : constant Boolean := Sl.R.X0 = 0 or else Sl.R.Y0 = 0 or else Sl.R.X1 + 1 >= F.Cams (Cam).W or else Sl.R.Y1 + 1 >= F.Cams (Cam).H;
-            --  形心要在画幅中间那一半里(比例,无量纲):贴着画幅边上的大块(墙、桌沿)手一挪就变形、出画(S4 2026-09-23 实测:左眼盯了右上角的墙面,四停丢两停)
-            Central : constant Boolean := Sl.R.Cu >= 0.25 and then Sl.R.Cu <= 0.75 and then Sl.R.Cv >= 0.25 and then Sl.R.Cv <= 0.75;
-         begin
-            if Sl.Present and then not Mine and then not On_Edge and then Central and then Sl.R.Count > Bc then
-               Bc := Sl.R.Count;
-               Best := Si;
-            end if;
-         end;
-      end loop;
-      return Best;
-   end Largest_Slot;
-
    --  转这只手,让它自己那只眼的正前方对准世界里的一个方向(Want,单位向量)。
    --  转最少的角度:转轴 = 现在的正前方 × 要的方向。指尖不许甩走(08-28 那次甩出 20 cm):每一步先按要转的角度算出
    --  指尖会挪到哪,再用平移把它补回原处 —— 指尖偏置是量过的。一条命令最多转多少 = 开机量出来的"一条命令转得到的最大一档"(G.Stride_Rot)× 脑的档位;
@@ -7118,33 +6442,10 @@ package body Act is
          Event := S ("refused: I cannot turn this eye - it does not ride on this arm, or my turning stride has not been measured");
          return;
       end if;
-      --  这只眼装在手上的朝向还没量 ⇒ 现在量:盯着这只眼里【最大的那一块】(随便什么东西都行,只要它不动)挪四下
+      --  这只眼在手上怎么装的只有一种量法:开机量(运动学 + 对齐);开机没量出 ⇒ 照实说(09-30 删了"干活时盯着一块挪几下现量"那条后备)
       if not C.Geo (Natural (Hc)).Valid then
-         declare
-            Ec : constant Natural := Natural (Hc);
-            Best : Integer := -1;
-            Bc : Natural := 0;
-            Cok : Boolean := False;
-         begin
-            World.Observe (C.Wld, Ec, Cut_Things (C, F, Ec), F.Cams (Ec).W, F.Cams (Ec).H);
-            for Si in 0 .. World.Count (C.Wld, Ec) - 1 loop
-               declare
-                  Sl : constant World.Slot := World.Get (C.Wld, Ec, Si);
-               begin
-                  if Sl.Present and then Sl.R.Count > Bc then
-                     Bc := Sl.R.Count; Best := Si;
-                  end if;
-               end;
-            end loop;
-            if Best >= 0 then
-               Geo_Say ("第" & Codec.Img (Ec) & " 台相机的朝向还没量 ⇒ 先盯着它里面最大的一块(" & Codec.Img (Bc) & " px)挪四下量出来");
-               Geo_Calibrate (L, C, F, Ec, Arm, Best, Cok);
-            end if;
-            if not Cok then
-               Event := S ("refused: I cannot turn this eye - I could not measure how it sits on my hand (nothing steady to look at)");
-               return;
-            end if;
-         end;
+         Event := S ("refused: I cannot turn this eye - how it sits on my hand was not measured at boot");
+         return;
       end if;
       declare
          G : constant Geom.Cam_Geo := C.Geo (Natural (Hc));
@@ -7435,9 +6736,13 @@ package body Act is
       if Seen and then Whole then
          declare
             P : constant Plug.Arm_Pose := F.EE (Arm);
+            Rok : Boolean;
+            D : constant Geom.V3 := Geom.Ray (G, P, U, V, Rok);   --  去不了畸变(像素在镜头模型够不到的地方)⇒ 这只眼不给视线
          begin
-            Rays.Append (Geom.Sight'(O => Geom.Cam_Pos (G, P), D => Geom.Ray (G, P, U, V)));
-            Sds.Append (Ray_Sd (G));
+            if Rok then
+               Rays.Append (Geom.Sight'(O => Geom.Cam_Pos (G, P), D => D));
+               Sds.Append (Ray_Sd (G));
+            end if;
             Append (Who, "第" & Codec.Img (Cam) & " 台");
          end;
       end if;
@@ -7468,14 +6773,25 @@ package body Act is
                               if Hand_On_It then
                                  null;   --  这一眼不给视线
                               elsif A2 < 0 then
-                                 Rays.Append (Geom.Sight'(O => Gm.Pos, D => Geom.Ray_Fixed (Gm, Pu, Pv)));
-                                 Sds.Append (Ray_Sd (Gm));
+                                 declare
+                                    Rok : Boolean;
+                                    D : constant Geom.V3 := Geom.Ray_Fixed (Gm, Pu, Pv, Rok);
+                                 begin
+                                    if Rok then
+                                       Rays.Append (Geom.Sight'(O => Gm.Pos, D => D));
+                                       Sds.Append (Ray_Sd (Gm));
+                                    end if;
+                                 end;
                               else
                                  declare
                                     P2 : constant Plug.Arm_Pose := F.EE (Natural (A2));
+                                    Rok : Boolean;
+                                    D : constant Geom.V3 := Geom.Ray (Gm, P2, Pu, Pv, Rok);
                                  begin
-                                    Rays.Append (Geom.Sight'(O => Geom.Cam_Pos (Gm, P2), D => Geom.Ray (Gm, P2, Pu, Pv)));
-                                    Sds.Append (Ray_Sd (Gm));
+                                    if Rok then
+                                       Rays.Append (Geom.Sight'(O => Geom.Cam_Pos (Gm, P2), D => D));
+                                       Sds.Append (Ray_Sd (Gm));
+                                    end if;
                                  end;
                               end if;
                               Append (Who, (if Length (Who) > 0 then "+" else "") & "第" & Codec.Img (Cm) & " 台");
@@ -7564,9 +6880,15 @@ package body Act is
             St : Natural;
             --  🔴 先算好再传:从 F 算出的东西不许直接当实参交给会改 F 的调用(GC12 / H24 2026-09-22 同一处崩:
             --  Plug.Sense 里帧的 finalize 报 PROGRAM_ERROR)
-            Want : constant Geom.V3 := Geom.Ray (G, F.EE (Arm), U, V);
+            Ray_Ok : Boolean;
+            Want : constant Geom.V3 := Geom.Ray (G, F.EE (Arm), U, V, Ray_Ok);
          begin
-            Geo_Turn (L, C, F, Arm, Want, Amt, Ev, St);
+            if Ray_Ok then
+               Geo_Turn (L, C, F, Arm, Want, Amt, Ev, St);
+            else
+               Ev := S ("its pixel is outside what my lens model covers, so I cannot tell which way to turn");
+               St := 0;
+            end if;
             Steps_Taken := Steps_Taken + St;
             Geo_Say ("它被画面边切着 ⇒ 转眼看着它(" & To_String (Ev) & ")");
             --  转过之后它的方向没变(世界系那条视线),把窗投到这条视线在新位姿画面里的落点
@@ -7918,9 +7240,15 @@ package body Act is
                   declare
                      Ev : Unbounded_String;
                      St : Natural;
-                     Want : constant Geom.V3 := Geom.Ray (G, F.EE (Arm), U, V);   --  先算好再传(见上)
+                     Ray_Ok : Boolean;
+                     Want : constant Geom.V3 := Geom.Ray (G, F.EE (Arm), U, V, Ray_Ok);   --  先算好再传(见上)
                   begin
-                     Geo_Turn (L, C, F, Arm, Want, Amt, Ev, St);
+                     if Ray_Ok then
+                        Geo_Turn (L, C, F, Arm, Want, Amt, Ev, St);
+                     else
+                        Ev := S ("its pixel is outside what my lens model covers, so I cannot tell which way to turn");
+                        St := 0;
+                     end if;
                      Steps_Taken := Steps_Taken + St;
                      Geo_Say ("它被画面边切着 ⇒ 转眼看着它(" & To_String (Ev) & ")");
                      Retarget_Box (C, F, Cam, Arm, Name, Pw);   --  它在哪这一步刚算过(Pw)⇒ 投进转过的眼
@@ -9798,6 +9126,10 @@ package body Act is
                   return;
                end if;
                --  每一块先合到离料还剩一点(Pre;张口和抓握读数按线性换算 —— 开机只量了张开、合空两头的读数,说出来)
+               if Pick.Pre > 0.0 and then not Hand_Of (C, Arm, Say.Grip_K).Measured then
+                  Event := S ("refused: I never measured which readings open and close this grip, so I cannot pre-close it before going down");
+                  return;
+               end if;
                if Pick.Pre > 0.0 then
                   declare
                      Hk : constant Zone.Hand := Hand_Of (C, Arm, Say.Grip_K);
@@ -9987,17 +9319,21 @@ package body Act is
          end;
          declare
             Jk : constant Natural := Natural (Integer'Max (0, C.Wld.Held_Jaw));
-            R_Now : constant Long_Float := Selfmap.Jaw_Of (F, Arm, Jk);
+            Have_R : constant Boolean := Selfmap.Has_Jaw (F, Arm, Jk);
+            R_Now : constant Long_Float := (if Have_R then Selfmap.Jaw_Of (F, Arm, Jk) else 0.0);   --  没读数时不用它(下面先问 Have_R)
             Emp : Long_Float := 0.0;
             Hf : Zone.Hand;
             Found : Boolean := False;
          begin
             for H of C.Hands loop
-               if H.Arm = Arm and then H.K = Jk then
+               if H.Arm = Arm and then H.K = Jk and then H.Measured then
                   Emp := H.Empty_Close; Hf := H; Found := True;
                end if;
             end loop;
-            if Found and then Past_Empty (Hf, R_Now) <= C.Map.Jaw_Noise then
+            if not Have_R then
+               Event := S ("settled: I moved it " & Len (C, Went) & " along the direction that changes its " & Qty
+                           & "; my fingers report no reading this beat, so I cannot tell whether it is still between them") & Note;
+            elsif Found and then Past_Empty (Hf, R_Now) <= C.Map.Jaw_Noise then
                Event := S ("slipped: I moved my hand " & Len (C, Went) & " along that direction and my fingers closed to their empty reading - it is no longer between them");
                C.Wld.Holding := False;
             elsif Went + Went < Ln then   --  两下加起来还不到要的一半(纯数学的一半)
@@ -10097,7 +9433,10 @@ package body Act is
                      end;
                   end if;
                   --  🔴 脑说合就合。这里不再有任何"我觉得还不到时候"的判断。
-                  if Caged then
+                  if Caged and then not Hand_Of (C, A, Say.Grip_K).Measured then
+                     --  这个抓握通道开机没推到两头量过 ⇒ 不知道哪个读数是合(09-30:原来按缺省"合 0"= x5 的约定照发)
+                     Did_Grip := S ("I did NOT close grip " & Codec.Img (A + 1) & ": I never measured which reading closes it (its two ends were not measured at boot)");
+                  elsif Caged then
                      --  合 = 发合拢那头的读数(开机两头推到头量的,V1b ②;原来写死 0.0 —— 读数在 0–1、0 = 合是 x5 的约定)
                      Move_Jaw (L, C, F, A, Hand_Of (C, A, Say.Grip_K).Empty_Close, Steps_J, Reading, Say.Grip_K);
                      declare
@@ -10165,7 +9504,7 @@ package body Act is
                            if Grasp_Valid then
                               Note_Grip_Mu (Geo_Name, Held => False);   --  没拿住:这一组要的摩擦它给不起(不是"这一处拉黑")
                            end if;
-                           Move_Jaw (L, C, F, A, Hand_Of (C, A, Say.Grip_K).Open_Reading, Steps_J, Reading, Say.Grip_K);
+                           Move_Jaw (L, C, F, A, Hand_Of (C, A, Say.Grip_K).Open_Reading, Steps_J, Reading, Say.Grip_K);   --  走到这里手一定量过(上面没量过就不合)
                            Append (Did_Grip, "; I opened it again");
                         end if;
                      end;
@@ -10182,11 +9521,16 @@ package body Act is
                   Steps_J : Natural;
                   Reading : Long_Float;
                begin
-                  Move_Jaw (L, C, F, A, Hand_Of (C, A, Say.Grip_K).Open_Reading, Steps_J, Reading, Say.Grip_K);
-                  C.Wld.Holding := False; C.Wld.Held_Arm := -1; C.Wld.Held_Jaw := -1; C.Wld.Held_Slot := -1;
-                  C.Held_Set_Valid := False;
-                  Memory.Set (C.Mem, "holding", "");
-                  Did_Grip := S ("I opened grip " & Codec.Img (A + 1) & " (" & Codec.Img (Steps_J) & " steps, reading " & Codec.Fmt (Reading, 3) & ")");
+                  if not Hand_Of (C, A, Say.Grip_K).Measured then
+                     --  没量过哪个读数是张开 ⇒ 不张(09-30:原来按缺省"张 1"= x5 的约定照发)
+                     Did_Grip := S ("I did NOT open grip " & Codec.Img (A + 1) & ": I never measured which reading opens it (its two ends were not measured at boot)");
+                  else
+                     Move_Jaw (L, C, F, A, Hand_Of (C, A, Say.Grip_K).Open_Reading, Steps_J, Reading, Say.Grip_K);
+                     C.Wld.Holding := False; C.Wld.Held_Arm := -1; C.Wld.Held_Jaw := -1; C.Wld.Held_Slot := -1;
+                     C.Held_Set_Valid := False;
+                     Memory.Set (C.Mem, "holding", "");
+                     Did_Grip := S ("I opened grip " & Codec.Img (A + 1) & " (" & Codec.Img (Steps_J) & " steps, reading " & Codec.Fmt (Reading, 3) & ")");
+                  end if;
                end;
             end if;
             if Did_Grip /= "" then
@@ -10289,26 +9633,13 @@ package body Act is
                end if;
             end if;
          end;
-         --  这条臂的眼朝向还没量(左腕眼一直没量过)⇒ 第一次用它时当场量:盯着它眼里最大的一块挪四下(PLAN 第 2 步)。走到它跟前(1)和合在它上(5)都要
+         --  这条臂的眼在手上怎么装的开机没量出 ⇒ 用不了这只眼走路、合手,照实说(一种量法:开机量;09-30 删了"第一次用它时当场挪四下量"那条后备)
          if Geo_Case in 1 | 5 and then not Geo_Of (C, Natural (Geo_Cam)).Valid then
-            declare
-               Cok : Boolean;
-            begin
-               --  盯着谁挪:脑点名的那块在这只眼里有槽就盯它;没有(脑在别的眼里点的名)就盯这只眼里最大的一块(随便什么都行,只要它不动)
-               declare
-                  Sl : constant Integer := (if Geo_Slot_Now >= 0 then Geo_Slot_Now else Largest_Slot (C, F, Natural (Geo_Cam)));
-               begin
-                  Put_Line ("[身] 📐 这台相机的朝向还没量 ⇒ 先盯着" & (if Geo_Slot_Now >= 0 then "它" else "这只眼里最大的一块") & "挪四下量出来");
-                  Geo_Calibrate (L, C, F, Natural (Geo_Cam), Natural (Own), Sl, Cok);
-               end;
-               if not Cok then
-                  Report := S ("I tried to measure how my hand camera sits on my hand and could not. ");
-                  if Geo_Case = 5 then
-                     Say.Grip := Null_Unbounded_String;   --  眼都量不出,合拢点送不到它身上,合了也是空
-                  end if;
-                  Geo_Case := 0;
-               end if;
-            end;
+            Report := S ("how my hand camera sits on my hand was not measured at boot, so I cannot walk or close by it. ");
+            if Geo_Case = 5 then
+               Say.Grip := Null_Unbounded_String;   --  眼都量不出,合拢点送不到它身上,合了也是空
+            end if;
+            Geo_Case := 0;
          end if;
          if Geo_Case = 1 then
             Put_Line ("[身] ⚙ 几何走法:" & To_String (Geo_Desc)
@@ -11016,7 +10347,7 @@ package body Act is
                   V : Long_Float := Cur (K);
                begin
                   for Hh of C.Hands loop
-                     if Hh.Arm = A and then Hh.K = K then
+                     if Hh.Arm = A and then Hh.K = K and then Hh.Measured then
                         V := Hh.Open_Reading;
                      end if;
                   end loop;
@@ -11518,16 +10849,21 @@ package body Act is
                Zone.Tip_Section (Z, Lb, Cw, Ch, U, V, Wd, Wt, Ok);
                if Ok and then Z.Valid then
                   declare
-                     Dc : Geom.V3 := Geom.Cam_Dir (G0, U, V);   --  相机系单位视线(去掉镜头畸变)
+                     Dir_Ok : Boolean;
+                     Dc : Geom.V3 := Geom.Cam_Dir (G0, U, V, Dir_Ok);   --  相机系单位视线(去掉镜头畸变;去不了 ⇒ 这一瓣不要)
                      Nn : constant Long_Float := Geom.Norm (Dc);
                   begin
-                     for I in 0 .. 2 loop
-                        Dc (I) := Dc (I) / Nn;
-                     end loop;
-                     D.Append (Dc);
-                     Tu.Append (U); Tv.Append (V);
-                     Nw.Append (Wd);   --  指尖那一小截的像素跨度(不是整瓣:V1B21 整瓣 124 px 落到面上 90 mm,空的面挑到了半米外)
-                     Nt.Append (Wt);
+                     if Dir_Ok and then Nn > 0.0 then
+                        for I in 0 .. 2 loop
+                           Dc (I) := Dc (I) / Nn;
+                        end loop;
+                        D.Append (Dc);
+                        Tu.Append (U); Tv.Append (V);
+                        Nw.Append (Wd);   --  指尖那一小截的像素跨度(不是整瓣:V1B21 整瓣 124 px 落到面上 90 mm,空的面挑到了半米外)
+                        Nt.Append (Wt);
+                     else
+                        Geo_Say (Who & ":第 " & Codec.Img (K + 1) & " 瓣的尖落在镜头模型够不到的地方 ⇒ 这一瓣不量");
+                     end if;
                   end;
                end if;
             end;
