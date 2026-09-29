@@ -392,18 +392,12 @@ package Act is
       Touch_Fresh : Boolean := False;        --  这张面是这一集里碰出来的(False = 上一集留下的,新一集第一次朝下被顶住就换成新的,再往后只让更低的换)
       Bumps : Contact.V3_Vectors.Vector;     --  这一集里朝下被顶住、却比它躺的面高的地方(躺在面上的别的东西,或它自己):记进地图,不当成面
    end record;
-   --  标定板(2026-09-25):C.Board_Stops 里每只量好了的腕眼、同一集的那几停 ⇒ 仪器配点 ⇒ C.Board / C.Board_Tracks(Geom.Build_Board)。
-   --  Geo_Board_Solve:按板解不动的眼(Wc),再腕眼 + 不动的眼一起解(Geom.Refine_Board),按新几何重三角,板上的点躺的那张面进地图。
-   --  开机(Geo_Boot_Fixed)调;导出只为离线工具 boardexam 拿落盘的图跑同一段代码
-   procedure Geo_Board (C : in out Context);
-   procedure Geo_Board_Solve (C : in out Context; G : in out Geom.Cam_Geo; Rep : out Geom.Fixed_Report; Ok : out Boolean);
    --  不动的眼每轮核一次(V1:被转了、被挡了一半 ⇒ 身体自己发现、重新标、接着干):Fixed_Ref → 此刻的图,仪器把板上的点配过来 ⇒ Geom.Check_Fixed。
    --  挪过 ⇒ 位姿换成按板重解的、说出来、存几何文件;挡住一大块 ⇒ 说出来(位姿照旧)。没配仪器、没有板 ⇒ 不核(量不出来)
    procedure Check_Fixed_Eye (F : Plug.Frame; C : in out Context);
    --  标定板随身体文件存、随身体文件装回(<几何文件>.board.txt + .board_ref.bmp):下一次开机装回身体时板和参考图也回来,每轮核对照常;
    --  两次开机之间相机被挪过 ⇒ 第一轮核对就发现、重标
    procedure Board_Save (C : Context);
-   procedure Board_Load (C : in out Context);
    --  朝下被顶住的一点进地图(有板的面时只和它对账、不换它);开机碰桌面时在板上找一块空的面(压的那一瓣和别的瓣落点连成的几段 R 之内没有高出面的板点)。
    --  导出只为自检
    procedure Note_Support (C : in out Context; P, N : Geom.V3; How : String);
@@ -426,23 +420,12 @@ package Act is
    function Past_Empty (H : Zone.Hand; R : Long_Float) return Long_Float;
 
    procedure Init_Tracks (C : in out Context);
-   --  开机装回几何常数(身体文件旁边的 .geo.json:焦距、相机在手上的朝向、指尖在相机里的位置);缺的当场量。
-   procedure Geo_Boot (F : Plug.Frame; C : in out Context; Body_Path : String);
    --  开机后半段的几何从前半段来(V1b 09-27):每台相机一份(Geo:手上那只眼 = 运动学量的焦距、主点,插头给的手的位姿就是它的位姿 ⇒ 不转、不偏;
    --  不动的眼 = 对齐量的,世界系)、标定板(Board:放进世界的手三角出、配进不动的眼的点)、世界系的桌面(Plane_*)、不动的眼那一刻的画面(Ref:
    --  板上的点在它里面的像素就是在这张图里配的,每轮核对拿它比)。这几样前半段量过,后半段不再量(朝向、不动的眼);指尖、步幅后面照量。
    --  长度单位 = 第一只手运动学的单位(从零量的每一炮不一样 ⇒ 不装回上一炮的几何文件;前半段按身体文件装回的是同一个单位 ⇒ Keep_Tips)
    procedure Geo_Install (F : Plug.Frame; C : in out Context; Body_Path : String; Geo : Geom.Geo_Vectors.Vector; Board : Geom.Scene_Pt_Vectors.Vector;
                           Plane_Pt, Plane_N : Geom.V3; Plane_Rms : Long_Float; Ref : Plug.Cam; Keep_Tips : Boolean := False);
-   --  Keep_Tips:前半段是装回的(同一个世界单位)⇒ 几何文件里存的指尖、张口照用(后半段"缺什么才量什么");从零量的前半段不留旧的(单位换了)
-   --  量【不动的眼】:看着自己的手挪几下(每停一处合空一次,看指尖落在画面哪儿),解出它在世界里的位置和朝向。
-   --  只在它还没量过时做;量过就存进几何文件,下一炮直接装回。
-   procedure Geo_Boot_Fixed (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);
-   --  开机把身体量全(任何身体同一套,不分左右、不抄数):
-   --  ① 长在通道组(臂)上的每一只眼:朝向没量过的,盯着它眼里最大的一块不动的东西挪四下量出来;
-   --  ② 每只能合拢的手:指尖偏置没量过的(没有深度就量不了),借不动的眼在两停里看它指尖落在哪,解出指尖离眼多远;
-   --  ③ 每只手:指尖朝下压到被顶住,量出它下面那张面在哪(东西躺的面;先量了,第一句话就不用猜高度)
-   procedure Geo_Boot_Eyes (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);
    procedure Geo_Boot_Support (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);
    --  ④ 每条臂一条命令能走多远还走得到(阶梯探)
    --  这只手一条命令转得到的最大一档(弧度):按运动学在量到的关节限位里问反解(Plug.Reach,不动胳膊)—— 从位姿 P0 绕世界 x 轴转,

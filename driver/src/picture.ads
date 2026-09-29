@@ -32,8 +32,6 @@ package Picture is
    function Cut_Colour (RGB : Buf; W, H : Natural; Floor_Level : Long_Float; Min_Count : Natural) return Regions;
    --  这张画面自己的纹理有多粗:相邻像素颜色差的中位数(木纹、布纹都在这个量级)。切块的门槛要比它大才不会把纹理切成块
    function Texture_Level (RGB : Buf; W, H : Natural) return Long_Float;
-   procedure Mean_Colour (RGB : Buf; W, H : Natural; R : Region; Cr, Cg, Cb : out Long_Float);
-   function Region_Mask (Depth : Floats; W, H : Natural; R : Region) return Bools;
    function Near_Depth (Depth : Floats; W, H : Natural; U, V, Win_Frac : Long_Float) return Long_Float;  --  NaN = 读不到
    function Null_Floor (A, B : Buf; W, H : Natural; Min_Px : Natural) return Floor_Map;
    function Moved (A, B : Buf; F : Floor_Map) return Bools;
@@ -49,15 +47,6 @@ package Picture is
    function Fraction (Mask : Bools) return Long_Float;
    function Max_Diff (A, B : Buf) return Natural;
    function Mean_Gray (G : Buf; W, H : Natural; R : Region) return Long_Float;   --  这一块框里的平均灰度(0..255)
-   --  脑说"它在这一框里"(BX0..BY1,像素,闭区间);框里【哪些像素】是它,由我自己量。不要深度,不要全图切块。
-   --  Found = False:框里没有哪一片和周围分得开(如实说,不硬凑)。
-   --  Isolated = False:量到的那一块顶到了让出来的那一圈 ⇒ 它在这一框里没被单独框出来(挨着别的东西,或被画面切掉)
-   --  ⇒ 这只眼里它的形心和长轴不可信。这一位只是如实报,不拦任何动作。
-   procedure Measure_In_Box (G : Buf; W, H : Natural; BX0, BY0, BX1, BY1 : Natural;
-                             Found, Isolated : out Boolean; R : out Region);
-   --  同上,并交出它的像素(整幅掩膜)
-   procedure Measure_In_Box (G : Buf; W, H : Natural; BX0, BY0, BX1, BY1 : Natural;
-                             Found, Isolated : out Boolean; R : out Region; Mask : out Bools);
    --  一张整幅掩膜(W*H,是 = 它)⇒ 它的框、像素数、形心、主轴、伸长比(同 Measure_In_Box 的算法;2026-09-26 分割仪器 SAM 出掩膜后用)。一个像素都没有 ⇒ Ok = False
    procedure Region_Of_Mask (M : Bools; W, H : Natural; R : out Region; Ok : out Boolean);
    function Quantile (F : in out Floats; Q : Long_Float) return Long_Float;

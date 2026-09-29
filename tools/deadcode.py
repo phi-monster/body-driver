@@ -5,6 +5,8 @@
 # 只给自检当假身体用的钩子(驱动自己不调、专门让自检替身体喂一拍)照实列在 TEST_HOOKS 里,每一个写明替谁。
 TEST_HOOKS = {
     ("plug.adb", "Lock_Feed"): "自检在主线程里当假身体,替 Lock_Beat 从链路收的那一帧",
+    ("contact.adb", "Turn"): "脑要它'绕一根轴转'的那种运动(接触集执行层 Contact.Exec.Steps 吃的 Twist);自检拿它验转着走,驱动接上'脑要它怎么动'(PLAN ② 接下来第 1 条)就是活的",
+    ("kinem.adb", "Refine_Tracks"): "把 Fit 的最后一步(④ 多视图,Refine_Until_Done)单独交给自检,从真模型起步验它",
 }
 import os, re, sys, glob, collections
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

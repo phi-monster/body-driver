@@ -47,12 +47,6 @@ package Contact.Exec is
    --  接触集 → 一串航点:悬停(沿各自那只手的工具轴往回退 Standoff,容差放宽到进场余量)→ 贴上(容差用最严的)→ 按③把接触点分 Arc 段搬过去,手跟着物体转。
    --  转必须分步:一步到位等于让手沿直线穿过物体,而接触点是沿圆弧走的 —— 撬、翻、倒、拧全都吃它。不动的动词到"贴上"就结束,那也是一个完整的计划
    procedure Steps (S : Set; L : Hand_Limits; Must_Move : Boolean; Arc : Positive; Out_Steps : out Step_Vectors.Vector; Why : out No_Plan);
-   --  一串 / 并存 → 一串航点。"够"(Reach)不需要变体:每一段的第一个航点(悬停)就是它,执行层自己产生过渡。
-   --  Keep:除第一段外把每段开头的悬停扔掉(手已经握着东西在那儿),并把前面几段已经转过的角带进来(不带的话手腕悄悄转回去);
-   --  Meanwhile:朝向由维持的那一段定;Clear:一步、永远不接触。过渡的避障没做:那是世界属性(学),不该在这一层里硬编
-   procedure Script (M : Move; L : Hand_Limits; Must_Move : Boolean; Arc : Positive; Out_Steps : out Step_Vectors.Vector; Why : out No_Plan);
-   --  把一个点让到"离每一个要躲的地方都至少 By_M 远"的位置。不是"从最近那个推开"(会推向另一个);取有限的候选方向,各算出"走多远才彻底出了所有的球",取最短
-   function Dodge_To (P : V3; Keep_Out : V3_Vectors.Vector; By_M : Long_Float; Ok : out Boolean) return V3;
    --  走完一段之后:偏了没有。只是路过的点永远不算偏;要碰的点,门槛只能由这具身体自己的重复精度给
    function Off_Course (L : Hand_Limits; St : Step; Residual_M : Long_Float) return Boolean;
 end Contact.Exec;

@@ -50,8 +50,6 @@ package Instrument is
       Ua, Va, Ub, Vb : Long_Float := 0.0;
    end record;
    package Pair_Vectors is new Ada.Containers.Vectors (Natural, Pair_Pt);
-   function Sample_Ids (Host : String; Port : Natural; Ia, Ib : Natural; Num : Natural; Err : out Unbounded_String;
-                        Coarse : Boolean := False) return Pair_Vectors.Vector;
    --  分割(SAM 2.1,2026-09-26 owner 批准):脑给一个框(X1 < X0 = 没有框)、或几个点(在它身上 / 不在)⇒ 那件东西在这一帧里的整片像素。
    --  Mask 按行展开(W*H 个,是 = 它);Score = 模型自报的 IoU(只报数、不当门);Area = 像素数。没配仪器 / 没问到 ⇒ Ok = False(Err 说为什么)
    type Seg_Pt is record

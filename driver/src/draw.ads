@@ -13,7 +13,6 @@ package Draw is
    procedure Rect (RGB : in out Buf; W, H, X0, Y0, X1, Y1 : Natural; C : Color; Thick : Natural);
    procedure Number (RGB : in out Buf; W, H, X, Y, N : Natural; C : Color; Scale : Natural);
    procedure Numbered_Box (RGB : in out Buf; W, H, X0, Y0, X1, Y1, N : Natural; C : Color; Thick : Natural);
-   procedure Dot (RGB : in out Buf; W, H, X, Y, Radius : Natural; C : Color);
    --  画网格并返回格心(归一化;格号 = 行优先从 1 起)
    procedure Grid (RGB : in out Buf; W, H, Cols, Rows : Natural; Centers_U, Centers_V : out Floats);
 end Draw;

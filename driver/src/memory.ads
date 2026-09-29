@@ -5,7 +5,6 @@ package Memory is
       Names, Values : Strs;
    end record;
    procedure Set (M : in out Store; Name, Value : String);
-   function Get (M : Store; Name : String) return String;
    function Text (M : Store) return String;
    procedure Clear (M : in out Store);
 end Memory;

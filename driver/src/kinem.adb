@@ -227,16 +227,6 @@ package body Kinem is
       return Out_Cs;
    end Thin;
 
-   function Residual (M : Model; Frames : Frame_Vectors.Vector; C : Corr) return Long_Float is
-      Ri, Rj, Rij : M3;
-      Ti, Tj, Tij : V3;
-   begin
-      FK (M, Frames (C.I).Q, Ri, Ti);
-      FK (M, Frames (C.J).Q, Rj, Tj);
-      Rel (Ri, Ti, Rj, Tj, Rij, Tij);
-      return Samp (Rij, Tij, M.F, M.Cx, M.Cy, C);
-   end Residual;
-
    --  ── 抗野点的 LM(数值雅可比;Huber 1 px 迭代加权)──
    --  Resid 把全部残差填进 R(长度 N_R);只有前 N_Rob 个按 Huber 加权(配点),后面的(约束行)原样。
    --  阻尼升降的两个倍数只管这次拟合怎么迭代,不影响身体动不动
@@ -2464,33 +2454,6 @@ package body Kinem is
       Rep.Eye_Px := Natural (Eye.Length);
       Rep.Eye_Corrs := Natural (Cs.Length) - Natural (Kept.Length);
    end Fit;
-   procedure Meet_Rays (O, D : V3_Array; X : out V3; Ok : out Boolean) is
-      A : M3 := [others => [others => 0.0]];
-      B : V3 := [0.0, 0.0, 0.0];
-   begin
-      Ok := False; X := [0.0, 0.0, 0.0];
-      if O'Length < 2 then
-         return;
-      end if;
-      for I in O'Range loop
-         declare
-            Dd : constant V3 := Unit (D (I));
-         begin
-            for R in 0 .. 2 loop
-               for C in 0 .. 2 loop
-                  declare
-                     Pr : constant Long_Float := (if R = C then 1.0 else 0.0) - Dd (R) * Dd (C);   --  I − d dᵀ
-                  begin
-                     A (R, C) := A (R, C) + Pr;
-                     B (R) := B (R) + Pr * O (I) (C);
-                  end;
-               end loop;
-            end loop;
-         end;
-      end loop;
-      X := Solve3 (A, B);
-      Ok := Norm (X) > 0.0 or else Norm (B) = 0.0;
-   end Meet_Rays;
 
    --  4×4 对称阵的特征分解(循环 Jacobi):返回最大特征值的特征向量
    function Max_Eigvec4 (N0 : Mat) return Vec is
@@ -2564,123 +2527,12 @@ package body Kinem is
       return Out_V;
    end Max_Eigvec4;
 
-   procedure Similarity (A, B : V3_Array; S : out Long_Float; R : out M3; T : out V3) is
-      Ca, Cb : V3 := [0.0, 0.0, 0.0];
-      N : constant Long_Float := Long_Float (A'Length);
-      Sm : M3 := [others => [others => 0.0]];
-      Saa, Sba : Long_Float := 0.0;
-   begin
-      S := 1.0; R := Identity; T := [0.0, 0.0, 0.0];
-      if A'Length = 0 then
-         return;
-      end if;
-      for I in A'Range loop
-         Ca := Add (Ca, A (I)); Cb := Add (Cb, B (I - A'First + B'First));
-      end loop;
-      Ca := Scl (Ca, 1.0 / N); Cb := Scl (Cb, 1.0 / N);
-      for I in A'Range loop
-         declare
-            Pa : constant V3 := Sub (A (I), Ca);
-            Pb : constant V3 := Sub (B (I - A'First + B'First), Cb);
-         begin
-            for X in 0 .. 2 loop
-               for Y in 0 .. 2 loop
-                  Sm (X, Y) := Sm (X, Y) + Pa (X) * Pb (Y);
-               end loop;
-            end loop;
-            Saa := Saa + Dot (Pa, Pa);
-         end;
-      end loop;
-      declare
-         Nm : constant Mat (0 .. 3, 0 .. 3) :=
-           [[Sm (0, 0) + Sm (1, 1) + Sm (2, 2), Sm (1, 2) - Sm (2, 1), Sm (2, 0) - Sm (0, 2), Sm (0, 1) - Sm (1, 0)],
-            [Sm (1, 2) - Sm (2, 1), Sm (0, 0) - Sm (1, 1) - Sm (2, 2), Sm (0, 1) + Sm (1, 0), Sm (2, 0) + Sm (0, 2)],
-            [Sm (2, 0) - Sm (0, 2), Sm (0, 1) + Sm (1, 0), -Sm (0, 0) + Sm (1, 1) - Sm (2, 2), Sm (1, 2) + Sm (2, 1)],
-            [Sm (0, 1) - Sm (1, 0), Sm (2, 0) + Sm (0, 2), Sm (1, 2) + Sm (2, 1), -Sm (0, 0) - Sm (1, 1) + Sm (2, 2)]];
-         Q : constant Vec := Max_Eigvec4 (Nm);
-      begin
-         R := Quat_To_R ([0.0, 0.0, 0.0, Q (0), Q (1), Q (2), Q (3)]);
-      end;
-      for I in A'Range loop
-         Sba := Sba + Dot (Sub (B (I - A'First + B'First), Cb), Ap (R, Sub (A (I), Ca)));
-      end loop;
-      S := (if Saa > 0.0 then Sba / Saa else 1.0);
-      T := Sub (Cb, Scl (Ap (R, Ca), S));
-   end Similarity;
-
    --  确定性的伪随机(同一份数据同一个结果):线性同余
    procedure Next (Seed : in out Unsigned_Seed; K : Natural; Out_I : out Natural) is
    begin
       Seed := Seed * 6364136223846793005 + 1442695040888963407;   --  线性同余的乘数 / 增量(Knuth MMIX,协议)
       Out_I := Natural ((Seed / 2 ** 33) mod Unsigned_Seed (K));
    end Next;
-
-   procedure Robust_Similarity (A, B : V3_Array; S : out Long_Float; R : out M3; T : out V3; Inliers : out Natural; Med : out Long_Float) is
-      N : constant Natural := A'Length;
-      Seed : Unsigned_Seed := 20260926;
-      Best_Med : Long_Float := Long_Float'Last;
-      Res : Vec (0 .. Natural'Max (1, N) - 1);
-      Trials : constant := 500;   --  抽 500 次(次数)
-      function Med_Of (Ss : Long_Float; Rr : M3; Tt : V3) return Long_Float is
-      begin
-         for I in 0 .. N - 1 loop
-            Res (I) := Norm (Sub (B (B'First + I), Add (Scl (Ap (Rr, A (A'First + I)), Ss), Tt)));
-         end loop;
-         return Median_Abs (Res (0 .. N - 1));
-      end Med_Of;
-   begin
-      S := 1.0; R := Identity; T := [0.0, 0.0, 0.0]; Inliers := 0; Med := 0.0;
-      if N < 3 then
-         return;
-      end if;
-      for Tr_I in 1 .. Trials loop
-         declare
-            I1, I2, I3 : Natural;
-            Ss : Long_Float;
-            Rr : M3;
-            Tt : V3;
-         begin
-            Next (Seed, N, I1); Next (Seed, N, I2); Next (Seed, N, I3);
-            if I1 /= I2 and then I2 /= I3 and then I1 /= I3 then
-               Similarity ([A (A'First + I1), A (A'First + I2), A (A'First + I3)], [B (B'First + I1), B (B'First + I2), B (B'First + I3)], Ss, Rr, Tt);
-               declare
-                  Md : constant Long_Float := Med_Of (Ss, Rr, Tt);
-               begin
-                  if Md < Best_Med then
-                     Best_Med := Md; S := Ss; R := Rr; T := Tt;
-                  end if;
-               end;
-            end if;
-         end;
-      end loop;
-      --  拿"残差 < 2.5 × 1.4826 × 中位数"的那些重解(统计常数,无量纲,见规格说明)
-      declare
-         Gate : constant Long_Float := 2.5 * 1.4826 * Best_Med;
-         Cnt : Natural := 0;
-      begin
-         Med := Med_Of (S, R, T);
-         for I in 0 .. N - 1 loop
-            if Res (I) <= Gate then
-               Cnt := Cnt + 1;
-            end if;
-         end loop;
-         if Cnt >= 3 then
-            declare
-               Ai, Bi : V3_Array (0 .. Cnt - 1);
-               K : Natural := 0;
-            begin
-               for I in 0 .. N - 1 loop
-                  if Res (I) <= Gate then
-                     Ai (K) := A (A'First + I); Bi (K) := B (B'First + I); K := K + 1;
-                  end if;
-               end loop;
-               Similarity (Ai, Bi, S, R, T);
-            end;
-         end if;
-         Inliers := Cnt;
-         Med := Med_Of (S, R, T);
-      end;
-   end Robust_Similarity;
 
    procedure Robust_Plane (X : V3_Array; P0, Nrm : out V3; Inliers : out Natural; Med : out Long_Float) is
       N : constant Natural := X'Length;

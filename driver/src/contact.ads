@@ -21,7 +21,6 @@ package Contact is
       Axis : V3 := [0.0, 0.0, 1.0];
       Half_Angle : Long_Float := 0.0;
    end record;
-   function Admits (K : Cone; Dir : V3) return Boolean;   --  这个方向在不在锥里:判据是角度,不是力
 
    --  ① 这个接触是谁跟物体之间的。
    --  手:执行层要去访问它,它变成航点。带编号 —— 一只五指手的五个点共一个手腕、一个朝向;双臂抱一个箱子是两只手腕,合成一个朝向没有意义。
@@ -119,9 +118,6 @@ package Contact is
       Root : Natural := 0;
    end record;
    package Move_Vectors is new Ada.Containers.Vectors (Natural, Move);
-   function One_Of (S : Set) return Move;
-   function Chain (Kind : Move_Kind; Items : Move_Vectors.Vector) return Move;   --  Kind ∈ In_Turn / Keep / Meanwhile
-   function Clear_Of (Keep_Out : V3_Vectors.Vector; By_M : Long_Float; From : V3_Vectors.Vector) return Move;
 
    --  一串 / 并存填不满时,点名是第几段的哪一格。
    type Many_Kind is
@@ -142,11 +138,7 @@ package Contact is
       Off_M : Long_Float := 0.0;
    end record;
    function Img (M : Many_Gap) return String;
-   --  逐段自检。In_Turn / Keep 的每一段都按 Must_Move 判;Meanwhile 的第一段永远按"不动"判(它是维持的那一个),其余按 Must_Move。
-   --  Keep 的接续条件:下一段的接触点就是上一段末了那些点,门槛用下一段自己声明的最严容差,不另拍一个常数。
-   function Check (M : Move; Must_Move : Boolean) return Many_Gap;
    function Moves (M : Move) return Boolean;                        --  这条计划里有没有任何一段要求物体动(躲开是手在动,不是物体 ⇒ False)
    function Start_Points (M : Move) return V3_Vectors.Vector;       --  开头那些手接触点在哪(世界接触不算:手够不到桌子底下那条边)
    function End_Points (M : Move) return V3_Vectors.Vector;         --  末了那些手接触点在哪:起点让第③格搬过去;Meanwhile 停在维持的那一段上
-   function Flatten (M : Move) return Nat_Vectors.Vector;           --  按时间先后的那些 One 节点编号(Meanwhile 摊平后仍然是并存的;摊平只用来数数与遍历)
 end Contact;

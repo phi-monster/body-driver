@@ -18,11 +18,7 @@ package Contact.Gen is
       Axis : V3 := [0.0, 0.0, 1.0];
       Ang : Long_Float := 0.0;
    end record;
-   function Between (From, To : V3; Ok : out Boolean) return Rot;   --  把 From 转到 To 的最小旋转;两者反向时任取一条垂直轴
    function Inverse (R : Rot) return Rot;
-   function Dir (R : Rot; V : V3) return V3;                       --  转一个方向 / 绕原点转一个点
-   function Rotate (R : Rot; S : Set) return Set;                  --  点、法向、锥轴、旋量、进场方向一个都不能漏
-   procedure To_Upright (Cloud : in out V3_Vectors.Vector; Support_Normal : V3; Back : out Rot; Ok : out Boolean);
 
    --  另外两种手:吸盘(1 点)· 环抓(n 点)。同一张接触集表,三条不同的几何路径填:表不认识机体,机体各自算各自的
    type No_Hand_Kind is (Fine, Too_Few_Points, No_Flat_Patch, Nothing_In_Direction, Not_Surrounding, Handed_Off);
@@ -32,12 +28,5 @@ package Contact.Gen is
       Direction : Natural := 0;              --  Nothing_In_Direction:第几个方向摸不到料
       H : Handoff;                           --  Handed_Off:转发原因
    end record;
-   --  吸盘:找一片够大、够平的面,给出一个接触点。Cup_R_M 是身体常数(量出来传进来);Flat_Tol_M 是采样噪声的函数,不是身体常数。
-   --  取铺得最满的那一片(不是最高的那一片);"背面"(薄板另一面,偏离量不随半径变)筛掉,"弯曲"(偏离量随半径长大)判死
-   procedure Suction (Cloud : V3_Vectors.Vector; Cup_R_M, Flat_Tol_M, Mu : Long_Float; Motion : Twist; Tol_M : Long_Float; S : out Set; Why : out No_Hand);
-   --  环抓:在一个高度上绕物体一圈,给出 N 个接触点(三指 = 3,五指 = 5)。每个方向上取最外那个真表面点;N 个内法向必须正张成平面,否则那不是握是推
-   procedure Ring (Cloud : V3_Vectors.Vector; At_Z, Band_M : Long_Float; N : Positive; Mu : Long_Float; Motion : Twist; Tol_M : Long_Float; S : out Set; Why : out No_Hand);
    function Sampling_Gap (Cloud : V3_Vectors.Vector) return Long_Float;   --  点云自己的采样间距:每个点到最近邻的距离取中位。量得出来就不许拍
-   function Img (H : Handoff) return String;
-   function Img (N : No_Hand) return String;
 end Contact.Gen;

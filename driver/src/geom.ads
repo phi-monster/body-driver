@@ -153,13 +153,6 @@ package Geom is
       Sw, Sh : Long_Float := 0.0;          --  这台腕眼、不动的眼的配点噪声(像素,每轴)
    end record;
    package Board_Track_Vectors is new Ada.Containers.Vectors (Natural, Board_Track);
-   --  Cam = 这台腕眼的相机号;进板的点同时追加到 Scene(按 G 三角好的世界点)和 Tracks(几停原样,留着一起解时重新三角)
-   procedure Build_Board (G : Cam_Geo; Cam : Natural; O : Board_Obs_Vectors.Vector; Scene : in out Scene_Pt_Vectors.Vector;
-                          Tracks : in out Board_Track_Vectors.Vector; St : out Board_Stats);
-   --  按给定的腕眼几何(Geos,按相机号)把 Tracks 重新三角成板上的点(协方差同 Build_Board)
-   procedure Board_Points (Geos : Geo_Vectors.Vector; Tracks : Board_Track_Vectors.Vector; Scene : out Scene_Pt_Vectors.Vector);
-   --  一条点在这只手上的眼里几停的视线最小二乘交点 + 它的协方差(Sw = 配点噪声,像素);交不出来 ⇒ Ok = False
-   procedure Tri_Views (G : Cam_Geo; Views : Board_View_Vectors.Vector; Sw : Long_Float; X : out V3; Cov : out M3; Ok : out Boolean);
    --  腕眼 + 不动的眼 + 板上的点一起解(2026-09-25):参数 = 每台腕眼(朝向改正 3、偏移改正 3、焦距 1,焦距是身体给的就不动)+ 不动的眼(朝向 3、位置 3、焦距 1);
    --  板上的点不是未知数:每换一次参数,按它在腕眼里的几停重新三角。残差 = 腕眼各停的重投 ÷ 腕眼配点噪声 + 不动的眼里的像素 ÷ 它的配点噪声
    --  + 腕眼标定(Fit_Rig)量到的偏移、焦距当先验(÷ 它们自己报的不确定度;没报就不加)。
@@ -171,7 +164,6 @@ package Geom is
       Tracks, Head_Used : Natural := 0;
       Wrist_Rms, Head_Rms : Long_Float := 0.0;   --  像素
    end record;
-   procedure Refine_Board (Geos : in out Geo_Vectors.Vector; Head : in out Cam_Geo; Tracks : Board_Track_Vectors.Vector; Rep : out Refine_Report; Ok : out Boolean);
    --  不动的眼还是不是标定时那样(2026-09-25,V1:头顶眼被转了、被挡了一半 ⇒ 身体自己发现、重新标、接着干):
    --  Scene = 板上的点(世界位置已知,U/V = 它们在上一次核对时的像素),Now = 同一批点此刻在画面里配到的像素(同序;负 = 没配到)。
    --  按板再解一次它的位姿(焦距不动:转一下、挡一下都不改焦距):一份从原来的位姿起步(Start_Here)、一份从零盲搜,对得上的点多的那份算数
@@ -199,8 +191,6 @@ package Geom is
    --  门以内一个都没有 ⇒ 0
    function Board_Rms (G : Cam_Geo; Pts : Scene_Pt_Vectors.Vector; Gate : Long_Float) return Long_Float;
    function Region_Name (R : Natural) return String;
-   --  给的位姿下"全都看见了"的那一份(刚标好时、焊点用):每个点按这个位姿投进画面,落在哪几块就算哪几块看见过
-   function Seen_All (G : Cam_Geo; Scene : Scene_Pt_Vectors.Vector) return Fixed_Best;
    type Fixed_Check is record
       Asked, Matched, Consistent : Natural := 0;   --  问了几个点、配到几个、和新解对得上几个
       Consistent_Now : Natural := 0;               --  和现在的位姿对得上几个
@@ -278,18 +268,6 @@ package Geom is
    --  Start_Here = 从 G 现在的位姿起步(不盲搜):挑点按每个点自己的预测噪声的 3 倍(倍数无量纲)——起点就在真值附近时这条门和挡住多少无关;
    --  从零盲搜时起点离得远,只能按全体残差中位的 3 倍挑(超过一半是乱点就失灵)
    procedure Fit_Fixed_Board (G : in out Cam_Geo; Scene : Scene_Pt_Vectors.Vector; Rep : in out Fixed_Report; Ok : out Boolean; Start_Here : Boolean := False);
-   --  不动的眼已知 ⇒ 手上被它标记的点在手系里在哪。点的身份 = (Pt = 臂号, Kind = 这一笔里它看见这只手的手指分成几瓣)
-   --  (G1S 2026-09-24:同一只手一瓣、两瓣的标记当一个点解,残差 7.5 px;分开解 1.7 px)。一个点至少 4 笔(次数)。
-   --  瓣数和这条臂自己那只眼里一样的点(Own_Kind (k))按定义在腕眼那条视线上(手系起点 Ray_O、单位方向 Ray_D)⇒ 只解离眼多远;别的点 3 个数都解。
-   --  每笔:点在世界里 = p_j + R_j t 必须落在不动的眼过 (u_j, v_j) 的视线上 ⇒ 对 t 线性,最小二乘;像素残差超过这个点中位 3 倍的那笔踢掉再解一次。
-   --  解到离手腕原点比手腕离这只眼还远的点不在手上 ⇒ 不要。Rep 的手那一半 = 进解的笔数和它们的像素残差
-   procedure Hand_Points (G : Cam_Geo; O : Obs_Pt_Vectors.Vector; Ray_O, Ray_D : V3_Vectors.Vector; Own_Kind : Nat_Vectors.Vector;
-                          Tips : out Tip_Class_Vectors.Vector; Rep : in out Fixed_Report);
-   --  开机用的两步:先按板解不动的眼,再按解好的眼认手上的点。手上的点不进眼的解 —— 分割出来的指尖在手换角度、换远近时会在手上滑,
-   --  而每个点在手系里的位置是自由的,滑出来的偏差被点的位置吃掉、残差看着很小,却顺着"焦距 ↔ 远近"把相机拽走
-   --  (G2E 2026-09-24:只靠它们,焦距随放进哪几笔在 ±8% 里翻;合成:板 + 放大 2% 的手上标记一起解,焦距 275.5,比板单独 289.5、手单独 287.0 都偏)
-   procedure Fit_Fixed_Rig (G : in out Cam_Geo; O : Obs_Pt_Vectors.Vector; Scene : Scene_Pt_Vectors.Vector; Ray_O, Ray_D : V3_Vectors.Vector;
-                            Own_Kind : Nat_Vectors.Vector; Tips : out Tip_Class_Vectors.Vector; Rep : out Fixed_Report; Ok : out Boolean);
    --  手上的点按"落不落在它自己那只眼的某条瓣视线上"来认(2026-09-24):不动的眼已经解好(Fixed);O = 它每一笔里每一瓣手指的尖(Pose = 那一停手的位姿);
    --  这条臂自己那只眼里每一瓣的尖在手系里是一条视线(起点 Ray_O,单位方向 Ray_D (k))。每个尖和每条视线:两条空间直线求最近点,视线上那个最近点投回不动的眼,
    --  离这个尖不到 Gate_Px 像素、又在眼前面的,归最近的那条视线,给出离眼多远 S;每条视线取归给它的 S 的中位数。
@@ -300,11 +278,6 @@ package Geom is
       N : Natural := 0;             --  归给它几个尖
    end record;
    package Ray_Tip_Vectors is new Ada.Containers.Vectors (Natural, Ray_Tip);
-   function Tips_On_Rays (Fixed : Cam_Geo; O : Obs_Pt_Vectors.Vector; Ray_O : V3; Ray_D : V3_Vectors.Vector; Gate_Px : Long_Float) return Ray_Tip_Vectors.Vector;
-   --  ── 没有深度时量指尖 ──:指尖在这只手自己眼里的像素给出相机系里的一条视线 Dir_C(单位向量,从手的位姿点出发);指尖 = S · Dir_C,只差 S(米)。
-   --  不动的眼在几停里看见这只手的指尖落在 (U,V)(O 里的 Pose = 那一停手的位姿读数):指尖的世界位置必须落在不动眼那条视线上
-   --  ⇒ 每停两条线性方程、一个未知数 S,最小二乘。两条视线平行(解不出)或一停都没有 ⇒ Ok = False。Rms_Px = 解出来之后指尖投回不动眼的像素残差。
-   procedure Fit_Tip_Scale (Fixed, Hand : Cam_Geo; Dir_C : V3; O : Obs_Vectors.Vector; S, Rms_Px : out Long_Float; Ok : out Boolean);
    --  视线与一个面的交点(面 = 过 P0、法向 N);视线和面平行或交在身后 ⇒ Ok = False
    function Hit_Plane (Origin, Dir, P0, N : V3; Ok : out Boolean) return V3;
    --  ── 几条视线同一时刻交在哪 ──:每条视线 = 世界系里的起点 + 单位方向,来自哪只眼都行(不动的眼、任何一只手上的眼)。

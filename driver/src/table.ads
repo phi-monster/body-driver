@@ -41,7 +41,6 @@ package Table is
    function Predict (E : Effect; A : Vec) return Vec3;
    procedure Update (E : in out Effect; A : Vec; Dy : Vec3; Motion_Floor, Cmd_Floor : Long_Float);
    function Blocked (E : Effect) return Boolean;       --  连着两步"零表"比"走的表"预测得准
-   function Spread (E : Effect) return Long_Float;     --  协方差迹的平均:还有多不确定
    function Norm (A : Vec; N : Natural) return Long_Float;
    function Norm3 (V : Vec3) return Long_Float;
 
@@ -62,9 +61,6 @@ package Table is
    --  上下限:A1 由第一段自己守;越界只缩 z 那一半,方向不变,硬约束照旧成立。
    procedure Solve_Priority (Hard, Soft : Term_Vectors.Vector; N : Natural; Cap : Vec; Active : Mask; Damp : Vec;
                              A : out Vec; Ok : out Boolean);
-   --  这一行在这具身体上"推一格能被推动多少"(所有通道里最响的那个)。
-   --  把每一行的误差按它自己的这个尺度归一,五行才在同一种货币里比较 —— 否则量纲最大的那一行独吞方程。
-   function Row_Scale (E : Effect; Notch : Vec; R : Natural) return Long_Float;
    --  🔴 "这一行证明过了没有" 只在这里定义一次 —— 体检和执行器都问它,免得两处判据分叉。
    --  证明过 = 一格推得动(尺度 > 0)+ 同一个推法重复过至少两次 + 散布小于均值本身。
    function Row_Proven (E : Effect; Notch : Vec; R : Natural) return Boolean;

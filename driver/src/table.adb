@@ -129,18 +129,6 @@ package body Table is
 
    function Blocked (E : Effect) return Boolean is (E.Null_Wins >= 2);
 
-   function Spread (E : Effect) return Long_Float is
-      S : Long_Float := 0.0;
-   begin
-      if E.N = 0 then
-         return 0.0;
-      end if;
-      for I in 0 .. E.N - 1 loop
-         S := S + E.P (I, I);
-      end loop;
-      return S / Long_Float (E.N);
-   end Spread;
-
    procedure Solve (Terms : Term_Vectors.Vector; N : Natural; Cap : Vec; Active : Mask; Damp : Vec;
                     A : out Vec; Ok : out Boolean) is
       Nn : constant Natural := Natural'Min (N, Max_Ch);
@@ -288,32 +276,6 @@ package body Table is
          end;
       end loop;
    end Solve;
-
-   function Row_Scale (E : Effect; Notch : Vec; R : Natural) return Long_Float is
-      M : Long_Float := 0.0;
-   begin
-      for C in 0 .. E.N - 1 loop
-         M := Long_Float'Max (M, abs (E.B (C, R)) * abs Notch (C));
-      end loop;
-      return M;
-   end Row_Scale;
-
-   function Loudest (E : Effect; Notch : Vec; R : Natural; Best : out Integer) return Long_Float is
-      M : Long_Float := 0.0;
-   begin
-      Best := -1;
-      for C in 0 .. E.N - 1 loop
-         declare
-            V : constant Long_Float := abs (E.B (C, R)) * abs Notch (C);
-         begin
-            if V > M then
-               M := V;
-               Best := C;
-            end if;
-         end;
-      end loop;
-      return M;
-   end Loudest;
 
    --  🔴 这一行能不能拿去算动作:【有没有任何一个】通道又证明过、又推得动它。
    --  以前写的是"最响的那个证过了没有" —— 那是错的:一行常常有好几个通道都推得动它,

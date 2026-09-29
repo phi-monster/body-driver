@@ -12,16 +12,6 @@ package body Memory is
       M.Values.Append (Value);
    end Set;
 
-   function Get (M : Store; Name : String) return String is
-   begin
-      for I in 0 .. Natural (M.Names.Length) - 1 loop
-         if M.Names (I) = Name then
-            return M.Values (I);
-         end if;
-      end loop;
-      return "";
-   end Get;
-
    function Text (M : Store) return String is
       R : Unbounded_String;
    begin

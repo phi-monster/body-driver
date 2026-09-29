@@ -77,7 +77,6 @@ package Exam is
    --  一个量能不能被程序引用 —— 编译器唯一该问的问题
    function Allowed (R : Row_Check) return Boolean is (R.V = Usable);
 
-   procedure Say (R : Report);
    function Row_Name (X : Row_Id) return String;
    function Verdict_Name (V : Verdict) return String;
 end Exam;

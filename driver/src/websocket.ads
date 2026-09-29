@@ -15,5 +15,4 @@ package Websocket is
    procedure Accept_Client (C : in out Conn; Ok : out Boolean);
    procedure Read_Message (C : in out Conn; Kind : out Op; Data : out Buf; Ok : out Boolean);
    procedure Send_Binary (C : in out Conn; Data : Buf; Ok : out Boolean);
-   procedure Close (C : in out Conn);
 end Websocket;

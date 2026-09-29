@@ -71,15 +71,6 @@ package body Draw is
       Number (RGB, W, H, X0 + 2, (if Y0 >= 12 then Y0 - 12 else Y0 + 2), N, C, 2);
    end Numbered_Box;
 
-   procedure Dot (RGB : in out Buf; W, H, X, Y, Radius : Natural; C : Color) is
-   begin
-      for Dy in -Integer (Radius) .. Integer (Radius) loop
-         for Dx in -Integer (Radius) .. Integer (Radius) loop
-            Put (RGB, W, H, Integer (X) + Dx, Integer (Y) + Dy, C);
-         end loop;
-      end loop;
-   end Dot;
-
    procedure Grid (RGB : in out Buf; W, H, Cols, Rows : Natural; Centers_U, Centers_V : out Floats) is
       Line : constant Color := (200, 200, 200);
       Label : constant Color := (255, 255, 0);

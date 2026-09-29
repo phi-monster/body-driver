@@ -10,6 +10,7 @@ cd "$ROOT/driver"
 command -v alr >/dev/null || export PATH="$HOME/.alire/bin:$HOME/alire/bin:/root/alire/bin:$PATH"
 command -v alr >/dev/null || { echo "need Alire (alr) with gnat_native + gprbuild: https://alire.ada.dev"; exit 1; }
 alr -n build
+python3 "$ROOT/tools/deadcode.py" --check   #  驱动里不许留走不到的代码(按编译器的交叉引用算,09-30 起)
 ./bin/selfcheck
 # 🔴 "证明器自己跑不起来" ≠ "代码没通过证明" —— 崩掉的工具什么也没证明,两件事必须分开报。
 # `gnatprove --version` 不调后端就能答(FSF 16.1.0),所以它过了【不代表】证明跑得动:

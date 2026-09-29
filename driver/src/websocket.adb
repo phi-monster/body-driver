@@ -289,17 +289,4 @@ package body Websocket is
       end loop;
    end Read_Message;
 
-   procedure Close (C : in out Conn) is
-   begin
-      if C.Open then
-         Close_Socket (C.Sock);
-         C.Open := False;
-      end if;
-      if C.Listening then
-         Close_Socket (C.Listener);
-         C.Listening := False;
-      end if;
-   exception
-      when others => null;
-   end Close;
 end Websocket;

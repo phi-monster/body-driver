@@ -105,9 +105,6 @@ package Kinem is
                   M : out Model; Rep : out Fit_Report; Ok : out Boolean; Per_Pair : Positive := 60);
    --  Per_Pair:最后一起解时每一对最多取几个内点(次数;驱动开机永远用默认 —— 离线回放 kinexam 的 KINEXAM_PER_PAIR 才改,做对照实验)
 
-   --  一个配点在模型下的 Sampson 残差(像素)
-   function Residual (M : Model; Frames : Frame_Vectors.Vector; C : Corr) return Long_Float;
-
    --  Fit 的最后一步(④ 多视图:轨迹按重投影一起解,M 当起步)单独拿出来,给自检焊点用;从 M.Eye 那些像素出发的配点不用(同 Fit)
    procedure Refine_Tracks (Frames : Frame_Vectors.Vector; Cs : Corr_Vectors.Vector; M : in out Model; Rep : in out Fit_Report);
 
@@ -129,13 +126,6 @@ package Kinem is
 
    --  ── 两只手的系对齐到一个世界(V1b 3c)──
    type V3_Array is array (Natural range <>) of V3;
-   --  多条视线交一点(最小二乘):第 I 条 = 起点 O (I) + 单位方向 D (I)
-   procedure Meet_Rays (O, D : V3_Array; X : out V3; Ok : out Boolean);
-   --  两团一一对应的点 ⇒ B ≈ S · R · A + T(相似变换,Horn 四元数法:4×4 对称阵最大特征值的特征向量)
-   procedure Similarity (A, B : V3_Array; S : out Long_Float; R : out M3; T : out V3);
-   --  抗野点(最小中位数:随机抽 3 对解一次、取残差中位数最小的那个,再拿残差 < 2.5 × 1.4826 × 中位数的那些重解 ——
-   --  2.5 和 1.4826 是正态分布下中位数换标准差、2.5 倍标准差的统计常数,不是拍的门槛)
-   procedure Robust_Similarity (A, B : V3_Array; S : out Long_Float; R : out M3; T : out V3; Inliers : out Natural; Med : out Long_Float);
    --  一团点里的那张面(同样的最小中位数):面上一点 P0、单位法向 Nrm
    procedure Robust_Plane (X : V3_Array; P0, Nrm : out V3; Inliers : out Natural; Med : out Long_Float);
 
