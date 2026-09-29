@@ -282,6 +282,7 @@ act.adb	C.Wld.Holding := False; C.Wld.Held_Arm := -1; C.Wld.Held_Jaw := -1; C.Wl
 act.adb	C.Wld.Holding := False; C.Wld.Held_Arm := -1; C.Wld.Held_Jaw := -1; C.Wld.Held_Slot := -1;	1	数值	哨兵:−1 = 手里的东西在世界图里没有槽(Held_Slot)(后面一律按 < 0 / ≥ 0 判);不描述身体和世界(act.adb:11078)
 act.adb	Cage_Note := S ("" & Codec.Fmt (Dp, 3)	3	格式	Cage_Note(拼进给脑的话):Codec.Fmt 印 3 位小数(给脑的话的显示精度,不改任何量)(act.adb:10983)
 act.adb	Cap_Mult : constant Long_Float := 2.0;	2.0	调参数	一步命令上限 = 探针幅度×2×Reach;注释写 EH 试过 8 倍失败后改成 2,是试出来的(act.adb:32)	每步命令的天花板	高	删倍数:上限 = C.Map.Amp × Reach(K)(Reach 已靠'表说的 vs 实到'翻倍/减半学出来),再压在量过的一条命令可达 G.Stride / G.Stride_Rot 与跟踪捕获范围(见 Track_Win)之下
+act.adb	Cb : constant Long_Float := (1.0 - T2) / (1.0 + T2);	1.0	数学	半角公式:cos β = (1 − tan²(β/2)) / (1 + tan²(β/2)),分母里的 1(纯数学)(act.adb:10182)
 act.adb	Claim (P, (if P.Known then Long_Float'Max (Long_Float'Max (P.Box_W, P.Box_H), Track_Win) else 1.0), Long_Float'Max (0.005, Long_Float'Max (P.Box_W, P.Box_H) * 0.25), Taken, Regs);	0.005	调参数	重认零件读深窗下限 0.5% 画幅(act.adb:4899)	读深窗最小半宽	低	删掉;Near_Depth / Flow.Sample 里 Natural'Max(1,…) 已保证至少 1 px
 act.adb	Claim (P, (if P.Known then Long_Float'Max (Long_Float'Max (P.Box_W, P.Box_H), Track_Win) else 1.0), Long_Float'Max (0.005, Long_Float'Max (P.Box_W, P.Box_H) * 0.25), Taken, Regs);	0.25	调参数	重认零件读深窗半宽 = 框长边 1/4(长条零件会超出短边)(act.adb:4899)	重认后零件的深度	中	在认领到的那一团'动过'的像素上读近侧分位(掩膜已在手)
 act.adb	Claim (P, (if P.Known then Long_Float'Max (Long_Float'Max (P.Box_W, P.Box_H), Track_Win) else 1.0), Long_Float'Max (0.005, Long_Float'Max (P.Box_W, P.Box_H) * 0.25), Taken, Regs);	1.0	数学	同上一条(零件那一处)(act.adb:4899)

@@ -4824,26 +4824,34 @@ begin
                 & " · 标记对不上号 ⇒ 不认、不挪" & (if S_Ok then "" else "(错)")
                 & " · 5 mm 小东西标成找不到照样挡 ⇒ 落点离它 " & Codec.Fmt (Flat (Lb), 3) & " m" & (if B_Ok then "" else "(错)"));
       end;
-      --  另一瓣落在没量过的那半(V1B70 2026-09-30:第 1 只手第 2 瓣落在开机时没量过的那块 —— 电子琴上):压的那一瓣落在 (0, 0.04) m(整圈在有点那半里),
-      --  另一瓣落在 (0, −0.01) m(y < 0,没有板点;两瓣隔 5 cm,有点那半只有 14.4 cm 深:隔得更远就没有两处都整圈在里面的地方)
-      --  ⇒ 要挪到另一瓣的落点也整圈在有点那半里:挪了以后它的 y ≥ R − 半格。
+      --  另一瓣的尖落在没量过的那半(V1B70 2026-09-30:第 1 只手第 2 瓣压在开机时没量过的那块 —— 电子琴上):压的那一瓣落在 (0, 0.04) m(整圈在有点那半里);
+      --  另一瓣视线斜 60°(tan 30°;尖在它视线落点离压的那一点的 cos 60° = 一半处),视线落点 (0, −0.06) ⇒ 尖在 (0, −0.01) m(y < 0,没有板点)
+      --  ⇒ 要挪到它的尖也整圈在有点那半里:挪了以后尖的 y ≥ R − 半格。视线落点本身不查(V1B71:按视线落点查,落点在十几 cm 外,x5 一处空地都挑不到):
+      --  尖在里面、视线落点出了那片(压的那一瓣 (0, 0.10)、视线落点 (0, −0.02) ⇒ 尖 (0, 0.04))⇒ 原地就收。
       --  🦷 原来只要压的那一瓣整圈在里面、连线旁边没有高出面的板点(没量过的地方没有板点 ⇒ 查不出东西):同一块板只给压的那一瓣 ⇒ 原地就收
       declare
-         Lp2, Lp1 : Geom.V3_Vectors.Vector;
-         D2, D1 : Geom.V3_Vectors.Vector;
-         Other_Y : Long_Float := -99.0;
+         Lp2, Lp1, Lp3 : Geom.V3_Vectors.Vector;
+         D2, D1, D3 : Geom.V3_Vectors.Vector;
+         Tb2 : Bytes.Floats;
+         Tip_Y : Long_Float := -99.0;
       begin
+         Tb2.Append (0.0); Tb2.Append (Tan (Ada.Numerics.Pi / 6.0));   --  β = 60°:tan(β/2) = tan 30°(合成)
          Lp2.Append (Geom.V3'[0.0, 0.04, Z0]);
-         Lp2.Append (Geom.V3'[0.0, -0.01, Z0]);
+         Lp2.Append (Geom.V3'[0.0, -0.06, Z0]);
          Lp1.Append (Geom.V3'[0.0, 0.04, Z0]);
-         Act.Board_Free_Spots (Half, Lp2, Tb, Rw, D2);
-         Act.Board_Free_Spots (Half, Lp1, Tb, Rw, D1);
+         Lp3.Append (Geom.V3'[0.0, 0.10, Z0]);
+         Lp3.Append (Geom.V3'[0.0, -0.02, Z0]);
+         Act.Board_Free_Spots (Half, Lp2, Tb2, Rw, D2);
+         Act.Board_Free_Spots (Half, Lp1, Tb2, Rw, D1);
+         Act.Board_Free_Spots (Half, Lp3, Tb2, Rw, D3);
          if not D2.Is_Empty then
-            Other_Y := -0.01 + D2 (0) (1);
+            Tip_Y := -0.01 + D2 (0) (1);
          end if;
-         Check (not D2.Is_Empty and then Other_Y >= Rw - 0.5 * Cell and then not D1.Is_Empty and then Geom.Norm (D1 (0)) = 0.0,
-                "另一瓣落在没量过的那半 ⇒ 挪到它的落点也在量过的桌面里(挪了以后它在 y = " & Codec.Fmt (Other_Y, 3) & " m,要 ≥ " & Codec.Fmt (Rw - 0.5 * Cell, 3)
-                & ")· 🦷 只看压的那一瓣(原来的判法)⇒ 原地就收(挪 " & (if D1.Is_Empty then "-" else Codec.Fmt (Geom.Norm (D1 (0)), 3)) & " m)");
+         Check (not D2.Is_Empty and then Tip_Y >= Rw - 0.5 * Cell and then not D3.Is_Empty and then Geom.Norm (D3 (0)) = 0.0
+                and then not D1.Is_Empty and then Geom.Norm (D1 (0)) = 0.0,
+                "另一瓣的尖落在没量过的那半 ⇒ 挪到它的尖也在量过的桌面里(挪了以后尖在 y = " & Codec.Fmt (Tip_Y, 3) & " m,要 ≥ " & Codec.Fmt (Rw - 0.5 * Cell, 3)
+                & ")· 尖在里面、只是视线落点出了那片 ⇒ 原地就收(挪 " & (if D3.Is_Empty then "-" else Codec.Fmt (Geom.Norm (D3 (0)), 3)) & " m)"
+                & " · 🦷 只看压的那一瓣(原来的判法)⇒ 原地就收(挪 " & (if D1.Is_Empty then "-" else Codec.Fmt (Geom.Norm (D1 (0)), 3)) & " m)");
       end;
    end;
    --  🔴 几只手按拍对齐(Lockstep + Plug.Lock_*,09-28 PLAN ⑧ (g)):两只假手,第 1 只走 3 条(第 0 组关节目标 1、2、3)、第 2 只走 5 条(第 1 组 11–15),
