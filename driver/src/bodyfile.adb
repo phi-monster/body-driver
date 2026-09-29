@@ -3,7 +3,7 @@ with Ada.Directories;
 with Chan;
 with Bytes; use Bytes;
 with Codec;
-with Json; use type Json.Kind;
+with Json;
 with Layout;
 with Picture;
 with Table;
@@ -26,16 +26,9 @@ package body Bodyfile is
       return To_String (R);
    end Fingerprint;
 
-   --  ── 写 ──
-   procedure Put_Floats (B : in out Unbounded_String; Name : String; V : Floats) is
-   begin
-      Append (B, """" & Name & """:[");
-      for I in 0 .. Natural (V.Length) - 1 loop
-         Append (B, (if I > 0 then "," else "") & Codec.Fmt (V (I), 6));
-      end loop;
-      Append (B, "]");
-   end Put_Floats;
+   function Jaws_Recorded (M : Selfmap.Body_Map) return Boolean is (Natural (M.Jaws.Length) = M.Arms);
 
+   --  ── 写 ──
    procedure Put_Ints (B : in out Unbounded_String; Name : String; V : Ints) is
    begin
       Append (B, """" & Name & """:[");
@@ -79,18 +72,52 @@ package body Bodyfile is
    procedure Save (Path : String; Key : String; M : Selfmap.Body_Map; Hands : Zone.Hand_Vectors.Vector; Tables : Act.Effect_Vectors.Vector; Sch : Schema.Map) is
       B : Unbounded_String;
       Seen : Ints;
+      --  每个数都按 Json.Number 写(写出去再读回来一个比特不差)。不是有限数的(NaN、正负无穷)JSON 里写不了 ⇒ 写成 null,
+      --  并把是哪几格照实印出来;读回来是 NaN = 这一格没有一个数,不编成 0。
+      --  原来按 Codec.Fmt 定点印:NaN 印成 nan、大过 1e15 的印成 inf —— 都不是 JSON,json.adb 读回来要么整份读不回来,
+      --  要么把 nan 当成 null 还吃掉后面的逗号、读错一位不报;比印的那一位还小的量(读数噪声这种)读回来就成了 0
+      Bad : Unbounded_String;
+      Bad_N : Natural := 0;
+      function Num (Where : String; X : Long_Float) return String is
+      begin
+         if not Json.Finite (X) then
+            Bad_N := Bad_N + 1;
+            Append (Bad, (if Bad_N > 1 then "、" else "") & Where & " = " & Codec.Fmt (X));
+         end if;
+         return Json.Number (X);
+      end Num;
+      procedure Put_Floats (Name : String; V : Floats) is
+      begin
+         Append (B, """" & Name & """:[");
+         for I in 0 .. Natural (V.Length) - 1 loop
+            Append (B, (if I > 0 then "," else "") & Num (Name & "[" & Codec.Img (I) & "]", V (I)));
+         end loop;
+         Append (B, "]");
+      end Put_Floats;
+      function Pose_Text (Where : String; P : Plug.Arm_Pose) return String is
+         R : Unbounded_String;
+      begin
+         for K in P'Range loop
+            Append (R, (if K > P'First then "," else "") & Num (Where & "[" & Codec.Img (K) & "]", P (K)));
+         end loop;
+         return To_String (R);
+      end Pose_Text;
    begin
       Append (B, "{""key"":""" & Json.Escape (Key) & """,""method_ver"":" & Codec.Img (Method_Ver) & ",");
       Append (B, """arms"":" & Codec.Img (M.Arms) & ",""cams"":" & Codec.Img (M.N_Cams) & ",""per_arm"":" & Codec.Img (M.Per_Arm) & ",");
-      Append (B, """ee_noise"":" & Codec.Fmt (M.EE_Noise, 6) & ",""rot_noise"":" & Codec.Fmt (M.Rot_Noise, 6) & ",""jaw_noise"":" & Codec.Fmt (M.Jaw_Noise, 6) & ",""settle"":" & Codec.Img (M.Settle) & ",");
-      Put_Floats (B, "amp", M.Amp); Append (B, ",");
-      Put_Floats (B, "delivered", M.Delivered); Append (B, ",");
+      Append (B, """ee_noise"":" & Num ("ee_noise", M.EE_Noise) & ",""rot_noise"":" & Num ("rot_noise", M.Rot_Noise)
+              & ",""jaw_noise"":" & Num ("jaw_noise", M.Jaw_Noise) & ",""settle"":" & Codec.Img (M.Settle) & ",");
+      Put_Floats ("amp", M.Amp); Append (B, ",");
+      Put_Floats ("delivered", M.Delivered); Append (B, ",");
       for X of M.Seen loop
          Seen.Append (if X then 1 else 0);
       end loop;
       Put_Ints (B, "seen", Seen); Append (B, ",");
-      Put_Floats (B, "cam_frac", M.Cam_Frac); Append (B, ",");
+      Put_Floats ("cam_frac", M.Cam_Frac); Append (B, ",");
       Put_Ints (B, "cam_on_arm", M.Cam_On_Arm); Append (B, ",");
+      --  每条臂量到几个抓握通道(Selfmap.Measure 按身体这一拍报的抓握读数数出来的)。原来不存 ⇒ 装回以后一律当 1 个:
+      --  五指手第 1 号往后的握区全丢,而且每次存盘都把少了的那份写回去
+      Put_Ints (B, "jaws", M.Jaws); Append (B, ",");
       Append (B, """world_cam"":" & Codec.Img (M.World_Cam) & ",");
       Put_Ints (B, "pic_floor", M.Pic_Floor); Append (B, ",");
       --  历史:每通道历次 amp/delivered(取中位数当现值),最多 History_Depth 次
@@ -99,7 +126,7 @@ package body Bodyfile is
          Append (B, (if Ch > 0 then "," else "") & "[");
          if Ch < Natural (M.Amp_Hist.Length) then
             for I in 0 .. Natural (M.Amp_Hist (Ch).Length) - 1 loop
-               Append (B, (if I > 0 then "," else "") & Codec.Fmt (M.Amp_Hist (Ch) (I), 6));
+               Append (B, (if I > 0 then "," else "") & Num ("amp_hist[" & Codec.Img (Ch) & "][" & Codec.Img (I) & "]", M.Amp_Hist (Ch) (I)));
             end loop;
          end if;
          Append (B, "]");
@@ -109,7 +136,7 @@ package body Bodyfile is
          Append (B, (if Ch > 0 then "," else "") & "[");
          if Ch < Natural (M.Deliv_Hist.Length) then
             for I in 0 .. Natural (M.Deliv_Hist (Ch).Length) - 1 loop
-               Append (B, (if I > 0 then "," else "") & Codec.Fmt (M.Deliv_Hist (Ch) (I), 6));
+               Append (B, (if I > 0 then "," else "") & Num ("deliv_hist[" & Codec.Img (Ch) & "][" & Codec.Img (I) & "]", M.Deliv_Hist (Ch) (I)));
             end loop;
          end if;
          Append (B, "]");
@@ -120,24 +147,26 @@ package body Bodyfile is
       for A in 0 .. Natural (Hands.Length) - 1 loop
          declare
             H : constant Zone.Hand := Hands (A);
+            Hw : constant String := "hands[" & Codec.Img (A) & "].";
             First : Boolean := True;
          begin
             Append (B, (if A > 0 then "," else "") & "{""arm"":" & Codec.Img (H.Arm) & ",""k"":" & Codec.Img (H.K)
-                    & ",""empty_close"":" & Codec.Fmt (H.Empty_Close, 6) & ",""open"":" & Codec.Fmt (H.Open_Reading, 6) & ",""pose"":[");
-            for K in 0 .. 6 loop
-               Append (B, (if K > 0 then "," else "") & Codec.Fmt (H.Pose (K), 6));
-            end loop;
-            Append (B, "],""zones"":[");
+                    & ",""empty_close"":" & Num (Hw & "empty_close", H.Empty_Close) & ",""open"":" & Num (Hw & "open", H.Open_Reading)
+                    & ",""pose"":[" & Pose_Text (Hw & "pose", H.Pose) & "],""zones"":[");
             for Cm in 0 .. Natural (H.Zones.Length) - 1 loop
                if H.Zones (Cm).Valid then
                   declare
                      Z : constant Zone.Hand_Zone := H.Zones (Cm);
+                     Zw : constant String := Hw & "zones[cam " & Codec.Img (Cm) & "].";
                   begin
-                     Append (B, (if First then "" else ",") & "{""cam"":" & Codec.Img (Cm) & ",""cu"":" & Codec.Fmt (Z.Cu, 5) & ",""cv"":" & Codec.Fmt (Z.Cv, 5) &
-                             ",""au"":" & Codec.Fmt (Z.Au, 5) & ",""av"":" & Codec.Fmt (Z.Av, 5) & ",""span"":" & Codec.Fmt (Z.Span, 5) & ",""depth"":" & Codec.Fmt (Z.Depth, 5) &
+                     Append (B, (if First then "" else ",") & "{""cam"":" & Codec.Img (Cm) & ",""cu"":" & Num (Zw & "cu", Z.Cu) & ",""cv"":" & Num (Zw & "cv", Z.Cv) &
+                             ",""au"":" & Num (Zw & "au", Z.Au) & ",""av"":" & Num (Zw & "av", Z.Av) & ",""span"":" & Num (Zw & "span", Z.Span) &
+                             ",""depth"":" & Num (Zw & "depth", Z.Depth) &
                              ",""n_lobes"":" & Codec.Img (Z.N_Lobes) & ",""box"":[" & Codec.Img (Z.X0) & "," & Codec.Img (Z.Y0) & "," & Codec.Img (Z.X1) & "," & Codec.Img (Z.Y1) & "]" &
-                             ",""a"":[" & Codec.Img (Z.A.X0) & "," & Codec.Img (Z.A.Y0) & "," & Codec.Img (Z.A.X1) & "," & Codec.Img (Z.A.Y1) & "," & Codec.Fmt (Z.A.Cu, 5) & "," & Codec.Fmt (Z.A.Cv, 5) & "," & Codec.Img (Z.A.Count) & "]" &
-                             ",""b"":[" & Codec.Img (Z.B.X0) & "," & Codec.Img (Z.B.Y0) & "," & Codec.Img (Z.B.X1) & "," & Codec.Img (Z.B.Y1) & "," & Codec.Fmt (Z.B.Cu, 5) & "," & Codec.Fmt (Z.B.Cv, 5) & "," & Codec.Img (Z.B.Count) & "]" &
+                             ",""a"":[" & Codec.Img (Z.A.X0) & "," & Codec.Img (Z.A.Y0) & "," & Codec.Img (Z.A.X1) & "," & Codec.Img (Z.A.Y1) & ","
+                             & Num (Zw & "a.cu", Z.A.Cu) & "," & Num (Zw & "a.cv", Z.A.Cv) & "," & Codec.Img (Z.A.Count) & "]" &
+                             ",""b"":[" & Codec.Img (Z.B.X0) & "," & Codec.Img (Z.B.Y0) & "," & Codec.Img (Z.B.X1) & "," & Codec.Img (Z.B.Y1) & ","
+                             & Num (Zw & "b.cu", Z.B.Cu) & "," & Num (Zw & "b.cv", Z.B.Cv) & "," & Codec.Img (Z.B.Count) & "]" &
                              ",""fingers"":[" & Runs (Z.Fingers) & "]}");
                      First := False;
                   end;
@@ -150,12 +179,13 @@ package body Bodyfile is
       for I in 0 .. Natural (Tables.Length) - 1 loop
          declare
             T : constant Act.Stored_Effect := Tables (I);
+            Tw : constant String := "tables[" & Codec.Img (I) & "].";
          begin
             Append (B, (if I > 0 then "," else "") & "{""arm"":" & Codec.Img (T.Arm) & ",""cam"":" & Codec.Img (T.Cam) & ",""kind"":" & Codec.Img (Act.Track_Kind'Pos (T.Kind)) &
                     ",""chan"":" & Codec.Img (T.Chan_K) & ",""blob"":" & Codec.Img (T.Blob) & ",""held"":" & Codec.Img (T.Held) & ",""n"":" & Codec.Img (T.E.N) & ",""b"":[");
             for K in 0 .. T.E.N - 1 loop
                for R in 0 .. Table.Rows - 1 loop
-                  Append (B, (if K + R > 0 then "," else "") & Codec.Fmt (T.E.B (K, R), 6));
+                  Append (B, (if K + R > 0 then "," else "") & Num (Tw & "b[" & Codec.Img (K) & "," & Codec.Img (R) & "]", T.E.B (K, R)));
                end loop;
             end loop;
             Append (B, "],""reps"":[");
@@ -165,20 +195,16 @@ package body Bodyfile is
             Append (B, "],""scatter"":[");
             for K in 0 .. T.E.N - 1 loop
                for R in 0 .. Table.Rows - 1 loop
-                  Append (B, (if K + R > 0 then "," else "") & Codec.Fmt (T.E.Scatter (K, R), 4));
+                  Append (B, (if K + R > 0 then "," else "") & Num (Tw & "scatter[" & Codec.Img (K) & "," & Codec.Img (R) & "]", T.E.Scatter (K, R)));
                end loop;
             end loop;
             Append (B, "],""trust"":[");
             for K in 0 .. T.E.N - 1 loop
                Append (B, (if K > 0 then "," else "") & (if T.Trust (K) then "1" else "0"));
             end loop;
-            Append (B, "],""tpose"":[");
-            for K in 0 .. 6 loop
-               Append (B, (if K > 0 then "," else "") & Codec.Fmt (T.Pose (K), 6));
-            end loop;
-            Append (B, "],""has_pose"":" & (if T.Has_Pose then "1" else "0") & ",""reach"":[");
+            Append (B, "],""tpose"":[" & Pose_Text (Tw & "tpose", T.Pose) & "],""has_pose"":" & (if T.Has_Pose then "1" else "0") & ",""reach"":[");
             for K in 0 .. T.E.N - 1 loop
-               Append (B, (if K > 0 then "," else "") & Codec.Fmt (T.Reach (K), 3));
+               Append (B, (if K > 0 then "," else "") & Num (Tw & "reach[" & Codec.Img (K) & "]", T.Reach (K)));
             end loop;
             Append (B, "]}");
          end;
@@ -188,20 +214,22 @@ package body Bodyfile is
       for I in 0 .. Natural (Sch.S.Length) - 1 loop
          declare
             X : constant Schema.Sample := Sch.S (I);
+            Sw : constant String := "schema[" & Codec.Img (I) & "].";
          begin
-            Append (B, (if I > 0 then "," else "") & "{""arm"":" & Codec.Img (X.Arm) & ",""cam"":" & Codec.Img (X.Cam) & ",""pose"":[");
-            for K in 0 .. 6 loop
-               Append (B, (if K > 0 then "," else "") & Codec.Fmt (X.Pose (K), 6));
-            end loop;
-            Append (B, "],""parts"":[");
+            Append (B, (if I > 0 then "," else "") & "{""arm"":" & Codec.Img (X.Arm) & ",""cam"":" & Codec.Img (X.Cam) & ",""pose"":[" & Pose_Text (Sw & "pose", X.Pose) & "],""parts"":[");
             declare
                First : Boolean := True;
             begin
                for K in Schema.Part_Array'Range loop
                   if X.Parts (K).Valid then
-                     Append (B, (if First then "" else ",") & "[" & Codec.Img (K) & "," & Codec.Fmt (X.Parts (K).Cu, 5) & "," & Codec.Fmt (X.Parts (K).Cv, 5) & "," & Codec.Fmt (X.Parts (K).Z, 5) & "," &
-                             Codec.Img (X.Parts (K).X0) & "," & Codec.Img (X.Parts (K).Y0) & "," & Codec.Img (X.Parts (K).X1) & "," & Codec.Img (X.Parts (K).Y1) & "," &
-                             Codec.Img (X.Parts (K).N_Blobs) & "," & Codec.Fmt (X.Parts (K).B0u, 5) & "," & Codec.Fmt (X.Parts (K).B0v, 5) & "," & Codec.Fmt (X.Parts (K).B1u, 5) & "," & Codec.Fmt (X.Parts (K).B1v, 5) & "]");
+                     declare
+                        P : constant Schema.Part_Pos := X.Parts (K);
+                        Pw : constant String := Sw & "parts[" & Codec.Img (K) & "].";
+                     begin
+                        Append (B, (if First then "" else ",") & "[" & Codec.Img (K) & "," & Num (Pw & "cu", P.Cu) & "," & Num (Pw & "cv", P.Cv) & "," & Num (Pw & "z", P.Z) & "," &
+                                Codec.Img (P.X0) & "," & Codec.Img (P.Y0) & "," & Codec.Img (P.X1) & "," & Codec.Img (P.Y1) & "," &
+                                Codec.Img (P.N_Blobs) & "," & Num (Pw & "b0u", P.B0u) & "," & Num (Pw & "b0v", P.B0v) & "," & Num (Pw & "b1u", P.B1u) & "," & Num (Pw & "b1v", P.B1v) & "]");
+                     end;
                      First := False;
                   end if;
                end loop;
@@ -210,6 +238,9 @@ package body Bodyfile is
          end;
       end loop;
       Append (B, "]}");
+      if Bad_N > 0 then
+         Ada.Text_IO.Put_Line ("[装] 身体文件里有 " & Codec.Img (Bad_N) & " 格不是有限数,照原样写成 null(装回来还是""没有一个数"",不编成 0):" & To_String (Bad));
+      end if;
       declare
          Dir : constant String := Ada.Directories.Containing_Directory (Path);
       begin
@@ -224,8 +255,7 @@ package body Bodyfile is
 
    --  ── 读 ──
    function Load (Path : String; Key : String; M : in out Selfmap.Body_Map; Hands : in out Zone.Hand_Vectors.Vector;
-                  Tables : in out Act.Effect_Vectors.Vector; Sch : in out Schema.Map; Note : out Unbounded_String;
-                  With_Tables : Boolean := False) return Boolean is
+                  Tables : in out Act.Effect_Vectors.Vector; Sch : in out Schema.Map; Note : out Unbounded_String) return Boolean is
       D : Json.Doc;
       Err : Unbounded_String;
       Text : Unbounded_String;
@@ -258,17 +288,21 @@ package body Bodyfile is
          return False;
       end if;
       declare
-         function Num (K : String) return Long_Float is (Json.Num (D, Json.Get (D, 0, K)));
+         --  数一律按 Json.Real 读:写的时候不是有限数的那几格是 null,读回来还是 NaN(不编成 0)
+         function Val (N : Integer) return Long_Float is (Json.Real (D, N));
+         function Num (K : String) return Long_Float is (Val (Json.Get (D, 0, K)));
          function Arr (N : Integer) return Floats is
             V : Floats;
          begin
             for I in 0 .. Json.Count (D, N) - 1 loop
-               V.Append (Json.Num (D, Json.Child (D, N, I)));
+               V.Append (Val (Json.Child (D, N, I)));
             end loop;
             return V;
          end Arr;
          Amp_H : constant Integer := Json.Get (D, 0, "amp_hist");
          Del_H : constant Integer := Json.Get (D, 0, "deliv_hist");
+         function Jaw_Note return String is
+           (if Jaws_Recorded (M) then "" else ";这份文件没记每条臂几个抓握通道 ⇒ 要重量(不按 1 个猜)");
       begin
          M.Arms := Natural (Num ("arms")); M.N_Cams := Natural (Num ("cams")); M.Per_Arm := Natural (Num ("per_arm"));
          M.Channels := M.Arms * M.Per_Arm;
@@ -285,6 +319,17 @@ package body Bodyfile is
          for X of Arr (Json.Get (D, 0, "cam_on_arm")) loop
             M.Cam_On_Arm.Append (Integer (X));
          end loop;
+         --  每条臂几个抓握通道:文件里记了(一条臂一个数)就照记的装;没记(09-30 以前的文件)就空着 —— 不猜,开机照实说要重量(Jaws_Recorded)
+         M.Jaws.Clear;
+         declare
+            Jn : constant Integer := Json.Get (D, 0, "jaws");
+         begin
+            if Json.Count (D, Jn) = M.Arms then
+               for X of Arr (Jn) loop
+                  M.Jaws.Append (Integer (X));
+               end loop;
+            end if;
+         end;
          M.World_Cam := Natural (Num ("world_cam"));
          M.Pic_Floor.Clear;
          for X of Arr (Json.Get (D, 0, "pic_floor")) loop
@@ -311,7 +356,7 @@ package body Bodyfile is
          Hands.Clear;
          if Integer (Json.Num (D, Json.Get (D, 0, "method_ver"))) /= Method_Ver then
             Note := To_Unbounded_String ("身体文件是老量法(存的版本 " & Codec.Img (Integer (Json.Num (D, Json.Get (D, 0, "method_ver")))) &
-                                         ",现在 " & Codec.Img (Method_Ver) & ")⇒ 握区重量,其余照用");
+                                         ",现在 " & Codec.Img (Method_Ver) & ")⇒ 握区重量,其余照用" & Jaw_Note);
             return True;
          end if;
          declare
@@ -323,20 +368,19 @@ package body Bodyfile is
                   H : Zone.Hand;
                   Hk : constant Integer := Json.Get (D, Hn, "k");
                   Ha : constant Integer := Json.Get (D, Hn, "arm");
-                  Zn : constant Integer := Json.Get (D, Hn, "zone");
                begin
                   H.Arm := A;
-                  H.Empty_Close := Json.Num (D, Json.Get (D, Hn, "empty_close"));
-                  H.Open_Reading := Json.Num (D, Json.Get (D, Hn, "open"));
+                  H.Empty_Close := Val (Json.Get (D, Hn, "empty_close"));
+                  H.Open_Reading := Val (Json.Get (D, Hn, "open"));
                   for C in 0 .. M.N_Cams - 1 loop
                      H.Zones.Append (Zone.Hand_Zone'(others => <>));
                   end loop;
                   declare
                      Pv : constant Floats := Arr (Json.Get (D, Hn, "pose"));
                   begin
-                     if Natural (Pv.Length) = 7 then
-                        for K in 0 .. 6 loop
-                           H.Pose (K) := Pv (K);
+                     if Natural (Pv.Length) = H.Pose'Length then
+                        for K in H.Pose'Range loop
+                           H.Pose (K) := Pv (K - H.Pose'First);
                         end loop;
                      end if;
                   end;
@@ -348,9 +392,9 @@ package body Bodyfile is
                         Bb : constant Floats := Arr (Json.Get (D, Zn, "b"));
                      begin
                         Z.Valid := True;
-                        Z.Cu := Json.Num (D, Json.Get (D, Zn, "cu")); Z.Cv := Json.Num (D, Json.Get (D, Zn, "cv"));
-                        Z.Au := Json.Num (D, Json.Get (D, Zn, "au")); Z.Av := Json.Num (D, Json.Get (D, Zn, "av"));
-                        Z.Span := Json.Num (D, Json.Get (D, Zn, "span")); Z.Depth := Json.Num (D, Json.Get (D, Zn, "depth"));
+                        Z.Cu := Val (Json.Get (D, Zn, "cu")); Z.Cv := Val (Json.Get (D, Zn, "cv"));
+                        Z.Au := Val (Json.Get (D, Zn, "au")); Z.Av := Val (Json.Get (D, Zn, "av"));
+                        Z.Span := Val (Json.Get (D, Zn, "span")); Z.Depth := Val (Json.Get (D, Zn, "depth"));
                         Z.N_Lobes := Natural (Json.Num (D, Json.Get (D, Zn, "n_lobes")));
                         if Natural (Bx.Length) = 4 then
                            Z.X0 := Natural (Bx (0)); Z.Y0 := Natural (Bx (1)); Z.X1 := Natural (Bx (2)); Z.Y1 := Natural (Bx (3));
@@ -400,87 +444,12 @@ package body Bodyfile is
          --  响应表【不跨炮沿用】:它是在某一次跟踪里学出来的,跟错了东西就会把"往哪走会靠近"学反,
          --  存进档案再拿回来用,下一炮会一路朝反方向走(FK/FL 实测,清掉表当场重量之后球才第一次变近)。
          --  重量一遍只要几十拍,不值得冒这个险。身体图、通道幅度、握区照旧沿用。
+         --  (原来还有一条 With_Tables 的路把表读回来给离线体检审;那个体检 bodyexam 09-30 随死代码删了,这条路再没人走,一起删)
          Tables.Clear;
          --  🔴 原来这里是 `if True then ... return True; end if;` —— 它把【身体图】也一起跳过了。
          --  注释只说"响应表不沿用",可那一个 return 落在身体图读取【之前】,于是每次开机
          --  都把上一炮攒下来的"位姿 → 我的零件在画面里的位置"整份丢掉(今晚这份档案里有 16 个样本)。
          --  改成只挡响应表:身体图照常装回。
-         if With_Tables then
-         declare
-            Ts : constant Integer := Json.Get (D, 0, "tables");
-         begin
-            for I in 0 .. Json.Count (D, Ts) - 1 loop
-               declare
-                  Tn : constant Integer := Json.Child (D, Ts, I);
-                  T : Act.Stored_Effect;
-                  Bv : constant Floats := Arr (Json.Get (D, Tn, "b"));
-                  Tv : constant Floats := Arr (Json.Get (D, Tn, "trust"));
-                  Rp : constant Floats := Arr (Json.Get (D, Tn, "reps"));
-                  Sc : constant Floats := Arr (Json.Get (D, Tn, "scatter"));
-                  N : constant Natural := Natural (Json.Num (D, Json.Get (D, Tn, "n")));
-               begin
-                  T.Arm := Natural (Json.Num (D, Json.Get (D, Tn, "arm")));
-                  T.Cam := Natural (Json.Num (D, Json.Get (D, Tn, "cam")));
-                  T.Kind := Act.Track_Kind'Val (Integer (Json.Num (D, Json.Get (D, Tn, "kind"))));
-                  T.Chan_K := Natural (Long_Float'Max (0.0, Json.Num (D, Json.Get (D, Tn, "chan"))));
-                  T.Blob := Integer (Json.Num (D, Json.Get (D, Tn, "blob")));
-                  T.Held := (if Json.Get (D, Tn, "held") >= 0 then Integer (Json.Num (D, Json.Get (D, Tn, "held"))) else -1);
-                  declare
-                     Tp : constant Floats := Arr (Json.Get (D, Tn, "tpose"));
-                  begin
-                     if Natural (Tp.Length) = 7 then
-                        for K in 0 .. 6 loop
-                           T.Pose (K) := Tp (K);
-                        end loop;
-                        T.Has_Pose := Json.Num (D, Json.Get (D, Tn, "has_pose")) > 0.5;
-                     end if;
-                  end;
-                  declare
-                     Rn : constant Integer := Json.Get (D, Tn, "reach");
-                  begin
-                     if Rn >= 0 and then Json.Kind_Of (D, Rn) = Json.J_Arr then
-                        declare
-                           Rv : constant Floats := Arr (Rn);
-                        begin
-                           for K in 0 .. Natural'Min (N, Natural (Rv.Length)) - 1 loop
-                              T.Reach (K) := Long_Float'Max (1.0, Rv (K));
-                           end loop;
-                        end;
-                     elsif Rn >= 0 then
-                        T.Reach := [others => Long_Float'Max (1.0, Json.Num (D, Rn))];
-                     end if;
-                  end;
-                  Table.Reset (T.E, N, 1.0);
-                  for K in 0 .. N - 1 loop
-                     if Table.Rows * K + Table.Rows - 1 < Natural (Bv.Length) then
-                        declare
-                           Cl : Table.Vec3;
-                        begin
-                           for R in 0 .. Table.Rows - 1 loop
-                              Cl (R) := Bv (Table.Rows * K + R);
-                           end loop;
-                           Table.Set_Col (T.E, K, Cl);
-                        end;
-                     end if;
-                     T.Trust (K) := K < Natural (Tv.Length) and then Tv (K) > 0.5;
-                     if K < Natural (Rp.Length) then
-                        declare
-                           Sv : Table.Vec3 := Table.Zero3;
-                        begin
-                           for R in 0 .. Table.Rows - 1 loop
-                              if Table.Rows * K + R < Natural (Sc.Length) then
-                                 Sv (R) := Sc (Table.Rows * K + R);
-                              end if;
-                           end loop;
-                           Table.Set_Spread (T.E, K, Natural (Long_Float'Max (0.0, Rp (K))), Sv);
-                        end;
-                     end if;
-                  end loop;
-                  Tables.Append (T);
-               end;
-            end loop;
-         end;
-         end if;
          --  身体图(旧文件没有这一节 ⇒ 空)
          Sch.S.Clear;
          declare
@@ -511,9 +480,9 @@ package body Bodyfile is
                            end loop;
                         end if;
                      end;
-                     if Natural (Pv.Length) = 7 then
-                        for K in 0 .. 6 loop
-                           X.Pose (K) := Pv (K);
+                     if Natural (Pv.Length) = X.Pose'Length then
+                        for K in X.Pose'Range loop
+                           X.Pose (K) := Pv (K - X.Pose'First);
                         end loop;
                         Sch.S.Append (X);
                      end if;
@@ -521,8 +490,8 @@ package body Bodyfile is
                end loop;
             end if;
          end;
+         Note := To_Unbounded_String ("装回身体文件(量过 " & Codec.Img (M.Measured_Times) & " 次,身体图 " & Codec.Img (Natural (Sch.S.Length)) & " 个样本)" & Jaw_Note);
       end;
-      Note := To_Unbounded_String ("装回身体文件(量过 " & Codec.Img (M.Measured_Times) & " 次,身体图 " & Codec.Img (Natural (Sch.S.Length)) & " 个样本)");
       return True;
    exception
       when others =>

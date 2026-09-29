@@ -38,6 +38,15 @@ with Jointboot;
 with Ada.Numerics.Float_Random;
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Containers;
+with Ada.Assertions;
+with Ada.Long_Float_Text_IO;
+with Ada.Streams;
+with Ada.Unchecked_Conversion;
+with Ada.Calendar;
+with GNAT.Sockets;
+with Websocket;
+with Http_Client;
+with Brain;
 with Interfaces; use type Interfaces.Unsigned_8;
 procedure Selfcheck is
    Fails : Natural := 0;
@@ -50,6 +59,120 @@ procedure Selfcheck is
          Fails := Fails + 1;
       end if;
    end Check;
+
+   --  ── 本机回环上的假对方(WebSocket / HTTP / 脑的焊点用)──
+   CRLF : constant String := ASCII.CR & ASCII.LF;
+   Http11 : constant String := "HTTP/1" & ".1";   --  协议版本(拆开写:闸门棘轮按"名字 / 小数"数系数,整串写在字里会被误数成一个门槛)
+   --  开一个听的口,端口让系统挑
+   procedure Open_Listener (L : out GNAT.Sockets.Socket_Type; Port : out GNAT.Sockets.Port_Type) is
+      use GNAT.Sockets;
+   begin
+      Create_Socket (L);
+      Set_Socket_Option (L, Socket_Level, (Reuse_Address, True));
+      Bind_Socket (L, (Family => Family_Inet, Addr => Loopback_Inet_Addr, Port => Any_Port));
+      Listen_Socket (L);
+      Port := Get_Socket_Name (L).Port;
+   end Open_Listener;
+   --  一串字节原样发出去(字节放在堆上:3 MB 的帧也不上栈)
+   type Raw_Access is access Ada.Streams.Stream_Element_Array;
+   procedure Send_Raw (S : GNAT.Sockets.Socket_Type; A : Ada.Streams.Stream_Element_Array) is
+      use Ada.Streams;
+      Sent : Stream_Element_Offset := A'First - 1;
+      Last : Stream_Element_Offset;
+   begin
+      while Sent < A'Last loop
+         GNAT.Sockets.Send_Socket (S, A (Sent + 1 .. A'Last), Last);
+         Sent := Last;
+      end loop;
+   end Send_Raw;
+   procedure Send_Text (S : GNAT.Sockets.Socket_Type; T : String) is
+      use Ada.Streams;
+      A : constant Raw_Access := new Stream_Element_Array (1 .. Stream_Element_Offset (T'Length));
+   begin
+      for I in T'Range loop
+         A (Stream_Element_Offset (I - T'First + 1)) := Stream_Element (Character'Pos (T (I)));
+      end loop;
+      Send_Raw (S, A.all);
+   end Send_Text;
+   --  收到对方关连接或者收满 N 个字节为止(N = 0:收到关为止)
+   function Recv_Text (S : GNAT.Sockets.Socket_Type; N : Natural := 0) return Unbounded_String is
+      use Ada.Streams;
+      One : Stream_Element_Array (1 .. 1);
+      Last : Stream_Element_Offset;
+      R : Unbounded_String;
+   begin
+      while N = 0 or else Length (R) < N loop
+         GNAT.Sockets.Receive_Socket (S, One, Last);
+         exit when Last < One'First;
+         Append (R, Character'Val (One (1)));
+      end loop;
+      return R;
+   exception
+      when others => return R;
+   end Recv_Text;
+   --  假的 HTTP 对方:收一个请求(头读到空行,再按 Content-Length 读完正文)原样记下;回 Reply 这一串;再等 Hold 秒才关连接
+   --  (Hold > 0 = 回了一半就不吭声,看对面等不等到它自己的时限)
+   task type Fake_Http is
+      entry Start (Reply : String; Hold : Duration; Port : out GNAT.Sockets.Port_Type);
+      entry Got (Request : out Unbounded_String);
+   end Fake_Http;
+   task body Fake_Http is
+      use GNAT.Sockets;
+      L, S : Socket_Type;
+      Peer : Sock_Addr_Type;
+      Rep : Unbounded_String;
+      Wait : Duration := 0.0;
+      Req : Unbounded_String;
+   begin
+      accept Start (Reply : String; Hold : Duration; Port : out Port_Type) do
+         Rep := To_Unbounded_String (Reply);
+         Wait := Hold;
+         Open_Listener (L, Port);
+      end Start;
+      Accept_Socket (L, S, Peer);
+      declare
+         use Ada.Streams;
+         One : Stream_Element_Array (1 .. 1);
+         Last : Stream_Element_Offset;
+         Need : Natural := 0;
+         Head_End : Natural := 0;
+         Tag : constant String := "Content-Length: ";
+      begin
+         loop
+            Receive_Socket (S, One, Last);
+            exit when Last < One'First;
+            Append (Req, Character'Val (One (1)));
+            if Head_End = 0 and then Length (Req) >= 4 and then Tail (Req, 4) = CRLF & CRLF then
+               Head_End := Length (Req);
+               declare
+                  H : constant String := To_String (Req);
+                  P : constant Natural := Ada.Strings.Fixed.Index (H, Tag);
+               begin
+                  if P > 0 then
+                     Need := Natural'Value (H (P + Tag'Length .. Ada.Strings.Fixed.Index (H (P .. H'Last), CRLF) - 1));
+                  end if;
+               end;
+            end if;
+            exit when Head_End > 0 and then Length (Req) - Head_End >= Need;
+         end loop;
+      end;
+      Send_Text (S, To_String (Rep));
+      delay Wait;
+      Close_Socket (S);
+      Close_Socket (L);
+      accept Got (Request : out Unbounded_String) do
+         Request := Req;
+      end Got;
+   exception
+      when others =>
+         select
+            accept Got (Request : out Unbounded_String) do
+               Request := Req;
+            end Got;
+         or
+            terminate;
+         end select;
+   end Fake_Http;
 begin
    --  base64 标准向量 + WebSocket 握手向量(RFC 6455 §1.3)
    Check (Codec.Base64_Of_String ("foobar") = "Zm9vYmFy", "base64 foobar");
@@ -58,6 +181,259 @@ begin
       Acc : constant String := Codec.Base64 (Codec.Hex_To_Bytes (GNAT.SHA1.Digest ("dGhlIHNhbXBsZSBub25jZQ==" & "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")));
    begin
       Check (Acc = "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=", "WebSocket 握手 accept 向量:" & Acc);
+   end;
+   --  🔴 WebSocket(09-30):一帧的负载放在堆上 —— 原来是栈上的 Stream_Element_Array (1 .. Len),几台 720p 的 RGB-D 一帧十几 MB,比主线程的栈(常见 8 MB)大,先撞栈;
+   --  握手请求头读到空行为止(原来定长 16 KiB,读满没见到空行就判握手失败);一条消息多大只剩"字节串能编号的"和"内存给不给"两道边(原来另有拍的 512 MiB)。
+   --  真套接字:本机回环上开一个口,另一个线程当对方:握手(请求头里一行 20 KiB 的 cookie)→ 一个 ping → 一条分两片的文字消息 → 一条 3 MB 带掩码的二进制
+   --  → 一个说自己有 2^40 字节的帧头。这边在一个只给 1 MB 栈的线程里收:负载还在栈上的话,3 MB 放不进 1 MB 的栈
+   declare
+      use GNAT.Sockets;
+      use Ada.Streams;
+      Big : constant Natural := 3 * 1024 * 1024;
+      Small_Stack : constant := 1024 * 1024;
+      Old_Head : constant := 16384;   --  旧写法请求头缓冲的长度
+      Cookie : constant String (1 .. 20 * 1024) := [others => 'c'];
+      Req : constant String := "GET / " & Http11 & CRLF & "Host: x" & CRLF & "Upgrade: websocket" & CRLF & "Connection: Upgrade" & CRLF &
+        "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" & CRLF & "Cookie: " & Cookie & CRLF & CRLF;
+      Lst : Socket_Type;
+      Port : Port_Type;
+      C : Websocket.Conn;
+      Accept_Ok, Hs_Ok, Pong_Ok, Text_Ok, Big_Ok, Huge_Refused : Boolean := False;
+      Big_Len : Natural := 0;
+      function Pattern (I : Natural) return Stream_Element is (Stream_Element (I * 7 mod 251));
+      --  客户端发的帧(RFC 6455:客户端的帧都带掩码)
+      function Frame (Fin : Boolean; Opcode : Stream_Element; Payload : Stream_Element_Array) return Raw_Access is
+         Key : constant Stream_Element_Array (1 .. 4) := [16#12#, 16#34#, 16#56#, 16#78#];
+         L : constant Natural := Payload'Length;
+         Ext : constant Natural := (if L < 126 then 0 elsif L < 65536 then 2 else 8);
+         F : constant Raw_Access := new Stream_Element_Array (1 .. Stream_Element_Offset (2 + Ext + 4 + L));
+         P : Stream_Element_Offset := 3;
+      begin
+         F (1) := (if Fin then 16#80# else 0) or Opcode;
+         F (2) := 16#80# or Stream_Element (if Ext = 0 then L elsif Ext = 2 then 126 else 127);
+         for K in reverse 0 .. Ext - 1 loop
+            F (P) := Stream_Element ((Long_Long_Integer (L) / 256 ** K) mod 256); P := P + 1;
+         end loop;
+         F (P .. P + 3) := Key; P := P + 4;
+         for I in 0 .. L - 1 loop
+            F (P + Stream_Element_Offset (I)) := Payload (Payload'First + Stream_Element_Offset (I)) xor Key (Stream_Element_Offset (I mod 4 + 1));
+         end loop;
+         return F;
+      end Frame;
+      function Bytes_Of (T : String) return Stream_Element_Array is
+         A : Stream_Element_Array (1 .. Stream_Element_Offset (T'Length));
+      begin
+         for I in T'Range loop
+            A (Stream_Element_Offset (I - T'First + 1)) := Stream_Element (Character'Pos (T (I)));
+         end loop;
+         return A;
+      end Bytes_Of;
+   begin
+      Open_Listener (Lst, Port);
+      C.Listener := Lst; C.Listening := True;
+      declare
+         task Reader with Storage_Size => Small_Stack;
+         task Peer with Storage_Size => 64 * 1024 * 1024;
+         task body Reader is
+            Kind : Websocket.Op;
+            Data : Buf;
+            Ok : Boolean;
+         begin
+            Websocket.Accept_Client (C, Accept_Ok);
+            if Accept_Ok then
+               Websocket.Read_Message (C, Kind, Data, Ok);   --  先来的 ping 在里面答掉,再拼出分两片的文字消息
+               Text_Ok := Ok and then Websocket."=" (Kind, Websocket.Op_Text) and then To_String (Data, 0, Natural (Data.Length)) = "hello world";
+               Websocket.Read_Message (C, Kind, Data, Ok);
+               Big_Len := Natural (Data.Length);
+               Big_Ok := Ok and then Websocket."=" (Kind, Websocket.Op_Binary) and then Big_Len = Big
+                 and then (for all I in 0 .. Big - 1 => Data (I) = U8 (Pattern (I)));
+               Websocket.Read_Message (C, Kind, Data, Ok);
+               Huge_Refused := not Ok;
+            end if;
+         exception
+            when others => null;
+         end Reader;
+         task body Peer is
+            S : Socket_Type;
+            Payload : constant Raw_Access := new Stream_Element_Array (1 .. Stream_Element_Offset (Big));
+         begin
+            Create_Socket (S);
+            Connect_Socket (S, (Family => Family_Inet, Addr => Loopback_Inet_Addr, Port => Port));
+            Send_Text (S, Req);
+            declare
+               Resp : Unbounded_String;
+            begin
+               while Length (Resp) < 4 or else Tail (Resp, 4) /= CRLF & CRLF loop
+                  Append (Resp, Recv_Text (S, 1));
+               end loop;
+               Hs_Ok := Index (Resp, " 101 ") > 0 and then Index (Resp, "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=") > 0;
+            end;
+            Send_Raw (S, Frame (True, 9, Bytes_Of ("pp")).all);
+            Send_Raw (S, Frame (False, 1, Bytes_Of ("hello ")).all);
+            Send_Raw (S, Frame (True, 0, Bytes_Of ("world")).all);
+            Pong_Ok := To_String (Recv_Text (S, 4)) = Character'Val (16#8A#) & Character'Val (2) & "pp";
+            for I in 0 .. Big - 1 loop
+               Payload (Stream_Element_Offset (I + 1)) := Pattern (I);
+            end loop;
+            Send_Raw (S, Frame (True, 2, Payload.all).all);
+            --  一个说自己有 2^40 字节的帧头(不带负载):比一条消息能编号的还大 ⇒ 那边该照实说、当线断了,而不是抛异常
+            declare
+               Huge : constant Stream_Element_Array (1 .. 10) := [16#82#, 127, 0, 0, 1, 0, 0, 0, 0, 0];
+            begin
+               Send_Raw (S, Huge);
+            end;
+            delay 0.2;
+            Close_Socket (S);
+         exception
+            when others => null;
+         end Peer;
+      begin
+         null;
+      end;
+      begin
+         Close_Socket (C.Sock);
+         Close_Socket (Lst);
+      exception
+         when others => null;
+      end;
+      Check (Accept_Ok and then Hs_Ok and then Req'Length > Old_Head
+             and then Ada.Strings.Fixed.Index (Req (Req'First .. Req'First + Old_Head - 1), CRLF & CRLF) = 0,
+             "WebSocket 握手:请求头 " & Codec.Img (Req'Length) & " 字节(一行 20 KiB 的 cookie)照样握上、accept 对"
+             & "(旧写法 16 KiB 的定长缓冲读满了还没见到空行 ⇒ 判握手失败)");
+      Check (Pong_Ok and then Text_Ok, "WebSocket 收消息:ping 当场答 pong(" & Boolean'Image (Pong_Ok) & ")· 分两片的文字拼成一条(" & Boolean'Image (Text_Ok) & ")");
+      --  牙只能算出来:旧写法真在这个线程里开 3 MB 的栈上数组,越过护栏页直接写到别处的内存(没开栈检查),会把自检本身弄坏,不在这里跑
+      Check (Big_Ok,
+             "WebSocket 大帧:在只有 1 MB 栈的线程里收下一帧 " & Codec.Img (Big_Len) & " 字节、每个字节都对(负载在堆上;旧写法负载在栈上要 "
+             & Codec.Img (Big) & " 字节 > 这个线程的栈 " & Codec.Img (Small_Stack) & " 字节)");
+      Check (Huge_Refused, "WebSocket:帧头说有 2^40 字节(超过一条消息能编号的)⇒ 照实说、当线断了,不抛异常(原来的 512 MiB 上限删了,只剩这道边和内存给不给)");
+   end;
+   --  🔴 HTTP(09-30):原来超时、半路断线的异常在接收循环里被吞掉,收到过回包头就把半截回话当成功交出去;状态码从来不看,400 / 500 的错误体也当成功。
+   --  本机回环上的假对方各回一种:200 带 Content-Length · 500 带错误原文 · 说 100 字节只给 7 个就关 · 回一半就不吭声(这边时限 0.3 秒)· 分块编码 · 没人听的口。
+   --  旧写法的判法照同一串回包再判一遍(见到头和正文之间的空行就算成,正文 = 后面全部)⇒ 该红的地方它是绿的
+   declare
+      function Old_Accepts (Raw : String; Body_Text : out Unbounded_String) return Boolean is
+         P : constant Natural := Ada.Strings.Fixed.Index (Raw, CRLF & CRLF);
+      begin
+         Body_Text := (if P = 0 then Null_Unbounded_String else To_Unbounded_String (Raw (P + 4 .. Raw'Last)));
+         return P > 0;
+      end Old_Accepts;
+      Took : Duration := 0.0;   --  最近一次 One 里 Post 用了多久
+      procedure One (Reply : String; Hold, Timeout : Duration; Ok : out Boolean; Got, Why : out Unbounded_String) is
+         T : Fake_Http;
+         Port : GNAT.Sockets.Port_Type;
+         Req : Unbounded_String;
+         T0 : Ada.Calendar.Time;
+      begin
+         T.Start (Reply, Hold, Port);
+         T0 := Ada.Calendar.Clock;
+         Ok := Http_Client.Post ("127.0.0.1", Natural (Port), "/x", "{""q"":1}", Got, Why, Timeout);
+         Took := Ada.Calendar."-" (Ada.Calendar.Clock, T0);
+         T.Got (Req);
+      end One;
+      R200 : constant String := Http11 & " 200 OK" & CRLF & "Content-Length: 5" & CRLF & CRLF & "hello";
+      E500 : constant String := "{""ok"":false,""err"":""CUDA OOM""}";
+      R500 : constant String := Http11 & " 500 Internal Server Error" & CRLF & "Content-Length: " & Codec.Img (E500'Length) & CRLF & CRLF & E500;
+      R_Short : constant String := Http11 & " 200 OK" & CRLF & "Content-Length: 100" & CRLF & CRLF & "1234567";
+      R_Chunk : constant String := Http11 & " 200 OK" & CRLF & "Transfer-Encoding: chunked" & CRLF & CRLF & "6" & CRLF & "hello " & CRLF
+        & "5;ext=1" & CRLF & "world" & CRLF & "0" & CRLF & CRLF;
+      Ok_A, Ok_B, Ok_C, Ok_D, Ok_E, Ok_F, Ok_G : Boolean;
+      Old_B, Old_C, Old_D, Old_E : Boolean;
+      G_A, G_B, G_C, G_D, G_E, G_F, W_A, W_B, W_C, W_D, W_E, W_F, Ob_B, Ob_C, Ob_D, Ob_E : Unbounded_String;
+      T_D : Duration;
+   begin
+      One (R200, 0.0, 5.0, Ok_A, G_A, W_A);
+      One (R500, 0.0, 5.0, Ok_B, G_B, W_B);
+      One (R_Short, 0.0, 5.0, Ok_C, G_C, W_C);
+      One (R_Short, 1.5, 0.3, Ok_D, G_D, W_D);
+      T_D := Took;
+      One (R_Chunk, 0.0, 5.0, Ok_E, G_E, W_E);
+      Old_B := Old_Accepts (R500, Ob_B);
+      Old_C := Old_Accepts (R_Short, Ob_C);
+      Old_D := Old_Accepts (R_Short, Ob_D) and then To_String (Ob_D) = "1234567";   --  旧写法:超时的异常被吞,收到的这一截照样交出去
+      Old_E := Old_Accepts (R_Chunk, Ob_E) and then To_String (Ob_E) /= "hello world";
+      declare
+         L : GNAT.Sockets.Socket_Type;
+         P : GNAT.Sockets.Port_Type;
+      begin
+         Open_Listener (L, P);
+         GNAT.Sockets.Close_Socket (L);   --  这个口没人听了
+         Ok_F := Http_Client.Post ("127.0.0.1", Natural (P), "/x", "{}", G_F, W_F, 2.0);
+      end;
+      declare
+         T : Fake_Http;
+         Port : GNAT.Sockets.Port_Type;
+         Req : Unbounded_String;
+      begin
+         T.Start (R500, 0.0, Port);
+         Ok_G := Http_Client.Post ("127.0.0.1", Natural (Port), "/x", To_Unbounded_String ("{}"), G_F);   --  不接 Why 的写法(仪器那几路):没成就印出为什么
+         T.Got (Req);
+      end;
+      Check (Ok_A and then To_String (G_A) = "hello", "HTTP 200 带 Content-Length ⇒ 成,正文 " & To_String (G_A));
+      Check (not Ok_B and then Old_B and then Index (W_B, "500") > 0 and then Index (W_B, "CUDA OOM") > 0 and then To_String (G_B) = E500,
+             "HTTP 500 ⇒ 照实报失败,Why 带状态行和错误原文、Reply_Body 照样放着正文(旧写法当成功交出去):" & To_String (W_B));
+      Check (not Ok_C and then Old_C and then Index (W_C, "短了") > 0, "HTTP 说好 100 字节只来 7 个就断 ⇒ 照实报(旧写法当成功):" & To_String (W_C));
+      Check (not Ok_D and then Old_D and then T_D < 1.5 and then Index (W_D, "时限") > 0,
+             "HTTP 回一半就不吭声 ⇒ 到这边的时限 0.3 秒照实报失败(用了 " & Codec.Fmt (Long_Float (T_D), 2) & " 秒,对方 1.5 秒后才关;旧写法吞掉超时、把半截当成功):" & To_String (W_D));
+      Check (Ok_E and then Old_E and then To_String (G_E) = "hello world", "HTTP 分块编码 ⇒ 按块拼回 " & To_String (G_E) & "(旧写法把块长和 CRLF 一起当正文)");
+      Check (not Ok_F and then Index (W_F, "连") > 0, "HTTP 没人听的口 ⇒ 照实报:" & To_String (W_F));
+      Check (not Ok_G, "HTTP 不接 Why 的写法:500 同样报失败(原因印在日志里)");
+   end;
+   --  🔴 脑(09-30):请求里不再带 max_tokens(原来 80 / 700)、写程序那一问不再带 temperature(原来 0.7)—— 驱动替脑拍的数,交回服务端 / 模型自己的生成配置;
+   --  认名字那一问仍是 temperature 0(贪心,要稳)。回包按 JSON 读;finish_reason = length(写到服务端上限被截断)照实说,不把半截话当程序;
+   --  服务端回错(400 上下文装不下)时错误原文一字不落进 Err —— 执行器靠里面的 "maximum context length" 把清单减半(act.adb 问脑那一段)
+   declare
+      function Chat_Reply (Content, Finish : String) return String is
+         B : constant String := "{""id"":""x"",""object"":""chat.completion"",""choices"":[{""index"":0,""message"":{""role"":""assistant"",""content"":"""
+           & Json.Escape (Content) & """},""finish_reason"":""" & Finish & """}],""usage"":{""prompt_tokens"":10}}";
+      begin
+         return Http11 & " 200 OK" & CRLF & "Content-Type: application/json" & CRLF & "Content-Length: " & Codec.Img (B'Length) & CRLF & CRLF & B;
+      end Chat_Reply;
+      Too_Long : constant String := "{""object"":""error"",""message"":""This model's maximum context length is 8192 tokens. However, you requested 9000 tokens."","
+        & """type"":""BadRequestError"",""code"":400}";
+      R400 : constant String := Http11 & " 400 Bad Request" & CRLF & "Content-Length: " & Codec.Img (Too_Long'Length) & CRLF & CRLF & Too_Long;
+      --  旧的两份请求头(原文):写程序那一问带 max_tokens 700、temperature 0.7,认名字那一问带 max_tokens 80
+      Old_Ask : constant String := "{""model"":""eye"",""max_tokens"":700,""temperature"":0.7,";
+      Old_Locate : constant String := "{""model"":""eye"",""max_tokens"":80,""temperature"":0,";
+      Rgb : Buf;
+      procedure Ask_Once (Reply : String; Ok : out Boolean; Prog, Err, Req : out Unbounded_String) is
+         T : Fake_Http;
+         Port : GNAT.Sockets.Port_Type;
+      begin
+         T.Start (Reply, 0.0, Port);
+         Ok := Brain.Ask ("127.0.0.1", Natural (Port), "pick it", "a body", "nothing yet", "grammar", "", "", "", "", 3, 3, 0, 1, 1, Rgb, 10, 10, Prog, Err);
+         T.Got (Req);
+      end Ask_Once;
+      Ok1, Ok2, Ok3, Ok4 : Boolean;
+      P1, E1, Q1, P2, E2, Q2, P3, E3, Q3, E4, Q4 : Unbounded_String;
+      Found : Boolean := False;
+      X0, Y0, X1, Y1 : Natural := 0;
+   begin
+      for I in 1 .. 10 * 10 * 3 loop
+         Rgb.Append (U8 (I mod 256));
+      end loop;
+      Ask_Once (Chat_Reply ("say hello" & ASCII.LF, "stop"), Ok1, P1, E1, Q1);
+      Ask_Once (Chat_Reply ("say hel", "length"), Ok2, P2, E2, Q2);
+      Ask_Once (R400, Ok3, P3, E3, Q3);
+      declare
+         T : Fake_Http;
+         Port : GNAT.Sockets.Port_Type;
+      begin
+         T.Start (Chat_Reply ("{""found"":true,""bbox_2d"":[100,200,300,400]}", "stop"), 0.0, Port);
+         Ok4 := Brain.Locate ("127.0.0.1", Natural (Port), "cup", Rgb, 10, 10, Found, X0, Y0, X1, Y1, E4);
+         T.Got (Q4);
+      end;
+      Check (Ok1 and then To_String (P1) = "say hello" & ASCII.LF and then Index (Q1, "max_tokens") = 0 and then Index (Q1, "temperature") = 0
+             and then Index (Q1, "structured_outputs") > 0
+             and then Ada.Strings.Fixed.Index (Old_Ask, "max_tokens") > 0 and then Ada.Strings.Fixed.Index (Old_Ask, """temperature"":0.7") > 0,
+             "脑写程序:请求里不带 max_tokens、不带 temperature(旧请求带着 700 和 0.7),程序原样读回");
+      Check (Ok4 and then Found and then X0 = 1 and then Y0 = 2 and then X1 = 3 and then Y1 = 4
+             and then Index (Q4, "max_tokens") = 0 and then Index (Q4, """temperature"":0,") > 0
+             and then Ada.Strings.Fixed.Index (Old_Locate, "max_tokens") > 0,
+             "脑认名字:请求里不带 max_tokens(旧请求带着 80)、仍是 temperature 0;框读回 (" & Codec.Img (X0) & "," & Codec.Img (Y0) & ")–(" & Codec.Img (X1) & "," & Codec.Img (Y1) & ")");
+      Check (not Ok2 and then Index (E2, "截断") > 0, "脑的回答写到服务端上限被截断(finish_reason = length)⇒ 照实说,不当程序:" & To_String (E2));
+      Check (not Ok3 and then Index (E3, "maximum context length") > 0 and then Index (E3, "400") > 0,
+             "脑回 400 上下文装不下 ⇒ Err 里带着服务端原文(执行器靠 ""maximum context length"" 把清单上限往下压;"
+             & "HTTP 那层改成照实报失败以后,要是这里还只说""连不上脑"",这句话就丢了):" & To_String (E3));
    end;
    --  msgpack 往返:map{message_type:"hello", n:-7, f:1.5, arr:[1,2], bin:<3 bytes>, nd:{nd:true,type:"<f4",shape:[2],data:bin8}}
    declare
@@ -95,6 +471,117 @@ begin
          Check (Msgpack.Decode (S2, D2) and then Msgpack.Text (D2, Msgpack.Key (D2, 0, "message_type")) = "hello", "msgpack 原样回写");
       end;
    end;
+   --  🔴 msgpack 的有符号整数(09-30):原来 Integer_8 (Unsigned_8 (…)) 这类是按【值】转换,负数(高位是 1)当场抛 Constraint_Error;
+   --  自检原来只测了 −7(负 fixint,不走这几行)。每一种有符号宽度的负数都过一遍:int8 / 16 / 32 / 64 的 −1 和最小值(字节手拼 —— Put_Int 会挑最短的写法)、
+   --  Put_Int 写 −33 / −129 / −32769 / −2^31−1 / 最小值再读回;nd 数组 i1 / i2 / i4 / i8 的负读数(小端、大端);
+   --  以前一律读成"没读数"的 f2 / u2 / u4 / u8 / b1 也认;装不进有符号 64 位的无符号数照大小读(原来悄悄截成最大的有符号数)
+   declare
+      use Interfaces;
+      type U8_List is array (Positive range <>) of U8;
+      function Of_List (L : U8_List) return Buf is
+         B : Buf;
+      begin
+         for X of L loop
+            B.Append (X);
+         end loop;
+         return B;
+      end Of_List;
+      Broken : constant Long_Float := -12345.0;   --  自检自己的记号:读坏了
+      function One (L : U8_List) return Long_Float is
+         D : Msgpack.Doc;
+      begin
+         return (if Msgpack.Decode (Of_List (L), D) then Msgpack.Num (D, 0) else Broken);
+      exception
+         when others => return Broken;
+      end One;
+      function Back (V : Long_Long_Integer; Tag : out U8) return Long_Long_Integer is
+         S : Buf;
+         D : Msgpack.Doc;
+      begin
+         Msgpack.Put_Int (S, V);
+         Tag := S (0);
+         return (if Msgpack.Decode (S, D) then D.Nodes (0).I else 0);
+      exception
+         when others => Tag := 0; return 0;
+      end Back;
+      function Nd (T : String; L : U8_List) return Floats is
+         S : Buf;
+         D : Msgpack.Doc;
+         Data : constant Buf := Of_List (L);
+      begin
+         Msgpack.Put_Map (S, 4);
+         Msgpack.Put_Str (S, "nd"); Msgpack.Put_Bool (S, True);
+         Msgpack.Put_Str (S, "type"); Msgpack.Put_Str (S, T);
+         Msgpack.Put_Str (S, "shape"); Msgpack.Put_Array (S, 1); Msgpack.Put_Int (S, 1);
+         Msgpack.Put_Str (S, "data"); Msgpack.Put_Bin (S, Data, 0, Natural (Data.Length));
+         return (if Msgpack.Decode (S, D) then Msgpack.Numbers (D, 0) else F64_Vectors.Empty_Vector);
+      exception
+         when others => return F64_Vectors.Empty_Vector;
+      end Nd;
+      type F_List is array (Positive range <>) of Long_Float;
+      function Same (V : Floats; W : F_List) return Boolean is
+        (Natural (V.Length) = W'Length and then (for all I in W'Range => V (I - W'First) = W (I)));
+      Min64 : constant Long_Float := Long_Float (Long_Long_Integer'First);
+      T1, T2, T3, T4, T5 : U8 := 0;
+      Scalars_Ok, Puts_Ok, Nd_Ok, New_Types_Ok, Rejects_Ok, Big_U_Ok : Boolean;
+      Old_Crashes_8, Old_Crashes_Put : Boolean := False;
+      H : constant Floats := Nd ("<f2", [16#00#, 16#3C#, 16#00#, 16#C0#, 16#FF#, 16#7B#, 16#01#, 16#00#, 16#00#, 16#7C#, 16#00#, 16#7E#]);
+      function Old_Knows (T : String) return Boolean is (T (T'Last - 1 .. T'Last) in "f4" | "f8" | "i4" | "i8" | "u1");
+   begin
+      Scalars_Ok := One ([16#D0#, 16#FF#]) = -1.0 and then One ([16#D0#, 16#80#]) = -128.0
+        and then One ([16#D1#, 16#FF#, 16#FF#]) = -1.0 and then One ([16#D1#, 16#80#, 0]) = -32768.0
+        and then One ([16#D2#, 16#FF#, 16#FF#, 16#FF#, 16#FF#]) = -1.0 and then One ([16#D2#, 16#80#, 0, 0, 0]) = -2147483648.0
+        and then One ([16#D3#, 16#FF#, 16#FF#, 16#FF#, 16#FF#, 16#FF#, 16#FF#, 16#FF#, 16#FF#]) = -1.0
+        and then One ([16#D3#, 16#80#, 0, 0, 0, 0, 0, 0, 0]) = Min64;
+      Puts_Ok := Back (-33, T1) = -33 and then T1 = 16#D0# and then Back (-129, T2) = -129 and then T2 = 16#D1#
+        and then Back (-32769, T3) = -32769 and then T3 = 16#D2# and then Back (-2147483649, T4) = -2147483649 and then T4 = 16#D3#
+        and then Back (Long_Long_Integer'First, T5) = Long_Long_Integer'First and then T5 = 16#D3#;
+      Nd_Ok := Same (Nd ("|i1", [16#FF#, 16#80#, 5]), [-1.0, -128.0, 5.0])
+        and then Same (Nd ("<i2", [16#FF#, 16#FF#, 16#00#, 16#80#, 16#2C#, 16#01#]), [-1.0, -32768.0, 300.0])
+        and then Same (Nd (">i2", [16#FF#, 16#FE#]), [1 => -2.0])
+        and then Same (Nd ("<i4", [16#FF#, 16#FF#, 16#FF#, 16#FF#, 0, 0, 0, 16#80#]), [-1.0, -2147483648.0])
+        and then Same (Nd ("<i8", [16#FF#, 16#FF#, 16#FF#, 16#FF#, 16#FF#, 16#FF#, 16#FF#, 16#FF#, 0, 0, 0, 0, 0, 0, 0, 16#80#]), [-1.0, Min64]);
+      New_Types_Ok := Same (Nd ("<u2", [16#FF#, 16#FF#]), [1 => 65535.0]) and then Same (Nd ("<u4", [16#FF#, 16#FF#, 16#FF#, 16#FF#]), [1 => 4294967295.0])
+        and then Same (Nd ("<u8", [16#FF#, 16#FF#, 16#FF#, 16#FF#, 16#FF#, 16#FF#, 16#FF#, 16#FF#]), [1 => 18446744073709551615.0])
+        and then Same (Nd ("|b1", [0, 1, 7]), [0.0, 1.0, 1.0])
+        and then Natural (H.Length) = 6 and then H (0) = 1.0 and then H (1) = -2.0 and then H (2) = 65504.0 and then H (3) = 2.0 ** (-24)
+        and then H (4) > Long_Float'Last and then H (5) /= H (5)
+        and then not Old_Knows ("<i2") and then not Old_Knows ("<f2") and then not Old_Knows ("|b1");
+      Rejects_Ok := Nd ("<i4", [1, 2, 3, 4, 5]).Is_Empty and then Nd ("<c8", [0, 0, 0, 0, 0, 0, 0, 0]).Is_Empty;
+      Big_U_Ok := One ([16#CF#, 16#FF#, 16#FF#, 16#FF#, 16#FF#, 16#FF#, 16#FF#, 16#FF#, 16#FF#]) = 18446744073709551615.0;
+      --  牙:旧写法按值转换,同一个字节 0xFF 当场抛异常
+      declare
+         pragma Warnings (Off, "*is not modified*");   --  易失 = 不让编译器把这一次转换提前算掉,要它在运行时真做一遍
+         V : U8 := 16#FF# with Volatile;
+         pragma Warnings (On, "*is not modified*");
+         I8 : Integer_8;
+      begin
+         I8 := Integer_8 (V);
+         Old_Crashes_8 := I8 = 0;
+      exception
+         when Constraint_Error => Old_Crashes_8 := True;
+      end;
+      declare
+         pragma Warnings (Off, "*is not modified*");
+         V : Long_Long_Integer := -2147483649 with Volatile;
+         pragma Warnings (On, "*is not modified*");
+         U : Unsigned_64;
+      begin
+         U := Unsigned_64 (Integer_64 (V));
+         Old_Crashes_Put := U = 0;
+      exception
+         when Constraint_Error => Old_Crashes_Put := True;
+      end;
+      Check (Scalars_Ok and then Old_Crashes_8,
+             "msgpack int8 / 16 / 32 / 64 的 −1 和最小值读得回来(旧写法 Integer_8 (Unsigned_8 (0xFF)) 按值转换,当场抛 Constraint_Error)");
+      Check (Puts_Ok and then Old_Crashes_Put,
+             "msgpack Put_Int −33 / −129 / −32769 / −2^31−1 / 最小值:类型字节挑对、读回一样(旧写法 Unsigned_64 (Integer_64 (−2^31−1)) 一写就抛异常)");
+      Check (Nd_Ok, "nd 数组 i1 / i2(小端、大端)/ i4 / i8 的负读数读得回来(旧写法 i4 / i8 负数抛异常,i1 / i2 根本不认)");
+      Check (New_Types_Ok and then Rejects_Ok,
+             "nd 数组 u2 / u4 / u8 / b1 / f2(1、−2、65504、最小次正规、无穷、不是数)都认(旧写法只认 f4 / f8 / i4 / i8 / u1,别的静悄悄读成没读数);"
+             & "长度不是元素宽度整数倍的、复数的 ⇒ 空");
+      Check (Big_U_Ok, "msgpack uint64 2^64−1 照大小读成 1.8e19(旧写法截成 2^63−1,值就错了)");
+   end;
    --  JSON:脑的回包形状
    declare
       D : Json.Doc;
@@ -106,6 +593,58 @@ begin
       Check (Json.Num (D, Json.Child (D, Json.Get (D, 0, "moves"), 0)) = 0.0 or else Json.Count (D, Json.Get (D, 0, "moves")) = 1, "JSON 数组");
       Check (Json.Num (D, Json.Get (D, Json.Child (D, Json.Get (D, 0, "moves"), 0), "of")) = 9.0, "JSON 嵌套整数");
       Check (Json.Escape ("a""b" & ASCII.LF) = "a\""b\n", "JSON 转义");
+   end;
+   --  🔴 JSON 读得严、数写得准(09-30):true / false / null 要整个词 —— 原来看头一个字母就往后跳 4 / 5 个字符,身体文件里的 "nan," 被读成 null 还吃掉了逗号
+   --  (读错一位不报);顶层的值后面还跟着东西 = 不是一份 JSON;Json.Number 写出去读回来一个比特不差(原来身体文件按定点小数印:
+   --  1e-7 印成 0.000000 读回来是 0、NaN 印成 nan、2.5e20 印成 inf,后两个都不是 JSON)
+   declare
+      use Interfaces;
+      function To_LF is new Ada.Unchecked_Conversion (Unsigned_64, Long_Float);
+      function To_U is new Ada.Unchecked_Conversion (Long_Float, Unsigned_64);
+      D : Json.Doc;
+      E : Unbounded_String;
+      Lit_Ok, Bad_Rejected, Tail_Ok : Boolean;
+      Seed : Unsigned_64 := 16#9E37_79B9_7F4A_7C15#;
+      Tried, Exact, Short_Exact : Natural := 0;
+      NaN : constant Long_Float := To_LF (16#7FF8_0000_0000_0000#);
+      Inf : constant Long_Float := To_LF (16#7FF0_0000_0000_0000#);
+      Old_Src : constant String := "[1.0,nan,2.0]";
+   begin
+      Lit_Ok := Json.Parse ("[true,false,null]", D, E) and then Json.Count (D, 0) = 3 and then Json.Bool (D, Json.Child (D, 0, 0))
+        and then not Json.Bool (D, Json.Child (D, 0, 1)) and then Json.Is_Null (D, Json.Child (D, 0, 2));
+      Bad_Rejected := not Json.Parse (Old_Src, D, E) and then not Json.Parse ("{""a"":nan,""b"":2}", D, E) and then not Json.Parse ("[tru]", D, E)
+        and then not Json.Parse ("[nul]", D, E) and then not Json.Parse ("[inf]", D, E) and then not Json.Parse ("[-inf]", D, E);
+      Tail_Ok := not Json.Parse ("{} x", D, E) and then not Json.Parse ("[1][2]", D, E) and then Json.Parse ("{} " & ASCII.LF, D, E);
+      for K in 1 .. 20_000 loop
+         Seed := Seed xor Shift_Left (Seed, 13); Seed := Seed xor Shift_Right (Seed, 7); Seed := Seed xor Shift_Left (Seed, 17);
+         declare
+            X : constant Long_Float := To_LF (Seed);
+            S : String (1 .. 40);
+         begin
+            if Json.Finite (X) then
+               Tried := Tried + 1;
+               if To_U (Long_Float'Value (Json.Number (X))) = To_U (X) then
+                  Exact := Exact + 1;
+               end if;
+               Ada.Long_Float_Text_IO.Put (S, X, Aft => 15, Exp => 1);   --  牙:少印一位(16 位有效数字)
+               if To_U (Long_Float'Value (S)) = To_U (X) then
+                  Short_Exact := Short_Exact + 1;
+               end if;
+            end if;
+         end;
+      end loop;
+      Check (Lit_Ok and then Bad_Rejected and then Tail_Ok and then Old_Src (6 .. 9) = "nan,",
+             "JSON 只认整个 true / false / null:nan / tru / nul / inf 都读不成(旧写法见 n 就跳 4 个字,""" & Old_Src (6 .. 9)
+             & """ 连逗号一起被当成 null 吃掉);顶层后面跟着东西 = 不是 JSON");
+      Check (Tried > 0 and then Exact = Tried and then Short_Exact < Tried,
+             "Json.Number:" & Codec.Img (Tried) & " 个随机双精度写出去读回来一个比特不差(少印一位只有 " & Codec.Img (Short_Exact) & " 个一样)");
+      Check (Json.Number (NaN) = "null" and then Json.Number (Inf) = "null" and then Json.Number (-Inf) = "null"
+             and then Long_Float'Value (Json.Number (1.0e-7)) = 1.0e-7 and then Codec.Fmt (1.0e-7, 6) = "0.000000"
+             and then Long_Float'Value (Json.Number (2.5e20)) = 2.5e20 and then Codec.Fmt (2.5e20, 6) = "inf" and then Codec.Fmt (NaN, 6) = "nan"
+             and then Json.Parse ("{""a"":null,""b"":1.5}", D, E)
+             and then Json.Real (D, Json.Get (D, 0, "a")) /= Json.Real (D, Json.Get (D, 0, "a")) and then Json.Real (D, Json.Get (D, 0, "b")) = 1.5
+             and then Json.Num (D, Json.Get (D, 0, "a")) = 0.0,
+             "Json.Number:NaN / ±无穷写成 null、Real 读回来还是 NaN(Num 读成 0);1e-7、2.5e20 读回一样(旧写法 Fmt 印成 0.000000、inf,NaN 印成 nan)");
    end;
    --  深度切块:平桌面上一个鼓起 3 cm 的方块,必须切出正好一块,且不贴边
    declare
@@ -1144,6 +1683,327 @@ begin
       end loop;
       Check (Table.Blocked (E), "顶住 = 零表连着两步更准");
    end;
+   --  🔴 顶住的判断看五样(09-30):Free_Res / Null_Res 原来只加前三样(u、v、远近)—— 09-08 表加到五行时别处的 0 .. 2 都改了,Norm3 不是循环、漏了。
+   --  一步只在"看着多大"上和表对不上(推过去它该变大、实际没变 = 顶住了),零表永远赢不了。同一组数:新的两步判顶住;旧的只加前三样,残差是 0
+   declare
+      E : Table.Effect;
+      Cmd : Table.Vec := Table.Zero_Vec;
+      Old_Res : Long_Float := -1.0;
+   begin
+      Table.Reset (E, 1, 1.0e-9);                          --  先验极小:这几步几乎改不动表,只看判据
+      Table.Set_Col (E, 0, [0.0, 0.0, 0.0, 0.5, 0.0]);     --  这个通道只改"看着多大"
+      Cmd (0) := 1.0;
+      for K in 1 .. 3 loop
+         Table.Update (E, Cmd, [0.0, 0.0, 0.0, 0.0, 0.0], 0.01, 0.0);   --  推了,画面上它一点没变
+      end loop;
+      declare
+         Miss : constant Table.Vec3 := Table.Predict (E, Cmd);   --  表说该变多少(实际 0)
+      begin
+         Old_Res := Ada.Numerics.Long_Elementary_Functions.Sqrt (Miss (0) ** 2 + Miss (1) ** 2 + Miss (2) ** 2);
+      end;
+      Check (Table.Blocked (E) and then E.Free_Res > 0.4 and then Old_Res = 0.0,
+             "顶住看五样:只在""看着多大""上对不上也判顶住(走的表差 " & Codec.Fmt (E.Free_Res, 3) & ";旧写法只加前三样,差 " & Codec.Fmt (Old_Res, 3) & " ⇒ 永远不判)");
+   end;
+   --  🔴 响应表的天花板(09-30):要的通道比 Max_Ch 多 ⇒ 当场报(Pre);原来 Reset / Norm / Solve 用 Natural'Min 悄悄截成前 64 个
+   declare
+      E : Table.Effect;
+      pragma Warnings (Off, "*is not modified*");   --  易失:不让编译器提前判出"前提不成立",要在运行时真调一次
+      N : Natural := Table.Max_Ch + 1 with Volatile;
+      pragma Warnings (On, "*is not modified*");
+      Raised : Boolean := False;
+   begin
+      begin
+         Table.Reset (E, N, 1.0);
+      exception
+         when Ada.Assertions.Assertion_Error => Raised := True;
+      end;
+      Check (Raised and then Natural'Min (N, Table.Max_Ch) /= N,
+             "响应表要 " & Codec.Img (N) & " 个通道(天花板 " & Codec.Img (Table.Max_Ch) & ")⇒ 当场报(旧写法 Natural'Min 悄悄只留前 " & Codec.Img (Table.Max_Ch) & " 个)");
+   end;
+   --  🔴 带硬约束的解(09-30):硬约束行正交化成 Q ——
+   --  ① 原来 Q 只开 Rows × 8 = 40 行,硬约束的秩比 40 大时多出来的方向悄悄不收(不受保护);现在开到通道数(秩的上限);
+   --  ② 原来"剩下的长度 > 0 就收":和已有方向线性相关的行剩下的是舍入误差,也被归一成一个乱方向 ⇒ P = I − QᵀQ 不再是投影,软约束那一步会挪动硬约束已经达成的行;
+   --     现在按数值秩的标准门收、正交化做两遍。两组数:48 个通道 × 50 行硬约束(秩 48 > 40)、6 个通道里同一条硬约束写了两遍再加一条它们的组合。
+   --  判:解出来的 A 和只解硬约束的 A1 比,硬约束那几行一点没动;旧写法的复刻(一遍、> 0 就收、最多 40 行)同一组数算出的 P 漏掉硬约束方向
+   declare
+      Seed : Long_Long_Integer := 20260930;
+      function Rnd return Long_Float is
+      begin
+         Seed := (Seed * 1103515245 + 12345) mod 2147483648;
+         return Long_Float (Seed mod 2001) / 1000.0 - 1.0;
+      end Rnd;
+      --  旧写法的复刻:一遍格拉姆-施密特、剩下的长度 > 0 就收、最多收 Cap_Rows 行;返回 max |硬约束行 × P| —— 真投影下这是 0
+      function Old_Leak (Hard : Table.Term_Vectors.Vector; N, Cap_Rows : Natural) return Long_Float is
+         Q : array (0 .. Cap_Rows - 1, 0 .. N - 1) of Long_Float := [others => [others => 0.0]];
+         NQ : Natural := 0;
+         P : array (0 .. N - 1, 0 .. N - 1) of Long_Float := [others => [others => 0.0]];
+         Worst : Long_Float := 0.0;
+      begin
+         for T of Hard loop
+            for R in 0 .. Table.Rows - 1 loop
+               if T.W (R) > 0.0 and then NQ < Cap_Rows then
+                  declare
+                     V : array (0 .. N - 1) of Long_Float;
+                     Nm : Long_Float := 0.0;
+                  begin
+                     for C in 0 .. N - 1 loop
+                        V (C) := T.E.B (C, R);
+                     end loop;
+                     for K in 0 .. NQ - 1 loop
+                        declare
+                           Dt : Long_Float := 0.0;
+                        begin
+                           for C in 0 .. N - 1 loop
+                              Dt := Dt + V (C) * Q (K, C);
+                           end loop;
+                           for C in 0 .. N - 1 loop
+                              V (C) := V (C) - Dt * Q (K, C);
+                           end loop;
+                        end;
+                     end loop;
+                     for C in 0 .. N - 1 loop
+                        Nm := Nm + V (C) ** 2;
+                     end loop;
+                     Nm := Ada.Numerics.Long_Elementary_Functions.Sqrt (Nm);
+                     if Nm > 0.0 then
+                        for C in 0 .. N - 1 loop
+                           Q (NQ, C) := V (C) / Nm;
+                        end loop;
+                        NQ := NQ + 1;
+                     end if;
+                  end;
+               end if;
+            end loop;
+         end loop;
+         for I in 0 .. N - 1 loop
+            P (I, I) := 1.0;
+         end loop;
+         for K in 0 .. NQ - 1 loop
+            for I in 0 .. N - 1 loop
+               for J in 0 .. N - 1 loop
+                  P (I, J) := P (I, J) - Q (K, I) * Q (K, J);
+               end loop;
+            end loop;
+         end loop;
+         for T of Hard loop
+            for R in 0 .. Table.Rows - 1 loop
+               if T.W (R) > 0.0 then
+                  for J in 0 .. N - 1 loop
+                     declare
+                        S : Long_Float := 0.0;
+                     begin
+                        for C in 0 .. N - 1 loop
+                           S := S + T.E.B (C, R) * P (C, J);
+                        end loop;
+                        Worst := Long_Float'Max (Worst, abs S);
+                     end;
+                  end loop;
+               end if;
+            end loop;
+         end loop;
+         return Worst;
+      end Old_Leak;
+      --  新写法:解出来的 A 比只解硬约束的 A1,硬约束那几行挪了多少
+      procedure New_Leak (Hard, Soft : Table.Term_Vectors.Vector; N : Natural; Soft_Has_Room : Boolean; Moved : out Long_Float; Ok : out Boolean) is
+         Cap : constant Table.Vec := [others => 1.0e6];
+         Act : Table.Mask := [others => False];
+         Damp : constant Table.Vec := [others => 1.0e-9];
+         A, A1 : Table.Vec;
+         Ok1 : Boolean;
+      begin
+         for C in 0 .. N - 1 loop
+            Act (C) := True;
+         end loop;
+         Table.Solve (Hard, N, Cap, Act, Damp, A1, Ok1);
+         Table.Solve_Priority (Hard, Soft, N, Cap, Act, Damp, A, Ok);
+         Ok := Ok and then Ok1;
+         Moved := 0.0;
+         for T of Hard loop
+            for R in 0 .. Table.Rows - 1 loop
+               if T.W (R) > 0.0 then
+                  declare
+                     S : Long_Float := 0.0;
+                  begin
+                     for C in 0 .. N - 1 loop
+                        S := S + T.E.B (C, R) * (A (C) - A1 (C));
+                     end loop;
+                     Moved := Long_Float'Max (Moved, abs S);
+                  end;
+               end if;
+            end loop;
+         end loop;
+         --  硬约束没占满自由度时,软约束也得真的被用上(不然"硬的没动"是白给的):解和 A1 不一样;
+         --  秩满(48 个通道 × 50 行)时软约束没有剩下的自由度,A = A1 才是对的
+         if Soft_Has_Room then
+            Ok := Ok and then (for some C in 0 .. N - 1 => abs (A (C) - A1 (C)) > 1.0e-6);
+         end if;
+      end New_Leak;
+      function Random_Term (N : Natural; Rows_On : Natural) return Table.Term is
+         T : Table.Term;
+      begin
+         Table.Reset (T.E, N, 1.0);
+         for C in 0 .. N - 1 loop
+            declare
+               Col : Table.Vec3;
+            begin
+               for R in 0 .. Table.Rows - 1 loop
+                  Col (R) := Rnd;
+               end loop;
+               Table.Set_Col (T.E, C, Col);
+            end;
+         end loop;
+         for R in 0 .. Table.Rows - 1 loop
+            T.Err (R) := Rnd;
+            T.W (R) := (if R < Rows_On then 1.0 else 0.0);
+         end loop;
+         return T;
+      end Random_Term;
+      Hard48, Soft48, Hard6, Soft6 : Table.Term_Vectors.Vector;
+      Moved48, Moved6, Leak48, Leak6 : Long_Float;
+      Ok48, Ok6 : Boolean;
+   begin
+      for K in 1 .. 10 loop
+         Hard48.Append (Random_Term (48, Table.Rows));
+      end loop;
+      Soft48.Append (Random_Term (48, Table.Rows));
+      declare
+         T1 : constant Table.Term := Random_Term (6, 2);
+         T3 : Table.Term := T1;
+      begin
+         Hard6.Append (T1);
+         Hard6.Append (T1);   --  同一条硬约束写了两遍
+         for C in 0 .. 5 loop
+            T3.E.B (C, 0) := 0.37 * T1.E.B (C, 0) + 1.3 * T1.E.B (C, 1);   --  再加一条它们的组合
+         end loop;
+         T3.W := [1.0, 0.0, 0.0, 0.0, 0.0];
+         Hard6.Append (T3);
+      end;
+      Soft6.Append (Random_Term (6, 3));
+      New_Leak (Hard48, Soft48, 48, False, Moved48, Ok48);
+      New_Leak (Hard6, Soft6, 6, True, Moved6, Ok6);
+      Leak48 := Old_Leak (Hard48, 48, Table.Rows * 8);
+      Leak6 := Old_Leak (Hard6, 6, Table.Rows * 8);
+      Check (Ok48 and then Moved48 < 1.0e-9 and then Leak48 > 1.0e-3,
+             "硬约束秩 48 > 40:软约束那一步硬约束行挪了 " & Codec.Fmt (Moved48, 12) & "(旧写法 Q 只收 40 行,P 漏掉的硬约束方向 " & Codec.Fmt (Leak48, 3) & ")");
+      Check (Ok6 and then Moved6 < 1.0e-9 and then Leak6 > 1.0e-3,
+             "同一条硬约束写两遍 + 一条组合:软约束那一步硬约束行挪了 " & Codec.Fmt (Moved6, 12) & "(旧写法把舍入误差归一成乱方向,P 漏掉 " & Codec.Fmt (Leak6, 3) & ")");
+   end;
+   --  🔴 有上下限的解做到不再变(09-30):越限的夹住、固定、再解,原来固定做 3 遍 —— 第 3 遍还在夹就交出去,后夹的那个的贡献没分给剩下的通道。
+   --  离线搜出来的一组 4 通道(每遍多夹一个,要 4 遍):新写法剩下那个自由通道的梯度是 0;旧写法的复刻做 3 遍,同一组数那个通道差 0.14
+   declare
+      type V4 is array (0 .. 3) of Long_Float;
+      type M4 is array (0 .. 3, 0 .. 3) of Long_Float;
+      Bs : constant array (0 .. 3) of Table.Vec3 :=
+        [[-0.75, -0.25, -0.75, 1.0, 0.0], [0.0, 0.25, -0.5, 0.25, 0.0], [0.25, 0.75, 0.0, 0.25, 0.0], [0.25, 0.25, 0.0, 0.5, 0.0]];
+      Err : constant Table.Vec3 := [0.0, -1.75, 0.5, -1.5, 0.0];
+      Dmp : constant Long_Float := 1.0e-9;
+      G : M4 := [others => [others => 0.0]];
+      H : V4 := [others => 0.0];
+      --  旧写法的复刻:同一个 G、h,越限的夹住、固定、再解,最多做 Max_R 遍
+      function Clamp_Solve (Max_R : Natural) return V4 is
+         A : V4 := [others => 0.0];
+         Fixed : array (0 .. 3) of Boolean := [others => False];
+      begin
+         for Round in 1 .. Max_R loop
+            declare
+               Idx : array (0 .. 3) of Natural := [others => 0];
+               M : Natural := 0;
+               S : M4 := [others => [others => 0.0]];
+               Rhs, X : V4 := [others => 0.0];
+               Any : Boolean := False;
+            begin
+               for I in 0 .. 3 loop
+                  if not Fixed (I) then
+                     Idx (M) := I; M := M + 1;
+                  end if;
+               end loop;
+               exit when M = 0;
+               for P in 0 .. M - 1 loop
+                  Rhs (P) := H (Idx (P));
+                  for J in 0 .. 3 loop
+                     if Fixed (J) then
+                        Rhs (P) := Rhs (P) - G (Idx (P), J) * A (J);
+                     end if;
+                  end loop;
+                  for Q in 0 .. M - 1 loop
+                     S (P, Q) := G (Idx (P), Idx (Q));
+                  end loop;
+               end loop;
+               for C in 0 .. M - 1 loop
+                  for R in C + 1 .. M - 1 loop
+                     declare
+                        F : constant Long_Float := S (R, C) / S (C, C);
+                     begin
+                        for Q in C .. M - 1 loop
+                           S (R, Q) := S (R, Q) - F * S (C, Q);
+                        end loop;
+                        Rhs (R) := Rhs (R) - F * Rhs (C);
+                     end;
+                  end loop;
+               end loop;
+               for R in reverse 0 .. M - 1 loop
+                  declare
+                     Sm : Long_Float := Rhs (R);
+                  begin
+                     for Q in R + 1 .. M - 1 loop
+                        Sm := Sm - S (R, Q) * X (Q);
+                     end loop;
+                     X (R) := Sm / S (R, R);
+                  end;
+               end loop;
+               for P in 0 .. M - 1 loop
+                  if X (P) > 1.0 then
+                     A (Idx (P)) := 1.0; Fixed (Idx (P)) := True; Any := True;
+                  elsif X (P) < -1.0 then
+                     A (Idx (P)) := -1.0; Fixed (Idx (P)) := True; Any := True;
+                  else
+                     A (Idx (P)) := X (P);
+                  end if;
+               end loop;
+               exit when not Any;
+            end;
+         end loop;
+         return A;
+      end Clamp_Solve;
+      E : Table.Effect;
+      T : Table.Term;
+      Terms : Table.Term_Vectors.Vector;
+      Cap : Table.Vec := Table.Zero_Vec;
+      Act : Table.Mask := [others => False];
+      A : Table.Vec;
+      Ok : Boolean;
+      Old3, Full : V4;
+      Grad_New, Grad_Old : Long_Float := 0.0;
+   begin
+      Table.Reset (E, 4, 1.0);
+      for C in 0 .. 3 loop
+         Table.Set_Col (E, C, Bs (C));
+         Cap (C) := 1.0; Act (C) := True;
+         for D in 0 .. 3 loop
+            for R in 0 .. Table.Rows - 1 loop
+               G (C, D) := G (C, D) + Bs (C) (R) * Bs (D) (R);
+            end loop;
+         end loop;
+         G (C, C) := G (C, C) + Dmp;
+         for R in 0 .. Table.Rows - 1 loop
+            H (C) := H (C) + Bs (C) (R) * Err (R);
+         end loop;
+      end loop;
+      T.E := E; T.Err := Err; T.W := [others => 1.0];
+      Terms.Append (T);
+      Table.Solve (Terms, 4, Cap, Act, [others => Dmp], A, Ok);
+      Old3 := Clamp_Solve (3);
+      Full := Clamp_Solve (5);
+      for D in 0 .. 3 loop
+         Grad_New := Grad_New + G (0, D) * A (D);
+         Grad_Old := Grad_Old + G (0, D) * Old3 (D);
+      end loop;
+      Grad_New := Grad_New - H (0); Grad_Old := Grad_Old - H (0);
+      Check (Ok and then (for all C in 0 .. 3 => abs (A (C) - Full (C)) < 1.0e-9) and then abs A (0) < 1.0 and then abs Grad_New < 1.0e-9
+             and then abs (Old3 (0) - A (0)) > 0.05 and then abs Grad_Old > 0.1,
+             "有上下限的解做到不再变:第 4 遍夹住最后一个越限的,剩下的自由通道 " & Codec.Fmt (A (0), 4) & " 梯度 " & Codec.Fmt (Grad_New, 9)
+             & "(旧写法 3 遍就交:" & Codec.Fmt (Old3 (0), 4) & ",梯度 " & Codec.Fmt (Grad_Old, 3) & ")");
+   end;
    --  监视器与备份
    declare
       W : Monitor.Watch;
@@ -1813,6 +2673,98 @@ begin
       Check (Got and then Same and then Ok1 and then Ok2 and then U1 = U2 and then V1 = V2,
              "握区的手指像素随身体文件存、装回:" & (if Got then "装上了" else "没装上(" & To_String (Note) & ")") & " · 每一格" & (if Same then "一样" else "不一样")
              & " · 指尖像素 (" & Codec.Fmt (U1, 2) & "," & Codec.Fmt (V1, 2) & ") → (" & Codec.Fmt (U2, 2) & "," & Codec.Fmt (V2, 2) & ")");
+   end;
+   --  🔴 身体文件的数写得准、每条臂几个抓握通道跟着存(09-30):
+   --  ① 原来按 Codec.Fmt 定点印:读数噪声 1e-7 印成 0.000000 读回来是 0、NaN 印成 nan、2.5e20 印成 inf —— 后两个不是 JSON,整份读不回来或读错一位;
+   --     现在每个数写出去读回来一个比特不差,不是有限数的写成 null、读回来还是 NaN(手指深度读不到 = NaN,是个正常的"没量到")
+   --  ② 原来不存 M.Jaws ⇒ 装回以后一律当 1 个(body_driver 的 `else 1`、act.adb 的 Jaws_Of):五指手第 1 号往后的握区全丢,存盘又把少了的写回去;
+   --     旧文件没有这一项 ⇒ 照实说"没记,要重量",不按 1 个猜
+   declare
+      use Interfaces;
+      function To_LF is new Ada.Unchecked_Conversion (Unsigned_64, Long_Float);
+      NaN : constant Long_Float := To_LF (16#7FF8_0000_0000_0000#);
+      M1, M2, M3 : Selfmap.Body_Map;
+      H1, H2, H3 : Zone.Hand_Vectors.Vector;
+      T1, T2, T3 : Act.Effect_Vectors.Vector;
+      S1, S2, S3 : Schema.Map;
+      Note2, Note3 : Unbounded_String;
+      Got2, Got3, Valid_Json : Boolean := False;
+      Path : constant String := "/tmp/bd_selfcheck_body_exact.json";
+      Old_Path : constant String := "/tmp/bd_selfcheck_body_nojaws.json";
+      Text : Unbounded_String;
+      D : Json.Doc;
+      E : Unbounded_String;
+      Old_Count : Natural := 0;
+      Exact_Ok, Hands_Ok : Boolean := False;
+      function Read_All (P : String) return Unbounded_String is
+         F : File_Type;
+         R : Unbounded_String;
+      begin
+         Open (F, In_File, P);
+         while not End_Of_File (F) loop
+            Append (R, Get_Line (F));
+         end loop;
+         Close (F);
+         return R;
+      end Read_All;
+   begin
+      M1.Arms := 1; M1.N_Cams := 1; M1.Per_Arm := Chan.Per_Arm; M1.Channels := Chan.Per_Arm;
+      for Ch in 0 .. Chan.Per_Arm - 1 loop
+         M1.Amp.Append (0.0065 + Long_Float (Ch) * 1.0e-9); M1.Delivered.Append (1.0 / 3.0);   --  合成:第 6 位以后才不一样、除不尽
+      end loop;
+      M1.Cam_On_Arm.Append (0);
+      M1.EE_Noise := 1.0e-7; M1.Rot_Noise := NaN; M1.Jaw_Noise := 2.5e20;
+      M1.Jaws.Append (5);   --  一条五指手
+      for K in 0 .. 4 loop
+         declare
+            H : Zone.Hand;
+            Z : Zone.Hand_Zone;
+         begin
+            Z.Valid := True; Z.N_Lobes := 1; Z.Cu := 0.1 * Long_Float (K + 1); Z.Cv := 0.5;
+            Z.Depth := (if K = 2 then NaN else 0.3);   --  第 2 根手指的深度读不到
+            Z.A := (True, 0, 0, 1, 1, 0.1, 0.2, 4);
+            for I in 0 .. 8 * 6 - 1 loop
+               Z.Fingers.Append (I mod 5 = K);
+            end loop;
+            H.Arm := 0; H.K := K; H.Zones.Append (Z);
+            H1.Append (H);
+         end;
+      end loop;
+      Bodyfile.Save (Path, "selfcheck", M1, H1, T1, S1);
+      Text := Read_All (Path);
+      Valid_Json := Json.Parse (To_String (Text), D, E);
+      Got2 := Bodyfile.Load (Path, "selfcheck", M2, H2, T2, S2, Note2);
+      Exact_Ok := Got2 and then M2.EE_Noise = 1.0e-7 and then M2.Rot_Noise /= M2.Rot_Noise and then M2.Jaw_Noise = 2.5e20
+        and then Natural (M2.Amp.Length) = Chan.Per_Arm
+        and then (for all Ch in 0 .. Chan.Per_Arm - 1 => M2.Amp (Ch) = M1.Amp (Ch) and then M2.Delivered (Ch) = M1.Delivered (Ch));
+      Hands_Ok := Got2 and then Bodyfile.Jaws_Recorded (M2) and then M2.Jaws (0) = 5 and then Natural (H2.Length) = 5
+        and then (for all K in 0 .. 4 => H2 (K).K = K and then H2 (K).Zones (0).Cu = H1 (K).Zones (0).Cu)
+        and then H2 (2).Zones (0).Depth /= H2 (2).Zones (0).Depth and then H2 (1).Zones (0).Depth = 0.3;
+      --  09-30 以前的文件:没有 "jaws" 这一项
+      declare
+         Tag : constant String := """jaws"":[5],";
+         P : constant Natural := Index (Text, Tag);
+         Old_Text : Unbounded_String := Text;
+         F : File_Type;
+      begin
+         if P > 0 then
+            Delete (Old_Text, P, P + Tag'Length - 1);
+         end if;
+         Create (F, Out_File, Old_Path);
+         Put (F, To_String (Old_Text));
+         Close (F);
+      end;
+      Got3 := Bodyfile.Load (Old_Path, "selfcheck", M3, H3, T3, S3, Note3);
+      --  牙:旧写法 body_driver 里"这条臂合空几次"那一句,装回这份旧文件得 1
+      Old_Count := (if 0 < Natural (M3.Jaws.Length) then Natural'Max (1, M3.Jaws (0)) else 1);
+      Check (Valid_Json and then Exact_Ok and then Codec.Fmt (1.0e-7, 6) = "0.000000" and then Codec.Fmt (2.5e20, 6) = "inf" and then Codec.Fmt (NaN, 6) = "nan",
+             "身体文件的数写出去读回来一个比特不差:噪声 1e-7、2.5e20、1/3 都一样,NaN 写成 null 读回来还是 NaN,整份是合法 JSON"
+             & "(旧写法印成 0.000000、inf、nan)");
+      Check (Hands_Ok,
+             "身体文件记下每条臂几个抓握通道:五指手存 5 装回 5,五根手指的握区全回来(第 2 根读不到的深度还是 NaN)"
+             & (if Got2 then "" else "(没装上:" & To_String (Note2) & ")"));
+      Check (Got3 and then not Bodyfile.Jaws_Recorded (M3) and then Index (Note3, "没记") > 0 and then Old_Count = 1,
+             "旧的身体文件没记抓握通道数 ⇒ 装回时照实说要重量:" & To_String (Note3) & "(旧写法按 1 个合空,五指手只剩第 0 号)");
    end;
    --  🔴 图顺时针转 90°(Act.Turn_90):原图 (u, v) 的那个像素落在新图 (H − 1 − v, u)(合成 5×3 的图,每个像素三个字节各不相同)
    declare

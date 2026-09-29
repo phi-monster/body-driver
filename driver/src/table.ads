@@ -6,6 +6,9 @@
 --  解算:带上下限的加权最小二乘分配(飞控的控制分配),没有减半/放大/禁用这类规则。
 with Ada.Containers.Vectors;
 package Table is
+   --  一张表最多几个通道:定长数组的天花板(现在每张表是一条臂的 Chan.Per_Arm 个通道)。
+   --  要的通道数超过它 = 调用方的错,当场报(下面几个入口的 Pre);原来 Reset / Norm / Solve 用 Natural'Min 悄悄截掉多出来的通道,
+   --  表和解都只剩前 64 个,不报(09-30 审计 G5 查出)
    Max_Ch : constant := 64;
    subtype Ch_Index is Natural range 0 .. Max_Ch - 1;
    type Vec is array (Ch_Index) of Long_Float;
@@ -33,15 +36,17 @@ package Table is
       Scatter : Mat3 := [others => [others => 0.0]];
    end record;
 
-   procedure Reset (E : in out Effect; N : Natural; P0 : Long_Float);
+   procedure Reset (E : in out Effect; N : Natural; P0 : Long_Float) with Pre => N <= Max_Ch;
    procedure Set_Prior (E : in out Effect; Ch : Natural; P0 : Long_Float);   --  这一通道的先验不确定度(按它的命令量级定)
    procedure Set_Col (E : in out Effect; Ch : Natural; D : Vec3);
    procedure Set_Spread (E : in out Effect; Ch : Natural; N : Natural; S : Vec3);
    function Col (E : Effect; Ch : Natural) return Vec3;
    function Predict (E : Effect; A : Vec) return Vec3;
+   --  Free_Res / Null_Res = 走的表 / 零表这一步预测差多少:五样(u、v、远近、大小、朝向)一起算
    procedure Update (E : in out Effect; A : Vec; Dy : Vec3; Motion_Floor, Cmd_Floor : Long_Float);
    function Blocked (E : Effect) return Boolean;       --  连着两步"零表"比"走的表"预测得准
-   function Norm (A : Vec; N : Natural) return Long_Float;
+   function Norm (A : Vec; N : Natural) return Long_Float with Pre => N <= Max_Ch;
+   --  五样一起的长度(名字是表只有三行时起的;09-08 加到五行时这里漏改了,一直只加前三样 —— 顶住的判断因此看不见大小和朝向)
    function Norm3 (V : Vec3) return Long_Float;
 
    type Term is record
@@ -52,15 +57,18 @@ package Table is
    package Term_Vectors is new Ada.Containers.Vectors (Natural, Term);
    --  最小化 Σ w·|B a − e|² + μ|a|²,|a_k| ≤ cap_k,只动 Active 的通道。解不出来 Ok = False。
    --  Damp (k) = 这一通道每单位命令的阻尼(按它的探针幅度归一:μ/幅²,所有通道都以"几个探针幅度"计价)
+   --  越限的通道夹到限上、固定、再解剩下的,一直做到这一遍没有新越限的为止(每遍至少多固定一个 ⇒ 最多 通道数 + 1 遍;
+   --  原来固定做 3 遍,第 3 遍还在夹就照样交出去,后夹的那几个的贡献没再分给剩下的通道)
    procedure Solve (Terms : Term_Vectors.Vector; N : Natural; Cap : Vec; Active : Mask; Damp : Vec;
-                    A : out Vec; Ok : out Boolean);
+                    A : out Vec; Ok : out Boolean) with Pre => N <= Max_Ch;
    --  带优先级的解:Hard 里的约束【不许被牺牲】,Soft 只能在剩下的自由度里做文章。
    --  做法是真的零空间投影,不是"给硬的加大权重"—— 加权重只是让它更重要,不是让它不被牺牲。
    --  先解 Hard 得 A1;再把 Soft 的雅可比右乘投影阵 P = I − QᵀQ(Q = 硬约束行的正交化),
    --  解出 z,最终 A = A1 + P·z。P·z 恒落在硬约束的零空间里 ⇒ 走它不改变硬约束已经达成的那几行。
    --  上下限:A1 由第一段自己守;越界只缩 z 那一半,方向不变,硬约束照旧成立。
+   --  Q 最多 N 行(硬约束行的秩不会超过通道数);哪一行算"新方向"按数值秩的标准门定,正交化做两遍 —— 见 table.adb
    procedure Solve_Priority (Hard, Soft : Term_Vectors.Vector; N : Natural; Cap : Vec; Active : Mask; Damp : Vec;
-                             A : out Vec; Ok : out Boolean);
+                             A : out Vec; Ok : out Boolean) with Pre => N <= Max_Ch;
    --  🔴 "这一行证明过了没有" 只在这里定义一次 —— 体检和执行器都问它,免得两处判据分叉。
    --  证明过 = 一格推得动(尺度 > 0)+ 同一个推法重复过至少两次 + 散布小于均值本身。
    function Row_Proven (E : Effect; Notch : Vec; R : Natural) return Boolean;
