@@ -86,8 +86,10 @@ package body Plug is
                declare
                   Kq : constant Integer := K - Lag;
                begin
+                  --  这台相机那一拍没量成(那一拍或上一拍没收到它的画面)⇒ 不参与:不当成"画面没变"
                   if Kq >= 0 and then Kq < Natural (L.Beats.Length) and then L.Beats (K).Seq >= From_Seq and then L.Beats (Kq).Seq >= From_Seq
-                    and then Cam < Natural (L.Beats (K).Img_Chg.Length) and then Group < Natural (L.Beats (Kq).Q_Chg.Length)
+                    and then Cam < Natural (L.Beats (K).Img_Chg.Length) and then Cam < Natural (L.Beats (K).Img_Ok.Length)
+                    and then L.Beats (K).Img_Ok (Cam) and then Group < Natural (L.Beats (Kq).Q_Chg.Length)
                   then
                      declare
                         X : constant Long_Float := L.Beats (K).Img_Chg (Cam);
@@ -135,46 +137,52 @@ package body Plug is
       return Numbers (L.Last, Layout.Find (L.Last, L.Last_Obs, P));
    end Nums_At;
 
-   --  「照现在这样保持」:把此刻报的位姿/关节/开合原样编成一条动作。零假设,一次回声。
-   function Hold_Action (L : Link) return Buf is
+   --  一条动作里的一个键:名字 + 那一串数。先凑齐再数有几个键(读数空、这回不发的键不占 Put_Map 的个数)
+   procedure Put_Keys (S : in out Buf; Keys : Strs; Vals : Floats_Vectors.Vector) is
+   begin
+      Put_Map (S, Natural (Keys.Length));
+      for K in 0 .. Natural (Keys.Length) - 1 loop
+         Put_Str (S, Keys (K));
+         Put_Array (S, Natural (Vals (K).Length));
+         for X of Vals (K) loop
+            Put_Float (S, X);
+         end loop;
+      end loop;
+   end Put_Keys;
+
+   --  「照现在这样保持」:把此刻报的位姿 / 关节原样回声,每组抓握照这一组读数的个数发(Jaw_Values,没有新命令)。零假设,一次回声。
+   --  读数空的键不发:不知道对方要几个数,也不编(09-30:原来抓握一栏每只手只发 1 个数、没读数就发 1.0 —— x5"1 = 张开"的约定)
+   function Hold_Action (L : in out Link) return Buf is
       S : Buf;
       N : constant Natural := Arms (L);
+      Keys : Strs;
+      Vals : Floats_Vectors.Vector;
+      None : Cmd;
+      procedure Add (Name : String; V : Floats) is
+      begin
+         if not V.Is_Empty then
+            Keys.Append (Name); Vals.Append (V);
+         end if;
+      end Add;
    begin
       if N = 0 or else L.Last_Obs < 0 then
          return S;
       end if;
-      Put_Map (S, 2 * N);
       for I in 0 .. N - 1 loop
          if Joint_Mode (L) then
-            Put_Str (S, Layout.Last_Seg (L.Lay.Joints (I)));
-            declare
-               Q : constant Floats := Nums_At (L, L.Lay.Joints (I));
-            begin
-               Put_Array (S, Natural (Q.Length));
-               for X of Q loop
-                  Put_Float (S, X);
-               end loop;
-            end;
+            Add (Layout.Last_Seg (L.Lay.Joints (I)), Nums_At (L, L.Lay.Joints (I)));
          else
-            Put_Str (S, Layout.Last_Seg (L.Lay.EE (I)));
+            Add (Layout.Last_Seg (L.Lay.EE (I)), Nums_At (L, L.Lay.EE (I)));
+         end if;
+         if not L.Lay.Jaw.Is_Empty then
             declare
-               P : constant Floats := Nums_At (L, L.Lay.EE (I));
+               Ji : constant Natural := Natural'Min (I, Natural (L.Lay.Jaw.Length) - 1);
             begin
-               Put_Array (S, Natural (P.Length));
-               for X of P loop
-                  Put_Float (S, X);
-               end loop;
+               Add (Layout.Last_Seg (L.Lay.Jaw (Ji)), Jaw_Values (L, Ji, False, None, Nums_At (L, L.Lay.Jaw (Ji))));
             end;
          end if;
-         declare
-            Ji : constant Natural := Natural'Min (I, Natural (L.Lay.Jaw.Length) - 1);
-            J : constant Floats := Nums_At (L, L.Lay.Jaw (Ji));
-         begin
-            Put_Str (S, Layout.Last_Seg (L.Lay.Jaw (Ji)));
-            Put_Array (S, 1);
-            Put_Float (S, (if J.Is_Empty then 1.0 else J (0)));
-         end;
       end loop;
+      Put_Keys (S, Keys, Vals);
       return S;
    end Hold_Action;
 
@@ -269,6 +277,7 @@ package body Plug is
                         L.Reset_Flag := True;
                         L.Ep_Seq0 := L.Seq;   --  新的一集从零数拍
                         L.Jaw_Set.Clear;      --  新的一集爪子回到对方的初始状态,上一集给过的目标作废
+                        L.Jaw_Sent.Clear;     --  上一集发出去的那一串也作废(没读数的那一拍不许把上一集的数发进新的一集)
                      end if;
                      if Ack /= "" then
                         if Obs < 0 then
@@ -363,23 +372,8 @@ package body Plug is
       end loop;
    end Boot;
 
-   function Sense (L : in out Link; F : out Frame) return Boolean is
-      use Ada.Calendar;
-      T0 : constant Time := Clock;
-      T1 : Time;
+   procedure Frame_Of (L : Link; F : in out Frame) is
    begin
-      if Lockstep.Current_Hand >= 0 then
-         --  手的任务:把棒交还主线程,这一拍由主线程收(Lock_Beat),醒来拿那一帧
-         Lockstep.Yield;
-         F := Lock_F;
-         return Lock_Ok;
-      end if;
-      F := (others => <>);
-      if not Pump (L) then
-         return False;
-      end if;
-      T1 := Clock;
-      L.Seq := L.Seq + 1;
       F.Seq := L.Seq;
       for P of L.Lay.Joints loop
          F.Joints.Append (Nums_At (L, P));
@@ -415,7 +409,7 @@ package body Plug is
          declare
             N : constant Integer := Layout.Find (L.Last, L.Last_Obs, L.Lay.Cams (Ci));
             W, H : Natural;
-            C : Cam;
+            C : Cam;   --  没收到这台的画面 ⇒ 这一格就是占位(W = H = 0、缓冲空),下标照样占住
             First, Len : Natural;
          begin
             if Layout.Is_Image (L.Last, N, W, H) then
@@ -437,68 +431,91 @@ package body Plug is
                   end loop;
                   --  身体另外给的深度图、相机内参:认得出(Layout 按形状认,免得当成别的读数),但驱动不读(铁律 1,2026-09-26 owner:
                   --  每个量只有一种量法 —— 远近、焦距都由身体自己量;以前"给了就用、没给就量"是两种量法)。Has_Depth / Has_K 永远是 False
-                  F.Cams.Append (C);
                end if;
             end if;
+            F.Cams.Append (C);
          end;
       end loop;
-      --  这一拍记下来(量画面比读数晚几拍用;见 Beat)
-      declare
-         B : Beat;
-      begin
-         B.Seq := L.Seq; B.Joints := F.Joints; B.Reported_EE := F.Reported_EE;
-         for Ci in 0 .. Natural (F.Cams.Length) - 1 loop
-            declare
-               W : constant Natural := F.Cams (Ci).W;
-               H : constant Natural := F.Cams (Ci).H;
-               Sum : Long_Float := 0.0;
-               Cnt : Natural := 0;
-            begin
-               if Ci < Natural (L.Prev_Gray.Length) and then Natural (L.Prev_Gray (Ci).Length) = W * H and then Natural (F.Cams (Ci).Gray.Length) = W * H then
-                  declare
-                     G0 : Buf renames L.Prev_Gray (Ci);
-                     G1 : Buf renames F.Cams (Ci).Gray;
-                  begin
-                     for Y in 0 .. (H - 1) / Img_Stride loop
-                        for X in 0 .. (W - 1) / Img_Stride loop
-                           declare
-                              I : constant Natural := Y * Img_Stride * W + X * Img_Stride;
-                           begin
-                              Sum := Sum + abs (Long_Float (G1 (I)) - Long_Float (G0 (I)));
-                              Cnt := Cnt + 1;
-                           end;
-                        end loop;
+   end Frame_Of;
+
+   procedure Note_Beat (L : in out Link; F : Frame) is
+      B : Beat;
+   begin
+      B.Seq := F.Seq; B.Joints := F.Joints; B.Reported_EE := F.Reported_EE;
+      for Ci in 0 .. Natural (F.Cams.Length) - 1 loop
+         declare
+            W : constant Natural := F.Cams (Ci).W;
+            H : constant Natural := F.Cams (Ci).H;
+            Sum : Long_Float := 0.0;
+            Cnt : Natural := 0;
+         begin
+            --  这一拍、上一拍都有这台的画面(而且一样大)才量;占位的那一拍、占位之后的那一拍这台都记"没量"(Img_Ok = False)
+            if Has_Picture (F.Cams (Ci)) and then Ci < Natural (L.Prev_Gray.Length) and then Natural (L.Prev_Gray (Ci).Length) = W * H then
+               declare
+                  G0 : Buf renames L.Prev_Gray (Ci);
+                  G1 : Buf renames F.Cams (Ci).Gray;
+               begin
+                  for Y in 0 .. (H - 1) / Img_Stride loop
+                     for X in 0 .. (W - 1) / Img_Stride loop
+                        declare
+                           I : constant Natural := Y * Img_Stride * W + X * Img_Stride;
+                        begin
+                           Sum := Sum + abs (Long_Float (G1 (I)) - Long_Float (G0 (I)));
+                           Cnt := Cnt + 1;
+                        end;
                      end loop;
-                  end;
-               end if;
-               B.Img_Chg.Append (if Cnt > 0 then Sum / Long_Float (Cnt) else 0.0);
-            end;
-         end loop;
-         for Gi in 0 .. Natural (F.Joints.Length) - 1 loop
-            declare
-               Mx : Long_Float := 0.0;
-            begin
-               if not L.Beats.Is_Empty and then Gi < Natural (L.Beats.Last_Element.Joints.Length) then
-                  declare
-                     Q0 : constant Floats := L.Beats.Last_Element.Joints (Gi);
-                  begin
-                     for K in 0 .. Natural'Min (Natural (Q0.Length), Natural (F.Joints (Gi).Length)) - 1 loop
-                        Mx := Long_Float'Max (Mx, abs (F.Joints (Gi) (K) - Q0 (K)));
-                     end loop;
-                  end;
-               end if;
-               B.Q_Chg.Append (Mx);
-            end;
-         end loop;
-         L.Beats.Append (B);
-         if Natural (L.Beats.Length) > Keep_Beats then
-            L.Beats.Delete_First (Ada.Containers.Count_Type (Natural (L.Beats.Length) - Keep_Beats));
-         end if;
-         L.Prev_Gray.Clear;
-         for C of F.Cams loop
-            L.Prev_Gray.Append (C.Gray);
-         end loop;
-      end;
+                  end loop;
+               end;
+            end if;
+            B.Img_Chg.Append (if Cnt > 0 then Sum / Long_Float (Cnt) else 0.0);
+            B.Img_Ok.Append (Cnt > 0);
+         end;
+      end loop;
+      for Gi in 0 .. Natural (F.Joints.Length) - 1 loop
+         declare
+            Mx : Long_Float := 0.0;
+         begin
+            if not L.Beats.Is_Empty and then Gi < Natural (L.Beats.Last_Element.Joints.Length) then
+               declare
+                  Q0 : constant Floats := L.Beats.Last_Element.Joints (Gi);
+               begin
+                  for K in 0 .. Natural'Min (Natural (Q0.Length), Natural (F.Joints (Gi).Length)) - 1 loop
+                     Mx := Long_Float'Max (Mx, abs (F.Joints (Gi) (K) - Q0 (K)));
+                  end loop;
+               end;
+            end if;
+            B.Q_Chg.Append (Mx);
+         end;
+      end loop;
+      L.Beats.Append (B);
+      if Natural (L.Beats.Length) > Keep_Beats then
+         L.Beats.Delete_First (Ada.Containers.Count_Type (Natural (L.Beats.Length) - Keep_Beats));
+      end if;
+      L.Prev_Gray.Clear;
+      for C of F.Cams loop
+         L.Prev_Gray.Append (C.Gray);   --  占位的那台存空的 ⇒ 下一拍这台也不量(没有"上一拍")
+      end loop;
+   end Note_Beat;
+
+   function Sense (L : in out Link; F : out Frame) return Boolean is
+      use Ada.Calendar;
+      T0 : constant Time := Clock;
+      T1 : Time;
+   begin
+      if Lockstep.Current_Hand >= 0 then
+         --  手的任务:把棒交还主线程,这一拍由主线程收(Lock_Beat),醒来拿那一帧
+         Lockstep.Yield;
+         F := Lock_F;
+         return Lock_Ok;
+      end if;
+      F := (others => <>);
+      if not Pump (L) then
+         return False;
+      end if;
+      T1 := Clock;
+      L.Seq := L.Seq + 1;
+      Frame_Of (L, F);
+      Note_Beat (L, F);   --  这一拍记下来(量画面比读数晚几拍用;见 Beat)
       --  录像:BL_VID 全分辨率灰度(开头密、后面疏,编号连续 ⇒ mkvid 能拼);BL_FILM 半分辨率抽帧。
       declare
          Vid : constant String := Codec.Env ("BL_VID");
@@ -686,30 +703,46 @@ package body Plug is
       return Act_Raw (L, C);
    end Act;
 
-   --  第 Ji 个抓握读数组第 K 个数这回发什么:这条命令给了 ⇒ 发它并记下;没给 ⇒ 这一集给过的最后一个目标;一次没给过 ⇒ 此刻的读数
-   function Jaw_Value (L : in out Link; Ji : Natural; K : Natural; Mine : Boolean; C : Cmd; Cur : Floats) return Long_Float is
+   --  第 Ji 个抓握读数组这回发哪一串(见 spec):形状 = 这一拍的读数(没收到 ⇒ 上一回发出去的那一串);给了 ⇒ 给的,没给 ⇒ 给过的最后一个目标,
+   --  一次没给过 ⇒ 此刻的读数,这一拍没读数 ⇒ 上一回发出去的那个数。一个都凑不出 ⇒ 空(这一组这回不发)
+   function Jaw_Values (L : in out Link; Ji : Natural; Mine : Boolean; C : Cmd; Cur : Floats) return Floats is
+      V : Floats;
    begin
       while Natural (L.Jaw_Set.Length) <= Ji loop
          L.Jaw_Set.Append (F64_Vectors.Empty_Vector);
       end loop;
-      if Mine and then K < Natural (C.Jaw.Length) then
+      while Natural (L.Jaw_Sent.Length) <= Ji loop
+         L.Jaw_Sent.Append (F64_Vectors.Empty_Vector);
+      end loop;
+      if Mine then
+         --  这条命令给了这一组前几个通道的目标:整段记下(连着一段、没有空位 ⇒ 不用编数去填前面没给的)
          declare
             S : Floats := L.Jaw_Set (Ji);
          begin
-            while Natural (S.Length) <= K loop
-               S.Append ((if Natural (S.Length) < Natural (Cur.Length) then Cur (Natural (S.Length)) else 1.0));
+            for K in 0 .. Natural (C.Jaw.Length) - 1 loop
+               if K < Natural (S.Length) then
+                  S.Replace_Element (K, C.Jaw (K));
+               else
+                  S.Append (C.Jaw (K));
+               end if;
             end loop;
-            S.Replace_Element (K, C.Jaw (K));
             L.Jaw_Set.Replace_Element (Ji, S);
          end;
-         return C.Jaw (K);
-      elsif K < Natural (L.Jaw_Set (Ji).Length) then
-         return L.Jaw_Set (Ji) (K);
-      elsif K < Natural (Cur.Length) then
-         return Cur (K);
       end if;
-      return 1.0;
-   end Jaw_Value;
+      declare
+         Given : constant Floats := L.Jaw_Set (Ji);
+         Last : constant Floats := L.Jaw_Sent (Ji);
+         N : constant Natural := (if Cur.Is_Empty then Natural (Last.Length) else Natural (Cur.Length));
+      begin
+         for K in 0 .. N - 1 loop
+            V.Append (if K < Natural (Given.Length) then Given (K) elsif K < Natural (Cur.Length) then Cur (K) else Last (K));
+         end loop;
+      end;
+      if not V.Is_Empty then
+         L.Jaw_Sent.Replace_Element (Ji, V);
+      end if;
+      return V;
+   end Jaw_Values;
 
    function Act_Raw (L : in out Link; C : Cmd) return Boolean is
       S : Buf;
@@ -763,6 +796,8 @@ package body Plug is
             end In_Groups;
             J_Names, W_Names : Strs;
             J_First, W_First : Ints;
+            W_Vals : Floats_Vectors.Vector;   --  每个抓握键这回发的那一串(Jaw_Values;空 = 这回不发)
+            N_Keys : Natural;
             function Has (V : Strs; X : String) return Boolean is
             begin
                for Y of V loop
@@ -783,7 +818,21 @@ package body Plug is
                   W_Names.Append (Layout.Last_Seg (L.Lay.Jaw (I))); W_First.Append (I);
                end if;
             end loop;
-            Put_Map (S, Natural (J_Names.Length) + Natural (W_Names.Length));
+            N_Keys := Natural (J_Names.Length);
+            for K in 0 .. Natural (W_Names.Length) - 1 loop
+               declare
+                  J : constant Floats := Nums_At (L, L.Lay.Jaw (W_First (K)));
+                  --  这条臂自己的抓握通道给了目标就发目标(位姿命令解成关节目标时带着,V1b 3c),别的发这一集给过的最后一个目标(见 Jaw_Set)
+                  Mine : constant Boolean := W_First (K) = C.Arm and then not C.Jaw.Is_Empty;
+               begin
+                  --  不截:读数范围是开机两头推到头量的(V1b ②;原来截在 [0, 1],x5 的约定)
+                  W_Vals.Append (Jaw_Values (L, W_First (K), Mine, C, J));
+                  if not W_Vals.Last_Element.Is_Empty then
+                     N_Keys := N_Keys + 1;
+                  end if;
+               end;
+            end loop;
+            Put_Map (S, N_Keys);
             for K in 0 .. Natural (J_Names.Length) - 1 loop
                Put_Str (S, J_Names (K));
                declare
@@ -797,17 +846,13 @@ package body Plug is
                end;
             end loop;
             for K in 0 .. Natural (W_Names.Length) - 1 loop
-               Put_Str (S, W_Names (K));
-               declare
-                  J : constant Floats := Nums_At (L, L.Lay.Jaw (W_First (K)));
-                  --  这条臂自己的抓握通道给了目标就发目标(位姿命令解成关节目标时带着,V1b 3c),别的发这一集给过的最后一个目标(见 Jaw_Set)
-                  Mine : constant Boolean := W_First (K) = C.Arm and then not C.Jaw.Is_Empty;
-               begin
-                  Put_Array (S, Natural'Max (1, Natural (J.Length)));
-                  for X in 0 .. Natural'Max (1, Natural (J.Length)) - 1 loop
-                     Put_Float (S, Jaw_Value (L, W_First (K), X, Mine, C, J));   --  不截:读数范围是开机两头推到头量的(V1b ②;原来截在 [0, 1],x5 的约定)
+               if not W_Vals (K).Is_Empty then
+                  Put_Str (S, W_Names (K));
+                  Put_Array (S, Natural (W_Vals (K).Length));
+                  for X of W_Vals (K) loop
+                     Put_Float (S, X);
                   end loop;
-               end;
+               end if;
             end loop;
          end;
          L.Pending := S; L.Has_Pending := True;
@@ -816,61 +861,79 @@ package body Plug is
       if (C.Kind = Joint) /= Joint_Mode (L) then
          return False;    --  关节命令只在关节模式,位姿命令只在位姿模式:一条动作里不许混两种类型
       end if;
-      Put_Map (S, 2 * N);
-      for I in 0 .. N - 1 loop
-         if Joint_Mode (L) then
-            Put_Str (S, Layout.Last_Seg (L.Lay.Joints (I)));
-            declare
-               --  发给第几组:给了 Group 就按它(开机前半段按读数组认手,V1b 3c),没给按臂
-               Tg : constant Natural := (if C.Group >= 0 then Natural (C.Group) else C.Arm);
-               Kg : Integer := -1;
-            begin
-               for K in 0 .. Natural'Min (Natural (C.Groups.Length), Natural (C.Qs.Length)) - 1 loop
-                  if C.Groups (K) = I then
-                     Kg := Integer (K);
-                  end if;
-               end loop;
-               declare
-                  Q : constant Floats := (if Kg >= 0 then C.Qs (Natural (Kg)) elsif C.Groups.Is_Empty and then I = Tg then C.Q else Nums_At (L, L.Lay.Joints (I)));
-               begin
-                  Put_Array (S, Natural (Q.Length));
-                  for X of Q loop
-                     Put_Float (S, X);
-                  end loop;
-               end;
-            end;
-         else
-            Put_Str (S, Layout.Last_Seg (L.Lay.EE (I)));
-            if I = C.Arm then
-               Put_Array (S, 7);
-               for K in 0 .. 6 loop
-                  Put_Float (S, C.Pose (K));
-               end loop;
+      declare
+         --  每只手的抓握键先凑好这回发的那一串(Jaw_Values;空 = 这回不发:这一拍没读数、这一集也没发过),再数一条动作里有几个键
+         Jv : Floats_Vectors.Vector;
+         Ji_Of : Ints;
+         N_Keys : Natural := N;
+      begin
+         for I in 0 .. N - 1 loop
+            if L.Lay.Jaw.Is_Empty then
+               Jv.Append (F64_Vectors.Empty_Vector); Ji_Of.Append (0);
             else
                declare
-                  P : constant Floats := Nums_At (L, L.Lay.EE (I));
+                  Ji : constant Natural := Natural'Min (I, Natural (L.Lay.Jaw.Length) - 1);
+                  Mine : constant Boolean := (I = C.Arm or else Natural (L.Lay.Jaw.Length) = 1) and then not C.Jaw.Is_Empty;
                begin
-                  Put_Array (S, Natural (P.Length));
-                  for X of P loop
-                     Put_Float (S, X);
-                  end loop;
+                  --  没给命令的通道发这一集给过它的最后一个目标(一次只动脑点名的那一根手指;见 Jaw_Set);不截(同上)
+                  Jv.Append (Jaw_Values (L, Ji, Mine, C, Nums_At (L, L.Lay.Jaw (Ji))));
+                  Ji_Of.Append (Ji);
                end;
             end if;
-         end if;
-         declare
-            Ji : constant Natural := Natural'Min (I, Natural (L.Lay.Jaw.Length) - 1);
-            Cur : constant Floats := Nums_At (L, L.Lay.Jaw (Ji));
-            Nj : constant Natural := Natural'Max (1, Natural (Cur.Length));
-            Mine : constant Boolean := (I = C.Arm or else Natural (L.Lay.Jaw.Length) = 1) and then not C.Jaw.Is_Empty;
-         begin
-            Put_Str (S, Layout.Last_Seg (L.Lay.Jaw (Ji)));
-            Put_Array (S, Nj);
-            for K in 0 .. Nj - 1 loop
-               --  没给命令的通道发这一集给过它的最后一个目标(一次只动脑点名的那一根手指;见 Jaw_Set)
-               Put_Float (S, Jaw_Value (L, Ji, K, Mine, C, Cur));   --  不截(同上)
-            end loop;
-         end;
-      end loop;
+            if not Jv.Last_Element.Is_Empty then
+               N_Keys := N_Keys + 1;
+            end if;
+         end loop;
+         Put_Map (S, N_Keys);
+         for I in 0 .. N - 1 loop
+            if Joint_Mode (L) then
+               Put_Str (S, Layout.Last_Seg (L.Lay.Joints (I)));
+               declare
+                  --  发给第几组:给了 Group 就按它(开机前半段按读数组认手,V1b 3c),没给按臂
+                  Tg : constant Natural := (if C.Group >= 0 then Natural (C.Group) else C.Arm);
+                  Kg : Integer := -1;
+               begin
+                  for K in 0 .. Natural'Min (Natural (C.Groups.Length), Natural (C.Qs.Length)) - 1 loop
+                     if C.Groups (K) = I then
+                        Kg := Integer (K);
+                     end if;
+                  end loop;
+                  declare
+                     Q : constant Floats := (if Kg >= 0 then C.Qs (Natural (Kg)) elsif C.Groups.Is_Empty and then I = Tg then C.Q else Nums_At (L, L.Lay.Joints (I)));
+                  begin
+                     Put_Array (S, Natural (Q.Length));
+                     for X of Q loop
+                        Put_Float (S, X);
+                     end loop;
+                  end;
+               end;
+            else
+               Put_Str (S, Layout.Last_Seg (L.Lay.EE (I)));
+               if I = C.Arm then
+                  Put_Array (S, 7);
+                  for K in 0 .. 6 loop
+                     Put_Float (S, C.Pose (K));
+                  end loop;
+               else
+                  declare
+                     P : constant Floats := Nums_At (L, L.Lay.EE (I));
+                  begin
+                     Put_Array (S, Natural (P.Length));
+                     for X of P loop
+                        Put_Float (S, X);
+                     end loop;
+                  end;
+               end if;
+            end if;
+            if not Jv (I).Is_Empty then
+               Put_Str (S, Layout.Last_Seg (L.Lay.Jaw (Natural (Ji_Of (I)))));
+               Put_Array (S, Natural (Jv (I).Length));
+               for X of Jv (I) loop
+                  Put_Float (S, X);
+               end loop;
+            end if;
+         end loop;
+      end;
       L.Pending := S; L.Has_Pending := True;
       return True;
    end Act_Raw;

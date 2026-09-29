@@ -36,7 +36,9 @@ package Selfmap is
       Floors : Floor_Vectors.Vector;       --  每台相机的静止噪声地板
       Pic_Floor : Ints;                    --  每台相机:整幅画静止时最大灰度差
       Jaws : Ints;                         --  每条臂量到几个抓握通道(五指手 5,两指手 1)
-      Settle : Natural := 2;               --  一条命令发出后读数稳下来要几拍(量出来的)
+      --  一条命令发出后读数稳下来要几拍(量出来的:Settle_Since,每一次探针各量一回、取最多的;0 = 还没量到。
+      --  09-30:原来缺省 2、开机前半段从来不量,后半段又夹在 6 拍以内)
+      Settle : Natural := 0;
       --  越用越强:历次量到的幅度/实到(现值取中位数),量过几次
       Amp_Hist : Plug.Floats_Vectors.Vector;
       Deliv_Hist : Plug.Floats_Vectors.Vector;
@@ -77,16 +79,28 @@ package Selfmap is
    --  开机扫描用:扫的那根差不到这一格的三分之一,别的关节差不到每根轴单独起步收格子的门(Kinem.Clean_Tol;H1 2026-09-28)
    --  一组关节这一拍"到了没有"(Go 里用的就是它;纯函数,导出给自检):Tols 这一位 > 0 ⇒ 这个关节按它自己的门,否则按 Tol;门 ≤ 0 的关节永远不算到
    function Joints_Arrived (Now, Target, Tols : Floats; Tol : Long_Float) return Boolean;
+   --  一条命令从发出到读数停住用了几拍(纯函数,导出给自检):Moves (I) = 发出后第 I + 1 拍读数挪了多少(那一拍挪得最多的那个关节)。
+   --  停住 = 动起来以后(挪过超过 Noise 的一拍),第一次"这一拍挪动不超过 Noise、而且不比上一拍小"(不再变小)的那一拍;返回它是第几拍。
+   --  一直没动起来(探针小得读数跟不上)/ 看到的那几拍里还在变小(还没停住)⇒ 0:这一条量不出,不算(不拿没停住的拍数顶)
+   function Settle_Beats (Moves : Floats; Noise : Long_Float) return Natural;
+   --  量 Settle 的唯一办法:帧号 From_Seq(发命令之前那一拍,L.Seq)以后 Plug 逐拍记下的读数(Beats.Q_Chg,每一拍取各组里挪得最多的)⇒ Settle_Beats。
+   --  开机前半段认手的每一次探针、后半段逐通道推的每一次(推过去、推回来各一条)都这样量,M.Settle 取量到的最多的
+   function Settle_Since (L : Plug.Link; From_Seq : Natural; Noise : Long_Float) return Natural;
    procedure Idle (L : in out Plug.Link; F : in out Plug.Frame; N : Natural; Ok : out Boolean);   --  不下命令空等 N 拍
    --  什么都不做时读数抖多少、画面抖多少(静止对,4 拍):位姿 / 姿态 / 抓握 / 关节读数的噪声 + 每台相机的灰度地板。
+   --  地板用这几拍里最后一对"两帧都收到了画面"的静止对;一对都没有的那台 ⇒ 地板记成 U8'Last(量不到它的噪声 ⇒ 它的画面里什么都不算动了,
+   --  不拿空画面当静止对、不编一个 0 的地板)。
    --  Measure 开头用它;只报关节的身体开机前半段(还没有位姿)也用它(同一种量法)。M.Arms 条臂的位姿噪声(没有位姿 = 0)
    procedure Measure_Idle (L : in out Plug.Link; F : in out Plug.Frame; M : in out Body_Map; Ok : out Boolean);
-   --  等到每台相机的画面连着两拍都不再变(各自的灰度地板以内),最多 Max 拍;返回用了几拍
+   --  等到画面连着两拍都不再变(各自的灰度地板以内),最多 Max 拍;返回用了几拍。
+   --  Ok = 停稳了。等满 Max 拍还在变 ⇒ Ok = False、Used = Max(照实说没停稳 —— 09-30:原来超时照样 Ok = True,握区在还在动的画面上量);
+   --  线断了 ⇒ Ok = False、Used < Max
    --  Prev_Pic 给了 ⇒ 等完时里面是最后一帧之前那一帧(两帧都是画面停下以后的:抓握通道推到头时"看没看见动了"两次比较、不共用一帧用,Picture.Seen_Twice)
    procedure Wait_Still (L : in out Plug.Link; M : Body_Map; F : in out Plug.Frame; Max : Natural; Used : out Natural; Ok : out Boolean;
                          Prev_Pic : access Plug.Cam_Vectors.Vector := null);
+   --  每台判得了的相机(有地板、两帧都收到了画面)都静止,而且至少有一台判得了;一台都判不了 ⇒ False(没有证据不说静止)
    function Pictures_Still (M : Body_Map; Before, After : Plug.Cam_Vectors.Vector) return Boolean;
-   --  只看第 Cam 台:两帧之间超过噪声地板的像素凑不成一团
+   --  只看第 Cam 台:两帧之间超过噪声地板的像素凑不成一团。两帧里有一帧没收到这台的画面(占位)⇒ False(判不了,不说静止)
    function Picture_Still (M : Body_Map; Before, After : Plug.Cam; Cam : Natural) return Boolean;
    --  Eyes / World:开机前半段只用关节命令已经认出了"哪台相机长在哪只手上、哪台是世界相机"(Jointboot.Find_Arms)⇒ 照用,
    --  这里不再按位姿探针另认一遍(一个量一种量法);空 = 这里认
@@ -97,8 +111,13 @@ package Selfmap is
    procedure Measure (L : in out Plug.Link; F : in out Plug.Frame; M : out Body_Map; Ok : out Boolean;
                       Step_Px : Plug.Floats_Vectors.Vector;
                       Eyes : Ints := Int_Vectors.Empty_Vector; World : Integer := -1);
-   function Jaw_Of (F : Plug.Frame; Arm : Natural; K : Natural := 0) return Long_Float;
    function Jaw_Count (F : Plug.Frame; Arm : Natural) return Natural;   --  这条臂量到几个抓握通道
+   --  这一帧里有没有这条臂第 K 个抓握通道的读数
+   function Has_Jaw (F : Plug.Frame; Arm : Natural; K : Natural := 0) return Boolean is (K < Jaw_Count (F, Arm));
+   --  这条臂第 K 个抓握通道此刻的读数。没读数就不许问(09-30:原来没读数返回 1.0 = x5 夹爪"1 = 张开"的约定,被当成读数、又被当成目标发出去):
+   --  先问 Has_Jaw,没有就照实说这一拍没读数
+   function Jaw_Of (F : Plug.Frame; Arm : Natural; K : Natural := 0) return Long_Float
+     with Pre => Has_Jaw (F, Arm, K);
    function Jaw_All (F : Plug.Frame; Arm : Natural) return Floats;      --  这条臂全部抓握通道此刻的读数
    function Jaw_Index (F : Plug.Frame; Arm : Natural) return Natural;
 end Selfmap;

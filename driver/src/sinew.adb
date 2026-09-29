@@ -397,25 +397,26 @@ package body Sinew is
       Has_Rel : constant Boolean := Has_Key (Rels_Usable);
       --  🔴 say 后面那一句必须打得出数字和等号:提示词每一轮都印着 "say look = k",而以前这里只许字母、逗号、句号
       --  ⇒ 受限解码下这个键【按不动】(人当脑时不走掩膜所以一直没暴露)。纸上有的键,键盘上必须有。
-      --  🔴 自由填的槽要有长度上限(H44 2026-09-23 实测:名字槽里生成了 "untiltimeoutuntiltimeout…" 一整行,say 也会无限重复)。
-      --  GBNF 没有 {n,m},用嵌套的可选项写出"最多几个字符":一个名字的词最多 12 个字母,一句话最多 80 个字符。
-      function Sent_Tail (N : Natural) return String is
-        (if N = 0 then "" else "([a-zA-Z0-9 ,.=\'] " & Sent_Tail (N - 1) & ")?");
-      Sent_Rule : constant String := "sent ::= [a-zA-Z] " & Sent_Tail (80);
+      --  🔴 自由填的槽不设长度上限、能说几个也不设上限(09-30,owner 的规矩:拍的数不许):一个词几个字母、一个名字几个词、一句话几个字、
+      --  一段几行、一段几条约束、一个块里几行、数有几位,没有哪一个是量得出来的 —— 原来"一个词最多 24 个字母"是照这个世界里
+      --  mintgreenscissors 那个名字定的,"数只到 99""最多四行""名字最多三个词""一段最多两条约束"也都是拍的。一律写成重复 (x)*。
+      --  生成跑飞(H44 2026-09-23 实测:名字槽里生成了 "untiltimeoutuntiltimeout…" 一整行)由推理服务那一头的 token 上限截住,
+      --  截断了的那一段解析不过、照实退回;解析这一头也不截(词数、块套几层都不设上限,读不进 Natural 的数照实退回)
+      Sent_Rule : constant String := "sent ::= [a-zA-Z] ([a-zA-Z0-9 ,.=\'])*";
       function Body_Text (W_Rule : String) return String is
       begin
          if not Has_Who then
             return
-              "root ::= line (line)? (line)? (line)?" & ASCII.LF &
+              "root ::= line (line)*" & ASCII.LF &
               "line ::= word ""\n""" & ASCII.LF &
               "word ::= ""say "" sent | ""done""" & ASCII.LF &
               Sent_Rule;
          end if;
          return
-           "root ::= line (line)? (line)? (line)?" & ASCII.LF &
+           "root ::= line (line)*" & ASCII.LF &
            "line ::= (interval | control | decl | word) ""\n""" & ASCII.LF &
            "simple ::= (interval | decl1 | word) ""\n""" & ASCII.LF &
-           "interval ::= ""do "" cons ("" and "" cons)? "" until "" outc ("" or "" num "" steps"")? (eye)?" & ASCII.LF &
+           "interval ::= ""do "" cons ("" and "" cons)* "" until "" outc ("" or "" num "" steps"")? (eye)?" & ASCII.LF &
            "eye ::= "" with my still eye"" | "" with my moving eye""" & ASCII.LF &
            "cons ::= " & (if Has_Rel then "who "" "" rel "" "" name (step)? | " else "")
                        & "who "" close "" name | who "" open"" | who "" still""" & ASCII.LF &
@@ -424,11 +425,11 @@ package body Sinew is
            "outcome ::= " & Quoted_List (All_Outcomes) & ASCII.LF &
            "outc ::= " & Quoted_List (Outs_Usable) & ASCII.LF &
            "step ::= "" small"" | "" medium"" | "" large""" & ASCII.LF &
-           "num ::= [1-9] ([0-9])?" & ASCII.LF &
-           "name ::= w ("" "" w)? ("" "" w)?" & ASCII.LF &
+           "num ::= [1-9] ([0-9])*" & ASCII.LF &
+           "name ::= w ("" "" w)*" & ASCII.LF &
            "w ::= " & W_Rule & ASCII.LF &
-           "control ::= ""repeat "" num "" times:\n"" simple (simple)? ""end"" | ""if "" outcome "":\n"" simple (simple)? (""else:\n"" simple (simple)?)? ""end"" | ""try:\n"" simple (simple)? ""or:\n"" simple (simple)? ""end""" & ASCII.LF &
-           "decl ::= ""to "" name "":\n"" simple (simple)? ""end"" | decl1" & ASCII.LF &
+           "control ::= ""repeat "" num "" times:\n"" simple (simple)* ""end"" | ""if "" outcome "":\n"" simple (simple)* (""else:\n"" simple (simple)*)? ""end"" | ""try:\n"" simple (simple)* ""or:\n"" simple (simple)* ""end""" & ASCII.LF &
+           "decl ::= ""to "" name "":\n"" simple (simple)* ""end"" | decl1" & ASCII.LF &
            "decl1 ::= ""run "" name | ""remember where "" who "" is as "" name" & ASCII.LF &
            "word ::= ""say "" sent | ""done""" & ASCII.LF &
            Sent_Rule;
@@ -437,45 +438,26 @@ package body Sinew is
       --  语言的根(2026-09-23):有可用的量时,键盘上只有这一句 —— <东西> <量> up|down until <结局>,外加 say / done。
       --  手的关系词、眼、步子、控制块全不在键盘上:它们是 9B 的脑乱按的地方(09-22 十七炮里四炮乱码),不是地基。
       function Qty_Text (W_Rule : String) return String is
-        ("root ::= line (line)? (line)? (line)?" & ASCII.LF &
+        ("root ::= line (line)*" & ASCII.LF &
          "line ::= (interval | word) ""\n""" & ASCII.LF &
          "interval ::= ""do "" name "" "" qty "" "" dir "" until "" outc" & ASCII.LF &
          "qty ::= " & Quoted_List (Qtys_Usable) & ASCII.LF &
          "dir ::= ""up"" | ""down""" & ASCII.LF &
          "outc ::= " & Quoted_List (Outs_Usable) & ASCII.LF &
-         "name ::= w ("" "" w)? ("" "" w)?" & ASCII.LF &
+         "name ::= w ("" "" w)*" & ASCII.LF &
          "w ::= " & W_Rule & ASCII.LF &
          "word ::= ""say "" sent | ""done""" & ASCII.LF &
          Sent_Rule);
-      --  把词尾的 "([a-z])*" 换成最多 11 个字母的嵌套可选项(见上)
-      function Word_Tail (N : Natural) return String is
-        (if N = 0 then "" else "([a-z] " & Word_Tail (N - 1) & ")?");
-      function Bound_Tails (G : String) return String is
-         Pat : constant String := "([a-z])*";
-         R : Unbounded_String;
-         I : Natural := G'First;
-      begin
-         while I <= G'Last loop
-            if I + Pat'Length - 1 <= G'Last and then G (I .. I + Pat'Length - 1) = Pat then
-               Append (R, Word_Tail (23));   --  一个词最多 24 个字母("mintgreenscissors" 17 个;H45 实测 12 个把它自己的名字截断了)
-               I := I + Pat'Length;
-            else
-               Append (R, G (I));
-               I := I + 1;
-            end if;
-         end loop;
-         return To_String (R);
-      end Bound_Tails;
    begin
       if Has_Key (Qtys_Usable) then
          declare
             Dq : constant String := Qty_Text ("[a-z] ([a-z])*");
          begin
-            return Bound_Tails (Qty_Text (Complement (Literal_Words (Dq) & " item", True)));
+            return Qty_Text (Complement (Literal_Words (Dq) & " item", True));
          end;
       end if;
       --  名字里也打不出 item:那是我清单上的记账词,不是任何东西的名字(T2 实测 Qwen 拿它当名字用)
-      return Bound_Tails (Body_Text (Complement (Literal_Words (Draft) & " item", True)));
+      return Body_Text (Complement (Literal_Words (Draft) & " item", True));
    end EBNF;
 
    --  每个量配一句它是什么(含义来自身体怎么量它,不是说明书)
@@ -526,10 +508,10 @@ package body Sinew is
       --  语言的根(2026-09-23):有可用的量 ⇒ 纸上只印这一句(和 EBNF 同一张纸)
       if Has_Key (Qtys_Usable) then
          return
-           "<program>   ::= <line> (up to four lines)" & ASCII.LF &
+           "<program>   ::= <line> (<line>)*   (one line or more)" & ASCII.LF &
            "<line>      ::= <interval> | <word>" & ASCII.LF &
            "<interval>  ::= do <what> <quantity> <direction> until <outcome>" & ASCII.LF &
-           "<what>      ::= <the thing's name only> (one to three plain words: the name you use when you point the thing out; not an action, not a part of me; it may NOT be any of the words in this grammar, nor the word item)" & ASCII.LF &
+           "<what>      ::= <the thing's name only> (plain words, as many as the name needs: the name you use when you point the thing out; not an action, not a part of me; it may NOT be any of the words in this grammar, nor the word item)" & ASCII.LF &
            "<quantity>  ::= " & Bar (Qtys_Usable) & "   (a quantity of that thing that I measure myself and can change)" & ASCII.LF &
            Qty_Gloss (Qtys_Usable) &
            "<direction> ::= up | down" & ASCII.LF &
@@ -540,16 +522,16 @@ package body Sinew is
       --  和 EBNF 同一张纸:角色表空了,这一轮能按的键就只有 say / done,纸上也只印这两个,并照实说为什么。
       if not Has_Key (Roles_Usable) then
          return
-           "<program>   ::= <line> (up to four lines)" & ASCII.LF &
+           "<program>   ::= <line> (<line>)*   (one line or more)" & ASCII.LF &
            "<line>      ::= <word>" & ASCII.LF &
            "<word>      ::= say <one sentence in your own words> | done" & ASCII.LF &
            "(In the eye I am looking through right now I cannot find any part of me that I can command, " &
            "so this turn there is nothing I could be told to move. Speaking still works, and so does changing eyes.)";
       end if;
       return
-        "<program>   ::= <line> (up to four lines)" & ASCII.LF &
+        "<program>   ::= <line> (<line>)*   (one line or more)" & ASCII.LF &
         "<line>      ::= <interval> | <control> | <decl> | <word>" & ASCII.LF &
-        "<interval>  ::= do <constraint> (and <constraint>)? until <outcome> [or <n> steps] [<eye>]" & ASCII.LF &
+        "<interval>  ::= do <constraint> (and <constraint>)* until <outcome> [or <n> steps] [<eye>]" & ASCII.LF &
         "<eye>       ::= with my still eye | with my moving eye" & ASCII.LF &
         (if Has_Key (Rels_Usable)
          then "<constraint>::= <who> <relation> <what> [<step>]" & ASCII.LF &
@@ -557,21 +539,32 @@ package body Sinew is
          else "<constraint>::= <who> close <what> | <who> open | <who> still" & ASCII.LF) &
         "<who>       ::= " & Bar (Roles_Usable) & "   (roles; I bind them by measuring myself)" & ASCII.LF &
         "<what>      ::= <a name in your words> | <a name you told me to remember> | <who>" & ASCII.LF &
-        "              (a name is one to three plain words; it may NOT be any of the words in this grammar, nor the word item - that is only my label for list entries, not a name of anything)" & ASCII.LF &
+        "              (a name is plain words, as many as it needs; it may NOT be any of the words in this grammar, nor the word item - that is only my label for list entries, not a name of anything)" & ASCII.LF &
         --  每个键标上它是干什么的(含义来自驱动自己那张表,不是我写的说明书)
         (if Has_Key (Rels_Usable) then "<relation>  ::= " & Bar (Rels_Usable) & ASCII.LF & Rel_Gloss (Rels_Usable) else "") &
         "<step>      ::= small | medium | large" & ASCII.LF &
         "<outcome>   ::= " & Bar (Outs_Usable) & ASCII.LF &
-        "<control>   ::= repeat <n> times: <line> [<line>] end" & ASCII.LF &
-        "              | if <outcome>: <line> [<line>] [else: <line> [<line>]] end" & ASCII.LF &
-        "              | try: <line> [<line>] or: <line> [<line>] end" & ASCII.LF &
-        "<decl>      ::= to <name>: <line> [<line>] end | run <name>" & ASCII.LF &
+        "<control>   ::= repeat <n> times: <line> (<line>)* end" & ASCII.LF &
+        "              | if <outcome>: <line> (<line>)* [else: <line> (<line>)*] end" & ASCII.LF &
+        "              | try: <line> (<line>)* or: <line> (<line>)* end" & ASCII.LF &
+        "<decl>      ::= to <name>: <line> (<line>)* end | run <name>" & ASCII.LF &
         "              | remember where <who> is as <name>" & ASCII.LF &
         "<word>      ::= say <one sentence in your own words> | done";
    end Grammar;
 
-   Max_Words : constant := 64;
-   type Word_Array is array (1 .. Max_Words) of Unbounded_String;
+   --  一行切出来的词(第 1 个起);不设个数上限(09-30:原来最多 64 个,多出来的静悄悄丢掉 —— 名字被截短、until 被丢掉都不说)
+   package Word_Vectors is new Ada.Containers.Vectors (Positive, Unbounded_String);
+
+   --  一串数字读成 Natural;大到 Natural 装不下 ⇒ Ok = False,照实退回(不抛异常:文法里数不再只到 99)
+   procedure To_Count (S : String; V : out Natural; Ok : out Boolean) is
+   begin
+      V := Natural'Value (S);
+      Ok := True;
+   exception
+      when Constraint_Error =>
+         V := 0;
+         Ok := False;
+   end To_Count;
 
    function Parse (Src : String) return Program is
       P : Program;
@@ -584,8 +577,10 @@ package body Sinew is
          At_Addr : Natural;      --  这个块的头指令
          Patch : Integer := -1;  --  待回填的那一条
       end record;
-      Stack : array (1 .. 32) of Open_Block;
-      Depth : Natural := 0;
+      --  开着的块一层一层压着(不设层数上限;09-30:原来最多 32 层,多一层就越界崩掉)
+      package Block_Vectors is new Ada.Containers.Vectors (Positive, Open_Block);
+      Stack : Block_Vectors.Vector;
+      function Depth return Natural is (Natural (Stack.Length));
 
       procedure Fail (Msg : String; Ln : Natural) is
       begin
@@ -616,8 +611,8 @@ package body Sinew is
       end Patch_To;
 
       procedure Do_Line (Text : String) is
-         W : Word_Array;
-         N : Natural := 0;
+         W : Word_Vectors.Vector;
+         N : Natural := 0;   --  这一行有几个词(行尾的 ":" 拆出来以后不算在里面)
          J : Natural := Text'First;
          Opens_Block : Boolean := False;
 
@@ -658,22 +653,17 @@ package body Sinew is
                while K <= Text'Last and then Text (K) /= ' ' and then Text (K) /= ASCII.HT loop
                   K := K + 1;
                end loop;
-               if N < Max_Words then
-                  N := N + 1;
-                  declare
-                     Tk : constant String := Text (J .. K - 1);
-                  begin
-                     if Tk'Length > 1 and then Tk (Tk'Last) = ':' then
-                        W (N) := To_Unbounded_String (Tk (Tk'First .. Tk'Last - 1));
-                        if N < Max_Words then
-                           N := N + 1;
-                           W (N) := To_Unbounded_String (":");
-                        end if;
-                     else
-                        W (N) := To_Unbounded_String (Tk);
-                     end if;
-                  end;
-               end if;
+               declare
+                  Tk : constant String := Text (J .. K - 1);
+               begin
+                  if Tk'Length > 1 and then Tk (Tk'Last) = ':' then
+                     W.Append (To_Unbounded_String (Tk (Tk'First .. Tk'Last - 1)));
+                     W.Append (To_Unbounded_String (":"));
+                  else
+                     W.Append (To_Unbounded_String (Tk));
+                  end if;
+               end;
+               N := Natural (W.Length);
                J := K;
             end;
          end loop;
@@ -692,9 +682,9 @@ package body Sinew is
                return;
             end if;
             declare
-               B : constant Open_Block := Stack (Depth);
+               B : constant Open_Block := Stack.Last_Element;
             begin
-               Depth := Depth - 1;
+               Stack.Delete_Last;
                case B.K is
                   when B_Repeat =>
                      declare
@@ -731,30 +721,30 @@ package body Sinew is
          end if;
 
          if Lw (1) = "else" then
-            if Depth = 0 or else Stack (Depth).K /= B_If then
+            if Depth = 0 or else Stack.Last_Element.K /= B_If then
                Fail ("else 前面没有一个 if", Line_No);
                return;
             end if;
             declare
                I : Instr;
-               B : constant Open_Block := Stack (Depth);
+               B : constant Open_Block := Stack.Last_Element;
             begin
                I.O := Op_Jump;
                Emit (I);                       --  真分支走完跳过 else
                Patch_To (B.Patch, Here);       --  if 不成立跳到这里
-               Stack (Depth) := (K => B_Else, At_Addr => B.At_Addr, Patch => Integer (Here) - 1);
+               Stack.Replace_Element (Stack.Last_Index, (K => B_Else, At_Addr => B.At_Addr, Patch => Integer (Here) - 1));
             end;
             return;
          end if;
 
          if Lw (1) = "or" and then Opens_Block then
-            if Depth = 0 or else Stack (Depth).K /= B_Try then
+            if Depth = 0 or else Stack.Last_Element.K /= B_Try then
                Fail ("or: 前面没有一个 try:", Line_No);
                return;
             end if;
             declare
                I : Instr;
-               B : constant Open_Block := Stack (Depth);
+               B : constant Open_Block := Stack.Last_Element;
             begin
                I.O := Op_Endtry;
                Emit (I);                       --  try 体顺利走完:先把这一层 try 摘掉
@@ -762,7 +752,7 @@ package body Sinew is
                I.O := Op_Jump;
                Emit (I);                       --  再跳过 or 那一段
                Patch_To (B.Patch, Here);       --  try 里失败跳到这里(运行时顺手出栈)
-               Stack (Depth) := (K => B_Or, At_Addr => B.At_Addr, Patch => Integer (Here) - 1);
+               Stack.Replace_Element (Stack.Last_Index, (K => B_Or, At_Addr => B.At_Addr, Patch => Integer (Here) - 1));
             end;
             return;
          end if;
@@ -774,7 +764,15 @@ package body Sinew is
             begin
                I.O := Op_Loop;
                if N >= 3 and then Is_Digits (To_String (W (2))) and then Lw (3) = "times" then
-                  I.Count := Natural'Value (To_String (W (2)));
+                  declare
+                     Okc : Boolean;
+                  begin
+                     To_Count (To_String (W (2)), I.Count, Okc);
+                     if not Okc then
+                        Fail ("repeat 后面那个数「" & To_String (W (2)) & "」大得我数不了(要一个装得进 Natural 的数)", Line_No);
+                        return;
+                     end if;
+                  end;
                elsif N >= 3 and then Lw (2) = "until" then
                   I.Cond := To_Outcome (Lw (3));
                   if I.Cond = Oc_None then
@@ -790,8 +788,7 @@ package body Sinew is
                   return;
                end if;
                Emit (I);
-               Depth := Depth + 1;
-               Stack (Depth) := (K => B_Repeat, At_Addr => Here - 1, Patch => -1);
+               Stack.Append (Open_Block'(K => B_Repeat, At_Addr => Here - 1, Patch => -1));
             end;
             return;
          end if;
@@ -810,8 +807,7 @@ package body Sinew is
                   return;
                end if;
                Emit (I);
-               Depth := Depth + 1;
-               Stack (Depth) := (K => B_If, At_Addr => Here - 1, Patch => Integer (Here) - 1);
+               Stack.Append (Open_Block'(K => B_If, At_Addr => Here - 1, Patch => Integer (Here) - 1));
             end;
             return;
          end if;
@@ -826,8 +822,7 @@ package body Sinew is
                end if;
                I.O := Op_Try;
                Emit (I);
-               Depth := Depth + 1;
-               Stack (Depth) := (K => B_Try, At_Addr => Here - 1, Patch => Integer (Here) - 1);
+               Stack.Append (Open_Block'(K => B_Try, At_Addr => Here - 1, Patch => Integer (Here) - 1));
             end;
             return;
          end if;
@@ -846,8 +841,7 @@ package body Sinew is
                D.Name := Phrase (2, N);
                D.At_Addr := Here;
                P.Defs.Append (D);
-               Depth := Depth + 1;
-               Stack (Depth) := (K => B_Def, At_Addr => Here, Patch => Integer (Here) - 1);
+               Stack.Append (Open_Block'(K => B_Def, At_Addr => Here, Patch => Integer (Here) - 1));
             end;
             return;
          end if;
@@ -1031,7 +1025,15 @@ package body Sinew is
                      Fail ("写成「or <几> steps」", Line_No);
                      return;
                   end if;
-                  I.Max_Steps := Natural'Value (To_String (W (K + 1)));
+                  declare
+                     Okc : Boolean;
+                  begin
+                     To_Count (To_String (W (K + 1)), I.Max_Steps, Okc);
+                     if not Okc then
+                        Fail ("「or " & To_String (W (K + 1)) & " steps」这个数大得我数不了(要一个装得进 Natural 的数)", Line_No);
+                        return;
+                     end if;
+                  end;
                   K := K + 3;
                elsif Lw (K) = "anyway" then
                   I.Anyway := True;

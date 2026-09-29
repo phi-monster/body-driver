@@ -4,8 +4,23 @@ with Codec;
 with Ada.Containers;
 with Ada.Unchecked_Deallocation;
 with Chan;
-with Table;
 package body Zone is
+   --  绕世界竖直轴(z)转的那个通道:每条臂的通道前三个平移、后三个绕世界 x / y / z 小转(Chan.Compose)
+   Turn_Ch : constant Natural := Chan.Pos_Channels + 2;
+
+   function Turn_Step (M : Selfmap.Body_Map; Arm : Natural) return Table.Vec is
+      Av : Table.Vec := Table.Zero_Vec;
+      Ch : constant Natural := Arm * M.Per_Arm + Turn_Ch;
+   begin
+      if Ch < Natural (M.Amp.Length) then
+         --  绕世界竖直轴转 64 倍转动探针(倍数,无量纲;同步幅阶梯的顶档,约 0.16 弧度):背景挪几十像素、手指跟着眼不动,眼不挪位置、碰不着东西
+         --  (V1B28 2026-09-27:平移 4 倍探针 = 2.9 mm,木纹只挪约 4 像素,后半段灰度地板 26 ⇒ 合到的区里 89% 的像素也"没变",分不开)。
+         --  步子按推的这个通道自己的探针幅度定(09-30:原来按第 3 个通道 —— 绕 x 转 —— 的幅度定步子,推的却是第 5 个)
+         Av (Turn_Ch) := 64.0 * M.Amp (Ch);
+      end if;
+      return Av;
+   end Turn_Step;
+
    function Is_Self (Z : Hand_Zone; R : Picture.Region; W, Hh : Natural) return Boolean is
       --  只按瓣自己的框判(不外扩):EE2 实测外扩半个框把紧挨着右爪的剪刀当成了"我"
       function In_Box (X0, Y0, X1, Y1 : Natural) return Boolean is
@@ -422,31 +437,36 @@ package body Zone is
       --  和两张图谁先谁后无关);哪头张开:到最后那一头时胳膊挪一下再挪回来,它自己那只眼里没跟着变的手指像素(长在手上的)落在瓣里多 ⇒ 这一头张开。
       --  原来是"命令 0 = 合空、再张回开机那个读数"—— 读数在 0–1、0 = 合是 x5 的约定。最后停在张开那头(碰桌面量指尖要手指在瓣那儿)
       N_Cams : constant Natural := Natural (F.Cams.Length);
-      J0 : constant Long_Float := Selfmap.Jaw_Of (F, Arm, K);
+      --  这个通道此刻有没有读数:没有就量不了(不拿编的数当读数推;09-30 原来没读数时 Selfmap.Jaw_Of 给 1.0 = x5"1 = 张开")
+      Has_J0 : constant Boolean := Selfmap.Has_Jaw (F, Arm, K);
       Rest : constant Floats := Selfmap.Jaw_All (F, Arm);   --  其余通道保持它们此刻的读数
+      function J0 return Long_Float is (Rest (K));   --  开始时的读数(只在 Has_J0 时问)
       Ramp : constant := 4.0;   --  推动了下一步放大几倍(次数,同关节扫描)
       --  推的时候手要停着的位姿 = 等画面静止【之后】的读数(不是刚进来时的):手还在慢慢挪时进来,按进来那一刻的位姿发"停住"命令会把手拽回去,
       --  合爪那几拍整条胳膊跟着动,扫出来的"手指"连着胳膊贴到画面边,记下的位姿也不是画面里那一刻的(G2A 2026-09-24:人形每挪一下要 ~40 拍才停稳,
       --  头顶眼 16 笔里 7 笔因手指贴画面边被拒)
       Pose : Plug.Arm_Pose := (if Arm < Natural (F.EE.Length) then F.EE (Arm) else [others => 0.0]);
-      Target : Floats;
+      Target : Floats := Rest;
       Lo_Frame, Hi_Frame : Plug.Cam_Vectors.Vector;
       --  每一头停稳时最后一帧之前那一帧(看没看见动了:两次比较、不共用一帧,Picture.Seen_Twice)
       Lo_Prev, Hi_Prev : Plug.Cam_Vectors.Vector;
       Last_Prev : Plug.Cam_Vectors.Vector;   --  最近一次读画面之前那一帧(Go_Jaw、Wait_Still 走完时 = 停稳的倒数第二帧)
       S_Prev : aliased Plug.Cam_Vectors.Vector;
-      Lo_R, Hi_R : Long_Float := J0;
+      Lo_R, Hi_R : Long_Float;   --  两头停住时的读数(Sweep 推到头才给)
       Lo_Steps, Hi_Steps : Natural := 0;
       Moved_Px : array (0 .. Natural'Max (1, N_Cams) - 1) of Natural := [others => 0];   --  整个行程里每台相机跟着动的像素(两头的图比)
       Okg : Boolean;
-      --  发一条抓握命令(其余通道照旧、胳膊停在 Pose),等读数和画面都静止(同原来合空的等法:读数连着两拍不动、每台相机连着两拍不变,至少 3 拍),回读数
+      Still_Wait : constant := 30;   --  等画面静止最多几拍(次数;量握区之前、转出去以后同一个等法)
+      --  发一条抓握命令(其余通道照旧、胳膊停在 Pose),等读数和画面都静止(同原来合空的等法:读数连着两拍不动、每台相机连着两拍不变,至少 3 拍),回读数。
+      --  Good = 停住了;等满了还在变 / 这一拍没收到这个通道的读数 ⇒ Good = False,照实说(09-30:原来等满 40 拍照样 Good = True,
+      --  还在走的读数被当成"推到这儿停住了",慢的手被 Sweep 误判到头)。R 只在 Good 时有意义
       procedure Go_Jaw (V : Long_Float; R : out Long_Float; Steps : in out Natural; Good : out Boolean) is
-         Prev_J : Long_Float := Selfmap.Jaw_Of (F, Arm, K);
+         Prev_J : Floats := Selfmap.Jaw_All (F, Arm);   --  上一拍这条臂的抓握读数(没收到 = 空 ⇒ 这一拍判不了停没停)
          Prev_Cams : Plug.Cam_Vectors.Vector := F.Cams;
          Still : Natural := 0;
       begin
          Target.Replace_Element (K, V);
-         Good := False; R := Prev_J;
+         Good := False; R := V;
          for Step in 1 .. 40 loop   --  最多等 40 拍(次数)
             declare
                C : Plug.Cmd;
@@ -459,9 +479,11 @@ package body Zone is
             end;
             Steps := Steps + 1;
             declare
-               J : constant Long_Float := Selfmap.Jaw_Of (F, Arm, K);
+               J : constant Floats := Selfmap.Jaw_All (F, Arm);
             begin
-               if abs (J - Prev_J) <= M.Jaw_Noise and then Selfmap.Pictures_Still (M, Prev_Cams, F.Cams) then
+               if K < Natural (J.Length) and then K < Natural (Prev_J.Length) and then abs (J (K) - Prev_J (K)) <= M.Jaw_Noise
+                 and then Selfmap.Pictures_Still (M, Prev_Cams, F.Cams)
+               then
                   Still := Still + 1;
                else
                   Still := 0;
@@ -469,10 +491,14 @@ package body Zone is
                Prev_J := J;
                Prev_Cams := F.Cams;
             end;
-            exit when Still >= 2 and then Step >= 3;
+            Good := Still >= 2 and then Step >= 3;   --  连着两拍读数、画面都不动才算停住(这一拍有读数:Still 是这一拍才数上去的)
+            exit when Good;
          end loop;
-         R := Selfmap.Jaw_Of (F, Arm, K);
-         Good := True;
+         if Good then
+            R := Selfmap.Jaw_Of (F, Arm, K);
+         else
+            Put_Line ("[身]   抓握通道推到 " & Codec.Fmt (V, 3) & ":等满了读数 / 画面还在变(或这几拍没收到这个通道的读数)⇒ 这一下没停住,不当到了");
+         end if;
       end Go_Jaw;
       --  这一步有没有哪台相机看见一块像素跟着动:推之前停稳的两帧 A1 / A2、推完停稳的两帧 B1 / B2,两次比较、不共用一帧(Picture.Seen_Twice,
       --  同开机认手、逐通道推;原来只数一次比较里超过地板的像素够不够一块,DR1 2026-09-28 头顶眼的渲染闪烁就够)
@@ -485,56 +511,77 @@ package body Zone is
          end loop;
          return False;
       end Any_Moved;
-      --  往 Dir 那边推到头
+      --  往 Dir 那边推到头。Good = 真推到头了(读数挪不到命令的一半 / 手指动过以后画面不再跟着动);推满 12 下还没到头、有一下没停住、
+      --  起点这一拍没收到读数 ⇒ Good = False,照实说。R_End 只在 Good 时有意义
       procedure Sweep (Dir : Long_Float; R_End : out Long_Float; Fr, Fr_Prev : out Plug.Cam_Vectors.Vector; Steps : out Natural; Good : out Boolean) is
-         R : Long_Float := Selfmap.Jaw_Of (F, Arm, K);
+         R, S, Rn : Long_Float;
+         Seen_Move : Boolean := False;   --  这一趟里画面已经跟着动过
+         At_End : Boolean := False;
+      begin
+         Steps := 0; Good := False;
+         Fr := F.Cams; Fr_Prev := Last_Prev;
+         if not Selfmap.Has_Jaw (F, Arm, K) then
+            Put_Line ("[身]   这一拍没收到这个抓握通道的读数 ⇒ 推不了(不拿编的数当起点)");
+            return;
+         end if;
+         R := Selfmap.Jaw_Of (F, Arm, K); R_End := R;
          --  头一步 = 读数量级那么大(max(1, |读数|),同关节扫描的量级取法),推动了下一步 ×4:这里只找两头,不像关节扫描要细采样给运动学
          --  (V1B30 2026-09-27:头一步 3% 时每只手要推七八下、每下都等停稳,一只手 80 多拍;x5 现在往每边两下)
-         S : Long_Float := Long_Float'Max (1.0, abs R);
-         Rn : Long_Float;
-         Seen_Move : Boolean := False;   --  这一趟里画面已经跟着动过
-      begin
-         Steps := 0; Good := False; R_End := R;
+         S := Long_Float'Max (1.0, abs R);
          for Pushes in 1 .. 12 loop   --  最多推 12 下(次数;×4 放大,12 下远超任何读数量级)
             declare
                Before : constant Plug.Cam_Vectors.Vector := F.Cams;
                Before_Prev : constant Plug.Cam_Vectors.Vector := Last_Prev;
                Moved : Boolean;
+               Pushed : Boolean;
             begin
-               Go_Jaw (R + Dir * S, Rn, Steps, Good);
-               exit when not Good;
+               Go_Jaw (R + Dir * S, Rn, Steps, Pushed);
+               if not Pushed then
+                  return;   --  有一下没停住:这一头量不出(Good = False)
+               end if;
                Moved := Any_Moved (Before_Prev, Last_Prev, Before, F.Cams);
                --  到头 = 读数挪不到命令的一半(纯数学的一半),或者这一趟里手指已经在画面里动过、这一下画面什么都没跟着动(读数只是命令的回声的身体)。
                --  动之前画面不动不算到头:x5 合到底以后命令 0–0.185 这一段手指不动、读数照样跟着命令走(V1B28 2026-09-27,往回推两步就被当成了到头)
-               exit when Dir * (Rn - R) < 0.5 * S or else (Seen_Move and then not Moved);
-               Seen_Move := Seen_Move or else Moved;
+               At_End := Dir * (Rn - R) < 0.5 * S or else (Seen_Move and then not Moved);
                R := Rn;
+               exit when At_End;
+               Seen_Move := Seen_Move or else Moved;
                S := S * Ramp;
             end;
          end loop;
-         R_End := Selfmap.Jaw_Of (F, Arm, K);
+         R_End := R;
          Fr := F.Cams;
          Fr_Prev := Last_Prev;
+         Good := At_End;
+         if not At_End then
+            Put_Line ("[身]   推满了还没到头(读数一直跟着命令走、画面也没停过)⇒ 这一头量不出,不当到了");
+         end if;
       end Sweep;
    begin
       H := (others => <>);
       H.Arm := Arm;
       H.K := K;
-      H.Open_Reading := J0;
+      if Has_J0 then
+         H.Open_Reading := J0;
+      end if;
       H.Pose := Pose;
       Ok := False;
       if N_Cams = 0 or else Arm >= Natural (F.EE.Length) then
          return;
       end if;
-      for I in 0 .. Natural'Max (1, Natural (Rest.Length)) - 1 loop
-         Target.Append (if I < Natural (Rest.Length) then Rest (I) else J0);
-      end loop;
+      if not Has_J0 then
+         Put_Line ("[身] 第" & Natural'Image (Arm + 1) & " 只手第" & Natural'Image (K) & " 号抓握通道这一拍没有读数 ⇒ 握区量不了(不拿编的数当读数推)");
+         return;
+      end if;
       declare
          Used : Natural;
          Ok2 : Boolean;
       begin
-         Selfmap.Wait_Still (L, M, F, 30, Used, Ok2, Prev_Pic => S_Prev'Access);
+         Selfmap.Wait_Still (L, M, F, Still_Wait, Used, Ok2, Prev_Pic => S_Prev'Access);
          if not Ok2 then
+            --  等满了画面还在变 ⇒ 不在还在动的画面上量握区(09-30:原来超时照样往下量);Used 没到上限 = 线断了
+            Put_Line ("[身] 第" & Natural'Image (Arm + 1) & " 只手第" & Natural'Image (K) & " 号抓握通道:先等画面静止,等了" & Natural'Image (Used)
+                      & " 拍" & (if Used < Still_Wait then "线断了" else "画面还在变") & " ⇒ 握区这回不量");
             return;
          end if;
          Last_Prev := S_Prev;
@@ -644,18 +691,18 @@ package body Zone is
          Hc : constant Integer := (if H.Arm < Natural (M.Cam_On_Arm.Length) then M.Cam_On_Arm (H.Arm) else -1);
          Hi_Open : Boolean := True;
          Known : Boolean := False;
+         Seen_Turn : Boolean := True;   --  转出去以后画面停住了、这只眼转之前转之后都收到了画面(判得了)
       begin
          if Hc >= 0 and then Natural (Hc) < Natural (H.Zones.Length) and then H.Zones (Natural (Hc)).Valid
-           and then H.Arm * M.Per_Arm < Natural (M.Amp.Length)
+           and then H.Arm * M.Per_Arm + Turn_Ch < Natural (M.Amp.Length)
          then
             declare
                Z : constant Hand_Zone := H.Zones (Natural (Hc));
                Cw : constant Natural := F.Cams (Natural (Hc)).W;
                Ch : constant Natural := F.Cams (Natural (Hc)).H;
                Pre : constant Buf := F.Cams (Natural (Hc)).Gray;
-               --  绕世界竖直轴转 64 倍转动探针(倍数,无量纲;同步幅阶梯的顶档,约 0.16 弧度):背景挪几十像素、手指跟着眼不动,眼不挪位置、碰不着东西
-               --  (V1B28 2026-09-27:平移 4 倍探针 = 2.9 mm,木纹只挪约 4 像素,后半段灰度地板 26 ⇒ 合到的区里 89% 的像素也"没变",分不开)
-               Step : constant Long_Float := 64.0 * M.Amp (H.Arm * M.Per_Arm + 3);
+               Turn : constant Table.Vec := Turn_Step (M, H.Arm);   --  绕世界竖直轴转出去的那一下(见 Turn_Step)
+               Step : constant Long_Float := Turn (Turn_Ch);
                In_Lobe : constant Bools := Lobe_Pixels (Z, Cw, Ch);
                Stat_L, Stat_A, N_L, N_A : Natural := 0;
                Used : Natural;
@@ -667,18 +714,23 @@ package body Zone is
                   begin
                      C.Kind := Plug.Ee; C.Arm := H.Arm; C.Pose := Pose; C.Jaw := Target;
                      if Dir = 0 then
-                        declare
-                           Av : Table.Vec := Table.Zero_Vec;
-                        begin
-                           Av (5) := Step;
-                           C.Pose := Chan.Compose (Pose, Av);
-                        end;
+                        C.Pose := Chan.Compose (Pose, Turn);
                      end if;
                      if not Plug.Act (L, C) or else not Plug.Sense (L, F) then
                         return;
                      end if;
-                     Selfmap.Wait_Still (L, M, F, 30, Used, Ok2);
-                     if Dir = 0 then
+                     Selfmap.Wait_Still (L, M, F, Still_Wait, Used, Ok2);
+                     if Dir = 0 and then not Ok2 then
+                        --  转出去以后画面没停住:不拿还在动的画面比(照实说看不出)
+                        Seen_Turn := False;
+                        Put_Line ("[身]   手绕眼转出去以后等了" & Natural'Image (Used) & " 拍画面还没停住 ⇒ 这一转不拿来判哪头张开");
+                     end if;
+                     if Dir = 0 and then Seen_Turn and then not (Plug.Has_Picture (F.Cams (Natural (Hc))) and then Natural (Pre.Length) = Cw * Ch
+                                                               and then F.Cams (Natural (Hc)).W = Cw and then F.Cams (Natural (Hc)).H = Ch)
+                     then
+                        Seen_Turn := False;   --  转之前 / 转之后这只眼有一帧没收到画面(占位):比不了
+                     end if;
+                     if Dir = 0 and then Seen_Turn then
                         declare
                            Mv : constant Bools := Picture.Moved (Pre, F.Cams (Natural (Hc)).Gray, M.Floors (Natural (Hc)));
                         begin
@@ -708,11 +760,13 @@ package body Zone is
                   Ml : constant Long_Float := 1.0 - Long_Float (Stat_L) / Long_Float (Natural'Max (1, N_L));
                   Ma : constant Long_Float := 1.0 - Long_Float (Stat_A) / Long_Float (Natural'Max (1, N_A));
                begin
-                  Known := N_L > 0 and then N_A > 0 and then (Ma > 2.0 * Ml or else Ml > 2.0 * Ma);
+                  Known := Seen_Turn and then N_L > 0 and then N_A > 0 and then (Ma > 2.0 * Ml or else Ml > 2.0 * Ma);
                   Hi_Open := Ma > Ml;
                   Put_Line ("[身]   手绕眼转 " & Codec.Fmt (Step, 3) & " 弧度再转回来:它自己那只眼里没跟着变的手指像素 在瓣里 " & Codec.Img (Stat_L) & " / " & Codec.Img (N_L)
                             & "、在合到的区里 " & Codec.Img (Stat_A) & " / " & Codec.Img (N_A)
-                            & (if Known then " ⇒ 读数 " & Codec.Fmt ((if Hi_Open then Hi_R else Lo_R), 3) & " 那头张开" else " ⇒ 看不出哪头张开(差不到两倍)"));
+                            & (if Known then " ⇒ 读数 " & Codec.Fmt ((if Hi_Open then Hi_R else Lo_R), 3) & " 那头张开"
+                               elsif not Seen_Turn then " ⇒ 这一转没看清(画面没停住 / 没收到这只眼的画面),看不出哪头张开"
+                               else " ⇒ 看不出哪头张开(差不到两倍)"));
                end;
             end;
          end if;
@@ -729,6 +783,10 @@ package body Zone is
             St : Natural := 0;
          begin
             Go_Jaw (H.Open_Reading, Rr, St, Okg);
+            if not Okg then
+               --  两头、握区都量完了;只是停回张开那头时没等到停住 ⇒ 照实说(后面碰桌面前会再等它停)
+               Put_Line ("[身]   两头量完了,停回张开那头(读数 " & Codec.Fmt (H.Open_Reading, 3) & ")时没等到停住");
+            end if;
          end;
       end;
       Ok := True;

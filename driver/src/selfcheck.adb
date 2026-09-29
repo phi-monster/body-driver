@@ -38,6 +38,7 @@ with Jointboot;
 with Ada.Numerics.Float_Random;
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Containers;
+with Ada.Containers.Vectors;
 with Interfaces; use type Interfaces.Unsigned_8;
 procedure Selfcheck is
    Fails : Natural := 0;
@@ -1072,6 +1073,127 @@ begin
              "碰到没有(Blocked):V1B66 轻碰第二档已压着 0.00578 ⇒ 认出(旧的两档平均当底 ⇒ 门 " & Codec.Fmt (Old_Gate, 5) & ",后面 9 档都认不出);"
              & "空走差一丝 0.001430 → 0.001439 ⇒ 不认(旧的门 = 第一步 ⇒ 认成碰到);碰上的小步 0.00718 ⇒ 认出;第一步不判;噪声大、空走抖得大 ⇒ 门跟着放宽");
    end;
+   --  🔴 Settle(一条命令从发出到读数停住用了几拍)是量出来的,不缺省、不封顶(Selfmap.Settle_Beats / Settle_Since,09-30):
+   --  ① 慢的手(命令隔两拍才起效、慢慢收尾,读数噪声 0.001):每拍挪动 0 0 0.05 0.03 0.012 0.004 0.0008 0.0009 ⇒ 第 8 拍停住(挪动到了噪声以内、不再变小);
+   --     牙:原来开机前半段从来不量、恒为缺省 2,后半段取 Go 用的拍数又夹在 6 拍以内 ⇒ 2 / 6,都比真的 8 少(慢身体一条命令没走完就被当成停了);
+   --  ② V1B65 录下的 x5 探针(每拍挪动 9e-5、1.1e-5、2e-6,静止噪声不到 5e-7):一路还在变小 ⇒ 还没停住 ⇒ 0(这一条量不出,不拿"看了几拍"顶);
+   --  ③ 一直没动起来 ⇒ 0;④ Settle_Since 只看发命令那一拍(帧号 From_Seq)以后记下的拍,之前那一拍的大挪动不算
+   declare
+      type Lf_Array is array (Positive range <>) of Long_Float;
+      function Fl (A : Lf_Array) return Bytes.Floats is
+         R : Bytes.Floats;
+      begin
+         for X of A loop
+            R.Append (X);
+         end loop;
+         return R;
+      end Fl;
+      Slow : constant Lf_Array := [0.0, 0.0, 0.05, 0.03, 0.012, 0.004, 0.0008, 0.0009];
+      S1 : constant Natural := Selfmap.Settle_Beats (Fl (Slow), 0.001);
+      S2 : constant Natural := Selfmap.Settle_Beats (Fl ([9.0e-5, 1.1e-5, 2.0e-6]), 5.0e-7);
+      S3 : constant Natural := Selfmap.Settle_Beats (Fl ([0.0, 0.0, 0.0, 0.0]), 0.001);
+      Old_First : constant Natural := 2;                             --  原来的缺省(前半段从来不量)
+      Old_Second : constant Natural := Natural'Min (Slow'Length, 6);   --  原来后半段:Go 用的拍数、夹在 6 以内
+      Lk : Plug.Link;
+      S4 : Natural;
+   begin
+      for I in 0 .. Slow'Length loop
+         declare
+            B : Plug.Beat;
+         begin
+            B.Seq := 10 + I;
+            B.Q_Chg.Append (if I = 0 then 0.3 else Slow (I));   --  帧号 10 = 发命令之前那一拍,挪了一大截(上一条命令的尾巴)
+            B.Q_Chg.Append (0.0);                               --  另一组一动不动
+            Lk.Beats.Append (B);
+         end;
+      end loop;
+      S4 := Selfmap.Settle_Since (Lk, 10, 0.001);
+      Check (S1 = 8 and then S2 = 0 and then S3 = 0 and then S4 = 8 and then Old_First < S1 and then Old_Second < S1,
+             "Settle 量出来:慢的手 ⇒ 第 " & Codec.Img (S1) & " 拍停住(要 8)· x5 探针还在变小 ⇒ " & Codec.Img (S2) & "(量不出,要 0)· 没动起来 ⇒ "
+             & Codec.Img (S3) & " · 按帧号从发命令那一拍往后数 ⇒ " & Codec.Img (S4) & "(要 8)· 牙:原来前半段 " & Codec.Img (Old_First)
+             & "、后半段夹到 " & Codec.Img (Old_Second) & ",都比 8 少");
+   end;
+   --  🔴 等画面停稳照实说停没停(Selfmap.Wait_Still,09-30):锁步里一只假手等,主线程当假身体 —— 32×24 的画面里一块 8×8 的亮块:
+   --  一直在挪(每拍 2 像素)⇒ 等满 12 拍、Ok = False、Used = 12(牙:原来超时照样 Ok = True —— 握区就在还在动的画面上量);
+   --  挪三拍就停 ⇒ Ok = True、第 5 拍就停稳(没等满)。判得了的相机才算数(Pictures_Still):后一帧没收到画面(占位)⇒ 判不了 ⇒ 不说静止;
+   --  两帧都是占位 ⇒ 一台都判不了 ⇒ 不说静止(牙:原来空画面比出来一个动的像素都没有 ⇒ 当成静止)
+   declare
+      W : constant := 32;
+      H : constant := 24;
+      Lk : Plug.Link;
+      Mp : Selfmap.Body_Map;
+      Fr0 : Plug.Frame;
+      Max_W : constant := 12;
+      Used_W : Natural := 0;
+      Ok_W : Boolean := True;
+      function Pic (X0 : Natural) return Plug.Cam is
+         C : Plug.Cam;
+      begin
+         C.W := W; C.H := H;
+         for I in 0 .. W * H - 1 loop
+            C.Gray.Append (if I mod W in X0 .. X0 + 7 and then I / W in 8 .. 15 then 200 else 30);
+         end loop;
+         return C;
+      end Pic;
+      task type Wait_Hand;
+      task body Wait_Hand is
+         Fr : Plug.Frame := Fr0;
+      begin
+         Lockstep.Begin_Hand (0);
+         Selfmap.Wait_Still (Lk, Mp, Fr, Max_W, Used_W, Ok_W);
+         Lockstep.Done;
+      end Wait_Hand;
+      --  假身体:前 Moving 拍每拍把亮块往右挪 2 像素,之后停住
+      procedure Run (Moving : Natural) is
+         Beat : Natural := 0;
+      begin
+         Fr0 := (others => <>);
+         Fr0.Cams.Append (Pic (0));
+         Lockstep.Clear;
+         Plug.Lock_Begin;
+         declare
+            Hd : Wait_Hand;
+         begin
+            Lockstep.Start (0, Hd'Identity);
+            loop
+               Lockstep.Run (0);
+               exit when Lockstep.Finished (0);
+               Beat := Beat + 1;
+               declare
+                  Ff : Plug.Frame;
+               begin
+                  Ff.Cams.Append (Pic (2 * Natural'Min (Beat, Moving)));
+                  Plug.Lock_Feed (Ff);
+               end;
+            end loop;
+         end;
+         Plug.Lock_End;
+         Lockstep.Clear;
+      end Run;
+      Ok_Moving, Ok_Settle : Boolean;
+      Used_Moving, Used_Settle : Natural;
+      Hole : constant Plug.Cam := (others => <>);
+      Bf, Af, Hf : Plug.Cam_Vectors.Vector;
+      Old_Blank : Natural := 0;   --  原来:拿空画面比,超过地板的像素一个都没有
+   begin
+      Mp.Floors.Append (Picture.Null_Floor (Pic (0).Gray, Pic (0).Gray, W, H, Picture.Min_Pixels (W, H)));
+      Run (Max_W + 1);
+      Ok_Moving := Ok_W; Used_Moving := Used_W;
+      Run (3);
+      Ok_Settle := Ok_W; Used_Settle := Used_W;
+      Bf.Append (Pic (0)); Af.Append (Hole); Hf.Append (Hole);
+      for B of Picture.Moved (Pic (0).Gray, Hole.Gray, Mp.Floors (0)) loop
+         if B then
+            Old_Blank := Old_Blank + 1;
+         end if;
+      end loop;
+      Check (not Ok_Moving and then Used_Moving = Max_W and then Ok_Settle and then Used_Settle < Max_W
+             and then Selfmap.Pictures_Still (Mp, Bf, Bf) and then not Selfmap.Pictures_Still (Mp, Bf, Af) and then not Selfmap.Pictures_Still (Mp, Hf, Af)
+             and then Old_Blank = 0,
+             "等画面停稳:一直在挪 ⇒ 等满 " & Codec.Img (Used_Moving) & " 拍、" & (if Ok_Moving then "说停了(错)" else "照实说没停稳")
+             & " · 挪三拍就停 ⇒ " & Codec.Img (Used_Settle) & " 拍停稳 · 后一帧没收到画面 ⇒ 不说静止 · 两帧都没收到 ⇒ 不说静止"
+             & " · 牙:原来超时照样说停了;空画面比出来动的像素 " & Codec.Img (Old_Blank) & " 个 ⇒ 当成静止");
+   end;
    --  🔴 抓握通道带不带手指是量出来的(Act.Has_Fingers;09-28 DR1 / DR2:无人机开机说了"握区量不了",干活时照样列两瓣手指一组爪心):
    --  一条臂一个抓握通道,两台相机的握区都没量成 ⇒ 没手指;其中一台量成 ⇒ 有;两条臂只有第 2 条量成 ⇒ 第 1 条没有、第 2 条有、整具有
    declare
@@ -1292,26 +1414,307 @@ begin
              "抓握读数离空手合那头往张开那头走了多远:x5 读数 0.4 ⇒ " & Codec.Fmt (Act.Past_Empty (Hx, 0.4), 2) & "(该 0.4)· 0 张 20 合的假手读数 12 ⇒ "
              & Codec.Fmt (Act.Past_Empty (Hf, 12.0), 2) & "(该 8)");
    end;
-   --  🔴 没点名的抓握通道发这一集给过它的最后一个目标,不发此刻的读数(Plug.Jaw_Value,V1B24 2026-09-27:碰桌面时手指被沿滑轨往里推,
-   --  "保持此刻的读数"把推合了的读数锁住,爪子合上,后一瓣量短 13 mm)。给了 0.3 ⇒ 发 0.3;下一条没给、读数被推到 0.8 ⇒ 还发 0.3;
-   --  对方复位(清空)⇒ 发读数 0.8;一次没给过的通道 ⇒ 发读数
+   --  🔴 判哪头张开时绕世界竖直轴转的那一下(Zone.Turn_Step,09-30):步子按推的那个通道(绕 z,第 5 个)自己的探针幅度定 ——
+   --  三个转动通道的探针幅度 0.001 / 0.002 / 0.004 ⇒ 只推第 5 个、64 × 0.004;牙:原来按第 3 个(绕 x)的幅度定步子、推的却是第 5 个 ⇒ 64 × 0.001
    declare
-      L : Plug.Link;
-      C1, C2 : Plug.Cmd;
-      Cur : Bytes.Floats;
-      V1, V2, V3, V4 : Long_Float;
+      Mz : Selfmap.Body_Map;
+      Tv : Table.Vec;
+      Old_Step : Long_Float;
+   begin
+      Mz.Per_Arm := Chan.Per_Arm;
+      Mz.Amp := Bytes.Zeros (2 * Chan.Per_Arm);
+      Mz.Amp.Replace_Element (Chan.Per_Arm + 3, 0.001); Mz.Amp.Replace_Element (Chan.Per_Arm + 4, 0.002); Mz.Amp.Replace_Element (Chan.Per_Arm + 5, 0.004);
+      Tv := Zone.Turn_Step (Mz, 1);
+      Old_Step := 64.0 * Mz.Amp (Chan.Per_Arm + 3);
+      Check (abs (Tv (5) - 64.0 * 0.004) < 1.0e-12 and then Tv (3) = 0.0 and then Tv (4) = 0.0 and then Tv (0) = 0.0 and then Tv (1) = 0.0 and then Tv (2) = 0.0
+             and then abs (Old_Step - Tv (5)) > 1.0e-6
+             and then (for all K in Tv'Range => Zone.Turn_Step (Mz, 2) (K) = 0.0),
+             "绕竖直轴转的那一下:第 2 只手三个转动探针 0.001 / 0.002 / 0.004 ⇒ 只推绕 z 的那个 " & Codec.Fmt (Tv (5), 3) & "(= 64 × 0.004)"
+             & " · 没量过的手 ⇒ 不转 · 牙:原来按绕 x 的幅度定步子 ⇒ " & Codec.Fmt (Old_Step, 3));
+   end;
+   --  🔴 抓握通道推一下等它停住:等满了还在走就照实说没停住,不当"推到这儿停了"(Zone.Measure 里的 Go_Jaw,09-30):
+   --  锁步里一只假手真跑 Zone.Measure,主线程当假身体 —— 抓握读数每拍只朝目标走 0.01(慢的手:从 0.5 推到 -0.5 要 100 拍),画面不动。
+   --  新:往小那边推的第一下等满 40 拍读数还在走 ⇒ 没停住 ⇒ 这一头量不出、握区照实说量不了(Ok = False,没记下哪一头);
+   --  牙:原来等满 40 拍照样 Good = True ⇒ 那时的读数 0.1 被当成"推到这儿停了",挪了 0.4 < 命令 1.0 的一半 ⇒ 判成到头,把 0.1 当成合空那一头(真的一头还在 -0.5 往外)
+   declare
+      W : constant := 16;
+      H : constant := 12;
+      Lk : Plug.Link;
+      Mz : Selfmap.Body_Map;
+      Fr0 : Plug.Frame;
+      Hz : Zone.Hand;
+      Ok_Z : Boolean := True;
+      Jaw_Now : Long_Float := 0.5;
+      Jaw_Tgt : Long_Float := 0.5;
+      Beats : Natural := 0;
+      At_40 : Long_Float := 0.0;   --  第一下推出去第 40 拍时的读数(原来就拿它当"推到这儿停了")
+      Push_Start : Natural := 0;   --  第一下推是第几拍发的
+      Pic : Plug.Cam;
+      procedure Fake_Cmd (C : in out Plug.Cmd; Ok : out Boolean) is
+      begin
+         if not C.Jaw.Is_Empty then
+            Jaw_Tgt := C.Jaw (0);
+         end if;
+         C.Kind := Plug.Joint; C.Q := Bytes.F64_Vectors.Empty_Vector;
+         Ok := True;
+      end Fake_Cmd;
+      task type Zone_Hand;
+      task body Zone_Hand is
+         Fr : Plug.Frame := Fr0;
+      begin
+         Lockstep.Begin_Hand (0);
+         Zone.Measure (Lk, Mz, 0, 0, Fr, Hz, Ok_Z);
+         Lockstep.Done;
+      end Zone_Hand;
+      function Frame_Now return Plug.Frame is
+         Ff : Plug.Frame;
+      begin
+         Ff.EE.Append (Plug.Arm_Pose'[0.0, 0.0, 0.5, 1.0, 0.0, 0.0, 0.0]);
+         Ff.Jaw.Append (Bytes.F64_Vectors.To_Vector (Jaw_Now, 1));
+         Ff.Cams.Append (Pic);
+         return Ff;
+      end Frame_Now;
+      Old_End : Boolean;
+   begin
+      Pic.W := W; Pic.H := H;
+      for I in 0 .. W * H - 1 loop
+         Pic.Gray.Append (U8 (40 + I mod 7));
+      end loop;
+      Mz.Floors.Append (Picture.Null_Floor (Pic.Gray, Pic.Gray, W, H, Picture.Min_Pixels (W, H)));
+      Mz.Jaw_Noise := 1.0e-6; Mz.Per_Arm := Chan.Per_Arm; Mz.Amp := Bytes.Zeros (Chan.Per_Arm); Mz.Cam_On_Arm.Append (0);
+      Fr0 := Frame_Now;
+      Plug.Set_Hooks (null, Fake_Cmd'Unrestricted_Access);
+      Lockstep.Clear;
+      Plug.Lock_Begin;
+      declare
+         Hd : Zone_Hand;
+      begin
+         Lockstep.Start (0, Hd'Identity);
+         loop
+            Lockstep.Run (0);
+            exit when Lockstep.Finished (0);
+            Beats := Beats + 1;
+            if Push_Start = 0 and then Jaw_Tgt < 0.0 then
+               Push_Start := Beats;
+            end if;
+            Jaw_Now := Jaw_Now + Long_Float'Max (-0.01, Long_Float'Min (0.01, Jaw_Tgt - Jaw_Now));
+            if Push_Start > 0 and then Beats = Push_Start + 39 then
+               At_40 := Jaw_Now;
+            end if;
+            Plug.Lock_Feed (Frame_Now);
+         end loop;
+      end;
+      Plug.Lock_End;
+      Lockstep.Clear;
+      Plug.Set_Hooks (null, null);
+      Old_End := -1.0 * (At_40 - 0.5) < 0.5 * 1.0;   --  原来 Sweep 的到头判据:读数挪不到命令(1.0)的一半
+      Check (not Ok_Z and then Push_Start > 0 and then Beats = Push_Start + 39 and then Hz.Empty_Close = 0.0 and then abs (At_40 - 0.1) < 1.0e-9 and then Old_End,
+             "慢的抓握通道:第一下推出去等满 " & Codec.Img (Beats - Push_Start + 1) & " 拍读数还在走(读数 " & Codec.Fmt (At_40, 2) & ",要去 -0.5)⇒ "
+             & (if Ok_Z then "照样量下去(错)" else "照实说没停住、握区这回不量") & " · 牙:原来这时 Good = True、挪了 0.4 不到命令的一半 ⇒ "
+             & (if Old_End then "把 0.10 当成推到头" else "(牙没咬住)"));
+   end;
+   --  🔴 没点名的抓握通道发这一集给过它的最后一个目标,不发此刻的读数(Plug.Jaw_Values,V1B24 2026-09-27:碰桌面时手指被沿滑轨往里推,
+   --  "保持此刻的读数"把推合了的读数锁住,爪子合上,后一瓣量短 13 mm)。给了 0.3 ⇒ 发 0.3;下一条没给、读数被推到 0.8 ⇒ 还发 0.3;
+   --  对方复位(清空)⇒ 发读数 0.8;一次没给过的通道 ⇒ 发读数。
+   --  09-30 没读数不编数:这一拍没收到读数 ⇒ 照发上一回发出去的那一串(插头规矩 ②);这一集一次没发过又没读数 ⇒ 空(这一组这回不发);
+   --  五指手只点名第 0 根(给 0.2)⇒ 五个数照发(0.2 + 其余四根的读数),下一拍没读数 ⇒ 还是那五个。
+   --  牙:原来的 Jaw_Value(下面照抄一份)在"一次没发过、没读数"时发 1.0(x5 夹爪"1 = 张开"的约定,拿着东西时等于松手),而且只发 1 个数
+   declare
+      L, L2, L3 : Plug.Link;
+      C1, C2, Cf : Plug.Cmd;
+      Cur, Cur5, None : Bytes.Floats;
+      V1, V2, V3, V4, V5, V6, V7, V8 : Bytes.Floats;
+      Old_Set : Plug.Floats_Vectors.Vector;
+      --  原来的写法(照抄):第 K 个数;没给、没给过、没读数 ⇒ 1.0;发几个 = max(1, 读数个数)
+      function Old_Value (K : Natural; Mine : Boolean; C : Plug.Cmd; Cur : Bytes.Floats) return Long_Float is
+      begin
+         while Natural (Old_Set.Length) <= 0 loop
+            Old_Set.Append (Bytes.F64_Vectors.Empty_Vector);
+         end loop;
+         if Mine and then K < Natural (C.Jaw.Length) then
+            return C.Jaw (K);
+         elsif K < Natural (Old_Set (0).Length) then
+            return Old_Set (0) (K);
+         elsif K < Natural (Cur.Length) then
+            return Cur (K);
+         end if;
+         return 1.0;
+      end Old_Value;
+      Old_N : constant Natural := Natural'Max (1, Natural (None.Length));
+      Old_V : constant Long_Float := Old_Value (0, False, C2, None);
+      function Just (V : Bytes.Floats; X : Long_Float) return Boolean is (Natural (V.Length) = 1 and then V (0) = X);
+      function Five (V : Bytes.Floats; X0, X : Long_Float) return Boolean is
+        (Natural (V.Length) = 5 and then V (0) = X0 and then (for all K in 1 .. 4 => V (K) = X));
    begin
       C1.Jaw.Append (0.3);
       Cur.Append (1.0);
-      V1 := Plug.Jaw_Value (L, 0, 0, True, C1, Cur);
+      V1 := Plug.Jaw_Values (L, 0, True, C1, Cur);
       Cur.Replace_Element (0, 0.8);
-      V2 := Plug.Jaw_Value (L, 0, 0, False, C2, Cur);
-      V4 := Plug.Jaw_Value (L, 1, 0, False, C2, Cur);
-      L.Jaw_Set.Clear;
-      V3 := Plug.Jaw_Value (L, 0, 0, False, C2, Cur);
-      Check (V1 = 0.3 and then V2 = 0.3 and then V3 = 0.8 and then V4 = 0.8,
-             "抓握通道:给了 0.3 发 " & Codec.Fmt (V1, 2) & " · 没给、读数被推到 0.8 还发 " & Codec.Fmt (V2, 2) & "(该 0.3)· 复位后发 " & Codec.Fmt (V3, 2)
-             & "(该读数 0.8)· 一次没给过的那一组发 " & Codec.Fmt (V4, 2) & "(该读数 0.8)");
+      V2 := Plug.Jaw_Values (L, 0, False, C2, Cur);
+      V4 := Plug.Jaw_Values (L, 1, False, C2, Cur);
+      L.Jaw_Set.Clear; L.Jaw_Sent.Clear;
+      V3 := Plug.Jaw_Values (L, 0, False, C2, Cur);
+      V5 := Plug.Jaw_Values (L, 0, False, C2, None);    --  这一拍没读数:照发上一回发出去的 0.8
+      V6 := Plug.Jaw_Values (L2, 0, False, C2, None);   --  一次没发过、没读数:空
+      Cf.Jaw.Append (0.2);
+      for K in 1 .. 5 loop
+         Cur5.Append (0.5);
+      end loop;
+      V7 := Plug.Jaw_Values (L3, 0, True, Cf, Cur5);
+      V8 := Plug.Jaw_Values (L3, 0, False, C2, None);
+      Check (Just (V1, 0.3) and then Just (V2, 0.3) and then Just (V3, 0.8) and then Just (V4, 0.8) and then Just (V5, 0.8) and then V6.Is_Empty
+             and then Five (V7, 0.2, 0.5) and then Five (V8, 0.2, 0.5)
+             and then Old_N = 1 and then Old_V = 1.0,
+             "抓握通道:给了 0.3 发 0.3 · 没给、读数被推到 0.8 还发 0.3 · 复位后发读数 0.8 · 一次没给过的那一组发读数 0.8 · 这一拍没读数照发上一回的 "
+             & (if Just (V5, 0.8) then "0.8" else "(错)") & " · 一次没发过又没读数 ⇒ " & (if V6.Is_Empty then "这一组不发" else "发了(错)")
+             & " · 五指手只给第 0 根 0.2 ⇒ 发 " & Codec.Img (Natural (V7.Length)) & " 个数、没读数的下一拍还是 " & Codec.Img (Natural (V8.Length))
+             & " 个(要 5 / 5)· 牙:原来的写法这时发 " & Codec.Img (Old_N) & " 个数、值 " & Codec.Fmt (Old_V, 1) & "(编的 1.0 = x5 的张开)");
+   end;
+   --  🔴 保持动作(Plug.Hold_Action:发第一条命令之前每拍回给对方的"照现在保持")每组抓握照读数的个数发(09-30):
+   --  一组抓握报 5 个数(五指手)⇒ 发 5 个(原来每只手只发 1 个 = 形状不对);下一拍这组读数没来 ⇒ 照发上一回的 5 个;
+   --  一次没发过、这一拍又没读数 ⇒ 这个键不发(原来发编的 1.0)。关节那一键照读数回声
+   declare
+      S, Out1 : Buf;
+      D1, D2, Dh : Msgpack.Doc;
+      L, L2 : Plug.Link;
+      procedure Build (With_Hand : Boolean) is
+      begin
+         S.Clear;
+         Msgpack.Put_Map (S, 1);
+         Msgpack.Put_Str (S, "obs"); Msgpack.Put_Map (S, (if With_Hand then 2 else 1));
+         if With_Hand then
+            Msgpack.Put_Str (S, "hand"); Msgpack.Put_Array (S, 5);
+            for I in 1 .. 5 loop
+               Msgpack.Put_Float (S, 0.4);
+            end loop;
+         end if;
+         Msgpack.Put_Str (S, "elbow"); Msgpack.Put_Array (S, 6);
+         for I in 1 .. 6 loop
+            Msgpack.Put_Float (S, 0.1);
+         end loop;
+      end Build;
+      function Hand_Of (B : Buf) return Bytes.Floats is
+      begin
+         if not Msgpack.Decode (B, Dh) or else Msgpack.Key (Dh, 0, "hand") < 0 then
+            return Bytes.F64_Vectors.Empty_Vector;
+         end if;
+         return Msgpack.Numbers (Dh, Msgpack.Key (Dh, 0, "hand"));
+      end Hand_Of;
+      H1, H2, H3 : Bytes.Floats;
+      Elbow_Ok : Boolean;
+      --  牙:原来的写法 —— 每只手的抓握一栏只发 1 个数,没读数发 1.0
+      function Old_Hand (J : Bytes.Floats) return Bytes.Floats is
+        (if J.Is_Empty then Bytes.F64_Vectors.To_Vector (1.0, 1) else Bytes.F64_Vectors.To_Vector (J (0), 1));
+      Old1, Old3 : Bytes.Floats;
+   begin
+      Build (True);
+      Check (Msgpack.Decode (S, D1), "保持动作:带五指手的那一帧解得开");
+      Build (False);
+      Check (Msgpack.Decode (S, D2), "保持动作:抓握读数没来的那一帧解得开");
+      Layout.Recognise (D1, Msgpack.Key (D1, 0, "obs"), L.Lay);
+      L2.Lay := L.Lay;
+      L.Last := D1; L.Last_Obs := Msgpack.Key (D1, 0, "obs");
+      Out1 := Plug.Hold_Action (L);
+      H1 := Hand_Of (Out1);
+      Elbow_Ok := Msgpack.Key (Dh, 0, "elbow") >= 0 and then Natural (Msgpack.Numbers (Dh, Msgpack.Key (Dh, 0, "elbow")).Length) = 6;
+      L.Last := D2; L.Last_Obs := Msgpack.Key (D2, 0, "obs");
+      H2 := Hand_Of (Plug.Hold_Action (L));
+      L2.Last := D2; L2.Last_Obs := Msgpack.Key (D2, 0, "obs");
+      H3 := Hand_Of (Plug.Hold_Action (L2));
+      Old1 := Old_Hand (Msgpack.Numbers (D1, Msgpack.Key (D1, Msgpack.Key (D1, 0, "obs"), "hand")));
+      Old3 := Old_Hand (Bytes.F64_Vectors.Empty_Vector);
+      Check (Natural (H1.Length) = 5 and then (for all X of H1 => X = 0.4) and then Elbow_Ok
+             and then Natural (H2.Length) = 5 and then (for all X of H2 => X = 0.4) and then H3.Is_Empty
+             and then Natural (Old1.Length) = 1 and then Natural (Old3.Length) = 1 and then Old3 (0) = 1.0,
+             "保持动作:五指手报 5 个 ⇒ 发 " & Codec.Img (Natural (H1.Length)) & " 个(要 5)、关节 6 个照回 · 下一拍这组读数没来 ⇒ 照发上一回的 "
+             & Codec.Img (Natural (H2.Length)) & " 个 · 一次没发过又没读数 ⇒ " & (if H3.Is_Empty then "这个键不发" else "发了(错)")
+             & " · 牙:原来发 " & Codec.Img (Natural (Old1.Length)) & " 个数,没读数发 " & Codec.Fmt (Old3 (0), 1) & "(x5 的张开)");
+   end;
+   --  🔴 某台相机这一拍没收到画面(不是图 / 数据不够)⇒ 那一格留占位,后面相机的下标不许前移(Plug.Frame_Of / Note_Beat,09-30):
+   --  三台相机 c0 / c1 / c2(灰度 10 / 20 / 30),第二拍 c1 的数据不够 ⇒ F.Cams 还是 3 格、第 1 格是占位、第 2 格是 c2 的画面;
+   --  逐拍的账里 c1 这一拍和下一拍都记"没量"(不当"画面没变"),c2 这一拍和它自己上一拍比(没变 = 0)。
+   --  牙:原来丢一台就不占位(下面照抄那一段)⇒ 只剩 2 格,第 1 格装的是 c2 的画面,"c1 这一拍变了多少"拿 c2 和 c1 的上一帧比出 10
+   declare
+      S : Buf;
+      D1, D2 : Msgpack.Doc;
+      L : Plug.Link;
+      F1, F2, F3 : Plug.Frame;
+      Old : Plug.Cam_Vectors.Vector;
+      procedure Img (Name : String; V : Interfaces.Unsigned_8; Short : Boolean) is
+         Px : Buf;
+      begin
+         for I in 1 .. 4 * 3 * 3 loop
+            Px.Append (V);
+         end loop;
+         Msgpack.Put_Str (S, Name); Msgpack.Put_Map (S, 4);
+         Msgpack.Put_Str (S, "nd"); Msgpack.Put_Bool (S, True);
+         Msgpack.Put_Str (S, "type"); Msgpack.Put_Str (S, "|u1");
+         Msgpack.Put_Str (S, "shape"); Msgpack.Put_Array (S, 3); Msgpack.Put_Int (S, 3); Msgpack.Put_Int (S, 4); Msgpack.Put_Int (S, 3);
+         Msgpack.Put_Str (S, "data"); Msgpack.Put_Bin (S, Px, 0, (if Short then 4 * 3 * 3 - 1 else 4 * 3 * 3));
+      end Img;
+      procedure Build (Drop_C1 : Boolean) is
+      begin
+         S.Clear;
+         Msgpack.Put_Map (S, 1);
+         Msgpack.Put_Str (S, "obs"); Msgpack.Put_Map (S, 4);
+         Img ("c0", 10, False); Img ("c1", 20, Drop_C1); Img ("c2", 30, False);
+         Msgpack.Put_Str (S, "elbow"); Msgpack.Put_Array (S, 6);
+         for I in 1 .. 6 loop
+            Msgpack.Put_Float (S, 0.1);
+         end loop;
+      end Build;
+      procedure Take (D : Msgpack.Doc; F : out Plug.Frame) is
+      begin
+         L.Last := D; L.Last_Obs := Msgpack.Key (D, 0, "obs");
+         L.Seq := L.Seq + 1;
+         F := (others => <>);
+         Plug.Frame_Of (L, F);
+         Plug.Note_Beat (L, F);
+      end Take;
+      B2, B3 : Plug.Beat;
+      Old_Chg1 : Long_Float := 0.0;
+   begin
+      Build (False);
+      Check (Msgpack.Decode (S, D1), "相机占位:三台相机那一帧解得开");
+      Build (True);
+      Check (Msgpack.Decode (S, D2), "相机占位:c1 数据不够的那一帧解得开");
+      Layout.Recognise (D1, Msgpack.Key (D1, 0, "obs"), L.Lay);
+      Take (D1, F1);
+      Take (D2, F2);
+      B2 := L.Beats.Last_Element;
+      Take (D1, F3);
+      B3 := L.Beats.Last_Element;
+      --  原来的写法(照抄):收到的才 Append
+      for Ci in 0 .. Natural (L.Lay.Cams.Length) - 1 loop
+         declare
+            N : constant Integer := Layout.Find (D2, Msgpack.Key (D2, 0, "obs"), L.Lay.Cams (Ci));
+            W, H, First, Len : Natural;
+            C : Plug.Cam;
+         begin
+            if Layout.Is_Image (D2, N, W, H) then
+               Msgpack.Nd_Data (D2, N, First, Len);
+               if Len >= W * H * 3 then
+                  C.W := W; C.H := H;
+                  for I in 0 .. W * H - 1 loop
+                     C.Gray.Append (D2.Raw.Element (First + 3 * I));
+                  end loop;
+                  Old.Append (C);
+               end if;
+            end if;
+         end;
+      end loop;
+      if Natural (Old.Length) >= 2 and then Natural (Old (1).Gray.Length) = 4 * 3 then
+         Old_Chg1 := abs (Long_Float (Old (1).Gray (0)) - Long_Float (F1.Cams (1).Gray (0)));
+      end if;
+      Check (Natural (L.Lay.Cams.Length) = 3 and then Natural (F2.Cams.Length) = 3 and then not Plug.Has_Picture (F2.Cams (1))
+             and then Plug.Has_Picture (F2.Cams (2)) and then F2.Cams (2).Gray (0) = 30 and then F2.Cams (0).Gray (0) = 10
+             and then Natural (B2.Img_Ok.Length) = 3 and then B2.Img_Ok (0) and then not B2.Img_Ok (1) and then B2.Img_Ok (2) and then B2.Img_Chg (2) = 0.0
+             and then not B3.Img_Ok (1) and then B3.Img_Ok (2)
+             and then Natural (Old.Length) = 2 and then Old (1).Gray (0) = 30 and then Old_Chg1 = 10.0,
+             "相机占位:c1 这一拍没收到 ⇒ 还是 " & Codec.Img (Natural (F2.Cams.Length)) & " 格,第 1 格" & (if Plug.Has_Picture (F2.Cams (1)) then "有画面(错)" else "是占位")
+             & "、第 2 格灰度 " & Codec.Img (Natural (F2.Cams (2).Gray (0))) & "(要 30 = c2)· c1 这一拍、下一拍都记没量;c2 和它自己上一拍比 "
+             & Codec.Fmt (B2.Img_Chg (2), 1) & " · 牙:原来只剩 " & Codec.Img (Natural (Old.Length)) & " 格、第 1 格是 c2(灰度 "
+             & Codec.Img (Natural (Old (1).Gray (0))) & "),'c1 变了' " & Codec.Fmt (Old_Chg1, 1));
    end;
    --  🔴 指尖只按这一瓣自己那一块手指像素找(V1B21 2026-09-27):手指像素里合上时手指在的那一块落进了瓣框的一角、瓣框又只盖住手指的下半截
    --  (同一根手指按背景明暗分进了两类)。合成 48×48:手指 x 3..9、y 20..47 从下沿伸进来;合上的那一块 x 12..18、y 40..47 另成一块;
@@ -1486,6 +1889,399 @@ begin
              and then To_String (P1.Code (0).Cons (0).Obj.Word) = "height" and then P1.Code (0).Until_Oc = Oc_Settled,
              "语言:「do mint green scissors height up until settled」= 剪刀的 height 往上,到 settled 为止");
       Check (not P2.Ok, "语言:量前面没说哪件东西 ⇒ 退回");
+   end;
+   --  🔴 语法里没有拍的上限(Sinew.EBNF / Grammar / Parse,09-30 owner 的规矩:拍的数不许):一个词几个字母、名字几个词、一句话几个字、
+   --  一段几行、一段几条约束、块里几行、数有几位,全用重复;解析这一头也不截词、不限块套几层、大得装不进 Natural 的数照实退回。
+   --  拿一个小的 GBNF 匹配器(按"能走到哪些位置"的集合一步步推,不回溯)对着驱动交给解码器的那份文法试 ——
+   --  名字一个词 27 个字母(pinkandwhitestripedcupcakes)· 名字五个词 · 五行 · 100 个字的一句 say · 一段三条约束 + or 250 steps · repeat 块里三行
+   --  ⇒ 新文法全接得住;牙:把新文法按原来的写法还原(一个词最多 24 个字母 —— 照 mintgreenscissors 定的、名字最多 3 个词、最多 4 行、
+   --  一句话最多 81 个字、约束最多 2 条、数最多两位、块里最多 2 行)⇒ 这几句一句都接不住;最普通的两句两份都接得住(还原得对、匹配器也对)
+   declare
+      type Node_Kind is (N_Alt, N_Seq, N_Opt, N_Star, N_Plus, N_Lit, N_Class, N_Ref);
+      type G_Node is record
+         K : Node_Kind := N_Seq;
+         Kids : Bytes.Ints;
+         Txt : Unbounded_String;   --  N_Lit:字面;N_Class:这一类里有哪些字符;N_Ref:规则名
+         Neg : Boolean := False;
+      end record;
+      package G_Vectors is new Ada.Containers.Vectors (Natural, G_Node);
+      type G_Tree is record
+         Nodes : G_Vectors.Vector;
+         Names : Bytes.Strs;
+         Roots : Bytes.Ints;
+         Ok : Boolean := True;      --  文法本身写得对不对(括号、引号配得上,引到的规则都有)
+      end record;
+      function Build (G : String) return G_Tree is
+         T : G_Tree;
+         Src : Unbounded_String;
+         P : Natural := 1;
+         function At_End return Boolean is (P > Length (Src));
+         function Cur return Character is (Element (Src, P));
+         procedure Skip is
+         begin
+            while not At_End and then Cur = ' ' loop
+               P := P + 1;
+            end loop;
+         end Skip;
+         function Add (N : G_Node) return Natural is
+         begin
+            T.Nodes.Append (N);
+            return Natural (T.Nodes.Length) - 1;
+         end Add;
+         function Esc return Character is
+         begin
+            if Cur = '\' and then P < Length (Src) then
+               P := P + 1;
+               return (if Cur = 'n' then ASCII.LF else Cur);
+            end if;
+            return Cur;
+         end Esc;
+         function Alt return Natural;
+         function Prim return Natural is
+            N : G_Node;
+         begin
+            Skip;
+            if At_End then
+               T.Ok := False;
+               return Add (N);
+            end if;
+            if Cur = '"' then
+               N.K := N_Lit;
+               P := P + 1;
+               while not At_End and then Cur /= '"' loop
+                  Append (N.Txt, Esc);
+                  P := P + 1;
+               end loop;
+               T.Ok := T.Ok and then not At_End;
+               P := P + 1;
+               return Add (N);
+            elsif Cur = '[' then
+               N.K := N_Class;
+               P := P + 1;
+               if not At_End and then Cur = '^' then
+                  N.Neg := True;
+                  P := P + 1;
+               end if;
+               while not At_End and then Cur /= ']' loop
+                  declare
+                     C0 : constant Character := Esc;
+                  begin
+                     if P + 2 <= Length (Src) and then Element (Src, P + 1) = '-' and then Element (Src, P + 2) /= ']' then
+                        for X in C0 .. Element (Src, P + 2) loop
+                           Append (N.Txt, X);
+                        end loop;
+                        P := P + 3;
+                     else
+                        Append (N.Txt, C0);
+                        P := P + 1;
+                     end if;
+                  end;
+               end loop;
+               T.Ok := T.Ok and then not At_End;
+               P := P + 1;
+               return Add (N);
+            elsif Cur = '(' then
+               P := P + 1;
+               declare
+                  A : constant Natural := Alt;
+               begin
+                  Skip;
+                  if not At_End and then Cur = ')' then
+                     P := P + 1;
+                  else
+                     T.Ok := False;
+                  end if;
+                  return A;
+               end;
+            end if;
+            N.K := N_Ref;
+            while not At_End and then Cur in 'a' .. 'z' | '0' .. '9' | '_' | '-' loop
+               Append (N.Txt, Cur);
+               P := P + 1;
+            end loop;
+            if Length (N.Txt) = 0 then
+               T.Ok := False;
+               P := P + 1;
+            end if;
+            return Add (N);
+         end Prim;
+         function Term return Natural is
+            A : constant Natural := Prim;
+            N : G_Node;
+         begin
+            if not At_End and then Cur in '?' | '*' | '+' then
+               N.K := (case Cur is when '?' => N_Opt, when '*' => N_Star, when others => N_Plus);
+               N.Kids.Append (A);
+               P := P + 1;
+               return Add (N);
+            end if;
+            return A;
+         end Term;
+         function Seq return Natural is
+            N : G_Node;
+         begin
+            loop
+               Skip;
+               exit when At_End or else Cur in ')' | '|';
+               N.Kids.Append (Term);
+            end loop;
+            return Add (N);
+         end Seq;
+         function Alt return Natural is
+            N : G_Node;
+         begin
+            N.K := N_Alt;
+            N.Kids.Append (Seq);
+            loop
+               Skip;
+               exit when At_End or else Cur /= '|';
+               P := P + 1;
+               N.Kids.Append (Seq);
+            end loop;
+            return Add (N);
+         end Alt;
+         From : Natural := G'First;
+      begin
+         for I in G'First .. G'Last + 1 loop
+            if I > G'Last or else G (I) = ASCII.LF then
+               declare
+                  Ln : constant String := G (From .. I - 1);
+                  Def : constant Natural := Ada.Strings.Fixed.Index (Ln, " ::= ");
+               begin
+                  if Ln'Length > 0 then
+                     if Def = 0 then
+                        T.Ok := False;
+                     else
+                        T.Names.Append (Ln (Ln'First .. Def - 1));
+                        Src := To_Unbounded_String (Ln (Def + 5 .. Ln'Last));
+                        P := 1;
+                        T.Roots.Append (Alt);
+                        T.Ok := T.Ok and then At_End;
+                     end if;
+                  end if;
+               end;
+               From := I + 1;
+            end if;
+         end loop;
+         for N of T.Nodes loop
+            if N.K = N_Ref and then not T.Names.Contains (To_String (N.Txt)) then
+               T.Ok := False;
+            end if;
+         end loop;
+         return T;
+      end Build;
+      function Accepts (T : G_Tree; Input : String) return Boolean is
+         Last : constant Natural := Input'Length;
+         function None return Bools is (Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (Last + 1)));
+         function Union (A, B : Bools) return Bools is
+            R : Bools := A;
+         begin
+            for I in 0 .. Last loop
+               if B (I) then
+                  R.Replace_Element (I, True);
+               end if;
+            end loop;
+            return R;
+         end Union;
+         function Same (A, B : Bools) return Boolean is (for all I in 0 .. Last => A (I) = B (I));
+         function Match (Id : Natural; From : Bools) return Bools is
+            Nd : constant G_Node := T.Nodes (Id);
+            R : Bools := None;
+         begin
+            if (for all X of From => not X) then
+               return From;
+            end if;
+            case Nd.K is
+               when N_Lit =>
+                  declare
+                     S : constant String := To_String (Nd.Txt);
+                  begin
+                     for Q in 0 .. Last loop
+                        if From (Q) and then Q + S'Length <= Last and then Input (Input'First + Q .. Input'First + Q + S'Length - 1) = S then
+                           R.Replace_Element (Q + S'Length, True);
+                        end if;
+                     end loop;
+                  end;
+               when N_Class =>
+                  for Q in 0 .. Last - 1 loop
+                     if From (Q) and then (Ada.Strings.Fixed.Index (To_String (Nd.Txt), [1 => Input (Input'First + Q)]) > 0) /= Nd.Neg then
+                        R.Replace_Element (Q + 1, True);
+                     end if;
+                  end loop;
+               when N_Seq =>
+                  R := From;
+                  for K of Nd.Kids loop
+                     R := Match (Natural (K), R);
+                  end loop;
+               when N_Alt =>
+                  for K of Nd.Kids loop
+                     R := Union (R, Match (Natural (K), From));
+                  end loop;
+               when N_Opt =>
+                  R := Union (From, Match (Natural (Nd.Kids (0)), From));
+               when N_Star | N_Plus =>
+                  declare
+                     Acc : Bools := (if Nd.K = N_Star then From else Match (Natural (Nd.Kids (0)), From));
+                     Nx : Bools;
+                  begin
+                     loop
+                        Nx := Union (Acc, Match (Natural (Nd.Kids (0)), Acc));
+                        exit when Same (Nx, Acc);
+                        Acc := Nx;
+                     end loop;
+                     R := Acc;
+                  end;
+               when N_Ref =>
+                  for I in 0 .. Natural (T.Names.Length) - 1 loop
+                     if T.Names (I) = To_String (Nd.Txt) then
+                        R := Match (Natural (T.Roots (I)), From);
+                     end if;
+                  end loop;
+            end case;
+            return R;
+         end Match;
+         Start : Bools := None;
+      begin
+         Start.Replace_Element (0, True);
+         for I in 0 .. Natural (T.Names.Length) - 1 loop
+            if T.Names (I) = "root" then
+               declare
+                  Ends : constant Bools := Match (Natural (T.Roots (I)), Start);
+               begin
+                  return Ends (Last);
+               end;
+            end if;
+         end loop;
+         return False;
+      end Accepts;
+      --  原来的写法:把新文法里的重复还原成当时的嵌套可选项 / 写死的个数
+      function Old_Of (G : String) return String is
+         function Tail (N : Natural; Cls : String) return String is (if N = 0 then "" else "(" & Cls & " " & Tail (N - 1, Cls) & ")?");
+         R : Unbounded_String := To_Unbounded_String (G);
+         procedure Swap (A, B : String) is
+            Out_S : Unbounded_String;
+            S : constant String := To_String (R);
+            I : Natural := S'First;
+         begin
+            while I <= S'Last loop
+               if I + A'Length - 1 <= S'Last and then S (I .. I + A'Length - 1) = A then
+                  Append (Out_S, B);
+                  I := I + A'Length;
+               else
+                  Append (Out_S, S (I));
+                  I := I + 1;
+               end if;
+            end loop;
+            R := Out_S;
+         end Swap;
+      begin
+         Swap ("[a-zA-Z] ([a-zA-Z0-9 ,.=\'])*", "[a-zA-Z] " & Tail (80, "[a-zA-Z0-9 ,.=\']"));
+         Swap ("([a-z])*", Tail (23, "[a-z]"));
+         Swap ("root ::= line (line)*", "root ::= line (line)? (line)? (line)?");
+         Swap ("name ::= w ("" "" w)*", "name ::= w ("" "" w)? ("" "" w)?");
+         Swap ("cons ("" and "" cons)*", "cons ("" and "" cons)?");
+         Swap ("num ::= [1-9] ([0-9])*", "num ::= [1-9] ([0-9])?");
+         Swap ("simple (simple)*", "simple (simple)?");
+         return To_String (R);
+      end Old_Of;
+      Outs : constant String := "touched stuck slipped lost settled stalled timeout";
+      NL : constant String := "" & ASCII.LF;
+      Qn : constant String := Sinew.EBNF ("touching above", "grasper", Outs, "height");
+      Fn : constant String := Sinew.EBNF ("touching above", "grasper", Outs);
+      Tq, Tq_Old, Tf, Tf_Old : G_Tree;
+      Long_Say : constant String := "say " & [1 .. 100 => 'a'] & NL;
+      Five : constant String := "say one" & NL & "say two" & NL & "say three" & NL & "say four" & NL & "say five" & NL;
+      Q_Plain : constant String := "do scissors height up until settled" & NL;
+      Q_Long_Word : constant String := "do pinkandwhitestripedcupcakes height up until settled" & NL;
+      Q_Five_Words : constant String := "do the big red toy car height up until settled" & NL;
+      F_Plain : constant String := "do grasper still until settled" & NL;
+      F_Three : constant String := "do grasper touching the red cube and grasper still and grasper open until settled or 250 steps" & NL;
+      F_Block : constant String := "repeat 2 times:" & NL & "do grasper still until settled" & NL & "do grasper open until settled" & NL
+                                   & "do grasper still until settled" & NL & "end" & NL;
+      function Both_Plain_Ok return Boolean is
+        (Accepts (Tq, Q_Plain) and then Accepts (Tq_Old, Q_Plain) and then Accepts (Tf, F_Plain) and then Accepts (Tf_Old, F_Plain));
+      New_All, Old_None : Boolean;
+   begin
+      Tq := Build (Qn); Tq_Old := Build (Old_Of (Qn)); Tf := Build (Fn); Tf_Old := Build (Old_Of (Fn));
+      New_All := Accepts (Tq, Q_Long_Word) and then Accepts (Tq, Q_Five_Words) and then Accepts (Tq, Five) and then Accepts (Tq, Long_Say)
+                 and then Accepts (Tf, F_Three) and then Accepts (Tf, F_Block);
+      Old_None := not Accepts (Tq_Old, Q_Long_Word) and then not Accepts (Tq_Old, Q_Five_Words) and then not Accepts (Tq_Old, Five)
+                  and then not Accepts (Tq_Old, Long_Say) and then not Accepts (Tf_Old, F_Three) and then not Accepts (Tf_Old, F_Block);
+      Check (Tq.Ok and then Tf.Ok and then Tq_Old.Ok and then Tf_Old.Ok and then Both_Plain_Ok and then New_All and then Old_None
+             and then Ada.Strings.Fixed.Index (Qn, "([a-z] ([a-z]") = 0 and then Ada.Strings.Fixed.Index (Fn, "(line)?") = 0,
+             "语法没有拍的上限:新文法" & (if New_All then "接得住" else "有接不住的(错)") & " 27 个字母的名字、五个词的名字、五行、100 个字的 say、三条约束 + 250 steps、块里三行"
+             & " · 牙:按原来的写法还原 ⇒ " & (if Old_None then "一句都接不住" else "有接得住的(牙没咬住)")
+             & " · 两份都接得住最普通的两句:" & (if Both_Plain_Ok then "是" else "否(错)")
+             & " · 文法本身配得上:" & (if Tq.Ok and then Tf.Ok then "是" else "否(错)"));
+   end;
+   --  🔴 解析这一头也不截(Sinew.Parse,09-30):一行 70 个词(名字 66 个词)⇒ 整行读完、名字 66 个词;牙:原来一行最多 64 个词,
+   --  多出来的静悄悄丢掉 —— 同一行只读前 64 个词,until 被丢掉、这一段退回;or 99999999999999999999 steps ⇒ 照实退回(不抛异常;
+   --  牙:原来 Natural'Value 直接抛 Constraint_Error);repeat 套 40 层 ⇒ 读得下(牙:原来块栈只有 32 格,第 33 层越界)
+   declare
+      use Sinew;
+      Name66 : Unbounded_String;
+      First64 : Unbounded_String;
+      Big : constant String := "99999999999999999999";
+      P_Long, P_Cut, P_Big, P_Deep, P_250 : Program;
+      Old_Raised, Old_Deep : Boolean := False;
+      Old_Val : Natural := 0;
+      Deep : Unbounded_String;
+      Nw : Natural := 0;
+   begin
+      for I in 1 .. 66 loop
+         Append (Name66, (if I > 1 then " " else "") & "w" & [1 .. 1 + I mod 5 => 'q']);
+      end loop;
+      P_Long := Sinew.Parse ("do grasper touching " & To_String (Name66) & " until settled");
+      declare
+         Words : constant String := "do grasper touching " & To_String (Name66) & " until settled";
+      begin
+         for Ch of Words loop
+            if Ch = ' ' then
+               Nw := Nw + 1;
+            end if;
+            exit when Nw = 64;
+            Append (First64, Ch);
+         end loop;
+      end;
+      P_Cut := Sinew.Parse (To_String (First64));
+      P_Big := Sinew.Parse ("do grasper still until settled or " & Big & " steps");
+      begin
+         Old_Val := Natural'Value (Big);   --  原来的读法
+      exception
+         when Constraint_Error =>
+            Old_Raised := True;
+      end;
+      for I in 1 .. 40 loop
+         Append (Deep, "repeat 2 times:" & ASCII.LF);
+      end loop;
+      Append (Deep, "do grasper still until settled" & ASCII.LF);
+      for I in 1 .. 40 loop
+         Append (Deep, "end" & ASCII.LF);
+      end loop;
+      P_Deep := Sinew.Parse (To_String (Deep));
+      declare
+         type Old_Stack is array (1 .. 32) of Natural;   --  原来的块栈
+         Os : Old_Stack := [others => 0];
+      begin
+         for Level in 1 .. Ada.Strings.Unbounded.Count (Deep, "repeat") loop
+            Os (Level) := Level;
+         end loop;
+         Nw := Nw + Os (Os'Last);   --  读一下(不让优化器把上面那几格连同越界检查一起删掉);走到这儿 = 没越界(Old_Deep 还是 False)
+      exception
+         when Constraint_Error =>
+            Old_Deep := True;
+      end;
+      P_250 := Sinew.Parse ("do grasper still until settled or 250 steps");
+      Check (P_Long.Ok and then Natural (P_Long.Code.Length) = 1 and then To_String (P_Long.Code (0).Cons (0).Obj.Word) = To_String (Name66)
+             and then not P_Cut.Ok
+             and then not P_Big.Ok and then Old_Raised
+             and then P_Deep.Ok and then Old_Deep
+             and then P_250.Ok and then P_250.Code (0).Max_Steps = 250,
+             "解析不截:一行 70 个词 ⇒ " & (if P_Long.Ok then "读完、名字 66 个词" else "退回(错)") & "(牙:原来只读前 " & Codec.Img (Nw) & " 个词 ⇒ "
+             & (if P_Cut.Ok then "读成了(牙没咬住)" else "until 丢了、退回") & ")· or " & Big & " steps ⇒ "
+             & (if P_Big.Ok then "收了(错)" else "照实退回:" & To_String (P_Big.Err)) & "(牙:原来 Natural'Value " & (if Old_Raised then "抛异常" else "没抛,读成 " & Codec.Img (Old_Val)) & ")"
+             & " · repeat 套 40 层 ⇒ " & (if P_Deep.Ok then "读得下" else "退回(错):" & To_String (P_Deep.Err))
+             & "(牙:原来 32 格的块栈第 33 层" & (if Old_Deep then "越界" else "没越界") & ")· or 250 steps ⇒ " & Codec.Img (P_250.Code (0).Max_Steps));
    end;
    --  🔴 不动的眼(2026-09-22):已知世界点 + 它们在画面里的像素 ⇒ 解出相机位置和朝向。正反两条。
    declare

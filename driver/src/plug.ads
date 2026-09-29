@@ -10,6 +10,9 @@ package Plug is
    type Arm_Pose is array (0 .. 6) of Long_Float;
    package Pose_Vectors is new Ada.Containers.Vectors (Natural, Arm_Pose);
    package Floats_Vectors is new Ada.Containers.Vectors (Natural, Floats, F64_Vectors."=");
+   --  一台相机这一拍的画面。这一拍没收到它的画面(不是图、数据不够)⇒ 占位:W = H = 0、缓冲空(Has_Picture = False)。
+   --  Frame.Cams 永远每台相机一格、下标 = L.Lay.Cams 的下标(09-30:原来丢一台就不占位,后面相机的下标整体前移,
+   --  "画面变了多少"、地板、哪台长在哪只手上全拿错了相机比)
    type Cam is record
       W, H : Natural := 0;
       Gray, RGB : Buf;
@@ -19,6 +22,7 @@ package Plug is
       Has_K : Boolean := False;
       Focal, Cx, Cy : Long_Float := 0.0;        --  像素
    end record;
+   function Has_Picture (C : Cam) return Boolean is (C.W > 0 and then C.H > 0 and then Natural (C.Gray.Length) = C.W * C.H);
    package Cam_Vectors is new Ada.Containers.Vectors (Natural, Cam);
    type Frame is record
       Joints : Floats_Vectors.Vector;   --  每个关节组一串
@@ -34,12 +38,13 @@ package Plug is
    --  逐拍记下的东西(2026-09-26 V1B10:仿真的画面比关节读数晚一拍 —— 扫描时手还在转就存了格子,画面和读数不是同一刻,
    --  第 5 个关节那几格差到 4°,解出来的运动学一只手整组错;要量"画面晚几拍",再按它给每一格配读数)。
    --  每一拍:帧号、各组关节读数、身体报的位姿(只落盘打分)、各台相机这一拍画面变了多少(和上一拍比的灰度差平均,隔 Img_Stride 个像素取一个)、
-   --  各组读数这一拍变了多少(变得最多的那个关节)
+   --  各组读数这一拍变了多少(变得最多的那个关节)。Img_Ok:这台相机这一拍和上一拍都有画面、Img_Chg 真量了(没量的那一格不参与相关,不当"没变")
    type Beat is record
       Seq : Natural := 0;
       Joints : Floats_Vectors.Vector;
       Reported_EE : Pose_Vectors.Vector;
       Img_Chg : Floats;
+      Img_Ok : Bools;
       Q_Chg : Floats;
    end record;
    package Beat_Vectors is new Ada.Containers.Vectors (Natural, Beat);
@@ -85,11 +90,23 @@ package Plug is
       --  读数会被外力推着走(V1B24 2026-09-27:碰桌面时手指被桌面顶着沿滑轨往里推,"保持此刻的读数"把推合了的读数锁住,爪子合上,
       --  后一瓣按张开的手指去量、短了 13 mm;拿着东西时它也会把夹紧的目标换成夹着东西的读数、卸掉夹紧力)。对方复位(新的一集)时清空
       Jaw_Set : Floats_Vectors.Vector;
+      --  每个抓握读数组这一集最后一回发出去的那一串(形状 = 对方那一拍报的):这一拍没收到这组的读数 ⇒ 照发它(插头规矩 ②),不编一个数。对方复位时清空
+      Jaw_Sent : Floats_Vectors.Vector;
    end record;
 
    procedure Boot (Port : Natural; L : in out Link; Ok : out Boolean);
-   --  第 Ji 个抓握读数组第 K 个数这回发什么:这条命令给了(Mine)⇒ 发它并记进 L.Jaw_Set;没给 ⇒ 这一集给过的最后一个目标;一次没给过 ⇒ 此刻的读数 Cur。导出只为自检
-   function Jaw_Value (L : in out Link; Ji : Natural; K : Natural; Mine : Boolean; C : Cmd; Cur : Floats) return Long_Float;
+   --  第 Ji 个抓握读数组这回发哪一串(插头规矩 ①②):形状 = 这一拍这组的读数(这一拍没收到 ⇒ 这一集上一回发出去的那一串);
+   --  每一个数:这条命令给了(Mine:C.Jaw 的前几个)⇒ 发它、整段记进 L.Jaw_Set;没给 ⇒ 这一集给过的最后一个目标;一次没给过 ⇒ 此刻的读数;
+   --  这一拍没读数 ⇒ 上一回发出去的那个数。一个数都不编(09-30:原来没读数就发 1.0 = x5 夹爪"1 = 张开"的约定,拿着东西时等于松手;
+   --  而且只发 1 个数,五指手形状不对):这一拍没读数、这一集也还没发过 ⇒ 空(这一组这回不发)。发出去的那一串记进 L.Jaw_Sent。导出只为自检
+   function Jaw_Values (L : in out Link; Ji : Natural; Mine : Boolean; C : Cmd; Cur : Floats) return Floats;
+   --  「照现在这样保持」:把此刻报的位姿 / 关节原样回声,抓握按 Jaw_Values(没有新命令的保持);读数空的键不发(不知道形状,不编)。导出只为自检
+   function Hold_Action (L : in out Link) return Buf;
+   --  把对方最后一帧观测(L.Last)按认出来的布局拆成一帧:各组关节、身体报的位姿、抓握、任务句、每台相机的画面(没收到的那台留占位,见 Cam)。
+   --  Sense 收完一帧就调它;导出只为自检
+   procedure Frame_Of (L : Link; F : in out Frame);
+   --  这一拍记进逐拍的账(见 Beat):各台相机这一拍画面变了多少(这一拍、上一拍都有画面才量)、各组读数变了多少。Sense 调它;导出只为自检
+   procedure Note_Beat (L : in out Link; F : Frame);
    function Sense (L : in out Link; F : out Frame) return Boolean;
    function Act (L : in out Link; C : Cmd) return Boolean;
    --  几只手按拍对齐(Lockstep,2026-09-28 PLAN ⑧ (g)):在手的任务里 Act 只记下目标(位姿命令先按 Cmd_Hook 解成关节;每组关节一个目标、
