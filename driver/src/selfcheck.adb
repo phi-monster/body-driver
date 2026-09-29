@@ -942,10 +942,145 @@ begin
    begin
       Eye.Append (Kinem.Px'(U => (0.0 + 0.5) * 640.0 / 32.0, V => (0.0 + 0.5) * 480.0 / 24.0));
       Eye.Append (Kinem.Px'(U => (1.0 + 0.5) * 640.0 / 32.0, V => (0.0 + 0.5) * 480.0 / 24.0));
-      Check (Kinem.On_Eye_Grid (Eye, 12.5, 17.0, 640, 480, 32, 24) and then Kinem.On_Eye_Grid (Eye, 19.99, 19.99, 640, 480, 32, 24)
-             and then Kinem.On_Eye_Grid (Eye, 20.0, 5.0, 640, 480, 32, 24) and then not Kinem.On_Eye_Grid (Eye, 45.0, 10.0, 640, 480, 32, 24)
-             and then not Kinem.On_Eye_Grid (Eye, 10.0, 25.0, 640, 480, 32, 24) and then not Kinem.On_Eye_Grid (Eye, -1.0, 5.0, 640, 480, 32, 24),
+      Check (Kinem.On_Eye_Grid (Eye, 12.5, 17.0, 640, 480) and then Kinem.On_Eye_Grid (Eye, 19.99, 19.99, 640, 480)
+             and then Kinem.On_Eye_Grid (Eye, 20.0, 5.0, 640, 480) and then not Kinem.On_Eye_Grid (Eye, 45.0, 10.0, 640, 480)
+             and then not Kinem.On_Eye_Grid (Eye, 10.0, 25.0, 640, 480) and then not Kinem.On_Eye_Grid (Eye, -1.0, 5.0, 640, 480),
              "落在自己手上的那一格:格点 (10,10)、(30,10) 那两格里的点(连 19.99 / 20.0 格子边)算,邻格 (50,10)、(10,30) 和画面外不算");
+   end;
+   --  🔴 眼转了一下,画面里哪些点长在眼上(Kinem.Rides_On_Eye;09-30 V1B69:按灰度判时手一转光照就变,第 1 只手判不出哪头张开)。
+   --  合成的眼:焦距 400、640 × 480,问那张格点(Kinem.Grid_U / Grid_V)。世界 = 离眼 2–3.5 单位的斜面,眼绕它后面 0.02 单位的一点转 0.161 弧度
+   --  (轴斜着:x5 那一下绕世界竖直轴,在腕眼里是斜的;驱动发的位姿就是眼的位姿,这里再让转的中心偏一点,世界点带一点视差)。世界点配点噪声 0.3 px、二十个里一个是乱配(±30 px);
+   --  长在眼上的点 = 画面下方两块"手指"(同 x5 腕眼:左 0–110、右 520–640、下 260–480)里的格点,配点照 V1B69 实测那样糟:没有纹理,
+   --  散在 12 px 半径的圆里,五个里一个被周围的世界拖过去两成(实测手指格点挪了中位 2.2 px、九成 11.7 px,世界挪 72 px)。
+   --  要:长在眼上的判成 Rides、世界判成 World(各错不到 2%);眼没转(配到的地方 = 问的点 + 0.05 px 噪声)⇒ 全是 Unknown;
+   --  长在眼上的占六成(手指铺满下面六成画面)⇒ 全是 Unknown(照实判不了,不猜)。
+   --  🦷 同一批配点按开机认手指那一条(挪不到 Geom.Trip_Px = 1 px 算没挪)判:手指格点只有少数"没挪"(红)
+   declare
+      use Ada.Numerics.Long_Elementary_Functions;
+      use type Kinem.Ride;
+      Fr : constant Long_Float := 400.0;
+      Cx0 : constant Long_Float := 320.0;
+      Cy0 : constant Long_Float := 240.0;
+      Wd : constant Positive := 640;
+      Ht : constant Positive := 480;
+      N_G : constant Natural := Kinem.Gx * Kinem.Gy;
+      Th : constant Long_Float := 0.161;
+      Ax : constant Geom.V3 := [0.2 / Sqrt (1.13), 1.0 / Sqrt (1.13), 0.3 / Sqrt (1.13)];
+      Rr : constant Geom.M3 := Geom.Rodrigues ([Th * Ax (0), Th * Ax (1), Th * Ax (2)]);
+      Piv : constant Geom.V3 := [0.0, 0.0, 0.02];   --  转的中心在眼后面 0.02 单位(相机系 -z 朝前 ⇒ +z 是后面;景物的 1%,一点视差)
+      Eye : Geom.Cam_Geo := Geom.No_Geo;
+      type Lcg is mod 2 ** 31;
+      Seed : Lcg := 12345;
+      function Rnd return Long_Float is   --  0..1 的伪随机(线性同余,固定种子 ⇒ 每次一样)
+      begin
+         Seed := Seed * 1103515245 + 12345;
+         return Long_Float (Seed) / Long_Float (Lcg'Modulus);
+      end Rnd;
+      function Finger (U, V : Long_Float; Wide : Boolean) return Boolean is
+        (V >= (if Wide then 190.0 else 260.0) and then (U <= (if Wide then 640.0 else 110.0) or else U >= 520.0));
+      procedure Make (Turned, Wide : Boolean; Pu, Pv, Bu, Bv : out Kinem.Vec; Is_F : out Bools) is
+      begin
+         Is_F.Clear;
+         for Gyy in 0 .. Kinem.Gy - 1 loop
+            for Gxx in 0 .. Kinem.Gx - 1 loop
+               declare
+                  K : constant Natural := Gyy * Kinem.Gx + Gxx;
+                  U : constant Long_Float := Kinem.Grid_U (Gxx, Wd);
+                  V : constant Long_Float := Kinem.Grid_V (Gyy, Ht);
+                  F_Here : constant Boolean := Finger (U, V, Wide);
+                  --  这个像素看出去的世界点:视线 (x, y, -1)(相机系,+y 朝上 ⇒ 像素 v 往下是 -y),深度按斜面
+                  Dz : constant Long_Float := 2.0 + 1.5 * V / Long_Float (Ht);
+                  Xc : constant Geom.V3 := [(U - Cx0) / Fr * Dz, -(V - Cy0) / Fr * Dz, -Dz];
+                  --  眼绕 Piv 转 Rr ⇒ 世界点在新的眼系里 = Rrᵀ (X − Piv) + Piv
+                  Rel : constant Geom.V3 := Geom.Ap (Geom.Tr (Rr), [Xc (0) - Piv (0), Xc (1) - Piv (1), Xc (2) - Piv (2)]);
+                  Xn : constant Geom.V3 := [Rel (0) + Piv (0), Rel (1) + Piv (1), Rel (2) + Piv (2)];
+                  Uw : constant Long_Float := Cx0 + Fr * Xn (0) / (-Xn (2));
+                  Vw : constant Long_Float := Cy0 - Fr * Xn (1) / (-Xn (2));
+                  A1 : constant Long_Float := Rnd;
+                  A2 : constant Long_Float := Rnd;
+                  A3 : constant Long_Float := Rnd;
+               begin
+                  Pu (K) := U; Pv (K) := V;
+                  Is_F.Append (F_Here);
+                  if not Turned then
+                     Bu (K) := U + 0.05 * (A1 - 0.5); Bv (K) := V + 0.05 * (A2 - 0.5);
+                  elsif F_Here then
+                     declare
+                        Rad : constant Long_Float := 12.0 * Sqrt (A1);
+                        Ang : constant Long_Float := 2.0 * Ada.Numerics.Pi * A2;
+                        Drag : constant Long_Float := (if A3 < 0.2 then 0.2 else 0.0);
+                     begin
+                        Bu (K) := U + Rad * Cos (Ang) + Drag * (Uw - U);
+                        Bv (K) := V + Rad * Sin (Ang) + Drag * (Vw - V);
+                     end;
+                  elsif A3 < 0.05 then
+                     Bu (K) := Uw + 60.0 * (A1 - 0.5); Bv (K) := Vw + 60.0 * (A2 - 0.5);
+                  else
+                     Bu (K) := Uw + 0.6 * (A1 - 0.5) * 1.7320508; Bv (K) := Vw + 0.6 * (A2 - 0.5) * 1.7320508;   --  均匀分布 ±0.3·√3 ⇒ 标准差 0.3 px
+                  end if;
+               end;
+            end loop;
+         end loop;
+      end Make;
+      Pu, Pv, Bu, Bv : Kinem.Vec (0 .. N_G - 1);
+      Rd : Kinem.Ride_Vec (0 .. N_G - 1);
+      Is_F : Bools;
+      Sig : Long_Float;
+      Settled : Boolean;
+      N_F, N_W, F_Ok, W_Ok, F_Gate, Unk_Idle, Unk_Wide : Natural := 0;
+   begin
+      Eye.F := Fr; Eye.Cx := Cx0; Eye.Cy := Cy0; Eye.Valid := True;   --  这只眼的焦距、主点(针孔,没畸变)
+      Make (True, False, Pu, Pv, Bu, Bv, Is_F);
+      Kinem.Rides_On_Eye (Eye, Pu, Pv, Bu, Bv, Rd, Sig, Settled);
+      for K in 0 .. N_G - 1 loop
+         if Is_F (K) then
+            N_F := N_F + 1;
+            if Rd (K) = Kinem.Rides then
+               F_Ok := F_Ok + 1;
+            end if;
+            if Sqrt ((Bu (K) - Pu (K)) ** 2 + (Bv (K) - Pv (K)) ** 2) < Geom.Trip_Px then
+               F_Gate := F_Gate + 1;
+            end if;
+         else
+            N_W := N_W + 1;
+            if Rd (K) = Kinem.World then
+               W_Ok := W_Ok + 1;
+            end if;
+         end if;
+      end loop;
+      Make (False, False, Pu, Pv, Bu, Bv, Is_F);
+      Kinem.Rides_On_Eye (Eye, Pu, Pv, Bu, Bv, Rd, Sig, Settled);
+      for K in 0 .. N_G - 1 loop
+         if Rd (K) = Kinem.Unknown then
+            Unk_Idle := Unk_Idle + 1;
+         end if;
+      end loop;
+      declare
+         Sig_Turn : Long_Float;
+         N_Wide : Natural := 0;
+      begin
+         Make (True, False, Pu, Pv, Bu, Bv, Is_F);
+         Kinem.Rides_On_Eye (Eye, Pu, Pv, Bu, Bv, Rd, Sig_Turn, Settled);
+         Make (True, True, Pu, Pv, Bu, Bv, Is_F);
+         for K in 0 .. N_G - 1 loop
+            if Is_F (K) then
+               N_Wide := N_Wide + 1;
+            end if;
+         end loop;
+         Kinem.Rides_On_Eye (Eye, Pu, Pv, Bu, Bv, Rd, Sig, Settled);
+         for K in 0 .. N_G - 1 loop
+            if Rd (K) = Kinem.Unknown then
+               Unk_Wide := Unk_Wide + 1;
+            end if;
+         end loop;
+         Check (N_F > 0 and then N_W > 0 and then 50 * (N_F - F_Ok) < N_F and then 50 * (N_W - W_Ok) < N_W,
+                "眼转了一下哪些点长在眼上:手指格点判成长在眼上 " & Codec.Img (F_Ok) & " / " & Codec.Img (N_F) & "、世界格点判成世界 " & Codec.Img (W_Ok) & " / " & Codec.Img (N_W)
+                & "(各错不到 2%;量到的配点噪声 " & Codec.Fmt (Sig_Turn, 2) & " px)");
+         Check (Unk_Idle = N_G, "眼没转:全部格点两种说法分不开(" & Codec.Img (Unk_Idle) & " / " & Codec.Img (N_G) & ")");
+         Check (10 * N_Wide >= 6 * N_G and then Unk_Wide = N_G,
+                "长在眼上的占 " & Codec.Img (N_Wide) & " / " & Codec.Img (N_G) & "(过半):转动拟合成没转 ⇒ 全部分不开(" & Codec.Img (Unk_Wide) & ",照实判不了)");
+         Check (2 * F_Gate < N_F, "🦷 同一批配点按开机认手指的 1 px 门:手指格点只有 " & Codec.Img (F_Gate) & " / " & Codec.Img (N_F) & " 算没挪(旧量法漏掉大半)");
+      end;
    end;
    --  🔴 接触集重写(09-29):托住它要多大的摩擦、每单位重量最少要夹多紧(Contact.Hold)—— 能手算的几条:
    --  ① 两处正对的点接触夹在重心两侧,抬 = 托住单位重量:法向力之和 = 1/μ(每边 1/(2μ));不靠摩擦做不到、靠一点摩擦就做得到(要的摩擦 → 0);
@@ -2822,7 +2957,7 @@ begin
          Fr : Plug.Frame := Fr0;
       begin
          Lockstep.Begin_Hand (0);
-         Zone.Measure (Lk, Mz, 0, 0, Fr, Hz, Ok_Z);
+         Zone.Measure (Lk, Mz, 0, 0, Fr, Hz, Ok_Z, Host => "", Port => 0, Eyes => Geom.Geo_Vectors.Empty_Vector);   --  判哪头张开之前就停(慢的手没停住),用不着配点仪器
          Lockstep.Done;
       end Zone_Hand;
       function Frame_Now return Plug.Frame is

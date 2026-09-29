@@ -18,6 +18,9 @@ package Kinem is
    --  Huber 的门,以量到的 σ 为单位:正态噪声下效率 95% 的那个数(Huber 1964 的约定)。Robust_LM、每根轴起步的网格(Best_Phi)、
    --  ② 定比例都用它 —— 残差一律先除以量到的 σ 再比(09-30 以前 kinem 自己喂的是像素,门 1.0 = "1 像素";jointboot 喂白化的,同一个 1 是 1σ)
    Huber_K : constant := 1.345;
+   --  Tukey 双权的门,以量到的 σ 为单位:门外的残差权为 0(正态噪声下效率 95% 的那个数,Beaton & Tukey 1974 的约定)。
+   --  只在"谁占多数就落到谁那边、另一拨一点都不拽"的地方用(Rides_On_Eye);Huber 门外的点还按 δ/|r| 拽着
+   Tukey_C : constant := 4.685;
    --  一根轴是"转"还是"沿轴走"(平移)是开机扫描量出来的(① 同一批配点按两样各解一次,残差小的那样;09-27 无人机那一半):
    --  转:W = 转轴方向(单位向量),P = 轴上一点,读数差 = 转角(弧度);
    --  走:W = 走的方向 × 每一个读数单位走多远(模型单位 / 读数单位,长短是量出来的),P 不用(0)
@@ -114,9 +117,6 @@ package Kinem is
    function Eye_Pixels (Frames : Frame_Vectors.Vector; Ref : Natural; Cs : Corr_Vectors.Vector; Width : Long_Float) return Px_Vectors.Vector;
    --  配点里去掉从 Eye 这些像素出发的(不管哪一对)
    function Off_Eye (Eye : Px_Vectors.Vector; Cs : Corr_Vectors.Vector) return Corr_Vectors.Vector;
-   --  (U, V) 落在 W × H 画面、Gx × Gy 格子(扫描问的那张)的哪一格,那一格的格点是不是 Eye 里的(长在眼上的 ⇒ 这一处被自己的手挡着)。
-   --  配进一只手的腕眼时落在这儿的不可能是桌面上的点(09-28 H4 / H5:第二只手的桌面点配到第一只手画面里它自己那只白手上的 69 / 29 对,按真值全错、差 300–450 px)
-   function On_Eye_Grid (Eye : Px_Vectors.Vector; U, V : Long_Float; W, H, Gx, Gy : Positive) return Boolean;
    --  Frames(Ref) = 参照帧(扫描起点);Width = 画幅宽(像素,焦距网格按它铺:视场 30°–110°)。
    --  先按 Eye_Pixels 认出长在眼上的像素(记进 M.Eye、Rep.Eye_Px / Eye_Corrs),从它们出发的配点不进解。
    --  Ok = False:能量的轴不够 / 配点不够(Rep 里照实写到哪一步)
@@ -158,6 +158,33 @@ package Kinem is
    type Vec is array (Natural range <>) of Long_Float;
    procedure Robust_LM (X : in out Vec; N_R, N_Rob : Natural; Iters : Positive; Step : Vec;
                         Resid : not null access procedure (X : Vec; R : out Vec); Done : out Boolean);
+
+   --  配点问的格点(09-30 从 Jointboot 挪来:一张格子全仓一份):整幅 Gx × Gy 个格子,问每一格的中心(采样密度,次数;4:3 画幅上 20 px 一格)。
+   --  开机扫描、认长在眼上的像素(Eye_Pixels / On_Eye_Grid)、判抓握通道哪头张开(Zone.Measure)问的都是这一张 —— 同一个像素在哪一对里都是它
+   Gx : constant := 32;
+   Gy : constant := 24;
+   function Grid_U (I : Natural; W : Positive) return Long_Float is ((Long_Float (I) + 0.5) * Long_Float (W) / Long_Float (Gx));
+   function Grid_V (J : Natural; H : Positive) return Long_Float is ((Long_Float (J) + 0.5) * Long_Float (H) / Long_Float (Gy));
+   --  (U, V) 落在 W × H 画面、Gx × Gy 格子的哪一格,那一格的格点是不是 Eye 里的(长在眼上的 ⇒ 这一处被自己的手挡着)。
+   --  配进一只手的腕眼时落在这儿的不可能是桌面上的点(09-28 H4 / H5:第二只手的桌面点配到第一只手画面里它自己那只白手上的 69 / 29 对,按真值全错、差 300–450 px)
+   function On_Eye_Grid (Eye : Px_Vectors.Vector; U, V : Long_Float; W, H : Positive) return Boolean;
+
+   --  眼转了一下,画面里哪些点长在眼上(09-30,判抓握通道哪头张开):同一只眼转之前 / 转之后两帧,问的点 (Pu, Pv)、配到的 (Bu, Bv);
+   --  G = 这只眼量过的焦距、主点、畸变(开机运动学量的)。驱动发的手的位姿就是这只眼的位姿,绕它转 = 眼在原地转:
+   --  世界在画面里按一个转动挪(3 个数:视线 d 转成 R·d 再投回去,畸变照算),和世界多远无关;长在眼上的点(自己的手指、手里的东西)不挪。
+   --  转动按全部点抗野点拟合:先最小二乘,再按 Tukey 双权迭代加权(残差除以当场量的 σ = Mad_Sigma × 残差分量的中位,门 Tukey_C),
+   --  重量 σ、重解到门外的那批残差不再变。门外的权为 0 ⇒ 谁占多数就落到谁那边,另一拨一点都不拽。
+   --  只拟合转动(3 个数)不拟合单应(8 个数):单应能用一个剪切同时凑"下半幅不挪、上半幅挪 64 px"(09-30 合成的眼,手指铺满下面六成画面:
+   --  Huber 拟合停在两边中间、156 个点被一个两边都不是的单应判了;换成 Tukey 还剩 179 个);一个转动凑不出来。
+   --  世界点占多数时它就是世界的挪法,长在眼上的那些是野点。每个点两种说法:没挪 / 按这个转动挪 ⇒ 配到的地方离哪个近就是哪个。
+   --  两种说法本身挨得不到 2·Z·σ(按近的判,判错的概率超过 Z 的单边尾巴)的点 ⇒ Unknown:眼没转、转回了原处、转轴方向附近都这样。
+   --  长在眼上的点占了多数时转动拟合成"没转"⇒ 全是 Unknown,照实判不了,不猜。去不了畸变的点、G 没有焦距 ⇒ 那几个点 / 全部 Unknown。
+   --  Sig_Px = 量到的配点噪声(像素,每个方向);Settled = False:门外那批换了残差条数那么多轮还在变(保险,照实报)。
+   --  原来(Zone.Measure)按灰度判"没跟着变的像素":手一转光照角度就变,手指没挪也整片亮暗十几级(V1B69 2026-09-30 第 1 只手)
+   type Ride is (Rides, World, Unknown);
+   type Ride_Vec is array (Natural range <>) of Ride;
+   procedure Rides_On_Eye (G : Cam_Geo; Pu, Pv, Bu, Bv : Vec; R : out Ride_Vec; Sig_Px : out Long_Float; Settled : out Boolean)
+     with Pre => Pv'Length = Pu'Length and then Bu'Length = Pu'Length and then Bv'Length = Pu'Length and then R'Length = Pu'Length;
 
    --  转动 + 平移 ⇒ 驱动的位姿格式 [x, y, z, qw, qx, qy, qz](四元数取 w ≥ 0 那一半)
    function To_Pose (R : M3; T : V3) return Plug.Arm_Pose;

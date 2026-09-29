@@ -426,7 +426,7 @@ begin
                H := Stored_Hands (Natural (Old));
                Put_Line ("[装] 第" & Natural'Image (A + 1) & " 只手第" & Natural'Image (Jk) & " 号抓握通道:位姿和存的一样 ⇒ 握区照用,不合空");
             else
-               Zone.Measure (L, C.Map, A, Jk, F, H, Ok);
+               Zone.Measure (L, C.Map, A, Jk, F, H, Ok, To_String (C.Inst_Host), C.Inst_Port, Kin_Geo);
                if not Ok then
                   Put_Line ("[身] 第" & Natural'Image (A + 1) & " 只手第" & Natural'Image (Jk) & " 号抓握通道的握区量不了");
                end if;

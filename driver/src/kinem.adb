@@ -3,6 +3,7 @@ with Ada.Unchecked_Deallocation;
 with Ada.Calendar;
 with Ada.Containers.Ordered_Maps;
 with Ada.Containers.Ordered_Sets;
+with Stats;
 package body Kinem is
 
    function Axis_Of (A : Axes; J : Natural) return Axis is
@@ -20,6 +21,8 @@ package body Kinem is
    function Huber_Rho (R : Long_Float) return Long_Float is
      (if abs R <= Huber_K then 0.5 * R ** 2 else Huber_K * (abs R - 0.5 * Huber_K));
    function Huber_W (R : Long_Float) return Long_Float is (if abs R <= Huber_K then 1.0 else Huber_K / abs R);
+   --  Tukey 双权的权(残差以量到的 σ 为单位):门里 (1 − (r/c)²)²,门外 0
+   function Tukey_W (R : Long_Float) return Long_Float is (if abs R >= Tukey_C then 0.0 else (1.0 - (R / Tukey_C) ** 2) ** 2);
 
    --  ── 小向量 ──
    function Cross (A, B : V3) return V3 is
@@ -416,6 +419,127 @@ package body Kinem is
       end loop;
       Free (R0); Free (Rp); Free (Rn); Free (Jc); Free (Wt);
    end Robust_LM;
+
+   procedure Rides_On_Eye (G : Cam_Geo; Pu, Pv, Bu, Bv : Vec; R : out Ride_Vec; Sig_Px : out Long_Float; Settled : out Boolean) is
+      N : constant Natural := Pu'Length;
+      Np : constant := 3;   --  转动向量的三个数(结构)
+      type Dir_Arr is array (Natural range <>) of V3;
+      type Flag_Arr is array (Natural range <>) of Boolean;
+      D : Dir_Arr (0 .. Natural'Max (1, N) - 1);            --  每个问的点的视线(这只眼的相机系,去了畸变)
+      Use_P : Flag_Arr (0 .. Natural'Max (1, N) - 1) := [others => False];   --  去得了畸变的
+      Ix : array (0 .. Natural'Max (1, N) - 1) of Natural := [others => 0];  --  进拟合的第 J 个点是第几个问的点
+      Nu : Natural := 0;   --  进拟合的点数
+      X : Vec (0 .. Np - 1) := [0.0, 0.0, 0.0];   --  从"没转"起
+      --  差分步:转角是弧度、1 的量级以下,前向差分最好的步子 = √ε(数值)
+      Steps : constant Vec (0 .. Np - 1) := [others => Sqrt (Long_Float'Model_Epsilon)];
+      Sig : Long_Float := 1.0;   --  残差除以它(像素);头一遍最小二乘不按它,量出来以后才换成真的
+      procedure Map (Xx : Vec; K : Natural; Hu, Hv : out Long_Float; Front : out Boolean) is
+         Rm : constant M3 := Rodrigues ([Xx (Xx'First), Xx (Xx'First + 1), Xx (Xx'First + 2)]);
+      begin
+         Cam_Pixel (G, Ap (Rm, D (K)), Hu, Hv, Front);
+      end Map;
+   begin
+      R := [others => Unknown];
+      Sig_Px := 0.0;
+      Settled := True;
+      if not (G.F > 0.0) then
+         return;   --  这只眼没有量过的焦距:转动投不回去
+      end if;
+      for I in 0 .. N - 1 loop
+         declare
+            Ok : Boolean;
+         begin
+            D (I) := Cam_Dir (G, Pu (Pu'First + I), Pv (Pv'First + I), Ok);
+            if Ok then
+               Use_P (I) := True;
+               Ix (Nu) := I;
+               Nu := Nu + 1;
+            end if;
+         end;
+      end loop;
+      if 2 * Nu <= Np then
+         return;   --  方程不比转动的数多:解不出、也量不了 σ
+      end if;
+      declare
+         Wt : Vec (0 .. 2 * Nu - 1) := [others => 1.0];   --  每一条残差的权(Tukey;头一遍全是 1 = 最小二乘)
+         --  不加权的残差(像素);转到眼后面去的点(小转动不会有)记成 0 残差、权也给 0
+         procedure Raw (Xx : Vec; Rr : out Vec) is
+            Hu, Hv : Long_Float;
+            Front : Boolean;
+         begin
+            for J in 0 .. Nu - 1 loop
+               Map (Xx, Ix (J), Hu, Hv, Front);
+               if Front then
+                  Rr (Rr'First + 2 * J) := Hu - Bu (Bu'First + Ix (J));
+                  Rr (Rr'First + 2 * J + 1) := Hv - Bv (Bv'First + Ix (J));
+               else
+                  Rr (Rr'First + 2 * J) := 0.0;
+                  Rr (Rr'First + 2 * J + 1) := 0.0;
+               end if;
+            end loop;
+         end Raw;
+         --  进最小二乘的:√权 × 残差 / σ
+         procedure Resid (Xx : Vec; Rr : out Vec) is
+         begin
+            Raw (Xx, Rr);
+            for K in Rr'Range loop
+               Rr (K) := Sqrt (Wt (K - Rr'First)) * Rr (K) / Sig;
+            end loop;
+         end Resid;
+         Rr : Vec (0 .. 2 * Nu - 1);
+         Outside, Prev : Flag_Arr (0 .. 2 * Nu - 1) := [others => False];
+         Done : Boolean;
+         Stopped : Boolean := False;
+      begin
+         --  头一遍最小二乘(权全是 1):世界点占多数时落得离它们近
+         Robust_LM (X, 2 * Nu, 0, Positive'Last, Steps, Resid'Access, Done);
+         for Round in 1 .. 2 * Nu loop   --  保险:门外那批残差每一轮至少换掉一条,换满残差条数那么多轮还在变 ⇒ 照实报
+            Raw (X, Rr);
+            declare
+               Md : constant Long_Float := Median_Abs (Rr);
+            begin
+               if not (Md > 0.0) then
+                  Stopped := True;   --  拟合得分毫不差(合成的无噪声点):没有野点要抗
+                  exit;
+               end if;
+               Sig := Mad_Sigma * Md;
+            end;
+            for K in Rr'Range loop
+               Wt (K) := Tukey_W (Rr (K) / Sig);
+               Outside (K) := Wt (K) = 0.0;
+            end loop;
+            if Round > 1 and then Outside = Prev then
+               Stopped := True;   --  门外那批不再变:上一遍按的就是这批权(门里的权值跟着残差走,门外的是 0)
+               exit;
+            end if;
+            Prev := Outside;
+            Robust_LM (X, 2 * Nu, 0, Positive'Last, Steps, Resid'Access, Done);
+         end loop;
+         Settled := Stopped;
+      end;
+      Sig_Px := Sig;
+      for I in 0 .. N - 1 loop
+         if Use_P (I) then
+            declare
+               Hu, Hv : Long_Float;
+               Front : Boolean;
+               U0 : constant Long_Float := Pu (Pu'First + I);
+               V0 : constant Long_Float := Pv (Pv'First + I);
+               U1 : constant Long_Float := Bu (Bu'First + I);
+               V1 : constant Long_Float := Bv (Bv'First + I);
+            begin
+               Map (X, I, Hu, Hv, Front);
+               if not Front or else Sqrt ((Hu - U0) ** 2 + (Hv - V0) ** 2) < 2.0 * Stats.Z * Sig_Px then
+                  R (R'First + I) := Unknown;   --  两种说法挨得太近:按近的判,判错的概率超过 Z 的单边尾巴
+               elsif Sqrt ((U1 - U0) ** 2 + (V1 - V0) ** 2) < Sqrt ((U1 - Hu) ** 2 + (V1 - Hv) ** 2) then
+                  R (R'First + I) := Rides;
+               else
+                  R (R'First + I) := World;
+               end if;
+            end;
+         end if;
+      end loop;
+   end Rides_On_Eye;
 
    --  ── ① 每根轴单独 ──
    --  一根轴的一组配点(已按帧换成这根轴的转角):θ_a, θ_b = 两帧相对参照的转角
@@ -1783,7 +1907,7 @@ package body Kinem is
       return R;
    end Off_Eye;
 
-   function On_Eye_Grid (Eye : Px_Vectors.Vector; U, V : Long_Float; W, H, Gx, Gy : Positive) return Boolean is
+   function On_Eye_Grid (Eye : Px_Vectors.Vector; U, V : Long_Float; W, H : Positive) return Boolean is
       Iu : constant Integer := Integer (Long_Float'Floor (U * Long_Float (Gx) / Long_Float (W)));
       Iv : constant Integer := Integer (Long_Float'Floor (V * Long_Float (Gy) / Long_Float (H)));
    begin
@@ -1791,9 +1915,9 @@ package body Kinem is
          return False;
       end if;
       declare
-         --  同 Jointboot 问格点的写法(同一个式子 ⇒ 同一个数)
-         Pu : constant Long_Float := (Long_Float (Iu) + 0.5) * Long_Float (W) / Long_Float (Gx);
-         Pv : constant Long_Float := (Long_Float (Iv) + 0.5) * Long_Float (H) / Long_Float (Gy);
+         --  问格点的那一个式子(Grid_U / Grid_V ⇒ 同一个数)
+         Pu : constant Long_Float := Grid_U (Natural (Iu), W);
+         Pv : constant Long_Float := Grid_V (Natural (Iv), H);
       begin
          for P of Eye loop
             if P.U = Pu and then P.V = Pv then

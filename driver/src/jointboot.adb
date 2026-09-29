@@ -213,8 +213,8 @@ package body Jointboot is
       Ok := not Arms.Is_Empty;
    end Find_Arms;
 
-   Gx : constant := 32;   --  格点 32 × 24(整幅,只铺在认出来那一下动过的像素里;采样密度,次数)
-   Gy : constant := 24;
+   Gx : constant := Kinem.Gx;   --  问格点的那张格子(全仓一份,见 Kinem.Grid_U / Grid_V)
+   Gy : constant := Kinem.Gy;
 
    procedure Sweep_All (L : in out Plug.Link; F : in out Plug.Frame; M : Selfmap.Body_Map; Arms : Arm_Vectors.Vector;
                         Host : String; Port : Natural; Dump : String; Ds : out Sweep_Vectors.Vector; Css : out Corr_Set_Vectors.Vector;
@@ -273,8 +273,7 @@ package body Jointboot is
       begin
          for Gyy in 0 .. Gy - 1 loop
             for Gxx in 0 .. Gx - 1 loop
-               Q.Append (Instrument.Match_Pt'(U => (Long_Float (Gxx) + 0.5) * Long_Float (W) / Long_Float (Gx),
-                                              V => (Long_Float (Gyy) + 0.5) * Long_Float (H) / Long_Float (Gy), others => <>));
+               Q.Append (Instrument.Match_Pt'(U => Kinem.Grid_U (Gxx, W), V => Kinem.Grid_V (Gyy, H), others => <>));
             end loop;
          end loop;
          declare
@@ -1182,7 +1181,7 @@ package body Jointboot is
                         Ei : constant Long_Float := Norm ([R (I).Bu - Q (I).U, R (I).Bv - Q (I).V, 0.0]);
                      begin
                         if Ei < Trip_Px and then not (Dst_Arm >= 0 and then Dw > 0 and then Dh > 0
-                                                      and then Kinem.On_Eye_Grid (Worlds (Natural (Dst_Arm)).Model.Eye, R (I).U, R (I).V, Dw, Dh, Gx, Gy))
+                                                      and then Kinem.On_Eye_Grid (Worlds (Natural (Dst_Arm)).Model.Eye, R (I).U, R (I).V, Dw, Dh))
                         then
                            Keep.Append (I); U.Append (R (I).U); V.Append (R (I).V); E.Append (Ei);
                         end if;
@@ -1263,13 +1262,27 @@ package body Jointboot is
          end loop;
       end Add_Arm_Views;
       --  按攒下的点试解:不动的眼(内点数)/ 第 B 只手(相似变换、内点数、残差中位)
+      --  放这只眼只拿世界那只手(第 0 只)自己三角出的点:它们在世界里的位置就是它自己系里的位置,不带任何"放进世界"的误差。
+      --  别的手的点在世界里的位置带着那只手放进世界时的误差,而这个误差不在它们的协方差里(Cov_World 只有三角的那一份)——
+      --  拿它们单独定一只新眼,等于把一个没算进不确定度的错当成量准了的点。它们照样记进 Cam_Obs:一起精修里那只手的放法也是未知数,
+      --  在那里它们既修这只眼、也修那只手。
+      --  (V1B69 2026-09-30:第 2 只手先放进世界,沿两手连线偏了 0.7 单位 ≈ 3.9 cm —— 两只腕眼共同看见的 97% 是远处的墙,墙几乎是一个面,
+      --  "沿连线挪一点、同时转一点"分不出来,只有桌面上那 17 个近点分得出,又被当野点挑掉了;V1B68 的扫描拿掉头顶眼重放一样偏 5.4%。
+      --  第二轮把它的 1512 个点和第 0 只手的 1117 个一起拿来解头顶眼,两拨在头顶眼里差 14 px,门外的过半 ⇒ 照实拒绝 ⇒ 头顶眼没放进世界、
+      --  没有板、没法碰桌面量指尖。只拿第 0 只手的 1117 个:进解 959 个、残差 0.27 px,第 2 只手的点再在一起精修里把它拉回来)
       procedure Fit_Cam (Gt : out Cam_Geo; Rp : out Fixed_Report; Inl : out Natural) is
          Scene : Scene_Pt_Vectors.Vector;
          Sh : Long_Float := 0.0;
          Okf : Boolean;
+         N_Ref : Natural := 0;
       begin
          Gt := No_Geo; Rp := (others => <>); Inl := 0;
-         if Natural (Cam_Obs.Length) < Min_Inl then
+         for X of Cam_Obs loop
+            if X.Pa = 0 then
+               N_Ref := N_Ref + 1;
+            end if;
+         end loop;
+         if N_Ref < Min_Inl then
             return;
          end if;
          declare
@@ -1277,13 +1290,17 @@ package body Jointboot is
             Es : Floats;
          begin
             for X of Cam_Obs loop
-               Es.Append (X.E);
+               if X.Pa = 0 then
+                  Es.Append (X.E);
+               end if;
             end loop;
             Sorting.Sort (Es);
             Sh := Es (Natural (Es.Length) / 2);   --  这只眼里配点的噪声 = 这一次往返差的中位(像素)
          end;
          for X of Cam_Obs loop
-            Scene.Append (Scene_Pt'(Pw => X.Xw, Cov => X.Cw, U => X.U, V => X.V, Sh => Sh, Views => 2));
+            if X.Pa = 0 then
+               Scene.Append (Scene_Pt'(Pw => X.Xw, Cov => X.Cw, U => X.U, V => X.V, Sh => Sh, Views => 2));
+            end if;
          end loop;
          Gt.Cx := Long_Float (Ds (0).World_Img.W) / 2.0; Gt.Cy := Long_Float (Ds (0).World_Img.H) / 2.0; Gt.F := Pin_Fixed_F;   --  焦距一起解(Pin_Fixed_F = 0;离线对照实验才钉)
          Fit_Fixed_Board (Gt, Scene, Rp, Okf);
@@ -3470,8 +3487,7 @@ package body Jointboot is
       end if;
       for Gyy in 0 .. Gy - 1 loop
          for Gxx in 0 .. Gx - 1 loop
-            Q.Append (Instrument.Match_Pt'(U => (Long_Float (Gxx) + 0.5) * Long_Float (A_Img.W) / Long_Float (Gx),
-                                           V => (Long_Float (Gyy) + 0.5) * Long_Float (A_Img.H) / Long_Float (Gy), others => <>));
+            Q.Append (Instrument.Match_Pt'(U => Kinem.Grid_U (Gxx, A_Img.W), V => Kinem.Grid_V (Gyy, A_Img.H), others => <>));
          end loop;
       end loop;
       declare

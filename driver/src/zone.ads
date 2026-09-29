@@ -5,6 +5,7 @@ with Plug;
 with Picture;
 with Selfmap;
 with Table;
+with Geom;
 with Ada.Containers.Vectors;
 package Zone is
    type Lobe is record
@@ -46,7 +47,10 @@ package Zone is
 
    --  合【第 K 个抓握通道】一次(其余通道保持不动),看它扫过哪些像素 = 那一根(或那一组)手指。
    --  一条臂上有几个通道是量出来的:两指手 1 个,五指手 5 个,代码一处都不用改。
-   procedure Measure (L : in out Plug.Link; M : Selfmap.Body_Map; Arm, K : Natural; F : in out Plug.Frame; H : out Hand; Ok : out Boolean);
+   --  Host / Port = 配点仪器(判哪头张开要问转之前 / 转之后格点配到哪;没配仪器 ⇒ 哪头张开量不出,照实说);
+   --  Eyes = 每台相机量过的几何(按相机号;手上那只眼的焦距、主点是开机运动学量的,判哪头张开时拿它把"眼转了多少"投回画面)
+   procedure Measure (L : in out Plug.Link; M : Selfmap.Body_Map; Arm, K : Natural; F : in out Plug.Frame; H : out Hand; Ok : out Boolean;
+                      Host : String; Port : Natural; Eyes : Geom.Geo_Vectors.Vector);
    --  判哪头张开时手绕世界竖直轴(z)转出去的那一下(按通道,纯函数,导出给自检):只有绕 z 转的那个通道(平移三个之后的第三个)有数,
    --  = 64 倍它自己的探针幅度。这只手的那个通道没量过 ⇒ 全零(转不了)
    function Turn_Step (M : Selfmap.Body_Map; Arm : Natural) return Table.Vec;
