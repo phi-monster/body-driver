@@ -4429,6 +4429,102 @@ begin
    end;
 
 
+   --  🔴 LM 阻尼一直往上调到步子挪不动 X 为止(09-30,Kinem.Robust_LM;原来一轮最多调 8 次阻尼、都没降就判"到底了"整个退出):
+   --  r(x) = x⁴ − 1 从 x = 0.01 起 —— 那里斜率只有 4e-6,不加阻尼的一步跳到 2e5,阻尼(1e-3 起、每次 ×10)要到 1e6、第 10 次才第一次降
+   --  ⇒ 要解到 x = 1、交出"收住了"。牙:同一个起点按原来的 8 次(阻尼 1e-3 … 1e4)一步一步算,每一步代价都涨 ⇒ 旧写法停在 0.01 当"到底了"
+   declare
+      procedure Quartic (X : Kinem.Vec; R : out Kinem.Vec) is
+      begin
+         R (R'First) := X (X'First) ** 4 - 1.0;
+      end Quartic;
+      X : Kinem.Vec (0 .. 0) := [0.01];
+      Done : Boolean;
+      Old_Stuck : Boolean := True;   --  原来的 8 次都没降
+   begin
+      declare
+         X0 : constant Long_Float := 0.01;
+         H : constant Long_Float := 1.0e-6;   --  同下面给 Robust_LM 的差分步
+         R0 : constant Long_Float := X0 ** 4 - 1.0;
+         J : constant Long_Float := ((X0 + H) ** 4 - 1.0 - R0) / H;
+         Lam : Long_Float := 1.0e-3;          --  同 Robust_LM 起步的阻尼
+         Up : constant Long_Float := 10.0;    --  同 Robust_LM 的阻尼放大倍数
+      begin
+         for Try in 1 .. 8 loop
+            declare
+               D : constant Long_Float := -J * R0 / (J * J * (1.0 + Lam) + 1.0e-12);   --  同 Robust_LM 的一维:A = J²、B = −J r、对角加 1e-12
+            begin
+               if ((X0 + D) ** 4 - 1.0) ** 2 < R0 ** 2 then
+                  Old_Stuck := False;
+               end if;
+            end;
+            Lam := Lam * Up;
+         end loop;
+      end;
+      Kinem.Robust_LM (X, 1, 0, 100, [1.0e-6], Quartic'Access, Done);
+      Check (Done and then abs (X (0) - 1.0) < 1.0e-6 and then Old_Stuck,
+             "LM 阻尼调到步子挪不动为止:x⁴ − 1 从 0.01 起解到 x = " & Long_Float'Image (X (0)) & (if Done then "、收住了" else "、没收住")
+             & "(要 1 ± 1e-6);原来的 8 次阻尼" & (if Old_Stuck then "每一步都让代价涨,旧写法停在 0.01" else "有一步降了(牙没咬住)"));
+   end;
+   --  🔴 Huber 的门按量到的噪声定(09-30,Kinem.Huber_K;Robust_LM 的调用约定:残差先除以量到的 σ):一维的位置,2000 个样本,
+   --  噪声 σ = 0.02 px(配点很准的相机),一成离群、都偏在 +6σ(0.12 px:在 max(3 px, 3 倍中位)的挑内点门里面,挑不掉)。
+   --  残差除以起点量到的噪声(Mad_Sigma × 起点残差的中位,同 kinem 自己的几处)、门 Huber_K ⇒ 离群的被压下去,偏差 < 0.35σ。
+   --  牙:同一批样本按原来的门"1 像素"(kinem 自己喂像素残差、门 1.0)—— 0.12 px 全在门里,和最小二乘一样,偏差 ≈ 一成 × 6σ = 0.6σ(要 > 0.5σ)
+   declare
+      package FR renames Ada.Numerics.Float_Random;
+      Gen : FR.Generator;
+      N : constant := 2000;
+      S : constant Long_Float := 0.02;
+      Y : Kinem.Vec (0 .. N - 1);
+      Sig : Long_Float := 1.0;
+      X_New, X_Old : Kinem.Vec (0 .. 0);
+      D_New, D_Old : Boolean;
+      procedure R_New (X : Kinem.Vec; R : out Kinem.Vec) is
+      begin
+         for I in 0 .. N - 1 loop
+            R (R'First + I) := (Y (I) - X (X'First)) / Sig;
+         end loop;
+      end R_New;
+      --  旧的门 1 px 换成新约定:残差 × Huber_K 以后门 Huber_K 就落在 1 px(代价差一个常数倍,解一样)
+      procedure R_Old (X : Kinem.Vec; R : out Kinem.Vec) is
+      begin
+         for I in 0 .. N - 1 loop
+            R (R'First + I) := (Y (I) - X (X'First)) * Kinem.Huber_K;
+         end loop;
+      end R_Old;
+   begin
+      FR.Reset (Gen, 20260930);
+      for I in 0 .. N - 1 loop
+         declare
+            A : constant Long_Float := Long_Float'Max (1.0e-12, Long_Float (FR.Random (Gen)));
+            B : constant Long_Float := Long_Float (FR.Random (Gen));
+         begin
+            Y (I) := (if I mod 10 = 0 then 6.0 * S else S * Ada.Numerics.Long_Elementary_Functions.Sqrt (-2.0 * Ada.Numerics.Long_Elementary_Functions.Log (A))
+                                                          * Ada.Numerics.Long_Elementary_Functions.Cos (2.0 * Ada.Numerics.Pi * B));
+         end;
+      end loop;
+      declare
+         M0 : Long_Float := 0.0;
+         Ab : Floats;
+         package Sorting is new F64_Vectors.Generic_Sorting;
+      begin
+         for V of Y loop
+            M0 := M0 + V;
+         end loop;
+         M0 := M0 / Long_Float (N);   --  起点 = 平均(被离群的拉偏)
+         for V of Y loop
+            Ab.Append (abs (V - M0));
+         end loop;
+         Sorting.Sort (Ab);
+         Sig := Kinem.Mad_Sigma * Ab (N / 2);   --  起点量到的噪声
+         X_New := [M0]; X_Old := [M0];
+      end;
+      Kinem.Robust_LM (X_New, N, N, 100, [1.0e-6], R_New'Access, D_New);
+      Kinem.Robust_LM (X_Old, N, N, 100, [1.0e-6], R_Old'Access, D_Old);
+      Check (D_New and then abs X_New (0) < 0.35 * S and then abs X_Old (0) > 0.5 * S,
+             "Huber 的门按量到的噪声定:σ = 0.02 px、一成离群在 +6σ ⇒ 按量到的噪声(" & Codec.Fmt (Sig, 4) & " px)解出的偏差 "
+             & Codec.Fmt (X_New (0) / S, 2) & "σ(要 < 0.35σ);牙:门 1 像素的偏差 " & Codec.Fmt (X_Old (0) / S, 2) & "σ(和最小二乘一样,要 > 0.5σ)");
+   end;
+
    --  🔴 运动学(V1b 第三步,Kinem.Fit):合成的 6 关节胳膊(像 x5:底座转、肩 / 肘 / 腕三根平行的俯仰、腕转、腕滚),手上的眼在参照读数时
    --  离底座 0.6 m、朝前下方看桌面;开机扫描 = 每个关节单独两个方向转到 ±45°(8 格);桌面 3000 个点投进每一格(像素噪声 0.3 px、5% 乱配)。
    --  不给焦距(真 400),只给关节读数 + 配点 ⇒ 焦距要回到 1% 内;全部关节同时随机转 ±30° 的 30 个姿势(没参与拟合),只给关节读数算眼在哪,
@@ -4716,6 +4812,9 @@ begin
                    & " → " & Codec.Fmt (Rep.F, 1) & " · 残差中位 " & Codec.Fmt (Rep.Med_Px, 3) & " px · 多视图 " & Codec.Img (Rep.Mv_Tracks) & " 条轨迹 "
                    & Codec.Img (Rep.Mv_Obs) & " 笔、重投影中位 " & Codec.Fmt (Rep.Mv_Start_Px, 3) & " → " & Codec.Fmt (Rep.Mv_Px, 3) & " px(" & Codec.Img (Rep.Mv_Iters)
                    & " 轮)· 考试中位 " & Codec.Fmt (Emed, 3) & " mm、最大 " & Codec.Fmt (Emax, 3) & " mm" & (if Rep.Flipped then " · 平移反过一次号" else ""));
+         Put_Line ("    运动学·做到不再变:③ 挑内点 " & Codec.Img (Rep.Rounds) & " 轮、量到的噪声 " & Codec.Fmt (Rep.Sig_Px, 3) & " px · ④ " & Codec.Img (Rep.Mv_Passes)
+                   & " 遍(留下那遍 " & Codec.Img (Rep.Mv_Rounds) & " 轮)、量到的噪声 " & Codec.Fmt (Rep.Mv_Sig_Px, 3) & " px(配点加的 0.3)· 碰到保险上限:"
+                   & (if Length (Rep.Unsettled) = 0 then "没有" else To_String (Rep.Unsettled)));
          declare
             T : Unbounded_String;
          begin
@@ -4812,6 +4911,80 @@ begin
             Check (E0x > 3.0 and then E1x < 0.5 and then abs (Mp.F - F_True) < 0.002 * F_True,
                    "运动学·多视图一步把挪开的轴拉回来:起步考试最大 " & Codec.Fmt (E0x, 2) & " mm(要 > 3)⇒ " & Codec.Fmt (E1x, 2) & " mm(要 < 0.5)、焦距 "
                    & Codec.Fmt (Mp.F, 1) & "(真 400,要 0.2% 内)");
+         end;
+         --  🔴 配点噪声从重投影残差怎么量(09-30,Kinem.Track_Points 的 Sig_Px:jointboot 拿它当三角点的协方差进对齐白化):真模型、这一批配点
+         --  (每一笔每个方向 0.3 px 高斯、5% 乱配没挑)、起点那帧出发的轨迹(同驱动)⇒ Sig_Px 要 0.27–0.36 px(乱配把中位抬高约 6%)。
+         --  牙:原来 1.4826 × 二维残差长度的中位 —— 多视图轨迹上长度的中位 = 1.1774σ ⇒ 同一批点投回去算,偏大到 0.5 px 以上(要 > 0.45)
+         declare
+            use Ada.Numerics.Long_Elementary_Functions;
+            Tp : Kinem.Track_Pt_Vectors.Vector;
+            Sg : Long_Float;
+            Lens : Floats;
+            Old_Sig : Long_Float := 0.0;
+            package Sorting is new F64_Vectors.Generic_Sorting;
+         begin
+            Kinem.Track_Points (Truth, Frames, Cs, Only_I => 0, Min_Views => 1, Tracks => Tp, Sig_Px => Sg);
+            --  返回的点投回每一笔那一帧(真模型):同一个起点像素 = 同一条轨迹
+            for C of Cs loop
+               if C.I = 0 and then C.Pt >= 0 then
+                  for T of Tp loop
+                     if T.U = C.Ua and then T.V = C.Va then
+                        declare
+                           Rr : M3;
+                           Tt : V3;
+                           Pc : V3;
+                        begin
+                           Kinem.FK (Truth, Frames (C.J).Q, Rr, Tt);
+                           Pc := Ap (Tr (Rr), [T.X (0) - Tt (0), T.X (1) - Tt (1), T.X (2) - Tt (2)]);
+                           if Pc (2) < 0.0 then
+                              Lens.Append (Sqrt ((Cx + F_True * Pc (0) / (-Pc (2)) - C.Ub) ** 2 + (Cy - F_True * Pc (1) / (-Pc (2)) - C.Vb) ** 2));
+                           end if;
+                        end;
+                        exit;
+                     end if;
+                  end loop;
+               end if;
+            end loop;
+            if not Lens.Is_Empty then
+               Sorting.Sort (Lens);
+               Old_Sig := 1.4826 * Lens (Natural (Lens.Length) / 2);
+            end if;
+            Check (Sg > 0.27 and then Sg < 0.36 and then Old_Sig > 0.45,
+                   "配点噪声从重投影残差量:真的 0.3 px ⇒ Sig_Px " & Codec.Fmt (Sg, 3) & " px(要 0.27–0.36;垂直于对极线那一分量的 Mad_Sigma × 中位)· "
+                   & Codec.Img (Natural (Tp.Length)) & " 条轨迹 " & Codec.Img (Natural (Lens.Length)) & " 笔;牙:原来 1.4826 × 二维长度的中位 = "
+                   & Codec.Fmt (Old_Sig, 3) & " px(要 > 0.45:偏大)");
+         end;
+         --  🔴 ④ 够不够解要数上每条轨迹的远近(09-30,Kinem.Refine_Mv 开头):20 笔各自成一条轨迹(不是起点那帧出发的:一条只一笔)⇒
+         --  行 = 2 × 20 + 约束 13 = 53 < 待解 37 + 20 = 57,解不了 ⇒ 模型原样不动、交回 0 条轨迹。牙:原来只比 2 × 笔数 = 40 > 37 ⇒ 当成解得了
+         declare
+            Cz : Kinem.Corr_Vectors.Vector;
+            Mt : Kinem.Model := Truth;
+            Rz : Kinem.Fit_Report;
+            Np : constant Natural := 3 * Truth.N + 3 * Truth.N + 1;   --  6 根转的轴:方向 3 + 轴上点 3,加对数焦距
+            N_Reg : constant Natural := 2 * Truth.N + 1;
+            Same : Boolean := True;
+         begin
+            for C of Cs loop
+               exit when Natural (Cz.Length) >= 20;
+               if C.I /= 0 and then C.Pt >= 0 then
+                  Cz.Append (C);
+               end if;
+            end loop;
+            Kinem.Refine_Tracks (Frames, Cz, Mt, Rz);
+            for K in 0 .. Natural (Frames.Length) - 1 loop
+               declare
+                  Ra, Rb : M3;
+                  Ta, Tb : V3;
+               begin
+                  Kinem.FK (Truth, Frames (K).Q, Ra, Ta);
+                  Kinem.FK (Mt, Frames (K).Q, Rb, Tb);
+                  Same := Same and then Ta = Tb and then Ra = Rb;
+               end;
+            end loop;
+            Check (Same and then Rz.Mv_Tracks = 0 and then 2 * 20 + N_Reg <= Np + 20 and then 2 * 20 > Np,
+                   "④ 够不够解数上远近:20 条一笔的轨迹 ⇒ 行" & Natural'Image (2 * 20 + N_Reg) & " 不多于待解" & Natural'Image (Np + 20)
+                   & ",模型" & (if Same then "原样不动" else "被改了") & "、交回" & Natural'Image (Rz.Mv_Tracks) & " 条;牙:原来 2 × 笔数"
+                   & Natural'Image (2 * 20) & " > Np" & Natural'Image (Np) & " 就解");
          end;
          --  🔴 长在眼上的像素(09-28 人形 H2 / H3):同一条胳膊、同一批配点,每一对再加 12 × 10 个钉在画面同一处的格点(像腕眼里自己的手:
          --  下半幅中间一块,占全部配点近一半;人形实测 26%;每一笔带 0.3 px 噪声,四分之一再抖 2.2 px = 软手指)⇒ 要:正好认出这 120 个像素、
@@ -4941,6 +5114,82 @@ begin
              "长在眼上的像素:只认出每一对都不挪的 A 和软手指 H(认出 " & Codec.Img (Natural (Eye.Length)) & " 个" & (if Only_Ah then "、就是 A、H" else "") & ");"
              & "一根转轴方向附近的、只一个关节不挪的、交叉对 / 一起动 / 被顶偏的帧里不挪的、相机下游关节里不挪的都不认;从 A、H 出发的 " & Codec.Img (N_A + N_H)
              & " 笔(连交叉对那几笔)都去掉(剩 " & Codec.Img (Natural (Kept.Length)) & " / " & Codec.Img (Natural (Cs.Length)) & ");只动了一个关节的帧认得对");
+   end;
+
+   --  🔴 一组关节读数多于 12 个也不截(09-30:Kinem.Model.Ax 跟着读数个数走;原来按 12 根开死,Fit_World / Single_Joint / Eye_Pixels 都取
+   --  min(12, 读数个数),多出来的关节照样带着眼动,运动学错而且不报)。一组 14 个读数:
+   --  ① 扫第 3 个关节那一格,第 13 个被顶偏 0.01(比 Clean_Tol 大)⇒ 不算"只动了一个关节"(-1);牙:原来只查前 12 个 ⇒ 认成只动了第 3 个;
+   --  ② 格点 E 在第 12、13 个关节各自单独转的格子里都不挪(别的格点都挪)⇒ 认成长在眼上的像素;牙:原来第 12、13 个关节的格子根本不算单独转的格子;
+   --  ③ 14 根轴的模型:只转第 13 根,眼跟着动(FK),反解从零位解回那个位姿(IK,要 < 1e-6)
+   declare
+      Frames : Kinem.Frame_Vectors.Vector;
+      Cs : Kinem.Corr_Vectors.Vector;
+      Q0 : Floats;
+      Dmax : constant Long_Float := Kinem.Clean_Tol (640.0);
+      Old_N : constant Natural := Natural'Min (12, 14);   --  原来最多查几个关节
+      Old_Clean : Boolean := True;
+      Eye : Kinem.Px_Vectors.Vector;
+      M : Kinem.Model;
+      function Q_With (J : Natural; V : Long_Float) return Floats is
+         Q : Floats := Q0;
+      begin
+         Q.Replace_Element (J, V);
+         return Q;
+      end Q_With;
+      Pe, Re : Long_Float := 1.0;
+      Moves : Long_Float := 0.0;
+   begin
+      for J in 0 .. 13 loop
+         Q0.Append (0.0);
+      end loop;
+      declare
+         Q1 : Floats := Q_With (3, 0.1);
+      begin
+         Q1.Replace_Element (13, 0.01);
+         Frames.Append (Kinem.Frame_Info'(Q => Q0, Joint => -1));
+         Frames.Append (Kinem.Frame_Info'(Q => Q1, Joint => 3));
+         for K in 0 .. Old_N - 1 loop
+            if K /= 3 and then abs (Q1 (K) - Q0 (K)) >= Dmax then
+               Old_Clean := False;
+            end if;
+         end loop;
+      end;
+      --  ②:帧 2、3 只转第 12 / 13 个关节,帧 4 只转第 0 个;世界的 10 个格点每一格都挪,E(300, 200)只在帧 2、3 不挪
+      Frames.Append (Kinem.Frame_Info'(Q => Q_With (12, 0.2), Joint => 12));
+      Frames.Append (Kinem.Frame_Info'(Q => Q_With (13, 0.2), Joint => 13));
+      Frames.Append (Kinem.Frame_Info'(Q => Q_With (0, 0.2), Joint => 0));
+      for Fr in 2 .. 4 loop
+         for K in 0 .. 9 loop
+            Cs.Append (Kinem.Corr'(I => 0, J => Fr, Ua => 100.0 + 20.0 * Long_Float (K), Va => 100.0, Ub => 140.0 + 20.0 * Long_Float (K), Vb => 100.0, Pt => -1));
+         end loop;
+         Cs.Append (Kinem.Corr'(I => 0, J => Fr, Ua => 300.0, Va => 200.0, Ub => (if Fr = 4 then 340.0 else 300.2), Vb => 200.0, Pt => -1));
+      end loop;
+      Eye := Kinem.Eye_Pixels (Frames, 0, Cs, 640.0);
+      --  ③
+      M.N := 14; M.Q0 := Q0; M.Valid := True; M.F := 400.0; M.Cx := 320.0; M.Cy := 240.0;
+      for J in 0 .. 13 loop
+         M.Ax (J).W := (if J mod 2 = 0 then [0.0, 0.0, 1.0] else [0.0, 1.0, 0.0]);
+         M.Ax (J).P := [0.05 * Long_Float (J + 1), 0.0, 0.0];
+      end loop;
+      declare
+         Qt, Qs : Floats;
+         Rt, R0 : Geom.M3;
+         Tt, T0 : Geom.V3;
+         Empty : Floats;
+      begin
+         Qt := Q_With (13, 0.5);
+         Kinem.FK (M, Q0, R0, T0);
+         Kinem.FK (M, Qt, Rt, Tt);
+         Moves := Geom.Norm ([Tt (0) - T0 (0), Tt (1) - T0 (1), Tt (2) - T0 (2)]);
+         Kinem.IK (M, Rt, Tt, Q0, Empty, Empty, Qs, Pe, Re);
+      end;
+      Check (Kinem.Single_Joint (Frames, 0, 1, Dmax) = -1 and then Old_Clean
+             and then Natural (Eye.Length) = 1 and then Eye (0).U = 300.0 and then Eye (0).V = 200.0 and then Old_N < 13
+             and then Natural (M.Ax.V.Length) = 14 and then Moves > 0.1 and then Pe < 1.0e-6 and then Re < 1.0e-6,
+             "14 个关节的读数不截:第 13 个被顶偏 ⇒ 不算只动了一个关节(原来只查前" & Natural'Image (Old_N) & " 个 ⇒ "
+             & (if Old_Clean then "认成只动了第 3 个" else "也认出来了(牙没咬住)") & ");只在第 12、13 个关节的格子里不挪的格点认成长在眼上("
+             & Codec.Img (Natural (Eye.Length)) & " 个;原来这两个关节的格子不算);14 根轴:只转第 13 根眼挪 " & Codec.Fmt (Moves, 3)
+             & "、反解差 " & Long_Float'Image (Pe) & " /" & Long_Float'Image (Re));
    end;
 
    --  🔴 运动学·沿轴走的关节(09-27 无人机那一半):合成的龙门架(像箱上的无人机:三个沿世界 x / y / z 走的关节,再绕机身中心 yaw / pitch / roll),
@@ -5157,6 +5406,9 @@ begin
          Put_Line ("    龙门架:配点 " & Natural'Image (Rep.N_Corr) & " · 焦距 " & Codec.Fmt (Rep.F_Start, 1) & " → " & Codec.Fmt (Rep.F_Axes, 1) & " → " & Codec.Fmt (Rep.F, 1)
                    & " · 多视图重投影中位 " & Codec.Fmt (Rep.Mv_Start_Px, 3) & " → " & Codec.Fmt (Rep.Mv_Px, 3) & " px · 考试最大 " & Codec.Fmt (Emax, 3) & " mm、朝向 "
                    & Codec.Fmt (Rmax, 4) & "°");
+         Put_Line ("    龙门架·做到不再变:③ 挑内点 " & Codec.Img (Rep.Rounds) & " 轮、量到的噪声 " & Codec.Fmt (Rep.Sig_Px, 3) & " px · ④ " & Codec.Img (Rep.Mv_Passes)
+                   & " 遍(留下那遍 " & Codec.Img (Rep.Mv_Rounds) & " 轮)、量到的噪声 " & Codec.Fmt (Rep.Mv_Sig_Px, 3) & " px(配点加的 0.3)· 碰到保险上限:"
+                   & (if Length (Rep.Unsettled) = 0 then "没有" else To_String (Rep.Unsettled)));
          Check (Types_Ok and then abs (Rep.F - F_True) < 0.005 * F_True and then Emax < 1.0 and then Rmax < 0.05,
                 "运动学·龙门架(三走三转,像无人机):轴的类型" & (if Types_Ok then "认对" else "认错") & "(转 / 走的残差 px:" & To_String (T) & ")· 焦距 "
                 & Codec.Fmt (Rep.F, 1) & "(真 400,要 0.5% 内)· 扫到的范围里 30 个随机姿势最大 " & Codec.Fmt (Emax, 3) & " mm(要 < 1)、朝向 " & Codec.Fmt (Rmax, 4) & "°(要 < 0.05)"

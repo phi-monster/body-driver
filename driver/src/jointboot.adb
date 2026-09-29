@@ -1527,8 +1527,9 @@ package body Jointboot is
                      end loop;
                      Plane_Res (B, Sx, Rx, Tx, Rr (J), Rr (J + 1), Rr (J + 2));
                   end Resid;
+                  Lm_Done : Boolean;   --  LM 收住了没有(False = 做满 100 次还在降)
                begin
-                  Kinem.Robust_LM (X, N_Res, N_Res, 100, Steps, Resid'Access);
+                  Kinem.Robust_LM (X, N_Res, N_Res, 100, Steps, Resid'Access, Lm_Done);
                   R := Rodrigues ([X (0), X (1), X (2)]); T := [X (3), X (4), X (5)]; S := Exp (X (6));
                end;
             end;
@@ -1818,9 +1819,10 @@ package body Jointboot is
                      begin
                         All_Res (Xx, Rr, Ua, Uc, False, E1, E2, G2);
                      end Resid;
+                     Lm_Done : Boolean;   --  LM 收住了没有(False = 做满 100 次还在降)
                   begin
                      if N_Res > Np then
-                        Kinem.Robust_LM (X, N_Res, N_Res, 100, Steps, Resid'Access);
+                        Kinem.Robust_LM (X, N_Res, N_Res, 100, Steps, Resid'Access, Lm_Done);
                      end if;
                   end;
                end;
