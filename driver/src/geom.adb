@@ -1895,6 +1895,55 @@ package body Geom is
       return [Axis (0) * Ang, Axis (1) * Ang, Axis (2) * Ang];
    end Turn_To;
 
+   function Meet_Sd (Rays : Sight_Vectors.Vector; Sds : Bytes.Floats; P, U : V3) return Long_Float is
+      A : M3 := [others => [others => 0.0]];
+   begin
+      if Natural (Sds.Length) /= Natural (Rays.Length) or else Natural (Rays.Length) < 2 then
+         return Long_Float'Last;
+      end if;
+      for K in 0 .. Natural (Rays.Length) - 1 loop
+         declare
+            R : constant Sight := Rays (K);
+            T : constant Long_Float := (P (0) - R.O (0)) * R.D (0) + (P (1) - R.O (1)) * R.D (1) + (P (2) - R.O (2)) * R.D (2);
+            S : constant Long_Float := Sds (K) * T;   --  这条视线在交点处垂直方向的位置噪声
+         begin
+            if Sds (K) <= 0.0 or else T <= 0.0 then
+               return Long_Float'Last;
+            end if;
+            for I in 0 .. 2 loop
+               for J in 0 .. 2 loop
+                  A (I, J) := A (I, J) + ((if I = J then 1.0 else 0.0) - R.D (I) * R.D (J)) / (S * S);
+               end loop;
+            end loop;
+         end;
+      end loop;
+      declare
+         --  协方差 = A⁻¹;沿 U 的方差 = Uᵀ A⁻¹ U = U · X,X 解 A X = U(奇异 ⇒ Solve3 交零向量 ⇒ 这个方向量不出)。
+         --  先按 A 的迹缩到 1 附近再解(Solve3 的奇异门是绝对数),解完再缩回去
+         Un : constant Long_Float := Norm (U);
+         Uu : constant V3 := (if Un > 0.0 then [U (0) / Un, U (1) / Un, U (2) / Un] else U);
+         Sc : constant Long_Float := (A (0, 0) + A (1, 1) + A (2, 2)) / 3.0;
+         An : M3;
+         X : V3;
+         Var : Long_Float;
+      begin
+         if Sc <= 0.0 then
+            return Long_Float'Last;
+         end if;
+         for I in 0 .. 2 loop
+            for J in 0 .. 2 loop
+               An (I, J) := A (I, J) / Sc;
+            end loop;
+         end loop;
+         X := Solve3 (An, Uu);
+         Var := (Uu (0) * X (0) + Uu (1) * X (1) + Uu (2) * X (2)) / Sc;
+         if Un <= 0.0 or else Var <= 0.0 then
+            return Long_Float'Last;
+         end if;
+         return Sqrt (Var);
+      end;
+   end Meet_Sd;
+
    function Meet (Rays : Sight_Vectors.Vector; Ok : out Boolean; Spread : out Long_Float) return V3 is
       A : M3 := [others => [others => 0.0]];
       B : V3 := [others => 0.0];

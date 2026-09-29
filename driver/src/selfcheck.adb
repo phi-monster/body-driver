@@ -28,7 +28,6 @@ with Selfmap;
 with Learned;
 with Exam;
 with Contact;
-with Contact.Gen;
 with Contact.Grasp;
 with Contact.Hold;
 with Contact.Exec;
@@ -575,6 +574,63 @@ begin
              "顶面补侧壁:8 × 8 个顶面点离面 3 cm ⇒ 只从轮廓那一圈 48 个往下补两层(一共 " & Codec.Img (Natural (Out1.Length)) & " 个,要 160),中间 16 个不补;"
              & "面斜着放 ⇒ " & Codec.Img (Natural (Out2.Length)) & " 个,正中那几个照样不补、补的都在顶面和面之间");
    end;
+   --  🔴 两眼交点有多不准(Geom.Meet_Sd,09-30):视线的角度噪声到交点那么远就是垂直于视线的位置噪声,几条合起来求协方差。
+   --  两条正交的视线(沿 x、沿 y,各离交点 1 单位,角度噪声 0.001)⇒ 沿 x、y 各 0.001、沿 z 0.001/√2;两条都近乎竖直、只差 2° 的视线
+   --  (头顶眼和腕眼都往下看,H53 那种)⇒ 沿竖直方向的不准是横着的几十倍。牙:交点到两条视线的偏差(Spread)在这种时候是 0,看不出它不准
+   declare
+      Rays : Geom.Sight_Vectors.Vector;
+      Sds : Floats;
+      Ok : Boolean;
+      Spread, Sx, Sz, Sv, Sh : Long_Float;
+      P : Geom.V3;
+      Half : constant Long_Float := 0.5 * 2.0 * Ada.Numerics.Pi / 180.0;   --  两条视线夹 2°,各偏竖直 1°
+      use Ada.Numerics.Long_Elementary_Functions;
+   begin
+      Rays.Append (Geom.Sight'(O => [-1.0, 0.0, 0.0], D => [1.0, 0.0, 0.0]));
+      Rays.Append (Geom.Sight'(O => [0.0, -1.0, 0.0], D => [0.0, 1.0, 0.0]));
+      Sds.Append (0.001); Sds.Append (0.001);
+      P := Geom.Meet (Rays, Ok, Spread);
+      Sx := Geom.Meet_Sd (Rays, Sds, P, [1.0, 0.0, 0.0]);
+      Sz := Geom.Meet_Sd (Rays, Sds, P, [0.0, 0.0, 1.0]);
+      Check (Ok and then abs (Sx - 0.001) < 1.0e-9 and then abs (Sz - 0.001 / Sqrt (2.0)) < 1.0e-9,
+             "两眼交点的不准·两条正交视线:沿 x " & Codec.Fmt (Sx, 6) & "(真 0.001)、沿 z " & Codec.Fmt (Sz, 6) & "(真 0.000707)");
+      Rays.Clear;
+      Rays.Append (Geom.Sight'(O => [-Sin (Half), 0.0, Cos (Half)], D => [Sin (Half), 0.0, -Cos (Half)]));
+      Rays.Append (Geom.Sight'(O => [Sin (Half), 0.0, Cos (Half)], D => [-Sin (Half), 0.0, -Cos (Half)]));
+      P := Geom.Meet (Rays, Ok, Spread);
+      Sv := Geom.Meet_Sd (Rays, Sds, P, [0.0, 0.0, 1.0]);
+      Sh := Geom.Meet_Sd (Rays, Sds, P, [1.0, 0.0, 0.0]);
+      Check (Ok and then Spread < 1.0e-9 and then Sv > 20.0 * Sh,
+             "两眼交点的不准·两条近乎竖直的视线:交点到视线的偏差 " & Codec.Fmt (Spread, 9) & "(看着很准),沿竖直不准 " & Codec.Fmt (Sv, 5)
+             & "、横着 " & Codec.Fmt (Sh, 6) & "(竖直是横着的 " & Codec.Fmt (Sv / Sh, 0) & " 倍)");
+      Sds.Clear; Sds.Append (0.001);
+      Check (Geom.Meet_Sd (Rays, Sds, P, [0.0, 0.0, 1.0]) = Long_Float'Last, "两眼交点的不准·噪声条数和视线对不上 ⇒ 量不出");
+   end;
+
+   --  🔴 接触集往下伸看着走(Act.Plan_Descent,09-30;owner 09-29"为啥会有 3mm 这种数字"):悬停离下手处 9 cm,下手时尖比它顶面低 2 cm;
+   --  顶面横着准到 0.2 mm、高低准到 2 mm,尖 1.5 mm,到位差 0.5 mm ⇒ 带子半宽 = 3 × √(0.2² + 2² + 1.5² + 0.5²) mm ≈ 7.7 mm;
+   --  带子里一步 = 手自己的不准 3 × √(1.5² + 0.5²) mm 的一半 ≈ 2.4 mm;先一条命令下到"尖碰到顶面那一层之前一条带子、再留两步空走"处,
+   --  小步探过带子,剩下到下手处一条命令。牙:原来每步 4 倍最小一档、全程小步(C1 那样 19 步;这里按 0.3 mm 一档算 75 步)
+   declare
+      use Ada.Numerics.Long_Elementary_Functions;
+      Floor : constant Long_Float := 0.0003;
+      D : constant Act.Descent := Act.Plan_Descent (0.09, 0.02, 0.0002, 0.002, 1.0, 0.0015, 0.0005, 0.0, Floor);
+      Band_True : constant Long_Float := 3.0 * Sqrt (0.0002 ** 2 + 0.002 ** 2 + 0.0015 ** 2 + 0.0005 ** 2);
+      Step_True : constant Long_Float := 0.5 * 3.0 * Sqrt (0.0015 ** 2 + 0.0005 ** 2);
+      Steps_New : constant Long_Float := 1.0 + (D.Fine_End - D.Fast) / D.Lstep + 1.0;
+      Steps_Old : constant Long_Float := 0.09 / (4.0 * Floor);
+      U : constant Act.Descent := Act.Plan_Descent (0.09, 0.02, 0.0002, Long_Float'Last, 1.0, 0.0015, 0.0005, 0.0, Floor);
+   begin
+      Check (abs (D.Band - Band_True) < 1.0e-12 and then abs (D.Lstep - Step_True) < 1.0e-12
+             and then abs (D.Fast - (0.09 - 0.02 - Band_True - 2.0 * Step_True)) < 1.0e-12 and then abs (D.Fine_End - (0.07 + Band_True)) < 1.0e-12,
+             "接触集往下伸·带子半宽 " & Codec.Fmt (1000.0 * D.Band, 2) & " mm、带子里一步 " & Codec.Fmt (1000.0 * D.Lstep, 2) & " mm、先一条命令下 "
+             & Codec.Fmt (1000.0 * D.Fast, 1) & " mm、小步探到 " & Codec.Fmt (1000.0 * D.Fine_End, 1) & " mm");
+      Check (Steps_New < Steps_Old and then D.Fine_End - D.Fast >= 2.0 * D.Band + 2.0 * D.Lstep - 1.0e-12,
+             "接触集往下伸·要 " & Codec.Fmt (Steps_New, 1) & " 步(原来全程 4 倍最小一档要 " & Codec.Fmt (Steps_Old, 0) & " 步),带子前留够两步空走、小步盖住整条带子");
+      Check (U.Band = Long_Float'Last and then U.Fast = 0.0 and then U.Fine_End = 0.09 and then abs (U.Lstep - Step_True) < 1.0e-12,
+             "接触集往下伸·顶面高低量不出 ⇒ 没有'碰不到它'的那一段,全程小步探");
+   end;
+
    --  🔴 接触集接进执行层(Act.Plan_Contact,09-29):一根 2 cm 宽、12 cm 长(比张口 9 cm 长:顺着长边夹不下)、离面 3 cm 的条沿 x 躺在面上(顶面点间距 2 mm),
    --  x5 那样的两瓣手(眼系两个尖 (±0.045, −0.013, −0.091),指肚宽 1 cm、看得见的厚 2 mm)⇒ 挑出的那一组:合拢方向沿量宽度的 y(不顺着长边 x),
    --  两处接触落在条的两侧(|y| ≈ 1 cm)、法向朝里;把条转 90° 沿 y 放 ⇒ 合拢方向跟着转到 x。身体文件里没有每一瓣的尖 ⇒ 照实说要从零量一次

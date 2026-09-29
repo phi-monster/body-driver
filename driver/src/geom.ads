@@ -2,6 +2,7 @@
 --  原理 = 大拇指测距:相机跟着手挪一段已知的米数(位姿读数说的),看东西在画面里跳了多少像素,两条视线一交就是它在哪。
 --  每具身体要量一次的常数:相机装在手上的朝向(R_ce)、指尖在相机里的位置(Tip)。都由身体自己动一动量出来(指尖那一条要一次尺子/深度)。
 --  相机约定与 USD 一致:-z 朝前,+y 朝上;像素 u = cx + f·x/(-z),v = cy - f·y/(-z)。
+with Bytes;
 with Plug;
 with Ada.Containers.Vectors;
 with Ada.Strings.Unbounded;
@@ -287,6 +288,11 @@ package Geom is
    end record;
    package Sight_Vectors is new Ada.Containers.Vectors (Natural, Sight);
    function Meet (Rays : Sight_Vectors.Vector; Ok : out Boolean; Spread : out Long_Float) return V3;   --  Spread = 交点到各视线的最远距离(米)
+   --  交点沿 U 方向有多不准(世界单位,一倍标准差):第 I 条视线的角度噪声 Sds (I)(弧度 = 那只眼量朝向时的像素残差 ÷ 焦距)
+   --  到交点那么远(t_I)就是垂直于视线的位置噪声 σ_I·t_I;几条视线的最小二乘交点的协方差 = (Σ (I − d dᵀ) / (σ_I t_I)²)⁻¹。
+   --  两条视线近乎平行时(头顶眼和腕眼都近乎竖直地看,交点的远近病态 —— H53 交点在桌面之下 9–28 cm)沿视线那个方向就很不准,照实交出来。
+   --  Sds 的条数和视线对不上、有哪条是 0(那只眼没量过误差)、交点在某只眼背后 ⇒ 量不出,交 Long_Float'Last
+   function Meet_Sd (Rays : Sight_Vectors.Vector; Sds : Bytes.Floats; P, U : V3) return Long_Float;
    procedure Save (Path : String; Gs : Geo_Vectors.Vector);
    procedure Load (Path : String; Gs : in out Geo_Vectors.Vector; N_Cams : Natural; Note : out String);
 end Geom;

@@ -12,26 +12,30 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 SRC="$ROOT/driver/src"
 CEIL="$ROOT/gates_ceiling.txt"
 strip() { sed -E 's#--.*$##' "$1"; }
+# 只数驱动自己:自检(selfcheck)和各种离线 exam 工具是单独的程序,不是身体(按 .gpr 的 Main 认,同 tools/numbers.py;09-30 起 ——
+# 以前连自检一起数,自检里造假数据的 Pts.Clear、角度换算的 Pi / 180.0 都被算成了"身体的闸")
+OFFLINE=$(sed -nE 's/.*for +Main +use *\((.*)\);.*/\1/p' "$ROOT/driver/body_driver.gpr" | tr -d '" ' | tr ',' '\n' | grep -v '^body_driver.adb$')
+drv() { for f in "$SRC"/$1; do b=$(basename "$f"); echo "$OFFLINE" | grep -qx "$b" || echo "$f"; done; }
 
 # ① 身体自己决定停下的地方
 # 🔴 第三种写法:把【这一段要跟的点】整个清空 ⇒ 后面 `if not Pts.Is_Empty` 直接跳过整段,
 #    一推不走而日志全绿。HC 实测连着四段零推(45 推那一段一个"步"都没有),而棘轮当时是绿的 ——
 #    它只认前两种写法。闸不一定写成"停",也可以写成"没活儿干"。
-stops=$(for f in "$SRC"/*.adb; do strip "$f"; done | grep -cE 'Say_Stop *:=|Ok_Pt *:= *False|Pts\.Clear' || true)
+stops=$(for f in $(drv '*.adb'); do strip "$f"; done | grep -cE 'Say_Stop *:=|Ok_Pt *:= *False|Pts\.Clear' || true)
 # ② 伪装成测量的门槛:量 × 系数 / 量 ÷ 系数(排除纯数学 0.0/1.0/2.0 的向量运算无从分辨,一律计入)
-coef=$(for f in "$SRC"/*.adb "$SRC"/*.ads; do strip "$f"; done | grep -oE '[A-Za-z_.]+ *[*/] *[0-9]+\.[0-9]+' | wc -l | tr -d ' ')
+coef=$(for f in $(drv '*.adb') $(drv '*.ads'); do strip "$f"; done | grep -oE '[A-Za-z_.]+ *[*/] *[0-9]+\.[0-9]+' | wc -l | tr -d ' ')
 # 🔴 第三条(HZ 2026-09-15 补):把【脑交上来的整段程序】半路扔掉,也是一种闸,而且前两条看不见它。
 #    实测:脑写了三行,第二行是"记个名字",没记成 ⇒ `Have_Prog := False; return` 把第三行那句
 #    "去球上方"一起扔了 ⇒ 整段一推没走,而 stops 和 coef 两个数都是绿的。
 #    只许两处:Y_Finished(程序自己跑完)和 Y_Broken(编译期退回,动之前、免费)。多一处都是闸。
-disc=$(for f in "$SRC"/*.adb; do strip "$f"; done | grep -cE 'Have_Prog *:= *False' || true)
+disc=$(for f in $(drv '*.adb'); do strip "$f"; done | grep -cE 'Have_Prog *:= *False' || true)
 
 # 🔴 第四条(2026-09-18 补):【编译期宣称"物理上做不到"】也是一种闸,而且前三条一个都看不见它。
 #    实测:plan.adb 里一条"整块比爪口宽 ⇒ 合下去也是空的"把抓剪刀整段挡在动手之前,
 #    而三个棘轮全是绿的 —— 它们只数运行期的停。
 #    LAB 09-13 总规矩:驱动只准因为【量过期 / 依赖失效 / 量不出来】拒绝;
 #    "我物理上做不到"不算理由(owner:"事实不事实的 vlm 难道看不出来吗")。
-phys=$(for f in "$SRC"/*.adb; do strip "$f"; done | grep -cE '张不到|张得开|合下去也是空|够不着|太重|太宽|物理上' || true)
+phys=$(for f in $(drv '*.adb'); do strip "$f"; done | grep -cE '张不到|张得开|合下去也是空|够不着|太重|太宽|物理上' || true)
 
 read -r c_stops c_coef c_disc c_phys < <(cat "$CEIL" 2>/dev/null || echo "999 999 999 999")
 c_phys=${c_phys:-999}

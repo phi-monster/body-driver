@@ -101,4 +101,6 @@ package Selfmap is
    function Jaw_Count (F : Plug.Frame; Arm : Natural) return Natural;   --  这条臂量到几个抓握通道
    function Jaw_All (F : Plug.Frame; Arm : Natural) return Floats;      --  这条臂全部抓握通道此刻的读数
    function Jaw_Index (F : Plug.Frame; Arm : Natural) return Natural;
+   --  Blocked 拿这一段前面两步空走当底(前两步空走之差就是散布):往前压的时候,碰上之前至少要空走这么多步,Blocked 才判得出(结构)
+   Free_Base : constant := 2;
 end Selfmap;

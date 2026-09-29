@@ -364,6 +364,7 @@ package Act is
       Geo_Name : Unbounded_String;        --  这些观测是哪件【点过名的东西】的(按名字记,不按槽:近处重新指一次会换槽,远处那几眼好观测不能因此作废)
       --  它最后一次被量到的世界位置(视线交点 / 我自己挪过的几眼)。手贴近时它在腕眼里糊了、被切了,脑指不出 ⇒ 凭这个走(前提是它没动,并如实说)
       Geo_Pw : Geom.V3 := [others => 0.0];
+      Geo_Pw_Up_Sd : Long_Float := Long_Float'Last;   --  那个位置沿"上"有多不准(两眼交点的几何按各眼的误差算,Geom.Meet_Sd;量不出 = 最大)
       Geo_Pw_Valid : Boolean := False;
       Geo_Pw_Name : Unbounded_String;
       --  我最后一次被一个面顶住的地方:面上的一点(指尖世界位置)和它的法向(指向我这边)。
@@ -378,6 +379,7 @@ package Act is
       Sil_P0 : Geom.V3 := [others => 0.0];   --  面过的那一点 = 它量到的位置
       Sil_Pitch : Long_Float := 0.0;         --  这份点的采样间距(米)
       Sil_Err : Long_Float := 0.0;           --  这份点的预期误差(米)= 那只眼量朝向时的像素残差 ÷ 焦距 × 眼到面的距离:几只眼都看全了它就留误差最小的那份
+      Sil_H_Sd : Long_Float := Long_Float'Last;   --  这份点落的那张面(过它量到的位置)高低有多不准 = 那个位置沿"上"的不准(Geo_Pw_Up_Sd);Sil_Err 只管轮廓横着的误差
       Sil_Rays : Geom.Sight_Vectors.Vector;  --  出这份点的那些视线:碰到它躺的面之后按真高度重投一遍(取点时面的高度可能只是交点估的)
       --  合上时交出去的那个接触集(手里东西的接触点 + 锥);拿住之后锥放开(拿住 = 摩擦够,这就是身体量 μ 的办法)
       Held_Set : Contact.Set;
@@ -435,6 +437,17 @@ package Act is
    --  接触集(09-29 重写):量出来的手在记下的形状上挑一组下手处(导出只为自检)
    procedure Plan_Contact (C : in out Context; F : Plug.Frame; Arm, Cam : Natural; Name : Unbounded_String;
                            Pick : out Contact.Grasp.Candidate; Note : out Unbounded_String; Ok : out Boolean);
+   --  接触集往下伸怎么走(纯函数,导出给自检):悬停时离下手处 Stand;最靠前的尖和它顶面那一层沿进场方向差 Tip_Over(= X_Tip − X_Top,≤ 0 就是尖还没到顶面那一层);
+   --  顶面的不准 = 轮廓横着的 Sil_Err ⊕ 那张面高低的不准 H_Sd 在进场方向上的那一份(An = |进场方向 · 面法向|;H_Sd = Long_Float'Last 表示量不出);
+   --  尖的不准 Tip_Sd、这一次到位还差 Miss、读数噪声 Noise;Floor = 身体量得出的最细那一档。
+   --  交出:Band = 尖碰到它顶面那一层"可能早也可能晚"的那条带子的半宽(Stats.Z 倍合起来的不准;量不出 = Long_Float'Last);
+   --  Lstep = 带子里一步 = 手自己的不准(尖、到位、读数,Stats.Z 倍)÷ Selfmap.Free_Base —— 比手自己的不准还细的步子多不出东西,粗了就丢准头;不细过 Floor;
+   --  Fast = 带子之前先一条命令下多远(再留出 Blocked 当底的那几步;≤ Lstep 就不走这一条);
+   --  Fine_End = 小步探到多深为止(过了顶面那一层的带子,尖就在它两边;再往下到下手处一条命令,Blocked 拿前面小步空走的当底判挡没挡)
+   type Descent is record
+      Band, Lstep, Fast, Fine_End : Long_Float := 0.0;
+   end record;
+   function Plan_Descent (Stand, Tip_Over, Sil_Err, H_Sd, An, Tip_Sd, Miss, Noise, Floor : Long_Float) return Descent;
    procedure Geo_Boot_Stride (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);
    procedure Round (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);
 end Act;
