@@ -114,7 +114,7 @@ package Plug is
    type Reach_Hook is access procedure (Arm : Natural; Pose : Arm_Pose; Pos_Err, Rot_Err : out Long_Float);
    procedure Set_Reach (R : Reach_Hook);
    procedure Reach (Arm : Natural; Pose : Arm_Pose; Pos_Err, Rot_Err : out Long_Float; Ok : out Boolean);
-   --  岔路二(09-29):上一条位姿命令的反解是不是被"到过的范围往外一步"截住了(没解到目标、有关节停在这道界上而那不是记下的尽头):
+   --  到过的范围(09-29):上一条位姿命令的反解是不是被"到过的范围往外一步"截住了(没解到目标、有关节停在这道界上而那不是记下的尽头):
    --  Free = 没截住;Held = 截住了、从那一条以来到过的范围还没长(手还没动起来:命令隔一两拍才起效)⇒ 先别收;
    --  Held_Grown = 截住了、范围长了 ⇒ 同一个目标按此刻的读数再解一次还能往前 ⇒ Selfmap.Go 这一拍就重发(大转跟着手连着走完)。
    --  手停在真的尽头 / 碰上东西 ⇒ 范围不再长 ⇒ 一直是 Held,照常等停下、核尽头。没登记(没有运动学)⇒ Free

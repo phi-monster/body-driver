@@ -91,8 +91,17 @@ package body Selfmap is
       return True;
    end Joints_Arrived;
 
+   function Blocked (Short, Prev, Prev2 : Long_Float; N_Free : Natural; Lstep, Noise : Long_Float) return Boolean is
+      Jit : constant Long_Float := (if N_Free >= 2 then abs (Prev - Prev2) else 0.0);
+   begin
+      if N_Free = 0 then
+         return False;
+      end if;
+      return Short > Prev + Long_Float'Max (Negligible * Lstep, 3.0 * Long_Float'Max (Noise, Jit));
+   end Blocked;
+
    procedure Go (L : in out Plug.Link; M : Body_Map; Arm : Natural; Target : Plug.Arm_Pose; Jaw : Floats;
-                 F : in out Plug.Frame; Delivered : out Table.Vec; Frames : out Natural; Ok : out Boolean; Quick : Boolean := False;
+                 F : in out Plug.Frame; Delivered : out Table.Vec; Frames : out Natural; Ok : out Boolean; Press : Boolean := False;
                  Watch : Watcher := null; Joints : Floats := F64_Vectors.Empty_Vector; Group : Integer := -1;
                  Groups : Ints := Int_Vectors.Empty_Vector; Qs : Plug.Floats_Vectors.Vector := Plug.Floats_Vectors.Empty_Vector;
                  Tol : Long_Float := 0.0; Tol_Rot : Long_Float := 0.0;
@@ -109,8 +118,10 @@ package body Selfmap is
       Prev_All : Plug.Floats_Vectors.Vector;
       Is_Joint : constant Boolean := Group >= 0 or else not Groups.Is_Empty;
       Arrived : Natural := 0;
-      Sub_Frames : Natural := 0;       --  这一条(岔路二重发以后的那一条)走了几拍
-      Still_Frac : constant := 0.01;   --  百分之一(比例,见下)
+      Sub_Frames : Natural := 0;       --  这一条(到过的范围截住后重发的那一条)走了几拍
+      Still_Frac : constant := Negligible;   --  百分之一(比例,见下)
+      Press_Moved : Boolean := False;  --  Press:这一步沿命令方向动起来过
+      Press_Still : Natural := 0;      --  Press:动起来以后连着几拍沿命令方向挪不到这一步的百分之一
    begin
       Delivered := Table.Zero_Vec;
       Frames := 0;
@@ -170,7 +181,7 @@ package body Selfmap is
                Arrived := (if Any_Read and then Arr then Arrived + 1 else 0);
                --  连着两拍都到了目标附近 = 到了;没到目标就等连着两拍不动(被顶住 / 到头)
                exit when Arrived >= 2 or else (Still >= 2 and then Frames >= M.Settle)
-                 or else Frames >= 12 + M.Settle or else (Quick and then Frames >= M.Settle);
+                 or else Frames >= 12 + M.Settle;
             end;
          else
          exit when Arm >= Natural (F.EE.Length);
@@ -206,9 +217,21 @@ package body Selfmap is
             end if;
             Arrived := (if Tol > 0.0 and then Table.Norm (Miss, 3) <= Tol
                           and then Miss (3) ** 2 + Miss (4) ** 2 + Miss (5) ** 2 <= Tol_Rot * Tol_Rot then Arrived + 1 else 0);
+            if Press then
+               declare
+                  Lc : constant Long_Float := Table.Norm (Cmd, 3);
+                  Along : constant Long_Float := (if Lc > 0.0 then (D (0) * Cmd (0) + D (1) * Cmd (1) + D (2) * Cmd (2)) / Lc else 0.0);
+               begin
+                  if abs Along > Long_Float'Max (M.EE_Noise, Still_Frac * Lc) then
+                     Press_Moved := True; Press_Still := 0;
+                  elsif Press_Moved then
+                     Press_Still := Press_Still + 1;
+                  end if;
+               end;
+            end if;
             Prev := F.EE (Arm);
          end;
-         --  岔路二(09-29):反解被"到过的范围 + 往外一步"截住了(Plug.Held_Back)⇒ 不等停稳:手一动、到过的范围一长(Held_Grown),
+         --  到过的范围(09-29):反解被"到过的范围 + 往外一步"截住了(Plug.Held_Back)⇒ 不等停稳:手一动、到过的范围一长(Held_Grown),
          --  这一拍就按此刻的读数重解、重发 —— 目标跟着手往前一步,大转一条 Go 里连着走完(V1B63:等停稳再发,碰指尖 520 → 1012 拍;
          --  快步不重发,一大步只走三成、被认成碰到)。截住了但手还没动起来(Held:命令隔一两拍才起效)⇒ 等,快步也不许先收;
          --  手停在真的尽头 / 碰上东西 ⇒ 范围不再长、一直 Held ⇒ 照常等停下(尽头由 Jointboot 核)。每重发一次拍数重新数;另有一道总拍数上限防万一
@@ -221,7 +244,7 @@ package body Selfmap is
             if Ls = Plug.Held_Grown and then Frames < Cap then
                Send := True; Still := 0; Sub_Frames := 0;
             else
-               exit when Arrived >= 2 or else Stop or else (Quick and then Ls = Plug.Free and then Sub_Frames >= M.Settle) or else Frames >= Cap;
+               exit when Arrived >= 2 or else Stop or else (Press and then Ls = Plug.Free and then Press_Still >= 2) or else Frames >= Cap;
             end if;
          end;
          end if;

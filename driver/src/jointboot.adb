@@ -497,7 +497,7 @@ package body Jointboot is
                                  if Sweep_Stops (Got, Pushed, Sa.Step) then
                                     --  没转到命令的三分之一(比例):到头;别的关节被顶偏超过这一格的三分之一(比例,同上):碰上东西了 —— 都不再往里压。
                                     --  只有"这个关节自己停住、别的关节没被顶偏"才是它这一边的界(反解不过这儿)。碰上东西了 = 手压在桌子 / 东西上,
-                                    --  换个姿势这个关节照样转得过去,不记界(owner 09-28 岔路二:"被桌子挡住这种'转不过去'本来就不是关节尽头";
+                                    --  换个姿势这个关节照样转得过去,不记界(owner 09-28 到过的范围:"被桌子挡住这种'转不过去'本来就不是关节尽头";
                                     --  H4:人形第 0、3 关节往正碰桌记成了界,第二只手手指朝下再往前伸 15 cm 按这两道界解不出来,按仿真的真尽头解得出)
                                     Sa.Why := To_Unbounded_String (if not Sweep_Stop_Is_End (Got, Pushed, Sa.Step)
                                                                    then "碰上东西了:第" & Codec.Img (Kp) & " 个关节被顶偏 " & Codec.Fmt (Pushed, 4) & "(这一格命令 " & Codec.Fmt (Sa.Step, 4) & ";不是关节到头,不记界)"
@@ -523,7 +523,7 @@ package body Jointboot is
                                  if Sa.Done then
                                     Say ("  第" & Codec.Img (A + 1) & " 只手第" & Codec.Img (J) & " 个关节往" & (if Dd > 0 then "正" else "负") & "转了 " & Codec.Img (Sa.K)
                                          & " 格(累计 " & Codec.Fmt (Sa.Off, 3) & ")⇒ 停:" & To_String (Sa.Why));
-                                    --  这一边最后一格命令的步子 = 往到过的范围外最多走的那一步(岔路二:身体开机时一条命令走过的量)
+                                    --  这一边最后一格命令的步子 = 往到过的范围外最多走的那一步(到过的范围:身体开机时一条命令走过的量)
                                     if J < Natural (Ds (A).Step_Lo.Length) then
                                        if Dd < 0 then
                                           Ds (A).Step_Lo.Replace_Element (J, Sa.Step);
@@ -2383,7 +2383,7 @@ package body Jointboot is
       Say ("  对齐用了 " & Codec.Fmt (Long_Float (Ada.Calendar."-" (Ada.Calendar.Clock, T0)), 1) & " 秒 " & Lap);
    end Align;
 
-   --  ── 岔路二(09-29,owner:"已知范围,越用越大"):到过的范围、往外一步、尽头 ──
+   --  ── 到过的范围(09-29,owner:"已知范围,越用越大"):到过的范围、往外一步、尽头 ──
 
    procedure Set_Ranges (D : Sweep_Data; W : in out Arm_World) is
    begin
@@ -2549,7 +2549,7 @@ package body Jointboot is
       Plug.Set_Reach (Reach_Hook'Access);
       Plug.Set_Limit (Held_Back'Access);
       Say ("装上:从此每一帧手的位姿 = 按关节读数算出的腕眼位姿(" & Codec.Img (Natural (St_Worlds.Length)) & " 只手),位姿命令 = 按记下的尽头解出关节目标、"
-           & "每个关节夹到到过的范围往外一步里发(岔路二;问够不够得着只按尽头)");
+           & "每个关节夹到到过的范围往外一步里发(到过的范围;问够不够得着只按尽头)");
    end Install;
 
    --  上一条被截住了没有;截住了,从那一条以来到过的范围长了没有(不止一档)—— 手还没动(命令要隔一两拍才起效)⇒ Held,截住的状态留着;
@@ -2729,7 +2729,7 @@ package body Jointboot is
    end Clamp_Cmd;
 
    --  先只按记下的尽头解出这个位姿要的关节(Pe / Re = 解完还差多少:位置按第一只手的模型单位 = 世界的单位,朝向按弧度)。
-   --  For_Command = 真要发出去(岔路二):每个关节再夹到"到过的范围 + 往外一步"里 —— 每个关节直接朝那个解走、一条命令最多走出到过的地方一步;
+   --  For_Command = 真要发出去(到过的范围):每个关节再夹到"到过的范围 + 往外一步"里 —— 每个关节直接朝那个解走、一条命令最多走出到过的地方一步;
    --  Clamped = 有关节被夹住了(这一条到不了那个解,手走过去、范围长了再往前)。
    --  (09-29 离线接真 Go 查出来的:原来直接在"到过的范围 + 一步"里反解,被夹住的那个关节差的那点由别的关节凑 ——
    --  只转第 4 个关节到 0.8,第 0、2 个关节中途被拉出去 0.23 弧度再转回来;到不了时停在一个扭着的姿势)
@@ -2790,12 +2790,12 @@ package body Jointboot is
                end if;
             end loop;
             Say ("第" & Codec.Img (A + 1) & " 只手:第 " & Codec.Img (Jm) & " 个关节要到 " & Codec.Fmt (Full (Jm), 4) & ",这一条只发到 " & Codec.Fmt (Q (Jm), 4)
-                 & "(到过的范围 + 往外一步)⇒ 手走过去、范围长了就跟着往前重发(岔路二)");
+                 & "(到过的范围 + 往外一步)⇒ 手走过去、范围长了就跟着往前重发(到过的范围)");
          end;
       end if;
       P.Held_Back := Clamped;
       P.Cmd_Glo := W.Got_Lo; P.Cmd_Ghi := W.Got_Hi;
-      --  上一条还没核就来了新的 = 被打断了,不核(岔路二原话)
+      --  上一条还没核就来了新的 = 被打断了,不核(到过的范围原话)
       P.Live := Beyond;
       if Beyond then
          P.Q_Cmd := Q; P.Q_At := St_Last (A); P.Glo := W.Got_Lo; P.Ghi := W.Got_Hi; P.Still := 0;
@@ -3008,7 +3008,7 @@ package body Jointboot is
       end Put_V3;
    begin
       Create (Fo, Out_File, Path);
-      Put_Line (Fo, "kin 4");   --  格式版本:4 = 每个关节到过的范围和往外一步(岔路二,09-29);3 = 每根轴记着是转还是走(09-27 无人机);2 = 不动的眼整份相机几何;更旧的读到 ⇒ 从零量
+      Put_Line (Fo, "kin 4");   --  格式版本:4 = 每个关节到过的范围和往外一步(到过的范围,09-29);3 = 每根轴记着是转还是走(09-27 无人机);2 = 不动的眼整份相机几何;更旧的读到 ⇒ 从零量
       Put_Line (Fo, "key " & To_String (K.Key));
       Put_Line (Fo, "world_cam" & Integer'Image (K.World_Cam));
       Put (Fo, "rw"); Put_M3 (K.Rw); New_Line (Fo);
@@ -3058,7 +3058,7 @@ package body Jointboot is
                Put (Fo, " " & Lim (X));
             end loop;
             New_Line (Fo);
-            --  岔路二:到过的范围(两头)、往外一步(两边)
+            --  到过的范围:到过的范围(两头)、往外一步(两边)
             declare
                procedure Row (Tag : String; V : Floats) is
                begin

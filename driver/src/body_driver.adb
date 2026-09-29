@@ -211,7 +211,7 @@ begin
                if Found (A).Eye < 0 then
                   Put_Line ("[身] 📐 第" & Codec.Img (A + 1) & " 只手上没有眼 ⇒ 这一版量不了它的运动学(要一只看得见它的眼),先不用");
                elsif not Ds (A).Frames.Is_Empty then
-                  --  记下的尽头、到过的范围、往外一步(岔路二,09-29):发命令时反解只在到过的范围往外一步里解,问够不够得着只按尽头
+                  --  记下的尽头、到过的范围、往外一步(到过的范围,09-29):发命令时反解只在到过的范围往外一步里解,问够不够得着只按尽头
                   Jointboot.Set_Ranges (Ds (A), W);
                end if;
                Worlds.Append (W);

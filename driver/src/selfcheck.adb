@@ -531,7 +531,7 @@ begin
                 & " 个位姿;手指厚 4 mm ⇒ 第 1 名离重心 " & (if Fd_T.Is_Empty then "-" else Codec.Fmt (Fd_T (0).Com_Off, 4)) & "(要 < 0.0075)");
       end;
    end;
-   --  🔴 岔路二(Jointboot:到过的范围 + 往外一步、记尽头、碰上东西不记、越过尽头删掉;09-29 owner"已知范围,越用越大"):合成的 6 关节胳膊装上
+   --  🔴 到过的范围(Jointboot:到过的范围 + 往外一步、记尽头、碰上东西不记、越过尽头删掉;09-29 owner"已知范围,越用越大"):合成的 6 关节胳膊装上
    --  (同上面运动学那条的几何),假身体只按关节命令走 —— 第 4 个关节真尽头 0.9 弧度(反解不知道);到过的范围一开始每个关节 ±0.3、往外一步 0.2。
    --  ① 要去一个第 4 个关节得转到 1.3 的位姿:每条命令都只到"到过的范围 + 一步"里,手到了那儿范围长了才再往前(重发的旗子 Held_Back);
    --     走到 0.9 卡住、别的关节都到了 ⇒ 记下这一头(之后问"够不够得着"那个位姿就解不到了);
@@ -542,10 +542,10 @@ begin
    --     读数噪声 1 µm(真 x5 4e-5 m;反解每次重解的数值抖动约 1e-8 弧度,在它下面)——
    --     (a) 要转到 1.3(慢步,等停):先按记下的尽头解出要到的关节、每个关节夹到"到过的范围 + 一步"里发;截住以后手一动、范围一长就重发,
    --         一条 Go 里走到 0.9、停下、记下这一头;拍数 ≤ 走的 9 拍 + 起效 1 拍 + 停下 2 拍 = 12;
-   --     (b) 同样 1.3,快步(不等停):截住时不许先收,照样 12 拍走到 0.9、记下;(c) 要到 0.8:8 + 1 + 2 = 11 拍走到、不记尽头;
+   --     (b) 同样 1.3,按压的那种步(Press:沿命令方向停下就读):截住时不许先收,照样 12 拍走到 0.9、记下;(c) 要到 0.8:8 + 1 + 2 = 11 拍走到、不记尽头;
    --     三条里别的关节一直不动(< 1e-6 弧度)。牙(09-29 离线各拆一处跑过):直接在夹过的范围里反解(c629b87 那一版)⇒
    --     被夹住的那一点由别的关节凑、别的关节被拉出去 0.557 弧度、14 / 14 / 13 拍,红;只在停稳以后才重发(V1B63 那一版)⇒ 27 / 22 / 17 拍,红;
-   --     截住时快步照样先收 ⇒ 快步第 2 拍停在 0.1,红
+   --     截住时 Press 照样先收 ⇒ 第 2 拍停在 0.1,红
    declare
       use Geom;
       use type Plug.Limit_State;
@@ -659,14 +659,14 @@ begin
       Plug.Reach (0, Goal, Pe1, Re1, Okr);
       Check (Okr and then In_Step and then Cmds >= 4 and then Cmds < 40 and then Pe0 < 1.0e-6 and then Re0 < 1.0e-6 and then (Pe1 > 1.0e-4 or else Re1 > 1.0e-4)
              and then abs (Hi_Seen (4) - True_End) < 1.0e-12,
-             "岔路二·大转拆开、卡住那一头记下:要把第 4 个关节转到 1.3(真尽头 0.9、到过 ±0.3、往外一步 0.2)," & Codec.Img (Cmds)
+             "到过的范围·大转拆开、卡住那一头记下:要把第 4 个关节转到 1.3(真尽头 0.9、到过 ±0.3、往外一步 0.2)," & Codec.Img (Cmds)
              & " 条命令、每条都在到过的范围 + 一步里(第 4 个关节最远要到 " & Codec.Fmt (Max_4, 3) & ");停在 0.9 以后记下这一头 ⇒ 问够不够得着:记之前差 "
              & Codec.Fmt (Pe0, 7) & " / " & Codec.Fmt (Re0, 7) & ",记之后 " & Codec.Fmt (Pe1, 4) & " / " & Codec.Fmt (Re1, 4) & " rad");
       --  ③ 读数越过了记下的尽头(真尽头其实更远)⇒ 删掉
       Feed (Q6 (4, 0.95), 3);
       Plug.Reach (0, Goal, Pe2, Re2, Okr);
       Check (Pe2 < 1.0e-6 and then Re2 < 1.0e-6,
-             "岔路二·读数到了 0.95、越过记下的 0.9 ⇒ 那个尽头删掉,那个位姿又够得着了(差 " & Codec.Fmt (Pe2, 7) & " / " & Codec.Fmt (Re2, 7) & ")");
+             "到过的范围·读数到了 0.95、越过记下的 0.9 ⇒ 那个尽头删掉,那个位姿又够得着了(差 " & Codec.Fmt (Pe2, 7) & " / " & Codec.Fmt (Re2, 7) & ")");
       --  ② 正反对照:第 4 个关节要到 0.5(到过 0.3、往外一步正好 0.5),只走到 0.35(不到要往外走的 0.2 的一半)。
       --  用第 4 个(腕转)不用第 2 个:第 1–3 个是三根平行的俯仰轴,第 2 个记了尽头,反解换成手肘翻过去的那个解照样到得了,"够不着了"判不出来
       declare
@@ -681,7 +681,7 @@ begin
          Q := Command (Goal2, Short_J => 4, Short_At => 0.35);                       --  别的关节都到了 = 关节到头
          Plug.Reach (0, Goal2, Pe_E, Re_E, Okr);
          Check (not Q.Is_Empty and then Pe_C < 1.0e-6 and then Re_C < 1.0e-6 and then (Pe_E > 1.0e-4 or else Re_E > 1.0e-4),
-                "岔路二·碰上东西 vs 关节到头:第 4 个关节只走到 0.35(要 0.5)—— 别的关节被顶偏 0.14 ⇒ 不记(还够得着,差 " & Codec.Fmt (Pe_C, 7)
+                "到过的范围·碰上东西 vs 关节到头:第 4 个关节只走到 0.35(要 0.5)—— 别的关节被顶偏 0.14 ⇒ 不记(还够得着,差 " & Codec.Fmt (Pe_C, 7)
                 & ");别的关节都到了 ⇒ 记下 0.35(那个位姿解不到了,差 " & Codec.Fmt (Pe_E, 4) & " / " & Codec.Fmt (Re_E, 4) & " rad)");
       end;
       --  ⑥
@@ -690,7 +690,7 @@ begin
          Mp : Selfmap.Body_Map;
          Fr0 : Plug.Frame;
          Goal_G : Plug.Arm_Pose;
-         Quick_G : Boolean := False;
+         Press_G : Boolean := False;
          Go_Frames : Natural := 0;
          Go_Ok : Boolean := False;
          Body_Q, Act_Q, Pend_Q : Floats;   --  假身体此刻的关节 / 正在走向的目标 / 这一拍收到、下一拍才起效的目标
@@ -701,7 +701,7 @@ begin
             Dl : Table.Vec;
          begin
             Lockstep.Begin_Hand (0);
-            Selfmap.Go (Lk, Mp, 0, Goal_G, Bytes.F64_Vectors.Empty_Vector, Fr, Dl, Go_Frames, Go_Ok, Quick => Quick_G);
+            Selfmap.Go (Lk, Mp, 0, Goal_G, Bytes.F64_Vectors.Empty_Vector, Fr, Dl, Go_Frames, Go_Ok, Press => Press_G);
             Lockstep.Done;
          end Go_Hand;
          --  走一条 Go;返回主线程走了几拍
@@ -709,7 +709,7 @@ begin
             Beats : Natural := 0;
          begin
             Setup;
-            Goal_G := Goal; Quick_G := Quick;
+            Goal_G := Goal; Press_G := Quick;
             Body_Q := Q6 (0, 0.0); Act_Q := Body_Q; Pend_Q := Body_Q;
             Fr0.Joints.Clear; Fr0.Joints.Append (Body_Q);
             Jointboot.Pose_Hook (Fr0);
@@ -773,10 +773,98 @@ begin
          Check (abs (Ea - True_End) < 1.0e-9 and then Ba <= 12 and then (Pe_A > 1.0e-4 or else Re_A > 1.0e-4)
                 and then abs (Eb - True_End) < 1.0e-9 and then Bb <= 12
                 and then abs (Q4c - 0.8) < 1.0e-6 and then Bc <= 11 and then Pe_C < 1.0e-6 and then Re_C < 1.0e-6 and then Max_Other < 1.0e-6,
-                "岔路二·走真的 Go(命令隔一拍起效、每拍最多 0.1 弧度、真尽头 0.9):要 1.3 慢步 ⇒ 一条 Go " & Codec.Img (Ba) & " 拍停在 " & Codec.Fmt (Ea, 3)
-                & "、记下尽头(之后问够不够得着差 " & Codec.Fmt (Re_A, 3) & " rad);快步 ⇒ " & Codec.Img (Bb) & " 拍停在 " & Codec.Fmt (Eb, 3)
+                "到过的范围·走真的 Go(命令隔一拍起效、每拍最多 0.1 弧度、真尽头 0.9):要 1.3 慢步 ⇒ 一条 Go " & Codec.Img (Ba) & " 拍停在 " & Codec.Fmt (Ea, 3)
+                & "、记下尽头(之后问够不够得着差 " & Codec.Fmt (Re_A, 3) & " rad);按压的那种步 ⇒ " & Codec.Img (Bb) & " 拍停在 " & Codec.Fmt (Eb, 3)
                 & ";要 0.8 ⇒ " & Codec.Img (Bc) & " 拍走到 " & Codec.Fmt (Q4c, 4) & "、不记尽头(问 0.85 差 " & Codec.Fmt (Pe_C, 7) & ")(拍数要 ≤ 12 / 12 / 11)"
                 & " · 别的关节最远离开 0 " & Codec.Fmt (Max_Other, 9) & " 弧度(要 < 1e-6)");
+      end;
+      --  ⑦ 压的那一步(Selfmap.Go 的 Press,09-29):沿命令方向停下就读 —— 真的 Go + 锁步里一只假手,眼往下 2 cm,假身体三种:
+      --     (i) 空中:每拍走还差的九成 ⇒ 到了就收(≤ 4 拍);(ii) 被挡住:只走到三成就停,手腕还在每拍转 3e-4 弧度地蠕动
+      --     (V1B50 真值:顶住以后每拍还转约 0.004°)⇒ 沿命令方向连着两拍不挪就读(≤ 6 拍);同一条不按 Press 走要等到上限(≥ 12 拍);
+      --     (iii) 胳膊慢慢漂(每拍只走还差的 5%;V1B65 伸远了跟不上)⇒ 沿命令方向一直在挪,不许提前读(到上限才收)。
+      --     牙:原来的快读(到了量出来的稳定拍数就读)⇒ (iii) 第 5 拍就读、红
+      declare
+         Lk : Plug.Link;
+         Mp : Selfmap.Body_Map;
+         Fr0 : Plug.Frame;
+         Goal_P : Plug.Arm_Pose;
+         Press_P : Boolean := True;
+         Go_Frames : Natural := 0;
+         Go_Ok : Boolean := False;
+         Mode : Natural := 0;
+         Body_Q, Pend_Q, Act_Q, Q0 : Floats;
+         task type Go_Hand;
+         task body Go_Hand is
+            Fr : Plug.Frame := Fr0;
+            Dl : Table.Vec;
+         begin
+            Lockstep.Begin_Hand (0);
+            Selfmap.Go (Lk, Mp, 0, Goal_P, Bytes.F64_Vectors.Empty_Vector, Fr, Dl, Go_Frames, Go_Ok, Press => Press_P, Tol => 0.005, Tol_Rot => 0.0025);
+            Lockstep.Done;
+         end Go_Hand;
+         function Run (M_Mode : Natural; With_Press : Boolean) return Natural is
+            Beats : Natural := 0;
+            Home : constant Plug.Arm_Pose := Pose_Of (Q6 (0, 0.0));
+         begin
+            Setup;
+            Mode := M_Mode; Press_P := With_Press;
+            Goal_P := Home; Goal_P (2) := Home (2) - 0.02;
+            Body_Q := Q6 (0, 0.0); Pend_Q := Body_Q; Act_Q := Body_Q; Q0 := Body_Q;
+            Fr0.Joints.Clear; Fr0.Joints.Append (Body_Q);
+            Jointboot.Pose_Hook (Fr0);
+            Lockstep.Clear;
+            Plug.Lock_Begin;
+            declare
+               Hd : Go_Hand;
+            begin
+               Lockstep.Start (0, Hd'Identity);
+               loop
+                  Lockstep.Run (0);
+                  exit when Lockstep.Finished (0);
+                  Beats := Beats + 1;
+                  Act_Q := Pend_Q;
+                  declare
+                     Mg : constant Plug.Cmd := Plug.Lock_Merged;
+                  begin
+                     if not Mg.Qs.Is_Empty then
+                        Pend_Q := Mg.Qs (0);
+                     end if;
+                  end;
+                  for J in 0 .. 5 loop
+                     declare
+                        Rate : constant Long_Float := (if Mode = 2 then 0.05 else 0.9);   --  每拍走还差的几成(比例)
+                        Nx : Long_Float := Body_Q (J) + Rate * (Act_Q (J) - Body_Q (J));
+                        Lim3 : constant Long_Float := abs (0.3 * (Act_Q (J) - Q0 (J)));   --  被挡住:离起点最多三成(比例)
+                     begin
+                        if Mode = 1 then
+                           Nx := (if J = 5 then Body_Q (J) + 3.0e-4 else Q0 (J) + Long_Float'Max (-Lim3, Long_Float'Min (Lim3, Nx - Q0 (J))));
+                        end if;
+                        Body_Q.Replace_Element (J, Nx);
+                     end;
+                  end loop;
+                  declare
+                     Ff : Plug.Frame;
+                  begin
+                     Ff.Joints.Append (Body_Q);
+                     Jointboot.Pose_Hook (Ff);
+                     Plug.Lock_Feed (Ff);
+                  end;
+               end loop;
+            end;
+            Plug.Lock_End;
+            Lockstep.Clear;
+            return Beats;
+         end Run;
+         B1, B2, B2n, B3 : Natural;
+      begin
+         Mp.Settle := 5; Mp.EE_Noise := 1.0e-6; Mp.Rot_Noise := 1.0e-6;
+         B1 := Run (0, True);
+         B2 := Run (1, True);
+         B2n := Run (1, False);
+         B3 := Run (2, True);
+         Check (B1 <= 4 and then B2 <= 6 and then B2n >= 12 and then B3 >= 12 + Mp.Settle,
+                "压的那一步(Go 的 Press):空中 " & Codec.Img (B1) & " 拍到(要 ≤ 4);被挡住、手腕还在蠕动 ⇒ " & Codec.Img (B2)
+                & " 拍就读(要 ≤ 6;不按 Press 要 " & Codec.Img (B2n) & " 拍);胳膊慢慢漂 ⇒ " & Codec.Img (B3) & " 拍才收(要 ≥ " & Codec.Img (12 + Mp.Settle) & ",不许提前读)");
       end;
       Plug.Set_Hooks (null, null); Plug.Set_Reach (null); Plug.Set_Limit (null);
       --  ④ 纯函数
@@ -804,7 +892,7 @@ begin
          Qc := Q6 (0, Got0 + Step);
          V4 := Jointboot.Judge_End (Qc, Qa, Qn, Glo, Ghi, Stp, Stp, Tol, Jx, Hs);
          Check (V1 = Jointboot.Ambiguous and then V2 = Jointboot.Reached and then V3 = Jointboot.Reached and then V4 = Jointboot.End_Hit,
-                "岔路二·判尽头:两个关节都要到范围外、都没走到一半 ⇒ 分不清是哪一个(" & V1'Image & ",不记);只出范围半档(" & Codec.Fmt (0.5 * Tol, 5)
+                "到过的范围·判尽头:两个关节都要到范围外、都没走到一半 ⇒ 分不清是哪一个(" & V1'Image & ",不记);只出范围半档(" & Codec.Fmt (0.5 * Tol, 5)
                 & ")⇒ 当在范围里、到了(" & V2'Image & ");只多要 0.05(不到半步)、只走到 0.31 ⇒ 不核(" & V3'Image & ",V1B64 那种假尽头不记);"
                 & "多要一整步、同样只到 0.31 ⇒ " & V4'Image & "(记)");
       end;
@@ -830,10 +918,10 @@ begin
          Jointboot.Set_Ranges (D, W);
          Check (W.Hi (1) = 0.25 and then W.Lo (1) = Long_Float'First and then W.Hi (0) = Long_Float'Last and then W.Got_Lo (1) = -0.4 and then W.Got_Hi (1) = 0.25
                 and then W.Got_Lo (0) = 0.0 and then W.Step_Lo (1) = 0.1 and then W.Step_Hi (1) = 0.05 and then W.Eye_W = 640,
-                "岔路二·开机扫描 ⇒ 第 1 个关节往正是关节到头停的:尽头 0.25、往负没尽头;到过的范围 [-0.4, 0.25];往外一步 0.1 / 0.05;画幅 640");
+                "到过的范围·开机扫描 ⇒ 第 1 个关节往正是关节到头停的:尽头 0.25、往负没尽头;到过的范围 [-0.4, 0.25];往外一步 0.1 / 0.05;画幅 640");
       end;
    end;
-   --  🔴 扫描时碰上东西不是关节尽头(Jointboot.Sweep_Stops / Sweep_Stop_Is_End;09-28 H4 + owner 岔路二):用在线量到的数 ——
+   --  🔴 扫描时碰上东西不是关节尽头(Jointboot.Sweep_Stops / Sweep_Stop_Is_End;09-28 H4 + owner 定的"到过的范围"):用在线量到的数 ——
    --  H4 人形第 0 关节往正:这一格命令 0.2011 走满、第 5 关节被顶偏 0.139 ⇒ 停、不记界;x5 V1B59 第 1 关节往负:命令 0.2602 只到 0.0822、别的关节偏 0.001 ⇒ 停、记界;
    --  关节自己没转到三分之一、同时别的关节被顶偏 ⇒ 仍是碰上东西、不记界;走满、谁也没被顶 ⇒ 不停
    Check (Jointboot.Sweep_Stops (0.2011, 0.139, 0.2011) and then not Jointboot.Sweep_Stop_Is_End (0.2011, 0.139, 0.2011)
@@ -841,6 +929,31 @@ begin
           and then Jointboot.Sweep_Stops (0.02, 0.139, 0.2011) and then not Jointboot.Sweep_Stop_Is_End (0.02, 0.139, 0.2011)
           and then not Jointboot.Sweep_Stops (0.2, 0.001, 0.2011),
           "扫描停下记不记界:碰桌(别的关节被顶偏 0.139)停、不记界;x5 真到头(实到 0.0822 / 0.2602、别的只偏 0.001)停、记界;自己停住又顶偏别人仍不记;走满没顶偏不停");
+   --  🔴 碰到没有(Selfmap.Blocked;09-29 台架,V1B66 满精度的数):
+   --  ① V1B66 第 2 只手头一下的轻碰:第一档空走少走 0.00086、第二档已经压着 0.00578 ⇒ 第二档认出(牙:旧的"前两档平均当底、两档之差当抖动"
+   --     ⇒ 底 0.00332、门 0.0181,后面 9 档最多 0.01266,一档都认不出);② 空走的小步差一丝(0.001430 → 0.001439)⇒ 不认(牙:旧的
+   --     "第一步 + 3 × 静止噪声 0"⇒ 认成碰到,V1B60 / V1B65 的虚认);③ 碰上的小步 0.00718(空走 0.00163)⇒ 认出;④ 第一步没有可比的 ⇒ 不认;
+   --  ⑤ 读数噪声 1e-3 ⇒ 多少走 2e-3 不认、4e-3 认;⑥ 前两步空走之差 0.0006 ⇒ 门跟着放宽
+   declare
+      Old_Base : constant Long_Float := 0.5 * (0.00086 + 0.00578);
+      Old_Gate : constant Long_Float := Old_Base + 3.0 * abs (0.00578 - 0.00086);
+      Later : constant array (1 .. 9) of Long_Float := [0.00971, 0.01053, 0.01110, 0.01163, 0.01191, 0.01218, 0.01239, 0.01255, 0.01266];
+      Old_Miss : Boolean := True;
+   begin
+      for X of Later loop
+         if X > Old_Gate then
+            Old_Miss := False;
+         end if;
+      end loop;
+      Check (Selfmap.Blocked (0.00578, 0.00086, 0.0, 1, 0.0135, 0.0) and then Old_Miss
+             and then not Selfmap.Blocked (0.001439, 0.001430, 0.001425, 2, 0.054, 0.0) and then 0.001439 > 0.001430
+             and then Selfmap.Blocked (0.00718, 0.00163, 0.00160, 2, 0.054, 0.0)
+             and then not Selfmap.Blocked (0.5, 0.0, 0.0, 0, 0.054, 0.0)
+             and then not Selfmap.Blocked (0.0036, 0.0016, 0.0016, 2, 0.054, 1.0e-3) and then Selfmap.Blocked (0.0056, 0.0016, 0.0016, 2, 0.054, 1.0e-3)
+             and then not Selfmap.Blocked (0.0030, 0.0016, 0.0010, 2, 0.054, 0.0) and then Selfmap.Blocked (0.0040, 0.0016, 0.0010, 2, 0.054, 0.0),
+             "碰到没有(Blocked):V1B66 轻碰第二档已压着 0.00578 ⇒ 认出(旧的两档平均当底 ⇒ 门 " & Codec.Fmt (Old_Gate, 5) & ",后面 9 档都认不出);"
+             & "空走差一丝 0.001430 → 0.001439 ⇒ 不认(旧的门 = 第一步 ⇒ 认成碰到);碰上的小步 0.00718 ⇒ 认出;第一步不判;噪声大、空走抖得大 ⇒ 门跟着放宽");
+   end;
    --  🔴 抓握通道带不带手指是量出来的(Act.Has_Fingers;09-28 DR1 / DR2:无人机开机说了"握区量不了",干活时照样列两瓣手指一组爪心):
    --  一条臂一个抓握通道,两台相机的握区都没量成 ⇒ 没手指;其中一台量成 ⇒ 有;两条臂只有第 2 条量成 ⇒ 第 1 条没有、第 2 条有、整具有
    declare
@@ -6947,7 +7060,7 @@ begin
                W.Model.Ax (J).Slide := J = 1;   --  一根"走"的(09-27 无人机):类型也要原样回来
                W.Lo.Append (if J = 2 then Long_Float'First else -0.5 - Long_Float (J));
                W.Hi.Append (if J = 3 then Long_Float'Last else 0.5 + Long_Float (J));
-               W.Got_Lo.Append (-0.25 - 0.01 * Long_Float (J)); W.Got_Hi.Append (0.35 + 0.02 * Long_Float (J + A));   --  岔路二:到过的范围、往外一步
+               W.Got_Lo.Append (-0.25 - 0.01 * Long_Float (J)); W.Got_Hi.Append (0.35 + 0.02 * Long_Float (J + A));   --  到过的范围:到过的范围、往外一步
                W.Step_Lo.Append (0.0123 * Long_Float (J + 1)); W.Step_Hi.Append (0.0456 * Long_Float (J + 1));
             end loop;
             W.Eye_W := 8;
