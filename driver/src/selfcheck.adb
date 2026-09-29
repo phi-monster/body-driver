@@ -4824,6 +4824,27 @@ begin
                 & " · 标记对不上号 ⇒ 不认、不挪" & (if S_Ok then "" else "(错)")
                 & " · 5 mm 小东西标成找不到照样挡 ⇒ 落点离它 " & Codec.Fmt (Flat (Lb), 3) & " m" & (if B_Ok then "" else "(错)"));
       end;
+      --  另一瓣落在没量过的那半(V1B70 2026-09-30:第 1 只手第 2 瓣落在开机时没量过的那块 —— 电子琴上):压的那一瓣落在 (0, 0.04) m(整圈在有点那半里),
+      --  另一瓣落在 (0, −0.01) m(y < 0,没有板点;两瓣隔 5 cm,有点那半只有 14.4 cm 深:隔得更远就没有两处都整圈在里面的地方)
+      --  ⇒ 要挪到另一瓣的落点也整圈在有点那半里:挪了以后它的 y ≥ R − 半格。
+      --  🦷 原来只要压的那一瓣整圈在里面、连线旁边没有高出面的板点(没量过的地方没有板点 ⇒ 查不出东西):同一块板只给压的那一瓣 ⇒ 原地就收
+      declare
+         Lp2, Lp1 : Geom.V3_Vectors.Vector;
+         D2, D1 : Geom.V3_Vectors.Vector;
+         Other_Y : Long_Float := -99.0;
+      begin
+         Lp2.Append (Geom.V3'[0.0, 0.04, Z0]);
+         Lp2.Append (Geom.V3'[0.0, -0.01, Z0]);
+         Lp1.Append (Geom.V3'[0.0, 0.04, Z0]);
+         Act.Board_Free_Spots (Half, Lp2, Tb, Rw, D2);
+         Act.Board_Free_Spots (Half, Lp1, Tb, Rw, D1);
+         if not D2.Is_Empty then
+            Other_Y := -0.01 + D2 (0) (1);
+         end if;
+         Check (not D2.Is_Empty and then Other_Y >= Rw - 0.5 * Cell and then not D1.Is_Empty and then Geom.Norm (D1 (0)) = 0.0,
+                "另一瓣落在没量过的那半 ⇒ 挪到它的落点也在量过的桌面里(挪了以后它在 y = " & Codec.Fmt (Other_Y, 3) & " m,要 ≥ " & Codec.Fmt (Rw - 0.5 * Cell, 3)
+                & ")· 🦷 只看压的那一瓣(原来的判法)⇒ 原地就收(挪 " & (if D1.Is_Empty then "-" else Codec.Fmt (Geom.Norm (D1 (0)), 3)) & " m)");
+      end;
    end;
    --  🔴 几只手按拍对齐(Lockstep + Plug.Lock_*,09-28 PLAN ⑧ (g)):两只假手,第 1 只走 3 条(第 0 组关节目标 1、2、3)、第 2 只走 5 条(第 1 组 11–15),
    --  每一条走 Selfmap.Go(发命令的只有这一处;假帧里没有读数 ⇒ 等满两拍就算停)⇒ 一共 10 拍(不是 6 + 10 = 16 拍:两只手同时走);
