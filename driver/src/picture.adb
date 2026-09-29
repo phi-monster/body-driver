@@ -7,6 +7,82 @@ package body Picture is
 
    function Is_Nan (X : Long_Float) return Boolean is (X /= X);
 
+   --  全仓同一个置信倍数:3σ(单侧尾 1 − Φ(3) ≈ 0.135%;同 act.adb 的 Sigma_Mult、geom 的 3 倍门)
+   Conf_K : constant := 3.0;
+
+   --  标准正态的上侧尾 1 − Φ(z),z ≥ 0。Φ(z) − ½ = φ(z)·(z + z³/3 + z⁵/(3·5) + …):一项一项加,加到再加和也不变为止
+   function Upper_Tail (Z : Long_Float) return Long_Float is
+      Term : Long_Float := Z;
+      Sum : Long_Float := 0.0;
+      Odd : Long_Float := 1.0;   --  这一项分母里最后那个奇数
+   begin
+      while Sum + Term /= Sum loop
+         Sum := Sum + Term;
+         Odd := Odd + 2.0;
+         Term := Term * Z * Z / Odd;
+      end loop;
+      return 0.5 - Exp (-0.5 * Z * Z) / Sqrt (2.0 * Ada.Numerics.Pi) * Sum;
+   end Upper_Tail;
+
+   --  标准正态的分位 Φ⁻¹(P),½ ≤ P < 1:先把上界翻倍到够,再二分,分到中点和一头重合(再分也不变)为止
+   function Normal_Quantile (P : Long_Float) return Long_Float is
+      Lo : Long_Float := 0.0;
+      Hi : Long_Float := 1.0;
+      Mid : Long_Float;
+   begin
+      while Upper_Tail (Hi) > 1.0 - P loop
+         Hi := 2.0 * Hi;
+      end loop;
+      loop
+         Mid := 0.5 * (Lo + Hi);
+         exit when Mid <= Lo or else Mid >= Hi;
+         if Upper_Tail (Mid) > 1.0 - P then
+            Lo := Mid;
+         else
+            Hi := Mid;
+         end if;
+      end loop;
+      return Mid;
+   end Normal_Quantile;
+
+   --  一块像素的形状:形心、各向 σ、主轴、伸长比(三处量块的地方共用这一份)。
+   --  每个像素当成一个单位方块,不当成一个点:二阶矩各加 1/12(单位方块沿一条轴的方差,数学)。
+   --  这样一像素宽、ℓ 长的线伸长比 = ℓ,两像素宽的 = ℓ/2(就是长宽比),短轴永远不为零。
+   --  原来按点算:一像素宽的线短轴为零,伸长比记成哨兵 1000,两像素宽的约 ℓ/√3 —— 进了 act.adb 的"像不像",宽一个像素就被当成完全不同的东西
+   procedure Fill_Shape (R : in out Region; Cnt : Natural; Sx, Sy, Sxx, Syy, Sxy : Long_Float; W, H : Natural) is
+      C : constant Long_Float := Long_Float (Cnt);
+      Mx : constant Long_Float := Sx / C;
+      My : constant Long_Float := Sy / C;
+      Pix : constant Long_Float := 1.0 / 12.0;
+      Vxx : constant Long_Float := Long_Float'Max (0.0, Sxx / C - Mx * Mx) + Pix;
+      Vyy : constant Long_Float := Long_Float'Max (0.0, Syy / C - My * My) + Pix;
+      Vxy : constant Long_Float := Sxy / C - Mx * My;
+      Tr : constant Long_Float := Vxx + Vyy;
+      Det : constant Long_Float := Vxx * Vyy - Vxy * Vxy;
+      Disc : constant Long_Float := Long_Float'Max (0.0, 0.25 * Tr * Tr - Det);
+      L1 : constant Long_Float := 0.5 * Tr + Sqrt (Disc);
+      --  小特征值 ≥ 1/12(协方差加上 1/12 倍单位阵),夹在这个数学下界上只防舍入
+      L2 : constant Long_Float := Long_Float'Max (Pix, 0.5 * Tr - Sqrt (Disc));
+      Ax, Ay : Long_Float;
+   begin
+      R.Count := Cnt;
+      R.Cu := Mx / Long_Float (W);
+      R.Cv := My / Long_Float (H);
+      R.Sig_U := Sqrt (Vxx) / Long_Float (W);
+      R.Sig_V := Sqrt (Vyy) / Long_Float (H);
+      --  主轴 = 协方差最大特征值的特征向量(三种情形都给出非零向量)
+      if abs Vxy > 1.0e-12 then
+         Ax := L1 - Vyy; Ay := Vxy;
+      elsif Vxx >= Vyy then
+         Ax := 1.0; Ay := 0.0;
+      else
+         Ax := 0.0; Ay := 1.0;
+      end if;
+      R.Au := Ax / Sqrt (Ax * Ax + Ay * Ay);
+      R.Av := Ay / Sqrt (Ax * Ax + Ay * Ay);
+      R.Elong := Sqrt (L1 / L2);
+   end Fill_Shape;
+
    function Min_Pixels (W, H : Natural) return Natural is
       --  3e-5 是画幅的比例(无量纲):比这还小的斑块读不出形状
       V : constant Long_Float := Long_Float (W * H) * 3.0e-5;
@@ -204,36 +280,9 @@ package body Picture is
             if A1.Cnt >= Natural'Max (1, Min_Count) then
                declare
                   R : Region;
-                  C : constant Long_Float := Long_Float (A1.Cnt);
-                  Mx : constant Long_Float := A1.Sx / C;
-                  My : constant Long_Float := A1.Sy / C;
-                  Vxx : constant Long_Float := Long_Float'Max (0.0, A1.Sxx / C - Mx * Mx);
-                  Vyy : constant Long_Float := Long_Float'Max (0.0, A1.Syy / C - My * My);
-                  Vxy : constant Long_Float := A1.Sxy / C - Mx * My;
-                  Tr : constant Long_Float := Vxx + Vyy;
-                  Det : constant Long_Float := Long_Float'Max (0.0, Vxx * Vyy - Vxy * Vxy);
-                  Disc : constant Long_Float := Long_Float'Max (0.0, 0.25 * Tr * Tr - Det);
-                  L1 : constant Long_Float := 0.5 * Tr + Sqrt (Disc);
-                  L2 : constant Long_Float := Long_Float'Max (0.0, 0.5 * Tr - Sqrt (Disc));
-                  Ax, Ay, Ln : Long_Float;
                begin
                   R.X0 := A1.X0; R.Y0 := A1.Y0; R.X1 := A1.X1; R.Y1 := A1.Y1;
-                  R.Count := A1.Cnt;
-                  R.Cu := Mx / Long_Float (W); R.Cv := My / Long_Float (H);
-                  R.Sig_U := Sqrt (Vxx) / Long_Float (W); R.Sig_V := Sqrt (Vyy) / Long_Float (H);
-                  if abs Vxy > 1.0e-12 then
-                     Ax := L1 - Vyy; Ay := Vxy;
-                  elsif Vxx >= Vyy then
-                     Ax := 1.0; Ay := 0.0;
-                  else
-                     Ax := 0.0; Ay := 1.0;
-                  end if;
-                  Ln := Sqrt (Ax * Ax + Ay * Ay);
-                  if Ln > 1.0e-12 then
-                     R.Au := Ax / Ln; R.Av := Ay / Ln;
-                  end if;
-                  --  短轴为零时伸长比记成一个大数(无量纲)
-                  R.Elong := (if L2 > 1.0e-9 then Sqrt (L1 / L2) else 1.0e3);
+                  Fill_Shape (R, A1.Cnt, A1.Sx, A1.Sy, A1.Sxx, A1.Syy, A1.Sxy, W, H);
                   Out_R.Append (R);
                end;
             end if;
@@ -301,11 +350,13 @@ package body Picture is
             for V of Samples loop
                Absd.Append (abs (V - Mid));
             end loop;
-            --  中位绝对偏差可能是 0(量化)⇒ 往上取分位数直到拿到正的尺度;1.4826 = MAD→σ 的固定换算,无量纲
+            --  中位绝对偏差可能是 0(量化)⇒ 往上取分位数直到拿到正的尺度。
+            --  正态下 |x − 中位| 的 q 分位 = σ·Φ⁻¹((1+q)/2) ⇒ σ = 分位 ÷ Φ⁻¹((1+q)/2):q = 0.5 时就是常说的 1.4826 × 中位绝对偏差。
+            --  🔴 原来每一档都乘 1.4826(只对 q = 0.5 成立):q = 0.75 / 0.9 / 0.99 时 σ 被放大 1.71 / 2.43 / 3.82 倍,门偏高,小东西切不出来
             Sigma := 0.0;
             for Q of Quantiles loop
                declare
-                  V : constant Long_Float := Quantile (Absd, Q) * 1.4826;
+                  V : constant Long_Float := Quantile (Absd, Q) / Normal_Quantile (0.5 * (1.0 + Q));
                begin
                   if V > 0.0 then
                      Sigma := V;
@@ -554,44 +605,9 @@ package body Picture is
                if Cnt >= Natural'Max (1, Min_Count) then
                   declare
                      R : Region;
-                     C : constant Long_Float := Long_Float (Cnt);
-                     Mx : constant Long_Float := Sx / C;
-                     My : constant Long_Float := Sy / C;
-                     Vxx : constant Long_Float := Long_Float'Max (0.0, Sxx / C - Mx * Mx);
-                     Vyy : constant Long_Float := Long_Float'Max (0.0, Syy / C - My * My);
-                     Vxy : constant Long_Float := Sxy / C - Mx * My;
-                     Tr : constant Long_Float := Vxx + Vyy;
-                     Det : constant Long_Float := Long_Float'Max (0.0, Vxx * Vyy - Vxy * Vxy);
-                     Disc : constant Long_Float := Long_Float'Max (0.0, 0.25 * Tr * Tr - Det);
-                     L1 : constant Long_Float := 0.5 * Tr + Sqrt (Disc);
-                     L2 : constant Long_Float := Long_Float'Max (0.0, 0.5 * Tr - Sqrt (Disc));
-                     Ax, Ay : Long_Float;
                   begin
                      R.X0 := X0; R.Y0 := Y0; R.X1 := X1; R.Y1 := Y1;
-                     R.Count := Cnt;
-                     R.Cu := Mx / Long_Float (W);
-                     R.Cv := My / Long_Float (H);
-                     R.Sig_U := Sqrt (Vxx) / Long_Float (W);
-                     R.Sig_V := Sqrt (Vyy) / Long_Float (H);
-                     --  主轴 = 协方差最大特征值的特征向量
-                     if abs Vxy > 1.0e-12 then
-                        Ax := L1 - Vyy; Ay := Vxy;
-                     elsif Vxx >= Vyy then
-                        Ax := 1.0; Ay := 0.0;
-                     else
-                        Ax := 0.0; Ay := 1.0;
-                     end if;
-                     declare
-                        Ln : constant Long_Float := Sqrt (Ax * Ax + Ay * Ay);
-                     begin
-                        if Ln > 0.0 then
-                           R.Au := Ax / Ln; R.Av := Ay / Ln;
-                        else
-                           R.Au := 1.0; R.Av := 0.0;
-                        end if;
-                     end;
-                     --  短轴为零时伸长比记成一个大数(无量纲)
-                     R.Elong := (if L2 > 1.0e-9 then Sqrt (L1 / L2) else 1.0e3);
+                     Fill_Shape (R, Cnt, Sx, Sy, Sxx, Syy, Sxy, W, H);
                      Out_R.Append (R);
                   end;
                end if;
@@ -624,77 +640,122 @@ package body Picture is
       return Quantile (Vals, Q);
    end Region_Depth;
 
+   --  一堆 8 位灰度级分两拨。
+   --  ① 一级一格的直方图:8 位灰度就是 256 级(图像格式)。原来按量程分 64 格,门的分辨率只有量程 / 64。
+   --  ② 分不分得开 = 有没有一道真谷:左边一段、右边一段、中间夹着一段,中间那段的平均密度比两边都低 ——
+   --     而且是按置信界比:两边按密度的下界、中间按上界。单峰的分布做不到这一条(密度先升后降,夹在中间的那段不可能比两边都低),
+   --     所以置信界一成立,"有谷"就不是抽样抖出来的。置信界 = 每一段样本份额的伯恩斯坦界;
+   --     8 位的所有区间(256 × 257 / 2 段)要一起成立,总的置信度用全仓同一个 3σ 的单侧尾 1 − Φ(3),平摊到每一段。
+   --  ③ 返回:落在真谷里的所有切口中类间方差最大(Otsu)的那一刀,放在两级正中;一道真谷都没有(单峰)⇒ NaN。
+   --  🔴 原来的判法是"类间方差 ≥ 总方差一半":单峰高斯 0.64、均匀 0.75、灰度噪声的半正态 0.67 全过,几乎从不说分不开
+   --  (审计 G4 仿真量过);反过来桌面上只占 1% 的白东西(一眼分得开)只有 0.45,被拒
    function Split (F : Floats) return Long_Float is
-      N : constant Natural := Natural (F.Length);
-      Lo : Long_Float := 1.0e30;
-      Hi : Long_Float := -1.0e30;
-      Bins : constant := 64;      --  直方图格数(次数,无量纲)
-      H : array (0 .. Bins - 1) of Long_Float := [others => 0.0];
-      Best_T : Long_Float := NaN;
-      Best_Var : Long_Float := -1.0;
-      Total : Long_Float := 0.0;
-      Sum_All : Long_Float := 0.0;
+      Levels : constant := 256;                                         --  8 位灰度的级数(图像格式)
+      H : array (0 .. Levels - 1) of Long_Float := [others => 0.0];
+      Cum : array (0 .. Levels) of Long_Float := [others => 0.0];      --  Cum (K) = 级 0 .. K − 1 一共几个样本
+      N : Long_Float := 0.0;
+      Lo : Natural := Levels - 1;
+      Hi : Natural := 0;
    begin
-      if N < 16 then
-         return NaN;
-      end if;
-      for X of F loop
-         if not Is_Nan (X) then
-            Lo := Long_Float'Min (Lo, X);
-            Hi := Long_Float'Max (Hi, X);
-         end if;
-      end loop;
-      if not (Hi > Lo) then
-         return NaN;
-      end if;
       for X of F loop
          if not Is_Nan (X) then
             declare
-               B : constant Natural := Natural'Min (Bins - 1, Natural (Long_Float'Floor ((X - Lo) / (Hi - Lo) * Long_Float (Bins))));
+               K : constant Natural := Natural (Long_Float'Max (0.0, Long_Float'Min (Long_Float (Levels - 1), X)));
             begin
-               H (B) := H (B) + 1.0;
-               Total := Total + 1.0;
-               Sum_All := Sum_All + Long_Float (B);
+               H (K) := H (K) + 1.0;
+               N := N + 1.0;
+               Lo := Natural'Min (Lo, K);
+               Hi := Natural'Max (Hi, K);
             end;
          end if;
       end loop;
+      if Hi <= Lo then
+         return NaN;   --  没有样本,或者全在同一级
+      end if;
+      for K in 0 .. Levels - 1 loop
+         Cum (K + 1) := Cum (K) + H (K);
+      end loop;
       declare
-         W0, Sum0 : Long_Float := 0.0;
+         --  每一段的失败概率 = 总的(3σ 单侧尾)÷ 段数,双侧 ⇒ Ln = ln(2 × 段数 ÷ 总失败概率)
+         Ln : constant Long_Float := Log (2.0 * Long_Float (Levels * (Levels + 1) / 2) / Upper_Tail (Conf_K));
+         --  段 [A, E)(级 A .. E − 1)的样本份额 p̂ 的置信界 ÷ 段宽 = 这一段平均密度的界。
+         --  伯恩斯坦:|p̂ − P| ≥ t 的概率 ≤ 2·exp(−N t² ÷ (2P(1 − P) + 2t/3)),方差用界端点自己的 P(1 − P);
+         --  端点 P = p̂ ± u 解 (N + 2Ln)·u² − B·u − 2Ln·p̂(1 − p̂) = 0,B = 2Ln·(1/3 + (1 − 2p̂))(上界)/ 2Ln·(1/3 + (2p̂ − 1))(下界)
+         function Dens (A, E : Natural; Upper : Boolean) return Long_Float is
+            P : constant Long_Float := (Cum (E) - Cum (A)) / N;
+            B : constant Long_Float := 2.0 * Ln * (1.0 / 3.0 + (if Upper then 1.0 - 2.0 * P else 2.0 * P - 1.0));
+            Qa : constant Long_Float := N + 2.0 * Ln;
+            U : constant Long_Float := (B + Sqrt (B * B + 8.0 * Ln * Qa * P * (1.0 - P))) / (2.0 * Qa);
+         begin
+            return (if Upper then Long_Float'Min (1.0, P + U) else Long_Float'Max (0.0, P - U)) / Long_Float (E - A);
+         end Dens;
+         --  Left (B) = 在级 B 之前结束的所有段里,密度下界最大的那个;Right (C) = 从级 C 起的所有段里
+         Left : array (0 .. Levels) of Long_Float := [others => 0.0];
+         Right : array (0 .. Levels) of Long_Float := [others => 0.0];
+         In_Valley : array (0 .. Levels - 1) of Boolean := [others => False];   --  切在级 K 和 K + 1 之间,落在某一道真谷里
       begin
-         for B in 0 .. Bins - 2 loop
-            W0 := W0 + H (B);
-            Sum0 := Sum0 + H (B) * Long_Float (B);
+         for A in Lo .. Hi loop
+            for E in A + 1 .. Hi + 1 loop
+               declare
+                  D : constant Long_Float := Dens (A, E, Upper => False);
+               begin
+                  Left (E) := Long_Float'Max (Left (E), D);
+                  Right (A) := Long_Float'Max (Right (A), D);
+               end;
+            end loop;
+         end loop;
+         for B in Lo + 1 .. Hi + 1 loop
+            Left (B) := Long_Float'Max (Left (B), Left (B - 1));
+         end loop;
+         for C in reverse Lo .. Hi - 1 loop
+            Right (C) := Long_Float'Max (Right (C), Right (C + 1));
+         end loop;
+         --  谷 = 段 [B, C):左边的段在 B 之前结束,右边的段从 C 起;谷里任何一刀(切在 B − 1 .. C − 1 之后)都把两边分开
+         for B in Lo + 1 .. Hi - 1 loop
             declare
-               W1 : constant Long_Float := Total - W0;
+               Last : Natural := B;   --  从 B 起的真谷,最远到哪(= B 就是一道都没有)
             begin
-               if W0 > 0.0 and then W1 > 0.0 then
-                  declare
-                     M0 : constant Long_Float := Sum0 / W0;
-                     M1 : constant Long_Float := (Sum_All - Sum0) / W1;
-                     Var : constant Long_Float := W0 * W1 * (M0 - M1) * (M0 - M1);
-                  begin
-                     if Var > Best_Var then
-                        Best_Var := Var;
-                        Best_T := Lo + (Long_Float (B) + 1.0) / Long_Float (Bins) * (Hi - Lo);
-                     end if;
-                  end;
+               for C in B + 1 .. Hi loop
+                  if Dens (B, C, Upper => True) < Long_Float'Min (Left (B), Right (C)) then
+                     Last := C;
+                  end if;
+               end loop;
+               if Last > B then
+                  for K in B - 1 .. Last - 1 loop
+                     In_Valley (K) := True;
+                  end loop;
                end if;
             end;
          end loop;
+         declare
+            W0, S0, S_All : Long_Float := 0.0;
+            Best_Var : Long_Float := 0.0;
+            Best_K : Natural := Lo;
+            Found : Boolean := False;
+         begin
+            for K in Lo .. Hi loop
+               S_All := S_All + H (K) * Long_Float (K);
+            end loop;
+            --  切在 K 和 K + 1 之间:K ≥ Lo、K < Hi,两边都有样本(不会除零)
+            for K in Lo .. Hi - 1 loop
+               W0 := W0 + H (K);
+               S0 := S0 + H (K) * Long_Float (K);
+               if In_Valley (K) then
+                  declare
+                     W1 : constant Long_Float := N - W0;
+                     Var : constant Long_Float := W0 * W1 * (S0 / W0 - (S_All - S0) / W1) ** 2;
+                  begin
+                     if not Found or else Var > Best_Var then
+                        Best_Var := Var;
+                        Best_K := K;
+                        Found := True;
+                     end if;
+                  end;
+               end if;
+            end loop;
+            return (if Found then Long_Float (Best_K) + 0.5 else NaN);
+         end;
       end;
-      --  两拨要真的分得开:类间方差得占总方差的大头(比例,无量纲),否则是单峰
-      declare
-         Mean : constant Long_Float := Sum_All / Total;
-         Tot_Var : Long_Float := 0.0;
-      begin
-         for B in 0 .. Bins - 1 loop
-            Tot_Var := Tot_Var + H (B) * (Long_Float (B) - Mean) ** 2;
-         end loop;
-         if Tot_Var <= 0.0 or else Best_Var / Total < 0.5 * Tot_Var then
-            return NaN;
-         end if;
-      end;
-      return Best_T;
    end Split;
 
    function Inside (R : Region; U, V : Long_Float; W, H : Natural; Grow : Long_Float) return Boolean is
@@ -731,44 +792,8 @@ package body Picture is
       if Cnt = 0 then
          return;
       end if;
-      declare
-         N : constant Long_Float := Long_Float (Cnt);
-         Mx : constant Long_Float := Sx / N;
-         My : constant Long_Float := Sy / N;
-         Vxx : constant Long_Float := Long_Float'Max (0.0, Sxx / N - Mx * Mx);
-         Vyy : constant Long_Float := Long_Float'Max (0.0, Syy / N - My * My);
-         Vxy : constant Long_Float := Sxy / N - Mx * My;
-         Tr : constant Long_Float := Vxx + Vyy;
-         Det : constant Long_Float := Long_Float'Max (0.0, Vxx * Vyy - Vxy * Vxy);
-         Disc : constant Long_Float := Long_Float'Max (0.0, 0.25 * Tr * Tr - Det);
-         L1 : constant Long_Float := 0.5 * Tr + Sqrt (Disc);
-         L2 : constant Long_Float := Long_Float'Max (0.0, 0.5 * Tr - Sqrt (Disc));
-         Ax, Ay : Long_Float;
-      begin
-         R.X0 := X0; R.Y0 := Y0; R.X1 := X1; R.Y1 := Y1;
-         R.Count := Cnt;
-         R.Cu := Mx / Long_Float (W);
-         R.Cv := My / Long_Float (H);
-         R.Sig_U := Sqrt (Vxx) / Long_Float (W);
-         R.Sig_V := Sqrt (Vyy) / Long_Float (H);
-         if abs Vxy > 1.0e-12 then
-            Ax := L1 - Vyy; Ay := Vxy;
-         elsif Vxx >= Vyy then
-            Ax := 1.0; Ay := 0.0;
-         else
-            Ax := 0.0; Ay := 1.0;
-         end if;
-         declare
-            Ln : constant Long_Float := Sqrt (Ax * Ax + Ay * Ay);
-         begin
-            if Ln > 0.0 then
-               R.Au := Ax / Ln; R.Av := Ay / Ln;
-            else
-               R.Au := 1.0; R.Av := 0.0;
-            end if;
-         end;
-         R.Elong := (if L2 > 1.0e-9 then Sqrt (L1 / L2) else 1.0e3);   --  短轴为零时伸长比记成一个大数(无量纲)
-      end;
+      R.X0 := X0; R.Y0 := Y0; R.X1 := X1; R.Y1 := Y1;
+      Fill_Shape (R, Cnt, Sx, Sy, Sxx, Syy, Sxy, W, H);
       Ok := True;
    end Region_Of_Mask;
 

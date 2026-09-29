@@ -202,6 +202,164 @@ begin
              & Codec.Img (Natural (Old_Shared.Length)) & " 块)、新比法 " & Codec.Img (Natural (New_Shared.Length)) & " 块 · 四帧各闪各的 "
              & Codec.Img (Natural (Each.Length)) & " 块 · 真动的 + 一帧闪:" & Codec.Img (Natural (Real_And_Flick.Length)) & " 块");
    end;
+   --  🔴 两拨分不分得开(Picture.Split;09-30 审计 G4:原来"类间方差 ≥ 总方差一半"几乎从不拒 —— 单峰高斯 0.64、均匀 0.75、
+   --  灰度噪声的半正态 0.67 全算"分得开";桌面上只占 1% 的白东西一眼分得开,反而 0.45 被拒)。新判法:直方图里有一道按置信界站得住的谷才算。
+   --  每组 2 万个 8 位灰度级(Cut_Bright 一只眼抽样的量级),固定种子伪随机:单峰三种 ⇒ NaN;真两拨三种 ⇒ 分界落在两拨之间。
+   --  老判法(64 格 Otsu + 一半,09-30 以前 picture.adb 原样)在这里同一组数重算一遍当牙
+   declare
+      use Ada.Numerics.Long_Elementary_Functions;
+      package FR renames Ada.Numerics.Float_Random;
+      Gen : FR.Generator;
+      N_Each : constant := 20_000;
+      function U01 return Long_Float is (Long_Float (FR.Random (Gen)));
+      function Gauss return Long_Float is   --  标准正态(Box–Muller)
+         U1 : constant Long_Float := Long_Float'Max (1.0e-12, 1.0 - U01);
+         U2 : constant Long_Float := U01;
+      begin
+         return Sqrt (-2.0 * Log (U1)) * Cos (2.0 * Ada.Numerics.Pi * U2);
+      end Gauss;
+      function Level (X : Long_Float) return Long_Float is (Long_Float'Rounding (Long_Float'Max (0.0, Long_Float'Min (255.0, X))));
+      procedure Old_Split (F : Floats; Split_Ok : out Boolean; T : out Long_Float) is
+         Bins : constant := 64;
+         Hh : array (0 .. Bins - 1) of Long_Float := [others => 0.0];
+         Lo : Long_Float := Long_Float'Last;
+         Hi : Long_Float := Long_Float'First;
+         Total, Sum_All, W0, Sum0, Tot_Var : Long_Float := 0.0;
+         Best_Var : Long_Float := -1.0;
+      begin
+         Split_Ok := False; T := 0.0;
+         for X of F loop
+            Lo := Long_Float'Min (Lo, X); Hi := Long_Float'Max (Hi, X);
+         end loop;
+         if not (Hi > Lo) then
+            return;
+         end if;
+         for X of F loop
+            declare
+               B : constant Natural := Natural'Min (Bins - 1, Natural (Long_Float'Floor ((X - Lo) / (Hi - Lo) * Long_Float (Bins))));
+            begin
+               Hh (B) := Hh (B) + 1.0; Total := Total + 1.0; Sum_All := Sum_All + Long_Float (B);
+            end;
+         end loop;
+         for B in 0 .. Bins - 2 loop
+            W0 := W0 + Hh (B); Sum0 := Sum0 + Hh (B) * Long_Float (B);
+            if W0 > 0.0 and then Total - W0 > 0.0 then
+               declare
+                  Var : constant Long_Float := W0 * (Total - W0) * (Sum0 / W0 - (Sum_All - Sum0) / (Total - W0)) ** 2;
+               begin
+                  if Var > Best_Var then
+                     Best_Var := Var; T := Lo + (Long_Float (B) + 1.0) / Long_Float (Bins) * (Hi - Lo);
+                  end if;
+               end;
+            end if;
+         end loop;
+         for B in 0 .. Bins - 1 loop
+            Tot_Var := Tot_Var + Hh (B) * (Long_Float (B) - Sum_All / Total) ** 2;
+         end loop;
+         Split_Ok := Tot_Var > 0.0 and then Best_Var / Total >= 0.5 * Tot_Var;
+      end Old_Split;
+      Gauss_1, Flat_1, Noise_1, Table_White, Two_Tone, Noise_Fingers : Floats;
+      T_Gauss, T_Flat, T_Noise, T_White, T_Two, T_Fing : Long_Float;
+      O_Gauss, O_Flat, O_Noise, O_White, O_Two, O_Fing : Boolean;
+      Ot : Long_Float;
+   begin
+      FR.Reset (Gen, 20260930);
+      for I in 1 .. N_Each loop
+         Gauss_1.Append (Level (128.0 + 10.0 * Gauss));                                           --  单峰:高斯 σ = 10 级
+         Flat_1.Append (Level (60.0 + 140.0 * U01));                                              --  单峰:均匀 60..200
+         Noise_1.Append (abs (Level (100.0 + 2.0 * Gauss) - Level (100.0 + 2.0 * Gauss)));        --  单峰:静止两帧的灰度差(半正态)
+         Table_White.Append ((if I mod 100 = 0 then Level (240.0 + 4.0 * Gauss) else Level (135.0 + 12.0 * Gauss)));   --  桌面 + 1% 白东西
+         Two_Tone.Append ((if I mod 2 = 0 then Level (100.0 + 10.0 * Gauss) else Level (140.0 + 10.0 * Gauss)));        --  两种一样多、隔 4σ
+         Noise_Fingers.Append ((if I mod 100 = 0 then Level (72.0 + 16.0 * U01)
+                                else abs (Level (100.0 + 2.0 * Gauss) - Level (100.0 + 2.0 * Gauss))));                --  噪声 + 1% 手指变化
+      end loop;
+      T_Gauss := Picture.Split (Gauss_1); T_Flat := Picture.Split (Flat_1); T_Noise := Picture.Split (Noise_1);
+      T_White := Picture.Split (Table_White); T_Two := Picture.Split (Two_Tone); T_Fing := Picture.Split (Noise_Fingers);
+      Old_Split (Gauss_1, O_Gauss, Ot); Old_Split (Flat_1, O_Flat, Ot); Old_Split (Noise_1, O_Noise, Ot);
+      Old_Split (Table_White, O_White, Ot); Old_Split (Two_Tone, O_Two, Ot); Old_Split (Noise_Fingers, O_Fing, Ot);
+      Check (Picture.Is_Nan (T_Gauss) and then Picture.Is_Nan (T_Flat) and then Picture.Is_Nan (T_Noise),
+             "两拨:单峰三种(高斯、均匀、静止噪声的差)都分不开 ⇒ NaN(老判法说分得开:" & Boolean'Image (O_Gauss) & " /" & Boolean'Image (O_Flat)
+             & " /" & Boolean'Image (O_Noise) & ",该 FALSE)");
+      Check (O_Gauss and then O_Flat and then O_Noise, "两拨·牙:老判法(类间方差 ≥ 一半)同一组单峰全都当成分得开");
+      Check (not Picture.Is_Nan (T_White) and then T_White > 180.0 and then T_White < 225.0
+             and then not Picture.Is_Nan (T_Two) and then T_Two > 110.0 and then T_Two < 130.0
+             and then not Picture.Is_Nan (T_Fing) and then T_Fing > 10.0 and then T_Fing < 72.0,
+             "两拨:真两拨都分得开,分界在两拨之间 —— 桌面 135 + 1% 白 240:" & Codec.Fmt (T_White, 1) & " · 100 / 140 各一半:" & Codec.Fmt (T_Two, 1)
+             & " · 静止噪声 + 1% 手指 72–88:" & Codec.Fmt (T_Fing, 1));
+      Check (not O_White, "两拨·牙:老判法把桌面 + 1% 白东西判成分不开(类间方差不到一半)");
+   end;
+   --  🔴 中位绝对偏差为 0 时往上换分位,σ 的换算跟着分位走(Picture.Cut;09-30 审计 G4 / H6):|x − 中位| 的 q 分位 = σ·Φ⁻¹((1+q)/2)。
+   --  原来每一档都乘 1.4826(只对 q = 0.5 对),q = 0.9 时 σ 放大 1.4826 × 1.645 = 2.44 倍。
+   --  造一张按 1 mm 量化的深度图:桌面 0.80 m、噪声 σ = 0.35 mm(量化后 85% 的像素一点不差 ⇒ 中位绝对偏差 = 0、0.75 分位也是 0,落到 0.9 那一档 = 1 mm),
+   --  中间一块近 3 mm 的东西(16×12,鼓出背景面 4 mm):新换算 σ = 1 mm / 1.645 ⇒ 门 = 中位 + 1.82 mm,切得出来;
+   --  老换算 σ = 1.4826 mm ⇒ 门 = 中位 + 4.45 mm,比这块鼓出来的还高 ⇒ 切不出来(牙 = 同一张图、σ 倍数乘上老换算多出来的 1.4826 × Φ⁻¹(0.95))
+   declare
+      use Ada.Numerics.Long_Elementary_Functions;
+      package FR renames Ada.Numerics.Float_Random;
+      Gen : FR.Generator;
+      W : constant := 96;
+      H : constant := 72;
+      Dep : Floats := Filled (W * H, 0.80);
+      New_R, Old_R : Picture.Regions;
+      function U01 return Long_Float is (Long_Float (FR.Random (Gen)));
+      function Gauss return Long_Float is
+         U1 : constant Long_Float := Long_Float'Max (1.0e-12, 1.0 - U01);
+         U2 : constant Long_Float := U01;
+      begin
+         return Sqrt (-2.0 * Log (U1)) * Cos (2.0 * Ada.Numerics.Pi * U2);
+      end Gauss;
+      Old_Extra : constant Long_Float := 1.4826 * 1.6448536;   --  老换算在 q = 0.9 这一档多乘出来的倍数
+      At_Block : Boolean := False;
+   begin
+      FR.Reset (Gen, 20260931);
+      for I in 0 .. W * H - 1 loop
+         Dep.Replace_Element (I, 0.80 + 0.001 * Long_Float'Rounding (0.35 * Gauss));
+      end loop;
+      for Y in 30 .. 41 loop
+         for X in 40 .. 55 loop
+            Dep.Replace_Element (Y * W + X, 0.797);
+         end loop;
+      end loop;
+      New_R := Picture.Cut (Dep, W, H, 0.125, 3.0);
+      Old_R := Picture.Cut (Dep, W, H, 0.125, 3.0 * Old_Extra);
+      if Natural (New_R.Length) = 1 then
+         At_Block := New_R (0).X0 >= 38 and then New_R (0).X1 <= 57 and then New_R (0).Y0 >= 28 and then New_R (0).Y1 <= 43;
+      end if;
+      Check (Natural (New_R.Length) = 1 and then At_Block,
+             "量化深度(中位绝对偏差 = 0):σ 按 0.9 分位 ÷ Φ⁻¹(0.95) 换 ⇒ 那块近 3 mm 的东西切出" & Codec.Img (Natural (New_R.Length))
+             & " 块(该 1 块、就在它那儿)");
+      Check (Old_R.Is_Empty, "量化深度·牙:老换算(每档都乘 1.4826)同一张图切出" & Codec.Img (Natural (Old_R.Length)) & " 块(门比它鼓出来的还高 ⇒ 该 0)");
+   end;
+   --  🔴 伸长比:像素当单位方块(二阶矩各加 1/12;Picture.Components / Cut_Colour / Region_Of_Mask 同一份),一像素宽、20 长的线 = 20,两像素宽的 = 10(长宽比)。
+   --  原来按点算:一像素宽的短轴为零 ⇒ 哨兵 1000;两像素宽的 √((20² − 1)/12 ÷ 0.25) = 11.5 —— 只宽一个像素就差 87 倍,这个数进了 act.adb 的"像不像"
+   declare
+      use Ada.Numerics.Long_Elementary_Functions;
+      W : constant := 40;
+      H : constant := 20;
+      M : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (W * H));
+      Rs : Picture.Regions;
+      E1, E2 : Long_Float := 0.0;
+      function Old_Elong (Len, Wd : Natural) return Long_Float is   --  老算法:按点的矩,短轴为零记 1000
+        (if Long_Float (Wd * Wd - 1) / 12.0 > 1.0e-9 then Sqrt ((Long_Float (Len * Len - 1) / 12.0) / (Long_Float (Wd * Wd - 1) / 12.0)) else 1.0e3);
+   begin
+      for X in 5 .. 24 loop
+         M.Replace_Element (3 * W + X, True);
+         M.Replace_Element (10 * W + X, True);
+         M.Replace_Element (11 * W + X, True);
+      end loop;
+      Rs := Picture.Components (M, W, H, 4);
+      for R of Rs loop
+         if R.Count = 20 then
+            E1 := R.Elong;
+         elsif R.Count = 40 then
+            E2 := R.Elong;
+         end if;
+      end loop;
+      Check (abs (E1 - 20.0) < 1.0e-9 and then abs (E2 - 10.0) < 1.0e-9,
+             "伸长比:一像素宽 20 长的线 " & Codec.Fmt (E1, 3) & "(该 20)· 两像素宽 " & Codec.Fmt (E2, 3) & "(该 10)");
+      Check (Old_Elong (20, 1) / Old_Elong (20, 2) > 80.0,
+             "伸长比·牙:老算法一像素宽 " & Codec.Fmt (Old_Elong (20, 1), 1) & "、两像素宽 " & Codec.Fmt (Old_Elong (20, 2), 2) & "(真长宽比只差 2 倍)");
+   end;
    --  🔴 扫描时"到了"按每个关节各自的门(Selfmap.Joints_Arrived + Kinem.Clean_Tol;09-28 H1:人形别的关节还偏 0.001–0.009 rad 就读了格子,
    --  每根轴单独起步只收偏不到 Clean_Tol 的格子,两只手运动学都没量成)。按 H1 量到的收法造:扫的那根一拍就到目标(0.221),
    --  上一段那根从 +0.304 rad 回起点(−0.4),每拍剩 0.64;这一格一步 0.0295 ⇒ 老门 = 三分之一格 ≈ 0.0098,新门:别的关节按 Clean_Tol(640 宽 ≈ 0.00084)
@@ -1909,7 +2067,7 @@ begin
              "镜头畸变:像素 → 视线 → 像素,最大差 " & Codec.Fmt (Worst, 9) & " px · 角上那一点去畸变的视线比理想针孔的偏 " & Codec.Fmt (Corner_Deg, 2) & "°");
    end;
    --  🔴 整幅掩膜 ⇒ 框、像素数、形心、主轴(Picture.Region_Of_Mask,SAM 出掩膜后用):合成 40×30 画幅里一条 20×4 的横条(x 10..29、y 5..8)
-   --  ⇒ 框 [10 5 29 8]、80 px、形心 (19.5, 6.5)、主轴水平、伸长比 = √(方差比) ≈ 5.8;空掩膜 ⇒ 不成
+   --  ⇒ 框 [10 5 29 8]、80 px、形心 (19.5, 6.5)、主轴水平、伸长比 = 长 ÷ 宽 = 5(像素当单位方块);空掩膜 ⇒ 不成
    declare
       Mk : Bools;
       Rg : Picture.Region;
@@ -1926,7 +2084,7 @@ begin
       Picture.Region_Of_Mask (Mk, 40, 30, Rg, Okm);
       Picture.Region_Of_Mask (Mk0, 40, 30, Rg0, Ok0);
       Check (Okm and then Rg.X0 = 10 and then Rg.Y0 = 5 and then Rg.X1 = 29 and then Rg.Y1 = 8 and then Rg.Count = 80
-             and then abs (40.0 * Rg.Cu - 19.5) < 1.0e-9 and then abs (30.0 * Rg.Cv - 6.5) < 1.0e-9 and then abs (Rg.Av) < 1.0e-9 and then Rg.Elong > 5.0 and then not Ok0,
+             and then abs (40.0 * Rg.Cu - 19.5) < 1.0e-9 and then abs (30.0 * Rg.Cv - 6.5) < 1.0e-9 and then abs (Rg.Av) < 1.0e-9 and then abs (Rg.Elong - 5.0) < 1.0e-9 and then not Ok0,
              "整幅掩膜 ⇒ 框 [" & Codec.Img (Rg.X0) & " " & Codec.Img (Rg.Y0) & " " & Codec.Img (Rg.X1) & " " & Codec.Img (Rg.Y1) & "]、" & Codec.Img (Rg.Count)
              & " px、形心 (" & Codec.Fmt (40.0 * Rg.Cu, 2) & "," & Codec.Fmt (30.0 * Rg.Cv, 2) & ")、伸长比 " & Codec.Fmt (Rg.Elong, 2) & " · 空掩膜 ⇒ " & (if Ok0 then "成了(错)" else "不成"));
    end;

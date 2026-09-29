@@ -10,7 +10,7 @@ package Picture is
       Depth : Long_Float := 0.0;            --  中位深度(米)
       Height : Long_Float := 0.0;           --  比背景鼓出多少(米)
       Au, Av : Long_Float := 0.0;           --  主轴单位向量(像素系)
-      Elong : Long_Float := 1.0;            --  长轴 σ / 短轴 σ
+      Elong : Long_Float := 1.0;            --  长轴 σ / 短轴 σ(像素当单位方块:一像素宽、ℓ 长的线 = ℓ,就是长宽比)
       Sig_U, Sig_V : Long_Float := 0.0;     --  各向 1σ(归一化画幅)
    end record;
    package Region_Vectors is new Ada.Containers.Vectors (Natural, Region);
@@ -53,6 +53,7 @@ package Picture is
    function Region_Depth (Depth : Floats; W, H : Natural; Mask : Bools; Q : Long_Float) return Long_Float;  --  掩膜上的深度分位;NaN = 无
    function Inside (R : Region; U, V : Long_Float; W, H : Natural; Grow : Long_Float) return Boolean;
    function Is_Nan (X : Long_Float) return Boolean;
-   --  一堆数分成两拨(Otsu):返回分界;分不开(单峰)返回 NaN
+   --  一堆 8 位灰度级(0..255,按最近的一级算)分成两拨:返回分界(两级正中,下面那拨 < 分界 < 上面那拨);
+   --  分不开返回 NaN。分得开 = 直方图里有一道按置信界站得住的谷(单峰的分布没有),分界 = 谷里类间方差最大(Otsu)的那一刀
    function Split (F : Floats) return Long_Float;
 end Picture;
