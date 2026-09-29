@@ -3,7 +3,7 @@
 set -eu
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 bash "$ROOT/check_purity.sh"
-bash "$ROOT/check_constants.sh"
+python3 "$ROOT/tools/numbers.py" check   #  每个数都要登记来历,调参数只许减(09-29 起替掉 check_constants.sh:那一个有白名单、注释放行、不查整数三个口子)
 bash "$ROOT/check_freedom.sh"
 bash "$ROOT/check_gates.sh"
 cd "$ROOT/driver"
