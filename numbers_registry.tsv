@@ -3060,7 +3060,6 @@ plug.adb	L.Wait_Us := L.Wait_Us + Long_Float (T1 - T0) * 1.0e6;	1.0e6	格式	秒
 plug.adb	Max : constant Natural := Codec.Env_Nat ("", 6000);	6000	格式	抽帧录像张数上限(环境变量可改)(plug.adb:561)
 plug.adb	Mine : constant Boolean := (I = C.Arm or else Natural (L.Lay.Jaw.Length) = 1) and then not C.Jaw.Is_Empty;	1	调参数	认身体的规则('正好 1 个夹爪'):身体只有一组抓握通道时,不管命令的是哪一组关节,抓握目标都算这组的。抓握组和哪只手配对从来没量过,全靠下标(861 行 Natural'Min (I, 抓握组数 − 1));关节组比抓握组多时,每组关节都把同一个抓握键再写一遍(msgpack 映射里出现重复键)(plug.adb:864)	一条动作里抓握目标跟着哪条臂 / 哪组关节走	中	开机量'这组抓握通道属于哪只手':开机本来就对每个抓握通道合空一次(body_driver.adb:426 Zone.Measure),每台相机里扫过的手指像素记在 H.Zones (Cm);哪只手自己那只眼(C.Map.Cam_On_Arm)里出现了手指,这组抓握就归哪只手 ⇒ 存成抓握组 → 臂的对照表,Act_Raw / Hold_Action 按表发,不按下标、不按'只有一组'分支(selfmap.adb:7 的 Jaw_Index 一起换)
 plug.adb	N : Natural := 4;	4	格式	协议应答固定 4 个键(message_type、message_id、step、payload)(plug.adb:183)
-plug.adb	Nj : constant Natural := Natural'Max (1, Natural (Cur.Length));	1	调参数	同 806 行的规矩,在位姿命令 / 只报关节的身体那条路上:Nj 同时是 Put_Array 的个数和循环上界,读数缺失时发 1 个、值兜底 1.0(x5 全开);读数丢的那一拍多通道手的形状同样缩成 1。这条路上抓握键还按下标配臂(861 行 Natural'Min (I, 抓握键数 − 1)),见 summary(plug.adb:863)	位姿命令 / 只报关节的身体的动作里,读数缺失那一拍每条臂的抓握键带几个数	低	同 806 行:按开机认出的这组长度发,读不到又没给过目标就不发这个键
 plug.adb	Put (Fo, "" & Codec.Fmt (P (I), 6));	6	格式	离线打分用的 poses.txt 印 6 位小数(确认规则定的类)(plug.adb:524)
 plug.adb	Put (Fo, "" & Codec.Fmt (P (I), 6));	6	格式	fk_poses.txt 印 6 位小数(确认规则定的类)(plug.adb:611)
 plug.adb	Put (Fo, "" & Codec.Fmt (X, 6));	6	格式	joints.txt 印 6 位小数(确认规则定的类)(plug.adb:540)
@@ -3068,27 +3067,20 @@ plug.adb	Put (Fo, Codec.Img (L.Seq) & "" & (if Saved then Codec.Img (L.Vid_N) el
 plug.adb	Put (Fo, Codec.Img (L.Seq) & "" & (if Saved then Codec.Img (L.Vid_N) else ""));	"1	格式	joints.txt 同一个 -1 记号(plug.adb:536)
 plug.adb	Put (Fo, Codec.Img (L.Seq) & "");	"1	格式	fk_poses.txt 里'没存画面'记 -1(同 poses.txt 的格式)(plug.adb:608)
 plug.adb	Put_Array (Payload, 1);	1	格式	协议:result 是动作列表,这里装的就是手里攥着的那一条(一拍一条,闭环);个数由后面真写进去的条数定(plug.adb:301)
-plug.adb	Put_Array (S, 1);	1	调参数	认身体的规则:Hold_Action(驱动发出第一条命令之前每拍回给身体的'照现在保持')里每只手的抓握一栏写死只发 1 个数(J (0))。驱动别处早就改成整组发(Frame.Jaw 注释:以前只留第一个 ⇒ 五指手后四根手指整组丢掉),这里漏了;也违背 plug.ads 规矩①'应答的形状由对方定'(plug.adb:174)	连上以后、第一条命令之前,回给身体的保持动作里每组抓握发几个数	中	按这一拍身体报的这组读数原样回声:Put_Array (S, Natural (J.Length)) 再逐个 Put_Float (S, J (K)),和 Act_Raw 里 Nj 那段同一个写法
 plug.adb	Put_Array (S, 7);	7	调参数	认身体的规则(按个数认):身体也报末端位姿、又还没装运动学钩子(Hook_C = null)时,位姿命令写死按 7 个数(xyz + wxyz)发给被点名的那条臂 —— 同一段里别的臂是按身体报的长度原样回声的,只有这条臂按驱动自己的格式(plug.adb:845)	没装运动学之前原样发位姿命令的形状	低	按身体这一拍报的这条臂位姿的长度和排法发(同函数里别的臂用的 Nums_At (L, L.Lay.EE (I)));更干净是删掉原样发位姿这条路 —— V1b 以后开机只发关节,装上 Jointboot.Install 之后 Act 先把位姿命令解成关节,这条路基本走不到
-plug.adb	Put_Array (S, Natural'Max (1, Natural (J.Length)));	1	调参数	认身体的规则(形状缺省):按拍发的关节动作里,每组抓握键至少发 1 个数。这一拍读不到这组的读数(J 空)时照样发 1 个,值走 Jaw_Value:命令里给了发 C.Jaw (0)、给过发 Jaw_Set 的第 0 位、都没有发 1.0(x5 约定的全开,plug.adb:711 已登记)。开机认形状要求这组至少 1 个数(layout.adb:162),所以只在读数中途丢了才走到。顺带的 bug:发几个数只看此刻读数的长度,读数丢的那一拍,多通道的手(比如五指手)的命令和记下的目标只发得出第 0 个,形状从 N 个变成 1 个(plug.adb:806)	读数缺失那一拍,关节动作里抓握键带几个数、带什么值	低	按这组抓握键开机认出来的长度发(Layout.Recognise 那一刻的个数 Nn,给 L.Lay 每条抓握路径记一栏;或 Plug 自己记下每个键上一次读到的长度);一次都没读到、也没给过目标就不发这个键(Put_Map 的键数跟着减)。和 807 行是同一条,一起换
-plug.adb	Put_Float (S, (if J.Is_Empty then 1.0 else J (0)));	1.0	调参数	认身体的规则(缺省值):这组抓握这一拍读不到数就发 1.0。1.0 是 x5 的约定(LAB 08-18:开度 0→1.0 逐档张开 ⇒ 1.0 = 全开;plug.adb:808 注释也写着'[0, 1] 是 x5 的约定'),换一具身体 1.0 可能是全合、半合或超出它的读数范围(plug.adb:175)	保持动作里抓握读数缺失时发给身体的目标	低	用开机量到的量代替:没读数 ⇒ 不发这个抓握键(Put_Map 的键数跟着减),或发这组通道上一拍收到的读数(Plug 自己记着上一帧);真要一个'张开'的值就用开机合空量到的 Zone.Hand.Open_Reading(像 Pose_Hook 那样由上层登记给 Plug)
 plug.adb	Put_Line ("" & Codec.Fmt (L.Wait_Us / 50000.0, 1) & "" &	"50	格式	计时日志文字'近 50 帧',和 587 行的计时窗口 50 帧是同一个数(那个已登记格式;L.Frame_S 只打印、驱动不读)(plug.adb:590)
 plug.adb	Put_Line ("" & Codec.Fmt (L.Wait_Us / 50000.0, 1) & "" &	1	格式	日志印 1 位小数(确认规则定的类)(plug.adb:590)
 plug.adb	Put_Line ("" & Codec.Fmt (L.Wait_Us / 50000.0, 1) & "" &	50000.0	格式	50 帧 × 1000 µs/ms(plug.adb:590)
 plug.adb	Put_Map (Payload, 1);	1	格式	协议:get_action 的应答 payload 只有 result 一个键(下一行就写这个键)(plug.adb:296)
 plug.adb	Put_Map (Payload, 1);	1	格式	协议:其余 ack 的 payload 一个键(ok)(plug.adb:313)
 plug.adb	Put_Map (Payload, 3);	3	格式	协议:hello_ack 的 payload 三个键(ok / server / server_instance_id,下面三行)(plug.adb:308)
-plug.adb	Put_Map (S, 2 * N);	2	格式	应答里每条臂两个键(位姿 / 关节 + 抓握)(plug.adb:146)
-plug.adb	Put_Map (S, 2 * N);	2	格式	(819 行同一句)同上;隐含'每条臂都有一个抓握键',没有抓握的身体在 Layout.Missing 就被拒(plug.adb:146)
 plug.adb	R : constant Natural := Natural (L.Last.Raw.Element (First + 3 * I));	3	格式	RGB 交错,每像素 3 字节(plug.adb:430)
-plug.adb	S.Append ((if Natural (S.Length) < Natural (Cur.Length) then Cur (Natural (S.Length)) else 1.0));	1.0	调参数	认身体的规则(缺省值):记'这一集给过的目标'(L.Jaw_Set)时,被点名那一位前面、身体又没报读数的通道先填 1.0(x5 约定的全开)。按现在的调用(K < max (1, Cur 长度))填进去的 1.0 立刻被覆盖或走不到,换个调用方就会把 1.0 当成'给过的目标'一直发下去(plug.adb:700)	Jaw_Set 里没给过目标、又没读数的那几位记成什么	低	用这组通道此刻的读数 Cur 补;没有读数就不记这一位(Jaw_Set 只记真给过的目标)
 plug.adb	Saved : constant Boolean := L.Seq <= 2000 or else L.Seq mod 20 = 0;	20	格式	录像落盘密度:前 2000 帧全存,之后每 20 帧一张(只管调试落盘)(plug.adb:513)
 plug.adb	Saved : constant Boolean := L.Seq <= 2000 or else L.Seq mod 20 = 0;	2000	格式	同上(plug.adb:513)
 plug.adb	Stride : constant Natural := Natural'Max (1, Codec.Env_Nat ("", 6));	1	数值	调试录像(BL_FILM)抽帧步长至少 1:环境变量给成 0 时 L.Seq mod 0 会抛异常(防除零);只管落盘(plug.adb:560)
 plug.adb	Stride : constant Natural := Natural'Max (1, Codec.Env_Nat ("", 6));	6	格式	半分辨率抽帧录像的缺省步长(环境变量可改,只管落盘)(plug.adb:560)
 plug.adb	for I in 0 .. 6 loop	6	结构	Arm_Pose 是 array (0 .. 6)(xyz + wxyz 七个分量),这里逐个抄,应写成 Pose'Range;它依附在上一行 layout 式的'正好 7 个数 = 位姿'规矩上(plug.adb:392,第一轮已记调参数),Reported_EE 驱动不读、只落盘(plug.adb:393)
 plug.adb	for K in 0 .. 6 loop	6	结构	逐个发 C.Pose 的 7 个分量(Arm_Pose'Range);'发 7 个'这个决定在上一行(plug.adb:846)
-plug.adb	for X in 0 .. Natural'Max (1, Natural (J.Length)) - 1 loop	1	调参数	同 806 行那一条:逐个发的循环上界和 806 的个数必须一样(一对),读数缺失时只循环一次,值兜底 1.0(plug.adb:807)	同 806 行	低	同 806 行(循环上界改成同一个开机认出的长度)
 plug.adb	if Idle mod 1000 = 0 then	1000	格式	日志节流:每 1000 条无画面消息说一句(plug.adb:265)
 plug.adb	if L.Seq <= 2000 or else L.Seq mod 20 = 0 then	20	格式	同上(plug.adb:549)
 plug.adb	if L.Seq <= 2000 or else L.Seq mod 20 = 0 then	2000	格式	同上(plug.adb:549)
@@ -3101,7 +3093,6 @@ plug.adb	if Tries <= 3 then	3	格式	日志节流:认不出只说前 3 回(plug.
 plug.adb	if Tries > 4000 then	4000	调参数	收 4000 条观测还认不出就放弃开机(plug.adb:358)	开机最多等多久	低	去掉:认不出就一直等、每回说缺什么(线断了 Pump 自己返回 False);要上限按 owner 的每炮时间预算 ÷ 量到的帧时 L.Frame_S
 plug.adb	return -1;	1	数值	Beat_Index:−1 = 这个帧号不在记下的拍里(哨兵;调用方 K >= 0 才取)。和 762 行字面一样,registry 里两条都记在 61 行名下(plug.adb:61)
 plug.adb	return -1;	1	数值	In_Groups:−1 = 这个名字的关节组不在 C.Groups 里(哨兵;调用方 Kg >= 0 才用)(plug.adb:762)
-plug.adb	return 1.0;	1.0	调参数	认身体的规则(缺省值):没点名、这一集没给过目标、这一拍又读不到数的抓握通道发 1.0(x5 约定 = 全开;拿着东西时等于松手)(plug.adb:711)	缺读数时发给身体的抓握目标	低	用开机量到的量代替:没读数 ⇒ 不发这个抓握键(Put_Map 的键数跟着减),或发这组通道上一拍收到的读数(Plug 自己记着上一帧);真要一个'张开'的值就用开机合空量到的 Zone.Hand.Open_Reading(像 Pose_Hook 那样由上层登记给 Plug)
 plug.adb	return Natural'Min (Natural (L.Lay.EE.Length), Natural'Max (1, Natural (L.Lay.Jaw.Length)));	1	调参数	认身体的规则:报位姿的身体,臂数 = min(位姿键数, max(1, 抓握键数)) ——'每条臂配一组抓握键';这个 1 = '一组抓握都没有也按一条臂'。今天这个 1 走不到:Layout.Missing(layout.adb:267)把没有抓握读数的身体直接拒掉。外面那个 Min 是活的:抓握键比位姿键少(比如两条臂共用一个 [左, 右] 抓握数组)时,多出来的臂在 Hold_Action 里不回声,原样发位姿那条路(现在基本走不到)里它的命令被悄悄丢掉、还返回 True;Selfmap.Measure(selfmap.adb:383)按 F.EE 数臂,两边臂数可能对不上(plug.adb:49)	Hold_Action(第一条命令之前每拍回给身体的'照现在保持')和原样发位姿那条路里,一条动作带几条臂	低	臂数 = 身体报的位姿键个数(每个位姿键就是一个能单独指挥的末端),不看抓握键;抓握键归哪条臂按开机量:合空那一下(Zone.Measure)按抓握键逐个做,看哪只手上那台眼(C.Map.Cam_On_Arm)里手指动了就归哪条臂;哪条臂都不归的抓握键原样回声读数。Layout.Missing 里'没认出夹爪开度就拒'一起拆
 plug.ads	Group : Integer := -1;	1	数值	哨兵:Cmd.Group = -1 = 没指定第几组关节读数 ⇒ 按臂号发(plug.adb:661 / 825)。现在所有发关节命令的地方(Selfmap.Go、Jointboot.Cmd_Hook、Lock_Merged)都填了 Group / Groups,这条后路没人走("组号 = 臂号"的假设见 summary)(plug.ads:60)
 plug.ads	Img_Stride : constant := 4;	4	调参数	量'每拍画面变了多少'隔 4 个像素取一个(给画面延迟相关用);灰度转换那一遍已逐像素走过,省不了多少(plug.ads:47)	Image_Lag 用的画面变化信号	低	去掉:在 RGB→灰度那一遍里顺手逐像素累加(步长 1),不需要数
@@ -3122,7 +3113,7 @@ selfmap.adb	"" & Codec.Fmt (Amp, 4) & "" & Codec.Fmt (Got, 4) & "" & Natural'Ima
 selfmap.adb	"" & Codec.Fmt (Amp, 4) & "" & Codec.Fmt (Got, 4) & "" & Natural'Image (Frames) & ""	4	格式	日志 / 报原因的话里 Amp 印 4 位小数(Codec.Fmt 第二个参数 = 小数位数),不进任何判据(selfmap.adb:493)
 selfmap.adb	"" & Codec.Fmt (Amp, 4) & "" & Codec.Fmt (Got, 4) & "" & Natural'Image (Frames) & ""	4	格式	日志 / 报原因的话里 Got 印 4 位小数(Codec.Fmt 第二个参数 = 小数位数),不进任何判据(selfmap.adb:493)
 selfmap.adb	"" & Codec.Fmt (M.Jaw_Noise, 4) & "" &	4	格式	日志 / 报原因的话里 M.Jaw_Noise 印 4 位小数(Codec.Fmt 第二个参数 = 小数位数),不进任何判据(selfmap.adb:405)
-selfmap.adb	(if F.Jaw.Is_Empty or else K >= Jaw_Count (F, Arm) then 1.0	1.0	调参数	这条臂没有抓握读数(或第 K 个不存在)时 Jaw_Of 返回 1.0 —— 就是'没读数就发 1.0'。1.0 是 x5 夹爪读数 [0, 1]、1 = 张开的约定(zone.adb:513、plug.adb:808 的注释都说那是 x5 的约定,别处已改成开机量两头)。它既被当成'此刻的抓握读数'(zone.adb:515–605、act.adb:4708–4844 拿它当扫动起点、判动没动),又被 Verify / Measure(279、425 行)放进 Go 的抓握目标发给身体。【认身体的规则:缺省值】(selfmap.adb:17)	没有抓握读数的身体:开机量身体、核对身体时发给抓握通道的目标;各处当作'此刻抓握读数'的那个数	高	没读数就不发抓握目标:调用方改用 Jaw_All (F, A)(空 = 保持,Plug.Cmd.Jaw 的约定本来就是'空 = 保持读数');非要一个数的地方用 Zone 开机量到的两头(Hand.Open_Reading / Hand.Empty_Close);都没有就如实说'这只手没有抓握读数',不编 1.0
+selfmap.adb	& (if M.Settle > 0 then "" & Codec.Img (M.Settle) & "" else ""));	"0	格式	日志文字"(记 0,不编)":Settle 一次都没量出来时照实说记成 0(0 = 还没量到);只是说明,不进任何判据(selfmap.adb:565)
 selfmap.adb	Amp : constant Long_Float := (if Has_Step then Step_Px (A) (if K < 3 then 0 else 1) else 0.0);	3	结构	前 3 个通道平移、后 3 个转动(selfmap.adb:421)
 selfmap.adb	Append (T, "" & Natural'Image (A + 1) & "" & Codec.Fmt (Got, 4) & "" & Codec.Fmt (Expect, 4) & "" & (if Visible then "" else "") & "");	4	格式	日志 / 报原因的话里 Got 印 4 位小数(Codec.Fmt 第二个参数 = 小数位数),不进任何判据(selfmap.adb:311)
 selfmap.adb	Append (T, "" & Natural'Image (A + 1) & "" & Codec.Fmt (Got, 4) & "" & Codec.Fmt (Expect, 4) & "" & (if Visible then "" else "") & "");	4	格式	日志 / 报原因的话里 Expect 印 4 位小数(Codec.Fmt 第二个参数 = 小数位数),不进任何判据(selfmap.adb:311)
@@ -3144,11 +3135,12 @@ selfmap.adb	Ls : constant Plug.Limit_State := (if Arrived < 2 then Plug.Held_Bac
 selfmap.adb	M.Cam_On_Arm := Int_Vectors.To_Vector (-1, Ada.Containers.Count_Type (Arms));	1	数值	哨兵:-1 = 这只手上没认出相机。(selfmap.adb:412)
 selfmap.adb	M.EE_Noise := Long_Float'Max (M.EE_Noise, Table.Norm (D, 3));	3	结构	Chan 的通道布局:每条臂 6 个通道(Chan.Per_Arm = 6),前 3 个是平移;Table.Norm (D, 3) = 取前 3 个分量的模 = 平移量(selfmap.adb:345)
 selfmap.adb	M.Jaws.Append (Integer (Natural'Max (1, Jaw_Count (F, A))));	1	调参数	"每条臂至少一个抓握通道":这条臂一个抓握读数都没报(Jaw_Count = 0)也记成 1 个。眼下基本走不到:认布局时没认出夹爪就不开机(layout.adb:267),没有自己抓握组的臂借第 0 组的读数(selfmap.adb:8 Jaw_Index)—— 那两条是根。(selfmap.adb:389)	M.Jaws(每条臂几个抓握通道)⇒ 开机为几个通道合空量握区、act 里 Jaws_Of 列几根手指	低 — 眼下被上游盖住;根上的规矩(没夹爪不开机、借第 0 组)一改,这里会给没夹爪的臂造一个假通道:发抓握命令、等几十拍、存一只量不出握区的手	直接存 Jaw_Count (F, A)(这条臂此刻报了几个抓握读数),0 就是 0;和 layout.adb:267、selfmap.adb:8 一起改:没夹爪的身体照样开机,没有自己抓握组的臂 Jaw_Count = 0,不借第 0 组
-selfmap.adb	M.Settle := Natural'Max (M.Settle, Natural'Min (Frames, 6));	6	调参数	'读数稳下来要几拍'(Settle)取探针推的拍数,但封顶 6 拍。Settle 是 Go 里'至少等几拍'和'最多等 12 + Settle 拍'(183–184、241–242 行)、抓握扫动(act.adb:4843)的依据:慢的身体(人形每挪一下 ~40 拍才停稳,zone.adb:519 G2A)被截成 6,之后每一步都等不够【时间假设:固定封顶几拍】(selfmap.adb:442)	每条命令发出后最少 / 最多等几拍	中	Settle = 各通道探针那一推里读数第一次连着两拍不动时的拍数,取各通道的中位(卡住的那一根跑满上限也拖不动中位),不封顶
 selfmap.adb	Moved_P : constant Long_Float := Table.Norm (D, 3);	3	结构	Chan 的通道布局:每条臂 6 个通道(Chan.Per_Arm = 6),前 3 个是平移;Table.Norm (D, 3) = 取前 3 个分量的模 = 平移量(selfmap.adb:198)
 selfmap.adb	N_Cmd : constant Long_Float := (if Geo then Table.Norm (Cmd, 3) / Tol + Sqrt (Cmd (3) ** 2 + Cmd (4) ** 2 + Cmd (5) ** 2) / Tol_Rot else 0.0);	3	结构	Chan 的通道布局:每条臂 6 个通道(Chan.Per_Arm = 6),前 3 个是平移;Table.Norm (D, 3) = 取前 3 个分量的模 = 平移量(selfmap.adb:206)
+selfmap.adb	Ok := Still >= 2;	2	调参数	画面连着 2 拍不变 = 停了(Wait_Still;09-30 从 exit when 那一行挪到这儿,改成照实回 Ok:等满了还在变 ⇒ Ok = False)(selfmap.adb:115)	等画面停下(Wait_Still)	中	连着(量到的画面刷新周期 + 1)拍;新量:动的时候画面每几拍才变一次(Plug.Beat.Img_Chg 在扫描里零与非零的间隔)——相机帧率低于控制频率时重复帧会被当成'静止'
 selfmap.adb	Put_Line ("" & Codec.Fmt (M.EE_Noise, 5) & "" & Codec.Fmt (M.Rot_Noise, 5) &	5	格式	日志 / 报原因的话里 M.EE_Noise 印 5 位小数(Codec.Fmt 第二个参数 = 小数位数),不进任何判据(selfmap.adb:404)
 selfmap.adb	Put_Line ("" & Codec.Fmt (M.EE_Noise, 5) & "" & Codec.Fmt (M.Rot_Noise, 5) &	5	格式	日志 / 报原因的话里 M.Rot_Noise 印 5 位小数(Codec.Fmt 第二个参数 = 小数位数),不进任何判据(selfmap.adb:404)
+selfmap.adb	Put_Line ("" & Codec.Fmt (M.Joint_Noise, 6) & ""	6	格式	日志 / 给脑的话里印几位小数(selfmap.adb:564)
 selfmap.adb	Put_Line ("" & Natural'Image (Ch) & (if Has_Step then "" & Codec.Fmt (Amp, 4) & "" & Codec.Fmt (M.Delivered (Ch), 4) & ""	4	格式	日志 / 报原因的话里 Amp 印 4 位小数(Codec.Fmt 第二个参数 = 小数位数),不进任何判据(selfmap.adb:499)
 selfmap.adb	Put_Line ("" & Natural'Image (Ch) & (if Has_Step then "" & Codec.Fmt (Amp, 4) & "" & Codec.Fmt (M.Delivered (Ch), 4) & ""	4	格式	日志 / 报原因的话里 M.Delivered (Ch) 印 4 位小数(Codec.Fmt 第二个参数 = 小数位数),不进任何判据(selfmap.adb:499)
 selfmap.adb	Stop : constant Boolean := (Still >= 2 and then Sub_Frames >= M.Settle) or else Sub_Frames >= 12 + M.Settle;	12	调参数	位姿命令每一条最多等 12 + Settle 拍(selfmap.adb:241)	位姿命令最多等多久(碰桌面那一步 V1B21 要 24 拍)	高	去掉固定拍数:每拍还在挪(超过 M.Joint_Noise / EE_Noise)就等,停了才读;安全上限 = 这条命令的距离 ÷ 量到的每拍最大速度 + 量到的 Settle + 刷新周期(新量:探针 / 扫描里每拍挪多少)。慢身体(人形、DIY 大臂)一格要 20 拍以上,到点没走完就读 ⇒ 实到不足被判到头
@@ -3158,31 +3150,26 @@ selfmap.adb	exit when Arrived >= 2 or else (Still >= 2 and then Frames >= M.Sett
 selfmap.adb	exit when Arrived >= 2 or else (Still >= 2 and then Frames >= M.Settle)	2	调参数	关节目标没到时连着 2 拍不动 = 被顶住 / 到头(selfmap.adb:183)	Go 关节目标什么时候算停	中	连着(量到的读数刷新周期 + 1)拍,不写 2;新量:动的时候读数每几拍才变一次(Plug.Beat.Q_Chg 在扫描里零与非零的间隔)——读数 10 Hz、控制 30 Hz 的身体刷新周期 3 拍,'连着 2 拍不动'会在还在动时误判停了
 selfmap.adb	exit when Arrived >= 2 or else Stop or else (Press and then Ls = Plug.Free and then Press_Still >= 2) or else Frames >= Cap;	2	调参数	到了连着 2 拍(selfmap.adb:247)	Go 位姿命令什么时候算到	中	连着(量到的读数刷新周期 + 1)拍,不写 2;新量:动的时候读数每几拍才变一次(Plug.Beat.Q_Chg 在扫描里零与非零的间隔)——读数 10 Hz、控制 30 Hz 的身体刷新周期 3 拍,'连着 2 拍不动'会在还在动时误判停了
 selfmap.adb	exit when Arrived >= 2 or else Stop or else (Press and then Ls = Plug.Free and then Press_Still >= 2) or else Frames >= Cap;	2	调参数	压下去连着 2 拍沿命令方向不动 = 停了(selfmap.adb:247)	碰桌面 / 压东西那一步什么时候读	中	连着(量到的读数刷新周期 + 1)拍,不写 2;新量:动的时候读数每几拍才变一次(Plug.Beat.Q_Chg 在扫描里零与非零的间隔)——读数 10 Hz、控制 30 Hz 的身体刷新周期 3 拍,'连着 2 拍不动'会在还在动时误判停了
-selfmap.adb	exit when Still >= 2;	2	调参数	画面连着 2 拍不变 = 停了(selfmap.adb:76)	等画面停下(Wait_Still)	中	连着(量到的画面刷新周期 + 1)拍;新量:动的时候画面每几拍才变一次(Plug.Beat.Img_Chg 在扫描里零与非零的间隔)——相机帧率低于控制频率时重复帧会被当成'静止'
 selfmap.adb	for K in 1 .. 4 loop	4	调参数	静止噪声只量 4 拍(取最大差),而且接着上一个动作就量(注释自己写着 PLAN 2b 欠账)(selfmap.adb:336)	M.Joint_Noise / EE_Noise / Rot_Noise / 每台相机的地板 —— 后面几乎所有门的下限	高	先等收住(每拍挪动不再变小)再量;拍数按要的置信度定(估 3σ 门上界要数十拍,拍数由统计定);相机地板用多对帧的分位数,不用一对
 selfmap.adb	for Try in 1 .. (if Has_Step and then Amp > 0.0 then 1 else 0) loop	1	结构	循环当 if 用:有"一步看得见"的幅度就推这一回(推过去再推回来),没有就不推;写成循环是为了里面能直接 return。"推一次"就是这一段的定义(selfmap.ads:95 "每个通道按它推一次再推回来")。注:只推一次,M.Delivered 是单个样本,通道稳不稳证不出。(selfmap.adb:426)
 selfmap.adb	if Best >= 0 and then Bv > 0.0 and then Bv >= 2.0 * Second then	2.0	调参数	同 jointboot 140 行'比第二名多一倍';现在只有没给 Eyes 时才走(开机前半段总会给)(selfmap.adb:532)	认眼(后备路径)	低	同 jointboot 140 行(一个量一种量法:删掉这份)
-selfmap.adb	if K < 4 then	4	结构	= 336 行的最后一拍(留倒数第二帧和最后一帧做地板那一对);336 改这里跟着改(selfmap.adb:362)
 selfmap.adb	if abs (Got - Expect) <= 0.5 * abs Expect + M.EE_Noise and then Visible then	0.5	调参数	装回核对:实到和存的差一半以内 = 同一具身体(selfmap.adb:308)	身体文件能不能直接用(换了负载 / 关节后 40% 的变化也会被当成没变)	中	按存的历次实到(Deliv_Hist)的散布:|实到 − 存的| ≤ 3×历次散布 + 3×EE_Noise(统计门)
 selfmap.adb	if abs Got >= Amp * 0.5 then	0.5	调参数	探针实到一半以上才记零件(selfmap.adb:477)	逐通道量身体(看见没有、记不记)	中	实到超过 3×量到的读数噪声(统计门)且和命令同向;'一半'去掉
 selfmap.adb	if abs Got >= Amp * 0.5 then	0.5	调参数	(482 行同一句)实到一半以上才记相机变化比例(selfmap.adb:477)	同上	中	实到超过 3×量到的读数噪声(统计门)且和命令同向;'一半'去掉
 selfmap.adb	if abs Got >= Amp * 0.5 then	0.5	调参数	(489 行同一句)实到一半以上这个通道才算量成(selfmap.adb:477)	同上	中	实到超过 3×量到的读数噪声(统计门)且和命令同向;'一半'去掉
-selfmap.adb	or else Frames >= 12 + M.Settle;	12	调参数	关节目标最多等 12 + Settle 拍;开机前半段 M0 的 Settle 从来没量、恒为缺省 2 ⇒ 每格 14 拍封顶(V1B4 注释:每格都等满 14 拍)(selfmap.adb:184)	一格扫描 / 一条关节命令最多等多久;到点没走完就读 ⇒ 实到不足被判到头、记成尽头	高	去掉固定拍数:每拍还在挪(超过 M.Joint_Noise / EE_Noise)就等,停了才读;安全上限 = 这条命令的距离 ÷ 量到的每拍最大速度 + 量到的 Settle + 刷新周期(新量:探针 / 扫描里每拍挪多少)。慢身体(人形、DIY 大臂)一格要 20 拍以上,到点没走完就读 ⇒ 实到不足被判到头
+selfmap.adb	or else Frames >= 12 + M.Settle;	12	调参数	关节目标最多等 12 + Settle 拍(Settle 是量出来的:09-30 起不缺省、不封顶,开机前半段量上以前是 0 ⇒ 12 拍封顶;原来缺省 2 ⇒ 每格 14 拍封顶,V1B4 注释:每格都等满 14 拍)(selfmap.adb:223)	一格扫描 / 一条关节命令最多等多久;到点没走完就读 ⇒ 实到不足被判到头、记成尽头	高	去掉固定拍数:每拍还在挪(超过 M.Joint_Noise / EE_Noise)就等,停了才读;安全上限 = 这条命令的距离 ÷ 量到的每拍最大速度 + 量到的 Settle + 刷新周期(新量:探针 / 扫描里每拍挪多少)。慢身体(人形、DIY 大臂)一格要 20 拍以上,到点没走完就读 ⇒ 实到不足被判到头
 selfmap.adb	return Cnt <= 4 * Picture.Min_Pixels (Before.W, Before.H);	4	调参数	画面静止 = 超地板像素总数 ≤ 4×最小斑块(注释说'凑不成一团',代码只数总数)(selfmap.adb:41)	Wait_Still / Pictures_Still 判画面停了	中	按注释做:Picture.Components 找不到 ≥ Min_Pixels 的连通块 ⇒ 静止;或门 = 开机静止对上量到的超地板像素数(Measure_Idle 那一对,新量)
 selfmap.adb	return Short > Prev + Long_Float'Max (Negligible * Lstep, 3.0 * Long_Float'Max (Noise, Jit));	3.0	统计	3 倍读数噪声 / 抖动(3σ 式门);注:Noise 是最大差不是 σ(selfmap.adb:100)
 selfmap.ads	Eyes : Ints := Int_Vectors.Empty_Vector; World : Integer := -1);	1	数值	Measure 的缺省参数 World = −1 = 开机前半段没认出世界相机(哨兵)。注意 selfmap.adb:512 在 Eyes 给了、World = −1 时把 World_Cam 记成 0 号 —— 那个 0 才是认身体的缺省,检查器按规则放行,不在这一格,见 summary(selfmap.ads:99)
 selfmap.ads	Free_Base : constant := 2;	2	结构	Blocked 的定义:拿前两步空走当底(两步之差就是散布);碰上之前要空走这么多步才判得出(09-30 我定)
 selfmap.ads	Negligible : constant := 0.01;	0.01	调参数	一步里可忽略的一丝 = 这一步的 1%('停了'和 Blocked 共用)(selfmap.ads:52)	Go 判停、Blocked 判碰到	中	'停了':用量到的收尾蠕动上界 / 每拍挪动不再变小;Blocked 里已有 3×噪声、3×抖动两项,1% 只在仿真噪声为 0 时起作用 ⇒ 换成量到的空走少走量的散布
 selfmap.ads	Per_Arm : Natural := 6;	6	结构	缺省 = SE(3) 维数,Measure 里改成 Chan.Per_Arm(selfmap.ads:22)
-selfmap.ads	Settle : Natural := 2;	2	调参数	Settle 缺省 2 拍:开机前半段(M0 只经过 Measure_Idle)从来不量,整个认手 / 扫描 / 装回核对都按 2;后半段 Measure 又把它夹在 [2, 6](442 行的 6 被新检查当成结构漏掉了)(selfmap.ads:39)	Go 的'至少等几拍'和 12 + Settle 上限;act 里 12 + Settle 的等待	高	开机前半段就量:Find_Arms 每次探针从发命令到读数停住(每拍挪动 ≤ Joint_Noise 且不再变小)用了几拍,取最大;去掉 442 行的上限 6 和这里的缺省 2
 selfmap.ads	Watch : Watcher := null; Joints : Floats := F64_Vectors.Empty_Vector; Group : Integer := -1;	1	数值	Go 的缺省参数 Group = −1 = 发的是位姿目标,不是第几组关节(selfmap.adb:119 Is_Joint := Group >= 0 …;哨兵)(selfmap.ads:72)
 sinew.adb	"" & ASCII.LF &	"0	格式	GBNF num ::= [1-9] ([0-9])? 里第二位的字符类 [0-9] 的下端 = 任一数字字符(这一位能不能出现、出现几次才是上限,见下面第二个 9)(sinew.adb:427)
 sinew.adb	"" & ASCII.LF &	"1	格式	num 的第一位 [1-9]:脑说的步数 / 次数是正整数、不许前导零("0 steps"、"repeat 0 times"没有意义)(sinew.adb:427)
 sinew.adb	"" & ASCII.LF &	"9	调参数	(这一行两个 9 登记时分不开,第二个算这一条)num ::= [1-9] ([0-9])? —— 第二位 [0-9] 只许出现一次 ⇒ 脑能说的数写死在 1..99。这是文法里给脑能说的数写死的范围:'or <n> steps' 最多 99 步,'repeat <n> times' 最多 99 次。上限藏在'只有一个可选位'这个形状里,不是任何量出来的东西(sinew.adb:427)	脑在受限解码下能写出的最大步数 / 重复次数(一段区间最多要多少拍;不写步数时身体按 Step_Cap 60 拍)	低	位数按这一集还剩多少拍生成:剩 R 拍 ⇒ num 允许 ⌈log10 (R + 1)⌉ 位(已用拍数 = Plug.Steps (L);总拍数要对方在 prepare_case / reset 里报,或按 owner 给的每炮时间预算 ÷ 量到的帧时 L.Frame_S),不再写死一个可选位
 sinew.adb	"" & ASCII.LF &	"9	格式	num 第一位 [1-9] 的上端(数字字符类)(sinew.adb:427)
 sinew.adb	& (if J - I = 1 then "" else Words (I + 1 .. J - 1)));	1	结构	Sufs:这个词只有 1 个字母 ⇒ 剩下的后缀是空的,用 '.' 记'词到这儿结束'(字符串算法的下标)(sinew.adb:301)
-sinew.adb	(if N = 0 then "" else "" & Sent_Tail (N - 1) & "");	"9	格式	GBNF 字符类 [a-zA-Z0-9 ,.=\'] 里的 0-9 = 任一数字字符(say 那句话里打得出数字)(sinew.adb:403)
-sinew.adb	Append (R, Word_Tail (23));	23	格式	语法:一个词最多 24 字母(按见过的名字 mintgreenscissors 定,名字更长说不出)(sinew.adb:460)
 sinew.adb	C.Dir := (if Lw (Stop) = "" then 1 else -1);	1	数学	方向的正负号:up = +1。(sinew.adb:940)
 sinew.adb	C.Dir := (if Lw (Stop) = "" then 1 else -1);	1	数学	方向的正负号:down = −1。(sinew.adb:940)
 sinew.adb	C.Subj := Make_Noun (K, Stop - 2);	2	格式	同上,主语的末位(sinew.adb:942)
@@ -3200,11 +3187,9 @@ sinew.adb	K : Natural := 2;	2	格式	do 之后第 2 个词开始(sinew.adb:920)
 sinew.adb	K := K + 2;	2	格式	until <结局> 两词(sinew.adb:1028)
 sinew.adb	K := K + 3;	3	格式	or <几> steps 三词(sinew.adb:1035)
 sinew.adb	K := K + 4;	4	格式	with my <still|moving> eye 四词(sinew.adb:1047)
-sinew.adb	Max_Words : constant := 64;	64	格式	一行最多 64 个词(解析容量)(sinew.adb:573)
 sinew.adb	Patch : Integer := -1;	1	数值	哨兵:-1 = 这个块还没有待回填的跳转。(sinew.adb:585)
-sinew.adb	Sent_Rule : constant String := "" & Sent_Tail (80);	80	格式	语法:一句话最多 81 字符(挡生成跑飞)(sinew.adb:404)
-sinew.adb	Stack (Depth) := (K => B_Repeat, At_Addr => Here - 1, Patch => -1);	1	数值	哨兵:-1 = repeat 块还没有待回填的那一条。(sinew.adb:794)
-sinew.adb	Stack : array (1 .. 32) of Open_Block;	32	格式	块嵌套栈容量(sinew.adb:587)
+sinew.adb	Sent_Rule : constant String := "";	"9	格式	GBNF 字符类 [a-zA-Z0-9 ,.=\'] 里的 0-9 = 任一数字字符(say 那句话里打得出数字,look = k 这个键按得动)(sinew.adb:405)
+sinew.adb	Stack.Append (Open_Block'(K => B_Repeat, At_Addr => Here - 1, Patch => -1));	1	数值	哨兵:-1 = repeat 块没有待回填的那一条(repeat 的跳转回填在它的头指令上,不走 Patch)(sinew.adb:791)
 sinew.adb	and then (Lw (K + 2) = "" or else Lw (K + 2) = "")	2	结构	K + 2 是 still 或 moving(字段位置)(sinew.adb:1044)
 sinew.adb	and then (Lw (K + 2) = "" or else Lw (K + 2) = "")	2	结构	同上(sinew.adb:1044)
 sinew.adb	elsif N >= 3 and then Lw (2) = "" then	2	结构	'repeat until <结局>':第 2 个词是 until(字段位置)(sinew.adb:778)
@@ -3321,15 +3306,19 @@ zone.adb	"" & Codec.Fmt (Z.Span, 3) & "" & Codec.Fmt (100.0 * Long_Float (N_Mv) 
 zone.adb	"" & Codec.Fmt (Z.Span, 3) & "" & Codec.Fmt (100.0 * Long_Float (N_Mv) / Long_Float (Natural'Max (1, Cw * Ch)), 2) & ""	2	格式	日志里百分比印 2 位小数(zone.adb:705)
 zone.adb	"" & Codec.Fmt (Z.Span, 3) & "" & Codec.Fmt (100.0 * Long_Float (N_Mv) / Long_Float (Natural'Max (1, Cw * Ch)), 2) & ""	3	格式	日志里印几位小数(zone.adb:705)
 zone.adb	& "" & Natural'Image (Hi_Steps) & "" & Codec.Fmt (abs (Hi_R - Lo_R), 3));	3	格式	日志里印几位小数(zone.adb:644)
-zone.adb	& (if Known then "" & Codec.Fmt ((if Hi_Open then Hi_R else Lo_R), 3) & "" else ""));	3	格式	日志里印几位小数(zone.adb:805)
+zone.adb	& (if Known then "" & Codec.Fmt ((if Hi_Open then Hi_R else Lo_R), 3) & ""	3	格式	日志 / 给脑的话里印几位小数(zone.adb:765)
+zone.adb	At_End := Dir * (Rn - R) < 0.5 * S or else (Seen_Move and then not Moved);	0.5	调参数	读数挪不到命令的一半 = 到头,拍的一半;力控/跟随误差大的爪会提前判到头(09-30 起这一下没停住就不判,Go_Jaw 照实回没停住)(zone.adb:545)	抓握通道行程两头	中	同碰到判据:和前几步空推的少走量比,超过 max(1% 步长, 3×Jaw_Noise, 3×前两步之差)(Selfmap.Blocked)才算到头
+zone.adb	Av (Turn_Ch) := 64.0 * M.Amp (Ch);	64.0	调参数	判哪头张开时手绕竖轴转 64 倍转动探针(让背景挪几十像素),拍的倍数;09-30 起按推的那个通道(绕 z)自己的探针幅度定(原来按绕 x 那个通道的幅度)(zone.adb:19)	判抓握通道哪头张开	中	按阶梯(×4)转,直到区里与瓣里'变了的比例'之差在统计上显著(见 Known 那一行),上限按量到的 G.Stride_Rot / 关节范围
 zone.adb	Band : constant Long_Float := Long_Float (Hh) / 80.0;	80.0	调参数	指尖那一截厚 = 画幅高/80;Lobe_Geo.Wide(指肚宽)/Thin(手指厚)都在这一截上量,喂给 Contact.Grasp 的 Width/Thick;随分辨率/距离变,圆指尖上宽 ≈ 2√(2rb) 随截厚变(zone.adb:222)	指尖位置、指肚宽、手指厚	高	沿手指从尖往里量宽度剖面,取宽度不再随深入增大处(平台)作指肚宽/厚;尖的那一截厚取量到的指尖误差折成像素(G.Tip_Sd × G.F ÷ 深)
 zone.adb	Codec.Fmt (Z.Cu, 3) & "" & Codec.Fmt (Z.Cv, 3) & "" & Codec.Img (Z.X0) & "" & Codec.Img (Z.Y0) & "" & Codec.Img (Z.X1) & "" & Codec.Img (Z.Y1) &	3	格式	日志里印几位小数(zone.adb:704)
 zone.adb	Codec.Fmt (Z.Cu, 3) & "" & Codec.Fmt (Z.Cv, 3) & "" & Codec.Img (Z.X0) & "" & Codec.Img (Z.Y0) & "" & Codec.Img (Z.X1) & "" & Codec.Img (Z.Y1) &	3	格式	日志里印几位小数(zone.adb:704)
+zone.adb	Good := Still >= 2 and then Step >= 3;	2	调参数	读数/画面连着 2 拍不动算停稳,拍的确认次数(09-30 从 exit when 挪到 Good 这一行:等满 40 拍还没停稳 ⇒ Good = False 照实说)(zone.adb:494)	抓握命令停稳	中	= 量到的画面滞后 Plug.Image_Lag + 1
+zone.adb	Good := Still >= 2 and then Step >= 3;	3	调参数	至少等 3 拍,拍的(zone.adb:494)	抓握命令停稳	中	= Image_Lag + 2(命令进来、画面跟上),或 M.Settle
 zone.adb	Hc : constant Integer := (if H.Arm < Natural (M.Cam_On_Arm.Length) then M.Cam_On_Arm (H.Arm) else -1);	1	数值	哨兵:-1 = 这只手上没有相机(738 行按 ≥ 0 判)。(zone.adb:734)
 zone.adb	Hi : Long_Float := -1.0e30;	1.0e30	数值	哨兵:求最小 / 最大值的初值(当「无穷」用),不进结果(zone.adb:80)
 zone.adb	I := I + 7;	7	数值	每 7 个像素抽一个估噪声地板(182 行,只影响样本量)(zone.adb:182)
-zone.adb	Known := N_L > 0 and then N_A > 0 and then (Ma > 2.0 * Ml or else Ml > 2.0 * Ma);	2.0	调参数	两处变了的比例差到 2 倍才敢说哪头张开,拍的倍数(zone.adb:801)	判抓握通道哪头张开	中	两比例检验(N_L、N_A 与各自变了的个数都有)在声明置信度下显著就判,改成统计门
-zone.adb	Known := N_L > 0 and then N_A > 0 and then (Ma > 2.0 * Ml or else Ml > 2.0 * Ma);	2.0	调参数	两处变了的比例差到 2 倍才敢说哪头张开,拍的倍数(zone.adb:801)	判抓握通道哪头张开	中	两比例检验(N_L、N_A 与各自变了的个数都有)在声明置信度下显著就判,改成统计门
+zone.adb	Known := Seen_Turn and then N_L > 0 and then N_A > 0 and then (Ma > 2.0 * Ml or else Ml > 2.0 * Ma);	2.0	调参数	两处变了的比例差到 2 倍才敢说哪头张开,拍的倍数(zone.adb:761)	判抓握通道哪头张开	中	两比例检验(N_L、N_A 与各自变了的个数都有)在声明置信度下显著就判,改成统计门
+zone.adb	Known := Seen_Turn and then N_L > 0 and then N_A > 0 and then (Ma > 2.0 * Ml or else Ml > 2.0 * Ma);	2.0	调参数	两处变了的比例差到 2 倍才敢说哪头张开,拍的倍数(zone.adb:761)	判抓握通道哪头张开	中	两比例检验(N_L、N_A 与各自变了的个数都有)在声明置信度下显著就判,改成统计门
 zone.adb	Lo : Long_Float := 1.0e30;	1.0e30	数值	哨兵:求最小 / 最大值的初值(当「无穷」用),不进结果(zone.adb:79)
 zone.adb	Lobes_Of_Z : constant array (1 .. 2) of Lobe := [Z.A, Z.B];	2	调参数	调试图只画 A/B 两瓣(两瓣写死)(zone.adb:684)	BL_DUMP 调试图	低	按 Lobe_Of (Z, I),I < Z.N_Lobes 遍历
 zone.adb	Ma : constant Long_Float := 1.0 - Long_Float (Stat_A) / Long_Float (Natural'Max (1, N_A));	1	数值	防除零:合到的区里手指像素数 N_A,同上。(zone.adb:799)
@@ -3337,27 +3326,24 @@ zone.adb	Mk.Replace_Element (Y * Cw + X, 128);	128	格式	调试图灰度(区框
 zone.adb	Mk.Replace_Element (Y * Cw + X, 255);	255	格式	调试图灰度(瓣框)(zone.adb:695)
 zone.adb	Ml : constant Long_Float := 1.0 - Long_Float (Stat_L) / Long_Float (Natural'Max (1, N_L));	1	数值	防除零:瓣里手指像素数 N_L 作分母至少 1;801 行 Known 已要求 N_L > 0,Max 不改任何用到的值。(zone.adb:798)
 zone.adb	Moved_Px : array (0 .. Natural'Max (1, N_Cams) - 1) of Natural := [others => 0];	1	结构	至少留一格免得数组为空;N_Cams = 0 时 616 行已返回,Moved_Px 不会被读。(zone.adb:530)
+zone.adb	Put_Line ("" & Codec.Fmt (H.Open_Reading, 3) & "");	3	格式	日志 / 给脑的话里印几位小数(zone.adb:786)
 zone.adb	Put_Line ("" & Codec.Fmt (Lo_R, 3) & "" & Natural'Image (Lo_Steps) & "" & Codec.Fmt (Hi_R, 3)	3	格式	日志里印几位小数(zone.adb:643)
 zone.adb	Put_Line ("" & Codec.Fmt (Lo_R, 3) & "" & Natural'Image (Lo_Steps) & "" & Codec.Fmt (Hi_R, 3)	3	格式	日志里印几位小数(zone.adb:643)
 zone.adb	Put_Line ("" & Codec.Fmt (Step, 3) & "" & Codec.Img (Stat_L) & "" & Codec.Img (N_L)	3	格式	日志里印几位小数(zone.adb:803)
+zone.adb	Put_Line ("" & Codec.Fmt (V, 3) & "");	3	格式	日志 / 给脑的话里印几位小数(zone.adb:500)
 zone.adb	Put_Line ("" & Natural'Image (Arm + 1) & "" & Natural'Image (K) & "" & Natural'Image (Used) & "" & Codec.Fmt (J0, 3) & "");	3	格式	日志里印几位小数(zone.adb:633)
 zone.adb	Ramp : constant := 4.0;	4.0	数值	推到头的指数搜索放大倍数(只影响推几下;到头另有判据)(zone.adb:517)
-zone.adb	S : Long_Float := Long_Float'Max (1.0, abs R);	1.0	调参数	单位假设:抓握通道推到头的头一步 = max(1, |读数|),读数为 0 或很小时按「1 个读数单位」推 —— 默认读数单位让 1 是合适的量级(读数是 [0,1] 开度时一下就是满行程;读数是米时一下就是 1 米的命令;读数是编码器刻度时 1 格太小)(zone.adb:583)	抓握通道往两头推时第一下推多远、要推几下(每下还要等停稳)才到头	中 — 不钳位命令的身体上「1 个单位」可能是越界命令;刻度很细的通道推满 12 下(×4 放大)还可能到不了头	头一步从这个通道量到的量起:在读数噪声 M.Jaw_Noise 之上按 Ramp 放大,推到画面(Any_Moved)或读数跟着动的那一下就是这个通道的量级;jointboot.adb:451 关节扫描的 0.03 × max(1, |读数|) 是同一个「1 个读数单位」假设,一起换
-zone.adb	Selfmap.Wait_Still (L, M, F, 30, Used, Ok2);	30	调参数	转完等静止最多 30 拍,超时照样比像素(同 626)(zone.adb:770)	判哪头张开时的静止	高	等待上限 = 量到的这具身体停稳拍数(M.Settle 的历次最大/开机停稳分布的高分位);超时照实说'没停稳'(Ok=False),不在动着的画面上接着量
-zone.adb	Selfmap.Wait_Still (L, M, F, 30, Used, Ok2, Prev_Pic => S_Prev'Access);	30	调参数	量握区前等画面静止最多 30 拍,超时 Wait_Still 仍给 Ok=True 照样往下;就在这段注释里人形要 ~40 拍(zone.adb:626)	量握区之前的静止	高	等待上限 = 量到的这具身体停稳拍数(M.Settle 的历次最大/开机停稳分布的高分位);超时照实说'没停稳'(Ok=False),不在动着的画面上接着量
-zone.adb	Step : constant Long_Float := 64.0 * M.Amp (H.Arm * M.Per_Arm + 3);	3	结构	位姿通道布局(平移 0–2、转动 3–5)里第一个转动通道的探针幅度(zone.adb:748)
-zone.adb	Step : constant Long_Float := 64.0 * M.Amp (H.Arm * M.Per_Arm + 3);	64.0	调参数	判哪头张开时手绕竖轴转 64 倍转动探针(让背景挪几十像素),拍的倍数(zone.adb:748)	判抓握通道哪头张开	中	按阶梯(×4)转,直到区里与瓣里'变了的比例'之差在统计上显著(见 801),上限按量到的 G.Stride_Rot / 关节范围
+zone.adb	S := Long_Float'Max (1.0, abs R);	1.0	调参数	单位假设:抓握通道推到头的头一步 = max(1, |读数|),读数为 0 或很小时按「1 个读数单位」推 —— 默认读数单位让 1 是合适的量级(读数是 [0,1] 开度时一下就是满行程;读数是米时一下就是 1 米的命令;读数是编码器刻度时 1 格太小)(zone.adb:530)	抓握通道往两头推时第一下推多远、要推几下(每下还要等停稳)才到头	中 — 不钳位命令的身体上「1 个单位」可能是越界命令;刻度很细的通道推满 12 下(×4 放大)还可能到不了头(09-30 起推满还没到头照实说量不出)	头一步从这个通道量到的量起:在读数噪声 M.Jaw_Noise 之上按 Ramp 放大,推到画面(Any_Moved)或读数跟着动的那一下就是这个通道的量级;jointboot.adb:451 关节扫描的 0.03 × max(1, |读数|) 是同一个「1 个读数单位」假设,一起换
+zone.adb	Still_Wait : constant := 30;	30	调参数	等画面静止最多 30 拍(量握区之前、判哪头张开时转出去以后,同一个等法;09-30 两处合成一个名字,超时 Wait_Still 照实回 Ok = False、不在还在动的画面上量);人形 G2A 每挪一下要 ~40 拍才停稳(zone.adb 那段注释)(zone.adb:459)	量握区之前 / 判哪头张开时的静止	高	等待上限 = 量到的这具身体停稳拍数(M.Settle 的历次最大 / 开机停稳分布的高分位)+ 量到的画面滞后;超时照实说'没停稳'(已经这样做)
 zone.adb	Sweep (-1.0, Lo_R, Lo_Frame, Lo_Prev, Lo_Steps, Okg);	1.0	数学	方向符号:往读数变小那边(−1)(zone.adb:635)
 zone.adb	Sweep (1.0, Hi_R, Hi_Frame, Hi_Prev, Hi_Steps, Okg);	1.0	数学	方向符号:往读数变大那边(+1)(zone.adb:639)
+zone.adb	Turn_Ch : constant Natural := Chan.Pos_Channels + 2;	2	结构	绕世界 z 转的那个通道:每条臂的通道前三个平移、后三个绕 x / y / z 小转(Chan.Compose),z 是转动里的第 3 个 = 平移三个之后下标 +2(x +0、y +1、z +2)(zone.adb:9)
 zone.adb	Z.Cu := 0.5 * (Z.A.Cu + Z.B.Cu); Z.Cv := 0.5 * (Z.A.Cv + Z.B.Cv);	0.5	数学	两瓣心的中点(zone.adb:69)
 zone.adb	Z.Cu := 0.5 * (Z.A.Cu + Z.B.Cu); Z.Cv := 0.5 * (Z.A.Cv + Z.B.Cv);	0.5	数学	两瓣心的中点(zone.adb:69)
 zone.adb	Z.Depth := Picture.Region_Depth (Depth_Closed, W, Hh, Clean, 0.25);	0.25	调参数	合上时手指深度取扫过像素的下四分位,假设手指占 ≥25%(zone.adb:115)	有深度时手指深度	低	深度直方图分两拨(Picture.Split)取近的一拨的中位。现只在自检
 zone.adb	Z.Depth := Picture.Region_Depth (Depth_Open, W, Hh, Left, 0.5);	0.5	统计	张开时瓣像素深度取中位(有深度那条路,现只在自检)(zone.adb:113)
 zone.adb	Z.N_Lobes := 1;	1	结构	计数:第 0 块连通块刚填进 Z.A ⇒ 此刻瓣数 = 1。两瓣写死的规矩不在这个 1 上,在 49–53、68 行的 >= 2 / := 2 / = 2(上一轮已登记为调参数·高)和 zone.ads:22 只有 A、B 两格。(zone.adb:48)
 zone.adb	Z.N_Lobes := 2;	2	调参数	瓣数写死成 2(zone.adb:51)	一个抓握通道的手指数	高	瓣存成向量(Zone.Lobe_Of 已是口子):每个'张开时是手指'的连通块只要大于量到的噪声斑块(两帧静止图做 Picture.Seen_Twice 的最大块)就是一瓣,N_Lobes = 量到的瓣块数,不设上限
-zone.adb	exit when Dir * (Rn - R) < 0.5 * S or else (Seen_Move and then not Moved);	0.5	调参数	读数挪不到命令的一半 = 到头,拍的一半;力控/跟随误差大的爪会提前判到头(zone.adb:599)	抓握通道行程两头	中	同碰到判据:和前几步空推的少走量比,超过 max(1% 步长, 3×Jaw_Noise, 3×前两步之差)(Selfmap.Blocked)才算到头
-zone.adb	exit when Still >= 2 and then Step >= 3;	2	调参数	读数/画面连着 2 拍不动算停稳,拍的确认次数(zone.adb:562)	抓握命令停稳	中	= 量到的画面滞后 Plug.Image_Lag + 1
-zone.adb	exit when Still >= 2 and then Step >= 3;	3	调参数	至少等 3 拍,拍的(zone.adb:562)	抓握命令停稳	中	= Image_Lag + 2(命令进来、画面跟上),或 M.Settle
 zone.adb	for Dir in 0 .. 1 loop	1	结构	一去一回两步:Dir = 0 绕竖轴转出去、比像素,Dir = 1 转回原位姿(759–766 行)。两步就是"去 + 回"本身,不是重复几回。(zone.adb:754)
 zone.adb	for Dx in -1 .. 1 loop	1	结构	8 邻连通的横向偏移 −1..+1,同上。(zone.adb:261)
 zone.adb	for Dx in -1 .. 1 loop	1	结构	Lobe_Pixels 里同样的 8 邻连通(横向)。(zone.adb:375)
@@ -3367,9 +3353,8 @@ zone.adb	for Dy in -1 .. 1 loop	1	结构	8 邻连通的纵向偏移 −1、0、+
 zone.adb	for Dy in -1 .. 1 loop	1	结构	Lobe_Pixels 里同样的 8 邻连通(纵向)。(zone.adb:374)
 zone.adb	for Dy in -1 .. 1 loop	1	结构	3×3 邻域(八邻接)的下界:连通块生长(09-30 我定)
 zone.adb	for Dy in -1 .. 1 loop	1	结构	3×3 邻域(八邻接)的下界:连通块生长(09-30 我定)
-zone.adb	for I in 0 .. Natural'Max (1, Natural (Rest.Length)) - 1 loop	1	结构	至少留一格:538 行要替换 Target 的第 K 格,这条臂一个抓握读数都没有时也得有第 0 格,不然越界。它本身不是规矩;"每条臂至少一个抓握通道"的规矩在 selfmap.adb:389、body_driver.adb:372,那两处按量到的个数改了以后,这里的 Max 就走不到。(zone.adb:619)
 zone.adb	for Pushes in 1 .. 12 loop	12	数值	最多推 12 下;×4 放大 12 下覆盖 4^12≈1.7e7 倍读数量级,任何身体都够(zone.adb:588)
-zone.adb	for Step in 1 .. 40 loop	40	调参数	一条抓握命令最多等 40 拍静止,到了照样 Good=True 当停了;慢的手会被 Sweep 误判到头(zone.adb:540)	抓握通道推到头	高	等待上限 = 量到的这具身体停稳拍数(M.Settle 的历次最大/开机停稳分布的高分位);超时照实说'没停稳'(Ok=False),不在动着的画面上接着量
+zone.adb	for Step in 1 .. 40 loop	40	调参数	一条抓握命令最多等 40 拍静止(保险);09-30 起等满了还没停稳照实回 Good = False、这一头量不出(原来照样 Good = True 当停了,慢的手被 Sweep 误判到头)(zone.adb:470)	抓握通道推到头	高	等待上限 = 量到的这具身体停稳拍数(M.Settle 的历次最大 / 开机停稳分布的高分位);超时照实说'没停稳'(已经这样做)
 zone.adb	if Comps (A).Count * 4 >= Comps (0).Count and then Comps (B).Count * 4 >= Comps (0).Count then	4	调参数	判'哪一类是张开时的手指'只看 ≥ 最大块 1/4 的块(zone.adb:428)	瓣 vs 合到的区(明暗两类谁是手指)	高	按量到的噪声斑块大小筛块:开机两帧静止图做 Picture.Seen_Twice(M.Floors)得到的最大噪声块像素数,比它大的块都留;不按'和最大块的比例'
 zone.adb	if Comps (A).Count * 4 >= Comps (0).Count and then Comps (B).Count * 4 >= Comps (0).Count then	4	调参数	同上(第二块)(zone.adb:428)	瓣 vs 合到的区	高	按量到的噪声斑块大小筛块:开机两帧静止图做 Picture.Seen_Twice(M.Floors)得到的最大噪声块像素数,比它大的块都留;不按'和最大块的比例'
 zone.adb	if Comps (K).Count * 10 >= Comps (0).Count then	10	调参数	扫过像素只留 ≥ 最大块 1/10 的连通块;为渲染器逐帧去噪撒点而设(146 行 From_Sweep,现只在自检)(zone.adb:146)	手指像素去散点	中	按量到的噪声斑块大小筛块:开机两帧静止图做 Picture.Seen_Twice(M.Floors)得到的最大噪声块像素数,比它大的块都留;不按'和最大块的比例'

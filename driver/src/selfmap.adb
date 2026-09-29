@@ -13,9 +13,37 @@ package body Selfmap is
    function Jaw_All (F : Plug.Frame; Arm : Natural) return Floats is
      (if F.Jaw.Is_Empty then F64_Vectors.Empty_Vector else F.Jaw (Jaw_Index (F, Arm)));
 
-   function Jaw_Of (F : Plug.Frame; Arm : Natural; K : Natural := 0) return Long_Float is
-     (if F.Jaw.Is_Empty or else K >= Jaw_Count (F, Arm) then 1.0
-      else F.Jaw (Jaw_Index (F, Arm)) (K));
+   function Jaw_Of (F : Plug.Frame; Arm : Natural; K : Natural := 0) return Long_Float is (F.Jaw (Jaw_Index (F, Arm)) (K));
+
+   function Settle_Beats (Moves : Floats; Noise : Long_Float) return Natural is
+      Started : Boolean := False;
+   begin
+      for T in 0 .. Natural (Moves.Length) - 1 loop
+         if Started and then Moves (T) <= Noise and then Moves (T) >= Moves (T - 1) then
+            return T + 1;
+         end if;
+         Started := Started or else Moves (T) > Noise;
+      end loop;
+      return 0;
+   end Settle_Beats;
+
+   function Settle_Since (L : Plug.Link; From_Seq : Natural; Noise : Long_Float) return Natural is
+      Moves : Floats;
+   begin
+      for B of L.Beats loop
+         if B.Seq > From_Seq then
+            declare
+               Mx : Long_Float := 0.0;
+            begin
+               for X of B.Q_Chg loop
+                  Mx := Long_Float'Max (Mx, X);
+               end loop;
+               Moves.Append (Mx);
+            end;
+         end if;
+      end loop;
+      return Settle_Beats (Moves, Noise);
+   end Settle_Since;
 
    procedure Idle (L : in out Plug.Link; F : in out Plug.Frame; N : Natural; Ok : out Boolean) is
    begin
@@ -28,12 +56,19 @@ package body Selfmap is
       end loop;
    end Idle;
 
+   --  这一对帧能不能判第 Cam 台:有地板、两帧都收到了这台的画面、一样大
+   function Judgeable (M : Body_Map; Before, After : Plug.Cam; Cam : Natural) return Boolean is
+     (Cam < Natural (M.Floors.Length) and then Plug.Has_Picture (Before) and then Plug.Has_Picture (After)
+      and then Before.W = After.W and then Before.H = After.H);
+
    function Picture_Still (M : Body_Map; Before, After : Plug.Cam; Cam : Natural) return Boolean is
-      --  静止 = 超过各自噪声地板的像素凑不成一团(最少像素数的几倍,倍数无量纲;去噪闪烁是撒开的单点)
-      Mv : constant Bools := Picture.Moved (Before.Gray, After.Gray, M.Floors (Cam));
       Cnt : Natural := 0;
    begin
-      for B of Mv loop
+      if not Judgeable (M, Before, After, Cam) then
+         return False;   --  有一帧没收到这台的画面:判不了,不说静止(原来空画面比出来一个动的像素都没有 ⇒ 当成静止)
+      end if;
+      --  静止 = 超过各自噪声地板的像素凑不成一团(最少像素数的几倍,倍数无量纲;去噪闪烁是撒开的单点)
+      for B of Picture.Moved (Before.Gray, After.Gray, M.Floors (Cam)) loop
          if B then
             Cnt := Cnt + 1;
          end if;
@@ -42,13 +77,17 @@ package body Selfmap is
    end Picture_Still;
 
    function Pictures_Still (M : Body_Map; Before, After : Plug.Cam_Vectors.Vector) return Boolean is
+      Judged : Boolean := False;
    begin
       for C in 0 .. Natural'Min (Natural (Before.Length), Natural (After.Length)) - 1 loop
-         if C < Natural (M.Floors.Length) and then not Picture_Still (M, Before (C), After (C), C) then
-            return False;
+         if Judgeable (M, Before (C), After (C), C) then
+            if not Picture_Still (M, Before (C), After (C), C) then
+               return False;
+            end if;
+            Judged := True;
          end if;
       end loop;
-      return True;
+      return Judged;
    end Pictures_Still;
 
    procedure Wait_Still (L : in out Plug.Link; M : Body_Map; F : in out Plug.Frame; Max : Natural; Used : out Natural; Ok : out Boolean;
@@ -57,7 +96,7 @@ package body Selfmap is
       Still : Natural := 0;
    begin
       Used := 0;
-      Ok := True;
+      Ok := False;   --  等满了还在变 ⇒ 照实说没停稳(调用方别拿这时的画面当停住的量)
       for I in 1 .. Max loop
          if Prev_Pic /= null then
             Prev_Pic.all := F.Cams;
@@ -73,7 +112,8 @@ package body Selfmap is
             Still := 0;
          end if;
          Last := F.Cams;
-         exit when Still >= 2;
+         Ok := Still >= 2;
+         exit when Ok;
       end loop;
    end Wait_Still;
 
@@ -269,14 +309,15 @@ package body Selfmap is
             Deliv, Back : Table.Vec;
             Frames : Natural;
             Ok2 : Boolean;
-            Jaw0 : Floats;
+            --  抓握通道不给目标 = 保持(插头按这一集给过的目标 / 此刻的读数 / 上一回发出去的保持,Plug.Jaw_Values)。
+            --  09-30:原来把"此刻第 0 个抓握读数"当目标发,没读数时那个数是编的 1.0(x5"1 = 张开")
+            Jaw0 : constant Floats := F64_Vectors.Empty_Vector;
             Visible : Boolean := False;
          begin
             if Ch >= Natural (M.Amp.Length) or else not M.Seen (Ch) then
                Append (T, "第" & Natural'Image (A + 1) & " 只手没有可核的通道;");
                Ok_Body := False;
             else
-               Jaw0.Append (Jaw_Of (F, A));
                A_Cmd (K) := M.Amp (Ch);
                Go (L, M, A, Chan.Compose (P0, A_Cmd), Jaw0, F, Deliv, Frames, Ok2);
                if not Ok2 then
@@ -331,13 +372,23 @@ package body Selfmap is
          Prev_EE : Plug.Pose_Vectors.Vector := F.EE;
          Prev_Jaw : Plug.Floats_Vectors.Vector := F.Jaw;
          Prev_Q : Plug.Floats_Vectors.Vector := F.Joints;
-         Prev_Gray : Plug.Cam_Vectors.Vector := F.Cams;
+         Prev_Pic : Plug.Cam_Vectors.Vector := F.Cams;
+         --  每台相机最后一对"两帧都收到了画面"的静止对(占位的那一拍不进地板;没有 ⇒ 这台的地板量不到)
+         Pair_A, Pair_B : Plug.Cam_Vectors.Vector := Plug.Cam_Vectors.To_Vector (Plug.Cam'(others => <>), Ada.Containers.Count_Type (N_Cams));
       begin
          for K in 1 .. 4 loop
             if not Plug.Sense (L, F) then
                Ok := False;
                return;
             end if;
+            for C in 0 .. Natural'Min (N_Cams, Natural'Min (Natural (Prev_Pic.Length), Natural (F.Cams.Length))) - 1 loop
+               if Plug.Has_Picture (Prev_Pic (C)) and then Plug.Has_Picture (F.Cams (C))
+                 and then Prev_Pic (C).W = F.Cams (C).W and then Prev_Pic (C).H = F.Cams (C).H
+               then
+                  Pair_A.Replace_Element (C, Prev_Pic (C)); Pair_B.Replace_Element (C, F.Cams (C));
+               end if;
+            end loop;
+            Prev_Pic := F.Cams;
             for A in 0 .. Arms - 1 loop
                declare
                   D : constant Table.Vec := Chan.Delivered (Prev_EE (A), F.EE (A));
@@ -359,18 +410,22 @@ package body Selfmap is
                end loop;
             end loop;
             Prev_EE := F.EE; Prev_Jaw := F.Jaw; Prev_Q := F.Joints;
-            if K < 4 then
-               Prev_Gray := F.Cams;
-            end if;
          end loop;
          M.Floors.Clear; M.Pic_Floor.Clear;
          for C in 0 .. N_Cams - 1 loop
             declare
-               Cw : constant Natural := F.Cams (C).W;
-               Ch : constant Natural := F.Cams (C).H;
+               Cw : constant Natural := Pair_B (C).W;
+               Ch : constant Natural := Pair_B (C).H;
             begin
-               M.Floors.Append (Picture.Null_Floor (Prev_Gray (C).Gray, F.Cams (C).Gray, Cw, Ch, Picture.Min_Pixels (Cw, Ch)));
-               M.Pic_Floor.Append (Picture.Max_Diff (Prev_Gray (C).Gray, F.Cams (C).Gray));
+               if Plug.Has_Picture (Pair_B (C)) then
+                  M.Floors.Append (Picture.Null_Floor (Pair_A (C).Gray, Pair_B (C).Gray, Cw, Ch, Picture.Min_Pixels (Cw, Ch)));
+                  M.Pic_Floor.Append (Picture.Max_Diff (Pair_A (C).Gray, Pair_B (C).Gray));
+               else
+                  --  这几拍里这台一对静止对都没收全 ⇒ 量不到它的噪声:地板顶满(它的画面里什么都不算动),不编一个 0 的地板
+                  --  (空画面算出来的地板是 0 ⇒ 下一拍收到画面时每个像素的渲染抖动都算"动了")
+                  M.Floors.Append (Picture.Floor_Map'(Per_Pixel => U8_Vectors.Empty_Vector, Global => U8'Last, W => 0, H => 0));
+                  M.Pic_Floor.Append (Integer (U8'Last));
+               end if;
             end;
          end loop;
       end;
@@ -420,9 +475,8 @@ package body Selfmap is
                Has_Step : constant Boolean := A < Natural (Step_Px.Length) and then Natural (Step_Px (A).Length) >= 2;
                Amp : constant Long_Float := (if Has_Step then Step_Px (A) (if K < 3 then 0 else 1) else 0.0);
                Accepted : Boolean := False;
-               Jaw0 : Floats;
+               Jaw0 : constant Floats := F64_Vectors.Empty_Vector;   --  抓握通道保持(同 Verify:不拿此刻的读数当目标发,没读数更不编)
             begin
-               Jaw0.Append (Jaw_Of (F, A));
                for Try in 1 .. (if Has_Step and then Amp > 0.0 then 1 else 0) loop
                   declare
                      A_Cmd : Table.Vec := Table.Zero_Vec;
@@ -433,13 +487,13 @@ package body Selfmap is
                      Got : Long_Float;
                      F1, F1b : Plug.Cam_Vectors.Vector;   --  推到那头:走完那一帧、再读的一帧
                      Visible : Boolean := False;
+                     S0 : Natural := L.Seq;               --  发命令之前那一拍的帧号(Settle 从它往后数)
                   begin
                      A_Cmd (K) := Amp;
                      Go (L, M, A, Chan.Compose (P0, A_Cmd), Jaw0, F, Deliv, Frames, Ok2);
                      if not Ok2 then
                         return;
                      end if;
-                     M.Settle := Natural'Max (M.Settle, Natural'Min (Frames, 6));
                      Got := Deliv (K);
                      F1 := F.Cams;
                      --  推到那头再读一帧(画面比读数晚一拍;同开机前半段认手)
@@ -448,10 +502,14 @@ package body Selfmap is
                         return;
                      end if;
                      F1b := F.Cams;
+                     --  推过去这一条从发出到读数停住用了几拍(连再读的那一拍一起看;09-30:原来取 Go 用的拍数、夹在 6 拍以内);推回来那一条另量
+                     M.Settle := Natural'Max (M.Settle, Settle_Since (L, S0, M.Joint_Noise));
+                     S0 := L.Seq;
                      Go (L, M, A, P0, Jaw0, F, Back, Frames_Back, Ok2);
                      if not Ok2 then
                         return;
                      end if;
+                     M.Settle := Natural'Max (M.Settle, Settle_Since (L, S0, M.Joint_Noise));
                      for C in 0 .. N_Cams - 1 loop
                         declare
                            Fl : Picture.Floor_Map renames M.Floors (C);
@@ -503,6 +561,8 @@ package body Selfmap is
          end loop;
       end loop;
       end;
+      Put_Line ("[身] 一条命令从发出到读数停住(每拍挪动不超过静止噪声 " & Codec.Fmt (M.Joint_Noise, 6) & "、而且不再变小):"
+                & (if M.Settle > 0 then "量到的最多 " & Codec.Img (M.Settle) & " 拍" else "每一次都还没停住就收了 / 读数没动起来 ⇒ 量不出(记 0,不编)"));
       --  ③ 哪台相机长在哪只手上:这只手一动它整幅都变,而且比第二名多一倍(倍数,无量纲);世界相机 = 变得最少的。
       --  开机前半段已经认过(Eyes 不空)⇒ 照用
       if not Eyes.Is_Empty then
