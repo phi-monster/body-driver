@@ -3,12 +3,22 @@ with Ada.Text_IO;
 with Ada.Exceptions;
 with Ada.Containers;
 with Ada.Strings.Fixed;
+with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
+with Ada.Unchecked_Deallocation;
 with GNAT.SHA1;
 with Codec;
 with Interfaces; use Interfaces;
 package body Websocket is
    use GNAT.Sockets;
+   use type Ada.Containers.Count_Type;
    GUID : constant String := "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+
+   --  一帧的负载放在堆上。原来是栈上的 Stream_Element_Array (1 .. Len):几台 720p 的 RGB-D 一帧十几 MB,
+   --  比主线程的栈(常见 8 MB)大,先撞栈(Storage_Error),轮不到任何上限(09-30 审计 H6 查出)
+   type Bytes_Access is access Stream_Element_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Stream_Element_Array, Bytes_Access);
+
+   function Img (V : Unsigned_64) return String is (Ada.Strings.Fixed.Trim (Unsigned_64'Image (V), Ada.Strings.Both));
 
    procedure Read_Exact (C : in out Conn; A : out Stream_Element_Array; Ok : out Boolean) is
       Last : Stream_Element_Offset;
@@ -60,38 +70,32 @@ package body Websocket is
    end Listen;
 
    procedure Handshake (C : in out Conn; Ok : out Boolean) is
-      Head : String (1 .. 16384);
-      N : Natural := 0;
+      --  请求头读到空行(CRLF CRLF)为止,缓冲跟着长。原来是定长 16 KiB(拍的):请求头带大 cookie、经代理加了头,读满还没见到空行就判握手失败
+      Head : Unbounded_String;
       One : Stream_Element_Array (1 .. 1);
-      Done : Boolean := False;
+      Blank : constant String := ASCII.CR & ASCII.LF & ASCII.CR & ASCII.LF;
       Key_Tag : constant String := "Sec-WebSocket-Key:";
    begin
       Ok := False;
-      while N < Head'Last and then not Done loop
+      loop
          Read_Exact (C, One, Ok);
-         exit when not Ok;
-         N := N + 1;
-         Head (N) := Character'Val (One (1));
-         if N >= 4 and then Head (N - 3 .. N) = ASCII.CR & ASCII.LF & ASCII.CR & ASCII.LF then
-            Done := True;
+         if not Ok then
+            return;
          end if;
+         Append (Head, Character'Val (One (1)));
+         exit when Length (Head) >= Blank'Length and then Tail (Head, Blank'Length) = Blank;
       end loop;
-      if not Done then
-         Ok := False;
-         return;
-      end if;
+      Ok := False;
       declare
-         H : constant String := Head (1 .. N);
+         H : constant String := To_String (Head);
          P : constant Natural := Ada.Strings.Fixed.Index (H, Key_Tag);
          E : Natural;
       begin
          if P = 0 then
-            Ok := False;
             return;
          end if;
          E := Ada.Strings.Fixed.Index (H, ASCII.CR & "", P);
          if E = 0 then
-            Ok := False;
             return;
          end if;
          declare
@@ -142,6 +146,7 @@ package body Websocket is
    procedure Send_Frame (C : in out Conn; Opcode : Unsigned_8; Data : Buf; Ok : out Boolean) is
       L : constant Natural := Natural (Data.Length);
       Hdr : Buf;
+      A : Bytes_Access;
    begin
       Hdr.Append (16#80# or Opcode);
       if L < 126 then
@@ -155,9 +160,9 @@ package body Websocket is
             Hdr.Append (Unsigned_8 (Shift_Right (Unsigned_64 (L), 8 * K) and 16#FF#));
          end loop;
       end if;
+      --  整帧也在堆上拼(同 Read_Message:大的一帧不上栈)
+      A := new Stream_Element_Array (1 .. Stream_Element_Offset (Natural (Hdr.Length) + L));
       declare
-         Total : constant Natural := Natural (Hdr.Length) + L;
-         A : Stream_Element_Array (1 .. Stream_Element_Offset (Total));
          P : Stream_Element_Offset := 1;
       begin
          for B of Hdr loop
@@ -166,8 +171,14 @@ package body Websocket is
          for B of Data loop
             A (P) := Stream_Element (B); P := P + 1;
          end loop;
-         Send_All (C, A, Ok);
       end;
+      Send_All (C, A.all, Ok);
+      Free (A);
+   exception
+      when Storage_Error =>
+         Ada.Text_IO.Put_Line ("[链] 要发的一帧 " & Codec.Img (L) & " 字节,内存里放不下 ⇒ 没发出去");
+         Free (A);
+         Ok := False;
    end Send_Frame;
 
    procedure Send_Binary (C : in out Conn; Data : Buf; Ok : out Boolean) is
@@ -183,7 +194,7 @@ package body Websocket is
       H2 : Stream_Element_Array (1 .. 2);
       Fin, Masked : Boolean;
       Opcode : Unsigned_8;
-      Len : Natural;
+      Len : Unsigned_64;
       Mask : Stream_Element_Array (1 .. 4) := [others => 0];
       Msg_Op : Unsigned_8 := 0;
    begin
@@ -201,7 +212,7 @@ package body Websocket is
          Fin := (Unsigned_8 (H2 (1)) and 16#80#) /= 0;
          Opcode := Unsigned_8 (H2 (1)) and 16#0F#;
          Masked := (Unsigned_8 (H2 (2)) and 16#80#) /= 0;
-         Len := Natural (Unsigned_8 (H2 (2)) and 16#7F#);
+         Len := Unsigned_64 (Unsigned_8 (H2 (2)) and 16#7F#);
          if Len = 126 then
             declare
                X : Stream_Element_Array (1 .. 2);
@@ -210,26 +221,29 @@ package body Websocket is
                if not Ok then
                   return;
                end if;
-               Len := Natural (X (1)) * 256 + Natural (X (2));
+               Len := Unsigned_64 (X (1)) * 256 + Unsigned_64 (X (2));
             end;
          elsif Len = 127 then
             declare
                X : Stream_Element_Array (1 .. 8);
-               V : Unsigned_64 := 0;
             begin
                Read_Exact (C, X, Ok);
                if not Ok then
                   return;
                end if;
+               Len := 0;
                for I in X'Range loop
-                  V := Shift_Left (V, 8) or Unsigned_64 (X (I));
+                  Len := Shift_Left (Len, 8) or Unsigned_64 (X (I));
                end loop;
-               if V > 512 * 1024 * 1024 then
-                  Ok := False;
-                  return;
-               end if;
-               Len := Natural (V);
             end;
+         end if;
+         --  一条消息多大,只有两道边,都不是拍的:收下来的字节串按 Natural 编号(最多 Natural'Last 个字节),再就是内存给不给(分配不到照实说)。
+         --  原来另有一道"一条消息最多 512 MiB"(拍的),删了
+         if Len > Unsigned_64 (Natural'Last) or else Len + Unsigned_64 (Data.Length) > Unsigned_64 (Natural'Last) then
+            Ada.Text_IO.Put_Line ("[链] 对方说这一帧有 " & Img (Len) & " 字节,连同这条消息已收的 " & Img (Unsigned_64 (Data.Length))
+                                  & " 字节,超过一条消息能编号的 " & Codec.Img (Natural'Last) & " 字节 ⇒ 当线断了");
+            Ok := False;
+            return;
          end if;
          if Masked then
             Read_Exact (C, Mask, Ok);
@@ -238,35 +252,43 @@ package body Websocket is
             end if;
          end if;
          declare
-            Payload : Stream_Element_Array (1 .. Stream_Element_Offset (Len));
-            Chunk : Buf;
+            N : constant Natural := Natural (Len);
+            Payload : Bytes_Access;
          begin
-            if Len > 0 then
-               Read_Exact (C, Payload, Ok);
+            begin
+               Payload := new Stream_Element_Array (1 .. Stream_Element_Offset (N));
+            exception
+               when Storage_Error =>
+                  Ada.Text_IO.Put_Line ("[链] 这一帧 " & Codec.Img (N) & " 字节,内存里放不下 ⇒ 当线断了");
+                  Ok := False;
+                  return;
+            end;
+            if N > 0 then
+               Read_Exact (C, Payload.all, Ok);
                if not Ok then
+                  Free (Payload);
                   return;
                end if;
             end if;
-            Chunk.Reserve_Capacity (Ada.Containers.Count_Type (Len));
-            for I in 0 .. Len - 1 loop
-               declare
-                  B : Unsigned_8 := Unsigned_8 (Payload (Stream_Element_Offset (I + 1)));
-               begin
-                  if Masked then
-                     B := B xor Unsigned_8 (Mask (Stream_Element_Offset (I mod 4 + 1)));
-                  end if;
-                  Chunk.Append (B);
-               end;
-            end loop;
+            if Masked then
+               for I in Payload'Range loop
+                  Payload (I) := Payload (I) xor Mask ((I - Payload'First) mod Mask'Length + Mask'First);
+               end loop;
+            end if;
             case Opcode is
                when 8 =>
                   Kind := Op_Close;
+                  Free (Payload);
                   return;
                when 9 =>
                   declare
+                     Pong : Buf;
                      Pong_Ok : Boolean;
                   begin
-                     Send_Frame (C, 10, Chunk, Pong_Ok);
+                     for B of Payload.all loop
+                        Pong.Append (Unsigned_8 (B));
+                     end loop;
+                     Send_Frame (C, 10, Pong, Pong_Ok);
                   end;
                when 10 =>
                   null;
@@ -275,16 +297,19 @@ package body Websocket is
                      Msg_Op := Opcode;
                      Data.Clear;
                   end if;
-                  for B of Chunk loop
-                     Data.Append (B);
+                  Data.Reserve_Capacity (Data.Length + Ada.Containers.Count_Type (N));
+                  for B of Payload.all loop
+                     Data.Append (Unsigned_8 (B));
                   end loop;
                   if Fin then
                      Kind := (if Msg_Op = 1 then Op_Text else Op_Binary);
+                     Free (Payload);
                      return;
                   end if;
                when others =>
                   null;
             end case;
+            Free (Payload);
          end;
       end loop;
    end Read_Message;

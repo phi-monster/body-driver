@@ -76,37 +76,41 @@ package body Brain is
       return Length (Answer) > 0;
    end Ask_Human;
 
-   function Extract_Content (Raw : String) return String is
-      Key_S : constant String := """content"":""";
-      P : constant Natural := Ada.Strings.Fixed.Index (Raw, Key_S);
-      R : Unbounded_String;
-      I : Natural;
+   --  问模型一句,读回它写的那段话(回包按 JSON 读:choices 第一个的 message.content 和 finish_reason)。
+   --  请求里不带 max_tokens、也不带写程序那一问的 temperature:那是驱动替脑拍的数(原来 80 / 700 个 token、0.7),
+   --  现在交给服务端 / 模型自己的生成配置(Qwen 的 generation_config);回答多长由受限解码的文法 / schema 自己收尾。
+   --  没问成就照实说为什么:连不上、超时、服务端回了错(错误原文整段带回来 —— "maximum context length" 这种限额和用量就写在里面,执行器要读)。
+   --  finish_reason = length = 写到服务端的上限被截断(不带 max_tokens 以后,这个上限就是服务端的上下文还剩多少)⇒ 照实说截断了,不把半截话当回答
+   function Chat (Host : String; Port : Natural; Body_Json : String; Content : out Unbounded_String; Err : out Unbounded_String) return Boolean is
+      Reply, Why, Jerr : Unbounded_String;
+      D : Json.Doc;
    begin
-      if P = 0 then
-         return "";
+      Content := Null_Unbounded_String;
+      Err := Null_Unbounded_String;
+      if not Http_Client.Post (Host, Port, "/v1/chat/completions", Body_Json, Reply, Why) then
+         Err := "问脑没问成:" & Why;
+         return False;
       end if;
-      I := P + Key_S'Length;
-      while I <= Raw'Last loop
-         case Raw (I) is
-            when '"' => return To_String (R);
-            when '\' =>
-               if I < Raw'Last then
-                  I := I + 1;
-                  case Raw (I) is
-                     when 'n' => Append (R, ASCII.LF);
-                     when 't' => Append (R, ASCII.HT);
-                     when 'r' => null;
-                     when '"' => Append (R, '"');
-                     when '\' => Append (R, '\');
-                     when others => Append (R, Raw (I));
-                  end case;
-               end if;
-            when others => Append (R, Raw (I));
-         end case;
-         I := I + 1;
-      end loop;
-      return To_String (R);
-   end Extract_Content;
+      if not Json.Parse (To_String (Reply), D, Jerr) then
+         Err := To_Unbounded_String ("脑的回包不是 JSON(" & To_String (Jerr) & ";前 200 字:" & Ada.Strings.Fixed.Head (To_String (Reply), 200) & ")");
+         return False;
+      end if;
+      declare
+         Ch : constant Integer := Json.Child (D, Json.Get (D, 0, "choices"), 0);
+         Finish : constant String := Json.Text (D, Json.Get (D, Ch, "finish_reason"));
+      begin
+         Content := To_Unbounded_String (Json.Text (D, Json.Get (D, Json.Get (D, Ch, "message"), "content")));
+         if Finish = "length" then
+            Err := "脑的回答写到服务端的上限被截断了(上下文用完了),半截话不当回答;截在:" & Content;
+            return False;
+         end if;
+         if Length (Content) = 0 then
+            Err := To_Unbounded_String ("脑的回包里没有话(content 是空的;前 200 字:" & Ada.Strings.Fixed.Head (To_String (Reply), 200) & ")");
+            return False;
+         end if;
+      end;
+      return True;
+   end Chat;
 
    function Locate (Host : String; Port : Natural; Word : String; RGB : Buf; W, H : Natural;
                     Found : out Boolean; X0, Y0, X1, Y1 : out Natural; Err : out Unbounded_String) return Boolean is
@@ -170,23 +174,24 @@ package body Brain is
       end if;
       declare
          B64 : constant String := Codec.Base64 (Codec.BMP24 (RGB, W, H));
+         --  temperature 0 = 贪心:这一问只要模型最可能的那一个框(认名字要稳)。这是选"取最大"这种解法,不是替它拍一个量级;
+         --  回答多长由 strict schema 管,不另给 max_tokens
          Body_Json : constant String :=
-           "{""model"":""eye"",""max_tokens"":80,""temperature"":0,""chat_template_kwargs"":{""enable_thinking"":false},""response_format"":" & Schema &
+           "{""model"":""eye"",""temperature"":0,""chat_template_kwargs"":{""enable_thinking"":false},""response_format"":" & Schema &
            ",""messages"":[{""role"":""user"",""content"":[{""type"":""image_url"",""image_url"":{""url"":""data:image/bmp;base64," & B64 &
            """}},{""type"":""text"",""text"":""" & Json.Escape (Prompt) & """}]}]}";
       begin
-         if not Http_Client.Post (Host, Port, "/v1/chat/completions", Body_Json, Reply) then
-            Err := To_Unbounded_String ("连不上脑 " & Host & ":" & Codec.Img (Port));
+         if not Chat (Host, Port, Body_Json, Reply, Err) then
             return False;
          end if;
       end;
       declare
-         Inner : constant String := Extract_Content (To_String (Reply));
+         Inner : constant String := To_String (Reply);
          D : Json.Doc;
          Perr : Unbounded_String;
       begin
-         if Inner = "" or else not Json.Parse (Inner, D, Perr) then
-            Err := To_Unbounded_String ("问它在哪的回包读不出来");
+         if not Json.Parse (Inner, D, Perr) then
+            Err := To_Unbounded_String ("问它在哪的回包读不出来(" & To_String (Perr) & ")");
             return False;
          end if;
          declare
@@ -241,12 +246,13 @@ package body Brain is
         --  全炮只有 3 种开头 —— 那不是 45 个样本,是 1 个样本的 43 份复印件。
         --  它写了一句不动身体的话 ⇒ 世界没变 ⇒ 提示词没变 ⇒ 温度 0 ⇒ 又写同一句,闭环。
         --  温度是【解码器设置】,不是给它的暗示:要判"它会不会想",至少得是独立抽样。
+        --  09-30:抽样的温度也不再由驱动拍(原来写死 0.7,没有来历),请求里不带 ⇒ 服务端按模型自己的生成配置抽样;
+        --  max_tokens 也不带(原来 700:长程序被截在半截、文法没收尾,整段被拒)—— 文法最多 4 行、每个槽都有长度上限,自己会收尾。
         --  代价照记:同一炮不再逐字可复现(认名字那一问仍然温度 0,那是要稳)。
-        "{""model"":""eye"",""max_tokens"":700,""temperature"":0.7,""chat_template_kwargs"":{""enable_thinking"":false}," &
+        "{""model"":""eye"",""chat_template_kwargs"":{""enable_thinking"":false}," &
         """structured_outputs"":{""grammar"":""" & Json.Escape (Sinew.EBNF (Rels_Usable, Roles_Usable, Outs_Usable, Qtys_Usable)) & """}" &
         ",""messages"":[{""role"":""user"",""content"":[{""type"":""image_url"",""image_url"":{""url"":""data:image/bmp;base64," & B64 &
         """}},{""type"":""text"",""text"":""" & Json.Escape (Prompt) & """}]}]}";
-      Reply : Unbounded_String;
    begin
       Program := Null_Unbounded_String;
       Err := Null_Unbounded_String;
@@ -262,27 +268,7 @@ package body Brain is
          Err := To_Unbounded_String ("画面短了");
          return False;
       end if;
-      if not Http_Client.Post (Host, Port, "/v1/chat/completions", Body_Json, Reply) then
-         Err := To_Unbounded_String ("连不上脑 " & Host & ":" & Codec.Img (Port));
-         return False;
-      end if;
-      declare
-         Inner : constant String := Extract_Content (To_String (Reply));
-         D : Json.Doc;
-         Perr : Unbounded_String;
-      begin
-         if Inner = "" then
-            Err := To_Unbounded_String ("回包里没有 content(前 200 字:" & Ada.Strings.Fixed.Head (To_String (Reply), 200) & ")");
-            return False;
-         end if;
-         --  受限解码之后 content 不是 JSON 了,这里原来那道 Json.Parse 会把【每一段】程序都毙掉。
-         --  受限解码之后 content 本身就是程序(不再包一层 JSON)
-         Program := To_Unbounded_String (Inner);
-         if Length (Program) = 0 then
-            Err := To_Unbounded_String ("脑交上来一段空程序");
-            return False;
-         end if;
-         return True;
-      end;
+      --  受限解码之后 content 本身就是程序(不再包一层 JSON;原来在这里对它做 Json.Parse 会把【每一段】程序都毙掉)
+      return Chat (Host, Port, Body_Json, Program, Err);
    end Ask;
 end Brain;

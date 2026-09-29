@@ -292,7 +292,11 @@ begin
          --  前半段从零量了 ⇒ 世界单位换了(运动学的单位每回不一样),身体文件里按旧单位记的量(通道步子、握区时手的位姿)不装回
          Put_Line ("[装] 前半段是从零量的(世界单位换了)⇒ 身体文件里按旧单位记的量不装回,从零量");
       end if;
-      if Loaded then
+      if Loaded and then not Bodyfile.Jaws_Recorded (Stored) then
+         --  旧的身体文件没记每条臂几个抓握通道:不猜(原来一律当 1 个 ⇒ 五指手第 1 号往后的握区全丢,存盘又把少了的写回去)
+         --  ⇒ 重量;存的历次读数照样合进来
+         Put_Line ("[装] 这份身体文件没记每条臂几个抓握通道 ⇒ 要重量(存的历次读数照样合进来)");
+      elsif Loaded then
          declare
             Ok_Body, Ok_Link : Boolean;
             Vn : Selfmap.String_Note;
@@ -368,8 +372,10 @@ begin
       end if;
       --  握区:存的这只手若是在【同一个位姿】下合空量的(每通道差不过一个探针幅度),身体又核对没变 ⇒ 照用,不再合空;否则合空一次
       --  一条臂上有几个抓握通道是【量出来的】:两指手 1 个,五指手 5 个。每一个各合空一次,各成一个名词。
+      --  C.Map.Jaws 这时一条臂一个数(从零量的是 Selfmap.Measure 数的;照用存的,前面已经核过身体文件记了这一项)⇒ 照它合空,不另设"至少一个"、
+      --  不在缺了的时候当 1 个(原来是 `else 1`:身体文件不存这一项,装回以后五指手只剩第 0 号)
       for A in 0 .. C.Map.Arms - 1 loop
-       for Jk in 0 .. (if A < Natural (C.Map.Jaws.Length) then Natural'Max (1, C.Map.Jaws (A)) else 1) - 1 loop
+       for Jk in 0 .. C.Map.Jaws (A) - 1 loop
          declare
             H : Zone.Hand;
             Reuse : Boolean := False;

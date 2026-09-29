@@ -1,3 +1,8 @@
+with Ada.Long_Float_Text_IO;
+with Ada.Strings.Fixed;
+with Ada.Numerics.Long_Elementary_Functions; use Ada.Numerics.Long_Elementary_Functions;
+with Ada.Unchecked_Conversion;
+with Interfaces;
 package body Json is
    function Parse (Src : String; D : out Doc; Err : out Unbounded_String) return Boolean is
       Pos : Natural := Src'First;
@@ -132,12 +137,19 @@ package body Json is
             when '"' =>
                Nd.K := J_Str;
                Nd.S := Parse_String;
-            when 't' =>
-               Nd.K := J_Bool; Nd.B := True; Pos := Pos + 4;
-            when 'f' =>
-               Nd.K := J_Bool; Nd.B := False; Pos := Pos + 5;
-            when 'n' =>
-               Nd.K := J_Null; Pos := Pos + 4;
+            when 't' | 'f' | 'n' =>
+               --  只认整个词:原来看到头一个字母就往后跳 4 / 5 个字符,"nan," 被读成 null 还吃掉了逗号(身体文件里一个 NaN 就读错一位,不报)
+               declare
+                  Word : constant String := (case Src (Pos) is when 't' => "true", when 'f' => "false", when others => "null");
+               begin
+                  if Pos + Word'Length - 1 <= Src'Last and then Src (Pos .. Pos + Word'Length - 1) = Word then
+                     Nd.K := (if Word = "null" then J_Null else J_Bool);
+                     Nd.B := Word = "true";
+                     Pos := Pos + Word'Length;
+                  else
+                     Bad := True;
+                  end if;
+               end;
             when others =>
                declare
                   St : constant Natural := Pos;
@@ -166,6 +178,11 @@ package body Json is
       declare
          R : constant Integer := Parse_Value;
       begin
+         --  顶层的值后面还跟着别的(空白不算)= 不是一份 JSON(原来不管,后面的东西悄悄丢掉)
+         Skip_Ws;
+         if Pos <= Src'Last then
+            Bad := True;
+         end if;
          if Bad then
             Err := To_Unbounded_String ("解析失败,位置 " & Natural'Image (Pos));
          end if;
@@ -207,6 +224,27 @@ package body Json is
      (if Ok (D, N) and then D.Nodes (N).K = J_Arr then Natural (D.Nodes (N).Kids.Length) else 0);
    function Child (D : Doc; N : Integer; I : Natural) return Integer is
      (if Ok (D, N) and then D.Nodes (N).K = J_Arr and then I < Natural (D.Nodes (N).Kids.Length) then D.Nodes (N).Kids (I) else -1);
+   function Is_Null (D : Doc; N : Integer) return Boolean is (Ok (D, N) and then D.Nodes (N).K = J_Null);
+
+   function To_LF is new Ada.Unchecked_Conversion (Interfaces.Unsigned_64, Long_Float);
+   NaN : constant Long_Float := To_LF (16#7FF8_0000_0000_0000#);   --  IEEE 754 双精度的"不是数"(按位造,格式)
+   function Real (D : Doc; N : Integer) return Long_Float is (if Is_Null (D, N) then NaN else Num (D, N));
+
+   function Finite (X : Long_Float) return Boolean is (X = X and then abs X <= Long_Float'Last);
+
+   --  小数点后印几位才"写出去读回来一个比特不差":尾数有 p 位二进制,要 ⌈p·log10 2⌉ 位(科学记数的整数部分另占 1 位 ⇒ 双精度共 17 位有效数字)
+   Exact_Aft : constant Natural := Natural (Long_Float'Ceiling (Long_Float (Long_Float'Machine_Mantissa) * Log (2.0, 10.0)));
+
+   function Number (X : Long_Float) return String is
+      --  够装:'Width 是 'Image(15 位有效数字的科学记数)最长的样子,小数再多印 Exact_Aft 位也装得下
+      S : String (1 .. Long_Float'Width + Exact_Aft);
+   begin
+      if not Finite (X) then
+         return "null";
+      end if;
+      Ada.Long_Float_Text_IO.Put (S, X, Aft => Exact_Aft, Exp => 1);
+      return Ada.Strings.Fixed.Trim (S, Ada.Strings.Both);
+   end Number;
 
    function Escape (S : String) return String is
       R : Unbounded_String;

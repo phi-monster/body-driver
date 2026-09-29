@@ -1,11 +1,20 @@
 with Ada.Numerics.Long_Elementary_Functions; use Ada.Numerics.Long_Elementary_Functions;
 package body Table is
-   function Norm3 (V : Vec3) return Long_Float is (Sqrt (V (0) * V (0) + V (1) * V (1) + V (2) * V (2)));
+   --  五样全加(原来写死只加 V (0) .. V (2):09-08 表从三行加到五行时,别处的 0 .. 2 都改成了 0 .. Rows - 1,只有这一个不是循环、漏了 ——
+   --  Update 里 Free_Res / Null_Res 因此不看大小和朝向:一步只在"看着多大 / 朝向"上和表对不上(顶住了、它没跟着转),零表永远赢不了)
+   function Norm3 (V : Vec3) return Long_Float is
+      S : Long_Float := 0.0;
+   begin
+      for R in V'Range loop
+         S := S + V (R) * V (R);
+      end loop;
+      return Sqrt (S);
+   end Norm3;
 
    function Norm (A : Vec; N : Natural) return Long_Float is
       S : Long_Float := 0.0;
    begin
-      for I in 0 .. Natural'Min (N, Max_Ch) - 1 loop
+      for I in 0 .. N - 1 loop
          S := S + A (I) * A (I);
       end loop;
       return Sqrt (S);
@@ -13,7 +22,7 @@ package body Table is
 
    procedure Reset (E : in out Effect; N : Natural; P0 : Long_Float) is
    begin
-      E.N := Natural'Min (N, Max_Ch);
+      E.N := N;
       E.B := [others => [others => 0.0]];
       E.P := [others => [others => 0.0]];
       for I in 0 .. E.N - 1 loop
@@ -131,7 +140,7 @@ package body Table is
 
    procedure Solve (Terms : Term_Vectors.Vector; N : Natural; Cap : Vec; Active : Mask; Damp : Vec;
                     A : out Vec; Ok : out Boolean) is
-      Nn : constant Natural := Natural'Min (N, Max_Ch);
+      Nn : constant Natural := N;
       G : Cov := [others => [others => 0.0]];
       Hv : Vec := Zero_Vec;
       Fixed : Mask := [others => False];
@@ -164,8 +173,10 @@ package body Table is
             A (I) := 0.0;
          end if;
       end loop;
-      --  投影迭代:解自由通道;越限的夹到限上、固定住、把它的贡献搬到右边;再解。三轮(次数,无量纲)。
-      for Round in 1 .. 3 loop
+      --  投影迭代:解自由通道;越限的夹到限上、固定住、把它的贡献搬到右边;再解 —— 做到这一遍没有新越限的为止。
+      --  每一遍要么收尾、要么至少多固定一个通道 ⇒ 最多 Nn + 1 遍一定停(证出来的界,不是拍的次数)。
+      --  原来固定三遍:第三遍还在夹就照样交出去,后夹的那几个的贡献没再分给剩下的通道(09-30 审计 G5)
+      for Round in 1 .. Nn + 1 loop
          declare
             Idx : array (Ch_Index) of Natural := [others => 0];
             M : Natural := 0;
@@ -269,7 +280,7 @@ package body Table is
                   end;
                end loop;
                Ok := True;
-               if not Any_Clamped or else Round = 3 then
+               if not Any_Clamped then
                   return;
                end if;
             end;
@@ -322,8 +333,10 @@ package body Table is
                              A : out Vec; Ok : out Boolean) is
       A1 : Vec := Zero_Vec;
       P : array (Ch_Index, Ch_Index) of Long_Float := [others => [others => 0.0]];
-      Q : array (0 .. Rows * 8 - 1, Ch_Index) of Long_Float := [others => [others => 0.0]];
+      --  硬约束行正交化出来的方向:最多通道数那么多(秩不会超过通道数)。原来只开了 Rows × 8 = 40 行(拍的),超出就悄悄不收
+      Q : array (Ch_Index, Ch_Index) of Long_Float := [others => [others => 0.0]];
       NQ : Natural := 0;
+      Tol : Long_Float := 0.0;
    begin
       A := Zero_Vec;
       if Natural (Hard.Length) = 0 then
@@ -338,10 +351,34 @@ package body Table is
          A := A1;
          return;
       end if;
-      --  硬约束那些行,正交化成 Q
+      --  硬约束那些行,正交化成 Q。
+      --  🔴 一行算不算"新方向":看它减掉已有方向以后还剩多长,和【数值秩的标准门】比 ——
+      --  行数、通道数里大的那个 × 机器精度 × 硬约束行合起来的长度(Frobenius 范数,不小于最大奇异值;LAPACK / numpy 定秩就用这个门,数值类,不是拍的)。
+      --  减已有方向做两遍("两遍就够",Kahan–Parlett),Q 才真的正交。
+      --  原来:剩下的长度 > 0 就收 —— 一行和已有方向线性相关时剩下的只是舍入误差(1e-16 量级),照样被归一成一个"新方向":
+      --  它是个乱方向、和已有的也不正交 ⇒ P = I − QᵀQ 不再是投影(离线 2 万组相关的硬约束行,99.8% 出现负特征值,最低 −3.99)
+      --  ⇒ 软约束那一步会挪动硬约束已经达成的行,"硬的不许被牺牲"就不成立了
+      declare
+         Rows_N : Natural := 0;
+         Fro2 : Long_Float := 0.0;
+      begin
+         for T in 0 .. Natural (Hard.Length) - 1 loop
+            for R in 0 .. Rows - 1 loop
+               if Hard (T).W (R) > 0.0 then
+                  Rows_N := Rows_N + 1;
+                  for C in 0 .. N - 1 loop
+                     if Active (C) then
+                        Fro2 := Fro2 + Hard (T).E.B (C, R) ** 2;
+                     end if;
+                  end loop;
+               end if;
+            end loop;
+         end loop;
+         Tol := Long_Float (Natural'Max (Rows_N, N)) * Long_Float'Model_Epsilon * Sqrt (Fro2);
+      end;
       for T in 0 .. Natural (Hard.Length) - 1 loop
          for R in 0 .. Rows - 1 loop
-            if Hard (T).W (R) > 0.0 and then NQ <= Q'Last (1) then
+            if Hard (T).W (R) > 0.0 then
                declare
                   V : array (Ch_Index) of Long_Float := [others => 0.0];
                   Nm : Long_Float := 0.0;
@@ -349,23 +386,25 @@ package body Table is
                   for C in 0 .. N - 1 loop
                      V (C) := (if Active (C) then Hard (T).E.B (C, R) else 0.0);
                   end loop;
-                  for K in 0 .. NQ - 1 loop
-                     declare
-                        D : Long_Float := 0.0;
-                     begin
-                        for C in 0 .. N - 1 loop
-                           D := D + V (C) * Q (K, C);
-                        end loop;
-                        for C in 0 .. N - 1 loop
-                           V (C) := V (C) - D * Q (K, C);
-                        end loop;
-                     end;
+                  for Pass in 1 .. 2 loop
+                     for K in 0 .. NQ - 1 loop
+                        declare
+                           D : Long_Float := 0.0;
+                        begin
+                           for C in 0 .. N - 1 loop
+                              D := D + V (C) * Q (K, C);
+                           end loop;
+                           for C in 0 .. N - 1 loop
+                              V (C) := V (C) - D * Q (K, C);
+                           end loop;
+                        end;
+                     end loop;
                   end loop;
                   for C in 0 .. N - 1 loop
                      Nm := Nm + V (C) * V (C);
                   end loop;
                   Nm := Sqrt (Nm);
-                  if Nm > 0.0 then
+                  if Nm > Tol then
                      for C in 0 .. N - 1 loop
                         Q (NQ, C) := V (C) / Nm;
                      end loop;

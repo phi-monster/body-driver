@@ -4,6 +4,44 @@ package body Msgpack is
    function U32_To_F32 is new Ada.Unchecked_Conversion (Unsigned_32, Float);
    function U64_To_F64 is new Ada.Unchecked_Conversion (Unsigned_64, Long_Float);
    function F64_To_U64 is new Ada.Unchecked_Conversion (Long_Float, Unsigned_64);
+   --  有符号整数按【位】重新解释(补码)。原来写成 Integer_8 (Unsigned_8 (…)) —— Ada 里那是按【值】转换:
+   --  高位是 1 的字节(负数)值是 128..255,装不进 Integer_8 ⇒ 当场抛 Constraint_Error(检查是开着的)。
+   --  Python 把 −128..−33 按 0xD0 打包、numpy 的 i4 / i8 负读数,一来就崩(09-30 审计 H5 查出;自检以前只测了 −7,走的是负 fixint)
+   function To_I8 is new Ada.Unchecked_Conversion (Unsigned_8, Integer_8);
+   function To_I16 is new Ada.Unchecked_Conversion (Unsigned_16, Integer_16);
+   function To_I32 is new Ada.Unchecked_Conversion (Unsigned_32, Integer_32);
+   function To_I64 is new Ada.Unchecked_Conversion (Unsigned_64, Integer_64);
+   function To_U64 is new Ada.Unchecked_Conversion (Integer_64, Unsigned_64);
+
+   --  N 个字节(已经按字节序拼成一个数)按 N 字节的补码读成有符号整数
+   function Signed (V : Unsigned_64; N : Natural) return Long_Long_Integer is
+     (case N is
+         when 1 => Long_Long_Integer (To_I8 (Unsigned_8 (V))),
+         when 2 => Long_Long_Integer (To_I16 (Unsigned_16 (V))),
+         when 4 => Long_Long_Integer (To_I32 (Unsigned_32 (V))),
+         when others => Long_Long_Integer (To_I64 (V)));
+
+   --  IEEE 754 半精度(numpy 的 f2):1 位符号 · 5 位指数(偏置 15)· 10 位尾数(格式)
+   Half_Frac_Bits : constant := 10;
+   Half_Exp_Bits : constant := 5;
+   Half_Exp_Top : constant := 2 ** Half_Exp_Bits - 1;          --  指数全 1 = 无穷 / 不是数
+   Half_Bias : constant := 2 ** (Half_Exp_Bits - 1) - 1;
+   function Half (H : Unsigned_64) return Long_Float is
+      Neg : constant Boolean := (H and 2 ** (Half_Frac_Bits + Half_Exp_Bits)) /= 0;
+      E : constant Integer := Integer (Shift_Right (H, Half_Frac_Bits) and Half_Exp_Top);
+      M : constant Integer := Integer (H and (2 ** Half_Frac_Bits - 1));
+      V : Long_Float;
+   begin
+      if E = Half_Exp_Top then
+         --  双精度里同样的两种:指数全 1、尾数 0 = 无穷,否则 = 不是数(按位造,格式)
+         V := U64_To_F64 (if M = 0 then 16#7FF0_0000_0000_0000# else 16#7FF8_0000_0000_0000#);
+      elsif E = 0 then
+         V := Long_Float'Scaling (Long_Float (M), 1 - Half_Bias - Half_Frac_Bits);                        --  次正规数:没有隐含的 1
+      else
+         V := Long_Float'Scaling (Long_Float (2 ** Half_Frac_Bits + M), E - Half_Bias - Half_Frac_Bits);   --  隐含的 1 补上
+      end if;
+      return (if Neg then -V else V);
+   end Half;
 
    function Decode (Data : Buf; D : out Doc) return Boolean is
       Pos : Natural := 0;
@@ -84,13 +122,17 @@ package body Msgpack is
                   declare
                      V : constant Unsigned_64 := Take_U (8);
                   begin
-                     Nd.K := Int;
-                     Nd.I := (if V <= Unsigned_64 (Long_Long_Integer'Last) then Long_Long_Integer (V) else Long_Long_Integer'Last);
+                     --  装不进有符号 64 位的无符号数:原来悄悄截成最大的那个有符号数(值就错了);改成照它的大小记成浮点数
+                     if V <= Unsigned_64 (Long_Long_Integer'Last) then
+                        Nd.K := Int; Nd.I := Long_Long_Integer (V);
+                     else
+                        Nd.K := Flt; Nd.F := Long_Float (V);
+                     end if;
                   end;
-               when 16#D0# => Nd.K := Int; Nd.I := Long_Long_Integer (Integer_8 (Unsigned_8 (Take_U (1))));
-               when 16#D1# => Nd.K := Int; Nd.I := Long_Long_Integer (Integer_16 (Unsigned_16 (Take_U (2))));
-               when 16#D2# => Nd.K := Int; Nd.I := Long_Long_Integer (Integer_32 (Unsigned_32 (Take_U (4))));
-               when 16#D3# => Nd.K := Int; Nd.I := Long_Long_Integer (Integer_64 (Take_U (8)));
+               when 16#D0# => Nd.K := Int; Nd.I := Signed (Take_U (1), 1);
+               when 16#D1# => Nd.K := Int; Nd.I := Signed (Take_U (2), 2);
+               when 16#D2# => Nd.K := Int; Nd.I := Signed (Take_U (4), 4);
+               when 16#D3# => Nd.K := Int; Nd.I := Signed (Take_U (8), 8);
                when 16#D4# .. 16#D8# =>
                   L := (case B is when 16#D4# => 1, when 16#D5# => 2, when 16#D6# => 4, when 16#D7# => 8, when others => 16);
                   B := Take;
@@ -254,9 +296,16 @@ package body Msgpack is
       end if;
       if Is_Nd (D, N) then
          declare
+            --  numpy 的 dtype 字串 = [字节序] 种类 每个元素几个字节:< 小端 · > 大端 · | 单字节不分 · = 本机;种类 f 浮点 · i 有符号 · u 无符号 · b 布尔。
+            --  numpy 的这几种数全都认(原来只认 f4 / f8 / i4 / i8 / u1,f2 / i1 / i2 / u2 / u4 / u8 / b1 一律静悄悄返回空 ⇒ 身体"没读数";
+            --  舵机按 16 位报读数的 DIY 身体就这么进不来)。别的(复数、定长字串、日期……)不是一串读数 ⇒ 空;
+            --  数据长度不是元素宽度的整数倍 = 坏数组 ⇒ 空,不按截掉的半个元素硬读
             T : constant String := Nd_Type (D, N);
             First, Len : Natural;
             Little : Boolean := True;
+            Kind_Ch : Character := ' ';
+            Width : Natural := 0;
+            P : Natural := T'First;
             function Word (Off, Bytes_N : Natural) return Unsigned_64 is
                V : Unsigned_64 := 0;
             begin
@@ -269,34 +318,40 @@ package body Msgpack is
                end loop;
                return V;
             end Word;
-            Code : String (1 .. 2) := "  ";
          begin
             Nd_Data (D, N, First, Len);
-            if T'Length >= 2 then
-               Little := T (T'First) /= '>';
-               Code := T (T'Last - 1 .. T'Last);
+            if P <= T'Last and then T (P) in '<' | '>' | '|' | '=' then
+               Little := T (P) /= '>';
+               P := P + 1;
             end if;
-            if Code = "f4" then
-               for I in 0 .. Len / 4 - 1 loop
-                  R.Append (Long_Float (U32_To_F32 (Unsigned_32 (Word (First + 4 * I, 4)))));
-               end loop;
-            elsif Code = "f8" then
-               for I in 0 .. Len / 8 - 1 loop
-                  R.Append (U64_To_F64 (Word (First + 8 * I, 8)));
-               end loop;
-            elsif Code = "i4" then
-               for I in 0 .. Len / 4 - 1 loop
-                  R.Append (Long_Float (Integer_32 (Unsigned_32 (Word (First + 4 * I, 4)))));
-               end loop;
-            elsif Code = "i8" then
-               for I in 0 .. Len / 8 - 1 loop
-                  R.Append (Long_Float (Integer_64 (Word (First + 8 * I, 8))));
-               end loop;
-            elsif Code = "u1" then
-               for I in 0 .. Len - 1 loop
-                  R.Append (Long_Float (D.Raw.Element (First + I)));
-               end loop;
+            if P + 1 = T'Last and then T (T'Last) in '1' .. '9' then
+               Kind_Ch := T (P);
+               Width := Character'Pos (T (T'Last)) - Character'Pos ('0');
             end if;
+            if Width = 0 or else Len mod Width /= 0
+              or else not (case Kind_Ch is
+                              when 'f' => Width in 2 | 4 | 8,
+                              when 'i' | 'u' => Width in 1 | 2 | 4 | 8,
+                              when 'b' => Width = 1,
+                              when others => False)
+            then
+               return R;
+            end if;
+            R.Reserve_Capacity (Ada.Containers.Count_Type (Len / Width));
+            for I in 0 .. Len / Width - 1 loop
+               declare
+                  W : constant Unsigned_64 := Word (First + Width * I, Width);
+               begin
+                  R.Append ((case Kind_Ch is
+                                when 'f' => (case Width is
+                                                when 2 => Half (W),
+                                                when 4 => Long_Float (U32_To_F32 (Unsigned_32 (W))),
+                                                when others => U64_To_F64 (W)),
+                                when 'i' => Long_Float (Signed (W, Width)),
+                                when 'b' => (if W = 0 then 0.0 else 1.0),
+                                when others => Long_Float (W)));
+               end;
+            end loop;
          end;
       end if;
       return R;
@@ -341,7 +396,8 @@ package body Msgpack is
       elsif V >= -2147483648 then
          S.Append (16#D2#); Put_U (S, Unsigned_64 (Unsigned_32 (4294967296 + V)), 4);
       else
-         S.Append (16#D3#); Put_U (S, Unsigned_64 (Integer_64 (V)), 8);
+         --  补码按位写出去(原来 Unsigned_64 (Integer_64 (V)) 是按值转换,负数一写就抛 Constraint_Error)
+         S.Append (16#D3#); Put_U (S, To_U64 (Integer_64 (V)), 8);
       end if;
    end Put_Int;
 
