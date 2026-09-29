@@ -1,7 +1,8 @@
 --  开机前半段:只用关节命令(V1b 第三步,2026-09-26)。身体报不报"手在哪"都不读 —— 运动学量好之前,手是按关节目标挪的。
 --  ① 认身体:每组关节读数一起转一小格,哪台相机整幅都变、而且比第二名多一倍 = 长在这只手上的眼(同 Selfmap.Measure 的判法);
 --     跟着一起变的别的组 = 同一只手的回声组(命令的回显),不单算一只手;所有手动时变得最少的那台 = 世界相机。
---  ② 每只有眼的手做关节扫描(每个关节单独两个方向一格一格转;到头 / 被顶住 / 别的关节被顶偏 / 走满 12 格停),每一格的画面和读数留在内存;
+--  ② 每只有眼的手做关节扫描(每个关节单独两个方向一格一格转;到头 / 被顶住 / 别的关节被顶偏 / 走满 3 格停;
+--     再几个关节一起动 N + 1 格),每一格的画面和读数留在内存;
 --  ③ 手指遮罩:整段扫描里画面一次都没变过的那些像素 = 跟着眼一起动的自己的手指(或者什么都没有的空白),配点不要它们。
 with Plug;
 with Selfmap;
@@ -48,6 +49,17 @@ package Jointboot is
    procedure Sweep_All (L : in out Plug.Link; F : in out Plug.Frame; M : Selfmap.Body_Map; Arms : Arm_Vectors.Vector;
                         Host : String; Port : Natural; Dump : String; Ds : out Sweep_Vectors.Vector; Css : out Corr_Set_Vectors.Vector;
                         World_Cam : Integer := -1);
+   --  单关节扫完以后几个关节一起动的格子(09-30 改;纯函数,导出给自检):一组 N 个关节走 N + 1 格,第 C 格(从 0 数)第 J 个关节往正还是往负
+   --  = Sylvester 型 Hadamard 矩阵第 C 行、第 J + 1 列的正负(C 和 J + 1 的二进制里同为 1 的位数是偶数 ⇒ 正;第 0 列全正,不用)。
+   --  取前 N + 1 行:[全 1 | 各关节的正负] 满秩 ⇒ 每个关节的效果都分得开(N + 1 正好是 2 的幂时各列两两正交,正负各一半)。
+   --  原来 8 格、正负按 (格子号 × 37 + 关节号 × 11) mod 16 排:秩最多 8,第 j 与 j + 8 个关节正负恰好相反、j 与 j + 16 完全相同 ——
+   --  关节多的一组(人形一条胳膊加手)几个关节的效果分不开
+   function Multi_Cells (N_Joints : Natural) return Natural is (N_Joints + 1);
+   function Multi_Up (Cell, Joint : Natural) return Boolean;
+   --  这样的一格里一个关节往它那一边走多远:预计画面挪 Gw(和单关节每格同一个判据;Px_Per = 这个关节这一边那一段头一格和起点配点量的
+   --  每个读数单位挪几像素),不越过这一边扫到过的最远那一格(Reach = 离起点多远)。Px_Per = 0(这一边头一格没量到画面挪)⇒ 画面管不住它,只按 Reach。
+   --  原来一律走到扫到过的那一头的一半:头一格小、后面几格被"最多放大四倍"压住的关节(离眼近的腕转)画面只挪四分之一格,离眼远的又多挪一成
+   function Multi_Offset (Gw, Px_Per, Reach : Long_Float) return Long_Float is (if Px_Per > 0.0 then Long_Float'Min (Gw / Px_Per, Reach) else Reach);
 
    --  ④ 这只手的运动学:Kinem.Fit(配点来自扫描的配对)
    --  Note = 这一步的报告(几只手各开一个线程同时解 ⇒ 不在这里打印,解完由调用方按顺序打)
@@ -88,6 +100,15 @@ package Jointboot is
    --  fixed_eye.txt(头顶眼,第一只手的系里)、world.txt(世界系:Rw、O),离线回放 / 打分用
    --  Board / Plane_* 交给开机后半段(V1b 09-27):板 = 放进世界的手三角出、配进不动的眼的点(世界系位置和协方差、在不动的眼那张起点画面里的像素、
    --  那一批往返差换成的每轴噪声);Plane_Pt / Plane_N = 世界系里的桌面(原点就在桌面上、法向 = +z),Plane_Rms = 桌面上的点离面的离散(标准差)
+   --  对齐里两处精修(一只手放进世界、全部放完以后一起精修)重挑内点、重解,做到门里的那一组不再变(09-30 改:原来固定 3 轮,那一组还在变就交了)。
+   --  每一轮 Pick 按此刻的解挑出门里的那一组(Enough = 够不够解);和上一轮挑的一样 ⇒ 定下来了(此刻的解就是按这一组解出来的);
+   --  和更早的某一轮一样 ⇒ 来回转、定不下来;都不是 ⇒ Solve 按这一组重解,再下一轮。保险:最多解"观测条数 + 1"遍
+   --  (那一组要是单调地收或放,N 条观测最多变 N 回;比这还多 = 乱跳)。Rounds = 解了几遍;没定下来(Cycled / Capped)由调用方照实说
+   type Settle_Verdict is (Settled, Cycled, Capped, Too_Few);
+   generic
+      with procedure Pick (Use_Set : out Bools; Enough : out Boolean);
+      with procedure Solve (Use_Set : Bools);
+   procedure Until_Settled (Rounds : out Natural; Verdict : out Settle_Verdict);
    procedure Align (Ds : Sweep_Vectors.Vector; Worlds : in out Arm_World_Vectors.Vector; Css : Corr_Set_Vectors.Vector;
                     Host : String; Port : Natural; Rw : out Geom.M3; O : out Geom.V3; Ok : out Boolean; Fixed_Eye : out Geom.Cam_Geo;
                     Board : out Geom.Scene_Pt_Vectors.Vector; Plane_Pt, Plane_N : out Geom.V3; Plane_Rms : out Long_Float; Dump : String := "";

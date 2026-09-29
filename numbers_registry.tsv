@@ -1947,8 +1947,6 @@ jointboot.adb	([[V (T, I), V (T, I + 1), V (T, I + 2)], [V (T, I + 3), V (T, I +
 jointboot.adb	([[V (T, I), V (T, I + 1), V (T, I + 2)], [V (T, I + 3), V (T, I + 4), V (T, I + 5)], [V (T, I + 6), V (T, I + 7), V (T, I + 8)]]);	6	结构	身体文件里 3×3 矩阵 9 个字段的偏移(jointboot.adb:3122)
 jointboot.adb	([[V (T, I), V (T, I + 1), V (T, I + 2)], [V (T, I + 3), V (T, I + 4), V (T, I + 5)], [V (T, I + 6), V (T, I + 7), V (T, I + 8)]]);	7	结构	身体文件里 3×3 矩阵 9 个字段的偏移(jointboot.adb:3122)
 jointboot.adb	([[V (T, I), V (T, I + 1), V (T, I + 2)], [V (T, I + 3), V (T, I + 4), V (T, I + 5)], [V (T, I + 6), V (T, I + 7), V (T, I + 8)]]);	8	结构	身体文件里 3×3 矩阵 9 个字段的偏移(jointboot.adb:3122)
-jointboot.adb	(if Up then St (A).Q0 (Jx) + 0.5 * (Hi (A) (Jx) - St (A).Q0 (Jx)) else St (A).Q0 (Jx) - 0.5 * (St (A).Q0 (Jx) - Lo (A) (Jx)));	0.5	调参数	几个关节一起动的 8 格,每个关节走到"这次扫到过的那一头的一半"。不是恒等式里的一半,是挑采样位置的比例(1/3、2/3、到头都行),拍的(jointboot.adb:574)	这 8 格离起点多远:近了把各轴远近比例绑不紧(注释:没有它们时运动学中位 4–8 mm),远了几个关节加起来画面挪太多、和起点那格 / 上一格配不上	中	每个关节的偏移按它自己头一格量到的"每个读数单位挪几像素"(Keep 里算 Sa.Px_Per 时按关节、方向存下来)定成"预计画面挪 Gw"——和单关节每格同一个判据,再夹进 Lo/Hi(到过的范围)里;不再用一半
-jointboot.adb	(if Up then St (A).Q0 (Jx) + 0.5 * (Hi (A) (Jx) - St (A).Q0 (Jx)) else St (A).Q0 (Jx) - 0.5 * (St (A).Q0 (Jx) - Lo (A) (Jx)));	0.5	调参数	几个关节一起动的 8 格,每个关节走到"这次扫到过的那一头的一半"。不是恒等式里的一半,是挑采样位置的比例(1/3、2/3、到头都行),拍的(jointboot.adb:574)	这 8 格离起点多远:近了把各轴远近比例绑不紧(注释:没有它们时运动学中位 4–8 mm),远了几个关节加起来画面挪太多、和起点那格 / 上一格配不上	中	每个关节的偏移按它自己头一格量到的"每个读数单位挪几像素"(Keep 里算 Sa.Px_Per 时按关节、方向存下来)定成"预计画面挪 Gw"——和单关节每格同一个判据,再夹进 Lo/Hi(到过的范围)里;不再用一半
 jointboot.adb	A (I, J) := A (I, J) + (if I = J then 1.0 else 0.0) - D (I) * D (J);	1.0	数学	单位矩阵的 δ_ij:点到视线距离的正规方程 Σ(I − ddᵀ)(jointboot.adb:1329)
 jointboot.adb	A, B : Integer := -1;	1	数值	哨兵:试过的对(Pair)两头的仪器编号缺省 -1 = 没有;每次用都当场填(jointboot.adb:940)
 jointboot.adb	Ada.Text_IO.Put (Fo, "" & Codec.Fmt (Ea (Kp.A) (I), 7));	7	格式	离线回放 / 打分用的落盘文件 sweep.txt 里印几位小数(Codec.Fmt 的位数),驱动自己不读回(jointboot.adb:677)
@@ -2059,6 +2057,9 @@ jointboot.adb	Ea.Append (0.0);	0.0	结构	占位:不填残差时 Ea 只当计数
 jointboot.adb	Ec.Append (0.0);	0.0	结构	占位:同上一条(Ec / Use_C)(jointboot.adb:1693)
 jointboot.adb	Ec.Replace_Element (K, Ec (K) / Jf (2 * Na));	2	结构	组号 2·Na(jointboot.adb:1788)
 jointboot.adb	Echo : array (0 .. Natural'Max (1, Ng) - 1) of Boolean := [others => False];	1	结构	数组上界 Natural'Max (1, Ng) - 1:至少留一格免得数组为空(Ng = 0 时要么先返回、要么循环一次不走,这一格不会被读);Echo 按关节读数组的下标记"这组是别组的回声"(Ng = 0 时 45 行已返回)(jointboot.adb:40)
+jointboot.adb	Enough := 2 * Nua + 2 * Nuc + 3 * N_Planes > Np;	2	结构	残差条数:手的每条配点 2 条(同 Solve 里的 N_Res;够不够解 = 残差条数比参数多)(jointboot.adb:1886)
+jointboot.adb	Enough := 2 * Nua + 2 * Nuc + 3 * N_Planes > Np;	2	结构	不动的眼每条配点 2 条(同上)(jointboot.adb:1886)
+jointboot.adb	Enough := 2 * Nua + 2 * Nuc + 3 * N_Planes > Np;	3	结构	每张桌面 3 条残差(两个倾角 + 一个高度;同上)(jointboot.adb:1886)
 jointboot.adb	Es : array (0 .. 1) of Floats;	1	结构	两格:Score 里按 1298 行那两组分别攒白化残差,各算一个中位(jointboot.adb:1381)
 jointboot.adb	Es : array (0 .. 1) of Floats;	1	结构	两格:Group_Scale 里按同样两组重估噪声倍数(jointboot.adb:1400)
 jointboot.adb	F_Meas => V (T, 8), F_Prior => V (T, 9), F_Prior_Sd => V (T, 10), R_Ce => M3_At (T, 11), Off => V3_At (T, 20),	10	结构	身体文件 .kin.txt 一行里的第几个字段(和 Save_Kin 写的次序一一对上,我逐个对过);文件格式里的字段位置(jointboot.adb:3150)
@@ -2094,7 +2095,6 @@ jointboot.adb	Gi : constant Natural := 2 * B + (if Wv (Ob.Wk).Arm < 0 then 1 els
 jointboot.adb	Grow : constant := 2.0;	2.0	数值	几何级数找幅度(区间倍增)的倍率;只影响找到的幅度离最小可见幅度差几倍(≤2×)和试几次,不描述身体(jointboot.adb:24)
 jointboot.adb	Gt.Cx := Long_Float (Ds (0).World_Img.W) / 2.0; Gt.Cy := Long_Float (Ds (0).World_Img.H) / 2.0; Gt.F := Pin_Fixed_F;	2.0	调参数	数学上是"一半",用法是【主点 = 画幅正中】的相机假设:不动的眼(头顶眼)的主点钉在 W/2、H/2,之后再也不解(Kinem.Fit_World 里 M.Cx := Cx 以后没有任何一处改它;Geom.Fit_Fixed_Board 也不解 Cx/Cy)。仿真相机的主点恰好就在正中 = 仿真的真值,所以仿真验收查不出它(jointboot.adb:1204)	不动的眼(头顶眼)的主点:它的焦距和位姿怎么解、别的手怎么放进世界、交给开机后半段的板点,全按它投影	中	Geom.Fit_Fixed_Board 和 Joint_Refine 里这只眼那一组(现在 7 个:转 3、平移 3、log 焦距)加 Cx、Cy 两维,W/2、H/2 只当起步值。注意可观性:板点要是几乎全在桌面一张平面上、只有这一个视角,平面单视角只给内参两条约束,焦距 + 主点三个解不全 —— 要靠板里离开桌面的点(东西上的三角点),解不出就如实报"主点没量到",不许悄悄退回画幅中心。geom.adb 里拿 G.Cx 当半幅宽的几处同样要改
 jointboot.adb	Gt.Cx := Long_Float (Ds (0).World_Img.W) / 2.0; Gt.Cy := Long_Float (Ds (0).World_Img.H) / 2.0; Gt.F := Pin_Fixed_F;	2.0	调参数	数学上是"一半",用法是【主点 = 画幅正中】的相机假设:不动的眼(头顶眼)的主点钉在 W/2、H/2,之后再也不解(Kinem.Fit_World 里 M.Cx := Cx 以后没有任何一处改它;Geom.Fit_Fixed_Board 也不解 Cx/Cy)。仿真相机的主点恰好就在正中 = 仿真的真值,所以仿真验收查不出它(jointboot.adb:1204)	不动的眼(头顶眼)的主点:它的焦距和位姿怎么解、别的手怎么放进世界、交给开机后半段的板点,全按它投影	中	Geom.Fit_Fixed_Board 和 Joint_Refine 里这只眼那一组(现在 7 个:转 3、平移 3、log 焦距)加 Cx、Cy 两维,W/2、H/2 只当起步值。注意可观性:板点要是几乎全在桌面一张平面上、只有这一个视角,平面单视角只给内参两条约束,焦距 + 主点三个解不全 —— 要靠板里离开桌面的点(东西上的三角点),解不出就如实报"主点没量到",不许悄悄退回画幅中心。geom.adb 里拿 G.Cx 当半幅宽的几处同样要改
-jointboot.adb	Gw := Long_Float (Sa.W) / 5.0;	5.0	调参数	每格画面挪画幅宽的 1/5,拍的比例(V1B14 回放挑的)(jointboot.adb:415)	扫描每格转多大(配点配不配得上 vs 运动学约束够不够强)	中	按这只手自己的图量配点能承受的位移:每段往外一格一格放大,直到往返 1 px 内配上的格点比例开始下降(进展停了)为止;不定死 1/5
 jointboot.adb	Gx : constant := 32;	32	调参数	问格点 32×24 = 768 个,拍的采样密度,按 4:3 画幅铺(16:9 时格子是扁的)(jointboot.adb:181)	每对图问几个点 ⇒ 运动学 / 对齐的配点数	低	格距 = 配点仪器自己的输出分辨率(它的特征图步长,问仪器),格数 = W/步长 × H/步长;或按要解的参数个数 × 冗余定
 jointboot.adb	Gy : constant := 24;	24	调参数	同上(纵向 24 格)(jointboot.adb:182)	同上	低	同 181 行
 jointboot.adb	Half_Hi : constant Long_Float := (if K < Natural (Step_Hi.Length) then 0.5 * Step_Hi (K) else 0.0);	0.5	调参数	'往范围外要走的不到半步就不核尽头',半步是拍的(V1B64 就是它边上的误记)(jointboot.adb:2448)	干活时哪些关节会被记成尽头(记错 ⇒ 反解永久被挡)	中	新量:这只手每个关节在'到了'的命令上停下时还差多少(到位误差的分布,干活时每条命令都有);要往外走的那一截 > 3×到位误差(统计门)才核
@@ -2212,7 +2212,7 @@ jointboot.adb	Sa : constant Long_Float := (if A = 0 then 1.0 else Worlds (A).S);
 jointboot.adb	Sa.Px_Per := Dv (Natural (Dv.Length) / 2) / Dq;	2	数学	排好序取正中那个的下标(长度 ÷ 2)= 中位数的定义;这一对配点挪动的中位 ÷ 实到的转角 = Px_Per(jointboot.adb:349)
 jointboot.adb	Sa.Step := 0.03 * Long_Float'Max (1.0, abs Sa.Q0 (J));	0.03	调参数	扫描起步 = 读数量级的 3%(Max(1.0, |q0|) 里的 1.0 也是单位假设:至少 0.03 单位);读数零点在哪是身体的约定,起步大小却跟着它变(jointboot.adb:451)	每个关节扫描第一格多大(进而定全段范围:最多 1+4+16 = 21 倍起步)	高	第一格 = Find_Arms 量到的 Arms(A).Probe(这组关节一起转多少就看得见,量出来的),之后按 Px_Per 定步;角度制零点附近 3% 是 0.03°(看不见),米制滑轨一步 3 cm
 jointboot.adb	Sa.Step := 0.03 * Long_Float'Max (1.0, abs Sa.Q0 (J));	1.0	调参数	Long_Float'Max (1.0, |q0|):起点读数不到 1 就按 1 算"读数量级",起步 = 0.03 × 它。这个 1 是【读数单位 ≈ 弧度 / 米】的单位假设:报角度(度)、报毫米、报编码器刻度而起点在 0 附近的身体,起步小几十到上千倍;之后每格最多放大 4 倍(Ramp)、一段最多 3 格,追不回来;头一格配不出挪动时 Px_Per = 0,步子干脆不改(jointboot.adb:451)	单关节扫描每一段头一格的步子(起步量);起步太小 ⇒ 这一段看不见挪动 ⇒ 这个关节的轴量不出来,整只手的运动学量不成	高	起步用开机认手时已经量到的 Arms (A).Probe(这组关节一起转多少就看得见,读数自己的单位);头一格若 Px_Per 仍是 0,按 Find_Arms 同一个翻倍协议(Grow)放大到看得见为止。0.03 这个比例一起去掉
-jointboot.adb	Sa.Step := Sa.Step * Long_Float'Max (0.5, Long_Float'Min (Ramp, Gw / (Sa.Step * Sa.Px_Per)));	0.5	调参数	下一格步子最少减半(和 Ramp 一起把缩放夹在 [0.5, 4])(jointboot.adb:519)	扫描步子缩得多快	中	去掉钳子:下一格步子直接 = Gw ÷ Px_Per(每格用这一格和上一格的配点重量 Px_Per,非线性靠重量,不靠 [0.5, 4] 夹)
+jointboot.adb	Sa.Step := Sa.Step * Long_Float'Max (0.5, Long_Float'Min (Ramp, Gw_Of (A) / (Sa.Step * Sa.Px_Per)));	0.5	调参数	下一格步子最少减半(和 Ramp 一起把缩放夹在 [0.5, 4]);09-30 只把 Gw 换成每只手自己的 Gw_Of (A)(jointboot.adb:541)	扫描步子缩得多快	中	去掉钳子:下一格步子直接 = Gw ÷ Px_Per(每格用这一格和上一格的配点重量 Px_Per,非线性靠重量,不靠 [0.5, 4] 夹)
 jointboot.adb	Sa.Why := To_Unbounded_String ("");	"3	调参数	日志字串"走满 3 格"里的 3,是第 513 行"最多 3 格(Sa.K >= 3)"那个调参数的抄本(jointboot.adb:453)	日志里怎么说这一段为什么停;那个上限一改,这句话就说错	低	跟第 513 行一起换:这句话改成印真正的上限变量(将来量出来的格数),不在字串里写数
 jointboot.adb	Say ("" & Codec.Fmt (G.F, 1) & "" & Codec.Fmt (abs Dist (G.Pos, Pl0, N0), 3) & "");	1	格式	日志里印几位小数(Codec.Fmt 的位数),只给人看,不进任何判断(jointboot.adb:2233)
 jointboot.adb	Say ("" & Codec.Fmt (G.F, 1) & "" & Codec.Fmt (abs Dist (G.Pos, Pl0, N0), 3) & "");	3	格式	日志里印几位小数(Codec.Fmt 的位数),只给人看,不进任何判断(jointboot.adb:2233)
@@ -2265,10 +2265,6 @@ jointboot.adb	Third : constant := 1.0 / 3.0;	3.0	调参数	Third = 1/3:'没转�
 jointboot.adb	Tx : constant V3 := [Xx (Xx'First + 3), Xx (Xx'First + 4), Xx (Xx'First + 5)];	3	结构	参数向量里的第几个分量(0–2 转动向量、3–5 平移、6 = log 倍数 / log 焦距;一只手 / 一只眼占 7 个);分量下标(jointboot.adb:1519)
 jointboot.adb	Tx : constant V3 := [Xx (Xx'First + 3), Xx (Xx'First + 4), Xx (Xx'First + 5)];	4	结构	参数向量里的第几个分量(0–2 转动向量、3–5 平移、6 = log 倍数 / log 焦距;一只手 / 一只眼占 7 个);分量下标(jointboot.adb:1519)
 jointboot.adb	Tx : constant V3 := [Xx (Xx'First + 3), Xx (Xx'First + 4), Xx (Xx'First + 5)];	5	结构	参数向量里的第几个分量(0–2 转动向量、3–5 平移、6 = log 倍数 / log 焦距;一只手 / 一只眼占 7 个);分量下标(jointboot.adb:1519)
-jointboot.adb	Up : constant Boolean := ((Cb * 37 + Jx * 11) mod 16) < 8;	11	数值	确定性伪随机正负排列((格子号×37 + 关节号×11) mod 16 < 8);不描述身体,但实测:第 j 与 j+8 个关节正负恰好相反、j 与 j+16 完全相同(≥9 个关节时各轴分不开)⇒ 改 Hadamard 行(jointboot.adb:572)
-jointboot.adb	Up : constant Boolean := ((Cb * 37 + Jx * 11) mod 16) < 8;	16	数值	同上(模 16)(jointboot.adb:572)
-jointboot.adb	Up : constant Boolean := ((Cb * 37 + Jx * 11) mod 16) < 8;	37	数值	同上(乘 37)(jointboot.adb:572)
-jointboot.adb	Up : constant Boolean := ((Cb * 37 + Jx * 11) mod 16) < 8;	8	数值	同上(前一半为正)(jointboot.adb:572)
 jointboot.adb	V => (Long_Float (Gyy) + 0.5) * Long_Float (A_Img.H) / Long_Float (Gy), others => <>));	0.5	数学	同上(纵向)(jointboot.adb:3331)
 jointboot.adb	V => (Long_Float (Gyy) + 0.5) * Long_Float (H) / Long_Float (Gy), others => <>));	0.5	数学	同上(纵向)(jointboot.adb:242)
 jointboot.adb	Version_Ok := Natural (T.Length) >= 2 and then T (1) = "";	"4	格式	读回身体文件时只认格式版本 4(jointboot.adb:3135)
@@ -2305,7 +2301,6 @@ jointboot.adb	elsif Shorts > 1 then	1	数学	计数逻辑:Shorts > 1 = 两个以
 jointboot.adb	elsif Tag = "" and then Natural (T.Length) < 41 then	41	结构	fixed 行 = 标签 + 40 个字段(身体文件格式)(jointboot.adb:3146)
 jointboot.adb	elsif Tag = "" and then Natural (T.Length) >= 2 then	2	结构	'key <钥匙>' 两个字段(jointboot.adb:3136)
 jointboot.adb	exit when Best = -2;	2	结构	同上(jointboot.adb:2087)
-jointboot.adb	for Cb in 1 .. 8 loop	8	调参数	'几个关节一起动'8 格,拍的格数;8 格时 ± 号矩阵秩最多 8,组里超过 8 个关节(人形手臂 + 手指)时各轴比例绑不住(jointboot.adb:563)	把各轴离眼远近的比例绑在一起的约束有多少	中	格数 = 这组关节数 + 1,正负取 Hadamard(Sylvester)矩阵的行(两两正交,结构量),同时去掉 572 行的散列
 jointboot.adb	for Dd in -1 .. 1 loop	1	数学	正负号:Dd 取 -1 和 +1(0 跳过)= 每个关节往负、往正两个方向各扫一段(jointboot.adb:441)
 jointboot.adb	for Dd in -1 .. 1 loop	1	数学	两个方向的正负号(Dd = −1 / +1,0 跳过):每个关节往两头各扫一次(09-30 我定)
 jointboot.adb	for I in 0 .. 6 loop	6	结构	0 .. 6 = Plug.Arm_Pose 的 7 个分量(xyz + wxyz),把身体自报的位姿落盘给离线打分(驱动不读);最好写成 Ea (Kp.A)'Range(jointboot.adb:676)
@@ -2313,8 +2308,6 @@ jointboot.adb	for I in 2 .. Natural (T.Length) - 1 loop	2	结构	q0 行:标签�
 jointboot.adb	for I in 2 .. Natural (T.Length) - 1 loop	2	结构	(3192 行同一句:glo/ghi/slo/shi 行)同上(jointboot.adb:3185)
 jointboot.adb	for I in 2 .. Natural (T.Length) - 1 loop	2	结构	(3209 行同一句:lo/hi 行)同上(jointboot.adb:3185)
 jointboot.adb	for I in 3 .. Natural (T.Length) - 1 loop	3	结构	frame 行:标签、臂号、关节号之后是读数(jointboot.adb:3238)
-jointboot.adb	for Round in 1 .. 3 loop	3	数值	重估噪声 → 挑内点 → 解 的轮数 3;注:内点集还在变时也停,应改成'内点集不再变'为止(jointboot.adb:1494)
-jointboot.adb	for Round in 1 .. 3 loop	3	数值	(1757 行同一句:一起精修 3 轮)同上(jointboot.adb:1494)
 jointboot.adb	function B (X : Boolean) return String is (if X then "" else "");	"0	格式	布尔在身体文件里写成 0 / 1(jointboot.adb:3021)
 jointboot.adb	function B (X : Boolean) return String is (if X then "" else "");	"1	格式	布尔在身体文件里写成 0 / 1(jointboot.adb:3021)
 jointboot.adb	function Cross (A, B : V3) return V3 is ([A (1) * B (2) - A (2) * B (1), A (2) * B (0) - A (0) * B (2), A (0) * B (1) - A (1) * B (0)]);	1	结构	叉乘公式里第几个分量(A (1)·B (2) − A (2)·B (1) …)。检查器把它当函数参数,是因为本文件第 3021 行有个叫 B 的函数 —— 名字按文件认、函数优先的漏洞(jointboot.adb:1118)
@@ -2323,6 +2316,7 @@ jointboot.adb	function Cross (A, B : V3) return V3 is ([A (1) * B (2) - A (2) * 
 jointboot.adb	function Cross (A, B : V3) return V3 is ([A (1) * B (2) - A (2) * B (1), A (2) * B (0) - A (0) * B (2), A (0) * B (1) - A (1) * B (0)]);	2	结构	叉乘公式里第几个分量;同上(B 被当成第 3021 行那个函数)(jointboot.adb:1118)
 jointboot.adb	function F9 (X : Long_Float) return String is (Codec.Fmt (X, 9));	9	格式	F9 = 身体文件 .kin.txt(和装回时的落盘)存 9 位小数;装回后接着用,9 位对模型单位(眼位置均方根 = 1)、像素、弧度都远够(jointboot.adb:2990)
 jointboot.adb	function Grp (Ob : Arm_Ob) return Natural is (if Wv (Ob.Wk).Arm < 0 then 1 else 0);	1	结构	组号:配进不长在手上的眼(Arm < 0)= 第 1 组,否则第 0 组;同 1298 行那两格(jointboot.adb:1299)
+jointboot.adb	function Gw_Of (A : Natural) return Long_Float is (Long_Float (St (A).W) / 5.0);	5.0	调参数	每格画面挪画幅宽的 1/5,拍的比例(V1B14 回放挑的);09-30 起按每只手自己的画幅(原来一个数取最后一只手的),也定几个关节一起动的格子里每个关节走多远(Multi_Offset)(jointboot.adb:318)	扫描每格转多大、几个关节一起动时每个关节走多远(配点配不配得上 vs 运动学约束够不够强)	中	按这只手自己的图量配点能承受的位移:每段往外一格一格放大,直到往返 1 px 内配上的格点比例开始下降(进展停了)为止;不定死 1/5
 jointboot.adb	function Id_Of (A, F : Natural) return Integer is (if F < Natural (Ds (A).Ids.Length) then Ds (A).Ids (F) else -1);	1	数值	哨兵:Id_Of = 这一格在配点仪器那边的编号,格号越界 ⇒ -1 = 没有;调用方见 < 0 就跳过(jointboot.adb:1041)
 jointboot.adb	function Px (X : Long_Float) return String is (if X < 0.0 then "" else Codec.Fmt (X, 3));	3	格式	日志里印几位小数(Codec.Fmt 的位数),只给人看,不进任何判断(jointboot.adb:781)
 jointboot.adb	function V3_At (T : Strs; I : Natural) return Geom.V3 is ([V (T, I), V (T, I + 1), V (T, I + 2)]);	2	结构	3 维向量字段的偏移(jointboot.adb:3123)

@@ -9,6 +9,7 @@ with Instrument;
 with Layout;
 with Ada.Directories;
 with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
+with Interfaces;
 package body Jointboot is
 
    procedure Say (S : String) is
@@ -18,6 +19,18 @@ package body Jointboot is
 
    --  落盘时一根轴是转还是走(格式里的一个词)
    function Kind_Word (A : Kinem.Axis) return String is (if A.Slide then "slide" else "turn");
+
+   function Multi_Up (Cell, Joint : Natural) return Boolean is
+      use type Interfaces.Unsigned_32;
+      X : Interfaces.Unsigned_32 := Interfaces.Unsigned_32 (Cell) and Interfaces.Unsigned_32 (Joint + 1);
+      Odd : Boolean := False;
+   begin
+      while X /= 0 loop
+         Odd := not Odd;
+         X := X and (X - 1);   --  去掉最低的那一个 1:几轮去完 = 同为 1 的有几位
+      end loop;
+      return not Odd;
+   end Multi_Up;
 
    Start_Amp : constant Long_Float := 1.0e-4;   --  探针协议的起点(同 Selfmap:极小,翻倍到走得出来又看得见为止;无量纲协议)
    Max_Doublings : constant := 12;              --  次数
@@ -289,6 +302,7 @@ package body Jointboot is
          W, H : Natural := 0;
          Step, Off, Q_Prev : Long_Float := 0.0;
          Px_Per : Long_Float := 0.0;              --  这个关节每转一个读数单位画面挪几像素(这一段头一格和起点那一对配点量的;0 = 没量到)
+         Px_Lo, Px_Hi : Floats;                   --  每个关节往负 / 往正那一段量的 Px_Per(几个关节一起动的格子按它定每个关节走多远;0 = 没量到)
          Tgt : Floats;
          K : Natural := 0;
          Done : Boolean := True;
@@ -299,7 +313,9 @@ package body Jointboot is
       St : array (0 .. Natural'Max (1, Na) - 1) of Arm_State;
       --  这一格在仪器那边存成了没有
       function Sa_Id_Ok (A, Fr : Natural) return Boolean is (Fr < Natural (St (A).Ids.Length) and then St (A).Ids (Fr) >= 0);
-      Gw : Long_Float := 0.0;
+      --  每格画面挪第 A 只手那只眼画幅宽的 1/5(比例,无量纲;每个方向停 3 格,转开的总量同原来 5 格 × 1/10:V1B14 挑格回放,停 3 格最大 0.73 mm)。
+      --  按每只手自己的画幅(原来一个数给所有手、取的是最后一只手的画幅:几只手的眼画幅不一样时别的手每格挪错)
+      function Gw_Of (A : Natural) return Long_Float is (Long_Float (St (A).W) / 5.0);
       Nj : Natural := 0;
       Okc : Boolean;
       Err : Unbounded_String;
@@ -347,6 +363,13 @@ package body Jointboot is
                if not Dv.Is_Empty and then Dq > 0.0 then
                   Sorting.Sort (Dv);
                   Sa.Px_Per := Dv (Natural (Dv.Length) / 2) / Dq;
+               end if;
+               if J < Natural (Sa.Px_Lo.Length) then
+                  if Dd < 0 then
+                     Sa.Px_Lo.Replace_Element (J, Sa.Px_Per);
+                  else
+                     Sa.Px_Hi.Replace_Element (J, Sa.Px_Per);
+                  end if;
                end if;
                T_Now := T_Now + Ada.Calendar."-" (Ada.Calendar.Clock, Tn);
             end;
@@ -403,6 +426,7 @@ package body Jointboot is
                Sa.Live := True;
                Sa.G := Arms (A).Group; Sa.Cam := Natural (Arms (A).Eye);
                Sa.Q0 := F.Joints (Sa.G); Sa.Tgt := Sa.Q0;
+               Sa.Px_Lo := Zeros (Natural (Sa.Q0.Length)); Sa.Px_Hi := Zeros (Natural (Sa.Q0.Length));
                Sa.W := F.Cams (Sa.Cam).W; Sa.H := F.Cams (Sa.Cam).H;
                D.W := Sa.W; D.H := Sa.H;
                D.Has_Lo := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (Natural (Sa.Q0.Length)));
@@ -411,8 +435,6 @@ package body Jointboot is
                D.Step_Hi := F64_Vectors.To_Vector (0.0, Ada.Containers.Count_Type (Natural (Sa.Q0.Length)));
                Ds.Replace_Element (A, D);
                Nj := Natural'Max (Nj, Natural (Sa.Q0.Length));
-               --  每格画面挪画幅宽的 1/5(比例,无量纲;每个方向停 3 格,转开的总量同原来 5 格 × 1/10:V1B14 挑格回放,停 3 格最大 0.73 mm)
-               Gw := Long_Float (Sa.W) / 5.0;
                Say ("关节扫描 · 第" & Codec.Img (A + 1) & " 只手(第" & Codec.Img (Sa.G) & " 组读数," & Codec.Img (Natural (Sa.Q0.Length)) & " 个关节,眼 = 第"
                     & Codec.Img (Sa.Cam) & " 台)");
             end;
@@ -516,7 +538,7 @@ package body Jointboot is
                                     if Sa.Px_Per > 0.0 then
                                        --  下一格按这一格画面挪的(头一格那一对配点量的"每个读数单位挪几像素" × 这一格的步子)放大 / 缩小,
                                        --  一次最多四倍、最少减半(倍数,无量纲);没量到就不改
-                                       Sa.Step := Sa.Step * Long_Float'Max (0.5, Long_Float'Min (Ramp, Gw / (Sa.Step * Sa.Px_Per)));
+                                       Sa.Step := Sa.Step * Long_Float'Max (0.5, Long_Float'Min (Ramp, Gw_Of (A) / (Sa.Step * Sa.Px_Per)));
                                     end if;
                                     Sa.Q_Prev := F.Joints (Sa.G) (J);
                                  end if;
@@ -541,9 +563,11 @@ package body Jointboot is
             end if;
          end loop;
       end loop;
-      --  ② 几个关节一起动的 8 格(次数):每个关节转到它这次扫到过的那一头的一半(正负按格子号排开),每格和起点、和上一格配。
+      --  ② 几个关节一起动的格子:最多那只手的关节数 + 1 格(Multi_Cells),第几格每个关节往哪边 = Hadamard 矩阵那一行(Multi_Up),
+      --  走多远 = 预计画面挪一格(Gw ÷ 它那一边头一格量的 Px_Per,不越过它这次扫到过的那一头;Multi_Offset),每格和起点、和上一格配。
       --  只一个关节一个关节扫,各轴离眼远近的比例只靠相邻关节头一格那几对连,约束太弱:V1B6 / V1B8 驱动自己解的运动学在扫描格上
-      --  中位 4–8 mm、最大 26–116 mm(像素残差却只有 0.2 px)。V1B2 离线能过线,靠的是板停 —— 几个关节一起动的姿势把各轴的比例绑在一起
+      --  中位 4–8 mm、最大 26–116 mm(像素残差却只有 0.2 px)。V1B2 离线能过线,靠的是板停 —— 几个关节一起动的姿势把各轴的比例绑在一起。
+      --  关节比最多那只少的手多走几格(Hadamard 往下几行,照样分得开)
       declare
          Lo, Hi : array (0 .. Natural'Max (1, Na) - 1) of Floats;
       begin
@@ -560,7 +584,7 @@ package body Jointboot is
                end loop;
             end if;
          end loop;
-         for Cb in 1 .. 8 loop
+         for Cb in 1 .. Multi_Cells (Nj) loop
             declare
                Tol : Long_Float := Long_Float'Last;
             begin
@@ -568,10 +592,10 @@ package body Jointboot is
                   if St (A).Live then
                      for Jx in 0 .. Natural (St (A).Q0.Length) - 1 loop
                         declare
-                           --  正负按格子号和关节号排开(确定的,不随机):(格子号 × 37 + 关节号 × 11) 除以 16 的余数前一半为正(次数,只是排列)
-                           Up : constant Boolean := ((Cb * 37 + Jx * 11) mod 16) < 8;
+                           Sa : Arm_State renames St (A);
                            Tq : constant Long_Float :=
-                             (if Up then St (A).Q0 (Jx) + 0.5 * (Hi (A) (Jx) - St (A).Q0 (Jx)) else St (A).Q0 (Jx) - 0.5 * (St (A).Q0 (Jx) - Lo (A) (Jx)));
+                             (if Multi_Up (Cb - 1, Jx) then Sa.Q0 (Jx) + Multi_Offset (Gw_Of (A), Sa.Px_Hi (Jx), Hi (A) (Jx) - Sa.Q0 (Jx))
+                              else Sa.Q0 (Jx) - Multi_Offset (Gw_Of (A), Sa.Px_Lo (Jx), Sa.Q0 (Jx) - Lo (A) (Jx)));
                            Dq_Now : constant Long_Float := abs (Tq - St (A).Tgt (Jx));
                         begin
                            St (A).Tgt.Replace_Element (Jx, Tq);
@@ -875,6 +899,34 @@ package body Jointboot is
          end;
       end loop;
    end Tri_Pts;
+
+   procedure Until_Settled (Rounds : out Natural; Verdict : out Settle_Verdict) is
+      package Set_Vectors is new Ada.Containers.Vectors (Natural, Bools, Bool_Vectors."=");
+      Seen : Set_Vectors.Vector;   --  解过的每一组(按先后)
+      U : Bools;
+      Enough : Boolean;
+   begin
+      Rounds := 0;
+      loop
+         Pick (U, Enough);
+         if not Enough then
+            Verdict := Too_Few;
+            return;
+         elsif not Seen.Is_Empty and then Bool_Vectors."=" (U, Seen.Last_Element) then
+            Verdict := Settled;
+            return;
+         elsif Seen.Contains (U) then
+            Verdict := Cycled;
+            return;
+         elsif Rounds >= Natural (U.Length) + 1 then
+            Verdict := Capped;
+            return;
+         end if;
+         Seen.Append (U);
+         Solve (U);
+         Rounds := Rounds + 1;
+      end loop;
+   end Until_Settled;
 
    --  ── 把几只手、几只不长在手上的眼放进同一个世界(一种办法,所有身体一样;代码里不问"有没有头顶眼")──
    --  世界 = 第一只手的参照眼系;它扫描的每一格(有三角点的)都是世界里的一只眼,位姿按它的运动学。
@@ -1490,15 +1542,15 @@ package body Jointboot is
                end loop;
             end;
          end;
-         --  一起精修三轮(每轮先按各组自己的残差重估噪声倍数,再挑门里的、解)
-         for Round in 1 .. 3 loop
-            Group_Scale;
-            declare
+         --  一起精修:每轮先按各组自己的残差重估噪声倍数,再挑门里的、解,做到门里的那一组不再变(Until_Settled;原来固定三轮)
+         declare
+            procedure Pick (Use_R : out Bools; Enough : out Boolean) is
                Es : Floats;
                Gate : Long_Float;
-               Use_R : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (Nr));
                Nu : Natural := 0;
             begin
+               Group_Scale;
+               Use_R := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (Nr));
                for Ob of Arm_Obs (B) loop
                   Es.Append (abs Epi (Ob, S, R, T));
                end loop;
@@ -1508,7 +1560,16 @@ package body Jointboot is
                      Use_R.Replace_Element (K, True); Nu := Nu + 1;
                   end if;
                end loop;
-               exit when Nu < Min_Inl;
+               Enough := Nu >= Min_Inl;
+            end Pick;
+            procedure Solve (Use_R : Bools) is
+               Nu : Natural := 0;
+            begin
+               for U of Use_R loop
+                  if U then
+                     Nu := Nu + 1;
+                  end if;
+               end loop;
                declare
                   N_Res : constant Natural := 2 * Nu + 3;
                   Rv : constant V3 := Rot_Vec (R);
@@ -1531,8 +1592,17 @@ package body Jointboot is
                   Kinem.Robust_LM (X, N_Res, N_Res, 100, Steps, Resid'Access);
                   R := Rodrigues ([X (0), X (1), X (2)]); T := [X (3), X (4), X (5)]; S := Exp (X (6));
                end;
-            end;
-         end loop;
+            end Solve;
+            procedure Refine is new Until_Settled (Pick, Solve);
+            Rounds : Natural;
+            Verdict : Settle_Verdict;
+         begin
+            Refine (Rounds, Verdict);
+            if Verdict = Cycled or else Verdict = Capped then
+               Say ("  第" & Codec.Img (B + 1) & " 只手放进世界的精修:重挑重解了 " & Codec.Img (Rounds) & " 遍,门里的那一组"
+                    & (if Verdict = Cycled then "又变回了前面某一遍的样子(来回转)" else "解满保险的遍数还在变") & " ⇒ 没定下来,交的是最后一遍的解");
+            end if;
+         end;
          declare
             All_E, Es : Floats;
             package Sorting is new F64_Vectors.Generic_Sorting;
@@ -1754,14 +1824,16 @@ package body Jointboot is
                   X (K .. K + 6) := [Rv (0), Rv (1), Rv (2), G.Pos (0), G.Pos (1), G.Pos (2), Log (G.F)];
                end;
             end if;
-            for Round in 1 .. 3 loop   --  三轮:每轮先按各组自己的残差重估噪声倍数,再挑门里的、解(次数)
-               declare
+            --  每轮先按各组自己的残差重估噪声倍数,再挑门里的、解,做到门里的那一组(手的配点 + 不动的眼的配点)不再变(Until_Settled;原来固定三轮)
+            declare
+               Ua, Uc : Bools;
+               Nua, Nuc, N_Planes : Natural := 0;
+               procedure Pick (Both : out Bools; Enough : out Boolean) is
                   Ea, Ec : Floats;
                   Ga : Ints;
                   Dummy : Kinem.Vec (0 .. 0);
-                  Ua, Uc : Bools;
-                  Nua, Nuc, N_Planes : Natural := 0;
                begin
+                  Ua.Clear; Uc.Clear; Nua := 0; Nuc := 0; N_Planes := 0;
                   Jf := [others => 1.0];
                   All_Res (X, Dummy, Bool_Vectors.Empty_Vector, Bool_Vectors.Empty_Vector, True, Ea, Ec, Ga);
                   --  各组的噪声倍数 = 白化后二维残差长度的中位 ÷ √(2 ln 2)(单位方差时瑞利分布的中位,统计常数,无量纲)
@@ -1810,6 +1882,12 @@ package body Jointboot is
                         N_Planes := N_Planes + 1;
                      end if;
                   end loop;
+                  Both := Bool_Vectors."&" (Ua, Uc);
+                  Enough := 2 * Nua + 2 * Nuc + 3 * N_Planes > Np;   --  残差条数(同 Solve 里的 N_Res)比参数多才解得了
+               end Pick;
+               procedure Solve (Both : Bools) is
+                  pragma Unreferenced (Both);   --  这一组 Pick 已经按手 / 不动的眼分开放在 Ua、Uc 里
+               begin
                   declare
                      N_Res : constant Natural := 2 * Nua + 2 * Nuc + 3 * N_Planes;
                      procedure Resid (Xx : Kinem.Vec; Rr : out Kinem.Vec) is
@@ -1823,8 +1901,19 @@ package body Jointboot is
                         Kinem.Robust_LM (X, N_Res, N_Res, 100, Steps, Resid'Access);
                      end if;
                   end;
-               end;
-            end loop;
+               end Solve;
+               procedure Refine is new Until_Settled (Pick, Solve);
+               Rounds : Natural;
+               Verdict : Settle_Verdict;
+            begin
+               Refine (Rounds, Verdict);
+               Say ("  一起精修:重挑重解了 " & Codec.Img (Rounds) & " 遍,门里的那一组"
+                    & (case Verdict is
+                          when Settled => "不再变了",
+                          when Cycled => "又变回了前面某一遍的样子(来回转)⇒ 没定下来,交的是最后一遍的解",
+                          when Capped => "解满保险的遍数还在变 ⇒ 没定下来,交的是最后一遍的解",
+                          when Too_Few => "的残差条数不比要解的参数多 ⇒ 解不了"));
+            end;
             --  写回去
             for B in 1 .. Na - 1 loop
                if Arm_Slot (B) >= 0 then

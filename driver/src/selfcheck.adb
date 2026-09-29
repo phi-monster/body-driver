@@ -1047,6 +1047,289 @@ begin
           and then Jointboot.Sweep_Stops (0.02, 0.139, 0.2011) and then not Jointboot.Sweep_Stop_Is_End (0.02, 0.139, 0.2011)
           and then not Jointboot.Sweep_Stops (0.2, 0.001, 0.2011),
           "扫描停下记不记界:碰桌(别的关节被顶偏 0.139)停、不记界;x5 真到头(实到 0.0822 / 0.2602、别的只偏 0.001)停、记界;自己停住又顶偏别人仍不记;走满没顶偏不停");
+   --  🔴 几个关节一起动的格子怎么排(Jointboot.Multi_Cells / Multi_Up,09-30 C 组):一组 N 个关节走 N + 1 格,正负取 Sylvester 型 Hadamard 矩阵的行 ⇒
+   --  N = 1 .. 24 每一个 [全 1 | 各关节的正负] 都满秩(按素数 2^31 − 1 的余数消元数秩:整数运算、不靠浮点容差;余数下满秩 ⇒ 实数下也满秩);
+   --  N = 7(人形一条胳膊,8 格)各关节的正负两两正交、正负各一半。牙:原来 8 格、(格子号 × 37 + 关节号 × 11) mod 16 < 8 为正 ⇒
+   --  N = 9 秩只有 8(要 10),第 0 与第 8 个关节正负恰好相反、第 0 与第 16 个完全相同 —— 这几个关节的效果分不开
+   declare
+      P : constant Long_Long_Integer := 2147483647;   --  素数 2^31 − 1:两个余数相乘不出 64 位
+      type Mat is array (Natural range <>, Natural range <>) of Long_Long_Integer;
+      function Pow_Mod (B, E : Long_Long_Integer) return Long_Long_Integer is
+         R : Long_Long_Integer := 1;
+         Bb : Long_Long_Integer := B mod P;
+         Ee : Long_Long_Integer := E;
+      begin
+         while Ee > 0 loop
+            if Ee mod 2 = 1 then
+               R := R * Bb mod P;
+            end if;
+            Bb := Bb * Bb mod P;
+            Ee := Ee / 2;
+         end loop;
+         return R;
+      end Pow_Mod;
+      function Rank (M0 : Mat) return Natural is
+         M : Mat := M0;
+         R : Natural := M'First (1);
+      begin
+         for I in M'Range (1) loop
+            for J in M'Range (2) loop
+               M (I, J) := M (I, J) mod P;
+            end loop;
+         end loop;
+         for C in M'Range (2) loop
+            exit when R > M'Last (1);
+            declare
+               Pv : Integer := -1;
+            begin
+               for I in R .. M'Last (1) loop
+                  if M (I, C) /= 0 then
+                     Pv := I;
+                     exit;
+                  end if;
+               end loop;
+               if Pv >= 0 then
+                  for J in M'Range (2) loop
+                     declare
+                        T : constant Long_Long_Integer := M (R, J);
+                     begin
+                        M (R, J) := M (Pv, J); M (Pv, J) := T;
+                     end;
+                  end loop;
+                  declare
+                     Inv : constant Long_Long_Integer := Pow_Mod (M (R, C), P - 2);   --  费马小定理求逆
+                  begin
+                     for I in R + 1 .. M'Last (1) loop
+                        declare
+                           Fct : constant Long_Long_Integer := M (I, C) * Inv mod P;
+                        begin
+                           for J in M'Range (2) loop
+                              M (I, J) := (M (I, J) - Fct * M (R, J)) mod P;
+                           end loop;
+                        end;
+                     end loop;
+                  end;
+                  R := R + 1;
+               end if;
+            end;
+         end loop;
+         return R - M'First (1);
+      end Rank;
+      function New_Design (N : Natural) return Mat is
+         M : Mat (0 .. Jointboot.Multi_Cells (N) - 1, 0 .. N);
+      begin
+         for C in M'Range (1) loop
+            M (C, 0) := 1;
+            for J in 0 .. N - 1 loop
+               M (C, J + 1) := (if Jointboot.Multi_Up (C, J) then 1 else -1);
+            end loop;
+         end loop;
+         return M;
+      end New_Design;
+      function Old_Design (N : Natural) return Mat is
+         M : Mat (0 .. 7, 0 .. N);
+      begin
+         for Cb in 1 .. 8 loop
+            M (Cb - 1, 0) := 1;
+            for J in 0 .. N - 1 loop
+               M (Cb - 1, J + 1) := (if ((Cb * 37 + J * 11) mod 16) < 8 then 1 else -1);   --  原来的排法(09-30 以前的 jointboot)
+            end loop;
+         end loop;
+         return M;
+      end Old_Design;
+      Full_All : Boolean := True;
+      Bad_N : Natural := 0;
+      D7 : constant Mat := New_Design (7);
+      Orth7 : Boolean := True;
+      O9 : constant Mat := Old_Design (9);
+      O17 : constant Mat := Old_Design (17);
+      Opp_0_8, Same_0_16 : Boolean := True;
+   begin
+      for N in 1 .. 24 loop
+         if Rank (New_Design (N)) /= N + 1 then
+            Full_All := False; Bad_N := N;
+         end if;
+      end loop;
+      for A in 1 .. 7 loop
+         declare
+            Sa : Long_Long_Integer := 0;
+         begin
+            for C in D7'Range (1) loop
+               Sa := Sa + D7 (C, A);
+            end loop;
+            Orth7 := Orth7 and then Sa = 0;
+         end;
+         for B in A + 1 .. 7 loop
+            declare
+               Dt : Long_Long_Integer := 0;
+            begin
+               for C in D7'Range (1) loop
+                  Dt := Dt + D7 (C, A) * D7 (C, B);
+               end loop;
+               Orth7 := Orth7 and then Dt = 0;
+            end;
+         end loop;
+      end loop;
+      for C in 0 .. 7 loop
+         Opp_0_8 := Opp_0_8 and then O9 (C, 1) = -O9 (C, 9);
+         Same_0_16 := Same_0_16 and then O17 (C, 1) = O17 (C, 17);
+      end loop;
+      Check (Full_All and then Orth7 and then D7'Length (1) = 8 and then Rank (O9) < 10 and then Opp_0_8 and then Same_0_16,
+             "几个关节一起动的格子:N 个关节 N + 1 格、正负取 Hadamard 的行 ⇒ N = 1 .. 24 都满秩" & (if Full_All then "" else "(N = " & Codec.Img (Bad_N) & " 不满秩)")
+             & ";7 个关节 8 格两两正交、正负各一半" & (if Orth7 then "" else "(不正交!)")
+             & " · 牙:原来 8 格的排法 N = 9 秩只有 " & Codec.Img (Rank (O9)) & "(要 10)、第 0 与第 8 个关节正负"
+             & (if Opp_0_8 then "恰好相反" else "不相反?") & "、第 0 与第 16 个" & (if Same_0_16 then "完全相同" else "不同?"));
+   end;
+   --  🔴 几个关节一起动时每个关节走多远(Jointboot.Multi_Offset):预计画面挪一格(640 宽的 1/5 = 128 px),不越过扫到过的那一头。
+   --  扫描同驱动:头一格 0.03,下一格按"挪一格 ÷ 头一格量的每读数单位像素"放大、一次最多四倍 ——
+   --  离眼远的关节(1000 px / 单位)三格走到 0.03 + 0.12 + 0.128 = 0.278 ⇒ 走 0.128(画面挪 128 px = 一格);离眼近的腕转(100 px / 单位)
+   --  被"最多四倍"压住,三格只走到 0.03 + 0.12 + 0.48 = 0.63 ⇒ 走满 0.63(挪 63 px);这一边头一格没量到画面挪 ⇒ 走满扫到过的 0.09。
+   --  牙:原来一律走到那一头的一半 ⇒ 远的挪 139 px(多一成)、近的只挪 31.5 px(一格的四分之一,扫到过的那一截白扔一半)
+   declare
+      Gw : constant Long_Float := 640.0 / 5.0;
+      function Reach (Px : Long_Float) return Long_Float is   --  同驱动的三格:头一格 0.03,之后按画面放大、最多四倍、最少一半
+         Step : Long_Float := 0.03;
+         Sum : Long_Float := Step;
+      begin
+         for K in 2 .. 3 loop
+            Step := Step * Long_Float'Max (0.5, Long_Float'Min (4.0, Gw / (Step * Px)));
+            Sum := Sum + Step;
+         end loop;
+         return Sum;
+      end Reach;
+      Far : constant Long_Float := Jointboot.Multi_Offset (Gw, 1000.0, Reach (1000.0));
+      Near : constant Long_Float := Jointboot.Multi_Offset (Gw, 100.0, Reach (100.0));
+      Unmeasured : constant Long_Float := Jointboot.Multi_Offset (Gw, 0.0, 0.09);
+      Old_Far : constant Long_Float := 0.5 * Reach (1000.0);
+      Old_Near : constant Long_Float := 0.5 * Reach (100.0);
+   begin
+      Check (abs (Reach (1000.0) - 0.278) < 1.0e-9 and then abs (Reach (100.0) - 0.63) < 1.0e-9
+             and then abs (1000.0 * Far - Gw) < 1.0e-9 and then abs (Near - Reach (100.0)) < 1.0e-12 and then Unmeasured = 0.09
+             and then abs (1000.0 * Old_Far - Gw) > 0.05 * Gw and then Old_Near < 0.5 * Near + 1.0e-12,
+             "几个关节一起动时每个关节走多远:离眼远的(1000 px/单位,扫到过 " & Codec.Fmt (Reach (1000.0), 3) & ")走 " & Codec.Fmt (Far, 3) & "、画面挪 "
+             & Codec.Fmt (1000.0 * Far, 1) & " px(一格 " & Codec.Fmt (Gw, 0) & ");离眼近的腕转(100 px/单位,扫到过 " & Codec.Fmt (Reach (100.0), 2) & ")走满、挪 "
+             & Codec.Fmt (100.0 * Near, 1) & " px;没量到画面挪的走满扫到过的 " & Codec.Fmt (Unmeasured, 2) & " · 牙:原来走一半 ⇒ 远的挪 "
+             & Codec.Fmt (1000.0 * Old_Far, 1) & " px、近的只挪 " & Codec.Fmt (100.0 * Old_Near, 1) & " px");
+   end;
+   --  🔴 重挑内点到门里的那一组不再变(Jointboot.Until_Settled,对齐里两处精修走的那一条;09-30 C 组):一维位置,门 = 3 × 残差中位(中位同驱动:
+   --  排好序取第 N/2 个),内点求平均,起步 = 全体平均。12 个内点等距铺在 [-1, 1]、8 个野点 4 × 1.3^k 一个比一个远 ⇒ 每遍剥掉一个:
+   --  解 8 遍门里的那一组不再变、位置回到 0(真值);门里的那一组来回变 ⇒ 来回转(Cycled,2 遍);每遍都给一组没见过的(3 条观测)⇒
+   --  解满 3 + 1 遍停(Capped);门里不够 ⇒ Too_Few、一遍不解。牙:原来固定三轮 ⇒ 停在 2.13(内点只铺在 [-1, 1]),再挑一遍门里的那一组还在变
+   declare
+      use type Jointboot.Settle_Verdict;
+      package Sorting is new F64_Vectors.Generic_Sorting;
+      Xs : Floats;
+      Mu : Long_Float := 0.0;
+      procedure Pick (U : out Bools; Enough : out Boolean) is
+         Res : Floats;
+         Gate : Long_Float;
+         N_In : Natural := 0;
+      begin
+         for X of Xs loop
+            Res.Append (abs (X - Mu));
+         end loop;
+         declare
+            Srt : Floats := Res;
+         begin
+            Sorting.Sort (Srt);
+            Gate := 3.0 * Srt (Natural (Srt.Length) / 2);
+         end;
+         U.Clear;
+         for E of Res loop
+            U.Append (E < Gate);
+            if E < Gate then
+               N_In := N_In + 1;
+            end if;
+         end loop;
+         Enough := N_In > 0;
+      end Pick;
+      procedure Solve (U : Bools) is
+         S : Long_Float := 0.0;
+         N_In : Natural := 0;
+      begin
+         for I in 0 .. Natural (Xs.Length) - 1 loop
+            if U (I) then
+               S := S + Xs (I); N_In := N_In + 1;
+            end if;
+         end loop;
+         Mu := S / Long_Float (N_In);
+      end Solve;
+      procedure Run is new Jointboot.Until_Settled (Pick, Solve);
+      Calls : Natural := 0;
+      --  来回转:不管解成什么,单数遍给一组、双数遍给另一组
+      procedure Pick_Alt (U : out Bools; Enough : out Boolean) is
+      begin
+         Calls := Calls + 1;
+         U.Clear; U.Append (Calls mod 2 = 1); U.Append (True); U.Append (Calls mod 2 = 0);
+         Enough := True;
+      end Pick_Alt;
+      procedure Solve_None (U : Bools) is null;
+      procedure Run_Alt is new Jointboot.Until_Settled (Pick_Alt, Solve_None);
+      --  每遍一组没见过的(3 条观测的 8 种按二进制顺着给)
+      procedure Pick_New (U : out Bools; Enough : out Boolean) is
+      begin
+         Calls := Calls + 1;
+         U.Clear;
+         for B in 0 .. 2 loop
+            U.Append ((Calls / 2 ** B) mod 2 = 1);
+         end loop;
+         Enough := True;
+      end Pick_New;
+      procedure Run_New is new Jointboot.Until_Settled (Pick_New, Solve_None);
+      procedure Pick_Few (U : out Bools; Enough : out Boolean) is
+      begin
+         U.Clear; U.Append (False);
+         Enough := False;
+      end Pick_Few;
+      procedure Run_Few is new Jointboot.Until_Settled (Pick_Few, Solve_None);
+      function Mean_All return Long_Float is
+         S : Long_Float := 0.0;
+      begin
+         for X of Xs loop
+            S := S + X;
+         end loop;
+         return S / Long_Float (Xs.Length);
+      end Mean_All;
+      Rounds, R_Alt, R_New, R_Few : Natural;
+      V, V_Alt, V_New, V_Few : Jointboot.Settle_Verdict;
+      Mu3 : Long_Float;
+      Still : Boolean;
+   begin
+      for K in 0 .. 11 loop
+         Xs.Append (-1.0 + 2.0 * Long_Float (K) / 11.0);
+      end loop;
+      for K in 0 .. 7 loop
+         Xs.Append (4.0 * 1.3 ** K);
+      end loop;
+      --  牙:原来那样固定三轮
+      declare
+         U, U4 : Bools;
+         En : Boolean;
+      begin
+         Mu := Mean_All;
+         for Round in 1 .. 3 loop
+            Pick (U, En);
+            Solve (U);
+         end loop;
+         Mu3 := Mu;
+         Pick (U4, En);
+         Still := not Bool_Vectors."=" (U, U4);
+      end;
+      Mu := Mean_All;
+      Run (Rounds, V);
+      Calls := 0;
+      Run_Alt (R_Alt, V_Alt);
+      Calls := 0;
+      Run_New (R_New, V_New);
+      Run_Few (R_Few, V_Few);
+      Check (V = Jointboot.Settled and then Rounds = 8 and then abs Mu < 1.0e-12 and then V_Alt = Jointboot.Cycled and then R_Alt = 2
+             and then V_New = Jointboot.Capped and then R_New = 4 and then V_Few = Jointboot.Too_Few and then R_Few = 0
+             and then Still and then abs (Mu3 - 2.1278) < 1.0e-3,
+             "重挑内点到不再变:12 个内点 + 8 个一个比一个远的野点 ⇒ 解 " & Codec.Img (Rounds) & " 遍定下来(" & V'Image & ",要 8 遍)、位置 " & Codec.Fmt (Mu, 6)
+             & "(真 0)· 来回变 ⇒ " & V_Alt'Image & "(" & Codec.Img (R_Alt) & " 遍)· 每遍一组新的 ⇒ " & V_New'Image & "(" & Codec.Img (R_New)
+             & " 遍 = 3 条观测 + 1)· 门里不够 ⇒ " & V_Few'Image & " · 牙:原来固定三轮 ⇒ 停在 " & Codec.Fmt (Mu3, 3) & "、"
+             & (if Still then "再挑一遍门里的那一组还在变" else "(再挑一遍没变?)"));
+   end;
    --  🔴 碰到没有(Selfmap.Blocked;09-29 台架,V1B66 满精度的数):
    --  ① V1B66 第 2 只手头一下的轻碰:第一档空走少走 0.00086、第二档已经压着 0.00578 ⇒ 第二档认出(牙:旧的"前两档平均当底、两档之差当抖动"
    --     ⇒ 底 0.00332、门 0.0181,后面 9 档最多 0.01266,一档都认不出);② 空走的小步差一丝(0.001430 → 0.001439)⇒ 不认(牙:旧的
@@ -4945,8 +5228,9 @@ begin
 
    --  🔴 运动学·沿轴走的关节(09-27 无人机那一半):合成的龙门架(像箱上的无人机:三个沿世界 x / y / z 走的关节,再绕机身中心 yaw / pitch / roll),
    --  机身中心下 3 cm 的眼朝下(偏 8°)看桌面,离桌 0.6 m,读数:走的按米、转的按弧度。扫描同驱动:每个关节单独两个方向各 3 格
-   --  (走的累计 0.03 / 0.15 / 0.34、转的 0.03 / 0.15 / 0.45,同驱动"头一格 = 读数量级的 3%、之后按画面挪画幅宽 1/5 放大"的量级)+ 8 格几个关节一起动
-   --  (每个关节到它扫到的那一头的一半,正负排法同驱动);配对同驱动:起点 ↔ 每一格(轨迹)、每段头两格、相邻关节头一格之间、一起动的相邻两格;
+   --  (走的累计 0.03 / 0.15 / 0.34、转的 0.03 / 0.15 / 0.45,同驱动"头一格 = 读数量级的 3%、之后按画面挪画幅宽 1/5 放大"的量级)+ 7 格几个关节一起动
+   --  (同驱动 09-30:关节数 + 1 格、正负取 Hadamard 的行、每个关节预计画面挪一格 —— 头一格和起点挪动的中位 ÷ 转角 —— 不越过扫到过的那一头);
+   --  配对同驱动:起点 ↔ 每一格(轨迹)、每段头两格、相邻关节头一格之间、一起动的相邻两格;
    --  像素噪声 0.3 px、5% 乱配。要:六根轴认对(前三根走、后三根转)、焦距 0.5% 内、全部关节在扫到的范围里随机 30 个姿势只给读数算眼在哪 ——
    --  按训练帧定一个倍数(量不出米)后最大 < 1 mm、朝向最大 < 0.05°;反解在真模型上 20 个随机姿势从零位解回来 < 1e-6
    declare
@@ -5043,6 +5327,7 @@ begin
       end record;
       Heads : array (0 .. 11) of Head;
       N_Heads : Natural := 0;
+      Px_Of : array (0 .. 5, 0 .. 1) of Long_Float := [others => [others => 0.0]];   --  每个关节往负 / 往正头一格:每读数单位画面挪几像素(同驱动)
       Fit_M : Kinem.Model;
       Rep : Kinem.Fit_Report;
       Okf : Boolean;
@@ -5075,6 +5360,22 @@ begin
                   Add_Pair (0, Natural (Frames.Length) - 1);
                   if K = 1 then
                      Heads (N_Heads) := (Frame => Natural (Frames.Length) - 1, Joint => J); N_Heads := N_Heads + 1;
+                     --  同驱动:头一格和起点那一对挪动的中位 ÷ 实到的转角 = 每读数单位挪几像素
+                     declare
+                        package Sorting is new F64_Vectors.Generic_Sorting;
+                        Vh : constant Uv_Ptr := Views (Natural (Frames.Length) - 1);
+                        Dv : Floats;
+                     begin
+                        for P in 0 .. Npt - 1 loop
+                           if Views (0) (P).U >= 0.0 and then Vh (P).U >= 0.0 then
+                              Dv.Append (Sqrt ((Vh (P).U - Views (0) (P).U) ** 2 + (Vh (P).V - Views (0) (P).V) ** 2));
+                           end if;
+                        end loop;
+                        if not Dv.Is_Empty then
+                           Sorting.Sort (Dv);
+                           Px_Of (J, D) := Dv (Natural (Dv.Length) / 2) / Offs (J, 1);
+                        end if;
+                     end;
                   elsif K = 2 then
                      Add_Pair (Natural (Frames.Length) - 2, Natural (Frames.Length) - 1);
                   end if;
@@ -5082,12 +5383,16 @@ begin
             end loop;
          end loop;
       end loop;
-      for Cb_K in 1 .. 8 loop
+      for Cb_K in 1 .. Jointboot.Multi_Cells (6) loop
          declare
             Q : Floats := Zeros6;
          begin
             for J in 0 .. 5 loop
-               Q.Replace_Element (J, (if ((Cb_K * 37 + J * 11) mod 16) < 8 then 0.5 else -0.5) * Offs (J, 3));   --  同驱动的排法
+               declare
+                  Up : constant Boolean := Jointboot.Multi_Up (Cb_K - 1, J);   --  同驱动的排法
+               begin
+                  Q.Replace_Element (J, (if Up then 1.0 else -1.0) * Jointboot.Multi_Offset (640.0 / 5.0, Px_Of (J, (if Up then 1 else 0)), Offs (J, 3)));
+               end;
             end loop;
             Frames.Append (Kinem.Frame_Info'(Q => Q, Joint => -1));
             Views (Natural (Frames.Length) - 1) := new Uv_Array'(Project_All (Q));
