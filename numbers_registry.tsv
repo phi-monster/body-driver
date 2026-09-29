@@ -26,9 +26,6 @@ act.adb	"" & Codec.Fmt (Trust, 2) & "" & Codec.Fmt (Reach (0), 0) & "" & Codec.F
 act.adb	"" & Codec.Fmt (U, 3) & "" & Codec.Fmt (V, 3) & "" & Codec.Fmt (Pts (0).Z, 3) &	3	格式	日志印 3 位小数(act.adb:4987)
 act.adb	"" & Codec.Fmt (U, 3) & "" & Codec.Fmt (V, 3) & "" & Codec.Fmt (Pts (0).Z, 3) &	3	格式	日志印 3 位小数(act.adb:4987)
 act.adb	"" & Codec.Fmt (U, 3) & "" & Codec.Fmt (V, 3) & "" & Codec.Fmt (Pts (0).Z, 3) &	3	格式	日志印 3 位小数(act.adb:4987)
-act.adb	"" & Codec.Fmt (Wall (0), 2) & "" & Codec.Fmt (Wall (1), 2) & "" & Codec.Fmt (Wall (2), 2) & "");	2	格式	Geo_Go 被顶住时的说明文字 / 日志(方向印两位):Codec.Fmt 印 2 位小数(显示精度,不改任何量)(act.adb:7786)
-act.adb	"" & Codec.Fmt (Wall (0), 2) & "" & Codec.Fmt (Wall (1), 2) & "" & Codec.Fmt (Wall (2), 2) & "");	2	格式	Geo_Go 被顶住时的说明文字 / 日志(方向印两位):Codec.Fmt 印 2 位小数(显示精度,不改任何量)(act.adb:7786)
-act.adb	"" & Codec.Fmt (Wall (0), 2) & "" & Codec.Fmt (Wall (1), 2) & "" & Codec.Fmt (Wall (2), 2) & "");	2	格式	Geo_Go 被顶住时的说明文字 / 日志(方向印两位):Codec.Fmt 印 2 位小数(显示精度,不改任何量)(act.adb:7786)
 act.adb	& ""	"0	格式	和脑的约定:在那只眼里指不出它就答 0(Brain.Locate 的协议)(act.adb:9763)
 act.adb	& "" & (if Agree_Out (K) < 1.0 then ""	1.0	统计	日志复述来回对表的判决(同 2433 行那道门)(act.adb:2421)
 act.adb	& "" & (if Nl >= 2 then "" & Codec.Fmt (3.0 * Theta / Deg, 1) & "" else "")	"1	结构	日志文字'压 1 下':每个方向各压一下(代码里朝下那一下、每个方位各调一次 Press_Try)(act.adb:12514)
@@ -253,8 +250,6 @@ act.adb	At_Bx : Integer := -1;	1	数值	同 9409:这只眼里还没有同名的�
 act.adb	Av (3 + I) := Rv (I);	3	结构	六维命令里第 3..5 个分量是转动(0..2 平移、3..5 转动,Chan 的通道布局)(act.adb:10620)
 act.adb	Av (3 + I) := Rv (I);	3	结构	六维命令里第 3..5 个分量是转动(Chan 的通道布局)(act.adb:12050)
 act.adb	Av (3 + I) := Rv (I);	3	结构	六维命令里第 3..5 个分量是转动(Chan 的通道布局)(act.adb:12095)
-act.adb	Ax : constant Geom.V3 := (if abs (N (0)) < abs (N (1)) then [1.0, 0.0, 0.0] else [0.0, 1.0, 0.0]);	1.0	数学	标准基向量 x 当种子轴:法向叉上一根和它不平行的坐标轴,得到面内的滑动方向(挑 |分量| 小的那根就保证不平行)。只滑这一个方向是旁边的毛病,见小结(act.adb:11627)
-act.adb	Ax : constant Geom.V3 := (if abs (N (0)) < abs (N (1)) then [1.0, 0.0, 0.0] else [0.0, 1.0, 0.0]);	1.0	数学	同 11627,标准基向量 y(act.adb:11627)
 act.adb	Ax : constant Geom.V3 := (if abs (Nb (0)) < abs (Nb (1)) then [1.0, 0.0, 0.0] else [0.0, 1.0, 0.0]);	1.0	数学	同 11627:标准基向量 x 当种子轴(Along:板面内挪开的方向)(act.adb:12422)
 act.adb	Ax : constant Geom.V3 := (if abs (Nb (0)) < abs (Nb (1)) then [1.0, 0.0, 0.0] else [0.0, 1.0, 0.0]);	1.0	数学	同 11627:标准基向量 y(act.adb:12422)
 act.adb	Ax : constant Geom.V3 := (if abs N (0) <= abs N (1) and then abs N (0) <= abs N (2) then [1.0, 0.0, 0.0]	1.0	数学	标准基向量:挑和法向最不平行的那根坐标轴,叉出面内两根轴(只定铺格子的方位,不改结果)(act.adb:11807)
@@ -356,7 +351,6 @@ act.adb	Cr : constant Geom.V3 := [Fwd (1) * Want (2) - Fwd (2) * Want (1), Fwd (
 act.adb	Cr := Cr + ((B1 (I, K, R) + B2 (I, K, R)) / 2.0) ** 2;	2.0	数学	去程、回程两遍的均值("共识" = 两遍之和的一半)(act.adb:2404)
 act.adb	Cs : constant Long_Float := Fwd (0) * Want (0) + Fwd (1) * Want (1) + Fwd (2) * Want (2);	1	结构	点积 Fwd · Want 的分量下标(act.adb:8121)
 act.adb	Cs : constant Long_Float := Fwd (0) * Want (0) + Fwd (1) * Want (1) + Fwd (2) * Want (2);	2	结构	点积 Fwd · Want 的分量下标(act.adb:8121)
-act.adb	Cut : constant Long_Float := (if Dist > Step_Cap then Step_Cap / Dist else 1.0);	1.0	数学	不用缩时比例 = 1(乘 1 不变);距离超过上限才按 Step_Cap / Dist 缩(act.adb:7884)
 act.adb	Cut : constant Long_Float := (if Want_Ln > Step_Cap and then Want_Ln > 0.0 then Step_Cap / Want_Ln else 1.0);	1.0	数学	不用缩时比例 = 1。注:Step_Cap 现在要么 Long_Float'Last 要么 0,这一缩实际永远不发生(死分支)(act.adb:8753)
 act.adb	D : constant Long_Float := Sqrt ((R.Cu - Pred_U) ** 2 + (R.Cv - Pred_V) ** 2) / Long_Float'Max (Tol, 1.0e-9);	1.0e-9	数值	防除零(Tol 本身 ≥ 跟踪窗)(act.adb:1980)
 act.adb	D : constant Natural := ((Ch + Y) * Cw + Ox + X) * 3;	3	格式	RGB 每像素 3 字节(act.adb:9050)
@@ -377,8 +371,6 @@ act.adb	Dirs7 : constant array (1 .. 7) of Geom.V3 :=	7	结构	Dirs7 的长度 =
 act.adb	Dn : constant Long_Float := H3 - (Depth3 + 3.0 * Small);	3.0	调参数	按估的尖一条命令下到离面三小步(注释:V1B51 试两小步失败后改三 —— 试错得来)(act.adb:12281)	快下之后留几小步空走	高	余量 = 2 小步(Blocked 底数,从 Selfmap 导出)+ 3 × 估的尖沿法向的不确定度(有拟合时用 Fits(K).Sd 投到法向;只有正下那一下时用几何上限 R·sin θ,R = 指尖那一截宽落到面上的上限)+ σ_move(实测命令落位误差)
 act.adb	Draw.Numbered_Box (RGB, Cw, Ch, R.X0, R.Y0, R.X1, R.Y1, N, Draw.Green, 2);	2	格式	落图框线宽(act.adb:2702)
 act.adb	Dv : constant Table.Vec3 := Table.Col (E, 1);	1	结构	Table.Col 的通道号:第 1 号平移通道(每条臂前三个通道是平移,Chan.Pos_Channels = 3);Cm_Gap 只拿它把画面差折成世界长度印日志(act.adb:3977)
-act.adb	Dw : constant Geom.V3 := [Press_Along (0) * Ln, Press_Along (1) * Ln, Press_Along (2) * Ln];	1	结构	三维向量的第 1、2 个分量(y、z);Contact_Onto 里另有一个叫 Press_Along 的过程,检查器因同名把下标当函数参数(act.adb:7844)
-act.adb	Dw : constant Geom.V3 := [Press_Along (0) * Ln, Press_Along (1) * Ln, Press_Along (2) * Ln];	2	结构	三维向量的第 1、2 个分量(y、z);Contact_Onto 里另有一个叫 Press_Along 的过程,检查器因同名把下标当函数参数(act.adb:7844)
 act.adb	Dz : constant Table.Vec3 := Table.Col (E, 2);	2	结构	同上:第 2 号平移通道(act.adb:3978)
 act.adb	E : constant Long_Float := abs (R.Elong - P.Elong) / Long_Float'Max (1.0, P.Elong);	1.0	数学	长短轴之比的下界 1(同时防除零)(act.adb:1985)
 act.adb	Each.Append (-1.0);	1.0	数值	哨兵:-1 = 这个候选这一转没看见(按 ≥ 0 判)(act.adb:6456)
@@ -387,7 +379,6 @@ act.adb	Emp : Long_Float := -1.0;	1.0	数值	哨兵:-1 = 没找到这只手的�
 act.adb	Event := S ("" & Codec.Fmt (Ang, 3) & "");	3	格式	Geo_Turn 交给脑的 Event / 日志:Codec.Fmt 印 3 位小数(给脑的话的显示精度,不改任何量)(act.adb:8125)
 act.adb	Event := S ("" & Codec.Fmt (Stp, 3) & "" & Codec.Fmt (Got, 3)	3	格式	Geo_Turn 交给脑的 Event / 日志:Codec.Fmt 印 3 位小数(给脑的话的显示精度,不改任何量)(act.adb:8156)
 act.adb	Event := S ("" & Codec.Fmt (Stp, 3) & "" & Codec.Fmt (Got, 3)	3	格式	Geo_Turn 交给脑的 Event / 日志:Codec.Fmt 印 3 位小数(给脑的话的显示精度,不改任何量)(act.adb:8156)
-act.adb	Event := S ("" & Len (C, Long_Float (Presses) * (if Press_Step > 0.0 then Press_Step else 4.0 * Geo_Base (C, Arm)))	4.0	调参数	Press_Step 没给时一压 = 4 倍最小一档(这里算日志里压了多远)(act.adb:7837)	Geo_Go 碰到为止的一压(现只有 Touch_Plane 用)	高	一压(小步)= √(Stride_Of(C,A) × Geo_Base(C,A)):大步/小步/一档三级搜索每级扫的步数相同时总步数最少,全是量的;下限 = Selfmap.Blocked 判得出的最小一步 ≥ 3·max(C.Map.EE_Noise, 空走抖动)/(1−Negligible);朝东西压时上限 = 允许推它的量 C.Sil_Err + G.Tip_Sd
 act.adb	Event := S ("");	"40	调参数	给脑的话里写死'40 步',就是 act.adb:8109 for Step_No in 1 .. 40 这个转眼上限(第一轮已记调参数/中):上限一改这句话就是假的(act.adb:8164)	告诉脑转了多少步还没对准(真正的上限在 8109 行)	低	改印实际走的步数 Codec.Img (Steps_Taken);上限本身按第一轮的换法:每步不到位就是'实到不足一半 ⇒ resist'退出,必然收敛;要上限就用 ⌈2·Ang₀ / G.Stride_Rot⌉ + 1(Stride_Rot 是开机量的)
 act.adb	Far0 : constant Long_Float := 4.0 * Small;	4.0	调参数	压到一半到关节限位就沿面挪开 4 倍一压再试(act.adb:12419)	换落点挪多远	中	删 Far0 和两边重试:挑落点时就按整段压深(眼离面 H)问 Plug.Reach(有尖的估计时已这么做),按远近取第一处解得出的空地
 act.adb	Finger (Z.B, 1);	1	结构	第二瓣的编号(Which = 1)。⚠ 认身体:这里直接写 Finger (Z.A, 0); Finger (Z.B, 1) 两瓣,不看 Z.N_Lobes —— 单瓣(吸盘)会多列一根"找不到"的手指,五指只列两根;违反 zone.ads 自己"一律走 Lobe_Of、瓣数读 N_Lobes"的规矩(act.adb:1385)
@@ -425,8 +416,6 @@ act.adb	Geo_Case := 3;	3	结构	Geo_Case 分派码(应写成枚举类型)(act.ad
 act.adb	Geo_Case := 4;	4	结构	Geo_Case 分派码(应写成枚举类型)(act.adb:11142)
 act.adb	Geo_Case := 5;	5	结构	Geo_Case 分派码(应写成枚举类型)(act.adb:11172)
 act.adb	Geo_Case := 7;	7	结构	Geo_Case 分派码(应写成枚举类型)(act.adb:11180)
-act.adb	Geo_Go (L, C, F, A, Tp, Geo_Base (C, A), 1.0, True, Down, Ev, St, Press_Cap => 8);	1.0	数学	Amt = 1:一条命令最多走'量出来的最大一档'× 1(不缩);Geo_Go 全仓只有这一处调用(act.adb:12665)
-act.adb	Geo_Go (L, C, F, A, Tp, Geo_Base (C, A), 1.0, True, Down, Ev, St, Press_Cap => 8);	8	调参数	没有板的面时压面最多 8 下(每下 4×Geo_Base ⇒ 最多探 32 档深)(act.adb:12665)	Touch_Plane 往下探多深就放弃	高	删次数:往下探到被顶住或到量到的关节限位(Geo_Go 每压已问 Plug.Reach)为止;步子按大步 / 小步 / 一档三级
 act.adb	Geo_Move (L, C, F, A, [2.0 * Ln * Nb0 (0), 2.0 * Ln * Nb0 (1), 2.0 * Ln * Nb0 (2)], Mok);	2.0	调参数	抬两大步(同一行文字在 12302 被顶住后、12414 每压完一下各一次,各 3 个分量)(act.adb:12302)	抬多高再下一下 / 再横挪	中	被顶住后:抬 = 实测压进去的量(Dn − Went)+ 一大步(保证下一次第一大步是空走);压完横挪之前:抬 = 按估的各瓣尖和下一下要转的 Rv 算出的最低点扫过的深度 + 一小步
 act.adb	Geo_Move (L, C, F, A, [2.0 * Ln * Nb0 (0), 2.0 * Ln * Nb0 (1), 2.0 * Ln * Nb0 (2)], Mok);	2.0	调参数	抬两大步(同一行文字在 12302 被顶住后、12414 每压完一下各一次,各 3 个分量)(act.adb:12302)	抬多高再下一下 / 再横挪	中	被顶住后:抬 = 实测压进去的量(Dn − Went)+ 一大步(保证下一次第一大步是空走);压完横挪之前:抬 = 按估的各瓣尖和下一下要转的 Rv 算出的最低点扫过的深度 + 一小步
 act.adb	Geo_Move (L, C, F, A, [2.0 * Ln * Nb0 (0), 2.0 * Ln * Nb0 (1), 2.0 * Ln * Nb0 (2)], Mok);	2.0	调参数	抬两大步(同一行文字在 12302 被顶住后、12414 每压完一下各一次,各 3 个分量)(act.adb:12302)	抬多高再下一下 / 再横挪	中	被顶住后:抬 = 实测压进去的量(Dn − Went)+ 一大步(保证下一次第一大步是空走);压完横挪之前:抬 = 按估的各瓣尖和下一下要转的 Rv 算出的最低点扫过的深度 + 一小步
@@ -457,9 +446,6 @@ act.adb	Geo_Say ("" & Codec.Fmt (Turned_By * Deg, 1) & "" & Codec.Fmt (Med0, 1) 
 act.adb	Geo_Say ("" & Codec.Fmt (Wall (0), 2) & "" & Codec.Fmt (Wall (1), 2) & "" & Codec.Fmt (Wall (2), 2)	2	格式	Geo_Go 被顶住时的说明文字 / 日志(方向印两位):Codec.Fmt 印 2 位小数(显示精度,不改任何量)(act.adb:7789)
 act.adb	Geo_Say ("" & Codec.Fmt (Wall (0), 2) & "" & Codec.Fmt (Wall (1), 2) & "" & Codec.Fmt (Wall (2), 2)	2	格式	Geo_Go 被顶住时的说明文字 / 日志(方向印两位):Codec.Fmt 印 2 位小数(显示精度,不改任何量)(act.adb:7789)
 act.adb	Geo_Say ("" & Codec.Fmt (Wall (0), 2) & "" & Codec.Fmt (Wall (1), 2) & "" & Codec.Fmt (Wall (2), 2)	2	格式	Geo_Go 被顶住时的说明文字 / 日志(方向印两位):Codec.Fmt 印 2 位小数(显示精度,不改任何量)(act.adb:7789)
-act.adb	Geo_Say ("" & Codec.Fmt (Wall (0), 2) & "" & Codec.Fmt (Wall (1), 2) & "" & Codec.Fmt (Wall (2), 2)	2	格式	Change_Held_Qty 的日志:Codec.Fmt 印 2 位小数(显示精度,不改任何量)(act.adb:10867)
-act.adb	Geo_Say ("" & Codec.Fmt (Wall (0), 2) & "" & Codec.Fmt (Wall (1), 2) & "" & Codec.Fmt (Wall (2), 2)	2	格式	Change_Held_Qty 的日志:Codec.Fmt 印 2 位小数(显示精度,不改任何量)(act.adb:10867)
-act.adb	Geo_Say ("" & Codec.Fmt (Wall (0), 2) & "" & Codec.Fmt (Wall (1), 2) & "" & Codec.Fmt (Wall (2), 2)	2	格式	Change_Held_Qty 的日志:Codec.Fmt 印 2 位小数(显示精度,不改任何量)(act.adb:10867)
 act.adb	Geo_Say ("" & Codec.Img (A + 1) & "" & Codec.Fmt (G.Stride_Rot, 3)	3	格式	Geo_Boot_Stride 的日志:Codec.Fmt 印 3 位小数(显示精度,不改任何量)(act.adb:12814)
 act.adb	Geo_Say ("" & Codec.Img (Arm + 1) & "" & Codec.Fmt (U, 1) & "" & Codec.Fmt (V, 1) & "" & Codec.Img (H.Zones (Wc).N_Lobes)	1	格式	日志印 1 位小数(act.adb:5963)
 act.adb	Geo_Say ("" & Codec.Img (Arm + 1) & "" & Codec.Fmt (U, 1) & "" & Codec.Fmt (V, 1) & "" & Codec.Img (H.Zones (Wc).N_Lobes)	1	格式	日志印 1 位小数(act.adb:5963)
@@ -482,7 +468,6 @@ act.adb	Geo_Say (Who & "" & Codec.Img (K + 1) & "" & Codec.Fmt (Tips (K) (0), 5)
 act.adb	Geo_Slot_Now : Integer := -1;	1	数值	哨兵:−1 = 走路的眼里没有它的槽(后面一律按 < 0 / ≥ 0 判);不描述身体和世界(act.adb:10183)
 act.adb	Geo_Slot_Now := (if Natural (Geo_Cam) = Cam then C.Items (G0.Of_Item - 1).Slot else -1);	1	数值	哨兵:−1 = 走路的眼不是此刻这只 ⇒ 这只眼里的槽号不作数(后面一律按 < 0 / ≥ 0 判);不描述身体和世界(act.adb:11135)
 act.adb	Geo_Slot_Now := (if Natural (Geo_Cam) = Cam then C.Items (Say.Grip_On - 1).Slot else -1);	1	数值	哨兵:−1 = 走路的眼不是此刻这只 ⇒ 这只眼里的槽号不作数(后面一律按 < 0 / ≥ 0 判);不描述身体和世界(act.adb:11174)
-act.adb	Geo_Turn (L, C, F, A, Down, 1.0, Ev, St, Along => G.Tip);	1.0	数学	传给 Amt 的 1 = 不缩放。⚠ Geo_Turn 里已经 pragma Unreferenced (Amt)(act.adb:8070),这个实参不起任何作用,参数应删(act.adb:12658)
 act.adb	Gp.N_Blobs >= 2 and then Extrapolation_Blew (Was, Now);	2	数学	两瓣都在才有瓣间距可比(两点定一段)(act.adb:1824)
 act.adb	Gray : Long_Float := -1.0;	1.0	数值	哨兵:< 0 = 点名那一刻没量到灰度(调用处按 ≥ 0 判)(act.adb:1643)
 act.adb	Grip_Arm : constant Integer := (if Say.Grip_Arm >= 1 and then Say.Grip_Arm <= C.Map.Arms then Integer (Say.Grip_Arm) - 1 else -1);	1	结构	脑说的手号从 1 起(Grip_Arm = 0 = 没说哪只手):≥ 1 且 ≤ 臂数才是真手号,内部换成从 0 起;编号约定,不是'至少一只手'(act.adb:10175)
@@ -542,10 +527,8 @@ act.adb	Last_Split : Long_Float := -1.0;	1.0	数值	哨兵:-1 = 这只眼还没�
 act.adb	Legs : constant := 2;	2	调参数	退回分两截(截数)(act.adb:8919)	Geo_Retreat 分几条命令退	低	截数 = ⌈Dist / Stride_Of(C, Arm)⌉(每截在一条命令量过的步幅内);注释说'走一截量一眼',代码两截之间并不看
 act.adb	Life : constant String := Codec.Tail_Lines (Life_Path, 6);	6	调参数	给脑的自述里读回经历账最后 6 行(Tail_Lines (Life_Path, 6));6 是拍的(act.adb:1336)	脑每一轮能看到多少条"我以前干过什么"	低	按脑的上下文预算定:脑那边的上下文长度(服务器报的 max_model_len,Brain 已在用的那个上限)减去这一轮清单已占的长度,够几行给几行;或者只给和这一次点名的东西 / 这一种动作有关的那些行,不按条数截
 act.adb	Lifted : Long_Float := 0.0; H_First : Long_Float := -1.0; Prev_Off : Long_Float := Long_Float'Last) is	1.0	数值	默认参数哨兵:高度 > 0 才算'第一回的高度',−1 = 还没有(act.adb:12119 按 > 0 判)(act.adb:11983)
-act.adb	Ln : constant Long_Float := (if Press_Step > 0.0 then Press_Step else 4.0 * Geo_Base (C, Arm));	4.0	调参数	Press_Step 没给时一压 = 4 倍最小一档(act.adb:7843)	Geo_Go 碰到为止的一压(现只有 Touch_Plane 用)	高	一压(小步)= √(Stride_Of(C,A) × Geo_Base(C,A)):大步/小步/一档三级搜索每级扫的步数相同时总步数最少,全是量的;下限 = Selfmap.Blocked 判得出的最小一步 ≥ 3·max(C.Map.EE_Noise, 空走抖动)/(1−Negligible);朝东西压时上限 = 允许推它的量 C.Sil_Err + G.Tip_Sd;并改用 Selfmap.Blocked 判碰到(现在按'实到不足一半')
 act.adb	Ln : constant Long_Float := 4.0 * Geo_Base (C, Arm);	4.0	调参数	估着到位后接着压,一压 = 4 倍最小一档(act.adb:8690)	Geo_Approach 碰到为止的一压	高	一压(小步)= √(Stride_Of(C,A) × Geo_Base(C,A)):大步/小步/一档三级搜索每级扫的步数相同时总步数最少,全是量的;下限 = Selfmap.Blocked 判得出的最小一步 ≥ 3·max(C.Map.EE_Noise, 空走抖动)/(1−Negligible);朝东西压时上限 = 允许推它的量 C.Sil_Err + G.Tip_Sd;并改用 Selfmap.Blocked 判碰到(现在按'实到不足一半')
 act.adb	Ln : constant Long_Float := Long_Float'Max (1.0e-9, Sqrt (Du * Du + Dv * Dv));	1.0e-9	数值	画幅坐标差(无量纲)的防除零(act.adb:10325)
-act.adb	Ln := 4.0 * Geo_Base (C, A);	4.0	调参数	沿面滑一步 = 4 倍最小一档(act.adb:11634)	Touch_Plane 判顶住的是面还是关节到头	中	关节到没到头直接问量到的运动学(Plug.Reach 在量到的关节限位里解不解得出,Geo_Go / Press 已这么做);非要滑,滑的长度 ≥ 2·3·max(C.Map.EE_Noise, 空走抖动)才判得出'不到一半'
 act.adb	Ln := S ("" & Codec.Img (I) & "");	"1	格式	日志文字:响应表的单位是'这个通道推 +1'时画面 / 远近变多少(act.adb:11366)
 act.adb	Ln := S ("" & Codec.Img (I) & "");	"1	格式	日志文字:响应表的单位是'这个通道推 +1'时画面 / 远近变多少(act.adb:11373)
 act.adb	Long_Float (It.Y1 - It.Y0) / Long_Float (Natural'Max (1, Ch_Of (C, F))));	1	数值	同上(高)(act.adb:5288)
@@ -726,7 +709,6 @@ act.adb	Shrink : constant Long_Float := 0.5;	0.5	调参数	跟丢时步子缩一
 act.adb	Sigma_Mult : constant Long_Float := 3.0;	3.0	统计	Picture.Cut 的门 = 鼓起中位 + 3×稳健σ(MAD×1.4826),n-σ 离群门,单侧约 99.87%。注:注释说是在真深度图上试出来的(3 行、5 杀光);逐像素检验约 30 万次,真正压假块的是最小像素数(act.adb:30)
 act.adb	Sj : constant Long_Float := (if Cj > 1.0e-9 then H / Cj else 0.0);	1.0e-9	数值	视线和面法向夹角的余弦(单位向量点积,无量纲)防除零(act.adb:12020)
 act.adb	Slice (Err, I, I + 21) = "")	21	格式	同上(切片 I .. I + 21)(act.adb:9144)
-act.adb	Slid := Got + Got >= Ln;	2×Got	调参数	Slide_Test:沿刚碰到的'面'滑一个量距单位,实到不到一半 ⇒ 判'不是面,是关节到头',把这张面作废(注释自称'纯数学的一半')。一半是拍的(act.adb:11645)	开机没有板时碰出来的面收不收 —— 东西躺的面、之后所有高度都按它;G2F 已出过事(够不着的手横着滑得动,被当成了面)	高	滑不滑得动按 Selfmap.Blocked 的门:少走量 Ln − Got 比这条臂空走同样一步的少走量(开机交付比 C.Map.Delivered / C.Map.Amp 折出)多出 max(Selfmap.Negligible × Ln, 3 × C.Map.EE_Noise) 就算滑不动;滑之前先问 Plug.Reach,反解本来就到不了 ⇒ 这一滑不作数、换 −T0 那边再滑
 act.adb	Slot : Integer := -1;	1	数值	哨兵:-1 = 这一点没有世界槽(act.adb:1595)
 act.adb	Small : constant Long_Float := 4.0 * Geo_Base (C, A);	4.0	调参数	开机碰桌面粗找一小步 = 4 倍最小一档(act.adb:11942)	碰桌面量指尖时的小步(粗找、快下余量、Up_By 门)	高	Small = √(Ln × Notch) = √(Stride_Of(C,A) × Geo_Base(C,A))(大步→小步→一档三级,每级扫的步数相同时总步数最少);下限同 Blocked 判得出的最小一步
 act.adb	Sp : constant Natural := (Sy * Kw + Sx) * 3;	3	格式	RGB 每像素 3 字节(拼图时的字节偏移)(act.adb:9051)
@@ -773,8 +755,6 @@ act.adb	Tol_R : constant Long_Float := (if A * Chan.Per_Arm + 3 < Natural (C.Map
 act.adb	Tol_R : constant Long_Float := (if A * Chan.Per_Arm + 3 < Natural (C.Map.Amp.Length) then C.Map.Amp (A * Chan.Per_Arm + 3) else 0.0);	3	结构	通道布局 +3 = 第一根转动通道(同一行文字在 12039、12170 各一次)(act.adb:12039)
 act.adb	Tol_R : constant Long_Float := (if A * Chan.Per_Arm + 3 < Natural (C.Map.Amp.Length) then C.Map.Amp (A * Chan.Per_Arm + 3) else 0.0);	3	结构	通道布局 +3 = 第一根转动通道(同一行文字在 12039、12170 各一次)(act.adb:12039)
 act.adb	Tol_R : constant Long_Float := (if A * Chan.Per_Arm + 3 < Natural (C.Map.Amp.Length) then C.Map.Amp (A * Chan.Per_Arm + 3) else 0.0);	3	结构	通道布局 +3 = 第一根转动通道(同一行文字在 12039、12170 各一次)(act.adb:12039)
-act.adb	Tol_R : constant Long_Float := (if Arm * Chan.Per_Arm + 3 < Natural (C.Map.Amp.Length) then C.Map.Amp (Arm * Chan.Per_Arm + 3) else 0.0);	3	结构	通道布局:每臂 0..2 平移、3..5 转动,+3 = 第一根转动通道(同一行文字在 7857、7922、10582 各一次);注:只取 +3 这一根的幅度当所有转动的一档,三根转动轴一档不同时会偏(act.adb:7857)
-act.adb	Tol_R : constant Long_Float := (if Arm * Chan.Per_Arm + 3 < Natural (C.Map.Amp.Length) then C.Map.Amp (Arm * Chan.Per_Arm + 3) else 0.0);	3	结构	通道布局:每臂 0..2 平移、3..5 转动,+3 = 第一根转动通道(同一行文字在 7857、7922、10582 各一次);注:只取 +3 这一根的幅度当所有转动的一档,三根转动轴一档不同时会偏(act.adb:7857)
 act.adb	Tol_R : constant Long_Float := (if Arm * Chan.Per_Arm + 3 < Natural (C.Map.Amp.Length) then C.Map.Amp (Arm * Chan.Per_Arm + 3) else 0.0);	3	结构	通道布局:每臂 0..2 平移、3..5 转动,+3 = 第一根转动通道(同一行文字在 7857、7922、10582 各一次);注:只取 +3 这一根的幅度当所有转动的一档,三根转动轴一档不同时会偏(act.adb:7857)
 act.adb	Tol_R : constant Long_Float := (if Arm * Chan.Per_Arm + 3 < Natural (C.Map.Amp.Length) then C.Map.Amp (Arm * Chan.Per_Arm + 3) else 0.0);	3	结构	通道布局:每臂 0..2 平移、3..5 转动,+3 = 第一根转动通道(同一行文字在 7857、7922、10582 各一次);注:只取 +3 这一根的幅度当所有转动的一档,三根转动轴一档不同时会偏(act.adb:7857)
 act.adb	Tp : constant Long_Float := (if Geo_Settle and then K + 3 < Natural (C.Map.Amp.Length) then C.Map.Amp (K) else 0.0);	3	结构	K+3 = 这条臂第一根转动通道(平移 0..2、转动 3..5 的通道布局)(act.adb:2082)
@@ -843,7 +823,6 @@ act.adb	elsif Geo_Case = 4 then	4	结构	Geo_Case 分派码(应写成枚举类�
 act.adb	elsif Geo_Case = 5 then	5	结构	Geo_Case 分派码(应写成枚举类型)(act.adb:11241)
 act.adb	elsif Geo_Case = 7 then	7	结构	Geo_Case 分派码(应写成枚举类型)(act.adb:11259)
 act.adb	elsif Got + Got < Ln then	2×Got	调参数	同 7895:已经被顶过一次、沿面走的一步又不到一半 ⇒ 报 resist 收工(act.adb:7897)	Geo_Go 什么时候放弃、交回脑(眼下走不到,同 7895)	低	换成 Selfmap.Blocked 同一把门(Touch_Tips、Contact_Onto.Press_Along 已经在用):少走量 Short = Ln − Got 比这一段前面空走那几步的少走量 Prev 多出 max(Selfmap.Negligible × Ln, 3 × max(C.Map.EE_Noise, |Prev − Prev2|)) 才算被挡;步长不一样就按少走比例 Short / Ln 比;这一段第一步没有可比的底 ⇒ 用开机量的交付比折出空走该少走多少(小步用探针那一档 C.Map.Delivered / C.Map.Amp;大步用 Geo_Boot_Stride 每一档的实到 ÷ 命令 —— 现在只存了 G.Stride,要把每档的比值也存进几何文件);或者'沿面剩下的差距这一步没比上一步少过 3 × C.Map.EE_Noise'就停(同 Eye_To 的'不再变近就停',无参数)
-act.adb	elsif Got + Got < Ln then	2×Got	调参数	已被一个面顶着、沿面走的一步又不到一半 ⇒ 报 resist 收工(注释自称'纯数学的一半')(act.adb:8797)	走向它时什么时候放弃、交回脑	中	换成 Selfmap.Blocked 同一把门(Touch_Tips、Contact_Onto.Press_Along 已经在用):少走量 Short = Ln − Got 比这一段前面空走那几步的少走量 Prev 多出 max(Selfmap.Negligible × Ln, 3 × max(C.Map.EE_Noise, |Prev − Prev2|)) 才算被挡;步长不一样就按少走比例 Short / Ln 比;这一段第一步没有可比的底 ⇒ 用开机量的交付比折出空走该少走多少(小步用探针那一档 C.Map.Delivered / C.Map.Amp;大步用 Geo_Boot_Stride 每一档的实到 ÷ 命令 —— 现在只存了 G.Stride,要把每档的比值也存进几何文件);或者'沿面剩下的差距 Dist 这一步没比上一步少过 3 × C.Map.EE_Noise'就停(无参数的'不再变近')
 act.adb	elsif Natural (Tip_Arms.Length) > 1 then	1	结构	要量指尖的手多于一只才开线程按拍对齐(Touch_Tips_Together),两条路跑的是同一个 Touch_Tips;'> 1'只是'要不要并行',不是拍的数。⚠ 按个数分两条执行路(和 12767 的 = 1 同一处,已登记结构带 ⚠):单手那条直接调,Touch_Tips 抛异常没人接;多手那条在任务里接住、说'这只手这回没有指尖'。该删成一条(act.adb:12769)
 act.adb	elsif P.Kind = Thing_Pt and then Z.Valid and then Z.N_Lobes >= 2	2	数学	要两瓣才有合拢方向(act.adb:2533)
 act.adb	elsif Rl = "" and then G0.Of_Item >= 1 and then G0.Of_Item <= Natural (C.Items.Length) then	1	结构	清单号(G0.Of_Item)从 1 起数(0 / −1 = 没说、没绑上):≥ 1 且 ≤ 长度才是一个真号,后面按 N − 1 取;是编号约定,不是'至少一个'(act.adb:11141)
@@ -903,11 +882,9 @@ act.adb	if Geo_Case in 1 | 5 and then not Geo_Of (C, Natural (Geo_Cam)).Valid th
 act.adb	if Geo_Case in 1 | 5 and then not Geo_Of (C, Natural (Geo_Cam)).Valid then	5	结构	Geo_Case 分派码(应写成枚举类型)(act.adb:11185)
 act.adb	if Geom.Norm ([B (0) - Q (0), B (1) - Q (1), B (2) - Q (2)]) <= 2.0 * C.Sil_Pitch then	2.0	调参数	顶住点离它表面点两个采样间距以内就当成它自己(act.adb:7991)	分开'碰到的是它自己'和'旁边的东西'(C.Bumps → Around)	中	门 = 采样几何上限 C.Sil_Pitch/√2(面上任一点离最近采样点不超过半对角)+ 3·√(C.Sil_Err² + G.Tip_Sd² + C.Map.EE_Noise²)(表面点和顶住点各自的量测误差)
 act.adb	if Got + Got < Ln and then not Held_Back then	2×Got	调参数	Geo_Go 走路那一步(还没被顶过):沿命令方向实到不到一半 ⇒ 当成被面 / 墙顶住,记下方向,朝下的记成它躺的面。一半是拍的门(同 7875)(act.adb:7895)	Geo_Go 途中哪一步算被顶住、要不要记面(Note_Support)或墙(C.Walls)。眼下唯一调用方 Touch_Plane 的目标就是此刻的指尖(Dist = 0,直接进压的那一支),这一支走不到	低	换成 Selfmap.Blocked 同一把门(Touch_Tips、Contact_Onto.Press_Along 已经在用):少走量 Short = Ln − Got 比这一段前面空走那几步的少走量 Prev 多出 max(Selfmap.Negligible × Ln, 3 × max(C.Map.EE_Noise, |Prev − Prev2|)) 才算被挡;步长不一样就按少走比例 Short / Ln 比;这一段第一步没有可比的底 ⇒ 用开机量的交付比折出空走该少走多少(小步用探针那一档 C.Map.Delivered / C.Map.Amp;大步用 Geo_Boot_Stride 每一档的实到 ÷ 命令 —— 现在只存了 G.Stride,要把每档的比值也存进几何文件)
-act.adb	if Got + Got < Ln and then not Held_Back then	2×Got	调参数	Geo_Approach 走路那一步第一次实到不到一半 ⇒ 当被面 / 墙顶住:记 Wall、Held_Back,朝下的写进它躺的面(Note_Support),横的记成墙。一半是拍的(act.adb:8768)	路上哪一步算撞上东西,以及把哪一处记成它躺的面(之后 Plan_Contact 的 Up / Sp、'上方一个张口'、高度都按它)。步子是剩余距离的六成、Step_Cap 不设上限,反解跟不上、慢身体都能让一步交付不到一半 ⇒ 空中记出一张假面	高	换成 Selfmap.Blocked 同一把门(Touch_Tips、Contact_Onto.Press_Along 已经在用):少走量 Short = Ln − Got 比这一段前面空走那几步的少走量 Prev 多出 max(Selfmap.Negligible × Ln, 3 × max(C.Map.EE_Noise, |Prev − Prev2|)) 才算被挡;步长不一样就按少走比例 Short / Ln 比;这一段第一步没有可比的底 ⇒ 用开机量的交付比折出空走该少走多少(小步用探针那一档 C.Map.Delivered / C.Map.Amp;大步用 Geo_Boot_Stride 每一档的实到 ÷ 命令 —— 现在只存了 G.Stride,要把每档的比值也存进几何文件);记面之前先问 Plug.Reach(同 Geo_Go 压之前那一问):这一步反解本来就到不了 ⇒ 是关节限位,不记面
 act.adb	if Got + Got < Ln then	2×Got	调参数	Geo_Go'碰到为止'那一压:沿命令方向实到不到这一压的一半就判被顶住。注释自称'纯数学的一半',其实是判停的门(0.3、0.7 一样说得通),隐含'空走一条命令至少交付一半、被挡的交付不到一半';同一件事 Touch_Tips / Contact_Onto 已经按 Selfmap.Blocked(一步的 1% / 3 倍读数噪声 / 3 倍前两步之差)判,这里还是老门 —— 一个量两种量法(act.adb:7875)	开机没有标定板时 Touch_Plane 往下压量'东西躺的面':哪一压算碰到、在哪一压记下那张面(Note_Wall → Note_Support)	中	换成 Selfmap.Blocked 同一把门(Touch_Tips、Contact_Onto.Press_Along 已经在用):少走量 Short = Ln − Got 比这一段前面空走那几步的少走量 Prev 多出 max(Selfmap.Negligible × Ln, 3 × max(C.Map.EE_Noise, |Prev − Prev2|)) 才算被挡;步长不一样就按少走比例 Short / Ln 比;这一段第一步没有可比的底 ⇒ 用开机量的交付比折出空走该少走多少(小步用探针那一档 C.Map.Delivered / C.Map.Amp;大步用 Geo_Boot_Stride 每一档的实到 ÷ 命令 —— 现在只存了 G.Stride,要把每档的比值也存进几何文件)
 act.adb	if Got + Got < Ln then	2×Got	调参数	Geo_Approach'碰到为止'接着往它身上压:这一压沿命令方向实到不到一半 ⇒ 判碰到、收工。一半是拍的;同一件事 Contact_Onto.Press_Along 用 Selfmap.Blocked 判 —— 一个量两种量法(act.adb:8699)	脑说 until touched 时哪一压算碰到它;推得动的东西只要跟着手走过一半就不算碰到,手会一直往前推(没说步数时 Limit = Natural'Last)	高	换成 Selfmap.Blocked 同一把门(Touch_Tips、Contact_Onto.Press_Along 已经在用):少走量 Short = Ln − Got 比这一段前面空走那几步的少走量 Prev 多出 max(Selfmap.Negligible × Ln, 3 × max(C.Map.EE_Noise, |Prev − Prev2|)) 才算被挡;步长不一样就按少走比例 Short / Ln 比;这一段第一步没有可比的底 ⇒ 用开机量的交付比折出空走该少走多少(小步用探针那一档 C.Map.Delivered / C.Map.Amp;大步用 Geo_Boot_Stride 每一档的实到 ÷ 命令 —— 现在只存了 G.Stride,要把每档的比值也存进几何文件)
 act.adb	if Got + Got < Ln then	2×Got	调参数	Geo_Away 那一步实到不到一半 ⇒ 报 resist 收工(注释自称'纯数学的一半')(act.adb:8959)	离远时哪一步算被挡住	低	换成 Selfmap.Blocked 同一把门(Touch_Tips、Contact_Onto.Press_Along 已经在用):少走量 Short = Ln − Got 比这一段前面空走那几步的少走量 Prev 多出 max(Selfmap.Negligible × Ln, 3 × max(C.Map.EE_Noise, |Prev − Prev2|)) 才算被挡;步长不一样就按少走比例 Short / Ln 比;这一段第一步没有可比的底 ⇒ 用开机量的交付比折出空走该少走多少(小步用探针那一档 C.Map.Delivered / C.Map.Amp;大步用 Geo_Boot_Stride 每一档的实到 ÷ 命令 —— 现在只存了 G.Stride,要把每档的比值也存进几何文件)
-act.adb	if Got + Got < Ln then	2×Got	调参数	拿着东西抬(改它的量):沿要的方向实到不到一半 ⇒ 认成被自己的够不着顶住,沿'边界'再走一步。一半是拍的(act.adb:10850)	抬的时候什么时候认'胳膊到头'并补走一步	中	换成 Selfmap.Blocked 同一把门(Touch_Tips、Contact_Onto.Press_Along 已经在用):少走量 Short = Ln − Got 比这一段前面空走那几步的少走量 Prev 多出 max(Selfmap.Negligible × Ln, 3 × max(C.Map.EE_Noise, |Prev − Prev2|)) 才算被挡;步长不一样就按少走比例 Short / Ln 比;这一段第一步没有可比的底 ⇒ 用开机量的交付比折出空走该少走多少(小步用探针那一档 C.Map.Delivered / C.Map.Amp;大步用 Geo_Boot_Stride 每一档的实到 ÷ 命令 —— 现在只存了 G.Stride,要把每档的比值也存进几何文件);抬之前先问 Plug.Reach 这一抬在量到的关节限位里解不解得出来,解不出就是胳膊到头(量出来的,不靠'不到一半')
 act.adb	if Got + Got < Stp then	2×Got	调参数	Geo_Turn:这一转实到不到命令的一半 ⇒ 报 resist 收手。一半是拍的(0.3、0.7 一样说得通),隐含'空转一条命令至少交付一半'(act.adb:8155)	转眼看它(Aim_Eye_At)、指尖转朝下(Geo_Approach 上方那一转、Touch_Plane)时哪一步算转不动了、交回脑	中	按量到的转动噪声判:还差的角这一步没比上一步少过 3 × C.Map.Rot_Noise 就停(同 Eye_To 的'不再变近就停',无参数);或少转量 Stp − Got 比开机转动通道交付比 C.Map.Delivered / C.Map.Amp(Arm × Per_Arm + 3 .. 5)折出的空转少转量多出 max(Selfmap.Negligible × Stp, 3 × C.Map.Rot_Noise)
 act.adb	if Got and then K = 1 then	1	格式	'say look = k' 的编号协议:1 = 此刻这只眼,2.. = 其余(和印给脑的相机表同一套编号,见 act.adb:1543)(act.adb:10011)
 act.adb	if Got and then K >= 2 then	2	格式	给脑的相机编号协议:1 = 此刻这只眼,2.. = 其余(act.adb:10016)
@@ -957,7 +934,6 @@ act.adb	if R = 2 and then In_Metres (I) then	2	结构	第 2 行 = 远近(米)那
 act.adb	if R.Count * 3 >= Obj_Count and then R.Cu * Long_Float (Cw) >= Long_Float (Z.X0) and then R.Cu * Long_Float (Cw) <= Long_Float (Z.X1)	3	调参数	手眼握区框里有一块 ≥ 物体像素数 1/3 才算'还在手里',拍的(act.adb:5079)	手上相机里看见它在两指间	中	预期像素数按腕眼里的远近换算(指尖深度 vs 原深度的平方比)+ 分割像素数散布做 z·σ 门
 act.adb	if R.Count * 3 >= P.Count and then R.Count <= P.Count * 3 and then Sqrt ((R.Cu - P.Cu) ** 2 + (R.Cv - P.Cv) ** 2) <= Tol then	3	调参数	途中盯着:像素数差不到 3 倍才算还是它,硬门槛;和 1978 行'大小不许一票否决'矛盾(一步里变大 3 倍就叫停)(act.adb:2671)	走的途中判被跟的东西还在	中	预期像素数 = 上次像素数 × (Z_旧/Z_新)²(有深度时),容差 = 分割像素数在静止两帧间的量到散布 z·σ;没有深度就用跟点/重叠配对,不用倍数
 act.adb	if R.Count * 3 >= P.Count and then R.Count <= P.Count * 3 and then Sqrt ((R.Cu - P.Cu) ** 2 + (R.Cv - P.Cv) ** 2) <= Tol then	3	调参数	同一行另一侧(R.Count <= P.Count×3)(act.adb:2671)	同上	中	预期像素数 = 上次像素数 × (Z_旧/Z_新)²(有深度时),容差 = 分割像素数在静止两帧间的量到散布 z·σ;没有深度就用跟点/重叠配对,不用倍数
-act.adb	if Rok and then (Pe + Pe > Ln or else (Tol_R > 0.0 and then Re > Tol_R)) then	2×Pe	调参数	压下一下之前先问运动学:这一压的目标反解出来还差超过这一压的一半就不压、报'够不着'(注释'同下面判被顶住的一半')。一半是拍的(前轮 3700 行'差过命令的一半 ⇒ 没照做'同类定调参数);写成 Pe + Pe 躲过了字面数检查(act.adb:7861)	手停下来算'碰到'还是'反解到了限位'(V1B36 那类假碰)	中	门 = 碰没碰到那道判据自己的分辨力:Selfmap.Blocked 的门 max(1% 步长, 3 × 读数噪声, 3 × 空走两步的散布) —— 反解差过这个门,停下就分不清是碰到还是够不着;或用这只手运动学考核量到的可达目标的反解残差上分位
 act.adb	if Rok and then (Pe + Pe > Lstep or else (Tol_R > 0.0 and then Re > Tol_R)) then	2×Pe	调参数	Touch_Tips 往下压每一步之前问反解:位置残差超过这一步的一半才判到了关节限位。一半是拍的,而判碰到的门是 Selfmap.Blocked(一步的 1% / 3σ),差 50 倍:残差在 1%–50% 之间的那一步照走,停在限位上就被认成碰到 ⇒ 一条假的压面方程(注释里 V1B31 / V1B36 正是这一类)(act.adb:12177)	开机碰桌面量指尖时哪一步算'压不下去是限位',哪一步照压	高	反解的门和判碰到的门用同一道:Pe > max(Selfmap.Negligible × 这一步, 3 × max(C.Map.EE_Noise, 前两步空走之差)) ⇒ 这一步停下来会被 Blocked 认成碰到 ⇒ 当限位、不走(转动照旧按 Tol_R = C.Map.Amp (Arm × Per_Arm + 3));或者同 Plan_Contact / Press_At 用 Pe ≤ Geo_Base 这一道
 act.adb	if Round = 4 then	4	调参数	同上:第 4 回就放弃避让(act.adb:3225)	同上	中	同上
 act.adb	if Say.Grip = "" and then Grip_Arm >= 0 and then Say.Grip_On >= 1 and then Say.Grip_On <= Natural (C.Items.Length)	1	结构	清单号(Say.Grip_On)从 1 起数(0 / −1 = 没说、没绑上):≥ 1 且 ≤ 长度才是一个真号,后面按 N − 1 取;是编号约定,不是'至少一个'(act.adb:10503)

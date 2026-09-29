@@ -388,7 +388,6 @@ package Act is
       Walls : Wall_Vectors.Vector;           --  这一集里各条臂横着被顶住过的地方(见 Wall_Mark)
       No_Reach_Arm : Integer := -1;          --  这一集里"它身上一段都在够不着那侧"的那条臂(-1 = 没有):下次选手绕开它
       Fingers_Aimed : Boolean := False;   --  上一段"到它上方"末尾已把手指指向它躺的面 ⇒ 接下来贴上去的那一段不再为了看它而转手
-      Press_From : Plug.Arm_Pose := [others => 0.0];   --  Geo_Go 压到被顶住的那一下是从哪个位姿开始压的(碰到之前、还没顶的那一处)
       Touch_Valid : Boolean := False;
       Touch_Pt, Touch_N : Geom.V3 := [others => 0.0];
       Touch_Fresh : Boolean := False;        --  这张面是这一集里碰出来的(False = 上一集留下的,新一集第一次朝下被顶住就换成新的,再往后只让更低的换)
