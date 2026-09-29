@@ -1546,6 +1546,272 @@ begin
          Check (not Hok, "视线背对着面 ⇒ 不交,如实说");
       end;
    end;
+   --  🔴 不动的眼按标定板解(Geom.Fit_Fixed_Board,09-30 修的几样):合成的头顶眼(焦距 288、640×480、斜着看桌子),板上的点铺在桌面上,
+   --  每个点在这只眼里配点噪声 Sh(像素)、配到的像素按 Sh 抖
+   declare
+      use Ada.Numerics.Long_Elementary_Functions;
+      Gt : Geom.Cam_Geo;
+      Seed : Long_Long_Integer := 11;
+      function Jit return Long_Float is   --  确定性伪随机 ±1(测试数据自己的抖动)
+      begin
+         Seed := (Seed * 1103515245 + 12345) mod 2147483648;
+         return Long_Float (Integer ((Seed / 65536) mod 2001) - 1000) / 1000.0;
+      end Jit;
+      --  Nx × Ny 个点铺在桌面上(x −0.3..0.3、y −0.3..0.05、高 0.8 上下 5 cm 起伏,米,合成),画面里的才要
+      procedure Board (Nx, Ny : Positive; Sh : Long_Float; Sc : out Geom.Scene_Pt_Vectors.Vector) is
+      begin
+         Sc.Clear;
+         for I in 0 .. Nx - 1 loop
+            for J in 0 .. Ny - 1 loop
+               declare
+                  Pw : constant Geom.V3 := [-0.3 + 0.6 * Long_Float (I) / Long_Float (Nx - 1), -0.3 + 0.35 * Long_Float (J) / Long_Float (Ny - 1),
+                                            0.8 + 0.05 * Sin (Long_Float (I + 2 * J))];
+                  U, V : Long_Float;
+                  Fr : Boolean;
+               begin
+                  Geom.Project_Fixed (Gt, Pw, U, V, Fr);
+                  if Fr and then U > 0.0 and then U < 640.0 and then V > 0.0 and then V < 480.0 then
+                     Sc.Append (Geom.Scene_Pt'(Pw => Pw, Cov => [others => [others => 0.0]], U => U + Sh * Jit, V => V + Sh * Jit, Sh => Sh, Views => 3));
+                  end if;
+               end;
+            end loop;
+         end loop;
+      end Board;
+      function Off_By (G : Geom.Cam_Geo) return Long_Float is (Geom.Norm ([G.Pos (0) - Gt.Pos (0), G.Pos (1) - Gt.Pos (1), G.Pos (2) - Gt.Pos (2)]));
+      Sc : Geom.Scene_Pt_Vectors.Vector;
+   begin
+      Gt.F := 288.0; Gt.Cx := 320.0; Gt.Cy := 240.0; Gt.R_Ce := Geom.Rodrigues ([0.3, 0.1, 0.0]); Gt.Pos := [0.05, -0.45, 1.75]; Gt.Fixed := True; Gt.Valid := True;
+      --  ① 焦距先验那一槽只算一条方程(Param_Sd):同一块 6 点的板,焦距不给、一次不带先验、一次带一条宽得没分量的先验(±1e9 px)。
+      --  两次解一样、残差一样,差的只是方程条数:不确定度之比 = √((12 − 7) ÷ (13 − 7));牙:旧写法把先验那一槽算两条 ⇒ √(5 ÷ 7)
+      Board (2, 3, 0.3, Sc);
+      declare
+         Ga, Gb : Geom.Cam_Geo;
+         Ra, Rb : Geom.Fixed_Report;
+         Oka, Okb : Boolean;
+      begin
+         Ga.F := 0.0; Ga.Cx := 320.0; Ga.Cy := 240.0;
+         Gb := Ga; Gb.F_Prior := 288.0; Gb.F_Prior_Sd := 1.0e9;
+         Geom.Fit_Fixed_Board (Ga, Sc, Ra, Oka);
+         Geom.Fit_Fixed_Board (Gb, Sc, Rb, Okb);
+         declare
+            N : constant Natural := Ra.Scene_Used;
+            Ratio : constant Long_Float := (if Oka and then Okb and then Ga.F_Sd > 0.0 then Gb.F_Sd / Ga.F_Sd else 0.0);
+            Want : constant Long_Float := Sqrt (Long_Float (2 * N - 7) / Long_Float (2 * N + 1 - 7));
+            Old : constant Long_Float := Sqrt (Long_Float (2 * N - 7) / Long_Float (2 * N + 2 - 7));
+         begin
+            Check (Oka and then Okb and then N = Natural (Sc.Length) and then Rb.Scene_Used = N and then abs (Ratio - Want) < 1.0e-6 and then abs (Ratio - Old) > 0.01,
+                   "不动的眼·先验一槽一条方程:" & Codec.Img (N) & " 点的板,带宽先验和不带的焦距不确定度之比 " & Codec.Fmt (Ratio, 6) & "(该 √(5/6) = "
+                   & Codec.Fmt (Want, 6) & ")· 牙:旧写法算两条 ⇒ " & Codec.Fmt (Old, 6));
+         end;
+      end;
+      --  ② 从现位姿起步(Start_Here,核对时走这条):120 个点的板里 30 个配错,错得一层比一层小(300 / 100 / 30 / 10 / 4 px 各 6 个,
+      --  Sh = 0.2 px);起点偏 0.6°。门从粗到细收到挑出来的那一批不再变 ⇒ 30 个全踢掉、一个好的都不踢,位置差 < 3 mm;
+      --  牙:要收的遍数 ≥ 4 = 旧写法固定收三遍,第三遍挑出来的还在变也照样交
+      Board (12, 10, 0.2, Sc);
+      for K in 0 .. 29 loop
+         declare
+            Tier : constant array (0 .. 4) of Long_Float := [300.0, 100.0, 30.0, 10.0, 4.0];   --  配错多少像素(合成)
+            P : Geom.Scene_Pt := Sc (K * 4 + 1);
+         begin
+            P.U := P.U + Tier (K / 6) * Cos (2.4 * Long_Float (K)); P.V := P.V + Tier (K / 6) * Sin (2.4 * Long_Float (K));
+            Sc.Replace_Element (K * 4 + 1, P);
+         end;
+      end loop;
+      declare
+         Gs, Gz : Geom.Cam_Geo;
+         Rs, Rz : Geom.Fixed_Report;
+         Oks, Okz : Boolean;
+         Rounds_S : Natural;
+      begin
+         Gs := Gt; Gs.R_Ce := Geom.Mul (Gt.R_Ce, Geom.Rodrigues ([0.01, -0.005, 0.0]));
+         Geom.Fit_Fixed_Board (Gs, Sc, Rs, Oks, Start_Here => True);
+         Rounds_S := Geom.Refits;
+         Check (Oks and then Rs.Scene_Used = Natural (Sc.Length) - 30 and then Gs.Dropped = 30 and then Off_By (Gs) < 0.003 and then Rounds_S >= 4,
+                "不动的眼·从现位姿起步:" & Codec.Img (Natural (Sc.Length)) & " 个点里 30 个一层比一层小地配错 ⇒ 踢掉 " & Codec.Img (Gs.Dropped) & " 个、位置差 "
+                & Codec.Fmt (1000.0 * Off_By (Gs), 2) & " mm · 牙:门收了 " & Codec.Img (Rounds_S) & " 遍才定(旧写法固定三遍)");
+         --  ③ 同一块板从零盲搜:按中位 3 倍踢到不再变(Reselect_Loop)⇒ 同样 30 个全踢掉
+         Gz.F := 288.0; Gz.Cx := 320.0; Gz.Cy := 240.0;
+         Geom.Fit_Fixed_Board (Gz, Sc, Rz, Okz);
+         Check (Okz and then Rz.Scene_Used = Natural (Sc.Length) - 30 and then Gz.Dropped = 30 and then Off_By (Gz) < 0.003,
+                "不动的眼·从零盲搜:同一块板 ⇒ 踢掉 " & Codec.Img (Gz.Dropped) & " 个(重解 " & Codec.Img (Geom.Refits) & " 遍)、位置差 " & Codec.Fmt (1000.0 * Off_By (Gz), 2) & " mm");
+      end;
+      --  ④ 焦距给了(288)、板挤成 1 mm 见方的一小团 ⇒ 位置分不开、解不出;报原因里印给的焦距,不带 ±(牙:旧写法印 P (5) = 相机位置的 z,后面 ± 0.0 px)
+      Sc.Clear;
+      for I in 0 .. 5 loop
+         declare
+            Pw : constant Geom.V3 := [0.0005 * Long_Float (I mod 3), 0.0005 * Long_Float (I / 3), 0.85];   --  米,合成
+            U, V : Long_Float;
+            Fr : Boolean;
+         begin
+            Geom.Project_Fixed (Gt, Pw, U, V, Fr);
+            Sc.Append (Geom.Scene_Pt'(Pw => Pw, Cov => [others => [others => 0.0]], U => U + 0.3 * Jit, V => V + 0.3 * Jit, Sh => 0.3, Views => 3));
+         end;
+      end loop;
+      declare
+         Gf : Geom.Cam_Geo;
+         Rf : Geom.Fixed_Report;
+         Okf : Boolean;
+      begin
+         Gf.F := 288.0; Gf.Cx := 320.0; Gf.Cy := 240.0;
+         Geom.Fit_Fixed_Board (Gf, Sc, Rf, Okf);
+         declare
+            W : constant String := To_String (Geom.Why);
+         begin
+            Check (not Okf and then Ada.Strings.Fixed.Index (W, "焦距 288.0 px(给的") > 0 and then Ada.Strings.Fixed.Index (W, "± 0.0 px") = 0,
+                   "不动的眼·焦距给了也解不出时,报原因印给的焦距:" & W);
+         end;
+      end;
+      --  ⑤ 核对的细门按板配得多细(Geom.Board_Rms):101 个点的误差按瑞利分布的分位数摆(σ = 0.5 px,中位正好 σ√(2 ln 2))⇒ 均方根 = σ√2,差 < 1e-12;
+      --  牙:旧写法中位 × 1.2 差 0.09%(6.6e-4 px)
+      Sc.Clear;
+      for I in 0 .. 100 loop
+         declare
+            Pw : constant Geom.V3 := [-0.3 + 0.006 * Long_Float (I), -0.2 + 0.002 * Long_Float (I), 0.85];   --  米,合成
+            U, V : Long_Float;
+            Fr : Boolean;
+            R : constant Long_Float := 0.5 * Sqrt (-2.0 * Log (1.0 - (Long_Float (I) + 0.5) / 101.0));   --  瑞利分布的分位数(σ = 0.5 px)
+         begin
+            Geom.Project_Fixed (Gt, Pw, U, V, Fr);
+            Sc.Append (Geom.Scene_Pt'(Pw => Pw, Cov => [others => [others => 0.0]], U => U + R * Cos (2.4 * Long_Float (I)), V => V + R * Sin (2.4 * Long_Float (I)),
+                                      Sh => 0.0, Views => 3));
+         end;
+      end loop;
+      declare
+         Br : constant Long_Float := Geom.Board_Rms (Gt, Sc, Long_Float'Last);
+         Old : constant Long_Float := 1.2 * 0.5 * Sqrt (2.0 * Log (2.0));
+      begin
+         Check (abs (Br - 0.5 * Sqrt (2.0)) < 1.0e-12 and then abs (Old - 0.5 * Sqrt (2.0)) > 1.0e-4,
+                "核对的细门:瑞利分位数摆的误差 ⇒ 均方根 " & Codec.Fmt (Br, 9) & " px(真 σ√2 = " & Codec.Fmt (0.5 * Sqrt (2.0), 9) & ")· 牙:中位 × 1.2 ⇒ " & Codec.Fmt (Old, 9));
+      end;
+   end;
+   --  🔴 离群重挑到不再变(09-30,Geom.Reselect / Reselect_Loop,Fit_Rig 和 Fit_Fixed_Board 同一套)。玩具:一堆数求平均,残差 = 离平均多远;
+   --  好的在 [−1, 1] 里匀开。① 一层比一层小的错(1000 / 100 / 30 / 10 各 3 个,40 个好的)⇒ 挑到不再变:12 个全出去、平均回到 0;
+   --  牙:旧的固定三遍还留 3 个、第四遍还在变;只挑一遍留 9 个。② 三成错(+50 × 8、−50 × 4,30 个好的)⇒ 一遍全出去;
+   --  牙:旧的"踢掉的到了四分之一就全放回"把 12 个全放回,平均偏到 4.76。③ 错的占六成、一个比一个大(5 × 2^(k/3),30 个)⇒ 挑到进解的不到一半 ⇒
+   --  Broken,照实报;牙:旧的固定三遍交出一个还在变、平均 26 的"解"
+   declare
+      use Ada.Numerics.Long_Elementary_Functions;
+      use type Geom.Reselect_End;
+      type Toy is (Cascade, Quarter, Majority);
+      procedure Run (K : Toy) is
+         Xs : Geom.Param_Vec (0 .. 99) := [others => 0.0];
+         N : Natural := 0;
+         N_Good : constant Natural := (case K is when Cascade => 40, when Quarter => 30, when Majority => 20);
+         Mean : Long_Float := 0.0;
+         procedure Add (X : Long_Float) is
+         begin
+            Xs (N) := X; N := N + 1;
+         end Add;
+         procedure Solve (S : Geom.Flags) is
+            Sum : Long_Float := 0.0;
+            C : Natural := 0;
+         begin
+            for I in S'Range loop
+               if not S (I) then
+                  Sum := Sum + Xs (I); C := C + 1;
+               end if;
+            end loop;
+            Mean := (if C > 0 then Sum / Long_Float (C) else 0.0);
+         end Solve;
+         procedure Errs (Rs : out Geom.Param_Vec) is
+         begin
+            for I in Rs'Range loop
+               Rs (I) := abs (Xs (I) - Mean);
+            end loop;
+         end Errs;
+      begin
+         for I in 0 .. N_Good - 1 loop
+            Add (-1.0 + 2.0 * (Long_Float (I) + 0.5) / Long_Float (N_Good));
+         end loop;
+         case K is
+            when Cascade =>
+               for T of Geom.Param_Vec'[1000.0, 100.0, 30.0, 10.0] loop
+                  for M in 1 .. 3 loop
+                     Add (T);
+                  end loop;
+               end loop;
+            when Quarter =>
+               for M in 1 .. 12 loop
+                  Add (if M <= 8 then 50.0 else -50.0);
+               end loop;
+            when Majority =>
+               for M in 0 .. 29 loop
+                  Add (5.0 * 2.0 ** (Long_Float (M) / 3.0));
+               end loop;
+         end case;
+         declare
+            Sk : Geom.Flags (0 .. N - 1) := [others => False];
+            Kept, Rounds : Natural;
+            How : Geom.Reselect_End;
+            Bad_In, Bad_Old : Natural := 0;
+            Mean_New, Mean_Old : Long_Float;
+            Still : Boolean := False;   --  旧写法交出来的那一批再挑一遍还变不变
+            Old_Kept : Natural;
+         begin
+            Solve (Sk);
+            Geom.Reselect_Loop (Errs'Access, Solve'Access, Sk, Kept, Rounds, How);
+            Mean_New := Mean;
+            for I in N_Good .. N - 1 loop
+               if not Sk (I) then
+                  Bad_In := Bad_In + 1;
+               end if;
+            end loop;
+            --  旧写法:Cascade / Majority 按 Fit_Fixed_Board 的固定三遍;Quarter 按 Fit_Rig 的一遍 + "到四分之一全放回"
+            declare
+               So : Geom.Flags (0 .. N - 1) := [others => False];
+               Rs : Geom.Param_Vec (0 .. N - 1);
+               Ch : Boolean;
+            begin
+               Solve (So);
+               if K = Quarter then
+                  Errs (Rs);
+                  Geom.Reselect (Rs, So, Ch, Old_Kept);
+                  if 4 * (N - Old_Kept) >= N then
+                     So := [others => False];
+                  end if;
+                  Solve (So);
+               else
+                  for R in 1 .. 3 loop
+                     Errs (Rs);
+                     Geom.Reselect (Rs, So, Ch, Old_Kept);
+                     Solve (So);
+                  end loop;
+                  Errs (Rs);
+                  declare
+                     Probe : Geom.Flags := So;
+                  begin
+                     Geom.Reselect (Rs, Probe, Still, Old_Kept);
+                  end;
+               end if;
+               Mean_Old := Mean;
+               for I in N_Good .. N - 1 loop
+                  if not So (I) then
+                     Bad_Old := Bad_Old + 1;
+                  end if;
+               end loop;
+            end;
+            case K is
+               when Cascade =>
+                  Check (How = Geom.Settled and then Bad_In = 0 and then Kept = N_Good and then abs Mean_New < 1.0e-9 and then Rounds >= 4
+                         and then Bad_Old > 0 and then Still,
+                         "离群重挑·一层比一层小:挑到不再变(重解 " & Codec.Img (Rounds) & " 遍)⇒ 12 个错的全出去、平均 " & Codec.Fmt (Mean_New, 6)
+                         & " · 牙:旧的固定三遍还留 " & Codec.Img (Bad_Old) & " 个、平均 " & Codec.Fmt (Mean_Old, 3) & "、再挑还在变");
+               when Quarter =>
+                  Check (How = Geom.Settled and then Bad_In = 0 and then abs Mean_New < 1.0e-9 and then Bad_Old = 12 and then abs Mean_Old > 1.0,
+                         "离群重挑·三成错:" & Codec.Img (N - Kept) & " 个全出去、平均 " & Codec.Fmt (Mean_New, 6) & " · 牙:旧的踢到四分之一就全放回 ⇒ 平均 "
+                         & Codec.Fmt (Mean_Old, 3));
+               when Majority =>
+                  Check (How = Geom.Broken and then 2 * Kept < N and then Bad_Old > 0 and then Still,
+                         "离群重挑·错的占六成:挑到进解的只剩 " & Codec.Img (Kept) & " / " & Codec.Img (N) & " ⇒ 不是离群,照实报解不出 · 牙:旧的固定三遍交出平均 "
+                         & Codec.Fmt (Mean_Old, 1) & " 的解(还留 " & Codec.Img (Bad_Old) & " 个错的、再挑还在变)");
+            end case;
+         end;
+      end Run;
+   begin
+      Run (Cascade);
+      Run (Quarter);
+      Run (Majority);
+   end;
    --  🔴 焦距一起解(2026-09-24,官方 RoboDojo 观测没有内参):手上的眼 F 不给(0),从 6 停里把朝向和焦距一起量出来;真值 F = 400
    declare
       Gt : Geom.Cam_Geo;
@@ -1724,7 +1990,9 @@ begin
                    & Codec.Fmt (Gs.Off (0) * 1000.0, 0) & "," & Codec.Fmt (Gs.Off (1) * 1000.0, 0) & "," & Codec.Fmt (Gs.Off (2) * 1000.0, 0)
                    & ") mm(真 (30,0,50),该在 1.5 cm 内)· 朝向差 " & Codec.Fmt (Da, 4) & " rad · 残差 " & Codec.Fmt (Gs.Rms, 2) & " px · 进了 " & Codec.Img (Used) & " 点");
          end;
-         --  跟错的观测混进来(每 7 笔里 1 笔错 40 px,像 V1F 右眼):踢离群再解,焦距该仍在 2% 内
+         --  跟错的观测混进来(每 7 笔里 1 笔错 40 px,像 V1F 右眼):踢离群再解,焦距该仍在 2% 内。
+         --  09-30 起踢到进解的那一批不再变(Geom.Reselect_Loop):6 笔错的全踢掉 ⇒ 残差回到 1 px 抖动那一档;
+         --  牙:要重解不止一遍(Geom.Refits ≥ 2)= 旧写法只踢一遍不够 —— 09-30 以前这一组一遍只踢掉 5 笔,留下 1 笔 40 px 的,残差 4.91 px
          declare
             Bad : Geom.Obs_Pt_Vectors.Vector;
             Gb : Geom.Cam_Geo;
@@ -1743,8 +2011,42 @@ begin
             end loop;
             Gb.F := 0.0; Gb.Cx := 320.0; Gb.Cy := 240.0;
             Geom.Fit_Rig (Gb, Bad, 3, Ok_B, Used_B);
-            Check (Ok_B and then abs (Gb.F - 400.0) < 8.0 and then Gb.Dropped >= 4,
-                   "多点连偏移·踢离群:每 7 笔 1 笔错 40 px ⇒ 踢掉 " & Codec.Img (Gb.Dropped) & " 笔,焦距 " & Codec.Fmt (Gb.F, 1) & " px(真 400,该在 2% 内)· 残差 " & Codec.Fmt (Gb.Rms, 2) & " px");
+            Check (Ok_B and then abs (Gb.F - 400.0) < 8.0 and then Gb.Dropped >= 6 and then Gb.Rms < 1.0 and then Geom.Refits >= 2,
+                   "多点连偏移·踢离群:每 7 笔 1 笔错 40 px ⇒ 踢掉 " & Codec.Img (Gb.Dropped) & " 笔,焦距 " & Codec.Fmt (Gb.F, 1) & " px(真 400,该在 2% 内)· 残差 " & Codec.Fmt (Gb.Rms, 2)
+                   & " px(该 < 1)· 牙:重解了 " & Codec.Img (Geom.Refits) & " 遍才定下来 —— 旧写法只踢一遍(09-30 以前:踢 5 笔、残差 4.91 px)");
+         end;
+         --  三成跟错(42 笔里 12 笔错 40 px,错的方向轮着换,挪哪个点都吃不掉):踢到不再变 ⇒ 12 笔全出去、焦距仍在 2% 内;
+         --  牙:旧写法要么一遍踢不完(要重解不止一遍),要么"踢掉的到了四分之一就全放回"(12 × 4 ≥ 42)—— 两样都把明知跟错的留在解里
+         declare
+            Bad : Geom.Obs_Pt_Vectors.Vector;
+            Gb : Geom.Cam_Geo;
+            Ok_B : Boolean;
+            Used_B : Natural;
+            N_Bad : Natural := 0;
+         begin
+            for I in 0 .. Natural (Obs.Length) - 1 loop
+               declare
+                  Ob : Geom.Obs_Pt := Obs (I);
+               begin
+                  if I mod 7 = 1 or else I mod 7 = 4 then
+                     case (I / 8) mod 4 is   --  错 40 px,方向轮着换(合成)
+                        when 0 => Ob.U := Ob.U + 40.0;
+                        when 1 => Ob.V := Ob.V - 40.0;
+                        when 2 => Ob.U := Ob.U - 40.0;
+                        when others => Ob.V := Ob.V + 40.0;
+                     end case;
+                     N_Bad := N_Bad + 1;
+                  end if;
+                  Bad.Append (Ob);
+               end;
+            end loop;
+            Gb.F := 0.0; Gb.Cx := 320.0; Gb.Cy := 240.0;
+            Geom.Fit_Rig (Gb, Bad, 3, Ok_B, Used_B);
+            Check (Ok_B and then abs (Gb.F - 400.0) < 8.0 and then Gb.Dropped >= N_Bad and then Gb.Rms < 1.0
+                   and then (Geom.Refits >= 2 or else 4 * Gb.Dropped >= Natural (Bad.Length)),
+                   "多点连偏移·三成跟错:" & Codec.Img (Natural (Bad.Length)) & " 笔里 " & Codec.Img (N_Bad) & " 笔错 40 px ⇒ 踢掉 " & Codec.Img (Gb.Dropped) & " 笔、重解 "
+                   & Codec.Img (Geom.Refits) & " 遍,焦距 " & Codec.Fmt (Gb.F, 1) & " px(真 400)· 残差 " & Codec.Fmt (Gb.Rms, 2)
+                   & " px · 牙:旧写法一遍踢不完、踢到四分之一又全放回");
          end;
          --  不确定度从雅可比来:转过、多点、长基线 ⇒ 焦距 ± 几个像素;只横挪 1 cm 不转(星形)⇒ 焦距和远近分不开,不确定度该比焦距本身还大 ⇒ 判解不出
          Check (Ok_R and then Gs.F_Sd > 0.0 and then Gs.F_Sd < 6.0 and then Gs.Off_Sd < 0.02 and then Gs.Rot_Sd < 0.01,
@@ -1770,6 +2072,36 @@ begin
             Gd.F := 0.0; Gd.Cx := 320.0; Gd.Cy := 240.0;
             Geom.Fit_Rig (Gd, Obs_S, 1, Ok_D, Used_D);
             Check (not Ok_D, "不确定度:只横挪 1 cm、不转 ⇒ 焦距和远近分不开 ⇒ 判解不出(不再吐一个看着像样的数)");
+            --  同一组、焦距给了(400):朝向定不住(焦距 × 朝向 ± 比半幅对角线 400 px 还大)⇒ 解不出,报原因里印的是给的焦距,不带 ±;
+            --  牙:旧写法这时印 P (5)(偏移的 z)当"焦距",后面跟着 ± 0.0 px(不解焦距时不确定度记 0)
+            declare
+               Gf : Geom.Cam_Geo;
+               Ok_F : Boolean;
+               Used_F : Natural;
+            begin
+               Gf.F := 400.0; Gf.Cx := 320.0; Gf.Cy := 240.0;
+               Geom.Fit_Rig (Gf, Obs_S, 1, Ok_F, Used_F);
+               declare
+                  W : constant String := To_String (Geom.Why);
+               begin
+                  Check (not Ok_F and then Ada.Strings.Fixed.Index (W, "焦距 400.0 px(给的") > 0 and then Ada.Strings.Fixed.Index (W, "± 0.0 px") = 0
+                         and then Ada.Strings.Fixed.Index (W, "半幅对角线 400.0 px") > 0,
+                         "不确定度:焦距给了也解不出时,报原因印给的焦距:" & W);
+               end;
+            end;
+         end;
+         --  🔴 朝向定没定住按量到的焦距和画幅判(09-30,Geom.Pointing_Lost,换掉"朝向 ± ≥ 1 弧度"):640×480(半幅对角线 400 px)。
+         --  长焦 F = 4000:朝向 ± 0.3 rad 让投影挪 1200 px(画面三倍远)⇒ 定不住;广角 F = 150:± 1.2 rad 只挪 180 px ⇒ 还在画面里、定得住;
+         --  F = 400 时两种判法一样(± 0.5 定得住、± 1.2 定不住)。牙:旧的"≥ 1 弧度"长焦那组当成定住了、广角那组当成没定
+         declare
+            Gp : Geom.Cam_Geo;
+            function Old_Lost (Rot_Sd : Long_Float) return Boolean is (Rot_Sd >= 1.0);
+         begin
+            Gp.Cx := 320.0; Gp.Cy := 240.0;
+            Check (Geom.Pointing_Lost (Gp, 4000.0, 0.3) and then not Geom.Pointing_Lost (Gp, 150.0, 1.2)
+                   and then not Geom.Pointing_Lost (Gp, 400.0, 0.5) and then Geom.Pointing_Lost (Gp, 400.0, 1.2)
+                   and then not Old_Lost (0.3) and then Old_Lost (1.2),
+                   "朝向定没定住:长焦 4000 px ± 0.3 rad ⇒ 定不住、广角 150 px ± 1.2 rad ⇒ 定得住、400 px 时和旧判法一样 · 牙:旧的 ≥ 1 弧度两头都判反");
          end;
       end;
    end;
@@ -1888,12 +2220,13 @@ begin
             declare
                U0 : constant Long_Float := 40.0 * Long_Float (Xi);
                V0 : constant Long_Float := 40.0 * Long_Float (Yi);
-               D : constant Geom.V3 := Geom.Cam_Dir (Gd, U0, V0);
+               Seen : Boolean;
+               D : constant Geom.V3 := Geom.Cam_Dir (Gd, U0, V0, Seen);
                U, V : Long_Float;
                Fr : Boolean;
             begin
                Geom.Cam_Pixel (Gd, D, U, V, Fr);
-               Worst := Long_Float'Max (Worst, (if Fr then abs (U - U0) + abs (V - V0) else 1.0e9));
+               Worst := Long_Float'Max (Worst, (if Fr and then Seen then abs (U - U0) + abs (V - V0) else 1.0e9));   --  这个镜头一直单调:每个像素都得去得了
             end;
          end loop;
       end loop;
@@ -1907,6 +2240,84 @@ begin
       end;
       Check (Worst < 1.0e-6 and then Corner_Deg > 1.0,
              "镜头畸变:像素 → 视线 → 像素,最大差 " & Codec.Fmt (Worst, 9) & " px · 角上那一点去畸变的视线比理想针孔的偏 " & Codec.Fmt (Corner_Deg, 2) & "°");
+   end;
+   --  🔴 去畸变改成一维牛顿法、去不了照实报(09-30,Geom.Cam_Dir 的 Ok):强桶形 K1 = −0.35(合成;折回半径 r* = 1/√(−3K1) = 0.976,
+   --  那儿畸变后的半径最大 = 0.6506)。① 折回半径以内、靠近它的三个点(r = 0.95 / 0.97 / 0.975)解回的视线和真的差 < 1e-9 弧度;
+   --  牙:旧写法(不动点迭代,50 次封顶)同一组像素差 4e-4 ~ 6e-3 弧度也不报 —— 迭代的斜率在 r* 处正好是 1。
+   --  ② 畸变后离主点 0.66(比能到的 0.6506 还远,没有哪条视线落在这儿)⇒ Ok = False、零向量,不带 Ok 的 Cam_Dir / Ray 也是零向量,
+   --  Hit_Plane 不拿它当视线;牙:旧写法给出 r = 2.39 的"视线",投回去离这个像素一千多像素。③ K1 = −0.2、F = 397 的镜头:
+   --  画幅角上(畸变后 1.0 > 能到的 0.861)照实说去不了,画面中心去得了
+   declare
+      use Ada.Numerics.Long_Elementary_Functions;
+      Gk : Geom.Cam_Geo;
+      Phi : constant Long_Float := 0.5;   --  方位(弧度,合成)
+      type Radii is array (Positive range <>) of Long_Float;
+      Near_Fold : constant Radii := [0.95, 0.97, 0.975];
+      --  旧写法原样(09-30 以前的 Geom.Undistort)
+      procedure Old_Undistort (K1, Xd, Yd : Long_Float; X, Y : out Long_Float) is
+      begin
+         X := Xd; Y := Yd;
+         for It in 1 .. 50 loop
+            declare
+               D : constant Long_Float := 1.0 + K1 * (X * X + Y * Y);
+               Xn, Yn : Long_Float;
+            begin
+               exit when D <= 0.0;
+               Xn := Xd / D; Yn := Yd / D;
+               exit when abs (Xn - X) + abs (Yn - Y) < 1.0e-12;
+               X := Xn; Y := Yn;
+            end;
+         end loop;
+      end Old_Undistort;
+      function Ang (A, B : Geom.V3) return Long_Float is
+        (Arccos (Long_Float'Max (-1.0, Long_Float'Min (1.0, (A (0) * B (0) + A (1) * B (1) + A (2) * B (2)) / (Geom.Norm (A) * Geom.Norm (B))))));
+      New_Worst, Old_Best : Long_Float := 0.0;
+      All_Seen : Boolean := True;
+   begin
+      Gk.F := 400.0; Gk.Cx := 320.0; Gk.Cy := 240.0; Gk.K1 := -0.35;
+      Old_Best := Long_Float'Last;
+      for R of Near_Fold loop
+         declare
+            Rd : constant Long_Float := R * (1.0 + Gk.K1 * R * R);
+            Truth : constant Geom.V3 := [R * Cos (Phi), R * Sin (Phi), -1.0];
+            Seen : Boolean;
+            D : constant Geom.V3 := Geom.Cam_Dir (Gk, Gk.Cx + Gk.F * Rd * Cos (Phi), Gk.Cy - Gk.F * Rd * Sin (Phi), Seen);
+            Xo, Yo : Long_Float;
+         begin
+            All_Seen := All_Seen and then Seen;
+            New_Worst := Long_Float'Max (New_Worst, (if Seen then Ang (D, Truth) else 1.0));
+            Old_Undistort (Gk.K1, Rd * Cos (Phi), Rd * Sin (Phi), Xo, Yo);
+            Old_Best := Long_Float'Min (Old_Best, Ang ([Xo, Yo, -1.0], Truth));
+         end;
+      end loop;
+      Check (All_Seen and then New_Worst < 1.0e-9 and then Old_Best > 1.0e-4,
+             "去畸变(牛顿):K1 −0.35 折回半径 0.976 以内 r = 0.95 / 0.97 / 0.975 解回的视线最多差 " & Codec.Fmt (New_Worst, 12)
+             & " 弧度 · 牙:旧的不动点迭代(50 次封顶)同一组最少也差 " & Codec.Fmt (Old_Best, 5) & " 弧度,也不报");
+      declare
+         Rd : constant Long_Float := 0.66;   --  畸变后离主点(归一化,合成;能到的最大是 0.6506)
+         U : constant Long_Float := Gk.Cx + Gk.F * Rd * Cos (Phi);
+         V : constant Long_Float := Gk.Cy - Gk.F * Rd * Sin (Phi);
+         Seen : Boolean;
+         D : constant Geom.V3 := Geom.Cam_Dir (Gk, U, V, Seen);
+         Dw : constant Geom.V3 := Geom.Ray (Gk, [0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0], U, V);
+         Hok : Boolean;
+         Hit : constant Geom.V3 := Geom.Hit_Plane ([0.0, 0.0, 1.0], Dw, [0.0, 0.0, 0.0], [0.0, 0.0, 1.0], Hok);
+         pragma Unreferenced (Hit);
+         Xo, Yo, Uo, Vo : Long_Float;
+         Fr : Boolean;
+         Gw : constant Geom.Cam_Geo := (Gk with delta F => 397.0, K1 => -0.2);
+         Seen_Corner, Seen_Center : Boolean;
+         Corner : constant Geom.V3 := Geom.Cam_Dir (Gw, 0.0, 0.0, Seen_Corner);
+         Center : constant Geom.V3 := Geom.Cam_Dir (Gw, 320.0, 240.0, Seen_Center);
+      begin
+         Old_Undistort (Gk.K1, Rd * Cos (Phi), Rd * Sin (Phi), Xo, Yo);
+         Geom.Cam_Pixel (Gk, [Xo, Yo, -1.0], Uo, Vo, Fr);
+         Check (not Seen and then Geom.Norm (D) = 0.0 and then Geom.Norm (Dw) = 0.0 and then not Hok and then Sqrt ((Uo - U) ** 2 + (Vo - V) ** 2) > 100.0
+                and then not Seen_Corner and then Geom.Norm (Corner) = 0.0 and then Seen_Center and then abs (Center (2) + 1.0) < 1.0e-12,
+                "去畸变:畸变后 0.66 比这个镜头能到的 0.6506 还远 ⇒ 去不了、零向量,Ray 也是零、交不了面 · 牙:旧写法给出 r = "
+                & Codec.Fmt (Sqrt (Xo * Xo + Yo * Yo), 2) & " 的视线,投回去离这个像素 " & Codec.Fmt (Sqrt ((Uo - U) ** 2 + (Vo - V) ** 2), 0)
+                & " px · K1 −0.2 的镜头画幅角上去不了、中心去得了");
+      end;
    end;
    --  🔴 整幅掩膜 ⇒ 框、像素数、形心、主轴(Picture.Region_Of_Mask,SAM 出掩膜后用):合成 40×30 画幅里一条 20×4 的横条(x 10..29、y 5..8)
    --  ⇒ 框 [10 5 29 8]、80 px、形心 (19.5, 6.5)、主轴水平、伸长比 = √(方差比) ≈ 5.8;空掩膜 ⇒ 不成
@@ -2520,6 +2931,36 @@ begin
       Rs.Append (Geom.Sight'(O => [1.0, 0.0, 1.0], D => [0.6, 0.0, 0.8]));   --  第二条背对交点
       P := Geom.Meet (Rs, Ok, Sp);
       Check (not Ok, "两眼交点:交点在某只眼背后 ⇒ 不解");
+      --  零向量 = 那个像素去不了畸变、没有视线(09-30,Geom.Cam_Dir):不算一条。两条真视线交在 (0, 0.75, 0),再加一条从 (1,1,1) 出发的零向量 ⇒ 交点不动;
+      --  牙:按旧写法把它也当一条(I − 0·0ᵀ = I,等于把交点往它的起点拽)⇒ 交点被拽开
+      Rs.Clear;
+      Rs.Append (Geom.Sight'(O => [0.0, 0.0, 1.0], D => [0.0, 0.6, -0.8]));
+      Rs.Append (Geom.Sight'(O => [1.0, 0.0, 1.0], D => [-0.6246950475544243, 0.4685212856658182, -0.6246950475544243]));   --  (1,0,1) → (0,0.75,0) 归一
+      declare
+         P2 : Geom.V3;
+         Ok2 : Boolean;
+         Sp2 : Long_Float;
+         A : Geom.M3 := [others => [others => 0.0]];
+         B : Geom.V3 := [others => 0.0];
+         Old_P : Geom.V3;
+      begin
+         P := Geom.Meet (Rs, Ok, Sp);
+         Rs.Append (Geom.Sight'(O => [1.0, 1.0, 1.0], D => [0.0, 0.0, 0.0]));
+         P2 := Geom.Meet (Rs, Ok2, Sp2);
+         for R of Rs loop   --  旧写法:每一条都进最小二乘,零向量也算
+            for I in 0 .. 2 loop
+               for J in 0 .. 2 loop
+                  A (I, J) := A (I, J) + (if I = J then 1.0 else 0.0) - R.D (I) * R.D (J);
+                  B (I) := B (I) + ((if I = J then 1.0 else 0.0) - R.D (I) * R.D (J)) * R.O (J);
+               end loop;
+            end loop;
+         end loop;
+         Old_P := Geom.Solve3 (A, B);
+         Check (Ok and then Ok2 and then Geom.Norm ([P2 (0) - P (0), P2 (1) - P (1), P2 (2) - P (2)]) < 1.0e-12 and then abs (P (1) - 0.75) < 1.0e-9
+                and then Geom.Norm ([Old_P (0) - P (0), Old_P (1) - P (1), Old_P (2) - P (2)]) > 0.1,
+                "两眼交点:多一条零向量(去不了畸变的像素)⇒ 交点不动 (" & Codec.Fmt (P2 (0), 3) & "," & Codec.Fmt (P2 (1), 3) & "," & Codec.Fmt (P2 (2), 3)
+                & ") · 牙:当成一条视线 ⇒ 被拽到 (" & Codec.Fmt (Old_P (0), 3) & "," & Codec.Fmt (Old_P (1), 3) & "," & Codec.Fmt (Old_P (2), 3) & ")");
+      end;
    end;
    --  身体图:最近样本按探针幅度归一;同位姿(噪声内)再看一次 = 顶替不是新增
    declare

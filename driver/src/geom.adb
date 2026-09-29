@@ -116,37 +116,92 @@ package body Geom is
       Xd := X * D; Yd := Y * D;
    end Distort;
 
-   --  反过来:从畸变后的点迭代回理想的点(不动点迭代 x = x畸 ÷ (1 + K1 r² + K2 r⁴);畸变不到三成时几步就收敛,50 次封顶)。
-   --  迭代到来回差不到 1e-12(归一化坐标,纯数值精度)就停
-   procedure Undistort (G : Cam_Geo; Xd, Yd : Long_Float; X, Y : out Long_Float) is
+   --  反过来:从畸变后的点回到理想的点(09-30 改成一维牛顿法)。畸变只改离主点多远、不改方位 ⇒ 只解一个方程 r·(1 + K1 r² + K2 r⁴) = r畸
+   --  (r畸 = 畸变后的点离主点多远,归一化平面)。只在单调的那一段里解:r 从 0 往外,畸变后的半径先跟着涨,到折回半径 r*
+   --  (导数 1 + 3K1 r² + 5K2 r⁴ 第一次到 0)处最大,再往外反而变小 —— r* 以外的方向和 r* 以内的某个方向落在同一个像素上,
+   --  镜头模型在那儿已经不成立。
+   --  r畸 比 r* 处能到的还大 ⇒ 没有哪条视线落在这个像素上 ⇒ Ok = False(调用方照实说"这一点去不了畸变")。有根时根夹在 [0, r*] 里
+   --  (一直单调时夹在 [0, r畸 ÷ 导数的最小值] 里):牛顿一步走出夹住的区间就改成对半分,每一步都收窄区间,做到 r 不再变
+   --  (或区间只剩相邻两个浮点数)为止;遍数上限只当保险 = 对半分把任何有限区间收到一个浮点数最多要的步数,碰到就 Ok = False,照实报。
+   --  原来的不动点迭代 x = x畸 ÷ (1 + K1 r² + K2 r⁴) 在 r* 处斜率正好是 1:靠近折回半径时 50 次停在半路,超出能到的最大半径时发一个
+   --  折到主点另一边的"解",都不报(K1 = −0.35:r = 0.975 差 0.0115,r畸 = 0.66 解成 2.39)
+   procedure Undistort (G : Cam_Geo; Xd, Yd : Long_Float; X, Y : out Long_Float; Ok : out Boolean) is
+      Rd : constant Long_Float := Sqrt (Xd * Xd + Yd * Yd);
+      function Excess (R : Long_Float) return Long_Float is (R * (1.0 + G.K1 * R * R + G.K2 * R ** 4) - Rd);   --  畸变后的半径比 r畸 多多少
+      function Slope (R : Long_Float) return Long_Float is (1.0 + 3.0 * G.K1 * R * R + 5.0 * G.K2 * R ** 4);   --  d(畸变后的半径) / dr
+      --  导数的零点:5K2 s² + 3K1 s + 1 = 0(s = r²)最小的正根 = 2 ÷ (−3K1 + √(9K1² − 20K2))(常数项是 1 的求根式,K2 = 0 也成立);分母 ≤ 0 = 没有正根
+      Disc : constant Long_Float := 9.0 * G.K1 * G.K1 - 20.0 * G.K2;
+      Den : constant Long_Float := (if Disc >= 0.0 then Sqrt (Disc) - 3.0 * G.K1 else 0.0);
+      Cap : constant Natural := Long_Float'Machine_Mantissa + Long_Float'Machine_Emax - Long_Float'Machine_Emin;
+      Lo : Long_Float := 0.0;
+      Hi, R, Rn : Long_Float;
+      Steps : Natural := 0;
    begin
-      X := Xd; Y := Yd;
-      if G.K1 = 0.0 and then G.K2 = 0.0 then
+      X := Xd; Y := Yd; Ok := True;
+      if (G.K1 = 0.0 and then G.K2 = 0.0) or else Rd = 0.0 then
          return;
       end if;
-      for It in 1 .. 50 loop
+      if Den > 0.0 then
+         Hi := Sqrt (2.0 / Den);   --  折回半径 r*
+         if Excess (Hi) < 0.0 then
+            Ok := False;           --  r畸 比镜头模型能到的最大半径还大
+            return;
+         end if;
+      else
+         --  一直单调:导数的最小值 m(K1 < 0 时在 s = −3K1 ÷ (10 K2) 处 = −(9K1² − 20K2) ÷ (20 K2);否则在 r = 0 处 = 1)
+         --  ⇒ 畸变后的半径 ≥ m·r ⇒ 根 ≤ r畸 ÷ m
+         Hi := (if G.K1 < 0.0 then Rd * (20.0 * G.K2) / (-Disc) else Rd);
+      end if;
+      R := Long_Float'Min (Rd, Hi);
+      loop
          declare
-            R2 : constant Long_Float := X * X + Y * Y;
-            D : constant Long_Float := 1.0 + G.K1 * R2 + G.K2 * R2 * R2;
-            Xn, Yn : Long_Float;
+            E : constant Long_Float := Excess (R);
+            S : constant Long_Float := Slope (R);
+            Newton : Boolean := S > 0.0;
          begin
-            exit when D <= 0.0;   --  这么远的地方畸变已经折回来了:停在上一步
-            Xn := Xd / D; Yn := Yd / D;
-            exit when abs (Xn - X) + abs (Yn - Y) < 1.0e-12;
-            X := Xn; Y := Yn;
+            exit when E = 0.0;
+            if E < 0.0 then
+               Lo := R;
+            else
+               Hi := R;
+            end if;
+            if Newton then
+               Rn := R - E / S;
+               exit when Rn = R;   --  牛顿一步不再改变 r:到了浮点数的分辨率
+               Newton := Rn > Lo and then Rn < Hi;
+            end if;
+            if not Newton then
+               Rn := Lo + (Hi - Lo) / 2.0;   --  走出夹住的区间(或在 r* 上导数为 0)⇒ 对半分
+               exit when not (Rn > Lo and then Rn < Hi);   --  区间只剩相邻两个浮点数
+            end if;
+            R := Rn;
          end;
+         Steps := Steps + 1;
+         if Steps >= Cap then
+            Ok := False;   --  保险:到了上限还在变,不交半路的数
+            return;
+         end if;
       end loop;
+      X := Xd * (R / Rd); Y := Yd * (R / Rd);
    end Undistort;
 
-   function Cam_Dir (G : Cam_Geo; U, V : Long_Float) return V3 is
+   function Cam_Dir (G : Cam_Geo; U, V : Long_Float; Ok : out Boolean) return V3 is
       X, Y : Long_Float;
    begin
-      Undistort (G, (U - G.Cx) / G.F, -(V - G.Cy) / G.F, X, Y);
+      Undistort (G, (U - G.Cx) / G.F, -(V - G.Cy) / G.F, X, Y, Ok);
+      if not Ok then
+         return [0.0, 0.0, 0.0];   --  没有视线
+      end if;
       declare
          N : constant Long_Float := Sqrt (X * X + Y * Y + 1.0);
       begin
          return [X / N, Y / N, -1.0 / N];
       end;
+   end Cam_Dir;
+   function Cam_Dir (G : Cam_Geo; U, V : Long_Float) return V3 is
+      Ok : Boolean;
+   begin
+      return Cam_Dir (G, U, V, Ok);
    end Cam_Dir;
 
    procedure Cam_Pixel (G : Cam_Geo; Pc : V3; U, V : out Long_Float; In_Front : out Boolean) is
@@ -163,15 +218,23 @@ package body Geom is
       V := G.Cy - G.F * Yd;
    end Cam_Pixel;
 
-   function Ray (G : Cam_Geo; P : Plug.Arm_Pose; U, V : Long_Float) return V3 is
-      Dc : constant V3 := Cam_Dir (G, U, V);
+   function Ray (G : Cam_Geo; P : Plug.Arm_Pose; U, V : Long_Float; Ok : out Boolean) return V3 is
+      Dc : constant V3 := Cam_Dir (G, U, V, Ok);
       Dw : V3 := Ap (Cam_R (G, P), Dc);
       N : constant Long_Float := Norm (Dw);
    begin
+      if not Ok then
+         return Dc;   --  零向量:没有视线
+      end if;
       for I in 0 .. 2 loop
          Dw (I) := Dw (I) / N;
       end loop;
       return Dw;
+   end Ray;
+   function Ray (G : Cam_Geo; P : Plug.Arm_Pose; U, V : Long_Float) return V3 is
+      Ok : Boolean;
+   begin
+      return Ray (G, P, U, V, Ok);
    end Ray;
 
    --  3×3 线性方程组,列主元消元
@@ -228,19 +291,22 @@ package body Geom is
    begin
       for Ob of O loop
          declare
-            D : constant V3 := Ray (G, Ob.Pose, Ob.U, Ob.V);
+            Seen : Boolean;
+            D : constant V3 := Ray (G, Ob.Pose, Ob.U, Ob.V, Seen);
             T : constant V3 := [Ob.Pose (0), Ob.Pose (1), Ob.Pose (2)];
          begin
-            for I in 0 .. 2 loop
-               for J in 0 .. 2 loop
-                  declare
-                     Pm : constant Long_Float := (if I = J then 1.0 else 0.0) - D (I) * D (J);
-                  begin
-                     A (I, J) := A (I, J) + Pm;
-                     B (I) := B (I) + Pm * T (J);
-                  end;
+            if Seen then   --  去不了畸变的那一笔没有视线,不进
+               for I in 0 .. 2 loop
+                  for J in 0 .. 2 loop
+                     declare
+                        Pm : constant Long_Float := (if I = J then 1.0 else 0.0) - D (I) * D (J);
+                     begin
+                        A (I, J) := A (I, J) + Pm;
+                        B (I) := B (I) + Pm * T (J);
+                     end;
+                  end loop;
                end loop;
-            end loop;
+            end if;
          end;
       end loop;
       return Solve3 (A, B);
@@ -261,8 +327,7 @@ package body Geom is
    --  ── 量朝向 ──
    --  ── Levenberg–Marquardt 精修(数值雅可比、正规方程高斯消元)──:参数个数由调用方定(6 = 朝向 + 点/位置;7 = 再加焦距)。
    --  Resid 把每个观测的两个像素差填进 Fill;Steps 是各参数的差分步(弧度 / 米 / 像素,极小量)。
-   --  阻尼升降的两个倍数不是门槛、不影响身体动不动,只管这次拟合怎么迭代
-   type Param_Vec is array (Natural range <>) of Long_Float;
+   --  阻尼升降的两个倍数不是门槛、不影响身体动不动,只管这次拟合怎么迭代(参数向量 Param_Vec 在 geom.ads)
    --  雅可比和残差放在堆上:标定板一起解时 2 万多条残差 × 20 多个未知数,摆在 8 MB 的栈上不稳(一份雅可比就 4 MB)
    type Big_Mat is array (Natural range <>, Natural range <>) of Long_Float;
    type Big_Mat_Ptr is access Big_Mat;
@@ -396,11 +461,14 @@ package body Geom is
    end LM_Refine;
 
    --  ── 解完之后每个参数的不确定度 ──:在解处再算一次数值雅可比 J,σ² = 残差平方和 ÷ (方程数 − 未知数),协方差 = σ² (JᵀJ)⁻¹,
-   --  Sd = 对角线开方(和参数同单位)。"解不出"从此按它判:不确定度比量本身还大 = 方程分不开这个量,而不是拍一个阈值
-   procedure Param_Sd (P : Param_Vec; N_Obs : Natural; Steps : Param_Vec;
+   --  Sd = 对角线开方(和参数同单位)。"解不出"从此按它判:不确定度比量本身还大 = 方程分不开这个量,而不是拍一个阈值。
+   --  方程数只数真的那几条(09-30):每一槽两条(u、v),Prior = 最后一槽是焦距先验,只有一条 —— 它的第二条恒为 0,原来也算进自由度,
+   --  σ² 偏小(多算 1)。真方程不比未知数多 ⇒ 全是 Long_Float'Last;没有信息的参数 = Long_Float'Last
+   procedure Param_Sd (P : Param_Vec; N_Obs : Natural; Prior : Boolean; Steps : Param_Vec;
                        Resid : access procedure (P : Param_Vec; R : out Long_Float; Fill : access procedure (I : Natural; Du, Dv : Long_Float));
                        Sd : out Param_Vec) is
       Np : constant Natural := P'Length;
+      Rows : constant Natural := (if Prior and then N_Obs > 0 then 2 * N_Obs - 1 else 2 * N_Obs);   --  真方程几条
       Rv : Big_Vec_Ptr := New_Vec (2 * N_Obs);
       Rp : Big_Vec_Ptr := New_Vec (2 * N_Obs);
       J : Big_Mat_Ptr := new Big_Mat (0 .. Integer (2 * N_Obs) - 1, 0 .. Integer (Np) - 1);
@@ -415,8 +483,8 @@ package body Geom is
       Undet : array (0 .. Np - 1) of Boolean := [others => False];   --  没有信息的参数
    begin
       Sd := [others => 0.0];
-      if Np = 0 or else 2 * N_Obs <= Np then
-         Sd := [others => Long_Float'Last];   --  方程比未知数还少:什么都定不了
+      if Np = 0 or else Rows <= Np then
+         Sd := [others => Long_Float'Last];   --  方程不比未知数多:什么都定不了
          Free_Vec (Rv); Free_Vec (Rp); Free_Mat (J);
          return;
       end if;
@@ -424,7 +492,7 @@ package body Geom is
       for I in 0 .. 2 * N_Obs - 1 loop
          Sum := Sum + Rv (I) * Rv (I);
       end loop;
-      Sigma2 := Sum / Long_Float (2 * N_Obs - Np);
+      Sigma2 := Sum / Long_Float (Rows - Np);
       for K in 0 .. Np - 1 loop
          declare
             Pp : Param_Vec := P;
@@ -499,6 +567,8 @@ package body Geom is
       end loop;
       Free_Vec (Rv); Free_Vec (Rp); Free_Mat (J);
    end Param_Sd;
+
+   function Pointing_Lost (G : Cam_Geo; F, Rot_Sd : Long_Float) return Boolean is (F * Rot_Sd >= Sqrt (G.Cx ** 2 + G.Cy ** 2));
 
    procedure Fit (G : in out Cam_Geo; O : Obs_Vectors.Vector; Ok : out Boolean) is
       N : constant Natural := Natural (O.Length);
@@ -664,6 +734,63 @@ package body Geom is
       return A (K / 2);
    end Median;
 
+   --  离群重挑的一遍(Fit_Rig、Fit_Fixed_Board 同一套,09-30):门 = 上一遍进解那些的残差中位 × 3 —— 二维残差按瑞利分布,3 倍中位 = 3.53σ,
+   --  一笔好的被踢的机会 0.2%(统计门);每一笔都按这道门重判(先前踢掉的也算,踢错的能回来)
+   procedure Reselect (Rs : Param_Vec; Skip : in out Flags; Changed : out Boolean; Kept : out Natural) is
+      Ks : Param_Vec (0 .. Rs'Length - 1) := [others => 0.0];
+      Nk : Natural := 0;
+      Med : Long_Float;
+   begin
+      for I in Rs'Range loop
+         if not Skip (I) then
+            Ks (Nk) := Rs (I); Nk := Nk + 1;
+         end if;
+      end loop;
+      Med := Median (Ks, Nk);
+      Changed := False; Kept := Nk;
+      if Med <= 0.0 then
+         return;   --  中位是 0:没有尺度,不挑
+      end if;
+      Kept := 0;
+      for I in Rs'Range loop
+         declare
+            Out_Now : constant Boolean := Rs (I) > 3.0 * Med;
+         begin
+            Changed := Changed or else Out_Now /= Skip (I);
+            Skip (I) := Out_Now;
+            if not Out_Now then
+               Kept := Kept + 1;
+            end if;
+         end;
+      end loop;
+   end Reselect;
+
+   procedure Reselect_Loop (Errs : access procedure (Rs : out Param_Vec); Solve : access procedure (Skip : Flags);
+                            Skip : in out Flags; Kept, Rounds : out Natural; How : out Reselect_End) is
+      Rs : Param_Vec (Skip'Range);
+      Changed : Boolean;
+   begin
+      Rounds := 0;
+      loop
+         Errs (Rs);
+         Reselect (Rs, Skip, Changed, Kept);
+         if not Changed then
+            How := Settled;
+            return;
+         end if;
+         if 2 * Kept < Skip'Length then   --  进解的不到一半:中位数的崩溃点(数学)
+            How := Broken;
+            return;
+         end if;
+         if Rounds >= Skip'Length then   --  保险:重解的遍数到了笔数还在变
+            How := Stuck;
+            return;
+         end if;
+         Solve (Skip);
+         Rounds := Rounds + 1;
+      end loop;
+   end Reselect_Loop;
+
    procedure Fit_Rig (G : in out Cam_Geo; O : Obs_Pt_Vectors.Vector; N_Pts : Natural; Ok : out Boolean; Used : out Natural) is
       Fit_F : constant Boolean := G.F <= 0.0;
       Use_Prior : constant Boolean := Fit_F and then G.F_Prior > 0.0 and then G.F_Prior_Sd > 0.0;
@@ -677,7 +804,7 @@ package body Geom is
       Best_Pt : Integer := -1;
       Nk : Natural := 0;
    begin
-      Ok := False; Used := 0;
+      Ok := False; Used := 0; Refits := 0;
       Why := Ada.Strings.Unbounded.To_Unbounded_String ("观测不到 4 笔");
       if N_Pts = 0 or else N < 4 then
          return;
@@ -829,47 +956,71 @@ package body Geom is
          end if;
          Resid (P, Cur, null);
          LM_Refine (P, Nr, Steps, 40, Resid'Access, Cur);
-         --  跟错的观测(仪器说看见、其实认错了)会把焦距带偏(V1F 右眼:残差 8.4 px、焦距 446 / 真 397):
-         --  每笔观测的残差比中位数大 3 倍(比例,无量纲)的踢出去,再解一遍
+         --  跟错的观测(仪器说看见、其实认错了)会把焦距带偏(V1F 右眼:残差 8.4 px、焦距 446 / 真 397):按 Reselect_Loop 踢
+         --  (同 Fit_Fixed_Board 那一套),每遍重解,踢到进解的那一批不再变为止。09-30 以前只踢一遍 —— 一遍踢不干净(自检那组每 7 笔 1 笔错 40 px:
+         --  6 笔只踢掉 5 笔,残差 4.9 px);还有一条"踢掉的不到四分之一才算离群、否则全放回"(拍的比例,错跟占三成时把明知跟错的全放回去一起解)
          declare
-            Rs : Param_Vec (0 .. Natural'Max (0, Nr - 1)) := [others => 0.0];
-            procedure Grab (I : Natural; Du, Dv : Long_Float) is
-            begin
-               if I < Nr then
-                  Rs (I) := Sqrt (Du * Du + Dv * Dv);
-               end if;
-            end Grab;
-            Med : Long_Float := 0.0;
-            Dropped : Natural := 0;
-            Rtmp : Long_Float;
+            Ne : Natural := 0;                                      --  进得了联合解的观测笔数(它那个点留着)
+            Idx : array (0 .. N - 1) of Natural := [others => 0];   --  第几笔 → 观测序号
          begin
-            Resid (P, Rtmp, Grab'Access);
-            Med := Median (Rs, Nr - (if Use_Prior then 1 else 0));
-            if Med > 0.0 then
-               declare
-                  I : Natural := 0;
+            for J in 0 .. N - 1 loop
+               if O (J).Pt < N_Pts and then Keep (O (J).Pt) then
+                  Idx (Ne) := J; Ne := Ne + 1;
+               end if;
+            end loop;
+            declare
+               Sk : Flags (0 .. Ne - 1) := [others => False];
+               Kept, Rounds : Natural;
+               How : Reselect_End;
+               --  每一笔在现在这组参数下的像素残差(全体,先前踢掉的也算;跑到相机后面 = Long_Float'Last)
+               procedure Errs (Rs : out Param_Vec) is
+                  Gt : Cam_Geo := G;
                begin
-                  for J in 0 .. N - 1 loop
-                     if O (J).Pt < N_Pts and then Keep (O (J).Pt) and then not Skip (J) then
-                        if Rs (I) > 3.0 * Med then
-                           Skip (J) := True;
-                           Dropped := Dropped + 1;
-                        end if;
-                        I := I + 1;
+                  Gt.R_Ce := Rodrigues ([P (0), P (1), P (2)]);
+                  Gt.Off := [P (3), P (4), P (5)];
+                  if Fit_F then
+                     Gt.F := P (6);
+                  end if;
+                  for E in Rs'Range loop
+                     declare
+                        Ob : constant Obs_Pt := O (Idx (E));
+                        B : constant Natural := Base + 3 * Natural (Slot (Ob.Pt));
+                        U, V : Long_Float;
+                        Front : Boolean;
+                     begin
+                        Project (Gt, Ob.Pose, [P (B), P (B + 1), P (B + 2)], U, V, Front);
+                        Rs (E) := (if Front and then Gt.F > 0.0 then Sqrt ((U - Ob.U) ** 2 + (V - Ob.V) ** 2) else Long_Float'Last);
+                     end;
+                  end loop;
+               end Errs;
+               procedure Solve (S : Flags) is
+               begin
+                  Nr := 0;
+                  for E in S'Range loop
+                     Skip (Idx (E)) := S (E);
+                     if not S (E) then
+                        Nr := Nr + 1;
                      end if;
                   end loop;
-               end;
-               if Dropped > 0 and then Dropped * 4 < Nr then   --  踢掉的不到四分之一才算离群,再多就是整体不对(比例,无量纲)
-                  Nr := Nr - Dropped;
+                  if Use_Prior then
+                     Nr := Nr + 1;   --  先验那一槽
+                  end if;
                   Resid (P, Cur, null);
                   LM_Refine (P, Nr, Steps, 40, Resid'Access, Cur);
-               else
-                  for K in Skip'Range loop
-                     Skip (K) := False;
-                  end loop;
+               end Solve;
+            begin
+               Reselect_Loop (Errs'Access, Solve'Access, Sk, Kept, Rounds, How);
+               G.Dropped := Ne - Kept;
+               Refits := Rounds;
+               if How = Broken then
+                  Why := Ada.Strings.Unbounded.To_Unbounded_String ("踢跟错的踢到只剩 " & Codec.Img (Kept) & " / " & Codec.Img (Ne)
+                                                                   & " 笔:门外的比一半还多,不是离群,是整个解不对");
+                  return;
+               elsif How = Stuck then
+                  Why := Ada.Strings.Unbounded.To_Unbounded_String ("踢跟错的重解了 " & Codec.Img (Rounds) & " 遍,进解的那一批还在变(遍数上限 = 笔数,只当保险)");
+                  return;
                end if;
-               G.Dropped := Dropped;
-            end if;
+            end;
          end;
          Resid (P, Cur, null);
          if Behind > 0 then
@@ -879,17 +1030,26 @@ package body Geom is
          declare
             Sd : Param_Vec (0 .. Np - 1);
          begin
-            Param_Sd (P, Nr, Steps, Resid'Access, Sd);
+            Param_Sd (P, Nr, Use_Prior, Steps, Resid'Access, Sd);
             G.Rot_Sd := Sqrt (Sd (0) ** 2 + Sd (1) ** 2 + Sd (2) ** 2);
             G.Off_Sd := Sqrt (Sd (3) ** 2 + Sd (4) ** 2 + Sd (5) ** 2);
             G.F_Sd := (if Fit_F then Sd (6) else 0.0);
-            --  不确定度比量本身还大 = 方程分不开它(横着挪、不转:焦距和远近绑着)⇒ 不算解出来
-            if (Fit_F and then G.F_Sd >= P (6)) or else G.Rot_Sd >= 1.0 then   --  朝向的不确定度 ≥ 1 弧度 = 根本没定(无量纲)
-               Why := Ada.Strings.Unbounded.To_Unbounded_String ("不确定度比量本身还大:焦距 " & Codec.Fmt (P (Base - 1), 1) & " ± " & Codec.Fmt (G.F_Sd, 1)
-                                                                & " px,朝向 ± " & Codec.Fmt (G.Rot_Sd, 3) & " rad,偏移 ± " & Codec.Fmt (G.Off_Sd, 3) & " 单位(残差 "
-                                                                & Codec.Fmt (Cur, 2) & " px," & Codec.Img (Nk) & " 点," & Codec.Img (Nr) & " 笔)");
-               return;
-            end if;
+            --  不确定度比量本身还大 = 方程分不开它(横着挪、不转:焦距和远近绑着)⇒ 不算解出来。
+            --  朝向按 Pointing_Lost(焦距 × 朝向 ± 比半幅对角线还大)。
+            --  报原因时印这次用的焦距:解的带 ±,给的照实说"给的"(09-30 以前不解焦距时印的是 P (5) = 偏移的 z)
+            declare
+               Fv : constant Long_Float := (if Fit_F then P (6) else G.F);
+               F_Say : constant String := (if Fit_F then "焦距 " & Codec.Fmt (P (6), 1) & " ± " & Codec.Fmt (G.F_Sd, 1) & " px"
+                                           else "焦距 " & Codec.Fmt (G.F, 1) & " px(给的,不解)");
+            begin
+               if (Fit_F and then G.F_Sd >= P (6)) or else Pointing_Lost (G, Fv, G.Rot_Sd) then
+                  Why := Ada.Strings.Unbounded.To_Unbounded_String ("不确定度比量本身还大:" & F_Say & ",朝向 ± " & Codec.Fmt (G.Rot_Sd, 3) & " rad(让投影挪 "
+                                                                   & Codec.Fmt (Fv * G.Rot_Sd, 1) & " px,半幅对角线 " & Codec.Fmt (Sqrt (G.Cx ** 2 + G.Cy ** 2), 1)
+                                                                   & " px),偏移 ± " & Codec.Fmt (G.Off_Sd, 3) & " 单位(残差 "
+                                                                   & Codec.Fmt (Cur, 2) & " px," & Codec.Img (Nk) & " 点," & Codec.Img (Nr) & " 笔)");
+                  return;
+               end if;
+            end;
             --  这套几何是无畸变针孔:焦距短到半幅宽 ÷ 焦距 > tan 60°(视场 > 120°)时针孔假设本身不成立,
             --  这样的"解"是拟合把错数据凑平的结果(G1M 2026-09-24 左眼:5 个点解出 47.8 px),不存
             if Fit_F and then G.Cx > 1.732 * P (6) then
@@ -912,15 +1072,23 @@ package body Geom is
    end Fit_Rig;
 
    --  ── 不动的眼 ──
-   function Ray_Fixed (G : Cam_Geo; U, V : Long_Float) return V3 is
-      Dc : constant V3 := Cam_Dir (G, U, V);
+   function Ray_Fixed (G : Cam_Geo; U, V : Long_Float; Ok : out Boolean) return V3 is
+      Dc : constant V3 := Cam_Dir (G, U, V, Ok);
       Dw : V3 := Ap (G.R_Ce, Dc);
       N : constant Long_Float := Norm (Dw);
    begin
+      if not Ok then
+         return Dc;   --  零向量:没有视线
+      end if;
       for I in 0 .. 2 loop
          Dw (I) := Dw (I) / N;
       end loop;
       return Dw;
+   end Ray_Fixed;
+   function Ray_Fixed (G : Cam_Geo; U, V : Long_Float) return V3 is
+      Ok : Boolean;
+   begin
+      return Ray_Fixed (G, U, V, Ok);
    end Ray_Fixed;
 
    procedure Project_Fixed (G : Cam_Geo; Pw : V3; U, V : out Long_Float; In_Front : out Boolean) is
@@ -956,18 +1124,21 @@ package body Geom is
       Gt.R_Ce := R;
       for Ob of O loop
          declare
-            D : constant V3 := Ray_Fixed (Gt, Ob.U, Ob.V);
+            Seen : Boolean;
+            D : constant V3 := Ray_Fixed (Gt, Ob.U, Ob.V, Seen);
          begin
-            for I in 0 .. 2 loop
-               for J in 0 .. 2 loop
-                  declare
-                     Pm : constant Long_Float := (if I = J then 1.0 else 0.0) - D (I) * D (J);
-                  begin
-                     A (I, J) := A (I, J) + Pm;
-                     B (I) := B (I) + Pm * Ob.Pw (J);
-                  end;
+            if Seen then   --  去不了畸变的那一笔没有视线,不进
+               for I in 0 .. 2 loop
+                  for J in 0 .. 2 loop
+                     declare
+                        Pm : constant Long_Float := (if I = J then 1.0 else 0.0) - D (I) * D (J);
+                     begin
+                        A (I, J) := A (I, J) + Pm;
+                        B (I) := B (I) + Pm * Ob.Pw (J);
+                     end;
+                  end loop;
                end loop;
-            end loop;
+            end if;
          end;
       end loop;
       return Solve3 (A, B);
@@ -1136,11 +1307,11 @@ package body Geom is
       Min_Pts : constant := 4;   --  单点法至少几个点(次数)
       Gi : Cam_Geo := G;
       Ws : array (0 .. Natural'Max (1, Ns) - 1) of Long_Float := [others => 1.0];   --  每个点的权 = 1 / 它在这只眼里的每轴像素噪声
-      Skip : array (0 .. Natural'Max (1, Ns) - 1) of Boolean := [others => False];  --  被判离群、不再进解的点
+      Skip : Flags (0 .. Ns - 1) := [others => False];   --  被判离群、不再进解的点
       Behind : Natural := 0;   --  最近一次算残差时跑到相机后面的点数
    begin
       Ok := False;
-      Rep.Scene_N := Ns; Rep.Scene_Used := 0; Rep.Scene_Rms := 0.0;
+      Rep.Scene_N := Ns; Rep.Scene_Used := 0; Rep.Scene_Rms := 0.0; Refits := 0;
       if Ns < Min_Pts then
          Why := To_Unbounded_String ("标定板不到 4 个点(" & Codec.Img (Ns) & ")");
          return;
@@ -1267,16 +1438,18 @@ package body Geom is
          Nr := Ns + (if Use_Prior then 1 else 0);
          if Start_Here then
             --  起点就在真值附近:门从粗到细 —— 先放画幅宽的 1/16(比例,无量纲;挡住的那片配成乱的,乱点散在几百像素里,门外),
-            --  解一次,再收到"门内这些点自己的像素离散"的 3 倍(倍数无量纲),来回三遍(次数)。门的尺度是这一次配点自己量的:
+            --  解一次,再收到"门内这些点自己的像素离散"的 3 倍(倍数无量纲),收到挑出来的那一批不再变为止(09-30 以前固定来回三遍,
+            --  第三遍挑出来的还在变也照样交);遍数到了点数还在变 ⇒ 解不出,照实报。门的尺度是这一次配点自己量的:
             --  转过、挡过的画面配得比标定时粗得多,按标定时的噪声挑,好点也全挑没了(X5B 2026-09-25)
             declare
                Gate : Long_Float := 0.125 * G.Cx;   --  半幅宽的八分之一 = 画幅宽的 1/16(比例,无量纲)
             begin
-               for Round in 1 .. 3 loop
+               loop
                   declare
                      Gt : constant Cam_Geo := Cam_Of (P);
                      Dropped : Natural := 0;
                      Sum : Long_Float := 0.0;
+                     Changed : Boolean := False;
                   begin
                      for S in 0 .. Ns - 1 loop
                         declare
@@ -1286,6 +1459,7 @@ package body Geom is
                         begin
                            Project_Fixed (Gt, Scene (S).Pw, U, V, Front);
                            E := (if Front then Sqrt ((U - Scene (S).U) ** 2 + (V - Scene (S).V) ** 2) else Long_Float'Last);
+                           Changed := Changed or else (E > Gate) /= Skip (S);
                            Skip (S) := E > Gate;
                            if Skip (S) then
                               Dropped := Dropped + 1;
@@ -1298,59 +1472,80 @@ package body Geom is
                         Why := To_Unbounded_String ("从现在的位姿起步,门 " & Codec.Fmt (Gate, 1) & " px 内的点不到 4 个(" & Codec.Img (Ns - Dropped) & "/" & Codec.Img (Ns) & ")");
                         return;
                      end if;
+                     exit when Refits > 0 and then not Changed;   --  收过的门挑出来的还是上一遍解的那一批 ⇒ 定了
+                     if Refits >= Ns then
+                        Why := To_Unbounded_String ("从现在的位姿起步,门从粗到细收了 " & Codec.Img (Refits)
+                                                    & " 遍,挑出来的那一批还在变(遍数上限 = 点数,只当保险)");
+                        return;
+                     end if;
                      Nr := Ns - Dropped + (if Use_Prior then 1 else 0);
                      Resid (P, Cur, null);
                      LM_Refine (P, Nr, Steps, 100, Resid'Access, Cur);   --  100 = 迭代次数上限(次数)
                      Gate := 3.0 * Sqrt (Sum / Long_Float (Ns - Dropped));
+                     Refits := Refits + 1;
                   end;
                end loop;
             end;
          end if;
          Resid (P, Cur, null);
          LM_Refine (P, Nr, Steps, 100, Resid'Access, Cur);   --  100 = 迭代次数上限(次数)
-         --  离群的点踢掉再解,来回三遍(次数):加权残差比进解的那些的中位数大 3 倍(比例,无量纲)的不要,每遍都从全体重挑(先前踢错的能回来)。
-         --  不设"踢的不到四分之一才算"那条(手上标记的规矩):板上天然混着一小撮远处、桌下配错的点,它们在各停里错得一样、交叉核不出来,
-         --  一次最小二乘就被它们拽走(G2E 离线:327 个点里 14 个配错,不踢 ⇒ 焦距 −5%、位置差 3 cm;连踢三遍 ⇒ 14 个全踢掉)
-         declare
-            Rs : Param_Vec (0 .. Natural'Max (0, Ns - 1)) := [others => 0.0];
-            Dropped : Natural := 0;
-         begin
-            for Round in 1 .. (if Start_Here then 0 else 3) loop   --  从现位姿起步的已经按门挑过了
-               declare
+         --  离群的点按 Reselect_Loop 踢(同 Fit_Rig 那一套;从现位姿起步的已经按门挑过了):加权残差比进解的那些的中位大 3 倍的不要,
+         --  每遍都从全体重挑(先前踢错的能回来)、重解,踢到进解的那一批不再变为止(09-30 以前固定三遍)。
+         --  不设"踢的不到四分之一才算":板上天然混着一小撮远处、桌下配错的点,它们在各停里错得一样、交叉核不出来,
+         --  一次最小二乘就被它们拽走(G2E 离线:327 个点里 14 个配错,不踢 ⇒ 焦距 −5%、位置差 3 cm;连踢三遍 ⇒ 14 个全踢掉);
+         --  进解的不到一半 ⇒ 是整个解不对(Broken),剩下不到 4 个点 ⇒ 解不出,都照实报
+         if not Start_Here then
+            declare
+               Sk : Flags (Skip'Range) := Skip;
+               Kept, Rounds : Natural;
+               How : Reselect_End;
+               procedure Errs (Rs : out Param_Vec) is
                   Gt : constant Cam_Geo := Cam_Of (P);
-                  Kept : Param_Vec (0 .. Natural'Max (0, Ns - 1)) := [others => 0.0];
-                  Nk : Natural := 0;
-                  Med : Long_Float;
                begin
-                  for S in 0 .. Ns - 1 loop
+                  for S in Rs'Range loop
                      declare
                         U, V : Long_Float;
                         Front : Boolean;
                      begin
                         Project_Fixed (Gt, Scene (S).Pw, U, V, Front);
                         Rs (S) := (if Front then Ws (S) * Sqrt ((U - Scene (S).U) ** 2 + (V - Scene (S).V) ** 2) else Long_Float'Last);
-                        if not Skip (S) then
-                           Kept (Nk) := Rs (S); Nk := Nk + 1;
-                        end if;
                      end;
                   end loop;
-                  Med := Median (Kept, Nk);
-                  exit when Med <= 0.0;
-                  Dropped := 0;
-                  for S in 0 .. Ns - 1 loop
-                     Skip (S) := Rs (S) > 3.0 * Med;
-                     if Skip (S) then
-                        Dropped := Dropped + 1;
+               end Errs;
+               procedure Solve (S : Flags) is
+               begin
+                  Skip := S;
+                  Nr := (if Use_Prior then 1 else 0);   --  先验那一槽
+                  for K in S'Range loop
+                     if not S (K) then
+                        Nr := Nr + 1;
                      end if;
                   end loop;
-                  exit when Ns - Dropped < Min_Pts;
-                  Nr := Ns - Dropped + (if Use_Prior then 1 else 0);
                   Resid (P, Cur, null);
                   LM_Refine (P, Nr, Steps, 100, Resid'Access, Cur);   --  100 = 迭代次数上限(次数)
-               end;
-            end loop;
-            G.Dropped := Dropped;
-         end;
+               end Solve;
+            begin
+               Reselect_Loop (Errs'Access, Solve'Access, Sk, Kept, Rounds, How);
+               Refits := Rounds;
+               if How = Broken then
+                  Why := To_Unbounded_String ("踢离群的点踢到只剩 " & Codec.Img (Kept) & " / " & Codec.Img (Ns) & " 个:门外的比一半还多,不是离群,是整个解不对");
+                  return;
+               elsif How = Stuck then
+                  Why := To_Unbounded_String ("踢离群的点重解了 " & Codec.Img (Rounds) & " 遍,进解的那一批还在变(遍数上限 = 点数,只当保险)");
+                  return;
+               elsif Kept < Min_Pts then
+                  Why := To_Unbounded_String ("踢离群的点踢到只剩 " & Codec.Img (Kept) & " 个,比单点法要的点数还少");
+                  return;
+               end if;
+               Skip := Sk;
+            end;
+         end if;
+         G.Dropped := 0;
+         for S of Skip loop
+            if S then
+               G.Dropped := G.Dropped + 1;
+            end if;
+         end loop;
          Resid (P, Cur, null);
          if Behind > 0 then
             Why := To_Unbounded_String ("解出来还有 " & Codec.Img (Behind) & " 个板上的点跑到相机后面(" & Px_Note (P) & ")");
@@ -1376,17 +1571,25 @@ package body Geom is
                end if;
             end loop;
             Span := Sqrt ((Hi (0) - Lo (0)) ** 2 + (Hi (1) - Lo (1)) ** 2 + (Hi (2) - Lo (2)) ** 2);
-            Param_Sd (P, Nr, Steps, Resid'Access, Sd);
+            Param_Sd (P, Nr, Use_Prior, Steps, Resid'Access, Sd);
             G.Rot_Sd := Sqrt (Sd (0) ** 2 + Sd (1) ** 2 + Sd (2) ** 2);
             G.Pos_Sd := Sqrt (Sd (3) ** 2 + Sd (4) ** 2 + Sd (5) ** 2);
             G.F_Sd := (if Fit_F then Sd (6) else 0.0);
-            --  位置的不确定度比板铺开的量程还大、或焦距的不确定度比焦距还大 = 方程分不开 ⇒ 不算解出来
-            --  (V1I / G1K 2026-09-24:相机解到 2.8 m / 120 m 外、残差却只有零点几像素,就是这种"解")
-            if G.Pos_Sd >= Span or else (Fit_F and then G.F_Sd >= P (6)) or else G.Rot_Sd >= 1.0 then
-               Why := To_Unbounded_String ("不确定度比量本身还大:位置 ± " & Codec.Fmt (G.Pos_Sd, 3) & " 单位(板铺开 " & Codec.Fmt (Span, 3) & " 单位),焦距 "
-                                           & Codec.Fmt (P (Np - 1), 1) & " ± " & Codec.Fmt (G.F_Sd, 1) & " px,朝向 ± " & Codec.Fmt (G.Rot_Sd, 3) & " rad(" & Px_Note (P) & ")");
-               return;
-            end if;
+            --  位置的不确定度比板铺开的量程还大、或焦距的不确定度比焦距还大、或朝向定不住(Pointing_Lost,同 Fit_Rig)= 方程分不开 ⇒ 不算解出来
+            --  (V1I / G1K 2026-09-24:相机解到 2.8 m / 120 m 外、残差却只有零点几像素,就是这种"解")。
+            --  报原因时印这次用的焦距:解的带 ±,给的照实说"给的"(09-30 以前不解焦距时印的是 P (5) = 相机位置的 z)
+            declare
+               Fv : constant Long_Float := (if Fit_F then P (6) else G.F);
+               F_Say : constant String := (if Fit_F then "焦距 " & Codec.Fmt (P (6), 1) & " ± " & Codec.Fmt (G.F_Sd, 1) & " px"
+                                           else "焦距 " & Codec.Fmt (G.F, 1) & " px(给的,不解)");
+            begin
+               if G.Pos_Sd >= Span or else (Fit_F and then G.F_Sd >= P (6)) or else Pointing_Lost (G, Fv, G.Rot_Sd) then
+                  Why := To_Unbounded_String ("不确定度比量本身还大:位置 ± " & Codec.Fmt (G.Pos_Sd, 3) & " 单位(板铺开 " & Codec.Fmt (Span, 3) & " 单位)," & F_Say
+                                              & ",朝向 ± " & Codec.Fmt (G.Rot_Sd, 3) & " rad(让投影挪 " & Codec.Fmt (Fv * G.Rot_Sd, 1) & " px,半幅对角线 "
+                                              & Codec.Fmt (Sqrt (G.Cx ** 2 + G.Cy ** 2), 1) & " px)(" & Px_Note (P) & ")");
+                  return;
+               end if;
+            end;
          end;
          Why := Null_Unbounded_String;
          Px_Rms (P, Rep.Scene_Rms, Rep.Scene_Used);
@@ -1430,6 +1633,8 @@ package body Geom is
    function Board_Rms (G : Cam_Geo; Pts : Scene_Pt_Vectors.Vector; Gate : Long_Float) return Long_Float is
       Es : Param_Vec (0 .. Natural'Max (1, Natural (Pts.Length)) - 1) := [others => 0.0];
       Ne : Natural := 0;
+      --  二维高斯误差离原点的距离服从瑞利分布:均方根 σ√2 ÷ 中位 σ√(2 ln 2) = 1/√ln2(统计换算;09-30 以前写成 1.2,差 0.1%)
+      Rms_Per_Median : constant Long_Float := 1.0 / Sqrt (Log (2.0));
    begin
       for P of Pts loop
          if P.U >= 0.0 and then P.V >= 0.0 then
@@ -1445,7 +1650,7 @@ package body Geom is
             end;
          end if;
       end loop;
-      return (if Ne > 0 then 1.2 * Median (Es, Ne) else 0.0);   --  误差中位 → 均方根(换算,无量纲)
+      return (if Ne > 0 then Rms_Per_Median * Median (Es, Ne) else 0.0);   --  误差中位 → 均方根
    end Board_Rms;
 
    procedure Check_Fixed (G : in out Cam_Geo; Scene : Scene_Pt_Vectors.Vector; Now : Scene_Pt_Vectors.Vector; Best : in out Fixed_Best; Rep : out Fixed_Check;
@@ -1572,7 +1777,7 @@ package body Geom is
       if (if Base_Now >= 0 then 2 * Base_Now else 2 * Rep.Consistent_Now) < Rep.Consistent and then 4 * Rep.Consistent >= Best.All_N and then Rep.Shift_Px > Rep.Gate then
          Rep.Moved := True;
          Gn.F := G.F; Gn.F_Meas := G.F_Meas; Gn.F_Sd := G.F_Sd;   --  焦距照旧
-         --  以后按新解配得多细来判:新位姿解释得了的那些点(新门内)像素误差的中位 × 1.2(换算,无量纲:二维高斯误差中位 ≈ 均方根 ÷ 1.2)。
+         --  以后按新解配得多细来判:新位姿解释得了的那些点(新门内)像素误差的中位 × 1/√ln2(Board_Rms:二维高斯误差的均方根 ÷ 中位)。
          --  不拿解的时候那份没加权的均方根:加权挑点留下了三角得不准的点,它们的大误差把均方根抬到 1.31 px(标定时 0.16),门跟着放到 3.9 px(X5E2 2026-09-26)
          declare
             Gate_New : constant Long_Float := Long_Float'Max (3.0 * Long_Float'Max (1.0e-9, G.Rms), 3.0 * Turn_Sd);
@@ -1617,12 +1822,13 @@ package body Geom is
       for Vw of Views loop
          declare
             O : constant V3 := Cam_Pos (G, Vw.Pose);
-            D : constant V3 := Ray (G, Vw.Pose, Vw.U, Vw.V);
+            Seen : Boolean;
+            D : constant V3 := Ray (G, Vw.Pose, Vw.U, Vw.V, Seen);
             Dn : constant Long_Float := D (0) * N (0) + D (1) * N (1) + D (2) * N (2);
             H : constant Long_Float := (P0 (0) - O (0)) * N (0) + (P0 (1) - O (1)) * N (1) + (P0 (2) - O (2)) * N (2);
             T : Plane_Tip;
          begin
-            if Dn /= 0.0 and then H / Dn > 0.0 then   --  朝着面、交在眼前
+            if Seen and then Dn /= 0.0 and then H / Dn > 0.0 then   --  有视线(去得了畸变)、朝着面、交在眼前
                T.S := H / Dn;
                T.Sd := Sd_Plane / abs Dn;
                T.Pw := [O (0) + T.S * D (0), O (1) + T.S * D (1), O (2) + T.S * D (2)];
@@ -1899,23 +2105,27 @@ package body Geom is
       A : M3 := [others => [others => 0.0]];
       B : V3 := [others => 0.0];
       P : V3 := [others => 0.0];
+      Used : Natural := 0;   --  真有视线的几条(零向量 = 那个像素去不了畸变,没有视线:当成一条会把交点往它的起点拽)
    begin
       Ok := False; Spread := 0.0;
-      if Natural (Rays.Length) < 2 then
+      for R of Rays loop
+         if Norm (R.D) > 0.0 then
+            Used := Used + 1;
+            for I in 0 .. 2 loop
+               for J in 0 .. 2 loop
+                  declare
+                     Pm : constant Long_Float := (if I = J then 1.0 else 0.0) - R.D (I) * R.D (J);
+                  begin
+                     A (I, J) := A (I, J) + Pm;
+                     B (I) := B (I) + Pm * R.O (J);
+                  end;
+               end loop;
+            end loop;
+         end if;
+      end loop;
+      if Used < 2 then   --  一条视线交不出点
          return P;
       end if;
-      for R of Rays loop
-         for I in 0 .. 2 loop
-            for J in 0 .. 2 loop
-               declare
-                  Pm : constant Long_Float := (if I = J then 1.0 else 0.0) - R.D (I) * R.D (J);
-               begin
-                  A (I, J) := A (I, J) + Pm;
-                  B (I) := B (I) + Pm * R.O (J);
-               end;
-            end loop;
-         end loop;
-      end loop;
       --  视线全平行时 A 退化(行列式为零),交点没有意义
       declare
          Det : constant Long_Float :=
@@ -1929,16 +2139,18 @@ package body Geom is
       end;
       P := Solve3 (A, B);
       for R of Rays loop
-         declare
-            W : constant V3 := [P (0) - R.O (0), P (1) - R.O (1), P (2) - R.O (2)];
-            T : constant Long_Float := W (0) * R.D (0) + W (1) * R.D (1) + W (2) * R.D (2);
-            Perp : constant V3 := [W (0) - T * R.D (0), W (1) - T * R.D (1), W (2) - T * R.D (2)];
-         begin
-            Spread := Long_Float'Max (Spread, Norm (Perp));
-            if T <= 0.0 then
-               return P;      --  交点在某只眼的背后 ⇒ 不是它,Ok 留 False
-            end if;
-         end;
+         if Norm (R.D) > 0.0 then
+            declare
+               W : constant V3 := [P (0) - R.O (0), P (1) - R.O (1), P (2) - R.O (2)];
+               T : constant Long_Float := W (0) * R.D (0) + W (1) * R.D (1) + W (2) * R.D (2);
+               Perp : constant V3 := [W (0) - T * R.D (0), W (1) - T * R.D (1), W (2) - T * R.D (2)];
+            begin
+               Spread := Long_Float'Max (Spread, Norm (Perp));
+               if T <= 0.0 then
+                  return P;      --  交点在某只眼的背后 ⇒ 不是它,Ok 留 False
+               end if;
+            end;
+         end if;
       end loop;
       Ok := True;
       return P;

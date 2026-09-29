@@ -34,8 +34,9 @@ package Geom is
    type Cam_Geo is record
       Valid : Boolean := False;        --  相机朝向量过了
       F, Cx, Cy : Long_Float := 0.0;   --  焦距(像素)、主点。焦距:身体给了就用;没给(官方 RoboDojo 观测就没有)就在量朝向时一起解出来
-      --  镜头径向畸变(2026-09-26):归一化平面上畸变后的点 = 理想的点 × (1 + K1 r² + K2 r⁴)。0 = 理想针孔(仿真就是);真机的镜头都有,
-      --  腕眼 + 不动的眼 + 板一起解时按板上铺满画面的几百个点解出来(Refine_Board)。投影 / 视线全走 Project / Ray / Cam_Dir,不许在别处按针孔自己算
+      --  镜头径向畸变(2026-09-26):归一化平面上畸变后的点 = 理想的点 × (1 + K1 r² + K2 r⁴)。0 = 理想针孔(仿真就是);真机的镜头都有。
+      --  原来按板上铺满画面的几百个点解(Refine_Board);09-30 那一段随死代码删了,现在只从存下的几何文件装回,驱动里没有哪一段再解它。
+      --  投影 / 视线全走 Project / Ray / Cam_Dir,不许在别处按针孔自己算
       K1, K2 : Long_Float := 0.0;
       K1_Sd : Long_Float := 0.0;       --  K1 的不确定度(一起解时从 JᵀJ 算出;0 = 没解)
       F_Meas : Long_Float := 0.0;      --  量朝向时顺带解出来的焦距(和给的那份对账用;没给时它就是 F)
@@ -77,8 +78,13 @@ package Geom is
    function Angle_Between (P, Q : Plug.Arm_Pose) return Long_Float;   --  两个位姿的姿态差(弧度)
    function Cam_R (G : Cam_Geo; P : Plug.Arm_Pose) return M3;         --  相机 → 世界 = R_e · R_ce
    function Cam_Pos (G : Cam_Geo; P : Plug.Arm_Pose) return V3;       --  相机中心在世界里 = 手的位置 + R_e · Off
-   function Ray (G : Cam_Geo; P : Plug.Arm_Pose; U, V : Long_Float) return V3;   --  世界系里的单位视线
-   function Cam_Dir (G : Cam_Geo; U, V : Long_Float) return V3;                    --  相机系里的单位视线(去掉畸变;驱动的相机系 z 朝后 ⇒ 前方 -1)
+   --  相机系里的单位视线(去掉畸变;驱动的相机系 z 朝后 ⇒ 前方 -1)。这个像素去不了畸变 ⇒ Ok = False,返回零向量(不是一个方向):
+   --  畸变后离主点比镜头模型在折回半径处能到的还远,没有哪条视线落在这儿(09-30,见 geom.adb 的 Undistort)。
+   --  不带 Ok 的那一份同样返回零向量;Meet、Hit_Plane、Tips_On_Plane、Triangulate 都不拿零向量当视线
+   function Cam_Dir (G : Cam_Geo; U, V : Long_Float; Ok : out Boolean) return V3;
+   function Cam_Dir (G : Cam_Geo; U, V : Long_Float) return V3;
+   function Ray (G : Cam_Geo; P : Plug.Arm_Pose; U, V : Long_Float; Ok : out Boolean) return V3;   --  世界系里的单位视线(去不了畸变同 Cam_Dir)
+   function Ray (G : Cam_Geo; P : Plug.Arm_Pose; U, V : Long_Float) return V3;
    procedure Cam_Pixel (G : Cam_Geo; Pc : V3; U, V : out Long_Float; In_Front : out Boolean);   --  相机系的点 → 像素(加上畸变)
    --  几条视线的最小二乘交点(相机原点 = 手的位置;只走平移时相机在手上的偏移对结果没影响)
    function Triangulate (G : Cam_Geo; O : Obs_Vectors.Vector) return V3;
@@ -86,8 +92,26 @@ package Geom is
    procedure Project (G : Cam_Geo; P : Plug.Arm_Pose; Pw : V3; U, V : out Long_Float; In_Front : out Boolean);
    --  量相机朝向:手做几次【平移】,同一个不动的东西在画面里的像素 ⇒ 解朝向 + 那东西的位置(+ 焦距,当 G.F 没给时)。盲搜初值 + 最小二乘。
    procedure Fit (G : in out Cam_Geo; O : Obs_Vectors.Vector; Ok : out Boolean);
+   --  ── 两种标定(Fit_Rig、Fit_Fixed_Board)共用的几样(导出给自检)──
+   type Param_Vec is array (Natural range <>) of Long_Float;
+   --  朝向定没定住(09-30 换掉"朝向 ± ≥ 1 弧度"):朝向差 Rot_Sd(弧度)一阶让投影挪 焦距 F × Rot_Sd 像素;挪得比半幅对角线
+   --  (主点到画幅角;画幅 = 两倍主点,驱动的约定)还远 = 连它朝哪看都定不住 ⇒ True。F 和画幅都是量的:长焦的眼门自动收紧、广角的放宽
+   function Pointing_Lost (G : Cam_Geo; F, Rot_Sd : Long_Float) return Boolean;
+   --  离群重挑(09-30,Fit_Rig 和 Fit_Fixed_Board 并成一套)。Reselect = 一遍:Rs = 每一笔在现在这个解下的残差(全体,先前踢掉的也算;
+   --  在眼后这类算不出的 = Long_Float'Last),门 = 上一遍进解那些的残差中位 × 3(统计门),从全体重挑(先前踢错的能回来);中位是 0 ⇒ 不挑。
+   --  Changed = 这一遍进解的和上一遍不一样,Kept = 这一遍进解几笔
+   type Flags is array (Natural range <>) of Boolean;
+   procedure Reselect (Rs : Param_Vec; Skip : in out Flags; Changed : out Boolean; Kept : out Natural)
+     with Pre => Rs'First = Skip'First and then Rs'Last = Skip'Last;
+   --  Reselect_Loop = 挑到不再变:Errs 按现在的解填 Rs,Solve 按 Skip 重解;每遍 Errs → Reselect,变了就 Solve 再来。
+   --  Settled = 进解的那一批不再变;Broken = 进解的不到全体一半(过了中位数的崩溃点 1/2:一半以上都在门外就不是"离群",是整个解不对);
+   --  Stuck = 重解的遍数到了笔数还在变(上限只当保险,碰到照实报)。Rounds = 重解了几遍
+   type Reselect_End is (Settled, Broken, Stuck);
+   procedure Reselect_Loop (Errs : access procedure (Rs : out Param_Vec); Solve : access procedure (Skip : Flags);
+                            Skip : in out Flags; Kept, Rounds : out Natural; How : out Reselect_End);
    --  手上的眼,多点一起解(2026-09-24):朝向 R_Ce、相机偏移 Off、焦距(没给就一起解)、每个点的世界位置。
-   --  横着挪只给 焦距/远近 的比;转动的停让焦距和远近分开;转动下近处的点让 Off 分得出来。观测不足 4 停的点不进;Used = 进了几个点
+   --  横着挪只给 焦距/远近 的比;转动的停让焦距和远近分开;转动下近处的点让 Off 分得出来。观测不足 4 停的点不进;Used = 进了几个点。
+   --  跟错的观测按 Reselect_Loop 踢到不再变(Broken / Stuck ⇒ 解不出);不确定度比量本身还大(焦距 ± 比焦距大、Pointing_Lost)⇒ 解不出
    procedure Fit_Rig (G : in out Cam_Geo; O : Obs_Pt_Vectors.Vector; N_Pts : Natural; Ok : out Boolean; Used : out Natural);
    --  ── 不动的眼 ──:它看见我身上一个【世界位置已知】的点(指尖:手的位姿读数 + 量过的指尖偏置)落在画面哪儿
    type Mark is record
@@ -95,13 +119,16 @@ package Geom is
       U, V : Long_Float := 0.0;
    end record;
    package Mark_Vectors is new Ada.Containers.Vectors (Natural, Mark);
-   function Ray_Fixed (G : Cam_Geo; U, V : Long_Float) return V3;        --  世界系单位视线,从 G.Pos 出发
+   function Ray_Fixed (G : Cam_Geo; U, V : Long_Float; Ok : out Boolean) return V3;   --  世界系单位视线,从 G.Pos 出发(去不了畸变同 Cam_Dir)
+   function Ray_Fixed (G : Cam_Geo; U, V : Long_Float) return V3;
    procedure Project_Fixed (G : Cam_Geo; Pw : V3; U, V : out Long_Float; In_Front : out Boolean);
    --  量不动的眼:几次看见指尖在哪(世界位置 + 像素)⇒ 解它的位置和朝向。盲搜初值 + 最小二乘,和 Fit 同一套。
    procedure Fit_Fixed (G : in out Cam_Geo; O : Mark_Vectors.Vector; Ok : out Boolean);
    package V3_Vectors is new Ada.Containers.Vectors (Natural, V3);
-   --  上一次 Fit_Rig / Fit_Fixed_Rig 没解出来的原因(解出来时是空);开机日志原样打出来,不猜
+   --  上一次 Fit_Rig / Fit_Fixed_Board 没解出来的原因(解出来时是空);开机日志原样打出来,不猜
    Why : Ada.Strings.Unbounded.Unbounded_String;
+   --  上一次 Fit_Rig / Fit_Fixed_Board 挑点重解了几遍才定下来(离群重挑 / 从现位姿起步时门从粗到细;记账,同 Why)
+   Refits : Natural := 0;
    --  不动的眼给手上的一个点做的标记解出来的那个点(手系,米):哪条臂、它看见几瓣手指时的那个点、用了几笔、这些笔的像素残差
    type Tip_Class is record
       Arm, Kind : Natural := 0;
@@ -186,7 +213,8 @@ package Geom is
    --  往返:编出来的那半边只有 8% 在 1 px 内(往返中位 3.75 px),看得见的 87%
    Trip_Px : constant := 1.0;
    function Round_Trip_Ok (Qu, Qv, Bu, Bv : Long_Float) return Boolean;   --  问的点 (Qu, Qv),配回来落在 (Bu, Bv)(< 0 = 配不回来)
-   --  这只不动的眼按板配得多细:点(给的像素)按位姿投回去的像素误差,门以内的取中位 × 1.2(换算,无量纲:二维高斯误差中位 ≈ 均方根 ÷ 1.2)。
+   --  这只不动的眼按板配得多细:点(给的像素)按位姿投回去的像素误差,门以内的取中位 × 1/√ln2 = 1.2011(换算:二维高斯误差离原点的距离服从瑞利分布,
+   --  中位 = σ√(2 ln 2)、均方根 = σ√2,两者之比正好 1/√ln2;09-30 以前写成 1.2,差 0.1%)。
    --  开机标完、每次重标完都按它定核对的细门(09-27 V1B41:开机那份原来用解的时候的均方根,几个坏点把它抬到 2.48 px、按真值只差 0.33 px,细门放到 7.4 px);
    --  门以内一个都没有 ⇒ 0
    function Board_Rms (G : Cam_Geo; Pts : Scene_Pt_Vectors.Vector; Gate : Long_Float) return Long_Float;
@@ -263,10 +291,13 @@ package Geom is
       Hand_Rms : Long_Float := 0.0;
    end record;
    --  不动的眼按标定板解(2026-09-25):相机在世界里的朝向 + 位置、焦距(没给就解)。板上的点世界位置已知 ⇒ 单点法(盲搜 + 精修)起步,
-   --  再按每个点自己的噪声加权精修(Scene_Var:配点噪声 ⊕ 三角的不确定度投进这只眼);加权残差超过中位 3 倍的踢掉再解(倍数无量纲)。
-   --  视场界(焦距 ≥ 半幅宽 / √3)、不确定度界(位置 ± 比板铺开的量程还大、焦距 ± 比焦距还大 = 分不开)同手上的眼。板不到 4 个点 ⇒ 解不出
-   --  Start_Here = 从 G 现在的位姿起步(不盲搜):挑点按每个点自己的预测噪声的 3 倍(倍数无量纲)——起点就在真值附近时这条门和挡住多少无关;
-   --  从零盲搜时起点离得远,只能按全体残差中位的 3 倍挑(超过一半是乱点就失灵)
+   --  再按每个点自己的噪声加权精修(Scene_Var:配点噪声 ⊕ 三角的不确定度投进这只眼);加权残差按 Reselect_Loop 踢到不再变(同 Fit_Rig 那一套;
+   --  Broken / Stuck / 剩下不到 4 个点 ⇒ 解不出)。
+   --  视场界(焦距 ≥ 半幅宽 / √3)、不确定度界(位置 ± 比板铺开的量程还大、焦距 ± 比焦距还大 = 分不开、Pointing_Lost)同手上的眼。
+   --  板不到 4 个点 ⇒ 解不出
+   --  Start_Here = 从 G 现在的位姿起步(不盲搜):门从粗到细 —— 第一遍画幅宽的 1/16,以后每遍 = 上一遍门内误差均方根的 3 倍,
+   --  收到挑出来的那一批不再变(遍数到了点数还在变 ⇒ 解不出,照实报)——起点就在真值附近时这条门和挡住多少无关;
+   --  从零盲搜时起点离得远,只能按中位的 3 倍挑(超过一半是乱点就失灵 ⇒ Broken,照实报)
    procedure Fit_Fixed_Board (G : in out Cam_Geo; Scene : Scene_Pt_Vectors.Vector; Rep : in out Fixed_Report; Ok : out Boolean; Start_Here : Boolean := False);
    --  手上的点按"落不落在它自己那只眼的某条瓣视线上"来认(2026-09-24):不动的眼已经解好(Fixed);O = 它每一笔里每一瓣手指的尖(Pose = 那一停手的位姿);
    --  这条臂自己那只眼里每一瓣的尖在手系里是一条视线(起点 Ray_O,单位方向 Ray_D (k))。每个尖和每条视线:两条空间直线求最近点,视线上那个最近点投回不动的眼,
@@ -282,6 +313,7 @@ package Geom is
    function Hit_Plane (Origin, Dir, P0, N : V3; Ok : out Boolean) return V3;
    --  ── 几条视线同一时刻交在哪 ──:每条视线 = 世界系里的起点 + 单位方向,来自哪只眼都行(不动的眼、任何一只手上的眼)。
    --  两只眼同时看见 ⇒ 距离当场出来,东西动不动都一样;只有一只眼 ⇒ 交不出来(Ok = False),调用方得靠自己挪、并如实说前提是它没动。
+   --  方向是零向量的(那个像素去不了畸变,没有视线,见 Cam_Dir)不算一条
    type Sight is record
       O, D : V3 := [others => 0.0];
    end record;
