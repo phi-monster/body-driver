@@ -23,6 +23,14 @@ package Geom is
       Kind : Natural := 0;   --  不动的眼给指尖做的标记:这一笔里它看见这只手的手指分成几瓣(和 Pt 一起定"手上哪个点");别的观测不用,0
    end record;
    package Obs_Pt_Vectors is new Ada.Containers.Vectors (Natural, Obs_Pt);
+   --  一瓣手指碰东西的那一截(相机系、世界单位,碰桌面量的;09-29 起存 —— 接触集的手按每一瓣的尖和它那一截的截面来):
+   --  Tip = 这一瓣的尖;Wide / Thin = 尖那一小截在自己那只眼里看得见的两个跨度(像素 × 深 ÷ 焦距):宽的那个 = 指肚宽,窄的那个 = 看得见的厚
+   --  (手指背后还有多厚不预先量:往前伸、合拢时被挡住就知道,记进来)
+   type Lobe_Geo is record
+      Tip : V3 := [others => 0.0];
+      Wide, Thin : Long_Float := 0.0;
+   end record;
+   package Lobe_Geo_Vectors is new Ada.Containers.Vectors (Natural, Lobe_Geo);
    type Cam_Geo is record
       Valid : Boolean := False;        --  相机朝向量过了
       F, Cx, Cy : Long_Float := 0.0;   --  焦距(像素)、主点。焦距:身体给了就用;没给(官方 RoboDojo 观测就没有)就在量朝向时一起解出来
@@ -46,6 +54,8 @@ package Geom is
       Tip_Touch : Boolean := False;    --  指尖是碰桌面量的(2026-09-26 起的量法;旧文件里按头顶眼交的不算)
       Tip : V3 := [others => 0.0];     --  指尖中点在相机系(米)
       Gap : Long_Float := 0.0;         --  张开时两指尖间距(米)
+      Lobes : Lobe_Geo_Vectors.Vector; --  每一瓣手指的尖和尖那一截的截面(碰桌面量的;空 = 没量)
+      Tip_Sd : Long_Float := 0.0;      --  尖的位置误差(碰指尖几下一起解的不确定度,各瓣各维里最大的;世界单位)
       Stride : Long_Float := 0.0;      --  长着这只眼的那条臂一条命令能走多远还走得到(米;开机按阶梯探出来的最大一档,0 = 没量)
       Stride_Rot : Long_Float := 0.0;  --  同上,转:一条命令能转多远还转得到(弧度;开机按阶梯探,0 = 没量)
       --  不长在任何胳膊上的眼(头顶眼):它在世界里的位置和朝向,由身体看着【自己的手】挪出来(Fit_Fixed)。

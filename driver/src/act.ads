@@ -21,6 +21,7 @@ with Sinew;
 with Runtime;
 with Monitor;
 with Contact;
+with Contact.Grasp;
 package Act is
    --  🔴 脑写的结局词 → 身体的判法。**只有这一处**。
    --  以前它散在两个局部函数里(Outcome → 字符串 → Until_Kind),中间那一跳把 lost / free / refused
@@ -222,6 +223,14 @@ package Act is
       P, W : Geom.V3 := [others => 0.0];
    end record;
    package Wall_Vectors is new Ada.Containers.Vectors (Natural, Wall_Mark);
+   --  一件东西和这只身体之间量到的摩擦(接触集重写 09-29):合上、抬一点它跟着走 ⇒ 这一组最坏要的摩擦它给得起(下限往上走);
+   --  没跟着走 ⇒ 这一组按量到的法向要的摩擦它给不起(上限往下走)。挑下手处按它们,不再"这一处拉黑、换下一个"
+   type Grip_Mu is record
+      Name : Ada.Strings.Unbounded.Unbounded_String;
+      Lb : Long_Float := 0.0;
+      Ub : Long_Float := Long_Float'Last;
+   end record;
+   package Grip_Mu_Vectors is new Ada.Containers.Vectors (Natural, Grip_Mu);
    --  不动的眼一笔合空标记里它看见的手指像素(2026-09-26,V1"头顶眼按指尖"的量法:碰出来的指尖投进它眼里,离这片像素最近多远)
    type Px2 is record
       U, V : Natural := 0;
@@ -373,9 +382,7 @@ package Act is
       --  合上时交出去的那个接触集(手里东西的接触点 + 锥);拿住之后锥放开(拿住 = 摩擦够,这就是身体量 μ 的办法)
       Held_Set : Contact.Set;
       Held_Set_Valid : Boolean := False;
-      --  这一集里合过又没拿住的那些落点(中心,世界系):同一处不再试 —— 那是量出来的"这儿滑",不是猜
-      Tried : Contact.V3_Vectors.Vector;
-      Tried_W : Floats;                      --  那一把的段宽:离滑过的落点不到一个段宽的候选算同一处
+      Grip_Mus : Grip_Mu_Vectors.Vector;     --  每件东西量到的摩擦上下限(见 Grip_Mu)
       Walls : Wall_Vectors.Vector;           --  这一集里各条臂横着被顶住过的地方(见 Wall_Mark)
       No_Reach_Arm : Integer := -1;          --  这一集里"它身上一段都在够不着那侧"的那条臂(-1 = 没有):下次选手绕开它
       Fingers_Aimed : Boolean := False;   --  上一段"到它上方"末尾已把手指指向它躺的面 ⇒ 接下来贴上去的那一段不再为了看它而转手
@@ -442,6 +449,9 @@ package Act is
    --  从一档转动(Notch)起每次翻倍,反解位置还差不到 Tol_P、朝向还差不到 Tol_R ⇒ 转得到;第一次转不到就停、取上一档;最多到 π
    --  (转动向量过 π 是反方向的小转动,纯几何)。没有运动学 ⇒ 0(量不了)
    function Kin_Turn_Reach (Arm : Natural; P0 : Plug.Arm_Pose; Notch, Tol_P, Tol_R : Long_Float) return Long_Float;
+   --  接触集(09-29 重写):量出来的手在记下的形状上挑一组下手处(导出只为自检)
+   procedure Plan_Contact (C : in out Context; F : Plug.Frame; Arm, Cam : Natural; Name : Unbounded_String;
+                           Pick : out Contact.Grasp.Candidate; Note : out Unbounded_String; Ok : out Boolean);
    procedure Geo_Boot_Stride (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);
    procedure Round (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);
 end Act;

@@ -531,6 +531,124 @@ begin
                 & " 个位姿;手指厚 4 mm ⇒ 第 1 名离重心 " & (if Fd_T.Is_Empty then "-" else Codec.Fmt (Fd_T (0).Com_Off, 4)) & "(要 < 0.0075)");
       end;
    end;
+   --  🔴 顶面补侧壁(Contact.Surface.Walls_To_Support,09-29):8 × 8 个顶面点(间距 1 cm、离面 3 cm;格子边长两个间距 ⇒ 4 × 4 格)
+   --  ⇒ 只从轮廓那一圈 12 格的 48 个点往下补(每个 2 层:2 cm、1 cm 高),中间 4 格的 16 个不补;面斜着放(法向不是 z,点的格子和函数自己的格子转开了)
+   --  ⇒ 中间那 16 个照样不补、补出来的点都在顶面和面之间。牙:整块往下填(原来的 Extrude_To_Support)⇒ 中间也补了
+   declare
+      Top, Out1, Out2 : Contact.V3_Vectors.Vector;
+      Ok_Z, Ok_T : Boolean := True;
+      Nt : constant Geom.V3 := [0.0, 0.6, 0.8];
+      Et : constant Geom.V3 := [1.0, 0.0, 0.0];
+      Ft : constant Geom.V3 := [0.0, 0.8, -0.6];   --  和 Nt、Et 都垂直
+      Top2 : Contact.V3_Vectors.Vector;
+      function Inner (A, B : Long_Float) return Boolean is (A > 0.02 and then A < 0.06 and then B > 0.02 and then B < 0.06);
+   begin
+      for I in 0 .. 7 loop
+         for J in 0 .. 7 loop
+            Top.Append (Geom.V3'[0.005 + 0.01 * Long_Float (I), 0.005 + 0.01 * Long_Float (J), 0.03]);
+            Top2.Append (Geom.V3'[(0.005 + 0.01 * Long_Float (I)) * Et (0) + (0.005 + 0.01 * Long_Float (J)) * Ft (0) + 0.03 * Nt (0),
+                                  (0.005 + 0.01 * Long_Float (I)) * Et (1) + (0.005 + 0.01 * Long_Float (J)) * Ft (1) + 0.03 * Nt (1),
+                                  (0.005 + 0.01 * Long_Float (I)) * Et (2) + (0.005 + 0.01 * Long_Float (J)) * Ft (2) + 0.03 * Nt (2)]);
+         end loop;
+      end loop;
+      Contact.Surface.Walls_To_Support (Top, [0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 0.01, Out1);
+      for K in 64 .. Natural (Out1.Length) - 1 loop
+         if not (abs (Out1 (K) (2) - 0.02) < 1.0e-9 or else abs (Out1 (K) (2) - 0.01) < 1.0e-9) or else Inner (Out1 (K) (0), Out1 (K) (1)) then
+            Ok_Z := False;
+         end if;
+      end loop;
+      Contact.Surface.Walls_To_Support (Top2, Nt, [0.0, 0.0, 0.0], 0.01, Out2);
+      for K in 64 .. Natural (Out2.Length) - 1 loop
+         declare
+            Q : constant Geom.V3 := Out2 (K);
+            Hn : constant Long_Float := Q (0) * Nt (0) + Q (1) * Nt (1) + Q (2) * Nt (2);   --  离面多高
+            Ae : constant Long_Float := Q (0) * Et (0) + Q (1) * Et (1) + Q (2) * Et (2);
+            Af : constant Long_Float := Q (0) * Ft (0) + Q (1) * Ft (1) + Q (2) * Ft (2);
+         begin
+            --  格子和点阵转开以后,边上那一圈最多厚到一格的对角(2√2 cm)⇒ 只核离边 3 cm 以上的正中那几个不补
+            if Hn <= 0.0 or else Hn >= 0.03 or else (Ae > 0.03 and then Ae < 0.05 and then Af > 0.03 and then Af < 0.05) then
+               Ok_T := False;
+            end if;
+         end;
+      end loop;
+      Check (Natural (Out1.Length) = 64 + 96 and then Ok_Z and then Ok_T and then Natural (Out2.Length) > 64,
+             "顶面补侧壁:8 × 8 个顶面点离面 3 cm ⇒ 只从轮廓那一圈 48 个往下补两层(一共 " & Codec.Img (Natural (Out1.Length)) & " 个,要 160),中间 16 个不补;"
+             & "面斜着放 ⇒ " & Codec.Img (Natural (Out2.Length)) & " 个,正中那几个照样不补、补的都在顶面和面之间");
+   end;
+   --  🔴 接触集接进执行层(Act.Plan_Contact,09-29):一根 2 cm 宽、12 cm 长(比张口 9 cm 长:顺着长边夹不下)、离面 3 cm 的条沿 x 躺在面上(顶面点间距 2 mm),
+   --  x5 那样的两瓣手(眼系两个尖 (±0.045, −0.013, −0.091),指肚宽 1 cm、看得见的厚 2 mm)⇒ 挑出的那一组:合拢方向沿量宽度的 y(不顺着长边 x),
+   --  两处接触落在条的两侧(|y| ≈ 1 cm)、法向朝里;把条转 90° 沿 y 放 ⇒ 合拢方向跟着转到 x。身体文件里没有每一瓣的尖 ⇒ 照实说要从零量一次
+   declare
+      Cx : Act.Context;
+      Fx : Plug.Frame;
+      Gx : Geom.Cam_Geo;
+      Pick : Contact.Grasp.Candidate;
+      Nt : Unbounded_String;
+      Okp : Boolean;
+      procedure Any_Reach (Arm : Natural; Pose : Plug.Arm_Pose; Pos_Err, Rot_Err : out Long_Float) is
+         pragma Unreferenced (Arm, Pose);
+      begin
+         Pos_Err := 0.0; Rot_Err := 0.0;
+      end Any_Reach;
+      procedure Bar (Along_X : Boolean) is
+      begin
+         Cx.Sil_Pts := Contact.V3_Vectors.Empty_Vector;
+         for I in 0 .. 60 loop
+            for J in 0 .. 10 loop
+               declare
+                  A : constant Long_Float := -0.06 + 0.002 * Long_Float (I);
+                  B : constant Long_Float := -0.01 + 0.002 * Long_Float (J);
+               begin
+                  Cx.Sil_Pts.Append (Geom.V3'(if Along_X then [0.5 + A, B, 0.03] else [0.5 + B, A, 0.03]));
+               end;
+            end loop;
+         end loop;
+         Cx.Sil_Valid := True; Cx.Sil_Name := To_Unbounded_String ("bar"); Cx.Sil_Cam := 1; Cx.Sil_N := [0.0, 0.0, 1.0];
+         Cx.Sil_P0 := Cx.Sil_Pts.First_Element; Cx.Sil_Pitch := 0.002; Cx.Sil_Err := 0.0005;
+      end Bar;
+      function Jaw_World (P : Contact.Grasp.Candidate) return Geom.V3 is (Geom.Ap (P.R, [1.0, 0.0, 0.0]));
+      Jx1, Jx2 : Geom.V3;
+      Sides_Ok : Boolean := False;
+      Ok1, Ok2 : Boolean := False;
+   begin
+      Gx.Valid := True; Gx.F := 400.0; Gx.Cx := 320.0; Gx.Cy := 240.0; Gx.Gap := 0.09;
+      Gx.Tip := [0.0, -0.013, -0.091]; Gx.Tip_Valid := True; Gx.Tip_Touch := True; Gx.Tip_Sd := 0.0005;
+      Gx.Lobes.Append (Geom.Lobe_Geo'(Tip => [0.045, -0.013, -0.091], Wide => 0.01, Thin => 0.002));
+      Gx.Lobes.Append (Geom.Lobe_Geo'(Tip => [-0.045, -0.013, -0.091], Wide => 0.01, Thin => 0.002));
+      Cx.Geo.Append (Geom.No_Geo); Cx.Geo.Append (Gx);
+      Cx.Map.Amp := Bytes.F64_Vectors.To_Vector (0.0, 6);
+      Cx.Map.Amp.Replace_Element (0, 0.001); Cx.Map.Amp.Replace_Element (3, 0.0025);
+      Cx.Touch_Valid := True; Cx.Touch_Pt := [0.0, 0.0, 0.0]; Cx.Touch_N := [0.0, 0.0, 1.0];
+      Plug.Set_Reach (Any_Reach'Unrestricted_Access);
+      Bar (True);
+      Act.Plan_Contact (Cx, Fx, 0, 1, To_Unbounded_String ("bar"), Pick, Nt, Okp);
+      Ok1 := Okp;
+      Jx1 := Jaw_World (Pick);
+      if Okp and then Natural (Pick.Touches.Length) = 2 then
+         Sides_Ok := abs (abs Pick.Touches (0).P (1) - 0.01) < 0.003 and then abs (abs Pick.Touches (1).P (1) - 0.01) < 0.003
+           and then Pick.Touches (0).P (1) * Pick.Touches (1).P (1) < 0.0
+           and then Pick.Touches (0).N (1) * Pick.Touches (0).P (1) < 0.0 and then Pick.Touches (1).N (1) * Pick.Touches (1).P (1) < 0.0;
+      end if;
+      Bar (False);
+      Act.Plan_Contact (Cx, Fx, 0, 1, To_Unbounded_String ("bar"), Pick, Nt, Okp);
+      Ok2 := Okp;
+      Jx2 := Jaw_World (Pick);
+      --  没有每一瓣的尖(老身体文件)
+      declare
+         G2 : Geom.Cam_Geo := Cx.Geo (1);
+         Nt3 : Unbounded_String;
+         Ok3 : Boolean;
+      begin
+         G2.Lobes.Clear;
+         Cx.Geo.Replace_Element (1, G2);
+         Act.Plan_Contact (Cx, Fx, 0, 1, To_Unbounded_String ("bar"), Pick, Nt3, Ok3);
+         Plug.Set_Reach (null);
+         Check (Ok1 and then Sides_Ok and then abs Jx1 (1) > 0.95 and then Ok2 and then abs Jx2 (0) > 0.95 and then not Ok3
+                and then Index (Nt3, "measured once from scratch") > 0,
+                "接触集接进执行层:沿 x 躺的 2 cm 宽的条 ⇒ 合拢方向在世界里 (" & Codec.Fmt (Jx1 (0), 2) & "," & Codec.Fmt (Jx1 (1), 2) & "," & Codec.Fmt (Jx1 (2), 2)
+                & ")(要沿 y)、两处接触在条两侧、法向朝里 · 条转 90° ⇒ (" & Codec.Fmt (Jx2 (0), 2) & "," & Codec.Fmt (Jx2 (1), 2) & ")(要沿 x)· 没有每一瓣的尖 ⇒ 照实说");
+      end;
+   end;
    --  🔴 到过的范围(Jointboot:到过的范围 + 往外一步、记尽头、碰上东西不记、越过尽头删掉;09-29 owner"已知范围,越用越大"):合成的 6 关节胳膊装上
    --  (同上面运动学那条的几何),假身体只按关节命令走 —— 第 4 个关节真尽头 0.9 弧度(反解不知道);到过的范围一开始每个关节 ±0.3、往外一步 0.2。
    --  ① 要去一个第 4 个关节得转到 1.3 的位姿:每条命令都只到"到过的范围 + 一步"里,手到了那儿范围长了才再往前(重发的旗子 Held_Back);
@@ -2912,14 +3030,20 @@ begin
       Fresh.Append (G);   --  前半段装回的那份:还没有指尖、步幅
       G.Tip := [0.87, -0.24, -1.75]; G.Tip_Valid := True; G.Tip_Touch := True; G.Gap := 1.766;
       G.Stride := 0.888; G.Stride_Rot := 0.161;
+      G.Lobes.Append (Geom.Lobe_Geo'(Tip => [0.0123, -0.2345, -1.6875], Wide => 0.1932, Thin => 0.0317));
+      G.Lobes.Append (Geom.Lobe_Geo'(Tip => [-0.0071, -0.2468, 1.7011], Wide => 0.2011, Thin => 0.0299));
+      G.Tip_Sd := 0.00417;
       Stored.Append (G);
       Geom.Save (Path & ".geo.json", Stored);
       Act.Geo_Install (F1, C1, Path, Fresh, No_Board, [0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 0.001, Ref, Keep_Tips => True);
       Act.Geo_Install (F1, C2, Path, Fresh, No_Board, [0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 0.001, Ref, Keep_Tips => False);
       Check (C1.Geo (0).Tip_Valid and then abs (C1.Geo (0).Gap - 1.766) < 1.0e-4 and then abs (C1.Geo (0).Stride - 0.888) < 1.0e-4
-             and then abs (C1.Geo (0).Stride_Rot - 0.161) < 1.0e-4 and then not C2.Geo (0).Tip_Valid and then C2.Geo (0).Stride = 0.0,
+             and then abs (C1.Geo (0).Stride_Rot - 0.161) < 1.0e-4 and then not C2.Geo (0).Tip_Valid and then C2.Geo (0).Stride = 0.0
+             and then Natural (C1.Geo (0).Lobes.Length) = 2 and then C2.Geo (0).Lobes.Is_Empty and then abs (C1.Geo (0).Tip_Sd - 0.00417) < 1.0e-6
+             and then abs (C1.Geo (0).Lobes (1).Tip (2) - 1.7011) < 1.0e-6 and then abs (C1.Geo (0).Lobes (0).Wide - 0.1932) < 1.0e-6
+             and then abs (C1.Geo (0).Lobes (1).Thin - 0.0299) < 1.0e-6,
              "装回身体文件:存的指尖、张口、步幅(" & Codec.Fmt (C1.Geo (0).Stride, 3) & " / 转 " & Codec.Fmt (C1.Geo (0).Stride_Rot, 3)
-             & ")都并回来,开机不重量 · 从零量时一样都不并");
+             & ")、每一瓣的尖和截面(" & Codec.Img (Natural (C1.Geo (0).Lobes.Length)) & " 瓣)都并回来,开机不重量 · 从零量时一样都不并");
       --  有板 ⇒ 东西躺的面装上就是板的那张(S1A1:没登记,不动的眼看见的东西被按指尖高度放到了空中);没板 ⇒ 不登记
       Act.Geo_Install (F1, C3, Path, Fresh, One_Board, [0.0, 0.0, 0.765], [0.0, 0.0, 1.0], 0.001, Ref, Keep_Tips => True);
       Check (C3.Touch_Valid and then abs (C3.Touch_Pt (2) - 0.765) < 1.0e-9 and then abs (C3.Touch_N (2) - 1.0) < 1.0e-9 and then not C3.Touch_Fresh
@@ -5510,49 +5634,14 @@ begin
       end;
    end;
 
-   --  ===== 下手点生成器(②a):每一条排序规矩都是 2026-08 真抓失败逼出来的,单元测试逐条搬回(commit ef10664 contact-gen) =====
+   --  ===== 接触集的几何零件(②a):吸盘、环抓、转正(八月的单元测试;那张排序规矩单 Candidates 和它的焊点 09-29 删了,由 Contact.Grasp 替掉) =====
    declare
       package Ct renames Contact;
       package Cg renames Contact.Gen;
-      use type Cg.Refusal;
       use type Cg.Handoff_Kind;
       use type Cg.No_Hand_Kind;
       use type Ct.Gap_Kind;
       use Ada.Numerics.Long_Elementary_Functions;
-      --  八月测试台的观测参数(分辨率 + 当年拿来当参数的三个身体量),不是这具身体的数
-      Grid_Aug : constant Cg.Grid := (Bands => 6, Dirs => 16, Min_Pts => 6, Jaw_H_M => 0.03, Min_Above_M => 0.005, Finger_W_M => 0.02, Gap_M => 0.01);
-      function Hand_Of (Src : Cg.Span_Source; M : Long_Float) return Cg.Gripper is
-        ((Jaw => (Src, M), Reach_Lo => 0.15, Reach_Hi => 0.75, Base_X => 0.0, Base_Y => 0.0));
-      --  一根竖着的实心方杆,按 5 mm 采样(40 层)。早先只放四个角点 / 只放四个侧面(零厚度壳),两次都是夹具假,不是算法错
-      function Rod (W, H, At_X : Long_Float) return Ct.V3_Vectors.Vector is
-         V : Ct.V3_Vectors.Vector;
-         N : constant Natural := Natural'Max (2, Natural (Long_Float'Rounding (200.0 * W)));
-      begin
-         for I in 0 .. 39 loop
-            for A in 0 .. N loop
-               for B in 0 .. N loop
-                  V.Append (Ct.V3'([At_X - 0.5 * W + W * Long_Float (A) / Long_Float (N), -0.5 * W + W * Long_Float (B) / Long_Float (N), H * Long_Float (I) / 39.0]));
-               end loop;
-            end loop;
-         end loop;
-         return V;
-      end Rod;
-      --  剪刀:两片 9 mm 厚的刃,相距 7 cm,实心采样
-      function Scissors return Ct.V3_Vectors.Vector is
-         V : Ct.V3_Vectors.Vector;
-         Blades : constant array (1 .. 2) of Long_Float := [-0.035, 0.035];
-      begin
-         for I in 0 .. 59 loop
-            for Bl of Blades loop
-               for A in 0 .. 5 loop
-                  for B in 0 .. 3 loop
-                     V.Append (Ct.V3'([0.4 - 0.015 + 0.03 * Long_Float (A) / 5.0, Bl - 0.0045 + 0.009 * Long_Float (B) / 3.0, 0.01 + 0.02 * Long_Float (I) / 59.0]));
-                  end loop;
-               end loop;
-            end loop;
-         end loop;
-         return V;
-      end Scissors;
       --  一根竖着的圆柱(半径 3 cm、高 8 cm),顶面是平的;Half_Only = 只留角度在 [90°, 270°] 的那半圈壳(开口朝 +x)
       function Cylinder (With_Top, Half_Only : Boolean) return Ct.V3_Vectors.Vector is
          V : Ct.V3_Vectors.Vector;
@@ -5584,233 +5673,7 @@ begin
          end if;
          return V;
       end Cylinder;
-      Cs : Cg.Cand_Vectors.Vector;
-      Why : Cg.Refusal;
-      Ok : Boolean;
-      T : Long_Float;
    begin
-      T := Cg.Thickness_At (Scissors, 0.4, -0.035, 0.02, Ada.Numerics.Pi, 0.01, 0.02, Ok);
-      Check (Ok and then abs (T - 0.079) < 0.004, "②a·料厚:在一片刃上横着合爪,跨的是两片刃的外缘 7.9 cm,不是单片刃的 9 mm(读到 " & Codec.Fmt (T, 4) & ")");
-      T := Cg.Thickness_At (Scissors, 0.4, -0.035, 0.02, 0.5 * Ada.Numerics.Pi, 0.01, 0.02, Ok);
-      Check (Ok and then abs (T - 0.030) < 0.004, "②a·料厚:顺着刃的长边合爪,同一条上只有那一片刃,跨 3 cm(读到 " & Codec.Fmt (T, 4) & ")");
-      T := Cg.Thickness_At (Scissors, 0.4, 0.0, 0.02, Ada.Numerics.Pi, 0.01, 0.02, Ok);
-      Check (Ok and then abs (T - 0.079) < 0.004, "②a·料厚:站在两片刃中间的缝上照样跨两片刃 —— 爪子的中心在缝里不等于指头在缝里");
-      T := Cg.Thickness_At (Scissors, 1.0, 0.0, 0.02, Ada.Numerics.Pi, 0.01, 0.02, Ok);
-      Check (not Ok, "②a·料厚:那一条上根本没有料 ⇒ 说没有,不是 0(合到空气里和夹住零毫米是两件事)");
-      T := Cg.Thickness_At (Scissors, 0.4, -0.035, 0.5, Ada.Numerics.Pi, 0.01, 0.02, Ok);
-      Check (not Ok, "②a·料厚:高度不对(物体在 z 0.01–0.03,问 z 0.5)同样是没有料");
-      declare
-         Pts : Ct.V3_Vectors.Vector := Rod (0.02, 0.10, 0.35);
-      begin
-         --  又高又浅的一根细刺(0.14–0.20 m),沿指头方向只有一条:这条测的是「下限 vs 最大化」本身
-         for I in 0 .. 39 loop
-            for A in 0 .. 2 loop
-               for B in 0 .. 2 loop
-                  Pts.Append (Ct.V3'([0.35 + 0.004 * Long_Float (A) / 2.0 - 0.002, 0.004 * Long_Float (B) / 2.0 - 0.002, 0.14 + 0.06 * Long_Float (I) / 39.0]));
-               end loop;
-            end loop;
-         end loop;
-         Cg.Candidates (Pts, Hand_Of (Cg.Measured, 0.088), 0.0, Grid_Aug, Cs, Why);
-         Check (Why = Cg.Fine and then not Cs.Is_Empty and then Cs (0).Pos (2) < 0.12 and then Cs (0).Depth_M > Grid_Aug.Finger_W_M
-                and then Cs (0).Above_Support_M >= Grid_Aug.Min_Above_M,
-                "②a·离桌面高是下限不是最大化:又深又匀的矮杆排在又高又薄的细刺前面(2026-08-12 鞋腰 vs 鞋口那圈软皮)");
-      end;
-      declare
-         Pts : Ct.V3_Vectors.Vector := Rod (0.03, 0.10, 0.30);
-         Com_X : Long_Float := 0.0;
-         Any_Com, Any_Tilt : Boolean := False;
-      begin
-         Pts.Append (Rod (0.03, 0.10, 0.42));
-         for P of Pts loop
-            Com_X := Com_X + P (0) / Long_Float (Pts.Length);
-         end loop;
-         Cg.Candidates (Pts, Hand_Of (Cg.Measured, 0.088), 0.0, Grid_Aug, Cs, Why);
-         for C of Cs loop
-            if C.Com_Offset_M > 1.0e-6 then
-               Any_Com := True;
-            end if;
-            if C.Face_Tilt_Rad > 0.0 then
-               Any_Tilt := True;
-            end if;
-         end loop;
-         Check (Why = Cg.Fine and then abs (Cs.First_Element.Pos (0) - Com_X) <= abs (Cs.Last_Element.Pos (0) - Com_X) and then Any_Com and then Any_Tilt,
-                "②a·抓点离重心远的排在后面(管「提起来会不会转出去」:剪刀抓在手柄圆环上,重量全在刀刃那头),而且面歪、离重心两格真的被算了");
-      end;
-      declare
-         Pts : Ct.V3_Vectors.Vector := Rod (0.02, 0.2, 0.35);
-         Corner_Deeper : Boolean := False;
-      begin
-         Pts.Append (Rod (0.12, 0.2, 0.60));
-         Cg.Candidates (Pts, Hand_Of (Cg.Measured, 0.088), 0.0, Grid_Aug, Cs, Why);
-         --  八月原话:大块上排得最前的那一条(角上的薄片)不许比杆还深;大块中间那些放不下的宽段更深,但它们垫底,不在这一条里
-         for C of Cs loop
-            if abs (C.Pos (0) - 0.60) < 0.06 then
-               Corner_Deeper := C.Depth_M > Cs (0).Depth_M;
-               exit;
-            end if;
-         end loop;
-         for I in 0 .. Natural'Min (2, Natural (Cs.Length) - 1) loop
-            Put_Line ("     · 第 " & Codec.Img (I) & " 名:x=" & Codec.Fmt (Cs (I).Pos (0), 3) & " z=" & Codec.Fmt (Cs (I).Pos (2), 3) & " 宽=" & Codec.Fmt (Cs (I).Width_M, 4)
-                      & " 深=" & Codec.Fmt (Cs (I).Depth_M, 3) & " 歪=" & Codec.Fmt (Cs (I).Face_Tilt_Rad, 3) & " 离心=" & Codec.Fmt (Cs (I).Com_Offset_M, 3)
-                      & " 夹得下=" & Cs (I).Within_Jaw'Image & " 够高=" & Cs (I).Off_Ok'Image & " 面正=" & Cs (I).Tilt_Ok'Image & " 近心=" & Cs (I).Com_Ok'Image);
-         end loop;
-         Check (Why = Cg.Fine and then Cs (0).Within_Jaw and then abs (Cs (0).Pos (0) - 0.35) < 0.03 and then Cs (0).Depth_M > Grid_Aug.Finger_W_M and then not Corner_Deeper,
-                "②a·又深又匀的杆胜过大块的尖角(旧排序按余量最大 = 最窄,把最尖的角排最前:抓取率 19/48 → 26/96)");
-      end;
-      Cg.Candidates (Rod (0.02, 0.2, 0.4), Hand_Of (Cg.Unknown, 0.0), 0.0, Grid_Aug, Cs, Why);
-      Check (Why = Cg.Jaw_Span_Unknown, "②a·爪张开度没量过就拒绝,不许猜一个数出来(本仓最贵的一次手填就在这个量上)");
-      Cg.Candidates (Rod (0.02, 0.2, 0.4), Hand_Of (Cg.Declared, 0.088), 0.0, Grid_Aug, Cs, Why);
-      declare
-         All_Stamped : Boolean := Why = Cg.Fine and then not Cs.Is_Empty;
-      begin
-         for C of Cs loop
-            if not C.Jaw_Declared then
-               All_Stamped := False;
-            end if;
-         end loop;
-         Check (All_Stamped, "②a·声明值能用,但每一条候选都背着「这是声明值」的标记,出处不许在中途消失");
-      end;
-      Cg.Candidates (Rod (0.12, 0.2, 0.4), Hand_Of (Cg.Measured, 0.088), 0.0, Grid_Aug, Cs, Why);
-      declare
-         First_Bad : Integer := -1;
-         Last_Good : Integer := -1;
-      begin
-         for I in 0 .. Natural (Cs.Length) - 1 loop
-            if not Cs (I).Within_Jaw and then First_Bad < 0 then
-               First_Bad := I;
-            end if;
-            if Cs (I).Within_Jaw then
-               Last_Good := I;
-            end if;
-         end loop;
-         Check (Why = Cg.Fine and then First_Bad >= 0 and then Last_Good >= 0 and then Last_Good < First_Bad,
-                "②a·放不下的段只排最后、永远不删(仓里唯一那条可抓性规矩:不许拿钳口张开度当阈值筛物体)");
-      end;
-      declare
-         Pts : Ct.V3_Vectors.Vector := Rod (0.02, 0.2, 0.4);
-         Mid_Air, Any_Far : Boolean := False;
-      begin
-         Pts.Append (Rod (0.02, 0.2, 1.6));
-         Cg.Candidates (Pts, Hand_Of (Cg.Measured, 0.088), 0.0, Grid_Aug, Cs, Why);
-         for C of Cs loop
-            if not (abs (C.Pos (0) - 0.4) < 0.05 or else abs (C.Pos (0) - 1.6) < 0.05) then
-               Mid_Air := True;
-            end if;
-            if not C.Reachable then
-               Any_Far := True;
-            end if;
-         end loop;
-         Check (Why = Cg.Fine and then not Mid_Air, "②a·两根相距 1.2 m 的杆,落点一条都不落在半空(先分块再量宽度;单元测试自己逮出来的真 bug)");
-         Check (Cs (0).Reachable and then Any_Far, "②a·够不到的排在够得到的后面,但留在表里让上面看得见");
-      end;
-      Cg.Candidates (Rod (0.02, 0.2, 0.4), Hand_Of (Cg.Measured, 0.088), 0.0, Grid_Aug, Cs, Why);
-      Check (Why = Cg.Fine and then Cs.First_Element.Above_Support_M >= Cs.Last_Element.Above_Support_M,
-             "②a·贴着支撑面的那一层排在后面:爪子伸不到它下面(平躺薄件合爪停在 0,指间是空的)");
-      declare
-         V : Ct.V3_Vectors.Vector;
-      begin
-         for I in 0 .. 9 loop
-            for J in 0 .. 9 loop
-               V.Append (Ct.V3'([0.4 + 0.005 * Long_Float (I), 0.005 * Long_Float (J), 0.0]));
-            end loop;
-         end loop;
-         Cg.Candidates (V, Hand_Of (Cg.Measured, 0.088), 0.0, Grid_Aug, Cs, Why);
-         Check (Why = Cg.Flat, "②a·一张平面切不出层 ⇒ 拒绝并说 Flat,不许静默返回空表");
-      end;
-      --  一个圈(外径 6 cm、壁厚 6 mm):候选里既有"夹住环壁"(Single,~6 mm),也有"从里面撑开"(Inside,洞的跨度),两种都在,种类标得出来
-      declare
-         Ring : Ct.V3_Vectors.Vector;
-         Walls, Holes : Natural := 0;
-         use type Cg.Pair_Kind;
-      begin
-         for I in 0 .. 71 loop
-            for R in 0 .. 2 loop
-               for K in 0 .. 3 loop
-                  declare
-                     A : constant Long_Float := 2.0 * Ada.Numerics.Pi * Long_Float (I) / 72.0;
-                     Rr : constant Long_Float := 0.024 + 0.003 * Long_Float (R);
-                  begin
-                     Ring.Append (Ct.V3'([0.4 + Rr * Cos (A), Rr * Sin (A), 0.01 + 0.01 * Long_Float (K) / 3.0]));
-                  end;
-               end loop;
-            end loop;
-         end loop;
-         Cg.Candidates (Ring, Hand_Of (Cg.Measured, 0.088), 0.0, Grid_Aug, Cs, Why);
-         for C of Cs loop
-            if C.Kind = Cg.Single and then C.Width_M < 0.012 then
-               Walls := Walls + 1;
-            elsif C.Kind = Cg.Inside and then C.Width_M > 0.03 then
-               Holes := Holes + 1;
-            end if;
-         end loop;
-         Check (Why = Cg.Fine and then Walls > 0 and then Holes > 0,
-                "②a·圈:夹住环壁(Single,壁厚)和从里面撑开(Inside,洞的跨度)两种候选都生出来、种类标得出来(壁 " & Codec.Img (Walls) & " · 洞 " & Codec.Img (Holes) & ")");
-      end;
-      Cg.Candidates (Scissors, Hand_Of (Cg.Measured, 0.088), 0.0, Grid_Aug, Cs, Why);
-      declare
-         Narrow : Boolean := False;
-      begin
-         for C of Cs loop
-            if C.Width_M < 0.02 then
-               Narrow := True;
-            end if;
-         end loop;
-         Check (Why = Cg.Fine and then Narrow, "②a·剪刀:包围盒说「整体 8 cm 能夹」,表面点量到每片刃自己的 9 mm —— 找得到刃上那条窄段");
-      end;
-      declare
-         V : Ct.V3_Vectors.Vector;
-         Gp : constant Cg.Gripper := (Jaw => (Cg.Measured, 0.08), Reach_Lo => 0.05, Reach_Hi => 1.0, Base_X => 0.0, Base_Y => -0.4);
-         Gd : constant Cg.Grid := (Bands => 4, Dirs => 12, Min_Pts => 8, Jaw_H_M => 0.02, Min_Above_M => 0.001, Finger_W_M => 0.02, Gap_M => 0.01);
-         S : Ct.Set;
-         H : Cg.Handoff;
-         Pick : Natural := 0;
-      begin
-         for I in 0 .. 11 loop
-            for J in 0 .. 11 loop
-               for K in 0 .. 5 loop
-                  V.Append (Ct.V3'([-0.03 + 0.06 * Long_Float (I) / 11.0, -0.02 + 0.04 * Long_Float (J) / 11.0, 0.90 + 0.05 * Long_Float (K) / 5.0]));
-               end loop;
-            end loop;
-         end loop;
-         Cg.Candidates (V, Gp, 0.90, Gd, Cs, Why);
-         Check (Why = Cg.Fine and then not Cs.Is_Empty, "②a·一块方料给得出候选:" & Cg.Img (Why));
-         for I in 0 .. Natural (Cs.Length) - 1 loop
-            if Cs (I).Reachable then
-               Pick := I;
-               exit;
-            end if;
-         end loop;
-         declare
-            C : constant Cg.Candidate := Cs (Pick);
-         begin
-            Cg.To_Set (C, 0.5, Ct.Still (C.Pos), 0.002, S, H);
-            Check (H.Kind = Cg.Fine and then Natural (S.Points.Length) = 2 and then Ct.Check (S, False).Kind = Ct.Fine,
-                   "②a→接触集:中心 + 宽度 + 合爪方向 ⇒ 两个相对的接触点,四格自检就过:" & Cg.Img (H));
-            Check (abs (Ct.Norm ([S.Points (1).Pos (0) - S.Points (0).Pos (0), S.Points (1).Pos (1) - S.Points (0).Pos (1), S.Points (1).Pos (2) - S.Points (0).Pos (2)]) - C.Width_M) < 1.0e-12
-                   and then Ct.Dot (S.Points (0).Push.Axis, S.Points (1).Push.Axis) < -0.999 and then S.Has_Approach
-                   and then abs (S.Points (0).Push.Half_Angle - Arctan (0.5)) < 1.0e-12,
-                   "②a→接触集:两点间距 = 段宽,两个锥朝里且相反,进场方向由看得见空隙的这一层填,锥 = 摩擦锥 atan(μ)(不是 Face_Tilt:那是要多大,不是有多大)");
-         end;
-      end;
-      declare
-         Bad : Cg.Candidate;
-         S : Ct.Set;
-         H : Cg.Handoff;
-      begin
-         Bad.Pos := [0.0, 0.0, 0.95];
-         Bad.Width_M := 0.04;
-         Bad.Face_Tilt_Rad := 0.60;
-         Cg.To_Set (Bad, 0.5, Ct.Still ([0.0, 0.0, 0.95]), 0.002, S, H);
-         Check (H.Kind = Cg.Would_Slip and then abs (H.Need_Rad - 0.60) < 1.0e-12 and then abs (H.Have_Rad - Arctan (0.5)) < 1.0e-12 and then H.Need_Rad > H.Have_Rad,
-                "②a→接触集:两个面歪了 34.4° 而 μ=0.5 的摩擦锥只有 26.6° ⇒ 会滑,拒绝并点名差多少:" & Cg.Img (H));
-         Cg.To_Set (Bad, 1.0, Ct.Still ([0.0, 0.0, 0.95]), 0.002, S, H);
-         Check (H.Kind = Cg.Fine, "②a→接触集:μ=1.0 的摩擦锥 45° > 34.4° ⇒ 同一把就交得出去了 —— 差别只在 μ,不在几何");
-         Cg.To_Set (Bad, 0.0, Ct.Still ([0.0, 0.0, 0.95]), 0.002, S, H);
-         Check (H.Kind = Cg.Mu_Unknown, "②a→接触集:μ 没量过就不许瞎填 ⇒ MuUnknown");
-         Cg.To_Set_Least_Mu (Bad, Ct.Still ([0.0, 0.0, 0.95]), 0.002, S);
-         Check (Natural (S.Points.Length) = 2 and then abs (S.Points (0).Push.Half_Angle - 0.60) < 1.0e-12 and then Ct.Check (S, False).Kind = Ct.Fine,
-                "②a→接触集:μ 没量过 ⇒ 锥 = 这一把需要的最小值(0.60 rad)并明说;合上(物体不动)这一格照样自洽,能不能提由抬手验");
-      end;
       declare
          S : Ct.Set;
          Nh : Cg.No_Hand;
@@ -7044,7 +6907,8 @@ begin
       K.Fixed_Eye := (Valid => True, F => 289.25, Cx => 320.5, Cy => 239.75, K1 => -0.0123, K2 => 0.00456, K1_Sd => 0.0007, F_Meas => 289.125,
                       F_Prior => 300.5, F_Prior_Sd => 45.25, R_Ce => Rodrigues ([1.0, 0.01, -0.02]), Off => [0.011, -0.022, 0.033], Rms => 1.376,
                       F_Sd => 0.61, Rot_Sd => 0.0021, Off_Sd => 0.0033, Pos_Sd => 0.0144, Dropped => 17, Tip_Valid => True, Tip_Touch => True,
-                      Tip => [0.1, -0.2, -1.7], Gap => 1.75, Stride => 0.888, Stride_Rot => 0.161, Fixed => True, Pos => [5.7, -2.75, 10.35]);
+                      Tip => [0.1, -0.2, -1.7], Gap => 1.75, Stride => 0.888, Stride_Rot => 0.161, Fixed => True, Pos => [5.7, -2.75, 10.35],
+                      Lobes => Geom.Lobe_Geo_Vectors.Empty_Vector, Tip_Sd => 0.0);   --  不动的眼没有手指:这两样恒为空(kin 文件不存)
       K.Plane_Pt := [0.001, -0.002, 0.003]; K.Plane_N := [0.0, 0.6, 0.8];
       for A in 0 .. 1 loop
          declare

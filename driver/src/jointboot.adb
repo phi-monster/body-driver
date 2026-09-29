@@ -3150,7 +3150,8 @@ package body Jointboot is
                                            F_Meas => V (T, 8), F_Prior => V (T, 9), F_Prior_Sd => V (T, 10), R_Ce => M3_At (T, 11), Off => V3_At (T, 20),
                                            Rms => V (T, 23), F_Sd => V (T, 24), Rot_Sd => V (T, 25), Off_Sd => V (T, 26), Pos_Sd => V (T, 27),
                                            Dropped => Natural'Value (T (28)), Tip_Valid => T (29) = "1", Tip_Touch => T (30) = "1", Tip => V3_At (T, 31),
-                                           Gap => V (T, 34), Stride => V (T, 35), Stride_Rot => V (T, 36), Fixed => T (37) = "1", Pos => V3_At (T, 38));
+                                           Gap => V (T, 34), Stride => V (T, 35), Stride_Rot => V (T, 36), Fixed => T (37) = "1", Pos => V3_At (T, 38),
+                                           Lobes => Geom.Lobe_Geo_Vectors.Empty_Vector, Tip_Sd => 0.0);   --  不动的眼没有手指:这两样恒为空
             elsif Tag = "arm" then
                declare
                   A : constant Natural := Arm_Of (T);

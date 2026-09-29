@@ -13,6 +13,10 @@ package Contact.Surface is
    --  马克杯把手、拱形件、悬臂、有凹槽的东西下面拉出来的"侧面"根本不存在,爪子会合到空气上;摆在桌上的紧凑实心件(积木、瓶子、剪刀)占绝大多数。
    --  用它就要明说用了。首选仍然是换个视角再看一眼(Merge),那条一个假设都不用
    procedure Extrude_To_Support (Pts : in out V3_Vectors.Vector; Support_Z, Step_M : Long_Float);
+   --  同一个假设(实心、从顶面一直连到支撑面),只补表面:顶面的点照留,只从轮廓那一圈(格子边长两个 Pitch —— 同接触集判"同一块料"的邻居范围,
+   --  点不在格点上时里面才不会冒出空格;四邻有空格的那些格)
+   --  沿 -N 每隔 Pitch 往下补到支撑面(过 Support_P、法向 N)—— 世界系里做,不用先转正。里面不填(接触集按表面点算法向,实心的点会把法向带歪)
+   procedure Walls_To_Support (Top : V3_Vectors.Vector; N, Support_P : V3; Pitch : Long_Float; Pts : out V3_Vectors.Vector);
    --  几个视角的点合到一起,不需要任何假设:每一帧的相机位姿由本体感受给,视线落出来的本来就是世界坐标
    procedure Merge (Into : in out V3_Vectors.Vector; More : V3_Vectors.Vector);
    --  把支撑面那张平面上的点扔掉:确定性 RANSAC(不引随机数,同一份数据两次给同一个答案)找内点最多的那张平面,再把内点扔掉。

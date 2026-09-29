@@ -533,7 +533,7 @@ begin
          --  碰过的面留着但标成"上一集的":桌子一般不动,第一句话就有高度可用;新一集第一次朝下被顶住就换成新量的
          C.Boxed.Clear;
          C.Touch_Fresh := False; C.Bumps.Clear; C.Fingers_Aimed := False; C.Geo_Pw_Valid := False; C.Geo_Pw_Met := False; C.Geo_At_Above := False;
-         C.Sil_Valid := False; C.Held_Set_Valid := False; C.Tried.Clear; C.Tried_W.Clear; C.Walls.Clear; C.No_Reach_Arm := -1;
+         C.Sil_Valid := False; C.Held_Set_Valid := False; C.Walls.Clear; C.No_Reach_Arm := -1;   --  每件东西量到的摩擦(C.Grip_Mus)留着:越用越准
          Act.Init_Tracks (C);
       end if;
       if Order /= "" then

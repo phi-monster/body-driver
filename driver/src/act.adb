@@ -19,6 +19,8 @@ with Runtime;
 with Exam;
 with Contact;
 with Contact.Gen;
+with Contact.Grasp;
+with Kinem;
 with Contact.Exec;
 with Contact.Surface;
 with Instrument;
@@ -6016,6 +6018,7 @@ package body Act is
                   begin
                      if Old (Cm).Tip_Valid and then Old (Cm).Tip_Touch then
                         G.Tip := Old (Cm).Tip; G.Gap := Old (Cm).Gap; G.Tip_Valid := True; G.Tip_Touch := True;
+                        G.Lobes := Old (Cm).Lobes; G.Tip_Sd := Old (Cm).Tip_Sd;   --  每一瓣的尖和截面(接触集的手)跟着指尖一起并回来
                      end if;
                      if Old (Cm).Stride > 0.0 then
                         G.Stride := Old (Cm).Stride;
@@ -7751,21 +7754,6 @@ package body Act is
       end;
    end Take_Silhouette;
 
-   --  合爪轴在这只眼里的方向(单位向量,相机系):握区的主轴 —— 两瓣时是瓣到瓣的连线,一瓣(合空时两指扫过的像素连成一片)时是那片的长轴,
-   --  都是合拢时指头走的方向(像素 → 相机:x 向右、y 向上,同投影约定)。量出来的,不是推的
-   function Jaw_Dir_Cam (C : Context; F : Plug.Frame; Arm, Cam, K : Natural; Ok : out Boolean) return Geom.V3 is
-      Z : constant Zone.Hand_Zone := Zone_Of (C, Arm, Cam, K);
-      Du : constant Long_Float := Z.Au * Long_Float (F.Cams (Cam).W);
-      Dv : constant Long_Float := Z.Av * Long_Float (F.Cams (Cam).H);
-      Ln : constant Long_Float := Sqrt (Du * Du + Dv * Dv);
-   begin
-      Ok := Z.Valid and then Ln > 0.0;
-      if not Ok then
-         return [1.0, 0.0, 0.0];
-      end if;
-      return [Du / Ln, -Dv / Ln, 0.0];
-   end Jaw_Dir_Cam;
-
    --  三维走到一点:指尖中点(位姿读数 + 量过的指尖偏置)走到世界系的 Target,差到 Tol 之内算到;Until_Touch ⇒ 到了之后顺着 Press_Along 接着压,
    --  到真被顶住(同 touching 的"接着往它身上走")。一条命令最多走 4 倍探针幅度 × 脑的档位(同 Geo_Approach);被一个面顶住就沿着面走剩下的
    --  (同一条约束在量到的接触下接着解,不换打法);朝下顶住我的才是它躺的面(横着的是墙或我自己的关节),碰过的点进地图。身体不自己收工
@@ -7918,39 +7906,66 @@ package body Act is
       end loop;
    end Geo_Go;
 
-   --  从记下的顶面点算一个接触集:转到"它躺的面朝上"的系里 → 补出侧面(碰过面就拉到面;没碰过就拉一个爪面高,并明说)→ 候选(Contact.Gen 排序)
-   --  → 挑第一个这一集里没试过的 → 四格(μ 没量过:锥 = 这一把需要的最小值,明说)→ 航点(悬停 + 贴上)→ 转回世界系。
-   --  身体的数:张口 = G.Gap;指头宽 / 爪面高 = 握区瓣的像素框 × 指尖深度 ÷ 焦距;容差 = 一推的幅度(这只手能走出来又看得见的最小一档)
-   procedure Pick_Contact (C : in out Context; F : Plug.Frame; Arm, Cam, K : Natural; Name : Unbounded_String;
-                           Cs_Out : out Contact.Set; Center : out Geom.V3; Width : out Long_Float; Steps_V : out Contact.Exec.Step_Vectors.Vector;
-                           Note : out Unbounded_String; Ok : out Boolean) is
+   --  接触集(09-29 重写,PLAN §2 ②):量出来的手(每一瓣的尖和尖那一截的截面,碰桌面量的)在看到的形状上真合一次,
+   --  挑按量得出的误差最坏时每单位重量要夹得最松的那一组(Contact.Grasp.Plan)。
+   --  形状 = 记下的顶面点(Take_Silhouette;碰过它躺的面就按真高度重投)+ 从轮廓那一圈垂直补到它躺的面的侧壁(实心、竖壁的假设,说出来);
+   --  旁边的东西 = 这一集里被顶住过、比面高、又不在它身上的点(C.Bumps:伸下去被挡住就记进来 —— 试一下就知道);
+   --  够不够得着 = 眼在那个位姿时按量到的关节范围反解(Plug.Reach);摩擦 = 这件东西和这只身体以前量到的上下限(C.Grip_Mus)。
+   --  Pick = 挑中的那一组:下手那一刻眼的朝向 R、位置 T、进场方向、每一块先合多少(Pre)、接触
+   procedure Plan_Contact (C : in out Context; F : Plug.Frame; Arm, Cam : Natural; Name : Unbounded_String;
+                           Pick : out Contact.Grasp.Candidate; Note : out Unbounded_String; Ok : out Boolean) is
       G : constant Geom.Cam_Geo := Geo_Of (C, Cam);
-      Z : constant Zone.Hand_Zone := Zone_Of (C, Arm, Cam, K);
-      Depth : constant Long_Float := -G.Tip (2);   --  指尖离这只眼多远(米,量过的)
-      Rep : constant Long_Float := Geo_Base (C, Arm);
-      Pts : Contact.V3_Vectors.Vector := C.Sil_Pts;
-      Sil_P0 : Geom.V3 := C.Sil_P0;
-      Back : Contact.Gen.Rot;
-      Rok : Boolean;
+      Have_Plane : constant Boolean := C.Touch_Valid or else C.Board_Plane;
+      Up : constant Geom.V3 := (if C.Touch_Valid then C.Touch_N elsif C.Board_Plane then C.Board_N else Protocol_Up);
+      Sp : constant Geom.V3 := (if C.Touch_Valid then C.Touch_Pt else C.Board_Pt);
+      Tol_P : constant Long_Float := Geo_Base (C, Arm);
+      Tol_R : constant Long_Float := (if Arm * Chan.Per_Arm + 3 < Natural (C.Map.Amp.Length) then C.Map.Amp (Arm * Chan.Per_Arm + 3) else 0.0);
+      Mu_Lb : Long_Float := 0.0;
+      Mu_Ub : Long_Float := Long_Float'Last;
+      H : Contact.Grasp.Hand_Model;
+      Top : Contact.V3_Vectors.Vector := C.Sil_Pts;
+      Surf, Around : Contact.V3_Vectors.Vector;
+      Found : Contact.Grasp.Cand_Vectors.Vector;
+      St : Contact.Grasp.Plan_Stats;
       Reprojected : Boolean := False;
-      use type Contact.Gen.Refusal;
-      use type Contact.Exec.No_Plan_Kind;
+      --  眼在 (R, T) 时手的位姿:眼 → 世界 = 手 → 世界 · 相机 → 手 ⇒ 手 → 世界 = R · R_ceᵀ;眼的中心 = 手的位置 + 手 → 世界 · Off
+      function Reach (R : Geom.M3; T : Geom.V3) return Boolean is
+         Rp : constant Geom.M3 := Geom.Mul (R, Geom.Tr (G.R_Ce));
+         Ow : constant Geom.V3 := Geom.Ap (Rp, G.Off);
+         Pe, Re : Long_Float;
+         Rok : Boolean;
+      begin
+         Plug.Reach (Arm, Kinem.To_Pose (Rp, [T (0) - Ow (0), T (1) - Ow (1), T (2) - Ow (2)]), Pe, Re, Rok);
+         return not Rok or else (Pe <= Tol_P and then (Tol_R <= 0.0 or else Re <= Tol_R));
+      end Reach;
    begin
       Ok := False;
-      Cs_Out := (Points => Contact.Point_Vectors.Empty_Vector, Motion => Contact.Still ([others => 0.0]), Has_Approach => False, Approach => [others => 0.0]);
-      Center := [others => 0.0];
-      Width := 0.0;
-      Steps_V := Contact.Exec.Step_Vectors.Empty_Vector;
+      Pick := (others => <>);
       if not C.Sil_Valid or else C.Sil_Name /= Name then
          Note := S ("I have no measured outline of " & To_String (Name) & " (no eye saw it whole while I knew where it was)");
          return;
       end if;
-      if not G.Tip_Valid or else G.F <= 0.0 or else Depth <= 0.0 or else G.Gap <= 0.0 or else not Z.Valid or else Rep <= 0.0 then
-         Note := S ("I have not measured my fingertips, my jaw or my stride in this eye (" & (if G.Tip_Valid then "tips yes" else "tips no") & ", jaw " & Len (C, G.Gap)
-                    & ", grip zone " & (if Z.Valid then "yes" else "no") & ", stride " & Len (C, Rep) & "), so I cannot lay out a hold");
+      if not Have_Plane then
+         Note := S ("I have not measured the surface it lies on, so I cannot tell how tall it is or where my fingers can go down beside it");
          return;
       end if;
-      --  取轮廓时面的高度可能只是交点估的;之后碰到了它躺的面 ⇒ 按真的面重投一遍那些视线(交点在面之下 / 比张口还高出面的都贴回面上)
+      if Natural (G.Lobes.Length) /= 2 then
+         Note := S ("my fingers in this eye are " & Codec.Img (Natural (G.Lobes.Length)) & " measured pads (I lay out holds for two pads closing on each other"
+                    & (if G.Lobes.Is_Empty then "; my body file has no per-finger tips, it has to be measured once from scratch" else "") & ")");
+         return;
+      end if;
+      H := Contact.Grasp.Two_Pads (G.Lobes (0).Tip, G.Lobes (1).Tip, Long_Float'Min (G.Lobes (0).Wide, G.Lobes (1).Wide),
+                                   Long_Float'Max (G.Lobes (0).Thin, G.Lobes (1).Thin), Long_Float'Max (G.Tip_Sd, Tol_P));
+      if not H.Valid then
+         Note := S ("my measured fingers do not make a hand I can lay a hold out with: " & To_String (H.Why));
+         return;
+      end if;
+      for Gm of C.Grip_Mus loop
+         if Gm.Name = Name then
+            Mu_Lb := Gm.Lb; Mu_Ub := Gm.Ub;
+         end if;
+      end loop;
+      --  取轮廓时面的高度可能只是交点估的;碰过它躺的面 ⇒ 按真的面重投那些视线
       if C.Touch_Valid and then not C.Sil_Rays.Is_Empty then
          declare
             P0 : constant Geom.V3 := Plane_Point (C, C.Sil_P0, C.Sil_N, Say => False);
@@ -7960,128 +7975,59 @@ package body Act is
             if Geom.Norm ([P0 (0) - C.Sil_P0 (0), P0 (1) - C.Sil_P0 (1), P0 (2) - C.Sil_P0 (2)]) > C.Sil_Pitch then
                Contact.Surface.On_Plane (C.Sil_Rays, P0, C.Sil_N, Again, Dropped);
                if Natural (Again.Length) >= 8 then   --  点数
-                  Pts := Again;
-                  Sil_P0 := Again.First_Element;
+                  Top := Again;
                   Reprojected := True;
                end if;
             end if;
          end;
       end if;
-      Contact.Gen.To_Upright (Pts, C.Sil_N, Back, Rok);
-      if not Rok then
-         Note := S ("the surface it lies on has no measurable normal");
-         return;
-      end if;
-      declare
-         Fwd : constant Contact.Gen.Rot := Contact.Gen.Inverse (Back);
-         P0_Up : constant Geom.V3 := Contact.Gen.Dir (Fwd, Sil_P0);
-         Top_Z : constant Long_Float := P0_Up (2);
-         Thick : constant Long_Float :=
-           (if C.Touch_Valid
-            then (Sil_P0 (0) - C.Touch_Pt (0)) * C.Sil_N (0) + (Sil_P0 (1) - C.Touch_Pt (1)) * C.Sil_N (1) + (Sil_P0 (2) - C.Touch_Pt (2)) * C.Sil_N (2)
-            else 0.0);
-         Pitch : constant Long_Float := Contact.Gen.Sampling_Gap (Pts);
-         --  厚度:碰过面就是顶面到面的那一截;没碰过就只补薄薄一层(两个采样间距),贴上点落在顶面附近,压下去到被顶住为止会自己找到面
-         Known_Thick : constant Boolean := C.Touch_Valid and then Thick > Pitch;
-         Slab : constant Long_Float := (if Known_Thick then Thick else 2.0 * Pitch);
-         Support_Z : constant Long_Float := Top_Z - Slab;
-         --  指头宽 / 爪面高这具身体还没量到(合空扫过的像素是两指走过的路,不是指头本身)⇒ 条按一个采样间距宽、层按整块厚:
-         --  量的还是"每一行料多宽、连续多少行厚度不变",只是单位细到采样间距。这笔账记在这里,不藏
-         Gd : Contact.Gen.Grid;
-         Gp : constant Contact.Gen.Gripper := (Jaw => (Contact.Gen.Measured, G.Gap), Reach_Lo => 0.0, Reach_Hi => Long_Float'Last, Base_X => 0.0, Base_Y => 0.0);
-         Cands : Contact.Gen.Cand_Vectors.Vector;
-         Why : Contact.Gen.Refusal;
-         Pick : Integer := -1;
-         Beyond : Natural := 0;
-         Holes : Natural := 0;
-         use type Contact.Gen.Pair_Kind;
-      begin
-         if Pitch <= 0.0 then
-            Note := S ("the outline has no measurable sampling pitch");
-            return;
-         end if;
-         Contact.Surface.Extrude_To_Support (Pts, Support_Z, 0.5 * Slab);   --  补两层(0.5 = 一半,纯数学):两指几何只要有厚度,层数是可观测性参数
-         Gd := (Bands => 1,
-                Dirs => 16,     --  每层量多少个方向(次数)
-                Min_Pts => 6,   --  一段至少几个点才算数(点数)
-                Jaw_H_M => Slab, Min_Above_M => 0.0, Finger_W_M => Pitch,
-                Gap_M => 2.0 * Pitch);   --  两个采样点隔多远不算同一块料:对角邻居在 √2 个间距以内,取 2 个(纯几何)
-         Contact.Gen.Candidates (Pts, Gp, Support_Z, Gd, Cands, Why);
-         if Why /= Contact.Gen.Fine then
-            Note := S ("from its " & Codec.Img (Natural (Pts.Length)) & " surface points I found no section to hold: " & Contact.Gen.Img (Why));
-            return;
-         end if;
-         --  挑第一个这一集里没滑过的(滑过 = 合过又没拿住;离那个落点不到那一把的段宽就算同一处)
-         for I in 0 .. Natural (Cands.Length) - 1 loop
-            declare
-               Cd : constant Contact.Gen.Candidate := Cands (I);
-               Cw : constant Geom.V3 := Contact.Gen.Dir (Back, Cd.Pos);
-               Tried : Boolean := False;
-            begin
-               for J in 0 .. Natural (C.Tried.Length) - 1 loop
-                  declare
-                     T : constant Geom.V3 := C.Tried (J);
-                     Tw : constant Long_Float := (if J < Natural (C.Tried_W.Length) then C.Tried_W (J) else 0.0);
-                  begin
-                     if Geom.Norm ([Cw (0) - T (0), Cw (1) - T (1), Cw (2) - T (2)]) < Long_Float'Max (Tw, Pitch) then
-                        Tried := True;
-                     end if;
-                  end;
-               end loop;
-               --  往里捏的抓法用不了"从里面撑开"型(两指伸进洞里往外撑的那种):落上去就是合空(H58:剪刀手柄环的洞排第一)
-               if Cd.Kind = Contact.Gen.Inside then
-                  Tried := True;
-                  Holes := Holes + 1;
-               end if;
-               --  这条臂横着被顶住过的那一侧够不着(H56 2026-09-23 实测:右臂在 y≈-0.43 被关节顶住,候选全在 -0.44 以外,三把都合空)
-               for Wm of C.Walls loop
-                  if Wm.Arm = Arm and then (Cw (0) - Wm.P (0)) * Wm.W (0) + (Cw (1) - Wm.P (1)) * Wm.W (1) + (Cw (2) - Wm.P (2)) * Wm.W (2) > 0.0 then
-                     Tried := True;
-                     Beyond := Beyond + 1;
-                  end if;
-               end loop;
-               if not Tried then
-                  Pick := I;
+      Contact.Surface.Walls_To_Support (Top, Up, Sp, C.Sil_Pitch, Surf);
+      --  旁边的东西:被顶住过、比面高、离它自己的表面点超过两个采样间距的(贴着它的那些是它自己被顶住)
+      for B of C.Bumps loop
+         declare
+            Near : Boolean := False;
+         begin
+            for Q of Surf loop
+               if Geom.Norm ([B (0) - Q (0), B (1) - Q (1), B (2) - Q (2)]) <= 2.0 * C.Sil_Pitch then   --  两个采样间距(纯几何:对角邻居在 √2 个以内)
+                  Near := True;
                   exit;
                end if;
-            end;
-         end loop;
-         if Pick < 0 then
-            if Beyond > 0 then
-               C.No_Reach_Arm := Integer (Arm);   --  这条臂一段都够不着 ⇒ 下一句选手绕开它
+            end loop;
+            if not Near then
+               Around.Append (B);
             end if;
-            Note := S ("every one of the " & Codec.Img (Natural (Cands.Length)) & " sections I could hold on " & To_String (Name)
-                       & (if Beyond > 0 then " is beyond where this arm got stopped (" & Codec.Img (Beyond) & " of them) or" else "")
-                       & " has already slipped from my fingers in this episode");
+         end;
+      end loop;
+      Contact.Grasp.Plan (Surf, Around, C.Sil_Pitch, C.Sil_Err, Up, Sp, H, Mu_Lb, G.Gap, Reach'Access, 8, Found, St);   --  留前 8 组(个数)
+      --  量到的摩擦上限:这件东西以前没拿住过的那一组要的摩擦它给不起 ⇒ 要得比它还多的不要
+      declare
+         Kept : Contact.Grasp.Cand_Vectors.Vector;
+      begin
+         for Cd of Found loop
+            if Cd.Mu_Nom < Mu_Ub then
+               Kept.Append (Cd);
+            end if;
+         end loop;
+         if Kept.Is_Empty then
+            Note := S ("from " & Codec.Img (Natural (Surf.Length)) & " surface points of " & To_String (Name) & " (top outline from eye " & Codec.Img (Natural (Integer'Max (0, C.Sil_Cam)))
+                       & " pulled straight down to the surface it lies on, which assumes solid upright sides) I tried " & Codec.Img (St.Poses) & " placements of my hand: "
+                       & Codec.Img (St.Air) & " close on nothing, " & Codec.Img (St.Landed_On) & " put a finger down on it, " & Codec.Img (St.Blocked) & " hit something beside it, "
+                       & Codec.Img (St.Palm_Hit) & " push it into my palm, " & Codec.Img (St.No_Hold) & " cannot hold it up, " & Codec.Img (St.Unreachable) & " out of my reach"
+                       & (if Natural (Found.Length) > 0 then ", and every hold left needs more friction than " & To_String (Name) & " gave me before" else ""));
             return;
          end if;
-         declare
-            Cd : constant Contact.Gen.Candidate := Cands (Natural (Pick));
-            S_Up : Contact.Set;
-            Ewhy : Contact.Exec.No_Plan;
-         begin
-            Contact.Gen.To_Set_Least_Mu (Cd, Contact.Still (Cd.Pos), Rep, S_Up);
-            Cs_Out := Contact.Gen.Rotate (Back, S_Up);
-            Center := Contact.Gen.Dir (Back, Cd.Pos);
-            Width := Cd.Width_M;
-            Contact.Exec.Steps (Cs_Out, (Standoff_M => G.Gap, Repeat_M => Rep), False, 1, Steps_V, Ewhy);
-            if Ewhy.Kind /= Contact.Exec.Fine then
-               Note := S ("the executor could not lay out the approach: " & Contact.Exec.Img (Ewhy));
-               return;
-            end if;
-            Note := S ("contact set on " & To_String (Name) & ": of " & Codec.Img (Natural (Cands.Length)) & " sections (from " & Codec.Img (Natural (C.Sil_Pts.Length))
-                       & " surface points at " & Len (C, Pitch) & " pitch from eye " & Codec.Img (Natural (Integer'Max (0, C.Sil_Cam))) & ", expected error " & Len (C, C.Sil_Err)
-                       & (if Reprojected then ", re-laid on the surface I touched" else "")
-                       & (if Known_Thick then ", thickness " & Len (C, Thick) & " measured by touch" else ", thickness not measured yet")
-                       & ") I take #" & Codec.Img (Natural (Pick) + 1) & (if Beyond > 0 then " (" & Codec.Img (Beyond) & " ranked higher lie beyond where this arm got stopped)" else "")
-                       & (if Holes > 0 then " (" & Codec.Img (Holes) & " ranked higher are holes to spread, not material to pinch)" else "")
-                       & ": " & Len (C, Cd.Width_M) & " wide, " & Len (C, Cd.Depth_M) & " deep, faces off by "
-                       & Codec.Fmt (Cd.Face_Tilt_Rad, 2) & " rad, " & Len (C, Cd.Com_Offset_M) & " from its middle, jaw " & Len (C, G.Gap)
-                       & "; finger width unmeasured (strips one sample wide); friction unmeasured, so the cone is the least this pinch needs - the lift will tell");
-            Ok := True;
-         end;
+         Pick := Kept (0);
+         Note := S ("hold on " & To_String (Name) & ": " & Codec.Img (Natural (Kept.Length)) & " holds kept of " & Codec.Img (St.Poses) & " hand placements (from "
+                    & Codec.Img (Natural (Surf.Length)) & " surface points, top outline from eye " & Codec.Img (Natural (Integer'Max (0, C.Sil_Cam))) & " at " & Len (C, C.Sil_Pitch)
+                    & " pitch, expected error " & Len (C, C.Sil_Err) & (if Reprojected then ", re-laid on the surface I touched" else "")
+                    & ", sides assumed solid and upright down to the surface); best: fingers " & Len (C, Pick.Width) & " apart, coming in "
+                    & Codec.Fmt (Arccos (Long_Float'Max (-1.0, Long_Float'Min (1.0, -(Pick.Approach (0) * Up (0) + Pick.Approach (1) * Up (1) + Pick.Approach (2) * Up (2))))), 2)
+                    & " rad from straight down"
+                    & ", closing " & Len (C, Pick.Pre) & " before going down, needs friction at least " & Codec.Fmt (Pick.Mu_Worst, 2) & " in the worst case"
+                    & (if Mu_Lb > 0.0 then " (" & To_String (Name) & " has held at " & Codec.Fmt (Mu_Lb, 2) & ")" else " (friction on it not measured yet)"));
+         Ok := True;
       end;
-   end Pick_Contact;
+   end Plan_Contact;
 
    --  这只眼这一帧里最大的那一块(槽号);没有 ⇒ -1。量朝向要盯着一个不动的东西挪四下,随便什么东西都行
    function Largest_Slot (C : in out Context; F : Plug.Frame; Cam : Natural) return Integer is
@@ -10238,8 +10184,7 @@ package body Act is
          Geo_Name : Unbounded_String;        --  要去的那件东西叫什么(脑点的名;走路的眼里按名字跟)
          Grasp_Set : Contact.Set;            --  这一段合上之前算出来的接触集(合上拿住了就成为 Held_Set)
          Grasp_Valid : Boolean := False;
-         Grasp_Center : Geom.V3 := [others => 0.0];
-         Grasp_Width : Long_Float := 0.0;
+         Grasp_Mu_Nom, Grasp_Mu_Worst : Long_Float := 0.0;   --  这一组按量到的法向 / 法向取最坏要的摩擦(合完拿没拿住,按它记这件东西的摩擦)
       --  2a 把脑说的话变成要求:别动的,目标就是它现在的位置;要动的,目标是格子或与某号的关系;
       --  抓某号,目标是"和我张开的那片地方重合"(位置 / 远近 / 看着多大 / 朝向)
       --  把去哪翻成目标:格子 / 与某号的关系(碰到它 · 上下左右 · 前后 · 离远点)。全是量出来的位置,没有写死的距离
@@ -10618,27 +10563,125 @@ package body Act is
             end if;
       end Build_Goals;
 
-      --  2c 抓握(接触集版,PLAN 1.5):到它上方(两眼交点 + 指尖朝下,现成)→ 从看全它那一眼的轮廓算它顶面的点 → Contact.Gen 出候选 → 四格 →
-      --  悬停/贴上两步 → 合爪轴转到候选的合爪方向 → 三维走到悬停点、再压到贴上点(压到被顶住为止,同 touching)。
-      --  哪一处夹得住由算法从形状里算(两片刃、环壁、把手都是它切出来的段),不由我挑;换个机体只换那几个量出来的数。
+      --  接触集(09-29 重写,PLAN §2 ②):到它上方(两眼交点 + 指尖朝下,现成)→ 量出来的手在它的形状上挑一组(Plan_Contact)→
+      --  眼转到那一组的朝向、到悬停点(下手处沿进场方向往回退一个张口)→ 每一块先合到离料还剩一点(Pre)→ 沿进场方向往下压,
+      --  碰到没有按 Selfmap.Blocked(同碰桌面量指尖)。下到下手那一处之前一小步以上就被挡住 = 手指落在了东西上(它自己别处、旁边的东西)
+      --  ⇒ 两个尖那一刻在哪记进 C.Bumps,抬回悬停点,重挑(试一下就知道;最多几回,次数);下到了 ⇒ 交给 Do_Grip 合、抬一点看它跟不跟手
       procedure Contact_Onto (Amt : Long_Float) is
-         Ev1, Ev2 : Unbounded_String;
-         St1, Bt1, St2, St3, St4 : Natural;
+         Ev1 : Unbounded_String;
+         St1, Bt1 : Natural;
          Arm : constant Natural := Natural (Own);
          Cam1 : constant Natural := Natural (Geo_Cam);
          G : constant Geom.Cam_Geo := Geo_Of (C, Cam1);
-         Steps_V : Contact.Exec.Step_Vectors.Vector;
+         Small : constant Long_Float := 4.0 * Geo_Base (C, Arm);   --  一小步 = 4 倍最小一档(同碰桌面量指尖)
+         Tol_P : constant Long_Float := Geo_Base (C, Arm);
+         Tol_R : constant Long_Float := (if Arm * Chan.Per_Arm + 3 < Natural (C.Map.Amp.Length) then C.Map.Amp (Arm * Chan.Per_Arm + 3) else 0.0);
+         Pick : Contact.Grasp.Candidate;
          Note : Unbounded_String;
-         Pok, Jok : Boolean;
-         function Mid (St : Contact.Exec.Step) return Geom.V3 is
-            M : Geom.V3 := [others => 0.0];
-            N : constant Long_Float := Long_Float (St.Pos.Length);
+         Pok : Boolean;
+         --  眼走到 (R, T):一条命令 = 此刻还差的平移 + 转动(世界轴),走完看还差多少;差到一档以内、转动一档以内就到。
+         --  还差的(折成"一步看得见的那一档"的个数)不再变少就停(身体到头了或被挡住),照实说;最多几条(次数)
+         procedure Eye_To (R : Geom.M3; T : Geom.V3; Said : String; Arrived : out Boolean) is
+            Prev_N : Long_Float := Long_Float'Last;
          begin
-            for P of St.Pos loop
-               M := [M (0) + P (0) / N, M (1) + P (1) / N, M (2) + P (2) / N];
+            Arrived := False;
+            for K in 1 .. 4 loop   --  次数
+               declare
+                  P : constant Plug.Arm_Pose := F.EE (Arm);
+                  Rc : constant Geom.M3 := Geom.Cam_R (G, P);
+                  Oc : constant Geom.V3 := Geom.Cam_Pos (G, P);
+                  Rv : constant Geom.V3 := Geom.Rot_Vec (Geom.Mul (R, Geom.Tr (Rc)));   --  世界轴:从此刻的朝向转到要的
+                  Miss : constant Long_Float := Geom.Norm ([T (0) - Oc (0), T (1) - Oc (1), T (2) - Oc (2)]);
+                  Mrot : constant Long_Float := Geom.Norm (Rv);
+                  N_Left : constant Long_Float := Miss / Tol_P + (if Tol_R > 0.0 then Mrot / Tol_R else 0.0);
+                  --  手的位姿要到哪:手 → 世界 = R · R_ceᵀ;眼的中心 = 手的位置 + 手 → 世界 · Off
+                  Rp : constant Geom.M3 := Geom.Mul (R, Geom.Tr (G.R_Ce));
+                  Ow : constant Geom.V3 := Geom.Ap (Rp, G.Off);
+                  Av : Table.Vec := Table.Zero_Vec;
+                  Jaw : Floats;
+                  Del : Table.Vec;
+                  Mok : Boolean;
+               begin
+                  if Miss <= Tol_P and then (Tol_R <= 0.0 or else Mrot <= Tol_R) then
+                     Arrived := True;
+                     return;
+                  end if;
+                  if N_Left >= Prev_N then
+                     Put_Line ("[身] ✋ " & Said & ":还差 " & Mm (Miss) & "、转 " & Codec.Fmt (Mrot, 3) & " rad,上一条以后没再变近 ⇒ 停在这儿");
+                     return;
+                  end if;
+                  Prev_N := N_Left;
+                  for I in 0 .. 2 loop
+                     Av (I) := T (I) - Ow (I) - P (I);
+                     Av (3 + I) := Rv (I);
+                  end loop;
+                  Step_Arm (L, C, F, Arm, Av, Jaw, Del, Mok, Geo_Settle => True);
+                  Steps_Taken := Steps_Taken + 1;
+               end;
             end loop;
-            return M;
-         end Mid;
+            declare
+               Oc : constant Geom.V3 := Geom.Cam_Pos (G, F.EE (Arm));
+               Miss : constant Long_Float := Geom.Norm ([T (0) - Oc (0), T (1) - Oc (1), T (2) - Oc (2)]);
+            begin
+               Arrived := Miss <= Tol_P;
+               if not Arrived then
+                  Put_Line ("[身] ✋ " & Said & ":几条命令以后还差 " & Mm (Miss));
+               end if;
+            end;
+         end Eye_To;
+         --  沿 Dir 往下压,每步一小步,最多 Dist 那么深(最后一步可能多压不到一小步),按 Selfmap.Blocked 认挡住(同碰桌面量指尖:
+         --  比上一步空走多少走的量超过这一步的百分之一 / 3 倍读数噪声 / 3 倍前两步空走之差);Went = 实际往 Dir 走了多少
+         procedure Press_Along (Dir : Geom.V3; Dist : Long_Float; Hit : out Boolean; Went : out Long_Float; Limit : out Boolean) is
+            Prev, Prev2 : Long_Float := 0.0;
+            N_Free : Natural := 0;
+         begin
+            Hit := False; Went := 0.0; Limit := False;
+            while Went + 0.5 * Small < Dist loop   --  还差不到半步就算到了(一半,纯数学)
+               declare
+                  Cur : constant Plug.Arm_Pose := F.EE (Arm);
+                  Av : Table.Vec := Table.Zero_Vec;
+                  Pe, Re : Long_Float;
+                  Rok, Mok : Boolean;
+               begin
+                  for I in 0 .. 2 loop
+                     Av (I) := Small * Dir (I);
+                  end loop;
+                  Plug.Reach (Arm, Chan.Compose (Cur, Av), Pe, Re, Rok);
+                  if Rok and then (Pe + Pe > Small or else (Tol_R > 0.0 and then Re > Tol_R)) then
+                     Limit := True;
+                     return;
+                  end if;
+                  Geo_Move (L, C, F, Arm, [Av (0), Av (1), Av (2)], Mok, Press => True);
+                  Steps_Taken := Steps_Taken + 1;
+                  declare
+                     Now : constant Plug.Arm_Pose := F.EE (Arm);
+                     Moved : constant Long_Float := (Now (0) - Cur (0)) * Dir (0) + (Now (1) - Cur (1)) * Dir (1) + (Now (2) - Cur (2)) * Dir (2);
+                     Short : constant Long_Float := Small - Moved;
+                  begin
+                     Went := Went + Moved;
+                     if Selfmap.Blocked (Short, Prev, Prev2, N_Free, Small, C.Map.EE_Noise) then
+                        Hit := True;
+                        return;
+                     end if;
+                     Prev2 := Prev; Prev := Short; N_Free := N_Free + 1;
+                  end;
+               end;
+            end loop;
+         end Press_Along;
+         --  两个尖此刻在世界里在哪(挡住时记进 C.Bumps)
+         procedure Note_Tips_As_Bumps is
+            P : constant Plug.Arm_Pose := F.EE (Arm);
+            O : constant Geom.V3 := Geom.Cam_Pos (G, P);
+            Rc : constant Geom.M3 := Geom.Cam_R (G, P);
+         begin
+            for Lg of G.Lobes loop
+               declare
+                  T : constant Geom.V3 := Geom.Ap (Rc, Lg.Tip);
+               begin
+                  C.Bumps.Append (Geom.V3'[O (0) + T (0), O (1) + T (1), O (2) + T (2)]);
+               end;
+            end loop;
+         end Note_Tips_As_Bumps;
       begin
          Grasp_Valid := False;
          Geo_Approach (L, C, F, Cam1, Arm, Geo_Slot_Now, 0, Ev1, St1, Bt1, Above => True, Amt => Amt, Until_Touch => False, Name => Geo_Name);
@@ -10653,85 +10696,66 @@ package body Act is
             Event := S ("on the way to a point above it: ") & Ev1;
             return;
          end if;
-         Pick_Contact (C, F, Arm, Cam1, Say.Grip_K, Geo_Name, Grasp_Set, Grasp_Center, Grasp_Width, Steps_V, Note, Pok);
-         Put_Line ("[身] ✋ " & To_String (Note));
-         Report := Report & To_String (Note) & ". ";
-         if not Pok then
-            Event := S ("lost: I could not lay out a hold on it - ") & Note;
-            return;
-         end if;
-         declare
-            Hover : constant Contact.Exec.Step := Steps_V (0);
-            Touch : constant Contact.Exec.Step := Steps_V (1);
-            Fr : constant Contact.Exec.M3 := Hover.Frame (0);
-            Jx : constant Geom.V3 := [Fr (0, 0), Fr (1, 0), Fr (2, 0)];                      --  候选的开合轴(世界系)
-            Jc : constant Geom.V3 := Jaw_Dir_Cam (C, F, Arm, Cam1, Say.Grip_K, Jok);         --  我的合爪轴(相机系)
-            Jw : constant Geom.V3 := Geom.Ap (Geom.Cam_R (G, F.EE (Arm)), Jc);               --  此刻在世界里朝哪
-            Want : constant Geom.V3 := (if Jw (0) * Jx (0) + Jw (1) * Jx (1) + Jw (2) * Jx (2) >= 0.0 then Jx else [-Jx (0), -Jx (1), -Jx (2)]);
-            Along : constant Geom.V3 := Contact.Exec.Tool_Axis (Fr);                         --  进场方向 = 工具轴(支撑面法向的反向)
-            H_Pt : constant Geom.V3 := Mid (Hover);
-            T_Pt : constant Geom.V3 := Mid (Touch);
-         begin
-            Put_Line ("[身] ✋ 悬停点 (" & Mm (H_Pt (0)) & "," & Mm (H_Pt (1)) & "," & Mm (H_Pt (2)) & ") · 贴上点 (" & Mm (T_Pt (0)) & "," & Mm (T_Pt (1)) & "," & Mm (T_Pt (2))
-                      & ") · 合爪轴 (" & Codec.Fmt (Jx (0), 2) & "," & Codec.Fmt (Jx (1), 2) & "," & Codec.Fmt (Jx (2), 2) & ")");
-            --  合爪轴转到候选的合爪方向(工具轴已经朝下:上一段末尾指尖朝下那一转;两轴都横着,转轴就是竖的)
-            if Jok then
-               Geo_Turn (L, C, F, Arm, Want, Amt, Ev2, St2, Along => Jc);
-               if Index (Ev2, "reset:") = 1 then
-                  Event := Ev2;
+         for Attempt in 1 .. 3 loop   --  伸下去被挡住就记下来重挑,最多这么多回(次数)
+            Plan_Contact (C, F, Arm, Cam1, Geo_Name, Pick, Note, Pok);
+            Put_Line ("[身] ✋ " & To_String (Note));
+            Report := Report & To_String (Note) & ". ";
+            if not Pok then
+               Event := S ("lost: I could not lay out a hold on it - ") & Note;
+               return;
+            end if;
+            declare
+               Stand : constant Long_Float := G.Gap;   --  悬停:沿进场方向往回退一个张口(同原来的 Standoff)
+               Hover : constant Geom.V3 := [Pick.T (0) - Stand * Pick.Approach (0), Pick.T (1) - Stand * Pick.Approach (1), Pick.T (2) - Stand * Pick.Approach (2)];
+               Arr, Hit, Lim : Boolean;
+               Went : Long_Float;
+            begin
+               Eye_To (Pick.R, Hover, "转到这一组的朝向、到悬停点", Arr);
+               if Plug.Reset_Pending (L) then
+                  Event := S (Reset_Event);
                   return;
                end if;
-               Steps_Taken := Steps_Taken + St2;
-               Put_Line ("[身] 📐 合爪轴对准候选的合爪方向 ⇒ " & To_String (Ev2));
-            end if;
-            Geo_Go (L, C, F, Arm, H_Pt, Touch.Tol_M, Amt, False, Along, Ev2, St3);
-            if Index (Ev2, "reset:") = 1 then
-               Event := Ev2;
-               return;
-            end if;
-            Steps_Taken := Steps_Taken + St3;
-            Put_Line ("[身] 📐 悬停点 ⇒ " & To_String (Ev2));
-            Geo_Go (L, C, F, Arm, T_Pt, Touch.Tol_M, Amt, True, Along, Event, St4);
-            if Index (Event, "reset:") = 1 then
-               return;
-            end if;
-            Steps_Taken := Steps_Taken + St4;
-            --  压下去碰到了它躺的面,而取轮廓时面的高度只是估的(第一句时还没碰过面)⇒ 按真的面重投轮廓、重算落点,沿着面挪过去再合。
-            --  这是在量到的接触下继续解同一个约束,不是换打法(H58/H59:第一句的面估低 5 cm,落点横着偏 5 cm,合空)
-            if C.Touch_Valid and then Index (Event, "contact") > 0 then
-               declare
-                  Set2 : Contact.Set;
-                  Center2 : Geom.V3;
-                  Width2 : Long_Float;
-                  Steps2 : Contact.Exec.Step_Vectors.Vector;
-                  Note2 : Unbounded_String;
-                  Pok2 : Boolean;
-               begin
-                  Pick_Contact (C, F, Arm, Cam1, Say.Grip_K, Geo_Name, Set2, Center2, Width2, Steps2, Note2, Pok2);
-                  if Pok2 and then Index (Note2, "re-laid on the surface I touched") > 0 then
-                     declare
-                        T2 : constant Contact.Exec.Step := Steps2 (1);
-                        T_Pt2 : constant Geom.V3 := Mid (T2);
-                        Moved : constant Long_Float := Geom.Norm ([T_Pt2 (0) - T_Pt (0), T_Pt2 (1) - T_Pt (1), T_Pt2 (2) - T_Pt (2)]);
-                        Ev3 : Unbounded_String;
-                        St5 : Natural;
-                     begin
-                        Put_Line ("[身] ✋ 碰到面之后按真高度重投:" & To_String (Note2));
-                        Put_Line ("[身] ✋ 落点从 (" & Mm (T_Pt (0)) & "," & Mm (T_Pt (1)) & ") 挪到 (" & Mm (T_Pt2 (0)) & "," & Mm (T_Pt2 (1)) & "),差 " & Mm (Moved));
-                        if Moved > Touch.Tol_M then
-                           Grasp_Set := Set2; Grasp_Center := Center2; Grasp_Width := Width2;
-                           Geo_Go (L, C, F, Arm, T_Pt2, T2.Tol_M, Amt, True, Along, Ev3, St5);
-                           Steps_Taken := Steps_Taken + St5;
-                           Event := Ev3;
-                           Report := Report & "after touching the surface I re-laid the outline on it and moved my fingers " & Len (C, Moved) & " along it. ";
-                        end if;
-                     end;
-                  end if;
-               end;
-            end if;
-            Grasp_Valid := Index (Event, "contact") > 0 or else Index (Event, "amount: arrived") > 0;
-            Append (Event, " (I laid the hold out from its measured outline, turned my jaw to it, came to the hover point and then down onto it)");
-         end;
+               --  每一块先合到离料还剩一点(Pre;张口和抓握读数按线性换算 —— 开机只量了张开、合空两头的读数,说出来)
+               if Pick.Pre > 0.0 then
+                  declare
+                     Hk : constant Zone.Hand := Hand_Of (C, Arm, Say.Grip_K);
+                     Half : constant Long_Float := 0.5 * (Geom.Norm ([G.Lobes (1).Tip (0) - G.Lobes (0).Tip (0), G.Lobes (1).Tip (1) - G.Lobes (0).Tip (1),
+                                                                        G.Lobes (1).Tip (2) - G.Lobes (0).Tip (2)]) - Long_Float'Max (G.Lobes (0).Thin, G.Lobes (1).Thin));
+                     Frac : constant Long_Float := (if Half > 0.0 then Long_Float'Min (1.0, Pick.Pre / Half) else 0.0);
+                     Steps_J : Natural;
+                     Reading : Long_Float;
+                  begin
+                     Move_Jaw (L, C, F, Arm, Hk.Open_Reading + Frac * (Hk.Empty_Close - Hk.Open_Reading), Steps_J, Reading, Say.Grip_K);
+                     Put_Line ("[身] ✋ 下去之前每一块先合 " & Mm (Pick.Pre) & "(行程的 " & Codec.Fmt (100.0 * Frac, 0) & "%;读数按张开、合空两头线性换算)⇒ 读数 " & Codec.Fmt (Reading, 3));
+                  end;
+               end if;
+               Press_Along (Pick.Approach, Stand, Hit, Went, Lim);
+               Put_Line ("[身] ✋ 沿进场方向往下 " & Mm (Went) & "(要 " & Mm (Stand) & ")" & (if Lim then ",再往下在量到的关节限位里解不出来"
+                         elsif Hit then ",被挡住" else ",下到了"));
+               if Hit and then Went < Stand - Small then
+                  --  下到下手的高度之前一小步以上就被挡住:手指落在了东西上 ⇒ 记下两个尖此刻在哪,抬回去重挑
+                  Note_Tips_As_Bumps;
+                  Report := Report & "my fingers were stopped " & Len (C, Stand - Went) & " above where they should go down to (something is under them there), so I marked that spot and laid the hold out again. ";
+                  Eye_To (Pick.R, Hover, "被挡住,抬回悬停点", Arr);
+               else
+                  Grasp_Valid := not Lim;
+                  exit;
+               end if;
+            end;
+         end loop;
+         --  合上以后交给 Do_Grip:接触集(接触点、朝里的法向、按摩擦锥)和这一组要的摩擦(拿住 / 没拿住都按它记)
+         if Grasp_Valid then
+            Grasp_Set := (Points => Contact.Point_Vectors.Empty_Vector, Motion => Contact.Still (Pick.T), Has_Approach => True, Approach => Pick.Approach);
+            for T of Pick.Touches loop
+               Grasp_Set.Points.Append (Contact.Point'(By => (Kind => Contact.Hand, Id => 0), Pos => T.P, Normal => [-T.N (0), -T.N (1), -T.N (2)],
+                                                       Push => (Axis => T.N, Half_Angle => Arctan (Pick.Mu_Worst)), Pull => False, Torsion => T.Twist_R > 0.0,
+                                                       Peel => False, Tol_M => Tol_P));
+            end loop;
+            Grasp_Mu_Nom := Pick.Mu_Nom; Grasp_Mu_Worst := Pick.Mu_Worst;
+            Event := S ("contact: my fingers are down around it where the hold was laid out (turned to the hold, came to the hover point, then down along the approach)");
+         elsif Event = Null_Unbounded_String then
+            Event := S ("lost: every time I went down my fingers were stopped above the hold - something is in the way");
+         end if;
       end Contact_Onto;
 
       --  拿着它抬:沿它躺的面的法向(碰过的面按量到的法向,没碰过按"上")走一个单位(4 倍探针幅度 × 脑的档位,同贴近时那把尺)。
@@ -10835,6 +10859,33 @@ package body Act is
          end;
       end Change_Held_Qty;
 
+      --  拿没拿住,按这一组要的摩擦记这件东西和这只身体之间的摩擦(Grip_Mu):拿住 ⇒ 法向取最坏时要的那么多它给得起(下限往上走);
+      --  没拿住 ⇒ 按量到的法向要的那么多它给不起(上限往下走)。下一次挑下手处按它们
+      procedure Note_Grip_Mu (Name : Unbounded_String; Held : Boolean) is
+         Found : Boolean := False;
+      begin
+         for I in 0 .. Natural (C.Grip_Mus.Length) - 1 loop
+            if C.Grip_Mus (I).Name = Name then
+               declare
+                  M : Grip_Mu := C.Grip_Mus (I);
+               begin
+                  if Held then
+                     M.Lb := Long_Float'Max (M.Lb, Grasp_Mu_Worst);
+                  else
+                     M.Ub := Long_Float'Min (M.Ub, Grasp_Mu_Nom);
+                  end if;
+                  C.Grip_Mus.Replace_Element (I, M);
+               end;
+               Found := True;
+            end if;
+         end loop;
+         if not Found then
+            C.Grip_Mus.Append (Grip_Mu'(Name => Name, Lb => (if Held then Grasp_Mu_Worst else 0.0), Ub => (if Held then Long_Float'Last else Grasp_Mu_Nom)));
+         end if;
+         Put_Line ("[身] ✋ " & To_String (Name) & (if Held then " 拿住了 ⇒ 它和这只手之间的摩擦至少 " & Codec.Fmt (Grasp_Mu_Worst, 2)
+                                                     else " 没拿住 ⇒ 这一组要的摩擦 " & Codec.Fmt (Grasp_Mu_Nom, 2) & " 它给不起"));
+      end Note_Grip_Mu;
+
       procedure Do_Grip is
       begin
             --  ── 抓握 ──
@@ -10937,6 +10988,7 @@ package body Act is
                            C.Wld.Holding := True; C.Wld.Held_Arm := Integer (A); C.Wld.Held_Jaw := Integer (Say.Grip_K); C.Wld.Held_Cam := Integer (Cam);
                            --  接触集:拿住了 ⇒ 这一把的摩擦够(这就是身体量 μ 的办法)⇒ 手里的接触集记下来,锥放开到半空间(抬/搬按它算)
                            if Grasp_Valid then
+                              Note_Grip_Mu (Geo_Name, Held => True);
                               C.Held_Set := Grasp_Set;
                               for I in 0 .. Natural (C.Held_Set.Points.Length) - 1 loop
                                  declare
@@ -10961,8 +11013,7 @@ package body Act is
                            C.Wld.Holding := False; C.Wld.Held_Arm := -1; C.Wld.Held_Jaw := -1;
                            C.Held_Set_Valid := False;
                            if Grasp_Valid then
-                              C.Tried.Append (Grasp_Center);   --  这一处合过没拿住:量出来的"这儿滑",这一集不再试
-                              C.Tried_W.Append (Grasp_Width);
+                              Note_Grip_Mu (Geo_Name, Held => False);   --  没拿住:这一组要的摩擦它给不起(不是"这一处拉黑")
                            end if;
                            Move_Jaw (L, C, F, A, Hand_Of (C, A, Say.Grip_K).Open_Reading, Steps_J, Reading, Say.Grip_K);
                            Append (Did_Grip, "; I opened it again");
@@ -11835,7 +11886,7 @@ package body Act is
             end loop;
             return 1.4826 * Median_Of (Dv);
          end Spread_Of;
-         Tu, Tv, Nw : Floats;   --  每一瓣指尖的像素、指尖那一小截的像素跨度
+         Tu, Tv, Nw, Nt : Floats;   --  每一瓣指尖的像素、指尖那一小截的像素跨度(宽的那个 / 窄的那个)
          D : Geom.V3_Vectors.Vector;   --  每一瓣指尖的相机系单位视线
          Nl : Natural := 0;
          Who : constant String := "第" & Codec.Img (A + 1) & " 只手";
@@ -12364,10 +12415,10 @@ package body Act is
          for K in 0 .. Z.N_Lobes - 1 loop
             declare
                Lb : constant Zone.Lobe := Zone.Lobe_Of (Z, K);
-               U, V, Wd : Long_Float;
+               U, V, Wd, Wt : Long_Float;
                Ok : Boolean;
             begin
-               Zone.Tip_Band (Z, Lb, Cw, Ch, U, V, Wd, Ok);
+               Zone.Tip_Section (Z, Lb, Cw, Ch, U, V, Wd, Wt, Ok);
                if Ok and then Z.Valid then
                   declare
                      Dc : Geom.V3 := Geom.Cam_Dir (G0, U, V);   --  相机系单位视线(去掉镜头畸变)
@@ -12379,6 +12430,7 @@ package body Act is
                      D.Append (Dc);
                      Tu.Append (U); Tv.Append (V);
                      Nw.Append (Wd);   --  指尖那一小截的像素跨度(不是整瓣:V1B21 整瓣 124 px 落到面上 90 mm,空的面挑到了半米外)
+                     Nt.Append (Wt);
                   end;
                end if;
             end;
@@ -12504,6 +12556,18 @@ package body Act is
                      end loop;
                   end loop;
                   G.Tip := Tip; G.Tip_Valid := True; G.Tip_Touch := True;
+                  --  每一瓣的尖和尖那一截的截面(像素跨度 × 这一瓣的尖有多深 ÷ 焦距)进身体文件:接触集的手按它们来
+                  G.Lobes.Clear; G.Tip_Sd := 0.0;
+                  for K in 0 .. Nl - 1 loop
+                     declare
+                        Dk : constant Long_Float := Long_Float'Max (0.0, -Tips (K) (2));
+                     begin
+                        G.Lobes.Append (Geom.Lobe_Geo'(Tip => Tips (K), Wide => Nw (K) * Dk / G.F, Thin => Nt (K) * Dk / G.F));
+                        for I in 0 .. 2 loop
+                           G.Tip_Sd := Long_Float'Max (G.Tip_Sd, Fits (K).Sd (I));
+                        end loop;
+                     end;
+                  end loop;
                   if Nl = 2 then
                      G.Gap := Geom.Norm ([Tips (0) (0) - Tips (1) (0), Tips (0) (1) - Tips (1) (1), Tips (0) (2) - Tips (1) (2)]);
                   end if;

@@ -60,6 +60,8 @@ package Zone is
    --  已知不够的地方:指尖伸出画面(人形腕眼里大拇指的尖出了画面顶边)时,这条定义取到的是手指根 —— 人形那一半要换"同一瓣换几个倾角各碰一次"。
    --  Width = 这一小截的像素跨度(它的框的长边 + 1)。
    procedure Tip_Band (Z : Hand_Zone; Lb : Lobe; W, Hh : Natural; U, V, Width : out Long_Float; Ok : out Boolean);
+   --  同一小截,两个跨度都给:Wide = 宽的那个(= Tip_Band 的 Width,指肚宽的像素),Thin = 窄的那个(看得见的厚的像素)
+   procedure Tip_Section (Z : Hand_Zone; Lb : Lobe; W, Hh : Natural; U, V, Wide, Thin : out Long_Float; Ok : out Boolean);
    procedure Tip_Px (Z : Hand_Zone; Lb : Lobe; W, Hh : Natural; U, V : out Long_Float; Ok : out Boolean);
    --  每一瓣自己那一块手指像素(同 Tip_Band 的认法:手指像素里和瓣框重合最多的那一整块,8 邻连通)的并集
    function Lobe_Pixels (Z : Hand_Zone; W, Hh : Natural) return Bools;

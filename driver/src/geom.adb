@@ -3160,7 +3160,17 @@ package body Geom is
                       Codec.Fmt (G.Tip (2), 5) & "],""gap"":" & Codec.Fmt (G.Gap, 5) & ",""stride"":" & Codec.Fmt (G.Stride, 5) & ",""stride_rot"":" & Codec.Fmt (G.Stride_Rot, 5) &
                       ",""f_meas"":" & Codec.Fmt (G.F_Meas, 3) & ",""f_prior"":" & Codec.Fmt (G.F_Prior, 3) & ",""f_prior_sd"":" & Codec.Fmt (G.F_Prior_Sd, 3) &
                       ",""off"":[" & Codec.Fmt (G.Off (0), 5) & "," & Codec.Fmt (G.Off (1), 5) & "," & Codec.Fmt (G.Off (2), 5) & "]" &
-                      ",""fixed"":" & (if G.Fixed then "true" else "false") & ",""pos"":[" & Codec.Fmt (G.Pos (0), 5) & "," & Codec.Fmt (G.Pos (1), 5) & "," & Codec.Fmt (G.Pos (2), 5) & "]}");
+                      ",""fixed"":" & (if G.Fixed then "true" else "false") & ",""pos"":[" & Codec.Fmt (G.Pos (0), 5) & "," & Codec.Fmt (G.Pos (1), 5) & "," & Codec.Fmt (G.Pos (2), 5) & "]"
+                      & ",""tip_sd"":" & Codec.Fmt (G.Tip_Sd, 6) & ",""lobes"":[");
+            for Li in 0 .. Natural (G.Lobes.Length) - 1 loop
+               declare
+                  Lg : constant Lobe_Geo := G.Lobes (Li);
+               begin
+                  Append (B, (if Li > 0 then "," else "") & "{""tip"":[" & Codec.Fmt (Lg.Tip (0), 6) & "," & Codec.Fmt (Lg.Tip (1), 6) & "," & Codec.Fmt (Lg.Tip (2), 6)
+                          & "],""wide"":" & Codec.Fmt (Lg.Wide, 6) & ",""thin"":" & Codec.Fmt (Lg.Thin, 6) & "}");
+               end;
+            end loop;
+            Append (B, "]}");
          end;
       end loop;
       Append (B, "]}");
@@ -3239,6 +3249,30 @@ package body Geom is
                      G.Tip_Valid := False;
                   end if;
                   G.Gap := Json.Num (D, Json.Get (D, Nd, "gap"));
+                  --  每一瓣的尖(09-29 起存;老文件没有 ⇒ 空,接触集照实说"没量每一瓣")
+                  declare
+                     Ln : constant Integer := Json.Get (D, Nd, "lobes");
+                  begin
+                     G.Tip_Sd := Json.Num (D, Json.Get (D, Nd, "tip_sd"));
+                     if Ln >= 0 then
+                        for Li in 0 .. Json.Count (D, Ln) - 1 loop
+                           declare
+                              Lnd : constant Integer := Json.Child (D, Ln, Li);
+                              Lt : constant Integer := Json.Get (D, Lnd, "tip");
+                              Lg : Lobe_Geo;
+                           begin
+                              if Lt >= 0 and then Json.Count (D, Lt) = 3 then
+                                 for A in 0 .. 2 loop
+                                    Lg.Tip (A) := Json.Num (D, Json.Child (D, Lt, A));
+                                 end loop;
+                                 Lg.Wide := Json.Num (D, Json.Get (D, Lnd, "wide"));
+                                 Lg.Thin := Json.Num (D, Json.Get (D, Lnd, "thin"));
+                                 G.Lobes.Append (Lg);
+                              end if;
+                           end;
+                        end loop;
+                     end if;
+                  end;
                   declare
                      Sn : constant Integer := Json.Get (D, Nd, "stride");   --  老文件没有这一项 ⇒ 0,开机再量
                      Sr : constant Integer := Json.Get (D, Nd, "stride_rot");

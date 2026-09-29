@@ -212,6 +212,12 @@ package body Zone is
    end From_Sweep;
 
    procedure Tip_Band (Z : Hand_Zone; Lb : Lobe; W, Hh : Natural; U, V, Width : out Long_Float; Ok : out Boolean) is
+      Thin : Long_Float;
+   begin
+      Tip_Section (Z, Lb, W, Hh, U, V, Width, Thin, Ok);
+   end Tip_Band;
+
+   procedure Tip_Section (Z : Hand_Zone; Lb : Lobe; W, Hh : Natural; U, V, Wide, Thin : out Long_Float; Ok : out Boolean) is
       N : constant Natural := W * Hh;
       Band : constant Long_Float := Long_Float (Hh) / 80.0;   --  最远的那一小截有多厚(比例,无量纲)
       type Flag_Array is array (Natural range <>) of Boolean;
@@ -225,7 +231,7 @@ package body Zone is
       function On_Edge (P : Natural) return Boolean is
         (P mod W = 0 or else P mod W = W - 1 or else P / W = 0 or else P / W = Hh - 1);
    begin
-      U := 0.0; V := 0.0; Width := 0.0; Ok := False;
+      U := 0.0; V := 0.0; Wide := 0.0; Thin := 0.0; Ok := False;
       if not Lb.Valid or else N = 0 or else Natural (Z.Fingers.Length) < N then
          return;
       end if;
@@ -322,12 +328,13 @@ package body Zone is
             end loop;
             if Cnt > 0 then
                U := Su / Long_Float (Cnt); V := Sv / Long_Float (Cnt);
-               Width := Long_Float (Natural'Max (Bx1 - Bx0, By1 - By0) + 1);
+               Wide := Long_Float (Natural'Max (Bx1 - Bx0, By1 - By0) + 1);
+               Thin := Long_Float (Natural'Min (Bx1 - Bx0, By1 - By0) + 1);
                Ok := True;
             end if;
          end;
       end;
-   end Tip_Band;
+   end Tip_Section;
 
    function Lobe_Pixels (Z : Hand_Zone; W, Hh : Natural) return Bools is
       N : constant Natural := W * Hh;
