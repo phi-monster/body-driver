@@ -8065,8 +8065,10 @@ package body Act is
                        Along : Geom.V3 := [0.0, 0.0, -1.0]) is
       Hc : constant Integer := (if Arm < Natural (C.Map.Cam_On_Arm.Length) then C.Map.Cam_On_Arm (Arm) else -1);
       Notch : constant Long_Float := (if Arm * Chan.Per_Arm + 3 < Natural (C.Map.Amp.Length) then C.Map.Amp (Arm * Chan.Per_Arm + 3) else 0.0);
-      --  一条命令最多转多少 = 开机量出来的"一条命令转得到的最大一档"× 脑的档位(09-27 起;原来是 16 倍转动探针幅度)
-      Cap : constant Long_Float := (if Hc >= 0 and then Natural (Hc) < Natural (C.Geo.Length) then C.Geo (Natural (Hc)).Stride_Rot * Amt else 0.0);
+      --  一条命令最多转多少 = 开机按运动学量出来的"一条命令转得到的最大一档"(看着走,09-28 定:步子是身体的事,不再乘脑的档位;
+      --  C1 09-29:乘了一半,转 0.4 rad 花 5 条命令)。Amt 不再用来定步子
+      pragma Unreferenced (Amt);
+      Cap : constant Long_Float := (if Hc >= 0 and then Natural (Hc) < Natural (C.Geo.Length) then C.Geo (Natural (Hc)).Stride_Rot else 0.0);
    begin
       Event := Null_Unbounded_String; Steps_Taken := 0;
       if Hc < 0 or else Natural (Hc) >= Natural (C.Geo.Length) or else Notch <= 0.0 or else Cap <= 0.0 then
@@ -8461,7 +8463,9 @@ package body Act is
       --  又因为目标在桌面高度而无解 ⇒ 静默不动。GB5 的球心离桌面 3.4 cm,一步 170 mm 过得去;平躺的剪刀过不去。
       --  ⚠️ 我先写过一版"走成了加倍、没走成减半",被自由棘轮拦下(owner 09-03:驱动不许自己调步子)—— 已撤。
       --  命令了没走到 ⇒ 我不自己换打法,如实说"没走成"交回脑(它可以说 small,也可以说合手)。
-      Step_Cap : constant Long_Float := Stride_Of (C, Arm) * Amt;   --  一条命令最多走多远 = 量出来的最大一档 × 脑的档位
+      --  一条命令最多走多远:看着走(09-28 定)—— 不再乘脑的档位;远的时候走还差的六成再看一眼(下面的 Frac),
+      --  一条命令走不到的那一截由"到过的范围 + 往外一步"拆开、手一动就跟着往前重发(Selfmap.Go);量出来的最大一档只用来判"量过没有"
+      Step_Cap : constant Long_Float := (if Stride_Of (C, Arm) > 0.0 then Long_Float'Last else 0.0);
       --  🔴 被一个面顶住之后:顶住的只是【那个方向】(命令了没走到的那个方向,量出来的),剩下的误差里沿着面的那一部分照样走得了。
       --  H12 2026-09-22 实测:垂直下探碰到桌面即停,此刻剪刀在两指正前方 0.021 m(沿桌面);整段就此停下 ⇒ 合手合了个空(读数 0.000 = 空手值)。
       --  "touching" 要的是合拢点到它身上;桌面不让我再往下,不等于不让我往前。这是在量到的接触下继续解同一个约束,不是换打法。
