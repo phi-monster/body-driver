@@ -11,8 +11,13 @@ with Geom; use Geom;
 with Plug;
 with Bytes; use Bytes;
 with Ada.Containers.Vectors;
+with Ada.Strings.Unbounded;
 package Kinem is
-   Max_Joints : constant := 12;   --  一组关节读数最多几个(次数)
+   --  统计换算(正态噪声):一维残差的中位绝对偏差 × Mad_Sigma = 标准差(1 / Φ⁻¹(3/4))
+   Mad_Sigma : constant := 1.4826;
+   --  Huber 的门,以量到的 σ 为单位:正态噪声下效率 95% 的那个数(Huber 1964 的约定)。Robust_LM、每根轴起步的网格(Best_Phi)、
+   --  ② 定比例都用它 —— 残差一律先除以量到的 σ 再比(09-30 以前 kinem 自己喂的是像素,门 1.0 = "1 像素";jointboot 喂白化的,同一个 1 是 1σ)
+   Huber_K : constant := 1.345;
    --  一根轴是"转"还是"沿轴走"(平移)是开机扫描量出来的(① 同一批配点按两样各解一次,残差小的那样;09-27 无人机那一半):
    --  转:W = 转轴方向(单位向量),P = 轴上一点,读数差 = 转角(弧度);
    --  走:W = 走的方向 × 每一个读数单位走多远(模型单位 / 读数单位,长短是量出来的),P 不用(0)
@@ -21,7 +26,16 @@ package Kinem is
       P : V3 := [0.0, 0.0, 0.0];   --  轴上一点(参照眼系,模型单位);走的关节不用
       Slide : Boolean := False;    --  True = 沿 W 走(平移关节)
    end record;
-   type Axis_Array is array (0 .. Max_Joints - 1) of Axis;
+   package Axis_Vectors is new Ada.Containers.Vectors (Natural, Axis);
+   --  一只手的一串轴:根数跟着这组读数有几个走,不设上限(09-30:原来按 12 根开死,读数多于 12 个的那一组,
+   --  多出来的关节被悄悄截掉 —— 它们照样带着眼动,运动学错而且不报)。
+   --  读 Ax (J):还没写过的那根 = 缺省的轴;写 Ax (J):根数不够就先添到 J + 1 根(添的都是缺省的轴)
+   type Axes is tagged record
+      V : aliased Axis_Vectors.Vector;
+   end record
+     with Constant_Indexing => Axis_Of, Variable_Indexing => Axis_Ref;
+   function Axis_Of (A : Axes; J : Natural) return Axis;
+   function Axis_Ref (A : aliased in out Axes; J : Natural) return Axis_Vectors.Reference_Type;
    --  一个像素位置(配点在它那一帧里问的那个格点)
    type Px is record
       U, V : Long_Float := 0.0;
@@ -30,7 +44,7 @@ package Kinem is
    type Model is record
       Valid : Boolean := False;
       N : Natural := 0;                --  几根轴(= 这组关节读数几个)
-      Ax : Axis_Array;
+      Ax : Axes;
       F, Cx, Cy : Long_Float := 0.0;   --  手上那只眼的焦距(像素)、主点
       Q0 : Floats;                     --  参照读数
       Eye : Px_Vectors.Vector;         --  长在这只眼上的像素(Fit 按 Eye_Pixels 量;解、三角都不用从它们出发的配点);身体文件不存(开机以后用不着)
@@ -68,6 +82,8 @@ package Kinem is
       Rho_Pairs : Natural := 0;        --  ② 用了几对(两帧加起来至少两个关节离开参照读数的)
       Rho_Start_Px, Rho_Px : Long_Float := 0.0;   --  ② 三对起步最好的那个(截断到 3 px 的均方根)、全部重解以后(中位):这些配点的 Sampson 残差(像素)
       Med_Px, P90_Px : Long_Float := 0.0;   --  ③ 最后一起解的 Sampson 残差(像素)中位 / 九成
+      Sig_Px : Long_Float := 0.0;      --  ③ 最后一轮量到的配点噪声 σ(像素;Mad_Sigma × 全部配点 Sampson 残差的中位,残差除以它再进 Huber)
+      Rounds : Natural := 0;           --  ③ "按模型重挑内点 + 一起解"做了几轮(做到内点集不再变)
       N_Corr, N_Used : Natural := 0;   --  配点总数 / 进最后一起解的内点数
       Eye_Px, Eye_Corrs : Natural := 0;   --  长在眼上的像素几个、从它们出发的配点几笔(不进解;见 Eye_Pixels)
       Flipped : Boolean := False;      --  平移整体反了一次号(Sampson 分不出,按点在不在两只眼前面定)
@@ -75,7 +91,10 @@ package Kinem is
       Mv_Start_Px, Mv_Px, Mv_P90_Px : Long_Float := 0.0;   --  ④ 重投影残差(像素):起步中位、解完中位 / 九成
       Mv_Iters : Natural := 0;
       Mv_Passes : Natural := 0;        --  ④ 做了几遍(从上一遍的结果再做,直到残差中位不再降;最后一遍只是确认)
-      Secs : Floats;                   --  各步用了几秒(墙上时间):① 网格、① 精修、①b 焦距和各轴一起、② 比例、③ 一起解(两轮)、④ 多视图
+      Mv_Rounds : Natural := 0;        --  ④ 留下的那一遍里"重挑内点 + 解"做了几轮(做到内点集不再变)
+      Mv_Sig_Px : Long_Float := 0.0;   --  ④ 量到的配点噪声 σ(像素;重投影残差垂直于对极线那一分量的 Mad_Sigma × 中位 —— 远近解掉的只是沿对极线那一分量)
+      Secs : Floats;                   --  各步用了几秒(墙上时间):① 网格、① 精修、①b 焦距和各轴一起、② 比例、③ 一起解、④ 多视图
+      Unsettled : Ada.Strings.Unbounded.Unbounded_String;   --  碰到保险上限还没收住的那几步(空 = 每一步都做到了不再变);不空就照实印出来
    end record;
 
    --  每根轴单独起步收格子的门:别的关节偏得让画面挪不到 1 像素(按焦距网格最长那档算,最严)= 1 ÷ 最长焦距(弧度 / 读数单位)。
@@ -120,7 +139,9 @@ package Kinem is
    end record;
    package Track_Pt_Vectors is new Ada.Containers.Vectors (Natural, Track_Pt);
    --  按模型把每条轨迹(Pt >= 0 的配点,按 Pt 归到一起)的点解出来;只给起点在 Only_I 那帧的(-1 = 全部)、至少 Min_Views 帧看见的;
-   --  Sig_Px = 这些轨迹重投影残差的中位 × 1.4826(正态下中位换标准差,统计常数);从 M.Eye 那些像素出发的配点不用(同 Fit)
+   --  Sig_Px = 这些轨迹配点的噪声 σ(像素,每个方向):重投影残差垂直于对极线那一分量的 Mad_Sigma × 中位 —— 远近怎么解都动不了这一分量,
+   --  它就是一维正态(09-30 改:原来 1.4826 × 二维残差长度的中位,多视图轨迹上长度的中位 = 1.1774σ ⇒ 偏大 1.75 倍;
+   --  只有两帧的轨迹沿对极线那一分量被远近解掉、长度只剩一维 ⇒ 按二维换也不对);从 M.Eye 那些像素出发的配点不用(同 Fit)
    procedure Track_Points (M : Model; Frames : Frame_Vectors.Vector; Cs : Corr_Vectors.Vector; Only_I : Integer; Min_Views : Natural;
                            Tracks : out Track_Pt_Vectors.Vector; Sig_Px : out Long_Float);
 
@@ -129,11 +150,14 @@ package Kinem is
    --  一团点里的那张面(同样的最小中位数):面上一点 P0、单位法向 Nrm
    procedure Robust_Plane (X : V3_Array; P0, Nrm : out V3; Inliers : out Natural; Med : out Long_Float);
 
-   --  抗野点的 LM(数值雅可比):Resid 把全部残差填进 R(长度 N_R);前 N_Rob 个按 Huber(1,残差要先按自己的噪声归一)迭代加权,后面的原样。
-   --  拿出来给别的包用(几只手放进一个世界,2026-09-26)
+   --  抗野点的 LM(数值雅可比):Resid 把全部残差填进 R(长度 N_R);前 N_Rob 个按 Huber(门 Huber_K)迭代加权,后面的(约束行)原样。
+   --  调用约定(09-30 统一):前 N_Rob 个残差一律是除以量到的 σ 之后的(以 σ 为单位)—— kinem 自己的 Sampson 像素残差除以当场量到的
+   --  Mad_Sigma × 中位,jointboot 放进世界的是白化过的。拿出来给别的包用(几只手放进一个世界,2026-09-26)。
+   --  一轮里阻尼一直往上调,直到代价降了、或者步子小到参数的数值分辨率以下(= 到底了;09-30 以前最多调 8 次就判到底,平谷里停早)。
+   --  Done = 收住了(这一步降得不到十亿分之一,或者步子已经小到数值分辨率以下);False = 做满 Iters 还在降:Iters 只当保险,调用方照实报
    type Vec is array (Natural range <>) of Long_Float;
    procedure Robust_LM (X : in out Vec; N_R, N_Rob : Natural; Iters : Positive; Step : Vec;
-                        Resid : not null access procedure (X : Vec; R : out Vec));
+                        Resid : not null access procedure (X : Vec; R : out Vec); Done : out Boolean);
 
    --  转动 + 平移 ⇒ 驱动的位姿格式 [x, y, z, qw, qx, qy, qz](四元数取 w ≥ 0 那一半)
    function To_Pose (R : M3; T : V3) return Plug.Arm_Pose;
