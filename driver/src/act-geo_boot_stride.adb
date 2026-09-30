@@ -36,6 +36,8 @@ begin
                Tried : Natural := 0;   --  真试过几档(对方复位打断时一档没试就不许下"走不了路"的结论:V1C/V1E 右臂就是这么被冤枉的)
                --  先往上探(离桌面远,安全);第一档往上就走不到(手在上限)⇒ 往下探。哪个方向走得到就记哪个
                Dirs : constant array (1 .. 2) of Long_Float := [1.0, -1.0];
+               --  这只手空走的底(走一步判挡没挡用:开头装进开机探针量的那几步,每一档判成空走的再加进来)
+               Wk : Selfmap.Walk;
             begin
                --  (09-27 起不再每停给不动的眼打指尖标记:不动的眼由开机前半段对齐量了,那些标记只给旧的标法用;一笔要合一次爪、约 11 拍)
                for Dir of Dirs loop
@@ -51,19 +53,32 @@ begin
                         Del : Table.Vec;
                         Ok : Boolean;
                         Got : Long_Float;
+                        Legs : Selfmap.Leg_Vectors.Vector;
+                        Rs : Selfmap.Leg_Step_Vectors.Vector;
+                        Frames : Natural;
+                        Lim : Selfmap.Limits;   --  一整步、不另设上限,到了一步看得见的那一档以内就算到(同 Step_Arm 的 Geo_Settle)
+                        Rep : Selfmap.Leg_Step;
                      begin
                         Av (2) := Dir * Ln;
-                        Step_Arm (L, C, F, A, Av, Jaw, Del, Ok, Geo_Settle => True);
+                        --  走一步(Selfmap.Step):目标 = 此刻的位姿沿"上"(位姿系 z)挪这一档
+                        Legs.Append (Selfmap.Leg'(Arm => A, Goal => Chan.Compose (F.EE (A), Av), Jaw => <>));
+                        Selfmap.Step (L, C.Map, Legs, Lim, F, Wk, Rs, Frames, Ok);
+                        if not Rs.Is_Empty then
+                           Rep := Rs (0);
+                        end if;
+                        Del := Rep.Got;
                         Got := Dir * Del (2);
                         Tried := Tried + 1;
-                        Geo_Say ("第" & Codec.Img (A + 1) & " 只手:一条命令往" & (if Dir > 0.0 then "上 " else "下 ") & Mm (Ln) & " ⇒ 实到 " & Mm (Got));
+                        Geo_Say ("第" & Codec.Img (A + 1) & " 只手:一条命令往" & (if Dir > 0.0 then "上 " else "下 ") & Mm (Ln) & " ⇒ 实到 " & Mm (Got)
+                                 & (if Rep.Blocked_T then "(比空走时少走得多 ⇒ 这一档走不到)" else ""));
                         declare
                            Back : Table.Vec := Table.Zero_Vec;
                         begin
                            Back (0) := -Del (0); Back (1) := -Del (1); Back (2) := -Del (2);
                            Step_Arm (L, C, F, A, Back, Jaw, Del, Ok, Geo_Settle => True);
                         end;
-                        exit when Got + Got < Ln;
+                        --  这一档走不到 = 这一步自己停下、没到、少走的比空走时多出 Blocked 的门(原来:实到不到一半 —— 走 55% 也算走得到)
+                        exit when Rep.Blocked_T;
                         Best := Ln;
                      end;
                   end loop;
