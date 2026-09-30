@@ -1005,9 +1005,6 @@ bodyfile-load.adb	Natural (Pv2 (8)), Pv2 (9), Pv2 (10), Pv2 (11), Pv2 (12));	10	
 bodyfile-load.adb	Natural (Pv2 (8)), Pv2 (9), Pv2 (10), Pv2 (11), Pv2 (12));	11	格式	零件记录的字段位置(bodyfile-load.adb:229)
 bodyfile-load.adb	Natural (Pv2 (8)), Pv2 (9), Pv2 (10), Pv2 (11), Pv2 (12));	12	格式	零件记录的字段位置(bodyfile-load.adb:229)
 bodyfile-load.adb	Natural (Pv2 (8)), Pv2 (9), Pv2 (10), Pv2 (11), Pv2 (12));	9	格式	零件记录的字段位置(bodyfile-load.adb:229)
-bodyfile-load.adb	if Natural (Aa.Length) = 7 then	7	格式	瓣记录 7 个字段(bodyfile-load.adb:154)
-bodyfile-load.adb	if Natural (Bb.Length) = 7 and then Z.N_Lobes = 2 then	2	调参数	只有瓣数 = 2 才读回第二瓣:握区记录只有 A/B 两格(bodyfile-load.adb:157)	装回身体时读几瓣手指	高	握区的瓣改成向量,按存的 n_lobes 逐瓣读回;瓣数只来自量(Zone 连通块判定)。与 zone.adb 两瓣上限同改
-bodyfile-load.adb	if Natural (Bb.Length) = 7 and then Z.N_Lobes = 2 then	7	格式	瓣记录 7 个字段(bodyfile-load.adb:157)
 bodyfile-load.adb	if Natural (Bx.Length) = 4 then	4	格式	框字段 x0,y0,x1,y1(bodyfile-load.adb:151)
 bodyfile-load.adb	if Natural (Pv2.Length) = 13 and then Pv2 (0) >= 0.0 and then Integer (Pv2 (0)) <= Chan.Per_Arm then	13	格式	身体图零件记录 13 个字段(bodyfile-load.adb:227)
 bodyfile-save.adb	"" & Codec.Img (Zone.Lobe_Of (Z, 1).X0) & "" & Codec.Img (Zone.Lobe_Of (Z, 1).Y0) & "" & Codec.Img (Zone.Lobe_Of (Z, 1).X1) & "" & Codec.Img (Zone.Lobe_Of (Z, 1).Y1) & ""	1	结构	第二瓣的下标 Zone.Lobe_Of (Z, 1):握区今天还按两瓣存、这一处按两瓣读(第 0 步把 Z.B 换成走唯一的取瓣口子;按瓣数走归大并行路 2 / 用它的那一路)(bodyfile-save.adb:99)
