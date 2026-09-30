@@ -89,7 +89,7 @@ begin
                   else "  MY RULER: I have not measured my own size yet, so any length I tell you is only in my own scale, "
                        & "which means nothing outside this body.") & ASCII.LF);
       --  没有手指的臂照实说一句(PLAN V1b 无人机第 2 条:"我没有手指,长度只有我自己的比例")
-      for A in 0 .. C.Map.Arms - 1 loop
+      for A in 0 .. Selfmap.Graph.Arm_Count (C.Map) - 1 loop
          if not Arm_Has_Fingers (C, A) then
             Append (T, "  I HAVE NO FINGERS on arm " & Codec.Img (A + 1) & ": I pushed its grip channel from one end to the other and nothing in any of my pictures moved. "
                     & "I cannot hold, pinch or lift anything with it." & ASCII.LF);
@@ -101,11 +101,13 @@ begin
          for I in 0 .. Natural (C.Tables.Length) - 1 loop
             declare
                Se : constant Stored_Effect := C.Tables (I);
+               --  这张表第 K 列 = 这条臂第 K 个位姿通道;通道号问身体图(不按"臂 × 每臂几个 + K"算)
+               Chs : constant Ints := Selfmap.Graph.Pose_Channels (C.Map, Se.Arm);
             begin
                if Se.Cam = C.Cam and then Se.Kind = Piece_Pt and then Said < 4 then
-                  for K in 0 .. Chan.Per_Arm - 1 loop
+                  for K in 0 .. Natural (Chs.Length) - 1 loop
                      if Se.Trust (K) and then Said < 4 then
-                        Append (T, "  I KNOW: push channel " & Codec.Img (Se.Arm * Chan.Per_Arm + K)
+                        Append (T, "  I KNOW: push channel " & Codec.Img (Chs (K))
                                 & " by one unit and a piece of me travels "
                                 & Codec.Fmt (Sqrt (Se.E.B (K, 0) ** 2 + Se.E.B (K, 1) ** 2), 3)
                                 & " of a frame here - learned " & Codec.Img (Se.N_Learned)
@@ -130,7 +132,7 @@ begin
                  & " So my sense of distance is inflated by at least that much. I use it for which way, never for how far."
                  & ASCII.LF);
       end if;
-      for A in 0 .. C.Map.Arms - 1 loop
+      for A in 0 .. Selfmap.Graph.Arm_Count (C.Map) - 1 loop
          for Cm in 0 .. C.Map.N_Cams - 1 loop
             if Cam_Arm (C, Cm) /= Integer (A) and then Track_Idx (C, A, Cm) < Natural (C.Zones.Length)
               and then Cm = C.Cam
@@ -185,13 +187,14 @@ begin
    if not Qmode then
       Append (T, "PIECES OF YOURSELF (measured just now: you moved one channel at a time and watched which part of the picture followed; you closed each hand on nothing and watched which pixels swept). Each is boxed and NUMBERED on the picture in orange:" & ASCII.LF);
    end if;
-   for A in 0 .. C.Map.Arms - 1 loop
+   for A in 0 .. Selfmap.Graph.Arm_Count (C.Map) - 1 loop
     --  一条臂上量到几个抓握通道就列几组:两指手 1 组,五指手 5 组。代码里没有"一只手一个夹爪"这个假设。
     for Jk in 0 .. Jaws_Of (C, A) - 1 loop
       declare
          Z : constant Zone.Hand_Zone := Zone_Of (C, A, Cam, Jk);
          Tr : constant Zone_Track := (if Track_Idx (C, A, Cam) < Natural (C.Zones.Length) then C.Zones (Track_Idx (C, A, Cam)) else (others => <>));
          Own_Cam : constant Boolean := Cam_Arm (C, Cam) = Integer (A);
+         N_Pose : constant Natural := Natural (Selfmap.Graph.Pose_Channels (C.Map, A).Length);   --  这条臂几个位姿通道(问身体图)
          Du : constant Long_Float := (if Own_Cam then 0.0 else Tr.Cu - Z.Cu);
          Dv : constant Long_Float := (if Own_Cam then 0.0 else Tr.Cv - Z.Cv);
          procedure Finger (Lb : Zone.Lobe; Which : Natural) is
@@ -260,7 +263,7 @@ begin
          end if;
          --  全身零件:每个通道带的那一块(从那个关节往外的全部),位置按此刻位姿从身体图来
          if not Own_Cam and then Jk = 0 then
-            for K in 0 .. Chan.Per_Arm - 1 loop
+            for K in 0 .. N_Pose - 1 loop
                declare
                   Pc : constant Schema.Part_Pos := Tr.Pieces (K);
                   It : Item;

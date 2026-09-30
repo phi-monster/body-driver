@@ -17,10 +17,13 @@ procedure Probe_Effects (L : in out Plug.Link; C : in out Context; F : in out Pl
    Floor_S : array (0 .. Natural (Pts.Length) - 1) of Long_Float := [others => 0.0];
    Floor_A : array (0 .. Natural (Pts.Length) - 1) of Long_Float := [others => 0.0];
    Z : constant Zone.Hand_Zone := Zone_Of (C, Arm, Cam);
+   --  这条臂的位姿通道(问身体图,大并行 I1):响应表第 K 列 = 第 K 个位姿通道,通道号 = Chs (K);不按"臂 × 每臂几个 + K"算
+   Chs : constant Ints := Selfmap.Graph.Pose_Channels (C.Map, Arm);
+   N_Ch : constant Natural := Natural (Chs.Length);
    --  一次推动只证明"它动过",证明不了"它稳"。同一个推法重复这么多次,量散布(次数,无量纲)。
    Reps_Wanted : constant := 3;
    N_Pts : constant Natural := Natural (Pts.Length);
-   type Sum_Grid is array (0 .. N_Pts - 1, 0 .. Chan.Per_Arm - 1, 0 .. Table.Rows - 1) of Long_Float;
+   type Sum_Grid is array (0 .. N_Pts - 1, 0 .. N_Ch - 1, 0 .. Table.Rows - 1) of Long_Float;
    S1 : Sum_Grid := [others => [others => [others => 0.0]]];   --  各次列值之和
    S2 : Sum_Grid := [others => [others => [others => 0.0]]];   --  各次列值平方和
    --  🔴🔴 来回对表(2026-08-27 NV3 第一次上机就抓到一个符号错:分歧 2.539 / 共识 0.019):
@@ -29,18 +32,18 @@ procedure Probe_Effects (L : in out Plug.Link; C : in out Context; F : in out Pl
    --  判据零系数:两遍的【分歧】要小于两遍的【共识】。
    B1 : Sum_Grid := [others => [others => [others => 0.0]]];   --  去程那一遍的列
    B2 : Sum_Grid := [others => [others => [others => 0.0]]];   --  回程那一遍的列
-   Nb : array (0 .. Chan.Per_Arm - 1) of Natural := [others => 0];
+   Nb : array (0 .. N_Ch - 1) of Natural := [others => 0];
    Agree_Out : Table.Vec := [others => -1.0];   --  每根通道:分歧 ÷ 共识(<1 才算稳)
    --  🔴 每(通道,行)自己的来回对账结果。对不上的【那一行】清零 = "这根通道对这一行没有意见"。
    --  一开始全是 True:没对过表的行照原样用(没量过不等于量出来是错的)。
-   Row_Ok : array (0 .. Chan.Per_Arm - 1, 0 .. Table.Rows - 1) of Boolean := [others => [others => True]];
-   Said_Wide : array (0 .. Chan.Per_Arm - 1) of Boolean := [others => False];
-   Nrep : array (0 .. Chan.Per_Arm - 1) of Natural := [others => 0];
+   Row_Ok : array (0 .. N_Ch - 1, 0 .. Table.Rows - 1) of Boolean := [others => [others => True]];
+   Said_Wide : array (0 .. N_Ch - 1) of Boolean := [others => False];
+   Nrep : array (0 .. N_Ch - 1) of Natural := [others => 0];
    --  🔴 上一轮(幅度的一半)这一通道最多的那个点跑了多远。加倍之后【一点没多跑】⇒ 再加也没用,
    --  这一列就是零 —— 零本身是一次正确的测量("这个通道不动它")。
    --  HC 实测:腕转那几根一路加码到 0.8192 rad(47°,owner 看 JA 视频原话"机械臂全程在发癫"),
    --  每一档都是 0.0000 画幅,加了五档等于白甩五次。
-   Last_Ran : array (0 .. Chan.Per_Arm - 1) of Long_Float := [others => -1.0];
+   Last_Ran : array (0 .. N_Ch - 1) of Long_Float := [others => -1.0];
    --  重复够了(或者中途翻脸了)⇒ 把均值写进表,把散布÷|均值| 写进散布格
    procedure Finalise (K : Natural) is
    begin
@@ -85,10 +88,10 @@ begin
    Trust := [others => False];
    Jaw := Selfmap.Jaw_All (F, Arm);
    for I in 0 .. Natural (Pts.Length) - 1 loop
-      Table.Reset (Effs (I), Chan.Per_Arm, 1.0);
-      for K in 0 .. Chan.Per_Arm - 1 loop
+      Table.Reset (Effs (I), N_Ch, 1.0);
+      for K in 0 .. N_Ch - 1 loop
          declare
-            Am : constant Long_Float := Long_Float'Max (1.0e-6, C.Map.Amp (Arm * Chan.Per_Arm + K));
+            Am : constant Long_Float := Long_Float'Max (1.0e-6, C.Map.Amp (Chs (K)));
          begin
             Table.Set_Prior (Effs (I), K, 100.0 / (Am * Am));   --  先验按探针幅度定(倍数,无量纲)
          end;
@@ -146,12 +149,12 @@ begin
       end;
    end if;
    Ok := True;
-   Put_Line ("[身]   这些点还没有响应表 ⇒ 六个通道各推一下量列(幅度从开机看得见的那一档起翻倍,到点真的动过地板为止)");
-   --  六个通道一起解:转动不禁(owner 2026-09-07:禁了就永远和桌面平行,格斗全成直线)。让转动有对错的是"两根手指各自到位":
+   Put_Line ("[身]   这些点还没有响应表 ⇒ 这条臂的 " & Codec.Img (N_Ch) & " 个位姿通道各推一下量列(幅度从开机看得见的那一档起翻倍,到点真的动过地板为止)");
+   --  这条臂的位姿通道一起解:转动不禁(owner 2026-09-07:禁了就永远和桌面平行,格斗全成直线)。让转动有对错的是"两根手指各自到位":
    --  转歪了必有一指不到位;让转动不比平移便宜的是按各自探针幅度计价。
-   for K in 0 .. Chan.Per_Arm - 1 loop
+   for K in 0 .. N_Ch - 1 loop
       declare
-         Chn : constant Natural := Arm * Chan.Per_Arm + K;
+         Chn : constant Natural := Chs (K);
          Amp : Long_Float := C.Map.Amp (Chn);
          --  🔴🔴 "能看见它动的那一档"(C.Map.Amp)是【开机时在某一台相机里】量的,而它被所有相机通用。
          --  同样推一下关节,手在不长在这条胳膊上的相机里跑的画幅小得多 ⇒ 在那台相机里还没推到看得见,
@@ -195,7 +198,7 @@ begin
                      --  就靠这个换算(还差几米 ÷ 一推走几米 = 还差几步)。关节读数给的,不碰深度图。
                      declare
                         Dm : Long_Float := 0.0;
-                        Ch_No : constant Natural := Arm * Chan.Per_Arm + K;
+                        Ch_No : constant Natural := Chn;
                      begin
                         for Q in 0 .. 2 loop
                            Dm := Dm + (F.EE (Arm) (Q) - Ee0 (Q)) ** 2;
@@ -372,7 +375,7 @@ begin
    --  按相机放宽的系数是 1 ⇒ "量自己"的上限正好等于起始档 ⇒ 一次都加不了 ⇒ 六根全被扔、
    --  表是空的、命令恒零,连着六步 `还差 0.0 步 · 命令 [0.000 ×6]`,读日志像"已经到位了"。
    --  身体当时每根都老实说了"这一段不用它",但没有一句话说"合起来 = 我这一段动不了"。
-   if (for all K in 0 .. Chan.Per_Arm - 1 => not Trust (K)) then
+   if (for all K in 0 .. N_Ch - 1 => not Trust (K)) then
       Put_Line ("[身]   🔴 这一段一根通道都没量到 ⇒ 我没有任何一条能用的走法。"
                 & "你给的幅度那一档不够我看清自己动了没有。");
       C.Blind_Say := S ("with the step size you gave me I could not see any of my channels move in this eye, "

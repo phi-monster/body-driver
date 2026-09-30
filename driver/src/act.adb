@@ -27,6 +27,7 @@ with Contact.Surface;
 with Instrument;
 with Lockstep;
 with Ada.Exceptions;
+with Selfmap.Graph;
 package body Act is
    Sigma_Mult : constant Long_Float := 3.0;   --  鼓出来超过背景自己稳健 σ 的几倍才算一块(在真实深度图上验过:3 中,5 杀光);无量纲
    Track_Win : constant Long_Float := 0.10;   --  一步里任何被跟踪的点在画面里最多跑十分之一画幅(跟踪窗,比例,无量纲)
@@ -49,9 +50,9 @@ package body Act is
       return (others => <>);
    end Zone_Of;
 
-   --  这条臂量到几个抓握通道就是几个;没有抓握通道(无人机、只有胳膊的身体)就是 0 —— 不按"至少一个"猜(09-30 原来 Max (1, …)、缺省 1)
-   function Jaws_Of (C : Context; Arm : Natural) return Natural is
-     (if Arm < Natural (C.Map.Jaws.Length) then C.Map.Jaws (Arm) else 0);
+   --  这条臂量到几个抓握通道就是几个;没有抓握通道(无人机、只有胳膊的身体)就是 0 —— 不按"至少一个"猜(09-30 原来 Max (1, …)、缺省 1)。
+   --  问身体图(Selfmap.Graph,大并行 I1),不读字段
+   function Jaws_Of (C : Context; Arm : Natural) return Natural is (Selfmap.Graph.Closing_Count (C.Map, Arm));
 
    --  这条臂第 K 个抓握通道带不带手指 = 开机把它推到头时,有没有哪台相机量出了握区(Zone.Measure:两次比较、不共用一帧都看见东西动了)。
    --  哪台都没有 ⇒ 这个通道什么都不带,不列手指 / 爪心、不数、不说"你的手指之间"(无人机 DR1 / DR2 2026-09-28:
@@ -73,7 +74,7 @@ package body Act is
    --  这具身体上有没有哪个抓握通道带手指
    function Any_Fingers (C : Context) return Boolean is
    begin
-      for A in 0 .. C.Map.Arms - 1 loop
+      for A in 0 .. Selfmap.Graph.Arm_Count (C.Map) - 1 loop
          for K in 0 .. Jaws_Of (C, A) - 1 loop
             if Has_Fingers (C, A, K) then
                return True;

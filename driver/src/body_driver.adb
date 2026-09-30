@@ -9,6 +9,7 @@ with Ada.Strings.Fixed;
 with Codec;
 with Plug;
 with Selfmap;
+with Selfmap.Graph;
 with Zone;
 with World;
 with Memory;
@@ -371,12 +372,15 @@ begin
       --  一条臂上有几个抓握通道是【量出来的】:两指手 1 个,五指手 5 个。每一个各合空一次,各成一个名词。
       --  C.Map.Jaws 这时一条臂一个数(从零量的是 Selfmap.Measure 数的;照用存的,前面已经核过身体文件记了这一项)⇒ 照它合空,不另设"至少一个"、
       --  不在缺了的时候当 1 个(原来是 `else 1`:身体文件不存这一项,装回以后五指手只剩第 0 号)
-      for A in 0 .. C.Map.Arms - 1 loop
-       for Jk in 0 .. C.Map.Jaws (A) - 1 loop
+      --  几条臂、每条臂几个合拢通道、它的位姿通道、长在它上面的眼,都问身体图(Selfmap.Graph,大并行 I1),不按下标认
+      for A in 0 .. Selfmap.Graph.Arm_Count (C.Map) - 1 loop
+       for Jk in 0 .. Selfmap.Graph.Closing_Count (C.Map, A) - 1 loop
          declare
             H : Zone.Hand;
             Reuse : Boolean := False;
             Old : Integer := -1;   --  存的手里,哪一个是这条臂的这个通道
+            Chs : constant Bytes.Ints := Selfmap.Graph.Pose_Channels (C.Map, A);
+            Own_Eyes : constant Bytes.Ints := Selfmap.Graph.Eyes_On (C.Map, A);   --  长在这条臂上的眼(一串:可以几只,可以没有)
          begin
             for I in 0 .. Natural (Stored_Hands.Length) - 1 loop
                if Stored_Hands (I).Arm = A and then Stored_Hands (I).K = Jk then
@@ -389,8 +393,8 @@ begin
                   Any_Zone : Boolean := False;
                begin
                   Reuse := True;
-                  for K in 0 .. Chan.Per_Arm - 1 loop
-                     if abs Dv (K) > Long_Float'Max (1.0e-6, C.Map.Amp (A * Chan.Per_Arm + K)) then
+                  for K in 0 .. Natural (Chs.Length) - 1 loop
+                     if abs Dv (K) > Long_Float'Max (1.0e-6, C.Map.Amp (Chs (K))) then
                         Reuse := False;
                      end if;
                   end loop;
@@ -403,23 +407,24 @@ begin
                   --  存的握区少了哪台相机的(H53 2026-09-23 实测:第 2 只手只存了 0、1 两台,它自己那只眼(第 2 台)没有 ⇒ 合爪方向、指头都量不出)
                   --  ⇒ 不照用,合空一次把每台相机的都量上
                   --  (装回时握区表按相机数补齐了空位,所以要看的是它自己那只眼的那一格量过没有,不是表有多长 —— H54 实测表长 3、第 2 台那格是空的)
-                  declare
-                     Hc : constant Integer := (if A < Natural (C.Map.Cam_On_Arm.Length) then C.Map.Cam_On_Arm (A) else -1);
-                  begin
-                     if Hc >= 0 and then (Natural (Hc) >= Natural (Stored_Hands (Natural (Old)).Zones.Length)
-                                          or else not Stored_Hands (Natural (Old)).Zones (Natural (Hc)).Valid)
-                     then
-                        Reuse := False;
-                        Put_Line ("[装] 第" & Natural'Image (A + 1) & " 只手第" & Natural'Image (Jk) & " 号抓握通道:存的握区里没有它自己那只眼(第"
-                                  & Codec.Img (Natural (Hc)) & " 台)的那一格 ⇒ 合空一次补量");
-                     elsif Hc >= 0 and then Natural (Hc) < Natural (F.Cams.Length)
-                       and then Natural (Stored_Hands (Natural (Old)).Zones (Natural (Hc)).Fingers.Length) /= F.Cams (Natural (Hc)).W * F.Cams (Natural (Hc)).H
-                     then
-                        --  旧的身体文件不存手指像素 ⇒ 指尖认不出(Zone.Tip_Px 要按手指像素找;X5C3 2026-09-26)⇒ 合空一次补量
-                        Reuse := False;
-                        Put_Line ("[装] 第" & Natural'Image (A + 1) & " 只手第" & Natural'Image (Jk) & " 号抓握通道:存的握区里没有手指像素(旧的身体文件不存)⇒ 合空一次补量");
-                     end if;
-                  end;
+                  --  长在这条臂上的眼每一只都要有(一条臂几只眼都行)
+                  for E of Own_Eyes loop
+                     declare
+                        Hc : constant Natural := Natural (E);
+                     begin
+                        if Hc >= Natural (Stored_Hands (Natural (Old)).Zones.Length) or else not Stored_Hands (Natural (Old)).Zones (Hc).Valid then
+                           Reuse := False;
+                           Put_Line ("[装] 第" & Natural'Image (A + 1) & " 只手第" & Natural'Image (Jk) & " 号抓握通道:存的握区里没有它自己那只眼(第"
+                                     & Codec.Img (Hc) & " 台)的那一格 ⇒ 合空一次补量");
+                        elsif Hc < Natural (F.Cams.Length)
+                          and then Natural (Stored_Hands (Natural (Old)).Zones (Hc).Fingers.Length) /= F.Cams (Hc).W * F.Cams (Hc).H
+                        then
+                           --  旧的身体文件不存手指像素 ⇒ 指尖认不出(Zone.Tip_Px 要按手指像素找;X5C3 2026-09-26)⇒ 合空一次补量
+                           Reuse := False;
+                           Put_Line ("[装] 第" & Natural'Image (A + 1) & " 只手第" & Natural'Image (Jk) & " 号抓握通道:存的握区里没有手指像素(旧的身体文件不存)⇒ 合空一次补量");
+                        end if;
+                     end;
+                  end loop;
                end;
             end if;
             if Reuse then
@@ -432,25 +437,27 @@ begin
                end if;
             end if;
             if (not Reuse) and then Use_Stored and then Old >= 0 then
-               declare
-                  Hc : constant Integer := (if A < Natural (C.Map.Cam_On_Arm.Length) then C.Map.Cam_On_Arm (A) else -1);
-               begin
-                  if Hc >= 0 and then Natural (Hc) < Natural (H.Zones.Length) and then Natural (Hc) < Natural (Stored_Hands (Natural (Old)).Zones.Length)
-                    and then H.Zones (Natural (Hc)).Valid and then Stored_Hands (Natural (Old)).Zones (Natural (Hc)).Valid
-                  then
-                     declare
-                        Zn : constant Zone.Hand_Zone := H.Zones (Natural (Hc));
-                        Zo : constant Zone.Hand_Zone := Stored_Hands (Natural (Old)).Zones (Natural (Hc));
-                     begin
-                        Put_Line ("[装]   第" & Natural'Image (A + 1) & " 只手上相机里的握区:这次 (" & Codec.Fmt (Zn.Cu, 3) & "," & Codec.Fmt (Zn.Cv, 3) & ") 深 " & Codec.Fmt (Zn.Depth, 3) &
-                                  " · 存的 (" & Codec.Fmt (Zo.Cu, 3) & "," & Codec.Fmt (Zo.Cv, 3) & ") 深 " & Codec.Fmt (Zo.Depth, 3));
-                     end;
-                  end if;
-               end;
+               for E of Own_Eyes loop
+                  declare
+                     Hc : constant Natural := Natural (E);
+                  begin
+                     if Hc < Natural (H.Zones.Length) and then Hc < Natural (Stored_Hands (Natural (Old)).Zones.Length)
+                       and then H.Zones (Hc).Valid and then Stored_Hands (Natural (Old)).Zones (Hc).Valid
+                     then
+                        declare
+                           Zn : constant Zone.Hand_Zone := H.Zones (Hc);
+                           Zo : constant Zone.Hand_Zone := Stored_Hands (Natural (Old)).Zones (Hc);
+                        begin
+                           Put_Line ("[装]   第" & Natural'Image (A + 1) & " 只手上相机里的握区:这次 (" & Codec.Fmt (Zn.Cu, 3) & "," & Codec.Fmt (Zn.Cv, 3) & ") 深 " & Codec.Fmt (Zn.Depth, 3) &
+                                     " · 存的 (" & Codec.Fmt (Zo.Cu, 3) & "," & Codec.Fmt (Zo.Cv, 3) & ") 深 " & Codec.Fmt (Zo.Depth, 3));
+                        end;
+                     end if;
+                  end;
+               end loop;
             end if;
             --  合空那一下真看见了手指 ⇒ 记进身体图:这个位姿下,这只手在每台(不长在它上面的)相机里在哪
             for Cm in 0 .. Natural (H.Zones.Length) - 1 loop
-               if A < Natural (C.Map.Cam_On_Arm.Length) and then C.Map.Cam_On_Arm (A) /= Integer (Cm) and then H.Zones (Cm).Valid and then A < Natural (F.EE.Length) then
+               if not Own_Eyes.Contains (Cm) and then H.Zones (Cm).Valid and then A < Natural (F.EE.Length) then
                   declare
                      Z : constant Zone.Hand_Zone := H.Zones (Cm);
                      X : Schema.Sample;
@@ -460,9 +467,9 @@ begin
                      X.Parts (Chan.Per_Arm + Jk) := (True, Z.Cu, Z.Cv, (if Picture.Is_Nan (Z.Depth) then 0.0 else Z.Depth), Z.X0, Z.Y0, Z.X1, Z.Y1, Z.N_Lobes, Zone.Lobe_Of (Z, 0).Cu, Zone.Lobe_Of (Z, 0).Cv, Zone.Lobe_Of (Z, 1).Cu, Zone.Lobe_Of (Z, 1).Cv);
                      --  别的通道带的零件:开机每个通道推过一下,跟着动的那块(从零量的这次才有;装回的身体图里已经带着)
                      begin
-                        for K in 0 .. Chan.Per_Arm - 1 loop
+                        for K in 0 .. Natural (Chs.Length) - 1 loop
                            declare
-                              Pi : constant Natural := (A * Chan.Per_Arm + K) * C.Map.N_Cams + Cm;
+                              Pi : constant Natural := Chs (K) * C.Map.N_Cams + Cm;
                            begin
                               if Pi < Natural (C.Map.Parts.Length) and then C.Map.Parts (Pi).Valid then
                                  declare
@@ -501,11 +508,24 @@ begin
    Put_Line ("[装] 开机量身体一共用了 " & Codec.Img (C.Boot_Steps) & " 拍(一拍 = 对方走一步;只记账)");
    Act.Init_Tracks (C);
    World.Init (C.Wld, C.Map.N_Cams);
-   for A in 0 .. C.Map.Arms - 1 loop
-      Put_Line ("[身] 第" & Natural'Image (A + 1) & " 只手上的相机:" & Integer'Image (C.Map.Cam_On_Arm (A)) & " · 各相机变化比例:" &
-                Codec.Fmt (C.Map.Cam_Frac (A * C.Map.N_Cams), 3) & " " & (if C.Map.N_Cams > 1 then Codec.Fmt (C.Map.Cam_Frac (A * C.Map.N_Cams + 1), 3) else "") & " " &
-                (if C.Map.N_Cams > 2 then Codec.Fmt (C.Map.Cam_Frac (A * C.Map.N_Cams + 2), 3) else ""));
+   --  每条臂上的眼(一串)和每台相机的变化比例(几台就印几台;原来只印前三台)
+   for A in 0 .. Selfmap.Graph.Arm_Count (C.Map) - 1 loop
+      declare
+         Eyes : constant Bytes.Ints := Selfmap.Graph.Eyes_On (C.Map, A);
+         Line : Unbounded_String := To_Unbounded_String ("[身] 第" & Natural'Image (A + 1) & " 只手上的相机:" & (if Eyes.Is_Empty then "没有" else ""));
+      begin
+         for E of Eyes loop
+            Append (Line, Integer'Image (E));
+         end loop;
+         Append (Line, " · 各相机变化比例:");
+         for Cm in 0 .. C.Map.N_Cams - 1 loop
+            Append (Line, (if Cm > 0 then " " else "") & Codec.Fmt (C.Map.Cam_Frac (A * C.Map.N_Cams + Cm), 3));
+         end loop;
+         Put_Line (To_String (Line));
+      end;
    end loop;
+   --  开机报告:身体图按通用问法念一遍(几条臂、各自的位姿通道 / 合拢通道 / 眼,不长在臂上的眼,扛着全身走的组)
+   Put_Line ("[身] " & Selfmap.Graph.Say (C.Map));
    C.Cam := C.Map.World_Cam;
    --  🔴 抓起过球的那三炮(GB5/GC2/GC4)开机都有这一行;09-20 把几何驾驶搬回 main 时漏了它,
    --  于是几何常数从不装回、Geo_Ready 恒假、整条几何走法是死代码。
