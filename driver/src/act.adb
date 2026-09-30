@@ -10881,6 +10881,49 @@ package body Act is
                         Blocked := not (for some D2 of Ds2 => Geom."=" (D2, Dl));   --  候选是同一批板点算的:没被挡就原样还在
                      end;
                   end if;
+                  --  被挡了 ⇒ 这一次新看见的点里挡住它的那几个(同 Board_Free_Spots 的挡法:落点圈里的;到别的瓣的带子里、高出那儿手指离面的);
+                  --  一个都没有 ⇒ 挡它的是以前看见的
+                  if Blocked then
+                     declare
+                        N_Circle, N_Strip : Natural := 0;
+                        Worst : Unbounded_String;
+                        Worst_Over : Long_Float := Long_Float'First;
+                     begin
+                        for Pt of New_Pts loop
+                           declare
+                              Hp : constant Long_Float := Dot ([Pt.Pw (0) - C.Board_Pt (0), Pt.Pw (1) - C.Board_Pt (1), Pt.Pw (2) - C.Board_Pt (2)], Nb);
+                              Q : constant Geom.V3 := [Pt.Pw (0) - Hp * Nb (0) - Spot (0), Pt.Pw (1) - Hp * Nb (1) - Spot (1), Pt.Pw (2) - Hp * Nb (2) - Spot (2)];
+                           begin
+                              if Geom.Norm (Q) <= R then
+                                 N_Circle := N_Circle + 1;
+                                 if Hp > Worst_Over then
+                                    Worst_Over := Hp;
+                                    Worst := To_Unbounded_String ("落点圈里离落点 " & Mm (Geom.Norm (Q)) & "、高 " & Mm (Hp));
+                                 end if;
+                              end if;
+                              for J in 1 .. Natural (Lp.Length) - 1 loop
+                                 declare
+                                    Aj : constant Geom.V3 := [Lp (J) (0) - Lp (0) (0), Lp (J) (1) - Lp (0) (1), Lp (J) (2) - Lp (0) (2)];
+                                    Ln_J : constant Long_Float := Geom.Norm (Aj);
+                                    Rho : constant Long_Float := (if Ln_J > 0.0 then Long_Float'Max (0.0, Long_Float'Min (Ln_J, Dot (Q, Aj) / Ln_J)) else 0.0);
+                                    Side : constant Long_Float := (if Ln_J > 0.0 then Geom.Norm ([Q (0) - Rho * Aj (0) / Ln_J, Q (1) - Rho * Aj (1) / Ln_J, Q (2) - Rho * Aj (2) / Ln_J])
+                                                                   else Geom.Norm (Q));
+                                 begin
+                                    if Side <= R and then Hp >= Rho * Tb (J) and then Rho > 0.0 then
+                                       N_Strip := N_Strip + 1;
+                                       if Hp - Rho * Tb (J) > Worst_Over then
+                                          Worst_Over := Hp - Rho * Tb (J);
+                                          Worst := To_Unbounded_String ("到第 " & Codec.Img (J) & " 条带子里沿带子 " & Mm (Rho) & "、高 " & Mm (Hp) & "(那儿手指离面 " & Mm (Rho * Tb (J)) & ")");
+                                       end if;
+                                    end if;
+                                 end;
+                              end loop;
+                           end;
+                        end loop;
+                        Geo_Say ("  挡住这一处的(这一次新看见的):落点圈里 " & Codec.Img (N_Circle) & " 个、带子里 " & Codec.Img (N_Strip) & " 个"
+                                 & (if N_Circle + N_Strip > 0 then ",最要紧的一个" & To_String (Worst) else " ⇒ 挡它的是以前看见的"));
+                     end;
+                  end if;
                   Geo_Say ("  压之前看底下(往下第一步前后两帧,眼挪了 " & Mm (Went) & "):问 " & Codec.Img (Natural (Q.Length)) & " 个点(格点 + 落点圈和带子里密铺的)、配上 "
                            & Codec.Img (Matched) & " 个、交成且两帧对得上 " & Codec.Img (Tri) & " 个(配点噪声 " & Codec.Fmt (Sig, 2) & " px)、比面高出的 "
                            & Codec.Img (Natural (New_Pts.Length)) & " 个(看见的一共 " & Codec.Img (Natural (C.Seen_Above.Length)) & ")⇒ "
