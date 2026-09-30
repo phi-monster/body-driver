@@ -2,7 +2,7 @@
 --  用来离线试"手上哪个点"的认法(G2C:同一只手换个姿势,头顶眼里的瓣数在 1 和 2 之间跳),不用再开一炮。
 --  用法:zoneexam open.pgm closed.pgm [turned.pgm 仪器主机 仪器端口 焦距 主点x 主点y [out_prefix]]
 --  给了转出去以后那一帧(第二张图 = 转之前停住的那一头)、配点仪器和这只眼的焦距 / 主点:照驱动判"哪头张开"那一段(Zone.Measure)
---  问那张格点配到哪,Kinem.Rides_On_Eye 判长在眼上 / 世界 / 分不开,数瓣里 / 合到的区里各有几个长在眼上、按两个比例之差判哪头张开
+--  问那张格点配到哪,Kinem.Fit_Eye_Turn + Classify_Rides 判长在眼上 / 世界 / 分不开,数瓣里 / 合到的区里各有几个长在眼上、按两个比例之差判哪头张开
 --  (灰度图按三个通道一样当彩图发;驱动发的是彩图)。给了 out_prefix 还写出手指、瓣两张掩码(PGM)。
 --  09-30 V1B69 第 1 只手按灰度判不出哪头张开:手一转光照就变,换成按配点判
 with Ada.Command_Line;
@@ -166,7 +166,69 @@ begin
                         J := J + 1;
                      end if;
                   end loop;
-                  Kinem.Rides_On_Eye (Eye, Pu, Pv, Bu, Bv, Rd, Sig, Settled);
+                  declare
+                     Rot : Geom.V3;
+                     Fitted : Boolean;
+                  begin
+                     Kinem.Fit_Eye_Turn (Eye, Pu, Pv, Bu, Bv, Rot, Sig, Settled, Fitted);
+                     if Fitted then
+                        Kinem.Classify_Rides (Eye, Rot, Sig, Pu, Pv, Bu, Bv, Rd);
+                        --  驱动同一段:瓣按长在眼上补全(张开的就是第二张图那一头时),打出补之前 / 之后每一瓣的尖
+                        declare
+                           Gr : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (Kinem.Gx * Kinem.Gy));
+                           Jg : Natural := 0;
+                           Z2 : Zone.Hand_Zone := Z;
+                           Ps : Zone.Probe_Vectors.Vector;
+                           Added : Natural := 0;
+                        begin
+                           for G in 0 .. Natural (Q.Length) - 1 loop
+                              if Mt (G).U >= 0.0 and then Mt (G).V >= 0.0 then
+                                 Gr.Replace_Element (G, Rd (Jg) = Kinem.Rides);
+                                 Jg := Jg + 1;
+                              end if;
+                           end loop;
+                           Ps := Zone.Refine_Probes (Z2, W, H, Gr);
+                           if not Ps.Is_Empty then
+                              declare
+                                 Q2 : Instrument.Match_Vectors.Vector;
+                                 Err2 : Unbounded_String;
+                                 Mu, Mv : Floats;
+                              begin
+                                 for P of Ps loop
+                                    Q2.Append (Instrument.Match_Pt'(U => P.U, V => P.V, others => <>));
+                                 end loop;
+                                 declare
+                                    M2 : constant Instrument.Match_Vectors.Vector :=
+                                      Instrument.Match (Ada.Command_Line.Argument (4), Natural'Value (Ada.Command_Line.Argument (5)), Rgb (Closed_G), W, H, Rgb (Turned), W, H, Q2, Err2,
+                                                        Coarse => False);
+                                 begin
+                                    if Natural (M2.Length) = Natural (Q2.Length) then
+                                       for G of M2 loop
+                                          Mu.Append (G.U); Mv.Append (G.V);
+                                       end loop;
+                                       Zone.Apply_Refine (Z2, W, H, Ps, Mu, Mv, Eye, Rot, Sig, Added);
+                                    else
+                                       Put_Line ("补全:配点仪器没配成 " & To_String (Err2));
+                                    end if;
+                                 end;
+                              end;
+                           end if;
+                           Put ("补全:问 " & Codec.Img (Natural (Ps.Length)) & " 个像素、并进 " & Codec.Img (Added) & " 个");
+                           for Kl in 0 .. Z2.N_Lobes - 1 loop
+                              declare
+                                 U0, V0, U1, V1, Wd, Th : Long_Float;
+                                 O0, O1 : Boolean;
+                              begin
+                                 Zone.Tip_Section (Z, Zone.Lobe_Of (Z, Kl), W, H, U0, V0, Wd, Th, O0);
+                                 Zone.Tip_Section (Z2, Zone.Lobe_Of (Z2, Kl), W, H, U1, V1, Wd, Th, O1);
+                                 Put (" | 瓣 " & Codec.Img (Kl) & " 尖 " & (if O0 then Codec.Fmt (U0, 1) & " " & Codec.Fmt (V0, 1) else "-") & " → "
+                                      & (if O1 then Codec.Fmt (U1, 1) & " " & Codec.Fmt (V1, 1) else "-"));
+                              end;
+                           end loop;
+                           New_Line;
+                        end;
+                     end if;
+                  end;
                   for I in Rd'Range loop
                      declare
                         Px : constant Natural := Natural (Long_Float'Floor (Pv (I))) * W + Natural (Long_Float'Floor (Pu (I)));

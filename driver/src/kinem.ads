@@ -169,7 +169,7 @@ package Kinem is
    --  配进一只手的腕眼时落在这儿的不可能是桌面上的点(09-28 H4 / H5:第二只手的桌面点配到第一只手画面里它自己那只白手上的 69 / 29 对,按真值全错、差 300–450 px)
    function On_Eye_Grid (Eye : Px_Vectors.Vector; U, V : Long_Float; W, H : Positive) return Boolean;
 
-   --  眼转了一下,画面里哪些点长在眼上(09-30,判抓握通道哪头张开):同一只眼转之前 / 转之后两帧,问的点 (Pu, Pv)、配到的 (Bu, Bv);
+   --  眼转了一下,画面里哪些点长在眼上(09-30,判抓握通道哪头张开、瓣按长在眼上补全):同一只眼转之前 / 转之后两帧,问的点 (Pu, Pv)、配到的 (Bu, Bv);
    --  G = 这只眼量过的焦距、主点、畸变(开机运动学量的)。驱动发的手的位姿就是这只眼的位姿,绕它转 = 眼在原地转:
    --  世界在画面里按一个转动挪(3 个数:视线 d 转成 R·d 再投回去,畸变照算),和世界多远无关;长在眼上的点(自己的手指、手里的东西)不挪。
    --  转动按全部点抗野点拟合:先最小二乘,再按 Tukey 双权迭代加权(残差除以当场量的 σ = Mad_Sigma × 残差分量的中位,门 Tukey_C),
@@ -183,7 +183,11 @@ package Kinem is
    --  原来(Zone.Measure)按灰度判"没跟着变的像素":手一转光照角度就变,手指没挪也整片亮暗十几级(V1B69 2026-09-30 第 1 只手)
    type Ride is (Rides, World, Unknown);
    type Ride_Vec is array (Natural range <>) of Ride;
-   procedure Rides_On_Eye (G : Cam_Geo; Pu, Pv, Bu, Bv : Vec; R : out Ride_Vec; Sig_Px : out Long_Float; Settled : out Boolean)
+   --  分两步(09-30):转动只拿铺满整幅的格点拟合(Fit_Eye_Turn;Fitted = False ⇒ 点不够 / 没有焦距),再拿它判任意一批点(Classify_Rides)。
+   --  判手指像素时要在手指那一块里逐像素问:那一批全挤在手指上,拿它们一起拟合,长在眼上的占了多数 ⇒ 拟合成"没转"(离线 V1B69:σ 17.9 px、一个都判不出)
+   procedure Fit_Eye_Turn (G : Cam_Geo; Pu, Pv, Bu, Bv : Vec; Rot : out V3; Sig_Px : out Long_Float; Settled, Fitted : out Boolean)
+     with Pre => Pv'Length = Pu'Length and then Bu'Length = Pu'Length and then Bv'Length = Pu'Length;
+   procedure Classify_Rides (G : Cam_Geo; Rot : V3; Sig_Px : Long_Float; Pu, Pv, Bu, Bv : Vec; R : out Ride_Vec)
      with Pre => Pv'Length = Pu'Length and then Bu'Length = Pu'Length and then Bv'Length = Pu'Length and then R'Length = Pu'Length;
 
    --  转动 + 平移 ⇒ 驱动的位姿格式 [x, y, z, qw, qx, qy, qz](四元数取 w ≥ 0 那一半)

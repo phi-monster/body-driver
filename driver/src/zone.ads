@@ -65,4 +65,25 @@ package Zone is
    function Lobe_Pixels (Z : Hand_Zone; W, Hh : Natural) return Bools;
    --  把手指像素从深度切块结果里剔掉(块心落在手指框或区框里 = 我自己)
    function Is_Self (Z : Hand_Zone; R : Picture.Region; W, Hh : Natural) return Boolean;
+
+   --  ── 瓣按"长在眼上"补全(09-30)──
+   --  瓣原来只按"张开 / 合上两头之间变了的像素"认:手指身后的背景和手指一样暗的那一截认不出。V1B69 第 1 只手左边那根手指上半截贴着暗的墙,
+   --  瓣的尖认低了 46 px(117,289 → 108,335),顺着它那条视线压下去解出的尖离视线 0.25 单位(V1B66–68 0.04–0.08),指尖量歪;
+   --  那一炮量握区时手停的姿态是开机自检最后走到的那一处(扫描格改了以后它跟着变),背景是随手的。手指跟着眼走 ⇒ 转一下眼,在转之前 / 转之后两帧里
+   --  不挪的像素就是手指,和背景亮暗无关(离线 V1B69:左边那根整根认出来,尖顶到 y = 256)。
+   --  一个要问的像素:在哪(按像素中心问)、归哪一瓣
+   type Probe is record
+      U, V : Long_Float := 0.0;
+      Lobe : Natural := 0;
+   end record;
+   package Probe_Vectors is new Ada.Containers.Vectors (Natural, Probe);
+   --  要逐像素问的那些(纯函数):格点(Kinem.Gx × Gy,按格子)里判成长在眼上的(Grid_Ride),从和某一瓣的框重叠的那几格起,沿长在眼上的格子
+   --  (8 邻)往外连,每一格归最先连到它的那一瓣;连到的格子、再加它们四周不长在眼上的那一圈(手指边上的半格),里面每一个像素都问。
+   --  挨着别的瓣的格子的那一格不问(两瓣在手指像素里不许连成一块,不然两瓣的尖按同一块算);这一格没收到就不补。
+   function Refine_Probes (Z : Hand_Zone; W, Hh : Natural; Grid_Ride : Bools) return Probe_Vectors.Vector;
+   --  问回来的(纯函数):Mt (I) = Ps (I) 在转出去那一帧里配到的像素(U < 0 = 配不出);按格点拟合的转动 Rot、配点噪声 Sig(Kinem.Fit_Eye_Turn)
+   --  逐个判(Kinem.Classify_Rides),长在眼上的并进手指像素(Z.Fingers),那一瓣的框扩到连它们。Added = 新并进来的像素数
+   procedure Apply_Refine (Z : in out Hand_Zone; W, Hh : Natural; Ps : Probe_Vectors.Vector; Mu, Mv : Bytes.Floats; G : Geom.Cam_Geo; Rot : Geom.V3;
+                           Sig : Long_Float; Added : out Natural)
+     with Pre => Natural (Mu.Length) = Natural (Ps.Length) and then Natural (Mv.Length) = Natural (Ps.Length);
 end Zone;

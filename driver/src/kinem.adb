@@ -420,7 +420,7 @@ package body Kinem is
       Free (R0); Free (Rp); Free (Rn); Free (Jc); Free (Wt);
    end Robust_LM;
 
-   procedure Rides_On_Eye (G : Cam_Geo; Pu, Pv, Bu, Bv : Vec; R : out Ride_Vec; Sig_Px : out Long_Float; Settled : out Boolean) is
+   procedure Fit_Eye_Turn (G : Cam_Geo; Pu, Pv, Bu, Bv : Vec; Rot : out V3; Sig_Px : out Long_Float; Settled, Fitted : out Boolean) is
       N : constant Natural := Pu'Length;
       Np : constant := 3;   --  转动向量的三个数(结构)
       type Dir_Arr is array (Natural range <>) of V3;
@@ -439,9 +439,10 @@ package body Kinem is
          Cam_Pixel (G, Ap (Rm, D (K)), Hu, Hv, Front);
       end Map;
    begin
-      R := [others => Unknown];
+      Rot := [0.0, 0.0, 0.0];
       Sig_Px := 0.0;
       Settled := True;
+      Fitted := False;
       if not (G.F > 0.0) then
          return;   --  这只眼没有量过的焦距:转动投不回去
       end if;
@@ -518,17 +519,30 @@ package body Kinem is
          Settled := Stopped;
       end;
       Sig_Px := Sig;
-      for I in 0 .. N - 1 loop
-         if Use_P (I) then
-            declare
-               Hu, Hv : Long_Float;
-               Front : Boolean;
-               U0 : constant Long_Float := Pu (Pu'First + I);
-               V0 : constant Long_Float := Pv (Pv'First + I);
-               U1 : constant Long_Float := Bu (Bu'First + I);
-               V1 : constant Long_Float := Bv (Bv'First + I);
-            begin
-               Map (X, I, Hu, Hv, Front);
+      Rot := [X (0), X (1), X (2)];
+      Fitted := True;
+   end Fit_Eye_Turn;
+
+   procedure Classify_Rides (G : Cam_Geo; Rot : V3; Sig_Px : Long_Float; Pu, Pv, Bu, Bv : Vec; R : out Ride_Vec) is
+      Rm : constant M3 := Rodrigues (Rot);
+   begin
+      R := [others => Unknown];
+      if not (G.F > 0.0) then
+         return;
+      end if;
+      for I in 0 .. Pu'Length - 1 loop
+         declare
+            Ok : Boolean;
+            Dc : constant V3 := Cam_Dir (G, Pu (Pu'First + I), Pv (Pv'First + I), Ok);
+            Hu, Hv : Long_Float;
+            Front : Boolean;
+            U0 : constant Long_Float := Pu (Pu'First + I);
+            V0 : constant Long_Float := Pv (Pv'First + I);
+            U1 : constant Long_Float := Bu (Bu'First + I);
+            V1 : constant Long_Float := Bv (Bv'First + I);
+         begin
+            if Ok then
+               Cam_Pixel (G, Ap (Rm, Dc), Hu, Hv, Front);
                if not Front or else Sqrt ((Hu - U0) ** 2 + (Hv - V0) ** 2) < 2.0 * Stats.Z * Sig_Px then
                   R (R'First + I) := Unknown;   --  两种说法挨得太近:按近的判,判错的概率超过 Z 的单边尾巴
                elsif Sqrt ((U1 - U0) ** 2 + (V1 - V0) ** 2) < Sqrt ((U1 - Hu) ** 2 + (V1 - Hv) ** 2) then
@@ -536,10 +550,11 @@ package body Kinem is
                else
                   R (R'First + I) := World;
                end if;
-            end;
-         end if;
+            end if;
+         end;
       end loop;
-   end Rides_On_Eye;
+   end Classify_Rides;
+
 
    --  ── ① 每根轴单独 ──
    --  一根轴的一组配点(已按帧换成这根轴的转角):θ_a, θ_b = 两帧相对参照的转角

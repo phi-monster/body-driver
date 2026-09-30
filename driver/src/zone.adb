@@ -424,6 +424,176 @@ package body Zone is
       return Z;
    end From_Frames;
 
+   --  格子 (Gxx, Gyy) 的像素范围:x ∈ [⌊Gxx·W/Gx⌋, ⌊(Gxx+1)·W/Gx⌋ − 1](同 Kinem.Grid_U 的格子)
+   function Cell_X0 (Gxx : Natural; W : Natural) return Natural is ((Gxx * W) / Kinem.Gx);
+   function Cell_Y0 (Gyy : Natural; Hh : Natural) return Natural is ((Gyy * Hh) / Kinem.Gy);
+
+   function Refine_Probes (Z : Hand_Zone; W, Hh : Natural; Grid_Ride : Bools) return Probe_Vectors.Vector is
+      Ng : constant Natural := Kinem.Gx * Kinem.Gy;
+      None : constant Integer := -1;
+      Owner : array (0 .. Ng - 1) of Integer := [others => None];   --  长在眼上、连到的那一格归哪一瓣
+      Queue : Ints;
+      Head : Natural := 0;
+      R : Probe_Vectors.Vector;
+      function Idx (Gxx, Gyy : Natural) return Natural is (Gyy * Kinem.Gx + Gxx);
+      function Overlaps (Lb : Lobe; Gxx, Gyy : Natural) return Boolean is
+        (Lb.Valid and then Cell_X0 (Gxx, W) <= Lb.X1 and then Cell_X0 (Gxx + 1, W) > Lb.X0
+         and then Cell_Y0 (Gyy, Hh) <= Lb.Y1 and then Cell_Y0 (Gyy + 1, Hh) > Lb.Y0);
+      function Ride (I : Natural) return Boolean is (I < Natural (Grid_Ride.Length) and then Grid_Ride.Element (I));
+   begin
+      if W = 0 or else Hh = 0 or else Natural (Grid_Ride.Length) /= Ng then
+         return R;
+      end if;
+      --  起点:和每一瓣的框重叠、判成长在眼上的格子(按瓣的先后;一格同时和两瓣的框重叠就归前一瓣)
+      for K in 0 .. Z.N_Lobes - 1 loop
+         for Gyy in 0 .. Kinem.Gy - 1 loop
+            for Gxx in 0 .. Kinem.Gx - 1 loop
+               if Ride (Idx (Gxx, Gyy)) and then Owner (Idx (Gxx, Gyy)) = None and then Overlaps (Lobe_Of (Z, K), Gxx, Gyy) then
+                  Owner (Idx (Gxx, Gyy)) := K;
+                  Queue.Append (Idx (Gxx, Gyy));
+               end if;
+            end loop;
+         end loop;
+      end loop;
+      --  沿长在眼上的格子往外连(一层一层,先到先得)
+      while Head < Natural (Queue.Length) loop
+         declare
+            C : constant Natural := Natural (Queue (Head));
+            Cx : constant Integer := C mod Kinem.Gx;
+            Cy : constant Integer := C / Kinem.Gx;
+         begin
+            Head := Head + 1;
+            for Dy in -1 .. 1 loop
+               for Dx in -1 .. 1 loop
+                  if Cx + Dx in 0 .. Kinem.Gx - 1 and then Cy + Dy in 0 .. Kinem.Gy - 1 then
+                     declare
+                        Q : constant Natural := Idx (Cx + Dx, Cy + Dy);
+                     begin
+                        if Ride (Q) and then Owner (Q) = None then
+                           Owner (Q) := Owner (C);
+                           Queue.Append (Q);
+                        end if;
+                     end;
+                  end if;
+               end loop;
+            end loop;
+         end;
+      end loop;
+      --  要问的格子:连到的格子 + 它们四周那一圈;一格旁边(连它自己)有两瓣的格子 ⇒ 不问
+      for Gyy in 0 .. Kinem.Gy - 1 loop
+         for Gxx in 0 .. Kinem.Gx - 1 loop
+            declare
+               Who : Integer := None;
+               Clash : Boolean := False;
+            begin
+               for Dy in -1 .. 1 loop
+                  for Dx in -1 .. 1 loop
+                     if Gxx + Dx in 0 .. Kinem.Gx - 1 and then Gyy + Dy in 0 .. Kinem.Gy - 1 then
+                        declare
+                           O : constant Integer := Owner (Idx (Gxx + Dx, Gyy + Dy));
+                        begin
+                           if O /= None then
+                              if Who = None then
+                                 Who := O;
+                              elsif Who /= O then
+                                 Clash := True;
+                              end if;
+                           end if;
+                        end;
+                     end if;
+                  end loop;
+               end loop;
+               if Who /= None and then not Clash then
+                  for Y in Cell_Y0 (Gyy, Hh) .. Cell_Y0 (Gyy + 1, Hh) - 1 loop
+                     for X in Cell_X0 (Gxx, W) .. Cell_X0 (Gxx + 1, W) - 1 loop
+                        R.Append (Probe'(U => Long_Float (X) + 0.5, V => Long_Float (Y) + 0.5, Lobe => Natural (Who)));   --  像素中心(半个像素,纯几何)
+                     end loop;
+                  end loop;
+               end if;
+            end;
+         end loop;
+      end loop;
+      return R;
+   end Refine_Probes;
+
+   procedure Apply_Refine (Z : in out Hand_Zone; W, Hh : Natural; Ps : Probe_Vectors.Vector; Mu, Mv : Bytes.Floats; G : Geom.Cam_Geo; Rot : Geom.V3;
+                           Sig : Long_Float; Added : out Natural) is
+      use type Kinem.Ride;
+      Nv : Natural := 0;
+      In_Lobes : constant Bools := Lobe_Pixels (Z, W, Hh);
+      --  合到的区(手指在另一头时待的地方;张开这一头那儿是背景):区框里、不在任何一瓣那一块里的手指像素。补进来的像素贴着它一个都不收 ——
+      --  不然瓣和合到的区连成一块,瓣的尖(离画面边最远那一截)跑到区的另一角去(离线 V1B69 两只手右边那一瓣:尖 520,281 → 327,288)。
+      --  只看区框里的:区框外不属于哪一瓣的是手指边上零碎的几小块,拿它们挡,左边那根手指上半截整片补不进来(同一批画面:尖停在 108,335)
+      function In_Zone (Q : Natural) return Boolean is
+        (Z.Fingers.Element (Q) and then not In_Lobes.Element (Q) and then Q mod W in Z.X0 .. Z.X1 and then Q / W in Z.Y0 .. Z.Y1);
+      function Near_Zone (X, Y : Natural) return Boolean is
+      begin
+         for Dy in -1 .. 1 loop
+            for Dx in -1 .. 1 loop
+               if X + Dx in 0 .. W - 1 and then Y + Dy in 0 .. Hh - 1 then
+                  if In_Zone ((Y + Dy) * W + (X + Dx)) then
+                     return True;
+                  end if;
+               end if;
+            end loop;
+         end loop;
+         return False;
+      end Near_Zone;
+   begin
+      Added := 0;
+      if Natural (Z.Fingers.Length) /= W * Hh then
+         return;
+      end if;
+      for I in 0 .. Natural (Ps.Length) - 1 loop
+         if Mu (I) >= 0.0 and then Mv (I) >= 0.0 then
+            Nv := Nv + 1;
+         end if;
+      end loop;
+      declare
+         Pu, Pv, Bu, Bv : Kinem.Vec (0 .. Nv - 1);
+         Which : array (0 .. Natural'Max (1, Nv) - 1) of Natural := [others => 0];
+         Rd : Kinem.Ride_Vec (0 .. Nv - 1);
+         J : Natural := 0;
+      begin
+         for I in 0 .. Natural (Ps.Length) - 1 loop
+            if Mu (I) >= 0.0 and then Mv (I) >= 0.0 then
+               Pu (J) := Ps (I).U; Pv (J) := Ps (I).V; Bu (J) := Mu (I); Bv (J) := Mv (I); Which (J) := Ps (I).Lobe;
+               J := J + 1;
+            end if;
+         end loop;
+         Kinem.Classify_Rides (G, Rot, Sig, Pu, Pv, Bu, Bv, Rd);
+         for I in Rd'Range loop
+            if Rd (I) = Kinem.Rides then
+               declare
+                  X : constant Natural := Natural (Long_Float'Floor (Pu (I)));
+                  Y : constant Natural := Natural (Long_Float'Floor (Pv (I)));
+                  P : constant Natural := Y * W + X;
+               begin
+                  if X < W and then Y < Hh and then not In_Zone (P) and then not Near_Zone (X, Y) then
+                     if not Z.Fingers.Element (P) then
+                        Z.Fingers.Replace_Element (P, True);
+                        Added := Added + 1;
+                     end if;
+                     declare
+                        Lb : Lobe := Lobe_Of (Z, Which (I));
+                     begin
+                        if Lb.Valid then
+                           Lb.X0 := Natural'Min (Lb.X0, X); Lb.X1 := Natural'Max (Lb.X1, X);
+                           Lb.Y0 := Natural'Min (Lb.Y0, Y); Lb.Y1 := Natural'Max (Lb.Y1, Y);
+                           if Which (I) = 0 then
+                              Z.A := Lb;
+                           else
+                              Z.B := Lb;
+                           end if;
+                        end if;
+                     end;
+                  end if;
+               end;
+            end if;
+         end loop;
+      end;
+   end Apply_Refine;
+
    procedure Measure (L : in out Plug.Link; M : Selfmap.Body_Map; Arm, K : Natural; F : in out Plug.Frame; H : out Hand; Ok : out Boolean;
                       Host : String; Port : Natural; Eyes : Geom.Geo_Vectors.Vector) is
       --  抓握通道当关节量(V1b ②,2026-09-27):从此刻的读数起往读数变小那边推到头、再往另一边推到头(同关节扫描一个办法:
@@ -680,13 +850,14 @@ package body Zone is
          end loop;
       end;
       --  哪头张开:此刻停在读数大的那头。胳膊绕世界竖直轴转出去一下(Turn_Step)再转回来;转之前、转出去停稳以后,这只手自己那只眼各一帧,
-      --  问配点仪器那张格点(Kinem.Gx × Gy,同开机扫描)配到哪,Kinem.Rides_On_Eye 判每个格点长在眼上 / 是世界 / 两种说法分不开。
+      --  问配点仪器那张格点(Kinem.Gx × Gy,同开机扫描)配到哪;按格点拟合眼转了多少(Kinem.Fit_Eye_Turn),判每个格点长在眼上 / 是世界 / 两种说法分不开。
       --  手指此刻在的那一类里长在眼上的格点多:在瓣(分得开的那一类)里 ⇒ 这一头张开,在合到的区里 ⇒ 另一头张开。
       --  两类各自长在眼上的比例之差不过 Z 倍它自己的标准差(两个比例之差,二项)⇒ 看不出;分不开的格点不算。
       --  原来比灰度(没跟着变、在地板以下的手指像素落在瓣里多 ⇒ 张开)。手指跟着眼不挪,可手一转光照的角度就变:V1B69 2026-09-30 第 1 只手
       --  两根手指整片暗了 13–20 级(平均灰度 32 → 14、40 → 27),这只眼的地板 10,瓣里 68% 的手指像素"变了"、合到的区里 59%,判不出;
       --  V1B65–68 过了只是因为那几炮的地板量在上一步还没停的尾巴上(81 级),把光照的变化盖住了。挪没挪是位置的事,按配点量
-      --  (同一批画面离线:瓣里 72 / 73 个格点长在眼上、合到的区里 1 / 59;第 2 只手 74 / 75 对 0 / 65;没转的两帧、转回原处的两帧全是分不开)
+      --  (同一批画面离线:瓣里 72 / 73 个格点长在眼上、合到的区里 1 / 59;第 2 只手 74 / 75 对 0 / 65;没转的两帧、转回原处的两帧全是分不开)。
+      --  判完停到张开那头,在那一头转一下眼(张开的就是转过的这一头 ⇒ 用同一对画面),瓣按"长在眼上"补全(Refine_Probes / Apply_Refine)
       declare
          Hc : constant Integer := (if H.Arm < Natural (M.Cam_On_Arm.Length) then M.Cam_On_Arm (H.Arm) else -1);
          Hi_Open : Boolean := True;
@@ -697,113 +868,211 @@ package body Zone is
            and then H.Arm * M.Per_Arm + Turn_Ch < Natural (M.Amp.Length)
          then
             declare
-               Z : constant Hand_Zone := H.Zones (Natural (Hc));
+               use type Kinem.Ride;
                Cw : constant Natural := F.Cams (Natural (Hc)).W;
                Ch : constant Natural := F.Cams (Natural (Hc)).H;
-               Pre : constant Buf := F.Cams (Natural (Hc)).RGB;   --  转之前:停在这一头、画面静止
-               Pre_Ok : constant Boolean := Plug.Has_Picture (F.Cams (Natural (Hc))) and then Cw * Ch > 0 and then Natural (Z.Fingers.Length) = Cw * Ch;
                Turn : constant Table.Vec := Turn_Step (M, H.Arm);   --  绕世界竖直轴转出去的那一下(见 Turn_Step)
                Step : constant Long_Float := Turn (Turn_Ch);
-               In_Lobe : constant Bools := Lobe_Pixels (Z, Cw, Ch);
                Eye_G : constant Geom.Cam_Geo := (if Natural (Hc) < Natural (Eyes.Length) then Eyes (Natural (Hc)) else Geom.No_Geo);
-               Ride_L, Ride_A, N_L, N_A, N_Unk : Natural := 0;
+               Ng : constant Natural := Kinem.Gx * Kinem.Gy;
+               type Verdicts is array (0 .. Ng - 1) of Kinem.Ride;
+               Vd : Verdicts := [others => Kinem.Unknown];   --  每个格点(按格子号)判成什么
+               Rot : Geom.V3 := [0.0, 0.0, 0.0];
                Sig_Px : Long_Float := 0.0;
                Settled : Boolean := True;
-               Used : Natural;
-               Ok2 : Boolean;
-               --  转出去停稳的这一帧和转之前那一帧:格点配过去,每个手指格点落在瓣里还是合到的区里、长没长在眼上
-               procedure Count_Rides is
-                  use type Kinem.Ride;
-                  Q : Instrument.Match_Vectors.Vector;
-                  Err : Unbounded_String;
+               Before, After : Buf;   --  转之前 / 转出去停稳的那一帧(这只手自己那只眼,彩图)
+               --  转出去一下再转回来,中间那一对画面配格点、拟合、判每个格点;Why 不空 = 这一转用不了
+               procedure Turn_Fit (Why_T : in out Unbounded_String) is
+                  Used : Natural;
+                  Ok2 : Boolean;
+                  Pre_Ok : constant Boolean := Plug.Has_Picture (F.Cams (Natural (Hc))) and then F.Cams (Natural (Hc)).W = Cw and then F.Cams (Natural (Hc)).H = Ch
+                                               and then Cw * Ch > 0;
+                  Pose_Now : constant Plug.Arm_Pose := (if H.Arm < Natural (F.EE.Length) then F.EE (H.Arm) else Pose);
                begin
-                  for Gyy in 0 .. Kinem.Gy - 1 loop
-                     for Gxx in 0 .. Kinem.Gx - 1 loop
-                        Q.Append (Instrument.Match_Pt'(U => Kinem.Grid_U (Gxx, Cw), V => Kinem.Grid_V (Gyy, Ch), others => <>));
-                     end loop;
-                  end loop;
-                  declare
-                     --  粗配(同开机扫描问格点)
-                     Mt : constant Instrument.Match_Vectors.Vector :=
-                       Instrument.Match (Host, Port, Pre, Cw, Ch, F.Cams (Natural (Hc)).RGB, Cw, Ch, Q, Err, Coarse => True);
-                     Nv : Natural := 0;
-                  begin
-                     if Natural (Mt.Length) /= Natural (Q.Length) then
-                        Why := "配点仪器没配成(" & Err & ")";
-                        return;
-                     end if;
-                     for G of Mt loop
-                        if G.U >= 0.0 and then G.V >= 0.0 then   --  < 0 = 仪器配不出这一点(非有限数记成 -1)
-                           Nv := Nv + 1;
+                  Vd := [others => Kinem.Unknown];
+                  Before := F.Cams (Natural (Hc)).RGB;
+                  for Dir in 0 .. 1 loop
+                     declare
+                        C : Plug.Cmd;
+                     begin
+                        C.Kind := Plug.Ee; C.Arm := H.Arm; C.Pose := Pose_Now; C.Jaw := Target;
+                        if Dir = 0 then
+                           C.Pose := Chan.Compose (Pose_Now, Turn);
                         end if;
+                        if not Plug.Act (L, C) or else not Plug.Sense (L, F) then
+                           Why_T := To_Unbounded_String ("线断了");
+                           return;
+                        end if;
+                        Selfmap.Wait_Still (L, M, F, Still_Wait, Used, Ok2);
+                        if Dir = 0 and then Why_T = Null_Unbounded_String then
+                           if not Ok2 then
+                              --  转出去以后画面没停住:不拿还在动的画面比(照实说看不出)
+                              Why_T := To_Unbounded_String ("转出去以后等了" & Natural'Image (Used) & " 拍画面还没停住");
+                           elsif not (Pre_Ok and then Plug.Has_Picture (F.Cams (Natural (Hc))) and then F.Cams (Natural (Hc)).W = Cw
+                                      and then F.Cams (Natural (Hc)).H = Ch)
+                           then
+                              Why_T := To_Unbounded_String ("转之前 / 转之后这只眼有一帧没收到画面");   --  占位的帧比不了
+                           elsif not (Eye_G.F > 0.0) then
+                              Why_T := To_Unbounded_String ("这只眼的焦距没量过(转了多少投不回画面)");
+                           else
+                              After := F.Cams (Natural (Hc)).RGB;
+                              declare
+                                 Q : Instrument.Match_Vectors.Vector;
+                                 Err : Unbounded_String;
+                              begin
+                                 for Gyy in 0 .. Kinem.Gy - 1 loop
+                                    for Gxx in 0 .. Kinem.Gx - 1 loop
+                                       Q.Append (Instrument.Match_Pt'(U => Kinem.Grid_U (Gxx, Cw), V => Kinem.Grid_V (Gyy, Ch), others => <>));
+                                    end loop;
+                                 end loop;
+                                 declare
+                                    --  粗配(同开机扫描问格点)
+                                    Mt : constant Instrument.Match_Vectors.Vector := Instrument.Match (Host, Port, Before, Cw, Ch, After, Cw, Ch, Q, Err, Coarse => True);
+                                    Nv : Natural := 0;
+                                 begin
+                                    if Natural (Mt.Length) /= Natural (Q.Length) then
+                                       Why_T := "配点仪器没配成(" & Err & ")";
+                                    else
+                                       for G of Mt loop
+                                          if G.U >= 0.0 and then G.V >= 0.0 then   --  < 0 = 仪器配不出这一点(非有限数记成 -1)
+                                             Nv := Nv + 1;
+                                          end if;
+                                       end loop;
+                                       declare
+                                          Pu, Pv, Bu, Bv : Kinem.Vec (0 .. Nv - 1);
+                                          Rd : Kinem.Ride_Vec (0 .. Nv - 1);
+                                          Gi : array (0 .. Natural'Max (1, Nv) - 1) of Natural := [others => 0];
+                                          J : Natural := 0;
+                                          Fitted : Boolean;
+                                       begin
+                                          for G in 0 .. Natural (Q.Length) - 1 loop
+                                             if Mt (G).U >= 0.0 and then Mt (G).V >= 0.0 then
+                                                Pu (J) := Q (G).U; Pv (J) := Q (G).V; Bu (J) := Mt (G).U; Bv (J) := Mt (G).V; Gi (J) := G;
+                                                J := J + 1;
+                                             end if;
+                                          end loop;
+                                          Kinem.Fit_Eye_Turn (Eye_G, Pu, Pv, Bu, Bv, Rot, Sig_Px, Settled, Fitted);
+                                          if not Fitted then
+                                             Why_T := To_Unbounded_String ("格点配上的太少,拟合不出眼转了多少");
+                                          else
+                                             Kinem.Classify_Rides (Eye_G, Rot, Sig_Px, Pu, Pv, Bu, Bv, Rd);
+                                             for I in Rd'Range loop
+                                                Vd (Gi (I)) := Rd (I);
+                                             end loop;
+                                          end if;
+                                       end;
+                                    end if;
+                                 end;
+                              end;
+                           end if;
+                        end if;
+                     end;
+                  end loop;
+               end Turn_Fit;
+               --  按这一转(Before / After / Rot / Sig_Px / Vd)把张开那头的每一瓣补全
+               procedure Refine is
+                  Z2 : Hand_Zone := H.Zones (Natural (Hc));
+                  Gr : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (Ng));
+                  Ps : Probe_Vectors.Vector;
+                  Added : Natural := 0;
+                  Tip0 : Floats;   --  补之前每一瓣的尖(v;只进日志)
+                  Tip0_Ok : Bools;   --  那一瓣补之前算得出尖
+               begin
+                  for I in 0 .. Ng - 1 loop
+                     Gr.Replace_Element (I, Vd (I) = Kinem.Rides);
+                  end loop;
+                  for Kl in 0 .. Z2.N_Lobes - 1 loop
+                     declare
+                        U, V, Wd, Th : Long_Float;
+                        Okt : Boolean;
+                     begin
+                        Tip_Section (Z2, Lobe_Of (Z2, Kl), Cw, Ch, U, V, Wd, Th, Okt);
+                        Tip0.Append (V);
+                        Tip0_Ok.Append (Okt);
+                     end;
+                  end loop;
+                  Ps := Refine_Probes (Z2, Cw, Ch, Gr);
+                  if Ps.Is_Empty then
+                     Put_Line ("[身]   瓣按长在眼上补全:长在眼上的格子一格都连不到瓣上 ⇒ 不补");
+                     return;
+                  end if;
+                  declare
+                     Q : Instrument.Match_Vectors.Vector;
+                     Err : Unbounded_String;
+                     Mu, Mv : Floats;
+                  begin
+                     for P of Ps loop
+                        Q.Append (Instrument.Match_Pt'(U => P.U, V => P.V, others => <>));
                      end loop;
                      declare
-                        Pu, Pv, Bu, Bv : Kinem.Vec (0 .. Nv - 1);
-                        Rd : Kinem.Ride_Vec (0 .. Nv - 1);
-                        J : Natural := 0;
+                        --  细配:手指的边要到像素(格点那一步粗配就够)
+                        Mt : constant Instrument.Match_Vectors.Vector := Instrument.Match (Host, Port, Before, Cw, Ch, After, Cw, Ch, Q, Err, Coarse => False);
                      begin
-                        for G in 0 .. Natural (Q.Length) - 1 loop
-                           if Mt (G).U >= 0.0 and then Mt (G).V >= 0.0 then
-                              Pu (J) := Q (G).U; Pv (J) := Q (G).V; Bu (J) := Mt (G).U; Bv (J) := Mt (G).V;
-                              J := J + 1;
-                           end if;
-                        end loop;
-                        Kinem.Rides_On_Eye (Eye_G, Pu, Pv, Bu, Bv, Rd, Sig_Px, Settled);
-                        for I in Rd'Range loop
-                           declare
-                              Px : constant Natural := Natural (Long_Float'Floor (Pv (I))) * Cw + Natural (Long_Float'Floor (Pu (I)));
-                           begin
-                              if Z.Fingers.Element (Px) then
-                                 if Rd (I) = Kinem.Unknown then
-                                    N_Unk := N_Unk + 1;
-                                 elsif In_Lobe.Element (Px) then
-                                    N_L := N_L + 1;
-                                    if Rd (I) = Kinem.Rides then
-                                       Ride_L := Ride_L + 1;
-                                    end if;
-                                 else
-                                    N_A := N_A + 1;
-                                    if Rd (I) = Kinem.Rides then
-                                       Ride_A := Ride_A + 1;
-                                    end if;
-                                 end if;
-                              end if;
-                           end;
+                        if Natural (Mt.Length) /= Natural (Q.Length) then
+                           Put_Line ("[身]   瓣按长在眼上补全:问 " & Codec.Img (Natural (Ps.Length)) & " 个像素,配点仪器没配成(" & To_String (Err) & ")⇒ 不补");
+                           return;
+                        end if;
+                        for G of Mt loop
+                           Mu.Append (G.U); Mv.Append (G.V);
                         end loop;
                      end;
+                     Apply_Refine (Z2, Cw, Ch, Ps, Mu, Mv, Eye_G, Rot, Sig_Px, Added);
                   end;
-               end Count_Rides;
-            begin
-               for Dir in 0 .. 1 loop
+                  H.Zones.Replace_Element (Natural (Hc), Z2);
                   declare
-                     C : Plug.Cmd;
+                     Note : Unbounded_String;
                   begin
-                     C.Kind := Plug.Ee; C.Arm := H.Arm; C.Pose := Pose; C.Jaw := Target;
-                     if Dir = 0 then
-                        C.Pose := Chan.Compose (Pose, Turn);
-                     end if;
-                     if not Plug.Act (L, C) or else not Plug.Sense (L, F) then
-                        return;
-                     end if;
-                     Selfmap.Wait_Still (L, M, F, Still_Wait, Used, Ok2);
-                     if Dir = 0 then
-                        if not Ok2 then
-                           --  转出去以后画面没停住:不拿还在动的画面比(照实说看不出)
-                           Why := To_Unbounded_String ("转出去以后等了" & Natural'Image (Used) & " 拍画面还没停住");
-                        elsif not (Pre_Ok and then Plug.Has_Picture (F.Cams (Natural (Hc))) and then F.Cams (Natural (Hc)).W = Cw
-                                   and then F.Cams (Natural (Hc)).H = Ch)
-                        then
-                           Why := To_Unbounded_String ("转之前 / 转之后这只眼有一帧没收到画面");   --  占位的帧比不了
-                        elsif not (Eye_G.F > 0.0) then
-                           Why := To_Unbounded_String ("这只眼的焦距没量过(转了多少投不回画面)");
-                        else
-                           Count_Rides;
-                        end if;
-                     end if;
+                     for Kl in 0 .. Z2.N_Lobes - 1 loop
+                        declare
+                           U, V, Wd, Th : Long_Float;
+                           Okt : Boolean;
+                        begin
+                           Tip_Section (Z2, Lobe_Of (Z2, Kl), Cw, Ch, U, V, Wd, Th, Okt);
+                           Append (Note, " · 第" & Natural'Image (Kl + 1) & " 瓣的尖 v "
+                                   & (if Kl < Natural (Tip0.Length) and then Tip0_Ok (Kl) then Codec.Fmt (Tip0 (Kl), 1) else "-") & " → "
+                                   & (if Okt then Codec.Fmt (V, 1) else "-"));
+                        end;
+                     end loop;
+                     Put_Line ("[身]   瓣按长在眼上补全:问 " & Codec.Img (Natural (Ps.Length)) & " 个像素,并进手指 " & Codec.Img (Added) & " 个" & To_String (Note));
                   end;
-               end loop;
-               if Why = Null_Unbounded_String and then (N_L = 0 or else N_A = 0) then
-                  Why := To_Unbounded_String ("瓣里 / 合到的区里有一类没有判得了的格点");
+               end Refine;
+               Z : constant Hand_Zone := H.Zones (Natural (Hc));
+               In_Lobe : constant Bools := Lobe_Pixels (Z, Cw, Ch);
+               Ride_L, Ride_A, N_L, N_A, N_Unk : Natural := 0;
+            begin
+               if Natural (Z.Fingers.Length) /= Cw * Ch then
+                  Why := To_Unbounded_String ("这只眼的握区和画幅对不上");
+               else
+                  Turn_Fit (Why);
+               end if;
+               if Why = Null_Unbounded_String then
+                  for Gyy in 0 .. Kinem.Gy - 1 loop
+                     for Gxx in 0 .. Kinem.Gx - 1 loop
+                        declare
+                           Px : constant Natural := Natural (Long_Float'Floor (Kinem.Grid_V (Gyy, Ch))) * Cw + Natural (Long_Float'Floor (Kinem.Grid_U (Gxx, Cw)));
+                           Rv : constant Kinem.Ride := Vd (Gyy * Kinem.Gx + Gxx);
+                        begin
+                           if Z.Fingers.Element (Px) then
+                              if Rv = Kinem.Unknown then
+                                 N_Unk := N_Unk + 1;
+                              elsif In_Lobe.Element (Px) then
+                                 N_L := N_L + 1;
+                                 if Rv = Kinem.Rides then
+                                    Ride_L := Ride_L + 1;
+                                 end if;
+                              else
+                                 N_A := N_A + 1;
+                                 if Rv = Kinem.Rides then
+                                    Ride_A := Ride_A + 1;
+                                 end if;
+                              end if;
+                           end if;
+                        end;
+                     end loop;
+                  end loop;
+                  if N_L = 0 or else N_A = 0 then
+                     Why := To_Unbounded_String ("瓣里 / 合到的区里有一类没有判得了的格点");
+                  end if;
                end if;
                if Why = Null_Unbounded_String then
                   declare
@@ -826,6 +1095,37 @@ package body Zone is
                          & "、合到的区里 " & Codec.Img (Ride_A) & " / " & Codec.Img (N_A) & "(两种说法分不开的 " & Codec.Img (N_Unk) & " 个不算)"
                          & (if Known then " ⇒ 读数 " & Codec.Fmt ((if Hi_Open then Hi_R else Lo_R), 3) & " 那头张开"
                             else " ⇒ 看不出哪头张开:" & To_String (Why)));
+               if Known then
+                  H.Open_Reading := (if Hi_Open then Hi_R else Lo_R);
+                  H.Empty_Close := (if Hi_Open then Lo_R else Hi_R);
+                  H.Close_Steps := (if Hi_Open then Lo_Steps else Hi_Steps);
+                  --  停在张开那头,发的就是那一头的读数(不留推到头时 ×4 放出去的那个命令当爪子的目标)
+                  declare
+                     Rr : Long_Float;
+                     St : Natural := 0;
+                  begin
+                     Go_Jaw (H.Open_Reading, Rr, St, Okg);
+                     if not Okg then
+                        --  两头、握区都量完了;只是停回张开那头时没等到停住 ⇒ 照实说(后面碰桌面前会再等它停)
+                        Put_Line ("[身]   两头量完了,停回张开那头(读数 " & Codec.Fmt (H.Open_Reading, 3) & ")时没等到停住");
+                     end if;
+                  end;
+                  --  瓣按长在眼上补全:张开的就是刚转过的这一头 ⇒ 用那一对画面;否则在张开那头再转一下
+                  if Hi_Open then
+                     Refine;
+                  else
+                     declare
+                        Why2 : Unbounded_String;
+                     begin
+                        Turn_Fit (Why2);
+                        if Why2 = Null_Unbounded_String then
+                           Refine;
+                        else
+                           Put_Line ("[身]   瓣按长在眼上补全:在张开那头再转一下没转成(" & To_String (Why2) & ")⇒ 不补");
+                        end if;
+                     end;
+                  end if;
+               end if;
             end;
          else
             Why := To_Unbounded_String ("它自己那只眼里没量出握区(或这条臂没有绕竖直轴转的那个通道)");
@@ -834,20 +1134,6 @@ package body Zone is
             Put_Line ("[身]   第" & Natural'Image (H.Arm + 1) & " 只手第" & Natural'Image (K) & " 号抓握通道哪头张开量不出来:" & To_String (Why));
             return;
          end if;
-         H.Open_Reading := (if Hi_Open then Hi_R else Lo_R);
-         H.Empty_Close := (if Hi_Open then Lo_R else Hi_R);
-         H.Close_Steps := (if Hi_Open then Lo_Steps else Hi_Steps);
-         --  停在张开那头,发的就是那一头的读数(不留推到头时 ×4 放出去的那个命令当爪子的目标)
-         declare
-            Rr : Long_Float;
-            St : Natural := 0;
-         begin
-            Go_Jaw (H.Open_Reading, Rr, St, Okg);
-            if not Okg then
-               --  两头、握区都量完了;只是停回张开那头时没等到停住 ⇒ 照实说(后面碰桌面前会再等它停)
-               Put_Line ("[身]   两头量完了,停回张开那头(读数 " & Codec.Fmt (H.Open_Reading, 3) & ")时没等到停住");
-            end if;
-         end;
       end;
       H.Measured := True;
       Ok := True;
