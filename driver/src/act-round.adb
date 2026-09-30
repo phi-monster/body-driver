@@ -1732,6 +1732,18 @@ begin
          Event := S ("on the way to a point above it: ") & Ev1;
          return;
       end if;
+      --  脑这一句要它怎么动:"它的某个量往哪变" ⇒ 沿让那个量变的方向(Qty_Axis,量的)的一个旋量;没说量 ⇒ 接触集按"跟着手离开它躺的面"布置
+      C.Want_Move := (others => <>);
+      if Length (Say.Qty) > 0 and then Say.Qty_Dir /= 0 then
+         declare
+            Ax : constant Geom.V3 := Qty_Axis (C, To_String (Say.Qty));
+            Sg : constant Long_Float := (if Say.Qty_Dir > 0 then 1.0 else -1.0);
+         begin
+            if Geom.Norm (Ax) > 0.0 then
+               C.Want_Move := (Given => True, Move => Contact.Slide ([Sg * Ax (0), Sg * Ax (1), Sg * Ax (2)]));
+            end if;
+         end;
+      end if;
       --  伸下去被挡住就记下来重挑:挡住的尖进 C.Bumps,候选只会越来越少;挑不出来了、或者又挑回挑过的那一处,就停
       loop
          Plan_Contact (C, F, Arm, Cam1, Geo_Name, Pick, Note, Pok);
@@ -1910,7 +1922,8 @@ begin
          Event := S (Reset_Event);
          return;
       end if;
-      --  接触集(PLAN 1.5):抬 = 手里那几个接触点沿它躺的面的法向平移一个单位(第③格是旋量);判据只说,不拦(身体不许因为"算出来做不到"而不动)
+      --  接触集:改它的量 = 手里那几个接触点沿让那个量变的方向平移一个单位(第③格是旋量)⇒ 执行层排航点;只说,不拦。
+      --  它能不能照这样动、要多大力,规划时已经按同一个物理检查(Contact.Wrench:连同它躺的面、配平重力)算过了,这里不另判(一个量一种量法)
       if C.Held_Set_Valid then
          declare
             S2 : Contact.Set := C.Held_Set;
@@ -1920,8 +1933,8 @@ begin
          begin
             S2.Motion := Contact.Slide (Dw);
             Contact.Exec.Steps (S2, (Standoff_M => Geo_Base (C, Arm), Repeat_M => Geo_Base (C, Arm)), True, 1, St, Why);
-            Geo_Say ("接触集:改它的量(" & Qty & ")= " & Codec.Img (Natural (S2.Points.Length)) & " 个接触点沿法向平移 " & Mm (Ln) & " ⇒ "
-                     & (if Why.Kind = Contact.Exec.Fine then "航点 " & Codec.Img (Natural (St.Length)) & " 步" else "判据说 " & Contact.Exec.Img (Why) & ",照抬,抬完看手指读数"));
+            Geo_Say ("接触集:改它的量(" & Qty & ")= " & Codec.Img (Natural (S2.Points.Length)) & " 个接触点平移 " & Mm (Ln) & " ⇒ "
+                     & (if Why.Kind = Contact.Exec.Fine then "航点 " & Codec.Img (Natural (St.Length)) & " 步" else "航点排不出:" & Contact.Exec.Img (Why) & ",照走,走完看手指读数"));
          end;
       end if;
       Geo_Move (L, C, F, Arm, Dw, Mok);

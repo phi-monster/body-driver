@@ -389,6 +389,8 @@ package Act is
       Held_Set : Contact.Set;
       Held_Set_Valid : Boolean := False;
       Grip_Mus : Grip_Mu_Vectors.Vector;     --  每件东西量到的摩擦上下限(见 Grip_Mu)
+      --  脑这一轮要这件东西怎么动(大并行路 5,10-01,加法:I5 的一小块;Round 按脑说的"它的哪个量往哪变"填,接触集按它布置;没说 ⇒ 按"跟着手离开它躺的面")
+      Want_Move : Contact.Want;
       Walls : Wall_Vectors.Vector;           --  这一集里各条臂横着被顶住过的地方(见 Wall_Mark)
       No_Reach_Arm : Integer := -1;          --  这一集里"它身上一段都在够不着那侧"的那条臂(-1 = 没有):下次选手绕开它
       Fingers_Aimed : Boolean := False;   --  上一段"到它上方"末尾已把手指指向它躺的面 ⇒ 接下来贴上去的那一段不再为了看它而转手

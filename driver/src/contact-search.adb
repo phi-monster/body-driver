@@ -2,9 +2,10 @@ with Ada.Numerics; use Ada.Numerics;
 with Ada.Numerics.Long_Elementary_Functions; use Ada.Numerics.Long_Elementary_Functions;
 with Ada.Containers.Ordered_Sets;
 with Ada.Containers.Ordered_Maps;
-package body Contact.Grasp is
+with Ada.Containers.Generic_Array_Sort;
+package body Contact.Search is
    use Ada.Strings.Unbounded;
-   package Hd renames Contact.Hold;
+   package Hd renames Contact.Wrench;
    use type Ada.Containers.Count_Type;
 
    function Not_Measured (Why : String) return Hand_Model is
@@ -151,7 +152,8 @@ package body Contact.Grasp is
 
    procedure Plan (Pts, Around : V3_Vectors.Vector; Pitch_In, Sigma : Long_Float; Up, Support_P : V3; H : Hand_Model; Mu_Lb, Standoff : Long_Float;
                    Reach : not null access function (R : Geom.M3; T : V3) return Boolean;
-                   Want_K : Positive; Found : out Cand_Vectors.Vector; St : out Plan_Stats) is
+                   Want_K : Positive; Found : out Cand_Vectors.Vector; St : out Plan_Stats;
+                   Want : Contact.Want := (others => <>); Mu_Ub : Long_Float := Long_Float'Last) is
       Np0 : constant Natural := Natural (Pts.Length);
       --  扫的时候最多用这么多点(按体素均匀地稀疏,见 Voxel_Down;次数:点再多只是更慢)
       Max_Scan : constant := 1500;
@@ -176,14 +178,13 @@ package body Contact.Grasp is
       Po : Long_Float := Pitch;   --  它稀疏以后的间距(旁边的东西那几道门的余量按它)
       Seen : Key_Sets.Set;
       All_C : Cand_Vectors.Vector;
-      Ld : Hd.Load;
       Tilt_Steps : constant := 3;   --  进场方向离竖直分几档:把直角分成这么多份、取 0、1、2 份 = 0°、30°、60°(次数,分辨率;90° 是贴着桌面平着进,不取)
       Azims : constant := 8;      --  斜着进场时绕竖直分几个方位(分辨率)
       Rots : constant := 32;      --  绕进场方向转几档(分辨率:11.25°)
    begin
       Found.Clear;
       St := (others => <>);
-      if not H.Valid or else Np0 < 8 or else Pitch <= 0.0 or else not Oku or else H.Pads.Length < 2 then
+      if not H.Valid or else Np0 = 0 or else Pitch <= 0.0 or else not Oku or else H.Pads.Length < 2 then
          return;
       end if;
       for I in 0 .. Np - 1 loop
@@ -193,8 +194,7 @@ package body Contact.Grasp is
          Com := Add (Com, Scl (1.0 / Long_Float (Np0), Q));
       end loop;
       St.Com := Com;
-      --  要做的动作:抬 = 托住重心处的重量(按单位重量;密度量不出来 ⇒ 重心按表面点的形心,照实说)
-      Ld := (F => U, C => Com, M => [others => 0.0]);
+      --  重心按表面点的形心(密度量不出来,照实说)
       for Pd of H.Pads loop
          Mid_H := Add (Mid_H, Scl (1.0 / Long_Float (H.Pads.Length), Pd.Tip));
          Pad_W := Long_Float'Max (Pad_W, Pd.Width);
@@ -223,7 +223,7 @@ package body Contact.Grasp is
             end loop;
             if not Near.Is_Empty then
                declare
-                  Dn_O : constant Contact.Grasp.Down := Voxel_Down (Near, Pitch, Max_Scan);
+                  Dn_O : constant Contact.Search.Down := Voxel_Down (Near, Pitch, Max_Scan);
                begin
                   O := Dn_O.Pts;
                   Po := Dn_O.Pitch;
@@ -679,9 +679,11 @@ package body Contact.Grasp is
                                                       end if;
                                                    end loop;
                                                    Mid_C := Scl (1.0 / Long_Float (Nh), Mid_C);
-                                                   if Nh >= 2 then
-                                                      Cd.Width := Norm (Sub (Cd.Touches (1).P, Cd.Touches (0).P));
-                                                   end if;
+                                                   for Ia in 0 .. Nh - 1 loop   --  两两之间最远的那一对
+                                                      for Ib in Ia + 1 .. Nh - 1 loop
+                                                         Cd.Width := Long_Float'Max (Cd.Width, Norm (Sub (Cd.Touches (Ib).P, Cd.Touches (Ia).P)));
+                                                      end loop;
+                                                   end loop;
                                                    declare
                                                       Dc : constant V3 := Sub (Mid_C, Com);
                                                    begin
@@ -703,102 +705,225 @@ package body Contact.Grasp is
             end loop;
          end loop;
       end;
-      --  物理:每个候选最少要多大的摩擦(按量到的法向)
-      for I in 0 .. Natural (All_C.Length) - 1 loop
-         declare
+      --  物理(Contact.Wrench),每一组两样:
+      --  ① 跟着手离开它躺的面最少要多大的摩擦 —— 合上以后抬一点验它跟不跟手,验的就是这个;这件东西的摩擦上下限按它记
+      --     (Mu_Nom 按量到的法向、Mu_Worst 法向按误差取最坏);
+      --  ② 要的动(没说 = ①那一种),连同它躺的那张面(托着它、有摩擦):手的法向力之和最少多少,摩擦按 Mu_Ref(它跟手、跟面按同一个数),
+      --     法向按误差取最坏 —— 排序就按它。
+      --  都是精确的,不截断:"做不做得到"对摩擦是单调的,要知道一组能不能比已有的更好,在门槛上问一次做不做得到就够(一次规划),
+      --  做不到就跳过,做得到才细算;最坏的比名义的只大不小 ⇒ 按名义的排好一个个算最坏的,名义的已经不比挑出来的小就停
+      declare
+         Ld : constant Hd.Load := (F => U, C => Com, M => [others => 0.0]);
+         Move : constant Twist := (if Want.Given then Want.Move else Slide (U));
+         Sup : constant Hd.Surface := Hd.Footprint (Pts, Support_P, U, Pitch);
+         Nc : constant Natural := Natural (All_C.Length);
+         type Real_Arr is array (Natural range <>) of Long_Float;
+         type Idx_Arr is array (Natural range <>) of Natural;
+         Nom_Done, Mu_Done : array (0 .. Natural'Max (Nc, 1) - 1) of Boolean := [others => False];
+         Mu_First : Long_Float := Long_Float'Last;
+         --  法向在两个方向上各准到多少:点的误差(量的,不小于半个采样间距)除以碰到的那一片在那个方向上的半径(不小于一个采样间距)——
+         --  绕手指的轴转(Ax = 0)看那一片沿指肚宽有多宽,绕指肚宽的轴转(Ax = 1)看它沿手指有多高;每个方向正反各转一次
+         function Axis_Of (Cd : Candidate; Ax : Natural) return V3 is
+           (if Ax = 0 then Cd.Approach else Unit (Cross (Cd.Approach, Sub (Cd.Touches (1).P, Cd.Touches (0).P)), Oku));
+         function Tilt_Set (Cd : Candidate; Ax : Natural; Sign : Long_Float) return Hd.Touch_Vectors.Vector is
+            Dl : Bytes.Floats;
+            Dummy : constant Boolean := Set_Dl (Cd, Ax, Pitch, Sigma, Dl);
+         begin
+            for I in 0 .. Natural (Dl.Length) - 1 loop
+               Dl.Replace_Element (I, Sign * Dl (I));
+            end loop;
+            return Tilted (Cd.Touches, Dl, Axis_Of (Cd, Ax));
+         end Tilt_Set;
+         --  ①的名义 / 最坏(算过就不再算)
+         procedure Fill_Mu_Nom (I : Natural) is
             Cd : Candidate := All_C (I);
          begin
-            Cd.Mu_Nom := Hd.Mu_Need (Cd.Touches, Ld);
-            All_C.Replace_Element (I, Cd);
-         end;
-      end loop;
-      declare
-         function By_Mu (L, R : Candidate) return Boolean is (L.Mu_Nom < R.Mu_Nom);
-         package Mu_Sort is new Cand_Vectors.Generic_Sorting (By_Mu);
-         Top : constant := 200;   --  按量到的法向最不要摩擦的前 200 个再细算(次数:细算要多解几遍)
-         Keep : Cand_Vectors.Vector;
-         Mu_First : Long_Float := Long_Float'Last;
-      begin
-         Mu_Sort.Sort (All_C);
-         for I in 0 .. Natural'Min (Top, Natural (All_C.Length)) - 1 loop
-            if All_C (I).Mu_Nom < Hd.No_Way then
-               declare
-                  Cd : Candidate := All_C (I);
-                  Dl : Bytes.Floats;
-                  Worst : Long_Float := Cd.Mu_Nom;
-               begin
-                  for Ax in 0 .. 1 loop
-                     declare
-                        --  法向在两个方向上各准到多少:点的误差(量的,不小于半个采样间距)除以碰到的那一片在那个方向上的半径(不小于一个采样间距)——
-                        --  绕手指的轴转(Ax = 0)看那一片沿指肚宽有多宽,绕指肚宽的轴转(Ax = 1)看它沿手指有多高
-                        Axis : constant V3 := (if Ax = 0 then Cd.Approach else Unit (Cross (Cd.Approach, Sub (Cd.Touches (1).P, Cd.Touches (0).P)), Oku));
-                        Dummy : constant Boolean := Set_Dl (Cd, Ax, Pitch, Sigma, Dl);
-                        M1 : constant Long_Float := Hd.Mu_Need (Tilted (Cd.Touches, Dl, Axis), Ld);
-                        Neg : Bytes.Floats;
-                        M2 : Long_Float;
-                     begin
-                        for X of Dl loop
-                           Neg.Append (-X);
-                        end loop;
-                        M2 := Hd.Mu_Need (Tilted (Cd.Touches, Neg, Axis), Ld);
-                        Worst := Long_Float'Max (Worst, Long_Float'Max (M1, M2));
-                     end;
-                  end loop;
-                  Cd.Mu_Worst := Worst;
-                  if Worst < Hd.No_Way then
-                     --  这一把按误差最坏刚好够、再留它自己那份误差
-                     Mu_First := Long_Float'Min (Mu_First, Worst + (Worst - Cd.Mu_Nom));
-                  end if;
-                  Keep.Append (Cd);
-               end;
-            else
-               St.No_Hold := St.No_Hold + 1;
+            if not Nom_Done (I) then
+               Cd.Mu_Nom := Hd.Mu_Need (Cd.Touches, Ld);
+               All_C.Replace_Element (I, Cd);
+               Nom_Done (I) := True;
             end if;
-         end loop;
-         St.Mu_Ref := Long_Float'Max (Mu_Lb, (if Mu_First < Long_Float'Last then Mu_First else 0.0));
-         for I in 0 .. Natural (Keep.Length) - 1 loop
+         end Fill_Mu_Nom;
+         procedure Fill_Mu_Worst (I : Natural) is
+            Cd : Candidate;
+            Worst : Long_Float;
+         begin
+            if Mu_Done (I) then
+               return;
+            end if;
+            Fill_Mu_Nom (I);
+            Cd := All_C (I);
+            Worst := Cd.Mu_Nom;
+            for Ax in 0 .. 1 loop
+               Worst := Long_Float'Max (Worst, Long_Float'Max (Hd.Mu_Need (Tilt_Set (Cd, Ax, 1.0), Ld), Hd.Mu_Need (Tilt_Set (Cd, Ax, -1.0), Ld)));
+            end loop;
+            Cd.Mu_Worst := Worst;
+            All_C.Replace_Element (I, Cd);
+            Mu_Done (I) := True;
+         end Fill_Mu_Worst;
+         --  ①在摩擦 Mu 下,名义的和四个倾斜的都做得到吗(= 最坏的不比 Mu 大)
+         function All_Tilts_At (Cd : Candidate; Mu : Long_Float) return Boolean is
+         begin
+            for Ax in 0 .. 1 loop
+               if Hd.Squeeze (Tilt_Set (Cd, Ax, 1.0), Ld, Mu) = Hd.No_Way or else Hd.Squeeze (Tilt_Set (Cd, Ax, -1.0), Ld, Mu) = Hd.No_Way then
+                  return False;
+               end if;
+            end loop;
+            return True;
+         end All_Tilts_At;
+         --  ②的最坏
+         function Need_Worst (Cd : Candidate) return Long_Float is
+            Why : Hd.Why_Kind;
+            Worst : Long_Float := Hd.Need (Cd.Touches, Com, U, Sup, Move, St.Mu_Ref, St.Mu_Ref, Why);
+         begin
+            for Ax in 0 .. 1 loop
+               Worst := Long_Float'Max (Worst, Long_Float'Max (Hd.Need (Tilt_Set (Cd, Ax, 1.0), Com, U, Sup, Move, St.Mu_Ref, St.Mu_Ref, Why),
+                                                              Hd.Need (Tilt_Set (Cd, Ax, -1.0), Com, U, Sup, Move, St.Mu_Ref, St.Mu_Ref, Why)));
+            end loop;
+            return Worst;
+         end Need_Worst;
+         --  按键排下标(键一样按下标,稳定)
+         procedure Sort_By (Key : Real_Arr; Ix : in out Idx_Arr; N : Natural) is
+            function Lt (A, B : Natural) return Boolean is (Key (A) < Key (B) or else (Key (A) = Key (B) and then A < B));
+            procedure Srt is new Ada.Containers.Generic_Array_Sort (Natural, Natural, Idx_Arr, Lt);
+         begin
+            if N > 0 then
+               Srt (Ix (0 .. N - 1));
+            end if;
+         end Sort_By;
+      begin
+         St.Kept := Nc;
+         --  这件东西的摩擦没量过时的先验:这一批里①最坏刚好够、再留它自己那份误差(2 × 最坏 − 名义),最小的那一组要的。
+         --  一组要把它压低:名义的得在它之下做得到,四个倾斜的得在 (它 + 名义)/2 之下做得到 —— 先问这两句,都过了才细算
+         for I in 0 .. Nc - 1 loop
             declare
-               Cd : Candidate := Keep (I);
-               Dl : Bytes.Floats;
-               Worst : Long_Float := Hd.Squeeze (Cd.Touches, Ld, St.Mu_Ref);
+               Cd : constant Candidate := All_C (I);
             begin
-               for Ax in 0 .. 1 loop
-                  declare
-                     Axis : constant V3 := (if Ax = 0 then Cd.Approach else Unit (Cross (Cd.Approach, Sub (Cd.Touches (1).P, Cd.Touches (0).P)), Oku));
-                     Dummy : constant Boolean := Set_Dl (Cd, Ax, Pitch, Sigma, Dl);
-                     Neg : Bytes.Floats;
-                  begin
-                     for X of Dl loop
-                        Neg.Append (-X);
-                     end loop;
-                     Worst := Long_Float'Max (Worst, Long_Float'Max (Hd.Squeeze (Tilted (Cd.Touches, Dl, Axis), Ld, St.Mu_Ref),
-                                                                    Hd.Squeeze (Tilted (Cd.Touches, Neg, Axis), Ld, St.Mu_Ref)));
-                  end;
-               end loop;
-               Cd.Squeeze := Worst;
-               Keep.Replace_Element (I, Cd);
+               if Mu_First = Long_Float'Last or else Hd.Squeeze (Cd.Touches, Ld, Mu_First) < Hd.No_Way then
+                  Fill_Mu_Nom (I);
+                  if All_C (I).Mu_Nom < Hd.No_Way
+                    and then (Mu_First = Long_Float'Last or else All_Tilts_At (All_C (I), 0.5 * (Mu_First + All_C (I).Mu_Nom)))
+                  then
+                     Fill_Mu_Worst (I);
+                     if All_C (I).Mu_Worst < Hd.No_Way then
+                        Mu_First := Long_Float'Min (Mu_First, All_C (I).Mu_Worst + (All_C (I).Mu_Worst - All_C (I).Mu_Nom));
+                     end if;
+                  end if;
+               end if;
             end;
          end loop;
+         St.Mu_Ref := Long_Float'Max (Mu_Lb, (if Mu_First < Long_Float'Last then Mu_First else 0.0));
+         --  ②按名义的法向先算一遍;①在这件东西量到的摩擦上限下做不到的不要(它以前没跟上的那一组要的它给不起);
+         --  要的动往它躺的面里去 ⇒ 哪一组都做不到
          declare
-            function By_Sq (L, R : Candidate) return Boolean is
-              (L.Squeeze < R.Squeeze or else (L.Squeeze = R.Squeeze and then L.Mu_Worst < R.Mu_Worst));
-            package Sq_Sort is new Cand_Vectors.Generic_Sorting (By_Sq);
-         begin
-            Sq_Sort.Sort (Keep);
-         end;
-         --  够不够得着:下手那一刻和悬停那一刻的眼的位姿都要在量到的关节范围里解得出来
-         for Cd of Keep loop
-            exit when Natural (Found.Length) >= Want_K;
-            if Cd.Squeeze < Hd.No_Way then
-               if Reach (Cd.R, Cd.T) and then Reach (Cd.R, Sub (Cd.T, Scl (Standoff, Cd.Approach))) then
-                  Found.Append (Cd);
-               else
-                  St.Unreachable := St.Unreachable + 1;
+            Pool : Idx_Arr (0 .. Natural'Max (Nc, 1) - 1);
+            Np2 : Natural := 0;
+            Nn : Real_Arr (0 .. Natural'Max (Nc, 1) - 1) := [others => Hd.No_Way];
+            Worst_Of : Real_Arr (0 .. Natural'Max (Nc, 1) - 1) := [others => Hd.No_Way];
+            Reach_Of : array (0 .. Natural'Max (Nc, 1) - 1) of Integer := [others => -1];   --  -1 = 还没问,0 = 够不着,1 = 够得着
+            Ev : Idx_Arr (0 .. Natural'Max (Nc, 1) - 1) := [others => 0];   --  算过最坏的,按 (最坏的力, ①的最坏摩擦) 排好
+            Ne : Natural := 0;
+            Next : Natural := 0;
+            --  排在前面:最坏的力小;一样大时①的最坏摩擦小(打平了才补算它)
+            function Before (A, B : Natural) return Boolean is
+            begin
+               if Worst_Of (A) /= Worst_Of (B) then
+                  return Worst_Of (A) < Worst_Of (B);
                end if;
-            end if;
-         end loop;
-         St.Kept := Natural (All_C.Length);
+               Fill_Mu_Worst (A); Fill_Mu_Worst (B);
+               return All_C (A).Mu_Worst < All_C (B).Mu_Worst;
+            end Before;
+         begin
+            for I in 0 .. Nc - 1 loop
+               if Mu_Ub < Long_Float'Last and then Hd.Squeeze (All_C (I).Touches, Ld, Mu_Ub) = Hd.No_Way then
+                  St.Over_Ub := St.Over_Ub + 1;
+               else
+                  declare
+                     Why : Hd.Why_Kind;
+                     use type Hd.Why_Kind;
+                  begin
+                     Nn (I) := Hd.Need (All_C (I).Touches, Com, U, Sup, Move, St.Mu_Ref, St.Mu_Ref, Why);
+                     if Why = Hd.Surface_In_Way then
+                        St.In_Way := True;
+                        return;
+                     end if;
+                     if Nn (I) < Hd.No_Way then
+                        Pool (Np2) := I; Np2 := Np2 + 1;
+                     else
+                        St.No_Force := St.No_Force + 1;
+                     end if;
+                  end;
+               end if;
+            end loop;
+            Sort_By (Nn, Pool, Np2);
+            loop
+               declare
+                  Bound : constant Long_Float := (if Next < Np2 then Nn (Pool (Next)) else Long_Float'Last);
+                  Got : Natural := 0;
+               begin
+                  --  按排好的看:最坏的力比还没算的那些的名义还小的,够得着就收;收够了(或者都算完了)就停
+                  Found.Clear;
+                  for E in 0 .. Ne - 1 loop
+                     declare
+                        I : constant Natural := Ev (E);
+                        Cd : constant Candidate := All_C (I);
+                     begin
+                        exit when Got >= Want_K or else (Worst_Of (I) >= Bound and then Next < Np2);
+                        if Worst_Of (I) < Hd.No_Way then
+                           if Reach_Of (I) < 0 then
+                              --  够不够得着:下手那一刻和悬停那一刻的眼的位姿都要在量到的关节范围里解得出来
+                              Reach_Of (I) := (if Reach (Cd.R, Cd.T) and then Reach (Cd.R, Sub (Cd.T, Scl (Standoff, Cd.Approach))) then 1 else 0);
+                              if Reach_Of (I) = 0 then
+                                 St.Unreachable := St.Unreachable + 1;
+                              end if;
+                           end if;
+                           if Reach_Of (I) = 1 then
+                              Found.Append (Cd);
+                              Got := Got + 1;
+                           end if;
+                        end if;
+                     end;
+                  end loop;
+                  exit when Got >= Want_K or else Next >= Np2;
+                  --  再算一组的最坏,插进排好的里
+                  declare
+                     I : constant Natural := Pool (Next);
+                     Cd : Candidate := All_C (I);
+                     Pos : Natural := Ne;
+                  begin
+                     Worst_Of (I) := Need_Worst (Cd);
+                     Cd.Squeeze := Worst_Of (I);
+                     All_C.Replace_Element (I, Cd);
+                     while Pos > 0 and then Before (I, Ev (Pos - 1)) loop
+                        Ev (Pos) := Ev (Pos - 1);
+                        Pos := Pos - 1;
+                     end loop;
+                     Ev (Pos) := I;
+                     Ne := Ne + 1;
+                     Next := Next + 1;
+                  end;
+               end;
+            end loop;
+            --  挑出来的每一组:①的名义和最坏都给全(合上以后验它跟不跟手、记摩擦就按它们)
+            Found.Clear;
+            declare
+               Got : Natural := 0;
+            begin
+               for E in 0 .. Ne - 1 loop
+                  exit when Got >= Want_K;
+                  declare
+                     I : constant Natural := Ev (E);
+                  begin
+                     if Worst_Of (I) < Hd.No_Way and then Reach_Of (I) = 1 then
+                        Fill_Mu_Worst (I);
+                        Found.Append (All_C (I));
+                        Got := Got + 1;
+                     end if;
+                  end;
+               end loop;
+            end;
+         end;
       end;
    end Plan;
 
-end Contact.Grasp;
+end Contact.Search;
