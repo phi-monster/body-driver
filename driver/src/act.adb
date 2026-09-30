@@ -10563,8 +10563,12 @@ package body Act is
                      Hz : constant Long_Float := Dot (Nb, Vt);
                      Hv : constant Geom.V3 := [Vt (0) - Hz * Nb (0), Vt (1) - Hz * Nb (1), Vt (2) - Hz * Nb (2)];
                      Lh : constant Long_Float := Geom.Norm (Hv);
-                     --  沿它的视线从眼到面那么远(朝正下压时这条连线的另一头就是它的视线交面那一点,同原来)
-                     Sj : constant Long_Float := (if Cj > 1.0e-9 then H / Cj else 0.0);
+                     --  带子到另一根手指的尖为止:两根手指一样长(挑空地这一条本来就这么算)⇒ 它的尖离眼和这一瓣的尖一样远 —— 有估的尖按它,
+                     --  没有 ⇒ 这一瓣视线交面那么远(尖在眼和面之间,上限);也不超过它自己的视线交面。尖外面没有手指,东西再高也碰不着。
+                     --  09-30 V1B80:原来一直拉到它的视线交面(第一下眼离面 5.6 ⇒ 7.4 单位、约 40 cm),原位附近带子里全是东西,
+                     --  只挑得到 47 cm 外的空地,到了那儿被挡,剩下的空地在量到的关节限位里全解不出
+                     Sj : constant Long_Float := (if Cj > 1.0e-9 then Long_Float'Min (H / Cj, (if Has_Est (K) then Geom.Norm (Est (K)) elsif Ck > 1.0e-9 then H / Ck else H / Cj))
+                                                  else 0.0);
                   begin
                      All_Hit := All_Hit and then Cj > 1.0e-9;
                      Lp.Append (Geom.V3'[A0 (0) + Sj * Hv (0) + Shift (0), A0 (1) + Sj * Hv (1) + Shift (1), A0 (2) + Sj * Hv (2) + Shift (2)]);

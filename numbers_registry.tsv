@@ -635,7 +635,8 @@ act.adb	Selfmap.Idle (L, F, 1, Ok2);	1	调参数	固定等 1 拍取第二帧,拿
 act.adb	Sh : constant Natural := Ch / 2;	2	调参数	给脑的拼图里,其余相机一律缩成主图宽高的一半放在下面一条:拍的版面。连带后果:下面一条只放得下 Cw / Sw = 2 台(act.adb:9038 的 Slot * Sw < Cw),第 4 台及以后的眼脑每轮都看不见;而且统一按 Ch/2 缩,宽高比和主图不同的相机被压扁。规则把它当'求中点 / 一半',判错了(act.adb:9027)	脑每轮看得见几只眼、看得多大	中	按观测里现成的量排:Sw = Cw / (N_Cams − 1)(一条正好放下全部其余相机),每台按自己的宽高比 Sh_k = Sw × Kh / Kw,Bh = Ch + max_k Sh_k;N_Cams、每台 W/H 都在帧里
 act.adb	Sig := Es (Natural (Es.Length) / 2) / Stats.Rayleigh_Median;	2	数学	排好后取 Length/2 = 中位数(中位数的定义)(act.adb:10290)
 act.adb	Sigma_Mult : constant Long_Float := 3.0;	3.0	统计	Picture.Cut 的门 = 鼓起中位 + 3×稳健σ(MAD×1.4826),n-σ 离群门,单侧约 99.87%。注:注释说是在真深度图上试出来的(3 行、5 杀光);逐像素检验约 30 万次,真正压假块的是最小像素数(act.adb:30)
-act.adb	Sj : constant Long_Float := (if Cj > 1.0e-9 then H / Cj else 0.0);	1.0e-9	数值	视线和面法向夹角的余弦(单位向量点积,无量纲)防除零(act.adb:12020)
+act.adb	Sj : constant Long_Float := (if Cj > 1.0e-9 then Long_Float'Min (H / Cj, (if Has_Est (K) then Geom.Norm (Est (K)) elsif Ck > 1.0e-9 then H / Ck else H / Cj))	1.0e-9	数值	防除零:视线几乎和面平行(交不到面)时不除(同上一行 Cj、Ck 的门)(act.adb:10570)
+act.adb	Sj : constant Long_Float := (if Cj > 1.0e-9 then Long_Float'Min (H / Cj, (if Has_Est (K) then Geom.Norm (Est (K)) elsif Ck > 1.0e-9 then H / Ck else H / Cj))	1.0e-9	数值	防除零:视线几乎和面平行(交不到面)时不除(同上一行 Cj、Ck 的门)(act.adb:10570)
 act.adb	Slice (Err, I, I + 21) = "")	21	格式	同上(切片 I .. I + 21)(act.adb:9144)
 act.adb	Slot : Integer := -1;	1	数值	哨兵:-1 = 这一点没有世界槽(act.adb:1595)
 act.adb	Small : constant Long_Float := 4.0 * Geo_Base (C, A);	4.0	调参数	开机碰桌面粗找一小步 = 4 倍最小一档(act.adb:11942)	碰桌面量指尖时的小步(粗找、快下余量、Up_By 门)	高	Small = √(Ln × Notch) = √(Stride_Of(C,A) × Geo_Base(C,A))(大步→小步→一档三级,每级扫的步数相同时总步数最少);下限同 Blocked 判得出的最小一步
