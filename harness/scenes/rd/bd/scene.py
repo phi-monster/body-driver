@@ -185,28 +185,32 @@ class Walker:
                 p, qn = _np(pos)[:3], _np(rot)[:4]
                 key = (env_idx, inst)
                 st = self.state.get(key)
+                Rb = _rotm(qn)
                 if st is None:
                     rng = np.random.default_rng(int(w.get("seed", 0)))
+                    # "朝上"和"朝前"都按它开局躺着的样子定,不认资产自己的轴(chase_mouse 的鼠标资产不是 z 朝上:按 z 认它一开局就"翻倒了",一步不走)
+                    up0 = Rb.T @ np.array([0.0, 0.0, 1.0])
+                    fwd0 = np.array([1.0, 0.0, 0.0]) if np.linalg.norm((Rb @ np.array([1.0, 0.0, 0.0]))[:2]) > 0.5 else np.array([0.0, 1.0, 0.0])
                     st = {"rng": rng, "heading": float(rng.uniform(0.0, 2.0 * math.pi)), "z_rest": float(p[2]), "ticks": 0,
-                          "target": p[:2].copy()}
+                          "target": p[:2].copy(), "up0": up0, "fwd0": fwd0}
                     self.state[key] = st
                 if st["ticks"] > 0 and st["ticks"] % (int(w["turn_every"]) * sub) == 0:
                     st["heading"] = float(st["rng"].uniform(0.0, 2.0 * math.pi))
-                Rb = _rotm(qn)
-                upright = Rb[2, 2] > math.cos(math.radians(30.0))
+                upright = (Rb @ st["up0"])[2] > math.cos(math.radians(30.0))
                 if p[2] > st["z_rest"] + float(w["free_height"]) or not upright:
                     st["target"] = p[:2].copy()          # 被拿起来 / 翻倒了:不走;放下、立起来以后从那儿接着走
                 else:
                     step = float(w["speed"]) / sub
                     h = st["heading"]
-                    t = st["target"] + step * np.array([math.cos(h), math.sin(h)])
                     (x0, x1), (y0, y1) = w["region"]
-                    if t[0] < x0 or t[0] > x1:
+                    t = st["target"] + step * np.array([math.cos(h), math.sin(h)])
+                    # 碰边反射:这一步会往区域外面走就把那个方向反过来(不夹到边上:开局就在区域外的(chase_mouse 的老鼠开局 y −0.30、
+                    # 区域 y ≤ −0.32)夹一下"该在哪"就跳出去 2 cm,被当成被推开了、一步不走;反射以后它自己走回区域里)
+                    if (t[0] < x0 and math.cos(h) < 0) or (t[0] > x1 and math.cos(h) > 0):
                         h = math.pi - h
-                        t[0] = min(max(t[0], x0), x1)
-                    if t[1] < y0 or t[1] > y1:
+                    if (t[1] < y0 and math.sin(h) < 0) or (t[1] > y1 and math.sin(h) > 0):
                         h = -h
-                        t[1] = min(max(t[1], y0), y1)
+                    t = st["target"] + step * np.array([math.cos(h), math.sin(h)])
                     st["heading"] = h
                     err = t - p[:2]
                     if np.linalg.norm(err) > 2.0 * float(w["speed"]):
@@ -215,7 +219,8 @@ class Walker:
                     st["target"] = t
                     v = _np(obj.get_linear_velocity())[:3]
                     obj.set_linear_velocity(torch.tensor([err[0] / dt, err[1] / dt, v[2]], dtype=torch.float32))
-                    yaw_now = math.atan2(Rb[1, 0], Rb[0, 0])
+                    f = Rb @ st["fwd0"]
+                    yaw_now = math.atan2(f[1], f[0])
                     dyaw = (h + math.radians(float(w.get("yaw0", 0.0))) - yaw_now + math.pi) % (2.0 * math.pi) - math.pi
                     wmax = math.pi   # 转向最快半圈一秒
                     obj.set_angular_velocity(torch.tensor([0.0, 0.0, max(-wmax, min(wmax, dyaw / dt))], dtype=torch.float32))

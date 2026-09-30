@@ -17,7 +17,7 @@
 | `bd_trigger` | 带扳机的枪形东西(关节体,不固定;扳机是转轴 0–25°,回位弹簧 0.2 N·m/rad;侧躺在桌上,握把朝机器人) | 同一拍里枪身抬离 ≥ 5 cm 且扳机扣下 ≥ 17.5° | Pick up the water gun and pull its trigger. |
 | `bd_glass` | 玻璃杯(Isaac 自带的 OmniGlass,透明;碰撞是杯底 + 16 片薄壁) | 抬离 ≥ 10 cm(RoboDojo 的 is_lift) | Pick up the glass cup by 10 cm. |
 | `bd_white` | 白桌白墙:桌面纯白 OmniPBR(`Assets/Material/bd_white`)、四面白墙 + 白地;桌上一只喷漆罐(RoboDojo 自带的 `can/00000`) | 抬离 ≥ 10 cm | Pick up the spray can by 10 cm. |
-| `bd_walker` | 会自己走的东西:RoboDojo 自带的玩具校车(`toy_car/00000`)在桌面上按步随机走:每个动作 1 cm、每 25 个动作随机换方向、碰边反射;被拿离桌面 5 mm 以上或翻倒就不走。走法是速度伺服:心里"该在哪"的点每个动作前进 1 cm,物理按速度去追(摩擦、碰撞照算:被挡住就停,被推开就从那儿接着走) | 抬离 ≥ 10 cm | Catch the toy bus that drives around on the table and lift it 10 cm. |
+| `bd_walker` | 会自己走的东西:RoboDojo 自带的玩具校车(`toy_car/00000`)在桌面上按步随机走:每个动作 1 cm、每 25 个动作随机换方向、碰边反射;被拿离桌面 5 mm 以上或翻倒就不走。走法是速度伺服:心里"该在哪"的点每个动作前进 1 cm,物理按速度去追(摩擦、碰撞照算:被挡住就停,被推开就从那儿接着走);"朝上""朝前"按它开局躺着的样子定(不认资产自己的轴);开局在区域外就自己走回来。单测 `walker_unit.py`(不起 Isaac) | 抬离 ≥ 10 cm | Catch the toy bus that drives around on the table and lift it 10 cm. |
 | `bd_cloth` | 一块布:30 × 30 cm 粒子布(31 × 31 个点),平铺在桌上;粒子参数和 RoboDojo 自己的布(fold_clothes)一样 | 布上最高的粒子高出桌面 ≥ 10 cm | Pick up the cloth by a corner and lift it 10 cm. |
 
 几何都是这里自己定的,不照 RoboDojo 的布局、不照我们手上的硬件。判据里的尺寸不写在任务代码里,全从资产自己的 `metadata.json`(`passive.functional`)读:孔口位置和半宽、横杆两端、环心和内外半径、销底。

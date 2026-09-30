@@ -46,7 +46,7 @@ G=$(ls "$N/look"/grid_*.bmp 2>/dev/null | head -1)
 [ -f "$N/look/fixed_eye.txt" ] && cp "$N/look/fixed_eye.txt" "$E/"
 touch /root/q/done_$K
 wait $RUN
-echo "run.sh 结束:$(date +%T)" >> "$E/meta.txt"
+echo "run.sh 结束:$(date +%T) rc=$?" >> "$E/meta.txt"
 # 清:shot 目录里 cal* / 经历* 以外的都删
 find "$N" -mindepth 1 -maxdepth 1 ! -name 'cal*' ! -name '经历*' -exec rm -rf {} +
 case "$TASK" in   # RoboDojo 这一集的结果目录:.../<任务>/l3_link/<配置>/<种子>_/<ROBODOJO_RUN_ID = 炮名>(只删这一炮的)
