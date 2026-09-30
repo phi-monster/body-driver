@@ -140,9 +140,10 @@ package body Zone is
       end;
    end Assemble;
 
-   procedure Tip_Section (Z : Hand_Zone; Lb : Lobe; W, Hh : Natural; U, V, Wide, Thin : out Long_Float; Ok : out Boolean) is
+   --  这一瓣自己那一块:框里每一块手指像素(8 邻连通)各数一数有几个像素落在框里,取最多的那块(像素下标;尖那一截、瓣的像素、
+   --  这一瓣的剪影都按它)
+   function Lobe_Component (Z : Hand_Zone; Lb : Lobe; W, Hh : Natural) return Ints is
       N : constant Natural := W * Hh;
-      Band : constant Long_Float := Long_Float (Hh) / 80.0;   --  最远的那一小截有多厚(比例,无量纲)
       type Flag_Array is array (Natural range <>) of Boolean;
       type Flag_Access is access Flag_Array;
       procedure Free is new Ada.Unchecked_Deallocation (Flag_Array, Flag_Access);
@@ -151,14 +152,10 @@ package body Zone is
       Best_In : Natural := 0;
       function In_Box (P : Natural) return Boolean is
         (P mod W in Lb.X0 .. Lb.X1 and then P / W in Lb.Y0 .. Lb.Y1);
-      function On_Edge (P : Natural) return Boolean is
-        (P mod W = 0 or else P mod W = W - 1 or else P / W = 0 or else P / W = Hh - 1);
    begin
-      U := 0.0; V := 0.0; Wide := 0.0; Thin := 0.0; Ok := False;
       if not Lb.Valid or else N = 0 or else Natural (Z.Fingers.Length) < N then
-         return;
+         return Best;
       end if;
-      --  这一瓣自己那一块:框里每一块手指像素(8 邻连通)各数一数有几个像素落在框里,取最多的那块
       Seen := new Flag_Array'(0 .. N - 1 => False);
       for Y in Lb.Y0 .. Natural'Min (Lb.Y1, Hh - 1) loop
          for X in Lb.X0 .. Natural'Min (Lb.X1, W - 1) loop
@@ -203,6 +200,21 @@ package body Zone is
          end loop;
       end loop;
       Free (Seen);
+      return Best;
+   end Lobe_Component;
+
+   procedure Tip_Section (Z : Hand_Zone; Lb : Lobe; W, Hh : Natural; U, V, Wide, Thin : out Long_Float; Ok : out Boolean) is
+      N : constant Natural := W * Hh;
+      Band : constant Long_Float := Long_Float (Hh) / 80.0;   --  最远的那一小截有多厚(比例,无量纲)
+      Best : Ints;
+      function On_Edge (P : Natural) return Boolean is
+        (P mod W = 0 or else P mod W = W - 1 or else P / W = 0 or else P / W = Hh - 1);
+   begin
+      U := 0.0; V := 0.0; Wide := 0.0; Thin := 0.0; Ok := False;
+      if not Lb.Valid or else N = 0 or else Natural (Z.Fingers.Length) < N then
+         return;
+      end if;
+      Best := Lobe_Component (Z, Lb, W, Hh);
       declare
          Nb : Natural := 0;
       begin
@@ -267,63 +279,53 @@ package body Zone is
          return R;
       end if;
       for I in 0 .. Z.N_Lobes - 1 loop
-         declare
-            Lb : constant Lobe := Lobe_Of (Z, I);
-            Seen : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (N));
-            Best, Cur, Stack : Ints;
-            Best_In : Natural := 0;
-         begin
-            if Lb.Valid then
-               for Y in Lb.Y0 .. Natural'Min (Lb.Y1, Hh - 1) loop
-                  for X in Lb.X0 .. Natural'Min (Lb.X1, W - 1) loop
-                     declare
-                        P0 : constant Natural := Y * W + X;
-                        In_Cnt : Natural := 0;
-                     begin
-                        if Z.Fingers.Element (P0) and then not Seen.Element (P0) then
-                           Cur.Clear; Stack.Clear;
-                           Seen.Replace_Element (P0, True); Stack.Append (P0);
-                           while not Stack.Is_Empty loop
-                              declare
-                                 P : constant Natural := Natural (Stack.Last_Element);
-                                 Px : constant Integer := P mod W;
-                                 Py : constant Integer := P / W;
-                              begin
-                                 Stack.Delete_Last;
-                                 Cur.Append (P);
-                                 if Px in Lb.X0 .. Lb.X1 and then Py in Lb.Y0 .. Lb.Y1 then
-                                    In_Cnt := In_Cnt + 1;
-                                 end if;
-                                 for Dy in -1 .. 1 loop
-                                    for Dx in -1 .. 1 loop
-                                       if (Dx /= 0 or else Dy /= 0) and then Px + Dx in 0 .. W - 1 and then Py + Dy in 0 .. Hh - 1 then
-                                          declare
-                                             Q : constant Natural := (Py + Dy) * W + (Px + Dx);
-                                          begin
-                                             if not Seen.Element (Q) and then Z.Fingers.Element (Q) then
-                                                Seen.Replace_Element (Q, True); Stack.Append (Q);
-                                             end if;
-                                          end;
-                                       end if;
-                                    end loop;
-                                 end loop;
-                              end;
-                           end loop;
-                           if In_Cnt > Best_In then
-                              Best_In := In_Cnt; Best := Cur;
-                           end if;
-                        end if;
-                     end;
-                  end loop;
-               end loop;
-               for P of Best loop
-                  R.Replace_Element (P, True);
-               end loop;
-            end if;
-         end;
+         for P of Lobe_Component (Z, Lobe_Of (Z, I), W, Hh) loop
+            R.Replace_Element (P, True);
+         end loop;
       end loop;
       return R;
    end Lobe_Pixels;
+
+   function Lobe_Mask (Z : Hand_Zone; Lb : Lobe; W, Hh : Natural; Through : out Boolean) return Bools is
+      N : constant Natural := W * Hh;
+      R : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (N));
+      Runs : Natural := 0;
+   begin
+      Through := False;
+      if Natural (Z.Fingers.Length) < N or else W = 0 or else Hh = 0 then
+         return R;
+      end if;
+      for P of Lobe_Component (Z, Lb, W, Hh) loop
+         R.Replace_Element (P, True);
+      end loop;
+      --  沿画面四条边绕一圈(顺时针),数这一块贴画面边的有几段:一段 = 从画面外伸进来、尖在画面里;两段以上 = 穿过画面
+      declare
+         Perim : constant Natural := 2 * (W + Hh) - 4;
+         function At_Perim (K : Natural) return Natural is
+           (if K < W then K                                          --  上边,从左往右
+            elsif K < W + Hh - 1 then (K - W + 1) * W + (W - 1)      --  右边,从上往下
+            elsif K < 2 * W + Hh - 2 then (Hh - 1) * W + (2 * W + Hh - 3 - K)   --  下边,从右往左
+            else (2 * (W + Hh) - 4 - K) * W);                        --  左边,从下往上
+         First_On : constant Boolean := R.Element (At_Perim (0));
+         Prev : Boolean := R.Element (At_Perim (Perim - 1));
+      begin
+         for K in 0 .. Perim - 1 loop
+            declare
+               Cur : constant Boolean := R.Element (At_Perim (K));
+            begin
+               if Cur and then not Prev then
+                  Runs := Runs + 1;
+               end if;
+               Prev := Cur;
+            end;
+         end loop;
+         if Runs = 0 and then First_On then
+            Runs := 1;   --  一整圈都是它(整幅都是手指)
+         end if;
+      end;
+      Through := Runs > 1;
+      return R;
+   end Lobe_Mask;
 
    function From_Frames (Open_G, Closed_G : Buf; W, Hh : Natural) return Hand_Zone is
       Z : Hand_Zone;
@@ -562,35 +564,78 @@ package body Zone is
             end if;
          end loop;
          Kinem.Classify_Rides (G, Rot, Sig, W, Hh, Pu, Pv, Bu, Bv, Rd);
-         for I in Rd'Range loop
-            if Rd (I) = Kinem.Rides then
-               declare
-                  X : constant Natural := Natural (Long_Float'Floor (Pu (I)));
-                  Y : constant Natural := Natural (Long_Float'Floor (Pv (I)));
-                  P : constant Natural := Y * W + X;
-               begin
-                  if X < W and then Y < Hh and then not In_Zone (P) and then not Near_Zone (X, Y) then
-                     if not Z.Fingers.Element (P) then
-                        Z.Fingers.Replace_Element (P, True);
-                        Added := Added + 1;
+         --  要补进来的(长在眼上、原来不是手指像素、不挨着合到的区)先记下,再做一遍开运算:只留能整块盖住一个格子(W/Gx × Hh/Gy)的 ——
+         --  补全的证据是那张格点(一格一个点),比一格还薄的判不了。09-30 V1B74 第 1 只手右边那一瓣:手指边上一圈 3–6 px、尖旁边一块
+         --  10×8 px、一列点子判成长在眼上(挨着手指的一片匀色白墙,眼转以后颜色没变,配点仪器在遮挡边上把"不动"往外带了几个像素:
+         --  它们离"没动"中位 1.23 px,真手指 1.31 px,按配点分不开),尖取到那一块上、只有 8 px 宽 ⇒ 落点圈 0.113 单位,手指压在琴边上。
+         --  V1B69 那种手指上半截整块缺的(约 50 px 宽)开运算后照样补上
+         declare
+            N : constant Natural := W * Hh;
+            Wc : constant Natural := W / Kinem.Gx;
+            Hc : constant Natural := Hh / Kinem.Gy;
+            type Nat_Array is array (Natural range <>) of Natural;
+            type Nat_Access is access Nat_Array;
+            procedure Free is new Ada.Unchecked_Deallocation (Nat_Array, Nat_Access);
+            --  Want = 这一像素要补、是第几瓣的(0 = 不补,k + 1 = 第 k 瓣);Sa / Sf = 求和表(右下角含自己,(W+1) × (Hh+1))
+            Want : Nat_Access := new Nat_Array'(0 .. N - 1 => 0);
+            Sa : Nat_Access := new Nat_Array'(0 .. (W + 1) * (Hh + 1) - 1 => 0);
+            Sf : Nat_Access := new Nat_Array'(0 .. (W + 1) * (Hh + 1) - 1 => 0);
+            function Sum (T : Nat_Access; X0, Y0, X1, Y1 : Integer) return Integer is   --  [X0, X1) × [Y0, Y1) 里的和
+              (Integer (T ((Y1) * (W + 1) + X1)) - Integer (T ((Y0) * (W + 1) + X1)) - Integer (T ((Y1) * (W + 1) + X0)) + Integer (T ((Y0) * (W + 1) + X0)));
+         begin
+            for I in Rd'Range loop
+               if Rd (I) = Kinem.Rides then
+                  declare
+                     X : constant Natural := Natural (Long_Float'Floor (Pu (I)));
+                     Y : constant Natural := Natural (Long_Float'Floor (Pv (I)));
+                  begin
+                     if X < W and then Y < Hh and then not Z.Fingers.Element (Y * W + X) and then not In_Zone (Y * W + X) and then not Near_Zone (X, Y) then
+                        Want (Y * W + X) := Which (I) + 1;
                      end if;
-                     declare
-                        Lb : Lobe := Lobe_Of (Z, Which (I));
-                     begin
-                        if Lb.Valid then
-                           Lb.X0 := Natural'Min (Lb.X0, X); Lb.X1 := Natural'Max (Lb.X1, X);
-                           Lb.Y0 := Natural'Min (Lb.Y0, Y); Lb.Y1 := Natural'Max (Lb.Y1, Y);
-                           if Which (I) = 0 then
-                              Z.A := Lb;
-                           else
-                              Z.B := Lb;
+                  end;
+               end if;
+            end loop;
+            if Wc > 0 and then Hc > 0 then
+               for Y in 0 .. Hh - 1 loop
+                  for X in 0 .. W - 1 loop
+                     Sa ((Y + 1) * (W + 1) + X + 1) := Sa (Y * (W + 1) + X + 1) + Sa ((Y + 1) * (W + 1) + X) - Sa (Y * (W + 1) + X)
+                       + (if Want (Y * W + X) > 0 then 1 else 0);
+                  end loop;
+               end loop;
+               --  Sf:左上角在这一像素、一整格都要补的那些格子的起点
+               for Y in 0 .. Hh - 1 loop
+                  for X in 0 .. W - 1 loop
+                     Sf ((Y + 1) * (W + 1) + X + 1) := Sf (Y * (W + 1) + X + 1) + Sf ((Y + 1) * (W + 1) + X) - Sf (Y * (W + 1) + X)
+                       + (if X + Wc <= W and then Y + Hc <= Hh and then Sum (Sa, X, Y, X + Wc, Y + Hc) = Wc * Hc then 1 else 0);
+                  end loop;
+               end loop;
+               for Y in 0 .. Hh - 1 loop
+                  for X in 0 .. W - 1 loop
+                     if Want (Y * W + X) > 0
+                       and then Sum (Sf, Integer'Max (0, X - Wc + 1), Integer'Max (0, Y - Hc + 1), X + 1, Y + 1) > 0
+                     then
+                        Z.Fingers.Replace_Element (Y * W + X, True);
+                        Added := Added + 1;
+                        declare
+                           Kl : constant Natural := Want (Y * W + X) - 1;
+                           Lb : Lobe := Lobe_Of (Z, Kl);
+                        begin
+                           if Lb.Valid then
+                              Lb.X0 := Natural'Min (Lb.X0, X); Lb.X1 := Natural'Max (Lb.X1, X);
+                              Lb.Y0 := Natural'Min (Lb.Y0, Y); Lb.Y1 := Natural'Max (Lb.Y1, Y);
+                              if Kl = 0 then
+                                 Z.A := Lb;
+                              else
+                                 Z.B := Lb;
+                              end if;
                            end if;
-                        end if;
-                     end;
-                  end if;
-               end;
+                        end;
+                     end if;
+                  end loop;
+               end loop;
             end if;
-         end loop;
+            Free (Want); Free (Sa); Free (Sf);
+         end;
       end;
    end Apply_Refine;
 

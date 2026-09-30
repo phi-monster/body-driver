@@ -5,6 +5,7 @@ with Ada.Text_IO;
 with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
 with Json;
 with Codec;
+with Stats;
 package body Geom is
 
    function Quat_To_R (P : Plug.Arm_Pose) return M3 is
@@ -1391,8 +1392,39 @@ package body Geom is
       return E;
    end Press_Of;
 
-   function Fit_Presses (Eqs : Press_Eq_Vectors.Vector; Gate : Long_Float) return Press_Fit is
+   function Fit_Presses (Eqs : Press_Eq_Vectors.Vector; Gate : Long_Float; View : Finger_View) return Press_Fit is
       Ai : Nat_Vectors.Vector;   --  对准这一瓣的那几下
+      --  解出来的尖投回这只眼落不落在这一瓣的手指像素上(见 Finger_View)
+      function On_Finger (X, Sd : V3) return Boolean is
+         U, V : Long_Float;
+         Front : Boolean;
+      begin
+         if View.Mask.Is_Empty or else View.W = 0 or else View.H = 0 or else Natural (View.Mask.Length) /= View.W * View.H then
+            return True;
+         end if;
+         Cam_Pixel (View.G, X, U, V, Front);
+         if not Front or else U < 0.0 or else V < 0.0 or else U >= Long_Float (View.W) or else V >= Long_Float (View.H) then
+            return False;
+         end if;
+         declare
+            Sp : constant Long_Float := View.G.F * Norm (Sd) / Long_Float'Max (Norm (X), Long_Float'Model_Small);   --  投回来的不确定度(像素)
+            Reach : constant Long_Float := Stats.Z * Sp;
+            Rp : constant Natural := Natural (Long_Float'Ceiling (Reach));
+            Xc : constant Integer := Integer (Long_Float'Floor (U));
+            Yc : constant Integer := Integer (Long_Float'Floor (V));
+         begin
+            for Y in Integer'Max (0, Yc - Rp) .. Integer'Min (View.H - 1, Yc + Rp) loop
+               for Xx in Integer'Max (0, Xc - Rp) .. Integer'Min (View.W - 1, Xc + Rp) loop
+                  if View.Mask.Element (Y * View.W + Xx)
+                    and then (Long_Float (Xx - Xc) ** 2 + Long_Float (Y - Yc) ** 2 <= Reach ** 2 or else (Xx = Xc and then Y = Yc))
+                  then
+                     return True;
+                  end if;
+               end loop;
+            end loop;
+            return False;
+         end;
+      end On_Finger;
       Max_Enum : constant := 16;   --  枚举的上限(次数:2^16 组;调用方一瓣最多压 8 下)
       Min_Set : constant := 4;     --  3 个未知数 + 1 条自己核(次数)
       function Dot (A, B : V3) return Long_Float is (A (0) * B (0) + A (1) * B (1) + A (2) * B (2));
@@ -1528,7 +1560,7 @@ package body Geom is
                               F.Sd (R) := Sig * Sqrt (Long_Float'Max (0.0, Mi (R, R)));
                            end loop;
                         end;
-                        if F.Low >= -Gate then
+                        if F.Low >= -Gate and then On_Finger (F.X, F.Sd) then
                            F.Ok := True;
                            if K > Best_Size then
                               Cs.Clear;

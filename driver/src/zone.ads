@@ -63,6 +63,9 @@ package Zone is
    procedure Tip_Section (Z : Hand_Zone; Lb : Lobe; W, Hh : Natural; U, V, Wide, Thin : out Long_Float; Ok : out Boolean);
    --  每一瓣自己那一块手指像素(同 Tip_Band 的认法:手指像素里和瓣框重合最多的那一整块,8 邻连通)的并集
    function Lobe_Pixels (Z : Hand_Zone; W, Hh : Natural) return Bools;
+   --  这一瓣自己那一块(同上)= 它在这只眼里的剪影(张开到合上扫过的,包住张开那一头);Through = 这一块沿画面边贴着不止一段(穿过画面:
+   --  尖在画面外,看得见的那一截里没有尖)。碰指尖几下一起解时拿它核解出来的尖(Geom.Fit_Presses 的 Finger_View)
+   function Lobe_Mask (Z : Hand_Zone; Lb : Lobe; W, Hh : Natural; Through : out Boolean) return Bools;
    --  把手指像素从深度切块结果里剔掉(块心落在手指框或区框里 = 我自己)
    function Is_Self (Z : Hand_Zone; R : Picture.Region; W, Hh : Natural) return Boolean;
 
@@ -82,7 +85,8 @@ package Zone is
    --  挨着别的瓣的格子的那一格不问(两瓣在手指像素里不许连成一块,不然两瓣的尖按同一块算);这一格没收到就不补。
    function Refine_Probes (Z : Hand_Zone; W, Hh : Natural; Grid_Ride : Bools) return Probe_Vectors.Vector;
    --  问回来的(纯函数):Mt (I) = Ps (I) 在转出去那一帧里配到的像素(U < 0 = 配不出);按格点拟合的转动 Rot、配点噪声 Sig(Kinem.Fit_Eye_Turn)
-   --  逐个判(Kinem.Classify_Rides),长在眼上的并进手指像素(Z.Fingers),那一瓣的框扩到连它们。Added = 新并进来的像素数
+   --  逐个判(Kinem.Classify_Rides),长在眼上的并进手指像素(Z.Fingers),那一瓣的框扩到连它们;只收能整块盖住一个格子的(开运算:
+   --  补全的证据是格点,比一格还薄的 —— 遮挡边上配点仪器往外带的那一圈 —— 判不了)。Added = 新并进来的像素数
    procedure Apply_Refine (Z : in out Hand_Zone; W, Hh : Natural; Ps : Probe_Vectors.Vector; Mu, Mv : Bytes.Floats; G : Geom.Cam_Geo; Rot : Geom.V3;
                            Sig : Long_Float; Added : out Natural)
      with Pre => Natural (Mu.Length) = Natural (Ps.Length) and then Natural (Mv.Length) = Natural (Ps.Length);

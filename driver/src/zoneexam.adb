@@ -6,6 +6,7 @@
 --  (灰度图按三个通道一样当彩图发;驱动发的是彩图)。给了 out_prefix 还写出手指、瓣两张掩码(PGM)。
 --  09-30 V1B69 第 1 只手按灰度判不出哪头张开:手一转光照就变,换成按配点判
 with Ada.Command_Line;
+with Ada.Environment_Variables;
 with Ada.Containers;
 with Ada.Text_IO; use Ada.Text_IO;
 with Ada.Streams.Stream_IO;
@@ -225,6 +226,35 @@ begin
                                        for G of M2 loop
                                           Mu.Append (G.U); Mv.Append (G.V);
                                        end loop;
+                                       --  给了环境变量 ZONEEXAM_DUMP ⇒ 每个细问的像素:问的点、配到的、按"跟着世界转"该在哪(诊断)
+                                       declare
+                                          Dump : constant String := (if Ada.Environment_Variables.Exists ("ZONEEXAM_DUMP")
+                                                                     then Ada.Environment_Variables.Value ("ZONEEXAM_DUMP") else "");
+                                       begin
+                                          if Dump /= "" then
+                                             declare
+                                                Fo : File_Type;
+                                                Rm : constant Geom.M3 := Geom.Rodrigues (Rot);
+                                             begin
+                                                Create (Fo, Out_File, Dump);
+                                                for I in 0 .. Natural (Ps.Length) - 1 loop
+                                                   declare
+                                                      Ok : Boolean;
+                                                      Dc : constant Geom.V3 := Geom.Cam_Dir (Eye, Ps (I).U, Ps (I).V, Ok);
+                                                      Hu, Hv : Long_Float := -1.0;
+                                                      Fr : Boolean := False;
+                                                   begin
+                                                      if Ok then
+                                                         Geom.Cam_Pixel (Eye, Geom.Ap (Rm, Dc), Hu, Hv, Fr);
+                                                      end if;
+                                                      Put_Line (Fo, Codec.Fmt (Ps (I).U, 1) & " " & Codec.Fmt (Ps (I).V, 1) & " " & Codec.Img (Ps (I).Lobe) & " " & Codec.Fmt (Mu (I), 2) & " "
+                                                                & Codec.Fmt (Mv (I), 2) & " " & Codec.Fmt (Hu, 2) & " " & Codec.Fmt (Hv, 2));
+                                                   end;
+                                                end loop;
+                                                Close (Fo);
+                                             end;
+                                          end if;
+                                       end;
                                        Zone.Apply_Refine (Z2, W, H, Ps, Mu, Mv, Eye, Rot, Sig, Added);
                                     else
                                        Put_Line ("补全:配点仪器没配成 " & To_String (Err2));
@@ -241,7 +271,7 @@ begin
                                  Zone.Tip_Section (Z, Zone.Lobe_Of (Z, Kl), W, H, U0, V0, Wd, Th, O0);
                                  Zone.Tip_Section (Z2, Zone.Lobe_Of (Z2, Kl), W, H, U1, V1, Wd, Th, O1);
                                  Put (" | 瓣 " & Codec.Img (Kl) & " 尖 " & (if O0 then Codec.Fmt (U0, 1) & " " & Codec.Fmt (V0, 1) else "-") & " → "
-                                      & (if O1 then Codec.Fmt (U1, 1) & " " & Codec.Fmt (V1, 1) else "-"));
+                                      & (if O1 then Codec.Fmt (U1, 1) & " " & Codec.Fmt (V1, 1) & "(尖那一截 " & Codec.Fmt (Wd, 0) & "×" & Codec.Fmt (Th, 0) & " px)" else "-"));
                               end;
                            end loop;
                            New_Line;

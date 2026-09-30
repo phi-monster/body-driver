@@ -10400,6 +10400,7 @@ package body Act is
          end Spread_Of;
          Tu, Tv, Nw, Nt : Floats;   --  每一瓣指尖的像素、指尖那一小截的像素跨度(宽的那个 / 窄的那个)
          D : Geom.V3_Vectors.Vector;   --  每一瓣指尖的相机系单位视线
+         Lobe_At : Geom.Nat_Vectors.Vector;   --  和 D 一一对应:它是握区里的第几瓣(认不出尖的那一瓣不进 D,下标会错开)
          Nl : Natural := 0;
          Who : constant String := "第" & Codec.Img (A + 1) & " 只手";
          Top_H : Long_Float := Long_Float'First;  --  压之前到过的最高处(眼沿面的法向有多高)
@@ -11015,14 +11016,17 @@ package body Act is
                Press_At (K, Tilt, Azim, Along ((if Try = 1 then Far0 else -2.0 * Far0)), Got, S_Ray);   --  第二次挪到另一边(从第一次那儿挪两倍,纯几何)
             end loop;
          end Press_Try;
-         --  第 K 瓣按压过的几下解(对准它的几下进解,别的瓣的几下只当"它不许在面之下"核)
+         --  第 K 瓣按压过的几下解(对准它的几下进解,别的瓣的几下只当"它不许在面之下"核);解出来的尖要落在这一瓣看得见的手指上
+         --  (Geom.Finger_View;这一瓣穿过画面、尖在画面外 ⇒ 不核)
          function Fit_Of (K : Natural) return Geom.Press_Fit is
             E : Geom.Press_Eq_Vectors.Vector;
+            Through : Boolean;
+            Mask : constant Bools := Zone.Lobe_Mask (Z, Zone.Lobe_Of (Z, Lobe_At (K)), Cw, Ch, Through);
          begin
             for I in 0 .. Natural (Eqs.Length) - 1 loop
                E.Append (Geom.Press_Eq'(A => Eqs (I).A, B => Eqs (I).B, Aimed => Eq_Lobe (I) = K));
             end loop;
-            return Geom.Fit_Presses (E, Gate);
+            return Geom.Fit_Presses (E, Gate, (if Through then Geom.No_View else Geom.Finger_View'(G => G0, W => Cw, H => Ch, Mask => Mask)));
          end Fit_Of;
          function Aimed_At (K : Natural) return Natural is
             N : Natural := 0;
@@ -11053,6 +11057,7 @@ package body Act is
                            Dc (I) := Dc (I) / Nn;
                         end loop;
                         D.Append (Dc);
+                        Lobe_At.Append (K);
                         Tu.Append (U); Tv.Append (V);
                         Nw.Append (Wd);   --  指尖那一小截的像素跨度(不是整瓣:V1B21 整瓣 124 px 落到面上 90 mm,空的面挑到了半米外)
                         Nt.Append (Wt);

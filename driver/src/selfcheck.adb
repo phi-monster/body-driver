@@ -4615,12 +4615,12 @@ begin
       Gt.Valid := True; Gt.F := 397.0; Gt.Cx := 320.0; Gt.Cy := 240.0;
       Dirs.Append (Dir (0)); Dirs.Append (Dir (1));
       Theta := Geom.Tilt_Angle (Dirs, 0, 0.0);
-      F0 := Geom.Fit_Presses (Presses (0, 6), Gate);
-      F1 := Geom.Fit_Presses (Presses (1, 6), Gate);
-      Fb := Geom.Fit_Presses (Presses (0, 6, Bad1 => 3), Gate);
-      Fn := Geom.Fit_Presses (Presses (0, 6, Bad1 => 0), Gate);
-      F2b := Geom.Fit_Presses (Presses (0, 8, Bad1 => 2, Bad2 => 5), Gate);
-      F4 := Geom.Fit_Presses (Presses (0, 4, Bad1 => 2), Gate);
+      F0 := Geom.Fit_Presses (Presses (0, 6), Gate, Geom.No_View);
+      F1 := Geom.Fit_Presses (Presses (1, 6), Gate, Geom.No_View);
+      Fb := Geom.Fit_Presses (Presses (0, 6, Bad1 => 3), Gate, Geom.No_View);
+      Fn := Geom.Fit_Presses (Presses (0, 6, Bad1 => 0), Gate, Geom.No_View);
+      F2b := Geom.Fit_Presses (Presses (0, 8, Bad1 => 2, Bad2 => 5), Gate, Geom.No_View);
+      F4 := Geom.Fit_Presses (Presses (0, 4, Bad1 => 2), Gate, Geom.No_View);
       --  ⑦ 原来的写法:4 下一起按最小二乘解,组里每一下的残差都 ≤ 一小步就收
       declare
          E : constant Geom.Press_Eq_Vectors.Vector := Presses (0, 4, Bad1 => 2);
@@ -4647,12 +4647,12 @@ begin
       for E of Presses (1, 6) loop
          With_Other.Append (Geom.Press_Eq'(A => E.A, B => E.B, Aimed => False));
       end loop;
-      Fo := Geom.Fit_Presses (With_Other, Gate);
+      Fo := Geom.Fit_Presses (With_Other, Gate, Geom.No_View);
       Bogus := With_Other;
       --  另一瓣压的第 2 下改成"那一刻这一瓣真的尖在面之下 5 mm"(B = A·真的尖 + 5 mm)
       Bogus.Replace_Element (7, Geom.Press_Eq'(A => Bogus (7).A, B => Bogus (7).A (0) * Truth (0) (0) + Bogus (7).A (1) * Truth (0) (1) + Bogus (7).A (2) * Truth (0) (2) + Block,
                                                Aimed => False));
-      Fx := Geom.Fit_Presses (Bogus, Gate);
+      Fx := Geom.Fit_Presses (Bogus, Gate, Geom.No_View);
       Check (F0.Ok and then F1.Ok and then Natural (F0.Used.Length) = 6 and then Err (F0, 0) < Tol and then Err (F1, 1) < Tol,
              "换倾角碰:两瓣视线夹角 " & Codec.Fmt (Beta / Deg, 1) & "°、斜 θ = " & Codec.Fmt (Theta / Deg, 1)
              & "° ⇒ 6 下全好,两瓣解回离真的尖 " & Codec.Fmt (1000.0 * Err (F0, 0), 3) & " / " & Codec.Fmt (1000.0 * Err (F1, 1), 3) & " mm(< 1)· 别的几下预测每一下最多差 "
@@ -4702,7 +4702,7 @@ begin
                   E.Append (Geom.Press_Of (Gt, P, P0, Nn));
                end;
             end loop;
-            Fl := Geom.Fit_Presses (E, Gate);
+            Fl := Geom.Fit_Presses (E, Gate, Geom.No_View);
             Check (Other_Low > 0 and then (not Fl.Ok or else Geom.Ray_Owner (Fl.X, Dirs) /= 0 or else Err (Fl, 0) < V1_Line),
                    "换倾角碰:另一根手指长 " & Codec.Fmt (1000.0 * Extra, 0) & " mm ⇒ 压第 0 瓣的 6 下里 " & Codec.Img (Other_Low) & " 下先碰到的是它 ⇒ "
                    & (if not Fl.Ok then "几下对不上、不收" elsif Geom.Ray_Owner (Fl.X, Dirs) /= 0 then "收下的解离第 1 瓣的视线更近 ⇒ 认出碰着的不是这一瓣"
@@ -4716,26 +4716,60 @@ begin
       Check (Raw_Would and then not F4.Ok,
              "换倾角碰:原来的写法(4 下、组里残差 ≤ 一小步)" & (if Raw_Would then "会收下被顶住 5 mm 的那一组" else "不收(焊点前提不成立)")
              & " —— 按别的几下预测它 ⇒ " & (if F4.Ok then "也收了(错)" else "不收"));
+      --  ⑨ V1B74 第 2 只手第 2 瓣:8 下里方位 72°、144°、108° 那三下停高 15.4 / 20.7 / 22.2 mm(压在剪刀轴、扁勺的边上),36° 那一下 5.1 mm。
+      --  这一瓣的手指剪影(合成):从真的尖投回的像素往画面右边、上下各 20 px 的一条。要:带剪影 ⇒ 解是真的尖(< 1 mm)或者照实不收;
+      --  🦷 不带剪影 ⇒ 得不到对的尖:含坏的那一组和好的那一组一样大、互相对不上(认不出,不收;V1B74 真帧上含坏的那组更大,收了错的)
+      declare
+         Blocks : constant array (0 .. 7) of Long_Float := [0.0, 0.0, 0.0154, 0.0207, 0.0, 0.0, 0.0051, 0.0222];   --  停高(米,V1B74 按真值)
+         E : Geom.Press_Eq_Vectors.Vector;
+         Mask : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (Natural'(640 * 480)));
+         Tu, Tv : Long_Float;
+         Fr : Boolean;
+         Fv, Fnv : Geom.Press_Fit;
+      begin
+         for I in Blocks'Range loop
+            E.Append (Press (0, (if I = 0 then 0.0 else Theta), (if I = 0 then 0.0 else Az (I - 1)), Blocks (I), Noise (I)));
+         end loop;
+         Geom.Cam_Pixel (Gt, Truth (0), Tu, Tv, Fr);
+         for Y in Integer (Tv) - 20 .. Integer (Tv) + 20 loop
+            for X in Integer (Tu) .. 639 loop
+               Mask.Replace_Element (Y * 640 + X, True);
+            end loop;
+         end loop;
+         Fv := Geom.Fit_Presses (E, Gate, Geom.Finger_View'(G => Gt, W => 640, H => 480, Mask => Mask));
+         Fnv := Geom.Fit_Presses (E, Gate, Geom.No_View);
+         Check (not Fv.Ok or else Err (Fv, 0) < Tol,
+                "换倾角碰:8 下里三下压在东西上(停高 15–22 mm)、带这一瓣的手指剪影 ⇒ "
+                & (if Fv.Ok then "解 " & Codec.Fmt (1000.0 * Err (Fv, 0), 3) & " mm(用了 " & Codec.Img (Natural (Fv.Used.Length)) & " 下)" else "不收"));
+         Check (not Fnv.Ok or else Err (Fnv, 0) > Tol,
+                "🦷 不带剪影:" & (if Fnv.Ok then "收下离真的尖 " & Codec.Fmt (1000.0 * Err (Fnv, 0), 1) & " mm 的解(用了 " & Codec.Img (Natural (Fnv.Used.Length)) & " 下)"
+                                  elsif Fnv.Ambiguous then "两组一样大、互相对不上,认不出哪几下是坏的 ⇒ 不收(这一瓣量不成)" else "找不到对得上的一组 ⇒ 不收"));
+      end;
    end;
    --  🔴 瓣按"长在眼上"补全(Zone.Refine_Probes / Zone.Apply_Refine,09-30 V1B69:左边那根手指上半截贴着暗墙、变化掩码里没有,尖认低 46 px)。
    --  合成的眼 640 × 480(焦距 400、主点正中);手指从画面下边伸进来(同 x5 腕眼):右瓣框 x 540–619、y 300–479,左瓣框 x 20–99、y 300–479,
    --  合到的区(区框)x 250–400、y 350–479。真的手指:左 x 20–99、y ≥ 240(变化掩码只有 y ≥ 300 那一截,上面 60 px 缺了),右 x 530–619、y ≥ 300(内侧一溜也缺了);
-   --  眼绕自己的竖直轴转 0.16 弧度:手指像素配到原处,别的按这个转动挪(Classify_Rides 拿同一个转动判)。
-   --  要:左瓣的尖(Tip_Section)从 y > 300 挪到 y < 270;右瓣的尖留在右边(u > 500);区框里一个像素都不补。
-   --  🦷 不补:左瓣的尖还在 y > 300
+   --  眼绕自己的竖直轴转 0.16 弧度(画面往右挪:左边缺的那一截按"跟着世界转"留在画幅里,判得了;往左转它就转出画幅、全判不了):
+   --  手指像素配到原处,别的按这个转动挪(Classify_Rides 拿同一个转动判)。另照 V1B74:右边那根手指尖外面一圈 4 px、尖左上一块 10×8 px 的
+   --  背景也配到原处(遮挡边上配点仪器把"不动"往外带的那一圈)。
+   --  要:左瓣的尖(Tip_Section)从 y > 300 挪到 y < 270;右瓣的尖留在原处(u > 500、v ≥ 299,尖那一截宽 ≥ 20 px);区框里一个像素都不补。
+   --  🦷 不补:左瓣的尖还在 y > 300;🦷 不做开运算(比一格还薄的也收):右瓣的尖跑到那一块上
    declare
       use Ada.Numerics.Long_Elementary_Functions;
       Wd : constant := 640;
       Ht : constant := 480;
       Z : Zone.Hand_Zone;
       Eye : Geom.Cam_Geo := Geom.No_Geo;
-      Rot : constant Geom.V3 := [0.0, 0.16, 0.0];
+      Rot : constant Geom.V3 := [0.0, -0.16, 0.0];
       Gr : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (Kinem.Gx * Kinem.Gy));
       Ps : Zone.Probe_Vectors.Vector;
       Mu, Mv : Bytes.Floats;
       Added : Natural;
       function True_Finger (X, Y : Long_Float) return Boolean is
         ((X >= 20.0 and then X < 100.0 and then Y >= 240.0) or else (X >= 530.0 and then X < 620.0 and then Y >= 300.0));
+      --  右边那根手指尖外面被配点仪器带成"不动"的背景:上沿外 4 px 一圈、左上角外一块 10×8(合成,照 V1B74)
+      function Smear (X, Y : Long_Float) return Boolean is
+        ((X >= 526.0 and then X < 624.0 and then Y >= 296.0 and then Y < 300.0) or else (X >= 516.0 and then X < 526.0 and then Y >= 292.0 and then Y < 300.0));
       Z0 : Zone.Hand_Zone;
       Ul0, Vl0, Ur0, Vr0, Ul1, Vl1, Ur1, Vr1, Wdt, Th : Long_Float := 0.0;
       Okl0, Okr0, Okl1, Okr1 : Boolean;
@@ -4765,7 +4799,7 @@ begin
          Rm : constant Geom.M3 := Geom.Rodrigues (Rot);
       begin
          for P of Ps loop
-            if True_Finger (P.U, P.V) then
+            if True_Finger (P.U, P.V) or else Smear (P.U, P.V) then
                Mu.Append (P.U); Mv.Append (P.V);
             else
                declare
@@ -4792,10 +4826,29 @@ begin
       Zone.Tip_Section (Z0, Zone.Lobe_Of (Z0, 0), Wd, Ht, Ur0, Vr0, Wdt, Th, Okr0);
       Zone.Tip_Section (Z, Zone.Lobe_Of (Z, 1), Wd, Ht, Ul1, Vl1, Wdt, Th, Okl1);
       Zone.Tip_Section (Z, Zone.Lobe_Of (Z, 0), Wd, Ht, Ur1, Vr1, Wdt, Th, Okr1);
-      Check (Okl1 and then Okr1 and then Vl1 < 270.0 and then Ur1 > 500.0 and then Zone_Added = 0 and then Added > 0,
+      Check (Okl1 and then Okr1 and then Vl1 < 270.0 and then Ur1 > 500.0 and then Vr1 >= 299.0 and then Wdt >= 20.0 and then Zone_Added = 0 and then Added > 0,
              "瓣按长在眼上补全:问 " & Codec.Img (Natural (Ps.Length)) & " 个像素、补进 " & Codec.Img (Added) & " 个 · 左瓣的尖 v " & Codec.Fmt (Vl0, 1) & " → " & Codec.Fmt (Vl1, 1)
-             & "(要 < 270)· 右瓣的尖 u " & Codec.Fmt (Ur0, 1) & " → " & Codec.Fmt (Ur1, 1) & "(要 > 500)· 区框里补进 " & Codec.Img (Zone_Added) & " 个(要 0)");
+             & "(要 < 270)· 右瓣的尖 (" & Codec.Fmt (Ur0, 1) & "," & Codec.Fmt (Vr0, 1) & ") → (" & Codec.Fmt (Ur1, 1) & "," & Codec.Fmt (Vr1, 1)
+             & ")、尖那一截宽 " & Codec.Fmt (Wdt, 0) & " px(要 u > 500、v ≥ 299、宽 ≥ 20:外面那一圈、那一块不收)· 区框里补进 " & Codec.Img (Zone_Added) & " 个(要 0)");
       Check (Okl0 and then Vl0 > 300.0, "🦷 不补:左瓣的尖还在 v = " & Codec.Fmt (Vl0, 1) & "(变化掩码缺的那一截认不出)");
+      --  🦷 不做开运算:外面那一圈、那一块照原来的收法并进来,右瓣的尖跑到那一块上
+      declare
+         Zt : Zone.Hand_Zone := Z;
+         Ut, Vt, Wt, Tt : Long_Float;
+         Okt : Boolean;
+      begin
+         for Y in 0 .. Ht - 1 loop
+            for X in 0 .. Wd - 1 loop
+               if Smear (Long_Float (X) + 0.5, Long_Float (Y) + 0.5) then
+                  Zt.Fingers.Replace_Element (Y * Wd + X, True);
+               end if;
+            end loop;
+         end loop;
+         Zt.A.X0 := Natural'Min (Zt.A.X0, 516); Zt.A.Y0 := Natural'Min (Zt.A.Y0, 292);
+         Zone.Tip_Section (Zt, Zone.Lobe_Of (Zt, 0), Wd, Ht, Ut, Vt, Wt, Tt, Okt);
+         Check (Okt and then (Vt < 299.0 or else Wt < 20.0),
+                "🦷 不做开运算:右瓣的尖 (" & Codec.Fmt (Ut, 1) & "," & Codec.Fmt (Vt, 1) & ")、尖那一截宽 " & Codec.Fmt (Wt, 0) & " px(跑到外面那一块上)");
+      end;
    end;
    --  🔴 开机碰桌面挑空的面(Act.Board_Free_Spots):板 21×21 个点铺在 0.765 m 的面上(2 cm 一格、离散 1 mm),中间 5×5 格是一块 5 cm 高的东西。
    --  压的那一瓣落在 (0,0)、另一瓣落在 (0.05,0),手指宽上限 1 cm,另一瓣视线斜 90°(tan 45° = 1:离压的那一点 ρ 处手指至少高 ρ)⇒ 第一个空的:

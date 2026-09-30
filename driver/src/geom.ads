@@ -261,7 +261,18 @@ package Geom is
       Worst : Long_Float := 0.0;     --  组里每一下被别的几下预测、差得最多的那一下差多少
       Low : Long_Float := 0.0;       --  组外最低的 A·x − B(没有组外的 = 0)
    end record;
-   function Fit_Presses (Eqs : Press_Eq_Vectors.Vector; Gate : Long_Float) return Press_Fit;
+   --  这一瓣在它那只眼里看得见的手指像素(按行 W × H;Mask 空 = 不核)。解出来的尖是手指上的一点,投回这只眼一定落在手指的剪影里:
+   --  投到眼后面、画面外、或者离最近的手指像素超过 Z 倍"它投回来的不确定度"(焦距 × 解的不确定度 ÷ 它离眼多远)⇒ 这一组不收。
+   --  09-30 V1B74 第 2 只手第 2 瓣:8 下里 3 下压在东西上(剪刀轴、扁勺的边,离桌面 15–22 mm),斜 17.8° 分不出"那一下停早了"和
+   --  "尖横着偏 5 cm",含坏的三下那一组对得上,解出的尖离视线 1.41 单位、投到画面外 (−194, 679),存进了身体文件。
+   --  尖不在画面里的手指(穿过画面,Zone.Lobe_Mask 的 Through)调用方给空的 Mask
+   type Finger_View is record
+      G : Cam_Geo;
+      W, H : Natural := 0;
+      Mask : Bytes.Bools;
+   end record;
+   No_View : constant Finger_View := (G => No_Geo, W => 0, H => 0, Mask => Bytes.Bool_Vectors.Empty_Vector);   --  不核(只给自检的合成方程)
+   function Fit_Presses (Eqs : Press_Eq_Vectors.Vector; Gate : Long_Float; View : Finger_View) return Press_Fit;
    --  换倾角碰每一下让手上哪一个方向朝正下(相机系,单位):这一瓣的视线 D(相机系,单位)朝方位 Azim 斜 Tilt(弧度)——
    --  方位从"眼的 x 轴扣掉沿 D 的那一截"起量、绕 D 转(手自己的方向,每只手、每具身体一样的定法)。Tilt = 0 ⇒ D 本身
    function Tilt_Dir (D : V3; Tilt, Azim : Long_Float) return V3;
