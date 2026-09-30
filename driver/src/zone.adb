@@ -25,80 +25,236 @@ package body Zone is
       return Av;
    end Turn_Step;
 
+   --  ── 一串瓣(I2)──
+   function Lobe_Of (Z : Hand_Zone; I : Natural) return Lobe is
+   begin
+      if Z.Lobes.Is_Empty then
+         --  旧写法写的握区(只填了 A / B 两格):照第 0 步那一版读它的两格。合并时主代理把旧写法换成 Set_Lobes / Lobes_From_Json,连这一段一起删
+         return (if I = 0 then Z.A elsif I = 1 then Z.B else No_Lobe);
+      end if;
+      return (if I < Natural (Z.Lobes.Length) then Z.Lobes (I) else No_Lobe);
+   end Lobe_Of;
+
+   procedure Set_Lobes (Z : in out Hand_Zone; Ls : Lobe_Vectors.Vector) is
+      function Nth (I : Natural) return Lobe is (if I < Natural (Ls.Length) then Ls (I) else No_Lobe);
+   begin
+      Z.Lobes := Ls;
+      Z.N_Lobes := Natural (Ls.Length);
+      --  旧的两格照今天的身体照旧填(= 第 0 / 1 瓣,没有就是 No_Lobe):还直接读 A / B 的地方(selfcheck.adb 几条焊点)不坏
+      Z.A := Nth (0);
+      Z.B := Nth (1);
+   end Set_Lobes;
+
+   procedure Set_Lobe (Z : in out Hand_Zone; I : Natural; Lb : Lobe) is
+      Ls : Lobe_Vectors.Vector := Z.Lobes;
+   begin
+      if Ls.Is_Empty then
+         --  旧写法写的握区:它的瓣 = Lobe_Of 读出来的那几格
+         for K in 0 .. Z.N_Lobes - 1 loop
+            Ls.Append (Lobe_Of (Z, K));
+         end loop;
+      end if;
+      if I < Natural (Ls.Length) then
+         Ls.Replace_Element (I, Lb);
+      end if;
+      Set_Lobes (Z, Ls);
+   end Set_Lobe;
+
+   --  身体文件里一瓣几个数(x0, y0, x1, y1, cu, cv, 像素数;和旧文件的 "a" / "b" 同一个排法)
+   Lobe_Fields : constant := 7;
+
+   function Lobes_Json (Z : Hand_Zone) return String is
+      R : Unbounded_String := To_Unbounded_String ("[");
+   begin
+      for K in 0 .. Z.N_Lobes - 1 loop
+         declare
+            Lb : constant Lobe := Lobe_Of (Z, K);
+         begin
+            Append (R, (if K > 0 then "," else "") & "[" & Codec.Img (Lb.X0) & "," & Codec.Img (Lb.Y0) & "," & Codec.Img (Lb.X1) & "," & Codec.Img (Lb.Y1)
+                    & "," & Json.Number (Lb.Cu) & "," & Json.Number (Lb.Cv) & "," & Codec.Img (Lb.Count) & "]");
+         end;
+      end loop;
+      Append (R, "]");
+      return To_String (R);
+   end Lobes_Json;
+
+   procedure Lobes_From_Json (D : Json.Doc; Zn : Integer; Z : in out Hand_Zone) is
+      Ls : Lobe_Vectors.Vector;
+      --  一瓣:正好 Lobe_Fields 个数、每个都是有限数才收(写的时候不是有限数的写成 null,读回来是 NaN,不拿它当像素号)
+      procedure Take (N : Integer) is
+         function Fld (I : Natural) return Long_Float is (Json.Real (D, Json.Child (D, N, I)));
+      begin
+         if N < 0 or else Json.Count (D, N) /= Lobe_Fields then
+            return;
+         end if;
+         for I in 0 .. Lobe_Fields - 1 loop
+            if not Json.Finite (Fld (I)) then
+               return;
+            end if;
+         end loop;
+         Ls.Append (Lobe'(Valid => True, X0 => Natural (Fld (0)), Y0 => Natural (Fld (1)), X1 => Natural (Fld (2)), Y1 => Natural (Fld (3)),
+                          Cu => Fld (4), Cv => Fld (5), Count => Natural (Fld (6))));
+      end Take;
+      L : constant Integer := Json.Get (D, Zn, "lobes");
+   begin
+      if L >= 0 then
+         for J in 0 .. Json.Count (D, L) - 1 loop
+            Take (Json.Child (D, L, J));
+         end loop;
+      else
+         --  I2 以前的文件:两格 "a" / "b"(第二格瓣数不到也照样写了),瓣数在 "n_lobes" ⇒ 按它取前几格
+         declare
+            Old_Keys : constant String := "ab";
+            Nk : constant Integer := Json.Get (D, Zn, "n_lobes");
+            Want : constant Natural := (if Nk >= 0 and then Json.Finite (Json.Real (D, Nk)) then Natural (Long_Float'Max (0.0, Json.Real (D, Nk))) else 0);
+         begin
+            for Key of Old_Keys loop
+               exit when Natural (Ls.Length) >= Want;
+               Take (Json.Get (D, Zn, [Key]));
+            end loop;
+         end;
+      end if;
+      Set_Lobes (Z, Ls);
+   end Lobes_From_Json;
+
    function Is_Self (Z : Hand_Zone; R : Picture.Region; W, Hh : Natural) return Boolean is
       --  只按瓣自己的框判(不外扩):EE2 实测外扩半个框把紧挨着右爪的剪刀当成了"我"
-      function In_Box (X0, Y0, X1, Y1 : Natural) return Boolean is
+      function In_Box (Lb : Lobe) return Boolean is
          Cx : constant Natural := Natural (R.Cu * Long_Float (W));
          Cy : constant Natural := Natural (R.Cv * Long_Float (Hh));
       begin
-         return Cx >= X0 and then Cx <= X1 and then Cy >= Y0 and then Cy <= Y1;
+         return Lb.Valid and then Cx >= Lb.X0 and then Cx <= Lb.X1 and then Cy >= Lb.Y0 and then Cy <= Lb.Y1;
       end In_Box;
    begin
       if not Z.Valid then
          return False;
       end if;
-      if Z.A.Valid and then In_Box (Z.A.X0, Z.A.Y0, Z.A.X1, Z.A.Y1) then
-         return True;
-      end if;
-      if Z.B.Valid and then In_Box (Z.B.X0, Z.B.Y0, Z.B.X1, Z.B.Y1) then
-         return True;
-      end if;
+      --  每一瓣的框都查(原来只查 A / B 两格:第三根手指框里的块不算"我")
+      for K in 0 .. Z.N_Lobes - 1 loop
+         if In_Box (Lobe_Of (Z, K)) then
+            return True;
+         end if;
+      end loop;
       return False;
    end Is_Self;
 
-   --  从三张掩膜拼出握区:瓣 = "张开时是手指"的连通块(最大的一两块),区 = 手指合到的地方 / 扫过而张开时不是手指的那片
-   procedure Assemble (Z : in out Hand_Zone; Left, Arrived, Gap : Bools; W, Hh : Natural;
+   --  一个 2×2 对称矩阵(像素系)的主方向。两个特征值一样大(差不过舍入:各向同性,连全零)⇒ Ok = False(定不出方向)。
+   --  特征向量取 (A − L1)v = 0 两行里不相消的那一行((L1 − Vyy, Vxy) 或 (Vxy, L1 − Vxx),哪根轴大取哪一行);
+   --  正负号同 Picture.Fill_Shape:第一个分量不为负(为零时第二个为正)
+   procedure Principal (Vxx, Vyy, Vxy : Long_Float; Au, Av : out Long_Float; Ok : out Boolean) is
+      Half : constant Long_Float := (Vxx - Vyy) / 2.0;   --  两轴之差的一半(纯数学)
+      Gap : constant Long_Float := Sqrt (Half * Half + Vxy * Vxy);   --  = (L1 − L2) / 2
+      L1 : constant Long_Float := (Vxx + Vyy) / 2.0 + Gap;
+      Ax : Long_Float := (if Vxx >= Vyy then L1 - Vyy else Vxy);
+      Ay : Long_Float := (if Vxx >= Vyy then Vxy else L1 - Vxx);
+   begin
+      Au := 0.0; Av := 0.0;
+      Ok := Gap > Long_Float'Epsilon * (abs Vxx + abs Vyy);
+      if not Ok then
+         return;
+      end if;
+      if Ax < 0.0 or else (Ax = 0.0 and then Ay < 0.0) then
+         Ax := -Ax; Ay := -Ay;
+      end if;
+      Au := Ax / Sqrt (Ax * Ax + Ay * Ay);
+      Av := Ay / Sqrt (Ax * Ax + Ay * Ay);
+   end Principal;
+
+   --  瓣的主轴(像素系,和 Picture.Region 的主轴同一个系、同一个正负号约定;给脑看的朝向和东西的朝向按它比):
+   --  瓣排开的方向 = 各瓣形心散布的主方向(一样的权:排法和每一瓣看着多大无关)—— 两瓣就是瓣心到瓣心那条线;
+   --  排法定不出方向(一瓣,或者几瓣均匀排一圈)⇒ 各瓣自己形状(协方差,按 Picture 存的主轴、伸长、各向 1σ 还原)之和的主方向 ——
+   --  一瓣就是它自己的主轴。一套算法,不看瓣数
+   procedure Lobe_Axis (Rs : Picture.Regions; W, Hh : Natural; Au, Av : out Long_Float) is
+      N : constant Long_Float := Long_Float (Rs.Length);
+      Mu, Mv, Sxx, Syy, Sxy : Long_Float := 0.0;
+      Ok : Boolean;
+   begin
+      Au := 0.0; Av := 0.0;
+      if Rs.Is_Empty then
+         return;
+      end if;
+      --  形心先在归一化画幅里减平均再换成像素:一瓣时差正好是 0。先乘成像素再减,编译器会把乘和减并成一次(FMA),
+      --  剩下乘法的舍入(1e-15 像素)被当成一个方向(自检里一根竖着的手指主轴成了 (0.55, −0.83))
+      for R of Rs loop
+         Mu := Mu + R.Cu; Mv := Mv + R.Cv;
+      end loop;
+      Mu := Mu / N; Mv := Mv / N;
+      for R of Rs loop
+         declare
+            Dx : constant Long_Float := (R.Cu - Mu) * Long_Float (W);
+            Dy : constant Long_Float := (R.Cv - Mv) * Long_Float (Hh);
+         begin
+            Sxx := Sxx + Dx * Dx; Syy := Syy + Dy * Dy; Sxy := Sxy + Dx * Dy;
+         end;
+      end loop;
+      Principal (Sxx, Syy, Sxy, Au, Av, Ok);
+      if Ok then
+         return;
+      end if;
+      Sxx := 0.0; Syy := 0.0; Sxy := 0.0;
+      for R of Rs loop
+         declare
+            --  Fill_Shape 存的:Sig_U / Sig_V = 两轴方向的 1σ(归一化)、主轴 (Au, Av)、伸长 = √(L1 / L2) ⇒ L1 + L2 = Vxx + Vyy、Vxy = (L1 − L2)·Au·Av
+            Vxx : constant Long_Float := (R.Sig_U * Long_Float (W)) ** 2;
+            Vyy : constant Long_Float := (R.Sig_V * Long_Float (Hh)) ** 2;
+            L2 : constant Long_Float := (Vxx + Vyy) / (1.0 + R.Elong ** 2);
+            L1 : constant Long_Float := Vxx + Vyy - L2;
+         begin
+            Sxx := Sxx + Vxx; Syy := Syy + Vyy; Sxy := Sxy + (L1 - L2) * R.Au * R.Av;
+         end;
+      end loop;
+      Principal (Sxx, Syy, Sxy, Au, Av, Ok);
+   end Lobe_Axis;
+
+   --  从三张掩膜拼出握区:瓣 = "张开时是手指"那一类里的每一块(大小的门见下),区 = 扫过而张开时不是手指的那片
+   procedure Assemble (Z : in out Hand_Zone; Left, Gap : Bools; W, Hh : Natural;
                        Has_Depth : Boolean; Depth_Open, Depth_Closed : Floats; Clean : Bools) is
-      procedure Fill (Lb : in out Lobe; R : Picture.Region) is
-      begin
-         Lb.Valid := True; Lb.X0 := R.X0; Lb.Y0 := R.Y0; Lb.X1 := R.X1; Lb.Y1 := R.Y1;
-         Lb.Cu := R.Cu; Lb.Cv := R.Cv; Lb.Count := R.Count;
-      end Fill;
    begin
       declare
          Lobes : constant Picture.Regions := Picture.Components (Left, W, Hh, Picture.Min_Pixels (W, Hh));
-         Arr : constant Picture.Regions := Picture.Components (Arrived, W, Hh, Picture.Min_Pixels (W, Hh));
          Gaps : constant Picture.Regions := Picture.Components (Gap, W, Hh, Picture.Min_Pixels (W, Hh));
+         Ls : Lobe_Vectors.Vector;
+         Rs : Picture.Regions;   --  和 Ls 一一对应的那几块(主轴按它们的形状)
       begin
          if Lobes.Is_Empty then
             return;
          end if;
-         Fill (Z.A, Lobes (0));
-         Z.N_Lobes := 1;
-         if Natural (Lobes.Length) >= 2 and then Lobes (1).Count * 4 >= Lobes (0).Count then
-            Fill (Z.B, Lobes (1));
-            Z.N_Lobes := 2;
-         end if;
-         if Z.N_Lobes = 2 then
-            declare
-               Du : constant Long_Float := Z.B.Cu - Z.A.Cu;
-               Dv : constant Long_Float := Z.B.Cv - Z.A.Cv;
-               Ln : constant Long_Float := Sqrt (Du * Du + Dv * Dv);
+         --  每一块不比最大块小四倍的都是一瓣(原来只看第二块、最多留两块:五指手只认出两根、三指爪第三根手指的尖永远量不到)。
+         --  比它小的是手指边上零碎的几小块(同一根手指被匀色背景切开的边角,V1B78 腕眼里 28–520 像素,最多是最大块的 3%)
+         for R of Lobes loop
+            if R.Count * 4 >= Lobes (0).Count then
+               Ls.Append (Lobe'(Valid => True, X0 => R.X0, Y0 => R.Y0, X1 => R.X1, Y1 => R.Y1, Cu => R.Cu, Cv => R.Cv, Count => R.Count));
+               Rs.Append (R);
+            end if;
+         end loop;
+         Set_Lobes (Z, Ls);
+         --  区心 = 各瓣形心的平均(两瓣 = 中点;EE3 实测"合到处"的形心在手上相机里落到扫过带的上沿,不可靠)。
+         --  一瓣(吸盘、看不开的几根手指)= 那一瓣自己的形心(原来按一瓣另写一套:手指合到的地方的形心)
+         Z.Cu := 0.0; Z.Cv := 0.0;
+         for Lb of Ls loop
+            Z.Cu := Z.Cu + Lb.Cu; Z.Cv := Z.Cv + Lb.Cv;
+         end loop;
+         Z.Cu := Z.Cu / Long_Float (Ls.Length); Z.Cv := Z.Cv / Long_Float (Ls.Length);
+         Lobe_Axis (Rs, W, Hh, Z.Au, Z.Av);
+         --  区框 = 扫过而张开时不是手指的那片(Gap 里不比最大块小十倍的块);张幅 = 它沿主轴伸多长(在归一化画幅里量:主轴折成归一化画幅里的方向)。
+         --  那片没有 ⇒ 区框 = 各瓣的框并起来,张幅 = 各瓣的框沿主轴伸多长
+         declare
+            Du0 : constant Long_Float := Z.Au / Long_Float (W);
+            Dv0 : constant Long_Float := Z.Av / Long_Float (Hh);
+            Dn : constant Long_Float := Sqrt (Du0 * Du0 + Dv0 * Dv0);
+            Du : constant Long_Float := (if Dn > 0.0 then Du0 / Dn else 0.0);
+            Dv : constant Long_Float := (if Dn > 0.0 then Dv0 / Dn else 0.0);
+            Lo : Long_Float := Long_Float'Last;
+            Hi : Long_Float := Long_Float'First;
+            X0 : Natural := W; Y0 : Natural := Hh; X1 : Natural := 0; Y1 : Natural := 0;
+            procedure Reach (X, Y : Natural) is
+               P : constant Long_Float := (Long_Float (X) / Long_Float (W)) * Du + (Long_Float (Y) / Long_Float (Hh)) * Dv;
             begin
-               if Ln > 1.0e-9 then
-                  Z.Au := Du / Ln; Z.Av := Dv / Ln;
-               end if;
-            end;
-         else
-            Z.Au := Lobes (0).Au; Z.Av := Lobes (0).Av;
-         end if;
-         --  区心:两瓣时 = 两瓣心的中点(EE3 实测"合到处"的形心在手上相机里落到扫过带的上沿,不可靠);
-         --  一瓣时 = 手指合到的地方的形心(没有就用扫过区的形心);区框 = 扫过而张开时不是手指的那片;张幅 = 它沿瓣到瓣方向的伸展
-         if Z.N_Lobes = 2 then
-            Z.Cu := 0.5 * (Z.A.Cu + Z.B.Cu); Z.Cv := 0.5 * (Z.A.Cv + Z.B.Cv);
-         elsif not Arr.Is_Empty then
-            Z.Cu := Arr (0).Cu; Z.Cv := Arr (0).Cv;
-         elsif not Gaps.Is_Empty then
-            Z.Cu := Gaps (0).Cu; Z.Cv := Gaps (0).Cv;
-         else
-            Z.Cu := Z.A.Cu; Z.Cv := Z.A.Cv;
-         end if;
-         if not Gaps.Is_Empty then
-            declare
-               Lo : Long_Float := 1.0e30;
-               Hi : Long_Float := -1.0e30;
-               X0 : Natural := W; Y0 : Natural := Hh; X1 : Natural := 0; Y1 : Natural := 0;
-            begin
+               Lo := Long_Float'Min (Lo, P);
+               Hi := Long_Float'Max (Hi, P);
+            end Reach;
+         begin
+            if not Gaps.Is_Empty then
                for K in 0 .. Natural (Gaps.Length) - 1 loop
                   if Gaps (K).Count * 10 >= Gaps (0).Count then
                      declare
@@ -109,25 +265,23 @@ package body Zone is
                         for Y in G.Y0 .. G.Y1 loop
                            for X in G.X0 .. G.X1 loop
                               if Gap.Element (Y * W + X) then
-                                 declare
-                                    P : constant Long_Float := (Long_Float (X) / Long_Float (W)) * Z.Au + (Long_Float (Y) / Long_Float (Hh)) * Z.Av;
-                                 begin
-                                    Lo := Long_Float'Min (Lo, P);
-                                    Hi := Long_Float'Max (Hi, P);
-                                 end;
+                                 Reach (X, Y);
                               end if;
                            end loop;
                         end loop;
                      end;
                   end if;
                end loop;
-               Z.X0 := X0; Z.Y0 := Y0; Z.X1 := X1; Z.Y1 := Y1;
-               Z.Span := Long_Float'Max (0.0, Hi - Lo);
-            end;
-         else
-            Z.X0 := Z.A.X0; Z.Y0 := Z.A.Y0; Z.X1 := Z.A.X1; Z.Y1 := Z.A.Y1;
-            Z.Span := Long_Float (Z.A.X1 - Z.A.X0) / Long_Float (W);
-         end if;
+            else
+               for Lb of Ls loop
+                  X0 := Natural'Min (X0, Lb.X0); Y0 := Natural'Min (Y0, Lb.Y0);
+                  X1 := Natural'Max (X1, Lb.X1); Y1 := Natural'Max (Y1, Lb.Y1);
+                  Reach (Lb.X0, Lb.Y0); Reach (Lb.X1, Lb.Y0); Reach (Lb.X0, Lb.Y1); Reach (Lb.X1, Lb.Y1);
+               end loop;
+            end if;
+            Z.X0 := X0; Z.Y0 := Y0; Z.X1 := X1; Z.Y1 := Y1;
+            Z.Span := (if Hi >= Lo then Hi - Lo else 0.0);
+         end;
          if Has_Depth then
             Z.Depth := Picture.Region_Depth (Depth_Open, W, Hh, Left, 0.5);
             if Picture.Is_Nan (Z.Depth) then
@@ -432,9 +586,9 @@ package body Zone is
          None : constant Floats := F64_Vectors.Empty_Vector;
       begin
          if Dark_Is_Open then
-            Assemble (Z, Darker, Lighter, Lighter, W, Hh, False, None, None, Clean);
+            Assemble (Z, Darker, Lighter, W, Hh, False, None, None, Clean);
          else
-            Assemble (Z, Lighter, Darker, Darker, W, Hh, False, None, None, Clean);
+            Assemble (Z, Lighter, Darker, W, Hh, False, None, None, Clean);
          end if;
       end;
       Z.Fingers := Clean;
@@ -638,11 +792,7 @@ package body Zone is
                            if Lb.Valid then
                               Lb.X0 := Natural'Min (Lb.X0, X); Lb.X1 := Natural'Max (Lb.X1, X);
                               Lb.Y0 := Natural'Min (Lb.Y0, Y); Lb.Y1 := Natural'Max (Lb.Y1, Y);
-                              if Kl = 0 then
-                                 Z.A := Lb;
-                              else
-                                 Z.B := Lb;
-                              end if;
+                              Set_Lobe (Z, Kl, Lb);   --  原来第 0 瓣以外一律写进 B:第三瓣补全会盖掉第二瓣
                            end if;
                         end;
                      end if;
@@ -862,14 +1012,13 @@ package body Zone is
                if Codec.Env ("BL_DUMP") /= "" then
                   declare
                      Mk : Buf := U8_Vectors.To_Vector (0, Ada.Containers.Count_Type (Cw * Ch));
-                     Lobes_Of_Z : constant array (1 .. 2) of Lobe := [Z.A, Z.B];
                   begin
                      for Y in Z.Y0 .. Z.Y1 loop
                         for X in Z.X0 .. Z.X1 loop
                            Mk.Replace_Element (Y * Cw + X, 128);
                         end loop;
                      end loop;
-                     for Lb of Lobes_Of_Z loop
+                     for Lb of Z.Lobes loop   --  每一瓣都画(原来只画 A / B 两格)
                         if Lb.Valid then
                            for Y in Lb.Y0 .. Lb.Y1 loop
                               for X in Lb.X0 .. Lb.X1 loop

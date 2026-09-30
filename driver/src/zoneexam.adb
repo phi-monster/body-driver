@@ -106,6 +106,8 @@ begin
          Put (" | 平均 " & Codec.Fmt (Su / Long_Float (Nt), 1) & " " & Codec.Fmt (Sv / Long_Float (Nt), 1));
       end if;
       New_Line;
+      --  区心、主轴、张幅(和身体文件里这只眼握区的 cu / cv / au / av / span 比)
+      Put_Line ("区心 " & Codec.Fmt (Z.Cu, 6) & " " & Codec.Fmt (Z.Cv, 6) & " · 主轴 " & Codec.Fmt (Z.Au, 6) & " " & Codec.Fmt (Z.Av, 6) & " · 张幅 " & Codec.Fmt (Z.Span, 6));
       if Ada.Command_Line.Argument_Count >= 8 then
          declare
             use type Kinem.Ride;
