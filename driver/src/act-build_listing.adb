@@ -222,17 +222,17 @@ begin
       begin
          --  这个抓握通道开机推到头时哪台相机里都没看见东西跟着动 ⇒ 它不带手指:不列手指 / 爪心(零件照列,见下)
          if Has_Fingers (C, A, Jk) then
-            Finger (Z.A, 0);
-            Finger (Z.B, 1);
+            Finger (Zone.Lobe_Of (Z, 0), 0);
+            Finger (Zone.Lobe_Of (Z, 1), 1);
             --  🔴🔴 同一个爪的两瓣,在画面里应该只隔【量到的钳口张幅】那么远。
             --  差得离谱 = 我按关节推出来的位置在这台相机里根本不对,而这条我自己量得出来。
             --  GW 实测:arm 2(右臂)的两根手指被放到画面【左】边的第 2 格和第 19 格,相隔四分之三个画面,
             --  而它自己标着"我还没在这儿看过我的手"。位置错 ⇒ 误差错 ⇒ 往错的方向推 ⇒
             --  十炮里七炮"靠近→停在错的稳定点→退开"。必须说出来,别让脑拿它当真。
-            if Z.Valid and then Z.A.Valid and then Z.B.Valid and then Z.Span > 0.0 then
+            if Z.Valid and then Zone.Lobe_Of (Z, 0).Valid and then Zone.Lobe_Of (Z, 1).Valid and then Z.Span > 0.0 then
                declare
                   Sep : constant Long_Float :=
-                    Sqrt ((Z.A.Cu - Z.B.Cu) ** 2 + (Z.A.Cv - Z.B.Cv) ** 2);
+                    Sqrt ((Zone.Lobe_Of (Z, 0).Cu - Zone.Lobe_Of (Z, 1).Cu) ** 2 + (Zone.Lobe_Of (Z, 0).Cv - Zone.Lobe_Of (Z, 1).Cv) ** 2);
                begin
                   --  比的是两个量出来的量,没有人拍的系数:隔得比张幅还远 ⇒ 对不上
                   if Sep > Z.Span + Z.Span and then not Qmode then

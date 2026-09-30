@@ -457,7 +457,7 @@ begin
                   begin
                      X.Arm := A; X.Cam := Cm; X.Pose := F.EE (A);
                      --  握合通道带的那块 = 手指:合空时看见的两团 + 区心 + 手指深
-                     X.Parts (Chan.Per_Arm + Jk) := (True, Z.Cu, Z.Cv, (if Picture.Is_Nan (Z.Depth) then 0.0 else Z.Depth), Z.X0, Z.Y0, Z.X1, Z.Y1, Z.N_Lobes, Z.A.Cu, Z.A.Cv, Z.B.Cu, Z.B.Cv);
+                     X.Parts (Chan.Per_Arm + Jk) := (True, Z.Cu, Z.Cv, (if Picture.Is_Nan (Z.Depth) then 0.0 else Z.Depth), Z.X0, Z.Y0, Z.X1, Z.Y1, Z.N_Lobes, Zone.Lobe_Of (Z, 0).Cu, Zone.Lobe_Of (Z, 0).Cv, Zone.Lobe_Of (Z, 1).Cu, Zone.Lobe_Of (Z, 1).Cv);
                      --  别的通道带的零件:开机每个通道推过一下,跟着动的那块(从零量的这次才有;装回的身体图里已经带着)
                      begin
                         for K in 0 .. Chan.Per_Arm - 1 loop

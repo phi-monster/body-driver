@@ -119,13 +119,13 @@ package body Act is
    --  以前用的是整只手的张幅,把自己的白色大臂框了进去(大臂比手指更近)⇒ 靠近的那一档分位一路下滑,
    --  9 步从 1.07 m 滑到 0.50 m(LAB 09-09「爬深」)。这一条和"就地重读"是一对,一起被 a7ab7e9 退掉了。
    function Lobe_Win (Z : Zone.Hand_Zone; Cw, Ch : Natural) return Long_Float is
-      W1 : constant Long_Float := Long_Float (Z.A.X1 - Z.A.X0 + 1) / Long_Float (Cw);
-      H1 : constant Long_Float := Long_Float (Z.A.Y1 - Z.A.Y0 + 1) / Long_Float (Ch);
-      W2 : constant Long_Float := (if Z.B.Valid then Long_Float (Z.B.X1 - Z.B.X0 + 1) / Long_Float (Cw) else W1);
-      H2 : constant Long_Float := (if Z.B.Valid then Long_Float (Z.B.Y1 - Z.B.Y0 + 1) / Long_Float (Ch) else H1);
+      W1 : constant Long_Float := Long_Float (Zone.Lobe_Of (Z, 0).X1 - Zone.Lobe_Of (Z, 0).X0 + 1) / Long_Float (Cw);
+      H1 : constant Long_Float := Long_Float (Zone.Lobe_Of (Z, 0).Y1 - Zone.Lobe_Of (Z, 0).Y0 + 1) / Long_Float (Ch);
+      W2 : constant Long_Float := (if Zone.Lobe_Of (Z, 1).Valid then Long_Float (Zone.Lobe_Of (Z, 1).X1 - Zone.Lobe_Of (Z, 1).X0 + 1) / Long_Float (Cw) else W1);
+      H2 : constant Long_Float := (if Zone.Lobe_Of (Z, 1).Valid then Long_Float (Zone.Lobe_Of (Z, 1).Y1 - Zone.Lobe_Of (Z, 1).Y0 + 1) / Long_Float (Ch) else H1);
    begin
       --  还没量到手的时候退回一个百分之一画幅的小窗(比例,无量纲)
-      if not Z.Valid or else not Z.A.Valid then
+      if not Z.Valid or else not Zone.Lobe_Of (Z, 0).Valid then
          return 0.01;
       end if;
       --  取最窄那一边的四分之一;再小也留千分之四画幅,免得窗口小到一个像素(比例,无量纲)

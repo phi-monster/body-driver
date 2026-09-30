@@ -1263,11 +1263,11 @@ begin
                                              Lv : Long_Float := 0.0;
                                              Ln : Long_Float := 0.0;
                                           begin
-                                             if Z.A.Valid then
-                                                Lu := Lu + Z.A.Cu; Lv := Lv + Z.A.Cv; Ln := Ln + 1.0;
+                                             if Zone.Lobe_Of (Z, 0).Valid then
+                                                Lu := Lu + Zone.Lobe_Of (Z, 0).Cu; Lv := Lv + Zone.Lobe_Of (Z, 0).Cv; Ln := Ln + 1.0;
                                              end if;
-                                             if Z.B.Valid then
-                                                Lu := Lu + Z.B.Cu; Lv := Lv + Z.B.Cv; Ln := Ln + 1.0;
+                                             if Zone.Lobe_Of (Z, 1).Valid then
+                                                Lu := Lu + Zone.Lobe_Of (Z, 1).Cu; Lv := Lv + Zone.Lobe_Of (Z, 1).Cv; Ln := Ln + 1.0;
                                              end if;
                                              P.Tu := (if Ln > 0.0 then Lu / Ln else Z.Cu);
                                              P.Tv := (if Ln > 0.0 then Lv / Ln else Z.Cv);
@@ -2367,8 +2367,8 @@ begin
                   declare
                      Z : constant Zone.Hand_Zone := Zone_Of (C, P.Arm, Cam, Jaw_K_Of (P.Chan_K));
                   begin
-                     if Z.Valid and then Z.A.Valid and then Z.B.Valid and then Z.Span > 0.0
-                       and then Sqrt ((Z.A.Cu - Z.B.Cu) ** 2 + (Z.A.Cv - Z.B.Cv) ** 2) > Z.Span + Z.Span
+                     if Z.Valid and then Zone.Lobe_Of (Z, 0).Valid and then Zone.Lobe_Of (Z, 1).Valid and then Z.Span > 0.0
+                       and then Sqrt ((Zone.Lobe_Of (Z, 0).Cu - Zone.Lobe_Of (Z, 1).Cu) ** 2 + (Zone.Lobe_Of (Z, 0).Cv - Zone.Lobe_Of (Z, 1).Cv) ** 2) > Z.Span + Z.Span
                      then
                         Need_Look := True;
                      end if;

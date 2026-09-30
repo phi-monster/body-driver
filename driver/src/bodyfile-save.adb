@@ -94,10 +94,10 @@ begin
                           ",""au"":" & Num (Zw & "au", Z.Au) & ",""av"":" & Num (Zw & "av", Z.Av) & ",""span"":" & Num (Zw & "span", Z.Span) &
                           ",""depth"":" & Num (Zw & "depth", Z.Depth) &
                           ",""n_lobes"":" & Codec.Img (Z.N_Lobes) & ",""box"":[" & Codec.Img (Z.X0) & "," & Codec.Img (Z.Y0) & "," & Codec.Img (Z.X1) & "," & Codec.Img (Z.Y1) & "]" &
-                          ",""a"":[" & Codec.Img (Z.A.X0) & "," & Codec.Img (Z.A.Y0) & "," & Codec.Img (Z.A.X1) & "," & Codec.Img (Z.A.Y1) & ","
-                          & Num (Zw & "a.cu", Z.A.Cu) & "," & Num (Zw & "a.cv", Z.A.Cv) & "," & Codec.Img (Z.A.Count) & "]" &
-                          ",""b"":[" & Codec.Img (Z.B.X0) & "," & Codec.Img (Z.B.Y0) & "," & Codec.Img (Z.B.X1) & "," & Codec.Img (Z.B.Y1) & ","
-                          & Num (Zw & "b.cu", Z.B.Cu) & "," & Num (Zw & "b.cv", Z.B.Cv) & "," & Codec.Img (Z.B.Count) & "]" &
+                          ",""a"":[" & Codec.Img (Zone.Lobe_Of (Z, 0).X0) & "," & Codec.Img (Zone.Lobe_Of (Z, 0).Y0) & "," & Codec.Img (Zone.Lobe_Of (Z, 0).X1) & "," & Codec.Img (Zone.Lobe_Of (Z, 0).Y1) & ","
+                          & Num (Zw & "a.cu", Zone.Lobe_Of (Z, 0).Cu) & "," & Num (Zw & "a.cv", Zone.Lobe_Of (Z, 0).Cv) & "," & Codec.Img (Zone.Lobe_Of (Z, 0).Count) & "]" &
+                          ",""b"":[" & Codec.Img (Zone.Lobe_Of (Z, 1).X0) & "," & Codec.Img (Zone.Lobe_Of (Z, 1).Y0) & "," & Codec.Img (Zone.Lobe_Of (Z, 1).X1) & "," & Codec.Img (Zone.Lobe_Of (Z, 1).Y1) & ","
+                          & Num (Zw & "b.cu", Zone.Lobe_Of (Z, 1).Cu) & "," & Num (Zw & "b.cv", Zone.Lobe_Of (Z, 1).Cv) & "," & Codec.Img (Zone.Lobe_Of (Z, 1).Count) & "]" &
                           ",""fingers"":[" & Runs (Z.Fingers) & "]}");
                   First := False;
                end;
