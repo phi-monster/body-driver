@@ -335,7 +335,7 @@ act-probe_effects.adb	& "" & Codec.Fmt (Track_Win, 4)	4	格式	日志印 4 位�
 act-probe_effects.adb	& Codec.Fmt (Dp, 4) & "" & Codec.Fmt (Cp, 4)	4	格式	日志印 4 位小数(act-probe_effects.adb:326)
 act-probe_effects.adb	& Codec.Fmt (Dp, 4) & "" & Codec.Fmt (Cp, 4)	4	格式	日志印 4 位小数(act-probe_effects.adb:326)
 act-probe_effects.adb	Agree_Out : Table.Vec := [others => -1.0];	1.0	数值	哨兵:-1 = 这根通道还没来回对表(act-probe_effects.adb:33)
-act-probe_effects.adb	Am : constant Long_Float := Long_Float'Max (1.0e-6, C.Map.Amp (Arm * Chan.Per_Arm + K));	1.0e-6	数值	防除零:100 / 幅² 的幅度下限(act-probe_effects.adb:91)
+act-probe_effects.adb	Am : constant Long_Float := Long_Float'Max (1.0e-6, C.Map.Amp (Chs (K)));	1.0e-6	数值	防除零:100 / 幅² 的幅度下限(act-probe_effects.adb:91)
 act-probe_effects.adb	Amp := Amp * 2.0;	2.0	数值	探针幅度倍增(几何括区间);只定搜索快慢,终点由'过地板'和上限定(act-probe_effects.adb:363)
 act-probe_effects.adb	C.Map.Amp (Chn) * Long_Float'Max (1.0, Allow) * Cam_Slack (C, Arm, Cam);	1.0	数学	探针上限至少是这根通道自己那一档(1 倍 = 看得见的那一档本身)(act-probe_effects.adb:165)
 act-probe_effects.adb	Codec.Fmt (Ran_Max, 4) & "" & Codec.Fmt ((if Pts (0).Z > 0.0 and then Was (0).Z > 0.0 then Pts (0).Z - Was (0).Z else 0.0), 4));	4	格式	日志印 4 位小数(act-probe_effects.adb:249)
@@ -347,7 +347,7 @@ act-probe_effects.adb	Floor_S (I) := Long_Float'Max (4.0 * abs (P2.Size - Was0 (
 act-probe_effects.adb	Floor_Z (I) := 0.01 * Zr;	0.01	调参数	读不到深度时地板 = 1% 距离(距离也没有时 Zr=1.0 ⇒ 0.01 个单位),编出来的(act-probe_effects.adb:135)	同上	高	读不到就没有地板:这一行不参与、如实说,不编
 act-probe_effects.adb	Floor_Z (I) := Long_Float'Max (4.0 * abs (Z1 (I) - Z2), 0.01 * Zr);	0.01	调参数	读深地板至少'距离的 1%':深度噪声∝距离的写死模型(像传感器指标);仿真深度不抖,于是永远是它当地板;它进 P.Z_Noise,管深度闸和'离开了面(free)'(act-probe_effects.adb:133)	深度读数多大的变化算真的	高	静止 k 拍逐点读深的稳健 σ;为 0 时下限 = 这张深度图里量到的最小非零台阶(量化分辨率)或读窗内深度值的分位散布;不写 1%
 act-probe_effects.adb	Floor_Z (I) := Long_Float'Max (4.0 * abs (Z1 (I) - Z2), 0.01 * Zr);	4.0	调参数	读深地板 = 4×(一对静止读数之差),同 2213(act-probe_effects.adb:133)	同上	中	静止 k 拍求稳健 σ(MAD×1.4826),门 = z·σ(3σ 统计约定);σ 为 0(仿真)时下限 = 量化 1 px(Size_Floor/Ang_Floor 已有)
-act-probe_effects.adb	Last_Ran : array (0 .. Chan.Per_Arm - 1) of Long_Float := [others => -1.0];	1.0	数值	哨兵:-1 = 上一档还没量(按 ≥ 0 判)(act-probe_effects.adb:43)
+act-probe_effects.adb	Last_Ran : array (0 .. N_Ch - 1) of Long_Float := [others => -1.0];	1.0	数值	哨兵:-1 = 上一档还没量(按 ≥ 0 判)(act-probe_effects.adb:43)
 act-probe_effects.adb	Nk : constant Long_Float := Long_Float (Natural'Max (1, Nrep (K)));	1	数值	防除零:还没重复过时按 1 除(这时 S1、S2 本来就是 0)(act-probe_effects.adb:49)
 act-probe_effects.adb	Pts (I).Cu, Pts (I).Cv, Long_Float'Max (0.005, Z.Span * 0.25));	0.005	调参数	量读深抖动时的窗下限 0.5% 画幅(行 2200 与 2222 同一行文本)(act-probe_effects.adb:106)	读深窗最小半宽	低	删掉;Near_Depth / Flow.Sample 里 Natural'Max(1,…) 已保证至少 1 px
 act-probe_effects.adb	Pts (I).Cu, Pts (I).Cv, Long_Float'Max (0.005, Z.Span * 0.25));	0.005	调参数	同上(2222 行那一处)(act-probe_effects.adb:128)	同上	低	删掉;Near_Depth / Flow.Sample 里 Natural'Max(1,…) 已保证至少 1 px
@@ -362,7 +362,7 @@ act-probe_effects.adb	Put_Line ("" & Natural'Image (Chn) & "" & Natural'Image (N
 act-probe_effects.adb	Put_Line ("" & Natural'Image (Chn) & "" & Natural'Image (Nrep (K)) & "" & Codec.Fmt (Amp, 4) & "" & Codec.Fmt (Deliv (K), 4) & "" &	4	格式	日志印 4 位小数(act-probe_effects.adb:247)
 act-probe_effects.adb	Reps_Wanted : constant := 3;	3	调参数	同一推法重复 3 次量散布,拍的次数(act-probe_effects.adb:21)	每根通道探几遍	中	2 遍才有散布(数学下限);之后序贯判:列均值标准误 σ/√n 换算成命令误差 < Geo_Base 一档就停,或散布估计不再变
 act-probe_effects.adb	Selfmap.Idle (L, F, 1, Ok2);	1	调参数	固定等 1 拍取第二帧,拿这【一对】静止帧的差当"看着多大 / 朝向"的抖动地板。⚠ 这一段整个在 if Has_Depth 里,而 Has_Depth 恒为 False(plug.adb:439)⇒ 这 1 拍从不执行,Floor_S / Floor_A 永远是 0(见小结 bug 一)(act-probe_effects.adb:112)	探针时大小 / 朝向两行的噪声地板(地板太小 ⇒ 探针那一点点变化的符号都可能是反的)	低	把量这两个地板挪出深度分支;按量到的画面滞后(Plug.Image_Lag)等到这台相机真出了新的一帧再比;抖动用几对静止帧的散布(和 EE_Noise、Pic_Floor 同一种量法),不是一对;再小也不低于 Size_Floor / Ang_Floor(像素量化)
-act-probe_effects.adb	Table.Reset (Effs (I), Chan.Per_Arm, 1.0);	1.0	数值	Reset 的初始先验,随即被每个通道 Set_Prior (100 / 幅²) 全部覆盖,不起作用(占位)(act-probe_effects.adb:88)
+act-probe_effects.adb	Table.Reset (Effs (I), N_Ch, 1.0);	1.0	数值	Reset 的初始先验,随即被每个通道 Set_Prior (100 / 幅²) 全部覆盖,不起作用(占位)(act-probe_effects.adb:88)
 act-probe_effects.adb	Table.Set_Prior (Effs (I), K, 100.0 / (Am * Am));	100.0	数值	RLS 初始协方差 P=100/Am²:弱先验,命令约一个探针幅度时第一次观测拿约 99% 权重。⚠ 探针用 Set_Col 写完列后 P 没改,于是 Learn 第一步几乎用单步观测覆盖掉 3 遍平均的探针列;应按探针量到的散布设 P(act-probe_effects.adb:93)
 act-probe_effects.adb	Trust (K) := Agree_Out (K) < 0.0 or else Agree_Out (K) < 1.0;	1.0	统计	来回对表的门:分歧(两遍之差)< 共识(两遍的均值)。单点单行时等价于 1 个自由度的 t > 2,双侧置信只有约 70%(纯噪声的一列约 29.5% 会被放过);注释说"判据零系数",其实隐含系数 1 和"共识取一半"(act-probe_effects.adb:339)
 act-probe_effects.adb	Z1 : array (0 .. Natural (Pts.Length) - 1) of Long_Float := [others => -1.0];	1.0	数值	占位初值,下一个循环每个点都覆盖(读不到时是 NaN,另有判断);整段在 Has_Depth 分支里,现在走不到(act-probe_effects.adb:100)
@@ -966,22 +966,15 @@ backup.ads	Max_Ch : constant := 64;	64	结构	每步向量的通道容量(只用
 body_driver.adb	"" & Codec.Fmt (Zo.Cu, 3) & "" & Codec.Fmt (Zo.Cv, 3) & "" & Codec.Fmt (Zo.Depth, 3));	3	格式	日志里印几位小数(body_driver.adb:443)
 body_driver.adb	"" & Codec.Fmt (Zo.Cu, 3) & "" & Codec.Fmt (Zo.Cv, 3) & "" & Codec.Fmt (Zo.Depth, 3));	3	格式	日志里印几位小数(body_driver.adb:443)
 body_driver.adb	"" & Codec.Fmt (Zo.Cu, 3) & "" & Codec.Fmt (Zo.Cv, 3) & "" & Codec.Fmt (Zo.Depth, 3));	3	格式	日志里印几位小数(body_driver.adb:443)
-body_driver.adb	(if C.Map.N_Cams > 2 then Codec.Fmt (C.Map.Cam_Frac (A * C.Map.N_Cams + 2), 3) else ""));	2	格式	日志只印前三台相机的变化比例(body_driver.adb:504)
-body_driver.adb	(if C.Map.N_Cams > 2 then Codec.Fmt (C.Map.Cam_Frac (A * C.Map.N_Cams + 2), 3) else ""));	2	格式	同上,第三台的下标(body_driver.adb:504)
-body_driver.adb	(if C.Map.N_Cams > 2 then Codec.Fmt (C.Map.Cam_Frac (A * C.Map.N_Cams + 2), 3) else ""));	3	格式	日志里印几位小数(body_driver.adb:504)
 body_driver.adb	Ada.Command_Line.Set_Exit_Status (1);	1	格式	进程退出码约定:1 = 失败(没接上)(body_driver.adb:105)
 body_driver.adb	Ada.Command_Line.Set_Exit_Status (2);	2	格式	进程退出码约定:2 = 用法不对(body_driver.adb:72)
+body_driver.adb	Append (Line, (if Cm > 0 then "" else "") & Codec.Fmt (C.Map.Cam_Frac (A * C.Map.N_Cams + Cm), 3));	3	格式	日志 / 给脑的话里印几位小数(body_driver.adb:522)
 body_driver.adb	C.Map.Measured_Times := 1;	1	结构	计数:从零量的这一次就是第 1 次量这具身体(以后合成时按历次累加)。(body_driver.adb:358)
 body_driver.adb	C.Sil_Valid := False; C.Held_Set_Valid := False; C.Walls.Clear; C.No_Reach_Arm := -1;	1	数值	哨兵:-1 = 没有"够不着"的那条臂(新一集清掉)。(body_driver.adb:536)
-body_driver.adb	Codec.Fmt (C.Map.Cam_Frac (A * C.Map.N_Cams), 3) & "" & (if C.Map.N_Cams > 1 then Codec.Fmt (C.Map.Cam_Frac (A * C.Map.N_Cams + 1), 3) else "") & "" &	1	格式	日志:有第 1 号相机(第二台)才印它那一格;这行日志只印前三台(504 行的 > 2 上一轮已登记为格式)。只管日志;四台以上相机的比例不印,宜改成按 N_Cams 循环。(body_driver.adb:503)
-body_driver.adb	Codec.Fmt (C.Map.Cam_Frac (A * C.Map.N_Cams), 3) & "" & (if C.Map.N_Cams > 1 then Codec.Fmt (C.Map.Cam_Frac (A * C.Map.N_Cams + 1), 3) else "") & "" &	3	格式	日志里印几位小数(body_driver.adb:503)
-body_driver.adb	Codec.Fmt (C.Map.Cam_Frac (A * C.Map.N_Cams), 3) & "" & (if C.Map.N_Cams > 1 then Codec.Fmt (C.Map.Cam_Frac (A * C.Map.N_Cams + 1), 3) else "") & "" &	3	格式	日志里印几位小数(body_driver.adb:503)
 body_driver.adb	Eye : Unbounded_String := To_Unbounded_String ("");	"127.0	格式	脑的默认地址 127.0.0.1 里的一段(本机回环地址的写法);接线约定,--eye / BL_EYE 可改,不影响身体怎么动(body_driver.adb:29)
 body_driver.adb	Eye : Unbounded_String := To_Unbounded_String ("");	"8079	格式	脑服务的默认端口(接线约定,要和 harness 那边的脑服务对上;不是给脑的行为设定)(body_driver.adb:29)
 body_driver.adb	G.Cx := 0.5 * Long_Float (F.Cams (Cm).W); G.Cy := 0.5 * Long_Float (F.Cams (Cm).H);	0.5	调参数	主点 = 画幅正中:从来不解(同 act.adb:5528、jointboot.adb:775 / 1204 —— 三处是同一条相机假设,09-30 并成同一个定法)(body_driver.adb:253)	每只眼的主点(投影、放大都绕它)	中	把 Cx、Cy 放进运动学 / 不动的眼的解里一起解,报 sd;画幅中心只当起点
 body_driver.adb	G.Cx := 0.5 * Long_Float (F.Cams (Cm).W); G.Cy := 0.5 * Long_Float (F.Cams (Cm).H);	0.5	调参数	主点 = 画幅正中:从来不解(同 act.adb:5528、jointboot.adb:775 / 1204 —— 三处是同一条相机假设,09-30 并成同一个定法)(body_driver.adb:253)	每只眼的主点(投影、放大都绕它)	中	把 Cx、Cy 放进运动学 / 不动的眼的解里一起解,报 sd;画幅中心只当起点
-body_driver.adb	Hc : constant Integer := (if A < Natural (C.Map.Cam_On_Arm.Length) then C.Map.Cam_On_Arm (A) else -1);	1	数值	哨兵:-1 = 这条臂上没有相机(406 行按 ≥ 0 判)。(body_driver.adb:404)
-body_driver.adb	Hc : constant Integer := (if A < Natural (C.Map.Cam_On_Arm.Length) then C.Map.Cam_On_Arm (A) else -1);	1	数值	哨兵:-1 = 这条臂上没有相机(435 行按 ≥ 0 判)。(body_driver.adb:433)
 body_driver.adb	I : Natural := 1;	1	结构	命令行参数从第 1 个起(Ada.Command_Line 从 1 数)(body_driver.adb:46)
 body_driver.adb	Kin_World_Cam : Integer := -1;	1	数值	哨兵:-1 = 开机前半段没认出世界相机(不长在手上的那只)。(body_driver.adb:36)
 body_driver.adb	Long_Float'Max (0.005, Long_Float (P.X1 - P.X0) / Long_Float (F.Cams (Cm).W) * 0.25));	0.005	调参数	读深窗口下限 = 画幅 0.5%,拍的(body_driver.adb:472)	带深度相机上读零件深度的窗口下限	低	不用窗口:在这块零件自己量到的像素掩膜上取深度的稳健分位(中位);窗口由零件像素本身定。现主路无深度
@@ -995,7 +988,7 @@ body_driver.adb	St.Append (F.EE (A) (2) / Fa); St.Append (1.0 / Fa);	1.0	调参�
 body_driver.adb	X.Parts (Chan.Per_Arm + Jk) := (True, Z.Cu, Z.Cv, (if Picture.Is_Nan (Z.Depth) then 0.0 else Z.Depth), Z.X0, Z.Y0, Z.X1, Z.Y1, Z.N_Lobes, Zone.Lobe_Of (Z, 0).Cu, Zone.Lobe_Of (Z, 0).Cv, Zone.Lobe_Of (Z, 1).Cu, Zone.Lobe_Of (Z, 1).Cv);	1	结构	第二瓣的下标 Zone.Lobe_Of (Z, 1):握区今天还按两瓣存、这一处按两瓣读(第 0 步把 Z.B 换成走唯一的取瓣口子;按瓣数走归大并行路 2 / 用它的那一路)(body_driver.adb:460)
 body_driver.adb	X.Parts (Chan.Per_Arm + Jk) := (True, Z.Cu, Z.Cv, (if Picture.Is_Nan (Z.Depth) then 0.0 else Z.Depth), Z.X0, Z.Y0, Z.X1, Z.Y1, Z.N_Lobes, Zone.Lobe_Of (Z, 0).Cu, Zone.Lobe_Of (Z, 0).Cv, Zone.Lobe_Of (Z, 1).Cu, Zone.Lobe_Of (Z, 1).Cv);	1	结构	第二瓣的下标 Zone.Lobe_Of (Z, 1):握区今天还按两瓣存、这一处按两瓣读(第 0 步把 Z.B 换成走唯一的取瓣口子;按瓣数走归大并行路 2 / 用它的那一路)(body_driver.adb:460)
 body_driver.adb	X.Parts (K) := (True, P.Cu, P.Cv, Zp, P.X0, P.Y0, P.X1, P.Y1, 1, P.Cu, P.Cv, 0.0, 0.0);	1	结构	身体图样本里这块零件"由几团组成"(Schema.Part_Pos.N_Blobs)= 1:位姿通道带的零件在 Selfmap.Measure 里只存了最大的那一团(selfmap.adb:471 Comps (0)),所以如实是 1 团,后面第二团的位置 0.0, 0.0 空着。注:Part_Pos 只有两团的位置格(schema.ads:15 自己写着"五指是欠账"),那是两瓣写死的另一处,不在这个 1 上。(body_driver.adb:477)
-body_driver.adb	if abs Dv (K) > Long_Float'Max (1.0e-6, C.Map.Amp (A * Chan.Per_Arm + K)) then	1.0e-6	调参数	不是防除零:判「这只手现在的位姿和存的一样」的门取 max(1e-6, 这通道的探针幅度);探针幅度为 0 的通道就按 1e-6(米 / 弧度)比,等于要求一模一样 —— 带世界单位的门(body_driver.adb:390)	装回时握区照用还是重新合空一次	低 — 最坏是多合空一次(多花几十拍),不会用错	下限换成量到的本体噪声:平移通道用 C.Map.EE_Noise、转动通道用 C.Map.Rot_Noise(act.adb:1874 是同一个 1.0e-6,一起换)
+body_driver.adb	if abs Dv (K) > Long_Float'Max (1.0e-6, C.Map.Amp (Chs (K))) then	1.0e-6	调参数	不是防除零:判「这只手现在的位姿和存的一样」的门取 max(1e-6, 这通道的探针幅度);探针幅度为 0 的通道就按 1e-6(米 / 弧度)比,等于要求一模一样 —— 带世界单位的门(body_driver.adb:390)	装回时握区照用还是重新合空一次	低 — 最坏是多合空一次(多花几十拍),不会用错	下限换成量到的本体噪声:平移通道用 C.Map.EE_Noise、转动通道用 C.Map.Rot_Noise(act.adb:1874 是同一个 1.0e-6,一起换)
 body_driver.adb	task type Fit_Task with Storage_Size => 64 * 1024 * 1024 is	1024	格式	字节单位换算(KiB)(body_driver.adb:177)
 body_driver.adb	task type Fit_Task with Storage_Size => 64 * 1024 * 1024 is	1024	格式	字节单位换算(MiB)(body_driver.adb:177)
 body_driver.adb	task type Fit_Task with Storage_Size => 64 * 1024 * 1024 is	64	数值	解运动学线程栈 64 MB(资源,不描述身体);注释说要几百 KB,余量百倍(body_driver.adb:177)
