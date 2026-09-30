@@ -4,7 +4,9 @@
 --  红 = 判成比面高出,绿 = 交成、没高出,蓝 = 配上了、两帧对不上(或交不成),不标 = 没配上。
 --  面按驱动开机量的:世界 z = 0、法向 +z,离散给出(日志"桌面离散")。手指像素这里不挑出去(全问:长在眼上的交不出远近,判不成高出面)。
 --  灰度图按三个通道一样当彩图发(驱动发的是彩图)。
---  用法:lookexam run_dir seq0 seq1 cam arm geo.json plane_rms host port [out.ppm]
+--  用法:lookexam run_dir seq0 seq1 cam arm geo.json plane_rms host port [out.ppm [tip_u tip_v R step_px]]
+--  给了压的那一瓣尖的像素、落点圈半径 R(世界单位)、铺点间距(像素):按驱动同一个 Act.Look_Points 在落点圈里密铺(落点 = 第一帧里那一瓣的视线交面),
+--  另报落点圈里判成高出面的点
 with Ada.Command_Line;
 with Ada.Containers;
 with Ada.Text_IO; use Ada.Text_IO;
@@ -161,11 +163,55 @@ begin
       end if;
       C.Board_Plane := True; C.Board_Pt := [0.0, 0.0, 0.0]; C.Board_N := [0.0, 0.0, 1.0];
       C.Board_Rms := Long_Float'Value (Ada.Command_Line.Argument (7));
-      for Gyy in 0 .. Kinem.Gy - 1 loop
-         for Gxx in 0 .. Kinem.Gx - 1 loop
-            Q.Append (Instrument.Match_Pt'(U => Kinem.Grid_U (Gxx, W), V => Kinem.Grid_V (Gyy, H), others => <>));
-         end loop;
-      end loop;
+      declare
+         Spot : Geom.V3 := [0.0, 0.0, 0.0];
+         Rr : Long_Float := 0.0;
+         Step : Long_Float := 0.0;
+         No_Fingers : Bools;
+         Ends : Geom.V3_Vectors.Vector;
+      begin
+         if Ada.Command_Line.Argument_Count >= 14 then
+            declare
+               Hok : Boolean;
+            begin
+               Spot := Geom.Hit_Plane (Geom.Cam_Pos (Gs (Cam), P0), Geom.Ray (Gs (Cam), P0, Long_Float'Value (Ada.Command_Line.Argument (11)),
+                                       Long_Float'Value (Ada.Command_Line.Argument (12))), C.Board_Pt, C.Board_N, Hok);
+               Rr := (if Hok then Long_Float'Value (Ada.Command_Line.Argument (13)) else 0.0);
+               Step := Long_Float'Value (Ada.Command_Line.Argument (14));
+               Put_Line ("落点 (" & Codec.Fmt (Spot (0), 3) & ", " & Codec.Fmt (Spot (1), 3) & ") · 落点圈半径 " & Codec.Fmt (Rr, 3) & " · 铺点间距 " & Codec.Fmt (Step, 1) & " px");
+            end;
+         end if;
+         Q := Act.Look_Points (C, Gs (Cam), P0, W, H, No_Fingers, Spot, Ends, Rr, Step);
+         if Rr > 0.0 then
+            declare
+               Above2 : Geom.Scene_Pt_Vectors.Vector;
+               M2 : Instrument.Match_Vectors.Vector;
+               Err2 : Unbounded_String;
+               Qu2, Qv2, Mu2, Mv2, Bu2, Bv2 : Floats;
+               Mt2, Tr2 : Natural;
+               Sg2 : Long_Float;
+               N_In, Hit : Natural := 0;
+            begin
+               M2 := Instrument.Match (Host, Port, Rgb (G0), W, H, Rgb (G1), W, H, Q, Err2, Back => True);
+               if Natural (M2.Length) = Natural (Q.Length) then
+                  for I in 0 .. Natural (Q.Length) - 1 loop
+                     Qu2.Append (Q (I).U); Qv2.Append (Q (I).V); Mu2.Append (M2 (I).U); Mv2.Append (M2 (I).V); Bu2.Append (M2 (I).Bu); Bv2.Append (M2 (I).Bv);
+                  end loop;
+                  Act.Seen_Above_Of (C, Gs (Cam), P0, P1, W, H, Qu2, Qv2, Mu2, Mv2, Bu2, Bv2, Above2, Mt2, Tr2, Sg2);
+                  N_In := Natural (Q.Length) - Kinem.Gx * Kinem.Gy;
+                  for A of Above2 loop
+                     if Sqrt ((A.Pw (0) - Spot (0)) ** 2 + (A.Pw (1) - Spot (1)) ** 2) <= Rr then
+                        Hit := Hit + 1;
+                        Put_Line ("  落点圈里高出面 " & Codec.Fmt (A.Pw (2), 3) & " @ (" & Codec.Fmt (A.Pw (0), 3) & ", " & Codec.Fmt (A.Pw (1), 3) & ") 离落点 "
+                                  & Codec.Fmt (Sqrt ((A.Pw (0) - Spot (0)) ** 2 + (A.Pw (1) - Spot (1)) ** 2), 3));
+                     end if;
+                  end loop;
+                  Put_Line ("密铺 " & Codec.Img (N_In) & " 个 · 一共配上 " & Codec.Img (Mt2) & "、交成 " & Codec.Img (Tr2) & " · 落点圈里高出面的 " & Codec.Img (Hit) & " 个"
+                            & (if Hit > 0 then " ⇒ 这一处被挡" else " ⇒ 这一处照样空"));
+               end if;
+            end;
+         end if;
+      end;
       M := Instrument.Match (Host, Port, Rgb (G0), W, H, Rgb (G1), W, H, Q, Err, Back => True);
       if Natural (M.Length) /= Natural (Q.Length) then
          Put_Line ("仪器没配成:" & To_String (Err));

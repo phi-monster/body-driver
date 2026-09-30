@@ -223,6 +223,7 @@ act.adb	Av (3 + I) := Rv (I);	3	结构	六维命令里第 3..5 个分量是转�
 act.adb	Ax : constant Geom.V3 := (if abs (Nb (0)) < abs (Nb (1)) then [1.0, 0.0, 0.0] else [0.0, 1.0, 0.0]);	1.0	数学	同 11627:标准基向量 x 当种子轴(Along:板面内挪开的方向)(act.adb:12422)
 act.adb	Ax : constant Geom.V3 := (if abs (Nb (0)) < abs (Nb (1)) then [1.0, 0.0, 0.0] else [0.0, 1.0, 0.0]);	1.0	数学	同 11627:标准基向量 y(act.adb:12422)
 act.adb	Ax : constant Geom.V3 := (if abs N (0) <= abs N (1) and then abs N (0) <= abs N (2) then [1.0, 0.0, 0.0]	1.0	数学	标准基向量:挑和法向最不平行的那根坐标轴,叉出面内两根轴(只定铺格子的方位,不改结果)(act.adb:11807)
+act.adb	Ax : constant Geom.V3 := (if abs Nb (0) <= abs Nb (1) and then abs Nb (0) <= abs Nb (2) then [1.0, 0.0, 0.0]	1.0	结构	坐标轴单位向量(挑和法向最不平行的那根,叉出面内的轴;同 Board_Free_Spots)(act.adb:10285)
 act.adb	Axis : constant Geom.V3 := (if Sn > 1.0e-9 then [Cr (0) / Sn, Cr (1) / Sn, Cr (2) / Sn]	1.0e-9	数值	单位向量叉积的模(= 夹角的正弦,无量纲)防除零;都近零时再换一根种子轴(act.adb:8134)
 act.adb	Az_Step : constant Long_Float := 72.0 * Deg;	72.0	数学	360° ÷ N_Tilt(5 个方位);应写成 2π / N_Tilt,否则改 N_Tilt 时它不跟着变(act.adb:11944)
 act.adb	B.Append (F.Cams (Cam).Gray.Element ((2 * Y) * Cw + 2 * X));	2	数值	同上(后一帧取样)(act.adb:1918)
@@ -648,6 +649,7 @@ act.adb	Su : constant Long_Float := (if P.Blob = 1 then Gp.B1u elsif P.Blob = 0 
 act.adb	Su := Su + P.Cu; Sv := Sv + P.Cv; N := N + 1.0;	1.0	数学	计数加一(下面求均值)(act.adb:11301)
 act.adb	Sub_Arm : Integer := -1;	1	数值	哨兵:−1 = grasper 没绑上,不知道要动哪条臂(后面一律按 < 0 / ≥ 0 判);不描述身体和世界(act.adb:9637)
 act.adb	Sv : constant Long_Float := (if P.Blob = 1 then Gp.B1v elsif P.Blob = 0 then Gp.B0v else Gp.Cv);	1	结构	同上一条(v 那一半)(act.adb:3463)
+act.adb	Sw : constant Long_Float := (if G.F > 0.0 then Long_Float'Max (1.0, Step_Px) * Long_Float'Max (0.0, H0) / G.F else 0.0);	1.0	数值	铺点间距至少 1 个像素(尖那一截的厚量不出时不让间距变成 0)(act.adb:10268)
 act.adb	Sw : constant Natural := Cw / 2;	2	调参数	给脑的拼图里,其余相机一律缩成主图宽高的一半放在下面一条:拍的版面。连带后果:下面一条只放得下 Cw / Sw = 2 台(act.adb:9038 的 Slot * Sw < Cw),第 4 台及以后的眼脑每轮都看不见;而且统一按 Ch/2 缩,宽高比和主图不同的相机被压扁。规则把它当'求中点 / 一半',判错了(act.adb:9028)	脑每轮看得见几只眼、看得多大	中	按观测里现成的量排:Sw = Cw / (N_Cams − 1)(一条正好放下全部其余相机),每台按自己的宽高比 Sh_k = Sw × Kh / Kw,Bh = Ch + max_k Sh_k;N_Cams、每台 W/H 都在帧里
 act.adb	T.Err (2) := P.Tz - P.Z; T.W (2) := 1.0;	1.0	数学	远近那一行(深度读数)的权重 = 1:同上,等权(act.adb:2885)
 act.adb	T.Err (3) := P.Tsize - P.Size; T.W (3) := 1.0;	1.0	数学	"看着多大"那一行的权重 = 1:同上,等权(act.adb:2889)

@@ -6,6 +6,7 @@ with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
 with Ada.Containers.Vectors;
 with Plug;
 with Geom;
+with Instrument;
 with Selfmap;
 with Zone;
 with World;
@@ -418,6 +419,11 @@ package Act is
    --  原图(宽 W、高 H)顺时针转了 Turns 个 90° 之后那张图里的 (U, V) 换算回原图的像素。核对时画面可能被转了,转回去配完再换算回来;导出只为自检
    procedure Unturn (U, V : Long_Float; Turns, W, H : Natural; U0, V0 : out Long_Float);
    procedure Board_Free_Spots (C : Context; Lp : Geom.V3_Vectors.Vector; Tb : Floats; R : Long_Float; Deltas : out Geom.V3_Vectors.Vector);
+   --  压之前先看底下要问的点(导出给离线工具):Kinem 那张格点,再加压的那一瓣的落点圈(Spot 为心、半径 R)和到 Far_Ends 里每一处(别的瓣的落点)
+   --  的带子(同 Board_Free_Spots 挡的那几处)里按 Step_Px 像素的间距(这一瓣尖那一截的厚:比指尖还窄的东西才可能漏)铺的点,
+   --  间距按眼离面多高折成世界里的长度、铺在面上、投回位姿 P0 那一帧;Fingers 里的像素(手指,长在眼上、交不出远近)不问
+   function Look_Points (C : Context; G : Geom.Cam_Geo; P0 : Plug.Arm_Pose; W, H : Natural; Fingers : Bools;
+                         Spot : Geom.V3; Far_Ends : Geom.V3_Vectors.Vector; R, Step_Px : Long_Float) return Instrument.Match_Vectors.Vector;
    --  压之前先看底下(09-30):同一只眼两个位姿 P0 → P1 各一帧(W × H),问的点 (Qu, Qv) 配到 (Mu, Mv)、配回来落在 (Bu, Bv)(< 0 = 配不回来)
    --  ⇒ 比面高出的点(Above:世界位置 + 协方差)。Matched = 配上的(往返 1 px 以内、落在画面里),Tri = 其中两条视线交成、两帧对得上的;
    --  Sig = 这一批的配点噪声(像素,每轴)。导出只为自检

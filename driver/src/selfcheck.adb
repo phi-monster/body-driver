@@ -34,6 +34,7 @@ with Contact.Exec;
 with Contact.Surface;
 with Kinem;
 with Jointboot;
+with Instrument;
 with Ada.Numerics.Float_Random;
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Containers;
@@ -5167,6 +5168,71 @@ begin
              & Codec.Fmt (Box_Err * 1000.0, 1) & " mm)· 面上、手指、动着的判成高出面的 " & Codec.Img (Wrong) & " 个(要 0)");
       Check (Mv_Tooth > 0, "🦷 两帧对不对得上不核:动着的格点有 " & Codec.Img (Mv_Tooth) & " 个按高度判成高出面");
       Check (Ep_Tooth > 0, "🦷 门只按面的离散:面上的格点有 " & Codec.Img (Ep_Tooth) & " 个判成高出面(眼平移方向附近视差小)");
+   end;
+   --  🔴 落点圈里密铺(Act.Look_Points,09-30 V1B74 / V1B76:剪刀轴、一支笔从 20 px 一格的格点之间漏过去,手指压在上面):合成的眼同上
+   --  (焦距 400、朝正下,第一步从离面 0.25 m 走到 0.20 m),面上横躺一支 7 mm 宽、1.5 cm 高的笔(x 0.008–0.015 m,正好在两列格点之间),
+   --  压的那一瓣落在 (0.011, 0.02)、落点圈半径 3 cm、铺点间距 5 px。要:落点圈里有判成比面高出的点(这一处被挡);🦷 不密铺(只有那张格点)⇒ 落点圈里一个都没有
+   declare
+      use Ada.Numerics.Long_Elementary_Functions;
+      G : Geom.Cam_Geo := Geom.No_Geo;
+      Cx : Act.Context;
+      P0 : constant Plug.Arm_Pose := [0.0, 0.0, 0.25, 1.0, 0.0, 0.0, 0.0];
+      P1 : constant Plug.Arm_Pose := [0.0, 0.0, 0.20, 1.0, 0.0, 0.0, 0.0];
+      Pen_H : constant Long_Float := 0.015;   --  笔高(米,合成)
+      Spot : constant Geom.V3 := [0.011, 0.02, 0.0];
+      Rr : constant Long_Float := 0.03;       --  落点圈半径(米,合成)
+      type Lcg is mod 2 ** 31;
+      Seed : Lcg := 4242;
+      function Rnd return Long_Float is   --  0..1 的伪随机(线性同余,固定种子)
+      begin
+         Seed := Seed * 1103515245 + 12345;
+         return Long_Float (Seed) / Long_Float (Lcg'Modulus);
+      end Rnd;
+      No_Fingers : Bools;
+      Ends : Geom.V3_Vectors.Vector;
+      --  问的点在第二帧里配到哪:视线从 0.25 m 往下先看落不落在笔顶上,不在就落在面上;加 ±0.2 px 的配点噪声,往返差 ±0.2 px
+      function In_Circle (Q : Instrument.Match_Vectors.Vector) return Natural is
+         Qu, Qv, Mu, Mv, Bu, Bv : Bytes.Floats;
+         Above : Geom.Scene_Pt_Vectors.Vector;
+         Matched, Tri : Natural;
+         Sig : Long_Float;
+         N : Natural := 0;
+      begin
+         for P of Q loop
+            declare
+               Dx : constant Long_Float := (P.U - 320.0) / 400.0;
+               Dy : constant Long_Float := -(P.V - 240.0) / 400.0;
+               Xb : constant Long_Float := Dx * (0.25 - Pen_H);
+               On_Pen : constant Boolean := Xb >= 0.008 and then Xb <= 0.015;
+               Zp : constant Long_Float := (if On_Pen then Pen_H else 0.0);
+               Xp : constant Long_Float := Dx * (0.25 - Zp);
+               Yp : constant Long_Float := Dy * (0.25 - Zp);
+            begin
+               Qu.Append (P.U); Qv.Append (P.V);
+               Mu.Append (320.0 + 400.0 * Xp / (0.20 - Zp) + 0.4 * (Rnd - 0.5)); Mv.Append (240.0 - 400.0 * Yp / (0.20 - Zp) + 0.4 * (Rnd - 0.5));
+               Bu.Append (P.U + 0.4 * (Rnd - 0.5)); Bv.Append (P.V + 0.4 * (Rnd - 0.5));
+            end;
+         end loop;
+         Act.Seen_Above_Of (Cx, G, P0, P1, 640, 480, Qu, Qv, Mu, Mv, Bu, Bv, Above, Matched, Tri, Sig);
+         for A of Above loop
+            if Sqrt ((A.Pw (0) - Spot (0)) ** 2 + (A.Pw (1) - Spot (1)) ** 2) <= Rr then
+               N := N + 1;
+            end if;
+         end loop;
+         return N;
+      end In_Circle;
+      N_Dense, N_Grid : Natural;
+      Q_Dense, Q_Grid : Instrument.Match_Vectors.Vector;
+   begin
+      G.Valid := True; G.F := 400.0; G.Cx := 320.0; G.Cy := 240.0;
+      Cx.Board_Plane := True; Cx.Board_Pt := [0.0, 0.0, 0.0]; Cx.Board_N := [0.0, 0.0, 1.0]; Cx.Board_Rms := 0.001;
+      Q_Dense := Act.Look_Points (Cx, G, P0, 640, 480, No_Fingers, Spot, Ends, Rr, 5.0);
+      Q_Grid := Act.Look_Points (Cx, G, P0, 640, 480, No_Fingers, Spot, Ends, 0.0, 5.0);
+      N_Dense := In_Circle (Q_Dense);
+      N_Grid := In_Circle (Q_Grid);
+      Check (N_Dense > 0, "落点圈里密铺:问 " & Codec.Img (Natural (Q_Dense.Length)) & " 个(格点 " & Codec.Img (Natural (Q_Grid.Length)) & ")⇒ 落点圈里判成高出面的 "
+             & Codec.Img (N_Dense) & " 个(那支笔)⇒ 这一处被挡");
+      Check (N_Grid = 0, "🦷 不密铺(只有那张格点):落点圈里判成高出面的 " & Codec.Img (N_Grid) & " 个(笔在两列格点之间,漏了)");
    end;
    --  🔴 几只手按拍对齐(Lockstep + Plug.Lock_*,09-28 PLAN ⑧ (g)):两只假手,第 1 只走 3 条(第 0 组关节目标 1、2、3)、第 2 只走 5 条(第 1 组 11–15),
    --  每一条走 Selfmap.Go(发命令的只有这一处;假帧里没有读数 ⇒ 等满两拍就算停)⇒ 一共 10 拍(不是 6 + 10 = 16 拍:两只手同时走);
