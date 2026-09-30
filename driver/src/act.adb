@@ -10478,8 +10478,13 @@ package body Act is
          Gate : constant Long_Float := 4.0 * Geo_Base (C, A);   --  一小步 = 4 倍最小一档(同 Geo_Go 默认的一压、同原来两处对不对得上的门)
          Small : constant Long_Float := 4.0 * Geo_Base (C, A);  --  同上(压的时候的一小步)
          Deg : constant := 0.0174532925199433;   --  1° 的弧度(换算,无量纲)
-         Az_Step : constant Long_Float := 72.0 * Deg;   --  五个方位各差 72°(360° ÷ 5,纯几何:没有正对着的两个方位)
          N_Tilt : constant := 5;      --  斜着压的下数(次数)
+         --  斜着压只朝这一瓣手指身子的反方向那半边斜:身子在画面里从尖往它伸进画面的那一头去(Zone.Lobe_Entry),朝反方向那半边(±90° 以内)斜时,
+         --  身子上每一点离"朝下"只会更远、只会更高(纯几何:斜 θ 朝 w 时,方向 u 上的一点离朝下 |αu − θw|,u·w ≤ 0 ⇒ 不比 α 小)。
+         --  09-30 V1B79 第 2 只手第 2 瓣:原来一圈五个方位各差 72°,朝手指身子那边斜的那几下(36°–144°)板的另一头沉得比尖还低
+         --  (拍 1218:尖离面 2.026,身子上一点 2.011、离眼比尖还远),压在东西上,8 下只有 3 下碰的是尖。五下均匀铺在那半边:各差 180° ÷ 5
+         Az_Step : constant Long_Float := Ada.Numerics.Pi / Long_Float (N_Tilt);
+         Az0 : Floats;   --  和 D 一一对应:这一瓣手指身子反方向的方位(Geom.Azim_Of,Tilt_Dir 的量法)
          N_Extra : constant := 2;     --  对不上时补压的下数(次数;方位取前两个方位中间的)
          function Dot (P, Q : Geom.V3) return Long_Float is (P (0) * Q (0) + P (1) * Q (1) + P (2) * Q (2));
          --  世界里一点沿面的法向落到面上
@@ -10872,7 +10877,7 @@ package body Act is
                         Blocked := not (for some D2 of Ds2 => Geom."=" (D2, Dl));   --  候选是同一批板点算的:没被挡就原样还在
                      end;
                   end if;
-                  Geo_Say ("  压之前看底下(往下第一步前后两帧,眼挪了 " & Mm (Went) & "):问 " & Codec.Img (Natural (Q.Length)) & " 个点(格点 + 落点圈和带子里密铺的,手指像素不问)、配上 "
+                  Geo_Say ("  压之前看底下(往下第一步前后两帧,眼挪了 " & Mm (Went) & "):问 " & Codec.Img (Natural (Q.Length)) & " 个点(格点 + 落点圈和带子里密铺的)、配上 "
                            & Codec.Img (Matched) & " 个、交成且两帧对得上 " & Codec.Img (Tri) & " 个(配点噪声 " & Codec.Fmt (Sig, 2) & " px)、比面高出的 "
                            & Codec.Img (Natural (New_Pts.Length)) & " 个(看见的一共 " & Codec.Img (Natural (C.Seen_Above.Length)) & ")⇒ "
                            & (if Blocked then "挑好的这一处被挡了 ⇒ 退回去,从这儿重挑" else "这一处照样空"));
@@ -11119,6 +11124,19 @@ package body Act is
                         for I in 0 .. 2 loop
                            Dc (I) := Dc (I) / Nn;
                         end loop;
+                        declare
+                           Eu, Ev : Long_Float;
+                           Eok, Dok : Boolean;
+                        begin
+                           Zone.Lobe_Entry (Z, Lb, Cw, Ch, Eu, Ev, Eok);
+                           declare
+                              De : constant Geom.V3 := (if Eok then Geom.Cam_Dir (G0, Eu, Ev, Dok) else Geom.V3'[0.0, 0.0, 0.0]);
+                              Dd : constant Long_Float := De (0) * Dc (0) + De (1) * Dc (1) + De (2) * Dc (2);
+                           begin
+                              --  身子的方向 = 伸进画面那一头的视线扣掉沿尖那条视线的那一截;反方向那半边的正中
+                              Az0.Append (Geom.Azim_Of (Dc, [-(De (0) - Dd * Dc (0)), -(De (1) - Dd * Dc (1)), -(De (2) - Dd * Dc (2))]));
+                           end;
+                        end;
                         D.Append (Dc);
                         Lobe_At.Append (K);
                         Tu.Append (U); Tv.Append (V);
@@ -11178,7 +11196,8 @@ package body Act is
                      Geo_Say (Who & "第 " & Codec.Img (K + 1) & " 瓣:只有这一瓣、一条命令转得到的那一档也没量 ⇒ 斜不了,这一瓣量不成");
                      Failed := True;
                   else
-                     Geo_Say (Who & "第 " & Codec.Img (K + 1) & " 瓣:让它指尖的视线朝下压 1 下、再朝五个方位(各差 72°)各斜 " & Codec.Fmt (Theta / Deg, 1)
+                     Geo_Say (Who & "第 " & Codec.Img (K + 1) & " 瓣:让它指尖的视线朝下压 1 下、再朝它手指身子反方向那半边的五个方位(正中 "
+                              & Codec.Fmt (Az0 (K) / Deg, 0) & "°、各差 " & Codec.Fmt (Az_Step / Deg, 0) & "°)各斜 " & Codec.Fmt (Theta / Deg, 1)
                               & "° 压 1 下(" & (if Nl >= 2 then "它和最近的另一瓣视线夹角 " & Codec.Fmt (3.0 * Theta / Deg, 1) & "° 的三分之一" else "一条命令转得到的那一档")
                               & ")⇒ 每一下手上最低那一点落在面上,几下一起解它在手系里在哪");
                      --  压之前板上的点在不动的眼里重找一遍:这一瓣只在此刻还找得到的那片桌面上挑落点(09-28 V1B47:手把电子琴推进了板量过的那片)
@@ -11200,7 +11219,7 @@ package body Act is
                         S_Known := S1;
                      end if;
                      for I in 0 .. N_Tilt - 1 loop
-                        Press_Try (K, Theta, Long_Float (I) * Az_Step, Got, S1);
+                        Press_Try (K, Theta, Az0 (K) + Long_Float (2 * I - (N_Tilt - 1)) / 2.0 * Az_Step, Got, S1);   --  以正中为心左右铺开(一半,纯数学)
                         Note_Ray (S1);
                      end loop;
                      Fits (K) := Fit_Of (K);
@@ -11208,8 +11227,8 @@ package body Act is
                         exit when Fits (K).Ok;
                         Geo_Say ("  第 " & Codec.Img (K + 1) & " 瓣压了 " & Codec.Img (Aimed_At (K)) & " 下:"
                                  & (if Fits (K).Ambiguous then "有两组一样多、互相对不上(认不出哪一下是坏的)" else "找不到 4 下以上互相对得上的(3 个未知数 + 1 条自己核)")
-                                 & " ⇒ 补压一下(方位 " & Codec.Fmt ((0.5 + Long_Float (E)) * Az_Step / Deg, 0) & "°)");
-                        Press_Try (K, Theta, (0.5 + Long_Float (E)) * Az_Step, Got, S1);   --  两个方位中间(一半,纯数学)
+                                 & " ⇒ 补压一下(方位 " & Codec.Fmt ((Az0 (K) + (Long_Float (E) - 0.5) * Az_Step) / Deg, 0) & "°)");
+                        Press_Try (K, Theta, Az0 (K) + (Long_Float (E) - 0.5) * Az_Step, Got, S1);   --  正中两边各半格(一半,纯数学)
                         Note_Ray (S1);
                         Fits (K) := Fit_Of (K);
                      end loop;

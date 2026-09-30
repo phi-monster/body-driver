@@ -66,6 +66,9 @@ package Zone is
    --  这一瓣自己那一块(同上)= 它在这只眼里的剪影(张开到合上扫过的,包住张开那一头);Through = 这一块沿画面边贴着不止一段(穿过画面:
    --  尖在画面外,看得见的那一截里没有尖)。碰指尖几下一起解时拿它核解出来的尖(Geom.Fit_Presses 的 Finger_View)
    function Lobe_Mask (Z : Hand_Zone; Lb : Lobe; W, Hh : Natural; Through : out Boolean) return Bools;
+   --  这一瓣从哪儿伸进画面:它那一块(同上)贴画面边的那些像素的中点(Eu, Ev)。手指的身子在画面里从尖往这儿去;没有贴边的 ⇒ Ok = False
+   --  (Tip_Section 那时也认不出尖)。碰指尖斜着压时只朝它的反方向那半边斜(Geom.Azim_Of)
+   procedure Lobe_Entry (Z : Hand_Zone; Lb : Lobe; W, Hh : Natural; Eu, Ev : out Long_Float; Ok : out Boolean);
    --  把手指像素从深度切块结果里剔掉(块心落在手指框或区框里 = 我自己)
    function Is_Self (Z : Hand_Zone; R : Picture.Region; W, Hh : Natural) return Boolean;
 

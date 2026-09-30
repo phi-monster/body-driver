@@ -4717,6 +4717,58 @@ begin
       Check (Raw_Would and then not F4.Ok,
              "换倾角碰:原来的写法(4 下、组里残差 ≤ 一小步)" & (if Raw_Would then "会收下被顶住 5 mm 的那一组" else "不收(焊点前提不成立)")
              & " —— 按别的几下预测它 ⇒ " & (if F4.Ok then "也收了(错)" else "不收"));
+      --  ⑩ 手指的身子(09-30 V1B79:朝手指身子那边斜的几下,板的另一头沉得比尖还低):照 V1B79 拍 1218 按真值的几何,板的另一头离尖的方向差 44°、
+      --  离眼比尖远 11%(合成:第 0 瓣视线再往外 44°、离眼 1.11 倍,上下各错 1 cm 三个点;朝正下压时它比尖高)。
+      --  身子的方向 = 那一头的视线扣掉沿尖那条视线的那一截(驱动按伸进画面那一头的像素算,这里直接给)。
+      --  要:朝身子反方向那半边的五个方位(Geom.Azim_Of 算的正中、各差 36°)每一下最低的都是压的这一瓣的尖;🦷 原来一圈五个方位各差 72° ⇒ 至少一下身子比尖低
+      declare
+         D0 : constant Geom.V3 := Dir (0);
+         Ang0 : constant Long_Float := Arctan (D0 (0), -D0 (2)) + 44.0 * Deg;   --  离相机轴的角(往外)
+         Lp0 : constant Long_Float := 1.11 * Geom.Norm (Ctr (0));
+         Plate : constant V3_Arr := [[Lp0 * Sin (Ang0), 0.0, -Lp0 * Cos (Ang0)], [Lp0 * Sin (Ang0), 0.01, -Lp0 * Cos (Ang0)], [Lp0 * Sin (Ang0), -0.01, -Lp0 * Cos (Ang0)]];
+         Bd : constant Long_Float := Plate (0) (0) * D0 (0) + Plate (0) (1) * D0 (1) + Plate (0) (2) * D0 (2);
+         Az_Anti : constant Long_Float := Geom.Azim_Of (D0, [-(Plate (0) (0) - Bd * D0 (0)), -(Plate (0) (1) - Bd * D0 (1)), -(Plate (0) (2) - Bd * D0 (2))]);
+         Half_Step : constant Long_Float := Ada.Numerics.Pi / 5.0;   --  半圈 ÷ 5(同驱动)
+         --  这一下(斜 Tilt、方位 Azim)真的最低点是不是压的这一瓣的尖(和身子、另一根手指、手掌比)
+         function Tip_Lowest (Tilt, Azim : Long_Float) return Boolean is
+            Rv : constant Geom.V3 := Geom.Turn_To (Geom.Tilt_Dir (D0, Tilt, Azim), Down);
+            Av : Table.Vec := Table.Zero_Vec;
+            R : Geom.M3;
+            Tip_Z : Long_Float;
+         begin
+            Av (3) := Rv (0); Av (4) := Rv (1); Av (5) := Rv (2);
+            R := Geom.Quat_To_R (Chan.Compose (Home, Av));
+            Tip_Z := Geom.Ap (R, Ctr (0)) (2) - Rt;
+            for B of Plate loop
+               if Geom.Ap (R, B) (2) < Tip_Z then
+                  return False;
+               end if;
+            end loop;
+            if Geom.Ap (R, Ctr (1)) (2) - Rt < Tip_Z then
+               return False;
+            end if;
+            for Q of Palm loop
+               if Geom.Ap (R, Q) (2) < Tip_Z then
+                  return False;
+               end if;
+            end loop;
+            return True;
+         end Tip_Lowest;
+         New_Ok : Boolean := True;
+         Old_Bad : Natural := 0;
+      begin
+         for I in 0 .. 4 loop
+            if not Tip_Lowest (Theta, Az_Anti + Long_Float (2 * I - 4) / 2.0 * Half_Step) then
+               New_Ok := False;
+            end if;
+            if not Tip_Lowest (Theta, Long_Float (I) * 72.0 * Deg) then
+               Old_Bad := Old_Bad + 1;
+            end if;
+         end loop;
+         Check (New_Ok and then Tip_Lowest (0.0, 0.0), "换倾角碰:朝下那一下和朝手指身子反方向那半边的五个方位(正中 " & Codec.Fmt (Az_Anti / Deg, 0)
+                & "°、各差 36°)⇒ 每一下最低的都是压的这一瓣的尖");
+         Check (Old_Bad > 0, "🦷 原来一圈五个方位各差 72°:" & Codec.Img (Old_Bad) & " 下手指身子比尖低");
+      end;
       --  ⑨ V1B74 第 2 只手第 2 瓣:8 下里方位 72°、144°、108° 那三下停高 15.4 / 20.7 / 22.2 mm(压在剪刀轴、扁勺的边上),36° 那一下 5.1 mm。
       --  这一瓣的手指剪影(合成):从真的尖投回的像素往画面右边、上下各 20 px 的一条。要:带剪影 ⇒ 解是真的尖(< 1 mm)或者照实不收;
       --  🦷 不带剪影 ⇒ 得不到对的尖:含坏的那一组和好的那一组一样大、互相对不上(认不出,不收;V1B74 真帧上含坏的那组更大,收了错的)

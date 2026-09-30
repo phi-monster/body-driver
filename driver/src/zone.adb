@@ -286,6 +286,21 @@ package body Zone is
       return R;
    end Lobe_Pixels;
 
+   procedure Lobe_Entry (Z : Hand_Zone; Lb : Lobe; W, Hh : Natural; Eu, Ev : out Long_Float; Ok : out Boolean) is
+      Su, Sv : Long_Float := 0.0;
+      Nb : Natural := 0;
+   begin
+      Eu := 0.0; Ev := 0.0; Ok := False;
+      for P of Lobe_Component (Z, Lb, W, Hh) loop
+         if P mod W = 0 or else P mod W = W - 1 or else P / W = 0 or else P / W = Hh - 1 then
+            Su := Su + Long_Float (P mod W); Sv := Sv + Long_Float (P / W); Nb := Nb + 1;
+         end if;
+      end loop;
+      if Nb > 0 then
+         Eu := Su / Long_Float (Nb); Ev := Sv / Long_Float (Nb); Ok := True;
+      end if;
+   end Lobe_Entry;
+
    function Lobe_Mask (Z : Hand_Zone; Lb : Lobe; W, Hh : Natural; Through : out Boolean) return Bools is
       N : constant Natural := W * Hh;
       R : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (N));

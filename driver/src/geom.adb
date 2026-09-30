@@ -1631,6 +1631,24 @@ package body Geom is
       end;
    end Tilt_Dir;
 
+   function Azim_Of (D, U : V3) return Long_Float is
+      function Dot (A, B : V3) return Long_Float is (A (0) * B (0) + A (1) * B (1) + A (2) * B (2));
+      X : constant V3 := [1.0, 0.0, 0.0];
+      Y : constant V3 := [0.0, 1.0, 0.0];
+      Xp : V3 := [X (0) - Dot (X, D) * D (0), X (1) - Dot (X, D) * D (1), X (2) - Dot (X, D) * D (2)];
+   begin
+      if Norm (Xp) < 1.0e-9 then   --  同 Tilt_Dir
+         Xp := [Y (0) - Dot (Y, D) * D (0), Y (1) - Dot (Y, D) * D (1), Y (2) - Dot (Y, D) * D (2)];
+      end if;
+      declare
+         L : constant Long_Float := Norm (Xp);
+         E1 : constant V3 := [Xp (0) / L, Xp (1) / L, Xp (2) / L];
+         E2 : constant V3 := [D (1) * E1 (2) - D (2) * E1 (1), D (2) * E1 (0) - D (0) * E1 (2), D (0) * E1 (1) - D (1) * E1 (0)];
+      begin
+         return Arctan (Dot (U, E2), Dot (U, E1));
+      end;
+   end Azim_Of;
+
    function Tilt_Angle (D : V3_Vectors.Vector; K : Natural; Single : Long_Float) return Long_Float is
       Beta : Long_Float := Long_Float'Last;
    begin

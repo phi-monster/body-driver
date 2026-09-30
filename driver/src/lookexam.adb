@@ -5,10 +5,12 @@
 --  面按驱动开机量的:世界 z = 0、法向 +z,离散给出(日志"桌面离散")。手指像素这里不挑出去(全问:长在眼上的交不出远近,判不成高出面)。
 --  灰度图按三个通道一样当彩图发(驱动发的是彩图)。
 --  用法:lookexam run_dir seq0 seq1 cam arm geo.json plane_rms host port [out.ppm [tip_u tip_v R step_px [other_u other_v]]]
---  再给了另一瓣尖的像素:它的视线交面那一点当带子的另一头(同驱动的 Lp),另报带子里判成高出面的点(离压的那一点沿带子多远、多高)
+--  再给了另一瓣尖的像素:它的视线交面那一点当带子的另一头(同驱动的 Lp),另报带子里判成高出面的点(离压的那一点沿带子多远、多高)。
+--  环境变量 LOOKEXAM_EST="x y z"(估的尖,眼系):落点改按驱动有估的尖时的算法 —— 第一帧那一刻估的尖在世界里的位置竖直落到面上
 --  给了压的那一瓣尖的像素、落点圈半径 R(世界单位)、铺点间距(像素):按驱动同一个 Act.Look_Points 在落点圈里密铺(落点 = 第一帧里那一瓣的视线交面),
 --  另报落点圈里判成高出面的点
 with Ada.Command_Line;
+with Ada.Environment_Variables;
 with Ada.Containers;
 with Ada.Text_IO; use Ada.Text_IO;
 with Ada.Streams.Stream_IO;
@@ -176,6 +178,33 @@ begin
             begin
                Spot := Geom.Hit_Plane (Geom.Cam_Pos (Gs (Cam), P0), Geom.Ray (Gs (Cam), P0, Long_Float'Value (Ada.Command_Line.Argument (11)),
                                        Long_Float'Value (Ada.Command_Line.Argument (12))), C.Board_Pt, C.Board_N, Hok);
+               if Ada.Environment_Variables.Exists ("LOOKEXAM_EST") then
+                  declare
+                     Sv : constant String := Ada.Environment_Variables.Value ("LOOKEXAM_EST");
+                     E : Geom.V3;
+                     I0 : Natural := Sv'First;
+                  begin
+                     for K in 0 .. 2 loop
+                        declare
+                           I1 : Natural := I0;
+                        begin
+                           while I1 <= Sv'Last and then Sv (I1) /= ' ' loop
+                              I1 := I1 + 1;
+                           end loop;
+                           E (K) := Long_Float'Value (Sv (I0 .. I1 - 1));
+                           I0 := I1 + 1;
+                        end;
+                     end loop;
+                     declare
+                        O : constant Geom.V3 := Geom.Cam_Pos (Gs (Cam), P0);
+                        Tw : constant Geom.V3 := Geom.Ap (Geom.Cam_R (Gs (Cam), P0), E);
+                     begin
+                        Spot := [O (0) + Tw (0), O (1) + Tw (1), 0.0];   --  面是世界 z = 0
+                        Hok := True;
+                        Put_Line ("按估的尖定落点:尖此刻离面 " & Codec.Fmt (O (2) + Tw (2), 3));
+                     end;
+                  end;
+               end if;
                Rr := (if Hok then Long_Float'Value (Ada.Command_Line.Argument (13)) else 0.0);
                Step := Long_Float'Value (Ada.Command_Line.Argument (14));
                Put_Line ("落点 (" & Codec.Fmt (Spot (0), 3) & ", " & Codec.Fmt (Spot (1), 3) & ") · 落点圈半径 " & Codec.Fmt (Rr, 3) & " · 铺点间距 " & Codec.Fmt (Step, 1) & " px");
