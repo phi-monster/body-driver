@@ -19,7 +19,8 @@ for w in "e.g." "how you " "To close" "To lift" "pick it up" "from above" "is ho
   if [ "$n" != "0" ]; then echo "🔴 提示词里有教它动作的句子「$w」×$n —— 只许讲格式,不许教怎么做"; fail=1; fi
 done
 # ③ 运动命令只许从一处发出(selfmap.Go 是唯一的位姿派发;zone/act 的抓握走 Plug.Act 直接发):`Plug.Act (` 的处数是棘轮(只许降)
-n=$(for f in "$SRC"/*.adb; do strip "$f"; done | grep -c 'Plug.Act (' || true)
+OFFLINE=$(sed -nE 's/.*for +Main +use *\((.*)\);.*/\1/p' "$ROOT/driver/body_driver.gpr" | tr -d '" ' | tr ',' '\n' | grep -v '^body_driver.adb$')
+n=$(for f in "$SRC"/*.adb; do b=$(basename "$f"); r="${b%%-*}.adb"; echo "$OFFLINE" | grep -qx -e "$b" -e "$r" || strip "$f"; done | grep -c 'Plug.Act (' || true)   # 自检、exam 工具连同它们分开编译出去的文件不算驱动
 ceil=$(cat "$ROOT/freedom_act_ceiling.txt" 2>/dev/null || echo 999)
 if [ "$n" -gt "$ceil" ]; then echo "🔴 发运动命令的地方从 $ceil 处涨到 $n 处 —— 新加的那一处是谁在替模型做决定?"; fail=1; fi
 if [ "$n" -lt "$ceil" ]; then echo "$n" > "$ROOT/freedom_act_ceiling.txt"; fi

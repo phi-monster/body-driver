@@ -15,7 +15,7 @@ strip() { sed -E 's#--.*$##' "$1"; }
 # 只数驱动自己:自检(selfcheck)和各种离线 exam 工具是单独的程序,不是身体(按 .gpr 的 Main 认,同 tools/numbers.py;09-30 起 ——
 # 以前连自检一起数,自检里造假数据的 Pts.Clear、角度换算的 Pi / 180.0 都被算成了"身体的闸")
 OFFLINE=$(sed -nE 's/.*for +Main +use *\((.*)\);.*/\1/p' "$ROOT/driver/body_driver.gpr" | tr -d '" ' | tr ',' '\n' | grep -v '^body_driver.adb$')
-drv() { for f in "$SRC"/$1; do b=$(basename "$f"); echo "$OFFLINE" | grep -qx "$b" || echo "$f"; done; }
+drv() { for f in "$SRC"/$1; do b=$(basename "$f"); r="${b%%-*}.adb"; echo "$OFFLINE" | grep -qx -e "$b" -e "$r" || echo "$f"; done; }   # 离线程序分开编译出去的文件(selfcheck-*.adb)也不算驱动
 
 # ① 身体自己决定停下的地方
 # 🔴 第三种写法:把【这一段要跟的点】整个清空 ⇒ 后面 `if not Pts.Is_Empty` 直接跳过整段,

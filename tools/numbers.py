@@ -63,7 +63,7 @@ PACKAGES = {"Ada", "Interfaces", "GNAT", "System"}
 
 def names_in(path):
     call = set(); obj = set()
-    offline = os.path.basename(path) in OFFLINE          # 自检、exam 工具里的包改名(package Cg renames …)不算驱动里的包名
+    offline = os.path.basename(path) in OFFLINE or os.path.basename(path).split("-")[0] + ".adb" in OFFLINE   # 自检、exam 工具(连同它们分开编译出去的文件)里的包改名不算驱动里的包名
     for raw in open(path, encoding="utf-8").read().split("\n"):
         c, _ = split_code(raw)
         if not offline:
@@ -93,10 +93,33 @@ def declared_names():
         per[f] = names_in(f)
         if f.endswith(".ads"):
             pub_call |= per[f][0]; pub_obj |= per[f][1]
+    #  分开编译(separate (Act) ⇒ act-xxx.adb):子程序体搬进自己的文件,看得见的东西和它还在母体里时一模一样
+    #  ⇒ 母体和它所有的分开编译文件算一家,名字合在一起认(拆文件不许改变任何一个数的归类)
+    def root_of(f):
+        seen = set()
+        while f not in seen:
+            seen.add(f)
+            head = ""
+            for raw in open(f, encoding="utf-8"):
+                c, _ = split_code(raw)
+                if c.strip():
+                    head = c.strip(); break
+            m = re.match(r"separate\s*\(\s*([A-Za-z_][A-Za-z_0-9.]*)\s*\)", head)
+            if not m:
+                return f
+            f = os.path.join(os.path.dirname(f), m.group(1).lower().replace(".", "-") + ".adb")
+        return f
+    family = collections.defaultdict(list)
+    for f in files:
+        if f.endswith(".adb"):
+            family[root_of(f)].append(f)
     scope = {}
     for f in files:
-        lc, lo = set(per[f][0]), set(per[f][1])
-        spec = f[:-1] + "s"
+        members = family.get(root_of(f), [f]) if f.endswith(".adb") else [f]
+        lc, lo = set(), set()
+        for g in members + [f]:
+            lc |= per[g][0]; lo |= per[g][1]
+        spec = (root_of(f) if f.endswith(".adb") else f)[:-1] + "s"
         if f.endswith(".adb") and spec in per:
             lc |= per[spec][0]; lo |= per[spec][1]
         scope[os.path.basename(f)] = (lc, lo, pub_call, pub_obj)
@@ -248,12 +271,34 @@ def scan():
     SCOPE.clear(); SCOPE.update(declared_names())
     for f in sorted(glob.glob(os.path.join(ROOT, "driver/src/*.ad[sb]"))):
         b = os.path.basename(f)
-        if b in OFFLINE:
+        if b in OFFLINE or (b.split("-")[0] + ".adb" in OFFLINE and b != b.split("-")[0] + ".adb"):   # 离线程序分开编译出去的文件也不算驱动
             continue
         CUR[0] = b
         LINES[:] = open(f, encoding="utf-8").read().split("\n")
+        #  分开编译的文件(separate (…) 开头):正文开头的参数表是母体里那一行 is separate; 的原样重复(语言要求一字不差),
+        #  那里的数只在母体里记一次 —— 从 procedure / function 那一行到头一个 is 为止不数
+        hdr_end = -1
+        first = next((split_code(r)[0].strip() for r in LINES if split_code(r)[0].strip()), "")
+        if re.match(r"separate\s*\(", first):
+            depth = 0; started = False
+            for i, raw in enumerate(LINES):
+                c, _ = split_code(raw)
+                if not started:
+                    if re.match(r"\s*(procedure|function)\b", c):
+                        started = True
+                    else:
+                        continue
+                done = False
+                for t in re.finditer(r"\(|\)|\bis\b", c):
+                    if t.group(0) == "(": depth += 1
+                    elif t.group(0) == ")": depth -= 1
+                    elif depth == 0: done = True; break
+                if done:
+                    hdr_end = i; break
         for ln, raw in enumerate(LINES, 1):
             LN[0] = ln - 1
+            if ln - 1 <= hdr_end:
+                continue
             c, strs = split_code(raw)
             if not c.strip() and not strs:
                 continue

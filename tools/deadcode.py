@@ -50,6 +50,9 @@ def main():
     g = open(os.path.join(ROOT, "driver", "body_driver.gpr"), encoding="utf-8").read()
     mains = set(re.findall(r'"([^"]+)"', re.search(r"for\s+Main\s+use\s*\(([^)]*)\)", g).group(1)))
     offline = mains - {"body_driver.adb"}
+    #  离线程序分开编译出去的文件(selfcheck-welds_path_N.adb 这种)也是离线程序,不是驱动
+    offline |= {os.path.basename(f) for f in glob.glob(os.path.join(SRC, "*.adb"))
+                if os.path.basename(f).split("-")[0] + ".adb" in offline and "-" in os.path.basename(f)}
     subs = {}          # (decl_file, decl_line, name) -> {"body": (file, lo, hi)}
     refs = []          # (ref_file, ref_line, target_key, kind)
     for ali in glob.glob(os.path.join(OBJ, "*.ali")):

@@ -174,6 +174,15 @@ procedure Selfcheck is
             terminate;
          end select;
    end Fake_Http;
+   --  大并行(大并行.md §5):每一路新加的焊点写在它自己那个文件里(selfcheck-welds_path_N.adb),不挤这个大文件
+   procedure Welds_Path_1 is separate;
+   procedure Welds_Path_2 is separate;
+   procedure Welds_Path_3 is separate;
+   procedure Welds_Path_4 is separate;
+   procedure Welds_Path_5 is separate;
+   procedure Welds_Path_6 is separate;
+   procedure Welds_Path_7 is separate;
+   procedure Welds_Path_8 is separate;
 begin
    --  base64 标准向量 + WebSocket 握手向量(RFC 6455 §1.3)
    Check (Codec.Base64_Of_String ("foobar") = "Zm9vYmFy", "base64 foobar");
@@ -8775,6 +8784,15 @@ begin
              & """;第一只手也量过(1.744)→ """ & To_String (L2) & """(0.872 单位要说成 0.50)");
    end;
 
+
+   Welds_Path_1;
+   Welds_Path_2;
+   Welds_Path_3;
+   Welds_Path_4;
+   Welds_Path_5;
+   Welds_Path_6;
+   Welds_Path_7;
+   Welds_Path_8;
 
    Put_Line ((if Fails = 0 then "🟢 自检全过" else "🔴 自检失败" & Natural'Image (Fails) & " 条"));
    if Fails > 0 then
