@@ -11096,6 +11096,20 @@ package body Act is
                   Theta : constant Long_Float := Geom.Tilt_Angle (D, K, C.Geo (Hc).Stride_Rot);
                   Got : Boolean;
                   S1 : Long_Float;
+                  --  尖大概在哪:压到的几下里这一瓣的视线交面离眼最近的那一下(后面几下挑落点、快下多深都按它;解出来以后换成解的)。
+                  --  别的东西先顶住只会让手停得更高、交面显得更远,不会更近(Press_Eq 的"只错一边")⇒ 来了近一小步以上的就换成它。
+                  --  09-30 V1B75 第 1 只手第 2 瓣:朝下那一下压在约 7.6 cm 高的东西上(交面 3.432 单位,真的约 1.87),原来只信这一下,
+                  --  后面几下按它挑落点、在关节限位里解不出,6 下只压成 4 下(其中 3 下交面 1.856–1.889)⇒ 这一瓣量不成
+                  procedure Note_Ray (S : Long_Float) is
+                  begin
+                     if Got and then S > 0.0 and then (not Has_Est (K) or else S + Gate < Geom.Norm (Est (K))) then
+                        if Has_Est (K) then
+                           Geo_Say ("  这一下视线交面离眼 " & Mm (S) & ",比估的尖(" & Mm (Geom.Norm (Est (K))) & ")近一小步以上 ⇒ 估的尖换成它(停早了只会显得更远)");
+                        end if;
+                        Est.Replace_Element (K, Geom.V3'[S * D (K) (0), S * D (K) (1), S * D (K) (2)]);
+                        Has_Est.Replace_Element (K, True);
+                     end if;
+                  end Note_Ray;
                begin
                   if Theta <= 0.0 then
                      Geo_Say (Who & "第 " & Codec.Img (K + 1) & " 瓣:只有这一瓣、一条命令转得到的那一档也没量 ⇒ 斜不了,这一瓣量不成");
@@ -11118,16 +11132,13 @@ package body Act is
                         end if;
                      end;
                      Press_Try (K, 0.0, 0.0, Got, S1);
-                     if Got and then S1 > 0.0 then
-                        --  尖大概在哪:朝下那一下它的视线交面那一点(后面几下的起点和快下的高度按它;解出来以后换成解的)
-                        Est.Replace_Element (K, Geom.V3'[S1 * D (K) (0), S1 * D (K) (1), S1 * D (K) (2)]);
-                        Has_Est.Replace_Element (K, True);
-                        if S_Known <= 0.0 then
-                           S_Known := S1;
-                        end if;
+                     Note_Ray (S1);
+                     if Got and then S1 > 0.0 and then S_Known <= 0.0 then
+                        S_Known := S1;
                      end if;
                      for I in 0 .. N_Tilt - 1 loop
                         Press_Try (K, Theta, Long_Float (I) * Az_Step, Got, S1);
+                        Note_Ray (S1);
                      end loop;
                      Fits (K) := Fit_Of (K);
                      for E in 0 .. N_Extra - 1 loop
@@ -11136,6 +11147,7 @@ package body Act is
                                  & (if Fits (K).Ambiguous then "有两组一样多、互相对不上(认不出哪一下是坏的)" else "找不到 4 下以上互相对得上的(3 个未知数 + 1 条自己核)")
                                  & " ⇒ 补压一下(方位 " & Codec.Fmt ((0.5 + Long_Float (E)) * Az_Step / Deg, 0) & "°)");
                         Press_Try (K, Theta, (0.5 + Long_Float (E)) * Az_Step, Got, S1);   --  两个方位中间(一半,纯数学)
+                        Note_Ray (S1);
                         Fits (K) := Fit_Of (K);
                      end loop;
                      if not Fits (K).Ok then
