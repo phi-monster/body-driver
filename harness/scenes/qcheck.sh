@@ -22,7 +22,8 @@ export PYTHONPATH=${CHK_PYPRE:+$CHK_PYPRE:}/root/RoboDojo:/root/RoboDojo/XPolicy
 for T in "$@"; do
   TAG="$T${CHK_TAG:+_$CHK_TAG}"
   rm -rf "$OUT/$TAG"
-  timeout 1500 python -u "$HERE/check_scenes.py" --task "$T" --tag "$TAG" --out "$OUT" --cfg "${CHK_CFG:-arx_x5}" --seed "${CHK_SEED:-0}" ${CHK_EXTRA:-} \
+  # 一个任务三张布局约 2.5 分钟;10 分钟封顶(Kit 关机卡住也占不住仿真位),-k:TERM 不理就 KILL
+  timeout -k 20 600 python -u "$HERE/check_scenes.py" --task "$T" --tag "$TAG" --out "$OUT" --cfg "${CHK_CFG:-arx_x5}" --seed "${CHK_SEED:-0}" ${CHK_EXTRA:-} \
       --enable_cameras --headless --kit_args " --enable isaacsim.replicator.behavior --enable isaacsim.sensors.camera" > "$OUT/$TAG.log" 2>&1
   echo "$(date +%T) $TAG rc=$? $(grep -o 'ok=[A-Za-z]*' "$OUT/$TAG.log" | tail -1)" | tee -a $OUT/summary.txt
   # RoboDojo 取帧时自己开的流式视频临时文件(这里不要视频):只删这一次核过的那几格

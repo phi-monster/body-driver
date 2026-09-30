@@ -146,10 +146,18 @@ def install_checks(func_parser):
 class Walker:
     """布局里带 "bd_walk" 的 Rigid:{"speed": 每个动作走几米, "turn_every": 每几个动作随机换一次方向,
     "region": [[x0, x1], [y0, y1]](碰边就反射), "free_height": 高出它开局那张面多少就算被拿起来了(不走), "seed": 随机数种子,
-    "yaw0": 资产自己的前方和 +x 差多少度}。每个物理子步调一次 tick。"""
+    "yaw0": 资产自己的前方和 +x 差多少度}。每个物理子步调一次 tick。
 
-    def __init__(self):
+    怎么走:它心里有一个"该在哪"的点,每个物理子步往走的方向挪 speed / collect_interval(一个动作正好 speed);
+    每个子步按"该在哪 − 此刻在哪"给它一个水平速度,位置由物理自己积分(摩擦、碰撞都算:被挡住就过不去,不会穿过去)。
+    差出去超过两个动作的路 = 被挡住或被推开了 ⇒ "该在哪"拉回它此刻在哪,从那儿接着走。朝向按限定的角速度转向走的方向。
+    第一版是每个子步直接把位姿挪一小段:挪完物理的摩擦又把它往回拽,一个动作只走了 9.5 mm(bd_walker 离线核量的)。
+    被拿离开局那张面 free_height 以上、或者翻倒了(竖轴偏过 30°),就不走。"""
+
+    def __init__(self, params_by_label=None):
+        """params_by_label = {标签: 同 bd_walk 的参数}:给了就按它走这件(不看布局里的 bd_walk;chase_mouse 用这个)"""
         self.state = {}
+        self.params_by_label = params_by_label or {}
         self._log = os.environ.get("BD_WALK_LOG")
 
     def reset(self):
@@ -160,45 +168,57 @@ class Walker:
         om = getattr(env, "obs_manager", None)
         sub = int(round(float(getattr(om, "collect_interval", 1.0) or 1.0))) if om is not None else 1
         sub = max(sub, 1)
+        dt = float(env.dt)
         ended = getattr(env, "end_flag", None)
         for env_idx in range(env.num_envs):
             if ended is not None and ended[env_idx]:
                 continue
             for rec in lm.get_layout_records(env_idx, "Rigid"):
-                w = rec.get("bd_walk")
+                w = self.params_by_label.get(rec.get("label")) or rec.get("bd_walk")
                 if not w:
                     continue
                 inst = rec["inst_name"]
                 obj = lm.get_scene_object(env_idx, inst)
                 if obj is None:
                     continue
-                pos, _ = obj.get_local_pose()
-                p = _np(pos)[:3]
+                pos, rot = obj.get_local_pose()
+                p, qn = _np(pos)[:3], _np(rot)[:4]
                 key = (env_idx, inst)
                 st = self.state.get(key)
                 if st is None:
                     rng = np.random.default_rng(int(w.get("seed", 0)))
-                    st = {"rng": rng, "heading": float(rng.uniform(0.0, 2.0 * math.pi)), "z_rest": float(p[2]), "ticks": 0}
+                    st = {"rng": rng, "heading": float(rng.uniform(0.0, 2.0 * math.pi)), "z_rest": float(p[2]), "ticks": 0,
+                          "target": p[:2].copy()}
                     self.state[key] = st
                 if st["ticks"] > 0 and st["ticks"] % (int(w["turn_every"]) * sub) == 0:
                     st["heading"] = float(st["rng"].uniform(0.0, 2.0 * math.pi))
-                if p[2] <= st["z_rest"] + float(w["free_height"]):
+                Rb = _rotm(qn)
+                upright = Rb[2, 2] > math.cos(math.radians(30.0))
+                if p[2] > st["z_rest"] + float(w["free_height"]) or not upright:
+                    st["target"] = p[:2].copy()          # 被拿起来 / 翻倒了:不走;放下、立起来以后从那儿接着走
+                else:
                     step = float(w["speed"]) / sub
                     h = st["heading"]
-                    nx, ny = p[0] + step * math.cos(h), p[1] + step * math.sin(h)
+                    t = st["target"] + step * np.array([math.cos(h), math.sin(h)])
                     (x0, x1), (y0, y1) = w["region"]
-                    if nx < x0 or nx > x1:
+                    if t[0] < x0 or t[0] > x1:
                         h = math.pi - h
-                        nx = min(max(nx, x0), x1)
-                    if ny < y0 or ny > y1:
+                        t[0] = min(max(t[0], x0), x1)
+                    if t[1] < y0 or t[1] > y1:
                         h = -h
-                        ny = min(max(ny, y0), y1)
+                        t[1] = min(max(t[1], y0), y1)
                     st["heading"] = h
-                    yaw = h + math.radians(float(w.get("yaw0", 0.0)))
-                    q = np.array([math.cos(yaw / 2.0), 0.0, 0.0, math.sin(yaw / 2.0)])
-                    obj.set_local_pose(translation=np.array([nx, ny, p[2]]), orientation=q)
-                    obj.set_linear_velocity(torch.zeros(3))
-                    obj.set_angular_velocity(torch.zeros(3))
+                    err = t - p[:2]
+                    if np.linalg.norm(err) > 2.0 * float(w["speed"]):
+                        t = p[:2].copy()                  # 被挡住 / 被推开了
+                        err = t - p[:2]
+                    st["target"] = t
+                    v = _np(obj.get_linear_velocity())[:3]
+                    obj.set_linear_velocity(torch.tensor([err[0] / dt, err[1] / dt, v[2]], dtype=torch.float32))
+                    yaw_now = math.atan2(Rb[1, 0], Rb[0, 0])
+                    dyaw = (h + math.radians(float(w.get("yaw0", 0.0))) - yaw_now + math.pi) % (2.0 * math.pi) - math.pi
+                    wmax = math.pi   # 转向最快半圈一秒
+                    obj.set_angular_velocity(torch.tensor([0.0, 0.0, max(-wmax, min(wmax, dyaw / dt))], dtype=torch.float32))
                 if self._log and st["ticks"] % sub == 0:
                     with open(self._log, "a") as f:
                         f.write("%s %d %.5f %.5f %.5f\n" % (inst, st["ticks"] // sub, p[0], p[1], p[2]))

@@ -15,6 +15,7 @@ import argparse
 import json
 import math
 import os
+import sys
 import time
 
 from isaaclab.app import AppLauncher
@@ -186,7 +187,7 @@ class Scene:
             return "view"
         from pxr import Vt
         attr = o._prim.GetAttribute("points")
-        p = np.asarray(attr.Get(), dtype=np.float32)
+        p = np.array(attr.Get(), dtype=np.float32)   # 拷一份(Vt 数组给出来的是只读视图)
         p[mask, 2] += dz
         attr.Set(Vt.Vec3fArray.FromNumpy(p))
         return "usd"
@@ -336,6 +337,17 @@ def scenario(S, rep):
         mask = np.linalg.norm(P[:, :2] - c[:2], axis=1) < 0.05
         rep["cloth_set_path"] = S.cloth_shift("cloth", mask, 0.12)
         test(rep, "一角拎高 12 cm", 1, S.graded())
+        # 读到的粒子是不是活的(仿真在动它):撒手走 60 步,拎高的那一角该掉回去、判据跟着变 0
+        hs = []
+        for _ in range(6):
+            S.steps(10)
+            hs.append(round(float(S.cloth_points("cloth")[:, 2].max() - top), 4))
+        rep["cloth_corner_after_release_every_10_steps"] = hs
+        log("   撒手后布最高点每 10 步:%s m" % hs)
+        test(rep, "撒手走 60 步(那一角掉回去了)", 0, S.graded())
+        test(rep, "粒子是活的(撒手后最高点降了 2 cm 以上)", 1, hs[-1] < 0.12 - 0.02)
+        # 最后停在"做成了"的样子给 RoboDojo 的管线判:整块布抬高 12 cm(撒手时拎高的那一角被拉向中间、掉下来以后已不在原来那一角的位置)
+        rep["cloth_set_path"] = S.cloth_shift("cloth", np.ones(len(P), dtype=bool), 0.12)
         return True
     return False
 
@@ -382,21 +394,9 @@ def save_images(env, rep, tag):
 
 # ---------------------------------------------------------------- 主循环(每张布局:关掉 → 重装,和 main.py 一样)
 env = make_env()
-for lid in [int(s) for s in args.layouts.split(",") if s != ""]:
-    rep = {"layout": lid, "tests": []}
-    REPORT["layouts"].append(rep)
+def check_layout(lid, rep):
     t1 = time.time()
-    try:
-        env.reset(seed=[lid])
-    except Exception as e:
-        rep["loaded"] = False
-        rep["error"] = "%s: %s" % (type(e).__name__, e)
-        log("布局 %d 装不起来:%s" % (lid, rep["error"]))
-        try:
-            env.close()
-        except Exception:
-            pass
-        continue
+    env.reset(seed=[lid])
     rep["loaded"] = True
     rep["reset_s"] = round(time.time() - t1, 1)
     env.run_reward()
@@ -404,7 +404,6 @@ for lid in [int(s) for s in args.layouts.split(",") if s != ""]:
     log("布局 %d 装好了(%.0f s),判据:%s" % (lid, rep["reset_s"], env.reward_manager.check_list[0]))
     # ② 每件东西在不在、落稳后离布局给的位置多远
     rep["objects"] = []
-    saved = S.lm.saved_layouts[0]
     for sect in ("Rigid", "Articulation", "Geometry", "Garment"):
         for r in S.lm.get_layout_records(0, sect):
             inst = r["inst_name"]
@@ -443,10 +442,35 @@ for lid in [int(s) for s in args.layouts.split(",") if s != ""]:
         save_images(env, rep, "L%d_done" % lid)
     rep["ok"] = rep["loaded"] and all(t["ok"] for t in rep["tests"]) and rep.get("pipeline_reward_in_success_state", 1.0) > 0.999 \
         and all(o["present"] for o in rep["objects"])
-    env.close()
 
-REPORT["total_s"] = round(time.time() - T0, 1)
-REPORT["ok"] = all(l.get("ok") for l in REPORT["layouts"])
-json.dump(REPORT, open(os.path.join(OUT, "report.json"), "w"), indent=1, ensure_ascii=False)
-log("完:%s ok=%s" % (args.task, REPORT["ok"]))
-app.close()
+
+def finish(code):
+    """写报告、退出。出了错就不走 Kit 的正常关机(第一版 bd_cloth 抛了异常以后 Kit 关机卡住,占着仿真位 5 分钟):
+    报告先落盘,正常结束也只给 app.close() 30 秒,卡住就直接退"""
+    REPORT["total_s"] = round(time.time() - T0, 1)
+    REPORT["ok"] = code == 0 and all(l.get("ok") for l in REPORT["layouts"])
+    json.dump(REPORT, open(os.path.join(OUT, "report.json"), "w"), indent=1, ensure_ascii=False)
+    log("完:%s ok=%s" % (args.task, REPORT["ok"]))
+    sys.stdout.flush()
+    sys.stderr.flush()
+    if code != 0:
+        os._exit(code)
+    import threading
+    threading.Timer(30.0, lambda: os._exit(0)).start()
+    app.close()
+    os._exit(0)
+
+
+for lid in [int(s) for s in args.layouts.split(",") if s != ""]:
+    rep = {"layout": lid, "tests": [], "loaded": False}
+    REPORT["layouts"].append(rep)
+    try:
+        check_layout(lid, rep)
+    except Exception as e:
+        import traceback
+        rep["error"] = "%s: %s" % (type(e).__name__, e)
+        rep["traceback"] = traceback.format_exc()
+        log("布局 %d 出错:%s\n%s" % (lid, rep["error"], rep["traceback"]))
+        finish(3)
+    env.close()
+finish(0)

@@ -273,6 +273,31 @@ class Asset:
                 out += self.corners({child: float(v)})
         return out
 
+    def obbs(self, joint_values=None):
+        """所有碰撞盒(中心、转阵、尺寸;资产系);joint_values 同 corners"""
+        out = []
+        moves = {j[0]: j for j in self.joints}
+        for c, s, q, link in self.cols:
+            C, Rb = np.asarray(c, dtype=float), rotm(q)
+            if joint_values and link in moves and link in joint_values:
+                _, kind, anchor, axis, frame, _, _ = moves[link]
+                e = rotm(frame) @ np.eye(3)["XYZ".index(axis)]
+                v = joint_values[link]
+                if kind == "prismatic":
+                    C = C + v * e
+                else:
+                    Rj = rotm(q_axis(e, v))
+                    C, Rb = anchor + Rj @ (C - anchor), Rj @ Rb
+            out.append((C, Rb, np.asarray(s, dtype=float)))
+        return out
+
+    def swept_obbs(self, samples=9):
+        out = self.obbs()
+        for child, kind, anchor, axis, frame, lo, hi in self.joints:
+            for v in np.linspace(lo, hi, samples):
+                out += self.obbs({child: float(v)})
+        return out
+
     # 落盘
     def rest_minz(self, quat):
         """这件东西按 quat 摆着时,碰撞盒最低点在资产原点下面多少(负数)"""
@@ -675,10 +700,14 @@ CLOTH_PHYS = {   # 和 RoboDojo 自己的布(fold_clothes)同一套粒子参数:
 
 
 # ---------------------------------------------------------------- 摆布局:每件东西(连同动的那一节整个行程)离身体歇着的两只手够远、东西之间不叠
-# 身体(RoboDojo 的双臂 x5)开局歇着时两只手占的地方:check_scenes 在这张桌上量的每一节连杆的位置(见 README「离线核」);
-# 手指朝上,比 HAND_Z 低的(平放在桌上的)碰不到手。第一版 bd_drawer 布局 2 就是抽屉拉开 11 cm 顶在歇着的左手上。
+# 身体(RoboDojo 的双臂 x5)开局歇着时两只手占的地方,check_scenes 在这张桌上量的每一节连杆(report.json 的 robot_links_rest):
+#   腕 link6 (±0.30, −0.352, 0.922);两根手指 link7 / link8 在腕前 86 mm(y −0.266)、左右各 69 mm、高 0.921 —— 手指朝前平伸;
+#   手指板再往前约 6 cm ⇒ 指尖约 y −0.21。每只手取一个盒子:x = 臂 ± 0.11(手指张开 ±0.069 + 板厚 + 3 cm),
+#   y ∈ [−0.40, −0.17](腕后 5 cm 到指尖前 3–4 cm),高于 HAND_Z 才算撞(手指在 0.92 平伸,比它低 7 cm 的平放东西碰不到)。
+#   外加一个以腕为心、半径 0.15 的圆(第一版的估计,只多拒不少拒)。第一版 bd_drawer 布局 2 就是抽屉拉开 11 cm 顶在歇着的左手手指上。
 HANDS = [(-0.30, -0.352), (0.30, -0.352)]
 HAND_R = 0.15
+HAND_BOX = [(-0.41, -0.19, -0.40, -0.17), (0.19, 0.41, -0.40, -0.17)]
 HAND_Z = 0.85
 
 
@@ -687,9 +716,22 @@ def _world(pts, pos, quat):
     return [np.asarray(pos, dtype=float) + Rq @ np.asarray(p, dtype=float) for p in pts]
 
 
+# 手那块地方里铺满的点(每只手 7 × 7 × 3 个):拿来查"东西的哪个碰撞盒把手包进去了"(大块板子横穿手、角点都不在手里也查得出)
+HAND_PTS = np.array([[x, y, z] for x0, x1, y0, y1 in HAND_BOX for x in np.linspace(x0, x1, 7) for y in np.linspace(y0, y1, 7)
+                     for z in (HAND_Z, HAND_Z + 0.08, HAND_Z + 0.16)])
+
+
 class Item:
-    def __init__(self, sect, cat, r, pts, overlap=True, hands=True):
+    def __init__(self, sect, cat, r, pts, overlap=True, hands=True, obbs=()):
         self.sect, self.cat, self.r, self.pts, self.overlap, self.hands = sect, cat, r, pts, overlap, hands
+        self.obbs = list(obbs)     # 世界里的碰撞盒(中心、转阵、尺寸),连同动的那一节整个行程
+
+    def covers_hand(self):
+        for C, Rb, s in self.obbs:
+            local = (HAND_PTS - C) @ Rb          # 每个手点在这个盒子自己系里的坐标
+            if np.any(np.all(np.abs(local) <= s / 2, axis=1)):
+                return True
+        return False
 
     def footprint(self):
         P = np.array(self.pts)[:, :2]
@@ -702,19 +744,31 @@ def item(sect, cat, label, x, y, q, ptype, physics=None, lift=0.001, reuse=None,
     if reuse is not None:   # reuse = RoboDojo 自带资产的编号(0 也算)
         local = reuse_corners("Rigid", cat, reuse)
         minz = min(0.0, min((rotm(q) @ p)[2] for p in local))
+        P = np.array(local)
+        lo_, hi_ = P.min(axis=0), P.max(axis=0)
+        boxes = [((lo_ + hi_) / 2, np.eye(3), hi_ - lo_)]
     else:
         local = ASSETS[cat].swept()
         minz = ASSETS[cat].rest_minz(q)
+        boxes = ASSETS[cat].swept_obbs()
     pos = [x, y, TABLE_TOP - minz + lift]
-    return Item(sect, cat, rec(cat, 0, label, pos, q, ptype, physics, **extra), _world(local, pos, q) + list(extra_pts))
+    Rq, P0 = rotm(q), np.asarray(pos, dtype=float)
+    wobbs = [(P0 + Rq @ C, Rq @ Rb, s) for C, Rb, s in boxes]
+    return Item(sect, cat, rec(cat, 0, label, pos, q, ptype, physics, **extra), _world(local, pos, q) + list(extra_pts), obbs=wobbs)
+
+
+def _near_hand(p):
+    if p[2] < HAND_Z:
+        return False
+    if any(math.hypot(p[0] - hx, p[1] - hy) < HAND_R for hx, hy in HANDS):
+        return True
+    return any(x0 <= p[0] <= x1 and y0 <= p[1] <= y1 for x0, x1, y0, y1 in HAND_BOX)
 
 
 def _placed_ok(items):
     for it in items:
-        if it.hands:
-            for p in it.pts:
-                if p[2] >= HAND_Z and any(math.hypot(p[0] - hx, p[1] - hy) < HAND_R for hx, hy in HANDS):
-                    return False
+        if it.hands and (any(_near_hand(p) for p in it.pts) or it.covers_hand()):
+            return False
     fps = [it.footprint() for it in items if it.overlap]
     for i in range(len(fps)):
         for j in range(i):
@@ -761,7 +815,7 @@ def _sample(name, rng):
         return [can, walls], "bd_white"
     if name == "bd_walker":
         # 它会走遍这一块:这一块的四角(外扩它自己的半径)按手的高度查,离歇着的手够远
-        (x0, x1), (y0, y1) = region = [[-0.28, 0.28], [-0.13, 0.10]]
+        (x0, x1), (y0, y1) = region = [[-0.28, 0.28], [-0.12, 0.10]]
         rr = max(np.linalg.norm(p[:2]) for p in reuse_corners("Rigid", "toy_car", 0))
         corners = [np.array([x + sx * rr, y + sy * rr, HAND_Z]) for x in (x0, x1) for y in (y0, y1) for sx in (-1, 1) for sy in (-1, 1)]
         bus = item("Rigid", "toy_car", "target", U(rng, -0.20, 0.20), U(rng, -0.10, 0.06), yaw(U(rng, 0, 360)), "rigid",
