@@ -212,8 +212,30 @@ begin
       Geom.Load (Body_Path & ".geo.json", C.Geo, C.Map.N_Cams, Gnote);
       Jointboot.Load_Kin (Body_Path & ".kin.txt", K, Kok, Note);
       if not Kok then
-         Put_Line ("运动学装不上:" & To_String (Note));
-         return;
+         --  kin 3 只少了"关节到过的范围和往外一步"(glo / ghi / slo / shi):重放只拿运动学算位姿、按记下的尽头问够不够得着,这两样都不用它
+         --  ⇒ 在当前目录写一份版本号改成 4 的临时副本来装,用完删掉(照实印出来)
+         declare
+            Src : constant String := Read_All (Body_Path & ".kin.txt");
+            Tmp : constant String := "contactexam_kin.txt";
+            Fo : File_Type;
+         begin
+            if Src'Length > 6 and then Src (Src'First .. Src'First + 5) = "kin 3" & ASCII.LF then
+               Create (Fo, Out_File, Tmp);
+               Put (Fo, "kin 4" & Src (Src'First + 5 .. Src'Last));
+               Close (Fo);
+               Jointboot.Load_Kin (Tmp, K, Kok, Note);
+               Open (Fo, In_File, Tmp);
+               Delete (Fo);
+            end if;
+         exception
+            when others => Kok := False;
+         end;
+         if not Kok then
+            Put_Line ("运动学装不上:" & To_String (Note));
+            return;
+         end if;
+         Put_Line ("运动学是 kin 3(没存关节到过的范围):只用它算位姿、按记下的尽头问够不够得着 —— 这两样都不用到过的范围"
+                   & " ⇒ 按一份版本号改成 4 的临时副本装的");
       end if;
       Jointboot.Install (K.Worlds, K.Rw, K.O);
       C.Board_Plane := True; C.Board_Pt := K.Plane_Pt; C.Board_N := K.Plane_N; C.Board_Rms := K.Plane_Rms;
