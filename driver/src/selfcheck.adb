@@ -978,9 +978,11 @@ begin
       end Rnd;
       function Finger (U, V : Long_Float; Wide : Boolean) return Boolean is
         (V >= (if Wide then 190.0 else 260.0) and then (U <= (if Wide then 640.0 else 110.0) or else U >= 520.0));
+      Out_W : Bools;   --  世界点里转出去以后出了画幅的(Make 记下)
       procedure Make (Turned, Wide : Boolean; Pu, Pv, Bu, Bv : out Kinem.Vec; Is_F : out Bools) is
       begin
          Is_F.Clear;
+         Out_W.Clear;
          for Gyy in 0 .. Kinem.Gy - 1 loop
             for Gxx in 0 .. Kinem.Gx - 1 loop
                declare
@@ -1002,6 +1004,7 @@ begin
                begin
                   Pu (K) := U; Pv (K) := V;
                   Is_F.Append (F_Here);
+                  Out_W.Append (Turned and then not F_Here and then (Uw < 0.0 or else Vw < 0.0 or else Uw >= Long_Float (Wd) or else Vw >= Long_Float (Ht)));
                   if not Turned then
                      Bu (K) := U + 0.05 * (A1 - 0.5); Bv (K) := V + 0.05 * (A2 - 0.5);
                   elsif F_Here then
@@ -1013,6 +1016,9 @@ begin
                         Bu (K) := U + Rad * Cos (Ang) + Drag * (Uw - U);
                         Bv (K) := V + Rad * Sin (Ang) + Drag * (Vw - V);
                      end;
+                  elsif Out_W.Last_Element then
+                     --  转出去以后出了画幅:转出去那一帧里没有它的真对应,配点仪器交回原地附近一个编的(V1B73 实测:右边那一条几乎不挪)
+                     Bu (K) := U + 2.0 * (A1 - 0.5); Bv (K) := V + 2.0 * (A2 - 0.5);
                   elsif A3 < 0.05 then
                      Bu (K) := Uw + 60.0 * (A1 - 0.5); Bv (K) := Vw + 60.0 * (A2 - 0.5);
                   else
@@ -1028,14 +1034,15 @@ begin
       Sig : Long_Float;
       Settled : Boolean;
       N_F, N_W, F_Ok, W_Ok, F_Gate, Unk_Idle, Unk_Wide : Natural := 0;
+      F_Bad, W_Bad, N_Out, Out_Bad, Out_Old : Natural := 0;
       --  驱动的两步:按这一批点拟合眼转了多少,再拿它判同一批点
       procedure Rides_On_Eye (G : Geom.Cam_Geo; Pu, Pv, Bu, Bv : Kinem.Vec; R : out Kinem.Ride_Vec; Sig_Px : out Long_Float; Settled : out Boolean) is
          Rot : Geom.V3;
          Fitted : Boolean;
       begin
-         Kinem.Fit_Eye_Turn (G, Pu, Pv, Bu, Bv, Rot, Sig_Px, Settled, Fitted);
+         Kinem.Fit_Eye_Turn (G, Wd, Ht, Pu, Pv, Bu, Bv, Rot, Sig_Px, Settled, Fitted);
          if Fitted then
-            Kinem.Classify_Rides (G, Rot, Sig_Px, Pu, Pv, Bu, Bv, R);
+            Kinem.Classify_Rides (G, Rot, Sig_Px, Wd, Ht, Pu, Pv, Bu, Bv, R);
          else
             R := [others => Kinem.Unknown];
          end if;
@@ -1049,6 +1056,8 @@ begin
             N_F := N_F + 1;
             if Rd (K) = Kinem.Rides then
                F_Ok := F_Ok + 1;
+            elsif Rd (K) = Kinem.World then
+               F_Bad := F_Bad + 1;
             end if;
             if Sqrt ((Bu (K) - Pu (K)) ** 2 + (Bv (K) - Pv (K)) ** 2) < Geom.Trip_Px then
                F_Gate := F_Gate + 1;
@@ -1057,6 +1066,15 @@ begin
             N_W := N_W + 1;
             if Rd (K) = Kinem.World then
                W_Ok := W_Ok + 1;
+            elsif Rd (K) = Kinem.Rides then
+               W_Bad := W_Bad + 1;
+            end if;
+            if Out_W (K) then
+               N_Out := N_Out + 1;
+               --  🦷 原来(不管出没出画幅)按近的判:配到的地方离原处近 ⇒ 判成长在眼上
+               if Rd (K) = Kinem.Rides then
+                  Out_Bad := Out_Bad + 1;
+               end if;
             end if;
          end if;
       end loop;
@@ -1085,9 +1103,18 @@ begin
                Unk_Wide := Unk_Wide + 1;
             end if;
          end loop;
-         Check (N_F > 0 and then N_W > 0 and then 50 * (N_F - F_Ok) < N_F and then 50 * (N_W - W_Ok) < N_W,
-                "眼转了一下哪些点长在眼上:手指格点判成长在眼上 " & Codec.Img (F_Ok) & " / " & Codec.Img (N_F) & "、世界格点判成世界 " & Codec.Img (W_Ok) & " / " & Codec.Img (N_W)
-                & "(各错不到 2%;量到的配点噪声 " & Codec.Fmt (Sig_Turn, 2) & " px)");
+         --  🦷 同一批配点按原来的判法(出了画幅的也按近的判):出了画幅的世界点配回原处附近 ⇒ 判成长在眼上
+         for K in 0 .. N_G - 1 loop
+            if Out_W (K) and then Sqrt ((Bu (K) - Pu (K)) ** 2 + (Bv (K) - Pv (K)) ** 2) < 2.0 then
+               Out_Old := Out_Old + 1;
+            end if;
+         end loop;
+         Check (N_F > 0 and then N_W > 0 and then 50 * F_Bad < N_F and then 50 * W_Bad < N_W and then 2 * F_Ok >= N_F and then 2 * W_Ok >= N_W
+                and then N_Out > 0 and then Out_Bad = 0,
+                "眼转了一下哪些点长在眼上:手指格点判成长在眼上 " & Codec.Img (F_Ok) & " / " & Codec.Img (N_F) & "(判成世界 " & Codec.Img (F_Bad) & ")、世界格点判成世界 "
+                & Codec.Img (W_Ok) & " / " & Codec.Img (N_W) & "(判成长在眼上 " & Codec.Img (W_Bad) & ";别的是分不开)· 转出画幅的世界点 " & Codec.Img (N_Out)
+                & " 个一个都没判成长在眼上(量到的配点噪声 " & Codec.Fmt (Sig_Turn, 2) & " px)");
+         Check (Out_Old > 0, "🦷 转出画幅的世界点按原来的判法(近的那个):" & Codec.Img (Out_Old) & " / " & Codec.Img (N_Out) & " 个会判成长在眼上(V1B73 右边那一条就是这样连进瓣里的)");
          Check (Unk_Idle = N_G, "眼没转:全部格点两种说法分不开(" & Codec.Img (Unk_Idle) & " / " & Codec.Img (N_G) & ")");
          Check (10 * N_Wide >= 6 * N_G and then Unk_Wide = N_G,
                 "长在眼上的占 " & Codec.Img (N_Wide) & " / " & Codec.Img (N_G) & "(过半):转动拟合成没转 ⇒ 全部分不开(" & Codec.Img (Unk_Wide) & ",照实判不了)");
@@ -4916,6 +4943,177 @@ begin
                 & " · 标记对不上号 ⇒ 不认、不挪" & (if S_Ok then "" else "(错)")
                 & " · 5 mm 小东西标成找不到照样挡 ⇒ 落点离它 " & Codec.Fmt (Flat (Lb), 3) & " m" & (if B_Ok then "" else "(错)"));
       end;
+   end;
+   --  🔴 压之前看见的高出面的点照样挡(Act.Board_Free_Spots + C.Seen_Above,09-30 V1B70 / V1B73):板 21×21 个点铺满 0.765 m 的面(2 cm 一格),
+   --  压的那一瓣落在 (0,0)、另一瓣落在 (0.05,0),另一瓣视线斜 90°(离压的那一点 ρ 处手指至少高 ρ)。另一瓣连线 3 cm 处看见一个比面高 4 cm 的点
+   --  (琴的一角:板上没有它 —— 开机时手自己挡着)⇒ 要挪,挪完那一点碰不着另一根手指:离两个落点的连线超过手指宽上限,或者比那儿的手指低
+   --  (离压的那一点 ρ 处手指至少高 ρ);同一处看见的点只高 0.5 mm(在面的离散里)⇒ 不挪。
+   --  🦷 不算看见的点:原处就收(另一瓣压在琴上)
+   declare
+      Cell : constant Long_Float := 0.02;   --  格距(米,合成)
+      Z0 : constant Long_Float := 0.765;    --  面高(米,合成)
+      Rw : constant Long_Float := 0.01;     --  手指宽上限(米,合成)
+      Small_Cov : constant Geom.M3 := [[1.0e-6, 0.0, 0.0], [0.0, 1.0e-6, 0.0], [0.0, 0.0, 1.0e-6]];
+      function Pt (X, Y, Z : Long_Float) return Geom.Scene_Pt is
+        (Geom.Scene_Pt'(Pw => [X, Y, Z], U => 0.0, V => 0.0, Sh => 0.0, Views => 9, Cov => Small_Cov));
+      Flat, Keys, Low : Act.Context;
+      Lp : Geom.V3_Vectors.Vector;
+      Tb : Bytes.Floats;
+      Df, Dk, Dl : Geom.V3_Vectors.Vector;
+      Side_Ok : Boolean := False;
+   begin
+      Flat.Board_Plane := True; Flat.Board_Pt := [0.0, 0.0, Z0]; Flat.Board_N := [0.0, 0.0, 1.0]; Flat.Board_Rms := 0.001;
+      for I in -10 .. 10 loop
+         for J in -10 .. 10 loop
+            Flat.Board.Append (Pt (Cell * Long_Float (I), Cell * Long_Float (J), Z0));
+         end loop;
+      end loop;
+      Keys := Flat; Low := Flat;
+      Keys.Seen_Above.Append (Pt (0.03, 0.0, Z0 + 0.04));
+      Low.Seen_Above.Append (Pt (0.03, 0.0, Z0 + 0.0005));
+      Lp.Append (Geom.V3'[0.0, 0.0, Z0]);
+      Lp.Append (Geom.V3'[0.05, 0.0, Z0]);
+      Tb.Append (0.0); Tb.Append (1.0);
+      Act.Board_Free_Spots (Flat, Lp, Tb, Rw, Df);
+      Act.Board_Free_Spots (Keys, Lp, Tb, Rw, Dk);
+      Act.Board_Free_Spots (Low, Lp, Tb, Rw, Dl);
+      if not Dk.Is_Empty then
+         declare
+            use Ada.Numerics.Long_Elementary_Functions;
+            Ax : constant Long_Float := Dk (0) (0); Ay : constant Long_Float := Dk (0) (1);
+            Bx : constant Long_Float := 0.05 + Dk (0) (0);
+            T : constant Long_Float := Long_Float'Max (0.0, Long_Float'Min (1.0, (0.03 - Ax) / (Bx - Ax)));
+            Rho : constant Long_Float := T * (Bx - Ax);   --  沿连线离压的那一点多远
+         begin
+            Side_Ok := Sqrt ((0.03 - (Ax + T * (Bx - Ax))) ** 2 + (0.0 - Ay) ** 2) > Rw or else 0.04 < Rho;
+         end;
+      end if;
+      Check (not Dk.Is_Empty and then Geom.Norm (Dk (0)) > 0.0 and then Side_Ok and then not Dl.Is_Empty and then Geom.Norm (Dl (0)) = 0.0,
+             "压之前看见的高出面的点照样挡:另一瓣连线 3 cm 处高 4 cm 的点 ⇒ 挪 " & (if Dk.Is_Empty then "-" else Codec.Fmt (Geom.Norm (Dk (0)), 3)) & " m、"
+             & "挪完那一点碰不着另一根手指" & (if Side_Ok then "" else "(错)") & " · 只高 0.5 mm ⇒ 不挪" & (if not Dl.Is_Empty and then Geom.Norm (Dl (0)) = 0.0 then "" else "(错)"));
+      Check (not Df.Is_Empty and then Geom.Norm (Df (0)) = 0.0, "🦷 不算看见的点:原处就收(另一瓣压在琴上)");
+   end;
+   --  🔴 压之前先看底下的那一对立体像(Act.Seen_Above_Of,09-30):合成的眼焦距 400、640 × 480、朝正下(相机系 -z = 世界 -z),
+   --  往下压的第一步从离面 0.25 m 走到 0.20 m。面 z = 0(离散 1 mm);面上一块 4 cm 高的盒子,顶面 x 0.02–0.08、y −0.03–0.03 m。
+   --  问 Kinem 那张格点,配点噪声 ±0.2 px(均匀),往返差 ±0.2 px。另有三样:手指(左下角 u < 100、v > 380:长在眼上,配到原处)、
+   --  "动着的东西"(右上角 u > 500、v < 120 的格点沿垂直于过画面中心那条线的方向多挪 8 px:和只平移的眼对不上)。
+   --  要:盒子顶上的格点全判成高出面(判出来的离真高 4 cm 在 5 mm 内),面上的一个都不判,手指、动着的一个都不判。
+   --  🦷 两帧对不对得上不核:动着的那些按高度判,有的就成了高出面;🦷 门只按面的离散、不按每一点自己沿法向的不确定度:画面中心附近
+   --  (眼平移的方向,视差小)面上的点有的判成高出面
+   declare
+      use Ada.Numerics.Long_Elementary_Functions;
+      G : Geom.Cam_Geo := Geom.No_Geo;
+      Cx : Act.Context;
+      P0 : constant Plug.Arm_Pose := [0.0, 0.0, 0.25, 1.0, 0.0, 0.0, 0.0];
+      P1 : constant Plug.Arm_Pose := [0.0, 0.0, 0.20, 1.0, 0.0, 0.0, 0.0];
+      Box_H : constant Long_Float := 0.04;
+      Qu, Qv, Mu, Mv, Bu, Bv : Bytes.Floats;
+      Is_Box, Is_F, Is_Mv : Bools;
+      type Lcg is mod 2 ** 31;
+      Seed : Lcg := 777;
+      function Rnd return Long_Float is   --  0..1 的伪随机(线性同余,固定种子)
+      begin
+         Seed := Seed * 1103515245 + 12345;
+         return Long_Float (Seed) / Long_Float (Lcg'Modulus);
+      end Rnd;
+      Above : Geom.Scene_Pt_Vectors.Vector;
+      Matched, Tri : Natural;
+      Sig : Long_Float;
+      N_Box, Box_Hit, Wrong, Mv_Tooth, Ep_Tooth : Natural := 0;
+      Box_Err : Long_Float := 0.0;
+   begin
+      G.Valid := True; G.F := 400.0; G.Cx := 320.0; G.Cy := 240.0;
+      Cx.Board_Plane := True; Cx.Board_Pt := [0.0, 0.0, 0.0]; Cx.Board_N := [0.0, 0.0, 1.0]; Cx.Board_Rms := 0.001;
+      for Gyy in 0 .. Kinem.Gy - 1 loop
+         for Gxx in 0 .. Kinem.Gx - 1 loop
+            declare
+               U : constant Long_Float := Kinem.Grid_U (Gxx, 640);
+               V : constant Long_Float := Kinem.Grid_V (Gyy, 480);
+               Dx : constant Long_Float := (U - 320.0) / 400.0;
+               Dy : constant Long_Float := -(V - 240.0) / 400.0;
+               --  先看落不落在盒子顶上(视线从 0.25 m 往下到 z = 盒高),不在就落在面上
+               Xb : constant Long_Float := Dx * (0.25 - Box_H);
+               Yb : constant Long_Float := Dy * (0.25 - Box_H);
+               On_Box : constant Boolean := Xb >= 0.02 and then Xb <= 0.08 and then Yb >= -0.03 and then Yb <= 0.03;
+               Zp : constant Long_Float := (if On_Box then Box_H else 0.0);
+               Xp : constant Long_Float := Dx * (0.25 - Zp);
+               Yp : constant Long_Float := Dy * (0.25 - Zp);
+               Fing : constant Boolean := U < 100.0 and then V > 380.0;
+               Movr : constant Boolean := U > 500.0 and then V < 120.0;
+               U1 : Long_Float := 320.0 + 400.0 * Xp / (0.20 - Zp);
+               V1 : Long_Float := 240.0 - 400.0 * Yp / (0.20 - Zp);
+            begin
+               if Fing then
+                  U1 := U; V1 := V;
+               elsif Movr then
+                  declare
+                     Rr : constant Long_Float := Sqrt ((U - 320.0) ** 2 + (V - 240.0) ** 2);
+                  begin
+                     U1 := U1 + 8.0 * (-(V - 240.0)) / Rr; V1 := V1 + 8.0 * (U - 320.0) / Rr;
+                  end;
+               end if;
+               Qu.Append (U); Qv.Append (V);
+               Mu.Append (U1 + 0.4 * (Rnd - 0.5)); Mv.Append (V1 + 0.4 * (Rnd - 0.5));
+               Bu.Append (U + 0.4 * (Rnd - 0.5)); Bv.Append (V + 0.4 * (Rnd - 0.5));
+               Is_Box.Append (On_Box and then not Fing and then not Movr);
+               Is_F.Append (Fing); Is_Mv.Append (Movr);
+               if On_Box and then not Fing and then not Movr then
+                  N_Box := N_Box + 1;
+               end if;
+            end;
+         end loop;
+      end loop;
+      Act.Seen_Above_Of (Cx, G, P0, P1, 640, 480, Qu, Qv, Mu, Mv, Bu, Bv, Above, Matched, Tri, Sig);
+      --  每个判出来的点归回它是哪一个格点:按它投回第一帧落在哪个格点上(最近的那个)
+      for A of Above loop
+         declare
+            Pu0, Pv0 : Long_Float;
+            Fr : Boolean;
+            Best : Natural := 0;
+            Bd : Long_Float := Long_Float'Last;
+         begin
+            Geom.Project (G, P0, A.Pw, Pu0, Pv0, Fr);
+            for I in 0 .. Natural (Qu.Length) - 1 loop
+               if (Qu (I) - Pu0) ** 2 + (Qv (I) - Pv0) ** 2 < Bd then
+                  Bd := (Qu (I) - Pu0) ** 2 + (Qv (I) - Pv0) ** 2; Best := I;
+               end if;
+            end loop;
+            if Is_Box (Best) then
+               Box_Hit := Box_Hit + 1;
+               Box_Err := Long_Float'Max (Box_Err, abs (A.Pw (2) - Box_H));
+            else
+               Wrong := Wrong + 1;
+            end if;
+         end;
+      end loop;
+      --  🦷 两种旧判法各自在同一批配点上会判出几个假的
+      for I in 0 .. Natural (Qu.Length) - 1 loop
+         if not Is_Box (I) and then not Is_F (I) then
+            declare
+               Rays : Geom.Sight_Vectors.Vector;
+               Okm : Boolean;
+               Spread : Long_Float;
+               X : Geom.V3;
+            begin
+               Rays.Append (Geom.Sight'(O => Geom.Cam_Pos (G, P0), D => Geom.Ray (G, P0, Qu (I), Qv (I))));
+               Rays.Append (Geom.Sight'(O => Geom.Cam_Pos (G, P1), D => Geom.Ray (G, P1, Mu (I), Mv (I))));
+               X := Geom.Meet (Rays, Okm, Spread);
+               if Okm and then X (2) > 3.0 * Cx.Board_Rms then
+                  if Is_Mv (I) then
+                     Mv_Tooth := Mv_Tooth + 1;
+                  else
+                     Ep_Tooth := Ep_Tooth + 1;
+                  end if;
+               end if;
+            end;
+         end if;
+      end loop;
+      Check (N_Box > 0 and then Box_Hit = N_Box and then Wrong = 0 and then Box_Err < 0.005,
+             "压之前看底下:问 " & Codec.Img (Natural (Qu.Length)) & " 个、配上 " & Codec.Img (Matched) & "、交成且两帧对得上 " & Codec.Img (Tri)
+             & "(配点噪声 " & Codec.Fmt (Sig, 3) & " px)· 盒子顶上 " & Codec.Img (Box_Hit) & " / " & Codec.Img (N_Box) & " 判成高出面(离真高最多差 "
+             & Codec.Fmt (Box_Err * 1000.0, 1) & " mm)· 面上、手指、动着的判成高出面的 " & Codec.Img (Wrong) & " 个(要 0)");
+      Check (Mv_Tooth > 0, "🦷 两帧对不对得上不核:动着的格点有 " & Codec.Img (Mv_Tooth) & " 个按高度判成高出面");
+      Check (Ep_Tooth > 0, "🦷 门只按面的离散:面上的格点有 " & Codec.Img (Ep_Tooth) & " 个判成高出面(眼平移方向附近视差小)");
    end;
    --  🔴 几只手按拍对齐(Lockstep + Plug.Lock_*,09-28 PLAN ⑧ (g)):两只假手,第 1 只走 3 条(第 0 组关节目标 1、2、3)、第 2 只走 5 条(第 1 组 11–15),
    --  每一条走 Selfmap.Go(发命令的只有这一处;假帧里没有读数 ⇒ 等满两拍就算停)⇒ 一共 10 拍(不是 6 + 10 = 16 拍:两只手同时走);

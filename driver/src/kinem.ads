@@ -185,9 +185,11 @@ package Kinem is
    type Ride_Vec is array (Natural range <>) of Ride;
    --  分两步(09-30):转动只拿铺满整幅的格点拟合(Fit_Eye_Turn;Fitted = False ⇒ 点不够 / 没有焦距),再拿它判任意一批点(Classify_Rides)。
    --  判手指像素时要在手指那一块里逐像素问:那一批全挤在手指上,拿它们一起拟合,长在眼上的占了多数 ⇒ 拟合成"没转"(离线 V1B69:σ 17.9 px、一个都判不出)
-   procedure Fit_Eye_Turn (G : Cam_Geo; Pu, Pv, Bu, Bv : Vec; Rot : out V3; Sig_Px : out Long_Float; Settled, Fitted : out Boolean)
+   --  W × H = 画幅:每一轮按此刻的转动会转出画幅的点不进拟合、不进量 σ(它们在转出去那一帧里没有真对应)
+   procedure Fit_Eye_Turn (G : Cam_Geo; W, H : Natural; Pu, Pv, Bu, Bv : Vec; Rot : out V3; Sig_Px : out Long_Float; Settled, Fitted : out Boolean)
      with Pre => Pv'Length = Pu'Length and then Bu'Length = Pu'Length and then Bv'Length = Pu'Length;
-   procedure Classify_Rides (G : Cam_Geo; Rot : V3; Sig_Px : Long_Float; Pu, Pv, Bu, Bv : Vec; R : out Ride_Vec)
+   --  W × H = 画幅:按转动算、它要是世界就会转出画幅的点 ⇒ Unknown(转出去那一帧里没有它的真对应)
+   procedure Classify_Rides (G : Cam_Geo; Rot : V3; Sig_Px : Long_Float; W, H : Natural; Pu, Pv, Bu, Bv : Vec; R : out Ride_Vec)
      with Pre => Pv'Length = Pu'Length and then Bu'Length = Pu'Length and then Bv'Length = Pu'Length and then R'Length = Pu'Length;
 
    --  转动 + 平移 ⇒ 驱动的位姿格式 [x, y, z, qw, qx, qy, qz](四元数取 w ≥ 0 那一半)

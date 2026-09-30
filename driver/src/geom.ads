@@ -315,6 +315,9 @@ package Geom is
    --  两条视线近乎平行时(头顶眼和腕眼都近乎竖直地看,交点的远近病态 —— H53 交点在桌面之下 9–28 cm)沿视线那个方向就很不准,照实交出来。
    --  Sds 的条数和视线对不上、有哪条是 0(那只眼没量过误差)、交点在某只眼背后 ⇒ 量不出,交 Long_Float'Last
    function Meet_Sd (Rays : Sight_Vectors.Vector; Sds : Bytes.Floats; P, U : V3) return Long_Float;
+   --  同一个协方差整个交出来(世界单位²;压之前先看底下时新看见的点带着它进挑空地,和板点一样按沿面法向的那一份判高不高出面)。
+   --  量不出(同 Meet_Sd 的几种)⇒ Ok = False
+   function Meet_Cov (Rays : Sight_Vectors.Vector; Sds : Bytes.Floats; P : V3; Ok : out Boolean) return M3;
    procedure Save (Path : String; Gs : Geo_Vectors.Vector);
    procedure Load (Path : String; Gs : in out Geo_Vectors.Vector; N_Cams : Natural; Note : out String);
 end Geom;

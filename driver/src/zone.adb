@@ -561,7 +561,7 @@ package body Zone is
                J := J + 1;
             end if;
          end loop;
-         Kinem.Classify_Rides (G, Rot, Sig, Pu, Pv, Bu, Bv, Rd);
+         Kinem.Classify_Rides (G, Rot, Sig, W, Hh, Pu, Pv, Bu, Bv, Rd);
          for I in Rd'Range loop
             if Rd (I) = Kinem.Rides then
                declare
@@ -951,11 +951,11 @@ package body Zone is
                                                 J := J + 1;
                                              end if;
                                           end loop;
-                                          Kinem.Fit_Eye_Turn (Eye_G, Pu, Pv, Bu, Bv, Rot, Sig_Px, Settled, Fitted);
+                                          Kinem.Fit_Eye_Turn (Eye_G, Cw, Ch, Pu, Pv, Bu, Bv, Rot, Sig_Px, Settled, Fitted);
                                           if not Fitted then
                                              Why_T := To_Unbounded_String ("格点配上的太少,拟合不出眼转了多少");
                                           else
-                                             Kinem.Classify_Rides (Eye_G, Rot, Sig_Px, Pu, Pv, Bu, Bv, Rd);
+                                             Kinem.Classify_Rides (Eye_G, Rot, Sig_Px, Cw, Ch, Pu, Pv, Bu, Bv, Rd);
                                              for I in Rd'Range loop
                                                 Vd (Gi (I)) := Rd (I);
                                              end loop;

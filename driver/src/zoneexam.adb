@@ -170,9 +170,28 @@ begin
                      Rot : Geom.V3;
                      Fitted : Boolean;
                   begin
-                     Kinem.Fit_Eye_Turn (Eye, Pu, Pv, Bu, Bv, Rot, Sig, Settled, Fitted);
+                     Kinem.Fit_Eye_Turn (Eye, W, H, Pu, Pv, Bu, Bv, Rot, Sig, Settled, Fitted);
                      if Fitted then
-                        Kinem.Classify_Rides (Eye, Rot, Sig, Pu, Pv, Bu, Bv, Rd);
+                        --  眼转了多少:画面四角、正中按这个转动挪到哪(诊断)
+                        declare
+                           Rm : constant Geom.M3 := Geom.Rodrigues (Rot);
+                           Cn : constant array (1 .. 5, 1 .. 2) of Long_Float := [[0.5, 0.5], [639.5, 0.5], [0.5, 479.5], [639.5, 479.5], [320.0, 240.0]];
+                        begin
+                           Put ("眼转 (" & Codec.Fmt (Rot (0), 4) & "," & Codec.Fmt (Rot (1), 4) & "," & Codec.Fmt (Rot (2), 4) & ") ·");
+                           for I in Cn'Range (1) loop
+                              declare
+                                 Ok : Boolean;
+                                 Dc : constant Geom.V3 := Geom.Cam_Dir (Eye, Cn (I, 1), Cn (I, 2), Ok);
+                                 U1, V1 : Long_Float;
+                                 Fr : Boolean;
+                              begin
+                                 Geom.Cam_Pixel (Eye, Geom.Ap (Rm, Dc), U1, V1, Fr);
+                                 Put (" (" & Codec.Fmt (Cn (I, 1), 0) & "," & Codec.Fmt (Cn (I, 2), 0) & ")→(" & Codec.Fmt (U1, 0) & "," & Codec.Fmt (V1, 0) & ")");
+                              end;
+                           end loop;
+                           New_Line;
+                        end;
+                        Kinem.Classify_Rides (Eye, Rot, Sig, W, H, Pu, Pv, Bu, Bv, Rd);
                         --  驱动同一段:瓣按长在眼上补全(张开的就是第二张图那一头时),打出补之前 / 之后每一瓣的尖
                         declare
                            Gr : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (Kinem.Gx * Kinem.Gy));

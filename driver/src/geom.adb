@@ -1642,11 +1642,14 @@ package body Geom is
       return [Axis (0) * Ang, Axis (1) * Ang, Axis (2) * Ang];
    end Turn_To;
 
-   function Meet_Sd (Rays : Sight_Vectors.Vector; Sds : Bytes.Floats; P, U : V3) return Long_Float is
+   --  几条视线的信息矩阵 A = Σ (I − d dᵀ) / (σ_I t_I)²(协方差 = A⁻¹),先按 A 的迹缩到 1 附近(Solve3 的奇异门是绝对数):An = A / Sc。
+   --  Sds 的条数和视线对不上、不到两条、有哪条是 0、交点在某只眼背后 ⇒ Ok = False
+   procedure Meet_Info (Rays : Sight_Vectors.Vector; Sds : Bytes.Floats; P : V3; An : out M3; Sc : out Long_Float; Ok : out Boolean) is
       A : M3 := [others => [others => 0.0]];
    begin
+      An := A; Sc := 0.0; Ok := False;
       if Natural (Sds.Length) /= Natural (Rays.Length) or else Natural (Rays.Length) < 2 then
-         return Long_Float'Last;
+         return;
       end if;
       for K in 0 .. Natural (Rays.Length) - 1 loop
          declare
@@ -1655,7 +1658,7 @@ package body Geom is
             S : constant Long_Float := Sds (K) * T;   --  这条视线在交点处垂直方向的位置噪声
          begin
             if Sds (K) <= 0.0 or else T <= 0.0 then
-               return Long_Float'Last;
+               return;
             end if;
             for I in 0 .. 2 loop
                for J in 0 .. 2 loop
@@ -1664,32 +1667,65 @@ package body Geom is
             end loop;
          end;
       end loop;
-      declare
-         --  协方差 = A⁻¹;沿 U 的方差 = Uᵀ A⁻¹ U = U · X,X 解 A X = U(奇异 ⇒ Solve3 交零向量 ⇒ 这个方向量不出)。
-         --  先按 A 的迹缩到 1 附近再解(Solve3 的奇异门是绝对数),解完再缩回去
-         Un : constant Long_Float := Norm (U);
-         Uu : constant V3 := (if Un > 0.0 then [U (0) / Un, U (1) / Un, U (2) / Un] else U);
-         Sc : constant Long_Float := (A (0, 0) + A (1, 1) + A (2, 2)) / 3.0;
-         An : M3;
-         X : V3;
-         Var : Long_Float;
-      begin
-         if Sc <= 0.0 then
-            return Long_Float'Last;
-         end if;
-         for I in 0 .. 2 loop
-            for J in 0 .. 2 loop
-               An (I, J) := A (I, J) / Sc;
-            end loop;
+      Sc := (A (0, 0) + A (1, 1) + A (2, 2)) / 3.0;
+      if Sc <= 0.0 then
+         return;
+      end if;
+      for I in 0 .. 2 loop
+         for J in 0 .. 2 loop
+            An (I, J) := A (I, J) / Sc;
          end loop;
-         X := Solve3 (An, Uu);
-         Var := (Uu (0) * X (0) + Uu (1) * X (1) + Uu (2) * X (2)) / Sc;
-         if Un <= 0.0 or else Var <= 0.0 then
-            return Long_Float'Last;
-         end if;
-         return Sqrt (Var);
-      end;
+      end loop;
+      Ok := True;
+   end Meet_Info;
+
+   function Meet_Sd (Rays : Sight_Vectors.Vector; Sds : Bytes.Floats; P, U : V3) return Long_Float is
+      An : M3;
+      Sc : Long_Float;
+      Ok : Boolean;
+      --  沿 U 的方差 = Uᵀ A⁻¹ U = U · X,X 解 A X = U(奇异 ⇒ Solve3 交零向量 ⇒ 这个方向量不出)
+      Un : constant Long_Float := Norm (U);
+      Uu : constant V3 := (if Un > 0.0 then [U (0) / Un, U (1) / Un, U (2) / Un] else U);
+      X : V3;
+      Var : Long_Float;
+   begin
+      Meet_Info (Rays, Sds, P, An, Sc, Ok);
+      if not Ok then
+         return Long_Float'Last;
+      end if;
+      X := Solve3 (An, Uu);
+      Var := (Uu (0) * X (0) + Uu (1) * X (1) + Uu (2) * X (2)) / Sc;
+      if Un <= 0.0 or else Var <= 0.0 then
+         return Long_Float'Last;
+      end if;
+      return Sqrt (Var);
    end Meet_Sd;
+
+   function Meet_Cov (Rays : Sight_Vectors.Vector; Sds : Bytes.Floats; P : V3; Ok : out Boolean) return M3 is
+      An : M3;
+      Sc : Long_Float;
+      Cv : M3 := [others => [others => 0.0]];
+   begin
+      Meet_Info (Rays, Sds, P, An, Sc, Ok);
+      if not Ok then
+         return Cv;
+      end if;
+      --  A⁻¹ 按列解:A x = e_j(奇异 ⇒ Solve3 交零向量 ⇒ 那一列是零、对角线不正 ⇒ 量不出)
+      for J in 0 .. 2 loop
+         declare
+            E : V3 := [0.0, 0.0, 0.0];
+            X : V3;
+         begin
+            E (J) := 1.0;
+            X := Solve3 (An, E);
+            for I in 0 .. 2 loop
+               Cv (I, J) := X (I) / Sc;
+            end loop;
+         end;
+      end loop;
+      Ok := Cv (0, 0) > 0.0 and then Cv (1, 1) > 0.0 and then Cv (2, 2) > 0.0;
+      return Cv;
+   end Meet_Cov;
 
    function Meet (Rays : Sight_Vectors.Vector; Ok : out Boolean; Spread : out Long_Float) return V3 is
       A : M3 := [others => [others => 0.0]];

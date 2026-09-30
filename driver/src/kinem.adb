@@ -420,13 +420,12 @@ package body Kinem is
       Free (R0); Free (Rp); Free (Rn); Free (Jc); Free (Wt);
    end Robust_LM;
 
-   procedure Fit_Eye_Turn (G : Cam_Geo; Pu, Pv, Bu, Bv : Vec; Rot : out V3; Sig_Px : out Long_Float; Settled, Fitted : out Boolean) is
+   procedure Fit_Eye_Turn (G : Cam_Geo; W, H : Natural; Pu, Pv, Bu, Bv : Vec; Rot : out V3; Sig_Px : out Long_Float; Settled, Fitted : out Boolean) is
       N : constant Natural := Pu'Length;
       Np : constant := 3;   --  转动向量的三个数(结构)
       type Dir_Arr is array (Natural range <>) of V3;
       type Flag_Arr is array (Natural range <>) of Boolean;
       D : Dir_Arr (0 .. Natural'Max (1, N) - 1);            --  每个问的点的视线(这只眼的相机系,去了畸变)
-      Use_P : Flag_Arr (0 .. Natural'Max (1, N) - 1) := [others => False];   --  去得了畸变的
       Ix : array (0 .. Natural'Max (1, N) - 1) of Natural := [others => 0];  --  进拟合的第 J 个点是第几个问的点
       Nu : Natural := 0;   --  进拟合的点数
       X : Vec (0 .. Np - 1) := [0.0, 0.0, 0.0];   --  从"没转"起
@@ -452,7 +451,6 @@ package body Kinem is
          begin
             D (I) := Cam_Dir (G, Pu (Pu'First + I), Pv (Pv'First + I), Ok);
             if Ok then
-               Use_P (I) := True;
                Ix (Nu) := I;
                Nu := Nu + 1;
             end if;
@@ -496,19 +494,53 @@ package body Kinem is
          Robust_LM (X, 2 * Nu, 0, Positive'Last, Steps, Resid'Access, Done);
          for Round in 1 .. 2 * Nu loop   --  保险:门外那批残差每一轮至少换掉一条,换满残差条数那么多轮还在变 ⇒ 照实报
             Raw (X, Rr);
+            --  按此刻的转动,它要是世界就会转出画幅的点:转出去那一帧里没有它的真对应,配点仪器交回的是编的 ⇒ 这一轮不进拟合、也不进量 σ
+            --  (09-30 合成的眼:出了画幅的 83 个配回原处附近,连同手指占了三成,不排除 ⇒ 起点停在两边中间、σ 量成 31 px、全判不了)
             declare
-               Md : constant Long_Float := Median_Abs (Rr);
+               Gone : Flag_Arr (0 .. Nu - 1) := [others => False];
+               N_In : Natural := 0;
             begin
-               if not (Md > 0.0) then
-                  Stopped := True;   --  拟合得分毫不差(合成的无噪声点):没有野点要抗
-                  exit;
-               end if;
-               Sig := Mad_Sigma * Md;
+               for J in 0 .. Nu - 1 loop
+                  declare
+                     Hu, Hv : Long_Float;
+                     Front : Boolean;
+                  begin
+                     Map (X, Ix (J), Hu, Hv, Front);
+                     Gone (J) := not Front or else Hu < 0.0 or else Hv < 0.0 or else Hu >= Long_Float (W) or else Hv >= Long_Float (H);
+                     if not Gone (J) then
+                        N_In := N_In + 1;
+                     end if;
+                  end;
+               end loop;
+               exit when 2 * N_In <= Np;   --  留在画幅里的不够解:照上一遍的交(Stopped 仍是 False ⇒ 照实报没收住)
+               declare
+                  Rin : Vec (0 .. 2 * N_In - 1);
+                  Jn : Natural := 0;
+               begin
+                  for J in 0 .. Nu - 1 loop
+                     if not Gone (J) then
+                        Rin (2 * Jn) := Rr (Rr'First + 2 * J);
+                        Rin (2 * Jn + 1) := Rr (Rr'First + 2 * J + 1);
+                        Jn := Jn + 1;
+                     end if;
+                  end loop;
+                  declare
+                     Md : constant Long_Float := Median_Abs (Rin);
+                  begin
+                     if not (Md > 0.0) then
+                        Stopped := True;   --  拟合得分毫不差(合成的无噪声点):没有野点要抗
+                        exit;
+                     end if;
+                     Sig := Mad_Sigma * Md;
+                  end;
+               end;
+               for J in 0 .. Nu - 1 loop
+                  for C in 0 .. 1 loop
+                     Wt (2 * J + C) := (if Gone (J) then 0.0 else Tukey_W (Rr (Rr'First + 2 * J + C) / Sig));
+                     Outside (2 * J + C) := Wt (2 * J + C) = 0.0;
+                  end loop;
+               end loop;
             end;
-            for K in Rr'Range loop
-               Wt (K) := Tukey_W (Rr (K) / Sig);
-               Outside (K) := Wt (K) = 0.0;
-            end loop;
             if Round > 1 and then Outside = Prev then
                Stopped := True;   --  门外那批不再变:上一遍按的就是这批权(门里的权值跟着残差走,门外的是 0)
                exit;
@@ -523,7 +555,7 @@ package body Kinem is
       Fitted := True;
    end Fit_Eye_Turn;
 
-   procedure Classify_Rides (G : Cam_Geo; Rot : V3; Sig_Px : Long_Float; Pu, Pv, Bu, Bv : Vec; R : out Ride_Vec) is
+   procedure Classify_Rides (G : Cam_Geo; Rot : V3; Sig_Px : Long_Float; W, H : Natural; Pu, Pv, Bu, Bv : Vec; R : out Ride_Vec) is
       Rm : constant M3 := Rodrigues (Rot);
    begin
       R := [others => Unknown];
@@ -545,6 +577,10 @@ package body Kinem is
                Cam_Pixel (G, Ap (Rm, Dc), Hu, Hv, Front);
                if not Front or else Sqrt ((Hu - U0) ** 2 + (Hv - V0) ** 2) < 2.0 * Stats.Z * Sig_Px then
                   R (R'First + I) := Unknown;   --  两种说法挨得太近:按近的判,判错的概率超过 Z 的单边尾巴
+               elsif Hu < 0.0 or else Hv < 0.0 or else Hu >= Long_Float (W) or else Hv >= Long_Float (H) then
+                  --  它要是世界,转出去以后就出了画面:转出去那一帧里没有它的真对应,配点仪器交回来的是编的(V1B73 第 1 只手:
+                  --  画面整片往右下挪 60 px,右边那一条被判成长在眼上、连进右边那一瓣,瓣框长到半幅画面)⇒ 判不了
+                  R (R'First + I) := Unknown;
                elsif Sqrt ((U1 - U0) ** 2 + (V1 - V0) ** 2) < Sqrt ((U1 - Hu) ** 2 + (V1 - Hv) ** 2) then
                   R (R'First + I) := Rides;
                else
