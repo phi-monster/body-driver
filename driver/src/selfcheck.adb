@@ -5188,7 +5188,6 @@ begin
          Seed := Seed * 1103515245 + 12345;
          return Long_Float (Seed) / Long_Float (Lcg'Modulus);
       end Rnd;
-      No_Fingers : Bools;
       Ends : Geom.V3_Vectors.Vector;
       --  问的点在第二帧里配到哪:视线从 0.25 m 往下先看落不落在笔顶上,不在就落在面上;加 ±0.2 px 的配点噪声,往返差 ±0.2 px
       function In_Circle (Q : Instrument.Match_Vectors.Vector) return Natural is
@@ -5226,13 +5225,66 @@ begin
    begin
       G.Valid := True; G.F := 400.0; G.Cx := 320.0; G.Cy := 240.0;
       Cx.Board_Plane := True; Cx.Board_Pt := [0.0, 0.0, 0.0]; Cx.Board_N := [0.0, 0.0, 1.0]; Cx.Board_Rms := 0.001;
-      Q_Dense := Act.Look_Points (Cx, G, P0, 640, 480, No_Fingers, Spot, Ends, Rr, 5.0);
-      Q_Grid := Act.Look_Points (Cx, G, P0, 640, 480, No_Fingers, Spot, Ends, 0.0, 5.0);
+      Q_Dense := Act.Look_Points (Cx, G, P0, 640, 480, Spot, Ends, Rr, 5.0);
+      Q_Grid := Act.Look_Points (Cx, G, P0, 640, 480, Spot, Ends, 0.0, 5.0);
       N_Dense := In_Circle (Q_Dense);
       N_Grid := In_Circle (Q_Grid);
       Check (N_Dense > 0, "落点圈里密铺:问 " & Codec.Img (Natural (Q_Dense.Length)) & " 个(格点 " & Codec.Img (Natural (Q_Grid.Length)) & ")⇒ 落点圈里判成高出面的 "
              & Codec.Img (N_Dense) & " 个(那支笔)⇒ 这一处被挡");
       Check (N_Grid = 0, "🦷 不密铺(只有那张格点):落点圈里判成高出面的 " & Codec.Img (N_Grid) & " 个(笔在两列格点之间,漏了)");
+      --  两根手指中间那一片也要问(09-30 V1B77:原来按握区"张开到合上扫过的"像素不问,两根手指中间也在里面,电扇在那儿、一个点都没问):
+      --  同一只眼,压的那一瓣落在 (0.011, 0.02),另一瓣落在 (−0.06, 0.02);两个落点中间 x −0.04 … −0.02、y 0 … 0.04 放一块 8 cm 高的盒子。
+      --  要:带子里判成比面高出的有;🦷 画面里两根手指中间那一片(合成:u 200–300、v 130–260,盒子顶投下来在 u 226–273、v 146–240)不问 ⇒ 一个都没有
+      declare
+         Box_H : constant Long_Float := 0.08;   --  盒子高(米,合成)
+         Far : constant Geom.V3 := [-0.06, 0.02, 0.0];
+         Ends2 : Geom.V3_Vectors.Vector;
+         Q_All, Q_Masked : Instrument.Match_Vectors.Vector;
+         function In_Strip (Q : Instrument.Match_Vectors.Vector) return Natural is
+            Qu, Qv, Mu, Mv, Bu, Bv : Bytes.Floats;
+            Above : Geom.Scene_Pt_Vectors.Vector;
+            Matched, Tri : Natural;
+            Sig : Long_Float;
+            N : Natural := 0;
+         begin
+            for P of Q loop
+               declare
+                  Dx : constant Long_Float := (P.U - 320.0) / 400.0;
+                  Dy : constant Long_Float := -(P.V - 240.0) / 400.0;
+                  Xb : constant Long_Float := Dx * (0.25 - Box_H);
+                  Yb : constant Long_Float := Dy * (0.25 - Box_H);
+                  On_Box : constant Boolean := Xb >= -0.04 and then Xb <= -0.02 and then Yb >= 0.0 and then Yb <= 0.04;
+                  Zp : constant Long_Float := (if On_Box then Box_H else 0.0);
+                  Xp : constant Long_Float := Dx * (0.25 - Zp);
+                  Yp : constant Long_Float := Dy * (0.25 - Zp);
+               begin
+                  Qu.Append (P.U); Qv.Append (P.V);
+                  Mu.Append (320.0 + 400.0 * Xp / (0.20 - Zp) + 0.4 * (Rnd - 0.5)); Mv.Append (240.0 - 400.0 * Yp / (0.20 - Zp) + 0.4 * (Rnd - 0.5));
+                  Bu.Append (P.U + 0.4 * (Rnd - 0.5)); Bv.Append (P.V + 0.4 * (Rnd - 0.5));
+               end;
+            end loop;
+            Act.Seen_Above_Of (Cx, G, P0, P1, 640, 480, Qu, Qv, Mu, Mv, Bu, Bv, Above, Matched, Tri, Sig);
+            for A of Above loop
+               if A.Pw (0) >= Far (0) and then A.Pw (0) <= Spot (0) and then abs (A.Pw (1) - Spot (1)) <= Rr then
+                  N := N + 1;
+               end if;
+            end loop;
+            return N;
+         end In_Strip;
+         N_All, N_Masked : Natural;
+      begin
+         Ends2.Append (Far);
+         Q_All := Act.Look_Points (Cx, G, P0, 640, 480, Spot, Ends2, Rr, 5.0);
+         for P of Q_All loop
+            if not (P.U >= 200.0 and then P.U < 300.0 and then P.V >= 130.0 and then P.V < 260.0) then
+               Q_Masked.Append (P);
+            end if;
+         end loop;
+         N_All := In_Strip (Q_All);
+         N_Masked := In_Strip (Q_Masked);
+         Check (N_All > 0, "两根手指中间那一片也问:带子里判成高出面的 " & Codec.Img (N_All) & " 个(那块 8 cm 高的盒子)⇒ 这一处被挡");
+         Check (N_Masked = 0, "🦷 按原来那样那一片不问:带子里判成高出面的 " & Codec.Img (N_Masked) & " 个(漏了)");
+      end;
    end;
    --  🔴 几只手按拍对齐(Lockstep + Plug.Lock_*,09-28 PLAN ⑧ (g)):两只假手,第 1 只走 3 条(第 0 组关节目标 1、2、3)、第 2 只走 5 条(第 1 组 11–15),
    --  每一条走 Selfmap.Go(发命令的只有这一处;假帧里没有读数 ⇒ 等满两拍就算停)⇒ 一共 10 拍(不是 6 + 10 = 16 拍:两只手同时走);

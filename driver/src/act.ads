@@ -421,8 +421,10 @@ package Act is
    procedure Board_Free_Spots (C : Context; Lp : Geom.V3_Vectors.Vector; Tb : Floats; R : Long_Float; Deltas : out Geom.V3_Vectors.Vector);
    --  压之前先看底下要问的点(导出给离线工具):Kinem 那张格点,再加压的那一瓣的落点圈(Spot 为心、半径 R)和到 Far_Ends 里每一处(别的瓣的落点)
    --  的带子(同 Board_Free_Spots 挡的那几处)里按 Step_Px 像素的间距(这一瓣尖那一截的厚:比指尖还窄的东西才可能漏)铺的点,
-   --  间距按眼离面多高折成世界里的长度、铺在面上、投回位姿 P0 那一帧;Fingers 里的像素(手指,长在眼上、交不出远近)不问
-   function Look_Points (C : Context; G : Geom.Cam_Geo; P0 : Plug.Arm_Pose; W, H : Natural; Fingers : Bools;
+   --  间距按眼离面多高折成世界里的长度、铺在面上、投回位姿 P0 那一帧。手指像素照样问:手指长在眼上、两帧里不动,两条视线平行,
+   --  交不出点、或者交在面下面很远(不确定度也大),判不成高出面。09-30 V1B77:原来按握区的手指像素不问 —— 那是张开到合上扫过的一整片,
+   --  两根手指中间也在里面,电扇正好在那儿、一个点都没问,手往下一压,两根手指中间先顶在电扇上
+   function Look_Points (C : Context; G : Geom.Cam_Geo; P0 : Plug.Arm_Pose; W, H : Natural;
                          Spot : Geom.V3; Far_Ends : Geom.V3_Vectors.Vector; R, Step_Px : Long_Float) return Instrument.Match_Vectors.Vector;
    --  压之前先看底下(09-30):同一只眼两个位姿 P0 → P1 各一帧(W × H),问的点 (Qu, Qv) 配到 (Mu, Mv)、配回来落在 (Bu, Bv)(< 0 = 配不回来)
    --  ⇒ 比面高出的点(Above:世界位置 + 协方差)。Matched = 配上的(往返 1 px 以内、落在画面里),Tri = 其中两条视线交成、两帧对得上的;

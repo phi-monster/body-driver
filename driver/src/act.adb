@@ -10254,15 +10254,13 @@ package body Act is
       end loop;
    end Board_Free_Spots;
 
-   function Look_Points (C : Context; G : Geom.Cam_Geo; P0 : Plug.Arm_Pose; W, H : Natural; Fingers : Bools;
+   function Look_Points (C : Context; G : Geom.Cam_Geo; P0 : Plug.Arm_Pose; W, H : Natural;
                          Spot : Geom.V3; Far_Ends : Geom.V3_Vectors.Vector; R, Step_Px : Long_Float) return Instrument.Match_Vectors.Vector is
       Q : Instrument.Match_Vectors.Vector;
       Nb : constant Geom.V3 := C.Board_N;
       function Dot (P, Q : Geom.V3) return Long_Float is (P (0) * Q (0) + P (1) * Q (1) + P (2) * Q (2));
       function Free_Px (U, V : Long_Float) return Boolean is
-        (U >= 0.0 and then V >= 0.0 and then U < Long_Float (W) and then V < Long_Float (H)
-         and then (Natural (Long_Float'Floor (V)) * W + Natural (Long_Float'Floor (U)) >= Natural (Fingers.Length)
-                   or else not Fingers (Natural (Long_Float'Floor (V)) * W + Natural (Long_Float'Floor (U)))));
+        (U >= 0.0 and then V >= 0.0 and then U < Long_Float (W) and then V < Long_Float (H));
       O0 : constant Geom.V3 := Geom.Cam_Pos (G, P0);
       H0 : constant Long_Float := Dot ([O0 (0) - C.Board_Pt (0), O0 (1) - C.Board_Pt (1), O0 (2) - C.Board_Pt (2)], Nb);
       Sw : constant Long_Float := (if G.F > 0.0 then Long_Float'Max (1.0, Step_Px) * Long_Float'Max (0.0, H0) / G.F else 0.0);   --  铺点的间距(世界单位)
@@ -10541,7 +10539,9 @@ package body Act is
             Tb : Floats;   --  别的瓣:从压的这一瓣的尖到它的尖那条连线的坡度(两根手指一样长时,Board_Free_Spots 算它的手指离面多高)
             Dl : Geom.V3 := [0.0, 0.0, 0.0];
             All_Hit : Boolean := Ck > 1.0e-9;
-            R : constant Long_Float := Nw (K) * Long_Float'Max (0.0, H) / Gk.F;   --  指尖那一小截的宽(像素)落到面那么远的上限(指尖在眼和面之间)
+            --  指尖那一小截的宽(像素)落到尖那么远:有估的尖按它离眼多远(量的);没有 ⇒ 按眼离面多高(尖在眼和面之间,上限)。
+            --  09-30 V1B77:原来一直按眼离面多高,压不成、抬高以后圈跟着变大(0.798 单位),那一带一处空地都挑不出
+            R : constant Long_Float := Nw (K) * (if Has_Est (K) then Long_Float'Min (Long_Float'Max (0.0, H), Geom.Norm (Est (K))) else Long_Float'Max (0.0, H)) / Gk.F;
             Spot : Geom.V3;
             Aim_O : Geom.V3 := [0.0, 0.0, 0.0];
             Moved : Boolean := True;   --  这一回转和挪那条命令真要动(超过这只手平移、转动各自一步看得见的那一档)
@@ -10830,7 +10830,7 @@ package body Act is
                --  压之前先看底下(09-30 V1B70 / V1B73):开机量的板只有不动的眼看得见、腕眼三角得出的那片,手自己挡着的那块没有板点 ——
                --  V1B70 / V1B73 第 1 只手底下那块是一台电子琴,挑空地只拿板点挡,另一瓣(V1B73 连压的那一瓣)压在琴上查不出。
                --  往下压的第一步本身就是一对立体像:Im0 / P0 = 走之前那一帧和位姿,此刻 = 走之后;两帧之间眼只平移(位姿读数量的)。
-               --  问 Kinem 那张格点,手指像素(握区扫过的)不问 —— 长在眼上,两帧里不动,交不出远近。比面高出的(Seen_Above_Of)进 C.Seen_Above;
+               --  问的点见 Look_Points(手指像素照样问)。比面高出的(Seen_Above_Of)进 C.Seen_Above;
                --  Blocked = 按新看见的点,挑好的这一处(Dl)不再是空的
                procedure Look_Below (Im0 : Plug.Cam; P0 : Plug.Arm_Pose; Blocked : out Boolean) is
                   Q, M : Instrument.Match_Vectors.Vector;
@@ -10850,7 +10850,7 @@ package body Act is
                      for J in 1 .. Natural (Lp.Length) - 1 loop
                         Ends.Append (Geom.V3'[Lp (J) (0) + Dl (0), Lp (J) (1) + Dl (1), Lp (J) (2) + Dl (2)]);
                      end loop;
-                     Q := Look_Points (C, Gk, P0, Cw, Ch, Z.Fingers, Spot, Ends, R, Nt (K));
+                     Q := Look_Points (C, Gk, P0, Cw, Ch, Spot, Ends, R, Nt (K));
                   end;
                   M := Instrument.Match (To_String (C.Inst_Host), C.Inst_Port, Im0.RGB, Cw, Ch, F.Cams (Hc).RGB, Cw, Ch, Q, Err, Back => True);
                   if Natural (M.Length) /= Natural (Q.Length) then

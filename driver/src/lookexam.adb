@@ -4,7 +4,8 @@
 --  红 = 判成比面高出,绿 = 交成、没高出,蓝 = 配上了、两帧对不上(或交不成),不标 = 没配上。
 --  面按驱动开机量的:世界 z = 0、法向 +z,离散给出(日志"桌面离散")。手指像素这里不挑出去(全问:长在眼上的交不出远近,判不成高出面)。
 --  灰度图按三个通道一样当彩图发(驱动发的是彩图)。
---  用法:lookexam run_dir seq0 seq1 cam arm geo.json plane_rms host port [out.ppm [tip_u tip_v R step_px]]
+--  用法:lookexam run_dir seq0 seq1 cam arm geo.json plane_rms host port [out.ppm [tip_u tip_v R step_px [other_u other_v]]]
+--  再给了另一瓣尖的像素:它的视线交面那一点当带子的另一头(同驱动的 Lp),另报带子里判成高出面的点(离压的那一点沿带子多远、多高)
 --  给了压的那一瓣尖的像素、落点圈半径 R(世界单位)、铺点间距(像素):按驱动同一个 Act.Look_Points 在落点圈里密铺(落点 = 第一帧里那一瓣的视线交面),
 --  另报落点圈里判成高出面的点
 with Ada.Command_Line;
@@ -167,8 +168,7 @@ begin
          Spot : Geom.V3 := [0.0, 0.0, 0.0];
          Rr : Long_Float := 0.0;
          Step : Long_Float := 0.0;
-         No_Fingers : Bools;
-         Ends : Geom.V3_Vectors.Vector;
+            Ends : Geom.V3_Vectors.Vector;
       begin
          if Ada.Command_Line.Argument_Count >= 14 then
             declare
@@ -181,7 +181,20 @@ begin
                Put_Line ("落点 (" & Codec.Fmt (Spot (0), 3) & ", " & Codec.Fmt (Spot (1), 3) & ") · 落点圈半径 " & Codec.Fmt (Rr, 3) & " · 铺点间距 " & Codec.Fmt (Step, 1) & " px");
             end;
          end if;
-         Q := Act.Look_Points (C, Gs (Cam), P0, W, H, No_Fingers, Spot, Ends, Rr, Step);
+         if Ada.Command_Line.Argument_Count >= 16 then
+            declare
+               Hok : Boolean;
+               Pb : constant Geom.V3 := Geom.Hit_Plane (Geom.Cam_Pos (Gs (Cam), P0), Geom.Ray (Gs (Cam), P0, Long_Float'Value (Ada.Command_Line.Argument (15)),
+                                                        Long_Float'Value (Ada.Command_Line.Argument (16))), C.Board_Pt, C.Board_N, Hok);
+            begin
+               if Hok then
+                  Ends.Append (Pb);
+                  Put_Line ("另一瓣的视线交面 (" & Codec.Fmt (Pb (0), 3) & ", " & Codec.Fmt (Pb (1), 3) & ") · 带子长 "
+                            & Codec.Fmt (Sqrt ((Pb (0) - Spot (0)) ** 2 + (Pb (1) - Spot (1)) ** 2), 3));
+               end if;
+            end;
+         end if;
+         Q := Act.Look_Points (C, Gs (Cam), P0, W, H, Spot, Ends, Rr, Step);
          if Rr > 0.0 then
             declare
                Above2 : Geom.Scene_Pt_Vectors.Vector;
@@ -200,6 +213,19 @@ begin
                   Act.Seen_Above_Of (C, Gs (Cam), P0, P1, W, H, Qu2, Qv2, Mu2, Mv2, Bu2, Bv2, Above2, Mt2, Tr2, Sg2);
                   N_In := Natural (Q.Length) - Kinem.Gx * Kinem.Gy;
                   for A of Above2 loop
+                     for Pb of Ends loop
+                        declare
+                           Tx : constant Long_Float := Pb (0) - Spot (0);
+                           Ty : constant Long_Float := Pb (1) - Spot (1);
+                           Ln : constant Long_Float := Sqrt (Tx * Tx + Ty * Ty);
+                           Rho : constant Long_Float := (if Ln > 0.0 then Long_Float'Max (0.0, Long_Float'Min (Ln, ((A.Pw (0) - Spot (0)) * Tx + (A.Pw (1) - Spot (1)) * Ty) / Ln)) else 0.0);
+                           Side : constant Long_Float := (if Ln > 0.0 then Sqrt ((A.Pw (0) - Spot (0) - Rho * Tx / Ln) ** 2 + (A.Pw (1) - Spot (1) - Rho * Ty / Ln) ** 2) else 0.0);
+                        begin
+                           if Side <= Rr and then Rho > 0.0 then
+                              Put_Line ("  带子里高出面 " & Codec.Fmt (A.Pw (2), 3) & " @ 沿带子 " & Codec.Fmt (Rho, 3) & "、离中线 " & Codec.Fmt (Side, 3));
+                           end if;
+                        end;
+                     end loop;
                      if Sqrt ((A.Pw (0) - Spot (0)) ** 2 + (A.Pw (1) - Spot (1)) ** 2) <= Rr then
                         Hit := Hit + 1;
                         Put_Line ("  落点圈里高出面 " & Codec.Fmt (A.Pw (2), 3) & " @ (" & Codec.Fmt (A.Pw (0), 3) & ", " & Codec.Fmt (A.Pw (1), 3) & ") 离落点 "
