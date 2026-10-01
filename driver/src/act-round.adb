@@ -1,3 +1,4 @@
+with Links;
 separate (Act)
 procedure Round (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context) is
    Cam : constant Natural := Natural'Min (C.Cam, Natural (F.Cams.Length) - 1);
@@ -482,6 +483,13 @@ begin
                               Same := Integer (Bi);
                            end if;
                         end loop;
+                        --  ④b 不是已经认得的哪一件,而它自己身上那一点落在我身上(这只眼此刻哪些像素是我,路 1 量的每一节)⇒ 是我自己,
+                        --  不当成一件东西记(S1A1 R1:眼把我的右臂框成了「arm reach ight」,它从此是清单上的一件)
+                        if Same < 0 and then Plan.On_Me (Bt.Pu_On, Bt.Pv_On, Links.Self_Mask_Now (F, K, Geo_Of (C, K), Pw, Ph), Pw, Ph) then
+                           Put_Line ("[身] 📦 " & W & ":你指的那一片(第" & Codec.Img (K) & " 台)是我自己:我身上量过的那几节此刻就在那儿 ⇒ 不当成一件东西记");
+                           Said ("你指的那一片(第" & Codec.Img (K) & " 台)是我自己:我身上量过的那几节此刻就在那儿");
+                           return 0;
+                        end if;
                         if Same >= 0 then
                            declare
                               Old : constant Unbounded_String := C.Boxed (Natural (Same)).Name;

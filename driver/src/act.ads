@@ -513,4 +513,8 @@ package Act is
    function Plan_Descent (Stand, Tip_Over, Sil_Err, H_Sd, An, Tip_Sd, Miss, Noise, Floor : Long_Float) return Descent;
    procedure Geo_Boot_Stride (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);
    procedure Round (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context);
+   --  经历账(每做完一段追加一行,最后几行进给脑的 WHAT I HAVE DONE BEFORE)放在哪:BL_LIFE 给了就放那儿;
+   --  没给 ⇒ <身体文件>.life.txt(Set_Body_File 开机时给,--in / --out 那个路径);身体文件也没给 ⇒ ""(不记)
+   procedure Set_Body_File (Path : String);
+   function Life_Path return String;
 end Act;

@@ -112,6 +112,7 @@ begin
    end;
    C.Look_Only := Codec.Env ("BL_LOOK") /= "";
    C.Dump_Dir := To_Unbounded_String (Codec.Env ("BL_DUMP"));
+   Act.Set_Body_File (To_String (Body_Path));   --  经历账跟着身体文件走(BL_LIFE 没给时;路 7,10-01)
    if C.Dump_Dir /= "" then
       Codec.Make_Dir (To_String (C.Dump_Dir));
    end if;

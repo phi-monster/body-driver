@@ -1071,9 +1071,11 @@ brain.adb	Json.Num (D, Json.Child (D, Bn, 2)), Json.Num (D, Json.Child (D, Bn, 3
 brain.adb	Json.Num (D, Json.Child (D, Bn, 2)), Json.Num (D, Json.Child (D, Bn, 3)));	2	格式	同上(198 行)(brain.adb:164)
 brain.adb	Json.Num (D, Json.Child (D, Bn, 2)), Json.Num (D, Json.Child (D, Bn, 3)));	3	格式	bbox 第 4 个分量下标(164 行)(brain.adb:164)
 brain.adb	Json.Num (D, Json.Child (D, Bn, 2)), Json.Num (D, Json.Child (D, Bn, 3)));	3	格式	同上(198 行)(brain.adb:164)
+brain.adb	Key : constant String := To_String (D.Nodes (Kids (2 * I)).S);	2	结构	JSON 对象的成员在节点池里按 键,值,键,值… 排(Json.Node.Kids 的约定):第 I 个成员的键在 2·I(brain.adb:147)
 brain.adb	To_Pixels (Json.Num (D, Json.Child (D, Bn, 0)), Json.Num (D, Json.Child (D, Bn, 1)),	1	结构	bbox_2d 数组里第几个数(0 左、1 上、2 右、3 下);协议里的字段位置(brain.adb:163)
 brain.adb	To_Pixels (Json.Num (D, Json.Child (D, Bn, 0)), Json.Num (D, Json.Child (D, Bn, 1)),	1	结构	同 163 行:bbox_2d 里第几个数(brain.adb:197)
 brain.adb	delay 1.0;	1.0	调参数	人当脑(BL_BRAIN)时每隔 1 秒看一次回答文件出没出现:拍的轮询间隔(brain.adb:69)	人当脑时每一问多等的时间(最多 1 秒一问,几十问累起来占 5 分钟一炮的预算)	低	不轮询:改成阻塞等(命名管道 / 文件系统通知,回答一写好就醒);要轮询也按开机量到的一拍(Plug 的拍长)看一次 —— 驱动本来就不可能比一拍更快用上回答
+brain.adb	for I in 0 .. Natural (Kids.Length) / 2 - 1 loop	2	结构	JSON 对象有几个成员 = 键值节点数的一半(Json.Node.Kids 的约定:键,值,键,值…)(brain.adb:145)
 brain.adb	if Fn >= 0 and then Json.Bool (D, Fn) and then Bn >= 0 and then Json.Count (D, Bn) = 4 then	4	格式	bbox 四个数(162 行,人当脑那条路)(brain.adb:162)
 brain.adb	if Fn >= 0 and then Json.Bool (D, Fn) and then Bn >= 0 and then Json.Count (D, Bn) = 4 then	4	格式	bbox 四个数(196 行,模型那条路)(brain.adb:162)
 brain.adb	if Natural (RGB.Length) < W * H * 3 then	3	格式	RGB 每个像素 3 个字节(图像格式)(brain.adb:261)

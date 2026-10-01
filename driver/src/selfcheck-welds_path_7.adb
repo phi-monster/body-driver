@@ -1,3 +1,4 @@
+with Ada.Environment_Variables;
 separate (Selfcheck)
 procedure Welds_Path_7 is
    --  路 7 的焊点(大并行.md §5 路 7):每条写清"错了会是什么病",带一颗牙(去掉那一改就红)
@@ -127,6 +128,9 @@ procedure Welds_Path_7 is
       end loop;
    end Round;
 
+   --  这只眼此刻哪些像素是我(假数据:路 1 的 Links.Self_Mask_Now 在真 x5 上还收不下点):我的胳膊就是每只眼里 (7,1)–(11,7) 那一块
+   function Self_Here return Bools is (Blob (7, 1, 11, 7));
+
    --  在第 E 台眼里照眼的答案认它(Bind_Name 里 Look_In 那一段):和那只眼里量到的哪一件同一片像素 ⇒ 就是它、改叫这个名字,
    --  不然记成那只眼里新的一件(别的眼里同一件改叫这个名字 = 视线交在一点)。返回清单上的号
    function Look (E : Natural; W : String; Ans : Answer) return Natural is
@@ -142,6 +146,10 @@ procedure Welds_Path_7 is
             Same := Integer (I);
          end if;
       end loop;
+      --  不是已经认得的哪一件,它自己身上那一点又落在我身上 ⇒ 是我自己,不记(Bind_Name ④b)
+      if Same < 0 and then Plan.On_Me (Pu, Pv, Self_Here, Fw, Fh) then
+         return 0;
+      end if;
       if Same >= 0 then
          declare
             Old : constant Unbounded_String := Store (Natural (Same)).R.Name;
@@ -183,31 +191,44 @@ procedure Welds_Path_7 is
    --  ③ 哪只眼都说没有 ⇒ 只按字找(Plan.Without_Eye)。返回清单上的号(0 = 绑不上)
    function Bind (W : String; Ans : Answer; Elsewhere : Eye_Answers) return Natural is
       V : Plan.Name_Verdict := Plan.Before_Eye (W, Eye_Now, Records);
+      Asked : constant Boolean := Ans = Not_Here;   --  这只眼真答了"这里指不出它"
    begin
       if V.Kind = Plan.Nv_This then
          return Item_Of (Natural (V.Index));
       end if;
       if Ans /= Not_Here then
-         return Look (Eye_Now, W, Ans);
+         declare
+            N : constant Natural := Look (Eye_Now, W, Ans);
+         begin
+            if N > 0 then
+               return N;
+            end if;
+         end;
       end if;
       for K of Plan.Other_Eyes (Eye_Now, [0 .. 2 => True]) loop
          if Elsewhere (Natural (K)) /= Not_Here then
             declare
                N : constant Natural := Look (Natural (K), W, Elsewhere (Natural (K)));
             begin
-               Mark_Blind (Eye_Now, U (W));   --  这只眼说过这里没有它
-               return N;
+               if N > 0 then
+                  if Asked then
+                     Mark_Blind (Eye_Now, U (W));   --  这只眼说过这里没有它
+                  end if;
+                  return N;
+               end if;
             end;
          end if;
       end loop;
       V := Plan.Without_Eye (W, Eye_Now, Records, Fb);
       if V.Kind in Plan.Nv_This | Plan.Nv_Elsewhere and then Item_Of (Natural (V.Index)) > 0 then
-         if V.Kind = Plan.Nv_Elsewhere then
+         if V.Kind = Plan.Nv_Elsewhere and then Asked then
             Mark_Blind (Eye_Now, V.Name);
          end if;
          return Item_Of (Natural (V.Index));
       end if;
-      Mark_Blind (Eye_Now, (if V.Kind in Plan.Nv_This | Plan.Nv_Elsewhere | Plan.Nv_Not_Seen then V.Name else U (W)));
+      if Asked then
+         Mark_Blind (Eye_Now, (if V.Kind in Plan.Nv_This | Plan.Nv_Elsewhere | Plan.Nv_Not_Seen then V.Name else U (W)));
+      end if;
       return 0;
    end Bind;
 
@@ -550,6 +571,80 @@ begin
              "纸上每个量的含义照抄量它的那一边(给了就印它的原话,没给就不印,不另编)");
    end;
 
+   --  ⑫ 这一片是不是我自己。病:眼把我自己的胳膊框成一件"东西"(S1A1 R1 的「arm reach ight」),从此清单上有一件是我自己,
+   --  手会去抓自己。判法:这一片自己身上那一点落在"这只眼此刻哪些像素是我"里(路 1 的 Links.Self_Mask_Now;这里用假画面)。
+   --  🦷 Plan.On_Me 恒答 False ⇒ 这一条和重放 S1A1 红
+   Check (Plan.On_Me (9.0, 4.0, Self_Here, Fw, Fh) and then not Plan.On_Me (3.0, 4.0, Self_Here, Fw, Fh)
+          and then not Plan.On_Me (9.0, 4.0, Bools'(Bool_Vectors.Empty_Vector), Fw, Fh),
+          "是不是我自己:那一片自己的点落在我身上的像素里 ⇒ 是;落在别处 ⇒ 不是;这只眼里哪些像素是我说不出 ⇒ 不说是我");
+
+   --  ⑬ 写程序那一问的采样设置:部署给的那一份(BL_BRAIN_SAMPLING)原样并进请求,驱动自己一个数都不带。病:同一个模型、同一批问题,
+   --  采样设置不同,写不停的和写对的都差一倍以上(10-01 量的);vLLM 的生成配置给不了 presence_penalty,驱动又不许替模型拍数 ⇒ 由部署给。
+   --  🦷 请求里不并部署给的那一份(只发骨架)⇒ 第一条红;🦷 不查"撞了这一问自己的键" ⇒ 第三条红
+   declare
+      function Chat_Ok (Content : String) return String is
+         B : constant String := "{""choices"":[{""index"":0,""message"":{""role"":""assistant"",""content"":"""
+           & Json.Escape (Content) & """},""finish_reason"":""stop""}]}";
+      begin
+         return Http11 & " 200 OK" & CRLF & "Content-Type: application/json" & CRLF & "Content-Length: " & Codec.Img (B'Length) & CRLF & CRLF & B;
+      end Chat_Ok;
+      Rgb : Buf;
+      procedure Ask_With (Setting : String; Ok : out Boolean; Req : out Unbounded_String) is
+         T : Fake_Http;
+         Port : GNAT.Sockets.Port_Type;
+         Prog, Err : Unbounded_String;
+      begin
+         if Setting = "" then
+            Ada.Environment_Variables.Clear ("BL_BRAIN_SAMPLING");
+         else
+            Ada.Environment_Variables.Set ("BL_BRAIN_SAMPLING", Setting);
+         end if;
+         T.Start (Chat_Ok ("say hi" & ASCII.LF), 0.0, Port);
+         Ok := Brain.Ask ("127.0.0.1", Natural (Port), "pick it", "a body", "nothing yet", "grammar", "", "", "", "", 3, 3, 0, 1, 1, Rgb, 10, 10, Prog, Err);
+         T.Got (Req);
+      end Ask_With;
+      Card : constant String := "{""temperature"": 0.7, ""top_p"": 0.8, ""top_k"": 20, ""presence_penalty"": 1.5}";
+      Ok1, Ok2, Ok3, Ok4 : Boolean;
+      R1, R2, R3, R4 : Unbounded_String;
+   begin
+      for I in 1 .. 10 * 10 * 3 loop
+         Rgb.Append (U8 (I mod 256));
+      end loop;
+      Ask_With (Card, Ok1, R1);
+      Ask_With ("", Ok2, R2);
+      Ask_With ("{""temperature"": 0.7", Ok3, R3);
+      Ask_With ("{""model"": ""other"", ""top_k"": 20}", Ok4, R4);
+      Ada.Environment_Variables.Clear ("BL_BRAIN_SAMPLING");
+      Check (Ok1 and then Index (R1, "{""model"":""eye"",""temperature"": 0.7, ""top_p"": 0.8, ""top_k"": 20, ""presence_penalty"": 1.5,") > 0,
+             "采样设置:部署给的那一段原样并进写程序那一问的请求(一个字不改)");
+      Check (Ok2 and then Index (R2, "temperature") = 0 and then Index (R2, "top_k") = 0 and then Index (R2, "presence_penalty") = 0,
+             "采样设置:没设 ⇒ 请求里一样都不带");
+      Check (Ok3 and then Ok4 and then Index (R3, "temperature") = 0 and then Index (R4, "top_k") = 0 and then Index (R4, """other""") = 0,
+             "采样设置:读不成一个 JSON 对象、或者撞了这一问自己的键(model)⇒ 不带,照常问");
+   end;
+
+   --  ⑭ 经历账放哪。病:没给 BL_LIFE 时一律写 /root/经历.txt —— 别人的机器上多半写不了,写得了也是在 root 底下乱放一个文件
+   --  (注释说"和身体文件同一个地方",代码却写死了一个路径)。🦷 改回那一句 ⇒ 红
+   declare
+      Was : constant String := (if Ada.Environment_Variables.Exists ("BL_LIFE") then Ada.Environment_Variables.Value ("BL_LIFE") else "");
+      Next_To, None, Given : Unbounded_String;
+   begin
+      Ada.Environment_Variables.Clear ("BL_LIFE");
+      Act.Set_Body_File ("/robots/arm/body.json");
+      Next_To := U (Act.Life_Path);
+      Act.Set_Body_File ("");
+      None := U (Act.Life_Path);
+      Ada.Environment_Variables.Set ("BL_LIFE", "/deploy/经历_k.txt");
+      Given := U (Act.Life_Path);
+      if Was = "" then
+         Ada.Environment_Variables.Clear ("BL_LIFE");
+      else
+         Ada.Environment_Variables.Set ("BL_LIFE", Was);
+      end if;
+      Check (To_String (Next_To) = "/robots/arm/body.json.life.txt" and then Length (None) = 0 and then To_String (Given) = "/deploy/经历_k.txt",
+             "经历账:没给 BL_LIFE ⇒ 跟着身体文件(" & To_String (Next_To) & ");身体文件也没给 ⇒ 不记;给了 BL_LIFE ⇒ 放那儿");
+   end;
+
    --  ⑦ 重放 S1A1–S1A5 落盘的每一轮(大并行 §5 路 7:S1A2–S1A4 落盘的轮次重放,粘在一起的名字都绑对)。
    --  每一轮:在哪只眼、脑的程序里按行的先后写了哪些名字、那只眼对每个名字怎么答(日志里的原话;日志里旧的认法没问眼就绑了的,
    --  拿那一轮落盘的画面、驱动一字不差的请求问过真 Qwen3.5-9B,10-01);脑说的是什么(打分用,判法看不见)。
@@ -583,11 +678,12 @@ begin
       Round (0); Ask ("reach untilarm reachtheis", No, N); Ask ("reach untilpick upuntilstuckscissorsis", A, S);
       Ask ("pick upuntilstuckscissorsheight untilstuck", A, S); Score;
       Put_Line ("  重放 S1A1:" & Say (T));
-      Check (T.Right = 6 and then T.Fail_Thing = 0 and then T.Fail_Honest = 3 and then T.Wrong = 1
+      Check (T.Right = 6 and then T.Fail_Thing = 0 and then T.Fail_Honest = 4 and then T.Wrong = 0
              and then (for all M of Store => M.Id /= Id_Mark or else not M.R.Seen)
-             and then Count_Of (Id_Scissors, 0) = 1,
+             and then Count_Of (Id_Scissors, 0) = 1 and then Count_Of (Id_Arm, 0) = 0,
              "重放 S1A1:剪刀的名字 6 个全绑对(R4、R7 腕眼里看不见它,头顶眼框出来、和那一件同一片像素;R8 两种粘法都认成同一件,"
-             & "不再记成三件);绑错 1 = R1 眼把我自己的右臂框成了「arm reach ight」(我自己的零件认不出来,要路 1 的每一节形状,见报告)");
+             & "不再记成三件);绑错 1 → 0:R1 眼把我自己的右臂框成了「arm reach ight」,那一片自己的点落在我身上"
+             & "(假数据:这只眼此刻哪些像素是我)⇒ 不当成一件东西记,照实说绑不上");
 
       --  S1A2:第 2 轮起第 1 台(左腕眼)也看得见
       Start_Run;

@@ -117,6 +117,55 @@ package body Brain is
       return True;
    end Chat;
 
+   --  ── 写程序那一问的采样设置:部署给的那一份,驱动自己一个数都不带 ──
+   --  BL_BRAIN_SAMPLING = 一段 JSON 对象(比如这个模型自己推荐的 temperature / top_p / top_k / presence_penalty),原样并进写程序那一问的请求。
+   --  没设 ⇒ 什么都不带,服务端按它自己的默认。10-01 量过:同一个模型、同一批问题,采样设置不同,写不停的和写对的都差一倍以上;
+   --  vLLM 的生成配置(模型目录里的 generation_config.json)给不了 presence_penalty,所以从请求里给。用什么模型,就照它自己的推荐设。
+   --  它不许带这一问自己的键(撞了就分不清听谁的),读不成一个 JSON 对象也不带 —— 这两种都照实说一次。认名字那一问不并它(那一问要的是最可能的那个框)
+   Sampling_Said : Boolean := False;
+   function Sampling_Members (Skeleton : String) return String is
+      Raw : constant String := (if Ada.Environment_Variables.Exists ("BL_BRAIN_SAMPLING") then Ada.Environment_Variables.Value ("BL_BRAIN_SAMPLING") else "");
+      T : constant String := Ada.Strings.Fixed.Trim (Raw, Ada.Strings.Both);
+      D, Sk : Json.Doc;
+      Perr : Unbounded_String;
+      Why : Unbounded_String;
+      Members : Unbounded_String;
+   begin
+      if T = "" then
+         Why := To_Unbounded_String ("没设 BL_BRAIN_SAMPLING ⇒ 写程序那一问不带采样设置,服务端按它自己的默认");
+      elsif not Json.Parse (T, D, Perr) or else Json."/=" (Json.Kind_Of (D, 0), Json.J_Obj) then
+         Why := To_Unbounded_String ("🔴 BL_BRAIN_SAMPLING 读不成一个 JSON 对象(" & To_String (Perr) & ")⇒ 不带:" & T);
+      elsif not Json.Parse (Skeleton, Sk, Perr) then
+         Why := To_Unbounded_String ("🔴 写程序那一问的请求自己读不回来(" & To_String (Perr) & ")⇒ 不带采样设置");
+      else
+         declare
+            Kids : constant Ints := D.Nodes (0).Kids;   --  键,值,键,值…
+            Clash : Unbounded_String;
+         begin
+            for I in 0 .. Natural (Kids.Length) / 2 - 1 loop
+               declare
+                  Key : constant String := To_String (D.Nodes (Kids (2 * I)).S);
+               begin
+                  if Json.Get (Sk, 0, Key) >= 0 then
+                     Append (Clash, (if Length (Clash) > 0 then " " else "") & Key);
+                  end if;
+               end;
+            end loop;
+            if Length (Clash) > 0 then
+               Why := "🔴 BL_BRAIN_SAMPLING 里有这一问自己的键(" & Clash & "),撞了就分不清听谁的 ⇒ 不带:" & To_Unbounded_String (T);
+            else
+               Members := To_Unbounded_String (Ada.Strings.Fixed.Trim (T (T'First + 1 .. T'Last - 1), Ada.Strings.Both));
+               Why := "写程序那一问带着部署给的采样设置(BL_BRAIN_SAMPLING):" & To_Unbounded_String (T);
+            end if;
+         end;
+      end if;
+      if not Sampling_Said then
+         Ada.Text_IO.Put_Line ("[脑] " & To_String (Why));
+         Sampling_Said := True;
+      end if;
+      return To_String (Members);
+   end Sampling_Members;
+
    function Locate_Once (Host : String; Port : Natural; Word : String; RGB : Buf; W, H : Natural;
                          Found : out Boolean; X0, Y0, X1, Y1 : out Natural; Err : out Unbounded_String) return Boolean is
       NL : constant String := "" & ASCII.LF;
@@ -246,7 +295,8 @@ package body Brain is
       --  实测 GC9:587 段里 0 段合语法。换成【受限解码】:把驱动当场生成的文法交给解码器,
       --  说不出口的话在 token 层面就打不出来。回包的 content 本身就是程序,不再包一层 JSON。
       B64 : constant String := Codec.Base64 (Codec.BMP24 (RGB, W, H));
-      Body_Json : constant String :=
+      Head : constant String := "{""model"":""eye"",";
+      Rest : constant String :=
         --  🔴 写程序这一问【不能用温度 0】。CS3 实测:45 段里 43 段第一句一字不差,
         --  全炮只有 3 种开头 —— 那不是 45 个样本,是 1 个样本的 43 份复印件。
         --  它写了一句不动身体的话 ⇒ 世界没变 ⇒ 提示词没变 ⇒ 温度 0 ⇒ 又写同一句,闭环。
@@ -255,10 +305,13 @@ package body Brain is
         --  max_tokens 也不带(原来 700:长程序被截在半截、文法没收尾,整段被拒)。09-30 起文法的长度上限也去掉了 ⇒ 写程序这一问可能写不停,
         --  量到的数见 Chat 上面那段注释
         --  代价照记:同一炮不再逐字可复现(认名字那一问仍然温度 0,那是要稳)。
-        "{""model"":""eye"",""chat_template_kwargs"":{""enable_thinking"":false}," &
+        --  10-01 起:采样设置由部署给(BL_BRAIN_SAMPLING,见 Sampling_Members),原样并在 "model" 后面;驱动自己还是一个数不带
+        """chat_template_kwargs"":{""enable_thinking"":false}," &
         """structured_outputs"":{""grammar"":""" & Json.Escape (Sinew.EBNF (Rels_Usable, Roles_Usable, Outs_Usable, Qtys_Usable)) & """}" &
         ",""messages"":[{""role"":""user"",""content"":[{""type"":""image_url"",""image_url"":{""url"":""data:image/bmp;base64," & B64 &
         """}},{""type"":""text"",""text"":""" & Json.Escape (Prompt) & """}]}]}";
+      Members : constant String := (if Brain_Dir /= "" then "" else Sampling_Members (Head & Rest));
+      Body_Json : constant String := Head & (if Members = "" then "" else Members & ",") & Rest;
    begin
       Program := Null_Unbounded_String;
       Err := Null_Unbounded_String;
