@@ -124,6 +124,25 @@ package body Driver.Pixels.Tests is
       Check (Changed_Inside (M, True) = 32 * 32, "one frame each missed a two-level change (4.9 sigmas)");
    end Noiseless_Renders;
 
+   procedure Bulk_Reads is
+      V : constant View := View_Of (4.0, 2.0, 0.0);
+      M : Real_Array (1 .. Side * Side);
+      S : Real_Array (1 .. Side * Side);
+   begin
+      Means (V, M);
+      Variances (V, S);
+      for Row in 0 .. Side - 1 loop
+         for Column in 0 .. Side - 1 loop
+            if M (Row * Side + Column + 1) /= Mean (V, Column, Row)
+              or else S (Row * Side + Column + 1) /= Variance (V, Column, Row)
+            then
+               Check (False, "the whole-view reads differ at column" & Column'Image & ", row" & Row'Image);
+               return;
+            end if;
+         end loop;
+      end loop;
+   end Bulk_Reads;
+
    procedure Register is
    begin
       Driver.Tests.Register ("pixels.still", "still pixels are called changed more often than Z promises",
@@ -131,6 +150,8 @@ package body Driver.Pixels.Tests is
       Driver.Tests.Register ("pixels.change", "a change far beyond the noise is missed or spills", Real_Change'Access);
       Driver.Tests.Register ("pixels.renders", "exact renders are judged without the quantization floor",
                              Noiseless_Renders'Access);
+      Driver.Tests.Register ("pixels.bulk", "the whole-view means or variances differ from the per-pixel ones",
+                             Bulk_Reads'Access);
    end Register;
 
 end Driver.Pixels.Tests;

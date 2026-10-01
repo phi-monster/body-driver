@@ -53,18 +53,37 @@ package body Driver.Pixels is
    function Mean (V : View; Column, Row : Natural) return Real is
      (V.Means.Constant_Reference.Element (Row * V.Width + Column + 1));
 
+   function Sample_Variance_Of (Sum : Real; Frames : Natural) return Real is
+     (if Frames > 1 then Sum / Real (Frames - 1) else 0.0);
+
+   function Floored (Sample : Real) return Real is (Real'Max (Quantization, Sample));
+
    function Sample_Variance (V : View; K : Positive) return Real is
-     (if V.Count > 1 then V.Sums.Constant_Reference.Element (K) / Real (V.Count - 1) else 0.0);
+     (Sample_Variance_Of (V.Sums.Constant_Reference.Element (K), V.Count));
 
    function Variance (V : View; Column, Row : Natural) return Real is
-     (Real'Max (Quantization, Sample_Variance (V, Row * V.Width + Column + 1)));
+     (Floored (Sample_Variance (V, Row * V.Width + Column + 1)));
+
+   procedure Means (V : View; Into : out Real_Array) is
+      M : constant Real_Holders.Constant_Reference_Type := V.Means.Constant_Reference;
+   begin
+      Into := M.Element.all;
+   end Means;
+
+   procedure Variances (V : View; Into : out Real_Array) is
+      S : constant Real_Holders.Constant_Reference_Type := V.Sums.Constant_Reference;
+   begin
+      for K in 0 .. Into'Length - 1 loop
+         Into (Into'First + K) := Floored (Sample_Variance_Of (S.Element (K + 1), V.Count));
+      end loop;
+   end Variances;
 
    function Mean_Estimate (V : View; Means : Real_Array; K : Positive) return Driver.Uncertain.Estimate is
       Sample : constant Real := Sample_Variance (V, K);
    begin
       --  A variance at the floor is known; one above it rests on the frames less one.
       return (Value              => Means (K),
-              Sigma              => Sqrt (Real'Max (Quantization, Sample) / Real (V.Count)),
+              Sigma              => Sqrt (Floored (Sample) / Real (V.Count)),
               Degrees_Of_Freedom => (if Sample > Quantization then V.Count - 1 else 0));
    end Mean_Estimate;
 
