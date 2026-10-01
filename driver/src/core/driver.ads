@@ -19,4 +19,6 @@ package Driver with Pure is
 
    type Real_Array is array (Positive range <>) of Real;
 
+   type Natural_Array is array (Positive range <>) of Natural;
+
 end Driver;

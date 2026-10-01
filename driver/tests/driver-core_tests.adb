@@ -1,6 +1,11 @@
 with Ada.Numerics;
+with Ada.Strings.Unbounded;
 with Driver.Bytes;
+with Driver.Commands;
 with Driver.Images;
+with Driver.Msgpack;
+with Driver.Observations;
+with Driver.Replies;
 with Driver.Numerics.Dense;
 with Driver.Stats;
 with Driver.Tests;
@@ -117,7 +122,10 @@ package body Driver.Core_Tests is
 
    procedure Buffer_Growth is
       B : Driver.Bytes.Buffer;
+      Empty : constant Driver.Bytes.Byte_Array (1 .. 0) := [others => 0];
    begin
+      B.Append (Empty);
+      Check (B.Length = 0, "appending nothing to an empty buffer");
       for I in 1 .. 1000 loop
          B.Append (Driver.Bytes.Byte (I mod 256));
       end loop;
@@ -148,6 +156,147 @@ package body Driver.Core_Tests is
       end;
    end Image_Access;
 
+
+   procedure Msgpack_Round_Trip is
+      use Driver.Msgpack;
+      B   : Driver.Bytes.Buffer;
+      Doc : Document;
+      Ok  : Boolean;
+   begin
+      Put_Map_Header (B, 4);
+      Put_String (B, "ints");
+      Put_Array_Header (B, 5);
+      Put_Integer (B, 5); Put_Integer (B, -7); Put_Integer (B, -129); Put_Integer (B, 70_000); Put_Integer (B, -2 ** 40);
+      Put_String (B, "x");
+      Put_Float (B, -0.125);
+      Put_String (B, "flag");
+      Put_Boolean (B, True);
+      Put_String (B, "nested");
+      Put_Array_Header (B, 2);
+      Put_Array_Header (B, 2); Put_Float (B, 1.0); Put_Float (B, 2.0);
+      Put_Array_Header (B, 2); Put_Float (B, 3.0); Put_Float (B, 4.0);
+      Decode (B.To_Array, Doc, Ok);
+      Check (Ok, "a well-formed document did not decode");
+      declare
+         Ints : constant Real_Array := Numbers (Doc, Lookup (Doc, Root (Doc), "ints"));
+         Nest : constant Natural_Array := Shape (Doc, Lookup (Doc, Root (Doc), "nested"));
+      begin
+         Check (Ints = [5.0, -7.0, -129.0, 70_000.0, -2.0 ** 40], "integers changed in a round trip");
+         Check_Close (Number (Doc, Lookup (Doc, Root (Doc), "x")), -0.125, 0.0, "float");
+         Check (Is_True (Doc, Lookup (Doc, Root (Doc), "flag")), "boolean");
+         Check (Nest = [2, 2], "shape of a nest of plain arrays");
+      end;
+      Decode (Driver.Bytes.To_Bytes ("" & Character'Val (16#92#) & Character'Val (1)), Doc, Ok);
+      Check (not Ok, "a truncated array decoded");
+   end Msgpack_Round_Trip;
+
+   procedure Put_Ndarray (B : in out Driver.Bytes.Buffer; Dtype : String; Shape : Natural_Array;
+                          Data : Driver.Bytes.Byte_Array) is
+      use Driver.Msgpack;
+   begin
+      Put_Map_Header (B, 4);
+      Put_String (B, "nd"); Put_Boolean (B, True);
+      Put_String (B, "type"); Put_String (B, Dtype);
+      Put_String (B, "shape"); Put_Array_Header (B, Shape'Length);
+      for S of Shape loop
+         Put_Integer (B, Long_Long_Integer (S));
+      end loop;
+      Put_String (B, "data"); Put_Binary (B, Data);
+   end Put_Ndarray;
+
+   procedure Ndarray_Dtypes is
+      use Driver.Msgpack;
+      B   : Driver.Bytes.Buffer;
+      Doc : Document;
+      Ok  : Boolean;
+   begin
+      --  Big-endian int16 -2 and 3, then little-endian float16 1.5 (0x3E00).
+      Put_Map_Header (B, 2);
+      Put_String (B, "i");
+      Put_Ndarray (B, ">i2", [2], [16#FF#, 16#FE#, 16#00#, 16#03#]);
+      Put_String (B, "h");
+      Put_Ndarray (B, "<f2", [1], [16#00#, 16#3E#]);
+      Decode (B.To_Array, Doc, Ok);
+      Check (Ok, "ndarray document did not decode");
+      Check (Numbers (Doc, Lookup (Doc, Root (Doc), "i")) = [-2.0, 3.0], "big-endian int16 misread");
+      Check (Numbers (Doc, Lookup (Doc, Root (Doc), "h")) = [1.5], "float16 misread");
+   end Ndarray_Dtypes;
+
+   procedure Layout_By_Shape is
+      use Driver.Msgpack;
+      use Driver.Observations;
+      use Ada.Strings.Unbounded;
+      B   : Driver.Bytes.Buffer;
+      Doc : Document;
+      Ok  : Boolean;
+      L   : Layout;
+      O   : Observation;
+      Pixels : constant Driver.Bytes.Byte_Array (1 .. 3 * 4 * 2) := [others => 7];
+      Depth  : constant Driver.Bytes.Byte_Array (1 .. 4 * 4 * 2) := [others => 0];
+      K      : constant Driver.Bytes.Byte_Array (1 .. 4 * 9) := [others => 0];
+   begin
+      --  {cam: {rgb: u1 2x4x3, size: [2, 4], depth: f4 2x4, k: f4 3x3},
+      --   state: {arm: [0.1, 0.2]}, echo: {arm: [0.1, 0.2]}, mode: [3.0], instruction: "go"}
+      Put_Map_Header (B, 5);
+      Put_String (B, "cam");
+      Put_Map_Header (B, 4);
+      Put_String (B, "rgb"); Put_Ndarray (B, "|u1", [2, 4, 3], Pixels);
+      Put_String (B, "size"); Put_Array_Header (B, 2); Put_Integer (B, 2); Put_Integer (B, 4);
+      Put_String (B, "depth"); Put_Ndarray (B, "<f4", [2, 4], Depth);
+      Put_String (B, "k"); Put_Ndarray (B, "<f4", [3, 3], K);
+      Put_String (B, "state"); Put_Map_Header (B, 1);
+      Put_String (B, "arm"); Put_Array_Header (B, 2); Put_Float (B, 0.1); Put_Float (B, 0.2);
+      Put_String (B, "echo"); Put_Map_Header (B, 1);
+      Put_String (B, "arm"); Put_Array_Header (B, 2); Put_Float (B, 0.1); Put_Float (B, 0.2);
+      Put_String (B, "mode"); Put_Array_Header (B, 1); Put_Float (B, 3.0);
+      Put_String (B, "instruction"); Put_String (B, "go");
+      Decode (B.To_Array, Doc, Ok);
+      Recognize (Doc, Root (Doc), L, Ok);
+      Check (Ok, "a layout with a camera and a group was rejected");
+      Check (Natural (L.Cameras.Length) = 1 and then L.Cameras (1).Width = 4 and then L.Cameras (1).Height = 2,
+             "camera not recognized by its shape");
+      Check (To_String (L.Cameras (1).Depth_Path) = "cam/depth", "depth not paired with the camera of its size");
+      Check (Natural (L.Groups.Length) = 2, "camera metadata, intrinsics or the echo became reading groups");
+      Check (To_String (L.Groups (1).Command_Key) = "arm" and then To_String (L.Groups (1).Echo_Path) = "echo/arm",
+             "the twin key was not taken as a command key with its echo");
+      Check (not Is_Commandable (L, 2), "a group without a twin became commandable while others echo");
+      Check (L.Has_Instruction, "instruction not found");
+      Parse (Doc, Root (Doc), L, 5, O);
+      Check (O.Readings.Element (1) = [0.1, 0.2] and then O.Echoes.Element (1) = [0.1, 0.2], "readings or echo");
+      Check (Driver.Images.Width (O.Images (1)) = 4, "image not parsed");
+      Check (To_String (O.Instruction) = "go", "instruction text");
+   end Layout_By_Shape;
+
+   procedure Hold_Rules is
+      use Driver.Observations;
+      use Ada.Strings.Unbounded;
+      L : Layout;
+      O : Observation;
+      S : Driver.Replies.State;
+      B : Driver.Bytes.Buffer;
+      C : Driver.Commands.Command;
+      Sent : Driver.Commands.Command;
+   begin
+      L.Groups.Append (Group_Info'(Path => To_Unbounded_String ("a"), Keys => To_Unbounded_String ("a"), Size => 2,
+                                   Command_Key => To_Unbounded_String ("a"), others => <>));
+      L.Groups.Append (Group_Info'(Path => To_Unbounded_String ("b"), Keys => To_Unbounded_String ("b"), Size => 1,
+                                   Command_Key => To_Unbounded_String ("b"), others => <>));
+      O.Readings.Append (Real_Array'(1.0, 2.0));
+      O.Readings.Append (Real_Array'(1 .. 0 => 0.0));
+      O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+      O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+      Driver.Replies.Write_Action (S, L, O, C, B, Sent);
+      Check (Driver.Commands.Target (Sent, 1) = [1.0, 2.0], "an uncommanded group did not hold its reading");
+      Check (not Driver.Commands.Has_Target (Sent, 2), "a value was invented for a group with nothing known");
+      Driver.Commands.Set_Target (C, 2, [0.5]);
+      Driver.Replies.Write_Action (S, L, O, C, B, Sent);
+      Driver.Replies.Write_Action (S, L, O, Driver.Commands.Hold, B, Sent);
+      Check (Driver.Commands.Target (Sent, 2) = [0.5], "a commanded group did not hold its last target");
+      Driver.Replies.New_Episode (S);
+      Driver.Replies.Write_Action (S, L, O, Driver.Commands.Hold, B, Sent);
+      Check (Driver.Commands.Target (Sent, 2) = [0.5], "with no reading the last value sent was not repeated");
+   end Hold_Rules;
+
    procedure Register is
    begin
       Driver.Tests.Register ("core.rotation", "Exp and Log disagree near 0 or pi", Rotation_Round_Trip'Access);
@@ -163,6 +312,13 @@ package body Driver.Core_Tests is
       Driver.Tests.Register ("core.buffer", "a byte buffer loses data when it grows or copies",
                              Buffer_Growth'Access);
       Driver.Tests.Register ("core.image", "pixels are addressed by the wrong column or row", Image_Access'Access);
+      Driver.Tests.Register ("core.msgpack", "a value changes in an encode-decode round trip, or bad input decodes",
+                             Msgpack_Round_Trip'Access);
+      Driver.Tests.Register ("core.ndarray", "a numpy dtype or byte order is misread", Ndarray_Dtypes'Access);
+      Driver.Tests.Register ("core.layout", "a leaf is recognized by value or name instead of by its shape",
+                             Layout_By_Shape'Access);
+      Driver.Tests.Register ("core.replies", "a held group sends an invented value or forgets its target",
+                             Hold_Rules'Access);
    end Register;
 
 end Driver.Core_Tests;

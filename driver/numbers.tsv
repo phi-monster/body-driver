@@ -14,6 +14,184 @@ driver-log.adb	Buffer : String (1 .. 64);	64	format	room for any Real printed in
 driver-log.adb	IO.Put (Buffer, X, Aft => Digits_After_Point, Exp => 3);	3	format	exponent digits when a value is too large for fixed point
 driver-log.adb	function Image (X : Real; Digits_After_Point : Natural := 3) return String is	3	format	default digits printed after the point
 driver-log.ads	function Image (X : Real; Digits_After_Point : Natural := 3) return String;	3	format	default digits printed after the point
+driver-msgpack.adb	(case B is when 16#D0# => 1, when 16#D1# => 2, when 16#D2# => 4, when others => 8);	1	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	(case B is when 16#D0# => 1, when 16#D1# => 2, when 16#D2# => 4, when others => 8);	16#D0#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	(case B is when 16#D0# => 1, when 16#D1# => 2, when 16#D2# => 4, when others => 8);	16#D1#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	(case B is when 16#D0# => 1, when 16#D1# => 2, when 16#D2# => 4, when others => 8);	16#D2#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	(case B is when 16#D0# => 1, when 16#D1# => 2, when 16#D2# => 4, when others => 8);	2	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	(case B is when 16#D0# => 1, when 16#D1# => 2, when 16#D2# => 4, when others => 8);	4	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	(case B is when 16#D0# => 1, when 16#D1# => 2, when 16#D2# => 4, when others => 8);	8	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	(case B is when 16#D4# => 1, when 16#D5# => 2, when 16#D6# => 4, when 16#D7# => 8,	1	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	(case B is when 16#D4# => 1, when 16#D5# => 2, when 16#D6# => 4, when 16#D7# => 8,	16#D4#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	(case B is when 16#D4# => 1, when 16#D5# => 2, when 16#D6# => 4, when 16#D7# => 8,	16#D5#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	(case B is when 16#D4# => 1, when 16#D5# => 2, when 16#D6# => 4, when 16#D7# => 8,	16#D6#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	(case B is when 16#D4# => 1, when 16#D5# => 2, when 16#D6# => 4, when 16#D7# => 8,	16#D7#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	(case B is when 16#D4# => 1, when 16#D5# => 2, when 16#D6# => 4, when 16#D7# => 8,	2	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	(case B is when 16#D4# => 1, when 16#D5# => 2, when 16#D6# => 4, when 16#D7# => 8,	4	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	(case B is when 16#D4# => 1, when 16#D5# => 2, when 16#D6# => 4, when 16#D7# => 8,	8	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	(if Kind_Of (Doc, N) = Map_Value then Child (Doc, N, 2 * Index - 1) else No_Node);	2	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	(if Kind_Of (Doc, N) = Map_Value then Child (Doc, N, 2 * Index) else No_Node);	2	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	B.Append (Byte (256 + V));	256	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	B.Append (Byte (Shift_Right (V, 8 * K) and 16#FF#));	16#FF#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	B.Append (Byte (Shift_Right (V, 8 * K) and 16#FF#));	8	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	B.Append (Byte'(16#C0#));	16#C0#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	B.Append (Byte'(16#C4#)); B.Append (Byte (V'Length));	16#C4#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	B.Append (Byte'(16#C5#)); Put_Unsigned (B, Unsigned_64 (V'Length), 2);	16#C5#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	B.Append (Byte'(16#C5#)); Put_Unsigned (B, Unsigned_64 (V'Length), 2);	2	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	B.Append (Byte'(16#C6#)); Put_Unsigned (B, Unsigned_64 (V'Length), 4);	16#C6#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	B.Append (Byte'(16#C6#)); Put_Unsigned (B, Unsigned_64 (V'Length), 4);	4	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	B.Append (Byte'(16#CB#));	16#CB#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	B.Append (Byte'(16#CC#)); B.Append (Byte (V));	16#CC#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	B.Append (Byte'(16#CD#)); Put_Unsigned (B, Unsigned_64 (V), 2);	16#CD#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	B.Append (Byte'(16#CD#)); Put_Unsigned (B, Unsigned_64 (V), 2);	2	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	B.Append (Byte'(16#CE#)); Put_Unsigned (B, Unsigned_64 (V), 4);	16#CE#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	B.Append (Byte'(16#CE#)); Put_Unsigned (B, Unsigned_64 (V), 4);	4	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	B.Append (Byte'(16#CF#)); Put_Unsigned (B, Unsigned_64 (V), 8);	16#CF#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	B.Append (Byte'(16#CF#)); Put_Unsigned (B, Unsigned_64 (V), 8);	8	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	B.Append (Byte'(16#D3#)); Put_Unsigned (B, To_U64 (Integer_64 (V)), 8);	16#D3#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	B.Append (Byte'(16#D3#)); Put_Unsigned (B, To_U64 (Integer_64 (V)), 8);	8	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	B.Append (Byte'(if V then 16#C3# else 16#C2#));	16#C2#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	B.Append (Byte'(if V then 16#C3# else 16#C2#));	16#C3#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	B.Append (Code16); Put_Unsigned (B, Unsigned_64 (Length), 2);	2	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	B.Append (Code32); Put_Unsigned (B, Unsigned_64 (Length), 4);	4	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	Half_Bias : constant := 2 ** (Half_Exponent_Bits - 1) - 1;	2	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	Half_Exponent_All : constant := 2 ** Half_Exponent_Bits - 1;	2	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	Half_Exponent_Bits : constant := 5;	5	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	Half_Fraction_Bits : constant := 10;	10	format	IEEE 754 binary16 and binary64 layouts
+driver-msgpack.adb	Inner : constant Natural_Array := Plain_Shape (Doc, Element (Doc, N, 1), Rectangular);	1	structure	the shape of a nest is taken from its first element
+driver-msgpack.adb	M : constant Integer := Integer (H and (2 ** Half_Fraction_Bits - 1));	2	format	IEEE 754 binary16 and binary64 layouts
+driver-msgpack.adb	Natural (Take_Unsigned (if B = 16#C7# then 1 elsif B = 16#C8# then 2 else 4));	1	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	Natural (Take_Unsigned (if B = 16#C7# then 1 elsif B = 16#C8# then 2 else 4));	16#C7#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	Natural (Take_Unsigned (if B = 16#C7# then 1 elsif B = 16#C8# then 2 else 4));	16#C8#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	Natural (Take_Unsigned (if B = 16#C7# then 1 elsif B = 16#C8# then 2 else 4));	2	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	Natural (Take_Unsigned (if B = 16#C7# then 1 elsif B = 16#C8# then 2 else 4));	4	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	Negative : constant Boolean := (H and 2 ** (Half_Fraction_Bits + Half_Exponent_Bits)) /= 0;	2	format	IEEE 754 binary16 and binary64 layouts
+driver-msgpack.adb	Next : Positive := 1;	1	structure	fill the flattened values from the first index
+driver-msgpack.adb	Ok := not Bad and then Top = 1 and then Pos = Data'Last + 1;	1	structure	the root is the first node and must end exactly at the last byte
+driver-msgpack.adb	Put_Length (B, Length, 16#90#, 0, 16#DC#, 16#DD#, 15);	15	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	Put_Length (B, Length, 16#90#, 0, 16#DC#, 16#DD#, 15);	16#90#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	Put_Length (B, Length, 16#90#, 0, 16#DC#, 16#DD#, 15);	16#DC#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	Put_Length (B, Length, 16#90#, 0, 16#DC#, 16#DD#, 15);	16#DD#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	Put_Length (B, Pairs, 16#80#, 0, 16#DE#, 16#DF#, 15);	15	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	Put_Length (B, Pairs, 16#80#, 0, 16#DE#, 16#DF#, 15);	16#80#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	Put_Length (B, Pairs, 16#80#, 0, 16#DE#, 16#DF#, 15);	16#DE#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	Put_Length (B, Pairs, 16#80#, 0, 16#DE#, 16#DF#, 15);	16#DF#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	Put_Length (B, V'Length, 16#A0#, 16#D9#, 16#DA#, 16#DB#, 31);	16#A0#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	Put_Length (B, V'Length, 16#A0#, 16#D9#, 16#DA#, 16#DB#, 31);	16#D9#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	Put_Length (B, V'Length, 16#A0#, 16#D9#, 16#DA#, 16#DB#, 31);	16#DA#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	Put_Length (B, V'Length, 16#A0#, 16#D9#, 16#DA#, 16#DB#, 31);	16#DB#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	Put_Length (B, V'Length, 16#A0#, 16#D9#, 16#DA#, 16#DB#, 31);	31	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	Put_Map_Header (B, R.Kids_Count / 2);	2	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	Put_Unsigned (B, F64_To_U64 (V), 8);	8	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	R.Int := Long_Long_Integer (Take_Unsigned (if B = 16#CC# then 1 elsif B = 16#CD# then 2 else 4));	1	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	R.Int := Long_Long_Integer (Take_Unsigned (if B = 16#CC# then 1 elsif B = 16#CD# then 2 else 4));	16#CC#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	R.Int := Long_Long_Integer (Take_Unsigned (if B = 16#CC# then 1 elsif B = 16#CD# then 2 else 4));	16#CD#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	R.Int := Long_Long_Integer (Take_Unsigned (if B = 16#CC# then 1 elsif B = 16#CD# then 2 else 4));	2	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	R.Int := Long_Long_Integer (Take_Unsigned (if B = 16#CC# then 1 elsif B = 16#CD# then 2 else 4));	4	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	R.Of_Kind := Array_Value; Children (R, Natural (B and 16#0F#));	16#0F#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	R.Of_Kind := Array_Value; Children (R, Natural (Take_Unsigned (if B = 16#DC# then 2 else 4)));	16#DC#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	R.Of_Kind := Array_Value; Children (R, Natural (Take_Unsigned (if B = 16#DC# then 2 else 4)));	2	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	R.Of_Kind := Array_Value; Children (R, Natural (Take_Unsigned (if B = 16#DC# then 2 else 4)));	4	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	R.Of_Kind := Boolean_Value; R.Flag := B = 16#C3#;	16#C3#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	R.Of_Kind := Float_Value; R.Flt := Real (U32_To_F32 (Unsigned_32 (Take_Unsigned (4))));	4	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	R.Of_Kind := Float_Value; R.Flt := U64_To_F64 (Take_Unsigned (8));	8	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	R.Of_Kind := Integer_Value; R.Int := Long_Long_Integer (B) - 256;	256	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	R.Of_Kind := Map_Value; Children (R, 2 * Natural (B and 16#0F#));	16#0F#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	R.Of_Kind := Map_Value; Children (R, 2 * Natural (B and 16#0F#));	2	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	R.Of_Kind := Map_Value; Children (R, 2 * Natural (Take_Unsigned (if B = 16#DE# then 2 else 4)));	16#DE#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	R.Of_Kind := Map_Value; Children (R, 2 * Natural (Take_Unsigned (if B = 16#DE# then 2 else 4)));	2	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	R.Of_Kind := Map_Value; Children (R, 2 * Natural (Take_Unsigned (if B = 16#DE# then 2 else 4)));	2	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	R.Of_Kind := Map_Value; Children (R, 2 * Natural (Take_Unsigned (if B = 16#DE# then 2 else 4)));	4	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	R.Of_Kind := String_Value; Skip (Natural (B and 16#1F#), R);	16#1F#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	Skip (Natural (Take_Unsigned (if B = 16#C4# then 1 elsif B = 16#C5# then 2 else 4)), R);	1	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	Skip (Natural (Take_Unsigned (if B = 16#C4# then 1 elsif B = 16#C5# then 2 else 4)), R);	16#C4#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	Skip (Natural (Take_Unsigned (if B = 16#C4# then 1 elsif B = 16#C5# then 2 else 4)), R);	16#C5#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	Skip (Natural (Take_Unsigned (if B = 16#C4# then 1 elsif B = 16#C5# then 2 else 4)), R);	2	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	Skip (Natural (Take_Unsigned (if B = 16#C4# then 1 elsif B = 16#C5# then 2 else 4)), R);	4	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	Skip (Natural (Take_Unsigned (if B = 16#D9# then 1 elsif B = 16#DA# then 2 else 4)), R);	1	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	Skip (Natural (Take_Unsigned (if B = 16#D9# then 1 elsif B = 16#DA# then 2 else 4)), R);	16#D9#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	Skip (Natural (Take_Unsigned (if B = 16#D9# then 1 elsif B = 16#DA# then 2 else 4)), R);	16#DA#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	Skip (Natural (Take_Unsigned (if B = 16#D9# then 1 elsif B = 16#DA# then 2 else 4)), R);	2	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	Skip (Natural (Take_Unsigned (if B = 16#D9# then 1 elsif B = 16#DA# then 2 else 4)), R);	4	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	Total : Natural := 1;	1	math	the empty product, start of the element count
+driver-msgpack.adb	V : constant Unsigned_64 := Take_Unsigned (8);	8	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	V := Real'Scaling (Real (2 ** Half_Fraction_Bits + M), E - Half_Bias - Half_Fraction_Bits);	2	format	IEEE 754 binary16 and binary64 layouts
+driver-msgpack.adb	V := Shift_Left (V, 8) or Unsigned_64 (Take);	8	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	V := U64_To_F64 (if M = 0 then 16#7FF0_0000_0000_0000# else 16#7FF8_0000_0000_0000#);	16#7FF0_0000_0000_0000#	format	IEEE 754 binary16 and binary64 layouts
+driver-msgpack.adb	V := U64_To_F64 (if M = 0 then 16#7FF0_0000_0000_0000# else 16#7FF8_0000_0000_0000#);	16#7FF8_0000_0000_0000#	format	IEEE 754 binary16 and binary64 layouts
+driver-msgpack.adb	W := Shift_Left (W, 8)	8	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	elsif Code8 /= 0 and then Length <= 16#FF# then	16#FF#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	elsif Length <= 16#FFFF# then	16#FFFF#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	elsif V in -32 .. -1 then	32	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	elsif V in 0 .. 16#FF# then	16#FF#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	elsif V in 0 .. 16#FFFF# then	16#FFFF#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	elsif V in 0 .. 16#FFFF_FFFF# then	16#FFFF_FFFF#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	elsif V'Length <= 16#FFFF# then	16#FFFF#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	for I in 2 .. Count (Doc, N) loop	2	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	function Root (Doc : Document) return Node is (if Doc.Nodes.Is_Empty then No_Node else 1);	1	structure	the root is the first node
+driver-msgpack.adb	if V in 0 .. 16#7F# then	16#7F#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	if V'Length <= 16#FF# then	16#FF#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	return 1;	1	math	a number is one leaf
+driver-msgpack.adb	return D.Width = 1 and then D.Of_Kind in '' | '';	1	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	return [1 => 0];	1	structure	an empty array has one dimension of extent zero
+driver-msgpack.adb	return [1 => Number (Doc, N)];	1	structure	a single number as a one-element array
+driver-msgpack.adb	when '' => (if W = 0 then 0.0 else 1.0),	1.0	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when '' => D.Width = 1,	1	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when '' => D.Width in 2 | 4 | 8,	2	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when '' => D.Width in 2 | 4 | 8,	4	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when '' => D.Width in 2 | 4 | 8,	8	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when '' | '' => D.Width in 1 | 2 | 4 | 8,	1	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when '' | '' => D.Width in 1 | 2 | 4 | 8,	2	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when '' | '' => D.Width in 1 | 2 | 4 | 8,	4	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when '' | '' => D.Width in 1 | 2 | 4 | 8,	8	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 1 => Long_Long_Integer (To_I8 (Unsigned_8 (V))),	1	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 16#00# .. 16#7F# =>	16#00#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 16#00# .. 16#7F# =>	16#7F#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 16#80# .. 16#8F# =>	16#80#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 16#80# .. 16#8F# =>	16#8F#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 16#90# .. 16#9F# =>	16#90#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 16#90# .. 16#9F# =>	16#9F#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 16#A0# .. 16#BF# =>	16#A0#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 16#A0# .. 16#BF# =>	16#BF#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 16#C0# =>	16#C0#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 16#C1# =>	16#C1#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 16#C2# | 16#C3# =>	16#C2#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 16#C2# | 16#C3# =>	16#C3#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 16#C4# | 16#C5# | 16#C6# =>	16#C4#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 16#C4# | 16#C5# | 16#C6# =>	16#C5#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 16#C4# | 16#C5# | 16#C6# =>	16#C6#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 16#C7# | 16#C8# | 16#C9# =>	16#C7#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 16#C7# | 16#C8# | 16#C9# =>	16#C8#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 16#C7# | 16#C8# | 16#C9# =>	16#C9#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 16#CA# =>	16#CA#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 16#CB# =>	16#CB#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 16#CC# | 16#CD# | 16#CE# =>	16#CC#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 16#CC# | 16#CD# | 16#CE# =>	16#CD#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 16#CC# | 16#CD# | 16#CE# =>	16#CE#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 16#CF# =>	16#CF#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 16#D0# | 16#D1# | 16#D2# | 16#D3# =>	16#D0#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 16#D0# | 16#D1# | 16#D2# | 16#D3# =>	16#D1#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 16#D0# | 16#D1# | 16#D2# | 16#D3# =>	16#D2#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 16#D0# | 16#D1# | 16#D2# | 16#D3# =>	16#D3#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 16#D4# .. 16#D8# =>	16#D4#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 16#D4# .. 16#D8# =>	16#D8#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 16#D9# | 16#DA# | 16#DB# =>	16#D9#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 16#D9# | 16#DA# | 16#DB# =>	16#DA#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 16#D9# | 16#DA# | 16#DB# =>	16#DB#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 16#DC# | 16#DD# =>	16#DC#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 16#DC# | 16#DD# =>	16#DD#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 16#DE# | 16#DF# =>	16#DE#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 16#DE# | 16#DF# =>	16#DF#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 16#E0# .. 16#FF# =>	16#E0#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 16#E0# .. 16#FF# =>	16#FF#	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 2 => Half (W),	2	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 2 => Long_Long_Integer (To_I16 (Unsigned_16 (V))),	2	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 4 => Long_Long_Integer (To_I32 (Unsigned_32 (V))),	4	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when 4 => Real (U32_To_F32 (Unsigned_32 (W))),	4	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when Boolean_Value => (if R.Flag then 1.0 else 0.0),	1.0	format	booleans read as 1 and 0
+driver-msgpack.adb	when Map_Value => R.Kids_Count / 2,	2	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.adb	when others => 16);	16	format	MessagePack type codes, payload widths and length limits (msgpack spec)
+driver-msgpack.ads	No_Node : constant Node := 0;	0	structure	the absent node
 driver-numerics-dense.adb	Q (K, K) := Q (K, K) + 1.0;	1.0	math	Householder vector normalized to v_k = 1 + x_k / norm
 driver-numerics.adb	B : constant Mat3 := (R + Transpose (R)) / 2.0 - C * Identity3;	2.0	math	identity: symmetric part, half-angle or quaternion formula
 driver-numerics.adb	Best : Integer := 1;	1	structure	start the search at the first column
@@ -61,6 +239,34 @@ driver-numerics.ads	Identity3 : constant Mat3 := [[1.0, 0.0, 0.0], [0.0, 1.0, 0.
 driver-numerics.ads	subtype Mat3 is Real_Matrix (1 .. 3, 1 .. 3);	3	structure	three dimensions
 driver-numerics.ads	subtype Mat3 is Real_Matrix (1 .. 3, 1 .. 3);	3	structure	three dimensions
 driver-numerics.ads	subtype Vec3 is Real_Vector (1 .. 3);	3	structure	three dimensions
+driver-observations.adb	Best_Length : Integer := -1;	1	structure	no camera matched yet
+driver-observations.adb	elsif not Of_Camera and then Is_Numeric (Doc, F.N) and then Shape (Doc, F.N)'Length <= 1	1	structure	reading groups are scalars or one-dimensional arrays
+driver-observations.adb	if S'Length = 3 and then S (S'First + 2) = 3 and then S (S'First) > 0 and then S (S'First + 1) > 0 then	2	format	an RGB image is height x width x 3 bytes
+driver-observations.adb	if S'Length = 3 and then S (S'First + 2) = 3 and then S (S'First) > 0 and then S (S'First + 1) > 0 then	3	format	an RGB image is height x width x 3 bytes
+driver-observations.adb	if S'Length = 3 and then S (S'First + 2) = 3 and then S (S'First) > 0 and then S (S'First + 1) > 0 then	3	format	an RGB image is height x width x 3 bytes
+driver-observations.adb	if T'Length >= 2 and then T (T'Last - 1) = '' and then S'Length = 2 then	2	format	a depth map is a two-dimensional float grid (numpy dtype kind letter before the width)
+driver-observations.adb	if T'Length >= 2 and then T (T'Last - 1) = '' and then S'Length = 2 then	2	format	a depth map is a two-dimensional float grid (numpy dtype kind letter before the width)
+driver-observations.ads	Key_Separator : constant Character := Character'Val (31);	31	format	ASCII unit separator
+driver-protocol.adb	Pairs : Natural := 3;	3	format	pair and element counts of the reply maps (docs/body-protocol.md 4)
+driver-protocol.adb	Put_Array_Header (Reply, 1);	1	format	pair and element counts of the reply maps (docs/body-protocol.md 4)
+driver-protocol.adb	Put_Map_Header (Reply, 1);	1	format	pair and element counts of the reply maps (docs/body-protocol.md 4)
+driver-protocol.adb	Put_Map_Header (Reply, 1);	1	format	pair and element counts of the reply maps (docs/body-protocol.md 4)
+driver-protocol.adb	Put_Map_Header (Reply, 3);	3	format	pair and element counts of the reply maps (docs/body-protocol.md 4)
+driver-recording.adb	Head (Offset (10 + I)) := Byte (Shift_Right (Size, 8 * I) and 16#FF#);	10	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
+driver-recording.adb	Head (Offset (10 + I)) := Byte (Shift_Right (Size, 8 * I) and 16#FF#);	16#FF#	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
+driver-recording.adb	Head (Offset (10 + I)) := Byte (Shift_Right (Size, 8 * I) and 16#FF#);	8	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
+driver-recording.adb	Head (Offset (2 + I)) := Byte (Shift_Right (Ns, 8 * I) and 16#FF#);	16#FF#	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
+driver-recording.adb	Head (Offset (2 + I)) := Byte (Shift_Right (Ns, 8 * I) and 16#FF#);	2	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
+driver-recording.adb	Head (Offset (2 + I)) := Byte (Shift_Right (Ns, 8 * I) and 16#FF#);	8	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
+driver-recording.adb	Head : Byte_Array (1 .. 13);	13	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
+driver-recording.adb	Head : Byte_Array (1 .. 13);	13	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
+driver-recording.adb	Nanoseconds := Long_Long_Integer (Little_Endian (Head (2 .. 9)));	9	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
+driver-recording.adb	Ns : constant Unsigned_64 := Unsigned_64 (Driver.Clock.Seconds * 1_000_000_000);	1_000_000_000	format	nanoseconds per second
+driver-recording.adb	Size : constant Offset := Offset (Little_Endian (Head (10 .. 13)));	10	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
+driver-recording.adb	Size : constant Offset := Offset (Little_Endian (Head (10 .. 13)));	13	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
+driver-recording.adb	V := Shift_Left (V, 8) or Unsigned_64 (Data (I));	8	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
+driver-recording.adb	for I in 0 .. 3 loop	3	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
+driver-recording.adb	for I in 0 .. 7 loop	7	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
 driver-stats.adb	Child := 2 * Root;	2	math	heap sort and median index arithmetic
 driver-stats.adb	Gaussian_MAD_To_Sigma : constant := 1.482_602_218_505_602;	1.482_602_218_505_602	statistics	1 / Phi^-1 (3/4): MAD to sigma for Gaussian data
 driver-stats.adb	Intercept => (Value => A, Sigma => Sqrt (S2 * (1.0 / N + Mean (Mx) ** 2 / Sxx))),	1.0	math	standard error of the intercept, 1/n term

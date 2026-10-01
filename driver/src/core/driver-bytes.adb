@@ -38,6 +38,9 @@ package body Driver.Bytes is
 
    procedure Append (B : in out Buffer; Data : Byte_Array) is
    begin
+      if Data'Length = 0 then
+         return;   --  an empty buffer may have no storage yet
+      end if;
       Reserve (B, B.Last + Data'Length);
       B.Data (B.Last + 1 .. B.Last + Data'Length) := Data;
       B.Last := B.Last + Data'Length;

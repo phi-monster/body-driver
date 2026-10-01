@@ -13,9 +13,9 @@
 with Ada.Containers.Indefinite_Vectors;
 with Ada.Containers.Vectors;
 with Ada.Strings.Unbounded;
-with Driver.Bytes;
 with Driver.Clock;
 with Driver.Images;
+with Driver.Msgpack;
 
 package Driver.Observations is
 
@@ -25,27 +25,35 @@ package Driver.Observations is
    type Group_Id is new Positive;
 
    type Camera_Info is record
-      Path          : Unbounded_String;
+      Path          : Unbounded_String;   --  keys from the root, joined with "/" for display
+      Keys          : Unbounded_String;   --  the same keys, joined with Key_Separator
       Width, Height : Positive;
       Depth_Path    : Unbounded_String;   --  empty when the camera reports no depth
+      Depth_Keys    : Unbounded_String;
    end record;
 
    type Group_Info is record
       Path        : Unbounded_String;
+      Keys        : Unbounded_String;
       Size        : Positive;              --  number of values in the group
       Command_Key : Unbounded_String;      --  empty when the group cannot be commanded
-      Echo_Path   : Unbounded_String;      --  where the robot echoes the last command
+      Echo_Path   : Unbounded_String;      --  where the robot echoes the last command, if it does
+      Echo_Keys   : Unbounded_String;
    end record;
+
+   Key_Separator : constant Character := Character'Val (31);
+   --  ASCII unit separator: joins the keys of a path without colliding with
+   --  any character a key is likely to contain.
 
    package Camera_Vectors is new Ada.Containers.Vectors (Camera_Id, Camera_Info);
    package Group_Vectors is new Ada.Containers.Vectors (Group_Id, Group_Info);
    package Path_Vectors is new Ada.Containers.Vectors (Positive, Unbounded_String);
 
    type Layout is record
-      Cameras          : Camera_Vectors.Vector;
-      Groups           : Group_Vectors.Vector;
-      Instruction_Path : Unbounded_String;
-      Unused           : Path_Vectors.Vector;   --  recognized leaves the driver ignores
+      Cameras         : Camera_Vectors.Vector;
+      Groups          : Group_Vectors.Vector;
+      Has_Instruction : Boolean := False;        --  a top-level string "instruction" (the task sentence)
+      Unused          : Path_Vectors.Vector;     --  recognized leaves the driver ignores
    end record;
 
    function Is_Commandable (L : Layout; G : Group_Id) return Boolean is
@@ -74,15 +82,20 @@ package Driver.Observations is
    function Has_Image (O : Observation; C : Camera_Id) return Boolean is
      (not Driver.Images.Is_Empty (O.Images (C)));
 
-   procedure Recognize (Message : Driver.Bytes.Byte_Array; L : out Layout; Ok : out Boolean);
-   --  Learns the layout from one decoded observation message.
+   procedure Recognize (Doc : Driver.Msgpack.Document; Root : Driver.Msgpack.Node; L : out Layout; Ok : out Boolean);
+   --  Learns the layout from one observation (the obs map of a request).
+   --  Ok is False when it has no camera or no reading group (docs/body-protocol.md 3).
+
+   function Describe (L : Layout) return String;
+   --  One line per camera and group, for the log.
 
    procedure Parse
-     (Message : Driver.Bytes.Byte_Array;
-      L       : Layout;
-      Beat    : Driver.Clock.Beat;
-      O       : out Observation;
-      Ok      : out Boolean);
-   --  Reads one observation message against a known layout.
+     (Doc  : Driver.Msgpack.Document;
+      Root : Driver.Msgpack.Node;
+      L    : Layout;
+      Beat : Driver.Clock.Beat;
+      O    : out Observation);
+   --  Reads one observation against a known layout; whatever is missing or
+   --  of another shape this beat is left empty in its slot.
 
 end Driver.Observations;

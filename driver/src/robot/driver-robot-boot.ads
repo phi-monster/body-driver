@@ -16,4 +16,9 @@ package Driver.Robot.Boot is
    --  file to reload from and store into. Ok is False when the body breaks
    --  the porting contract (docs/body-protocol.md); the log says which clause.
 
+   procedure Save (M : Model; H : Driver.Robot.Hand.Hands; Body_File : String);
+   --  Writes everything measured so far, with uncertainties and method
+   --  versions, to the body file. Boot calls it as it measures; the replay
+   --  tool calls it at the end so the estimates can be scored against truth.
+
 end Driver.Robot.Boot;

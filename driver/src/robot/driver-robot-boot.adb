@@ -8,4 +8,10 @@ package body Driver.Robot.Boot is
       Ok := False;
    end Run;
 
+   procedure Save (M : Model; H : Driver.Robot.Hand.Hands; Body_File : String) is
+      pragma Unreferenced (M, H, Body_File);
+   begin
+      null;
+   end Save;
+
 end Driver.Robot.Boot;
