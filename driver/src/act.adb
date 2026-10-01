@@ -27,6 +27,7 @@ with Contact.Surface;
 with Instrument;
 with Lockstep;
 with Ada.Exceptions;
+with Selfmap.Graph;
 package body Act is
    Sigma_Mult : constant Long_Float := 3.0;   --  鼓出来超过背景自己稳健 σ 的几倍才算一块(在真实深度图上验过:3 中,5 杀光);无量纲
    Track_Win : constant Long_Float := 0.10;   --  一步里任何被跟踪的点在画面里最多跑十分之一画幅(跟踪窗,比例,无量纲)
@@ -49,9 +50,9 @@ package body Act is
       return (others => <>);
    end Zone_Of;
 
-   --  这条臂量到几个抓握通道就是几个;没有抓握通道(无人机、只有胳膊的身体)就是 0 —— 不按"至少一个"猜(09-30 原来 Max (1, …)、缺省 1)
-   function Jaws_Of (C : Context; Arm : Natural) return Natural is
-     (if Arm < Natural (C.Map.Jaws.Length) then C.Map.Jaws (Arm) else 0);
+   --  这条臂量到几个抓握通道就是几个;没有抓握通道(无人机、只有胳膊的身体)就是 0 —— 不按"至少一个"猜(09-30 原来 Max (1, …)、缺省 1)。
+   --  问身体图(Selfmap.Graph,大并行 I1),不读字段
+   function Jaws_Of (C : Context; Arm : Natural) return Natural is (Selfmap.Graph.Closing_Count (C.Map, Arm));
 
    --  这条臂第 K 个抓握通道带不带手指 = 开机把它推到头时,有没有哪台相机量出了握区(Zone.Measure:两次比较、不共用一帧都看见东西动了)。
    --  哪台都没有 ⇒ 这个通道什么都不带,不列手指 / 爪心、不数、不说"你的手指之间"(无人机 DR1 / DR2 2026-09-28:
@@ -73,7 +74,7 @@ package body Act is
    --  这具身体上有没有哪个抓握通道带手指
    function Any_Fingers (C : Context) return Boolean is
    begin
-      for A in 0 .. C.Map.Arms - 1 loop
+      for A in 0 .. Selfmap.Graph.Arm_Count (C.Map) - 1 loop
          for K in 0 .. Jaws_Of (C, A) - 1 loop
             if Has_Fingers (C, A, K) then
                return True;
@@ -554,17 +555,28 @@ package body Act is
       end if;
    end Mark_Blind;
 
-   --  这只眼看的地方变了(转过了 / 脑明确换过来了)⇒ 以前说的"没有它"不再算数
+   --  这只眼看的地方变了(转过了 / 脑明确换过来了)⇒ 以前说的"没有它"不再算数。
+   --  🔴 只是一句"脑说这只眼里指不出它"、在这只眼里从来没有过框的那一条【删掉】,不解除:解除了它就是一条框为 (0,0,0,0) 的"东西",
+   --  下一帧 Remeasure_Boxed 就在画面左上角量出一块来当它(S1A4 2026-09-27:reach right untilstuck 这句没绑上的话,
+   --  左腕眼一转就成了画面左上角一块墙,3 px 长到 44922 px;lift the mintgreenscissors 成了旁边 83–133 px 的另一块;
+   --  此后 21 次名字绑到这两块假东西上,"这只眼里点过它的名"于是成立,腕眼再没转向桌上的真剪刀)
    procedure Clear_Blind (C : in out Context; Cam : Natural) is
    begin
-      for Bi in 0 .. Natural (C.Boxed.Length) - 1 loop
+      for Bi in reverse 0 .. Natural (C.Boxed.Length) - 1 loop
          if C.Boxed (Bi).Cam = Cam and then C.Boxed (Bi).Blind then
-            declare
-               B : Boxed_Thing := C.Boxed (Bi);
-            begin
-               B.Blind := False;
-               C.Boxed.Replace_Element (Bi, B);
-            end;
+            if Plan.Forget_When_Eye_Moves ((Name => C.Boxed (Bi).Name, Eye => Cam,
+                                            Boxed => C.Boxed (Bi).X1 > C.Boxed (Bi).X0 and then C.Boxed (Bi).Y1 > C.Boxed (Bi).Y0,
+                                            Seen => C.Boxed (Bi).Seen, Blind => True))
+            then
+               C.Boxed.Delete (Bi);
+            else
+               declare
+                  B : Boxed_Thing := C.Boxed (Bi);
+               begin
+                  B.Blind := False;
+                  C.Boxed.Replace_Element (Bi, B);
+               end;
+            end if;
          end if;
       end loop;
    end Clear_Blind;
@@ -929,31 +941,9 @@ package body Act is
 
    procedure Fill_Say (C : in out Context; I : Sinew.Instr; Answer : out Brain.Say) is separate;
 
-   --  身体报的那句事件,归到八个结局里的哪一个。控制流只认这八个。
-   function Classify (Event : String) return Sinew.Outcome is
-      use Sinew;
-      function Has (P : String) return Boolean is
-        (Event'Length >= P'Length and then Event (Event'First .. Event'First + P'Length - 1) = P);
-   begin
-      if Has ("amount: arrived") or else Has ("amount: already there") then
-         return Oc_Arrived;
-      elsif Has ("contact") then
-         return Oc_Touched;
-      elsif Has ("resist") or else Has ("amount: stopped getting closer") then
-         return Oc_Stuck;
-      elsif Has ("slip") then
-         return Oc_Slipped;
-      elsif Has ("settle") then
-         return Oc_Settled;
-      elsif Has ("lost") then
-         return Oc_Lost;
-      elsif Has ("free") then
-         return Oc_Free;
-      elsif Has ("steps") then
-         return Oc_Timeout;
-      end if;
-      return Oc_Refused;
-   end Classify;
+   --  身体报的那句事件,归到结局词里的哪一个。控制流只认结局词。表只有一张(Plan.Outcome_Of_Event,自检逐词核对它和 Until_Word 对得上);
+   --  以前这张表写在这儿、少了 stall 那一行(见 Plan.Outcome_Of_Event)
+   function Classify (Event : String) return Sinew.Outcome is (Plan.Outcome_Of_Event (Event));
 
    procedure Geo_Say (S : String) is
       H : constant Integer := Lockstep.Current_Hand;   --  几只手按拍对齐时:哪只手说的(PLAN ⑧ (g))
@@ -997,21 +987,46 @@ package body Act is
    --  🔴 这里的量全是【米】。09-20 搬回来时为了不碰棘轮把"×1000"删了,标签却还写着 mm ⇒ 横挪 25.6 毫米显示成 "0.0 mm",
    --  "它在相机前 -0.8 mm"其实是负 0.8 米(算到相机背后去了)—— T10 2026-09-21 差点被这个标签骗过去。量的是米,就按米说,三位小数到毫米。
 
+   --  走一步(Selfmap.Step,I6):这只手的目标 = 此刻的读数平移 Dw,这一步走它的 Frac、最长 Track(Selfmap.Step 的上限),一条命令、等它停
+   --  (没给 Watch ⇒ 到了一步看得见的那一档以内就算到,同 Step_Arm 的 Geo_Settle);Rep = 这一步的账(实到、到没到、挡没挡:Blocked_By 拿 Wk 里这一段空走的底)
    procedure Geo_Move (L : in out Plug.Link; C : Context; F : in out Plug.Frame; Arm : Natural; Dw : Geom.V3; Ok : out Boolean;
-                       Watch : Selfmap.Watcher := null; Press : Boolean := False) is
+                       Wk : in out Selfmap.Walk; Rep : out Selfmap.Leg_Step;
+                       Watch : Selfmap.Watcher := null; Press : Boolean := False;
+                       Frac : Long_Float := 1.0; Track : Long_Float := Long_Float'Last) is
       A : Table.Vec := Table.Zero_Vec;
-      Jaw : Floats;
-      Del : Table.Vec;
       Seq0 : constant Natural := F.Seq;
+      Legs : Selfmap.Leg_Vectors.Vector;
+      Rs : Selfmap.Leg_Step_Vectors.Vector;
+      Frames : Natural;
+      Lim : Selfmap.Limits;
    begin
+      Rep := (others => <>);
+      if Arm >= Natural (F.EE.Length) then
+         Ok := False;
+         return;
+      end if;
       A (0) := Dw (0); A (1) := Dw (1); A (2) := Dw (2);
-      Step_Arm (L, C, F, Arm, A, Jaw, Del, Ok, Press => Press, Watch => Watch, Geo_Settle => Selfmap."=" (Watch, null));
+      Legs.Append (Selfmap.Leg'(Arm => Arm, Goal => Chan.Compose (F.EE (Arm), A), Jaw => <>));
+      Lim.Press := Press; Lim.Watch := Watch; Lim.Loose := Selfmap."=" (Watch, null); Lim.Frac := Frac; Lim.Track := Track;
+      Selfmap.Step (L, C.Map, Legs, Lim, F, Wk, Rs, Frames, Ok);
+      if not Rs.Is_Empty then
+         Rep := Rs (0);
+      end if;
       --  命令了多少、实到多少,每一步都说(GB5 那一版有这一行,搬回 main 时丢了;H6 2026-09-22 实测每步要 14 cm 而差距只缩 0–2 cm,
       --  没有这一行就分不清是身体没走成、还是我算错了)。拍号 = 这一下起止那两帧的帧号(同 poses.txt / fk_poses.txt / joints.txt 的第一列,
       --  离线按仿真真值给每一下压标"碰没碰到"用;09-29 V1B65 按位移反推拍号一半对不上)
-      Geo_Say ("挪 (" & Mm (Dw (0)) & "," & Mm (Dw (1)) & "," & Mm (Dw (2)) & ") ⇒ 实到 (" & Mm (Del (0)) & "," & Mm (Del (1)) & "," & Mm (Del (2)) &
-               "),差 " & Mm (Geom.Norm ([Dw (0) - Del (0), Dw (1) - Del (1), Dw (2) - Del (2)])) & (if Ok then "" else " · 身体说没走成")
+      Geo_Say ("挪 (" & Mm (Rep.Cmd (0)) & "," & Mm (Rep.Cmd (1)) & "," & Mm (Rep.Cmd (2)) & ") ⇒ 实到 (" & Mm (Rep.Got (0)) & "," & Mm (Rep.Got (1)) & "," & Mm (Rep.Got (2)) &
+               "),差 " & Mm (Geom.Norm ([Rep.Cmd (0) - Rep.Got (0), Rep.Cmd (1) - Rep.Got (1), Rep.Cmd (2) - Rep.Got (2)])) & (if Ok then "" else " · 身体说没走成")
+               & (if Rep.Blocked_T then " · 被挡住(比这一段空走时少走得多)" else "")
                & " · 拍 " & Codec.Img (Seq0) & "→" & Codec.Img (F.Seq));
+   end Geo_Move;
+
+   procedure Geo_Move (L : in out Plug.Link; C : Context; F : in out Plug.Frame; Arm : Natural; Dw : Geom.V3; Ok : out Boolean;
+                       Watch : Selfmap.Watcher := null; Press : Boolean := False) is
+      Wk : Selfmap.Walk;
+      Rep : Selfmap.Leg_Step;
+   begin
+      Geo_Move (L, C, F, Arm, Dw, Ok, Wk, Rep, Watch, Press);
    end Geo_Move;
 
    --  "上"只写在这一处:位姿系的 +z 是协议约定的重力反方向(观测里没有重力读数的身体只能这么约;有加速度计的身体应把它换成量出来的)。
@@ -1152,7 +1167,7 @@ package body Act is
    --  画面按核对定下的转法先转正再配(同核对)。只管"还找不找得到",不按位姿判:相机挪过时点照样找得到,板的世界位置不跟着变
    procedure Board_Recheck (F : Plug.Frame; C : in out Context; Found : out Natural; Said : out Unbounded_String) is separate;
 
-   --  ── 接触集接线(PLAN.md 1.5)──:身体量的数全从这只眼和握区来,一个字面量都没有;哪儿夹得住由 Contact.Gen 从形状里算,不由我挑
+   --  ── 接触集接线(第二期_PLAN.md 1.5)──:身体量的数全从这只眼和握区来,一个字面量都没有;哪儿夹得住由 Contact.Gen 从形状里算,不由我挑
 
    --  它躺的面过哪一点:碰过它躺的面之后,就是那个面上离 P 最近的点(当它厚度为零)。量到的位置 P 的高度是视线交出来/挪眼估出来的,
    --  两条视线都近乎竖直时深度病态(H53:桌面之下 9–28 cm),而腕眼近乎竖直向下看时,面的高度错 5 cm 就把整片轮廓横着投歪 5 cm

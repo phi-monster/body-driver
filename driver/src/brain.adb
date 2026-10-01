@@ -234,7 +234,7 @@ package body Brain is
         "until says when to call me back. Lines run in the order you write them." & NL & NL &
         "Do NOT give distances, angles or speeds - I measure those myself. The only numbers I understand are camera numbers and step counts. " &
         "Things out in the world have no numbers: you point at a thing by calling it what it is, in your own plain words, and I then ask you where in the picture it is. " &
-        "If there is a strip of smaller pictures under the numbered one, those are my OTHER eyes right now, each boxed with its camera number in white. " &
+        "If there is a strip of pictures under the numbered one, those are my OTHER eyes right now, each boxed with its camera number in white. " &
         "The bracketed numbers on the pictures are only my own labels for the list above, so that you can tell which box is which. " &
         "The grid of cells belongs to the BIG picture on top only.";
       --  🔴 原来这里是 json_schema + "program": string —— 自由字符串,脑想写什么写什么。
