@@ -18,6 +18,12 @@ package Zone is
    end record;
    package Lobe_Vectors is new Ada.Containers.Vectors (Natural, Lobe);
    No_Lobe : constant Lobe := (Valid => False, others => <>);
+   --  一小截(手指尖那一截):像素中心 (U, V)、两个跨度(宽的那个 / 窄的那个,像素),和它那一整块手指像素从画面哪儿伸进来
+   --  (贴画面边那些像素的中点 (Eu, Ev))。Ok = False:没有这一截
+   type Section is record
+      Ok : Boolean := False;
+      U, V, Wide, Thin, Eu, Ev : Long_Float := 0.0;
+   end record;
    type Hand_Zone is record
       Valid : Boolean := False;
       --  区心(归一化)= 这几瓣合拢时会合到的那一点("东西会被夹在哪"):每一对瓣在连线中点会合的最小二乘解(= 各瓣形心的平均),
@@ -35,6 +41,16 @@ package Zone is
       --  I2(大并行 路 2):量到的每一瓣都在这一串里,一个不少、没有上限(0 个 = 这只眼里没有手指)。
       --  只经 Set_Lobes / Set_Lobe 写、只经 Lobe_Of 读;瓣数 = 它的个数,驱动里没有按瓣数的分支
       Lobes : Lobe_Vectors.Vector;
+      --  合空时手指到的那一截(大并行 §2 第 4 条"合拢那一路:张到头、合空两头都量"):合到的那片里离"手从画面外伸进来的地方"最远的那一小截
+      --  (同 Tip_Section 的认法:合到的那片所在的那一整块手指像素,贴画面边的那些 = 伸进来的地方)。几瓣合空时到一起 ⇒ 这一截就在会合的那一处;
+      --  一边不动的夹爪(只有一瓣在动)⇒ 动的那一根合到不动的那一根旁边。三维位置碰桌面量(Geom.Lobe_Geo.Shut)。
+      --  Ok = False:合到的那片没有,或者它那一整块不贴画面边(看不出手从哪伸进来,不猜)
+      Shut : Section;
+      --  量握区那一刻(From_Frames)哪一类是张开时的手指定没定下来:那一类的几块散得比另一类开(两两形心之间),或者离两头都长在眼上、
+      --  合拢时没跟着动的部分(手掌、不动的那根手指)比另一类远。两类一样开 ⇒ False(只有一块在动、又不知道不动的部分在哪 ——
+      --  张开、合上两头各一块,画面里分不出哪头是张开的,不猜)。只在量的那一刻用,不存
+      Open_Known : Boolean := False;
+      Lobes_Darker : Boolean := False;   --  瓣是 Closed_G 里变暗的那一类(量的那一刻;另有证据要换成另一类时用,不存)
    end record;
    package Zone_Vectors is new Ada.Containers.Vectors (Natural, Hand_Zone);
    --  🔴 第 I 瓣(I ≥ 瓣数 ⇒ No_Lobe)。别处一律走这个口子,不许直接读写 Z.A / Z.B / Z.Lobes ——
@@ -79,8 +95,14 @@ package Zone is
    --  没有深度时的握区(纯函数,可离线测):只看两张停住的画面(张开 vs 合上)。
    --  变化大的像素才是手指来去(分界 = 变化量的两拨分界,算出来的;不用噪声地板 —— 腕上的相机一合爪整幅画面都抖,按地板算下半幅全"动了",
    --  S5 2026-09-23 实测 12.7 万像素被记成手指)。变暗的一拨和变亮的一拨是两类:一类是手指离开露出背景,一类是手指到来盖住背景;
-   --  张开时的手指分得开、合上时挤在一起 ⇒ 几块形心散得开的那一类是"张开时的手指"(瓣),另一类是手指合到的地方(区)
-   function From_Frames (Open_G, Closed_G : Buf; W, Hh : Natural) return Hand_Zone;
+   --  张开时的手指分得开、合上时挤在一起 ⇒ 几块形心散得开的那一类是"张开时的手指"(瓣),另一类是手指合到的地方(区)。
+   --  Static = 两头都长在眼上、合拢时没跟着动的像素(开机按转一下眼判的格点:手掌、不动的那根手指;空 = 不知道):
+   --  "散得开"也算手指伸出去离它们最远多远 —— 一边不动的夹爪只有一块在动,张开那头离不动的那根远、合上那头贴着它(10-01 路 5 要的"一边固定、一边动");
+   --  五指手一个通道一起合,张开那头四指伸直、离手掌远,合上那头蜷在手掌边上(H4)。
+   --  两类一样开 ⇒ Open_Known = False(照原来按像素多少排一个出来,调用方不许照用)。
+   --  Open_Class = 调用方另有证据时指定哪一类是张开时的手指(1 = Closed_G 里变暗的那一类,-1 = 变亮的那一类;0 = 按上面判)
+   function From_Frames (Open_G, Closed_G : Buf; W, Hh : Natural; Static : Bools := Bool_Vectors.Empty_Vector;
+                         Open_Class : Integer := 0) return Hand_Zone;
    --  同一小截,两个跨度都给:Wide = 宽的那个(= Tip_Band 的 Width,指肚宽的像素),Thin = 窄的那个(看得见的厚的像素)
    procedure Tip_Section (Z : Hand_Zone; Lb : Lobe; W, Hh : Natural; U, V, Wide, Thin : out Long_Float; Ok : out Boolean);
    --  每一瓣自己那一块手指像素(同 Tip_Band 的认法:手指像素里和瓣框重合最多的那一整块,8 邻连通)的并集
