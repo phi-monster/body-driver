@@ -80,6 +80,8 @@ begin
    --  再加上两边的不准(Z 倍的:顶住那一刻尖的误差、它顶面点的误差、位姿读数的噪声)
    declare
       Own : constant Long_Float := C.Sil_Pitch + Stats.Z * Sqrt (G.Tip_Sd ** 2 + C.Sil_Err ** 2 + C.Map.EE_Noise ** 2);
+      Own_Bumps : Contact.V3_Vectors.Vector;
+      Extra : Contact.V3_Vectors.Vector;
    begin
       for B of C.Bumps loop
          declare
@@ -91,11 +93,21 @@ begin
                   exit;
                end if;
             end loop;
-            if not Near then
+            if Near then
+               Own_Bumps.Append (B);
+            else
                Around.Append (B);
             end if;
          end;
       end loop;
+      --  挡住的那一点在它身上(§2 第 27 条"挡了 ⇒ 挡住的那一点记进形状"):手指在那儿碰到了它 ⇒ 它在那儿至少有那么大、那么高
+      --  (尖那一刻的位置,误差同上);连同往下到它躺的面的侧壁补进它的形状(同 Solid_Of 的实心、竖壁的假设),下一次就不往那儿下手指
+      if not Own_Bumps.Is_Empty then
+         Contact.Surface.Walls_To_Support (Own_Bumps, Up, Sp, C.Sil_Pitch, Extra);
+         for Q of Extra loop
+            Surf.Append (Q);
+         end loop;
+      end if;
    end;
    --  只要挑中的那一组(量到的摩擦上限在搜索里就用上了;往下伸被挡住会重挑)
    Contact.Search.Plan (Surf, Around, C.Sil_Pitch, C.Sil_Err, Up, Sp, H, Mu_Lb, G.Gap, Reach'Access, 1, Found, St,

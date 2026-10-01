@@ -77,4 +77,8 @@ package Contact.Search is
                    Reach : not null access function (R : Geom.M3; T : V3) return Boolean;
                    Want_K : Positive; Found : out Cand_Vectors.Vector; St : out Plan_Stats;
                    Want : Contact.Want := (others => <>); Mu_Ub : Long_Float := Long_Float'Last);
+   --  一组下手处合上、提一提以后,这件东西的摩擦上下限怎么变(大并行路 5,§2 第 13 条):它真的法向在"按量到的"和"按误差取最坏"之间,
+   --  所以跟着手走了(Came)⇒ 它至少给得起按量到的法向要的那么多(Lb 往上走到 Mu_Nom);手指合在了它身上、它没跟着走 ⇒ 它给不起法向取最坏时要的那么多
+   --  (Ub 往下走到 Mu_Worst)。手指合空不是摩擦的事,调用方不该来问
+   procedure Note_Hold (Lb, Ub : in out Long_Float; Mu_Nom, Mu_Worst : Long_Float; Came : Boolean);
 end Contact.Search;

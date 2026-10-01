@@ -1,15 +1,36 @@
 separate (Act)
-procedure Measure_Again (C : in out Context; F : Plug.Frame; Arm : Natural; Name : Unbounded_String; Predicted : Geom.V3; Got : out Boolean) is
+procedure Measure_Again (C : in out Context; F : Plug.Frame; Arm : Natural; Name : Unbounded_String; Predicted : Geom.V3; Got : out Boolean;
+                         Forget_Old : Boolean := True) is
    Cam1 : constant Integer := Hand_Eye_Of (C, Integer (Arm));
    U, V : Long_Float;
    Seen, Whole, Edge, Mok : Boolean;
    Its_Name, Who : Unbounded_String;
    Sds : Floats;
    Spread : Long_Float;
+   --  旧的那一份:没重新量成、又不该作废它的时候(它还在原处:手指合空了)放回去
+   Old_Pts : constant Contact.V3_Vectors.Vector := C.Sil_Pts;
+   Old_Valid : constant Boolean := C.Sil_Valid;
+   Old_Name : constant Unbounded_String := C.Sil_Name;
+   Old_Cam : constant Integer := C.Sil_Cam;
+   Old_N : constant Geom.V3 := C.Sil_N;
+   Old_P0 : constant Geom.V3 := C.Sil_P0;
+   Old_Pitch : constant Long_Float := C.Sil_Pitch;
+   Old_Err : constant Long_Float := C.Sil_Err;
+   Old_H_Sd : constant Long_Float := C.Sil_H_Sd;
+   Old_Rays : constant Geom.Sight_Vectors.Vector := C.Sil_Rays;
+   procedure Done is
+   begin
+      Got := C.Sil_Valid and then C.Sil_Name = Name;
+      if not Got and then not Forget_Old then
+         C.Sil_Pts := Old_Pts; C.Sil_Valid := Old_Valid; C.Sil_Name := Old_Name; C.Sil_Cam := Old_Cam; C.Sil_N := Old_N; C.Sil_P0 := Old_P0;
+         C.Sil_Pitch := Old_Pitch; C.Sil_Err := Old_Err; C.Sil_H_Sd := Old_H_Sd; C.Sil_Rays := Old_Rays;
+      end if;
+   end Done;
 begin
    Got := False;
    C.Sil_Valid := False;
    if Cam1 < 0 or else Length (Name) = 0 then
+      Done;
       return;
    end if;
    Retarget_Box (C, F, Natural (Cam1), Arm, Name, Predicted);
@@ -21,6 +42,7 @@ begin
       Pm : constant Geom.V3 := Geom.Meet (Rays, Mok, Spread);
    begin
       if not Mok then
+         Done;
          return;
       end if;
       declare
@@ -51,5 +73,5 @@ begin
          end loop;
       end;
    end;
-   Got := C.Sil_Valid and then C.Sil_Name = Name;
+   Done;
 end Measure_Again;

@@ -1750,6 +1750,10 @@ begin
       end if;
    end Wants_From_Say;
 
+   --  这一句里挑过的下手处(眼的位置):又挑回同一处 = 候选里没有新的了(伸下去被挡住重挑、没拿住重挑都算)
+   Tried : Contact.V3_Vectors.Vector;
+   Tried_Why : Unbounded_String;   --  上一处为什么没成(又挑回来时照实说)
+
    --  这只手到没到的分辨率(都是量的):位置 = 读数噪声和这只手那只眼配点噪声折到手上(这只手挪一档 = 自己那只眼里挪 1 像素,配点准到 G.Rms 像素)
    --  两样里大的那个的 Stats.Z 倍;转动 = 读数噪声和那只眼的角度噪声(G.Rms ÷ 焦距)里大的那个的 Stats.Z 倍
    procedure Floors (Arm : Natural; Fp, Fr : out Long_Float) is
@@ -1932,7 +1936,6 @@ begin
             end;
          end loop;
       end Note_Tips_As_Bumps;
-      Tried : Contact.V3_Vectors.Vector;   --  挑过的下手处(眼的位置):又挑回同一处 = 候选里没有新的了
    begin
       Floors (Arm, Floor_P, Floor_R);
       Grasp_Valid := False;
@@ -1984,7 +1987,7 @@ begin
                end if;
             end loop;
             if Again then
-               Event := S ("lost: I was stopped above the hold and the next hold I can lay out is that same place again - something is in the way there");
+               Event := S ("lost: the next hold I can lay out is a place I already tried (" & To_String (Tried_Why) & ")");
                return;
             end if;
             Tried.Append (Pick.T);
@@ -2065,6 +2068,7 @@ begin
                if Hit and then Went < Stand - Lstep then
                   --  下到下手的高度之前一步以上就被挡住:手指落在了东西上 ⇒ 记下尖此刻在哪,抬回去重挑
                   Note_Tips_As_Bumps;
+                  Tried_Why := S ("my fingers were stopped above it there");
                   Report := Report & "my fingers were stopped " & Len (C, Stand - Went) & " above where they should go down to (something is under them there), so I marked that spot and laid the hold out again. ";
                   Eye_To (Pick.R, Hover, "被挡住,抬回悬停点", Arr, Miss);
                else
@@ -2319,8 +2323,10 @@ begin
       end;
    end Change_Held_Qty;
 
-   --  拿没拿住,按这一组要的摩擦记这件东西和这只身体之间的摩擦(Grip_Mu):拿住 ⇒ 法向取最坏时要的那么多它给得起(下限往上走);
-   --  没拿住 ⇒ 按量到的法向要的那么多它给不起(上限往下走)。下一次挑下手处按它们
+   --  拿没拿住,按这一组要的摩擦记这件东西和这只身体之间的摩擦(Grip_Mu)。它真的法向在"按量到的"和"按误差取最坏"之间,
+   --  所以:拿住 ⇒ 至少给得起按量到的法向要的那么多(下限往上走到 Mu_Nom);手指合在了它身上、它却没跟着走 ⇒ 给不起法向取最坏时要的那么多
+   --  (上限往下走到 Mu_Worst)。10-01 以前这两个是反的(拿住记最坏、没拿住记名义),两头都说多了 —— 对夹(两处法向正对)名义要的摩擦几乎是零,
+   --  没拿住一次上限就成了零,再也挑不出下一组。手指合空(没碰到它)不是摩擦的事,不记。下一次挑下手处按它们
    procedure Note_Grip_Mu (Name : Unbounded_String; Held : Boolean) is
       Found : Boolean := False;
    begin
@@ -2329,21 +2335,22 @@ begin
             declare
                M : Grip_Mu := C.Grip_Mus (I);
             begin
-               if Held then
-                  M.Lb := Long_Float'Max (M.Lb, Grasp_Mu_Worst);
-               else
-                  M.Ub := Long_Float'Min (M.Ub, Grasp_Mu_Nom);
-               end if;
+               Contact.Search.Note_Hold (M.Lb, M.Ub, Grasp_Mu_Nom, Grasp_Mu_Worst, Came => Held);
                C.Grip_Mus.Replace_Element (I, M);
             end;
             Found := True;
          end if;
       end loop;
       if not Found then
-         C.Grip_Mus.Append (Grip_Mu'(Name => Name, Lb => (if Held then Grasp_Mu_Worst else 0.0), Ub => (if Held then Long_Float'Last else Grasp_Mu_Nom)));
+         declare
+            M : Grip_Mu := (Name => Name, Lb => 0.0, Ub => Long_Float'Last);
+         begin
+            Contact.Search.Note_Hold (M.Lb, M.Ub, Grasp_Mu_Nom, Grasp_Mu_Worst, Came => Held);
+            C.Grip_Mus.Append (M);
+         end;
       end if;
-      Put_Line ("[身] ✋ " & To_String (Name) & (if Held then " 拿住了 ⇒ 它和这只手之间的摩擦至少 " & Codec.Fmt (Grasp_Mu_Worst, 2)
-                                                  else " 没拿住 ⇒ 这一组要的摩擦 " & Codec.Fmt (Grasp_Mu_Nom, 2) & " 它给不起"));
+      Put_Line ("[身] ✋ " & To_String (Name) & (if Held then " 拿住了 ⇒ 它和这只手之间的摩擦至少 " & Codec.Fmt (Grasp_Mu_Nom, 2)
+                                                  else " 手指合在了它身上、它没跟着走 ⇒ 这一组法向取最坏时要的摩擦 " & Codec.Fmt (Grasp_Mu_Worst, 2) & " 它给不起"));
    end Note_Grip_Mu;
 
    procedure Do_Grip is
@@ -2411,12 +2418,14 @@ begin
                   --  这个抓握通道开机没推到两头量过 ⇒ 不知道哪个读数是合(09-30:原来按缺省"合 0"= x5 的约定照发)
                   Did_Grip := S ("I did NOT close grip " & Codec.Img (A + 1) & ": I never measured which reading closes it (its two ends were not measured at boot)");
                elsif Caged then
+                  Attempt : loop
                   --  合 = 发合拢那头的读数(开机两头推到头量的,V1b ②;原来写死 0.0 —— 读数在 0–1、0 = 合是 x5 的约定)
                   Move_Jaw (L, C, F, A, Hand_Of (C, A, Say.Grip_K).Empty_Close, Steps_J, Reading, Say.Grip_K);
                   declare
                      Pose_Closed : constant Plug.Arm_Pose := F.EE (A);   --  合上那一刻手在哪:拿住了,它就从这一刻起跟着手走
                      Empty : constant Long_Float := Hand_Of (C, A, Say.Grip_K).Empty_Close;
                      By_Reading : Boolean := Past_Empty (Hand_Of (C, A, Say.Grip_K), Reading) > C.Map.Jaw_Noise;
+                     Touched_It : constant Boolean := By_Reading;   --  合上那一刻手指停在空手值之上 = 碰到了它(提一提之前)
                      Sure_Held : Boolean := False;
                      Note : Unbounded_String;
                      Origin : Picture.Region;
@@ -2478,13 +2487,36 @@ begin
                      else
                         C.Wld.Holding := False; C.Wld.Held_Arm := -1; C.Wld.Held_Jaw := -1;
                         C.Held_Set_Valid := False;
-                        if Grasp_Valid then
-                           Note_Grip_Mu (Geo_Name, Held => False);   --  没拿住:这一组要的摩擦它给不起(不是"这一处拉黑")
+                        if Grasp_Valid and then Touched_It then
+                           Note_Grip_Mu (Geo_Name, Held => False);   --  碰到了它、它没跟着走:这一组要的摩擦它给不起(不是"这一处拉黑")
                         end if;
                         Move_Jaw (L, C, F, A, Hand_Of (C, A, Say.Grip_K).Open_Reading, Steps_J, Reading, Say.Grip_K);   --  走到这里手一定量过(上面没量过就不合)
                         Append (Did_Grip, "; I opened it again");
                      end if;
+                     --  §2 第 27 条:没成就按量到的新情况重挑再做,不原样再来 —— 这一组要的摩擦它给不起(上限降到这一组要的),
+                     --  下一组只从要得更少的里挑;挑不出新的、又挑回挑过的、没到它身上,就照实停。只在这一下是接触集布置的时候(Grasp_Valid)
+                     exit Attempt when By_Reading or else not Sure_Held or else not Grasp_Valid or else Plug.Reset_Pending (L);
+                     Report := Report & To_String (Did_Grip) & ". ";
+                     if Touched_It then
+                        Tried_Why := S ("it did not come with my hand there: that hold needs friction up to " & Codec.Fmt (Grasp_Mu_Worst, 2) & " and it gives less");
+                        Report := Report & "My fingers closed on it but it did not come with my hand, so I laid out a hold that needs less friction and went down again. ";
+                     else
+                        --  合空:手指没碰到它 ⇒ 它不在我量的那儿(轮廓、位置有误差)。从此刻离它很近的这只眼重新量它,再按新量到的布置
+                        declare
+                           Got : Boolean;
+                        begin
+                           Measure_Again (C, F, A, Geo_Name, (if C.Geo_Pw_Valid and then C.Geo_Pw_Name = Geo_Name then C.Geo_Pw else Grasp_Set.Motion.Pivot), Got, Forget_Old => False);
+                           Tried_Why := S ("my fingers closed on nothing there");
+                           Report := Report & "My fingers closed on nothing, so I measured it again from here"
+                                     & (if Got then "" else " (no eye of mine saw it whole, so the outline I lay the next hold on is the old one)") & " and laid out a new hold. ";
+                        end;
+                     end if;
+                     Did_Grip := Null_Unbounded_String;
+                     Contact_Onto (Amount_Factor (Null_Unbounded_String));
+                     Report := Report & To_String (Event) & ". ";
+                     exit Attempt when not Grasp_Valid;
                   end;
+                  end loop Attempt;
                else
                   Did_Grip := S ("I did NOT close grip " & Codec.Img (A + 1) & ": " & To_String (Cage_Note));
                end if;

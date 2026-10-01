@@ -1389,7 +1389,8 @@ package body Act is
 
    --  手刚松开、退开以后:重新量一遍它(同走过去时那一套:这只手那只眼的窗投到它该在的地方,几只眼此刻的视线一交就是它在哪,
    --  看全了它的眼各记一份顶面轮廓)。记下的旧轮廓是它被拿起来之前那儿的,先作废。Got = 重新记下了它的轮廓
-   procedure Measure_Again (C : in out Context; F : Plug.Frame; Arm : Natural; Name : Unbounded_String; Predicted : Geom.V3; Got : out Boolean) is separate;
+   procedure Measure_Again (C : in out Context; F : Plug.Frame; Arm : Natural; Name : Unbounded_String; Predicted : Geom.V3; Got : out Boolean;
+                            Forget_Old : Boolean := True) is separate;
    --  ── 放下(大并行路 5,10-01,主代理批的;owner 以后不同意,撤这一处就回到"碰到面只报 resist")──
    --  拿着它往下碰到了下面的面(只按 Selfmap.Blocked):先问物理 —— 单靠下面那张面托不托得住它(Contact.Wrench.Rests:它底下贴着面的那一片当唯一的接触,
    --  重心按量到的不准挪一挪也托得住);托得住才松手、手退开、重新量它,看它是不是还在原处(Contact.Qty.Moved_Off,同一种量法:它的实心模型的形心);
