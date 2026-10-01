@@ -35,6 +35,8 @@ ap.add_argument("--bodies", default="x5,humanoid,drone")
 ap.add_argument("--out", default="/root/p8/qexam/batches")
 ap.add_argument("--scenes", action="store_true",
                 help="这一批出路 8 的小场景(harness/scenes 的 11 个任务,每个随机挑一张布局,一题一个种子目录),不出 YCB 题")
+ap.add_argument("--replace", default="", help="题号,题号…:这一批里这几题重出(同一具身体、同一种要求,另抽东西和摆法),种子目录不变;要和 --why 一起给")
+ap.add_argument("--why", default="", help="--replace 的原因(记进题单)")
 ap.add_argument("--feasibility", type=int, default=0, help="只看每一对(身体, 要求)摆不摆得下:每对试这么多回,报成了几回、一回多久,不写文件")
 ap.add_argument("--pool_check", action="store_true",
                 help="只写一张核物件池稳不稳的布局(种子 29999,x5):池里每件按它的摆法隔开放一排排,离线核时逐件量站不站得住")
@@ -135,15 +137,22 @@ def overlap2d(P, Q):
     return True
 
 
+def footprint_of(pts):
+    """corners() 的 8 个角里 z 低 / 高成对,隔一个取就是 4 个桌面上的角;按绕中心的角度排成凸多边形"""
+    foot = np.array([[p[0], p[1]] for p in pts[::2]])
+    return foot[np.argsort(np.arctan2(foot[:, 1] - foot[:, 1].mean(), foot[:, 0] - foot[:, 0].mean()))]
+
+
+def keepout_hit(body, foot, top):
+    """一块桌面上的投影 foot、顶高 top:碰不碰到歇着的手占的那几块(够高、投影叠着)"""
+    return any(top >= zmin and overlap2d(foot, np.array([[x0, y0], [x1, y0], [x1, y1], [x0, y1]])) for x0, x1, y0, y1, zmin in body["keepout"])
+
+
 def clear(body, pts):
     # 歇着的手占的那几块:东西够高(顶高过那块的下沿)、桌面上的投影和那块叠着就不行。按整个投影判,不按角:
     # 第一版只看包围盒的 8 个角在不在里面,电钻(18 cm 长)横跨人形右手那块(16 cm 宽),8 个角都在外面,开局就压着手,RoboDojo 判站不住(题 10)
-    foot = np.array([[p[0], p[1]] for p in pts[::2]])   # corners() 的 8 个角里 z 低 / 高成对,隔一个取就是 4 个桌面上的角
-    foot = foot[np.argsort(np.arctan2(foot[:, 1] - foot[:, 1].mean(), foot[:, 0] - foot[:, 0].mean()))]
-    top = max(p[2] for p in pts)
-    for x0, x1, y0, y1, zmin in body["keepout"]:
-        if top >= zmin and overlap2d(foot, np.array([[x0, y0], [x1, y0], [x1, y1], [x0, y1]])):
-            return False
+    if keepout_hit(body, footprint_of(pts), max(p[2] for p in pts)):
+        return False
     # 每个角都在某一块出题区里(放宽 3 cm)
     return all(any(z[0][0] - 0.03 <= p[0] <= z[0][1] + 0.03 and z[1][0] - 0.03 <= p[1] <= z[1][1] + 0.03 for z in body["zones"]) for p in pts)
 
@@ -247,6 +256,14 @@ def make_one(rng, body_name, req):
     spots = place(rng, body, [POOL[n] for n in objs], pair)
     if spots is None:
         return None
+    if req == "on":
+        # 做成了的样子也不能碰着歇着的手:A 摞在 B 上(放进去就是两件里高的那件)那一摞的顶。题 26(人形):泡沫砖摞到手底下的果冻盒上,
+        # 顶到了手指,离线核里物理走到停,砖被顶下桌了
+        xb, yb, yawb, _ = spots[1]
+        pts_b, _ = corners(POOL[b], xb, yb, yawb)
+        stack = height(POOL[b]) + height(POOL[a]) if mode == "on" else max(height(POOL[b]), height(POOL[a]))
+        if keepout_hit(body, footprint_of(pts_b), TABLE_TOP + stack):
+            return None
     labels = ["target"] + (["other"] if other else []) + ["clutter_%d" % k for k in range(len(clutter))]
     sentence = sent.format(A=POOL[a]["desc"], B=POOL[other[0]]["desc"] if other else "")
     return {"body": body_name, "cfg": body["cfg"], "cfg_name": body["cfg_name"], "requirement": req, "sentence": sentence,
@@ -401,26 +418,7 @@ if args.scenes:
                                                                 q["check"][1]["copy_md5_same"], q["steps"], q["sentence"]))
     raise SystemExit(0)
 bodies = args.bodies.split(",")
-# 每题先抽(身体, 要求)这一对 —— 每一对机会一样(无人机只有一种要求,就只占一份);再在这一对里抽东西、摆布局,摆不下换东西重抽。
-# 第一版身体、要求一起抽,摆不下就连身体带要求整个重抽:人形的小块地方摆不下两件,"挪到旁边""放上去"总被换掉,30 题里人形 8 道是"转过来"
-PAIRS = []
-r_chk = np.random.default_rng(args.seed + 1)   # 另一路随机数:看摆不摆得下,不搅出题那一路
-for b_ in bodies:
-    for rq in BODIES[b_]["reqs"]:
-        if any(make_one(r_chk, b_, rq) is not None for _ in range(200)):
-            PAIRS.append((b_, rq))
-        else:
-            print("不出 %s / %s:抽 200 回东西都摆不下(这具身体够得着的地方放不下这种题)" % (b_, rq))
-qs = []
-while len(qs) < args.n:
-    body_name, req = PAIRS[int(rng.integers(len(PAIRS)))]
-    for _ in range(500):
-        q = make_one(rng, body_name, req)
-        if q is not None:
-            break
-    assert q is not None, f"{body_name} / {req}:抽 500 回东西都摆不下"
-    q["qid"] = qid
-    q["seed"] = SEED0 + qid
+def write_question(q):
     d = f"{R}/Assets/Eval_Layout/RoboDojo/{q['cfg_name']}/{q['seed']}"
     os.makedirs(d, exist_ok=True)
     for old in os.listdir(d):
@@ -432,6 +430,66 @@ while len(qs) < args.n:
             if not os.listdir(od):
                 os.rmdir(od)
     json.dump(layout_for(q), open(mine(f"{d}/bd_question_0.json"), "w"), indent=1)
+
+
+def draw(r, body_name, req, tries=500):
+    for _ in range(tries):
+        q = make_one(r, body_name, req)
+        if q is not None:
+            return q
+    raise AssertionError(f"{body_name} / {req}:抽 {tries} 回东西都摆不下")
+
+
+if args.replace:
+    # 离线核里"做成了"的样子在物理上摆不成的题(比如马克笔放到饼干盒上,物理走到停它滚下去了)不留:同一对(身体, 要求)另抽东西、摆法,
+    # 种子目录、题号不变;换下来的那一题和原因记进题单。另一路随机数(种子 + 换的题号),不搅原来那一路
+    path = os.path.join(args.out, f"{args.batch}.json")
+    batch = json.load(open(path))
+    ids = sorted(int(v) for v in args.replace.split(","))
+    assert args.why, "--replace 要和 --why 一起给"
+    r2 = np.random.default_rng([args.seed, *ids, len(batch.get("replaced", []))])
+    for i, q in enumerate(batch["questions"]):
+        if q["qid"] in ids:
+            # 同一对(身体, 要求)抽 200 回摆不下(出题的规矩改严了,这一对在这具身体上出不成了)⇒ 同一具身体、别的要求里随机挑一种
+            try:
+                new = draw(r2, q["body"], q["requirement"], tries=200)
+            except AssertionError as e:
+                print("  %s ⇒ 同一具身体换一种要求" % e)
+                new = None
+                for rq in r2.permutation([x for x in BODIES[q["body"]]["reqs"] if x != q["requirement"]]):
+                    try:
+                        new = draw(r2, q["body"], str(rq), tries=200)
+                        break
+                    except AssertionError:
+                        continue
+                assert new is not None, "%s 哪种要求都摆不下" % q["body"]
+            new["qid"], new["seed"] = q["qid"], q["seed"]
+            write_question(new)
+            batch["questions"][i] = new
+            print("换 %d(%s / %s):%s → %s" % (q["qid"], q["body"], q["requirement"], q["sentence"], new["sentence"]))
+    batch.setdefault("replaced", []).append({"qids": ids, "why": args.why,
+                                             "old": [q for q in json.load(open(path))["questions"] if q["qid"] in ids]})
+    json.dump(batch, open(mine(path), "w"), indent=1, ensure_ascii=False)
+    raise SystemExit(0)
+
+# 每题先抽(身体, 要求)这一对 —— 每一对机会一样(无人机只有一种要求,就只占一份);再在这一对里抽东西、摆布局,摆不下换东西重抽。
+# 第一版身体、要求一起抽,摆不下就连身体带要求整个重抽:人形的小块地方摆不下两件,"挪到旁边""放上去"总被换掉,30 题里人形 8 道是"转过来"
+PAIRS = []
+r_chk = np.random.default_rng(args.seed + 1)   # 另一路随机数:看摆不摆得下,不搅出题那一路
+for b_ in bodies:
+    for rq in BODIES[b_]["reqs"]:
+        if any(make_one(r_chk, b_, rq) is not None for _ in range(200)):
+            PAIRS.append((b_, rq))
+        else:
+            print("不出 %s / %s:抽 200 回东西都摆不下(这具身体够得着的地方放不下这种题)" % (b_, rq))
+
+qs = []
+while len(qs) < args.n:
+    body_name, req = PAIRS[int(rng.integers(len(PAIRS)))]
+    q = draw(rng, body_name, req)
+    q["qid"] = qid
+    q["seed"] = SEED0 + qid
+    write_question(q)
     qs.append(q)
     qid += 1
 batch = {"batch": args.batch, "seed": args.seed, "bodies": bodies, "questions": qs}

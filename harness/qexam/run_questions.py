@@ -34,7 +34,9 @@ ap.add_argument("--keep_video", action="store_true", help="留 RoboDojo 这一�
 ap.add_argument("--shard", default="", help="k/n:这一份只跑第 k 份(从 0 数,共 n 份);有几个仿真位就起几个,各跑一份")
 ap.add_argument("--path", default="8", help="排队时报的路号")
 args = ap.parse_args()
-BODY_FILE = {"x5": "/root/cal_v1b78.json", "humanoid": "/root/cal_h4.json", "drone": "/root/cal_dr2.json"}
+# 身体文件:x5 用 /root/cal_v1b78.json(装回来开机 68 拍);人形、无人机原来的 /root/cal_h4.json、/root/cal_dr2.json 是 09-28 的旧格式,
+# 现在的驱动不认、每集都从零量(人形 710 拍,比题的步数还多)⇒ 10-01 用当时的主线驱动在 bootcal 上从零各量了一份(炮 P8P、P8R)
+BODY_FILE = {"x5": "/root/cal_v1b78.json", "humanoid": "/root/p8/cal_p8p.json", "drone": "/root/p8/cal_p8r.json"}
 for kv in args.body:
     k, v = kv.split("=", 1)
     BODY_FILE[k] = v
