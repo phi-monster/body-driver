@@ -4,7 +4,7 @@
   这一炮得是 qboot.sh 带 BOOT_KEEP=1 开的(look/ 和 vid/ 都留着);
 - 眼:身体文件 .geo.json 里每台相机的焦距、主点、畸变 vs 真值(RoboDojo 相机配置算出来的:焦距 = 画幅宽 × focal_length / horizontal_aperture;
   主点 = 画幅中心;畸变 = 钩子加的那一份,没加就是 0)。
-用法(箱上):python3 score_boot.py P8S [--distort -0.15,0.03]
+用法(箱上):python3 score_boot.py P8S [--distort=-0.15,0.03](负号开头的值要写成 = 连着,不然 argparse 当成另一个选项)
 """
 import argparse
 import json
@@ -42,7 +42,15 @@ out["cams"] = rows
 txt = open(f"{RUN}/cal.log", errors="replace").read()
 out["boot_steps"] = next((int(l.split("用了")[1].split("拍")[0]) for l in txt.splitlines() if "开机量身体一共用了" in l), None)
 out["round1"] = "── 第 1 轮" in txt
-sc = subprocess.run(["python3", "/root/diag/v1b_score_fk_cur.py", RUN], capture_output=True, text=True, timeout=3000)
+# 打分脚本的第一种考法要逐帧的位姿(vid/fk_poses.txt、vid/poses.txt);开机炮默认不录(BOOT_VID 才录,一炮近 1 GB)⇒ 没录就给两份空的,
+# 那一种考法就不考(脚本自己按"0 只手"跳过),第二种考法(扫描各格的运动学、走到没去过的地方、指尖、桌面、头顶眼)照常
+vid = os.path.join(RUN, "vid")
+out["per_frame_poses"] = os.path.exists(os.path.join(vid, "fk_poses.txt"))
+if not out["per_frame_poses"]:
+    os.makedirs(vid, exist_ok=True)
+    for f in ("fk_poses.txt", "poses.txt"):
+        open(os.path.join(vid, f), "a").close()
+sc = subprocess.run(["/venv/RoboDojo/bin/python", "/root/diag/v1b_score_fk_cur.py", RUN], capture_output=True, text=True, timeout=3000)
 out["v1b_score"] = (sc.stdout + sc.stderr).strip().splitlines()
 json.dump(out, open(f"/root/p8/boot/{K}/score.json", "w"), indent=1, ensure_ascii=False)
 print("== %s:开机 %s 拍,到第 1 轮 %s" % (K, out["boot_steps"], out["round1"]))

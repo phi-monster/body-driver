@@ -1572,8 +1572,8 @@ begin
    begin
       Gx.Valid := True; Gx.F := 400.0; Gx.Cx := 320.0; Gx.Cy := 240.0; Gx.Gap := 0.09;
       Gx.Tip := [0.0, -0.013, -0.091]; Gx.Tip_Valid := True; Gx.Tip_Touch := True; Gx.Tip_Sd := 0.0005;
-      Gx.Lobes.Append (Geom.Lobe_Geo'(Tip => [0.045, -0.013, -0.091], Wide => 0.01, Thin => 0.002));
-      Gx.Lobes.Append (Geom.Lobe_Geo'(Tip => [-0.045, -0.013, -0.091], Wide => 0.01, Thin => 0.002));
+      Gx.Lobes.Append (Geom.Lobe_Geo'(Tip => [0.045, -0.013, -0.091], Wide => 0.01, Thin => 0.002, others => <>));
+      Gx.Lobes.Append (Geom.Lobe_Geo'(Tip => [-0.045, -0.013, -0.091], Wide => 0.01, Thin => 0.002, others => <>));
       Cx.Geo.Append (Geom.No_Geo); Cx.Geo.Append (Gx);
       Cx.Map.Amp := Bytes.F64_Vectors.To_Vector (0.0, 6);
       Cx.Map.Amp.Replace_Element (0, 0.001); Cx.Map.Amp.Replace_Element (3, 0.0025);
@@ -4511,8 +4511,8 @@ begin
       Fresh.Append (G);   --  前半段装回的那份:还没有指尖、步幅
       G.Tip := [0.87, -0.24, -1.75]; G.Tip_Valid := True; G.Tip_Touch := True; G.Gap := 1.766;
       G.Stride := 0.888; G.Stride_Rot := 0.161;
-      G.Lobes.Append (Geom.Lobe_Geo'(Tip => [0.0123, -0.2345, -1.6875], Wide => 0.1932, Thin => 0.0317));
-      G.Lobes.Append (Geom.Lobe_Geo'(Tip => [-0.0071, -0.2468, 1.7011], Wide => 0.2011, Thin => 0.0299));
+      G.Lobes.Append (Geom.Lobe_Geo'(Tip => [0.0123, -0.2345, -1.6875], Wide => 0.1932, Thin => 0.0317, others => <>));
+      G.Lobes.Append (Geom.Lobe_Geo'(Tip => [-0.0071, -0.2468, 1.7011], Wide => 0.2011, Thin => 0.0299, others => <>));
       G.Tip_Sd := 0.00417;
       Stored.Append (G);
       Geom.Save (Path & ".geo.json", Stored);

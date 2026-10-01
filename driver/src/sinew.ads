@@ -122,6 +122,9 @@ package Sinew is
    --  交给受限解码器的那份文法(GBNF)。三张表都由驱动当场生成,和给脑【看】的那份同源。
    --  没有它,脑交上来的是自由字符串 —— GC9 实测 587 段里 0 段合语法。
    function EBNF (Rels_Usable, Roles_Usable, Outs_Usable : String; Qtys_Usable : String := "") return String;
+   --  这一轮名字里打不出的那几个词(空格隔开):EBNF 名字那一槽就是照这张表挡的,同一份。
+   --  脑想写的话里有它们时只能粘到旁边的词上(pick up the … ⇒ upthe),认名字时多出来的字母只许是它们(Plan.Same_Core)
+   function Name_Forbidden (Rels_Usable, Roles_Usable, Outs_Usable : String; Qtys_Usable : String := "") return String;
 
    function Role_Word (R : Role) return String;
    function Rel_Word (R : Rel) return String;

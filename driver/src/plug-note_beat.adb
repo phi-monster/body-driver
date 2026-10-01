@@ -1,8 +1,13 @@
 separate (Plug)
 procedure Note_Beat (L : in out Link; F : Frame) is
    B : Beat;
+   Now : constant Ada.Calendar.Time := Ada.Calendar.Clock;
 begin
+   if not L.Have_T0 then
+      L.T0 := Now; L.Have_T0 := True;
+   end if;
    B.Seq := F.Seq; B.Joints := F.Joints; B.Reported_EE := F.Reported_EE;
+   B.T := Long_Float (Ada.Calendar."-" (Now, L.T0));
    for Ci in 0 .. Natural (F.Cams.Length) - 1 loop
       declare
          W : constant Natural := F.Cams (Ci).W;

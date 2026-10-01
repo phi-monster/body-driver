@@ -322,8 +322,12 @@ package Act is
       --  找不到的(被挪来的东西盖住、被手挡着)挑空地时不算量过的桌面(2026-09-28 V1B47)
       Board_Seen : Bools;
       --  压之前先看底下(09-30 V1B70 / V1B73):手上那只眼往下压的第一步前后两帧三角出、比面高出(同挑空地的"高出面")的点(世界位置 + 协方差)。
-      --  挑空地时和高出面的板点一样挡;只挡、不当量过的桌面(判"躺在面上"要的细度,这对立体像在视线挨着走的方向那一片给不出来)
+      --  挑空地时和高出面的板点一样挡
       Seen_Above : Geom.Scene_Pt_Vectors.Vector;
+      --  同一对立体像里躺在面上、而且高低量得够细的点(10-01 大并行 §2 第 5 条"看底下看见的点也能当量过的桌面"):挑空地时和躺在面上的板点一样
+      --  当量过的桌面(围得住落点圈、能当落点)。够细 = 沿法向 Z 倍的不确定度不过碰指尖认几下对得上的那道门(比它矮的东西压上去也认得出;
+      --  视线挨着眼走的方向那一片远近定不住,进不来)。碰指尖那一段量、用;换了板一起作废(同 Seen_Above)
+      Seen_On : Geom.Scene_Pt_Vectors.Vector;
       Fixed_Turn_Sd : Long_Float := 0.0;        --  仪器把参考图配到"它自己转了 90°"那张时的配点噪声(像素,均方根;核对时判新位姿用,0 = 没量)
       Fixed_Said : Boolean := False;            --  这一次开机第一次核对的结果说过了(以后只在挪了、挡了、又看全了时说)
       Fixed_Covered : Boolean := False;         --  上一次核对判成挡住了
@@ -463,8 +467,10 @@ package Act is
    --  压之前先看底下(09-30):同一只眼两个位姿 P0 → P1 各一帧(W × H),问的点 (Qu, Qv) 配到 (Mu, Mv)、配回来落在 (Bu, Bv)(< 0 = 配不回来)
    --  ⇒ 比面高出的点(Above:世界位置 + 协方差)。Matched = 配上的(往返 1 px 以内、落在画面里),Tri = 其中两条视线交成、两帧对得上的;
    --  Sig = 这一批的配点噪声(像素,每轴)。导出只为自检
+   --  On 给了 ⇒ 交成、躺在面上(离面不过 Plane_Tol)的点也追加进去(世界位置 + 协方差;够不够细由调用方按它的门挑)
    procedure Seen_Above_Of (C : Context; G : Geom.Cam_Geo; P0, P1 : Plug.Arm_Pose; W, H : Natural; Qu, Qv, Mu, Mv, Bu, Bv : Floats;
-                            Above : out Geom.Scene_Pt_Vectors.Vector; Matched, Tri : out Natural; Sig : out Long_Float);
+                            Above : out Geom.Scene_Pt_Vectors.Vector; Matched, Tri : out Natural; Sig : out Long_Float;
+                            On : access Geom.Scene_Pt_Vectors.Vector := null);
    --  板上的点在不动的眼此刻的画面里重找一遍(往返配,同核对不动的眼)⇒ C.Board_Seen;没有不动的眼 / 没配仪器 / 没配成 ⇒ Board_Seen 不动,Said 说为什么
    procedure Board_Recheck (F : Plug.Frame; C : in out Context; Found : out Natural; Said : out Unbounded_String);
    --  读数 R 离"空手合"那头往张开那头走了多远(方向按开机量的两头,不假设读数变小 = 合)。导出只为自检

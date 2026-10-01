@@ -120,7 +120,8 @@ def run_one(batch, q):
     else:
         env.pop("BD_STEP_LIM", None)
     t0 = time.time()
-    print("== 题 %d(%s / %s,种子 %d,%d 步)%s · 炮 %s" % (q["qid"], q["body"], q["requirement"], q["seed"], q["steps"], q["sentence"], shot), flush=True)
+    print("== 题 %d(%s / %s,种子 %d,%s 步)%s · 炮 %s" % (q["qid"], q["body"], q["requirement"], q["seed"],
+                                                     q["steps"] if q.get("steps") is not None else "任务自己的", q["sentence"], shot), flush=True)
     log = open(f"{out}/run.log", "w")
     task = q.get("task", "bd_question")   # 小场景那一批(make_questions.py --scenes)是各自的任务;YCB 题都是 bd_question
     proc = subprocess.Popen(["bash", "/root/q/run.sh", args.path, shot, task, str(args.lim)], env=env, stdout=log, stderr=subprocess.STDOUT)

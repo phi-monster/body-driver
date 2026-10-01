@@ -897,5 +897,69 @@ begin
              "走一步·档位是上限:small ⇒ " & Codec.Fmt (Sm, 4) & " · medium ⇒ " & Codec.Fmt (Selfmap.Gear_Bound ("medium", Sm, Lg), 4)
              & " · large ⇒ " & Codec.Fmt (Lg, 4) & " · 没说 ⇒ 不限(最大一档比小步还小时 large 取小步)");
    end;
+   --  ⑫ 命令 → 动作的阶跃响应(大并行 §2 第 9 条,V5):开机按每一次探针那一条命令逐拍走到它自己的几成量出"头几拍不动、之后每拍走还差的几成"
+   --  (Selfmap.Fit_Response),再拿它预测一大步(20 档)逐拍走到哪、哪一拍起效。假身体晚 0 / 1 / 2 拍、每拍走还差的 89%(x5 量的),
+   --  另有一具每拍只走还差的 70–85% 轮着。要:晚几拍量得对、起效那一拍预测差 0 拍;每拍 89% 的那几具逐拍预测差不到一档。
+   --  病:不量(Go 只认"停了没有")⇒ 会动的东西、打到它都没法提前算命令几时起效。
+   --  牙(当场算):不算晚的那几拍(当成 0)⇒ 晚两拍那具起效差 2 拍;当成一拍到位(Alpha = 1)⇒ 第一拍就差两档多
+   declare
+      type Rc is record
+         D : Natural;
+         Rate : Boolean;
+      end record;
+      type Rcs is array (Positive range <>) of Rc;
+      Cs : constant Rcs := [(0, False), (1, False), (2, False), (1, True)];
+      Txt : Unbounded_String;
+      All_Ok : Boolean := True;
+      Tooth_Dead, Tooth_Alpha : Boolean := False;
+      Busy_Max : Long_Float := 0.0;
+   begin
+      for X of Cs loop
+         Reset_Body (X.D, False, 1.0, 1);
+         Rate_Mode := X.Rate;
+         Boot_Measure;
+         declare
+            R : constant Selfmap.Response := (if M.Resp.Is_Empty then (others => <>) else M.Resp (0));
+         begin
+            Legs.Clear;
+            Legs.Append (Selfmap.Leg'(Arm => 0, Goal => Offset (Bs (0).X, 20.0 * Tn, 0.0, 0.0, 0.0, 0.0, 0.0), Jaw => <>));
+            Lim := (others => <>); Wk := (others => <>); Reps.Clear; Frames := 0; N_Steps := 1;
+            Job := Do_Steps;
+            Run_Hand;
+            declare
+               S : constant Selfmap.Leg_Step := Reps (0);
+               Tk : Floats;
+               Nn : Long_Float;
+            begin
+               Selfmap.Step_Track (M, S, Tk, Nn);   --  这一步只平移 20 档 ⇒ 平移那一份、20 档
+            declare
+               Err_N : constant Long_Float := Selfmap.Response_Err (R, Tk) * Nn;
+               Miss_B : constant Natural := Selfmap.Effect_Miss (R, Tk);
+               Ok_X : constant Boolean := R.Alpha > 0.0 and then R.Dead = X.D and then Miss_B = 0
+                 and then (if X.Rate then R.Alpha >= R_Min - Selfmap.Negligible and then R.Alpha <= 0.85 + Selfmap.Negligible
+                           else abs (R.Alpha - Alpha_X5) < Selfmap.Negligible and then Err_N < 1.0);
+               Zero_Dead : constant Selfmap.Response := (R with delta Dead => 0);
+               One_Shot : constant Selfmap.Response := (R with delta Alpha => 1.0);
+            begin
+               All_Ok := All_Ok and then Ok_X;
+               Busy_Max := Long_Float'Max (Busy_Max, S.Busy);
+               if X.D = 2 and then not X.Rate then
+                  Tooth_Dead := Selfmap.Effect_Miss (Zero_Dead, Tk) >= 1;
+               end if;
+               if X.D = 0 then
+                  Tooth_Alpha := Selfmap.Response_Err (One_Shot, Tk) * Nn >= 1.0;
+               end if;
+               Append (Txt, " · 晚 " & Codec.Img (X.D) & (if X.Rate then " 拍、每拍 70–85%" else " 拍") & " ⇒ 量成晚 " & Codec.Img (R.Dead)
+                       & "、每拍 " & Codec.Fmt (R.Alpha, 3) & "(" & Codec.Img (R.N) & " 条),20 档那一步逐拍最多差 " & Codec.Fmt (Err_N, 2)
+                       & " 档、起效差 " & Codec.Img (Miss_B) & " 拍" & (if Ok_X then "" else "(错)"));
+            end;
+            end;
+         end;
+      end loop;
+      Check (All_Ok and then Tooth_Dead and then Tooth_Alpha,
+             "走一步·阶跃响应(V5)" & To_String (Txt) & " · 驱动自己一拍最多 " & Codec.Fmt (Busy_Max * 1000.0, 3) & " ms"
+             & " · 牙:不算晚的那几拍 ⇒ " & (if Tooth_Dead then "起效差 2 拍" else "(牙没咬住)")
+             & ";当成一拍到位 ⇒ " & (if Tooth_Alpha then "差两档多" else "(牙没咬住)"));
+   end;
    Plug.Set_Hooks (null, null);
 end Welds_Path_4;

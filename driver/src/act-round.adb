@@ -11,6 +11,7 @@ procedure Round (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context
 begin
    C.Round_N := C.Round_N + 1;
    C.Cam := Cam;
+   Brain.Episode (L.Ep_Seq0);   --  叫脑的次数按集数(那一集开始时的帧号认一集)
    Feel (C, F);   --  先感觉手在哪(按位姿查身体图),不看
    --  切块 → 世界槽
    World.Observe (C.Wld, Cam, Cut_Things (C, F, Cam), Cw, Ch);
@@ -38,7 +39,9 @@ begin
          end;
       end if;
    end loop;
-   Put_Line ("[身] ── 第" & Natural'Image (C.Round_N) & " 轮(第" & Natural'Image (Cam) & " 台相机)── 这一集已用 " & Codec.Img (Plug.Steps (L)) & " 拍(开机量身体 " & Codec.Img (C.Boot_Steps) & " 拍)");
+   Put_Line ("[身] ── 第" & Natural'Image (C.Round_N) & " 轮(第" & Natural'Image (Cam) & " 台相机)── 这一集已用 " & Codec.Img (Plug.Steps (L)) & " 拍(开机量身体 " & Codec.Img (C.Boot_Steps) & " 拍)"
+             & " · 叫过脑 " & Codec.Img (Brain.Programs_Asked + Brain.Locates_Asked) & " 次(写程序 " & Codec.Img (Brain.Programs_Asked)
+             & "、问在哪 " & Codec.Img (Brain.Locates_Asked) & ")");
    Put (To_String (Listing));
    if C.Dump_Dir /= "" then
       Codec.Write_BMP (To_String (C.Dump_Dir) & "/grid_" & Codec.Pad6 (C.Round_N) & ".bmp", RGB, Cw, Ch);
@@ -227,6 +230,9 @@ begin
             declare
                Rep : constant Exam.Report := Exam.Judge (C.Map, C.Tables);
                P : constant Sinew.Program := Sinew.Parse (To_String (Text));
+               --  这一轮键盘上名字里打不出的词(EBNF 名字那一槽照它挡的同一张表):按字认名字时,多出来的字母只许是它们
+               Forbidden : constant String := Sinew.Name_Forbidden (To_String (Rels), To_String (Roles),
+                                                                   Plan.Waitable_Outcomes (Any_Stands), To_String (Qtys));
                --  🔴 脑点的眼睛要在【绑定和选眼之前】就位。第一版把 C.Eye_Want 放在执行指令时赋值,
                --  而顺序是 解析 → 绑定 → 选眼 → 执行 ⇒ 赋值永远晚一步,自动选眼照样把段拽走
                --  (GZ 实测:写了 with my still eye,日志里还是"这条胳膊一动,第2 只眼睛…换过去")。
@@ -377,40 +383,162 @@ begin
                   Cam : constant Natural := C.Cam;
                   Kw : constant Natural := F.Cams (Cam).W;
                   Kh : constant Natural := F.Cams (Cam).H;
-                  Found, Got, Iso : Boolean := False;
                   Asked : Boolean := False;          --  这只眼真答了"这里指不出它"(不是没问通、不是框里量不出)
-                  X0, Y0, X1, Y1 : Natural := 0;
-                  R : Picture.Region;
-                  M0 : Bools;                --  脑指它那一帧它的像素(整幅掩膜)
-                  E2 : Unbounded_String;
-                  Eye_Said : Unbounded_String;       --  这只眼这一问怎么了(绑不上时照实告诉脑)
+                  Down : Boolean := False;           --  问这只眼的那一问没问通(推理服务不通):别的眼也就不问了
+                  Eye_Said : Unbounded_String;       --  问过的每只眼怎么答的(绑不上时照实告诉脑)
                   V : Plan.Name_Verdict;
 
-                  --  让第 Bx 条当场进槽、进清单:这一帧重切一次(这回带着它),再照常对号。对不上 ⇒ -1
-                  function Enlist (Bx : Natural) return Integer is
+                  --  让第 K 台眼里的第 Bx 条当场进槽、进清单:那只眼这一帧重切一次(这回带着它),再照常对号。对不上 ⇒ -1
+                  function Enlist (K, Bx : Natural) return Integer is
+                     Pw : constant Natural := F.Cams (K).W;
+                     Ph : constant Natural := F.Cams (K).H;
                   begin
                      C.Cut_Cam := -1;
-                     World.Observe (C.Wld, Cam, Cut_Things (C, F, Cam), Kw, Kh);
-                     for Si in 0 .. World.Count (C.Wld, Cam) - 1 loop
+                     World.Observe (C.Wld, K, Cut_Things (C, F, K), Pw, Ph);
+                     for Si in 0 .. World.Count (C.Wld, K) - 1 loop
                         declare
-                           Sl : constant World.Slot := World.Get (C.Wld, Cam, Si);
+                           Sl : constant World.Slot := World.Get (C.Wld, K, Si);
                            It : Item;
                         begin
-                           if Sl.Present and then Boxed_Index (C, Cam, Sl.R.Cu, Sl.R.Cv) = Integer (Bx) then
-                              It.Kind := Thing; It.Located := True; It.Slot := Si; It.Cam := Cam;
+                           if Sl.Present and then Boxed_Index (C, K, Sl.R.Cu, Sl.R.Cv) = Integer (Bx) then
+                              It.Kind := Thing; It.Located := True; It.Slot := Si; It.Cam := K;
                               It.Cu := Sl.R.Cu; It.Cv := Sl.R.Cv; It.Count := Sl.R.Count;
                               It.X0 := Sl.R.X0; It.Y0 := Sl.R.Y0; It.X1 := Sl.R.X1; It.Y1 := Sl.R.Y1;
                               It.Au := Sl.R.Au; It.Av := Sl.R.Av; It.Elong := Sl.R.Elong;
-                              It.Gray := Picture.Mean_Gray (F.Cams (Cam).Gray, Kw, Kh, Sl.R);
+                              It.Gray := Picture.Mean_Gray (F.Cams (K).Gray, Pw, Ph, Sl.R);
                               C.Items.Append (It);
                               --  (刚记进去的那一条 Blind = False:只在【就是这只被判过"没有它"的眼】里又认出来了才解除 —— JA 推演过,别改回去)
-                              C.Name_Cam := Integer (Cam);
+                              C.Name_Cam := Integer (K);
                               return Integer (C.Items.Length);
                            end if;
                         end;
                      end loop;
                      return -1;
                   end Enlist;
+
+                  --  ②–⑤ 在第 K 台眼里认它。返回清单上的号:> 0 认出来了;0 = 这只眼给不出它的一片(怎么答的记进 Eye_Said);
+                  --  -1 = 那一片量到了、可重量一遍时它没再出来(Tried 照实写着,不再往下找)
+                  function Look_In (K : Natural) return Integer is
+                     Pw : constant Natural := F.Cams (K).W;
+                     Ph : constant Natural := F.Cams (K).H;
+                     Found, Got, Iso : Boolean := False;
+                     X0, Y0, X1, Y1 : Natural := 0;
+                     R : Picture.Region;
+                     M0 : Bools;                --  脑指它那一帧它的像素(整幅掩膜)
+                     E2 : Unbounded_String;
+                     This : constant String := (if K = Cam then "这只眼" else "第" & Codec.Img (K) & " 台眼");
+                     procedure Said (S : String) is
+                     begin
+                        Append (Eye_Said, (if Length (Eye_Said) > 0 then ";" else "") & S);
+                     end Said;
+                  begin
+                     --  ② 问脑它在这只眼的哪一框(原话,一个字不改)。给它【干净】的画面:我画上去的格子和编号框实测在伤它的视力
+                     if not Brain.Locate (To_String (C.Eye_Host), C.Eye_Port, W, F.Cams (K).RGB, Pw, Ph,
+                                          Found, X0, Y0, X1, Y1, E2)
+                     then
+                        Said ("我问" & This & "(第" & Codec.Img (K) & " 台)它在哪时没问通(" & To_String (E2) & ")");
+                        Down := True;
+                        return 0;
+                     elsif not Found then
+                        if K = Cam then
+                           Asked := True;
+                        end if;
+                        Said ("我问了" & This & "(第" & Codec.Img (K) & " 台),它说这里指不出「" & W & "」");
+                        return 0;
+                     end if;
+                     --  ③ 框里哪一片是它,我自己量
+                     Seg_In_Box (C, F, K, X0, Y0, X1, Y1, Got, Iso, R, M0);
+                     Put_Line ("[身] 📦 " & W & ":脑给的框 [" & Codec.Img (X0) & " " & Codec.Img (Y0) & " " & Codec.Img (X1) & " " & Codec.Img (Y1)
+                               & "](第" & Codec.Img (K) & " 台相机)⇒ "
+                               & (if Got then "框里量到一整块 " & Codec.Img (R.Count) & " px · 形心 ("
+                                    & Codec.Fmt (R.Cu * Long_Float (Pw), 1) & "," & Codec.Fmt (R.Cv * Long_Float (Ph), 1)
+                                    & ") · 长宽比 " & Codec.Fmt (R.Elong, 1)
+                                    & (if Iso then " · 是单独的一块" else " · 它顶到了框外那一圈(挨着别的东西或被画面切掉),形心和长轴在这只眼里不可信")
+                                  else "框里没有哪一片和周围分得开"));
+                     if not Got then
+                        Said ("你指的那一片里(第" & Codec.Img (K) & " 台),我量不出哪些像素和周围分得开");
+                        return 0;
+                     end if;
+                     declare
+                        Bt : Boxed_Thing;
+                        At_Bx : Integer := -1;
+                        Same : Integer := -1;       --  这只眼里已经量到的哪一件和它是同一片像素
+                     begin
+                        Bt.Name := To_Unbounded_String (W); Bt.Cam := K;
+                        Bt.X0 := R.X0; Bt.Y0 := R.Y0; Bt.X1 := R.X1; Bt.Y1 := R.Y1;
+                        Bt.Cu := R.Cu; Bt.Cv := R.Cv; Bt.Seen := True; Bt.Isolated := Iso;
+                        Bt.Mask := M0; Bt.Count := R.Count;
+                        On_Pixel (M0, Pw, Ph, R, Bt.Pu_On, Bt.Pv_On);
+                        Blob_Levels (F.Cams (K).Gray, Pw, Ph, M0, R, Bt.Gray, Bt.Bg);   --  记下它多亮、周围多亮:以后每帧认它靠这个
+                        --  ④ 和这只眼里我已经量到的某一件是同一片像素(两块各自身上那一点都落在对方身上)⇒ 就是那一件:
+                        --  不另起一件,按脑这回指的重量一遍;名字改成脑这回的叫法(和两只眼视线交在一点时同一个规矩:
+                        --  "以后都叫它脑现在用的这个"),每只眼里、记忆里都跟着改。S1A1 R8 实测:同一把剪刀换了两种粘法说,
+                        --  同一只眼里记成了三件(第 18、20、21 块),每件一个名字
+                        for Bi in 0 .. Natural (C.Boxed.Length) - 1 loop
+                           if Same < 0 and then C.Boxed (Bi).Cam = K and then C.Boxed (Bi).Seen
+                             and then Plan.Same_Pixels (C.Boxed (Bi).Mask, C.Boxed (Bi).Pu_On, C.Boxed (Bi).Pv_On,
+                                                        M0, Bt.Pu_On, Bt.Pv_On, Pw, Ph)
+                           then
+                              Same := Integer (Bi);
+                           end if;
+                        end loop;
+                        if Same >= 0 then
+                           declare
+                              Old : constant Unbounded_String := C.Boxed (Natural (Same)).Name;
+                           begin
+                              Put_Line ("[身] 📦 你这回叫它「" & W & "」,框出来的和我在" & This & "里叫「" & To_String (Old)
+                                        & "」的那一件是同一片像素 ⇒ 就是它,以后都叫它「" & W & "」");
+                              if Old /= Bt.Name then
+                                 for Bj in 0 .. Natural (C.Boxed.Length) - 1 loop
+                                    if C.Boxed (Bj).Name = Old then
+                                       declare
+                                          B2 : Boxed_Thing := C.Boxed (Bj);
+                                       begin
+                                          B2.Name := Bt.Name;
+                                          C.Boxed.Replace_Element (Bj, B2);
+                                       end;
+                                    end if;
+                                 end loop;
+                                 if C.Geo_Pw_Name = Old then
+                                    C.Geo_Pw_Name := Bt.Name;
+                                 end if;
+                                 if C.Geo_Name = Old then
+                                    C.Geo_Name := Bt.Name;
+                                 end if;
+                                 if C.Sil_Name = Old then   --  它的顶面点也跟着改名(H53:换个叫法轮廓就不认了)
+                                    C.Sil_Name := Bt.Name;
+                                 end if;
+                              end if;
+                           end;
+                           C.Boxed.Replace_Element (Natural (Same), Bt);
+                           At_Bx := Same;
+                        else
+                           --  ⑤ 新的一件:记下它,从这一帧起每帧在原地重量。先前同名同眼的那一条作废(脑重新指了一遍,以新的为准)
+                           for Bi in 0 .. Natural (C.Boxed.Length) - 1 loop
+                              if C.Boxed (Bi).Cam = K and then To_String (C.Boxed (Bi).Name) = W then
+                                 At_Bx := Integer (Bi);
+                              end if;
+                           end loop;
+                           if At_Bx >= 0 then
+                              C.Boxed.Replace_Element (Natural (At_Bx), Bt);
+                           else
+                              C.Boxed.Append (Bt);
+                              At_Bx := Integer (C.Boxed.Length) - 1;
+                           end if;
+                           --  ⑤b 别的眼里已经起过名的那块和它是不是同一件:看视线交不交在一点(名字对不上也认得出)
+                           Unify_By_Sight (C, F, K, W, R);
+                        end if;
+                        declare
+                           N : constant Integer := Enlist (K, Natural (At_Bx));
+                        begin
+                           if N > 0 then
+                              return N;
+                           end if;
+                        end;
+                     end;
+                     Tried := To_Unbounded_String ("我在你指的那一片里(第" & Codec.Img (K) & " 台)量到了它,可重量一遍时它没再出来");
+                     return -1;
+                  end Look_In;
                begin
                   Tried := Null_Unbounded_String;
                   --  ⓞ 脑用 remember 记下的地方(LANGUAGE §3.3):它不是画面里的一件东西,不问眼 —— 绑到记下的那一处
@@ -435,111 +563,49 @@ begin
                      C.Name_Cam := Integer (Cam);
                      return Integer (Item_Of (Natural (V.Index)));
                   end if;
-                  --  ② 问脑它在这只眼的哪一框(原话,一个字不改)。给它【干净】的画面:我画上去的格子和编号框实测在伤它的视力
-                  if not Brain.Locate (To_String (C.Eye_Host), C.Eye_Port, W, F.Cams (Cam).RGB, Kw, Kh,
-                                       Found, X0, Y0, X1, Y1, E2)
-                  then
-                     Eye_Said := To_Unbounded_String ("我问自己这只眼(第" & Codec.Img (Cam) & " 台)它在哪时没问通(" & To_String (E2) & ")");
-                  elsif not Found then
-                     Asked := True;
-                     Eye_Said := To_Unbounded_String ("我问了这只眼(第" & Codec.Img (Cam) & " 台),它说这里指不出「" & W & "」");
-                  else
-                     --  ③ 框里哪一片是它,我自己量
-                     Seg_In_Box (C, F, Cam, X0, Y0, X1, Y1, Got, Iso, R, M0);
-                     Put_Line ("[身] 📦 " & W & ":脑给的框 [" & Codec.Img (X0) & " " & Codec.Img (Y0) & " " & Codec.Img (X1) & " " & Codec.Img (Y1)
-                               & "](第" & Codec.Img (Cam) & " 台相机)⇒ "
-                               & (if Got then "框里量到一整块 " & Codec.Img (R.Count) & " px · 形心 ("
-                                    & Codec.Fmt (R.Cu * Long_Float (Kw), 1) & "," & Codec.Fmt (R.Cv * Long_Float (Kh), 1)
-                                    & ") · 长宽比 " & Codec.Fmt (R.Elong, 1)
-                                    & (if Iso then " · 是单独的一块" else " · 它顶到了框外那一圈(挨着别的东西或被画面切掉),形心和长轴在这只眼里不可信")
-                                  else "框里没有哪一片和周围分得开"));
-                     if not Got then
-                        Eye_Said := To_Unbounded_String ("你指的那一片里,我量不出哪些像素和周围分得开");
-                     else
-                        declare
-                           Bt : Boxed_Thing;
-                           At_Bx : Integer := -1;
-                           Same : Integer := -1;       --  这只眼里已经量到的哪一件和它是同一片像素
-                        begin
-                           Bt.Name := To_Unbounded_String (W); Bt.Cam := Cam;
-                           Bt.X0 := R.X0; Bt.Y0 := R.Y0; Bt.X1 := R.X1; Bt.Y1 := R.Y1;
-                           Bt.Cu := R.Cu; Bt.Cv := R.Cv; Bt.Seen := True; Bt.Isolated := Iso;
-                           Bt.Mask := M0; Bt.Count := R.Count;
-                           On_Pixel (M0, Kw, Kh, R, Bt.Pu_On, Bt.Pv_On);
-                           Blob_Levels (F.Cams (Cam).Gray, Kw, Kh, M0, R, Bt.Gray, Bt.Bg);   --  记下它多亮、周围多亮:以后每帧认它靠这个
-                           --  ④ 和这只眼里我已经量到的某一件是同一片像素(两块各自身上那一点都落在对方身上)⇒ 就是那一件:
-                           --  不另起一件,按脑这回指的重量一遍;名字改成脑这回的叫法(和两只眼视线交在一点时同一个规矩:
-                           --  "以后都叫它脑现在用的这个"),每只眼里、记忆里都跟着改。S1A1 R8 实测:同一把剪刀换了两种粘法说,
-                           --  同一只眼里记成了三件(第 18、20、21 块),每件一个名字
-                           for Bi in 0 .. Natural (C.Boxed.Length) - 1 loop
-                              if Same < 0 and then C.Boxed (Bi).Cam = Cam and then C.Boxed (Bi).Seen
-                                and then Plan.Same_Pixels (C.Boxed (Bi).Mask, C.Boxed (Bi).Pu_On, C.Boxed (Bi).Pv_On,
-                                                           M0, Bt.Pu_On, Bt.Pv_On, Kw, Kh)
-                              then
-                                 Same := Integer (Bi);
-                              end if;
-                           end loop;
-                           if Same >= 0 then
-                              declare
-                                 Old : constant Unbounded_String := C.Boxed (Natural (Same)).Name;
-                              begin
-                                 Put_Line ("[身] 📦 你这回叫它「" & W & "」,框出来的和我在这只眼里叫「" & To_String (Old)
-                                           & "」的那一件是同一片像素 ⇒ 就是它,以后都叫它「" & W & "」");
-                                 if Old /= Bt.Name then
-                                    for Bj in 0 .. Natural (C.Boxed.Length) - 1 loop
-                                       if C.Boxed (Bj).Name = Old then
-                                          declare
-                                             B2 : Boxed_Thing := C.Boxed (Bj);
-                                          begin
-                                             B2.Name := Bt.Name;
-                                             C.Boxed.Replace_Element (Bj, B2);
-                                          end;
-                                       end if;
-                                    end loop;
-                                    if C.Geo_Pw_Name = Old then
-                                       C.Geo_Pw_Name := Bt.Name;
-                                    end if;
-                                    if C.Geo_Name = Old then
-                                       C.Geo_Name := Bt.Name;
-                                    end if;
-                                    if C.Sil_Name = Old then   --  它的顶面点也跟着改名(H53:换个叫法轮廓就不认了)
-                                       C.Sil_Name := Bt.Name;
-                                    end if;
-                                 end if;
-                              end;
-                              C.Boxed.Replace_Element (Natural (Same), Bt);
-                              At_Bx := Same;
-                           else
-                              --  ⑤ 新的一件:记下它,从这一帧起每帧在原地重量。先前同名同眼的那一条作废(脑重新指了一遍,以新的为准)
-                              for Bi in 0 .. Natural (C.Boxed.Length) - 1 loop
-                                 if C.Boxed (Bi).Cam = Cam and then To_String (C.Boxed (Bi).Name) = W then
-                                    At_Bx := Integer (Bi);
-                                 end if;
-                              end loop;
-                              if At_Bx >= 0 then
-                                 C.Boxed.Replace_Element (Natural (At_Bx), Bt);
-                              else
-                                 C.Boxed.Append (Bt);
-                                 At_Bx := Integer (C.Boxed.Length) - 1;
-                              end if;
-                              --  ⑤b 别的眼里已经起过名的那块和它是不是同一件:看视线交不交在一点(名字对不上也认得出)
-                              Unify_By_Sight (C, F, Cam, W, R);
-                           end if;
+                  --  ②–⑤ 这只眼
+                  declare
+                     N : constant Integer := Look_In (Cam);
+                  begin
+                     if N /= 0 then
+                        return N;
+                     end if;
+                  end;
+                  --  ②b 这只眼给不出它的一片 ⇒ 照问眼那句话里说的("看不见就照实说,我换一只眼看,不猜"),按相机的次序问别的眼,
+                  --  头一只给得出一片的就认那一片(同一套 ②–⑤:和那只眼里量到的某一件同一片像素 ⇒ 就是那一件)。
+                  --  S1A1、S1A3、S1A4 落盘的画面实测(10-01,同一个模型、同一问,画面上带着格子):这只眼看不见剪刀时脑写的 10 种剪刀名字,
+                  --  头顶眼框在剪刀上 8 种;脑写的 8 句不是东西的话(reach right untilstuck、saydone untildone untildone…),别的眼一句都没框
+                  if not Down then
+                     declare
+                        Pictures : Plan.Eye_Flags (0 .. Natural (F.Cams.Length) - 1);
+                     begin
+                        for K in Pictures'Range loop
+                           Pictures (K) := F.Cams (K).W > 0 and then F.Cams (K).H > 0
+                             and then Natural (F.Cams (K).RGB.Length) >= F.Cams (K).W * F.Cams (K).H * 3;
+                        end loop;
+                        for K of Plan.Other_Eyes (Cam, Pictures) loop
                            declare
-                              N : constant Integer := Enlist (Natural (At_Bx));
+                              N : constant Integer := Look_In (Natural (K));
                            begin
                               if N > 0 then
+                                 Put_Line ("[身] 📦 " & W & ":" & To_String (Eye_Said) & ";第" & Codec.Img (Natural (K))
+                                           & " 台眼框出来了 ⇒ 绑上它(它在那只眼里)");
+                                 if Asked then
+                                    Mark_Blind (C, Cam, To_Unbounded_String (W));   --  这只眼说过这里没有它:记在它的名下(按名字 × 眼)
+                                 end if;
+                                 return N;
+                              elsif N < 0 then
                                  return N;
                               end if;
                            end;
-                        end;
-                        Tried := To_Unbounded_String ("我在你指的那一片里量到了它,可重量一遍时它没再出来");
-                        return -1;
-                     end if;
+                           exit when Down;
+                        end loop;
+                     end;
                   end if;
-                  --  ⑥ 这只眼给不出它的一片(眼说这里没有 / 没问通 / 框里量不出)⇒ 只按字找:它是不是你以前说过的哪一件。
-                  --  字母一样,或者整串原样含着你起过的名字、原样含在里面,而且只对得上一件(S1A5:scissors upuntil toucheduntil 含着 scissors)
-                  V := Plan.Without_Eye (W, Cam, Records);
+                  --  ⑥ 哪只眼都给不出它的一片(眼说这里没有 / 没问通 / 框里量不出)⇒ 只按字找:它是不是你以前说过的哪一件。
+                  --  字母一样,或者多出来的字母全是这一轮名字里打不出的语言词,而且只对得上一件
+                  --  (S1A5:scissors upuntil toucheduntil 多出来的是 up until touched until;cupboard 多出来的 board 不是 ⇒ 不是 cup)
+                  V := Plan.Without_Eye (W, Cam, Records, Forbidden);
                   declare
                      use type Plan.Name_Verdict_Kind;
                      Knows : constant Boolean := V.Kind in Plan.Nv_This | Plan.Nv_Elsewhere | Plan.Nv_Not_Seen;
@@ -710,7 +776,7 @@ begin
                      Was : constant Plan.Bind_Vectors.Vector := Binds;
                      Got : Natural;
                   begin
-                     Plan.Rebind_Missing (Binds, Records, C.Cam, Item_Of'Access, Got);
+                     Plan.Rebind_Missing (Binds, Records, C.Cam, Forbidden, Item_Of'Access, Got);
                      for I2 in 0 .. Natural (Binds.Length) - 1 loop
                         if Was (I2).Item <= 0 and then Binds (I2).Item > 0 then
                            Put_Line ("[身] 📦 " & To_String (Binds (I2).Key) & ":" & To_String (Binds (I2).Tried) & " ⇒ 绑上它");
