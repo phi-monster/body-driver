@@ -132,6 +132,24 @@ procedure Brain_Measure is
      (Key'Length > 0 and then Ada.Strings.Fixed.Index (Driver.Brain.Names.Letters (Name),
                                                        Driver.Brain.Names.Letters (Key)) > 0);
 
+   --  The stretches a program asks for, as written.
+   function Stretches (Program : String) return Natural is
+      P   : Driver.Brain.Programs.Program;
+      Ok  : Boolean;
+      Why : Driver.Brain.Programs.Refusal;
+      N   : Natural := 0;
+   begin
+      Driver.Brain.Parser.Parse (Program, P, Ok, Why);
+      if Ok then
+         for S of P.Statements loop
+            if S.Kind = Driver.Brain.Programs.Interval then
+               N := N + 1;
+            end if;
+         end loop;
+      end if;
+      return N;
+   end Stretches;
+
    --  Whether the first stretch of the program says what the task asks.
    function Right (Kind, Thing, Other, Program : String) return Boolean is
       P   : Driver.Brain.Programs.Program;
@@ -247,6 +265,7 @@ procedure Brain_Measure is
                               & ",""why"":" & Driver.Json.Quote (To_String (A.Why))
                               & ",""seconds"":" & Driver.Log.Image (Driver.Real (A.Seconds), 1)
                               & ",""right"":" & (if Is_Right then "true" else "false")
+                              & ",""stretches"":" & Driver.Log.Image (Stretches (To_String (A.Program)))
                               & ",""program"":" & Driver.Json.Quote (To_String (A.Program)) & "}");
                            Ada.Text_IO.Flush (Out_File);
                            Ada.Text_IO.Put_Line (Get ("id") & " " & Board & Rep'Image & " "

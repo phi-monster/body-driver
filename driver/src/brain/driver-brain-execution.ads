@@ -15,7 +15,10 @@
 --                  its letters
 --    remember      the body records where something is, as a place
 --    say           the sentence goes to the log and to the next round
---    done          the task is finished: nothing more runs this episode
+--    done          the program ends; when the brain had seen how every
+--                  stretch before it ended (none ran, or each ran inside a
+--                  try or was followed by an if or a repeat until), it also
+--                  says the task is finished
 --
 --  The interpreter keeps its own stack, so a behaviour that calls itself
 --  deeply costs memory, not the decider's stack. Before every statement it
@@ -73,10 +76,14 @@ package Driver.Brain.Execution is
    --  Finished: the last line ran. Said_Done: a done ran. Stopped: interrupted.
 
    type Run_Report is record
-      How    : Run_End := Finished;
-      Events : Event_Vectors.Vector;
-      Moved  : Boolean := False;   --  some stretch reached the body
+      How       : Run_End := Finished;
+      Events    : Event_Vectors.Vector;
+      Moved     : Boolean := False;    --  some stretch reached the body
+      Done_Line : Natural := 0;        --  Said_Done: the line of the done
+      Done_Seen : Boolean := False;    --  Said_Done: the brain had seen how every stretch before it ended
    end record;
+
+   function Task_Finished (R : Run_Report) return Boolean is (R.How = Said_Done and then R.Done_Seen);
 
    procedure Run
      (P      : Driver.Brain.Programs.Program;

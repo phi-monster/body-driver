@@ -124,6 +124,10 @@ package body Driver.Brain.Round is
             end case;
          end;
       end loop;
+      if Report.How = Driver.Brain.Execution.Said_Done and then not Report.Done_Seen then
+         Put ("line " & Driver.Log.Image (Report.Done_Line)
+              & ": done came before you saw how the lines above it ended, so I ask you again.");
+      end if;
       if Report.Events.Is_Empty then
          Put ("Your last program had nothing to run.");
       end if;

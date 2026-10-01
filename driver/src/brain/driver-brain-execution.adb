@@ -28,7 +28,10 @@ package body Driver.Brain.Execution is
       Last   : in out Driver.Brain.Termination.Last_Endings;
       Report : out Run_Report)
    is
-      Stack : Frame_Vectors.Vector;
+      Stack  : Frame_Vectors.Vector;
+      Unseen : Boolean := False;
+      --  A stretch ran, outside every try, whose ending no if or repeat until
+      --  has read since: a done after it cannot be the brain's judgment of it.
 
       procedure Push (Kind : Frame_Kind; Block : Block_Index; Header : Statement_Id; Left : Natural := 0) is
       begin
@@ -56,6 +59,9 @@ package body Driver.Brain.Execution is
       procedure Ended (E : Driver.Action.Ending) is
       begin
          Last := Driver.Brain.Termination.Exactly (E);
+         if not (for some F of Stack => F.Kind = Attempt) then
+            Unseen := True;
+         end if;
          if not Driver.Brain.Words.Is_Failure (E) then
             return;
          end if;
@@ -175,6 +181,7 @@ package body Driver.Brain.Execution is
                         Stack.Delete_Last;
                      end if;
                   when Until_Loop =>
+                     Unseen := False;
                      if Last.Endings (P.Statements (F.Header).Exit_Ending) then
                         Stack.Delete_Last;
                      else
@@ -201,6 +208,7 @@ package body Driver.Brain.Execution is
                      when Repeat_Until =>
                         Push (Until_Loop, S.Until_Body, Id);
                      when If_Ending =>
+                        Unseen := False;
                         if Last.Endings (S.Test) then
                            Push (Plain, S.Then_Block, Id);
                         elsif S.Else_Block /= No_Block then
@@ -219,6 +227,8 @@ package body Driver.Brain.Execution is
                         Note (S, Spoken, Driver.Action.Refused, To_String (S.Sentence));
                      when Done =>
                         Report.How := Said_Done;
+                        Report.Done_Line := S.Line;
+                        Report.Done_Seen := not Unseen;
                         return;
                   end case;
                end;

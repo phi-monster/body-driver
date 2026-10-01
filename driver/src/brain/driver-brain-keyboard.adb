@@ -133,18 +133,12 @@ package body Driver.Brain.Keyboard is
    Sentence_Rule : constant String := "sent ::= [a-zA-Z] ([a-zA-Z0-9 ,.\'])*";
    --  No "=" in a free sentence: the look key is the only way to type one.
 
-   function Speech_Rules (K : Keyboard) return String is
-     ("speech ::= " & Quoted (Say_Word & " ") & " sent"
-      & (if K.Eyes.Is_Empty then "" else " | " & Quoted (Say_Word & " " & Look_Sign & " ") & " eyeno") & NL
+   function Word_Rules (K : Keyboard) return String is
+     ("word ::= " & Quoted (Say_Word & " ") & " sent"
+      & (if K.Eyes.Is_Empty then "" else " | " & Quoted (Say_Word & " " & Look_Sign & " ") & " eyeno")
+      & " | " & Quoted (Done_Word) & NL
       & Sentence_Rule & NL
       & (if K.Eyes.Is_Empty then "" else "eyeno ::= " & Or_List (Eye_Numbers (K), True, " | ") & NL));
-
-   --  A done says the task is finished, which the brain can know only from
-   --  what it has seen: the picture, or an ending a block tested. So done
-   --  stands only where no stretch can have run untested since: after lines
-   --  that move nothing, at the start of the program or of a branch of if,
-   --  else or or; or last in a try, which a failing stretch would have left.
-   Done_Line : constant String := Quoted (Done_Word & Line_Break);
 
    Placeholder_Name_Word : constant String := "[a-z] ([a-z])*";
 
@@ -167,15 +161,14 @@ package body Driver.Brain.Keyboard is
    begin
       case K.Keys is
          when Speech_Only =>
-            Rule ("root ::= (line)* " & Done_Line & " | line (line)*");
-            Rule ("line ::= speech " & Quoted (Line_Break));
-            Append (G, Speech_Rules (K));
+            Rule ("root ::= line (line)*");
+            Rule ("line ::= word " & Quoted (Line_Break));
+            Append (G, Word_Rules (K));
 
          when Quantity_Keys =>
-            Rule ("root ::= (quiet)* " & Done_Line & " | line (line)*");
-            Rule ("line ::= (change" & (if Has_Any (K.Relations) then " | placing" else "") & " | speech) "
+            Rule ("root ::= line (line)*");
+            Rule ("line ::= (change" & (if Has_Any (K.Relations) then " | placing" else "") & " | word) "
                   & Quoted (Line_Break));
-            Rule ("quiet ::= speech " & Quoted (Line_Break));
             Rule ("change ::= " & Quoted (Do_Word & " ") & " name " & Quoted (" ") & " qty " & Quoted (" ")
                   & " dir " & Quoted (" " & Until_Word & " ") & " outc");
             if Has_Any (K.Relations) then
@@ -188,7 +181,7 @@ package body Driver.Brain.Keyboard is
             Rule ("outc ::= " & Or_List (Ending_Words (K, Only_Waitable => True), True, " | "));
             Rule ("name ::= w (" & Quoted (" ") & " w)*");
             Rule ("w ::= " & Name_Word_Rule);
-            Append (G, Speech_Rules (K));
+            Append (G, Word_Rules (K));
 
          when Full_Keys =>
             declare
@@ -206,10 +199,8 @@ package body Driver.Brain.Keyboard is
                Append (Forms, (if Length (Forms) > 0 then " | " else "") & Who & " "
                        & Quoted (" " & Word (Close) & " ") & " what | " & Who & " " & Quoted (" " & Word (Open))
                        & " | " & Who & " " & Quoted (" " & Word (Still)));
-               Rule ("root ::= block");
-               Rule ("block ::= (quiet)* " & Done_Line & " | line (line)*");
-               Rule ("line ::= (interval | control | decl | speech) " & Quoted (Line_Break));
-               Rule ("quiet ::= (speech | define | remember) " & Quoted (Line_Break));
+               Rule ("root ::= line (line)*");
+               Rule ("line ::= (interval | control | decl | word) " & Quoted (Line_Break));
                Rule ("interval ::= " & Quoted (Do_Word & " ") & " cons (" & Quoted (" " & And_Word & " ")
                      & " cons)* " & Quoted (" " & Until_Word & " ") & " outc ("
                      & Quoted (" " & Or_Word & " ") & " num " & Quoted (" " & Steps_Word) & ")? (eye)?");
@@ -233,15 +224,15 @@ package body Driver.Brain.Keyboard is
                Rule ("control ::= " & Quoted (Repeat_Word & " ") & " num " & Quoted (" " & Times_Word & ":" & Line_Break)
                      & " line (line)* " & Quoted (End_Word)
                      & " | " & Quoted (If_Word & " ") & " outcome " & Quoted (":" & Line_Break)
-                     & " block (" & Quoted (Else_Word & ":" & Line_Break) & " block)? " & Quoted (End_Word)
-                     & " | " & Quoted (Try_Word & ":" & Line_Break) & " line (line)* (" & Done_Line & ")? "
-                     & Quoted (Or_Word & ":" & Line_Break) & " block " & Quoted (End_Word));
-               Rule ("decl ::= define | " & Quoted (Run_Word & " ") & " name | remember");
-               Rule ("define ::= " & Quoted (To_Word & " ") & " name " & Quoted (":" & Line_Break)
-                     & " line (line)* " & Quoted (End_Word));
-               Rule ("remember ::= " & Quoted (Remember_Word & " " & Where_Word & " ") & " what "
+                     & " line (line)* (" & Quoted (Else_Word & ":" & Line_Break) & " line (line)*)? "
+                     & Quoted (End_Word)
+                     & " | " & Quoted (Try_Word & ":" & Line_Break) & " line (line)* "
+                     & Quoted (Or_Word & ":" & Line_Break) & " line (line)* " & Quoted (End_Word));
+               Rule ("decl ::= " & Quoted (To_Word & " ") & " name " & Quoted (":" & Line_Break)
+                     & " line (line)* " & Quoted (End_Word) & " | " & Quoted (Run_Word & " ") & " name | "
+                     & Quoted (Remember_Word & " " & Where_Word & " ") & " what "
                      & Quoted (" " & Is_Word & " " & As_Word & " ") & " name");
-               Append (G, Speech_Rules (K));
+               Append (G, Word_Rules (K));
             end;
       end case;
       return To_String (G);
@@ -427,18 +418,20 @@ package body Driver.Brain.Keyboard is
 
    Gloss_Indent : constant String := "      ";
 
-   --  The speech keys. Say_Head: how this sheet writes the head of the
-   --  <say> line, aligned with its other lines.
-   function Speech_Sheet (K : Keyboard; Say_Head : String) return String is
+   --  The speech keys and what done does on this keyboard. Word_Head: how
+   --  this sheet writes the head of the <word> line, aligned with its other
+   --  lines.
+   function Speech_Sheet (K : Keyboard; Word_Head : String; Done_Means : String) return String is
       Eye_Slot : constant String := "<eye number>";
    begin
-      return Say_Head & Say_Word & " <one sentence in your own words>"
-        & (if K.Eyes.Is_Empty then "" else " | " & Say_Word & " " & Look_Sign & " " & Eye_Slot) & NL
+      return Word_Head & Say_Word & " <one sentence in your own words>"
+        & (if K.Eyes.Is_Empty then "" else " | " & Say_Word & " " & Look_Sign & " " & Eye_Slot)
+        & " | " & Done_Word & NL
         & (if K.Eyes.Is_Empty then ""
            else Eye_Slot & " ::= " & Or_List (Eye_Numbers (K), False, " | ")
                 & "   (from the next round on, the large picture is what that eye sees)" & NL)
-        & Gloss_Indent & Done_Word & " = the task is finished: I run nothing after it and ask you nothing more"
-        & " for this task" & NL;
+        & Gloss_Indent & Done_Word & " = the program ends here; " & Done_Means
+        & ", it also tells me the task is finished, and I ask you nothing more for this task" & NL;
    end Speech_Sheet;
 
    function Sheet (K : Keyboard) return String is
@@ -448,16 +441,19 @@ package body Driver.Brain.Keyboard is
       begin
          Append (S, Line & NL);
       end Put;
+
+      No_Change_Before : constant String := "if no change ran before it";
    begin
       case K.Keys is
          when Speech_Only =>
-            Put ("<program>  ::= <say> (<say>)* | (<say>)* done");
-            Append (S, Speech_Sheet (K, "<say>      ::= "));
+            Put ("<program>  ::= <line> (<line>)*");
+            Put ("<line>     ::= <word>");
+            Append (S, Speech_Sheet (K, "<word>     ::= ", No_Change_Before));
             Put ("No part of me can be commanded this round, so a program only speaks.");
 
          when Quantity_Keys =>
-            Put ("<program>  ::= <line> (<line>)* | (<say>)* done");
-            Put ("<line>     ::= <change>" & (if Has_Any (K.Relations) then " | <placing>" else "") & " | <say>");
+            Put ("<program>  ::= <line> (<line>)*");
+            Put ("<line>     ::= <change>" & (if Has_Any (K.Relations) then " | <placing>" else "") & " | <word>");
             Put ("<change>   ::= do <thing> <quantity> <direction> until <ending>");
             if Has_Any (K.Relations) then
                Put ("<placing>  ::= do <thing> <relation> <thing> until <ending>");
@@ -474,15 +470,12 @@ package body Driver.Brain.Keyboard is
             end if;
             Put ("<ending>   ::= " & Or_List (Ending_Words (K, Only_Waitable => True), False, " | "));
             Append (S, Ending_Glosses (K, Gloss_Indent));
-            Append (S, Speech_Sheet (K, "<say>      ::= "));
-            Put ("A change names what should happen to the thing; I choose where to hold it and how to move it."
-                 & " A program that changes something ends without done, and I tell you how each change ended.");
+            Append (S, Speech_Sheet (K, "<word>     ::= ", No_Change_Before));
+            Put ("A change names what should happen to the thing; I choose where to hold it and how to move it.");
 
          when Full_Keys =>
-            Put ("<program>    ::= <block>");
-            Put ("<block>      ::= <line> (<line>)* | (<quiet>)* done");
-            Put ("<line>       ::= <interval> | <control> | <decl> | <say>");
-            Put ("<quiet>      ::= <say> | <define> | <remember>   (lines that move nothing)");
+            Put ("<program>    ::= <line> (<line>)*");
+            Put ("<line>       ::= <interval> | <control> | <decl> | <word>");
             Put ("<interval>   ::= do <constraint> (and <constraint>)* until <ending> [or <n> steps] [<eye>]");
             Put ("<eye>        ::= with my still eye | with my moving eye");
             declare
@@ -522,13 +515,11 @@ package body Driver.Brain.Keyboard is
                end if;
             end loop;
             Put ("<control>    ::= repeat <n> times: <line> (<line>)* end");
-            Put ("               | if <outcome>: <block> [else: <block>] end");
-            Put ("               | try: <line> (<line>)* [done] or: <block> end");
-            Put ("<decl>       ::= <define> | run <name> | <remember>");
-            Put ("<define>     ::= to <name>: <line> (<line>)* end");
-            Put ("<remember>   ::= remember where <what> is as <name>");
-            Append (S, Speech_Sheet (K, "<say>        ::= "));
-            Put ("A block that runs a stretch ends without done, except a try; I tell you how each stretch ended.");
+            Put ("               | if <outcome>: <line> (<line>)* [else: <line> (<line>)*] end");
+            Put ("               | try: <line> (<line>)* or: <line> (<line>)* end");
+            Put ("<decl>       ::= to <name>: <line> (<line>)* end | run <name> | remember where <what> is as <name>");
+            Append (S, Speech_Sheet (K, "<word>       ::= ",
+                                     "if no stretch ran before it, or each one ran inside a try or was followed by an if"));
       end case;
       return To_String (S);
    end Sheet;

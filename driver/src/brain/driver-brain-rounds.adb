@@ -12,7 +12,6 @@ package body Driver.Brain.Rounds is
 
    use Driver.Brain.Programs;
    use type Driver.Brain.Service.Reading_End;
-   use type Driver.Brain.Execution.Run_End;
    use type Driver.Brain.Execution.Event_Kind;
    use type Driver.Robot.Mount_Kind;
    use type Driver.Brain.Names.Binding_Kind;
@@ -175,7 +174,7 @@ package body Driver.Brain.Rounds is
                    else "")
                   & Driver.Brain.Round.Happened_Text
                       (Report, (if A.How = Driver.Brain.Service.Ran_Away then To_String (A.Why) else "")));
-               if Report.How /= Driver.Brain.Execution.Said_Done then
+               if not Driver.Brain.Execution.Task_Finished (Report) then
                   Say_Lines ("what happened:", To_String (Happened));
                end if;
                Previous := A.Program;
@@ -192,7 +191,7 @@ package body Driver.Brain.Rounds is
                      end;
                   end if;
                end loop;
-               Finished := Report.How = Driver.Brain.Execution.Said_Done;
+               Finished := Driver.Brain.Execution.Task_Finished (Report);
             end;
          end;
       end Answer;

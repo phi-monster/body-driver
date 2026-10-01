@@ -236,6 +236,18 @@ package body Driver.Brain.Rounds.Tests is
              "the next round tells how every stretch ended and what the body said");
    end Lift_And_Done;
 
+   procedure Unseen_Done is
+      Brain : Scripted;
+      Doer  : Body_Fixture;
+   begin
+      Episode (Script ("do scissors height up until settled" & LF & "done" & LF, "done" & LF), Brain, Doer);
+      Check (Natural (Doer.Done_Wants.Length) = 1 and then Natural (Brain.Prompts.Length) = 2,
+             "a done written before the brain saw the change end does not end the rounds; the next done does");
+      Check (Has (Brain.Prompts (2), "line 2: done came before you saw how the lines above it ended")
+             and then Has (Brain.Prompts (2), "ended settled"),
+             "the brain is told how the change ended and why it is asked again");
+   end Unseen_Done;
+
    procedure Refused_Then_Told is
       Brain : Scripted;
       Doer  : Body_Fixture;
@@ -279,6 +291,8 @@ package body Driver.Brain.Rounds.Tests is
    begin
       Register ("brain.rounds.lift", "a round loses the name, the change, or the account of how it ended",
                 Lift_And_Done'Access);
+      Register ("brain.rounds.unseen_done", "the task ends on a done the brain wrote before it saw the change end",
+                Unseen_Done'Access);
       Register ("brain.rounds.refused", "a refused program moves the body, or the brain is not told why",
                 Refused_Then_Told'Access);
       Register ("brain.rounds.look", "the brain looks through the wrong eye", Eye_Switch'Access);

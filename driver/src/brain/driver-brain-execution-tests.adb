@@ -194,6 +194,39 @@ package body Driver.Brain.Execution.Tests is
       Check (R.How = Stopped and then Length (D.Spoken) = 0, "an interrupted run stops before the next statement");
    end Stops;
 
+   procedure Seen_Done is
+      D : Fake;
+      R : Run_Report;
+      L : Driver.Brain.Termination.Last_Endings := Driver.Brain.Termination.No_Stretch_Yet;
+
+      function Finished_By (Text : String) return Boolean is
+      begin
+         D := (others => <>);
+         Go (Text, D, R, L, Ball);
+         return Task_Finished (R);
+      end Finished_By;
+   begin
+      Check (Finished_By ("say it is up" & LF & "done") and then R.Done_Line = 2,
+             "done after lines that move nothing finishes the task");
+      Check (not Finished_By ("do ball height up until settled" & LF & "done")
+             and then R.How = Said_Done and then Natural (D.Done_Wants.Length) = 1,
+             "done after a stretch whose ending the brain has not seen ends the program but not the task");
+      Check (not Finished_By ("do ball height up until settled" & LF & "say up" & LF & "done"),
+             "say lines in between do not show the brain the ending");
+      Check (Finished_By ("do ball height up until settled" & LF & "if settled:" & LF & "done" & LF & "end")
+             and then Finished_By ("do ball height up until settled" & LF & "if settled:" & LF & "say ok" & LF & "end"
+                                   & LF & "done"),
+             "an if that read the ending makes a later done the brain's judgment");
+      Check (Finished_By ("try:" & LF & "do ball height up until settled" & LF & "done" & LF & "or:" & LF & "say no"
+                          & LF & "end"),
+             "a stretch inside a try is tested by it: a failure would have left for the or lines");
+      Check (not Finished_By ("do ball height up until settled" & LF & "try:" & LF & "do ball height up until settled"
+                              & LF & "done" & LF & "or:" & LF & "say no" & LF & "end"),
+             "a try tests only the stretches inside it");
+      Check (not Finished_By ("if settled:" & LF & "do ball height up until settled" & LF & "done" & LF & "end"),
+             "a stretch after the if that read an ending is untested again");
+   end Seen_Done;
+
    procedure Places is
       D : Fake;
       R : Run_Report;
@@ -249,6 +282,8 @@ package body Driver.Brain.Execution.Tests is
       Register ("brain.execution.loops", "a loop runs too few or too many passes", Loops'Access);
       Register ("brain.execution.last", "if reads something other than how the last stretch ended", Last_Ending'Access);
       Register ("brain.execution.stops", "lines run after done, or after the run was interrupted", Stops'Access);
+      Register ("brain.execution.seen", "a done written before the brain saw how a stretch ended finishes the task, or"
+                & " one it did see does not", Seen_Done'Access);
       Register ("brain.execution.places", "a remembered place is lost, or used before it exists", Places'Access);
       Register ("brain.wants.build", "a stretch reaches the body as the wrong want", Building'Access);
    end Register;
