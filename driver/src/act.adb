@@ -987,6 +987,9 @@ package body Act is
    --  🔴 这里的量全是【米】。09-20 搬回来时为了不碰棘轮把"×1000"删了,标签却还写着 mm ⇒ 横挪 25.6 毫米显示成 "0.0 mm",
    --  "它在相机前 -0.8 mm"其实是负 0.8 米(算到相机背后去了)—— T10 2026-09-21 差点被这个标签骗过去。量的是米,就按米说,三位小数到毫米。
 
+   --  (V5)这一步按开机量的阶跃响应逐拍预测的和读数差多少(写在 Geo_Base 后面)
+   function Response_Note (C : Context; Arm : Natural; Rep : Selfmap.Leg_Step) return String;
+
    --  走一步(Selfmap.Step,I6):这只手的目标 = 此刻的读数平移 Dw,这一步走它的 Frac,上限 = 眼跟得住 Track、离可能碰到的地方 Clear、
    --  反解够得到(Reach)(Selfmap.Step 的三道上限),一条命令、等它停
    --  (没给 Watch ⇒ 到了一步看得见的那一档以内就算到,同 Step_Arm 的 Geo_Settle);Rep = 这一步的账(实到、到没到、挡没挡:Blocked_By 拿 Wk 里这一段空走的底)
@@ -1021,7 +1024,7 @@ package body Act is
       Geo_Say ("挪 (" & Mm (Rep.Cmd (0)) & "," & Mm (Rep.Cmd (1)) & "," & Mm (Rep.Cmd (2)) & ") ⇒ 实到 (" & Mm (Rep.Got (0)) & "," & Mm (Rep.Got (1)) & "," & Mm (Rep.Got (2)) &
                "),差 " & Mm (Geom.Norm ([Rep.Cmd (0) - Rep.Got (0), Rep.Cmd (1) - Rep.Got (1), Rep.Cmd (2) - Rep.Got (2)])) & (if Ok then "" else " · 身体说没走成")
                & (if Rep.Blocked_T then " · 被挡住(比这一段空走时少走得多)" else "")
-               & " · 拍 " & Codec.Img (Seq0) & "→" & Codec.Img (F.Seq));
+               & " · 拍 " & Codec.Img (Seq0) & "→" & Codec.Img (F.Seq) & Response_Note (C, Arm, Rep));
    end Geo_Move;
 
    procedure Geo_Move (L : in out Plug.Link; C : Context; F : in out Plug.Frame; Arm : Natural; Dw : Geom.V3; Ok : out Boolean;
@@ -1035,7 +1038,9 @@ package body Act is
    --  "上"只写在这一处:位姿系的 +z 是协议约定的重力反方向(观测里没有重力读数的身体只能这么约;有加速度计的身体应把它换成量出来的)。
    --  碰过面之后"上"= 那张面的法向(量出来的)
    Protocol_Up : constant Geom.V3 := [0.0, 0.0, 1.0];
-   function Up_Dir (C : Context) return Geom.V3 is (if C.Touch_Valid then C.Touch_N else Protocol_Up);
+   --  "上"(路 1,10-01 改:原来没碰过面就给协议的 +z,板已经拟合出面也不用 —— 接触集"它躺的面"用的是板法向,同一个"上"两种量法,路 5 查出):
+   --  碰过面 ⇒ 碰到的那张面的法向(以碰到的为准);没碰过、板拟合出了面 ⇒ 板的法向;都没有 ⇒ 世界的 z 轴(开机对齐时就定成桌面法向)
+   function Up_Dir (C : Context) return Geom.V3 is (if C.Touch_Valid then C.Touch_N elsif C.Board_Plane then C.Board_N else Protocol_Up);
 
    --  ── 东西的量(登记表,大并行 §2 第 16 条)──:脑的句子:do <东西> <量> up|down until <结局>(两件东西那一句的关系词也按量算,见 Contact.Qty)。
    --  量的名字由身体列(键盘上"量 [...]"那一栏);每个量 = 一种量法(Contact.Qty.Kind),它往哪变 = 让它变得最快的那个刚体运动(一个旋量,从量到的几何算)
@@ -1113,6 +1118,24 @@ package body Act is
       end if;
       return C.Map.EE_Noise;
    end Geo_Base;
+
+   --  (V5)这一步按开机量的阶跃响应(Selfmap.Predict)逐拍预测走到几成,和读数最多差几档(按这一步的长、这只手一步看得见的那一档折)、
+   --  起效那一拍差几拍;驱动自己一拍最多花几秒(判停 + 发命令,不含等帧)。没量过阶跃响应 ⇒ 照实说
+   function Response_Note (C : Context; Arm : Natural; Rep : Selfmap.Leg_Step) return String is
+      Tk : Floats;
+      Nn : Long_Float;
+   begin
+      if Arm >= Natural (C.Map.Resp.Length) or else C.Map.Resp (Arm).Alpha <= 0.0 then
+         return " · 阶跃响应没量过";
+      end if;
+      Selfmap.Step_Track (C.Map, Rep, Tk, Nn);
+      if Tk.Is_Empty then
+         return "";
+      end if;
+      return " · 按阶跃响应逐拍预测:最多差 " & Codec.Fmt (Selfmap.Response_Err (C.Map.Resp (Arm), Tk) * Nn, 2)
+        & " 档、起效差 " & Codec.Img (Selfmap.Effect_Miss (C.Map.Resp (Arm), Tk)) & " 拍 · 驱动一拍最多 "
+        & Codec.Fmt (Rep.Busy, 6) & " 秒";
+   end Response_Note;
 
    --  这只手的小步(Selfmap.Careful_Step):手自己的不准(长在它上面那只眼量的指尖不准、这一次到位差 Miss、读数噪声)分给 Blocked 当底的那几步,
    --  再小也得是它自己那只眼看得出的一步
@@ -1444,7 +1467,8 @@ package body Act is
    --  这根手指离面至少 ρ·tan(β/2) 高(β = 它的视线离朝下的角;纯几何),所以它那条落点连线 R 之内、高出面超过这个高度的板点才挡它
    --  (V1B22 2026-09-27:原来连线旁边高出面一点点的板点都算挡,空的面挑到了 0.39 m 外)。
    --  躺在面上 / 高出面:离面在 / 超出 3 倍(倍数无量纲,同踢离群)"面内离散 ⊕ 这一点自己沿法向的不确定度"。
-   --  量过的桌面 = 躺在面上、上回在不动的眼里重找时还找得到(C.Board_Seen;没重找过 = 按量的那一刻)的板点围成的那一片。
+   --  量过的桌面 = 躺在面上、上回在不动的眼里重找时还找得到(C.Board_Seen;没重找过 = 按量的那一刻)的板点,和压之前看底下看见、躺在面上、
+   --  高低量得够细的点(C.Seen_On)围成的那一片。
    --  09-28 V1B47:原来只要"落点 R 之内有一个躺在面上的板点",落在那片的边上也收 —— 边外是开机时手自己挡着、没量过的一块,
    --  那儿放着一台电子琴:手指压在琴上,还把琴推进了板上量过是桌面的那片,第 2 瓣接着压在琴上(按仿真真值这只手 14 下里 9 下碰的不是桌面)。
    --  高出面的板点重找时找没找到都照样挡(东西被挪走了也不知道挪到了哪)。压之前看见的高出面的点(C.Seen_Above)和它们一样挡。
@@ -1463,7 +1487,8 @@ package body Act is
    --  交成的点离面高出 Plane_Tol(同挑空地的"高出面";沿法向的方差按 Geom.Meet_Cov,每条视线的角度噪声 = 配点噪声 ÷ 焦距)⇒ Above。
    --  挨着眼平移方向的那一片视差小、远近定不住:它的方差大,门跟着宽,判不成高出面(不猜)
    procedure Seen_Above_Of (C : Context; G : Geom.Cam_Geo; P0, P1 : Plug.Arm_Pose; W, H : Natural; Qu, Qv, Mu, Mv, Bu, Bv : Floats;
-                            Above : out Geom.Scene_Pt_Vectors.Vector; Matched, Tri : out Natural; Sig : out Long_Float) is separate;
+                            Above : out Geom.Scene_Pt_Vectors.Vector; Matched, Tri : out Natural; Sig : out Long_Float;
+                            On : access Geom.Scene_Pt_Vectors.Vector := null) is separate;
 
    --  ③ 每只手:摸它下面的面,顺带量指尖(2026-09-26;09-28 改成换倾角碰,PLAN 开机后半段 ③)。
    --  标定板的点拟合过那张面(1 mm 级,Geo_Board)⇒ 指尖按碰量:每一瓣压 6 下,每一下让手上一个方向朝正下 —— 这一瓣指尖那条视线

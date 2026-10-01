@@ -19,6 +19,12 @@ package Selfmap.Graph is
    --  扛着全身走的那几组(推一下每只眼一起动、世界在所有眼里一起流的那组读数;大并行 §2 第 2 条):M.Groups 的下标(开机逐组推一下认的);
    --  没按组量过 ⇒ 空
    function Carrying_Groups (M : Body_Map) return Ints;
+   --  整个我(大并行 §2 第 2 条;10-01):推一下它,我身上量得到的每一样都跟着动的那一组 —— 扛着全身的那组(有就是它);
+   --  没有扛着全身的组、只有一条臂、别的零件(合拢通道)都长在这条臂上、也没有长在哪儿量不出的零件 ⇒ 这条臂就是整个我
+   --  (无人机测试台:龙门吊那 6 个数推一下,机身那只眼整幅在动、头顶眼里只有机身在动 —— 量出来和一条没手指的臂一样,
+   --  它就是整个我)。Groups 的下标;量不出 / 没有 ⇒ -1。Whole_Arm = 它是第几条臂(扛着全身的组、没有 ⇒ -1)
+   function Whole_Group (M : Body_Map) return Integer;
+   function Whole_Arm (M : Body_Map) return Integer;
    --  开机报告里念身体图的那一行:只按上面几问念,不读字段
    function Say (M : Body_Map) return String;
 end Selfmap.Graph;

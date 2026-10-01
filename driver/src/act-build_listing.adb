@@ -166,9 +166,18 @@ begin
                        & " (camera index " & Codec.Img (Cm) & ") I CAN measure it: I step sideways a distance I know and watch how far the thing jumps. "
                        & "Through that eye, touching is carried out by walking arm " & Codec.Img (Natural (A) + 1)
                        & " up to the thing in a few large steps." & ASCII.LF);
-            elsif A < 0 then
+            elsif A >= 0 and then Cm < Natural (C.Geo.Length) and then C.Geo (Cm).F > 0.0 then
+               Append (T, "  HOW FAR AWAY A THING IS - through the eye that rides on arm " & Codec.Img (Natural (A) + 1)
+                       & " (camera index " & Codec.Img (Cm) & ") I CAN measure it: I step sideways a distance I know and watch how far the thing jumps. "
+                       & "I have not measured a fingertip on arm " & Codec.Img (Natural (A) + 1) & ", so I cannot say how far a fingertip is from the thing." & ASCII.LF);
+            elsif A < 0 and then Selfmap.Graph.Eyes_Off_Arms (C.Map).Contains (Cm) then
                Append (T, "  HOW FAR AWAY A THING IS - through the eye that does not move with me (camera index " & Codec.Img (Cm)
                        & ") I CANNOT measure it. Through that eye I can only nudge and look again, about one pixel of progress per push." & ASCII.LF);
+            elsif A < 0 then
+               --  长在我身上、可这一回没量成怎么跟着动的那只眼(开机认组认出它长在一条臂上,那条臂的运动学没量成):不说成"不跟着我动"
+               --  (10-01 P8A:第 2 只手扫描撞柜子、没量成,它的眼被说成 "does not move with me")
+               Append (T, "  HOW FAR AWAY A THING IS - through the eye that rides on a part of me I could not measure this time (camera index " & Codec.Img (Cm)
+                       & ") I CANNOT measure it, and that eye moves when that part of me moves." & ASCII.LF);
             end if;
          end;
       end loop;
@@ -194,7 +203,6 @@ begin
          Z : constant Zone.Hand_Zone := Zone_Of (C, A, Cam, Jk);
          Tr : constant Zone_Track := (if Track_Idx (C, A, Cam) < Natural (C.Zones.Length) then C.Zones (Track_Idx (C, A, Cam)) else (others => <>));
          Own_Cam : constant Boolean := Cam_Arm (C, Cam) = Integer (A);
-         N_Pose : constant Natural := Natural (Selfmap.Graph.Pose_Channels (C.Map, A).Length);   --  这条臂几个位姿通道(问身体图)
          Du : constant Long_Float := (if Own_Cam then 0.0 else Tr.Cu - Z.Cu);
          Dv : constant Long_Float := (if Own_Cam then 0.0 else Tr.Cv - Z.Cv);
          procedure Finger (Lb : Zone.Lobe; Which : Natural) is
@@ -261,26 +269,37 @@ begin
                Push (G, "grip " & Codec.Img (A + 1) & " (the space between the fingers of arm " & Codec.Img (A + 1) & ") - not locatable in this picture right now", Draw.Pink, 0);
             end if;
          end if;
-         --  全身零件:每个通道带的那一块(从那个关节往外的全部),位置按此刻位姿从身体图来
-         if not Own_Cam and then Jk = 0 then
-            for K in 0 .. N_Pose - 1 loop
-               declare
-                  Pc : constant Schema.Part_Pos := Tr.Pieces (K);
-                  It : Item;
-               begin
-                  if Pc.Valid then
-                     It.Kind := Piece; It.Arm := A; It.Which := K; It.Located := True;
-                     It.Cu := Pc.Cu; It.Cv := Pc.Cv; It.Depth := Pc.Z;
-                     It.X0 := Pc.X0; It.Y0 := Pc.Y0; It.X1 := Pc.X1; It.Y1 := Pc.Y1;
-                     Push (It, "a piece of you: everything that swings when channel " & Codec.Img (K) & " of arm " & Codec.Img (A + 1) & " moves (measured), now in cell " &
-                           Codec.Img (Cell_Of (C, It.Cu, It.Cv)) & Rel (It.Cu, It.Cv) &
-                           (if Tr.Pieces_Known (K) then "" else " (placed from my joints; not yet looked at here)"), Draw.Orange, 1);
-                  end if;
-               end;
-            end loop;
-         end if;
       end;
     end loop;
+    --  全身零件:每个通道带的那一块(从那个关节往外的全部),位置按此刻位姿从身体图来。不在抓握通道的循环里:
+    --  一条臂没有合拢通道(无人机测试台的抓握组是哑巴,10-01 P8MD)照样列它的零件 —— 原来零件跟着第 0 号抓握通道一起列,
+    --  没有抓握通道就一块都不列,pusher 绑不上,键盘上关系、角色全空
+    declare
+       Tr : constant Zone_Track := (if Track_Idx (C, A, Cam) < Natural (C.Zones.Length) then C.Zones (Track_Idx (C, A, Cam)) else (others => <>));
+       Own_Cam : constant Boolean := Cam_Arm (C, Cam) = Integer (A);
+       N_Pose : constant Natural := Natural (Selfmap.Graph.Pose_Channels (C.Map, A).Length);
+    begin
+       if not Own_Cam then
+          for K in 0 .. Natural'Min (N_Pose, Chan.Per_Arm) - 1 loop
+             declare
+                Pc : constant Schema.Part_Pos := Tr.Pieces (K);
+                It : Item;
+             begin
+                if Pc.Valid then
+                   It.Kind := Piece; It.Arm := A; It.Which := K; It.Located := True;
+                   It.Cu := Pc.Cu; It.Cv := Pc.Cv; It.Depth := Pc.Z;
+                   It.X0 := Pc.X0; It.Y0 := Pc.Y0; It.X1 := Pc.X1; It.Y1 := Pc.Y1;
+                   Push (It, "a piece of you: everything that swings when channel " & Codec.Img (K) & " of arm " & Codec.Img (A + 1) & " moves (measured), now in cell " &
+                         Codec.Img (Cell_Of (C, It.Cu, It.Cv)) & Rel (It.Cu, It.Cv) &
+                         (if Tr.Pieces_Known (K) then "" else " (placed from my joints; not yet looked at here)")
+                         & (if Selfmap.Graph.Whole_Arm (C.Map) = Integer (A) then
+                              " - this is ALL OF ME that moves: nothing else of mine moves without it" else ""),
+                         Draw.Orange, 1);
+                end if;
+             end;
+          end loop;
+       end if;
+    end;
    end loop;
    --  一块都没列出来就照实说一句(DR4 / DR5 2026-09-28:无人机这一行底下什么都没有,"每一块都框了编号"对着一张空单子)
    if not Qmode and then (for all It of C.Items => It.Cam /= Cam or else It.Kind not in Finger | Grip | Piece) then

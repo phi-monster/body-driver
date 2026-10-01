@@ -21,4 +21,13 @@ package Readings is
    type Quad_Counts is array (0 .. 3) of Natural;
    procedure Verdict_Of (A1, B1, A2, B2 : Buf; F : Picture.Floor_Map; W, H : Natural; V : out Eye_Verdict; Strong, Changed : out Quad_Counts);
    function Image (V : Eye_Verdict) return String;
+   --  这只眼看不看得出东西挪没挪(10-01,路 8 P8I 白桌白墙):画面里比静止地板强的纹理(格子里相邻像素灰度差超过地板)不止落在一个象限 ⇒ 看得出;
+   --  白墙白桌那样一处都没有或只挤在一处 ⇒ 看不出 —— 推了它画面不变,不等于它不长在推的那组上;配不上点,不等于动了
+   --  (和"整幅在动"要不止一处在变是同一条:一处的纹理分不开整幅挪和一块挪)
+   function Can_Judge (Img : Buf; F : Picture.Floor_Map; W, H : Natural) return Boolean;
+   --  一对图(存的 → 此刻)⇒ 没动 / 看不出 / 动了(纯函数):两张都看得出(Can_Judge)、配上的点不少于 Min_Points 才判,
+   --  判的时候没动没动照 Same(调用方按它自己那一条判法给,如 Jointboot.Same_View);判不了 = 看不出(不当成动了:身体没变、只是换了一间屋子也这样)
+   type View_Says is (Same, Unseen, Moved);
+   function View_Verdict (Judge_A, Judge_B : Boolean; Matched, Min_Points : Natural; Same : Boolean) return View_Says;
+   function Image (V : View_Says) return String;
 end Readings;

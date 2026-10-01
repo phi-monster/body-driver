@@ -39,6 +39,8 @@ procedure Find_Arms (L : in out Plug.Link; F : in out Plug.Frame; M : in out Sel
       Lied : Boolean := False;
       Lie_Note : Ada.Strings.Unbounded.Unbounded_String;
       Followers : Ints;                             --  推它时跟着变的别的组(Groups 的下标;同名的不算)
+      Blind : Ints;                                 --  看不出的眼(推之前那一张没纹理:白桌白墙;它们的判法不算数)
+      By_Prior : Boolean := False;                  --  它的眼看不出,照上一回存的认成臂(Layout.Prior_Arms)
    end record;
    --  每个命令组一格(数组,不是容器:下面到处按下标读写它的字段,容器的引用计数在条件表达式里会漏放 —— 10-01 自检里收尾时报"正被引用")
    P : array (0 .. Natural'Max (1, Nk) - 1) of Probe_Info;
@@ -91,6 +93,25 @@ procedure Find_Arms (L : in out Plug.Link; F : in out Plug.Frame; M : in out Sel
       and then A.W = D.W and then A.H = D.H and then B.W = D.W and then C.W = D.W and then B.H = D.H and then C.H = D.H);
 
    --  这一组(命令下标 K)是名字 Name_Of (K) 的第一组吗
+   --  上一回存的:这个名字是不是一条臂、长着哪只眼(-1 = 不是 / 没存)
+   function Prior_Eye (Nm : String) return Integer is
+   begin
+      for I in 0 .. Natural'Min (Natural (L.Lay.Prior_Arms.Length), Natural (L.Lay.Prior_Eyes.Length)) - 1 loop
+         if L.Lay.Prior_Arms (I) = Nm then
+            return L.Lay.Prior_Eyes (I);
+         end if;
+      end loop;
+      return -1;
+   end Prior_Eye;
+   --  量不出它是不是臂(长着它的那只眼看不出)⇒ 照存的认:存的说它是臂、长着的那只眼这一回正好看不出
+   procedure By_Prior (K : Natural; Pi : in out Probe_Info) is
+      E : constant Integer := Prior_Eye (Name_Of (K));
+   begin
+      if E >= 0 and then Pi.Blind.Contains (E) then
+         Pi.Role := Selfmap.Arm; Pi.Eyes.Clear; Pi.Eyes.Append (E); Pi.By_Prior := True;
+      end if;
+   end By_Prior;
+
    function First_Of_Name (K : Natural) return Integer is
    begin
       for K2 in 0 .. K loop
@@ -125,6 +146,7 @@ procedure Find_Arms (L : in out Plug.Link; F : in out Plug.Frame; M : in out Sel
             W_Set, P_Set : Ints;
             Unsure : Boolean := False;   --  有一只眼看见动了、分不出整幅还是一块(Readings.Undecided):推大一点再看,不先下结论
             Any_Seen : Boolean := False;
+            Blind_Set : Ints;            --  这一推看不出的眼(Readings.Can_Judge:推之前那一张没纹理)
          begin
             for K2 in 0 .. Nk - 1 loop
                if Name_Of (K2) = Name_Of (K) and then K2 < Natural (J1.Length) and then Natural (J1 (K2).Length) = N then
@@ -154,10 +176,14 @@ procedure Find_Arms (L : in out Plug.Link; F : in out Plug.Frame; M : in out Sel
                      Comps : constant Picture.Regions :=
                        Picture.Seen_Twice (F0 (C).Gray, F1 (C).Gray, F1b (C).Gray, F2 (C).Gray, Fl, F2 (C).W, F2 (C).H);
                      V : constant Readings.Eye_Verdict := Readings.Verdict (F0 (C).Gray, F1 (C).Gray, F1b (C).Gray, F2 (C).Gray, Fl, F2 (C).W, F2 (C).H);
+                     --  白桌白墙:推之前那一张没纹理(不止一处)⇒ 这只眼分不出整幅挪还是一块挪,它的判法不算数(看不出 ≠ 没动)
+                     Judge : constant Boolean := Readings.Can_Judge (F0 (C).Gray, Fl, F0 (C).W, F0 (C).H);
                   begin
                      Fr.Append (Picture.Fraction (Picture.Either (Picture.Moved (F0 (C).Gray, F1 (C).Gray, Fl), Picture.Moved (F1 (C).Gray, F2 (C).Gray, Fl))));
                      Vd.Append (Readings.Eye_Verdict'Pos (V));
-                     if not Comps.Is_Empty then
+                     if not Judge then
+                        Blind_Set.Append (C);
+                     elsif not Comps.Is_Empty then
                         Any_Seen := True;
                         if V = Readings.Whole then
                            W_Set.Append (C);
@@ -175,14 +201,19 @@ procedure Find_Arms (L : in out Plug.Link; F : in out Plug.Frame; M : in out Sel
                end if;
             end loop;
             Pi.Ever_Seen := Pi.Ever_Seen or else Any_Seen;
+            Pi.Blind := Blind_Set;
             if Any_Follow and then Any_Seen and then not Unsure and then not (W_Set.Is_Empty and then P_Set.Is_Empty)
               and then (not W_Set.Is_Empty or else Part_Once or else Try = Max_Doublings)
             then
                Decided := True;
                Pi.Reading := Integer (R); Pi.Amp := Amp; Pi.Got := Got; Pi.Frac := Fr; Pi.Verd := Vd; Pi.Eyes := W_Set; Pi.Seen := P_Set;
-               Pi.Role := (if Nc >= 2 and then Natural (W_Set.Length) = Nc then Selfmap.Carrying
+               --  扛着全身 = 看得出的眼(两只以上)都整幅在动;看不出的眼不算
+               Pi.Role := (if Nc - Natural (Blind_Set.Length) >= 2 and then Natural (W_Set.Length) = Nc - Natural (Blind_Set.Length) then Selfmap.Carrying
                            elsif not W_Set.Is_Empty then Selfmap.Arm
                            else Selfmap.Piece);
+               if Pi.Role = Selfmap.Piece then
+                  By_Prior (K, Pi);
+               end if;
                --  推它时跟着变的别的组(同名的不算):超过 Stats.Z 倍静止噪声(统计门;仿真噪声是 0 ⇒ 变了就算)
                for G in 0 .. Natural'Min (Natural (G0.Length), Natural (G1.Length)) - 1 loop
                   if Layout.Last_Seg (L.Lay.Groups (G)) /= Name_Of (K) and then Natural (G0 (G).Length) = Natural (G1 (G).Length) then
@@ -225,6 +256,10 @@ procedure Find_Arms (L : in out Plug.Link; F : in out Plug.Frame; M : in out Sel
       if not Decided then
          Pi.Amp := Amp / Grow;
          Pi.Role := (if Natural (Pi.Stuck.Length) < N then Selfmap.Mute else Selfmap.Not_Following);
+         if Pi.Role = Selfmap.Mute then
+            Pi.Reading := Integer (K);
+            By_Prior (K, Pi);   --  哪只眼里都没看见变,可存的说它是臂、它那只眼又看不出 ⇒ 照存的认
+         end if;
          return;
       end if;
       --  第 3 条(没动却不说):反方向同样大的一推 —— 读数说走到了,每只眼里却一个像素都没变(两次比较都超过地板的一个都没有)⇒ 说谎
@@ -464,6 +499,9 @@ begin
                   Bv := Pa.Frac (Natural (E)); Info.Eye := Integer (E);
                end if;
             end loop;
+            if Pa.By_Prior and then not Pa.Eyes.Is_Empty then
+               Info.Eye := Integer (Pa.Eyes (0));   --  这只眼看不出,照存的认它长在这条臂上
+            end if;
             Arms.Append (Info);
          end;
       end loop;
@@ -491,7 +529,9 @@ begin
                        & " · 每个数推 " & Codec.Fmt (Gi.Probe, 4) & " 就看得见(实到 " & Codec.Fmt (Gi.Delivered, 4) & ")"
                        & (if Gi.Eyes.Is_Empty then "" else " · 整幅跟着动的眼:第 " & Img_List (Gi.Eyes) & " 台")
                        & (if Gi.Seen_In.Is_Empty then "" else " · 只看见一块动的眼:第 " & Img_List (Gi.Seen_In) & " 台")
-                       & (if Gi.Twin >= 0 then " · 第" & Codec.Img (Natural (Gi.Twin)) & " 组是它的回声" else ""));
+                       & (if Gi.Twin >= 0 then " · 第" & Codec.Img (Natural (Gi.Twin)) & " 组是它的回声" else "")
+                       & (if Pr.Blind.Is_Empty then "" else " · 看不出的眼(没纹理):第 " & Img_List (Pr.Blind) & " 台")
+                       & (if Pr.By_Prior then " ⇒ 它那只眼看不出,照上一回存的认它是臂" else ""));
                when Selfmap.Mute =>
                   Say (Head & "🔴 接入契约第 2 条不满足:推到 " & Codec.Fmt (Pr.Amp, 4) & " 读数跟着走,哪只眼里都没变(哑巴零件:加眼睛或镜子,代码修不了)");
                when Selfmap.Not_Following =>

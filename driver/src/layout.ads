@@ -29,6 +29,10 @@ package Layout is
       N_Arms : Natural := 0;
       Closing_First, Closing_N : Ints;
       Jaw_Len : Ints;        --  Jaw 每一组几个数(开机量的那一刻;一条臂接起来的抓握目标按它切给各组)
+      --  上一回开机量出来、存在前半段文件里的:哪几组是臂(名字 = 最后一节)、各自长着哪只眼(相机号)。开机认组时有一只眼看不出
+      --  (没纹理:白桌白墙)、量不出它长在哪一组上 ⇒ 照存的认(10-01,P8I);看得出的照量的。没有存的 ⇒ 空
+      Prior_Arms : Strs;
+      Prior_Eyes : Ints;
    end record;
 
    procedure Recognise (D : Msgpack.Doc; Obs : Integer; L : out Body_Layout);
