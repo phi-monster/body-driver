@@ -41,6 +41,11 @@ package Contact.Qty is
    --  已经在那儿了(Rest_On 已经贴着它的顶面、Aim 已经指着它,差的不到不准)⇒ Ok,M 不动(Moving (M) = False),Note 说为什么
    procedure Motion (K : Kind; Dir : Integer; S : Scene; M : out Twist; Ok : out Boolean; Note : out Ada.Strings.Unbounded.Unbounded_String);
 
+   --  松手以后它还在不在原处(大并行路 5,10-01,主代理批的第 3 条):松手那一刻按手带着它算的它的中心 Before(不准 Sd_Before)、
+   --  松手、手退开以后重新量到的 After(不准 Sd_After;同一种量法:它的实心模型的形心)。挪的那段比合起来的不准的 Stats.Z 倍还长 ⇒ 它挪了
+   --  (倒了、滑了、被手带走了);不准是不是数、是不是负的 ⇒ 判不了,当挪了(不许没量出来就说它躺住了)
+   function Moved_Off (Before, After : V3; Sd_Before, Sd_After : Long_Float) return Boolean;
+
    --  Rest_On 走到哪一段了(给执行层和焊点):先往上 / 横着到正上方 / 往下 / 已经贴着(按 Bottom 和 Ref_Top、它和参照那一件的水平距离)
    type Leg is (Up_First, Over, Down, Resting, Unknown);
    function Rest_Leg (S : Scene) return Leg;

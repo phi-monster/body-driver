@@ -1378,9 +1378,25 @@ package body Act is
    --  "横" = 脑看着的那只眼的横轴;参照那一件 = 此刻看得见它的几只眼的视线交点(交点的高 = 它顶面的高:接触集的模型就是"顶面过它量到的位置")。
    --  不准:它轮廓横着的误差(Sil_Err)、它那张面高低的不准(Sil_H_Sd)、参照那一件交点沿"上"的不准(Meet_Sd)、位姿读数的抖动,合起来;
    --  长轴朝向的不准 = 轮廓点误差 × √(长轴方向的方差 / 点数) ÷ (长短两轴方差之差)(主轴的一阶扰动),Z 倍到不了直角 ⇒ 才算有长轴
+   --  它此刻的实心模型(世界系表面点):拿着它 ⇒ 合上那一刻的那份按手从那一刻起挪过的刚体运动带过来(拿住 = 抬一点它跟着手走,量过的);
+   --  没拿着 ⇒ Solid_Of(记下的顶面轮廓往下补到它躺的面,同接触集);都没有 ⇒ 空。
+   --  Rest = 它还躺在面上时的那一份(拿着的 = 合上那一刻的;没拿着的就是 Shape):它的底离面多高 = 此刻的最低点比躺着时的最低点高出多少
+   --  (模型的侧壁补到离面不到一个采样间距处为止,躺着时的最低点本来就在面上方一点 —— 量"抬起多高"要从那儿算)
+   procedure Thing_Shape (C : Context; F : Plug.Frame; Arm : Integer; Name : Unbounded_String; Shape, Rest : out Contact.V3_Vectors.Vector) is separate;
    procedure Want_Scene (C : in out Context; F : Plug.Frame; W : Want; Arm : Integer; Sc : out Contact.Qty.Scene) is separate;
    --  这一个要 ⇒ 要它怎么动(一个旋量)。量的名字按登记表(Qty_Kind);两件东西那一句的关系词各是两件之间的一个量(Contact.Qty),方向由关系词定
    procedure Want_Twist (C : in out Context; F : Plug.Frame; W : Want; Arm : Integer; M : out Contact.Twist; Ok : out Boolean; Note : out Unbounded_String) is separate;
+
+   --  手刚松开、退开以后:重新量一遍它(同走过去时那一套:这只手那只眼的窗投到它该在的地方,几只眼此刻的视线一交就是它在哪,
+   --  看全了它的眼各记一份顶面轮廓)。记下的旧轮廓是它被拿起来之前那儿的,先作废。Got = 重新记下了它的轮廓
+   procedure Measure_Again (C : in out Context; F : Plug.Frame; Arm : Natural; Name : Unbounded_String; Predicted : Geom.V3; Got : out Boolean) is separate;
+   --  ── 放下(大并行路 5,10-01,主代理批的;owner 以后不同意,撤这一处就回到"碰到面只报 resist")──
+   --  拿着它往下碰到了下面的面(只按 Selfmap.Blocked):先问物理 —— 单靠下面那张面托不托得住它(Contact.Wrench.Rests:它底下贴着面的那一片当唯一的接触,
+   --  重心按量到的不准挪一挪也托得住);托得住才松手、手退开、重新量它,看它是不是还在原处(Contact.Qty.Moved_Off,同一种量法:它的实心模型的形心);
+   --  托不住不松,照实说差多少(重心离那一片的边多远、它在哪不准多少)。它停在比它躺过的面高出量得出的那么多的地方 = 底下是一件我没量过顶面的东西,
+   --  托不托得住判不了 ⇒ 不松,照实说
+   procedure Let_Go_If_It_Rests (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Arm : Natural; W : Want; Qty : String;
+                                 Fallback_Name : Unbounded_String; Event : out Unbounded_String; Steps_Taken : in out Natural) is separate;
 
    procedure Round (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context) is separate;
 

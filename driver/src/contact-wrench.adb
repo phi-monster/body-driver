@@ -2,6 +2,7 @@ with Ada.Numerics; use Ada.Numerics;
 with Ada.Numerics.Long_Elementary_Functions; use Ada.Numerics.Long_Elementary_Functions;
 with Ada.Containers.Ordered_Maps;
 with Ada.Containers.Generic_Array_Sort;
+with Stats;
 package body Contact.Wrench is
 
    --  摩擦锥线性化的棱数(次数):第一条对准 Align 在接触面上的那一份,那个方向上是准的,别的方向内接、偏保守
@@ -482,6 +483,90 @@ package body Contact.Wrench is
       --  配平重力:这几处接触(连同面)要一起产生朝上的单位重量,绕重心的力矩为零;第一条棱对准"上"
       return Least (Ts, Com, U, [0.0, 0.0, 0.0], U, Sup, M, Mu_Hand, Mu_Surf, Why);
    end Need;
+
+   function Base_Of (Pts : V3_Vectors.Vector; Up : V3; Pitch : Long_Float) return Surface is
+      Ok : Boolean;
+      U : constant V3 := Unit (Up, Ok);
+      Lo : Long_Float := Long_Float'Last;
+      P0 : V3 := [others => 0.0];
+      Bottom : V3_Vectors.Vector;
+   begin
+      if not Ok or else Pts.Is_Empty or else not Pitch'Valid or else Pitch <= 0.0 then
+         return No_Surface;
+      end if;
+      for P of Pts loop
+         if Dot (P, U) < Lo then
+            Lo := Dot (P, U); P0 := P;
+         end if;
+      end loop;
+      for P of Pts loop
+         if Dot (P, U) <= Lo + Pitch then
+            Bottom.Append (P);
+         end if;
+      end loop;
+      return Footprint (Bottom, P0, U, Pitch);
+   end Base_Of;
+
+   procedure Rests (Sup : Surface; Com, Up : V3; Com_Sd, Mu : Long_Float; Ok : out Boolean; Margin : out Long_Float) is
+      Ou : Boolean;
+      U : constant V3 := Unit (Sup.Up, Ou);
+      E1, E2 : V3;
+      Why : Why_Kind;
+      No_Hand : Touch_Vectors.Vector;
+   begin
+      Ok := False;
+      Margin := Long_Float'First;
+      if not Sup.Present or else not Ou or else Natural (Sup.Foot.Length) < 3 or else not Com_Sd'Valid or else Com_Sd < 0.0 then
+         return;
+      end if;
+      Plane_Basis (U, E1, E2);
+      declare
+         Np : constant Natural := Natural (Sup.Foot.Length);
+         Pts : Xy_Array (0 .. Np - 1);
+      begin
+         for I in 0 .. Np - 1 loop
+            Pts (I) := (X => Dot (Sup.Foot (I), E1), Y => Dot (Sup.Foot (I), E2), K => I);
+         end loop;
+         declare
+            H : constant Idx_Array := Hull (Pts);
+            Cx : constant Long_Float := Dot (Com, E1);
+            Cy : constant Long_Float := Dot (Com, E2);
+            All_Stay : Boolean := True;
+         begin
+            if H'Length < 3 then
+               return;   --  共线:没有面积,托不住任何东西
+            end if;
+            Margin := Long_Float'Last;
+            for I in H'Range loop
+               declare
+                  A : constant V3 := Sup.Foot (H (I));
+                  B : constant V3 := Sup.Foot (H (if I = H'Last then H'First else I + 1));
+                  Ax : constant Long_Float := Dot (A, E1);
+                  Ay : constant Long_Float := Dot (A, E2);
+                  Ex : constant Long_Float := Dot (B, E1) - Ax;
+                  Ey : constant Long_Float := Dot (B, E2) - Ay;
+                  Le : constant Long_Float := Sqrt (Ex * Ex + Ey * Ey);
+               begin
+                  if Le > 0.0 then
+                     declare
+                        --  凸包是逆时针排的(单调链):边 A→B 的外法向 = 边的方向顺时针转直角
+                        Nx : constant Long_Float := Ey / Le;
+                        Ny : constant Long_Float := -Ex / Le;
+                        Out_D : constant Long_Float := (Cx - Ax) * Nx + (Cy - Ay) * Ny;   --  重心在这条边外面多远(里面为负)
+                        Shifted : constant V3 := Add (Com, Scl (Stats.Z * Com_Sd, Add (Scl (Nx, E1), Scl (Ny, E2))));
+                     begin
+                        Margin := Long_Float'Min (Margin, -Out_D);
+                        if Need (No_Hand, Shifted, Up, Sup, Still (Shifted), 0.0, Mu, Why) = No_Way then
+                           All_Stay := False;
+                        end if;
+                     end;
+                  end if;
+               end;
+            end loop;
+            Ok := All_Stay;
+         end;
+      end;
+   end Rests;
 
    function Squeeze (Ts : Touch_Vectors.Vector; L : Load; Mu : Long_Float) return Long_Float is
       Why : Why_Kind;

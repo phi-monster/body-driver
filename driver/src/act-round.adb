@@ -1750,6 +1750,109 @@ begin
       end if;
    end Wants_From_Say;
 
+   --  这只手到没到的分辨率(都是量的):位置 = 读数噪声和这只手那只眼配点噪声折到手上(这只手挪一档 = 自己那只眼里挪 1 像素,配点准到 G.Rms 像素)
+   --  两样里大的那个的 Stats.Z 倍;转动 = 读数噪声和那只眼的角度噪声(G.Rms ÷ 焦距)里大的那个的 Stats.Z 倍
+   procedure Floors (Arm : Natural; Fp, Fr : out Long_Float) is
+      Hc : constant Integer := Hand_Eye_Of (C, Integer (Arm));
+      G : constant Geom.Cam_Geo := (if Hc >= 0 then Geo_Of (C, Natural (Hc)) else Geom.No_Geo);
+   begin
+      Fp := Stats.Z * Long_Float'Max (C.Map.EE_Noise, Geo_Base (C, Arm) * G.Rms);
+      Fr := Stats.Z * Long_Float'Max (C.Map.Rot_Noise, (if G.F > 0.0 then G.Rms / G.F else 0.0));
+   end Floors;
+
+   --  沿 Dir 往前压,每步 Lstep,最多 Dist 那么远(还差不到半步就算到了:四舍五入),按 Selfmap.Blocked 认挡住(同碰桌面量指尖:
+   --  比上一步空走多少走的量超过这一步的百分之一 / 3 倍读数噪声 / 3 倍前两步空走之差);Went = 实际往 Dir 走了多少
+   --  Prev / Prev2 / N_Free 交回去:后面接着的那一条命令拿它们当底
+   procedure Press_Along (Arm : Natural; Dir : Geom.V3; Dist, Lstep, Floor_P, Floor_R : Long_Float; Hit : out Boolean; Went : out Long_Float; Limit : out Boolean;
+                          Prev, Prev2 : in out Long_Float; N_Free : in out Natural) is
+   begin
+      Hit := False; Went := 0.0; Limit := False;
+      while Went + 0.5 * Lstep < Dist loop   --  还差不到半步就算到了(四舍五入,数学)
+         declare
+            Cur : constant Plug.Arm_Pose := F.EE (Arm);
+            Av : Table.Vec := Table.Zero_Vec;
+            Pe, Re : Long_Float;
+            Rok, Mok : Boolean;
+         begin
+            for I in 0 .. 2 loop
+               Av (I) := Lstep * Dir (I);
+            end loop;
+            Plug.Reach (Arm, Chan.Compose (Cur, Av), Pe, Re, Rok);
+            if Rok and then (Pe > Floor_P or else Re > Floor_R) then
+               Limit := True;   --  这一步在量到的关节范围里反解到不了(差得比分辨率还多)
+               return;
+            end if;
+            Geo_Move (L, C, F, Arm, [Av (0), Av (1), Av (2)], Mok, Press => True);
+            Steps_Taken := Steps_Taken + 1;
+            declare
+               Now : constant Plug.Arm_Pose := F.EE (Arm);
+               Moved : constant Long_Float := (Now (0) - Cur (0)) * Dir (0) + (Now (1) - Cur (1)) * Dir (1) + (Now (2) - Cur (2)) * Dir (2);
+               Short : constant Long_Float := Lstep - Moved;
+            begin
+               Went := Went + Moved;
+               if Selfmap.Blocked (Short, Prev, Prev2, N_Free, Lstep, C.Map.EE_Noise) then
+                  Hit := True;
+                  return;
+               end if;
+               Prev2 := Prev; Prev := Short; N_Free := N_Free + 1;
+            end;
+         end;
+      end loop;
+   end Press_Along;
+
+   --  沿 Dir 一共往前 Total 那么远,碰到为止 —— 接触集往下伸、拿着它往下放都是这一条(碰到没有只有 Selfmap.Blocked 一个判法):
+   --  Dp 给的三段:带子外一条命令 Dp.Fast(比一步大才走);带子里每步 Dp.Lstep 探到 Dp.Fine_End;剩下到 Total 一条命令,挡没挡拿前面小步空走的少走量当底。
+   --  带子外那一条命令就没走完(少走得比分辨率加一步还多)= 在以为碰不到的地方就被挡住了 ⇒ Hit。Fast_Went = 带子外那一条实到多少
+   procedure Press_Toward (Arm : Natural; Dir : Geom.V3; Total : Long_Float; Dp : Descent; Floor_P, Floor_R : Long_Float;
+                           Hit, Lim : out Boolean; Went, Fast_Went : out Long_Float) is
+   begin
+      Hit := False; Lim := False; Went := 0.0; Fast_Went := 0.0;
+      if Dp.Fast > Dp.Lstep then
+         declare
+            Cur : constant Plug.Arm_Pose := F.EE (Arm);
+            Mok : Boolean;
+         begin
+            Geo_Move (L, C, F, Arm, [Dp.Fast * Dir (0), Dp.Fast * Dir (1), Dp.Fast * Dir (2)], Mok, Press => True);
+            Steps_Taken := Steps_Taken + 1;
+            declare
+               Now : constant Plug.Arm_Pose := F.EE (Arm);
+            begin
+               Fast_Went := (Now (0) - Cur (0)) * Dir (0) + (Now (1) - Cur (1)) * Dir (1) + (Now (2) - Cur (2)) * Dir (2);
+            end;
+         end;
+         if Dp.Fast - Fast_Went > Floor_P + Dp.Lstep then
+            --  带子外那一条命令就没走完:在我以为碰不到的地方就被挡住了
+            Hit := True; Went := Fast_Went;
+            return;
+         end if;
+      end if;
+      declare
+         Prev, Prev2 : Long_Float := 0.0;
+         N_Free : Natural := 0;
+      begin
+         Press_Along (Arm, Dir, Dp.Fine_End - Fast_Went, Dp.Lstep, Floor_P, Floor_R, Hit, Went, Lim, Prev, Prev2, N_Free);
+         Went := Went + Fast_Went;
+         if not Hit and then not Lim and then Went + 0.5 * Dp.Lstep < Total then
+            --  过了带子:剩下的一条命令;挡没挡,Blocked 拿前面小步空走的少走量当底
+            declare
+               Rest : constant Long_Float := Total - Went;
+               Cur : constant Plug.Arm_Pose := F.EE (Arm);
+               Mok : Boolean;
+            begin
+               Geo_Move (L, C, F, Arm, [Rest * Dir (0), Rest * Dir (1), Rest * Dir (2)], Mok, Press => True);
+               Steps_Taken := Steps_Taken + 1;
+               declare
+                  Now : constant Plug.Arm_Pose := F.EE (Arm);
+                  Moved : constant Long_Float := (Now (0) - Cur (0)) * Dir (0) + (Now (1) - Cur (1)) * Dir (1) + (Now (2) - Cur (2)) * Dir (2);
+               begin
+                  Went := Went + Moved;
+                  Hit := Selfmap.Blocked (Rest - Moved, Prev, Prev2, N_Free, Rest, C.Map.EE_Noise);
+               end;
+            end;
+         end if;
+      end;
+   end Press_Toward;
+
    --  接触集(09-29 重写,PLAN §2 ②):到它上方(两眼交点 + 指尖朝下,现成)→ 量出来的手在它的形状上挑一组(Plan_Contact)→
    --  眼转到那一组的朝向、到悬停点(下手处沿进场方向往回退一个张口)→ 每一块先合到离料还剩一点(Pre)→ 沿进场方向往下,
    --  碰到没有按 Selfmap.Blocked(同碰桌面量指尖)。下到下手那一处之前一步以上就被挡住 = 手指落在了东西上(它自己别处、旁边的东西)
@@ -1764,10 +1867,8 @@ begin
       Arm : constant Natural := Natural (Own);
       Cam1 : constant Natural := Natural (Geo_Cam);
       G : constant Geom.Cam_Geo := Geo_Of (C, Cam1);
-      --  到没到的分辨率(都是量的):位置 = 读数噪声和这只眼配点噪声折到手上(这只手挪一档 = 自己那只眼里挪 1 像素,配点准到 G.Rms 像素)
-      --  两样里大的那个的 Stats.Z 倍;转动 = 读数噪声和这只眼的角度噪声(G.Rms ÷ 焦距)里大的那个的 Stats.Z 倍
-      Floor_P : constant Long_Float := Stats.Z * Long_Float'Max (C.Map.EE_Noise, Geo_Base (C, Arm) * G.Rms);
-      Floor_R : constant Long_Float := Stats.Z * Long_Float'Max (C.Map.Rot_Noise, (if G.F > 0.0 then G.Rms / G.F else 0.0));
+      --  到没到的分辨率(Floors,量的)
+      Floor_P, Floor_R : Long_Float;
       Pick : Contact.Search.Candidate;
       Note : Unbounded_String;
       Pok : Boolean;
@@ -1817,45 +1918,6 @@ begin
             end;
          end loop;
       end Eye_To;
-      --  沿 Dir 往下压,每步 Lstep,最多 Dist 那么深(还差不到半步就算到了:四舍五入),按 Selfmap.Blocked 认挡住(同碰桌面量指尖:
-      --  比上一步空走多少走的量超过这一步的百分之一 / 3 倍读数噪声 / 3 倍前两步空走之差);Went = 实际往 Dir 走了多少
-      --  Prev / Prev2 / N_Free 交回去:后面接着的那一条命令拿它们当底
-      procedure Press_Along (Dir : Geom.V3; Dist, Lstep : Long_Float; Hit : out Boolean; Went : out Long_Float; Limit : out Boolean;
-                             Prev, Prev2 : in out Long_Float; N_Free : in out Natural) is
-      begin
-         Hit := False; Went := 0.0; Limit := False;
-         while Went + 0.5 * Lstep < Dist loop   --  还差不到半步就算到了(四舍五入,数学)
-            declare
-               Cur : constant Plug.Arm_Pose := F.EE (Arm);
-               Av : Table.Vec := Table.Zero_Vec;
-               Pe, Re : Long_Float;
-               Rok, Mok : Boolean;
-            begin
-               for I in 0 .. 2 loop
-                  Av (I) := Lstep * Dir (I);
-               end loop;
-               Plug.Reach (Arm, Chan.Compose (Cur, Av), Pe, Re, Rok);
-               if Rok and then (Pe > Floor_P or else Re > Floor_R) then
-                  Limit := True;   --  这一步在量到的关节范围里反解到不了(差得比分辨率还多)
-                  return;
-               end if;
-               Geo_Move (L, C, F, Arm, [Av (0), Av (1), Av (2)], Mok, Press => True);
-               Steps_Taken := Steps_Taken + 1;
-               declare
-                  Now : constant Plug.Arm_Pose := F.EE (Arm);
-                  Moved : constant Long_Float := (Now (0) - Cur (0)) * Dir (0) + (Now (1) - Cur (1)) * Dir (1) + (Now (2) - Cur (2)) * Dir (2);
-                  Short : constant Long_Float := Lstep - Moved;
-               begin
-                  Went := Went + Moved;
-                  if Selfmap.Blocked (Short, Prev, Prev2, N_Free, Lstep, C.Map.EE_Noise) then
-                     Hit := True;
-                     return;
-                  end if;
-                  Prev2 := Prev; Prev := Short; N_Free := N_Free + 1;
-               end;
-            end;
-         end loop;
-      end Press_Along;
       --  每一个尖此刻在世界里在哪(挡住时记进 C.Bumps)
       procedure Note_Tips_As_Bumps is
          P : constant Plug.Arm_Pose := F.EE (Arm);
@@ -1872,6 +1934,7 @@ begin
       end Note_Tips_As_Bumps;
       Tried : Contact.V3_Vectors.Vector;   --  挑过的下手处(眼的位置):又挑回同一处 = 候选里没有新的了
    begin
+      Floors (Arm, Floor_P, Floor_R);
       Grasp_Valid := False;
       Geo_Approach (L, C, F, Cam1, Arm, Geo_Slot_Now, 0, Ev1, St1, Bt1, Above => True, Amt => Amt, Until_Touch => False, Name => Geo_Name);
       if Index (Ev1, "reset:") = 1 then
@@ -1992,54 +2055,11 @@ begin
                end loop;
                Dp := Plan_Descent (Stand, (if C.Sil_Pts.Is_Empty then 0.0 else X_Tip - X_Top), C.Sil_Err, C.Sil_H_Sd, An, G.Tip_Sd, Miss, C.Map.EE_Noise, Floor_P);
                Band := Dp.Band; Lstep := Dp.Lstep; Fast := Dp.Fast;
-               if Fast > Lstep then
-                  declare
-                     Cur : constant Plug.Arm_Pose := F.EE (Arm);
-                     Mok : Boolean;
-                  begin
-                     Geo_Move (L, C, F, Arm, [Fast * A (0), Fast * A (1), Fast * A (2)], Mok, Press => True);
-                     Steps_Taken := Steps_Taken + 1;
-                     declare
-                        Now : constant Plug.Arm_Pose := F.EE (Arm);
-                     begin
-                        Fast_Went := (Now (0) - Cur (0)) * A (0) + (Now (1) - Cur (1)) * A (1) + (Now (2) - Cur (2)) * A (2);
-                     end;
-                  end;
-               end if;
+               Press_Toward (Arm, A, Stand, Dp, Floor_P, Floor_R, Hit, Lim, Went, Fast_Went);
                Put_Line ("[身] ✋ 往下伸:可能碰到它的那条带子半宽 " & (if Band < Long_Float'Last then Mm (Band) else "(它顶面高低量不出)")
                          & "(顶面横着 " & Mm (C.Sil_Err) & "、高低 " & (if C.Sil_H_Sd < Long_Float'Last then Mm (C.Sil_H_Sd) else "量不出") & "、尖 " & Mm (G.Tip_Sd) & "、到位 " & Mm (Miss)
-                         & ",合起来的 " & Codec.Fmt (Stats.Z, 0) & " 倍)⇒ 先一条命令下 " & Mm (Fast_Went) & ",再每步 " & Mm (Lstep) & " 探到 " & Mm (Dp.Fine_End)
-                         & "(尖过了它顶面那一层),剩下的一条命令");
-               if Fast > Lstep and then Fast - Fast_Went > Floor_P + Lstep then
-                  --  带子外那一条命令就没走完:在我以为碰不到它的地方就被挡住了(它顶面比量到的高、或旁边有东西)
-                  Hit := True; Went := Fast_Went; Lim := False;
-               else
-                  declare
-                     Prev, Prev2 : Long_Float := 0.0;
-                     N_Free : Natural := 0;
-                  begin
-                     Press_Along (A, Dp.Fine_End - Fast_Went, Lstep, Hit, Went, Lim, Prev, Prev2, N_Free);
-                     Went := Went + Fast_Went;
-                     if not Hit and then not Lim and then Went + 0.5 * Lstep < Stand then
-                        --  尖过了它顶面那一层、在它两边了:剩下到下手处一条命令;挡没挡,Blocked 拿前面小步空走的少走量当底
-                        declare
-                           Rest : constant Long_Float := Stand - Went;
-                           Cur : constant Plug.Arm_Pose := F.EE (Arm);
-                           Mok : Boolean;
-                        begin
-                           Geo_Move (L, C, F, Arm, [Rest * A (0), Rest * A (1), Rest * A (2)], Mok, Press => True);
-                           Steps_Taken := Steps_Taken + 1;
-                           declare
-                              Now : constant Plug.Arm_Pose := F.EE (Arm);
-                              Moved : constant Long_Float := (Now (0) - Cur (0)) * A (0) + (Now (1) - Cur (1)) * A (1) + (Now (2) - Cur (2)) * A (2);
-                           begin
-                              Went := Went + Moved;
-                              Hit := Selfmap.Blocked (Rest - Moved, Prev, Prev2, N_Free, Rest, C.Map.EE_Noise);
-                           end;
-                        end;
-                     end if;
-                  end;
-               end if;
+                         & ",合起来的 " & Codec.Fmt (Stats.Z, 0) & " 倍)⇒ 先一条命令下 " & Mm (Fast_Went) & (if Fast > Lstep then "" else "(带子外不到一步,没走)")
+                         & ",再每步 " & Mm (Lstep) & " 探到 " & Mm (Dp.Fine_End) & "(尖过了它顶面那一层),剩下的一条命令");
                Put_Line ("[身] ✋ 沿进场方向往下 " & Mm (Went) & "(要 " & Mm (Stand) & ")" & (if Lim then ",再往下在量到的关节限位里解不出来"
                          elsif Hit then ",被挡住" else ",下到了"));
                if Hit and then Went < Stand - Lstep then
@@ -2085,6 +2105,8 @@ begin
       end loop;
       Empty_Now := Have_R and then Found and then Past_Empty (Hf, R_Now) <= C.Map.Jaw_Noise;
    end Grip_State;
+
+   function Dot3 (A, B : Geom.V3) return Long_Float is (A (0) * B (0) + A (1) * B (1) + A (2) * B (2));
 
    --  改手里东西的一个角度量:绕要的那根轴(过它的中心,M.Pivot)转一个单位 = 开机量的"一条命令转得到的最大一档"(这只手那只眼的 Stride_Rot)× 脑的档位。
    --  手和它一起绕同一根轴转(拿住 = 它跟着手走):手的位置绕那一点转过去、朝向转同一个角,一条命令(Selfmap.Step)。
@@ -2194,6 +2216,47 @@ begin
             Contact.Exec.Steps (S2, (Standoff_M => Geo_Base (C, Arm), Repeat_M => Geo_Base (C, Arm)), True, 1, St, Why);
             Geo_Say ("接触集:改它的量(" & Qty & ")= " & Codec.Img (Natural (S2.Points.Length)) & " 个接触点平移 " & Mm (Ln) & " ⇒ "
                      & (if Why.Kind = Contact.Exec.Fine then "航点 " & Codec.Img (Natural (St.Length)) & " 步" else "航点排不出:" & Contact.Exec.Img (Why) & ",照走,走完看手指读数"));
+         end;
+      end if;
+      --  要的动有一份朝它躺的面(往下):它的底可能在这一个单位里碰到下面的面 ⇒ 按碰到为止走(Press_Toward,同接触集往下伸),碰到了交给 Let_Go_If_It_Rests
+      if Dot3 (Nn, Up_Dir (C)) < 0.0 then
+         declare
+            W0 : constant Want := (if C.Wants.Is_Empty then (others => <>) else C.Wants.First_Element);
+            Sc : Contact.Qty.Scene;
+            Fp, Fr : Long_Float;
+            Dn : constant Long_Float := -Dot3 (Nn, Up_Dir (C));
+            Hit, Lim : Boolean;
+            Gone, Fw : Long_Float;
+            Dp : Descent;
+         begin
+            Want_Scene (C, F, W0, Integer (Arm), Sc);
+            Floors (Arm, Fp, Fr);
+            --  带子:它的底沿要的方向离面还有 Bottom ÷ Dn;它底多高不准(Sd,同"要它怎么动"那一份)按 Stats.Z 倍,折到要的方向上;
+            --  带子里一步 = 手自己的不准(读数噪声的 Stats.Z 倍)÷ Blocked 要的空走步数,不细过这只手的分辨率(同 Plan_Descent)
+            Dp.Lstep := Long_Float'Max (Stats.Z * C.Map.EE_Noise / Long_Float (Selfmap.Free_Base), Fp);
+            if Sc.Has_Bottom then
+               Dp.Band := Stats.Z * Sc.Sd / Dn;
+               Dp.Fast := Sc.Bottom / Dn - Dp.Band - Long_Float (Selfmap.Free_Base) * Dp.Lstep;
+               Dp.Fine_End := Long_Float'Min (Ln, Sc.Bottom / Dn + Dp.Band);
+            else
+               --  它的底多高量不出(没有它的形状):没有"碰不到"的那一段,全程小步探(照实说)
+               Dp.Band := Long_Float'Last; Dp.Fast := 0.0; Dp.Fine_End := Ln;
+            end if;
+            if Sc.Has_Bottom and then Dp.Fast >= Ln then
+               null;   --  这一个单位里它的底碰不到面(带子都在这一个单位外面)⇒ 照常一条命令(下面)
+            else
+               Press_Toward (Arm, Nn, Ln, Dp, Fp, Fr, Hit, Lim, Gone, Fw);
+               Geo_Say ("拿着它往下:它的底离面 " & (if Sc.Has_Bottom then Mm (Sc.Bottom) else "(量不出)") & "、带子半宽 " & (if Dp.Band < Long_Float'Last then Mm (Dp.Band) else "(量不出)")
+                        & " ⇒ 走了 " & Mm (Gone) & (if Hit then ",碰到了" elsif Lim then ",再往下在量到的关节范围里解不出来" else ",没碰到"));
+               if Hit then
+                  Let_Go_If_It_Rests (L, C, F, Arm, W0, Qty, Geo_Name, Event, Steps_Taken);
+               elsif Lim then
+                  Event := S ("resist: I moved it " & Len (C, Gone) & " along the direction that changes its " & Qty & " and my arm cannot go further that way from here; it is still between my fingers");
+               else
+                  Event := S ("settled: I moved it " & Len (C, Gone) & " along the direction that changes its " & Qty & "; nothing stopped it and it is still between my fingers");
+               end if;
+               return;
+            end if;
          end;
       end if;
       Geo_Move (L, C, F, Arm, Dw, Mok);
