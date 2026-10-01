@@ -113,6 +113,15 @@ procedure Sweep_All (L : in out Plug.Link; F : in out Plug.Frame; M : Selfmap.Bo
       Why : Unbounded_String;
       Ids : Ints;                              --  每一格在仪器那边的编号
       Heads : Head_Vectors.Vector;
+      --  ── 扫描时身前不一定是空的(路 1,10-01 P8A:右臂扫第 2 个关节时撞上柜子把手,第 2 个关节一格就被带偏 1.24 rad、卡在那儿,
+      --  后面每一段都从卡住的地方出发,22 格里一大半是卡着的,运动学没量成)──
+      Last_Ok : Floats;                        --  这一段里最后一格干净的目标(段头 = 起点):碰上了就先退回这儿
+      Collided : Boolean := False;             --  碰上过东西、还没确认退回了起点:下一段 / 下一格之前先退回去
+      Stuck : Boolean := False;                --  退不回起点(一根一根往回挪也挪不动了):这只手不再扫,照实说
+      Retry : Boolean := False;                --  这一段头一格就碰上了 ⇒ 退回去,按小一半的步子重来这一段
+      Min_Step : Long_Float := 0.0;            --  步子最小缩到多少:认手时这组读数一起转多少就看得见(Arm_Info.Probe,量的)
+      Kept_Lo, Kept_Hi : Ints;                 --  每个关节往负 / 往正留下了几格干净的
+      Hit_Lo, Hit_Hi : Bools;                  --  每个关节往负 / 往正最后是碰上东西停的(不是走满、不是关节到头)
    end record;
    St : array (0 .. Natural'Max (1, Na) - 1) of Arm_State;
    --  这一格在仪器那边存成了没有
@@ -224,6 +233,94 @@ procedure Sweep_All (L : in out Plug.Link; F : in out Plug.Frame; M : Selfmap.Bo
       Selfmap.Go (L, M, 0, [others => 0.0], F64_Vectors.Empty_Vector, F, Dl, Fr, Okc, Groups => Gs, Qs => Qs, Tol => Tol,
                   Tols => (if Swept >= 0 then Ts else Plug.Floats_Vectors.Empty_Vector));
    end Move_All;
+   --  这只手此刻每个关节离起点都不到"画面挪不到 1 像素"那一档(Kinem.Clean_Tol,同收格子)
+   function At_Start (A : Natural) return Boolean is
+      Sa : Arm_State renames St (A);
+      Ct : constant Long_Float := Kinem.Clean_Tol (Long_Float (Sa.W));
+   begin
+      for X in 0 .. Natural (Sa.Q0.Length) - 1 loop
+         if X >= Natural (F.Joints (Sa.G).Length) or else abs (F.Joints (Sa.G) (X) - Sa.Q0 (X)) > Ct then
+            return False;
+         end if;
+      end loop;
+      return True;
+   end At_Start;
+   --  碰上过东西的手先退回起点(别的手停在各自此刻的目标上,不动):整组回起点;回不去(挡着的东西卡在原路上)⇒ 一根一根往回挪,
+   --  离起点最远的先挪;一整轮挪下来"在起点上的关节"一根都没多 ⇒ 不再挪 = 卡住了:这只手不再扫(Stuck),照实说卡在哪。
+   --  (在起点上的关节每一轮只许多、不许持平,根数有限 ⇒ 最多挪关节数那么多轮)
+   procedure Recover (A : Natural) is
+      Sa : Arm_State renames St (A);
+      Ct : constant Long_Float := Kinem.Clean_Tol (Long_Float (Sa.W));
+      function Off_Of (X : Natural) return Long_Float is (abs (F.Joints (Sa.G) (X) - Sa.Q0 (X)));
+      function Home_Count return Natural is
+         N : Natural := 0;
+      begin
+         for X in 0 .. Natural (Sa.Q0.Length) - 1 loop
+            if Off_Of (X) <= Ct then
+               N := N + 1;
+            end if;
+         end loop;
+         return N;
+      end Home_Count;
+   begin
+      if not Sa.Live or else not Sa.Collided or else Sa.Stuck then
+         return;
+      end if;
+      Sa.Collided := False;
+      Sa.Tgt := Sa.Q0;
+      Move_All (Ct);
+      while Okc and then not At_Start (A) loop
+         declare
+            Before : constant Natural := Home_Count;
+            Done_X : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (Natural (Sa.Q0.Length)));
+         begin
+            loop
+               declare
+                  Far : Integer := -1;
+                  Far_Off : Long_Float := Ct;
+               begin
+                  for X in 0 .. Natural (Sa.Q0.Length) - 1 loop
+                     if not Done_X (X) and then Off_Of (X) > Far_Off then
+                        Far := X; Far_Off := Off_Of (X);
+                     end if;
+                  end loop;
+                  exit when Far < 0;
+                  Done_X.Replace_Element (Natural (Far), True);
+                  Sa.Tgt := F.Joints (Sa.G);                       --  别的关节就停在此刻的读数上
+                  Sa.Tgt.Replace_Element (Natural (Far), Sa.Q0 (Natural (Far)));
+                  Move_All (Ct);
+                  exit when not Okc;
+               end;
+            end loop;
+            exit when Home_Count <= Before;
+         end;
+      end loop;
+      if Okc and then not At_Start (A) then
+         Sa.Stuck := True;
+         Sa.Tgt := F.Joints (Sa.G);   --  卡住了就停在此刻的读数上,不再往挡着的东西里压
+         declare
+            T : Unbounded_String;
+         begin
+            for X in 0 .. Natural (Sa.Q0.Length) - 1 loop
+               if Off_Of (X) > Ct then
+                  Append (T, " 第" & Codec.Img (X) & " 个关节停在 " & Codec.Fmt (F.Joints (Sa.G) (X), 4) & "(起点 " & Codec.Fmt (Sa.Q0 (X), 4) & ")");
+               end if;
+            end loop;
+            Say ("  第" & Codec.Img (A + 1) & " 只手碰上东西以后退不回起点(整组退、一根一根退都挪不动了):" & To_String (T) & " ⇒ 这只手不再扫,后面的格子它都没有");
+         end;
+      elsif Okc then
+         Sa.Tgt := Sa.Q0;
+         Say ("  第" & Codec.Img (A + 1) & " 只手碰上东西以后退回了起点(每个关节离起点都不到 " & Codec.Fmt (Ct, 5) & ")");
+      end if;
+   end Recover;
+   --  这一段从起点重新开始(步子按调用方给的;碰上过东西、头一格就碰上的那一段按小一半的步子重来时步子不重置)
+   procedure Start_Segment (A, J : Natural) is
+      Sa : Arm_State renames St (A);
+   begin
+      Sa.Off := 0.0; Sa.K := 0; Sa.Tgt := Sa.Q0; Sa.Q_Prev := F.Joints (Sa.G) (J); Sa.Px_Per := 0.0;
+      Sa.Why := To_Unbounded_String ("走满 3 格");
+      Sa.Last_Ok := Sa.Q0;
+   end Start_Segment;
 begin
    Ds.Clear; Css.Clear;
    for A in 0 .. Na - 1 loop
@@ -270,6 +367,18 @@ begin
          end if;
       end;
    end if;
+   for A in 0 .. Na - 1 loop
+      if St (A).Live then
+         declare
+            Sa : Arm_State renames St (A);
+            Nq : constant Ada.Containers.Count_Type := Ada.Containers.Count_Type (Natural (Sa.Q0.Length));
+         begin
+            Sa.Min_Step := Arms (A).Probe;
+            Sa.Kept_Lo := Int_Vectors.To_Vector (0, Nq); Sa.Kept_Hi := Int_Vectors.To_Vector (0, Nq);
+            Sa.Hit_Lo := Bool_Vectors.To_Vector (False, Nq); Sa.Hit_Hi := Bool_Vectors.To_Vector (False, Nq);
+         end;
+      end if;
+   end loop;
    for J in 0 .. Nj - 1 loop
       for Dd in -1 .. 1 loop
          if Dd /= 0 then
@@ -277,98 +386,155 @@ begin
                declare
                   Sa : Arm_State renames St (A);
                begin
-                  Sa.Done := not Sa.Live or else J >= Natural (Sa.Q0.Length);
+                  Recover (A);   --  上一段碰上过东西:先退回起点(退不回 ⇒ Stuck,不再扫)
+                  Sa.Done := not Sa.Live or else Sa.Stuck or else J >= Natural (Sa.Q0.Length);
                   if not Sa.Done then
                      --  起步 = 读数量级的 3%(比例,无量纲),按画面挪动放大。目标里别的关节都回起点:上一段转完不单独回起点,
                      --  回去和这一段的头一格是同一个动作(到没到按这一格的三分之一判,所有关节一起看)
                      Sa.Step := 0.03 * Long_Float'Max (1.0, abs Sa.Q0 (J));
-                     Sa.Off := 0.0; Sa.K := 0; Sa.Tgt := Sa.Q0; Sa.Q_Prev := F.Joints (Sa.G) (J); Sa.Px_Per := 0.0;
-                     Sa.Why := To_Unbounded_String ("走满 3 格");
+                     Start_Segment (A, J);
                   end if;
                end;
             end loop;
-            loop
+            loop   --  一段走完;头一格就碰上东西的手退回去、步子小一半,这一段只为它们再走一遍,直到没有要重来的
+               loop
+                  declare
+                     Any : Boolean := False;
+                     Tol : Long_Float := Long_Float'Last;
+                  begin
+                     for A in 0 .. Na - 1 loop
+                        declare
+                           Sa : Arm_State renames St (A);
+                        begin
+                           if not Sa.Done then
+                              Any := True;
+                              Sa.K := Sa.K + 1;
+                              Sa.Off := Sa.Off + Sa.Step;
+                              Sa.Tgt.Replace_Element (J, Sa.Q0 (J) + Long_Float (Dd) * Sa.Off);
+                              Tol := Long_Float'Min (Tol, Sa.Step * Third);   --  到了 = 差不到这一格的三分之一(比例,同"被顶住")
+                           end if;
+                        end;
+                     end loop;
+                     exit when not Any;
+                     Move_All (Tol, Swept => Integer (J));
+                     exit when not Okc;
+                     for A in 0 .. Na - 1 loop
+                        declare
+                           Sa : Arm_State renames St (A);
+                        begin
+                           if not Sa.Done then
+                              declare
+                                 Got : constant Long_Float := abs (F.Joints (Sa.G) (J) - Sa.Q_Prev);
+                                 Pushed : Long_Float := 0.0;
+                                 Kp : Natural := 0;
+                                 --  扫的这根冲过了这一格的目标多少(沿命令的方向;负 = 没到):被别的东西带着走的那一种"没对上"
+                                 Over : constant Long_Float := Long_Float (Dd) * (F.Joints (Sa.G) (J) - Sa.Tgt (J));
+                                 Hit : Boolean;
+                              begin
+                                 for X in 0 .. Natural (Sa.Q0.Length) - 1 loop
+                                    if X /= J and then abs (F.Joints (Sa.G) (X) - Sa.Q0 (X)) > Pushed then
+                                       Pushed := abs (F.Joints (Sa.G) (X) - Sa.Q0 (X)); Kp := X;
+                                    end if;
+                                 end loop;
+                                 --  碰上东西 = 命令和读数对不上、又不是"这根自己到头":别的关节被顶偏超过这一格的三分之一(同 Sweep_Stops),
+                                 --  或者扫的这根冲过了目标、超过同一个三分之一(被挡着的东西带着走:P8A 第 2 只手命令 −0.15、一格冲到 −1.237)
+                                 Hit := (Sweep_Stops (Got, Pushed, Sa.Step) and then not Sweep_Stop_Is_End (Got, Pushed, Sa.Step))
+                                        or else Over > Sa.Step * Third;
+                                 if Hit then
+                                    --  这一格不进运动学(读数是被挡着的东西顶出来的、画面可能正被它挡着);目标立刻改回这一段最后一格干净的地方 ——
+                                    --  别的手接着扫的每一条命令都把它往回带;下一段之前再核一遍退没退到起点(Recover)
+                                    Sa.Why := To_Unbounded_String ("碰上东西了:" & (if Over > Sa.Step * Third
+                                                                   then "扫的这根冲过了目标 " & Codec.Fmt (Over, 4)
+                                                                   else "第" & Codec.Img (Kp) & " 个关节被顶偏 " & Codec.Fmt (Pushed, 4))
+                                                                   & "(这一格命令 " & Codec.Fmt (Sa.Step, 4) & ";这一格不进运动学,不记界)");
+                                    Sa.Done := True;
+                                    Sa.Collided := True;
+                                    Sa.Tgt := Sa.Last_Ok;
+                                    if Dd < 0 then
+                                       Sa.Hit_Lo.Replace_Element (J, True);
+                                    else
+                                       Sa.Hit_Hi.Replace_Element (J, True);
+                                    end if;
+                                    --  这一边一格干净的都还没留下 ⇒ 按小一半的步子再来(不小过认手时看得见的那一推:再小画面里分不出动没动)
+                                    if Sa.K = 1 and then Sa.Step / Grow >= Sa.Min_Step then
+                                       Sa.Retry := True;
+                                    end if;
+                                 else
+                                    Keep (A, J, Dd, Sa.K);
+                                    Sa.Last_Ok := Sa.Tgt;
+                                    if Dd < 0 then
+                                       Sa.Kept_Lo.Replace_Element (J, Sa.Kept_Lo (J) + 1);
+                                    else
+                                       Sa.Kept_Hi.Replace_Element (J, Sa.Kept_Hi (J) + 1);
+                                    end if;
+                                    if Sa.K = 1 then
+                                       Sa.Heads.Append (Head'(Frame => Natural (Ds (A).Frames.Length) - 1, Joint => J));
+                                    end if;
+                                    if Sweep_Stops (Got, Pushed, Sa.Step) then
+                                       --  只剩"这个关节自己停住、别的关节没被顶偏"= 它这一边的界(反解不过这儿);碰上东西的那一种在上面
+                                       --  (owner 09-28 到过的范围:"被桌子挡住这种'转不过去'本来就不是关节尽头")
+                                       Sa.Why := To_Unbounded_String ("关节到头(命令 " & Codec.Fmt (Sa.Step, 4) & ",实到 " & Codec.Fmt (Got, 4) & ";这一边记界)");
+                                       Sa.Done := True;
+                                       if J < Natural (Ds (A).Has_Lo.Length) then
+                                          if Dd < 0 then
+                                             Ds (A).Has_Lo.Replace_Element (J, True);
+                                          else
+                                             Ds (A).Has_Hi.Replace_Element (J, True);
+                                          end if;
+                                       end if;
+                                    elsif Sa.K >= 3 then   --  最多 3 格(次数;5 分钟一炮)
+                                       Sa.Done := True;
+                                    else
+                                       if Sa.Px_Per > 0.0 then
+                                          --  下一格按这一格画面挪的(头一格那一对配点量的"每个读数单位挪几像素" × 这一格的步子)放大 / 缩小,
+                                          --  一次最多四倍、最少减半(倍数,无量纲);没量到就不改
+                                          Sa.Step := Sa.Step * Long_Float'Max (0.5, Long_Float'Min (Ramp, Gw_Of (A) / (Sa.Step * Sa.Px_Per)));
+                                       end if;
+                                       Sa.Q_Prev := F.Joints (Sa.G) (J);
+                                    end if;
+                                 end if;
+                                 if Sa.Done then
+                                    Say ("  第" & Codec.Img (A + 1) & " 只手第" & Codec.Img (J) & " 个关节往" & (if Dd > 0 then "正" else "负") & "转了 " & Codec.Img (Sa.K)
+                                         & " 格(累计 " & Codec.Fmt (Sa.Off, 3) & ")⇒ 停:" & To_String (Sa.Why)
+                                         & (if Sa.Retry then " ⇒ 退回去,步子小一半再来" else ""));
+                                    --  这一边最后一格命令的步子 = 往到过的范围外最多走的那一步(到过的范围:身体开机时一条命令走过的量)
+                                    if J < Natural (Ds (A).Step_Lo.Length) and then not Hit then
+                                       if Dd < 0 then
+                                          Ds (A).Step_Lo.Replace_Element (J, Sa.Step);
+                                       else
+                                          Ds (A).Step_Hi.Replace_Element (J, Sa.Step);
+                                       end if;
+                                    end if;
+                                 end if;
+                              end;
+                           end if;
+                        end;
+                     end loop;
+                  end;
+               end loop;
+               exit when not Okc;
                declare
-                  Any : Boolean := False;
-                  Tol : Long_Float := Long_Float'Last;
+                  Again : Boolean := False;
                begin
                   for A in 0 .. Na - 1 loop
                      declare
                         Sa : Arm_State renames St (A);
                      begin
-                        if not Sa.Done then
-                           Any := True;
-                           Sa.K := Sa.K + 1;
-                           Sa.Off := Sa.Off + Sa.Step;
-                           Sa.Tgt.Replace_Element (J, Sa.Q0 (J) + Long_Float (Dd) * Sa.Off);
-                           Tol := Long_Float'Min (Tol, Sa.Step * Third);   --  到了 = 差不到这一格的三分之一(比例,同"被顶住")
+                        if Sa.Retry then
+                           Sa.Retry := False;
+                           Recover (A);
+                           if not Sa.Stuck then
+                              Sa.Step := Sa.Step / Grow;
+                              Start_Segment (A, J);
+                              Sa.Done := False;
+                              Again := True;
+                           end if;
+                        else
+                           Sa.Done := True;   --  别的手这一段已经走完,不再跟着走
                         end if;
                      end;
                   end loop;
-                  exit when not Any;
-                  Move_All (Tol, Swept => Integer (J));
-                  exit when not Okc;
-                  for A in 0 .. Na - 1 loop
-                     declare
-                        Sa : Arm_State renames St (A);
-                     begin
-                        if not Sa.Done then
-                           declare
-                              Got : constant Long_Float := abs (F.Joints (Sa.G) (J) - Sa.Q_Prev);
-                              Pushed : Long_Float := 0.0;
-                              Kp : Natural := 0;
-                           begin
-                              for X in 0 .. Natural (Sa.Q0.Length) - 1 loop
-                                 if X /= J and then abs (F.Joints (Sa.G) (X) - Sa.Q0 (X)) > Pushed then
-                                    Pushed := abs (F.Joints (Sa.G) (X) - Sa.Q0 (X)); Kp := X;
-                                 end if;
-                              end loop;
-                              Keep (A, J, Dd, Sa.K);
-                              if Sa.K = 1 then
-                                 Sa.Heads.Append (Head'(Frame => Natural (Ds (A).Frames.Length) - 1, Joint => J));
-                              end if;
-                              if Sweep_Stops (Got, Pushed, Sa.Step) then
-                                 --  没转到命令的三分之一(比例):到头;别的关节被顶偏超过这一格的三分之一(比例,同上):碰上东西了 —— 都不再往里压。
-                                 --  只有"这个关节自己停住、别的关节没被顶偏"才是它这一边的界(反解不过这儿)。碰上东西了 = 手压在桌子 / 东西上,
-                                 --  换个姿势这个关节照样转得过去,不记界(owner 09-28 到过的范围:"被桌子挡住这种'转不过去'本来就不是关节尽头";
-                                 --  H4:人形第 0、3 关节往正碰桌记成了界,第二只手手指朝下再往前伸 15 cm 按这两道界解不出来,按仿真的真尽头解得出)
-                                 Sa.Why := To_Unbounded_String (if not Sweep_Stop_Is_End (Got, Pushed, Sa.Step)
-                                                                then "碰上东西了:第" & Codec.Img (Kp) & " 个关节被顶偏 " & Codec.Fmt (Pushed, 4) & "(这一格命令 " & Codec.Fmt (Sa.Step, 4) & ";不是关节到头,不记界)"
-                                                                else "关节到头(命令 " & Codec.Fmt (Sa.Step, 4) & ",实到 " & Codec.Fmt (Got, 4) & ";这一边记界)");
-                                 Sa.Done := True;
-                                 if Sweep_Stop_Is_End (Got, Pushed, Sa.Step) and then J < Natural (Ds (A).Has_Lo.Length) then
-                                    if Dd < 0 then
-                                       Ds (A).Has_Lo.Replace_Element (J, True);
-                                    else
-                                       Ds (A).Has_Hi.Replace_Element (J, True);
-                                    end if;
-                                 end if;
-                              elsif Sa.K >= 3 then   --  最多 3 格(次数;5 分钟一炮)
-                                 Sa.Done := True;
-                              else
-                                 if Sa.Px_Per > 0.0 then
-                                    --  下一格按这一格画面挪的(头一格那一对配点量的"每个读数单位挪几像素" × 这一格的步子)放大 / 缩小,
-                                    --  一次最多四倍、最少减半(倍数,无量纲);没量到就不改
-                                    Sa.Step := Sa.Step * Long_Float'Max (0.5, Long_Float'Min (Ramp, Gw_Of (A) / (Sa.Step * Sa.Px_Per)));
-                                 end if;
-                                 Sa.Q_Prev := F.Joints (Sa.G) (J);
-                              end if;
-                              if Sa.Done then
-                                 Say ("  第" & Codec.Img (A + 1) & " 只手第" & Codec.Img (J) & " 个关节往" & (if Dd > 0 then "正" else "负") & "转了 " & Codec.Img (Sa.K)
-                                      & " 格(累计 " & Codec.Fmt (Sa.Off, 3) & ")⇒ 停:" & To_String (Sa.Why));
-                                 --  这一边最后一格命令的步子 = 往到过的范围外最多走的那一步(到过的范围:身体开机时一条命令走过的量)
-                                 if J < Natural (Ds (A).Step_Lo.Length) then
-                                    if Dd < 0 then
-                                       Ds (A).Step_Lo.Replace_Element (J, Sa.Step);
-                                    else
-                                       Ds (A).Step_Hi.Replace_Element (J, Sa.Step);
-                                    end if;
-                                 end if;
-                              end if;
-                           end;
-                        end if;
-                     end;
-                  end loop;
+                  exit when not Again;
                end;
             end loop;
          end if;
@@ -400,7 +566,10 @@ begin
             Tol : Long_Float := Long_Float'Last;
          begin
             for A in 0 .. Na - 1 loop
-               if St (A).Live then
+               Recover (A);   --  上一格碰上东西的手先退回起点(退不回 ⇒ Stuck:不再走这些格)
+            end loop;
+            for A in 0 .. Na - 1 loop
+               if St (A).Live and then not St (A).Stuck then
                   for Jx in 0 .. Natural (St (A).Q0.Length) - 1 loop
                      declare
                         Sa : Arm_State renames St (A);
@@ -420,7 +589,7 @@ begin
             Move_All ((if Tol < Long_Float'Last then Tol else 0.0));
             exit when not Okc;
             for A in 0 .. Na - 1 loop
-               if St (A).Live then
+               if St (A).Live and then not St (A).Stuck then
                   declare
                      Miss : Long_Float := 0.0;
                      Span : Long_Float := 0.0;
@@ -429,11 +598,15 @@ begin
                         Miss := Long_Float'Max (Miss, abs (F.Joints (St (A).G) (Jx) - St (A).Tgt (Jx)));
                         Span := Long_Float'Max (Span, abs (St (A).Tgt (Jx) - St (A).Q0 (Jx)));
                      end loop;
-                     --  有关节没跟上(差超过它这次要走的三分之一 = 碰上东西 / 到头,比例同上)⇒ 这一格不要
-                     if 3.0 * Miss <= Span then
+                     --  有关节没跟上(差超过它这次要走的三分之一 = 碰上东西 / 到头,同单关节那一段的 Third)⇒ 这一格不要;
+                     --  目标改回起点(别的手走下一格的命令把它往回带),下一格之前再核一遍退没退到(Recover)
+                     if Miss <= Span * Third then
                         Keep (A, 0, 0, Cb, Multi => True);   --  起点 ↔ 这一格、上一格 ↔ 这一格都在 Keep 里交给配点
                      else
-                        Say ("  第" & Codec.Img (A + 1) & " 只手几个关节一起动的第" & Codec.Img (Cb) & " 格:有关节没跟上(差 " & Codec.Fmt (Miss, 4) & ")⇒ 不要这一格");
+                        Say ("  第" & Codec.Img (A + 1) & " 只手几个关节一起动的第" & Codec.Img (Cb) & " 格:有关节没跟上(差 " & Codec.Fmt (Miss, 4)
+                             & ")⇒ 不要这一格,先退回起点再走下一格");
+                        St (A).Collided := True;
+                        St (A).Tgt := St (A).Q0;
                      end if;
                   end;
                end if;
@@ -441,12 +614,50 @@ begin
          end;
       end loop;
       for A in 0 .. Na - 1 loop
-         if St (A).Live then
+         if St (A).Live and then not St (A).Stuck then
             St (A).Tgt := St (A).Q0;
          end if;
       end loop;
       Move_All (0.0);
+      --  扫完回起点:回不去的手照样按碰上东西退一遍(退不回就照实说卡在哪)
+      for A in 0 .. Na - 1 loop
+         if St (A).Live and then not St (A).Stuck and then not At_Start (A) then
+            St (A).Collided := True;
+            Recover (A);
+         end if;
+      end loop;
    end;
+   --  扫不全的照实说:哪只手、哪根轴、哪一边一格干净的都没留下(碰上东西 / 卡住了);两边都没有 = 这根轴没扫成
+   for A in 0 .. Na - 1 loop
+      if St (A).Live then
+         declare
+            Sa : Arm_State renames St (A);
+            T : Unbounded_String;
+            Short : Boolean := False;
+         begin
+            for J in 0 .. Natural (Sa.Q0.Length) - 1 loop
+               declare
+                  Lo_N : constant Integer := Sa.Kept_Lo (J);
+                  Hi_N : constant Integer := Sa.Kept_Hi (J);
+               begin
+                  if Lo_N = 0 or else Hi_N = 0 or else Sa.Hit_Lo (J) or else Sa.Hit_Hi (J) then
+                     Short := Short or else Lo_N = 0 or else Hi_N = 0;
+                     Append (T, " · 第" & Codec.Img (J) & " 个关节 往负 " & Codec.Img (Lo_N) & " 格" & (if Sa.Hit_Lo (J) then "(碰上东西)" else "")
+                             & "、往正 " & Codec.Img (Hi_N) & " 格" & (if Sa.Hit_Hi (J) then "(碰上东西)" else "")
+                             & (if Lo_N = 0 and then Hi_N = 0 then " ⇒ 这根轴没扫成" elsif Lo_N = 0 or else Hi_N = 0 then " ⇒ 只扫了一边" else ""));
+                  end if;
+               end;
+            end loop;
+            if Sa.Stuck then
+               Say ("  第" & Codec.Img (A + 1) & " 只手扫描没扫全:碰上东西卡住了,卡住以后的格子都没有" & To_String (T));
+            elsif Short then
+               Say ("  第" & Codec.Img (A + 1) & " 只手扫描没扫全(碰上东西的那一边一格干净的都没留下)" & To_String (T));
+            elsif Length (T) > 0 then
+               Say ("  第" & Codec.Img (A + 1) & " 只手扫描里碰上过东西(碰上的那几格不进运动学,别的照扫完了)" & To_String (T));
+            end if;
+         end;
+      end if;
+   end loop;
    --  ④ 画面比读数晚几拍(见 Plug.Beat):这一段扫描里,每只手的眼每拍画面变了多少 和 几拍之前它那组读数变了多少 的相关,几只手加起来取最大的那个;
    --  每一格改配"画面那一刻"的读数(存格那一拍的帧号 − 晚的拍数)。V1B10 离线回放:配晚一拍的读数,扫描格上考试中位 0.71 → 0.11 mm,焦距 391.9 → 396.7(真 397)
    declare

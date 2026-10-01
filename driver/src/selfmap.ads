@@ -16,6 +16,26 @@ package Selfmap is
    end record;
    package Part_Vectors is new Ada.Containers.Vectors (Natural, Part);
    package Floor_Vectors is new Ada.Containers.Vectors (Natural, Picture.Floor_Map, Picture."=");
+   --  ── 身体报的每一组读数,开机推一下量出来是什么(大并行 I1,路 1;10-01 加,旧字段 Arms / Jaws / Cam_On_Arm 照旧填)──
+   --  Arm:推它有眼整幅跟着动(眼长在它上面),它就是一条臂;Closing:推它只动了画面里一块,而那一块在某条臂自己那只眼里 = 那条臂的合拢通道;
+   --  Carrying:推它每只眼都整幅在动 = 扛着全身走的那组;Piece:推它只动了画面里一块,哪条臂的眼里都不是 = 一块零件(长在哪儿量不出);
+   --  Mute:推它读数跟着走,可哪只眼里都没东西变(接入契约第 2 条);Not_Following:推它读数不跟,画面也没变(第 1 条:推不动);
+   --  Reading:不是命令(身体没把它当命令回声),只是一组读数 —— 推别的组时它跟着变(Follows)或者一直不变;Unprobed:还没量
+   type Group_Role is (Unprobed, Arm, Closing, Carrying, Piece, Mute, Not_Following, Reading);
+   type Group_Info is record
+      Role : Group_Role := Unprobed;
+      Name : Ada.Strings.Unbounded.Unbounded_String;   --  这一组读数在观测里的路径(只给开机报告 / 文档)
+      N_Values : Natural := 0;                         --  这一组几个数
+      Arm : Integer := -1;                             --  Arm:第几条臂;Closing:哪条臂的合拢通道;别的 -1
+      Eyes : Ints;                                     --  整幅跟着它动的眼(相机号;Arm / Carrying)
+      Seen_In : Ints;                                  --  只看见它带动的一块的眼(相机号;Closing / Piece,Arm 在别的眼里)
+      Twin : Integer := -1;                            --  同名的另一组(身体的命令回声;-1 = 没有)
+      Follows : Integer := -1;                         --  Reading:推哪一组(组号)时它跟着变;-1 = 推哪一组都不变
+      Probe : Long_Float := 0.0;                       --  认出来时那一推多大(读数单位;0 = 没认成)
+      Delivered : Long_Float := 0.0;                   --  那一推读数实到多少(读数单位,跟得最少的那个数)
+      Lied : Boolean := False;                         --  一个方向推了画面变、另一个方向读数说走了画面却没变(接入契约第 3 条:没动却不说)
+   end record;
+   package Group_Vectors is new Ada.Containers.Vectors (Natural, Group_Info);
    type Body_Map is record
       Arms : Natural := 0;
       N_Cams : Natural := 0;
@@ -43,6 +63,9 @@ package Selfmap is
       Amp_Hist : Plug.Floats_Vectors.Vector;
       Deliv_Hist : Plug.Floats_Vectors.Vector;
       Measured_Times : Natural := 0;
+      --  身体报的每一组读数开机量出来是什么(Layout.Groups 的下标一一对应;空 = 这一版开机还没按组量)。I1 的通用写法:
+      --  Selfmap.Graph 从它答"扛着全身走的那几组""长在这条臂上的眼"(路 1,10-01 加)
+      Groups : Group_Vectors.Vector;
    end record;
    --  快速核对:每只手推一个通道(存的幅度),实到和存的差一半以内且画面里看得见 ⇒ 身体没变
    type String_Note is record

@@ -23,6 +23,8 @@ with Table;
 with Jointboot;
 with Kinem;
 with Geom;
+with Layout;
+with Instrument;
 procedure Body_Driver is
    Port : Natural := 0;
    Body_Path : Unbounded_String;   --  身体文件(--in/--out;同一具身体越用越强)
@@ -44,6 +46,7 @@ procedure Body_Driver is
    Kin_Plane_Rms : Long_Float := 0.0;
    Kin_Ref : Plug.Cam;
    Front_Reloaded : Boolean := False;   --  开机前半段是按身体文件旁边存的装回的(核对过):后面按同一个世界单位记的量(身体图、握区、指尖)才照用
+   Body_Groups : Selfmap.Group_Vectors.Vector;   --  开机第一步逐组推一下量出来的:身体报的每一组数是什么(I1;装进 C.Map.Groups,身体图从它答)
    I : Natural := 1;
    Order : constant String := Codec.Env ("BL_ORDER");
 begin
@@ -110,8 +113,33 @@ begin
       Put_Line ("[装] 取不到第一帧,退出");
       return;
    end if;
-   Put_Line ("[装] 第一帧:" & Natural'Image (Natural (F.EE.Length)) & " 条臂 ·" & Natural'Image (Natural (F.Jaw.Length)) & " 个抓握通道 ·" &
+   --  I1(大并行 路 1,10-01):身体报的每一组数先都当"还没认"—— 命令组(对方回给我们看的那些名字)都当一组通道推(Layout.Probe_Mode),
+   --  开机第一步逐组推一下认出是什么(Jointboot.Find_Arms),再把布局换成量出来的。不按"几个数、值在哪"认,没有抓握照样开机
+   Layout.Probe_Mode (L.Lay);
+   if not Plug.Sense (L, F) then
+      Put_Line ("[装] 取不到第一帧,退出");
+      return;
+   end if;
+   Put_Line ("[装] 第一帧:" & Codec.Img (Natural (L.Lay.Groups.Length)) & " 组数(其中 " & Codec.Img (Natural (F.Joints.Length)) & " 组是命令,开机逐组推一下认)·" &
              Natural'Image (Natural (F.Cams.Length)) & " 台相机" & (if F.Cams.Is_Empty then "" else "(" & Codec.Img (F.Cams (0).W) & "x" & Codec.Img (F.Cams (0).H) & (if F.Cams (0).Has_Depth then ",带深度" else ",无深度") & ")"));
+   --  接入检查第一拍:配点仪器通不通(开机量运动学、装回核对、对齐都靠它配点)—— 不通就现在说,不等扫描到一半才红
+   declare
+      Id : Integer := -1;
+      Err : Unbounded_String;
+   begin
+      if not F.Cams.Is_Empty and then Plug.Has_Picture (F.Cams (0)) then
+         Instrument.Frame_Put (To_String (C.Inst_Host), C.Inst_Port, F.Cams (0).RGB, F.Cams (0).W, F.Cams (0).H, Id, Err);
+      else
+         Err := To_Unbounded_String ("第一帧第 0 台相机没画面,问不了");
+      end if;
+      if Id < 0 then
+         Put_Line ("[装] 🔴 接入检查:配点仪器 " & To_String (C.Inst_Host) & ":" & Codec.Img (C.Inst_Port) & " 第一拍就不通(" & To_String (Err)
+                   & ")⇒ 开机量不了运动学(扫描配点、装回核对、几只手对齐都要它),退出");
+         Ada.Command_Line.Set_Exit_Status (1);
+         return;
+      end if;
+      Put_Line ("[装] 接入检查:配点仪器 " & To_String (C.Inst_Host) & ":" & Codec.Img (C.Inst_Port) & " 通(第一拍存进一帧,编号 " & Codec.Img (Natural (Id)) & ")");
+   end;
    --  ── 开机前半段(V1b 第三步,2026-09-26):只用关节命令。身体报的"手在哪"驱动不读 ——
    --  认手认眼(每组关节一起转一小格)→ 每只有眼的手扫关节、两两配点、量运动学 → 两只手对到一个世界("上" = 桌面法向)→ 装上:
    --  从此每一帧手的位姿 = 按关节读数算出的腕眼位姿,位姿命令 = 在量到的关节限位里解关节目标。后面量身体的每一步都在这个世界里 ──
@@ -137,6 +165,13 @@ begin
          return;
       end if;
       Put_Line ("[身] 静止噪声(开机前半段):关节读数 " & Codec.Fmt (M0.Joint_Noise, 6) & " · 各相机灰度地板 " & (if M0.Pic_Floor.Is_Empty then "-" else Codec.Img (M0.Pic_Floor (0))));
+      --  ① 认组:每一次开机都量(装回前半段也先量 —— 量出来的布局决定哪一组是第几条臂,装回的核对、扫描都按它)
+      Jointboot.Find_Arms (L, F, M0, Found, Kin_World_Cam, Okj);
+      if not Okj then
+         Put_Line ("[身] 只用关节命令认不出一条臂,量不了身体,退出");
+         return;
+      end if;
+      Body_Groups := M0.Groups;
       --  ⑤ 装回:身体文件旁边存着前半段、钥匙对得上 ⇒ 每只手回到存的参照读数、拍一张和存的比;都没动 ⇒ 不扫描、不解。一项不过 ⇒ 从零量(不修补)
       if Kin_Path /= "" and then Ada.Directories.Exists (Kin_Path) then
          declare
@@ -162,11 +197,6 @@ begin
          Jointboot.Dump_Kin (Dump, K);
          Jointboot.Remember_Kin (Kin_Path, K);
       else
-      Jointboot.Find_Arms (L, F, M0, Found, Kin_World_Cam, Okj);
-      if not Okj then
-         Put_Line ("[身] 只用关节命令认不出一只手,量不了身体,退出");
-         return;
-      end if;
       --  有眼的几只手同时扫(一条命令带几组目标),扫的时候跟点仪器一路跟
       Jointboot.Sweep_All (L, F, M0, Found, Host, C.Inst_Port, Dump, Ds, Css, World_Cam => Kin_World_Cam);
       --  每只手各自解运动学(两只手的解互不相干 ⇒ 一只手一个线程)
@@ -368,6 +398,8 @@ begin
             end loop;
          end if;
       end if;
+      --  身体报的每一组数是什么(开机第一步量的,每次开机都量;身体文件不存它)⇒ 身体图从它答"扛着全身的那几组""长在这条臂上的眼"(I1)
+      C.Map.Groups := Body_Groups;
       --  握区:存的这只手若是在【同一个位姿】下合空量的(每通道差不过一个探针幅度),身体又核对没变 ⇒ 照用,不再合空;否则合空一次
       --  一条臂上有几个抓握通道是【量出来的】:两指手 1 个,五指手 5 个。每一个各合空一次,各成一个名词。
       --  C.Map.Jaws 这时一条臂一个数(从零量的是 Selfmap.Measure 数的;照用存的,前面已经核过身体文件记了这一项)⇒ 照它合空,不另设"至少一个"、

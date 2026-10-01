@@ -15,6 +15,10 @@ begin
       return False;
    end if;
    T1 := Clock;
+   if L.Ep_Seq0 = L.Seq then
+      --  新的一集(对方复位时 Pump 把 Ep_Seq0 拨到此刻):上一集每个键发出去的那一串作废(没读数的那一拍不许把上一集的数发进新的一集;同 Jaw_Sent)
+      L.Hold_Names.Clear; L.Hold_Sent.Clear;
+   end if;
    L.Seq := L.Seq + 1;
    Frame_Of (L, F);
    Note_Beat (L, F);   --  这一拍记下来(量画面比读数晚几拍用;见 Beat)
