@@ -114,10 +114,79 @@ package body Driver.Distributions.Tests is
       Check_Close (Difference ((10.0, 3.0, 4), (4.0, 4.0, 0)).Sigma, 5.0, 1.0e-12, "sigmas add in quadrature");
    end Welch;
 
+   procedure Chi_Square_And_F is
+      Alpha : constant Real := Gaussian_Two_Sided_Tail (Driver.Conventions.Z);
+   begin
+      --  Closed forms: two degrees are an exponential, one is a squared Gaussian.
+      Check_Close (Chi_Square_Upper_Tail (3.0, 2), Exp (-1.5), 1.0e-15, "chi square 2 dof tail");
+      Check_Close (Chi_Square_Upper_Tail (9.0, 1), Gaussian_Two_Sided_Tail (3.0), 1.0e-16, "chi square 1 dof tail");
+      Check_Close (Chi_Square_Quantile (Alpha, 2), -2.0 * Log (Alpha), 1.0e-9, "chi square 2 dof quantile");
+      --  Published critical values.
+      Check_Close (Chi_Square_Quantile (0.05, 3), 7.814_727_903, 1.0e-8, "chi square 0.05, 3 dof");
+      Check_Close (Chi_Square_Quantile (0.05, 10), 18.307_038_05, 1.0e-7, "chi square 0.05, 10 dof");
+      Check_Close (Chi_Square_Upper_Tail (9.487_729_037, 4), 0.05, 1.0e-10, "chi square tail, 4 dof");
+      Check_Close (F_Quantile (0.05, 2, 10), 4.102_821_015, 1.0e-8, "F 0.05, 2 and 10 dof");
+      Check_Close (F_Quantile (0.05, 5, 20), 2.710_889_837, 1.0e-8, "F 0.05, 5 and 20 dof");
+      --  F with one numerator degree is t squared.
+      Check_Close (F_Quantile (Alpha, 1, 6), Student_T_Quantile (Alpha, 6) ** 2, 1.0e-9, "F (1, 6) against t (6)");
+      Check_Close (Gaussian_Two_Sided_Quantile (0.05), 1.959_963_985, 1.0e-9, "Gaussian quantile at 0.05");
+      Check_Close (Gaussian_Two_Sided_Quantile (Alpha), Driver.Conventions.Z, 1.0e-9, "Gaussian quantile at Z's tail");
+      Check_Close (Chi_Square_Deviate (4.0, 1), 2.0, 1.0e-9, "one-dof deviate is the square root");
+      Check_Close (Chi_Square_Deviate (Chi_Square_Quantile (Alpha, 5), 5), Driver.Conventions.Z, 1.0e-6,
+                   "a chi square at Z's tail has deviate Z");
+      Check (Chi_Square_Deviate (1.0e5, 1) = Real'Last, "an underflowing tail is not beyond every deviate");
+   end Chi_Square_And_F;
+
+   procedure Vector_False_Alarms is
+      --  Two-dimensional Gaussian differences, tested by their length.
+      Trials  : constant := 100_000;
+      Nominal : constant Real := Gaussian_Two_Sided_Tail (Driver.Conventions.Z);
+      Spread  : constant Real := Sqrt (Nominal * (1.0 - Nominal) / Real (Trials));
+      Known   : constant Gate := Vector_Gate (2);
+      Plain   : constant Gate := Scalar_Gate;
+      Measured : constant Gate := Vector_Gate (2, 8);
+      By_Vector, By_Length, By_Measured : Natural := 0;
+   begin
+      Ada.Numerics.Float_Random.Reset (Gen, 23);
+      Check_Close (Threshold (Vector_Gate (1)), Driver.Conventions.Z, 1.0e-9, "a one-dimensional vector is a scalar");
+      Check_Close (Threshold (Vector_Gate (1, 6)), Threshold (Scalar_Gate (6)), 1.0e-8, "one dimension with 6 dof is t");
+      for T in 1 .. Trials loop
+         declare
+            Length : constant Real := Sqrt (Gaussian ** 2 + Gaussian ** 2);
+            Sum    : Real := 0.0;
+         begin
+            if Significant (Known, Length, 1.0) then
+               By_Vector := By_Vector + 1;
+            end if;
+            if Significant (Plain, Length, 1.0) then
+               By_Length := By_Length + 1;
+            end if;
+            --  The sigma estimated from four other two-dimensional samples (8 dof).
+            for I in 1 .. 8 loop
+               Sum := Sum + Gaussian ** 2;
+            end loop;
+            if Significant (Measured, Length, Sqrt (Sum / 8.0)) then
+               By_Measured := By_Measured + 1;
+            end if;
+         end;
+      end loop;
+      Check (abs (Real (By_Vector) / Real (Trials) - Nominal) <= Driver.Conventions.Z * Spread,
+             "two-dimensional differences with a known sigma alarm off the nominal rate:" & Natural'Image (By_Vector));
+      Check (abs (Real (By_Measured) / Real (Trials) - Nominal) <= Driver.Conventions.Z * Spread,
+             "two-dimensional differences with a measured sigma alarm off the nominal rate:"
+             & Natural'Image (By_Measured));
+      --  Testing the length against the scalar threshold alarms about four times as often (exp (-4.5)).
+      Check (Real (By_Length) / Real (Trials) > 3.0 * Nominal, "the scalar threshold on a length did not over-alarm");
+   end Vector_False_Alarms;
+
    procedure Register is
    begin
       Driver.Tests.Register ("distributions.gaussian", "the Gaussian tail is off its tabulated values",
                              Gaussian_Tail'Access);
+      Driver.Tests.Register ("distributions.chi_square", "the chi-square or F tails and quantiles are off their tables",
+                             Chi_Square_And_F'Access);
+      Driver.Tests.Register ("uncertain.vector", "a vector's length alarms more often than a scalar at the same Z",
+                             Vector_False_Alarms'Access);
       Driver.Tests.Register ("distributions.t_quantile", "the t quantile is off its tables or closed forms",
                              T_Quantile'Access);
       Driver.Tests.Register ("uncertain.known_sigma", "a known sigma is not tested against Z, or few dof not widened",

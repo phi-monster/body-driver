@@ -45,6 +45,29 @@ package Driver.Uncertain with Pure is
    function Significant (A, B : Estimate) return Boolean;
    --  Significant (Difference (A, B)) against zero.
 
+   type Gate is private;
+   --  The test above with its threshold worked out once, for code that tests
+   --  many differences with the same degrees of freedom (every pixel of an
+   --  image, say). It is the same rule, not another one.
+
+   function Scalar_Gate (Degrees_Of_Freedom : Natural := 0) return Gate;
+   --  Significant (G, D, S) = Significant (D, S, Degrees_Of_Freedom).
+
+   function Vector_Gate (Dimensions : Positive; Degrees_Of_Freedom : Natural := 0) return Gate;
+   --  For the length of a difference of that many dimensions whose every
+   --  component has the given sigma. Its length over sigma is not Gaussian:
+   --  it is a chi (or, with an estimated sigma, the square root of Dimensions
+   --  times an F), and the threshold is taken at the same tail probability Z
+   --  has for a Gaussian, so a two-dimensional displacement alarms as rarely
+   --  as a scalar.
+
+   function Significant (G : Gate; Difference, Sigma : Real) return Boolean;
+   --  abs Difference > threshold * Sigma, with the zero and unknown sigmas of
+   --  the scalar rule.
+
+   function Threshold (G : Gate) return Real;
+   --  The multiple of sigma beyond which a difference is significant.
+
    type Point_Estimate is record
       Mean       : Vec3 := Zero3;
       Covariance : Mat3 := [others => [others => Real'Last]];
@@ -81,5 +104,11 @@ package Driver.Uncertain with Pure is
       Direction : Direction_Estimate;
    end record;
    --  A line of sight: the points Origin + s * Direction for s >= 0.
+
+private
+
+   type Gate is record
+      Multiple : Real := 0.0;
+   end record;
 
 end Driver.Uncertain;
