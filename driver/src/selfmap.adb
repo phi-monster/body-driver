@@ -664,7 +664,7 @@ package body Selfmap is
       M.Arms := Arms; M.N_Cams := N_Cams; M.Per_Arm := Chan.Per_Arm; M.Channels := Arms * Chan.Per_Arm;
       M.Jaws.Clear;
       for A in 0 .. Arms - 1 loop
-         M.Jaws.Append (Integer (Natural'Max (1, Jaw_Count (F, A))));
+         M.Jaws.Append (Integer (Jaw_Count (F, A)));   --  量到几个就是几个,可以 0 个(没有抓握的身体照样开机;路 1 10-01 改这一行,原来 Max (1, …))
       end loop;
       Ok := False;
       if Arms = 0 or else N_Cams = 0 then

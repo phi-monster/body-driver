@@ -22,7 +22,7 @@ with Sinew;
 with Runtime;
 with Monitor;
 with Contact;
-with Contact.Grasp;
+with Contact.Search;
 package Act is
    --  🔴 脑写的结局词 → 身体的判法。**只有这一处**。
    --  以前它散在两个局部函数里(Outcome → 字符串 → Until_Kind),中间那一跳把 lost / free / refused
@@ -393,6 +393,8 @@ package Act is
       Held_Set : Contact.Set;
       Held_Set_Valid : Boolean := False;
       Grip_Mus : Grip_Mu_Vectors.Vector;     --  每件东西量到的摩擦上下限(见 Grip_Mu)
+      --  脑这一轮要这件东西怎么动(大并行路 5,10-01,加法:I5 的一小块;Round 按脑说的"它的哪个量往哪变"填,接触集按它布置;没说 ⇒ 按"跟着手离开它躺的面")
+      Want_Move : Contact.Want;
       Walls : Wall_Vectors.Vector;           --  这一集里各条臂横着被顶住过的地方(见 Wall_Mark)
       No_Reach_Arm : Integer := -1;          --  这一集里"它身上一段都在够不着那侧"的那条臂(-1 = 没有):下次选手绕开它
       Fingers_Aimed : Boolean := False;   --  上一段"到它上方"末尾已把手指指向它躺的面 ⇒ 接下来贴上去的那一段不再为了看它而转手
@@ -455,7 +457,7 @@ package Act is
    function Kin_Turn_Reach (Arm : Natural; P0 : Plug.Arm_Pose; Notch, Tol_P, Tol_R : Long_Float) return Long_Float;
    --  接触集(09-29 重写):量出来的手在记下的形状上挑一组下手处(导出只为自检)
    procedure Plan_Contact (C : in out Context; F : Plug.Frame; Arm, Cam : Natural; Name : Unbounded_String;
-                           Pick : out Contact.Grasp.Candidate; Note : out Unbounded_String; Ok : out Boolean);
+                           Pick : out Contact.Search.Candidate; Note : out Unbounded_String; Ok : out Boolean);
    --  接触集往下伸怎么走(纯函数,导出给自检):悬停时离下手处 Stand;最靠前的尖和它顶面那一层沿进场方向差 Tip_Over(= X_Tip − X_Top,≤ 0 就是尖还没到顶面那一层);
    --  顶面的不准 = 轮廓横着的 Sil_Err ⊕ 那张面高低的不准 H_Sd 在进场方向上的那一份(An = |进场方向 · 面法向|;H_Sd = Long_Float'Last 表示量不出);
    --  尖的不准 Tip_Sd、这一次到位还差 Miss、读数噪声 Noise;Floor = 身体量得出的最细那一档。

@@ -12,8 +12,10 @@ begin
    --  区心 / 主轴按"两瓣 / 一瓣"两套写法;Is_Self 只查 A / B 两格(第三根手指框里的块不算"我");补全把第 0 瓣以外一律写进 B(第三瓣盖掉第二瓣)。
    --  合成:160 × 60 的画面、背景 100;张开时 N 根黑手指(20,宽 10、高 h)从下边伸进来,合上时并成上方正中一块 8 × 10(x 76–83、y 5–14)。
    --  要:N 瓣、每一瓣的框 / 像素数对上一根手指(一根不少、不重)、第 N 瓣 = 没有;旧的两格 A / B = 第 0 / 1 瓣;每一瓣的尖在它那根手指顶上正中、
-   --  尖那一截宽 10;区心 = 各手指形心的平均;主轴 = 各瓣形心排开的方向(一瓣 = 那根手指自己的方向:竖着);张幅 = 合上那一块沿主轴伸多长;
-   --  区框 = 合上那一块;每一根手指上的块都是"我"、空地上的不是;瓣的像素一根不少;一串瓣存进 JSON、读回来一个比特不差
+   --  尖那一截宽 10;区心 = 手指会合到的那一点(有两根以上 ⇒ 各手指形心的平均;只有一根 ⇒ 合上那一块的形心,上方正中 (79.5, 9.5),
+   --  和那根手指的形心隔得远 —— 两根以上时合上那一块也不在手指形心的平均上(y 9.5 对 49.5),它不许把区心拉过去);
+   --  主轴 = 各瓣形心排开的方向(一瓣 = 那根手指自己的方向:竖着);张幅 = 合上那一块沿主轴伸多长;
+   --  区框 = 合上那一块;每一根手指上的块都是"我"、空地上的不是;瓣的像素一根不少;一串瓣存进 JSON、读回来一个比特不差、还算这一版量的
    declare
       W : constant := 160;
       H : constant := 60;
@@ -29,6 +31,7 @@ begin
          Boxes_Ok, Tips_Ok, Self_Ok : Boolean := True;
          Why : Unbounded_String;
          Mu, Mv, Sxx, Syy, Sxy : Long_Float := 0.0;
+         Mu_Want, Mv_Want : Long_Float := 0.0;   --  区心该在哪(像素)
          Eu, Ev : Long_Float := 0.0;
          Px_Want : Natural := 0;
          Px_Got : Natural := 0;
@@ -98,6 +101,12 @@ begin
             Mu := Mu + (Long_Float (F.X0) + 4.5) / Long_Float (N);
             Mv := Mv + (Long_Float (H - 1) - Long_Float (F.Hgt - 1) / 2.0) / Long_Float (N);
          end loop;
+         declare
+            Cmu : constant Long_Float := (if N = 1 then 79.5 else Mu);   --  一根手指:合上那一块(x 76–83、y 5–14)的形心
+            Cmv : constant Long_Float := (if N = 1 then 9.5 else Mv);
+         begin
+            Mu_Want := Cmu; Mv_Want := Cmv;
+         end;
          for F of Fs loop
             declare
                Dx : constant Long_Float := Long_Float (F.X0) + 4.5 - Mu;
@@ -128,7 +137,7 @@ begin
               - Long_Float'Min (Long_Float'Min (Pr (76.0, 5.0), Pr (83.0, 5.0)), Long_Float'Min (Pr (76.0, 14.0), Pr (83.0, 14.0)));
             Count_Ok : constant Boolean := Z.Valid and then Z.N_Lobes = N and then not Zone.Lobe_Of (Z, N).Valid;
             Mirror_Ok : constant Boolean := Same_Lobe (Z.A, Zone.Lobe_Of (Z, 0)) and then Same_Lobe (Z.B, Zone.Lobe_Of (Z, 1));
-            Center_Ok : constant Boolean := abs (Z.Cu - Mu / Long_Float (W)) < 1.0e-12 and then abs (Z.Cv - Mv / Long_Float (H)) < 1.0e-12;
+            Center_Ok : constant Boolean := abs (Z.Cu - Mu_Want / Long_Float (W)) < 1.0e-12 and then abs (Z.Cv - Mv_Want / Long_Float (H)) < 1.0e-12;
             Axis_Ok : constant Boolean := abs (Z.Au - Eu) < 1.0e-9 and then abs (Z.Av - Ev) < 1.0e-9;
             Span_Ok : constant Boolean := abs (Z.Span - Span_Want) < 1.0e-12;
             Frame_Ok : constant Boolean := Z.X0 = 76 and then Z.Y0 = 5 and then Z.X1 = 83 and then Z.Y1 = 14;
@@ -138,15 +147,16 @@ begin
             Json_Ok : Boolean := False;
          begin
             if Json.Parse ("{""z"":{""lobes"":" & Zone.Lobes_Json (Z) & "}}", D, E) then
+               Z2.Valid := True;   --  装回的人先当它有效(同 bodyfile-load 的 Read_Zone),版本对不上 Lobes_From_Json 才把它置成没量过
                Zone.Lobes_From_Json (D, Json.Get (D, 0, "z"), Z2);
-               Json_Ok := Z2.N_Lobes = Z.N_Lobes and then (for all K in 0 .. Z.N_Lobes - 1 => Same_Lobe (Zone.Lobe_Of (Z2, K), Zone.Lobe_Of (Z, K)));
+               Json_Ok := Z2.Valid and then Z2.N_Lobes = Z.N_Lobes and then (for all K in 0 .. Z.N_Lobes - 1 => Same_Lobe (Zone.Lobe_Of (Z2, K), Zone.Lobe_Of (Z, K)));
             end if;
             Check (Count_Ok and then Boxes_Ok and then Mirror_Ok and then Tips_Ok and then Center_Ok and then Axis_Ok and then Span_Ok and then Frame_Ok
                    and then Self_Ok and then Px_Got = Px_Want and then Json_Ok,
                    "I2 瓣改成一串 · " & Name & ":认出" & Natural'Image (Z.N_Lobes) & " 瓣(该" & Natural'Image (N) & ")"
                    & (if Boxes_Ok then "、一瓣一根手指" else "、瓣和手指对不上") & (if Mirror_Ok then "、A / B = 第 0 / 1 瓣" else "、A / B 没照旧填")
                    & (if Tips_Ok then "、每瓣的尖在手指顶上正中" else "、尖不对" & To_String (Why))
-                   & " · 区心 (" & Codec.Fmt (Z.Cu, 4) & "," & Codec.Fmt (Z.Cv, 4) & ")(该 (" & Codec.Fmt (Mu / Long_Float (W), 4) & "," & Codec.Fmt (Mv / Long_Float (H), 4) & "))"
+                   & " · 区心 (" & Codec.Fmt (Z.Cu, 4) & "," & Codec.Fmt (Z.Cv, 4) & ")(该 (" & Codec.Fmt (Mu_Want / Long_Float (W), 4) & "," & Codec.Fmt (Mv_Want / Long_Float (H), 4) & "))"
                    & " · 主轴 (" & Codec.Fmt (Z.Au, 4) & "," & Codec.Fmt (Z.Av, 4) & ")(该 (" & Codec.Fmt (Eu, 4) & "," & Codec.Fmt (Ev, 4) & "))"
                    & " · 张幅 " & Codec.Fmt (Z.Span, 4) & "(该 " & Codec.Fmt (Span_Want, 4) & ")" & (if Frame_Ok then "" else " · 区框不对")
                    & (if Self_Ok then " · 每根手指上的块都是我" else " · 有手指上的块不算我") & " · 瓣的像素 " & Codec.Img (Px_Got) & "(该 " & Codec.Img (Px_Want) & ")"
@@ -160,44 +170,57 @@ begin
       Case_N ([(4, 20), (36, 20), (68, 20), (100, 20), (132, 20)], "五瓣(五指)");
    end;
 
-   --  🔴 ② 一串瓣的存取(I2):新文件按 "lobes" 读;I2 以前的文件(两格 "a" / "b",瓣数在 "n_lobes";第二格瓣数不到也照样写了)照旧读得回来;
-   --  两样都有时按 "lobes"。旧写法写的握区(只填 A / B、一串空着)Lobe_Of 照旧读它的两格,存出去是那两格,换一瓣时先转成一串。
-   --  病:读不回旧身体文件 ⇒ 装回身体时手指全丢、开机要重量;读成三瓣 / 把没写的第二格当一瓣 ⇒ 多出一根不存在的手指
+   --  🔴 ② 一串瓣的存取(I2):这一版写的 "lobes" = {"rule": 这一版的号, "list": [...]} ⇒ 读回、照用;
+   --  别的版本存的 —— I2 以前(两格 "a" / "b",瓣数在 "n_lobes",第二格瓣数不到也照样写了)、I2 第一版("lobes" 是一串)—— 瓣照样读回来,
+   --  可区心 / 主轴是旧算法算的(I2 以前两瓣的主轴按归一化画幅、和东西的主轴差 0.56° 一类的角;I2 第一版一瓣的区心按那一瓣自己),
+   --  文件里没有能重算的画面 ⇒ 这一格判成没量过(开机合空重量),照实说;新旧键都有时按 "lobes"。
+   --  旧写法写的握区(只填 A / B、一串空着)Lobe_Of 照旧读它的两格,存出去是这一版的那两格,换一瓣时先转成一串。
+   --  病:读不回旧身体文件 ⇒ 装回身体时手指全丢;读成三瓣 / 把没写的第二格当一瓣 ⇒ 多出一根不存在的手指;
+   --  旧算法算的区心 / 主轴装回来照用 ⇒ 悄悄差着用(主代理 10-01:"不许悄悄差着用")
    declare
       D : Json.Doc;
       E : Unbounded_String;
-      Z1, Z2, Z3, Zl : Zone.Hand_Zone;
+      Z1, Z2, Z3, Z4, Zl : Zone.Hand_Zone;
       La : constant Zone.Lobe := (Valid => True, X0 => 1, Y0 => 2, X1 => 3, Y1 => 4, Cu => 0.5, Cv => 0.25, Count => 6);
       Lb : constant Zone.Lobe := (Valid => True, X0 => 5, Y0 => 6, X1 => 7, Y1 => 8, Cu => 0.75, Cv => 0.125, Count => 9);
       Lc : constant Zone.Lobe := (Valid => True, X0 => 10, Y0 => 11, X1 => 12, Y1 => 13, Cu => 1.0 / 3.0, Cv => 2.0 / 3.0, Count => 14);
-      Ok1, Ok2, Ok3, Okl : Boolean := False;
+      Ok1, Ok2, Ok3, Ok4, Okl : Boolean := False;
+      --  装回一格:先当它有效(同 bodyfile-load 的 Read_Zone),再让 Lobes_From_Json 读瓣、判版本
+      procedure Load (Text : String; Z : out Zone.Hand_Zone; Ok : out Boolean) is
+      begin
+         Z := (others => <>);
+         Ok := Json.Parse (Text, D, E);
+         if Ok then
+            Z.Valid := True;
+            Zone.Lobes_From_Json (D, Json.Get (D, 0, "z"), Z);
+         end if;
+      end Load;
+      Parsed : Boolean;
    begin
-      if Json.Parse ("{""z"":{""n_lobes"":1,""a"":[1,2,3,4,0.5,0.25,6],""b"":[0,0,0,0,0,0,0]}}", D, E) then
-         Zone.Lobes_From_Json (D, Json.Get (D, 0, "z"), Z1);
-         Ok1 := Z1.N_Lobes = 1 and then Same_Lobe (Zone.Lobe_Of (Z1, 0), La) and then not Zone.Lobe_Of (Z1, 1).Valid;
-      end if;
-      if Json.Parse ("{""z"":{""n_lobes"":2,""a"":[1,2,3,4,0.5,0.25,6],""b"":[5,6,7,8,0.75,0.125,9]}}", D, E) then
-         Zone.Lobes_From_Json (D, Json.Get (D, 0, "z"), Z2);
-         Ok2 := Z2.N_Lobes = 2 and then Same_Lobe (Zone.Lobe_Of (Z2, 0), La) and then Same_Lobe (Zone.Lobe_Of (Z2, 1), Lb) and then Same_Lobe (Z2.B, Lb);
-      end if;
+      Load ("{""z"":{""n_lobes"":1,""a"":[1,2,3,4,0.5,0.25,6],""b"":[0,0,0,0,0,0,0]}}", Z1, Parsed);
+      Ok1 := Parsed and then Z1.N_Lobes = 1 and then Same_Lobe (Zone.Lobe_Of (Z1, 0), La) and then not Zone.Lobe_Of (Z1, 1).Valid and then not Z1.Valid;
+      Load ("{""z"":{""n_lobes"":2,""a"":[1,2,3,4,0.5,0.25,6],""b"":[5,6,7,8,0.75,0.125,9]}}", Z2, Parsed);
+      Ok2 := Parsed and then Z2.N_Lobes = 2 and then Same_Lobe (Zone.Lobe_Of (Z2, 0), La) and then Same_Lobe (Zone.Lobe_Of (Z2, 1), Lb) and then Same_Lobe (Z2.B, Lb)
+        and then not Z2.Valid;
       Z3.Valid := True;
       Zone.Set_Lobes (Z3, Zone.Lobe_Vectors.Vector'[La, Lb, Lc]);
-      if Json.Parse ("{""z"":{""n_lobes"":2,""a"":[1,2,3,4,0.5,0.25,6],""b"":[5,6,7,8,0.75,0.125,9],""lobes"":" & Zone.Lobes_Json (Z3) & "}}", D, E) then
-         Zone.Lobes_From_Json (D, Json.Get (D, 0, "z"), Z1);
-         Ok3 := Z1.N_Lobes = 3 and then Same_Lobe (Zone.Lobe_Of (Z1, 2), Lc) and then Same_Lobe (Zone.Lobe_Of (Z1, 0), La);
-      end if;
+      Load ("{""z"":{""n_lobes"":2,""a"":[1,2,3,4,0.5,0.25,6],""b"":[5,6,7,8,0.75,0.125,9],""lobes"":" & Zone.Lobes_Json (Z3) & "}}", Z1, Parsed);
+      Ok3 := Parsed and then Z1.N_Lobes = 3 and then Same_Lobe (Zone.Lobe_Of (Z1, 2), Lc) and then Same_Lobe (Zone.Lobe_Of (Z1, 0), La) and then Z1.Valid;
+      Load ("{""z"":{""lobes"":[[1,2,3,4,0.5,0.25,6],[5,6,7,8,0.75,0.125,9]]}}", Z4, Parsed);   --  I2 第一版:一串
+      Ok4 := Parsed and then Z4.N_Lobes = 2 and then Same_Lobe (Zone.Lobe_Of (Z4, 1), Lb) and then not Z4.Valid;
       Zl.Valid := True; Zl.N_Lobes := 2; Zl.A := La; Zl.B := Lb;   --  旧写法写的握区
-      if Same_Lobe (Zone.Lobe_Of (Zl, 0), La) and then Same_Lobe (Zone.Lobe_Of (Zl, 1), Lb) and then not Zone.Lobe_Of (Zl, 2).Valid
-        and then Json.Parse ("{""z"":{""lobes"":" & Zone.Lobes_Json (Zl) & "}}", D, E)
-      then
-         Zone.Lobes_From_Json (D, Json.Get (D, 0, "z"), Z2);
+      if Same_Lobe (Zone.Lobe_Of (Zl, 0), La) and then Same_Lobe (Zone.Lobe_Of (Zl, 1), Lb) and then not Zone.Lobe_Of (Zl, 2).Valid then
+         Load ("{""z"":{""lobes"":" & Zone.Lobes_Json (Zl) & "}}", Z2, Parsed);
          Zone.Set_Lobe (Zl, 1, Lc);
-         Okl := Z2.N_Lobes = 2 and then Same_Lobe (Zone.Lobe_Of (Z2, 1), Lb)
+         Okl := Parsed and then Z2.Valid and then Z2.N_Lobes = 2 and then Same_Lobe (Zone.Lobe_Of (Z2, 1), Lb)
            and then Zl.N_Lobes = 2 and then Same_Lobe (Zone.Lobe_Of (Zl, 0), La) and then Same_Lobe (Zone.Lobe_Of (Zl, 1), Lc) and then Same_Lobe (Zl.B, Lc);
       end if;
-      Check (Ok1 and then Ok2 and then Ok3 and then Okl,
-             "I2 一串瓣的存取:旧文件 n_lobes 1(第二格照样写了)⇒ " & (if Ok1 then "1 瓣" else "读错") & " · 旧文件 n_lobes 2 ⇒ " & (if Ok2 then "2 瓣" else "读错")
-             & " · 新旧键都有 ⇒ " & (if Ok3 then "按 lobes 读回 3 瓣" else "读错") & " · 旧写法写的握区(只填 A / B)⇒ " & (if Okl then "照旧读、存得出、换一瓣先转成一串" else "读错"));
+      Check (Ok1 and then Ok2 and then Ok3 and then Ok4 and then Okl,
+             "I2 一串瓣的存取:I2 以前的文件 n_lobes 1(第二格照样写了)⇒ " & (if Ok1 then "读回 1 瓣、判成要重量" else "读错")
+             & " · n_lobes 2 ⇒ " & (if Ok2 then "读回 2 瓣、判成要重量" else "读错")
+             & " · I2 第一版(一串)⇒ " & (if Ok4 then "读回 2 瓣、判成要重量" else "读错")
+             & " · 这一版、新旧键都有 ⇒ " & (if Ok3 then "按 lobes 读回 3 瓣、照用" else "读错")
+             & " · 旧写法写的握区(只填 A / B)⇒ " & (if Okl then "照旧读、存成这一版、换一瓣先转成一串" else "读错"));
    end;
 
    --  🔴 ③ 三瓣的补全(Zone.Apply_Refine,瓣按"长在眼上"补全,09-30 V1B69 那一段):每一瓣补进来的像素扩它自己的框。

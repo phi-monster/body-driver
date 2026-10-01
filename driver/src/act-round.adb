@@ -1758,7 +1758,7 @@ begin
       --  两样里大的那个的 Stats.Z 倍;转动 = 读数噪声和这只眼的角度噪声(G.Rms ÷ 焦距)里大的那个的 Stats.Z 倍
       Floor_P : constant Long_Float := Stats.Z * Long_Float'Max (C.Map.EE_Noise, Geo_Base (C, Arm) * G.Rms);
       Floor_R : constant Long_Float := Stats.Z * Long_Float'Max (C.Map.Rot_Noise, (if G.F > 0.0 then G.Rms / G.F else 0.0));
-      Pick : Contact.Grasp.Candidate;
+      Pick : Contact.Search.Candidate;
       Note : Unbounded_String;
       Pok : Boolean;
       --  眼走到 (R, T):一条命令 = 此刻还差的平移 + 转动(世界轴),走完看还差多少。差到分辨率以内就到;
@@ -1875,6 +1875,18 @@ begin
          Event := S ("on the way to a point above it: ") & Ev1;
          return;
       end if;
+      --  脑这一句要它怎么动:"它的某个量往哪变" ⇒ 沿让那个量变的方向(Qty_Axis,量的)的一个旋量;没说量 ⇒ 接触集按"跟着手离开它躺的面"布置
+      C.Want_Move := (others => <>);
+      if Length (Say.Qty) > 0 and then Say.Qty_Dir /= 0 then
+         declare
+            Ax : constant Geom.V3 := Qty_Axis (C, To_String (Say.Qty));
+            Sg : constant Long_Float := (if Say.Qty_Dir > 0 then 1.0 else -1.0);
+         begin
+            if Geom.Norm (Ax) > 0.0 then
+               C.Want_Move := (Given => True, Move => Contact.Slide ([Sg * Ax (0), Sg * Ax (1), Sg * Ax (2)]));
+            end if;
+         end;
+      end if;
       --  伸下去被挡住就记下来重挑:挡住的尖进 C.Bumps,候选只会越来越少;挑不出来了、或者又挑回挑过的那一处,就停
       loop
          Plan_Contact (C, F, Arm, Cam1, Geo_Name, Pick, Note, Pok);
@@ -1923,12 +1935,23 @@ begin
             if Pick.Pre > 0.0 then
                declare
                   Hk : constant Zone.Hand := Hand_Of (C, Arm, Say.Grip_K);
-                  Half : constant Long_Float := 0.5 * (Geom.Norm ([G.Lobes (1).Tip (0) - G.Lobes (0).Tip (0), G.Lobes (1).Tip (1) - G.Lobes (0).Tip (1),
-                                                                     G.Lobes (1).Tip (2) - G.Lobes (0).Tip (2)]) - Long_Float'Max (G.Lobes (0).Thin, G.Lobes (1).Thin));
-                  Frac : constant Long_Float := (if Half > 0.0 then Long_Float'Min (1.0, Pick.Pre / Half) else 0.0);
+                  --  每一瓣合到头能走多远(同接触集建手:朝全部瓣尖的中心、留半个手指厚),几瓣一起合 ⇒ 按走得最短的那一瓣算这一下合了几成。
+                  --  ⚠ 和 From_Lobes 同一条没量的假设(对称相向合;不对称的手就错),量到每一瓣合空时的尖就换掉
+                  Mid : Geom.V3 := [others => 0.0];
+                  Half : Long_Float := Long_Float'Last;
+                  Frac : Long_Float;
                   Steps_J : Natural;
                   Reading : Long_Float;
                begin
+                  for Lg of G.Lobes loop
+                     for K in 0 .. 2 loop
+                        Mid (K) := Mid (K) + Lg.Tip (K) / Long_Float (G.Lobes.Length);
+                     end loop;
+                  end loop;
+                  for Lg of G.Lobes loop
+                     Half := Long_Float'Min (Half, Geom.Norm ([Mid (0) - Lg.Tip (0), Mid (1) - Lg.Tip (1), Mid (2) - Lg.Tip (2)]) - 0.5 * Lg.Thin);
+                  end loop;
+                  Frac := (if Half > 0.0 and then Half < Long_Float'Last then Long_Float'Min (1.0, Pick.Pre / Half) else 0.0);
                   Move_Jaw (L, C, F, Arm, Hk.Open_Reading + Frac * (Hk.Empty_Close - Hk.Open_Reading), Steps_J, Reading, Say.Grip_K);
                   Put_Line ("[身] ✋ 下去之前每一块先合 " & Mm (Pick.Pre) & "(行程的 " & Codec.Fmt (100.0 * Frac, 0) & "%;读数按张开、合空两头线性换算)⇒ 读数 " & Codec.Fmt (Reading, 3));
                end;
@@ -2020,7 +2043,7 @@ begin
          Grasp_Set := (Points => Contact.Point_Vectors.Empty_Vector, Motion => Contact.Still (Pick.T), Has_Approach => True, Approach => Pick.Approach);
          for T of Pick.Touches loop
             Grasp_Set.Points.Append (Contact.Point'(By => (Kind => Contact.Hand, Id => 0), Pos => T.P, Normal => [-T.N (0), -T.N (1), -T.N (2)],
-                                                    Push => (Axis => T.N, Half_Angle => Arctan (Pick.Mu_Worst)), Pull => False, Torsion => T.Twist_R > 0.0,
+                                                    Allowed => (Axis => T.N, Half_Angle => Arctan (Pick.Mu_Worst)), Tension => False, Torsion => T.Twist_R > 0.0,
                                                     Peel => False, Tol_M => Floor_P));
          end loop;
          Grasp_Mu_Nom := Pick.Mu_Nom; Grasp_Mu_Worst := Pick.Mu_Worst;
@@ -2053,7 +2076,8 @@ begin
          Event := S (Reset_Event);
          return;
       end if;
-      --  接触集(PLAN 1.5):抬 = 手里那几个接触点沿它躺的面的法向平移一个单位(第③格是旋量);判据只说,不拦(身体不许因为"算出来做不到"而不动)
+      --  接触集:改它的量 = 手里那几个接触点沿让那个量变的方向平移一个单位(第③格是旋量)⇒ 执行层排航点;只说,不拦。
+      --  它能不能照这样动、要多大力,规划时已经按同一个物理检查(Contact.Wrench:连同它躺的面、配平重力)算过了,这里不另判(一个量一种量法)
       if C.Held_Set_Valid then
          declare
             S2 : Contact.Set := C.Held_Set;
@@ -2063,8 +2087,8 @@ begin
          begin
             S2.Motion := Contact.Slide (Dw);
             Contact.Exec.Steps (S2, (Standoff_M => Geo_Base (C, Arm), Repeat_M => Geo_Base (C, Arm)), True, 1, St, Why);
-            Geo_Say ("接触集:改它的量(" & Qty & ")= " & Codec.Img (Natural (S2.Points.Length)) & " 个接触点沿法向平移 " & Mm (Ln) & " ⇒ "
-                     & (if Why.Kind = Contact.Exec.Fine then "航点 " & Codec.Img (Natural (St.Length)) & " 步" else "判据说 " & Contact.Exec.Img (Why) & ",照抬,抬完看手指读数"));
+            Geo_Say ("接触集:改它的量(" & Qty & ")= " & Codec.Img (Natural (S2.Points.Length)) & " 个接触点平移 " & Mm (Ln) & " ⇒ "
+                     & (if Why.Kind = Contact.Exec.Fine then "航点 " & Codec.Img (Natural (St.Length)) & " 步" else "航点排不出:" & Contact.Exec.Img (Why) & ",照走,走完看手指读数"));
          end;
       end if;
       Geo_Move (L, C, F, Arm, Dw, Mok);
@@ -2273,7 +2297,7 @@ begin
                               declare
                                  P : Contact.Point := C.Held_Set.Points (I);
                               begin
-                                 P.Push.Half_Angle := 0.5 * Ada.Numerics.Pi;
+                                 P.Allowed.Half_Angle := 0.5 * Ada.Numerics.Pi;
                                  C.Held_Set.Points.Replace_Element (I, P);
                               end;
                            end loop;

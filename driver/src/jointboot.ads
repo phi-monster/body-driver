@@ -72,15 +72,15 @@ package Jointboot is
 
    --  ⑤ 世界:每只手的运动学在它自己参照读数时那只眼的系里 ⇒ 拿看得见整张桌子的不动的眼(头顶眼)当桥对到一个系:
    --  每只手从自己扫描的格子里三角出桌面点;这些点在头顶眼里的像素 = 腕眼那一格配到头顶眼、再配回来,往返 1 px 内的才算;
-   --  第一只手的点当板解头顶眼(焦距 + 在第一只手系里的位姿,Geom.Fit_Fixed_Board);别的手:落在它自己桌面上的点,
-   --  头顶眼那条视线交第一只手系里的桌面 ⇒ 同一个点在两个系里 ⇒ 相似变换(抗野点)。长度倍数靠同一张桌面(只靠一只不动的眼,绕它缩放分不出来)。
+   --  世界那只手(能定世界的第一只,World_Arm)的点当板解头顶眼(焦距 + 在它系里的位姿,Geom.Fit_Fixed_Board);别的手:落在它自己桌面上的点,
+   --  头顶眼那条视线交世界那只手系里的桌面 ⇒ 同一个点在两个系里 ⇒ 相似变换(抗野点)。长度倍数靠同一张桌面(只靠一只不动的眼,绕它缩放分不出来)。
    --  (V1B11 2026-09-26:原来用两只腕眼起点那一格互相配 —— 两只眼看桌子两头、一点不重叠,倍数解成 0.72、真 1.007)
-   --  "上" = 桌面法向(朝第一只手的眼那边),原点 = 第一只手参照眼在桌面上的垂足,x = 那只眼的 x 轴投到桌面上;长度单位 = 第一只手的模型单位。
+   --  "上" = 桌面法向(朝世界那只手的眼那边),原点 = 那只手参照眼在桌面上的垂足,x = 那只眼的 x 轴投到桌面上;长度单位 = 那只手的模型单位。
    --  Fixed_Eye = 解出来的头顶眼(世界系:R_Ce = 相机 → 世界,Pos;Valid = False 就是没解成)
    type Arm_World is record
       Group : Natural := 0;
       Model : Kinem.Model;
-      S : Long_Float := 1.0;                  --  这只手参照眼系 → 第一只手参照眼系:X0 = S · Ra · X + Ta
+      S : Long_Float := 1.0;                  --  这只手参照眼系 → 世界那只手参照眼系:X0 = S · Ra · X + Ta(世界那只手自己 = 恒等)
       Ra : Geom.M3 := Geom.Identity;
       Ta : Geom.V3 := [0.0, 0.0, 0.0];
       Lo, Hi : Floats;                        --  每个关节记下的尽头(扫描时这一边关节到头 = 扫到的最远那一格;干活时"往范围外走、走不到一半、别的关节都到了"也记;
@@ -93,11 +93,17 @@ package Jointboot is
       Eye_W : Natural := 0;                   --  长在它上面那只眼的画幅宽(判"到了"的最小一档 = Kinem.Clean_Tol)
       Valid : Boolean := False;
       Sweep : Natural := 0;                   --  扫描数据(Sweep_All 的 Ds)里是第几只手
+      --  放进世界那一步的账(10-01,§2 第 7 条后半;对齐填,世界那只手 = 世界本身,不填):它干活的地方(它的桌面中心)放进世界后最不准的方向、
+      --  沿那个方向真的有多不准(形式的 ⊕ 系统那一份按全相关线性加,世界单位)、它自己的眼在那儿量一个点有多不准(桌面上的点的远近,按量到的放大)。
+      --  Place_Ok = 前者不比后者大(放法不是它干活时最不准的那一环);False ⇒ 该两只手一起去看共同的近处再放
+      Place_Dir : Geom.V3 := [0.0, 0.0, 0.0];
+      Place_Sd, Place_Eye_Sd : Long_Float := 0.0;
+      Place_Ok : Boolean := True;
    end record;
    package Arm_World_Vectors is new Ada.Containers.Vectors (Natural, Arm_World);
    --  Dump 非空 = 落盘 align_arm<k>.txt(第一行 = 相似变换;每一条配点:世界里哪只眼(第几只手、第几格;-1 = 不长在手上的眼)、这只手的第几个三角点、
    --  那只眼里的像素、这只手那一格里的像素、往返差、放进世界后的点、这只手系里的点)、
-   --  fixed_eye.txt(头顶眼,第一只手的系里)、world.txt(世界系:Rw、O),离线回放 / 打分用
+   --  fixed_eye.txt(头顶眼,世界那只手的系里)、world.txt(世界系:Rw、O)、world_arm.txt(世界那只手是第几只),离线回放 / 打分用
    --  Board / Plane_* 交给开机后半段(V1b 09-27):板 = 放进世界的手三角出、配进不动的眼的点(世界系位置和协方差、在不动的眼那张起点画面里的像素、
    --  那一批往返差换成的每轴噪声);Plane_Pt / Plane_N = 世界系里的桌面(原点就在桌面上、法向 = +z),Plane_Rms = 桌面上的点离面的离散(标准差)
    --  对齐里两处精修(一只手放进世界、全部放完以后一起精修)重挑内点、重解,做到门里的那一组不再变(09-30 改:原来固定 3 轮,那一组还在变就交了)。
@@ -109,11 +115,105 @@ package Jointboot is
       with procedure Pick (Use_Set : out Bools; Enough : out Boolean);
       with procedure Solve (Use_Set : Bools);
    procedure Until_Settled (Rounds : out Natural; Verdict : out Settle_Verdict);
+   --  ── I3 眼:每只眼长在谁身上(大并行第 0 步 I3,路 3;10-01 P8A)──
+   --  一只眼长在谁身上是开机量出来的(Find_Arms:每组读数一起转一小格,哪台相机整幅都变 = 长在这组上;所有手动时都变得最少的 = 不动的眼),
+   --  量清了就不再改判 —— 一条臂扫坏了(运动学没量成 / 放不进世界),它的眼照样是那条臂上的,只是这一回用不了,不改判成"不动的眼"。
+   --  (P8A 10-01:右臂扫描撞上柜子把手、卡偏,第 2 只手运动学没量成;往下的身体图只收了量成的手上的眼,第 2 台相机就成了"不长在臂上的",
+   --  告诉脑 "through the eye that does not move with me (camera index 2)")
+   --  On_Group = 长在第 Group 组读数上(Arm = 装上以后的第几只手,同 Install 按 Valid 的先后数;没装上 = -1);Still = 推哪组都不动(Placed = 放进世界了);
+   --  Unclear = 量不清(推哪组都没认出它跟着动,也不是那只最不动的)⇒ 照实说量不清,不猜
+   type Eye_Carrier is (On_Group, Still, Unclear);
+   type Eye_Info is record
+      Kind : Eye_Carrier := Unclear;
+      Group : Integer := -1;
+      Arm : Integer := -1;
+      Placed : Boolean := False;
+      World : Boolean := False;   --  它长在世界那只手上(世界 = 那只手参照眼系)
+   end record;
+   package Eye_Vectors is new Ada.Containers.Vectors (Natural, Eye_Info);
+   --  Eyes (A) / Groups (A) / Valid (A) = 第 A 只认出来的手上的相机(-1 = 没有)、它的读数组、它装没装上(运动学量成并且放进了世界);World_Cam = 不动的眼(-1 = 没有);
+   --  Ref = 世界那只手(-1 = 没定成);Fixed_Placed = 不动的眼放进了世界。纯函数(导出给自检)
+   function Eye_List (N_Cams : Natural; Eyes, Groups : Ints; Valid : Bools; World_Cam, Ref : Integer; Fixed_Placed : Boolean) return Eye_Vectors.Vector;
+   function Eye_Say (L : Eye_Vectors.Vector) return String;
+   --  世界取哪只手(大并行 §2 第 7 条 / 旧不足 4:原来第一组读数写死当世界,它扫坏了整个开机就退出,"定不了世界"):
+   --  Tilt_Sd (A) = 第 A 只手自己的桌面拟合出来"上"有多准(倾角的标准误差,弧度:离面散布 ÷ √面上的点数 ÷ 面铺开的大小);< 0 = 这只手当不了世界
+   --  (运动学没量成 / 三角出的点不够)。取当得了的第一只(按开机认出来的先后);没有一只当得了 ⇒ -1。纯函数(导出给自检)。
+   --  不按"上"最准的挑(10-01 量过):V1B68 / V1B69 / P3B / P3C 四炮按它都挑第 2 只(0.00002–0.00003 对 0.00003–0.00004 弧度,两只都远好过用得着的),
+   --  世界换到第 2 只以后,拿掉头顶眼的两炮把第 1 只手放坏(差 1036 / 957 mm、转 20° / 18°),另两炮 2.8 / 4.7 mm(第 1 只当世界 2.2 / 3.6),
+   --  有头顶眼的两炮 2.0 / 2.0 mm(第 1 只当世界 0.4 / 0.7)⇒ 放法对哪只手当世界不对称,"上"准不准不代表"当世界准不准";
+   --  哪个量能代表,要先量出来(照实写在报告里),量出来之前不按一个没证过的量换世界
+   function World_Arm (Tilt_Sd : Floats) return Integer;
+
    procedure Align (Ds : Sweep_Vectors.Vector; Worlds : in out Arm_World_Vectors.Vector; Css : Corr_Set_Vectors.Vector;
                     Host : String; Port : Natural; Rw : out Geom.M3; O : out Geom.V3; Ok : out Boolean; Fixed_Eye : out Geom.Cam_Geo;
                     Board : out Geom.Scene_Pt_Vectors.Vector; Plane_Pt, Plane_N : out Geom.V3; Plane_Rms : out Long_Float; Dump : String := "";
-                    Pin_Fixed_F : Long_Float := 0.0);
+                    Pin_Fixed_F : Long_Float := 0.0;
+                    Eyes : Ints := Int_Vectors.Empty_Vector; World_Cam : Integer := -1; N_Cams : Natural := 0);
+   --  Eyes / World_Cam / N_Cams(10-01,可以不给):每只认出来的手上的相机(和 Worlds 一一对应)、不动的眼、一共几台 ⇒ 对齐完照实说每只眼长在谁身上(Eye_List)
    --  Pin_Fixed_F > 0:不动的眼的焦距钉在这个值上不解(只给离线回放做对照实验用 —— alignexam 的 ALIGNEXAM_PIN_F;驱动开机永远不给,焦距一起解)
+
+   --  ── 放一只手进世界(10-01,大并行 §2 第 7 条后半)──
+   --  V1B68 / V1B69 拿掉头顶眼:第 2 只手沿两手连线偏 38 mm。离线按真值查出三件事:
+   --  ① 两只腕眼共同看见的 97% 是远处的墙,这些点的远近是第 2 只手自己扫描(基线几厘米)三角出来的,按真值错 1–1.3%,是它自报的 2.6–3.5 倍,
+   --     而且在画面里成片(左边、右边 −1.2 … −2.4%,中间 +0.1 … +0.6%);残差主要沿对极线(0.9–1.1 px,垂直的只有 0.24–0.34 px)。
+   --  ② "沿连线挪 + 反着转"挪远点,恰好也是沿对极线挪 ⇒ 远点远近那片误差和这个方向分不开;形式上的不确定度说沿连线 1.9 mm,实际偏 38 mm。
+   --  ③ 近处桌面上共同看见的 31 / 10 个点按真值只差 0.9–1.8 px,按偏的解差 24–30 px、要改远近 −7%、100% 同号 —— 不是野点,被门当野点挑掉了。
+   --  所以:配点噪声按量的分两份(Noise_Of);精修定了以后,被门挡掉的点要是一致地指向另一个解,就去那一坑再解、按混合似然比(Place_Hand);
+   --  放完照实算它干活的地方沿最不准的方向真的有多不准(Hand_Sd:系统那一份按全相关线性加)。
+   --
+   --  一条配点:这只手三角出的一个点(它自己系里 X、协方差 Cov;远近那一维沿 X 的方向 —— 点都是从它的参照眼三角出来的)配进世界里一只眼
+   --  (Cam:世界系位姿、焦距、主点)的像素 (U, V)。W × H = 那只眼的画幅(混合似然里门外的点均匀落在画面上);
+   --  Grp = 配点噪声按组各自量(配进手的格子 / 配进不长在手上的眼,视角差得远,噪声不一样);Rd = 那只眼过 (U, V) 的视线(世界系单位方向,起点 Cam.Pos;网格起步用)
+   type Hand_Ob is record
+      X : Geom.V3 := [0.0, 0.0, 0.0];
+      Cov : Geom.M3 := [others => [others => 0.0]];
+      Cam : Geom.Cam_Geo;
+      U, V : Long_Float := 0.0;
+      W, H : Natural := 0;
+      Grp : Natural := 0;
+      Rd : Geom.V3 := [0.0, 0.0, 0.0];
+   end record;
+   package Hand_Ob_Vectors is new Ada.Containers.Vectors (Natural, Hand_Ob);
+   --  它自己的桌面对上世界的桌面(3 条残差:两个倾角、一个高度):它的桌面中心 Cb、朝它的眼的法向 Nb(它自己系),倾角(弧度)/ 高度(世界单位)的不确定度 Sn / Sd;
+   --  世界的桌面 P0、朝世界那只手的眼的法向 N0
+   type Plane_Tie is record
+      Cb, Nb : Geom.V3 := [0.0, 0.0, 0.0];
+      Sn, Sd : Long_Float := 0.0;
+      P0, N0 : Geom.V3 := [0.0, 0.0, 0.0];
+   end record;
+   type Hand_Place is record
+      S : Long_Float := 1.0;                  --  这只手系 → 世界:X_世界 = S · R · X + T
+      R : Geom.M3 := Geom.Identity;
+      T : Geom.V3 := [0.0, 0.0, 0.0];
+      Inl : Natural := 0;                     --  门里的配点
+      Md : Long_Float := 0.0;                 --  门里的白化残差中位
+      Sm : Floats;                            --  每组配点噪声(像素,按垂直对极线那一份量)
+      K : Long_Float := 1.0;                  --  这只手三角点的远近真的不准是它自报的几倍(按沿对极线那一份量)
+      Cost : Long_Float := 0.0;               --  混合似然代价(门里 = 二维正态、门外 = 均匀落在画面上;各自按自己量的噪声,在像素里比)
+      Escapes : Natural := 0;                 --  换到代价更低的一坑,换了几次
+      Weak : Geom.V3 := [0.0, 0.0, 0.0];      --  它干活的地方(它的桌面中心)放进世界后最不准的方向(世界系单位向量)
+      Sd_Formal, Sd_Sys, Sd_Real : Long_Float := 0.0;   --  沿那个方向:形式的、系统那一份按全相关线性加的、合起来的(世界单位)
+      Lm_Capped : Boolean := False;           --  哪一遍的 LM 做满保险的次数代价还在降(没解到底,调用方照实说)
+      Unsettled : Boolean := False;           --  精修门里的那一组没定下来(来回转 / 解满保险的遍数)
+   end record;
+   --  从 P 的放法(网格起步挑的那一格,S / R / T)起:① 精修 —— 每轮按此刻的解量方差分量(Noise_Of)、按混合模型的分界挑门里的(像门里的比像
+   --  均匀落在画面上的乱配似然大,γ 按 EM)、Huber 解,做到门里的那一组不再变;
+   --  ② 出坑 —— 在它干活的地方最不准的方向上,每条被门挡掉的配点各报一个"沿这个方向挪多少我就对上了"(带它自己的不确定度),
+   --  核密度最高的那一处 + 提议落在那儿(Z 倍自己的不确定度以内)的那几条 = 另一坑的共识,先按共识解、再照 ① 精修;
+   --  混合似然代价(各自按自己量的噪声)低过似然比的门(Z² / 2)才换,换了再找,到换不动为止;③ Hand_Sd。
+   --  Sig0 = 精修第一轮之前每条配点的噪声(像素;往返差的中位)。Ok = False:门里的配点不到 Min_Inl 条
+   procedure Place_Hand (Obs : Hand_Ob_Vectors.Vector; Tie : Plane_Tie; Sig0 : Long_Float; P : in out Hand_Place; Ok : out Boolean);
+   --  在 P 的放法、P 的噪声(Sm、K)上重算:门里的配点、沿最不准的方向形式的 / 系统的 / 真的不准(一起精修以后也按这个再算一遍)
+   procedure Hand_Sd (Obs : Hand_Ob_Vectors.Vector; Tie : Plane_Tie; P : in out Hand_Place);
+   --  方差分量(纯函数,导出给自检):每条配点的像素残差拆成垂直对极线(Ep,方差 Sm² + Vp)和沿对极线(Ea,方差 Sm² + Va + K² · Vd:Vd = 自报的远近投进来的方差)。
+   --  每组的 Sm:让 Mad_Sigma × 中位 |Ep| / √(Sm² + Vp) = 1;再按各组的 Sm 让 Mad_Sigma × 中位 |Ea| / √(Sm² + Va + K² Vd) = 1 定 K
+   --  (都单调 ⇒ 二分到区间不再缩)。Live = 算哪几条(门里的);某组一条都没有 ⇒ 那组 Sm = Sig0;没有一条带远近 ⇒ K = 1(没法量,照自报的)
+   procedure Noise_Of (Ep, Vp, Ea, Va, Vd : Floats; Grp : Ints; Live : Bools; N_Grp : Natural; Sig0 : Long_Float; Sm : out Floats; K : out Long_Float);
+   --  一串提议(T,各自的不确定度 St):每个人按自己的不确定度当宽度的核密度,在每个提议处取值,最高的那一个(下标;空 ⇒ -1)
+   function Peak_Of (T, St : Floats) return Integer;
+   --  门里还是乱配(混合模型自己的分界,纯函数,导出给自检):W2 = 每条配点白化残差的 |w|²,Dens = 乱配(均匀落在那只眼的画面上)在白化单位里的密度
+   --  (这条配点的像素面积 ÷ 画幅面积);门里的占比 Gamma 按 EM 解到不再变;Inl = 这一条像门里的(二维单位正态)比像乱配的似然大
+   procedure Mix_Gate (W2, Dens : Floats; Inl : out Bools; Gamma : out Long_Float);
 
    --  到过的范围(09-29):开机扫描的一只手 ⇒ 记下的尽头(Lo / Hi:这一边是关节到头停的 ⇒ 扫到的最远那一格,否则不设界)、到过的范围(各格读数的两头)、
    --  往外一步(Step_Lo / Step_Hi)、眼的画幅宽

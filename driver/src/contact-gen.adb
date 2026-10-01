@@ -34,12 +34,6 @@ package body Contact.Gen is
       return A;
    end To_Array;
 
-   --  ── 支撑面在哪,变成一个参数 ──
-
-   function Inverse (R : Rot) return Rot is ((Axis => R.Axis, Ang => -R.Ang));
-
-   --  ── 另外两种手 ──
-
    function Gap_Of (Ca : V3_Array) return Long_Float is
       N : constant Natural := Ca'Length;
       D : Float_Array (0 .. N - 1);

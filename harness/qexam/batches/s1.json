@@ -1,0 +1,379 @@
+{
+ "batch": "s1",
+ "seed": 11,
+ "bodies": [
+  "x5"
+ ],
+ "questions": [
+  {
+   "qid": 30,
+   "seed": 20030,
+   "task": "bd_cloth",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "scene",
+   "sentence": "Pick up the cloth by a corner and lift it 10 cm.",
+   "check": [
+    "bd_cloth 自己的判据",
+    {
+     "layout": "arx_x5/0/bd_cloth_0.json",
+     "copy_md5_same": true
+    }
+   ],
+   "steps": 200,
+   "objects": [
+    {
+     "label": "cloth",
+     "cat": "bd_cloth",
+     "desc": "bd_cloth",
+     "pos": [
+      0.05592567574082302,
+      -0.11431105341146483,
+      0.769
+     ]
+    }
+   ]
+  },
+  {
+   "qid": 31,
+   "seed": 20031,
+   "task": "bd_drawer",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "scene",
+   "sentence": "Open the drawer of the cabinet.",
+   "check": [
+    "bd_drawer 自己的判据",
+    {
+     "layout": "arx_x5/0/bd_drawer_0.json",
+     "copy_md5_same": true
+    }
+   ],
+   "steps": 200,
+   "objects": [
+    {
+     "label": "cabinet",
+     "cat": "bd_cabinet",
+     "desc": "bd_cabinet",
+     "pos": [
+      0.04044459119329394,
+      0.12562027253188732,
+      0.766
+     ]
+    }
+   ]
+  },
+  {
+   "qid": 32,
+   "seed": 20032,
+   "task": "bd_glass",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "scene",
+   "sentence": "Pick up the glass cup by 10 cm.",
+   "check": [
+    "bd_glass 自己的判据",
+    {
+     "layout": "arx_x5/0/bd_glass_2.json",
+     "copy_md5_same": true
+    }
+   ],
+   "steps": 200,
+   "objects": [
+    {
+     "label": "glass",
+     "cat": "bd_glass_cup",
+     "desc": "bd_glass_cup",
+     "pos": [
+      -0.09810582966358246,
+      -0.05401659978852422,
+      0.766
+     ]
+    }
+   ]
+  },
+  {
+   "qid": 33,
+   "seed": 20033,
+   "task": "bd_hinge",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "scene",
+   "sentence": "Swing the hinged board open.",
+   "check": [
+    "bd_hinge 自己的判据",
+    {
+     "layout": "arx_x5/0/bd_hinge_1.json",
+     "copy_md5_same": true
+    }
+   ],
+   "steps": 200,
+   "objects": [
+    {
+     "label": "board",
+     "cat": "bd_hinge_board",
+     "desc": "bd_hinge_board",
+     "pos": [
+      -0.13128148367938408,
+      0.04527179489491432,
+      0.766
+     ]
+    }
+   ]
+  },
+  {
+   "qid": 34,
+   "seed": 20034,
+   "task": "bd_hook",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "scene",
+   "sentence": "Hang the red ring on the hook.",
+   "check": [
+    "bd_hook 自己的判据",
+    {
+     "layout": "arx_x5/0/bd_hook_1.json",
+     "copy_md5_same": true
+    }
+   ],
+   "steps": 300,
+   "objects": [
+    {
+     "label": "ring",
+     "cat": "bd_ring",
+     "desc": "bd_ring",
+     "pos": [
+      0.21973528202461162,
+      -0.14911850117151415,
+      0.766
+     ]
+    },
+    {
+     "label": "hook",
+     "cat": "bd_hook",
+     "desc": "bd_hook",
+     "pos": [
+      0.08048939005364905,
+      0.11515884215463773,
+      0.765
+     ]
+    }
+   ]
+  },
+  {
+   "qid": 35,
+   "seed": 20035,
+   "task": "bd_knob",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "scene",
+   "sentence": "Turn the knob half a turn.",
+   "check": [
+    "bd_knob 自己的判据",
+    {
+     "layout": "arx_x5/0/bd_knob_1.json",
+     "copy_md5_same": true
+    }
+   ],
+   "steps": 300,
+   "objects": [
+    {
+     "label": "knob",
+     "cat": "bd_knob",
+     "desc": "bd_knob",
+     "pos": [
+      0.14986108335676007,
+      -0.03964819309831266,
+      0.766
+     ]
+    }
+   ]
+  },
+  {
+   "qid": 36,
+   "seed": 20036,
+   "task": "bd_lidbox",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "scene",
+   "sentence": "Open the lid of the box.",
+   "check": [
+    "bd_lidbox 自己的判据",
+    {
+     "layout": "arx_x5/0/bd_lidbox_2.json",
+     "copy_md5_same": true
+    }
+   ],
+   "steps": 200,
+   "objects": [
+    {
+     "label": "inside",
+     "cat": "bd_cube",
+     "desc": "bd_cube",
+     "pos": [
+      0.037419806714637655,
+      -0.13087297864807224,
+      0.775
+     ]
+    },
+    {
+     "label": "box",
+     "cat": "bd_lidbox",
+     "desc": "bd_lidbox",
+     "pos": [
+      0.037419806714637655,
+      -0.13087297864807224,
+      0.766
+     ]
+    }
+   ]
+  },
+  {
+   "qid": 37,
+   "seed": 20037,
+   "task": "bd_peg",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "scene",
+   "sentence": "Insert the blue peg into the square hole of the yellow block.",
+   "check": [
+    "bd_peg 自己的判据",
+    {
+     "layout": "arx_x5/0/bd_peg_0.json",
+     "copy_md5_same": true
+    }
+   ],
+   "steps": 300,
+   "objects": [
+    {
+     "label": "peg",
+     "cat": "bd_peg",
+     "desc": "bd_peg",
+     "pos": [
+      -0.07375031090961767,
+      0.015803968023914483,
+      0.766
+     ]
+    },
+    {
+     "label": "block",
+     "cat": "bd_hole_block",
+     "desc": "bd_hole_block",
+     "pos": [
+      0.18646398677840853,
+      -0.09310261627686285,
+      0.765
+     ]
+    }
+   ]
+  },
+  {
+   "qid": 38,
+   "seed": 20038,
+   "task": "bd_trigger",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "scene",
+   "sentence": "Pick up the water gun and pull its trigger.",
+   "check": [
+    "bd_trigger 自己的判据",
+    {
+     "layout": "arx_x5/0/bd_trigger_1.json",
+     "copy_md5_same": true
+    }
+   ],
+   "steps": 300,
+   "objects": [
+    {
+     "label": "gun",
+     "cat": "bd_water_gun",
+     "desc": "bd_water_gun",
+     "pos": [
+      0.03778438273495455,
+      -0.010395979523327187,
+      0.784
+     ]
+    }
+   ]
+  },
+  {
+   "qid": 39,
+   "seed": 20039,
+   "task": "bd_walker",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "scene",
+   "sentence": "Catch the toy bus that drives around on the table and lift it 10 cm.",
+   "check": [
+    "bd_walker 自己的判据",
+    {
+     "layout": "arx_x5/0/bd_walker_0.json",
+     "copy_md5_same": true
+    }
+   ],
+   "steps": 200,
+   "objects": [
+    {
+     "label": "target",
+     "cat": "toy_car",
+     "desc": "toy_car",
+     "pos": [
+      0.01688231365560569,
+      -0.08881297320476203,
+      0.7873360004127026
+     ]
+    }
+   ]
+  },
+  {
+   "qid": 40,
+   "seed": 20040,
+   "task": "bd_white",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "scene",
+   "sentence": "Pick up the spray can by 10 cm.",
+   "check": [
+    "bd_white 自己的判据",
+    {
+     "layout": "arx_x5/0/bd_white_1.json",
+     "copy_md5_same": true
+    }
+   ],
+   "steps": 200,
+   "objects": [
+    {
+     "label": "target",
+     "cat": "can",
+     "desc": "can",
+     "pos": [
+      0.09826711286255563,
+      -0.045671622097591874,
+      0.766
+     ]
+    },
+    {
+     "label": "walls",
+     "cat": "bd_white_room",
+     "desc": "bd_white_room",
+     "pos": [
+      0.0,
+      0.0,
+      0.0
+     ]
+    }
+   ]
+  }
+ ]
+}
