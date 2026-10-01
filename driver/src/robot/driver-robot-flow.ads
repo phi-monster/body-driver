@@ -29,25 +29,31 @@ private package Driver.Robot.Flow is
    --  cells are numbered row by row from the top-left one.
 
    function Luma (I : Driver.Images.Image) return Real_Array;
-   --  The BT.601 luma of every pixel, row by row; empty for an empty image.
+   --  Driver.Images.Luma of every pixel, row by row, read in one pass over
+   --  the bytes (a call per pixel costs three eyes a tenth of a second a
+   --  beat); empty for an empty image.
 
    procedure Displacements
      (G             : Cell_Grid;
       Before, After : Real_Array;
+      Luma_Variance : Real_Array;
       Du, Dv        : out Real_Array;
       Condition     : out Real_Array)
      with Pre => Before'Length = G.Width * G.Height and then After'Length = Before'Length
+                 and then Luma_Variance'Length = Cells (G)
                  and then Du'Length = Cells (G) and then Dv'Length = Cells (G)
                  and then Condition'Length = Cells (G);
    --  Per cell, the translation (pixels, +U right and +V down) that moves the
    --  content of Before to After, and the smaller eigenvalue of the cell's
    --  gradient tensor. A cell without texture in two directions gets zero
-   --  displacement and zero condition.
+   --  displacement and zero condition. Luma_Variance is, per cell, the
+   --  variance of a resting pixel's luma (Noise_Floor); the iteration stops
+   --  once a step is below what that noise lets the cell resolve.
 
-   function Noise_Floor (Condition : Real) return Real;
-   --  The least standard deviation a displacement of a cell with that
-   --  condition can have: the rounding of 8-bit images alone, propagated
-   --  through the cell's gradient tensor along its weakest direction.
-   --  Unknown (Real'Last) for a cell without texture.
+   function Noise_Floor (Condition, Luma_Variance : Real) return Real;
+   --  The standard deviation of a displacement of a cell with that condition
+   --  measured between two frames whose pixels carry that luma variance
+   --  each: the variance propagated through the cell's gradient tensor along
+   --  its weakest direction. Unknown (Real'Last) for a cell without texture.
 
 end Driver.Robot.Flow;

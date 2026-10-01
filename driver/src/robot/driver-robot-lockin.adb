@@ -142,7 +142,7 @@ package body Driver.Robot.Lockin is
                               Cond (R) := S.Condition (Beat_Of (R) * N + Cell - 1);
                               if Cond (R) > 0.0 then
                                  Fl := Fl + 1;
-                                 Floors (Fl) := Flow.Noise_Floor (Cond (R));
+                                 Floors (Fl) := Flow.Noise_Floor (Cond (R), S.Luma_Variance (Cell - 1));
                               end if;
                            end loop;
                            Textured (Cell) := Driver.Stats.Median (Cond) > 0.0;
@@ -177,7 +177,9 @@ package body Driver.Robot.Lockin is
                                           Regression.Test_Block (Fu, First, Last, Su, Ku);
                                           Regression.Test_Block (Fv, First, Last, Sv, Kv);
                                           Responding (Cell, G) :=
-                                            Ku + Kv > 0 and then Regression.Z_Of (Su + Sv, Ku + Kv) > Driver.Conventions.Z;
+                                            Ku + Kv > 0
+                                            and then Driver.Distributions.Chi_Square_Deviate (Su + Sv, Ku + Kv)
+                                                       > Driver.Conventions.Z;
                                        end;
                                     end if;
                                  end;
@@ -199,7 +201,7 @@ package body Driver.Robot.Lockin is
                         end loop;
                         --  The per-cell test's own false-alarm rate.
                         declare
-                           P0 : constant Real := Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z) / 2.0;
+                           P0 : constant Real := Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z);
                            T  : Natural := 0;
                         begin
                            for Cell in 1 .. N loop
@@ -223,21 +225,21 @@ package body Driver.Robot.Lockin is
                                        end if;
                                     end loop;
                                     declare
-                                       F     : constant Real := Real (Count) / Real (T);
-                                       Sd_F  : constant Real := Sqrt (F * (1.0 - F) / Real (T));
-                                       Alarm : constant Real := Real (T) * P0;
-                                       Sd_A  : constant Real := Sqrt (Real (T) * P0 * (1.0 - P0));
-                                       Half  : constant Real := 0.5;
+                                       F    : constant Real := Real (Count) / Real (T);
+                                       --  An eye mostly sees the world: a whole image moves when
+                                       --  a significant majority of what can move does.
+                                       Half : constant Real := 0.5;
                                     begin
                                        Effect.Responding := Count;
                                        Effect.Textured := T;
-                                       Effect.Fraction := (Value => F, Sigma => Sd_F, Degrees_Of_Freedom => 0);
-                                       if not Driver.Uncertain.Significant (Real (Count) - Alarm, Sd_A)
-                                         or else Real (Count) <= Alarm
-                                       then
+                                       Effect.Fraction :=
+                                         (Value => F, Sigma => Sqrt (F * (1.0 - F) / Real (T)), Degrees_Of_Freedom => 0);
+                                       if not Regression.Count_Significant (Count, T, P0) then
                                           Effect.Verdict := Nothing;
-                                       elsif Driver.Uncertain.Significant (F - Half, Sd_F) then
-                                          Effect.Verdict := (if F > Half then Whole else Patch);
+                                       elsif Regression.Count_Significant (Count, T, Half) then
+                                          Effect.Verdict := Whole;
+                                       elsif Regression.Count_Significant (T - Count, T, Half) then
+                                          Effect.Verdict := Patch;
                                        else
                                           Effect.Verdict := Undecided;
                                        end if;

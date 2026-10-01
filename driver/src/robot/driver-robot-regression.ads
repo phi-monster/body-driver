@@ -2,7 +2,7 @@
 --  coefficients.
 --
 --  The fit is iteratively reweighted least squares with Huber's weights to
---  convergence: a convex loss, so where it starts does not matter, and an
+--  convergence, cut at the significance level Z: a convex loss, so where it starts does not matter, and an
 --  observation far outside the model (a motion too large for a
 --  linearization) keeps only a weight inversely proportional to its
 --  residual. A redescending loss would drop such observations entirely,
@@ -32,15 +32,18 @@ private package Driver.Robot.Regression is
    --  quantity): exact data would otherwise give a zero scale, and every
    --  observation that is not fitted exactly would lose all its weight.
 
+   function Count_Significant (Count, Trials : Natural; Rate : Real) return Boolean
+     with Pre => Count <= Trials and then Rate > 0.0 and then Rate < 1.0;
+   --  Count events in that many independent trials are more than chance at
+   --  Rate per trial explains: the exact binomial probability of at least
+   --  Count is below the tail Z has for a Gaussian (through its relation to
+   --  Fisher's F). Used for how many tests of a family alarmed.
+
    procedure Test_Block (F : Fit; First, Last : Positive; Statistic : out Real; Freedom : out Natural)
      with Pre => First <= Last and then Last <= F.Columns;
    --  The Wald statistic of coefficients First .. Last against zero, with
    --  the covariance Scale ** 2 times the pseudo-inverse of Normal, and its
    --  degrees of freedom (the numerical rank of that block). Statistics of
    --  independent responses add, and so do their degrees of freedom.
-
-   function Z_Of (Statistic : Real; Freedom : Positive) return Real;
-   --  The standard normal deviate with the same upper tail as a chi-square
-   --  of that many degrees of freedom (Wilson-Hilferty).
 
 end Driver.Robot.Regression;

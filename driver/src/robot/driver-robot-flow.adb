@@ -22,7 +22,7 @@ package body Driver.Robot.Flow is
       Y1 := (Row + 1) * G.Height / G.Rows;
    end Bounds;
 
-   --  ITU-R BT.601 luma weights.
+   --  ITU-R BT.601 luma weights, those of Driver.Images.Luma.
    Red_Weight   : constant := 0.299;
    Green_Weight : constant := 0.587;
    Blue_Weight  : constant := 0.114;
@@ -51,6 +51,7 @@ package body Driver.Robot.Flow is
    procedure Displacements
      (G             : Cell_Grid;
       Before, After : Real_Array;
+      Luma_Variance : Real_Array;
       Du, Dv        : out Real_Array;
       Condition     : out Real_Array)
    is
@@ -143,8 +144,12 @@ package body Driver.Robot.Flow is
                                  Sv := -(Sxx * By - Sxy * Bx) / Det;
                                  U := U + Su;
                                  V := V + Sv;
+                                 --  Done when a step no longer changes the estimate,
+                                 --  or is below what the cell can resolve at all.
                                  exit when Sqrt (Su * Su + Sv * Sv)
-                                           <= Driver.Conventions.Unchanged_Fraction * Sqrt (U * U + V * V);
+                                           <= Real'Max (Driver.Conventions.Unchanged_Fraction * Sqrt (U * U + V * V),
+                                                        Noise_Floor (Condition (Condition'First + Cell - 1),
+                                                                     Luma_Variance (Luma_Variance'First + Cell - 1)));
                               end;
                            end loop;
                            Du (K) := U;
@@ -158,13 +163,7 @@ package body Driver.Robot.Flow is
       end loop;
    end Displacements;
 
-   --  The variance of the luma of an 8-bit RGB pixel from rounding alone:
-   --  each channel's rounding is uniform over one level (variance 1 / 12)
-   --  and the luma weighs the three.
-   Rounding_Variance : constant Real :=
-     (Red_Weight ** 2 + Green_Weight ** 2 + Blue_Weight ** 2) / 12.0;
-
-   function Noise_Floor (Condition : Real) return Real is
-     (if Condition > 0.0 then Sqrt (2.0 * Rounding_Variance / Condition) else Real'Last);
+   function Noise_Floor (Condition, Luma_Variance : Real) return Real is
+     (if Condition > 0.0 then Sqrt (2.0 * Luma_Variance / Condition) else Real'Last);
 
 end Driver.Robot.Flow;

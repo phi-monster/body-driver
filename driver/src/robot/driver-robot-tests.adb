@@ -3,6 +3,7 @@ with Driver.Bytes;
 with Driver.Clock;
 with Driver.Commands;
 with Driver.Conventions;
+with Driver.Distributions;
 with Driver.Images;
 with Driver.Observations;
 with Driver.Robot.Channels;
@@ -53,6 +54,9 @@ package body Driver.Robot.Tests is
       G : constant Cell_Grid := Flow.Grid_Of (W, H);
       A, B : Real_Array (1 .. W * H);
       Du, Dv, Cond : Real_Array (1 .. Cells (G));
+      --  Noiseless frames: a pixel varies by its 8-bit rounding alone, the
+      --  floor Driver.Pixels applies.
+      Quantization : constant Real_Array (1 .. Cells (G)) := [others => 1.0 / 12.0];
 
       --  B shows A moved by (Su, Sv): B at x shows A at x - (Su, Sv).
       procedure Shift (Su, Sv : Real) is
@@ -63,7 +67,7 @@ package body Driver.Robot.Tests is
                B (Y * W + X + 1) := Smooth (Real (X) - Su, Real (Y) - Sv);
             end loop;
          end loop;
-         Flow.Displacements (G, A, B, Du, Dv, Cond);
+         Flow.Displacements (G, A, B, Quantization, Du, Dv, Cond);
       end Shift;
    begin
       Check (G.Columns = 8 and then G.Rows = 6, "grid of a 64 x 48 image is 8 x 6");
@@ -92,7 +96,7 @@ package body Driver.Robot.Tests is
          Check_Close (Dv (C), -0.2, 0.07, "vertical sub-pixel shift of cell" & C'Image);
       end loop;
       A := [others => 100.0];
-      Flow.Displacements (G, A, A, Du, Dv, Cond);
+      Flow.Displacements (G, A, A, Quantization, Du, Dv, Cond);
       Check (Cond (1) = 0.0 and then Du (1) = 0.0, "a flat cell has no displacement and no condition");
    end Flow_Recovers_Shifts;
 
@@ -126,7 +130,7 @@ package body Driver.Robot.Tests is
          Check (F.Scale < 0.02, "scale from the inliers:" & F.Scale'Image);
          Regression.Test_Block (F, 3, 4, S, K);
          Check (K = 1, "two collinear columns carry one degree of freedom, got" & K'Image);
-         Check (Regression.Z_Of (S, K) > Driver.Conventions.Z, "the collinear block is significant");
+         Check (Driver.Distributions.Chi_Square_Deviate (S, K) > Driver.Conventions.Z, "the collinear block is significant");
       end;
       --  A response unrelated to the columns gives an insignificant block.
       for I in 1 .. N loop
@@ -138,7 +142,7 @@ package body Driver.Robot.Tests is
          K : Natural;
       begin
          Regression.Test_Block (F, 2, 2, S, K);
-         Check (Regression.Z_Of (S, K) < Driver.Conventions.Z, "noise is not a response");
+         Check (Driver.Distributions.Chi_Square_Deviate (S, K) < Driver.Conventions.Z, "noise is not a response");
       end;
    end Regression_Ignores_Outliers;
 
@@ -177,7 +181,7 @@ package body Driver.Robot.Tests is
             begin
                case Eye is
                   when 1 =>
-                     if Y >= 40 and then X in 24 .. 39 then
+                     if Y >= 32 and then X in 16 .. 47 then
                         L := Texture (Xr + Px_Per_Unit * S.Closer, Yr, 1.0);
                      else
                         L := Texture (Xr + Px_Per_Unit * S.Arm_1 (1), Yr + Px_Per_Unit * S.Arm_1 (2));
@@ -326,17 +330,23 @@ package body Driver.Robot.Tests is
       O    : Observation;
       Sent : Driver.Commands.Command;
    begin
-      --  One commandable group whose reading carries noise of sigma 0.01,
-      --  pushed by 1 at beat 20 and answered from beat 21; one camera.
+      --  Group 1 reads with noise of sigma 0.01 and is pushed by 1 at beat 20,
+      --  answered from beat 21. Group 2 echoes its target exactly but no
+      --  further than 1 (a clipped echo): its push to 0.5 at beat 10 is
+      --  answered at once, its push to 1.5 at beat 40 never. One camera.
       for B in 0 .. 59 loop
          O := (others => <>);
          O.Beat := Driver.Clock.Beat (B);
          O.Images.Append (Driver.Images.No_Image);
          O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
-         O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+         for G in 1 .. 2 loop
+            O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+         end loop;
          O.Readings.Append (Real_Array'(1 => (if B >= 21 then 1.0 else 0.0) + 0.01 * Gaussian (Rng)));
+         O.Readings.Append (Real_Array'(1 => (if B >= 40 then 1.0 elsif B >= 10 then 0.5 else 0.0)));
          Sent := Driver.Commands.Hold;
          Driver.Commands.Set_Target (Sent, 1, [(if B >= 20 then 1.0 else 0.0)]);
+         Driver.Commands.Set_Target (Sent, 2, [(if B >= 40 then 1.5 elsif B >= 10 then 0.5 else 0.0)]);
          Observe (M, O, Sent);
       end loop;
       Estimate_Now (M);
@@ -347,10 +357,69 @@ package body Driver.Robot.Tests is
       Check (not Channels.Pushed (M, 1, 25), "the push ends when the reading stops closing in");
       Check (Stillness.Group_Still (M, 1, 40), "a resting reading with noise is still");
       Check (not Stillness.Group_Still (M, 1, 21), "the answer to a push is motion");
+      Check (Channels.Asked (M, 2, 40), "a target beyond the clip asks for motion");
+      Check (not Channels.Pushed (M, 2, 41) and then not Channels.Pushed (M, 2, 50),
+             "a push that is not answered within the measured delay is over");
    end Channel_Noise_And_Pushes;
+
+   procedure Eye_Stillness is
+      Rng : Generator;
+      S   : Eye_Stream;
+
+      --  The texture with Gaussian noise of one level per pixel, a 16 x 16
+      --  patch moved Shift pixels to the right.
+      function Frame (Shift : Real) return Driver.Images.Image is
+         use type Driver.Bytes.Offset;
+         Data : Driver.Bytes.Byte_Array (1 .. 3 * Rig_Width * Rig_Height);
+      begin
+         for Y in 0 .. Rig_Height - 1 loop
+            for X in 0 .. Rig_Width - 1 loop
+               declare
+                  Moved : constant Real := (if X in 20 .. 35 and then Y in 16 .. 31 then Shift else 0.0);
+                  L : constant Real := Texture (Real (X) - Moved, Real (Y)) + Gaussian (Rng);
+                  V : constant Driver.Bytes.Byte := Driver.Bytes.Byte (Integer (Real'Max (0.0, Real'Min (255.0, L))));
+                  K : constant Driver.Bytes.Offset := Driver.Bytes.Offset (3 * (Y * Rig_Width + X) + 1);
+               begin
+                  Data (K) := V;
+                  Data (K + 1) := V;
+                  Data (K + 2) := V;
+               end;
+            end loop;
+         end loop;
+         return Driver.Images.Create (Rig_Width, Rig_Height, Data);
+      end Frame;
+   begin
+      Stillness.Judge_Eye (S, Frame (0.0));
+      Check (not S.Is_Still, "one frame cannot say an eye is still");
+      for B in 2 .. 8 loop
+         Stillness.Judge_Eye (S, Frame (0.0));
+      end loop;
+      --  A still eye alarms by chance at the rate Z has for a Gaussian
+      --  (0.27 % a frame); two alarms in twenty frames would happen 0.14 %
+      --  of the time.
+      declare
+         Alarms : Natural := 0;
+      begin
+         for B in 1 .. 20 loop
+            Stillness.Judge_Eye (S, Frame (0.0));
+            if not S.Is_Still then
+               Alarms := Alarms + 1;
+            end if;
+         end loop;
+         Check (Alarms <= 1, "a still view with camera noise comes to rest; alarms in twenty frames:" & Alarms'Image);
+      end;
+      Stillness.Judge_Eye (S, Frame (2.0));
+      Check (not S.Is_Still, "a patch moving two pixels is a change");
+      for B in 1 .. 3 loop
+         Stillness.Judge_Eye (S, Frame (2.0));
+         Check (S.Is_Still, "the moved patch rests again at frame" & B'Image);
+      end loop;
+   end Eye_Stillness;
 
    procedure Register is
    begin
+      Driver.Tests.Register ("robot.stillness", "an eye with ordinary camera noise never comes to rest, or a moving "
+                             & "patch goes unnoticed", Eye_Stillness'Access);
       Driver.Tests.Register ("robot.roles", "a group is given the wrong role, an eye the wrong mount or lag, an arm "
                              & "is credited with a lockstep partner's eye, or a reaction to another push is taken "
                              & "for a push", Roles_Of_A_Synthetic_Body'Access);

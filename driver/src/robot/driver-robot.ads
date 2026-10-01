@@ -30,6 +30,7 @@ with Driver.Commands;
 with Driver.Images;
 with Driver.Numerics;
 with Driver.Observations;
+private with Driver.Pixels;
 with Driver.Uncertain;
 
 package Driver.Robot is
@@ -162,6 +163,7 @@ private
    package Real_Vectors is new Ada.Containers.Vectors (Natural, Real);
    package Flag_Vectors is new Ada.Containers.Vectors (Natural, Boolean);
    package Luma_Holders is new Ada.Containers.Indefinite_Holders (Real_Array);
+   package Count_Vectors is new Ada.Containers.Vectors (Natural, Natural);
 
    --  A group's readings and the target in effect, beat after beat; beat K
    --  of the stream is the K-th observation (counted from zero).
@@ -197,6 +199,12 @@ private
       Measured      : Flag_Vectors.Vector;   --  per beat: both frames were there
       Noise         : Real_Vectors.Vector;   --  per cell: displacement noise at rest, once measured
       Textured      : Flag_Vectors.Vector;   --  per cell: can show a displacement, once measured
+      Luma_Variance : Real_Vectors.Vector;   --  per cell: a resting pixel's luma variance (Stillness)
+      Settled       : Driver.Pixels.View;    --  the frames since the eye last saw a change
+      Noise_View    : Driver.Pixels.View;    --  the longest still run before the current one
+      Noise_Is_Settled : Boolean := True;    --  the settled view is the longest run so far
+      Has_Settled   : Boolean := False;
+      Is_Still      : Boolean := False;      --  at the latest beat, once judged (Driver.Robot.Stillness)
    end record;
 
    package Eye_Stream_Vectors is new Ada.Containers.Vectors (Eye_Id, Eye_Stream);
@@ -236,6 +244,7 @@ private
       Groups         : Group_Stream_Vectors.Vector;
       Eyes           : Eye_Stream_Vectors.Vector;
       Noise          : Real_Vectors.Vector;        --  per channel of every group, in group order
+      Noise_Freedom  : Count_Vectors.Vector;       --  the degrees of freedom each noise rests on
       Lags           : Lag_Vectors.Vector;
       Graph          : Body_Graph;
       Graph_Evidence : Natural := 0;               --  push beats behind the current graph

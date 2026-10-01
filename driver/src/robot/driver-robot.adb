@@ -46,9 +46,12 @@ package body Driver.Robot is
                if Same and then not S.Previous.Is_Empty then
                   declare
                      Now : constant Real_Array := Flow.Luma (O.Images (E));
-                     Du, Dv, Condition : Real_Array (1 .. N);
+                     Du, Dv, Condition, Luma_Variance : Real_Array (1 .. N);
                   begin
-                     Flow.Displacements (S.Grid, S.Previous.Element, Now, Du, Dv, Condition);
+                     for C in 1 .. N loop
+                        Luma_Variance (C) := S.Luma_Variance (C - 1);
+                     end loop;
+                     Flow.Displacements (S.Grid, S.Previous.Element, Now, Luma_Variance, Du, Dv, Condition);
                      for C in 1 .. N loop
                         S.Du.Append (Du (C));
                         S.Dv.Append (Dv (C));
@@ -73,6 +76,12 @@ package body Driver.Robot is
                   end if;
                end if;
             end;
+            if Have then
+               Stillness.Judge_Eye (S, O.Images (E));
+               if S.Luma_Variance.Is_Empty then
+                  Stillness.Measure_Luma_Noise (S);
+               end if;
+            end if;
          end;
       end loop;
    end Observe_Eyes;
@@ -81,6 +90,11 @@ package body Driver.Robot is
       Start : constant Duration := Driver.Clock.Seconds;
    begin
       Channels.Measure_Noise (M);
+      for S of M.Eyes loop
+         if S.Has_Settled then
+            Stillness.Measure_Luma_Noise (S);
+         end if;
+      end loop;
       Channels.Measure_Pushes (M);
       Lag.Measure (M);
       Lockin.Measure (M);
@@ -146,7 +160,7 @@ package body Driver.Robot is
      (raise Not_Measured with "Clearance");
 
    function Still (M : Model) return Boolean is
-     (M.Beats = 0 or else Stillness.All_Still (M, M.Beats - 1));
+     (Stillness.All_Still (M));
 
    function Group_Count (M : Model) return Natural is (Natural (M.Groups.Length));
 

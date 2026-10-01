@@ -38,6 +38,9 @@ private package Driver.Robot.Channels is
    function Noise (M : Model; G : Group_Id; Channel : Positive) return Real;
    --  Unknown (Real'Last) until measured.
 
+   function Noise_Measured (M : Model; G : Group_Id) return Boolean;
+   --  Every channel of the group has its noise measured.
+
    function Moving (M : Model; G : Group_Id; Beat : Natural) return Boolean;
    --  Some channel's change at Beat is significant against its noise; False
    --  without a reading at Beat or Beat - 1, or before noise is measured.

@@ -1,13 +1,13 @@
-with Ada.Numerics.Long_Elementary_Functions;
 with Driver.Conventions;
+with Driver.Distributions;
 with Driver.Stats;
 
 package body Driver.Robot.Regression is
 
-   use Ada.Numerics.Long_Elementary_Functions;
 
-   Huber_K : constant := 1.345;
-   --  Huber's constant: 95 % asymptotic efficiency at the normal distribution.
+   Huber_K : constant := Driver.Conventions.Z;
+   --  A residual beyond Z sigma is significantly not noise: from there on
+   --  its weight falls inversely with its size.
 
    --  The pseudo-inverse of a symmetric positive semi-definite matrix, and
    --  its numerical rank: eigenvalues below the round-off of the largest
@@ -151,6 +151,24 @@ package body Driver.Robot.Regression is
       return (Columns => P, Beta => B, Scale => S, Normal => A, Converged => Converged);
    end Solve;
 
+   function Count_Significant (Count, Trials : Natural; Rate : Real) return Boolean is
+   begin
+      if Count = 0 then
+         return False;
+      end if;
+      --  P (X >= k) for X binomial (n, p) is P (F < (n - k + 1) p / (k (1 - p)))
+      --  for F with 2 k and 2 (n - k + 1) degrees of freedom.
+      declare
+         K : constant Real := Real (Count);
+         N : constant Real := Real (Trials);
+         Tail : constant Real :=
+           1.0 - Driver.Distributions.F_Upper_Tail
+                   ((N - K + 1.0) * Rate / (K * (1.0 - Rate)), 2 * Count, 2 * (Trials - Count + 1));
+      begin
+         return Tail < Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z);
+      end;
+   end Count_Significant;
+
    procedure Test_Block (F : Fit; First, Last : Positive; Statistic : out Real; Freedom : out Natural) is
       K    : constant Natural := Last - First + 1;
       Inv  : Real_Matrix (1 .. F.Columns, 1 .. F.Columns);
@@ -169,15 +187,5 @@ package body Driver.Robot.Regression is
       Pseudo_Inverse (Cov, Cinv, Freedom);
       Statistic := (if Freedom = 0 then 0.0 else Beta * (Cinv * Beta));
    end Test_Block;
-
-   function Z_Of (Statistic : Real; Freedom : Positive) return Real is
-      K : constant Real := Real (Freedom);
-      V : constant Real := 2.0 / (9.0 * K);
-   begin
-      if Statistic <= 0.0 then
-         return (0.0 - (1.0 - V)) / Sqrt (V);
-      end if;
-      return ((Statistic / K) ** (1.0 / 3.0) - (1.0 - V)) / Sqrt (V);
-   end Z_Of;
 
 end Driver.Robot.Regression;
