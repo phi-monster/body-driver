@@ -453,11 +453,11 @@ begin
    end;
    --  ── 量 → 要它怎么动(§2 第 16 条后半:量都变成旋量,10-01)──
    --  ① height 和 10-01 以前逐位一样:以前 = 沿 Up_Dir(碰过的面按量到的法向,没碰过按协议的上)走,往下取反;现在 = Act.Want_Twist 的平移。
-   --     三种面:碰过的面(法向是量出来又归一过的,模长差一丝不到 1)、没碰过也没有板、只有标定板(Up_Dir 仍是协议的上),上下各一次,三个分量逐位比。
+   --     三种面:碰过的面(法向是量出来又归一过的,模长差一丝不到 1)、没碰过也没有板、只有标定板(Up_Dir = 板法向,路 1 10-01 按 §2 第 1 条改的),上下各一次,三个分量逐位比。
    --     病:换成旋量以后 height 悄悄变了一丝(比如把量到的法向再归一一遍),x5 抬东西的每一步跟着变,和 09-23 以来的落盘对不上
    declare
       function Old_Height (Cx : Act.Context; Dir : Integer) return Contact.V3 is
-         Ax : constant Contact.V3 := (if Cx.Touch_Valid then Cx.Touch_N else [0.0, 0.0, 1.0]);
+         Ax : constant Contact.V3 := (if Cx.Touch_Valid then Cx.Touch_N elsif Cx.Board_Plane then Cx.Board_N else [0.0, 0.0, 1.0]);
       begin
          return (if Dir < 0 then [-Ax (0), -Ax (1), -Ax (2)] else Ax);
       end Old_Height;

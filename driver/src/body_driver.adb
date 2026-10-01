@@ -49,11 +49,12 @@ procedure Body_Driver is
    Front_Reloaded : Boolean := False;   --  开机前半段是按身体文件旁边存的装回的(核对过):后面按同一个世界单位记的量(身体图、握区、指尖)才照用
    Body_Groups : Selfmap.Group_Vectors.Vector;   --  开机第一步逐组推一下量出来的:身体报的每一组数是什么(I1;装进 C.Map.Groups,身体图从它答)
    --  每条臂怎么放进世界(Links 用:每一节的表面点此刻在哪)
-   function Placements (Ws : Jointboot.Arm_World_Vectors.Vector; Rw : Geom.M3; O : Geom.V3) return Links.Placement_Vectors.Vector is
+   function Placements (Ws : Jointboot.Arm_World_Vectors.Vector; Rw : Geom.M3; O : Geom.V3; Eyes : Bytes.Ints) return Links.Placement_Vectors.Vector is
       R : Links.Placement_Vectors.Vector;
    begin
-      for W of Ws loop
-         R.Append (Links.Placement'(Model => W.Model, S => W.S, Ra => W.Ra, Ta => W.Ta, Rw => Rw, O => O, Valid => W.Valid));
+      for A in 0 .. Natural (Ws.Length) - 1 loop
+         R.Append (Links.Placement'(Model => Ws (A).Model, S => Ws (A).S, Ra => Ws (A).Ra, Ta => Ws (A).Ta, Rw => Rw, O => O, Valid => Ws (A).Valid,
+                                    Group => Ws (A).Group, Eye => (if A < Natural (Eyes.Length) then Eyes (A) else -1)));
       end loop;
       return R;
    end Placements;
@@ -175,6 +176,48 @@ begin
          return;
       end if;
       Put_Line ("[身] 静止噪声(开机前半段):关节读数 " & Codec.Fmt (M0.Joint_Noise, 6) & " · 各相机灰度地板 " & (if M0.Pic_Floor.Is_Empty then "-" else Codec.Img (M0.Pic_Floor (0))));
+      --  上一回存的前半段(有的话)先读出来:认组时有一只眼看不出(没纹理:白桌白墙)、量不出它长在哪一组上 ⇒ 照存的认(Layout.Prior_Arms);
+      --  看得出的照量的(10-01 P8I)
+      if Kin_Path /= "" and then Ada.Directories.Exists (Kin_Path) then
+         declare
+            Kp : Jointboot.Kin_Store;
+            Okp : Boolean;
+            Np : Unbounded_String;
+         begin
+            Jointboot.Load_Kin (Kin_Path, Kp, Okp, Np);
+            if Okp then
+               declare
+                  K_Txt : constant String := To_String (Kp.Key);
+                  Tag : constant String := "joints=";
+                  P0 : constant Natural := Ada.Strings.Fixed.Index (K_Txt, Tag);
+                  Names : Bytes.Strs;
+               begin
+                  if P0 > 0 then
+                     declare
+                        I : Natural := P0 + Tag'Length;
+                        J : Natural;
+                     begin
+                        while I <= K_Txt'Last loop
+                           J := I;
+                           while J <= K_Txt'Last and then K_Txt (J) /= ',' and then K_Txt (J) /= ';' loop
+                              J := J + 1;
+                           end loop;
+                           exit when J = I;
+                           Names.Append (K_Txt (I .. J - 1));
+                           exit when J > K_Txt'Last or else K_Txt (J) = ';';
+                           I := J + 1;
+                        end loop;
+                     end;
+                  end if;
+                  for A in 0 .. Natural (Kp.Worlds.Length) - 1 loop
+                     if Kp.Worlds (A).Valid and then Kp.Worlds (A).Group < Natural (Names.Length) and then A < Natural (Kp.Eyes.Length) then
+                        L.Lay.Prior_Arms.Append (Names (Kp.Worlds (A).Group)); L.Lay.Prior_Eyes.Append (Kp.Eyes (A));
+                     end if;
+                  end loop;
+               end;
+            end if;
+         end;
+      end if;
       --  ① 认组:每一次开机都量(装回前半段也先量 —— 量出来的布局决定哪一组是第几条臂,装回的核对、扫描都按它)
       Jointboot.Find_Arms (L, F, M0, Found, Kin_World_Cam, Okj);
       if not Okj then
@@ -203,7 +246,22 @@ begin
       end if;
       if Front_Reloaded then
          Worlds := K.Worlds; Ds := K.Ds; Rw := K.Rw; O := K.O; Kin_World_Cam := K.World_Cam; Eyes_Of := K.Eyes;
-         Links.Place (Placements (Worlds, Rw, O));   --  每一节的表面点随前半段读回来了(Load_Kin),这里给它放进世界的那一份
+         Links.Place (Placements (Worlds, Rw, O, Eyes_Of));   --  每一节的表面点随前半段读回来了(Load_Kin),这里给它放进世界的那一份
+         --  前半段存的少了每一节的表面点(kin 4 写的):缺什么量什么 —— 运动学、世界、不动的眼照存的,只扫一遍补量表面点,再写回(10-01 P8N:
+         --  原来格式一换就整份从零量,前半段一重量,身体文件按旧单位记的量也跟着全丢)
+         if Links.Points.Is_Empty and then K.Fixed_Eye.Valid then
+            declare
+               Ds2 : Jointboot.Sweep_Vectors.Vector;
+               Css2 : Jointboot.Corr_Set_Vectors.Vector;
+               Nt : Unbounded_String;
+            begin
+               Put_Line ("[装] 前半段存的少了每一节的表面点 ⇒ 别的照存的,只扫一遍补量它");
+               Jointboot.Sweep_All (L, F, M0, Found, Host, C.Inst_Port, Dump, Ds2, Css2, World_Cam => Kin_World_Cam);
+               Links.Measure (Placements (Worlds, Rw, O, Eyes_Of), K.Fixed_Eye, Nt);
+               Put (To_String (Nt));
+               Jointboot.Save_Kin (Kin_Path, K, Images => False);   --  写回:这一回补上了表面点(核对用的图照旧)
+            end;
+         end if;
          Kin_Fixed := K.Fixed_Eye; Kin_Board := K.Board; Kin_Plane_Pt := K.Plane_Pt; Kin_Plane_N := K.Plane_N; Kin_Plane_Rms := K.Plane_Rms;
          Jointboot.Dump_Kin (Dump, K);
          Jointboot.Remember_Kin (Kin_Path, K);
@@ -272,7 +330,7 @@ begin
       declare
          Nt : Unbounded_String;
       begin
-         Links.Measure (Placements (Worlds, Rw, O), Kin_Fixed, Nt);
+         Links.Measure (Placements (Worlds, Rw, O, Eyes_Of), Kin_Fixed, Nt);
          Put (To_String (Nt));
       end;
       if Kin_Path /= "" then
@@ -328,7 +386,6 @@ begin
          Qs : Plug.Floats_Vectors.Vector;
          Down : constant Geom.V3 := [-Kin_Plane_N (0), -Kin_Plane_N (1), -Kin_Plane_N (2)];
          Txt : Unbounded_String;
-         K_Valid : Natural := 0;   --  F.EE 里第几只(装上的手按序)
       begin
          for W of Worlds loop
             Qs.Append (if W.Group < Natural (F.Joints.Length) then F.Joints (W.Group) else Bytes.F64_Vectors.Empty_Vector);
@@ -351,21 +408,11 @@ begin
          for Cm in 0 .. Natural (F.Cams.Length) - 1 loop
             declare
                G : constant Geom.Cam_Geo := (if Cm < Natural (Kin_Geo.Length) then Kin_Geo (Cm) else Geom.No_Geo);
-               Pose : Plug.Arm_Pose := [others => 0.0];
-               Mine : Boolean := G.Fixed;
             begin
-               K_Valid := 0;
-               for A in 0 .. Natural (Worlds.Length) - 1 loop
-                  if Worlds (A).Valid then
-                     if A < Natural (Eyes_Of.Length) and then Eyes_Of (A) = Integer (Cm) and then K_Valid < Natural (F.EE.Length) then
-                        Pose := F.EE (K_Valid); Mine := True;
-                     end if;
-                     K_Valid := K_Valid + 1;
-                  end if;
-               end loop;
-               if Mine and then G.Valid and then F.Cams (Cm).W > 0 then
+               if G.Valid and then F.Cams (Cm).W > 0 then
                   declare
-                     Mk : constant Bytes.Bools := Links.Self_Mask (G, Pose, F.Cams (Cm).W, F.Cams (Cm).H, Qs);
+                     --  同干活时一帧里直接问的那一句(Links.Self_Mask_Now:不动的眼按它自己的几何,臂上的眼按那条臂此刻的运动学)
+                     Mk : constant Bytes.Bools := Links.Self_Mask_Now (F, Cm, G, F.Cams (Cm).W, F.Cams (Cm).H);
                      N : Natural := 0;
                   begin
                      for B of Mk loop
@@ -399,10 +446,18 @@ begin
          --  前半段从零量了 ⇒ 世界单位换了(运动学的单位每回不一样),身体文件里按旧单位记的量(通道步子、握区时手的位姿)不装回
          Put_Line ("[装] 前半段是从零量的(世界单位换了)⇒ 身体文件里按旧单位记的量不装回,从零量");
       end if;
+      --  旧的身体文件没记每条臂几个抓握通道:缺什么量什么 —— 开机认组已经量出来了(每条臂的合拢通道接起来几个数 = 这一帧它的抓握读数几个),
+      --  补上这一样,别的照存的往下核(10-01 P8N:原来这一样缺了就整份重量;更早是一律当 1 个,五指手第 1 号往后的握区全丢)
+      if Loaded and then not Bodyfile.Jaws_Recorded (Stored) and then Stored.Arms = Natural (F.EE.Length) then
+         Stored.Jaws.Clear;
+         for A in 0 .. Stored.Arms - 1 loop
+            Stored.Jaws.Append (Integer (Selfmap.Jaw_Count (F, A)));
+         end loop;
+         Put_Line ("[装] 这份身体文件没记每条臂几个抓握通道 ⇒ 按开机认组量的补上(" & (if Stored.Jaws.Is_Empty then "" else Codec.Img (Natural (Stored.Jaws (0))))
+                   & (if Natural (Stored.Jaws.Length) > 1 then " / " & Codec.Img (Natural (Stored.Jaws (1))) else "") & " …),别的照存的往下核");
+      end if;
       if Loaded and then not Bodyfile.Jaws_Recorded (Stored) then
-         --  旧的身体文件没记每条臂几个抓握通道:不猜(原来一律当 1 个 ⇒ 五指手第 1 号往后的握区全丢,存盘又把少了的写回去)
-         --  ⇒ 重量;存的历次读数照样合进来
-         Put_Line ("[装] 这份身体文件没记每条臂几个抓握通道 ⇒ 要重量(存的历次读数照样合进来)");
+         Put_Line ("[装] 这份身体文件没记每条臂几个抓握通道、臂数也和这一回量的对不上 ⇒ 要重量(存的历次读数照样合进来)");
       elsif Loaded then
          declare
             Ok_Body, Ok_Link : Boolean;
