@@ -3376,26 +3376,19 @@ selfmap.adb	Append (T, "" & Natural'Image (A + 1) & "" & Codec.Fmt (Got, 4) & ""
 selfmap.adb	Append (T, "" & Natural'Image (A + 1) & "" & Codec.Fmt (M.Amp (Ch), 4) & "" & Codec.Fmt (Got, 4) & "" & Codec.Fmt (Expect, 4) & "");	4	格式	日志 / 报原因的话里 M.Amp (Ch) 印 4 位小数(Codec.Fmt 第二个参数 = 小数位数),不进任何判据(selfmap.adb:309)
 selfmap.adb	Append (T, "" & Natural'Image (A + 1) & "" & Codec.Fmt (M.Amp (Ch), 4) & "" & Codec.Fmt (Got, 4) & "" & Codec.Fmt (Expect, 4) & "");	4	格式	日志 / 报原因的话里 Got 印 4 位小数(Codec.Fmt 第二个参数 = 小数位数),不进任何判据(selfmap.adb:309)
 selfmap.adb	Append (T, "" & Natural'Image (A + 1) & "" & Codec.Fmt (M.Amp (Ch), 4) & "" & Codec.Fmt (Got, 4) & "" & Codec.Fmt (Expect, 4) & "");	4	格式	日志 / 报原因的话里 Expect 印 4 位小数(Codec.Fmt 第二个参数 = 小数位数),不进任何判据(selfmap.adb:309)
-selfmap.adb	Arrived := (if Tol > 0.0 and then Table.Norm (Miss, 3) <= Tol	3	结构	Chan 的通道布局:每条臂 6 个通道(Chan.Per_Arm = 6),前 3 个是平移;Table.Norm (D, 3) = 取前 3 个分量的模 = 平移量(selfmap.adb:218)
 selfmap.adb	Best : Integer := -1;	1	数值	哨兵:-1 = 还没挑到变得最多的那台相机。(selfmap.adb:518)
 selfmap.adb	Bv : Long_Float := 1.0e9;	1.0e9	数值	找最小值的初值哨兵(Cam_Frac 在 [0, 1],任何大于 1 的数都行;写 Long_Float'Last 更干净)(selfmap.adb:541)
-selfmap.adb	Cap : constant Natural := 20 * (12 + M.Settle);	12	调参数	总上限 20×(12 + Settle) 里的 12(同 184 行)(selfmap.adb:242)	大转跟着重发最多走多久	中	同 184 行
-selfmap.adb	Cap : constant Natural := 20 * (12 + M.Settle);	20	调参数	总拍数上限 = 20 次重发(防万一)(selfmap.adb:242)	大转跟着重发最多走多久	中	按进展:到过的范围连着(Settle + 刷新周期)拍不再长 ⇒ 停(Held / Held_Grown 已有这个判法),不数总拍数
+selfmap.adb	Cam_Feed (Ws (C), (if Used >= 2 then Last2 (C) else Plug.Cam'(others => <>)), Last (C), F.Cams (C));	2	结构	第 2 拍起才有上上拍那一帧(两拍的变化要它);第 1 拍只比一拍(selfmap.adb Wait_Still)
 selfmap.adb	Codec.Fmt (Bv * 100.0, 0) & "");	100.0	格式	百分数打印(selfmap.adb:535)
 selfmap.adb	Eyes : Ints := Int_Vectors.Empty_Vector; World : Integer := -1) is	1	数值	缺省参数的哨兵:World = -1 = 开机前半段没认出世界相机(512 行按 ≥ 0 判)。(selfmap.adb:381)
 selfmap.adb	Has_Step : constant Boolean := A < Natural (Step_Px.Length) and then Natural (Step_Px (A).Length) >= 2;	2	结构	Step_Px 每只手两个数 [平移, 转动](selfmap.adb:420)
 selfmap.adb	Hi : Long_Float := 1.0;	1.0	数学	二分的上端 = 整步(沿这一步的比例 1):反解够不到整步时在 [0, 1] 里二分(selfmap.adb:872)
 selfmap.adb	Jit : constant Long_Float := (if N_Free >= 2 then Sd else 0.0);	2	结构	要两步空走才有散布(同原来 Blocked 的"前两步之差";Blocked_Stats 是同一句换成统计的写法)(selfmap.adb:137)
 selfmap.adb	K : constant Natural := 0;	0	结构	第几个平移通道(0 号 = 第一个平移通道):核对身体时推它;是通道的下标,不是大小(09-30 我定)
-selfmap.adb	Last.Append (0.0); Have_Last.Append (False); Done.Append (False);	0.0	数值	占位的初值:每组上一拍挪了多少,Have_Last = False 时不读(第一次有读数才写进去)(selfmap.adb:545)
-selfmap.adb	Lc : constant Long_Float := Table.Norm (Cmd, 3);	3	结构	Chan 的通道布局:每条臂 6 个通道(Chan.Per_Arm = 6),前 3 个是平移;Table.Norm (D, 3) = 取前 3 个分量的模 = 平移量(selfmap.adb:222)
-selfmap.adb	Ls : constant Plug.Limit_State := (if Arrived < 2 then Plug.Held_Back (Arm) else Plug.Free);	2	调参数	到了连着 2 拍才不再问'被截住没有'(selfmap.adb:240)	Held_Back 什么时候查	中	连着(量到的读数刷新周期 + 1)拍,不写 2;新量:动的时候读数每几拍才变一次(Plug.Beat.Q_Chg 在扫描里零与非零的间隔)——读数 10 Hz、控制 30 Hz 的身体刷新周期 3 拍,'连着 2 拍不动'会在还在动时误判停了
 selfmap.adb	M.Cam_On_Arm := Int_Vectors.To_Vector (-1, Ada.Containers.Count_Type (Arms));	1	数值	哨兵:-1 = 这只手上没认出相机。(selfmap.adb:412)
 selfmap.adb	M.EE_Noise := Long_Float'Max (M.EE_Noise, Table.Norm (D, 3));	3	结构	Chan 的通道布局:每条臂 6 个通道(Chan.Per_Arm = 6),前 3 个是平移;Table.Norm (D, 3) = 取前 3 个分量的模 = 平移量(selfmap.adb:345)
 selfmap.adb	Mid : constant Long_Float := (Lo + Hi) / 2.0;	2.0	数学	二分取中点(出口是量的:区间细过这只手一步看得见的那一档)(selfmap.adb:878)
-selfmap.adb	Moved_P : constant Long_Float := Table.Norm (D, 3);	3	结构	Chan 的通道布局:每条臂 6 个通道(Chan.Per_Arm = 6),前 3 个是平移;Table.Norm (D, 3) = 取前 3 个分量的模 = 平移量(selfmap.adb:198)
-selfmap.adb	N_Cmd : constant Long_Float := (if Geo then Table.Norm (Cmd, 3) / Tol + Sqrt (Cmd (3) ** 2 + Cmd (4) ** 2 + Cmd (5) ** 2) / Tol_Rot else 0.0);	3	结构	Chan 的通道布局:每条臂 6 个通道(Chan.Per_Arm = 6),前 3 个是平移;Table.Norm (D, 3) = 取前 3 个分量的模 = 平移量(selfmap.adb:206)
-selfmap.adb	Ok := Still >= 2;	2	调参数	画面连着 2 拍不变 = 停了(Wait_Still;09-30 从 exit when 那一行挪到这儿,改成照实回 Ok:等满了还在变 ⇒ Ok = False)(selfmap.adb:115)	等画面停下(Wait_Still)	中	连着(量到的画面刷新周期 + 1)拍;新量:动的时候画面每几拍才变一次(Plug.Beat.Img_Chg 在扫描里零与非零的间隔)——相机帧率低于控制频率时重复帧会被当成'静止'
+selfmap.adb	Moves.Append (0.0); Have.Append (True);	0.0	数学	读不到这一组 = 这一拍什么都没变(变化 0):两拍不变就停 —— 没有证据,不白等(selfmap.adb Go 关节那一支)
 selfmap.adb	Put_Line ("" & Codec.Fmt (M.EE_Noise, 5) & "" & Codec.Fmt (M.Rot_Noise, 5) &	5	格式	日志 / 报原因的话里 M.EE_Noise 印 5 位小数(Codec.Fmt 第二个参数 = 小数位数),不进任何判据(selfmap.adb:404)
 selfmap.adb	Put_Line ("" & Codec.Fmt (M.EE_Noise, 5) & "" & Codec.Fmt (M.Rot_Noise, 5) &	5	格式	日志 / 报原因的话里 M.Rot_Noise 印 5 位小数(Codec.Fmt 第二个参数 = 小数位数),不进任何判据(selfmap.adb:404)
 selfmap.adb	Put_Line ("" & Codec.Fmt (M.Joint_Noise, 6) & ""	6	格式	日志 / 给脑的话里印几位小数(selfmap.adb:564)
@@ -3405,21 +3398,19 @@ selfmap.adb	R.Alpha := Long_Float'Min (1.0, Picture.Quantile (As, 0.5));	0.5	统
 selfmap.adb	R.Alpha := Long_Float'Min (1.0, Picture.Quantile (As, 0.5));	1.0	数学	一拍走到一条命令的几成最多是一整份(1);读数抖过了头的那一点不许让模型一拍走过头(selfmap.adb Fit_Response)
 selfmap.adb	R.Dead := Natural (Long_Float'Floor (Picture.Quantile (Ds, 0.5)));	0.5	统计	中位 = 0.5 分位:各条探针动起来之前那几拍取中位(selfmap.adb Fit_Response)
 selfmap.adb	Run_Of.Append (-1);	1	数值	哨兵:−1 = 这一组这一步没发命令(反解一截都够不到);后面按 ≥ 0 判(selfmap.adb:903)
-selfmap.adb	Settled : constant Boolean := Still >= 2 and then Sub_Frames >= M.Settle and then (M.Settle > 0 or else Started);	2	调参数	连着 2 拍不动 = 停了(selfmap.adb:241);10-01 路 4:搬进 Judge(一组、几组共用的判停)	Go 位姿命令什么时候算停	中	连着(量到的读数刷新周期 + 1)拍,不写 2;新量:动的时候读数每几拍才变一次(Plug.Beat.Q_Chg 在扫描里零与非零的间隔)——读数 10 Hz、控制 30 Hz 的身体刷新周期 3 拍,'连着 2 拍不动'会在还在动时误判停了
+selfmap.adb	Unmeasured_Start : constant := 12;	12	调参数	一条命令一点都没动起来,开机还一个起效拍数都没量过时最多等几拍(量过 ⇒ 等量到的 Settle)。原来是 Go 判停里的 12 + Settle 和总上限 20 × (12 + Settle) 三处(10-01 路 4 删成这一处,只管"一点没动起来";判停本身没有拍数了)。怎么换:开机第一条命令按对方报的控制频率 / 命令回声的那一拍定(selfmap.adb Start_Cap)
+selfmap.adb	W.Last.Append (0.0); W.Peak.Append (0.0); W.Have_Last.Append (False); W.Done.Append (False); W.Ruled.Append (False);	0.0	数值	占位的初值:上一拍的数,Have_Last = False 时不读(selfmap.adb Watch_Reset)
+selfmap.adb	W.Last.Append (0.0); W.Peak.Append (0.0); W.Have_Last.Append (False); W.Done.Append (False); W.Ruled.Append (False);	0.0	数学	尺子从 0 起(都是不小于 0 的量:挪了多少、还差多少、画面变了多少;给了尺子才用它)(selfmap.adb Watch_Reset)
 selfmap.adb	Watch : Watcher := null; Joints : Floats := F64_Vectors.Empty_Vector; Group : Integer := -1;	1	数值	缺省参数的哨兵:Group = -1 = 这条不是关节命令(119、132 行按 ≥ 0 判)。(selfmap.adb:105)
-selfmap.adb	elsif Arrived >= 2 then	2	调参数	到了连着 2 拍(selfmap.adb:247);10-01 路 4:搬进 Judge	Go 位姿命令什么时候算到	中	连着(量到的读数刷新周期 + 1)拍,不写 2;新量:动的时候读数每几拍才变一次(Plug.Beat.Q_Chg 在扫描里零与非零的间隔)——读数 10 Hz、控制 30 Hz 的身体刷新周期 3 拍,'连着 2 拍不动'会在还在动时误判停了
-selfmap.adb	elsif Press and then Ls = Plug.Free and then Press_Still >= 2 then	2	调参数	压下去连着 2 拍沿命令方向不动 = 停了(selfmap.adb:247);10-01 路 4:搬进 Judge	碰桌面 / 压东西那一步什么时候读	中	连着(量到的读数刷新周期 + 1)拍,不写 2;新量:动的时候读数每几拍才变一次(Plug.Beat.Q_Chg 在扫描里零与非零的间隔)——读数 10 Hz、控制 30 Hz 的身体刷新周期 3 拍,'连着 2 拍不动'会在还在动时误判停了
-selfmap.adb	elsif Sub_Frames >= 12 + M.Settle then	12	调参数	位姿命令每一条最多等 12 + Settle 拍(selfmap.adb:241);10-01 路 4:搬进 Judge	位姿命令最多等多久(碰桌面那一步 V1B21 要 24 拍)	高	去掉固定拍数:每拍还在挪(超过 M.Joint_Noise / EE_Noise)就等,停了才读;安全上限 = 这条命令的距离 ÷ 量到的每拍最大速度 + 量到的 Settle + 刷新周期(新量:探针 / 扫描里每拍挪多少)。慢身体(人形、DIY 大臂)一格要 20 拍以上,到点没走完就读 ⇒ 实到不足被判到头
-selfmap.adb	exit when Arrived >= 2 or else (Still >= 2 and then Frames >= M.Settle and then (M.Settle > 0 or else Started or else not Any_Read))	2	调参数	关节目标'到了'要连着 2 拍(selfmap.adb:183);10-01 路 4:Settle 没量过时要读数动起来过才算停	Go 关节目标什么时候算到	中	连着(量到的读数刷新周期 + 1)拍,不写 2;新量:动的时候读数每几拍才变一次(Plug.Beat.Q_Chg 在扫描里零与非零的间隔)——读数 10 Hz、控制 30 Hz 的身体刷新周期 3 拍,'连着 2 拍不动'会在还在动时误判停了
-selfmap.adb	exit when Arrived >= 2 or else (Still >= 2 and then Frames >= M.Settle and then (M.Settle > 0 or else Started or else not Any_Read))	2	调参数	关节目标没到时连着 2 拍不动 = 被顶住 / 到头(selfmap.adb:183);10-01 路 4:同上	Go 关节目标什么时候算停	中	连着(量到的读数刷新周期 + 1)拍,不写 2;新量:动的时候读数每几拍才变一次(Plug.Beat.Q_Chg 在扫描里零与非零的间隔)——读数 10 Hz、控制 30 Hz 的身体刷新周期 3 拍,'连着 2 拍不动'会在还在动时误判停了
+selfmap.adb	Watch_Peak (R.Wt, 1, Rot_Len (Cmd));	1	结构	Run 的停没停两样里的第 1 样 = 转动(第 0 样平移)(selfmap.adb New_Run)
 selfmap.adb	for K in 1 .. 4 loop	4	调参数	静止噪声量 4 拍(取每拍挪得最多的那一拍);10-01 路 4:先等上一个动作的尾巴收住(Wait_Tail,每组读数一拍挪的不再比上一拍少)再量,"接着上一个动作就量"那一半已改(selfmap.adb:336)	M.Joint_Noise / EE_Noise / Rot_Noise / 每台相机的地板 —— 后面几乎所有门的下限	高	先等收住(每拍挪动不再变小)再量;拍数按要的置信度定(估 3σ 门上界要数十拍,拍数由统计定);相机地板用多对帧的分位数,不用一对
 selfmap.adb	for Try in 1 .. (if Has_Step and then Amp > 0.0 then 1 else 0) loop	1	结构	循环当 if 用:有"一步看得见"的幅度就推这一回(推过去再推回来),没有就不推;写成循环是为了里面能直接 return。"推一次"就是这一段的定义(selfmap.ads:95 "每个通道按它推一次再推回来")。注:只推一次,M.Delivered 是单个样本,通道稳不稳证不出。(selfmap.adb:426)
 selfmap.adb	if Best >= 0 and then Bv > 0.0 and then Bv >= 2.0 * Second then	2.0	调参数	同 jointboot 140 行'比第二名多一倍';现在只有没给 Eyes 时才走(开机前半段总会给)(selfmap.adb:532)	认眼(后备路径)	低	同 jointboot 140 行(一个量一种量法:删掉这份)
+selfmap.adb	if Started and then T >= 1 and then Stopped_Shrinking (Moves (T - 1), Moves (T)) then	1	结构	从第 2 拍起才有上一拍可比(下标 T − 1)(selfmap.adb Settle_Beats)
 selfmap.adb	if abs (Got - Expect) <= 0.5 * abs Expect + M.EE_Noise and then Visible then	0.5	调参数	装回核对:实到和存的差一半以内 = 同一具身体(selfmap.adb:308)	身体文件能不能直接用(换了负载 / 关节后 40% 的变化也会被当成没变)	中	按存的历次实到(Deliv_Hist)的散布:|实到 − 存的| ≤ 3×历次散布 + 3×EE_Noise(统计门)
 selfmap.adb	if abs Got >= Amp * 0.5 then	0.5	调参数	探针实到一半以上才记零件(selfmap.adb:477)	逐通道量身体(看见没有、记不记)	中	实到超过 3×量到的读数噪声(统计门)且和命令同向;'一半'去掉
 selfmap.adb	if abs Got >= Amp * 0.5 then	0.5	调参数	(482 行同一句)实到一半以上才记相机变化比例(selfmap.adb:477)	同上	中	实到超过 3×量到的读数噪声(统计门)且和命令同向;'一半'去掉
 selfmap.adb	if abs Got >= Amp * 0.5 then	0.5	调参数	(489 行同一句)实到一半以上这个通道才算量成(selfmap.adb:477)	同上	中	实到超过 3×量到的读数噪声(统计门)且和命令同向;'一半'去掉
-selfmap.adb	or else Frames >= 12 + M.Settle;	12	调参数	关节目标最多等 12 + Settle 拍(Settle 是量出来的:09-30 起不缺省、不封顶,开机前半段量上以前是 0 ⇒ 12 拍封顶;原来缺省 2 ⇒ 每格 14 拍封顶,V1B4 注释:每格都等满 14 拍)(selfmap.adb:223)	一格扫描 / 一条关节命令最多等多久;到点没走完就读 ⇒ 实到不足被判到头、记成尽头	高	去掉固定拍数:每拍还在挪(超过 M.Joint_Noise / EE_Noise)就等,停了才读;安全上限 = 这条命令的距离 ÷ 量到的每拍最大速度 + 量到的 Settle + 刷新周期(新量:探针 / 扫描里每拍挪多少)。慢身体(人形、DIY 大臂)一格要 20 拍以上,到点没走完就读 ⇒ 实到不足被判到头
 selfmap.adb	return (if P.N >= 2 and then G > 0.0 and then Len <= P.Len_Hi then G else 1.0);	1.0	数学	不放大 = 乘 1:量不出散布、上界是一整份、或这一步比量过的最长那一步还长(selfmap.adb:805)
 selfmap.adb	return (if P.N >= 2 and then G > 0.0 and then Len <= P.Len_Hi then G else 1.0);	2	统计	交付的上界 = 平均 − Z 倍散布,散布要至少两个样本(同 Free_Sd)(selfmap.adb:805)
 selfmap.adb	return Cnt <= 4 * Picture.Min_Pixels (Before.W, Before.H);	4	调参数	画面静止 = 超地板像素总数 ≤ 4×最小斑块(注释说'凑不成一团',代码只数总数)(selfmap.adb:41)	Wait_Still / Pictures_Still 判画面停了	中	按注释做:Picture.Components 找不到 ≥ Min_Pixels 的连通块 ⇒ 静止;或门 = 开机静止对上量到的超地板像素数(Measure_Idle 那一对,新量)

@@ -19,11 +19,84 @@ package body Selfmap is
 
    function Jaw_Of (F : Plug.Frame; Arm : Natural; K : Natural := 0) return Long_Float is (F.Jaw (Jaw_Index (F, Arm)) (K));
 
+   function Rot_Len (A : Table.Vec) return Long_Float is (Sqrt (A (3) ** 2 + A (4) ** 2 + A (5) ** 2));
+
+   procedure Watch_Reset (W : out Settle_Watch; N : Natural) is
+   begin
+      W.Last.Clear; W.Peak.Clear; W.Have_Last.Clear; W.Done.Clear; W.Ruled.Clear;
+      for I in 1 .. N loop
+         W.Last.Append (0.0); W.Peak.Append (0.0); W.Have_Last.Append (False); W.Done.Append (False); W.Ruled.Append (False);
+      end loop;
+   end Watch_Reset;
+
+   procedure Watch_Peak (W : in out Settle_Watch; S : Natural; V : Long_Float) is
+   begin
+      if S < Natural (W.Peak.Length) then
+         W.Ruled.Replace_Element (S, True);
+         if V > W.Peak (S) then
+            W.Peak.Replace_Element (S, V);
+         end if;
+      end if;
+   end Watch_Peak;
+
+   procedure Watch_Feed (W : in out Settle_Watch; Moves : Floats; Have : Bools) is
+   begin
+      for S in 0 .. Natural'Min (Natural (W.Done.Length), Natural'Min (Natural (Moves.Length), Natural (Have.Length))) - 1 loop
+         if not Have (S) then
+            W.Done.Replace_Element (S, True);    --  这一拍没有它的数:不等它
+         else
+            if W.Ruled (S) and then Moves (S) > W.Peak (S) then
+               W.Peak.Replace_Element (S, Moves (S));
+            end if;
+            if W.Have_Last (S) and then (Stopped_Shrinking (W.Last (S), Moves (S)) or else (W.Ruled (S) and then Moves (S) <= Negligible * W.Peak (S))) then
+               W.Done.Replace_Element (S, True);
+            end if;
+            W.Last.Replace_Element (S, Moves (S));
+            W.Have_Last.Replace_Element (S, True);
+         end if;
+      end loop;
+   end Watch_Feed;
+
+   function Watch_All_Done (W : Settle_Watch) return Boolean is (for all D of W.Done => D);
+
+   procedure Picture_Change (Before, After : Plug.Cam; Change : out Long_Float; Ok : out Boolean) is
+      Sum : Long_Float := 0.0;
+   begin
+      Change := 0.0;
+      Ok := Plug.Has_Picture (Before) and then Plug.Has_Picture (After) and then Before.W = After.W and then Before.H = After.H;
+      if not Ok then
+         return;
+      end if;
+      for I in 0 .. Natural (Before.Gray.Length) - 1 loop
+         Sum := Sum + abs (Long_Float (After.Gray (I)) - Long_Float (Before.Gray (I)));
+      end loop;
+      Change := Sum / Long_Float (Before.Gray.Length);
+   end Picture_Change;
+
+   procedure Cam_Feed (W : in out Cam_Watch; Prev2, Prev, Now : Plug.Cam) is
+      C1, C2 : Long_Float;
+      Ok1, Ok2 : Boolean;
+   begin
+      Picture_Change (Prev, Now, C1, Ok1);
+      if not Ok1 then
+         return;
+      end if;
+      Picture_Change (Prev2, Now, C2, Ok2);
+      W.Seen := True;
+      W.Peak := Long_Float'Max (W.Peak, C1);
+      if W.Have and then (Stopped_Shrinking (W.C1_Last, C1) or else C1 <= Negligible * W.Peak)
+        and then (not Ok2 or else C2 - C1 <= Stats.Z * abs (C1 - W.C1_Last))
+      then
+         W.Done := True;
+      end if;
+      W.C1_Last := C1; W.Have := True;
+   end Cam_Feed;
+
    function Settle_Beats (Moves : Floats; Noise : Long_Float) return Natural is
       Started : Boolean := False;
    begin
       for T in 0 .. Natural (Moves.Length) - 1 loop
-         if Started and then Moves (T) <= Noise and then Moves (T) >= Moves (T - 1) then
+         if Started and then T >= 1 and then Stopped_Shrinking (Moves (T - 1), Moves (T)) then
             return T + 1;
          end if;
          Started := Started or else Moves (T) > Noise;
@@ -96,12 +169,15 @@ package body Selfmap is
 
    procedure Wait_Still (L : in out Plug.Link; M : Body_Map; F : in out Plug.Frame; Max : Natural; Used : out Natural; Ok : out Boolean;
                          Prev_Pic : access Plug.Cam_Vectors.Vector := null) is
-      Last : Plug.Cam_Vectors.Vector := F.Cams;
-      Still : Natural := 0;
+      pragma Unreferenced (M);
+      N : constant Natural := Natural (F.Cams.Length);
+      Last, Last2 : Plug.Cam_Vectors.Vector := F.Cams;   --  上一拍、上上拍(第一拍之前都 = 进门那一帧)
+      Ws : array (0 .. N) of Cam_Watch;
    begin
       Used := 0;
       Ok := False;   --  等满了还在变 ⇒ 照实说没停稳(调用方别拿这时的画面当停住的量)
-      for I in 1 .. Max loop
+      loop
+         exit when Max > 0 and then Used >= Max;
          if Prev_Pic /= null then
             Prev_Pic.all := F.Cams;
          end if;
@@ -109,14 +185,26 @@ package body Selfmap is
             Ok := False;
             return;
          end if;
-         Used := I;
-         if Pictures_Still (M, Last, F.Cams) then
-            Still := Still + 1;
-         else
-            Still := 0;
-         end if;
-         Last := F.Cams;
-         Ok := Still >= 2;
+         Used := Used + 1;
+         for C in 0 .. N - 1 loop
+            if C < Natural (Last.Length) and then C < Natural (Last2.Length) and then C < Natural (F.Cams.Length) then
+               Cam_Feed (Ws (C), (if Used >= 2 then Last2 (C) else Plug.Cam'(others => <>)), Last (C), F.Cams (C));
+            end if;
+         end loop;
+         Last2 := Last; Last := F.Cams;
+         --  停稳 = 给过画面的每一台都停了(一台都没给过 ⇒ 没有证据,不说停了)
+         declare
+            Any_Seen : Boolean := False;
+            All_Done : Boolean := True;
+         begin
+            for C in 0 .. N - 1 loop
+               if Ws (C).Seen then
+                  Any_Seen := True;
+                  All_Done := All_Done and then Ws (C).Done;
+               end if;
+            end loop;
+            Ok := Any_Seen and then All_Done;
+         end;
          exit when Ok;
       end loop;
    end Wait_Still;
@@ -148,18 +236,25 @@ package body Selfmap is
      (Blocked_Stats (Short, Prev, abs (Prev - Prev2), N_Free, Lstep, Noise));
 
    --  一组位姿目标在 Go 里的那一段账:一只手的 Go 和几组一起的 Go 用同一段判停(Judge),一拍一判。
-   --  Why:这一组为什么收了 —— Reached = 到了目标 Tol 以内连着两拍;Pressed = 压的那种步沿命令方向停下;Stopped = 连着两拍不动(没到);
-   --  Waited = 等满了一条命令最多等的拍数(还在动,或者一次都没动起来);Capped = 总拍数上限;No_Pose = 这一拍没有这条臂的位姿读数
-   type Stop_Why is (Going, Reached, Pressed, Stopped, Waited, Capped, No_Pose);
+   --  Why:这一组为什么收了 —— Reached = 差不到 Tol(给了才判)而且没在往远走;Pressed / Stopped = 动起来以后离目标还差的不再变小
+   --  (压的那种步 / 别的;Stopped_Shrinking);Waited = 一点都没动起来,等满了量过的起效拍数(Start_Cap);No_Pose = 这一拍没有这条臂的位姿读数
+   type Stop_Why is (Going, Reached, Pressed, Stopped, Waited, No_Pose);
+   package Cam_Watch_Vectors is new Ada.Containers.Vectors (Natural, Cam_Watch);
    type Run is record
       Arm : Natural := 0;
       C : Plug.Cmd;
       P0, Prev : Plug.Arm_Pose := [others => 0.0];
       Tol, Tol_Rot : Long_Float := 0.0;
-      Still, Arrived, Sub_Frames, Press_Still : Natural := 0;
-      Press_Moved : Boolean := False;   --  Press:这一步沿命令方向动起来过
+      Sub_Frames : Natural := 0;
+      Arrived : Boolean := False;
+      Prev_Rem_T : Long_Float := Long_Float'Last;   --  上一拍离目标还差几档(平移、转动各按各自那一档折了加起来)
+      Wt : Settle_Watch;                --  停没停(离目标还差的;"停在这儿"那种命令看每拍挪了多少)
+      Eyes : Ints;                      --  长在这条臂上的眼(Selfmap.Graph.Eyes_On)
+      Eyes_Set : Boolean := False;
+      Img_W : Cam_Watch_Vectors.Vector; --  读数停了以后,这几只眼的画面停没停(Cam_Feed;画面比读数晚的那一拍在这儿等出来)
+      Rd_Done : Boolean := False;       --  读数停了(到了 / 离目标还差的不再变小)
       Halted : Boolean := False;        --  途中 Watch 叫停过
-      Started : Boolean := False;       --  这一条发出去以后读数动起来过(挪过"停了"的那道门)
+      Started : Boolean := False;       --  这一条发出去以后读数动起来过(离目标少了超过这一条的百分之一)
       Send : Boolean := True;
       Why : Stop_Why := Going;
       Track_T, Track_R : Floats;        --  (V5)发出后逐拍走到这一条的几成(平移 / 转动;这一条没有那一样 = 空)
@@ -174,52 +269,62 @@ package body Selfmap is
       R.C.Kind := Plug.Ee; R.C.Arm := Arm; R.C.Pose := Target; R.C.Jaw := Jaw;
       R.P0 := (if Arm < Natural (F.EE.Length) then F.EE (Arm) else [others => 0.0]);
       R.Prev := R.P0;
+      Watch_Reset (R.Wt, Chan.Per_Arm / Chan.Pos_Channels);   --  两样:平移、转动
+      declare
+         Cmd : constant Table.Vec := Chan.Delivered (R.P0, Target);
+      begin
+         Watch_Peak (R.Wt, 0, Table.Norm (Cmd, Chan.Pos_Channels));
+         Watch_Peak (R.Wt, 1, Rot_Len (Cmd));
+      end;
       return R;
    end New_Run;
 
-   --  这一拍对这一组:看它停没停、到没到、要不要重发(Frames = 这一条 Go 一共走了几拍)
-   procedure Judge (M : Body_Map; F : Plug.Frame; Frames : Natural; Press : Boolean; Watch : Watcher; R : in out Run) is
+   --  一点都没动起来的那一条最多等几拍:量过的起效拍数(Settle);开机还一个都没量过 ⇒ Unmeasured_Start
+   --  (那时身体多久起效还不知道:晚两拍的身体照样要等它动起来,一组推不动的读数也不能一直等下去)
+   Unmeasured_Start : constant := 12;
+   function Start_Cap (M : Body_Map) return Natural is (if M.Settle > 0 then M.Settle else Unmeasured_Start);
+
+   --  这一拍对这一组:看它停没停、到没到、要不要重发(Prev_Cams = 上一拍的画面)
+   procedure Judge (M : Body_Map; F : Plug.Frame; Prev_Cams, Prev2_Cams : Plug.Cam_Vectors.Vector; Press : Boolean; Watch : Watcher; R : in out Run) is
       Arm : constant Natural := R.Arm;
-      Still : Natural renames R.Still;
-      Arrived : Natural renames R.Arrived;
-      Sub_Frames : Natural renames R.Sub_Frames;
-      Press_Moved : Boolean renames R.Press_Moved;
-      Press_Still : Natural renames R.Press_Still;
-      Started : Boolean renames R.Started;
-      Tol : constant Long_Float := R.Tol;
-      Tol_Rot : constant Long_Float := R.Tol_Rot;
-      Still_Frac : constant := Negligible;   --  百分之一(比例,见下)
+      procedure Restart_Watches is
+      begin
+         Watch_Reset (R.Wt, Natural (R.Wt.Done.Length));
+         R.Rd_Done := False;
+      end Restart_Watches;
    begin
-      Sub_Frames := Sub_Frames + 1;
+      if not R.Eyes_Set then
+         R.Eyes := Selfmap.Graph.Eyes_On (M, Arm);
+         R.Eyes_Set := True;
+      end if;
+      R.Sub_Frames := R.Sub_Frames + 1;
       if Arm >= Natural (F.EE.Length) then
          R.Why := No_Pose;
          return;
       end if;
-      --  途中每一拍看一眼:出事就把目标改成"停在此刻的位姿",同一条发命令的路再发一次
+      --  途中每一拍看一眼:出事就把目标改成"停在此刻的位姿",同一条发命令的路再发一次(从这一刻起重新判停)
       if Watch /= null and then not R.Halted and then Watch (F) then
          R.Halted := True;
          R.C.Pose := F.EE (Arm);
          R.Send := True;
-         Still := 0;
+         R.P0 := F.EE (Arm); R.Prev := R.P0; R.Started := False; R.Sub_Frames := 0;
+         R.Prev_Rem_T := Long_Float'Last;
+         Restart_Watches;
       end if;
       declare
-         D : constant Table.Vec := Chan.Delivered (R.Prev, F.EE (Arm));
-         Moved_P : constant Long_Float := Table.Norm (D, 3);
-         Rv : constant Long_Float := D (3) ** 2 + D (4) ** 2 + D (5) ** 2;
-         --  给了这一档(Tol、Tol_Rot > 0):平移、转动都折成"一步看得见的那一档"的个数,这一拍挪的档数不到这条命令档数的百分之一就算"停了"
-         --  (比例;慢的身体还在一拍半毫米地挪时不算停,G2D 2026-09-24 人形返回时还在往下挪被误判成顶住;
-         --  V1B23 2026-09-27:只往下压、不转的命令,转动那一项的门原来退成读数噪声 2e-5 弧度,被东西挡住时手一晃就不算停,
-         --  顶满 17 拍、一滑把手指推进桌面 19 mm);
-         --  没给:挪不到读数噪声才算
          Cmd : constant Table.Vec := Chan.Delivered (R.P0, R.C.Pose);
-         Geo : constant Boolean := Tol > 0.0 and then Tol_Rot > 0.0;
-         N_Cmd : constant Long_Float := (if Geo then Table.Norm (Cmd, 3) / Tol + Sqrt (Cmd (3) ** 2 + Cmd (4) ** 2 + Cmd (5) ** 2) / Tol_Rot else 0.0);
-         N_Beat : constant Long_Float := (if Geo then Moved_P / Tol + Sqrt (Rv) / Tol_Rot else 0.0);
-         N_Noise : constant Long_Float := (if Geo then M.EE_Noise / Tol + M.Rot_Noise / Tol_Rot else 0.0);
+         Cmd_T : constant Long_Float := Table.Norm (Cmd, Chan.Pos_Channels);
+         Cmd_R : constant Long_Float := Rot_Len (Cmd);
+         Hold : constant Boolean := Cmd_T <= 0.0 and then Cmd_R <= 0.0;   --  这一条是"停在这儿"
          Miss : constant Table.Vec := Chan.Delivered (F.EE (Arm), R.C.Pose);
+         Rem_T : constant Long_Float := Table.Norm (Miss, Chan.Pos_Channels);
+         Rem_R : constant Long_Float := Rot_Len (Miss);
+         D : constant Table.Vec := Chan.Delivered (R.Prev, F.EE (Arm));     --  这一拍挪了多少
          Dc : constant Table.Vec := Chan.Delivered (R.P0, F.EE (Arm));
          Ct2 : constant Long_Float := Cmd (0) ** 2 + Cmd (1) ** 2 + Cmd (2) ** 2;
          Cr2 : constant Long_Float := Cmd (3) ** 2 + Cmd (4) ** 2 + Cmd (5) ** 2;
+         Moves : Floats;
+         Have : Bools;
       begin
          --  (V5)这一拍走到这一条的几成:从起点挪的沿命令方向的那一份 ÷ 命令的长(平移、转动各算各的)
          if Ct2 > 0.0 then
@@ -228,54 +333,69 @@ package body Selfmap is
          if Cr2 > 0.0 then
             R.Track_R.Append ((Dc (3) * Cmd (3) + Dc (4) * Cmd (4) + Dc (5) * Cmd (5)) / Cr2);
          end if;
-         if (if Geo then N_Beat <= Long_Float'Max (N_Noise, Still_Frac * N_Cmd)
-             else Moved_P <= M.EE_Noise and then Rv <= M.Rot_Noise * M.Rot_Noise)
-         then
-            Still := Still + 1;
+         --  动起来了 = 离目标少了超过这一条的百分之一(晚几拍起效的身体:起效之前读数不动,不算停)
+         R.Started := R.Started or else Hold
+           or else (Cmd_T > 0.0 and then Cmd_T - Rem_T > Negligible * Cmd_T)
+           or else (Cmd_R > 0.0 and then Cmd_R - Rem_R > Negligible * Cmd_R);
+         --  看哪一样停没停:往一个目标走 ⇒ 离目标还差多少(匀速走着的那一段每拍都在变小,不会被当成停了;被挡住 / 到了 ⇒ 不再变小);
+         --  停在这儿 ⇒ 每拍挪了多少。这一条不动的那一样(只平移的命令的转动)不等
+         if Hold then
+            Moves.Append (Table.Norm (D, Chan.Pos_Channels)); Moves.Append (Rot_Len (D));
+            Have.Append (True); Have.Append (True);
          else
-            Still := 0;
-            Started := True;
+            Moves.Append (Rem_T); Moves.Append (Rem_R);
+            Have.Append (Cmd_T > 0.0); Have.Append (Cmd_R > 0.0);
          end if;
-         Arrived := (if Tol > 0.0 and then Table.Norm (Miss, 3) <= Tol
-                       and then Miss (3) ** 2 + Miss (4) ** 2 + Miss (5) ** 2 <= Tol_Rot * Tol_Rot then Arrived + 1 else 0);
-         if Press then
-            declare
-               Lc : constant Long_Float := Table.Norm (Cmd, 3);
-               Along : constant Long_Float := (if Lc > 0.0 then (D (0) * Cmd (0) + D (1) * Cmd (1) + D (2) * Cmd (2)) / Lc else 0.0);
-            begin
-               if abs Along > Long_Float'Max (M.EE_Noise, Still_Frac * Lc) then
-                  Press_Moved := True; Press_Still := 0;
-               elsif Press_Moved then
-                  Press_Still := Press_Still + 1;
-               end if;
-            end;
+         if R.Started then
+            Watch_Feed (R.Wt, Moves, Have);
          end if;
+         --  到了 = 差不到这一档(给了才判),而且没在往远走(冲过头往回摆的那一拍不算;平移、转动折成各自那一档的个数加起来看,
+         --  这一条没要转的那一点转动读数的起伏不算往远走)
+         declare
+            N_Now : constant Long_Float := (if R.Tol > 0.0 then Rem_T / R.Tol else 0.0) + (if R.Tol_Rot > 0.0 then Rem_R / R.Tol_Rot else 0.0);
+         begin
+            R.Arrived := R.Tol > 0.0 and then Rem_T <= R.Tol and then Rem_R <= R.Tol_Rot and then N_Now <= R.Prev_Rem_T;
+            R.Prev_Rem_T := N_Now;
+         end;
          R.Prev := F.EE (Arm);
+         --  画面:读数停了(到了 / 不再变小)以后,等这条臂自己那几只眼的画面也停了(Cam_Feed,同一种判法)——
+         --  画面比读数晚一拍的身体,读数停了那一拍的画面还是上一拍的
+         if not R.Rd_Done and then (R.Arrived or else (R.Started and then Watch_All_Done (R.Wt))) then
+            R.Rd_Done := True;
+            R.Img_W.Clear;
+            for E of R.Eyes loop
+               R.Img_W.Append (Cam_Watch'(others => <>));
+            end loop;
+         end if;
+         if R.Rd_Done then
+            for I in 0 .. Natural (R.Eyes.Length) - 1 loop
+               declare
+                  E : constant Natural := Natural (R.Eyes (I));
+                  Cw : Cam_Watch := R.Img_W (I);
+               begin
+                  if E < Natural (Prev_Cams.Length) and then E < Natural (Prev2_Cams.Length) and then E < Natural (F.Cams.Length) then
+                     Cam_Feed (Cw, Prev2_Cams (E), Prev_Cams (E), F.Cams (E));
+                     R.Img_W.Replace_Element (I, Cw);
+                  end if;
+               end;
+            end loop;
+         end if;
       end;
       --  到过的范围(09-29):反解被"到过的范围 + 往外一步"截住了(Plug.Held_Back)⇒ 不等停稳:手一动、到过的范围一长(Held_Grown),
       --  这一拍就按此刻的读数重解、重发 —— 目标跟着手往前一步,大转一条 Go 里连着走完(V1B63:等停稳再发,碰指尖 520 → 1012 拍;
-      --  快步不重发,一大步只走三成、被认成碰到)。截住了但手还没动起来(Held:命令隔一两拍才起效)⇒ 等,快步也不许先收;
-      --  手停在真的尽头 / 碰上东西 ⇒ 范围不再长、一直 Held ⇒ 照常等停下(尽头由 Jointboot 核)。每重发一次拍数重新数;另有一道总拍数上限防万一。
-      --  "停了"要等过量出来的起效拍数(M.Settle);还没量过(0)⇒ 读数动起来以后才算得上停(10-01 路 4:晚两拍起效的身体,
-      --  开机第一下探针发出去两拍读数不动就被当成"停了",一步都没走就收、探针量成 0,Settle 也就一直量不出)
+      --  快步不重发,一大步只走三成、被认成碰到)。手停在真的尽头 / 碰上东西 ⇒ 范围不再长 ⇒ 照常等停下(尽头由 Jointboot 核)。
+      --  每重发一次从头判停(范围只会长到量过的尽头,重发的次数有底;原来另有一道"总拍数 20 × (12 + Settle)"的上限,删了)
       declare
          use type Plug.Limit_State;
-         Ls : constant Plug.Limit_State := (if Arrived < 2 then Plug.Held_Back (Arm) else Plug.Free);
-         Settled : constant Boolean := Still >= 2 and then Sub_Frames >= M.Settle and then (M.Settle > 0 or else Started);
-         Cap : constant Natural := 20 * (12 + M.Settle);   --  总拍数上限(次数:防万一,正常的大转十几拍走完)
+         Ls : constant Plug.Limit_State := (if R.Arrived then Plug.Free else Plug.Held_Back (Arm));
       begin
-         if Ls = Plug.Held_Grown and then Frames < Cap then
-            R.Send := True; Still := 0; Sub_Frames := 0; Started := False;
-         elsif Arrived >= 2 then
-            R.Why := Reached;
-         elsif Press and then Ls = Plug.Free and then Press_Still >= 2 then
-            R.Why := Pressed;
-         elsif Settled then
-            R.Why := Stopped;
-         elsif Sub_Frames >= 12 + M.Settle then
+         if Ls = Plug.Held_Grown then
+            R.Send := True; R.Sub_Frames := 0; R.Started := False;
+            Restart_Watches;
+         elsif R.Rd_Done and then (for all Cw of R.Img_W => Cw.Done or else not Cw.Seen) then
+            R.Why := (if R.Arrived then Reached elsif Press then Pressed else Stopped);
+         elsif not R.Started and then R.Sub_Frames >= Start_Cap (M) then
             R.Why := Waited;
-         elsif Frames >= Cap then
-            R.Why := Capped;
          end if;
       end;
    end Judge;
@@ -289,6 +409,7 @@ package body Selfmap is
                       Ok : out Boolean; Press : Boolean; Watch : Watcher) is
       use type Ada.Calendar.Time;
       T_Got : Ada.Calendar.Time := Ada.Calendar.Clock;   --  这一帧收到的时刻(第一拍之前 = 进门)
+      Prev_Cams, Prev2_Cams : Plug.Cam_Vectors.Vector := F.Cams;   --  上一拍、上上拍的画面(判画面停没停)
    begin
       Frames := 0;
       Ok := True;
@@ -335,7 +456,7 @@ package body Selfmap is
                   declare
                      R : Run := Rs (I);
                   begin
-                     Judge (M, F, Frames, Press, Watch, R);
+                     Judge (M, F, Prev_Cams, Prev2_Cams, Press, Watch, R);
                      Rs.Replace_Element (I, R);
                      if R.Why = Going then
                         All_Done := False;
@@ -343,6 +464,7 @@ package body Selfmap is
                   end;
                end if;
             end loop;
+            Prev2_Cams := Prev_Cams; Prev_Cams := F.Cams;
             exit when All_Done;
          end;
       end loop;
@@ -356,16 +478,15 @@ package body Selfmap is
                  Tols : Plug.Floats_Vectors.Vector := Plug.Floats_Vectors.Empty_Vector;
                  Track_T, Track_R : access Floats := null) is
       C : Plug.Cmd;
-      Still : Natural := 0;
       Send : Boolean := True;
       --  关节目标:看哪几组读数、各自的目标
       W_G : Ints;
       W_Q : Plug.Floats_Vectors.Vector;
       Prev_All : Plug.Floats_Vectors.Vector;
+      Rem0, Prev_Rem : Floats;           --  每组发命令时、上一拍离目标还差多少(组里差得最多的那个关节)
       Is_Joint : constant Boolean := Group >= 0 or else not Groups.Is_Empty;
-      Arrived : Natural := 0;
-      Started : Boolean := False;      --  这一条发出去以后读数动起来过
-      Still_Frac : constant := Negligible;   --  百分之一(比例,见下)
+      Started : Boolean := False;        --  这一条发出去以后读数动起来过(有一组离目标少了超过它的百分之一)
+      Wt : Settle_Watch;
    begin
       Delivered := Table.Zero_Vec;
       Frames := 0;
@@ -396,8 +517,31 @@ package body Selfmap is
          C.Q := Joints; C.Group := Group;
          W_G.Append (Group); W_Q.Append (Joints);
       end if;
-      for G of W_G loop
-         Prev_All.Append (if G >= 0 and then G < Natural (F.Joints.Length) then F.Joints (Natural (G)) else F64_Vectors.Empty_Vector);
+      --  一组离目标还差多少:组里差得最多的那个关节
+      declare
+         function Gap (Now, Q : Floats) return Long_Float is
+            Mx : Long_Float := 0.0;
+         begin
+            for K in 0 .. Natural'Min (Natural (Now.Length), Natural (Q.Length)) - 1 loop
+               Mx := Long_Float'Max (Mx, abs (Now (K) - Q (K)));
+            end loop;
+            return Mx;
+         end Gap;
+      begin
+         for Gi in 0 .. Natural (W_G.Length) - 1 loop
+            declare
+               G : constant Integer := W_G (Gi);
+               Now : constant Floats := (if G >= 0 and then G < Natural (F.Joints.Length) then F.Joints (Natural (G)) else F64_Vectors.Empty_Vector);
+            begin
+               Prev_All.Append (Now);
+               Rem0.Append (Gap (Now, W_Q (Gi)));
+               Prev_Rem.Append (Long_Float'Last);
+            end;
+         end loop;
+      end;
+      Watch_Reset (Wt, Natural (W_G.Length));
+      for Gi in 0 .. Natural (W_G.Length) - 1 loop
+         Watch_Peak (Wt, Gi, Rem0 (Gi));
       end loop;
       loop
          if Send then
@@ -412,40 +556,54 @@ package body Selfmap is
             return;
          end if;
          Frames := Frames + 1;
-         --  关节目标:"停稳"看这几组关节读数(不看位姿:只报关节的身体没有位姿读数)。
-         --  到了目标附近(差 ≤ Tol,调用方按这一格的步子定)再有一拍不动 ⇒ 到了;没到目标就等连着两拍不动(被顶住 / 到头)
-         --  (5 分钟一炮,2026-09-26:原来每格都等"连着两拍不动 + 量出来的稳定拍数",V1B3 扫描一格 9 拍)。
-         --  "停了"要等过量出来的起效拍数;还没量过(Settle = 0)⇒ 读数动起来以后才算得上停(同 Judge)——
-         --  这一拍一组读数都读不到 ⇒ 动没动起来看不见,照原来连着两拍就收(没有证据,不白等)
+         --  关节目标:"停稳"看这几组关节读数(不看位姿:只报关节的身体没有位姿读数),同位姿那一支一种判法 ——
+         --  动起来以后每组离目标还差的不再变小(Stopped_Shrinking)= 停了;"停在这儿"那一组(发命令时就在目标上)看每拍挪了多少;
+         --  到了 = 每一组读得到的关节都差不到它的门(Joints_Arrived),而且没在往远走;一点都没动起来 ⇒ 最多等量过的起效拍数(Start_Cap)。
+         --  这一拍一组读数都读不到 ⇒ 动没动起来看不见,不白等(同原来:最多等起效拍数)
          declare
-            Moved : Long_Float := 0.0;
             Arr : Boolean := True;          --  这一拍每一组读得到的关节都到了(Joints_Arrived)
             Any_Read : Boolean := False;    --  至少有一组读得到(读不到的组不算,同原来)
-            --  一拍挪不到"到了"那个范围的百分之一 = 停了(比例;动作做完以后读数还会有极小的抖动,空闲时量的噪声是 0 ⇒ 不能拿它当"不动"的门,
-            --  V1B4 2026-09-26:每格都等满 14 拍)
-            Still_Gate : constant Long_Float := Long_Float'Max (M.Joint_Noise, Tol * Still_Frac);
+            Away : Boolean := False;        --  有一组离目标比上一拍远了
+            Moves : Floats;
+            Have : Bools;
          begin
             for Gi in 0 .. Natural (W_G.Length) - 1 loop
                declare
                   G : constant Integer := W_G (Gi);
                begin
                   if G >= 0 and then G < Natural (F.Joints.Length) and then Natural (Prev_All (Gi).Length) = Natural (F.Joints (Natural (G)).Length) then
-                     for K in 0 .. Natural (Prev_All (Gi).Length) - 1 loop
-                        Moved := Long_Float'Max (Moved, abs (F.Joints (Natural (G)) (K) - Prev_All (Gi) (K)));
-                     end loop;
-                     Any_Read := True;
-                     Arr := Arr and then Joints_Arrived (F.Joints (Natural (G)), W_Q (Gi),
-                                                         (if Gi < Natural (Tols.Length) then Tols (Gi) else F64_Vectors.Empty_Vector), Tol);
-                     Prev_All.Replace_Element (Gi, F.Joints (Natural (G)));
+                     declare
+                        Now : constant Floats := F.Joints (Natural (G));
+                        Gap_Now, Moved : Long_Float := 0.0;
+                     begin
+                        for K in 0 .. Natural (Now.Length) - 1 loop
+                           Moved := Long_Float'Max (Moved, abs (Now (K) - Prev_All (Gi) (K)));
+                           if K < Natural (W_Q (Gi).Length) then
+                              Gap_Now := Long_Float'Max (Gap_Now, abs (Now (K) - W_Q (Gi) (K)));
+                           end if;
+                        end loop;
+                        Any_Read := True;
+                        Arr := Arr and then Joints_Arrived (Now, W_Q (Gi), (if Gi < Natural (Tols.Length) then Tols (Gi) else F64_Vectors.Empty_Vector), Tol);
+                        Away := Away or else Gap_Now > Prev_Rem (Gi);
+                        Started := Started or else Rem0 (Gi) <= 0.0 or else Rem0 (Gi) - Gap_Now > Negligible * Rem0 (Gi);
+                        Moves.Append (if Rem0 (Gi) <= 0.0 then Moved else Gap_Now);   --  "停在这儿"那一组看每拍挪了多少
+                        Have.Append (True);
+                        Prev_Rem.Replace_Element (Gi, Gap_Now);
+                        Prev_All.Replace_Element (Gi, Now);
+                     end;
+                  else
+                     --  读不到这一组:当成这一拍什么都没变(两拍不变就停 —— 没有证据,不白等;同原来)
+                     Moves.Append (0.0); Have.Append (True);
                   end if;
                end;
             end loop;
-            Still := (if Moved <= Still_Gate then Still + 1 else 0);
-            Started := Started or else Moved > Still_Gate;
-            Arrived := (if Any_Read and then Arr then Arrived + 1 else 0);
-            --  连着两拍都到了目标附近 = 到了;没到目标就等连着两拍不动(被顶住 / 到头)
-            exit when Arrived >= 2 or else (Still >= 2 and then Frames >= M.Settle and then (M.Settle > 0 or else Started or else not Any_Read))
-              or else Frames >= 12 + M.Settle;
+            Started := Started or else not Any_Read;
+            if Started then
+               Watch_Feed (Wt, Moves, Have);
+            end if;
+            exit when (Any_Read and then Arr and then not Away)
+              or else (Started and then Watch_All_Done (Wt))
+              or else (not Started and then Frames >= Start_Cap (M));
          end;
       end loop;
    end Go;
@@ -515,7 +673,6 @@ package body Selfmap is
       Note.Text := T;
    end Verify;
 
-   function Rot_Len (A : Table.Vec) return Long_Float is (Sqrt (A (3) ** 2 + A (4) ** 2 + A (5) ** 2));
 
    --  ── 上一个动作的尾巴收住了没有(Measure_Idle 先等它收住再量)──
    --  一帧到下一帧每一组读数挪了多少:每条臂的平移、转动(位姿),每组关节、每组抓握(组里取挪得最多的那个数)。
@@ -570,20 +727,13 @@ package body Selfmap is
       N_Q : constant Natural := Natural (F.Joints.Length);
       N_Jaw : constant Natural := Natural (F.Jaw.Length);
       Prev_F : Plug.Frame := F;
-      Last : Floats;
-      Have_Last, Done : Bools;
+      Wt : Settle_Watch;
    begin
       Used := 0;
       Ok := True;
-      declare
-         G0 : constant Group_Move := Group_Moves (F, F, N_Ee, N_Q, N_Jaw);   --  只取组数
-      begin
-         for S in 0 .. Natural (G0.Moves.Length) - 1 loop
-            Last.Append (0.0); Have_Last.Append (False); Done.Append (False);
-         end loop;
-      end;
+      Watch_Reset (Wt, Natural (Group_Moves (F, F, N_Ee, N_Q, N_Jaw).Moves.Length));   --  只取组数
       loop
-         exit when (for all D of Done => D);
+         exit when Watch_All_Done (Wt);
          if not Plug.Sense (L, F) then
             Ok := False;
             return;
@@ -592,17 +742,7 @@ package body Selfmap is
          declare
             G : constant Group_Move := Group_Moves (Prev_F, F, N_Ee, N_Q, N_Jaw);
          begin
-            for S in 0 .. Natural (G.Moves.Length) - 1 loop
-               if not G.Have (S) then
-                  Done.Replace_Element (S, True);
-               else
-                  if Have_Last (S) and then Last (S) - G.Moves (S) <= Negligible * Last (S) then
-                     Done.Replace_Element (S, True);
-                  end if;
-                  Last.Replace_Element (S, G.Moves (S));
-                  Have_Last.Replace_Element (S, True);
-               end if;
-            end loop;
+            Watch_Feed (Wt, G.Moves, G.Have);
          end;
          Prev_F := F;
       end loop;
@@ -1130,7 +1270,7 @@ package body Selfmap is
                         S.Turned := (if S.Ang > 0.0 then (S.Got (3) * S.Cmd (3) + S.Got (4) * S.Cmd (4) + S.Got (5) * S.Cmd (5)) / S.Ang else 0.0);
                         S.Halted := R.Halted;
                         S.Fracs_T := R.Track_T; S.Fracs_R := R.Track_R; S.Busy := R.Busy;
-                        S.Moving := (R.Why in Waited | Capped) and then R.Still = 0;
+                        S.Moving := False;   --  (10-01)没有"最多等几拍"了:没动起来的那一条(Waited)就是没动,照常判挡没挡
                         S.Arrived := R.Tol > 0.0 and then Table.Norm (Miss, Chan.Pos_Channels) <= R.Tol and then Rot_Len (Miss) <= R.Tol_Rot;
                         --  判挡没挡:它自己停下来了、又没到 ⇒ 少走的比这一段空走时多出门没有。走到了(那一档以内,少走多少是 Go 在哪一刻收的)、
                         --  被 Watch 叫停、等满了还在动 ⇒ 不判,也不进底
