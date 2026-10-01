@@ -41,7 +41,7 @@ package Plan is
    --  名字是脑的话,落到哪一件只有两种证据:
    --    · 量:脑说"它在这一框里",框里那一片由我量 —— 和我已经量到的某一件是同一片像素 ⇒ 就是那一件;
    --    · 字:脑这回写的和它以前写过的某个名字是【同一串字母】(粘在一起、拆开、大小写都不算不同),
-   --      或者整串原样含着以前的名字 / 原样含在以前的名字里 ⇒ 是那一件;对得上的不止一件 ⇒ 不猜。
+   --      或者多出来的字母全是键盘不许名字里单独出现的那几个词(Same_Core)⇒ 是那一件;对得上的不止一件 ⇒ 不猜。
    --  别的一概不算:共用一个词(the red ball / the red cup)、差几个字母、让脑自己说"是哪一件"都量过,都会认错
    --  (10-01 用 S1A1–S1A5 落盘的名字问真 Qwen3.5-9B"它是你起过名的哪一件",能判对错的 33 问错 15:the red ball 认成 the red cup、
    --  cupboard 认成 cup,lift scissors 却认不出是 reach left …withscissors)。差几个字母的由眼来认:同一个模型看着画面,
@@ -49,7 +49,15 @@ package Plan is
    --  字母 = 名字里的 a–z(大写折成小写);空格、数字、标点不算。
    function Letters (W : String) return String;
    function Same_Name (A, B : String) return Boolean;           --  字母一样,而且不是空的
-   function Holds_Name (Outer, Inner : String) return Boolean;  --  Inner 的字母原样连着出现在 Outer 的字母里(Inner 不空)
+   --  名字里多出字母的来路(10-01):键盘不许名字里单独出现语言自己的词和 item(Sinew.Name_Forbidden)——
+   --  脑想写 pick up the mint green scissors,up 单独打不出,只能粘到旁边成了 upmint。这是今天唯一的来路;
+   --  09-30 以前还有两条:一个名字最多三个词、一个词最多 24 个字母(S1A1–S1A5 就是那时跑的:the mint green scissors
+   --  四个词写不下,截成了 the mint green;树莓派上那句 pick upthe pinktissueby 也正好是三个词)。
+   --  所以只按今天这一条来路认:多出来的每个字母都得能切成那几个词,别的(board、cil、the、pick)一律不算 ——
+   --  cupboard 不是 cup,pencil、open 不是 pen,red cupboard 不是 red cup,tissue box 不是 tissue。
+   --  A、B 各自去掉头尾粘着的语言词(Forbidden 里的词,空格隔开)以后剩下的字母一样(剩下的不空);
+   --  整个名字都切得成语言词的(untildone)没有芯,和谁都不一样
+   function Same_Core (A, B : String; Forbidden : String) return Boolean;
    --  同一片像素:两块各自身上的那一点(离形心最近的它自己的像素)都落在对方的像素里。
    --  不设重叠比例,两个方向都要成立;哪一点没有(< 0)或者掩膜不是整幅 ⇒ 不算同一片
    function Same_Pixels (Ma : Bytes.Bools; Ua, Va : Long_Float; Mb : Bytes.Bools; Ub, Vb : Long_Float; W, H : Natural) return Boolean;
@@ -81,15 +89,22 @@ package Plan is
       Name : Unbounded_String;   --  那件东西现在叫什么(Nv_Ambiguous:对得上的那几个,「」隔开)
       Known : Unbounded_String;  --  以前说过的名字都有哪些(照实告诉脑用;「」隔开)
    end record;
+   --  这只眼给不出它的一片 ⇒ 还问哪几只眼、按什么次序(Bind_Name ②b):别的每一只有画面的眼,按相机的次序。
+   --  问眼那句话里说的是"看不见就照实说,我换一只眼看,不猜";以前换眼要等下一轮(这一轮整段退回,回到上次认出名字的那只眼,
+   --  脑把同一段话再说一遍),S1A4 在看不见剪刀的腕眼里这样耗了 21 次
+   type Eye_Flags is array (Natural range <>) of Boolean;
+   function Other_Eyes (Cam : Natural; Has_Picture : Eye_Flags) return Bytes.Ints;
    --  问眼之前:这只眼这一帧量到的东西里,有没有和 W 同一串字母的 ⇒ Nv_This,否则 Nv_Ask_Eye
    function Before_Eye (W : String; Eye : Natural; Records : Named_Vectors.Vector) return Name_Verdict;
    --  眼说这只眼里指不出它(或者没问眼):只按字找它是不是以前说过的哪一件。
-   --  同一串字母优先;没有才看"原样含着 / 原样含在里面";只认有过框的那几条(只记了"指不出"的不算一件东西)
-   function Without_Eye (W : String; Eye : Natural; Records : Named_Vectors.Vector) return Name_Verdict;
+   --  同一串字母优先;没有才看 Same_Core(Forbidden = 这一轮键盘的 Sinew.Name_Forbidden);
+   --  只认有过框的那几条(只记了"指不出"的不算一件东西)
+   function Without_Eye (W : String; Eye : Natural; Records : Named_Vectors.Vector; Forbidden : String) return Name_Verdict;
    --  同一段程序里,一个名字绑没绑上不许取决于它写在第几行:头一遍认的时候后面几行的东西还没进清单。
    --  整段认完一遍以后,头一遍没绑上的东西名字(不是角色)按字再找一次 —— 规则就是 Without_Eye(不再问眼);
    --  找到的换成它此刻在清单上的号(Item_Of:Records 的第几条 → 清单第几号,0 = 不在清单上)。Got = 这一遍绑上了几个
    procedure Rebind_Missing (Binds : in out Bind_Vectors.Vector; Records : Named_Vectors.Vector; Eye : Natural;
+                             Forbidden : String;
                              Item_Of : not null access function (Bx : Natural) return Natural;
                              Got : out Natural);
    --  这段程序里用 remember … as <名字> 起的地名(跑到那一行才记下位置):编译期它还不是一处地方,可它是脑自己起的地名,

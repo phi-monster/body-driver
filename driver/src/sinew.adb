@@ -385,7 +385,8 @@ package body Sinew is
       return False;
    end Has_Key;
 
-   function EBNF (Rels_Usable, Roles_Usable, Outs_Usable : String; Qtys_Usable : String := "") return String is
+   --  这一轮键盘的文法原文;名字那一槽里一个词怎么写由 W_Rule 给。EBNF 和 Name_Forbidden 都从这一份出,不会漂
+   function Keyboard_Text (Rels_Usable, Roles_Usable, Outs_Usable, Qtys_Usable, W_Rule : String) return String is
       --  🔴 一条没有任何候选的规则(`who ::= ` 后面是空的)不是"窄的键盘",是【坏掉的语法】:
       --  T1 2026-09-21 实测,脑点了 `with my moving eye`,身体照办换到一只绑不上任何"我"的眼 ⇒ 角色表为空
       --  ⇒ vLLM 原话 "Invalid grammar specification … Expected name at line 8 'who ::= '" ⇒ 这一轮问不了脑,
@@ -403,7 +404,7 @@ package body Sinew is
       --  生成跑飞(H44 2026-09-23 实测:名字槽里生成了 "untiltimeoutuntiltimeout…" 一整行)由推理服务那一头的 token 上限截住,
       --  截断了的那一段解析不过、照实退回;解析这一头也不截(词数、块套几层都不设上限,读不进 Natural 的数照实退回)
       Sent_Rule : constant String := "sent ::= [a-zA-Z] ([a-zA-Z0-9 ,.=\'])*";
-      function Body_Text (W_Rule : String) return String is
+      function Body_Text return String is
       begin
          if not Has_Who then
             return
@@ -434,10 +435,9 @@ package body Sinew is
            "word ::= ""say "" sent | ""done""" & ASCII.LF &
            Sent_Rule;
       end Body_Text;
-      Draft : constant String := Body_Text ("[a-z] ([a-z])*");
       --  语言的根(2026-09-23):有可用的量时,键盘上只有这一句 —— <东西> <量> up|down until <结局>,外加 say / done。
       --  手的关系词、眼、步子、控制块全不在键盘上:它们是 9B 的脑乱按的地方(09-22 十七炮里四炮乱码),不是地基。
-      function Qty_Text (W_Rule : String) return String is
+      function Qty_Text return String is
         ("root ::= line (line)*" & ASCII.LF &
          "line ::= (interval | word) ""\n""" & ASCII.LF &
          "interval ::= ""do "" name "" "" qty "" "" dir "" until "" outc" & ASCII.LF &
@@ -449,16 +449,17 @@ package body Sinew is
          "word ::= ""say "" sent | ""done""" & ASCII.LF &
          Sent_Rule);
    begin
-      if Has_Key (Qtys_Usable) then
-         declare
-            Dq : constant String := Qty_Text ("[a-z] ([a-z])*");
-         begin
-            return Qty_Text (Complement (Literal_Words (Dq) & " item", True));
-         end;
-      end if;
-      --  名字里也打不出 item:那是我清单上的记账词,不是任何东西的名字(T2 实测 Qwen 拿它当名字用)
-      return Body_Text (Complement (Literal_Words (Draft) & " item", True));
-   end EBNF;
+      return (if Has_Key (Qtys_Usable) then Qty_Text else Body_Text);
+   end Keyboard_Text;
+
+   --  名字里不许单独出现的词 = 这张键盘文法里的每个词,外加 item
+   --  (item 是我清单上的记账词,不是任何东西的名字;T2 实测 Qwen 拿它当名字用)
+   function Name_Forbidden (Rels_Usable, Roles_Usable, Outs_Usable : String; Qtys_Usable : String := "") return String is
+     (Literal_Words (Keyboard_Text (Rels_Usable, Roles_Usable, Outs_Usable, Qtys_Usable, "[a-z] ([a-z])*")) & " item");
+
+   function EBNF (Rels_Usable, Roles_Usable, Outs_Usable : String; Qtys_Usable : String := "") return String is
+     (Keyboard_Text (Rels_Usable, Roles_Usable, Outs_Usable, Qtys_Usable,
+                     Complement (Name_Forbidden (Rels_Usable, Roles_Usable, Outs_Usable, Qtys_Usable), True)));
 
    --  每个量配一句它是什么(含义来自身体怎么量它,不是说明书)
    function Qty_Gloss (Qtys_Usable : String) return String is
