@@ -12,10 +12,20 @@
 --  assume that +z is up (use Up). Camera frames have z along the optical
 --  axis, x along +U and y along +V of the image (Driver.Images).
 --
+--  Estimation is separate from decision: Observe is fed every beat with the
+--  observation and the command in effect, whoever chose it, so the same
+--  estimates follow from a recording of any driver. The heavier estimates
+--  (roles, kinematics) are recomputed by Observe whenever the evidence
+--  behind them has doubled, and a decider may ask for them at once with
+--  Estimate_Now.
+--
 --  Ownership: path A owns this layer except Driver.Robot.Hand (path B).
 --  Upper layers use only what this specification and Driver.Robot.Motion and
 --  Driver.Robot.Hand export.
 
+with Ada.Containers.Indefinite_Holders;
+with Ada.Containers.Vectors;
+with Ada.Strings.Unbounded;
 with Driver.Commands;
 with Driver.Images;
 with Driver.Numerics;
@@ -38,7 +48,10 @@ package Driver.Robot is
    --    Closer   moving it moves a patch inside an arm's own eye (fingers, gripper)
    --    Part     moving it moves a patch outside every arm's eye
    --    Sensor   its readings change though it is not commanded
-   --    Inert    nothing it is pushed to changes anything any eye sees
+   --    Inert    nothing it is pushed to changes anything any eye sees, or,
+   --             not commandable, its readings never change
+   --  With a single eye nothing tells carrying the whole body apart from
+   --  carrying that eye, so a group moving it is an Arm.
 
    type Arm_Id is new Positive;
 
@@ -57,6 +70,11 @@ package Driver.Robot is
    --  One beat: the observation, and Sent, the last command sent to the
    --  robot before it arrived (the one in effect while it was captured;
    --  holds included). Estimators only; never sends anything.
+
+   procedure Estimate_Now (M : in out Model);
+   --  Recomputes the heavier estimates from everything observed so far.
+   --  Deciders call it between Driver.Beats.Next and Send; it can take
+   --  seconds, during which the robot holds.
 
    function Booted (M : Model) return Boolean;
 
@@ -101,10 +119,128 @@ package Driver.Robot is
    --  The one stillness judgment: at the latest beat no group and no eye
    --  changes significantly against its own measured noise.
 
+   --  What the body reported and how each group behaves.
+
+   function Group_Count (M : Model) return Natural;
+   function Group_Size (M : Model; G : Group_Id) return Natural;
+   function Is_Commandable (M : Model; G : Group_Id) return Boolean;
+   --  A command in effect has carried a target for it.
+
+   function Reading_Noise (M : Model; G : Group_Id; Channel : Positive) return Real;
+   --  The standard deviation of the channel's reading at rest, in reading
+   --  units; zero for a reading that repeats exactly.
+
+   type Eye_Response is (Unmeasured, Nothing, Patch, Undecided, Whole);
+   --  What pushing a group does to what an eye sees: nothing, a patch of the
+   --  image moves, or the whole image moves (the eye rides on the group).
+
+   function Response (M : Model; G : Group_Id; E : Eye_Id) return Eye_Response;
+
+   function Image_Lag (M : Model; E : Eye_Id) return Integer;
+   --  How many beats the eye's images trail the readings they belong to:
+   --  the image of beat B shows the body as read at beat B - Image_Lag.
+
+   function Closer_Arm (M : Model; G : Group_Id) return Arm_Id'Base;
+   --  For a Closer, the arm in whose eye it moves; 0 otherwise.
+
+   function Carrier_Group (M : Model) return Group_Id'Base;
+   --  The group that carries every eye, or 0 when there is none.
+
+   function Contract_Breach (M : Model; G : Group_Id) return Natural;
+   --  The clause of the porting contract (docs/body-protocol.md, 3) the
+   --  group breaks: 1 its reading does not follow its command, 2 nothing
+   --  any eye sees changes when it moves, 3 it reports moving where an eye
+   --  sees nothing move although the opposite push showed; 0 none.
+
+   function Describe (M : Model) return String;
+   --  The measured body in a few lines, for the log.
+
 private
 
+   use Ada.Strings.Unbounded;
+
+   package Real_Vectors is new Ada.Containers.Vectors (Natural, Real);
+   package Flag_Vectors is new Ada.Containers.Vectors (Natural, Boolean);
+   package Luma_Holders is new Ada.Containers.Indefinite_Holders (Real_Array);
+
+   --  A group's readings and the target in effect, beat after beat; beat K
+   --  of the stream is the K-th observation (counted from zero).
+   type Group_Stream is record
+      Size        : Natural := 0;
+      Commandable : Boolean := False;
+      Values      : Real_Vectors.Vector;   --  Size readings per beat
+      Present     : Flag_Vectors.Vector;   --  a reading arrived that beat
+      Targets     : Real_Vectors.Vector;   --  Size targets per beat
+      Targeted    : Flag_Vectors.Vector;   --  the command in effect carried a target
+      Pushed      : Flag_Vectors.Vector;   --  per beat, once measured: moving because it was pushed
+   end record;
+
+   package Group_Stream_Vectors is new Ada.Containers.Vectors (Group_Id, Group_Stream);
+
+   --  The cells an image is divided into for measuring where it moves.
+   type Cell_Grid is record
+      Width, Height : Natural := 0;
+      Columns, Rows : Natural := 0;
+   end record;
+
+   function Cells (G : Cell_Grid) return Natural is (G.Columns * G.Rows);
+
+   --  An eye's motion, beat after beat: for every cell, the displacement of
+   --  the image content since the previous beat (pixels) and the smaller
+   --  eigenvalue of the cell's gradient tensor (how well that displacement
+   --  is determined).
+   type Eye_Stream is record
+      Grid          : Cell_Grid;
+      Previous      : Luma_Holders.Holder;   --  luma of the last frame, empty before the first
+      Du, Dv        : Real_Vectors.Vector;   --  Cells values per beat
+      Condition     : Real_Vectors.Vector;   --  Cells values per beat
+      Measured      : Flag_Vectors.Vector;   --  per beat: both frames were there
+      Noise         : Real_Vectors.Vector;   --  per cell: displacement noise at rest, once measured
+      Textured      : Flag_Vectors.Vector;   --  per cell: can show a displacement, once measured
+   end record;
+
+   package Eye_Stream_Vectors is new Ada.Containers.Vectors (Eye_Id, Eye_Stream);
+
+   --  What one group's push does to one eye (Driver.Robot.Lockin).
+   type Eye_Effect is record
+      Verdict    : Eye_Response := Unmeasured;
+      Responding : Natural := 0;   --  cells whose displacement follows the group
+      Textured   : Natural := 0;   --  cells that can show a displacement
+      Fraction   : Estimate;       --  Responding / Textured, with its binomial sigma
+   end record;
+
+   package Effect_Vectors is new Ada.Containers.Vectors (Positive, Eye_Effect);
+   --  Indexed (G - 1) * Eyes + E.
+
+   package Role_Vectors is new Ada.Containers.Vectors (Group_Id, Group_Role);
+   package Arm_Number_Vectors is new Ada.Containers.Vectors (Group_Id, Arm_Id'Base);
+   package Clause_Vectors is new Ada.Containers.Vectors (Group_Id, Natural);
+   package Arm_Group_Vectors is new Ada.Containers.Vectors (Arm_Id, Group_Id, Driver.Observations."=");
+   package Mount_Vectors is new Ada.Containers.Vectors (Eye_Id, Mount);
+   package Lag_Vectors is new Ada.Containers.Vectors (Eye_Id, Integer);
+
+   --  The groups and eyes as measured: what each group's push does to each
+   --  eye, and what follows from that (Driver.Robot.Graph).
+   type Body_Graph is record
+      Effects : Effect_Vectors.Vector;
+      Roles   : Role_Vectors.Vector;
+      Arm_Of  : Arm_Number_Vectors.Vector;   --  an Arm's own number, a Closer's arm, else 0
+      Breach  : Clause_Vectors.Vector;
+      Arms    : Arm_Group_Vectors.Vector;
+      Mounts  : Mount_Vectors.Vector;
+      Carrier : Group_Id'Base := 0;
+   end record;
+
    type Model is tagged limited record
-      Is_Booted : Boolean := False;
+      Beats          : Natural := 0;               --  observations seen
+      Groups         : Group_Stream_Vectors.Vector;
+      Eyes           : Eye_Stream_Vectors.Vector;
+      Noise          : Real_Vectors.Vector;        --  per channel of every group, in group order
+      Lags           : Lag_Vectors.Vector;
+      Graph          : Body_Graph;
+      Graph_Evidence : Natural := 0;               --  push beats behind the current graph
+      Is_Booted      : Boolean := False;
+      Report         : Unbounded_String;           --  what the last estimate found, for Describe
    end record;
 
 end Driver.Robot;

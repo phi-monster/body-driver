@@ -1,0 +1,46 @@
+--  Robust linear regression with a significance test for blocks of
+--  coefficients.
+--
+--  The fit is iteratively reweighted least squares with Huber's weights to
+--  convergence: a convex loss, so where it starts does not matter, and an
+--  observation far outside the model (a motion too large for a
+--  linearization) keeps only a weight inversely proportional to its
+--  residual. A redescending loss would drop such observations entirely,
+--  but it also drops sound ones whenever the measurement noise is far
+--  below the model's own small systematic error, which is the case for a
+--  rendered image. The scale is re-measured every iteration from the median
+--  absolute residual, never below the given floor. Columns that are
+--  combinations of others (channels that always moved together) are
+--  handled by a pseudo-inverse, and a block test then tests what the data
+--  can tell about that block and reports its rank as degrees of freedom.
+
+private package Driver.Robot.Regression is
+
+   use Driver.Numerics.Arrays;
+
+   type Fit (Columns : Natural) is record
+      Beta      : Real_Array (1 .. Columns);
+      Scale     : Real;                                   --  robust sigma of one residual
+      Normal    : Real_Matrix (1 .. Columns, 1 .. Columns);  --  X' W X at the final weights
+      Converged : Boolean;
+   end record;
+
+   function Solve (X : Real_Matrix; Y : Real_Array; Floor : Real) return Fit
+     with Pre => X'Length (1) = Y'Length and then X'Length (2) > 0 and then Floor >= 0.0;
+   --  X has one row per observation and one column per regressor. Floor is
+   --  the least sigma a residual can have (the resolution of the measured
+   --  quantity): exact data would otherwise give a zero scale, and every
+   --  observation that is not fitted exactly would lose all its weight.
+
+   procedure Test_Block (F : Fit; First, Last : Positive; Statistic : out Real; Freedom : out Natural)
+     with Pre => First <= Last and then Last <= F.Columns;
+   --  The Wald statistic of coefficients First .. Last against zero, with
+   --  the covariance Scale ** 2 times the pseudo-inverse of Normal, and its
+   --  degrees of freedom (the numerical rank of that block). Statistics of
+   --  independent responses add, and so do their degrees of freedom.
+
+   function Z_Of (Statistic : Real; Freedom : Positive) return Real;
+   --  The standard normal deviate with the same upper tail as a chi-square
+   --  of that many degrees of freedom (Wilson-Hilferty).
+
+end Driver.Robot.Regression;
