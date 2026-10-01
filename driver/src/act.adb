@@ -987,12 +987,14 @@ package body Act is
    --  🔴 这里的量全是【米】。09-20 搬回来时为了不碰棘轮把"×1000"删了,标签却还写着 mm ⇒ 横挪 25.6 毫米显示成 "0.0 mm",
    --  "它在相机前 -0.8 mm"其实是负 0.8 米(算到相机背后去了)—— T10 2026-09-21 差点被这个标签骗过去。量的是米,就按米说,三位小数到毫米。
 
-   --  走一步(Selfmap.Step,I6):这只手的目标 = 此刻的读数平移 Dw,这一步走它的 Frac、最长 Track(Selfmap.Step 的上限),一条命令、等它停
+   --  走一步(Selfmap.Step,I6):这只手的目标 = 此刻的读数平移 Dw,这一步走它的 Frac,上限 = 眼跟得住 Track、离可能碰到的地方 Clear、
+   --  反解够得到(Reach)(Selfmap.Step 的三道上限),一条命令、等它停
    --  (没给 Watch ⇒ 到了一步看得见的那一档以内就算到,同 Step_Arm 的 Geo_Settle);Rep = 这一步的账(实到、到没到、挡没挡:Blocked_By 拿 Wk 里这一段空走的底)
    procedure Geo_Move (L : in out Plug.Link; C : Context; F : in out Plug.Frame; Arm : Natural; Dw : Geom.V3; Ok : out Boolean;
                        Wk : in out Selfmap.Walk; Rep : out Selfmap.Leg_Step;
                        Watch : Selfmap.Watcher := null; Press : Boolean := False;
-                       Frac : Long_Float := 1.0; Track : Long_Float := Long_Float'Last) is
+                       Frac : Long_Float := 1.0; Track : Long_Float := Long_Float'Last;
+                       Clear : Long_Float := Long_Float'Last; Reach : Boolean := False) is
       A : Table.Vec := Table.Zero_Vec;
       Seq0 : constant Natural := F.Seq;
       Legs : Selfmap.Leg_Vectors.Vector;
@@ -1008,6 +1010,7 @@ package body Act is
       A (0) := Dw (0); A (1) := Dw (1); A (2) := Dw (2);
       Legs.Append (Selfmap.Leg'(Arm => Arm, Goal => Chan.Compose (F.EE (Arm), A), Jaw => <>));
       Lim.Press := Press; Lim.Watch := Watch; Lim.Loose := Selfmap."=" (Watch, null); Lim.Frac := Frac; Lim.Track := Track;
+      Lim.Clear := Clear; Lim.Reach := Reach;
       Selfmap.Step (L, C.Map, Legs, Lim, F, Wk, Rs, Frames, Ok);
       if not Rs.Is_Empty then
          Rep := Rs (0);
@@ -1072,6 +1075,21 @@ package body Act is
       end if;
       return C.Map.EE_Noise;
    end Geo_Base;
+
+   --  这只手的小步(Selfmap.Careful_Step):手自己的不准(长在它上面那只眼量的指尖不准、这一次到位差 Miss、读数噪声)分给 Blocked 当底的那几步,
+   --  再小也得是它自己那只眼看得出的一步
+   function Careful_Of (C : Context; Arm : Natural; Miss : Long_Float) return Long_Float is
+      Hc : constant Integer := Hand_Eye_Of (C, Arm);
+      G : constant Geom.Cam_Geo := (if Hc >= 0 then Geo_Of (C, Natural (Hc)) else (others => <>));
+   begin
+      return Selfmap.Careful_Step (G.Tip_Sd, Miss, C.Map.EE_Noise, Geo_Base (C, Arm), G.Rms);
+   end Careful_Of;
+
+   --  脑说的步子档位 = 这一步最多多大(语言 §17.6,大并行 §2 第 23 条;10-01 路 4,原来是"乘探针上限的 1/4、1/2、1"):
+   --  small = 这只手的小步(Careful_Of:到可能碰到的带子里每一步多大),large = 一条命令走得到的最大一档(开机量的步幅),
+   --  medium = 两者的几何中点(对数尺上的正中;两头都是量的)。脑没说 ⇒ 不加上限(步子由反解、眼、带子定)
+   function Gear_Cap (C : Context; Arm : Natural; Gear : Unbounded_String; Miss : Long_Float := 0.0) return Long_Float is
+     (Selfmap.Gear_Bound (To_String (Gear), Careful_Of (C, Arm, Miss), Stride_Of (C, Arm)));
 
    --  指尖在相机里的位置:开机那一帧里两根手指(合空扫过的像素)各自最靠上的那一截 = 指尖;有深度那一帧读一次深度
    --  (真机:一台相机一辈子量一次,用尺子也行;之后再也不读深度)
@@ -1275,41 +1293,73 @@ package body Act is
 
    --  Above = True:不是走到它跟前,而是走到它【正上方、高出一个张口】(张口是身体量过的长度,不是拍的数)。
    --  "上" = 位姿读数系的 +z,和抬手那一条同一个约定(当它朝上;真机该由重力读数定)。
+   --  Gear = 脑说的步子档位那个词(small / medium / large;空 = 没说):这一步最多多大(Gear_Cap)。Amt 是老的"乘几分之几",
+   --  走路这一段不再用它乘(只转交给 Geo_Turn,Geo_Turn 也不用);调用方都显式给,不设缺省
    procedure Geo_Approach (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Cam, Arm : Natural; Slot : Integer;
                            Step_Limit : Natural; Event : out Unbounded_String; Steps_Taken : out Natural; Beats : out Natural;
-                           Above : Boolean := False; Amt : Long_Float := 0.5; Until_Touch : Boolean := False;
-                           Name : Unbounded_String := Null_Unbounded_String) is separate;
+                           Above : Boolean := False; Amt : Long_Float; Until_Touch : Boolean := False;
+                           Name : Unbounded_String := Null_Unbounded_String;
+                           Gear : Unbounded_String := Null_Unbounded_String) is separate;
 
-   --  离远点(拿着东西):沿来的路退,退它来时那么远(全是量的,两段走)
+   --  沿来的路退回逼近开始的那一处(C.Geo_Came 那么远,反着 C.Geo_Dir):一步一步 Selfmap.Step(同一个 Walk),每一步走还差的全部,
+   --  上限 = 反解够得到、脑说的档位(Gear_Cap);到了 = 离那一处不到我自己看得出的那一步(Plan_Approach 的分辨率:身后没有它,只有我自己的不准);
+   --  被挡住(Blocked)、一步下去没再近过分辨率(到头了)、走满脑给的步数(Max_Steps > 0)就收。
+   --  Went = 沿退的方向实到多远;C.Geo_Came / Geo_Dist / Geo_At 跟着变(下一回"离远点"只退剩下的)
+   procedure Retrace (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Arm : Natural; Max_Steps : Natural; Gear : Unbounded_String;
+                      Went : out Long_Float; Steps_Taken : out Natural; Blocked, Arrived : out Boolean) is
+      P0 : constant Plug.Arm_Pose := F.EE (Arm);
+      Back : Table.Vec := Table.Zero_Vec;
+      Hc : constant Integer := Hand_Eye_Of (C, Arm);
+      G : constant Geom.Cam_Geo := (if Hc >= 0 then Geo_Of (C, Natural (Hc)) else (others => <>));
+      --  身后没有它,只有我自己的不准:分辨率 = 我自己看得出的那一步(Plan_Approach,它的位置不准 0、没有它的半径)
+      Res : constant Long_Float := Selfmap.Plan_Approach (C.Geo_Came, 0.0, 0.0, G.Tip_Sd, 0.0, C.Map.EE_Noise, Geo_Base (C, Arm), G.Rms).Res;
+      Lim : Selfmap.Limits;
+      Wk : Selfmap.Walk;
+      Turned : Long_Float;
+      Why : Selfmap.Walk_End;
+      use type Selfmap.Walk_End;
+   begin
+      for K in 0 .. Chan.Pos_Channels - 1 loop
+         Back (K) := -C.Geo_Dir (K) * C.Geo_Came;
+      end loop;
+      Lim.Track := Gear_Cap (C, Arm, Gear); Lim.Reach := True;
+      Selfmap.Walk_To (L, C.Map, (Arm => Arm, Goal => Chan.Compose (P0, Back), Jaw => <>), Lim, Res, Long_Float'Last, Max_Steps,
+                       F, Wk, Went, Turned, Steps_Taken, Why);
+      Blocked := Why = Selfmap.Was_Blocked; Arrived := Why = Selfmap.Arrived;
+      C.Geo_Came := Long_Float'Max (0.0, C.Geo_Came - Went);
+      if C.Geo_Dist >= 0.0 then
+         C.Geo_Dist := C.Geo_Dist + Went;   --  离它远了这么多;刚算的"笼住"距离跟着变
+      end if;
+      C.Geo_At := F.EE (Arm);
+   end Retrace;
+
+   --  离远点(拿着东西):沿来的路退,退它来时那么远(全是量的;一步一步走还差的全部,Retrace)
    procedure Geo_Retreat (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Arm : Natural;
                           Event : out Unbounded_String; Steps_Taken : out Natural; Beats : out Natural) is
       Beats0 : constant Natural := Plug.Steps (L);
       Dist : constant Long_Float := C.Geo_Came;
-      Mok : Boolean;
+      Went : Long_Float;
+      Blocked, Arrived : Boolean;
    begin
       Steps_Taken := 0; Beats := 0;
       if Dist <= 0.0 or else Geom.Norm (C.Geo_Dir) <= 0.0 then
          Event := S ("amount: stopped (I have no approach path to retrace)");
          return;
       end if;
-      --  分几截退:除数【就是截数】,不是一个可调的系数 —— 走一截量一眼,免得一口气退过头。
-      declare
-         Legs : constant := 2;
-         Leg_D : constant Long_Float := Dist / Long_Float (Legs);
-      begin
-      for Leg in 1 .. Legs loop
-         Geo_Move (L, C, F, Arm, [-C.Geo_Dir (0) * Leg_D, -C.Geo_Dir (1) * Leg_D, -C.Geo_Dir (2) * Leg_D], Mok);
-         Steps_Taken := Steps_Taken + 1;
-      end loop;
-      end;
-      Event := S ("amount: arrived (I went back the way I came, " & Len (C, Dist) & ")");
+      --  原来分两截退(截数是拍的,"走一截量一眼,免得一口气退过头"):Selfmap.Step 按量到的交付走、到了分辨率以内就收,不会退过头
+      Retrace (L, C, F, Arm, 0, Null_Unbounded_String, Went, Steps_Taken, Blocked, Arrived);
+      Event := S ((if Blocked then "resist: going back the way I came, my hand was stopped after " & Len (C, Went) & " of " & Len (C, Dist)
+                   elsif Arrived then "amount: arrived (I went back the way I came, " & Len (C, Went) & ")"
+                   else "amount: stopped getting closer to where I started (I went back " & Len (C, Went) & " of " & Len (C, Dist) & ")"));
       Beats := Beats_Since (L, Beats0);
    end Geo_Retreat;
 
-   --  离远点(手里没东西):沿我来时走向它的方向【反着】走。一步多长 = 脑那一档的步子(和贴近时同一把尺);走几步 = 脑说的步数,没说就一步。
-   --  没朝它走过就说不出哪边是"远" ⇒ 如实拒,不猜。
+   --  离远点(手里没东西):沿我来时走向它的方向【反着】走,退回逼近开始的那一处(Retrace)。脑说了档位 ⇒ 每一步最多这么大(Gear_Cap);
+   --  脑说了步数 ⇒ 最多走这么多步(10-01 路 4:原来一步 = 量出来的最大一档 × 脑的档位、没说步数就只走一步 —— 两个拍的数)。
+   --  Amt 是老的"乘几分之几",不再用。没朝它走过就说不出哪边是"远" ⇒ 如实拒,不猜。
    procedure Geo_Away (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Arm : Natural; Step_Limit : Natural; Amt : Long_Float;
-                       Event : out Unbounded_String; Steps_Taken : out Natural; Beats : out Natural) is separate;
+                       Event : out Unbounded_String; Steps_Taken : out Natural; Beats : out Natural;
+                       Gear : Unbounded_String := Null_Unbounded_String) is separate;
 
    --  ── 一轮 ──
    procedure Round (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context) is separate;
