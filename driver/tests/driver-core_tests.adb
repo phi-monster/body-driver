@@ -1,4 +1,6 @@
 with Ada.Numerics;
+with Ada.Numerics.Float_Random;
+with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Strings.Unbounded;
 with Driver.Bytes;
 with Driver.Commands;
@@ -121,6 +123,63 @@ package body Driver.Core_Tests is
       Check (not Significant (Estimate'(10.0, 2.0, 0), Estimate'(5.0, 2.0, 0)), "5 apart with combined sigma 2.83");
       Check (Significant (Estimate'(10.0, 1.0, 0), Estimate'(5.0, 1.0, 0)), "5 apart with combined sigma 1.41");
    end Significance;
+
+   procedure Point_Significance is
+      use Driver.Uncertain;
+      use Ada.Numerics.Long_Elementary_Functions;
+
+      function Point (Mean : Vec3; Variances : Vec3) return Point_Estimate is
+         P : Point_Estimate := (Mean => Mean, Covariance => [others => [others => 0.0]]);
+      begin
+         for I in 1 .. 3 loop
+            P.Covariance (I, I) := Variances (I);
+         end loop;
+         return P;
+      end Point;
+
+      Half_Each : constant Vec3 := [0.5, 0.5, 0.5];   --  two such points: unit variance per axis
+      Origin    : constant Point_Estimate := Point (Zero3, Half_Each);
+      G         : Ada.Numerics.Float_Random.Generator;
+      Draws     : constant := 40_000;
+      Alarms    : Natural := 0;
+
+      function Gaussian return Real is
+         --  Box and Muller; 1 - U keeps the logarithm finite.
+         U : constant Real := 1.0 - Real (Ada.Numerics.Float_Random.Random (G));
+         V : constant Real := Real (Ada.Numerics.Float_Random.Random (G));
+      begin
+         return Sqrt (-2.0 * Log (U)) * Cos (2.0 * Pi * V);
+      end Gaussian;
+   begin
+      --  The false-alarm rate under pure noise is the scalar rule's, not the
+      --  far higher rate of a length tested along the direction noise chose.
+      Ada.Numerics.Float_Random.Reset (G, 1);
+      for K in 1 .. Draws loop
+         if Significant (Origin, Point ([Gaussian, Gaussian, Gaussian], Half_Each)) then
+            Alarms := Alarms + 1;
+         end if;
+      end loop;
+      declare
+         P : constant Real := 2.0 * (1.0 - 0.998_650_101_968_369_9);   --  two-sided Gaussian tail at Z = 3
+         Expected : constant Real := Real (Draws) * P;
+      begin
+         Check (abs (Real (Alarms) - Expected) <= 3.0 * Sqrt (Expected * (1.0 - P)),
+                "isotropic noise raised" & Natural'Image (Alarms) & " alarms in" & Natural'Image (Draws)
+                & ", expected about" & Natural'Image (Natural (Expected)));
+      end;
+      Check (not Significant (Origin, Point ([3.5, 0.0, 0.0], Half_Each)),
+             "3.5 sigma in three dimensions is within the 0.27 % tail of a chi with 3 degrees of freedom");
+      Check (Significant (Origin, Point ([4.0, 0.0, 0.0], Half_Each)), "4 sigma in three dimensions not significant");
+      --  Along the separation the spread looks wide; across the narrow axis it is not.
+      Check (Significant (Point (Zero3, [0.5, 0.005, 0.5]), Point ([2.8, 0.28, 0.0], [0.5, 0.005, 0.5])),
+             "a separation hidden by projecting onto its own direction was missed");
+      Check (Significant (Point (Zero3, [1.0, 1.0, 0.0]), Point ([0.0, 0.0, 1.0e-6], [0.0, 0.0, 0.0])),
+             "a separation along a direction both points pin down exactly was not significant");
+      Check (not Significant (Point (Zero3, [1.0, 1.0, 0.0]), Point ([1.0, 1.0, 0.0], [0.0, 0.0, 0.0])),
+             "a separation within the spread of a degenerate covariance was significant");
+      Check (not Significant (Origin, (Mean => [1.0e9, 0.0, 0.0], others => <>)),
+             "an unknown covariance made a separation significant");
+   end Point_Significance;
 
    procedure Buffer_Growth is
       B : Driver.Bytes.Buffer;
@@ -345,6 +404,9 @@ package body Driver.Core_Tests is
       Driver.Tests.Register ("core.stats", "robust statistics moved by a single outlier", Robust_Statistics'Access);
       Driver.Tests.Register ("core.significance", "the one significance rule misjudges a difference",
                              Significance'Access);
+      Driver.Tests.Register ("core.point_significance",
+                             "a separation of points alarms more often than the scalar rule, or a real one is missed",
+                             Point_Significance'Access);
       Driver.Tests.Register ("core.buffer", "a byte buffer loses data when it grows or copies",
                              Buffer_Growth'Access);
       Driver.Tests.Register ("core.image", "pixels are addressed by the wrong column or row", Image_Access'Access);

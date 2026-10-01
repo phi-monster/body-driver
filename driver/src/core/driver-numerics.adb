@@ -65,15 +65,18 @@ package body Driver.Numerics is
       end;
    end Log;
 
+   procedure Symmetric_Eigensystem (M : Mat3; Values : out Vec3; Vectors : out Mat3) is
+   begin
+      Eigensystem ((M + Transpose (M)) / 2.0, Values, Vectors);
+   end Symmetric_Eigensystem;
+
    function Orthonormalize (R : Mat3) return Mat3 is
       --  Polar decomposition through the symmetric square root of R^T R.
-      M        : constant Mat3 := Transpose (R) * R;
-      Values   : Real_Vector (1 .. 3);
-      Vectors  : Real_Matrix (1 .. 3, 1 .. 3);
+      Values   : Vec3;
+      Vectors  : Mat3;
       Inv_Sqrt : Mat3 := [others => [others => 0.0]];
    begin
-      --  Eigensystem requires exact symmetry; rounding can break it slightly.
-      Eigensystem ((M + Transpose (M)) / 2.0, Values, Vectors);
+      Symmetric_Eigensystem (Transpose (R) * R, Values, Vectors);
       for I in 1 .. 3 loop
          Inv_Sqrt (I, I) := 1.0 / Sqrt (Values (I));
       end loop;

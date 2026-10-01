@@ -7,6 +7,8 @@ with Driver.Brain.Tests;
 with Driver.Core_Tests;
 with Driver.Distributions.Tests;
 with Driver.Geometry.Tests;
+with Driver.Instrument.Tests;
+with Driver.Pixels.Tests;
 with Driver.Robot.Hand.Tests;
 with Driver.Robot.Tests;
 with Driver.Tests;
@@ -18,6 +20,8 @@ begin
    Driver.Core_Tests.Register;
    Driver.Distributions.Tests.Register;
    Driver.Geometry.Tests.Register;
+   Driver.Pixels.Tests.Register;
+   Driver.Instrument.Tests.Register;
    Driver.Robot.Tests.Register;
    Driver.Robot.Hand.Tests.Register;
    Driver.World.Tests.Register;

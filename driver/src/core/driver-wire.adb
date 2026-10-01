@@ -3,6 +3,7 @@ with Ada.Strings.Unbounded;
 with Ada.Unchecked_Deallocation;
 with GNAT.SHA1;
 with Interfaces;
+with Driver.Base64;
 
 package body Driver.Wire is
 
@@ -15,8 +16,23 @@ package body Driver.Wire is
    Accept_Suffix : constant String := "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
    --  RFC 6455 4.2.2: appended to the client's key before hashing.
 
+   Line_End : constant String := ASCII.CR & ASCII.LF;
+   Blank    : constant String := Line_End & Line_End;
+
    type Byte_Array_Access is access Byte_Array;
    procedure Free is new Ada.Unchecked_Deallocation (Byte_Array, Byte_Array_Access);
+
+   protected body Send_Lock is
+      entry Seize when not Busy is
+      begin
+         Busy := True;
+      end Seize;
+
+      procedure Release is
+      begin
+         Busy := False;
+      end Release;
+   end Send_Lock;
 
    procedure Read_Exactly (C : Connection; Item : out Byte_Array; Ok : out Boolean) is
       Got  : Offset := Item'First - 1;
@@ -24,9 +40,9 @@ package body Driver.Wire is
    begin
       Ok := False;
       while Got < Item'Last loop
-         Receive_Socket (C.Client, Item (Got + 1 .. Item'Last), Last);
+         Receive_Socket (C.Peer, Item (Got + 1 .. Item'Last), Last);
          if Last <= Got then
-            return;   --  the client closed the connection
+            return;   --  the other end closed the connection
          end if;
          Got := Last;
       end loop;
@@ -42,7 +58,7 @@ package body Driver.Wire is
    begin
       Ok := False;
       while Sent < Item'Last loop
-         Send_Socket (C.Client, Item (Sent + 1 .. Item'Last), Last);
+         Send_Socket (C.Peer, Item (Sent + 1 .. Item'Last), Last);
          if Last <= Sent then
             return;
          end if;
@@ -54,29 +70,6 @@ package body Driver.Wire is
          Ok := False;
    end Send_All;
 
-   function Base64 (Data : Byte_Array) return String is
-      Alphabet : constant String := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-      R : Ada.Strings.Unbounded.Unbounded_String;
-      I : Offset := Data'First;
-   begin
-      while I <= Data'Last loop
-         declare
-            B0 : constant Natural := Natural (Data (I));
-            B1 : constant Natural := (if I + 1 <= Data'Last then Natural (Data (I + 1)) else 0);
-            B2 : constant Natural := (if I + 2 <= Data'Last then Natural (Data (I + 2)) else 0);
-            Group : constant Natural := B0 * 2 ** 16 + B1 * 2 ** 8 + B2;
-         begin
-            Ada.Strings.Unbounded.Append (R, Alphabet (Group / 2 ** 18 + 1));
-            Ada.Strings.Unbounded.Append (R, Alphabet ((Group / 2 ** 12) mod 2 ** 6 + 1));
-            Ada.Strings.Unbounded.Append
-              (R, (if I + 1 <= Data'Last then Alphabet ((Group / 2 ** 6) mod 2 ** 6 + 1) else '='));
-            Ada.Strings.Unbounded.Append (R, (if I + 2 <= Data'Last then Alphabet (Group mod 2 ** 6 + 1) else '='));
-         end;
-         I := I + 3;
-      end loop;
-      return Ada.Strings.Unbounded.To_String (R);
-   end Base64;
-
    function Digest_Bytes (Hex : String) return Byte_Array is
       R : Byte_Array (1 .. Offset (Hex'Length / 2));
    begin
@@ -86,54 +79,76 @@ package body Driver.Wire is
       return R;
    end Digest_Bytes;
 
-   procedure Handshake (C : Connection; Ok : out Boolean) is
-      Head  : Ada.Strings.Unbounded.Unbounded_String;
-      One   : Byte_Array (1 .. 1);
-      Blank : constant String := ASCII.CR & ASCII.LF & ASCII.CR & ASCII.LF;
-      Tag   : constant String := "sec-websocket-key:";
+   function Accept_Key (Key : String) return String is
+     (Driver.Base64.Encode (Digest_Bytes (GNAT.SHA1.Digest (Key & Accept_Suffix))));
+
+   procedure Read_Head (C : Connection; Head : out Ada.Strings.Unbounded.Unbounded_String; Ok : out Boolean) is
+      use Ada.Strings.Unbounded;
+      One : Byte_Array (1 .. 1);
    begin
+      Head := Null_Unbounded_String;
       loop
          Read_Exactly (C, One, Ok);
          if not Ok then
             return;
          end if;
-         Ada.Strings.Unbounded.Append (Head, Character'Val (One (1)));
-         exit when Ada.Strings.Unbounded.Length (Head) >= Blank'Length
-           and then Ada.Strings.Unbounded.Slice
-                      (Head, Ada.Strings.Unbounded.Length (Head) - Blank'Length + 1,
-                       Ada.Strings.Unbounded.Length (Head)) = Blank;
+         Append (Head, Character'Val (One (1)));
+         exit when Length (Head) >= Blank'Length
+           and then Slice (Head, Length (Head) - Blank'Length + 1, Length (Head)) = Blank;
+      end loop;
+   end Read_Head;
+
+   function Header_Value (Head : String; Name : String) return String is
+      --  The value of a header (Name in lower case, with its colon), or "".
+      Lower : String := Head;
+   begin
+      for Ch of Lower loop
+         if Ch in 'A' .. 'Z' then
+            Ch := Character'Val (Character'Pos (Ch) + 32);
+         end if;
       end loop;
       declare
-         H     : constant String := Ada.Strings.Unbounded.To_String (Head);
-         Lower : String := H;
+         P : constant Natural := Ada.Strings.Fixed.Index (Lower, Name);
+         E : constant Natural := (if P = 0 then 0 else Ada.Strings.Fixed.Index (Head, "" & ASCII.CR, P));
       begin
-         for Ch of Lower loop
-            if Ch in 'A' .. 'Z' then
-               Ch := Character'Val (Character'Pos (Ch) + 32);
-            end if;
-         end loop;
-         declare
-            P : constant Natural := Ada.Strings.Fixed.Index (Lower, Tag);
-            E : constant Natural := (if P = 0 then 0 else Ada.Strings.Fixed.Index (H, "" & ASCII.CR, P));
-         begin
-            Ok := P > 0 and then E > 0;
-            if not Ok then
-               return;
-            end if;
-            declare
-               Key      : constant String := Ada.Strings.Fixed.Trim (H (P + Tag'Length .. E - 1), Ada.Strings.Both);
-               Answer   : constant String := Base64 (Digest_Bytes (GNAT.SHA1.Digest (Key & Accept_Suffix)));
-               Response : constant String :=
-                 "HTTP/1.1 101 Switching Protocols" & ASCII.CR & ASCII.LF
-                 & "Upgrade: websocket" & ASCII.CR & ASCII.LF
-                 & "Connection: Upgrade" & ASCII.CR & ASCII.LF
-                 & "Sec-WebSocket-Accept: " & Answer & Blank;
-            begin
-               Send_All (C, To_Bytes (Response), Ok);
-            end;
-         end;
+         if P = 0 or else E = 0 then
+            return "";
+         end if;
+         return Ada.Strings.Fixed.Trim (Head (P + Name'Length .. E - 1), Ada.Strings.Both);
+      end;
+   end Header_Value;
+
+   procedure Handshake (C : Connection; Ok : out Boolean) is
+      Head : Ada.Strings.Unbounded.Unbounded_String;
+   begin
+      Read_Head (C, Head, Ok);
+      if not Ok then
+         return;
+      end if;
+      declare
+         Key : constant String := Header_Value (Ada.Strings.Unbounded.To_String (Head), "sec-websocket-key:");
+      begin
+         Ok := Key /= "";
+         if Ok then
+            Send_All (C, To_Bytes ("HTTP/1.1 101 Switching Protocols" & Line_End
+                                   & "Upgrade: websocket" & Line_End
+                                   & "Connection: Upgrade" & Line_End
+                                   & "Sec-WebSocket-Accept: " & Accept_Key (Key) & Blank), Ok);
+         end if;
       end;
    end Handshake;
+
+   procedure Drop_Peer (C : in out Connection) is
+   begin
+      C.Open := False;
+      if C.Peer /= No_Socket then
+         Close_Socket (C.Peer);
+         C.Peer := No_Socket;
+      end if;
+   exception
+      when Socket_Error =>
+         C.Peer := No_Socket;
+   end Drop_Peer;
 
    procedure Listen (C : in out Connection; Port : Natural; Ok : out Boolean) is
    begin
@@ -150,52 +165,142 @@ package body Driver.Wire is
    procedure Accept_Client (C : in out Connection; Ok : out Boolean) is
       Address : Sock_Addr_Type;
    begin
-      if C.Open then
-         Close_Socket (C.Client);
-         C.Open := False;
-      end if;
-      Accept_Socket (C.Listener, C.Client, Address);
-      C.Open := True;
+      --  The previous client's socket is closed here rather than when it went
+      --  away, so no other task can still be using it.
+      Drop_Peer (C);
+      C.Client := False;
+      Accept_Socket (C.Listener, C.Peer, Address);
       Handshake (C, Ok);
-      if not Ok then
-         Close_Socket (C.Client);
-         C.Open := False;
+      if Ok then
+         C.Open := True;
+      else
+         Drop_Peer (C);
       end if;
    exception
       when Socket_Error =>
          Ok := False;
    end Accept_Client;
 
-   procedure Send_Frame (C : Connection; Opcode : Byte; Data : Byte_Array; Ok : out Boolean) is
+   procedure Connect (C : in out Connection; Host : String; Port : Natural; Ok : out Boolean) is
+      Nonce : Byte_Array (1 .. 16);   --  RFC 6455 4.1: a random 16-byte key
+      Head  : Ada.Strings.Unbounded.Unbounded_String;
+   begin
+      Drop_Peer (C);
+      C.Client := True;
+      Mask_Keys.Reset (C.Keys);
+      for B of Nonce loop
+         B := Mask_Keys.Random (C.Keys);
+      end loop;
+      Create_Socket (C.Peer);
+      Connect_Socket (C.Peer, (Family => Family_Inet, Addr => Addresses (Get_Host_By_Name (Host), 1),
+                               Port => Port_Type (Port)));
+      declare
+         Key  : constant String := Driver.Base64.Encode (Nonce);
+         Port_Text : constant String := Ada.Strings.Fixed.Trim (Natural'Image (Port), Ada.Strings.Both);
+      begin
+         Send_All (C, To_Bytes ("GET / HTTP/1.1" & Line_End
+                                & "Host: " & Host & ":" & Port_Text & Line_End
+                                & "Upgrade: websocket" & Line_End
+                                & "Connection: Upgrade" & Line_End
+                                & "Sec-WebSocket-Key: " & Key & Line_End
+                                & "Sec-WebSocket-Version: 13" & Blank), Ok);
+         if Ok then
+            Read_Head (C, Head, Ok);
+         end if;
+         if Ok then
+            declare
+               H : constant String := Ada.Strings.Unbounded.To_String (Head);
+               Status : constant String := "HTTP/1.1 101";
+            begin
+               Ok := H'Length >= Status'Length
+                 and then H (H'First .. H'First + Status'Length - 1) = Status
+                 and then Header_Value (H, "sec-websocket-accept:") = Accept_Key (Key);
+            end;
+         end if;
+      end;
+      if Ok then
+         C.Open := True;
+      else
+         Drop_Peer (C);
+      end if;
+   exception
+      when Socket_Error | Host_Error =>
+         Drop_Peer (C);
+         Ok := False;
+   end Connect;
+
+   procedure Send_Frame (C : in out Connection; Opcode : Byte; Data : Byte_Array; Ok : out Boolean) is
       Header : Buffer;
       L      : constant Unsigned_64 := Unsigned_64 (Data'Length);
+      Mask   : constant Byte := (if C.Client then 16#80# else 0);
    begin
       Header.Append (16#80# or Opcode);   --  FIN and the opcode
       if L < 126 then
-         Header.Append (Byte (L));
+         Header.Append (Mask or Byte (L));
       elsif L < 2 ** 16 then
-         Header.Append (Byte'(126));
+         Header.Append (Mask or 126);
          Header.Append (Byte (Shift_Right (L, 8) and 16#FF#));
          Header.Append (Byte (L and 16#FF#));
       else
-         Header.Append (Byte'(127));
+         Header.Append (Mask or 127);
          for K in reverse 0 .. 7 loop
             Header.Append (Byte (Shift_Right (L, 8 * K) and 16#FF#));
          end loop;
       end if;
-      Send_All (C, Header.To_Array, Ok);
-      if Ok then
-         Send_All (C, Data, Ok);
-      end if;
+      C.Sending.Seize;
+      begin
+         if C.Client then
+            declare
+               Key    : Byte_Array (1 .. 4);
+               Masked : Byte_Array_Access := new Byte_Array (Data'Range);
+            begin
+               for B of Key loop
+                  B := Mask_Keys.Random (C.Keys);
+               end loop;
+               Header.Append (Key);
+               for I in Data'Range loop
+                  Masked (I) := Data (I) xor Key ((I - Data'First) mod 4 + 1);
+               end loop;
+               Send_All (C, Header.To_Array, Ok);
+               if Ok then
+                  Send_All (C, Masked.all, Ok);
+               end if;
+               Free (Masked);
+            end;
+         else
+            Send_All (C, Header.To_Array, Ok);
+            if Ok then
+               Send_All (C, Data, Ok);
+            end if;
+         end if;
+      exception
+         when others =>
+            C.Sending.Release;
+            raise;
+      end;
+      C.Sending.Release;
    end Send_Frame;
 
-   procedure Send (C : in out Connection; Data : Byte_Array; Ok : out Boolean) is
+   procedure Send (C : in out Connection; Data : Byte_Array; Ok : out Boolean; Kind : Message_Kind := Binary) is
    begin
       Ok := C.Open;
       if Ok then
-         Send_Frame (C, 2, Data, Ok);
+         Send_Frame (C, (if Kind = Text then 1 else 2), Data, Ok);
       end if;
    end Send;
+
+   procedure Disconnect (C : in out Connection) is
+   begin
+      --  Shutting the socket down wakes a Receive blocked on it in another
+      --  task; the socket itself is closed when the connection is reused.
+      C.Open := False;
+      if C.Peer /= No_Socket then
+         Shutdown_Socket (C.Peer);
+      end if;
+   exception
+      when Socket_Error =>
+         null;   --  already shut down by the other end
+   end Disconnect;
 
    procedure Receive (C : in out Connection; Kind : out Message_Kind; Data : in out Buffer) is
       Two     : Byte_Array (1 .. 2);
@@ -280,8 +385,7 @@ package body Driver.Wire is
             end;
          end;
       end loop;
-      Close_Socket (C.Client);
-      C.Open := False;
+      Disconnect (C);
       Kind := Closed;
    end Receive;
 
