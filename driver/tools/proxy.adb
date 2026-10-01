@@ -11,6 +11,7 @@
 --  most the message in flight.
 
 with Ada.Command_Line;
+with Ada.Exceptions;
 with Ada.Text_IO;
 with Driver.Bytes;
 with Driver.Recording;
@@ -26,6 +27,8 @@ procedure Proxy is
 
    Ends : array (Side) of Driver.Wire.Connection;
 
+   function Name (S : Side) return String is (if S = Robot_Side then "robot" else "driver");
+
    function Record_Of (From : Side; Kind : Driver.Wire.Message_Kind) return Record_Kind is
      (case From is
          when Robot_Side  => (if Kind = Driver.Wire.Text then Robot_Text else Robot_Message),
@@ -39,6 +42,7 @@ procedure Proxy is
       Kind    : Driver.Wire.Message_Kind;
       Message : Driver.Bytes.Buffer;
       Ok      : Boolean := True;
+      Count   : Natural := 0;
 
       procedure Forward (Data : Driver.Bytes.Byte_Array) is
       begin
@@ -51,8 +55,18 @@ procedure Proxy is
          exit when Kind = Driver.Wire.Closed;
          Message.Query (Forward'Access);
          exit when not Ok;
+         Count := Count + 1;
       end loop;
+      Ada.Text_IO.Put_Line (Name (From) & " to " & Name (To) & ":" & Natural'Image (Count) & " messages, then "
+                            & (if Ok then "the " & Name (From) & " closed" else "the " & Name (To) & " stopped taking them"));
       Driver.Wire.Disconnect (Ends (To));
+   exception
+      when E : others =>
+         --  One direction must not die silently and leave the other waiting.
+         Ada.Text_IO.Put_Line (Name (From) & " to " & Name (To) & " failed after" & Natural'Image (Count)
+                               & " messages: " & Ada.Exceptions.Exception_Information (E));
+         Driver.Wire.Disconnect (Ends (To));
+         Driver.Wire.Disconnect (Ends (From));
    end Pump;
 
    Ok : Boolean;
@@ -73,6 +87,7 @@ begin
    loop
       Driver.Wire.Accept_Client (Ends (Robot_Side), Ok);
       if Ok then
+         Ada.Text_IO.Put_Line ("robot connected");
          Write_Shared (Connection, Driver.Bytes.To_Bytes (""));
          Driver.Wire.Connect (Ends (Driver_Side), Argument (2), Natural'Value (Argument (3)), Ok);
          if Ok then

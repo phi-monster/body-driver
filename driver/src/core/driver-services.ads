@@ -48,6 +48,30 @@ package Driver.Services is
    procedure Shut_Down;
    --  Lets the workers behind Submit finish; the main program calls it before exiting.
 
+   --  Replay. A replay runs no deciders, only estimators: their submitted
+   --  calls are answered from the recording, or by the live service when the
+   --  recording holds no replies of that service, and a reply becomes Ready
+   --  on the first beat after the one it was submitted at whichever source
+   --  answered it, so a replay never depends on how fast it runs.
+
+   type Service_Set is array (Service) of Boolean;
+
+   procedure Start_Replay (Recorded : Service_Set);
+   --  From now on a submitted call of a Recorded service waits for
+   --  Replay_Reply; one of any other service is a blocking call to its
+   --  configured address, made when it is submitted.
+
+   procedure Replay_Reply (S : Service; Path, Request : String; R : Reply);
+   --  A reply the recording holds. It answers the oldest submitted call of S
+   --  with this path and request that has no reply yet, or else the next one
+   --  submitted.
+
+   procedure Replay_Beat (Beat : Driver.Clock.Beat);
+   --  The beat the replay is about to feed.
+
+   procedure End_Replay;
+   --  Back to live calls; replayed calls still waiting are dropped.
+
 private
 
    type Ticket is new Natural;

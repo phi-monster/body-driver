@@ -81,6 +81,7 @@ driver-base64.ads	function Encoded_Length (Bytes : Natural) return Natural is (4
 driver-base64.ads	function Encoded_Length (Bytes : Natural) return Natural is (4 * ((Bytes + 2) / 3));	4	format	three bytes make four characters
 driver-bytes.adb	Capacity := 1;	1	numerics	smallest buffer capacity before doubling
 driver-bytes.adb	Capacity := 2 * Capacity;	2	numerics	geometric growth keeps appends amortized O(1)
+driver-clock.adb	function Nanoseconds_Of (S : Duration) return Long_Long_Integer is (Long_Long_Integer (Real (S) * 1.0e9));	1.0e9	format	nanoseconds per second (the recording format counts nanoseconds)
 driver-conventions.ads	Unchanged_Fraction : constant := 0.01;	0.01	numerics	convergence of iterative estimates (documented in Conventions)
 driver-conventions.ads	Z : constant := 3.0;	3.0	statistics	the significance level of the one test (documented in Conventions)
 driver-distributions.adb	(Sqrt (Chi_Square_Quantile (Two_Sided_Tail, 1)));	1	math	a squared standard Gaussian is a chi square of one degree of freedom
@@ -503,7 +504,6 @@ driver-recording.adb	Head (Offset (2 + I)) := Byte (Shift_Right (Ns, 8 * I) and 
 driver-recording.adb	Head : Byte_Array (1 .. 13);	13	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
 driver-recording.adb	Head : Byte_Array (1 .. 13);	13	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
 driver-recording.adb	Nanoseconds := Long_Long_Integer (Little_Endian (Head (2 .. 9)));	9	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
-driver-recording.adb	Ns : constant Unsigned_64 := Unsigned_64 (Driver.Clock.Seconds * 1_000_000_000);	1_000_000_000	format	nanoseconds per second
 driver-recording.adb	Size : constant Offset := Offset (Little_Endian (Head (10 .. 13)));	10	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
 driver-recording.adb	Size : constant Offset := Offset (Little_Endian (Head (10 .. 13)));	13	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
 driver-recording.adb	V := Shift_Left (V, 8) or Unsigned_64 (Data (I));	8	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
@@ -554,25 +554,19 @@ driver-stats.ads	with Pre => Count (A) > 1;	1	statistics	a variance or a correla
 driver-stats.ads	with Pre => X'Length = Y'Length and then X'Length > 1;	1	statistics	a variance or a correlation needs two samples
 driver-stats.ads	with Pre => X'Length = Y'Length and then X'Length > 2;	2	statistics	a line fit with a residual spread needs three points
 driver-uncertain.adb	Dof := Natural'Max (1, Natural (Real'Floor ((Va + Vb) * (Va + Vb) / Spread)));	1	statistics	Welch's degrees of freedom are at least one
+driver-uncertain.adb	elsif Tests = 1 then Driver.Conventions.Z	1	statistics	a family of one test is a single test: the plain threshold
 driver-uncertain.adb	for I in 1 .. 3 loop	3	structure	three dimensions
+driver-uncertain.adb	function Scalar_Gate (Degrees_Of_Freedom : Natural := 0; Tests : Positive := 1) return Gate is	1	statistics	a family of one test is a single test: the plain threshold
+driver-uncertain.adb	function Vector_Gate (Dimensions : Positive; Degrees_Of_Freedom : Natural := 0; Tests : Positive := 1)	1	statistics	a family of one test is a single test: the plain threshold
+driver-uncertain.ads	function Scalar_Gate (Degrees_Of_Freedom : Natural := 0; Tests : Positive := 1) return Gate;	1	statistics	a family of one test is a single test: the plain threshold
+driver-uncertain.ads	function Vector_Gate (Dimensions : Positive; Degrees_Of_Freedom : Natural := 0; Tests : Positive := 1)	1	statistics	a family of one test is a single test: the plain threshold
 driver-wire.adb	& "" & Blank), Ok);	"13	format	WebSocket framing and handshake (RFC 6455)
-driver-wire.adb	(R, (if I + 1 <= Data'Last then Alphabet ((Group / 2 ** 6) mod 2 ** 6 + 1) else ''));	2	format	base64 groups of three bytes into four characters (RFC 4648)
-driver-wire.adb	(R, (if I + 1 <= Data'Last then Alphabet ((Group / 2 ** 6) mod 2 ** 6 + 1) else ''));	2	format	base64 groups of three bytes into four characters (RFC 4648)
 driver-wire.adb	Accept_Suffix : constant String := "";	"258	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Accept_Suffix : constant String := "";	"47	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Accept_Suffix : constant String := "";	"95	format	WebSocket framing and handshake (RFC 6455)
-driver-wire.adb	Ada.Strings.Unbounded.Append (R, (if I + 2 <= Data'Last then Alphabet (Group mod 2 ** 6 + 1) else ''));	2	format	base64 groups of three bytes into four characters (RFC 4648)
-driver-wire.adb	Ada.Strings.Unbounded.Append (R, (if I + 2 <= Data'Last then Alphabet (Group mod 2 ** 6 + 1) else ''));	2	format	base64 groups of three bytes into four characters (RFC 4648)
-driver-wire.adb	Ada.Strings.Unbounded.Append (R, Alphabet ((Group / 2 ** 12) mod 2 ** 6 + 1));	2	format	base64 groups of three bytes into four characters (RFC 4648)
-driver-wire.adb	Ada.Strings.Unbounded.Append (R, Alphabet ((Group / 2 ** 12) mod 2 ** 6 + 1));	2	format	base64 groups of three bytes into four characters (RFC 4648)
-driver-wire.adb	Ada.Strings.Unbounded.Append (R, Alphabet (Group / 2 ** 18 + 1));	2	format	base64 groups of three bytes into four characters (RFC 4648)
-driver-wire.adb	B2 : constant Natural := (if I + 2 <= Data'Last then Natural (Data (I + 2)) else 0);	2	format	base64 groups of three bytes into four characters (RFC 4648)
-driver-wire.adb	B2 : constant Natural := (if I + 2 <= Data'Last then Natural (Data (I + 2)) else 0);	2	format	base64 groups of three bytes into four characters (RFC 4648)
 driver-wire.adb	Ch := Character'Val (Character'Pos (Ch) + 32);	32	format	ASCII upper to lower case
 driver-wire.adb	Connect_Socket (C.Peer, (Family => Family_Inet, Addr => Addresses (Get_Host_By_Name (Host), 1),	1	structure	the first address the host name resolves to
 driver-wire.adb	Fin : constant Boolean := (Two (1) and 16#80#) /= 0;	16#80#	format	WebSocket framing and handshake (RFC 6455)
-driver-wire.adb	Group : constant Natural := B0 * 2 ** 16 + B1 * 2 ** 8 + B2;	2	format	base64 groups of three bytes into four characters (RFC 4648)
-driver-wire.adb	Group : constant Natural := B0 * 2 ** 16 + B1 * 2 ** 8 + B2;	2	format	base64 groups of three bytes into four characters (RFC 4648)
 driver-wire.adb	Header.Append (16#80# or Opcode);	16#80#	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Header.Append (Byte (L and 16#FF#));	16#FF#	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Header.Append (Byte (Shift_Right (L, 8 * K) and 16#FF#));	16#FF#	format	WebSocket framing and handshake (RFC 6455)
@@ -581,7 +575,6 @@ driver-wire.adb	Header.Append (Byte (Shift_Right (L, 8) and 16#FF#));	16#FF#	for
 driver-wire.adb	Header.Append (Byte (Shift_Right (L, 8) and 16#FF#));	8	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Header.Append (Mask or 126);	126	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Header.Append (Mask or 127);	127	format	WebSocket framing and handshake (RFC 6455)
-driver-wire.adb	I := I + 3;	3	format	base64 groups of three bytes into four characters (RFC 4648)
 driver-wire.adb	Key : Byte_Array (1 .. 4);	4	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Kind := (if Message = 1 then Text else Binary);	1	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Length : Unsigned_64 := Unsigned_64 (Two (2) and 16#7F#);	16#7F#	format	WebSocket framing and handshake (RFC 6455)

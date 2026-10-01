@@ -106,7 +106,7 @@ package body Driver.Recording is
 
    procedure Write (W : in out Writer; Kind : Record_Kind; Payload : Byte_Array) is
       Head : Byte_Array (1 .. 13);
-      Ns   : constant Unsigned_64 := Unsigned_64 (Driver.Clock.Seconds * 1_000_000_000);
+      Ns   : constant Unsigned_64 := Unsigned_64 (Driver.Clock.Nanoseconds);
       Size : constant Unsigned_64 := Unsigned_64 (Payload'Length);
    begin
       Head (1) := Character'Pos (Codes (Kind));

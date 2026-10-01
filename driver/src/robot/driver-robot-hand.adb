@@ -29,4 +29,13 @@ package body Driver.Robot.Hand is
    function Grip_Centre (H : Hands; M : Model; Id : Hand_Id; O : Observation) return Point_Estimate is
      (raise Unbuilt with "Grip_Centre");
 
+   function Tip_In_Tool (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening) return Point_Estimate is
+     (raise Unbuilt with "Tip_In_Tool");
+
+   function Press_Direction (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening)
+     return Direction_Estimate is (raise Unbuilt with "Press_Direction");
+
+   function Closer_Reading (H : Hands; Id : Hand_Id; At_Opening : Opening) return Real_Array is
+     (raise Unbuilt with "Closer_Reading");
+
 end Driver.Robot.Hand;

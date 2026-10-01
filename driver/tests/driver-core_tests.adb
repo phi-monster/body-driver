@@ -3,6 +3,7 @@ with Ada.Numerics.Float_Random;
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Strings.Unbounded;
 with Driver.Bytes;
+with Driver.Clock;
 with Driver.Commands;
 with Driver.Images;
 with Driver.Json;
@@ -180,6 +181,14 @@ package body Driver.Core_Tests is
       Check (not Significant (Origin, (Mean => [1.0e9, 0.0, 0.0], others => <>)),
              "an unknown covariance made a separation significant");
    end Point_Significance;
+
+   procedure Clock_Range is
+   begin
+      Check (Driver.Clock.Nanoseconds_Of (1.0) = 1_000_000_000, "one second");
+      Check (Driver.Clock.Nanoseconds_Of (Duration'Small) = 1, "one nanosecond");
+      Check (Driver.Clock.Nanoseconds_Of (3_600.0) = 3_600_000_000_000, "an hour");
+      Check (Driver.Clock.Nanoseconds_Of (8_640_000.0) = 8_640_000_000_000_000, "a hundred days");
+   end Clock_Range;
 
    procedure Buffer_Growth is
       B : Driver.Bytes.Buffer;
@@ -392,6 +401,37 @@ package body Driver.Core_Tests is
              "a call without an address pretended to succeed or gave no reason");
    end Unconfigured_Service;
 
+   procedure Replayed_Services is
+      use Driver.Services;
+      R  : constant Reply := (Ok => True, Text => Ada.Strings.Unbounded.To_Unbounded_String ("answer"), others => <>);
+      T1, T2, T3 : Ticket;
+   begin
+      Start_Replay ([Instrument => True, Brain => False]);
+      --  A recorded reply answers the call with the same request, and only
+      --  from the beat after the call.
+      Replay_Beat (3);
+      T1 := Submit (Instrument, "/match", "first", 3);
+      T2 := Submit (Instrument, "/match", "second", 3);
+      Replay_Reply (Instrument, "/match", "second", R);
+      Check (Ready (T2) = False, "a replayed reply was ready on the beat of its call");
+      Replay_Beat (4);
+      Check (Ready (T2), "a replayed reply was not ready on the next beat");
+      Check (not Ready (T1), "a reply answered a call with another request");
+      Check (Ada.Strings.Unbounded.To_String (Collect (T2).Text) = "answer", "the recorded text was not delivered");
+      --  A reply recorded before an identical call is submitted waits for it.
+      Replay_Reply (Instrument, "/segment", "box", R);
+      T3 := Submit (Instrument, "/segment", "box", 4);
+      Check (not Ready (T3), "a waiting reply was ready on the beat of its call");
+      Replay_Beat (5);
+      Check (Ready (T3), "a reply recorded before its call was lost");
+      --  A service without recorded replies is called live; without an
+      --  address it answers at once that it cannot.
+      T3 := Submit (Brain, "/chat", "hello", 5);
+      Replay_Beat (6);
+      Check (Ready (T3) and then not Collect (T3).Ok, "an unconfigured live service pretended to answer");
+      End_Replay;
+   end Replayed_Services;
+
    procedure Register is
    begin
       Driver.Tests.Register ("core.rotation", "Exp and Log disagree near 0 or pi", Rotation_Round_Trip'Access);
@@ -407,6 +447,8 @@ package body Driver.Core_Tests is
       Driver.Tests.Register ("core.point_significance",
                              "a separation of points alarms more often than the scalar rule, or a real one is missed",
                              Point_Significance'Access);
+      Driver.Tests.Register ("core.clock", "record times overflow after a few seconds or lose nanoseconds",
+                             Clock_Range'Access);
       Driver.Tests.Register ("core.buffer", "a byte buffer loses data when it grows or copies",
                              Buffer_Growth'Access);
       Driver.Tests.Register ("core.image", "pixels are addressed by the wrong column or row", Image_Access'Access);
@@ -421,6 +463,9 @@ package body Driver.Core_Tests is
                              Json_Round_Trip'Access);
       Driver.Tests.Register ("core.services", "a call to an unconfigured service pretends to succeed",
                              Unconfigured_Service'Access);
+      Driver.Tests.Register ("core.replayed_services",
+                             "a replayed service reply arrives on another beat or answers another call",
+                             Replayed_Services'Access);
    end Register;
 
 end Driver.Core_Tests;
