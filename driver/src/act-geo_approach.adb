@@ -44,6 +44,10 @@ procedure Geo_Approach (L : in out Plug.Link; C : in out Context; F : in out Plu
    Press_Dir : Geom.V3 := [0.0, 0.0, 0.0];
    Held_Back : Boolean := False;
    Wall : Geom.V3 := [0.0, 0.0, 0.0];   --  顶住我的那个方向(世界系单位向量,指向面里)
+   --  这一段路空走的底(走一步 Selfmap.Step 判挡没挡用:开头装进开机探针量的那几步,这一段里每一步空走的再加进来)。
+   --  挡住 = 这一步自己停下、没到、少走的比空走时多出 Blocked 的门(同碰指尖那一判;原来"沿命令方向实到不到一半"——走到一半就算没挡住)
+   Wk : Selfmap.Walk;
+   Rep : Selfmap.Leg_Step;
 begin
    Event := Null_Unbounded_String; Steps_Taken := 0; Beats := 0;
    Want (2) := Want (2) + Inward;   --  相机 -z 朝前 ⇒ 往手心方向 = +z
@@ -258,13 +262,13 @@ begin
                Ln : constant Long_Float := 4.0 * Geo_Base (C, Arm);     --  一个量距单位(刚被证明走得到的那一档)
                Dw : constant Geom.V3 := [Press_Dir (0) * Ln, Press_Dir (1) * Ln, Press_Dir (2) * Ln];
             begin
-               Geo_Move (L, C, F, Arm, Dw, Mok);
+               Geo_Move (L, C, F, Arm, Dw, Mok, Wk, Rep);
                Steps_Taken := Steps_Taken + 1;
                declare
                   Now : constant Plug.Arm_Pose := F.EE (Arm);
-                  Got : constant Long_Float := ((Now (0) - Cur (0)) * Dw (0) + (Now (1) - Cur (1)) * Dw (1) + (Now (2) - Cur (2)) * Dw (2)) / Ln;
+                  Got : constant Long_Float := Rep.Went;   --  沿命令方向实到多少
                begin
-                  if Got + Got < Ln then
+                  if Rep.Blocked_T then
                      Event := S ("contact: I kept going toward it as you asked and something stopped my hand (I commanded " & Len (C, Ln)
                                  & " and went " & Len (C, Got) & "); by my own estimate the thing sits at where my fingers close");
                      C.Geo_At := Now; C.Geo_At_Arm := Integer (Arm); C.Geo_At_Above := False;   --  压到它身上了:接下来合手不用再下去
@@ -315,25 +319,23 @@ begin
             exit;
          end if;
          if not Pressing then
+         --  走一步(Selfmap.Step):目标 = 指尖该到的那一点,这一步走还差的 Frac、最长 Step_Cap(量过步幅 ⇒ 不限:一条命令走不到的那一截由
+         --  "到过的范围 + 往外一步"拆开、手一动就跟着往前重发)
+         Geo_Move (L, C, F, Arm, Geom.Ap (Geom.Cam_R (G, Cur), D), Mok, Wk, Rep,
+                   Frac => (if Dist > G.Gap then 0.6 else 1.0),   --  远时走六成再看一眼(比例,无量纲);近了一步到
+                   Track => Step_Cap);
          declare
-            Frac : constant Long_Float := (if Dist > G.Gap then 0.6 else 1.0);   --  远时走六成再看一眼(比例,无量纲);近了一步到
-            Want_Ln : constant Long_Float := Dist * Frac;
-            Cut : constant Long_Float := (if Want_Ln > Step_Cap and then Want_Ln > 0.0 then Step_Cap / Want_Ln else 1.0);   --  超过脑给的那一档就按比例缩
-            Step : constant Geom.V3 := [D (0) * Frac * Cut, D (1) * Frac * Cut, D (2) * Frac * Cut];
-            Rc : constant Geom.M3 := Geom.Cam_R (G, Cur);
-            Dw : constant Geom.V3 := Geom.Ap (Rc, Step);
-            Ln : constant Long_Float := Geom.Norm (Dw);
+            Dw : constant Geom.V3 := [Rep.Cmd (0), Rep.Cmd (1), Rep.Cmd (2)];   --  这一步命令的平移(世界系)
+            Ln : constant Long_Float := Rep.Len;
          begin
-            Geo_Move (L, C, F, Arm, Dw, Mok);
             Steps_Taken := Steps_Taken + 1;
             declare
                Now : constant Plug.Arm_Pose := F.EE (Arm);
                --  实到 = 沿【命令的方向】真走了多少(不是位移的长度:H10 2026-09-22 实测,命令往下 0.041 m 只下去 0.006 m,
                --  手却横着滑了 0.025 m —— 按长度比就被当成"走成了",接着在一个撞着桌面的姿势上继续算、算飞)
-               Got : constant Long_Float :=
-                 (if Ln > 0.0 then ((Now (0) - Cur (0)) * Dw (0) + (Now (1) - Cur (1)) * Dw (1) + (Now (2) - Cur (2)) * Dw (2)) / Ln else 0.0);
+               Got : constant Long_Float := Rep.Went;
             begin
-               if Got + Got < Ln and then not Held_Back then
+               if Rep.Blocked_T and then not Held_Back then
                   --  第一次被顶住:记下顶住我的方向 = 命令的位移减去实到的位移(量出来的),之后只走沿着面的那一部分
                   declare
                      Miss : constant Geom.V3 := [Dw (0) - (Now (0) - Cur (0)), Dw (1) - (Now (1) - Cur (1)), Dw (2) - (Now (2) - Cur (2))];
@@ -362,7 +364,7 @@ begin
                         end if;
                      end if;
                   end;
-               elsif Got + Got < Ln then              --  沿命令方向实到不到要的一半(纯数学的一半)= 命令了,身体没走
+               elsif Rep.Blocked_T then              --  又被挡住(沿着面走的这一步也比空走时少走得多)= 命令了,身体没走
                   Event := S ("resist: I commanded a step of " & Len (C, Ln) & " toward it and my hand only went " & Len (C, Got)
                               & " (" & Len (C, Dist) & " from where my fingers close) - either something is holding my hand there, "
                               & "or that step was more than I can do in one command from this pose");

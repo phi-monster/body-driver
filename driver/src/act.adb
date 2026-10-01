@@ -987,21 +987,46 @@ package body Act is
    --  🔴 这里的量全是【米】。09-20 搬回来时为了不碰棘轮把"×1000"删了,标签却还写着 mm ⇒ 横挪 25.6 毫米显示成 "0.0 mm",
    --  "它在相机前 -0.8 mm"其实是负 0.8 米(算到相机背后去了)—— T10 2026-09-21 差点被这个标签骗过去。量的是米,就按米说,三位小数到毫米。
 
+   --  走一步(Selfmap.Step,I6):这只手的目标 = 此刻的读数平移 Dw,这一步走它的 Frac、最长 Track(Selfmap.Step 的上限),一条命令、等它停
+   --  (没给 Watch ⇒ 到了一步看得见的那一档以内就算到,同 Step_Arm 的 Geo_Settle);Rep = 这一步的账(实到、到没到、挡没挡:Blocked_By 拿 Wk 里这一段空走的底)
    procedure Geo_Move (L : in out Plug.Link; C : Context; F : in out Plug.Frame; Arm : Natural; Dw : Geom.V3; Ok : out Boolean;
-                       Watch : Selfmap.Watcher := null; Press : Boolean := False) is
+                       Wk : in out Selfmap.Walk; Rep : out Selfmap.Leg_Step;
+                       Watch : Selfmap.Watcher := null; Press : Boolean := False;
+                       Frac : Long_Float := 1.0; Track : Long_Float := Long_Float'Last) is
       A : Table.Vec := Table.Zero_Vec;
-      Jaw : Floats;
-      Del : Table.Vec;
       Seq0 : constant Natural := F.Seq;
+      Legs : Selfmap.Leg_Vectors.Vector;
+      Rs : Selfmap.Leg_Step_Vectors.Vector;
+      Frames : Natural;
+      Lim : Selfmap.Limits;
    begin
+      Rep := (others => <>);
+      if Arm >= Natural (F.EE.Length) then
+         Ok := False;
+         return;
+      end if;
       A (0) := Dw (0); A (1) := Dw (1); A (2) := Dw (2);
-      Step_Arm (L, C, F, Arm, A, Jaw, Del, Ok, Press => Press, Watch => Watch, Geo_Settle => Selfmap."=" (Watch, null));
+      Legs.Append (Selfmap.Leg'(Arm => Arm, Goal => Chan.Compose (F.EE (Arm), A), Jaw => <>));
+      Lim.Press := Press; Lim.Watch := Watch; Lim.Loose := Selfmap."=" (Watch, null); Lim.Frac := Frac; Lim.Track := Track;
+      Selfmap.Step (L, C.Map, Legs, Lim, F, Wk, Rs, Frames, Ok);
+      if not Rs.Is_Empty then
+         Rep := Rs (0);
+      end if;
       --  命令了多少、实到多少,每一步都说(GB5 那一版有这一行,搬回 main 时丢了;H6 2026-09-22 实测每步要 14 cm 而差距只缩 0–2 cm,
       --  没有这一行就分不清是身体没走成、还是我算错了)。拍号 = 这一下起止那两帧的帧号(同 poses.txt / fk_poses.txt / joints.txt 的第一列,
       --  离线按仿真真值给每一下压标"碰没碰到"用;09-29 V1B65 按位移反推拍号一半对不上)
-      Geo_Say ("挪 (" & Mm (Dw (0)) & "," & Mm (Dw (1)) & "," & Mm (Dw (2)) & ") ⇒ 实到 (" & Mm (Del (0)) & "," & Mm (Del (1)) & "," & Mm (Del (2)) &
-               "),差 " & Mm (Geom.Norm ([Dw (0) - Del (0), Dw (1) - Del (1), Dw (2) - Del (2)])) & (if Ok then "" else " · 身体说没走成")
+      Geo_Say ("挪 (" & Mm (Rep.Cmd (0)) & "," & Mm (Rep.Cmd (1)) & "," & Mm (Rep.Cmd (2)) & ") ⇒ 实到 (" & Mm (Rep.Got (0)) & "," & Mm (Rep.Got (1)) & "," & Mm (Rep.Got (2)) &
+               "),差 " & Mm (Geom.Norm ([Rep.Cmd (0) - Rep.Got (0), Rep.Cmd (1) - Rep.Got (1), Rep.Cmd (2) - Rep.Got (2)])) & (if Ok then "" else " · 身体说没走成")
+               & (if Rep.Blocked_T then " · 被挡住(比这一段空走时少走得多)" else "")
                & " · 拍 " & Codec.Img (Seq0) & "→" & Codec.Img (F.Seq));
+   end Geo_Move;
+
+   procedure Geo_Move (L : in out Plug.Link; C : Context; F : in out Plug.Frame; Arm : Natural; Dw : Geom.V3; Ok : out Boolean;
+                       Watch : Selfmap.Watcher := null; Press : Boolean := False) is
+      Wk : Selfmap.Walk;
+      Rep : Selfmap.Leg_Step;
+   begin
+      Geo_Move (L, C, F, Arm, Dw, Ok, Wk, Rep, Watch, Press);
    end Geo_Move;
 
    --  "上"只写在这一处:位姿系的 +z 是协议约定的重力反方向(观测里没有重力读数的身体只能这么约;有加速度计的身体应把它换成量出来的)。
