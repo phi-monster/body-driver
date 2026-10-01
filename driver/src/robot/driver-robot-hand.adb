@@ -440,11 +440,8 @@ package body Driver.Robot.Hand is
       end loop;
    end Observe;
 
-   procedure Measure (H : in out Hands; M : in out Model) is
-      pragma Unreferenced (H, M);
-   begin
-      Driver.Log.Line (Driver.Log.Robot, "hand: the sweeps and presses that measure the hands are not built yet");
-   end Measure;
+   procedure Measure (H : in out Hands; M : in out Model) is separate;
+   --  The decider (driver-robot-hand-measure.adb).
 
    function Found (H : Hands; Id : Hand_Id) return Hand_Record is (H.Data.Found (Id));
 
