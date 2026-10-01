@@ -97,6 +97,9 @@ f = Furn("bd_lr_room", "living room walls")
 for nm, c, s in (("north", (0, 3.0, 1.25), (8.0, 0.1, 2.5)), ("south", (0, -3.0, 1.25), (8.0, 0.1, 2.5)),
                  ("west", (-4.0, 0, 1.25), (0.1, 6.0, 2.5)), ("east", (4.0, 0, 1.25), (0.1, 6.0, 2.5))):
     f.box(nm, c, s, WHITE)
+# 客厅自己的地:8 × 6 m 的底板,顶面在资产原点(摆在地面高上)。RoboDojo 的 Ground 只有 7 × 7 m(env_spacing),第一版没底板,
+# 靠墙(x ±3.6 m)的东西掉出了地(糖盒落下去 3.8 m)
+f.box("floor", (0, 0, -0.05), (8.0, 6.0, 0.1), WOOD)
 f.save()
 
 f = Furn("bd_lr_sofa", "sofa")

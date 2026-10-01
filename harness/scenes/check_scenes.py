@@ -564,6 +564,60 @@ def livingroom_scenario(S, rep):
     from task.RoboDojo.bd import question as Q
     from task.RoboDojo.bd import tidy as TD
     env = S.env
+    art = env.robot_manager.robot_key[0]
+    org = _np(env.scene_manager.env_origins[0])[:3]
+    # 身体真站在地上没有:根是不是固定的、脚底(脚那一节碰撞形状的最低点)离地面多高;把地面整个往下挪 1 cm 再走 20 步,站在地上的根跟着落 1 cm
+    from pxr import UsdGeom, Usd, UsdPhysics
+    import carb
+    import omni.usd
+    stage = omni.usd.get_context().get_stage()
+    bc = UsdGeom.BBoxCache(Usd.TimeCode.Default(), ["default", "render", "proxy", "guide"])
+    soles = {}
+    for side in ("left", "right"):
+        path = None
+        for prim in stage.Traverse():
+            pp = str(prim.GetPath())
+            if pp.startswith("/World/envs/env_0/robot0") and pp.endswith("%s_ankle_roll_link" % side):
+                path = prim
+                break
+        lows = []
+        if path is not None:
+            for c in Usd.PrimRange(path):
+                if c.HasAPI(UsdPhysics.CollisionAPI):
+                    r = bc.ComputeWorldBound(c).ComputeAlignedRange()
+                    if not r.IsEmpty():
+                        lows.append(float(r.GetMin()[2]) - org[2])
+        soles[side] = round(min(lows), 4) if lows else None
+    # 往下打几条射线(PhysX 场景查询,仿真真值):脚旁边 15 cm、两脚中间、骨盆正下方 —— 打到的第一个碰撞体是谁、多高
+    from omni.physx import get_physx_scene_query_interface
+    sq = get_physx_scene_query_interface()
+    rays = {}
+    fid = [art.body_names.index(n) for n in ("left_ankle_roll_link", "right_ankle_roll_link")]
+    fp = art.data.body_pos_w[0, fid].cpu().numpy()
+    pts = {"beside_left_foot": fp[0] + [0.15, 0.0, 0.0], "between_feet": fp.mean(axis=0), "left_foot": fp[0]}
+    for name, q in pts.items():
+        hit = sq.raycast_closest(carb.Float3(float(q[0]), float(q[1]), float(org[2] + 1.5)), carb.Float3(0.0, 0.0, -1.0), 3.0)
+        rays[name] = {"hit": bool(hit["hit"]), "z": round(float(hit["position"][2]) - org[2], 4) if hit["hit"] else None,
+                      "collider": str(hit.get("collision", "")) if hit["hit"] else None}
+    rep["body_on_floor"] = {"is_fixed_base": bool(getattr(art, "is_fixed_base", False)), "sole_z": soles, "rays": rays,
+                            "feet_link_z": [round(float(v) - org[2], 4) for v in fp[:, 2]],
+                            "pelvis_z": round(float(art.data.root_pos_w[0, 2].cpu()) - org[2], 4)}
+    log("   身体站没站在地上:%s" % rep["body_on_floor"])
+    # 抬起来放手:根整个抬高 0.20 m(位姿、速度写进仿真),物理走 0.4 s。根是自由的、站在地上 ⇒ 掉回原来的高度;被什么拽着 ⇒ 不掉
+    ids = torch.arange(art.num_instances, device=art.device)
+    rs = torch.cat([art.data.root_pos_w.clone(), art.data.root_quat_w.clone()], dim=-1)
+    z_before = float(rs[0, 2].cpu()) - org[2]
+    rs[:, 2] += 0.20
+    art.write_root_pose_to_sim(rs, env_ids=ids)
+    art.write_root_velocity_to_sim(torch.zeros(art.num_instances, 6, device=art.device), env_ids=ids)
+    zs = []
+    for _ in range(10):
+        S.steps(10)
+        zs.append(round(float(art.data.root_pos_w[0, 2].cpu()) - org[2], 3))
+    rep["lift_drop"] = {"z_before": round(z_before, 4), "z_every_10_substeps": zs}
+    log("   抬高 0.20 m 放手:骨盆高 %.3f → 每 10 个子步 %s" % (z_before, zs))
+    # 脚没埋在地里 ⇒ 落回原来的高度(第一版:落回去高了 4.5 cm —— 复位时脚埋在地里,站在下面那层地上)
+    test(rep, "抬高放手落回原来的高度(%.3f → %.3f m)" % (z_before, zs[-1]), 1, abs(zs[-1] - z_before) < 0.01)
     p0, _ = robot_root(S)
     for _ in range(50):
         env.take_action(S.hold_action())
@@ -571,9 +625,30 @@ def livingroom_scenario(S, rep):
     rep["stand"] = {"pelvis_z": [round(float(p0[2]), 3), round(float(p1[2]), 3)], "moved_m": round(float(np.linalg.norm((p1 - p0)[:2])), 3)}
     test(rep, "站着不动 50 个动作:骨盆高 %.3f → %.3f m、挪了 %.3f m" % (p0[2], p1[2], rep["stand"]["moved_m"]), 1, p1[2] > p0[2] - 0.1 and rep["stand"]["moved_m"] < 0.1)
     env.bd_cmd = [0.3, 0.0, 0.0, 0.72]
-    for _ in range(50):
+    w = env._walk()
+    c0 = w.calls if w is not None else None
+    vel, feet, track, lift = [], [], [], []
+    art = env.robot_manager.robot_key[0]
+    fid = [art.body_names.index(n) for n in ("left_ankle_roll_link", "right_ankle_roll_link")]
+    org = _np(env.scene_manager.env_origins[0])[:3]
+    for k in range(50):
         env.take_action(S.hold_action())
+        d = art.data
+        fz = d.body_pos_w[0, fid, 2].cpu().numpy() - org[2]
+        lift.append(float(fz.max() - fz.min()))
+        if k % 10 == 9:
+            vel.append([round(float(v), 3) for v in d.root_lin_vel_b[0].cpu().numpy()[:2]])
+            feet.append([[round(float(v), 3) for v in (d.body_pos_w[0, i].cpu().numpy() - org)[:3]] for i in fid])
+            if w is not None:
+                e = (d.joint_pos_target[0, w.leg_ids] - d.joint_pos[0, w.leg_ids]).abs().cpu().numpy()
+                track.append(round(float(e.max()), 3))
     p2, _ = robot_root(S)
+    rep["walk_diag"] = {"policy_calls": (w.calls - c0) if w is not None else None, "decim": getattr(w, "decim", None),
+                        "last_cmd": getattr(w, "last_cmd", None), "last_out_absmax": getattr(w, "last_out", None),
+                        "v_body_every_10": vel, "feet_xyz_every_10": feet, "leg_track_err_max_every_10": track,
+                        "feet_height_diff_max": round(max(lift), 4), "dt": float(env.dt),
+                        "actuators": {k2: type(v2).__name__ for k2, v2 in getattr(art, "actuators", {}).items()}}
+    log("   走路控制器诊断:%s" % rep["walk_diag"])
     env.bd_cmd = [0.0, 0.0, 0.0, 0.72]
     for _ in range(25):
         env.take_action(S.hold_action())

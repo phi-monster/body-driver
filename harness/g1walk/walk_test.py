@@ -24,6 +24,10 @@ ap.add_argument("--mode", choices=["flat", "stairs", "squat"], default="flat")
 ap.add_argument("--minutes", type=float, default=30.0, help="仿真时间(分钟)")
 ap.add_argument("--seed", type=int, default=40)
 ap.add_argument("--out", default="/root/p8/chk/g1walk")
+ap.add_argument("--dt", type=float, default=1 / 200, help="物理一步多少秒(Isaac Lab 训它用的 1/200;RoboDojo 是 0.004)")
+ap.add_argument("--decim", type=int, default=4, help="几个物理步算一回策略(dt × decim = 0.02 s)")
+ap.add_argument("--friction_mode", default="average", help="地面摩擦和脚的怎么合(Isaac 默认 average;RoboDojo 的地是 multiply)")
+ap.add_argument("--tag", default="", help="结果目录名后缀")
 AppLauncher.add_app_launcher_args(ap)
 args = ap.parse_args()
 args.headless = True
@@ -46,7 +50,7 @@ from isaaclab_assets.robots.unitree import G1_29DOF_CFG
 from isaaclab_tasks.manager_based.locomanipulation.pick_place.configs.action_cfg import AgileBasedLowerBodyActionCfg
 from isaaclab_tasks.manager_based.locomanipulation.pick_place.configs.agile_locomotion_observation_cfg import AgileTeacherPolicyObservationsCfg
 
-OUT = f"{args.out}_{args.mode}"
+OUT = f"{args.out}_{args.mode}{args.tag}"
 os.makedirs(OUT, exist_ok=True)
 LOWER = [".*_hip_.*_joint", ".*_knee_joint", ".*_ankle_.*_joint"]
 
@@ -70,7 +74,8 @@ STEP_H = 0.10   # 一级台阶 10 cm(家里的台阶 15–18 cm;先验 10 cm,过
 class SceneCfg(InteractiveSceneCfg):
     terrain = (stairs_terrain() if args.mode == "stairs" else
                TerrainImporterCfg(prim_path="/World/ground", terrain_type="plane",
-                                  physics_material=sim_utils.RigidBodyMaterialCfg(static_friction=1.0, dynamic_friction=1.0)))
+                                  physics_material=sim_utils.RigidBodyMaterialCfg(static_friction=1.0, dynamic_friction=1.0,
+                                                                                  friction_combine_mode=args.friction_mode)))
     robot = G1_29DOF_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
     light = AssetBaseCfg(prim_path="/World/light", spawn=sim_utils.DomeLightCfg(intensity=2000.0))
 
@@ -103,8 +108,8 @@ class EnvCfg(ManagerBasedEnvCfg):
     events = EventsCfg()
 
     def __post_init__(self):
-        self.decimation = 4
-        self.sim.dt = 1 / 200   # 和 Isaac Lab 的 locomanipulation G1 一样:物理 200 Hz,策略 50 Hz
+        self.decimation = args.decim
+        self.sim.dt = args.dt   # 默认和 Isaac Lab 的 locomanipulation G1 一样:物理 200 Hz,策略 50 Hz
 
 
 env = ManagerBasedEnv(EnvCfg())
