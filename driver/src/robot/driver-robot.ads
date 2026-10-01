@@ -31,7 +31,6 @@
 --  Upper layers use only what this specification and Driver.Robot.Motion and
 --  Driver.Robot.Hand export.
 
-with Ada.Containers.Indefinite_Holders;
 with Ada.Containers.Vectors;
 with Ada.Strings.Unbounded;
 with Driver.Commands;
@@ -199,7 +198,9 @@ private
 
    package Real_Vectors is new Ada.Containers.Vectors (Natural, Real);
    package Flag_Vectors is new Ada.Containers.Vectors (Natural, Boolean);
-   package Luma_Holders is new Ada.Containers.Indefinite_Holders (Real_Array);
+   type Luma_Access is access Real_Array;
+   --  A frame's luma (Driver.Images.Luma), on the heap: two per eye, swapped
+   --  every beat, never on a stack.
    package Count_Vectors is new Ada.Containers.Vectors (Natural, Natural);
 
    --  A group's readings and the target in effect, beat after beat; beat K
@@ -230,7 +231,9 @@ private
    --  is determined).
    type Eye_Stream is record
       Grid          : Cell_Grid;
-      Previous      : Luma_Holders.Holder;   --  luma of the last frame, empty before the first
+      Previous      : Luma_Access;           --  luma of the last frame
+      Current       : Luma_Access;           --  luma of this beat's frame
+      Has_Previous  : Boolean := False;      --  Previous is the frame of the beat before, of the grid's size
       Du, Dv        : Real_Vectors.Vector;   --  Cells values per beat
       Condition     : Real_Vectors.Vector;   --  Cells values per beat
       Measured      : Flag_Vectors.Vector;   --  per beat: both frames were there

@@ -1,4 +1,5 @@
 with Ada.Containers;
+with Ada.Unchecked_Deallocation;
 with Driver.Clock;
 with Driver.Log;
 with Driver.Robot.Channels;
@@ -14,6 +15,28 @@ package body Driver.Robot is
    use type Driver.Observations.Group_Id;
    use type Driver.Observations.Camera_Id;
 
+   procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Luma_Access);
+
+   --  The displacement of every cell of the eye from its previous frame to
+   --  its current one, appended to its stream.
+   procedure Measure_Displacement (S : in out Eye_Stream)
+     with Pre => S.Has_Previous and then Cells (S.Grid) > 0
+   is
+      N : constant Positive := Cells (S.Grid);
+      Du, Dv, Condition, Cell_Noise : Real_Array (1 .. N);
+   begin
+      for C in 1 .. N loop
+         Cell_Noise (C) := S.Luma_Variance.Element (C - 1);
+      end loop;
+      Flow.Displacements (S.Grid, S.Previous.all, S.Current.all, Cell_Noise, Du, Dv, Condition);
+      for C in 1 .. N loop
+         S.Du.Append (Du (C));
+         S.Dv.Append (Dv (C));
+         S.Condition.Append (Condition (C));
+      end loop;
+      S.Measured.Append (True);
+   end Measure_Displacement;
+
    procedure Observe_Eyes (M : in out Model; O : Observation) is
    begin
       if M.Eyes.Is_Empty then
@@ -23,16 +46,26 @@ package body Driver.Robot is
       end if;
       for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
          declare
-            S : Eye_Stream renames M.Eyes (E);
+            S    : Eye_Stream renames M.Eyes (E);
             Have : constant Boolean := E <= O.Images.Last_Index and then Driver.Observations.Has_Image (O, E);
-            Now  : constant Real_Array := (if Have then Flow.Luma (O.Images (E)) else Real_Array'(1 .. 0 => 0.0));
          begin
-            if Have and then S.Grid.Width = 0 then
-               S.Grid := Flow.Grid_Of (Driver.Images.Width (O.Images (E)), Driver.Images.Height (O.Images (E)));
-               S.Du.Append (0.0, Ada.Containers.Count_Type (Cells (S.Grid) * M.Beats));
-               S.Dv.Append (0.0, Ada.Containers.Count_Type (Cells (S.Grid) * M.Beats));
-               S.Condition.Append (0.0, Ada.Containers.Count_Type (Cells (S.Grid) * M.Beats));
-               S.Measured.Append (False, Ada.Containers.Count_Type (M.Beats));
+            if Have then
+               declare
+                  Size : constant Natural := Driver.Images.Width (O.Images (E)) * Driver.Images.Height (O.Images (E));
+               begin
+                  if S.Current = null or else S.Current'Length /= Size then
+                     Free (S.Current);
+                     S.Current := new Real_Array (1 .. Size);
+                  end if;
+                  Driver.Images.Luma (O.Images (E), S.Current.all);
+               end;
+               if S.Grid.Width = 0 then
+                  S.Grid := Flow.Grid_Of (Driver.Images.Width (O.Images (E)), Driver.Images.Height (O.Images (E)));
+                  S.Du.Append (0.0, Ada.Containers.Count_Type (Cells (S.Grid) * M.Beats));
+                  S.Dv.Append (0.0, Ada.Containers.Count_Type (Cells (S.Grid) * M.Beats));
+                  S.Condition.Append (0.0, Ada.Containers.Count_Type (Cells (S.Grid) * M.Beats));
+                  S.Measured.Append (False, Ada.Containers.Count_Type (M.Beats));
+               end if;
             end if;
             declare
                N    : constant Natural := Cells (S.Grid);
@@ -40,44 +73,33 @@ package body Driver.Robot is
                  Have and then Driver.Images.Width (O.Images (E)) = S.Grid.Width
                  and then Driver.Images.Height (O.Images (E)) = S.Grid.Height;
             begin
-               if Same and then not S.Previous.Is_Empty then
+               if Same and then S.Has_Previous then
+                  Measure_Displacement (S);
+               elsif N > 0 then
+                  S.Du.Append (0.0, Ada.Containers.Count_Type (N));
+                  S.Dv.Append (0.0, Ada.Containers.Count_Type (N));
+                  S.Condition.Append (0.0, Ada.Containers.Count_Type (N));
+                  S.Measured.Append (False);
+               end if;
+               if Have then
+                  Stillness.Judge_Eye (S, O.Images (E), S.Current.all);
+                  if S.Luma_Variance.Is_Empty then
+                     Stillness.Measure_Luma_Noise (S);
+                  end if;
+               end if;
+               --  This frame is the next one's previous; a missing frame, or
+               --  one of another size, breaks the chain: the next displacement
+               --  would span two beats.
+               if Same then
                   declare
-                     Du, Dv, Condition, Luma_Variance : Real_Array (1 .. N);
+                     Spare : constant Luma_Access := S.Previous;
                   begin
-                     for C in 1 .. N loop
-                        Luma_Variance (C) := S.Luma_Variance (C - 1);
-                     end loop;
-                     Flow.Displacements (S.Grid, S.Previous.Element, Now, Luma_Variance, Du, Dv, Condition);
-                     for C in 1 .. N loop
-                        S.Du.Append (Du (C));
-                        S.Dv.Append (Dv (C));
-                        S.Condition.Append (Condition (C));
-                     end loop;
-                     S.Measured.Append (True);
-                     S.Previous.Replace_Element (Now);
+                     S.Previous := S.Current;
+                     S.Current := Spare;
                   end;
-               else
-                  if N > 0 then
-                     S.Du.Append (0.0, Ada.Containers.Count_Type (N));
-                     S.Dv.Append (0.0, Ada.Containers.Count_Type (N));
-                     S.Condition.Append (0.0, Ada.Containers.Count_Type (N));
-                     S.Measured.Append (False);
-                  end if;
-                  if Same then
-                     S.Previous.Replace_Element (Now);
-                  elsif not Have then
-                     --  A missing frame breaks the chain: the next displacement
-                     --  would span two beats.
-                     S.Previous.Clear;
-                  end if;
                end if;
+               S.Has_Previous := Same;
             end;
-            if Have then
-               Stillness.Judge_Eye (S, O.Images (E), Now);
-               if S.Luma_Variance.Is_Empty then
-                  Stillness.Measure_Luma_Noise (S);
-               end if;
-            end if;
          end;
       end loop;
    end Observe_Eyes;

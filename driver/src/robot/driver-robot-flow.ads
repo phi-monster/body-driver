@@ -28,11 +28,6 @@ private package Driver.Robot.Flow is
    --  The cell covers pixel columns X0 .. X1 - 1 and rows Y0 .. Y1 - 1;
    --  cells are numbered row by row from the top-left one.
 
-   function Luma (I : Driver.Images.Image) return Real_Array;
-   --  Driver.Images.Luma of every pixel, row by row, read in one pass over
-   --  the bytes (a call per pixel costs three eyes a tenth of a second a
-   --  beat); empty for an empty image.
-
    procedure Displacements
      (G             : Cell_Grid;
       Before, After : Real_Array;

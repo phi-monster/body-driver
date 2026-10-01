@@ -451,8 +451,8 @@ driver-recording.adb	for I in 0 .. 3 loop	3	format	record header layout: kind by
 driver-recording.adb	for I in 0 .. 7 loop	7	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
 driver-robot-body_file.adb	Append (T, (if C > 1 then "" else "") & Num (Channels.Noise (M, G, C)));	1	structure	channels are numbered from one; a separator goes before every channel but the first
 driver-robot-body_file.ads	Graph_Method : constant := 1;	1	format	the first version of this method; the body file records it so a reload re-measures what a later version measures differently
-driver-robot-body_file.ads	Lag_Method : constant := 1;	1	format	the first version of this method; the body file records it so a reload re-measures what a later version measures differently
-driver-robot-body_file.ads	Lockin_Method : constant := 1;	1	format	the first version of this method; the body file records it so a reload re-measures what a later version measures differently
+driver-robot-body_file.ads	Lag_Method : constant := 2;	2	format	the second version of this method; the body file records it so a reload re-measures what a later version measures differently
+driver-robot-body_file.ads	Lockin_Method : constant := 2;	2	format	the second version of this method; the body file records it so a reload re-measures what a later version measures differently
 driver-robot-body_file.ads	Noise_Method : constant := 1;	1	format	the first version of this method; the body file records it so a reload re-measures what a later version measures differently
 driver-robot-channels.adb	(Driver.Uncertain.Vector_Gate (Tested, (if Freedom = Natural'Last then 0 else Freedom)), Sqrt (Q), 1.0);	1.0	math	the squared deviations are already in units of each channel's sigma
 driver-robot-channels.adb	Half : constant Real := 0.5;	0.5	math	the median of the absolute value of a unit Gaussian is its two-sided quantile at one half
@@ -463,20 +463,15 @@ driver-robot-channels.adb	S.Targets.Append (0.0, Ada.Containers.Count_Type (S.Si
 driver-robot-channels.adb	S.Targets.Prepend (0.0, Ada.Containers.Count_Type (S.Size * Earlier));	0.0	structure	a placeholder for beats without a reading or target; Present and Targeted mark them absent
 driver-robot-channels.adb	S.Values.Append (0.0, Ada.Containers.Count_Type (S.Size));	0.0	structure	a placeholder for beats without a reading or target; Present and Targeted mark them absent
 driver-robot-channels.adb	S.Values.Prepend (0.0, Ada.Containers.Count_Type (S.Size * Earlier));	0.0	structure	a placeholder for beats without a reading or target; Present and Targeted mark them absent
-driver-robot-channels.adb	if Loss > 0.0 and then Driver.Uncertain.Significant (Loss, Sigma * Sqrt (2.0), Noise_Freedom (M, G, C)) then	2.0	math	the change of two readings has twice the variance of one
+driver-robot-channels.adb	if Loss > 0.0 and then Driver.Uncertain.Significant (Gate, Loss, Sigma * Sqrt (2.0)) then	2.0	math	the change of two readings has twice the variance of one
 driver-robot-channels.adb	return Natural (Real'Floor (8.0 * C * C * Phi * Phi * Real (N)));	8.0	math	the median absolute deviation's asymptotic efficiency at the Gaussian is 8 c^2 phi (c)^2
 driver-robot-channels.adb	return Significant_Change (M, G, Ask, 1.0);	1.0	math	a target against one reading carries that reading's noise once
 driver-robot-channels.adb	return Significant_Change (M, G, D, Sqrt (2.0));	2.0	math	the change of two readings has twice the variance of one
 driver-robot-flow.adb	(Trace - Sqrt (Real'Max (0.0, Trace * Trace - 4.0 * Det))) / 2.0;	2.0	math	the smaller eigenvalue of a symmetric 2 x 2 matrix, (trace - sqrt (trace^2 - 4 det)) / 2
 driver-robot-flow.adb	(Trace - Sqrt (Real'Max (0.0, Trace * Trace - 4.0 * Det))) / 2.0;	4.0	math	the smaller eigenvalue of a symmetric 2 x 2 matrix, (trace - sqrt (trace^2 - 4 det)) / 2
 driver-robot-flow.adb	(if Condition > 0.0 then Sqrt (2.0 * Luma_Variance / Condition) else Real'Last);	2.0	math	a displacement between two frames carries both frames' pixel noise
-driver-robot-flow.adb	+ Blue_Weight * Real (RGB (P + 2));	2	format	the third byte of an RGB pixel is blue
-driver-robot-flow.adb	Blue_Weight : constant := 0.114;	0.114	format	ITU-R BT.601 luma weight, the same as Driver.Images.Luma
-driver-robot-flow.adb	Green_Weight : constant := 0.587;	0.587	format	ITU-R BT.601 luma weight, the same as Driver.Images.Luma
 driver-robot-flow.adb	Gx (I) := (At_Before (X + 1, Y) - At_Before (X - 1, Y)) / 2.0;	2.0	math	a central difference spans two pixels
 driver-robot-flow.adb	Gy (I) := (At_Before (X, Y + 1) - At_Before (X, Y - 1)) / 2.0;	2.0	math	a central difference spans two pixels
-driver-robot-flow.adb	P := P + 3;	3	format	three bytes per RGB pixel
-driver-robot-flow.adb	Red_Weight : constant := 0.299;	0.299	format	ITU-R BT.601 luma weight, the same as Driver.Images.Luma
 driver-robot-flow.adb	X0 := Natural'Max (X0, 1);	1	structure	the central difference needs the pixel before
 driver-robot-flow.adb	X1 : constant Natural := Natural'Min (Natural (Real'Floor (Xc)), W - 2);	2	structure	bilinear interpolation reads the pixel after its left neighbour, so that neighbour is at most the one before the last
 driver-robot-flow.adb	Y0 := Natural'Max (Y0, 1);	1	structure	the central difference needs the pixel before
@@ -512,6 +507,7 @@ driver-robot-lag.adb	Child := 2 * Root;	2	structure	in a binary heap the childre
 driver-robot-lag.adb	I : Positive := 1;	1	structure	arrays are indexed from one
 driver-robot-lag.adb	Ranks (L) := Real (I + J) / 2.0;	2.0	math	tied values share the mean of the ranks they span
 driver-robot-lag.adb	Sift (1, Stop - 1);	1	structure	the heap's root is node one, and the heap shrinks by one per extraction
+driver-robot-lag.adb	and then Driver.Uncertain.Significant (Driver.Uncertain.Scalar_Gate (Tests => Tests), Best, 1.0)	1.0	math	a rank correlation's z is already in units of its own sigma
 driver-robot-lag.adb	for Start in reverse 1 .. N / 2 loop	2	structure	the last node of a binary heap that has a child is N / 2
 driver-robot-lag.adb	for Stop in reverse 2 .. N loop	2	structure	extraction stops when one node is left, which is then in place
 driver-robot-lag.adb	if Last < 1 then	1	structure	a differenced series needs two beats

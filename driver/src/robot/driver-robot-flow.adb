@@ -1,5 +1,4 @@
 with Ada.Numerics.Long_Elementary_Functions;
-with Driver.Bytes;
 with Driver.Conventions;
 
 package body Driver.Robot.Flow is
@@ -21,32 +20,6 @@ package body Driver.Robot.Flow is
       Y0 := Row * G.Height / G.Rows;
       Y1 := (Row + 1) * G.Height / G.Rows;
    end Bounds;
-
-   --  ITU-R BT.601 luma weights, those of Driver.Images.Luma.
-   Red_Weight   : constant := 0.299;
-   Green_Weight : constant := 0.587;
-   Blue_Weight  : constant := 0.114;
-
-   function Luma (I : Driver.Images.Image) return Real_Array is
-      N : constant Natural := Driver.Images.Width (I) * Driver.Images.Height (I);
-      Y : Real_Array (1 .. N);
-
-      procedure Convert (RGB : Driver.Bytes.Byte_Array) is
-         use type Driver.Bytes.Offset;
-         P : Driver.Bytes.Offset := RGB'First;
-      begin
-         for K in Y'Range loop
-            Y (K) := Red_Weight * Real (RGB (P)) + Green_Weight * Real (RGB (P + 1))
-                     + Blue_Weight * Real (RGB (P + 2));
-            P := P + 3;
-         end loop;
-      end Convert;
-   begin
-      if N > 0 then
-         Driver.Images.Query (I, Convert'Access);
-      end if;
-      return Y;
-   end Luma;
 
    procedure Displacements
      (G             : Cell_Grid;

@@ -391,7 +391,12 @@ package body Driver.Robot.Tests is
 
       procedure Judge (I : Driver.Images.Image) is
       begin
-         Stillness.Judge_Eye (S, I, Flow.Luma (I));
+         declare
+            L : Real_Array (1 .. Driver.Images.Width (I) * Driver.Images.Height (I));
+         begin
+            Driver.Images.Luma (I, L);
+            Stillness.Judge_Eye (S, I, L);
+         end;
       end Judge;
    begin
       Judge (Frame (0.0));
