@@ -1,0 +1,2 @@
+# Every path appends its own rows; a union merge keeps them all, and tools/numbers.py gen then drops rows whose literal is gone.
+driver/numbers.tsv merge=union
