@@ -78,6 +78,43 @@ package body Selfmap.Graph is
       return R;
    end Carrying_Groups;
 
+   function Whole_Group (M : Body_Map) return Integer is
+      N_Arm : Natural := 0;
+      Arm_G : Integer := -1;
+      Arm_Idx : Integer := -1;
+   begin
+      for G in 0 .. Natural (M.Groups.Length) - 1 loop
+         if M.Groups (G).Role = Selfmap.Carrying then
+            return Integer (G);
+         end if;
+      end loop;
+      for G in 0 .. Natural (M.Groups.Length) - 1 loop
+         case M.Groups (G).Role is
+            when Selfmap.Arm =>
+               N_Arm := N_Arm + 1; Arm_G := Integer (G); Arm_Idx := M.Groups (G).Arm;
+            when Selfmap.Piece =>
+               return -1;   --  有一块长在哪儿量不出的零件:它不一定跟着这条臂动
+            when others =>
+               null;
+         end case;
+      end loop;
+      if N_Arm /= 1 then
+         return -1;
+      end if;
+      for G of M.Groups loop
+         if G.Role = Selfmap.Closing and then G.Arm /= Arm_Idx then
+            return -1;
+         end if;
+      end loop;
+      return Arm_G;
+   end Whole_Group;
+
+   function Whole_Arm (M : Body_Map) return Integer is
+      G : constant Integer := Whole_Group (M);
+   begin
+      return (if G >= 0 and then M.Groups (Natural (G)).Role = Selfmap.Arm then M.Groups (Natural (G)).Arm else -1);
+   end Whole_Arm;
+
    function Say (M : Body_Map) return String is
       function List (V : Ints) return String is
          R : Unbounded_String;
@@ -98,6 +135,9 @@ package body Selfmap.Graph is
                  & " 个、长在它上面的眼(相机号)" & List (Eyes_On (M, A)));
       end loop;
       Append (R, " · 不长在任何臂上的眼(相机号)" & List (Eyes_Off_Arms (M)) & " · 扛着全身走的组 " & List (Carrying_Groups (M)));
+      if Whole_Group (M) >= 0 then
+         Append (R, " · 整个我 = 第 " & Codec.Img (Natural (Whole_Group (M))) & " 组" & (if Whole_Arm (M) >= 0 then "(第 " & Codec.Img (Natural (Whole_Arm (M)) + 1) & " 条臂)" else ""));
+      end if;
       return To_String (R);
    end Say;
 end Selfmap.Graph;

@@ -40,7 +40,8 @@ begin
          Tag : constant String := (if T.Is_Empty then "" else T (0));
       begin
          if Tag = "kin" then
-            Version_Ok := Natural (T.Length) >= 2 and then T (1) = "5";
+            --  5 = 每一节的表面点;4 = 少了表面点、别的一样(缺什么量什么:只补量表面点,别的照用 —— 10-01 P8N 旧文件整份从零量)
+            Version_Ok := Natural (T.Length) >= 2 and then (T (1) = "5" or else T (1) = "4");
          elsif Tag = "key" and then Natural (T.Length) >= 2 then
             K.Key := To_Unbounded_String (T (1));
          elsif Tag = "world_cam" then
@@ -169,8 +170,7 @@ begin
    end loop;
    Close (Fi);
    if not Version_Ok then
-      Note := To_Unbounded_String ("格式是旧版(" & Path & ";存的量不全:kin 1 没存不动的眼的像素残差,kin 2 没存每根轴是转是走,kin 3 没存关节到过的范围,"
-                                   & "kin 4 没存每一节的表面点)");
+      Note := To_Unbounded_String ("格式是旧版(" & Path & ";存的量不全:kin 1 没存不动的眼的像素残差,kin 2 没存每根轴是转是走,kin 3 没存关节到过的范围)");
       return;
    end if;
    if K.Worlds.Is_Empty or else Length (K.Key) = 0 then
@@ -211,7 +211,7 @@ begin
       end;
    end if;
    Ok := True;
-   Links.Set_Points (Pts);
+   Links.Set_Points (Pts);   --  kin 4 读回来是空的:开机只补量表面点(body_driver)
    Note := To_Unbounded_String (Codec.Img (Natural (K.Worlds.Length)) & " 只手的运动学和世界、不动的眼(第" & Integer'Image (K.World_Cam) & " 台)、板 "
                                 & Codec.Img (Natural (K.Board.Length)) & " 个点、每一节的表面点 " & Codec.Img (Natural (Pts.Length)) & " 个");
 exception

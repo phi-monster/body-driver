@@ -799,6 +799,9 @@ begin
          begin
             Links.Sweep_Match (Host, Port, Nt);
             Say ("  " & To_String (Nt) & "," & Codec.Fmt (Long_Float (Ada.Calendar."-" (Ada.Calendar.Clock, T2)), 0) & " 秒");
+            if Dump /= "" then
+               Links.Dump_Sweep (Dump & "/links_sweep.txt");   --  离线重放每一节的形状用
+            end if;
          end;
       end if;
    end;
