@@ -8,7 +8,7 @@ package Contact.Exec is
    subtype M3 is Geom.M3;   --  一只手的完整朝向:列 = (开合轴 x, y, 工具轴 z) 在世界里
    use type Geom.M3;
    package M3_Vectors is new Ada.Containers.Vectors (Natural, M3);
-   type Step_Kind is (Hover, Touch, Carry, Dodge);
+   type Step_Kind is (Hover, Touch, Follow, Aside);   --  悬停 · 贴上 · 跟着它按③走 · 让开(Aside 时身体层保持当前朝向)
    --  一个该发的航点。它描述的是"这几个接触点各自该在哪",不是"末端在哪" —— 末端在哪是身体层按自己的运动学去解的事
    type Step is record
       Pos : V3_Vectors.Vector;      --  每个接触点这一刻该到的世界位置(吸盘 1 个、五指 5 个),与接触集的手接触点一一对应
@@ -16,7 +16,7 @@ package Contact.Exec is
       Hand : Nat_Vectors.Vector;    --  每个点归哪一只手(编号不带语义)
       Touching : Boolean := False;  --  这一刻算不算已经接触(True = 允许有力,False = 只是路过)
       Tol_M : Long_Float := 0.0;    --  这一步的容差 = 参与的那些点里最严的那一个
-      Kind : Step_Kind := Hover;    --  只为日志与判据;执行层自己不读它(Dodge 时身体层保持当前朝向,Frame 只是占位)
+      Kind : Step_Kind := Hover;    --  只为日志与判据;执行层自己不读它(Aside 时身体层保持当前朝向,Frame 只是占位)
    end record;
    package Step_Vectors is new Ada.Containers.Vectors (Natural, Step);
    --  这具身体在这一层需要的东西,全部由调用方量了再递进来

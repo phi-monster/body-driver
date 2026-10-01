@@ -38,9 +38,10 @@ package Contact is
       By : Who;
       Pos : V3 := [others => 0.0];       --  ① 碰物体表面的哪儿(世界系,米)
       Normal : V3 := [others => 0.0];    --  ② 那一点的表面法向,指向物体外侧
+      --  (Push / Pull 这两个字段名是八月的旧名,主代理的 selfcheck.adb 执行层焊点按完整的具名聚合在用;合并时改成 Allowed / Tension)
       Push : Cone;                       --  ② 那一点允许往哪使劲
       --  ② 这个接触能传哪几种东西(都是身体属性,要量;谁填谁负责,别默认 True 混过去):
-      Pull : Boolean := False;           --  拉不拉得动(真空吸盘/电磁/胶带能拉;手指一拉就离开表面了)。少了它,吸盘吸住了也抬不起任何东西
+      Pull : Boolean := False;           --  能不能传拉力(真空吸盘/电磁/胶带能;手指往外一使劲就离开表面了)。少了它,吸盘吸住了也离不开面
       Torsion : Boolean := False;        --  绕自己的法向扭不扭得动(指腹是一片面 ⇒ 能;硬针尖 ⇒ 不能)。少了它,两指捏着勺子兜起来在静力学上直接判死
       Peel : Boolean := False;           --  绕切向轴掰不掰得动(抗不抗剥离:吸盘/胶垫/大贴片能;点接触不能)。少了它,吸盘只转得动、翻不动
       Tol_M : Long_Float := 0.0;         --  ④ 这一个点的容差(米);每点各一个,不是每个计划一个
@@ -54,12 +55,20 @@ package Contact is
       Ang : V3 := [others => 0.0];       --  轴角:方向 = 转轴,模长 = 转多少弧度;零向量 = 不转
       Pivot : V3 := [others => 0.0];     --  绕哪一点转(世界系,米);Ang 为零时它不起作用
    end record;
-   function Still (Pivot : V3) return Twist;                   --  什么都不动:压/敲/抓的第③格。"物体不动"是一个合法的答案,不是缺省值
+   function Still (Pivot : V3) return Twist;                   --  什么都不动。"物体不动"是一个合法的答案,不是缺省值
    function Slide (Lin : V3) return Twist;                     --  纯平移
-   function Turn (Axis : V3; Rad : Long_Float; Pivot : V3; Ok : out Boolean) return Twist;   --  绕 Pivot 的一条轴转 Rad;轴不是方向 ⇒ Ok = False
+   --  绕 Pivot 的一条轴转 Rad;轴不是方向 ⇒ Ok = False(旧名:主代理的 selfcheck.adb 执行层焊点在用;合并时改成 Rotation)
+   function Turn (Axis : V3; Rad : Long_Float; Pivot : V3; Ok : out Boolean) return Twist;
    function Angle (T : Twist) return Long_Float;               --  转多少弧度
    function Moving (T : Twist) return Boolean;                 --  平移或转,任一个不为零
    function Apply (T : Twist; P : V3) return V3;               --  把一个世界点按这个旋量搬过去:先绕 Pivot 转,再整体平移(罗德里格斯)
+
+   --  脑要这件东西怎么动(I5 的一小块:路 7 从语言填、路 5 读;这一版由 Round 按脑说的"它的哪个量往哪变"填):
+   --  Given = 说了;没说 ⇒ 接触集按"它跟着手离开它躺的面"布置(合上以后抬一点验它跟不跟手,验的就是这个)。Move 只看方向和绕哪儿转
+   type Want is record
+      Given : Boolean := False;
+      Move : Twist;
+   end record;
 
    --  一个接触集 —— 四格齐。里面只有物体,没有身体。
    type Set is record
@@ -77,7 +86,6 @@ package Contact is
       No_Points,        --  ① 一个接触点都没有
       Bad_Normal,       --  ② 某一点的法向不是一个方向(零向量 / 不是数)
       Bad_Cone,         --  ② 某一点的锥轴不是一个方向,或半张角不在 [0, π]
-      Cannot_Drive,     --  ② 所有接触加在一起都产生不出③要的那个力旋量:你说只能这样使劲,又说物体要那样动
       Motion_Still,     --  ③ 旋量既不平移也不转,而这个动词要求物体动
       No_Pivot,         --  ③ 要转,但绕哪一点不是数
       Bad_Tolerance);   --  ④ 某一点的容差不是一个正数
@@ -86,28 +94,24 @@ package Contact is
       Index : Natural := 0;              --  哪一点(Bad_Normal / Bad_Cone / Bad_Tolerance)
    end record;
    function Img (G : Gap) return String;
-   --  逐格自检。Must_Move:这个动词要不要求物体动(压/敲/抓不要求,推/撬/拧要求)。
+   --  逐格自检:每一格填得像不像样(法向、锥、容差、要动时旋量不为零、转时绕的那一点是数)。Must_Move:要不要求物体动。
+   --  "这几处接触能不能让它照要的那样动"不在这儿判:那是物理检查(Contact.Wrench,连同它躺的面、按重力配平),一个量一种量法
+   --  (八月那一版"需要的力旋量方向 ∝ 要的旋量"的判据不算重力、不算面,10-01 删了)
    function Check (S : Set; Must_Move : Boolean) return Gap;
-   --  所有接触的摩擦锥张成的凸锥,包不包含③要的那个力旋量方向。
-   --  判据必须在【集合】上,不在单点上:两指捏着横向搬运,任何单指都做不到(切向力出了自己的摩擦锥),但两指一起可以 ——
-   --  内部的对夹力互相抵消,切向的摩擦力叠加。逐点判会把「放」「反例」两条合法接触集判死(2026-08-16 实测)。
-   --  建模:准静态,需要的力旋量方向 ∝ ③的旋量;参考点取接触点质心(物体质心的代理,不是 Pivot:拿着东西挥的时候合力本来就不为零,那个力是胳膊给的);
-   --  力与力矩用特征长度 L(各接触到参考点的平均距离)配平;只判方向在不在锥里,不判大小(大小是"捏多紧",归执行层)。
-   function Can_Drive (S : Set) return Boolean;
 
    --  ── 一个接触集说不完的三件事:一串 · 并存 · 过渡 ──
-   --  一段不够(擦:来回若干道;舀:插进去 → 兜起来 → 抬出来)⇒ In_Turn(段间重新下手,过渡由执行层自己产生)或 Keep(不松手);
+   --  一段不够(来回若干道;插进去 → 兜起来 → 离开)⇒ In_Order(段间重新下手,过渡由执行层自己产生)或 Keep(不松手);
    --  要同时成立(握住 + 扣扳机)⇒ Meanwhile:第一段维持(第③格必须不动),其余在动;
    --  "不要碰"(躲拳)⇒ Clear:零接触点 + 一个净空;
    --  物体不参与(够/Reach)⇒ 不进接口:每段开头的"悬停"就是它,由执行层自己产生。给它一个变体等于让脑去操心手怎么绕过去。
-   type Move_Kind is (One, In_Turn, Keep, Clear, Meanwhile);
+   type Move_Kind is (One, In_Order, Keep, Clear, Meanwhile);
    package Nat_Vectors is new Ada.Containers.Vectors (Natural, Natural);
    package V3_Vectors is new Ada.Containers.Vectors (Natural, V3);
    --  树存成一张表:每个节点记自己的种类和子节点的编号(Ada 里递归的变体要么走访问类型,要么走编号;这里走编号)。
    type Node is record
       Kind : Move_Kind := One;
       S : Set;                           --  One
-      Items : Nat_Vectors.Vector;        --  In_Turn / Keep / Meanwhile:子节点编号,按先后
+      Items : Nat_Vectors.Vector;        --  In_Order / Keep / Meanwhile:子节点编号,按先后
       Keep_Out : V3_Vectors.Vector;      --  Clear:要躲开的那些地方(世界系,米)
       By_M : Long_Float := 0.0;          --  Clear:至少要留多宽(米)
       From : V3_Vectors.Vector;          --  Clear:手上那些点现在在哪(由调用方给:身体层知道手在哪,这一层不知道,也不该知道)
@@ -123,7 +127,7 @@ package Contact is
    type Many_Kind is
      (Fine,
       Inside,                      --  里面某一段自己就填不满 —— 带上是第几段(Path)、哪一格(G)
-      Empty,                       --  In_Turn / Keep / Meanwhile 里一段都没有
+      Empty,                       --  In_Order / Keep / Meanwhile 里一段都没有
       Holder_Moves,                --  Meanwhile 的第一段不是"维持":它的第③格在动
       Nothing_To_Pair_With,        --  Meanwhile 只有一段 ⇒ 没有"并存"可言
       Keep_Breaks_Contact,         --  Keep 说"不松手",而下一段的接触点不在上一段末了那个位置上(Seg = 第几段,Off_M = 差多少米)
