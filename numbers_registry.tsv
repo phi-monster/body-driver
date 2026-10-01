@@ -985,7 +985,6 @@ body_driver.adb	Append (Txt, "" & Codec.Img (Cm) & "" & Codec.Fmt (100.0 * Long_
 body_driver.adb	Append (Txt, "" & Codec.Img (Cm) & "" & Codec.Fmt (100.0 * Long_Float (N) / Long_Float (Natural'Max (1, Natural (Mk.Length))), 1) & "");	1	数值	防除零:÷ Natural'Max (1, 像素数),画面是空的时这一句不进任何判断(body_driver.adb:376)
 body_driver.adb	Append (Txt, "" & Codec.Img (Cm) & "" & Codec.Fmt (100.0 * Long_Float (N) / Long_Float (Natural'Max (1, Natural (Mk.Length))), 1) & "");	100.0	格式	比例换百分数打印(开机报告,只给人看)(body_driver.adb:376)
 body_driver.adb	C.Map.Measured_Times := 1;	1	结构	计数:从零量的这一次就是第 1 次量这具身体(以后合成时按历次累加)。(body_driver.adb:358)
-body_driver.adb	C.Sil_Valid := False; C.Held_Set_Valid := False; C.Walls.Clear; C.No_Reach_Arm := -1;	1	数值	哨兵:-1 = 没有"够不着"的那条臂(新一集清掉)。(body_driver.adb:536)
 body_driver.adb	Err := To_Unbounded_String ("");	"0	格式	日志里说'第 0 台相机'(第一帧拿第一台相机的画面问仪器通不通;只给人看)(body_driver.adb:133)
 body_driver.adb	Eye : Unbounded_String := To_Unbounded_String ("");	"127.0	格式	脑的默认地址 127.0.0.1 里的一段(本机回环地址的写法);接线约定,--eye / BL_EYE 可改,不影响身体怎么动(body_driver.adb:29)
 body_driver.adb	Eye : Unbounded_String := To_Unbounded_String ("");	"8079	格式	脑服务的默认端口(接线约定,要和 harness 那边的脑服务对上;不是给脑的行为设定)(body_driver.adb:29)
@@ -1383,6 +1382,12 @@ draw.ads	Red : constant Color := (255, 32, 32);	32	调参数	配色是拍的:Red
 draw.ads	White : constant Color := (255, 255, 255);	255	调参数	配色是拍的:White (白:各相机小图的框(act.adb:9062))的这一个分量。颜色进给脑的画面,场景里有同色的东西(绿剪刀、橙方块)时框和东西糊在一起;不描述身体也不描述世界,只是没有依据(draw.ads:11)	给脑看的画面上编号框的颜色(脑看得清框和号、分得开框和东西)	低	每帧按画面自己量:统计这台相机这一帧的颜色直方图(F.Cams (Cam).RGB),挑画面里出现最少、彼此又分得开的几种颜色给框;或按框里那块东西量到的平均色取对比色
 draw.ads	White : constant Color := (255, 255, 255);	255	调参数	配色是拍的:White (白:各相机小图的框(act.adb:9062))的这一个分量。颜色进给脑的画面,场景里有同色的东西(绿剪刀、橙方块)时框和东西糊在一起;不描述身体也不描述世界,只是没有依据(draw.ads:11)	给脑看的画面上编号框的颜色(脑看得清框和号、分得开框和东西)	低	每帧按画面自己量:统计这台相机这一帧的颜色直方图(F.Cams (Cam).RGB),挑画面里出现最少、彼此又分得开的几种颜色给框;或按框里那块东西量到的平均色取对比色
 draw.ads	White : constant Color := (255, 255, 255);	255	调参数	配色是拍的:White (白:各相机小图的框(act.adb:9062))的这一个分量。颜色进给脑的画面,场景里有同色的东西(绿剪刀、橙方块)时框和东西糊在一起;不描述身体也不描述世界,只是没有依据(draw.ads:11)	给脑看的画面上编号框的颜色(脑看得清框和号、分得开框和东西)	低	每帧按画面自己量:统计这台相机这一帧的颜色直方图(F.Cams (Cam).RGB),挑画面里出现最少、彼此又分得开的几种颜色给框;或按框里那块东西量到的平均色取对比色
+episode.adb	C.Geo_Dist := -1.0; C.Geo_Round := 0; C.Geo_At_Arm := -1; C.Geo_Came := 0.0;	1	数值	哨兵:-1 = 没有(下标、臂号、相机号都 ≥ 0;复位成 act.ads 里的初值)(episode.adb:38)
+episode.adb	C.Geo_Dist := -1.0; C.Geo_Round := 0; C.Geo_At_Arm := -1; C.Geo_Came := 0.0;	1.0	数值	哨兵:< 0 = 没有(上一次几何逼近没留下距离;同 act.ads 的初值)(episode.adb:38)
+episode.adb	C.Geo_Obs.Clear; C.Geo_Slot := -1; C.Geo_Name := Null_Unbounded_String; C.Geo_Pw_Name := Null_Unbounded_String;	1	数值	哨兵:-1 = 没有(下标、臂号、相机号都 ≥ 0;复位成 act.ads 里的初值)(episode.adb:39)
+episode.adb	C.Name_Cam := -1;	1	数值	哨兵:-1 = 没有(下标、臂号、相机号都 ≥ 0;复位成 act.ads 里的初值)(episode.adb:20)
+episode.adb	C.Sil_Valid := False; C.Held_Set_Valid := False; C.Walls.Clear; C.No_Reach_Arm := -1;	1	数值	哨兵:-1 = 没有(下标、臂号、相机号都 ≥ 0;复位成 act.ads 里的初值)(episode.adb:17)
+episode.adb	C.Tgt_Cam := -1;	1	数值	哨兵:-1 = 没有(下标、臂号、相机号都 ≥ 0;复位成 act.ads 里的初值)(episode.adb:36)
 exam.adb	& Codec.Fmt (Sc, 2) & "");	2	格式	日志 / 给脑的话里印几位小数(exam.adb:164)
 exam.adb	Best := -1;	1	数值	哨兵:-1 = 没有哪个通道推得动这一行。(exam.adb:29)
 exam.adb	Ec.Rides_On := -1;	1	数值	哨兵:-1 = 这只眼不跟着任何一只手动(exam.ads 注释原话)。(exam.adb:108)
