@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 # The driver's gates. Every merge and every install runs them; any failure stops it.
 #
-#   numbers    every literal has a stated origin and none is a tuning number (tools/numbers.py)
+#   build      the driver and its tools build without warnings (first: the gates are Ada tools)
+#   numbers    every literal has a stated origin and none is a tuning number (driver/bin/numbers)
 #   names      no benchmark, scene, task or robot name in driver code
 #   python     no Python anywhere under driver/
 #   english    no CJK characters in driver sources, tests or tools (code, comments and strings)
 #   contact    no action words in the contact-set packages: one search serves every task
 #   prompt     no tutorial sentences in what the brain is shown: format only, never how to act
 #   motion     commands reach the robot from one place only, Driver.Robot.Motion
-#   build      the driver builds without warnings
 #   selftest   every behavior specification passes
 #   deadcode   what body_driver cannot reach (reported while the layers are being written in
 #              parallel; binding once they are wired together)
 #
-# Usage: tools/check.sh [--no-build]
+# Usage: tools/check.sh [--no-build]   (--no-build uses the binaries of the last build)
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 D="$ROOT/driver"
@@ -24,8 +24,15 @@ ok() { echo "pass  $1"; }
 code_of() { sed -E 's/--.*$//' "$@"; }                                 # Ada code without comments
 sources() { find "$D/src" -name '*.ad[sb]' ! -name '*-tests.ad[sb]'; }  # driver code, self tests excluded
 
+# build
+if [ "${1:-}" != "--no-build" ]; then
+  ALR="${ALR:-$(command -v alr || echo "$HOME/alire/bin/alr")}"
+  out=$(cd "$D" && "$ALR" -n build 2>&1)
+  if echo "$out" | grep -qE 'error|warning'; then echo "$out" | grep -E 'error|warning' | head -20; red "build"; else ok "build"; fi
+fi
+
 # numbers
-if python3 "$ROOT/tools/numbers.py" check > /tmp/bd_numbers.$$ 2>&1; then ok "numbers"; else cat /tmp/bd_numbers.$$; red "numbers"; fi
+if (cd "$ROOT" && "$D/bin/numbers" check > /tmp/bd_numbers.$$ 2>&1); then ok "numbers"; else cat /tmp/bd_numbers.$$; red "numbers"; fi
 rm -f /tmp/bd_numbers.$$
 
 # names
@@ -66,14 +73,9 @@ hits=$(for f in $(sources); do b=$(basename "$f"); [[ "$b" == driver-robot-motio
   code_of "$f" | grep -nE '\bBeats\.Send\b|\bSend[[:space:]]*\(' | grep -E 'Beats' | sed "s#^#$b:#"; done)
 if [ -n "$hits" ]; then echo "$hits" | head -20; red "motion"; else ok "motion"; fi
 
-# build and selftest
-if [ "${1:-}" != "--no-build" ]; then
-  ALR="${ALR:-$(command -v alr || echo "$HOME/alire/bin/alr")}"
-  out=$(cd "$D" && "$ALR" -n build 2>&1)
-  if echo "$out" | grep -qE 'error|warning'; then echo "$out" | grep -E 'error|warning' | head -20; red "build"; else ok "build"; fi
-  if (cd "$D" && ./bin/selftest > /tmp/bd_selftest.$$ 2>&1); then ok "selftest ($(tail -1 /tmp/bd_selftest.$$))"; else grep -A1 FAIL /tmp/bd_selftest.$$ | head -20; red "selftest"; fi
-  rm -f /tmp/bd_selftest.$$
-  echo "info  deadcode: $(python3 "$ROOT/tools/deadcode.py" | head -1 | sed 's/^== //; s/ ==$//')"
-fi
+# selftest and dead code
+if (cd "$D" && ./bin/selftest > /tmp/bd_selftest.$$ 2>&1); then ok "selftest ($(tail -1 /tmp/bd_selftest.$$))"; else grep -A1 FAIL /tmp/bd_selftest.$$ | head -20; red "selftest"; fi
+rm -f /tmp/bd_selftest.$$
+echo "info  deadcode: $(cd "$ROOT" && "$D/bin/deadcode" | head -1 | sed 's/^== //; s/ ==$//')"
 
 [ "$fail" = 0 ] && echo "all gates pass" || { echo "gates failed"; exit 1; }

@@ -4,7 +4,7 @@
 #   tools/merge.sh BRANCH "message"
 #
 # The registry (driver/numbers.tsv) merges by union (.gitattributes); after the
-# merge numbers.py gen drops rows whose literal no longer occurs. Any other
+# merge driver/bin/numbers gen drops rows whose literal no longer occurs. Any other
 # conflict, a new unclassified literal, or a failed gate stops here with the
 # working tree left as it is, for a person to resolve.
 set -u
@@ -17,7 +17,13 @@ fi
 if ! git merge --no-ff --no-commit "$BRANCH"; then
   echo "conflicts outside the registry: resolve them, then rerun the gates"; exit 3
 fi
-python3 tools/numbers.py gen > /dev/null
+ALR="${ALR:-$(command -v alr || echo "$HOME/alire/bin/alr")}"
+if ! (cd driver && "$ALR" -n build > /tmp/bd_merge_build.$$ 2>&1); then
+  grep -E 'error' /tmp/bd_merge_build.$$ | head -20; rm -f /tmp/bd_merge_build.$$
+  echo "the merged sources do not build"; exit 6
+fi
+rm -f /tmp/bd_merge_build.$$
+driver/bin/numbers gen > /dev/null
 if awk -F'\t' '$4 == "undecided" { found = 1 } END { exit !found }' driver/numbers.tsv; then
   awk -F'\t' '$4 == "undecided"' driver/numbers.tsv | head -20
   echo "the branch brought unclassified literals"; exit 4
