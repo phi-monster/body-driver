@@ -1,16 +1,20 @@
 with Ada.Containers.Indefinite_Holders;
 with Ada.Containers.Vectors;
+with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Strings.Unbounded;
 with Ada.Unchecked_Deallocation;
 with Driver.Instrument;
 with Driver.Log;
 with Driver.Robot.Hand.Frames;
+with Driver.Robot.Hand.Presses;
 with Driver.Robot.Hand.Sweep;
+with Driver.Robot.Hand.Tips;
 with Driver.Robot.Hand.Views;
 with Driver.Services;
 
 package body Driver.Robot.Hand is
 
+   use Ada.Numerics.Long_Elementary_Functions;
    use Ada.Strings.Unbounded;
    use Driver.Numerics.Arrays;
    use type Driver.Observations.Group_Id;
@@ -69,6 +73,8 @@ package body Driver.Robot.Hand is
       Eye      : Eye_Id;
       Readings : Reading_Array;
       Lobes    : Lobe_Record_Vectors.Vector;
+      Watch    : Driver.Robot.Hand.Presses.Watcher;   --  the arm's presses, from the stream
+      Book     : Driver.Robot.Hand.Tips.Book;         --  the presses kept and the tips they measure
    end record;
 
    package Hand_Vectors is new Ada.Containers.Vectors (Hand_Id, Hand_Record);
@@ -270,12 +276,28 @@ package body Driver.Robot.Hand is
       if Made.Lobes.Is_Empty then
          return;
       end if;
-      for Id in D.Found.First_Index .. D.Found.Last_Index loop
-         if D.Found (Id).Group = P.Group then
-            D.Found.Replace_Element (Id, Made);
-            return;
-         end if;
-      end loop;
+      declare
+         Table : Driver.Robot.Hand.Tips.Sight_Table (1 .. Natural (Made.Lobes.Length));
+      begin
+         for L in Table'Range loop
+            for Which in Opening loop
+               Table (L) (Which) := (Known => Made.Lobes (L).Sights (Which).Known,
+                                     Ray   => Made.Lobes (L).Sights (Which).Ray);
+            end loop;
+         end loop;
+         --  A hand measured again keeps its presses; they are given to the
+         --  new lobes by number, or forgotten when the number changed.
+         for Id in D.Found.First_Index .. D.Found.Last_Index loop
+            if D.Found (Id).Group = P.Group then
+               Made.Watch := D.Found (Id).Watch;
+               Made.Book := D.Found (Id).Book;
+               Driver.Robot.Hand.Tips.Set_Sights (Made.Book, Table);
+               D.Found.Replace_Element (Id, Made);
+               return;
+            end if;
+         end loop;
+         Driver.Robot.Hand.Tips.Set_Sights (Made.Book, Table);
+      end;
       D.Found.Append (Made);
    end Rebuild;
 
@@ -332,6 +354,65 @@ package body Driver.Robot.Hand is
       end if;
    end Collect;
 
+   function Opening_Of (R : Hand_Record; M : Model; Readings : Real_Array; Which : out Opening) return Boolean;
+   --  The opening the closer was at, when its readings equal those of one
+   --  opening within their noise and not those of the other.
+
+   function Opening_Of (R : Hand_Record; M : Model; Readings : Real_Array; Which : out Opening) return Boolean is
+      function At_It (O : Opening) return Boolean is
+         Measured : constant Real_Array := R.Readings (O).Element;
+      begin
+         if Measured'Length /= Readings'Length then
+            return False;
+         end if;
+         --  Each reading and the one measured at the opening carry the
+         --  channel's noise, so their difference carries it twice over.
+         return (for all C in 1 .. Readings'Length =>
+                   not Significant (Readings (Readings'First + C - 1) - Measured (Measured'First + C - 1),
+                                    Sqrt (2.0) * Reading_Noise (M, R.Group, C)));
+      end At_It;
+   begin
+      Which := Open;
+      if R.Readings (Open).Is_Empty or else R.Readings (Closed_Empty).Is_Empty then
+         return False;
+      end if;
+      if At_It (Open) and then not At_It (Closed_Empty) then
+         Which := Open;
+         return True;
+      elsif At_It (Closed_Empty) and then not At_It (Open) then
+         Which := Closed_Empty;
+         return True;
+      end if;
+      return False;
+   end Opening_Of;
+
+   procedure Watch (R : in out Hand_Record; Id : Hand_Id; M : Model; O : Observation);
+   --  Follows the hand's arm for presses and keeps every press made at one
+   --  of the hand's openings.
+
+   procedure Watch (R : in out Hand_Record; Id : Hand_Id; M : Model; O : Observation) is
+      Found : Boolean;
+      Press : Driver.Robot.Hand.Presses.Event;
+      Which : Opening;
+   begin
+      if not Driver.Observations.Has_Reading (O, R.Group) then
+         return;
+      end if;
+      Driver.Robot.Hand.Presses.Observe (R.Watch, O.Beat, Blocked (M, R.Arm, O), Still (M), Tool_Pose (M, R.Arm, O),
+                                         O.Readings.Element (R.Group), Found, Press);
+      if not Found then
+         return;
+      end if;
+      if Opening_Of (R, M, Press.Closer.Element, Which) then
+         Driver.Robot.Hand.Tips.Add (R.Book, Press, Which);
+         Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": a press at the " & Opening'Image (Which)
+                          & " opening, " & Driver.Robot.Hand.Tips.Pressed (R.Book)'Image & " kept");
+      else
+         Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image
+                          & ": a press with the closer at neither measured opening is not used");
+      end if;
+   end Watch;
+
    procedure Observe (H : in out Hands; M : Model; O : Observation; Sent : Driver.Commands.Command) is
       pragma Unreferenced (Sent);
    begin
@@ -347,6 +428,14 @@ package body Driver.Robot.Hand is
             Ask (P, M, O);
             Collect (P, H.Data.all, M);
             H.Data.Pairs.Replace_Element (I, P);
+         end;
+      end loop;
+      for Id in H.Data.Found.First_Index .. H.Data.Found.Last_Index loop
+         declare
+            R : Hand_Record := H.Data.Found (Id);
+         begin
+            Watch (R, Id, M, O);
+            H.Data.Found.Replace_Element (Id, R);
          end;
       end loop;
    end Observe;
@@ -378,20 +467,11 @@ package body Driver.Robot.Hand is
    --  none is measured yet: these report an unknown estimate.
 
    function Tip_In_Tool (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening) return Point_Estimate is
-      pragma Unreferenced (H, Id, Lobe, At_Opening);
-      Unmeasured : Point_Estimate;
-   begin
-      return Unmeasured;
-   end Tip_In_Tool;
+     (Driver.Robot.Hand.Tips.Tip (Found (H, Id).Book, Lobe, At_Opening));
 
    function Press_Direction (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening)
-     return Direction_Estimate
-   is
-      pragma Unreferenced (H, Id, Lobe, At_Opening);
-      Unmeasured : Direction_Estimate;
-   begin
-      return Unmeasured;
-   end Press_Direction;
+     return Direction_Estimate is
+     (Driver.Robot.Hand.Tips.Direction (Found (H, Id).Book, Lobe, At_Opening));
 
    function Tip (H : Hands; M : Model; Id : Hand_Id; Lobe : Positive; At_Opening : Opening; O : Observation)
      return Point_Estimate is

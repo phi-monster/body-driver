@@ -487,33 +487,43 @@ driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	the eight neighbo
 driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
 driver-robot-hand-lobes.adb	for Dr in -1 .. 1 loop	1	structure	the eight neighbours of a pixel
 driver-robot-hand-lobes.adb	if Natural (Lobes.Length) >= 2 then	2	structure	lobes close towards one another when there are two or more
+driver-robot-hand-presses.adb	- U * (Step.Covariance * U)) / 2.0);	2.0	math	the mean of the variance about the two axes across the move
+driver-robot-hand-presses.adb	U : constant Vec3 := (1.0 / Length) * Step.Mean;	1.0	math	a vector over its length is its unit vector
 driver-robot-hand-sweep.adb	Points (K) := (U => Real (C) + 0.5, V => Real (R) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
 driver-robot-hand-sweep.adb	Points (K) := (U => Real (C) + 0.5, V => Real (R) + 0.5);	0.5	format	a pixel's centre is half a pixel from its corner (Driver.Images)
 driver-robot-hand-sweep.adb	Still : Correspondence_Array (1 .. 2 * Still_Count);	2	structure	each unchanged pixel is matched both ways round
-driver-robot-hand-touch.adb	A (Row + 1, Base + 1) := 1.0 / P.Offset_Sigma;	1.0	math	a prior row is whitened by the inverse of its sigma
-driver-robot-hand-touch.adb	A (Row + 2, Base + 2) := 1.0 / L11;	1.0	math	whitening by the inverse of the tilt covariance's Cholesky factor
-driver-robot-hand-touch.adb	A (Row + 2, Base + 2) := 1.0 / L11;	2	structure	the second of a surface's three error components, the first tilt
-driver-robot-hand-touch.adb	A (Row + 2, Base + 2) := 1.0 / L11;	2	structure	the second of a surface's three error components, the first tilt
-driver-robot-hand-touch.adb	A (Row + 3, Base + 2) := -L21 / (L11 * L22);	2	structure	the second of a surface's three error components, the first tilt
-driver-robot-hand-touch.adb	A (Row + 3, Base + 2) := -L21 / (L11 * L22);	3	structure	the third of a surface's three error components, the second tilt
-driver-robot-hand-touch.adb	A (Row + 3, Base + 3) := 1.0 / L22;	1.0	math	whitening by the inverse of the tilt covariance's Cholesky factor
-driver-robot-hand-touch.adb	A (Row + 3, Base + 3) := 1.0 / L22;	3	structure	the third of a surface's three error components, the second tilt
-driver-robot-hand-touch.adb	A (Row + 3, Base + 3) := 1.0 / L22;	3	structure	the third of a surface's three error components, the second tilt
-driver-robot-hand-touch.adb	E : Equations (Presses => Presses'Length, K => 1);	1	structure	a tip on a known line of sight has one unknown, its distance
-driver-robot-hand-touch.adb	E : Equations (Presses => Presses'Length, K => 3);	3	structure	a free tip has three unknowns, its coordinates
-driver-robot-hand-touch.adb	E.Plane (I, 1) := -1.0;	1.0	math	a surface raised by its offset error lowers the tip's height by the same amount
-driver-robot-hand-touch.adb	Found : Surface_Index (Presses'Range) := [others => 1];	1	structure	surfaces are numbered from one
-driver-robot-hand-touch.adb	Next : constant Real := Real'Max (1.0, Noise * (Res * Res) / Real (Dof));	1.0	statistics	the presses' noise is never below what the arm's pose predicts
+driver-robot-hand-tips.adb	Driver.Robot.Hand.Touch.Fit (Presses, Known_Sights (T), [1 => (Measured => False)]);	1	structure	a hand's presses are fitted on one surface
+driver-robot-hand-tips.adb	Presses (N) := (Tool => K.Event.Tool, Sight => Index_Of (T, K.Lobe, K.Opening), Surface => 1);	1	structure	a hand's presses are fitted on one surface
+driver-robot-hand-tips.adb	Spread := Spread + (Across * Across) / 2.0;	2.0	math	the mean of the squared angle about the two axes across the direction
+driver-robot-hand-touch.adb	A (R, J + F) := -1.0;	1.0	math	a higher surface lowers the height by as much
+driver-robot-hand-touch.adb	Base (Row + 1, CF) := 1.0 / P.Offset_Sigma;	1.0	math	a prior's row is whitened by its own sigma
+driver-robot-hand-touch.adb	Base (Row + 2, CF + 1) := 1.0 / L11;	1.0	math	the inverse of the tilt covariance's Cholesky factor
+driver-robot-hand-touch.adb	Base (Row + 2, CF + 1) := 1.0 / L11;	2	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
+driver-robot-hand-touch.adb	Base (Row + 3, CF + 1) := -L21 / (L11 * L22);	3	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
+driver-robot-hand-touch.adb	Base (Row + 3, CF + 2) := 1.0 / L22;	1.0	math	the inverse of the tilt covariance's Cholesky factor
+driver-robot-hand-touch.adb	Base (Row + 3, CF + 2) := 1.0 / L22;	2	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
+driver-robot-hand-touch.adb	Base (Row + 3, CF + 2) := 1.0 / L22;	3	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
+driver-robot-hand-touch.adb	Base (Row, CF + 2) := -(Nominal (F).Tangent_2 * (Y - Nominal (F).Centre));	2	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
+driver-robot-hand-touch.adb	Base (Row, CF) := -1.0;	1.0	math	a higher surface lowers the height by as much
+driver-robot-hand-touch.adb	C13 : constant Real := Solution_Cov (CF, CF + 2);	2	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
+driver-robot-hand-touch.adb	Next : constant Real := Real'Max (1.0, Scale * (Res * Res) / Real (Dof));	1.0	statistics	the noise is never taken below the one predicted
 driver-robot-hand-touch.adb	Noise : Real := 1.0;	1.0	statistics	the presses' noise starts at what the arm's pose predicts
+driver-robot-hand-touch.adb	Noise_Dof := (if Scale > 1.0 then Dof else 0);	1.0	statistics	the predicted noise, not raised by the scatter
+driver-robot-hand-touch.adb	Nominal (F) := Moved (Nominal (F), Solution_Q (CF), Solution_Q (CF + 1), Solution_Q (CF + 2));	2	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
+driver-robot-hand-touch.adb	Pinned (Rows + C, C) := 1.0;	1.0	math	an unknown nothing bears on is pinned by a unit row
 driver-robot-hand-touch.adb	Plane_Unknowns : constant := 3;	3	structure	a surface's error is its offset and its two tilts
-driver-robot-hand-touch.adb	S : Solution (K => 1);	1	structure	a tip on a known line of sight has one unknown, its distance
-driver-robot-hand-touch.adb	S : Solution (K => 3);	3	structure	a free tip has three unknowns, its coordinates
-driver-robot-hand-touch.adb	S.Degrees_Of_Freedom := (if Noise > 1.0 then Dof else 0);	1.0	statistics	the scale was measured when it exceeds the predicted noise
-driver-robot-hand-touch.adb	Scale : Real := 1.0 / Noise;	1.0	statistics	the predicted noise in units of the measured scale
-driver-robot-hand-touch.adb	Solve (E, Presses, Surfaces, [1 => 0.0], S, Stopped, Sunk);	1	structure	the single unknown of a tip on a line of sight
+driver-robot-hand-touch.adb	Point_Unknowns : constant := 3;	3	structure	a point has three coordinates
+driver-robot-hand-touch.adb	S : constant Real := (if Press_Of_Row (R) > 0 then Sigma (R) * Sqrt (Scale) else 1.0);	1.0	math	a prior's rows are whitened already
+driver-robot-hand-touch.adb	Scale : Real := 1.0;	1.0	statistics	the noise starts at the one predicted
+driver-robot-hand-touch.adb	Sigma : Real_Vector (1 .. Rows) := [others => 1.0];	1.0	math	a prior's rows are whitened already
+driver-robot-hand-touch.adb	T12 : constant Real := Solution_Cov (CF + 1, CF + 2);	2	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
+driver-robot-hand-touch.adb	T22 : constant Real := Solution_Cov (CF + 2, CF + 2);	2	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
+driver-robot-hand-touch.adb	T22 : constant Real := Solution_Cov (CF + 2, CF + 2);	2	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
+driver-robot-hand-touch.adb	W : constant Positive := (if As = On_Sight then 1 else Point_Unknowns);	1	structure	a tip on its line has one unknown, the distance along it
+driver-robot-hand-touch.adb	Without : Real := 1.0 / Scale;	1.0	statistics	the others' noise in units of the predicted one
 driver-robot-hand-touch.adb	if Chosen (I) and then Significant (Deleted (I), 1.0, Dof_Of (I))	1.0	math	a residual already in units of its own sigma
-driver-robot-hand-touch.adb	if Dof > 1 and then (Chi - Res (J) ** 2 / Free) / Real (Dof - 1) > Scale then	1	statistics	the others need a degree of freedom left to measure their scatter
-driver-robot-hand-touch.adb	if Presses'Length < 2 or else not Known (Origin) or else Direction.Sigma >= Real'Last then	2	structure	one press to fix the distance and one to check it
+driver-robot-hand-touch.adb	if Dof > 1 and then (Chi - Res (R) ** 2 / Free) / Real (Dof - 1) > Without then	1	statistics	leaving a press out leaves one degree of freedom less
+driver-robot-hand-touch.adb	then Moved (Prior (F).Plane, Correction (Plane_Unknowns * F - 2), Correction (Plane_Unknowns * F - 1),	2	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
 driver-robot-hand-views.adb	Noise : constant Real := Sqrt (2.0) * T.Closer_Noise.Element (T.Closer_Noise.Element'First + C - 1);	2.0	statistics	the difference of two readings carries the noise of each: the square root of two times one
 driver-robot-hand-views.adb	Sqrt (2.0) * T.Closer_Noise.Element (T.Closer_Noise.Element'First + Channel - 1));	2.0	statistics	the difference of two readings carries the noise of each: the square root of two times one
 driver-robot-hand-views.adb	and then Significant (A (I) - B (B'First + I - A'First), Sqrt (2.0) * Noise (Noise'First + I - A'First))	2.0	statistics	the difference of two readings carries the noise of each: the square root of two times one
@@ -523,6 +533,7 @@ driver-robot-hand.adb	("" & Driver.Log.Image (P.U, 1) & "" & Driver.Log.Image (P
 driver-robot-hand.adb	("" & Driver.Log.Image (P.U, 1) & "" & Driver.Log.Image (P.V, 1) & "");	1	format	digits printed in a log line or a message
 driver-robot-hand.adb	(Mean => (1.0 / Real (Count)) * Sum, Covariance => (1.0 / Real (Count) ** 2) * Total));	1.0	math	the mean of n tips, and its covariance over n squared
 driver-robot-hand.adb	(Mean => (1.0 / Real (Count)) * Sum, Covariance => (1.0 / Real (Count) ** 2) * Total));	1.0	math	the mean of n tips, and its covariance over n squared
+driver-robot-hand.adb	Sqrt (2.0) * Reading_Noise (M, R.Group, C)));	2.0	statistics	the difference of two readings carries the noise of each: the square root of two times one
 driver-stats.adb	Child := 2 * Root;	2	math	heap sort and median index arithmetic
 driver-stats.adb	Degrees_Of_Freedom => X'Length - 2),	2	statistics	a line fit uses two degrees of freedom
 driver-stats.adb	Gaussian_MAD_To_Sigma : constant := 1.482_602_218_505_602;	1.482_602_218_505_602	statistics	1 / Phi^-1 (3/4): MAD to sigma for Gaussian data
