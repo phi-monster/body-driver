@@ -18,21 +18,30 @@ procedure Geo_Boot_Support (L : in out Plug.Link; F : in out Plug.Frame; C : in 
    procedure Touch_Tips_Together (Arms, Cams : Geom.Nat_Vectors.Vector) is separate;
    Tip_Arms, Tip_Cams : Geom.Nat_Vectors.Vector;   --  要碰桌面量指尖的手、它们各自的眼
 begin
+   --  压之前看底下看见、躺在面上的点只在这一段量、这一段用(挑空地);上一回开机留下的(可能是另一个世界的)不要
+   C.Seen_On.Clear;
    for A in 0 .. C.Map.Arms - 1 loop
       declare
          Hc : constant Integer := (if A < Natural (C.Map.Cam_On_Arm.Length) then C.Map.Cam_On_Arm (A) else -1);
          Have : constant Boolean := Hc >= 0 and then Natural (Hc) < Natural (C.Geo.Length) and then Natural (Hc) < Natural (F.Cams.Length) and then A < Natural (F.EE.Length)
            and then C.Geo (Natural (Hc)).Valid and then C.Geo (Natural (Hc)).F > 0.0;
+         --  合空时的尖:每一瓣都量过,或者握区里没有合空时手指到的那一截(量不了,碰了也白碰)
+         Shut_Done : constant Boolean := Have and then
+           ((not C.Geo (Natural (Hc)).Lobes.Is_Empty and then (for all Lg of C.Geo (Natural (Hc)).Lobes => Lg.Shut_Ok))
+            or else not Zone_Of (C, A, Natural (Hc)).Shut.Ok);
       begin
          if Plug.Reset_Pending (L) and then Plug.Take_Reset (L) then
             Geo_Say ("对方复位(新的一集)⇒ 手回了原处,接着摸面");
          end if;
          if not Have then
             Geo_Say ("第" & Codec.Img (A + 1) & " 只手:眼的朝向没量 ⇒ 这只手先不去摸它下面的面");
-         elsif C.Board_Plane and then C.Geo (Natural (Hc)).Tip_Valid and then C.Geo (Natural (Hc)).Tip_Touch then
-            --  缺什么才量什么:指尖是碰桌面量过的(几何文件里存着)、东西躺的面是板的(随板装回)⇒ 这回不碰
-            --  (X5C4 2026-09-26:装回身体干活,开机每瓣碰一次用掉 900 多拍,官方一集只有 200 步)
+         elsif C.Board_Plane and then C.Geo (Natural (Hc)).Tip_Valid and then C.Geo (Natural (Hc)).Tip_Touch and then Shut_Done then
+            --  缺什么才量什么:指尖(张开、合空两头)是碰桌面量过的(几何文件里存着)、东西躺的面是板的(随板装回)⇒ 这回不碰
+            --  (X5C4 2026-09-26:装回身体干活,开机每瓣碰一次用掉 900 多拍,官方一集只有 200 步)。
+            --  只缺合空时的尖(10-01 以前的几何文件)⇒ 下面照样叫碰指尖,它只碰合空那一头
             Geo_Say ("第" & Codec.Img (A + 1) & " 只手:指尖是碰桌面量过的(离眼 " & Mm (Geom.Norm (C.Geo (Natural (Hc)).Tip)) & "、张口 " & Mm (C.Geo (Natural (Hc)).Gap)
+                     & (if not C.Geo (Natural (Hc)).Lobes.Is_Empty and then C.Geo (Natural (Hc)).Lobes (0).Shut_Ok then "、合空时的尖也量过"
+                        else "、握区里没有合空时手指到的那一截(合空时的尖量不了)")
                      & "),桌面是板的 ⇒ 这回不碰");
          elsif C.Board_Plane then
             if A < Lockstep.Max_Hands then

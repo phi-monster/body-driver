@@ -494,6 +494,7 @@ package body Geom is
    end Press_Of;
 
    function Fit_Presses (Eqs : Press_Eq_Vectors.Vector; Gate : Long_Float; View : Finger_View) return Press_Fit is separate;
+   function Fit_On_Ray (Eqs : Press_Eq_Vectors.Vector; D : V3; Gate : Long_Float) return Press_Fit is separate;
 
    function Tilt_Dir (D : V3; Tilt, Azim : Long_Float) return V3 is
       function Dot (A, B : V3) return Long_Float is (A (0) * B (0) + A (1) * B (1) + A (2) * B (2));

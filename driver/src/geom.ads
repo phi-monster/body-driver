@@ -30,6 +30,12 @@ package Geom is
    type Lobe_Geo is record
       Tip : V3 := [others => 0.0];
       Wide, Thin : Long_Float := 0.0;
+      --  合空时这一瓣的尖(相机系、世界单位;大并行 §2 第 4 条"合拢那一路:张到头、合空两头都量",10-01 路 5 要的):爪子合空、碰桌面量的
+      --  (Zone.Hand_Zone.Shut 那一截的视线朝下压,沿那条视线解多远,Fit_On_Ray)。几瓣合空时到一起 ⇒ 量的是会合的那一点,每一瓣都是它;
+      --  一边不动的夹爪 ⇒ 动的那一瓣合到不动的那一根旁边的那一点。张开时的尖(Tip)→ 它 = 这一瓣合拢那一路的方向和行程。
+      --  Shut_Ok = 量过(老文件没有 ⇒ 没量,开机补碰)
+      Shut : V3 := [others => 0.0];
+      Shut_Ok : Boolean := False;
    end record;
    package Lobe_Geo_Vectors is new Ada.Containers.Vectors (Natural, Lobe_Geo);
    type Cam_Geo is record
@@ -273,6 +279,11 @@ package Geom is
    end record;
    No_View : constant Finger_View := (G => No_Geo, W => 0, H => 0, Mask => Bytes.Bool_Vectors.Empty_Vector);   --  不核(只给自检的合成方程)
    function Fit_Presses (Eqs : Press_Eq_Vectors.Vector; Gate : Long_Float; View : Finger_View) return Press_Fit;
+   --  同一套碰法,那一点在眼系里的视线 D(单位)已知、只差多远(1 个未知数 λ,X = λ D;合空时手指到的那一截,像素量的):
+   --  对准它的几下里找对得上的最大的一组 —— 至少 2 下(1 个未知数 + 1 条自己核)、组里每一下拿组里别的几下解的 λ 预测它,差不过 Gate;
+   --  λ 在眼前面;一样大的组不止一组、解出来对组里哪一下差过 Gate ⇒ Ambiguous。别的手形压的几下(Aimed = False)不核。
+   --  Sd = λ 的不确定度(组里残差定的噪声 ÷ √Σ(A·D)²)沿 D 摊到三个分量
+   function Fit_On_Ray (Eqs : Press_Eq_Vectors.Vector; D : V3; Gate : Long_Float) return Press_Fit;
    --  换倾角碰每一下让手上哪一个方向朝正下(相机系,单位):这一瓣的视线 D(相机系,单位)朝方位 Azim 斜 Tilt(弧度)——
    --  方位从"眼的 x 轴扣掉沿 D 的那一截"起量、绕 D 转(手自己的方向,每只手、每具身体一样的定法)。Tilt = 0 ⇒ D 本身
    function Tilt_Dir (D : V3; Tilt, Azim : Long_Float) return V3;

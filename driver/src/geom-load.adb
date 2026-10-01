@@ -87,6 +87,17 @@ begin
                               end loop;
                               Lg.Wide := Json.Num (D, Json.Get (D, Lnd, "wide"));
                               Lg.Thin := Json.Num (D, Json.Get (D, Lnd, "thin"));
+                              --  合空时的尖(10-01 起存;没有 ⇒ 没量,开机补碰)
+                              declare
+                                 Ls : constant Integer := Json.Get (D, Lnd, "shut");
+                              begin
+                                 if Ls >= 0 and then Json.Count (D, Ls) = 3 then
+                                    for A in 0 .. 2 loop
+                                       Lg.Shut (A) := Json.Num (D, Json.Child (D, Ls, A));
+                                    end loop;
+                                    Lg.Shut_Ok := True;
+                                 end if;
+                              end;
                               G.Lobes.Append (Lg);
                            end if;
                         end;
