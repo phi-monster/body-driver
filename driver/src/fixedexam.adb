@@ -1,6 +1,6 @@
 --  离线解不动的眼(09-30 V1B69:开机"不长在手上的那只眼放不进世界",同一台机器、同样的配点数 V1B68 解出焦距 297.5):
 --  读一炮落盘的 look/cam_obs.txt(每一笔:哪只手、它的第几格、第几个三角点、不动的眼里的像素、往返差、这个点在那只手自己系里的坐标和协方差),
---  第 0 只手的点就是世界系;别的手按 align_arm<k>.txt 的长度倍数、转动、平移搬进世界(同 Jointboot.To_World / Cov_World;
+--  世界那只手(同目录的 world_arm.txt;没有 = 第 0 只,10-01 以前的落盘)的点就是世界系;别的手按 align_arm<k>.txt(k 按文件名认)的长度倍数、转动、平移搬进世界(同 Jointboot.To_World / Cov_World;
 --  落盘的是一起精修以后的那一份,和当时配进来时差一点)。照 Jointboot.Fit_Cam 的样子搭板:配点噪声 = 往返差的中位、主点在画幅正中、焦距一起解,
 --  跑驱动同一份 Geom.Fit_Fixed_Board,打出解没解出、进解几个点、残差、焦距、位置。
 --  用法:fixedexam <cam_obs.txt> <画幅宽> <画幅高> [align_arm1.txt …];环境变量 FIT_ARM = k ⇒ 只拿第 k 只手的点解,再按解出来的眼把每只手的点投回去各报残差
@@ -9,6 +9,8 @@ with Ada.Command_Line; use Ada.Command_Line;
 with Ada.Text_IO; use Ada.Text_IO;
 with Ada.Containers.Vectors;
 with Ada.Strings.Unbounded;
+with Ada.Strings.Fixed;
+with Ada.Directories;
 with Bytes; use Bytes;
 with Codec;
 with Geom; use Geom;
@@ -55,12 +57,28 @@ begin
    end if;
    W := Natural'Value (Argument (2));
    H := Natural'Value (Argument (3));
-   Worlds.Append (Arm_World'(others => <>));
+   --  每只手先当恒等(世界那只手就是它;没给 align 文件的手也当恒等 —— 同以前第 0 只)
+   for K in 0 .. 7 loop   --  最多 8 只手(次数,同 alignexam)
+      Worlds.Append (Arm_World'(others => <>));
+   end loop;
+   declare
+      Dir : constant String := Ada.Directories.Containing_Directory (Argument (1));
+   begin
+      if Ada.Directories.Exists (Dir & "/world_arm.txt") then
+         Open (F, In_File, Dir & "/world_arm.txt");
+         Put_Line ("世界那只手:第" & Natural'Image (Natural'Value (Get_Line (F))) & " 只(world_arm.txt)");
+         Close (F);
+      end if;
+   end;
    for A in 4 .. Argument_Count loop
       Open (F, In_File, Argument (A));
       declare
          T : constant Strs := Fields (Get_Line (F));
          Wd : Arm_World;
+         Nm : constant String := Ada.Directories.Simple_Name (Argument (A));
+         P0 : constant Natural := Ada.Strings.Fixed.Index (Nm, "align_arm");
+         P1 : constant Natural := Ada.Strings.Fixed.Index (Nm, ".txt");
+         Ka : constant Natural := (if P0 > 0 and then P1 > P0 + 9 then Natural'Value (Nm (P0 + 9 .. P1 - 1)) else A - 3);
       begin
          --  S s R r00 … r22 T t0 t1 t2
          Wd.S := Long_Float'Value (T (1));
@@ -72,7 +90,7 @@ begin
          for I in 0 .. 2 loop
             Wd.Ta (I) := Long_Float'Value (T (13 + I));
          end loop;
-         Worlds.Append (Wd);
+         Worlds.Replace_Element (Ka, Wd);
       end;
       Close (F);
    end loop;
