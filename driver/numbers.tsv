@@ -1,5 +1,10 @@
 # file	line (comments and strings removed, blanks normalized)	literal (a " prefix: inside a string)	category	why
 body_driver.adb	Handed : Integer := -1;	1	structure	sentinel: no episode's sentence handed out yet
+driver-brain-keyboard.adb	Rule ("");	"0	format	GBNF character class of decimal digits (a count, or a digit inside a say sentence)
+driver-brain-keyboard.adb	Rule ("");	"1	format	GBNF character class of decimal digits (a count, or a digit inside a say sentence)
+driver-brain-keyboard.adb	Rule ("");	"9	format	GBNF character class of decimal digits (a count, or a digit inside a say sentence)
+driver-brain-keyboard.adb	Rule ("");	"9	format	GBNF character class of decimal digits (a count, or a digit inside a say sentence)
+driver-brain-keyboard.adb	Sentence_Rule : constant String := "";	"9	format	GBNF character class of decimal digits (a count, or a digit inside a say sentence)
 driver-bytes.adb	Capacity := 1;	1	numerics	smallest buffer capacity before doubling
 driver-bytes.adb	Capacity := 2 * Capacity;	2	numerics	geometric growth keeps appends amortized O(1)
 driver-conventions.ads	Unchanged_Fraction : constant := 0.01;	0.01	numerics	convergence of iterative estimates (documented in Conventions)
