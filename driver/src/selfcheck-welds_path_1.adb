@@ -13,12 +13,14 @@ with Episode;
 with World;
 with Memory;
 with Runtime;
+with Probe;
 separate (Selfcheck)
 procedure Welds_Path_1 is
    use Ada.Numerics.Long_Elementary_Functions;
    use type Selfmap.Group_Role;
    use type Selfmap.Walk_End;
    use type Runtime.Yield;
+   use type Probe.Next_Step;
    use type Readings.Eye_Verdict;
    use type Readings.View_Says;
    --  路 1 的焊点(大并行.md §5 路 1):每条写清"错了会是什么病",带一颗牙(去掉那一改就红)
@@ -1877,4 +1879,81 @@ begin
              & " · 牙:原来那一串 ⇒ 地方 " & Codec.Img (Natural (Co.Places.Length)) & " 个、认名字的眼" & Integer'Image (Co.Name_Cam)
              & "、换过眼 " & Boolean'Image (Co.Eye_Chosen) & "、程序还在,执行器下一步交出「" & To_String (Old_Next) & "」(上一集那段的第二条)");
    end;
+
+   --  ══ 探针那一推看没看见(Probe;Act.Probe_Effects 用它,10-01 主代理批):命令实到了、画面里那一点一个像素都没挪(按驱动的跟法)⇒ 不算量到 ══
+   --  假身体(只有画面这一边):推 Amp,那一点在画面里真挪 K × Amp 像素;驱动的跟法(Act.Retrack 跟手上那一块)流不到半个像素就判跟丢、放回原处。
+   --  V1B79 落盘重放(驱动自己的光流,10-01):通道 6 一推实到 0.0127,手在头顶眼里真挪 0.67–0.87 px(OpenCV LK / 相位相关),
+   --  驱动的光流只看到 0.28–0.37 px ⇒ 跟丢、放回原处 ⇒ 原来照样记成"这一列是零"、还信它。A 照它取(一推 0.3 px),B 更小(一推 0.2 px);
+   --  地板按那一炮静止两帧重跟量的(0.010 / 0.013 px)。
+   --  病:没挪的那一推当成"量到了零",响应表里这一列是假的零,解算以为这根通道不动手。
+   --  牙:① 原来的判法(命令实到超过读数噪声就算)⇒ 第一推就收、记成零;② 新判法配原来的"加倍了一点没多跑"(拿跟丢的 0 比)⇒ B 两推都跟丢就判成零、不再加倍
+   declare
+      Amp0 : constant Long_Float := 0.0127;
+      Cap : constant Long_Float := 8.0 * Amp0;
+      Lost_Px : constant Long_Float := 0.5;            --  Retrack:手动了、这儿流不到半个像素 ⇒ 跟丢(它那一行的数)
+      W : constant Long_Float := 640.0;
+      Static : Floats;                                 --  静止两帧上重跟的挪动平方(画幅²)
+      Floor : Long_Float;
+      type Rule is (New_Rule, Old_Seen, Old_Next);
+      --  一路加倍到看见(或上限 / 判成零):Pushes = 推了几推,Col = 记进表的那一列(像素 / 单位),Got = 收下了
+      procedure Ladder (K_Px : Long_Float; R : Rule; Pushes : out Natural; Col : out Long_Float; Got : out Boolean) is
+         Amp : Long_Float := Amp0;
+         Last : Long_Float := -1.0;
+      begin
+         Pushes := 0; Col := 0.0; Got := False;
+         loop
+            declare
+               Px : constant Long_Float := K_Px * Amp;
+               Lost : constant Boolean := Px < Lost_Px;
+               Ran : constant Long_Float := (if Lost then 0.0 else Px / W);   --  跟丢 ⇒ 放回原处
+               Meas : constant Long_Float := (if Lost then -1.0 else Ran);
+               Seen : constant Boolean := (if R = Old_Seen then True else Probe.Moved (False, Lost, Ran, Floor));
+               Nx : Probe.Next_Step;
+            begin
+               Pushes := Pushes + 1;
+               if R = Old_Next and then not Seen then
+                  --  原来的:幅度 × 2 过上限 ⇒ 不用;加倍以后(连跟丢的 0 一起比)一点没多 ⇒ 零
+                  Nx := (if Amp * 2.0 > Cap then Probe.At_Cap elsif Last >= 0.0 and then Ran <= Last then Probe.Is_Zero else Probe.Double_It);
+                  Last := Ran;
+               else
+                  Nx := Probe.Next (Seen, Meas, Last, Amp, Cap);
+                  Last := Meas;
+               end if;
+               case Nx is
+                  when Probe.Take_It =>
+                     Col := Ran * W / Amp; Got := True;
+                     return;
+                  when Probe.At_Cap | Probe.Is_Zero =>
+                     return;
+                  when Probe.Double_It =>
+                     Amp := 2.0 * Amp;
+               end case;
+            end;
+         end loop;
+      end Ladder;
+      Ka : constant Long_Float := 0.3 / Amp0;
+      Kb : constant Long_Float := 0.2 / Amp0;
+      Pa, Pb, Pa_Old, Pb_Old : Natural;
+      Ca, Cb, Ca_Old, Cb_Old : Long_Float;
+      Ga, Gb, Ga_Old, Gb_Old : Boolean;
+   begin
+      Static.Append ((0.010 / W) ** 2); Static.Append ((0.013 / W) ** 2);
+      Floor := Probe.Floor_Of (Probe.Track_Sigma (Static));
+      Ladder (Ka, New_Rule, Pa, Ca, Ga);
+      Ladder (Kb, New_Rule, Pb, Cb, Gb);
+      Ladder (Ka, Old_Seen, Pa_Old, Ca_Old, Ga_Old);
+      Ladder (Kb, Old_Next, Pb_Old, Cb_Old, Gb_Old);
+      Check (Ga and then Pa = 2 and then abs (Ca - Ka) <= 1.0e-9 * Ka and then Gb and then Pb = 3 and then abs (Cb - Kb) <= 1.0e-9 * Kb
+             and then not Probe.Moved (False, True, 0.0, Floor) and then not Probe.Moved (True, False, 1.0, Floor)
+             and then Probe.Next (False, 0.002, 0.002, 2.0 * Amp0, Cap) = Probe.Is_Zero
+             and then Probe.Next (False, -1.0, 0.002, 2.0 * Amp0, Cap) = Probe.Double_It
+             and then Ga_Old and then Pa_Old = 1 and then Ca_Old = 0.0 and then not Gb_Old and then Pb_Old = 2,
+             "探针 · 命令实到了、画面里那一点按驱动的跟法没挪(流不到半像素 ⇒ 跟丢)不算量到:A(一推 0.3 px)第 " & Codec.Img (Pa)
+             & " 推看见、记 " & Codec.Fmt (Ca, 2) & " px/单位(真 " & Codec.Fmt (Ka, 2) & ") · B(一推 0.2 px)第 " & Codec.Img (Pb) & " 推看见、记 "
+             & Codec.Fmt (Cb, 2) & "(真 " & Codec.Fmt (Kb, 2) & ") · 地板 = 静止两帧重跟的 Stats.Z 倍 = " & Codec.Fmt (Floor * W, 4) & " px"
+             & " · 长在这只眼上的手的点不算看见 · 两推都量出来、加倍一点没多 ⇒ 零;有一推跟丢 ⇒ 接着加倍"
+             & " · 牙:① 原来只问命令实到 ⇒ A 第 " & Codec.Img (Pa_Old) & " 推就收、这一列记成 " & Codec.Fmt (Ca_Old, 2)
+             & ";② 拿跟丢的 0 比「没多跑」⇒ B 第 " & Codec.Img (Pb_Old) & " 推判成零、" & (if Gb_Old then "(收下了,牙没咬上)" else "没收下"));
+   end;
+
 end Welds_Path_1;
