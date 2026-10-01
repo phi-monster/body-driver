@@ -461,8 +461,9 @@ package body Sinew is
      (Keyboard_Text (Rels_Usable, Roles_Usable, Outs_Usable, Qtys_Usable,
                      Complement (Name_Forbidden (Rels_Usable, Roles_Usable, Outs_Usable, Qtys_Usable), True)));
 
-   --  每个量配一句它是什么(含义来自身体怎么量它,不是说明书)
-   function Qty_Gloss (Qtys_Usable : String) return String is
+   --  每个量配一句它是什么(含义来自身体怎么量它,不是说明书):那句话只有一份,在量它的那一边(Act.Qty_Meaning),这里照抄。
+   --  没给(Meaning = null)⇒ 纸上不印含义,不另编一句
+   function Qty_Gloss (Qtys_Usable : String; Meaning : access function (Name : String) return String) return String is
       R : Unbounded_String;
       I : Natural := Qtys_Usable'First;
       J : Natural;
@@ -476,10 +477,9 @@ package body Sinew is
             declare
                Wd : constant String := Qtys_Usable (I .. J - 1);
             begin
-               Append (R, "              " & Wd & " = "
-                       & (if Wd = "height" then "how far the thing is above the surface it lies on (I measure it with my own eyes; up means lift it off that surface)"
-                          else "a reading of it I can change")
-                       & ASCII.LF);
+               if Meaning /= null then
+                  Append (R, "              " & Wd & " = " & Meaning (Wd) & ASCII.LF);
+               end if;
             end;
          end if;
          I := J + 1;
@@ -487,7 +487,8 @@ package body Sinew is
       return To_String (R);
    end Qty_Gloss;
 
-   function Grammar (Rels_Usable, Roles_Usable, Outs_Usable : String; Qtys_Usable : String := "") return String is
+   function Grammar (Rels_Usable, Roles_Usable, Outs_Usable : String; Qtys_Usable : String := "";
+                     Qty_Meaning : access function (Name : String) return String := null) return String is
       function Bar (S : String) return String is
          R : Unbounded_String;
          I : Natural := S'First;
@@ -514,7 +515,7 @@ package body Sinew is
            "<interval>  ::= do <what> <quantity> <direction> until <outcome>" & ASCII.LF &
            "<what>      ::= <the thing's name only> (plain words, as many as the name needs: the name you use when you point the thing out; not an action, not a part of me; it may NOT be any of the words in this grammar, nor the word item)" & ASCII.LF &
            "<quantity>  ::= " & Bar (Qtys_Usable) & "   (a quantity of that thing that I measure myself and can change)" & ASCII.LF &
-           Qty_Gloss (Qtys_Usable) &
+           Qty_Gloss (Qtys_Usable, Qty_Meaning) &
            "<direction> ::= up | down" & ASCII.LF &
            "<outcome>   ::= " & Bar (Outs_Usable) & ASCII.LF &
            "<word>      ::= say <one sentence in your own words> | done" & ASCII.LF &
