@@ -34,6 +34,8 @@ package Plan is
    end record;
    package Bind_Vectors is new Ada.Containers.Vectors (Natural, Bind_Entry);
    function Key_Of (N : Sinew.Noun) return String;
+   --  K 是不是这门语言的一个角色词(me / grasper / pusher …,照 Sinew 的角色表,不另抄一份)
+   function Is_Role (K : String) return Boolean;
    function Look_Up (B : Bind_Vectors.Vector; N : Sinew.Noun) return Integer;
 
    --  ── 名字落到哪一件(大并行 §2 第 15 条,2026-10-01)──────────────────────────────

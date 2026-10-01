@@ -287,13 +287,14 @@ begin
              begin
                 if Pc.Valid then
                    It.Kind := Piece; It.Arm := A; It.Which := K; It.Located := True;
+                   It.Whole := Selfmap.Graph.Whole_Piece (C.Map, A);   --  me 只收它(Role_Wants 按整件问)
                    It.Cu := Pc.Cu; It.Cv := Pc.Cv; It.Depth := Pc.Z;
                    It.X0 := Pc.X0; It.Y0 := Pc.Y0; It.X1 := Pc.X1; It.Y1 := Pc.Y1;
                    Push (It, "a piece of you: everything that swings when channel " & Codec.Img (K) & " of arm " & Codec.Img (A + 1) & " moves (measured), now in cell " &
                          Codec.Img (Cell_Of (C, It.Cu, It.Cv)) & Rel (It.Cu, It.Cv) &
                          (if Tr.Pieces_Known (K) then "" else " (placed from my joints; not yet looked at here)")
-                         & (if Selfmap.Graph.Whole_Arm (C.Map) = Integer (A) then
-                              " - this is ALL OF ME that moves: nothing else of mine moves without it" else ""),
+                         & (if It.Whole then
+                              " - this is ALL OF ME that moves (say me): nothing else of mine moves without it" else ""),
                          Draw.Orange, 1);
                 end if;
              end;

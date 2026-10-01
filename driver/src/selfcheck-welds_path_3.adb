@@ -1,4 +1,5 @@
 with Stats;
+with Things;
 separate (Selfcheck)
 procedure Welds_Path_3 is
    --  路 3 的焊点(大并行.md §5 路 3):每条写清"错了会是什么病",带一颗牙(去掉那一改就红)
@@ -362,5 +363,433 @@ begin
              and then L (1).Kind = Jointboot.On_Group and then L (1).Arm = 0 and then L (1).World
              and then L2 (1).Kind = Jointboot.On_Group and then L2 (1).Group = 0 and then L2 (1).Arm = -1 and then L2 (2).Arm = 0 and then L2 (2).World,
              "眼长在谁身上(P8A):" & Jointboot.Eye_Say (L));
+   end;
+   --  ── I4 一件东西的估计(Things)──:合成的桌面 z = 0 上一块 4 × 3 × 2 的箱子(x ∈ ±2、y ∈ ±1.5、z ∈ 0 … 2);
+   --  四只眼从四边、高 2.5、离 20 看,一只从正上方 22 看(焦距 400、640 × 480;掩膜 = 像素中心那条视线碰得到箱子)
+   declare
+      Bx_Lo : constant V3 := [-2.0, -1.5, 0.0];
+      Bx_Hi : constant V3 := [2.0, 1.5, 2.0];
+      Up_Z : constant V3 := [0.0, 0.0, 1.0];
+      function Look_At (P, T, Up : V3) return Cam_Geo is
+         G : Cam_Geo;
+         Fw : V3 := [T (0) - P (0), T (1) - P (1), T (2) - P (2)];
+         Nf : constant Long_Float := Norm (Fw);
+         Xc, Yc : V3;
+      begin
+         Fw := [Fw (0) / Nf, Fw (1) / Nf, Fw (2) / Nf];
+         Xc := [Fw (1) * Up (2) - Fw (2) * Up (1), Fw (2) * Up (0) - Fw (0) * Up (2), Fw (0) * Up (1) - Fw (1) * Up (0)];
+         declare
+            Nx : constant Long_Float := Norm (Xc);
+         begin
+            Xc := [Xc (0) / Nx, Xc (1) / Nx, Xc (2) / Nx];
+         end;
+         Yc := [Xc (1) * Fw (2) - Xc (2) * Fw (1), Xc (2) * Fw (0) - Xc (0) * Fw (2), Xc (0) * Fw (1) - Xc (1) * Fw (0)];
+         for I in 0 .. 2 loop
+            G.R_Ce (I, 0) := Xc (I); G.R_Ce (I, 1) := Yc (I); G.R_Ce (I, 2) := -Fw (I);
+         end loop;
+         G.Pos := P; G.F := F; G.Cx := Cx; G.Cy := Cy; G.Valid := True; G.Fixed := True;
+         return G;
+      end Look_At;
+      --  一条视线碰不碰得到箱子(三对平面夹出来的那一段,纯几何)
+      function Hits (O, D, Lo, Hi : V3) return Boolean is
+         T0 : Long_Float := 0.0;
+         T1 : Long_Float := Long_Float'Last;
+      begin
+         for I in 0 .. 2 loop
+            if D (I) = 0.0 then
+               if O (I) < Lo (I) or else O (I) > Hi (I) then
+                  return False;
+               end if;
+            else
+               declare
+                  A : constant Long_Float := (Lo (I) - O (I)) / D (I);
+                  B : constant Long_Float := (Hi (I) - O (I)) / D (I);
+               begin
+                  T0 := Long_Float'Max (T0, Long_Float'Min (A, B)); T1 := Long_Float'Min (T1, Long_Float'Max (A, B));
+               end;
+            end if;
+         end loop;
+         return T0 <= T1;
+      end Hits;
+      function Render (G : Cam_Geo; Lo, Hi : V3) return Bools is
+         M : Bools;
+      begin
+         M.Set_Length (Ada.Containers.Count_Type (Wd * Ht));
+         for Y in 0 .. Ht - 1 loop
+            for X in 0 .. Wd - 1 loop
+               M (Y * Wd + X) := Hits (G.Pos, Ray_Fixed (G, Long_Float (X), Long_Float (Y)), Lo, Hi);
+            end loop;
+         end loop;
+         return M;
+      end Render;
+      --  一眼:掩膜只留窗里的(分割只在窗里作数);窗 = 掩膜外接框四面各让一个像素(没给就这么取)
+      function View_Of (G : Cam_Geo; Idx : Natural; M : Bools; X0, Y0, X1, Y1 : Integer := -1) return Things.View is
+         V : Things.View;
+         Ax0, Ay0 : Integer := Integer'Last;
+         Ax1, Ay1 : Integer := -1;
+      begin
+         V.Cam := G; V.Cam_Index := Idx; V.W := Wd; V.H := Ht; V.Mask := M;
+         for Y in 0 .. Ht - 1 loop
+            for X in 0 .. Wd - 1 loop
+               if M (Y * Wd + X) then
+                  Ax0 := Integer'Min (Ax0, X); Ay0 := Integer'Min (Ay0, Y); Ax1 := Integer'Max (Ax1, X); Ay1 := Integer'Max (Ay1, Y);
+               end if;
+            end loop;
+         end loop;
+         if X0 >= 0 then
+            V.X0 := X0; V.Y0 := Y0; V.X1 := X1; V.Y1 := Y1;
+         else
+            V.X0 := Integer'Max (0, Ax0 - 1); V.Y0 := Integer'Max (0, Ay0 - 1); V.X1 := Integer'Min (Wd - 1, Ax1 + 1); V.Y1 := Integer'Min (Ht - 1, Ay1 + 1);
+         end if;
+         for Y in 0 .. Ht - 1 loop
+            for X in 0 .. Wd - 1 loop
+               if X < V.X0 or else X > V.X1 or else Y < V.Y0 or else Y > V.Y1 then
+                  V.Mask (Y * Wd + X) := False;
+               end if;
+            end loop;
+         end loop;
+         return V;
+      end View_Of;
+      Gs : array (0 .. 5) of Cam_Geo;
+      --  箱子表面的真值采样:每面 9 × 9
+      Truth : V3_Vectors.Vector;
+      procedure Sample_Box (Lo, Hi : V3) is
+      begin
+         Truth.Clear;
+         for Ax in 0 .. 2 loop
+            for Sd in 0 .. 1 loop
+               for I in 0 .. 8 loop
+                  for J in 0 .. 8 loop
+                     declare
+                        P : V3;
+                        A1 : constant Natural := (Ax + 1) mod 3;
+                        A2 : constant Natural := (Ax + 2) mod 3;
+                     begin
+                        P (Ax) := (if Sd = 0 then Lo (Ax) else Hi (Ax));
+                        P (A1) := Lo (A1) + (Hi (A1) - Lo (A1)) * Long_Float (I) / 8.0;
+                        P (A2) := Lo (A2) + (Hi (A2) - Lo (A2)) * Long_Float (J) / 8.0;
+                        Truth.Append (P);
+                     end;
+                  end loop;
+               end loop;
+            end loop;
+         end loop;
+      end Sample_Box;
+      --  真值的点有几成落在外包里(外包 = 没被雕掉的格子)。格子的边是起步格一半一半分出来的,舍入差几个末位;底面那些真值点正好躺在
+      --  面上(z = 0),格子的底边落在 0 的哪一侧只差末位 —— 判"在格子里"放宽格子自己的几个末位(数值)
+      function Covered (E : Things.Estimate) return Long_Float is
+         N : Natural := 0;
+         function Within (A, C, H : Long_Float) return Boolean is
+           (abs (A - C) <= H + Long_Float'Model_Epsilon * (abs C + H + abs A));
+      begin
+         for P of Truth loop
+            for Cl of E.Solid loop
+               if Within (P (0), Cl.C (0), Cl.H) and then Within (P (1), Cl.C (1), Cl.H) and then Within (P (2), Cl.C (2), Cl.H) then
+                  N := N + 1;
+                  exit;
+               end if;
+            end loop;
+         end loop;
+         return Long_Float (N) / Long_Float (Truth.Length);
+      end Covered;
+      --  独立的判法(按真值的箱子,不经 Things 的积分图、窗、八叉树):这一格的八个角投进第 K 只眼,外接框放宽 Z 倍像素量化、再多一个像素,
+      --  框里每个像素中心的视线都碰不到箱子 ⇒ 这一格明明是空的。外包里留着这样的格子 = 该雕没雕
+      function Clearly_Free (Cl : Things.Cell; Lo, Hi : V3) return Boolean is
+         D : constant Long_Float := Stats.Z / Sqrt (12.0) + 1.0;
+      begin
+         for K in 0 .. 4 loop
+            declare
+               U0, V0 : Long_Float := Long_Float'Last;
+               U1, V1 : Long_Float := Long_Float'First;
+               All_Front : Boolean := True;
+               Any_Hit : Boolean := False;
+            begin
+               for Sx in 0 .. 1 loop
+                  for Sy in 0 .. 1 loop
+                     for Sz in 0 .. 1 loop
+                        declare
+                           P : constant V3 := [Cl.C (0) + (if Sx = 0 then -Cl.H else Cl.H), Cl.C (1) + (if Sy = 0 then -Cl.H else Cl.H),
+                                               Cl.C (2) + (if Sz = 0 then -Cl.H else Cl.H)];
+                           U, V : Long_Float;
+                           Ok : Boolean;
+                        begin
+                           Project_Fixed (Gs (K), P, U, V, Ok);
+                           if Ok then
+                              U0 := Long_Float'Min (U0, U); U1 := Long_Float'Max (U1, U); V0 := Long_Float'Min (V0, V); V1 := Long_Float'Max (V1, V);
+                           else
+                              All_Front := False;
+                           end if;
+                        end;
+                     end loop;
+                  end loop;
+               end loop;
+               if All_Front and then U1 - U0 < Long_Float (Wd) and then V1 - V0 < Long_Float (Ht) then
+                  for Y in Integer (Long_Float'Ceiling (V0 - D)) .. Integer (Long_Float'Floor (V1 + D)) loop
+                     for X in Integer (Long_Float'Ceiling (U0 - D)) .. Integer (Long_Float'Floor (U1 + D)) loop
+                        if Hits (Gs (K).Pos, Ray_Fixed (Gs (K), Long_Float (X), Long_Float (Y)), Lo, Hi) then
+                           Any_Hit := True;
+                           exit;
+                        end if;
+                     end loop;
+                     exit when Any_Hit;
+                  end loop;
+                  if not Any_Hit then
+                     return True;
+                  end if;
+               end if;
+            end;
+         end loop;
+         return False;
+      end Clearly_Free;
+      E0 : Things.Estimate;
+      Ms : array (0 .. 4) of Bools;
+      T_Start : Ada.Calendar.Time;
+      Solve_S : Duration;
+      use type Ada.Calendar.Time;
+   begin
+      Gs (0) := Look_At ([0.0, -20.0, 2.5], [0.0, 0.0, 1.0], Up_Z);
+      Gs (1) := Look_At ([20.0, 0.0, 2.5], [0.0, 0.0, 1.0], Up_Z);
+      Gs (2) := Look_At ([0.0, 20.0, 2.5], [0.0, 0.0, 1.0], Up_Z);
+      Gs (3) := Look_At ([-20.0, 0.0, 2.5], [0.0, 0.0, 1.0], Up_Z);
+      Gs (4) := Look_At ([0.0, 0.0, 22.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]);
+      Gs (5) := Look_At ([14.0, -14.0, 10.0], [0.0, 0.0, 1.0], Up_Z);
+      for K in 0 .. 4 loop
+         Ms (K) := Render (Gs (K), Bx_Lo, Bx_Hi);
+      end loop;
+      Sample_Box (Bx_Lo, Bx_Hi);
+
+      --  🔴 ⑧ 五只眼雕出来的外包(Things.Solve):真值的点全在外包里(雕多了 = 把真的边雕掉);外包里没有一格是"按真值的箱子明明是空的"
+      --  (独立的判法,见 Clearly_Free;雕少了 = 该雕没雕)—— 外包本来就比箱子大一圈(四只侧眼从 2.5 高看,箱子底边外头那一圈从哪只眼看都挡在箱子前面,
+      --  轮廓分不出它和箱子),这一圈不算错;底面那一面(外法向朝下)没有眼看过、顶面看过;同一只眼没挪的第二眼换掉上一眼(眼数不涨);
+      --  只有一只眼(一处)⇒ 不雕,说沿视线多厚说不出(锥一直通到眼上)。
+      --  错了会是什么病:放宽那一圈没有(像素量化 ½ 像素就把真的边雕掉)⇒ 接触集挑到它外头;窗外当"不是它"⇒ 截了一截。
+      --  牙:Dilate 返回 0 ⇒ 真值落在外包外,红
+      E0.Name := To_Unbounded_String ("box");
+      Things.Set_Support (E0, [0.0, 0.0, 0.0], Up_Z);
+      for K in 0 .. 4 loop
+         Things.Add_View (E0, View_Of (Gs (K), K, Ms (K)));
+      end loop;
+      Things.Add_View (E0, View_Of (Gs (4), 4, Ms (4)));   --  同一只眼没挪:换掉上一眼
+      T_Start := Ada.Calendar.Clock;
+      Things.Solve (E0);
+      Solve_S := Ada.Calendar.Clock - T_Start;
+      declare
+         Bottom_Seen, Top_Unseen, N_Bottom, N_Top, N_Wrong : Natural := 0;
+         One : Things.Estimate;
+         Cov : constant Long_Float := Covered (E0);
+      begin
+         for P of E0.Surface loop
+            if P.N = [0.0, 0.0, -1.0] then
+               N_Bottom := N_Bottom + 1;
+               if P.Seen then
+                  Bottom_Seen := Bottom_Seen + 1;
+               end if;
+            elsif P.N = [0.0, 0.0, 1.0] then
+               N_Top := N_Top + 1;
+               if not P.Seen then
+                  Top_Unseen := Top_Unseen + 1;
+               end if;
+            end if;
+         end loop;
+         for Cl of E0.Solid loop
+            if Clearly_Free (Cl, Bx_Lo, Bx_Hi) then
+               N_Wrong := N_Wrong + 1;
+            end if;
+         end loop;
+         One.Name := To_Unbounded_String ("box");
+         Things.Set_Support (One, [0.0, 0.0, 0.0], Up_Z);
+         Things.Add_View (One, View_Of (Gs (4), 4, Ms (4)));
+         Things.Solve (One);
+         Check (E0.Valid and then Cov = 1.0 and then N_Wrong = 0 and then Natural (E0.Views.Length) = 5
+                and then N_Bottom > 0 and then Bottom_Seen = 0 and then N_Top > 0 and then Top_Unseen = 0
+                and then not E0.Thick_Unknown and then not One.Valid and then One.Thick_Unknown,
+                "一件东西的外包(五只眼,I4):真值的点 " & Codec.Img (Natural (Long_Float'Floor (100.0 * Cov))) & "% 在外包里;外包 "
+                & Codec.Img (Natural (E0.Solid.Length)) & " 格里按真值明明是空的 " & Codec.Img (N_Wrong) & " 格;外接盒 x "
+                & Codec.Fmt (E0.Lo (0), 3) & " … " & Codec.Fmt (E0.Hi (0), 3) & "、y " & Codec.Fmt (E0.Lo (1), 3) & " … " & Codec.Fmt (E0.Hi (1), 3)
+                & "、z " & Codec.Fmt (E0.Lo (2), 3) & " … " & Codec.Fmt (E0.Hi (2), 3) & "(箱子 ±2 / ±1.5 / 0 … 2,间距 " & Codec.Fmt (E0.Pitch, 3) & ");"
+                & Codec.Img (Natural (E0.Surface.Length)) & " 个表面点,底面 " & Codec.Img (Bottom_Seen) & " / " & Codec.Img (N_Bottom) & " 看过、顶面 "
+                & Codec.Img (N_Top - Top_Unseen) & " / " & Codec.Img (N_Top) & " 看过;眼 " & Codec.Img (Natural (E0.Views.Length))
+                & " 眼;只一只眼 ⇒ 不雕(" & Boolean'Image (One.Valid) & ")、多厚说不出 " & Boolean'Image (One.Thick_Unknown)
+                & ";解了 " & Codec.Fmt (Long_Float (Solve_S), 3) & " s");
+      end;
+
+      --  🔴 ⑨ 窗切着它的那一眼(Whole = False):第 1 只眼的窗只盖住箱子在它眼里的左半边(掩膜顶着窗边)⇒ 窗外不算"不是它",外包照样兜住整个箱子;
+      --  错了会是什么病:窗外当"不是它" ⇒ 窗外那一半被这一眼雕掉,接触集只在剩下那一截里挑(10-01 路 5:C1 第 102 拍 482 / 1704、S1A5 只剩转轴)。
+      --  牙:Judge 不分 Whole(窗外一律当空)⇒ 真值落在外包外,红
+      declare
+         E : Things.Estimate;
+         Vc : Things.View := View_Of (Gs (1), 1, Ms (1));
+      begin
+         Vc := View_Of (Gs (1), 1, Ms (1), Vc.X0, Vc.Y0, (Vc.X0 + Vc.X1) / 2, Vc.Y1);
+         E.Name := To_Unbounded_String ("box");
+         Things.Set_Support (E, [0.0, 0.0, 0.0], Up_Z);
+         for K in 0 .. 4 loop
+            Things.Add_View (E, (if K = 1 then Vc else View_Of (Gs (K), K, Ms (K))));
+         end loop;
+         Things.Solve (E);
+         Check (E.Valid and then not E.Views (1).Whole and then E.Views (0).Whole and then Covered (E) = 1.0,
+                "窗切着它的那一眼:第 1 只眼的窗只盖住左半边 ⇒ 判成没整个在窗里(" & Boolean'Image (E.Views (1).Whole) & "),真值的点 "
+                & Codec.Img (Natural (Long_Float'Floor (100.0 * Covered (E)))) & "% 在外包里;判动过 " & Codec.Img (E.Moves) & " 次、眼 "
+                & Codec.Img (Natural (E.Views.Length)) & " 眼(" & To_String (E.Note) & ")");
+      end;
+
+      --  🔴 ⑩ 被我自己挡着的像素(Occl,腕眼自己的手指):第 0 只眼右边三分之一被手指挡着,掩膜里没有那一截 ⇒ 挡着的地方不算"不是它",
+      --  这一眼也不算整个在窗里;外包照样兜住。错了会是什么病:手指后面那一截被雕掉,抓的时候以为它比真的短。
+      --  牙:Judge 不数挡着的像素、Whole 不看挨不挨着挡着的 ⇒ 真值落在外包外,红
+      declare
+         E : Things.Estimate;
+         V0 : Things.View := View_Of (Gs (0), 0, Ms (0));
+         Cut_X : constant Integer := V0.X0 + 2 * (V0.X1 - V0.X0) / 3;
+      begin
+         V0.Occl.Set_Length (Ada.Containers.Count_Type (Wd * Ht));
+         for Y in 0 .. Ht - 1 loop
+            for X in 0 .. Wd - 1 loop
+               V0.Occl (Y * Wd + X) := X >= Cut_X;
+               if X >= Cut_X then
+                  V0.Mask (Y * Wd + X) := False;
+               end if;
+            end loop;
+         end loop;
+         E.Name := To_Unbounded_String ("box");
+         Things.Set_Support (E, [0.0, 0.0, 0.0], Up_Z);
+         Things.Add_View (E, V0);
+         for K in 1 .. 4 loop
+            Things.Add_View (E, View_Of (Gs (K), K, Ms (K)));
+         end loop;
+         Things.Solve (E);
+         Check (E.Valid and then not E.Views (0).Whole and then Covered (E) = 1.0,
+                "被我自己挡着的像素:第 0 只眼右边三分之一被手指挡着 ⇒ 不算整个在窗里(" & Boolean'Image (E.Views (0).Whole) & "),真值的点 "
+                & Codec.Img (Natural (Long_Float'Floor (100.0 * Covered (E)))) & "% 在外包里;判动过 " & Codec.Img (E.Moves) & " 次、眼 "
+                & Codec.Img (Natural (E.Views.Length)) & " 眼");
+      end;
+
+      --  🔴 ⑪ 它动过了(Add_View 核新的一眼和外包对不对得上):五只眼雕好以后,从新的一处(14, −14, 10)看 —— 箱子没动 ⇒ 对得上,眼数 6;
+      --  箱子挪了 x + 1.5 ⇒ 对不上 ⇒ 判它动过、以前的眼作废(只剩这一眼,Moves = 1)。
+      --  错了会是什么病:挪过的东西前后两处的锥交在一起,外包只剩两处重叠的那一小块(或者整个雕没了)。牙:Off_Hull 永远说对得上 ⇒ 红
+      declare
+         Same, Shifted : Things.Estimate := E0;
+         Ms5 : constant Bools := Render (Gs (5), Bx_Lo, Bx_Hi);
+         Ms5b : constant Bools := Render (Gs (5), [Bx_Lo (0) + 1.5, Bx_Lo (1), Bx_Lo (2)], [Bx_Hi (0) + 1.5, Bx_Hi (1), Bx_Hi (2)]);
+      begin
+         Things.Add_View (Same, View_Of (Gs (5), 5, Ms5));
+         Things.Add_View (Shifted, View_Of (Gs (5), 5, Ms5b));
+         Check (Same.Moves = 0 and then Natural (Same.Views.Length) = 6 and then Shifted.Moves = 1 and then Natural (Shifted.Views.Length) = 1,
+                "它动过了:没动 ⇒ 判动过 " & Codec.Img (Same.Moves) & " 次、眼 " & Codec.Img (Natural (Same.Views.Length)) & " 眼;挪了 1.5 ⇒ 判动过 "
+                & Codec.Img (Shifted.Moves) & " 次、剩 " & Codec.Img (Natural (Shifted.Views.Length)) & " 眼");
+      end;
+
+      --  🔴 ⑬ 哪儿算"不是它"(Things.Reach,10-01 C1 重放):第 0 只眼里箱子右边挨着一块挡着的像素(从箱子一直连到画幅右边,像腕眼自己的手指),
+      --  掩膜没顶着窗边 ⇒ 说不出的只有挨着它的那一块(Unknown)、它可能伸到画幅外(Beyond);窗外没被挡着的像素照样不是它。
+      --  按三处像素各取一点(离眼 20):箱子上方窗外 ⇒ Free;挡着的那一块里 ⇒ No_Info;画幅外 ⇒ No_Info(它可能从挡着的那一块伸出去)。
+      --  错了会是什么病:挨着手指 ⇒ 窗外全算说不出,腕眼只在窗里雕,外包顺着别的眼的锥一直伸到眼上(C1:伸到 10 单位高)。
+      --  牙:挨着挡着的像素就当它顶着窗边(窗外全算说不出)⇒ 箱子上方那一点 No_Info,红
+      declare
+         V0 : Things.View := View_Of (Gs (0), 0, Ms (0));
+         Cut_X : constant Integer := V0.X0 + 2 * (V0.X1 - V0.X0) / 3;
+         function Pt_At (U, V : Long_Float) return V3 is
+            D : constant V3 := Ray_Fixed (Gs (0), U, V);
+         begin
+            return [Gs (0).Pos (0) + 20.0 * D (0), Gs (0).Pos (1) + 20.0 * D (1), Gs (0).Pos (2) + 20.0 * D (2)];
+         end Pt_At;
+         use type Things.Verdict;
+      begin
+         V0.Occl.Set_Length (Ada.Containers.Count_Type (Wd * Ht));
+         for Y in 0 .. Ht - 1 loop
+            for X in 0 .. Wd - 1 loop
+               V0.Occl (Y * Wd + X) := X >= Cut_X and then Y >= V0.Y0 and then Y <= V0.Y1;
+            end loop;
+         end loop;
+         Things.Reach (V0);
+         declare
+            Above : constant Things.Verdict := Things.Point_In (V0, Pt_At (Long_Float ((V0.X0 + V0.X1) / 2), Long_Float (V0.Y0 - 40)));
+            Hid : constant Things.Verdict := Things.Point_In (V0, Pt_At (Long_Float (Cut_X + 5), Long_Float ((V0.Y0 + V0.Y1) / 2)));
+            Off : constant Things.Verdict := Things.Point_In (V0, Pt_At (Long_Float (Wd + 60), Long_Float ((V0.Y0 + V0.Y1) / 2)));
+         begin
+            Check (V0.Beyond and then not V0.Whole and then Above = Things.Free and then Hid = Things.No_Info and then Off = Things.No_Info,
+                   "哪儿算不是它:挨着一块连到画幅边的挡着的像素 ⇒ 伸到画幅外 " & Boolean'Image (V0.Beyond) & ";箱子上方窗外 " & Things.Verdict'Image (Above)
+                   & "、挡着的那一块里 " & Things.Verdict'Image (Hid) & "、画幅外 " & Things.Verdict'Image (Off));
+         end;
+      end;
+
+      --  🔴 ⑭ 两眼夹着的那一截(Core,10-01 C1 重放):正上方那只眼看全了箱子;第 0 只眼(侧上方)里箱子上方整片被挡着(挡着的那一片挨着箱子、连到画幅上边)
+      --  ⇒ 箱子上方顺着正上方那只眼的视线一直到眼上,只有一眼说得上话(那儿有没有东西说不出):外包里有这一截,Core 里没有;
+      --  Core 的形心落在箱子里(按格子的半边长 + 放宽那一圈的世界尺寸),外包的上沿伸到箱子顶以上;真值的点全在外包里。
+      --  错了会是什么病:形心按整个外包算,被那一截拉到半空(C1:形心高 3.4 单位,东西本身 0.2),接触集、"走过去"都朝着半空。
+      --  牙:形心按整个外包算 ⇒ 红
+      declare
+         E : Things.Estimate;
+         V0 : Things.View := View_Of (Gs (0), 0, Ms (0));
+         Tol : Long_Float;
+      begin
+         V0.Occl.Set_Length (Ada.Containers.Count_Type (Wd * Ht));
+         for Y in 0 .. Ht - 1 loop
+            for X in 0 .. Wd - 1 loop
+               V0.Occl (Y * Wd + X) := Y < V0.Y0 + 2;
+            end loop;
+         end loop;
+         for Y in 0 .. Ht - 1 loop
+            for X in 0 .. Wd - 1 loop
+               if V0.Occl (Y * Wd + X) then
+                  V0.Mask (Y * Wd + X) := False;
+               end if;
+            end loop;
+         end loop;
+         E.Name := To_Unbounded_String ("box");
+         Things.Set_Support (E, [0.0, 0.0, 0.0], Up_Z);
+         Things.Add_View (E, V0);
+         Things.Add_View (E, View_Of (Gs (4), 4, Ms (4)));
+         Things.Solve (E);
+         Tol := E.Pitch + E.Center_Sd;
+         Check (E.Valid and then E.One_Look_Frac > 0.0 and then E.Hull_Hi (2) > Bx_Hi (2) + Tol and then Covered (E) = 1.0
+                and then E.Center (0) >= Bx_Lo (0) - Tol and then E.Center (0) <= Bx_Hi (0) + Tol
+                and then E.Center (1) >= Bx_Lo (1) - Tol and then E.Center (1) <= Bx_Hi (1) + Tol
+                and then E.Center (2) >= Bx_Lo (2) - Tol and then E.Center (2) <= Bx_Hi (2) + Tol,
+                "两眼夹着的那一截:只一眼说得上话的占外包的 " & Codec.Fmt (E.One_Look_Frac, 3) & ";外包上沿 " & Codec.Fmt (E.Hull_Hi (2), 2)
+                & "(箱子顶 2)· Core 的形心 (" & Codec.Fmt (E.Center (0), 3) & ", " & Codec.Fmt (E.Center (1), 3) & ", " & Codec.Fmt (E.Center (2), 3)
+                & ")、上沿 " & Codec.Fmt (E.Hi (2), 3) & ";真值的点 " & Codec.Img (Natural (Long_Float'Floor (100.0 * Covered (E)))) & "% 在外包里");
+      end;
+   end;
+
+   --  🔴 ⑫ 窗随它长(Picture.Grow_Window / Covers_Interior;10-01 路 5:下一帧的框 = 这一帧掩膜的外接框,分割又不出框 ⇒ 框只缩不长,
+   --  C1 第 102 拍窗只盖住 28%,S1A5 只剩剪刀转轴)。量到的那一块顶着窗的右边(窗不在画幅边上)⇒ 往右长出它自己那么宽;
+   --  顶着画幅左边 ⇒ 左边不长;哪边都没顶着 ⇒ 不长。新的掩膜盖住旧的里头 ⇒ 同一件;换成旁边另一块 ⇒ 不是。
+   --  错了会是什么病:窗切着的东西永远只量到那一截(原来判的是"顶没顶到画幅边")。牙:Grow_Window 不长 ⇒ 红
+   declare
+      R1 : Picture.Region;
+      X0, Y0, X1, Y1 : Natural;
+      G1, G2, G3 : Boolean;
+      Old_M, New_M, Other_M : Bools;
+      Rx : constant Natural := 300;
+   begin
+      R1.X0 := 250; R1.X1 := Rx; R1.Y0 := 100; R1.Y1 := 140;
+      X0 := 250; Y0 := 90; X1 := Rx; Y1 := 150;
+      Picture.Grow_Window (R1, Wd, Ht, X0, Y0, X1, Y1, G1);
+      declare
+         Ok1 : constant Boolean := G1 and then X1 = Rx + (Rx - 250 + 1) and then X0 = 250 - (Rx - 250 + 1) and then Y0 = 90 and then Y1 = 150;
+         Ax0, Ay0, Ax1, Ay1 : Natural;
+      begin
+         R1.X0 := 0; R1.X1 := 40; R1.Y0 := 100; R1.Y1 := 140;
+         Ax0 := 0; Ay0 := 90; Ax1 := 60; Ay1 := 150;
+         Picture.Grow_Window (R1, Wd, Ht, Ax0, Ay0, Ax1, Ay1, G2);
+         R1.X0 := 10; R1.X1 := 40; R1.Y0 := 100; R1.Y1 := 140;
+         Picture.Grow_Window (R1, Wd, Ht, Ax0, Ay0, Ax1, Ay1, G3);
+         Old_M.Set_Length (Ada.Containers.Count_Type (Wd * Ht)); New_M.Set_Length (Ada.Containers.Count_Type (Wd * Ht));
+         Other_M.Set_Length (Ada.Containers.Count_Type (Wd * Ht));
+         for I in 0 .. Wd * Ht - 1 loop
+            declare
+               X : constant Natural := I mod Wd;
+               Y : constant Natural := I / Wd;
+            begin
+               Old_M (I) := X in 250 .. Rx and then Y in 100 .. 140;
+               New_M (I) := X in 250 .. 380 and then Y in 100 .. 140;
+               Other_M (I) := X in 330 .. 380 and then Y in 100 .. 140;
+            end;
+         end loop;
+         R1.X0 := 250; R1.X1 := Rx; R1.Y0 := 100; R1.Y1 := 140;
+         Check (Ok1 and then not G2 and then not G3 and then Picture.Covers_Interior (New_M, Old_M, Wd, Ht, R1)
+                and then not Picture.Covers_Interior (Other_M, Old_M, Wd, Ht, R1),
+                "窗随它长:顶着窗边 ⇒ 窗 x " & Codec.Img (X0) & " … " & Codec.Img (X1) & "(长了 " & Boolean'Image (G1) & ");顶着画幅边 ⇒ 长了 "
+                & Boolean'Image (G2) & ";没顶着 ⇒ 长了 " & Boolean'Image (G3) & ";长大的那一块盖住旧的里头、旁边另一块盖不住");
+      end;
    end;
 end Welds_Path_3;

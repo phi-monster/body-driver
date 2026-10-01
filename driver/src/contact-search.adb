@@ -775,6 +775,12 @@ package body Contact.Search is
             All_C.Replace_Element (I, Cd);
             Mu_Done (I) := True;
          end Fill_Mu_Worst;
+         --  ①的最坏(要用时才算)
+         function Mu_Worst_Of (I : Natural) return Long_Float is
+         begin
+            Fill_Mu_Worst (I);
+            return All_C (I).Mu_Worst;
+         end Mu_Worst_Of;
          --  ①在摩擦 Mu 下,名义的和四个倾斜的都做得到吗(= 最坏的不比 Mu 大)
          function All_Tilts_At (Cd : Candidate; Mu : Long_Float) return Boolean is
          begin
@@ -827,6 +833,10 @@ package body Contact.Search is
             end;
          end loop;
          St.Mu_Ref := Long_Float'Max (Mu_Lb, (if Mu_First < Long_Float'Last then Mu_First else 0.0));
+         --  量到的上限(它没跟上的那一组最坏要的,见 Act 的 Note_Grip_Mu):先验不许比它大 —— 不假设它比量过的还滑得少
+         if Mu_Ub < Long_Float'Last then
+            St.Mu_Ref := Long_Float'Min (St.Mu_Ref, Mu_Ub);
+         end if;
          --  ②按名义的法向先算一遍;①在这件东西量到的摩擦上限下做不到的不要(它以前没跟上的那一组要的它给不起);
          --  要的动往它躺的面里去 ⇒ 哪一组都做不到
          declare
@@ -849,7 +859,13 @@ package body Contact.Search is
             end Before;
          begin
             for I in 0 .. Nc - 1 loop
-               if Mu_Ub < Long_Float'Last and then Hd.Squeeze (All_C (I).Touches, Ld, Mu_Ub) = Hd.No_Way then
+               --  这件东西量到的摩擦上限 Ub(它没跟上的那一组法向取最坏时要的):①法向取最坏时要的不比 Ub 小的不要 ——
+               --  在 Ub 那儿最坏的都做不到 ⇒ 要得比 Ub 还多;做得到再算准确的最坏(没跟上的那一组正好等于 Ub,严格地不要它)
+               if Mu_Ub < Long_Float'Last
+                 and then (Hd.Squeeze (All_C (I).Touches, Ld, Mu_Ub) = Hd.No_Way or else not All_Tilts_At (All_C (I), Mu_Ub))
+               then
+                  St.Over_Ub := St.Over_Ub + 1;
+               elsif Mu_Ub < Long_Float'Last and then Mu_Worst_Of (I) >= Mu_Ub then
                   St.Over_Ub := St.Over_Ub + 1;
                else
                   declare
@@ -939,5 +955,14 @@ package body Contact.Search is
          end;
       end;
    end Plan;
+
+   procedure Narrow_Mu (Lb, Ub : in out Long_Float; Mu_Nom, Mu_Worst : Long_Float; Came : Boolean) is
+   begin
+      if Came then
+         Lb := Long_Float'Max (Lb, Mu_Nom);
+      else
+         Ub := Long_Float'Min (Ub, Mu_Worst);
+      end if;
+   end Narrow_Mu;
 
 end Contact.Search;

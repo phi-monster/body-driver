@@ -54,6 +54,31 @@ procedure Welds_Path_4 is
    Creep : Long_Float := 0.0;
    Drift : Long_Float := 0.0;
    F32 : Boolean := False;
+   --  V_Max > 0 ⇒ 每拍平移最多走这么多(限速的身体:匀速走着的那一段每拍挪得一样多);Pic_Lag ⇒ 手上那只眼的画面是一根竖条,
+   --  它的横坐标跟着这只手上一拍的 x(画面比读数晚一拍,同 V1B78 量的),每档 2 像素,边上按覆盖的比例渐变
+   V_Max : Long_Float := 0.0;
+   Pic_Lag : Boolean := False;
+   X_Prev : Plug.Arm_Pose := [others => 0.0];
+   Lag_W : constant := 64;
+   Lag_H : constant := 8;
+   function Bar_Col (X : Long_Float) return Long_Float is (10.0 + 2.0 * (X - 0.3) / 0.005);
+   function Lag_Pic (X : Long_Float) return Plug.Cam is
+      C : Plug.Cam;
+      Left : constant Long_Float := Bar_Col (X);
+   begin
+      C.W := Lag_W; C.H := Lag_H;
+      for Y in 0 .. Lag_H - 1 loop
+         for Xp in 0 .. Lag_W - 1 loop
+            declare
+               --  这一格被竖条(宽 6 像素,从 Left 起)盖住了几成
+               Cov : constant Long_Float := Long_Float'Max (0.0, Long_Float'Min (Long_Float (Xp + 1), Left + 6.0) - Long_Float'Max (Long_Float (Xp), Left));
+            begin
+               C.Gray.Append (U8 (30.0 + 190.0 * Long_Float'Min (1.0, Cov)));
+            end;
+         end loop;
+      end loop;
+      return C;
+   end Lag_Pic;
    function Alpha_Of (B : Natural) return Long_Float is
      (if Creep > 0.0 then Creep elsif Rate_Mode then R_Tab (B mod R_Tab'Length) else Alpha_X5);
    Beat : Natural := 0;
@@ -131,7 +156,7 @@ procedure Welds_Path_4 is
             Ff.Joints.Append (To_Q (P));
          end;
       end loop;
-      Ff.Cams.Append (Pic);
+      Ff.Cams.Append (if Pic_Lag then Lag_Pic (X_Prev (0)) else Pic);
       Ff.Seq := Beat;
       return Ff;
    end Frame_Now;
@@ -178,7 +203,18 @@ procedure Welds_Path_4 is
          declare
             X0 : constant Plug.Arm_Pose := Bs (A).X;
          begin
-            Bs (A).X := Chan.Compose (Bs (A).X, Scaled (Chan.Delivered (Bs (A).X, Bs (A).Y), Alpha_Of (Beat)));
+            if A = 0 then
+               X_Prev := Bs (A).X;
+            end if;
+            declare
+               Dv : Table.Vec := Scaled (Chan.Delivered (Bs (A).X, Bs (A).Y), Alpha_Of (Beat));
+               Lv : constant Long_Float := Table.Norm (Dv, Chan.Pos_Channels);
+            begin
+               if V_Max > 0.0 and then Lv > V_Max then
+                  Dv := Scaled (Dv, V_Max / Lv);
+               end if;
+               Bs (A).X := Chan.Compose (Bs (A).X, Dv);
+            end;
             if Drift > 0.0 then
                Bs (A).X (0) := Bs (A).X (0) + Drift;
                Bs (A).Y (0) := Bs (A).Y (0) + Drift;
@@ -212,7 +248,7 @@ procedure Welds_Path_4 is
    begin
       Dead := D; Rand := Random; R_Fix := R; N_Arms := Arms; Rate_Mode := False; Band_Mode := False;
       Wall_On := False;
-      Creep := 0.0; Drift := 0.0; F32 := False; Noise := Noise_Def; Guard := 0;
+      Creep := 0.0; Drift := 0.0; F32 := False; Noise := Noise_Def; Guard := 0; V_Max := 0.0; Pic_Lag := False;
       for A in 0 .. Max_Arms - 1 loop
          Bs (A) := (X | Y | Last_T => (if A = 0 then Start else Start2), others => <>);
       end loop;
@@ -222,7 +258,13 @@ procedure Welds_Path_4 is
    end Reset_Body;
 
    --  ── 手的任务里做的那一件(Job),主线程当身体 ──
-   type Job_Kind is (Do_Measure, Do_Steps, Do_Joint_Go, Do_Idle, Do_Old_Idle, Do_Approach, Do_Walk_To);
+   type Job_Kind is (Do_Measure, Do_Steps, Do_Joint_Go, Do_Idle, Do_Old_Idle, Do_Approach, Do_Walk_To, Do_Pose_Go);
+   --  Do_Pose_Go:一条位姿命令(Selfmap.Go,不给 Tol:同开机的探针)走到 Pg_Goal;Pg_Frames / Pg_Got 是它的账
+   Pg_Goal : Plug.Arm_Pose := Start;
+   Pg_Frames : Natural := 0;
+   Pg_Got : Long_Float := 0.0;
+   Pg_Track : aliased Floats;
+   Pg_Last : Plug.Frame;
    --  Do_Idle:驱动的 Measure_Idle(先等尾巴收住再量);Do_Old_Idle:牙 —— 原来的量法(接着就读 4 拍、取每拍挪得最多的)
    Idle_Beats : Natural := 0;
    Old_Noise : Long_Float := 0.0;
@@ -291,6 +333,7 @@ procedure Welds_Path_4 is
                         Hit : Boolean := False;
                      begin
                         Selfmap.Step (Lk, M, Legs, Lim, Fr, Wk, Rs, Fs, Step_Ok);
+                        Pg_Last := Fr;
                         Frames := Frames + Fs; Steps_Done := Steps_Done + 1;
                         for S of Rs loop
                            Reps.Append (S);
@@ -384,6 +427,15 @@ procedure Welds_Path_4 is
                         end;
                      end loop;
                      Ap_Beats := Beat - B0;
+                  end;
+               when Do_Pose_Go =>
+                  declare
+                     Dl : Table.Vec;
+                     Okp : Boolean;
+                  begin
+                     Selfmap.Go (Lk, M, 0, Pg_Goal, F64_Vectors.Empty_Vector, Fr, Dl, Pg_Frames, Okp, Track_T => Pg_Track'Access);
+                     Pg_Got := Dl (0);
+                     Pg_Last := Fr;
                   end;
                when Do_Walk_To =>
                   declare
@@ -960,6 +1012,220 @@ begin
              "走一步·阶跃响应(V5)" & To_String (Txt) & " · 驱动自己一拍最多 " & Codec.Fmt (Busy_Max * 1000.0, 3) & " ms"
              & " · 牙:不算晚的那几拍 ⇒ " & (if Tooth_Dead then "起效差 2 拍" else "(牙没咬住)")
              & ";当成一拍到位 ⇒ " & (if Tooth_Alpha then "差两档多" else "(牙没咬住)"));
+   end;
+   --  ⑬ 停了没有:全仓一种判法(10-01 主代理:人形认不出手指,是别处还拿静止地板当"停了"的门 —— 慢慢收的尾巴一直比地板大,等满 40 拍也等不到)。
+   --  Selfmap.Stopped_Shrinking / Settle_Watch:一样东西不再变小(比上一拍少不到百分之一)、或者掉到它这一回最大的那一下的百分之一以下,就停了;
+   --  画面(Cam_Feed)另看两拍的变化有没有比一拍的多出来(多出来 = 还在朝一个方向挪);Go:读数离目标还差的那样停了以后,再等这条臂自己那只眼的画面停。
+   --  五样:① 几串数(尾巴 0.64、平的、匀速走过来的"还差多少")② 画面:不动只有渲染噪声 / 匀速挪的一块 / 0.64 收尾的一块加噪声
+   --  ③ 像 H4 的身体(每拍走还差的 36%)一条不给 Tol 的命令(同开机探针)④ 限速的身体(每拍最多一档)走 20 档 ⑤ 画面比读数晚一拍的眼。
+   --  牙(当场算):② 静止地板那种门(地板量在不抖的那一刻)⇒ 噪声一来永远不停;只看"不再变小"、不看两拍多出来 ⇒ 匀速挪的那一块当成停了;
+   --  ③ 原来 H4 的 Settle = 2(两拍不动就收)⇒ 59% 就收;④ 拿每拍挪了多少当"停了"(不看还差多少)⇒ 第 2 拍就当停了;
+   --  ⑤ 读数一停就收 ⇒ 交回去的画面比读数晚一拍(竖条差 2 像素多)
+   declare
+      function Beats_To_Done (Seq : Floats; Peak0 : Long_Float) return Natural is
+         Wt : Selfmap.Settle_Watch;
+         Mv : Floats;
+         Hv : Bools;
+      begin
+         Selfmap.Watch_Reset (Wt, 1);
+         Selfmap.Watch_Peak (Wt, 0, Peak0);
+         for I in 0 .. Natural (Seq.Length) - 1 loop
+            Mv.Clear; Hv.Clear;
+            Mv.Append (Seq (I)); Hv.Append (True);
+            Selfmap.Watch_Feed (Wt, Mv, Hv);
+            if Selfmap.Watch_All_Done (Wt) then
+               return I + 1;
+            end if;
+         end loop;
+         return 0;
+      end Beats_To_Done;
+      Tail, Flat, Ramp : Floats;
+      B_Tail, B_Flat, B_Ramp : Natural;
+      Pw : constant := 40;
+      Ph : constant := 30;
+      function Scene (Left : Long_Float; Beat_No : Natural; Noisy : Boolean) return Plug.Cam is
+         C : Plug.Cam;
+      begin
+         C.W := Pw; C.H := Ph;
+         for Y in 0 .. Ph - 1 loop
+            for X in 0 .. Pw - 1 loop
+               declare
+                  Cov : constant Long_Float := (if Y in 10 .. 19
+                                                then Long_Float'Max (0.0, Long_Float'Min (Long_Float (X + 1), Left + 8.0) - Long_Float'Max (Long_Float (X), Left))
+                                                else 0.0);
+                  Nz : constant Long_Float := (if Noisy then Long_Float ((X * 7 + Y * 13 + Beat_No * 29) mod 11) - 5.0 else 0.0);
+               begin
+                  C.Gray.Append (U8 (Long_Float'Max (0.0, Long_Float'Min (255.0, 60.0 + 150.0 * Long_Float'Min (1.0, Cov) + Nz))));
+               end;
+            end loop;
+         end loop;
+         return C;
+      end Scene;
+      type Pos_Fn is access function (T : Natural) return Long_Float;
+      function Still_Pos (T : Natural) return Long_Float is (10.0);
+      function Steady_Pos (T : Natural) return Long_Float is (2.0 + 0.7 * Long_Float (T));
+      function Tail_Pos (T : Natural) return Long_Float is (10.0 + 6.0 * (1.0 - 0.64 ** T));
+      --  新判法:Cam_Feed 一拍一拍喂,第几拍停住(0 = 没停);旧判法:超过静止地板的像素凑不成一团、连着两拍(Selfmap.Pictures_Still),地板量在不抖的那一刻
+      function Cam_Done (P : Pos_Fn; Noisy : Boolean; Limit : Natural) return Natural is
+         Cw : Selfmap.Cam_Watch;
+         P2 : Plug.Cam := Scene (P (0), 0, Noisy);
+         P1 : Plug.Cam := P2;
+      begin
+         for T in 1 .. Limit loop
+            declare
+               Now : constant Plug.Cam := Scene (P (T), T, Noisy);
+            begin
+               Selfmap.Cam_Feed (Cw, (if T >= 2 then P2 else Plug.Cam'(others => <>)), P1, Now);
+               if Cw.Done then
+                  return T;
+               end if;
+               P2 := P1; P1 := Now;
+            end;
+         end loop;
+         return 0;
+      end Cam_Done;
+      function Old_Done (P : Pos_Fn; Noisy : Boolean; Limit : Natural) return Natural is
+         Mf : Selfmap.Body_Map;
+         Quiet : constant Plug.Cam := Scene (P (0), 0, False);
+         Prev : Plug.Cam := Scene (P (0), 0, Noisy);
+         St : Natural := 0;
+         Bf, Af : Plug.Cam_Vectors.Vector;
+      begin
+         Mf.Floors.Append (Picture.Null_Floor (Quiet.Gray, Quiet.Gray, Pw, Ph, Picture.Min_Pixels (Pw, Ph)));
+         for T in 1 .. Limit loop
+            declare
+               Now : constant Plug.Cam := Scene (P (T), T, Noisy);
+            begin
+               Bf.Clear; Af.Clear; Bf.Append (Prev); Af.Append (Now);
+               St := (if Selfmap.Pictures_Still (Mf, Bf, Af) then St + 1 else 0);
+               if St >= 2 then
+                  return T;
+               end if;
+               Prev := Now;
+            end;
+         end loop;
+         return 0;
+      end Old_Done;
+      C_Still, C_Steady, C_Tail, O_Tail : Natural;
+      Steady_Nacc : Natural := 0;   --  牙:只看"不再变小"那一半
+      Got_Tail, Got_Plat : Long_Float := 0.0;
+      F_Tail, F_Plat : Natural := 0;
+      Per_Beat_Stop : Natural := 0;   --  牙:拿每拍挪了多少当"停了"
+      Lag_Err, Lag_Err_Rd : Long_Float := 0.0;
+   begin
+      for T in 0 .. 59 loop
+         Tail.Append (0.64 ** T); Flat.Append (0.3); Ramp.Append (Long_Float'Max (0.0, 20.0 - Long_Float (T)));
+      end loop;
+      B_Tail := Beats_To_Done (Tail, 1.0); B_Flat := Beats_To_Done (Flat, 0.0); B_Ramp := Beats_To_Done (Ramp, 20.0);
+      C_Still := Cam_Done (Still_Pos'Unrestricted_Access, True, 60);
+      C_Steady := Cam_Done (Steady_Pos'Unrestricted_Access, False, 40);
+      C_Tail := Cam_Done (Tail_Pos'Unrestricted_Access, True, 60);
+      O_Tail := Old_Done (Tail_Pos'Unrestricted_Access, True, 40);
+      --  牙:同一串匀速挪的画面,只看一拍的变化不再变小(不看两拍多出来)
+      declare
+         Wt : Selfmap.Settle_Watch;
+         Mv : Floats;
+         Hv : Bools;
+         Prev : Plug.Cam := Scene (Steady_Pos (0), 0, False);
+      begin
+         Selfmap.Watch_Reset (Wt, 1);
+         for T in 1 .. 40 loop
+            declare
+               Now : constant Plug.Cam := Scene (Steady_Pos (T), T, False);
+               Ch : Long_Float;
+               Okc : Boolean;
+            begin
+               Selfmap.Picture_Change (Prev, Now, Ch, Okc);
+               Mv.Clear; Hv.Clear; Mv.Append (Ch); Hv.Append (Okc);
+               Selfmap.Watch_Feed (Wt, Mv, Hv);
+               if Steady_Nacc = 0 and then Selfmap.Watch_All_Done (Wt) then
+                  Steady_Nacc := T;
+               end if;
+               Prev := Now;
+            end;
+         end loop;
+      end;
+      --  ③ 像 H4 的身体:每拍走还差的 36%,一条不给 Tol 的命令走 2 档
+      Reset_Body (0, False, 1.0, 1);
+      Boot_Measure;
+      Creep := 0.36; Guard := 200;   --  自检自己的保险:拆掉"掉到尺子的百分之一以下"那一道的牙在这儿会一直等(读数平滑地一拍比一拍少三成六)
+      Pg_Goal := Offset (Bs (0).X, 2.0 * Tn, 0.0, 0.0, 0.0, 0.0, 0.0);
+      Job := Do_Pose_Go; Run_Hand;
+      Got_Tail := Pg_Got / (2.0 * Tn); F_Tail := Pg_Frames;
+      --  ④ 限速的身体:每拍最多一档,一条 20 档的命令(不给 Tol)
+      Reset_Body (0, False, 1.0, 1);
+      Boot_Measure;
+      Creep := 1.0; V_Max := Tn;
+      Pg_Goal := Offset (Bs (0).X, 20.0 * Tn, 0.0, 0.0, 0.0, 0.0, 0.0);
+      Job := Do_Pose_Go; Run_Hand;
+      Got_Plat := Pg_Got / (20.0 * Tn); F_Plat := Pg_Frames;
+      --  牙 ④:同一串读数,拿"每拍挪了多少不再变小"当停了
+      declare
+         Wt : Selfmap.Settle_Watch;
+         Mv : Floats;
+         Hv : Bools;
+      begin
+         Selfmap.Watch_Reset (Wt, 1);
+         for I in 0 .. Natural (Pg_Track.Length) - 1 loop
+            Mv.Clear; Hv.Clear;
+            Mv.Append (Pg_Track (I) - (if I = 0 then 0.0 else Pg_Track (I - 1))); Hv.Append (True);
+            Selfmap.Watch_Feed (Wt, Mv, Hv);
+            if Per_Beat_Stop = 0 and then Selfmap.Watch_All_Done (Wt) then
+               Per_Beat_Stop := I + 1;
+            end if;
+         end loop;
+      end;
+      --  ⑤ 画面比读数晚一拍的眼(长在这只手上):走一小步(4 档,到了一档以内就算到 —— 第一拍就差不到一档),交回去的那一帧,
+      --  竖条在不在这只手此刻的 x 那儿
+      Reset_Body (0, False, 1.0, 1);
+      Pic_Lag := True;
+      X_Prev := Bs (0).X;
+      Boot_Measure;
+      Legs.Clear;
+      Legs.Append (Selfmap.Leg'(Arm => 0, Goal => Offset (Bs (0).X, 4.0 * Tn, 0.0, 0.0, 0.0, 0.0, 0.0), Jaw => <>));
+      Lim := (others => <>); Wk := (others => <>); Reps.Clear; Frames := 0; N_Steps := 1;
+      Job := Do_Steps; Run_Hand;
+      Pg_Track := Reps (0).Fracs_T;
+      declare
+         --  竖条的左边:第一行里头一个比底色亮的格子,按亮了几成插
+         function Bar_At (C : Plug.Cam) return Long_Float is
+         begin
+            for X in 0 .. C.W - 1 loop
+               if Long_Float (C.Gray (X)) > 30.0 then
+                  return Long_Float (X) + 1.0 - (Long_Float (C.Gray (X)) - 30.0) / 190.0;
+               end if;
+            end loop;
+            return -1.0;
+         end Bar_At;
+         Rd : Natural := 0;
+      begin
+         Lag_Err := abs (Bar_At (Pg_Last.Cams (0)) - Bar_Col (Pg_Last.EE (0) (0)));
+         --  牙 ⑤:读数一到(差不到一档)就收的那一拍,画面是上一拍的:竖条差这一拍走的那么多(一档 2 像素)
+         for I in 0 .. Natural (Pg_Track.Length) - 1 loop
+            if Rd = 0 and then (1.0 - Pg_Track (I)) * 4.0 <= 1.0 then
+               Rd := I + 1;
+            end if;
+         end loop;
+         Lag_Err_Rd := (if Rd >= 2 then 2.0 * 4.0 * (Pg_Track (Rd - 1) - Pg_Track (Rd - 2)) elsif Rd = 1 then 2.0 * 4.0 * Pg_Track (0) else 0.0);
+      end;
+      Pic_Lag := False;
+      Reset_Body (0, False, 1.0, 1);
+      Check (B_Tail = 12 and then B_Flat = 2 and then B_Ramp >= 20
+             and then C_Still >= 1 and then C_Still <= 4 and then C_Steady = 0 and then C_Tail > 0 and then C_Tail <= 20 and then O_Tail = 0
+             and then Steady_Nacc > 0
+             and then Got_Tail >= 1.0 - Selfmap.Negligible and then F_Tail <= 14 and then 1.0 - 0.64 ** 2 < 0.6
+             and then Got_Plat >= 1.0 - Selfmap.Negligible and then F_Plat >= 20 and then Per_Beat_Stop > 0 and then Per_Beat_Stop <= 3
+             and then Lag_Err < 1.0 and then Lag_Err_Rd > 1.0,
+             "走一步·停了没有(一种判法):一串数 —— 0.64 的尾巴 " & Codec.Img (B_Tail) & " 拍(掉到最大的百分之一)、平的 " & Codec.Img (B_Flat)
+             & " 拍、匀速走过来的「还差多少」" & Codec.Img (B_Ramp) & " 拍(走到才停)· 画面 —— 只有渲染噪声 " & Codec.Img (C_Still) & " 拍、匀速挪的一块 "
+             & (if C_Steady = 0 then "40 拍都不停(对)" else Codec.Img (C_Steady) & " 拍就停了(错)") & "、0.64 收尾加噪声 " & Codec.Img (C_Tail) & " 拍"
+             & " · 牙:静止地板那种门 ⇒ " & (if O_Tail = 0 then "40 拍等不到" else Codec.Img (O_Tail) & " 拍(牙没咬住)")
+             & ";只看不再变小 ⇒ 匀速挪的那一块第 " & Codec.Img (Steady_Nacc) & " 拍当成停了"
+             & " · 像 H4 的身体一条不给 Tol 的命令 ⇒ " & Codec.Img (F_Tail) & " 拍、走到 " & Codec.Fmt (100.0 * Got_Tail, 1) & "%(牙:原来两拍就收 ⇒ "
+             & Codec.Fmt (100.0 * (1.0 - 0.64 ** 2), 0) & "%)"
+             & " · 限速的身体走 20 档 ⇒ " & Codec.Img (F_Plat) & " 拍、" & Codec.Fmt (100.0 * Got_Plat, 1) & "%(牙:拿每拍挪了多少当停了 ⇒ 第 "
+             & Codec.Img (Per_Beat_Stop) & " 拍就收)"
+             & " · 画面晚一拍的眼:交回去那一帧竖条差 " & Codec.Fmt (Lag_Err, 2) & " 像素(牙:读数一停就收 ⇒ 差 " & Codec.Fmt (Lag_Err_Rd, 2) & ")");
    end;
    Plug.Set_Hooks (null, null);
 end Welds_Path_4;

@@ -235,6 +235,9 @@ package Jointboot is
    --  ⑥ 装上:从此插头每一帧的手的位姿 = 按关节读数算出的世界里的腕眼位姿;位姿命令 = 按记下的尽头解出关节目标、每个关节夹到"到过的范围 + 往外一步"里(到过的范围)。
    --  Joint_Noise = 开机量的关节读数噪声(判"停下了"的下限)
    procedure Install (Worlds : Arm_World_Vectors.Vector; Rw : Geom.M3; O : Geom.V3; Joint_Noise : Long_Float := 0.0);
+   --  装上以后第 Arm 只手放进世界有多不准(对齐那一步 Hand_Sd 算的、它干活的地方沿最不准的方向真的不准;世界那只手、没这只手 = 0)。
+   --  它身上的眼在世界里的位置就带着这一份(东西的估计 Thing 拿它放宽这只眼的轮廓锥)
+   function Arm_Sd (Arm : Natural) return Long_Float;
    --  上一条位姿命令的反解被"到过的范围往外一步"截住了没有、之后范围长了没有(Plug.Limit_State;Selfmap.Go 据此重发;插头的 Held_Back 钩子)
    function Held_Back (Arm : Natural) return Plug.Limit_State;
    --  插头的两个钩子(Install 登记)

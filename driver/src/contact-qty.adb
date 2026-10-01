@@ -8,6 +8,14 @@ package body Contact.Qty is
    --  放平到面里:去掉沿 Up 的那一份
    function Flat (A, Up : V3) return V3 is (Sub (A, Scl (Dot (A, Up), Up)));
 
+   function Moved_Off (Before, After : V3; Sd_Before, Sd_After : Long_Float) return Boolean is
+   begin
+      if not Sd_Before'Valid or else not Sd_After'Valid or else Sd_Before < 0.0 or else Sd_After < 0.0 then
+         return True;
+      end if;
+      return Norm (Sub (After, Before)) > Stats.Z * Sqrt (Sd_Before ** 2 + Sd_After ** 2);
+   end Moved_Off;
+
    function Rest_Leg (S : Scene) return Leg is
       Ou : Boolean;
       Up : constant V3 := Unit (S.Up, Ou);
@@ -88,7 +96,7 @@ package body Contact.Qty is
                return;
             end if;
             Rotate_About (Scl (Sg, Up));
-         when Tilt | Away =>
+         when Tilt =>
             if not S.Has_Center then
                Missing ("where its centre is");
                return;
@@ -105,11 +113,7 @@ package body Contact.Qty is
                   Note := To_Unbounded_String ("it is straight under my still eye, so no direction along the surface points away from me");
                   return;
                end if;
-               if K = Tilt then
-                  Rotate_About (Scl (Sg, Cross (Up, H)));
-               else
-                  Slide_Along (Scl (Sg, H));
-               end if;
+               Rotate_About (Scl (Sg, Cross (Up, H)));
             end;
          when Across =>
             if not S.Has_View then

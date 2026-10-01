@@ -296,19 +296,20 @@ package body Plan is
       return V;
    end Without_Eye;
 
+   function Is_Role (K : String) return Boolean is
+   begin
+      for R in Sinew.Role loop
+         if Sinew."/=" (R, Sinew.Rl_None) and then Sinew.Role_Word (R) = K then
+            return True;
+         end if;
+      end loop;
+      return False;
+   end Is_Role;
+
    procedure Rebind_Missing (Binds : in out Bind_Vectors.Vector; Records : Named_Vectors.Vector; Eye : Natural;
                              Forbidden : String;
                              Item_Of : not null access function (Bx : Natural) return Natural;
                              Got : out Natural) is
-      function Is_Role (K : String) return Boolean is
-      begin
-         for R in Sinew.Role loop
-            if Sinew."/=" (R, Sinew.Rl_None) and then Sinew.Role_Word (R) = K then
-               return True;
-            end if;
-         end loop;
-         return False;
-      end Is_Role;
    begin
       Got := 0;
       for I in 0 .. Natural (Binds.Length) - 1 loop

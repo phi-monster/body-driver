@@ -97,6 +97,37 @@ package Selfmap is
 
    --  一步里可以忽略的那一丝 = 这一步的百分之一(比例):Go 判"停了"(一拍挪不到这条命令的百分之一)和"碰到没有"(Blocked)用同一个
    Negligible : constant := 0.01;
+
+   --  ── 停了没有:全仓一种判法(10-01,主代理:人形认不出手指就是因为别处拿静止地板当"停了"的门)──
+   --  一样东西每拍喂进来"这一拍它是多少":读数这一拍挪了多少、离目标还差多少、画面这一拍变了多少……
+   --  它停了 = 这一拍的比上一拍少不到上一拍的百分之一(Negligible):不再变小 —— 收到了噪声、读数的分辨率,或者身体在自己漂,
+   --  再等也不会更小;或者 —— 给了它这一回的尺子(Watch_Peak:离目标还差的那一样 = 这一条命令那么长)—— 它已经掉到那把尺子的
+   --  百分之一以下(该走的走完了)。量静止噪声那种等(Wait_Tail)不给尺子:尾巴要收到底,收到百分之一还不够。
+   --  停了一次就算(噪声有大有小,不回头再看);这一拍没有它的数 ⇒ 不等它(没有证据就不等)。
+   --  几样一起看:每一样都停过才算停了。
+   --  没有静止地板(地板是静止时量的:慢慢收的尾巴一直比它大 ⇒ 等满也等不到),没有写死的拍数(H4 时等 2 拍收在六成处、P8MH 等满 40 拍)
+   function Stopped_Shrinking (Prev, Now : Long_Float) return Boolean is (Prev - Now <= Negligible * Prev);
+   type Settle_Watch is record
+      Last, Peak : Floats;             --  每一样:上一拍的数、这一回的尺子(给了尺子以后喂进来的更大的数也算进去)
+      Have_Last, Done, Ruled : Bools;  --  Ruled = 给过尺子
+   end record;
+   procedure Watch_Reset (W : out Settle_Watch; N : Natural);
+   --  第 S 样给一把尺子 V(离目标还差的那一样:命令本身那么长 —— 动起来以后才喂,喂进来的已经比它小)
+   procedure Watch_Peak (W : in out Settle_Watch; S : Natural; V : Long_Float);
+   procedure Watch_Feed (W : in out Settle_Watch; Moves : Floats; Have : Bools);
+   function Watch_All_Done (W : Settle_Watch) return Boolean;
+   --  这台相机两帧之间画面变了多少:每个像素灰度差的平均(全幅,没有地板);两帧有一帧没画面 / 不一样大 ⇒ Ok = False
+   procedure Picture_Change (Before, After : Plug.Cam; Change : out Long_Float; Ok : out Boolean);
+   --  一台相机的画面停没停(同一种判法用在画面上):这一拍变的(C1 = 和上一拍比)不再比上一拍少(Stopped_Shrinking),而且两拍的变化
+   --  (C2 = 和上上拍比)没比一拍的多出来 —— 多出来就是还在朝一个方向挪(匀速挪着的东西每拍变得一样多,不再变小,可两拍加起来多一倍;
+   --  噪声两拍、一拍一样多)。多出来的门 = Stats.Z 倍画面自己一拍和一拍之差(|C1 − 上一拍的 C1|):没有地板。
+   --  一拍变的掉到这一回最大那一拍的百分之一以下(该动的动完了)也算不再变小。停过一次就算。
+   --  这一拍两帧有一帧没画面 ⇒ 这一拍不算(不当成停了,也不当成在动)
+   type Cam_Watch is record
+      C1_Last, Peak : Long_Float := 0.0;
+      Have, Seen, Done : Boolean := False;   --  Seen = 给过一对能比的画面
+   end record;
+   procedure Cam_Feed (W : in out Cam_Watch; Prev2, Prev, Now : Plug.Cam);
    --  往前压的这一步有没有被挡住(纯函数,导出给自检):Short = 这一步沿命令方向少走了多少;Prev / Prev2 = 这一段里前两步空走的少走量,
    --  N_Free = 前面有几步空走的(0 ⇒ 这一步是第一步,没有可比的,判不了 ⇒ False);Lstep = 这一步多大;Noise = 静止读数噪声。
    --  被挡住 = 比上一步空走时多少走的量超过"这一步的百分之一、3 倍读数噪声、3 倍前两步空走之差"三样里最大的那样(倍数无量纲,同踢离群)。
@@ -118,6 +149,9 @@ package Selfmap is
    --  关节目标的"停稳":读数到了目标 Tol 以内再有一拍不动就算到(Tol = 0 不这样判),否则连着两拍不动
    --  位姿目标给了 Tol(平移)/ Tol_Rot(转动)⇒ 位姿到了目标这么近连着两拍就算到;没到 ⇒ 连着两拍每拍挪不到这一档就算停(被顶住 / 到头);
    --  Tol = 0 照旧:连着两拍挪不到读数噪声才算停(V1B21 2026-09-27:位姿读数按关节算,停下以后还有十几微米的蠕动,空中一步要等 13 拍、压到桌面那一步 24 拍)
+   --  (10-01 路 4 改:上面几种"停了"都换成同一种判法 —— 读数动起来以后,离目标还差的不再变小(Stopped_Shrinking;"停在这儿"那种命令看每拍挪了多少)就停了,
+   --  压的、几组一起的、关节目标都这样判;到了 = 差不到 Tol(给了才判)而且没在往远走。没有地板、没有"连着两拍"、没有"最多等几拍":
+   --  一点都没动起来的那一条最多等量过的起效拍数(Settle;开机还一个都没量过 ⇒ Unmeasured_Start)
    type Watcher is access function (F : Plug.Frame) return Boolean;
    procedure Go (L : in out Plug.Link; M : Body_Map; Arm : Natural; Target : Plug.Arm_Pose; Jaw : Floats;
                  F : in out Plug.Frame; Delivered : out Table.Vec; Frames : out Natural; Ok : out Boolean; Press : Boolean := False;
@@ -133,7 +167,8 @@ package Selfmap is
    --  一组关节这一拍"到了没有"(Go 里用的就是它;纯函数,导出给自检):Tols 这一位 > 0 ⇒ 这个关节按它自己的门,否则按 Tol;门 ≤ 0 的关节永远不算到
    function Joints_Arrived (Now, Target, Tols : Floats; Tol : Long_Float) return Boolean;
    --  一条命令从发出到读数停住用了几拍(纯函数,导出给自检):Moves (I) = 发出后第 I + 1 拍读数挪了多少(那一拍挪得最多的那个关节)。
-   --  停住 = 动起来以后(挪过超过 Noise 的一拍),第一次"这一拍挪动不超过 Noise、而且不比上一拍小"(不再变小)的那一拍;返回它是第几拍。
+   --  停住 = 动起来以后(挪过超过 Noise 的一拍:Noise 只用来认"动起来了"),第一次挪的不再变小、或者掉到这一条挪得最多那一拍的百分之一以下
+   --  (Settle_Watch,尺子 = 挪得最多的那一拍;同 Go 判"走完了")的那一拍;返回它是第几拍。
    --  一直没动起来(探针小得读数跟不上)/ 看到的那几拍里还在变小(还没停住)⇒ 0:这一条量不出,不算(不拿没停住的拍数顶)
    function Settle_Beats (Moves : Floats; Noise : Long_Float) return Natural;
    --  量 Settle 的唯一办法:帧号 From_Seq(发命令之前那一拍,L.Seq)以后 Plug 逐拍记下的读数(Beats.Q_Chg,每一拍取各组里挪得最多的)⇒ Settle_Beats。
@@ -151,9 +186,10 @@ package Selfmap is
    --  版本对不上就不信、开机重量(Bodyfile)。1 = 接着上一个动作就量 4 拍(慢的身体会把还在收的尾巴量进去:H4 / H7 的 ee_noise 0.0121);
    --  身体文件里没记版本的 = 更老,也不信
    Idle_Ver : constant := 1;
-   --  等到画面连着两拍都不再变(各自的灰度地板以内),最多 Max 拍;返回用了几拍。
-   --  Ok = 停稳了。等满 Max 拍还在变 ⇒ Ok = False、Used = Max(照实说没停稳 —— 09-30:原来超时照样 Ok = True,握区在还在动的画面上量);
-   --  线断了 ⇒ Ok = False、Used < Max
+   --  等到画面停住:每台相机这一拍变的(Picture_Change)不再比上一拍少(Stopped_Shrinking,同 Go;10-01 路 4:原来是"连着两拍在各自的
+   --  灰度地板以内" —— 地板是静止时量的,人形手指慢慢收的那条尾巴一直比它大,等满也等不到)。Max > 0 ⇒ 最多等这么多拍(调用方自己的上限;
+   --  0 = 不设,出口只有"不再变小");返回用了几拍。Ok = 停稳了。等满 Max 拍还在变 ⇒ Ok = False、Used = Max(照实说没停稳 ——
+   --  09-30:原来超时照样 Ok = True,握区在还在动的画面上量);线断了 ⇒ Ok = False、Used < Max
    --  Prev_Pic 给了 ⇒ 等完时里面是最后一帧之前那一帧(两帧都是画面停下以后的:抓握通道推到头时"看没看见动了"两次比较、不共用一帧用,Picture.Seen_Twice)
    procedure Wait_Still (L : in out Plug.Link; M : Body_Map; F : in out Plug.Frame; Max : Natural; Used : out Natural; Ok : out Boolean;
                          Prev_Pic : access Plug.Cam_Vectors.Vector := null);

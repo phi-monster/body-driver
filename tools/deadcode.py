@@ -34,6 +34,21 @@ TEST_HOOKS = {
     # 路 6 对准插进去(§2 第 21 条)、一次走不完的(§2 第 22 条):执行层"往里送 / 松开再握"那一处调它们(Run_Segment 留给路 6 的接口),接上以后这 2 条删
     ("seek.adb", "Run"): "路 6:对准插进去 —— 沿轴送,被挡住就在横着的不准那一片里按缝定的格子从最可能的试起;执行层接上就是活的",
     ("strokes.adb", "Run"): "路 6:一次走不完的 —— 到了范围的头就松开、空着转回、再握,到转不动或走够为止;执行层接上就是活的",
+    # 路 3 一件东西的估计(I4,大并行 §2 第 10 条):每一眼由 Remeasure_Boxed 交进来(活的),"给我它的形状"那一头是路 4 / 5 / 6 的
+    # (接触集按 Things.Solved 的表面点挑下手处、"走过去"按 Center、部件按 Surface),它们接上以后这 12 条删
+    ("things.adb", "Solve"): "路 3 I4:按全部的眼、面、碰到的点、量到的表面点雕外包;路 4 / 5 / 6 调 Solved 就是活的",
+    ("things.adb", "Solved"): "路 3 I4:解过的那一份(要多细由调用方说);路 4 / 5 / 6 调它就是活的",
+    ("things-solve_once.adb", "Solve_Once"): "路 3 I4:Solve 的八叉树那一遍(Solve 接上就是活的)",
+    ("things.adb", "Judge"): "路 3 I4:一格按一眼判空 / 实 / 压着轮廓 / 说不出(Solve 用);Solve 接上就是活的",
+    ("things.adb", "Build"): "路 3 I4:积分图(Solve / Point_In 用);Solve 接上就是活的",
+    ("things.adb", "Count_In"): "路 3 I4:积分图里数一块矩形(Judge 用);Solve 接上就是活的",
+    ("things.adb", "Free_Integral"): "路 3 I4:积分图用完放掉(Solve / Point_In 用);Solve 接上就是活的",
+    ("things.adb", "Point_In"): "路 3 I4:一点按一眼判(拿下手处问'那儿按这一眼是不是它'的人用;自检验判法);接触集接上就是活的",
+    ("things.adb", "Whole_In_Window"): "路 3 I4:这一眼看得见的它整个在掩膜里吗(要据此决定再不再看一眼的人用;自检验判法)",
+    ("things.adb", "Add_Touch"): "路 3 I4:碰到它的点进估计;接触集碰到东西那一处(路 2 / 5)调它就是活的",
+    ("things.adb", "Add_Point"): "路 3 I4:量到的它表面上的点进估计;两眼配点交出它表面的点那一步(路 3 下一段)接上就是活的",
+    ("things.adb", "Rename"): "路 3 I4:脑给它改名时估计跟着走;路 7 改名那一处(act-round)调它就是活的",
+    ("linkage-together.adb", "Check"): "路 6:同时两套接触(A 不动 + 它上面的 B 沿轴动)的物理检查,两个要一起算;脑一次说得出两个要(I5)时接上就是活的",
 }
 import os, re, sys, glob, collections
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

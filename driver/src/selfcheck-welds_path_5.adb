@@ -506,11 +506,11 @@ begin
    end;
    --  ② 每个量往哪变(Contact.Qty.Motion,量到的几何直接给):它在 (0.10, 0.20) 躺在面上(上 = +z),中心高 0.02;我那只眼在 (0.50, 0.20, 0.60);
    --     脑看着的那只眼横轴朝 -y;参照那一件在 (-0.10, 0.20),顶面高 0.03。
-   --     · height 往上 = +z、往下 = -z;heading 往上 = 绕过它中心的 +z 转;tilt 往上 = 它的顶往远离我那边倒(绕 z × 水平离我的方向);away 往上 = 水平离我更远
+   --     · height 往上 = +z、往下 = -z;heading 往上 = 绕过它中心的 +z 转;tilt 往上 = 它的顶往远离我那边倒(绕 z × 水平离我的方向)
    --     · gap 往下(nearer)= 朝参照那一件;参照那一件比它低(中心更低)时往面里去的那一份去掉,只在面里走;rise ±z;across 往上 = 那只眼的右边(-y 放平)
    --     · rest_on:底不比参照的顶高出不准那么多 ⇒ 先往上;够高、不在正上方 ⇒ 横着朝它;在正上方、比它的顶高 ⇒ 往下;贴着它的顶 ⇒ 不动
    --     · aim:长轴沿 x,参照那一件在 +y 方向 ⇒ 绕 +z 转(逆时针)转过去;在 -y ⇒ 绕 -z;正对着长轴(两头都算)⇒ 不动
-   --     · 缺什么照实说:没有"我"那只眼 ⇒ tilt / away 说不出;没有参照那一件 ⇒ gap 说不出
+   --     · 缺什么照实说:没有"我"那只眼 ⇒ tilt 说不出;没有参照那一件 ⇒ gap 说不出
    --  病:量的方向写反 / 绕错点转 / 贴着面躺的东西被要求往面里走 / onto 横着直接往参照那一件身上撞 / 长轴只认一头,转大半圈
    declare
       package Q renames Contact.Qty;
@@ -522,11 +522,10 @@ begin
          return Ok;
       end Mo;
       function Near (A, B : Contact.V3) return Boolean is (Contact.Norm ([A (0) - B (0), A (1) - B (1), A (2) - B (2)]) < 1.0e-9);
-      M_H, M_Hd, M_Hd2, M_T, M_A, M_G, M_G2, M_R, M_X, M_O1, M_O2, M_O3, M_O4, M_Am, M_Am2, M_Am3, M_Miss1, M_Miss2 : Contact.Twist;
-      N1, N2, N3, N4, N5, N6, N7, N8, N9, N10, N11, N12, N13, N14, N15, N16, N17, N18 : Unbounded_String;
+      M_H, M_Hd, M_Hd2, M_T, M_G, M_G2, M_R, M_X, M_O1, M_O2, M_O3, M_O4, M_Am, M_Am2, M_Am3, M_Miss1, M_Miss2 : Contact.Twist;
+      N1, N2, N3, N4, N6, N7, N8, N9, N10, N11, N12, N13, N14, N15, N16, N17, N18 : Unbounded_String;
       Ok_All : Boolean := True;
       Tilt_Away : Boolean := False;
-      Away_Up : Boolean := False;
       Gap_Flat : Boolean := False;
    begin
       S0.Up := [0.0, 0.0, 1.0];
@@ -550,9 +549,6 @@ begin
          begin
             Tilt_Away := Hd (T1) > Hd (Top) and then Near (M_T.Pivot, S0.Center);
          end;
-      end if;
-      if Mo (Q.Away, 1, S0, M_A, N5) then
-         Away_Up := Near (M_A.Lin, [-1.0, 0.0, 0.0]);   --  我在 +x 那边 ⇒ 远离我 = -x
       end if;
       Ok_All := Ok_All and then Mo (Q.Gap, -1, S0, M_G, N6) and then Near (M_G.Lin, [-1.0, 0.0, 0.0]);
       --  参照那一件的中心比它低:往它那边走有往下的一份,它贴着面躺 ⇒ 去掉,只在面里走
@@ -591,9 +587,9 @@ begin
          S3.Has_Ref := False;
          Ok_All := Ok_All and then not Mo (Q.Gap, -1, S3, M_Miss2, N18) and then Index (N18, "other thing") > 0;
       end;
-      Check (Ok_All and then Tilt_Away and then Away_Up and then Gap_Flat,
+      Check (Ok_All and then Tilt_Away and then Gap_Flat,
              "量变旋量·每个量往哪变:height ±z · heading 绕它中心的 +z · tilt 往上顶往远离我那边倒 " & (if Tilt_Away then "是" else "否")
-             & " · away 往上 (" & F4 (M_A.Lin (0)) & "," & F4 (M_A.Lin (1)) & ")· gap 往下朝参照那一件、它贴着面 ⇒ 不往面里去(z " & F4 (M_G2.Lin (2)) & ")"
+             & " · gap 往下朝参照那一件、它贴着面 ⇒ 不往面里去(z " & F4 (M_G2.Lin (2)) & ")"
              & " · across 往右 = 那只眼的右边 · rest_on 先上 / 横着 / 往下 / 不动 · aim 逆时针 / 顺时针 / 两头都算不动 · 缺的照实说「" & To_String (N17) & "」「" & To_String (N18) & "」");
    end;
    --  ③ 它此刻在哪(Act.Want_Scene):没拿着 ⇒ 记下的轮廓补成实心(同接触集那一份)的形心、底贴着面、长条的长轴;
@@ -660,5 +656,165 @@ begin
          end;
       end loop;
       Check (Worst < 1.0e-9, "量变旋量·拿着它转:手按 Carry_Goal 走,它身上四个点和「绕过它中心的竖轴转 0.4 rad」最多差 " & Codec.Fmt (Worst, 12));
+   end;
+   --  ── 放下:单靠下面那张面托不托得住它(§2 第 17 条的物理那一半,10-01 主代理批的条件 2、4、5)──
+   --  ① 托得住:4 cm 的方块平放(它的实心模型按格子补到面上),重心在正中、不准 1 mm ⇒ 托得住,重心离边 2 cm(凸包每条边各挪 Z 倍不准都还托得住)
+   --  ② 托不住:同一块底,重心在它外面 5 mm ⇒ 托不住,差的就是 −5 mm
+   --  ③ 拿不准:重心在里面、离边 2 mm,可它在哪只准到 1 mm(Z 倍 3 mm)⇒ 托不住(不准说了算);准到 0.5 mm(Z 倍 1.5 mm)⇒ 托得住
+   --  ④ 底下那一片只算贴着面的那一层:蘑菇形(顶 4 cm 宽、底下一根 1 cm 的柄),重心偏 1 cm ⇒ 在顶的范围里、在柄外面 ⇒ 托不住
+   --  ⑤ 没有面积(两个点)⇒ 托不住
+   --  ⑥ 松手以后它挪了没有(Contact.Qty.Moved_Off,同一种量法前后比):挪 1 cm、前后各准到 1 mm ⇒ 挪了;挪 2 mm(Z 倍合起来 4.2 mm 以内)⇒ 没挪;不准没量出来(负的)⇒ 当挪了
+   --  病:不按重心的不准挪就松手(离边 2 mm、准到 1 mm 也松 ⇒ 一碰就倒);外法向反了(往里挪,永远托得住);把它全身的点都当成底(蘑菇被判站得住);
+   --      松手以后的比较不带不准(渲染抖一个像素就说它倒了)
+   declare
+      package Wr2 renames Contact.Wrench;
+      function Base_Block return Wr2.Surface is (Wr2.Base_Of (Slab (-0.02, 0.02, -0.02, 0.02, 0.04, Block'Access), Up, Pitch));
+      Ok1, Ok2, Ok3a, Ok3b, Ok4, Ok5 : Boolean;
+      M1, M2, M3a, M3b, M4, M5 : Long_Float;
+      function Mush (X, Y : Long_Float) return Boolean is (abs X <= 0.005 and then abs Y <= 0.005);
+      Stem : Contact.V3_Vectors.Vector := Slab (-0.005, 0.005, -0.005, 0.005, 0.03, Mush'Unrestricted_Access);
+      Cap : constant Contact.V3_Vectors.Vector := Slab (-0.02, 0.02, -0.02, 0.02, 0.04, Block'Access);
+      Two_Pts : Wr2.Surface;
+      Mv1, Mv2, Mv3 : Boolean;
+   begin
+      Wr2.Rests (Base_Block, [0.0, 0.0, 0.02], Up, 0.001, 0.0, Ok1, M1);
+      Wr2.Rests (Base_Block, [0.025, 0.0, 0.02], Up, 0.001, 0.0, Ok2, M2);
+      Wr2.Rests (Base_Block, [0.018, 0.0, 0.02], Up, 0.001, 0.0, Ok3a, M3a);
+      Wr2.Rests (Base_Block, [0.018, 0.0, 0.02], Up, 0.0005, 0.0, Ok3b, M3b);
+      --  蘑菇:柄从面起 3 cm 高,顶那一块在 3 cm 到 4 cm 之间(顶的点抬高到柄上面)
+      for P of Cap loop
+         if P (2) >= 0.03 then
+            Stem.Append (P);
+         end if;
+      end loop;
+      Wr2.Rests (Wr2.Base_Of (Stem, Up, Pitch), [0.01, 0.0, 0.03], Up, 0.0005, 0.0, Ok4, M4);
+      Two_Pts.Present := True; Two_Pts.Up := Up; Two_Pts.Pitch := Pitch;
+      Two_Pts.Foot.Append (Contact.V3'[-0.02, 0.0, 0.0]); Two_Pts.Foot.Append (Contact.V3'[0.02, 0.0, 0.0]);
+      Wr2.Rests (Two_Pts, [0.0, 0.0, 0.02], Up, 0.0005, 0.0, Ok5, M5);
+      Mv1 := Contact.Qty.Moved_Off ([0.0, 0.0, 0.0], [0.01, 0.0, 0.0], 0.001, 0.001);
+      Mv2 := Contact.Qty.Moved_Off ([0.0, 0.0, 0.0], [0.002, 0.0, 0.0], 0.001, 0.001);
+      Mv3 := Contact.Qty.Moved_Off ([0.0, 0.0, 0.0], [0.0, 0.0, 0.0], -0.001, 0.001);
+      Check (Ok1 and then abs (M1 - 0.02) < 1.0e-9 and then not Ok2 and then abs (M2 + 0.005) < 1.0e-9 and then not Ok3a and then Ok3b and then abs (M3a - 0.002) < 1.0e-9
+             and then not Ok4 and then not Ok5 and then M5 = Long_Float'First and then Mv1 and then not Mv2 and then Mv3,
+             "放下·托不托得住:方块正中 " & (if Ok1 then "托得住" else "托不住(错)") & "(离边 " & F4 (M1) & ")· 重心在外 5 mm " & (if Ok2 then "托得住(错)" else "托不住")
+             & "(" & F4 (M2) & ")· 离边 2 mm、准到 1 mm " & (if Ok3a then "托得住(错)" else "托不住") & " / 准到 0.5 mm " & (if Ok3b then "托得住" else "托不住(错)")
+             & " · 蘑菇偏 1 cm " & (if Ok4 then "托得住(错:把顶当成了底)" else "托不住") & "(离柄的边 " & F4 (M4) & ")· 两个点 " & (if Ok5 then "托得住(错)" else "托不住")
+             & " · 松手以后挪 1 cm " & (if Mv1 then "挪了" else "没挪(错)") & "、挪 2 mm " & (if Mv2 then "挪了(错)" else "没挪") & "、不准是负的 " & (if Mv3 then "当挪了" else "当没挪(错)"));
+   end;
+   --  ── 没成就重挑(§2 第 27 条:按量到的新情况重挑再做,不原样再来)──
+   --  ① 手指合在了它身上、它没跟着走 ⇒ 摩擦的上限降到那一组法向取最坏时要的那么多(Narrow_Mu;拿住了 ⇒ 下限升到按量到的法向要的);
+   --     下一次只从最坏时要得更少的里挑、先验不许比上限大:方块、两瓣(先验摩擦按 0.5 的下限),先挑一次,把上限设成挑中那一组的 Mu_Worst 再挑
+   --     ⇒ 挑中的不是它、最坏要的比上限小、先验不比上限大,那一组算进"要的摩擦给不起"
+   --  病:上下限记反(拿住记最坏、没跟上记名义:对夹按量到的法向几乎不要摩擦,没跟上一次上限就成了零,再也挑不出下一组);
+   --      上限不严格(正好等于上限的那一组 —— 就是没跟上的那一组 —— 又被挑回来,原样再来一遍)
+   declare
+      Pts : constant Contact.V3_Vectors.Vector := Slab (-0.02, 0.02, -0.02, 0.02, 0.04, Block'Access);
+      None : Contact.V3_Vectors.Vector;
+      F1, F2 : Se.Cand_Vectors.Vector;
+      S1, S2 : Se.Plan_Stats;
+      Ub : Long_Float := 0.0;
+      Differs : Boolean := False;
+      Lb_Ok : Boolean := False;
+      function Touches_Img (Ts : Wr.Touch_Vectors.Vector) return String is
+         R : Unbounded_String;
+      begin
+         for T of Ts loop
+            Append (R, " (" & F4 (T.P (0)) & "," & F4 (T.P (1)) & "," & F4 (T.P (2)) & ")→(" & Codec.Fmt (T.N (0), 2) & "," & Codec.Fmt (T.N (1), 2) & "," & Codec.Fmt (T.N (2), 2) & ")");
+         end loop;
+         return To_String (R);
+      end Touches_Img;
+   begin
+      Se.Plan (Pts, None, Pitch, 0.0005, Up, Zero3, Two_Hand, Mu, 0.09, Always'Access, 1, F1, S1);
+      if not F1.Is_Empty then
+         Lb_Ok := True;
+         declare
+            Lb : Long_Float := 0.0;
+            Ub2 : Long_Float := Long_Float'Last;
+         begin
+            Se.Narrow_Mu (Lb, Ub2, F1.First_Element.Mu_Nom, F1.First_Element.Mu_Worst, Came => True);
+            Lb_Ok := Lb = F1.First_Element.Mu_Nom and then Ub2 = Long_Float'Last;
+            Se.Narrow_Mu (Lb, Ub2, F1.First_Element.Mu_Nom, F1.First_Element.Mu_Worst, Came => False);
+            Lb_Ok := Lb_Ok and then Ub2 = F1.First_Element.Mu_Worst;
+            Ub := Ub2;
+         end;
+         Se.Plan (Pts, None, Pitch, 0.0005, Up, Zero3, Two_Hand, Mu, 0.09, Always'Access, 1, F2, S2, Mu_Ub => Ub);
+         if not F2.Is_Empty then
+            Differs := Contact.Norm ([F2.First_Element.T (0) - F1.First_Element.T (0), F2.First_Element.T (1) - F1.First_Element.T (1),
+                                      F2.First_Element.T (2) - F1.First_Element.T (2)]) > 0.0 or else Geom."/=" (F2.First_Element.R, F1.First_Element.R);
+         end if;
+      end if;
+      Check (not F1.Is_Empty and then not F2.Is_Empty and then Lb_Ok and then Differs and then F2.First_Element.Mu_Worst < Ub and then S2.Mu_Ref <= Ub
+             and then S2.Over_Ub > 0,
+             "重挑·没跟上 ⇒ 摩擦上限降:先挑的那一组按量到的法向要 " & (if F1.Is_Empty then "—" else F4 (F1.First_Element.Mu_Nom) & "、最坏要 " & F4 (F1.First_Element.Mu_Worst))
+             & (if Lb_Ok then "(拿住记下限 = 名义、没跟上记上限 = 最坏)" else "(上下限记错了)") & ";上限设成它的最坏再挑 ⇒ "
+             & (if F2.Is_Empty then "一组都挑不出" else (if Differs then "换了一组" else "又是那一组(错)") & "、最坏要 " & F4 (F2.First_Element.Mu_Worst)
+                & "、先验 " & F4 (S2.Mu_Ref))
+             & " · 给不起的 " & Codec.Img (S2.Over_Ub) & " 组 · 先验摩擦 " & F4 (S1.Mu_Ref)
+             & (if F1.Is_Empty then "" else " · 先挑那组的接触:" & Touches_Img (F1.First_Element.Touches)));
+   end;
+   --  ② 挡了 ⇒ 挡住的那一点记进形状:Act.Plan_Contact 里,被顶住的尖离它的表面不到一个采样间距加两边的不准 ⇒ 那是它自己,
+   --     连同往下到它躺的面的侧壁补进它的形状(说的"从多少个表面点"跟着多出来);离得远的 ⇒ 旁边的东西,不进它的形状
+   --  病:挡住它的那一点被当成"它自己被顶住"扔掉(10-01 以前),下一次照样往那儿下手指,原样再来
+   declare
+      function Count_Of (Note : Unbounded_String) return Natural is
+         S : constant String := To_String (Note);
+         I : constant Natural := Index (Note, " surface points");
+         J : Natural := I;
+      begin
+         if I = 0 then
+            return 0;
+         end if;
+         while J > S'First and then S (J - 1) in '0' .. '9' loop
+            J := J - 1;
+         end loop;
+         return Natural'Value (S (J .. I - 1));
+      end Count_Of;
+      function Note_With (Bumps : Contact.V3_Vectors.Vector) return Unbounded_String is
+         Cx : Act.Context;
+         Fx : Plug.Frame;
+         Gx : Geom.Cam_Geo;
+         Pick : Contact.Search.Candidate;
+         Nt : Unbounded_String;
+         Okp : Boolean;
+         procedure Any_Reach (Arm : Natural; Pose : Plug.Arm_Pose; Pos_Err, Rot_Err : out Long_Float) is
+            pragma Unreferenced (Arm, Pose);
+         begin
+            Pos_Err := 0.0; Rot_Err := 0.0;
+         end Any_Reach;
+      begin
+         Gx.Valid := True; Gx.F := 400.0; Gx.Cx := 320.0; Gx.Cy := 240.0; Gx.Gap := 0.09;
+         Gx.Tip := [0.0, 0.0, -0.09]; Gx.Tip_Valid := True; Gx.Tip_Touch := True; Gx.Tip_Sd := 0.0005;
+         Gx.Lobes.Append (Geom.Lobe_Geo'(Tip => [-0.045, 0.0, -0.09], Wide => 0.015, Thin => 0.01, others => <>));
+         Gx.Lobes.Append (Geom.Lobe_Geo'(Tip => [0.045, 0.0, -0.09], Wide => 0.015, Thin => 0.01, others => <>));
+         Cx.Geo.Append (Geom.No_Geo); Cx.Geo.Append (Gx);
+         Cx.Map.Amp := Bytes.F64_Vectors.To_Vector (0.0, 6);
+         Cx.Map.Amp.Replace_Element (0, 0.001); Cx.Map.Amp.Replace_Element (3, 0.0025);
+         Cx.Touch_Valid := True; Cx.Touch_Pt := [0.0, 0.0, 0.0]; Cx.Touch_N := [0.0, 0.0, 1.0];
+         for I in -10 .. 10 loop
+            for J in -10 .. 10 loop
+               Cx.Sil_Pts.Append (Geom.V3'[Pitch * Long_Float (I), Pitch * Long_Float (J), 0.04]);
+            end loop;
+         end loop;
+         Cx.Sil_Valid := True; Cx.Sil_Name := To_Unbounded_String ("block"); Cx.Sil_Cam := 1; Cx.Sil_N := [0.0, 0.0, 1.0];
+         Cx.Sil_P0 := Cx.Sil_Pts.First_Element; Cx.Sil_Pitch := Pitch; Cx.Sil_Err := 0.0005;
+         Cx.Bumps := Bumps;
+         Plug.Set_Reach (Any_Reach'Unrestricted_Access);
+         Act.Plan_Contact (Cx, Fx, 0, 1, To_Unbounded_String ("block"), Pick, Nt, Okp);
+         Plug.Set_Reach (null);
+         return Nt;
+      end Note_With;
+      None, Own_B, Far_B : Contact.V3_Vectors.Vector;
+      Walls : Contact.V3_Vectors.Vector;
+      N0, N1, N2 : Natural;
+   begin
+      Own_B.Append (Contact.V3'[0.023, 0.0, 0.04]);    --  它的边外 3 mm、顶面那么高:是它自己(比量到的宽)
+      Far_B.Append (Contact.V3'[0.06, 0.0, 0.03]);     --  它的边外 4 cm:旁边的东西
+      Contact.Surface.Walls_To_Support (Own_B, Up, Zero3, Pitch, Walls);
+      N0 := Count_Of (Note_With (None));
+      N1 := Count_Of (Note_With (Own_B));
+      N2 := Count_Of (Note_With (Far_B));
+      Check (N0 > 0 and then N1 = N0 + Natural (Walls.Length) and then N2 = N0,
+             "重挑·挡了 ⇒ 挡住的那一点记进形状:没挡点 " & Codec.Img (N0) & " 个表面点 · 挡在它边外 3 mm ⇒ " & Codec.Img (N1) & "(多出它和往下的侧壁 "
+             & Codec.Img (Natural (Walls.Length)) & " 个)· 挡在 4 cm 外 ⇒ " & Codec.Img (N2) & "(旁边的东西,不进它的形状)");
    end;
 end Welds_Path_5;

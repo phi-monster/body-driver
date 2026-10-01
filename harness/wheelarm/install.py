@@ -43,8 +43,10 @@ print("装了 task/RoboDojo/config/bd_mouse_floor.yml")
 base = json.load(open(os.path.join(R, "Assets/Eval_Layout/RoboDojo/drone/1/bootcal_0.json")))
 LAY = os.path.join(R, "Assets/Eval_Layout/RoboDojo/wheelarm/0")
 os.makedirs(LAY, exist_ok=True)
-G = base["Ground"]
-FLOOR_Z = float(G["default_pos"][2]) + 0.5 * float(G["thickness"])   # 地是一块 cube,default_pos 是它的中心 ⇒ 地面 = 中心 + 半厚(第一版当成 0:老鼠埋进地里蹦出来歪了 70°、底盘被顶高 5 cm)
+# 地面高:RoboDojo 的 Ground 是一块 cube,中心摆在 default_pos 的 z − 半厚(scene_manager/objects/ground.py)⇒ 顶面就在 default_pos 的 z;
+# 这里把它摆到 0.05 m,比默认房间 Simple_Room 自己的地高一点(第 39 条离线核实测:东西落在 0.0475 上),地面就是这一块的顶,高度说得清。
+# (第一版按"中心 + 半厚"算出 0.05,算法是错的,碰巧和房间的地差 2.5 mm;大客厅没放房间,东西其实落在 Ground 的顶 0 上、边上的掉出了 7 m 的地)
+FLOOR_Z = 0.05
 MOUSE_Z = FLOOR_Z + (0.7818 - 0.765)   # chase_mouse 的布局里老鼠的中心比桌面高这么多(它自己的半高);放在地上一样高出地面这么多
 BASE_Z = FLOOR_Z + 0.08                # 底盘中心离地 8 cm(make_wheelarm.py:离地 3 cm + 半高 5 cm)
 rob = os.path.join(R, "env_cfg/robot/wheelarm.yml")
@@ -54,6 +56,7 @@ print("装了 env_cfg/robot/wheelarm.yml(地面 z = %.3f,底盘根 z = %.3f)" % 
 rng = np.random.default_rng(39)
 for k in range(3):
     lay = {key: json.loads(json.dumps(base[key])) for key in ("Room", "Ground", "Background")}
+    lay["Ground"]["default_pos"] = [0.0, 0.0, FLOOR_Z]
     lay["Table"] = dict(base["Table"], default_pos=[0.0, 1.3, base["Table"]["default_pos"][2]])
     x, y = float(rng.uniform(-0.4, 0.4)), float(rng.uniform(-0.5, -0.1))
     h = float(rng.uniform(0, 2 * np.pi))

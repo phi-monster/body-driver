@@ -1,4 +1,5 @@
 with Ada.Numerics.Long_Elementary_Functions; use Ada.Numerics.Long_Elementary_Functions;
+with Things;
 package body World is
    type Bool_Array is array (Natural range <>) of Boolean;
    procedure Init (S : in out State; N_Cams : Natural) is
@@ -14,6 +15,7 @@ package body World is
       N : constant Natural := Natural (S.Cams.Length);
    begin
       Init (S, N);
+      Things.Clear_All;   --  新的一集:每件东西的估计(I4)也是上一集的世界
    end Reset_All;
 
    procedure Observe (S : in out State; Cam : Natural; Regs : Picture.Regions; W, H : Natural) is

@@ -536,6 +536,20 @@ begin
              "别的眼:在第 1 台里给不出它 ⇒ 按次序问第 0、第 3 台(第 2 台这一帧没有画面,跳过)");
    end;
 
+   --  ⑪ 纸上每个量那句"我怎么量它"照抄量它的那一边(Act.Qty_Meaning),不另编。病:sinew 里自己写了一句 height 的含义、别的量一律
+   --  "a reading of it I can change" —— 路 5 加了 heading / tilt / away,脑在纸上只看到这句空话;height 的那句也和路 5 的原文不是同一句。
+   --  🦷 Sinew.Qty_Gloss 不用 Meaning(改回自己写的那一句)⇒ 红
+   declare
+      function Meaning (Name : String) return String is ("what the measuring side says about " & Name);
+      G : constant String := Sinew.Grammar ("touching", "grasper", "settled", "height heading", Meaning'Access);
+      G0 : constant String := Sinew.Grammar ("touching", "grasper", "settled", "height heading");
+   begin
+      Check (Ada.Strings.Fixed.Index (G, "height = what the measuring side says about height") > 0
+             and then Ada.Strings.Fixed.Index (G, "heading = what the measuring side says about heading") > 0
+             and then Ada.Strings.Fixed.Index (G, "a reading of it I can change") = 0 and then Ada.Strings.Fixed.Index (G0, " = ") = 0,
+             "纸上每个量的含义照抄量它的那一边(给了就印它的原话,没给就不印,不另编)");
+   end;
+
    --  ⑦ 重放 S1A1–S1A5 落盘的每一轮(大并行 §5 路 7:S1A2–S1A4 落盘的轮次重放,粘在一起的名字都绑对)。
    --  每一轮:在哪只眼、脑的程序里按行的先后写了哪些名字、那只眼对每个名字怎么答(日志里的原话;日志里旧的认法没问眼就绑了的,
    --  拿那一轮落盘的画面、驱动一字不差的请求问过真 Qwen3.5-9B,10-01);脑说的是什么(打分用,判法看不见)。

@@ -293,9 +293,15 @@ package body Act is
          --  以前这里写 Grip | Piece,爪心同时满足两个角色,语言的角色区分等于没有。
          --  这具身体上量不到这样的零件时,绑不上就是对的,身体要说出来,不许拿爪心顶数。
          when Sinew.Rl_Pusher => K = Piece,
-         --  me = 整个我。只有"推一下整幅画面跟着变、而且身上量不出可分的零件"的机体(无人机)才有它。
-         --  这具身体量得出手指和爪心 ⇒ me 绑不上,而这是对的;身体要说清为什么,不许只回一句"认不出"。
+         --  me = 整个我:种类说不出"整个",按种类问恒为 False;按整件问(下面那个)才认 Whole
          when others => False);
+
+   --  me = 整个我(路 1,10-01):推一下我身上量得到的每一样都跟着动的那一组(扛着全身的那组;没有它时,唯一的一条臂、
+   --  合拢通道全在它上面、又没有量不出长在哪的零件)上的零件。x5 两条臂互不带着 ⇒ 没有 ⇒ 绑不上,照实说(Why_No_Role)
+   function Role_Wants (R : Sinew.Role; It : Item) return Boolean is
+     (case R is
+         when Sinew.Rl_Me => It.Kind = Piece and then It.Whole,
+         when others => Role_Wants (R, It.Kind));
 
    function Rel_Cmd (R : Sinew.Rel) return String is
      (case R is
@@ -483,6 +489,8 @@ package body Act is
    procedure Seg_In_Box (C : Context; F : Plug.Frame; Cam : Natural; X0, Y0, X1, Y1 : Natural; Got, Iso : out Boolean; R : out Picture.Region; M : out Bools;
                          Pu_On, Pv_On : Long_Float := -1.0) is separate;
 
+   --  别的手压在东西上没有(路 1 的 Hand_Covers,正文在后面):先在这里声明,Remeasure_Boxed 拿它跳过"别的手压在东西上"的那一眼(路 3 I4,10-01)
+   function Hand_Covers (C : Context; F : Plug.Frame; Arm, Cm : Natural; B : Boxed_Thing) return Boolean;
    procedure Remeasure_Boxed (C : in out Context; F : Plug.Frame; Cam : Natural; Regs : in out Picture.Regions) is separate;
 
    --  这一块是不是脑点过名的那几件之一(拿形心对;我量出来的那一块原样进了槽,所以对得上)。-1 = 不是
@@ -1055,8 +1063,6 @@ package body Act is
          K := Contact.Qty.Heading;
       elsif Name = "tilt" then
          K := Contact.Qty.Tilt;
-      elsif Name = "away" then
-         K := Contact.Qty.Away;
       else
          return False;
       end if;
@@ -1066,9 +1072,8 @@ package body Act is
      (if Name = "height" then "how far the thing is above the surface it lies on (I measure it with my own eyes; up = off that surface, down = back onto it)"
       elsif Name = "heading" then "which way the thing's long side points along the surface it lies on (up rotates it counterclockwise seen from above that surface, down clockwise)"
       elsif Name = "tilt" then "how far the thing leans from how it stands (up leans its top away from my still eye, down toward it)"
-      elsif Name = "away" then "how far the thing is from my still eye, measured along the surface it lies on (up = farther, down = nearer)"
       else "a reading of it I can change");
-   --  键盘上列哪几个:有能合拢的部件(grasper)才列。heading 要它的长轴(轮廓量得出);tilt / away 要一只"不跟着动它的那条臂走"的眼 ——
+   --  键盘上列哪几个:有能合拢的部件(grasper)才列。heading 要它的长轴(轮廓量得出);tilt 要一只"不跟着动它的那条臂走"的眼 ——
    --  按开机量的"每只眼长在哪条臂上"判(Cam_Arm):有手指的臂里有一条臂,有一只量过几何的眼不长在它上面,就列(用到哪条臂时缺了照实说)
    function Qty_Words (C : Context; Roles : String) return String is
       Still_Eye : Boolean := False;
@@ -1085,7 +1090,9 @@ package body Act is
             end loop;
          end if;
       end loop;
-      return "height heading" & (if Still_Eye then " tilt away" else "");
+      --  "离我多远"(10-01 叫 away)10-01 从键盘上撤了:路 7 拿真 Qwen 量,"拿起来 10 cm"那一题 30 问第一句全写成 away down(读成"先拉近"),
+      --  单件对 0 / 30(只有 height 的键盘 5–13 / 30)。要回来得先换一种写法(名字和那句含义),量过不让"拿起来"那一类变差(大并行 §2 第 16 条)
+      return "height heading" & (if Still_Eye then " tilt" else "");
    end Qty_Words;
 
    --  这一段用了几拍:对方在段中间复位(新的一集,步数从零起)时不许算成负数(S1 2026-09-23 实测:第二集开始时正在进场,减出负数把驱动崩了)
@@ -1451,9 +1458,26 @@ package body Act is
    --  "横" = 脑看着的那只眼的横轴;参照那一件 = 此刻看得见它的几只眼的视线交点(交点的高 = 它顶面的高:接触集的模型就是"顶面过它量到的位置")。
    --  不准:它轮廓横着的误差(Sil_Err)、它那张面高低的不准(Sil_H_Sd)、参照那一件交点沿"上"的不准(Meet_Sd)、位姿读数的抖动,合起来;
    --  长轴朝向的不准 = 轮廓点误差 × √(长轴方向的方差 / 点数) ÷ (长短两轴方差之差)(主轴的一阶扰动),Z 倍到不了直角 ⇒ 才算有长轴
+   --  它此刻的实心模型(世界系表面点):拿着它 ⇒ 合上那一刻的那份按手从那一刻起挪过的刚体运动带过来(拿住 = 抬一点它跟着手走,量过的);
+   --  没拿着 ⇒ Solid_Of(记下的顶面轮廓往下补到它躺的面,同接触集);都没有 ⇒ 空。
+   --  Rest = 它还躺在面上时的那一份(拿着的 = 合上那一刻的;没拿着的就是 Shape):它的底离面多高 = 此刻的最低点比躺着时的最低点高出多少
+   --  (模型的侧壁补到离面不到一个采样间距处为止,躺着时的最低点本来就在面上方一点 —— 量"抬起多高"要从那儿算)
+   procedure Thing_Shape (C : Context; F : Plug.Frame; Arm : Integer; Name : Unbounded_String; Shape, Rest : out Contact.V3_Vectors.Vector) is separate;
    procedure Want_Scene (C : in out Context; F : Plug.Frame; W : Want; Arm : Integer; Sc : out Contact.Qty.Scene) is separate;
    --  这一个要 ⇒ 要它怎么动(一个旋量)。量的名字按登记表(Qty_Kind);两件东西那一句的关系词各是两件之间的一个量(Contact.Qty),方向由关系词定
    procedure Want_Twist (C : in out Context; F : Plug.Frame; W : Want; Arm : Integer; M : out Contact.Twist; Ok : out Boolean; Note : out Unbounded_String) is separate;
+
+   --  手刚松开、退开以后:重新量一遍它(同走过去时那一套:这只手那只眼的窗投到它该在的地方,几只眼此刻的视线一交就是它在哪,
+   --  看全了它的眼各记一份顶面轮廓)。记下的旧轮廓是它被拿起来之前那儿的,先作废。Got = 重新记下了它的轮廓
+   procedure Measure_Again (C : in out Context; F : Plug.Frame; Arm : Natural; Name : Unbounded_String; Predicted : Geom.V3; Got : out Boolean;
+                            Forget_Old : Boolean := True) is separate;
+   --  ── 放下(大并行路 5,10-01,主代理批的;owner 以后不同意,撤这一处就回到"碰到面只报 resist")──
+   --  拿着它往下碰到了下面的面(只按 Selfmap.Blocked):先问物理 —— 单靠下面那张面托不托得住它(Contact.Wrench.Rests:它底下贴着面的那一片当唯一的接触,
+   --  重心按量到的不准挪一挪也托得住);托得住才松手、手退开、重新量它,看它是不是还在原处(Contact.Qty.Moved_Off,同一种量法:它的实心模型的形心);
+   --  托不住不松,照实说差多少(重心离那一片的边多远、它在哪不准多少)。它停在比它躺过的面高出量得出的那么多的地方 = 底下是一件我没量过顶面的东西,
+   --  托不托得住判不了 ⇒ 不松,照实说
+   procedure Let_Go_If_It_Rests (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Arm : Natural; W : Want; Qty : String;
+                                 Fallback_Name : Unbounded_String; Event : out Unbounded_String; Steps_Taken : in out Natural) is separate;
 
    procedure Round (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context) is separate;
 

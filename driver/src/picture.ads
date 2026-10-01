@@ -50,6 +50,11 @@ package Picture is
    --  一张整幅掩膜(W*H,是 = 它)⇒ 它的框、像素数、形心、主轴、伸长比(同 Measure_In_Box 的算法;2026-09-26 分割仪器 SAM 出掩膜后用)。一个像素都没有 ⇒ Ok = False
    procedure Region_Of_Mask (M : Bools; W, H : Natural; R : out Region; Ok : out Boolean);
    function Quantile (F : in out Floats; Q : Long_Float) return Long_Float;
+   --  窗随它长(I4):量出来的那一块 R 顶到了窗 [X0..X1] × [Y0..Y1] 的哪几边(那一边不在画幅边上;R 伸出窗外也算顶到)
+   --  ⇒ 往那几边各长出 R 自己那么宽 / 高,夹在画幅里。Grew = 长了;哪边都没顶着、或顶着的都是画幅边 ⇒ False,窗不变
+   procedure Grow_Window (R : Region; W, H : Natural; X0, Y0, X1, Y1 : in out Natural; Grew : out Boolean);
+   --  New 盖住 Old 的里头吗(Old 里上下左右四个邻像素也都是 Old 的那些像素,New 里全是):同一件东西长大了;盖不住 = 分割跳到了别的东西上
+   function Covers_Interior (New_M, Old_M : Bools; W, H : Natural; R : Region) return Boolean;
    function Region_Depth (Depth : Floats; W, H : Natural; Mask : Bools; Q : Long_Float) return Long_Float;  --  掩膜上的深度分位;NaN = 无
    function Inside (R : Region; U, V : Long_Float; W, H : Natural; Grow : Long_Float) return Boolean;
    function Is_Nan (X : Long_Float) return Boolean;

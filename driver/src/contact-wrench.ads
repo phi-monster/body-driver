@@ -43,6 +43,15 @@ package Contact.Wrench is
    --  同一个规划,要的不是配平重力,而是这几处接触(加上面)一起产生力 F、绕 Ref 的力矩 Mo(按单位重量)。
    --  Align:每处接触摩擦锥的第一条棱对准它在接触面上的那一份(线性化的锥只在那个方向上是准的;没有就任取)
    function Least (Ts : Touch_Vectors.Vector; Ref, F, Mo, Align : V3; Sup : Surface; M : Twist; Mu_Hand, Mu_Surf : Long_Float; Why : out Why_Kind) return Long_Float;
+   --  它底下贴着面的那一片(放下、摞上去之前问):它的点里最低的那一层 —— 最低点往上一个采样间距以内的那些点(点按这个间距铺,
+   --  比它近的高低分不出)—— 投到过最低点、法向 Up 的那张面上(Footprint)。点空 / 间距不是正数 ⇒ No_Surface
+   function Base_Of (Pts : V3_Vectors.Vector; Up : V3; Pitch : Long_Float) return Surface;
+   --  单靠下面那张面托不托得住它(松手之前问,放下、摞上去同一条;大并行路 5,10-01 主代理批的):Sup = 它底下贴着那张面的那一片,重力在 Com、朝 −Up;
+   --  手不碰它、它不动(Still)—— 就是 Need,手一处都没有。重心按量到的不准挪:沿那一片凸包每条边的外法向各挪 Stats.Z 倍 Com_Sd,
+   --  每一种都托得住才算托得住(凸的那一片:半径 Z 倍不准的圆整个在里面 ⇔ 圆心朝每条边的外法向各挪这么远都还托得住)。
+   --  面的摩擦按 Mu(不知道就给 0:不靠摩擦也托得住才算)。
+   --  Margin = 重心离那一片凸包最近的那条边多远(在面里量,里面为正、外面为负);那一片不到三个不共线的点(没有面积)⇒ Ok = False、Margin = 负无穷
+   procedure Rests (Sup : Surface; Com, Up : V3; Com_Sd, Mu : Long_Float; Ok : out Boolean; Margin : out Long_Float);
    --  没有面时要这几处接触一起产生的:力 F(按单位重量;托住 = 抵掉重力 ⇒ 朝上 1)作用在 C,另加转矩 M
    type Load is record
       F : V3 := [0.0, 0.0, 1.0];
