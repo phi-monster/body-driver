@@ -439,8 +439,7 @@ driver-stats.ads	with Pre => X'Length = Y'Length and then X'Length > 1;	1	statis
 driver-stats.ads	with Pre => X'Length = Y'Length and then X'Length > 2;	2	statistics	a line fit with a residual spread needs three points
 driver-uncertain.adb	Dof := Natural'Max (1, Natural (Real'Floor ((Va + Vb) * (Va + Vb) / Spread)));	1	statistics	Welch's degrees of freedom are at least one
 driver-uncertain.adb	for I in 1 .. 3 loop	3	structure	three dimensions
-driver-wire.adb	"" & ASCII.CR & ASCII.LF	"1.1	format	WebSocket framing and handshake (RFC 6455)
-driver-wire.adb	"" & ASCII.CR & ASCII.LF	"101	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	& "" & Blank), Ok);	"13	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	(R, (if I + 1 <= Data'Last then Alphabet ((Group / 2 ** 6) mod 2 ** 6 + 1) else ''));	2	format	base64 groups of three bytes into four characters (RFC 4648)
 driver-wire.adb	(R, (if I + 1 <= Data'Last then Alphabet ((Group / 2 ** 6) mod 2 ** 6 + 1) else ''));	2	format	base64 groups of three bytes into four characters (RFC 4648)
 driver-wire.adb	Accept_Suffix : constant String := "";	"258	format	WebSocket framing and handshake (RFC 6455)
@@ -454,6 +453,7 @@ driver-wire.adb	Ada.Strings.Unbounded.Append (R, Alphabet (Group / 2 ** 18 + 1))
 driver-wire.adb	B2 : constant Natural := (if I + 2 <= Data'Last then Natural (Data (I + 2)) else 0);	2	format	base64 groups of three bytes into four characters (RFC 4648)
 driver-wire.adb	B2 : constant Natural := (if I + 2 <= Data'Last then Natural (Data (I + 2)) else 0);	2	format	base64 groups of three bytes into four characters (RFC 4648)
 driver-wire.adb	Ch := Character'Val (Character'Pos (Ch) + 32);	32	format	ASCII upper to lower case
+driver-wire.adb	Connect_Socket (C.Peer, (Family => Family_Inet, Addr => Addresses (Get_Host_By_Name (Host), 1),	1	structure	the first address the host name resolves to
 driver-wire.adb	Fin : constant Boolean := (Two (1) and 16#80#) /= 0;	16#80#	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Group : constant Natural := B0 * 2 ** 16 + B1 * 2 ** 8 + B2;	2	format	base64 groups of three bytes into four characters (RFC 4648)
 driver-wire.adb	Group : constant Natural := B0 * 2 ** 16 + B1 * 2 ** 8 + B2;	2	format	base64 groups of three bytes into four characters (RFC 4648)
@@ -463,15 +463,19 @@ driver-wire.adb	Header.Append (Byte (Shift_Right (L, 8 * K) and 16#FF#));	16#FF#
 driver-wire.adb	Header.Append (Byte (Shift_Right (L, 8 * K) and 16#FF#));	8	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Header.Append (Byte (Shift_Right (L, 8) and 16#FF#));	16#FF#	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Header.Append (Byte (Shift_Right (L, 8) and 16#FF#));	8	format	WebSocket framing and handshake (RFC 6455)
-driver-wire.adb	Header.Append (Byte'(126));	126	format	WebSocket framing and handshake (RFC 6455)
-driver-wire.adb	Header.Append (Byte'(127));	127	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Header.Append (Mask or 126);	126	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Header.Append (Mask or 127);	127	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	I := I + 3;	3	format	base64 groups of three bytes into four characters (RFC 4648)
+driver-wire.adb	Key : Byte_Array (1 .. 4);	4	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Kind := (if Message = 1 then Text else Binary);	1	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Length : Unsigned_64 := Unsigned_64 (Two (2) and 16#7F#);	16#7F#	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Length := Shift_Left (Length, 8) or Unsigned_64 (B);	8	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Length := Unsigned_64 (X (1)) * 2 ** 8 + Unsigned_64 (X (2));	2	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Mask : Byte_Array (1 .. 4) := [others => 0];	4	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Mask : constant Byte := (if C.Client then 16#80# else 0);	16#80#	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Masked (I) := Data (I) xor Key ((I - Data'First) mod 4 + 1);	4	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Masked : constant Boolean := (Two (2) and 16#80#) /= 0;	16#80#	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Nonce : Byte_Array (1 .. 16);	16	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	One : Byte_Array (1 .. 1);	1	structure	read the handshake one byte at a time
 driver-wire.adb	Opcode : constant Byte := Two (1) and 16#0F#;	16#0F#	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Payload (I) := Payload (I) xor Mask ((I - 1) mod 4 + 1);	4	format	WebSocket framing and handshake (RFC 6455)
@@ -479,8 +483,14 @@ driver-wire.adb	R (I) := Byte'Value ("" & Hex (Hex'First + 2 * Natural (I - 1) .
 driver-wire.adb	R (I) := Byte'Value ("" & Hex (Hex'First + 2 * Natural (I - 1) .. Hex'First + 2 * Natural (I - 1) + 1) & "");	2	format	SHA-1 digest as hexadecimal pairs
 driver-wire.adb	R (I) := Byte'Value ("" & Hex (Hex'First + 2 * Natural (I - 1) .. Hex'First + 2 * Natural (I - 1) + 1) & "");	2	format	SHA-1 digest as hexadecimal pairs
 driver-wire.adb	R : Byte_Array (1 .. Offset (Hex'Length / 2));	2	format	SHA-1 digest as hexadecimal pairs
+driver-wire.adb	Send_All (C, To_Bytes ("" & Line_End	"1.1	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Send_All (C, To_Bytes ("" & Line_End	"1.1	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Send_All (C, To_Bytes ("" & Line_End	"101	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Send_Frame (C, (if Kind = Text then 1 else 2), Data, Ok);	1	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Send_Frame (C, (if Kind = Text then 1 else 2), Data, Ok);	2	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Send_Frame (C, 10, Payload.all, Ok);	10	format	WebSocket framing and handshake (RFC 6455)
-driver-wire.adb	Send_Frame (C, 2, Data, Ok);	2	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Status : constant String := "";	"1.1	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Status : constant String := "";	"101	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Two : Byte_Array (1 .. 2);	2	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	X : Byte_Array (1 .. 2);	2	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	X : Byte_Array (1 .. 8);	8	format	WebSocket framing and handshake (RFC 6455)
