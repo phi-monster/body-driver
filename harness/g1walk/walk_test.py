@@ -132,7 +132,11 @@ def act(cmd):
     return a
 
 
-rep = {"mode": args.mode, "step_dt_s": dt, "segments": [], "falls": [], "seed": args.seed}
+rep = {"mode": args.mode, "step_dt_s": dt, "segments": [], "falls": [], "seed": args.seed,
+       # 这具身体的关节、连杆叫什么、按什么顺序排(搭 RoboDojo 那一具会走的人形要照着它配手、眼)
+       "joint_names": list(robot.joint_names), "body_names": list(robot.body_names),
+       "lower_body_joints": list(env.action_manager.get_term("lower_body_joint_pos")._joint_names),
+       "usd": G1_29DOF_CFG.spawn.usd_path}
 obs, _ = env.reset()
 t0 = time.time()
 T = int(round(args.minutes * 60 / dt))

@@ -30,6 +30,11 @@ for rel in FILES:
     os.makedirs(os.path.dirname(dst), exist_ok=True)
     shutil.copy(os.path.join(HERE, "rd", rel), dst)
     print("装了", rel)
+# 路 8 的运行时(task/RoboDojo/bd/):Walker(老鼠)、新身体的登记(rig.py)
+for src, rel in ((f"{HERE}/../scenes/rd/bd/scene.py", "task/RoboDojo/bd/scene.py"), (f"{HERE}/../scenes/rd/bd/rig.py", "task/RoboDojo/bd/rig.py")):
+    os.makedirs(os.path.join(R, "task/RoboDojo/bd"), exist_ok=True)
+    shutil.copy(src, os.path.join(R, rel))
+    print("装了", rel)
 cfg = os.path.join(R, "task/RoboDojo/config/bd_mouse_floor.yml")
 open(cfg, "w").write("# body-driver 第 39 条(harness/wheelarm/install.py 写出):布局直接给,这里不列东西。\n{}\n")
 print("装了 task/RoboDojo/config/bd_mouse_floor.yml")

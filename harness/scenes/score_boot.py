@@ -42,7 +42,15 @@ out["cams"] = rows
 txt = open(f"{RUN}/cal.log", errors="replace").read()
 out["boot_steps"] = next((int(l.split("用了")[1].split("拍")[0]) for l in txt.splitlines() if "开机量身体一共用了" in l), None)
 out["round1"] = "── 第 1 轮" in txt
-sc = subprocess.run(["python3", "/root/diag/v1b_score_fk_cur.py", RUN], capture_output=True, text=True, timeout=3000)
+# 打分脚本的第一种考法要逐帧的位姿(vid/fk_poses.txt、vid/poses.txt);开机炮默认不录(BOOT_VID 才录,一炮近 1 GB)⇒ 没录就给两份空的,
+# 那一种考法就不考(脚本自己按"0 只手"跳过),第二种考法(扫描各格的运动学、走到没去过的地方、指尖、桌面、头顶眼)照常
+vid = os.path.join(RUN, "vid")
+out["per_frame_poses"] = os.path.exists(os.path.join(vid, "fk_poses.txt"))
+if not out["per_frame_poses"]:
+    os.makedirs(vid, exist_ok=True)
+    for f in ("fk_poses.txt", "poses.txt"):
+        open(os.path.join(vid, f), "a").close()
+sc = subprocess.run(["/venv/RoboDojo/bin/python", "/root/diag/v1b_score_fk_cur.py", RUN], capture_output=True, text=True, timeout=3000)
 out["v1b_score"] = (sc.stdout + sc.stderr).strip().splitlines()
 json.dump(out, open(f"/root/p8/boot/{K}/score.json", "w"), indent=1, ensure_ascii=False)
 print("== %s:开机 %s 拍,到第 1 轮 %s" % (K, out["boot_steps"], out["round1"]))

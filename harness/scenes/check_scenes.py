@@ -333,6 +333,8 @@ def scenario(S, rep):
         return question_scenario(S, rep)
     if t == "bd_mouse_floor":
         return mouse_floor_scenario(S, rep)
+    if t == "bd_livingroom":
+        return livingroom_scenario(S, rep)
     if t == "bd_cloth":
         P = S.cloth_points("cloth")
         top = S.lm.table_info[0]["height"]
@@ -527,6 +529,66 @@ def mouse_floor_scenario(S, rep):
     S.set_pose("target", p0 + [0, 0, 0.12], q0)
     test(rep, "老鼠离地 12 cm", 1, S.graded())
     return True
+
+
+def livingroom_scenario(S, rep):
+    """第 40 条:会走的人形站得住、按走路控制器的命令走得动;大客厅的判据:开局 0,每件都摆到它该去的地方、物理走到停 ⇒ 1,挪走一件 ⇒ 0"""
+    from task.RoboDojo.bd import question as Q
+    from task.RoboDojo.bd import tidy as TD
+    env = S.env
+    p0, _ = robot_root(S)
+    for _ in range(50):
+        env.take_action(S.hold_action())
+    p1, _ = robot_root(S)
+    rep["stand"] = {"pelvis_z": [round(float(p0[2]), 3), round(float(p1[2]), 3)], "moved_m": round(float(np.linalg.norm((p1 - p0)[:2])), 3)}
+    test(rep, "站着不动 50 个动作:骨盆高 %.3f → %.3f m、挪了 %.3f m" % (p0[2], p1[2], rep["stand"]["moved_m"]), 1, p1[2] > p0[2] - 0.1 and rep["stand"]["moved_m"] < 0.1)
+    env.bd_cmd = [0.3, 0.0, 0.0, 0.72]
+    for _ in range(50):
+        env.take_action(S.hold_action())
+    p2, _ = robot_root(S)
+    env.bd_cmd = [0.0, 0.0, 0.0, 0.72]
+    for _ in range(25):
+        env.take_action(S.hold_action())
+    p3, _ = robot_root(S)
+    rep["walk"] = {"moved_xy_m": [round(float(v), 3) for v in (p2 - p1)[:2]], "dist_m": round(float(np.linalg.norm((p2 - p1)[:2])), 3),
+                   "pelvis_z_after": round(float(p3[2]), 3)}
+    test(rep, "走路控制器 vx 0.3 m/s 走 2 s:走了 %.3f m(该 0.6 m 上下)、停下以后骨盆高 %.3f m" % (rep["walk"]["dist_m"], p3[2]), 1,
+         0.4 < rep["walk"]["dist_m"] < 0.8 and p3[2] > p0[2] - 0.1)
+    save_images(env, rep, "L0_walked")
+    fp = S.rm.func_parser
+    test(rep, "开局(东西乱放着)", 0, S.graded())
+    lay = S.lm.saved_layouts[0]
+    todo = TD.places(lay)
+    starts = {lab: S.pose(lab) for lab, _, _ in todo}
+    for k, (lab, furn, place) in enumerate(todo):
+        fi = S.inst(furn)
+        pl = S.meta(furn)["passive"]["functional"]["place"][place]
+        fpos, fq = S.pose(furn)
+        Rf = rotm(fq)
+        top = fpos + Rf @ np.asarray(pl["center"], dtype=float)
+        half = np.asarray(pl["half"], dtype=float)
+        # 同一处放好几件:沿那一面排开(按序号在面上铺格子),从面上(箱子:箱底往上)放下去
+        n = sum(1 for _, f2, p2 in todo if (f2, p2) == (furn, place))
+        i = sum(1 for _, f2, p2 in todo[:k] if (f2, p2) == (furn, place))
+        cols = int(math.ceil(math.sqrt(n)))
+        u = -half[0] + (2 * half[0]) * ((i % cols) + 0.5) / cols
+        v = -half[1] + (2 * half[1]) * ((i // cols) + 0.5) / max(1, int(math.ceil(n / cols)))
+        xy = (top + Rf @ np.array([u, v, 0.0]))[:2]
+        _, q = starts[lab]
+        sa = Q._shape(fp, 0, S.inst(lab))
+        world = sa @ rotm(q).T
+        floor = top[2] - float(pl["depth"])
+        S.set_pose(lab, np.r_[xy - Q._center_xy(world), floor + 0.01 - world[:, 2].min()], q)
+    S.steps(500)
+    got = S.graded()
+    done = fp.__dict__.get("_bd_tidy_done", {}).get(0)
+    rep["tidy_all_placed"] = {"placed": done[0] if done else None, "of": done[1] if done else None}
+    test(rep, "每件都摆到它该去的地方、物理走到停(%s / %s 件放好了)" % (rep["tidy_all_placed"]["placed"], rep["tidy_all_placed"]["of"]), 1, got)
+    lab0 = todo[0][0]
+    S.set_pose(lab0, *starts[lab0])
+    S.steps(100)
+    test(rep, "挪回一件(%s)" % lab0, 0, S.graded())
+    return False
 
 
 def question_scenario(S, rep):

@@ -1,0 +1,16 @@
+# body-driver walking humanoid rig: the head eye rides on the torso (mount_link); the wrist eyes come from Assets/Robots/g1walk/robot_config.yml.
+# ori = intrinsic XYZ Euler degrees (RoboDojo utils/rotations.py default); the camera looks along its -Z: [0, -60, -90] = forward (+x), 30 deg down.
+annotator:
+  common:
+    enabled: true
+    rgb_capture:
+      type: rgb
+      device: cpu
+
+cam_head:
+  camera:
+    type: d435
+    mesh: pinhole
+    mount_link: robot0/torso_link
+    pos: [0.06, 0.0, 0.40]
+    ori: [0, -60, -90]
