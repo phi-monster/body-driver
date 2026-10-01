@@ -506,11 +506,11 @@ begin
    end;
    --  ② 每个量往哪变(Contact.Qty.Motion,量到的几何直接给):它在 (0.10, 0.20) 躺在面上(上 = +z),中心高 0.02;我那只眼在 (0.50, 0.20, 0.60);
    --     脑看着的那只眼横轴朝 -y;参照那一件在 (-0.10, 0.20),顶面高 0.03。
-   --     · height 往上 = +z、往下 = -z;heading 往上 = 绕过它中心的 +z 转;tilt 往上 = 它的顶往远离我那边倒(绕 z × 水平离我的方向);away 往上 = 水平离我更远
+   --     · height 往上 = +z、往下 = -z;heading 往上 = 绕过它中心的 +z 转;tilt 往上 = 它的顶往远离我那边倒(绕 z × 水平离我的方向)
    --     · gap 往下(nearer)= 朝参照那一件;参照那一件比它低(中心更低)时往面里去的那一份去掉,只在面里走;rise ±z;across 往上 = 那只眼的右边(-y 放平)
    --     · rest_on:底不比参照的顶高出不准那么多 ⇒ 先往上;够高、不在正上方 ⇒ 横着朝它;在正上方、比它的顶高 ⇒ 往下;贴着它的顶 ⇒ 不动
    --     · aim:长轴沿 x,参照那一件在 +y 方向 ⇒ 绕 +z 转(逆时针)转过去;在 -y ⇒ 绕 -z;正对着长轴(两头都算)⇒ 不动
-   --     · 缺什么照实说:没有"我"那只眼 ⇒ tilt / away 说不出;没有参照那一件 ⇒ gap 说不出
+   --     · 缺什么照实说:没有"我"那只眼 ⇒ tilt 说不出;没有参照那一件 ⇒ gap 说不出
    --  病:量的方向写反 / 绕错点转 / 贴着面躺的东西被要求往面里走 / onto 横着直接往参照那一件身上撞 / 长轴只认一头,转大半圈
    declare
       package Q renames Contact.Qty;
@@ -522,11 +522,10 @@ begin
          return Ok;
       end Mo;
       function Near (A, B : Contact.V3) return Boolean is (Contact.Norm ([A (0) - B (0), A (1) - B (1), A (2) - B (2)]) < 1.0e-9);
-      M_H, M_Hd, M_Hd2, M_T, M_A, M_G, M_G2, M_R, M_X, M_O1, M_O2, M_O3, M_O4, M_Am, M_Am2, M_Am3, M_Miss1, M_Miss2 : Contact.Twist;
-      N1, N2, N3, N4, N5, N6, N7, N8, N9, N10, N11, N12, N13, N14, N15, N16, N17, N18 : Unbounded_String;
+      M_H, M_Hd, M_Hd2, M_T, M_G, M_G2, M_R, M_X, M_O1, M_O2, M_O3, M_O4, M_Am, M_Am2, M_Am3, M_Miss1, M_Miss2 : Contact.Twist;
+      N1, N2, N3, N4, N6, N7, N8, N9, N10, N11, N12, N13, N14, N15, N16, N17, N18 : Unbounded_String;
       Ok_All : Boolean := True;
       Tilt_Away : Boolean := False;
-      Away_Up : Boolean := False;
       Gap_Flat : Boolean := False;
    begin
       S0.Up := [0.0, 0.0, 1.0];
@@ -550,9 +549,6 @@ begin
          begin
             Tilt_Away := Hd (T1) > Hd (Top) and then Near (M_T.Pivot, S0.Center);
          end;
-      end if;
-      if Mo (Q.Away, 1, S0, M_A, N5) then
-         Away_Up := Near (M_A.Lin, [-1.0, 0.0, 0.0]);   --  我在 +x 那边 ⇒ 远离我 = -x
       end if;
       Ok_All := Ok_All and then Mo (Q.Gap, -1, S0, M_G, N6) and then Near (M_G.Lin, [-1.0, 0.0, 0.0]);
       --  参照那一件的中心比它低:往它那边走有往下的一份,它贴着面躺 ⇒ 去掉,只在面里走
@@ -591,9 +587,9 @@ begin
          S3.Has_Ref := False;
          Ok_All := Ok_All and then not Mo (Q.Gap, -1, S3, M_Miss2, N18) and then Index (N18, "other thing") > 0;
       end;
-      Check (Ok_All and then Tilt_Away and then Away_Up and then Gap_Flat,
+      Check (Ok_All and then Tilt_Away and then Gap_Flat,
              "量变旋量·每个量往哪变:height ±z · heading 绕它中心的 +z · tilt 往上顶往远离我那边倒 " & (if Tilt_Away then "是" else "否")
-             & " · away 往上 (" & F4 (M_A.Lin (0)) & "," & F4 (M_A.Lin (1)) & ")· gap 往下朝参照那一件、它贴着面 ⇒ 不往面里去(z " & F4 (M_G2.Lin (2)) & ")"
+             & " · gap 往下朝参照那一件、它贴着面 ⇒ 不往面里去(z " & F4 (M_G2.Lin (2)) & ")"
              & " · across 往右 = 那只眼的右边 · rest_on 先上 / 横着 / 往下 / 不动 · aim 逆时针 / 顺时针 / 两头都算不动 · 缺的照实说「" & To_String (N17) & "」「" & To_String (N18) & "」");
    end;
    --  ③ 它此刻在哪(Act.Want_Scene):没拿着 ⇒ 记下的轮廓补成实心(同接触集那一份)的形心、底贴着面、长条的长轴;

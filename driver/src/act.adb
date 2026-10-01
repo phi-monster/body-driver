@@ -1047,8 +1047,6 @@ package body Act is
          K := Contact.Qty.Heading;
       elsif Name = "tilt" then
          K := Contact.Qty.Tilt;
-      elsif Name = "away" then
-         K := Contact.Qty.Away;
       else
          return False;
       end if;
@@ -1058,9 +1056,8 @@ package body Act is
      (if Name = "height" then "how far the thing is above the surface it lies on (I measure it with my own eyes; up = off that surface, down = back onto it)"
       elsif Name = "heading" then "which way the thing's long side points along the surface it lies on (up rotates it counterclockwise seen from above that surface, down clockwise)"
       elsif Name = "tilt" then "how far the thing leans from how it stands (up leans its top away from my still eye, down toward it)"
-      elsif Name = "away" then "how far the thing is from my still eye, measured along the surface it lies on (up = farther, down = nearer)"
       else "a reading of it I can change");
-   --  键盘上列哪几个:有能合拢的部件(grasper)才列。heading 要它的长轴(轮廓量得出);tilt / away 要一只"不跟着动它的那条臂走"的眼 ——
+   --  键盘上列哪几个:有能合拢的部件(grasper)才列。heading 要它的长轴(轮廓量得出);tilt 要一只"不跟着动它的那条臂走"的眼 ——
    --  按开机量的"每只眼长在哪条臂上"判(Cam_Arm):有手指的臂里有一条臂,有一只量过几何的眼不长在它上面,就列(用到哪条臂时缺了照实说)
    function Qty_Words (C : Context; Roles : String) return String is
       Still_Eye : Boolean := False;
@@ -1077,7 +1074,9 @@ package body Act is
             end loop;
          end if;
       end loop;
-      return "height heading" & (if Still_Eye then " tilt away" else "");
+      --  "离我多远"(10-01 叫 away)10-01 从键盘上撤了:路 7 拿真 Qwen 量,"拿起来 10 cm"那一题 30 问第一句全写成 away down(读成"先拉近"),
+      --  单件对 0 / 30(只有 height 的键盘 5–13 / 30)。要回来得先换一种写法(名字和那句含义),量过不让"拿起来"那一类变差(大并行 §2 第 16 条)
+      return "height heading" & (if Still_Eye then " tilt" else "");
    end Qty_Words;
 
    --  这一段用了几拍:对方在段中间复位(新的一集,步数从零起)时不许算成负数(S1 2026-09-23 实测:第二集开始时正在进场,减出负数把驱动崩了)
