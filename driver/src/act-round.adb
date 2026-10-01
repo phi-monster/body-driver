@@ -1180,7 +1180,7 @@ begin
                      return;
                   end if;
                end;
-               V := Plan.Check (P, Rep, Facts, Binds);
+               V := Plan.Check (P, Rep, Facts, Binds, To_String (Qtys));
                if V.Ok then
                   --  第三道闸:整段在自己量出来的表上跑一遍,不通电
                   V := Plan.Dry_Run (P, Rep, Facts, Binds);

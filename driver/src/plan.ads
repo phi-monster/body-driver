@@ -133,8 +133,9 @@ package Plan is
    end record;
 
    --  整段检查:每一条 Op_Interval 里的每一条约束都过一遍。
+   --  Qtys_Usable = 这一轮键盘上列的量词(Round 给的,和键盘同一份):量的那一句只认它们(空 = 这一轮一个量都量不出)
    function Check (P : Sinew.Program; R : Exam.Report; Facts : Facts_Vectors.Vector;
-                   B : Bind_Vectors.Vector) return Verdict;
+                   B : Bind_Vectors.Vector; Qtys_Usable : String) return Verdict;
 
    --  🔴 第三道闸:整段程序在【自己量出来的表】上跑一遍,不通电。
    --  它复用同一台执行器,只是喂【预测的结局】而不是真结局 —— 所以循环、分支、try 全都照走。

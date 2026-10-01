@@ -535,8 +535,25 @@ package body Plan is
    end Mine_List;
 
    function Check (P : Sinew.Program; R : Exam.Report; Facts : Facts_Vectors.Vector;
-                   B : Bind_Vectors.Vector) return Verdict is
+                   B : Bind_Vectors.Vector; Qtys_Usable : String) return Verdict is
       V : Verdict;
+      --  W 是不是 List(空格隔开)里的一个词
+      function In_List (List, W : String) return Boolean is
+         I : Natural := List'First;
+         J : Natural;
+      begin
+         while I <= List'Last loop
+            J := I;
+            while J <= List'Last and then List (J) /= ' ' loop
+               J := J + 1;
+            end loop;
+            if J > I and then List (I .. J - 1) = W then
+               return True;
+            end if;
+            I := J + 1;
+         end loop;
+         return False;
+      end In_List;
 
       procedure Reject (Line : Natural; Msg : String; Alt : String := "") is
       begin
@@ -646,9 +663,12 @@ package body Plan is
                                    "写你给那件东西起的名字,再写 height up 或 height down");
                            exit;
                         end if;
-                        if To_String (C.Obj.Word) /= "height" then
-                           Reject (I.Line, "「" & To_String (C.Obj.Word) & "」不是我量得出的量",
-                                   "我量得出的量:height(它离它躺的面多高)");
+                        --  量的名字只许是这一轮键盘上列的那几个(身体量得出的,Qtys_Usable;原来这里写死只认 height:
+                        --  路 5 加的 heading / tilt / away 键盘上有、脑写了,编译这一步一句都过不去)
+                        if not In_List (Qtys_Usable, To_String (C.Obj.Word)) then
+                           Reject (I.Line, "「" & To_String (C.Obj.Word) & "」不是我这一轮量得出的量",
+                                   (if Qtys_Usable = "" then "这一轮我一个量都量不出(键盘上没有量的那一句)"
+                                    else "我这一轮量得出的量:" & Qtys_Usable));
                            exit;
                         end if;
                         goto Next_Constraint;
