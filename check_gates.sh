@@ -28,6 +28,8 @@ coef=$(for f in $(drv '*.adb') $(drv '*.ads'); do strip "$f"; done | grep -oE '[
 #    实测:脑写了三行,第二行是"记个名字",没记成 ⇒ `Have_Prog := False; return` 把第三行那句
 #    "去球上方"一起扔了 ⇒ 整段一推没走,而 stops 和 coef 两个数都是绿的。
 #    只许两处:Y_Finished(程序自己跑完)和 Y_Broken(编译期退回,动之前、免费)。多一处都是闸。
+#    第三处(主代理 10-01 批):新的一集(对方复位),只在 Episode.Begin_New 里这一处 —— 不是身体觉得这段程序不该跑了,
+#    是对方开了新的一集;不清它,下一轮就接着跑上一集那段程序的下一条。上限因此是 3。
 disc=$(for f in $(drv '*.adb'); do strip "$f"; done | grep -cE 'Have_Prog *:= *False' || true)
 
 # 🔴 第四条(2026-09-18 补):【编译期宣称"物理上做不到"】也是一种闸,而且前三条一个都看不见它。
@@ -44,7 +46,7 @@ echo "== 闸门棘轮:身体自己停下 $stops(上限 $c_stops)· 伪装成测�
 fail=0
 if [ "$stops" -gt "$c_stops" ]; then echo "🔴 身体自己决定不动的地方从 $c_stops 涨到 $stops —— 身体不许有意见,只许有无能"; fail=1; fi
 if [ "$coef" -gt "$c_coef" ]; then echo "🔴 伪装成测量的门槛从 $c_coef 涨到 $coef —— 门槛必须说得出它是从哪次测量来的"; fail=1; fi
-if [ "$disc" -gt "$c_disc" ]; then echo "🔴 半路扔掉整段程序的地方从 $c_disc 涨到 $disc —— 只许"跑完"和"编译期退回"两处"; fail=1; fi
+if [ "$disc" -gt "$c_disc" ]; then echo "🔴 半路扔掉整段程序的地方从 $c_disc 涨到 $disc —— 只许「跑完」「编译期退回」和「新的一集(Episode.Begin_New)」三处"; fail=1; fi
 if [ "$phys" -gt "$c_phys" ]; then echo "🔴 编译期宣称"物理上做不到"的地方从 $c_phys 涨到 $phys —— 只准因为量过期/依赖失效/量不出来而拒绝"; fail=1; fi
 if [ "$fail" = 0 ]; then
   echo "$stops $coef $disc $phys" > "$CEIL"

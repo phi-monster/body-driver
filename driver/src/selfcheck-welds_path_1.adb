@@ -12,11 +12,13 @@ with Plan;
 with Episode;
 with World;
 with Memory;
+with Runtime;
 separate (Selfcheck)
 procedure Welds_Path_1 is
    use Ada.Numerics.Long_Elementary_Functions;
    use type Selfmap.Group_Role;
    use type Selfmap.Walk_End;
+   use type Runtime.Yield;
    use type Readings.Eye_Verdict;
    use type Readings.View_Says;
    --  路 1 的焊点(大并行.md §5 路 1):每条写清"错了会是什么病",带一颗牙(去掉那一改就红)
@@ -1799,11 +1801,11 @@ begin
       end;
    end;
 
-   --  ══ 一集和一集之间不带经验(路 7 查出,10-01):对方复位、开新的一集 ⇒ Episode.Begin_New 清掉上一集的世界和这一集的选择,身体留着 ══
-   --  上一集留下:remember 记下的一个地方、上次认出名字的那只眼、"这一集已经自己换过一次眼睛了"、几何逼近记的观测;
-   --  身体那一侧:身体图里的臂数、碰过的面(标成上一集的)。脑交的那一段程序这一版不清(闸门棘轮只许两处扔程序,等主代理定),照实焊着它留着。
-   --  病:上一集 remember 的地方、认名字的眼带进下一集;第一集换过一次眼以后每一集都不许换。
-   --  牙:原来 body_driver 里那一串(只清世界、框、碰的面、墙)⇒ 地方、认名字的眼、换过眼都还在
+   --  ══ 一集和一集之间不带经验(路 7 查出,10-01):对方复位、开新的一集 ⇒ Episode.Begin_New 清掉上一集的世界、脑那一段程序、这一集的选择,身体留着 ══
+   --  上一集留下:remember 记下的一个地方、上次认出名字的那只眼、跑到一半的一段程序(跑完了第一条)、"这一集已经自己换过一次眼睛了"、
+   --  几何逼近记的观测;身体那一侧:身体图里的臂数、碰过的面(标成上一集的)。
+   --  病:上一集 remember 的地方、认名字的眼带进下一集;下一轮接着跑上一集那段程序的下一条;第一集换过一次眼以后每一集都不许换。
+   --  牙:原来 body_driver 里那一串(只清世界、框、碰的面、墙)⇒ 地方、认名字的眼、换过眼都还在,程序还在:执行器再走一步交出的是上一集那段的第二条
    declare
       procedure Dirty (C : in out Act.Context) is
          Pl : Act.Place;
@@ -1815,8 +1817,15 @@ begin
          C.Name_Cam := 1;
          B.Key := To_Unbounded_String ("ball"); B.Item := 3;
          C.Binds.Append (B);
+         --  上一集那段程序:跑完了第一条(执行器走过一步),下一步该交出第二条
+         C.Prog := Sinew.Parse ("say first" & ASCII.LF & "say second" & ASCII.LF & "done");
          C.Have_Prog := True;
-         C.M.PC := 5;
+         declare
+            What : Runtime.Yield;
+            I : Sinew.Instr;
+         begin
+            Runtime.Advance (C.Prog, C.M, What, I);
+         end;
          C.Refused := To_Unbounded_String ("line 2: no");
          C.Eye_Chosen := True;
          C.Last_Prog := To_Unbounded_String ("do grasper close ball until stuck");
@@ -1839,19 +1848,33 @@ begin
          Act.Init_Tracks (C);
       end Old_Reset;
       Cn, Co : Act.Context;
+      Old_Next : Unbounded_String;   --  牙那一份:执行器再走一步交出什么
    begin
       Dirty (Cn); Dirty (Co);
       Episode.Begin_New (Cn);
       Old_Reset (Co);
+      declare
+         What : Runtime.Yield;
+         I : Sinew.Instr;
+      begin
+         if Co.Have_Prog then
+            Runtime.Advance (Co.Prog, Co.M, What, I);
+            Old_Next := To_Unbounded_String (Runtime.Yield'Image (What) & (if What = Runtime.Y_Say then " " & To_String (I.Text) else ""));
+         end if;
+      end;
       Check (Cn.Places.Is_Empty and then Cn.Name_Cam = -1 and then not Cn.Eye_Chosen and then Cn.Geo_Obs.Is_Empty
+             and then not Cn.Have_Prog and then Cn.Prog.Code.Is_Empty and then Cn.M.PC = 0 and then Cn.Binds.Is_Empty
+             and then Cn.Refused = Null_Unbounded_String and then Cn.Last_Prog = Null_Unbounded_String
              and then Cn.Map.Arms = 2 and then Natural (Cn.Map.Groups.Length) = 1 and then Cn.Touch_Valid and then not Cn.Touch_Fresh
-             and then not Co.Places.Is_Empty and then Co.Name_Cam = 1 and then Co.Eye_Chosen,
+             and then not Co.Places.Is_Empty and then Co.Name_Cam = 1 and then Co.Eye_Chosen and then Co.Have_Prog
+             and then To_String (Old_Next) = "Y_SAY second",
              "新的一集 · 复位以后:记下的地方 " & Codec.Img (Natural (Cn.Places.Length)) & " 个、认名字的眼" & Integer'Image (Cn.Name_Cam)
+             & "、程序 " & (if Cn.Have_Prog then "还在" else "清了") & "(" & Codec.Img (Natural (Cn.Prog.Code.Length)) & " 条、绑定 "
+             & Codec.Img (Natural (Cn.Binds.Length)) & ",下一轮问脑要新的)"
              & "、换过眼 " & Boolean'Image (Cn.Eye_Chosen) & "、几何逼近的观测 " & Codec.Img (Natural (Cn.Geo_Obs.Length)) & " 笔"
              & " · 身体留着(臂 " & Codec.Img (Cn.Map.Arms) & "、碰过的面 " & Boolean'Image (Cn.Touch_Valid)
              & "、标成上一集的 " & Boolean'Image (not Cn.Touch_Fresh) & ")"
-             & " · 脑那一段程序这一版照旧留着(" & (if Cn.Have_Prog then "还在" else "清了") & ",等主代理定)"
              & " · 牙:原来那一串 ⇒ 地方 " & Codec.Img (Natural (Co.Places.Length)) & " 个、认名字的眼" & Integer'Image (Co.Name_Cam)
-             & "、换过眼 " & Boolean'Image (Co.Eye_Chosen));
+             & "、换过眼 " & Boolean'Image (Co.Eye_Chosen) & "、程序还在,执行器下一步交出「" & To_String (Old_Next) & "」(上一集那段的第二条)");
    end;
 end Welds_Path_1;
