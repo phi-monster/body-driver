@@ -102,6 +102,60 @@ package body Readings is
       return V;
    end Verdict;
 
+   function Can_Judge (Img : Buf; F : Picture.Floor_Map; W, H : Natural) return Boolean is
+      N : constant Natural := W * H;
+   begin
+      if N = 0 or else Natural (Img.Length) /= N then
+         return False;
+      end if;
+      declare
+         Ncx : constant Positive := Natural'Max (1, Natural'Min (Kinem.Gx, W));
+         Ncy : constant Positive := Natural'Max (1, Natural'Min (Kinem.Gy, H));
+         Cw : constant Positive := Natural'Max (1, W / Ncx);
+         Ch : constant Positive := Natural'Max (1, H / Ncy);
+         Has : Quad_Counts := [others => 0];
+         Places : Natural := 0;
+      begin
+         for Y in 0 .. Natural'Min (H, Ncy * Ch) - 1 loop
+            for X in 0 .. Natural'Min (W, Ncx * Cw) - 1 loop
+               declare
+                  K : constant Natural := Y * W + X;
+                  P : constant Integer := Integer (Img (K));
+                  Gate : constant Natural := Natural'Max (Natural (F.Global), (if K < Natural (F.Per_Pixel.Length) then Natural (F.Per_Pixel (K)) else 0));
+                  Edge : Natural := 0;
+                  Q : constant Natural := (if Y / Ch < Ncy / 2 then 0 else 2) + (if X / Cw < Ncx / 2 then 0 else 1);
+               begin
+                  if X + 1 < W then
+                     Edge := Natural'Max (Edge, abs (Integer (Img (K + 1)) - P));
+                  end if;
+                  if Y + 1 < H then
+                     Edge := Natural'Max (Edge, abs (Integer (Img (K + W)) - P));
+                  end if;
+                  if Edge > Gate then
+                     Has (Q) := Has (Q) + 1;
+                  end if;
+               end;
+            end loop;
+         end loop;
+         --  一处有纹理 = 这一象限里比地板强的边不少于最小连通块(同"看没看见动了"那一个数:更少的是撒开的噪声点)
+         for Q in Quad_Counts'Range loop
+            if Has (Q) >= Picture.Min_Pixels (W, H) then
+               Places := Places + 1;
+            end if;
+         end loop;
+         return Places > 1;
+      end;
+   end Can_Judge;
+
+   function View_Verdict (Judge_A, Judge_B : Boolean; Matched, Min_Points : Natural; Same : Boolean) return View_Says is
+     (if not Judge_A or else not Judge_B or else Matched < Min_Points then Unseen elsif Same then Readings.Same else Moved);
+
+   function Image (V : View_Says) return String is
+     (case V is
+         when Same => "没动",
+         when Unseen => "看不出(没纹理 / 配不上)",
+         when Moved => "动了");
+
    function Image (V : Eye_Verdict) return String is
      (case V is
          when Nothing => "没看见动",
