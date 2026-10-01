@@ -1,31 +1,5 @@
 # file	line (comments and strings removed, blanks normalized)	literal (a " prefix: inside a string)	category	why
 body_driver.adb	Handed : Integer := -1;	1	structure	sentinel: no episode's sentence handed out yet
-driver-brain-keyboard.adb	Rule ("");	"0	format	GBNF character class of decimal digits (a count, or a digit inside a say sentence)
-driver-brain-keyboard.adb	Rule ("");	"1	format	GBNF character class of decimal digits (a count, or a digit inside a say sentence)
-driver-brain-keyboard.adb	Rule ("");	"9	format	GBNF character class of decimal digits (a count, or a digit inside a say sentence)
-driver-brain-keyboard.adb	Rule ("");	"9	format	GBNF character class of decimal digits (a count, or a digit inside a say sentence)
-driver-brain-keyboard.adb	Sentence_Rule : constant String := "";	"9	format	GBNF character class of decimal digits (a count, or a digit inside a say sentence)
-driver-brain-live.adb	Half : constant := 0.5;	0.5	format	the centre of a pixel is half a pixel from its corner (Driver.Images coordinates)
-driver-brain-pictures.adb	& Le (1, Two) & Le (Bits, Two) & Le (0, Four) & Le (Long_Long_Integer (Pixels), Four)	1	format	BMP information header: one colour plane
-driver-brain-pictures.adb	Bits : constant := 24;	24	format	bits per pixel of a 24-bit BMP
-driver-brain-pictures.adb	Byte_Base : constant := 256;	256	format	the values one byte holds
-driver-brain-pictures.adb	Channels : constant := 3;	3	format	bytes per RGB pixel
-driver-brain-pictures.adb	File_Header : constant := 14;	14	format	size of the BMP file header
-driver-brain-pictures.adb	Four : constant := 4;	4	format	size of a 32-bit BMP field
-driver-brain-pictures.adb	Group : constant := 3;	3	format	base64 turns three bytes into four characters
-driver-brain-pictures.adb	Info_Header : constant := 40;	40	format	size of the BMP information header
-driver-brain-pictures.adb	Row_Align : constant := 4;	4	format	BMP rows are padded to a multiple of four bytes
-driver-brain-pictures.adb	Sextet : constant := 64;	64	format	a base64 character carries six bits
-driver-brain-pictures.adb	Two : constant := 2;	2	format	size of a 16-bit BMP field
-driver-brain-runaway.adb	for Length in 1 .. (N - Slot_First + 1) / 2 loop	2	math	a run that comes again needs two copies, so it is at most half of the words read
-driver-brain-runaway.adb	for Length in 1 .. L / 2 loop	2	math	a run that comes again needs two copies, so it is at most half of the lines read
-driver-brain-service.adb	& ""	"4	format	a box has four edges (the where-is-it schema of docs/brain-service.md)
-driver-brain-service.adb	& ""	"4	format	a box has four edges (the where-is-it schema of docs/brain-service.md)
-driver-brain-service.adb	& "";	"0	format	box edges are thousandths of the picture, from 0
-driver-brain-service.adb	& "";	"1000	format	box edges are thousandths of the picture, up to 1000
-driver-brain-service.adb	& Driver.Log.Image (Real (A.Seconds), 1) & ""	1	format	digits printed in a log line or a message(driver-brain-service.adb:197)
-driver-brain-service.adb	& Driver.Log.Image (Real (Driver.Clock.Seconds - Started), 1) & ""	1	format	digits printed in a log line or a message(driver-brain-service.adb:284)
-driver-brain-service.adb	Thousandths : constant := 1000.0;	1000.0	format	boxes are given in thousandths of the picture (docs/brain-service.md)
 driver-base64.adb	B1 : constant Natural := (if Have > 1 then Natural (Data (I + 1)) else 0);	1	format	base64 takes three bytes at a time; the second may be missing at the end
 driver-base64.adb	B2 : constant Natural := (if Have > 2 then Natural (Data (I + 2)) else 0);	2	format	base64 takes three bytes at a time; the third may be missing at the end
 driver-base64.adb	B2 : constant Natural := (if Have > 2 then Natural (Data (I + 2)) else 0);	2	format	base64 takes three bytes at a time; the third may be missing at the end
@@ -43,6 +17,22 @@ driver-base64.adb	Sextet : constant := 2 ** 6;	2	format	each base64 character ca
 driver-base64.ads	function Encoded_Length (Bytes : Natural) return Natural is (4 * ((Bytes + 2) / 3));	2	format	a partial group of three bytes still takes four characters
 driver-base64.ads	function Encoded_Length (Bytes : Natural) return Natural is (4 * ((Bytes + 2) / 3));	3	format	base64 takes three bytes at a time
 driver-base64.ads	function Encoded_Length (Bytes : Natural) return Natural is (4 * ((Bytes + 2) / 3));	4	format	three bytes make four characters
+driver-brain-keyboard.adb	Rule ("");	"0	format	GBNF character class of decimal digits (a count, or a digit inside a say sentence)
+driver-brain-keyboard.adb	Rule ("");	"1	format	GBNF character class of decimal digits (a count, or a digit inside a say sentence)
+driver-brain-keyboard.adb	Rule ("");	"9	format	GBNF character class of decimal digits (a count, or a digit inside a say sentence)
+driver-brain-keyboard.adb	Rule ("");	"9	format	GBNF character class of decimal digits (a count, or a digit inside a say sentence)
+driver-brain-keyboard.adb	Sentence_Rule : constant String := "";	"9	format	GBNF character class of decimal digits (a count, or a digit inside a say sentence)
+driver-brain-live.adb	Half : constant := 0.5;	0.5	format	the centre of a pixel is half a pixel from its corner (Driver.Images coordinates)
+driver-brain-pictures.adb	Channels : constant := 3;	3	format	bytes per RGB pixel
+driver-brain-runaway.adb	for Length in 1 .. (N - Slot_First + 1) / 2 loop	2	math	a run that comes again needs two copies, so it is at most half of the words read
+driver-brain-runaway.adb	for Length in 1 .. L / 2 loop	2	math	a run that comes again needs two copies, so it is at most half of the lines read
+driver-brain-service.adb	& ""	"4	format	a box has four edges (the where-is-it schema of docs/brain-service.md)
+driver-brain-service.adb	& ""	"4	format	a box has four edges (the where-is-it schema of docs/brain-service.md)
+driver-brain-service.adb	& "";	"0	format	box edges are thousandths of the picture, from 0
+driver-brain-service.adb	& "";	"1000	format	box edges are thousandths of the picture, up to 1000
+driver-brain-service.adb	& Driver.Log.Image (Real (A.Seconds), 1) & ""	1	format	digits printed in a log line or a message(driver-brain-service.adb:197)
+driver-brain-service.adb	& Driver.Log.Image (Real (Driver.Clock.Seconds - Started), 1) & ""	1	format	digits printed in a log line or a message(driver-brain-service.adb:284)
+driver-brain-service.adb	Thousandths : constant := 1000.0;	1000.0	format	boxes are given in thousandths of the picture (docs/brain-service.md)
 driver-bytes.adb	Capacity := 1;	1	numerics	smallest buffer capacity before doubling
 driver-bytes.adb	Capacity := 2 * Capacity;	2	numerics	geometric growth keeps appends amortized O(1)
 driver-clock.adb	function Nanoseconds_Of (S : Duration) return Long_Long_Integer is (Long_Long_Integer (Real (S) * 1.0e9));	1.0e9	format	nanoseconds per second (the recording format counts nanoseconds)

@@ -1,11 +1,9 @@
 with Driver.Beats;
-with Driver.Brain.Pictures;
 with Driver.Brain.Round;
-with Driver.Json;
+with Driver.Instrument;
 with Driver.Log;
 with Driver.Robot;
 with Driver.Robot.Hand;
-with Driver.Services;
 with Driver.Uncertain;
 
 package body Driver.Brain.Live is
@@ -128,30 +126,6 @@ package body Driver.Brain.Live is
       Driver.Brain.Service.Ask_Where (B.Now.Images (E), Name, Answer, Where, Why);
    end Ask_Where;
 
-   function Region_Of_Runs (Width, Height : Natural; Runs : Driver.Natural_Array; Ok : out Boolean)
-     return Driver.Images.Mask
-   is
-      M      : Driver.Images.Mask := Driver.Images.Create (Width, Height);
-      At_Px  : Natural := 0;
-      Inside : Boolean := False;
-   begin
-      for R of Runs loop
-         if At_Px + R > Width * Height then
-            Ok := False;
-            return M;
-         end if;
-         if Inside then
-            for P in At_Px .. At_Px + R - 1 loop
-               Driver.Images.Include (M, P mod Width, P / Width);
-            end loop;
-         end if;
-         At_Px := At_Px + R;
-         Inside := not Inside;
-      end loop;
-      Ok := At_Px = Width * Height;
-      return M;
-   end Region_Of_Runs;
-
    function Own_Point (M : Driver.Images.Mask; Found : out Boolean) return Driver.Images.Pixel is
       Su, Sv : Real := 0.0;
       N      : Natural := 0;
@@ -189,57 +163,6 @@ package body Driver.Brain.Live is
       return Best;
    end Own_Point;
 
-   --  The instrument's /segment (docs/instrument-service.md): the pixels of
-   --  the thing inside a box.
-   procedure Segment
-     (Picture : Driver.Images.Image;
-      Where   : Driver.Brain.Names.Box;
-      Region  : out Driver.Images.Mask;
-      Ok      : out Boolean;
-      Why     : out Unbounded_String)
-   is
-      function Pixel_Image (X : Real) return String is (Driver.Log.Image (Integer (X)));
-      Request : constant String :=
-        "{""image"":" & Driver.Json.Quote (Driver.Brain.Pictures.Base64 (Driver.Brain.Pictures.Bmp (Picture)))
-        & ",""box"":[" & Pixel_Image (Real'Floor (Where.Top_Left.U)) & "," & Pixel_Image (Real'Floor (Where.Top_Left.V))
-        & "," & Pixel_Image (Real'Ceiling (Where.Bottom_Right.U)) & ","
-        & Pixel_Image (Real'Ceiling (Where.Bottom_Right.V)) & "]}";
-      R   : constant Driver.Services.Reply := Driver.Services.Call (Driver.Services.Instrument, "/segment", Request);
-      Doc : Driver.Json.Document;
-   begin
-      Region := Driver.Images.Create (0, 0);
-      Ok := False;
-      if not R.Ok then
-         Why := "the instrument could not segment it: " & R.Why;
-         return;
-      end if;
-      Driver.Json.Parse (To_String (R.Text), Doc, Ok, Why);
-      if not Ok then
-         Why := "the instrument's answer is not JSON: " & Why;
-         return;
-      end if;
-      declare
-         Root : constant Driver.Json.Node := Driver.Json.Root (Doc);
-         Runs : constant Driver.Json.Node := Driver.Json.Lookup (Doc, Root, "runs");
-         Count : constant Natural := Driver.Json.Count (Doc, Runs);
-         Lengths : Driver.Natural_Array (1 .. Count);
-      begin
-         if not Driver.Json.Is_True (Doc, Driver.Json.Lookup (Doc, Root, "ok")) then
-            Ok := False;
-            Why := "the instrument says: " & To_Unbounded_String
-              (Driver.Json.Text (Doc, Driver.Json.Lookup (Doc, Root, "err")));
-            return;
-         end if;
-         for I in Lengths'Range loop
-            Lengths (I) := Natural (Driver.Json.Number (Doc, Driver.Json.Element (Doc, Runs, I)));
-         end loop;
-         Region := Region_Of_Runs (Driver.Images.Width (Picture), Driver.Images.Height (Picture), Lengths, Ok);
-         if not Ok then
-            Why := To_Unbounded_String ("the instrument's runs do not cover the picture");
-         end if;
-      end;
-   end Segment;
-
    overriding procedure Identify
      (B     : in out Body_Link;
       E     : Driver.Brain.Names.Eye_Id;
@@ -249,8 +172,10 @@ package body Driver.Brain.Live is
       Why   : out Unbounded_String)
    is
       Region : Driver.Images.Mask;
+      Score  : Real;
       Ok     : Boolean;
       Point  : Driver.Images.Pixel;
+      No_Points : constant Driver.Instrument.Prompt_Array := [];
 
       --  Is the patch part of the body, a thing already known, or a new one?
       --  A point on both the body and a known thing is that thing (held in
@@ -287,8 +212,12 @@ package body Driver.Brain.Live is
       T := Driver.Brain.Names.Thing_Id'First;
       Why := Null_Unbounded_String;
       Found := Driver.Brain.Names.No_Patch;
-      Segment (B.Now.Images (E), Where, Region, Ok, Why);
+      Driver.Instrument.Segment
+        (B.Now.Images (E), Has_Box => True,
+         Around => (X0 => Where.Top_Left.U, Y0 => Where.Top_Left.V, X1 => Where.Bottom_Right.U, Y1 => Where.Bottom_Right.V),
+         Points => No_Points, Region => Region, Score => Score, Ok => Ok, Why => Why);
       if not Ok then
+         Why := "the instrument could not segment it: " & Why;
          return;
       end if;
       Point := Own_Point (Region, Ok);

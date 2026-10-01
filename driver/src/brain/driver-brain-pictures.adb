@@ -1,4 +1,3 @@
-with Ada.Strings.Unbounded;
 with Driver.Bytes;
 
 package body Driver.Brain.Pictures is
@@ -57,85 +56,5 @@ package body Driver.Brain.Pictures is
          return Create (W, H, RGB);
       end;
    end Compose;
-
-   --  BMP: a 14-byte file header and a 40-byte information header, then rows
-   --  of blue, green, red, each padded to a multiple of four bytes. A
-   --  negative height means the first row is the top one.
-
-   File_Header : constant := 14;
-   Info_Header : constant := 40;
-   Row_Align   : constant := 4;
-   Bits        : constant := 24;
-   Byte_Base   : constant := 256;
-
-   function Le (Value : Long_Long_Integer; Size : Positive) return String is
-      R : String (1 .. Size);
-      V : Long_Long_Integer := (if Value < 0 then Value + Long_Long_Integer (Byte_Base) ** Size else Value);
-   begin
-      for I in R'Range loop
-         R (I) := Character'Val (V mod Byte_Base);
-         V := V / Byte_Base;
-      end loop;
-      return R;
-   end Le;
-
-   function Bmp (I : Image) return String is
-      W       : constant Positive := Width (I);
-      H       : constant Positive := Height (I);
-      Row     : constant Natural := Channels * W;
-      Padded  : constant Natural := (Row + Row_Align - 1) / Row_Align * Row_Align;
-      Pixels  : constant Natural := Padded * H;
-      Offset  : constant Natural := File_Header + Info_Header;
-      Two     : constant := 2;   --  the size of a 16-bit field
-      Four    : constant := 4;   --  the size of a 32-bit field
-      R       : String (1 .. Offset + Pixels) := [others => Character'Val (0)];
-   begin
-      R (1 .. Offset) :=
-        "BM" & Le (Long_Long_Integer (Offset + Pixels), Four) & Le (0, Four) & Le (Long_Long_Integer (Offset), Four)
-        & Le (Info_Header, Four) & Le (Long_Long_Integer (W), Four) & Le (-Long_Long_Integer (H), Four)
-        & Le (1, Two) & Le (Bits, Two) & Le (0, Four) & Le (Long_Long_Integer (Pixels), Four)
-        & Le (0, Four) & Le (0, Four) & Le (0, Four) & Le (0, Four);
-      for Y in 0 .. H - 1 loop
-         for X in 0 .. W - 1 loop
-            declare
-               At_Char : constant Positive := Offset + Y * Padded + Channels * X + 1;
-            begin
-               R (At_Char .. At_Char + Channels - 1) :=
-                 Character'Val (Blue (I, X, Y)) & Character'Val (Green (I, X, Y)) & Character'Val (Red (I, X, Y));
-            end;
-         end loop;
-      end loop;
-      return R;
-   end Bmp;
-
-   Alphabet : constant String := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-   function Base64 (Data : String) return String is
-      use Ada.Strings.Unbounded;
-      Group  : constant := 3;    --  three bytes become four characters of six bits
-      Sextet : constant := 64;
-      R      : Unbounded_String;
-      I      : Natural := Data'First;
-   begin
-      while I <= Data'Last loop
-         declare
-            Have : constant Positive := Natural'Min (Group, Data'Last - I + 1);
-            N    : Natural := 0;
-         begin
-            for K in 0 .. Group - 1 loop
-               N := N * Byte_Base + (if K < Have then Character'Pos (Data (I + K)) else 0);
-            end loop;
-            for K in reverse 0 .. Group loop
-               declare
-                  Six : constant Natural := N / Sextet ** K mod Sextet;
-               begin
-                  Append (R, (if Group - K <= Have then Alphabet (Alphabet'First + Six) else '='));
-               end;
-            end loop;
-            I := I + Group;
-         end;
-      end loop;
-      return To_String (R);
-   end Base64;
 
 end Driver.Brain.Pictures;

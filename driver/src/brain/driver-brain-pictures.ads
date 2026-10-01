@@ -6,10 +6,12 @@
 --  strip below it, side by side in camera order, each scaled to share the
 --  width and keeping its own proportions. Nothing is drawn on the pictures:
 --  drawn marks were measured to hurt the model's sight (LANGUAGE.md 17.7).
---  Pictures travel as uncompressed 24-bit BMP in base64.
+--  Pictures travel as uncompressed 24-bit BMP in base64, encoded as the
+--  instrument's pictures are (Driver.Instrument.Bitmap).
 
 with Driver.Images;
 with Driver.Brain.Names;
+with Driver.Instrument;
 
 package Driver.Brain.Pictures is
 
@@ -21,14 +23,8 @@ package Driver.Brain.Pictures is
      with Pre => not Driver.Images.Is_Empty (Main);
    --  Main above, the Rest below it in the order given.
 
-   function Bmp (I : Driver.Images.Image) return String
-     with Pre => not Driver.Images.Is_Empty (I);
-   --  A 24-bit BMP file, top row first, as bytes in a String.
-
-   function Base64 (Data : String) return String;
-
    function Data_Url (I : Driver.Images.Image) return String is
-     ("data:image/bmp;base64," & Base64 (Bmp (I)))
+     ("data:image/bmp;base64," & Driver.Instrument.Bitmap (I))
      with Pre => not Driver.Images.Is_Empty (I);
 
 end Driver.Brain.Pictures;

@@ -71,11 +71,6 @@ package Driver.Brain.Live is
       Prompt  : String;
       Keys    : Driver.Brain.Keyboard.Keyboard) return Driver.Brain.Service.Answer;
 
-   function Region_Of_Runs (Width, Height : Natural; Runs : Driver.Natural_Array; Ok : out Boolean)
-     return Driver.Images.Mask;
-   --  The instrument's answer to /segment: row-major runs of pixels, outside
-   --  the patch first, then inside, alternating; they must cover the picture.
-
    function Own_Point (M : Driver.Images.Mask; Found : out Boolean) return Driver.Images.Pixel;
    --  The pixel of the patch nearest its centroid: a point that is surely on
    --  it, whatever its shape.

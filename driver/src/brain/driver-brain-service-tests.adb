@@ -4,6 +4,7 @@ with GNAT.Sockets;
 with Driver.Action;
 with Driver.Brain.Names;
 with Driver.Brain.Pictures;
+with Driver.Instrument;
 with Driver.Bytes;
 with Driver.Clock;
 with Driver.Json;
@@ -218,17 +219,9 @@ package body Driver.Brain.Service.Tests is
    end Streaming;
 
    procedure Pictures_Encoded is
-      B : constant String := Driver.Brain.Pictures.Bmp (Tiny);
    begin
-      Check (B (1 .. 2) = "BM" and then B'Length = 54 + 2 * 8, "a BMP header and two rows padded to eight bytes");
-      Check (Character'Pos (B (23)) = 254 and then Character'Pos (B (26)) = 255,
-             "a negative height: the first row is the top one");
-      Check (Character'Pos (B (55 + 2)) = 255 and then Character'Pos (B (55)) = 0,
-             "pixels as blue, green, red: the red pixel's red byte is third");
-      Check (Character'Pos (B (63 + 3 + 1)) = 255, "the green pixel of the second row");
-      Check (Driver.Brain.Pictures.Base64 ("") = "" and then Driver.Brain.Pictures.Base64 ("f") = "Zg=="
-             and then Driver.Brain.Pictures.Base64 ("fo") = "Zm8=" and then Driver.Brain.Pictures.Base64 ("foo") = "Zm9v"
-             and then Driver.Brain.Pictures.Base64 ("foobar") = "Zm9vYmFy", "base64 as RFC 4648 gives it");
+      Check (Driver.Brain.Pictures.Data_Url (Tiny) = "data:image/bmp;base64," & Driver.Instrument.Bitmap (Tiny),
+             "the brain's picture is a data URL of the BMP the instrument gets");
    end Pictures_Encoded;
 
    function Wide return Driver.Images.Image is
