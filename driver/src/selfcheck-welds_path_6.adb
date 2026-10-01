@@ -1527,7 +1527,7 @@ begin
       begin
          Err_T := Geom.Norm (Sub (Contact.Apply (Tw_T, X_Now), True_T));
          Err_S := Geom.Norm (Sub (Contact.Apply (Tw_S, X_Now), True_S));
-         Naive := Contact.Turn (Jt.Ax.W, Q, Jt.Ax.P, Okn);
+         Naive := Contact.Rotation (Jt.Ax.W, Q, Jt.Ax.P, Okn);
          Naive_Err := Geom.Norm (Sub (Contact.Apply (Naive, X_Now), True_T));
       end;
       Check (Ok_T and then Ok_S and then not Ok_U and then Err_T < Sqrt (Long_Float'Model_Epsilon) and then Err_S < Sqrt (Long_Float'Model_Epsilon)

@@ -18,12 +18,51 @@ begin
          F.Reported_EE.Append (Pose);   --  V1b 3c:身体报的位姿驱动不读(F.EE 由运动学按关节读数算,Pose_Hook 填)
       end;
    end loop;
-   for P of L.Lay.Jaw loop
+   if L.Lay.Measured then
+      --  开机按量认完(I1,10-01):第 A 条臂的抓握读数 = 它的合拢通道(Jaw 里从 Closing_First (A) 起 Closing_N (A) 组)按顺序接起来,
+      --  一条臂一格(0 组 = 空格,下标照样占住:Selfmap.Jaw_Count 按臂取);有一组这一拍没读数 ⇒ 这条臂这一拍整格空(接一半下标就错位了);
+      --  各臂之后是这些通道的回声
       declare
-         A : constant Floats := Nums_At (L, P);
+         Used : Natural := 0;
       begin
-         F.Jaw.Append (A);   --  整组留下,不再只取 A (0)
+         for A in 0 .. L.Lay.N_Arms - 1 loop
+            declare
+               Cat : Floats;
+               Whole : Boolean := True;
+               N_A : constant Natural := (if A < Natural (L.Lay.Closing_N.Length) then Natural (L.Lay.Closing_N (A)) else 0);
+               First : constant Natural := (if A < Natural (L.Lay.Closing_First.Length) then Natural (L.Lay.Closing_First (A)) else 0);
+            begin
+               for K in 0 .. N_A - 1 loop
+                  if First + K < Natural (L.Lay.Jaw.Length) then
+                     declare
+                        V : constant Floats := Nums_At (L, L.Lay.Jaw (First + K));
+                     begin
+                        Whole := Whole and then not V.Is_Empty;
+                        for X of V loop
+                           Cat.Append (X);
+                        end loop;
+                     end;
+                  end if;
+               end loop;
+               F.Jaw.Append (if Whole then Cat else F64_Vectors.Empty_Vector);
+               Used := Natural'Max (Used, First + N_A);
+            end;
+         end loop;
+         for I in Used .. Natural (L.Lay.Jaw.Length) - 1 loop
+            F.Jaw.Append (Nums_At (L, L.Lay.Jaw (I)));
+         end loop;
       end;
+   else
+      for P of L.Lay.Jaw loop
+         declare
+            A : constant Floats := Nums_At (L, P);
+         begin
+            F.Jaw.Append (A);   --  整组留下,不再只取 A (0)
+         end;
+      end loop;
+   end if;
+   for P of L.Lay.Groups loop
+      F.Groups.Append (Nums_At (L, P));   --  身体报的每一组数(I1;开机按量认组用)
    end loop;
    declare
       Ins : constant Integer := Key (L.Last, L.Last_Obs, "instruction");

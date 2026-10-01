@@ -91,7 +91,7 @@ package Linkage is
    --  量:归块、每一块每一帧的位姿、每两块之间的轴
    procedure Fit (Tracks : Track_Vectors.Vector; Rep : out Report);
    --  两块之间的一根轴 ⇒ 接触集的第③格(B 相对 A 怎么动,§2 第 19 条"同时两套接触"那一句里动的那一块):
-   --  A 此刻的位姿 Pa(这一帧 A 那一块的 Poses;参照帧那一刻 = 单位阵)把轴搬到此刻的世界里;转轴 ⇒ 绕 W 过 P 转 Q 弧度(Contact.Turn),
+   --  A 此刻的位姿 Pa(这一帧 A 那一块的 Poses;参照帧那一刻 = 单位阵)把轴搬到此刻的世界里;转轴 ⇒ 绕 W 过 P 转 Q 弧度(Contact.Rotation),
    --  滑轴 ⇒ 沿 W 走 Q(Contact.Slide)。"一件东西不动 + 它上面的一块沿自己的轴动"(握住 + 扣扳机)= 接触集的 Meanwhile:
    --  第一段 Contact.Still、第二段是这一块的这个旋量,两段一起进物理检查(路 5)。
    --  轴没定下来(Undecided / Not_One_Axis / No_Common_Frame)、Pa 定不住 ⇒ Ok = False:不编一根轴

@@ -134,6 +134,10 @@ package body Layout is
                Nn : constant Natural := Natural (Xs.Length);
                All_Small : Boolean := True;
             begin
+               --  I1:每一个数值数组都是一组读数(不看几个数、值在哪);是什么,开机推一下才知道
+               if Nn >= 1 and then Kind_Of (D, F.N) in Arr | Map and then Kind_Of (D, F.N) /= Bool then
+                  L.Groups.Append (F.P);
+               end if;
                for X of Xs loop
                   if abs X > 7.0 then      --  7.0 rad ≈ 2π 带余量:关节角的物理量级,无量纲
                      All_Small := False;
@@ -169,6 +173,47 @@ package body Layout is
                end if;
             end;
          end if;
+      end loop;
+      --  和一台相机的画面挂在同一个父节点下的数(画幅 shape、时戳……)是那台相机的,不是身体的一组读数(看结构,不看值)
+      declare
+         function Parent (P : Path) return Path is
+            R : Path := P;
+         begin
+            if not R.Segs.Is_Empty then
+               R.Segs.Delete_Last;
+            end if;
+            return R;
+         end Parent;
+         Kept : Paths;
+      begin
+         for G of L.Groups loop
+            declare
+               Of_Cam : Boolean := False;
+            begin
+               for Cp of L.Cams loop
+                  if not Parent (G).Segs.Is_Empty and then Joined (Parent (G)) = Joined (Parent (Cp)) then
+                     Of_Cam := True;
+                  end if;
+               end loop;
+               if not Of_Cam then
+                  Kept.Append (G);
+               end if;
+            end;
+         end loop;
+         L.Groups := Kept;
+      end;
+      --  同名的另一组(最后一节一样):动作按最后一节发,对方观测里同一个名字出现两回 = 它把上一条命令回给我们看
+      for I in 0 .. Natural (L.Groups.Length) - 1 loop
+         declare
+            T : Integer := -1;
+         begin
+            for J in 0 .. Natural (L.Groups.Length) - 1 loop
+               if J /= I and then T < 0 and then Last_Seg (L.Groups (J)) = Last_Seg (L.Groups (I)) then
+                  T := J;
+               end if;
+            end loop;
+            L.Twin.Append (T);
+         end;
       end loop;
       --  深度图必须和某台相机同尺寸,并按最长公共前缀配对(内参 3×3 / 外参 4×4 也是"浮点二维",靠尺寸剔掉)。
       declare
@@ -261,20 +306,47 @@ package body Layout is
 
    function Missing (L : Body_Layout) return String is
    begin
-      if L.EE.Is_Empty and then L.Joints.Is_Empty then
-         return "没认出末端位姿也没认出关节角";
-      end if;
-      if L.Jaw.Is_Empty then
-         return "没认出夹爪开度";
-      end if;
       if L.Cams.Is_Empty then
          return "没认出相机";
       end if;
-      if not L.Ambiguous.Is_Empty then
-         return "有形状分不开的读数,拒绝硬认";
+      if L.Groups.Is_Empty then
+         return "没认出一组数(读数 / 命令)";
       end if;
       return "";
    end Missing;
+
+   function Command_Groups (L : Body_Layout) return Ints is
+      R : Ints;
+      Any_Twin : Boolean := False;
+   begin
+      for T of L.Twin loop
+         if T >= 0 then
+            Any_Twin := True;
+         end if;
+      end loop;
+      for I in 0 .. Natural (L.Groups.Length) - 1 loop
+         if not Any_Twin or else (I < Natural (L.Twin.Length) and then L.Twin (I) >= 0) then
+            R.Append (I);
+         end if;
+      end loop;
+      return R;
+   end Command_Groups;
+
+   procedure Probe_Mode (L : in out Body_Layout) is
+   begin
+      L.Joints.Clear;
+      for I of Command_Groups (L) loop
+         L.Joints.Append (L.Groups (I));
+      end loop;
+      L.Jaw.Clear; L.Holds.Clear; L.Closing_First.Clear; L.Closing_N.Clear; L.Jaw_Len.Clear;
+      L.Measured := False; L.N_Arms := 0;
+   end Probe_Mode;
+
+   procedure Set_Measured (L : in out Body_Layout; Joints, Jaw, Holds : Paths; Closing_First, Closing_N, Jaw_Len : Ints; N_Arms : Natural) is
+   begin
+      L.Joints := Joints; L.Jaw := Jaw; L.Holds := Holds; L.Closing_First := Closing_First; L.Closing_N := Closing_N; L.Jaw_Len := Jaw_Len;
+      L.N_Arms := N_Arms; L.Measured := True;
+   end Set_Measured;
 
    procedure Say (L : Body_Layout) is
       procedure Line (Tag : String; Ps : Paths) is
@@ -302,6 +374,23 @@ package body Layout is
       for A of L.Ambiguous loop
          Ada.Text_IO.Put_Line ("[认] 🔴 分不开:" & A);
       end loop;
+      declare
+         S : String (1 .. 4096);
+         N : Natural := 0;
+      begin
+         for I in 0 .. Natural (L.Groups.Length) - 1 loop
+            declare
+               T : constant String := (if N = 0 then "" else " · ") & Codec.Img (I) & "=" & Joined (L.Groups (I))
+                 & (if I < Natural (L.Twin.Length) and then L.Twin (I) >= 0 then "(同名 " & Codec.Img (L.Twin (I)) & ")" else "");
+            begin
+               if N + T'Length <= S'Last then
+                  S (N + 1 .. N + T'Length) := T;
+                  N := N + T'Length;
+               end if;
+            end;
+         end loop;
+         Ada.Text_IO.Put_Line ("[认] 每组数(开机逐组推一下认它是什么):" & S (1 .. N));
+      end;
       for Lf of L.Leaves loop
          Ada.Text_IO.Put_Line ("[认] 叶子:" & Lf);
       end loop;

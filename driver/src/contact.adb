@@ -31,11 +31,11 @@ package body Contact is
    function Still (Pivot : V3) return Twist is (Lin => [others => 0.0], Ang => [others => 0.0], Pivot => Pivot);
    function Slide (Lin : V3) return Twist is (Lin => Lin, Ang => [others => 0.0], Pivot => [others => 0.0]);
 
-   function Turn (Axis : V3; Rad : Long_Float; Pivot : V3; Ok : out Boolean) return Twist is
+   function Rotation (Axis : V3; Rad : Long_Float; Pivot : V3; Ok : out Boolean) return Twist is
       A : constant V3 := Unit (Axis, Ok);
    begin
       return (Lin => [others => 0.0], Ang => [A (0) * Rad, A (1) * Rad, A (2) * Rad], Pivot => Pivot);
-   end Turn;
+   end Rotation;
 
    function Angle (T : Twist) return Long_Float is (Norm (T.Ang));
    function Moving (T : Twist) return Boolean is (Norm (T.Lin) > 1.0e-9 or else Angle (T) > 1.0e-9);
@@ -86,8 +86,8 @@ package body Contact is
             if not Is_Dir (P.Normal) then
                return (Bad_Normal, I);
             end if;
-            if not Is_Dir (P.Push.Axis) or else not P.Push.Half_Angle'Valid
-              or else P.Push.Half_Angle < 0.0 or else P.Push.Half_Angle > Pi
+            if not Is_Dir (P.Allowed.Axis) or else not P.Allowed.Half_Angle'Valid
+              or else P.Allowed.Half_Angle < 0.0 or else P.Allowed.Half_Angle > Pi
             then
                return (Bad_Cone, I);
             end if;

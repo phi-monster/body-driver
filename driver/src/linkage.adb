@@ -1998,7 +1998,7 @@ package body Linkage is
       declare
          P : constant V3 := Geom.Ap (Pa.R, J.Ax.P);
       begin
-         return Contact.Turn (W, Q, [P (0) + Pa.T (0), P (1) + Pa.T (1), P (2) + Pa.T (2)], Ok);
+         return Contact.Rotation (W, Q, [P (0) + Pa.T (0), P (1) + Pa.T (1), P (2) + Pa.T (2)], Ok);
       end;
    end Motion_Of;
 
