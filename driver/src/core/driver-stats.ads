@@ -17,7 +17,8 @@ package Driver.Stats with Pure is
    --  The unbiased sample variance.
 
    function Mean_Estimate (A : Accumulator) return Driver.Uncertain.Estimate;
-   --  The mean with the standard error of the mean; unknown below two samples.
+   --  The mean with the standard error of the mean and N - 1 degrees of
+   --  freedom; unknown below two samples.
 
    function Median (X : Real_Array) return Real
      with Pre => X'Length > 0;
@@ -39,7 +40,7 @@ package Driver.Stats with Pure is
    function Fit_Line (X, Y : Real_Array) return Line
      with Pre => X'Length = Y'Length and then X'Length > 2;
    --  Ordinary least squares Y = Slope * X + Intercept, with standard errors
-   --  from the scatter of the residuals.
+   --  from the scatter of the residuals (N - 2 degrees of freedom).
 
 private
 

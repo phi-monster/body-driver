@@ -25,9 +25,10 @@ package body Driver.Stats is
    function Mean_Estimate (A : Accumulator) return Driver.Uncertain.Estimate is
    begin
       if A.N < 2 then
-         return (Value => (if A.N = 1 then A.Mean else 0.0), Sigma => Real'Last);
+         return (Value => (if A.N = 1 then A.Mean else 0.0), Sigma => Real'Last, Degrees_Of_Freedom => 0);
       end if;
-      return (Value => A.Mean, Sigma => Sqrt (Variance (A) / Real (A.N)));
+      --  The variance is estimated from the N samples less the mean they fixed.
+      return (Value => A.Mean, Sigma => Sqrt (Variance (A) / Real (A.N)), Degrees_Of_Freedom => A.N - 1);
    end Mean_Estimate;
 
    procedure Sort (X : in out Real_Array) is
@@ -149,8 +150,11 @@ package body Driver.Stats is
          declare
             S2 : constant Real := Sse / (N - 2.0);
          begin
-            return (Slope          => (Value => B, Sigma => Sqrt (S2 / Sxx)),
-                    Intercept      => (Value => A, Sigma => Sqrt (S2 * (1.0 / N + Mean (Mx) ** 2 / Sxx))),
+            --  The residual variance rests on the points less the two parameters they fixed.
+            return (Slope          => (Value => B, Sigma => Sqrt (S2 / Sxx), Degrees_Of_Freedom => X'Length - 2),
+                    Intercept      => (Value              => A,
+                                       Sigma              => Sqrt (S2 * (1.0 / N + Mean (Mx) ** 2 / Sxx)),
+                                       Degrees_Of_Freedom => X'Length - 2),
                     Residual_Sigma => Sqrt (S2));
          end;
       end;
