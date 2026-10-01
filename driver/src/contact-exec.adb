@@ -31,7 +31,7 @@ package body Contact.Exec is
             for P of S.Points loop
                if P.By.Kind = Hand then
                   declare
-                     A : constant V3 := Unit (P.Push.Axis, Oa);
+                     A : constant V3 := Unit (P.Allowed.Axis, Oa);
                   begin
                      if Oa then
                         Sum := [Sum (0) + A (0), Sum (1) + A (1), Sum (2) + A (2)];

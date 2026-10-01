@@ -231,4 +231,31 @@ package Selfmap is
    --  = 这就是此刻能到的最近(身体到头 / 被挡住),照实报还差多少;有一组 Blocked_T / Blocked_R 就是被挡住(同接触集里"眼走到悬停点"那一段)
    procedure Step (L : in out Plug.Link; M : Body_Map; Legs : Leg_Vectors.Vector; Lim : Limits; F : in out Plug.Frame;
                    W : in out Walk; Rep : out Leg_Step_Vectors.Vector; Frames : out Natural; Ok : out Boolean);
+
+   --  ── 走近一件东西每一步多大(I6 的调用方用;纯函数,导出给自检)── 全是量到的量,没有拍的数:
+   --  小步(到"可能碰到它"的那条带子里每一步多大)= 手自己的不准(Stats.Z × √(指尖 Tip_Sd² + 这一次到位差 Miss² + 读数噪声²))
+   --  分给 Blocked 当底的那几步(Free_Base);再小也得是这只眼看得出的一步:地板 = Stats.Z × max(读数噪声, 一档 × 眼的像素残差),
+   --  而且不小于一档(比一档小的一步在它自己那只眼里不到一个像素)。同接触集往下伸的小步(Act.Plan_Descent 同一个式子)
+   function Careful_Step (Tip_Sd, Miss, Noise, Notch, Eye_Rms : Long_Float) return Long_Float;
+   type Approach_Plan is record
+      Res   : Long_Float := 0.0;   --  到没到的分辨率:还差的不到"量它、量我自己"的不准(Stats.Z 倍)⇒ 分不出还差,就是到了(不小于小步的地板)
+      Band  : Long_Float := 0.0;   --  可能碰到它的那条带子从它的中心往外多远 = 它朝我这边的半径 + Res
+      Clear : Long_Float := 0.0;   --  这一步最多走多远还不进带子(带子前留出 Free_Base 步小步给 Blocked 当底);≤ 0 = 已经在带子里
+      Lstep : Long_Float := 0.0;   --  带子里每一步多大(Careful_Step)
+   end record;
+   --  Dist = 指尖该到的那一点(它的中心)还差多远;R_Obj = 它朝我这边的半径(画面里的框按远近折出来的;量不出 ⇒ Long_Float'Last:全程小步);
+   --  Sd_Target = 它的位置沿走的方向有多不准(两眼交点按各眼的误差算的;量不出 ⇒ Long_Float'Last:全程小步,照实;
+   --  到没到只按我自己看得出的那一步判)
+   function Plan_Approach (Dist, R_Obj, Sd_Target, Tip_Sd, Miss, Noise, Notch, Eye_Rms : Long_Float) return Approach_Plan;
+   --  脑说的步子档位 = 这一步最多多大(语言 §17.6;大并行 §2 第 23 条):small = 小步(Small,Careful_Step),large = 一条命令走得到的
+   --  最大一档(Large,开机量的步幅),medium = 两者的几何中点(对数尺上的正中;两头都是量的);别的词 / 没说 ⇒ 不加上限(Long_Float'Last)
+   function Gear_Bound (Gear : String; Small, Large : Long_Float) return Long_Float;
+   --  这一步比上一步之前又近了没有:Prev = 上一步之前还差多少(Long_Float'Last = 还没走过),Now = 此刻还差多少,Res = 分辨率。
+   --  近了不到一个分辨率 = 看不出近了 ⇒ False(走到头了 / 被什么拦着,不再拿同一步去撞;原来是拍一个"最多走几步")
+   function Gained (Prev, Now, Res : Long_Float) return Boolean is (Prev = Long_Float'Last or else Prev - Now > Res);
+   --  走到一个定了的目标(一组,Goal 是绝对位姿):同一个 Walk 一步一步 Step,每步走还差的全部,上限按 Lim;
+   --  到了 = 平移、转动都差不到 Res / Res_Rot;被挡住(Blocked)、一步下去哪样都没再近过分辨率(Gained)、走满 Max_Steps(> 0)、线断了就收
+   type Walk_End is (Arrived, Was_Blocked, No_Gain, Max_Steps_Done, Lost_Link);
+   procedure Walk_To (L : in out Plug.Link; M : Body_Map; G : Leg; Lim : Limits; Res, Res_Rot : Long_Float; Max_Steps : Natural;
+                      F : in out Plug.Frame; W : in out Walk; Went, Turned : out Long_Float; Steps : out Natural; Why : out Walk_End);
 end Selfmap;

@@ -1,0 +1,20 @@
+# body-driver wheelarm rig (大并行 §2 第 39 条,路 8): RGB + joint readings only (no depth, no intrinsics, no extrinsics); front eye + wrist eye, no head eye.
+config_name: wheelarm
+
+config:
+  sim: sim_config
+  scene: default
+  robot: wheelarm
+  camera: camera_wheelarm
+
+observation:
+  collect_freq: 25
+  robot:
+    joint_states: true
+    world_ee_state: true
+  vision:
+    approximate_depth: false
+    depth: false
+    intrinsic_matrix: false
+    extrinsic_matrix: false
+    shape: true
