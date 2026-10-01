@@ -3174,6 +3174,8 @@ zone.adb	Mk.Replace_Element (Y * Cw + X, 128);	128	格式	调试图灰度(区框
 zone.adb	Mk.Replace_Element (Y * Cw + X, 255);	255	格式	调试图灰度(瓣框)(zone.adb:695)
 zone.adb	Moved_Px : array (0 .. Natural'Max (1, N_Cams) - 1) of Natural := [others => 0];	1	结构	至少留一格免得数组为空;N_Cams = 0 时 616 行已返回,Moved_Px 不会被读。(zone.adb:530)
 zone.adb	None : constant Integer := -1;	1	结构	哨兵:这一格还没归哪一瓣(瓣号从 0 起)(zone.adb:433)
+zone.adb	Pairs : constant Long_Float := N * (N - 1.0) / 2.0;	1.0	数学	N 瓣两两成对的对数 N(N−1)/2 里的 N − 1(组合数,恒等式)(zone.adb:271)
+zone.adb	Pairs : constant Long_Float := N * (N - 1.0) / 2.0;	2.0	数学	N 瓣两两成对的对数 N(N−1)/2 里的 /2(组合数,恒等式)(zone.adb:271)
 zone.adb	Perim : constant Natural := 2 * (W + Hh) - 4;	2	数学	沿画面四条边绕一圈的像素数 2(W+H)−4 和各段的起点偏移(四个角各只算一次)(zone.adb:303)
 zone.adb	Perim : constant Natural := 2 * (W + Hh) - 4;	4	数学	沿画面四条边绕一圈的像素数 2(W+H)−4 和各段的起点偏移(四个角各只算一次)(zone.adb:303)
 zone.adb	Put_Line ("" & Codec.Fmt (H.Open_Reading, 3) & "");	3	格式	日志 / 给脑的话里印几位小数(zone.adb:786)
@@ -3186,6 +3188,7 @@ zone.adb	Put_Line ("" & Natural'Image (Arm + 1) & "" & Natural'Image (K) & "" & 
 zone.adb	R.Append (Probe'(U => Long_Float (X) + 0.5, V => Long_Float (Y) + 0.5, Lobe => Natural (Who)));	0.5	数学	像素中心 = 像素号 + 半个像素(按像素中心问配点;取像素号时向下取整回到它)(zone.adb:509)
 zone.adb	R.Append (Probe'(U => Long_Float (X) + 0.5, V => Long_Float (Y) + 0.5, Lobe => Natural (Who)));	0.5	数学	像素中心 = 像素号 + 半个像素(按像素中心问配点;取像素号时向下取整回到它)(zone.adb:509)
 zone.adb	Ramp : constant := 4.0;	4.0	数值	推到头的指数搜索放大倍数(只影响推几下;到头另有判据)(zone.adb:517)
+zone.adb	Rule := 1;	1	格式	身体文件里握区的算法版本号:"lobes" 是一串(没有 rule 键)= I2 第一版 = 1(协议,见 Zone_Rule)(zone.adb:120)
 zone.adb	Runs := 1;	1	结构	画面四条边全是这一块:算一段(zone.adb:323)
 zone.adb	S := Long_Float'Max (1.0, abs R);	1.0	调参数	单位假设:抓握通道推到头的头一步 = max(1, |读数|),读数为 0 或很小时按「1 个读数单位」推 —— 默认读数单位让 1 是合适的量级(读数是 [0,1] 开度时一下就是满行程;读数是米时一下就是 1 米的命令;读数是编码器刻度时 1 格太小)(zone.adb:530)	抓握通道往两头推时第一下推多远、要推几下(每下还要等停稳)才到头	中 — 不钳位命令的身体上「1 个单位」可能是越界命令;刻度很细的通道推满 12 下(×4 放大)还可能到不了头(09-30 起推满还没到头照实说量不出)	头一步从这个通道量到的量起:在读数噪声 M.Jaw_Noise 之上按 Ramp 放大,推到画面(Any_Moved)或读数跟着动的那一下就是这个通道的量级;jointboot.adb:451 关节扫描的 0.03 × max(1, |读数|) 是同一个「1 个读数单位」假设,一起换
 zone.adb	Still_Wait : constant := 30;	30	调参数	等画面静止最多 30 拍(量握区之前、判哪头张开时转出去以后,同一个等法;09-30 两处合成一个名字,超时 Wait_Still 照实回 Ok = False、不在还在动的画面上量);人形 G2A 每挪一下要 ~40 拍才停稳(zone.adb 那段注释)(zone.adb:459)	量握区之前 / 判哪头张开时的静止	高	等待上限 = 量到的这具身体停稳拍数(M.Settle 的历次最大 / 开机停稳分布的高分位)+ 量到的画面滞后;超时照实说'没停稳'(已经这样做)
@@ -3199,6 +3202,7 @@ zone.adb	Why := To_Unbounded_String ("" & Codec.Fmt (Pl, 2) & "" & Codec.Fmt (Pa
 zone.adb	Z.B := Nth (1);	1	结构	旧的第二格 B = 一串瓣里的第 1 瓣(I2:旧字段照今天的身体照旧填,别人不坏;合并时主代理连同 A、B 一起删)(zone.adb:45)
 zone.adb	Z.Depth := Picture.Region_Depth (Depth_Closed, W, Hh, Clean, 0.25);	0.25	调参数	合上时手指深度取扫过像素的下四分位,假设手指占 ≥25%(zone.adb:115)	有深度时手指深度	低	深度直方图分两拨(Picture.Split)取近的一拨的中位。现只在自检
 zone.adb	Z.Depth := Picture.Region_Depth (Depth_Open, W, Hh, Left, 0.5);	0.5	统计	张开时瓣像素深度取中位(有深度那条路,现只在自检)(zone.adb:113)
+zone.adb	Zone_Rule : constant := 2;	2	格式	握区算法的版本号(写进身体文件的 "lobes".rule;0 = I2 以前、1 = I2 第一版、2 = 10-01 起):版本对不上的握区不照用、开机重量(协议)(zone.adb:68)
 zone.adb	else (2 * (W + Hh) - 4 - K) * W);	2	数学	沿画面四条边绕一圈的像素数 2(W+H)−4 和各段的起点偏移(四个角各只算一次)(zone.adb:308)
 zone.adb	else (2 * (W + Hh) - 4 - K) * W);	4	数学	沿画面四条边绕一圈的像素数 2(W+H)−4 和各段的起点偏移(四个角各只算一次)(zone.adb:308)
 zone.adb	elsif K < 2 * W + Hh - 2 then (Hh - 1) * W + (2 * W + Hh - 3 - K)	2	数学	沿画面四条边绕一圈的像素数 2(W+H)−4 和各段的起点偏移(四个角各只算一次)(zone.adb:307)

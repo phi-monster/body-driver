@@ -62,9 +62,13 @@ package body Zone is
 
    --  身体文件里一瓣几个数(x0, y0, x1, y1, cu, cv, 像素数;和旧文件的 "a" / "b" 同一个排法)
    Lobe_Fields : constant := 7;
+   --  这一份握区是按哪一版的算法量的(区心、主轴怎么从瓣算;存在 "lobes" 里,协议):
+   --  0 = I2 以前("a" / "b" 两格:两瓣的主轴按归一化画幅算,和东西的主轴(像素系)差 0.56° 一类的角)、
+   --  1 = I2 第一版(49dfbe1:一瓣的区心按那一瓣自己的形心)、2 = 10-01 起(主轴按像素系;区心按会合的那一点,一瓣时 = 合到的那片)
+   Zone_Rule : constant := 2;
 
    function Lobes_Json (Z : Hand_Zone) return String is
-      R : Unbounded_String := To_Unbounded_String ("[");
+      R : Unbounded_String := To_Unbounded_String ("{""rule"":" & Codec.Img (Zone_Rule) & ",""list"":[");
    begin
       for K in 0 .. Z.N_Lobes - 1 loop
          declare
@@ -74,11 +78,12 @@ package body Zone is
                     & "," & Json.Number (Lb.Cu) & "," & Json.Number (Lb.Cv) & "," & Codec.Img (Lb.Count) & "]");
          end;
       end loop;
-      Append (R, "]");
+      Append (R, "]}");
       return To_String (R);
    end Lobes_Json;
 
    procedure Lobes_From_Json (D : Json.Doc; Zn : Integer; Z : in out Hand_Zone) is
+      use type Json.Kind;
       Ls : Lobe_Vectors.Vector;
       --  一瓣:正好 Lobe_Fields 个数、每个都是有限数才收(写的时候不是有限数的写成 null,读回来是 NaN,不拿它当像素号)
       procedure Take (N : Integer) is
@@ -95,12 +100,25 @@ package body Zone is
          Ls.Append (Lobe'(Valid => True, X0 => Natural (Fld (0)), Y0 => Natural (Fld (1)), X1 => Natural (Fld (2)), Y1 => Natural (Fld (3)),
                           Cu => Fld (4), Cv => Fld (5), Count => Natural (Fld (6))));
       end Take;
-      L : constant Integer := Json.Get (D, Zn, "lobes");
-   begin
-      if L >= 0 then
-         for J in 0 .. Json.Count (D, L) - 1 loop
-            Take (Json.Child (D, L, J));
+      procedure Take_All (Arr : Integer) is
+      begin
+         for J in 0 .. Json.Count (D, Arr) - 1 loop
+            Take (Json.Child (D, Arr, J));
          end loop;
+      end Take_All;
+      L : constant Integer := Json.Get (D, Zn, "lobes");
+      Rule : Integer := 0;   --  这一份按第几版存的(见 Zone_Rule)
+   begin
+      if L >= 0 and then Json.Kind_Of (D, L) = Json.J_Obj then
+         declare
+            Rn : constant Integer := Json.Get (D, L, "rule");
+         begin
+            Rule := (if Rn >= 0 and then Json.Finite (Json.Real (D, Rn)) then Integer (Json.Real (D, Rn)) else 0);
+            Take_All (Json.Get (D, L, "list"));
+         end;
+      elsif L >= 0 then
+         Rule := 1;   --  I2 第一版:"lobes" 是一串
+         Take_All (L);
       else
          --  I2 以前的文件:两格 "a" / "b"(第二格瓣数不到也照样写了),瓣数在 "n_lobes" ⇒ 按它取前几格
          declare
@@ -115,6 +133,18 @@ package body Zone is
          end;
       end if;
       Set_Lobes (Z, Ls);
+      if Rule /= Zone_Rule then
+         --  别的版本的算法存的握区:瓣照样读回来,区心 / 主轴不是这一版的算法算的(差多少要按存它的那一刻的画面重算,文件里没有)⇒
+         --  不悄悄差着用:这一格判成没量过,开机合空一次重量(body_driver 里"存的握区里没有它自己那只眼那一格 ⇒ 合空一次补量"那一条)
+         declare
+            Cn : constant Integer := Json.Get (D, Zn, "cam");
+         begin
+            Put_Line ("[装] " & (if Cn >= 0 then "第" & Codec.Img (Natural (Long_Float'Max (0.0, Json.Num (D, Cn)))) & " 台相机里" else "")
+                      & "存的握区是第 " & Codec.Img (Natural'Max (0, Rule)) & " 版的算法量的(这一版是第 " & Codec.Img (Zone_Rule)
+                      & " 版:区心按会合的那一点、主轴按像素系)⇒ 不照用,要重量");
+         end;
+         Z.Valid := False;
+      end if;
    end Lobes_From_Json;
 
    function Is_Self (Z : Hand_Zone; R : Picture.Region; W, Hh : Natural) return Boolean is
@@ -228,13 +258,31 @@ package body Zone is
             end if;
          end loop;
          Set_Lobes (Z, Ls);
-         --  区心 = 各瓣形心的平均(两瓣 = 中点;EE3 实测"合到处"的形心在手上相机里落到扫过带的上沿,不可靠)。
-         --  一瓣(吸盘、看不开的几根手指)= 那一瓣自己的形心(原来按一瓣另写一套:手指合到的地方的形心)
-         Z.Cu := 0.0; Z.Cv := 0.0;
-         for Lb of Ls loop
-            Z.Cu := Z.Cu + Lb.Cu; Z.Cv := Z.Cv + Lb.Cv;
-         end loop;
-         Z.Cu := Z.Cu / Long_Float (Ls.Length); Z.Cv := Z.Cv / Long_Float (Ls.Length);
+         --  区心 = 这几瓣合拢时会合到的那一点("东西会被夹在哪")。一条规则:最小二乘 ——
+         --  每一对瓣合拢时在它们的连线中点会合 ⇒ 每一对一条约束"区心 = 这一对的中点";所有对一起的解 = 各瓣形心的平均。
+         --  这些约束定不下来的方向(一对都没有 = 这只眼里只有一瓣:另一根手指在画面外,或者本来就只有一瓣)由"手指合拢时到的那片"
+         --  (合到的区里最大的一块)的形心定:取最小二乘解里离那一片最近的那个(伪逆解:有一对以上 ⇒ 它不动结果;一对都没有 ⇒ 结果就是它)。
+         --  两瓣时 = 两瓣心的中点(EE3 实测"合到处"的形心在手上相机里落到扫过带的上沿 —— 合上的手指和后面的桌面差得不够,那片只认出一半;
+         --  10-01 按仿真真值:V1B78–V1B82 腕眼两瓣中点沿合拢方向离指尖真中点 1–2 px,合到的那片 77–96 px)。
+         --  一瓣时 = 合到的那片(10-01 按仿真真值:V1B78–V1B82 头顶眼第 1 只手,指尖真中点离它 32–38 px、沿合拢方向 2–3 px;
+         --  离那一瓣自己的形心 64–65 px、沿合拢方向 41 px —— I2 那一版改成了后者,改回)
+         declare
+            N : constant Long_Float := Long_Float (Ls.Length);
+            Pairs : constant Long_Float := N * (N - 1.0) / 2.0;   --  几对瓣
+            --  伪逆:Pairs⁺ · Pairs(Pairs = 0 ⇒ 0,否则 1;分母只防 0 / 0)
+            Gain : constant Long_Float := Pairs / Long_Float'Max (Pairs, Long_Float'Model_Small);
+            Mu, Mv : Long_Float := 0.0;
+            Ru, Rv : Long_Float;   --  合到的那片的形心(那一片没有 ⇒ 各瓣的平均:没有别的证据)
+         begin
+            for Lb of Ls loop
+               Mu := Mu + Lb.Cu; Mv := Mv + Lb.Cv;
+            end loop;
+            Mu := Mu / N; Mv := Mv / N;
+            Ru := (if Gaps.Is_Empty then Mu else Gaps (0).Cu);
+            Rv := (if Gaps.Is_Empty then Mv else Gaps (0).Cv);
+            Z.Cu := Gain * Mu + (1.0 - Gain) * Ru;
+            Z.Cv := Gain * Mv + (1.0 - Gain) * Rv;
+         end;
          Lobe_Axis (Rs, W, Hh, Z.Au, Z.Av);
          --  区框 = 扫过而张开时不是手指的那片(Gap 里不比最大块小十倍的块);张幅 = 它沿主轴伸多长(在归一化画幅里量:主轴折成归一化画幅里的方向)。
          --  那片没有 ⇒ 区框 = 各瓣的框并起来,张幅 = 各瓣的框沿主轴伸多长
