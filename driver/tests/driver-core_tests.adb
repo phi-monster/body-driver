@@ -401,6 +401,37 @@ package body Driver.Core_Tests is
              "a call without an address pretended to succeed or gave no reason");
    end Unconfigured_Service;
 
+   procedure Replayed_Services is
+      use Driver.Services;
+      R  : constant Reply := (Ok => True, Text => Ada.Strings.Unbounded.To_Unbounded_String ("answer"), others => <>);
+      T1, T2, T3 : Ticket;
+   begin
+      Start_Replay ([Instrument => True, Brain => False]);
+      --  A recorded reply answers the call with the same request, and only
+      --  from the beat after the call.
+      Replay_Beat (3);
+      T1 := Submit (Instrument, "/match", "first", 3);
+      T2 := Submit (Instrument, "/match", "second", 3);
+      Replay_Reply (Instrument, "/match", "second", R);
+      Check (Ready (T2) = False, "a replayed reply was ready on the beat of its call");
+      Replay_Beat (4);
+      Check (Ready (T2), "a replayed reply was not ready on the next beat");
+      Check (not Ready (T1), "a reply answered a call with another request");
+      Check (Ada.Strings.Unbounded.To_String (Collect (T2).Text) = "answer", "the recorded text was not delivered");
+      --  A reply recorded before an identical call is submitted waits for it.
+      Replay_Reply (Instrument, "/segment", "box", R);
+      T3 := Submit (Instrument, "/segment", "box", 4);
+      Check (not Ready (T3), "a waiting reply was ready on the beat of its call");
+      Replay_Beat (5);
+      Check (Ready (T3), "a reply recorded before its call was lost");
+      --  A service without recorded replies is called live; without an
+      --  address it answers at once that it cannot.
+      T3 := Submit (Brain, "/chat", "hello", 5);
+      Replay_Beat (6);
+      Check (Ready (T3) and then not Collect (T3).Ok, "an unconfigured live service pretended to answer");
+      End_Replay;
+   end Replayed_Services;
+
    procedure Register is
    begin
       Driver.Tests.Register ("core.rotation", "Exp and Log disagree near 0 or pi", Rotation_Round_Trip'Access);
@@ -432,6 +463,9 @@ package body Driver.Core_Tests is
                              Json_Round_Trip'Access);
       Driver.Tests.Register ("core.services", "a call to an unconfigured service pretends to succeed",
                              Unconfigured_Service'Access);
+      Driver.Tests.Register ("core.replayed_services",
+                             "a replayed service reply arrives on another beat or answers another call",
+                             Replayed_Services'Access);
    end Register;
 
 end Driver.Core_Tests;
