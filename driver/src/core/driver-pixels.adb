@@ -1,4 +1,5 @@
 with Ada.Numerics.Long_Elementary_Functions;
+with Ada.Unchecked_Deallocation;
 with Driver.Uncertain;
 
 package body Driver.Pixels is
@@ -19,26 +20,30 @@ package body Driver.Pixels is
    function Height (V : View) return Natural is (V.Height);
    function Frames (V : View) return Natural is (V.Count);
 
+   type Real_Array_Access is access Real_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Real_Array_Access);
+
    procedure Add (V : in out View; I : Driver.Images.Image) is
       Mr : constant Real_Holders.Reference_Type := V.Means.Reference;
       Sr : constant Real_Holders.Reference_Type := V.Sums.Reference;
       M  : Real_Array renames Mr.Element.all;
       S  : Real_Array renames Sr.Element.all;
       N  : constant Real := Real (V.Count + 1);
+      --  The frame's luma in one pass over its bytes, on the heap: a frame
+      --  does not fit on every task's stack.
+      Frame : Real_Array_Access := new Real_Array (M'Range);
    begin
+      Driver.Images.Luma (I, Frame.all);
       --  Welford's update, one pass and numerically stable.
-      for Row in 0 .. V.Height - 1 loop
-         for Column in 0 .. V.Width - 1 loop
-            declare
-               K     : constant Positive := Row * V.Width + Column + 1;
-               X     : constant Real := Driver.Images.Luma (I, Column, Row);
-               Delta_Before : constant Real := X - M (K);
-            begin
-               M (K) := M (K) + Delta_Before / N;
-               S (K) := S (K) + Delta_Before * (X - M (K));
-            end;
-         end loop;
+      for K in M'Range loop
+         declare
+            Delta_Before : constant Real := Frame (K) - M (K);
+         begin
+            M (K) := M (K) + Delta_Before / N;
+            S (K) := S (K) + Delta_Before * (Frame (K) - M (K));
+         end;
       end loop;
+      Free (Frame);
       V.Count := V.Count + 1;
    end Add;
 

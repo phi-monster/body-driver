@@ -224,6 +224,22 @@ package body Driver.Core_Tests is
          Driver.Images.Include (M, 3, 1);
          Check (Driver.Images.Contains (M, 3, 1) and then Driver.Images.Count (M) = 1, "mask membership");
       end;
+      --  The whole-image luma is the per-pixel luma, pixel for pixel, in row order.
+      for K in Data'Range loop
+         Data (K) := Byte ((7 * Natural (K)) mod 256);
+      end loop;
+      declare
+         I     : constant Driver.Images.Image := Driver.Images.Create (4, 2, Data);
+         Whole : Driver.Real_Array (1 .. 8);
+      begin
+         Driver.Images.Luma (I, Whole);
+         for Row in 0 .. 1 loop
+            for Column in 0 .. 3 loop
+               Check (Whole (Row * 4 + Column + 1) = Driver.Images.Luma (I, Column, Row),
+                      "the whole-image luma of column" & Column'Image & ", row" & Row'Image & " differs");
+            end loop;
+         end loop;
+      end;
    end Image_Access;
 
 
