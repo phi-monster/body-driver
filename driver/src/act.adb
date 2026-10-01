@@ -20,7 +20,7 @@ with Exam;
 with Contact;
 with Stats;
 with Contact.Gen;
-with Contact.Grasp;
+with Contact.Search;
 with Kinem;
 with Contact.Exec;
 with Contact.Surface;
@@ -1193,7 +1193,7 @@ package body Act is
    procedure Take_Silhouette (C : in out Context; F : Plug.Frame; Cam, Arm : Natural; Name : Unbounded_String; P0 : Geom.V3; P0_Up_Sd : Long_Float) is separate;
 
    --  接触集(09-29 重写,PLAN §2 ②):量出来的手(每一瓣的尖和尖那一截的截面,碰桌面量的)在看到的形状上真合一次,
-   --  挑按量得出的误差最坏时每单位重量要夹得最松的那一组(Contact.Grasp.Plan)。
+   --  挑按量得出的误差最坏时每单位重量要夹得最松的那一组(Contact.Search.Plan)。
    --  形状 = 记下的顶面点(Take_Silhouette;碰过它躺的面就按真高度重投)+ 从轮廓那一圈垂直补到它躺的面的侧壁(实心、竖壁的假设,说出来);
    --  旁边的东西 = 这一集里被顶住过、比面高、又不在它身上的点(C.Bumps:伸下去被挡住就记进来 —— 试一下就知道);
    --  够不够得着 = 眼在那个位姿时按量到的关节范围反解(Plug.Reach);摩擦 = 这件东西和这只身体以前量到的上下限(C.Grip_Mus)。
@@ -1217,7 +1217,7 @@ package body Act is
    end Plan_Descent;
 
    procedure Plan_Contact (C : in out Context; F : Plug.Frame; Arm, Cam : Natural; Name : Unbounded_String;
-                           Pick : out Contact.Grasp.Candidate; Note : out Unbounded_String; Ok : out Boolean) is separate;
+                           Pick : out Contact.Search.Candidate; Note : out Unbounded_String; Ok : out Boolean) is separate;
 
    --  转这只手,让它自己那只眼的正前方对准世界里的一个方向(Want,单位向量)。
    --  转最少的角度:转轴 = 现在的正前方 × 要的方向。指尖不许甩走(08-28 那次甩出 20 cm):每一步先按要转的角度算出

@@ -25,7 +25,7 @@ package body Contact.Exec is
       end if;
       if not Oz then
          declare
-            Push : V3 := [others => 0.0];
+            Sum : V3 := [others => 0.0];
             Oa : Boolean;
          begin
             for P of S.Points loop
@@ -34,27 +34,27 @@ package body Contact.Exec is
                      A : constant V3 := Unit (P.Push.Axis, Oa);
                   begin
                      if Oa then
-                        Push := [Push (0) + A (0), Push (1) + A (1), Push (2) + A (2)];
+                        Sum := [Sum (0) + A (0), Sum (1) + A (1), Sum (2) + A (2)];
                      end if;
                   end;
                end if;
             end loop;
-            Z := Unit (Push, Oz);
+            Z := Unit (Sum, Oz);
             if not Oz then
                --  合成为零时退回"沿各点法向的反向合";再为零就拒绝,不许瞎挑一个 —— 挑错了物体会被爪子侧面撞飞,而没有任何一个环节会不一致
-               Push := [others => 0.0];
+               Sum := [others => 0.0];
                for P of S.Points loop
                   if P.By.Kind = Hand then
                      declare
                         Nn : constant V3 := Unit (P.Normal, Oa);
                      begin
                         if Oa then
-                           Push := [Push (0) - Nn (0), Push (1) - Nn (1), Push (2) - Nn (2)];
+                           Sum := [Sum (0) - Nn (0), Sum (1) - Nn (1), Sum (2) - Nn (2)];
                         end if;
                      end;
                   end if;
                end loop;
-               Z := Unit (Push, Oz);
+               Z := Unit (Sum, Oz);
                if not Oz then
                   return F;
                end if;
@@ -207,7 +207,7 @@ package body Contact.Exec is
                for F of Fr loop
                   Fr_K.Append (Geom.Mul (R, F));
                end loop;
-               Out_Steps.Append (Step'(Pos => At_K, Frame => Fr_K, Hand => Who, Touching => True, Tol_M => Tol, Kind => Carry));
+               Out_Steps.Append (Step'(Pos => At_K, Frame => Fr_K, Hand => Who, Touching => True, Tol_M => Tol, Kind => Follow));
             end;
          end loop;
       end if;
