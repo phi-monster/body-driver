@@ -749,7 +749,9 @@ begin
    --  合成:200 × 80、背景 100,每个像素加 σ 6 的噪声(两帧各自的,确定的伪随机);张开时两根手指 x 10–29、x 170–189(y 30–79,灰度 20);
    --  合上时两根并在正中 x 70–129,左边那根的左半截 x 70–89 被照亮(180,比背景亮)、其余 20。要:
    --  (a) 只有噪声(没有照亮的那一截)⇒ 两瓣;(b) 有照亮的那一截 ⇒ 只按两张图拼是三瓣;张开那头的格点(手指上的长在眼上、别处是背景)一核 ⇒
-   --  那一块不长在眼上、挪走 ⇒ 两瓣,框是两根张开的手指。牙:不核(不给格点)⇒ 三瓣
+   --  那一块不长在眼上、挪走 ⇒ 两瓣,框是两根张开的手指。格点给的是转一下眼判的(Kinem.Ride:长在眼上 / 世界 / 判不了),
+   --  走开机同一处(Zone.Regroup_By_Ride → Ride_Grid → From_Frames)。牙:不核(不给格点)⇒ 三瓣;格点都判不了(Unknown)⇒ 没有证据、不挪、三瓣
+   --  (10-01 主代理在 Ride_Grid 那一句"长在眼上 = Rides"上拔过:原来这条焊点自己拼 Open_Ride、不走那一句,拔了不红)
    declare
       W : constant := 200;
       H : constant := 80;
@@ -778,8 +780,8 @@ begin
          end loop;
       end Frames;
       Oa, Ca, Ob, Cb : Buf;
-      Za, Zb, Zc : Zone.Hand_Zone;
-      Ride, Judged : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (Ng));
+      Za, Zb, Zc, Zu : Zone.Hand_Zone;
+      Vd : Kinem.Ride_Vec (0 .. Ng - 1) := [others => Kinem.Unknown];
       Dropped : Natural := 0;
       function Finger_Boxes (Z : Zone.Hand_Zone) return Boolean is
         (Z.N_Lobes = 2 and then (for all K in 0 .. 1 => Zone.Lobe_Of (Z, K).Y0 >= 28 and then
@@ -790,23 +792,27 @@ begin
       Frames (True, Ob, Cb);
       Za := Zone.From_Frames (Oa, Ca, W, H);
       Zb := Zone.From_Frames (Ob, Cb, W, H);
-      --  张开那头转一下眼判的格点:张开的手指上的长在眼上,别处(背景)判得了、不长在眼上
+      --  格点都判不了 ⇒ 没有证据
+      Zu := Zone.Regroup_By_Ride (Zb, Ob, Cb, W, H, Vd);
+      --  张开那头转一下眼判的格点:张开的手指上的长在眼上,别处(背景)判得了、是世界
       for Gyy in 0 .. Kinem.Gy - 1 loop
          for Gxx in 0 .. Kinem.Gx - 1 loop
             declare
                U : constant Long_Float := Kinem.Grid_U (Gxx, W);
                V : constant Long_Float := Kinem.Grid_V (Gyy, H);
             begin
-               Judged.Replace_Element (Gyy * Kinem.Gx + Gxx, True);
-               Ride.Replace_Element (Gyy * Kinem.Gx + Gxx, V >= 30.0 and then ((U >= 10.0 and then U < 30.0) or else (U >= 170.0 and then U < 190.0)));
+               Vd (Gyy * Kinem.Gx + Gxx) := (if V >= 30.0 and then ((U >= 10.0 and then U < 30.0) or else (U >= 170.0 and then U < 190.0)) then Kinem.Rides
+                                             else Kinem.World);
             end;
          end loop;
       end loop;
-      Zc := Zone.From_Frames (Ob, Cb, W, H, Open_Class => (if Zb.Lobes_Darker then 1 else -1), Open_Ride => Ride, Open_Judged => Judged);
+      Zc := Zone.Regroup_By_Ride (Zb, Ob, Cb, W, H, Vd);
       Dropped := Zc.Moved_Out;
-      Check (Za.Valid and then Finger_Boxes (Za) and then Zb.Valid and then Zb.N_Lobes = 3 and then Dropped = 1 and then Zc.Valid and then Finger_Boxes (Zc),
+      Check (Za.Valid and then Finger_Boxes (Za) and then Zb.Valid and then Zb.N_Lobes = 3 and then Dropped = 1 and then Zc.Valid and then Finger_Boxes (Zc)
+             and then Zu.Valid and then Zu.Moved_Out = 0 and then Zu.N_Lobes = 3,
              "画面带 σ 6 噪声的二指夹爪:只有噪声 ⇒ " & Codec.Img (Za.N_Lobes) & " 瓣" & (if Finger_Boxes (Za) then "(两根张开的手指)" else "(不对)")
              & " · 合上那根有一截被照亮(比背景亮)⇒ 只按两张图拼 " & Codec.Img (Zb.N_Lobes) & " 瓣(牙:不核就是它)"
+             & " · 格点都判不了 ⇒ 挪走 " & Codec.Img (Zu.Moved_Out) & " 块、" & Codec.Img (Zu.N_Lobes) & " 瓣(该 0、3:没有证据不挪)"
              & " · 按张开那头的格点核 ⇒ 挪走 " & Codec.Img (Dropped) & " 块、" & Codec.Img (Zc.N_Lobes) & " 瓣" & (if Finger_Boxes (Zc) then "(两根张开的手指)" else "(不对)"));
    end;
    --  🔴 ⑩ 别的眼(不长在这只手上)里只看得见一根手指、合到的区紧挨着它(10-01 P2A 第 1 只手的头顶眼):两类一样开(各一块)⇒ 定不下来,

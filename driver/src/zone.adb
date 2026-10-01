@@ -4,7 +4,6 @@ with Codec;
 with Ada.Containers;
 with Ada.Unchecked_Deallocation;
 with Chan;
-with Kinem;
 with Instrument;
 with Stats;
 with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
@@ -874,6 +873,23 @@ package body Zone is
       return Z;
    end From_Frames;
 
+   procedure Ride_Grid (Vd : Kinem.Ride_Vec; Ride, Judged : out Bools) is
+      use type Kinem.Ride;
+   begin
+      Ride.Clear; Judged.Clear;
+      for I in Vd'Range loop
+         Ride.Append (Vd (I) = Kinem.Rides);
+         Judged.Append (Vd (I) /= Kinem.Unknown);
+      end loop;
+   end Ride_Grid;
+
+   function Regroup_By_Ride (Z : Hand_Zone; Open_G, Closed_G : Buf; W, Hh : Natural; Vd : Kinem.Ride_Vec) return Hand_Zone is
+      Gr, Jd : Bools;
+   begin
+      Ride_Grid (Vd, Gr, Jd);
+      return From_Frames (Open_G, Closed_G, W, Hh, Open_Class => (if Z.Lobes_Darker then 1 else -1), Open_Ride => Gr, Open_Judged => Jd);
+   end Regroup_By_Ride;
+
    --  格子 (Gxx, Gyy) 的像素范围:x ∈ [⌊Gxx·W/Gx⌋, ⌊(Gxx+1)·W/Gx⌋ − 1](同 Kinem.Grid_U 的格子)
    function Cell_X0 (Gxx : Natural; W : Natural) return Natural is ((Gxx * W) / Kinem.Gx);
    function Cell_Y0 (Gyy : Natural; Hh : Natural) return Natural is ((Gyy * Hh) / Kinem.Gy);
@@ -1363,8 +1379,7 @@ package body Zone is
                Step : constant Long_Float := Turn (Turn_Ch);
                Eye_G : constant Geom.Cam_Geo := (if Natural (Hc) < Natural (Eyes.Length) then Eyes (Natural (Hc)) else Geom.No_Geo);
                Ng : constant Natural := Kinem.Gx * Kinem.Gy;
-               type Verdicts is array (0 .. Ng - 1) of Kinem.Ride;
-               Vd : Verdicts := [others => Kinem.Unknown];   --  每个格点(按格子号)判成什么
+               Vd : Kinem.Ride_Vec (0 .. Ng - 1) := [others => Kinem.Unknown];   --  每个格点(按格子号)判成什么
                Rot : Geom.V3 := [0.0, 0.0, 0.0];
                Sig_Px : Long_Float := 0.0;
                Settled : Boolean := True;
@@ -1461,39 +1476,29 @@ package body Zone is
                --  按这一转(Before / After / Rot / Sig_Px / Vd)把张开那头的每一瓣补全
                procedure Refine is
                   Z2 : Hand_Zone := H.Zones (Natural (Hc));
-                  Gr : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (Ng));
+                  Gr, Judged : Bools;
                   Ps : Probe_Vectors.Vector;
                   Added : Natural := 0;
                   Tip0 : Floats;   --  补之前每一瓣的尖(v;只进日志)
                   Tip0_Ok : Bools;   --  那一瓣补之前算得出尖
                begin
-                  for I in 0 .. Ng - 1 loop
-                     Gr.Replace_Element (I, Vd (I) = Kinem.Rides);
-                  end loop;
+                  Ride_Grid (Vd, Gr, Judged);
                   --  这一转是在张开那头转的 ⇒ 瓣那一类里在张开那头不长在眼上的块(背景:合上那根手指被照亮的那一侧比身后的地板亮,
-                  --  按亮暗落进了瓣那一类)挪进合到的那一类,按同一个类别重拼(From_Frames 的 Open_Ride / Open_Judged;已经补好的合空那一截照留)
+                  --  按亮暗落进了瓣那一类)挪进合到的那一类,按同一个类别重拼(Regroup_By_Ride;已经补好的合空那一截照留)
                   declare
-                     Judged : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (Ng));
+                     N0 : constant Natural := Z2.N_Lobes;
+                     Keep_Shut : constant Section := Z2.Shut;
+                     Zr : Hand_Zone := Regroup_By_Ride (Z2, Lo_Frame (Natural (Hc)).Gray, Hi_Frame (Natural (Hc)).Gray, Cw, Ch, Vd);
                   begin
-                     for I in 0 .. Ng - 1 loop
-                        Judged.Replace_Element (I, Vd (I) /= Kinem.Unknown);
-                     end loop;
-                     declare
-                        N0 : constant Natural := Z2.N_Lobes;
-                        Keep_Shut : constant Section := Z2.Shut;
-                        Zr : Hand_Zone := From_Frames (Lo_Frame (Natural (Hc)).Gray, Hi_Frame (Natural (Hc)).Gray, Cw, Ch,
-                                                       Open_Class => (if Z2.Lobes_Darker then 1 else -1), Open_Ride => Gr, Open_Judged => Judged);
-                     begin
-                        if Zr.Valid and then Zr.Moved_Out > 0 then
-                           if Shut_Refined then
-                              Zr.Shut := Keep_Shut;
-                           end if;
-                           Z2 := Zr;
-                           H.Zones.Replace_Element (Natural (Hc), Z2);
-                           Put_Line ("[身]   瓣那一类里有 " & Codec.Img (Zr.Moved_Out) & " 块在张开那头不长在眼上(是背景)⇒ 挪进合到的那一类:" & Codec.Img (N0) & " 瓣 → "
-                                     & Codec.Img (Z2.N_Lobes) & " 瓣");
+                     if Zr.Valid and then Zr.Moved_Out > 0 then
+                        if Shut_Refined then
+                           Zr.Shut := Keep_Shut;
                         end if;
-                     end;
+                        Z2 := Zr;
+                        H.Zones.Replace_Element (Natural (Hc), Z2);
+                        Put_Line ("[身]   瓣那一类里有 " & Codec.Img (Zr.Moved_Out) & " 块在张开那头不长在眼上(是背景)⇒ 挪进合到的那一类:" & Codec.Img (N0) & " 瓣 → "
+                                  & Codec.Img (Z2.N_Lobes) & " 瓣");
+                     end if;
                   end;
                   for Kl in 0 .. Z2.N_Lobes - 1 loop
                      declare
@@ -1557,7 +1562,7 @@ package body Zone is
                procedure Refine_Shut is
                   Z2 : Hand_Zone := H.Zones (Natural (Hc));
                   Zt : Hand_Zone := Z2;
-                  Gr : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (Ng));
+                  Gr, Jd : Bools;
                   Ps : Probe_Vectors.Vector;
                   Added : Natural := 0;
                   Il : constant Bools := Lobe_Pixels (Z2, Cw, Ch);
@@ -1567,9 +1572,7 @@ package body Zone is
                   if Natural (Z2.Fingers.Length) /= Cw * Ch then
                      return;
                   end if;
-                  for I in 0 .. Ng - 1 loop
-                     Gr.Replace_Element (I, Vd (I) = Kinem.Rides);
-                  end loop;
+                  Ride_Grid (Vd, Gr, Jd);
                   for P in 0 .. Cw * Ch - 1 loop
                      if Il.Element (P) then
                         Zt.Fingers.Replace_Element (P, False);   --  只留合到的那片

@@ -3794,8 +3794,6 @@ zone.adb	Mk.Replace_Element (Y * Cw + X, 128);	128	格式	调试图灰度(区框
 zone.adb	Mk.Replace_Element (Y * Cw + X, 255);	255	格式	调试图灰度(瓣框)(zone.adb:695)
 zone.adb	Moved_Px : array (0 .. Natural'Max (1, N_Cams) - 1) of Natural := [others => 0];	1	结构	至少留一格免得数组为空;N_Cams = 0 时 616 行已返回,Moved_Px 不会被读。(zone.adb:530)
 zone.adb	None : constant Integer := -1;	1	结构	哨兵:这一格还没归哪一瓣(瓣号从 0 起)(zone.adb:433)
-zone.adb	Open_Class => (if Z2.Lobes_Darker then 1 else -1), Open_Ride => Gr, Open_Judged => Judged);	1	结构	From_Frames 的 Open_Class 取值:1 = 变暗的那一类是张开的、-1 = 变亮的那一类(协议)(zone.adb:1488)
-zone.adb	Open_Class => (if Z2.Lobes_Darker then 1 else -1), Open_Ride => Gr, Open_Judged => Judged);	1	结构	From_Frames 的 Open_Class 取值:1 = 变暗的那一类是张开的、-1 = 变亮的那一类(协议)(zone.adb:1488)
 zone.adb	Pairs : constant Long_Float := N * (N - 1.0) / 2.0;	1.0	数学	N 瓣两两成对的对数 N(N−1)/2 里的 N − 1(组合数,恒等式)(zone.adb:271)
 zone.adb	Pairs : constant Long_Float := N * (N - 1.0) / 2.0;	2.0	数学	N 瓣两两成对的对数 N(N−1)/2 里的 /2(组合数,恒等式)(zone.adb:271)
 zone.adb	Perim : constant Natural := 2 * (W + Hh) - 4;	2	数学	沿画面四条边绕一圈的像素数 2(W+H)−4 和各段的起点偏移(四个角各只算一次)(zone.adb:303)
@@ -3873,4 +3871,6 @@ zone.adb	if Comps (K).Count * 10 >= Comps (0).Count then	10	调参数	扫过像�
 zone.adb	if Gaps (K).Count * 10 >= Gaps (0).Count then	10	调参数	能装东西的区只留 ≥ 最大块 1/10 的块(zone.adb:84)	区框/张幅(判'在手里')	中	按量到的噪声斑块大小筛块:开机两帧静止图做 Picture.Seen_Twice(M.Floors)得到的最大噪声块像素数,比它大的块都留;不按'和最大块的比例'
 zone.adb	if R.Count * 4 >= Lobes (0).Count then	4	调参数	一块算不算一瓣:不比最大块小四倍(原来只拿它判第二块、最多两瓣;I2 起每一块都这么判,瓣数不设上限)。V1B78–82 腕眼里真手指两块 1.1–1.8 万像素,手指边角碎块 28–520(≤ 3%),头顶眼里另一瓣边上的碎条 154(7.5%)(zone.adb:225)	一个抓握通道在这只眼里认出几根手指	高 —— 腕眼近大远小,远处那根手指比最近那根小四倍以上就被丢;五指手小指、拇指大小差得多	按"是不是同一根手指"判,不按和最大块的比例:碎块是同一根手指被匀色背景切开的边角(贴着 / 落在大块的框里),量它和别的块之间隔着的是不是手指(补全时长在眼上的格子连不连得上)。不是按噪声斑块大小:V1B78 的碎块是真变化,两次比较都在,噪声门留得住它们
 zone.adb	return (if I = 0 then Z.A elsif I = 1 then Z.B else No_Lobe);	1	结构	旧写法写的握区(一串瓣空着、只填了 A / B):第 1 瓣 = B,照第 0 步那一版读(bodyfile-load、selfcheck 拼握区的几条焊点;它们换成 Set_Lobes / Lobes_From_Json 以后连这一行一起删)(zone.adb:33)
+zone.adb	return From_Frames (Open_G, Closed_G, W, Hh, Open_Class => (if Z.Lobes_Darker then 1 else -1), Open_Ride => Gr, Open_Judged => Jd);	1	结构	From_Frames 的 Open_Class 取值:1 = 变暗的那一类是张开的、-1 = 变亮的那一类(协议)(zone.adb:890,Regroup_By_Ride)
+zone.adb	return From_Frames (Open_G, Closed_G, W, Hh, Open_Class => (if Z.Lobes_Darker then 1 else -1), Open_Ride => Gr, Open_Judged => Jd);	1	结构	From_Frames 的 Open_Class 取值:1 = 变暗的那一类是张开的、-1 = 变亮的那一类(协议)(zone.adb:890,Regroup_By_Ride)
 zone.ads	Open_Reading : Long_Float := 1.0;	1.0	调参数	⚠ 认身体的缺省值:还没量过的手,"张开时的读数"缺省 1.0(配 Empty_Close 缺省 0.0)= 默认夹爪读数在 [0,1]、1 = 张开。Measure / 身体文件都会覆盖,但 Hand_Of 找不到时返回 (others => <>),act.adb:11060 / 11077 的 open 就照这个 1.0 发(zone.ads:37)	找不到这只手的记录时,张开命令发什么;Past_Empty 用它定"哪头是张开"	低	缺省给"没量过"的哨兵(NaN,同 Hand_Zone.Depth 读不到用 NaN 的做法);Move_Jaw 的调用处见哨兵就不动爪、说"这只手哪头张开没量过";要不动就发此刻读数 Selfmap.Jaw_Of (F, Arm, K)
