@@ -809,4 +809,63 @@ begin
              & " · 合上那根有一截被照亮(比背景亮)⇒ 只按两张图拼 " & Codec.Img (Zb.N_Lobes) & " 瓣(牙:不核就是它)"
              & " · 按张开那头的格点核 ⇒ 挪走 " & Codec.Img (Dropped) & " 块、" & Codec.Img (Zc.N_Lobes) & " 瓣" & (if Finger_Boxes (Zc) then "(两根张开的手指)" else "(不对)"));
    end;
+   --  🔴 ⑩ 别的眼(不长在这只手上)里只看得见一根手指、合到的区紧挨着它(10-01 P2A 第 1 只手的头顶眼):两类一样开(各一块)⇒ 定不下来,
+   --  照按像素多的那一类排(瓣 = 张开时那根手指,区心 = 合到的那片),照实说是排的。
+   --  病(c996aca 里那一条,已删):拿"转的那一下挪了的像素落在哪一类"判此刻手指在哪一类 —— 手指边上那一窄条合到的区被转着的手指扫过,
+   --  挪了的比例比手指自己那一块还高(P2A:瓣里 1660 / 3184、合到的区里 70 / 71)⇒ 判成"另一类是张开的",区心挪到张开那根手指上
+   --  (离真指尖中点 64 px,原来 32–38 px)。
+   --  合成:160 × 60、背景 100;张开时一根手指 x 100–139(y 10–59,灰度 20),合上时它往右挪到 x 136–175(右边一截出了画面):
+   --  只在张开时的 x 100–135(1800 像素)、只在合上时的 x 140–159(1000 像素,紧挨着)。要:一瓣 = x 100–135、定不下来(Open_Known = False)、
+   --  区心 = 合到的那片的形心。牙:转的时候手指往右挪 5 px(挪了的 = x 100–104 和 x 140–144),按"挪了的比例高的那一类"判 ⇒ 判成合到的那片(错)
+   declare
+      W : constant := 160;
+      H : constant := 60;
+      Open_G, Closed_G : Buf := U8_Vectors.To_Vector (100, Ada.Containers.Count_Type (W * H));
+      Z : Zone.Hand_Zone;
+      Lb : Zone.Lobe;
+      M_L, T_L, M_A, T_A : Natural := 0;
+      Old_Says_Arrived : Boolean := False;
+   begin
+      for Y in 10 .. H - 1 loop
+         for X in 100 .. 139 loop
+            Open_G.Replace_Element (Y * W + X, 20);
+         end loop;
+         for X in 136 .. W - 1 loop
+            Closed_G.Replace_Element (Y * W + X, 20);
+         end loop;
+      end loop;
+      Z := Zone.From_Frames (Open_G, Closed_G, W, H);
+      Lb := Zone.Lobe_Of (Z, 0);
+      --  牙:原来那一条的判法,拿同一具假手算一遍(转的那一下挪了的像素 = 手指两条边各 5 px)
+      declare
+         Il : constant Bools := Zone.Lobe_Pixels (Z, W, H);
+      begin
+         for Y in 0 .. H - 1 loop
+            for X in 0 .. W - 1 loop
+               declare
+                  P : constant Natural := Y * W + X;
+                  Moved : constant Boolean := Y >= 10 and then (X in 100 .. 104 or else X in 140 .. 144);
+               begin
+                  if Z.Fingers.Element (P) then
+                     if Il.Element (P) then
+                        T_L := T_L + 1;
+                        M_L := M_L + (if Moved then 1 else 0);
+                     else
+                        T_A := T_A + 1;
+                        M_A := M_A + (if Moved then 1 else 0);
+                     end if;
+                  end if;
+               end;
+            end loop;
+         end loop;
+         Old_Says_Arrived := T_L > 0 and then T_A > 0 and then Long_Float (M_A) / Long_Float (T_A) > Long_Float (M_L) / Long_Float (T_L);
+      end;
+      Check (Z.Valid and then Z.N_Lobes = 1 and then not Z.Open_Known and then Lb.X0 = 100 and then Lb.X1 = 135
+             and then abs (Z.Cu - 149.5 / Long_Float (W)) < 1.0e-12 and then Old_Says_Arrived,
+             "别的眼里只看得见一根手指、合到的区紧挨着它:" & Codec.Img (Z.N_Lobes) & " 瓣、x " & Codec.Img (Lb.X0) & "–" & Codec.Img (Lb.X1) & "(该 100–135)、"
+             & (if Z.Open_Known then "说定下了(不该)" else "说定不下来、按像素多的那一类排")
+             & "、区心 u " & Codec.Fmt (Z.Cu * Long_Float (W), 1) & "(该 149.5,合到的那片)"
+             & " · 牙:按转的时候挪了的像素判(瓣里 " & Codec.Img (M_L) & " / " & Codec.Img (T_L) & "、合到的区里 " & Codec.Img (M_A) & " / " & Codec.Img (T_A) & ")⇒ "
+             & (if Old_Says_Arrived then "判成合到的那片是张开的(错,所以删了)" else "(牙没咬住)"));
+   end;
 end Welds_Path_2;
