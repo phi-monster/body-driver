@@ -797,4 +797,46 @@ package body Picture is
       Ok := True;
    end Region_Of_Mask;
 
+   procedure Grow_Window (R : Region; W, H : Natural; X0, Y0, X1, Y1 : in out Natural; Grew : out Boolean) is
+      Tl : constant Boolean := R.X0 <= X0 and then X0 > 0;
+      Tt : constant Boolean := R.Y0 <= Y0 and then Y0 > 0;
+      Tr : constant Boolean := R.X1 >= X1 and then X1 + 1 < W;
+      Tb : constant Boolean := R.Y1 >= Y1 and then Y1 + 1 < H;
+      Rw : constant Natural := R.X1 - R.X0 + 1;
+      Rh : constant Natural := R.Y1 - R.Y0 + 1;
+   begin
+      Grew := Tl or else Tt or else Tr or else Tb;
+      if Tl then
+         X0 := (if X0 > Rw then X0 - Rw else 0);
+      end if;
+      if Tt then
+         Y0 := (if Y0 > Rh then Y0 - Rh else 0);
+      end if;
+      if Tr then
+         X1 := Natural'Min (W - 1, X1 + Rw);
+      end if;
+      if Tb then
+         Y1 := Natural'Min (H - 1, Y1 + Rh);
+      end if;
+   end Grow_Window;
+
+   function Covers_Interior (New_M, Old_M : Bools; W, H : Natural; R : Region) return Boolean is
+   begin
+      if W < 3 or else H < 3 or else Natural (New_M.Length) /= W * H or else Natural (Old_M.Length) /= W * H then
+         return False;
+      end if;
+      for Y in Natural'Max (1, R.Y0) .. Natural'Min (R.Y1, H - 2) loop
+         for X in Natural'Max (1, R.X0) .. Natural'Min (R.X1, W - 2) loop
+            declare
+               I : constant Natural := Y * W + X;
+            begin
+               if Old_M (I) and then Old_M (I - 1) and then Old_M (I + 1) and then Old_M (I - W) and then Old_M (I + W) and then not New_M (I) then
+                  return False;
+               end if;
+            end;
+         end loop;
+      end loop;
+      return True;
+   end Covers_Interior;
+
 end Picture;

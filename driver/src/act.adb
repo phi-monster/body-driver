@@ -489,6 +489,8 @@ package body Act is
    procedure Seg_In_Box (C : Context; F : Plug.Frame; Cam : Natural; X0, Y0, X1, Y1 : Natural; Got, Iso : out Boolean; R : out Picture.Region; M : out Bools;
                          Pu_On, Pv_On : Long_Float := -1.0) is separate;
 
+   --  别的手压在东西上没有(路 1 的 Hand_Covers,正文在后面):先在这里声明,Remeasure_Boxed 拿它跳过"别的手压在东西上"的那一眼(路 3 I4,10-01)
+   function Hand_Covers (C : Context; F : Plug.Frame; Arm, Cm : Natural; B : Boxed_Thing) return Boolean;
    procedure Remeasure_Boxed (C : in out Context; F : Plug.Frame; Cam : Natural; Regs : in out Picture.Regions) is separate;
 
    --  这一块是不是脑点过名的那几件之一(拿形心对;我量出来的那一块原样进了槽,所以对得上)。-1 = 不是
