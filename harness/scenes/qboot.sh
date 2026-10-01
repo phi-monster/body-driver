@@ -13,9 +13,11 @@ mkdir -p "$E"
 [ -e "$N" ] && { echo "🔴 $N 已经有了,换个炮名"; exit 5; }
 CALF=/root/p8/cal_$k.json
 if [ "$BASE" != zero ]; then
+  # 驱动读的是:身体文件、.geo.json(眼的几何)、.kin.txt(开机前半段量的运动学和世界)和 .kin.txt_*.bmp(前半段核对用的参照图)。
+  # 少了参照图驱动就说"核对用的图读不了",从零量前半段(P8A 就这样)。拷真文件,不用链接:驱动会把量到的写回去
   cp "$BASE" "$CALF"
-  [ -f "$BASE.geo.json" ] && cp "$BASE.geo.json" "$CALF.geo.json"
-  echo "身体文件:$BASE → $CALF" > "$E/meta.txt"
+  for f in "$BASE".geo.json "$BASE".kin.txt "$BASE".kin.txt_*.bmp; do [ -f "$f" ] && cp "$f" "$CALF${f#$BASE}"; done
+  echo "身体文件:$BASE → $CALF(连 .geo.json、.kin.txt、参照图)" > "$E/meta.txt"
 else
   echo "身体文件:没有(从零量,量到的写进 $CALF)" > "$E/meta.txt"
 fi

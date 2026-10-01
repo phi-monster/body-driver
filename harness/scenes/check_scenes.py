@@ -29,6 +29,7 @@ parser.add_argument("--out", required=True)
 parser.add_argument("--walk_steps", type=int, default=60)
 parser.add_argument("--walk_label", default="", help="量任意一件东西每个动作走多远(比如 chase_mouse 的 target)")
 parser.add_argument("--tag", default="", help="结果放 out/<tag>(默认 = 任务名)")
+parser.add_argument("--qseeds", default="", help="bd_question:同一具身体的几道题(种子)在一个进程里挨个核")
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
 app = AppLauncher(args).app
@@ -326,6 +327,8 @@ def scenario(S, rep):
         S.set_pose(label, p0 + [0, 0, 0.12], q0)
         test(rep, "抬起 12 cm", 1, S.graded())
         return True
+    if t == "bd_question":
+        return question_scenario(S, rep)
     if t == "bd_cloth":
         P = S.cloth_points("cloth")
         top = S.lm.table_info[0]["height"]
@@ -350,6 +353,90 @@ def scenario(S, rep):
         rep["cloth_set_path"] = S.cloth_shift("cloth", np.ones(len(P), dtype=bool), 0.12)
         return True
     return False
+
+
+def question_scenario(S, rep):
+    """随机题机的一道题:按它的要求把仿真真值摆成做成了 / 没做成的几种样子(只动场景里的东西,不动身体)"""
+    from task.RoboDojo.bd import question as Q
+    q = S.lm.saved_layouts[0]["bd_question"]
+    req, (name, kw) = q["requirement"], q["check"]
+    rep["question"] = {k: q[k] for k in ("qid", "body", "requirement", "sentence")}
+    log("   题 %s(%s / %s):%s" % (q["qid"], q["body"], req, q["sentence"]))
+    p0, r0 = S.pose("target")
+    test(rep, "开局", 0, S.graded())
+    e = 0
+    ia = S.inst("target")
+    if req == "lift":
+        h = float(kw["z_threshold"])
+        S.set_pose("target", p0 + [0, 0, h + 0.02], r0)
+        test(rep, "抬高 %.0f cm" % ((h + 0.02) * 100), 1, S.graded())
+        S.set_pose("target", p0 + [0, 0, h - 0.02], r0)
+        test(rep, "只抬 %.0f cm" % ((h - 0.02) * 100), 0, S.graded())
+        S.set_pose("target", p0 + [0, 0, h + 0.02], r0)
+        return True
+    if req == "turn":
+        def yawed(deg):
+            c, s = math.cos(math.radians(deg) / 2), math.sin(math.radians(deg) / 2)
+            w, x, y, z = r0
+            return np.array([c * w - s * z, c * x - s * y, c * y + s * x, c * z + s * w])   # 绕世界 z 转 deg(左乘)
+        S.set_pose("target", p0, yawed(90))
+        test(rep, "原地转 90°", 0, S.graded())
+        S.set_pose("target", p0, yawed(180))
+        test(rep, "原地转 180°", 1, S.graded())
+        return True
+    if req == "push":
+        d = np.asarray(kw["dir"], dtype=float)
+        dist = float(kw["dist"])
+        goal = p0 + np.r_[d * (dist + 0.01), 0.0]
+        S.set_pose("target", goal, r0)
+        test(rep, "沿着推过去 %.0f cm(没抬)" % ((dist + 0.01) * 100), 1, S.graded())
+        S.set_pose("target", goal + [0, 0, 0.05], r0)
+        S.graded()
+        S.set_pose("target", goal, r0)
+        test(rep, "同一处,但中间被拿起来过 5 cm", 0, S.graded())
+        return True
+    if req == "next_to":
+        ib = S.inst("other")
+        pb, _ = S.pose("other")
+        u = (p0[:2] - pb[:2]) / max(1e-9, np.linalg.norm(p0[:2] - pb[:2]))
+        lo_, hi_ = 0.0, float(np.linalg.norm(p0[:2] - pb[:2]))
+        for _ in range(30):   # 沿两者连线往 B 挪,找到离 B 正好 2 cm 的地方
+            mid = (lo_ + hi_) / 2
+            S.set_pose("target", np.r_[pb[:2] + u * mid, p0[2]], r0)
+            gap = Q._poly_gap(Q._footprint(S.rm.func_parser, e, ia), Q._footprint(S.rm.func_parser, e, ib))
+            lo_, hi_ = (mid, hi_) if gap < 0.02 else (lo_, mid)
+        S.set_pose("target", np.r_[pb[:2] + u * hi_, p0[2]], r0)
+        test(rep, "挪到 B 旁边 2 cm", 1, S.graded())
+        S.set_pose("target", np.r_[pb[:2] + u * hi_, p0[2] + 0.06], r0)
+        test(rep, "在 B 旁边,但悬在半空 6 cm", 0, S.graded())
+        S.set_pose("target", np.r_[pb[:2] + u * hi_, p0[2]], r0)
+        return True
+    if req == "on":
+        ib = S.inst("other")
+        pb, _ = S.pose("other")
+        ca = Q._corners(S.rm.func_parser, e, ia)
+        cb = Q._corners(S.rm.func_parser, e, ib)
+        bottom_off = p0[2] - ca[:, 2].min()
+        z = (cb[:, 2].min() + 0.012 if kw.get("mode") == "in" else cb[:, 2].max() + 0.005) + bottom_off
+        S.set_pose("target", np.r_[pb[:2] + (p0[:2] - pb[:2]) * 0.6, z], r0)
+        test(rep, "在 B 旁边、悬在它上面那个高度(没在它上面)", 0, S.graded())
+        S.set_pose("target", np.r_[pb[:2], z], r0)
+        S.steps(60)
+        pa, _ = S.pose("target")
+        rep["on_after_settle"] = [float(v) for v in pa]
+        log("   放%s B 走 60 步后:A 在 %s" % ("进" if kw.get("mode") == "in" else "到", np.round(pa, 4).tolist()))
+        test(rep, "放%s B 落稳" % ("进" if kw.get("mode") == "in" else "到"), 1, S.graded())
+        return True
+    if req == "above":
+        robot = S.env.robot_manager.robot_list[0]
+        ee = _np(S.env.robot_manager.get_real_endpose(robot, env_idx_list=[0], is_relative=True)[0])
+        rep["drone_body"] = [float(v) for v in ee[:3]]
+        S.set_pose("target", np.r_[ee[:2] + [0.10, 0.0], p0[2]], r0)
+        test(rep, "东西在机身正下方偏 10 cm", 0, S.graded())
+        S.set_pose("target", np.r_[ee[:2], p0[2]], r0)
+        test(rep, "东西在机身正下方", 1, S.graded())
+        return True
+    raise KeyError(req)
 
 
 def walk(S, rep, label=None):
@@ -394,7 +481,8 @@ def save_images(env, rep, tag):
 
 # ---------------------------------------------------------------- 主循环(每张布局:关掉 → 重装,和 main.py 一样)
 env = make_env()
-def check_layout(lid, rep):
+def check_layout(lid, rep, tag=None):
+    tag = tag or "L%d" % lid
     t1 = time.time()
     env.reset(seed=[lid])
     rep["loaded"] = True
@@ -414,7 +502,7 @@ def check_layout(lid, rep):
                 item["drift_m"] = float(np.linalg.norm(_np(p)[:3] - np.asarray(r["default_pos"], dtype=float)))
             rep["objects"].append(item)
             log("   %s %s(%s)在=%s 漂 %s" % (sect, r.get("label"), inst, item["present"], ("%.4f m" % item["drift_m"]) if "drift_m" in item else "-"))
-    save_images(env, rep, "L%d" % lid)
+    save_images(env, rep, tag)
     st = env.get_obs()["state"]
     rep["ee_rest"] = {k: [round(float(v), 4) for v in np.asarray(st[k]).reshape(-1)[:3]] for k in st if k.endswith("ee_pose")}
     log("   身体歇着时手在哪(ee 位置):%s" % rep["ee_rest"])
@@ -439,7 +527,7 @@ def check_layout(lid, rep):
         r = env.reward_manager.get_reward(final_check=True)
         rep["pipeline_reward_in_success_state"] = float(r[0])
         log("   RoboDojo 自己的 step → get_reward(停在做成了的样子):%s" % r)
-        save_images(env, rep, "L%d_done" % lid)
+        save_images(env, rep, tag + "_done")
     rep["ok"] = rep["loaded"] and all(t["ok"] for t in rep["tests"]) and rep.get("pipeline_reward_in_success_state", 1.0) > 0.999 \
         and all(o["present"] for o in rep["objects"])
 
@@ -461,11 +549,16 @@ def finish(code):
     os._exit(0)
 
 
-for lid in [int(s) for s in args.layouts.split(",") if s != ""]:
-    rep = {"layout": lid, "tests": [], "loaded": False}
+QSEEDS = [int(s) for s in args.qseeds.split(",") if s != ""]
+RUNS = [(0, qs) for qs in QSEEDS] if QSEEDS else [(int(s), None) for s in args.layouts.split(",") if s != ""]
+for lid, qs in RUNS:
+    rep = {"layout": lid if qs is None else qs, "tests": [], "loaded": False}
     REPORT["layouts"].append(rep)
     try:
-        check_layout(lid, rep)
+        if qs is not None:   # 随机题机:一题一个种子目录;同一具身体的几题在一个进程里挨个核(换种子 = 换题)
+            env.seed_manager.config["seed"] = qs
+            env.seed_manager.init_eval()
+        check_layout(lid, rep, None if qs is None else "Q%d" % qs)
     except Exception as e:
         import traceback
         rep["error"] = "%s: %s" % (type(e).__name__, e)
