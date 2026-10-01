@@ -9,4 +9,11 @@ package Driver.Clock is
    function Seconds return Duration;
    --  Monotonic time since the driver started.
 
+   function Nanoseconds_Of (S : Duration) return Long_Long_Integer;
+   --  S in whole nanoseconds, exact for a hundred days. (S times 10 ** 9
+   --  overflows Duration beyond nine seconds.)
+
+   function Nanoseconds return Long_Long_Integer is (Nanoseconds_Of (Seconds));
+   --  The same clock in whole nanoseconds.
+
 end Driver.Clock;

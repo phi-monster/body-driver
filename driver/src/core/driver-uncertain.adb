@@ -10,14 +10,25 @@ package body Driver.Uncertain is
    function Tail return Real is (Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z));
    --  How rarely a Gaussian difference exceeds Z of its sigmas: every gate's false-alarm rate.
 
-   function Scalar_Gate (Degrees_Of_Freedom : Natural := 0) return Gate is
-     ((Multiple => (if Degrees_Of_Freedom = 0 then Driver.Conventions.Z
-                    else Driver.Distributions.Student_T_Quantile (Tail, Degrees_Of_Freedom))));
+   function Scalar_Gate (Degrees_Of_Freedom : Natural := 0; Tests : Positive := 1) return Gate is
+      Alpha : constant Real := Tail / Real (Tests);
+   begin
+      --  A single test with a known sigma is Z itself, not its round trip
+      --  through the quantile.
+      return (Multiple => (if Degrees_Of_Freedom > 0 then Driver.Distributions.Student_T_Quantile (Alpha, Degrees_Of_Freedom)
+                           elsif Tests = 1 then Driver.Conventions.Z
+                           else Driver.Distributions.Gaussian_Two_Sided_Quantile (Alpha)));
+   end Scalar_Gate;
 
-   function Vector_Gate (Dimensions : Positive; Degrees_Of_Freedom : Natural := 0) return Gate is
-     ((Multiple => (if Degrees_Of_Freedom = 0 then Sqrt (Driver.Distributions.Chi_Square_Quantile (Tail, Dimensions))
-                    else Sqrt (Real (Dimensions)
-                               * Driver.Distributions.F_Quantile (Tail, Dimensions, Degrees_Of_Freedom)))));
+   function Vector_Gate (Dimensions : Positive; Degrees_Of_Freedom : Natural := 0; Tests : Positive := 1)
+     return Gate
+   is
+      Alpha : constant Real := Tail / Real (Tests);
+   begin
+      return (Multiple => (if Degrees_Of_Freedom = 0 then Sqrt (Driver.Distributions.Chi_Square_Quantile (Alpha, Dimensions))
+                           else Sqrt (Real (Dimensions)
+                                      * Driver.Distributions.F_Quantile (Alpha, Dimensions, Degrees_Of_Freedom))));
+   end Vector_Gate;
 
    function Threshold (G : Gate) return Real is (G.Multiple);
 

@@ -6,7 +6,11 @@
 --
 --  Kinds: R robot to driver, D driver to robot (binary messages), r and d the
 --  same for text messages, C a new robot connection, S a service request and
---  T a service reply (payload: service name, LF, then the body).
+--  T a service reply. A service record starts with a line naming the call:
+--  the service, its call number (which pairs a reply with its request) and,
+--  for a call an estimator submitted, "beat" and the beat it was submitted
+--  at. A request goes on with the path, LF, and the body; a reply with "ok"
+--  or what went wrong, LF, and the body.
 
 with Ada.Streams.Stream_IO;
 with Driver.Bytes;

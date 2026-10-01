@@ -14,10 +14,6 @@ package body Driver.Robot is
    use type Driver.Observations.Group_Id;
    use type Driver.Observations.Camera_Id;
 
-   Not_Measured : exception;
-   --  A query about a quantity the body has not measured yet: callers check
-   --  Booted (or the role) first, so reaching this is a defect upstream.
-
    procedure Observe_Eyes (M : in out Model; O : Observation) is
    begin
       if M.Eyes.Is_Empty then
@@ -130,8 +126,7 @@ package body Driver.Robot is
    function Eye_Mount (M : Model; E : Eye_Id) return Mount is
      (if E <= M.Graph.Mounts.Last_Index then M.Graph.Mounts (E) else (Kind => Unmeasured));
 
-   function Eye_Pose (M : Model; E : Eye_Id; O : Observation) return Pose_Estimate is
-     (raise Not_Measured with "Eye_Pose");
+   function Eye_Pose (M : Model; E : Eye_Id; O : Observation) return Pose_Estimate is ((others => <>));
 
    procedure Project
      (M       : Model;
@@ -141,23 +136,30 @@ package body Driver.Robot is
       Px      : out Driver.Images.Pixel;
       Visible : out Boolean)
    is
+      pragma Unreferenced (M, E, O, Point);
    begin
-      raise Not_Measured with "Project";
+      Px := (U => 0.0, V => 0.0);
+      Visible := False;
    end Project;
 
    function Ray (M : Model; E : Eye_Id; O : Observation; Px : Driver.Images.Pixel) return Ray_Estimate is
-     (raise Not_Measured with "Ray");
+     ((others => <>));
 
-   function Up (M : Model) return Direction_Estimate is (raise Not_Measured with "Up");
+   function Eye_Ray (M : Model; E : Eye_Id; Px : Driver.Images.Pixel) return Ray_Estimate is ((others => <>));
 
-   function Tool_Pose (M : Model; A : Arm_Id; O : Observation) return Pose_Estimate is
-     (raise Not_Measured with "Tool_Pose");
+   function Up (M : Model) return Direction_Estimate is ((others => <>));
+
+   function Tool_Pose (M : Model; A : Arm_Id; O : Observation) return Pose_Estimate is ((others => <>));
+
+   function Eye_In_Tool (M : Model; E : Eye_Id; O : Observation) return Pose_Estimate is ((others => <>));
+
+   function Blocked (M : Model; A : Arm_Id; O : Observation) return Boolean is (False);
 
    function Self_Mask (M : Model; E : Eye_Id; O : Observation) return Driver.Images.Mask is
-     (raise Not_Measured with "Self_Mask");
+     (if E <= O.Images.Last_Index then Driver.Images.Create (Driver.Images.Width (O.Images (E)), Driver.Images.Height (O.Images (E)))
+      else Driver.Images.Create (0, 0));
 
-   function Clearance (M : Model; Point : Vec3; O : Observation) return Estimate is
-     (raise Not_Measured with "Clearance");
+   function Clearance (M : Model; Point : Vec3; O : Observation) return Estimate is (Unknown);
 
    function Still (M : Model) return Boolean is
      (Stillness.All_Still (M));
@@ -172,6 +174,8 @@ package body Driver.Robot is
 
    function Reading_Noise (M : Model; G : Group_Id; Channel : Positive) return Real is
      (Channels.Noise (M, G, Channel));
+
+   function Visible_Step (M : Model; G : Group_Id; Channel : Positive) return Estimate is (Unknown);
 
    function Response (M : Model; G : Group_Id; E : Eye_Id) return Eye_Response is
      (Graph.Effect (M, G, E).Verdict);

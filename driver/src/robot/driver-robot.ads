@@ -19,6 +19,14 @@
 --  behind them has doubled, and a decider may ask for them at once with
 --  Estimate_Now.
 --
+--  Before a quantity is measured it reads as an unmeasured body reports it,
+--  never as an exception, so callers can ask from the first beat: role
+--  Unclassified, mount and response Unmeasured, zero arms, a reading noise
+--  of Real'Last, an image lag of 0, unknown estimates (Driver.Uncertain:
+--  Unknown, or the infinite covariances of an estimate's defaults) for every
+--  pose, ray, point, distance and Visible_Step, an empty Self_Mask of the
+--  image's size, Still and Blocked False, Closer_Arm and Carrier_Group 0.
+--
 --  Ownership: path A owns this layer except Driver.Robot.Hand (path B).
 --  Upper layers use only what this specification and Driver.Robot.Motion and
 --  Driver.Robot.Hand export.
@@ -104,11 +112,30 @@ package Driver.Robot is
    function Ray (M : Model; E : Eye_Id; O : Observation; Px : Driver.Images.Pixel) return Ray_Estimate;
    --  The line of sight through a pixel, in the world frame.
 
+   function Eye_Ray (M : Model; E : Eye_Id; Px : Driver.Images.Pixel) return Ray_Estimate;
+   --  The same line of sight in the eye's own frame (from its centre of
+   --  projection), carrying only the lens's uncertainty: with Eye_In_Tool it
+   --  takes a pixel into the tool frame without the arm's kinematics.
+
    function Up (M : Model) return Direction_Estimate;
    --  Away from gravity, in the world frame, as measured.
 
    function Tool_Pose (M : Model; A : Arm_Id; O : Observation) return Pose_Estimate;
    --  The last link of the arm in the world frame at the beat of O.
+
+   function Eye_In_Tool (M : Model; E : Eye_Id; O : Observation) return Pose_Estimate
+     with Pre => Eye_Mount (M, E).Kind = Arm_Carried;
+   --  The eye's frame in its arm's tool frame at the beat of O, carrying only
+   --  the uncertainty of what lies between them (the mount, and any joints
+   --  between the last link and the eye), so a measurement made in the eye is
+   --  taken into the tool frame without counting the arm's kinematics twice.
+   --  Constant when the eye rides on the last link.
+
+   function Blocked (M : Model; A : Arm_Id; O : Observation) return Boolean;
+   --  At the beat of O the arm was commanded further than it went, by more
+   --  than its free motion falls short: the estimators' view of the judgment
+   --  Driver.Robot.Motion.Step reports, so a replay sees the blocked beats of
+   --  the run it replays.
 
    function Self_Mask (M : Model; E : Eye_Id; O : Observation) return Driver.Images.Mask;
    --  The pixels of the eye that show the robot itself at the beat of O.
@@ -130,6 +157,11 @@ package Driver.Robot is
    function Reading_Noise (M : Model; G : Group_Id; Channel : Positive) return Real;
    --  The standard deviation of the channel's reading at rest, in reading
    --  units; zero for a reading that repeats exactly.
+
+   function Visible_Step (M : Model; G : Group_Id; Channel : Positive) return Estimate;
+   --  The smallest change of the channel's command whose effect the eyes that
+   --  see it tell from their own noise, in reading units: where a probe or a
+   --  sweep of the channel starts.
 
    type Eye_Response is (Unmeasured, Nothing, Patch, Undecided, Whole);
    --  What pushing a group does to what an eye sees: nothing, a patch of the

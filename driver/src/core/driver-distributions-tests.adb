@@ -13,8 +13,24 @@ package body Driver.Distributions.Tests is
 
    Gen : Ada.Numerics.Float_Random.Generator;
 
+   function Uniform return Real;
+   --  Uniform on (0, 1]. The generator delivers [0, 1] rounded to the
+   --  nearest machine number, so it resolves values near 0 down to the
+   --  smallest floats (the tails of -ln U are right) but can return 1, and
+   --  0 with negligible chance: 0 is drawn again, and 1 - U is never taken.
+
+   function Uniform return Real is
+      U : Real;
+   begin
+      loop
+         U := Real (Ada.Numerics.Float_Random.Random (Gen));
+         exit when U > 0.0;
+      end loop;
+      return U;
+   end Uniform;
+
    function Gaussian return Real is
-      U1 : constant Real := 1.0 - Real (Ada.Numerics.Float_Random.Random (Gen));
+      U1 : constant Real := Uniform;
       U2 : constant Real := Real (Ada.Numerics.Float_Random.Random (Gen));
    begin
       return Sqrt (-2.0 * Log (U1)) * Cos (2.0 * Ada.Numerics.Pi * U2);
@@ -179,10 +195,79 @@ package body Driver.Distributions.Tests is
       Check (Real (By_Length) / Real (Trials) > 3.0 * Nominal, "the scalar threshold on a length did not over-alarm");
    end Vector_False_Alarms;
 
+   function Chi_Square_Two return Real is (-2.0 * Log (Uniform));
+   --  The squared length of a two-dimensional standard Gaussian: -2 ln U is
+   --  exponential with mean 2, the chi-square of two degrees.
+
+   procedure Family_False_Alarms is
+      --  Families of N independent null tests, the family alarming when any
+      --  of its tests does.
+      N        : constant := 1_000;
+      Families : constant := 10_000;
+      Alpha    : constant Real := Gaussian_Two_Sided_Tail (Driver.Conventions.Z);
+      Single   : constant Gate := Scalar_Gate;
+      Family   : constant Gate := Scalar_Gate (Tests => N);
+      Planar   : constant Gate := Vector_Gate (2, Tests => N);
+      Measured : constant Gate := Scalar_Gate (4, Tests => N);
+      Single_Alarms, Single_Families, Family_Families, Planar_Families, Measured_Families : Natural := 0;
+
+      function Within (Count : Natural; Trials : Positive; P : Real) return Boolean is
+        (abs (Real (Count) - Real (Trials) * P) <= Driver.Conventions.Z * Sqrt (Real (Trials) * P * (1.0 - P)));
+      --  A binomial count within Z of its sigma of the expected count.
+
+      Per_Family_Tests : constant Real := 1.0 - (1.0 - Alpha / Real (N)) ** N;
+      Per_Family_Single : constant Real := 1.0 - (1.0 - Alpha) ** N;
+   begin
+      Ada.Numerics.Float_Random.Reset (Gen, 29);
+      for F in 1 .. Families loop
+         declare
+            Any_Single, Any_Family, Any_Planar, Any_Measured : Boolean := False;
+         begin
+            for T in 1 .. N loop
+               declare
+                  X      : constant Real := Gaussian;
+                  Length : constant Real := Sqrt (Chi_Square_Two);
+                  --  The sigma of X estimated from four other samples: their
+                  --  squares add to a chi-square of four degrees.
+                  Sigma  : constant Real := Sqrt ((Chi_Square_Two + Chi_Square_Two) / 4.0);
+               begin
+                  if Significant (Single, X, 1.0) then
+                     Single_Alarms := Single_Alarms + 1;
+                     Any_Single := True;
+                  end if;
+                  Any_Family := Any_Family or else Significant (Family, X, 1.0);
+                  Any_Planar := Any_Planar or else Significant (Planar, Length, 1.0);
+                  Any_Measured := Any_Measured or else Significant (Measured, X, Sigma);
+               end;
+            end loop;
+            Single_Families := Single_Families + Boolean'Pos (Any_Single);
+            Family_Families := Family_Families + Boolean'Pos (Any_Family);
+            Planar_Families := Planar_Families + Boolean'Pos (Any_Planar);
+            Measured_Families := Measured_Families + Boolean'Pos (Any_Measured);
+         end;
+      end loop;
+      --  Each test alone keeps the single rate, so a family of N such tests
+      --  alarms nearly always ...
+      Check (Within (Single_Alarms, N * Families, Alpha), "single tests alarm off the single rate:"
+             & Natural'Image (Single_Alarms) & " of" & Natural'Image (N * Families));
+      Check (Within (Single_Families, Families, Per_Family_Single), "families of single tests alarm"
+             & Natural'Image (Single_Families) & " times of" & Natural'Image (Families));
+      --  ... and gated as a family of N it alarms as rarely as one test.
+      Check (Within (Family_Families, Families, Per_Family_Tests), "families of scalar tests alarm"
+             & Natural'Image (Family_Families) & " times of" & Natural'Image (Families));
+      Check (Within (Planar_Families, Families, Per_Family_Tests), "families of planar lengths alarm"
+             & Natural'Image (Planar_Families) & " times of" & Natural'Image (Families));
+      Check (Within (Measured_Families, Families, Per_Family_Tests), "families with measured sigmas alarm"
+             & Natural'Image (Measured_Families) & " times of" & Natural'Image (Families));
+      Check (Threshold (Scalar_Gate (Tests => 1)) = Driver.Conventions.Z, "a family of one is not the single test");
+   end Family_False_Alarms;
+
    procedure Register is
    begin
       Driver.Tests.Register ("distributions.gaussian", "the Gaussian tail is off its tabulated values",
                              Gaussian_Tail'Access);
+      Driver.Tests.Register ("uncertain.family", "a family of many tests alarms by chance more often than one test",
+                             Family_False_Alarms'Access);
       Driver.Tests.Register ("distributions.chi_square", "the chi-square or F tails and quantiles are off their tables",
                              Chi_Square_And_F'Access);
       Driver.Tests.Register ("uncertain.vector", "a vector's length alarms more often than a scalar at the same Z",

@@ -19,6 +19,7 @@ driver-base64.ads	function Encoded_Length (Bytes : Natural) return Natural is (4
 driver-base64.ads	function Encoded_Length (Bytes : Natural) return Natural is (4 * ((Bytes + 2) / 3));	4	format	three bytes make four characters
 driver-bytes.adb	Capacity := 1;	1	numerics	smallest buffer capacity before doubling
 driver-bytes.adb	Capacity := 2 * Capacity;	2	numerics	geometric growth keeps appends amortized O(1)
+driver-clock.adb	function Nanoseconds_Of (S : Duration) return Long_Long_Integer is (Long_Long_Integer (Real (S) * 1.0e9));	1.0e9	format	nanoseconds per second (the recording format counts nanoseconds)
 driver-conventions.ads	Unchanged_Fraction : constant := 0.01;	0.01	numerics	convergence of iterative estimates (documented in Conventions)
 driver-conventions.ads	Z : constant := 3.0;	3.0	statistics	the significance level of the one test (documented in Conventions)
 driver-distributions.adb	(Sqrt (Chi_Square_Quantile (Two_Sided_Tail, 1)));	1	math	a squared standard Gaussian is a chi square of one degree of freedom
@@ -424,7 +425,7 @@ driver-observations.adb	if S'Length = 3 and then S (S'First + 2) = 3 and then S 
 driver-observations.adb	if T'Length >= 2 and then T (T'Last - 1) = '' and then S'Length = 2 then	2	format	a depth map is a two-dimensional float grid (numpy dtype kind letter before the width)
 driver-observations.adb	if T'Length >= 2 and then T (T'Last - 1) = '' and then S'Length = 2 then	2	format	a depth map is a two-dimensional float grid (numpy dtype kind letter before the width)
 driver-observations.ads	Key_Separator : constant Character := Character'Val (31);	31	format	ASCII unit separator
-driver-pixels.adb	(if V.Count > 1 then V.Sums.Element (K) / Real (V.Count - 1) else 0.0);	1	statistics	a sample variance needs two frames
+driver-pixels.adb	(if V.Count > 1 then V.Sums.Constant_Reference.Element (K) / Real (V.Count - 1) else 0.0);	1	statistics	a sample variance needs two frames
 driver-pixels.adb	Quantization : constant := 1.0 / 12.0;	1.0	math	the variance of a uniform step of one level is 1/12
 driver-pixels.adb	Quantization : constant := 1.0 / 12.0;	12.0	math	the variance of a uniform step of one level is 1/12
 driver-protocol.adb	Pairs : Natural := 3;	3	format	pair and element counts of the reply maps (docs/body-protocol.md 4)
@@ -441,7 +442,6 @@ driver-recording.adb	Head (Offset (2 + I)) := Byte (Shift_Right (Ns, 8 * I) and 
 driver-recording.adb	Head : Byte_Array (1 .. 13);	13	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
 driver-recording.adb	Head : Byte_Array (1 .. 13);	13	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
 driver-recording.adb	Nanoseconds := Long_Long_Integer (Little_Endian (Head (2 .. 9)));	9	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
-driver-recording.adb	Ns : constant Unsigned_64 := Unsigned_64 (Driver.Clock.Seconds * 1_000_000_000);	1_000_000_000	format	nanoseconds per second
 driver-recording.adb	Size : constant Offset := Offset (Little_Endian (Head (10 .. 13)));	10	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
 driver-recording.adb	Size : constant Offset := Offset (Little_Endian (Head (10 .. 13)));	13	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
 driver-recording.adb	V := Shift_Left (V, 8) or Unsigned_64 (Data (I));	8	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
@@ -560,7 +560,12 @@ driver-stats.ads	with Pre => Count (A) > 1;	1	statistics	a variance or a correla
 driver-stats.ads	with Pre => X'Length = Y'Length and then X'Length > 1;	1	statistics	a variance or a correlation needs two samples
 driver-stats.ads	with Pre => X'Length = Y'Length and then X'Length > 2;	2	statistics	a line fit with a residual spread needs three points
 driver-uncertain.adb	Dof := Natural'Max (1, Natural (Real'Floor ((Va + Vb) * (Va + Vb) / Spread)));	1	statistics	Welch's degrees of freedom are at least one
+driver-uncertain.adb	elsif Tests = 1 then Driver.Conventions.Z	1	statistics	a family of one test is a single test: the plain threshold
 driver-uncertain.adb	for I in 1 .. 3 loop	3	structure	three dimensions
+driver-uncertain.adb	function Scalar_Gate (Degrees_Of_Freedom : Natural := 0; Tests : Positive := 1) return Gate is	1	statistics	a family of one test is a single test: the plain threshold
+driver-uncertain.adb	function Vector_Gate (Dimensions : Positive; Degrees_Of_Freedom : Natural := 0; Tests : Positive := 1)	1	statistics	a family of one test is a single test: the plain threshold
+driver-uncertain.ads	function Scalar_Gate (Degrees_Of_Freedom : Natural := 0; Tests : Positive := 1) return Gate;	1	statistics	a family of one test is a single test: the plain threshold
+driver-uncertain.ads	function Vector_Gate (Dimensions : Positive; Degrees_Of_Freedom : Natural := 0; Tests : Positive := 1)	1	statistics	a family of one test is a single test: the plain threshold
 driver-wire.adb	& "" & Blank), Ok);	"13	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Accept_Suffix : constant String := "";	"258	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Accept_Suffix : constant String := "";	"47	format	WebSocket framing and handshake (RFC 6455)

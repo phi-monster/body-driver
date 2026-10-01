@@ -17,11 +17,17 @@ holds the rig's F-theta parameters. Links, cameras and objects are the physics s
 observation is built; the image of the same observation may show an earlier state, as the
 renderer lags. An object is reported at its root: the parts of an articulated object are not.
 
-The first line of a run is {"kind": "geometry", "links": {...}, "objects": {...}}: for every
-link and object, the vertices of its meshes in its own frame, in "collision" (what touches) and
-"visual" (what the cameras see; a mesh can be both), and its other shapes (spheres, capsules,
-...) with their attributes and their transform into that frame (column vectors, translation in
-the last column), so the scorer computes tips, outlines and support points itself.
+The first line of a run is {"kind": "geometry", "store": DIR, "links": {"robot0/link": KEY},
+"objects": {inst_name: KEY}}. Each KEY names DIR/KEY.json, the geometry of that link or object in
+its own frame, written once, the first time any run meets it (KEY is the SHA-1 of the content):
+{"meshes": [{"collision": bool, "visual": bool, "vertices": n, "faces": f, "points": FILE,
+"counts": FILE, "indices": FILE}], "shapes": [{"type", "attributes", "transform", "collision",
+"visual"}]}. Each FILE, beside it in DIR, is raw little-endian: points x y z per vertex as float32,
+counts one int32 per face (its corners), indices the faces' vertex numbers as int32, as authored.
+A mesh is collision when it touches (PhysX collides it) and visual when the cameras see it; it can
+be both. Shapes are the other primitives (spheres, capsules, ...) with their transform into that
+frame (column vectors, translation in the last column). DIR is BD_TRUTH_GEOMETRY, or "geometry"
+beside FILE. The scorer computes tips, support points, outlines and surface distances from these.
 """
 
 import json
@@ -105,15 +111,11 @@ def _objects(om, env, origin):
     return out
 
 
-def _matrix(m):
-    return [[float(m[j][i]) for j in range(4)] for i in range(4)]
-
-
 def _shapes_of(root, stop_at_bodies):
     from pxr import Usd, UsdGeom, UsdPhysics
 
     cache = UsdGeom.XformCache()
-    out = {"collision": [], "visual": [], "shapes": []}
+    meshes, shapes = [], []
     it = iter(Usd.PrimRange(root, Usd.TraverseInstanceProxies()))
     for prim in it:
         if prim != root and stop_at_bodies and prim.HasAPI(UsdPhysics.RigidBodyAPI):
@@ -132,26 +134,57 @@ def _shapes_of(root, stop_at_bodies):
             p = p.GetParent()
         imageable = UsdGeom.Imageable(prim)
         visual = imageable.ComputePurpose() in ("default", "render") and imageable.ComputeVisibility() != "invisible"
-        m = cache.ComputeRelativeTransform(prim, root)[0]
+        # USD transforms row vectors: a point p maps to p m.
+        m = np.array(cache.ComputeRelativeTransform(prim, root)[0], dtype=np.float64)
         if prim.IsA(UsdGeom.Mesh):
-            points = UsdGeom.Mesh(prim).GetPointsAttr().Get() or []
-            moved = [[round(float(c), 6) for c in m.Transform(q)] for q in points]
-            if collision:
-                out["collision"].extend(moved)
-            if visual:
-                out["visual"].extend(moved)
+            mesh = UsdGeom.Mesh(prim)
+            points = np.asarray(mesh.GetPointsAttr().Get() or [], dtype=np.float64).reshape(-1, 3)
+            meshes.append((collision, visual, (points @ m[:3, :3] + m[3, :3]).astype("<f4"),
+                           np.asarray(mesh.GetFaceVertexCountsAttr().Get() or [], dtype="<i4"),
+                           np.asarray(mesh.GetFaceVertexIndicesAttr().Get() or [], dtype="<i4")))
         else:
             attributes = {}
             for a in prim.GetAttributes():
                 if a.GetName() in ("size", "radius", "height", "axis", "radiusTop", "radiusBottom"):
                     v = a.Get()
-                    attributes[a.GetName()] = v if isinstance(v, str) else float(v)
-            out["shapes"].append({"type": prim.GetTypeName(), "collision": collision, "visual": visual,
-                                  "attributes": attributes, "transform": _matrix(m)})
-    return out
+                    if v is not None:
+                        attributes[a.GetName()] = v if isinstance(v, str) else float(v)
+            shapes.append({"type": prim.GetTypeName(), "collision": collision, "visual": visual,
+                           "attributes": attributes, "transform": m.T.tolist()})
+    return meshes, shapes
 
 
-def _geometry(om, env):
+def _stored(meshes, shapes, store):
+    """The key of a geometry in the store, writing it there the first time it is seen."""
+    import hashlib
+    import os
+
+    shapes_text = json.dumps(shapes, separators=(",", ":"), sort_keys=True)
+    h = hashlib.sha1(shapes_text.encode())
+    for collision, visual, points, counts, indices in meshes:
+        h.update(bytes([collision, visual]))
+        for a in (points, counts, indices):
+            h.update(len(a).to_bytes(8, "little"))
+            h.update(a.tobytes())
+    key = h.hexdigest()
+    manifest = os.path.join(store, key + ".json")
+    if not os.path.exists(manifest):
+        os.makedirs(store, exist_ok=True)
+        entries = []
+        for i, (collision, visual, points, counts, indices) in enumerate(meshes):
+            files = {}
+            for part, a in (("points", points), ("counts", counts), ("indices", indices)):
+                files[part] = f"{key}.{i}.{part}"
+                a.tofile(os.path.join(store, files[part]))
+            entries.append({"collision": collision, "visual": visual, "vertices": len(points), "faces": len(counts),
+                            **files})
+        with open(manifest + ".part", "w") as f:
+            json.dump({"meshes": entries, "shapes": json.loads(shapes_text)}, f, separators=(",", ":"))
+        os.replace(manifest + ".part", manifest)
+    return key
+
+
+def _geometry(om, env, store):
     import omni.usd
     from pxr import Usd, UsdPhysics
 
@@ -166,17 +199,35 @@ def _geometry(om, env):
                 bodies.setdefault(prim.GetName(), prim)
         for link in art.body_names:
             if link in bodies:
-                links[f"{name}/{link}"] = _shapes_of(bodies[link], True)
+                links[f"{name}/{link}"] = _stored(*_shapes_of(bodies[link], True), store)
     objects = {}
     for kind, rec, obj in _object_records(om, env):
         try:
-            objects[rec["inst_name"]] = _shapes_of(stage.GetPrimAtPath(obj.prim_path), False)
+            objects[rec["inst_name"]] = _stored(*_shapes_of(stage.GetPrimAtPath(obj.prim_path), False), store)
         except Exception as e:
             objects[rec["inst_name"]] = {"error": repr(e)}
-    return {"kind": "geometry", "links": links, "objects": objects}
+    return {"kind": "geometry", "store": store, "links": links, "objects": objects}
+
+
+_failures = 0
 
 
 def write(om, obs, env_idx_list, path):
+    """Never lets the truth break the run: the first failure is printed whole, later ones counted."""
+    global _failures
+    try:
+        _write(om, obs, env_idx_list, path)
+    except Exception:
+        _failures += 1
+        if _failures == 1:
+            import traceback
+            print("[bd] truth hook failed; the run goes on without truth:", flush=True)
+            traceback.print_exc()
+        elif _failures % 1000 == 0:
+            print(f"[bd] truth hook failed {_failures} times", flush=True)
+
+
+def _write(om, obs, env_idx_list, path):
     global _calls, _geometry_written
     if om.robot_manager is None:
         return
@@ -184,7 +235,9 @@ def write(om, obs, env_idx_list, path):
     origin = np.asarray(_values(om.robot_manager.scene.env_origins[env]))
     lines = []
     if not _geometry_written:
-        lines.append(_geometry(om, env))
+        import os
+        store = os.environ.get("BD_TRUTH_GEOMETRY") or os.path.join(os.path.dirname(os.path.abspath(path)), "geometry")
+        lines.append(_geometry(om, env, store))
         _geometry_written = True
     _calls += 1
     lines.append({
