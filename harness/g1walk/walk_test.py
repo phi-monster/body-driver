@@ -2,6 +2,8 @@
 """第 40 条(路 8):会走的人形,厂商那一侧的走路控制器验收。不起 RoboDojo、不起驱动、不起脑、不开相机:Isaac Lab 自己的场子里只放人形和地。
 两份控制器(--policy):
   vh  :NVIDIA WBC-AGILE 的 velocity_height_g1(rd/bd/agile_vh.py;TorchScript 推理,接口照它自己的 yaml / ONNX,agile_check.py 对过)。
+  groot:NVIDIA GR00T-WholeBodyControl 的 Decoupled WBC(rd/bd/groot_wbc.py;它的两份 ONNX 用 onnx 的参考实现跑,接口照它自己的 MuJoCo 跑法,
+        groot_check.py 对过)。它出两条腿 + 腰 15 个;身体 = Isaac Lab 的 G1_29DOF_CFG,两条腿 + 腰换成它跑法里的 PD(kp / kd / 力矩上限 / armature)。
         身体 = 测试台用的那一具(rd/env/robot_manager/robot_config/g1walk.py:腿、脚的电机照它训练时的配)。
   old :Isaac Lab 自带的 agile_locomotion.pt(老的那份,留着对照):身体 = Isaac Lab 的 G1_29DOF_CFG 原样,输入输出照 Isaac Lab 的
         AgileBasedLowerBodyActionCfg / AgileTeacherPolicyObservationsCfg。
@@ -29,7 +31,10 @@ import time
 from isaaclab.app import AppLauncher
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--policy", choices=["vh", "old"], default="vh")
+ap.add_argument("--policy", choices=["vh", "old", "groot"], default="vh")
+ap.add_argument("--groot_bundle", default="/root/p8/groot", help="GR00T Decoupled WBC 那几个文件放在哪儿(fetch_groot.py 取下来、核过 sha256 的)")
+ap.add_argument("--squat_min", type=float, default=0.40, help="squat 往下给到多低(每档 0.04)")
+ap.add_argument("--reach_h", type=float, default=0.40, help="reach2 蹲到多低(胯高命令)")
 ap.add_argument("--bundle", default="/root/RoboDojo/Assets/Robots/g1walk/agile_velocity_height_g1",
                 help="velocity_height_g1 那几个文件放在哪儿(install.py 用 fetch_agile.py 取下来、核过 sha256 放的地方)")
 ap.add_argument("--mode", default="squat,squatwalk,flat")
@@ -47,7 +52,8 @@ ap.add_argument("--tag", default="", help="结果目录名后缀")
 ap.add_argument("--reach_grid", default="0,0.5;-0.5,0,0.5,1.0;-1.0,0,1.0",
                 help="reach2 摆哪几档:腰俯仰;肩前后;肘(弧度,离默认姿势),分号隔开三组,逗号隔开每组的几档")
 ap.add_argument("--faithful", action="store_true",
-                help="vh 只拿来查原因:身体整个照 AGILE 训练时的 G1_29DOF(不要手 —— USD 的 left_hand / right_hand 变体选 None;腰、胳膊也换成它的 DC 电机)")
+                help="只拿来查原因:vh —— 身体整个照 AGILE 训练时的 G1_29DOF(不要手 —— USD 的 left_hand / right_hand 变体选 None;腰、胳膊也换成它的 DC 电机);"
+                     "groot —— 胳膊也照它自己的 MuJoCo 跑法(目标 0、kp 100、kd 0.5 的 PD)")
 AppLauncher.add_app_launcher_args(ap)
 args = ap.parse_args()
 args.headless = True
@@ -76,7 +82,9 @@ assert "flatmany" not in MODES or MODES == ["flatmany"], "flatmany 要另起一�
 OUT = f"{args.out}_{args.mode.replace(',', '+')}{args.tag}"
 os.makedirs(OUT, exist_ok=True)
 LOWER = [".*_hip_.*_joint", ".*_knee_joint", ".*_ankle_.*_joint"]
-STAND_H = 0.72
+STAND_H = 0.72          # vh、old:站直的胯高命令;groot 换成它自己配置里的(0.74,见下)
+# 上半身(腰、胳膊、手)归测试台按默认姿势拿着;groot 连腰也归走路控制器管(它出两条腿 + 腰 15 个)
+UPPER_RE = r"^(?!.*(_hip_|_knee_|_ankle_|waist_)).*$" if args.policy == "groot" else r"^(?!.*(_hip_|_knee_|_ankle_)).*$"
 
 
 def load(path, name):
@@ -112,6 +120,31 @@ if args.policy == "vh":
                                            ".*_elbow_joint": 1.0, ".*_wrist_.*_joint": 0.2},
                                   armature=0.03, saturation_effort=40.0)
         ROBOT.actuators = acts
+elif args.policy == "groot":
+    # 身体 = 测试台那一具(Isaac Lab 的 G1_29DOF_CFG,Dex3 手),两条腿 + 腰换成 GR00T 自己跑法里的电机:每个物理步算
+    # 力矩 = kp(目标 − 位置) − kd·速度、夹在它 MuJoCo 身体写的上限里(IdealPD,显式);armature 照它 XML 的默认 0.01
+    groot_wbc = load(os.path.join(HERE, "rd/bd/groot_wbc.py"), "groot_wbc")
+    import yaml as _yaml
+    from isaaclab.actuators import IdealPDActuatorCfg
+    _gc = _yaml.safe_load(open(os.path.join(args.groot_bundle, "g1_gear_wbc.yaml")))
+    _gj, _gdef = groot_wbc.xml_joints(os.path.join(args.groot_bundle, "g1_gear_wbc.xml"))
+    _eff = dict(_gj)
+    _names15 = [n for n, _ in _gj][: int(_gc["num_actions"])]
+    ROBOT = G1_29DOF_CFG.copy()
+    ROBOT.spawn.articulation_props.fix_root_link = False
+    acts = {k: v for k, v in ROBOT.actuators.items() if k not in ("legs", "feet", "waist")}
+    acts["groot_lower"] = IdealPDActuatorCfg(
+        joint_names_expr=list(_names15), stiffness={n: float(v) for n, v in zip(_names15, _gc["kps"])},
+        damping={n: float(v) for n, v in zip(_names15, _gc["kds"])}, effort_limit={n: _eff[n] for n in _names15},
+        effort_limit_sim={n: _eff[n] for n in _names15}, armature=float(_gdef.get("armature", 0.0)))
+    if args.faithful:
+        _arms = [n for n, _ in _gj][int(_gc["num_actions"]):]
+        acts.pop("arms", None)
+        acts["groot_arms"] = IdealPDActuatorCfg(joint_names_expr=_arms, stiffness=100.0, damping=0.5,
+                                                effort_limit={n: _eff[n] for n in _arms}, effort_limit_sim={n: _eff[n] for n in _arms},
+                                                armature=float(_gdef.get("armature", 0.0)))
+    ROBOT.actuators = acts
+    STAND_H = float(_gc["height_cmd"])
 else:
     ROBOT = G1_29DOF_CFG.copy()
 q = ROBOT.init_state.rot
@@ -175,8 +208,7 @@ else:
     @configclass
     class ActionsCfg:
         # 腿归走路控制器(每一拍直接写腿的目标);这里只管上半身:目标 = 默认姿势(动作给 0)
-        upper_body = mdp.JointPositionActionCfg(asset_name="robot", joint_names=[r"^(?!.*(_hip_|_knee_|_ankle_)).*$"], scale=1.0,
-                                                use_default_offset=True)
+        upper_body = mdp.JointPositionActionCfg(asset_name="robot", joint_names=[UPPER_RE], scale=1.0, use_default_offset=True)
 
     @configclass
     class ObservationsCfg:
@@ -216,8 +248,11 @@ ctrl = None
 rep = {"policy": args.policy, "faithful": args.faithful, "modes": MODES, "step_dt_s": dt, "physics_dt_s": args.dt, "decimation": args.decim,
        "friction_mode": args.friction_mode, "seed": args.seed, "num_envs": N, "usd": ROBOT.spawn.usd_path,
        "joint_names": list(robot.joint_names), "falls": []}
-if args.policy == "vh":
-    ctrl = agile_vh.AgileVH(args.bundle, list(robot.joint_names), num_envs=N, device=dev)
+if args.policy in ("vh", "groot"):
+    if args.policy == "vh":
+        ctrl = agile_vh.AgileVH(args.bundle, list(robot.joint_names), num_envs=N, device=dev)
+    else:
+        ctrl = groot_wbc.GrootWBC(args.groot_bundle, list(robot.joint_names), num_envs=N, device=dev)
     assert abs(1.0 / dt - ctrl.freq) < 1e-6, f"策略要 {ctrl.freq} Hz,这里一拍 {dt} s"
     bad = ctrl.gains_ok(robot)
     assert not bad, f"腿上的 kp / kd 和策略要的不一样:{bad}"
@@ -232,7 +267,8 @@ if args.policy == "vh":
     jl = getattr(robot.data, "joint_vel_limits", getattr(robot.data, "joint_velocity_limits", None))
     if jl is not None:
         rep["physx_joint_vel_limit"] = {n: round(float(jl[0, robot.joint_names.index(n)]), 2) for n in ctrl.leg_names}
-    rep["policy_files"] = {"bundle": args.bundle, "freq_hz": ctrl.freq, "history": ctrl.history, "leg_order": ctrl.leg_names}
+    rep["policy_files"] = {"bundle": args.groot_bundle if args.policy == "groot" else args.bundle, "freq_hz": ctrl.freq,
+                           "history": ctrl.history, "leg_order": ctrl.leg_names, "stand_height_cmd": STAND_H}
 non_feet = [i for i, n in enumerate(robot.body_names) if "ankle" not in n]
 try:   # 这具身体的 USD 有哪些变体、选的是哪个(--faithful 去掉手靠的就是它)
     import omni.usd
@@ -255,11 +291,18 @@ def do_step(cmd):
         a[:, (4 if args.policy == "old" else 0):] = UPPER
     if args.policy == "old":
         a[:, :4] = c
+    elif args.policy == "groot":
+        d = robot.data
+        tgt = ctrl.step(c[:, :3], c[:, 3], RPY.expand(N, 3), d.root_ang_vel_b, d.projected_gravity_b, d.joint_pos, d.joint_vel)
+        robot.set_joint_position_target(tgt, joint_ids=leg)
     else:
         d = robot.data
         tgt = ctrl.step(c, d.root_ang_vel_b, d.projected_gravity_b, d.joint_pos, d.joint_vel)
         robot.set_joint_position_target(tgt, joint_ids=leg)
     env.step(a)
+
+
+RPY = torch.zeros(1, 3, device=dev)    # groot:躯干 roll / pitch / yaw 命令(它的观测里有这三个;reach2 用 pitch 往前弯)
 
 
 UPPER = None
@@ -330,7 +373,8 @@ hold([0.0, 0.0, 0.0, STAND_H], 2.0)   # 先站稳 2 秒
 sim_t += 2.0
 for mode in MODES:
     if mode == "squat":
-        seq = [round(STAND_H - 0.04 * i, 2) for i in range(9)] + [round(0.40 + 0.04 * i, 2) for i in range(1, 9)]
+        n_down = int(round((STAND_H - args.squat_min) / 0.04))
+        seq = [round(STAND_H - 0.04 * i, 2) for i in range(n_down + 1)] + [round(STAND_H - 0.04 * i, 2) for i in range(n_down - 1, -1, -1)]
         out = []
         for h in seq:
             fell, rec = hold([0.0, 0.0, 0.0, h], 4.0, keep_from=2.0)
@@ -429,6 +473,32 @@ for mode in MODES:
                            "vel_err_median_mps": round(float(np.median(e)), 3), "vel_err_p90_mps": round(float(np.quantile(e, 0.9)), 3),
                            "yaw_rate_err_median": round(float(np.median(ew)), 3)}
         print("[walk] flatmany:%s" % rep["flatmany"], flush=True)
+    elif mode == "still":
+        # 站着不动到底有多不动(驱动开机先量"静止噪声":每只眼不动时一拍里画面变多少;身体自己晃,眼就跟着晃 ——
+        # P8XH / P8XH2 两回开机,头上那只眼的灰度地板 163 / 200,固定在桌边的 G1 是 17、x5 是 6):站 10 秒,每拍记躯干(头上那只眼装在它上面)
+        # 的朝向和位置,算一拍里转了多少、10 秒里晃了多大;按 640 宽、横向视场 69°(d435)折成头上那只眼一拍里画面挪几个像素
+        tid = robot.body_names.index("torso_link")
+        f_px = 320.0 / math.tan(math.radians(69.0 / 2))
+        qs, ps = [], []
+        for _ in range(int(round(10.0 / dt))):
+            do_step([[0.0, 0.0, 0.0, STAND_H]])
+            qs.append(robot.data.body_quat_w[0, tid].cpu().numpy().astype(np.float64))
+            ps.append((robot.data.body_pos_w[0, tid] - env.scene.env_origins[0]).cpu().numpy().astype(np.float64))
+        sim_t += 10.0
+        qs, ps = np.array(qs), np.array(ps)
+        dots = np.abs(np.sum(qs[1:] * qs[:-1], axis=1)).clip(0, 1)
+        dang = np.degrees(2 * np.arccos(dots))                       # 一拍里转了多少度
+        q_mean = qs.mean(axis=0) / np.linalg.norm(qs.mean(axis=0))
+        dev_ang = np.degrees(2 * np.arccos(np.abs(qs @ q_mean).clip(0, 1)))
+        dpos = np.linalg.norm(np.diff(ps, axis=0), axis=1)
+        rep["still"] = {"seconds": 10.0, "torso_turn_per_beat_deg": {"median": round(float(np.median(dang)), 4), "p90": round(float(np.quantile(dang, 0.9)), 4),
+                                                                    "max": round(float(dang.max()), 4)},
+                        "torso_turn_per_beat_px": {"median": round(float(f_px * np.radians(np.median(dang))), 2),
+                                                   "p90": round(float(f_px * np.radians(np.quantile(dang, 0.9))), 2),
+                                                   "max": round(float(f_px * np.radians(dang.max())), 2)},
+                        "torso_sway_deg_max": round(float(dev_ang.max()), 3), "torso_move_per_beat_mm_p90": round(float(np.quantile(dpos, 0.9) * 1000), 2),
+                        "torso_drift_m": round(float(np.linalg.norm(ps[-1, :2] - ps[0, :2])), 4)}
+        print("[walk] still:%s" % rep["still"], flush=True)
     elif mode == "reach":
         # 手最低能到多低(从地上 / 矮处拿东西要它):胳膊照默认姿势垂着(G1 胳膊各关节 0 = 垂在身体两边),骨盆高 0.72 和 0.40 各站 4 秒,
         # 量手那几节(名字里带 hand 的连杆,连杆原点;指尖的形状再往外几厘米)最低在哪;再在 0.40 上把腰往前弯(waist_pitch +0.3、+0.5 rad,
@@ -461,9 +531,14 @@ for mode in MODES:
         for wp in W_:
             for sp in S_:
                 for el in E_:
-                    upper(**{"waist_pitch_joint": wp, "left_shoulder_pitch_joint": sp, "right_shoulder_pitch_joint": sp,
-                             "left_elbow_joint": el, "right_elbow_joint": el})
-                    fell, rec = hold([0.0, 0.0, 0.0, 0.40], 2.0, keep_from=1.5)
+                    arms = {"left_shoulder_pitch_joint": sp, "right_shoulder_pitch_joint": sp, "left_elbow_joint": el, "right_elbow_joint": el}
+                    if args.policy == "groot":
+                        # 腰归 GR00T 管:往前弯给它的躯干 pitch 命令(它观测里的那一项),不直接写腰的关节
+                        RPY[0, 1] = wp
+                        upper(**arms)
+                    else:
+                        upper(waist_pitch_joint=wp, **arms)
+                    fell, rec = hold([0.0, 0.0, 0.0, args.reach_h], 2.0, keep_from=1.5)
                     sim_t += 2.0
                     zs = (robot.data.body_pos_w[0, hands, 2] - env.scene.env_origins[0, 2]).cpu().numpy()
                     out.append({"waist_pitch": wp, "shoulder_pitch": sp, "elbow": el, "lowest_hand_link_z": round(float(zs.min()), 3),
@@ -472,8 +547,10 @@ for mode in MODES:
                         fall(sim_t, {"mode": mode, "waist_pitch": wp, "shoulder_pitch": sp, "elbow": el})
                         reset()
                         upper()
+                        RPY.zero_()
                         hold([0.0, 0.0, 0.0, STAND_H], 2.0)
         upper()
+        RPY.zero_()
         rep["reach2"] = out
         ok = [o for o in out if not o["fell"]]
         best = min(ok, key=lambda o: o["lowest_hand_link_z"]) if ok else None
