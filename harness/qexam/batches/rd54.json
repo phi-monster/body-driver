@@ -1,0 +1,982 @@
+{
+ "batch": "rd54",
+ "bodies": [
+  "x5"
+ ],
+ "guard": false,
+ "keep_video": true,
+ "questions": [
+  {
+   "qid": 1000,
+   "seed": 0,
+   "task": "align_blocks",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Use the set square to push the three blocks into a straight, aligned row, then reset the robot arm.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 55
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1001,
+   "seed": 0,
+   "task": "arrange_largest_number",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Arrange the numbers from left to right to form the largest possible number, and place them on the pad.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 30
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1002,
+   "seed": 0,
+   "task": "arrange_largest_number_random",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Arrange the numbers from left to right to form the largest possible number, and place them on the pad.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 30
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1003,
+   "seed": 0,
+   "task": "build_tower",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Build a tower using the wooden blocks and wooden boards.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 55
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1004,
+   "seed": 0,
+   "task": "classify_objects",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Sort the objects by category into the three baskets.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 55
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1005,
+   "seed": 0,
+   "task": "classify_objects_by_language",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "(任务自己出的话)",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 55
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1006,
+   "seed": 0,
+   "task": "cover_blocks",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Cover the blocks from left to right, remember their colors, then uncover them in the order: red, green, and blue.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 55
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1007,
+   "seed": 0,
+   "task": "deposit_coin",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Pick up the coin from the holder and insert it precisely into the coin bank.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 60
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1008,
+   "seed": 0,
+   "task": "fasten_screws",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Insert and tighten each screw into the nut of the same color.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 55
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1009,
+   "seed": 0,
+   "task": "fill_egg_holder",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Place the four eggs from the basket into the egg holder, then close the lid.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 65
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1010,
+   "seed": 0,
+   "task": "fill_pen_holder",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Hold the pen holder with one hand, place all pens into it with the other hand, then put it back down.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 55
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1011,
+   "seed": 0,
+   "task": "fold_clothes",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Fold the clothes neatly.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 55
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1012,
+   "seed": 0,
+   "task": "fold_clothes_random",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Fold the clothes neatly.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 30
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1013,
+   "seed": 0,
+   "task": "general_pickup",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Pick up the <target> by 10 cm.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 11
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1014,
+   "seed": 0,
+   "task": "hang_mugs",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Hang all the mugs on the mug rack.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 30
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1015,
+   "seed": 0,
+   "task": "hang_mugs_random",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Hang all the mugs on the mug rack.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 30
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1016,
+   "seed": 0,
+   "task": "imitate_sorting_sequence",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Observe the object placement order, remember it, then place the corresponding objects into the basket in the same order.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 65
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1017,
+   "seed": 0,
+   "task": "insert_key",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Pick up the key, hand it over to the other hand, insert it into the keyhole, then turn it.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 55
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1018,
+   "seed": 0,
+   "task": "insert_tubes",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Insert the three tubes into the rack one by one.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 55
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1019,
+   "seed": 0,
+   "task": "make_kong",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Wait for the opponent to discard a tile, then declare a kong with the matching tiles.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 65
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1020,
+   "seed": 0,
+   "task": "make_toast",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "(任务自己出的话)",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 70
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1021,
+   "seed": 0,
+   "task": "make_toast_random",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "(任务自己出的话)",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 45
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1022,
+   "seed": 0,
+   "task": "match_and_pick_from_conveyor",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Remember the first object on the conveyor, then pick the matching object when it appears again.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 55
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1023,
+   "seed": 0,
+   "task": "organize_table",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Place the mouse on the mouse pad, push the keyboard into the frame, put the figurine on the stand, place the alarm clock on the drawer, then open the drawer and put all remaining miscellaneous items inside.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 55
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1024,
+   "seed": 0,
+   "task": "pack_objects_into_box",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Place all the objects into the box with their front sides facing left.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 55
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1025,
+   "seed": 0,
+   "task": "pack_objects_into_box_random",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Place all the objects into the box with their front sides facing left.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 30
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1026,
+   "seed": 0,
+   "task": "pick_from_conveyor_by_image",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Lift the basket more than 8 cm, identify the target object on the conveyor according to the image on the board, pick it up, and place it into the basket.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 55
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1027,
+   "seed": 0,
+   "task": "play_Xylophone",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Pick up the mallet and strike all xylophone keys from left to right.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 55
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1028,
+   "seed": 0,
+   "task": "play_stacking_toy",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Place all stacking toy pieces onto the correct pegs.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 55
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1029,
+   "seed": 0,
+   "task": "play_tic_tac_toe",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Play tic-tac-toe as the first player and fill the board with the opponent.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 75
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1030,
+   "seed": 0,
+   "task": "plug_in_charger",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Plug the charger into the power strip.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 55
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1031,
+   "seed": 0,
+   "task": "pour_balls_into_vase",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Pour all the balls from the cup into the vase.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 55
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1032,
+   "seed": 0,
+   "task": "pour_by_language",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Pour the liquid from the first {bottle_color[str(cat_index[0])]} bottle into the first {bowl_color[str(cat_index[3])]} bowl, from the second {bottle_color[str(cat_index[1])]} bottle into the second {bowl_color[str(cat_index[4])]} bowl, and from the third {bottle_color[str(cat_index[2])]} bottle into the third {bowl_color[str(cat_index[5])]} bowl. Then reset the robot arm.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 55
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1033,
+   "seed": 0,
+   "task": "pour_liquid_into_cup",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Pour the liquid from the bottle into the cup.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 55
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1034,
+   "seed": 0,
+   "task": "pour_liquid_into_cup_random",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Pour the liquid from the bottle into the cup.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 30
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1035,
+   "seed": 0,
+   "task": "press_by_number",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Press the two red buttons the required number of times according to the number cards, then press the blue button to confirm.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 65
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1036,
+   "seed": 0,
+   "task": "push_T",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Push the T-shaped block to align it precisely with the gray T-shaped pad.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 55
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1037,
+   "seed": 0,
+   "task": "push_T_random",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Push the T-shaped block to align it precisely with the gray T-shaped pad.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 30
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1038,
+   "seed": 0,
+   "task": "put_bottles_into_dustbin",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Pick up the bottles and throw them into the dustbin, using handover when needed.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 55
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1039,
+   "seed": 0,
+   "task": "solve_equation",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Complete the equation by selecting the correct missing number or operator and placing it on the pad, then reset the robot arm.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 55
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1040,
+   "seed": 0,
+   "task": "sort_nesting_dolls_by_size",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "(任务自己出的话)",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 30
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1041,
+   "seed": 0,
+   "task": "sort_nesting_dolls_by_size_random",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "(任务自己出的话)",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 30
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1042,
+   "seed": 0,
+   "task": "stack_blocks",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Stack the three blocks with different textures.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 55
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1043,
+   "seed": 0,
+   "task": "stack_blocks_by_language",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "(任务自己出的话)",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 55
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1044,
+   "seed": 0,
+   "task": "stack_blocks_random",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Stack the three blocks with different textures.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 30
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1045,
+   "seed": 0,
+   "task": "stack_bowls",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Stack the three bowls together.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 55
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1046,
+   "seed": 0,
+   "task": "stack_bowls_random",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Stack the three bowls together.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 30
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1047,
+   "seed": 0,
+   "task": "store_laptop_and_headphones",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Hang the headphones on the headphone stand, close the laptop, then place it into the vertical laptop stand.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 55
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1048,
+   "seed": 0,
+   "task": "store_laptop_and_headphones_random",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Hang the headphones on the headphone stand, close the laptop, then place it into the vertical laptop stand.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 30
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1049,
+   "seed": 0,
+   "task": "store_tools_in_toolbox",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Place each tool into its matching position in the toolbox, then reset the robot arm.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 55
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1050,
+   "seed": 0,
+   "task": "swap_T",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Pick up the two T-shaped blocks, swap their positions, and place them back with the correct orientations.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 55
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1051,
+   "seed": 0,
+   "task": "swap_blocks",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Swap the two blocks using the empty mat, pressing the button after each move.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 55
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1052,
+   "seed": 0,
+   "task": "sweep_blocks",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Pick up the broom, hand it over to the right hand, then use the dustpan to sweep the blocks.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 55
+    }
+   ],
+   "steps": null,
+   "objects": []
+  },
+  {
+   "qid": 1053,
+   "seed": 0,
+   "task": "sweep_blocks_random",
+   "body": "x5",
+   "cfg": "arx_x5",
+   "cfg_name": "arx_x5",
+   "requirement": "robodojo",
+   "sentence": "Pick up the broom, hand it over to the right hand, then use the dustpan to sweep the objects.",
+   "check": [
+    "RoboDojo 自己的判据",
+    {
+     "layouts_in_seed0": 30
+    }
+   ],
+   "steps": null,
+   "objects": []
+  }
+ ]
+}

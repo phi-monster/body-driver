@@ -28,8 +28,8 @@ with Selfmap;
 with Learned;
 with Exam;
 with Contact;
-with Contact.Grasp;
-with Contact.Hold;
+with Contact.Search;
+with Contact.Wrench;
 with Contact.Exec;
 with Contact.Surface;
 with Kinem;
@@ -1131,13 +1131,13 @@ begin
          Check (2 * F_Gate < N_F, "🦷 同一批配点按开机认手指的 1 px 门:手指格点只有 " & Codec.Img (F_Gate) & " / " & Codec.Img (N_F) & " 算没挪(旧量法漏掉大半)");
       end;
    end;
-   --  🔴 接触集重写(09-29):托住它要多大的摩擦、每单位重量最少要夹多紧(Contact.Hold)—— 能手算的几条:
+   --  🔴 接触集重写(09-29):托住它要多大的摩擦、每单位重量最少要夹多紧(Contact.Wrench)—— 能手算的几条:
    --  ① 两处正对的点接触夹在重心两侧,抬 = 托住单位重量:法向力之和 = 1/μ(每边 1/(2μ));不靠摩擦做不到、靠一点摩擦就做得到(要的摩擦 → 0);
    --  ② 重心偏出夹持线 0.05、指肚能拧(半径 0.01):竖着的摩擦 1/μ + 拧住 0.05/(μ·0.01) = 6/μ;点接触(不能拧)⇒ 托不住;
    --  ③ 两个面各歪 0.3 rad(同向):要的摩擦 = tan 0.3;④ 线性规划本身:min x1 + x2、x1 + 2 x2 = 4 ⇒ 2;x1 = -1 ⇒ 做不到
    declare
       use Ada.Numerics.Long_Elementary_Functions;
-      package Hd renames Contact.Hold;
+      package Hd renames Contact.Wrench;
       Ts : Hd.Touch_Vectors.Vector;
       L : constant Hd.Load := (F => [0.0, 0.0, 1.0], C => [0.0, 0.0, 0.0], M => [0.0, 0.0, 0.0]);
       L_Off : constant Hd.Load := (F => [0.0, 0.0, 1.0], C => [0.0, 0.05, 0.0], M => [0.0, 0.0, 0.0]);
@@ -1173,7 +1173,7 @@ begin
              & " · 两面各歪 0.3 rad ⇒ 要的摩擦 " & Codec.Fmt (M3, 4) & "(tan 0.3 = " & Codec.Fmt (Tan (Al), 4) & ")· 线性规划 " & Codec.Fmt (Obj1, 4)
              & " / 做不到的那一条 " & (if Ok2 then "说做得到(错)" else "说做不到"));
    end;
-   --  🔴 接触集重写(09-29):几何上让量出来的手真合一次挑下手处(Contact.Grasp)。手 = x5 这种两块相向合:两个尖在眼前 9 cm、相距 9 cm,
+   --  🔴 接触集重写(09-29):几何上让量出来的手真合一次挑下手处(Contact.Search)。手 = x5 这种两块相向合:两个尖在眼前 9 cm、相距 9 cm,
    --  手指沿合拢方向厚 1 cm(碰东西的两面相距 8 cm),指肚宽 1.5 cm,手落位的误差 2 mm;
    --  东西都平躺在桌上(z = 0,上 = +z),表面点 2 mm 一个(顶面 + 往下补到桌面)。
    --  ① 平条(沿 x 宽 2 cm、沿 y 长 20 cm、厚 1 cm):两个接触点落在条的两条长边上(x = ±1 cm)、法向 ±x、从上面进(竖着或斜着都行,由那个数定)、
@@ -1194,9 +1194,17 @@ begin
    --     第 1 名的两处接触都在方块的 y 范围外(再让半个指肚宽),账上有"旁边的东西挡着";反面对照:手指厚 4 mm 塞得进 ⇒ 第 1 名夹在条的正中(离重心 < 半个指肚宽)
    declare
       use Ada.Numerics.Long_Elementary_Functions;
-      package Cg2 renames Contact.Grasp;
-      Hm : constant Cg2.Hand_Model := Cg2.Two_Pads ([-0.045, 0.0, -0.09], [0.045, 0.0, -0.09], 0.015, 0.01, 0.002);
-      Hm_Thin : constant Cg2.Hand_Model := Cg2.Two_Pads ([-0.042, 0.0, -0.09], [0.042, 0.0, -0.09], 0.015, 0.004, 0.002);
+      package Cg2 renames Contact.Search;
+      --  两瓣、同一个宽和厚的手(= 09-29 的两块相向合;路 5 起手由 From_Lobes 按全部瓣建,两瓣时逐位相同)
+      function Two_Lobes (Tip_A, Tip_B : Contact.V3; Width, Thick, Pos_Err : Long_Float) return Cg2.Hand_Model is
+         Ls : Cg2.Lobe_In_Vectors.Vector;
+      begin
+         Ls.Append (Cg2.Lobe_In'(Tip => Tip_A, Width => Width, Thick => Thick));
+         Ls.Append (Cg2.Lobe_In'(Tip => Tip_B, Width => Width, Thick => Thick));
+         return Cg2.From_Lobes (Ls, Pos_Err);
+      end Two_Lobes;
+      Hm : constant Cg2.Hand_Model := Two_Lobes ([-0.045, 0.0, -0.09], [0.045, 0.0, -0.09], 0.015, 0.01, 0.002);
+      Hm_Thin : constant Cg2.Hand_Model := Two_Lobes ([-0.042, 0.0, -0.09], [0.042, 0.0, -0.09], 0.015, 0.004, 0.002);
       None : Contact.V3_Vectors.Vector;
       function Always (R : Geom.M3; T : Contact.V3) return Boolean is (True);
       function Never (R : Geom.M3; T : Contact.V3) return Boolean is (False);
@@ -1533,7 +1541,7 @@ begin
       Cx : Act.Context;
       Fx : Plug.Frame;
       Gx : Geom.Cam_Geo;
-      Pick : Contact.Grasp.Candidate;
+      Pick : Contact.Search.Candidate;
       Nt : Unbounded_String;
       Okp : Boolean;
       procedure Any_Reach (Arm : Natural; Pose : Plug.Arm_Pose; Pos_Err, Rot_Err : out Long_Float) is
@@ -1557,15 +1565,15 @@ begin
          Cx.Sil_Valid := True; Cx.Sil_Name := To_Unbounded_String ("bar"); Cx.Sil_Cam := 1; Cx.Sil_N := [0.0, 0.0, 1.0];
          Cx.Sil_P0 := Cx.Sil_Pts.First_Element; Cx.Sil_Pitch := 0.002; Cx.Sil_Err := 0.0005;
       end Bar;
-      function Jaw_World (P : Contact.Grasp.Candidate) return Geom.V3 is (Geom.Ap (P.R, [1.0, 0.0, 0.0]));
+      function Jaw_World (P : Contact.Search.Candidate) return Geom.V3 is (Geom.Ap (P.R, [1.0, 0.0, 0.0]));
       Jx1, Jx2 : Geom.V3;
       Sides_Ok : Boolean := False;
       Ok1, Ok2 : Boolean := False;
    begin
       Gx.Valid := True; Gx.F := 400.0; Gx.Cx := 320.0; Gx.Cy := 240.0; Gx.Gap := 0.09;
       Gx.Tip := [0.0, -0.013, -0.091]; Gx.Tip_Valid := True; Gx.Tip_Touch := True; Gx.Tip_Sd := 0.0005;
-      Gx.Lobes.Append (Geom.Lobe_Geo'(Tip => [0.045, -0.013, -0.091], Wide => 0.01, Thin => 0.002));
-      Gx.Lobes.Append (Geom.Lobe_Geo'(Tip => [-0.045, -0.013, -0.091], Wide => 0.01, Thin => 0.002));
+      Gx.Lobes.Append (Geom.Lobe_Geo'(Tip => [0.045, -0.013, -0.091], Wide => 0.01, Thin => 0.002, others => <>));
+      Gx.Lobes.Append (Geom.Lobe_Geo'(Tip => [-0.045, -0.013, -0.091], Wide => 0.01, Thin => 0.002, others => <>));
       Cx.Geo.Append (Geom.No_Geo); Cx.Geo.Append (Gx);
       Cx.Map.Amp := Bytes.F64_Vectors.To_Vector (0.0, 6);
       Cx.Map.Amp.Replace_Element (0, 0.001); Cx.Map.Amp.Replace_Element (3, 0.0025);
@@ -4503,8 +4511,8 @@ begin
       Fresh.Append (G);   --  前半段装回的那份:还没有指尖、步幅
       G.Tip := [0.87, -0.24, -1.75]; G.Tip_Valid := True; G.Tip_Touch := True; G.Gap := 1.766;
       G.Stride := 0.888; G.Stride_Rot := 0.161;
-      G.Lobes.Append (Geom.Lobe_Geo'(Tip => [0.0123, -0.2345, -1.6875], Wide => 0.1932, Thin => 0.0317));
-      G.Lobes.Append (Geom.Lobe_Geo'(Tip => [-0.0071, -0.2468, 1.7011], Wide => 0.2011, Thin => 0.0299));
+      G.Lobes.Append (Geom.Lobe_Geo'(Tip => [0.0123, -0.2345, -1.6875], Wide => 0.1932, Thin => 0.0317, others => <>));
+      G.Lobes.Append (Geom.Lobe_Geo'(Tip => [-0.0071, -0.2468, 1.7011], Wide => 0.2011, Thin => 0.0299, others => <>));
       G.Tip_Sd := 0.00417;
       Stored.Append (G);
       Geom.Save (Path & ".geo.json", Stored);
@@ -7300,7 +7308,7 @@ begin
       Lim : constant Cx.Hand_Limits := (Standoff_M => 0.04, Repeat_M => 0.001);   --  两个数都该由驱动量出来;这里是测试台,取一个明显合法的组合
       Z_Dn : constant Ct.V3 := [0.0, 0.0, -1.0];
       function Pt (Pos, Normal, Axis : Ct.V3; Half : Long_Float; Tol : Long_Float := MM) return Ct.Point is
-        ((By => (Ct.Hand, 0), Pos => Pos, Normal => Normal, Push => (Axis => Axis, Half_Angle => Half), Pull => False, Torsion => False, Peel => False, Tol_M => Tol));
+        ((By => (Ct.Hand, 0), Pos => Pos, Normal => Normal, Allowed => (Axis => Axis, Half_Angle => Half), Tension => False, Torsion => False, Peel => False, Tol_M => Tol));
       function Two return Ct.Point_Vectors.Vector is
          V : Ct.Point_Vectors.Vector;
       begin
@@ -7318,13 +7326,13 @@ begin
         ((Points => Pts, Motion => Mo, Has_Approach => True, Approach => Ap));
       function Mk (Pts : Ct.Point_Vectors.Vector; Mo : Ct.Twist) return Ct.Set is
         ((Points => Pts, Motion => Mo, Has_Approach => False, Approach => [others => 0.0]));
-      function Turn (Axis : Ct.V3; Rad : Long_Float; Pivot : Ct.V3) return Ct.Twist is
+      function Rotation (Axis : Ct.V3; Rad : Long_Float; Pivot : Ct.V3) return Ct.Twist is
          Ok : Boolean;
-         T : constant Ct.Twist := Ct.Turn (Axis, Rad, Pivot, Ok);
+         T : constant Ct.Twist := Ct.Rotation (Axis, Rad, Pivot, Ok);
       begin
          pragma Assert (Ok, "转轴非零");
          return T;
-      end Turn;
+      end Rotation;
       --  两个朝向之间的夹角(弧度)
       function Angle_Of (A, B : Cx.M3) return Long_Float is (Geom.Norm (Geom.Rot_Vec (Geom.Mul (Geom.Tr (A), B))));
       --  先把第 I 步拷成具名变量再取第 J 个点/朝向:对函数返回的临时值直接下标取容器元素,GNAT 会在析构时报 PROGRAM_ERROR(H24 2026-09-22 同一个坑)
@@ -7382,9 +7390,9 @@ begin
          Pts : Ct.Point_Vectors.Vector := Single (Pt ([-0.04, 0.0, 0.02], [0.0, 0.0, 1.0], [0.0, 0.0, -1.0], 0.4636));
          Good : Boolean;
       begin
-         Pts.Append (Ct.Point'(By => (Ct.World, 0), Pos => Pivot, Normal => Z_Dn, Push => (Axis => [0.0, 0.0, 1.0], Half_Angle => 0.46),
-                               Pull => False, Torsion => False, Peel => False, Tol_M => MM));
-         Cx.Steps (Mk (Pts, Turn ([0.0, 1.0, 0.0], -0.8, Pivot)), Lim, True, 8, Steps, Why);
+         Pts.Append (Ct.Point'(By => (Ct.World, 0), Pos => Pivot, Normal => Z_Dn, Allowed => (Axis => [0.0, 0.0, 1.0], Half_Angle => 0.46),
+                               Tension => False, Torsion => False, Peel => False, Tol_M => MM));
+         Cx.Steps (Mk (Pts, Rotation ([0.0, 1.0, 0.0], -0.8, Pivot)), Lim, True, 8, Steps, Why);
          Good := Why.Kind = Cx.Fine and then Natural (Steps.Length) = 10;
          if Good then
             for St of Steps loop
@@ -7419,7 +7427,7 @@ begin
          end if;
          Check (Good, "②b·撬:悬停 + 贴上 + 8 段弧;航点里只有手那一个点(桌子那条边不进航点,只进判据);弧中点离弦有实打实的距离、到支点的半径全程不变:" & Cx.Img (Why));
       end;
-      Cx.Steps (Mk (Two, Turn ([0.0, 0.0, 1.0], 1.2, [0.0, 0.0, 0.10]), Z_Dn), Lim, True, 6, Steps, Why);
+      Cx.Steps (Mk (Two, Rotation ([0.0, 0.0, 1.0], 1.2, [0.0, 0.0, 0.10]), Z_Dn), Lim, True, 6, Steps, Why);
       Check (Why.Kind = Cx.Fine and then abs (Angle_Of (Frame_At (Steps, 1, 0), Frame_At (Steps, Last_Of (Steps), 0)) - 1.2) < 1.0e-6,
              "②b·拧:手转过的角等于物体转过的角(转的时候朝向也要跟着走,否则就是「握着的东西被拧脱手」的形状)");
       Cx.Steps (Mk (Single (Pt ([0.03, 0.0, 0.05], [1.0, 0.0, 0.0], [-1.0, 0.0, 0.0], 0.6)), Ct.Slide ([-0.10, 0.0, 0.0])), Lim, True, 4, Steps, Why);

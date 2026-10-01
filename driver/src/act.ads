@@ -22,7 +22,8 @@ with Sinew;
 with Runtime;
 with Monitor;
 with Contact;
-with Contact.Grasp;
+with Contact.Search;
+with Contact.Qty;
 package Act is
    --  🔴 脑写的结局词 → 身体的判法。**只有这一处**。
    --  以前它散在两个局部函数里(Outcome → 字符串 → Until_Kind),中间那一跳把 lost / free / refused
@@ -226,6 +227,18 @@ package Act is
    package Wall_Vectors is new Ada.Containers.Vectors (Natural, Wall_Mark);
    --  一件东西和这只身体之间量到的摩擦(接触集重写 09-29):合上、抬一点它跟着走 ⇒ 这一组最坏要的摩擦它给得起(下限往上走);
    --  没跟着走 ⇒ 这一组按量到的法向要的摩擦它给不起(上限往下走)。挑下手处按它们,不再"这一处拉黑、换下一个"
+   --  I5 要怎么动(大并行 §4 第 0 步;路 7 从语言填,路 5 / 6 读;10-01 主代理批的加法,别的一处不动)。
+   --  一个要 = 哪件(清单号,1 起)、哪个量(语言的根那一句:Rel = Re_Qty、Qty = 量的名字;两件东西那一句:Rel = 那个关系词,Qty 空)、
+   --  往哪变(+1 往上 / -1 往下;关系词那一句由关系词定,照样填 ±1)、参照的那一件(清单号;0 = 没有)。可以同时几个
+   type Want is record
+      Thing : Natural := 0;
+      Rel : Sinew.Rel := Sinew.Re_None;
+      Qty : Unbounded_String;
+      Dir : Integer := 0;
+      Ref : Natural := 0;
+   end record;
+   package Want_Vectors is new Ada.Containers.Vectors (Natural, Want);
+
    type Grip_Mu is record
       Name : Ada.Strings.Unbounded.Unbounded_String;
       Lb : Long_Float := 0.0;
@@ -303,8 +316,12 @@ package Act is
       --  找不到的(被挪来的东西盖住、被手挡着)挑空地时不算量过的桌面(2026-09-28 V1B47)
       Board_Seen : Bools;
       --  压之前先看底下(09-30 V1B70 / V1B73):手上那只眼往下压的第一步前后两帧三角出、比面高出(同挑空地的"高出面")的点(世界位置 + 协方差)。
-      --  挑空地时和高出面的板点一样挡;只挡、不当量过的桌面(判"躺在面上"要的细度,这对立体像在视线挨着走的方向那一片给不出来)
+      --  挑空地时和高出面的板点一样挡
       Seen_Above : Geom.Scene_Pt_Vectors.Vector;
+      --  同一对立体像里躺在面上、而且高低量得够细的点(10-01 大并行 §2 第 5 条"看底下看见的点也能当量过的桌面"):挑空地时和躺在面上的板点一样
+      --  当量过的桌面(围得住落点圈、能当落点)。够细 = 沿法向 Z 倍的不确定度不过碰指尖认几下对得上的那道门(比它矮的东西压上去也认得出;
+      --  视线挨着眼走的方向那一片远近定不住,进不来)。碰指尖那一段量、用;换了板一起作废(同 Seen_Above)
+      Seen_On : Geom.Scene_Pt_Vectors.Vector;
       Fixed_Turn_Sd : Long_Float := 0.0;        --  仪器把参考图配到"它自己转了 90°"那张时的配点噪声(像素,均方根;核对时判新位姿用,0 = 没量)
       Fixed_Said : Boolean := False;            --  这一次开机第一次核对的结果说过了(以后只在挪了、挡了、又看全了时说)
       Fixed_Covered : Boolean := False;         --  上一次核对判成挡住了
@@ -369,6 +386,10 @@ package Act is
       --  它最后一次被量到的世界位置(视线交点 / 我自己挪过的几眼)。手贴近时它在腕眼里糊了、被切了,脑指不出 ⇒ 凭这个走(前提是它没动,并如实说)
       Geo_Pw : Geom.V3 := [others => 0.0];
       Geo_Pw_Up_Sd : Long_Float := Long_Float'Last;   --  那个位置沿"上"有多不准(两眼交点的几何按各眼的误差算,Geom.Meet_Sd;量不出 = 最大)
+      --  (10-01 路 4 加)那个位置沿当时走的方向有多不准(同 Meet_Sd);它朝我这边的半径(手上那只眼里的框按远近折的;量不出 = 最大)。
+      --  看不全它的那几步凭这两样定"可能碰到它的那条带子"(Selfmap.Plan_Approach)
+      Geo_Pw_Sd : Long_Float := Long_Float'Last;
+      Geo_R_Obj : Long_Float := Long_Float'Last;
       Geo_Pw_Valid : Boolean := False;
       Geo_Pw_Name : Unbounded_String;
       --  我最后一次被一个面顶住的地方:面上的一点(指尖世界位置)和它的法向(指向我这边)。
@@ -388,7 +409,15 @@ package Act is
       --  合上时交出去的那个接触集(手里东西的接触点 + 锥);拿住之后锥放开(拿住 = 摩擦够,这就是身体量 μ 的办法)
       Held_Set : Contact.Set;
       Held_Set_Valid : Boolean := False;
+      --  拿住那一刻它的实心模型(顶面轮廓往下补到它躺的面,同接触集)和这只手的位姿:之后它在哪 = 手从那一刻起挪过的刚体运动带着它走
+      --  (拿住 = 抬一点它跟着手走,量过的;大并行路 5,10-01,加法)
+      Held_Shape : Contact.V3_Vectors.Vector;
+      Held_Pose : Plug.Arm_Pose := [others => 0.0];
       Grip_Mus : Grip_Mu_Vectors.Vector;     --  每件东西量到的摩擦上下限(见 Grip_Mu)
+      --  脑这一轮要这件东西怎么动(大并行路 5,10-01,加法:I5 的一小块;Round 按脑说的"它的哪个量往哪变"填,接触集按它布置;没说 ⇒ 按"跟着手离开它躺的面")
+      Want_Move : Contact.Want;
+      --  I5:这一句脑要的那几个(见 Want)。今天 Round 按脑说的语言的根那一句填一个(Rel = Re_Qty、Ref = 0);两件东西那一句等路 7 从语言填 Ref
+      Wants : Want_Vectors.Vector;
       Walls : Wall_Vectors.Vector;           --  这一集里各条臂横着被顶住过的地方(见 Wall_Mark)
       No_Reach_Arm : Integer := -1;          --  这一集里"它身上一段都在够不着那侧"的那条臂(-1 = 没有):下次选手绕开它
       Fingers_Aimed : Boolean := False;   --  上一段"到它上方"末尾已把手指指向它躺的面 ⇒ 接下来贴上去的那一段不再为了看它而转手
@@ -414,6 +443,9 @@ package Act is
    function Has_Fingers (C : Context; Arm : Natural; K : Natural := 0) return Boolean;
    function Arm_Has_Fingers (C : Context; Arm : Natural) return Boolean;
    function Any_Fingers (C : Context) return Boolean;
+   --  "上"(路 1;10-01 导出给自检和接触集):碰过面 ⇒ 碰到的那张面的法向(以碰到的为准);没碰过、板拟合出了面 ⇒ 板的法向;
+   --  都没有 ⇒ 世界的 z 轴(开机对齐时定成桌面法向)
+   function Up_Dir (C : Context) return Geom.V3;
    --  RGB 图顺时针转 90°(W×H → 宽 H、高 W):原图的 (u, v) 落到新图的 (H − 1 − v, u)。量仪器转着看时配得多细用;导出只为自检
    function Turn_90 (Img : Buf; W, H : Natural) return Buf;
    --  原图(宽 W、高 H)顺时针转了 Turns 个 90° 之后那张图里的 (U, V) 换算回原图的像素。核对时画面可能被转了,转回去配完再换算回来;导出只为自检
@@ -429,8 +461,10 @@ package Act is
    --  压之前先看底下(09-30):同一只眼两个位姿 P0 → P1 各一帧(W × H),问的点 (Qu, Qv) 配到 (Mu, Mv)、配回来落在 (Bu, Bv)(< 0 = 配不回来)
    --  ⇒ 比面高出的点(Above:世界位置 + 协方差)。Matched = 配上的(往返 1 px 以内、落在画面里),Tri = 其中两条视线交成、两帧对得上的;
    --  Sig = 这一批的配点噪声(像素,每轴)。导出只为自检
+   --  On 给了 ⇒ 交成、躺在面上(离面不过 Plane_Tol)的点也追加进去(世界位置 + 协方差;够不够细由调用方按它的门挑)
    procedure Seen_Above_Of (C : Context; G : Geom.Cam_Geo; P0, P1 : Plug.Arm_Pose; W, H : Natural; Qu, Qv, Mu, Mv, Bu, Bv : Floats;
-                            Above : out Geom.Scene_Pt_Vectors.Vector; Matched, Tri : out Natural; Sig : out Long_Float);
+                            Above : out Geom.Scene_Pt_Vectors.Vector; Matched, Tri : out Natural; Sig : out Long_Float;
+                            On : access Geom.Scene_Pt_Vectors.Vector := null);
    --  板上的点在不动的眼此刻的画面里重找一遍(往返配,同核对不动的眼)⇒ C.Board_Seen;没有不动的眼 / 没配仪器 / 没配成 ⇒ Board_Seen 不动,Said 说为什么
    procedure Board_Recheck (F : Plug.Frame; C : in out Context; Found : out Natural; Said : out Unbounded_String);
    --  读数 R 离"空手合"那头往张开那头走了多远(方向按开机量的两头,不假设读数变小 = 合)。导出只为自检
@@ -451,7 +485,13 @@ package Act is
    function Kin_Turn_Reach (Arm : Natural; P0 : Plug.Arm_Pose; Notch, Tol_P, Tol_R : Long_Float) return Long_Float;
    --  接触集(09-29 重写):量出来的手在记下的形状上挑一组下手处(导出只为自检)
    procedure Plan_Contact (C : in out Context; F : Plug.Frame; Arm, Cam : Natural; Name : Unbounded_String;
-                           Pick : out Contact.Grasp.Candidate; Note : out Unbounded_String; Ok : out Boolean);
+                           Pick : out Contact.Search.Candidate; Note : out Unbounded_String; Ok : out Boolean);
+   --  手拿着它绕 M 的那根轴(过 M.Pivot)转 Th 弧度:手的位姿要到哪(位置绕那一点转过去、朝向转同一个角)
+   function Carry_Goal (Cur : Plug.Arm_Pose; M : Contact.Twist; Th : Long_Float) return Plug.Arm_Pose;
+   --  I5 ⇒ 要它怎么动(大并行路 5,10-01):量到的几何(Want_Scene:它的实心模型、它躺的面、不跟着这条臂走的那只眼、脑看着的那只眼、参照那一件的视线交点)
+   --  ⇒ 让那个量变得最快的那个旋量(Want_Twist;量的名字按登记表 Qty_Kind,两件东西那一句按关系词)。Arm = 动它的那条臂(-1 = 还没定)
+   procedure Want_Scene (C : in out Context; F : Plug.Frame; W : Want; Arm : Integer; Sc : out Contact.Qty.Scene);
+   procedure Want_Twist (C : in out Context; F : Plug.Frame; W : Want; Arm : Integer; M : out Contact.Twist; Ok : out Boolean; Note : out Unbounded_String);
    --  接触集往下伸怎么走(纯函数,导出给自检):悬停时离下手处 Stand;最靠前的尖和它顶面那一层沿进场方向差 Tip_Over(= X_Tip − X_Top,≤ 0 就是尖还没到顶面那一层);
    --  顶面的不准 = 轮廓横着的 Sil_Err ⊕ 那张面高低的不准 H_Sd 在进场方向上的那一份(An = |进场方向 · 面法向|;H_Sd = Long_Float'Last 表示量不出);
    --  尖的不准 Tip_Sd、这一次到位还差 Miss、读数噪声 Noise;Floor = 身体量得出的最细那一档。

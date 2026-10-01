@@ -30,7 +30,8 @@ procedure Welds_Path_4 is
    Rate_Mode : Boolean := False;
    --  第三种(真舵机常见):每条命令少走一截死区 —— 少走的长度不随步长变(平移 Band_T、转动 Band_R)
    Band_Mode : Boolean := False;
-   Noise : constant Long_Float := 1.0e-6;
+   Noise_Def : constant Long_Float := 1.0e-6;
+   Noise : Long_Float := Noise_Def;
    Tn : constant Long_Float := 0.005;     --  这具假身体一步看得见的那一档(平移,开机"一步 = 自己那只眼里挪 1 像素"的那一档)
    Tr : constant Long_Float := 0.0025;    --  转动那一档
    --  死区那种身体:每条命令平移少走这么长、转动少走这么多 —— 一格长的探针只走到六成(过了开机"走到一半以上"那道,探针记得上),
@@ -48,8 +49,16 @@ procedure Welds_Path_4 is
    R_Tab : constant R_Table := [0.80, 0.79, 0.72, 0.81, 0.84, 0.75, 0.71, 0.83, 0.78, 0.74, 0.85, 0.77, 0.85, 0.84, 0.70, 0.76];
    function R_Of (Arm, K : Natural) return Long_Float is
      (if Rate_Mode then 1.0 elsif Rand then R_Tab ((K + 5 * Arm) mod R_Tab'Length) else R_Fix);
-   function Alpha_Of (B : Natural) return Long_Float is (if Rate_Mode then R_Tab (B mod R_Tab'Length) else Alpha_X5);
+   --  上一个动作的尾巴(静止噪声那条焊点用):Creep > 0 ⇒ 每拍只走还差的 Creep(H4 量的:每拍挪上一拍的 0.64 ⇒ Creep = 0.36);
+   --  Drift > 0 ⇒ 身体自己一直往 +x 漂这么多一拍(目标跟着漂);F32 ⇒ 读数按线上的 32 位浮点给(仿真读数本身不抖,只有这一点分辨率)
+   Creep : Long_Float := 0.0;
+   Drift : Long_Float := 0.0;
+   F32 : Boolean := False;
+   function Alpha_Of (B : Natural) return Long_Float is
+     (if Creep > 0.0 then Creep elsif Rate_Mode then R_Tab (B mod R_Tab'Length) else Alpha_X5);
    Beat : Natural := 0;
+   --  > 0 ⇒ 手的这一件做了这么多拍还没完就断线(Lock_Feed 给 Ok = False):一条等不完的牙不许把自检挂住
+   Guard : Natural := 0;
    Lk : Plug.Link;
    Pic : Plug.Cam;
    Start : constant Plug.Arm_Pose := [0.3, -0.2, 0.5, 1.0, 0.0, 0.0, 0.0];
@@ -113,6 +122,11 @@ procedure Welds_Path_4 is
          begin
             V (0) := N; V (1) := -N; V (2) := N; V (5) := N;
             P := Chan.Compose (Bs (A).X, V);
+            if F32 then
+               for I in P'Range loop
+                  P (I) := Long_Float (Float (P (I)));
+               end loop;
+            end if;
             Ff.EE.Append (P);
             Ff.Joints.Append (To_Q (P));
          end;
@@ -165,6 +179,10 @@ procedure Welds_Path_4 is
             X0 : constant Plug.Arm_Pose := Bs (A).X;
          begin
             Bs (A).X := Chan.Compose (Bs (A).X, Scaled (Chan.Delivered (Bs (A).X, Bs (A).Y), Alpha_Of (Beat)));
+            if Drift > 0.0 then
+               Bs (A).X (0) := Bs (A).X (0) + Drift;
+               Bs (A).Y (0) := Bs (A).Y (0) + Drift;
+            end if;
             if Wall_On and then Bs (A).X (0) > Wall_X then
                Bs (A).X (0) := Wall_X;
             end if;
@@ -194,6 +212,7 @@ procedure Welds_Path_4 is
    begin
       Dead := D; Rand := Random; R_Fix := R; N_Arms := Arms; Rate_Mode := False; Band_Mode := False;
       Wall_On := False;
+      Creep := 0.0; Drift := 0.0; F32 := False; Noise := Noise_Def; Guard := 0;
       for A in 0 .. Max_Arms - 1 loop
          Bs (A) := (X | Y | Last_T => (if A = 0 then Start else Start2), others => <>);
       end loop;
@@ -203,7 +222,25 @@ procedure Welds_Path_4 is
    end Reset_Body;
 
    --  ── 手的任务里做的那一件(Job),主线程当身体 ──
-   type Job_Kind is (Do_Measure, Do_Steps, Do_Joint_Go);
+   type Job_Kind is (Do_Measure, Do_Steps, Do_Joint_Go, Do_Idle, Do_Old_Idle, Do_Approach, Do_Walk_To);
+   --  Do_Idle:驱动的 Measure_Idle(先等尾巴收住再量);Do_Old_Idle:牙 —— 原来的量法(接着就读 4 拍、取每拍挪得最多的)
+   Idle_Beats : Natural := 0;
+   Old_Noise : Long_Float := 0.0;
+   --  Do_Approach:走近一件东西、碰到为止(同 Act.Geo_Approach 的步子:Selfmap.Plan_Approach 的带子 + Selfmap.Step 的上限),沿 +x 走。
+   --  Ap_Est = 走的人量到的它的中心(带偏差);Ap_R = 它朝我这边的半径;Ap_Sd = 量它量得多不准;Ap_Band = False ⇒ 牙:不设带子;
+   --  Ap_Old ⇒ 牙:原来的走法(离得比一个张口远就走还差的六成、到了以后一压 4 档)
+   Ap_Est, Ap_R, Ap_Sd : Long_Float := 0.0;
+   Ap_Tip_Sd : constant Long_Float := 0.002;
+   Ap_Rms : constant Long_Float := 1.0;
+   Ap_Gap : constant Long_Float := 0.3;
+   Ap_Band, Ap_Old : Boolean := False;
+   Ap_Steps, Ap_Beats : Natural := 0;
+   Ap_First_Len, Ap_First_Clear, Ap_Lstep, Ap_Push : Long_Float := 0.0;
+   Ap_Hit : Boolean := False;
+   --  Do_Walk_To:Selfmap.Walk_To 走到一个定了的目标(Wt_Goal),分辨率 Tn;Wt_Why / Wt_Steps 是它的账
+   Wt_Goal : Plug.Arm_Pose := Start;
+   Wt_Why : Selfmap.Walk_End := Selfmap.Lost_Link;
+   Wt_Steps : Natural := 0;
    Job : Job_Kind := Do_Measure;
    M : Selfmap.Body_Map;
    Measure_Ok : Boolean := False;
@@ -270,6 +307,94 @@ procedure Welds_Path_4 is
                      Selfmap.Go (Lk, M0, 0, Start, F64_Vectors.Empty_Vector, Fr, Dl, Joint_Frames, Joint_Ok, Joints => Joint_Target, Group => 0,
                                  Tol => Tn);
                   end;
+               when Do_Idle =>
+                  declare
+                     B0 : constant Natural := Beat;
+                  begin
+                     M := (others => <>);
+                     M.Arms := N_Arms;
+                     Selfmap.Measure_Idle (Lk, Fr, M, Measure_Ok);
+                     Idle_Beats := Beat - B0;
+                  end;
+               when Do_Old_Idle =>
+                  declare
+                     Prev : Plug.Pose_Vectors.Vector := Fr.EE;
+                  begin
+                     Old_Noise := 0.0;
+                     for K in 1 .. 4 loop
+                        exit when not Plug.Sense (Lk, Fr);
+                        for A in 0 .. Natural'Min (Natural (Prev.Length), Natural (Fr.EE.Length)) - 1 loop
+                           Old_Noise := Long_Float'Max (Old_Noise, Table.Norm (Chan.Delivered (Prev (A), Fr.EE (A)), Chan.Pos_Channels));
+                        end loop;
+                        Prev := Fr.EE;
+                     end loop;
+                  end;
+               when Do_Approach =>
+                  declare
+                     Wk2 : Selfmap.Walk;
+                     Miss : Long_Float := 0.0;
+                     Pressing : Boolean := False;
+                     Press_Left : Long_Float := 0.0;
+                     B0 : constant Natural := Beat;
+                  begin
+                     Ap_Steps := 0; Ap_Hit := False; Ap_Push := 0.0;
+                     for I in 1 .. 200 loop   --  自检自己的保险:走不完就当红
+                        declare
+                           Dist : constant Long_Float := Ap_Est - Fr.EE (0) (0);
+                           P : constant Selfmap.Approach_Plan :=
+                             Selfmap.Plan_Approach (abs Dist, Ap_R, Ap_Sd, Ap_Tip_Sd, Miss, M.EE_Noise, Tn, Ap_Rms);
+                           Lm : Selfmap.Limits;
+                           Rs : Selfmap.Leg_Step_Vectors.Vector;
+                           Fs : Natural;
+                           Ok2 : Boolean;
+                           Lg : Selfmap.Leg_Vectors.Vector;
+                        begin
+                           if I = 1 then
+                              Ap_First_Clear := P.Clear; Ap_Lstep := P.Lstep;
+                           end if;
+                           if not Pressing and then Dist <= P.Res then
+                              Pressing := True; Press_Left := Dist + P.Res;
+                           end if;
+                           exit when Pressing and then Press_Left <= 0.0;
+                           if Pressing then
+                              Lg.Append (Selfmap.Leg'(Arm => 0, Goal => Offset (Fr.EE (0), (if Ap_Old then 4.0 * Tn else P.Lstep), 0.0, 0.0, 0.0, 0.0, 0.0), Jaw => <>));
+                           else
+                              Lg.Append (Selfmap.Leg'(Arm => 0, Goal => Offset (Fr.EE (0), Dist, 0.0, 0.0, 0.0, 0.0, 0.0), Jaw => <>));
+                              if Ap_Old then
+                                 Lm.Frac := (if Dist > Ap_Gap then 0.6 else 1.0);
+                              elsif Ap_Band then
+                                 Lm.Clear := Long_Float'Max (P.Clear, P.Lstep);
+                              end if;
+                           end if;
+                           Selfmap.Step (Lk, M, Lg, Lm, Fr, Wk2, Rs, Fs, Ok2);
+                           exit when not Ok2 or else Rs.Is_Empty;
+                           Ap_Steps := Ap_Steps + 1;
+                           if I = 1 then
+                              Ap_First_Len := Rs (0).Len;
+                           end if;
+                           Miss := Table.Norm (Chan.Delivered (Fr.EE (0), Rs (0).Aim), Chan.Pos_Channels);
+                           if Pressing then
+                              Press_Left := Press_Left - Rs (0).Went;
+                           end if;
+                           if Rs (0).Blocked_T then
+                              Ap_Hit := True;
+                              Ap_Push := Rs (0).Aim (0) - Wall_X;   --  碰上的那一步命令往墙里多压了多远
+                              exit;
+                           end if;
+                        end;
+                     end loop;
+                     Ap_Beats := Beat - B0;
+                  end;
+               when Do_Walk_To =>
+                  declare
+                     Wk2 : Selfmap.Walk;
+                     Went, Turned : Long_Float;
+                     Lm : Selfmap.Limits;
+                  begin
+                     Lm.Reach := True;
+                     --  最多走 50 步:自检自己的保险(驱动里退回去那一段不设步数,出口是 Gained);拆掉 Gained 的牙在这儿撞满 50 步、红,不挂住自检
+                     Selfmap.Walk_To (Lk, M, (Arm => 0, Goal => Wt_Goal, Jaw => <>), Lm, Tn, Tr, 50, Fr, Wk2, Went, Turned, Wt_Steps, Wt_Why);
+                  end;
             end case;
          exception
             when E : others =>
@@ -283,6 +408,7 @@ procedure Welds_Path_4 is
       Plug.Lock_Begin;
       declare
          H : Hand;
+         B0 : constant Natural := Beat;
       begin
          Lockstep.Start (0, H'Identity);
          loop
@@ -295,7 +421,7 @@ procedure Welds_Path_4 is
             begin
                Lk.Seq := Beat;
                Plug.Note_Beat (Lk, Ff);
-               Plug.Lock_Feed (Ff);
+               Plug.Lock_Feed (Ff, Ok => Guard = 0 or else Beat - B0 <= Guard);
             end;
          end loop;
       end;
@@ -618,6 +744,222 @@ begin
              & "(上限 " & Codec.Fmt (20.0 * Tr, 4) & ")· 离带子 " & Codec.Fmt (9.0 * Tn, 4) & " ⇒ " & Codec.Fmt (R_Clear.Len, 4)
              & " · 反解够到 x ≤ " & Codec.Fmt (Reach_X - Start (0), 4) & " ⇒ 这一步走到 " & Codec.Fmt (R_Reach.Aim (0) - Start (0), 4) & "(细到一档 " & Codec.Fmt (Tn, 4) & ")"
              & " · 牙:不问反解 ⇒ 整步 " & Codec.Fmt (R_Free.Len, 4));
+   end;
+   --  ⑧ 静止噪声等上一个动作收住再量(Measure_Idle → Wait_Tail):胳膊还在慢慢挪的时候,挪的那一截不算噪声。
+   --  假身体照 H4(人形,09-28)量到的尾巴:每拍挪上一拍的 0.64,第一拍挪 1.3 档(H4 0.0121 单位、一档 0.0094)。
+   --  病:接着上一个动作就读 4 拍 ⇒ 读到的是尾巴(H4 0.0121 单位,其实读数不抖)⇒ 后面所有"挪没挪过噪声"的门都垫高了那么一截。
+   --  五种:静止(读数有 ±1e-6 的抖)/ 有尾巴、有抖 / 有尾巴、仿真不抖、读数按线上的 32 位浮点 / 身体自己一直在漂 / 尾巴慢到一拍只少 0.1%。
+   --  牙:原来的量法(接着就读 4 拍)同一具身体当场重量 ⇒ 有尾巴的两种量出来的是尾巴;离线拆掉 Wait_Tail ⇒ 那两种红;
+   --  离线把"少不到百分之一就算收住"改成"不比上一拍少"⇒ 慢尾巴那一种等不完(Guard 断线)⇒ 红
+   declare
+      D_Tail : constant Long_Float := 1.3 * Tn / 0.36;     --  还差这么多、每拍走还差的 0.36 ⇒ 第一拍挪 1.3 档
+      Still_Bound : constant Long_Float := Sqrt (3.0) * 1.5 * Noise_Def;   --  假身体的抖动一拍最多变这么多(三轴各 1.5 × Noise)
+      New_Still, New_Tail, New_F32, New_Drift, New_Slow : Long_Float := 0.0;
+      Old_Tail, Old_F32 : Long_Float := 0.0;
+      W_Still, W_Tail, W_F32, W_Drift, W_Slow : Natural := 0;
+      Ok_Still, Ok_Tail, Ok_F32, Ok_Drift, Ok_Slow : Boolean := False;
+      U32 : constant Long_Float := Long_Float (Float'Model_Epsilon) * abs (Start (0) + D_Tail);   --  32 位浮点在这个读数上的分辨率
+      Drift_V : constant Long_Float := 0.2 * Tn;
+      procedure Tail_Body (C : Long_Float; D0 : Long_Float) is
+      begin
+         Reset_Body (0, False, 1.0, 1);
+         Creep := C;
+         Bs (0).Y := Offset (Start, D0, 0.0, 0.0, 0.0, 0.0, 0.0);
+      end Tail_Body;
+      procedure Idle_Run (Ne : out Long_Float; Wt : out Natural; Ok : out Boolean) is
+      begin
+         Job := Do_Idle;
+         Run_Hand;
+         Ne := M.EE_Noise; Wt := Idle_Beats; Ok := Measure_Ok;
+      end Idle_Run;
+      procedure Old_Run (Ne : out Long_Float) is
+      begin
+         Job := Do_Old_Idle;
+         Run_Hand;
+         Ne := Old_Noise;
+      end Old_Run;
+   begin
+      --  静止
+      Reset_Body (0, False, 1.0, 1);
+      Idle_Run (New_Still, W_Still, Ok_Still);
+      --  有尾巴、有抖
+      Tail_Body (0.36, D_Tail);
+      Idle_Run (New_Tail, W_Tail, Ok_Tail);
+      Tail_Body (0.36, D_Tail);
+      Old_Run (Old_Tail);
+      --  有尾巴、仿真不抖、32 位读数
+      Tail_Body (0.36, D_Tail); Noise := 0.0; F32 := True;
+      Idle_Run (New_F32, W_F32, Ok_F32);
+      Tail_Body (0.36, D_Tail); Noise := 0.0; F32 := True;
+      Old_Run (Old_F32);
+      --  身体自己一直在漂
+      Reset_Body (0, False, 1.0, 1);
+      Drift := Drift_V;
+      Idle_Run (New_Drift, W_Drift, Ok_Drift);
+      --  尾巴慢到一拍只少 0.1%(仿真不抖、64 位读数:一拍比一拍少,少得极慢)—— 等它收到底要几十万拍
+      Tail_Body (0.001, Drift_V / 0.001); Noise := 0.0; Guard := 200;
+      Idle_Run (New_Slow, W_Slow, Ok_Slow);
+      Reset_Body (0, False, 1.0, 1);
+      Check (Ok_Still and then New_Still <= Still_Bound * (1.0 + Selfmap.Negligible) and then W_Still <= 4 + 3
+             and then Ok_Tail and then New_Tail <= 2.0 * Still_Bound and then Old_Tail > 1.0 * Tn
+             and then Ok_F32 and then New_F32 <= 4.0 * U32 and then Old_F32 > 1.0 * Tn
+             and then Ok_Drift and then New_Drift >= (1.0 - Selfmap.Negligible) * Drift_V and then New_Drift <= Drift_V + Still_Bound
+             and then W_Drift <= 4 + 3
+             and then Ok_Slow and then W_Slow <= 4 + 3,
+             "走一步·静止噪声等上一个动作收住再量:静止 ⇒ " & Codec.Fmt (New_Still * 1.0e6, 2) & "e-6(抖动最多 " & Codec.Fmt (Still_Bound * 1.0e6, 2)
+             & "e-6)、" & Codec.Img (W_Still) & " 拍 · 有尾巴(第一拍挪 " & Codec.Fmt (1.3 * Tn, 4) & ")⇒ " & Codec.Fmt (New_Tail * 1.0e6, 2) & "e-6、"
+             & Codec.Img (W_Tail) & " 拍 · 尾巴 + 不抖的 32 位读数 ⇒ " & Codec.Fmt (New_F32 * 1.0e9, 1) & "e-9(分辨率 " & Codec.Fmt (U32 * 1.0e9, 1) & "e-9)、"
+             & Codec.Img (W_F32) & " 拍 · 自己一拍漂 " & Codec.Fmt (Drift_V, 4) & " ⇒ 地板 " & Codec.Fmt (New_Drift, 6) & "(照实)、" & Codec.Img (W_Drift)
+             & " 拍 · 一拍只少 0.1% 的慢尾巴 ⇒ 当成漂、" & Codec.Img (W_Slow) & " 拍收(" & (if Ok_Slow then "没等死" else "等不完、断线(错)") & ")"
+             & " · 牙:原来接着就读 ⇒ 有尾巴 " & Codec.Fmt (Old_Tail, 4) & "、32 位 " & Codec.Fmt (Old_F32, 4) & "(量成了尾巴)");
+   end;
+   --  ⑨ 看着走接完(大并行 §2 第 23 条):走近一件东西、碰到为止,每一步走还差的全部,上限是"离可能碰到它的地方还远"
+   --  (Selfmap.Plan_Approach:它朝我这边的半径 + 量它和量我自己的不准的 Stats.Z 倍 = 带子;带子外一条命令到带子前,带子里一步一小步)。
+   --  假身体:x5 那种(不晚、交付满);它的中心在 40 档外,半径 4 档,走的人量到的中心偏远了一倍不准(2 档)—— 它朝我这边的面在
+   --  量到的中心前 6 档。病:原来远的时候走还差的六成、近了一步走完、到了一压 4 档 ⇒ 碰上的那一步命令往它身子里多压了一大截
+   --  (量它量偏了多少就多压多少);不设带子、一条命令走到底也一样。要:碰得出、碰上那一步多压的不超过一小步、头一步一条命令就到带子前。
+   --  牙(当场算):同一具身体、同一个目标,原来的走法 / 不设带子各走一遍 ⇒ 碰上那一步多压的都比一小步多
+   declare
+      Push_New, Push_Old, Push_None : Long_Float := 0.0;
+      Steps_New, Steps_Old, Steps_None, Beats_New, Beats_Old, Beats_None : Natural := 0;
+      Hit_New, Hit_Old, Hit_None : Boolean := False;
+      First_Ok : Boolean := False;
+      Lstep : Long_Float := 0.0;
+      procedure Run_Ap (Band, Old : Boolean; Push : out Long_Float; Steps, Bts : out Natural; Hit : out Boolean) is
+      begin
+         Reset_Body (0, False, 1.0, 1);
+         Boot_Measure;
+         Wall_On := True; Wall_X := Start (0) + 40.0 * Tn - 4.0 * Tn;
+         Ap_R := 4.0 * Tn; Ap_Sd := 2.0 * Tn; Ap_Est := Start (0) + 40.0 * Tn + Ap_Sd;
+         Ap_Band := Band; Ap_Old := Old;
+         Job := Do_Approach;
+         Run_Hand;
+         Wall_On := False;
+         Push := Ap_Push; Steps := Ap_Steps; Bts := Ap_Beats; Hit := Ap_Hit;
+      end Run_Ap;
+   begin
+      Run_Ap (True, False, Push_New, Steps_New, Beats_New, Hit_New);
+      First_Ok := abs (Ap_First_Len - Ap_First_Clear) < 1.0e-9 and then Ap_First_Clear > 0.0;
+      Lstep := Ap_Lstep;
+      Run_Ap (False, True, Push_Old, Steps_Old, Beats_Old, Hit_Old);
+      Run_Ap (False, False, Push_None, Steps_None, Beats_None, Hit_None);
+      Check (Hit_New and then Push_New <= Lstep * (1.0 + Selfmap.Negligible) and then First_Ok and then Push_Old > Lstep and then Push_None > Lstep,
+             "走一步·走近碰到为止(带子):碰上的那一步多压 " & Codec.Fmt (Push_New, 4) & "(一小步 " & Codec.Fmt (Lstep, 4) & ")、"
+             & Codec.Img (Steps_New) & " 步 " & Codec.Img (Beats_New) & " 拍、头一步一条命令就到带子前"
+             & (if First_Ok then "" else "(错:没有)") & " · 牙:原来的走法(六成 + 一压 4 档)⇒ 多压 " & Codec.Fmt (Push_Old, 4) & "、"
+             & Codec.Img (Steps_Old) & " 步 " & Codec.Img (Beats_Old) & " 拍;不设带子 ⇒ 多压 " & Codec.Fmt (Push_None, 4));
+   end;
+   --  ⑩ 走到一个定了的目标(Selfmap.Walk_To:离远点、沿来的路退都走它):到了就收;被挡住就收;够不着的那一截一步下去没再近过分辨率
+   --  (Selfmap.Gained)就收,不拿同一步去撞。病:原来退"分两截"、转眼"最多 40 条命令"—— 拍的截数 / 条数;够不着时撞满条数才停。
+   --  牙(离线拆掉 Gained 那一道 ⇒ 够不着的那一条走到自检的保险断线才停,红)
+   declare
+      Why_A, Why_B, Why_C : Selfmap.Walk_End;
+      St_A, St_B, St_C : Natural;
+      Reach_X : constant Long_Float := Start (0) + 6.0 * Tn;
+      procedure Fake_Reach (Arm : Natural; Pose : Plug.Arm_Pose; Pos_Err, Rot_Err : out Long_Float) is
+         pragma Unreferenced (Arm);
+      begin
+         Pos_Err := Long_Float'Max (0.0, Pose (0) - Reach_X); Rot_Err := 0.0;
+      end Fake_Reach;
+      use type Selfmap.Walk_End;
+   begin
+      Reset_Body (0, False, 1.0, 1);
+      Boot_Measure;
+      Wt_Goal := Offset (Start, 10.0 * Tn, 0.0, 0.0, 0.0, 0.0, 0.0);
+      Job := Do_Walk_To; Run_Hand; Why_A := Wt_Why; St_A := Wt_Steps;
+      Reset_Body (0, False, 1.0, 1);
+      Boot_Measure;
+      Wall_On := True; Wall_X := Start (0) + 5.0 * Tn;
+      Job := Do_Walk_To; Run_Hand; Why_B := Wt_Why; St_B := Wt_Steps;
+      Wall_On := False;
+      Reset_Body (0, False, 1.0, 1);
+      Boot_Measure;
+      Plug.Set_Reach (Fake_Reach'Unrestricted_Access);
+      Guard := 300;
+      Job := Do_Walk_To; Run_Hand; Why_C := Wt_Why; St_C := Wt_Steps;
+      Plug.Set_Reach (null);
+      Guard := 0;
+      Check (Why_A = Selfmap.Arrived and then St_A <= 2 and then Why_B = Selfmap.Was_Blocked and then Why_C = Selfmap.No_Gain and then St_C <= 3,
+             "走一步·走到一个定了的目标(Walk_To):够得着 ⇒ " & Selfmap.Walk_End'Image (Why_A) & "、" & Codec.Img (St_A) & " 步 · 墙在半路 ⇒ "
+             & Selfmap.Walk_End'Image (Why_B) & "、" & Codec.Img (St_B) & " 步 · 够不着的那一截 ⇒ " & Selfmap.Walk_End'Image (Why_C) & "、"
+             & Codec.Img (St_C) & " 步收(不拿同一步去撞)");
+   end;
+   --  ⑪ 脑说的档位 = 这一步最多多大(Selfmap.Gear_Bound,语言 §17.6):small = 小步、large = 最大一档、medium = 两者的几何中点,没说 = 不限。
+   --  病:原来是"乘探针上限的 1/4、1/2、1"(三个拍的数),没说也乘 1/2(C1 转眼每条只转最大一档的一半,54 拍)
+   declare
+      Sm : constant Long_Float := 3.0 * Tn;
+      Lg : constant Long_Float := 64.0 * Tn;
+   begin
+      Check (Selfmap.Gear_Bound ("small", Sm, Lg) = Sm and then Selfmap.Gear_Bound ("large", Sm, Lg) = Lg
+             and then abs (Selfmap.Gear_Bound ("medium", Sm, Lg) - Sqrt (Sm * Lg)) < 1.0e-12
+             and then Selfmap.Gear_Bound ("", Sm, Lg) = Long_Float'Last and then Selfmap.Gear_Bound ("fast", Sm, Lg) = Long_Float'Last
+             and then Selfmap.Gear_Bound ("large", Lg, Sm) = Lg,
+             "走一步·档位是上限:small ⇒ " & Codec.Fmt (Sm, 4) & " · medium ⇒ " & Codec.Fmt (Selfmap.Gear_Bound ("medium", Sm, Lg), 4)
+             & " · large ⇒ " & Codec.Fmt (Lg, 4) & " · 没说 ⇒ 不限(最大一档比小步还小时 large 取小步)");
+   end;
+   --  ⑫ 命令 → 动作的阶跃响应(大并行 §2 第 9 条,V5):开机按每一次探针那一条命令逐拍走到它自己的几成量出"头几拍不动、之后每拍走还差的几成"
+   --  (Selfmap.Fit_Response),再拿它预测一大步(20 档)逐拍走到哪、哪一拍起效。假身体晚 0 / 1 / 2 拍、每拍走还差的 89%(x5 量的),
+   --  另有一具每拍只走还差的 70–85% 轮着。要:晚几拍量得对、起效那一拍预测差 0 拍;每拍 89% 的那几具逐拍预测差不到一档。
+   --  病:不量(Go 只认"停了没有")⇒ 会动的东西、打到它都没法提前算命令几时起效。
+   --  牙(当场算):不算晚的那几拍(当成 0)⇒ 晚两拍那具起效差 2 拍;当成一拍到位(Alpha = 1)⇒ 第一拍就差两档多
+   declare
+      type Rc is record
+         D : Natural;
+         Rate : Boolean;
+      end record;
+      type Rcs is array (Positive range <>) of Rc;
+      Cs : constant Rcs := [(0, False), (1, False), (2, False), (1, True)];
+      Txt : Unbounded_String;
+      All_Ok : Boolean := True;
+      Tooth_Dead, Tooth_Alpha : Boolean := False;
+      Busy_Max : Long_Float := 0.0;
+   begin
+      for X of Cs loop
+         Reset_Body (X.D, False, 1.0, 1);
+         Rate_Mode := X.Rate;
+         Boot_Measure;
+         declare
+            R : constant Selfmap.Response := (if M.Resp.Is_Empty then (others => <>) else M.Resp (0));
+         begin
+            Legs.Clear;
+            Legs.Append (Selfmap.Leg'(Arm => 0, Goal => Offset (Bs (0).X, 20.0 * Tn, 0.0, 0.0, 0.0, 0.0, 0.0), Jaw => <>));
+            Lim := (others => <>); Wk := (others => <>); Reps.Clear; Frames := 0; N_Steps := 1;
+            Job := Do_Steps;
+            Run_Hand;
+            declare
+               S : constant Selfmap.Leg_Step := Reps (0);
+               Tk : Floats;
+               Nn : Long_Float;
+            begin
+               Selfmap.Step_Track (M, S, Tk, Nn);   --  这一步只平移 20 档 ⇒ 平移那一份、20 档
+            declare
+               Err_N : constant Long_Float := Selfmap.Response_Err (R, Tk) * Nn;
+               Miss_B : constant Natural := Selfmap.Effect_Miss (R, Tk);
+               Ok_X : constant Boolean := R.Alpha > 0.0 and then R.Dead = X.D and then Miss_B = 0
+                 and then (if X.Rate then R.Alpha >= R_Min - Selfmap.Negligible and then R.Alpha <= 0.85 + Selfmap.Negligible
+                           else abs (R.Alpha - Alpha_X5) < Selfmap.Negligible and then Err_N < 1.0);
+               Zero_Dead : constant Selfmap.Response := (R with delta Dead => 0);
+               One_Shot : constant Selfmap.Response := (R with delta Alpha => 1.0);
+            begin
+               All_Ok := All_Ok and then Ok_X;
+               Busy_Max := Long_Float'Max (Busy_Max, S.Busy);
+               if X.D = 2 and then not X.Rate then
+                  Tooth_Dead := Selfmap.Effect_Miss (Zero_Dead, Tk) >= 1;
+               end if;
+               if X.D = 0 then
+                  Tooth_Alpha := Selfmap.Response_Err (One_Shot, Tk) * Nn >= 1.0;
+               end if;
+               Append (Txt, " · 晚 " & Codec.Img (X.D) & (if X.Rate then " 拍、每拍 70–85%" else " 拍") & " ⇒ 量成晚 " & Codec.Img (R.Dead)
+                       & "、每拍 " & Codec.Fmt (R.Alpha, 3) & "(" & Codec.Img (R.N) & " 条),20 档那一步逐拍最多差 " & Codec.Fmt (Err_N, 2)
+                       & " 档、起效差 " & Codec.Img (Miss_B) & " 拍" & (if Ok_X then "" else "(错)"));
+            end;
+            end;
+         end;
+      end loop;
+      Check (All_Ok and then Tooth_Dead and then Tooth_Alpha,
+             "走一步·阶跃响应(V5)" & To_String (Txt) & " · 驱动自己一拍最多 " & Codec.Fmt (Busy_Max * 1000.0, 3) & " ms"
+             & " · 牙:不算晚的那几拍 ⇒ " & (if Tooth_Dead then "起效差 2 拍" else "(牙没咬住)")
+             & ";当成一拍到位 ⇒ " & (if Tooth_Alpha then "差两档多" else "(牙没咬住)"));
    end;
    Plug.Set_Hooks (null, null);
 end Welds_Path_4;

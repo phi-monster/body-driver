@@ -35,6 +35,8 @@ procedure Save (Path : String; Key : String; M : Selfmap.Body_Map; Hands : Zone.
 begin
    Append (B, "{""key"":""" & Json.Escape (Key) & """,""method_ver"":" & Codec.Img (Method_Ver) & ",");
    Append (B, """arms"":" & Codec.Img (M.Arms) & ",""cams"":" & Codec.Img (M.N_Cams) & ",""per_arm"":" & Codec.Img (M.Per_Arm) & ",");
+   --  静止噪声记着是第几版量法量的(Selfmap.Idle_Ver):装回时版本对不上就不信、开机重量
+   Append (B, """noise_ver"":" & Codec.Img (Selfmap.Idle_Ver) & ",");
    Append (B, """ee_noise"":" & Num ("ee_noise", M.EE_Noise) & ",""rot_noise"":" & Num ("rot_noise", M.Rot_Noise)
            & ",""jaw_noise"":" & Num ("jaw_noise", M.Jaw_Noise) & ",""settle"":" & Codec.Img (M.Settle) & ",");
    Put_Floats ("amp", M.Amp); Append (B, ",");

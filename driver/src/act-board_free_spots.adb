@@ -2,7 +2,9 @@ separate (Act)
 procedure Board_Free_Spots (C : Context; Lp : Geom.V3_Vectors.Vector; Tb : Floats; R : Long_Float; Deltas : out Geom.V3_Vectors.Vector) is
    N : constant Geom.V3 := C.Board_N;
    Nb : constant Natural := Natural (C.Board.Length);
-   Nt : constant Natural := Nb + Natural (C.Seen_Above.Length);   --  板点在前,压之前看见的高出面的点在后(只挡,不当量过的桌面)
+   Na : constant Natural := Natural (C.Seen_Above.Length);
+   --  板点在前,压之前看见的高出面的点(只挡)跟着,压之前看见、躺在面上、量得够细的点(C.Seen_On:当量过的桌面,同板点)在最后
+   Nt : constant Natural := Nb + Na + Natural (C.Seen_On.Length);
    Fresh : constant Boolean := Natural (C.Board_Seen.Length) = Nb;   --  重找过(和板一一对应)
    On, Above, Tried : Bools;
    Hgt : Floats;
@@ -20,9 +22,9 @@ procedure Board_Free_Spots (C : Context; Lp : Geom.V3_Vectors.Vector; Tb : Float
       Near : array (0 .. Kn - 1) of Long_Float := [others => Long_Float'Last];   --  最近几个的距离(从近到远)
       Near_S : array (0 .. Kn - 1) of Long_Float := [others => 0.0];            --  它们各自离最近一个同类的距离
       S : Long_Float;
-      Pool : Geom.Nat_Vectors.Vector;   --  离落点 R + 两个间距以内的那些量过的桌面上的板点
+      Pool : Geom.Nat_Vectors.Vector;   --  离落点 R + 两个间距以内的那些量过的桌面上的点
    begin
-      for I in 0 .. Nb - 1 loop
+      for I in 0 .. Nt - 1 loop
          if On (I) and then Nn (I) > 0.0 then
             declare
                D : constant Long_Float := Gap (Pp (I), A0);
@@ -51,7 +53,7 @@ procedure Board_Free_Spots (C : Context; Lp : Geom.V3_Vectors.Vector; Tb : Float
          Sorting.Sort (Ns);
          S := Ns (Kn / 2);
       end;
-      for I in 0 .. Nb - 1 loop
+      for I in 0 .. Nt - 1 loop
          if On (I) and then Gap (Pp (I), A0) <= R + 2.0 * S then
             Pool.Append (I);
          end if;
@@ -133,12 +135,12 @@ begin
    end if;
    for I in 0 .. Nt - 1 loop
       declare
-         S : constant Geom.Scene_Pt := (if I < Nb then C.Board (I) else C.Seen_Above (I - Nb));
+         S : constant Geom.Scene_Pt := (if I < Nb then C.Board (I) elsif I < Nb + Na then C.Seen_Above (I - Nb) else C.Seen_On (I - Nb - Na));
          H : constant Long_Float := (S.Pw (0) - C.Board_Pt (0)) * N (0) + (S.Pw (1) - C.Board_Pt (1)) * N (1) + (S.Pw (2) - C.Board_Pt (2)) * N (2);
          Cn : constant Geom.V3 := Geom.Ap (S.Cov, N);
          Tol : constant Long_Float := Plane_Tol (C, Cn (0) * N (0) + Cn (1) * N (1) + Cn (2) * N (2));
       begin
-         On.Append (I < Nb and then abs H <= Tol and then (not Fresh or else C.Board_Seen (I)));
+         On.Append (((I < Nb and then (not Fresh or else C.Board_Seen (I))) or else I >= Nb + Na) and then abs H <= Tol);
          Above.Append (H > Tol);
          Hgt.Append (H);
          Tried.Append (False);
@@ -158,13 +160,13 @@ begin
       E1 := [Cx (0) / Cl, Cx (1) / Cl, Cx (2) / Cl];
       E2 := [N (1) * E1 (2) - N (2) * E1 (1), N (2) * E1 (0) - N (0) * E1 (2), N (0) * E1 (1) - N (1) * E1 (0)];
    end;
-   for I in 0 .. Nb - 1 loop
+   for I in 0 .. Nt - 1 loop
       declare
          Best : Long_Float := 0.0;
       begin
          if On (I) then
             Best := Long_Float'Last;
-            for J in 0 .. Nb - 1 loop
+            for J in 0 .. Nt - 1 loop
                if J /= I and then On (J) then
                   Best := Long_Float'Min (Best, Gap (Pp (I), Pp (J)));
                end if;
@@ -184,7 +186,7 @@ begin
          Best : Integer := -1;
          Bd : Long_Float := Long_Float'Last;
       begin
-         for I in 0 .. Nb - 1 loop
+         for I in 0 .. Nt - 1 loop
             if On (I) and then not Tried (I) then
                declare
                   D : constant Long_Float := Geom.Norm ([Pp (I) (0) - Lp (0) (0), Pp (I) (1) - Lp (0) (1), Pp (I) (2) - Lp (0) (2)]);

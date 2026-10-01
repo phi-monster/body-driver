@@ -30,7 +30,10 @@ begin
                Lg : constant Lobe_Geo := G.Lobes (Li);
             begin
                Append (B, (if Li > 0 then "," else "") & "{""tip"":[" & Codec.Fmt (Lg.Tip (0), 6) & "," & Codec.Fmt (Lg.Tip (1), 6) & "," & Codec.Fmt (Lg.Tip (2), 6)
-                       & "],""wide"":" & Codec.Fmt (Lg.Wide, 6) & ",""thin"":" & Codec.Fmt (Lg.Thin, 6) & "}");
+                       & "],""wide"":" & Codec.Fmt (Lg.Wide, 6) & ",""thin"":" & Codec.Fmt (Lg.Thin, 6)
+                       --  合空时的尖(量过才写;10-01 路 2 加)
+                       & (if Lg.Shut_Ok then ",""shut"":[" & Codec.Fmt (Lg.Shut (0), 6) & "," & Codec.Fmt (Lg.Shut (1), 6) & "," & Codec.Fmt (Lg.Shut (2), 6) & "]"
+                          else "") & "}");
             end;
          end loop;
          Append (B, "]}");
