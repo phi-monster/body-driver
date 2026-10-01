@@ -18,8 +18,8 @@ if ! git merge --no-ff --no-commit "$BRANCH"; then
   echo "conflicts outside the registry: resolve them, then rerun the gates"; exit 3
 fi
 python3 tools/numbers.py gen > /dev/null
-if grep -qP "\tundecided\t" driver/numbers.tsv; then
-  grep -P "\tundecided\t" driver/numbers.tsv | head -20
+if awk -F'\t' '$4 == "undecided" { found = 1 } END { exit !found }' driver/numbers.tsv; then
+  awk -F'\t' '$4 == "undecided"' driver/numbers.tsv | head -20
   echo "the branch brought unclassified literals"; exit 4
 fi
 git add driver/numbers.tsv
