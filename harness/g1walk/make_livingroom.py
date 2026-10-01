@@ -152,6 +152,21 @@ f.place("fruit_bowl", (0.3, 0, 0.815), (0.13, 0.13), depth=0.045)
 f.place("top", (-0.3, 0, 0.76), (0.3, 0.35))
 f.save()
 
+# 台阶(远 5 上楼梯,bd_stairs 用):沿资产系 +x 往上 STAIR_N 级,每级高 STAIR_H、深 STAIR_D,宽 STAIR_W;最上面是一块 STAIR_TOP 深的平台。
+# 每一级都是一整块从地面立起来的实心(不是悬空的板子),一级挨着一级,脚踩不空。
+# 家里的台阶 15–18 cm 一级;先放 10 cm(和 walk_test.py 的台阶验收一样高),过了再往上加
+STAIR_N, STAIR_H, STAIR_D, STAIR_W, STAIR_TOP = 3, 0.10, 0.30, 1.0, 1.0
+f = Furn("bd_lr_stairs", "stairs up to a platform")
+for k in range(STAIR_N):
+    # 第 k 级:x 从 k·STAIR_D 到下一级的起点、从地面立到 (k+1)·STAIR_H;最上面那级连着平台
+    x0, h = k * STAIR_D, (k + 1) * STAIR_H
+    end = (k + 1) * STAIR_D if k < STAIR_N - 1 else STAIR_N * STAIR_D + STAIR_TOP
+    f.box(f"step{k}", ((x0 + end) / 2, 0, h / 2), (end - x0, STAIR_W, h), WOOD if k % 2 == 0 else BEIGE)
+# 平台顶面:两只脚都站在这一块里才算上去了(四周各让出 0.1 m,站在边上半只脚悬空不算)
+f.place("top", ((STAIR_N - 1) * STAIR_D + (STAIR_D + STAIR_TOP) / 2, 0, STAIR_N * STAIR_H),
+        ((STAIR_D + STAIR_TOP) / 2 - 0.1, STAIR_W / 2 - 0.1))
+f.save()
+
 for cat, desc, rgb in (("bd_lr_toy_box", "toy box", RED), ("bd_lr_tool_box", "toolbox", GREEN)):
     f = Furn(cat, desc)
     f.box("base", (0, 0, 0.01), (0.6, 0.4, 0.02), rgb)

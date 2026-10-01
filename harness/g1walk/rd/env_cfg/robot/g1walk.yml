@@ -1,4 +1,5 @@
 # body-driver walking humanoid rig (大并行 §2 第 40 条,路 8): Unitree G1 standing free on the living-room floor (pelvis 0.75 m above the floor), facing +y.
+# default_root_pos below is a placeholder: harness/g1walk/install.py writes the start from make_livingroom_layout.py (ROBOT_START, FLOOR_Z).
 robots:
   - {
     robot_type: arm,
