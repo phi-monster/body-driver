@@ -1,6 +1,6 @@
 --  replay RECORDING [--body FILE] [--estimates FILE]
 --
---  Feeds a recording (harness/record/wire_proxy.py format, uncompressed)
+--  Feeds a recording (Driver.Recording format, uncompressed)
 --  through every estimator exactly as the main loop does: each observation is
 --  given to the robot, hand and world estimators together with the last
 --  command sent before it arrived (read back from the recorded replies), the

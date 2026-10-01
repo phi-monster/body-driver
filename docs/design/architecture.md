@@ -96,9 +96,7 @@ planted violation.
 
 ## Recording and replay
 
-`harness/record/wire_proxy.py` records the conversation between a robot and
-any driver at the protocol boundary, unchanged. The driver itself can record
-everything it exchanges, service replies included (`--record`). The format is
+The driver records everything it exchanges, service replies included (`--record`); the format is
 described in `Driver.Recording`. `driver/tools/replay` feeds a recording
 through the estimators and writes the measured body for scoring; truth comes
 only from the simulator side and is never read by the driver.
