@@ -393,6 +393,30 @@ driver-recording.adb	Size : constant Offset := Offset (Little_Endian (Head (10 .
 driver-recording.adb	V := Shift_Left (V, 8) or Unsigned_64 (Data (I));	8	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
 driver-recording.adb	for I in 0 .. 3 loop	3	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
 driver-recording.adb	for I in 0 .. 7 loop	7	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
+driver-robot-hand-touch.adb	A (Row + 1, Base + 1) := 1.0 / P.Offset_Sigma;	1.0	math	a prior row is whitened by the inverse of its sigma
+driver-robot-hand-touch.adb	A (Row + 2, Base + 2) := 1.0 / L11;	1.0	math	whitening by the inverse of the tilt covariance's Cholesky factor
+driver-robot-hand-touch.adb	A (Row + 2, Base + 2) := 1.0 / L11;	2	structure	the second of a surface's three error components, the first tilt
+driver-robot-hand-touch.adb	A (Row + 2, Base + 2) := 1.0 / L11;	2	structure	the second of a surface's three error components, the first tilt
+driver-robot-hand-touch.adb	A (Row + 3, Base + 2) := -L21 / (L11 * L22);	2	structure	the second of a surface's three error components, the first tilt
+driver-robot-hand-touch.adb	A (Row + 3, Base + 2) := -L21 / (L11 * L22);	3	structure	the third of a surface's three error components, the second tilt
+driver-robot-hand-touch.adb	A (Row + 3, Base + 3) := 1.0 / L22;	1.0	math	whitening by the inverse of the tilt covariance's Cholesky factor
+driver-robot-hand-touch.adb	A (Row + 3, Base + 3) := 1.0 / L22;	3	structure	the third of a surface's three error components, the second tilt
+driver-robot-hand-touch.adb	A (Row + 3, Base + 3) := 1.0 / L22;	3	structure	the third of a surface's three error components, the second tilt
+driver-robot-hand-touch.adb	E : Equations (Presses => Presses'Length, K => 1);	1	structure	a tip on a known line of sight has one unknown, its distance
+driver-robot-hand-touch.adb	E : Equations (Presses => Presses'Length, K => 3);	3	structure	a free tip has three unknowns, its coordinates
+driver-robot-hand-touch.adb	E.Plane (I, 1) := -1.0;	1.0	math	a surface raised by its offset error lowers the tip's height by the same amount
+driver-robot-hand-touch.adb	Found : Surface_Index (Presses'Range) := [others => 1];	1	structure	surfaces are numbered from one
+driver-robot-hand-touch.adb	Next : constant Real := Real'Max (1.0, Noise * (Res * Res) / Real (Dof));	1.0	statistics	the presses' noise is never below what the arm's pose predicts
+driver-robot-hand-touch.adb	Noise : Real := 1.0;	1.0	statistics	the presses' noise starts at what the arm's pose predicts
+driver-robot-hand-touch.adb	Plane_Unknowns : constant := 3;	3	structure	a surface's error is its offset and its two tilts
+driver-robot-hand-touch.adb	S : Solution (K => 1);	1	structure	a tip on a known line of sight has one unknown, its distance
+driver-robot-hand-touch.adb	S : Solution (K => 3);	3	structure	a free tip has three unknowns, its coordinates
+driver-robot-hand-touch.adb	S.Degrees_Of_Freedom := (if Noise > 1.0 then Dof else 0);	1.0	statistics	the scale was measured when it exceeds the predicted noise
+driver-robot-hand-touch.adb	Scale : Real := 1.0 / Noise;	1.0	statistics	the predicted noise in units of the measured scale
+driver-robot-hand-touch.adb	Solve (E, Presses, Surfaces, [1 => 0.0], S, Stopped, Sunk);	1	structure	the single unknown of a tip on a line of sight
+driver-robot-hand-touch.adb	if Chosen (I) and then Significant (Deleted (I), 1.0, Dof_Of (I))	1.0	math	a residual already in units of its own sigma
+driver-robot-hand-touch.adb	if Dof > 1 and then (Chi - Res (J) ** 2 / Free) / Real (Dof - 1) > Scale then	1	statistics	the others need a degree of freedom left to measure their scatter
+driver-robot-hand-touch.adb	if Presses'Length < 2 or else not Known (Origin) or else Direction.Sigma >= Real'Last then	2	structure	one press to fix the distance and one to check it
 driver-stats.adb	Child := 2 * Root;	2	math	heap sort and median index arithmetic
 driver-stats.adb	Degrees_Of_Freedom => X'Length - 2),	2	statistics	a line fit uses two degrees of freedom
 driver-stats.adb	Gaussian_MAD_To_Sigma : constant := 1.482_602_218_505_602;	1.482_602_218_505_602	statistics	1 / Phi^-1 (3/4): MAD to sigma for Gaussian data
