@@ -12,7 +12,7 @@
 set -u
 H=$(cd "$(dirname "$0")" && pwd)
 Q=/root/p8/scenes/qboot.sh
-declare -A SHOT=([distort]=P8VD [delay2]=P8VL [blur]=P8VB [noise]=P8VN [nohead]=P8VH)
+declare -A SHOT=([distort]=P8WD [delay2]=P8WL [blur]=P8WB [noise]=P8WN [nohead]=P8WH)
 for c in ${@:-distort delay2 blur noise nohead}; do
   k=${SHOT[$c]}
   if [ "$c" = nohead ]; then
@@ -20,5 +20,7 @@ for c in ${@:-distort delay2 blur noise nohead}; do
   else
     BOOT_KEEP=1 BD_CAMTEST="$H/conditions/$c.json" BOOT_CFG=arx_x5 BOOT_SEED=0 bash "$Q" "$k" bootcal zero 25
   fi
+  d=0,0; [ "$c" = distort ] && d=-0.15,0.03      # 钩子加的畸变(和 conditions/distort.json 一样);写成 --distort=…(负号开头,分开写 argparse 当成另一个选项)
+  python3 /root/p8/scenes/score_boot.py "$k" --distort="$d" > "/root/p8/boot/$k/score.txt" 2>&1
   echo "$(date +%T) $c → $k:$(tail -4 /root/p8/boot/$k/meta.txt | tr '\n' ' ')"
 done
