@@ -14,7 +14,10 @@
 --  打出:挑中那一组的接触点和法向、要的摩擦(按量到的法向 / 按误差最坏)、每单位重量的法向力之和、进场方向、合拢方向,
 --  以及合拢方向和它顶面轮廓长轴的夹角(轮廓的主轴,按轮廓点在面里的协方差)。
 --  用法:contactexam run_dir body.json seq cam arm name host port x0 y0 x1 y1 u v [lobes_geo.json]
+--  要它怎么动(可选):环境变量 CONTACT_MOVE = "lin x y z"(沿世界系这个方向平移)或 "ang x y z"(绕过顶面轮廓重心、沿这个方向的轴转);
+--  没给 = 驱动没听到脑说"哪个量往哪变"时的那一种(跟着手离开它躺的面)。只看方向,不看大小。
 with Ada.Command_Line; use Ada.Command_Line;
+with Ada.Environment_Variables;
 with Ada.Text_IO; use Ada.Text_IO;
 with Ada.Streams.Stream_IO;
 with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
@@ -348,6 +351,32 @@ begin
          E2 : constant Geom.V3 := Contact.Cross (N, E1);
          Np : constant Long_Float := Long_Float (C.Sil_Pts.Length);
       begin
+         if Ada.Environment_Variables.Exists ("CONTACT_MOVE") then
+            declare
+               Fs : constant Strs := Fields (Ada.Environment_Variables.Value ("CONTACT_MOVE"));
+               Tw : Contact.Twist;
+               Cm : Geom.V3 := [others => 0.0];
+            begin
+               if Natural (Fs.Length) /= 4 or else (Fs (0) /= "lin" and then Fs (0) /= "ang") then
+                  Put_Line ("CONTACT_MOVE 要写成 ""lin x y z"" 或 ""ang x y z"",给的是 " & Ada.Environment_Variables.Value ("CONTACT_MOVE"));
+                  return;
+               end if;
+               for Q of C.Sil_Pts loop
+                  Cm := Add (Cm, Scl (1.0 / Np, Q));
+               end loop;
+               if Fs (0) = "lin" then
+                  Tw.Lin := [Long_Float'Value (Fs (1)), Long_Float'Value (Fs (2)), Long_Float'Value (Fs (3))];
+                  Tw.Pivot := Cm;
+               else
+                  Tw.Ang := [Long_Float'Value (Fs (1)), Long_Float'Value (Fs (2)), Long_Float'Value (Fs (3))];
+                  Tw.Pivot := Cm;
+               end if;
+               C.Want_Move := (Given => True, Move => Tw);
+               Put_Line ("要它怎么动:" & (if Fs (0) = "lin" then "沿 " & V (Tw.Lin) & " 平移" else "绕过 " & V (Cm) & "(顶面轮廓重心)、沿 " & V (Tw.Ang) & " 的轴转"));
+            end;
+         else
+            Put_Line ("要它怎么动:没说(跟着手离开它躺的面)");
+         end if;
          Act.Plan_Contact (C, F, Arm, Cam, Name, Pick, Note, Ok);
          Put_Line ("接触集:" & To_String (Note));
          if not Ok then
