@@ -39,7 +39,7 @@ sleep 3
 setsid nohup "$BIN/proxy" 9090 127.0.0.1 9080 "$R/wire.rec" </dev/null >"$R/proxy.log" 2>&1 &
 sleep 2
 cd /root/RoboDojo
-BD_TRUTH="$R/truth.jsonl" OMNI_KIT_ACCEPT_EULA=YES PATH=/venv/RoboDojo/bin:$PATH BD_STEP_LIM=3000 setsid nohup \
+BD_TRUTH="$R/truth.jsonl" BD_TRUTH_GEOMETRY=/root/rec/geometry OMNI_KIT_ACCEPT_EULA=YES PATH=/venv/RoboDojo/bin:$PATH BD_STEP_LIM=3000 setsid nohup \
   bash scripts/eval_policy.sh --root_dir /root/RoboDojo --task_name "$TASK" --env_cfg_type "$CFG" --device_id 0 \
   --policy_name l3_link --port 9090 --protocol ws --policy_server_url "ws://127.0.0.1:9090" --seed "$SEED" \
   --host 127.0.0.1 --enable_cameras --headless </dev/null >"$R/sim.log" 2>&1 &
