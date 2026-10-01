@@ -18,9 +18,19 @@ package body Episode is
       --  remember 记下的地方、上次认出名字的那只眼(路 7 查出,10-01)
       C.Places.Clear;
       C.Name_Cam := -1;
-      --  脑交的那一段程序(C.Prog / C.M / C.Binds / C.Have_Prog 和它的账)这里不清:清了就是"半路扔掉整段程序"的第三处,
-      --  闸门棘轮只许两处(跑完、编译期退回)—— 新的一集算不算第三处,等主代理定(10-01 报了:今天段里一见复位就收段,
-      --  下一轮接着跑上一集那段程序的下一条)
+      --  脑交的那一段程序、跑到哪、名词落到哪、上一段的结局 / 退回的话 / 原文:新的一集不接着跑上一集的程序
+      --  (原来段里一见复位就收段,下一轮接着跑上一集那段程序的下一条)。这是 check_gates "半路扔掉整段程序"的第三处:
+      --  对方复位、开了新的一集,不是身体觉得这段程序不该跑了(主代理 10-01 批,只在这一处)
+      C.Prog := (others => <>);
+      C.M := (others => <>);
+      C.Binds.Clear;
+      C.Have_Prog := False;
+      C.Refused := Null_Unbounded_String;
+      C.Last_Outcome := Sinew.Oc_None;
+      C.Blind_Say := Null_Unbounded_String;
+      C.Last_Prog := Null_Unbounded_String;
+      C.Last_Moved := True;
+      C.Prog_Log := Null_Unbounded_String;
       --  这一节 / 这一集的选择:换过眼、anyway、点了哪只眼、点名的那块在哪台相机
       C.Eye_Chosen := False;
       C.Reckless := False;

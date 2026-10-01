@@ -12,11 +12,15 @@ with Plan;
 with Episode;
 with World;
 with Memory;
+with Runtime;
+with Probe;
 separate (Selfcheck)
 procedure Welds_Path_1 is
    use Ada.Numerics.Long_Elementary_Functions;
    use type Selfmap.Group_Role;
    use type Selfmap.Walk_End;
+   use type Runtime.Yield;
+   use type Probe.Next_Step;
    use type Readings.Eye_Verdict;
    use type Readings.View_Says;
    --  路 1 的焊点(大并行.md §5 路 1):每条写清"错了会是什么病",带一颗牙(去掉那一改就红)
@@ -1799,11 +1803,11 @@ begin
       end;
    end;
 
-   --  ══ 一集和一集之间不带经验(路 7 查出,10-01):对方复位、开新的一集 ⇒ Episode.Begin_New 清掉上一集的世界和这一集的选择,身体留着 ══
-   --  上一集留下:remember 记下的一个地方、上次认出名字的那只眼、"这一集已经自己换过一次眼睛了"、几何逼近记的观测;
-   --  身体那一侧:身体图里的臂数、碰过的面(标成上一集的)。脑交的那一段程序这一版不清(闸门棘轮只许两处扔程序,等主代理定),照实焊着它留着。
-   --  病:上一集 remember 的地方、认名字的眼带进下一集;第一集换过一次眼以后每一集都不许换。
-   --  牙:原来 body_driver 里那一串(只清世界、框、碰的面、墙)⇒ 地方、认名字的眼、换过眼都还在
+   --  ══ 一集和一集之间不带经验(路 7 查出,10-01):对方复位、开新的一集 ⇒ Episode.Begin_New 清掉上一集的世界、脑那一段程序、这一集的选择,身体留着 ══
+   --  上一集留下:remember 记下的一个地方、上次认出名字的那只眼、跑到一半的一段程序(跑完了第一条)、"这一集已经自己换过一次眼睛了"、
+   --  几何逼近记的观测;身体那一侧:身体图里的臂数、碰过的面(标成上一集的)。
+   --  病:上一集 remember 的地方、认名字的眼带进下一集;下一轮接着跑上一集那段程序的下一条;第一集换过一次眼以后每一集都不许换。
+   --  牙:原来 body_driver 里那一串(只清世界、框、碰的面、墙)⇒ 地方、认名字的眼、换过眼都还在,程序还在:执行器再走一步交出的是上一集那段的第二条
    declare
       procedure Dirty (C : in out Act.Context) is
          Pl : Act.Place;
@@ -1815,8 +1819,15 @@ begin
          C.Name_Cam := 1;
          B.Key := To_Unbounded_String ("ball"); B.Item := 3;
          C.Binds.Append (B);
+         --  上一集那段程序:跑完了第一条(执行器走过一步),下一步该交出第二条
+         C.Prog := Sinew.Parse ("say first" & ASCII.LF & "say second" & ASCII.LF & "done");
          C.Have_Prog := True;
-         C.M.PC := 5;
+         declare
+            What : Runtime.Yield;
+            I : Sinew.Instr;
+         begin
+            Runtime.Advance (C.Prog, C.M, What, I);
+         end;
          C.Refused := To_Unbounded_String ("line 2: no");
          C.Eye_Chosen := True;
          C.Last_Prog := To_Unbounded_String ("do grasper close ball until stuck");
@@ -1839,19 +1850,208 @@ begin
          Act.Init_Tracks (C);
       end Old_Reset;
       Cn, Co : Act.Context;
+      Old_Next : Unbounded_String;   --  牙那一份:执行器再走一步交出什么
    begin
       Dirty (Cn); Dirty (Co);
       Episode.Begin_New (Cn);
       Old_Reset (Co);
+      declare
+         What : Runtime.Yield;
+         I : Sinew.Instr;
+      begin
+         if Co.Have_Prog then
+            Runtime.Advance (Co.Prog, Co.M, What, I);
+            Old_Next := To_Unbounded_String (Runtime.Yield'Image (What) & (if What = Runtime.Y_Say then " " & To_String (I.Text) else ""));
+         end if;
+      end;
       Check (Cn.Places.Is_Empty and then Cn.Name_Cam = -1 and then not Cn.Eye_Chosen and then Cn.Geo_Obs.Is_Empty
+             and then not Cn.Have_Prog and then Cn.Prog.Code.Is_Empty and then Cn.M.PC = 0 and then Cn.Binds.Is_Empty
+             and then Cn.Refused = Null_Unbounded_String and then Cn.Last_Prog = Null_Unbounded_String
              and then Cn.Map.Arms = 2 and then Natural (Cn.Map.Groups.Length) = 1 and then Cn.Touch_Valid and then not Cn.Touch_Fresh
-             and then not Co.Places.Is_Empty and then Co.Name_Cam = 1 and then Co.Eye_Chosen,
+             and then not Co.Places.Is_Empty and then Co.Name_Cam = 1 and then Co.Eye_Chosen and then Co.Have_Prog
+             and then To_String (Old_Next) = "Y_SAY second",
              "新的一集 · 复位以后:记下的地方 " & Codec.Img (Natural (Cn.Places.Length)) & " 个、认名字的眼" & Integer'Image (Cn.Name_Cam)
+             & "、程序 " & (if Cn.Have_Prog then "还在" else "清了") & "(" & Codec.Img (Natural (Cn.Prog.Code.Length)) & " 条、绑定 "
+             & Codec.Img (Natural (Cn.Binds.Length)) & ",下一轮问脑要新的)"
              & "、换过眼 " & Boolean'Image (Cn.Eye_Chosen) & "、几何逼近的观测 " & Codec.Img (Natural (Cn.Geo_Obs.Length)) & " 笔"
              & " · 身体留着(臂 " & Codec.Img (Cn.Map.Arms) & "、碰过的面 " & Boolean'Image (Cn.Touch_Valid)
              & "、标成上一集的 " & Boolean'Image (not Cn.Touch_Fresh) & ")"
-             & " · 脑那一段程序这一版照旧留着(" & (if Cn.Have_Prog then "还在" else "清了") & ",等主代理定)"
              & " · 牙:原来那一串 ⇒ 地方 " & Codec.Img (Natural (Co.Places.Length)) & " 个、认名字的眼" & Integer'Image (Co.Name_Cam)
-             & "、换过眼 " & Boolean'Image (Co.Eye_Chosen));
+             & "、换过眼 " & Boolean'Image (Co.Eye_Chosen) & "、程序还在,执行器下一步交出「" & To_String (Old_Next) & "」(上一集那段的第二条)");
+   end;
+
+   --  ══ 探针那一推看没看见(Probe;Act.Probe_Effects 用它,10-01 主代理批):命令实到了、画面里那一点一个像素都没挪(按驱动的跟法)⇒ 不算量到 ══
+   --  假身体(只有画面这一边):推 Amp,那一点在画面里真挪 K × Amp 像素;驱动的跟法(Act.Retrack 跟手上那一块)流不到半个像素就判跟丢、放回原处。
+   --  V1B79 落盘重放(驱动自己的光流,10-01):通道 6 一推实到 0.0127,手在头顶眼里真挪 0.67–0.87 px(OpenCV LK / 相位相关),
+   --  驱动的光流只看到 0.28–0.37 px ⇒ 跟丢、放回原处 ⇒ 原来照样记成"这一列是零"、还信它。A 照它取(一推 0.3 px),B 更小(一推 0.2 px);
+   --  地板按那一炮静止两帧重跟量的(0.010 / 0.013 px)。
+   --  病:没挪的那一推当成"量到了零",响应表里这一列是假的零,解算以为这根通道不动手。
+   --  牙:① 原来的判法(命令实到超过读数噪声就算)⇒ 第一推就收、记成零;② 新判法配原来的"加倍了一点没多跑"(拿跟丢的 0 比)⇒ B 两推都跟丢就判成零、不再加倍
+   declare
+      Amp0 : constant Long_Float := 0.0127;
+      Cap : constant Long_Float := 8.0 * Amp0;
+      Lost_Px : constant Long_Float := 0.5;            --  Retrack:手动了、这儿流不到半个像素 ⇒ 跟丢(它那一行的数)
+      W : constant Long_Float := 640.0;
+      Static : Floats;                                 --  静止两帧上重跟的挪动平方(画幅²)
+      Floor : Long_Float;
+      type Rule is (New_Rule, Old_Seen, Old_Next);
+      --  一路加倍到看见(或上限 / 判成零):Pushes = 推了几推,Col = 记进表的那一列(像素 / 单位),Got = 收下了
+      procedure Ladder (K_Px : Long_Float; R : Rule; Pushes : out Natural; Col : out Long_Float; Got : out Boolean) is
+         Amp : Long_Float := Amp0;
+         Last : Long_Float := -1.0;
+      begin
+         Pushes := 0; Col := 0.0; Got := False;
+         loop
+            declare
+               Px : constant Long_Float := K_Px * Amp;
+               Lost : constant Boolean := Px < Lost_Px;
+               Ran : constant Long_Float := (if Lost then 0.0 else Px / W);   --  跟丢 ⇒ 放回原处
+               Meas : constant Long_Float := (if Lost then -1.0 else Ran);
+               Seen : constant Boolean := (if R = Old_Seen then True else Probe.Moved (False, Lost, Ran, Floor));
+               Nx : Probe.Next_Step;
+            begin
+               Pushes := Pushes + 1;
+               if R = Old_Next and then not Seen then
+                  --  原来的:幅度 × 2 过上限 ⇒ 不用;加倍以后(连跟丢的 0 一起比)一点没多 ⇒ 零
+                  Nx := (if Amp * 2.0 > Cap then Probe.At_Cap elsif Last >= 0.0 and then Ran <= Last then Probe.Is_Zero else Probe.Double_It);
+                  Last := Ran;
+               else
+                  Nx := Probe.Next (Seen, Meas, Last, Amp, Cap);
+                  Last := Meas;
+               end if;
+               case Nx is
+                  when Probe.Take_It =>
+                     Col := Ran * W / Amp; Got := True;
+                     return;
+                  when Probe.At_Cap | Probe.Is_Zero =>
+                     return;
+                  when Probe.Double_It =>
+                     Amp := 2.0 * Amp;
+               end case;
+            end;
+         end loop;
+      end Ladder;
+      Ka : constant Long_Float := 0.3 / Amp0;
+      Kb : constant Long_Float := 0.2 / Amp0;
+      Pa, Pb, Pa_Old, Pb_Old : Natural;
+      Ca, Cb, Ca_Old, Cb_Old : Long_Float;
+      Ga, Gb, Ga_Old, Gb_Old : Boolean;
+   begin
+      Static.Append ((0.010 / W) ** 2); Static.Append ((0.013 / W) ** 2);
+      Floor := Probe.Floor_Of (Probe.Track_Sigma (Static));
+      Ladder (Ka, New_Rule, Pa, Ca, Ga);
+      Ladder (Kb, New_Rule, Pb, Cb, Gb);
+      Ladder (Ka, Old_Seen, Pa_Old, Ca_Old, Ga_Old);
+      Ladder (Kb, Old_Next, Pb_Old, Cb_Old, Gb_Old);
+      Check (Ga and then Pa = 2 and then abs (Ca - Ka) <= 1.0e-9 * Ka and then Gb and then Pb = 3 and then abs (Cb - Kb) <= 1.0e-9 * Kb
+             and then not Probe.Moved (False, True, 0.0, Floor) and then not Probe.Moved (True, False, 1.0, Floor)
+             and then Probe.Next (False, 0.002, 0.002, 2.0 * Amp0, Cap) = Probe.Is_Zero
+             and then Probe.Next (False, -1.0, 0.002, 2.0 * Amp0, Cap) = Probe.Double_It
+             and then Ga_Old and then Pa_Old = 1 and then Ca_Old = 0.0 and then not Gb_Old and then Pb_Old = 2,
+             "探针 · 命令实到了、画面里那一点按驱动的跟法没挪(流不到半像素 ⇒ 跟丢)不算量到:A(一推 0.3 px)第 " & Codec.Img (Pa)
+             & " 推看见、记 " & Codec.Fmt (Ca, 2) & " px/单位(真 " & Codec.Fmt (Ka, 2) & ") · B(一推 0.2 px)第 " & Codec.Img (Pb) & " 推看见、记 "
+             & Codec.Fmt (Cb, 2) & "(真 " & Codec.Fmt (Kb, 2) & ") · 地板 = 静止两帧重跟的 Stats.Z 倍 = " & Codec.Fmt (Floor * W, 4) & " px"
+             & " · 长在这只眼上的手的点不算看见 · 两推都量出来、加倍一点没多 ⇒ 零;有一推跟丢 ⇒ 接着加倍"
+             & " · 牙:① 原来只问命令实到 ⇒ A 第 " & Codec.Img (Pa_Old) & " 推就收、这一列记成 " & Codec.Fmt (Ca_Old, 2)
+             & ";② 拿跟丢的 0 比「没多跑」⇒ B 第 " & Codec.Img (Pb_Old) & " 推判成零、" & (if Gb_Old then "(收下了,牙没咬上)" else "没收下"));
+   end;
+
+   --  ══ 走一段关节直线,身体的表面挪多远(Links.Max_Shift,10-01 路 4 要的:保守推进每一步走多远)══
+   --  合成的两节臂(两根竖着的转轴,第 1 根在第 0 根外 L1;第 0 节、第 1 节各 5 个表面点),参照那一刻第 1 节往回折着(折 Fold);
+   --  沿关节直线走过去,每个点真走的路长(细分 4000 段量,按自己写的平面运动学算,不用 Links 的)≤ 上界 ≤ 2 倍。两种走法:
+   --  ① 两个关节同向(L1 0.20、L2 0.40、折 2.8,q0 −2.0、q1 −2.8:第 1 节一路伸直,离第 0 根轴越来越远);② 反向(L1 0.30、L2 0.25、折 2.5,q0 +0.4、q1 −2.5)。
+   --  没量过形状的臂:说不出(Known = False、Long_Float'Last)。
+   --  病:上界比真挪的小 ⇒ 路 4 按它放的步子撞上;大得离谱 ⇒ 步子小到走不动。
+   --  牙:只按参照那一刻点离轴多远算(不沿链往外加)⇒ ① 第 1 节伸直以后离第 0 根轴的距离没算上,上界比真挪的小
+   declare
+      function Rz (A : Long_Float; X : Geom.V3) return Geom.V3 is
+        ([Cos (A) * X (0) - Sin (A) * X (1), Sin (A) * X (0) + Cos (A) * X (1), X (2)]);
+      type Case_Rec is record
+         L1, L2, Fold, Q0e, Q1e : Long_Float;
+      end record;
+      type Case_Arr is array (1 .. 2) of Case_Rec;
+      Cases : constant Case_Arr := [(0.20, 0.40, 2.8, -2.0, -2.8), (0.30, 0.25, 2.5, 0.4, -2.5)];
+      Ok_All : Boolean := True;
+      Txt : Unbounded_String;
+      Naive_Bites : Boolean := False;
+   begin
+      for Cs of Cases loop
+         declare
+            Md : Kinem.Model;
+            Pl : Links.Placement;
+            Pls : Links.Placement_Vectors.Vector;
+            Pts : Links.Link_Pt_Vectors.Vector;
+            A1 : constant Geom.V3 := [Cs.L1, 0.0, 0.0];
+            Q0, Q1 : Floats;
+            Known, Known_None : Boolean;
+            Bound, None_Bound : Long_Float;
+            True_Max : Long_Float := 0.0;
+            Naive : Long_Float;
+            R0_Ref, R1 : Long_Float := 0.0;
+         begin
+            Md.Valid := True; Md.N := 2;
+            Md.Ax (0).W := [0.0, 0.0, 1.0]; Md.Ax (0).P := [0.0, 0.0, 0.0];
+            Md.Ax (1).W := [0.0, 0.0, 1.0]; Md.Ax (1).P := A1;
+            Md.Q0.Append (0.0); Md.Q0.Append (0.0);
+            Pl.Model := Md; Pl.Valid := True;
+            Pls.Append (Pl);
+            for K in 0 .. 4 loop
+               declare
+                  R : constant Long_Float := 0.2 + 0.2 * Long_Float (K);
+                  P0, P1 : Links.Link_Pt;
+               begin
+                  P0.Arm := 0; P0.Link := 0; P0.P := [R * Cs.L1, 0.0, 0.0]; P0.Views := 2;
+                  P1.Arm := 0; P1.Link := 1; P1.P := [Cs.L1 + R * Cs.L2 * Cos (Cs.Fold), R * Cs.L2 * Sin (Cs.Fold), 0.0]; P1.Views := 2;
+                  Pts.Append (P0); Pts.Append (P1);
+               end;
+            end loop;
+            Links.Install (Pls, Pts);
+            Q0.Append (0.0); Q0.Append (0.0);
+            Q1.Append (Cs.Q0e); Q1.Append (Cs.Q1e);
+            Bound := Links.Max_Shift (0, Q0, Q1, Known);
+            --  真挪的:每个点沿关节直线细分走一遍,路长求和(平面运动学自己算)
+            for P of Pts loop
+               declare
+                  Prev : Geom.V3 := P.P;
+                  L : Long_Float := 0.0;
+                  Nst : constant := 4000;   --  细分段数(自检自己的分辨率)
+               begin
+                  for I in 1 .. Nst loop
+                     declare
+                        T : constant Long_Float := Long_Float (I) / Long_Float (Nst);
+                        X : constant Geom.V3 :=
+                          (if P.Link = 0 then Rz (Cs.Q0e * T, P.P)
+                           else Rz (Cs.Q0e * T, [A1 (0) + Rz (Cs.Q1e * T, [P.P (0) - A1 (0), P.P (1) - A1 (1), P.P (2) - A1 (2)]) (0),
+                                                 A1 (1) + Rz (Cs.Q1e * T, [P.P (0) - A1 (0), P.P (1) - A1 (1), P.P (2) - A1 (2)]) (1),
+                                                 A1 (2) + Rz (Cs.Q1e * T, [P.P (0) - A1 (0), P.P (1) - A1 (1), P.P (2) - A1 (2)]) (2)]));
+                     begin
+                        L := L + Geom.Norm ([X (0) - Prev (0), X (1) - Prev (1), X (2) - Prev (2)]);
+                        Prev := X;
+                     end;
+                  end loop;
+                  True_Max := Long_Float'Max (True_Max, L);
+               end;
+            end loop;
+            --  牙:只按参照那一刻点离轴多远(第 0 根轴:所有点到原点;第 1 根轴:第 1 节的点到 A1)
+            for P of Pts loop
+               R0_Ref := Long_Float'Max (R0_Ref, Geom.Norm (P.P));
+               if P.Link = 1 then
+                  R1 := Long_Float'Max (R1, Geom.Norm ([P.P (0) - A1 (0), P.P (1) - A1 (1), P.P (2) - A1 (2)]));
+               end if;
+            end loop;
+            Naive := abs Cs.Q0e * R0_Ref + abs Cs.Q1e * R1;
+            Naive_Bites := Naive_Bites or else Naive < True_Max;
+            --  没量过形状的臂(第 1 条:装上的只有第 0 条)
+            None_Bound := Links.Max_Shift (1, Q0, Q1, Known_None);
+            Ok_All := Ok_All and then Known and then Bound >= True_Max and then Bound <= 2.0 * True_Max
+              and then not Known_None and then None_Bound = Long_Float'Last;
+            Append (Txt, " · 真挪最多 " & Codec.Fmt (True_Max, 3) & "、上界 " & Codec.Fmt (Bound, 3) & "(" & Codec.Fmt (Bound / True_Max, 2)
+                    & " 倍)、只按参照那一刻 " & Codec.Fmt (Naive, 3));
+         end;
+      end loop;
+      Links.Install (Links.Placement_Vectors.Empty_Vector, Links.Link_Pt_Vectors.Empty_Vector);   --  别的焊点看到的是空的
+      Check (Ok_All and then Naive_Bites,
+             "表面挪多远(Max_Shift)· 同向 / 反向两种走法" & To_String (Txt) & " · 没量过形状的臂说不出"
+             & " · 牙:只按参照那一刻点离轴多远 ⇒ " & (if Naive_Bites then "同向那一种比真挪的小" else "(不比真挪的小,牙没咬上)"));
    end;
 end Welds_Path_1;

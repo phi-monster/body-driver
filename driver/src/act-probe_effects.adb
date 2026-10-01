@@ -1,3 +1,4 @@
+with Probe;
 separate (Act)
 procedure Probe_Effects (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Cam : Natural; Pts : in out Point_Vectors.Vector;
                          Effs : in out Effect_Array; Trust : out Table.Mask; Ok : out Boolean;
@@ -8,10 +9,16 @@ procedure Probe_Effects (L : in out Plug.Link; C : in out Context; F : in out Pl
    Arm : constant Natural := (if Pts_Empty then 0 else Pts (0).Arm);
    P0 : constant Plug.Arm_Pose := F.EE (Arm);
    Jaw : Floats;
-   --  (路 1,10-01)驱动不读身体给的深度(Plug.Frame_Of:Has_Depth 恒为 False),原来在这里量的四样地板 —— 跟踪 4 像素、
-   --  远近、看着多大、朝向 —— 只在 Has_Depth 那一支里量,那一支从来没跑过:远近 / 看着多大 / 朝向三样地板恒为 0,
-   --  而"这一推有没有一个点动过地板"写成 "挪过 4 像素 或者 远近变过远近的地板",后一半 0 ≥ 0 恒真 ⇒ 4 像素那一半从来不起作用。
-   --  删掉以后行为逐位不变:动没动过只按命令实到超过读数噪声判(画面里挪多少不进这一判;要不要换成量出来的跟踪地板,报主代理了)
+   --  (路 1,10-01)看没看见一推:按量出来的跟踪地板判(Probe 包;同 Links 判"挪了")—— 推之前什么都不做再收一拍,
+   --  每个看得见的点在这两帧上重跟一次,挪了多少 = 跟踪噪声;一推以后一个点算挪了 = 看得见、没跟丢、挪的超过 Stats.Z 倍噪声。
+   --  原来(驱动不读深度以后)只要命令实到超过读数噪声就算量到了,点一个像素都没挪也写进表、还信它
+   --  (V1B79:54 次推里 48 次点跑了 0.0000 画幅 —— Retrack 在手动了这儿却没流时把点放回原处、标跟丢,这一推照样记成"这一列是零")
+   Floor_Px : Long_Float := 0.0;   --  跟踪地板(画幅;Probe.Floor_Of)
+   N_Static : Natural := 0;        --  量地板用了几个点(看得见、静止两帧上没跟丢的)
+   --  长在这只眼上的那只手的点:Retrack 在它自己的眼里不跟(握区是固定像素),它不动是按构造知道的,不是量的 ⇒ 不进地板、不算挪了
+   function Own_Eye_Point (Cx : Context; P : Point) return Boolean is (P.Kind = Piece_Pt and then Cam_Arm (Cx, P.Cam) = Integer (P.Arm));
+   --  跟的点全是这种点:它们在这只眼里不动是按构造知道的 ⇒ 每一推照原来记成"量到了零"(这一种和原来逐位一样)
+   All_Own : constant Boolean := (for all P of Pts => Own_Eye_Point (C, P));
    --  这条臂的位姿通道(问身体图,大并行 I1):响应表第 K 列 = 第 K 个位姿通道,通道号 = Chs (K);不按"臂 × 每臂几个 + K"算
    Chs : constant Ints := Selfmap.Graph.Pose_Channels (C.Map, Arm);
    N_Ch : constant Natural := Natural (Chs.Length);
@@ -92,8 +99,39 @@ begin
          end;
       end loop;
    end loop;
+   --  跟踪地板:什么都不做再收一拍,每个看得见的点在这两帧上重跟一次(点本身不动:拿拷贝跟);一个看得见的点都没有就不量
+   if not All_Own then
+   declare
+      Before0_All : constant Buf_Vectors.Vector := All_Gray (F);
+      Was0 : constant Point_Vectors.Vector := Pts;
+      D2 : Floats;
+      Ok0 : Boolean;
+   begin
+      Selfmap.Idle (L, F, 1, Ok0);
+      if not Ok0 then
+         Ok := False;
+         return;
+      end if;
+      for I in 0 .. N_Pts - 1 loop
+         if not Own_Eye_Point (C, Was0 (I)) then
+            declare
+               P2 : Point := Was0 (I);
+            begin
+               Retrack (C, F, P2.Cam, Before0_All (P2.Cam), P2, Was0 (I).Cu, Was0 (I).Cv, False);
+               if not P2.Lost then
+                  D2.Append ((P2.Cu - Was0 (I).Cu) ** 2 + (P2.Cv - Was0 (I).Cv) ** 2);
+               end if;
+            end;
+         end if;
+      end loop;
+      N_Static := Natural (D2.Length);
+      Floor_Px := Probe.Floor_Of (Probe.Track_Sigma (D2));
+   end;
+   end if;
    Ok := True;
-   Put_Line ("[身]   这些点还没有响应表 ⇒ 这条臂的 " & Codec.Img (N_Ch) & " 个位姿通道各推一下量列(幅度从开机看得见的那一档起;命令实到没超过读数噪声才翻倍)");
+   Put_Line ("[身]   这些点还没有响应表 ⇒ 这条臂的 " & Codec.Img (N_Ch) & " 个位姿通道各推一下量列(幅度从开机看得见的那一档起翻倍,"
+             & "到一个看得见的点挪过跟踪地板为止;地板 = 静止两帧上 " & Codec.Img (N_Static) & " 个点重跟的 Stats.Z 倍噪声 = "
+             & Codec.Fmt (Floor_Px, 5) & " 画幅)");
    --  这条臂的位姿通道一起解:转动不禁(owner 2026-09-07:禁了就永远和桌面平行,格斗全成直线)。让转动有对错的是"两根手指各自到位":
    --  转歪了必有一指不到位;让转动不比平移便宜的是按各自探针幅度计价。
    for K in 0 .. N_Ch - 1 loop
@@ -128,6 +166,7 @@ begin
                   Seen_Enough : Boolean := False;
                   N_Moved : Natural := 0;
                   Ran_Max : Long_Float := 0.0;
+                  Ran_Meas : Long_Float := -1.0;   --  这一推里量得出来的挪动最大多少(看得见、没跟丢的点;一个都没有 = -1)
                begin
                   A (K) := Amp;
                   declare
@@ -162,7 +201,10 @@ begin
                         Retrack (C, F, P.Cam, Before_All (P.Cam), P, W0.Cu, W0.Cv, True);
                         Ran := Sqrt ((P.Cu - W0.Cu) ** 2 + (P.Cv - W0.Cv) ** 2);
                         Ran_Max := Long_Float'Max (Ran_Max, Ran);
-                        if abs Deliv (K) > C.Map.EE_Noise then
+                        if not Own_Eye_Point (C, W0) and then not P.Lost then
+                           Ran_Meas := Long_Float'Max (Ran_Meas, Ran);
+                        end if;
+                        if abs Deliv (K) > C.Map.EE_Noise and then (All_Own or else Probe.Moved (Own_Eye_Point (C, W0), P.Lost, Ran, Floor_Px)) then
                            declare
                               Col : Table.Vec3;
                            begin
@@ -292,19 +334,22 @@ begin
                         Put_Line ("[身]     通道" & Natural'Image (Chn) & ":同一个推法第" & Natural'Image (Nrep (K) + 1) & " 次没动 ⇒ 不稳,如实记下");
                         exit;
                      end if;
-                     if Amp * 2.0 > Cap_Amp then
-                        Put_Line ("[身]     通道" & Natural'Image (Chn) & ":到 " & Codec.Fmt (Amp, 4) & " 命令实到都没超过读数噪声 " & Codec.Fmt (C.Map.EE_Noise, 4)
-                                  & "(点最多跑了 " & Codec.Fmt (Ran_Max, 4) & " 画幅)⇒ 这一段不用它");
-                        exit;
-                     end if;
-                     --  加倍了却一点没多跑 ⇒ 这一列是零,再加码只是空甩胳膊
-                     if Last_Ran (K) >= 0.0 and then Ran_Max <= Last_Ran (K) then
-                        Put_Line ("[身]     通道" & Natural'Image (Chn) & ":加倍到 " & Codec.Fmt (Amp, 4) &
-                                  " 之后点一点没多跑(" & Codec.Fmt (Last_Ran (K), 4) & " ⇒ " & Codec.Fmt (Ran_Max, 4) &
-                                  " 画幅)⇒ 这一列就是零,不再加码空甩");
-                        exit;
-                     end if;
-                     Last_Ran (K) := Ran_Max;
+                     case Probe.Next (False, Ran_Meas, Last_Ran (K), Amp, Cap_Amp) is
+                        when Probe.At_Cap =>
+                           Put_Line ("[身]     通道" & Natural'Image (Chn) & ":到 " & Codec.Fmt (Amp, 4) & " 一个看得见的点都没挪过跟踪地板 "
+                                     & Codec.Fmt (Floor_Px, 5) & "(量得出来的最多跑了 " & (if Ran_Meas < 0.0 then "—— 全跟丢了" else Codec.Fmt (Ran_Meas, 5))
+                                     & " 画幅,实到 " & Codec.Fmt (Deliv (K), 4) & ")⇒ 这一段不用它");
+                           exit;
+                        when Probe.Is_Zero =>
+                           --  加倍了却一点没多跑 ⇒ 这一列是零,再加码只是空甩胳膊
+                           Put_Line ("[身]     通道" & Natural'Image (Chn) & ":加倍到 " & Codec.Fmt (Amp, 4) &
+                                     " 之后点一点没多跑(" & Codec.Fmt (Last_Ran (K), 5) & " ⇒ " & Codec.Fmt (Ran_Meas, 5) &
+                                     " 画幅)⇒ 这一列就是零,不再加码空甩");
+                           exit;
+                        when Probe.Double_It | Probe.Take_It =>
+                           null;
+                     end case;
+                     Last_Ran (K) := Ran_Meas;
                      Amp := Amp * 2.0;
                   end if;
                end;

@@ -592,7 +592,20 @@ package body Links is
    end Readings_Now;
 
    function Self_Mask_Now (F : Plug.Frame; Cam : Natural; Geo : Cam_Geo; W, H : Natural) return Bools is
-      Qs : constant Plug.Floats_Vectors.Vector := Readings_Now (F);
+     (Self_Mask_At (Readings_Now (F), Cam, Geo, W, H));
+
+   function Reference_Readings return Plug.Floats_Vectors.Vector is
+      R : Plug.Floats_Vectors.Vector;
+   begin
+      for Pl of In_Pls loop
+         R.Append (Pl.Model.Q0);
+      end loop;
+      return R;
+   end Reference_Readings;
+
+   function Has_Shape (Arm : Natural) return Boolean is (for some P of In_Pts => P.Arm = Arm);
+
+   function Self_Mask_At (Qs : Plug.Floats_Vectors.Vector; Cam : Natural; Geo : Cam_Geo; W, H : Natural) return Bools is
       Pose : Plug.Arm_Pose := [others => 0.0];
       Placed : Boolean := Geo.Fixed;
    begin
@@ -618,7 +631,7 @@ package body Links is
          return Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (W * H));
       end if;
       return Self_Mask (Geo, Pose, W, H, Qs);
-   end Self_Mask_Now;
+   end Self_Mask_At;
 
    function Self_Mask (Geo : Cam_Geo; Pose : Plug.Arm_Pose; W, H : Natural; Qs : Plug.Floats_Vectors.Vector) return Bools is
       M : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (W * H));
@@ -668,4 +681,86 @@ package body Links is
       end loop;
       return M;
    end Self_Mask;
+
+   function Max_Shift (Arm : Natural; Q0, Q1 : Floats; Known : out Boolean) return Long_Float is
+      Best : Long_Float := 0.0;
+   begin
+      Known := False;
+      if Arm >= Natural (In_Pls.Length) or else not In_Pls (Arm).Valid or else not Has_Shape (Arm) then
+         return Long_Float'Last;
+      end if;
+      declare
+         Pl : constant Placement := In_Pls (Arm);
+         M : Kinem.Model renames Pl.Model;
+         N : constant Natural := M.N;
+         function Q_Of (V : Floats; J : Natural) return Long_Float is
+           (if J < Natural (V.Length) then V (J) elsif J < Natural (M.Q0.Length) then M.Q0 (J) else 0.0);
+         function Ref (J : Natural) return Long_Float is (if J < Natural (M.Q0.Length) then M.Q0 (J) else 0.0);
+         --  这一段关节直线上第 J 个关节离参照读数最远多远(直线 ⇒ 两头之一)
+         function Off_Ref (J : Natural) return Long_Float is
+           (Long_Float'Max (abs (Q_Of (Q0, J) - Ref (J)), abs (Q_Of (Q1, J) - Ref (J))));
+         --  第 K 根转轴上那一点:这根轴往外那几节(Link ≥ K)表面点的形心在轴上的垂足;一个点都没有 ⇒ 轴上存的那一点
+         function Anchor (K : Natural) return V3 is
+            Sum : V3 := [0.0, 0.0, 0.0];
+            Cnt : Natural := 0;
+            A : constant Kinem.Axis := M.Ax (K);
+            Wu : constant V3 := Unit (A.W);
+         begin
+            for P of In_Pts loop
+               if P.Arm = Arm and then P.Link >= K then
+                  Sum := Add (Sum, P.P); Cnt := Cnt + 1;
+               end if;
+            end loop;
+            if Cnt = 0 then
+               return A.P;
+            end if;
+            declare
+               C : constant V3 := Scl (Sum, 1.0 / Long_Float (Cnt));
+            begin
+               return Add (A.P, Scl (Wu, Dot (Sub (C, A.P), Wu)));
+            end;
+         end Anchor;
+         type V3_Arr is array (0 .. Natural'Max (1, N) - 1) of V3;
+         Anc : V3_Arr;
+      begin
+         for K in 0 .. N - 1 loop
+            Anc (K) := (if M.Ax (K).Slide then [0.0, 0.0, 0.0] else Anchor (K));
+         end loop;
+         for J in 0 .. N - 1 loop
+            declare
+               Dq : constant Long_Float := abs (Q_Of (Q1, J) - Q_Of (Q0, J));
+               Rj : Long_Float := 0.0;   --  转的关节:往外那几节表面点离它的轴最远多远(走到哪都成立的上界)
+            begin
+               if Dq > 0.0 then
+                  if M.Ax (J).Slide then
+                     Best := Best + Dq * Norm (M.Ax (J).W);
+                  else
+                     for P of In_Pts loop
+                        if P.Arm = Arm and then P.Link >= J and then P.Link < N then
+                           declare
+                              D : Long_Float := 0.0;
+                              Prev : V3 := Anc (J);
+                           begin
+                              for K in J + 1 .. P.Link loop
+                                 if M.Ax (K).Slide then
+                                    D := D + Norm (M.Ax (K).W) * Off_Ref (K);   --  走的关节:最多走出去这么远
+                                 else
+                                    D := D + Norm (Sub (Anc (K), Prev));        --  相邻两根转轴上的两点:同一节上,长度不变
+                                    Prev := Anc (K);
+                                 end if;
+                              end loop;
+                              D := D + Norm (Sub (P.P, Prev));                   --  点到它那一节最后一根转轴上那一点:同一节上,不变
+                              Rj := Long_Float'Max (Rj, D);
+                           end;
+                        end if;
+                     end loop;
+                     Best := Best + Dq * Rj;
+                  end if;
+               end if;
+            end;
+         end loop;
+         Known := True;
+         return Pl.S * Best;   --  模型单位 → 世界单位
+      end;
+   end Max_Shift;
 end Links;
