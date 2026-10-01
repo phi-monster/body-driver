@@ -7,7 +7,8 @@
 #   nohead   没有头顶眼:RoboDojo 的 arx_x5_nohead 配置(相机里就没有 cam_head,不是把图涂黑)
 # 钩子是 bd_camtest.py(装在 RoboDojo 的 env/observation_manager/,obs_manager.get_obs 里每一步调一次),触发文件按这一炮给
 # (BD_CAMTEST 环境变量,不用全箱共用的 /root/camtest.json:那个文件留着别路的炮也会被改图)。
-# 用法(箱上):bash run_conditions.sh [条件 …](默认五种全跑);证据在 /root/p8/boot/<炮名>/
+# 每一炮都留落盘和逐帧位姿(BOOT_KEEP=1),跑完用 sum_conditions.py 按仿真真值打分(焦距、畸变、手在哪 —— /root/diag/v1b_score_fk_cur.py)。
+# 用法(箱上):bash run_conditions.sh [条件 …](默认五种全跑);证据在 /root/p8/boot/<炮名>/ 和 /root/N<炮名>/
 set -u
 H=$(cd "$(dirname "$0")" && pwd)
 Q=/root/p8/scenes/qboot.sh
@@ -15,9 +16,9 @@ declare -A SHOT=([distort]=P8VD [delay2]=P8VL [blur]=P8VB [noise]=P8VN [nohead]=
 for c in ${@:-distort delay2 blur noise nohead}; do
   k=${SHOT[$c]}
   if [ "$c" = nohead ]; then
-    BOOT_CFG=arx_x5_nohead BOOT_SEED=0 bash "$Q" "$k" bootcal zero 25
+    BOOT_KEEP=1 BOOT_CFG=arx_x5_nohead BOOT_SEED=0 bash "$Q" "$k" bootcal zero 25
   else
-    BD_CAMTEST="$H/conditions/$c.json" BOOT_CFG=arx_x5 BOOT_SEED=0 bash "$Q" "$k" bootcal zero 25
+    BOOT_KEEP=1 BD_CAMTEST="$H/conditions/$c.json" BOOT_CFG=arx_x5 BOOT_SEED=0 bash "$Q" "$k" bootcal zero 25
   fi
   echo "$(date +%T) $c → $k:$(tail -4 /root/p8/boot/$k/meta.txt | tr '\n' ' ')"
 done
