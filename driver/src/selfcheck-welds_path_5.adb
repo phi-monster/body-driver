@@ -706,7 +706,7 @@ begin
              & " · 松手以后挪 1 cm " & (if Mv1 then "挪了" else "没挪(错)") & "、挪 2 mm " & (if Mv2 then "挪了(错)" else "没挪") & "、不准是负的 " & (if Mv3 then "当挪了" else "当没挪(错)"));
    end;
    --  ── 没成就重挑(§2 第 27 条:按量到的新情况重挑再做,不原样再来)──
-   --  ① 手指合在了它身上、它没跟着走 ⇒ 摩擦的上限降到那一组法向取最坏时要的那么多(Note_Hold;拿住了 ⇒ 下限升到按量到的法向要的);
+   --  ① 手指合在了它身上、它没跟着走 ⇒ 摩擦的上限降到那一组法向取最坏时要的那么多(Narrow_Mu;拿住了 ⇒ 下限升到按量到的法向要的);
    --     下一次只从最坏时要得更少的里挑、先验不许比上限大:方块、两瓣(先验摩擦按 0.5 的下限),先挑一次,把上限设成挑中那一组的 Mu_Worst 再挑
    --     ⇒ 挑中的不是它、最坏要的比上限小、先验不比上限大,那一组算进"要的摩擦给不起"
    --  病:上下限记反(拿住记最坏、没跟上记名义:对夹按量到的法向几乎不要摩擦,没跟上一次上限就成了零,再也挑不出下一组);
@@ -735,9 +735,9 @@ begin
             Lb : Long_Float := 0.0;
             Ub2 : Long_Float := Long_Float'Last;
          begin
-            Se.Note_Hold (Lb, Ub2, F1.First_Element.Mu_Nom, F1.First_Element.Mu_Worst, Came => True);
+            Se.Narrow_Mu (Lb, Ub2, F1.First_Element.Mu_Nom, F1.First_Element.Mu_Worst, Came => True);
             Lb_Ok := Lb = F1.First_Element.Mu_Nom and then Ub2 = Long_Float'Last;
-            Se.Note_Hold (Lb, Ub2, F1.First_Element.Mu_Nom, F1.First_Element.Mu_Worst, Came => False);
+            Se.Narrow_Mu (Lb, Ub2, F1.First_Element.Mu_Nom, F1.First_Element.Mu_Worst, Came => False);
             Lb_Ok := Lb_Ok and then Ub2 = F1.First_Element.Mu_Worst;
             Ub := Ub2;
          end;

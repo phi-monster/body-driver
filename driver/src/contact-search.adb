@@ -956,13 +956,13 @@ package body Contact.Search is
       end;
    end Plan;
 
-   procedure Note_Hold (Lb, Ub : in out Long_Float; Mu_Nom, Mu_Worst : Long_Float; Came : Boolean) is
+   procedure Narrow_Mu (Lb, Ub : in out Long_Float; Mu_Nom, Mu_Worst : Long_Float; Came : Boolean) is
    begin
       if Came then
          Lb := Long_Float'Max (Lb, Mu_Nom);
       else
          Ub := Long_Float'Min (Ub, Mu_Worst);
       end if;
-   end Note_Hold;
+   end Narrow_Mu;
 
 end Contact.Search;

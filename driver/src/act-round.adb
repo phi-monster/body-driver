@@ -2335,7 +2335,7 @@ begin
             declare
                M : Grip_Mu := C.Grip_Mus (I);
             begin
-               Contact.Search.Note_Hold (M.Lb, M.Ub, Grasp_Mu_Nom, Grasp_Mu_Worst, Came => Held);
+               Contact.Search.Narrow_Mu (M.Lb, M.Ub, Grasp_Mu_Nom, Grasp_Mu_Worst, Came => Held);
                C.Grip_Mus.Replace_Element (I, M);
             end;
             Found := True;
@@ -2345,7 +2345,7 @@ begin
          declare
             M : Grip_Mu := (Name => Name, Lb => 0.0, Ub => Long_Float'Last);
          begin
-            Contact.Search.Note_Hold (M.Lb, M.Ub, Grasp_Mu_Nom, Grasp_Mu_Worst, Came => Held);
+            Contact.Search.Narrow_Mu (M.Lb, M.Ub, Grasp_Mu_Nom, Grasp_Mu_Worst, Came => Held);
             C.Grip_Mus.Append (M);
          end;
       end if;
