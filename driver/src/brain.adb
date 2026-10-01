@@ -79,7 +79,11 @@ package body Brain is
 
    --  问模型一句,读回它写的那段话(回包按 JSON 读:choices 第一个的 message.content 和 finish_reason)。
    --  请求里不带 max_tokens、也不带写程序那一问的 temperature:那是驱动替脑拍的数(原来 80 / 700 个 token、0.7),
-   --  现在交给服务端 / 模型自己的生成配置(Qwen 的 generation_config);回答多长由受限解码的文法 / schema 自己收尾。
+   --  现在交给服务端 / 模型自己的生成配置(Qwen 的 generation_config);认名字那一问的回答多长由 strict schema 收尾。
+   --  ⚠ 写程序那一问 09-30 以后没有收尾(名字、say 两格和行数都没有上限):10-01 拿 S1A1–S1A5、H48/H49 落盘的画面问真 Qwen3.5-9B,
+   --  今天的键盘单件 30 问里 20 问、两件 36 问里 26 问写到 1024 个 token 还没停(多半在名字那一格里),驱动里这种要等到 http 的总时限。
+   --  而箱上的模型目录里没有 generation_config.json ⇒ 服务端用的是 vLLM 自己的默认(temperature 1.0、不截 top_p / top_k);
+   --  换成模型卡给不思考模式的那组(0.7 / 0.8 / 20 / presence 1.5)同一批问题跑飞降到单件 8/30(今天的键盘)、两件 11/36(加了两件那一句的键盘),还有。怎么收尾等 owner 定
    --  没问成就照实说为什么:连不上、超时、服务端回了错(错误原文整段带回来 —— "maximum context length" 这种限额和用量就写在里面,执行器要读)。
    --  finish_reason = length = 写到服务端的上限被截断(不带 max_tokens 以后,这个上限就是服务端的上下文还剩多少)⇒ 照实说截断了,不把半截话当回答
    function Chat (Host : String; Port : Natural; Body_Json : String; Content : out Unbounded_String; Err : out Unbounded_String) return Boolean is
@@ -248,7 +252,8 @@ package body Brain is
         --  它写了一句不动身体的话 ⇒ 世界没变 ⇒ 提示词没变 ⇒ 温度 0 ⇒ 又写同一句,闭环。
         --  温度是【解码器设置】,不是给它的暗示:要判"它会不会想",至少得是独立抽样。
         --  09-30:抽样的温度也不再由驱动拍(原来写死 0.7,没有来历),请求里不带 ⇒ 服务端按模型自己的生成配置抽样;
-        --  max_tokens 也不带(原来 700:长程序被截在半截、文法没收尾,整段被拒)—— 文法最多 4 行、每个槽都有长度上限,自己会收尾。
+        --  max_tokens 也不带(原来 700:长程序被截在半截、文法没收尾,整段被拒)。09-30 起文法的长度上限也去掉了 ⇒ 写程序这一问可能写不停,
+        --  量到的数见 Chat 上面那段注释
         --  代价照记:同一炮不再逐字可复现(认名字那一问仍然温度 0,那是要稳)。
         "{""model"":""eye"",""chat_template_kwargs"":{""enable_thinking"":false}," &
         """structured_outputs"":{""grammar"":""" & Json.Escape (Sinew.EBNF (Rels_Usable, Roles_Usable, Outs_Usable, Qtys_Usable)) & """}" &
