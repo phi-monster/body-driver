@@ -56,7 +56,6 @@ wait $RUN
 echo "run.sh 结束:$(date +%T) rc=$?" >> "$E/meta.txt"
 # 清:shot 目录里 cal* / 经历* 以外的都删
 find "$N" -mindepth 1 -maxdepth 1 ! -name 'cal*' ! -name '经历*' -exec rm -rf {} +
-case "$TASK" in   # RoboDojo 这一集的结果目录:.../<任务>/l3_link/<配置名>/<种子>_/<ROBODOJO_RUN_ID = 炮名>(只删这一炮的)
-  bd_*) for d in /root/RoboDojo/eval_result/RoboDojo/$TASK/l3_link/*/*_; do rm -rf "$d/$K" "$d/_resume_$K.json"; done ;;
-esac
+# RoboDojo 这一集的结果目录:.../<任务>/l3_link/<配置名>/<种子>_/<ROBODOJO_RUN_ID = 炮名>(炮名只有这一炮用,只删它;bootcal 那几炮也删)
+for d in /root/RoboDojo/eval_result/RoboDojo/$TASK/l3_link/*/*_; do [ -d "$d/$K" ] && rm -rf "$d/$K"; rm -f "$d/_resume_$K.json"; done
 echo "清完:$(ls "$N")" >> "$E/meta.txt"
