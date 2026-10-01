@@ -21,6 +21,7 @@ begin
    end if;
    declare
       G : constant Geom.Cam_Geo := C.Geo (Natural (Hc));
+      Wk : Selfmap.Walk;   --  这一段转空走的底(走一步判挡没挡用:开头装进开机探针量的那几步)
    begin
       for Step_No in 1 .. 40 loop
          if Plug.Reset_Pending (L) then
@@ -55,20 +56,29 @@ begin
                Tip0 : constant Geom.V3 := Geom.Ap (Rc, G.Tip);
                Tip1 : constant Geom.V3 := Geom.Ap (Geom.Mul (Rn, G.R_Ce), G.Tip);
                A : Table.Vec := Table.Zero_Vec;
-               Jaw : Floats;
-               Del : Table.Vec;
                Ok : Boolean;
+               Legs : Selfmap.Leg_Vectors.Vector;
+               Rs : Selfmap.Leg_Step_Vectors.Vector;
+               Frames : Natural;
+               Lim : Selfmap.Limits;   --  一整步(Frac 1)、不另设上限;到了一步看得见的那一档以内就算到(同 Step_Arm 的 Geo_Settle)
+               Rep : Selfmap.Leg_Step;
             begin
                A (0) := Tip0 (0) - Tip1 (0); A (1) := Tip0 (1) - Tip1 (1); A (2) := Tip0 (2) - Tip1 (2);
                A (3) := Rv (0); A (4) := Rv (1); A (5) := Rv (2);
-               Step_Arm (L, C, F, Arm, A, Jaw, Del, Ok, Geo_Settle => True);
+               --  走一步(Selfmap.Step):目标 = 转过、指尖补回原处的那个位姿
+               Legs.Append (Selfmap.Leg'(Arm => Arm, Goal => Chan.Compose (P, A), Jaw => <>));
+               Selfmap.Step (L, C.Map, Legs, Lim, F, Wk, Rs, Frames, Ok);
+               if not Rs.Is_Empty then
+                  Rep := Rs (0);
+               end if;
                Steps_Taken := Steps_Taken + 1;
                declare
-                  Got : constant Long_Float := Del (3) * Axis (0) + Del (4) * Axis (1) + Del (5) * Axis (2);
+                  Got : constant Long_Float := Rep.Turned;   --  沿要转的那根轴实到多少
                begin
                   Geo_Say ("转 " & Codec.Fmt (Stp, 3) & " rad ⇒ 实到 " & Codec.Fmt (Got, 3) & " rad(还差 " & Codec.Fmt (Ang, 3) & ")"
                            & (if Ok then "" else " · 身体说没走成"));
-                  if Got + Got < Stp then
+                  --  转不动 = 这一步自己停下、没到、少转的比这一段空转时多出 Blocked 的门(原来:实到不到命令的一半)
+                  if Rep.Blocked_R then
                      Event := S ("resist: I commanded a turn of " & Codec.Fmt (Stp, 3) & " rad and my hand only turned " & Codec.Fmt (Got, 3)
                                  & " (still " & Codec.Fmt (Ang, 3) & " rad from pointing there) - a joint is at its end or the pose is not reachable");
                      return;
