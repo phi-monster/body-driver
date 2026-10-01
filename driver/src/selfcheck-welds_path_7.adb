@@ -623,6 +623,28 @@ begin
              "采样设置:读不成一个 JSON 对象、或者撞了这一问自己的键(model)⇒ 不带,照常问");
    end;
 
+   --  ⑭ 经历账放哪。病:没给 BL_LIFE 时一律写 /root/经历.txt —— 别人的机器上多半写不了,写得了也是在 root 底下乱放一个文件
+   --  (注释说"和身体文件同一个地方",代码却写死了一个路径)。🦷 改回那一句 ⇒ 红
+   declare
+      Was : constant String := (if Ada.Environment_Variables.Exists ("BL_LIFE") then Ada.Environment_Variables.Value ("BL_LIFE") else "");
+      Next_To, None, Given : Unbounded_String;
+   begin
+      Ada.Environment_Variables.Clear ("BL_LIFE");
+      Act.Set_Body_File ("/robots/arm/body.json");
+      Next_To := U (Act.Life_Path);
+      Act.Set_Body_File ("");
+      None := U (Act.Life_Path);
+      Ada.Environment_Variables.Set ("BL_LIFE", "/deploy/经历_k.txt");
+      Given := U (Act.Life_Path);
+      if Was = "" then
+         Ada.Environment_Variables.Clear ("BL_LIFE");
+      else
+         Ada.Environment_Variables.Set ("BL_LIFE", Was);
+      end if;
+      Check (To_String (Next_To) = "/robots/arm/body.json.life.txt" and then Length (None) = 0 and then To_String (Given) = "/deploy/经历_k.txt",
+             "经历账:没给 BL_LIFE ⇒ 跟着身体文件(" & To_String (Next_To) & ");身体文件也没给 ⇒ 不记;给了 BL_LIFE ⇒ 放那儿");
+   end;
+
    --  ⑦ 重放 S1A1–S1A5 落盘的每一轮(大并行 §5 路 7:S1A2–S1A4 落盘的轮次重放,粘在一起的名字都绑对)。
    --  每一轮:在哪只眼、脑的程序里按行的先后写了哪些名字、那只眼对每个名字怎么答(日志里的原话;日志里旧的认法没问眼就绑了的,
    --  拿那一轮落盘的画面、驱动一字不差的请求问过真 Qwen3.5-9B,10-01);脑说的是什么(打分用,判法看不见)。

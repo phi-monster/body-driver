@@ -168,9 +168,17 @@ package body Act is
    function Into_Depth (Skin, Surface : Long_Float) return Long_Float is
      ((Skin + Surface) / 2.0);
 
-   --  🔴 经历账放哪:和身体文件同一个地方,跨炮留着。永远只追加,不许清。
+   --  🔴 经历账放哪:BL_LIFE 给了就放那儿;没给 ⇒ 跟着身体文件走(<身体文件>.life.txt),跨炮留着。永远只追加,不许清。
+   --  身体文件也没给 ⇒ 不记(原来没给 BL_LIFE 一律写 /root/经历.txt:别人的机器上多半写不了,写得了也是在 root 底下乱放一个文件)
+   Body_File : Unbounded_String;
+   procedure Set_Body_File (Path : String) is
+   begin
+      Body_File := To_Unbounded_String (Path);
+   end Set_Body_File;
    function Life_Path return String is
-     (if Codec.Env ("BL_LIFE") /= "" then Codec.Env ("BL_LIFE") else "/root/经历.txt");
+     (if Codec.Env ("BL_LIFE") /= "" then Codec.Env ("BL_LIFE")
+      elsif Length (Body_File) > 0 then To_String (Body_File) & ".life.txt"
+      else "");
 
    --  同一根通道只记一次"我变了",免得同一句话刷满整段话
    function Cn_Changed (C : Context; Cn : Natural) return Boolean is

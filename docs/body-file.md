@@ -21,6 +21,7 @@ body_driver --listen 9080 --in body.json --out body.json   # 以后:装回、核
 | `<路径>.kin.txt` | 每条臂的运动学、每一节的表面点、不动的眼、桌面;干活时关节到过的范围长了、或记下一个尽头,就写回 |
 | `<路径>.kin.txt_arm<k>.bmp` | 第 k 条臂扫描起点那一格的腕眼图,下次开机核对"它挪没挪"用 |
 | `<路径>.kin.txt_world.bmp` | 不动的眼在那一刻的图 |
+| `<路径>.life.txt` | 经历账(没设 `BL_LIFE` 时):每做完一段追加一行,只追加不清,最后几行进给脑的 `WHAT I HAVE DONE BEFORE` |
 
 ## 2. 钥匙:是不是同一具身体
 
