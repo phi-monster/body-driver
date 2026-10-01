@@ -55,6 +55,38 @@ package body Driver.Brain.Runaway.Tests is
       Check (C.Fired and then C.Keep = 2, "two lines that come again at once: the first copy stays");
    end Copy_Loops;
 
+   --  Recorded from Qwen3.5-9B on the keyboard with the sentence about two
+   --  things: in a name slot, endings glued into one word that never ends.
+   procedure Endless_Word is
+      Two : Word_Vectors.Vector := Names;
+      Head : constant String := "say look = 1" & LF & "do the scissors right untilfree "
+        & "settledtimeoutstuckslippedlosttouchedsettledfreeupdownheightuntiltouchingabovebelowleftright";
+      Loop_Part : constant String := "untiltouchedstuckslippedlostfreessettledstalledtimeout";
+      Text : constant String := Head & Loop_Part & Loop_Part & Loop_Part;
+      Fired_At : Natural := 0;
+   begin
+      for W of Word_Vectors.Vector'(["touching", "above", "below", "left", "right"]) loop
+         Two.Append (W);
+      end loop;
+      for Last in Text'Range loop
+         declare
+            V : constant Verdict := Judge (Text (Text'First .. Last), Two, Final => False);
+         begin
+            if V.Fired then
+               Fired_At := Last;
+               Check (V.Keep = 1, "the line with the endless word is dropped, the line before it kept");
+               exit;
+            end if;
+         end;
+      end loop;
+      Check (Fired_At > Head'Length + Loop_Part'Length and then Fired_At <= Head'Length + 3 * Loop_Part'Length,
+             "a word of glued language words that comes again inside one name is cut within its third copy (cut at"
+             & Fired_At'Image & ")");
+      Check (not Judge ("do the dodecahedron height up until settled" & LF, Names, Final => True).Fired
+             and then not Judge ("do the murmur toy height up until settled" & LF, Names, Final => True).Fired,
+             "a name word that repeats no glued language word is not a loop");
+   end Endless_Word;
+
    procedure Right_Answers is
       One : constant String := "do the baseball height up until settled" & LF & "say I lifted it" & LF;
       Two : constant String := "do the lego man height up until settled" & LF & "do the lego man height down until"
@@ -70,6 +102,15 @@ package body Driver.Brain.Runaway.Tests is
              "a word still being written is not compared: elli may yet become ellipse");
       Check (J ("do the mint green scissors under cell elli elli ", Final => False).Fired,
              "once a blank follows it, it is");
+      declare
+         Text : constant String := "do the dodone height up until settled" & LF;
+      begin
+         for Last in Text'Range loop
+            Check (not J (Text (Text'First .. Last), Final => False).Fired,
+                   "a word still being written is cut only where no later letter can change the cut: at character"
+                   & Last'Image & " dodo may yet become dodone");
+         end loop;
+      end;
    end Unfinished_Words;
 
    --  Fed one character at a time, the first verdict that stops reading keeps
@@ -115,6 +156,8 @@ package body Driver.Brain.Runaway.Tests is
       Register ("brain.runaway.loops", "a copy loop in a name, a sentence or a run of lines is read to the end",
                 Copy_Loops'Access);
       Register ("brain.runaway.right", "an answer that ended by itself is cut", Right_Answers'Access);
+      Register ("brain.runaway.endless_word", "a name word of glued language words that never ends is read to the"
+                & " service's limit", Endless_Word'Access);
       Register ("brain.runaway.unfinished", "a half-written word is compared as if finished",
                 Unfinished_Words'Access);
       Register ("brain.runaway.pieces", "where the stream is cut into pieces changes what is kept",

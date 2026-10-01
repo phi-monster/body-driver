@@ -7,10 +7,13 @@
 --
 --    complete  a done outside every block: nothing after it can ever run.
 --    runaway   the start of a copy loop: a run of whole words inside one
---              name or sentence comes again at once, or a run of whole
---              lines does. Only finished words and lines are compared, so
---              the verdict depends on the text alone, never on how the
---              stream was cut into pieces.
+--              sentence comes again at once, or a run of whole lines does,
+--              or inside one name a run of units: the language words glued
+--              into its words, the letters between them, and words without
+--              any. Only finished lines and words are compared, and of a
+--              word still being written only the units no later letter can
+--              change, so the verdict depends on the text alone, never on
+--              how the stream was cut into pieces.
 
 with Ada.Strings.Unbounded;
 with Driver.Brain.Keyboard;
