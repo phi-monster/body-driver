@@ -25,7 +25,6 @@ procedure Welds_Path_5 is
    package Wr renames Contact.Wrench;
    package Se renames Contact.Search;
    use type Wr.Why_Kind;
-   use type Se.Pad;
    Mu : constant Long_Float := 0.5;
    Pitch : constant Long_Float := 0.002;
    Up : constant Contact.V3 := [0.0, 0.0, 1.0];
@@ -124,7 +123,11 @@ procedure Welds_Path_5 is
    end One;
    function F4 (X : Long_Float) return String is (Codec.Fmt (X, 4));
    function Nw (X : Long_Float) return String is (if X = Wr.No_Way then "做不到" else F4 (X));
-   function Always (R : Geom.M3; T : Contact.V3) return Boolean is (True);
+   function Always (R : Geom.M3; T : Contact.V3) return Boolean is
+      pragma Unreferenced (R, T);   --  这几条焊点不考够不够得着
+   begin
+      return True;
+   end Always;
 
    --  ① 物理检查本身 —— 一件东西:两处相对的接触(两瓣:沿 x 夹 / 沿 y 夹)、五处(五指)、手掌(没有手指:侧面推、侧面偏着推、上面压)
    procedure Physics (Name : String; Pts : Contact.V3_Vectors.Vector; Wx, Wy : Long_Float; Five : Wr.Touch_Vectors.Vector; Five_Exact_Spin : Boolean;
@@ -315,6 +318,7 @@ begin
       Sup : constant Wr.Surface := Wr.Footprint (Sc_P, Zero3, Up, Pitch);
       Fc : Contact.V3 := Zero3;
       Why, W_Down : Wr.Why_Kind;
+      pragma Warnings (Off, Why);   --  做不到的是哪一条只看往下那一格(W_Down),别的只看数
       Pair : Wr.Touch_Vectors.Vector;
       Palm, Palm_Off, Top : Wr.Touch_Vectors.Vector;
       L_P, S_P, Sp_P, D_P, S_Palm, So_Palm, Sp_Top : Long_Float;
@@ -376,18 +380,73 @@ begin
              "接触集搜索·没有手指:建手说「" & To_String (H0.Why) & "」;只有一瓣说「" & To_String (H1.Why) & "」;合拢这一条路上一组都搜不出来(试了 "
              & Codec.Img (St.Poses) & " 个手位),照实交空的");
    end;
-   --  两瓣的旧写法(Two_Pads)和一串瓣的 From_Lobes 建出来的手一模一样(主代理的旧焊点还在用 Two_Pads)
+   --  驱动那一段(Act.Plan_Contact)按这只眼里量到的全部瓣建手(同主代理那条"接触集接进执行层"焊点的搭法,手换成五瓣):方块 4 cm 躺在面上,
+   --  脑要它沿面往 +x ⇒ 布得出一组、说的是要的那个动;脑要它往下 ⇒ 照实说面挡着。
+   --  病:建手只认两瓣 ⇒ 五瓣的手一组都布不出来("my fingers in this eye are 5 measured pads");要的动没交进去 ⇒ 往下也布得出来
    declare
-      Old : constant Se.Hand_Model := Se.Two_Pads ([-0.045, 0.0, -0.09], [0.045, 0.0, -0.09], 0.015, 0.01, 0.002);
-      Same : Boolean := Old.Valid and then Two.Valid and then Natural (Old.Pads.Length) = Natural (Two.Pads.Length) and then Old.Reach_In = Two.Reach_In;
+      Cx : Act.Context;
+      Fx : Plug.Frame;
+      Gx : Geom.Cam_Geo;
+      Pick, Pick_D : Contact.Grasp.Candidate;
+      Nt, Nd : Unbounded_String;
+      Okp, Okd : Boolean;
+      procedure Any_Reach (Arm : Natural; Pose : Plug.Arm_Pose; Pos_Err, Rot_Err : out Long_Float) is
+         pragma Unreferenced (Arm, Pose);
+      begin
+         Pos_Err := 0.0; Rot_Err := 0.0;
+      end Any_Reach;
    begin
-      if Same then
-         for I in 0 .. Natural (Old.Pads.Length) - 1 loop
-            if Old.Pads (I) /= Two.Pads (I) then
-               Same := False;
-            end if;
+      Gx.Valid := True; Gx.F := 400.0; Gx.Cx := 320.0; Gx.Cy := 240.0; Gx.Gap := 0.09;
+      Gx.Tip := [0.0, 0.0, -0.09]; Gx.Tip_Valid := True; Gx.Tip_Touch := True; Gx.Tip_Sd := 0.0005;
+      for K in 0 .. 4 loop
+         declare
+            A : constant Long_Float := 2.0 * Ada.Numerics.Pi * Long_Float (K) / 5.0;
+         begin
+            Gx.Lobes.Append (Geom.Lobe_Geo'(Tip => [0.045 * Cos (A), 0.045 * Sin (A), -0.09], Wide => 0.015, Thin => 0.01));
+         end;
+      end loop;
+      Cx.Geo.Append (Geom.No_Geo); Cx.Geo.Append (Gx);
+      Cx.Map.Amp := Bytes.F64_Vectors.To_Vector (0.0, 6);
+      Cx.Map.Amp.Replace_Element (0, 0.001); Cx.Map.Amp.Replace_Element (3, 0.0025);
+      Cx.Touch_Valid := True; Cx.Touch_Pt := [0.0, 0.0, 0.0]; Cx.Touch_N := [0.0, 0.0, 1.0];
+      for I in -10 .. 10 loop
+         for J in -10 .. 10 loop
+            Cx.Sil_Pts.Append (Geom.V3'[Pitch * Long_Float (I), Pitch * Long_Float (J), 0.04]);
          end loop;
-      end if;
-      Check (Same, "接触集建手:两瓣的旧写法和一串瓣的写法建出来的手逐位相同(各块的尖、合拢方向、行程、宽、厚)");
+      end loop;
+      Cx.Sil_Valid := True; Cx.Sil_Name := To_Unbounded_String ("block"); Cx.Sil_Cam := 1; Cx.Sil_N := [0.0, 0.0, 1.0];
+      Cx.Sil_P0 := Cx.Sil_Pts.First_Element; Cx.Sil_Pitch := Pitch; Cx.Sil_Err := 0.0005;
+      Plug.Set_Reach (Any_Reach'Unrestricted_Access);
+      Cx.Want_Move := (Given => True, Move => Along_X);
+      Act.Plan_Contact (Cx, Fx, 0, 1, To_Unbounded_String ("block"), Pick, Nt, Okp);
+      Cx.Want_Move := (Given => True, Move => Down);
+      Act.Plan_Contact (Cx, Fx, 0, 1, To_Unbounded_String ("block"), Pick_D, Nd, Okd);
+      Plug.Set_Reach (null);
+      Check (Okp and then Natural (Pick.Touches.Length) >= 2 and then Index (Nt, "rad off the normal") > 0 and then not Okd and then Index (Nd, "goes into the surface") > 0,
+             "接触集接进执行层·五瓣的手:方块沿面往 +x ⇒ " & (if Okp then "布出一组(" & Codec.Img (Natural (Pick.Touches.Length)) & " 处接触)" else "布不出:" & To_String (Nt))
+             & " · 往下 ⇒ " & (if Okd then "布出来了(错)" else "照实说:" & To_String (Nd) (1 .. Natural'Min (Length (Nd), 120))));
+   end;
+   --  一串瓣的 From_Lobes 在两瓣时和 09-29 的两瓣写法逐位相同:按原来那几行公式现场算一遍当参照(碰东西的面在尖往对面半个手指厚、各走两面之间的空的一半)
+   --  病:建手改成一串以后,两瓣的手悄悄变了(碰东西的面、行程、合拢方向),x5 挑出来的接触跟着变
+   declare
+      A : constant Contact.V3 := [-0.045, 0.0, -0.09];
+      B : constant Contact.V3 := [0.045, 0.0, -0.09];
+      Ok_U : Boolean;
+      D : constant Contact.V3 := [B (0) - A (0), B (1) - A (1), B (2) - A (2)];
+      U : constant Contact.V3 := Contact.Unit (D, Ok_U);
+      Th : constant Long_Float := 0.01;
+      Half : constant Long_Float := 0.5 * (Contact.Norm (D) - Th);
+      Ref_A : constant Se.Pad := (Tip => [A (0) + 0.5 * Th * U (0), A (1) + 0.5 * Th * U (1), A (2) + 0.5 * Th * U (2)], Dir => U, Travel => Half, Width => 0.015, Thick => Th);
+      Ref_B : constant Se.Pad := (Tip => [B (0) - 0.5 * Th * U (0), B (1) - 0.5 * Th * U (1), B (2) - 0.5 * Th * U (2)], Dir => [-U (0), -U (1), -U (2)], Travel => Half,
+                                  Width => 0.015, Thick => Th);
+      function Near (P, Q : Se.Pad) return Boolean is
+        (Contact.Norm ([P.Tip (0) - Q.Tip (0), P.Tip (1) - Q.Tip (1), P.Tip (2) - Q.Tip (2)]) < 1.0e-12
+         and then Contact.Norm ([P.Dir (0) - Q.Dir (0), P.Dir (1) - Q.Dir (1), P.Dir (2) - Q.Dir (2)]) < 1.0e-12
+         and then abs (P.Travel - Q.Travel) < 1.0e-12 and then P.Width = Q.Width and then P.Thick = Q.Thick);
+   begin
+      Check (Ok_U and then Two.Valid and then Natural (Two.Pads.Length) = 2 and then Near (Two.Pads (0), Ref_A) and then Near (Two.Pads (1), Ref_B)
+             and then abs (Two.Reach_In - 0.09) < 1.0e-12,
+             "接触集建手:一串瓣的写法在两瓣时和 09-29 的两瓣写法逐位相同(碰东西的面、合拢方向、行程 " & F4 (Two.Pads (0).Travel) & "、宽、厚、指尖到眼 "
+             & F4 (Two.Reach_In) & ")");
    end;
 end Welds_Path_5;
