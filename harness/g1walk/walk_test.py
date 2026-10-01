@@ -16,7 +16,7 @@
               一共 --minutes 分钟;数摔了几回,速度跟得上没有。
   flatmany  :--num_envs 个人形一起走 flat 那一套(各抽各的命令),谁摔了只复位谁;一共 num_envs × minutes 机器人分钟。
   stairs    :正前方 1 m 起 --steps 级台阶(每级高 --step_h、深 0.30 m,最上面一级 2 m 深),vx 0.4 往前走;看上去没有、摔没摔。
-摔了 = 身子歪过 60°,或者骨盆离脚下的地不到 0.25 m,或者除了两只脚以外哪一节离地不到 5 cm(跪下、坐下、躺下)。
+摔了 = 身子歪过 60°,或者骨盆离脚下的地不到 0.25 m,或者除了脚、手(手腕往外)以外哪一节离地不到 5 cm(跪下、坐下、躺下)。
 
 用法(箱上,走排队):bash qwalk.sh squat,squatwalk,flat 1 --policy vh --dt 0.004 --decim 5 --friction_mode multiply --tag _vh
 出:/root/p8/chk/g1walk_<模式>_<tag>/report.json
@@ -269,7 +269,9 @@ if args.policy in ("vh", "groot"):
         rep["physx_joint_vel_limit"] = {n: round(float(jl[0, robot.joint_names.index(n)]), 2) for n in ctrl.leg_names}
     rep["policy_files"] = {"bundle": args.groot_bundle if args.policy == "groot" else args.bundle, "freq_hz": ctrl.freq,
                            "history": ctrl.history, "leg_order": ctrl.leg_names, "stand_height_cmd": STAND_H}
-non_feet = [i for i, n in enumerate(robot.body_names) if "ankle" not in n]
+# 摔了的第三条看"除了脚、手以外哪一节离地太近"(跪下、坐下、躺下):手不算 —— reach2 就是要把手伸到地上
+# (第一版连手也算,GR00T 蹲到 0.30 把手伸到离地 5 cm,18 档里 14 档被当成摔了)
+non_feet = [i for i, n in enumerate(robot.body_names) if "ankle" not in n and "hand" not in n and "wrist" not in n]
 try:   # 这具身体的 USD 有哪些变体、选的是哪个(--faithful 去掉手靠的就是它)
     import omni.usd
     _prim = omni.usd.get_context().get_stage().GetPrimAtPath(env.scene.env_prim_paths[0] + "/Robot")
@@ -342,7 +344,7 @@ def state():
     tilt = np.degrees(np.arccos(np.clip(-g[:, 2], -1.0, 1.0)))
     low = (d.body_pos_w[:, non_feet, 2] - env.scene.env_origins[:, None, 2]).min(dim=1).values.cpu().numpy()
     ground = np.array([ground_under(float(np.dot(p[i, :2], HEAD))) for i in range(N)])
-    fallen = (tilt > 60.0) | (p[:, 2] - ground < 0.25) | (low - ground < 0.05)
+    fallen = (tilt > 60.0) | (p[:, 2] - ground < FALL_Z) | (low - ground < 0.05)
     return p, tilt, fallen, d.root_lin_vel_b.cpu().numpy(), d.root_ang_vel_b.cpu().numpy()
 
 
@@ -351,8 +353,14 @@ def fall(t, extra):
     rep["falls"].append({"t_s": round(t, 2), "pelvis_z": round(float(p[0, 2]), 3), "tilt_deg": round(float(tilt[0]), 1), **extra})
 
 
+FALL_Z = 0.25      # 骨盆离脚下的地不到这么高算摔了;蹲得深的时候(胯高命令 − 0.10 比它还低)跟着命令往下放(hold 里设)
+
+
 def hold(cmd, seconds, keep_from=0.0):
-    """命令 cmd 拿着走 seconds 秒;返回 (摔没摔, 从 keep_from 秒起每一拍的 (骨盆 xyz, 机身系速度, 角速度))"""
+    """命令 cmd 拿着走 seconds 秒;返回 (摔没摔, 从 keep_from 秒起每一拍的 (骨盆 xyz, 机身系速度, 角速度))。
+    蹲到 0.30 把手伸到地上,骨盆会再往下沉 5 cm 上下(GR00T reach2:0.245,身子只歪 8–17°),那不是摔:骨盆的线放到 胯高命令 − 0.10"""
+    global FALL_Z
+    FALL_Z = min(0.25, float(cmd[3]) - 0.10)
     k = int(round(seconds / dt))
     k0 = int(round(keep_from / dt))
     rec = []
@@ -479,15 +487,17 @@ for mode in MODES:
         # 的朝向和位置,算一拍里转了多少、10 秒里晃了多大;按 640 宽、横向视场 69°(d435)折成头上那只眼一拍里画面挪几个像素
         tid = robot.body_names.index("torso_link")
         f_px = 320.0 / math.tan(math.radians(69.0 / 2))
-        qs, ps = [], []
+        qs, ps, ws = [], [], []
         for _ in range(int(round(10.0 / dt))):
             do_step([[0.0, 0.0, 0.0, STAND_H]])
             qs.append(robot.data.body_quat_w[0, tid].cpu().numpy().astype(np.float64))
             ps.append((robot.data.body_pos_w[0, tid] - env.scene.env_origins[0]).cpu().numpy().astype(np.float64))
+            ws.append(robot.data.body_ang_vel_w[0, tid].cpu().numpy().astype(np.float64))
         sim_t += 10.0
-        qs, ps = np.array(qs), np.array(ps)
-        dots = np.abs(np.sum(qs[1:] * qs[:-1], axis=1)).clip(0, 1)
-        dang = np.degrees(2 * np.arccos(dots))                       # 一拍里转了多少度
+        qs, ps, ws = np.array(qs), np.array(ps), np.array(ws)
+        # 一拍里转了多少度 = 躯干角速度 × 一拍(第一版拿相邻两拍四元数的点积 2·acos 算:float32 的四元数点积分不出 0.05° 以下,
+        # 三份策略都量出 0.067°,其实是数值的底)
+        dang = np.degrees(np.linalg.norm(ws, axis=1) * dt)
         q_mean = qs.mean(axis=0) / np.linalg.norm(qs.mean(axis=0))
         dev_ang = np.degrees(2 * np.arccos(np.abs(qs @ q_mean).clip(0, 1)))
         dpos = np.linalg.norm(np.diff(ps, axis=0), axis=1)
