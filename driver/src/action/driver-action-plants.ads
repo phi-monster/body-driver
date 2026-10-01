@@ -1,7 +1,7 @@
 --  The body and the world as the action layer acts on them: what it can
 --  read, ask and do, and nothing else.
 --
---  Look reads the latest estimates; Reach and Clearance answer questions
+--  Look reads the latest estimates; Reach and Predicted answer questions
 --  without moving anything; Move is the only way anything moves, one step for
 --  any number of arms and closers together; Learn hands back what an outcome
 --  showed about a thing. Execute drives the live plant over the lower layers
@@ -9,15 +9,12 @@
 --  operation is a decider operation: it may exchange beats with the robot.
 
 with Ada.Containers.Vectors;
-with Ada.Strings.Unbounded;
-with Driver.Action.Contact;
 with Driver.Action.Snapshots;
 with Driver.Numerics;
 with Driver.Uncertain;
 
 package Driver.Action.Plants is
 
-   use Ada.Strings.Unbounded;
    use Driver.Numerics;
    use Driver.Action.Snapshots;
 
@@ -97,15 +94,6 @@ package Driver.Action.Plants is
    --  Whether the arm can be brought there from where it is now, solved
    --  along the way; the same solver Move uses. Moves nothing.
 
-   function Clearance
-     (P         : Plant;
-      Arm       : Arm_Id;
-      Path      : Driver.Action.Contact.Point_Vectors.Vector;
-      Obstacles : Driver.Action.Contact.Point_Vectors.Vector) return Driver.Uncertain.Estimate is abstract;
-   --  The least distance between the moving part of the body (the arm, its
-   --  hand and whatever the hand carries) and the obstacles while its tool
-   --  passes through Path (tool positions, orientation as now). Moves nothing.
-
    procedure Move (P : in out Plant; O : Order; R : out Report) is abstract;
    --  One step of every arm and closer in O, together.
 
@@ -115,5 +103,11 @@ package Driver.Action.Plants is
 
    procedure Learn (P : in out Plant; L : Lesson) is abstract;
    --  Records what an outcome showed about a thing, for every later look.
+
+   function Episode_Over (P : Plant) return Boolean is abstract;
+   --  No more beats will come in this episode.
+
+   function In_View (P : Plant; Point : Vec3) return Boolean is abstract;
+   --  Some eye that rides on no arm would see the point, as the body is now.
 
 end Driver.Action.Plants;

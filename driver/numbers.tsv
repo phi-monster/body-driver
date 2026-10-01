@@ -62,24 +62,48 @@ driver-action-contact.adb	Low : Positive := 1;	1	structure	the first coordinate 
 driver-action-contact.adb	Seed (Low) := 1.0;	1.0	math	the seed is a unit coordinate axis
 driver-action-contact.adb	for K in 2 .. 3 loop	2	structure	the remaining coordinate axes, second and third
 driver-action-contact.adb	for K in 2 .. 3 loop	3	structure	the remaining coordinate axes, second and third
+driver-action-execution.adb	& Img (Natural (Best.Touches.Length)) & "" & (if Natural (Best.Touches.Length) > 1 then "" else "")	1	format	the plural of a word in the account
+driver-action-execution.adb	((Arms => Arm_Goal_Vectors.To_Vector ((Arm => A, Tool => Tool, Position_Only => False), 1),	1	structure	an order for one arm holds one goal
+driver-action-execution.adb	Closers => Closer_Goal_Vectors.To_Vector ((Hand => H, Fraction => Fraction), 1),	1	structure	an order for one closer holds one goal
+driver-action-execution.adb	G := (Arm => Arm_Of_Best, Hands => E.Closers, Closing => Natural (Best.Touches.Length) > 1, Searched => True,	1	math	more than one touch is a set that closes on the thing; one touch alone presses
+driver-action-execution.adb	High := (Low + High) / 2.0;	2.0	numerics	bisection halves the interval
+driver-action-execution.adb	High := 2.0 * High;	2.0	numerics	doubling search: the bound is found within a factor two in a number of tries logarithmic in it
+driver-action-execution.adb	Lift := 2.0 * Lift;	2.0	numerics	doubling search: the height needed is found within a factor two in a number of tries logarithmic in it
+driver-action-execution.adb	Limit := Real'Min (Limit, Real'Max (Fine, Z * Sqrt (2.0) * Largest_Sigma (Start.Covariance)	2.0	statistics	a rise is the difference of two readings: its sigma is root two times theirs
+driver-action-execution.adb	Low := (Low + High) / 2.0;	2.0	numerics	bisection halves the interval
+driver-action-execution.adb	Margin : constant Real := Z * Sqrt (Sigma ** 2 + T.Sigma ** 2) + T.Pitch / 2.0;	2.0	math	a point of a surface is never farther than half a pitch from the nearest sample
+driver-action-execution.adb	NL : constant Positive := Positive'Max (1, Natural (Real'Ceiling (E.Depth / Spacing)));	1	structure	at least one interval, so both ends are sampled
+driver-action-execution.adb	NW : constant Positive := Positive'Max (1, Natural (Real'Ceiling (2.0 * Pd.Half_Width / Spacing)));	1	structure	at least one interval, so both ends are sampled
+driver-action-execution.adb	NW : constant Positive := Positive'Max (1, Natural (Real'Ceiling (2.0 * Pd.Half_Width / Spacing)));	2.0	math	the full width is twice the half width
+driver-action-execution.adb	Pieces : constant Positive := Positive'Max (1, Natural (Real'Ceiling ((Shift + Turn * Lever) / Spacing)));	1	structure	at least one piece, so the end of the way is checked
+driver-action-execution.adb	Q : constant Vec3 := C + (2.0 * Real (I) / Real (NW) - 1.0) * Pd.Half_Width * Wd	1.0	math	from minus one to one half widths across the face
+driver-action-execution.adb	Q : constant Vec3 := C + (2.0 * Real (I) / Real (NW) - 1.0) * Pd.Half_Width * Wd	2.0	math	from minus one to one half widths across the face
+driver-action-execution.adb	Reach_Of : constant Real := O.Pitch / 2.0 + B;	2.0	math	a point of a surface is never farther than half a pitch from the nearest sample
+driver-action-execution.adb	Set_Closer (P, X, C.Hand, 0.0, Out_Come);	0.0	math	a closer's fraction: zero is open
+driver-action-execution.adb	Set_Closer (P, X, C.Hand, 0.0, Out_Come);	0.0	math	a closer's fraction: zero is open
+driver-action-execution.adb	Set_Closer (P, X, E.Closers (K).Hand, 1.0, Out_Come);	1.0	math	a closer's fraction: one is closed on nothing, so it closes until it stops on the thing
+driver-action-execution.adb	Sigma => Sqrt (2.0) * Largest_Sigma (Start.Covariance), Degrees_Of_Freedom => 0);	2.0	statistics	a rise is the difference of two readings: its sigma is root two times theirs
+driver-action-execution.adb	function Img (X : Real) return String is (Driver.Log.Image (X, 3));	3	format	digits printed in a log line or a message
+driver-action-execution.adb	if Fits ((Low + High) / 2.0) then	2.0	numerics	bisection tries the middle
+driver-action-execution.adb	or else not Significant (Vector_Gate (3), Turn, Largest_Sigma (A.Tool.Rotation_Covariance)));	3	structure	a turn is a rotation vector of three components
 driver-action-goals.adb	Grow : constant Vec3 := P.Rotation * [1.0, 0.0, -U_S];	1.0	math	the image column x / z grows as 1 / z along the eye's x and as -u / z along its z
 driver-action-goals.adb	Half_Gap : constant Real := Sqrt (((Sxx - Syy) / 2.0) ** 2 + Sxy ** 2);	2.0	math	eigenvalues of a symmetric two by two matrix: half their difference
 driver-action-goals.adb	Larger : constant Real := (Sxx + Syy) / 2.0 + Half_Gap;	2.0	math	eigenvalues of a symmetric two by two matrix: their mean
 driver-action-goals.adb	Level : constant Boolean := Significant (Vector_Gate (2), abs Flat, Sigma);	2	structure	a separation within a plane has two dimensions
 driver-action-goals.adb	Motion => Contact.Rotation ((if Phi > 0.0 then Axis else -Axis), 1.0, Subject.Centre.Mean),	1.0	math	a twist of unit size: one radian
 driver-action-goals.adb	Sigma := X.Sigma * Sqrt (Larger / Real (Count)) / (2.0 * Half_Gap);	2.0	math	the gap between the two eigenvalues is twice the half gap
-driver-action-goals.adb	Sign : constant Real := (if Increase then 1.0 else -1.0);	1.0	math	up is the positive sense of a quantity
 driver-action-goals.adb	Sign : constant Real := (if Increase then 1.0 else -1.0);	1.0	math	down is the negative sense of a quantity
+driver-action-goals.adb	Sign : constant Real := (if Increase then 1.0 else -1.0);	1.0	math	up is the positive sense of a quantity
 driver-action-goals.adb	Theta : constant Real := Arctan (2.0 * Sxy, Sxx - Syy) / 2.0;	2.0	math	the principal axis of a two by two covariance lies at half the angle of (Sxx - Syy, 2 Sxy)
 driver-action-goals.adb	Theta : constant Real := Arctan (2.0 * Sxy, Sxx - Syy) / 2.0;	2.0	math	the principal axis of a two by two covariance lies at half the angle of (Sxx - Syy, 2 Sxy)
 driver-action-goals.adb	if not (abs F > 0.0) or else not Significant (Arccos (Real'Min (1.0, -Real'(D * U))), Angle_Sigma)	1.0	numerics	a cosine rounded above one is one, where Arccos is defined
 driver-action-goals.adb	if not Significant (Pi / 2.0, Sigma) then	2.0	math	an axis is itself after a half turn, so a quarter turn is as far off as it can be
 driver-action-goals.adb	if not Significant (Vector_Gate (2), abs Flat, Sigma) then	2	structure	a separation within a plane has two dimensions
 driver-action-goals.adb	if not Significant (Vector_Gate (2), abs H, X.Sigma) then	2	structure	a separation within a plane has two dimensions
-driver-action-goals.adb	return Along ((if R = Nearer then -1.0 else 1.0) * Unit (Subject.Centre.Mean - C), Sigma / D_S,	1.0	math	nearer goes toward the eye
 driver-action-goals.adb	return Along ((if R = Nearer then -1.0 else 1.0) * Unit (Subject.Centre.Mean - C), Sigma / D_S,	1.0	math	farther goes away from the eye
-driver-action-goals.adb	return Along ((if R = Right then 1.0 else -1.0) * Unit (Grow),	1.0	math	right goes the way the image column grows
+driver-action-goals.adb	return Along ((if R = Nearer then -1.0 else 1.0) * Unit (Subject.Centre.Mean - C), Sigma / D_S,	1.0	math	nearer goes toward the eye
 driver-action-goals.adb	return Along ((if R = Right then 1.0 else -1.0) * Unit (Grow),	1.0	math	left goes the way the image column shrinks
+driver-action-goals.adb	return Along ((if R = Right then 1.0 else -1.0) * Unit (Grow),	1.0	math	right goes the way the image column grows
 driver-action-goals.adb	return Moving (Contact.Rotation (Sign * Cross (N, Unit (H)), 1.0, X.Centre.Mean), Unknown);	1.0	math	a twist of unit size: one radian
 driver-action-goals.adb	return Moving (Contact.Rotation (Sign * N, 1.0, X.Centre.Mean), Unknown);	1.0	math	a twist of unit size: one radian
 driver-base64.adb	B1 : constant Natural := (if Have > 1 then Natural (Data (I + 1)) else 0);	1	format	base64 takes three bytes at a time; the second may be missing at the end

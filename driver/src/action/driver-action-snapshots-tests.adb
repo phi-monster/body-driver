@@ -242,10 +242,33 @@ package body Driver.Action.Snapshots.Tests is
       return T;
    end Thing_Of;
 
+   function Surface_Points (M : Model; Place : Rigid; Pitch : Real) return Sample_Vectors.Vector is
+      All_Points : Sample_Vectors.Vector;
+   begin
+      for P of M.Parts loop
+         declare
+            Local : Sample_Vectors.Vector;
+         begin
+            Faces (P, Pitch, Local);
+            for L of Local loop
+               declare
+                  Q : constant Vec3 := P.Pose * L.Point;
+               begin
+                  if not (for some Other of M.Parts => Other /= P and then Inside_Part (Other, Q, Pitch / 2.0)) then
+                     All_Points.Append (Sample'(Point => Place * Q, Normal => Rotate (Place, Rotate (P.Pose, L.Normal))));
+                  end if;
+               end;
+            end loop;
+         end;
+      end loop;
+      return All_Points;
+   end Surface_Points;
+
    function Floor (Id : Surface_Id; Place : Rigid; Sigma : Real) return Surface_State is
      ((Id     => Id,
        Point  => (Mean => Place.Translation, Covariance => (Sigma * Sigma) * Identity3),
-       Normal => (Unit_Vector => Rotate (Place, [0.0, 0.0, 1.0]), Sigma => Sigma)));
+       Normal => (Unit_Vector => Rotate (Place, [0.0, 0.0, 1.0]), Sigma => Sigma),
+       Of_Thing => 0));
 
    function Hand_Of (Arm : Arm_Id; Hand : Hand_Id; Depth, Sigma : Real) return Hand_State is
      ((Id       => Hand, Arm => Arm, Lobes => Lobe_Vectors.Empty_Vector,

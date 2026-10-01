@@ -46,10 +46,10 @@ is
    function Rose (E : Estimate) return Boolean is
      (Known (E) and then E.Value > 0.0 and then Significant (E.Value, E.Sigma, E.Degrees_Of_Freedom));
 
-   --  The carried thing is gone from the hand: it fell behind it, or the
-   --  closer that held it reached closed on nothing.
+   --  The carried thing is gone from the hand: it is not where the hand's
+   --  motion put it, or the closer that held it reached closed on nothing.
    function Dropped (F : Facts) return Boolean is
-     (Rose (F.Left_Behind)
+     ((Known (F.Carried_To) and then Known (F.Carried_At) and then Significant (F.Carried_To, F.Carried_At))
       or else (Known (F.Closed_Short)
                and then not Significant (F.Closed_Short.Value, F.Closed_Short.Sigma,
                                          F.Closed_Short.Degrees_Of_Freedom)));

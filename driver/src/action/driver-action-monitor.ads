@@ -24,7 +24,8 @@ is
       Exhausted    : Boolean := False;   --  the want needs motion and the body can make no more toward it
       Touch        : Boolean := False;   --  it met what it moved toward
       Height_Gain  : Estimate;           --  the thing's height above where it began; Unknown without one
-      Left_Behind  : Estimate;           --  how far a carried thing fell behind its hand; Unknown when none is
+      Carried_To   : Point_Estimate;     --  where the motion of the hand should have put the carried thing
+      Carried_At   : Point_Estimate;     --  where it is; both unknown when nothing was carried in this step
       Closed_Short : Estimate;           --  how far a holding closer is from closed on nothing; Unknown when none
       Seen         : Boolean := True;    --  the thing it follows is seen by some eye now
       Followable   : Boolean := True;    --  where that thing is is still known (seen, remembered or held)

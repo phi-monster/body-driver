@@ -115,9 +115,10 @@ package Driver.Action.Snapshots is
    package Thing_Vectors is new Ada.Containers.Vectors (Positive, Thing_State);
 
    type Surface_State is record
-      Id     : Surface_Id;
-      Point  : Point_Estimate;
-      Normal : Direction_Estimate;   --  away from the material, toward what rests on it
+      Id       : Surface_Id;
+      Point    : Point_Estimate;
+      Normal   : Direction_Estimate;   --  away from the material, toward what rests on it
+      Of_Thing : Thing_Id'Base := 0;   --  the thing whose top it is; 0 when it belongs to no thing
    end record;
 
    package Surface_Vectors is new Ada.Containers.Vectors (Positive, Surface_State);

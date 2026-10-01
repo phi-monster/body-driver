@@ -1,7 +1,9 @@
+with Driver.Numerics;
 with Driver.Tests;
 
 package body Driver.Action.Monitor.Tests is
 
+   use Driver.Numerics;
    use Driver.Tests;
 
    None : constant Ending_Set := [others => False];
@@ -113,13 +115,17 @@ package body Driver.Action.Monitor.Tests is
                                    Degrees_Of_Freedom => 0), others => <>);
       Shut    : constant Facts := (Holding with delta Closed_Short => (Value => 0.01, Sigma => 0.01,
                                    Degrees_Of_Freedom => 0));
-      Behind  : constant Facts := (Holding with delta Left_Behind => (Value => 0.05, Sigma => 0.01,
-                                   Degrees_Of_Freedom => 0));
+      Cov     : constant Mat3 := [[1.0E-4, 0.0, 0.0], [0.0, 1.0E-4, 0.0], [0.0, 0.0, 1.0E-4]];
+      Behind  : constant Facts := (Holding with delta Carried_To => (Mean => [0.0, 0.0, 0.1], Covariance => Cov),
+                                                     Carried_At => (Mean => [0.0, 0.0, 0.0], Covariance => Cov));
+      Along   : constant Facts := (Holding with delta Carried_To => (Mean => [0.0, 0.0, 0.01], Covariance => Cov),
+                                                     Carried_At => (Mean => [0.0, 0.0, 0.0], Covariance => Cov));
    begin
       Step (W, Holding);
       Check (Ends (W, Holding, Only (Free)) = "GOES ON", "a closer holding something is called slipped");
       Check (Ends (W, Shut, Only (Free)) = "SLIPPED", "a closer closed on nothing goes on carrying");
       Check (Ends (W, Behind, Only (Free)) = "SLIPPED", "a thing left behind by the hand goes on being carried");
+      Check (Ends (W, Along, Only (Free)) = "GOES ON", "a thing where the hand put it, within noise, is called slipped");
    end Slipped_When_Gone;
 
    procedure Lost_Only_When_Unknown is

@@ -53,6 +53,9 @@ package Driver.Action.Snapshots.Tests is
    --  normal, except where it rests on its frame's plane z = 0 or lies inside
    --  another part.
 
+   function Surface_Points (M : Model; Place : Rigid; Pitch : Real) return Sample_Vectors.Vector;
+   --  Every face sampled at Pitch, the hidden ones too, in the world.
+
    function Floor (Id : Surface_Id; Place : Rigid; Sigma : Real) return Surface_State;
    --  The plane z = 0 of Place, normal +z of Place.
 
