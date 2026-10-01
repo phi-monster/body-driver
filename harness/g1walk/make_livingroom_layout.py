@@ -88,10 +88,11 @@ def q_yaw(deg):
 
 
 # 东西开局乱放的地方:地上(避开家具和人形开局那一块)、沙发座、茶几面、电视柜面、餐桌面(果盘外)
-FLOOR_Z = 0.05          # 地面 = RoboDojo 布局里 Ground 那一块的中心 + 半厚(和第 39 条一样按布局算;这里读同一份)
+# 地面高:RoboDojo 的 Ground 是一块 cube,中心摆在 default_pos 的 z − 半厚(scene_manager/objects/ground.py)⇒ 顶面就在 default_pos 的 z;
+# 这里把它摆到 0.05 m,比默认房间 Simple_Room 自己的地高一点(第 39 条离线核实测:东西落在 0.0475 上),地面就是这一块的顶,高度说得清。
+# (第一版按"中心 + 半厚"算出 0.05,算法是错的,碰巧和房间的地差 2.5 mm;大客厅没放房间,东西其实落在 Ground 的顶 0 上、边上的掉出了 7 m 的地)
+FLOOR_Z = 0.05      # 和第 39 条(harness/wheelarm/install.py)一样;客厅自己的地(bd_lr_room 那块 8 × 6 m 的底板)顶面也在这儿
 base = json.load(open(f"{R}/Assets/Eval_Layout/RoboDojo/drone/1/bootcal_0.json"))
-G = base["Ground"]
-FLOOR_Z = float(G["default_pos"][2]) + 0.5 * float(G["thickness"])
 furn_foot = {}
 for lab, (cat, x, y, yaw) in FURN.items():
     if lab == "room":
@@ -117,6 +118,7 @@ D = f"{R}/Assets/Eval_Layout/RoboDojo/{args.cfg_name}/0"
 os.makedirs(D, exist_ok=True)
 for k in range(3):
     lay = {key: json.loads(json.dumps(base[key])) for key in ("Ground", "Background")}
+    lay["Ground"]["default_pos"] = [0.0, 0.0, FLOOR_Z]
     lay["Table"] = dict(base["Table"], default_pos=[0.0, 30.0, base["Table"]["default_pos"][2]])   # RoboDojo 的桌子挪出客厅(它要有这一项)
     lay["Geometry"] = {}
     for lab, (cat, x, y, yaw) in FURN.items():

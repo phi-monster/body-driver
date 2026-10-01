@@ -8,6 +8,7 @@
 # 走路控制器的命令那一组在身体报的读数里叫 base_cmd_joint_state(4 个:机身系的 vx、vy、wz 量到的,和骨盆离地多高),
 # 收的命令也叫 base_cmd_joint_state(4 个:[vx, vy, wz, 胯高])—— 这一组怎么叫、怎么报,等路 7 的身体协议文档定了照它改。
 # 判据:task/RoboDojo/bd/tidy.py 的 bd_tidy(每一件都放到它该去的地方)。一集 30 分钟 = 45000 个动作(25 Hz;BD_STEP_LIM 可改)。
+# 走路控制器挂在每一个物理子步上(_hook_physics);评测环境把场景全摆好以后,再把人形摆回站着的样子、物理走到停(bd_stand_and_settle)。
 import os
 
 import numpy as np
@@ -44,10 +45,25 @@ class WalkController:
         self.last = torch.zeros(self.q0.shape[0], len(self.leg_ids), device=dev)
         self.decim = max(1, int(round(0.02 / float(env.dt))))
         self.sub = 0
+        self.calls, self.last_cmd, self.last_out = 0, None, None   # 离线核看:策略算了几回、最后一回用的命令、输出多大
 
     def reset(self):
         self.last.zero_()
         self.sub = 0
+
+    def stand_up(self):
+        """把人形摆回开局站着的样子:根的位姿、速度、关节都按配置的开局写进仿真。RoboDojo 的 robot_manager.reset 只设关节目标、不摆根
+        (固定在桌边的胳膊用不着摆),根不固定的身体摔过一回,下一集开局还躺着"""
+        a = self.art
+        ids = torch.arange(a.num_instances, device=a.device)
+        rs = a.data.default_root_state.clone()
+        org = torch.stack([torch.as_tensor(np.asarray(_np_cpu(o), dtype=np.float32)[:3]) for o in self.env.scene_manager.env_origins]).to(a.device)
+        rs[:, :3] += org[: rs.shape[0]]
+        a.write_root_pose_to_sim(rs[:, :7], env_ids=ids)
+        a.write_root_velocity_to_sim(torch.zeros_like(rs[:, 7:]), env_ids=ids)
+        a.write_joint_state_to_sim(a.data.default_joint_pos.clone(), a.data.default_joint_vel.clone(), env_ids=ids)
+        a.set_joint_position_target(a.data.default_joint_pos.clone(), env_ids=ids)
+        self.reset()
 
     def tick(self, cmd):
         if self.sub % self.decim == 0:
@@ -59,6 +75,9 @@ class WalkController:
                 raw = self.policy(x)
             self.last = raw.clone()
             self.art.set_joint_position_target(raw * 0.25 + self.q0[:, self.leg_ids], joint_ids=self.leg_ids)
+            self.calls += 1
+            self.last_cmd = list(cmd)
+            self.last_out = float(raw.abs().max())
         self.sub += 1
 
     def reading(self, env_idx=0):
@@ -69,7 +88,28 @@ class WalkController:
         return [float(v[0]), float(v[1]), float(w[2]), z]
 
 
-FLOOR_Z = 0.05   # 地面 = RoboDojo 布局里 Ground 那一块的中心 + 半厚(安装时按布局核过,见 harness/g1walk/install.py)
+FLOOR_Z = 0.05   # 地面高:客厅布局把 RoboDojo 的 Ground 顶面和客厅底板都摆在这儿(make_livingroom_layout.py;安装时核过两边一样)
+
+
+def _np_cpu(x):
+    return x.detach().cpu().numpy() if hasattr(x, "detach") else np.asarray(x)
+
+
+def _hook_physics(task, sim):
+    """走路控制器挂在每一个物理子步上(不只挂在动作里):RoboDojo 开局复位要白走 300 个子步(task_env.reset),场景、相机也各自走几步
+    (scene_manager / camera_manager 直接调 sim.sim_step),这些时候没人管腿,人形就摔了(第一版离线核:开局骨盆已经在 0.37 m)"""
+    if getattr(sim, "_bd_walk_hooked", False):
+        return
+    orig = sim.sim_step
+
+    def sim_step(render=True):
+        w = task._walk()
+        if w is not None:
+            w.tick(task.bd_cmd)
+        return orig(render=render)
+
+    sim.sim_step = sim_step
+    sim._bd_walk_hooked = True
 
 
 def _patch_eval_env(cls):
@@ -94,7 +134,13 @@ def _patch_eval_env(cls):
                 d.setdefault("action", {})[CMD_KEY] = np.asarray(self.bd_cmd, dtype=np.float32)
         return out
 
-    cls.take_action, cls.get_obs_batch = take_action, get_obs_batch
+    orig_setup = cls.setup_scene
+
+    def setup_scene(self):
+        orig_setup(self)
+        self.bd_stand_and_settle()
+
+    cls.take_action, cls.get_obs_batch, cls.setup_scene = take_action, get_obs_batch, setup_scene
     cls._bd_walk_patched = True
 
 
@@ -108,28 +154,47 @@ class BdLivingroomCommon:
         self.bd_cmd = list(STAND)
         self.bd_walk = None
         _patch_eval_env(type(self))
-        # RoboDojo 开局核"布局稳不稳"要白走 300 个物理子步(1.2 s),那时走路控制器还没接上、人形站不稳;这一集的东西全不让它核
-        # (布局里 need_check_stable 都是 False,核也是白核),这一关在这具身体这一集里跳过
+        # 手的读数报每个关节此刻的位置(RoboDojo 自己报的是上一拍的命令)
+        rig.real_ee_readings(type(self))
+        # 布局里的东西 need_check_stable 都是 False(地上、家具上的东西 RoboDojo 那一关只认桌上的),核也是白核:这一关跳过
         self.scene_manager.layout_manager.check_layout_stability = lambda env, render=False: (True, [])
+
+    def _walk(self):
+        """走路控制器:身体那个关节体在仿真里起来了才建(第一次用到的时候)"""
+        if self.bd_walk is None:
+            keys = getattr(self.robot_manager, "robot_key", None)
+            if keys and getattr(keys[0], "is_initialized", False):
+                self.bd_walk = WalkController(self)
+        return self.bd_walk
 
     def _post_setup_scene(self, sim):
         super()._post_setup_scene(sim)
         self.reward_manager.initialize(self)
         scene.install_checks(self.reward_manager.func_parser)
         tidy.install_checks(self.reward_manager.func_parser)
+        for s in {id(o): o for o in (sim, getattr(self, "sim", None)) if o is not None}.values():
+            _hook_physics(self, s)
 
     def reset(self, seed=None, options=None):
+        self.bd_cmd = list(STAND)
         super().reset(seed=seed, options=options)
         self.reward_manager.reset()
-        self.bd_cmd = list(STAND)
-        if self.bd_walk is None:
-            self.bd_walk = WalkController(self)
-        self.bd_walk.reset()
 
-    def step(self, meta_control_list):
-        if self.bd_walk is not None:
-            self.bd_walk.tick(self.bd_cmd)
-        super().step(meta_control_list)
+    def bd_stand_and_settle(self):
+        """把人形摆回站着的样子,物理走到停(机身速度 < 1 cm/s、角速度 < 0.1 rad/s,每 10 个子步看一次,最多 2 秒)。
+        在评测环境把场景全摆好以后调(_patch_eval_env 接在 setup_scene 后面):RoboDojo 复位时先删掉地、家具再生出来,setup_scene 里又把
+        每件东西(连地、墙、家具)按布局重新摆一遍,中间都走物理步 —— 人形的脚趁地不在掉下去,地回来的时候脚埋在地里,卡着抬不起来
+        (离线核:站得住、走不动,腿跟不上目标 1.7 rad;抬高 0.2 m 放手,落回去高了 4 cm,之后就走得动了)"""
+        w = self._walk()
+        if w is None:
+            return
+        w.stand_up()
+        a = w.art
+        for _ in range(50):
+            for _ in range(10):
+                self.sim_step(render=False)
+            if float(a.data.root_lin_vel_w[0].norm()) < 0.01 and float(a.data.root_ang_vel_w[0].norm()) < 0.1:
+                break
 
     def run_reward(self):
         self.reward_manager.check([("bd_tidy", {})])

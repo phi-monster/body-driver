@@ -7,6 +7,7 @@
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -42,9 +43,8 @@ for src, rel in ((f"{HERE}/../scenes/rd/bd/scene.py", "task/RoboDojo/bd/scene.py
     print("装了", rel)
 open(os.path.join(R, "task/RoboDojo/config/bd_livingroom.yml"), "w").write("# body-driver 第 40 条(harness/g1walk/install.py 写出):布局直接给。\n{}\n")
 print("装了 task/RoboDojo/config/bd_livingroom.yml")
-# 机器人配置:骨盆离地 0.75 m(Isaac Lab 的 G1_29DOF_CFG 开局高),地面按布局里 Ground 那一块算(中心 + 半厚)
-G = json.load(open(os.path.join(R, "Assets/Eval_Layout/RoboDojo/drone/1/bootcal_0.json")))["Ground"]
-FLOOR_Z = float(G["default_pos"][2]) + 0.5 * float(G["thickness"])
+# 机器人配置:骨盆离地 0.75 m(Isaac Lab 的 G1_29DOF_CFG 开局高);地面高和布局(make_livingroom_layout.py)、任务里的是同一个数
+FLOOR_Z = float(re.search(r"^FLOOR_Z = ([0-9.]+)", open(os.path.join(HERE, "make_livingroom_layout.py"), encoding="utf-8").read(), re.M).group(1))
 task = open(os.path.join(R, "task/RoboDojo/tasks/bd_livingroom.py"), encoding="utf-8").read()
 assert "FLOOR_Z = %.2f" % FLOOR_Z in task, "任务里写的地面高和布局算的不一样(布局:%.3f)" % FLOOR_Z
 txt = open(os.path.join(HERE, "rd/env_cfg/robot/g1walk.yml")).read().replace("[0.0, -0.6, 0.80]", "[0.0, -0.6, %.4f]" % (FLOOR_Z + 0.75))

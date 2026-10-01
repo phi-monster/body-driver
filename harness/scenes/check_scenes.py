@@ -500,14 +500,13 @@ def drive(S, rep, name, d_left, d_right, n):
     """n 个动作里两个轮子的目标每个动作各往前转 d_left / d_right 弧度(胳膊、手指照读数不动),量底盘走了多远、转了多少"""
     p0, q0 = robot_root(S)
     yaw = lambda q: math.degrees(math.atan2(2 * (q[0] * q[3] + q[1] * q[2]), 1 - 2 * (q[2] ** 2 + q[3] ** 2)))
-    act = S.hold_action()
-    key = [k for k in act if k.endswith("arm_joint_state")][0]
-    tgt = np.asarray(act[key], dtype=float).copy()
-    # 胳膊那一串的顺序是 RoboDojo 按关节体里的顺序重排过的(robot_manager:find_joints 以后把 arm_joints_name 换成了它的顺序),按名字找轮子
-    names = list(S.env.robot_manager.robot_list[0].arm_joints_name)
-    il, ir = names.index("wheel_left_joint"), names.index("wheel_right_joint")
-    rep.setdefault("arm_joint_order", names)
-    w0 = tgt[[il, ir]].copy()
+    # 轮子单独一组(rig.joint_group 补的 base_joint_state:读数 = 此刻转角,命令 = 目标转角),目标从此刻的读数起
+    key = "base_joint_state"
+    obs = S.env.get_obs()
+    tgt = np.asarray(obs["state"][key], dtype=float).reshape(-1).copy()
+    il, ir = 0, 1
+    names = ["wheel_left_joint", "wheel_right_joint"]
+    w0 = tgt.copy()
     for _ in range(n):
         tgt[il] += d_left
         tgt[ir] += d_right
@@ -516,18 +515,50 @@ def drive(S, rep, name, d_left, d_right, n):
         S.env.take_action(a)
     p1, q1 = robot_root(S)
     st = S.env.get_obs()["state"]
-    w1 = np.asarray(st[key], dtype=float).reshape(-1)[[il, ir]]
+    w1 = np.asarray(st[key], dtype=float).reshape(-1)
     out = {"actions": n, "d_left_rad": d_left, "d_right_rad": d_right, "wheel_turned_rad": [round(float(v), 3) for v in (w1 - w0)],
            "moved_xy_m": [round(float(v), 4) for v in (p1 - p0)[:2]],
            "dist_m": round(float(np.linalg.norm((p1 - p0)[:2])), 4), "yaw_deg": round(yaw(q1) - yaw(q0), 2), "z_m": [round(float(p0[2]), 4), round(float(p1[2]), 4)]}
     rep.setdefault("drive", {})[name] = out
-    log("   底盘 %s:%d 个动作、轮子每个动作 %.3f / %.3f rad(轮子读数转了 %s)⇒ 走了 %s m(%.4f m)、转了 %.2f°、根高 %s;胳膊那一串的顺序 %s" % (
-        name, n, d_left, d_right, out["wheel_turned_rad"], out["moved_xy_m"], out["dist_m"], out["yaw_deg"], out["z_m"], names))
+    log("   底盘 %s:%d 个动作、轮子每个动作 %.3f / %.3f rad(轮子读数转了 %s)⇒ 走了 %s m(%.4f m)、转了 %.2f°、根高 %s" % (
+        name, n, d_left, d_right, out["wheel_turned_rad"], out["moved_xy_m"], out["dist_m"], out["yaw_deg"], out["z_m"]))
+    return out
+
+
+def grip_check(S, rep):
+    """夹爪真开合没有、眼里看得见没有(仿真真值):夹爪命令给 0、给 1 各走 10 个动作,量两根手指的关节位置、每只眼的画面变了多少像素
+    (开机炮里驱动说"推到头读数跟着走,哪只眼里都没变 ⇒ 哑巴零件",先在这儿看是手指没动,还是动了眼里看不见)"""
+    env = S.env
+    art = env.robot_manager.robot_key[0]
+    rob = env.robot_manager.robot_list[0]
+    out = {}
+    imgs = {}
+    lim = art.data.soft_joint_pos_limits[0, rob.gripper_joint_indices].cpu().numpy()   # 手(hand):每个关节给到它的下限 / 上限
+    for v in (0.0, 1.0):
+        for _ in range(10):
+            a = S.hold_action()
+            for k in [k for k in a if k.endswith("ee_joint_state")]:
+                a[k] = np.array([v]) if rob.ee_type == "gripper" else (lim[:, 0] if v == 0.0 else lim[:, 1]).astype(np.float64)
+            env.take_action(a)
+        for _ in range(4):
+            env.render()
+        obs = env.get_obs()
+        imgs[v] = {c: np.asarray(d["color"]).astype(np.int16) for c, d in obs["vision"].items() if isinstance(d, dict) and "color" in d}
+        q = art.data.joint_pos[0, rob.gripper_joint_indices].cpu().numpy()
+        st = obs["state"]
+        out["cmd_%g" % v] = {"finger_joint_pos": [round(float(x), 4) for x in q],
+                             "reading": [round(float(x), 4) for k, x2 in st.items() if k.endswith("ee_joint_state") for x in np.asarray(x2).reshape(-1)]}
+    out["changed_px_fraction"] = {c: round(float((np.abs(imgs[1.0][c] - imgs[0.0][c]).max(axis=-1) > 8).mean()), 4) for c in imgs[0.0]}
+    rep["grip"] = out
+    log("   夹爪 0 → 1:%s" % out)
     return out
 
 
 def mouse_floor_scenario(S, rep):
     """第 39 条:底盘真在地上走(两个轮子一起转 ⇒ 往前走;反着转 ⇒ 原地转),老鼠离地 12 cm 判 1、8 cm 判 0"""
+    g = grip_check(S, rep)
+    q0, q1 = g["cmd_0"]["finger_joint_pos"], g["cmd_1"]["finger_joint_pos"]
+    test(rep, "夹爪给 1:两根手指张开(%s → %s)" % (q0, q1), 1, max(abs(a - b) for a, b in zip(q0, q1)) > 0.01)
     r = 0.05   # 轮子半径(make_wheelarm.py)
     a = drive(S, rep, "往前", 0.004 / r, 0.004 / r, 50)          # 一个动作该走 4 mm(0.1 m/s),50 个动作该走 0.2 m
     test(rep, "两个轮子一起转,底盘往前走了 %.3f m(该 0.2 m 上下)" % a["dist_m"], 1, 0.1 < a["dist_m"] < 0.3)
@@ -564,6 +595,60 @@ def livingroom_scenario(S, rep):
     from task.RoboDojo.bd import question as Q
     from task.RoboDojo.bd import tidy as TD
     env = S.env
+    art = env.robot_manager.robot_key[0]
+    org = _np(env.scene_manager.env_origins[0])[:3]
+    # 身体真站在地上没有:根是不是固定的、脚底(脚那一节碰撞形状的最低点)离地面多高;把地面整个往下挪 1 cm 再走 20 步,站在地上的根跟着落 1 cm
+    from pxr import UsdGeom, Usd, UsdPhysics
+    import carb
+    import omni.usd
+    stage = omni.usd.get_context().get_stage()
+    bc = UsdGeom.BBoxCache(Usd.TimeCode.Default(), ["default", "render", "proxy", "guide"])
+    soles = {}
+    for side in ("left", "right"):
+        path = None
+        for prim in stage.Traverse():
+            pp = str(prim.GetPath())
+            if pp.startswith("/World/envs/env_0/robot0") and pp.endswith("%s_ankle_roll_link" % side):
+                path = prim
+                break
+        lows = []
+        if path is not None:
+            for c in Usd.PrimRange(path):
+                if c.HasAPI(UsdPhysics.CollisionAPI):
+                    r = bc.ComputeWorldBound(c).ComputeAlignedRange()
+                    if not r.IsEmpty():
+                        lows.append(float(r.GetMin()[2]) - org[2])
+        soles[side] = round(min(lows), 4) if lows else None
+    # 往下打几条射线(PhysX 场景查询,仿真真值):脚旁边 15 cm、两脚中间、骨盆正下方 —— 打到的第一个碰撞体是谁、多高
+    from omni.physx import get_physx_scene_query_interface
+    sq = get_physx_scene_query_interface()
+    rays = {}
+    fid = [art.body_names.index(n) for n in ("left_ankle_roll_link", "right_ankle_roll_link")]
+    fp = art.data.body_pos_w[0, fid].cpu().numpy()
+    pts = {"beside_left_foot": fp[0] + [0.15, 0.0, 0.0], "between_feet": fp.mean(axis=0), "left_foot": fp[0]}
+    for name, q in pts.items():
+        hit = sq.raycast_closest(carb.Float3(float(q[0]), float(q[1]), float(org[2] + 1.5)), carb.Float3(0.0, 0.0, -1.0), 3.0)
+        rays[name] = {"hit": bool(hit["hit"]), "z": round(float(hit["position"][2]) - org[2], 4) if hit["hit"] else None,
+                      "collider": str(hit.get("collision", "")) if hit["hit"] else None}
+    rep["body_on_floor"] = {"is_fixed_base": bool(getattr(art, "is_fixed_base", False)), "sole_z": soles, "rays": rays,
+                            "feet_link_z": [round(float(v) - org[2], 4) for v in fp[:, 2]],
+                            "pelvis_z": round(float(art.data.root_pos_w[0, 2].cpu()) - org[2], 4)}
+    log("   身体站没站在地上:%s" % rep["body_on_floor"])
+    # 抬起来放手:根整个抬高 0.20 m(位姿、速度写进仿真),物理走 0.4 s。根是自由的、站在地上 ⇒ 掉回原来的高度;被什么拽着 ⇒ 不掉
+    ids = torch.arange(art.num_instances, device=art.device)
+    rs = torch.cat([art.data.root_pos_w.clone(), art.data.root_quat_w.clone()], dim=-1)
+    z_before = float(rs[0, 2].cpu()) - org[2]
+    rs[:, 2] += 0.20
+    art.write_root_pose_to_sim(rs, env_ids=ids)
+    art.write_root_velocity_to_sim(torch.zeros(art.num_instances, 6, device=art.device), env_ids=ids)
+    zs = []
+    for _ in range(10):
+        S.steps(10)
+        zs.append(round(float(art.data.root_pos_w[0, 2].cpu()) - org[2], 3))
+    rep["lift_drop"] = {"z_before": round(z_before, 4), "z_every_10_substeps": zs}
+    log("   抬高 0.20 m 放手:骨盆高 %.3f → 每 10 个子步 %s" % (z_before, zs))
+    # 脚没埋在地里 ⇒ 落回原来的高度(第一版:落回去高了 4.5 cm —— 复位时脚埋在地里,站在下面那层地上)
+    test(rep, "抬高放手落回原来的高度(%.3f → %.3f m)" % (z_before, zs[-1]), 1, abs(zs[-1] - z_before) < 0.01)
     p0, _ = robot_root(S)
     for _ in range(50):
         env.take_action(S.hold_action())
@@ -571,9 +656,30 @@ def livingroom_scenario(S, rep):
     rep["stand"] = {"pelvis_z": [round(float(p0[2]), 3), round(float(p1[2]), 3)], "moved_m": round(float(np.linalg.norm((p1 - p0)[:2])), 3)}
     test(rep, "站着不动 50 个动作:骨盆高 %.3f → %.3f m、挪了 %.3f m" % (p0[2], p1[2], rep["stand"]["moved_m"]), 1, p1[2] > p0[2] - 0.1 and rep["stand"]["moved_m"] < 0.1)
     env.bd_cmd = [0.3, 0.0, 0.0, 0.72]
-    for _ in range(50):
+    w = env._walk()
+    c0 = w.calls if w is not None else None
+    vel, feet, track, lift = [], [], [], []
+    art = env.robot_manager.robot_key[0]
+    fid = [art.body_names.index(n) for n in ("left_ankle_roll_link", "right_ankle_roll_link")]
+    org = _np(env.scene_manager.env_origins[0])[:3]
+    for k in range(50):
         env.take_action(S.hold_action())
+        d = art.data
+        fz = d.body_pos_w[0, fid, 2].cpu().numpy() - org[2]
+        lift.append(float(fz.max() - fz.min()))
+        if k % 10 == 9:
+            vel.append([round(float(v), 3) for v in d.root_lin_vel_b[0].cpu().numpy()[:2]])
+            feet.append([[round(float(v), 3) for v in (d.body_pos_w[0, i].cpu().numpy() - org)[:3]] for i in fid])
+            if w is not None:
+                e = (d.joint_pos_target[0, w.leg_ids] - d.joint_pos[0, w.leg_ids]).abs().cpu().numpy()
+                track.append(round(float(e.max()), 3))
     p2, _ = robot_root(S)
+    rep["walk_diag"] = {"policy_calls": (w.calls - c0) if w is not None else None, "decim": getattr(w, "decim", None),
+                        "last_cmd": getattr(w, "last_cmd", None), "last_out_absmax": getattr(w, "last_out", None),
+                        "v_body_every_10": vel, "feet_xyz_every_10": feet, "leg_track_err_max_every_10": track,
+                        "feet_height_diff_max": round(max(lift), 4), "dt": float(env.dt),
+                        "actuators": {k2: type(v2).__name__ for k2, v2 in getattr(art, "actuators", {}).items()}}
+    log("   走路控制器诊断:%s" % rep["walk_diag"])
     env.bd_cmd = [0.0, 0.0, 0.0, 0.72]
     for _ in range(25):
         env.take_action(S.hold_action())
@@ -583,6 +689,9 @@ def livingroom_scenario(S, rep):
     test(rep, "走路控制器 vx 0.3 m/s 走 2 s:走了 %.3f m(该 0.6 m 上下)、停下以后骨盆高 %.3f m" % (rep["walk"]["dist_m"], p3[2]), 1,
          0.4 < rep["walk"]["dist_m"] < 0.8 and p3[2] > p0[2] - 0.1)
     save_images(env, rep, "L0_walked")
+    g = grip_check(S, rep)
+    q0, q1 = g["cmd_0"]["finger_joint_pos"], g["cmd_1"]["finger_joint_pos"]
+    test(rep, "左手每个关节给到下限 / 上限:手指动了(最大 %.3f rad)" % max(abs(x - y) for x, y in zip(q0, q1)), 1, max(abs(x - y) for x, y in zip(q0, q1)) > 0.1)
     fp = S.rm.func_parser
     test(rep, "开局(东西乱放着)", 0, S.graded())
     lay = S.lm.saved_layouts[0]
