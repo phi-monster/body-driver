@@ -415,7 +415,7 @@ package body Zone is
          --  这些约束定不下来的方向(一对都没有 = 这只眼里只有一瓣:另一根手指在画面外,或者本来就只有一瓣)由"手指合拢时到的那片"
          --  (合到的区里最大的一块)的形心定:取最小二乘解里离那一片最近的那个(伪逆解:有一对以上 ⇒ 它不动结果;一对都没有 ⇒ 结果就是它)。
          --  两瓣时 = 两瓣心的中点(EE3 实测"合到处"的形心在手上相机里落到扫过带的上沿 —— 合上的手指和后面的桌面差得不够,那片只认出一半;
-         --  10-01 按仿真真值:V1B78–V1B82 腕眼两瓣中点沿合拢方向离指尖真中点 1–2 px,合到的那片 77–96 px)。
+         --  10-01 按仿真真值:V1B78–V1B82 腕眼两瓣中点沿合拢方向离指尖真中点 1–2 px,合到的那片的形心约 96 px(第 1 只手)、116 px(第 2 只手))。
          --  一瓣时 = 合到的那片(10-01 按仿真真值:V1B78–V1B82 头顶眼第 1 只手,指尖真中点离它 32–38 px、沿合拢方向 2–3 px;
          --  离那一瓣自己的形心 64–65 px、沿合拢方向 41 px —— I2 那一版改成了后者,改回)
          declare
@@ -648,7 +648,7 @@ package body Zone is
    end Lobe_Mask;
 
    function From_Frames (Open_G, Closed_G : Buf; W, Hh : Natural; Static : Bools := Bool_Vectors.Empty_Vector;
-                         Open_Class : Integer := 0) return Hand_Zone is
+                         Open_Class : Integer := 0; Open_Ride, Open_Judged : Bools := Bool_Vectors.Empty_Vector) return Hand_Zone is
       Z : Hand_Zone;
       N : constant Natural := W * Hh;
       Changed : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (N));
@@ -705,6 +705,90 @@ package body Zone is
          end loop;
          return C;
       end Count_Of;
+      --  瓣那一类(Left)里每一块(8 邻连通,逐像素标号)按张开那头的格点核:里面判得了的格点里长在眼上的比例不比合到的那一类(Gap)里多出
+      --  Z 倍标准差 ⇒ 那一块整块挪进 Gap。Moved = 挪了几块
+      procedure Move_Background (Left, Gap : in out Bools; Ride, Judged : Bools; Moved : out Natural) is
+         Lab : array (0 .. Natural'Max (1, N) - 1) of Integer := [others => -1];
+         Stack : Ints;
+         Nc : Natural := 0;
+         Nk, Rk : Ints;   --  每一块:判得了的格点、其中长在眼上的
+         Na, Ra : Natural := 0;
+      begin
+         Moved := 0;
+         for P0 in 0 .. N - 1 loop
+            if Left.Element (P0) and then Lab (P0) < 0 then
+               Lab (P0) := Nc; Stack.Clear; Stack.Append (P0);
+               while not Stack.Is_Empty loop
+                  declare
+                     P : constant Natural := Natural (Stack.Last_Element);
+                     Px : constant Integer := P mod W;
+                     Py : constant Integer := P / W;
+                  begin
+                     Stack.Delete_Last;
+                     for Dy in -1 .. 1 loop
+                        for Dx in -1 .. 1 loop
+                           if Px + Dx in 0 .. W - 1 and then Py + Dy in 0 .. Hh - 1 then
+                              declare
+                                 Q : constant Natural := (Py + Dy) * W + (Px + Dx);
+                              begin
+                                 if Left.Element (Q) and then Lab (Q) < 0 then
+                                    Lab (Q) := Nc; Stack.Append (Q);
+                                 end if;
+                              end;
+                           end if;
+                        end loop;
+                     end loop;
+                  end;
+               end loop;
+               Nc := Nc + 1;
+               Nk.Append (0); Rk.Append (0);
+            end if;
+         end loop;
+         for Gyy in 0 .. Kinem.Gy - 1 loop
+            for Gxx in 0 .. Kinem.Gx - 1 loop
+               declare
+                  G : constant Natural := Gyy * Kinem.Gx + Gxx;
+                  Px : constant Natural := Natural (Long_Float'Floor (Kinem.Grid_V (Gyy, Hh))) * W + Natural (Long_Float'Floor (Kinem.Grid_U (Gxx, W)));
+               begin
+                  if Px < N and then Judged.Element (G) then
+                     if Lab (Px) >= 0 then
+                        Nk.Replace_Element (Lab (Px), Nk (Lab (Px)) + 1);
+                        if Ride.Element (G) then
+                           Rk.Replace_Element (Lab (Px), Rk (Lab (Px)) + 1);
+                        end if;
+                     elsif Gap.Element (Px) then
+                        Na := Na + 1;
+                        if Ride.Element (G) then
+                           Ra := Ra + 1;
+                        end if;
+                     end if;
+                  end if;
+               end;
+            end loop;
+         end loop;
+         if Na = 0 then
+            return;
+         end if;
+         for K in 0 .. Nc - 1 loop
+            if Nk (K) > 0 then
+               declare
+                  Pl : constant Long_Float := Long_Float (Rk (K)) / Long_Float (Nk (K));
+                  Pa : constant Long_Float := Long_Float (Ra) / Long_Float (Na);
+                  P : constant Long_Float := Long_Float (Rk (K) + Ra) / Long_Float (Nk (K) + Na);
+                  Sd : constant Long_Float := Sqrt (P * (1.0 - P) * (1.0 / Long_Float (Nk (K)) + 1.0 / Long_Float (Na)));
+               begin
+                  if not (Pl - Pa > Stats.Z * Sd) then
+                     Moved := Moved + 1;
+                     for I in 0 .. N - 1 loop
+                        if Lab (I) = K then
+                           Left.Replace_Element (I, False); Gap.Replace_Element (I, True);
+                        end if;
+                     end loop;
+                  end if;
+               end;
+            end if;
+         end loop;
+      end Move_Background;
    begin
       if Natural (Open_G.Length) < N or else Natural (Closed_G.Length) < N or else N = 0 then
          return Z;
@@ -770,6 +854,14 @@ package body Zone is
            (if Open_Class /= 0 then Open_Class > 0 elsif Sd /= Sl then Sd > Sl else Count_Of (Darker) >= Count_Of (Lighter));
          None : constant Floats := F64_Vectors.Empty_Vector;
       begin
+         --  张开那头转一下眼判的格点给了 ⇒ 瓣那一类里在张开那头不长在眼上的块(背景)挪进合到的那一类(见 spec)
+         if Natural (Open_Ride.Length) = Kinem.Gx * Kinem.Gy and then Natural (Open_Judged.Length) = Kinem.Gx * Kinem.Gy then
+            if Dark_Is_Open then
+               Move_Background (Darker, Lighter, Open_Ride, Open_Judged, Z.Moved_Out);
+            else
+               Move_Background (Lighter, Darker, Open_Ride, Open_Judged, Z.Moved_Out);
+            end if;
+         end if;
          if Dark_Is_Open then
             Assemble (Z, Darker, Lighter, W, Hh, False, None, None, Clean);
          else
@@ -1278,6 +1370,7 @@ package body Zone is
                Settled : Boolean := True;
                Before, After : Buf;   --  转之前 / 转出去停稳的那一帧(这只手自己那只眼,彩图)
                Before_All, After_All : Plug.Cam_Vectors.Vector;   --  同一对,每台相机(别的眼里手跟着转动挪了 ⇒ 那儿就是此刻手指在的那一类)
+               Shut_Refined : Boolean := False;   --  合空那一截已经在合空那头按长在眼上补过(张开那头重拼握区时照留)
                --  转出去一下再转回来,中间那一对画面配格点、拟合、判每个格点;Why 不空 = 这一转用不了
                procedure Turn_Fit (Why_T : in out Unbounded_String) is
                   Used : Natural;
@@ -1380,6 +1473,31 @@ package body Zone is
                   for I in 0 .. Ng - 1 loop
                      Gr.Replace_Element (I, Vd (I) = Kinem.Rides);
                   end loop;
+                  --  这一转是在张开那头转的 ⇒ 瓣那一类里在张开那头不长在眼上的块(背景:合上那根手指被照亮的那一侧比身后的地板亮,
+                  --  按亮暗落进了瓣那一类)挪进合到的那一类,按同一个类别重拼(From_Frames 的 Open_Ride / Open_Judged;已经补好的合空那一截照留)
+                  declare
+                     Judged : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (Ng));
+                  begin
+                     for I in 0 .. Ng - 1 loop
+                        Judged.Replace_Element (I, Vd (I) /= Kinem.Unknown);
+                     end loop;
+                     declare
+                        N0 : constant Natural := Z2.N_Lobes;
+                        Keep_Shut : constant Section := Z2.Shut;
+                        Zr : Hand_Zone := From_Frames (Lo_Frame (Natural (Hc)).Gray, Hi_Frame (Natural (Hc)).Gray, Cw, Ch,
+                                                       Open_Class => (if Z2.Lobes_Darker then 1 else -1), Open_Ride => Gr, Open_Judged => Judged);
+                     begin
+                        if Zr.Valid and then Zr.Moved_Out > 0 then
+                           if Shut_Refined then
+                              Zr.Shut := Keep_Shut;
+                           end if;
+                           Z2 := Zr;
+                           H.Zones.Replace_Element (Natural (Hc), Z2);
+                           Put_Line ("[身]   瓣那一类里有 " & Codec.Img (Zr.Moved_Out) & " 块在张开那头不长在眼上(是背景)⇒ 挪进合到的那一类:" & Codec.Img (N0) & " 瓣 → "
+                                     & Codec.Img (Z2.N_Lobes) & " 瓣");
+                        end if;
+                     end;
+                  end;
                   for Kl in 0 .. Z2.N_Lobes - 1 loop
                      declare
                         U, V, Wd, Th : Long_Float;
@@ -1494,6 +1612,7 @@ package body Zone is
                   if Okt and then Oke then
                      Z2.Shut := (Ok => True, U => U, V => V, Wide => Wd, Thin => Th, Eu => Eu, Ev => Ev);
                      H.Zones.Replace_Element (Natural (Hc), Z2);
+                     Shut_Refined := True;
                   end if;
                end Refine_Shut;
                Z : Hand_Zone := H.Zones (Natural (Hc));
