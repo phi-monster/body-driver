@@ -96,7 +96,7 @@ package body Contact.Qty is
                return;
             end if;
             Rotate_About (Scl (Sg, Up));
-         when Tilt | Away =>
+         when Tilt =>
             if not S.Has_Center then
                Missing ("where its centre is");
                return;
@@ -113,11 +113,7 @@ package body Contact.Qty is
                   Note := To_Unbounded_String ("it is straight under my still eye, so no direction along the surface points away from me");
                   return;
                end if;
-               if K = Tilt then
-                  Rotate_About (Scl (Sg, Cross (Up, H)));
-               else
-                  Slide_Along (Scl (Sg, H));
-               end if;
+               Rotate_About (Scl (Sg, Cross (Up, H)));
             end;
          when Across =>
             if not S.Has_View then

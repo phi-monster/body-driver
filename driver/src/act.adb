@@ -1063,8 +1063,6 @@ package body Act is
          K := Contact.Qty.Heading;
       elsif Name = "tilt" then
          K := Contact.Qty.Tilt;
-      elsif Name = "away" then
-         K := Contact.Qty.Away;
       else
          return False;
       end if;
@@ -1074,9 +1072,8 @@ package body Act is
      (if Name = "height" then "how far the thing is above the surface it lies on (I measure it with my own eyes; up = off that surface, down = back onto it)"
       elsif Name = "heading" then "which way the thing's long side points along the surface it lies on (up rotates it counterclockwise seen from above that surface, down clockwise)"
       elsif Name = "tilt" then "how far the thing leans from how it stands (up leans its top away from my still eye, down toward it)"
-      elsif Name = "away" then "how far the thing is from my still eye, measured along the surface it lies on (up = farther, down = nearer)"
       else "a reading of it I can change");
-   --  键盘上列哪几个:有能合拢的部件(grasper)才列。heading 要它的长轴(轮廓量得出);tilt / away 要一只"不跟着动它的那条臂走"的眼 ——
+   --  键盘上列哪几个:有能合拢的部件(grasper)才列。heading 要它的长轴(轮廓量得出);tilt 要一只"不跟着动它的那条臂走"的眼 ——
    --  按开机量的"每只眼长在哪条臂上"判(Cam_Arm):有手指的臂里有一条臂,有一只量过几何的眼不长在它上面,就列(用到哪条臂时缺了照实说)
    function Qty_Words (C : Context; Roles : String) return String is
       Still_Eye : Boolean := False;
@@ -1093,7 +1090,9 @@ package body Act is
             end loop;
          end if;
       end loop;
-      return "height heading" & (if Still_Eye then " tilt away" else "");
+      --  "离我多远"(10-01 叫 away)10-01 从键盘上撤了:路 7 拿真 Qwen 量,"拿起来 10 cm"那一题 30 问第一句全写成 away down(读成"先拉近"),
+      --  单件对 0 / 30(只有 height 的键盘 5–13 / 30)。要回来得先换一种写法(名字和那句含义),量过不让"拿起来"那一类变差(大并行 §2 第 16 条)
+      return "height heading" & (if Still_Eye then " tilt" else "");
    end Qty_Words;
 
    --  这一段用了几拍:对方在段中间复位(新的一集,步数从零起)时不许算成负数(S1 2026-09-23 实测:第二集开始时正在进场,减出负数把驱动崩了)
@@ -1470,7 +1469,8 @@ package body Act is
 
    --  手刚松开、退开以后:重新量一遍它(同走过去时那一套:这只手那只眼的窗投到它该在的地方,几只眼此刻的视线一交就是它在哪,
    --  看全了它的眼各记一份顶面轮廓)。记下的旧轮廓是它被拿起来之前那儿的,先作废。Got = 重新记下了它的轮廓
-   procedure Measure_Again (C : in out Context; F : Plug.Frame; Arm : Natural; Name : Unbounded_String; Predicted : Geom.V3; Got : out Boolean) is separate;
+   procedure Measure_Again (C : in out Context; F : Plug.Frame; Arm : Natural; Name : Unbounded_String; Predicted : Geom.V3; Got : out Boolean;
+                            Forget_Old : Boolean := True) is separate;
    --  ── 放下(大并行路 5,10-01,主代理批的;owner 以后不同意,撤这一处就回到"碰到面只报 resist")──
    --  拿着它往下碰到了下面的面(只按 Selfmap.Blocked):先问物理 —— 单靠下面那张面托不托得住它(Contact.Wrench.Rests:它底下贴着面的那一片当唯一的接触,
    --  重心按量到的不准挪一挪也托得住);托得住才松手、手退开、重新量它,看它是不是还在原处(Contact.Qty.Moved_Off,同一种量法:它的实心模型的形心);
