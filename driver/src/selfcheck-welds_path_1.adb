@@ -11,6 +11,7 @@ procedure Welds_Path_1 is
    use Ada.Numerics.Long_Elementary_Functions;
    use type Selfmap.Group_Role;
    use type Readings.Eye_Verdict;
+   use type Readings.View_Says;
    --  路 1 的焊点(大并行.md §5 路 1):每条写清"错了会是什么病",带一颗牙(去掉那一改就红)
    function Vec (A : Bytes.Int_Vectors.Vector) return Ints is (A);
    function Same (A, B : Ints) return Boolean is
@@ -53,6 +54,7 @@ procedure Welds_Path_1 is
    type Fake_Cam is record
       Ego : Ints;                     --  长在这几组上
       Parts : Ints;                   --  看得见这几组各自带动的一块
+      White : Boolean := False;       --  看的是一面白墙(世界没纹理,只有噪声;那几块照样有纹理)
    end record;
    package FC_Vectors is new Ada.Containers.Vectors (Natural, Fake_Cam);
    type Fake_Result is record
@@ -87,9 +89,10 @@ procedure Welds_Path_1 is
       G.Follows := Follows;
       return G;
    end Pose_Of_Group;
-   function Cam_Of (Ego, Parts : Ints) return Fake_Cam is (Ego => Ego, Parts => Parts);
+   function Cam_Of (Ego, Parts : Ints; White : Boolean := False) return Fake_Cam is (Ego => Ego, Parts => Parts, White => White);
 
-   function Run_Fake (Gs : FG_Vectors.Vector; Cs : FC_Vectors.Vector) return Fake_Result is
+   function Run_Fake (Gs : FG_Vectors.Vector; Cs : FC_Vectors.Vector; Prior_Arms : Strs := Str_Vectors.Empty_Vector;
+                      Prior_Eyes : Ints := Int_Vectors.Empty_Vector) return Fake_Result is
       Ng : constant Natural := Natural (Gs.Length);
       type Vals is array (0 .. Ng - 1) of Floats;
       V, Phys, Sent : Vals;
@@ -161,7 +164,7 @@ procedure Welds_Path_1 is
                for Y in 0 .. Fh - 1 loop
                   for X in 0 .. Fw - 1 loop
                      declare
-                        Val : Long_Float := World_Px (Long_Float (X) - Ox, Long_Float (Y) - 0.5 * Ox);
+                        Val : Long_Float := (if Cs (C).White then 230.0 else World_Px (Long_Float (X) - Ox, Long_Float (Y) - 0.5 * Ox));
                      begin
                         for K in 0 .. Natural (Cs (C).Parts.Length) - 1 loop
                            declare
@@ -252,6 +255,7 @@ procedure Welds_Path_1 is
       Lk.Last := D; Lk.Last_Obs := Msgpack.Key (D, 0, "obs");
       Layout.Recognise (D, Lk.Last_Obs, Lk.Lay);
       R.Lay0 := Lk.Lay;
+      Lk.Lay.Prior_Arms := Prior_Arms; Lk.Lay.Prior_Eyes := Prior_Eyes;   --  上一回存的(白墙那一条焊点用)
       Layout.Probe_Mode (Lk.Lay);
       Plug.Frame_Of (Lk, Fr0);
       Lockstep.Clear;
@@ -1051,9 +1055,9 @@ begin
          Md.Ax (I).P := V3_Sub (Pax (I), C0);
       end loop;
       Pls.Append (Links.Placement'(Model => Md, S => 1.5, Ra => Rodrigues ([0.0, 0.0, 0.3]), Ta => [0.1, -0.2, 0.05],
-                                   Rw => Rodrigues ([0.2, 0.0, 0.0]), O => [0.05, 0.05, 0.0], Valid => True));
+                                   Rw => Rodrigues ([0.2, 0.0, 0.0]), O => [0.05, 0.05, 0.0], Valid => True, Group => 1, Eye => -1));
       Pls.Append (Links.Placement'(Model => Md, S => 1.5, Ra => Rodrigues ([0.0, 0.0, 0.3]), Ta => [0.1, 0.4, 0.05],
-                                   Rw => Rodrigues ([0.2, 0.0, 0.0]), O => [0.05, 0.05, 0.0], Valid => True));
+                                   Rw => Rodrigues ([0.2, 0.0, 0.0]), O => [0.05, 0.05, 0.0], Valid => True, Group => 0, Eye => -1));
       --  每一节 4 个点:那一节的轴上一点挪开 ±3 cm、±2 cm(离轴有一段,转的时候挪得出来)
       for A in 0 .. 1 loop
          for Lk in 0 .. 5 loop
@@ -1140,7 +1144,7 @@ begin
             Tracks.Append (Tr);
          end;
       end loop;
-      Links.Triangulate (Pls, G, 640, Cells, Tracks, 0.0, Pts, Sd_Px);
+      Links.Triangulate (Pls, G, 640, Cells, Tracks, Pts, Sd_Px);
       declare
          Wrong, Far : Natural := 0;
          Worst_Z : Long_Float := 0.0;
@@ -1149,6 +1153,7 @@ begin
          C1 : Links.Clearance;
          T_Toward, T_Away : Long_Float := 0.0;
          True_Min : Long_Float := Long_Float'Last;
+         Readings_Ok : Boolean := False;
          T_Solo : Long_Float := 0.0;
          True_Link : Integer := -1;
          K_Toward, K_Away, K_None : Boolean := False;
@@ -1248,11 +1253,33 @@ begin
                Self_Ok := Front and then U >= 0.0 and then U < 640.0 and then V >= 0.0 and then V < 480.0
                           and then Mk (Natural (Long_Float'Floor (V)) * 640 + Natural (Long_Float'Floor (U)))
                           and then Far_Px > 0.0 and then not Mk (Natural (Long_Float'Floor (Vb)) * 640 + Natural (Long_Float'Floor (Ub)));
+               --  干活时一帧里直接问(路 7 用):读数按装上时记下的组号取 —— 第 1 条臂的读数排在第 1 组、第 2 条臂的在第 0 组时也取对;
+               --  同一帧问出来的"自己"和按臂给读数问出来的一样。牙:按下标取(第 A 条臂 = 第 A 组)⇒ 两条臂的读数对调
+               declare
+                  Fr : Plug.Frame;
+                  Qa : Floats := Zero6;
+                  Rn : Plug.Floats_Vectors.Vector;
+                  Mk2 : Bools;
+                  Same_Mask : Boolean := True;
+               begin
+                  Qa.Replace_Element (1, 0.05);
+                  Fr.Joints.Append (Qa); Fr.Joints.Append (Zero6);   --  第 1 条臂装上时记的是第 1 组、第 2 条臂是第 0 组(Qa 在第 0 组 = 第 2 条臂的)
+                  Rn := Links.Readings_Now (Fr);
+                  Readings_Ok := Natural (Rn.Length) = 2 and then Rn (0) (1) = 0.0 and then Rn (1) (1) = 0.05;
+                  Fr.Joints.Clear; Fr.Joints.Append (Zero6); Fr.Joints.Append (Zero6);
+                  Mk2 := Links.Self_Mask_Now (Fr, 0, G, 640, 480);
+                  for I in 0 .. Natural (Mk.Length) - 1 loop
+                     if Mk (I) /= Mk2 (I) then
+                        Same_Mask := False;
+                     end if;
+                  end loop;
+                  Self_Ok := Self_Ok and then Same_Mask;
+               end;
             end;
          end;
          Check (Natural (Pts.Length) = Natural (Truth.Length) and then Wrong = 0 and then Far = 0
                 and then (for all A in 0 .. 1 => (for all Lk in 0 .. 5 => Per_Link (A, Lk) = 4))
-                and then Sc_Ok and then Free_Ok and then Self_Ok,
+                and then Sc_Ok and then Free_Ok and then Self_Ok and then Readings_Ok,
                 "每一节的形状 · 三角:" & Codec.Img (Natural (Pts.Length)) & " / " & Codec.Img (Natural (Truth.Length)) & " 个表面点收回来(背景 70 个点一个没收)、"
                 & "认错节 " & Codec.Img (Wrong) & " 个、离真值超过 Stats.Z 倍自报不确定度的 " & Codec.Img (Far) & " 个(最多 " & Codec.Fmt (Worst_Z, 2) & " 倍)"
                 & "、配点噪声自己量出 " & Codec.Fmt (Sd_Px, 3) & " px(加的 ±0.15)"
@@ -1261,7 +1288,8 @@ begin
                 & (if T_Away = Long_Float'Last then "碰不上" else Codec.Fmt (T_Away, 4) & " 碰上第 2 条臂")
                 & "(第 2 条臂撤掉 ⇒ " & (if T_Solo = Long_Float'Last then "碰不上" else Codec.Fmt (T_Solo, 4)) & ")"
                 & "、没量过的臂说不出 " & Boolean'Image (not K_None)
-                & " · 自己:第 1 条臂第 3 节的点那一格是自己、墙上那一点不是 " & Boolean'Image (Self_Ok)
+                & " · 自己:第 1 条臂第 3 节的点那一格是自己、墙上那一点不是、一帧里直接问的一样 " & Boolean'Image (Self_Ok)
+                & " · 读数按装上时的组号取 " & Boolean'Image (Readings_Ok) & "(牙:按下标取 ⇒ 两条臂对调)"
                 & " · 牙:每一格按整条臂的位姿搬视线(不截到那一节)⇒ 近端几节的点交不上、收不回来");
       end;
    end;
@@ -1324,5 +1352,166 @@ begin
              & (if M3.EE_Noise < 0.0 then "不信" else Codec.Fmt (M3.EE_Noise, 4)) & "(开机报告:" & To_String (Note3) & ")"
              & " · 和这一回量的 0.0004 合:不信的那份 ⇒ " & Codec.Fmt (Mg_Old.EE_Noise, 4) & "、信的那份 ⇒ " & Codec.Fmt (Mg_New.EE_Noise, 4)
              & " · 牙:原来一律取历来最大 ⇒ 不信的那份也留 " & Codec.Fmt (Old_Max, 4));
+   end;
+   --  ══ "上" = 板的法向(路 5 查出,10-01):没碰过面、板已经拟合出了面时,Up_Dir 原来给协议的 +z;接触集"它躺的面"用板法向 ⇒ 同一个"上"两种量法 ══
+   --  协议的 +z 歪 10°、板是平的(板法向 = 真的竖直):没碰过面 ⇒ Up_Dir = 板法向;碰过一张面 ⇒ 以碰到的为准。
+   --  病:"抬多高"、挑空地、接触集朝哪抬按两个不同的"上"算,差 10° 就差出去。牙:原来的 Up_Dir 没碰过面就给 +z(差 10°)
+   declare
+      C : Act.Context;
+      Ten : constant Long_Float := Ada.Numerics.Pi / 18.0;
+      Board : constant Geom.V3 := Geom.Ap (Geom.Rodrigues ([Ten, 0.0, 0.0]), [0.0, 0.0, 1.0]);
+      Touch : constant Geom.V3 := Geom.Ap (Geom.Rodrigues ([0.0, Ten / 2.0, 0.0]), [0.0, 0.0, 1.0]);
+      U1, U2 : Geom.V3;
+      function Ang (A, B : Geom.V3) return Long_Float is
+        (Arccos (Long_Float'Max (-1.0, Long_Float'Min (1.0, A (0) * B (0) + A (1) * B (1) + A (2) * B (2)))));
+      Old_Up : constant Geom.V3 := [0.0, 0.0, 1.0];   --  牙:原来没碰过面时给的
+   begin
+      C.Board_Plane := True; C.Board_N := Board; C.Touch_Valid := False;
+      U1 := Act.Up_Dir (C);
+      C.Touch_Valid := True; C.Touch_N := Touch;
+      U2 := Act.Up_Dir (C);
+      --  比方向用差的长度(arccos 在 1 附近只准到 1e-8 弧度那么粗)
+      Check (Geom.Norm ([U1 (0) - Board (0), U1 (1) - Board (1), U1 (2) - Board (2)]) < 1.0e-12
+             and then Geom.Norm ([U2 (0) - Touch (0), U2 (1) - Touch (1), U2 (2) - Touch (2)]) < 1.0e-12 and then Ang (Old_Up, Board) > 0.17,
+             "「上」= 板的法向:协议的 +z 歪 10°、板是平的 ⇒ 没碰过面时 Up_Dir 离板法向 " & Codec.Fmt (Ang (U1, Board) * 180.0 / Ada.Numerics.Pi, 3)
+             & "°、碰过一张面以后离碰到的面 " & Codec.Fmt (Ang (U2, Touch) * 180.0 / Ada.Numerics.Pi, 3) & "° · 牙:原来没碰过面就给 +z,离板法向 "
+             & Codec.Fmt (Ang (Old_Up, Board) * 180.0 / Ada.Numerics.Pi, 1) & "°");
+   end;
+
+   --  ══ 白桌白墙(路 8 P8I,10-01):看不出 ≠ 动了 ══
+   --  ① 一张有纹理的画面 ⇒ 看得出;一面白墙(只有 ±1 灰阶的噪声)⇒ 看不出;纹理只挤在一个象限(白墙前一小块)⇒ 看不出。
+   --  ② 核对前半段:两张都看得出、配上的点够、没挪 ⇒ 没动;配上的点够、挪了 ⇒ 动了;有一张看不出 / 一个点都配不上 ⇒ 看不出(不当成动了)。
+   --  ③ 开机认组:腕眼对着白墙(推臂时它分不出整幅挪没挪),头顶眼看得见那条臂 ——
+   --     存着上一回的前半段(这一组是臂、长着第 1 台眼)⇒ 照存的认成臂、眼 = 第 1 台;什么都没存 ⇒ 照实是"一块零件",不硬认。
+   --  病:配不上一个点被记成"位移中位 −1 px ⇒ 动了",整份从零量,白墙又量不出,开不了机(P8I);身体没变、只是换了一间屋子也这样。
+   --  牙:原来的判法(Same_View:配上的点不到 10 个就"不是没动")⇒ 白墙那一对判成动了
+   declare
+      function Img (Kind : Natural) return Buf is
+         B : Buf;
+      begin
+         for Y in 0 .. Fh - 1 loop
+            for X in 0 .. Fw - 1 loop
+               declare
+                  Nz : constant Long_Float := Long_Float ((X * X * 31 + Y * 17 + X * Y * 7) mod 3 - 1);   --  ±1 灰阶的噪声
+                  Val : constant Long_Float :=
+                    (case Kind is
+                        when 0 => 128.0 + 50.0 * Sin (0.9 * Long_Float (X) + 0.4 * Long_Float (Y)) + 35.0 * Sin (0.37 * Long_Float (X) - 1.1 * Long_Float (Y)),
+                        when 1 => 230.0 + Nz,
+                        when others => (if X < Fw / 2 and then Y < Fh / 2 then 128.0 + 80.0 * Sin (1.3 * Long_Float (X)) else 230.0 + Nz));
+               begin
+                  B.Append (U8 (Long_Float'Max (0.0, Long_Float'Min (255.0, Long_Float'Rounding (Val)))));
+               end;
+            end loop;
+         end loop;
+         return B;
+      end Img;
+      Tex : constant Buf := Img (0);
+      Wall : constant Buf := Img (1);
+      Corner : constant Buf := Img (2);
+      --  静止地板:白墙那张自己和"下一拍"比 —— 下一拍的噪声换一个样、一样大(同一台相机前后两拍的噪声和相邻两个像素的噪声一样大)
+      Wall2 : Buf;
+      Fl : Picture.Floor_Map;
+      J_Tex, J_Wall, J_Corner : Boolean;
+      Few, Many_Same, Many_Moved : Floats;
+      V_Wall, V_Few, V_Same, V_Moved : Readings.View_Says;
+      Old_Wall : Boolean;
+   begin
+      for Y in 0 .. Fh - 1 loop
+         for X in 0 .. Fw - 1 loop
+            Wall2.Append (U8 (230 + (X * 13 + Y * Y * 29 + X * Y * 3 + 1) mod 3 - 1));   --  和上一拍不相干的另一份 ±1 噪声
+         end loop;
+      end loop;
+      Fl := Picture.Null_Floor (Wall, Wall2, Fw, Fh, Picture.Min_Pixels (Fw, Fh));
+      J_Tex := Readings.Can_Judge (Tex, Fl, Fw, Fh);
+      J_Wall := Readings.Can_Judge (Wall, Fl, Fw, Fh);
+      J_Corner := Readings.Can_Judge (Corner, Fl, Fw, Fh);
+      for I in 1 .. 3 loop
+         Few.Append (0.1);
+      end loop;
+      for I in 1 .. 40 loop
+         Many_Same.Append (0.2); Many_Moved.Append (4.0);
+      end loop;
+      V_Wall := Readings.View_Verdict (J_Wall, J_Tex, 0, 10, Jointboot.Same_View (Floats'(F64_Vectors.Empty_Vector)));
+      V_Few := Readings.View_Verdict (J_Tex, J_Tex, Natural (Few.Length), 10, Jointboot.Same_View (Few));
+      V_Same := Readings.View_Verdict (J_Tex, J_Tex, Natural (Many_Same.Length), 10, Jointboot.Same_View (Many_Same));
+      V_Moved := Readings.View_Verdict (J_Tex, J_Tex, Natural (Many_Moved.Length), 10, Jointboot.Same_View (Many_Moved));
+      Old_Wall := not Jointboot.Same_View (Floats'(F64_Vectors.Empty_Vector));   --  牙:原来只问 Same_View ⇒ 白墙那一对 "不是没动" = 动了
+      Check (J_Tex and then not J_Wall and then not J_Corner
+             and then V_Wall = Readings.Unseen and then V_Few = Readings.Unseen and then V_Same = Readings.Same and then V_Moved = Readings.Moved and then Old_Wall,
+             "白桌白墙 · 看不出 ≠ 动了:有纹理的画面看得出 " & Boolean'Image (J_Tex) & "、白墙 " & Boolean'Image (J_Wall) & "、纹理只挤在一个象限 " & Boolean'Image (J_Corner)
+             & " · 核对:白墙那一对 ⇒ " & Readings.Image (V_Wall) & "、配上 3 个点 ⇒ " & Readings.Image (V_Few) & "、40 个没挪 ⇒ " & Readings.Image (V_Same)
+             & "、40 个挪了 4 px ⇒ " & Readings.Image (V_Moved) & " · 牙:原来只问 Same_View ⇒ 白墙那一对" & (if Old_Wall then "判成动了" else "(没判成动了,牙没咬上)"));
+   end;
+   declare
+      Gs : FG_Vectors.Vector;
+      Cs : FC_Vectors.Vector;
+      R_Prior, R_None : Fake_Result;
+      Names : Strs;
+      Eyes_P : Ints;
+   begin
+      Gs.Append (G_Of ("arm_joint_state", 6, 0.0));
+      Cs.Append (Cam_Of (Empty, Vec ([0])));                  --  头顶眼:有纹理,看得见那条臂
+      Cs.Append (Cam_Of (Vec ([0]), Empty, White => True));   --  腕眼:对着白墙
+      Names.Append ("arm_joint_state"); Eyes_P.Append (1);
+      R_Prior := Run_Fake (Gs, Cs, Names, Eyes_P);
+      R_None := Run_Fake (Gs, Cs);
+      Check (R_Prior.Ok and then Natural (R_Prior.Arms.Length) = 1 and then R_Prior.Arms (0).Eye = 1
+             and then not R_None.Ok and then Role_Of (R_None, "state.arm_joint_state") = Selfmap.Piece,
+             "白桌白墙 · 开机认组:腕眼对着白墙 —— 存着上一回的(这一组是臂、长着第 1 台眼)⇒ " & Codec.Img (Natural (R_Prior.Arms.Length)) & " 条臂、眼 "
+             & (if R_Prior.Arms.Is_Empty then "?" else Integer'Image (R_Prior.Arms (0).Eye)) & " · 什么都没存 ⇒ "
+             & Role_Img (Role_Of (R_None, "state.arm_joint_state")) & "(不硬认,开不了机就照实说)");
+   end;
+   --  ══ 眼长在谁身上按开机认组量的答(P8A 10-01:第 2 只手扫描撞柜子、运动学没量成,身体图只收量成的手上的眼 ⇒ 第 2 台相机被说成
+   --  "不跟着我动的眼",清单告诉脑 "through the eye that does not move with me (camera index 2)")══
+   --  两条臂认组时各认出一只眼(第 1、2 台),第 2 条臂没装上(身体图的旧字段 Cam_On_Arm 只有第 1 台)⇒ 不长在身上的眼只有第 0 台。
+   --  牙:按旧字段答 ⇒ 第 0、2 台
+   declare
+      M : Selfmap.Body_Map := Map_Of (1, 3, Vec ([1]), Vec ([1]));
+      G1, G2 : Selfmap.Group_Info;
+      Old_Off : Ints;
+   begin
+      G1.Role := Selfmap.Arm; G1.Arm := 0; G1.Eyes.Append (1);
+      G2.Role := Selfmap.Arm; G2.Arm := 1; G2.Eyes.Append (2);
+      M.Groups.Append (G1); M.Groups.Append (G2);
+      for Cm in 0 .. M.N_Cams - 1 loop
+         if not M.Cam_On_Arm.Contains (Cm) then
+            Old_Off.Append (Cm);
+         end if;
+      end loop;
+      Check (Same (Selfmap.Graph.Eyes_Off_Arms (M), Vec ([0])) and then Same (Old_Off, Vec ([0, 2])),
+             "眼长在谁身上 · 第 2 条臂没装上:不长在身上的眼 " & Show (Selfmap.Graph.Eyes_Off_Arms (M)) & "(该 [0];第 2 台长在没量成的那条臂上)"
+             & " · 牙:按旧字段 Cam_On_Arm 答 ⇒ " & Show (Old_Off));
+   end;
+   --  ══ 整个我(大并行 §2 第 2 条):推一下它,我身上量得到的每一样都跟着动的那一组 ══
+   --  ① 无人机测试台的样子:一条臂(龙门吊 6 个数,扛着机身那只眼)+ 一组哑巴(假抓握)⇒ 整个我 = 那条臂;
+   --  ② x5 的样子:两条臂 ⇒ 没有(哪一条都不带着另一条);③ 有扛着全身的那组 ⇒ 就是它(不是臂);
+   --  ④ 一条臂 + 一块长在哪儿量不出的零件 ⇒ 没有(那一块不一定跟着它动)。
+   --  病:无人机说不出"整个我",脑说 me 绑不上(P8MD:键盘上只剩结局词)。牙:只认扛着全身的那组 ⇒ ① 也说没有
+   declare
+      function G (Role : Selfmap.Group_Role; Arm : Integer := -1) return Selfmap.Group_Info is
+         Gi : Selfmap.Group_Info;
+      begin
+         Gi.Role := Role; Gi.Arm := Arm;
+         return Gi;
+      end G;
+      M1, M2, M3, M4 : Selfmap.Body_Map;
+      Only_Carrying : Integer := -1;   --  牙:只认扛着全身的那组
+   begin
+      M1.Groups.Append (G (Selfmap.Arm, 0)); M1.Groups.Append (G (Selfmap.Reading)); M1.Groups.Append (G (Selfmap.Mute));
+      M2.Groups.Append (G (Selfmap.Arm, 0)); M2.Groups.Append (G (Selfmap.Arm, 1)); M2.Groups.Append (G (Selfmap.Closing, 0)); M2.Groups.Append (G (Selfmap.Closing, 1));
+      M3.Groups.Append (G (Selfmap.Carrying)); M3.Groups.Append (G (Selfmap.Arm, 0));
+      M4.Groups.Append (G (Selfmap.Arm, 0)); M4.Groups.Append (G (Selfmap.Piece));
+      for I in 0 .. Natural (M1.Groups.Length) - 1 loop
+         if M1.Groups (I).Role = Selfmap.Carrying then
+            Only_Carrying := Integer (I);
+         end if;
+      end loop;
+      Check (Selfmap.Graph.Whole_Group (M1) = 0 and then Selfmap.Graph.Whole_Arm (M1) = 0 and then Selfmap.Graph.Whole_Group (M2) = -1
+             and then Selfmap.Graph.Whole_Group (M3) = 0 and then Selfmap.Graph.Whole_Arm (M3) = -1 and then Selfmap.Graph.Whole_Group (M4) = -1
+             and then Only_Carrying = -1,
+             "整个我:无人机的样子 ⇒ 第" & Integer'Image (Selfmap.Graph.Whole_Group (M1)) & " 组(第" & Integer'Image (Selfmap.Graph.Whole_Arm (M1)) & " 条臂)"
+             & " · x5 的样子 ⇒" & Integer'Image (Selfmap.Graph.Whole_Group (M2)) & " · 有扛着全身的组 ⇒ 第" & Integer'Image (Selfmap.Graph.Whole_Group (M3))
+             & " 组 · 一条臂 + 一块量不出长在哪的零件 ⇒" & Integer'Image (Selfmap.Graph.Whole_Group (M4))
+             & " · 牙:只认扛着全身的那组 ⇒ 无人机说" & (if Only_Carrying < 0 then "没有" else "有"));
    end;
 end Welds_Path_1;

@@ -2,8 +2,9 @@
 # 路 8 开机炮:主线驱动(不设 BL_BIN)在排队位上开机 —— 走 /root/q/run.sh 排队;驱动日志走到"── 第 1 轮"(身体开完机、第一次叫脑)就放锁。不做任务。
 # 用法:bash qboot.sh 炮名 任务 [身体文件(默认 /root/cal_v1b78.json;写 zero = 从零量)] [时限分钟(默认 14)]
 #   身体配置、种子用环境变量:BOOT_CFG(默认 arx_x5;人形 g1_rgb、无人机 drone_rgb)、BOOT_SEED(随机题机一题一个种子;不给就是任务默认的)
-#   BOOT_KEEP=1:量身体文件的那种炮 —— 驱动落盘(look/)和逐帧的位姿、画面(vid/)都留着,给 /root/diag/v1b_score_fk_cur.py 按仿真真值打分;
-#   不给就和原来一样:不录 vid、跑完只留 cal* / 经历*(P8P、P8R 第一回没留,量出来的身体文件没法事后打分)
+#   BOOT_KEEP=1:量身体文件的那种炮 —— 驱动落盘(look/)留着,给 /root/diag/v1b_score_fk_cur.py 按仿真真值打分(扫描各格的运动学、
+#   走到没去过的地方、指尖、桌面、头顶眼);BOOT_VID=1 再录逐帧的位姿和画面(vid/,一炮近 1 GB;打分的第一种考法要它)。
+#   不给就和原来一样:跑完只留 cal* / 经历*(P8P、P8R 第一回没留,量出来的身体文件没法事后打分)
 # 身体文件先拷一份到 /root/p8/cal_<炮名>.json(驱动干活时会把量到的写回 --out,原件不能动)。
 # 证据留在 /root/p8/boot/<炮名>/:开机那几行、第 1 轮给脑的清单、脑第一眼看到的图(转成 jpg)、sim.log 里的报错。
 # 用完就清:shot 目录里除了 cal*、经历* 以外都删(look/ 近 10 MB、sim.log),RoboDojo 为这一集开的流式视频临时文件也删(只删 bd_ 任务的)。
@@ -26,7 +27,7 @@ else
 fi
 echo "任务 $TASK · 炮 $K · 起 $(date +%T)" >> "$E/meta.txt"
 echo "配置 ${BOOT_CFG:-arx_x5} · 种子 ${BOOT_SEED:-(任务默认)}" >> "$E/meta.txt"
-VIDDIR=; [ -n "${BOOT_KEEP:-}" ] && VIDDIR=$N/vid
+VIDDIR=; [ -n "${BOOT_VID:-}" ] && VIDDIR=$N/vid
 CAL=$CALF BL_LIFE=/root/p8/经历_$k.txt CFG=${BOOT_CFG:-arx_x5} DRVMODE=work BD_STEP_LIM=3000 BL_VID=$VIDDIR \
   setsid nohup env ${BOOT_SEED:+SEED=$BOOT_SEED} bash /root/q/run.sh 8 "$K" "$TASK" "$LIM" > "$E/run.log" 2>&1 < /dev/null &
 RUN=$!

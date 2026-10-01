@@ -46,7 +46,8 @@ begin
       end if;
       Say ("    多视图一起解(起点那格的格点配进各格 = 轨迹,按重投影):" & Codec.Img (Rep.Mv_Tracks) & " 条轨迹 " & Codec.Img (Rep.Mv_Obs) & " 笔 · 重投影中位 "
            & Codec.Fmt (Rep.Mv_Start_Px, 3) & " → " & Codec.Fmt (Rep.Mv_Px, 3) & " px、九成 " & Codec.Fmt (Rep.Mv_P90_Px, 3) & " px · " & Codec.Img (Rep.Mv_Iters) & " 轮 · 焦距 "
-           & Codec.Fmt (Rep.F, 1));
+           & Codec.Fmt (Rep.F, 1) & " · 主点 (" & Codec.Fmt (M.Cx, 2) & ", " & Codec.Fmt (M.Cy, 2) & ") ± (" & Codec.Fmt (Rep.Cx_Sd, 2) & ", "
+           & Codec.Fmt (Rep.Cy_Sd, 2) & ") px(画幅中心只当起步,一起解)");
    end;
    if Dump /= "" and then Ok then
       declare

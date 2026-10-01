@@ -1038,7 +1038,9 @@ package body Act is
    --  "上"只写在这一处:位姿系的 +z 是协议约定的重力反方向(观测里没有重力读数的身体只能这么约;有加速度计的身体应把它换成量出来的)。
    --  碰过面之后"上"= 那张面的法向(量出来的)
    Protocol_Up : constant Geom.V3 := [0.0, 0.0, 1.0];
-   function Up_Dir (C : Context) return Geom.V3 is (if C.Touch_Valid then C.Touch_N else Protocol_Up);
+   --  "上"(路 1,10-01 改:原来没碰过面就给协议的 +z,板已经拟合出面也不用 —— 接触集"它躺的面"用的是板法向,同一个"上"两种量法,路 5 查出):
+   --  碰过面 ⇒ 碰到的那张面的法向(以碰到的为准);没碰过、板拟合出了面 ⇒ 板的法向;都没有 ⇒ 世界的 z 轴(开机对齐时就定成桌面法向)
+   function Up_Dir (C : Context) return Geom.V3 is (if C.Touch_Valid then C.Touch_N elsif C.Board_Plane then C.Board_N else Protocol_Up);
 
    --  ── 东西的量(登记表,大并行 §2 第 16 条)──:脑的句子:do <东西> <量> up|down until <结局>(两件东西那一句的关系词也按量算,见 Contact.Qty)。
    --  量的名字由身体列(键盘上"量 [...]"那一栏);每个量 = 一种量法(Contact.Qty.Kind),它往哪变 = 让它变得最快的那个刚体运动(一个旋量,从量到的几何算)
@@ -1465,7 +1467,8 @@ package body Act is
    --  这根手指离面至少 ρ·tan(β/2) 高(β = 它的视线离朝下的角;纯几何),所以它那条落点连线 R 之内、高出面超过这个高度的板点才挡它
    --  (V1B22 2026-09-27:原来连线旁边高出面一点点的板点都算挡,空的面挑到了 0.39 m 外)。
    --  躺在面上 / 高出面:离面在 / 超出 3 倍(倍数无量纲,同踢离群)"面内离散 ⊕ 这一点自己沿法向的不确定度"。
-   --  量过的桌面 = 躺在面上、上回在不动的眼里重找时还找得到(C.Board_Seen;没重找过 = 按量的那一刻)的板点围成的那一片。
+   --  量过的桌面 = 躺在面上、上回在不动的眼里重找时还找得到(C.Board_Seen;没重找过 = 按量的那一刻)的板点,和压之前看底下看见、躺在面上、
+   --  高低量得够细的点(C.Seen_On)围成的那一片。
    --  09-28 V1B47:原来只要"落点 R 之内有一个躺在面上的板点",落在那片的边上也收 —— 边外是开机时手自己挡着、没量过的一块,
    --  那儿放着一台电子琴:手指压在琴上,还把琴推进了板上量过是桌面的那片,第 2 瓣接着压在琴上(按仿真真值这只手 14 下里 9 下碰的不是桌面)。
    --  高出面的板点重找时找没找到都照样挡(东西被挪走了也不知道挪到了哪)。压之前看见的高出面的点(C.Seen_Above)和它们一样挡。
@@ -1484,7 +1487,8 @@ package body Act is
    --  交成的点离面高出 Plane_Tol(同挑空地的"高出面";沿法向的方差按 Geom.Meet_Cov,每条视线的角度噪声 = 配点噪声 ÷ 焦距)⇒ Above。
    --  挨着眼平移方向的那一片视差小、远近定不住:它的方差大,门跟着宽,判不成高出面(不猜)
    procedure Seen_Above_Of (C : Context; G : Geom.Cam_Geo; P0, P1 : Plug.Arm_Pose; W, H : Natural; Qu, Qv, Mu, Mv, Bu, Bv : Floats;
-                            Above : out Geom.Scene_Pt_Vectors.Vector; Matched, Tri : out Natural; Sig : out Long_Float) is separate;
+                            Above : out Geom.Scene_Pt_Vectors.Vector; Matched, Tri : out Natural; Sig : out Long_Float;
+                            On : access Geom.Scene_Pt_Vectors.Vector := null) is separate;
 
    --  ③ 每只手:摸它下面的面,顺带量指尖(2026-09-26;09-28 改成换倾角碰,PLAN 开机后半段 ③)。
    --  标定板的点拟合过那张面(1 mm 级,Geo_Board)⇒ 指尖按碰量:每一瓣压 6 下,每一下让手上一个方向朝正下 —— 这一瓣指尖那条视线

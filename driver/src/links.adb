@@ -1,4 +1,5 @@
 with Ada.Numerics.Long_Elementary_Functions; use Ada.Numerics.Long_Elementary_Functions;
+with Ada.Text_IO;
 with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
 with Codec;
 with Instrument;
@@ -55,6 +56,9 @@ package body Links is
    end FK_To;
 
    function Median (V : in out Floats) return Long_Float is (Picture.Quantile (V, 0.5));
+   --  最后一次三角:挪过、交得出(在眼前面)的格点有几个(进第二遍之前),背景那一份配点噪声多少(Measure 的报告印)
+   Last_Moved : Natural := 0;
+   Last_Static : Long_Float := 0.0;
 
    function Track_Noise (Tracks : Track_Vectors.Vector; N_Cells : Natural) return Long_Float is
       Per_Cell : Floats;
@@ -78,117 +82,151 @@ package body Links is
    end Track_Noise;
 
    procedure Triangulate (Pls : Placement_Vectors.Vector; G : Cam_Geo; W : Natural; Cells : Cell_Vectors.Vector; Tracks : Track_Vectors.Vector;
-                          Px_Sd : Long_Float; Pts : out Link_Pt_Vectors.Vector; Sd_Used : out Long_Float) is
-      Sig : constant Long_Float := (if Px_Sd > 0.0 then Px_Sd else Track_Noise (Tracks, Natural (Cells.Length)));
+                          Pts : out Link_Pt_Vectors.Vector; Sd_Used : out Long_Float) is
+      --  挪没挪:不动的背景那一份配点噪声(大半格点是背景;它们配得最准)
+      Sig_Static : constant Long_Float := Track_Noise (Tracks, Natural (Cells.Length));
       Step_Px : constant Long_Float := Long_Float (W) / Long_Float (Kinem.Gx);   --  相邻两个格点隔几像素(采样密度)
+      --  一个格点在一条臂的一种假设下交出来的点(第一遍:每个格点留离各条视线最近的那个假设)
+      type Cand is record
+         Arm, Link : Natural := 0;
+         P : V3 := [0.0, 0.0, 0.0];
+         Rays : Sight_Vectors.Vector;
+         Res_Px : Floats;                       --  每条视线离交点多远(折成像素:角度 × 焦距)
+         Worst_Px : Long_Float := Long_Float'Last;
+         Range_M : Long_Float := 0.0;
+      end record;
+      package Cand_Vectors is new Ada.Containers.Vectors (Natural, Cand);
+      Best_Of : Cand_Vectors.Vector;
+      Sig : Long_Float;
    begin
       Pts := Link_Pt_Vectors.Empty_Vector;
-      Sd_Used := Sig;
-      if not G.Valid or else G.F <= 0.0 or else Sig <= 0.0 then
+      Sd_Used := 0.0;
+      if not G.Valid or else G.F <= 0.0 or else Sig_Static <= 0.0 then
          return;
       end if;
-      declare
-         Ang : constant Long_Float := Sig / G.F;   --  一条视线的角度噪声(弧度):配点噪声 ÷ 焦距
-      begin
-         for Tr of Tracks loop
-            declare
-               Ok0 : Boolean;
-               D0w : constant V3 := Ray_Fixed (G, Tr.U0, Tr.V0, Ok0);
-               Best : Link_Pt;
-               Best_Z : Long_Float := Long_Float'Last;
-               Found : Boolean := False;
-               function Moved (K : Natural) return Boolean is
-                 (K < Natural (Tr.U.Length) and then Tr.U (K) >= 0.0
-                  and then Sqrt ((Tr.U (K) - Tr.U0) ** 2 + (Tr.V (K) - Tr.V0) ** 2) > Stats.Z * Sig);
-            begin
-               if Ok0 then
-                  for A in 0 .. Natural (Pls.Length) - 1 loop
-                     if Pls (A).Valid then
-                        declare
-                           Pl : constant Placement := Pls (A);
-                           L_Max : Integer := -1;
-                        begin
-                           --  一转它就动的关节里最远的那一个(只看这条臂那一拍在单独扫的那个关节)
-                           for K in 0 .. Natural (Cells.Length) - 1 loop
-                              if A < Natural (Cells (K).Joints.Length) and then Cells (K).Joints (A) >= 0 and then Moved (K) then
-                                 L_Max := Integer'Max (L_Max, Cells (K).Joints (A));
-                              end if;
-                           end loop;
-                           if L_Max >= 0 and then L_Max < Pl.Model.N then
-                              declare
-                                 Rays : Sight_Vectors.Vector;
-                                 Sds : Floats;
-                                 Om : constant V3 := To_Model (Pl, G.Pos);
-                                 P : V3;
-                                 Okm, Okc : Boolean;
-                                 Spread : Long_Float;
-                                 Worst : Long_Float := 0.0;
-                                 Ahead : Boolean := True;
-                                 Cv : M3;
-                              begin
-                                 Rays.Append (Sight'(O => Om, D => Unit (Dir_To_Model (Pl, D0w))));
-                                 Sds.Append (Ang);
-                                 for K in 0 .. Natural (Cells.Length) - 1 loop
-                                    if K < Natural (Tr.U.Length) and then Tr.U (K) >= 0.0 and then A < Natural (Cells (K).Qs.Length)
-                                      and then Natural (Cells (K).Qs (A).Length) = Pl.Model.N
-                                    then
-                                       declare
-                                          Okk : Boolean;
-                                          Dkw : constant V3 := Ray_Fixed (G, Tr.U (K), Tr.V (K), Okk);
-                                          R : M3;
-                                          T : V3;
-                                       begin
-                                          if Okk then
-                                             --  这一格这一节的位姿 X_k = R · X + T ⇒ 这一格的视线搬回起点那一刻:起点 Rᵀ (Om − T)、方向 Rᵀ D
-                                             FK_To (Pl.Model, Cells (K).Qs (A), Natural (L_Max), R, T);
-                                             Rays.Append (Sight'(O => ApT (R, Sub (Om, T)), D => Unit (ApT (R, Dir_To_Model (Pl, Dkw)))));
-                                             Sds.Append (Ang);
-                                          end if;
-                                       end;
-                                    end if;
-                                 end loop;
-                                 P := Meet (Rays, Okm, Spread);
-                                 if Okm then
-                                    --  离每条视线都在 Stats.Z 倍噪声以内(一条视线在交点那么远处的位置噪声 = 角度噪声 × 那么远),而且在眼前面
-                                    for Ry of Rays loop
-                                       declare
-                                          Wv : constant V3 := Sub (P, Ry.O);
-                                          Tt : constant Long_Float := Dot (Wv, Ry.D);
-                                       begin
-                                          if Tt <= 0.0 then
-                                             Ahead := False;
-                                          else
-                                             Worst := Long_Float'Max (Worst, Norm (Sub (Wv, Scl (Ry.D, Tt))) / (Ang * Tt));
-                                          end if;
-                                       end;
-                                    end loop;
-                                    if Ahead and then Worst <= Stats.Z then
-                                       Cv := Meet_Cov (Rays, Sds, P, Okc);
-                                       declare
-                                          Range_M : constant Long_Float := Norm (Sub (P, Om));
-                                          D0 : constant V3 := Rays (0).D;
-                                       begin
-                                          --  远近定得住:沿起点那条视线的不确定度不比离眼的远近本身大
-                                          if Okc and then Sqrt (Along (Cv, D0)) < Range_M and then Worst < Best_Z then
-                                             Best_Z := Worst; Found := True;
-                                             Best := (Arm => A, Link => Natural (L_Max), P => P, Cov => Cv, Views => Natural (Rays.Length),
-                                                      Spacing => Range_M * Step_Px / G.F);
-                                          end if;
-                                       end;
-                                    end if;
-                                 end if;
-                              end;
+      --  ── 第一遍:每个挪过的格点、每条臂的假设各交一次,留离各条视线最近的那个 ──
+      for Tr of Tracks loop
+         declare
+            Ok0 : Boolean;
+            D0w : constant V3 := Ray_Fixed (G, Tr.U0, Tr.V0, Ok0);
+            Best : Cand;
+            Found : Boolean := False;
+            function Moved (K : Natural) return Boolean is
+              (K < Natural (Tr.U.Length) and then Tr.U (K) >= 0.0
+               and then Sqrt ((Tr.U (K) - Tr.U0) ** 2 + (Tr.V (K) - Tr.V0) ** 2) > Stats.Z * Sig_Static);
+         begin
+            if Ok0 then
+               for A in 0 .. Natural (Pls.Length) - 1 loop
+                  if Pls (A).Valid then
+                     declare
+                        Pl : constant Placement := Pls (A);
+                        L_Max : Integer := -1;
+                     begin
+                        --  一转它就动的关节里最远的那一个(只看这条臂那一拍在单独扫的那个关节)
+                        for K in 0 .. Natural (Cells.Length) - 1 loop
+                           if A < Natural (Cells (K).Joints.Length) and then Cells (K).Joints (A) >= 0 and then Moved (K) then
+                              L_Max := Integer'Max (L_Max, Cells (K).Joints (A));
                            end if;
-                        end;
-                     end if;
+                        end loop;
+                        if L_Max >= 0 and then L_Max < Pl.Model.N then
+                           declare
+                              C : Cand;
+                              Om : constant V3 := To_Model (Pl, G.Pos);
+                              Okm : Boolean;
+                              Spread : Long_Float;
+                              Ahead : Boolean := True;
+                           begin
+                              C.Arm := A; C.Link := Natural (L_Max);
+                              C.Rays.Append (Sight'(O => Om, D => Unit (Dir_To_Model (Pl, D0w))));
+                              for K in 0 .. Natural (Cells.Length) - 1 loop
+                                 if K < Natural (Tr.U.Length) and then Tr.U (K) >= 0.0 and then A < Natural (Cells (K).Qs.Length)
+                                   and then Natural (Cells (K).Qs (A).Length) = Pl.Model.N
+                                 then
+                                    declare
+                                       Okk : Boolean;
+                                       Dkw : constant V3 := Ray_Fixed (G, Tr.U (K), Tr.V (K), Okk);
+                                       R : M3;
+                                       T : V3;
+                                    begin
+                                       if Okk then
+                                          --  这一格这一节的位姿 X_k = R · X + T ⇒ 这一格的视线搬回起点那一刻:起点 Rᵀ (Om − T)、方向 Rᵀ D
+                                          FK_To (Pl.Model, Cells (K).Qs (A), Natural (L_Max), R, T);
+                                          C.Rays.Append (Sight'(O => ApT (R, Sub (Om, T)), D => Unit (ApT (R, Dir_To_Model (Pl, Dkw)))));
+                                       end if;
+                                    end;
+                                 end if;
+                              end loop;
+                              C.P := Meet (C.Rays, Okm, Spread);
+                              if Okm then
+                                 C.Worst_Px := 0.0;
+                                 for Ry of C.Rays loop
+                                    declare
+                                       Wv : constant V3 := Sub (C.P, Ry.O);
+                                       Tt : constant Long_Float := Dot (Wv, Ry.D);
+                                    begin
+                                       if Tt <= 0.0 then
+                                          Ahead := False;
+                                       else
+                                          --  这条视线离交点多远,折成像素(角度 × 焦距)
+                                          C.Res_Px.Append (G.F * Norm (Sub (Wv, Scl (Ry.D, Tt))) / Tt);
+                                          C.Worst_Px := Long_Float'Max (C.Worst_Px, C.Res_Px.Last_Element);
+                                       end if;
+                                    end;
+                                 end loop;
+                                 C.Range_M := Norm (Sub (C.P, Om));
+                                 if Ahead and then C.Worst_Px < Best.Worst_Px then
+                                    Best := C; Found := True;
+                                 end if;
+                              end if;
+                           end;
+                        end if;
+                     end;
+                  end if;
+               end loop;
+            end if;
+            if Found then
+               Best_Of.Append (Best);
+            end if;
+         end;
+      end loop;
+      --  ── 跟着身体动的点配得没有背景准(配的是一块在转的东西),运动学自己也有误差:这一份噪声从这批点自己量 ——
+      --  每个格点最好的那个假设下,各条视线离交点多远(像素)的中位 ÷ 瑞利中位 = 每轴 σ;配点仪器配背景的那一份是它的下限 ──
+      declare
+         All_Res : Floats;
+      begin
+         for C of Best_Of loop
+            for R of C.Res_Px loop
+               All_Res.Append (R);
+            end loop;
+         end loop;
+         Sig := (if Natural (All_Res.Length) > 1 then Long_Float'Max (Sig_Static, Median (All_Res) / Stats.Rayleigh_Median) else Sig_Static);
+      end;
+      Sd_Used := Sig;
+      --  ── 第二遍:离每条视线都在 Stats.Z 倍噪声以内、远近定得住(沿起点那条视线的不确定度不比远近本身大)才收 ──
+      declare
+         Ang : constant Long_Float := Sig / G.F;   --  一条视线的角度噪声(弧度)
+      begin
+         for C of Best_Of loop
+            if C.Worst_Px <= Stats.Z * Sig then
+               declare
+                  Sds : Floats;
+                  Okc : Boolean;
+                  Cv : M3;
+               begin
+                  for I in 1 .. Natural (C.Rays.Length) loop
+                     Sds.Append (Ang);
                   end loop;
-               end if;
-               if Found then
-                  Pts.Append (Best);
-               end if;
-            end;
+                  Cv := Meet_Cov (C.Rays, Sds, C.P, Okc);
+                  if Okc and then Sqrt (Along (Cv, C.Rays (0).D)) < C.Range_M then
+                     Pts.Append (Link_Pt'(Arm => C.Arm, Link => C.Link, P => C.P, Cov => Cv, Views => Natural (C.Rays.Length),
+                                          Spacing => C.Range_M * Step_Px / G.F));
+                  end if;
+               end;
+            end if;
          end loop;
       end;
+      Last_Moved := Natural (Best_Of.Length);
+      Last_Static := Sig_Static;
    end Triangulate;
 
    --  ── 开机扫描攒下的 ──
@@ -296,6 +334,41 @@ package body Links is
    function Sweep_Cells return Cell_Vectors.Vector is (Sw_Cells);
    function Sweep_Tracks return Track_Vectors.Vector is (Sw_Tracks);
 
+   --  格式:第一行 "sweep 起点编号 画幅宽 画幅高 格数 格点数";每一格一行 "cell 帧号 臂数 [扫的关节 读数个数 读数…]×臂数";
+   --  每个格点一行 "track u0 v0 [u v]×格数"
+   procedure Dump_Sweep (Path : String) is
+      use Ada.Text_IO;
+      Fo : File_Type;
+   begin
+      Create (Fo, Out_File, Path);
+      Put_Line (Fo, "sweep " & Integer'Image (Sw_World_Id) & " " & Codec.Img (Sw_W) & " " & Codec.Img (Sw_H) & " " & Codec.Img (Natural (Sw_Cells.Length))
+                & " " & Codec.Img (Natural (Sw_Tracks.Length)));
+      for C of Sw_Cells loop
+         Put (Fo, "cell " & Codec.Img (C.Seq) & " " & Codec.Img (Natural (C.Qs.Length)));
+         for A in 0 .. Natural (C.Qs.Length) - 1 loop
+            Put (Fo, " " & Integer'Image (if A < Natural (C.Joints.Length) then C.Joints (A) else -1) & " " & Codec.Img (Natural (C.Qs (A).Length)));
+            for X of C.Qs (A) loop
+               Put (Fo, " " & Codec.Fmt (X, 9));
+            end loop;
+         end loop;
+         New_Line (Fo);
+      end loop;
+      for T of Sw_Tracks loop
+         Put (Fo, "track " & Codec.Fmt (T.U0, 3) & " " & Codec.Fmt (T.V0, 3));
+         for K in 0 .. Natural (T.U.Length) - 1 loop
+            Put (Fo, " " & Codec.Fmt (T.U (K), 3) & " " & Codec.Fmt (T.V (K), 3));
+         end loop;
+         New_Line (Fo);
+      end loop;
+      Close (Fo);
+   exception
+      when others =>
+         if Is_Open (Fo) then
+            Close (Fo);
+         end if;
+   end Dump_Sweep;
+
+
    --  ── 装上的 ──
    In_Pls : Placement_Vectors.Vector;
    In_Pts : Link_Pt_Vectors.Vector;
@@ -366,9 +439,11 @@ package body Links is
                                       & " ⇒ 量不了(净空说不出、画面里哪些是自己说不出)" & ASCII.LF);
          return;
       end if;
-      Triangulate (Pls, G, Sw_W, Sw_Cells, Sw_Tracks, 0.0, Pts, Sd);
+      Triangulate (Pls, G, Sw_W, Sw_Cells, Sw_Tracks, Pts, Sd);
       Install (Pls, Pts);
-      Append (Note, "[身] 📐 每一节的形状(不动的眼看着各臂一个关节一个关节转,跟着哪一节动的点就是那一节的表面点;配点噪声 " & Codec.Fmt (Sd, 3) & " px):");
+      Append (Note, "[身] 📐 每一节的形状(不动的眼看着各臂一个关节一个关节转,跟着哪一节动的点就是那一节的表面点):挪过、交得出的格点 "
+              & Codec.Img (Last_Moved) & " 个,收下 " & Codec.Img (Natural (Pts.Length)) & " 个 · 配点噪声:背景 " & Codec.Fmt (Last_Static, 3)
+              & " px、跟着身体动的点 " & Codec.Fmt (Sd, 3) & " px(按它定门)");
       for A in 0 .. Natural (Pls.Length) - 1 loop
          if Pls (A).Valid then
             Append (Note, " · 第" & Codec.Img (A + 1) & " 条臂");
@@ -506,6 +581,44 @@ package body Links is
       end;
       return Best;
    end Free_Along;
+
+   function Readings_Now (F : Plug.Frame) return Plug.Floats_Vectors.Vector is
+      R : Plug.Floats_Vectors.Vector;
+   begin
+      for Pl of In_Pls loop
+         R.Append (if Pl.Group < Natural (F.Joints.Length) then F.Joints (Pl.Group) else F64_Vectors.Empty_Vector);
+      end loop;
+      return R;
+   end Readings_Now;
+
+   function Self_Mask_Now (F : Plug.Frame; Cam : Natural; Geo : Cam_Geo; W, H : Natural) return Bools is
+      Qs : constant Plug.Floats_Vectors.Vector := Readings_Now (F);
+      Pose : Plug.Arm_Pose := [others => 0.0];
+      Placed : Boolean := Geo.Fixed;
+   begin
+      if not Geo.Fixed then
+         for A in 0 .. Natural (In_Pls.Length) - 1 loop
+            if In_Pls (A).Valid and then In_Pls (A).Eye = Integer (Cam) and then A < Natural (Qs.Length)
+              and then Natural (Qs (A).Length) = In_Pls (A).Model.N
+            then
+               declare
+                  Pl : constant Placement := In_Pls (A);
+                  R : M3;
+                  T : V3;
+               begin
+                  --  这只眼此刻的位姿 = 这条臂此刻的运动学放进世界(同装上以后插头算手的位姿:眼就是手,不转不偏)
+                  Kinem.FK (Pl.Model, Qs (A), R, T);
+                  Pose := Kinem.To_Pose (Mul (Pl.Rw, Mul (Pl.Ra, R)), To_World (Pl, T));
+                  Placed := True;
+               end;
+            end if;
+         end loop;
+      end if;
+      if not Placed then
+         return Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (W * H));
+      end if;
+      return Self_Mask (Geo, Pose, W, H, Qs);
+   end Self_Mask_Now;
 
    function Self_Mask (Geo : Cam_Geo; Pose : Plug.Arm_Pose; W, H : Natural; Qs : Plug.Floats_Vectors.Vector) return Bools is
       M : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (W * H));
