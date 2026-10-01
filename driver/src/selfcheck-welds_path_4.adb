@@ -30,7 +30,8 @@ procedure Welds_Path_4 is
    Rate_Mode : Boolean := False;
    --  第三种(真舵机常见):每条命令少走一截死区 —— 少走的长度不随步长变(平移 Band_T、转动 Band_R)
    Band_Mode : Boolean := False;
-   Noise : constant Long_Float := 1.0e-6;
+   Noise_Def : constant Long_Float := 1.0e-6;
+   Noise : Long_Float := Noise_Def;
    Tn : constant Long_Float := 0.005;     --  这具假身体一步看得见的那一档(平移,开机"一步 = 自己那只眼里挪 1 像素"的那一档)
    Tr : constant Long_Float := 0.0025;    --  转动那一档
    --  死区那种身体:每条命令平移少走这么长、转动少走这么多 —— 一格长的探针只走到六成(过了开机"走到一半以上"那道,探针记得上),
@@ -48,8 +49,16 @@ procedure Welds_Path_4 is
    R_Tab : constant R_Table := [0.80, 0.79, 0.72, 0.81, 0.84, 0.75, 0.71, 0.83, 0.78, 0.74, 0.85, 0.77, 0.85, 0.84, 0.70, 0.76];
    function R_Of (Arm, K : Natural) return Long_Float is
      (if Rate_Mode then 1.0 elsif Rand then R_Tab ((K + 5 * Arm) mod R_Tab'Length) else R_Fix);
-   function Alpha_Of (B : Natural) return Long_Float is (if Rate_Mode then R_Tab (B mod R_Tab'Length) else Alpha_X5);
+   --  上一个动作的尾巴(静止噪声那条焊点用):Creep > 0 ⇒ 每拍只走还差的 Creep(H4 量的:每拍挪上一拍的 0.64 ⇒ Creep = 0.36);
+   --  Drift > 0 ⇒ 身体自己一直往 +x 漂这么多一拍(目标跟着漂);F32 ⇒ 读数按线上的 32 位浮点给(仿真读数本身不抖,只有这一点分辨率)
+   Creep : Long_Float := 0.0;
+   Drift : Long_Float := 0.0;
+   F32 : Boolean := False;
+   function Alpha_Of (B : Natural) return Long_Float is
+     (if Creep > 0.0 then Creep elsif Rate_Mode then R_Tab (B mod R_Tab'Length) else Alpha_X5);
    Beat : Natural := 0;
+   --  > 0 ⇒ 手的这一件做了这么多拍还没完就断线(Lock_Feed 给 Ok = False):一条等不完的牙不许把自检挂住
+   Guard : Natural := 0;
    Lk : Plug.Link;
    Pic : Plug.Cam;
    Start : constant Plug.Arm_Pose := [0.3, -0.2, 0.5, 1.0, 0.0, 0.0, 0.0];
@@ -113,6 +122,11 @@ procedure Welds_Path_4 is
          begin
             V (0) := N; V (1) := -N; V (2) := N; V (5) := N;
             P := Chan.Compose (Bs (A).X, V);
+            if F32 then
+               for I in P'Range loop
+                  P (I) := Long_Float (Float (P (I)));
+               end loop;
+            end if;
             Ff.EE.Append (P);
             Ff.Joints.Append (To_Q (P));
          end;
@@ -165,6 +179,10 @@ procedure Welds_Path_4 is
             X0 : constant Plug.Arm_Pose := Bs (A).X;
          begin
             Bs (A).X := Chan.Compose (Bs (A).X, Scaled (Chan.Delivered (Bs (A).X, Bs (A).Y), Alpha_Of (Beat)));
+            if Drift > 0.0 then
+               Bs (A).X (0) := Bs (A).X (0) + Drift;
+               Bs (A).Y (0) := Bs (A).Y (0) + Drift;
+            end if;
             if Wall_On and then Bs (A).X (0) > Wall_X then
                Bs (A).X (0) := Wall_X;
             end if;
@@ -194,6 +212,7 @@ procedure Welds_Path_4 is
    begin
       Dead := D; Rand := Random; R_Fix := R; N_Arms := Arms; Rate_Mode := False; Band_Mode := False;
       Wall_On := False;
+      Creep := 0.0; Drift := 0.0; F32 := False; Noise := Noise_Def; Guard := 0;
       for A in 0 .. Max_Arms - 1 loop
          Bs (A) := (X | Y | Last_T => (if A = 0 then Start else Start2), others => <>);
       end loop;
@@ -203,7 +222,10 @@ procedure Welds_Path_4 is
    end Reset_Body;
 
    --  ── 手的任务里做的那一件(Job),主线程当身体 ──
-   type Job_Kind is (Do_Measure, Do_Steps, Do_Joint_Go);
+   type Job_Kind is (Do_Measure, Do_Steps, Do_Joint_Go, Do_Idle, Do_Old_Idle);
+   --  Do_Idle:驱动的 Measure_Idle(先等尾巴收住再量);Do_Old_Idle:牙 —— 原来的量法(接着就读 4 拍、取每拍挪得最多的)
+   Idle_Beats : Natural := 0;
+   Old_Noise : Long_Float := 0.0;
    Job : Job_Kind := Do_Measure;
    M : Selfmap.Body_Map;
    Measure_Ok : Boolean := False;
@@ -270,6 +292,28 @@ procedure Welds_Path_4 is
                      Selfmap.Go (Lk, M0, 0, Start, F64_Vectors.Empty_Vector, Fr, Dl, Joint_Frames, Joint_Ok, Joints => Joint_Target, Group => 0,
                                  Tol => Tn);
                   end;
+               when Do_Idle =>
+                  declare
+                     B0 : constant Natural := Beat;
+                  begin
+                     M := (others => <>);
+                     M.Arms := N_Arms;
+                     Selfmap.Measure_Idle (Lk, Fr, M, Measure_Ok);
+                     Idle_Beats := Beat - B0;
+                  end;
+               when Do_Old_Idle =>
+                  declare
+                     Prev : Plug.Pose_Vectors.Vector := Fr.EE;
+                  begin
+                     Old_Noise := 0.0;
+                     for K in 1 .. 4 loop
+                        exit when not Plug.Sense (Lk, Fr);
+                        for A in 0 .. Natural'Min (Natural (Prev.Length), Natural (Fr.EE.Length)) - 1 loop
+                           Old_Noise := Long_Float'Max (Old_Noise, Table.Norm (Chan.Delivered (Prev (A), Fr.EE (A)), Chan.Pos_Channels));
+                        end loop;
+                        Prev := Fr.EE;
+                     end loop;
+                  end;
             end case;
          exception
             when E : others =>
@@ -283,6 +327,7 @@ procedure Welds_Path_4 is
       Plug.Lock_Begin;
       declare
          H : Hand;
+         B0 : constant Natural := Beat;
       begin
          Lockstep.Start (0, H'Identity);
          loop
@@ -295,7 +340,7 @@ procedure Welds_Path_4 is
             begin
                Lk.Seq := Beat;
                Plug.Note_Beat (Lk, Ff);
-               Plug.Lock_Feed (Ff);
+               Plug.Lock_Feed (Ff, Ok => Guard = 0 or else Beat - B0 <= Guard);
             end;
          end loop;
       end;
@@ -618,6 +663,74 @@ begin
              & "(上限 " & Codec.Fmt (20.0 * Tr, 4) & ")· 离带子 " & Codec.Fmt (9.0 * Tn, 4) & " ⇒ " & Codec.Fmt (R_Clear.Len, 4)
              & " · 反解够到 x ≤ " & Codec.Fmt (Reach_X - Start (0), 4) & " ⇒ 这一步走到 " & Codec.Fmt (R_Reach.Aim (0) - Start (0), 4) & "(细到一档 " & Codec.Fmt (Tn, 4) & ")"
              & " · 牙:不问反解 ⇒ 整步 " & Codec.Fmt (R_Free.Len, 4));
+   end;
+   --  ⑧ 静止噪声等上一个动作收住再量(Measure_Idle → Wait_Tail):胳膊还在慢慢挪的时候,挪的那一截不算噪声。
+   --  假身体照 H4(人形,09-28)量到的尾巴:每拍挪上一拍的 0.64,第一拍挪 1.3 档(H4 0.0121 单位、一档 0.0094)。
+   --  病:接着上一个动作就读 4 拍 ⇒ 读到的是尾巴(H4 0.0121 单位,其实读数不抖)⇒ 后面所有"挪没挪过噪声"的门都垫高了那么一截。
+   --  五种:静止(读数有 ±1e-6 的抖)/ 有尾巴、有抖 / 有尾巴、仿真不抖、读数按线上的 32 位浮点 / 身体自己一直在漂 / 尾巴慢到一拍只少 0.1%。
+   --  牙:原来的量法(接着就读 4 拍)同一具身体当场重量 ⇒ 有尾巴的两种量出来的是尾巴;离线拆掉 Wait_Tail ⇒ 那两种红;
+   --  离线把"少不到百分之一就算收住"改成"不比上一拍少"⇒ 慢尾巴那一种等不完(Guard 断线)⇒ 红
+   declare
+      D_Tail : constant Long_Float := 1.3 * Tn / 0.36;     --  还差这么多、每拍走还差的 0.36 ⇒ 第一拍挪 1.3 档
+      Still_Bound : constant Long_Float := Sqrt (3.0) * 1.5 * Noise_Def;   --  假身体的抖动一拍最多变这么多(三轴各 1.5 × Noise)
+      New_Still, New_Tail, New_F32, New_Drift, New_Slow : Long_Float := 0.0;
+      Old_Tail, Old_F32 : Long_Float := 0.0;
+      W_Still, W_Tail, W_F32, W_Drift, W_Slow : Natural := 0;
+      Ok_Still, Ok_Tail, Ok_F32, Ok_Drift, Ok_Slow : Boolean := False;
+      U32 : constant Long_Float := Long_Float (Float'Model_Epsilon) * abs (Start (0) + D_Tail);   --  32 位浮点在这个读数上的分辨率
+      Drift_V : constant Long_Float := 0.2 * Tn;
+      procedure Tail_Body (C : Long_Float; D0 : Long_Float) is
+      begin
+         Reset_Body (0, False, 1.0, 1);
+         Creep := C;
+         Bs (0).Y := Offset (Start, D0, 0.0, 0.0, 0.0, 0.0, 0.0);
+      end Tail_Body;
+      procedure Idle_Run (Ne : out Long_Float; Wt : out Natural; Ok : out Boolean) is
+      begin
+         Job := Do_Idle;
+         Run_Hand;
+         Ne := M.EE_Noise; Wt := Idle_Beats; Ok := Measure_Ok;
+      end Idle_Run;
+      procedure Old_Run (Ne : out Long_Float) is
+      begin
+         Job := Do_Old_Idle;
+         Run_Hand;
+         Ne := Old_Noise;
+      end Old_Run;
+   begin
+      --  静止
+      Reset_Body (0, False, 1.0, 1);
+      Idle_Run (New_Still, W_Still, Ok_Still);
+      --  有尾巴、有抖
+      Tail_Body (0.36, D_Tail);
+      Idle_Run (New_Tail, W_Tail, Ok_Tail);
+      Tail_Body (0.36, D_Tail);
+      Old_Run (Old_Tail);
+      --  有尾巴、仿真不抖、32 位读数
+      Tail_Body (0.36, D_Tail); Noise := 0.0; F32 := True;
+      Idle_Run (New_F32, W_F32, Ok_F32);
+      Tail_Body (0.36, D_Tail); Noise := 0.0; F32 := True;
+      Old_Run (Old_F32);
+      --  身体自己一直在漂
+      Reset_Body (0, False, 1.0, 1);
+      Drift := Drift_V;
+      Idle_Run (New_Drift, W_Drift, Ok_Drift);
+      --  尾巴慢到一拍只少 0.1%(仿真不抖、64 位读数:一拍比一拍少,少得极慢)—— 等它收到底要几十万拍
+      Tail_Body (0.001, Drift_V / 0.001); Noise := 0.0; Guard := 200;
+      Idle_Run (New_Slow, W_Slow, Ok_Slow);
+      Reset_Body (0, False, 1.0, 1);
+      Check (Ok_Still and then New_Still <= Still_Bound * (1.0 + Selfmap.Negligible) and then W_Still <= 4 + 3
+             and then Ok_Tail and then New_Tail <= 2.0 * Still_Bound and then Old_Tail > 1.0 * Tn
+             and then Ok_F32 and then New_F32 <= 4.0 * U32 and then Old_F32 > 1.0 * Tn
+             and then Ok_Drift and then New_Drift >= (1.0 - Selfmap.Negligible) * Drift_V and then New_Drift <= Drift_V + Still_Bound
+             and then W_Drift <= 4 + 3
+             and then Ok_Slow and then W_Slow <= 4 + 3,
+             "走一步·静止噪声等上一个动作收住再量:静止 ⇒ " & Codec.Fmt (New_Still * 1.0e6, 2) & "e-6(抖动最多 " & Codec.Fmt (Still_Bound * 1.0e6, 2)
+             & "e-6)、" & Codec.Img (W_Still) & " 拍 · 有尾巴(第一拍挪 " & Codec.Fmt (1.3 * Tn, 4) & ")⇒ " & Codec.Fmt (New_Tail * 1.0e6, 2) & "e-6、"
+             & Codec.Img (W_Tail) & " 拍 · 尾巴 + 不抖的 32 位读数 ⇒ " & Codec.Fmt (New_F32 * 1.0e9, 1) & "e-9(分辨率 " & Codec.Fmt (U32 * 1.0e9, 1) & "e-9)、"
+             & Codec.Img (W_F32) & " 拍 · 自己一拍漂 " & Codec.Fmt (Drift_V, 4) & " ⇒ 地板 " & Codec.Fmt (New_Drift, 6) & "(照实)、" & Codec.Img (W_Drift)
+             & " 拍 · 一拍只少 0.1% 的慢尾巴 ⇒ 当成漂、" & Codec.Img (W_Slow) & " 拍收(" & (if Ok_Slow then "没等死" else "等不完、断线(错)") & ")"
+             & " · 牙:原来接着就读 ⇒ 有尾巴 " & Codec.Fmt (Old_Tail, 4) & "、32 位 " & Codec.Fmt (Old_F32, 4) & "(量成了尾巴)");
    end;
    Plug.Set_Hooks (null, null);
 end Welds_Path_4;
