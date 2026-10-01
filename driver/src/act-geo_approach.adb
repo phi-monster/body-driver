@@ -76,6 +76,7 @@ procedure Geo_Approach (L : in out Plug.Link; C : in out Context; F : in out Plu
    Said_Known : Boolean := False;
    Said_Cut : Boolean := False;          --  说过一次"这只眼里它顶着画面边,轮廓不记"
    Said_Clamp : Boolean := False;        --  说过一次"交点出了它躺的面的范围,贴回面上"
+   Said_Path : Boolean := False;         --  说过一次"这条臂的形状没量过,路上撞不撞说不出"
    Who : Unbounded_String;
    Pressing : Boolean := False;          --  估计已到位,正沿原方向接着往它身上走
    Press_Dir : Geom.V3 := [0.0, 0.0, 0.0];
@@ -402,10 +403,18 @@ begin
          --  脑说的档位(最多这么大)
          declare
             Dw_Full : constant Geom.V3 := Geom.Ap (Geom.Cam_R (G, Cur), D);
+            Path_Known : Boolean;
+            --  到它身上的带子(到它上方 ⇒ 悬停点在它外面,不设),再加路上那一道(整条胳膊沿这一步走多远进别的东西 / 桌面 / 别的臂的带子)
+            Clear_Step : constant Long_Float :=
+              With_Path (C, F, Arm, Dw_Full, (if Above then Long_Float'Last else Long_Float'Max (Plan.Clear, Plan.Lstep)), Plan.Lstep, Path_Known);
          begin
+            if not Path_Known and then not Said_Path then
+               Said_Path := True;
+               Geo_Say ("这条臂每一节的形状没量过 ⇒ 路上会不会撞到别的东西说不出(碰上了照旧按 Blocked 判)");
+            end if;
             Geo_Move (L, C, F, Arm, Dw_Full, Mok, Wk, Rep,
                       Track => Long_Float'Min (Eye_Cap (Cur, Pw, Dw_Full), Gear_Cap (C, Arm, Gear, Miss)),
-                      Clear => (if Above then Long_Float'Last else Long_Float'Max (Plan.Clear, Plan.Lstep)),
+                      Clear => Clear_Step,
                       Reach => True);
          end;
          Miss := Table.Norm (Chan.Delivered (F.EE (Arm), Rep.Aim), Chan.Pos_Channels);
