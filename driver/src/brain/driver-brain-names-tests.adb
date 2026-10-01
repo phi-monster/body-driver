@@ -189,9 +189,25 @@ package body Driver.Brain.Names.Tests is
              "an eye that cannot point it out passes the question on, in camera order");
       F := Three_Eyes;
       F.Replies.Append (R (1, "arm reach ight", Boxed, Part_Of_Me));
+      F.Replies.Append (R (2, "arm reach ight", Boxed, A_Thing, 6));
       Bind (N, F, 1, "arm reach ight", Glue, B);
-      Check (B.Kind = Unbound and then Ada.Strings.Fixed.Index (To_String (B.Account), "part of me") > 0,
-             "a patch that is part of the body is not a thing");
+      Check (B.Kind = Unbound and then Ada.Strings.Fixed.Index (To_String (B.Account), "part of me") > 0
+             and then To_String (F.Asked) = "1:arm reach ight;",
+             "a patch that is part of the body is not a thing, and no other eye's guess replaces it");
+      declare
+         Held : Table;
+      begin
+         F := Three_Eyes;
+         F.Replies.Append (R (1, "cup", Boxed, A_Thing, 8));
+         Bind (Held, F, 1, "cup", Glue, B);
+         F.Replies.Append (R (2, "the cup", Boxed, Part_Of_Me));
+         Bind (Held, F, 2, "the cup", Glue, B);
+         Check (B.Kind = Unbound, "the cup is not the letters of the cup: the box on the body binds nothing");
+         F.Replies.Append (R (2, "cup", Boxed, Part_Of_Me));
+         Bind (Held, F, 2, "cup", Glue, B);
+         Check (B.Kind = To_Thing and then B.Thing = 8,
+                "a thing named before and boxed where my hand is: its letters still bind it (it is in my hand)");
+      end;
       F := Three_Eyes;
       F.Replies.Append (R (1, "ball", No_Answer));
       Bind (N, F, 1, "ball", Glue, B);
