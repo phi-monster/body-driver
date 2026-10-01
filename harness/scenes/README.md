@@ -55,11 +55,31 @@
 
 出了错(比如 Isaac 抛异常)先把报告写下来再直接退——Kit 在异常以后正常关机会卡住,第一版就这样占了仿真位 5 分钟;`qcheck.sh` 每个任务 10 分钟封顶。
 
-## 开炮(排队位,主线驱动)
+## 开炮(排队位,主线驱动):`qboot.sh`
 
-身体文件别用原件(驱动干活时会把量到的写回 `--out`):先拷一份,
 ```
-cp /root/cal_v1b78.json /root/p8/cal_p8a.json; cp /root/cal_v1b78.json.geo.json /root/p8/cal_p8a.json.geo.json
-CAL=/root/p8/cal_p8a.json BL_LIFE=/root/p8/经历_p8a.txt CFG=arx_x5 DRVMODE=work BD_STEP_LIM=3000 bash /root/q/run.sh 8 P8A bd_drawer 12
+bash qboot.sh P8L bd_drawer                    # 默认 x5、/root/cal_v1b78.json
+BOOT_CFG=g1_rgb BOOT_SEED=20000 bash qboot.sh P8N bd_question /root/cal_h4.json
 ```
-开得了机 = 驱动日志走到 `[身] 身体量完 ⇒ 开始干活` 和 `── 第 1 轮`;看完就 `touch /root/q/done_P8A` 放锁。
+- 身体文件不用原件(驱动干活时把量到的写回 `--out`):拷一份到 `/root/p8/cal_<炮名>.json`,**连 `.geo.json`、`.kin.txt`、`.kin.txt_*.bmp` 一起拷**——少了参照图(`.kin.txt_*.bmp`)驱动说"第 1 只手核对用的图读不了",从零量开机前半段(P8A 就这样:581 步,右手量的时候碰上了柜子把手);
+- 走 `/root/q/run.sh` 排队;驱动日志走到 `── 第 1 轮`(身体开完机、第一次叫脑)就 `touch /root/q/done_<炮名>` 放锁;run.sh 自己先结束了(驱动退了)就不 touch;
+- 证据留在 `/root/p8/boot/<炮名>/`:`meta.txt`、开机那几行、第 1 轮给脑的清单、脑第一眼看到的图、sim 报错;shot 目录里 `cal*` / `经历*` 以外的都删。
+
+10-01 这一轮的开机炮(主线驱动,x5 + `/root/cal_v1b78.json` 连参照图):
+
+| 炮 | 任务 | 开机用的步 | 不动的眼核对(板上 729 个点对上几个) | 到第 1 轮 |
+|---|---|---|---|---|
+| P8A | bd_drawer | 581(没拷参照图,从零量前半段) | — | 到了(右手量的时候碰了柜子把手) |
+| P8L | bd_drawer(重开,拷全) | 68 | 525(柜子挡了一部分)⇒ 没挪、没挡 | 到了 |
+| P8B | bd_lidbox | 68 | 630 | 到了 |
+| P8C | bd_hinge | 68 | 618 | 到了 |
+| P8D | bd_peg | 68 | 626 | 到了 |
+| P8E | bd_hook | 68 | 626 | 到了 |
+| P8F | bd_knob | 68 | 623 | 到了 |
+| P8G | bd_trigger | 68 | 624 | 到了 |
+| P8H | bd_glass | 68 | 626 | 到了 |
+| P8I | bd_white | — | 不动的眼配上 180 个点、没挪 | **没到**:两只手上的眼和存的参照图配上 0 个点,驱动判成"动了"⇒ 从零量;白桌白墙里手上的眼什么都看不出(哪台相机都不比第二名多一倍 ⇒ "这只手上没有眼")⇒ "定不了世界,量不了身体,退出" |
+| P8J | bd_walker | 68 | 627 | 到了 |
+| P8K | bd_cloth | 68 | 619 | 到了 |
+
+P8I 是这个场景要考的那件事(没纹理的白屋子),不是场景坏了:手上的眼看到的图(`chk/bd_white/L0_cam_left_wrist.png`)灰度均值 222、梯度 > 8 的像素只占 0.7%(抽屉那一张 4.7%),没饱和。

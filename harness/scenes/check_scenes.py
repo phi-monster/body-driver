@@ -30,6 +30,8 @@ parser.add_argument("--walk_steps", type=int, default=60)
 parser.add_argument("--walk_label", default="", help="量任意一件东西每个动作走多远(比如 chase_mouse 的 target)")
 parser.add_argument("--tag", default="", help="结果放 out/<tag>(默认 = 任务名)")
 parser.add_argument("--qseeds", default="", help="bd_question:同一具身体的几道题(种子)在一个进程里挨个核")
+parser.add_argument("--no_stability", action="store_true",
+                    help="物件池稳不稳:这个进程里跳过 RoboDojo 的'布局稳不稳'那一关,落稳后逐件量它挪了多远、歪了多少(哪件站不住一眼看出来)")
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
 app = AppLauncher(args).app
@@ -355,14 +357,116 @@ def scenario(S, rep):
     return False
 
 
+def quat_mul(a, b):
+    w1, x1, y1, z1 = a
+    w2, x2, y2, z2 = b
+    return np.array([w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2, w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+                     w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2, w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2])
+
+
+def settle(S, label, max_steps=500):
+    """物理往前走,直到这件东西停下(每 10 步看一次:线速度 < 1 cm/s、角速度 < 0.1 rad/s),最多 max_steps 个子步(2 秒)。返回走了几步"""
+    o = S.obj(label)
+    n = 0
+    while n < max_steps:
+        S.steps(10)
+        n += 10
+        if float(np.linalg.norm(_np(o.get_linear_velocity())[:3])) < 0.01 and float(np.linalg.norm(_np(o.get_angular_velocity())[:3])) < 0.1:
+            break
+    return n
+
+
+def put_on(S, la, lb, mode):
+    """把 A 放到 B 上(on:A 平放,落到 B 投影外接框的中点、最低点比 B 的顶高 5 mm)/ 放进 B 里(in:落到 B 的口的中心、最低点在 B 的半腰;
+    A 平放时投影放得进口就平放,放不进就把最长的那根轴竖起来 —— 出题时"放得进"就是按竖着算的),然后物理走到停。
+    返回放下去之后量的:A 最低点比 B 的底 / 顶高多少、走了几步、A 竖没竖"""
+    from task.RoboDojo.bd import question as Q
+    fp = S.rm.func_parser
+    ia, ib = S.inst(la), S.inst(lb)
+    pa, ra = S.pose(la)
+    pb, rb = S.pose(lb)
+    cb = Q._corners(fp, 0, ib)
+    sa = Q._shape(fp, 0, ia)
+    q = np.asarray(ra, dtype=float)
+    upright = False
+    if mode == "in":
+        mb = Q.bd_of(S.meta(lb))
+        xy = (pb + rotm(rb) @ np.r_[np.asarray(mb["opening_center"], dtype=float), 0.0])[:2]
+        flat = sa @ rotm(q).T
+        if 2 * float(np.linalg.norm(flat[:, :2] - Q._center_xy(flat), axis=1).max()) >= float(mb["opening_d"]):
+            k = int(np.argmax(sa.max(axis=0) - sa.min(axis=0)))
+            h = math.sqrt(0.5)
+            q_local = {0: [h, 0.0, -h, 0.0], 1: [h, h, 0.0, 0.0], 2: [1.0, 0.0, 0.0, 0.0]}[k]   # 资产系的这根轴转到竖直
+            q = quat_mul(q, q_local)
+            upright = True
+        low = (cb[:, 2].min() + cb[:, 2].max()) / 2
+    else:
+        xy = Q._center_xy(cb)
+        low = cb[:, 2].max() + 0.005
+    world = sa @ rotm(q).T
+    S.set_pose(la, np.r_[xy - Q._center_xy(world) + 0.0, low - world[:, 2].min()], q)
+    n = settle(S, la)
+    ca = Q._corners(fp, 0, ia)
+    cb = Q._corners(fp, 0, ib)
+    info = {"mode": mode, "upright": upright, "settle_steps": n, "a_low_minus_b_low": round(float(ca[:, 2].min() - cb[:, 2].min()), 4),
+            "a_low_minus_b_top": round(float(ca[:, 2].min() - cb[:, 2].max()), 4),
+            "a_center_minus_b_center": [round(float(v), 4) for v in Q._center_xy(ca) - Q._center_xy(cb)]}
+    log("   %s %s %s(竖起来 %s):走了 %d 步停下,A 最低点比 B 底高 %.4f、比 B 顶高 %.4f,中心差 %s" % (
+        la, "放进" if mode == "in" else "放到", lb, upright, n, info["a_low_minus_b_low"], info["a_low_minus_b_top"], info["a_center_minus_b_center"]))
+    return info
+
+
+def pool_scenario(S, rep):
+    """核物件池的两张布局:① 物理走 300 个子步(和 RoboDojo 自己核布局稳不稳一样长),逐件量离摆的位置挪了多远、歪了多少,
+    按 RoboDojo 的规矩(歪 ≤ 30°、每根轴挪 ≤ 4 cm)算站不站得住;② 这张里每个平顶 / 容器,拿同一张里最小的、放得上 / 放得进(question.fits)
+    的那件真放上去 / 放进去,物理走到停,用题里的判据(bdq_on)判一遍,该判 1;判完放回原处"""
+    from task.RoboDojo.bd import question as Q
+    S.steps(300)
+    recs = S.lm.get_layout_records(0, "Rigid")
+    rep["pool"] = []
+    for r in recs:
+        p, qq = S.pose(r["label"])
+        d = p - np.asarray(r["default_pos"], dtype=float)
+        Rr = rotm(qq) @ rotm(np.asarray(r["default_ori"], dtype=float)).T
+        tilt = float(math.degrees(math.acos(max(-1.0, min(1.0, Rr[2, 2])))))
+        ok = tilt <= 30.0 and bool((np.abs(d) <= 0.04).all())
+        rep["pool"].append({"cat": r["category"], "label": r["label"], "move_m": [round(float(v), 4) for v in d], "tilt_deg": round(tilt, 2), "stands": ok})
+        test(rep, "%s 落稳(挪 %.1f mm、歪 %.1f°)" % (r["category"], 1000 * float(np.linalg.norm(d)), tilt), 1, ok)
+    metas = {r["label"]: S.meta(r["label"]) for r in recs}
+    size = lambda m: float(np.prod(sorted(m["geometry"]["aligned_bbox"]["extents"][:2])))
+    for rb in recs:
+        mb = metas[rb["label"]]
+        if not (Q.bd_of(mb)["flat_top"] or Q.bd_of(mb)["container"]):
+            continue
+        cand = [ra for ra in recs if ra is not rb and Q.fits(metas[ra["label"]], mb)]
+        if not cand:
+            rep["pool"].append({"b": rb["category"], "a": None})
+            log("   %s:这张里没有放得上 / 放得进的东西" % rb["category"])
+            continue
+        mode = Q.fits(metas[cand[0]["label"]], mb)
+        key = (lambda ra: Q.bd_of(metas[ra["label"]])["pass_d"]) if mode == "in" else (lambda ra: size(metas[ra["label"]]))
+        ra = min(cand, key=key)
+        p0, r0 = S.pose(ra["label"])
+        info = put_on(S, ra["label"], rb["label"], mode)
+        got = S.rm.check_once(("bdq_on", {"a": ra["label"], "b": rb["label"], "mode": mode}), 0)
+        rep["pool"].append({"b": rb["category"], "a": ra["category"], **info, "graded": int(bool(got))})
+        test(rep, "%s %s %s、物理走到停" % (ra["category"], "放进" if mode == "in" else "放到", rb["category"]), 1, got)
+        S.set_pose(ra["label"], p0, r0)
+        settle(S, ra["label"])
+    return False
+
+
 def question_scenario(S, rep):
     """随机题机的一道题:按它的要求把仿真真值摆成做成了 / 没做成的几种样子(只动场景里的东西,不动身体)"""
     from task.RoboDojo.bd import question as Q
-    q = S.lm.saved_layouts[0]["bd_question"]
+    q = Q.find_question(S.lm.saved_layouts[0])
     req, (name, kw) = q["requirement"], q["check"]
+    if req == "pool":
+        return pool_scenario(S, rep)
     rep["question"] = {k: q[k] for k in ("qid", "body", "requirement", "sentence")}
     log("   题 %s(%s / %s):%s" % (q["qid"], q["body"], req, q["sentence"]))
     p0, r0 = S.pose("target")
+    S.graded = lambda: S.rm.check_once((name, dict(kw)), 0)   # 直接判这一题的判据(不碰 RoboDojo 那张待判的单子,最后管线还要用它)
     test(rep, "开局", 0, S.graded())
     e = 0
     ia = S.inst("target")
@@ -390,11 +494,15 @@ def question_scenario(S, rep):
         goal = p0 + np.r_[d * (dist + 0.01), 0.0]
         S.set_pose("target", goal, r0)
         test(rep, "沿着推过去 %.0f cm(没抬)" % ((dist + 0.01) * 100), 1, S.graded())
+        # "被拿起来过"记一次就一直算(判据里记着这一集到过的最高),所以管线判要在拿起来之前做
+        S.env.reward_manager.step(env_idx_list=[0])
+        rep["pipeline_reward_in_success_state"] = float(S.env.reward_manager.get_reward(final_check=True)[0])
+        log("   RoboDojo 自己的 step → get_reward(推过去了、没抬):%s" % rep["pipeline_reward_in_success_state"])
         S.set_pose("target", goal + [0, 0, 0.05], r0)
         S.graded()
         S.set_pose("target", goal, r0)
         test(rep, "同一处,但中间被拿起来过 5 cm", 0, S.graded())
-        return True
+        return "done"
     if req == "next_to":
         ib = S.inst("other")
         pb, _ = S.pose("other")
@@ -412,20 +520,16 @@ def question_scenario(S, rep):
         S.set_pose("target", np.r_[pb[:2] + u * hi_, p0[2]], r0)
         return True
     if req == "on":
-        ib = S.inst("other")
+        mode = kw.get("mode", "on")
         pb, _ = S.pose("other")
         ca = Q._corners(S.rm.func_parser, e, ia)
-        cb = Q._corners(S.rm.func_parser, e, ib)
-        bottom_off = p0[2] - ca[:, 2].min()
-        z = (cb[:, 2].min() + 0.012 if kw.get("mode") == "in" else cb[:, 2].max() + 0.005) + bottom_off
-        S.set_pose("target", np.r_[pb[:2] + (p0[:2] - pb[:2]) * 0.6, z], r0)
-        test(rep, "在 B 旁边、悬在它上面那个高度(没在它上面)", 0, S.graded())
-        S.set_pose("target", np.r_[pb[:2], z], r0)
-        S.steps(60)
-        pa, _ = S.pose("target")
-        rep["on_after_settle"] = [float(v) for v in pa]
-        log("   放%s B 走 60 步后:A 在 %s" % ("进" if kw.get("mode") == "in" else "到", np.round(pa, 4).tolist()))
-        test(rep, "放%s B 落稳" % ("进" if kw.get("mode") == "in" else "到"), 1, S.graded())
+        cb = Q._corners(S.rm.func_parser, e, S.inst("other"))
+        z = (cb[:, 2].min() + cb[:, 2].max()) / 2 if mode == "in" else cb[:, 2].max() + 0.005
+        S.set_pose("target", np.r_[pb[:2] + (p0[:2] - pb[:2]) * 0.6, z + p0[2] - ca[:, 2].min()], r0)
+        test(rep, "在 B 旁边、悬在它%s那个高度(没在它%s)" % (("半腰", "里面") if mode == "in" else ("上面", "上面")), 0, S.graded())
+        info = put_on(S, "target", "other", mode)
+        rep["on_after_settle"] = info
+        test(rep, "放%s B、物理走到停" % ("进" if mode == "in" else "到"), 1, S.graded())
         return True
     if req == "above":
         robot = S.env.robot_manager.robot_list[0]
@@ -481,6 +585,8 @@ def save_images(env, rep, tag):
 
 # ---------------------------------------------------------------- 主循环(每张布局:关掉 → 重装,和 main.py 一样)
 env = make_env()
+if args.no_stability:   # 只在这个进程里:跳过 RoboDojo 的"布局稳不稳"那一关,落稳后逐件量挪了多远、歪了多少
+    env.scene_manager.layout_manager.check_layout_stability = lambda e_, render=False: (True, [])
 def check_layout(lid, rep, tag=None):
     tag = tag or "L%d" % lid
     t1 = time.time()
@@ -498,10 +604,13 @@ def check_layout(lid, rep, tag=None):
             o = S.lm.get_scene_object(0, inst)
             item = {"type": sect, "label": r.get("label"), "inst": inst, "present": o is not None}
             if o is not None and sect != "Garment":
-                p, _ = S.lm.get_instance_pose(env_idx=0, inst_name=inst)
+                p, qq = S.lm.get_instance_pose(env_idx=0, inst_name=inst)
                 item["drift_m"] = float(np.linalg.norm(_np(p)[:3] - np.asarray(r["default_pos"], dtype=float)))
+                Rr = rotm(_np(qq)[:4]) @ rotm(np.asarray(r["default_ori"], dtype=float)).T   # 开局摆的样子 → 落稳后
+                item["tilt_deg"] = float(math.degrees(math.acos(max(-1.0, min(1.0, Rr[2, 2])))))
             rep["objects"].append(item)
-            log("   %s %s(%s)在=%s 漂 %s" % (sect, r.get("label"), inst, item["present"], ("%.4f m" % item["drift_m"]) if "drift_m" in item else "-"))
+            log("   %s %s(%s)在=%s 漂 %s 歪 %s" % (sect, r.get("label"), inst, item["present"], ("%.4f m" % item["drift_m"]) if "drift_m" in item else "-",
+                                               ("%.1f°" % item["tilt_deg"]) if "tilt_deg" in item else "-"))
     save_images(env, rep, tag)
     st = env.get_obs()["state"]
     rep["ee_rest"] = {k: [round(float(v), 4) for v in np.asarray(st[k]).reshape(-1)[:3]] for k in st if k.endswith("ee_pose")}
@@ -521,12 +630,15 @@ def check_layout(lid, rep, tag=None):
         log("   身体每一节开局在哪:%s" % links)
     if args.task == "bd_walker" or args.walk_label:
         walk(S, rep, args.walk_label or None)
+        save_images(env, rep, tag + "_walked")   # 走完以后它在哪(chase_mouse 走满 200 个动作那一炮:老鼠停在 G1 左小臂底下)
     # ③ 评分对不对
-    if scenario(S, rep):
+    res = scenario(S, rep)
+    if res is True:
         env.reward_manager.step(env_idx_list=[0])
         r = env.reward_manager.get_reward(final_check=True)
         rep["pipeline_reward_in_success_state"] = float(r[0])
         log("   RoboDojo 自己的 step → get_reward(停在做成了的样子):%s" % r)
+    if res:
         save_images(env, rep, tag + "_done")
     rep["ok"] = rep["loaded"] and all(t["ok"] for t in rep["tests"]) and rep.get("pipeline_reward_in_success_state", 1.0) > 0.999 \
         and all(o["present"] for o in rep["objects"])
@@ -563,7 +675,10 @@ for lid, qs in RUNS:
         import traceback
         rep["error"] = "%s: %s" % (type(e).__name__, e)
         rep["traceback"] = traceback.format_exc()
-        log("布局 %d 出错:%s\n%s" % (lid, rep["error"], rep["traceback"]))
-        finish(3)
+        log("布局 %d 出错:%s\n%s" % (rep["layout"], rep["error"], rep["traceback"]))
+        if type(e).__name__ != "UnStableError":
+            finish(3)
+        # 布局站不住:RoboDojo 自己的 main.py 也是记下、关掉、接着下一张(这一张算没过)
+        rep["unstable"] = True
     env.close()
 finish(0)

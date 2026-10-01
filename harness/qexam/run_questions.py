@@ -108,8 +108,9 @@ def run_one(batch, q):
     t0 = time.time()
     print("== 题 %d(%s / %s,种子 %d,%d 步)%s · 炮 %s" % (q["qid"], q["body"], q["requirement"], q["seed"], q["steps"], q["sentence"], shot), flush=True)
     log = open(f"{out}/run.log", "w")
-    proc = subprocess.Popen(["bash", "/root/q/run.sh", args.path, shot, "bd_question", str(args.lim)], env=env, stdout=log, stderr=subprocess.STDOUT)
-    res_glob = f"{RD}/eval_result/RoboDojo/bd_question/l3_link/{q['cfg_name']}/{q['seed']}_/{shot}/_result.json"
+    task = q.get("task", "bd_question")   # 小场景那一批(make_questions.py --scenes)是各自的任务;YCB 题都是 bd_question
+    proc = subprocess.Popen(["bash", "/root/q/run.sh", args.path, shot, task, str(args.lim)], env=env, stdout=log, stderr=subprocess.STDOUT)
+    res_glob = f"{RD}/eval_result/RoboDojo/{task}/l3_link/{q['cfg_name']}/{q['seed']}_/{shot}/_result.json"
     result = None
     started = None
     while proc.poll() is None:

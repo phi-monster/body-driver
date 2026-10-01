@@ -1,6 +1,7 @@
 #!/bin/bash
 # 路 8 开机炮:主线驱动(不设 BL_BIN)在排队位上开机 —— 走 /root/q/run.sh 排队;驱动日志走到"── 第 1 轮"(身体开完机、第一次叫脑)就放锁。不做任务。
 # 用法:bash qboot.sh 炮名 任务 [身体文件(默认 /root/cal_v1b78.json;写 zero = 从零量)] [时限分钟(默认 14)]
+#   身体配置、种子用环境变量:BOOT_CFG(默认 arx_x5;人形 g1_rgb、无人机 drone_rgb)、BOOT_SEED(随机题机一题一个种子;不给就是任务默认的)
 # 身体文件先拷一份到 /root/p8/cal_<炮名>.json(驱动干活时会把量到的写回 --out,原件不能动)。
 # 证据留在 /root/p8/boot/<炮名>/:开机那几行、第 1 轮给脑的清单、脑第一眼看到的图(转成 jpg)、sim.log 里的报错。
 # 用完就清:shot 目录里除了 cal*、经历* 以外都删(look/ 近 10 MB、sim.log),RoboDojo 为这一集开的流式视频临时文件也删(只删 bd_ 任务的)。
@@ -22,8 +23,9 @@ else
   echo "身体文件:没有(从零量,量到的写进 $CALF)" > "$E/meta.txt"
 fi
 echo "任务 $TASK · 炮 $K · 起 $(date +%T)" >> "$E/meta.txt"
-CAL=$CALF BL_LIFE=/root/p8/经历_$k.txt CFG=arx_x5 DRVMODE=work BD_STEP_LIM=3000 BL_VID= \
-  setsid nohup bash /root/q/run.sh 8 "$K" "$TASK" "$LIM" > "$E/run.log" 2>&1 < /dev/null &
+echo "配置 ${BOOT_CFG:-arx_x5} · 种子 ${BOOT_SEED:-(任务默认)}" >> "$E/meta.txt"
+CAL=$CALF BL_LIFE=/root/p8/经历_$k.txt CFG=${BOOT_CFG:-arx_x5} DRVMODE=work BD_STEP_LIM=3000 BL_VID= \
+  setsid nohup env ${BOOT_SEED:+SEED=$BOOT_SEED} bash /root/q/run.sh 8 "$K" "$TASK" "$LIM" > "$E/run.log" 2>&1 < /dev/null &
 RUN=$!
 # 等:第 1 轮 / run.sh 自己结束(到时限、驱动退了)
 got=""
@@ -46,12 +48,15 @@ fi
 G=$(ls "$N/look"/grid_*.bmp 2>/dev/null | head -1)
 [ -n "$G" ] && /venv/RoboDojo/bin/python -c "import sys; from PIL import Image; Image.open(sys.argv[1]).convert('RGB').save(sys.argv[2], quality=85)" "$G" "$E/first_grid.jpg"
 [ -f "$N/look/fixed_eye.txt" ] && cp "$N/look/fixed_eye.txt" "$E/"
-touch /root/q/done_$K
+# look/ 里的文字(给脑的话、脑交上来的)都是小文件,留下:核"那句话送到脑了没有"要看它(cal.log 里只记了有一片叫 instruction 的读数)
+mkdir -p "$E/look_txt" && find "$N/look" -maxdepth 1 -name '*.txt' -size -200k -exec cp {} "$E/look_txt/" \; 2>/dev/null
+# 放锁:run.sh 还在等(驱动还活着)才 touch;它已经自己结束了就不 touch(P8I 驱动先退了,touch 完留下一个没人删的 done_P8I)
+kill -0 $RUN 2>/dev/null && touch /root/q/done_$K
 wait $RUN
 echo "run.sh 结束:$(date +%T) rc=$?" >> "$E/meta.txt"
 # 清:shot 目录里 cal* / 经历* 以外的都删
 find "$N" -mindepth 1 -maxdepth 1 ! -name 'cal*' ! -name '经历*' -exec rm -rf {} +
-case "$TASK" in   # RoboDojo 这一集的结果目录:.../<任务>/l3_link/<配置>/<种子>_/<ROBODOJO_RUN_ID = 炮名>(只删这一炮的)
-  bd_*) rm -rf "/root/RoboDojo/eval_result/RoboDojo/$TASK/l3_link/arx_x5/0_/$K" "/root/RoboDojo/eval_result/RoboDojo/$TASK/l3_link/arx_x5/0_/_resume_$K.json" ;;
+case "$TASK" in   # RoboDojo 这一集的结果目录:.../<任务>/l3_link/<配置名>/<种子>_/<ROBODOJO_RUN_ID = 炮名>(只删这一炮的)
+  bd_*) for d in /root/RoboDojo/eval_result/RoboDojo/$TASK/l3_link/*/*_; do rm -rf "$d/$K" "$d/_resume_$K.json"; done ;;
 esac
 echo "清完:$(ls "$N")" >> "$E/meta.txt"
