@@ -378,6 +378,9 @@ driver-observations.adb	if S'Length = 3 and then S (S'First + 2) = 3 and then S 
 driver-observations.adb	if T'Length >= 2 and then T (T'Last - 1) = '' and then S'Length = 2 then	2	format	a depth map is a two-dimensional float grid (numpy dtype kind letter before the width)
 driver-observations.adb	if T'Length >= 2 and then T (T'Last - 1) = '' and then S'Length = 2 then	2	format	a depth map is a two-dimensional float grid (numpy dtype kind letter before the width)
 driver-observations.ads	Key_Separator : constant Character := Character'Val (31);	31	format	ASCII unit separator
+driver-pixels.adb	(if V.Count > 1 then V.Sums.Element (K) / Real (V.Count - 1) else 0.0);	1	statistics	a sample variance needs two frames
+driver-pixels.adb	Quantization : constant := 1.0 / 12.0;	1.0	math	the variance of a uniform step of one level is 1/12
+driver-pixels.adb	Quantization : constant := 1.0 / 12.0;	12.0	math	the variance of a uniform step of one level is 1/12
 driver-protocol.adb	Pairs : Natural := 3;	3	format	pair and element counts of the reply maps (docs/body-protocol.md 4)
 driver-protocol.adb	Put_Array_Header (Reply, 1);	1	format	pair and element counts of the reply maps (docs/body-protocol.md 4)
 driver-protocol.adb	Put_Map_Header (Reply, 1);	1	format	pair and element counts of the reply maps (docs/body-protocol.md 4)
