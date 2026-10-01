@@ -184,8 +184,21 @@ package body Jointboot is
          return P;
       end if;
       declare
-         Du : constant V3 := [Cg.F / Z, 0.0, Cg.F * Pc (0) / (Z * Z)];
-         Dv : constant V3 := [0.0, -Cg.F / Z, -Cg.F * Pc (1) / (Z * Z)];
+         --  像素对相机系点的导数:针孔那一份;有镜头畸变(同 Geom.Distort)再乘畸变在归一化平面上的雅可比 Dk·I + (2K1 + 4K2 r²)·x xᵀ
+         Pin : constant Boolean := Cg.K1 = 0.0 and then Cg.K2 = 0.0;
+         Xn : constant Long_Float := Pc (0) / Z;
+         Yn : constant Long_Float := Pc (1) / Z;
+         R2 : constant Long_Float := Xn * Xn + Yn * Yn;
+         Dk : constant Long_Float := 1.0 + Cg.K1 * R2 + Cg.K2 * R2 * R2;
+         Gr : constant Long_Float := 2.0 * Cg.K1 + 4.0 * Cg.K2 * R2;
+         Dxn : constant V3 := [1.0 / Z, 0.0, Xn / Z];   --  归一化 x 对相机系点的导数(-z 朝前)
+         Dyn : constant V3 := [0.0, 1.0 / Z, Yn / Z];
+         Du : constant V3 := (if Pin then [Cg.F / Z, 0.0, Cg.F * Pc (0) / (Z * Z)]
+                              else [Cg.F * ((Dk + Gr * Xn * Xn) * Dxn (0) + Gr * Xn * Yn * Dyn (0)), Cg.F * ((Dk + Gr * Xn * Xn) * Dxn (1) + Gr * Xn * Yn * Dyn (1)),
+                                    Cg.F * ((Dk + Gr * Xn * Xn) * Dxn (2) + Gr * Xn * Yn * Dyn (2))]);
+         Dv : constant V3 := (if Pin then [0.0, -Cg.F / Z, -Cg.F * Pc (1) / (Z * Z)]
+                              else [-Cg.F * (Gr * Xn * Yn * Dxn (0) + (Dk + Gr * Yn * Yn) * Dyn (0)), -Cg.F * (Gr * Xn * Yn * Dxn (1) + (Dk + Gr * Yn * Yn) * Dyn (1)),
+                                    -Cg.F * (Gr * Xn * Yn * Dxn (2) + (Dk + Gr * Yn * Yn) * Dyn (2))]);
          Ju, Jv : V3 := [0.0, 0.0, 0.0];     --  像素对世界点的导数(两行)
          Dd : constant V3 := (if Nx > 0.0 then [X (0) / Nx, X (1) / Nx, X (2) / Nx] else [0.0, 0.0, 0.0]);
          Dw : constant V3 := Ap (R, Dd);
@@ -232,8 +245,13 @@ package body Jointboot is
             P.A0 := 1.0; P.A1 := 0.0;   --  这一眼里远近挪它不动:方向随便取一个,Vd = 0(单位向量,纯数学)
          end if;
          P.Vd := Sd2 * Ng * Ng;
-         P.E0 := Cg.F * Pc (0) / Z + Cg.Cx - U;
-         P.E1 := -Cg.F * Pc (1) / Z + Cg.Cy - V;
+         if Pin then
+            P.E0 := Cg.F * Pc (0) / Z + Cg.Cx - U;
+            P.E1 := -Cg.F * Pc (1) / Z + Cg.Cy - V;
+         else
+            P.E0 := Cg.F * Xn * Dk + Cg.Cx - U;
+            P.E1 := -Cg.F * Yn * Dk + Cg.Cy - V;
+         end if;
          P.Valid := True;
       end;
       return P;

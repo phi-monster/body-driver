@@ -42,10 +42,12 @@ package Geom is
       Valid : Boolean := False;        --  相机朝向量过了
       F, Cx, Cy : Long_Float := 0.0;   --  焦距(像素)、主点。焦距:身体给了就用;没给(官方 RoboDojo 观测就没有)就在量朝向时一起解出来
       --  镜头径向畸变(2026-09-26):归一化平面上畸变后的点 = 理想的点 × (1 + K1 r² + K2 r⁴)。0 = 理想针孔(仿真就是);真机的镜头都有。
-      --  原来按板上铺满画面的几百个点解(Refine_Board);09-30 那一段随死代码删了,现在只从存下的几何文件装回,驱动里没有哪一段再解它。
+      --  原来按板上铺满画面的几百个点解(Refine_Board,九月那条标定板的路;V1b 换成只读关节读数的开机后它走不到,09-30 随死代码删了 ——
+      --  从那以后哪儿都不解,P8WD 2026-10-01 三台眼都加了 k1 −0.15 / k2 0.03,腕眼焦距解成 645 / 634(真 397)、头顶眼放不进世界)。
+      --  10-01 起:不动的眼在 Fit_Fixed_Board 里和焦距一起解(K1_Sd / K2_Sd 带出来);腕眼在运动学多视图那一步(Kinem ④)一起解
       --  投影 / 视线全走 Project / Ray / Cam_Dir,不许在别处按针孔自己算
       K1, K2 : Long_Float := 0.0;
-      K1_Sd : Long_Float := 0.0;       --  K1 的不确定度(一起解时从 JᵀJ 算出;0 = 没解)
+      K1_Sd : Long_Float := 0.0;       --  K1 的不确定度(一起解时从 JᵀJ 算出;0 = 没解;K2 的在 Fixed_Report.K2_Sd)
       F_Meas : Long_Float := 0.0;      --  量朝向时顺带解出来的焦距(和给的那份对账用;没给时它就是 F)
       --  仪器看一张图报的焦距 ± 不确定度(像素;0 = 没有)。没给内参时联合解里当一条残差 (F - 先验) / 不确定度:
       --  基线短、焦距和距离分不开时把焦距按在仪器的范围里;基线够长时观测压过它(V1B 2026-09-24:2.6 cm 星形基线把 397 解成 992 / 59)
@@ -98,6 +100,12 @@ package Geom is
    --  朝向定没定住(09-30 换掉"朝向 ± ≥ 1 弧度"):朝向差 Rot_Sd(弧度)一阶让投影挪 焦距 F × Rot_Sd 像素;挪得比半幅对角线
    --  (主点到画幅角;画幅 = 两倍主点,驱动的约定)还远 = 连它朝哪看都定不住 ⇒ True。F 和画幅都是量的:长焦的眼门自动收紧、广角的放宽
    function Pointing_Lost (G : Cam_Geo; F, Rot_Sd : Long_Float) return Boolean;
+   --  正态分布单侧上尾 P(N(0,1) > X)(X > 0:Mills 比的连分式,做到不再变;X ≤ 0 按对称;纯数学)
+   function Normal_Tail (X : Long_Float) return Long_Float;
+   --  多出两个参数(比如镜头畸变 K1 / K2)的那个模型,比少两个的显著好吗:嵌套模型的 F 检验(d1 = 2)。
+   --  Rss0 / Rss1 = 少两个 / 多两个参数的加权残差平方和(同一批点),D2 = 多的那个模型剩下的自由度(方程数 − 参数数)。
+   --  门按 Stats.Z 的单侧置信度:d1 = 2 时 F 的上尾有闭式 P(F > f) = (1 + 2f / D2)^(−D2 / 2) ⇒ f_c = (D2 / 2)(α^(−2 / D2) − 1)
+   function Two_More_Significant (Rss0, Rss1 : Long_Float; D2 : Natural) return Boolean;
    --  离群重挑(09-30,Fit_Rig 和 Fit_Fixed_Board 并成一套)。Reselect = 一遍:Rs = 每一笔在现在这个解下的残差(全体,先前踢掉的也算;
    --  在眼后这类算不出的 = Long_Float'Last),门 = 上一遍进解那些的残差中位 × 3(统计门),从全体重挑(先前踢错的能回来);中位是 0 ⇒ 不挑。
    --  Changed = 这一遍进解的和上一遍不一样,Kept = 这一遍进解几笔
@@ -304,6 +312,8 @@ package Geom is
       Scene_Rms : Long_Float := 0.0;        --  它们的像素残差
       Hand_N, Hand_Used : Natural := 0;     --  手上的标记:给了几笔、进解几笔
       Hand_Rms : Long_Float := 0.0;
+      K2_Sd : Long_Float := 0.0;            --  解出来的 K2 的不确定度(K1 的在 Cam_Geo.K1_Sd;Cam_Geo 不加字段 —— 别路的文件里有列全了字段的聚合)
+      K_Kept : Boolean := False;            --  镜头畸变进了解(F 检验显著)
    end record;
    --  不动的眼按标定板解(2026-09-25):相机在世界里的朝向 + 位置、焦距(没给就解)。板上的点世界位置已知 ⇒ 单点法(盲搜 + 精修)起步,
    --  再按每个点自己的噪声加权精修(Scene_Var:配点噪声 ⊕ 三角的不确定度投进这只眼);加权残差按 Reselect_Loop 踢到不再变(同 Fit_Rig 那一套;

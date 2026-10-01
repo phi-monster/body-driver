@@ -792,4 +792,73 @@ begin
                 & Boolean'Image (G2) & ";没顶着 ⇒ 长了 " & Boolean'Image (G3) & ";长大的那一块盖住旧的里头、旁边另一块盖不住");
       end;
    end;
+   --  🔴 ⑮ 不动的眼解镜头畸变(Geom.Fit_Fixed_Board,10-01 P8WD:三台眼都加了 k1 −0.15 / k2 0.03,驱动哪儿都不解畸变,头顶眼放不进世界):
+   --  合成的头顶眼(焦距 288、640 × 480、斜着看 1.2 米外的桌面),板上的点按画面里铺满的格子打到桌面上(高低起伏几厘米),配点按 0.3 px 抖。
+   --  带畸变的那只:畸变进了解(F 检验显著),K1 / K2 / 焦距 / 位置都在它自报的 Z 倍不确定度以内;不带的那只:畸变不进解(针孔),K1 = K2 = 0。
+   --  错了会是什么病:针孔去拟合有畸变的镜头 ⇒ 焦距、位置整个歪掉(P8WD 腕眼焦距 645 / 真 397,两手对齐差 586 mm),头顶眼放不进世界。
+   --  牙:K1 / K2 不放开(只解针孔)⇒ 带畸变的那只焦距 / 位置出了自报的不确定度(或解不出),红
+   declare
+      Gt0 : Geom.Cam_Geo;
+      Seed : Long_Long_Integer := 29;
+      function Jit return Long_Float is   --  确定性伪随机 ±1(测试数据自己的抖动)
+      begin
+         Seed := (Seed * 1103515245 + 12345) mod 2147483648;
+         return Long_Float (Integer ((Seed / 65536) mod 2001) - 1000) / 1000.0;
+      end Jit;
+      --  画面里 16 × 12 个格点各发一条视线打到桌面(z = 0.8 上下几厘米)上,再按真相机(带不带畸变)投回去、抖 Sh
+      procedure Board (Gt : Geom.Cam_Geo; Sh : Long_Float; Sc : out Geom.Scene_Pt_Vectors.Vector) is
+      begin
+         Sc.Clear;
+         for I in 0 .. 15 loop
+            for J in 0 .. 11 loop
+               declare
+                  Uq : constant Long_Float := 10.0 + 620.0 * Long_Float (I) / 15.0;
+                  Vq : constant Long_Float := 10.0 + 460.0 * Long_Float (J) / 11.0;
+                  Ok, Okh : Boolean;
+                  D : constant Geom.V3 := Geom.Ray_Fixed (Gt, Uq, Vq, Ok);
+                  Z0 : constant Long_Float := 0.8 + 0.04 * Sin (Long_Float (I + 3 * J));
+                  Pw : constant Geom.V3 := (if Ok then Geom.Hit_Plane (Gt.Pos, D, [0.0, 0.0, Z0], [0.0, 0.0, 1.0], Okh) else Gt.Pos);
+                  U, V : Long_Float;
+                  Fr : Boolean;
+               begin
+                  if Ok and then Okh then
+                     Geom.Project_Fixed (Gt, Pw, U, V, Fr);
+                     if Fr and then U > 0.0 and then U < 640.0 and then V > 0.0 and then V < 480.0 then
+                        Sc.Append (Geom.Scene_Pt'(Pw => Pw, Cov => [others => [others => 0.0]], U => U + Sh * Jit, V => V + Sh * Jit, Sh => Sh, Views => 3));
+                     end if;
+                  end if;
+               end;
+            end loop;
+         end loop;
+      end Board;
+      Sc_D, Sc_P : Geom.Scene_Pt_Vectors.Vector;
+      Gd, Gp : Geom.Cam_Geo;
+      Rd, Rp : Geom.Fixed_Report;
+      Okd, Okp : Boolean;
+      Gtd : Geom.Cam_Geo;
+   begin
+      Gt0.F := 288.0; Gt0.Cx := 320.0; Gt0.Cy := 240.0; Gt0.R_Ce := Geom.Rodrigues ([0.55, 0.12, 0.05]); Gt0.Pos := [0.05, -0.65, 1.75];
+      Gt0.Fixed := True; Gt0.Valid := True;
+      Gtd := Gt0; Gtd.K1 := -0.15; Gtd.K2 := 0.03;
+      Board (Gtd, 0.3, Sc_D);
+      Board (Gt0, 0.3, Sc_P);
+      Gd.F := 0.0; Gd.Cx := 320.0; Gd.Cy := 240.0;
+      Gp := Gd;
+      Geom.Fit_Fixed_Board (Gd, Sc_D, Rd, Okd);
+      Geom.Fit_Fixed_Board (Gp, Sc_P, Rp, Okp);
+      declare
+         Ed : constant Long_Float := Geom.Norm ([Gd.Pos (0) - Gtd.Pos (0), Gd.Pos (1) - Gtd.Pos (1), Gd.Pos (2) - Gtd.Pos (2)]);
+         Ep : constant Long_Float := Geom.Norm ([Gp.Pos (0) - Gt0.Pos (0), Gp.Pos (1) - Gt0.Pos (1), Gp.Pos (2) - Gt0.Pos (2)]);
+      begin
+         Check (Okd and then Rd.K_Kept and then abs (Gd.K1 - Gtd.K1) <= Stats.Z * Gd.K1_Sd and then abs (Gd.K2 - Gtd.K2) <= Stats.Z * Rd.K2_Sd
+                and then abs (Gd.F - Gtd.F) <= Stats.Z * Gd.F_Sd and then Ed <= Stats.Z * Gd.Pos_Sd
+                and then Okp and then not Rp.K_Kept and then Gp.K1 = 0.0 and then Gp.K2 = 0.0 and then abs (Gp.F - Gt0.F) <= Stats.Z * Gp.F_Sd
+                and then Ep <= Stats.Z * Gp.Pos_Sd,
+                "不动的眼解镜头畸变:带畸变的板(" & Codec.Img (Natural (Sc_D.Length)) & " 点)⇒ 畸变进解 " & Boolean'Image (Rd.K_Kept) & "、K1 "
+                & Codec.Fmt (Gd.K1, 4) & " ± " & Codec.Fmt (Gd.K1_Sd, 4) & "(真 −0.15)、K2 " & Codec.Fmt (Gd.K2, 4) & " ± " & Codec.Fmt (Rd.K2_Sd, 4)
+                & "(真 0.03)、焦距 " & Codec.Fmt (Gd.F, 2) & " ± " & Codec.Fmt (Gd.F_Sd, 2) & "(真 288)、位置差 " & Codec.Fmt (1000.0 * Ed, 2) & " mm ± "
+                & Codec.Fmt (1000.0 * Gd.Pos_Sd, 2) & ";不带畸变的板 ⇒ 畸变进解 " & Boolean'Image (Rp.K_Kept) & "、焦距 " & Codec.Fmt (Gp.F, 2) & " ± "
+                & Codec.Fmt (Gp.F_Sd, 2) & "、位置差 " & Codec.Fmt (1000.0 * Ep, 2) & " mm");
+      end;
+   end;
 end Welds_Path_3;
