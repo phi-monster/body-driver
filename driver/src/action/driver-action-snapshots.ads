@@ -105,6 +105,7 @@ package Driver.Action.Snapshots is
       Support      : Surface_Id'Base := 0;    --  0: it rests on nothing measured
       Height       : Estimate;                --  above its support, along that surface's normal
       Seen         : Boolean := False;        --  by some eye at this beat
+      Best_Eye     : Natural := 0;            --  of Eyes, the eye on no arm that shows it with the most pixels
       Moving       : Boolean := False;        --  significantly, against its own noise
       Held_By      : Hand_Id'Base := 0;
       Joint        : Joint_State;

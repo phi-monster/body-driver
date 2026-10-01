@@ -1,10 +1,10 @@
 # file	line (comments and strings removed, blanks normalized)	literal (a " prefix: inside a string)	category	why
 body_driver.adb	Handed : Integer := -1;	1	structure	sentinel: no episode's sentence handed out yet
 driver-action-contact-search.adb	((if Step mod 2 = 1 then 1.0 else -1.0) * 2.0 * Ada.Numerics.Pi * Real ((Step + 1) / 2) / Real (Steps));	1	math	odd steps turn one way, even steps the other
-driver-action-contact-search.adb	((if Step mod 2 = 1 then 1.0 else -1.0) * 2.0 * Ada.Numerics.Pi * Real ((Step + 1) / 2) / Real (Steps));	1.0	math	the positive sense of turning
 driver-action-contact-search.adb	((if Step mod 2 = 1 then 1.0 else -1.0) * 2.0 * Ada.Numerics.Pi * Real ((Step + 1) / 2) / Real (Steps));	1.0	math	the negative sense of turning
-driver-action-contact-search.adb	((if Step mod 2 = 1 then 1.0 else -1.0) * 2.0 * Ada.Numerics.Pi * Real ((Step + 1) / 2) / Real (Steps));	2	math	the sense alternates with the parity of the step
+driver-action-contact-search.adb	((if Step mod 2 = 1 then 1.0 else -1.0) * 2.0 * Ada.Numerics.Pi * Real ((Step + 1) / 2) / Real (Steps));	1.0	math	the positive sense of turning
 driver-action-contact-search.adb	((if Step mod 2 = 1 then 1.0 else -1.0) * 2.0 * Ada.Numerics.Pi * Real ((Step + 1) / 2) / Real (Steps));	2	math	each sense advances one step every second step
+driver-action-contact-search.adb	((if Step mod 2 = 1 then 1.0 else -1.0) * 2.0 * Ada.Numerics.Pi * Real ((Step + 1) / 2) / Real (Steps));	2	math	the sense alternates with the parity of the step
 driver-action-contact-search.adb	((if Step mod 2 = 1 then 1.0 else -1.0) * 2.0 * Ada.Numerics.Pi * Real ((Step + 1) / 2) / Real (Steps));	2.0	math	a full circle is two pi
 driver-action-contact-search.adb	(Pad_Index => K, Sample => I, Psi => Psi, Any_Angle => Steps = 1);	1	math	a single turn: the contact set does not depend on the turn
 driver-action-contact-search.adb	(case V is when 1 => Theta * A1, when 2 => -Theta * A1, when 3 => Theta * A2, when 4 => -Theta * A2);	1	structure	first of the four tilted variants: about the first axis, positive
@@ -62,6 +62,26 @@ driver-action-contact.adb	Low : Positive := 1;	1	structure	the first coordinate 
 driver-action-contact.adb	Seed (Low) := 1.0;	1.0	math	the seed is a unit coordinate axis
 driver-action-contact.adb	for K in 2 .. 3 loop	2	structure	the remaining coordinate axes, second and third
 driver-action-contact.adb	for K in 2 .. 3 loop	3	structure	the remaining coordinate axes, second and third
+driver-action-goals.adb	Grow : constant Vec3 := P.Rotation * [1.0, 0.0, -U_S];	1.0	math	the image column x / z grows as 1 / z along the eye's x and as -u / z along its z
+driver-action-goals.adb	Half_Gap : constant Real := Sqrt (((Sxx - Syy) / 2.0) ** 2 + Sxy ** 2);	2.0	math	eigenvalues of a symmetric two by two matrix: half their difference
+driver-action-goals.adb	Larger : constant Real := (Sxx + Syy) / 2.0 + Half_Gap;	2.0	math	eigenvalues of a symmetric two by two matrix: their mean
+driver-action-goals.adb	Level : constant Boolean := Significant (Vector_Gate (2), abs Flat, Sigma);	2	structure	a separation within a plane has two dimensions
+driver-action-goals.adb	Motion => Contact.Rotation ((if Phi > 0.0 then Axis else -Axis), 1.0, Subject.Centre.Mean),	1.0	math	a twist of unit size: one radian
+driver-action-goals.adb	Sigma := X.Sigma * Sqrt (Larger / Real (Count)) / (2.0 * Half_Gap);	2.0	math	the gap between the two eigenvalues is twice the half gap
+driver-action-goals.adb	Sign : constant Real := (if Increase then 1.0 else -1.0);	1.0	math	up is the positive sense of a quantity
+driver-action-goals.adb	Sign : constant Real := (if Increase then 1.0 else -1.0);	1.0	math	down is the negative sense of a quantity
+driver-action-goals.adb	Theta : constant Real := Arctan (2.0 * Sxy, Sxx - Syy) / 2.0;	2.0	math	the principal axis of a two by two covariance lies at half the angle of (Sxx - Syy, 2 Sxy)
+driver-action-goals.adb	Theta : constant Real := Arctan (2.0 * Sxy, Sxx - Syy) / 2.0;	2.0	math	the principal axis of a two by two covariance lies at half the angle of (Sxx - Syy, 2 Sxy)
+driver-action-goals.adb	if not (abs F > 0.0) or else not Significant (Arccos (Real'Min (1.0, -Real'(D * U))), Angle_Sigma)	1.0	numerics	a cosine rounded above one is one, where Arccos is defined
+driver-action-goals.adb	if not Significant (Pi / 2.0, Sigma) then	2.0	math	an axis is itself after a half turn, so a quarter turn is as far off as it can be
+driver-action-goals.adb	if not Significant (Vector_Gate (2), abs Flat, Sigma) then	2	structure	a separation within a plane has two dimensions
+driver-action-goals.adb	if not Significant (Vector_Gate (2), abs H, X.Sigma) then	2	structure	a separation within a plane has two dimensions
+driver-action-goals.adb	return Along ((if R = Nearer then -1.0 else 1.0) * Unit (Subject.Centre.Mean - C), Sigma / D_S,	1.0	math	nearer goes toward the eye
+driver-action-goals.adb	return Along ((if R = Nearer then -1.0 else 1.0) * Unit (Subject.Centre.Mean - C), Sigma / D_S,	1.0	math	farther goes away from the eye
+driver-action-goals.adb	return Along ((if R = Right then 1.0 else -1.0) * Unit (Grow),	1.0	math	right goes the way the image column grows
+driver-action-goals.adb	return Along ((if R = Right then 1.0 else -1.0) * Unit (Grow),	1.0	math	left goes the way the image column shrinks
+driver-action-goals.adb	return Moving (Contact.Rotation (Sign * Cross (N, Unit (H)), 1.0, X.Centre.Mean), Unknown);	1.0	math	a twist of unit size: one radian
+driver-action-goals.adb	return Moving (Contact.Rotation (Sign * N, 1.0, X.Centre.Mean), Unknown);	1.0	math	a twist of unit size: one radian
 driver-base64.adb	B1 : constant Natural := (if Have > 1 then Natural (Data (I + 1)) else 0);	1	format	base64 takes three bytes at a time; the second may be missing at the end
 driver-base64.adb	B2 : constant Natural := (if Have > 2 then Natural (Data (I + 2)) else 0);	2	format	base64 takes three bytes at a time; the third may be missing at the end
 driver-base64.adb	B2 : constant Natural := (if Have > 2 then Natural (Data (I + 2)) else 0);	2	format	base64 takes three bytes at a time; the third may be missing at the end
