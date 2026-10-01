@@ -1369,7 +1369,6 @@ package body Zone is
                Sig_Px : Long_Float := 0.0;
                Settled : Boolean := True;
                Before, After : Buf;   --  转之前 / 转出去停稳的那一帧(这只手自己那只眼,彩图)
-               Before_All, After_All : Plug.Cam_Vectors.Vector;   --  同一对,每台相机(别的眼里手跟着转动挪了 ⇒ 那儿就是此刻手指在的那一类)
                Shut_Refined : Boolean := False;   --  合空那一截已经在合空那头按长在眼上补过(张开那头重拼握区时照留)
                --  转出去一下再转回来,中间那一对画面配格点、拟合、判每个格点;Why 不空 = 这一转用不了
                procedure Turn_Fit (Why_T : in out Unbounded_String) is
@@ -1381,7 +1380,6 @@ package body Zone is
                begin
                   Vd := [others => Kinem.Unknown];
                   Before := F.Cams (Natural (Hc)).RGB;
-                  Before_All := F.Cams;
                   for Dir in 0 .. 1 loop
                      declare
                         C : Plug.Cmd;
@@ -1407,7 +1405,6 @@ package body Zone is
                               Why_T := To_Unbounded_String ("这只眼的焦距没量过(转了多少投不回画面)");
                            else
                               After := F.Cams (Natural (Hc)).RGB;
-                              After_All := F.Cams;
                               declare
                                  Q : Instrument.Match_Vectors.Vector;
                                  Err : Unbounded_String;
@@ -1713,74 +1710,13 @@ package body Zone is
                          & (if Known then " ⇒ 读数 " & Codec.Fmt ((if Hi_Open then Hi_R else Lo_R), 3) & " 那头张开"
                             else " ⇒ 看不出哪头张开:" & To_String (Why)));
                if Known then
-                  --  别的眼里哪一类是张开时的手指定不下来的(只有一块在动,那只眼里又看不出手上哪儿不动):转的那一下手在那只眼里跟着挪,
-                  --  挪了的像素落得多的那一类 = 此刻(读数大的那头)手指在的那一类(两类各自挪了的比例之差过 Z 倍它的标准差,同上面长在眼上的判法);
-                  --  读数大的那头张开 ⇒ 它就是张开时的手指,否则是另一类。判不出 ⇒ 那只眼的握区不要,照实说
+                  --  别的眼里(不长在这只手上)哪一类是张开时的手指定不下来的(只有一块在动、那只眼里又判不了哪儿长在手上):照原来按像素多的那一类排,
+                  --  照实说是排的(那只眼的握区只给身体图记"这只手在那只眼里在哪")。10-01 P2A 试过按"转的那一下挪了的像素落在哪一类"判:
+                  --  x5 头顶眼第 1 只手只看得见一根手指,合到的区只有 71 个像素、紧挨着手指,转的时候手指扫过它 ⇒ 判反了
+                  --  (瓣里挪了 1660 / 3184、合到的区里 70 / 71),区心挪到离真指尖中点 64 px 的那一块(原来 32–38 px)⇒ 不用
                   for Cc in 0 .. N_Cams - 1 loop
                      if Cc /= Natural (Hc) and then H.Zones (Cc).Valid and then not H.Zones (Cc).Open_Known then
-                        declare
-                           Zc : constant Hand_Zone := H.Zones (Cc);
-                           Wc : constant Natural := F.Cams (Cc).W;
-                           Hgc : constant Natural := F.Cams (Cc).H;
-                           Nc : constant Natural := Wc * Hgc;
-                           M_L, M_A, T_L, T_A : Natural := 0;
-                           Done : Boolean := False;
-                        begin
-                           if Cc < Natural (Before_All.Length) and then Cc < Natural (After_All.Length) and then Cc < Natural (M.Floors.Length)
-                             and then Nc > 0 and then Natural (Zc.Fingers.Length) = Nc
-                             and then Natural (Before_All (Cc).Gray.Length) = Nc and then Natural (After_All (Cc).Gray.Length) = Nc
-                           then
-                              declare
-                                 Il : constant Bools := Lobe_Pixels (Zc, Wc, Hgc);
-                                 Mv : constant Bools := Picture.Moved (Before_All (Cc).Gray, After_All (Cc).Gray, M.Floors (Cc));
-                              begin
-                                 for P in 0 .. Nc - 1 loop
-                                    if Zc.Fingers.Element (P) then
-                                       if Il.Element (P) then
-                                          T_L := T_L + 1;
-                                          if Mv.Element (P) then
-                                             M_L := M_L + 1;
-                                          end if;
-                                       else
-                                          T_A := T_A + 1;
-                                          if Mv.Element (P) then
-                                             M_A := M_A + 1;
-                                          end if;
-                                       end if;
-                                    end if;
-                                 end loop;
-                              end;
-                              if T_L > 0 and then T_A > 0 then
-                                 declare
-                                    Pl : constant Long_Float := Long_Float (M_L) / Long_Float (T_L);
-                                    Pa : constant Long_Float := Long_Float (M_A) / Long_Float (T_A);
-                                    P : constant Long_Float := Long_Float (M_L + M_A) / Long_Float (T_L + T_A);
-                                    Sd : constant Long_Float := Sqrt (P * (1.0 - P) * Long_Float (T_L + T_A) / (Long_Float (T_L) * Long_Float (T_A)));
-                                 begin
-                                    if abs (Pl - Pa) > Stats.Z * Sd then
-                                       declare
-                                          Keep : constant Boolean := (Pl > Pa) = Hi_Open;   --  瓣那一类是不是张开那头手指在的那一类
-                                          Z2 : Hand_Zone := (if Keep then Zc
-                                                             else From_Frames (Lo_Frame (Cc).Gray, Hi_Frame (Cc).Gray, Wc, Hgc,
-                                                                               Open_Class => (if Zc.Lobes_Darker then -1 else 1)));
-                                       begin
-                                          Z2.Open_Known := True;
-                                          H.Zones.Replace_Element (Cc, Z2);
-                                          Done := True;
-                                          Put_Line ("[身]   第" & Natural'Image (Cc) & " 台相机里哪一类是张开时的手指(只有一块在动、散得多开分不出):转的那一下挪了的像素 —— 瓣里 "
-                                                    & Codec.Img (M_L) & " / " & Codec.Img (T_L) & "、合到的区里 " & Codec.Img (M_A) & " / " & Codec.Img (T_A)
-                                                    & " ⇒ " & (if Keep then "照原来排的" else "换成另一类"));
-                                       end;
-                                    end if;
-                                 end;
-                              end if;
-                           end if;
-                           if not Done then
-                              Put_Line ("[身]   第" & Natural'Image (Cc) & " 台相机里分不出哪一类是张开时的手指(只有一块在动;转的那一下挪了的像素两类分不开:瓣里 "
-                                        & Codec.Img (M_L) & " / " & Codec.Img (T_L) & "、合到的区里 " & Codec.Img (M_A) & " / " & Codec.Img (T_A) & ")⇒ 这只眼里的握区不要");
-                              H.Zones.Replace_Element (Cc, Hand_Zone'(others => <>));
-                           end if;
-                        end;
+                        Put_Line ("[身]   第" & Natural'Image (Cc) & " 台相机里两类一样开(只有一块在动)⇒ 哪一类是张开时的手指照原来按像素多的那一类排(没有别的证据;这只眼的握区只记手在哪)");
                      end if;
                   end loop;
                   H.Open_Reading := (if Hi_Open then Hi_R else Lo_R);
