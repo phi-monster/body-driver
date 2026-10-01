@@ -404,7 +404,7 @@ begin
          declare
             A : constant Long_Float := 2.0 * Ada.Numerics.Pi * Long_Float (K) / 5.0;
          begin
-            Gx.Lobes.Append (Geom.Lobe_Geo'(Tip => [0.045 * Cos (A), 0.045 * Sin (A), -0.09], Wide => 0.015, Thin => 0.01));
+            Gx.Lobes.Append (Geom.Lobe_Geo'(Tip => [0.045 * Cos (A), 0.045 * Sin (A), -0.09], Wide => 0.015, Thin => 0.01, others => <>));
          end;
       end loop;
       Cx.Geo.Append (Geom.No_Geo); Cx.Geo.Append (Gx);
