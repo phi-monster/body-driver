@@ -2,16 +2,20 @@
 # body-driver drone test rig (2026-09-24): a flying camera in RoboDojo, built the same way as the humanoid rig (sim-side shim, zero driver code).
 # The "drone" is a small body hanging from a virtual 6-DoF gantry (x/y/z prismatic + yaw/pitch/roll revolute) fixed above the table:
 # RoboDojo/curobo see a 6-joint arm whose end link IS the body; the driver sees one "arm" that reports a pose and takes pose commands,
-# one camera on the body, and one grip channel that moves nothing (a drone has no fingers - the driver must live with that).
+# one camera on the body, and NO grip channel at all (ee_type "none", 10-01; 大并行 §5 路 1 "无人机不报抓握也开得了机").
+# Until 10-01 the rig reported a grip channel that moved nothing (a 1 cm placeholder joint inside the body); the driver measured it as a
+# mute group. A drone has no grip, so the observation now carries none and the action takes none. The placeholder joint stays in the
+# URDF only because RoboDojo's robot manager indexes one end-effector joint per arm (find_joints, control tensors); nobody sees or commands it.
 # Run on the box with the RoboDojo venv python:  python drone_setup.py   then convert the URDF to USD (needs Isaac):
 #   cd /root/RoboDojo && /venv/RoboDojo/bin/python third_party/IsaacLab/scripts/tools/convert_urdf.py Assets/Robots/drone/drone.urdf \
 #       Assets/Robots/drone/drone.usd --fix-base --headless
+# RD=<dir> writes into a copy of the RoboDojo tree instead (dry run: diff it against the live tree before touching the live one).
 import os, json, yaml, shutil
 
-R = "/root/RoboDojo"; D = f"{R}/Assets/Robots/drone"
+R = os.environ.get("RD", "/root/RoboDojo"); D = f"{R}/Assets/Robots/drone"
 os.makedirs(D, exist_ok=True)
 
-# ---- URDF: base_link (fixed) -> x -> y -> z -> yaw -> pitch -> roll -> body_link (+ a dummy grip joint so the framework has one)
+# ---- URDF: base_link (fixed) -> x -> y -> z -> yaw -> pitch -> roll -> body_link (+ the placeholder joint inside the body, see above)
 JOINTS = ["gx_joint", "gy_joint", "gz_joint", "yaw_joint", "pitch_joint", "roll_joint"]
 def link(name, size="0.02 0.02 0.02", mass=0.05):
     return f"""  <link name="{name}">
@@ -51,9 +55,11 @@ open(f"{D}/drone.urdf", "w").write(urdf)
 side = dict(ee_joints="roll_joint", ee_link="body_link", arm_joints_name=JOINTS, gripper_joints_name=["grip_joint"],
             gripper_move=dict(base="grip_joint", sign=1.0, mimic=[]), gripper_bias=0.0, gripper_scale=[0.0, 0.01], curobo="curobo_left.yml",
             camera=[dict(link="body_link", name="cam_wrist", type="d435", mesh="pinhole", pos=[0.0, 0.0, -0.03], ori=[0, 0, 0])])
-cfg = dict(urdf_path="./drone.urdf", base_link="base_link", ee_type="gripper", dual_arm=False, delta_matrix=[[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+# ee_type "none" (10-01): no end effector is reported or commanded (the shim below teaches RoboDojo's managers this third kind);
+# the gripper_* fields only describe the placeholder joint RoboDojo indexes
+cfg = dict(urdf_path="./drone.urdf", base_link="base_link", ee_type="none", dual_arm=False, delta_matrix=[[1, 0, 0], [0, 1, 0], [0, 0, 1]],
            global_trans_matrix=[[1, 0, 0], [0, 1, 0], [0, 0, 1]], grasp_camera_reference_axis=[1, 0, 0], sides=dict(left=side))
-open(f"{D}/robot_config.yml", "w").write("# body-driver drone rig (2026-09-24): a body on a virtual 6-DoF gantry above the table; one camera on the body; no fingers.\n" + yaml.safe_dump(cfg, sort_keys=False))
+open(f"{D}/robot_config.yml", "w").write("# body-driver drone rig (2026-09-24): a body on a virtual 6-DoF gantry above the table; one camera on the body; no grip (ee_type none, 10-01).\n" + yaml.safe_dump(cfg, sort_keys=False))
 
 # ---- curobo (6-joint chain, prismatic + revolute)
 links = chain + ["body_link"]
@@ -161,7 +167,7 @@ def get_robot_config():
                 joint_names_expr=["gx_joint", "gy_joint", "gz_joint", "yaw_joint", "pitch_joint", "roll_joint"],
                 effort_limit_sim=500.0, velocity_limit_sim=5.0, stiffness=5000.0, damping=200.0, armature=0.01,
             ),
-            "grip": ImplicitActuatorCfg(
+            "grip": ImplicitActuatorCfg(   # the placeholder joint inside the body (ee_type none: never reported, never commanded)
                 joint_names_expr=["grip_joint"],
                 effort_limit_sim=1.0, velocity_limit_sim=1.0, stiffness=10.0, damping=0.5, armature=0.001,
             ),
@@ -238,6 +244,33 @@ if "gripper_list = [[val] for _ in range(len(joint_list))]" not in s2:
     assert s2.count(old_init) == 1, "init-state mimic line not found"
     s2 = s2.replace(old_init, new_init); open(p, "w").write(s2)
 print("init-state no-mimic:", "gripper_list = [[val] for _ in range(len(joint_list))]" in open(p).read())
+
+# ---- 不报末端(ee_type "none",10-01):RoboDojo 只认 "gripper" / "hand" 两种末端。动作那一边(eval_env 取动作、插值)和
+#      control_manager 本来就是"gripper / hand / 别的照旧不管",别的这一种不用补;要补的只有两处,同一个记号 [bd] no end effector:
+#      ① robot_manager.set_robot_init_state 只给前两种算末端的初值,第三种 gripper_list 没定义 ⇒ 给占位关节一个 0(没人看、没人发);
+#      ② obs_manager 把上一条命令里的 ee_joint_state 原样放进观测(state 和 action 两处)⇒ 第三种不放:驱动看到的身体没有抓握通道。
+#      动作里不带 ee_joint_state 时 control_manager 按上一条命令补齐(update_current_missing_ctrl_info),占位关节一直停在 0
+NO_EE = "# [bd] no end effector"
+p = f"{R}/env/robot_manager/robot_manager.py"; s2 = open(p).read()
+old_hand = ('                elif robot.ee_type == "hand":\n'
+            '                    gripper_list = self.get_end_effector_real_val(robot=robot)\n')
+new_hand = ('                elif robot.ee_type == "none":   ' + NO_EE + ' (drone rig): the placeholder joint holds 0\n'
+            '                    gripper_list = [[0.0] * len(robot.gripper_joints_name) for _ in range(len(joint_list))]\n' + old_hand)
+if NO_EE not in s2:
+    assert s2.count(old_hand) == 1, ("init-state hand branch not found once", s2.count(old_hand))
+    s2 = s2.replace(old_hand, new_hand); open(p, "w").write(s2)
+print("init-state no-ee:", NO_EE in open(p).read())
+p = f"{R}/env/observation_manager/obs_manager.py"; s2 = open(p).read()
+old_obs = ("                                robot = self.robot_manager.get_robot_by_gripper_name(end_effector_name)\n"
+           '                                if robot.ee_type == "gripper":\n')
+new_obs = ("                                robot = self.robot_manager.get_robot_by_gripper_name(end_effector_name)\n"
+           '                                if robot.ee_type == "none":   ' + NO_EE + " (drone rig): not reported\n"
+           "                                    continue\n"
+           '                                if robot.ee_type == "gripper":\n')
+if NO_EE not in s2:
+    assert s2.count(old_obs) == 1, ("obs ee branch not found once", s2.count(old_obs))
+    s2 = s2.replace(old_obs, new_obs); open(p, "w").write(s2)
+print("obs no-ee:", NO_EE in open(p).read())
 
 # ---- layout for config drone, seed 1 (a static pickup table: the drone only calibrates over it)
 os.makedirs(f"{R}/Assets/Eval_Layout/RoboDojo/drone/1", exist_ok=True)
