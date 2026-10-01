@@ -1038,7 +1038,9 @@ package body Act is
    --  "上"只写在这一处:位姿系的 +z 是协议约定的重力反方向(观测里没有重力读数的身体只能这么约;有加速度计的身体应把它换成量出来的)。
    --  碰过面之后"上"= 那张面的法向(量出来的)
    Protocol_Up : constant Geom.V3 := [0.0, 0.0, 1.0];
-   function Up_Dir (C : Context) return Geom.V3 is (if C.Touch_Valid then C.Touch_N else Protocol_Up);
+   --  "上"(路 1,10-01 改:原来没碰过面就给协议的 +z,板已经拟合出面也不用 —— 接触集"它躺的面"用的是板法向,同一个"上"两种量法,路 5 查出):
+   --  碰过面 ⇒ 碰到的那张面的法向(以碰到的为准);没碰过、板拟合出了面 ⇒ 板的法向;都没有 ⇒ 世界的 z 轴(开机对齐时就定成桌面法向)
+   function Up_Dir (C : Context) return Geom.V3 is (if C.Touch_Valid then C.Touch_N elsif C.Board_Plane then C.Board_N else Protocol_Up);
 
    --  ── 东西的量(登记表,大并行 §2 第 16 条)──:脑的句子:do <东西> <量> up|down until <结局>(两件东西那一句的关系词也按量算,见 Contact.Qty)。
    --  量的名字由身体列(键盘上"量 [...]"那一栏);每个量 = 一种量法(Contact.Qty.Kind),它往哪变 = 让它变得最快的那个刚体运动(一个旋量,从量到的几何算)
