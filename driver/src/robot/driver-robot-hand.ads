@@ -35,6 +35,18 @@ package Driver.Robot.Hand is
    function Tip_Now (H : Hands; M : Model; Id : Hand_Id; Lobe : Positive; O : Observation) return Point_Estimate;
    --  A lobe's tip at the closer reading of O.
 
+   function Tip_In_Tool (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening) return Point_Estimate;
+   --  A lobe's tip in the tool frame of the hand's arm (Driver.Robot.Tool_Pose):
+   --  what the hand measured, before any arm pose is applied.
+
+   function Press_Direction (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening)
+     return Direction_Estimate;
+   --  The direction the tip was pressed along when it was measured, in the
+   --  tool frame: the tip is the point of the lobe that leads along it.
+
+   function Closer_Reading (H : Hands; Id : Hand_Id; At_Opening : Opening) return Real_Array;
+   --  The closer group's readings at that opening, the ones Tip refers to.
+
    function Grip_Centre (H : Hands; M : Model; Id : Hand_Id; O : Observation) return Point_Estimate;
    --  The middle of the region the lobes close on, at the opening of O.
 

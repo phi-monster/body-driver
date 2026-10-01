@@ -3,6 +3,7 @@ with Ada.Strings.Unbounded;
 with Ada.Unchecked_Deallocation;
 with GNAT.SHA1;
 with Interfaces;
+with Driver.Base64;
 
 package body Driver.Wire is
 
@@ -69,29 +70,6 @@ package body Driver.Wire is
          Ok := False;
    end Send_All;
 
-   function Base64 (Data : Byte_Array) return String is
-      Alphabet : constant String := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-      R : Ada.Strings.Unbounded.Unbounded_String;
-      I : Offset := Data'First;
-   begin
-      while I <= Data'Last loop
-         declare
-            B0 : constant Natural := Natural (Data (I));
-            B1 : constant Natural := (if I + 1 <= Data'Last then Natural (Data (I + 1)) else 0);
-            B2 : constant Natural := (if I + 2 <= Data'Last then Natural (Data (I + 2)) else 0);
-            Group : constant Natural := B0 * 2 ** 16 + B1 * 2 ** 8 + B2;
-         begin
-            Ada.Strings.Unbounded.Append (R, Alphabet (Group / 2 ** 18 + 1));
-            Ada.Strings.Unbounded.Append (R, Alphabet ((Group / 2 ** 12) mod 2 ** 6 + 1));
-            Ada.Strings.Unbounded.Append
-              (R, (if I + 1 <= Data'Last then Alphabet ((Group / 2 ** 6) mod 2 ** 6 + 1) else '='));
-            Ada.Strings.Unbounded.Append (R, (if I + 2 <= Data'Last then Alphabet (Group mod 2 ** 6 + 1) else '='));
-         end;
-         I := I + 3;
-      end loop;
-      return Ada.Strings.Unbounded.To_String (R);
-   end Base64;
-
    function Digest_Bytes (Hex : String) return Byte_Array is
       R : Byte_Array (1 .. Offset (Hex'Length / 2));
    begin
@@ -102,7 +80,7 @@ package body Driver.Wire is
    end Digest_Bytes;
 
    function Accept_Key (Key : String) return String is
-     (Base64 (Digest_Bytes (GNAT.SHA1.Digest (Key & Accept_Suffix))));
+     (Driver.Base64.Encode (Digest_Bytes (GNAT.SHA1.Digest (Key & Accept_Suffix))));
 
    procedure Read_Head (C : Connection; Head : out Ada.Strings.Unbounded.Unbounded_String; Ok : out Boolean) is
       use Ada.Strings.Unbounded;
@@ -217,7 +195,7 @@ package body Driver.Wire is
       Connect_Socket (C.Peer, (Family => Family_Inet, Addr => Addresses (Get_Host_By_Name (Host), 1),
                                Port => Port_Type (Port)));
       declare
-         Key  : constant String := Base64 (Nonce);
+         Key  : constant String := Driver.Base64.Encode (Nonce);
          Port_Text : constant String := Ada.Strings.Fixed.Trim (Natural'Image (Port), Ada.Strings.Both);
       begin
          Send_All (C, To_Bytes ("GET / HTTP/1.1" & Line_End
