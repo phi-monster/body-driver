@@ -3,7 +3,7 @@ with Driver.Conventions;
 with Driver.Numerics.Dense;
 with Driver.Stats;
 
-package body Driver.Robot.Hand.Geometry is
+package body Driver.Geometry is
 
    use Ada.Numerics.Long_Elementary_Functions;
    use Driver.Numerics.Arrays;
@@ -396,4 +396,4 @@ package body Driver.Robot.Hand.Geometry is
       end if;
    end Orient;
 
-end Driver.Robot.Hand.Geometry;
+end Driver.Geometry;

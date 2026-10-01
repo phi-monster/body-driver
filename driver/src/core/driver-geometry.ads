@@ -1,13 +1,20 @@
---  Measurement geometry the hand needs and the world reuses: where lines of
---  sight meet, and planes measured from points, each with its uncertainty.
+--  Measurement geometry: where lines of sight meet, and planes measured
+--  from points, each with its uncertainty.
 --
---  It lives in layer 2 because measuring a fingertip already needs it (the
---  tip is where a line of sight meets the surface it pressed on) and layer 2
---  cannot use layer 3. Nothing here knows about hands, bodies or scenes; the
+--  Every layer that measures something in space uses these: the body to fit
+--  its cameras and kinematics, the hand to find a fingertip (where a line of
+--  sight meets the surface it pressed on), the world to place things and the
+--  surfaces they rest on. Nothing here knows about bodies or scenes; the
 --  inputs are points and rays with their covariances, and every output
 --  carries the covariance that follows from them to first order.
 
-package Driver.Robot.Hand.Geometry is
+with Driver.Numerics;
+with Driver.Uncertain;
+
+package Driver.Geometry is
+
+   use Driver.Numerics;
+   use Driver.Uncertain;
 
    type Ray_Array is array (Positive range <>) of Ray_Estimate;
 
@@ -81,4 +88,4 @@ package Driver.Robot.Hand.Geometry is
    --  Turns the normal, if needed, to point to the side of Towards (the eye
    --  that saw the points, or the hand that touched them).
 
-end Driver.Robot.Hand.Geometry;
+end Driver.Geometry;

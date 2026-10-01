@@ -2,7 +2,7 @@ with Ada.Numerics.Float_Random;
 with Ada.Numerics.Long_Elementary_Functions;
 with Driver.Tests;
 
-package body Driver.Robot.Hand.Geometry.Tests is
+package body Driver.Geometry.Tests is
 
    use Ada.Numerics.Long_Elementary_Functions;
    use Driver.Numerics.Arrays;
@@ -257,21 +257,21 @@ package body Driver.Robot.Hand.Geometry.Tests is
 
    procedure Register is
    begin
-      Driver.Tests.Register ("hand.geometry.meet", "rays through one point are said to meet elsewhere",
+      Driver.Tests.Register ("geometry.meet", "rays through one point are said to meet elsewhere",
                              Meet_Exact'Access);
-      Driver.Tests.Register ("hand.geometry.meet_weights", "a ray counts the same whatever its own uncertainty",
+      Driver.Tests.Register ("geometry.meet_weights", "a ray counts the same whatever its own uncertainty",
                              Meet_Weights'Access);
-      Driver.Tests.Register ("hand.geometry.meet_covariance",
+      Driver.Tests.Register ("geometry.meet_covariance",
                              "the reported uncertainty of a meeting point is not what its rays' noise gives",
                              Meet_Covariance'Access);
-      Driver.Tests.Register ("hand.geometry.meet_behind", "a point behind a ray, or one ray alone, counts as a meeting",
+      Driver.Tests.Register ("geometry.meet_behind", "a point behind a ray, or one ray alone, counts as a meeting",
                              Meet_Behind'Access);
-      Driver.Tests.Register ("hand.geometry.plane", "a plane's reported offset and tilt sigmas are not its real error",
+      Driver.Tests.Register ("geometry.plane", "a plane's reported offset and tilt sigmas are not its real error",
                              Plane_Fit'Access);
-      Driver.Tests.Register ("hand.geometry.plane_robust", "things standing on a surface pull its plane up",
+      Driver.Tests.Register ("geometry.plane_robust", "things standing on a surface pull its plane up",
                              Plane_Robust'Access);
-      Driver.Tests.Register ("hand.geometry.ray_plane", "a ray meets a plane at the wrong distance or uncertainty",
+      Driver.Tests.Register ("geometry.ray_plane", "a ray meets a plane at the wrong distance or uncertainty",
                              Ray_Plane'Access);
    end Register;
 
-end Driver.Robot.Hand.Geometry.Tests;
+end Driver.Geometry.Tests;
