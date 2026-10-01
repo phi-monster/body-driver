@@ -784,8 +784,8 @@ begin
       begin
          Gx.Valid := True; Gx.F := 400.0; Gx.Cx := 320.0; Gx.Cy := 240.0; Gx.Gap := 0.09;
          Gx.Tip := [0.0, 0.0, -0.09]; Gx.Tip_Valid := True; Gx.Tip_Touch := True; Gx.Tip_Sd := 0.0005;
-         Gx.Lobes.Append (Geom.Lobe_Geo'(Tip => [-0.045, 0.0, -0.09], Wide => 0.015, Thin => 0.01));
-         Gx.Lobes.Append (Geom.Lobe_Geo'(Tip => [0.045, 0.0, -0.09], Wide => 0.015, Thin => 0.01));
+         Gx.Lobes.Append (Geom.Lobe_Geo'(Tip => [-0.045, 0.0, -0.09], Wide => 0.015, Thin => 0.01, others => <>));
+         Gx.Lobes.Append (Geom.Lobe_Geo'(Tip => [0.045, 0.0, -0.09], Wide => 0.015, Thin => 0.01, others => <>));
          Cx.Geo.Append (Geom.No_Geo); Cx.Geo.Append (Gx);
          Cx.Map.Amp := Bytes.F64_Vectors.To_Vector (0.0, 6);
          Cx.Map.Amp.Replace_Element (0, 0.001); Cx.Map.Amp.Replace_Element (3, 0.0025);
