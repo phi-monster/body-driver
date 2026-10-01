@@ -1100,4 +1100,84 @@ package body Selfmap is
       end loop;
    end Step;
 
+   --  ── 走近一件东西每一步多大 ──
+   function Floor_Step (Noise, Notch, Eye_Rms : Long_Float) return Long_Float is
+     (Long_Float'Max (Notch, Stats.Z * Long_Float'Max (Noise, Notch * Eye_Rms)));
+
+   function Careful_Step (Tip_Sd, Miss, Noise, Notch, Eye_Rms : Long_Float) return Long_Float is
+      Hand : constant Long_Float := Stats.Z * Sqrt (Tip_Sd ** 2 + Miss ** 2 + Noise ** 2);
+   begin
+      return Long_Float'Max (Hand / Long_Float (Free_Base), Floor_Step (Noise, Notch, Eye_Rms));
+   end Careful_Step;
+
+   function Plan_Approach (Dist, R_Obj, Sd_Target, Tip_Sd, Miss, Noise, Notch, Eye_Rms : Long_Float) return Approach_Plan is
+      P : Approach_Plan;
+      Sd_Hand : constant Long_Float := Sqrt (Tip_Sd ** 2 + Miss ** 2 + Noise ** 2);
+   begin
+      P.Lstep := Careful_Step (Tip_Sd, Miss, Noise, Notch, Eye_Rms);
+      if Sd_Target = Long_Float'Last or else R_Obj = Long_Float'Last then
+         --  它在哪 / 它多大量不出:没有"碰不到它"的那一段,全程小步(照实);到没到只按我自己看得出的那一步判
+         P.Res := Floor_Step (Noise, Notch, Eye_Rms); P.Band := Long_Float'Last; P.Clear := Long_Float'First;
+         return P;
+      end if;
+      P.Res := Long_Float'Max (Stats.Z * Sqrt (Sd_Target ** 2 + Sd_Hand ** 2), Floor_Step (Noise, Notch, Eye_Rms));
+      P.Band := R_Obj + P.Res;
+      P.Clear := Dist - P.Band - Long_Float (Free_Base) * P.Lstep;
+      return P;
+   end Plan_Approach;
+
+   function Gear_Bound (Gear : String; Small, Large : Long_Float) return Long_Float is
+     (if Gear = "small" then Small
+      elsif Gear = "large" then Long_Float'Max (Small, Large)
+      elsif Gear = "medium" then Sqrt (Small * Long_Float'Max (Small, Large))
+      else Long_Float'Last);
+
+   procedure Walk_To (L : in out Plug.Link; M : Body_Map; G : Leg; Lim : Limits; Res, Res_Rot : Long_Float; Max_Steps : Natural;
+                      F : in out Plug.Frame; W : in out Walk; Went, Turned : out Long_Float; Steps : out Natural; Why : out Walk_End) is
+      Prev_T, Prev_R : Long_Float := Long_Float'Last;
+      Legs : Leg_Vectors.Vector;
+   begin
+      Went := 0.0; Turned := 0.0; Steps := 0; Why := Lost_Link;
+      Legs.Append (G);
+      loop
+         if G.Arm >= Natural (F.EE.Length) then
+            Why := Lost_Link;
+            return;
+         end if;
+         declare
+            D : constant Table.Vec := Chan.Delivered (F.EE (G.Arm), G.Goal);
+            Left_T : constant Long_Float := Table.Norm (D, Chan.Pos_Channels);
+            Left_R : constant Long_Float := Rot_Len (D);
+            Rep : Leg_Step_Vectors.Vector;
+            Fr : Natural;
+            Ok : Boolean;
+         begin
+            if Left_T <= Res and then Left_R <= Res_Rot then
+               Why := Arrived;
+               return;
+            end if;
+            if not Gained (Prev_T, Left_T, Res) and then not Gained (Prev_R, Left_R, Res_Rot) then
+               Why := No_Gain;
+               return;
+            end if;
+            if Max_Steps > 0 and then Steps >= Max_Steps then
+               Why := Max_Steps_Done;
+               return;
+            end if;
+            Prev_T := Left_T; Prev_R := Left_R;
+            Step (L, M, Legs, Lim, F, W, Rep, Fr, Ok);
+            if not Ok or else Rep.Is_Empty then
+               Why := Lost_Link;
+               return;
+            end if;
+            Steps := Steps + 1;
+            Went := Went + Rep (0).Went; Turned := Turned + Rep (0).Turned;
+            if Rep (0).Blocked_T or else Rep (0).Blocked_R then
+               Why := Was_Blocked;
+               return;
+            end if;
+         end;
+      end loop;
+   end Walk_To;
+
 end Selfmap;

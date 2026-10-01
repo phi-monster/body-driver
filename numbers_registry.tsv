@@ -105,24 +105,20 @@ act-geo_approach.adb	& Codec.Fmt (Wall (0), 2) & "" & Codec.Fmt (Wall (1), 2) & 
 act-geo_approach.adb	& Codec.Fmt (Wall (0), 2) & "" & Codec.Fmt (Wall (1), 2) & "" & Codec.Fmt (Wall (2), 2) & "");	2	格式	Geo_Approach 被顶住时的说明文字 / 日志:Codec.Fmt 印 2 位小数(显示精度,不改任何量)(act-geo_approach.adb:355)
 act-geo_approach.adb	B.Pu_On := Pu + Grow * (B.Pu_On - 0.5 * Long_Float (B.X0 + B.X1));	0.5	数学	框中心 = 两边中点(act-geo_approach.adb:408)
 act-geo_approach.adb	B.Pv_On := Pv + Grow * (B.Pv_On - 0.5 * Long_Float (B.Y0 + B.Y1));	0.5	数学	框中心 = 两边中点(act-geo_approach.adb:409)
+act-geo_approach.adb	C.Geo_R_Obj := 0.5 * Long_Float (Integer'Max (B.X1 - B.X0, B.Y1 - B.Y0)) * (-Pc (2)) / G.F;	0.5	数学	半径 = 框的长边折成世界长度的一半(纯数学的一半):它朝我这边多大,进 Plan_Approach 的带子(act-geo_approach.adb:290)
 act-geo_approach.adb	D := [Pc (0) - Want (0) - Down_C (0), Pc (1) - Want (1) - Down_C (1), Pc (2) - Want (2) - Down_C (2)];	1	结构	三维差向量的分量下标(act-geo_approach.adb:225)
 act-geo_approach.adb	D := [Pc (0) - Want (0) - Down_C (0), Pc (1) - Want (1) - Down_C (1), Pc (2) - Want (2) - Down_C (2)];	2	结构	三维差向量的分量下标(act-geo_approach.adb:225)
-act-geo_approach.adb	Frac => (if Dist > G.Gap then 0.6 else 1.0),	0.6	调参数	离得比一个张口远时每步只走还差的六成(act-geo_approach.adb:319);10-01 路 4:这一行搬进 Geo_Move 的 Frac,由 Selfmap.Step 按它走还差的几成	逼近时每步走多少	中	这一步 = 还差的 − 3·它位置的不确定度(Tol_Hand = G.Rms × 距离 / G.F,随距离变小)− 上一步实测的命令误差 |命令−实到|;近到不确定度以内一步到。另:Gap=0 的手永远走六成
-act-geo_approach.adb	Frac => (if Dist > G.Gap then 0.6 else 1.0),	1.0	数学	近了一步走完剩下的全部 = 乘 1;这一行真正拍的是同一行的 0.6(远的时候走六成),不在本条(act-geo_approach.adb:325)
 act-geo_approach.adb	Geo_Say ("" & Codec.Fmt (Pu, 1) & "" & Codec.Fmt (Pv, 1) & "" & Codec.Fmt (Grow, 2) & "");	1	格式	Geo_Approach 的日志(窗该出现在哪):Codec.Fmt 印 1 位小数(显示精度,不改任何量)(act-geo_approach.adb:420)
 act-geo_approach.adb	Geo_Say ("" & Codec.Fmt (Pu, 1) & "" & Codec.Fmt (Pv, 1) & "" & Codec.Fmt (Grow, 2) & "");	1	格式	Geo_Approach 的日志(窗该出现在哪):Codec.Fmt 印 1 位小数(显示精度,不改任何量)(act-geo_approach.adb:420)
 act-geo_approach.adb	Geo_Say ("" & Codec.Fmt (Pu, 1) & "" & Codec.Fmt (Pv, 1) & "" & Codec.Fmt (Grow, 2) & "");	2	格式	Geo_Approach 的日志(窗该出现在哪):Codec.Fmt 印 2 位小数(显示精度,不改任何量)(act-geo_approach.adb:420)
 act-geo_approach.adb	Hh : constant Long_Float := 0.5 * (Long_Float (B.Y1 - B.Y0) * Grow);	0.5	数学	半宽 / 半高 = 宽高的一半(框随远近放大后按中心重新摆)(act-geo_approach.adb:403)
+act-geo_approach.adb	Hi : Long_Float := 1.0;	1.0	数学	眼跟得住那一道二分的上端 = 整步(沿这一步的比例 1)(act-geo_approach.adb:45)
 act-geo_approach.adb	Hw : constant Long_Float := 0.5 * (Long_Float (B.X1 - B.X0) * Grow);	0.5	数学	半宽 / 半高 = 宽高的一半(框随远近放大后按中心重新摆)(act-geo_approach.adb:402)
-act-geo_approach.adb	Inward : constant Long_Float := 0.15 * G.Gap;	0.15	调参数	指尖中点再往手心里缩 15% 张口('别咬在皮上')(act-geo_approach.adb:12)	Geo_Approach 的目标点往手心缩多少	中	按量的指肚:缩进 = 指尖那一截沿手指方向的半长(自眼里手指掩膜沿手指的像素长 × 尖的深度 ÷ G.F;身体文件已存掩膜,要新量这一项)+ G.Tip_Sd
-act-geo_approach.adb	Ln : constant Long_Float := 4.0 * Geo_Base (C, Arm);	4.0	调参数	估着到位后接着压,一压 = 4 倍最小一档(act-geo_approach.adb:258)	Geo_Approach 碰到为止的一压	高	一压(小步)= √(Stride_Of(C,A) × Geo_Base(C,A)):大步/小步/一档三级搜索每级扫的步数相同时总步数最少,全是量的;下限 = Selfmap.Blocked 判得出的最小一步 ≥ 3·max(C.Map.EE_Noise, 空走抖动)/(1−Negligible);朝东西压时上限 = 允许推它的量 C.Sil_Err + G.Tip_Sd;并改用 Selfmap.Blocked 判碰到(现在按'实到不足一半')
-act-geo_approach.adb	Tol : constant Long_Float := 0.1 * G.Gap;	0.1	调参数	到位容差 = 张口的一成(act-geo_approach.adb:11)	Geo_Approach 何时算到位 / 开始压	中	容差 = 这一刻它位置的量测不确定度(Tol_Hand = G.Rms × 距离 / G.F,与 Tol_Still 取大)⊕ G.Tip_Sd,下限 Geo_Base;不按手的大小。另:张口只在正好两瓣时才量(12613),别的手 Gap=0 ⇒ Tol=0 永远到不了
-act-geo_approach.adb	Want (2) := Want (2) + Inward;	2	调参数	把目标点沿相机 +z 挪 Inward 当成'往手心里'(注释:相机 −z 朝前 ⇒ 往手心 = +z)。这是相机装法的假设:手上那只眼顺着手指方向看。x5 成立;眼侧装、朝掌心装、装在手背斜着看的身体,+z 不是手心方向,目标会横着偏 0.15 × 张口。数字是下标,假设藏在'选第 2 个分量'里(act-geo_approach.adb:49)	走到它跟前时,要它落在两指之间多深的那一点(Geo_Approach 的目标)	中	'往手心'改用量过的方向:从两瓣指尖中点指向手腕原点 = 归一化(−R_ceᵀ·G.Off − G.Tip)(G.Off、G.R_Ce、G.Tip 都是开机量的),目标 = G.Tip + Inward × 这个方向;Inward = 0.15 × G.Gap(8455 行)本身也是拍的,应按指肚宽 G.Lobes(k).Wide / 尖截面定
-act-geo_approach.adb	Want (2) := Want (2) + Inward;	2	调参数	把目标点沿相机 +z 挪 Inward 当成'往手心里'(注释:相机 −z 朝前 ⇒ 往手心 = +z)。这是相机装法的假设:手上那只眼顺着手指方向看。x5 成立;眼侧装、朝掌心装、装在手背斜着看的身体,+z 不是手心方向,目标会横着偏 0.15 × 张口。数字是下标,假设藏在'选第 2 个分量'里(act-geo_approach.adb:49)	走到它跟前时,要它落在两指之间多深的那一点(Geo_Approach 的目标)	中	'往手心'改用量过的方向:从两瓣指尖中点指向手腕原点 = 归一化(−R_ceᵀ·G.Off − G.Tip)(G.Off、G.R_Ce、G.Tip 都是开机量的),目标 = G.Tip + Inward × 这个方向;Inward = 0.15 × G.Gap(8455 行)本身也是拍的,应按指肚宽 G.Lobes(k).Wide / 尖截面定
+act-geo_approach.adb	Mid : constant Long_Float := (Lo + Hi) / 2.0;	2.0	数学	二分取中点(出口是量的:区间细过这只手一步看得见的那一档)(act-geo_approach.adb:52)
 act-geo_approach.adb	else [Pn (0) + Want (0), Pn (1) + Want (1), Pn (2) + Want (2)]));	1	结构	三维点的分量下标(手的位置 + 视线方向)。⚠ 另有问题(不是这个数):拿'手的位置 + 1 个世界单位长的视线方向'当它该在的点去投窗,暗含'它离手 1 个世界单位'(x5 一个单位 ≈ 52 mm,报米的身体就是 1 m),起点还是手不是眼(差一个相机偏移 G.Off)(act-geo_approach.adb:91)
 act-geo_approach.adb	else [Pn (0) + Want (0), Pn (1) + Want (1), Pn (2) + Want (2)]));	2	结构	三维点的分量下标(手的位置 + 视线方向)。⚠ 另有问题(不是这个数):拿'手的位置 + 1 个世界单位长的视线方向'当它该在的点去投窗,暗含'它离手 1 个世界单位'(x5 一个单位 ≈ 52 mm,报米的身体就是 1 m),起点还是手不是眼(差一个相机偏移 G.Off)(act-geo_approach.adb:91)
-act-geo_approach.adb	if Dist <= 2.0 * Tol then	2.0	调参数	最后一步后看不见它了,上一眼在两倍容差内就算到(act-geo_approach.adb:457)	看丢时是否宣布到位	中	它的位置 Pw 已知、这一步走了多少位姿读数有 ⇒ 按读数算这一步之后还差多少,≤ Tol 才算到,否则按记住的位置接着走;删'两倍'
-act-geo_away.adb	N : constant Natural := (if Step_Limit > 0 then Step_Limit else 1);	1	调参数	Geo_Away:脑没写步数就只走一步(一步 = 量出来的最大一档 × 脑的档位)。1 本身不带尺度,可'没说就走一个单位、然后收工'是我定的缺省:这条路根本不看脑写的 until(Geo_Case 4 只传 Step_Limit),等于身体自己收工(act-geo_away.adb:6)	手里没东西时 farther / back 没写步数,离开它多远	低	没写步数 ⇒ 按脑写的 until 走到结局成立(Monitor.Fired),或按量到的来路长度 C.Geo_Came 退完(同 Geo_Retreat 的尺);不设'一步'
+act-geo_approach.adb	if Ln <= 0.0 or else Notch <= 0.0 or else not In_View (0.0) or else In_View (1.0) then	0.0	数学	眼跟得住:走这一步的 0 倍 = 此刻(此刻就不在画面里 ⇒ 眼帮不上,不限)(act-geo_approach.adb:47)
+act-geo_approach.adb	if Ln <= 0.0 or else Notch <= 0.0 or else not In_View (0.0) or else In_View (1.0) then	1.0	数学	眼跟得住:走这一步的 1 倍 = 整步走完(还在画面里 ⇒ 不限)(act-geo_approach.adb:47)
 act-geo_boot_stride.adb	& "" & Codec.Fmt (Notch_R, 4) & "");	4	格式	Geo_Boot_Stride 的日志:Codec.Fmt 印 4 位小数(显示精度,不改任何量)(act-geo_boot_stride.adb:20)
 act-geo_boot_stride.adb	Dirs : constant array (1 .. 2) of Long_Float := [1.0, -1.0];	1.0	数学	正负号:先往上(+1)探,走不到再往下(−1),和下面 Dir × Ln 相乘(act-geo_boot_stride.adb:38)
 act-geo_boot_stride.adb	Dirs : constant array (1 .. 2) of Long_Float := [1.0, -1.0];	1.0	数学	正负号(−1,往下),同 12833 第 68 列(act-geo_boot_stride.adb:38)
@@ -247,10 +243,10 @@ act-geo_turn.adb	Cr : constant Geom.V3 := [Fwd (1) * Want (2) - Fwd (2) * Want (
 act-geo_turn.adb	Cr : constant Geom.V3 := [Fwd (1) * Want (2) - Fwd (2) * Want (1), Fwd (2) * Want (0) - Fwd (0) * Want (2), Fwd (0) * Want (1) - Fwd (1) * Want (0)];	2	结构	叉积 Fwd × Want 的分量下标(0/1/2 = x/y/z);Want 在本文件里也是别处的名字,检查器因同名误判(act-geo_turn.adb:35)
 act-geo_turn.adb	Cs : constant Long_Float := Fwd (0) * Want (0) + Fwd (1) * Want (1) + Fwd (2) * Want (2);	1	结构	点积 Fwd · Want 的分量下标(act-geo_turn.adb:37)
 act-geo_turn.adb	Cs : constant Long_Float := Fwd (0) * Want (0) + Fwd (1) * Want (1) + Fwd (2) * Want (2);	2	结构	点积 Fwd · Want 的分量下标(act-geo_turn.adb:37)
+act-geo_turn.adb	Event := S ("" & Codec.Fmt (Ang, 3) & ""	3	格式	日志 / 给脑的话里印几位小数(act-geo_turn.adb:48)
 act-geo_turn.adb	Event := S ("" & Codec.Fmt (Ang, 3) & "");	3	格式	Geo_Turn 交给脑的 Event / 日志:Codec.Fmt 印 3 位小数(给脑的话的显示精度,不改任何量)(act-geo_turn.adb:41)
 act-geo_turn.adb	Event := S ("" & Codec.Fmt (Stp, 3) & "" & Codec.Fmt (Got, 3)	3	格式	Geo_Turn 交给脑的 Event / 日志:Codec.Fmt 印 3 位小数(给脑的话的显示精度,不改任何量)(act-geo_turn.adb:72)
 act-geo_turn.adb	Event := S ("" & Codec.Fmt (Stp, 3) & "" & Codec.Fmt (Got, 3)	3	格式	Geo_Turn 交给脑的 Event / 日志:Codec.Fmt 印 3 位小数(给脑的话的显示精度,不改任何量)(act-geo_turn.adb:72)
-act-geo_turn.adb	Event := S ("");	"40	调参数	给脑的话里写死'40 步',就是 act.adb:8109 for Step_No in 1 .. 40 这个转眼上限(第一轮已记调参数/中):上限一改这句话就是假的(act-geo_turn.adb:80)	告诉脑转了多少步还没对准(真正的上限在 8109 行)	低	改印实际走的步数 Codec.Img (Steps_Taken);上限本身按第一轮的换法:每步不到位就是'实到不足一半 ⇒ resist'退出,必然收敛;要上限就用 ⌈2·Ang₀ / G.Stride_Rot⌉ + 1(Stride_Rot 是开机量的)
 act-geo_turn.adb	Fwd : constant Geom.V3 := Geom.Ap (Rc, (if Al > 0.0 then [Along (0) / Al, Along (1) / Al, Along (2) / Al] else [0.0, 0.0, -1.0]));	1	结构	Along 向量的 y、z 分量(归一化);Touch_Tips 里另有一个叫 Along 的函数,检查器因同名误判(act-geo_turn.adb:34)
 act-geo_turn.adb	Fwd : constant Geom.V3 := Geom.Ap (Rc, (if Al > 0.0 then [Along (0) / Al, Along (1) / Al, Along (2) / Al] else [0.0, 0.0, -1.0]));	1.0	格式	Along 长度为 0 时退回眼自己的正前方 [0, 0, −1]:这是 Geom 的相机坐标约定(geom.ads:4'与 USD 一致:−z 朝前'),和 Geo_Turn 的缺省 Along 同一个向量;不描述身体。(另:Along 为零时静悄悄改成'让眼对准',不是调用方要的'让手指对准',见小结)(act-geo_turn.adb:34)
 act-geo_turn.adb	Fwd : constant Geom.V3 := Geom.Ap (Rc, (if Al > 0.0 then [Along (0) / Al, Along (1) / Al, Along (2) / Al] else [0.0, 0.0, -1.0]));	2	结构	Along 向量的 y、z 分量(归一化);Touch_Tips 里另有一个叫 Along 的函数,检查器因同名误判(act-geo_turn.adb:34)
@@ -261,7 +257,6 @@ act-geo_turn.adb	Hc : constant Integer := (if Arm < Natural (C.Map.Cam_On_Arm.Le
 act-geo_turn.adb	Notch : constant Long_Float := (if Arm * Chan.Per_Arm + 3 < Natural (C.Map.Amp.Length) then C.Map.Amp (Arm * Chan.Per_Arm + 3) else 0.0);	3	结构	Arm×Per_Arm+3 = 这条臂第一根转动通道(长度检查)(act-geo_turn.adb:6)
 act-geo_turn.adb	Notch : constant Long_Float := (if Arm * Chan.Per_Arm + 3 < Natural (C.Map.Amp.Length) then C.Map.Amp (Arm * Chan.Per_Arm + 3) else 0.0);	3	结构	同上(取值那一处)(act-geo_turn.adb:6)
 act-geo_turn.adb	elsif Aln > 1.0e-9 then [Alt (0) / Aln, Alt (1) / Aln, Alt (2) / Aln] else [0.0, 0.0, 1.0]);	1.0e-9	数值	单位向量叉积的模(= 夹角的正弦,无量纲)防除零;都近零时再换一根种子轴(act-geo_turn.adb:51)
-act-geo_turn.adb	for Step_No in 1 .. 40 loop	40	调参数	转眼最多 40 条命令,到了报'转了 40 步还没对准'(act-geo_turn.adb:25)	Geo_Turn 放弃前的命令数	中	删固定数:每步不是到位就是'实到不足一半 ⇒ resist'退出,必然收敛;要上限就用量的 ⌈2·Ang₀/G.Stride_Rot⌉ + ⌈log₂(G.Stride_Rot/Notch)⌉ + 1(Stride_Rot 小的身体 40 步转不到 π)
 act-head_tip_check.adb	& Codec.Fmt (E (Natural (E.Length) / 2), 2) & "" & Codec.Fmt (E (Natural (E.Length) - 1), 1) & "" & Codec.Img (Within) & "");	"2	调参数	日志里手写的'2 px 内',就是 act.adb:11528 的 V1_Line = 2.0(owner 的 V1 验收线,第一轮已记调参数/低):只数不拦,但常数一改日志就说假话;px 门本身随画幅变(act-head_tip_check.adb:20)	对账报告里'2 px 内几笔'	低	改印 Codec.Fmt (V1_Line, 0);按第一轮的换法,验收线属于测试协议,挪进 harness,驱动里按量的报(如 3 × Gw.Rms 内几笔)
 act-head_tip_check.adb	& Codec.Fmt (E (Natural (E.Length) / 2), 2) & "" & Codec.Fmt (E (Natural (E.Length) - 1), 1) & "" & Codec.Img (Within) & "");	1	格式	Head_Tip_Check 的日志:Codec.Fmt 印 1 位小数(显示精度,不改任何量)(act-head_tip_check.adb:20)
 act-head_tip_check.adb	& Codec.Fmt (E (Natural (E.Length) / 2), 2) & "" & Codec.Fmt (E (Natural (E.Length) - 1), 1) & "" & Codec.Img (Within) & "");	2	数学	E (Length / 2) = 误差中位的下标(中位数的定义)。规则因为这一行别处有 Fmt (…, 同一个数) 把它也判成'印几位小数',判错了(act-head_tip_check.adb:20)
@@ -836,7 +831,6 @@ act.adb	(if A = "" then 0.25 elsif A = "" then 1.0 else 0.5);	1.0	调参数	脑�
 act.adb	(if C.Cam < Natural (F.Cams.Length) then F.Cams (C.Cam).H else 1);	1	数值	同上(高)(act.adb:921)
 act.adb	(if C.Cam < Natural (F.Cams.Length) then F.Cams (C.Cam).W else 1);	1	数值	防除零缺省:相机号越界时画幅宽当 1,只在 5287 当除数(act.adb:919)
 act.adb	(if C.Wld.Holding and then C.Wld.Held_Arm = Integer (Arm) then C.Wld.Held_Slot else -1);	1	数值	哨兵:-1 = 这条臂没拿着东西(act.adb:778)
-act.adb	Above : Boolean := False; Amt : Long_Float := 0.5; Until_Touch : Boolean := False;	0.5	调参数	Geo_Approach 的 Amt 默认档位 0.5;Amt 只传给 Geo_Turn,而 Geo_Turn 不用它,调用方也都显式传 ⇒ 死参数(act.adb:1265)	无(死参数)	低	删 Amt 参数(Geo_Turn 里 pragma Unreferenced (Amt),传什么都不起作用)
 act.adb	Ada.Text_IO.Put_Line (Fo, "" & Codec.Img (Natural (C.Board.Length)) & "" & Codec.Img (C.Fixed_Best.All_N) & "" & Codec.Fmt (C.Fixed_Turn_Sd, 4));	4	格式	board.txt(Board_Save 存、Board_Load 读回的板文件):Codec.Fmt 存 4 位小数(文件格式,读回来就是这个精度;对这个量够用)(act.adb:1135)
 act.adb	Ada.Text_IO.Put_Line (Fo, Codec.Fmt (S.Pw (0), 6) & "" & Codec.Fmt (S.Pw (1), 6) & "" & Codec.Fmt (S.Pw (2), 6) & "" & Codec.Fmt (S.U, 3) & "" & Codec.Fmt (S.V, 3)	3	格式	board.txt(Board_Save 存、Board_Load 读回的板文件):Codec.Fmt 存 3 位小数(文件格式,读回来就是这个精度;对这个量够用)(act.adb:1138)
 act.adb	Ada.Text_IO.Put_Line (Fo, Codec.Fmt (S.Pw (0), 6) & "" & Codec.Fmt (S.Pw (1), 6) & "" & Codec.Fmt (S.Pw (2), 6) & "" & Codec.Fmt (S.U, 3) & "" & Codec.Fmt (S.V, 3)	3	格式	board.txt(Board_Save 存、Board_Load 读回的板文件):Codec.Fmt 存 3 位小数(文件格式,读回来就是这个精度;对这个量够用)(act.adb:1138)
@@ -853,7 +847,7 @@ act.adb	Bx : constant Integer := (if It.Kind in Thing | Thing_Remembered then Bo
 act.adb	Cap_Mult : constant Long_Float := 2.0;	2.0	调参数	一步命令上限 = 探针幅度×2×Reach;注释写 EH 试过 8 倍失败后改成 2,是试出来的(act.adb:33)	每步命令的天花板	高	删倍数:上限 = C.Map.Amp × Reach(K)(Reach 已靠'表说的 vs 实到'翻倍/减半学出来),再压在量过的一条命令可达 G.Stride / G.Stride_Rot 与跟踪捕获范围(见 Track_Win)之下
 act.adb	Col : constant Natural := Natural (Long_Float'Max (0.0, Long_Float'Min (Long_Float (C.Cols) - 1.0, Long_Float'Floor (U * Long_Float (C.Cols)))));	1.0	结构	列号夹到 [0, 列数 − 1]:最后一个下标 = 个数 − 1(act.adb:611)
 act.adb	Elong : Long_Float := 1.0;	1.0	数学	长轴/短轴之比的下界 = 1(圆);缺省当圆 ⇒ 朝向权重 1 − 1/Elong 自然为 0,不参与(act.adb:704)
-act.adb	Frac : Long_Float := 1.0; Track : Long_Float := Long_Float'Last) is	1.0	数学	Geo_Move 的缺省:走还差的一整份 = 乘 1(原来的 Geo_Move 就是整步发一条,行为不变)(act.adb:1005)
+act.adb	Frac : Long_Float := 1.0; Track : Long_Float := Long_Float'Last;	1.0	数学	Geo_Move 的缺省:走还差的一整份 = 乘 1(原来的 Geo_Move 就是整步发一条)(act.adb:996)
 act.adb	Gray : Long_Float := -1.0;	1.0	数值	哨兵:< 0 = 点名那一刻没量到灰度(调用处按 ≥ 0 判)(act.adb:705)
 act.adb	H2 : constant Long_Float := (if Zone.Lobe_Of (Z, 1).Valid then Long_Float (Zone.Lobe_Of (Z, 1).Y1 - Zone.Lobe_Of (Z, 1).Y0 + 1) / Long_Float (Ch) else H1);	1	结构	第二瓣的下标 Zone.Lobe_Of (Z, 1):握区今天还按两瓣存、这一处按两瓣读(第 0 步把 Z.B 换成走唯一的取瓣口子;按瓣数走归大并行路 2 / 用它的那一路)(act.adb:125)
 act.adb	H2 : constant Long_Float := (if Zone.Lobe_Of (Z, 1).Valid then Long_Float (Zone.Lobe_Of (Z, 1).Y1 - Zone.Lobe_Of (Z, 1).Y0 + 1) / Long_Float (Ch) else H1);	1	结构	第二瓣的下标 Zone.Lobe_Of (Z, 1):握区今天还按两瓣存、这一处按两瓣读(第 0 步把 Z.B 换成走唯一的取瓣口子;按瓣数走归大并行路 2 / 用它的那一路)(act.adb:125)
@@ -869,13 +863,15 @@ act.adb	K : constant Natural := ((H - 1 - X2) * W + Y2) * 3;	3	格式	RGB 每像
 act.adb	L : Positive := 1;	1	结构	金字塔层数从原图这一层数起(1 层 = 不缩)(act.adb:206)
 act.adb	Last_Bright_Cam : Integer := -1;	1	数值	哨兵:-1 = 还没缓存哪台相机的明暗切块(act.adb:403)
 act.adb	Last_Split : Long_Float := -1.0;	1.0	数值	哨兵:-1 = 这只眼还没算过明暗分界(有效值 0..255)。注:Last_Split 只写不读,是死变量(act.adb:406)
-act.adb	Legs : constant := 2;	2	调参数	退回分两截(截数)(act.adb:1282)	Geo_Retreat 分几条命令退	低	截数 = ⌈Dist / Stride_Of(C, Arm)⌉(每截在一条命令量过的步幅内);注释说'走一截量一眼',代码两截之间并不看
 act.adb	N : Natural := Natural (Long_Float'Min (1.0e6, Long_Float'Max (0.0, abs Px_Move)));	1.0e6	数值	转 Natural 前夹住,防溢出(act.adb:205)
 act.adb	N : constant Integer := (if Cam < Natural (C.Wld.Cams.Length) then C.Wld.Cams (Cam).Named else -1);	1	数值	哨兵:-1 = 这台相机里没有'脑上次点名那一块'(act.adb:350)
 act.adb	N := N / 2;	2	数学	金字塔每加一层分辨率减半(金字塔的定义,Retrack 光流用同一个定义)(act.adb:210)
 act.adb	Protocol_Up : constant Geom.V3 := [0.0, 0.0, 1.0];	1.0	调参数	'上' = 位姿读数系的 +z(Protocol_Up = [0,0,1])。接口文档 site/zh/connect.html 没写这条,只有 README.md:98 自己列成'明说的假设:真机该由重力读数定'。它不只是碰面前的缺省:标定板拟合出来的面法向也按它定朝哪一侧(6828 Fit_Board_Plane → Contact.Surface.Support_Plane'法向翻到 Up 那一侧'),Geo_Boot_Support 没有板时按它往下压(11881)。z 朝下的坐标系(无人机常用的北东地)会把'上'整个翻反:碰指尖往上压、抬变成往桌里压(act.adb:1019)	抬 / 压的方向,东西躺的面的法向朝哪边,height 这个量往哪变	中	面的法向按'看见这张面的眼在它哪一侧'定:翻到指向那几台相机中心的一侧(相机总在支撑面空的那一侧,量的);身体给了重力 / 加速度读数就用它;两样都没有时不猜,碰面之前不做要用'上'的动作并如实说
 act.adb	Pu_On, Pv_On : Long_Float := -1.0) is separate;	1.0	数值	哨兵:-1 = 没给"它身上的一点"(调用处按 ≥ 0 判)(act.adb:483)
 act.adb	R.Append (Img (K)); R.Append (Img (K + 1)); R.Append (Img (K + 2));	2	结构	RGB 一个像素三个字节里的第三个(蓝);K 是这个像素的首字节(act.adb:1099)
+act.adb	Res : constant Long_Float := Selfmap.Plan_Approach (C.Geo_Came, 0.0, 0.0, G.Tip_Sd, 0.0, C.Map.EE_Noise, Geo_Base (C, Arm), G.Rms).Res;	0.0	数学	沿来的路退:身后没有它 ⇒ 它朝我这边的半径 0(Plan_Approach 的 R_Obj)(act.adb:1315)
+act.adb	Res : constant Long_Float := Selfmap.Plan_Approach (C.Geo_Came, 0.0, 0.0, G.Tip_Sd, 0.0, C.Map.EE_Noise, Geo_Base (C, Arm), G.Rms).Res;	0.0	数学	沿来的路退:目标是我自己记下的那一处,不是量出来的东西 ⇒ 它的位置不准 0(Sd_Target)(act.adb:1315)
+act.adb	Res : constant Long_Float := Selfmap.Plan_Approach (C.Geo_Came, 0.0, 0.0, G.Tip_Sd, 0.0, C.Map.EE_Noise, Geo_Base (C, Arm), G.Rms).Res;	0.0	数学	分辨率按还没走的那一刻算:这一次到位差(Miss)还没有 = 0(act.adb:1315)
 act.adb	Row : constant Natural := Natural (Long_Float'Max (0.0, Long_Float'Min (Long_Float (C.Rows) - 1.0, Long_Float'Floor (V * Long_Float (C.Rows)))));	1.0	结构	行号夹到 [0, 行数 − 1]:最后一个下标 = 个数 − 1(act.adb:612)
 act.adb	Se.N_Learned := 1;	1	数学	计数:这张表第一次学到 = 学过 1 次(有旧表时是旧的 + 1)(act.adb:812)
 act.adb	Sigma_Mult : constant Long_Float := 3.0;	3.0	统计	Picture.Cut 的门 = 鼓起中位 + 3×稳健σ(MAD×1.4826),n-σ 离群门,单侧约 99.87%。注:注释说是在真深度图上试出来的(3 行、5 杀光);逐像素检验约 30 万次,真正压假块的是最小像素数(act.adb:31)

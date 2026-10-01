@@ -369,6 +369,10 @@ package Act is
       --  它最后一次被量到的世界位置(视线交点 / 我自己挪过的几眼)。手贴近时它在腕眼里糊了、被切了,脑指不出 ⇒ 凭这个走(前提是它没动,并如实说)
       Geo_Pw : Geom.V3 := [others => 0.0];
       Geo_Pw_Up_Sd : Long_Float := Long_Float'Last;   --  那个位置沿"上"有多不准(两眼交点的几何按各眼的误差算,Geom.Meet_Sd;量不出 = 最大)
+      --  (10-01 路 4 加)那个位置沿当时走的方向有多不准(同 Meet_Sd);它朝我这边的半径(手上那只眼里的框按远近折的;量不出 = 最大)。
+      --  看不全它的那几步凭这两样定"可能碰到它的那条带子"(Selfmap.Plan_Approach)
+      Geo_Pw_Sd : Long_Float := Long_Float'Last;
+      Geo_R_Obj : Long_Float := Long_Float'Last;
       Geo_Pw_Valid : Boolean := False;
       Geo_Pw_Name : Unbounded_String;
       --  我最后一次被一个面顶住的地方:面上的一点(指尖世界位置)和它的法向(指向我这边)。
