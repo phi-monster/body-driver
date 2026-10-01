@@ -11,8 +11,8 @@ private package Driver.Robot.Body_File is
 
    --  Method versions; each goes up when the code that measures it changes.
    Noise_Method  : constant := 1;
-   Lag_Method    : constant := 1;
-   Lockin_Method : constant := 1;
+   Lag_Method    : constant := 2;
+   Lockin_Method : constant := 2;
    Graph_Method  : constant := 1;
 
    function Text (M : Model) return String;

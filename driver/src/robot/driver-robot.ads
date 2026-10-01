@@ -171,7 +171,12 @@ package Driver.Robot is
 
    function Image_Lag (M : Model; E : Eye_Id) return Integer;
    --  How many beats the eye's images trail the readings they belong to:
-   --  the image of beat B shows the body as read at beat B - Image_Lag.
+   --  the image of beat B shows the body as read at beat B - Image_Lag; 0
+   --  until measured.
+
+   function Lag_Known (M : Model; E : Eye_Id) return Boolean;
+   --  The lag stood out of every shift tried: the eye's motion follows some
+   --  push at that delay.
 
    function Closer_Arm (M : Model; G : Group_Id) return Arm_Id'Base;
    --  For a Closer, the arm in whose eye it moves; 0 otherwise.
@@ -258,6 +263,7 @@ private
    package Arm_Group_Vectors is new Ada.Containers.Vectors (Arm_Id, Group_Id, Driver.Observations."=");
    package Mount_Vectors is new Ada.Containers.Vectors (Eye_Id, Mount);
    package Lag_Vectors is new Ada.Containers.Vectors (Eye_Id, Integer);
+   package Eye_Flag_Vectors is new Ada.Containers.Vectors (Eye_Id, Boolean);
 
    --  The groups and eyes as measured: what each group's push does to each
    --  eye, and what follows from that (Driver.Robot.Graph).
@@ -278,6 +284,7 @@ private
       Noise          : Real_Vectors.Vector;        --  per channel of every group, in group order
       Noise_Freedom  : Count_Vectors.Vector;       --  the degrees of freedom each noise rests on
       Lags           : Lag_Vectors.Vector;
+      Lag_Known      : Eye_Flag_Vectors.Vector;    --  per eye: its lag stood out of every shift tried
       Graph          : Body_Graph;
       Graph_Evidence : Natural := 0;               --  push beats behind the current graph
       Is_Booted      : Boolean := False;

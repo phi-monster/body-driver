@@ -183,6 +183,9 @@ package body Driver.Robot is
    function Image_Lag (M : Model; E : Eye_Id) return Integer is
      (if E <= M.Lags.Last_Index then M.Lags (E) else 0);
 
+   function Lag_Known (M : Model; E : Eye_Id) return Boolean is
+     (E <= M.Lag_Known.Last_Index and then M.Lag_Known (E));
+
    function Closer_Arm (M : Model; G : Group_Id) return Arm_Id'Base is
      (if Role (M, G) = Closer then M.Graph.Arm_Of (G) else 0);
 
@@ -221,7 +224,9 @@ package body Driver.Robot is
          declare
             Mt : constant Mount := Eye_Mount (M, E);
          begin
-            Append (T, "eye" & Eye_Id'Image (E) & ": image lag" & Integer'Image (Image_Lag (M, E)) & " beats, "
+            Append (T, "eye" & Eye_Id'Image (E) & ": "
+                    & (if Lag_Known (M, E) then "image lag" & Integer'Image (Image_Lag (M, E)) & " beats, "
+                        else "image lag unmeasured, ")
                     & Mount_Kind'Image (Mt.Kind)
                     & (if Mt.Kind = Arm_Carried then " on arm" & Arm_Id'Image (Mt.Arm) else "") & ASCII.LF);
          end;

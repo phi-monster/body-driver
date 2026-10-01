@@ -232,21 +232,26 @@ package body Driver.Robot.Channels is
    end Asked;
 
    --  The push is still closing in at Beat: the reading moved, and no
-   --  channel moved significantly away from its target.
+   --  channel moved significantly away from its target. Whether any channel
+   --  of the group did is one question asked of all of them, so each test is
+   --  one of a family of as many.
    function Closing_In (M : Model; G : Group_Id; Beat : Natural) return Boolean is
+      Size : constant Natural := M.Groups (G).Size;
    begin
-      if not Has_Reading (M, G, Beat) or else not Has_Reading (M, G, Beat - 1) or else not Has_Target (M, G, Beat)
-        or else not Moving (M, G, Beat)
+      if Size = 0 or else not Has_Reading (M, G, Beat) or else not Has_Reading (M, G, Beat - 1)
+        or else not Has_Target (M, G, Beat) or else not Moving (M, G, Beat)
       then
          return False;
       end if;
-      for C in 1 .. M.Groups (G).Size loop
+      for C in 1 .. Size loop
          declare
             Sigma : constant Real := Noise (M, G, C);
             Loss  : constant Real := abs (Target (M, G, Beat, C) - Reading (M, G, Beat, C))
                                      - abs (Target (M, G, Beat, C) - Reading (M, G, Beat - 1, C));
+            Gate  : constant Driver.Uncertain.Gate :=
+              Driver.Uncertain.Scalar_Gate (Noise_Freedom (M, G, C), Tests => Size);
          begin
-            if Loss > 0.0 and then Driver.Uncertain.Significant (Loss, Sigma * Sqrt (2.0), Noise_Freedom (M, G, C)) then
+            if Loss > 0.0 and then Driver.Uncertain.Significant (Gate, Loss, Sigma * Sqrt (2.0)) then
                return False;
             end if;
          end;

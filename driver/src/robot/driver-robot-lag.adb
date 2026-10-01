@@ -147,8 +147,10 @@ package body Driver.Robot.Lag is
       Last : constant Integer := M.Beats - 1;
    begin
       M.Lags.Clear;
+      M.Lag_Known.Clear;
       for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
          M.Lags.Append (0);
+         M.Lag_Known.Append (False);
       end loop;
       if Last < 1 then
          return;
@@ -181,6 +183,8 @@ package body Driver.Robot.Lag is
                N      : constant Natural := Cells (S.Grid);
                Motion : Series (M.Beats);
                Best   : Real := 0.0;
+               Lag    : Integer := 0;
+               Tests  : Natural := 0;
             begin
                if N > 0 then
                   for B in 1 .. Natural'Min (Last, Natural (S.Measured.Length) - 1) loop
@@ -204,14 +208,23 @@ package body Driver.Robot.Lag is
                            declare
                               Z : constant Real := Shifted_Z (Motion, Speeds (G), Shift);
                            begin
+                              Tests := Tests + 1;
                               if Z > Best then
                                  Best := Z;
-                                 M.Lags.Replace_Element (E, Shift);
+                                 Lag := Shift;
                               end if;
                            end;
                         end loop;
                      end if;
                   end loop;
+                  --  The best of many shifts is one of a family: the lag is
+                  --  measured only when it stands out of all of them.
+                  if Tests > 0
+                    and then Driver.Uncertain.Significant (Driver.Uncertain.Scalar_Gate (Tests => Tests), Best, 1.0)
+                  then
+                     M.Lags.Replace_Element (E, Lag);
+                     M.Lag_Known.Replace_Element (E, True);
+                  end if;
                end if;
             end;
          end loop;

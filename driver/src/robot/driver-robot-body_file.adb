@@ -55,7 +55,7 @@ package body Driver.Robot.Body_File is
             Mt : constant Mount := Eye_Mount (M, E);
          begin
             Append (T, (if E > M.Eyes.First_Index then "," & ASCII.LF & "  " else ASCII.LF & "  ")
-                    & "{""lag"": {""value"": " & Int (Image_Lag (M, E)) & ", ""method"": " & Int (Lag_Method) & "}"
+                    & "{""lag"": {""value"": " & Int (Image_Lag (M, E)) & ", ""known"": " & (if Lag_Known (M, E) then "true" else "false") & ", ""method"": " & Int (Lag_Method) & "}"
                     & ", ""mount"": {""kind"": " & Word (Mount_Kind'Image (Mt.Kind))
                     & ", ""arm"": " & Int (if Mt.Kind = Arm_Carried then Integer (Mt.Arm) else 0)
                     & ", ""method"": " & Int (Graph_Method) & "}"
