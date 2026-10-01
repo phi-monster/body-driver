@@ -1,3 +1,4 @@
+with Held;
 with Linkage;
 with Stats;
 separate (Selfcheck)
@@ -7,6 +8,7 @@ procedure Welds_Path_6 is
    use type Linkage.Role;
    use type Linkage.Axis_Status;
    use type Linkage.Follow_End;
+   use type Held.Ride;
    subtype V3 is Geom.V3;
    subtype M3 is Geom.M3;
    package FR renames Ada.Numerics.Float_Random;
@@ -996,5 +998,218 @@ begin
              "顺着没对准的滑轴走到头:" & Fw.How'Image & " · 抽屉最远到 " & Codec.Fmt (Max_S, 4) & "(头在 " & Codec.Fmt (Travel, 2) & ")· "
              & Codec.Img (Fw.Steps) & " 步(第 " & Codec.Img (End_Step) & " 步到头)· 沿 Want 挪了 " & Codec.Fmt (Fw.Along, 4) & " · 到头以后试了 "
              & Codec.Img (Natural (Fw.Tried.Length)) & " 个方向");
+   end;
+
+   --  🔴 拿着的东西跟着手走(Held.Take / Shape_Cov / In_World / Check_Slip,§2 第 20 条):手拿着一件东西(15 个点,在手的系里离手 0.06–0.20),
+   --  手转 0 / 10 / 20 / 30 / 40° 同时抬着走;桌上 8 个点不动;混进 4 个跟错了的点。手的位姿是按关节读数算的,不准 0.5°、0.003
+   --  (每一帧真的手都按这个不准偏一点);眼的噪声横着 0.001、沿视线 0.003。
+   --  要:① 15 个点跟着手走、8 个留在世界里、4 个哪种都不是,没有一个归错;它在手的系里的形状在自报的不准以内;
+   --     ② 手没动的那一场:一个都不说"拿着"(两种说法预测到同一处,照实说判不了);
+   --     ③ 再看一眼:没滑 ⇒ 不说滑了;整件东西在手里转了 8°、挪了 0.003(每个点单看都在门里:手此刻的不准每个点都摊着)⇒ 滑了。
+   --  错了会是什么病:手的不准不算进"长在手上"那一说 ⇒ 拿得好好的点被说成"自己在动";不看两种说法隔不隔得开 ⇒ 手没动时桌上的点也说成拿着;
+   --  一个个点比滑没滑 ⇒ 整件东西一起转了一点,一个点都不过门,说没滑;手此刻的不准不算 ⇒ 没滑也说滑了。
+   --  牙:① 手的不准当 0 ⇒ 跟着手走的少一大截;③ 一个个点比 ⇒ 转了 8° 一个都不过门;手此刻的不准当 0 ⇒ 没滑的那一眼说滑了;
+   --  ② 拿掉"隔不开就判不了"那一条 ⇒ 手没动时 23 个点说成拿着(离线跑过,见报告)
+   declare
+      Kf : constant := 5;
+      Vd : constant V3 := Unit ([0.2, 0.3, 0.93]);
+      Le, Ce : M3;
+      Rot_Sd : constant Long_Float := 0.5 * Deg;
+      Pos_Sd : constant Long_Float := 0.003;
+      Ch : Held.Cov6 := Held.Zero6;
+      Obj : constant Geom.V3_Vectors.Vector := Grid (0.06, 0.035, 5, -0.03, 0.03, 3, -0.04);
+      Tab : constant Geom.V3_Vectors.Vector := Grid (0.0, 0.1, 4, -0.1, 0.2, 2, 0.0);
+      No : constant Natural := Natural (Obj.Length);
+      Nt : constant Natural := Natural (Tab.Length);
+      Nj : constant := 4;
+      R0 : constant M3 := Rot ([0.3, 1.0, 0.2], 0.4);
+      T0 : constant V3 := [0.1, 0.0, 0.08];
+      function Noise return V3 is (Geom.Ap (Le, [Gauss, Gauss, Gauss]));
+      function Sum3 (A, B : M3) return M3 is
+         C : M3;
+      begin
+         for I in 0 .. 2 loop
+            for J in 0 .. 2 loop
+               C (I, J) := A (I, J) + B (I, J);
+            end loop;
+         end loop;
+         return C;
+      end Sum3;
+      --  手第 F 帧:驱动以为的(Est)、真的(Truth:按手的不准偏一点)
+      type Pair is record
+         Est, Truth : Held.Hand_Pose;
+      end record;
+      function Hand_At (F : Natural; Moving : Boolean) return Pair is
+         Ang : constant Long_Float := (if Moving then 10.0 * Deg * Long_Float (F) else 0.0);
+         Est : constant Held.Hand_Pose :=
+           (Ok => True, R => Geom.Mul (Rot ([0.5, -0.2, 1.0], Ang), R0),
+            T => Add (T0, (if Moving then Scl ([0.03, -0.02, 0.05], Long_Float (F)) else [0.0, 0.0, 0.0])), Cov => Ch);
+         Om : constant V3 := [Rot_Sd * Gauss, Rot_Sd * Gauss, Rot_Sd * Gauss];
+         Ta : constant V3 := [Pos_Sd * Gauss, Pos_Sd * Gauss, Pos_Sd * Gauss];
+      begin
+         return (Est => Est, Truth => (Ok => True, R => Geom.Mul (Geom.Rodrigues (Om), Est.R), T => Add (Est.T, Ta), Cov => Ch));
+      end Hand_At;
+      procedure Scene_Tracks (Moving : Boolean; Hands : out Held.Hand_Vectors.Vector; Tracks : out Linkage.Track_Vectors.Vector) is
+         Ps : array (0 .. Kf - 1) of Pair;
+      begin
+         Hands.Clear;
+         Tracks.Clear;
+         for F in 0 .. Kf - 1 loop
+            Ps (F) := Hand_At (F, Moving);
+            Hands.Append (Ps (F).Est);
+         end loop;
+         for P of Obj loop
+            declare
+               O : Linkage.Obs_Vectors.Vector;
+            begin
+               for F in 0 .. Kf - 1 loop
+                  O.Append (Linkage.Obs'(Seen => True, X => Add (Add (Geom.Ap (Ps (F).Truth.R, P), Ps (F).Truth.T), Noise), Cov => Ce));
+               end loop;
+               Tracks.Append (O);
+            end;
+         end loop;
+         for P of Tab loop
+            declare
+               O : Linkage.Obs_Vectors.Vector;
+            begin
+               for F in 0 .. Kf - 1 loop
+                  O.Append (Linkage.Obs'(Seen => True, X => Add (P, Noise), Cov => Ce));
+               end loop;
+               Tracks.Append (O);
+            end;
+         end loop;
+         for J in 1 .. Nj loop
+            declare
+               O : Linkage.Obs_Vectors.Vector;
+            begin
+               for F in 0 .. Kf - 1 loop
+                  O.Append (Linkage.Obs'(Seen => True, X => [Uni (-0.2, 0.4), Uni (-0.3, 0.3), Uni (0.0, 0.4)], Cov => Ce));
+               end loop;
+               Tracks.Append (O);
+            end;
+         end loop;
+      end Scene_Tracks;
+      function Obj_Rides (Rep : Held.Take_Report) return Natural is
+         C : Natural := 0;
+      begin
+         for I in 0 .. No - 1 loop
+            if Rep.Roles (I) = Held.Rides then
+               C := C + 1;
+            end if;
+         end loop;
+         return C;
+      end Obj_Rides;
+   begin
+      for I in 0 .. 2 loop
+         for J in 0 .. 2 loop
+            Le (I, J) := 0.001 * ((if I = J then 1.0 else 0.0) - Vd (I) * Vd (J)) + 0.003 * Vd (I) * Vd (J);
+         end loop;
+      end loop;
+      Ce := Geom.Mul (Le, Geom.Tr (Le));
+      for D in 0 .. 2 loop
+         Ch (D, D) := Rot_Sd ** 2;
+         Ch (D + 3, D + 3) := Pos_Sd ** 2;
+      end loop;
+      FR.Reset (Gen, 171);
+      declare
+         Hands : Held.Hand_Vectors.Vector;
+         Tracks : Linkage.Track_Vectors.Vector;
+         P, P0 : Held.Part;
+         Rep, Rep0 : Held.Take_Report;
+         Tab_World, Junk_Neither, Wrong, Shape_Out : Natural := 0;
+      begin
+         Scene_Tracks (True, Hands, Tracks);
+         Held.Take (Hands, Tracks, 0, 1.0, Long_Float'Last, P, Rep);
+         Put_Line ("    手在动:" & Held.Say (Rep));
+         for I in No .. Natural (Tracks.Length) - 1 loop
+            if I < No + Nt and then Rep.Roles (I) = Held.World then
+               Tab_World := Tab_World + 1;
+            elsif I >= No + Nt and then Rep.Roles (I) = Held.Neither then
+               Junk_Neither := Junk_Neither + 1;
+            end if;
+            if Rep.Roles (I) = Held.Rides then
+               Wrong := Wrong + 1;
+            end if;
+         end loop;
+         for K in 0 .. Natural (P.Tracks.Length) - 1 loop
+            if P.Tracks (K) < No and then Linkage.Mahal (Sub (P.Pts (K), Obj (P.Tracks (K))), Held.Shape_Cov (P, K)) > Linkage.Gate (3) then
+               Shape_Out := Shape_Out + 1;
+            end if;
+         end loop;
+         --  牙:手的位姿当成准的(不准 = 0)
+         declare
+            Hands0 : Held.Hand_Vectors.Vector := Hands;
+         begin
+            for H of Hands0 loop
+               H.Cov := Held.Zero6;
+            end loop;
+            Held.Take (Hands0, Tracks, 0, 1.0, Long_Float'Last, P0, Rep0);
+         end;
+         Check (Obj_Rides (Rep) + Chance_Bound (No) >= No and then Tab_World + Chance_Bound (Nt) >= Nt and then Junk_Neither = Nj and then Wrong = 0
+                and then Shape_Out <= Chance_Bound (No) and then Obj_Rides (Rep0) + Chance_Bound (No) < No,
+                "拿着的东西·认跟着手走的:" & Codec.Img (Obj_Rides (Rep)) & " / " & Codec.Img (No) & " 跟着手走 · 桌上 " & Codec.Img (Tab_World) & " / "
+                & Codec.Img (Nt) & " 留在世界里 · 坏点 " & Codec.Img (Junk_Neither) & " / " & Codec.Img (Nj) & " 哪种都不是 · 归错 " & Codec.Img (Wrong)
+                & " · 形状出了自报的不准 " & Codec.Img (Shape_Out) & " 个 · 牙:手的不准当 0 ⇒ 跟着手走的只剩 " & Codec.Img (Obj_Rides (Rep0)));
+         --  ③ 再看一眼(手又挪了一步):没滑 / 在手里绕自己转了 8°、挪了 0.003
+         declare
+            Pr : constant Pair := Hand_At (Kf, True);
+            Now_A, Now_B : Linkage.Obs_Vectors.Vector;
+            Slip_R : constant M3 := Rot ([0.6, -0.5, 0.4], 8.0 * Deg);
+            Slip_T : constant V3 := [0.003, -0.001, 0.0];
+            Cen : V3 := [0.0, 0.0, 0.0];
+            Sa, Sb, Sa0 : Held.Slip_Report;
+            Per_Point_Out : Natural := 0;
+         begin
+            for Q of Obj loop
+               Cen := Add (Cen, Scl (Q, 1.0 / Long_Float (No)));
+            end loop;
+            for K in 0 .. Natural (P.Tracks.Length) - 1 loop
+               declare
+                  S_True : constant V3 := Obj (P.Tracks (K));
+                  S_Slip : constant V3 := Add (Add (Geom.Ap (Slip_R, Sub (S_True, Cen)), Cen), Slip_T);
+               begin
+                  Now_A.Append (Linkage.Obs'(Seen => True, X => Add (Add (Geom.Ap (Pr.Truth.R, S_True), Pr.Truth.T), Noise), Cov => Ce));
+                  Now_B.Append (Linkage.Obs'(Seen => True, X => Add (Add (Geom.Ap (Pr.Truth.R, S_Slip), Pr.Truth.T), Noise), Cov => Ce));
+               end;
+            end loop;
+            Held.Check_Slip (P, Pr.Est, Now_A, Sa);
+            Held.Check_Slip (P, Pr.Est, Now_B, Sb);
+            Put_Line ("    没滑那一眼:" & Held.Say (Sa));
+            Put_Line ("    滑了那一眼:" & Held.Say (Sb));
+            declare
+               E0 : Held.Hand_Pose := Pr.Est;
+            begin
+               E0.Cov := Held.Zero6;
+               Held.Check_Slip (P, E0, Now_A, Sa0);
+            end;
+            declare
+               Wv : constant Held.World_View := Held.In_World (P, Pr.Est);
+            begin
+               for K in 0 .. Natural (Wv.Pts.Length) - 1 loop
+                  if Linkage.Mahal (Sub (Now_B (K).X, Wv.Pts (K)), Sum3 (Wv.Covs (K), Ce)) > Linkage.Gate (3) then
+                     Per_Point_Out := Per_Point_Out + 1;
+                  end if;
+               end loop;
+            end;
+            Check (not Sa.Slipped and then Sa.Dof = 6 and then Sb.Slipped and then Sa0.Slipped and then Per_Point_Out = 0,
+                   "拿着的东西·滑没滑:没滑的那一眼 " & Codec.Fmt (Sa.Chi, 1) & "(门 " & Codec.Fmt (Sa.Gate, 1) & ")不说滑 · 转了 8° 那一眼 "
+                   & Codec.Fmt (Sb.Chi, 1) & " 说滑了 · 牙:一个个点比,转了 8° 过门的 " & Codec.Img (Per_Point_Out) & " 个;手此刻的不准当 0 ⇒ 没滑的那一眼 "
+                   & Codec.Fmt (Sa0.Chi, 1) & (if Sa0.Slipped then " 说滑了" else " 没说滑"));
+         end;
+      end;
+      --  ② 手没动
+      declare
+         Hands : Held.Hand_Vectors.Vector;
+         Tracks : Linkage.Track_Vectors.Vector;
+         P : Held.Part;
+         Rep : Held.Take_Report;
+      begin
+         Scene_Tracks (False, Hands, Tracks);
+         Held.Take (Hands, Tracks, 0, 1.0, Long_Float'Last, P, Rep);
+         Put_Line ("    手没动:" & Held.Say (Rep));
+         Check (Rep.N_Rides = 0 and then Rep.N_Unknown = No + Nt + Nj,
+                "拿着的东西·手没动 ⇒ 判不了:跟着手走 " & Codec.Img (Rep.N_Rides) & " · 判不了 " & Codec.Img (Rep.N_Unknown) & " / "
+                & Codec.Img (No + Nt + Nj));
+      end;
    end;
 end Welds_Path_6;

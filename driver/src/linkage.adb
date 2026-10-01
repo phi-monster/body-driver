@@ -14,7 +14,6 @@ package body Linkage is
    Ka : constant := 2;         --  这 4 个里曲率向量的两个分量从第几个起(第 Ka、Ka + 1 个)
 
    subtype Vec is Kinem.Vec;
-   type Mat is array (Natural range <>, Natural range <>) of Long_Float;
    type Mat_Ptr is access Mat;
    procedure Free is new Ada.Unchecked_Deallocation (Mat, Mat_Ptr);
    type Vec_Ptr is access Vec;

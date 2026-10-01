@@ -105,6 +105,11 @@ package Linkage is
    function Z_Of (Chi : Long_Float; Nu : Positive; Dof : Long_Float) return Long_Float;
    --  马氏距离的平方 rᵀ C⁻¹ r。C 求不了逆(比如给的是 0:这个量量得毫无误差)⇒ r 不是 0 就当无穷远,是 0 就是 0
    function Mahal (R : V3; C : M3) return Long_Float;
+   --  3×3 求逆;求不了(行列式在数值分辨率以下)⇒ Ok = False
+   function Inv3 (A : M3; Ok : out Boolean) return M3;
+   --  对称阵的特征分解(循环 Jacobi):A(下标从 0 起、方阵)就地转成对角 = 特征值,V 的列 = 对应的特征向量(拿着的东西、对准那几个包也用)
+   type Mat is array (Natural range <>, Natural range <>) of Long_Float;
+   procedure Eig_Sym (A : in out Mat; V : out Mat);
 
    --  ── 顺着它让的方向走 ──
    --  走一步的结果(调用方按今天的 Geo_Move 写:命令手沿 Dir 挪 Len,量手实到多少、东西那一处挪了多少;路 4 交"走一步"以后换那一个)

@@ -21,6 +21,14 @@ TEST_HOOKS = {
     ("linkage.adb", "Perp"): "路 6:垂直于一个方向的一对轴(Fit 的轴参数化、Follow 试的方向用);它们接上就是活的",
     ("linkage.adb", "Gate_F"): "路 6:噪声是量的时候的门(Paulson 的 F 分位;Fit 里每一道门都按它开);Fit 接上就是活的",
     ("linkage.adb", "Z_Of"): "路 6:平方和换成一维正态的倍数(Fit 里判两块合不合、先合哪一对);Fit 接上就是活的",
+    # 路 6 拿着的东西(§2 第 20 条,I7 里路 6 那一份):抓住以后认跟着手走的点、它在手上的形状、每看一眼查滑没滑;
+    # 接口处在别路的文件里(接触集合拢以后调 Take、每看一眼调 Check_Slip、接触集搜索时问 In_World),接上以后这 6 条删
+    ("held.adb", "Take"): "路 6:抓住以后认哪些点跟着手走(和开机认长在眼上同一个判法)、它在手的系里的形状;接触集合拢以后调它就是活的",
+    ("held.adb", "In_World"): "路 6:拿着的东西此刻在世界里在哪、多不准(进'身体能碰东西的地方'那张单子);接触集搜索时问它就是活的",
+    ("held.adb", "Check_Slip"): "路 6:每看一眼查拿着的东西滑没滑(成团地比、算上手此刻的不准);看东西那一步调它就是活的",
+    ("held.adb", "Scl"): "路 6:3×3 乘一个数(Take / Check_Slip 用);它们接上就是活的",
+    ("held.adb", "Mapped"): "路 6:位姿的不准换一个系看(Take / In_World / Check_Slip 用);它们接上就是活的",
+    ("held.adb", "Add"): "路 6:两个 6×6 不准相加(Take / In_World / Check_Slip 用);它们接上就是活的",
 }
 import os, re, sys, glob, collections
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
