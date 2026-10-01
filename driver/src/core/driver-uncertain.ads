@@ -53,17 +53,30 @@ package Driver.Uncertain with Pure is
    --  The test above with its threshold worked out once, for code that tests
    --  many differences with the same degrees of freedom (every pixel of an
    --  image, say). It is the same rule, not another one.
+   --
+   --  A gate can also be one of a family: Tests differences tested together,
+   --  where any one passing makes the family pass (is there a lobe among
+   --  these candidates, did any of these pixels move). Each test then takes
+   --  its threshold at the tail probability Z has divided by Tests
+   --  (Bonferroni), so the family as a whole alarms by chance no more often
+   --  than a single test does, whatever the dependence between its tests;
+   --  with Tests = 1 each family member would alarm at the single rate and
+   --  a family of N null tests would expect N times as many alarms. Tests is
+   --  always a counted number, the candidates actually tested, never one
+   --  chosen.
 
-   function Scalar_Gate (Degrees_Of_Freedom : Natural := 0) return Gate;
-   --  Significant (G, D, S) = Significant (D, S, Degrees_Of_Freedom).
+   function Scalar_Gate (Degrees_Of_Freedom : Natural := 0; Tests : Positive := 1) return Gate;
+   --  Significant (G, D, S) = Significant (D, S, Degrees_Of_Freedom) when
+   --  Tests = 1.
 
-   function Vector_Gate (Dimensions : Positive; Degrees_Of_Freedom : Natural := 0) return Gate;
+   function Vector_Gate (Dimensions : Positive; Degrees_Of_Freedom : Natural := 0; Tests : Positive := 1)
+     return Gate;
    --  For the length of a difference of that many dimensions whose every
    --  component has the given sigma. Its length over sigma is not Gaussian:
    --  it is a chi (or, with an estimated sigma, the square root of Dimensions
    --  times an F), and the threshold is taken at the same tail probability Z
-   --  has for a Gaussian, so a two-dimensional displacement alarms as rarely
-   --  as a scalar.
+   --  has for a Gaussian (over Tests), so a two-dimensional displacement
+   --  alarms as rarely as a scalar.
 
    function Significant (G : Gate; Difference, Sigma : Real) return Boolean;
    --  abs Difference > threshold * Sigma, with the zero and unknown sigmas of
