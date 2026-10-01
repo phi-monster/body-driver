@@ -8,4 +8,6 @@ package body Driver.Clock is
 
    function Seconds return Duration is (To_Duration (Ada.Real_Time.Clock - Start));
 
+   function Nanoseconds_Of (S : Duration) return Long_Long_Integer is (Long_Long_Integer (Real (S) * 1.0e9));
+
 end Driver.Clock;

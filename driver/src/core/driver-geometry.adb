@@ -12,6 +12,9 @@ package body Driver.Geometry is
 
    subtype Mat2 is Real_Matrix (1 .. 2, 1 .. 2);
 
+   Plane_Unknowns : constant := 3;
+   --  A plane's offset and its two tilts.
+
    procedure Perpendicular_Basis (U : Vec3; E1, E2 : out Vec3);
    --  Two unit vectors completing U to an orthonormal frame.
 
@@ -143,6 +146,23 @@ package body Driver.Geometry is
 
    function Height (P : Plane_Estimate; X : Vec3) return Real is (P.Normal * (X - P.Centre));
 
+   function Plane_Degrees_Of_Freedom (P : Plane_Estimate) return Natural is
+     (if P.Points > Plane_Unknowns then P.Points - Plane_Unknowns else 0);
+
+   function Welch_Plane (P : Plane_Estimate; Plane_Variance, Known_Variance : Real) return Natural;
+   --  The degrees of freedom of a sum of the plane's variance, estimated from
+   --  its points' scatter, and a known one (Welch and Satterthwaite, rounded down).
+
+   function Welch_Plane (P : Plane_Estimate; Plane_Variance, Known_Variance : Real) return Natural is
+      Dof : constant Natural := Plane_Degrees_Of_Freedom (P);
+   begin
+      if Dof = 0 or else Plane_Variance <= 0.0 then
+         return 0;
+      end if;
+      return Natural'Max (1, Natural (Real'Floor
+        ((Plane_Variance + Known_Variance) ** 2 / (Plane_Variance ** 2 / Real (Dof)))));
+   end Welch_Plane;
+
    function Height_Sigma (P : Plane_Estimate; X : Vec3) return Real is
    begin
       if not Known (P) then
@@ -159,10 +179,16 @@ package body Driver.Geometry is
    function Height (P : Plane_Estimate; X : Point_Estimate) return Estimate is
    begin
       if not Known (P) or else not Known (X) then
-         return (Value => Height (P, X.Mean), Sigma => Real'Last);
+         return (Value => Height (P, X.Mean), Sigma => Real'Last, Degrees_Of_Freedom => 0);
       end if;
-      return (Value => Height (P, X.Mean),
-              Sigma => Sqrt (Height_Sigma (P, X.Mean) ** 2 + P.Normal * (X.Covariance * P.Normal)));
+      declare
+         Plane_Variance : constant Real := Height_Sigma (P, X.Mean) ** 2;
+         Point_Variance : constant Real := P.Normal * (X.Covariance * P.Normal);
+      begin
+         return (Value              => Height (P, X.Mean),
+                 Sigma              => Sqrt (Plane_Variance + Point_Variance),
+                 Degrees_Of_Freedom => Welch_Plane (P, Plane_Variance, Point_Variance));
+      end;
    end Height;
 
    procedure Intersect (P : Plane_Estimate; R : Ray_Estimate; Point : out Point_Estimate; Distance : out Estimate;
@@ -189,7 +215,7 @@ package body Driver.Geometry is
          Ok := True;
          if not Known (P) or else not Known (R.Origin) or else R.Direction.Sigma >= Real'Last then
             Point := (Mean => X, Covariance => [others => [others => Real'Last]]);
-            Distance := (Value => T, Sigma => Real'Last);
+            Distance := (Value => T, Sigma => Real'Last, Degrees_Of_Freedom => 0);
             return;
          end if;
          declare
@@ -203,11 +229,13 @@ package body Driver.Geometry is
               + (Along_Plane ** 2) * Outer (U, U);
             --  The distance moves with the origin and the plane along U.
             Dt : constant Vec3 := (-1.0 / Facing) * P.Normal;
+            Ray_Variance : constant Real :=
+              Dt * (R.Origin.Covariance * Dt) + (T * R.Direction.Sigma / Facing) ** 2 * (1.0 - Facing ** 2);
          begin
             Point := (Mean => X, Covariance => C);
-            Distance := (Value => T,
-                         Sigma => Sqrt (Dt * (R.Origin.Covariance * Dt) + Along_Plane ** 2
-                                        + (T * R.Direction.Sigma / Facing) ** 2 * (1.0 - Facing ** 2)));
+            Distance := (Value              => T,
+                         Sigma              => Sqrt (Ray_Variance + Along_Plane ** 2),
+                         Degrees_Of_Freedom => Welch_Plane (P, Along_Plane ** 2, Ray_Variance));
          end;
       end;
    end Intersect;
@@ -245,7 +273,6 @@ package body Driver.Geometry is
          N := [Vectors (1, 3), Vectors (2, 3), Vectors (3, 3)];
       end Solve_Normal;
 
-      Unknowns : constant := 3;   --  the plane's offset and its two tilts
    begin
       P := (others => <>);
       Ok := False;
@@ -259,7 +286,7 @@ package body Driver.Geometry is
          end if;
       end loop;
       --  One residual beyond the unknowns measures the scatter.
-      if Count <= Unknowns then
+      if Count <= Plane_Unknowns then
          return;
       end if;
       Solve_Normal;
@@ -310,7 +337,7 @@ package body Driver.Geometry is
                end;
             end if;
          end loop;
-         Scale := Chi / Real (Count - Unknowns);
+         Scale := Chi / Real (Count - Plane_Unknowns);
          declare
             Mi : constant Mat2 := Inverse2 (M, Inv_Ok);
          begin
@@ -373,10 +400,12 @@ package body Driver.Geometry is
             end loop;
             Centre := Driver.Stats.Median (Z);
             Noise := Driver.Stats.Robust_Sigma (Z);
+            --  Both the scale and the plane rest on the selection's scatter.
             for I in Points'Range loop
                Next (I) := not Significant
                  (Height (P, Points (I).Mean) - Centre * Sigma_Along_Normal (I),
-                  Sqrt ((Noise * Sigma_Along_Normal (I)) ** 2 + Height_Sigma (P, Points (I).Mean) ** 2));
+                  Sqrt ((Noise * Sigma_Along_Normal (I)) ** 2 + Height_Sigma (P, Points (I).Mean) ** 2),
+                  Plane_Degrees_Of_Freedom (P));
             end loop;
             if Next = Chosen then
                Inliers := Chosen;

@@ -26,23 +26,88 @@ driver-brain-service.adb	& "";	"1000	format	box edges are thousandths of the pic
 driver-brain-service.adb	& Driver.Log.Image (Real (A.Seconds), 1) & ""	1	format	digits printed in a log line or a message(driver-brain-service.adb:197)
 driver-brain-service.adb	& Driver.Log.Image (Real (Driver.Clock.Seconds - Started), 1) & ""	1	format	digits printed in a log line or a message(driver-brain-service.adb:284)
 driver-brain-service.adb	Thousandths : constant := 1000.0;	1000.0	format	boxes are given in thousandths of the picture (docs/brain-service.md)
+driver-base64.adb	B1 : constant Natural := (if Have > 1 then Natural (Data (I + 1)) else 0);	1	format	base64 takes three bytes at a time; the second may be missing at the end
+driver-base64.adb	B2 : constant Natural := (if Have > 2 then Natural (Data (I + 2)) else 0);	2	format	base64 takes three bytes at a time; the third may be missing at the end
+driver-base64.adb	B2 : constant Natural := (if Have > 2 then Natural (Data (I + 2)) else 0);	2	format	base64 takes three bytes at a time; the third may be missing at the end
+driver-base64.adb	Group : constant Natural := (B0 * 2 ** 8 + B1) * 2 ** 8 + B2;	2	format	three bytes of eight bits make one 24-bit group
+driver-base64.adb	Group : constant Natural := (B0 * 2 ** 8 + B1) * 2 ** 8 + B2;	2	format	three bytes of eight bits make one 24-bit group
+driver-base64.adb	Have : constant Natural := Natural (Offset'Min (3, Data'Last - I + 1));	3	format	base64 takes three bytes at a time
+driver-base64.adb	I := I + 3;	3	format	base64 takes three bytes at a time
+driver-base64.adb	Out_At : Positive := 1;	1	structure	strings are indexed from one
+driver-base64.adb	Out_At := Out_At + 4;	4	format	three bytes make four characters
+driver-base64.adb	Result (Out_At + 2) := (if Have > 1 then Alphabet ((Group / Sextet) mod Sextet + 1) else '');	1	format	the third character exists when the second byte does
+driver-base64.adb	Result (Out_At + 2) := (if Have > 1 then Alphabet ((Group / Sextet) mod Sextet + 1) else '');	2	format	the third of four characters
+driver-base64.adb	Result (Out_At + 3) := (if Have > 2 then Alphabet (Group mod Sextet + 1) else '');	2	format	the fourth character exists when the third byte does
+driver-base64.adb	Result (Out_At + 3) := (if Have > 2 then Alphabet (Group mod Sextet + 1) else '');	3	format	the fourth of four characters
+driver-base64.adb	Sextet : constant := 2 ** 6;	2	format	each base64 character carries six bits
+driver-base64.ads	function Encoded_Length (Bytes : Natural) return Natural is (4 * ((Bytes + 2) / 3));	2	format	a partial group of three bytes still takes four characters
+driver-base64.ads	function Encoded_Length (Bytes : Natural) return Natural is (4 * ((Bytes + 2) / 3));	3	format	base64 takes three bytes at a time
+driver-base64.ads	function Encoded_Length (Bytes : Natural) return Natural is (4 * ((Bytes + 2) / 3));	4	format	three bytes make four characters
 driver-bytes.adb	Capacity := 1;	1	numerics	smallest buffer capacity before doubling
 driver-bytes.adb	Capacity := 2 * Capacity;	2	numerics	geometric growth keeps appends amortized O(1)
+driver-clock.adb	function Nanoseconds_Of (S : Duration) return Long_Long_Integer is (Long_Long_Integer (Real (S) * 1.0e9));	1.0e9	format	nanoseconds per second (the recording format counts nanoseconds)
 driver-conventions.ads	Unchanged_Fraction : constant := 0.01;	0.01	numerics	convergence of iterative estimates (documented in Conventions)
 driver-conventions.ads	Z : constant := 3.0;	3.0	statistics	the significance level of the one test (documented in Conventions)
+driver-distributions.adb	(Sqrt (Chi_Square_Quantile (Two_Sided_Tail, 1)));	1	math	a squared standard Gaussian is a chi square of one degree of freedom
+driver-distributions.adb	(Upper_Incomplete_Gamma (1, Z * Z * Half, Log_Gamma_Halves (1)));	1	math	a = 1/2 counted in halves: erfc (x) = Q (1/2, x^2)
+driver-distributions.adb	(Upper_Incomplete_Gamma (1, Z * Z * Half, Log_Gamma_Halves (1)));	1	math	a = 1/2 counted in halves: erfc (x) = Q (1/2, x^2)
+driver-distributions.adb	A_Down : constant Real := A - 1.0;	1.0	math	the a - 1 of the incomplete beta continued fraction
+driver-distributions.adb	A_Up : constant Real := A + 1.0;	1.0	math	the a + 1 of the incomplete beta continued fraction
+driver-distributions.adb	Ap := Ap + 1.0;	1.0	math	successive terms of the incomplete gamma series
+driver-distributions.adb	B := B + 2.0;	2.0	math	the incomplete gamma continued fraction's denominators grow by two
+driver-distributions.adb	C : Real := 1.0 / Tiny;	1.0	numerics	Lentz's method starts C at the reciprocal of its stand-in for zero
+driver-distributions.adb	C : Real := 1.0;	1.0	math	Lentz's method starts C at one
+driver-distributions.adb	C := Clamp_Away_From_Zero (1.0 + Even / C);	1.0	math	Lentz's recurrence C = 1 + a / C
+driver-distributions.adb	C := Clamp_Away_From_Zero (1.0 + Odd / C);	1.0	math	Lentz's recurrence C = 1 + a / C
+driver-distributions.adb	D : Real := 1.0 / B;	1.0	math	Lentz's recurrence D = 1 / (b + a D), first step
+driver-distributions.adb	D : Real := 1.0 / Clamp_Away_From_Zero (1.0 - Sum_Ab * X / A_Up);	1.0	math	first term of the incomplete beta continued fraction
+driver-distributions.adb	D := 1.0 / Clamp_Away_From_Zero (1.0 + Even * D);	1.0	math	Lentz's recurrence D = 1 / (1 + a D)
+driver-distributions.adb	D := 1.0 / Clamp_Away_From_Zero (1.0 + Even * D);	1.0	math	Lentz's recurrence D = 1 / (1 + a D)
+driver-distributions.adb	D := 1.0 / Clamp_Away_From_Zero (1.0 + Odd * D);	1.0	math	Lentz's recurrence D = 1 / (1 + a D)
+driver-distributions.adb	D := 1.0 / Clamp_Away_From_Zero (1.0 + Odd * D);	1.0	math	Lentz's recurrence D = 1 / (1 + a D)
+driver-distributions.adb	D := 1.0 / Clamp_Away_From_Zero (An * D + B);	1.0	math	Lentz's recurrence D = 1 / (b + a D)
+driver-distributions.adb	Half : constant := 0.5;	0.5	math	one half: arguments counted in halves, and the midpoint of a bisection
+driver-distributions.adb	Hi : Real := 1.0;	1.0	math	the incomplete beta's argument lies in [0, 1]
+driver-distributions.adb	Hi := 2.0 * Hi;	2.0	numerics	the bracket widens by doubling until it holds the quantile
+driver-distributions.adb	J : Positive := (if Halves mod 2 = 1 then 1 else 2);	1	math	the Gamma recurrence starts at Gamma (1/2) for an odd count of halves
+driver-distributions.adb	J : Positive := (if Halves mod 2 = 1 then 1 else 2);	1	math	the Gamma recurrence starts at Gamma (1/2) for an odd count of halves
+driver-distributions.adb	J : Positive := (if Halves mod 2 = 1 then 1 else 2);	2	math	the Gamma recurrence starts at Gamma (1) for an even count of halves
+driver-distributions.adb	J : Positive := (if Halves mod 2 = 1 then 1 else 2);	2	math	the Gamma recurrence starts at Gamma (1) for an even count of halves
+driver-distributions.adb	J := J + 2;	2	math	the Gamma recurrence steps by one, which is two halves
+driver-distributions.adb	Sum : Real := (if Halves mod 2 = 1 then Half * Log (Ada.Numerics.Pi) else 0.0);	1	math	an odd count of halves starts from ln Gamma (1/2) = ln sqrt pi
+driver-distributions.adb	Sum : Real := (if Halves mod 2 = 1 then Half * Log (Ada.Numerics.Pi) else 0.0);	2	math	parity of the count of halves
+driver-distributions.adb	Term : Real := 1.0 / A;	1.0	math	first term of the incomplete gamma series
+driver-distributions.adb	Twice : constant Real := 2.0 * Mr;	2.0	math	the 2m terms of the incomplete beta continued fraction
+driver-distributions.adb	X : constant Real := Beta_Quantile (Two_Sided_Tail, Degrees_Of_Freedom, 1);	1	math	b = 1/2 counted in halves: the t tail is I_x (nu / 2, 1 / 2)
+driver-distributions.adb	elsif X >= 1.0 then	1.0	math	the incomplete beta is 1 at x = 1
+driver-distributions.adb	exit when abs (Factor - 1.0) <= Precision;	1.0	numerics	converged when the next factor is one to working precision
+driver-distributions.adb	exit when abs (Factor - 1.0) <= Precision;	1.0	numerics	converged when the next factor is one to working precision
+driver-distributions.adb	if X < (A + 1.0) / (A + B + 2.0) then	1.0	math	the fraction converges quickly below (a + 1) / (a + b + 2)
+driver-distributions.adb	if X < (A + 1.0) / (A + B + 2.0) then	2.0	math	the fraction converges quickly below (a + 1) / (a + b + 2)
+driver-distributions.adb	if X < A + 1.0 then	1.0	math	the incomplete gamma series converges quickly below a + 1
+driver-distributions.adb	return 1.0;	1.0	math	Q (a, 0) = 1 and I_1 (a, b) = 1
+driver-distributions.adb	return 1.0;	1.0	math	Q (a, 0) = 1 and I_1 (a, b) = 1
+driver-distributions.adb	return Gaussian_Two_Sided_Quantile (Real'Min (1.0, Tail));	1.0	math	a probability is at most one
+driver-distributions.adb	return Incomplete_Beta (Degrees_Of_Freedom, 1, Nu / (Nu + T * T), Log_Beta_Halves (Degrees_Of_Freedom, 1));	1	math	b = 1/2 counted in halves: the t tail is I_x (nu / 2, 1 / 2)
+driver-distributions.adb	return Incomplete_Beta (Degrees_Of_Freedom, 1, Nu / (Nu + T * T), Log_Beta_Halves (Degrees_Of_Freedom, 1));	1	math	b = 1/2 counted in halves: the t tail is I_x (nu / 2, 1 / 2)
+driver-distributions.ads	with Pre => Two_Sided_Tail > 0.0 and then Two_Sided_Tail <= 1.0;	1.0	math	a probability is at most one
+driver-distributions.ads	with Pre => Two_Sided_Tail > 0.0 and then Two_Sided_Tail <= 1.0;	1.0	math	a probability is at most one
+driver-distributions.ads	with Pre => Upper_Tail > 0.0 and then Upper_Tail <= 1.0;	1.0	math	a probability is at most one
+driver-distributions.ads	with Pre => Upper_Tail > 0.0 and then Upper_Tail <= 1.0;	1.0	math	a probability is at most one
 driver-geometry.adb	Axis (Smallest) := 1.0;	1.0	math	component of a unit coordinate axis
 driver-geometry.adb	Dt : constant Vec3 := (-1.0 / Facing) * P.Normal;	1.0	math	derivative of a ray's distance to a plane with respect to the ray's origin
 driver-geometry.adb	Half : constant := 0.5;	0.5	math	one half: the symmetric part of a matrix is (A + A^T) / 2
 driver-geometry.adb	J : constant Mat3 := Identity3 - (1.0 / Facing) * Outer (U, P.Normal);	1.0	math	oblique projection along the ray onto the plane
 driver-geometry.adb	L : Real_Matrix (1 .. 3, 1 .. 3);	3	structure	three dimensions
 driver-geometry.adb	L : Real_Matrix (1 .. 3, 1 .. 3);	3	structure	three dimensions
-driver-geometry.adb	Unknowns : constant := 3;	3	structure	a plane has three degrees of freedom: an offset and two tilts
+driver-geometry.adb	Plane_Unknowns : constant := 3;	3	structure	a plane has three degrees of freedom: an offset and two tilts
 driver-geometry.adb	Values : Real_Vector (1 .. 3);	3	structure	three dimensions
 driver-geometry.adb	Vectors : Real_Matrix (1 .. 3, 1 .. 3);	3	structure	three dimensions
 driver-geometry.adb	Vectors : Real_Matrix (1 .. 3, 1 .. 3);	3	structure	three dimensions
 driver-geometry.adb	Weight (I) := 1.0 / Real'Max (N * (Points (I).Covariance * N), Real'Model_Small);	1.0	math	a least-squares weight is the inverse of the variance
 driver-geometry.adb	Weight (I) := 1.0;	1.0	numerics	equal weights for the first pass, before any normal is known to weight along
 driver-geometry.adb	if Rays'Length < 2 then	2	structure	two lines are the fewest that can meet in a point
+driver-geometry.adb	return Natural'Max (1, Natural (Real'Floor	1	statistics	Welch's degrees of freedom are at least one
 driver-geometry.adb	return Sqrt (P.Offset_Sigma ** 2 + A * A * P.Tilt_11 + 2.0 * A * B * P.Tilt_12 + B * B * P.Tilt_22);	2.0	math	the cross term of a two-variable quadratic form appears twice
 driver-geometry.adb	subtype Mat2 is Real_Matrix (1 .. 2, 1 .. 2);	2	structure	the two tilt directions of a plane
 driver-geometry.adb	subtype Mat2 is Real_Matrix (1 .. 2, 1 .. 2);	2	structure	the two tilt directions of a plane
@@ -71,6 +136,35 @@ driver-images.adb	function Blue (I : Image; Column, Row : Natural) return Natura
 driver-images.adb	function Green (I : Image; Column, Row : Natural) return Natural is (Channel (I, Column, Row, 1));	1	structure	green is the second byte of a pixel
 driver-images.adb	return Natural (Data (Data'First + Offset (3 * (Row * I.Width + Column) + Index)));	3	format	three bytes per RGB pixel
 driver-images.ads	with Pre => RGB'Length = 3 * Width * Height;	3	format	three bytes per RGB pixel
+driver-instrument.adb	& "");	"0	format	the service's label for a prompt point off the thing
+driver-instrument.adb	& (if Points (K).On then "" else "") & "");	"0	format	the service's label for a prompt point off the thing
+driver-instrument.adb	& (if Points (K).On then "" else "") & "");	"1	format	the service's label for a prompt point on the thing
+driver-instrument.adb	B.Append (Byte (V mod 2 ** 8));	2	format	one byte holds eight bits
+driver-instrument.adb	Bits_Per_Pixel : constant := 24;	24	format	BMP: a 24-bit image
+driver-instrument.adb	Channels : constant := 3;	3	format	three colour bytes per pixel
+driver-instrument.adb	File_Header : constant := 14;	14	format	BMP: the file header is 14 bytes
+driver-instrument.adb	Info_Header : constant := 40;	40	format	BMP: the BITMAPINFOHEADER is 40 bytes
+driver-instrument.adb	M.Certainty := Driver.Json.Number (Doc, Driver.Json.Element (Doc, E, 3));	3	format	the service's answer is u, v, certainty
+driver-instrument.adb	Put_Little (B, 0, 4 * 4);	4	format	BMP: four four-byte fields of resolution and palette
+driver-instrument.adb	Put_Little (B, 0, 4 * 4);	4	format	BMP: four four-byte fields of resolution and palette
+driver-instrument.adb	Put_Little (B, 0, 4);	4	format	BMP: a four-byte field
+driver-instrument.adb	Put_Little (B, 0, 4);	4	format	BMP: a four-byte field
+driver-instrument.adb	Put_Little (B, 1, 2);	1	format	BMP: one colour plane
+driver-instrument.adb	Put_Little (B, 1, 2);	2	format	BMP: a two-byte field
+driver-instrument.adb	Put_Little (B, Bits_Per_Pixel, 2);	2	format	BMP: a two-byte field
+driver-instrument.adb	Put_Little (B, H, 4);	4	format	BMP: a four-byte field
+driver-instrument.adb	Put_Little (B, Info_Header, 4);	4	format	BMP: a four-byte field
+driver-instrument.adb	Put_Little (B, Offset_Of_Pixels + Row_Size * H, 4);	4	format	BMP: a four-byte field
+driver-instrument.adb	Put_Little (B, Offset_Of_Pixels, 4);	4	format	BMP: a four-byte field
+driver-instrument.adb	Put_Little (B, Row_Size * H, 4);	4	format	BMP: a four-byte field
+driver-instrument.adb	Put_Little (B, W, 4);	4	format	BMP: a four-byte field
+driver-instrument.adb	Row_Alignment : constant := 4;	4	format	BMP: rows are padded to a multiple of four bytes
+driver-instrument.adb	U := Driver.Json.Number (Doc, Driver.Json.Element (Doc, N, 1));	1	format	the service's answer starts with u
+driver-instrument.adb	V := Driver.Json.Number (Doc, Driver.Json.Element (Doc, N, 2));	2	format	the service's answer has v second
+driver-instrument.adb	V := V / 2 ** 8;	2	format	one byte holds eight bits
+driver-instrument.adb	if K mod 2 = 0 then	2	format	the service's runs alternate off and on, starting off
+driver-instrument.adb	if M.Found and then Driver.Json.Count (Doc, E) > 2 then	2	format	the service's answer is u, v, certainty
+driver-instrument.adb	or else Driver.Json.Count (Doc, N) < 2	2	format	a pixel answer has at least u and v
 driver-json.adb	(S, 16#1_0000# + (High - 16#D800#) * 16#400# + (Low - 16#DC00#));	16#1_0000#	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
 driver-json.adb	(S, 16#1_0000# + (High - 16#D800#) * 16#400# + (Low - 16#DC00#));	16#400#	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
 driver-json.adb	(S, 16#1_0000# + (High - 16#D800#) * 16#400# + (Low - 16#DC00#));	16#D800#	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
@@ -323,9 +417,6 @@ driver-numerics.adb	S := 2.0 * Sqrt (1.0 + R (3, 3) - R (1, 1) - R (2, 2));	1.0	
 driver-numerics.adb	S := 2.0 * Sqrt (1.0 + R (3, 3) - R (1, 1) - R (2, 2));	2.0	math	identity: symmetric part, half-angle or quaternion formula
 driver-numerics.adb	S := 2.0 * Sqrt (1.0 + Trace);	1.0	math	identity: trace formula, clamp to [-1, 1], unit quaternion or inverse square root
 driver-numerics.adb	S := 2.0 * Sqrt (1.0 + Trace);	2.0	math	identity: symmetric part, half-angle or quaternion formula
-driver-numerics.adb	Values : Real_Vector (1 .. 3);	3	structure	three dimensions
-driver-numerics.adb	Vectors : Real_Matrix (1 .. 3, 1 .. 3);	3	structure	three dimensions
-driver-numerics.adb	Vectors : Real_Matrix (1 .. 3, 1 .. 3);	3	structure	three dimensions
 driver-numerics.adb	Y => (R (2, 3) + R (3, 2)) / S, Z => S / 4.0);	4.0	math	Shepperd's quaternion formula
 driver-numerics.adb	Y => S / 4.0, Z => (R (2, 3) + R (3, 2)) / S);	4.0	math	Shepperd's quaternion formula
 driver-numerics.adb	[2.0 * (X * Y + W * Z), 1.0 - 2.0 * (X * X + Z * Z), 2.0 * (Y * Z - W * X)],	2.0	math	identity: symmetric part, half-angle or quaternion formula
@@ -360,6 +451,9 @@ driver-observations.adb	if S'Length = 3 and then S (S'First + 2) = 3 and then S 
 driver-observations.adb	if T'Length >= 2 and then T (T'Last - 1) = '' and then S'Length = 2 then	2	format	a depth map is a two-dimensional float grid (numpy dtype kind letter before the width)
 driver-observations.adb	if T'Length >= 2 and then T (T'Last - 1) = '' and then S'Length = 2 then	2	format	a depth map is a two-dimensional float grid (numpy dtype kind letter before the width)
 driver-observations.ads	Key_Separator : constant Character := Character'Val (31);	31	format	ASCII unit separator
+driver-pixels.adb	(if V.Count > 1 then V.Sums.Element (K) / Real (V.Count - 1) else 0.0);	1	statistics	a sample variance needs two frames
+driver-pixels.adb	Quantization : constant := 1.0 / 12.0;	1.0	math	the variance of a uniform step of one level is 1/12
+driver-pixels.adb	Quantization : constant := 1.0 / 12.0;	12.0	math	the variance of a uniform step of one level is 1/12
 driver-protocol.adb	Pairs : Natural := 3;	3	format	pair and element counts of the reply maps (docs/body-protocol.md 4)
 driver-protocol.adb	Put_Array_Header (Reply, 1);	1	format	pair and element counts of the reply maps (docs/body-protocol.md 4)
 driver-protocol.adb	Put_Map_Header (Reply, 1);	1	format	pair and element counts of the reply maps (docs/body-protocol.md 4)
@@ -374,17 +468,41 @@ driver-recording.adb	Head (Offset (2 + I)) := Byte (Shift_Right (Ns, 8 * I) and 
 driver-recording.adb	Head : Byte_Array (1 .. 13);	13	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
 driver-recording.adb	Head : Byte_Array (1 .. 13);	13	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
 driver-recording.adb	Nanoseconds := Long_Long_Integer (Little_Endian (Head (2 .. 9)));	9	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
-driver-recording.adb	Ns : constant Unsigned_64 := Unsigned_64 (Driver.Clock.Seconds * 1_000_000_000);	1_000_000_000	format	nanoseconds per second
 driver-recording.adb	Size : constant Offset := Offset (Little_Endian (Head (10 .. 13)));	10	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
 driver-recording.adb	Size : constant Offset := Offset (Little_Endian (Head (10 .. 13)));	13	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
 driver-recording.adb	V := Shift_Left (V, 8) or Unsigned_64 (Data (I));	8	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
 driver-recording.adb	for I in 0 .. 3 loop	3	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
 driver-recording.adb	for I in 0 .. 7 loop	7	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
+driver-robot-hand-touch.adb	A (Row + 1, Base + 1) := 1.0 / P.Offset_Sigma;	1.0	math	a prior row is whitened by the inverse of its sigma
+driver-robot-hand-touch.adb	A (Row + 2, Base + 2) := 1.0 / L11;	1.0	math	whitening by the inverse of the tilt covariance's Cholesky factor
+driver-robot-hand-touch.adb	A (Row + 2, Base + 2) := 1.0 / L11;	2	structure	the second of a surface's three error components, the first tilt
+driver-robot-hand-touch.adb	A (Row + 2, Base + 2) := 1.0 / L11;	2	structure	the second of a surface's three error components, the first tilt
+driver-robot-hand-touch.adb	A (Row + 3, Base + 2) := -L21 / (L11 * L22);	2	structure	the second of a surface's three error components, the first tilt
+driver-robot-hand-touch.adb	A (Row + 3, Base + 2) := -L21 / (L11 * L22);	3	structure	the third of a surface's three error components, the second tilt
+driver-robot-hand-touch.adb	A (Row + 3, Base + 3) := 1.0 / L22;	1.0	math	whitening by the inverse of the tilt covariance's Cholesky factor
+driver-robot-hand-touch.adb	A (Row + 3, Base + 3) := 1.0 / L22;	3	structure	the third of a surface's three error components, the second tilt
+driver-robot-hand-touch.adb	A (Row + 3, Base + 3) := 1.0 / L22;	3	structure	the third of a surface's three error components, the second tilt
+driver-robot-hand-touch.adb	E : Equations (Presses => Presses'Length, K => 1);	1	structure	a tip on a known line of sight has one unknown, its distance
+driver-robot-hand-touch.adb	E : Equations (Presses => Presses'Length, K => 3);	3	structure	a free tip has three unknowns, its coordinates
+driver-robot-hand-touch.adb	E.Plane (I, 1) := -1.0;	1.0	math	a surface raised by its offset error lowers the tip's height by the same amount
+driver-robot-hand-touch.adb	Found : Surface_Index (Presses'Range) := [others => 1];	1	structure	surfaces are numbered from one
+driver-robot-hand-touch.adb	Next : constant Real := Real'Max (1.0, Noise * (Res * Res) / Real (Dof));	1.0	statistics	the presses' noise is never below what the arm's pose predicts
+driver-robot-hand-touch.adb	Noise : Real := 1.0;	1.0	statistics	the presses' noise starts at what the arm's pose predicts
+driver-robot-hand-touch.adb	Plane_Unknowns : constant := 3;	3	structure	a surface's error is its offset and its two tilts
+driver-robot-hand-touch.adb	S : Solution (K => 1);	1	structure	a tip on a known line of sight has one unknown, its distance
+driver-robot-hand-touch.adb	S : Solution (K => 3);	3	structure	a free tip has three unknowns, its coordinates
+driver-robot-hand-touch.adb	S.Degrees_Of_Freedom := (if Noise > 1.0 then Dof else 0);	1.0	statistics	the scale was measured when it exceeds the predicted noise
+driver-robot-hand-touch.adb	Scale : Real := 1.0 / Noise;	1.0	statistics	the predicted noise in units of the measured scale
+driver-robot-hand-touch.adb	Solve (E, Presses, Surfaces, [1 => 0.0], S, Stopped, Sunk);	1	structure	the single unknown of a tip on a line of sight
+driver-robot-hand-touch.adb	if Chosen (I) and then Significant (Deleted (I), 1.0, Dof_Of (I))	1.0	math	a residual already in units of its own sigma
+driver-robot-hand-touch.adb	if Dof > 1 and then (Chi - Res (J) ** 2 / Free) / Real (Dof - 1) > Scale then	1	statistics	the others need a degree of freedom left to measure their scatter
+driver-robot-hand-touch.adb	if Presses'Length < 2 or else not Known (Origin) or else Direction.Sigma >= Real'Last then	2	structure	one press to fix the distance and one to check it
 driver-stats.adb	Child := 2 * Root;	2	math	heap sort and median index arithmetic
+driver-stats.adb	Degrees_Of_Freedom => X'Length - 2),	2	statistics	a line fit uses two degrees of freedom
 driver-stats.adb	Gaussian_MAD_To_Sigma : constant := 1.482_602_218_505_602;	1.482_602_218_505_602	statistics	1 / Phi^-1 (3/4): MAD to sigma for Gaussian data
-driver-stats.adb	Intercept => (Value => A, Sigma => Sqrt (S2 * (1.0 / N + Mean (Mx) ** 2 / Sxx))),	1.0	math	standard error of the intercept, 1/n term
 driver-stats.adb	S2 : constant Real := Sse / (N - 2.0);	2.0	statistics	two degrees of freedom used by slope and intercept
 driver-stats.adb	Sift (1, Stop - 1);	1	math	heap sort and median index arithmetic
+driver-stats.adb	Sigma => Sqrt (S2 * (1.0 / N + Mean (Mx) ** 2 / Sxx)),	1.0	math	standard error of the intercept, 1/n term
 driver-stats.adb	for Start in reverse 1 .. N / 2 loop	2	math	heap sort and median index arithmetic
 driver-stats.adb	for Stop in reverse 2 .. N loop	2	math	heap sort and median index arithmetic
 driver-stats.adb	if A.N < 2 then	2	statistics	a variance needs two samples
@@ -393,45 +511,44 @@ driver-stats.adb	if N mod 2 = 1 then	2	math	heap sort and median index arithmeti
 driver-stats.adb	return (S (O + N / 2) + S (O + N / 2 + 1)) / 2.0;	2	math	heap sort and median index arithmetic
 driver-stats.adb	return (S (O + N / 2) + S (O + N / 2 + 1)) / 2.0;	2	math	heap sort and median index arithmetic
 driver-stats.adb	return (S (O + N / 2) + S (O + N / 2 + 1)) / 2.0;	2.0	math	mean of the two middle values
-driver-stats.adb	return (Value => (if A.N = 1 then A.Mean else 0.0), Sigma => Real'Last);	1	statistics	a single sample has a mean but no spread
+driver-stats.adb	return (Slope => (Value => B, Sigma => Sqrt (S2 / Sxx), Degrees_Of_Freedom => X'Length - 2),	2	statistics	a line fit uses two degrees of freedom
+driver-stats.adb	return (Value => (if A.N = 1 then A.Mean else 0.0), Sigma => Real'Last, Degrees_Of_Freedom => 0);	1	statistics	a single sample has a mean but no spread
 driver-stats.adb	return S (O + (N + 1) / 2);	2	math	heap sort and median index arithmetic
 driver-stats.ads	with Pre => Count (A) > 1;	1	statistics	a variance or a correlation needs two samples
 driver-stats.ads	with Pre => X'Length = Y'Length and then X'Length > 1;	1	statistics	a variance or a correlation needs two samples
 driver-stats.ads	with Pre => X'Length = Y'Length and then X'Length > 2;	2	statistics	a line fit with a residual spread needs three points
+driver-uncertain.adb	Dof := Natural'Max (1, Natural (Real'Floor ((Va + Vb) * (Va + Vb) / Spread)));	1	statistics	Welch's degrees of freedom are at least one
+driver-uncertain.adb	elsif Tests = 1 then Driver.Conventions.Z	1	statistics	a family of one test is a single test: the plain threshold
 driver-uncertain.adb	for I in 1 .. 3 loop	3	structure	three dimensions
-driver-wire.adb	"" & ASCII.CR & ASCII.LF	"1.1	format	WebSocket framing and handshake (RFC 6455)
-driver-wire.adb	"" & ASCII.CR & ASCII.LF	"101	format	WebSocket framing and handshake (RFC 6455)
-driver-wire.adb	(R, (if I + 1 <= Data'Last then Alphabet ((Group / 2 ** 6) mod 2 ** 6 + 1) else ''));	2	format	base64 groups of three bytes into four characters (RFC 4648)
-driver-wire.adb	(R, (if I + 1 <= Data'Last then Alphabet ((Group / 2 ** 6) mod 2 ** 6 + 1) else ''));	2	format	base64 groups of three bytes into four characters (RFC 4648)
+driver-uncertain.adb	function Scalar_Gate (Degrees_Of_Freedom : Natural := 0; Tests : Positive := 1) return Gate is	1	statistics	a family of one test is a single test: the plain threshold
+driver-uncertain.adb	function Vector_Gate (Dimensions : Positive; Degrees_Of_Freedom : Natural := 0; Tests : Positive := 1)	1	statistics	a family of one test is a single test: the plain threshold
+driver-uncertain.ads	function Scalar_Gate (Degrees_Of_Freedom : Natural := 0; Tests : Positive := 1) return Gate;	1	statistics	a family of one test is a single test: the plain threshold
+driver-uncertain.ads	function Vector_Gate (Dimensions : Positive; Degrees_Of_Freedom : Natural := 0; Tests : Positive := 1)	1	statistics	a family of one test is a single test: the plain threshold
+driver-wire.adb	& "" & Blank), Ok);	"13	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Accept_Suffix : constant String := "";	"258	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Accept_Suffix : constant String := "";	"47	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Accept_Suffix : constant String := "";	"95	format	WebSocket framing and handshake (RFC 6455)
-driver-wire.adb	Ada.Strings.Unbounded.Append (R, (if I + 2 <= Data'Last then Alphabet (Group mod 2 ** 6 + 1) else ''));	2	format	base64 groups of three bytes into four characters (RFC 4648)
-driver-wire.adb	Ada.Strings.Unbounded.Append (R, (if I + 2 <= Data'Last then Alphabet (Group mod 2 ** 6 + 1) else ''));	2	format	base64 groups of three bytes into four characters (RFC 4648)
-driver-wire.adb	Ada.Strings.Unbounded.Append (R, Alphabet ((Group / 2 ** 12) mod 2 ** 6 + 1));	2	format	base64 groups of three bytes into four characters (RFC 4648)
-driver-wire.adb	Ada.Strings.Unbounded.Append (R, Alphabet ((Group / 2 ** 12) mod 2 ** 6 + 1));	2	format	base64 groups of three bytes into four characters (RFC 4648)
-driver-wire.adb	Ada.Strings.Unbounded.Append (R, Alphabet (Group / 2 ** 18 + 1));	2	format	base64 groups of three bytes into four characters (RFC 4648)
-driver-wire.adb	B2 : constant Natural := (if I + 2 <= Data'Last then Natural (Data (I + 2)) else 0);	2	format	base64 groups of three bytes into four characters (RFC 4648)
-driver-wire.adb	B2 : constant Natural := (if I + 2 <= Data'Last then Natural (Data (I + 2)) else 0);	2	format	base64 groups of three bytes into four characters (RFC 4648)
 driver-wire.adb	Ch := Character'Val (Character'Pos (Ch) + 32);	32	format	ASCII upper to lower case
+driver-wire.adb	Connect_Socket (C.Peer, (Family => Family_Inet, Addr => Addresses (Get_Host_By_Name (Host), 1),	1	structure	the first address the host name resolves to
 driver-wire.adb	Fin : constant Boolean := (Two (1) and 16#80#) /= 0;	16#80#	format	WebSocket framing and handshake (RFC 6455)
-driver-wire.adb	Group : constant Natural := B0 * 2 ** 16 + B1 * 2 ** 8 + B2;	2	format	base64 groups of three bytes into four characters (RFC 4648)
-driver-wire.adb	Group : constant Natural := B0 * 2 ** 16 + B1 * 2 ** 8 + B2;	2	format	base64 groups of three bytes into four characters (RFC 4648)
 driver-wire.adb	Header.Append (16#80# or Opcode);	16#80#	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Header.Append (Byte (L and 16#FF#));	16#FF#	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Header.Append (Byte (Shift_Right (L, 8 * K) and 16#FF#));	16#FF#	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Header.Append (Byte (Shift_Right (L, 8 * K) and 16#FF#));	8	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Header.Append (Byte (Shift_Right (L, 8) and 16#FF#));	16#FF#	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Header.Append (Byte (Shift_Right (L, 8) and 16#FF#));	8	format	WebSocket framing and handshake (RFC 6455)
-driver-wire.adb	Header.Append (Byte'(126));	126	format	WebSocket framing and handshake (RFC 6455)
-driver-wire.adb	Header.Append (Byte'(127));	127	format	WebSocket framing and handshake (RFC 6455)
-driver-wire.adb	I := I + 3;	3	format	base64 groups of three bytes into four characters (RFC 4648)
+driver-wire.adb	Header.Append (Mask or 126);	126	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Header.Append (Mask or 127);	127	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Key : Byte_Array (1 .. 4);	4	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Kind := (if Message = 1 then Text else Binary);	1	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Length : Unsigned_64 := Unsigned_64 (Two (2) and 16#7F#);	16#7F#	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Length := Shift_Left (Length, 8) or Unsigned_64 (B);	8	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Length := Unsigned_64 (X (1)) * 2 ** 8 + Unsigned_64 (X (2));	2	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Mask : Byte_Array (1 .. 4) := [others => 0];	4	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Mask : constant Byte := (if C.Client then 16#80# else 0);	16#80#	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Masked (I) := Data (I) xor Key ((I - Data'First) mod 4 + 1);	4	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Masked : constant Boolean := (Two (2) and 16#80#) /= 0;	16#80#	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Nonce : Byte_Array (1 .. 16);	16	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	One : Byte_Array (1 .. 1);	1	structure	read the handshake one byte at a time
 driver-wire.adb	Opcode : constant Byte := Two (1) and 16#0F#;	16#0F#	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Payload (I) := Payload (I) xor Mask ((I - 1) mod 4 + 1);	4	format	WebSocket framing and handshake (RFC 6455)
@@ -439,8 +556,14 @@ driver-wire.adb	R (I) := Byte'Value ("" & Hex (Hex'First + 2 * Natural (I - 1) .
 driver-wire.adb	R (I) := Byte'Value ("" & Hex (Hex'First + 2 * Natural (I - 1) .. Hex'First + 2 * Natural (I - 1) + 1) & "");	2	format	SHA-1 digest as hexadecimal pairs
 driver-wire.adb	R (I) := Byte'Value ("" & Hex (Hex'First + 2 * Natural (I - 1) .. Hex'First + 2 * Natural (I - 1) + 1) & "");	2	format	SHA-1 digest as hexadecimal pairs
 driver-wire.adb	R : Byte_Array (1 .. Offset (Hex'Length / 2));	2	format	SHA-1 digest as hexadecimal pairs
+driver-wire.adb	Send_All (C, To_Bytes ("" & Line_End	"1.1	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Send_All (C, To_Bytes ("" & Line_End	"1.1	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Send_All (C, To_Bytes ("" & Line_End	"101	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Send_Frame (C, (if Kind = Text then 1 else 2), Data, Ok);	1	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Send_Frame (C, (if Kind = Text then 1 else 2), Data, Ok);	2	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Send_Frame (C, 10, Payload.all, Ok);	10	format	WebSocket framing and handshake (RFC 6455)
-driver-wire.adb	Send_Frame (C, 2, Data, Ok);	2	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Status : constant String := "";	"1.1	format	WebSocket framing and handshake (RFC 6455)
+driver-wire.adb	Status : constant String := "";	"101	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Two : Byte_Array (1 .. 2);	2	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	X : Byte_Array (1 .. 2);	2	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	X : Byte_Array (1 .. 8);	8	format	WebSocket framing and handshake (RFC 6455)

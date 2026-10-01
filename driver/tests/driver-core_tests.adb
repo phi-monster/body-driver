@@ -1,6 +1,9 @@
 with Ada.Numerics;
+with Ada.Numerics.Float_Random;
+with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Strings.Unbounded;
 with Driver.Bytes;
+with Driver.Clock;
 with Driver.Commands;
 with Driver.Images;
 with Driver.Json;
@@ -118,9 +121,74 @@ package body Driver.Core_Tests is
       Check (Significant (3.1, 1.0), "3.1 sigma not significant");
       Check (not Significant (2.9, 1.0), "2.9 sigma significant");
       Check (not Significant (1.0e9, Real'Last), "unknown sigma made something significant");
-      Check (not Significant (Estimate'(10.0, 2.0), Estimate'(5.0, 2.0)), "5 apart with combined sigma 2.83");
-      Check (Significant (Estimate'(10.0, 1.0), Estimate'(5.0, 1.0)), "5 apart with combined sigma 1.41");
+      Check (not Significant (Estimate'(10.0, 2.0, 0), Estimate'(5.0, 2.0, 0)), "5 apart with combined sigma 2.83");
+      Check (Significant (Estimate'(10.0, 1.0, 0), Estimate'(5.0, 1.0, 0)), "5 apart with combined sigma 1.41");
    end Significance;
+
+   procedure Point_Significance is
+      use Driver.Uncertain;
+      use Ada.Numerics.Long_Elementary_Functions;
+
+      function Point (Mean : Vec3; Variances : Vec3) return Point_Estimate is
+         P : Point_Estimate := (Mean => Mean, Covariance => [others => [others => 0.0]]);
+      begin
+         for I in 1 .. 3 loop
+            P.Covariance (I, I) := Variances (I);
+         end loop;
+         return P;
+      end Point;
+
+      Half_Each : constant Vec3 := [0.5, 0.5, 0.5];   --  two such points: unit variance per axis
+      Origin    : constant Point_Estimate := Point (Zero3, Half_Each);
+      G         : Ada.Numerics.Float_Random.Generator;
+      Draws     : constant := 40_000;
+      Alarms    : Natural := 0;
+
+      function Gaussian return Real is
+         --  Box and Muller; 1 - U keeps the logarithm finite.
+         U : constant Real := 1.0 - Real (Ada.Numerics.Float_Random.Random (G));
+         V : constant Real := Real (Ada.Numerics.Float_Random.Random (G));
+      begin
+         return Sqrt (-2.0 * Log (U)) * Cos (2.0 * Pi * V);
+      end Gaussian;
+   begin
+      --  The false-alarm rate under pure noise is the scalar rule's, not the
+      --  far higher rate of a length tested along the direction noise chose.
+      Ada.Numerics.Float_Random.Reset (G, 1);
+      for K in 1 .. Draws loop
+         if Significant (Origin, Point ([Gaussian, Gaussian, Gaussian], Half_Each)) then
+            Alarms := Alarms + 1;
+         end if;
+      end loop;
+      declare
+         P : constant Real := 2.0 * (1.0 - 0.998_650_101_968_369_9);   --  two-sided Gaussian tail at Z = 3
+         Expected : constant Real := Real (Draws) * P;
+      begin
+         Check (abs (Real (Alarms) - Expected) <= 3.0 * Sqrt (Expected * (1.0 - P)),
+                "isotropic noise raised" & Natural'Image (Alarms) & " alarms in" & Natural'Image (Draws)
+                & ", expected about" & Natural'Image (Natural (Expected)));
+      end;
+      Check (not Significant (Origin, Point ([3.5, 0.0, 0.0], Half_Each)),
+             "3.5 sigma in three dimensions is within the 0.27 % tail of a chi with 3 degrees of freedom");
+      Check (Significant (Origin, Point ([4.0, 0.0, 0.0], Half_Each)), "4 sigma in three dimensions not significant");
+      --  Along the separation the spread looks wide; across the narrow axis it is not.
+      Check (Significant (Point (Zero3, [0.5, 0.005, 0.5]), Point ([2.8, 0.28, 0.0], [0.5, 0.005, 0.5])),
+             "a separation hidden by projecting onto its own direction was missed");
+      Check (Significant (Point (Zero3, [1.0, 1.0, 0.0]), Point ([0.0, 0.0, 1.0e-6], [0.0, 0.0, 0.0])),
+             "a separation along a direction both points pin down exactly was not significant");
+      Check (not Significant (Point (Zero3, [1.0, 1.0, 0.0]), Point ([1.0, 1.0, 0.0], [0.0, 0.0, 0.0])),
+             "a separation within the spread of a degenerate covariance was significant");
+      Check (not Significant (Origin, (Mean => [1.0e9, 0.0, 0.0], others => <>)),
+             "an unknown covariance made a separation significant");
+   end Point_Significance;
+
+   procedure Clock_Range is
+   begin
+      Check (Driver.Clock.Nanoseconds_Of (1.0) = 1_000_000_000, "one second");
+      Check (Driver.Clock.Nanoseconds_Of (Duration'Small) = 1, "one nanosecond");
+      Check (Driver.Clock.Nanoseconds_Of (3_600.0) = 3_600_000_000_000, "an hour");
+      Check (Driver.Clock.Nanoseconds_Of (8_640_000.0) = 8_640_000_000_000_000, "a hundred days");
+   end Clock_Range;
 
    procedure Buffer_Growth is
       B : Driver.Bytes.Buffer;
@@ -333,6 +401,37 @@ package body Driver.Core_Tests is
              "a call without an address pretended to succeed or gave no reason");
    end Unconfigured_Service;
 
+   procedure Replayed_Services is
+      use Driver.Services;
+      R  : constant Reply := (Ok => True, Text => Ada.Strings.Unbounded.To_Unbounded_String ("answer"), others => <>);
+      T1, T2, T3 : Ticket;
+   begin
+      Start_Replay ([Instrument => True, Brain => False]);
+      --  A recorded reply answers the call with the same request, and only
+      --  from the beat after the call.
+      Replay_Beat (3);
+      T1 := Submit (Instrument, "/match", "first", 3);
+      T2 := Submit (Instrument, "/match", "second", 3);
+      Replay_Reply (Instrument, "/match", "second", R);
+      Check (Ready (T2) = False, "a replayed reply was ready on the beat of its call");
+      Replay_Beat (4);
+      Check (Ready (T2), "a replayed reply was not ready on the next beat");
+      Check (not Ready (T1), "a reply answered a call with another request");
+      Check (Ada.Strings.Unbounded.To_String (Collect (T2).Text) = "answer", "the recorded text was not delivered");
+      --  A reply recorded before an identical call is submitted waits for it.
+      Replay_Reply (Instrument, "/segment", "box", R);
+      T3 := Submit (Instrument, "/segment", "box", 4);
+      Check (not Ready (T3), "a waiting reply was ready on the beat of its call");
+      Replay_Beat (5);
+      Check (Ready (T3), "a reply recorded before its call was lost");
+      --  A service without recorded replies is called live; without an
+      --  address it answers at once that it cannot.
+      T3 := Submit (Brain, "/chat", "hello", 5);
+      Replay_Beat (6);
+      Check (Ready (T3) and then not Collect (T3).Ok, "an unconfigured live service pretended to answer");
+      End_Replay;
+   end Replayed_Services;
+
    procedure Register is
    begin
       Driver.Tests.Register ("core.rotation", "Exp and Log disagree near 0 or pi", Rotation_Round_Trip'Access);
@@ -345,6 +444,11 @@ package body Driver.Core_Tests is
       Driver.Tests.Register ("core.stats", "robust statistics moved by a single outlier", Robust_Statistics'Access);
       Driver.Tests.Register ("core.significance", "the one significance rule misjudges a difference",
                              Significance'Access);
+      Driver.Tests.Register ("core.point_significance",
+                             "a separation of points alarms more often than the scalar rule, or a real one is missed",
+                             Point_Significance'Access);
+      Driver.Tests.Register ("core.clock", "record times overflow after a few seconds or lose nanoseconds",
+                             Clock_Range'Access);
       Driver.Tests.Register ("core.buffer", "a byte buffer loses data when it grows or copies",
                              Buffer_Growth'Access);
       Driver.Tests.Register ("core.image", "pixels are addressed by the wrong column or row", Image_Access'Access);
@@ -359,6 +463,9 @@ package body Driver.Core_Tests is
                              Json_Round_Trip'Access);
       Driver.Tests.Register ("core.services", "a call to an unconfigured service pretends to succeed",
                              Unconfigured_Service'Access);
+      Driver.Tests.Register ("core.replayed_services",
+                             "a replayed service reply arrives on another beat or answers another call",
+                             Replayed_Services'Access);
    end Register;
 
 end Driver.Core_Tests;

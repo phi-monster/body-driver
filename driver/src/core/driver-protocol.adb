@@ -55,6 +55,9 @@ package body Driver.Protocol is
          when Heartbeat    => "heartbeat_ack",
          when Unknown      => "error");
 
+   function Is_Echoed (Field : String) return Boolean is
+     (Field = "step" or else (for some Name of Echoed => To_String (Name) = Field));
+
    procedure Encode_Reply
      (R          : Request;
       Has_Action : Boolean;

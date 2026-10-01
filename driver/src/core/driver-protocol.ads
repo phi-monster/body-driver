@@ -36,4 +36,11 @@ package Driver.Protocol is
    --  (Driver.Replies); without one the result list is empty (nothing can be
    --  sent yet). Action is ignored for every other request.
 
+   function Reply_Type (K : Message_Kind) return String;
+   --  The message type of the reply to a request of kind K.
+
+   function Is_Echoed (Field : String) return Boolean;
+   --  Whether a reply returns this top-level field of its request unchanged
+   --  when the request carries it (the identifiers, and the step).
+
 end Driver.Protocol;
