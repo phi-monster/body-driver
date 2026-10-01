@@ -560,11 +560,51 @@ def grip_check(S, rep):
     return out
 
 
+def reading_check(S, rep):
+    """夹爪 / 手的读数是不是量到的:命令推到限位以外(夹爪给 3,手每个关节给上限 + 1 rad)走 10 个动作,读数该停在手指真到的地方(限位上),
+    不该跟着命令走(P8XH2:驱动"推到 97.5 读数跟着走";读数要是命令的回声,这里读数 = 命令)。返回 (读数 = 关节真位置, 读数 ≠ 命令)"""
+    env = S.env
+    rm = env.robot_manager
+    art = rm.robot_key[0]
+    rob = rm.robot_list[0]
+    key = rm.process_name(rob.gripper_name)
+    lim = art.data.soft_joint_pos_limits[0, rob.gripper_joint_indices].cpu().numpy()
+    cmd = np.array([3.0]) if rob.ee_type == "gripper" else (lim[:, 1] + 1.0).astype(np.float64)
+    for _ in range(10):
+        a = S.hold_action()
+        a[key] = cmd.copy()
+        env.take_action(a)
+    st = env.get_obs()["state"]
+    r = np.asarray(st[key], dtype=float).reshape(-1)
+    q = art.data.joint_pos[0, rob.gripper_joint_indices].cpu().numpy().astype(float)
+    if rob.ee_type == "gripper":
+        lo, hi = rob.gripper_scale
+        base = rob.gripper_joints_name.index(rob.gripper_move["base"])
+        truth = np.array([(q[base] - lo) / (hi - lo) if rob.gripper_move["sign"] == 1 else (hi - q[base]) / (hi - lo)])
+    else:
+        truth = q
+    out = {"key": key, "cmd": [round(float(v), 3) for v in cmd], "reading": [round(float(v), 4) for v in r], "joint_truth": [round(float(v), 4) for v in truth]}
+    rep["reading_check"] = out
+    log("   读数核:命令推到限位以外 %s ⇒ 读数 %s、关节真到 %s" % (out["cmd"], out["reading"], out["joint_truth"]))
+    real = r.shape == truth.shape and float(np.abs(r - truth).max()) < 1e-3
+    not_echo = float(np.abs(r - cmd).min()) > 0.5
+    # 放回去:命令回到上一拍的样子(夹爪 1 = 开;手回到下限 = 张开)
+    back = np.array([1.0]) if rob.ee_type == "gripper" else lim[:, 0].astype(np.float64)
+    for _ in range(10):
+        a = S.hold_action()
+        a[key] = back.copy()
+        env.take_action(a)
+    return real, not_echo
+
+
 def mouse_floor_scenario(S, rep):
     """第 39 条:底盘真在地上走(两个轮子一起转 ⇒ 往前走;反着转 ⇒ 原地转),老鼠离地 12 cm 判 1、8 cm 判 0"""
     g = grip_check(S, rep)
     q0, q1 = g["cmd_0"]["finger_joint_pos"], g["cmd_1"]["finger_joint_pos"]
     test(rep, "夹爪给 1:两根手指张开(%s → %s)" % (q0, q1), 1, max(abs(a - b) for a, b in zip(q0, q1)) > 0.01)
+    real, not_echo = reading_check(S, rep)
+    test(rep, "夹爪命令推到限位以外:读数 = 手指真到的地方", 1, real)
+    test(rep, "夹爪命令推到限位以外:读数不跟着命令走", 1, not_echo)
     r = 0.05   # 轮子半径(make_wheelarm.py)
     a = drive(S, rep, "往前", 0.004 / r, 0.004 / r, 50)          # 一个动作该走 4 mm(0.1 m/s),50 个动作该走 0.2 m
     test(rep, "两个轮子一起转,底盘往前走了 %.3f m(该 0.2 m 上下)" % a["dist_m"], 1, 0.1 < a["dist_m"] < 0.3)
@@ -756,6 +796,9 @@ def livingroom_scenario(S, rep):
     g = grip_check(S, rep)
     q0, q1 = g["cmd_0"]["finger_joint_pos"], g["cmd_1"]["finger_joint_pos"]
     test(rep, "左手每个关节给到下限 / 上限:手指动了(最大 %.3f rad)" % max(abs(x - y) for x, y in zip(q0, q1)), 1, max(abs(x - y) for x, y in zip(q0, q1)) > 0.1)
+    real, not_echo = reading_check(S, rep)
+    test(rep, "左手命令推到限位以外:读数 = 关节真到的地方", 1, real)
+    test(rep, "左手命令推到限位以外:读数不跟着命令走", 1, not_echo)
     fp = S.rm.func_parser
     test(rep, "开局(东西乱放着)", 0, S.graded())
     lay = S.lm.saved_layouts[0]
