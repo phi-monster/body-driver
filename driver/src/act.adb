@@ -987,6 +987,9 @@ package body Act is
    --  🔴 这里的量全是【米】。09-20 搬回来时为了不碰棘轮把"×1000"删了,标签却还写着 mm ⇒ 横挪 25.6 毫米显示成 "0.0 mm",
    --  "它在相机前 -0.8 mm"其实是负 0.8 米(算到相机背后去了)—— T10 2026-09-21 差点被这个标签骗过去。量的是米,就按米说,三位小数到毫米。
 
+   --  (V5)这一步按开机量的阶跃响应逐拍预测的和读数差多少(写在 Geo_Base 后面)
+   function Response_Note (C : Context; Arm : Natural; Rep : Selfmap.Leg_Step) return String;
+
    --  走一步(Selfmap.Step,I6):这只手的目标 = 此刻的读数平移 Dw,这一步走它的 Frac,上限 = 眼跟得住 Track、离可能碰到的地方 Clear、
    --  反解够得到(Reach)(Selfmap.Step 的三道上限),一条命令、等它停
    --  (没给 Watch ⇒ 到了一步看得见的那一档以内就算到,同 Step_Arm 的 Geo_Settle);Rep = 这一步的账(实到、到没到、挡没挡:Blocked_By 拿 Wk 里这一段空走的底)
@@ -1021,7 +1024,7 @@ package body Act is
       Geo_Say ("挪 (" & Mm (Rep.Cmd (0)) & "," & Mm (Rep.Cmd (1)) & "," & Mm (Rep.Cmd (2)) & ") ⇒ 实到 (" & Mm (Rep.Got (0)) & "," & Mm (Rep.Got (1)) & "," & Mm (Rep.Got (2)) &
                "),差 " & Mm (Geom.Norm ([Rep.Cmd (0) - Rep.Got (0), Rep.Cmd (1) - Rep.Got (1), Rep.Cmd (2) - Rep.Got (2)])) & (if Ok then "" else " · 身体说没走成")
                & (if Rep.Blocked_T then " · 被挡住(比这一段空走时少走得多)" else "")
-               & " · 拍 " & Codec.Img (Seq0) & "→" & Codec.Img (F.Seq));
+               & " · 拍 " & Codec.Img (Seq0) & "→" & Codec.Img (F.Seq) & Response_Note (C, Arm, Rep));
    end Geo_Move;
 
    procedure Geo_Move (L : in out Plug.Link; C : Context; F : in out Plug.Frame; Arm : Natural; Dw : Geom.V3; Ok : out Boolean;
@@ -1075,6 +1078,24 @@ package body Act is
       end if;
       return C.Map.EE_Noise;
    end Geo_Base;
+
+   --  (V5)这一步按开机量的阶跃响应(Selfmap.Predict)逐拍预测走到几成,和读数最多差几档(按这一步的长、这只手一步看得见的那一档折)、
+   --  起效那一拍差几拍;驱动自己一拍最多花几秒(判停 + 发命令,不含等帧)。没量过阶跃响应 ⇒ 照实说
+   function Response_Note (C : Context; Arm : Natural; Rep : Selfmap.Leg_Step) return String is
+      Tk : Floats;
+      Nn : Long_Float;
+   begin
+      if Arm >= Natural (C.Map.Resp.Length) or else C.Map.Resp (Arm).Alpha <= 0.0 then
+         return " · 阶跃响应没量过";
+      end if;
+      Selfmap.Step_Track (C.Map, Rep, Tk, Nn);
+      if Tk.Is_Empty then
+         return "";
+      end if;
+      return " · 按阶跃响应逐拍预测:最多差 " & Codec.Fmt (Selfmap.Response_Err (C.Map.Resp (Arm), Tk) * Nn, 2)
+        & " 档、起效差 " & Codec.Img (Selfmap.Effect_Miss (C.Map.Resp (Arm), Tk)) & " 拍 · 驱动一拍最多 "
+        & Codec.Fmt (Rep.Busy, 6) & " 秒";
+   end Response_Note;
 
    --  这只手的小步(Selfmap.Careful_Step):手自己的不准(长在它上面那只眼量的指尖不准、这一次到位差 Miss、读数噪声)分给 Blocked 当底的那几步,
    --  再小也得是它自己那只眼看得出的一步

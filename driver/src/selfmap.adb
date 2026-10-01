@@ -1,4 +1,5 @@
 with Ada.Text_IO; use Ada.Text_IO;
+with Ada.Calendar;
 with Codec;
 with Chan;
 with Lockstep;
@@ -161,6 +162,8 @@ package body Selfmap is
       Started : Boolean := False;       --  这一条发出去以后读数动起来过(挪过"停了"的那道门)
       Send : Boolean := True;
       Why : Stop_Why := Going;
+      Track_T, Track_R : Floats;        --  (V5)发出后逐拍走到这一条的几成(平移 / 转动;这一条没有那一样 = 空)
+      Busy : Long_Float := 0.0;         --  (V5)一拍最多花了几秒(判停 + 发命令)
    end record;
    package Run_Vectors is new Ada.Containers.Vectors (Natural, Run);
 
@@ -214,7 +217,17 @@ package body Selfmap is
          N_Beat : constant Long_Float := (if Geo then Moved_P / Tol + Sqrt (Rv) / Tol_Rot else 0.0);
          N_Noise : constant Long_Float := (if Geo then M.EE_Noise / Tol + M.Rot_Noise / Tol_Rot else 0.0);
          Miss : constant Table.Vec := Chan.Delivered (F.EE (Arm), R.C.Pose);
+         Dc : constant Table.Vec := Chan.Delivered (R.P0, F.EE (Arm));
+         Ct2 : constant Long_Float := Cmd (0) ** 2 + Cmd (1) ** 2 + Cmd (2) ** 2;
+         Cr2 : constant Long_Float := Cmd (3) ** 2 + Cmd (4) ** 2 + Cmd (5) ** 2;
       begin
+         --  (V5)这一拍走到这一条的几成:从起点挪的沿命令方向的那一份 ÷ 命令的长(平移、转动各算各的)
+         if Ct2 > 0.0 then
+            R.Track_T.Append ((Dc (0) * Cmd (0) + Dc (1) * Cmd (1) + Dc (2) * Cmd (2)) / Ct2);
+         end if;
+         if Cr2 > 0.0 then
+            R.Track_R.Append ((Dc (3) * Cmd (3) + Dc (4) * Cmd (4) + Dc (5) * Cmd (5)) / Cr2);
+         end if;
          if (if Geo then N_Beat <= Long_Float'Max (N_Noise, Still_Frac * N_Cmd)
              else Moved_P <= M.EE_Noise and then Rv <= M.Rot_Noise * M.Rot_Noise)
          then
@@ -274,6 +287,8 @@ package body Selfmap is
    --  每一拍把要发的那几组各发一回:在按拍对齐的手的任务里 Plug.Act 只记下那一组的目标,主线程把几组合成一条发出去
    procedure Go_Runs (L : in out Plug.Link; M : Body_Map; Rs : in out Run_Vectors.Vector; F : in out Plug.Frame; Frames : out Natural;
                       Ok : out Boolean; Press : Boolean; Watch : Watcher) is
+      use type Ada.Calendar.Time;
+      T_Got : Ada.Calendar.Time := Ada.Calendar.Clock;   --  这一帧收到的时刻(第一拍之前 = 进门)
    begin
       Frames := 0;
       Ok := True;
@@ -292,10 +307,25 @@ package body Selfmap is
                end;
             end if;
          end loop;
+         declare
+            Busy : constant Long_Float := Long_Float (Ada.Calendar.Clock - T_Got);
+         begin
+            for I in 0 .. Natural (Rs.Length) - 1 loop
+               if Rs (I).Busy < Busy then
+                  declare
+                     R : Run := Rs (I);
+                  begin
+                     R.Busy := Busy;
+                     Rs.Replace_Element (I, R);
+                  end;
+               end if;
+            end loop;
+         end;
          if not Plug.Sense (L, F) then
             Ok := False;
             return;
          end if;
+         T_Got := Ada.Calendar.Clock;
          Frames := Frames + 1;
          declare
             All_Done : Boolean := True;
@@ -323,7 +353,8 @@ package body Selfmap is
                  Watch : Watcher := null; Joints : Floats := F64_Vectors.Empty_Vector; Group : Integer := -1;
                  Groups : Ints := Int_Vectors.Empty_Vector; Qs : Plug.Floats_Vectors.Vector := Plug.Floats_Vectors.Empty_Vector;
                  Tol : Long_Float := 0.0; Tol_Rot : Long_Float := 0.0;
-                 Tols : Plug.Floats_Vectors.Vector := Plug.Floats_Vectors.Empty_Vector) is
+                 Tols : Plug.Floats_Vectors.Vector := Plug.Floats_Vectors.Empty_Vector;
+                 Track_T, Track_R : access Floats := null) is
       C : Plug.Cmd;
       Still : Natural := 0;
       Send : Boolean := True;
@@ -347,6 +378,12 @@ package body Selfmap is
             Go_Runs (L, M, Rs, F, Frames, Ok, Press, Watch);
             if Arm < Natural (F.EE.Length) then
                Delivered := Chan.Delivered (Rs (0).P0, F.EE (Arm));
+            end if;
+            if Track_T /= null then
+               Track_T.all := Rs (0).Track_T;
+            end if;
+            if Track_R /= null then
+               Track_R.all := Rs (0).Track_R;
             end if;
          end;
          return;
@@ -688,8 +725,12 @@ package body Selfmap is
       M.Amp := Zeros (M.Channels); M.Delivered := Zeros (M.Channels);
       M.Seen := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (M.Channels));
       M.Cam_On_Arm := Int_Vectors.To_Vector (-1, Ada.Containers.Count_Type (Arms));
+      M.Resp := Response_Vectors.To_Vector ((others => <>), Ada.Containers.Count_Type (Arms));
       begin
       for A in 0 .. Arms - 1 loop
+         declare
+            Tracks : Plug.Floats_Vectors.Vector;   --  (V5)这条臂每一条探针命令逐拍走到它自己的几成
+         begin
          for K in 0 .. Chan.Per_Arm - 1 loop
             declare
                Ch : constant Natural := A * Chan.Per_Arm + K;
@@ -711,12 +752,14 @@ package body Selfmap is
                      F1, F1b : Plug.Cam_Vectors.Vector;   --  推到那头:走完那一帧、再读的一帧
                      Visible : Boolean := False;
                      S0 : Natural := L.Seq;               --  发命令之前那一拍的帧号(Settle 从它往后数)
+                     Tr_T, Tr_R : aliased Floats;         --  (V5)这一条逐拍走到它自己的几成(平移 / 转动那一份)
                   begin
                      A_Cmd (K) := Amp;
-                     Go (L, M, A, Chan.Compose (P0, A_Cmd), Jaw0, F, Deliv, Frames, Ok2);
+                     Go (L, M, A, Chan.Compose (P0, A_Cmd), Jaw0, F, Deliv, Frames, Ok2, Track_T => Tr_T'Access, Track_R => Tr_R'Access);
                      if not Ok2 then
                         return;
                      end if;
+                     Tracks.Append (if K < Chan.Pos_Channels then Tr_T else Tr_R);   --  推的是平移通道 ⇒ 平移那一份,转动通道 ⇒ 转动那一份
                      Got := Deliv (K);
                      F1 := F.Cams;
                      --  推到那头再读一帧(画面比读数晚一拍;同开机前半段认手)
@@ -728,10 +771,11 @@ package body Selfmap is
                      --  推过去这一条从发出到读数停住用了几拍(连再读的那一拍一起看;09-30:原来取 Go 用的拍数、夹在 6 拍以内);推回来那一条另量
                      M.Settle := Natural'Max (M.Settle, Settle_Since (L, S0, M.Joint_Noise));
                      S0 := L.Seq;
-                     Go (L, M, A, P0, Jaw0, F, Back, Frames_Back, Ok2);
+                     Go (L, M, A, P0, Jaw0, F, Back, Frames_Back, Ok2, Track_T => Tr_T'Access, Track_R => Tr_R'Access);
                      if not Ok2 then
                         return;
                      end if;
+                     Tracks.Append (if K < Chan.Pos_Channels then Tr_T else Tr_R);
                      M.Settle := Natural'Max (M.Settle, Settle_Since (L, S0, M.Joint_Noise));
                      for C in 0 .. N_Cams - 1 loop
                         declare
@@ -782,6 +826,17 @@ package body Selfmap is
                end if;
             end;
          end loop;
+         declare
+            Rp : constant Response := Fit_Response (Tracks);
+         begin
+            M.Resp.Replace_Element (A, Rp);
+            Put_Line ("[身] 第" & Natural'Image (A + 1) & " 只手的阶跃响应(V5):"
+                      & (if Rp.Alpha > 0.0
+                         then "命令发出后头 " & Codec.Img (Rp.Dead) & " 拍不动,之后每拍走还差的 " & Codec.Fmt (Rp.Alpha, 3)
+                              & "(" & Codec.Img (Rp.N) & " 条探针;拿它重放这几条,逐拍最多差一条的 " & Codec.Fmt (Rp.Err, 3) & ")"
+                         else "探针一条都没动起来 ⇒ 量不出(记没量)"));
+         end;
+         end;
       end loop;
       end;
       Put_Line ("[身] 一条命令从发出到读数停住(每拍挪动不超过静止噪声 " & Codec.Fmt (M.Joint_Noise, 6) & "、而且不再变小):"
@@ -1074,6 +1129,7 @@ package body Selfmap is
                         S.Went := (if S.Len > 0.0 then (S.Got (0) * S.Cmd (0) + S.Got (1) * S.Cmd (1) + S.Got (2) * S.Cmd (2)) / S.Len else 0.0);
                         S.Turned := (if S.Ang > 0.0 then (S.Got (3) * S.Cmd (3) + S.Got (4) * S.Cmd (4) + S.Got (5) * S.Cmd (5)) / S.Ang else 0.0);
                         S.Halted := R.Halted;
+                        S.Fracs_T := R.Track_T; S.Fracs_R := R.Track_R; S.Busy := R.Busy;
                         S.Moving := (R.Why in Waited | Capped) and then R.Still = 0;
                         S.Arrived := R.Tol > 0.0 and then Table.Norm (Miss, Chan.Pos_Channels) <= R.Tol and then Rot_Len (Miss) <= R.Tol_Rot;
                         --  判挡没挡:它自己停下来了、又没到 ⇒ 少走的比这一段空走时多出门没有。走到了(那一档以内,少走多少是 Go 在哪一刻收的)、
@@ -1099,6 +1155,79 @@ package body Selfmap is
          end;
       end loop;
    end Step;
+
+   --  ── 命令 → 动作的阶跃响应(V5)──
+   function Predict (R : Response; Beat : Positive) return Long_Float is
+     (if R.Alpha <= 0.0 or else Beat <= R.Dead then 0.0 else 1.0 - (1.0 - R.Alpha) ** (Beat - R.Dead));
+
+   function Moved_At (Track : Floats) return Natural is   --  第几拍动起来(走过这一条的百分之一;一直没动 ⇒ 0)
+   begin
+      for I in 0 .. Natural (Track.Length) - 1 loop
+         if Track (I) > Negligible then
+            return I + 1;
+         end if;
+      end loop;
+      return 0;
+   end Moved_At;
+
+   function Fit_Response (Tracks : Plug.Floats_Vectors.Vector) return Response is
+      R : Response;
+      Ds, As : Floats;
+   begin
+      for Tk of Tracks loop
+         declare
+            B : constant Natural := Moved_At (Tk);
+         begin
+            if B > 0 then
+               Ds.Append (Long_Float (B - 1));
+               As.Append (Tk (B - 1));
+            end if;
+         end;
+      end loop;
+      if Ds.Is_Empty then
+         return R;
+      end if;
+      R.N := Natural (Ds.Length);
+      R.Dead := Natural (Long_Float'Floor (Picture.Quantile (Ds, 0.5)));   --  中位(0.5 分位)
+      R.Alpha := Long_Float'Min (1.0, Picture.Quantile (As, 0.5));
+      for Tk of Tracks loop
+         if Moved_At (Tk) > 0 then
+            R.Err := Long_Float'Max (R.Err, Response_Err (R, Tk));
+         end if;
+      end loop;
+      return R;
+   end Fit_Response;
+
+   function Response_Err (R : Response; Track : Floats) return Long_Float is
+      E : Long_Float := 0.0;
+   begin
+      for I in 0 .. Natural (Track.Length) - 1 loop
+         E := Long_Float'Max (E, abs (Track (I) - Predict (R, I + 1)));
+      end loop;
+      return E;
+   end Response_Err;
+
+   procedure Step_Track (M : Body_Map; S : Leg_Step; Track : out Floats; Notches : out Long_Float) is
+      Chs : constant Ints := Selfmap.Graph.Pose_Channels (M, S.Arm);
+      Tp : constant Long_Float := (if Natural (Chs.Length) > Chan.Pos_Channels and then Natural (Chs (0)) < Natural (M.Amp.Length)
+                                   then M.Amp (Natural (Chs (0))) else 0.0);
+      Tr : constant Long_Float := (if Natural (Chs.Length) > Chan.Pos_Channels and then Natural (Chs (Chan.Pos_Channels)) < Natural (M.Amp.Length)
+                                   then M.Amp (Natural (Chs (Chan.Pos_Channels))) else 0.0);
+      Nt : constant Long_Float := (if Tp > 0.0 then S.Len / Tp else 0.0);
+      Nr : constant Long_Float := (if Tr > 0.0 then S.Ang / Tr else 0.0);
+   begin
+      if Nt >= Nr then
+         Track := S.Fracs_T; Notches := Nt;
+      else
+         Track := S.Fracs_R; Notches := Nr;
+      end if;
+   end Step_Track;
+
+   function Effect_Miss (R : Response; Track : Floats) return Natural is
+      B : constant Natural := Moved_At (Track);
+   begin
+      return (if B = 0 then 0 elsif B > R.Dead + 1 then B - (R.Dead + 1) else (R.Dead + 1) - B);
+   end Effect_Miss;
 
    --  ── 走近一件东西每一步多大 ──
    function Floor_Step (Noise, Notch, Eye_Rms : Long_Float) return Long_Float is
