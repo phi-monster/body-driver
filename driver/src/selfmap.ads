@@ -167,7 +167,8 @@ package Selfmap is
    --  一组关节这一拍"到了没有"(Go 里用的就是它;纯函数,导出给自检):Tols 这一位 > 0 ⇒ 这个关节按它自己的门,否则按 Tol;门 ≤ 0 的关节永远不算到
    function Joints_Arrived (Now, Target, Tols : Floats; Tol : Long_Float) return Boolean;
    --  一条命令从发出到读数停住用了几拍(纯函数,导出给自检):Moves (I) = 发出后第 I + 1 拍读数挪了多少(那一拍挪得最多的那个关节)。
-   --  停住 = 动起来以后(挪过超过 Noise 的一拍:Noise 只用来认"动起来了"),第一次挪的不再变小(Stopped_Shrinking,同 Go)的那一拍;返回它是第几拍。
+   --  停住 = 动起来以后(挪过超过 Noise 的一拍:Noise 只用来认"动起来了"),第一次挪的不再变小、或者掉到这一条挪得最多那一拍的百分之一以下
+   --  (Settle_Watch,尺子 = 挪得最多的那一拍;同 Go 判"走完了")的那一拍;返回它是第几拍。
    --  一直没动起来(探针小得读数跟不上)/ 看到的那几拍里还在变小(还没停住)⇒ 0:这一条量不出,不算(不拿没停住的拍数顶)
    function Settle_Beats (Moves : Floats; Noise : Long_Float) return Natural;
    --  量 Settle 的唯一办法:帧号 From_Seq(发命令之前那一拍,L.Seq)以后 Plug 逐拍记下的读数(Beats.Q_Chg,每一拍取各组里挪得最多的)⇒ Settle_Beats。
