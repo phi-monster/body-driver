@@ -79,6 +79,227 @@ package body Plan is
       return -1;
    end Look_Up;
 
+   function Letters (W : String) return String is
+      R : String (1 .. W'Length);
+      N : Natural := 0;
+   begin
+      for Ch of W loop
+         if Ch in 'a' .. 'z' then
+            N := N + 1; R (N) := Ch;
+         elsif Ch in 'A' .. 'Z' then
+            N := N + 1; R (N) := Character'Val (Character'Pos (Ch) - Character'Pos ('A') + Character'Pos ('a'));
+         end if;
+      end loop;
+      return R (1 .. N);
+   end Letters;
+
+   function Same_Name (A, B : String) return Boolean is
+      La : constant String := Letters (A);
+   begin
+      return La'Length > 0 and then La = Letters (B);
+   end Same_Name;
+
+   function Holds_Name (Outer, Inner : String) return Boolean is
+      Lo : constant String := Letters (Outer);
+      Li : constant String := Letters (Inner);
+   begin
+      if Li'Length = 0 or else Li'Length > Lo'Length then
+         return False;
+      end if;
+      for I in Lo'First .. Lo'Last - Li'Length + 1 loop
+         if Lo (I .. I + Li'Length - 1) = Li then
+            return True;
+         end if;
+      end loop;
+      return False;
+   end Holds_Name;
+
+   function Same_Pixels (Ma : Bytes.Bools; Ua, Va : Long_Float; Mb : Bytes.Bools; Ub, Vb : Long_Float; W, H : Natural) return Boolean is
+      function Inside (U, V : Long_Float) return Boolean is
+        (U >= 0.0 and then V >= 0.0 and then U < Long_Float (W) and then V < Long_Float (H));
+      function At_Px (M : Bytes.Bools; U, V : Long_Float) return Boolean is
+        (M (Natural (Long_Float'Floor (V)) * W + Natural (Long_Float'Floor (U))));
+   begin
+      if W = 0 or else H = 0 or else Natural (Ma.Length) /= W * H or else Natural (Mb.Length) /= W * H
+        or else not Inside (Ua, Va) or else not Inside (Ub, Vb)
+      then
+         return False;
+      end if;
+      return At_Px (Ma, Ub, Vb) and then At_Px (Mb, Ua, Va);
+   end Same_Pixels;
+
+   --  以前说过的名字(有过框的那几条,按字母去重),「」隔开
+   function Known_Names (Records : Named_Vectors.Vector) return Unbounded_String is
+      S : Unbounded_String;
+      Seen_Letters : Unbounded_String;   --  已经列过的字母串,用一个字母里不会有的分隔符隔开
+   begin
+      for R of Records loop
+         if R.Boxed and then Letters (To_String (R.Name))'Length > 0
+           and then Ada.Strings.Unbounded.Index (Seen_Letters, "|" & Letters (To_String (R.Name)) & "|") = 0
+         then
+            Append (Seen_Letters, "|" & Letters (To_String (R.Name)) & "|");
+            Append (S, "「" & To_String (R.Name) & "」");
+         end if;
+      end loop;
+      return S;
+   end Known_Names;
+
+   function Before_Eye (W : String; Eye : Natural; Records : Named_Vectors.Vector) return Name_Verdict is
+      V : Name_Verdict;
+   begin
+      V.Known := Known_Names (Records);
+      for I in 0 .. Natural (Records.Length) - 1 loop
+         if Records (I).Eye = Eye and then Records (I).Seen and then Same_Name (To_String (Records (I).Name), W) then
+            V.Kind := Nv_This; V.Index := Integer (I); V.Name := Records (I).Name;
+            return V;
+         end if;
+      end loop;
+      V.Kind := Nv_Ask_Eye;
+      return V;
+   end Before_Eye;
+
+   function Without_Eye (W : String; Eye : Natural; Records : Named_Vectors.Vector) return Name_Verdict is
+      V : Name_Verdict;
+      Pick : Unbounded_String;       --  对上的那一件(字母串)
+      Picks : Natural := 0;          --  对上了几件(按字母去重)
+      Picked : Unbounded_String;     --  列过的字母串,"|…|" 隔开
+      Listed : Unbounded_String;     --  对上的那几件叫什么(给 Nv_Ambiguous)
+      procedure Take (Pass_Exact : Boolean) is
+      begin
+         for R of Records loop
+            declare
+               N : constant String := To_String (R.Name);
+               Ln : constant String := Letters (N);
+            begin
+               if R.Boxed and then Ln'Length > 0
+                 and then (if Pass_Exact then Same_Name (N, W) else Holds_Name (W, N) or else Holds_Name (N, W))
+                 and then Ada.Strings.Unbounded.Index (Picked, "|" & Ln & "|") = 0
+               then
+                  Append (Picked, "|" & Ln & "|");
+                  Append (Listed, "「" & N & "」");
+                  Pick := To_Unbounded_String (Ln);
+                  Picks := Picks + 1;
+               end if;
+            end;
+         end loop;
+      end Take;
+   begin
+      V.Known := Known_Names (Records);
+      Take (Pass_Exact => True);
+      if Picks = 0 then
+         Take (Pass_Exact => False);
+      end if;
+      if Picks = 0 then
+         V.Kind := Nv_Unknown;
+         return V;
+      end if;
+      if Picks > 1 then
+         V.Kind := Nv_Ambiguous; V.Name := Listed;
+         return V;
+      end if;
+      --  就这一件:这只眼这一帧量到了 ⇒ 这一条;别的眼这一帧量到了 ⇒ 那一条;都没量到 ⇒ 有过框的那一条(说它叫什么)
+      declare
+         type Where is (Here_Now, Elsewhere_Now, Only_Before);
+         Found : Boolean := False;
+      begin
+         for Pass in Where loop
+            for I in 0 .. Natural (Records.Length) - 1 loop
+               declare
+                  R : constant Named_Record := Records (I);
+               begin
+                  if Letters (To_String (R.Name)) = To_String (Pick)
+                    and then (case Pass is
+                                when Here_Now => R.Eye = Eye and then R.Seen,
+                                when Elsewhere_Now => R.Seen,
+                                when Only_Before => R.Boxed)
+                  then
+                     V.Kind := (case Pass is
+                                  when Here_Now => Nv_This,
+                                  when Elsewhere_Now => Nv_Elsewhere,
+                                  when Only_Before => Nv_Not_Seen);
+                     V.Index := Integer (I); V.Name := R.Name;
+                     Found := True;
+                     exit;
+                  end if;
+               end;
+            end loop;
+            exit when Found;
+         end loop;
+      end;
+      return V;
+   end Without_Eye;
+
+   procedure Rebind_Missing (Binds : in out Bind_Vectors.Vector; Records : Named_Vectors.Vector; Eye : Natural;
+                             Item_Of : not null access function (Bx : Natural) return Natural;
+                             Got : out Natural) is
+      function Is_Role (K : String) return Boolean is
+      begin
+         for R in Sinew.Role loop
+            if Sinew."/=" (R, Sinew.Rl_None) and then Sinew.Role_Word (R) = K then
+               return True;
+            end if;
+         end loop;
+         return False;
+      end Is_Role;
+   begin
+      Got := 0;
+      for I in 0 .. Natural (Binds.Length) - 1 loop
+         declare
+            E : Bind_Entry := Binds (I);
+            K : constant String := To_String (E.Key);
+         begin
+            if E.Item <= 0 and then not Is_Role (K) then
+               declare
+                  V : constant Name_Verdict := Without_Eye (K, Eye, Records);
+               begin
+                  if V.Kind in Nv_This | Nv_Elsewhere and then Item_Of (Natural (V.Index)) > 0 then
+                     E.Item := Integer (Item_Of (Natural (V.Index)));
+                     E.Tried := To_Unbounded_String ("整段认完再看,按字它就是这段程序里你叫「" & To_String (V.Name) & "」的那一件");
+                     Binds.Replace_Element (I, E);
+                     Got := Got + 1;
+                  end if;
+               end;
+            end if;
+         end;
+      end loop;
+   end Rebind_Missing;
+
+   function Remembered_Here (P : Sinew.Program; W : String) return Integer is
+   begin
+      for I in 0 .. Natural (P.Code.Length) - 1 loop
+         if P.Code (I).O = Sinew.Op_Remember and then Same_Name (To_String (P.Code (I).Name), W) then
+            return Integer (I);
+         end if;
+      end loop;
+      return -1;
+   end Remembered_Here;
+
+   function Outcome_Of_Event (Event : String) return Sinew.Outcome is
+      function Has (P : String) return Boolean is
+        (Event'Length >= P'Length and then Event (Event'First .. Event'First + P'Length - 1) = P);
+   begin
+      if Has ("amount: arrived") or else Has ("amount: already there") then
+         return Sinew.Oc_Arrived;
+      elsif Has ("contact") then
+         return Sinew.Oc_Touched;
+      elsif Has ("resist") or else Has ("amount: stopped getting closer") then
+         return Sinew.Oc_Stuck;
+      elsif Has ("slip") then
+         return Sinew.Oc_Slipped;
+      elsif Has ("settle") then
+         return Sinew.Oc_Settled;
+      elsif Has ("stall") then
+         return Sinew.Oc_Stalled;
+      elsif Has ("lost") then
+         return Sinew.Oc_Lost;
+      elsif Has ("free") then
+         return Sinew.Oc_Free;
+      elsif Has ("steps") then
+         return Sinew.Oc_Timeout;
+      end if;
+      return Sinew.Oc_Refused;
+   end Outcome_Of_Event;
+
    function Tried_Of (B : Bind_Vectors.Vector; N : Sinew.Noun) return String is
       K : constant String := Key_Of (N);
    begin

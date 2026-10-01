@@ -555,17 +555,28 @@ package body Act is
       end if;
    end Mark_Blind;
 
-   --  这只眼看的地方变了(转过了 / 脑明确换过来了)⇒ 以前说的"没有它"不再算数
+   --  这只眼看的地方变了(转过了 / 脑明确换过来了)⇒ 以前说的"没有它"不再算数。
+   --  🔴 只是一句"脑说这只眼里指不出它"、在这只眼里从来没有过框的那一条【删掉】,不解除:解除了它就是一条框为 (0,0,0,0) 的"东西",
+   --  下一帧 Remeasure_Boxed 就在画面左上角量出一块来当它(S1A4 2026-09-27:reach right untilstuck 这句没绑上的话,
+   --  左腕眼一转就成了画面左上角一块墙,3 px 长到 44922 px;lift the mintgreenscissors 成了旁边 83–133 px 的另一块;
+   --  此后 21 次名字绑到这两块假东西上,"这只眼里点过它的名"于是成立,腕眼再没转向桌上的真剪刀)
    procedure Clear_Blind (C : in out Context; Cam : Natural) is
    begin
-      for Bi in 0 .. Natural (C.Boxed.Length) - 1 loop
+      for Bi in reverse 0 .. Natural (C.Boxed.Length) - 1 loop
          if C.Boxed (Bi).Cam = Cam and then C.Boxed (Bi).Blind then
-            declare
-               B : Boxed_Thing := C.Boxed (Bi);
-            begin
-               B.Blind := False;
-               C.Boxed.Replace_Element (Bi, B);
-            end;
+            if Plan.Forget_When_Eye_Moves ((Name => C.Boxed (Bi).Name, Eye => Cam,
+                                            Boxed => C.Boxed (Bi).X1 > C.Boxed (Bi).X0 and then C.Boxed (Bi).Y1 > C.Boxed (Bi).Y0,
+                                            Seen => C.Boxed (Bi).Seen, Blind => True))
+            then
+               C.Boxed.Delete (Bi);
+            else
+               declare
+                  B : Boxed_Thing := C.Boxed (Bi);
+               begin
+                  B.Blind := False;
+                  C.Boxed.Replace_Element (Bi, B);
+               end;
+            end if;
          end if;
       end loop;
    end Clear_Blind;
@@ -930,31 +941,9 @@ package body Act is
 
    procedure Fill_Say (C : in out Context; I : Sinew.Instr; Answer : out Brain.Say) is separate;
 
-   --  身体报的那句事件,归到八个结局里的哪一个。控制流只认这八个。
-   function Classify (Event : String) return Sinew.Outcome is
-      use Sinew;
-      function Has (P : String) return Boolean is
-        (Event'Length >= P'Length and then Event (Event'First .. Event'First + P'Length - 1) = P);
-   begin
-      if Has ("amount: arrived") or else Has ("amount: already there") then
-         return Oc_Arrived;
-      elsif Has ("contact") then
-         return Oc_Touched;
-      elsif Has ("resist") or else Has ("amount: stopped getting closer") then
-         return Oc_Stuck;
-      elsif Has ("slip") then
-         return Oc_Slipped;
-      elsif Has ("settle") then
-         return Oc_Settled;
-      elsif Has ("lost") then
-         return Oc_Lost;
-      elsif Has ("free") then
-         return Oc_Free;
-      elsif Has ("steps") then
-         return Oc_Timeout;
-      end if;
-      return Oc_Refused;
-   end Classify;
+   --  身体报的那句事件,归到结局词里的哪一个。控制流只认结局词。表只有一张(Plan.Outcome_Of_Event,自检逐词核对它和 Until_Word 对得上);
+   --  以前这张表写在这儿、少了 stall 那一行(见 Plan.Outcome_Of_Event)
+   function Classify (Event : String) return Sinew.Outcome is (Plan.Outcome_Of_Event (Event));
 
    procedure Geo_Say (S : String) is
       H : constant Integer := Lockstep.Current_Hand;   --  几只手按拍对齐时:哪只手说的(PLAN ⑧ (g))
