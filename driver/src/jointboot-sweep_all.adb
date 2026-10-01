@@ -1,3 +1,4 @@
+with Links;
 separate (Jointboot)
 procedure Sweep_All (L : in out Plug.Link; F : in out Plug.Frame; M : Selfmap.Body_Map; Arms : Arm_Vectors.Vector;
                      Host : String; Port : Natural; Dump : String; Ds : out Sweep_Vectors.Vector; Css : out Corr_Set_Vectors.Vector;
@@ -208,6 +209,28 @@ procedure Sweep_All (L : in out Plug.Link; F : in out Plug.Frame; M : Selfmap.Bo
          Codec.Write_BMP (Dump & "/" & Nm, F.Cams (Sa.Cam).RGB, Sa.W, Sa.H);
          N_Img := N_Img + 1;
       end if;
+      --  不动的眼也拍这一拍(几条臂同一拍只存一张):每一节的形状按它量(Links,I7)。这一格每条臂的读数都记下(停着的臂也在画面里)
+      if Links.Sweep_On and then (K > 0 or else Multi) and then World_Cam >= 0 and then Natural (World_Cam) < Natural (F.Cams.Length) then
+         if Links.Last_Seq /= Integer (F.Seq) then
+            declare
+               Wi : constant Plug.Cam := F.Cams (Natural (World_Cam));
+               Idw : Integer := -1;
+               Errw : Unbounded_String;
+               C : Links.Cell;
+            begin
+               if Plug.Has_Picture (Wi) then
+                  Instrument.Frame_Put (Host, Port, Wi.RGB, Wi.W, Wi.H, Idw, Errw);
+               end if;
+               C.Seq := F.Seq;
+               for X in 0 .. Na - 1 loop
+                  C.Qs.Append (if St (X).Live and then St (X).G < Natural (F.Joints.Length) then F.Joints (St (X).G) else F64_Vectors.Empty_Vector);
+                  C.Joints.Append (-1);
+               end loop;
+               Links.Sweep_Cell (Idw, C);
+            end;
+         end if;
+         Links.Sweep_Set_Joint (A, (if Multi then -1 else Integer (J)));
+      end if;
    end Keep;
    --  Swept ≥ 0 = 单关节扫描这一格:扫的那根到了按 Tol(这一格的三分之一);别的关节要差不到每根轴单独起步收格子的门(Kinem.Clean_Tol)才算到 ——
    --  读的这一帧才用得上(H1 2026-09-28:人形别的关节还偏 0.001–0.009 就读了,格子全不干净,两只手运动学没量成;x5 每只手 35 格里 7 格同样不干净)
@@ -323,6 +346,7 @@ procedure Sweep_All (L : in out Plug.Link; F : in out Plug.Frame; M : Selfmap.Bo
    end Start_Segment;
 begin
    Ds.Clear; Css.Clear;
+   Links.Sweep_Begin (-1, 0, 0);   --  这一回扫描还没攒(有不动的眼、起点那一张存成了才攒)
    for A in 0 .. Na - 1 loop
       Ds.Append (Sweep_Data'(others => <>));
       Css.Append (Kinem.Corr_Vectors.Empty_Vector);
@@ -362,6 +386,7 @@ begin
                Ds (A).World_Id := Id;
             end if;
          end loop;
+         Links.Sweep_Begin (Id, Wi.W, Wi.H);
          if Dump /= "" then
             Codec.Write_BMP (Dump & "/world_cam.bmp", Wi.RGB, Wi.W, Wi.H);
          end if;
@@ -699,6 +724,16 @@ begin
             end if;
          end;
       end loop;
+      --  不动的眼拍的那几张同样配"画面那一刻"的读数
+      declare
+         function Q_At (Seq : Natural) return Plug.Floats_Vectors.Vector is (Plug.Joints_At (L, Seq));
+         Gs : Ints;
+      begin
+         for A in 0 .. Na - 1 loop
+            Gs.Append (if St (A).Live then Integer (St (A).G) else -1);
+         end loop;
+         Links.Sweep_Repair (Q_At'Access, Lag, Gs);
+      end;
       if Dump /= "" then
          declare
             Fo : Ada.Text_IO.File_Type;
@@ -756,6 +791,16 @@ begin
          delay 0.2;   --  等后台配完(秒,协议:只是轮询间隔)
       end loop;
       Say ("  配点配完:再等了 " & Codec.Fmt (Long_Float (Ada.Calendar."-" (Ada.Calendar.Clock, T1)), 0) & " 秒(" & Codec.Img (N_Empty) & " 对配不上)");
+      --  每一节的形状:不动的眼起点那一张的格点配进它拍的每一格(扫完再配,同上)
+      if Links.Sweep_On then
+         declare
+            T2 : constant Ada.Calendar.Time := Ada.Calendar.Clock;
+            Nt : Unbounded_String;
+         begin
+            Links.Sweep_Match (Host, Port, Nt);
+            Say ("  " & To_String (Nt) & "," & Codec.Fmt (Long_Float (Ada.Calendar."-" (Ada.Calendar.Clock, T2)), 0) & " 秒");
+         end;
+      end if;
    end;
    --  ③ 配点进运动学,这里只去掉落在画面外的点。长在眼上的像素(自己的手、夹爪)由 Kinem.Fit 按这批配点自己认(Eye_Pixels:
    --  两个以上关节各自单独转时各有一格没挪的格点),不再另跟一遍:09-27 以前按跟点仪器认手指,扫描时每格跟一次(V1B14 约 40 秒),

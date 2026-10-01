@@ -25,6 +25,7 @@ with Kinem;
 with Geom;
 with Layout;
 with Instrument;
+with Links;
 procedure Body_Driver is
    Port : Natural := 0;
    Body_Path : Unbounded_String;   --  身体文件(--in/--out;同一具身体越用越强)
@@ -47,6 +48,15 @@ procedure Body_Driver is
    Kin_Ref : Plug.Cam;
    Front_Reloaded : Boolean := False;   --  开机前半段是按身体文件旁边存的装回的(核对过):后面按同一个世界单位记的量(身体图、握区、指尖)才照用
    Body_Groups : Selfmap.Group_Vectors.Vector;   --  开机第一步逐组推一下量出来的:身体报的每一组数是什么(I1;装进 C.Map.Groups,身体图从它答)
+   --  每条臂怎么放进世界(Links 用:每一节的表面点此刻在哪)
+   function Placements (Ws : Jointboot.Arm_World_Vectors.Vector; Rw : Geom.M3; O : Geom.V3) return Links.Placement_Vectors.Vector is
+      R : Links.Placement_Vectors.Vector;
+   begin
+      for W of Ws loop
+         R.Append (Links.Placement'(Model => W.Model, S => W.S, Ra => W.Ra, Ta => W.Ta, Rw => Rw, O => O, Valid => W.Valid));
+      end loop;
+      return R;
+   end Placements;
    I : Natural := 1;
    Order : constant String := Codec.Env ("BL_ORDER");
 begin
@@ -193,6 +203,7 @@ begin
       end if;
       if Front_Reloaded then
          Worlds := K.Worlds; Ds := K.Ds; Rw := K.Rw; O := K.O; Kin_World_Cam := K.World_Cam; Eyes_Of := K.Eyes;
+         Links.Place (Placements (Worlds, Rw, O));   --  每一节的表面点随前半段读回来了(Load_Kin),这里给它放进世界的那一份
          Kin_Fixed := K.Fixed_Eye; Kin_Board := K.Board; Kin_Plane_Pt := K.Plane_Pt; Kin_Plane_N := K.Plane_N; Kin_Plane_Rms := K.Plane_Rms;
          Jointboot.Dump_Kin (Dump, K);
          Jointboot.Remember_Kin (Kin_Path, K);
@@ -257,6 +268,13 @@ begin
       for A in 0 .. Natural (Found.Length) - 1 loop
          Eyes_Of.Append (Found (A).Eye);
       end loop;
+      --  每一节的形状(I7):扫描时不动的眼拍的那几张,对齐以后才知道它在世界里在哪 ⇒ 现在三角
+      declare
+         Nt : Unbounded_String;
+      begin
+         Links.Measure (Placements (Worlds, Rw, O), Kin_Fixed, Nt);
+         Put (To_String (Nt));
+      end;
       if Kin_Path /= "" then
          K := (Key => To_Unbounded_String (Jointboot.Kin_Key (L, F)), Worlds => Worlds, Eyes => Eyes_Of, Ds => Ds, Rw => Rw, O => O, World_Cam => Kin_World_Cam,
                Fixed_Eye => Kin_Fixed, Board => Kin_Board, Plane_Pt => Kin_Plane_Pt, Plane_N => Kin_Plane_N, Plane_Rms => Kin_Plane_Rms);
@@ -304,6 +322,64 @@ begin
       end if;
       Jointboot.Self_Check (L, F, M0, Ds, Dump);
       Put_Line ("[装] 开机前半段完:" & Codec.Img (Natural (F.EE.Length)) & " 只手的位姿按关节读数算(用了 " & Codec.Img (Plug.Steps (L)) & " 拍)");
+      --  净空和"自己"(Links,I7):每条臂此刻离量过的场景点(桌面那块板)、离别的臂多远,朝桌面(板的法向反过来)再走多远进"可能碰到"的那条带子;
+      --  每只眼里此刻多大一片是自己 —— 开机报告照实念出来(走一步、认东西的那两路按同一个问法问)
+      declare
+         Qs : Plug.Floats_Vectors.Vector;
+         Down : constant Geom.V3 := [-Kin_Plane_N (0), -Kin_Plane_N (1), -Kin_Plane_N (2)];
+         Txt : Unbounded_String;
+         K_Valid : Natural := 0;   --  F.EE 里第几只(装上的手按序)
+      begin
+         for W of Worlds loop
+            Qs.Append (if W.Group < Natural (F.Joints.Length) then F.Joints (W.Group) else Bytes.F64_Vectors.Empty_Vector);
+         end loop;
+         for A in 0 .. Natural (Worlds.Length) - 1 loop
+            declare
+               Cl : constant Links.Clearance := Links.Clear_Of (A, Qs, Kin_Board);
+               Known : Boolean;
+               Fa : constant Long_Float := Links.Free_Along (A, Qs, Down, Kin_Board, Known);
+            begin
+               if Cl.Valid then
+                  Append (Txt, " · 第" & Codec.Img (A + 1) & " 条臂离" & (if Cl.To_Scene then "量过的场景点" else "第" & Codec.Img (Natural (Cl.Other_Arm) + 1) & " 条臂")
+                          & "最近 " & Codec.Fmt (Cl.Dist, 4) & " ± " & Codec.Fmt (Cl.Sd, 4) & "(第" & Integer'Image (Cl.Link) & " 节)、朝桌面再走 "
+                          & (if not Known then "说不出" elsif Fa = Long_Float'Last then "碰不上" else Codec.Fmt (Fa, 4)) & " 进带子");
+               else
+                  Append (Txt, " · 第" & Codec.Img (A + 1) & " 条臂没量过每一节的形状 ⇒ 净空说不出");
+               end if;
+            end;
+         end loop;
+         for Cm in 0 .. Natural (F.Cams.Length) - 1 loop
+            declare
+               G : constant Geom.Cam_Geo := (if Cm < Natural (Kin_Geo.Length) then Kin_Geo (Cm) else Geom.No_Geo);
+               Pose : Plug.Arm_Pose := [others => 0.0];
+               Mine : Boolean := G.Fixed;
+            begin
+               K_Valid := 0;
+               for A in 0 .. Natural (Worlds.Length) - 1 loop
+                  if Worlds (A).Valid then
+                     if A < Natural (Eyes_Of.Length) and then Eyes_Of (A) = Integer (Cm) and then K_Valid < Natural (F.EE.Length) then
+                        Pose := F.EE (K_Valid); Mine := True;
+                     end if;
+                     K_Valid := K_Valid + 1;
+                  end if;
+               end loop;
+               if Mine and then G.Valid and then F.Cams (Cm).W > 0 then
+                  declare
+                     Mk : constant Bytes.Bools := Links.Self_Mask (G, Pose, F.Cams (Cm).W, F.Cams (Cm).H, Qs);
+                     N : Natural := 0;
+                  begin
+                     for B of Mk loop
+                        if B then
+                           N := N + 1;
+                        end if;
+                     end loop;
+                     Append (Txt, " · 第" & Codec.Img (Cm) & " 台眼里自己占 " & Codec.Fmt (100.0 * Long_Float (N) / Long_Float (Natural'Max (1, Natural (Mk.Length))), 1) & "%");
+                  end;
+               end if;
+            end;
+         end loop;
+         Put_Line ("[身] 📐 净空和自己(开机,此刻)" & To_String (Txt));
+      end;
    end;
    --  ── 量身体:先装回身体文件(钥匙 = 这具身体报的形状),推一下核对;对不上或没有 ⇒ 从零量;量到的合进历史再写回 ──
    declare
@@ -338,8 +414,15 @@ begin
                Tmp : Selfmap.Body_Map;
                Ok2 : Boolean;
             begin
+               Tmp.Arms := Stored.Arms;   --  位姿噪声也量(存的那一份要是老量法量的,就换成这一回量的)
                Selfmap.Measure_Idle (L, F, Tmp, Ok2);
                Stored.Floors := Tmp.Floors; Stored.Pic_Floor := Tmp.Pic_Floor;
+               --  存的静止噪声是老量法量的(Bodyfile.Load 记成负数:不信)⇒ 用这一回量的(核对、往后每个门的下限都按它)
+               if Stored.EE_Noise < 0.0 or else Stored.Rot_Noise < 0.0 or else Stored.Jaw_Noise < 0.0 then
+                  Stored.EE_Noise := Tmp.EE_Noise; Stored.Rot_Noise := Tmp.Rot_Noise; Stored.Jaw_Noise := Tmp.Jaw_Noise;
+                  Put_Line ("[装] 存的静止噪声是老量法量的 ⇒ 用这一回量的:位置 " & Codec.Fmt (Tmp.EE_Noise, 6) & " · 转 " & Codec.Fmt (Tmp.Rot_Noise, 6)
+                            & " · 抓握 " & Codec.Fmt (Tmp.Jaw_Noise, 6));
+               end if;
             end;
             Selfmap.Verify (L, Stored, F, Ok_Body, Ok_Link, Vn);
             Put_Line ("[装] 核对身体:" & To_String (Vn.Text) & (if Ok_Body then " ⇒ 同一具身体,直接用" else " ⇒ 重量"));

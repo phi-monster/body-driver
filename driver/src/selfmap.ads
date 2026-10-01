@@ -120,6 +120,10 @@ package Selfmap is
    --  不拿空画面当静止对、不编一个 0 的地板)。
    --  Measure 开头用它;只报关节的身体开机前半段(还没有位姿)也用它(同一种量法)。M.Arms 条臂的位姿噪声(没有位姿 = 0)
    procedure Measure_Idle (L : in out Plug.Link; F : in out Plug.Frame; M : in out Body_Map; Ok : out Boolean);
+   --  Measure_Idle 量静止噪声的量法版本(路 1 10-01 加;改了这一段怎么量的那一路把它加一):身体文件记着每一份噪声是第几版量的,
+   --  版本对不上就不信、开机重量(Bodyfile)。1 = 接着上一个动作就量 4 拍(慢的身体会把还在收的尾巴量进去:H4 / H7 的 ee_noise 0.0121);
+   --  身体文件里没记版本的 = 更老,也不信
+   Idle_Ver : constant := 1;
    --  等到画面连着两拍都不再变(各自的灰度地板以内),最多 Max 拍;返回用了几拍。
    --  Ok = 停稳了。等满 Max 拍还在变 ⇒ Ok = False、Used = Max(照实说没停稳 —— 09-30:原来超时照样 Ok = True,握区在还在动的画面上量);
    --  线断了 ⇒ Ok = False、Used < Max

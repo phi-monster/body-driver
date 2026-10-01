@@ -1,5 +1,10 @@
 with Selfmap.Graph;
 with Readings;
+with Links;
+with Stats;
+with Geom;
+with Bodyfile;
+with Schema;
 with Ada.Exceptions;
 separate (Selfcheck)
 procedure Welds_Path_1 is
@@ -983,5 +988,341 @@ begin
              & Codec.Img (Ra.Late_Joints) & " 格、几个关节一起动的 " & Codec.Img (Ra.Multi) & " 格 · ② 松不开 ⇒ " & Codec.Img (Natural (Rb.Frames.Length))
              & " 格里挂着的 " & Codec.Img (Rb.Hooked_Kept) & " 格(要 0)、卡住以后不再扫(第 3–5 个关节 " & Codec.Img (Rb.Late_Joints) & " 格)"
              & " · 牙:原来碰上了照样留下那一格、下一段从卡住的地方出发 ⇒ 挂着的格子进运动学(P8A 22 格里 8 格)");
+   end;
+   --  ══ 每一节的形状(Links,I7):不动的眼看着臂一个关节一个关节转,跟着哪一节动的点就是那一节的表面点 ══
+   --  合成的两条 6 关节臂(同运动学那条焊点的几何;第 2 条挪开 0.6),放进世界时转过、缩放过(S = 1.5);一只不动的眼离 1.2 米斜着看。
+   --  每一节 4 个表面点(离各自的轴有一段),墙上 70 个不动的背景点;扫描:每个关节往两边各两格(两条臂同一拍扫同一个关节)、
+   --  再 3 格几个关节一起动;每个点每一格的像素 = 真的投影 + 0.15 像素以内的噪声(配点噪声从这批配点自己量)。
+   --  ① 三角:每条臂每一节的点都收回来、认对臂和节(48 个点,认错 0 个),离真值都在 Stats.Z 倍自报的不确定度以内;背景点一个都不收。
+   --  ② 净空:场景里放一个点,离第 1 条臂第 5 节最近那一点 0.05 ⇒ Clear_Of 说最近 0.05、是第 5 节、是场景点;
+   --     第 1 条臂朝它平移 ⇒ 走 0.05 减去 Stats.Z 倍不确定度就进带子;背着它走 ⇒ 碰不上;没量过的臂 ⇒ 说不出(Known = False)。
+   --  ③ 自己:不动的眼里,两条臂的表面点落的像素是"自己",墙上一个背景点那一格不是。
+   --  病:没有每一节的形状 ⇒ 走一步不知道胳膊会不会撞上东西、眼把自己的胳膊框成一件东西(路 7 那一回)。
+   --  牙:每一格按整条臂的位姿(所有关节,不截到那一节)搬视线 ⇒ 近端那几节的点在远端关节转的那几格里被搬错、交不上,收不回来
+   --  (10-01 改一行跑过:48 个点只收回第 5 节那 8 个,红;造假数据的真值是焊点自己算的,不借 Links)
+   declare
+      use Geom;
+      Wax : constant array (0 .. 5) of V3 := [[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]];
+      Pax : constant array (0 .. 5) of V3 := [[0.0, 0.0, 0.05], [0.0, 0.0, 0.12], [0.25, 0.0, 0.12], [0.45, 0.0, 0.16], [0.5, 0.0, 0.16], [0.55, 0.0, 0.16]];
+      C0 : constant V3 := [0.6, 0.0, 0.22];
+      Md : Kinem.Model;
+      Pls : Links.Placement_Vectors.Vector;
+      G : Cam_Geo;
+      Truth : Links.Link_Pt_Vectors.Vector;
+      Cells : Links.Cell_Vectors.Vector;
+      Tracks : Links.Track_Vectors.Vector;
+      Pts : Links.Link_Pt_Vectors.Vector;
+      Sd_Px : Long_Float;
+      N_Seed : Natural := 0;
+      function Noise return Long_Float is
+      begin
+         N_Seed := N_Seed + 1;
+         return 0.15 * Sin (Long_Float (N_Seed) * 12.9898) ;   --  确定的伪随机,±0.15 像素
+      end Noise;
+      function V3_Add (A, B : V3) return V3 is ([A (0) + B (0), A (1) + B (1), A (2) + B (2)]);
+      function V3_Sub (A, B : V3) return V3 is ([A (0) - B (0), A (1) - B (1), A (2) - B (2)]);
+      function Cross3 (A, B : V3) return V3 is ([A (1) * B (2) - A (2) * B (1), A (2) * B (0) - A (0) * B (2), A (0) * B (1) - A (1) * B (0)]);
+      function Unit3 (A : V3) return V3 is ([A (0) / Norm (A), A (1) / Norm (A), A (2) / Norm (A)]);
+      --  第 A 条臂第 Lk 节、读数 Q 时,参照系里的点 P 在世界里在哪
+      --  真值自己算(不借被考的那一份 Links.World_Of —— 借了的话,它算错的那一种动法造出来的假数据跟着一起错,牙咬不住):
+      --  第 Lk 节只跟着前 Lk + 1 个关节动(更远的关节放回参照读数 0),再按 X_世界 = Rw · (S · Ra · X + Ta − O) 放进世界
+      function Where (A, Lk : Natural; Q : Floats; P : V3) return V3 is
+         Pl : constant Links.Placement := Pls (A);
+         Qt : Floats := Q;
+         R : M3;
+         T : V3;
+      begin
+         for J in Lk + 1 .. Natural (Qt.Length) - 1 loop
+            Qt.Replace_Element (J, 0.0);
+         end loop;
+         Kinem.FK (Pl.Model, Qt, R, T);
+         declare
+            Xm : constant V3 := V3_Add (Ap (R, P), T);
+            Xr : constant V3 := Ap (Pl.Ra, Xm);
+         begin
+            return Ap (Pl.Rw, V3_Sub (V3_Add ([Pl.S * Xr (0), Pl.S * Xr (1), Pl.S * Xr (2)], Pl.Ta), Pl.O));
+         end;
+      end Where;
+      Zero6 : constant Floats := F64_Vectors.To_Vector (0.0, 6);
+   begin
+      Md.N := 6; Md.F := 400.0; Md.Cx := 320.0; Md.Cy := 240.0; Md.Valid := True; Md.Q0 := Zero6;
+      for I in 0 .. 5 loop
+         Md.Ax (I).W := Wax (I);
+         Md.Ax (I).P := V3_Sub (Pax (I), C0);
+      end loop;
+      Pls.Append (Links.Placement'(Model => Md, S => 1.5, Ra => Rodrigues ([0.0, 0.0, 0.3]), Ta => [0.1, -0.2, 0.05],
+                                   Rw => Rodrigues ([0.2, 0.0, 0.0]), O => [0.05, 0.05, 0.0], Valid => True));
+      Pls.Append (Links.Placement'(Model => Md, S => 1.5, Ra => Rodrigues ([0.0, 0.0, 0.3]), Ta => [0.1, 0.4, 0.05],
+                                   Rw => Rodrigues ([0.2, 0.0, 0.0]), O => [0.05, 0.05, 0.0], Valid => True));
+      --  每一节 4 个点:那一节的轴上一点挪开 ±3 cm、±2 cm(离轴有一段,转的时候挪得出来)
+      for A in 0 .. 1 loop
+         for Lk in 0 .. 5 loop
+            for K in 0 .. 3 loop
+               Truth.Append (Links.Link_Pt'(Arm => A, Link => Lk,
+                                            P => V3_Add (V3_Sub (Pax (Lk), C0), [(if K mod 2 = 0 then 0.03 else -0.03), (if K < 2 then 0.02 else -0.02), 0.04]),
+                                            others => <>));
+            end loop;
+         end loop;
+      end loop;
+      --  不动的眼:看着两条臂的中间,离 1.2(世界单位)
+      declare
+         Center : constant V3 := [0.5 * (Where (0, 0, Zero6, [0.0, 0.0, 0.0]) (0) + Where (1, 0, Zero6, [0.0, 0.0, 0.0]) (0)),
+                                  0.5 * (Where (0, 0, Zero6, [0.0, 0.0, 0.0]) (1) + Where (1, 0, Zero6, [0.0, 0.0, 0.0]) (1)),
+                                  0.5 * (Where (0, 0, Zero6, [0.0, 0.0, 0.0]) (2) + Where (1, 0, Zero6, [0.0, 0.0, 0.0]) (2))];
+         Pos : constant V3 := V3_Add (Center, [0.4, -0.5, 1.0]);
+         Zc : constant V3 := Unit3 (V3_Sub (Pos, Center));            --  相机 z 朝后(往前看是 −z)
+         Xc : constant V3 := Unit3 (Cross3 ([0.0, 0.0, 1.0], Zc));
+         Yc : constant V3 := Cross3 (Zc, Xc);
+      begin
+         G.Valid := True; G.Fixed := True; G.F := 400.0; G.Cx := 320.0; G.Cy := 240.0; G.Pos := Pos;
+         for I in 0 .. 2 loop
+            G.R_Ce (I, 0) := Xc (I); G.R_Ce (I, 1) := Yc (I); G.R_Ce (I, 2) := Zc (I);
+         end loop;
+      end;
+      --  扫描的格:每个关节两边各两格(两条臂同一拍扫同一个关节),再 3 格几个关节一起动
+      for J in 0 .. 5 loop
+         for V of Floats'([0.1, 0.2, -0.1, -0.2]) loop
+            declare
+               C : Links.Cell;
+               Q : Floats := Zero6;
+            begin
+               Q.Replace_Element (J, V);
+               C.Qs.Append (Q); C.Qs.Append (Q);
+               C.Joints.Append (J); C.Joints.Append (J);
+               Cells.Append (C);
+            end;
+         end loop;
+      end loop;
+      for K in 1 .. 3 loop
+         declare
+            C : Links.Cell;
+            Q : Floats := Zero6;
+         begin
+            for J in 0 .. 5 loop
+               Q.Replace_Element (J, 0.05 * Long_Float (K) * (if (J + K) mod 2 = 0 then 1.0 else -1.0));
+            end loop;
+            C.Qs.Append (Q); C.Qs.Append (Q);
+            C.Joints.Append (-1); C.Joints.Append (-1);
+            Cells.Append (C);
+         end;
+      end loop;
+      --  每个表面点、每个背景点的一串像素
+      for T of Truth loop
+         declare
+            Tr : Links.Track;
+            U, V : Long_Float;
+            Front : Boolean;
+         begin
+            Project_Fixed (G, Where (T.Arm, T.Link, Zero6, T.P), U, V, Front);
+            Tr.U0 := U; Tr.V0 := V;
+            for C of Cells loop
+               Project_Fixed (G, Where (T.Arm, T.Link, C.Qs (T.Arm), T.P), U, V, Front);
+               Tr.U.Append (U + Noise); Tr.V.Append (V + Noise);
+            end loop;
+            Tracks.Append (Tr);
+         end;
+      end loop;
+      for K in 0 .. 69 loop
+         declare
+            Tr : Links.Track;
+            Wall : constant V3 := V3_Add (V3_Sub (G.Pos, [3.0 * G.R_Ce (0, 2), 3.0 * G.R_Ce (1, 2), 3.0 * G.R_Ce (2, 2)]),
+                                          [0.08 * Long_Float (K mod 10 - 5) * G.R_Ce (0, 0) + 0.08 * Long_Float (K / 10 - 3) * G.R_Ce (0, 1),
+                                           0.08 * Long_Float (K mod 10 - 5) * G.R_Ce (1, 0) + 0.08 * Long_Float (K / 10 - 3) * G.R_Ce (1, 1),
+                                           0.08 * Long_Float (K mod 10 - 5) * G.R_Ce (2, 0) + 0.08 * Long_Float (K / 10 - 3) * G.R_Ce (2, 1)]);
+            U, V : Long_Float;
+            Front : Boolean;
+         begin
+            Project_Fixed (G, Wall, U, V, Front);
+            Tr.U0 := U; Tr.V0 := V;
+            for C of Cells loop
+               Tr.U.Append (U + Noise); Tr.V.Append (V + Noise);
+            end loop;
+            Tracks.Append (Tr);
+         end;
+      end loop;
+      Links.Triangulate (Pls, G, 640, Cells, Tracks, 0.0, Pts, Sd_Px);
+      declare
+         Wrong, Far : Natural := 0;
+         Worst_Z : Long_Float := 0.0;
+         Per_Link : array (0 .. 1, 0 .. 5) of Natural := [others => [others => 0]];
+         Sc_Ok, Free_Ok, Self_Ok : Boolean := False;
+         C1 : Links.Clearance;
+         T_Toward, T_Away : Long_Float := 0.0;
+         True_Min : Long_Float := Long_Float'Last;
+         T_Solo : Long_Float := 0.0;
+         True_Link : Integer := -1;
+         K_Toward, K_Away, K_None : Boolean := False;
+      begin
+         for I in 0 .. Natural (Pts.Length) - 1 loop
+            declare
+               P : constant Links.Link_Pt := Pts (I);
+               --  这一点是哪一个真值点(参照系里最近的那个,同一条臂)
+               Best : Natural := 0;
+               Bd : Long_Float := Long_Float'Last;
+            begin
+               for J in 0 .. Natural (Truth.Length) - 1 loop
+                  if Truth (J).Arm = P.Arm and then Norm (V3_Sub (Truth (J).P, P.P)) < Bd then
+                     Bd := Norm (V3_Sub (Truth (J).P, P.P)); Best := J;
+                  end if;
+               end loop;
+               if Truth (Best).Link /= P.Link then
+                  Wrong := Wrong + 1;
+               end if;
+               Per_Link (P.Arm, P.Link) := Per_Link (P.Arm, P.Link) + 1;
+               declare
+                  Sd : constant Long_Float := Sqrt (P.Cov (0, 0) + P.Cov (1, 1) + P.Cov (2, 2));
+               begin
+                  if Bd > Stats.Z * Sd then
+                     Far := Far + 1;
+                  end if;
+                  Worst_Z := Long_Float'Max (Worst_Z, Bd / Sd);
+               end;
+            end;
+         end loop;
+         --  ② 净空
+         Links.Install (Pls, Pts);
+         declare
+            Qs : Plug.Floats_Vectors.Vector;
+            Near : constant V3 := Where (0, 5, Zero6, Truth (5 * 4).P);   --  第 1 条臂第 5 节的第 0 个点
+            Away_Dir : V3;
+            Scene : Scene_Pt_Vectors.Vector;
+            Toward : V3;
+         begin
+            Qs.Append (Zero6); Qs.Append (Zero6);
+            --  离它 0.05、在背着另一条臂的那一边
+            Toward := Unit3 (V3_Sub (Near, Where (1, 5, Zero6, Truth (24 + 20).P)));
+            Scene.Append (Scene_Pt'(Pw => V3_Add (Near, [0.05 * Toward (0), 0.05 * Toward (1), 0.05 * Toward (2)]), others => <>));
+            C1 := Links.Clear_Of (0, Qs, Scene);
+            --  真的最近:这个场景点离第 1 条臂每一个真表面点(此刻)最近多远、是哪一节
+            for T of Truth loop
+               if T.Arm = 0 and then Norm (V3_Sub (Where (0, T.Link, Zero6, T.P), Scene (0).Pw)) < True_Min then
+                  True_Min := Norm (V3_Sub (Where (0, T.Link, Zero6, T.P), Scene (0).Pw)); True_Link := Integer (T.Link);
+               end if;
+            end loop;
+            Sc_Ok := C1.Valid and then C1.To_Scene and then C1.Link = True_Link and then abs (C1.Dist - True_Min) <= Stats.Z * C1.Sd;
+            T_Toward := Links.Free_Along (0, Qs, Toward, Scene, K_Toward);
+            Away_Dir := [-Toward (0), -Toward (1), -Toward (2)];
+            T_Away := Links.Free_Along (0, Qs, Away_Dir, Scene, K_Away);
+            declare
+               Tn : Long_Float;
+               Solo : Links.Link_Pt_Vectors.Vector;
+               K_Solo : Boolean;
+            begin
+               --  背着场景点走,那一边是第 2 条臂 ⇒ 碰上的是它(比朝场景点走远);第 2 条臂的点撤掉 ⇒ 碰不上
+               for P of Pts loop
+                  if P.Arm = 0 then
+                     Solo.Append (P);
+                  end if;
+               end loop;
+               Links.Install (Pls, Solo);
+               T_Solo := Links.Free_Along (0, Qs, Away_Dir, Scene, K_Solo);
+               Links.Install (Pls, Links.Link_Pt_Vectors.Empty_Vector);   --  量过的点一个都没有
+               Tn := Links.Free_Along (0, Qs, Toward, Scene, K_None);
+               Free_Ok := K_Toward and then T_Toward <= 0.05 and then T_Toward > 0.0 and then K_Away and then T_Away > T_Toward
+                          and then T_Away < Long_Float'Last and then K_Solo and then T_Solo = Long_Float'Last
+                          and then not K_None and then Tn = Long_Float'Last;
+            end;
+            Links.Install (Pls, Pts);
+            --  ③ 自己
+            declare
+               Mk : constant Bools := Links.Self_Mask (G, [others => 0.0], 640, 480, Qs);
+               U, V, Ub, Vb : Long_Float;
+               Front : Boolean;
+               Far_Px : Long_Float := -1.0;
+            begin
+               Project_Fixed (G, Where (0, 3, Zero6, Truth (3 * 4).P), U, V, Front);
+               --  墙上离所有表面点的投影最远的那个背景点
+               Ub := 0.0; Vb := 0.0;
+               for K in Natural (Truth.Length) .. Natural (Tracks.Length) - 1 loop
+                  declare
+                     Mn : Long_Float := Long_Float'Last;
+                  begin
+                     for J in 0 .. Natural (Truth.Length) - 1 loop
+                        Mn := Long_Float'Min (Mn, Sqrt ((Tracks (K).U0 - Tracks (J).U0) ** 2 + (Tracks (K).V0 - Tracks (J).V0) ** 2));
+                     end loop;
+                     if Mn > Far_Px and then Tracks (K).U0 >= 0.0 and then Tracks (K).U0 < 640.0 and then Tracks (K).V0 >= 0.0 and then Tracks (K).V0 < 480.0 then
+                        Far_Px := Mn; Ub := Tracks (K).U0; Vb := Tracks (K).V0;
+                     end if;
+                  end;
+               end loop;
+               Self_Ok := Front and then U >= 0.0 and then U < 640.0 and then V >= 0.0 and then V < 480.0
+                          and then Mk (Natural (Long_Float'Floor (V)) * 640 + Natural (Long_Float'Floor (U)))
+                          and then Far_Px > 0.0 and then not Mk (Natural (Long_Float'Floor (Vb)) * 640 + Natural (Long_Float'Floor (Ub)));
+            end;
+         end;
+         Check (Natural (Pts.Length) = Natural (Truth.Length) and then Wrong = 0 and then Far = 0
+                and then (for all A in 0 .. 1 => (for all Lk in 0 .. 5 => Per_Link (A, Lk) = 4))
+                and then Sc_Ok and then Free_Ok and then Self_Ok,
+                "每一节的形状 · 三角:" & Codec.Img (Natural (Pts.Length)) & " / " & Codec.Img (Natural (Truth.Length)) & " 个表面点收回来(背景 70 个点一个没收)、"
+                & "认错节 " & Codec.Img (Wrong) & " 个、离真值超过 Stats.Z 倍自报不确定度的 " & Codec.Img (Far) & " 个(最多 " & Codec.Fmt (Worst_Z, 2) & " 倍)"
+                & "、配点噪声自己量出 " & Codec.Fmt (Sd_Px, 3) & " px(加的 ±0.15)"
+                & " · 净空:最近 " & Codec.Fmt (C1.Dist, 4) & " ± " & Codec.Fmt (C1.Sd, 4) & "(真的 " & Codec.Fmt (True_Min, 4) & ")、第" & Integer'Image (C1.Link) & " 节、"
+                & (if C1.To_Scene then "场景点" else "别的臂") & " · 朝它走 " & Codec.Fmt (T_Toward, 4) & " 就进带子、背着走 "
+                & (if T_Away = Long_Float'Last then "碰不上" else Codec.Fmt (T_Away, 4) & " 碰上第 2 条臂")
+                & "(第 2 条臂撤掉 ⇒ " & (if T_Solo = Long_Float'Last then "碰不上" else Codec.Fmt (T_Solo, 4)) & ")"
+                & "、没量过的臂说不出 " & Boolean'Image (not K_None)
+                & " · 自己:第 1 条臂第 3 节的点那一格是自己、墙上那一点不是 " & Boolean'Image (Self_Ok)
+                & " · 牙:每一格按整条臂的位姿搬视线(不截到那一节)⇒ 近端几节的点交不上、收不回来");
+      end;
+   end;
+   --  ══ 身体文件里的静止噪声按量法版本认(路 4 查出来的,10-01):H4 / H7 两份文件的 ee_noise 0.0121 是胳膊还在慢慢挪的时候量的 ══
+   --  ① 这一版写的文件(带着量法版本)装回 ⇒ 0.0121 照装(同一版量的信);② 同一份去掉版本(= 09-30 以前写的,H4 / H7 那样)⇒ 装回时记成"不信"、
+   --  开机报告说要重量;③ 和这一回量的(0.0004)合:不信的那份 ⇒ 只用这一回量的;信的那份 ⇒ 照旧只放大不缩小(0.0121)。
+   --  病:老量法量大了的噪声永远留着(取历来最大),新的"挡没挡"在人形上判不出短步被挡。牙:原来的合法(一律取历来最大)⇒ ③ 里不信的那份也留 0.0121
+   declare
+      use Ada.Text_IO;
+      M1, M2, M3, Fresh, Mg_Old, Mg_New : Selfmap.Body_Map;
+      H1, H2 : Zone.Hand_Vectors.Vector;
+      T1, T2 : Act.Effect_Vectors.Vector;
+      S1, S2 : Schema.Map;
+      Note2, Note3 : Unbounded_String;
+      Got2, Got3 : Boolean;
+      Path : constant String := "/tmp/bd_selfcheck_noise.json";
+      Old_Path : constant String := "/tmp/bd_selfcheck_noise_old.json";
+      Text : Unbounded_String;
+      Rep, Kp : Natural;
+      Old_Max : Long_Float;
+   begin
+      M1.Arms := 1; M1.N_Cams := 1; M1.Per_Arm := Chan.Per_Arm; M1.Channels := Chan.Per_Arm;
+      for Ch in 0 .. Chan.Per_Arm - 1 loop
+         M1.Amp.Append (0.0065); M1.Delivered.Append (0.005); M1.Seen.Append (True);
+         M1.Amp_Hist.Append (F64_Vectors.To_Vector (0.0065, 1)); M1.Deliv_Hist.Append (F64_Vectors.To_Vector (0.005, 1));
+      end loop;
+      M1.Cam_On_Arm.Append (0); M1.Jaws.Append (1);
+      M1.EE_Noise := 0.0121; M1.Rot_Noise := 0.0002; M1.Jaw_Noise := 0.001;
+      Bodyfile.Save (Path, "selfcheck", M1, H1, T1, S1);
+      Got2 := Bodyfile.Load (Path, "selfcheck", M2, H2, T2, S2, Note2);
+      --  去掉量法版本 = 09-30 以前写的文件
+      declare
+         F : File_Type;
+         Tag : constant String := """noise_ver"":" & Codec.Img (Selfmap.Idle_Ver) & ",";
+         P : Natural;
+      begin
+         Open (F, In_File, Path);
+         while not End_Of_File (F) loop
+            Append (Text, Get_Line (F));
+         end loop;
+         Close (F);
+         P := Index (Text, Tag);
+         if P > 0 then
+            Delete (Text, P, P + Tag'Length - 1);
+         end if;
+         Create (F, Out_File, Old_Path);
+         Put (F, To_String (Text));
+         Close (F);
+      end;
+      Got3 := Bodyfile.Load (Old_Path, "selfcheck", M3, H2, T2, S2, Note3);
+      Fresh := M1;
+      Fresh.EE_Noise := 0.0004; Fresh.Rot_Noise := 0.0001; Fresh.Jaw_Noise := 0.0005;
+      Bodyfile.Merge (M3, Fresh, Mg_Old, Rep, Kp);
+      Bodyfile.Merge (M2, Fresh, Mg_New, Rep, Kp);
+      Old_Max := Long_Float'Max (0.0121, Fresh.EE_Noise);   --  牙:原来的合法
+      Check (Got2 and then M2.EE_Noise = 0.0121 and then Got3 and then M3.EE_Noise < 0.0 and then Index (Note3, "老量法") > 0
+             and then Mg_Old.EE_Noise = 0.0004 and then Mg_Old.Rot_Noise = 0.0001 and then Mg_Old.Jaw_Noise = 0.0005
+             and then Mg_New.EE_Noise = 0.0121 and then Old_Max = 0.0121,
+             "身体文件的静止噪声按量法版本认:这一版写的装回 " & Codec.Fmt (M2.EE_Noise, 4) & " · 去掉版本的(09-30 以前写的)装回 "
+             & (if M3.EE_Noise < 0.0 then "不信" else Codec.Fmt (M3.EE_Noise, 4)) & "(开机报告:" & To_String (Note3) & ")"
+             & " · 和这一回量的 0.0004 合:不信的那份 ⇒ " & Codec.Fmt (Mg_Old.EE_Noise, 4) & "、信的那份 ⇒ " & Codec.Fmt (Mg_New.EE_Noise, 4)
+             & " · 牙:原来一律取历来最大 ⇒ 不信的那份也留 " & Codec.Fmt (Old_Max, 4));
    end;
 end Welds_Path_1;
