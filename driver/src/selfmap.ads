@@ -152,6 +152,9 @@ package Selfmap is
    --  (10-01 路 4 改:上面几种"停了"都换成同一种判法 —— 读数动起来以后,离目标还差的不再变小(Stopped_Shrinking;"停在这儿"那种命令看每拍挪了多少)就停了,
    --  压的、几组一起的、关节目标都这样判;到了 = 差不到 Tol(给了才判)而且没在往远走。没有地板、没有"连着两拍"、没有"最多等几拍":
    --  一点都没动起来的那一条最多等量过的起效拍数(Settle;开机还一个都没量过 ⇒ Unmeasured_Start)
+   --  一条命令发出以后读数一点都没动,最多等几拍就算它不会动了:量过的起效拍数(M.Settle);开机还一个都没量过 ⇒ Unmeasured_Start。
+   --  Go 判"没动起来"用它;别处等一条命令起效(比如抓握命令发出去读数没动)也用这一个,不另写一份
+   function Start_Cap (M : Body_Map) return Natural;
    type Watcher is access function (F : Plug.Frame) return Boolean;
    procedure Go (L : in out Plug.Link; M : Body_Map; Arm : Natural; Target : Plug.Arm_Pose; Jaw : Floats;
                  F : in out Plug.Frame; Delivered : out Table.Vec; Frames : out Natural; Ok : out Boolean; Press : Boolean := False;
