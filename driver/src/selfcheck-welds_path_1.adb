@@ -1956,4 +1956,102 @@ begin
              & ";② 拿跟丢的 0 比「没多跑」⇒ B 第 " & Codec.Img (Pb_Old) & " 推判成零、" & (if Gb_Old then "(收下了,牙没咬上)" else "没收下"));
    end;
 
+   --  ══ 走一段关节直线,身体的表面挪多远(Links.Max_Shift,10-01 路 4 要的:保守推进每一步走多远)══
+   --  合成的两节臂(两根竖着的转轴,第 1 根在第 0 根外 L1;第 0 节、第 1 节各 5 个表面点),参照那一刻第 1 节往回折着(折 Fold);
+   --  沿关节直线走过去,每个点真走的路长(细分 4000 段量,按自己写的平面运动学算,不用 Links 的)≤ 上界 ≤ 2 倍。两种走法:
+   --  ① 两个关节同向(L1 0.20、L2 0.40、折 2.8,q0 −2.0、q1 −2.8:第 1 节一路伸直,离第 0 根轴越来越远);② 反向(L1 0.30、L2 0.25、折 2.5,q0 +0.4、q1 −2.5)。
+   --  没量过形状的臂:说不出(Known = False、Long_Float'Last)。
+   --  病:上界比真挪的小 ⇒ 路 4 按它放的步子撞上;大得离谱 ⇒ 步子小到走不动。
+   --  牙:只按参照那一刻点离轴多远算(不沿链往外加)⇒ ① 第 1 节伸直以后离第 0 根轴的距离没算上,上界比真挪的小
+   declare
+      function Rz (A : Long_Float; X : Geom.V3) return Geom.V3 is
+        ([Cos (A) * X (0) - Sin (A) * X (1), Sin (A) * X (0) + Cos (A) * X (1), X (2)]);
+      type Case_Rec is record
+         L1, L2, Fold, Q0e, Q1e : Long_Float;
+      end record;
+      type Case_Arr is array (1 .. 2) of Case_Rec;
+      Cases : constant Case_Arr := [(0.20, 0.40, 2.8, -2.0, -2.8), (0.30, 0.25, 2.5, 0.4, -2.5)];
+      Ok_All : Boolean := True;
+      Txt : Unbounded_String;
+      Naive_Bites : Boolean := False;
+   begin
+      for Cs of Cases loop
+         declare
+            Md : Kinem.Model;
+            Pl : Links.Placement;
+            Pls : Links.Placement_Vectors.Vector;
+            Pts : Links.Link_Pt_Vectors.Vector;
+            A1 : constant Geom.V3 := [Cs.L1, 0.0, 0.0];
+            Q0, Q1 : Floats;
+            Known, Known_None : Boolean;
+            Bound, None_Bound : Long_Float;
+            True_Max : Long_Float := 0.0;
+            Naive : Long_Float;
+            R0_Ref, R1 : Long_Float := 0.0;
+         begin
+            Md.Valid := True; Md.N := 2;
+            Md.Ax (0).W := [0.0, 0.0, 1.0]; Md.Ax (0).P := [0.0, 0.0, 0.0];
+            Md.Ax (1).W := [0.0, 0.0, 1.0]; Md.Ax (1).P := A1;
+            Md.Q0.Append (0.0); Md.Q0.Append (0.0);
+            Pl.Model := Md; Pl.Valid := True;
+            Pls.Append (Pl);
+            for K in 0 .. 4 loop
+               declare
+                  R : constant Long_Float := 0.2 + 0.2 * Long_Float (K);
+                  P0, P1 : Links.Link_Pt;
+               begin
+                  P0.Arm := 0; P0.Link := 0; P0.P := [R * Cs.L1, 0.0, 0.0]; P0.Views := 2;
+                  P1.Arm := 0; P1.Link := 1; P1.P := [Cs.L1 + R * Cs.L2 * Cos (Cs.Fold), R * Cs.L2 * Sin (Cs.Fold), 0.0]; P1.Views := 2;
+                  Pts.Append (P0); Pts.Append (P1);
+               end;
+            end loop;
+            Links.Install (Pls, Pts);
+            Q0.Append (0.0); Q0.Append (0.0);
+            Q1.Append (Cs.Q0e); Q1.Append (Cs.Q1e);
+            Bound := Links.Max_Shift (0, Q0, Q1, Known);
+            --  真挪的:每个点沿关节直线细分走一遍,路长求和(平面运动学自己算)
+            for P of Pts loop
+               declare
+                  Prev : Geom.V3 := P.P;
+                  L : Long_Float := 0.0;
+                  Nst : constant := 4000;   --  细分段数(自检自己的分辨率)
+               begin
+                  for I in 1 .. Nst loop
+                     declare
+                        T : constant Long_Float := Long_Float (I) / Long_Float (Nst);
+                        X : constant Geom.V3 :=
+                          (if P.Link = 0 then Rz (Cs.Q0e * T, P.P)
+                           else Rz (Cs.Q0e * T, [A1 (0) + Rz (Cs.Q1e * T, [P.P (0) - A1 (0), P.P (1) - A1 (1), P.P (2) - A1 (2)]) (0),
+                                                 A1 (1) + Rz (Cs.Q1e * T, [P.P (0) - A1 (0), P.P (1) - A1 (1), P.P (2) - A1 (2)]) (1),
+                                                 A1 (2) + Rz (Cs.Q1e * T, [P.P (0) - A1 (0), P.P (1) - A1 (1), P.P (2) - A1 (2)]) (2)]));
+                     begin
+                        L := L + Geom.Norm ([X (0) - Prev (0), X (1) - Prev (1), X (2) - Prev (2)]);
+                        Prev := X;
+                     end;
+                  end loop;
+                  True_Max := Long_Float'Max (True_Max, L);
+               end;
+            end loop;
+            --  牙:只按参照那一刻点离轴多远(第 0 根轴:所有点到原点;第 1 根轴:第 1 节的点到 A1)
+            for P of Pts loop
+               R0_Ref := Long_Float'Max (R0_Ref, Geom.Norm (P.P));
+               if P.Link = 1 then
+                  R1 := Long_Float'Max (R1, Geom.Norm ([P.P (0) - A1 (0), P.P (1) - A1 (1), P.P (2) - A1 (2)]));
+               end if;
+            end loop;
+            Naive := abs Cs.Q0e * R0_Ref + abs Cs.Q1e * R1;
+            Naive_Bites := Naive_Bites or else Naive < True_Max;
+            --  没量过形状的臂(第 1 条:装上的只有第 0 条)
+            None_Bound := Links.Max_Shift (1, Q0, Q1, Known_None);
+            Ok_All := Ok_All and then Known and then Bound >= True_Max and then Bound <= 2.0 * True_Max
+              and then not Known_None and then None_Bound = Long_Float'Last;
+            Append (Txt, " · 真挪最多 " & Codec.Fmt (True_Max, 3) & "、上界 " & Codec.Fmt (Bound, 3) & "(" & Codec.Fmt (Bound / True_Max, 2)
+                    & " 倍)、只按参照那一刻 " & Codec.Fmt (Naive, 3));
+         end;
+      end loop;
+      Links.Install (Links.Placement_Vectors.Empty_Vector, Links.Link_Pt_Vectors.Empty_Vector);   --  别的焊点看到的是空的
+      Check (Ok_All and then Naive_Bites,
+             "表面挪多远(Max_Shift)· 同向 / 反向两种走法" & To_String (Txt) & " · 没量过形状的臂说不出"
+             & " · 牙:只按参照那一刻点离轴多远 ⇒ " & (if Naive_Bites then "同向那一种比真挪的小" else "(不比真挪的小,牙没咬上)"));
+   end;
 end Welds_Path_1;

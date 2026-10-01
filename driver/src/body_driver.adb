@@ -398,35 +398,61 @@ begin
                Fa : constant Long_Float := Links.Free_Along (A, Qs, Down, Kin_Board, Known);
             begin
                if Cl.Valid then
-                  Append (Txt, " · 第" & Codec.Img (A + 1) & " 条臂离" & (if Cl.To_Scene then "量过的场景点" else "第" & Codec.Img (Natural (Cl.Other_Arm) + 1) & " 条臂")
-                          & "最近 " & Codec.Fmt (Cl.Dist, 4) & " ± " & Codec.Fmt (Cl.Sd, 4) & "(第" & Integer'Image (Cl.Link) & " 节)、朝桌面再走 "
-                          & (if not Known then "说不出" elsif Fa = Long_Float'Last then "碰不上" else Codec.Fmt (Fa, 4)) & " 进带子");
+                  declare
+                     --  从扫描起点(参照读数)走到此刻这段关节直线,这条臂表面每个点最多走过多远(上界,路 4 定保守推进的步子用同一个问法)
+                     Ref_Q : constant Plug.Floats_Vectors.Vector := Links.Reference_Readings;
+                     Ms_Known : Boolean;
+                     Ms : constant Long_Float := (if A < Natural (Ref_Q.Length) and then A < Natural (Qs.Length)
+                                                  then Links.Max_Shift (A, Ref_Q (A), Qs (A), Ms_Known) else Long_Float'Last);
+                  begin
+                     Append (Txt, " · 第" & Codec.Img (A + 1) & " 条臂离" & (if Cl.To_Scene then "量过的场景点" else "第" & Codec.Img (Natural (Cl.Other_Arm) + 1) & " 条臂")
+                             & "最近 " & Codec.Fmt (Cl.Dist, 4) & " ± " & Codec.Fmt (Cl.Sd, 4) & "(第" & Integer'Image (Cl.Link) & " 节)、朝桌面再走 "
+                             & (if not Known then "说不出" elsif Fa = Long_Float'Last then "碰不上" else Codec.Fmt (Fa, 4)) & " 进带子"
+                             & "、从扫描起点到此刻表面最多走过 " & (if Ms = Long_Float'Last then "说不出" else Codec.Fmt (Ms, 4)));
+                  end;
                else
                   Append (Txt, " · 第" & Codec.Img (A + 1) & " 条臂没量过每一节的形状 ⇒ 净空说不出");
                end if;
             end;
          end loop;
-         for Cm in 0 .. Natural (F.Cams.Length) - 1 loop
-            declare
-               G : constant Geom.Cam_Geo := (if Cm < Natural (Kin_Geo.Length) then Kin_Geo (Cm) else Geom.No_Geo);
+         declare
+            --  没量过形状的臂:它在哪只眼里占多少说不出 ⇒ 下面的百分数只是量过形状的那几条臂占的(照实写"至少")
+            Unshaped : Unbounded_String;
+            Ref_Q : constant Plug.Floats_Vectors.Vector := Links.Reference_Readings;
+            function Pct (Mk : Bytes.Bools) return String is
+               N : Natural := 0;
             begin
-               if G.Valid and then F.Cams (Cm).W > 0 then
-                  declare
-                     --  同干活时一帧里直接问的那一句(Links.Self_Mask_Now:不动的眼按它自己的几何,臂上的眼按那条臂此刻的运动学)
-                     Mk : constant Bytes.Bools := Links.Self_Mask_Now (F, Cm, G, F.Cams (Cm).W, F.Cams (Cm).H);
-                     N : Natural := 0;
-                  begin
-                     for B of Mk loop
-                        if B then
-                           N := N + 1;
-                        end if;
-                     end loop;
-                     Append (Txt, " · 第" & Codec.Img (Cm) & " 台眼里自己占 " & Codec.Fmt (100.0 * Long_Float (N) / Long_Float (Natural'Max (1, Natural (Mk.Length))), 1) & "%");
-                  end;
+               for B of Mk loop
+                  if B then
+                     N := N + 1;
+                  end if;
+               end loop;
+               return Codec.Fmt (100.0 * Long_Float (N) / Long_Float (Natural'Max (1, Natural (Mk.Length))), 1) & "%";
+            end Pct;
+         begin
+            for A in 0 .. Natural (Worlds.Length) - 1 loop
+               if not Links.Has_Shape (A) then
+                  Append (Unshaped, (if Length (Unshaped) > 0 then "、" else "") & "第" & Codec.Img (A + 1) & " 条");
                end if;
-            end;
-         end loop;
-         Put_Line ("[身] 📐 净空和自己(开机,此刻)" & To_String (Txt));
+            end loop;
+            for Cm in 0 .. Natural (F.Cams.Length) - 1 loop
+               declare
+                  G : constant Geom.Cam_Geo := (if Cm < Natural (Kin_Geo.Length) then Kin_Geo (Cm) else Geom.No_Geo);
+               begin
+                  if G.Valid and then F.Cams (Cm).W > 0 then
+                     --  此刻:同干活时一帧里直接问的那一句(Links.Self_Mask_Now:不动的眼按它自己的几何,臂上的眼按那条臂此刻的运动学);
+                     --  起点:参照读数那一刻(开机扫描的起点 = 身体开机时的样子),给拿仿真真值对用
+                     Append (Txt, " · 第" & Codec.Img (Cm) & " 台眼里自己占" & (if Length (Unshaped) > 0 then "至少 " else " ")
+                             & Pct (Links.Self_Mask_Now (F, Cm, G, F.Cams (Cm).W, F.Cams (Cm).H)) & "(此刻)/ "
+                             & Pct (Links.Self_Mask_At (Ref_Q, Cm, G, F.Cams (Cm).W, F.Cams (Cm).H)) & "(扫描起点)");
+                  end if;
+               end;
+            end loop;
+            if Length (Unshaped) > 0 then
+               Append (Txt, " · " & To_String (Unshaped) & "臂没量过形状(扫描时不动的眼看不见它,或没有不动的眼)⇒ 它在哪只眼里占多少说不出,上面的数不算它");
+            end if;
+         end;
+         Put_Line ("[身] 📐 净空和自己(开机)" & To_String (Txt));
       end;
    end;
    --  ── 量身体:先装回身体文件(钥匙 = 这具身体报的形状),推一下核对;对不上或没有 ⇒ 从零量;量到的合进历史再写回 ──

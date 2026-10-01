@@ -117,4 +117,19 @@ package Links is
    --  长在臂上的眼按那条臂此刻的运动学放;哪条臂都不带着它、又不是不动的眼 ⇒ 放不了这只眼,一个像素都不说是自己
    function Readings_Now (F : Plug.Frame) return Plug.Floats_Vectors.Vector;
    function Self_Mask_Now (F : Plug.Frame; Cam : Natural; Geo : Cam_Geo; W, H : Natural) return Bools;
+   --  同 Self_Mask_Now,读数直接给(每条臂一串,下标同装上的臂):开机报告拿参照读数那一刻(扫描起点)比真值用
+   function Self_Mask_At (Qs : Plug.Floats_Vectors.Vector; Cam : Natural; Geo : Cam_Geo; W, H : Natural) return Bools;
+   --  装上的每条臂的参照读数(运动学的 Q0 = 开机扫描起点那一刻)
+   function Reference_Readings return Plug.Floats_Vectors.Vector;
+   --  第 Arm 条臂量过表面点没有(没量过 ⇒ 它在哪只眼里占多少、净空、Max_Shift 都说不出)
+   function Has_Shape (Arm : Natural) return Boolean;
+
+   --  ⑦ 走一段关节直线,身体的表面挪多远(10-01 路 4 要的:保守推进时每一步走多远)——
+   --  第 Arm 条臂沿 Q0 → Q1 这段关节直线走过去,它每一个表面点走过的路长的上界(世界长度,单位同 World_Of)。
+   --  上界 = Σ_j |Δq_j| × (转的关节:关节 j 往外那几节的表面点离它的轴最远多远;走的关节:每个读数单位走多远)。
+   --  "离轴最远多远"按运动学的链算、走到哪都成立(不是只在参照那一刻量):点到第 j 根轴 ≤ 点到它自己那一节最后一根转轴上一点的距离
+   --  + 一路往里每两根相邻转轴上那两点的距离(两点在同一节上,刚体,这段长度不随关节变)+ 中间每个走的关节最多走出去多远
+   --  (这一段关节直线两头离参照读数远的那一头)。每根转轴上那一点取这根轴往外那几节表面点的形心在轴上的垂足(取哪一点上界都成立,取得近就紧)。
+   --  转的关节读数按弧度算(同 Kinem.FK)。这条臂没量过表面点 ⇒ Known = False、返回 Long_Float'Last(说不出,不当成"挪不了")
+   function Max_Shift (Arm : Natural; Q0, Q1 : Floats; Known : out Boolean) return Long_Float;
 end Links;
