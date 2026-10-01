@@ -94,12 +94,23 @@ package body Selfmap is
 
    function Settle_Beats (Moves : Floats; Noise : Long_Float) return Natural is
       Started : Boolean := False;
+      Wt : Settle_Watch;
+      Mv : Floats;
+      Hv : Bools;
    begin
+      Watch_Reset (Wt, 1);
+      Mv.Append (0.0); Hv.Append (True);
       for T in 0 .. Natural (Moves.Length) - 1 loop
-         if Started and then T >= 1 and then Stopped_Shrinking (Moves (T - 1), Moves (T)) then
-            return T + 1;
-         end if;
          Started := Started or else Moves (T) > Noise;
+         if Started then
+            --  尺子 = 这一条挪得最多的那一拍(同 Go 判"走完了":掉到它的百分之一以下)
+            Watch_Peak (Wt, 0, Moves (T));
+            Mv.Replace_Element (0, Moves (T));
+            Watch_Feed (Wt, Mv, Hv);
+            if Watch_All_Done (Wt) then
+               return T + 1;
+            end if;
+         end if;
       end loop;
       return 0;
    end Settle_Beats;

@@ -3455,6 +3455,7 @@ selfmap.adb	M.Cam_On_Arm := Int_Vectors.To_Vector (-1, Ada.Containers.Count_Type
 selfmap.adb	M.EE_Noise := Long_Float'Max (M.EE_Noise, Table.Norm (D, 3));	3	结构	Chan 的通道布局:每条臂 6 个通道(Chan.Per_Arm = 6),前 3 个是平移;Table.Norm (D, 3) = 取前 3 个分量的模 = 平移量(selfmap.adb:345)
 selfmap.adb	Mid : constant Long_Float := (Lo + Hi) / 2.0;	2.0	数学	二分取中点(出口是量的:区间细过这只手一步看得见的那一档)(selfmap.adb:878)
 selfmap.adb	Moves.Append (0.0); Have.Append (True);	0.0	数学	读不到这一组 = 这一拍什么都没变(变化 0):两拍不变就停 —— 没有证据,不白等(selfmap.adb Go 关节那一支)
+selfmap.adb	Mv.Append (0.0); Hv.Append (True);	0.0	数值	占位的初值:每拍喂之前就换成这一拍挪了多少(selfmap.adb Settle_Beats)
 selfmap.adb	Put_Line ("" & Codec.Fmt (M.EE_Noise, 5) & "" & Codec.Fmt (M.Rot_Noise, 5) &	5	格式	日志 / 报原因的话里 M.EE_Noise 印 5 位小数(Codec.Fmt 第二个参数 = 小数位数),不进任何判据(selfmap.adb:404)
 selfmap.adb	Put_Line ("" & Codec.Fmt (M.EE_Noise, 5) & "" & Codec.Fmt (M.Rot_Noise, 5) &	5	格式	日志 / 报原因的话里 M.Rot_Noise 印 5 位小数(Codec.Fmt 第二个参数 = 小数位数),不进任何判据(selfmap.adb:404)
 selfmap.adb	Put_Line ("" & Codec.Fmt (M.Joint_Noise, 6) & ""	6	格式	日志 / 给脑的话里印几位小数(selfmap.adb:564)
@@ -3469,10 +3470,10 @@ selfmap.adb	W.Last.Append (0.0); W.Peak.Append (0.0); W.Have_Last.Append (False)
 selfmap.adb	W.Last.Append (0.0); W.Peak.Append (0.0); W.Have_Last.Append (False); W.Done.Append (False); W.Ruled.Append (False);	0.0	数学	尺子从 0 起(都是不小于 0 的量:挪了多少、还差多少、画面变了多少;给了尺子才用它)(selfmap.adb Watch_Reset)
 selfmap.adb	Watch : Watcher := null; Joints : Floats := F64_Vectors.Empty_Vector; Group : Integer := -1;	1	数值	缺省参数的哨兵:Group = -1 = 这条不是关节命令(119、132 行按 ≥ 0 判)。(selfmap.adb:105)
 selfmap.adb	Watch_Peak (R.Wt, 1, Rot_Len (Cmd));	1	结构	Run 的停没停两样里的第 1 样 = 转动(第 0 样平移)(selfmap.adb New_Run)
+selfmap.adb	Watch_Reset (Wt, 1);	1	结构	只看一样:这一拍各组里挪得最多的那个关节(Moves 的一个数)(selfmap.adb Settle_Beats)
 selfmap.adb	for K in 1 .. 4 loop	4	调参数	静止噪声量 4 拍(取每拍挪得最多的那一拍);10-01 路 4:先等上一个动作的尾巴收住(Wait_Tail,每组读数一拍挪的不再比上一拍少)再量,"接着上一个动作就量"那一半已改(selfmap.adb:336)	M.Joint_Noise / EE_Noise / Rot_Noise / 每台相机的地板 —— 后面几乎所有门的下限	高	先等收住(每拍挪动不再变小)再量;拍数按要的置信度定(估 3σ 门上界要数十拍,拍数由统计定);相机地板用多对帧的分位数,不用一对
 selfmap.adb	for Try in 1 .. (if Has_Step and then Amp > 0.0 then 1 else 0) loop	1	结构	循环当 if 用:有"一步看得见"的幅度就推这一回(推过去再推回来),没有就不推;写成循环是为了里面能直接 return。"推一次"就是这一段的定义(selfmap.ads:95 "每个通道按它推一次再推回来")。注:只推一次,M.Delivered 是单个样本,通道稳不稳证不出。(selfmap.adb:426)
 selfmap.adb	if Best >= 0 and then Bv > 0.0 and then Bv >= 2.0 * Second then	2.0	调参数	同 jointboot 140 行'比第二名多一倍';现在只有没给 Eyes 时才走(开机前半段总会给)(selfmap.adb:532)	认眼(后备路径)	低	同 jointboot 140 行(一个量一种量法:删掉这份)
-selfmap.adb	if Started and then T >= 1 and then Stopped_Shrinking (Moves (T - 1), Moves (T)) then	1	结构	从第 2 拍起才有上一拍可比(下标 T − 1)(selfmap.adb Settle_Beats)
 selfmap.adb	if abs (Got - Expect) <= 0.5 * abs Expect + M.EE_Noise and then Visible then	0.5	调参数	装回核对:实到和存的差一半以内 = 同一具身体(selfmap.adb:308)	身体文件能不能直接用(换了负载 / 关节后 40% 的变化也会被当成没变)	中	按存的历次实到(Deliv_Hist)的散布:|实到 − 存的| ≤ 3×历次散布 + 3×EE_Noise(统计门)
 selfmap.adb	if abs Got >= Amp * 0.5 then	0.5	调参数	探针实到一半以上才记零件(selfmap.adb:477)	逐通道量身体(看见没有、记不记)	中	实到超过 3×量到的读数噪声(统计门)且和命令同向;'一半'去掉
 selfmap.adb	if abs Got >= Amp * 0.5 then	0.5	调参数	(482 行同一句)实到一半以上才记相机变化比例(selfmap.adb:477)	同上	中	实到超过 3×量到的读数噪声(统计门)且和命令同向;'一半'去掉
