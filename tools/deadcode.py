@@ -34,6 +34,8 @@ TEST_HOOKS = {
     # 路 6 对准插进去(§2 第 21 条)、一次走不完的(§2 第 22 条):执行层"往里送 / 松开再握"那一处调它们(Run_Segment 留给路 6 的接口),接上以后这 2 条删
     ("seek.adb", "Run"): "路 6:对准插进去 —— 沿轴送,被挡住就在横着的不准那一片里按缝定的格子从最可能的试起;执行层接上就是活的",
     ("strokes.adb", "Run"): "路 6:一次走不完的 —— 到了范围的头就松开、空着转回、再握,到转不动或走够为止;执行层接上就是活的",
+    ("linkage-together.adb", "Check"): "路 6:同时两套接触(A 不动 + 它上面的 B 沿轴动)的物理检查,两个要一起算;脑一次说得出两个要(I5)时接上就是活的",
+    ("linkage-together.adb", "Say"): "路 6:Linkage.Together.Check 的结果印一句日志;Check 接上就是活的",
 }
 import os, re, sys, glob, collections
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
