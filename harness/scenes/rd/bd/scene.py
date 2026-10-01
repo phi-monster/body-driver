@@ -133,7 +133,16 @@ def bd_cloth_lifted(self, args):
     return 1.0 if float(pts[:, 2].max()) - _table_top(self, env_idx) >= float(args["height"]) else 0.0
 
 
-CHECKS = {f.__name__: f for f in (bd_joint_moved, bd_peg_in_hole, bd_ring_on_hook, bd_trigger_while_held, bd_cloth_lifted)}
+def bd_not_touched(self, args):
+    """不要碰(远 6):会出拳的东西出完 punches 拳、拳头一回都没碰到身体。碰没碰 = PhysX 的接触报告里拳头那一节和身体的哪一节
+    有过接触(scene.Puncher 记在这件东西上,_bd_punch);拳还没出完判 0"""
+    env_idx = args["env_idx"]
+    obj = self.layout_manager.get_scene_object(env_idx, _inst(self, env_idx, args["label"]))
+    st = getattr(obj, "_bd_punch", None) or {}
+    return 1.0 if (st.get("done", 0) >= int(args["punches"]) and not st.get("touched")) else 0.0
+
+
+CHECKS = {f.__name__: f for f in (bd_joint_moved, bd_peg_in_hole, bd_ring_on_hook, bd_trigger_while_held, bd_cloth_lifted, bd_not_touched)}
 
 
 def install_checks(func_parser):
@@ -252,4 +261,175 @@ class Walker:
                 if self._log and st["ticks"] % sub == 0:
                     with open(self._log, "a") as f:
                         f.write("%s %d %.5f %.5f %.5f\n" % (inst, st["ticks"] // sub, p[0], p[1], p[2]))
+                st["ticks"] += 1
+
+
+# ---------------------------------------------------------------- 会出拳的东西(远 6 不要碰)
+def _robot_links(env, env_idx):
+    """身体每一节连杆此刻的位置(本 env 原点下;仿真真值)和名字"""
+    rm = getattr(env, "robot_manager", None)
+    org = _np(env.scene_manager.env_origins[env_idx])[:3]
+    P, names, seen = [], [], set()
+    for key in (getattr(rm, "robot_key", []) if rm is not None else []):
+        if id(key) in seen:
+            continue
+        seen.add(id(key))
+        d = key.data
+        X = getattr(d, "body_pos_w", None)
+        if X is None:
+            X = getattr(d, "body_link_pos_w")
+        P.append(X[env_idx].detach().cpu().numpy() - org)
+        names += list(getattr(key, "body_names", []))
+    return (np.concatenate(P) if P else np.zeros((0, 3))), names
+
+
+def _robot_prims(env, env_idx):
+    """身体在舞台上的 prim 路径(接触报告里另一方的路径在它下面 = 碰到身体了)"""
+    out = []
+    for key in getattr(env.robot_manager, "robot_key", []):
+        pp = str(key.cfg.prim_path)
+        p = pp.replace("env_.*", f"env_{env_idx}").replace(".*", str(env_idx))
+        if p not in out:
+            out.append(p)
+    return out
+
+
+class Puncher:
+    """布局里带 "bd_punch" 的关节体(会出拳的东西,make_scenes.py 的 bd_puncher):每个物理子步调一次 tick。
+    参数 {"start", "every", "count"(第几个动作开始第一拳、每几个动作一拳、一共几拳), "aim_s"(对准用几秒), "speed"(伸出去多快,m/s),
+    "overshoot"(伸过目标多远), "hold_s"(伸到头停几秒), "back_speed"(收回多快), "pivot"(转轴在资产系哪儿), "fist"(歇着时拳头中心在转轴前多远),
+    "stroke"(臂最多伸多远)}。
+    每一拳:对准那一刻身体离转轴最近的那一节(仿真真值:每一节连杆的位置)—— 转台转到朝着它、臂俯仰到朝着它;对准完再伸,
+    伸到"转轴到那一节的距离 − 拳头歇着的位置 + overshoot"为止(那一节一直不动就一定打到);停一下,收回。对准以后不再跟:拳头是直着打出去的。
+    碰没碰到身体:拳头那一节带 PhysX 的接触报告(资产里就带着 PhysxContactReportAPI),报告里另一方在身体的 prim 下面就记下来。
+    结果记在这件东西上(obj._bd_punch:done 出完几拳、touched 第一回碰到的那一拳 / 那一节 / 什么时候、aims 每一拳对准的是哪一节),
+    判据 bd_not_touched 读它。"""
+
+    def __init__(self):
+        self.state = {}
+        self._sub = None
+        self._watch = {}
+        self._log = os.environ.get("BD_PUNCH_LOG")
+
+    def reset(self):
+        self.state = {}
+        self._watch = {}
+
+    def _subscribe(self):
+        """每回新场子(复位重新生出这件东西)都调:接触处理打开、重新订阅接触报告。
+        Isaac Lab 的 SimulationContext 开局就把 omni.physx 的接触处理关了(/physics/disableContactProcessing = True,
+        isaaclab/sim/simulation_context.py),只有建 ContactSensor 时才打开(contact_sensor.py 里同一行设 False)。
+        不打开,拳头碰到哪儿接触报告都是空的(第一版离线核:拳头被手指挡在 0.243 m、报告 0 回)⇒ 照 ContactSensor 的做法打开。
+        第二版只在头一回订阅:第一张布局收得到,换布局(RoboDojo 删了重生)以后一条都收不到(拳头被手指挡住、拐开 14°)⇒ 每回重订"""
+        import carb
+        cs = carb.settings.get_settings()
+        was = cs.get("/physics/disableContactProcessing")
+        cs.set_bool("/physics/disableContactProcessing", False)
+        from omni.physx import get_physx_simulation_interface
+        self._sub = None
+        self._sub = get_physx_simulation_interface().subscribe_contact_report_events(self._on_contact)
+        self.headers_seen = getattr(self, "headers_seen", 0)
+        self.subscriptions = getattr(self, "subscriptions", 0) + 1
+        return bool(was)
+
+    def _on_contact(self, headers, data):
+        self.headers_seen = getattr(self, "headers_seen", 0) + len(headers)
+        if not self._watch:
+            return
+        from pxr import PhysicsSchemaTools
+        for h in headers:
+            a0, a1 = str(PhysicsSchemaTools.intToSdfPath(h.actor0)), str(PhysicsSchemaTools.intToSdfPath(h.actor1))
+            for fist, (st, prims) in self._watch.items():
+                other = a1 if a0 == fist else (a0 if a1 == fist else None)
+                if other is None:
+                    continue
+                st["contacts"] = st.get("contacts", 0) + 1
+                st["last_other"] = other
+                if any(other == p or other.startswith(p + "/") for p in prims) and not st.get("touched"):
+                    st["touched"] = {"punch": st.get("k"), "link": other, "t_s": round(st.get("t", 0.0), 3)}
+
+    def tick(self, env):
+        lm = env.scene_manager.layout_manager
+        om = getattr(env, "obs_manager", None)
+        sub = max(int(round(float(getattr(om, "collect_interval", 1.0) or 1.0))) if om is not None else 1, 1)
+        dt = float(env.dt)
+        for env_idx in range(env.num_envs):
+            for rec in lm.get_layout_records(env_idx, "Articulation"):
+                w = rec.get("bd_punch")
+                if not w:
+                    continue
+                inst = rec["inst_name"]
+                obj = lm.get_scene_object(env_idx, inst)
+                if obj is None:
+                    continue
+                key = (env_idx, inst)
+                st = self.state.get(key)
+                if st is None:
+                    from pxr import UsdPhysics
+                    fist = None
+                    root = getattr(obj, "prim", None)
+                    for prim in (root.GetChildren() if root is not None else []):
+                        if prim.GetName() == "arm" and prim.HasAPI(UsdPhysics.RigidBodyAPI):
+                            fist = str(prim.GetPath())
+                    names = list(obj.dof_names)
+                    st = {"ticks": 0, "k": 0, "t": 0.0, "done": 0, "touched": None, "aims": [], "phase": "idle",
+                          "ids": [names.index(n) for n in ("yaw_joint", "pitch_joint", "punch_joint")], "fist_path": fist,
+                          "robot_prims": _robot_prims(env, env_idx), "tgt": [0.0, 0.0, 0.0], "ext": 0.0}
+                    self.state[key] = st
+                    obj._bd_punch = st
+                    if fist is not None:
+                        self._watch[fist] = (st, st["robot_prims"])
+                        st["contact_processing_was_disabled"] = self._subscribe()
+                        st["headers_at_start"] = self.headers_seen
+                st["t"] = st["ticks"] * dt
+                t = st["t"]
+                k = st["k"]
+                if k < int(w["count"]):
+                    t0 = (float(w["start"]) + k * float(w["every"])) * sub * dt     # 这一拳几时开始(秒)
+                    if st["phase"] == "idle" and t >= t0:
+                        pos, rot = obj.get_local_pose()
+                        p, Rq = _np(pos)[:3], _rotm(_np(rot)[:4])
+                        pivot = p + Rq @ np.asarray(w.get("pivot", [0.0, 0.0, 0.15]), dtype=float)
+                        P, names = _robot_links(env, env_idx)
+                        j = int(np.argmin(np.linalg.norm(P - pivot, axis=1)))
+                        # aim_offset:只给离线核用(对准偏开一点,核"打不到就判 1"),题里不给
+                        da = Rq.T @ (P[j] + np.asarray(w.get("aim_offset", [0.0, 0.0, 0.0]), dtype=float) - pivot)
+                        yaw_ = math.atan2(da[1], da[0])
+                        elev = math.atan2(da[2], math.hypot(da[0], da[1]))
+                        dist = float(np.linalg.norm(da))
+                        st["tgt"] = [max(-math.radians(90), min(math.radians(90), yaw_)), max(-math.radians(60), min(math.radians(60), -elev)),
+                                     max(0.0, min(float(w.get("stroke", 0.5)), dist - float(w.get("fist", 0.10)) + float(w["overshoot"])))]
+                        st["aims"].append({"punch": k, "link": names[j] if j < len(names) else int(j), "dist_m": round(dist, 3),
+                                           "yaw_deg": round(math.degrees(yaw_), 1), "elev_deg": round(math.degrees(elev), 1), "t_s": round(t, 2),
+                                           "ext_m": round(st["tgt"][2], 3)})
+                        st["phase"], st["t_phase"] = "aim", t
+                    elif st["phase"] == "aim" and t >= st["t_phase"] + float(w["aim_s"]):
+                        st["phase"], st["t_phase"] = "extend", t
+                    elif st["phase"] == "extend":
+                        st["ext"] = min(st["tgt"][2], st["ext"] + float(w["speed"]) * dt)
+                        if st["ext"] >= st["tgt"][2] - 1e-9:
+                            st["phase"], st["t_phase"] = "hold", t
+                    elif st["phase"] == "hold" and "at_hold" not in st["aims"][-1] and t >= st["t_phase"] + 0.5 * float(w["hold_s"]):
+                        q = _np(obj.get_joint_positions())
+                        st["aims"][-1]["at_hold"] = {"yaw_deg": round(math.degrees(q[st["ids"][0]]), 1), "pitch_deg": round(math.degrees(q[st["ids"][1]]), 1),
+                                                     "ext_m": round(float(q[st["ids"][2]]), 3)}
+                    elif st["phase"] == "hold" and t >= st["t_phase"] + float(w["hold_s"]):
+                        st["phase"] = "retract"
+                    elif st["phase"] == "retract":
+                        st["ext"] = max(0.0, st["ext"] - float(w["back_speed"]) * dt)
+                        if st["ext"] <= 0.0:
+                            st["phase"], st["k"], st["done"] = "idle", k + 1, st["done"] + 1
+                cur = obj.get_joint_positions()
+                v = _np(cur).reshape(1, -1).copy()
+                aimed = st["phase"] != "idle" or st["k"] > 0
+                v[0, st["ids"][0]] = st["tgt"][0] if aimed else 0.0
+                v[0, st["ids"][1]] = st["tgt"][1] if aimed else 0.0
+                v[0, st["ids"][2]] = st["ext"]
+                tv = torch.as_tensor(v, dtype=torch.float32)
+                if hasattr(cur, "device"):
+                    tv = tv.to(cur.device)
+                obj._articulation_view.set_joint_position_targets(tv)
+                if self._log and st["ticks"] % sub == 0:
+                    with open(self._log, "a") as f:
+                        f.write("%s %d %s %.4f %s\n" % (inst, st["ticks"] // sub, st["phase"], st["ext"], bool(st["touched"])))
                 st["ticks"] += 1

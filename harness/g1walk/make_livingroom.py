@@ -61,14 +61,36 @@ class Furn:
             self.mats[name] = m
         return self.mats[name]
 
-    def box(self, name, center, size, rgb):
+    def tex(self, stem, scale=1.0):
+        """RoboDojo 材质库里带纹理的材质(Assets/Material/material_XXXX/<stem>.mdl,OmniPBR 底子):按世界坐标投 UV(盒子没有 UV,
+        按物体坐标投的话一张图会被盒子的缩放拉满整块面),texture_scale = 每米几个重复。路径写成相对这件家具 object.usd 的相对路径"""
+        key = f"tex_{stem}"
+        if key not in self.mats:
+            mdl = MDL_LIB[stem]
+            m = UsdShade.Material.Define(self.st, f"/World/Looks/{key}")
+            sh = UsdShade.Shader.Define(self.st, f"/World/Looks/{key}/Shader")
+            sh.SetSourceAsset(Sdf.AssetPath(os.path.relpath(mdl, self.dir)), "mdl")
+            sh.SetSourceAssetSubIdentifier(stem, "mdl")
+            sh.CreateInput("project_uvw", Sdf.ValueTypeNames.Bool).Set(True)
+            sh.CreateInput("world_or_object", Sdf.ValueTypeNames.Bool).Set(True)
+            sh.CreateInput("texture_scale", Sdf.ValueTypeNames.Float2).Set(Gf.Vec2f(float(scale), float(scale)))
+            out = sh.CreateOutput("out", Sdf.ValueTypeNames.Token)
+            m.CreateSurfaceOutput("mdl").ConnectToSource(out)
+            m.CreateVolumeOutput("mdl").ConnectToSource(out)
+            m.CreateDisplacementOutput("mdl").ConnectToSource(out)
+            self.mats[key] = m
+        return self.mats[key]
+
+    def box(self, name, center, size, look):
+        """look = (r, g, b) 纯色,或 RoboDojo 材质库里一种带纹理的材质的名字(字符串)"""
         g = UsdGeom.Cube.Define(self.st, f"/World/{name}")
         g.CreateSizeAttr(1.0)
         x = UsdGeom.Xformable(g)
         x.AddTranslateOp().Set(Gf.Vec3d(*[float(v) for v in center]))
         x.AddScaleOp().Set(Gf.Vec3f(*[float(v) for v in size]))
         UsdPhysics.CollisionAPI.Apply(g.GetPrim())
-        UsdShade.MaterialBindingAPI.Apply(g.GetPrim()).Bind(self.mat(name + "_m", rgb))
+        mat = self.tex(look) if isinstance(look, str) else self.mat(name + "_m", look)
+        UsdShade.MaterialBindingAPI.Apply(g.GetPrim()).Bind(mat)
         self.boxes.append((center, size))
 
     def place(self, name, center, half, depth=0.0):
@@ -90,59 +112,70 @@ class Furn:
         print("%-22s %.2f × %.2f × %.2f m  放东西的地方 %s" % (self.cat, ext[0], ext[1], ext[2], list(self.places) or "-"))
 
 
+# RoboDojo 材质库:每个 material_XXXX 目录里一份 .mdl(OmniPBR 底子,带纹理);按 .mdl 的名字找目录
+MDL_LIB = {}
+for _d in sorted(os.listdir(f"{R}/Assets/Material")):
+    if _d.startswith("material_"):
+        for _f in sorted(os.listdir(f"{R}/Assets/Material/{_d}")):
+            if _f.endswith(".mdl"):
+                MDL_LIB.setdefault(_f[:-4], f"{R}/Assets/Material/{_d}/{_f}")
+# 家具用的纹理(P8XH2:纯色的家具和地板,手上的眼对着餐桌面看不出动 —— 和 P8I 白桌一样;真客厅里地板、木头、布都有纹理)
+FLOOR_T, WALL_T, SOFA_T, TABLE_T, COFFEE_T, TV_T, SHELF_T, COUNTER_T, COUNTER_TOP_T, STAIR_T, STAIR_T2, TOY_T, TOOL_T = (
+    "Wood_Tiles_Fineline", "Plaster", "Linen_Blue", "Mahogany_Planks", "Walnut_Planks", "Veneer_OU_Walnut", "Oak_Planks", "MDF", "Marble",
+    "Ash_Planks", "Birch_Planks", "Cardboard", "Plywood")
 WOOD, WHITE, GREY, BEIGE, DARK, BLUE, RED, GREEN = ((0.55, 0.38, 0.22), (0.9, 0.9, 0.88), (0.5, 0.5, 0.52), (0.82, 0.75, 0.62),
                                                     (0.15, 0.15, 0.16), (0.2, 0.35, 0.7), (0.75, 0.2, 0.15), (0.25, 0.55, 0.3))
 
 f = Furn("bd_lr_room", "living room walls")
 for nm, c, s in (("north", (0, 3.0, 1.25), (8.0, 0.1, 2.5)), ("south", (0, -3.0, 1.25), (8.0, 0.1, 2.5)),
                  ("west", (-4.0, 0, 1.25), (0.1, 6.0, 2.5)), ("east", (4.0, 0, 1.25), (0.1, 6.0, 2.5))):
-    f.box(nm, c, s, WHITE)
+    f.box(nm, c, s, WALL_T)
 # 客厅自己的地:8 × 6 m 的底板,顶面在资产原点(摆在地面高上)。RoboDojo 的 Ground 只有 7 × 7 m(env_spacing),第一版没底板,
 # 靠墙(x ±3.6 m)的东西掉出了地(糖盒落下去 3.8 m)
-f.box("floor", (0, 0, -0.05), (8.0, 6.0, 0.1), WOOD)
+f.box("floor", (0, 0, -0.05), (8.0, 6.0, 0.1), FLOOR_T)
 f.save()
 
 f = Furn("bd_lr_sofa", "sofa")
-f.box("seat", (0, 0, 0.22), (2.0, 0.9, 0.44), BLUE)
-f.box("back", (0, 0.38, 0.6), (2.0, 0.15, 0.4), BLUE)
-f.box("arm_l", (-0.95, 0, 0.35), (0.1, 0.9, 0.3), BLUE)
-f.box("arm_r", (0.95, 0, 0.35), (0.1, 0.9, 0.3), BLUE)
+f.box("seat", (0, 0, 0.22), (2.0, 0.9, 0.44), SOFA_T)
+f.box("back", (0, 0.38, 0.6), (2.0, 0.15, 0.4), SOFA_T)
+f.box("arm_l", (-0.95, 0, 0.35), (0.1, 0.9, 0.3), SOFA_T)
+f.box("arm_r", (0.95, 0, 0.35), (0.1, 0.9, 0.3), SOFA_T)
 f.place("seat", (0, -0.07, 0.44), (0.85, 0.3))
 f.save()
 
 f = Furn("bd_lr_coffee_table", "coffee table")
-f.box("top", (0, 0, 0.40), (1.2, 0.6, 0.04), WOOD)
+f.box("top", (0, 0, 0.40), (1.2, 0.6, 0.04), COFFEE_T)
 for i, (x, y) in enumerate(((-0.55, -0.25), (0.55, -0.25), (-0.55, 0.25), (0.55, 0.25))):
-    f.box(f"leg{i}", (x, y, 0.19), (0.05, 0.05, 0.38), WOOD)
+    f.box(f"leg{i}", (x, y, 0.19), (0.05, 0.05, 0.38), COFFEE_T)
 f.place("top", (0, 0, 0.42), (0.55, 0.25))
 f.save()
 
 f = Furn("bd_lr_tv_stand", "TV stand")
-f.box("body", (0, 0, 0.25), (1.6, 0.4, 0.5), DARK)
-f.box("tv", (0, 0.1, 0.85), (1.2, 0.05, 0.7), DARK)
+f.box("body", (0, 0, 0.25), (1.6, 0.4, 0.5), TV_T)
+f.box("tv", (0, 0.1, 0.85), (1.2, 0.05, 0.7), DARK)          # 屏幕本来就是一整块黑
 f.place("top_left", (-0.55, -0.08, 0.5), (0.2, 0.1))
 f.save()
 
 f = Furn("bd_lr_bookshelf", "bookshelf")
-f.box("side_l", (-0.44, 0, 0.8), (0.02, 0.35, 1.6), WOOD)
-f.box("side_r", (0.44, 0, 0.8), (0.02, 0.35, 1.6), WOOD)
-f.box("back", (0, 0.17, 0.8), (0.9, 0.01, 1.6), WOOD)
+f.box("side_l", (-0.44, 0, 0.8), (0.02, 0.35, 1.6), SHELF_T)
+f.box("side_r", (0.44, 0, 0.8), (0.02, 0.35, 1.6), SHELF_T)
+f.box("back", (0, 0.17, 0.8), (0.9, 0.01, 1.6), SHELF_T)
 for i, z in enumerate((0.02, 0.42, 0.82, 1.22, 1.59)):
-    f.box(f"shelf{i}", (0, 0, z), (0.86, 0.34, 0.03), WOOD)
+    f.box(f"shelf{i}", (0, 0, z), (0.86, 0.34, 0.03), SHELF_T)
 for i, z in enumerate((0.435, 0.835)):    # 人形够得着的两层
     f.place(f"shelf{i + 1}", (0, -0.02, z), (0.38, 0.12))
 f.save()
 
 f = Furn("bd_lr_counter", "kitchen counter")
-f.box("body", (0, 0, 0.44), (2.0, 0.6, 0.88), WHITE)
-f.box("top", (0, 0, 0.9), (2.04, 0.64, 0.04), GREY)
+f.box("body", (0, 0, 0.44), (2.0, 0.6, 0.88), COUNTER_T)
+f.box("top", (0, 0, 0.9), (2.04, 0.64, 0.04), COUNTER_TOP_T)
 f.place("top", (0, -0.02, 0.92), (0.9, 0.25))
 f.save()
 
 f = Furn("bd_lr_dining_table", "dining table with a fruit bowl")
-f.box("top", (0, 0, 0.74), (1.4, 0.9, 0.04), WOOD)
+f.box("top", (0, 0, 0.74), (1.4, 0.9, 0.04), TABLE_T)
 for i, (x, y) in enumerate(((-0.65, -0.4), (0.65, -0.4), (-0.65, 0.4), (0.65, 0.4))):
-    f.box(f"leg{i}", (x, y, 0.36), (0.05, 0.05, 0.72), WOOD)
+    f.box(f"leg{i}", (x, y, 0.36), (0.05, 0.05, 0.72), TABLE_T)
 # 果盘:桌面上一只浅盘(底 + 四边),放水果的地方
 f.box("bowl_base", (0.3, 0, 0.765), (0.30, 0.30, 0.01), BEIGE)
 for nm, c, s in (("bowl_n", (0.3, 0.145, 0.79), (0.30, 0.01, 0.05)), ("bowl_s", (0.3, -0.145, 0.79), (0.30, 0.01, 0.05)),
@@ -152,7 +185,22 @@ f.place("fruit_bowl", (0.3, 0, 0.815), (0.13, 0.13), depth=0.045)
 f.place("top", (-0.3, 0, 0.76), (0.3, 0.35))
 f.save()
 
-for cat, desc, rgb in (("bd_lr_toy_box", "toy box", RED), ("bd_lr_tool_box", "toolbox", GREEN)):
+# 台阶(远 5 上楼梯,bd_stairs 用):沿资产系 +x 往上 STAIR_N 级,每级高 STAIR_H、深 STAIR_D,宽 STAIR_W;最上面是一块 STAIR_TOP 深的平台。
+# 每一级都是一整块从地面立起来的实心(不是悬空的板子),一级挨着一级,脚踩不空。
+# 家里的台阶 15–18 cm 一级;先放 10 cm(和 walk_test.py 的台阶验收一样高),过了再往上加
+STAIR_N, STAIR_H, STAIR_D, STAIR_W, STAIR_TOP = 3, 0.10, 0.30, 1.0, 1.0
+f = Furn("bd_lr_stairs", "stairs up to a platform")
+for k in range(STAIR_N):
+    # 第 k 级:x 从 k·STAIR_D 到下一级的起点、从地面立到 (k+1)·STAIR_H;最上面那级连着平台
+    x0, h = k * STAIR_D, (k + 1) * STAIR_H
+    end = (k + 1) * STAIR_D if k < STAIR_N - 1 else STAIR_N * STAIR_D + STAIR_TOP
+    f.box(f"step{k}", ((x0 + end) / 2, 0, h / 2), (end - x0, STAIR_W, h), STAIR_T if k % 2 == 0 else STAIR_T2)
+# 平台顶面:两只脚都站在这一块里才算上去了(四周各让出 0.1 m,站在边上半只脚悬空不算)
+f.place("top", ((STAIR_N - 1) * STAIR_D + (STAIR_D + STAIR_TOP) / 2, 0, STAIR_N * STAIR_H),
+        ((STAIR_D + STAIR_TOP) / 2 - 0.1, STAIR_W / 2 - 0.1))
+f.save()
+
+for cat, desc, rgb in (("bd_lr_toy_box", "toy box", TOY_T), ("bd_lr_tool_box", "toolbox", TOOL_T)):
     f = Furn(cat, desc)
     f.box("base", (0, 0, 0.01), (0.6, 0.4, 0.02), rgb)
     for nm, c, s in (("n", (0, 0.195, 0.16), (0.6, 0.01, 0.32)), ("s", (0, -0.195, 0.16), (0.6, 0.01, 0.32)),

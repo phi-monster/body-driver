@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
-"""第 40 条(路 8):大客厅的布局和"收拾完没有"的评分。家具是 make_livingroom.py 装的 bd_lr_*,东西是随机题机的物件池(bdq_*,Isaac 的 YCB)。
+"""第 40 条(路 8):大客厅的布局和"收拾完没有"的评分;同一间客厅里远 5 的两样(上台阶、从地上捡东西)的布局。家具是 make_livingroom.py 装的 bd_lr_*,东西是随机题机的物件池(bdq_*,Isaac 的 YCB)。
 
 箱上跑(不起 Isaac):/venv/RoboDojo/bin/python make_livingroom_layout.py /root/RoboDojo --cfg_name <会走的人形那具身体的配置名> --n 30
 写:
   Assets/Eval_Layout/RoboDojo/<配置名>/0/bd_livingroom_{0,1,2}.json(三张,东西乱放的地方不同)
+  Assets/Eval_Layout/RoboDojo/<配置名>/0/bd_stairs_{0,1,2}.json、bd_floorpick_{0,1,2}.json(远 5)
   task/RoboDojo/bd/tidy.py(判据 bd_tidy:每件东西在不在它该去的地方)
 每件东西该去哪(写在布局里那件东西的记录里,"bd_place": [家具的标签, 那件家具上放东西的地方]):
   吃的、碗碟 → 厨房台面;香蕉 → 餐桌上的果盘;玩具(泡沫砖、木块)→ 玩具箱;工具(电钻、夹子、剪刀)→ 工具箱;马克笔 → 书架。
@@ -50,7 +51,11 @@ WHERE = {   # 东西 → (家具, 放东西的地方)
 }
 SAY = ("Tidy up the living room: put the food and the dishes on the kitchen counter, the banana in the fruit bowl on the dining table, "
        "the toys in the toy box, the tools in the toolbox, and the marker on the bookshelf.")
-ROBOT_START = (0.0, -0.6)        # 会走的人形开局站在客厅中间偏南,朝 +y(沙发那边)
+# 会走的人形开局站在餐桌南边、面朝餐桌(朝 +y),骨盆离桌子近的那条边 START_GAP:开机量身体要一张手够得着、眼看得见的桌面
+# (P8XH 开局站在客厅当中,前面 1.9 m 才是茶几:"定不了世界(第一只手的眼没三角出桌面)");量完就在这间屋里接着干,地、桌子都是同一张。
+# 和 RoboDojo 那具固定在桌边的 G1 差不多的站法(那具骨盆在桌子近边后面 0.12 m,桌面比骨盆高 6.5 cm;这里桌面离地 0.76、骨盆 0.75)。
+# 站在哪儿按餐桌资产自己的包围盒算(下面 robot_start()),写进布局(第一件东西的 bd_tidy 里),install.py 从布局里读了写进身体配置
+START_AT, START_GAP = "dining_table", 0.15
 
 
 def rotz(deg):
@@ -101,6 +106,14 @@ for lab, (cat, x, y, yaw) in FURN.items():
     furn_foot[lab] = footprint(lo, hi, x, y, yaw)
 
 
+def robot_start():
+    """人形开局站哪儿(x, y):START_AT 那件家具朝 −y 那条边的正中,再往 −y 退 START_GAP(人形朝 +y)"""
+    cat, x, y, yaw = FURN[START_AT]
+    assert abs(yaw) < 1e-9, "这里只按没转过的家具算"
+    lo, hi = bbox(meta("Geometry", cat))
+    return (float(x + (lo[0] + hi[0]) / 2), float(y + lo[1] - START_GAP))
+
+
 def surface(lab, place):
     """家具 lab 上放东西的地方:世界里的中心(顶面)、半长半宽、转角、深"""
     cat, x, y, yaw = FURN[lab]
@@ -116,16 +129,23 @@ os.makedirs(f"{R}/task/RoboDojo/bd", exist_ok=True)
 shutil.copy(f"{HERE}/rd/bd/tidy.py", f"{R}/task/RoboDojo/bd/tidy.py")
 D = f"{R}/Assets/Eval_Layout/RoboDojo/{args.cfg_name}/0"
 os.makedirs(D, exist_ok=True)
-for k in range(3):
+def room_layout():
+    """客厅本身:地(RoboDojo 的 Ground 摆到 FLOOR_Z)、背景、家具;RoboDojo 的桌子挪出客厅(布局里要有这一项)"""
     lay = {key: json.loads(json.dumps(base[key])) for key in ("Ground", "Background")}
     lay["Ground"]["default_pos"] = [0.0, 0.0, FLOOR_Z]
-    lay["Table"] = dict(base["Table"], default_pos=[0.0, 30.0, base["Table"]["default_pos"][2]])   # RoboDojo 的桌子挪出客厅(它要有这一项)
+    lay["Table"] = dict(base["Table"], default_pos=[0.0, 30.0, base["Table"]["default_pos"][2]])
     lay["Geometry"] = {}
     for lab, (cat, x, y, yaw) in FURN.items():
         lay["Geometry"].setdefault(cat, []).append({"category": cat, "category_idx": 0, "label": lab, "default_pos": [x, y, FLOOR_Z],
                                                     "default_ori": q_yaw(yaw), "scale": [1.0, 1.0, 1.0], "physics": {"type": "geometry"}, "visual": {}})
-    taken = [footprint(np.array([-0.35, -0.35, 0]), np.array([0.35, 0.35, 0]), ROBOT_START[0], ROBOT_START[1], 0.0)]   # 人形站的地方
-    taken += list(furn_foot.values())
+    return lay
+
+
+ROBOT_START = robot_start()
+ROBOT_FOOT = footprint(np.array([-0.35, -0.35, 0]), np.array([0.35, 0.35, 0]), ROBOT_START[0], ROBOT_START[1], 0.0)   # 人形站的地方
+for k in range(3):
+    lay = room_layout()
+    taken = [ROBOT_FOOT] + list(furn_foot.values())
     lay["Rigid"] = {}
     placed = []
     for i in range(args.n):
@@ -163,7 +183,7 @@ for k in range(3):
                "visual": {}, "relative_plane": "Ground", "need_check_stable": False, "margin": 0.01, "check_mode": "bbox",
                "bd_place": list(WHERE[cat]), "bd_start": where}
         if i == 0:
-            rec["bd_tidy"] = {"sentence": SAY, "n": args.n}
+            rec["bd_tidy"] = {"sentence": SAY, "n": args.n, "robot_start": [round(v, 4) for v in ROBOT_START]}
         lay["Rigid"].setdefault(cat, []).append(rec)
         placed.append((cat, where))
     json.dump(lay, open(f"{D}/bd_livingroom_{k}.json", "w"), indent=1)
@@ -171,4 +191,67 @@ for k in range(3):
     for cat, w in placed:
         by[w] = by.get(w, 0) + 1
     print("布局 %s/bd_livingroom_%d.json:%d 件东西,开局在 %s" % (D, k, len(placed), by))
+print("人形开局站在:", [round(v, 4) for v in robot_start()], "(%s 前 %.2f m)" % (START_AT, START_GAP))
 print("给脑的话:", SAY)
+
+
+# ---------------------------------------------------------------- 远 5:上台阶(bd_stairs)、蹲下捡地上的东西(bd_floorpick)
+# 同一间客厅、同一个开局(人形站在餐桌跟前);每样三张布局,台阶 / 那件东西摆的地方不同
+def floor_ok(fp):
+    """在客厅的地上(离墙 0.4 m 以内不放)、不压家具、不压人形站的地方"""
+    if np.abs(fp[:, 0]).max() > 3.6 or np.abs(fp[:, 1]).max() > 2.6:
+        return False
+    return not any(overlap(fp, t) for t in [ROBOT_FOOT] + list(furn_foot.values()))
+
+
+def item_rec(cat, label, x, y, yaw, **extra):
+    m = meta("Rigid", cat)
+    lo, hi = bbox(m)
+    rec = {"category": cat, "category_idx": 0, "label": label, "default_pos": [float(x), float(y), float(FLOOR_Z - lo[2] + 0.003)],
+           "default_ori": q_yaw(yaw), "scale": [1.0, 1.0, 1.0], "physics": {"mass": m["physics"]["mass"], "static_friction": 0.6,
+                                                                           "dynamic_friction": 0.5, "type": "rigid"},
+           "visual": {}, "relative_plane": "Ground", "need_check_stable": False, "margin": 0.01, "check_mode": "bbox"}
+    rec.update(extra)
+    return rec
+
+
+st_lo, st_hi = bbox(meta("Geometry", "bd_lr_stairs"))
+for k in range(3):
+    lay = room_layout()
+    for _ in range(2000):
+        # 台阶朝 +x 往上(人形从西边、餐桌那儿走过来),摆在东边那块空地上;台阶前面(西边)再空出 1 m 走过来、站上第一级
+        x, y = float(rng.uniform(0.3, 1.2)), float(rng.uniform(-1.3, 0.2))
+        fp = footprint(st_lo, st_hi, x, y, 0.0)
+        ahead = footprint(np.array([-1.0, st_lo[1], 0.0]), np.array([0.0, st_hi[1], 0.0]), x, y, 0.0)
+        if floor_ok(fp) and floor_ok(ahead):
+            break
+    else:
+        raise AssertionError("台阶摆不下")
+    lay["Geometry"]["bd_lr_stairs"] = [{"category": "bd_lr_stairs", "category_idx": 0, "label": "stairs", "default_pos": [x, y, FLOOR_Z],
+                                        "default_ori": q_yaw(0.0), "scale": [1.0, 1.0, 1.0], "physics": {"type": "geometry"}, "visual": {}}]
+    lay["Rigid"] = {}
+    json.dump(lay, open(f"{D}/bd_stairs_{k}.json", "w"), indent=1)
+    print("布局 %s/bd_stairs_%d.json:台阶脚下在 (%.2f, %.2f),平台顶 %.2f m" % (D, k, x, y, FLOOR_Z + st_hi[2]))
+
+# 捡得起来的:平放时窄的那一边 < 7 cm(手张开能包住的;人形手的张口这里没量,按随机题机给 G1 的 6.6 cm 取整)
+PICK = []
+for cat in sorted(WHERE):
+    lo, hi = bbox(meta("Rigid", cat))
+    if min(hi[0] - lo[0], hi[1] - lo[1]) < 0.07:
+        PICK.append(cat)
+for k in range(3):
+    lay = room_layout()
+    cat = str(rng.choice(PICK))
+    lo, hi = bbox(meta("Rigid", cat))
+    for _ in range(2000):
+        r, ang, yaw = float(rng.uniform(1.0, 2.0)), float(rng.uniform(0.0, 2 * math.pi)), float(rng.uniform(0, 360))
+        x, y = ROBOT_START[0] + r * math.cos(ang), ROBOT_START[1] + r * math.sin(ang)
+        if floor_ok(footprint(lo, hi, x, y, yaw)):
+            break
+    else:
+        raise AssertionError(f"{cat} 摆不下")
+    desc = meta("Rigid", cat)["geometry"].get("bd", {}).get("desc") or cat.replace("bdq_", "").replace("_", " ")
+    say = "Pick up the %s from the floor and lift it 10 cm." % desc
+    lay["Rigid"] = {cat: [item_rec(cat, "target", x, y, yaw, bd_say=say)]}
+    json.dump(lay, open(f"{D}/bd_floorpick_{k}.json", "w"), indent=1)
+    print("布局 %s/bd_floorpick_%d.json:%s 在地上 (%.2f, %.2f),离人形 %.2f m —— %s" % (D, k, cat, x, y, r, say))

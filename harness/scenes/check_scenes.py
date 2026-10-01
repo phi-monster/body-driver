@@ -324,13 +324,19 @@ def scenario(S, rep):
         test(rep, "环平躺在杆顶上", 0, S.graded())
         S.set_pose("ring", c - rotm(q_hang) @ c_local, q_hang)
         return True
-    if t in ("bd_glass", "bd_white", "bd_walker"):
-        label = {"bd_glass": "glass", "bd_white": "target", "bd_walker": "target"}[t]
+    if t == "bd_stairs":
+        return stairs_scenario(S, rep)
+    if t in ("bd_glass", "bd_white", "bd_walker", "bd_floorpick"):
+        label = {"bd_glass": "glass", "bd_white": "target", "bd_walker": "target", "bd_floorpick": "target"}[t]
         p0, q0 = S.pose(label)
-        test(rep, "在桌上", 0, S.graded())
+        test(rep, "在地上" if t == "bd_floorpick" else "在桌上", 0, S.graded())
+        S.set_pose(label, p0 + [0, 0, 0.08], q0)
+        test(rep, "抬起 8 cm", 0, S.graded())
         S.set_pose(label, p0 + [0, 0, 0.12], q0)
         test(rep, "抬起 12 cm", 1, S.graded())
         return True
+    if t == "bd_punch":
+        return punch_scenario(S, rep)
     if t == "bd_question":
         return question_scenario(S, rep)
     if t == "bd_mouse_floor":
@@ -554,11 +560,51 @@ def grip_check(S, rep):
     return out
 
 
+def reading_check(S, rep):
+    """夹爪 / 手的读数是不是量到的:命令推到限位以外(夹爪给 3,手每个关节给上限 + 1 rad)走 10 个动作,读数该停在手指真到的地方(限位上),
+    不该跟着命令走(P8XH2:驱动"推到 97.5 读数跟着走";读数要是命令的回声,这里读数 = 命令)。返回 (读数 = 关节真位置, 读数 ≠ 命令)"""
+    env = S.env
+    rm = env.robot_manager
+    art = rm.robot_key[0]
+    rob = rm.robot_list[0]
+    key = rm.process_name(rob.gripper_name)
+    lim = art.data.soft_joint_pos_limits[0, rob.gripper_joint_indices].cpu().numpy()
+    cmd = np.array([3.0]) if rob.ee_type == "gripper" else (lim[:, 1] + 1.0).astype(np.float64)
+    for _ in range(10):
+        a = S.hold_action()
+        a[key] = cmd.copy()
+        env.take_action(a)
+    st = env.get_obs()["state"]
+    r = np.asarray(st[key], dtype=float).reshape(-1)
+    q = art.data.joint_pos[0, rob.gripper_joint_indices].cpu().numpy().astype(float)
+    if rob.ee_type == "gripper":
+        lo, hi = rob.gripper_scale
+        base = rob.gripper_joints_name.index(rob.gripper_move["base"])
+        truth = np.array([(q[base] - lo) / (hi - lo) if rob.gripper_move["sign"] == 1 else (hi - q[base]) / (hi - lo)])
+    else:
+        truth = q
+    out = {"key": key, "cmd": [round(float(v), 3) for v in cmd], "reading": [round(float(v), 4) for v in r], "joint_truth": [round(float(v), 4) for v in truth]}
+    rep["reading_check"] = out
+    log("   读数核:命令推到限位以外 %s ⇒ 读数 %s、关节真到 %s" % (out["cmd"], out["reading"], out["joint_truth"]))
+    real = r.shape == truth.shape and float(np.abs(r - truth).max()) < 1e-3
+    not_echo = float(np.abs(r - cmd).min()) > 0.5
+    # 放回去:命令回到上一拍的样子(夹爪 1 = 开;手回到下限 = 张开)
+    back = np.array([1.0]) if rob.ee_type == "gripper" else lim[:, 0].astype(np.float64)
+    for _ in range(10):
+        a = S.hold_action()
+        a[key] = back.copy()
+        env.take_action(a)
+    return real, not_echo
+
+
 def mouse_floor_scenario(S, rep):
     """第 39 条:底盘真在地上走(两个轮子一起转 ⇒ 往前走;反着转 ⇒ 原地转),老鼠离地 12 cm 判 1、8 cm 判 0"""
     g = grip_check(S, rep)
     q0, q1 = g["cmd_0"]["finger_joint_pos"], g["cmd_1"]["finger_joint_pos"]
     test(rep, "夹爪给 1:两根手指张开(%s → %s)" % (q0, q1), 1, max(abs(a - b) for a, b in zip(q0, q1)) > 0.01)
+    real, not_echo = reading_check(S, rep)
+    test(rep, "夹爪命令推到限位以外:读数 = 手指真到的地方", 1, real)
+    test(rep, "夹爪命令推到限位以外:读数不跟着命令走", 1, not_echo)
     r = 0.05   # 轮子半径(make_wheelarm.py)
     a = drive(S, rep, "往前", 0.004 / r, 0.004 / r, 50)          # 一个动作该走 4 mm(0.1 m/s),50 个动作该走 0.2 m
     test(rep, "两个轮子一起转,底盘往前走了 %.3f m(该 0.2 m 上下)" % a["dist_m"], 1, 0.1 < a["dist_m"] < 0.3)
@@ -588,6 +634,55 @@ def mouse_floor_scenario(S, rep):
     S.set_pose("target", p0 + [0, 0, 0.12], q0)
     test(rep, "老鼠离地 12 cm", 1, S.graded())
     return True
+
+
+def put_robot(S, xy, floor_z, settle_s=2.0):
+    """把会走的人形摆到 xy、站在高 floor_z 的那一层上(本 env 原点下;根的位姿、关节照开局站着的样子写进仿真),
+    走路控制器接着站(命令 = 站着不动),物理走 settle_s 秒。只给判据核用(核"站在平台上判 1"),题里不这么干"""
+    env = S.env
+    art = env.robot_manager.robot_key[0]
+    org = torch.as_tensor(_np(env.scene_manager.env_origins[0])[:3], dtype=torch.float32, device=art.device)
+    from task.RoboDojo.bd import walkrig
+    rs = art.data.default_root_state.clone()
+    rs[:, 0], rs[:, 1] = org[0] + float(xy[0]), org[1] + float(xy[1])
+    rs[:, 2] = rs[:, 2] - walkrig.FLOOR_Z + float(floor_z) + 0.01
+    ids = torch.arange(art.num_instances, device=art.device)
+    art.write_root_pose_to_sim(rs[:, :7], env_ids=ids)
+    art.write_root_velocity_to_sim(torch.zeros_like(rs[:, 7:]), env_ids=ids)
+    art.write_joint_state_to_sim(art.data.default_joint_pos.clone(), art.data.default_joint_vel.clone(), env_ids=ids)
+    art.set_joint_position_target(art.data.default_joint_pos.clone(), env_ids=ids)
+    w = env._walk()
+    if w is not None:
+        w.reset()
+    env.bd_cmd = list(walkrig.STAND)
+    S.steps(int(round(settle_s / float(env.dt))))
+    p = art.data.root_pos_w[0].cpu().numpy() - _np(env.scene_manager.env_origins[0])[:3]
+    return [round(float(v), 3) for v in p]
+
+
+def stairs_scenario(S, rep):
+    """远 5 上台阶:判据看两只脚是不是都站在平台那一块面上。站在开局(地上)判 0;摆到台阶脚下的地上判 0;摆到平台正中判 1
+    (摆身体只为核判据;走上去要靠走路控制器,walk_test.py stairs 量了:老策略 10 cm 一级上得去,velocity_height_g1 上不去)"""
+    fp = S.rm.func_parser
+    test(rep, "开局(站在餐桌跟前的地上)", 0, S.graded())
+    pos, q = S.pose("stairs")
+    pl = S.meta("stairs")["passive"]["functional"]["place"]["top"]
+    Rs = rotm(q)
+    top = pos + Rs @ np.asarray(pl["center"], dtype=float)
+    foot = pos + Rs @ np.array([-0.5, 0.0, 0.0])          # 台阶第一级前面 0.5 m 的地上
+    from task.RoboDojo.bd import walkrig
+    p = put_robot(S, foot[:2], walkrig.FLOOR_Z)
+    test(rep, "站在台阶脚下的地上(骨盆 %s)" % p, 0, S.graded())
+    p = put_robot(S, top[:2], top[2])
+    got = S.graded()
+    rep["on_top"] = dict(fp.__dict__.get("_bd_on_top", {}).get(0, {}), pelvis=p, platform_top_z=round(float(top[2]), 3))
+    test(rep, "站在平台正中(骨盆 %s;%s)" % (p, rep["on_top"]), 1, got)
+    return True
+
+
+def act_dt(S):
+    """一个动作多少秒(RoboDojo:物理一步 dt × 一个动作的子步数 collect_interval)"""
+    return float(S.env.dt) * max(int(round(float(getattr(S.env.obs_manager, "collect_interval", 1) or 1))), 1)
 
 
 def livingroom_scenario(S, rep):
@@ -638,6 +733,7 @@ def livingroom_scenario(S, rep):
     ids = torch.arange(art.num_instances, device=art.device)
     rs = torch.cat([art.data.root_pos_w.clone(), art.data.root_quat_w.clone()], dim=-1)
     z_before = float(rs[0, 2].cpu()) - org[2]
+    f_before = art.data.body_pos_w[0, fid, 2].cpu().numpy() - org[2]
     rs[:, 2] += 0.20
     art.write_root_pose_to_sim(rs, env_ids=ids)
     art.write_root_velocity_to_sim(torch.zeros(art.num_instances, 6, device=art.device), env_ids=ids)
@@ -645,24 +741,30 @@ def livingroom_scenario(S, rep):
     for _ in range(10):
         S.steps(10)
         zs.append(round(float(art.data.root_pos_w[0, 2].cpu()) - org[2], 3))
-    rep["lift_drop"] = {"z_before": round(z_before, 4), "z_every_10_substeps": zs}
-    log("   抬高 0.20 m 放手:骨盆高 %.3f → 每 10 个子步 %s" % (z_before, zs))
-    # 脚没埋在地里 ⇒ 落回原来的高度(第一版:落回去高了 4.5 cm —— 复位时脚埋在地里,站在下面那层地上)
-    test(rep, "抬高放手落回原来的高度(%.3f → %.3f m)" % (z_before, zs[-1]), 1, abs(zs[-1] - z_before) < 0.01)
+    f_after = art.data.body_pos_w[0, fid, 2].cpu().numpy() - org[2]
+    rep["lift_drop"] = {"z_before": round(z_before, 4), "z_every_10_substeps": zs,
+                        "feet_z_before": [round(float(v), 4) for v in f_before], "feet_z_after": [round(float(v), 4) for v in f_after]}
+    log("   抬高 0.20 m 放手:骨盆高 %.3f → 每 10 个子步 %s;脚那一节 %s → %s" % (z_before, zs, rep["lift_drop"]["feet_z_before"], rep["lift_drop"]["feet_z_after"]))
+    # 脚没埋在地里 ⇒ 脚落回原来的高度(第一版:骨盆落回去高了 4.5 cm —— 复位时脚埋在地里,站在下面那层地上)。
+    # 比脚那一节,不比骨盆:骨盆多高是走路控制器自己挑的站姿(AGILE 落地以后膝盖多弯一点,骨盆低 1.5 cm,lr11),脚踩在哪一层地上才是要核的
+    test(rep, "抬高放手,两只脚落回原来的高度(%s → %s m)" % (rep["lift_drop"]["feet_z_before"], rep["lift_drop"]["feet_z_after"]), 1,
+         float(np.abs(f_after - f_before).max()) < 0.01)
     p0, _ = robot_root(S)
     for _ in range(50):
         env.take_action(S.hold_action())
     p1, _ = robot_root(S)
     rep["stand"] = {"pelvis_z": [round(float(p0[2]), 3), round(float(p1[2]), 3)], "moved_m": round(float(np.linalg.norm((p1 - p0)[:2])), 3)}
     test(rep, "站着不动 50 个动作:骨盆高 %.3f → %.3f m、挪了 %.3f m" % (p0[2], p1[2], rep["stand"]["moved_m"]), 1, p1[2] > p0[2] - 0.1 and rep["stand"]["moved_m"] < 0.1)
-    env.bd_cmd = [0.3, 0.0, 0.0, 0.72]
+    # 往后退 1.5 s(开局站在餐桌跟前,前面是桌子;身后到墙 0.8 m)
+    VX, N_WALK = -0.3, 37
+    env.bd_cmd = [VX, 0.0, 0.0, 0.72]
     w = env._walk()
     c0 = w.calls if w is not None else None
     vel, feet, track, lift = [], [], [], []
     art = env.robot_manager.robot_key[0]
     fid = [art.body_names.index(n) for n in ("left_ankle_roll_link", "right_ankle_roll_link")]
     org = _np(env.scene_manager.env_origins[0])[:3]
-    for k in range(50):
+    for k in range(N_WALK):
         env.take_action(S.hold_action())
         d = art.data
         fz = d.body_pos_w[0, fid, 2].cpu().numpy() - org[2]
@@ -671,7 +773,8 @@ def livingroom_scenario(S, rep):
             vel.append([round(float(v), 3) for v in d.root_lin_vel_b[0].cpu().numpy()[:2]])
             feet.append([[round(float(v), 3) for v in (d.body_pos_w[0, i].cpu().numpy() - org)[:3]] for i in fid])
             if w is not None:
-                e = (d.joint_pos_target[0, w.leg_ids] - d.joint_pos[0, w.leg_ids]).abs().cpu().numpy()
+                legs = w.ctrl.leg_ids
+                e = (d.joint_pos_target[0, legs] - d.joint_pos[0, legs]).abs().cpu().numpy()
                 track.append(round(float(e.max()), 3))
     p2, _ = robot_root(S)
     rep["walk_diag"] = {"policy_calls": (w.calls - c0) if w is not None else None, "decim": getattr(w, "decim", None),
@@ -686,12 +789,16 @@ def livingroom_scenario(S, rep):
     p3, _ = robot_root(S)
     rep["walk"] = {"moved_xy_m": [round(float(v), 3) for v in (p2 - p1)[:2]], "dist_m": round(float(np.linalg.norm((p2 - p1)[:2])), 3),
                    "pelvis_z_after": round(float(p3[2]), 3)}
-    test(rep, "走路控制器 vx 0.3 m/s 走 2 s:走了 %.3f m(该 0.6 m 上下)、停下以后骨盆高 %.3f m" % (rep["walk"]["dist_m"], p3[2]), 1,
-         0.4 < rep["walk"]["dist_m"] < 0.8 and p3[2] > p0[2] - 0.1)
+    want = abs(VX) * N_WALK * act_dt(S)
+    test(rep, "走路控制器 vx %.1f m/s 走 %.1f s:走了 %.3f m(该 %.2f m 上下)、停下以后骨盆高 %.3f m" % (VX, N_WALK * act_dt(S), rep["walk"]["dist_m"], want, p3[2]), 1,
+         0.6 * want < rep["walk"]["dist_m"] < 1.4 * want and p3[2] > p0[2] - 0.1)
     save_images(env, rep, "L0_walked")
     g = grip_check(S, rep)
     q0, q1 = g["cmd_0"]["finger_joint_pos"], g["cmd_1"]["finger_joint_pos"]
     test(rep, "左手每个关节给到下限 / 上限:手指动了(最大 %.3f rad)" % max(abs(x - y) for x, y in zip(q0, q1)), 1, max(abs(x - y) for x, y in zip(q0, q1)) > 0.1)
+    real, not_echo = reading_check(S, rep)
+    test(rep, "左手命令推到限位以外:读数 = 关节真到的地方", 1, real)
+    test(rep, "左手命令推到限位以外:读数不跟着命令走", 1, not_echo)
     fp = S.rm.func_parser
     test(rep, "开局(东西乱放着)", 0, S.graded())
     lay = S.lm.saved_layouts[0]
@@ -813,6 +920,50 @@ def question_scenario(S, rep):
         test(rep, "东西在机身正下方", 1, S.graded())
         return True
     raise KeyError(req)
+
+
+def punch_scenario(S, rep):
+    """远 6:会出拳的东西真打得到不动的身体(接触报告记下打到了哪一节),对准往上偏开 30 cm 就打不到;判据跟着 0 / 1。
+    身体一直拿着不动(动作 = 此刻的关节读数),只改出拳的时序(早点出)。第一种只出 1 拳,判据按"出完 1 拳"直接问(打到了 ⇒ 0);
+    第二种照任务出满拳数(都偏开),用任务注册的判据判 ⇒ 1,停在这个样子再走一遍 RoboDojo 自己的 step → get_reward"""
+    rec = [r for r in S.lm.get_layout_records(0, "Articulation") if r.get("bd_punch")][0]
+    w = rec["bd_punch"]
+    count0 = int(w["count"])
+    fp = S.rm.func_parser
+    obj = S.obj(rec["label"])
+    act_s = S.env.dt * max(int(round(float(getattr(S.env.obs_manager, "collect_interval", 1) or 1))), 1)   # 一个动作多少秒
+    stroke = float(w.get("stroke", 0.5))
+    one = (w["aim_s"] + stroke / w["speed"] + w["hold_s"] + stroke / w["back_speed"]) / act_s     # 一拳最多要几个动作
+    out = {}
+    for name, off, count, expect_touch in (("身体不动、对准它", [0.0, 0.0, 0.0], 1, True), ("对准往上偏开 30 cm", [0.0, 0.0, 0.30], count0, False)):
+        S.env.puncher.reset()
+        w.update({"start": 3, "count": count, "aim_offset": off})
+        need = int(math.ceil(3 + (count - 1) * max(float(w["every"]), one) + one)) + 10
+        n = 0
+        while n < need:
+            S.env.take_action(S.hold_action())
+            n += 1
+            st = getattr(obj, "_bd_punch", None) or {}
+            if st.get("done", 0) >= count:
+                break
+        st = getattr(obj, "_bd_punch", None) or {}
+        out[name] = {k: st.get(k) for k in ("done", "touched", "aims", "contacts", "last_other", "fist_path", "robot_prims",
+                                            "contact_processing_was_disabled", "headers_at_start")}
+        out[name]["subscriptions"] = getattr(S.env.puncher, "subscriptions", None)
+        out[name]["actions"] = n
+        out[name]["contact_headers_seen_all"] = getattr(S.env.puncher, "headers_seen", None)
+        log("   出拳 %s:%d 个动作出完 %s 拳 · 打到 %s · 拳头碰到过 %s 回(最后一回是 %s)· 接触报告一共收到 %s 条(这一回开始时 %s)"
+            "· 开始时接触处理是关着的 %s · 订阅了 %s 回 · 对准 %s" % (
+                name, n, st.get("done"), st.get("touched"), st.get("contacts", 0), st.get("last_other"), out[name]["contact_headers_seen_all"],
+                st.get("headers_at_start"), st.get("contact_processing_was_disabled"), out[name]["subscriptions"], st.get("aims")))
+        test(rep, "%s:拳头碰到身体" % name, 1 if expect_touch else 0, bool(st.get("touched")))
+        if count == 1:
+            test(rep, "%s:出完 1 拳以后的判据(直接问 bd_not_touched)" % name, 0, fp.bd_not_touched({"env_idx": 0, "label": rec["label"], "punches": 1}))
+        else:
+            test(rep, "%s:出满 %d 拳以后任务的判据" % (name, count), 1, S.graded())
+    w.pop("aim_offset", None)
+    rep["punch"] = out
+    return True
 
 
 def walk(S, rep, label=None):

@@ -27,14 +27,15 @@ sides:
     gripper_bias: 0.0
     gripper_scale: [0.0, 1.0]
     curobo: curobo_left.yml
-    # 相机:内旋 XYZ 欧拉角(度,RoboDojo utils/rotations.py 的默认),相机看自己的 −Z;腕眼挂在手腕最后一节上,顺着手的方向(+x)往下 15°
+    # 相机:内旋 XYZ 欧拉角(度,RoboDojo utils/rotations.py 的默认),相机看自己的 −Z。腕眼照 RoboDojo 那具固定在桌边的 G1 的装法:
+    # 挂在手腕最后一节上方 8 cm、顺着手的方向往下 35°(第一版离手 6 cm、往下 15°:P8XH2 的左腕眼一大半是自己的手,驱动说"看不出")
     camera:
     - link: left_wrist_yaw_link
       name: cam_wrist
       type: d435
       mesh: pinhole
-      pos: [0.06, 0.0, 0.04]
-      ori: [0, -75, -90]
+      pos: [0.0, 0.0, 0.08]
+      ori: [0, -55, -90]
   right:
     ee_joints: right_wrist_yaw_joint
     ee_link: right_wrist_yaw_link
@@ -51,5 +52,5 @@ sides:
       name: cam_wrist
       type: d435
       mesh: pinhole
-      pos: [0.06, 0.0, 0.04]
-      ori: [0, -75, -90]
+      pos: [0.0, 0.0, 0.08]
+      ori: [0, -55, -90]
