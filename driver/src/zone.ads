@@ -6,31 +6,50 @@ with Picture;
 with Selfmap;
 with Table;
 with Geom;
+with Json;
 with Ada.Containers.Vectors;
 package Zone is
+   --  一瓣 = 这只眼里一根(或并在一起看不开的几根)手指张开时那一块:框、形心(归一化画幅)、像素数
    type Lobe is record
       Valid : Boolean := False;
       X0, Y0, X1, Y1 : Natural := 0;
       Cu, Cv : Long_Float := 0.0;
       Count : Natural := 0;
    end record;
+   package Lobe_Vectors is new Ada.Containers.Vectors (Natural, Lobe);
+   No_Lobe : constant Lobe := (Valid => False, others => <>);
    type Hand_Zone is record
       Valid : Boolean := False;
-      Cu, Cv : Long_Float := 0.0;      --  区心(归一化)
-      Au, Av : Long_Float := 0.0;      --  瓣到瓣的方向(单瓣时为主轴)
-      Span : Long_Float := 0.0;        --  瓣心距(归一化画幅)
+      Cu, Cv : Long_Float := 0.0;      --  区心(归一化)= 各瓣形心的平均(几瓣都是这一种算法)
+      --  主轴(像素系单位向量,和 Picture.Region 的主轴同一个系、同一个正负号约定):瓣排开的方向(各瓣形心的主方向);
+      --  瓣的排法定不出方向时(一瓣,或者几瓣均匀排一圈)= 各瓣自己伸长的方向
+      Au, Av : Long_Float := 0.0;
+      Span : Long_Float := 0.0;        --  张幅:能装东西的那片沿主轴的伸展(归一化画幅)
       Depth : Long_Float := 0.0;       --  手指深度(米);NaN = 读不到
-      N_Lobes : Natural := 0;
-      A, B : Lobe;
+      N_Lobes : Natural := 0;          --  = Lobes 的个数(Set_Lobes 填;旧写法写的握区 = 它自己填的那个数)
+      A, B : Lobe;                     --  旧的两格:Set_Lobes 照今天的身体照旧填(= 第 0、1 瓣),别人不坏;合并时主代理删
       Fingers : Bools;                 --  扫过的像素(手指本身)
       X0, Y0, X1, Y1 : Natural := 0;   --  区框
+      --  I2(大并行 路 2):量到的每一瓣都在这一串里,一个不少、没有上限(0 个 = 这只眼里没有手指)。
+      --  只经 Set_Lobes / Set_Lobe 写、只经 Lobe_Of 读;瓣数 = 它的个数,驱动里没有按瓣数的分支
+      Lobes : Lobe_Vectors.Vector;
    end record;
    package Zone_Vectors is new Ada.Containers.Vectors (Natural, Hand_Zone);
-   --  🔴 第 I 瓣。别处一律走这个口子,不许直接写 Z.A / Z.B ——
-   --  今天这具身体的握区只记得两瓣(A/B),以后长出五瓣、七瓣、吸盘一个点,只改这一处,
-   --  上面所有"每瓣一个接触点"的代码一个字都不用动。瓣数一律读 Z.N_Lobes,不许写死。
-   function Lobe_Of (Z : Hand_Zone; I : Natural) return Lobe is
-     (if I = 0 then Z.A elsif I = 1 then Z.B else (Valid => False, others => <>));
+   --  🔴 第 I 瓣(I ≥ 瓣数 ⇒ No_Lobe)。别处一律走这个口子,不许直接读写 Z.A / Z.B / Z.Lobes ——
+   --  一瓣(吸盘)、两指、五指、七指,同一段代码。瓣数一律读 Z.N_Lobes,不许写死。
+   --  Lobes 空着、A / B 却填了的握区是旧写法写的(bodyfile-load 读身体文件那一段、selfcheck.adb 里自己拼握区的几条焊点):
+   --  那时照旧读它的两格。它们换成 Set_Lobes / Lobes_From_Json 以后(主代理合并时),连同 A、B 一起删
+   function Lobe_Of (Z : Hand_Zone; I : Natural) return Lobe;
+   --  换掉整串瓣:Lobes := Ls,N_Lobes := 个数,A / B := 第 0 / 1 瓣(旧的两格照旧填)。Ls 里每一瓣都是量到的(Valid)
+   procedure Set_Lobes (Z : in out Hand_Zone; Ls : Lobe_Vectors.Vector);
+   --  换掉第 I 瓣(I < 瓣数;旧写法写的握区先按它的两格转成一串)
+   procedure Set_Lobe (Z : in out Hand_Zone; I : Natural; Lb : Lobe);
+   --  一串瓣 ↔ 身体文件(JSON)。每瓣一个 7 个数的数组 [x0, y0, x1, y1, cu, cv, 像素数](和旧文件里 "a" / "b" 那两格一个排法),
+   --  浮点按 Json.Number 写(写出去读回来一个比特不差)。Lobes_Json 返回 "[[…],[…],…]" 那一串(0 瓣 = "[]"),
+   --  存的时候写成这只眼握区里的 "lobes" 键;Lobes_From_Json 从握区节点 Zn 读回:有 "lobes" 按它,
+   --  没有(I2 以前的文件:两格 "a" / "b",按 "n_lobes" 取前几格)按旧的读。读完 Set_Lobes
+   function Lobes_Json (Z : Hand_Zone) return String;
+   procedure Lobes_From_Json (D : Json.Doc; Zn : Integer; Z : in out Hand_Zone);
    type Hand is record
       Arm : Natural := 0;
       K : Natural := 0;                --  这条臂的第几个抓握通道(五指手有五个,两指手只有 0 号)

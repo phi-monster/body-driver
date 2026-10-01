@@ -140,23 +140,15 @@ begin
                   procedure Read_Zone (Zn : Integer; Cm : Natural) is
                      Z : Zone.Hand_Zone;
                      Bx : constant Floats := Arr (Json.Get (D, Zn, "box"));
-                     Aa : constant Floats := Arr (Json.Get (D, Zn, "a"));
-                     Bb : constant Floats := Arr (Json.Get (D, Zn, "b"));
                   begin
                      Z.Valid := True;
                      Z.Cu := Val (Json.Get (D, Zn, "cu")); Z.Cv := Val (Json.Get (D, Zn, "cv"));
                      Z.Au := Val (Json.Get (D, Zn, "au")); Z.Av := Val (Json.Get (D, Zn, "av"));
                      Z.Span := Val (Json.Get (D, Zn, "span")); Z.Depth := Val (Json.Get (D, Zn, "depth"));
-                     Z.N_Lobes := Natural (Json.Num (D, Json.Get (D, Zn, "n_lobes")));
                      if Natural (Bx.Length) = 4 then
                         Z.X0 := Natural (Bx (0)); Z.Y0 := Natural (Bx (1)); Z.X1 := Natural (Bx (2)); Z.Y1 := Natural (Bx (3));
                      end if;
-                     if Natural (Aa.Length) = 7 then
-                        Z.A := (True, Natural (Aa (0)), Natural (Aa (1)), Natural (Aa (2)), Natural (Aa (3)), Aa (4), Aa (5), Natural (Aa (6)));
-                     end if;
-                     if Natural (Bb.Length) = 7 and then Z.N_Lobes = 2 then
-                        Z.B := (True, Natural (Bb (0)), Natural (Bb (1)), Natural (Bb (2)), Natural (Bb (3)), Bb (4), Bb (5), Natural (Bb (6)));
-                     end if;
+                     Zone.Lobes_From_Json (D, Zn, Z);   --  每一瓣(I2:"lobes";I2 以前的文件按 "n_lobes" 从 "a" / "b" 里取)
                      declare
                         Fr : constant Floats := Arr (Json.Get (D, Zn, "fingers"));   --  游程(见 Runs)
                         Cur : Boolean := False;

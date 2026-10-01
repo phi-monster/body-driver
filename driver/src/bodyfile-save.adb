@@ -98,6 +98,7 @@ begin
                           & Num (Zw & "a.cu", Zone.Lobe_Of (Z, 0).Cu) & "," & Num (Zw & "a.cv", Zone.Lobe_Of (Z, 0).Cv) & "," & Codec.Img (Zone.Lobe_Of (Z, 0).Count) & "]" &
                           ",""b"":[" & Codec.Img (Zone.Lobe_Of (Z, 1).X0) & "," & Codec.Img (Zone.Lobe_Of (Z, 1).Y0) & "," & Codec.Img (Zone.Lobe_Of (Z, 1).X1) & "," & Codec.Img (Zone.Lobe_Of (Z, 1).Y1) & ","
                           & Num (Zw & "b.cu", Zone.Lobe_Of (Z, 1).Cu) & "," & Num (Zw & "b.cv", Zone.Lobe_Of (Z, 1).Cv) & "," & Codec.Img (Zone.Lobe_Of (Z, 1).Count) & "]" &
+                          ",""lobes"":" & Zone.Lobes_Json (Z) &   --  每一瓣(I2);上面 a / b 两格照旧写,旧的读法还读得了
                           ",""fingers"":[" & Runs (Z.Fingers) & "]}");
                   First := False;
                end;
