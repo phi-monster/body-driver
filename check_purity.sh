@@ -42,7 +42,7 @@ grasp grasps grasped grasping grab grabs grabbed grabbing hold holds holding hel
 flip flips flipped flipping pour pours poured pouring carry carries carried carrying drag drags dragged dragging dodge dodges dodged dodging
 throw throws threw thrown wipe wipes wiped wiping scoop scoops scooped scooping stack stacks stacked stacking'
 ACT_CN='抬起 抬高 抬升 推动 推开 推过去 拉开 拉动 抓住 抓起 抓取 抓握 捏住 拧紧 拧开 撬开 翻转 翻过来 倒出 擦干 舀起 搬动 拿起 拿住 举起 夹住 握住 托住'
-ACT_EXEMPT='contact.ads:Push contact.ads:Pull contact.ads:Turn contact.adb:Push contact.adb:Turn contact-exec.adb:Push'
+ACT_EXEMPT=''
 read -r -d '' ACT_PL <<'PL' || true   #  (不用 $(cat <<…):macOS 自带的 bash 3.2 在命令替换里解析这段的引号有毛病)
 my %en = map { $_ => 1 } split /\s+/, $ENV{ACT_WORDS};
 use Encode; my @cn = split /\s+/, Encode::decode_utf8 ($ENV{ACT_CN});   # 环境变量是字节,按 UTF-8 解开才和读进来的文件比得上

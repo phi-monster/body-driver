@@ -7300,7 +7300,7 @@ begin
       Lim : constant Cx.Hand_Limits := (Standoff_M => 0.04, Repeat_M => 0.001);   --  两个数都该由驱动量出来;这里是测试台,取一个明显合法的组合
       Z_Dn : constant Ct.V3 := [0.0, 0.0, -1.0];
       function Pt (Pos, Normal, Axis : Ct.V3; Half : Long_Float; Tol : Long_Float := MM) return Ct.Point is
-        ((By => (Ct.Hand, 0), Pos => Pos, Normal => Normal, Push => (Axis => Axis, Half_Angle => Half), Pull => False, Torsion => False, Peel => False, Tol_M => Tol));
+        ((By => (Ct.Hand, 0), Pos => Pos, Normal => Normal, Allowed => (Axis => Axis, Half_Angle => Half), Tension => False, Torsion => False, Peel => False, Tol_M => Tol));
       function Two return Ct.Point_Vectors.Vector is
          V : Ct.Point_Vectors.Vector;
       begin
@@ -7318,13 +7318,13 @@ begin
         ((Points => Pts, Motion => Mo, Has_Approach => True, Approach => Ap));
       function Mk (Pts : Ct.Point_Vectors.Vector; Mo : Ct.Twist) return Ct.Set is
         ((Points => Pts, Motion => Mo, Has_Approach => False, Approach => [others => 0.0]));
-      function Turn (Axis : Ct.V3; Rad : Long_Float; Pivot : Ct.V3) return Ct.Twist is
+      function Rotation (Axis : Ct.V3; Rad : Long_Float; Pivot : Ct.V3) return Ct.Twist is
          Ok : Boolean;
-         T : constant Ct.Twist := Ct.Turn (Axis, Rad, Pivot, Ok);
+         T : constant Ct.Twist := Ct.Rotation (Axis, Rad, Pivot, Ok);
       begin
          pragma Assert (Ok, "转轴非零");
          return T;
-      end Turn;
+      end Rotation;
       --  两个朝向之间的夹角(弧度)
       function Angle_Of (A, B : Cx.M3) return Long_Float is (Geom.Norm (Geom.Rot_Vec (Geom.Mul (Geom.Tr (A), B))));
       --  先把第 I 步拷成具名变量再取第 J 个点/朝向:对函数返回的临时值直接下标取容器元素,GNAT 会在析构时报 PROGRAM_ERROR(H24 2026-09-22 同一个坑)
@@ -7382,9 +7382,9 @@ begin
          Pts : Ct.Point_Vectors.Vector := Single (Pt ([-0.04, 0.0, 0.02], [0.0, 0.0, 1.0], [0.0, 0.0, -1.0], 0.4636));
          Good : Boolean;
       begin
-         Pts.Append (Ct.Point'(By => (Ct.World, 0), Pos => Pivot, Normal => Z_Dn, Push => (Axis => [0.0, 0.0, 1.0], Half_Angle => 0.46),
-                               Pull => False, Torsion => False, Peel => False, Tol_M => MM));
-         Cx.Steps (Mk (Pts, Turn ([0.0, 1.0, 0.0], -0.8, Pivot)), Lim, True, 8, Steps, Why);
+         Pts.Append (Ct.Point'(By => (Ct.World, 0), Pos => Pivot, Normal => Z_Dn, Allowed => (Axis => [0.0, 0.0, 1.0], Half_Angle => 0.46),
+                               Tension => False, Torsion => False, Peel => False, Tol_M => MM));
+         Cx.Steps (Mk (Pts, Rotation ([0.0, 1.0, 0.0], -0.8, Pivot)), Lim, True, 8, Steps, Why);
          Good := Why.Kind = Cx.Fine and then Natural (Steps.Length) = 10;
          if Good then
             for St of Steps loop
@@ -7419,7 +7419,7 @@ begin
          end if;
          Check (Good, "②b·撬:悬停 + 贴上 + 8 段弧;航点里只有手那一个点(桌子那条边不进航点,只进判据);弧中点离弦有实打实的距离、到支点的半径全程不变:" & Cx.Img (Why));
       end;
-      Cx.Steps (Mk (Two, Turn ([0.0, 0.0, 1.0], 1.2, [0.0, 0.0, 0.10]), Z_Dn), Lim, True, 6, Steps, Why);
+      Cx.Steps (Mk (Two, Rotation ([0.0, 0.0, 1.0], 1.2, [0.0, 0.0, 0.10]), Z_Dn), Lim, True, 6, Steps, Why);
       Check (Why.Kind = Cx.Fine and then abs (Angle_Of (Frame_At (Steps, 1, 0), Frame_At (Steps, Last_Of (Steps), 0)) - 1.2) < 1.0e-6,
              "②b·拧:手转过的角等于物体转过的角(转的时候朝向也要跟着走,否则就是「握着的东西被拧脱手」的形状)");
       Cx.Steps (Mk (Single (Pt ([0.03, 0.0, 0.05], [1.0, 0.0, 0.0], [-1.0, 0.0, 0.0], 0.6)), Ct.Slide ([-0.10, 0.0, 0.0])), Lim, True, 4, Steps, Why);
