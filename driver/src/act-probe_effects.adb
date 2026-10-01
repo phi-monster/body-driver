@@ -8,15 +8,10 @@ procedure Probe_Effects (L : in out Plug.Link; C : in out Context; F : in out Pl
    Arm : constant Natural := (if Pts_Empty then 0 else Pts (0).Arm);
    P0 : constant Plug.Arm_Pose := F.EE (Arm);
    Jaw : Floats;
-   Cw : constant Natural := F.Cams (Cam).W;
-   Ch : constant Natural := F.Cams (Cam).H;
-   Floor_Px : constant Long_Float := 4.0 / Long_Float (Cw);   --  跟踪地板:4 个像素(倍数,无量纲)
-   Floor_Z : array (0 .. Natural (Pts.Length) - 1) of Long_Float := [others => 0.0];
-   --  新加的两行也要有自己的噪声地板:探针那一点点幅度下,"看着多大/朝向"的变化可能比噪声还小,
-   --  连符号都会是反的 ⇒ 身体照着反方向走(FB 实测:它一路往后退)。地板 = 静止两拍的抖动的 4 倍(倍数,无量纲)
-   Floor_S : array (0 .. Natural (Pts.Length) - 1) of Long_Float := [others => 0.0];
-   Floor_A : array (0 .. Natural (Pts.Length) - 1) of Long_Float := [others => 0.0];
-   Z : constant Zone.Hand_Zone := Zone_Of (C, Arm, Cam);
+   --  (路 1,10-01)驱动不读身体给的深度(Plug.Frame_Of:Has_Depth 恒为 False),原来在这里量的四样地板 —— 跟踪 4 像素、
+   --  远近、看着多大、朝向 —— 只在 Has_Depth 那一支里量,那一支从来没跑过:远近 / 看着多大 / 朝向三样地板恒为 0,
+   --  而"这一推有没有一个点动过地板"写成 "挪过 4 像素 或者 远近变过远近的地板",后一半 0 ≥ 0 恒真 ⇒ 4 像素那一半从来不起作用。
+   --  删掉以后行为逐位不变:动没动过只按命令实到超过读数噪声判(画面里挪多少不进这一判;要不要换成量出来的跟踪地板,报主代理了)
    --  这条臂的位姿通道(问身体图,大并行 I1):响应表第 K 列 = 第 K 个位姿通道,通道号 = Chs (K);不按"臂 × 每臂几个 + K"算
    Chs : constant Ints := Selfmap.Graph.Pose_Channels (C.Map, Arm);
    N_Ch : constant Natural := Natural (Chs.Length);
@@ -97,59 +92,8 @@ begin
          end;
       end loop;
    end loop;
-   --  深度读数地板:什么都不做,连着两拍在各点读深度
-   if F.Cams (Cam).Has_Depth then
-      declare
-         Z1 : array (0 .. Natural (Pts.Length) - 1) of Long_Float := [others => -1.0];
-         Ok2 : Boolean;
-      begin
-         for I in 0 .. Natural (Pts.Length) - 1 loop
-            --  读深窗口 = 张幅的四分之一,再小也有半个百分点的画幅(比例,无量纲)
-            Z1 (I) := Picture.Near_Depth (F.Cams (Pts (I).Cam).Depth, F.Cams (Pts (I).Cam).W, F.Cams (Pts (I).Cam).H,
-                                          Pts (I).Cu, Pts (I).Cv, Long_Float'Max (0.005, Z.Span * 0.25));
-         end loop;
-         declare
-            Was0 : constant Point_Vectors.Vector := Pts;
-            Before0_All : Buf_Vectors.Vector := All_Gray (F);
-         begin
-            Selfmap.Idle (L, F, 1, Ok2);
-            --  静止一拍,量"看着多大/朝向"自己抖多少
-            for I in 0 .. Natural (Pts.Length) - 1 loop
-               declare
-                  P2 : Point := Pts (I);
-               begin
-                  Retrack (C, F, P2.Cam, Before0_All (P2.Cam), P2, Was0 (I).Cu, Was0 (I).Cv, False);
-                  Floor_S (I) := Long_Float'Max (4.0 * abs (P2.Size - Was0 (I).Size), Size_Floor (Cw));
-                  Floor_A (I) := Long_Float'Max (4.0 * abs (Wrap (P2.Ang - Was0 (I).Ang)), Ang_Floor (Was0 (I), Cw, Ch));
-               end;
-            end loop;
-         end;
-         for I in 0 .. Natural (Pts.Length) - 1 loop
-            declare
-               --  读深窗口 = 张幅的四分之一,再小也有半个百分点的画幅(比例,无量纲)
-               Z2 : constant Long_Float := Picture.Near_Depth (F.Cams (Pts (I).Cam).Depth, F.Cams (Pts (I).Cam).W, F.Cams (Pts (I).Cam).H,
-                                                              Pts (I).Cu, Pts (I).Cv, Long_Float'Max (0.005, Z.Span * 0.25));
-               Zr : constant Long_Float := (if Pts (I).Z > 0.0 then Pts (I).Z else 1.0);
-            begin
-               --  地板 = 两拍读深抖动的 4 倍(倍数,无量纲),再小也有距离的百分之一(比例,无量纲)
-               if not Picture.Is_Nan (Z1 (I)) and then not Picture.Is_Nan (Z2) then
-                  Floor_Z (I) := Long_Float'Max (4.0 * abs (Z1 (I) - Z2), 0.01 * Zr);
-               else
-                  Floor_Z (I) := 0.01 * Zr;
-               end if;
-               --  同一个地板留在点上:高度是深度之差,判"离开了原来靠着的面"用的就是它
-               declare
-                  P : Point := Pts (I);
-               begin
-                  P.Z_Noise := Floor_Z (I);
-                  Pts.Replace_Element (I, P);
-               end;
-            end;
-         end loop;
-      end;
-   end if;
    Ok := True;
-   Put_Line ("[身]   这些点还没有响应表 ⇒ 这条臂的 " & Codec.Img (N_Ch) & " 个位姿通道各推一下量列(幅度从开机看得见的那一档起翻倍,到点真的动过地板为止)");
+   Put_Line ("[身]   这些点还没有响应表 ⇒ 这条臂的 " & Codec.Img (N_Ch) & " 个位姿通道各推一下量列(幅度从开机看得见的那一档起;命令实到没超过读数噪声才翻倍)");
    --  这条臂的位姿通道一起解:转动不禁(owner 2026-09-07:禁了就永远和桌面平行,格斗全成直线)。让转动有对错的是"两根手指各自到位":
    --  转歪了必有一指不到位;让转动不比平移便宜的是按各自探针幅度计价。
    for K in 0 .. N_Ch - 1 loop
@@ -213,13 +157,12 @@ begin
                      declare
                         P : Point := Pts (I);
                         W0 : constant Point := Was (I);
-                        Ran, Dz : Long_Float;
+                        Ran : Long_Float;
                      begin
                         Retrack (C, F, P.Cam, Before_All (P.Cam), P, W0.Cu, W0.Cv, True);
                         Ran := Sqrt ((P.Cu - W0.Cu) ** 2 + (P.Cv - W0.Cv) ** 2);
-                        Dz := (if P.Z > 0.0 and then W0.Z > 0.0 then abs (P.Z - W0.Z) else 0.0);
                         Ran_Max := Long_Float'Max (Ran_Max, Ran);
-                        if abs Deliv (K) > C.Map.EE_Noise and then (Ran >= Floor_Px or else Dz >= Floor_Z (I)) then
+                        if abs Deliv (K) > C.Map.EE_Noise then
                            declare
                               Col : Table.Vec3;
                            begin
@@ -228,10 +171,8 @@ begin
                               Col (2) := (if P.Z > 0.0 and then W0.Z > 0.0 then (P.Z - W0.Z) / Deliv (K) else 0.0);
                               --  推一下这块看着变大变小多少、转了多少(圆的东西转不出来 ⇒ 这一列恒零 ⇒ 自动不参与)
                               --  只有变化过了自己的噪声地板才敢写进表,否则这一格留零(留零 = 归一时这一行自动不参与)
-                              Col (3) := (if P.Size > 0.0 and then W0.Size > 0.0 and then abs (P.Size - W0.Size) > Floor_S (I)
-                                          then (P.Size - W0.Size) / Deliv (K) else 0.0);
-                              Col (4) := (if P.Size > 0.0 and then W0.Size > 0.0 and then abs (Wrap (P.Ang - W0.Ang)) > Floor_A (I)
-                                          then Wrap (P.Ang - W0.Ang) / Deliv (K) else 0.0);
+                              Col (3) := (if P.Size > 0.0 and then W0.Size > 0.0 then (P.Size - W0.Size) / Deliv (K) else 0.0);
+                              Col (4) := (if P.Size > 0.0 and then W0.Size > 0.0 then Wrap (P.Ang - W0.Ang) / Deliv (K) else 0.0);
                               for R in 0 .. Table.Rows - 1 loop
                                  S1 (I, K, R) := S1 (I, K, R) + Col (R);
                                  S2 (I, K, R) := S2 (I, K, R) + Col (R) * Col (R);
@@ -352,7 +293,8 @@ begin
                         exit;
                      end if;
                      if Amp * 2.0 > Cap_Amp then
-                        Put_Line ("[身]     通道" & Natural'Image (Chn) & ":到 " & Codec.Fmt (Amp, 4) & " 一个点也没动过地板(最多的跑了 " & Codec.Fmt (Ran_Max, 4) & " 画幅,地板 " & Codec.Fmt (Floor_Px, 4) & ")⇒ 这一段不用它");
+                        Put_Line ("[身]     通道" & Natural'Image (Chn) & ":到 " & Codec.Fmt (Amp, 4) & " 命令实到都没超过读数噪声 " & Codec.Fmt (C.Map.EE_Noise, 4)
+                                  & "(点最多跑了 " & Codec.Fmt (Ran_Max, 4) & " 画幅)⇒ 这一段不用它");
                         exit;
                      end if;
                      --  加倍了却一点没多跑 ⇒ 这一列是零,再加码只是空甩胳膊
