@@ -27,10 +27,19 @@ driver-brain-pictures.adb	Channels : constant := 3;	3	format	bytes per RGB pixel
 driver-brain-runaway.adb	for Length in 1 .. (N - S.First_Index) / 2 loop	2	math	a run that comes again needs two copies, so it is at most half of the words read
 driver-brain-runaway.adb	for Length in 1 .. L / 2 loop	2	math	a run that comes again needs two copies, so it is at most half of the lines read
 driver-brain-runaway.adb	for Length in 1 .. Natural (Slot.Length) / 2 loop	2	math	a run that comes again needs two copies, so it is at most half of the units read
-driver-brain-service.adb	& ""	"4	format	a box has four edges (the where-is-it schema of docs/brain-service.md)
-driver-brain-service.adb	& ""	"4	format	a box has four edges (the where-is-it schema of docs/brain-service.md)
-driver-brain-service.adb	& "";	"0	format	box edges are thousandths of the picture, from 0
-driver-brain-service.adb	& "";	"1000	format	box edges are thousandths of the picture, up to 1000
+driver-brain-service.adb	& ASCII.LF & "";	"0	format	GBNF digit classes of a box edge, a whole number of thousandths from 0 to 1000
+driver-brain-service.adb	& ASCII.LF & "";	"0	format	GBNF digit classes of a box edge, a whole number of thousandths from 0 to 1000
+driver-brain-service.adb	& ASCII.LF & "";	"0	format	GBNF digit classes of a box edge, a whole number of thousandths from 0 to 1000
+driver-brain-service.adb	& ASCII.LF & "";	"0	format	GBNF digit classes of a box edge, a whole number of thousandths from 0 to 1000
+driver-brain-service.adb	& ASCII.LF & "";	"1	format	GBNF digit classes of a box edge, a whole number of thousandths from 0 to 1000
+driver-brain-service.adb	& ASCII.LF & "";	"1	format	GBNF digit classes of a box edge, a whole number of thousandths from 0 to 1000
+driver-brain-service.adb	& ASCII.LF & "";	"1000	format	a box edge is at most 1000 thousandths of the picture (the where-is-it answer's grammar)
+driver-brain-service.adb	& ASCII.LF & "";	"9	format	GBNF digit classes of a box edge, a whole number of thousandths from 0 to 1000
+driver-brain-service.adb	& ASCII.LF & "";	"9	format	GBNF digit classes of a box edge, a whole number of thousandths from 0 to 1000
+driver-brain-service.adb	& ASCII.LF & "";	"9	format	GBNF digit classes of a box edge, a whole number of thousandths from 0 to 1000
+driver-brain-service.adb	& ASCII.LF & "";	"9	format	GBNF digit classes of a box edge, a whole number of thousandths from 0 to 1000
+driver-brain-service.adb	& ASCII.LF & "";	"9	format	GBNF digit classes of a box edge, a whole number of thousandths from 0 to 1000
+driver-brain-service.adb	& ASCII.LF & "";	"9	format	GBNF digit classes of a box edge, a whole number of thousandths from 0 to 1000
 driver-brain-service.adb	& Driver.Log.Image (Real (A.Seconds), 1) & ""	1	format	digits printed in a log line or a message(driver-brain-service.adb:197)
 driver-brain-service.adb	& Driver.Log.Image (Real (Driver.Clock.Seconds - Started), 1) & ""	1	format	digits printed in a log line or a message(driver-brain-service.adb:284)
 driver-brain-service.adb	Thousandths : constant := 1000.0;	1000.0	format	boxes are given in thousandths of the picture (docs/brain-service.md)

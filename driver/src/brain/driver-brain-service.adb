@@ -87,11 +87,13 @@ package body Driver.Brain.Service is
      (Head & ",""stream"":true,""structured_outputs"":{""grammar"":" & Driver.Json.Quote (Grammar) & "},"
       & User_Message (Picture_Url, Prompt) & "}");
 
-   Where_Schema : constant String :=
-     "{""type"":""json_schema"",""json_schema"":{""name"":""where_is_it"",""strict"":true,""schema"":"
-     & "{""type"":""object"",""additionalProperties"":false,""required"":[""found"",""bbox_2d""],""properties"":"
-     & "{""found"":{""type"":""boolean""},""bbox_2d"":{""type"":""array"",""minItems"":4,""maxItems"":4,"
-     & """items"":{""type"":""integer"",""minimum"":0,""maximum"":1000}}}}}}";
+   --  The where-is-it answer exactly, with no blank anywhere and every edge
+   --  a whole number of thousandths: under a JSON schema the decoder may
+   --  write blanks between the members without end, and greedy decoding
+   --  did (measured: an endless run of tabs after "found":).
+   Where_Grammar : constant String :=
+     "root ::= ""{\""found\"":"" (""true"" | ""false"") "",\""bbox_2d\"":["" e "","" e "","" e "","" e ""]}"""
+     & ASCII.LF & "e ::= ""1000"" | [1-9] [0-9] [0-9] | [1-9] [0-9] | [0-9]";
 
    function Where_Prompt (Name : String) return String is
      ("Locate what someone would call: " & Name & ASCII.LF
@@ -99,7 +101,10 @@ package body Driver.Brain.Service is
       & "that is a normal answer and I will look with another eye rather than guess.");
 
    function Where_Request (Picture_Url, Name : String) return String is
-     (Head & ",""response_format"":" & Where_Schema & "," & User_Message (Picture_Url, Where_Prompt (Name)) & "}");
+     (Head & ",""structured_outputs"":{""grammar"":" & Driver.Json.Quote (Where_Grammar) & "},"
+      & User_Message (Picture_Url, Where_Prompt (Name)) & "}");
+
+   function Where_Answer_Grammar return String is (Where_Grammar);
 
    --  Calls of the current episode, for the log.
    Programs_Asked, Wheres_Asked : Natural := 0;

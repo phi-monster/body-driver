@@ -2,6 +2,7 @@ with Ada.Streams;
 with Ada.Strings.Fixed;
 with GNAT.Sockets;
 with Driver.Action;
+with Driver.Brain.Keyboard.Tests;
 with Driver.Brain.Names;
 with Driver.Brain.Pictures;
 with Driver.Instrument;
@@ -64,9 +65,10 @@ package body Driver.Brain.Service.Tests is
                   (Doc, Driver.Json.Root (Doc), "structured_outputs"), "grammar")) = "root ::= x",
                 "the program request is JSON, streamed, with the grammar");
          Driver.Json.Parse (Where_Request ("data:image/bmp;base64,AAAA", "the red cup"), Doc, Ok, Why);
-         Check (Ok and then Driver.Json.Lookup (Doc, Driver.Json.Root (Doc), "response_format") /= Driver.Json.No_Node
+         Check (Ok and then Driver.Json.Text (Doc, Driver.Json.Lookup (Doc, Driver.Json.Lookup
+                  (Doc, Driver.Json.Root (Doc), "structured_outputs"), "grammar")) = Where_Answer_Grammar
                 and then Driver.Json.Lookup (Doc, Driver.Json.Root (Doc), "stream") = Driver.Json.No_Node,
-                "the where request asks for the strict box schema and is not streamed");
+                "the where request carries the answer's grammar and is not streamed");
       end;
    end Settings;
 
@@ -107,6 +109,27 @@ package body Driver.Brain.Service.Tests is
       Read_Where ("<html>", 640, 480, Found, Where, Why);
       Check (Found = Driver.Brain.Names.No_Answer, "a reply that is not JSON is no answer");
    end Where_Answers;
+
+   procedure Where_Grammar is
+      G : constant String := Where_Answer_Grammar;
+      Found : Driver.Brain.Names.Pointing;
+      Where : Driver.Brain.Names.Box;
+      Why   : Unbounded_String;
+   begin
+      Check (Driver.Brain.Keyboard.Tests.Accepts (G, "{""found"":true,""bbox_2d"":[100,200,300,400]}")
+             and then Driver.Brain.Keyboard.Tests.Accepts (G, "{""found"":false,""bbox_2d"":[0,0,0,0]}")
+             and then Driver.Brain.Keyboard.Tests.Accepts (G, "{""found"":true,""bbox_2d"":[0,9,99,1000]}"),
+             "every answer the driver reads can be typed");
+      Check (not Driver.Brain.Keyboard.Tests.Accepts (G, "{""found"": true,""bbox_2d"":[1,2,3,4]}")
+             and then not Driver.Brain.Keyboard.Tests.Accepts (G, "{""found"":" & ASCII.HT & "true,""bbox_2d"":[1,2,3,4]}"),
+             "no blank can be typed anywhere, so the answer cannot run on");
+      Check (not Driver.Brain.Keyboard.Tests.Accepts (G, "{""found"":true,""bbox_2d"":[1001,2,3,4]}")
+             and then not Driver.Brain.Keyboard.Tests.Accepts (G, "{""found"":true,""bbox_2d"":[01,2,3,4]}")
+             and then not Driver.Brain.Keyboard.Tests.Accepts (G, "{""found"":true,""bbox_2d"":[1,2,3]}"),
+             "an edge past 1000, a leading zero, or three edges cannot be typed");
+      Read_Where (Reply_With ("{""found"":true,""bbox_2d"":[100,200,300,400]}"), 640, 480, Found, Where, Why);
+      Check (Found = Driver.Brain.Names.Boxed, "the grammar's answer is read as a box");
+   end Where_Grammar;
 
    --  A fake service: one connection, a canned reply written at once, then
    --  the connection held open, as a service still writing would.
@@ -254,6 +277,8 @@ package body Driver.Brain.Service.Tests is
       Register ("brain.service.settings", "the driver adds a sampling setting of its own, or merges a broken one",
                 Settings'Access);
       Register ("brain.service.events", "a streamed answer loses text or its finish reason", Events'Access);
+      Register ("brain.service.where_grammar", "the where-is-it answer can run on, or cannot say what the driver reads",
+                Where_Grammar'Access);
       Register ("brain.service.where", "a box is turned into the wrong pixels, or not here is taken for a failure",
                 Where_Answers'Access);
       Register ("brain.service.streaming", "a runaway answer is read to the end of the stream, or a whole one cut",
