@@ -92,6 +92,10 @@ package body Driver.Action.Contact.Search.Tests is
                Check (abs (Across (Best) * Long) < 0.1, "the lobes close along the bar's length, not across it");
                Check (abs (Best.Touches (1).Inward * Best.Touches (2).Inward + 1.0) < 0.1,
                       "the two touches do not oppose each other");
+               for T of Best.Touches loop
+                  Check (T.Inward * (Shape_Of (X.S, 1).Centre.Mean - T.Point) > 0.0,
+                         "a touch presses outward, away from the thing");
+               end loop;
                Check (Best.Force < Real'Last, "the chosen set needs no finite force");
             end if;
          end;
@@ -100,7 +104,6 @@ package body Driver.Action.Contact.Search.Tests is
 
    procedure Scissors_Close_Across_A_Part is
       X     : constant Scene := Make (Scissors (0.18, 0.016, 0.006), Turned, 1.1, 2);
-      Long  : constant Vec3 := Rotate (X.Thing_Frame, [1.0, 0.0, 0.0]);
       Best  : Candidate;
       Found : Boolean;
       Tried : Account;
@@ -108,11 +111,12 @@ package body Driver.Action.Contact.Search.Tests is
       Search (X, Slide (Up_Of (X)), Best, Found, Tried);
       Check (Found, "no contact set raises flat scissors: " & Say (Tried));
       if Found then
-         --  The lobes close level with the table and across the scissors'
-         --  length, never along it (a pair along the length lands on top of
-         --  the blades and closes over the pivot on nothing).
+         --  Thin flat parts are taken by their edges, level with the table,
+         --  the two touches pressing against each other: never from above,
+         --  where the lobes would land on the blades and close on nothing.
          Check (abs (Across (Best) * Up_Of (X)) < 0.2, "the lobes close up and down on flat scissors");
-         Check (abs (Across (Best) * Long) < 0.5, "the lobes close along the scissors' length");
+         Check (Best.Touches (1).Inward * Best.Touches (2).Inward < -0.9,
+                "the two touches on the scissors do not press against each other");
       end if;
    end Scissors_Close_Across_A_Part;
 

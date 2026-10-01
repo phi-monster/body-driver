@@ -1,6 +1,8 @@
+with Ada.Containers.Generic_Array_Sort;
 with Ada.Containers.Indefinite_Ordered_Maps;
 with Ada.Numerics;
 with Ada.Numerics.Long_Elementary_Functions;
+with Ada.Unchecked_Deallocation;
 with Driver.Action.Contact.Wrench;
 with Driver.Conventions;
 with Driver.Log;
@@ -15,6 +17,8 @@ package body Driver.Action.Contact.Search is
    Pi        : constant := Ada.Numerics.Pi;
    Z         : constant Real := Driver.Conventions.Z;
    Round_Off : constant Real := Sqrt (Real'Model_Epsilon);
+   Apart     : constant Gate := Vector_Gate (3);
+   --  Two points in space, each with an isotropic sigma, are apart.
 
    use type Driver.Robot.Arm_Id;
    use type Driver.World.Surface_Id;
@@ -68,8 +72,11 @@ package body Driver.Action.Contact.Search is
                C      : constant Positive := Natural (E.Closers.Length);
                Meet   : Vec3 := Zero3;
                Moving : Natural := 0;
+               --  Its tips open and closed on nothing are apart, each known
+               --  to its tip sigma.
                function Moves (L : Lobe_State) return Boolean is
-                 (Significant (abs (L.Closed_Tip - L.Open_Tip), Sqrt (2.0) * L.Tip_Sigma));
+                 (Significant (Point_Estimate'(Mean => L.Open_Tip, Covariance => (L.Tip_Sigma ** 2) * Identity3),
+                               Point_Estimate'(Mean => L.Closed_Tip, Covariance => (L.Tip_Sigma ** 2) * Identity3)));
             begin
                --  A lobe that does not move faces the point where the moving
                --  ones meet when closed on nothing.
@@ -194,7 +201,7 @@ package body Driver.Action.Contact.Search is
    type Pin_Record is record
       Pad_Index, Sample : Positive;
       Psi               : Real := 0.0;     --  turn about the sample's normal
-      Free_Turn         : Boolean := False;   --  the set is the same at every turn
+      Any_Angle         : Boolean := False;   --  the set is the same at every turn
    end record;
 
    package Pin_Vectors is new Ada.Containers.Vectors (Positive, Pin_Record);
@@ -206,15 +213,35 @@ package body Driver.Action.Contact.Search is
       Pads       : Index_Vectors.Vector;   --  which pad makes each touch
       Pins       : Pin_Vectors.Vector;
       Mu_Nominal : Real := Physics.No_Way;
-      Mu_Worst   : Real := -1.0;            --  negative: not computed yet
+      Mu_Worst   : Real := Physics.No_Way;
+      Has_Mu     : Boolean := False;        --  Mu_Worst is computed
       Force      : Real := Physics.No_Way;  --  normals as measured, at the reference friction
-      Worst      : Real := -1.0;            --  negative: not computed yet
+      Worst      : Real := Physics.No_Way;  --  normals tilted the worst way, at the reference friction
       Single     : Boolean := False;        --  one touch: its placement is fitted afterwards
       Sample     : Natural := 0;            --  for a single touch, which sample
    end record;
    --  One contact set and the pins that make it.
 
+   --  The Step-th of Steps turns in the order 0, +1, -1, +2, -2, ... steps of
+   --  a full circle: the least turning first.
+   function Angle_In_Order (Step, Steps : Natural) return Real is
+     ((if Step mod 2 = 1 then 1.0 else -1.0) * 2.0 * Ada.Numerics.Pi * Real ((Step + 1) / 2) / Real (Steps));
+
    package Group_Maps is new Ada.Containers.Indefinite_Ordered_Maps (String, Group);
+
+   --  The sets are ranked in arrays on the heap: there can be many, each
+   --  holding vectors, and a decider's stack is not sized for that.
+   type Group_Array is array (Positive range <>) of Group;
+   type Group_Array_Access is access Group_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Group_Array, Group_Array_Access);
+
+   type Order_Array is array (Positive range <>) of Positive;
+   type Order_Array_Access is access Order_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Order_Array, Order_Array_Access);
+
+   type Key_Array is array (Positive range <>) of Real;
+   type Key_Array_Access is access Key_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Key_Array, Key_Array_Access);
 
    type Footprint is (Disc, Whole_Face);
    --  Disc: a face's inscribed disc about the lobe's end. Whole_Face: the face
@@ -469,28 +496,21 @@ package body Driver.Action.Contact.Search is
                                        T   : Touch_Vectors.Vector;
                                        P   : Index_Vectors.Vector;
                                        Pin : constant Pin_Record :=
-                                         (Pad_Index => K, Sample => I, Psi => Psi, Free_Turn => Steps = 1);
+                                         (Pad_Index => K, Sample => I, Psi => Psi, Any_Angle => Steps = 1);
                                     begin
                                        Touches_Of (Hits, T, P);
                                        declare
                                           Key : constant String := Key_Of (T, P);
-                                          Pos : constant Group_Maps.Cursor := Groups.Find (Key);
+                                          Pos : Group_Maps.Cursor := Groups.Find (Key);
+                                          New_Set : Boolean;
                                        begin
-                                          if Group_Maps.Has_Element (Pos) then
-                                             declare
-                                                G : Group := Group_Maps.Element (Pos);
-                                             begin
-                                                G.Pins.Append (Pin);
-                                                Groups.Replace_Element (Pos, G);
-                                             end;
-                                          else
-                                             declare
-                                                G : Group := (Touches => T, Pads => P, others => <>);
-                                             begin
-                                                G.Pins.Append (Pin);
-                                                Groups.Insert (Key, G);
-                                             end;
+                                          if not Group_Maps.Has_Element (Pos) then
+                                             Groups.Insert (Key, (Touches => T, Pads => P, others => <>),
+                                                            Pos, New_Set);
                                           end if;
+                                          --  In place: copying the set out and back would cost
+                                          --  every pin it already has.
+                                          Groups.Reference (Pos).Pins.Append (Pin);
                                        end;
                                     end;
                               end case;
@@ -613,8 +633,6 @@ package body Driver.Action.Contact.Search is
          return Fits;
       end Judge;
 
-      function Turn_From_Now (R : Mat3) return Real is (Angle (R * Transpose (Now_R)));
-
       --  Second pass for a closing set: each pin of it, at its own turn or,
       --  when the set does not depend on the turn, at every turn in steps of
       --  one pitch at the whole faces' lever, least turning first; whole
@@ -627,15 +645,11 @@ package body Driver.Action.Contact.Search is
          for Pin of G.Pins loop
             declare
                Steps : constant Positive :=
-                 (if Pin.Free_Turn then Steps_For (Lever (Pin.Pad_Index, E.Depth)) else 1);
+                 (if Pin.Any_Angle then Steps_For (Lever (Pin.Pad_Index, E.Depth)) else 1);
             begin
                for Step in 0 .. Steps - 1 loop
                   declare
-                     --  0, +1, -1, +2, -2, ... steps: the least turn first.
-                     Half  : constant Natural := (Step + 1) / 2;
-                     Sign  : constant Real := (if Step mod 2 = 1 then 1.0 else -1.0);
-                     Psi   : constant Real :=
-                       (if Pin.Free_Turn then Sign * 2.0 * Pi * Real (Half) / Real (Steps) else Pin.Psi);
+                     Psi   : constant Real := (if Pin.Any_Angle then Angle_In_Order (Step, Steps) else Pin.Psi);
                      R     : constant Mat3 := Pin_Rotation (Pin.Pad_Index, Pin.Sample, Psi);
                      X     : Vec3;
                      Stops : Fractions;
@@ -645,7 +659,8 @@ package body Driver.Action.Contact.Search is
                      Contacts (Pin.Pad_Index, Pin.Sample, R, Whole_Face, X, Stops, Hits, Result);
                      if Result = Touching
                        and then (for all J in 1 .. Natural (G.Pads.Length) =>
-                                   Hits (G.Pads (J)) /= 0 and then abs (Pts (Hits (G.Pads (J))) - G.Touches (J).Point) <= Res)
+                                   Hits (G.Pads (J)) /= 0
+                                   and then abs (Pts (Hits (G.Pads (J))) - G.Touches (J).Point) <= Res)
                      then
                         declare
                            Before : Fractions;
@@ -673,7 +688,8 @@ package body Driver.Action.Contact.Search is
                               when Fits =>
                                  declare
                                     Tool  : constant Rigid := (Rotation => R, Translation => X);
-                                    Hover : constant Rigid := (Rotation => R, Translation => X - Travel * (R * E.Along));
+                                    Hover : constant Rigid :=
+                                      (Rotation => R, Translation => X - Travel * (R * E.Along));
                                  begin
                                     if Reachable (Tool) and then Reachable (Hover) then
                                        Out_C := (Tool => Tool, Hover => Hover, Before => To_Vector (Before),
@@ -753,9 +769,7 @@ package body Driver.Action.Contact.Search is
                   begin
                      for Step in 0 .. Steps - 1 loop
                         declare
-                           Half  : constant Natural := (Step + 1) / 2;
-                           Sign  : constant Real := (if Step mod 2 = 1 then 1.0 else -1.0);
-                           R     : constant Mat3 := Exp ((Sign * 2.0 * Pi * Real (Half) / Real (Steps)) * N) * R0;
+                           R     : constant Mat3 := Exp (Angle_In_Order (Step, Steps) * N) * R0;
                            X     : constant Vec3 := Pts (I) - R * Part.Point;
                            Clean : Boolean := True;
                         begin
@@ -764,7 +778,7 @@ package body Driver.Action.Contact.Search is
                                  W : constant Vec3 := X + R * Other.Point;
                               begin
                                  if Below_Floor (W) or else Penetrates (W)
-                                   or else (for some Q of Obs => abs (Q - W) <= Z * Sig)
+                                   or else (for some Q of Obs => not Significant (Apart, abs (Q - W), Sig))
                                  then
                                     Clean := False;
                                  end if;
@@ -865,6 +879,118 @@ package body Driver.Action.Contact.Search is
          return F;
       end Worst_Force;
 
+      --  The physics over every set, then the second pass over the best ones
+      --  in order until one can be made.
+      procedure Rank (Sets : in out Group_Array; Order : in out Order_Array; Key : in out Key_Array) is
+         N         : constant Natural := Sets'Length;
+         Reference : Real := Physics.No_Way;
+
+         function Before (A, B : Positive) return Boolean is
+           (Key (A) < Key (B) or else (Key (A) = Key (B) and then A < B));
+
+         procedure Sort is new Ada.Containers.Generic_Array_Sort (Positive, Positive, Order_Array, Before);
+
+         Done      : array (1 .. N) of Boolean := [others => False];
+         Next      : Positive := 1;            --  in Order, the first set whose worst case is not computed
+         Evaluated : Index_Vectors.Vector;     --  sets with a worst case, not yet tried
+      begin
+         --  The least worst-case friction of any set. A set that cannot do it
+         --  at the least found so far cannot lower it, which one program
+         --  shows; only the others are searched, below that bound. Sets whose
+         --  touches oppose most come first, which only makes the bound fall
+         --  sooner.
+         for I in 1 .. N loop
+            Key (I) := Opposition (Sets (I));
+         end loop;
+         Sort (Order);
+         for I of Order loop
+            if Reference = Physics.No_Way
+              or else Physics.Need (Sets (I).Touches, Thing.Base, Motion, Thing.Centre.Mean, U, Reference).Force
+                      < Physics.No_Way
+            then
+               Sets (I).Mu_Nominal := Least (Sets (I).Touches, Reference);
+               if Sets (I).Mu_Nominal < Reference then
+                  declare
+                     W : constant Real := Worst_Mu (Sets (I), Reference);
+                  begin
+                     if W < Physics.No_Way then
+                        Sets (I).Mu_Worst := W;
+                        Sets (I).Has_Mu := True;
+                        Reference := W;
+                     end if;
+                  end;
+               end if;
+            end if;
+         end loop;
+         if Reference = Physics.No_Way then
+            Tried.Cannot_Balance := Tried.Distinct;
+            return;
+         end if;
+         --  The thing is taken to give the least friction under which it can
+         --  be done at all, or what it is known to give if that is more.
+         Reference := Real'Max (Reference, Friction.Low);
+         Tried.Reference_Mu := Reference;
+         for I in 1 .. N loop
+            Sets (I).Force :=
+              Physics.Need (Sets (I).Touches, Thing.Base, Motion, Thing.Centre.Mean, U, Reference).Force;
+            if Sets (I).Force = Physics.No_Way then
+               Tried.Cannot_Balance := Tried.Cannot_Balance + 1;
+            end if;
+            Key (I) := Sets (I).Force;
+         end loop;
+         Sort (Order);
+         loop
+            declare
+               Pick : Natural := 0;
+               Ok   : Boolean := False;
+            begin
+               --  Worst cases are computed in order of the nominal force
+               --  until no later set could beat the best one found.
+               loop
+                  Pick := 0;
+                  for I of Evaluated loop
+                     if not Done (I) and then (Pick = 0 or else Sets (I).Worst < Sets (Pick).Worst) then
+                        Pick := I;
+                     end if;
+                  end loop;
+                  exit when Next > N or else Sets (Order (Next)).Force = Physics.No_Way
+                    or else (Pick /= 0 and then Sets (Pick).Worst <= Sets (Order (Next)).Force);
+                  declare
+                     I : constant Positive := Order (Next);
+                  begin
+                     if not Sets (I).Has_Mu then
+                        Sets (I).Mu_Worst := Worst_Mu (Sets (I), Physics.No_Way);
+                        Sets (I).Has_Mu := True;
+                     end if;
+                     Sets (I).Worst := Worst_Force (Sets (I), Reference);
+                     if Sets (I).Worst = Physics.No_Way then
+                        Tried.Cannot_Balance := Tried.Cannot_Balance + 1;
+                     else
+                        Evaluated.Append (I);
+                     end if;
+                  end;
+                  Next := Next + 1;
+               end loop;
+               exit when Pick = 0;
+               Done (Pick) := True;
+               if Sets (Pick).Mu_Worst >= Friction.High then
+                  Tried.Over_Bound := Tried.Over_Bound + 1;
+               else
+                  if Sets (Pick).Single then
+                     Fit_Single (Sets (Pick), Best, Ok);
+                  else
+                     Realize (Sets (Pick), Best, Ok);
+                  end if;
+                  if Ok then
+                     Found := True;
+                     return;
+                  end if;
+                  Tried.Unreachable := Tried.Unreachable + 1;
+               end if;
+            end;
+         end loop;
+      end Rank;
+
    begin
       Best := (others => <>);
       Found := False;
@@ -906,165 +1032,34 @@ package body Driver.Action.Contact.Search is
       end loop;
       Tried.Distinct := Natural (Groups.Length);
       declare
-         type Name_Array is array (Positive range <>) of Unbounded_String;
-         Names     : Name_Array (1 .. Natural (Groups.Length));
-         K         : Natural := 0;
-         Reference : Real := Physics.No_Way;
-
-         function At_Name (I : Positive) return Group is (Groups (To_String (Names (I))));
-
-         procedure Store (I : Positive; G : Group) is
-         begin
-            Groups.Replace (To_String (Names (I)), G);
-         end Store;
-
-         --  Insertion sort on keys computed once; equal keys keep their order.
-         procedure Sort_By (Key : not null access function (G : Group) return Real) is
-            Keys : array (Names'Range) of Real;
-         begin
-            for I in Names'Range loop
-               Keys (I) := Key (At_Name (I));
-            end loop;
-            for I in Names'First + 1 .. Names'Last loop
-               declare
-                  N : constant Unbounded_String := Names (I);
-                  V : constant Real := Keys (I);
-                  J : Natural := I;
-               begin
-                  while J > Names'First and then Keys (J - 1) > V loop
-                     Names (J) := Names (J - 1);
-                     Keys (J) := Keys (J - 1);
-                     J := J - 1;
-                  end loop;
-                  Names (J) := N;
-                  Keys (J) := V;
-               end;
-            end loop;
-         end Sort_By;
-
-         function Nominal_Force (G : Group) return Real is (G.Force);
+         use type Physics.Obstacle;
+         None : Touch_Vectors.Vector;
       begin
-         declare
-            use type Physics.Obstacle;
-            None : Touch_Vectors.Vector;
-         begin
-            if Physics.Need (None, Thing.Base, Motion, Thing.Centre.Mean, U, 0.0).Why = Physics.Footing_In_Way then
-               Tried.Surface_In_Way := True;
-               return;
-            end if;
-         end;
-         for C in Groups.Iterate loop
-            K := K + 1;
-            Names (K) := To_Unbounded_String (Group_Maps.Key (C));
-         end loop;
-         --  The least worst-case friction of any set. A set that cannot do it
-         --  at the least found so far cannot lower it, which one program
-         --  shows; only the others are searched, below that bound. Sets whose
-         --  touches oppose most come first, which only makes the bound fall
-         --  sooner.
-         Sort_By (Opposition'Access);
-         for I in Names'Range loop
-            declare
-               G : Group := At_Name (I);
-            begin
-               if Reference = Physics.No_Way
-                 or else Physics.Need (G.Touches, Thing.Base, Motion, Thing.Centre.Mean, U, Reference).Force
-                         < Physics.No_Way
-               then
-                  G.Mu_Nominal := Least (G.Touches, Reference);
-                  if G.Mu_Nominal < Reference then
-                     declare
-                        W : constant Real := Worst_Mu (G, Reference);
-                     begin
-                        if W < Physics.No_Way then
-                           G.Mu_Worst := W;
-                           Reference := W;
-                        end if;
-                     end;
-                  end if;
-                  Store (I, G);
-               end if;
-            end;
-         end loop;
-         if Reference = Physics.No_Way then
-            Tried.Cannot_Balance := Tried.Distinct;
+         if Physics.Need (None, Thing.Base, Motion, Thing.Centre.Mean, U, 0.0).Why = Physics.Footing_In_Way then
+            Tried.Surface_In_Way := True;
             return;
          end if;
-         --  The thing is taken to give the least friction under which it can
-         --  be done at all, or what it is known to give if that is more.
-         Reference := Real'Max (Reference, Friction.Low);
-         Tried.Reference_Mu := Reference;
-         for I in Names'Range loop
-            declare
-               G : Group := At_Name (I);
-            begin
-               G.Force := Physics.Need (G.Touches, Thing.Base, Motion, Thing.Centre.Mean, U, Reference).Force;
-               if G.Force = Physics.No_Way then
-                  Tried.Cannot_Balance := Tried.Cannot_Balance + 1;
-               end if;
-               Store (I, G);
-            end;
-         end loop;
-         Sort_By (Nominal_Force'Access);
+      end;
+      declare
+         N     : constant Natural := Natural (Groups.Length);
+         Sets  : Group_Array_Access := new Group_Array (1 .. N);
+         Order : Order_Array_Access := new Order_Array (1 .. N);
+         Key   : Key_Array_Access := new Key_Array (1 .. N);
+      begin
          declare
-            Done : array (Names'Range) of Boolean := [others => False];
-            Next : Positive := Names'First;   --  the first set whose worst case is not computed
+            I : Natural := 0;
          begin
-            loop
-               declare
-                  Pick : Natural := 0;
-               begin
-                  --  Worst cases are computed in order of the nominal force
-                  --  until no later set could beat the best one found.
-                  loop
-                     Pick := 0;
-                     for I in Names'First .. Next - 1 loop
-                        if not Done (I) and then At_Name (I).Worst < Physics.No_Way
-                          and then (Pick = 0 or else At_Name (I).Worst < At_Name (Pick).Worst)
-                        then
-                           Pick := I;
-                        end if;
-                     end loop;
-                     exit when Next > Names'Last or else At_Name (Next).Force = Physics.No_Way
-                       or else (Pick /= 0 and then At_Name (Pick).Worst <= At_Name (Next).Force);
-                     declare
-                        G : Group := At_Name (Next);
-                     begin
-                        if G.Mu_Worst < 0.0 then
-                           G.Mu_Worst := Worst_Mu (G);
-                        end if;
-                        G.Worst := Worst_Force (G, Reference);
-                        if G.Worst = Physics.No_Way then
-                           Tried.Cannot_Balance := Tried.Cannot_Balance + 1;
-                        end if;
-                        Store (Next, G);
-                     end;
-                     Next := Next + 1;
-                  end loop;
-                  exit when Pick = 0;
-                  Done (Pick) := True;
-                  declare
-                     G  : constant Group := At_Name (Pick);
-                     Ok : Boolean := False;
-                  begin
-                     if G.Mu_Worst >= Friction.High then
-                        Tried.Over_Bound := Tried.Over_Bound + 1;
-                     else
-                        if G.Single then
-                           Fit_Single (G, Best, Ok);
-                        else
-                           Realize (G, Best, Ok);
-                        end if;
-                        if Ok then
-                           Found := True;
-                           return;
-                        end if;
-                        Tried.Unreachable := Tried.Unreachable + 1;
-                     end if;
-                  end;
-               end;
+            for G of Groups loop
+               I := I + 1;
+               Sets (I) := G;
+               Order (I) := I;
             end loop;
          end;
+         Groups.Clear;
+         Rank (Sets.all, Order.all, Key.all);
+         Free (Sets);
+         Free (Order);
+         Free (Key);
       end;
    end Find;
 

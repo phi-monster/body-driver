@@ -218,7 +218,7 @@ package body Driver.Action.Snapshots.Tests is
       T.Pitch := Pitch;
       T.Support := Support;
       T.Seen := True;
-      T.Height := (Value => 0.0, Sigma => Sigma);
+      T.Height := (Value => 0.0, Sigma => Sigma, Degrees_Of_Freedom => 0);
       T.Centre := (Mean => Place * Centre (M), Covariance => (Sigma * Sigma) * Identity3);
       for P of M.Parts loop
          declare
@@ -248,8 +248,9 @@ package body Driver.Action.Snapshots.Tests is
        Normal => (Unit_Vector => Rotate (Place, [0.0, 0.0, 1.0]), Sigma => Sigma)));
 
    function Hand_Of (Arm : Arm_Id; Hand : Hand_Id; Depth, Sigma : Real) return Hand_State is
-     ((Id => Hand, Arm => Arm, Lobes => Lobe_Vectors.Empty_Vector, Depth => (Value => Depth, Sigma => Sigma),
-       Fraction => (Value => 0.0, Sigma => Sigma)));
+     ((Id       => Hand, Arm => Arm, Lobes => Lobe_Vectors.Empty_Vector,
+       Depth    => (Value => Depth, Sigma => Sigma, Degrees_Of_Freedom => 0),
+       Fraction => (Value => 0.0, Sigma => Sigma, Degrees_Of_Freedom => 0)));
 
    function Gripper (Arm : Arm_Id; Hand : Hand_Id; Opening, Width, Thickness, Depth, Sigma : Real)
      return Hand_State
@@ -288,10 +289,10 @@ package body Driver.Action.Snapshots.Tests is
      ((Id          => Id,
        Tool        => (Pose => Tool, Position_Covariance => (Sigma * Sigma) * Identity3,
                        Rotation_Covariance => (Sigma * Sigma) * Identity3),
-       Step        => (Value => 3.0 * Sigma, Sigma => Sigma),
-       Turn_Step   => (Value => 3.0 * Sigma, Sigma => Sigma),
-       Lag         => (Value => 2.0, Sigma => 0.5),
-       Rate        => (Value => 0.5, Sigma => 0.05),
+       Step        => (Value => 3.0 * Sigma, Sigma => Sigma, Degrees_Of_Freedom => 0),
+       Turn_Step   => (Value => 3.0 * Sigma, Sigma => Sigma, Degrees_Of_Freedom => 0),
+       Lag         => (Value => 2.0, Sigma => 0.5, Degrees_Of_Freedom => 0),
+       Rate        => (Value => 0.5, Sigma => 0.05, Degrees_Of_Freedom => 0),
        Surface     => Sample_Vectors.Empty_Vector,
        Carries_Eye => True,
        Carries_All => False));
