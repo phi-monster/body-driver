@@ -1,5 +1,29 @@
 # file	line (comments and strings removed, blanks normalized)	literal (a " prefix: inside a string)	category	why
 body_driver.adb	Handed : Integer := -1;	1	structure	sentinel: no episode's sentence handed out yet
+driver-action-contact-simplex.adb	Size := 1.0;	1.0	math	an all-zero row stays zero under any scale; one leaves it as it is
+driver-action-contact-simplex.adb	T (I, N + I) := 1.0;	1.0	structure	the artificial variable of row I enters with coefficient one (identity block of phase one)
+driver-action-contact-wrench.adb	A (R + 3, J) := G (R + 3) / Length;	3	structure	moment rows follow the three force rows of a wrench
+driver-action-contact-wrench.adb	A (R + 3, J) := G (R + 3) / Length;	3	structure	moment rows follow the three force rows of a wrench
+driver-action-contact-wrench.adb	A : Real_Matrix (1 .. 6, 1 .. Cols);	6	structure	a wrench has six components, three of force and three of moment
+driver-action-contact-wrench.adb	Column (G, 0.0);	0.0	math	the surface's forces cost the body nothing
+driver-action-contact-wrench.adb	Column (G, 1.0);	1.0	math	each body generator carries one unit of normal force, so its cost is one
+driver-action-contact-wrench.adb	First : constant Answer := Need (Touches, Base, Motion, Centre, Up, 0.0);	0.0	math	zero friction: whether the motion needs any friction at all
+driver-action-contact-wrench.adb	H : Flat_Array (1 .. 2 * P'Length + 1) := [others => (X => 0.0, Y => 0.0, Index => 1)];	1	structure	placeholder index of unused hull slots, overwritten before use
+driver-action-contact-wrench.adb	H : Flat_Array (1 .. 2 * P'Length + 1) := [others => (X => 0.0, Y => 0.0, Index => 1)];	2	structure	the monotone chain holds at most both chains of every point plus the closing one
+driver-action-contact-wrench.adb	High : Real := Pi / 2.0;	2.0	math	a friction angle lies in [0, pi / 2)
+driver-action-contact-wrench.adb	Length := (if Count > 0 and then Length > 0.0 then Length / Real (Count) else 1.0);	1.0	math	any positive moment scale leaves the solution unchanged; one is the identity
+driver-action-contact-wrench.adb	Mid : constant Real := (Low + High) / 2.0;	2.0	math	bisection takes the midpoint
+driver-action-contact-wrench.adb	Theta : constant Real := 2.0 * Pi * Real (K) / Real (Edges);	2.0	math	a full turn is two pi
+driver-action-contact-wrench.adb	for R in 1 .. 3 loop	3	structure	the three force rows (the moment rows follow them)
+driver-action-contact-wrench.adb	if H'Length < 3 then	3	math	a hull of fewer than three vertices spans no area
+driver-action-contact-wrench.adb	if P'Length < 3 then	3	math	fewer than three points are their own hull
+driver-action-contact-wrench.adb	subtype Wrench6 is Real_Vector (1 .. 6);	6	structure	a wrench has six components, three of force and three of moment
+driver-action-contact-wrench.adb	while N >= 2 and then Side_Of (H (N - 1), H (N), S (I)) <= 0.0 loop	2	math	a turn is judged on the last two hull points and the next one
+driver-action-contact.adb	Cells.Insert (Key, (Total => Flat, Count => 1));	1	math	a new cell starts with the one point that opened it
+driver-action-contact.adb	Low : Positive := 1;	1	structure	the first coordinate axis is the first candidate seed
+driver-action-contact.adb	Seed (Low) := 1.0;	1.0	math	the seed is a unit coordinate axis
+driver-action-contact.adb	for K in 2 .. 3 loop	2	structure	the remaining coordinate axes, second and third
+driver-action-contact.adb	for K in 2 .. 3 loop	3	structure	the remaining coordinate axes, second and third
 driver-bytes.adb	Capacity := 1;	1	numerics	smallest buffer capacity before doubling
 driver-bytes.adb	Capacity := 2 * Capacity;	2	numerics	geometric growth keeps appends amortized O(1)
 driver-conventions.ads	Unchanged_Fraction : constant := 0.01;	0.01	numerics	convergence of iterative estimates (documented in Conventions)
