@@ -10,6 +10,8 @@
 #   motion     commands reach the robot from one place only, Driver.Robot.Motion
 #   build      the driver builds without warnings
 #   selftest   every behavior specification passes
+#   deadcode   what body_driver cannot reach (reported while the layers are being written in
+#              parallel; binding once they are wired together)
 #
 # Usage: tools/check.sh [--no-build]
 set -u
@@ -71,6 +73,7 @@ if [ "${1:-}" != "--no-build" ]; then
   if echo "$out" | grep -qE 'error|warning'; then echo "$out" | grep -E 'error|warning' | head -20; red "build"; else ok "build"; fi
   if (cd "$D" && ./bin/selftest > /tmp/bd_selftest.$$ 2>&1); then ok "selftest ($(tail -1 /tmp/bd_selftest.$$))"; else grep -A1 FAIL /tmp/bd_selftest.$$ | head -20; red "selftest"; fi
   rm -f /tmp/bd_selftest.$$
+  echo "info  deadcode: $(python3 "$ROOT/tools/deadcode.py" | head -1 | sed 's/^== //; s/ ==$//')"
 fi
 
 [ "$fail" = 0 ] && echo "all gates pass" || { echo "gates failed"; exit 1; }
