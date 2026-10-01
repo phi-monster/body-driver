@@ -157,7 +157,7 @@ begin
                   Any : Boolean := False;
                begin
                   for I in 0 .. Natural (C.Items.Length) - 1 loop
-                     if C.Items (I).Located and then Role_Wants (R, C.Items (I).Kind) then
+                     if C.Items (I).Located and then Role_Wants (R, C.Items (I)) then
                         Any := True;
                         --  Build_Facts 的第 0 条是占位,第 I+1 条才是清单第 I 件
                         if I + 1 < Natural (All_Facts.Length) then
@@ -271,7 +271,7 @@ begin
                      Any_Ready : Boolean := False;
                   begin
                      for K in 0 .. Natural (C.Items.Length) - 1 loop
-                        if Role_Wants (R, C.Items (K).Kind) and then C.Items (K).Located and then C.Items (K).Cam = C.Cam
+                        if Role_Wants (R, C.Items (K)) and then C.Items (K).Located and then C.Items (K).Cam = C.Cam
                           and then (Own < 0 or else Integer (C.Items (K).Arm) = Own) and then Eye_Ready (C.Items (K).Arm)
                         then
                            Any_Ready := True;
@@ -280,7 +280,7 @@ begin
                      for K in 0 .. Natural (C.Items.Length) - 1 loop
                         declare
                            It : constant Item := C.Items (K);
-                           Want : constant Boolean := Role_Wants (R, It.Kind);
+                           Want : constant Boolean := Role_Wants (R, It);   --  按整件问:me 认 It.Whole(路 1,10-01)
                            D : constant Long_Float :=
                              (if Has_Near and then It.Located
                               then Sqrt ((It.Cu - Near_U) ** 2 + (It.Cv - Near_V) ** 2) else 0.0);
@@ -306,14 +306,13 @@ begin
 
                --  绑不上时,把身上量到的零件种类如实报出来,让脑知道该换成什么说法
                function Why_No_Role (Key : String) return String is
-                  N_Grip, N_Piece, N_Finger : Natural := 0;
+                  N_Grip, N_Piece : Natural := 0;
                begin
                   for K in 0 .. Natural (C.Items.Length) - 1 loop
                      if C.Items (K).Cam = C.Cam then   --  只数这一台相机里的,别把跨相机的重复计进来
                         case C.Items (K).Kind is
                            when Grip => N_Grip := N_Grip + 1;
                            when Piece => N_Piece := N_Piece + 1;
-                           when Finger => N_Finger := N_Finger + 1;
                            when others => null;
                         end case;
                      end if;
@@ -325,13 +324,22 @@ begin
                   elsif Key = "pusher" then
                      return "我身上没量到【推得动东西又合不拢】的零件(合得拢的爪心"
                        & Codec.Img (N_Grip) & " 组不算);要用手,写 grasper";
-                  elsif Key = "me" and then N_Finger + N_Grip = 0 then
-                     --  没有手指的身体(无人机)"我"本该就是整个机身;这一版还没接上(PLAN V1b 无人机 (c)),照实说
-                     return "me 是【整个我】:我身上没量出手指和爪心,本该就是它 —— 可这一版还不会按整个机身走(me 没接上)";
                   elsif Key = "me" then
-                     return "me 是【整个我】,只有推一下整幅画面跟着变、身上又分不出零件的机体才有它;"
-                       & "我身上量得出 " & Codec.Img (N_Finger) & " 瓣手指、" & Codec.Img (N_Grip)
-                       & " 组爪心,所以要点名到零件:写 grasper";
+                     --  me = 整个我(路 1,10-01,主代理授权改这一句):按开机一组一组推着量到的说(Selfmap.Graph.Why_No_Me),
+                     --  不再按手指数猜(原来:"量得出手指 ⇒ 要点名到零件"、"没手指 ⇒ me 没接上")
+                     declare
+                        Why : constant String := Selfmap.Graph.Why_No_Me (C.Map);
+                        Wa : constant Integer := Selfmap.Graph.Whole_Arm (C.Map);
+                     begin
+                        if Why /= "" then
+                           return "me 是【整个我】:" & Why;
+                        elsif Wa >= 0 and then Cam_Arm (C, C.Cam) = Wa then
+                           return "me 是【整个我】= 第 " & Codec.Img (Natural (Wa) + 1) & " 条臂;这只眼就长在它上面,它在这只眼里是整幅画面在动、"
+                             & "不是画面里的一块 ⇒ 换一只不长在它上面的眼(look = k)才看得见它";
+                        elsif Wa >= 0 then
+                           return "me 是【整个我】= 第 " & Codec.Img (Natural (Wa) + 1) & " 条臂;这只眼睛里看不见它的零件";
+                        end if;
+                     end;
                   end if;
                   return "这只眼睛里没有一块符合它";
                end Why_No_Role;

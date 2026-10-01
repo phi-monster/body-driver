@@ -293,9 +293,15 @@ package body Act is
          --  以前这里写 Grip | Piece,爪心同时满足两个角色,语言的角色区分等于没有。
          --  这具身体上量不到这样的零件时,绑不上就是对的,身体要说出来,不许拿爪心顶数。
          when Sinew.Rl_Pusher => K = Piece,
-         --  me = 整个我。只有"推一下整幅画面跟着变、而且身上量不出可分的零件"的机体(无人机)才有它。
-         --  这具身体量得出手指和爪心 ⇒ me 绑不上,而这是对的;身体要说清为什么,不许只回一句"认不出"。
+         --  me = 整个我:种类说不出"整个",按种类问恒为 False;按整件问(下面那个)才认 Whole
          when others => False);
+
+   --  me = 整个我(路 1,10-01):推一下我身上量得到的每一样都跟着动的那一组(扛着全身的那组;没有它时,唯一的一条臂、
+   --  合拢通道全在它上面、又没有量不出长在哪的零件)上的零件。x5 两条臂互不带着 ⇒ 没有 ⇒ 绑不上,照实说(Why_No_Role)
+   function Role_Wants (R : Sinew.Role; It : Item) return Boolean is
+     (case R is
+         when Sinew.Rl_Me => It.Kind = Piece and then It.Whole,
+         when others => Role_Wants (R, It.Kind));
 
    function Rel_Cmd (R : Sinew.Rel) return String is
      (case R is

@@ -115,6 +115,44 @@ package body Selfmap.Graph is
       return (if G >= 0 and then M.Groups (Natural (G)).Role = Selfmap.Arm then M.Groups (Natural (G)).Arm else -1);
    end Whole_Arm;
 
+   function Why_No_Me (M : Body_Map) return String is
+      G : constant Integer := Whole_Group (M);
+      N_Arm : Natural := 0;
+      Arm_G : Integer := -1;
+      Arm_Idx : Integer := -1;
+   begin
+      if Whole_Arm (M) >= 0 then
+         return "";
+      end if;
+      if G >= 0 then
+         return "整个我是第 " & Codec.Img (Natural (G)) & " 组(推它,我每一只看得出的眼里整幅画面都跟着动 = 扛着全身的那组);"
+           & "它不是一条臂,我只会按臂上的零件走,还不会推着它走";
+      end if;
+      if M.Groups.Is_Empty then
+         return "这一次开机没有一组一组推着认,我说不出哪一组带着我身上的每一样";
+      end if;
+      for I in 0 .. Natural (M.Groups.Length) - 1 loop
+         if M.Groups (I).Role = Selfmap.Piece then
+            return "第 " & Codec.Img (I) & " 组推了只有画面里的一块动,我量不出它长在哪条臂上 ⇒ 说不出推哪一组我身上的每一样都跟着动";
+         end if;
+         if M.Groups (I).Role = Selfmap.Arm then
+            N_Arm := N_Arm + 1; Arm_G := Integer (I); Arm_Idx := M.Groups (I).Arm;
+         end if;
+      end loop;
+      if N_Arm = 0 then
+         return "我没量出臂(推哪一组,哪只眼里整幅画面都不动),也没有一组扛着全身";
+      end if;
+      if N_Arm > 1 then
+         return "我量出 " & Codec.Img (N_Arm) & " 条臂,哪一条都不带着别的(推一条,别的那几条长着的眼不跟着整幅动),也没有一组扛着全身";
+      end if;
+      for I in 0 .. Natural (M.Groups.Length) - 1 loop
+         if M.Groups (I).Role = Selfmap.Closing and then M.Groups (I).Arm /= Arm_Idx then
+            return "第 " & Codec.Img (I) & " 组合拢通道不长在第 " & Codec.Img (Natural (Arm_G)) & " 组那条臂上 ⇒ 推那条臂,它不一定跟着动";
+         end if;
+      end loop;
+      return "";
+   end Why_No_Me;
+
    function Say (M : Body_Map) return String is
       function List (V : Ints) return String is
          R : Unbounded_String;

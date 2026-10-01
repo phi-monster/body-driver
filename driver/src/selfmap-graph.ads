@@ -25,6 +25,12 @@ package Selfmap.Graph is
    --  它就是整个我)。Groups 的下标;量不出 / 没有 ⇒ -1。Whole_Arm = 它是第几条臂(扛着全身的组、没有 ⇒ -1)
    function Whole_Group (M : Body_Map) return Integer;
    function Whole_Arm (M : Body_Map) return Integer;
+   --  这条臂的零件是不是"整个我"(清单里 Item.Whole 就按它置;me 只收它):整个我是一条臂、就是这一条
+   function Whole_Piece (M : Body_Map; Arm : Natural) return Boolean is (Whole_Arm (M) = Integer (Arm));
+   --  me 为什么绑不上,按量到的说(整个我是一条臂 ⇒ "":绑不绑得上只看那只眼里有没有它的零件):
+   --  没按组量过 / 量不出臂 / 几条臂哪一条都不带着别的 / 有一块量不出长在哪的零件 / 合拢通道不全在那一条臂上 /
+   --  整个我是扛着全身的那组、不是一条臂(我只会按臂的零件走)
+   function Why_No_Me (M : Body_Map) return String;
    --  开机报告里念身体图的那一行:只按上面几问念,不读字段
    function Say (M : Body_Map) return String;
 end Selfmap.Graph;
