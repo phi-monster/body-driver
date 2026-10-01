@@ -21,9 +21,30 @@ package body Driver.Images is
    function Green (I : Image; Column, Row : Natural) return Natural is (Channel (I, Column, Row, 1));
    function Blue (I : Image; Column, Row : Natural) return Natural is (Channel (I, Column, Row, 2));
 
+   Red_Weight   : constant := 0.299;
+   Green_Weight : constant := 0.587;
+   Blue_Weight  : constant := 0.114;
+   --  ITU-R BT.601.
+
    function Luma (I : Image; Column, Row : Natural) return Real is
-     (0.299 * Real (Red (I, Column, Row)) + 0.587 * Real (Green (I, Column, Row))
-      + 0.114 * Real (Blue (I, Column, Row)));
+     (Red_Weight * Real (Red (I, Column, Row)) + Green_Weight * Real (Green (I, Column, Row))
+      + Blue_Weight * Real (Blue (I, Column, Row)));
+
+   procedure Luma (I : Image; Into : out Real_Array) is
+      procedure Fill (RGB : Byte_Array) is
+      begin
+         for K in 0 .. Into'Length - 1 loop
+            declare
+               B : constant Offset := RGB'First + Offset (3 * K);
+            begin
+               Into (Into'First + K) := Red_Weight * Real (RGB (B)) + Green_Weight * Real (RGB (B + 1))
+                                        + Blue_Weight * Real (RGB (B + 2));
+            end;
+         end loop;
+      end Fill;
+   begin
+      Query (I, Fill'Access);
+   end Luma;
 
    procedure Query (I : Image; Process : not null access procedure (RGB : Byte_Array)) is
    begin

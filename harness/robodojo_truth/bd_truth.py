@@ -18,7 +18,9 @@ observation is built; the image of the same observation may show an earlier stat
 renderer lags. An object is reported at its root: the parts of an articulated object are not.
 
 The first line of a run is {"kind": "geometry", "store": DIR, "links": {"robot0/link": KEY},
-"objects": {inst_name: KEY}}. Each KEY names DIR/KEY.json, the geometry of that link or object in
+"joints": [{"parent": "robot0/link", "child": "robot0/link", "type": "PhysicsRevoluteJoint"}],
+"objects": {inst_name: KEY}}; the joints give the tree of each robot (a finger is a link below the
+tool link through a joint that moves). Each KEY names DIR/KEY.json, the geometry of that link or object in
 its own frame, written once, the first time any run meets it (KEY is the SHA-1 of the content):
 {"meshes": [{"collision": bool, "visual": bool, "vertices": n, "faces": f, "points": FILE,
 "counts": FILE, "indices": FILE}], "shapes": [{"type", "attributes", "transform", "collision",
@@ -190,6 +192,7 @@ def _geometry(om, env, store):
 
     stage = omni.usd.get_context().get_stage()
     links = {}
+    joints = []
     for name, art in _articulations(om):
         path = art.cfg.prim_path.replace("{ENV_REGEX_NS}", "/World/envs/env_.*").replace("env_.*", f"env_{env}")
         root = stage.GetPrimAtPath(path)
@@ -197,6 +200,11 @@ def _geometry(om, env, store):
         for prim in Usd.PrimRange(root, Usd.TraverseInstanceProxies()):
             if prim.HasAPI(UsdPhysics.RigidBodyAPI):
                 bodies.setdefault(prim.GetName(), prim)
+            if prim.IsA(UsdPhysics.Joint):
+                ends = [UsdPhysics.Joint(prim).GetBody0Rel().GetTargets(), UsdPhysics.Joint(prim).GetBody1Rel().GetTargets()]
+                if ends[0] and ends[1]:
+                    joints.append({"parent": f"{name}/{ends[0][0].name}", "child": f"{name}/{ends[1][0].name}",
+                                   "type": prim.GetTypeName()})
         for link in art.body_names:
             if link in bodies:
                 links[f"{name}/{link}"] = _stored(*_shapes_of(bodies[link], True), store)
@@ -206,7 +214,7 @@ def _geometry(om, env, store):
             objects[rec["inst_name"]] = _stored(*_shapes_of(stage.GetPrimAtPath(obj.prim_path), False), store)
         except Exception as e:
             objects[rec["inst_name"]] = {"error": repr(e)}
-    return {"kind": "geometry", "store": store, "links": links, "objects": objects}
+    return {"kind": "geometry", "store": store, "links": links, "joints": joints, "objects": objects}
 
 
 _failures = 0

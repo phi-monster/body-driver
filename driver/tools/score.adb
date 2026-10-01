@@ -23,8 +23,8 @@
 --  Hands: each estimated tip is taken into the true tool link by its arm's S
 --  and X and compared, at the beat whose closer reading is nearest the tip's,
 --  with the support point of a finger's collision mesh along the estimated
---  press direction; the fingers are the links that move against the tool
---  link, and lobes are given to fingers by the smallest total distance. The
+--  press direction; the fingers are the links below the tool link in the
+--  robot's joint tree through a joint that moves, and lobes are given to fingers by the smallest total distance. The
 --  finger's farthest vertex along the tool's approach (from the tool link
 --  towards the fingers) is reported beside it.
 --
@@ -108,6 +108,13 @@ procedure Score is
    package Key_Maps is new Ada.Containers.Indefinite_Ordered_Maps (String, String);
    Link_Keys : Key_Maps.Map;   --  link name -> geometry file in the store
 
+   type Joint is record
+      Parent, Child, Kind : Unbounded_String;
+   end record;
+
+   package Joint_Vectors is new Ada.Containers.Vectors (Positive, Joint);
+   Joints : Joint_Vectors.Vector;   --  every robot's joint tree
+
    function Quaternion_Pose (X : Real_Array) return Rigid is
      (Rotation    => To_Matrix ((W => X (X'First + 3), X => X (X'First + 4), Y => X (X'First + 5),
                                  Z => X (X'First + 6))),
@@ -137,6 +144,16 @@ procedure Score is
                Links : constant Node := Lookup (Doc, Root (Doc), "links");
             begin
                Store := To_Unbounded_String (Text (Doc, Lookup (Doc, Root (Doc), "store")));
+               declare
+                  All_Joints : constant Node := Lookup (Doc, Root (Doc), "joints");
+               begin
+                  for I in 1 .. Count (Doc, All_Joints) loop
+                     Joints.Append
+                       (Joint'(Parent => To_Unbounded_String (Text (Doc, Lookup (Doc, Element (Doc, All_Joints, I), "parent"))),
+                               Child  => To_Unbounded_String (Text (Doc, Lookup (Doc, Element (Doc, All_Joints, I), "child"))),
+                               Kind   => To_Unbounded_String (Text (Doc, Lookup (Doc, Element (Doc, All_Joints, I), "type")))));
+                  end loop;
+               end;
                for I in 1 .. Count (Doc, Links) loop
                   if Kind_Of (Doc, Member_Value (Doc, Links, I)) = String_Value then
                      Link_Keys.Include (Member_Name (Doc, Links, I), Text (Doc, Member_Value (Doc, Links, I)));
@@ -832,46 +849,46 @@ procedure Score is
    ---------------------------------------------------------------------------
    --  Hands
 
-   function Float32_File (Path : String) return Real_Array is
-      --  A raw little-endian float32 array (the truth store's vertex files).
+   package Vertex_Vectors is new Ada.Containers.Vectors (Positive, Vec3);
+
+   procedure Append_Vertices (Path : String; Points : in out Vertex_Vectors.Vector) is
+      --  A raw little-endian float32 file of x y z triples (the truth store's
+      --  vertex files), read a block at a time: meshes run to millions of vertices.
       use Ada.Streams.Stream_IO;
       use type Interfaces.Unsigned_32;
       use type Ada.Streams.Stream_Element_Offset;
       function To_Float is new Ada.Unchecked_Conversion (Interfaces.Unsigned_32, Interfaces.IEEE_Float_32);
-      F : File_Type;
+      Vertex_Bytes : constant := 12;   --  three float32
+      Block_Vertices : constant := 4096;
+      F     : File_Type;
+      Block : Driver.Bytes.Byte_Array (1 .. Vertex_Bytes * Block_Vertices);
+      Last  : Ada.Streams.Stream_Element_Offset;
+
+      function Float_At (B : Ada.Streams.Stream_Element_Offset) return Real is
+        (Real (To_Float (Interfaces.Unsigned_32 (Block (B))
+                         or Interfaces.Shift_Left (Interfaces.Unsigned_32 (Block (B + 1)), 8)
+                         or Interfaces.Shift_Left (Interfaces.Unsigned_32 (Block (B + 2)), 16)
+                         or Interfaces.Shift_Left (Interfaces.Unsigned_32 (Block (B + 3)), 24))));
    begin
       Open (F, In_File, Path);
-      declare
-         Bytes : Driver.Bytes.Byte_Array (1 .. Ada.Streams.Stream_Element_Offset (Size (F)));
-         Last  : Ada.Streams.Stream_Element_Offset;
-         R     : Real_Array (1 .. Natural (Size (F)) / 4);
-      begin
-         Read (F, Bytes, Last);
-         Close (F);
-         for I in R'Range loop
-            declare
-               B : constant Ada.Streams.Stream_Element_Offset := Ada.Streams.Stream_Element_Offset (4 * (I - 1));
-               U : constant Interfaces.Unsigned_32 :=
-                 Interfaces.Unsigned_32 (Bytes (B + 1))
-                 or Interfaces.Shift_Left (Interfaces.Unsigned_32 (Bytes (B + 2)), 8)
-                 or Interfaces.Shift_Left (Interfaces.Unsigned_32 (Bytes (B + 3)), 16)
-                 or Interfaces.Shift_Left (Interfaces.Unsigned_32 (Bytes (B + 4)), 24);
-            begin
-               R (I) := Real (To_Float (U));
-            end;
+      while not End_Of_File (F) loop
+         Read (F, Block, Last);
+         for V in 0 .. Last / Vertex_Bytes - 1 loop
+            Points.Append (Vec3'(Float_At (V * Vertex_Bytes + 1), Float_At (V * Vertex_Bytes + 5),
+                                 Float_At (V * Vertex_Bytes + 9)));
          end loop;
-         return R;
-      end;
-   end Float32_File;
+      end loop;
+      Close (F);
+   end Append_Vertices;
 
-   function Collision_Points (Key : String) return Real_Array is
-      --  Every collision vertex of a stored geometry, x y z in turn, in its link's frame.
+   function Collision_Points (Key : String) return Vertex_Vectors.Vector is
+      --  Every collision vertex of a stored geometry, in its link's frame.
       use Driver.Json;
       F      : Ada.Text_IO.File_Type;
       Doc    : Document;
       Ok     : Boolean;
       Why    : Unbounded_String;
-      Points : Real_Holders.Holder := Real_Holders.To_Holder (Real_Array'(1 .. 0 => 0.0));
+      Points : Vertex_Vectors.Vector;
    begin
       Ada.Text_IO.Open (F, Ada.Text_IO.In_File, To_String (Store) & "/" & Key & ".json");
       Parse (Ada.Text_IO.Get_Line (F), Doc, Ok, Why);
@@ -882,25 +899,23 @@ procedure Score is
          begin
             for I in 1 .. Count (Doc, Meshes) loop
                if Is_True (Doc, Lookup (Doc, Element (Doc, Meshes, I), "collision")) then
-                  Points := Real_Holders.To_Holder
-                    (Points.Element
-                     & Float32_File (To_String (Store) & "/" & Text (Doc, Lookup (Doc, Element (Doc, Meshes, I), "points"))));
+                  Append_Vertices (To_String (Store) & "/" & Text (Doc, Lookup (Doc, Element (Doc, Meshes, I), "points")),
+                                   Points);
                end if;
             end loop;
          end;
       end if;
-      return Points.Element;
+      return Points;
    end Collision_Points;
 
-   function Support (Points : Real_Array; In_Tool : Rigid; Direction : Vec3) return Vec3 is
+   function Support (Points : Vertex_Vectors.Vector; In_Tool : Rigid; Direction : Vec3) return Vec3 is
       --  The vertex that leads along Direction, all in the tool link's frame.
       Best       : Vec3 := Zero3;
       Best_Along : Real := Real'First;
    begin
-      for I in 0 .. Points'Length / 3 - 1 loop
+      for V of Points loop
          declare
-            P : constant Vec3 := In_Tool * Vec3'(Points (Points'First + 3 * I), Points (Points'First + 3 * I + 1),
-                                                 Points (Points'First + 3 * I + 2));
+            P : constant Vec3 := In_Tool * V;
          begin
             if P * Direction > Best_Along then
                Best_Along := P * Direction;
@@ -910,6 +925,40 @@ procedure Score is
       end loop;
       return Best;
    end Support;
+
+   function Centroid (Points : Vertex_Vectors.Vector; In_Tool : Rigid) return Vec3 is
+      Sum : Vec3 := Zero3;
+   begin
+      for V of Points loop
+         Sum := Sum + In_Tool * V;
+      end loop;
+      return Sum / Real'Max (1.0, Real (Points.Length));
+   end Centroid;
+
+   function Is_Finger (Name, Tool_Link : String) return Boolean is
+      --  A finger hangs below the tool link in the robot's joint tree with at
+      --  least one joint between them that moves: links fixed to the tool
+      --  link (a camera, a flange) are part of the tool, not fingers.
+      function Below (Link : String; Through_Moving : Boolean) return Boolean is
+      begin
+         for J of Joints loop
+            if To_String (J.Parent) = Link then
+               declare
+                  Moving : constant Boolean := Through_Moving or else To_String (J.Kind) /= "PhysicsFixedJoint";
+               begin
+                  if To_String (J.Child) = Name then
+                     return Moving;
+                  elsif Below (To_String (J.Child), Moving) then
+                     return True;
+                  end if;
+               end;
+            end if;
+         end loop;
+         return False;
+      end Below;
+   begin
+      return Below (Tool_Link, False);
+   end Is_Finger;
 
    function Nearest_Beat (Closer : String; Reading : Real_Array) return Natural is
       --  The paired beat whose closer reading is nearest the given one.
@@ -950,35 +999,16 @@ procedure Score is
             Prefix    : constant String := Tool_Link (Tool_Link'First .. Ada.Strings.Fixed.Index (Tool_Link, "/"));
             Fingers   : Name_Vectors.Vector;
          begin
-            --  The fingers: links of the same robot that move against the tool link.
+            --  The fingers: links below the tool link in the joint tree, through a joint that moves.
             for C in Link_Keys.Iterate loop
                declare
-                  Name  : constant String := Key_Maps.Key (C);
-                  First : Rigid;
-                  Seen  : Boolean := False;
-                  Moves : Boolean := False;
+                  Name : constant String := Key_Maps.Key (C);
                begin
                   if Name /= Tool_Link and then Name'Length > Prefix'Length
                     and then Name (Name'First .. Name'First + Prefix'Length - 1) = Prefix
+                    and then Is_Finger (Name, Tool_Link)
                   then
-                     for L of Truth loop
-                        if L.Links.Contains (Name) and then L.Links.Contains (Tool_Link) then
-                           declare
-                              Relative : constant Rigid := Inverse (L.Links (Tool_Link)) * L.Links (Name);
-                           begin
-                              if not Seen then
-                                 First := Relative;
-                                 Seen := True;
-                              elsif abs (Relative.Translation - First.Translation) > 0.0 then
-                                 Moves := True;
-                              end if;
-                           end;
-                        end if;
-                        exit when Moves;
-                     end loop;
-                     if Moves then
-                        Fingers.Append (Name);
-                     end if;
+                     Fingers.Append (Name);
                   end if;
                end;
             end loop;
@@ -1011,16 +1041,10 @@ procedure Score is
                               declare
                                  L        : constant Truth_Line := Truth (Recorded (B).Line);
                                  In_Tool  : constant Rigid := Inverse (L.Links (Tool_Link)) * L.Links (Fingers (F));
-                                 Points   : constant Real_Array := Collision_Points (Link_Keys (Fingers (F)));
-                                 Approach : Vec3 := Zero3;
+                                 Points   : constant Vertex_Vectors.Vector := Collision_Points (Link_Keys (Fingers (F)));
                               begin
-                                 for I in 0 .. Points'Length / 3 - 1 loop
-                                    Approach := Approach + In_Tool * Vec3'(Points (Points'First + 3 * I),
-                                                                           Points (Points'First + 3 * I + 1),
-                                                                           Points (Points'First + 3 * I + 2));
-                                 end loop;
                                  Grid (Lobe, F) := (Support  => Support (Points, In_Tool, Press),
-                                                    Farthest => Support (Points, In_Tool, Unit (Approach)));
+                                                    Farthest => Support (Points, In_Tool, Unit (Centroid (Points, In_Tool))));
                               end;
                            end loop;
                         end if;
@@ -1174,16 +1198,10 @@ procedure Score is
                function At_Beat (B : Natural) return Tip_Estimate is
                   L        : constant Truth_Line := Truth (Recorded (B).Line);
                   In_Tool  : constant Rigid := Inverse (L.Links (Tool_Link)) * L.Links (Name);
-                  Points   : constant Real_Array := Collision_Points (Key_Maps.Element (C));
-                  Centroid : Vec3 := Zero3;
+                  Points   : constant Vertex_Vectors.Vector := Collision_Points (Key_Maps.Element (C));
                begin
-                  for I in 0 .. Points'Length / 3 - 1 loop
-                     Centroid := Centroid + In_Tool * Vec3'(Points (Points'First + 3 * I),
-                                                            Points (Points'First + 3 * I + 1),
-                                                            Points (Points'First + 3 * I + 2));
-                  end loop;
                   declare
-                     Press : constant Vec3 := Unit (Centroid);
+                     Press : constant Vec3 := Unit (Centroid (Points, In_Tool));
                      Tip   : constant Vec3 := Support (Points, In_Tool, Press);
                   begin
                      --  Back into the driver's tool frame: p_D = Rx p_L / s + tx.
@@ -1195,18 +1213,9 @@ procedure Score is
             begin
                if Name /= Tool_Link and then Name'Length > Prefix'Length
                  and then Name (Name'First .. Name'First + Prefix'Length - 1) = Prefix
-                 and then Low /= Natural'Last
+                 and then Low /= Natural'Last and then Is_Finger (Name, Tool_Link)
                then
-                  declare
-                     A : constant Rigid := Inverse (Truth (Recorded (Low).Line).Links (Tool_Link))
-                                           * Truth (Recorded (Low).Line).Links (Name);
-                     B : constant Rigid := Inverse (Truth (Recorded (High).Line).Links (Tool_Link))
-                                           * Truth (Recorded (High).Line).Links (Name);
-                  begin
-                     if abs (A.Translation - B.Translation) > 0.0 then
-                        H.Lobes.Append (Lobe_Estimate'(Open => At_Beat (High), Closed => At_Beat (Low)));
-                     end if;
-                  end;
+                  H.Lobes.Append (Lobe_Estimate'(Open => At_Beat (High), Closed => At_Beat (Low)));
                end if;
             end;
          end loop;
