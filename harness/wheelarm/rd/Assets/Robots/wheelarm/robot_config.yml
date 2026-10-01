@@ -1,5 +1,7 @@
 # body-driver wheelarm rig (大并行 §2 第 39 条,路 8):两轮差速底盘 + 一条五关节的胳膊 + 平行两指;前眼在底盘前沿,腕眼在掌上,没有头顶眼。
-# 身体报的、收的就是关节:两个轮子的转角(连续转,没有限位)排在前面,后面是胳膊五个关节;手指一组。驱动不知道哪个是轮子。
+# 身体报的、收的就是关节,分三组照实报:胳膊五个关节(RoboDojo 的 arm 那一组)、手指(ee 那一组)、两个轮子的转角(连续转、没有限位;
+# 单独一组 base_joint_state,任务模块用 task/RoboDojo/bd/rig.py 的 joint_group 补上 —— 真的轮式底盘,轮子和胳膊本来就是两套控制器)。
+# 第一版把轮子塞进胳膊那一串,开机认组:"第0 组(7 个数):零件(长在哪儿量不出)… 认组完:0 条臂"。驱动不知道哪一组是轮子。
 # 几何、质量见 harness/wheelarm/make_wheelarm.py;执行器(刚度、阻尼)见 env/robot_manager/robot_config/wheelarm.py。
 urdf_path: ./wheelarm.urdf
 base_link: base_link
@@ -19,8 +21,6 @@ sides:
     ee_joints: arm_joint5
     ee_link: gripper_link
     arm_joints_name:
-    - wheel_left_joint
-    - wheel_right_joint
     - arm_joint1
     - arm_joint2
     - arm_joint3

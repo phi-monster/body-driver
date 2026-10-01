@@ -25,6 +25,10 @@ class BdMouseFloorCommon:
         self.reward_manager = RewardManager(self.num_envs)
         self.step_lim = int(os.environ.get("BD_STEP_LIM", "750"))
         self.walker = scene.Walker()
+        # 两个轮子单独一组(读数 state.base_joint_state = 轮子此刻的转角,命令 = 轮子的目标转角),不塞进胳膊那一串
+        rig.joint_group(type(self), "base_joint_state", ["wheel_left_joint", "wheel_right_joint"])
+        # 夹爪读数报手指此刻的位置(RoboDojo 自己报的是上一拍的命令)
+        rig.real_ee_readings(type(self))
 
     def _post_setup_scene(self, sim):
         super()._post_setup_scene(sim)

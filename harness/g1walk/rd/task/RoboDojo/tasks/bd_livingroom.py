@@ -154,6 +154,8 @@ class BdLivingroomCommon:
         self.bd_cmd = list(STAND)
         self.bd_walk = None
         _patch_eval_env(type(self))
+        # 手的读数报每个关节此刻的位置(RoboDojo 自己报的是上一拍的命令)
+        rig.real_ee_readings(type(self))
         # 布局里的东西 need_check_stable 都是 False(地上、家具上的东西 RoboDojo 那一关只认桌上的),核也是白核:这一关跳过
         self.scene_manager.layout_manager.check_layout_stability = lambda env, render=False: (True, [])
 
