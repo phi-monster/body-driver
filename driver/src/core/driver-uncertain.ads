@@ -5,6 +5,13 @@
 --  standard deviations of its own measured noise" (Driver.Conventions.Z).
 --  Vector-valued differences are tested along their own direction, so one
 --  rule covers scalars, points, directions and poses alike.
+--
+--  A sigma measured from a few samples is itself uncertain: the difference
+--  over it follows Student's t, whose tails are heavier than the Gaussian's.
+--  An estimate therefore carries how many degrees of freedom its sigma rests
+--  on, and the test widens Z to the t quantile with the same tail
+--  probability, so a gate raises false alarms equally often whether its
+--  sigma came from three samples or was known.
 
 with Driver.Numerics;
 
@@ -13,21 +20,30 @@ package Driver.Uncertain with Pure is
    use Driver.Numerics;
 
    type Estimate is record
-      Value : Real := 0.0;
-      Sigma : Real := Real'Last;
+      Value              : Real := 0.0;
+      Sigma              : Real := Real'Last;
+      Degrees_Of_Freedom : Natural := 0;
    end record;
    --  Sigma is the standard deviation of Value; Real'Last means unknown.
+   --  Degrees_Of_Freedom is how many the sigma was estimated with; 0 means
+   --  the sigma is known, or rests on so many samples that it may as well be.
 
-   Unknown : constant Estimate := (Value => 0.0, Sigma => Real'Last);
+   Unknown : constant Estimate := (Value => 0.0, Sigma => Real'Last, Degrees_Of_Freedom => 0);
 
    function Known (E : Estimate) return Boolean is (E.Sigma < Real'Last);
 
-   function Significant (Difference, Sigma : Real) return Boolean;
-   --  abs Difference > Z * Sigma. A zero sigma makes any nonzero difference
-   --  significant; an unknown sigma makes none significant.
+   function Significant (Difference, Sigma : Real; Degrees_Of_Freedom : Natural := 0) return Boolean;
+   --  abs Difference > T * Sigma, with T = Z when the sigma is known and the
+   --  Student t quantile at the tail probability Z has for a Gaussian when it
+   --  rests on that many degrees of freedom. A zero sigma makes any nonzero
+   --  difference significant; an unknown sigma makes none significant.
+
+   function Difference (A, B : Estimate) return Estimate;
+   --  A - B for independent estimates: the sigmas add in quadrature and the
+   --  degrees of freedom combine by Welch and Satterthwaite (rounded down).
 
    function Significant (A, B : Estimate) return Boolean;
-   --  The difference of two independent estimates against their combined sigma.
+   --  Significant (Difference (A, B)) against zero.
 
    type Point_Estimate is record
       Mean       : Vec3 := Zero3;

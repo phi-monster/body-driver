@@ -4,19 +4,58 @@ driver-bytes.adb	Capacity := 1;	1	numerics	smallest buffer capacity before doubl
 driver-bytes.adb	Capacity := 2 * Capacity;	2	numerics	geometric growth keeps appends amortized O(1)
 driver-conventions.ads	Unchanged_Fraction : constant := 0.01;	0.01	numerics	convergence of iterative estimates (documented in Conventions)
 driver-conventions.ads	Z : constant := 3.0;	3.0	statistics	the significance level of the one test (documented in Conventions)
+driver-distributions.adb	(Upper_Incomplete_Gamma (1, Z * Z * Half));	1	math	a = 1/2 counted in halves: erfc (x) = Q (1/2, x^2)
+driver-distributions.adb	A_Down : constant Real := A - 1.0;	1.0	math	the a - 1 of the incomplete beta continued fraction
+driver-distributions.adb	A_Up : constant Real := A + 1.0;	1.0	math	the a + 1 of the incomplete beta continued fraction
+driver-distributions.adb	Ap := Ap + 1.0;	1.0	math	successive terms of the incomplete gamma series
+driver-distributions.adb	B := B + 2.0;	2.0	math	the incomplete gamma continued fraction's denominators grow by two
+driver-distributions.adb	C : Real := 1.0 / Tiny;	1.0	numerics	Lentz's method starts C at the reciprocal of its stand-in for zero
+driver-distributions.adb	C : Real := 1.0;	1.0	math	Lentz's method starts C at one
+driver-distributions.adb	C := Clamp_Away_From_Zero (1.0 + Even / C);	1.0	math	Lentz's recurrence C = 1 + a / C
+driver-distributions.adb	C := Clamp_Away_From_Zero (1.0 + Odd / C);	1.0	math	Lentz's recurrence C = 1 + a / C
+driver-distributions.adb	D : Real := 1.0 / B;	1.0	math	Lentz's recurrence D = 1 / (b + a D), first step
+driver-distributions.adb	D : Real := 1.0 / Clamp_Away_From_Zero (1.0 - Sum_Ab * X / A_Up);	1.0	math	first term of the incomplete beta continued fraction
+driver-distributions.adb	D := 1.0 / Clamp_Away_From_Zero (1.0 + Even * D);	1.0	math	Lentz's recurrence D = 1 / (1 + a D)
+driver-distributions.adb	D := 1.0 / Clamp_Away_From_Zero (1.0 + Even * D);	1.0	math	Lentz's recurrence D = 1 / (1 + a D)
+driver-distributions.adb	D := 1.0 / Clamp_Away_From_Zero (1.0 + Odd * D);	1.0	math	Lentz's recurrence D = 1 / (1 + a D)
+driver-distributions.adb	D := 1.0 / Clamp_Away_From_Zero (1.0 + Odd * D);	1.0	math	Lentz's recurrence D = 1 / (1 + a D)
+driver-distributions.adb	D := 1.0 / Clamp_Away_From_Zero (An * D + B);	1.0	math	Lentz's recurrence D = 1 / (b + a D)
+driver-distributions.adb	Half : constant := 0.5;	0.5	math	one half: arguments counted in halves, and the midpoint of a bisection
+driver-distributions.adb	Hi : Real := 1.0;	1.0	math	the incomplete beta's argument lies in [0, 1]
+driver-distributions.adb	J : Positive := (if Halves mod 2 = 1 then 1 else 2);	1	math	the Gamma recurrence starts at Gamma (1/2) for an odd count of halves
+driver-distributions.adb	J : Positive := (if Halves mod 2 = 1 then 1 else 2);	1	math	the Gamma recurrence starts at Gamma (1/2) for an odd count of halves
+driver-distributions.adb	J : Positive := (if Halves mod 2 = 1 then 1 else 2);	2	math	the Gamma recurrence starts at Gamma (1) for an even count of halves
+driver-distributions.adb	J : Positive := (if Halves mod 2 = 1 then 1 else 2);	2	math	the Gamma recurrence starts at Gamma (1) for an even count of halves
+driver-distributions.adb	J := J + 2;	2	math	the Gamma recurrence steps by one, which is two halves
+driver-distributions.adb	Sum : Real := (if Halves mod 2 = 1 then Half * Log (Ada.Numerics.Pi) else 0.0);	1	math	an odd count of halves starts from ln Gamma (1/2) = ln sqrt pi
+driver-distributions.adb	Sum : Real := (if Halves mod 2 = 1 then Half * Log (Ada.Numerics.Pi) else 0.0);	2	math	parity of the count of halves
+driver-distributions.adb	Term : Real := 1.0 / A;	1.0	math	first term of the incomplete gamma series
+driver-distributions.adb	Twice : constant Real := 2.0 * Mr;	2.0	math	the 2m terms of the incomplete beta continued fraction
+driver-distributions.adb	elsif X >= 1.0 then	1.0	math	the incomplete beta is 1 at x = 1
+driver-distributions.adb	exit when abs (Factor - 1.0) <= Precision;	1.0	numerics	converged when the next factor is one to working precision
+driver-distributions.adb	exit when abs (Factor - 1.0) <= Precision;	1.0	numerics	converged when the next factor is one to working precision
+driver-distributions.adb	if Incomplete_Beta (Degrees_Of_Freedom, 1, Mid) < Two_Sided_Tail then	1	math	b = 1/2 counted in halves: the t tail is I_x (nu / 2, 1 / 2)
+driver-distributions.adb	if X < (A + 1.0) / (A + B + 2.0) then	1.0	math	the fraction converges quickly below (a + 1) / (a + b + 2)
+driver-distributions.adb	if X < (A + 1.0) / (A + B + 2.0) then	2.0	math	the fraction converges quickly below (a + 1) / (a + b + 2)
+driver-distributions.adb	if X < A + 1.0 then	1.0	math	the incomplete gamma series converges quickly below a + 1
+driver-distributions.adb	return 1.0;	1.0	math	Q (a, 0) = 1 and I_1 (a, b) = 1
+driver-distributions.adb	return 1.0;	1.0	math	Q (a, 0) = 1 and I_1 (a, b) = 1
+driver-distributions.adb	return Incomplete_Beta (Degrees_Of_Freedom, 1, Nu / (Nu + T * T));	1	math	b = 1/2 counted in halves: the t tail is I_x (nu / 2, 1 / 2)
+driver-distributions.ads	with Pre => Two_Sided_Tail > 0.0 and then Two_Sided_Tail <= 1.0;	1.0	math	a probability is at most one
 driver-geometry.adb	Axis (Smallest) := 1.0;	1.0	math	component of a unit coordinate axis
 driver-geometry.adb	Dt : constant Vec3 := (-1.0 / Facing) * P.Normal;	1.0	math	derivative of a ray's distance to a plane with respect to the ray's origin
 driver-geometry.adb	Half : constant := 0.5;	0.5	math	one half: the symmetric part of a matrix is (A + A^T) / 2
 driver-geometry.adb	J : constant Mat3 := Identity3 - (1.0 / Facing) * Outer (U, P.Normal);	1.0	math	oblique projection along the ray onto the plane
 driver-geometry.adb	L : Real_Matrix (1 .. 3, 1 .. 3);	3	structure	three dimensions
 driver-geometry.adb	L : Real_Matrix (1 .. 3, 1 .. 3);	3	structure	three dimensions
-driver-geometry.adb	Unknowns : constant := 3;	3	structure	a plane has three degrees of freedom: an offset and two tilts
+driver-geometry.adb	Plane_Unknowns : constant := 3;	3	structure	a plane has three degrees of freedom: an offset and two tilts
 driver-geometry.adb	Values : Real_Vector (1 .. 3);	3	structure	three dimensions
 driver-geometry.adb	Vectors : Real_Matrix (1 .. 3, 1 .. 3);	3	structure	three dimensions
 driver-geometry.adb	Vectors : Real_Matrix (1 .. 3, 1 .. 3);	3	structure	three dimensions
 driver-geometry.adb	Weight (I) := 1.0 / Real'Max (N * (Points (I).Covariance * N), Real'Model_Small);	1.0	math	a least-squares weight is the inverse of the variance
 driver-geometry.adb	Weight (I) := 1.0;	1.0	numerics	equal weights for the first pass, before any normal is known to weight along
 driver-geometry.adb	if Rays'Length < 2 then	2	structure	two lines are the fewest that can meet in a point
+driver-geometry.adb	return Natural'Max (1, Natural (Real'Floor	1	statistics	Welch's degrees of freedom are at least one
 driver-geometry.adb	return Sqrt (P.Offset_Sigma ** 2 + A * A * P.Tilt_11 + 2.0 * A * B * P.Tilt_12 + B * B * P.Tilt_22);	2.0	math	the cross term of a two-variable quadratic form appears twice
 driver-geometry.adb	subtype Mat2 is Real_Matrix (1 .. 2, 1 .. 2);	2	structure	the two tilt directions of a plane
 driver-geometry.adb	subtype Mat2 is Real_Matrix (1 .. 2, 1 .. 2);	2	structure	the two tilt directions of a plane
@@ -355,10 +394,11 @@ driver-recording.adb	V := Shift_Left (V, 8) or Unsigned_64 (Data (I));	8	format	
 driver-recording.adb	for I in 0 .. 3 loop	3	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
 driver-recording.adb	for I in 0 .. 7 loop	7	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
 driver-stats.adb	Child := 2 * Root;	2	math	heap sort and median index arithmetic
+driver-stats.adb	Degrees_Of_Freedom => X'Length - 2),	2	statistics	a line fit uses two degrees of freedom
 driver-stats.adb	Gaussian_MAD_To_Sigma : constant := 1.482_602_218_505_602;	1.482_602_218_505_602	statistics	1 / Phi^-1 (3/4): MAD to sigma for Gaussian data
-driver-stats.adb	Intercept => (Value => A, Sigma => Sqrt (S2 * (1.0 / N + Mean (Mx) ** 2 / Sxx))),	1.0	math	standard error of the intercept, 1/n term
 driver-stats.adb	S2 : constant Real := Sse / (N - 2.0);	2.0	statistics	two degrees of freedom used by slope and intercept
 driver-stats.adb	Sift (1, Stop - 1);	1	math	heap sort and median index arithmetic
+driver-stats.adb	Sigma => Sqrt (S2 * (1.0 / N + Mean (Mx) ** 2 / Sxx)),	1.0	math	standard error of the intercept, 1/n term
 driver-stats.adb	for Start in reverse 1 .. N / 2 loop	2	math	heap sort and median index arithmetic
 driver-stats.adb	for Stop in reverse 2 .. N loop	2	math	heap sort and median index arithmetic
 driver-stats.adb	if A.N < 2 then	2	statistics	a variance needs two samples
@@ -367,11 +407,13 @@ driver-stats.adb	if N mod 2 = 1 then	2	math	heap sort and median index arithmeti
 driver-stats.adb	return (S (O + N / 2) + S (O + N / 2 + 1)) / 2.0;	2	math	heap sort and median index arithmetic
 driver-stats.adb	return (S (O + N / 2) + S (O + N / 2 + 1)) / 2.0;	2	math	heap sort and median index arithmetic
 driver-stats.adb	return (S (O + N / 2) + S (O + N / 2 + 1)) / 2.0;	2.0	math	mean of the two middle values
-driver-stats.adb	return (Value => (if A.N = 1 then A.Mean else 0.0), Sigma => Real'Last);	1	statistics	a single sample has a mean but no spread
+driver-stats.adb	return (Slope => (Value => B, Sigma => Sqrt (S2 / Sxx), Degrees_Of_Freedom => X'Length - 2),	2	statistics	a line fit uses two degrees of freedom
+driver-stats.adb	return (Value => (if A.N = 1 then A.Mean else 0.0), Sigma => Real'Last, Degrees_Of_Freedom => 0);	1	statistics	a single sample has a mean but no spread
 driver-stats.adb	return S (O + (N + 1) / 2);	2	math	heap sort and median index arithmetic
 driver-stats.ads	with Pre => Count (A) > 1;	1	statistics	a variance or a correlation needs two samples
 driver-stats.ads	with Pre => X'Length = Y'Length and then X'Length > 1;	1	statistics	a variance or a correlation needs two samples
 driver-stats.ads	with Pre => X'Length = Y'Length and then X'Length > 2;	2	statistics	a line fit with a residual spread needs three points
+driver-uncertain.adb	Dof := Natural'Max (1, Natural (Real'Floor ((Va + Vb) * (Va + Vb) / Spread)));	1	statistics	Welch's degrees of freedom are at least one
 driver-uncertain.adb	for I in 1 .. 3 loop	3	structure	three dimensions
 driver-wire.adb	"" & ASCII.CR & ASCII.LF	"1.1	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	"" & ASCII.CR & ASCII.LF	"101	format	WebSocket framing and handshake (RFC 6455)

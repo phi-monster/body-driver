@@ -118,8 +118,8 @@ package body Driver.Core_Tests is
       Check (Significant (3.1, 1.0), "3.1 sigma not significant");
       Check (not Significant (2.9, 1.0), "2.9 sigma significant");
       Check (not Significant (1.0e9, Real'Last), "unknown sigma made something significant");
-      Check (not Significant (Estimate'(10.0, 2.0), Estimate'(5.0, 2.0)), "5 apart with combined sigma 2.83");
-      Check (Significant (Estimate'(10.0, 1.0), Estimate'(5.0, 1.0)), "5 apart with combined sigma 1.41");
+      Check (not Significant (Estimate'(10.0, 2.0, 0), Estimate'(5.0, 2.0, 0)), "5 apart with combined sigma 2.83");
+      Check (Significant (Estimate'(10.0, 1.0, 0), Estimate'(5.0, 1.0, 0)), "5 apart with combined sigma 1.41");
    end Significance;
 
    procedure Buffer_Growth is
