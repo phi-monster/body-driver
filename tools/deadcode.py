@@ -29,6 +29,9 @@ TEST_HOOKS = {
     ("held.adb", "Scl"): "路 6:3×3 乘一个数(Take / Check_Slip 用);它们接上就是活的",
     ("held.adb", "Mapped"): "路 6:位姿的不准换一个系看(Take / In_World / Check_Slip 用);它们接上就是活的",
     ("held.adb", "Add"): "路 6:两个 6×6 不准相加(Take / In_World / Check_Slip 用);它们接上就是活的",
+    # 路 6 对准插进去(§2 第 21 条)、一次走不完的(§2 第 22 条):执行层"往里送 / 松开再握"那一处调它们(Run_Segment 留给路 6 的接口),接上以后这 2 条删
+    ("seek.adb", "Run"): "路 6:对准插进去 —— 沿轴送,被挡住就在横着的不准那一片里按缝定的格子从最可能的试起;执行层接上就是活的",
+    ("strokes.adb", "Run"): "路 6:一次走不完的 —— 到了范围的头就松开、空着转回、再握,到转不动或走够为止;执行层接上就是活的",
 }
 import os, re, sys, glob, collections
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
