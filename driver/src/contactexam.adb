@@ -31,7 +31,7 @@ with Jointboot;
 with Instrument;
 with Contact;
 with Contact.Gen;
-with Contact.Grasp;
+with Contact.Search;
 with Contact.Surface;
 procedure Contactexam is
    package SIO renames Ada.Streams.Stream_IO;
@@ -337,7 +337,7 @@ begin
       end;
       --  ④ 驱动的接触集
       declare
-         Pick : Contact.Grasp.Candidate;
+         Pick : Contact.Search.Candidate;
          Ok : Boolean;
          G : constant Geom.Cam_Geo := C.Geo (Cam);
          Mx, My, Sxx, Sxy, Syy : Long_Float := 0.0;

@@ -16,41 +16,61 @@ package body Contact.Search is
       return H;
    end Not_Measured;
 
-   function Two_Pads (Tip_A, Tip_B : V3; Width, Thick, Pos_Err : Long_Float) return Hand_Model is
-      H : Hand_Model;
-      D : constant V3 := [Tip_B (0) - Tip_A (0), Tip_B (1) - Tip_A (1), Tip_B (2) - Tip_A (2)];
-      Mid : constant V3 := [0.5 * (Tip_A (0) + Tip_B (0)), 0.5 * (Tip_A (1) + Tip_B (1)), 0.5 * (Tip_A (2) + Tip_B (2))];
-      Od, Om : Boolean;
-      U : constant V3 := Unit (D, Od);
-      Tl : constant V3 := Unit (Mid, Om);
-   begin
-      if not Od or else not Om or else not Width'Valid or else Width <= 0.0 or else not Thick'Valid or else Thick < 0.0
-        or else not Pos_Err'Valid or else Pos_Err < 0.0
-      then
-         return Not_Measured ("两个指尖重合、指尖和眼重合,或者指肚宽 / 手指厚 / 手落位的误差没量出来");
-      end if;
-      if Norm (D) <= Thick then
-         return Not_Measured ("张开时两个指尖比一个手指还近(尖或手指厚量错了)");
-      end if;
-      --  碰东西的那一面在尖往里半个手指厚;两块相向走,各走到两面之间的空的一半(走到那儿就碰上对面那块了)
-      declare
-         Face_A : constant V3 := [Tip_A (0) + 0.5 * Thick * U (0), Tip_A (1) + 0.5 * Thick * U (1), Tip_A (2) + 0.5 * Thick * U (2)];
-         Face_B : constant V3 := [Tip_B (0) - 0.5 * Thick * U (0), Tip_B (1) - 0.5 * Thick * U (1), Tip_B (2) - 0.5 * Thick * U (2)];
-         Half : constant Long_Float := 0.5 * (Norm (D) - Thick);
-      begin
-         H.Pads.Append (Pad'(Tip => Face_A, Dir => U, Travel => Half, Width => Width, Thick => Thick));
-         H.Pads.Append (Pad'(Tip => Face_B, Dir => [-U (0), -U (1), -U (2)], Travel => Half, Width => Width, Thick => Thick));
-      end;
-      H.Tool := Tl;
-      H.Pos_Err := Pos_Err;
-      H.Reach_In := Norm (Mid);   --  指尖在眼前面这么深:东西伸进手里超过它就顶到手掌 / 眼了
-      H.Valid := True;
-      return H;
-   end Two_Pads;
-
    function Sub (A, B : V3) return V3 is ([A (0) - B (0), A (1) - B (1), A (2) - B (2)]);
    function Add (A, B : V3) return V3 is ([A (0) + B (0), A (1) + B (1), A (2) + B (2)]);
    function Scl (K : Long_Float; A : V3) return V3 is ([K * A (0), K * A (1), K * A (2)]);
+
+   function From_Lobes (Ls : Lobe_In_Vectors.Vector; Pos_Err : Long_Float) return Hand_Model is
+      H : Hand_Model;
+      Mid : V3 := [others => 0.0];
+      Om : Boolean;
+   begin
+      if Ls.Is_Empty then
+         return Not_Measured ("这只眼里量不到手指(一瓣都没有)");
+      end if;
+      if not Pos_Err'Valid or else Pos_Err < 0.0 then
+         return Not_Measured ("手落位的误差没量出来");
+      end if;
+      for L of Ls loop
+         if not L.Width'Valid or else L.Width <= 0.0 or else not L.Thick'Valid or else L.Thick < 0.0 then
+            return Not_Measured ("有一瓣的指肚宽 / 手指厚没量出来");
+         end if;
+         Mid := Add (Mid, Scl (1.0 / Long_Float (Ls.Length), L.Tip));
+      end loop;
+      H.Tool := Unit (Mid, Om);
+      if not Om then
+         return Not_Measured ("指尖和眼重合");
+      end if;
+      H.Reach_In := Norm (Mid);   --  指尖在眼前面这么深:东西伸进手里超过它就顶到手掌 / 眼了
+      for L of Ls loop
+         declare
+            Od : Boolean;
+            To_C : constant V3 := Sub (Mid, L.Tip);
+            U : constant V3 := Unit (To_C, Od);
+            Dist : constant Long_Float := Norm (To_C);
+         begin
+            if not Od then
+               return Not_Measured ("量到的只有一瓣(或几瓣的尖重合),没有可以相向合的 —— 合拢那一路没量出来");
+            end if;
+            if Dist <= 0.5 * L.Thick then
+               return Not_Measured ("张开时有一瓣的尖离中心不到半个手指厚(尖或手指厚量错了)");
+            end if;
+            --  碰东西的那一面在尖往中心半个手指厚;合到头 = 走到中心再留半个手指厚(几瓣一起合,走到那儿就碰上对面的了)
+            H.Pads.Append (Pad'(Tip => Add (L.Tip, Scl (0.5 * L.Thick, U)), Dir => U, Travel => Dist - 0.5 * L.Thick, Width => L.Width, Thick => L.Thick));
+         end;
+      end loop;
+      H.Pos_Err := Pos_Err;
+      H.Valid := True;
+      return H;
+   end From_Lobes;
+
+   function Two_Pads (Tip_A, Tip_B : V3; Width, Thick, Pos_Err : Long_Float) return Hand_Model is
+      Ls : Lobe_In_Vectors.Vector;
+   begin
+      Ls.Append (Lobe_In'(Tip => Tip_A, Width => Width, Thick => Thick));
+      Ls.Append (Lobe_In'(Tip => Tip_B, Width => Width, Thick => Thick));
+      return From_Lobes (Ls, Pos_Err);
+   end Two_Pads;
 
    --  绕单位轴 K 转 Th(罗德里格斯)
    function Rot (V, K : V3; Th : Long_Float) return V3 is

@@ -168,6 +168,7 @@ package body Contact.Wrench is
    procedure Plane_Basis (U : V3; E1, E2 : out V3) is
       Ax : constant V3 := (if abs U (0) <= abs U (1) then [1.0, 0.0, 0.0] else [0.0, 1.0, 0.0]);
       Ok : Boolean;
+      pragma Warnings (Off, Ok);   --  U 是单位向量、Ax 是离它更远的那根坐标轴 ⇒ 叉乘不会是零
    begin
       E1 := Unit (Cross (U, Ax), Ok);
       E2 := Cross (U, E1);
@@ -230,9 +231,9 @@ package body Contact.Wrench is
    procedure Sort_Xy is new Ada.Containers.Generic_Array_Sort (Natural, Xy, Xy_Array);
    function Hull (P : Xy_Array) return Idx_Array is
       S : Xy_Array := P;
-      H : Xy_Array (0 .. 2 * P'Length);
+      H : Xy_Array (0 .. 2 * P'Length) := [others => (X => 0.0, Y => 0.0, K => 0)];
       N : Natural := 0;
-      function Turn_Of (O, A, B : Xy) return Long_Float is ((A.X - O.X) * (B.Y - O.Y) - (A.Y - O.Y) * (B.X - O.X));
+      function Side_Of (O, A, B : Xy) return Long_Float is ((A.X - O.X) * (B.Y - O.Y) - (A.Y - O.Y) * (B.X - O.X));
    begin
       if P'Length <= 2 then
          declare
@@ -246,7 +247,7 @@ package body Contact.Wrench is
       end if;
       Sort_Xy (S);
       for I in S'Range loop   --  下半圈
-         while N >= 2 and then Turn_Of (H (N - 2), H (N - 1), S (I)) <= 0.0 loop
+         while N >= 2 and then Side_Of (H (N - 2), H (N - 1), S (I)) <= 0.0 loop
             N := N - 1;
          end loop;
          H (N) := S (I); N := N + 1;
@@ -255,7 +256,7 @@ package body Contact.Wrench is
          Lo : constant Natural := N + 1;
       begin
          for I in reverse S'First .. S'Last - 1 loop   --  上半圈
-            while N >= Lo and then Turn_Of (H (N - 2), H (N - 1), S (I)) <= 0.0 loop
+            while N >= Lo and then Side_Of (H (N - 2), H (N - 1), S (I)) <= 0.0 loop
                N := N - 1;
             end loop;
             H (N) := S (I); N := N + 1;

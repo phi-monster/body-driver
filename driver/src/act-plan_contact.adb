@@ -53,13 +53,19 @@ begin
       Note := S ("I have not measured the surface it lies on, so I cannot tell how tall it is or where my fingers can go down beside it");
       return;
    end if;
-   if Natural (G.Lobes.Length) /= 2 then
-      Note := S ("my fingers in this eye are " & Codec.Img (Natural (G.Lobes.Length)) & " measured pads (I lay contacts out for two pads closing on each other"
-                 & (if G.Lobes.Is_Empty then "; my body file has no per-finger tips, it has to be measured once from scratch" else "") & ")");
+   if G.Lobes.Is_Empty then
+      Note := S ("I have no measured fingertips in this eye (my body file has no per-finger tips; they have to be measured once from scratch)");
       return;
    end if;
-   H := Contact.Search.Two_Pads (G.Lobes (0).Tip, G.Lobes (1).Tip, Long_Float'Min (G.Lobes (0).Wide, G.Lobes (1).Wide),
-                                 Long_Float'Max (G.Lobes (0).Thin, G.Lobes (1).Thin), Long_Float'Max (G.Tip_Sd, Tol_P));
+   --  手 = 这只眼里量到的每一瓣(尖、指肚宽、手指厚),一瓣不少;落位的误差 = 尖的误差和这只手走一档里大的那个
+   declare
+      Ls : Contact.Search.Lobe_In_Vectors.Vector;
+   begin
+      for Lg of G.Lobes loop
+         Ls.Append (Contact.Search.Lobe_In'(Tip => Lg.Tip, Width => Lg.Wide, Thick => Lg.Thin));
+      end loop;
+      H := Contact.Search.From_Lobes (Ls, Long_Float'Max (G.Tip_Sd, Tol_P));
+   end;
    if not H.Valid then
       Note := S ("my measured fingers do not make a hand I can lay contacts out with: " & To_String (H.Why));
       return;
@@ -108,7 +114,8 @@ begin
       end loop;
    end;
    --  只要挑中的那一组(量到的摩擦上限在搜索里就用上了;往下伸被挡住会重挑)
-   Contact.Search.Plan (Surf, Around, C.Sil_Pitch, C.Sil_Err, Up, Sp, H, Mu_Lb, G.Gap, Reach'Access, 1, Found, St, Want => C.Want_Move, Mu_Ub => Mu_Ub);
+   Contact.Search.Plan (Surf, Around, C.Sil_Pitch, C.Sil_Err, Up, Sp, H, Mu_Lb, G.Gap, Reach'Access, 1, Found, St,
+                        Want => C.Want_Move, Mu_Ub => Mu_Ub);
    declare
       Asked : constant String := (if C.Want_Move.Given then Motion_Words (C.Want_Move.Move)
                                   else "coming off the surface it lies on together with my hand (you did not say how it should move)");
@@ -116,7 +123,7 @@ begin
    begin
       if Found.Is_Empty then
          Note := S ("from " & Codec.Img (Natural (Surf.Length)) & " surface points of " & To_String (Name) & " (top outline from eye " & Codec.Img (Natural (Integer'Max (0, C.Sil_Cam)))
-                    & " pulled straight down to the surface it lies on, which assumes solid upright sides) I tried " & Codec.Img (St.Poses) & " placements of my hand for "
+                    & " extended straight down to the surface it lies on, which assumes solid upright sides) I tried " & Codec.Img (St.Poses) & " placements of my hand for "
                     & Asked & ": "
                     & (if St.In_Way then "that way goes into the surface it lies on, so no contacts can do it; "
                        else Codec.Img (St.Air) & " close on nothing, " & Codec.Img (St.Landed_On) & " put a finger down on it, " & Codec.Img (St.Blocked) & " hit something beside it, "
@@ -131,7 +138,7 @@ begin
                  & ", sides assumed solid and upright down to the surface); best: contacts " & Len (C, Pick.Width) & " apart, coming in "
                  & Codec.Fmt (Arccos (Long_Float'Max (-1.0, Long_Float'Min (1.0, -(Pick.Approach (0) * Up (0) + Pick.Approach (1) * Up (1) + Pick.Approach (2) * Up (2))))), 2)
                  & " rad from straight down"
-                 & ", closing " & Len (C, Pick.Pre) & " before going down; my contacts together press on it with at least " & Codec.Fmt (Pick.Squeeze, 2)
+                 & ", closing " & Len (C, Pick.Pre) & " before going down; the normal forces of my contacts add up to at least " & Codec.Fmt (Pick.Squeeze, 2)
                  & " times its weight in the worst case (friction taken as " & Codec.Fmt (St.Mu_Ref, 2) & " against my fingers and against the surface alike)"
                  & "; to come off the surface with my hand it needs friction at least " & Codec.Fmt (Pick.Mu_Worst, 2) & " in the worst case"
                  & (if Mu_Lb > 0.0 then " (" & To_String (Name) & " has come with my hand at " & Codec.Fmt (Mu_Lb, 2) & ")" else " (friction on it not measured yet)"));

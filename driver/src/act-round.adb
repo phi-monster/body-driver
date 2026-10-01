@@ -1792,12 +1792,22 @@ begin
             if Pick.Pre > 0.0 then
                declare
                   Hk : constant Zone.Hand := Hand_Of (C, Arm, Say.Grip_K);
-                  Half : constant Long_Float := 0.5 * (Geom.Norm ([G.Lobes (1).Tip (0) - G.Lobes (0).Tip (0), G.Lobes (1).Tip (1) - G.Lobes (0).Tip (1),
-                                                                     G.Lobes (1).Tip (2) - G.Lobes (0).Tip (2)]) - Long_Float'Max (G.Lobes (0).Thin, G.Lobes (1).Thin));
-                  Frac : constant Long_Float := (if Half > 0.0 then Long_Float'Min (1.0, Pick.Pre / Half) else 0.0);
+                  --  每一瓣合到头能走多远(同接触集建手:朝全部瓣尖的中心、留半个手指厚),几瓣一起合 ⇒ 按走得最短的那一瓣算这一下合了几成
+                  Mid : Geom.V3 := [others => 0.0];
+                  Half : Long_Float := Long_Float'Last;
+                  Frac : Long_Float;
                   Steps_J : Natural;
                   Reading : Long_Float;
                begin
+                  for Lg of G.Lobes loop
+                     for K in 0 .. 2 loop
+                        Mid (K) := Mid (K) + Lg.Tip (K) / Long_Float (G.Lobes.Length);
+                     end loop;
+                  end loop;
+                  for Lg of G.Lobes loop
+                     Half := Long_Float'Min (Half, Geom.Norm ([Mid (0) - Lg.Tip (0), Mid (1) - Lg.Tip (1), Mid (2) - Lg.Tip (2)]) - 0.5 * Lg.Thin);
+                  end loop;
+                  Frac := (if Half > 0.0 and then Half < Long_Float'Last then Long_Float'Min (1.0, Pick.Pre / Half) else 0.0);
                   Move_Jaw (L, C, F, Arm, Hk.Open_Reading + Frac * (Hk.Empty_Close - Hk.Open_Reading), Steps_J, Reading, Say.Grip_K);
                   Put_Line ("[身] ✋ 下去之前每一块先合 " & Mm (Pick.Pre) & "(行程的 " & Codec.Fmt (100.0 * Frac, 0) & "%;读数按张开、合空两头线性换算)⇒ 读数 " & Codec.Fmt (Reading, 3));
                end;

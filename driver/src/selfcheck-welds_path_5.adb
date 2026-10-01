@@ -25,6 +25,7 @@ procedure Welds_Path_5 is
    package Wr renames Contact.Wrench;
    package Se renames Contact.Search;
    use type Wr.Why_Kind;
+   use type Se.Pad;
    Mu : constant Long_Float := 0.5;
    Pitch : constant Long_Float := 0.002;
    Up : constant Contact.V3 := [0.0, 0.0, 1.0];
@@ -248,20 +249,26 @@ procedure Welds_Path_5 is
    end Searched;
 
    --  两瓣(同自检里 Contact.Grasp 那几条的手):两个尖在眼前 9 cm、相距 9 cm,手指沿合拢方向厚 1 cm,指肚宽 1.5 cm,手落位的误差 2 mm
-   Two : constant Se.Hand_Model := Se.Two_Pads ([-0.045, 0.0, -0.09], [0.045, 0.0, -0.09], 0.015, 0.01, 0.002);
-   --  五指:五个尖在眼前 9 cm 的一圈上(半径 4.5 cm),各自朝圆心合(一个自由度,一起合),指肚宽 1.5 cm、手指厚 1 cm
+   function Two_Hand return Se.Hand_Model is
+      Ls : Se.Lobe_In_Vectors.Vector;
+   begin
+      Ls.Append (Se.Lobe_In'(Tip => [-0.045, 0.0, -0.09], Width => 0.015, Thick => 0.01));
+      Ls.Append (Se.Lobe_In'(Tip => [0.045, 0.0, -0.09], Width => 0.015, Thick => 0.01));
+      return Se.From_Lobes (Ls, 0.002);
+   end Two_Hand;
+   Two : constant Se.Hand_Model := Two_Hand;
+   --  五指:五个尖在眼前 9 cm 的一圈上(半径 4.5 cm),各自朝圆心合(一个自由度,一起合),指肚宽 1.5 cm、手指厚 1 cm —— 同一个 From_Lobes
    function Five_Hand return Se.Hand_Model is
-      H : Se.Hand_Model;
+      Ls : Se.Lobe_In_Vectors.Vector;
    begin
       for K in 0 .. 4 loop
          declare
             A : constant Long_Float := 2.0 * Ada.Numerics.Pi * Long_Float (K) / 5.0;
          begin
-            H.Pads.Append (Se.Pad'(Tip => [0.045 * Cos (A), 0.045 * Sin (A), -0.09], Dir => [-Cos (A), -Sin (A), 0.0], Travel => 0.045 - 0.005, Width => 0.015, Thick => 0.01));
+            Ls.Append (Se.Lobe_In'(Tip => [0.045 * Cos (A), 0.045 * Sin (A), -0.09], Width => 0.015, Thick => 0.01));
          end;
       end loop;
-      H.Tool := [0.0, 0.0, -1.0]; H.Reach_In := 0.09; H.Pos_Err := 0.002; H.Valid := True;
-      return H;
+      return Se.From_Lobes (Ls, 0.002);
    end Five_Hand;
    Five : constant Se.Hand_Model := Five_Hand;
    Bar_P : constant Contact.V3_Vectors.Vector := Slab (-0.012, 0.012, -0.102, 0.102, 0.01, Bar'Access);
@@ -353,15 +360,34 @@ begin
    Searched ("圆柱 直径 4 cm", Disc_P, Five, "五指", False);
    Searched ("条 2 × 20 cm", Bar_P, Five, "五指", False);
    Searched ("平放的剪刀", Sc_P, Five, "五指", False);
-   --  没有手指(一块能合的都没有):合拢这一条路上一组都搜不出来,照实交空的(胳膊那条路接进同一个搜索是下一件)
+   --  没有手指 / 只有一瓣:建手照实说为什么不成(瓣数不认,同一个 From_Lobes);合拢这一条路上一组都搜不出来,照实交空的(胳膊那条路接进同一个搜索是下一件)
    declare
-      H0 : Se.Hand_Model;
+      Ls0, Ls1 : Se.Lobe_In_Vectors.Vector;
+      H0, H1 : Se.Hand_Model;
       Fd : Se.Cand_Vectors.Vector;
       St : Se.Plan_Stats;
       None : Contact.V3_Vectors.Vector;
    begin
-      H0.Valid := True; H0.Reach_In := 0.09;
+      Ls1.Append (Se.Lobe_In'(Tip => [0.0, 0.0, -0.09], Width => 0.015, Thick => 0.01));
+      H0 := Se.From_Lobes (Ls0, 0.002);
+      H1 := Se.From_Lobes (Ls1, 0.002);
       Se.Plan (Block_P, None, Pitch, 0.0005, Up, Zero3, H0, Mu, 0.09, Always'Access, 1, Fd, St, Want => (Given => True, Move => Along_X));
-      Check (Fd.Is_Empty and then St.Poses = 0, "接触集搜索·没有手指:合拢这一条路上一组都搜不出来(试了 " & Codec.Img (St.Poses) & " 个手位),照实交空的");
+      Check (not H0.Valid and then not H1.Valid and then Fd.Is_Empty and then St.Poses = 0,
+             "接触集搜索·没有手指:建手说「" & To_String (H0.Why) & "」;只有一瓣说「" & To_String (H1.Why) & "」;合拢这一条路上一组都搜不出来(试了 "
+             & Codec.Img (St.Poses) & " 个手位),照实交空的");
+   end;
+   --  两瓣的旧写法(Two_Pads)和一串瓣的 From_Lobes 建出来的手一模一样(主代理的旧焊点还在用 Two_Pads)
+   declare
+      Old : constant Se.Hand_Model := Se.Two_Pads ([-0.045, 0.0, -0.09], [0.045, 0.0, -0.09], 0.015, 0.01, 0.002);
+      Same : Boolean := Old.Valid and then Two.Valid and then Natural (Old.Pads.Length) = Natural (Two.Pads.Length) and then Old.Reach_In = Two.Reach_In;
+   begin
+      if Same then
+         for I in 0 .. Natural (Old.Pads.Length) - 1 loop
+            if Old.Pads (I) /= Two.Pads (I) then
+               Same := False;
+            end if;
+         end loop;
+      end if;
+      Check (Same, "接触集建手:两瓣的旧写法和一串瓣的写法建出来的手逐位相同(各块的尖、合拢方向、行程、宽、厚)");
    end;
 end Welds_Path_5;

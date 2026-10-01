@@ -30,9 +30,17 @@ package Contact.Search is
       Valid : Boolean := False;
       Why : Ada.Strings.Unbounded.Unbounded_String;   --  量不成时照实说为什么
    end record;
-   --  两块相向合的手(x5 这种):两块的尖都碰桌面量过(碰到的是手指底下正中那一点)⇒ 两块沿两个尖的连线相向走;
-   --  指肚宽、手指沿合拢方向多厚都量过(同一种量法:那一瓣在指尖那一截的像素宽 × 深度 ÷ 焦距)⇒ 碰东西的那一面在尖往里半个手指厚处,
-   --  两面之间的空各走一半
+   --  量出来的手(一瓣一条,瓣数不认):每一瓣的尖(张开时碰东西的那一面在尖上的那一点;碰桌面量的)、指肚宽、手指沿合拢方向多厚
+   --  (同一种量法:那一瓣在指尖那一截的像素宽 × 深度 ÷ 焦距)。合拢那一路量出来以前按"每一瓣朝全部瓣尖的中心合"
+   --  (两瓣时就是沿两个尖的连线相向合;这是假设,说出来):碰东西的那一面在尖往中心半个手指厚处,合到头 = 走到中心再留半个手指厚。
+   --  一瓣都没有 = 这只眼里没有手指;一瓣(或几瓣的尖重合)= 没有可以相向合的 —— 都照实说为什么
+   type Lobe_In is record
+      Tip : V3 := [others => 0.0];
+      Width, Thick : Long_Float := 0.0;
+   end record;
+   package Lobe_In_Vectors is new Ada.Containers.Vectors (Natural, Lobe_In);
+   function From_Lobes (Ls : Lobe_In_Vectors.Vector; Pos_Err : Long_Float) return Hand_Model;
+   --  两瓣的旧写法 = From_Lobes 两个尖、同一个宽和厚(只剩主代理 selfcheck.adb 里 Contact.Grasp 那几条旧焊点在用;合并时改成 From_Lobes、删掉它)
    function Two_Pads (Tip_A, Tip_B : V3; Width, Thick, Pos_Err : Long_Float) return Hand_Model;
    --  这只手没量全 ⇒ 不成立,照实说
    function Not_Measured (Why : String) return Hand_Model;
