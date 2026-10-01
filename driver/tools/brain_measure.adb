@@ -3,10 +3,16 @@
 --  request is the one the driver sends.
 --
 --    brain_measure keyboard HOST:PORT QUESTIONS.json REPEATS OUT.jsonl
---       Asks every question REPEATS times on every keyboard it names and
---       writes one line per answer: how reading ended, the kept program,
---       and whether its first stretch says what the task asks. REPEATS 0
---       prints each prompt instead of asking.
+--       Asks every question REPEATS times on every keyboard it names, through
+--       the driver's client, and writes one line per answer: how reading
+--       ended, the kept program, how many stretches it asks for, and whether
+--       its first stretch says what the task asks. REPEATS 0 prints each
+--       prompt instead of asking.
+--    brain_measure truncation HOST:PORT QUESTIONS.json REPEATS OUT.jsonl
+--       The same questions, each answer read to its end (the service's own
+--       end, or its token limit), with the driver's verdict evaluated on
+--       every event: where the driver would have stopped reading and what it
+--       would have kept, against where and how the answer really ended.
 --    brain_measure stream HOST:PORT QUESTIONS.json INDEX KEYBOARD LIMIT
 --       One answer printed as it streams, with the driver's verdict.
 --    brain_measure where HOST:PORT IMAGE.ppm NAME...
@@ -54,6 +60,7 @@ procedure Brain_Measure is
    use type Driver.Brain.Programs.Statement_Kind;
    use type Driver.Brain.Programs.Constraint_Kind;
    use type Driver.Action.Relation;
+
 
    function Slurp (Path : String) return String is
       use Ada.Streams.Stream_IO;
@@ -193,113 +200,210 @@ procedure Brain_Measure is
       return False;
    end Right;
 
-   procedure Keyboard_Run is
+   --  One question on one keyboard: the prompt and the picture as the round
+   --  composes them.
+   type Setting is record
+      Keys    : Driver.Brain.Keyboard.Keyboard;
+      Prompt  : Unbounded_String;
+      Picture : Driver.Images.Image;
+   end record;
+
+   function Setting_Of (Doc : Driver.Json.Document; N : Driver.Json.Node; Board : String) return Setting is
+      Eyes   : constant Driver.Json.Node := Driver.Json.Lookup (Doc, N, "eyes");
+      Mounts : constant Driver.Json.Node := Driver.Json.Lookup (Doc, N, "mounts");
+      Images : Driver.Observations.Image_Vectors.Vector;
+      Facts  : Driver.Brain.Round.Facts;
+      K      : constant Driver.Brain.Keyboard.Keyboard := Keys (Board, Driver.Json.Count (Doc, Eyes));
+   begin
+      for E in 1 .. Driver.Json.Count (Doc, Eyes) loop
+         Images.Append (Read_Ppm (Driver.Json.Text (Doc, Driver.Json.Element (Doc, Eyes, E))));
+         declare
+            M : constant String := Driver.Json.Text (Doc, Driver.Json.Element (Doc, Mounts, E));
+         begin
+            Facts.Eyes.Append
+              (Driver.Brain.Round.Eye_Facts'
+                 (Eye   => Driver.Observations.Camera_Id (E),
+                  Mount => (if M = "fixed" then (Kind => Driver.Robot.World_Fixed)
+                            else (Kind => Driver.Robot.Arm_Carried,
+                                  Arm  => Driver.Robot.Arm_Id'Value (M (M'First + 4 .. M'Last))))));
+         end;
+         if E > 1 then
+            Facts.Strip.Append (Driver.Observations.Camera_Id (E));
+         end if;
+      end loop;
+      Facts.View := 1;
+      Facts.Happened := To_Unbounded_String (Driver.Brain.Round.First_Round);
+      Facts.Instruction := To_Unbounded_String (Driver.Json.Text (Doc, Driver.Json.Lookup (Doc, N, "task")));
+      Facts.Sheet := To_Unbounded_String (Driver.Brain.Keyboard.Sheet (K));
+      declare
+         function Image_Of (E : Driver.Brain.Names.Eye_Id) return Driver.Images.Image is (Images (E));
+      begin
+         return (Keys    => K,
+                 Prompt  => To_Unbounded_String (Driver.Brain.Round.Prompt (Facts)),
+                 Picture => Driver.Brain.Pictures.Compose (Images (1), Facts.Strip, Image_Of'Access));
+      end;
+   end Setting_Of;
+
+   --  Every question of the file on every keyboard it names, Repeats times.
+   procedure Each_Answer
+     (Path    : String;
+      Repeats : Natural;
+      Visit   : not null access procedure
+        (Doc : Driver.Json.Document; N : Driver.Json.Node; Board : String; Rep : Positive; S : Setting))
+   is
       Doc : Driver.Json.Document;
       Ok  : Boolean;
       Why : Unbounded_String;
-      Out_File : Ada.Text_IO.File_Type;
-      Repeats  : constant Natural := Natural'Value (Argument (4));
    begin
-      Configure (Argument (2));
-      Driver.Json.Parse (Slurp (Argument (3)), Doc, Ok, Why);
+      Driver.Json.Parse (Slurp (Path), Doc, Ok, Why);
       if not Ok then
          Ada.Text_IO.Put_Line ("questions: " & To_String (Why));
          return;
       end if;
-      Ada.Text_IO.Create (Out_File, Ada.Text_IO.Append_File, Argument (5));
       for Q in 1 .. Driver.Json.Count (Doc, Driver.Json.Root (Doc)) loop
          declare
             N      : constant Driver.Json.Node := Driver.Json.Element (Doc, Driver.Json.Root (Doc), Q);
-            function Get (K : String) return String is (Driver.Json.Text (Doc, Driver.Json.Lookup (Doc, N, K)));
-            Eyes   : constant Driver.Json.Node := Driver.Json.Lookup (Doc, N, "eyes");
-            Mounts : constant Driver.Json.Node := Driver.Json.Lookup (Doc, N, "mounts");
             Boards : constant Driver.Json.Node := Driver.Json.Lookup (Doc, N, "keyboards");
-            Images : Driver.Observations.Image_Vectors.Vector;
-            Facts  : Driver.Brain.Round.Facts;
          begin
-            for E in 1 .. Driver.Json.Count (Doc, Eyes) loop
-               Images.Append (Read_Ppm (Driver.Json.Text (Doc, Driver.Json.Element (Doc, Eyes, E))));
+            for B in 1 .. Driver.Json.Count (Doc, Boards) loop
                declare
-                  M : constant String := Driver.Json.Text (Doc, Driver.Json.Element (Doc, Mounts, E));
+                  Board : constant String := Driver.Json.Text (Doc, Driver.Json.Element (Doc, Boards, B));
+                  S     : constant Setting := Setting_Of (Doc, N, Board);
                begin
-                  Facts.Eyes.Append
-                    (Driver.Brain.Round.Eye_Facts'
-                       (Eye   => Driver.Observations.Camera_Id (E),
-                        Mount => (if M = "fixed" then (Kind => Driver.Robot.World_Fixed)
-                                  else (Kind => Driver.Robot.Arm_Carried,
-                                        Arm  => Driver.Robot.Arm_Id'Value (M (M'First + 4 .. M'Last))))));
+                  if Repeats = 0 then
+                     Ada.Text_IO.Put_Line (To_String (S.Prompt));
+                  end if;
+                  for Rep in 1 .. Repeats loop
+                     Visit (Doc, N, Board, Rep, S);
+                  end loop;
                end;
-               if E > 1 then
-                  Facts.Strip.Append (Driver.Observations.Camera_Id (E));
-               end if;
             end loop;
-            Facts.View := 1;
-            Facts.Happened := To_Unbounded_String (Driver.Brain.Round.First_Round);
-            Facts.Instruction := To_Unbounded_String (Get ("task"));
-            declare
-               function Image_Of (E : Driver.Brain.Names.Eye_Id) return Driver.Images.Image is (Images (E));
-               Picture : constant Driver.Images.Image :=
-                 Driver.Brain.Pictures.Compose (Images (1), Facts.Strip, Image_Of'Access);
-            begin
-               for B in 1 .. Driver.Json.Count (Doc, Boards) loop
-                  declare
-                     Board : constant String := Driver.Json.Text (Doc, Driver.Json.Element (Doc, Boards, B));
-                     K     : constant Driver.Brain.Keyboard.Keyboard := Keys (Board, Driver.Json.Count (Doc, Eyes));
-                  begin
-                     Facts.Sheet := To_Unbounded_String (Driver.Brain.Keyboard.Sheet (K));
-                     if Repeats = 0 then
-                        Ada.Text_IO.Put_Line (Driver.Brain.Round.Prompt (Facts));
-                     end if;
-                     for Rep in 1 .. Repeats loop
-                        declare
-                           A : constant Driver.Brain.Service.Answer :=
-                             Driver.Brain.Service.Write_Program (Picture, Driver.Brain.Round.Prompt (Facts), K);
-                           Is_Right : constant Boolean :=
-                             Right (Get ("kind"), Get ("thing"), Get ("other"), To_String (A.Program));
-                        begin
-                           Ada.Text_IO.Put_Line
-                             (Out_File,
-                              "{""id"":" & Driver.Json.Quote (Get ("id")) & ",""kind"":" & Driver.Json.Quote (Get ("kind"))
-                              & ",""keyboard"":" & Driver.Json.Quote (Board) & ",""rep"":" & Driver.Log.Image (Rep)
-                              & ",""how"":" & Driver.Json.Quote (Driver.Brain.Service.Image (A.How))
-                              & ",""why"":" & Driver.Json.Quote (To_String (A.Why))
-                              & ",""seconds"":" & Driver.Log.Image (Driver.Real (A.Seconds), 1)
-                              & ",""right"":" & (if Is_Right then "true" else "false")
-                              & ",""stretches"":" & Driver.Log.Image (Stretches (To_String (A.Program)))
-                              & ",""program"":" & Driver.Json.Quote (To_String (A.Program)) & "}");
-                           Ada.Text_IO.Flush (Out_File);
-                           Ada.Text_IO.Put_Line (Get ("id") & " " & Board & Rep'Image & " "
-                                                 & Driver.Brain.Service.Image (A.How) & " "
-                                                 & (if Is_Right then "RIGHT" else "-") & " | "
-                                                 & Ada.Strings.Fixed.Head (To_String (A.Program), 160));
-                        end;
-                     end loop;
-                  end;
-               end loop;
-            end;
          end;
       end loop;
+   end Each_Answer;
+
+   function Head_Of (Doc : Driver.Json.Document; N : Driver.Json.Node; Board : String; Rep : Positive) return String is
+     ("{""id"":" & Driver.Json.Quote (Driver.Json.Text (Doc, Driver.Json.Lookup (Doc, N, "id")))
+      & ",""kind"":" & Driver.Json.Quote (Driver.Json.Text (Doc, Driver.Json.Lookup (Doc, N, "kind")))
+      & ",""keyboard"":" & Driver.Json.Quote (Board) & ",""rep"":" & Driver.Log.Image (Rep));
+
+   function Is_Right (Doc : Driver.Json.Document; N : Driver.Json.Node; Program : String) return Boolean is
+     (Right (Driver.Json.Text (Doc, Driver.Json.Lookup (Doc, N, "kind")),
+             Driver.Json.Text (Doc, Driver.Json.Lookup (Doc, N, "thing")),
+             Driver.Json.Text (Doc, Driver.Json.Lookup (Doc, N, "other")), Program));
+
+   Out_File : Ada.Text_IO.File_Type;
+
+   procedure Ask_Keyboard
+     (Doc : Driver.Json.Document; N : Driver.Json.Node; Board : String; Rep : Positive; S : Setting)
+   is
+      A    : constant Driver.Brain.Service.Answer :=
+        Driver.Brain.Service.Write_Program (S.Picture, To_String (S.Prompt), S.Keys);
+      Good : constant Boolean := Is_Right (Doc, N, To_String (A.Program));
+   begin
+      Ada.Text_IO.Put_Line
+        (Out_File, Head_Of (Doc, N, Board, Rep)
+         & ",""how"":" & Driver.Json.Quote (Driver.Brain.Service.Image (A.How))
+         & ",""why"":" & Driver.Json.Quote (To_String (A.Why))
+         & ",""seconds"":" & Driver.Log.Image (Driver.Real (A.Seconds), 1)
+         & ",""right"":" & (if Good then "true" else "false")
+         & ",""stretches"":" & Driver.Log.Image (Stretches (To_String (A.Program)))
+         & ",""program"":" & Driver.Json.Quote (To_String (A.Program)) & "}");
+      Ada.Text_IO.Flush (Out_File);
+      Ada.Text_IO.Put_Line (Board & Rep'Image & " " & Driver.Brain.Service.Image (A.How) & " "
+                            & (if Good then "RIGHT" else "-") & " | "
+                            & Ada.Strings.Fixed.Head (To_String (A.Program), 160));
+   end Ask_Keyboard;
+
+   --  The answer read to its end, with the verdict the driver would have
+   --  reached after every event.
+   procedure Ask_Truncation
+     (Doc : Driver.Json.Document; N : Driver.Json.Node; Board : String; Rep : Positive; S : Setting)
+   is
+      Text, Finish : Unbounded_String;
+      Started      : constant Duration := Driver.Clock.Seconds;
+      Stopped      : Boolean := False;
+      Cut          : Driver.Brain.Runaway.Verdict;
+      Cut_At       : Duration := 0.0;
+      Cut_Chars    : Natural := 0;
+      Names        : constant Driver.Brain.Keyboard.Word_Vectors.Vector := Driver.Brain.Keyboard.Name_Words (S.Keys);
+
+      procedure On_Text (Chunk : String; Stop : out Boolean) is
+      begin
+         Stop := False;
+         Driver.Brain.Service.Read_Event (Chunk, Text, Finish);
+         if not Stopped then
+            declare
+               V : constant Driver.Brain.Runaway.Verdict := Driver.Brain.Runaway.Judge (To_String (Text), Names, False);
+            begin
+               if Driver.Brain.Runaway.Stop_Reading (V) then
+                  Stopped := True;
+                  Cut := V;
+                  Cut_At := Driver.Clock.Seconds - Started;
+                  Cut_Chars := Length (Text);
+               end if;
+            end;
+         end if;
+      end On_Text;
+
+      R : constant Driver.Services.Reply := Driver.Services.Call_Streaming
+        (Driver.Services.Brain, "/v1/chat/completions",
+         Driver.Brain.Service.Program_Request (Driver.Brain.Pictures.Data_Url (S.Picture), To_String (S.Prompt),
+                                               Driver.Brain.Keyboard.Grammar (S.Keys)),
+         On_Text'Access);
+      Ended_At : constant Duration := Driver.Clock.Seconds - Started;
+      Whole    : constant Driver.Brain.Runaway.Verdict := Driver.Brain.Runaway.Judge (To_String (Text), Names, True);
+      Kept     : constant String :=
+        Driver.Brain.Runaway.First_Lines (To_String (Text), (if Stopped then Cut.Keep else Whole.Keep));
+      Full     : constant String := Driver.Brain.Runaway.First_Lines (To_String (Text), Whole.Keep);
+   begin
+      Ada.Text_IO.Put_Line
+        (Out_File, Head_Of (Doc, N, Board, Rep)
+         & ",""ok"":" & (if R.Ok then "true" else "false")
+         & ",""cut"":" & Driver.Json.Quote (if not Stopped then "none" elsif Cut.Complete then "complete" else "ran away")
+         & ",""why"":" & Driver.Json.Quote (To_String (Cut.Why))
+         & ",""cut_seconds"":" & Driver.Log.Image (Driver.Real (Cut_At), 2)
+         & ",""cut_chars"":" & Driver.Log.Image (Cut_Chars)
+         & ",""end_seconds"":" & Driver.Log.Image (Driver.Real (Ended_At), 2)
+         & ",""end_chars"":" & Driver.Log.Image (Length (Text))
+         & ",""finish"":" & Driver.Json.Quote (To_String (Finish))
+         & ",""kept_right"":" & (if Is_Right (Doc, N, Kept) then "true" else "false")
+         & ",""kept_stretches"":" & Driver.Log.Image (Stretches (Kept))
+         & ",""full_stretches"":" & Driver.Log.Image (Stretches (Full))
+         & ",""kept"":" & Driver.Json.Quote (Kept)
+         & ",""text"":" & Driver.Json.Quote (To_String (Text)) & "}");
+      Ada.Text_IO.Flush (Out_File);
+      Ada.Text_IO.Put_Line (Board & Rep'Image & " cut "
+                            & (if not Stopped then "none" elsif Cut.Complete then "complete" else "ran away")
+                            & " at " & Driver.Log.Image (Driver.Real (Cut_At), 1) & " s, ended "
+                            & Driver.Log.Image (Driver.Real (Ended_At), 1) & " s (" & To_String (Finish) & ")");
+   end Ask_Truncation;
+
+   procedure Over_Questions (Visit : not null access procedure
+                               (Doc : Driver.Json.Document; N : Driver.Json.Node; Board : String; Rep : Positive;
+                                S : Setting)) is
+   begin
+      Configure (Argument (2));
+      Ada.Text_IO.Create (Out_File, Ada.Text_IO.Append_File, Argument (5));
+      Each_Answer (Argument (3), Natural'Value (Argument (4)), Visit);
       Ada.Text_IO.Close (Out_File);
-   end Keyboard_Run;
+   end Over_Questions;
 
    --  One question, one keyboard: the answer printed as it streams, with the
    --  driver's verdict on it, until the verdict stops reading or LIMIT
    --  characters arrived (the limit is the measurement's, never the driver's).
    procedure Stream_Run is
-      Doc : Driver.Json.Document;
-      Ok  : Boolean;
-      Why : Unbounded_String;
+      Doc   : Driver.Json.Document;
+      Ok    : Boolean;
+      Why   : Unbounded_String;
       Limit : constant Positive := Positive'Value (Argument (6));
    begin
       Configure (Argument (2));
       Driver.Json.Parse (Slurp (Argument (3)), Doc, Ok, Why);
       declare
-         N      : constant Driver.Json.Node := Driver.Json.Element (Doc, Driver.Json.Root (Doc),
-                                                                    Positive'Value (Argument (4)));
-         Eyes   : constant Driver.Json.Node := Driver.Json.Lookup (Doc, N, "eyes");
-         Images : Driver.Observations.Image_Vectors.Vector;
-         Facts  : Driver.Brain.Round.Facts;
-         K      : constant Driver.Brain.Keyboard.Keyboard := Keys (Argument (5), Driver.Json.Count (Doc, Eyes));
+         S : constant Setting :=
+           Setting_Of (Doc, Driver.Json.Element (Doc, Driver.Json.Root (Doc), Positive'Value (Argument (4))),
+                       Argument (5));
          Text, Finish : Unbounded_String;
          Started : constant Duration := Driver.Clock.Seconds;
 
@@ -307,7 +411,7 @@ procedure Brain_Measure is
             V : Driver.Brain.Runaway.Verdict;
          begin
             Driver.Brain.Service.Read_Event (Chunk, Text, Finish);
-            V := Driver.Brain.Runaway.Judge (To_String (Text), Driver.Brain.Keyboard.Name_Words (K), Final => False);
+            V := Driver.Brain.Runaway.Judge (To_String (Text), Driver.Brain.Keyboard.Name_Words (S.Keys), False);
             Stop := Driver.Brain.Runaway.Stop_Reading (V) or else Length (Text) >= Limit;
             if Stop then
                Ada.Text_IO.Put_Line (To_String (Text));
@@ -317,42 +421,21 @@ procedure Brain_Measure is
                                         else "limit of the measurement") & " " & To_String (V.Why));
             end if;
          end On_Text;
+
+         R : constant Driver.Services.Reply := Driver.Services.Call_Streaming
+           (Driver.Services.Brain, "/v1/chat/completions",
+            Driver.Brain.Service.Program_Request (Driver.Brain.Pictures.Data_Url (S.Picture), To_String (S.Prompt),
+                                                  Driver.Brain.Keyboard.Grammar (S.Keys)),
+            On_Text'Access);
       begin
-         for E in 1 .. Driver.Json.Count (Doc, Eyes) loop
-            Images.Append (Read_Ppm (Driver.Json.Text (Doc, Driver.Json.Element (Doc, Eyes, E))));
-            Facts.Eyes.Append
-              (Driver.Brain.Round.Eye_Facts'(Eye   => Driver.Observations.Camera_Id (E),
-                                             Mount => (if E = 1 then (Kind => Driver.Robot.World_Fixed)
-                                                       else (Kind => Driver.Robot.Arm_Carried,
-                                                             Arm  => Driver.Robot.Arm_Id (E - 1)))));
-            if E > 1 then
-               Facts.Strip.Append (Driver.Observations.Camera_Id (E));
-            end if;
-         end loop;
-         Facts.View := 1;
-         Facts.Happened := To_Unbounded_String (Driver.Brain.Round.First_Round);
-         Facts.Instruction := To_Unbounded_String
-           (Driver.Json.Text (Doc, Driver.Json.Lookup (Doc, N, "task")));
-         Facts.Sheet := To_Unbounded_String (Driver.Brain.Keyboard.Sheet (K));
-         declare
-            function Image_Of (E : Driver.Brain.Names.Eye_Id) return Driver.Images.Image is (Images (E));
-            R : constant Driver.Services.Reply := Driver.Services.Call_Streaming
-              (Driver.Services.Brain, "/v1/chat/completions",
-               Driver.Brain.Service.Program_Request
-                 (Driver.Brain.Pictures.Data_Url
-                    (Driver.Brain.Pictures.Compose (Images (1), Facts.Strip, Image_Of'Access)),
-                  Driver.Brain.Round.Prompt (Facts), Driver.Brain.Keyboard.Grammar (K)),
-               On_Text'Access);
-         begin
-            if not R.Ok then
-               Ada.Text_IO.Put_Line ("failed: " & To_String (R.Why));
-            elsif Length (Finish) > 0 then
-               Ada.Text_IO.Put_Line (To_String (Text));
-               Ada.Text_IO.Put_Line ("-- " & Driver.Log.Image (Driver.Real (Driver.Clock.Seconds - Started), 1)
-                                     & " s, " & Driver.Log.Image (Length (Text)) & " characters: the service ended it ("
-                                     & To_String (Finish) & ")");
-            end if;
-         end;
+         if not R.Ok then
+            Ada.Text_IO.Put_Line ("failed: " & To_String (R.Why));
+         elsif Length (Finish) > 0 then
+            Ada.Text_IO.Put_Line (To_String (Text));
+            Ada.Text_IO.Put_Line ("-- " & Driver.Log.Image (Driver.Real (Driver.Clock.Seconds - Started), 1)
+                                  & " s, " & Driver.Log.Image (Length (Text)) & " characters: the service ended it ("
+                                  & To_String (Finish) & ")");
+         end if;
       end;
    end Stream_Run;
 
@@ -380,14 +463,16 @@ procedure Brain_Measure is
 
 begin
    if Argument_Count >= 5 and then Argument (1) = "keyboard" then
-      Keyboard_Run;
+      Over_Questions (Ask_Keyboard'Access);
+   elsif Argument_Count >= 5 and then Argument (1) = "truncation" then
+      Over_Questions (Ask_Truncation'Access);
    elsif Argument_Count >= 6 and then Argument (1) = "stream" then
       Stream_Run;
    elsif Argument_Count >= 4 and then Argument (1) = "where" then
       Where_Run;
    else
-      Ada.Text_IO.Put_Line ("usage: brain_measure keyboard HOST:PORT QUESTIONS.json REPEATS OUT.jsonl"
-                            & " | where HOST:PORT IMAGE.ppm NAME...");
+      Ada.Text_IO.Put_Line ("usage: brain_measure keyboard|truncation HOST:PORT QUESTIONS.json REPEATS OUT.jsonl"
+                            & " | stream HOST:PORT QUESTIONS.json INDEX KEYBOARD LIMIT | where HOST:PORT IMAGE.ppm NAME...");
       Set_Exit_Status (Failure);
    end if;
 end Brain_Measure;

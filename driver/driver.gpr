@@ -6,7 +6,7 @@ project Driver is
    for Exec_Dir use "bin";
    for Create_Missing_Dirs use "True";
    for Main use ("body_driver.adb", "selftest.adb", "replay.adb", "frame.adb", "score.adb", "numbers.adb", "deadcode.adb", "proxy.adb",
-                 "feed.adb", "brain_measure.adb");
+                 "feed.adb", "brain_measure.adb", "fake_brain.adb");
 
    package Compiler is
       for Default_Switches ("Ada") use
