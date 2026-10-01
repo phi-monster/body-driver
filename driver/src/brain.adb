@@ -7,6 +7,7 @@ with Sinew;
 with Codec;
 with Json;
 with Http_Client;
+with Ada.Real_Time;
 package body Brain is
 
    --  ── 人当脑 ────────────────────────────────────────────────────────────
@@ -112,8 +113,8 @@ package body Brain is
       return True;
    end Chat;
 
-   function Locate (Host : String; Port : Natural; Word : String; RGB : Buf; W, H : Natural;
-                    Found : out Boolean; X0, Y0, X1, Y1 : out Natural; Err : out Unbounded_String) return Boolean is
+   function Locate_Once (Host : String; Port : Natural; Word : String; RGB : Buf; W, H : Natural;
+                         Found : out Boolean; X0, Y0, X1, Y1 : out Natural; Err : out Unbounded_String) return Boolean is
       NL : constant String := "" & ASCII.LF;
       Prompt : constant String :=
         "Locate what someone would call: " & Word & NL &
@@ -206,13 +207,13 @@ package body Brain is
          end;
          return True;
       end;
-   end Locate;
+   end Locate_Once;
 
-   function Ask (Host : String; Port : Natural; Task_Text, Body_Text, Recent, Grammar, Refused : String;
-                 Rels_Usable, Roles_Usable, Outs_Usable : String;
-                 Cols, Rows, N_Items, N_Cams, N_Arms : Natural; RGB : Buf; W, H : Natural;
-                 Program : out Unbounded_String; Err : out Unbounded_String;
-                 Qtys_Usable : String := "") return Boolean is
+   function Ask_Once (Host : String; Port : Natural; Task_Text, Body_Text, Recent, Grammar, Refused : String;
+                      Rels_Usable, Roles_Usable, Outs_Usable : String;
+                      Cols, Rows, N_Items, N_Cams, N_Arms : Natural; RGB : Buf; W, H : Natural;
+                      Program : out Unbounded_String; Err : out Unbounded_String;
+                      Qtys_Usable : String) return Boolean is
       Cells : constant Natural := Cols * Rows;
       NL : constant String := "" & ASCII.LF;
       Prompt : constant String :=
@@ -270,5 +271,59 @@ package body Brain is
       end if;
       --  受限解码之后 content 本身就是程序(不再包一层 JSON;原来在这里对它做 Json.Parse 会把【每一段】程序都毙掉)
       return Chat (Host, Port, Body_Json, Program, Err);
+   end Ask_Once;
+   --  ── 叫了几次脑(大并行 §2 第 28 条:每个任务报叫了几次脑)──────────────────────────────
+   --  一集 = 对方两次复位之间,用那一集开始时的帧号认(Plug 的 Ep_Seq0);每问一次印一行 [脑],号是这一集里的第几次
+   Ep_Id : Integer := -1;
+   N_Prog, N_Loc : Natural := 0;
+
+   procedure Episode (Id : Natural) is
+   begin
+      if Ep_Id >= 0 and then Id /= Natural (Ep_Id) then
+         Ada.Text_IO.Put_Line ("[脑] 上一集一共叫了脑 " & Codec.Img (N_Prog + N_Loc) & " 次(写程序 " & Codec.Img (N_Prog)
+                               & " 次、问在哪 " & Codec.Img (N_Loc) & " 次)");
+         N_Prog := 0;
+         N_Loc := 0;
+      end if;
+      Ep_Id := Integer (Id);
+   end Episode;
+
+   function Programs_Asked return Natural is (N_Prog);
+   function Locates_Asked return Natural is (N_Loc);
+
+   function Seconds_Since (T0 : Ada.Real_Time.Time) return Long_Float is
+     (Long_Float (Ada.Real_Time.To_Duration (Ada.Real_Time."-" (Ada.Real_Time.Clock, T0))));
+
+   function Locate (Host : String; Port : Natural; Word : String; RGB : Buf; W, H : Natural;
+                    Found : out Boolean; X0, Y0, X1, Y1 : out Natural; Err : out Unbounded_String) return Boolean is
+      T0 : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+      Ok : Boolean;
+   begin
+      N_Loc := N_Loc + 1;
+      Ok := Locate_Once (Host, Port, Word, RGB, W, H, Found, X0, Y0, X1, Y1, Err);
+      Ada.Text_IO.Put_Line ("[脑] 这一集第 " & Codec.Img (N_Prog + N_Loc) & " 次叫脑:问「" & Word & "」在哪一框 · "
+                            & Codec.Fmt (Seconds_Since (T0), 1) & " 秒 · "
+                            & (if not Ok then "没问成:" & To_String (Err)
+                               elsif Found then "框 [" & Codec.Img (X0) & " " & Codec.Img (Y0) & " " & Codec.Img (X1) & " " & Codec.Img (Y1) & "]"
+                               else "它说这里指不出"));
+      return Ok;
+   end Locate;
+
+   function Ask (Host : String; Port : Natural; Task_Text, Body_Text, Recent, Grammar, Refused : String;
+                 Rels_Usable, Roles_Usable, Outs_Usable : String;
+                 Cols, Rows, N_Items, N_Cams, N_Arms : Natural; RGB : Buf; W, H : Natural;
+                 Program : out Unbounded_String; Err : out Unbounded_String;
+                 Qtys_Usable : String := "") return Boolean is
+      T0 : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+      Ok : Boolean;
+   begin
+      N_Prog := N_Prog + 1;
+      Ok := Ask_Once (Host, Port, Task_Text, Body_Text, Recent, Grammar, Refused, Rels_Usable, Roles_Usable, Outs_Usable,
+                      Cols, Rows, N_Items, N_Cams, N_Arms, RGB, W, H, Program, Err, Qtys_Usable);
+      Ada.Text_IO.Put_Line ("[脑] 这一集第 " & Codec.Img (N_Prog + N_Loc) & " 次叫脑:写一段程序 · "
+                            & Codec.Fmt (Seconds_Since (T0), 1) & " 秒 · "
+                            & (if Ok then "交回 " & Codec.Img (Ada.Strings.Unbounded.Count (Program, "" & ASCII.LF)) & " 行" else "没问成:" & To_String (Err)));
+      return Ok;
    end Ask;
+
 end Brain;

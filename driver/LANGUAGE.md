@@ -454,18 +454,23 @@ say <一句话>            done
 
 ### 17.7 名字怎么落到一件东西上
 
-名字是脑的话,身体按下面的顺序认;认不出就照实说是哪一个、为什么,绝不瞎猜(§3.1)。代码:`Plan.Before_Eye` / `Plan.Without_Eye` / `Plan.Same_Pixels` / `Plan.Rebind_Missing`,`Act.Round` 里的 `Bind_Name`。
+名字是脑的话,身体按下面的顺序认;认不出就照实说是哪一个、为什么,绝不瞎猜(§3.1)。代码:`Plan.Before_Eye` / `Plan.Without_Eye` / `Plan.Same_Core` / `Plan.Same_Pixels` / `Plan.Rebind_Missing`,`Act.Round` 里的 `Bind_Name`。
 
 0. 用 `remember … as <名字>` 记下的地方 ⇒ 那一处(见 17.8)。
 1. 这只眼这一帧量到的东西里有一件叫的是同一串字母 ⇒ 就是它。字母 = a–z;粘在一起、拆开、大小写都算同一串:`mintgreenscissors` = `mint green scissors` = `MintGreen Scissors`。
-2. 否则问这只眼"它在哪一框"(脑的原话,一个字不改)。框出来的那一片和这只眼里已经量到的某一件是同一片像素(两块各自身上的那一点都落在对方身上)⇒ 就是那一件,以后都叫这个新名字;不然是新的一件。差一个字母(`scisors`)也由眼来认。
-3. 眼说这只眼里没有它 ⇒ 只按字找:同一串字母,或者整串原样含着以前起过的名字、原样含在以前的名字里,而且只对得上一件 ⇒ 那一件(它在别的眼里,或者身体记着它在哪)。`pick upuntil stuckscissors` 含着 `scissors`,就是它。
+2. 否则问这只眼"它在哪一框"(脑的原话,一个字不改)。框出来的那一片和这只眼里已经量到的某一件是同一片像素(两块各自身上的那一点都落在对方身上)⇒ 就是那一件,以后都叫这个新名字;不然是新的一件。差一个字母(`scisors`)也由眼来认。这只眼说这里没有它 ⇒ 按相机的次序问别的眼,同一问、同一套认法(问眼那句话里答应过的"看不见就照实说,我换一只眼看")。
+3. 哪只眼都说没有它 ⇒ 只按字找:同一串字母,或者多出来的字母全是这一轮名字里打不出的语言词(见下),而且只对得上一件 ⇒ 那一件(它在别的眼里,或者身体记着它在哪)。`scissors upuntil toucheduntil` 多出来的是 `up until touched until`,就是 `scissors`。
 4. 一段程序里的名字全认过一遍以后,头一遍没绑上的再按第 3 步找一次:绑没绑上不随它写在第几行变。
 5. 都不成 ⇒ 绑不上,照实说:眼是怎么答的;按字它不像以前的任何一件,或者像的不止一件(不猜是哪一件);以前起过的名字都有哪些。
 
-按字只认"同一串字母"和"原样含着 / 原样含在里面"。共用一个词不算(`the red ball` 不是 `the red cup`),差几个字母也不按字认(`cap` 不是 `cup`)—— 这两种要么认错、要么交给眼。
+名字里不许是这门语言自己的词,也不许是 `item`(那是身体清单上的记账词):键盘在名字那一格按不出这些词(`Sinew.Name_Forbidden` 就是那张表,和键盘同一份)。所以受限解码下,脑想写 `pick up the …` 时 `up` 只能粘到旁边的词上,成了 `upmint`;想写 `up until touched` 成了 `upuntil toucheduntil` —— 第 1、3 步按字母比、不按空格,就是为了这个。这也是名字里多出字母的唯一来路,第 3 步只认它:
 
-名字里不许是这门语言自己的词,也不许是 `item`(那是身体清单上的记账词):键盘在名字那一格按不出这些词。所以受限解码下,脑想写 `up until` 时常被粘成 `upuntil`、`scissors upuntil toucheduntil` —— 第 1、3 步按字母比、不按空格,就是为了这个。
+- `upmint green scissors` 就是 `mint green scissors`(多出来的 `up` 是语言词);两头都粘着也一样:`mint green scissorsuntilstuck` 就是 `upmint green scissors`。
+- `cupboard` 不是 `cup`,`pencil`、`open` 不是 `pen`,`red cupboard` 不是 `red cup`,`tissue box` 不是 `tissue`:多出来的 board、cil、o、box 不是语言词。
+- `pick upuntil stuckscissors` 不按字认成 `scissors`,`the pink tissue` 不按字认成 `pink tissue`:多出来的 `pick`、`the` 不是语言词。它们是不是那一件由眼来认(第 2 步)。
+- 整个都是语言词的(`untildone`)不是名字,和谁都不一样。
+
+共用一个词不算(`the red ball` 不是 `the red cup`),差几个字母也不按字认(`cap` 不是 `cup`)—— 这些要么认错、要么交给眼。2026-09-30 以前一个名字最多三个词,`the mint green scissors` 会被截成 `the mint green`;那时候的名字按今天的规矩认不上的,照实说。
 
 ### 17.8 等、记住、补救:都用现成的词
 

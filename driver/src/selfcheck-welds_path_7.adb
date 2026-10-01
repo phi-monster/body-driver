@@ -21,6 +21,10 @@ procedure Welds_Path_7 is
       return M;
    end Blob;
 
+   --  S1A1–S1A5 那几轮的键盘(日志里的「这一轮键盘」那一行:量 [height]、九个关系、grasper pusher、七个结局)今天会挡掉的词
+   Fb : constant String := Sinew.Name_Forbidden ("touching above below left right nearer farther facing clear", "grasper pusher",
+                                                 "touched stuck slipped lost settled stalled timeout", "height");
+
    --  ── 重放用的模型(落盘里摘的每一轮,按 Bind_Name 的顺序、用 Plan 里同一套判法)──
    --  一条记录 = Act.Boxed_Thing 那几样 + 它其实是什么(剪刀 / 我自己的胳膊 / 只记了一句"指不出"的那种);
    --  "其实是什么"只给打分用,判法看不见它
@@ -36,6 +40,10 @@ procedure Welds_Path_7 is
    Visible : array (0 .. 2) of Boolean := [others => False];   --  这一轮剪刀在第几台眼里看得见(日志里的清单)
    --  眼对一个名字怎么答:框在剪刀上 / 框在我自己的胳膊上 / 这里指不出(落盘里那只眼的原话;日志里没问过的,用落盘的画面重问过)
    type Answer is (Here_Scissors, Here_Arm, Not_Here);
+   --  别的眼对这个名字怎么答(第几台 → 答案);没写的 = 那只眼说这里没有
+   type Eye_Answers is array (0 .. 2) of Answer;
+   Nowhere : constant Eye_Answers := [others => Not_Here];
+   In_Head : constant Eye_Answers := [0 => Here_Scissors, others => Not_Here];   --  头顶眼(第 0 台)框在剪刀上
    --  脑写这个名字是在说什么(打分用):剪刀 / 什么都不是(动作、乱码)/ 看不出
    type Meaning is (Means_Scissors, Means_Nothing, Means_Unclear);
    type Tally is record
@@ -119,66 +127,80 @@ procedure Welds_Path_7 is
       end loop;
    end Round;
 
-   --  脑的一个名字按 Bind_Name 的顺序落下去:① 这只眼这一帧量到的里面有同一串字母的 ⇒ 它;② 问眼(答案是落盘的);
-   --  指出来了 ⇒ 和这只眼里量到的哪一件同一片像素 ⇒ 就是它、改叫这个名字,不然记成新的一件(别的眼里同一件改叫这个名字 = 视线交在一点);
-   --  ③ 眼说这里没有 ⇒ 只按字找(Plan.Without_Eye)。返回清单上的号(0 = 绑不上)
-   function Bind (W : String; Ans : Answer) return Natural is
+   --  在第 E 台眼里照眼的答案认它(Bind_Name 里 Look_In 那一段):和那只眼里量到的哪一件同一片像素 ⇒ 就是它、改叫这个名字,
+   --  不然记成那只眼里新的一件(别的眼里同一件改叫这个名字 = 视线交在一点)。返回清单上的号
+   function Look (E : Natural; W : String; Ans : Answer) return Natural is
+      Mk : constant Bools := (if Ans = Here_Scissors then Blob (2, 2, 4, 5) else Blob (7, 1, 11, 7));
+      Pu : constant Long_Float := (if Ans = Here_Scissors then 3.0 else 9.0);
+      Pv : constant Long_Float := 4.0;
+      Same : Integer := -1;
+   begin
+      for I in 0 .. Natural (Store.Length) - 1 loop
+         if Same < 0 and then Store (I).R.Eye = E and then Store (I).R.Seen
+           and then Plan.Same_Pixels (Store (I).Mask, Store (I).Pu, Store (I).Pv, Mk, Pu, Pv, Fw, Fh)
+         then
+            Same := Integer (I);
+         end if;
+      end loop;
+      if Same >= 0 then
+         declare
+            Old : constant Unbounded_String := Store (Natural (Same)).R.Name;
+         begin
+            for I in 0 .. Natural (Store.Length) - 1 loop
+               if Store (I).R.Name = Old then
+                  declare
+                     M : Model_Rec := Store (I);
+                  begin
+                     M.R.Name := U (W);
+                     Store.Replace_Element (I, M);
+                  end;
+               end if;
+            end loop;
+         end;
+         return Item_Of (Natural (Same));
+      end if;
+      declare
+         Id : constant Ident := (if Ans = Here_Scissors then Id_Scissors else Id_Arm);
+      begin
+         Store.Append (Model_Rec'(R => (Name => U (W), Eye => E, Boxed => True, Seen => True, Blind => False),
+                                  Id => Id, Mask => Mk, Pu => Pu, Pv => Pv));
+         for I in 0 .. Natural (Store.Length) - 2 loop
+            if Store (I).R.Eye /= E and then Store (I).R.Seen and then Store (I).Id = Id then
+               declare
+                  M : Model_Rec := Store (I);
+               begin
+                  M.R.Name := U (W);
+                  Store.Replace_Element (I, M);
+               end;
+            end if;
+         end loop;
+         return Natural (Store.Length);
+      end;
+   end Look;
+
+   --  脑的一个名字按 Bind_Name 的顺序落下去:① 这只眼这一帧量到的里面有同一串字母的 ⇒ 它;② 问这只眼(答案是落盘的);
+   --  ②b 这只眼说没有 ⇒ 按 Plan.Other_Eyes 的次序问别的眼(Elsewhere:拿那只眼落盘的画面问过同一个模型的答案,10-01);
+   --  ③ 哪只眼都说没有 ⇒ 只按字找(Plan.Without_Eye)。返回清单上的号(0 = 绑不上)
+   function Bind (W : String; Ans : Answer; Elsewhere : Eye_Answers) return Natural is
       V : Plan.Name_Verdict := Plan.Before_Eye (W, Eye_Now, Records);
    begin
       if V.Kind = Plan.Nv_This then
          return Item_Of (Natural (V.Index));
       end if;
       if Ans /= Not_Here then
-         declare
-            Mk : constant Bools := (if Ans = Here_Scissors then Blob (2, 2, 4, 5) else Blob (7, 1, 11, 7));
-            Pu : constant Long_Float := (if Ans = Here_Scissors then 3.0 else 9.0);
-            Pv : constant Long_Float := 4.0;
-            Same : Integer := -1;
-         begin
-            for I in 0 .. Natural (Store.Length) - 1 loop
-               if Same < 0 and then Store (I).R.Eye = Eye_Now and then Store (I).R.Seen
-                 and then Plan.Same_Pixels (Store (I).Mask, Store (I).Pu, Store (I).Pv, Mk, Pu, Pv, Fw, Fh)
-               then
-                  Same := Integer (I);
-               end if;
-            end loop;
-            if Same >= 0 then
-               declare
-                  Old : constant Unbounded_String := Store (Natural (Same)).R.Name;
-               begin
-                  for I in 0 .. Natural (Store.Length) - 1 loop
-                     if Store (I).R.Name = Old then
-                        declare
-                           M : Model_Rec := Store (I);
-                        begin
-                           M.R.Name := U (W);
-                           Store.Replace_Element (I, M);
-                        end;
-                     end if;
-                  end loop;
-               end;
-               return Item_Of (Natural (Same));
-            end if;
-            declare
-               Id : constant Ident := (if Ans = Here_Scissors then Id_Scissors else Id_Arm);
-            begin
-               Store.Append (Model_Rec'(R => (Name => U (W), Eye => Eye_Now, Boxed => True, Seen => True, Blind => False),
-                                        Id => Id, Mask => Mk, Pu => Pu, Pv => Pv));
-               for I in 0 .. Natural (Store.Length) - 2 loop
-                  if Store (I).R.Eye /= Eye_Now and then Store (I).R.Seen and then Store (I).Id = Id then
-                     declare
-                        M : Model_Rec := Store (I);
-                     begin
-                        M.R.Name := U (W);
-                        Store.Replace_Element (I, M);
-                     end;
-                  end if;
-               end loop;
-               return Natural (Store.Length);
-            end;
-         end;
+         return Look (Eye_Now, W, Ans);
       end if;
-      V := Plan.Without_Eye (W, Eye_Now, Records);
+      for K of Plan.Other_Eyes (Eye_Now, [0 .. 2 => True]) loop
+         if Elsewhere (Natural (K)) /= Not_Here then
+            declare
+               N : constant Natural := Look (Natural (K), W, Elsewhere (Natural (K)));
+            begin
+               Mark_Blind (Eye_Now, U (W));   --  这只眼说过这里没有它
+               return N;
+            end;
+         end if;
+      end loop;
+      V := Plan.Without_Eye (W, Eye_Now, Records, Fb);
       if V.Kind in Plan.Nv_This | Plan.Nv_Elsewhere and then Item_Of (Natural (V.Index)) > 0 then
          if V.Kind = Plan.Nv_Elsewhere then
             Mark_Blind (Eye_Now, V.Name);
@@ -189,7 +211,7 @@ procedure Welds_Path_7 is
       return 0;
    end Bind;
 
-   procedure Ask (W : String; Ans : Answer; Truth : Meaning) is
+   procedure Ask (W : String; Ans : Answer; Truth : Meaning; Elsewhere : Eye_Answers := Nowhere) is
       E : Plan.Bind_Entry;
    begin
       E.Key := U (W);
@@ -198,7 +220,7 @@ procedure Welds_Path_7 is
             return;   --  同一段程序里同一个名字只认一次(Bind_All 同一条)
          end if;
       end loop;
-      E.Item := Integer (Bind (W, Ans));
+      E.Item := Integer (Bind (W, Ans, Elsewhere));
       Prog.Append (E);
       Truths (Natural (Prog.Length)) := Truth;
    end Ask;
@@ -207,7 +229,7 @@ procedure Welds_Path_7 is
    procedure Score is
       Got : Natural;
    begin
-      Plan.Rebind_Missing (Prog, Records, Eye_Now, Item_Of'Access, Got);
+      Plan.Rebind_Missing (Prog, Records, Eye_Now, Fb, Item_Of'Access, Got);
       for I in 0 .. Natural (Prog.Length) - 1 loop
          declare
             It : constant Integer := Prog (I).Item;
@@ -271,20 +293,52 @@ begin
       V := Plan.Before_Eye ("mintgreenscissors", 0, Rs);
       Check (V.Kind = Plan.Nv_This and then V.Index = 0,
              "粘词:这只眼里量到的「mint green scissors」,脑写成「mintgreenscissors」⇒ 同一件,不再问眼(" & Plan.Name_Verdict_Kind'Image (V.Kind) & ")");
-      V := Plan.Without_Eye ("MintGreen Scissors", 1, Rs);
+      V := Plan.Without_Eye ("MintGreen Scissors", 1, Rs, Fb);
       Check (V.Kind = Plan.Nv_Elsewhere and then V.Index = 0,
-             "粘词:在另一只眼里写成「MintGreen Scissors」(大小写、空格都变了)、那只眼说这里没有 ⇒ 按字就是第 0 台里那一件(" & Plan.Name_Verdict_Kind'Image (V.Kind) & ")");
-      --  大并行 §2 第 15 条点名的那一句。🦷 Plan.Holds_Name 改回按原字符串找 ⇒ 这一条红(pinktissueby 里找不到带空格的 pink tissue)
-      Rs.Clear;
-      Rs.Append (Rec ("pink tissue", 0, Boxed => True, Seen => True));
-      V := Plan.Without_Eye ("pick upthe pinktissueby", 1, Rs);
-      Check (V.Kind = Plan.Nv_Elsewhere and then V.Index = 0,
-             "粘词:「pick upthe pinktissueby」原样含着「pink tissue」的字母 ⇒ 就是第 0 台里那一件(" & Plan.Name_Verdict_Kind'Image (V.Kind) & ")");
-      Rs.Clear;
-      Rs.Append (Rec ("the mint green", 0, Boxed => True, Seen => True));
-      V := Plan.Without_Eye ("pick upthe pinktissueby", 1, Rs);
-      Check (V.Kind = Plan.Nv_Unknown,
-             "粘词(反例):只认得「the mint green」时,「pick upthe pinktissueby」不绑到它(共用一个 the 不算)⇒ 照实说绑不上");
+             "粘词:在另一只眼里写成「MintGreen Scissors」(大小写、空格都变了)、那只眼说这里没有 ⇒ 按字就是第 0 台里那一件("
+             & Plan.Name_Verdict_Kind'Image (V.Kind) & ")");
+   end;
+
+   --  ①b 多出来的字母只许是键盘挡掉的语言词。病(10-01 主代理查出来的洞):以前"整串原样含着以前的名字 / 原样含在里面"就算同一件,
+   --  cupboard 绑到 cup、pencil 和 open 绑到 pen、red cupboard 绑到 red cup、tissue box 绑到 tissue —— 眼说这只眼里没有它的时候,
+   --  手会照着另一件东西的位置走过去。名字里多出字母的来路只有一条:键盘不许名字里单独出现语言自己的词(Sinew.Name_Forbidden),
+   --  想写的话里有它们就只能粘到旁边的词上(pick up ⇒ upmint)。多出来的每个字母都得能切成这几个词才算同一个名字。
+   --  🦷 Plan.Same_Core 改回只看"原样含着"(不管多出来的是什么字母)⇒ cupboard / pencil / open / red cupboard / tissue box 这几条红;
+   --  🦷 Plan.Same_Core 去掉"整个名字都是语言词就没有芯" ⇒ saydone / untildone 那一条红(两个在劈开 done 剩下的 ne 上对上)
+   declare
+      Rs : Plan.Named_Vectors.Vector;
+      V : Plan.Name_Verdict;
+      procedure Not_Same (Said, Known : String; Why : String) is
+      begin
+         Rs.Clear;
+         Rs.Append (Rec (Known, 0, Boxed => True, Seen => True));
+         V := Plan.Without_Eye (Said, 1, Rs, Fb);
+         Check (V.Kind = Plan.Nv_Unknown and then Index (V.Known, Known) > 0,
+                "多出来的字母:「" & Said & "」不是「" & Known & "」(" & Why & ")⇒ 照实说绑不上,列出起过的名字(" & Plan.Name_Verdict_Kind'Image (V.Kind) & ")");
+      end Not_Same;
+      procedure Same (Said, Known : String; Why : String) is
+      begin
+         Rs.Clear;
+         Rs.Append (Rec (Known, 0, Boxed => True, Seen => True));
+         V := Plan.Without_Eye (Said, 1, Rs, Fb);
+         Check (V.Kind = Plan.Nv_Elsewhere and then V.Index = 0,
+                "多出来的字母:「" & Said & "」就是「" & Known & "」(" & Why & ")(" & Plan.Name_Verdict_Kind'Image (V.Kind) & ")");
+      end Same;
+   begin
+      Not_Same ("cupboard", "cup", "多出来的 board 不是语言词");
+      Not_Same ("pencil", "pen", "多出来的 cil 不是");
+      Not_Same ("open", "pen", "多出来的 o 不是");
+      Not_Same ("red cupboard", "red cup", "多出来的 board 不是");
+      Not_Same ("tissue box", "tissue", "多出来的 box 不是:纸巾盒不是纸巾");
+      Not_Same ("cup", "cupboard", "反过来也一样:以前的名字里多出 board");
+      Same ("upmint green scissors", "mint green scissors", "多出来的 up 是:pick up 的 up 单独打不出,粘到了 mint 上;这一轮键盘挡掉的词:" & Fb);
+      Same ("scissors upuntil toucheduntil", "scissors", "多出来的 up until touched until 全是(S1A5 R2 的原话)");
+      Same ("mint green scissorsuntilstuck", "upmint green scissors", "两头各粘着语言词,去掉以后一样");
+      --  只剩语言词的不是名字:以前把一句 saydone(脑想说 say done)当名字框过一块,这回的 untildone 不许因为都含 done 就绑上去
+      Not_Same ("untildone", "saydone", "去掉粘着的 until、say 以后只剩 done,那是语言词不是名字");
+      --  pick upthe pinktissueby(树莓派上的小 Qwen 写的,正好三个词 —— 那时一个名字最多三个词):多出来的 pick、the、by 都不是语言词。
+      --  今天的键盘没有三个词的上限,这种挤法没有来路了;它是不是那件纸巾,由眼来认(眼框出来的和纸巾同一片像素 ⇒ 就是它)
+      Not_Same ("pick upthe pinktissueby", "pink tissue", "多出来的 pick、the、by 不是语言词");
    end;
 
    --  ② 拆词。病:同一个名字被拆开(scis sors),按原字符串比就成了另一件。🦷 同上
@@ -316,25 +370,26 @@ begin
       Check (not Plan.Same_Pixels (Scissors, 3.0, 4.0, Other, 9.0, 4.0, Fw, Fh),
              "错一个字母(反例):旁边另一件 ⇒ 不是同一片");
       Rs.Append (Rec ("scissors", 0, Boxed => True, Seen => True));
-      V := Plan.Without_Eye ("scisors", 0, Rs);
+      V := Plan.Without_Eye ("scisors", 0, Rs, Fb);
       Check (V.Kind = Plan.Nv_Unknown,
              "错一个字母:眼没指出来的时候按字不认(「scisors」不是「scissors」,也不含它)⇒ 照实说绑不上,不猜");
    end;
 
    --  ④ 不猜。病:按"共用一个词 / 差几个字母"认,the red ball 会绑到 the red cup;两件都对得上时挑一件更是瞎猜。
+   --  对得上两件:两件不同的东西,一件叫 ball,另一件脑以前叫它 balldo(粘着 do);这回脑说 ballup ⇒ 去掉粘着的语言词两件都是 ball。
    --  🦷 Without_Eye 对得上两件时挑第一件 ⇒ 第一条红;改成"共用一个词就算"⇒ 第二条红
    declare
       Rs : Plan.Named_Vectors.Vector;
       V : Plan.Name_Verdict;
    begin
-      Rs.Append (Rec ("the mint green", 0, Boxed => True, Seen => True));
-      Rs.Append (Rec ("green", 0, Boxed => True, Seen => True));
-      V := Plan.Without_Eye ("pick up the mint green", 1, Rs);
-      Check (V.Kind = Plan.Nv_Ambiguous and then Index (V.Name, "the mint green") > 0 and then Index (V.Name, "「green」") > 0,
-             "不猜:「pick up the mint green」原样含着「the mint green」也含着「green」⇒ 两件都对得上,照实说不猜(" & To_String (V.Name) & ")");
+      Rs.Append (Rec ("ball", 0, Boxed => True, Seen => True));
+      Rs.Append (Rec ("balldo", 0, Boxed => True, Seen => True));
+      V := Plan.Without_Eye ("ballup", 1, Rs, Fb);
+      Check (V.Kind = Plan.Nv_Ambiguous and then Index (V.Name, "「ball」") > 0 and then Index (V.Name, "「balldo」") > 0,
+             "不猜:「ballup」去掉 up 是 ball,「balldo」去掉 do 也是 ball ⇒ 两件都对得上,照实说不猜(" & To_String (V.Name) & ")");
       Rs.Clear;
       Rs.Append (Rec ("the red cup", 0, Boxed => True, Seen => True));
-      V := Plan.Without_Eye ("the red ball", 1, Rs);
+      V := Plan.Without_Eye ("the red ball", 1, Rs, Fb);
       Check (V.Kind = Plan.Nv_Unknown and then Index (V.Known, "the red cup") > 0,
              "不猜:「the red ball」和「the red cup」共用 the red 两个词 ⇒ 不是同一件;绑不上时照实列出起过的名字(" & To_String (V.Known) & ")");
    end;
@@ -345,18 +400,18 @@ begin
    Check (Plan.Forget_When_Eye_Moves (Rec ("reach right untilstuck", 1, Boxed => False, Seen => False, Blind => True))
           and then not Plan.Forget_When_Eye_Moves (Rec ("the mint green", 1, Boxed => True, Seen => False, Blind => True)),
           "指不出的记录:在这只眼里从来没有过框的,眼转过就删;有过框的只解除(框还在,按框重量)");
-   --  🦷 Without_Eye 把没有过框的记录也当候选 ⇒ 这一条红:一句没绑上的话(green)不是以前说过的一件东西,
-   --  不许把对的那一件(the mint green)搅成"对得上两件、不猜"
+   --  🦷 Without_Eye 把没有过框的记录也当候选 ⇒ 这一条红:一句没绑上的话(第 1 台里说过的 mint green scissorsdo,眼答这里没有、
+   --  那时还不认得任何东西)不是以前说过的一件东西,不许把对的那一件(第 0 台里框过的 mint green scissors)搅成"对得上两件、不猜"
    declare
       Rs : Plan.Named_Vectors.Vector;
       V : Plan.Name_Verdict;
    begin
-      Rs.Append (Rec ("green", 1, Boxed => False, Seen => False, Blind => True));
-      Rs.Append (Rec ("the mint green", 0, Boxed => True, Seen => True));
-      V := Plan.Without_Eye ("pick up the mint green", 1, Rs);
-      Check (V.Kind = Plan.Nv_Elsewhere and then V.Index = 1 and then Index (V.Known, "「green」") = 0,
-             "指不出的记录:「green」只记过一句指不出、从没有过框 ⇒ 不是以前说过的东西,不当候选;"
-             & "「pick up the mint green」照样只对得上「the mint green」(" & Plan.Name_Verdict_Kind'Image (V.Kind) & ")");
+      Rs.Append (Rec ("mint green scissorsdo", 1, Boxed => False, Seen => False, Blind => True));
+      Rs.Append (Rec ("mint green scissors", 0, Boxed => True, Seen => True));
+      V := Plan.Without_Eye ("upmint green scissors", 1, Rs, Fb);
+      Check (V.Kind = Plan.Nv_Elsewhere and then V.Index = 1 and then Index (V.Known, "scissorsdo") = 0,
+             "指不出的记录:「mint green scissorsdo」只记过一句指不出、从没有过框 ⇒ 不是以前说过的东西,不当候选;"
+             & "「upmint green scissors」照样只对得上「mint green scissors」(" & Plan.Name_Verdict_Kind'Image (V.Kind) & ")");
    end;
 
    --  ⑥ 同一段程序里名字的绑法不随行的先后变。病:前一行的名字先问、没认出来(眼答这里没有),后一行的名字问眼认出一件新的,
@@ -368,13 +423,14 @@ begin
       Got : Natural;
       function One_Item (Bx : Natural) return Natural is (Bx + 1);
    begin
-      B.Append (Plan.Bind_Entry'(Key => U ("reach pick upmint green scissors"), Item => -1, Tried => U ("眼说这里没有")));
+      B.Append (Plan.Bind_Entry'(Key => U ("upmint green scissors"), Item => -1, Tried => U ("眼说这里没有")));
       B.Append (Plan.Bind_Entry'(Key => U ("mint green scissors"), Item => 1, Tried => Null_Unbounded_String));
       B.Append (Plan.Bind_Entry'(Key => U ("grasper"), Item => -1, Tried => Null_Unbounded_String));
       Rs.Append (Rec ("mint green scissors", 1, Boxed => True, Seen => True));
-      Plan.Rebind_Missing (B, Rs, 1, One_Item'Access, Got);
+      Plan.Rebind_Missing (B, Rs, 1, Fb, One_Item'Access, Got);
       Check (Got = 1 and then B (0).Item = 1 and then B (2).Item = -1,
-             "同一段程序:前一行「reach pick upmint green scissors」头一遍没绑上,整段认完按字它含着后一行认出来的「mint green scissors」⇒ 绑上;角色不归这一遍管");
+             "同一段程序:前一行「upmint green scissors」头一遍没绑上,整段认完按字它就是后一行认出来的「mint green scissors」"
+             & "(多出来的 up 是语言词)⇒ 绑上;角色不归这一遍管");
    end;
 
    --  ⑧ LANGUAGE.md §17 的例子驱动都认。病:文档教的写法驱动不认(§12 里单独一行的 close grasper on ball、调用写成 do <名字>),
@@ -470,9 +526,23 @@ begin
              & (if Length (Missed) > 0 then "(读错的:" & To_String (Missed) & ")" else ""));
    end;
 
+   --  ⑩ 这只眼给不出它的一片 ⇒ 按相机的次序问别的眼(Bind_Name ②b)。病:以前只问这一只眼,看不见就整段退回、下一轮再换眼,
+   --  S1A4 在看不见剪刀的腕眼里这样耗了 21 次,而头顶眼一直看得见它。
+   --  🦷 Plan.Other_Eyes 恒答空 ⇒ 这一条和 S1A1、S1A4 两条重放红
+   declare
+      Order : constant Bytes.Ints := Plan.Other_Eyes (1, [True, True, False, True]);
+   begin
+      Check (Natural (Order.Length) = 2 and then Order (0) = 0 and then Order (1) = 3,
+             "别的眼:在第 1 台里给不出它 ⇒ 按次序问第 0、第 3 台(第 2 台这一帧没有画面,跳过)");
+   end;
+
    --  ⑦ 重放 S1A1–S1A5 落盘的每一轮(大并行 §5 路 7:S1A2–S1A4 落盘的轮次重放,粘在一起的名字都绑对)。
    --  每一轮:在哪只眼、脑的程序里按行的先后写了哪些名字、那只眼对每个名字怎么答(日志里的原话;日志里旧的认法没问眼就绑了的,
    --  拿那一轮落盘的画面、驱动一字不差的请求问过真 Qwen3.5-9B,10-01);脑说的是什么(打分用,判法看不见)。
+   --  这只眼说没有它 ⇒ 按相机的次序问别的眼(Bind_Name ②b):别的眼的答案是拿那只眼在那一轮之前最后落盘的那张画面
+   --  (带着格子;驱动问的是干净的画面)、驱动一字不差的请求问同一个模型的(10-01),写在 Ask 的 Elsewhere 里,没写的 = 别的眼都说没有。
+   --  哪只眼都没有 ⇒ 按字只认今天这一条来路(多出来的字母只许是键盘挡掉的语言词,①b);S1A1–S1A5 跑的时候还有
+   --  "一个名字最多三个词"的上限,那时截短 / 挤粘的名字今天按字认不上,照实说。
    --  改之前的数(同一批名字,旧的认法,照日志数):
    --    S1A1 绑对 4 · 该绑上没绑上 2 · 本来就不是东西 3 · 绑错 1(我自己的胳膊);R8 同一把剪刀在同一只眼里记成三件
    --    S1A2 绑对 2 · 0 · 0 · 0
@@ -493,17 +563,17 @@ begin
       Round (0); Ask ("scissors", A, S); Ask ("arm reach ight", Arm, N); Score; Clear (1);
       Round (1); Ask ("arm reach the", No, N); Score;
       Round (0); Ask ("arm ride untilarm", No, N); Score;
-      Round (1); Ask ("scissors", No, S); Score;
+      Round (1); Ask ("scissors", No, S, Elsewhere => In_Head); Score;
       Round (0); Ask ("scissors", A, S); Score; Clear (1);
-      Round (1); Ask ("pick upuntil stuckscissors", No, S); Score;
+      Round (1); Ask ("pick upuntil stuckscissors", No, S, Elsewhere => In_Head); Score;
       Round (0); Ask ("reach untilarm reachtheis", No, N); Ask ("reach untilpick upuntilstuckscissorsis", A, S);
       Ask ("pick upuntilstuckscissorsheight untilstuck", A, S); Score;
       Put_Line ("  重放 S1A1:" & Say (T));
       Check (T.Right = 6 and then T.Fail_Thing = 0 and then T.Fail_Honest = 3 and then T.Wrong = 1
              and then (for all M of Store => M.Id /= Id_Mark or else not M.R.Seen)
              and then Count_Of (Id_Scissors, 0) = 1,
-             "重放 S1A1:剪刀的名字 6 个全绑对(R4 / R7 在看不见它的腕眼里按字绑上;R8 两种粘法都认成同一件,不再记成三件);"
-             & "绑错 1 = R1 眼把我自己的右臂框成了「arm reach ight」(我自己的零件认不出来,要路 1 的每一节形状,见报告)");
+             "重放 S1A1:剪刀的名字 6 个全绑对(R4、R7 腕眼里看不见它,头顶眼框出来、和那一件同一片像素;R8 两种粘法都认成同一件,"
+             & "不再记成三件);绑错 1 = R1 眼把我自己的右臂框成了「arm reach ight」(我自己的零件认不出来,要路 1 的每一节形状,见报告)");
 
       --  S1A2:第 2 轮起第 1 台(左腕眼)也看得见
       Start_Run;
@@ -532,35 +602,37 @@ begin
       Round (0); Ask ("the mint green", A, S); Score; Clear (1);
       Round (1); Ask ("reach right untilstuck", No, N); Score;
       Round (0); Ask ("the mint green", A, S); Score; Clear (1);
-      Round (1); Ask ("reach the mintgreenscissors", No, S); Ask ("lift the mintgreenscissors", No, S); Score;
+      Round (1); Ask ("reach the mintgreenscissors", No, S, Elsewhere => In_Head); Ask ("lift the mintgreenscissors", No, S, Elsewhere => In_Head); Score;
       Round (0); Ask ("the mint green", A, S); Score; Clear (1);
-      Round (1); Ask ("reach right untilstuck", No, N); Ask ("lift the mintgreenscissors", No, S);
+      Round (1); Ask ("reach right untilstuck", No, N); Ask ("lift the mintgreenscissors", No, S, Elsewhere => In_Head);
       Ask ("saydone untildone untildone", No, N); Score;
       Round (1); Ask ("the mint greenscissors", No, S); Score;
-      Round (1); Ask ("reach upcell untilstick", No, N); Ask ("pick upmint greenscissors", No, S); Score;
+      Round (1); Ask ("reach upcell untilstick", No, N); Ask ("pick upmint greenscissors", No, S, Elsewhere => In_Head); Score;
       Clear (0); Clear (2);   --  R18:say look = 2 / look = 3
-      Round (2); Ask ("pick upmint greenscissors", No, S); Score;
+      Round (2); Ask ("pick upmint greenscissors", No, S, Elsewhere => In_Head); Score;
       for Rn in 1 .. 4 loop   --  R22 R25 R29 R33
-         Round (1); Ask ("pick upmint greenscissors", No, S); Score;
+         Round (1); Ask ("pick upmint greenscissors", No, S, Elsewhere => In_Head); Score;
       end loop;
       Round (1); Ask ("reach right untilstuck", No, N); Ask ("reach upmints untilstuck", No, Q);
-      Ask ("reach pick upmintgreenscissorsuntilst", No, S); Ask ("reach mint greenscissorsuntilstuck", No, S); Score;   --  R31
+      Ask ("reach pick upmintgreenscissorsuntilst", No, S, Elsewhere => In_Head); Ask ("reach mint greenscissorsuntilstuck", No, S, Elsewhere => In_Head); Score;   --  R31
       for Rn in 1 .. 3 loop   --  R37 R40 R42
-         Round (1); Ask ("pick upmint greenscissors", No, S); Score;
+         Round (1); Ask ("pick upmint greenscissors", No, S, Elsewhere => In_Head); Score;
       end loop;
-      Round (1); Ask ("reach upmints untilstuck", No, Q); Ask ("reach pick upmintgreenscissorsuntilst", No, S); Score;   --  R45
-      Round (1); Ask ("reach upmints untilstuck", No, Q); Ask ("reach pick upmintgreenscissors", No, S); Score;          --  R47
-      Round (1); Ask ("pick upmint greenscissors", No, S); Score;   --  R49
+      Round (1); Ask ("reach upmints untilstuck", No, Q); Ask ("reach pick upmintgreenscissorsuntilst", No, S, Elsewhere => In_Head); Score;   --  R45
+      Round (1); Ask ("reach upmints untilstuck", No, Q); Ask ("reach pick upmintgreenscissors", No, S, Elsewhere => In_Head); Score;   --  R47
+      Round (1); Ask ("pick upmint greenscissors", No, S, Elsewhere => In_Head); Score;   --  R49
       Round (1); Ask ("reach upmints untilstuck", No, Q); Score;    --  R52
-      Round (1); Ask ("reach upmints untilstuck", No, Q); Ask ("pick upmint greenscissors", No, S); Score;   --  R56
+      Round (1); Ask ("reach upmints untilstuck", No, Q); Ask ("pick upmint greenscissors", No, S, Elsewhere => In_Head); Score;   --  R56
       for Rn in 1 .. 2 loop   --  R60 R63
-         Round (1); Ask ("pick upmint greenscissors", No, S); Score;
+         Round (1); Ask ("pick upmint greenscissors", No, S, Elsewhere => In_Head); Score;
       end loop;
       Put_Line ("  重放 S1A4:" & Say (T));
-      Check (T.Right = 7 and then T.Fail_Thing = 17 and then T.Fail_Honest = 10 and then T.Wrong = 0
-             and then (for all M of Store => M.Id /= Id_Mark or else not M.R.Seen),
-             "重放 S1A4:绑错 21 → 0(左腕眼里不再有假东西);含着「the mint green」的粘词名字 4 个在看不见剪刀的腕眼里按字绑到头顶眼里那一件;"
-             & "「pick upmint greenscissors」一族不含它、腕眼又看不见剪刀 ⇒ 照实说绑不上(回头顶眼那只眼能框出来,见报告)");
+      Check (T.Right = 23 and then T.Fail_Thing = 1 and then T.Fail_Honest = 10 and then T.Wrong = 0
+             and then (for all M of Store => M.Id /= Id_Mark or else not M.R.Seen)
+             and then Count_Of (Id_Scissors, 0) = 1,
+             "重放 S1A4:绑错 21 → 0(左腕眼里不再有假东西);腕眼里看不见剪刀时脑写的粘词名字 21 个里 20 个由头顶眼框出来、"
+             & "和那一件同一片像素 ⇒ 绑对;剩下 1 个(R13 the mint greenscissors)头顶眼在落盘画面上没框出来,按字多出来的 lift 不是语言词 ⇒ 照实说绑不上;"
+             & "10 句不是东西的话哪只眼都没框");
 
       --  S1A5:第 2 轮起左腕眼看得见;第 3 轮换了一集(世界记忆清空,身体留着)
       Start_Run;
