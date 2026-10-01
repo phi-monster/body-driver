@@ -1,0 +1,8 @@
+# body-driver wheelarm rig: only the robot's own cameras (cam_front on the base, cam_wrist on the palm; see Assets/Robots/wheelarm/robot_config.yml).
+# No world camera block ⇒ no head eye.
+annotator:
+  common:
+    enabled: true
+    rgb_capture:
+      type: rgb
+      device: cpu

@@ -1040,13 +1040,51 @@ package body Act is
    Protocol_Up : constant Geom.V3 := [0.0, 0.0, 1.0];
    function Up_Dir (C : Context) return Geom.V3 is (if C.Touch_Valid then C.Touch_N else Protocol_Up);
 
-   --  ── 东西的量(登记表)──:脑的句子只有一种:do <东西> <量> up|down until <结局>。量的名字由身体列(键盘上"量 [...]"那一栏),
-   --  每个量有一个"让它变的方向"(世界系单位向量,从量出来的东西算);量变了 = 手里的接触点沿那个方向的旋量 ⇒ 同一条接触集 + 执行层。
-   --  加一个量 = 这两处各加一行;句子、接触集、执行层都不动,不按任务分。现在身体量得出的只有一个:height = 离它躺的面多高,方向 = 那张面的法向
+   --  ── 东西的量(登记表,大并行 §2 第 16 条)──:脑的句子:do <东西> <量> up|down until <结局>(两件东西那一句的关系词也按量算,见 Contact.Qty)。
+   --  量的名字由身体列(键盘上"量 [...]"那一栏);每个量 = 一种量法(Contact.Qty.Kind),它往哪变 = 让它变得最快的那个刚体运动(一个旋量,从量到的几何算)
+   --  ⇒ 同一条接触集 + 执行层。加一个量 = 这里加一行;句子、接触集、执行层都不动,不按任务分。
+   --  一张表:名字、量法、给脑看的那句"我怎么量它"(Qty_Meaning;路 7 的 Qty_Gloss 从这儿取)
+   function Qty_Kind (Name : String; K : out Contact.Qty.Kind) return Boolean is
+   begin
+      K := Contact.Qty.Height;
+      if Name = "height" then
+         K := Contact.Qty.Height;
+      elsif Name = "heading" then
+         K := Contact.Qty.Heading;
+      elsif Name = "tilt" then
+         K := Contact.Qty.Tilt;
+      elsif Name = "away" then
+         K := Contact.Qty.Away;
+      else
+         return False;
+      end if;
+      return True;
+   end Qty_Kind;
+   function Qty_Meaning (Name : String) return String is
+     (if Name = "height" then "how far the thing is above the surface it lies on (I measure it with my own eyes; up = off that surface, down = back onto it)"
+      elsif Name = "heading" then "which way the thing's long side points along the surface it lies on (up rotates it counterclockwise seen from above that surface, down clockwise)"
+      elsif Name = "tilt" then "how far the thing leans from how it stands (up leans its top away from my still eye, down toward it)"
+      elsif Name = "away" then "how far the thing is from my still eye, measured along the surface it lies on (up = farther, down = nearer)"
+      else "a reading of it I can change");
+   --  键盘上列哪几个:有能合拢的部件(grasper)才列。heading 要它的长轴(轮廓量得出);tilt / away 要一只"不跟着动它的那条臂走"的眼 ——
+   --  按开机量的"每只眼长在哪条臂上"判(Cam_Arm):有手指的臂里有一条臂,有一只量过几何的眼不长在它上面,就列(用到哪条臂时缺了照实说)
    function Qty_Words (C : Context; Roles : String) return String is
-     (if Ada.Strings.Fixed.Index (Roles, "grasper") > 0 then "height" else "");
-   function Qty_Axis (C : Context; Qty : String) return Geom.V3 is
-     (if Qty = "height" then Up_Dir (C) else [0.0, 0.0, 0.0]);
+      Still_Eye : Boolean := False;
+   begin
+      if Ada.Strings.Fixed.Index (Roles, "grasper") = 0 then
+         return "";
+      end if;
+      for A in 0 .. C.Map.Arms - 1 loop
+         if Arm_Has_Fingers (C, A) then
+            for Cm in 0 .. C.Map.N_Cams - 1 loop
+               if Cam_Arm (C, Cm) /= Integer (A) and then Cm < Natural (C.Geo.Length) and then (C.Geo (Cm).Fixed or else C.Geo (Cm).Valid) then
+                  Still_Eye := True;
+               end if;
+            end loop;
+         end if;
+      end loop;
+      return "height heading" & (if Still_Eye then " tilt away" else "");
+   end Qty_Words;
 
    --  这一段用了几拍:对方在段中间复位(新的一集,步数从零起)时不许算成负数(S1 2026-09-23 实测:第二集开始时正在进场,减出负数把驱动崩了)
    function Beats_Since (L : Plug.Link; B0 : Natural) return Natural is
@@ -1255,6 +1293,29 @@ package body Act is
       return D;
    end Plan_Descent;
 
+   --  手拿着它绕 M 的那根轴(过 M.Pivot)转 Th 弧度,手的位姿要到哪:位置绕那一点转过去、朝向转同一个角(Chan.Compose 的转动按世界轴)。
+   --  拿住了它就跟着手走 ⇒ 它身上每一点正好绕那根轴转了 Th(Want_Scene 按"手从合上那一刻起挪过的刚体运动"搬它,同一个变换)
+   function Carry_Goal (Cur : Plug.Arm_Pose; M : Contact.Twist; Th : Long_Float) return Plug.Arm_Pose is
+      Oa : Boolean;
+      Ax : constant Geom.V3 := Contact.Unit (M.Ang, Oa);
+      Rv : constant Geom.V3 := [Th * Ax (0), Th * Ax (1), Th * Ax (2)];
+      Rq : constant Geom.V3 := Geom.Ap (Geom.Rodrigues (Rv), [Cur (0) - M.Pivot (0), Cur (1) - M.Pivot (1), Cur (2) - M.Pivot (2)]);
+      A : Table.Vec := Table.Zero_Vec;
+   begin
+      for I in 0 .. 2 loop
+         A (I) := M.Pivot (I) + Rq (I) - Cur (I);
+         A (3 + I) := Rv (I);
+      end loop;
+      return Chan.Compose (Cur, A);
+   end Carry_Goal;
+
+   --  它躺的面(接触集和"要它怎么动"共用这一份):碰过的面 ⇒ 量到的;没碰过、标定板拟合出了面 ⇒ 板的;都没有 ⇒ 协议的"上"(过原点)
+   function Lie_N (C : Context) return Geom.V3 is (if C.Touch_Valid then C.Touch_N elsif C.Board_Plane then C.Board_N else Protocol_Up);
+   function Lie_P (C : Context) return Geom.V3 is (if C.Touch_Valid then C.Touch_Pt else C.Board_Pt);
+   --  它的实心模型(接触集和"要它怎么动"共用这一份,一个量一种量法):记下的顶面轮廓点;碰过它躺的面 ⇒ 按真的面重投那些视线
+   --  (一条都没落到面上 ⇒ 还用原来那份);再从轮廓那一圈往下补到它躺的面(实心、竖壁的假设,说出来)。没记下它的轮廓 / 没量过它躺的面 ⇒ 空
+   procedure Solid_Of (C : Context; Name : Unbounded_String; Shape : out Contact.V3_Vectors.Vector; Reprojected : out Boolean) is separate;
+
    procedure Plan_Contact (C : in out Context; F : Plug.Frame; Arm, Cam : Natural; Name : Unbounded_String;
                            Pick : out Contact.Search.Candidate; Note : out Unbounded_String; Ok : out Boolean) is separate;
 
@@ -1383,6 +1444,15 @@ package body Act is
                        Gear : Unbounded_String := Null_Unbounded_String) is separate;
 
    --  ── 一轮 ──
+   --  量到的几何 → Contact.Qty.Scene。它:实心模型的形心、底离它躺的面多高、在面里的长轴(没有模型 ⇒ 两眼交点那个位置,没有长轴和底)。
+   --  "上" = Up_Dir(和 09-23 起"沿面的法向走一个单位"那一条是同一个;高低从它躺的面 Lie_P 量);"我" = 不跟着这条臂走的那只眼(Still_Cam);
+   --  "横" = 脑看着的那只眼的横轴;参照那一件 = 此刻看得见它的几只眼的视线交点(交点的高 = 它顶面的高:接触集的模型就是"顶面过它量到的位置")。
+   --  不准:它轮廓横着的误差(Sil_Err)、它那张面高低的不准(Sil_H_Sd)、参照那一件交点沿"上"的不准(Meet_Sd)、位姿读数的抖动,合起来;
+   --  长轴朝向的不准 = 轮廓点误差 × √(长轴方向的方差 / 点数) ÷ (长短两轴方差之差)(主轴的一阶扰动),Z 倍到不了直角 ⇒ 才算有长轴
+   procedure Want_Scene (C : in out Context; F : Plug.Frame; W : Want; Arm : Integer; Sc : out Contact.Qty.Scene) is separate;
+   --  这一个要 ⇒ 要它怎么动(一个旋量)。量的名字按登记表(Qty_Kind);两件东西那一句的关系词各是两件之间的一个量(Contact.Qty),方向由关系词定
+   procedure Want_Twist (C : in out Context; F : Plug.Frame; W : Want; Arm : Integer; M : out Contact.Twist; Ok : out Boolean; Note : out Unbounded_String) is separate;
+
    procedure Round (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context) is separate;
 
    --  V1 口径"头顶眼按指尖算的残差"(2026-09-26):开机各停里不动的眼给这只手做的合空标记(每一瓣的尖 C.Lobe_Obs、各瓣的中点 C.Fixed_Obs),

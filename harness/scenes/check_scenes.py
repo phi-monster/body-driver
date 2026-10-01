@@ -331,6 +331,8 @@ def scenario(S, rep):
         return True
     if t == "bd_question":
         return question_scenario(S, rep)
+    if t == "bd_mouse_floor":
+        return mouse_floor_scenario(S, rep)
     if t == "bd_cloth":
         P = S.cloth_points("cloth")
         top = S.lm.table_info[0]["height"]
@@ -454,6 +456,77 @@ def pool_scenario(S, rep):
         S.set_pose(ra["label"], p0, r0)
         settle(S, ra["label"])
     return False
+
+
+def robot_root(S):
+    """身体的根(底盘)此刻在本 env 原点下的位置、朝向(仿真真值)"""
+    key = S.env.robot_manager.robot_key[0]
+    org = _np(S.env.scene_manager.env_origins[0])[:3]
+    d = key.data
+    return d.root_pos_w[0].detach().cpu().numpy() - org, d.root_quat_w[0].detach().cpu().numpy()
+
+
+def drive(S, rep, name, d_left, d_right, n):
+    """n 个动作里两个轮子的目标每个动作各往前转 d_left / d_right 弧度(胳膊、手指照读数不动),量底盘走了多远、转了多少"""
+    p0, q0 = robot_root(S)
+    yaw = lambda q: math.degrees(math.atan2(2 * (q[0] * q[3] + q[1] * q[2]), 1 - 2 * (q[2] ** 2 + q[3] ** 2)))
+    act = S.hold_action()
+    key = [k for k in act if k.endswith("arm_joint_state")][0]
+    tgt = np.asarray(act[key], dtype=float).copy()
+    # 胳膊那一串的顺序是 RoboDojo 按关节体里的顺序重排过的(robot_manager:find_joints 以后把 arm_joints_name 换成了它的顺序),按名字找轮子
+    names = list(S.env.robot_manager.robot_list[0].arm_joints_name)
+    il, ir = names.index("wheel_left_joint"), names.index("wheel_right_joint")
+    rep.setdefault("arm_joint_order", names)
+    w0 = tgt[[il, ir]].copy()
+    for _ in range(n):
+        tgt[il] += d_left
+        tgt[ir] += d_right
+        a = S.hold_action()
+        a[key] = tgt.copy()
+        S.env.take_action(a)
+    p1, q1 = robot_root(S)
+    st = S.env.get_obs()["state"]
+    w1 = np.asarray(st[key], dtype=float).reshape(-1)[[il, ir]]
+    out = {"actions": n, "d_left_rad": d_left, "d_right_rad": d_right, "wheel_turned_rad": [round(float(v), 3) for v in (w1 - w0)],
+           "moved_xy_m": [round(float(v), 4) for v in (p1 - p0)[:2]],
+           "dist_m": round(float(np.linalg.norm((p1 - p0)[:2])), 4), "yaw_deg": round(yaw(q1) - yaw(q0), 2), "z_m": [round(float(p0[2]), 4), round(float(p1[2]), 4)]}
+    rep.setdefault("drive", {})[name] = out
+    log("   底盘 %s:%d 个动作、轮子每个动作 %.3f / %.3f rad(轮子读数转了 %s)⇒ 走了 %s m(%.4f m)、转了 %.2f°、根高 %s;胳膊那一串的顺序 %s" % (
+        name, n, d_left, d_right, out["wheel_turned_rad"], out["moved_xy_m"], out["dist_m"], out["yaw_deg"], out["z_m"], names))
+    return out
+
+
+def mouse_floor_scenario(S, rep):
+    """第 39 条:底盘真在地上走(两个轮子一起转 ⇒ 往前走;反着转 ⇒ 原地转),老鼠离地 12 cm 判 1、8 cm 判 0"""
+    r = 0.05   # 轮子半径(make_wheelarm.py)
+    a = drive(S, rep, "往前", 0.004 / r, 0.004 / r, 50)          # 一个动作该走 4 mm(0.1 m/s),50 个动作该走 0.2 m
+    test(rep, "两个轮子一起转,底盘往前走了 %.3f m(该 0.2 m 上下)" % a["dist_m"], 1, 0.1 < a["dist_m"] < 0.3)
+    b = drive(S, rep, "原地转", -0.004 / r, 0.004 / r, 50)
+    test(rep, "两个轮子反着转,底盘原地转了 %.1f°、挪了 %.3f m" % (b["yaw_deg"], b["dist_m"]), 1, abs(b["yaw_deg"]) > 10 and b["dist_m"] < 0.05)
+    # 会躲:老鼠摆到离身体最近那一节 0.15 m(布局里 flee_radius 0.25 m 以内),走 5 个动作;它该正背着那一节跑,一个动作 1 cm ⇒ 远出 ~5 cm
+    from task.RoboDojo.bd import scene as SC
+    p0, q0 = S.pose("target")
+    near = SC._nearest_robot_xy(S.env, 0, p0[:2])
+    u = (p0[:2] - near) / max(float(np.linalg.norm(p0[:2] - near)), 1e-9)
+    S.set_pose("target", np.r_[near + u * 0.15, p0[2]], q0)
+    S.steps(10)
+    pa, _ = S.pose("target")
+    da = float(np.linalg.norm(pa[:2] - SC._nearest_robot_xy(S.env, 0, pa[:2])))
+    for _ in range(5):
+        S.env.take_action(S.hold_action())
+    pb, _ = S.pose("target")
+    db = float(np.linalg.norm(pb[:2] - SC._nearest_robot_xy(S.env, 0, pb[:2])))
+    rep["flee"] = {"start_m": round(da, 4), "after5_m": round(db, 4)}
+    test(rep, "老鼠离身体最近那一节 %.3f m,5 个动作以后 %.3f m(躲开了 ≥ 3 cm)" % (da, db), 1, db - da >= 0.03)
+    S.set_pose("target", p0, q0)
+    S.steps(10)
+    p0, q0 = S.pose("target")
+    test(rep, "老鼠在地上", 0, S.graded())
+    S.set_pose("target", p0 + [0, 0, 0.08], q0)
+    test(rep, "老鼠离地 8 cm", 0, S.graded())
+    S.set_pose("target", p0 + [0, 0, 0.12], q0)
+    test(rep, "老鼠离地 12 cm", 1, S.graded())
+    return True
 
 
 def question_scenario(S, rep):
@@ -628,7 +701,7 @@ def check_layout(lid, rep, tag=None):
                 links["%d/%s" % (i, n)] = [round(float(v), 4) for v in (p - org)]
         rep["robot_links_rest"] = links
         log("   身体每一节开局在哪:%s" % links)
-    if args.task == "bd_walker" or args.walk_label:
+    if args.task in ("bd_walker", "bd_mouse_floor") or args.walk_label:
         walk(S, rep, args.walk_label or None)
         save_images(env, rep, tag + "_walked")   # 走完以后它在哪(chase_mouse 走满 200 个动作那一炮:老鼠停在 G1 左小臂底下)
     # ③ 评分对不对

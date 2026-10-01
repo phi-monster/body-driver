@@ -1740,6 +1740,16 @@ begin
          end if;
    end Build_Goals;
 
+   --  ── 要它怎么动(I5,大并行 §2 第 16 条,路 5)──
+   --  这一句脑要的那几个(C.Wants)。今天按脑说的语言的根那一句(Say.Qty / Qty_Dir / Qty_Of)填一个;路 7 在 Fill_Say 里直接填 C.Wants 以后,这一段删掉
+   procedure Wants_From_Say is
+   begin
+      C.Wants.Clear;
+      if Length (Say.Qty) > 0 and then Say.Qty_Dir /= 0 then
+         C.Wants.Append (Want'(Thing => Say.Qty_Of, Rel => Sinew.Re_Qty, Qty => Say.Qty, Dir => Say.Qty_Dir, Ref => 0));
+      end if;
+   end Wants_From_Say;
+
    --  接触集(09-29 重写,PLAN §2 ②):到它上方(两眼交点 + 指尖朝下,现成)→ 量出来的手在它的形状上挑一组(Plan_Contact)→
    --  眼转到那一组的朝向、到悬停点(下手处沿进场方向往回退一个张口)→ 每一块先合到离料还剩一点(Pre)→ 沿进场方向往下,
    --  碰到没有按 Selfmap.Blocked(同碰桌面量指尖)。下到下手那一处之前一步以上就被挡住 = 手指落在了东西上(它自己别处、旁边的东西)
@@ -1875,15 +1885,21 @@ begin
          Event := S ("on the way to a point above it: ") & Ev1;
          return;
       end if;
-      --  脑这一句要它怎么动:"它的某个量往哪变" ⇒ 沿让那个量变的方向(Qty_Axis,量的)的一个旋量;没说量 ⇒ 接触集按"跟着手离开它躺的面"布置
+      --  脑这一句要它怎么动(I5):"它的某个量往哪变" / "它对另一件的某个关系" ⇒ 让那个量变得最快的那个旋量(Want_Twist,从量到的几何算);
+      --  没说、或者算不出(缺的那一样照实说在改量那一步)⇒ 接触集按"跟着手离开它躺的面"布置
+      Wants_From_Say;
       C.Want_Move := (others => <>);
-      if Length (Say.Qty) > 0 and then Say.Qty_Dir /= 0 then
+      if not C.Wants.Is_Empty then
          declare
-            Ax : constant Geom.V3 := Qty_Axis (C, To_String (Say.Qty));
-            Sg : constant Long_Float := (if Say.Qty_Dir > 0 then 1.0 else -1.0);
+            Mv : Contact.Twist;
+            Mok : Boolean;
+            Mnote : Unbounded_String;
          begin
-            if Geom.Norm (Ax) > 0.0 then
-               C.Want_Move := (Given => True, Move => Contact.Slide ([Sg * Ax (0), Sg * Ax (1), Sg * Ax (2)]));
+            Want_Twist (C, F, C.Wants.First_Element, Own, Mv, Mok, Mnote);
+            if Mok and then Contact.Moving (Mv) then
+               C.Want_Move := (Given => True, Move => Mv);
+            elsif not Mok then
+               Put_Line ("[身] ✋ 要它怎么动算不出(" & To_String (Mnote) & ")⇒ 接触集按跟着手离开它躺的面布置");
             end if;
          end;
       end if;
@@ -2053,11 +2069,96 @@ begin
       end if;
    end Contact_Onto;
 
+   --  它还在不在手里(改量的每一步走完都看,同一种量法):这一拍有没有读数、读数多少、合空时的读数多少、读数是不是掉回了合空那头
+   procedure Grip_State (Arm : Natural; Have_R : out Boolean; R_Now, Emp : out Long_Float; Empty_Now : out Boolean) is
+      Jk : constant Natural := Natural (Integer'Max (0, C.Wld.Held_Jaw));
+      Hf : Zone.Hand;
+      Found : Boolean := False;
+   begin
+      Have_R := Selfmap.Has_Jaw (F, Arm, Jk);
+      R_Now := (if Have_R then Selfmap.Jaw_Of (F, Arm, Jk) else 0.0);   --  没读数时不用它(先问 Have_R)
+      Emp := 0.0;
+      for H of C.Hands loop
+         if H.Arm = Arm and then H.K = Jk and then H.Measured then
+            Emp := H.Empty_Close; Hf := H; Found := True;
+         end if;
+      end loop;
+      Empty_Now := Have_R and then Found and then Past_Empty (Hf, R_Now) <= C.Map.Jaw_Noise;
+   end Grip_State;
+
+   --  改手里东西的一个角度量:绕要的那根轴(过它的中心,M.Pivot)转一个单位 = 开机量的"一条命令转得到的最大一档"(这只手那只眼的 Stride_Rot)× 脑的档位。
+   --  手和它一起绕同一根轴转(拿住 = 它跟着手走):手的位置绕那一点转过去、朝向转同一个角,一条命令(Selfmap.Step)。
+   --  转到了没(沿要的那根轴实到的转动)、它还在不在手里,同平移那一条的判法
+   procedure Change_Held_Angle (Arm : Natural; Amt : Long_Float; M : Contact.Twist; Qty : String) is
+      Hc : constant Integer := (if Arm < Natural (C.Map.Cam_On_Arm.Length) then C.Map.Cam_On_Arm (Arm) else -1);
+      Th : constant Long_Float := (if Hc >= 0 and then Natural (Hc) < Natural (C.Geo.Length) then C.Geo (Natural (Hc)).Stride_Rot * Amt else 0.0);
+      Oa : Boolean;
+      Ax : constant Geom.V3 := Contact.Unit (M.Ang, Oa);
+      Cur : constant Plug.Arm_Pose := F.EE (Arm);
+      Turned : Long_Float := 0.0;
+      Have_R, Empty_Now : Boolean;
+      R_Now, Emp : Long_Float;
+   begin
+      if Th <= 0.0 or else not Oa then
+         Event := S ("refused: I have not measured how far one command rotates this arm, so I cannot change its " & Qty & " by a known amount");
+         return;
+      end if;
+      if Plug.Reset_Pending (L) then
+         Event := S (Reset_Event);
+         return;
+      end if;
+      declare
+         Rv : constant Geom.V3 := [Th * Ax (0), Th * Ax (1), Th * Ax (2)];
+         Legs : Selfmap.Leg_Vectors.Vector;
+         Lim : Selfmap.Limits;
+         Wk : Selfmap.Walk;
+         Rs : Selfmap.Leg_Step_Vectors.Vector;
+         Frames : Natural;
+         Mok : Boolean;
+      begin
+         if C.Held_Set_Valid then
+            declare
+               S2 : Contact.Set := C.Held_Set;
+               St : Contact.Exec.Step_Vectors.Vector;
+               Why : Contact.Exec.No_Plan;
+               use type Contact.Exec.No_Plan_Kind;
+            begin
+               S2.Motion := (Lin => [others => 0.0], Ang => Rv, Pivot => M.Pivot);
+               Contact.Exec.Steps (S2, (Standoff_M => Geo_Base (C, Arm), Repeat_M => Geo_Base (C, Arm)), True, 1, St, Why);
+               Geo_Say ("接触集:改它的量(" & Qty & ")= " & Codec.Img (Natural (S2.Points.Length)) & " 个接触点绕过它中心的轴转 " & Codec.Fmt (Th, 3) & " rad ⇒ "
+                        & (if Why.Kind = Contact.Exec.Fine then "航点 " & Codec.Img (Natural (St.Length)) & " 步" else "航点排不出:" & Contact.Exec.Img (Why) & ",照走,走完看手指读数"));
+            end;
+         end if;
+         Legs.Append (Selfmap.Leg'(Arm => Arm, Goal => Carry_Goal (Cur, M, Th), Jaw => <>));
+         Selfmap.Step (L, C.Map, Legs, Lim, F, Wk, Rs, Frames, Mok);
+         Steps_Taken := Steps_Taken + 1;
+         if not Rs.Is_Empty then
+            Turned := Rs (0).Turned;
+         end if;
+         Geo_Say ("绕过它中心的轴转 " & Codec.Fmt (Th, 3) & " rad(手的位置跟着绕那一点转过去)⇒ 实到 " & Codec.Fmt (Turned, 3) & " rad" & (if Mok then "" else " · 身体说没走成"));
+      end;
+      Grip_State (Arm, Have_R, R_Now, Emp, Empty_Now);
+      if not Have_R then
+         Event := S ("settled: I rotated it " & Codec.Fmt (Turned, 3) & " rad about the axis that changes its " & Qty
+                     & "; my fingers report no reading this beat, so I cannot tell whether it is still between them");
+      elsif Empty_Now then
+         Event := S ("slipped: I rotated my hand " & Codec.Fmt (Turned, 3) & " rad about that axis and my fingers closed to their empty reading - it is no longer between them");
+         C.Wld.Holding := False;
+      elsif Turned + Turned < Th then   --  还不到要的一半(纯数学的一半)
+         Event := S ("resist: I commanded " & Codec.Fmt (Th, 3) & " rad about the axis that changes its " & Qty & " and rotated only " & Codec.Fmt (Turned, 3)
+                     & " - my arm cannot go further that way from here; it is still between my fingers");
+      else
+         Event := S ("settled: I rotated it " & Codec.Fmt (Turned, 3) & " rad about the axis that changes its " & Qty & "; it is still between my fingers (reading "
+                     & Codec.Fmt (R_Now, 3) & ", empty would be " & Codec.Fmt (Emp, 3) & ")");
+      end if;
+   end Change_Held_Angle;
+
    --  拿着它抬:沿它躺的面的法向(碰过的面按量到的法向,没碰过按"上")走一个单位(4 倍探针幅度 × 脑的档位,同贴近时那把尺)。
    --  抬完看手指读数:掉回空手值 = 它掉了(slipped);命令了没走到一半 = 胳膊到头(resist);否则 settled,并说它还在手里。
-   --  改手里东西的一个量:沿"让它变的方向"(Axis,单位向量)平移一个单位 —— 任何量同一条路;抬只是 height 这个量往上
-   procedure Change_Held_Qty (Arm : Natural; Amt : Long_Float; Axis : Geom.V3; Qty : String) is
-      Nn : constant Geom.V3 := Axis;
+   --  改手里东西的一个量:要的动 M(一个旋量,Want_Twist 从量到的几何算)。要转 ⇒ Change_Held_Angle;只平移 ⇒ 沿 M.Lin(单位向量)平移一个单位 ——
+   --  任何量同一条路;抬只是 height 这个量往上
+   procedure Change_Held_Qty (Arm : Natural; Amt : Long_Float; M : Contact.Twist; Qty : String) is
+      Nn : constant Geom.V3 := M.Lin;
       Ln : constant Long_Float := Stride_Of (C, Arm) * Amt;   --  一个单位 = 量出来的最大一档 × 脑的档位
       Cur : constant Plug.Arm_Pose := F.EE (Arm);
       Dw : constant Geom.V3 := [Nn (0) * Ln, Nn (1) * Ln, Nn (2) * Ln];
@@ -2068,6 +2169,10 @@ begin
       Went : Long_Float := 0.0;
       Note : Unbounded_String;
    begin
+      if Contact.Angle (M) > 0.0 then
+         Change_Held_Angle (Arm, Amt, M, Qty);
+         return;
+      end if;
       if Ln <= 0.0 then
          Event := S ("refused: I have not measured how far one push moves this arm, so I cannot change its " & Qty & " by a known amount");
          return;
@@ -2132,22 +2237,14 @@ begin
          end if;
       end;
       declare
-         Jk : constant Natural := Natural (Integer'Max (0, C.Wld.Held_Jaw));
-         Have_R : constant Boolean := Selfmap.Has_Jaw (F, Arm, Jk);
-         R_Now : constant Long_Float := (if Have_R then Selfmap.Jaw_Of (F, Arm, Jk) else 0.0);   --  没读数时不用它(下面先问 Have_R)
-         Emp : Long_Float := 0.0;
-         Hf : Zone.Hand;
-         Found : Boolean := False;
+         Have_R, Empty_Now : Boolean;
+         R_Now, Emp : Long_Float;
       begin
-         for H of C.Hands loop
-            if H.Arm = Arm and then H.K = Jk and then H.Measured then
-               Emp := H.Empty_Close; Hf := H; Found := True;
-            end if;
-         end loop;
+         Grip_State (Arm, Have_R, R_Now, Emp, Empty_Now);
          if not Have_R then
             Event := S ("settled: I moved it " & Len (C, Went) & " along the direction that changes its " & Qty
                         & "; my fingers report no reading this beat, so I cannot tell whether it is still between them") & Note;
-         elsif Found and then Past_Empty (Hf, R_Now) <= C.Map.Jaw_Noise then
+         elsif Empty_Now then
             Event := S ("slipped: I moved my hand " & Len (C, Went) & " along that direction and my fingers closed to their empty reading - it is no longer between them");
             C.Wld.Holding := False;
          elsif Went + Went < Ln then   --  两下加起来还不到要的一半(纯数学的一半)
@@ -2254,6 +2351,7 @@ begin
                   --  合 = 发合拢那头的读数(开机两头推到头量的,V1b ②;原来写死 0.0 —— 读数在 0–1、0 = 合是 x5 的约定)
                   Move_Jaw (L, C, F, A, Hand_Of (C, A, Say.Grip_K).Empty_Close, Steps_J, Reading, Say.Grip_K);
                   declare
+                     Pose_Closed : constant Plug.Arm_Pose := F.EE (A);   --  合上那一刻手在哪:拿住了,它就从这一刻起跟着手走
                      Empty : constant Long_Float := Hand_Of (C, A, Say.Grip_K).Empty_Close;
                      By_Reading : Boolean := Past_Empty (Hand_Of (C, A, Say.Grip_K), Reading) > C.Map.Jaw_Noise;
                      Sure_Held : Boolean := False;
@@ -2289,19 +2387,21 @@ begin
                                     ", empty-close reading " & Codec.Fmt (Empty, 3) & "); " & To_String (Note));
                      if By_Reading then
                         C.Wld.Holding := True; C.Wld.Held_Arm := Integer (A); C.Wld.Held_Jaw := Integer (Say.Grip_K); C.Wld.Held_Cam := Integer (Cam);
-                        --  接触集:拿住了 ⇒ 这一把的摩擦够(这就是身体量 μ 的办法)⇒ 手里的接触集记下来,锥放开到半空间(抬/搬按它算)
+                        --  接触集:拿住了 ⇒ 这一把的摩擦够(这就是身体量 μ 的办法)⇒ 手里的接触集记下来。锥照合上前算的那一份
+                        --  (半张角 = atan(这一把法向取最坏时要的摩擦)):拿住证明了它给得起这么多,没证明更多(10-01 前这里放开到半空间,
+                        --  等于说"拿住了摩擦就无限大",是拍的)
                         if Grasp_Valid then
                            Note_Grip_Mu (Geo_Name, Held => True);
                            C.Held_Set := Grasp_Set;
-                           for I in 0 .. Natural (C.Held_Set.Points.Length) - 1 loop
-                              declare
-                                 P : Contact.Point := C.Held_Set.Points (I);
-                              begin
-                                 P.Allowed.Half_Angle := 0.5 * Ada.Numerics.Pi;
-                                 C.Held_Set.Points.Replace_Element (I, P);
-                              end;
-                           end loop;
                            C.Held_Set_Valid := True;
+                           --  它的实心模型(同接触集那一份)+ 合上那一刻手的位姿:之后它在哪 = 手从那一刻起挪过的刚体运动带着它走
+                           declare
+                              Rp : Boolean;
+                              pragma Warnings (Off, Rp);
+                           begin
+                              Solid_Of (C, Geo_Name, C.Held_Shape, Rp);
+                              C.Held_Pose := Pose_Closed;
+                           end;
                         end if;
                         if Say.Grip_On >= 1 and then Say.Grip_On <= Natural (C.Items.Length)
                           and then C.Items (Say.Grip_On - 1).Slot >= 0
@@ -2351,6 +2451,51 @@ begin
             Report := Report & To_String (Did_Grip) & ". ";
          end if;
    end Do_Grip;
+
+   --  语言的根:脑说的是"它的某个量往哪变"(或"它对另一件的某个关系",I5 的 Ref)。合完(或本来就拿着)⇒ 按那个量要的动走一个单位
+   --  (Want_Twist 从量到的几何算出旋量;平移走 Stride、转走 Stride_Rot);没拿住就说没拿住,不走;算不出就照实说缺的是哪一样。哪个量都是这一条
+   procedure Change_Qty_Now is
+   begin
+      Wants_From_Say;
+      if C.Wants.Is_Empty then
+         return;
+      end if;
+      declare
+         use type Sinew.Rel;
+         W : constant Want := C.Wants.First_Element;
+         Qn : constant String := (if W.Rel = Sinew.Re_Qty then To_String (W.Qty) else Sinew.Rel_Word (W.Rel));
+         Dir_Word : constant String := (if W.Rel /= Sinew.Re_Qty then " " & Say_Item (C, W.Ref) elsif W.Dir > 0 then " up" else " down");
+         K : Contact.Qty.Kind;
+      begin
+         if W.Rel = Sinew.Re_Qty and then not Qty_Kind (Qn, K) then
+            Event := S ("refused: " & Qn & " is not a quantity I measure on it");
+            Report := Report & " I do not measure a quantity called " & Qn & ". ";
+         elsif Own >= 0 and then C.Wld.Holding and then C.Wld.Held_Arm = Own then
+            declare
+               M : Contact.Twist;
+               Ok : Boolean;
+               Note : Unbounded_String;
+            begin
+               Want_Twist (C, F, W, Own, M, Ok, Note);
+               if not Ok then
+                  Event := S ("refused: I cannot work out which way changes its " & Qn & " - " & To_String (Note) & " (" & Qn & " = " & Qty_Meaning (Qn) & ")");
+                  Report := Report & " I did not change its " & Qn & ": " & To_String (Note) & ". ";
+               elsif not Contact.Moving (M) then
+                  Event := S ("amount: already there - " & To_String (Note));
+                  Report := Report & " Its " & Qn & Dir_Word & ": " & To_String (Note) & ". ";
+               else
+                  Change_Held_Qty (Natural (Own), Amount_Factor (Null_Unbounded_String), M, Qn);
+                  Put_Line ("[身] ⚙ 改它的量(" & Qn & Dir_Word & "):" & To_String (Event));
+                  Report := Report & " Then, holding it, I changed its " & Qn & Dir_Word & ": " & To_String (Event) & ". ";
+                  Codec.Append_Line (Life_Path, "beat " & Codec.Img (Plug.Steps (L)) & " | " & Say_Item (C, W.Thing) & " " & Qn & Dir_Word & " | " & To_String (Event));
+               end if;
+            end;
+         else
+            Event := S ("lost: I could not change the " & Qn & " of " & Say_Item (C, W.Thing) & " - it is not in my hand");
+            Report := Report & " I did not change its " & Qn & ": it is not in my hand. ";
+         end if;
+      end;
+   end Change_Qty_Now;
 
    begin
       for N of Say.Avoid loop
@@ -2704,30 +2849,7 @@ begin
       end if;
       end if;   --  Geo_Case
       Do_Grip;
-      --  语言的根:脑说的是"它的某个量往哪变"。合完(或本来就拿着)⇒ 沿让那个量变的方向走一个单位;没拿住就说没拿住,不走。哪个量都是这一条
-      if Length (Say.Qty) > 0 and then Say.Qty_Dir /= 0 then
-         declare
-            Qn : constant String := To_String (Say.Qty);
-            Ax : Geom.V3 := Qty_Axis (C, Qn);
-            Dir_Word : constant String := (if Say.Qty_Dir > 0 then " up" else " down");
-         begin
-            if Geom.Norm (Ax) <= 0.0 then
-               Event := S ("refused: " & Qn & " is not a quantity I measure on it");
-               Report := Report & " I do not measure a quantity called " & Qn & ". ";
-            elsif Own >= 0 and then C.Wld.Holding and then C.Wld.Held_Arm = Own then
-               if Say.Qty_Dir < 0 then
-                  Ax := [-Ax (0), -Ax (1), -Ax (2)];
-               end if;
-               Change_Held_Qty (Natural (Own), Amount_Factor (Null_Unbounded_String), Ax, Qn);
-               Put_Line ("[身] ⚙ 改它的量(" & Qn & Dir_Word & "):" & To_String (Event));
-               Report := Report & " Then, holding it, I changed its " & Qn & Dir_Word & ": " & To_String (Event) & ". ";
-               Codec.Append_Line (Life_Path, "beat " & Codec.Img (Plug.Steps (L)) & " | " & Say_Item (C, Say.Qty_Of) & " " & Qn & Dir_Word & " | " & To_String (Event));
-            else
-               Event := S ("lost: I could not change the " & Qn & " of " & Say_Item (C, Say.Qty_Of) & " - it is not in my hand");
-               Report := Report & " I did not change its " & Qn & ": it is not in my hand. ";
-            end if;
-         end;
-      end if;
+      Change_Qty_Now;
       Report := Report & Mode_Line (C, To_String (Event));
    end;
    --  这一节的结果攒进这一段程序的账上;跑完一整段才一次交给脑

@@ -143,10 +143,31 @@ def install_checks(func_parser):
 
 
 # ---------------------------------------------------------------- 会自己走的东西
+def _nearest_robot_xy(env, env_idx, xy):
+    """身体所有连杆里,桌面 / 地面上离 xy 最近的那一节的位置(本 env 原点下;仿真真值)"""
+    rm = getattr(env, "robot_manager", None)
+    if rm is None:
+        return None
+    org = _np(env.scene_manager.env_origins[env_idx])[:2]
+    best, bd = None, 1e9
+    for key in getattr(rm, "robot_key", []):
+        d = key.data
+        P = getattr(d, "body_pos_w", None)
+        if P is None:
+            P = getattr(d, "body_link_pos_w")
+        P = P[env_idx].detach().cpu().numpy()[:, :2] - org
+        k = int(np.argmin(np.linalg.norm(P - xy, axis=1)))
+        dist = float(np.linalg.norm(P[k] - xy))
+        if dist < bd:
+            best, bd = P[k], dist
+    return best
+
+
 class Walker:
     """布局里带 "bd_walk" 的 Rigid:{"speed": 每个动作走几米, "turn_every": 每几个动作随机换一次方向,
     "region": [[x0, x1], [y0, y1]](碰边就反射), "free_height": 高出它开局那张面多少就算被拿起来了(不走), "seed": 随机数种子,
-    "yaw0": 资产自己的前方和 +x 差多少度}。每个物理子步调一次 tick。
+    "yaw0": 资产自己的前方和 +x 差多少度, "flee_radius": 可选 —— 身体哪一节(仿真真值:每一节连杆的位置)进了这么近,就朝正背着最近那一节的
+    方向跑(会躲的老鼠,第 39 条);没进来照旧随机走}。每个物理子步调一次 tick。
 
     怎么走:它心里有一个"该在哪"的点,每个物理子步往走的方向挪 speed / collect_interval(一个动作正好 speed);
     每个子步按"该在哪 − 此刻在哪"给它一个水平速度,位置由物理自己积分(摩擦、碰撞都算:被挡住就过不去,不会穿过去)。
@@ -196,6 +217,10 @@ class Walker:
                     self.state[key] = st
                 if st["ticks"] > 0 and st["ticks"] % (int(w["turn_every"]) * sub) == 0:
                     st["heading"] = float(st["rng"].uniform(0.0, 2.0 * math.pi))
+                if w.get("flee_radius"):
+                    near = _nearest_robot_xy(env, env_idx, p[:2])
+                    if near is not None and float(np.linalg.norm(p[:2] - near)) < float(w["flee_radius"]):
+                        st["heading"] = math.atan2(p[1] - near[1], p[0] - near[0])   # 正背着最近的那一节跑
                 upright = (Rb @ st["up0"])[2] > math.cos(math.radians(30.0))
                 if p[2] > st["z_rest"] + float(w["free_height"]) or not upright:
                     st["target"] = p[:2].copy()          # 被拿起来 / 翻倒了:不走;放下、立起来以后从那儿接着走
