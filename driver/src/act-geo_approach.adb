@@ -1,28 +1,65 @@
 separate (Act)
 procedure Geo_Approach (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Cam, Arm : Natural; Slot : Integer;
                         Step_Limit : Natural; Event : out Unbounded_String; Steps_Taken : out Natural; Beats : out Natural;
-                        Above : Boolean := False; Amt : Long_Float := 0.5; Until_Touch : Boolean := False;
-                        Name : Unbounded_String := Null_Unbounded_String) is
+                        Above : Boolean := False; Amt : Long_Float; Until_Touch : Boolean := False;
+                        Name : Unbounded_String := Null_Unbounded_String;
+                        Gear : Unbounded_String := Null_Unbounded_String) is
    G : constant Geom.Cam_Geo := Geo_Of (C, Cam);
    Beats0 : constant Natural := Plug.Steps (L);
    --  🔴 没说步数 ⇒ 我不设上限:走到到位 / 碰到 / 被顶住 / 看丢为止(身体不许自己收工)。H28 2026-09-22 实测:我自设的 12 推上限
    --  (其中 5 推是转眼)让 above 停在离合拢点 0.111 m 处,还报"你要的步数走完了"—— 脑根本没要过步数,接着就合了个空。
    Limit : constant Natural := (if Step_Limit > 0 then Step_Limit else Natural'Last);
-   Tol : constant Long_Float := 0.1 * G.Gap;      --  到位容差 = 张口的一成(比例,无量纲)
-   Inward : constant Long_Float := 0.15 * G.Gap;  --  指尖中点再往手心里一点 = 张口的 15%(比例,无量纲):别咬在皮上
-   Want : Geom.V3 := G.Tip;
+   --  指尖该到的那一点 = 量过的指尖中点(G.Tip)对着它的中心(10-01 路 4:原来再往"手心里"缩 15% 张口、按相机 +z 当手心方向,
+   --  一个拍的数加一条相机装法的假设;碰到为止的那一段接着往它身上走、碰到才停,不靠预先缩进去)
+   Want : constant Geom.V3 := G.Tip;
    U, V : Long_Float;
    Seen, Mok : Boolean;
-   --  🔴 一条命令最多走多远,由【脑说的步子档位】定(small / medium / large,语言 §4.3:按身体自己量出的幅度计价),不由我自己调。
-   --  单位 = 测距那一下横挪的大小(4 倍探针幅度,每一段开头它都刚被证明走得到);small = 1 个单位,medium = 2,large = 4。
-   --  H8 2026-09-22 实测为什么要有上限:横挪 0.026 m 实到 0.024 m;之后每步命令 0.14 m(其中往下 0.097 m)实到 ≈ 0,连着 5 步 ——
-   --  仿真日志 65 行 "continuous ik did not converge … falling back to global IK":大步先被连续逆解拒掉,退回全局逆解
-   --  又因为目标在桌面高度而无解 ⇒ 静默不动。GB5 的球心离桌面 3.4 cm,一步 170 mm 过得去;平躺的剪刀过不去。
-   --  ⚠️ 我先写过一版"走成了加倍、没走成减半",被自由棘轮拦下(owner 09-03:驱动不许自己调步子)—— 已撤。
-   --  命令了没走到 ⇒ 我不自己换打法,如实说"没走成"交回脑(它可以说 small,也可以说合手)。
-   --  一条命令最多走多远:看着走(09-28 定)—— 不再乘脑的档位;远的时候走还差的六成再看一眼(下面的 Frac),
-   --  一条命令走不到的那一截由"到过的范围 + 往外一步"拆开、手一动就跟着往前重发(Selfmap.Go);量出来的最大一档只用来判"量过没有"
-   Step_Cap : constant Long_Float := (if Stride_Of (C, Arm) > 0.0 then Long_Float'Last else 0.0);
+   --  一步多大(看着走,大并行 §2 第 23 条;10-01 路 4):每一步走还差的全部,上限只有三条 ——
+   --    反解够得到(Lim.Reach,Selfmap.Step 按量到的关节范围问反解、解不到就缩);
+   --    眼跟得住(Eye_Cap:走完它在这只眼里还在画面里、在眼前);
+   --    离可能碰到它的地方还远(Selfmap.Plan_Approach:按它的位置量得多不准、它朝我这边多大、我自己多不准算出那条带子,
+   --      带子外一条命令到带子前,带子里小步)。
+   --  脑说了 small / medium / large ⇒ 再加一条"最多这么大"(Gear_Cap,语言 §17.6);没说 ⇒ 不加(原来远的时候只走还差的六成再看一眼:拍的数)。
+   --  一条命令走不到的那一截由"到过的范围 + 往外一步"拆开、手一动就跟着往前重发(Selfmap.Go)。
+   --  量出来的最大一档(开机步幅)只用来判"这条臂走得了路没有"(上下都走不到 ⇒ 0)
+   Walkable : constant Boolean := Stride_Of (C, Arm) > 0.0;
+   Miss : Long_Float := 0.0;              --  上一步走完离它要到的那一处还差多少(我自己这一次到位的不准,Plan_Approach 用)
+   Press_Left : Long_Float := 0.0;        --  碰到为止那一段:还许往它身上走多远(到它的中心再过它量得多不准那么远,没碰到就照实说)
+   --  眼跟得住:这一步(世界系平移 Dw)走完,它(Pw)在这只眼里还在眼前、在画面里;走完整步就出了画面 ⇒ 二分到还在画面里的那一截,
+   --  细到这只手一步看得见的那一档。此刻就不在画面里(看不见、凭记住的位置走)⇒ 眼帮不上,不限
+   function Eye_Cap (Cur : Plug.Arm_Pose; Pw, Dw : Geom.V3) return Long_Float is
+      Ln : constant Long_Float := Geom.Norm (Dw);
+      Notch : constant Long_Float := Geo_Base (C, Arm);
+      W : constant Long_Float := Long_Float (F.Cams (Cam).W);
+      H : constant Long_Float := Long_Float (F.Cams (Cam).H);
+      function In_View (T : Long_Float) return Boolean is
+         P : Plug.Arm_Pose := Cur;
+         Pu, Pv : Long_Float;
+         Front : Boolean;
+      begin
+         P (0) := Cur (0) + T * Dw (0); P (1) := Cur (1) + T * Dw (1); P (2) := Cur (2) + T * Dw (2);
+         Geom.Project (G, P, Pw, Pu, Pv, Front);
+         return Front and then Pu >= 0.0 and then Pv >= 0.0 and then Pu < W and then Pv < H;
+      end In_View;
+      Lo : Long_Float := 0.0;
+      Hi : Long_Float := 1.0;   --  整步(沿这一步的比例)
+   begin
+      if Ln <= 0.0 or else Notch <= 0.0 or else not In_View (0.0) or else In_View (1.0) then
+         return Long_Float'Last;
+      end if;
+      while (Hi - Lo) * Ln > Notch loop
+         declare
+            Mid : constant Long_Float := (Lo + Hi) / 2.0;   --  二分
+         begin
+            if In_View (Mid) then
+               Lo := Mid;
+            else
+               Hi := Mid;
+            end if;
+         end;
+      end loop;
+      return Long_Float'Max (Lo * Ln, Notch);
+   end Eye_Cap;
    --  🔴 被一个面顶住之后:顶住的只是【那个方向】(命令了没走到的那个方向,量出来的),剩下的误差里沿着面的那一部分照样走得了。
    --  H12 2026-09-22 实测:垂直下探碰到桌面即停,此刻剪刀在两指正前方 0.021 m(沿桌面);整段就此停下 ⇒ 合手合了个空(读数 0.000 = 空手值)。
    --  "touching" 要的是合拢点到它身上;桌面不让我再往下,不等于不让我往前。这是在量到的接触下继续解同一个约束,不是换打法。
@@ -50,7 +87,6 @@ procedure Geo_Approach (L : in out Plug.Link; C : in out Context; F : in out Plu
    Rep : Selfmap.Leg_Step;
 begin
    Event := Null_Unbounded_String; Steps_Taken := 0; Beats := 0;
-   Want (2) := Want (2) + Inward;   --  相机 -z 朝前 ⇒ 往手心方向 = +z
    --  🔴 每一段从头量:上一段留下的那几眼(转过手、离得远)和这一段近处的眼搅在一起,交点会飞
    --  (H25 2026-09-22 实测:悬停 12 cm 处重新指了它,交点却算到 0.7 m 外、偏 54 cm,手往反方向走)。
    --  两只眼同时看见就一帧出数;只有一只眼就横挪一步当基线 —— 这一段自己的眼。
@@ -100,6 +136,7 @@ begin
    end if;
    if (Length (Its_Name) = 0 and then C.Geo_Slot /= Slot) or else (Length (Its_Name) > 0 and then C.Geo_Name /= Its_Name) then
       C.Geo_Obs.Clear; C.Geo_Came := 0.0;
+      C.Geo_R_Obj := Long_Float'Last;   --  换了一件:它多大要重新看全了再量
    end if;
    C.Geo_Slot := Slot;
    if Length (Its_Name) > 0 then
@@ -114,7 +151,7 @@ begin
       Event := S ("lost: I cannot see the thing you named in this eye right now");
       return;
    end if;
-   if Step_Cap <= 0.0 then
+   if not Walkable then
       Event := S ("refused: I have not measured how far one command moves this arm, so I cannot walk toward it");
       return;
    end if;
@@ -126,7 +163,9 @@ begin
          Cur : constant Plug.Arm_Pose := F.EE (Arm);
          Pw, Pc, D : Geom.V3;
          Pw_Up_Sd : Long_Float := Long_Float'Last;   --  它的位置沿"上"有多不准(交点的几何算出来的;量不出 = 最大)
+         Pw_Sd : Long_Float := Long_Float'Last;      --  它的位置沿"我走向它"那个方向有多不准(同上)
          Dist : Long_Float;
+         Plan : Selfmap.Approach_Plan;               --  这一步的分辨率、带子、小步(Selfmap.Plan_Approach)
       begin
          --  🔴 它此刻在哪:问【此刻】每一只看得见它的眼 —— 两条以上视线一交就是它,它动不动都一样。这是唯一的量法;
          --  交不上 ⇒ 用上一次两眼交出来的位置并说出来(09-26 删了"我自己挪过的那几眼"和"一条视线落到它躺的面上"两种)。
@@ -160,12 +199,20 @@ begin
             if Mok then
                Pw := Pm;
                Pw_Up_Sd := Geom.Meet_Sd (Rays, Sds, Pm, Up_Dir (C));
+               declare
+                  Tw : constant Geom.V3 := Tip_World (C, Arm, Cur);
+                  Tv : constant Geom.V3 := [Pm (0) - Tw (0), Pm (1) - Tw (1), Pm (2) - Tw (2)];
+                  Tl : constant Long_Float := Geom.Norm (Tv);
+               begin
+                  Pw_Sd := (if Tl > 0.0 then Geom.Meet_Sd (Rays, Sds, Pm, [Tv (0) / Tl, Tv (1) / Tl, Tv (2) / Tl]) else Pw_Up_Sd);
+               end;
                Geo_Say ("此刻 " & To_String (Who) & " 相机同时看见它 ⇒ 视线交在 (" & Mm (Pw (0)) & "," & Mm (Pw (1)) & "," & Mm (Pw (2))
                         & "),视线间最大偏差 " & Mm (Spread) & ";按两只眼各自的误差和视线夹角,高低上不准 "
                         & (if Pw_Up_Sd < Long_Float'Last then Mm (Pw_Up_Sd) else "(量不出)"));
             elsif Known then
                Pw := C.Geo_Pw;
                Pw_Up_Sd := C.Geo_Pw_Up_Sd;
+               Pw_Sd := C.Geo_Pw_Sd;
                if not Said_Known then
                   Said_Known := True;
                   Geo_Say ("此刻没有两只眼同时看见它 ⇒ 按上一次两眼交出来的位置 (" & Mm (Pw (0)) & "," & Mm (Pw (1)) & "," & Mm (Pw (2))
@@ -182,6 +229,7 @@ begin
                --  ⇒ 只记两眼交出来的(09-26 起也只有这一种估计)
                if Mok then
                   C.Geo_Pw := Pw; C.Geo_Pw_Valid := True; C.Geo_Pw_Name := Its_Name; C.Geo_Pw_Met := True; C.Geo_Pw_Up_Sd := Pw_Up_Sd;
+                  C.Geo_Pw_Sd := Pw_Sd;
                end if;
             end if;
          end;
@@ -230,6 +278,21 @@ begin
          end;
          Dist := Geom.Norm (D);
          C.Geo_Dist := Dist; C.Geo_Round := C.Round_N; C.Geo_At := Cur; C.Geo_At_Arm := Integer (Arm); C.Geo_At_Above := Above;
+         --  它朝我这边多大:这只眼里看全了它 ⇒ 框的长边按远近折成世界长度,取一半(纯数学的一半);看不全 ⇒ 用上一次看全时量的
+         if Seen and then Whole and then -Pc (2) > 0.0 and then G.F > 0.0 then
+            declare
+               Bx : constant Integer := Boxed_By (C, Cam, (if Length (Name) > 0 then Name else Its_Name));
+            begin
+               if Bx >= 0 then
+                  declare
+                     B : constant Boxed_Thing := C.Boxed (Natural (Bx));
+                  begin
+                     C.Geo_R_Obj := 0.5 * Long_Float (Integer'Max (B.X1 - B.X0, B.Y1 - B.Y0)) * (-Pc (2)) / G.F;
+                  end;
+               end if;
+            end;
+         end if;
+         Plan := Selfmap.Plan_Approach (Dist, C.Geo_R_Obj, Pw_Sd, G.Tip_Sd, Miss, C.Map.EE_Noise, Geo_Base (C, Arm), G.Rms);
          Geo_Say ("它在相机前 " & Mm (-Pc (2)) & "(左右 " & Mm (Pc (0)) & " 上下 " & Mm (Pc (1)) & "),离指尖该到的那点还差 " & Mm (Dist) &
                   "(左右 " & Mm (D (0)) & " 上下 " & Mm (D (1)) & " 前后 " & Mm (D (2)) & ")");
          if -Pc (2) <= 0.0 then
@@ -251,19 +314,29 @@ begin
                Geo_Say ("被一个面顶着:沿着面还差 " & Mm (Dist) & "(往面里那一份 " & Mm (Long_Float'Max (0.0, Into)) & " 走不了,不算)");
             end;
          end if;
-         if (Pressing or else Dist <= Tol) and then Until_Touch and then (not Above or else Pressing) and then not Held_Back
+         if (Pressing or else Dist <= Plan.Res) and then Until_Touch and then (not Above or else Pressing) and then not Held_Back
            and then (Geom.Norm (C.Geo_Dir) > 0.0 or else Pressing) and then Steps_Taken < Limit
          then
             if not Pressing then
                Pressing := True; Press_Dir := C.Geo_Dir;
-               Geo_Say ("我估着到位了(差 " & Mm (Dist) & "),可你说的是碰到为止 ⇒ 沿来的方向接着往它身上走,到真被顶住");
+               Press_Left := Dist + Plan.Res;   --  到它的中心,再过它量得多不准那么远
+               Geo_Say ("我估着到位了(差 " & Mm (Dist) & ",分辨率 " & Mm (Plan.Res) & "),可你说的是碰到为止 ⇒ 沿来的方向接着往它身上走,"
+                        & "一步 " & Mm (Plan.Lstep) & ",到真被顶住;最多再走 " & Mm (Press_Left));
+            end if;
+            if Press_Left <= 0.0 then
+               Event := S ("lost: I went on toward it to where I measured it and past that by how unsure I am of where it is ("
+                           & Len (C, Plan.Res) & ") and touched nothing - it is not where I measured it");
+               exit;
             end if;
             declare
-               Ln : constant Long_Float := 4.0 * Geo_Base (C, Arm);     --  一个量距单位(刚被证明走得到的那一档)
+               --  一步 = 小步(Plan_Approach:手自己的不准分给 Blocked 当底的那几步,再小也得是这只眼看得出的一步)
+               Ln : constant Long_Float := Plan.Lstep;
                Dw : constant Geom.V3 := [Press_Dir (0) * Ln, Press_Dir (1) * Ln, Press_Dir (2) * Ln];
             begin
-               Geo_Move (L, C, F, Arm, Dw, Mok, Wk, Rep);
+               Geo_Move (L, C, F, Arm, Dw, Mok, Wk, Rep, Reach => True);
                Steps_Taken := Steps_Taken + 1;
+               Press_Left := Press_Left - Rep.Went;
+               Miss := Table.Norm (Chan.Delivered (F.EE (Arm), Rep.Aim), Chan.Pos_Channels);
                declare
                   Now : constant Plug.Arm_Pose := F.EE (Arm);
                   Got : constant Long_Float := Rep.Went;   --  沿命令方向实到多少
@@ -274,9 +347,13 @@ begin
                      C.Geo_At := Now; C.Geo_At_Arm := Integer (Arm); C.Geo_At_Above := False;   --  压到它身上了:接下来合手不用再下去
                      exit;
                   end if;
+                  if Rep.Reach_Cut and then Rep.Len <= 0.0 then
+                     Event := S ("resist: I cannot reach any further toward it from here (my arm cannot be solved for the next step)");
+                     exit;
+                  end if;
                end;
             end;
-         elsif Dist <= Tol then
+         elsif Dist <= Plan.Res then
             Event := S ((if Held_Back
                          then "contact: I am against a surface and as close as it lets me (the thing sits " & Len (C, Dist) & " from where my fingers close, measured along that surface)"
                          elsif Above
@@ -308,7 +385,8 @@ begin
                   Nn_P : constant Geom.V3 := Up_Dir (C);
                begin
                   Pressing := True; Press_Dir := [-Nn_P (0), -Nn_P (1), -Nn_P (2)];
-                  Geo_Say ("到了它上方,可你说的是碰到为止 ⇒ 顺着法向往它身上压,到真被顶住");
+                  Press_Left := G.Gap + Dist + Plan.Res;   --  它的中心在悬停点下面一个张口,再过它量得多不准那么远
+                  Geo_Say ("到了它上方,可你说的是碰到为止 ⇒ 顺着法向往它身上压,一步 " & Mm (Plan.Lstep) & ",到真被顶住;最多再走 " & Mm (Press_Left));
                end;
             else
                exit;
@@ -319,11 +397,18 @@ begin
             exit;
          end if;
          if not Pressing then
-         --  走一步(Selfmap.Step):目标 = 指尖该到的那一点,这一步走还差的 Frac、最长 Step_Cap(量过步幅 ⇒ 不限:一条命令走不到的那一截由
-         --  "到过的范围 + 往外一步"拆开、手一动就跟着往前重发)
-         Geo_Move (L, C, F, Arm, Geom.Ap (Geom.Cam_R (G, Cur), D), Mok, Wk, Rep,
-                   Frac => (if Dist > G.Gap then 0.6 else 1.0),   --  远时走六成再看一眼(比例,无量纲);近了一步到
-                   Track => Step_Cap);
+         --  走一步(Selfmap.Step):目标 = 指尖该到的那一点,这一步走还差的全部,上限:反解够得到、眼跟得住(Eye_Cap)、
+         --  离可能碰到它的地方还远(到它上方 ⇒ 悬停点在它外面,不设;往它身上走 ⇒ 带子外一条命令到带子前,带子里一步一小步)、
+         --  脑说的档位(最多这么大)
+         declare
+            Dw_Full : constant Geom.V3 := Geom.Ap (Geom.Cam_R (G, Cur), D);
+         begin
+            Geo_Move (L, C, F, Arm, Dw_Full, Mok, Wk, Rep,
+                      Track => Long_Float'Min (Eye_Cap (Cur, Pw, Dw_Full), Gear_Cap (C, Arm, Gear, Miss)),
+                      Clear => (if Above then Long_Float'Last else Long_Float'Max (Plan.Clear, Plan.Lstep)),
+                      Reach => True);
+         end;
+         Miss := Table.Norm (Chan.Delivered (F.EE (Arm), Rep.Aim), Chan.Pos_Channels);
          declare
             Dw : constant Geom.V3 := [Rep.Cmd (0), Rep.Cmd (1), Rep.Cmd (2)];   --  这一步命令的平移(世界系)
             Ln : constant Long_Float := Rep.Len;
@@ -455,8 +540,8 @@ begin
                   Geo_Say ("它有一截出了画面/被挡住,这一眼不可信 ⇒ 不再更新它的位置;凭上一次两眼交出来的位置走完");
                end if;
             elsif not Seen then
-               --  最后一步它进了指缝、被手指挡住也正常:上一眼已经在两倍容差内(倍数,无量纲)
-               if Dist <= 2.0 * Tol then
+               --  最后一步它进了指缝、被手指挡住也正常:上一眼已经分不出还差(在分辨率以内)
+               if Dist <= Plan.Res then
                   Event := S ("amount: arrived (I lost sight of it on the last step; it was " & Len (C, Dist) & " from where my fingers close)");
                   exit;
                elsif Known or else C.Geo_Pw_Valid then

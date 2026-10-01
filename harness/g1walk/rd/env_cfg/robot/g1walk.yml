@@ -1,0 +1,11 @@
+# body-driver walking humanoid rig (大并行 §2 第 40 条,路 8): Unitree G1 standing free on the living-room floor (pelvis 0.75 m above the floor), facing +y.
+robots:
+  - {
+    robot_type: arm,
+    robot_name: g1walk,
+    coupled: True,
+    default_root_pos: [0.0, -0.6, 0.80],
+    default_root_rot: [0.7071068, 0, 0, 0.7071068],
+    grasp_perfect_direction: "top_down",
+    enabled_self_collisions: False
+  }

@@ -1350,7 +1350,10 @@ package body Kinem is
    procedure Refine_Mv (Frames : Frame_Vectors.Vector; Cs : Corr_Vectors.Vector; M : in out Model; Rep : in out Fit_Report) is
       Nf : constant Natural := Natural (Frames.Length);
       N : constant Natural := M.N;
-      Np : constant Natural := N_Params (M);
+      --  ④ 解的数 = 运动学那一份(轴 + 对数焦距,同 ③)再加镜头中心(主点 Cx、Cy):扫描时几个关节绕不同的轴转、同一片静止的场景进很多格,
+      --  主点看得出来(画幅中心只当起步;10-01 起不再钉死在正中 —— 仿真的主点碰巧就在正中,钉死了验收查不出它)
+      Nb : constant Natural := N_Params (M);
+      Np : constant Natural := Nb + 2;
       Nt_Ax : constant Natural := N_Turn (M);
       N_Reg : constant Natural := 2 * Nt_Ax + 1;   --  约束行:每根转的轴两行 + 尺度一行
       S : Mv_Set;
@@ -1404,7 +1407,12 @@ package body Kinem is
             return True;
          end Same_Set;
          function Hstep (V : Long_Float) return Long_Float is (1.0e-6 * Long_Float'Max (1.0, abs V));   --  差分步(相对 1e-6,无量纲)
-         function To_Model (Xx : Vec) return Model is (From_X (M, Xx));
+         function To_Model (Xx : Vec) return Model is
+            Mm : Model := From_X (M, Xx (Xx'First .. Xx'First + Nb - 1));
+         begin
+            Mm.Cx := Xx (Xx'First + Nb); Mm.Cy := Xx (Xx'First + Nb + 1);
+            return Mm;
+         end To_Model;
          procedure Poses (Mm : Model) is
          begin
             for Fr in 0 .. Nf - 1 loop
@@ -1476,7 +1484,8 @@ package body Kinem is
                Scale_Model (M, 1.0 / Sqrt (S2 / Long_Float (Cnt)));
             end if;
          end;
-         To_X (M, X);
+         To_X (M, X (0 .. Nb - 1));
+         X (Nb) := M.Cx; X (Nb + 1) := M.Cy;
          Poses (M);
          Mv_Init (S, M.F, M.Cx, M.Cy, Pr, Pt, Lz.all);
          --  起步的抗野点尺度按起步的远近就量(Rn 跟远近无关;不解远近时用不着尺度,给什么都一样)—— 不拍一个像素数起步(09-30 以前 3 px)
@@ -1518,12 +1527,12 @@ package body Kinem is
                Rep.Mv_Rounds := Round;
                Prev_In (0 .. S.No - 1) := S.Obs_In (0 .. S.No - 1);
                Prev_Live (0 .. S.Nt - 1) := S.Live (0 .. S.Nt - 1);
-               Mv_Eval (S, Exp (X (Np - 1)), M.Cx, M.Cy, Pr, Pt, Lz.all, Tau, Wa, Wb, Ru, Rv, Rn, G, H, Lt, Stuck);   --  门里的重解远近
+               Mv_Eval (S, Exp (X (Nb - 1)), X (Nb), X (Nb + 1), Pr, Pt, Lz.all, Tau, Wa, Wb, Ru, Rv, Rn, G, H, Lt, Stuck);   --  门里的重解远近
                if Round = 1 then
                   Rep.Mv_Start_Px := Mv_Med (S, Ru, Rv);
                end if;
                Tau := Mv_Sig (S, Ru, Rn);   --  门里重量噪声
-               Mv_Eval (S, Exp (X (Np - 1)), M.Cx, M.Cy, Pr, Pt, Lz.all, Tau, Wa, Wb, Ru, Rv, Rn, G, H, Lt, Stuck);
+               Mv_Eval (S, Exp (X (Nb - 1)), X (Nb), X (Nb + 1), Pr, Pt, Lz.all, Tau, Wa, Wb, Ru, Rv, Rn, G, H, Lt, Stuck);
                Stuck_X := Stuck;
                for T in 0 .. S.Nt - 1 loop
                   Live_N := Live_N + S.Live (T);
@@ -1545,7 +1554,7 @@ package body Kinem is
                --  不一样,远近自己还在收的那一点被除以 1e-6 当成导数,多视图 800 轮才从焦距 419 爬到 410;09-30 以前试步解 4 遍、基准 2 遍,
                --  同样的毛病落在比代价上:试步多收的那一点也算成"降了")
                Poses (To_Model (X));
-               Mv_Eval (S, Exp (X (Np - 1)), M.Cx, M.Cy, Pr, Pt, Lz.all, Tau, Wa, Wb, Ru, Rv, Rn, G, H, Lt, Stuck);
+               Mv_Eval (S, Exp (X (Nb - 1)), X (Nb), X (Nb + 1), Pr, Pt, Lz.all, Tau, Wa, Wb, Ru, Rv, Rn, G, H, Lt, Stuck);
                Stuck_X := Stuck;
                Base;
                C0 := Cost (Ru, Rv, Rg0);
@@ -1700,6 +1709,81 @@ package body Kinem is
             end;
          end loop;
          M := To_Model (X);
+         --  主点的不确定度(像素):最后一轮的雅可比(加权)⇒ (JᵀJ)⁻¹ × 每行残差的方差(残差平方和 ÷ (行数 − 待解的数));
+         --  远近已经按模型解掉(只剩模型这一份的协方差)
+         declare
+            A : Mat (0 .. Np - 1, 0 .. Np - 1) := [others => [others => 0.0]];
+            Inv : Mat (0 .. Np - 1, 0 .. Np - 1) := [others => [others => 0.0]];
+            Ss : Long_Float := 0.0;
+            Ok_Inv : Boolean := True;
+         begin
+            for I in 0 .. Nr - 1 loop
+               Ss := Ss + R0 (I) ** 2;
+               for K in 0 .. Np - 1 loop
+                  if Jc (I, K) /= 0.0 then
+                     for L2 in 0 .. Np - 1 loop
+                        A (K, L2) := A (K, L2) + Jc (I, K) * Jc (I, L2);
+                     end loop;
+                  end if;
+               end loop;
+            end loop;
+            for K in 0 .. Np - 1 loop
+               Inv (K, K) := 1.0;
+            end loop;
+            --  高斯–约当(列主元)
+            for Col in 0 .. Np - 1 loop
+               declare
+                  Pv : Natural := Col;
+               begin
+                  for Rw in Col + 1 .. Np - 1 loop
+                     if abs A (Rw, Col) > abs A (Pv, Col) then
+                        Pv := Rw;
+                     end if;
+                  end loop;
+                  if abs A (Pv, Col) <= 1.0e-300 then   --  主元为零保护(数值,无量纲)
+                     Ok_Inv := False;
+                     exit;
+                  end if;
+                  if Pv /= Col then
+                     for Cc in 0 .. Np - 1 loop
+                        declare
+                           T1 : constant Long_Float := A (Col, Cc);
+                           T2 : constant Long_Float := Inv (Col, Cc);
+                        begin
+                           A (Col, Cc) := A (Pv, Cc); A (Pv, Cc) := T1;
+                           Inv (Col, Cc) := Inv (Pv, Cc); Inv (Pv, Cc) := T2;
+                        end;
+                     end loop;
+                  end if;
+                  declare
+                     Dg : constant Long_Float := A (Col, Col);
+                  begin
+                     for Cc in 0 .. Np - 1 loop
+                        A (Col, Cc) := A (Col, Cc) / Dg; Inv (Col, Cc) := Inv (Col, Cc) / Dg;
+                     end loop;
+                  end;
+                  for Rw in 0 .. Np - 1 loop
+                     if Rw /= Col and then A (Rw, Col) /= 0.0 then
+                        declare
+                           Fct : constant Long_Float := A (Rw, Col);
+                        begin
+                           for Cc in 0 .. Np - 1 loop
+                              A (Rw, Cc) := A (Rw, Cc) - Fct * A (Col, Cc); Inv (Rw, Cc) := Inv (Rw, Cc) - Fct * Inv (Col, Cc);
+                           end loop;
+                        end;
+                     end if;
+                  end loop;
+               end;
+            end loop;
+            if Ok_Inv and then Nr > Np then
+               declare
+                  S2 : constant Long_Float := Ss / Long_Float (Nr - Np);
+               begin
+                  Rep.Cx_Sd := Sqrt (Long_Float'Max (0.0, S2 * Inv (Nb, Nb)));
+                  Rep.Cy_Sd := Sqrt (Long_Float'Max (0.0, S2 * Inv (Nb + 1, Nb + 1)));
+               end;
+            end if;
+         end;
          for J in 0 .. N - 1 loop
             if not M.Ax (J).Slide then
                M.Ax (J).W := Unit (M.Ax (J).W);

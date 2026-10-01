@@ -1,3 +1,4 @@
+with Links;
 separate (Jointboot)
 procedure Load_Kin (Path : String; K : out Kin_Store; Ok : out Boolean; Note : out Unbounded_String) is
    use Ada.Text_IO;
@@ -29,6 +30,7 @@ procedure Load_Kin (Path : String; K : out Kin_Store; Ok : out Boolean; Note : o
    function V3_At (T : Strs; I : Natural) return Geom.V3 is ([V (T, I), V (T, I + 1), V (T, I + 2)]);
    function Arm_Of (T : Strs) return Natural is (Natural'Value (T (1)));
    Version_Ok : Boolean := False;
+   Pts : Links.Link_Pt_Vectors.Vector;   --  每一节的表面点(读完交给 Links;放进世界的那一份装回核对过以后由开机给)
 begin
    K := (others => <>); Ok := False; Note := Null_Unbounded_String;
    Open (Fi, In_File, Path);
@@ -38,7 +40,8 @@ begin
          Tag : constant String := (if T.Is_Empty then "" else T (0));
       begin
          if Tag = "kin" then
-            Version_Ok := Natural (T.Length) >= 2 and then T (1) = "4";
+            --  5 = 每一节的表面点;4 = 少了表面点、别的一样(缺什么量什么:只补量表面点,别的照用 —— 10-01 P8N 旧文件整份从零量)
+            Version_Ok := Natural (T.Length) >= 2 and then (T (1) = "5" or else T (1) = "4");
          elsif Tag = "key" and then Natural (T.Length) >= 2 then
             K.Key := To_Unbounded_String (T (1));
          elsif Tag = "world_cam" then
@@ -152,6 +155,16 @@ begin
          elsif Tag = "board" then
             K.Board.Append (Geom.Scene_Pt'(Pw => V3_At (T, 1), Cov => M3_At (T, 4), U => V (T, 13), V => V (T, 14), Sh => V (T, 15),
                                            Views => Natural'Value (T (16))));
+         elsif Tag = "link" then
+            declare
+               P : Links.Link_Pt;
+            begin
+               if Links.From_Fields (T, 1, P) then
+                  Pts.Append (P);
+               else
+                  Version_Ok := False;   --  一行读不全 = 不是这一版
+               end if;
+            end;
          end if;
       end;
    end loop;
@@ -198,8 +211,9 @@ begin
       end;
    end if;
    Ok := True;
+   Links.Set_Points (Pts);   --  kin 4 读回来是空的:开机只补量表面点(body_driver)
    Note := To_Unbounded_String (Codec.Img (Natural (K.Worlds.Length)) & " 只手的运动学和世界、不动的眼(第" & Integer'Image (K.World_Cam) & " 台)、板 "
-                                & Codec.Img (Natural (K.Board.Length)) & " 个点");
+                                & Codec.Img (Natural (K.Board.Length)) & " 个点、每一节的表面点 " & Codec.Img (Natural (Pts.Length)) & " 个");
 exception
    when others =>
       if Is_Open (Fi) then

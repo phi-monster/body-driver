@@ -96,6 +96,7 @@ package Kinem is
       Mv_Passes : Natural := 0;        --  ④ 做了几遍(从上一遍的结果再做,直到残差中位不再降;最后一遍只是确认)
       Mv_Rounds : Natural := 0;        --  ④ 留下的那一遍里"重挑内点 + 解"做了几轮(做到内点集不再变)
       Mv_Sig_Px : Long_Float := 0.0;   --  ④ 量到的配点噪声 σ(像素;重投影残差垂直于对极线那一分量的 Mad_Sigma × 中位 —— 远近解掉的只是沿对极线那一分量)
+      Cx_Sd, Cy_Sd : Long_Float := 0.0;   --  ④ 一起解出来的主点(镜头中心)的不确定度(像素;0 = 没解)
       Secs : Floats;                   --  各步用了几秒(墙上时间):① 网格、① 精修、①b 焦距和各轴一起、② 比例、③ 一起解、④ 多视图
       Unsettled : Ada.Strings.Unbounded.Unbounded_String;   --  碰到保险上限还没收住的那几步(空 = 每一步都做到了不再变);不空就照实印出来
    end record;

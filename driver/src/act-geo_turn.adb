@@ -22,8 +22,10 @@ begin
    declare
       G : constant Geom.Cam_Geo := C.Geo (Natural (Hc));
       Wk : Selfmap.Walk;   --  这一段转空走的底(走一步判挡没挡用:开头装进开机探针量的那几步)
+      --  上一步之前还差多少(10-01 路 4:原来最多转 40 条命令,拍的数;现在一步下去没再近过一档 = 转到头了,照实说)
+      Prev_Ang : Long_Float := Long_Float'Last;
    begin
-      for Step_No in 1 .. 40 loop
+      loop
          if Plug.Reset_Pending (L) then
             Event := S (Reset_Event);
             return;
@@ -42,6 +44,12 @@ begin
                Event := S ("amount: arrived (my eye now points there, off by " & Codec.Fmt (Ang, 3) & " rad)");
                return;
             end if;
+            if not Selfmap.Gained (Prev_Ang, Ang, Notch) then
+               Event := S ("amount: stopped getting closer to pointing there (still " & Codec.Fmt (Ang, 3) & " rad off after "
+                           & Codec.Img (Steps_Taken) & " turning steps; the last one gained less than I can see)");
+               return;
+            end if;
+            Prev_Ang := Ang;
             declare
                --  正前方正好背对着要的方向时叉积为零:随便取一根和正前方垂直的轴(和世界 z、世界 x 各叉一次,取长的那根)
                Az : constant Geom.V3 := [Fwd (1), -Fwd (0), 0.0];          --  Fwd × z
@@ -87,6 +95,5 @@ begin
             end;
          end;
       end loop;
-      Event := S ("steps: I took 40 turning steps and my eye is still not pointing there");
    end;
 end Geo_Turn;

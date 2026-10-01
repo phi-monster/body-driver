@@ -99,20 +99,76 @@ package body Plan is
       return La'Length > 0 and then La = Letters (B);
    end Same_Name;
 
-   function Holds_Name (Outer, Inner : String) return Boolean is
-      Lo : constant String := Letters (Outer);
-      Li : constant String := Letters (Inner);
+   --  Ok (K) = L 的前 K 个字母(From_End:后 K 个字母)能整个切成 Forbidden 里的词;Ok (0) = 空串 = 能
+   type Cut_Array is array (Natural range <>) of Boolean;
+   function Cuts (L : String; Forbidden : String; From_End : Boolean) return Cut_Array is
+      Ok : Cut_Array (0 .. L'Length) := [0 => True, others => False];
    begin
-      if Li'Length = 0 or else Li'Length > Lo'Length then
+      for K in 1 .. L'Length loop
+         declare
+            I : Natural := Forbidden'First;
+            J : Natural;
+         begin
+            while I <= Forbidden'Last and then not Ok (K) loop
+               J := I;
+               while J <= Forbidden'Last and then Forbidden (J) /= ' ' loop
+                  J := J + 1;
+               end loop;
+               declare
+                  Wd : constant String := Forbidden (I .. J - 1);
+               begin
+                  if Wd'Length in 1 .. K and then Ok (K - Wd'Length) then
+                     declare
+                        --  前 K 个字母的最后一个词 / 后 K 个字母的第一个词从哪一个字母起
+                        S : constant Positive := (if From_End then L'Last - K + 1 else L'First + K - Wd'Length);
+                     begin
+                        if L (S .. S + Wd'Length - 1) = Wd then
+                           Ok (K) := True;
+                        end if;
+                     end;
+                  end if;
+               end;
+               I := J + 1;
+            end loop;
+         end;
+      end loop;
+      return Ok;
+   end Cuts;
+
+   function Same_Core (A, B : String; Forbidden : String) return Boolean is
+      La : constant String := Letters (A);
+      Lb : constant String := Letters (B);
+      Pa : constant Cut_Array := Cuts (La, Forbidden, From_End => False);
+      Sa : constant Cut_Array := Cuts (La, Forbidden, From_End => True);
+      Pb : constant Cut_Array := Cuts (Lb, Forbidden, From_End => False);
+      Sb : constant Cut_Array := Cuts (Lb, Forbidden, From_End => True);
+   begin
+      --  整个名字都能切成语言词(untildone = until done)⇒ 脑没写出任何名字自己的字母,它没有芯。
+      --  不先挡这个,until|do|ne 和 say|do|ne 会在剩下的 ne 上"对上"(把 done 劈开了);挡了它,有芯的名字的芯也就不会整个是语言词
+      if Pa (La'Length) or else Pb (Lb'Length) then
          return False;
       end if;
-      for I in Lo'First .. Lo'Last - Li'Length + 1 loop
-         if Lo (I .. I + Li'Length - 1) = Li then
-            return True;
+      for I in 0 .. La'Length - 1 loop               --  A 的芯前面粘着 I 个字母
+         if Pa (I) then
+            for J in 0 .. La'Length - I - 1 loop     --  芯后面粘着 J 个
+               if Sa (J) then
+                  declare
+                     C : constant String := La (La'First + I .. La'Last - J);
+                  begin
+                     for P in 0 .. Lb'Length - C'Length loop   --  B 里同一个芯前面粘着 P 个
+                        if Pb (P) and then Sb (Lb'Length - P - C'Length)
+                          and then Lb (Lb'First + P .. Lb'First + P + C'Length - 1) = C
+                        then
+                           return True;
+                        end if;
+                     end loop;
+                  end;
+               end if;
+            end loop;
          end if;
       end loop;
       return False;
-   end Holds_Name;
+   end Same_Core;
 
    function Same_Pixels (Ma : Bytes.Bools; Ua, Va : Long_Float; Mb : Bytes.Bools; Ub, Vb : Long_Float; W, H : Natural) return Boolean is
       function Inside (U, V : Long_Float) return Boolean is
@@ -144,6 +200,17 @@ package body Plan is
       return S;
    end Known_Names;
 
+   function Other_Eyes (Cam : Natural; Has_Picture : Eye_Flags) return Bytes.Ints is
+      R : Bytes.Ints;
+   begin
+      for K in Has_Picture'Range loop
+         if K /= Cam and then Has_Picture (K) then
+            R.Append (Integer (K));
+         end if;
+      end loop;
+      return R;
+   end Other_Eyes;
+
    function Before_Eye (W : String; Eye : Natural; Records : Named_Vectors.Vector) return Name_Verdict is
       V : Name_Verdict;
    begin
@@ -158,7 +225,7 @@ package body Plan is
       return V;
    end Before_Eye;
 
-   function Without_Eye (W : String; Eye : Natural; Records : Named_Vectors.Vector) return Name_Verdict is
+   function Without_Eye (W : String; Eye : Natural; Records : Named_Vectors.Vector; Forbidden : String) return Name_Verdict is
       V : Name_Verdict;
       Pick : Unbounded_String;       --  对上的那一件(字母串)
       Picks : Natural := 0;          --  对上了几件(按字母去重)
@@ -172,7 +239,7 @@ package body Plan is
                Ln : constant String := Letters (N);
             begin
                if R.Boxed and then Ln'Length > 0
-                 and then (if Pass_Exact then Same_Name (N, W) else Holds_Name (W, N) or else Holds_Name (N, W))
+                 and then (if Pass_Exact then Same_Name (N, W) else Same_Core (W, N, Forbidden))
                  and then Ada.Strings.Unbounded.Index (Picked, "|" & Ln & "|") = 0
                then
                   Append (Picked, "|" & Ln & "|");
@@ -230,6 +297,7 @@ package body Plan is
    end Without_Eye;
 
    procedure Rebind_Missing (Binds : in out Bind_Vectors.Vector; Records : Named_Vectors.Vector; Eye : Natural;
+                             Forbidden : String;
                              Item_Of : not null access function (Bx : Natural) return Natural;
                              Got : out Natural) is
       function Is_Role (K : String) return Boolean is
@@ -250,7 +318,7 @@ package body Plan is
          begin
             if E.Item <= 0 and then not Is_Role (K) then
                declare
-                  V : constant Name_Verdict := Without_Eye (K, Eye, Records);
+                  V : constant Name_Verdict := Without_Eye (K, Eye, Records, Forbidden);
                begin
                   if V.Kind in Nv_This | Nv_Elsewhere and then Item_Of (Natural (V.Index)) > 0 then
                      E.Item := Integer (Item_Of (Natural (V.Index)));

@@ -16,6 +16,37 @@ package Selfmap is
    end record;
    package Part_Vectors is new Ada.Containers.Vectors (Natural, Part);
    package Floor_Vectors is new Ada.Containers.Vectors (Natural, Picture.Floor_Map, Picture."=");
+   --  ── 身体报的每一组读数,开机推一下量出来是什么(大并行 I1,路 1;10-01 加,旧字段 Arms / Jaws / Cam_On_Arm 照旧填)──
+   --  Arm:推它有眼整幅跟着动(眼长在它上面),它就是一条臂;Closing:推它只动了画面里一块,而那一块在某条臂自己那只眼里 = 那条臂的合拢通道;
+   --  Carrying:推它每只眼都整幅在动 = 扛着全身走的那组;Piece:推它只动了画面里一块,哪条臂的眼里都不是 = 一块零件(长在哪儿量不出);
+   --  Mute:推它读数跟着走,可哪只眼里都没东西变(接入契约第 2 条);Not_Following:推它读数不跟,画面也没变(第 1 条:推不动);
+   --  Reading:不是命令(身体没把它当命令回声),只是一组读数 —— 推别的组时它跟着变(Follows)或者一直不变;Unprobed:还没量
+   type Group_Role is (Unprobed, Arm, Closing, Carrying, Piece, Mute, Not_Following, Reading);
+   type Group_Info is record
+      Role : Group_Role := Unprobed;
+      Name : Ada.Strings.Unbounded.Unbounded_String;   --  这一组读数在观测里的路径(只给开机报告 / 文档)
+      N_Values : Natural := 0;                         --  这一组几个数
+      Arm : Integer := -1;                             --  Arm:第几条臂;Closing:哪条臂的合拢通道;别的 -1
+      Eyes : Ints;                                     --  整幅跟着它动的眼(相机号;Arm / Carrying)
+      Seen_In : Ints;                                  --  只看见它带动的一块的眼(相机号;Closing / Piece,Arm 在别的眼里)
+      Twin : Integer := -1;                            --  同名的另一组(身体的命令回声;-1 = 没有)
+      Follows : Integer := -1;                         --  Reading:推哪一组(组号)时它跟着变;-1 = 推哪一组都不变
+      Probe : Long_Float := 0.0;                       --  认出来时那一推多大(读数单位;0 = 没认成)
+      Delivered : Long_Float := 0.0;                   --  那一推读数实到多少(读数单位,跟得最少的那个数)
+      Lied : Boolean := False;                         --  一个方向推了画面变、另一个方向读数说走了画面却没变(接入契约第 3 条:没动却不说)
+   end record;
+   package Group_Vectors is new Ada.Containers.Vectors (Natural, Group_Info);
+   --  ── 命令 → 动作的阶跃响应(大并行 §2 第 9 条,V5;10-01 路 4)──
+   --  一条命令发出后头 Dead 拍读数不动,之后每拍走还差的 Alpha(一阶)⇒ 发出后第 t 拍走到这条命令的几成(Predict)。
+   --  开机按每一次探针那一条命令逐拍走到它自己的几成量(Measure:每个通道推过去、推回来各一条),每条臂一份(Body_Map.Resp)。
+   --  N = 量了几条;Err = 拿这个模型重放量它用的那几条,逐拍预测和读数最多差这一条命令的几成。Alpha = 0 = 没量
+   type Response is record
+      Dead  : Natural := 0;
+      Alpha : Long_Float := 0.0;
+      N     : Natural := 0;
+      Err   : Long_Float := 0.0;
+   end record;
+   package Response_Vectors is new Ada.Containers.Vectors (Natural, Response);
    type Body_Map is record
       Arms : Natural := 0;
       N_Cams : Natural := 0;
@@ -43,7 +74,21 @@ package Selfmap is
       Amp_Hist : Plug.Floats_Vectors.Vector;
       Deliv_Hist : Plug.Floats_Vectors.Vector;
       Measured_Times : Natural := 0;
+      --  身体报的每一组读数开机量出来是什么(Layout.Groups 的下标一一对应;空 = 这一版开机还没按组量)。I1 的通用写法:
+      --  Selfmap.Graph 从它答"扛着全身走的那几组""长在这条臂上的眼"(路 1,10-01 加)
+      Groups : Group_Vectors.Vector;
+      --  (V5)每条臂的阶跃响应(开机探针量的;身体文件里存它归路 1 的 bodyfile 读写,没存之前装回身体文件的那一回 = 空、照实说没量)
+      Resp : Response_Vectors.Vector;
    end record;
+   --  命令发出后第 Beat 拍(1 = 发出后收到的第一帧)走到这条命令的几成;没量过(Alpha = 0)⇒ 0
+   function Predict (R : Response; Beat : Positive) return Long_Float;
+   --  一串逐拍的"走到这条命令的几成"(Tracks:每条命令一串,第 I 个 = 发出后第 I + 1 拍)⇒ 模型:动起来 = 走过这一条的百分之一
+   --  (Negligible,同 Go 判"停了");Dead = 各条动起来之前那几拍的中位;Alpha = 各条动起来那一拍走到的几成的中位。一条都没动起来 ⇒ 没量
+   function Fit_Response (Tracks : Plug.Floats_Vectors.Vector) return Response;
+   --  这一串和模型逐拍最多差几成;起效差几拍(模型说第 Dead + 1 拍动,这一串第几拍动起来;一直没动 ⇒ 0)
+   function Response_Err (R : Response; Track : Floats) return Long_Float;
+   function Effect_Miss (R : Response; Track : Floats) return Natural;
+
    --  快速核对:每只手推一个通道(存的幅度),实到和存的差一半以内且画面里看得见 ⇒ 身体没变
    type String_Note is record
       Text : Ada.Strings.Unbounded.Unbounded_String;
@@ -79,7 +124,10 @@ package Selfmap is
                  Watch : Watcher := null; Joints : Floats := F64_Vectors.Empty_Vector; Group : Integer := -1;
                  Groups : Ints := Int_Vectors.Empty_Vector; Qs : Plug.Floats_Vectors.Vector := Plug.Floats_Vectors.Empty_Vector;
                  Tol : Long_Float := 0.0; Tol_Rot : Long_Float := 0.0;
-                 Tols : Plug.Floats_Vectors.Vector := Plug.Floats_Vectors.Empty_Vector);
+                 Tols : Plug.Floats_Vectors.Vector := Plug.Floats_Vectors.Empty_Vector;
+                 Track_T, Track_R : access Floats := null);
+   --  Track_T / Track_R 给了(位姿目标)⇒ 这一条发出后逐拍走到它自己的几成:平移那一份 / 转动那一份(V5 量阶跃响应用;
+   --  哪一份是这条命令要走的由调用方定 —— 只转的命令平移那一份是合成的余数,拿它当分母就是除以零)
    --  Tols(和 Qs 同形:每组每个关节一道门)给了 ⇒ "到了" = 每个关节差不到它自己那道门(关节目标);"停了"的门照旧按 Tol。
    --  开机扫描用:扫的那根差不到这一格的三分之一,别的关节差不到每根轴单独起步收格子的门(Kinem.Clean_Tol;H1 2026-09-28)
    --  一组关节这一拍"到了没有"(Go 里用的就是它;纯函数,导出给自检):Tols 这一位 > 0 ⇒ 这个关节按它自己的门,否则按 Tol;门 ≤ 0 的关节永远不算到
@@ -93,10 +141,16 @@ package Selfmap is
    function Settle_Since (L : Plug.Link; From_Seq : Natural; Noise : Long_Float) return Natural;
    procedure Idle (L : in out Plug.Link; F : in out Plug.Frame; N : Natural; Ok : out Boolean);   --  不下命令空等 N 拍
    --  什么都不做时读数抖多少、画面抖多少(静止对,4 拍):位姿 / 姿态 / 抓握 / 关节读数的噪声 + 每台相机的灰度地板。
+   --  先等上一个动作的尾巴收住才量:每组读数(每条臂的平移、转动,每组关节、每组抓握)一拍挪的不再比上一拍少 = 那一组收住了,
+   --  每组都收住了才开始量(还在慢慢挪的那一截不算噪声;出口是量到的"不再变小",不设拍数)。
    --  地板用这几拍里最后一对"两帧都收到了画面"的静止对;一对都没有的那台 ⇒ 地板记成 U8'Last(量不到它的噪声 ⇒ 它的画面里什么都不算动了,
    --  不拿空画面当静止对、不编一个 0 的地板)。
    --  Measure 开头用它;只报关节的身体开机前半段(还没有位姿)也用它(同一种量法)。M.Arms 条臂的位姿噪声(没有位姿 = 0)
    procedure Measure_Idle (L : in out Plug.Link; F : in out Plug.Frame; M : in out Body_Map; Ok : out Boolean);
+   --  Measure_Idle 量静止噪声的量法版本(路 1 10-01 加;改了这一段怎么量的那一路把它加一):身体文件记着每一份噪声是第几版量的,
+   --  版本对不上就不信、开机重量(Bodyfile)。1 = 接着上一个动作就量 4 拍(慢的身体会把还在收的尾巴量进去:H4 / H7 的 ee_noise 0.0121);
+   --  身体文件里没记版本的 = 更老,也不信
+   Idle_Ver : constant := 1;
    --  等到画面连着两拍都不再变(各自的灰度地板以内),最多 Max 拍;返回用了几拍。
    --  Ok = 停稳了。等满 Max 拍还在变 ⇒ Ok = False、Used = Max(照实说没停稳 —— 09-30:原来超时照样 Ok = True,握区在还在动的画面上量);
    --  线断了 ⇒ Ok = False、Used < Max
@@ -196,10 +250,42 @@ package Selfmap is
       Halted     : Boolean := False;                   --  途中 Watch 叫停
       Moving     : Boolean := False;                   --  等满了还在动(不是它自己停下的)
       Left, Left_Rot : Long_Float := 0.0;              --  走完离 Goal 还差的平移、转动
+      Fracs_T, Fracs_R : Floats;                       --  (V5)发出后逐拍走到这一步的几成(平移 / 转动;没有那一样 = 空)
+      Busy : Long_Float := 0.0;                        --  (V5)这一步里驱动自己一拍最多花了几秒(收到一帧到发下一条之前:判停 + 发命令,不含等帧)
    end record;
    package Leg_Step_Vectors is new Ada.Containers.Vectors (Natural, Leg_Step);
+   --  一步(Step 的账)逐拍走到它的几成:平移、转动哪一份是这一步要走的(各按这条臂一步看得见的那一档折成档数,大的那一份);
+   --  Notches = 那一份有几档(预测差几成 × 它 = 差几档)。只转的一步平移那一份是指尖补偿的合成余数 ⇒ 不拿它当分母
+   procedure Step_Track (M : Body_Map; S : Leg_Step; Track : out Floats; Notches : out Long_Float);
    --  走到一个目标 = 同一个 Walk 一步一步 Step(每步从此刻的读数起走还差的):每组都差不到分辨率就到了;一步下去哪组都没再近过分辨率
    --  = 这就是此刻能到的最近(身体到头 / 被挡住),照实报还差多少;有一组 Blocked_T / Blocked_R 就是被挡住(同接触集里"眼走到悬停点"那一段)
    procedure Step (L : in out Plug.Link; M : Body_Map; Legs : Leg_Vectors.Vector; Lim : Limits; F : in out Plug.Frame;
                    W : in out Walk; Rep : out Leg_Step_Vectors.Vector; Frames : out Natural; Ok : out Boolean);
+
+   --  ── 走近一件东西每一步多大(I6 的调用方用;纯函数,导出给自检)── 全是量到的量,没有拍的数:
+   --  小步(到"可能碰到它"的那条带子里每一步多大)= 手自己的不准(Stats.Z × √(指尖 Tip_Sd² + 这一次到位差 Miss² + 读数噪声²))
+   --  分给 Blocked 当底的那几步(Free_Base);再小也得是这只眼看得出的一步:地板 = Stats.Z × max(读数噪声, 一档 × 眼的像素残差),
+   --  而且不小于一档(比一档小的一步在它自己那只眼里不到一个像素)。同接触集往下伸的小步(Act.Plan_Descent 同一个式子)
+   function Careful_Step (Tip_Sd, Miss, Noise, Notch, Eye_Rms : Long_Float) return Long_Float;
+   type Approach_Plan is record
+      Res   : Long_Float := 0.0;   --  到没到的分辨率:还差的不到"量它、量我自己"的不准(Stats.Z 倍)⇒ 分不出还差,就是到了(不小于小步的地板)
+      Band  : Long_Float := 0.0;   --  可能碰到它的那条带子从它的中心往外多远 = 它朝我这边的半径 + Res
+      Clear : Long_Float := 0.0;   --  这一步最多走多远还不进带子(带子前留出 Free_Base 步小步给 Blocked 当底);≤ 0 = 已经在带子里
+      Lstep : Long_Float := 0.0;   --  带子里每一步多大(Careful_Step)
+   end record;
+   --  Dist = 指尖该到的那一点(它的中心)还差多远;R_Obj = 它朝我这边的半径(画面里的框按远近折出来的;量不出 ⇒ Long_Float'Last:全程小步);
+   --  Sd_Target = 它的位置沿走的方向有多不准(两眼交点按各眼的误差算的;量不出 ⇒ Long_Float'Last:全程小步,照实;
+   --  到没到只按我自己看得出的那一步判)
+   function Plan_Approach (Dist, R_Obj, Sd_Target, Tip_Sd, Miss, Noise, Notch, Eye_Rms : Long_Float) return Approach_Plan;
+   --  脑说的步子档位 = 这一步最多多大(语言 §17.6;大并行 §2 第 23 条):small = 小步(Small,Careful_Step),large = 一条命令走得到的
+   --  最大一档(Large,开机量的步幅),medium = 两者的几何中点(对数尺上的正中;两头都是量的);别的词 / 没说 ⇒ 不加上限(Long_Float'Last)
+   function Gear_Bound (Gear : String; Small, Large : Long_Float) return Long_Float;
+   --  这一步比上一步之前又近了没有:Prev = 上一步之前还差多少(Long_Float'Last = 还没走过),Now = 此刻还差多少,Res = 分辨率。
+   --  近了不到一个分辨率 = 看不出近了 ⇒ False(走到头了 / 被什么拦着,不再拿同一步去撞;原来是拍一个"最多走几步")
+   function Gained (Prev, Now, Res : Long_Float) return Boolean is (Prev = Long_Float'Last or else Prev - Now > Res);
+   --  走到一个定了的目标(一组,Goal 是绝对位姿):同一个 Walk 一步一步 Step,每步走还差的全部,上限按 Lim;
+   --  到了 = 平移、转动都差不到 Res / Res_Rot;被挡住(Blocked)、一步下去哪样都没再近过分辨率(Gained)、走满 Max_Steps(> 0)、线断了就收
+   type Walk_End is (Arrived, Was_Blocked, No_Gain, Max_Steps_Done, Lost_Link);
+   procedure Walk_To (L : in out Plug.Link; M : Body_Map; G : Leg; Lim : Limits; Res, Res_Rot : Long_Float; Max_Steps : Natural;
+                      F : in out Plug.Frame; W : in out Walk; Went, Turned : out Long_Float; Steps : out Natural; Why : out Walk_End);
 end Selfmap;

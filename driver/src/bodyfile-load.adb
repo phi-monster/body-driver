@@ -4,6 +4,7 @@ function Load (Path : String; Key : String; M : in out Selfmap.Body_Map; Hands :
    D : Json.Doc;
    Err : Unbounded_String;
    Text : Unbounded_String;
+   Noise_Note : Unbounded_String;   --  静止噪声不信时开机报告那一句
 begin
    Note := Null_Unbounded_String;
    if not Ada.Directories.Exists (Path) then
@@ -52,6 +53,17 @@ begin
       M.Arms := Natural (Num ("arms")); M.N_Cams := Natural (Num ("cams")); M.Per_Arm := Natural (Num ("per_arm"));
       M.Channels := M.Arms * M.Per_Arm;
       M.EE_Noise := Num ("ee_noise"); M.Rot_Noise := Num ("rot_noise"); M.Jaw_Noise := Num ("jaw_noise");
+      --  静止噪声是第几版量法量的(没记 = 更老):对不上 ⇒ 不信,记成负数(开机重量:Merge 只用这一回量的,照用存的那条路先换成这一回量的)
+      declare
+         Nv : constant Integer := Json.Get (D, 0, "noise_ver");
+         Ver : constant Integer := (if Nv >= 0 then Integer (Json.Num (D, Nv)) else 0);
+      begin
+         if Ver /= Selfmap.Idle_Ver then
+            M.EE_Noise := -1.0; M.Rot_Noise := -1.0; M.Jaw_Noise := -1.0;
+            Noise_Note := To_Unbounded_String (";静止噪声是老量法量的(第 " & Codec.Img (Ver) & " 版,现在第 " & Codec.Img (Selfmap.Idle_Ver)
+                                               & " 版)⇒ 不信,开机重量");
+         end if;
+      end;
       M.Settle := Natural (Num ("settle"));
       M.Amp := Arr (Json.Get (D, 0, "amp"));
       M.Delivered := Arr (Json.Get (D, 0, "delivered"));
@@ -101,7 +113,7 @@ begin
       Hands.Clear;
       if Integer (Json.Num (D, Json.Get (D, 0, "method_ver"))) /= Method_Ver then
          Note := To_Unbounded_String ("身体文件是老量法(存的版本 " & Codec.Img (Integer (Json.Num (D, Json.Get (D, 0, "method_ver")))) &
-                                      ",现在 " & Codec.Img (Method_Ver) & ")⇒ 握区重量,其余照用" & Jaw_Note);
+                                      ",现在 " & Codec.Img (Method_Ver) & ")⇒ 握区重量,其余照用" & Jaw_Note) & Noise_Note;
          return True;
       end if;
       declare
@@ -234,7 +246,8 @@ begin
             end loop;
          end if;
       end;
-      Note := To_Unbounded_String ("装回身体文件(量过 " & Codec.Img (M.Measured_Times) & " 次,身体图 " & Codec.Img (Natural (Sch.S.Length)) & " 个样本)" & Jaw_Note);
+      Note := To_Unbounded_String ("装回身体文件(量过 " & Codec.Img (M.Measured_Times) & " 次,身体图 " & Codec.Img (Natural (Sch.S.Length)) & " 个样本)" & Jaw_Note)
+              & Noise_Note;
    end;
    return True;
 exception
