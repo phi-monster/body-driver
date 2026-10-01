@@ -1412,4 +1412,127 @@ begin
              & Codec.Img (R4.Regrasps) & " 回 · 再握不上 ⇒ " & R5.How'Image & " 走了 " & Codec.Fmt (D5, 4)
              & " · 牙:不松开重握 ⇒ 螺丝只转了 " & Codec.Fmt (Naive / Deg, 1) & "°");
    end;
+
+   --  🔴 接到执行上的那一层(Linkage.Follow_Held,Change_Held_Qty 那一下"手里的东西沿要的方向变一个单位"换成它):同一扇门(把手离轴 0.8,
+   --  握得住顶着的 0.9 步),脑要把手沿"和门开的方向差 50°"挪 0.15(门开到二十几度才挪得够)。调用方只给"走一下":手实到多少、
+   --  东西挪了多少(眼没另外跟着 ⇒ 就是手实到的)、挡没挡(Selfmap.Blocked);一步多长按这只手看得见的一档 0.03、读数抖 0.002 定。
+   --  要:到了、沿要的方向挪够 0.15、把手没滑出去。错了会是什么病:今天的 Change_Held_Qty 直着走一个单位(顶住了就沿着顶住的那一面再走一步)
+   --  ⇒ 门越开推得越顶着门,把手滑出去。牙:一直直着沿要的方向走 ⇒ 没挪够就滑出去了
+   declare
+      Rho : constant Long_Float := 0.8;
+      Phi : Long_Float := 0.0;
+      Phi_Max : constant Long_Float := 100.0 * Deg;
+      Slipped : Boolean := False;
+      Noise : constant Long_Float := 0.002;
+      Floor : constant Long_Float := 0.03;
+      Unit_L : constant Long_Float := 0.15;
+      Want : constant V3 := [Sin (50.0 * Deg), Cos (50.0 * Deg), 0.0];
+      Wu : constant V3 := Unit (Want);
+      V2 : constant Long_Float := 2.0 * Noise ** 2;
+      Grip : constant Long_Float := 0.9 * Linkage.Light_Len (Floor, [[V2, 0.0, 0.0], [0.0, V2, 0.0], [0.0, 0.0, V2]]);
+      Walked : Long_Float := 0.0;   --  把手真沿 Want 挪了多少
+      function Pos (A : Long_Float) return V3 is ([Rho * Cos (A), Rho * Sin (A), 0.0]);
+      procedure Door_Move (D : V3; Got_Hand, Got_Thing : out V3; Blocked, Ok : out Boolean) is
+         N : constant V3 := [Cos (Phi), Sin (Phi), 0.0];
+         T : constant V3 := [-Sin (Phi), Cos (Phi), 0.0];
+         Off : constant Long_Float := Sqrt (Dot (D, N) ** 2 + D (2) ** 2);   --  顶着门的那一截
+         Real : V3 := [others => 0.0];
+         L : constant Long_Float := Geom.Norm (D);
+      begin
+         Ok := True;
+         if Slipped or else Off > Grip then
+            Slipped := True;
+            Got_Hand := Add (D, [Noise * Gauss, Noise * Gauss, Noise * Gauss]);
+            Got_Thing := Got_Hand;   --  眼没另外跟着把手:只知道手到了哪
+            Blocked := False;
+            return;
+         end if;
+         declare
+            New_Phi : constant Long_Float := Long_Float'Max (0.0, Long_Float'Min (Phi_Max, Phi + Dot (D, T) / Rho));
+         begin
+            Real := Sub (Pos (New_Phi), Pos (Phi));
+            Phi := New_Phi;
+         end;
+         Walked := Walked + Dot (Real, Wu);
+         Got_Hand := Add (Real, [Noise * Gauss, Noise * Gauss, Noise * Gauss]);
+         Got_Thing := Got_Hand;
+         Blocked := L > 0.0 and then Selfmap.Blocked (L - Dot (Real, Scl (D, 1.0 / L)), 0.0, 0.0, Selfmap.Free_Base, L, Noise);
+      end Door_Move;
+      Fw : Linkage.Follow_Report;
+      Walked_F, Phi_F : Long_Float;
+      Slip_F : Boolean;
+      Naive_Walked : Long_Float;
+      Naive_Slip : Boolean;
+   begin
+      FR.Reset (Gen, 201);
+      Linkage.Follow_Held (Want, Unit_L, Floor, Noise, 400, Door_Move'Access, Fw);
+      Walked_F := Walked;
+      Phi_F := Phi;
+      Slip_F := Slipped;
+      --  牙:直着沿 Want 一下一下走(同 Light_Len 那一步),走够 Unit 或者滑出去为止
+      Phi := 0.0;
+      Slipped := False;
+      Walked := 0.0;
+      for I in 1 .. 400 loop
+         declare
+            Gh, Gt : V3;
+            Bl, Ok : Boolean;
+         begin
+            Door_Move (Scl (Wu, Grip / 0.9), Gh, Gt, Bl, Ok);
+         end;
+         exit when Slipped or else Walked >= Unit_L;
+      end loop;
+      Naive_Walked := Walked;
+      Naive_Slip := Slipped;
+      Check (Fw.How = Linkage.Arrived and then Walked_F >= Unit_L - Linkage.Light_Len (Floor, [[V2, 0.0, 0.0], [0.0, V2, 0.0], [0.0, 0.0, V2]])
+             and then not Slip_F and then Naive_Slip and then Naive_Walked < Unit_L,
+             "接到执行上·手里的东西沿要的方向变一个单位:" & Fw.How'Image & " · " & Codec.Img (Fw.Steps) & " 步 · 沿 Want 真挪了 " & Codec.Fmt (Walked_F, 4)
+             & "(要 " & Codec.Fmt (Unit_L, 2) & ")· 门开到 " & Codec.Fmt (Phi_F / Deg, 1) & "° · 滑出去 " & Slip_F'Image
+             & " · 牙:直着走 ⇒ 挪了 " & Codec.Fmt (Naive_Walked, 4) & " 就滑出去 " & Naive_Slip'Image);
+   end;
+
+   --  🔴 两块之间的轴 ⇒ 接触集的第③格(Linkage.Motion_Of,§2 第 19 条"同时两套接触"里动的那一块):一件东西被挪过(A 此刻的位姿转了 30°、平移了),
+   --  它上面一块绕 A 上的一根轴转(或沿 A 上的一根滑轴走)。要:按此刻的位姿把轴搬到世界里,B 上一点按这个旋量搬过去,和真的搬过去的一致
+   --  (差在数值分辨率以内);轴没定下来(Undecided)⇒ 不给旋量(Ok = False)。
+   --  错了会是什么病:轴照参照帧那一刻的世界系用 ⇒ 东西一被挪过,"扣扳机"那一段绕着空中一根不在枪上的轴转。
+   --  牙:不按 A 此刻的位姿搬轴 ⇒ 差出一大截
+   declare
+      Pa : constant Linkage.Pose := (Ok => True, R => Rot ([0.2, -0.4, 1.0], 30.0 * Deg), T => [0.3, -0.1, 0.05]);
+      Jt : Linkage.Joint;
+      Js : Linkage.Joint;
+      Ju : Linkage.Joint;
+      X_Ref : constant V3 := [0.12, 0.05, -0.02];   --  B 上一点,参照帧那一刻(A 的系 = 参照帧的世界)
+      Q : constant Long_Float := 25.0 * Deg;
+      Ok_T, Ok_S, Ok_U : Boolean;
+      Tw_T, Tw_S, Tw_U : Contact.Twist;
+      Err_T, Err_S, Naive_Err : Long_Float;
+   begin
+      Jt.Status := Linkage.Found;
+      Jt.Ax := (W => Unit ([0.3, 1.0, 0.1]), P => [0.05, 0.0, 0.01], Slide => False);
+      Js := Jt;
+      Js.Ax := (W => Unit ([1.0, 0.2, -0.3]), P => [0.0, 0.0, 0.0], Slide => True);
+      Ju := Jt;
+      Ju.Status := Linkage.Undecided;
+      Tw_T := Linkage.Motion_Of (Jt, Pa, Q, Ok_T);
+      Tw_S := Linkage.Motion_Of (Js, Pa, 0.04, Ok_S);
+      Tw_U := Linkage.Motion_Of (Ju, Pa, Q, Ok_U);
+      declare
+         X_Now : constant V3 := Add (Geom.Ap (Pa.R, X_Ref), Pa.T);
+         --  真的:在 A 的系里绕轴转 Q,再按 A 此刻的位姿搬到世界
+         Rq : constant M3 := Rot (Jt.Ax.W, Q);
+         True_T : constant V3 := Add (Geom.Ap (Pa.R, Add (Geom.Ap (Rq, Sub (X_Ref, Jt.Ax.P)), Jt.Ax.P)), Pa.T);
+         True_S : constant V3 := Add (Geom.Ap (Pa.R, Add (X_Ref, Scl (Js.Ax.W, 0.04))), Pa.T);
+         Naive : Contact.Twist;
+         Okn : Boolean;
+      begin
+         Err_T := Geom.Norm (Sub (Contact.Apply (Tw_T, X_Now), True_T));
+         Err_S := Geom.Norm (Sub (Contact.Apply (Tw_S, X_Now), True_S));
+         Naive := Contact.Turn (Jt.Ax.W, Q, Jt.Ax.P, Okn);
+         Naive_Err := Geom.Norm (Sub (Contact.Apply (Naive, X_Now), True_T));
+      end;
+      Check (Ok_T and then Ok_S and then not Ok_U and then Err_T < Sqrt (Long_Float'Model_Epsilon) and then Err_S < Sqrt (Long_Float'Model_Epsilon)
+             and then Naive_Err > 0.01,
+             "两块之间的轴 ⇒ 接触集的旋量:转轴搬过去差 " & Codec.Fmt (Err_T, 12) & " · 滑轴 " & Codec.Fmt (Err_S, 12) & " · 定不下 ⇒ 不给 "
+             & Boolean'Image (not Ok_U) & " · 牙:轴不按 A 此刻的位姿搬 ⇒ 差 " & Codec.Fmt (Naive_Err, 4));
+   end;
 end Welds_Path_6;

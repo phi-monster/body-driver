@@ -14,6 +14,7 @@
 --     每一步都从手此刻在哪起算(手被挡住时顶着的那一截不超过一步,力不累加);哪边都不让 ⇒ 照实说试过哪几个方向、它往哪让过。
 --  不认单位和尺度:所有的门 = 这一次量到的噪声(给的协方差 × 量出来的倍数 Sigma)× 统计的 Z(Stats.Z);数据自己的尺度只用来定数值差分的步子。
 --  不认零件个数:几块都行,每两块之间各拟合一根。代码里没有东西的名字、没有动作的名字
+with Contact;
 with Geom;
 with Kinem;
 with Bytes;
@@ -89,6 +90,12 @@ package Linkage is
 
    --  量:归块、每一块每一帧的位姿、每两块之间的轴
    procedure Fit (Tracks : Track_Vectors.Vector; Rep : out Report);
+   --  两块之间的一根轴 ⇒ 接触集的第③格(B 相对 A 怎么动,§2 第 19 条"同时两套接触"那一句里动的那一块):
+   --  A 此刻的位姿 Pa(这一帧 A 那一块的 Poses;参照帧那一刻 = 单位阵)把轴搬到此刻的世界里;转轴 ⇒ 绕 W 过 P 转 Q 弧度(Contact.Turn),
+   --  滑轴 ⇒ 沿 W 走 Q(Contact.Slide)。"一件东西不动 + 它上面的一块沿自己的轴动"(握住 + 扣扳机)= 接触集的 Meanwhile:
+   --  第一段 Contact.Still、第二段是这一块的这个旋量,两段一起进物理检查(路 5)。
+   --  轴没定下来(Undecided / Not_One_Axis / No_Common_Frame)、Pa 定不住 ⇒ Ok = False:不编一根轴
+   function Motion_Of (J : Joint; Pa : Pose; Q : Long_Float; Ok : out Boolean) return Contact.Twist;
    --  日志里一句话说清量出了什么(世界单位照印,不换成米)
    function Say (Rep : Report) return String;
 
@@ -150,4 +157,15 @@ package Linkage is
    --  一小步多长:它挪了 Len 在最不准的方向上也看得出来(Len² ≥ Gate (3) × Thing_Cov 最大的特征值),而且不比手靠得住的最小一步 Floor 小。
    --  力 ∝ 顶着的那一截 ≤ 一步 ⇒ 用看得出的最小一步推,就是最轻的推
    function Light_Len (Floor : Long_Float; Thing_Cov : M3) return Long_Float;
+
+   --  ── 接到执行上:脑要手里的东西沿 Want 变一个单位(Unit,世界单位),它会不会顺着 Want 动不知道(门、抽屉、盖子的轴没量过)──
+   --  调用方只给"走一下"(Move):手沿 D 走(Selfmap.Step / Act.Geo_Move),报手实到多少(Got_Hand)、东西挪了多少(Got_Thing:眼没另外跟着它 ⇒
+   --  就填 Got_Hand —— 拿得住的时候东西跟着手)、挡没挡(Selfmap.Blocked 那一个判法)、做没做成。
+   --  一步多长 = Light_Len (Floor = 这只手一步看得见的那一档, 两次读数之差的不准:各向 2 × Noise²,Noise = 本体位置读数抖多少);
+   --  沿 Want 累计挪够 Unit ⇒ 到了。Budget = 最多走几步(脑说的"或者 N 步",这一段还剩的步数)
+   procedure Follow_Held (Want : V3; Unit, Floor, Noise : Long_Float; Budget : Natural;
+                          Move : access procedure (D : V3; Got_Hand, Got_Thing : out V3; Blocked, Ok : out Boolean);
+                          Rep : out Follow_Report);
+   --  日志里一句话:怎么停的、走了几步、沿要的方向挪了多少
+   function Say (F : Follow_Report) return String;
 end Linkage;
