@@ -1857,9 +1857,11 @@ begin
       end;
       --  ⑦ 压的那一步(Selfmap.Go 的 Press,09-29):沿命令方向停下就读 —— 真的 Go + 锁步里一只假手,眼往下 2 cm,假身体三种:
       --     (i) 空中:每拍走还差的九成 ⇒ 到了就收(≤ 4 拍);(ii) 被挡住:只走到三成就停,手腕还在每拍转 3e-4 弧度地蠕动
-      --     (V1B50 真值:顶住以后每拍还转约 0.004°)⇒ 沿命令方向连着两拍不挪就读(≤ 6 拍);同一条不按 Press 走要等到上限(≥ 12 拍);
+      --     (V1B50 真值:顶住以后每拍还转约 0.004°)⇒ 沿命令方向连着两拍不挪就读(≤ 6 拍);
       --     (iii) 胳膊慢慢漂(每拍只走还差的 5%;V1B65 伸远了跟不上)⇒ 沿命令方向一直在挪,不许提前读(到上限才收)。
       --     牙:原来的快读(到了量出来的稳定拍数就读)⇒ (iii) 第 5 拍就读、红
+      --     (10-01 路 4,主代理定"全仓停了只留一种判法":只看这一条要走的那几样离目标还差的不再变小 ⇒ 不按 Press 的那一条也不再被
+      --     这一条根本没要转的手腕蠕动拖到上限,和 Press 一样 ≤ 6 拍;原来这里要 ≥ 12 拍,是老判法的样子)
       declare
          Lk : Plug.Link;
          Mp : Selfmap.Body_Map;
@@ -1939,9 +1941,10 @@ begin
          B2 := Run (1, True);
          B2n := Run (1, False);
          B3 := Run (2, True);
-         Check (B1 <= 4 and then B2 <= 6 and then B2n >= 12 and then B3 >= 12 + Mp.Settle,
+         Check (B1 <= 4 and then B2 <= 6 and then B2n <= 6 and then B3 >= 12 + Mp.Settle,
                 "压的那一步(Go 的 Press):空中 " & Codec.Img (B1) & " 拍到(要 ≤ 4);被挡住、手腕还在蠕动 ⇒ " & Codec.Img (B2)
-                & " 拍就读(要 ≤ 6;不按 Press 要 " & Codec.Img (B2n) & " 拍);胳膊慢慢漂 ⇒ " & Codec.Img (B3) & " 拍才收(要 ≥ " & Codec.Img (12 + Mp.Settle) & ",不许提前读)");
+                & " 拍就读(要 ≤ 6;不按 Press 也一样 " & Codec.Img (B2n) & " 拍,要 ≤ 6);胳膊慢慢漂 ⇒ " & Codec.Img (B3) & " 拍才收(要 ≥ "
+                & Codec.Img (12 + Mp.Settle) & ",不许提前读)");
       end;
       Plug.Set_Hooks (null, null); Plug.Set_Reach (null); Plug.Set_Limit (null);
       --  ④ 纯函数
