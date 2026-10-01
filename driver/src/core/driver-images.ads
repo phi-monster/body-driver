@@ -38,6 +38,13 @@ package Driver.Images is
      with Pre => Column < Width (I) and then Row < Height (I);
    --  ITU-R BT.601 luma in [0, 255].
 
+   procedure Luma (I : Image; Into : out Real_Array)
+     with Pre => Into'Length = Width (I) * Height (I);
+   --  Every pixel's luma, row after row (pixel Column, Row at index
+   --  Row * Width + Column from Into'First), in one pass over the bytes: a
+   --  frame costs a fraction of reading its pixels one at a time. The caller
+   --  owns Into, so a frame-sized array need never sit on a task's stack.
+
    procedure Query (I : Image; Process : not null access procedure (RGB : Driver.Bytes.Byte_Array));
    --  Reads the raw RGB bytes in place.
 
