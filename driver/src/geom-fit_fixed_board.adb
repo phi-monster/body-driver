@@ -8,6 +8,7 @@ procedure Fit_Fixed_Board (G : in out Cam_Geo; Scene : Scene_Pt_Vectors.Vector; 
    Ws : array (0 .. Natural'Max (1, Ns) - 1) of Long_Float := [others => 1.0];   --  每个点的权 = 1 / 它在这只眼里的每轴像素噪声
    Skip : Flags (0 .. Ns - 1) := [others => False];   --  被判离群、不再进解的点
    Behind : Natural := 0;   --  最近一次算残差时跑到相机后面的点数
+   K_Kept : Boolean := False;   --  镜头畸变进了解(F 检验显著)
 begin
    Ok := False;
    Rep.Scene_N := Ns; Rep.Scene_Used := 0; Rep.Scene_Rms := 0.0; Refits := 0;
@@ -46,9 +47,9 @@ begin
          end if;
       end;
    end loop;
-   --  ③ 加权精修:朝向 3 + 位置 3 (+ 焦距)
+   --  ③ 加权精修:朝向 3 + 位置 3 (+ 焦距 + 镜头畸变 K1 / K2:内参没给就一起解,和焦距同进同出 —— 给了焦距的(装回的、核对时)内参照旧不动)
    declare
-      Np : constant Natural := (if Fit_F then 7 else 6);
+      Np : constant Natural := (if Fit_F then 9 else 6);
       P : Param_Vec (0 .. Np - 1) := [others => 0.0];
       Steps : Param_Vec (0 .. Np - 1) := [others => 1.0e-4];   --  差分步(弧度 / 米,极小量)
       Rv : constant V3 := Rot_Vec (Gi.R_Ce);
@@ -59,8 +60,11 @@ begin
       begin
          Gt.R_Ce := Rodrigues ([P (0), P (1), P (2)]);
          Gt.Pos := [P (3), P (4), P (5)];
-         if Fit_F then
+         if Fit_F and then P'Last >= 6 then
             Gt.F := P (6);
+         end if;
+         if Fit_F and then P'Last >= 8 then
+            Gt.K1 := P (7); Gt.K2 := P (8);   --  不带畸变那一份(P 只到 6)按 G 的,针孔
          end if;
          return Gt;
       end Cam_Of;
@@ -133,6 +137,7 @@ begin
       P (3) := Gi.Pos (0); P (4) := Gi.Pos (1); P (5) := Gi.Pos (2);
       if Fit_F then
          P (6) := Gi.F; Steps (6) := 1.0;   --  焦距的差分步(像素,极小量)
+         P (7) := Gi.K1; P (8) := Gi.K2;    --  畸变从单点法的起点起(针孔 = 0);差分步同朝向(无量纲,极小量)
       end if;
       Nr := Ns + (if Use_Prior then 1 else 0);
       if Start_Here then
@@ -245,6 +250,28 @@ begin
             G.Dropped := G.Dropped + 1;
          end if;
       end loop;
+      --  ④ 畸变要不要(内参一起解时):同一批进解的点,不带畸变(K1 = K2 = 0,针孔)再解一次,两份的残差平方和做嵌套模型的 F 检验
+      --  (Two_More_Significant,多出的两个数)。不显著 ⇒ 用针孔那一份 —— 和以前不解畸变时解出来的一样;显著 ⇒ 带畸变那一份。
+      --  K1 / K2 的不确定度两样都从带畸变那一份算(不显著时 K1 = K2 = 0 落在它们自己的不确定度以内)
+      if Fit_F then
+         declare
+            P7 : Param_Vec (0 .. 6) := P (0 .. 6);
+            Cur9, Cur7 : Long_Float;
+            Kept_Slots : constant Natural := Nr;
+            N_Eq : constant Natural := 2 * Kept_Slots - (if Use_Prior then 1 else 0);
+            Sd9 : Param_Vec (0 .. Np - 1);
+         begin
+            Resid (P, Cur9, null);
+            Param_Sd (P, Nr, Use_Prior, Steps, Resid'Access, Sd9);
+            Resid (P7, Cur7, null);
+            LM_Refine (P7, Nr, Steps (0 .. 6), 100, Resid'Access, Cur7);   --  100 = 迭代次数上限(次数)
+            K_Kept := N_Eq > Np and then Two_More_Significant (Cur7 ** 2 * Long_Float (Kept_Slots), Cur9 ** 2 * Long_Float (Kept_Slots), N_Eq - Np);
+            G.K1_Sd := Sd9 (7); Rep.K2_Sd := Sd9 (8); Rep.K_Kept := K_Kept;
+            if not K_Kept then
+               P (0 .. 6) := P7; P (7) := 0.0; P (8) := 0.0;
+            end if;
+         end;
+      end if;
       Resid (P, Cur, null);
       if Behind > 0 then
          Why := To_Unbounded_String ("解出来还有 " & Codec.Img (Behind) & " 个板上的点跑到相机后面(" & Px_Note (P) & ")");
@@ -270,7 +297,16 @@ begin
             end if;
          end loop;
          Span := Sqrt ((Hi (0) - Lo (0)) ** 2 + (Hi (1) - Lo (1)) ** 2 + (Hi (2) - Lo (2)) ** 2);
-         Param_Sd (P, Nr, Use_Prior, Steps, Resid'Access, Sd);
+         if Fit_F and then not K_Kept then
+            declare
+               Sd7 : Param_Vec (0 .. 6);
+            begin
+               Param_Sd (P (0 .. 6), Nr, Use_Prior, Steps (0 .. 6), Resid'Access, Sd7);   --  针孔那一份的不确定度(畸变没进解)
+               Sd (0 .. 6) := Sd7; Sd (7) := 0.0; Sd (8) := 0.0;
+            end;
+         else
+            Param_Sd (P, Nr, Use_Prior, Steps, Resid'Access, Sd);
+         end if;
          G.Rot_Sd := Sqrt (Sd (0) ** 2 + Sd (1) ** 2 + Sd (2) ** 2);
          G.Pos_Sd := Sqrt (Sd (3) ** 2 + Sd (4) ** 2 + Sd (5) ** 2);
          G.F_Sd := (if Fit_F then Sd (6) else 0.0);
@@ -290,6 +326,25 @@ begin
             end if;
          end;
       end;
+      --  解出来的镜头模型在画幅里不许折回:画幅四个角的像素都得去得了畸变(Cam_Dir 的 Ok)—— 折回半径落在画幅里,
+      --  外面那一圈的像素没有视线,这个"解"只是拿畸变去拟合别的错
+      if Fit_F and then K_Kept then
+         declare
+            Gt : constant Cam_Geo := Cam_Of (P);
+            Ok1, Ok2, Ok3, Ok4 : Boolean;
+            D1 : constant V3 := Cam_Dir (Gt, 0.0, 0.0, Ok1);
+            D2 : constant V3 := Cam_Dir (Gt, 2.0 * G.Cx, 0.0, Ok2);
+            D3 : constant V3 := Cam_Dir (Gt, 0.0, 2.0 * G.Cy, Ok3);
+            D4 : constant V3 := Cam_Dir (Gt, 2.0 * G.Cx, 2.0 * G.Cy, Ok4);
+            pragma Unreferenced (D1, D2, D3, D4);
+         begin
+            if not (Ok1 and then Ok2 and then Ok3 and then Ok4) then
+               Why := To_Unbounded_String ("解出来的镜头畸变 K1 " & Codec.Fmt (P (7), 4) & "、K2 " & Codec.Fmt (P (8), 4)
+                                           & " 在画幅里就折回了(角上的像素去不了畸变)(" & Px_Note (P) & ")");
+               return;
+            end if;
+         end;
+      end if;
       Why := Null_Unbounded_String;
       Px_Rms (P, Rep.Scene_Rms, Rep.Scene_Used);
       G := Cam_Of (P);

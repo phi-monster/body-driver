@@ -215,6 +215,52 @@ package body Geom is
 
    function Pointing_Lost (G : Cam_Geo; F, Rot_Sd : Long_Float) return Boolean is (F * Rot_Sd >= Sqrt (G.Cx ** 2 + G.Cy ** 2));
 
+   function Normal_Tail (X : Long_Float) return Long_Float is
+   begin
+      if X = 0.0 then
+         return 0.5;
+      elsif X < 0.0 then
+         return 1.0 - Normal_Tail (-X);
+      end if;
+      --  Q(x) = φ(x) / (x + 1 / (x + 2 / (x + 3 / (x + …))))(改过的 Lentz 法,做到这一节不再改变结果)
+      declare
+         Tiny : constant Long_Float := Long_Float'Model_Small;
+         F : Long_Float := X;
+         C : Long_Float := X;
+         D : Long_Float := 0.0;
+         K : Natural := 0;
+         Cap : constant Natural := Long_Float'Machine_Mantissa * Long_Float'Machine_Mantissa;   --  只当保险(收敛到浮点精度要的节数远比它少)
+      begin
+         loop
+            K := K + 1;
+            D := X + Long_Float (K) * D;
+            D := (if D = 0.0 then 1.0 / Tiny else 1.0 / D);
+            C := X + Long_Float (K) / (if C = 0.0 then Tiny else C);
+            declare
+               Delta_K : constant Long_Float := C * D;
+            begin
+               F := F * Delta_K;
+               exit when abs (Delta_K - 1.0) <= Long_Float'Epsilon or else K >= Cap;
+            end;
+         end loop;
+         return Exp (-0.5 * X * X) / Sqrt (2.0 * Ada.Numerics.Pi) / F;
+      end;
+   end Normal_Tail;
+
+   function Two_More_Significant (Rss0, Rss1 : Long_Float; D2 : Natural) return Boolean is
+   begin
+      if D2 = 0 or else Rss1 <= 0.0 then
+         return Rss0 > Rss1;   --  没有剩下的自由度 / 一点残差都没有:只能比大小
+      end if;
+      declare
+         Alpha : constant Long_Float := Normal_Tail (Stats.Z);
+         Fv : constant Long_Float := ((Rss0 - Rss1) / 2.0) / (Rss1 / Long_Float (D2));
+         Fc : constant Long_Float := Long_Float (D2) / 2.0 * (Alpha ** (-2.0 / Long_Float (D2)) - 1.0);
+      begin
+         return Fv > Fc;
+      end;
+   end Two_More_Significant;
+
    --  前 K 个数的中位数(拷一份排序;标定的观测最多几百笔)
    function Median (Xs : Param_Vec; K : Natural) return Long_Float is
       A : Param_Vec (0 .. Natural'Max (0, K - 1)) := [others => 0.0];
