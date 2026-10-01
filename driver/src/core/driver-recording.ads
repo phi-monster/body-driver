@@ -1,5 +1,5 @@
---  Recordings of everything that crosses the driver's boundary, in the
---  format of harness/record/wire_proxy.py, extended with service records:
+--  Recordings of everything that crosses the driver's boundary (the main
+--  program's --record), one record per message:
 --
 --    header   "BDWIRE1" LF
 --    record   kind (one byte) | nanoseconds (u64 LE) | length (u32 LE) | payload
