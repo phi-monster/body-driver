@@ -1,6 +1,8 @@
+with Contact.Wrench;
 with Held;
 with Seek;
 with Linkage;
+with Linkage.Together;
 with Strokes;
 with Stats;
 separate (Selfcheck)
@@ -352,6 +354,52 @@ procedure Welds_Path_6 is
       end loop;
       return V;
    end Grid;
+   --  准的尾巴(自检里核门用):正态的上尾按密度数值积分(Simpson),χ²_1 = 2Q(√x)、χ²_2 = e^{−x/2}、往上 S_{ν+2} = S_ν + (x/2)^{ν/2} e^{−x/2} / Γ(ν/2 + 1)
+   function Phi (X : Long_Float) return Long_Float is (Exp (-0.5 * X * X) / Sqrt (2.0 * Ada.Numerics.Pi));
+   function Q_Tail (Z0 : Long_Float) return Long_Float is
+      Hi : constant Long_Float := Z0 + 14.0;
+      M : constant := 20000;
+      H : constant Long_Float := (Hi - Z0) / Long_Float (M);
+      S : Long_Float := Phi (Z0) + Phi (Hi);
+   begin
+      for I in 1 .. M - 1 loop
+         S := S + (if I mod 2 = 1 then 4.0 else 2.0) * Phi (Z0 + Long_Float (I) * H);
+      end loop;
+      return S * H / 3.0;
+   end Q_Tail;
+   function Chi_Tail (Nu : Positive; X : Long_Float) return Long_Float is
+      S : Long_Float := (if Nu mod 2 = 1 then 2.0 * Q_Tail (Sqrt (X)) else Exp (-0.5 * X));
+      Nu0 : constant Natural := (if Nu mod 2 = 1 then 1 else 2);
+      Gm : Long_Float := (if Nu0 = 1 then Sqrt (Ada.Numerics.Pi) else 1.0);   --  Γ(ν0 / 2)
+      V : Natural := Nu0;
+   begin
+      while V < Nu loop
+         Gm := Gm * (Long_Float (V) / 2.0);                     --  Γ(v/2 + 1) = (v/2) Γ(v/2)
+         S := S + (0.5 * X) ** (Long_Float (V) / 2.0) * Exp (-0.5 * X) / Gm;
+         V := V + 2;
+      end loop;
+      return S;
+   end Chi_Tail;
+   --  ν 维卡方上尾 = Tail 的那个数(二分,分到中点和一头重合为止)
+   function Chi_Quantile (Nu : Positive; Tail : Long_Float) return Long_Float is
+      Lo : Long_Float := 0.0;
+      Hi : Long_Float := Long_Float (Nu);
+      Mid : Long_Float;
+   begin
+      while Chi_Tail (Nu, Hi) > Tail loop
+         Hi := 2.0 * Hi;
+      end loop;
+      loop
+         Mid := 0.5 * (Lo + Hi);
+         exit when Mid <= Lo or else Mid >= Hi;
+         if Chi_Tail (Nu, Mid) > Tail then
+            Lo := Mid;
+         else
+            Hi := Mid;
+         end if;
+      end loop;
+      return Mid;
+   end Chi_Quantile;
 begin
    Put_Line ("── 路 6:部件和轴、顺着它让的方向走 ──");
 
@@ -360,31 +408,6 @@ begin
    --  五帧(12 维)时 43% 的好点被当成跟错了。准的尾巴:χ²_1 = 2Q(√x)、χ²_2 = e^{−x/2}、再往上 S_{ν+2} = S_ν + (x/2)^{ν/2} e^{−x/2} / Γ(ν/2 + 1),
    --  Q 按正态密度数值积分(Simpson,离线)。牙:ν Z² 和 Z² 两种拼法同一组 ν 算出来的尾巴,差出几个数量级
    declare
-      function Phi (X : Long_Float) return Long_Float is (Exp (-0.5 * X * X) / Sqrt (2.0 * Ada.Numerics.Pi));
-      function Q_Tail (Z0 : Long_Float) return Long_Float is
-         Hi : constant Long_Float := Z0 + 14.0;
-         M : constant := 20000;
-         H : constant Long_Float := (Hi - Z0) / Long_Float (M);
-         S : Long_Float := Phi (Z0) + Phi (Hi);
-      begin
-         for I in 1 .. M - 1 loop
-            S := S + (if I mod 2 = 1 then 4.0 else 2.0) * Phi (Z0 + Long_Float (I) * H);
-         end loop;
-         return S * H / 3.0;
-      end Q_Tail;
-      function Chi_Tail (Nu : Positive; X : Long_Float) return Long_Float is
-         S : Long_Float := (if Nu mod 2 = 1 then 2.0 * Q_Tail (Sqrt (X)) else Exp (-0.5 * X));
-         Nu0 : constant Natural := (if Nu mod 2 = 1 then 1 else 2);
-         Gm : Long_Float := (if Nu0 = 1 then Sqrt (Ada.Numerics.Pi) else 1.0);   --  Γ(ν0 / 2)
-         V : Natural := Nu0;
-      begin
-         while V < Nu loop
-            Gm := Gm * (Long_Float (V) / 2.0);                     --  Γ(v/2 + 1) = (v/2) Γ(v/2)
-            S := S + (0.5 * X) ** (Long_Float (V) / 2.0) * Exp (-0.5 * X) / Gm;
-            V := V + 2;
-         end loop;
-         return S;
-      end Chi_Tail;
       Target : constant Long_Float := Q_Tail (Z);
       Worst : Long_Float := 1.0;
       Old_A, Old_B : Long_Float := 1.0;
@@ -1006,16 +1029,22 @@ begin
 
    --  🔴 拿着的东西跟着手走(Held.Take / Shape_Cov / In_World / Check_Slip,§2 第 20 条):手拿着一件东西(15 个点,在手的系里离手 0.06–0.20),
    --  手转 0 / 10 / 20 / 30 / 40° 同时抬着走;桌上 8 个点不动;混进 4 个跟错了的点。手的位姿是按关节读数算的,不准 0.5°、0.003
-   --  (每一帧真的手都按这个不准偏一点);眼的噪声横着 0.001、沿视线 0.003。
-   --  要:① 15 个点跟着手走、8 个留在世界里、4 个哪种都不是,没有一个归错;它在手的系里的形状在自报的不准以内;
+   --  (每一帧真的手都按这个不准偏一点);眼的噪声横着 0.001、沿视线 0.003。每一样都按独立的几回数(拿 10 回、再看 40 眼),牙按次数比,不靠一个种子。
+   --  要:① 10 回里跟着手走的点、留在世界里的点、形状出了自报不准的点,丢的都不超过门自己的虚警;坏点每一回都哪种都不是;没有一个归错。
+   --     手每一帧的不准是一回里所有点共有的 ⇒ 跟着手走的点丢起来成串(10-01 离线 1000 回:每个点丢的机会 12 / 15000 = 0.08%,
+   --     不超过一个门的 0.135%;丢的 7 回里平均一回丢 1.7 个)⇒ 按"一回算一次机会"给上限:15 × Chance_Bound (10);
+   --     桌上的点、坏点不跟手,一个点一次机会;
    --     ② 手没动的那一场:一个都不说"拿着"(两种说法预测到同一处,照实说判不了);
-   --     ③ 再看一眼:没滑 ⇒ 不说滑了;整件东西在手里转了 8°、挪了 0.003(每个点单看都在门里:手此刻的不准每个点都摊着)⇒ 滑了。
+   --     ③ 再看 40 眼:没滑的那几眼,说滑了的不超过门自己的虚警(Chance_Bound);在手里转了 8°、挪了 0.003 的那几眼,没认出来的不超过它。
    --  错了会是什么病:手的不准不算进"长在手上"那一说 ⇒ 拿得好好的点被说成"自己在动";不看两种说法隔不隔得开 ⇒ 手没动时桌上的点也说成拿着;
-   --  一个个点比滑没滑 ⇒ 整件东西一起转了一点,一个点都不过门,说没滑;手此刻的不准不算 ⇒ 没滑也说滑了。
-   --  牙:① 手的不准当 0 ⇒ 跟着手走的少一大截;③ 一个个点比 ⇒ 转了 8° 一个都不过门;手此刻的不准当 0 ⇒ 没滑的那一眼说滑了;
+   --  一个个点比滑没滑(每个点按 Bonferroni 的门,15 个点里有一个过门才算)⇒ 整件东西一起转了一点,大半眼一个点都不过门;
+   --  手此刻的不准不算 ⇒ 没滑也说滑了。
+   --  牙:① 手的不准当 0 ⇒ 10 回里跟着手走的平均少一大截;③ 一个个点比 ⇒ 认出来的少一大截;手此刻的不准当 0 ⇒ 没滑也说滑的多一大截;
    --  ② 拿掉"隔不开就判不了"那一条 ⇒ 手没动时 23 个点说成拿着(离线跑过,见报告)
    declare
       Kf : constant := 5;
+      N_Take : constant := 10;
+      N_Look : constant := 40;
       Vd : constant V3 := Unit ([0.2, 0.3, 0.93]);
       Le, Ce : M3;
       Rot_Sd : constant Long_Float := 0.5 * Deg;
@@ -1103,6 +1132,9 @@ begin
          end loop;
          return C;
       end Obj_Rides;
+      --  每个点按 Bonferroni 的门(15 个点里挑最不像的那一个,每一个按 Q(Z) / 15 的尾巴判)
+      Gate_Pt : Long_Float;
+      P_Last : Held.Part;
    begin
       for I in 0 .. 2 loop
          for J in 0 .. 2 loop
@@ -1114,92 +1146,119 @@ begin
          Ch (D, D) := Rot_Sd ** 2;
          Ch (D + 3, D + 3) := Pos_Sd ** 2;
       end loop;
+      Gate_Pt := Chi_Quantile (3, Tail_Z / Long_Float (No));
       FR.Reset (Gen, 171);
+      --  ① 拿 10 回
       declare
-         Hands : Held.Hand_Vectors.Vector;
-         Tracks : Linkage.Track_Vectors.Vector;
-         P, P0 : Held.Part;
-         Rep, Rep0 : Held.Take_Report;
-         Tab_World, Junk_Neither, Wrong, Shape_Out : Natural := 0;
+         Lost_Ride, Lost_World, Shape_Out, Wrong, Junk_Bad, Sum_Rides0 : Natural := 0;
       begin
-         Scene_Tracks (True, Hands, Tracks);
-         Held.Take (Hands, Tracks, 0, 1.0, Long_Float'Last, P, Rep);
-         Put_Line ("    手在动:" & Held.Say (Rep));
-         for I in No .. Natural (Tracks.Length) - 1 loop
-            if I < No + Nt and then Rep.Roles (I) = Held.World then
-               Tab_World := Tab_World + 1;
-            elsif I >= No + Nt and then Rep.Roles (I) = Held.Neither then
-               Junk_Neither := Junk_Neither + 1;
-            end if;
-            if Rep.Roles (I) = Held.Rides then
-               Wrong := Wrong + 1;
-            end if;
-         end loop;
-         for K in 0 .. Natural (P.Tracks.Length) - 1 loop
-            if P.Tracks (K) < No and then Linkage.Mahal (Sub (P.Pts (K), Obj (P.Tracks (K))), Held.Shape_Cov (P, K)) > Linkage.Gate (3) then
-               Shape_Out := Shape_Out + 1;
-            end if;
-         end loop;
-         --  牙:手的位姿当成准的(不准 = 0)
-         declare
-            Hands0 : Held.Hand_Vectors.Vector := Hands;
-         begin
-            for H of Hands0 loop
-               H.Cov := Held.Zero6;
-            end loop;
-            Held.Take (Hands0, Tracks, 0, 1.0, Long_Float'Last, P0, Rep0);
-         end;
-         Check (Obj_Rides (Rep) + Chance_Bound (No) >= No and then Tab_World + Chance_Bound (Nt) >= Nt and then Junk_Neither = Nj and then Wrong = 0
-                and then Shape_Out <= Chance_Bound (No) and then Obj_Rides (Rep0) + Chance_Bound (No) < No,
-                "拿着的东西·认跟着手走的:" & Codec.Img (Obj_Rides (Rep)) & " / " & Codec.Img (No) & " 跟着手走 · 桌上 " & Codec.Img (Tab_World) & " / "
-                & Codec.Img (Nt) & " 留在世界里 · 坏点 " & Codec.Img (Junk_Neither) & " / " & Codec.Img (Nj) & " 哪种都不是 · 归错 " & Codec.Img (Wrong)
-                & " · 形状出了自报的不准 " & Codec.Img (Shape_Out) & " 个 · 牙:手的不准当 0 ⇒ 跟着手走的只剩 " & Codec.Img (Obj_Rides (Rep0)));
-         --  ③ 再看一眼(手又挪了一步):没滑 / 在手里绕自己转了 8°、挪了 0.003
-         declare
-            Pr : constant Pair := Hand_At (Kf, True);
-            Now_A, Now_B : Linkage.Obs_Vectors.Vector;
-            Slip_R : constant M3 := Rot ([0.6, -0.5, 0.4], 8.0 * Deg);
-            Slip_T : constant V3 := [0.003, -0.001, 0.0];
-            Cen : V3 := [0.0, 0.0, 0.0];
-            Sa, Sb, Sa0 : Held.Slip_Report;
-            Per_Point_Out : Natural := 0;
-         begin
-            for Q of Obj loop
-               Cen := Add (Cen, Scl (Q, 1.0 / Long_Float (No)));
-            end loop;
-            for K in 0 .. Natural (P.Tracks.Length) - 1 loop
-               declare
-                  S_True : constant V3 := Obj (P.Tracks (K));
-                  S_Slip : constant V3 := Add (Add (Geom.Ap (Slip_R, Sub (S_True, Cen)), Cen), Slip_T);
-               begin
-                  Now_A.Append (Linkage.Obs'(Seen => True, X => Add (Add (Geom.Ap (Pr.Truth.R, S_True), Pr.Truth.T), Noise), Cov => Ce));
-                  Now_B.Append (Linkage.Obs'(Seen => True, X => Add (Add (Geom.Ap (Pr.Truth.R, S_Slip), Pr.Truth.T), Noise), Cov => Ce));
-               end;
-            end loop;
-            Held.Check_Slip (P, Pr.Est, Now_A, Sa);
-            Held.Check_Slip (P, Pr.Est, Now_B, Sb);
-            Put_Line ("    没滑那一眼:" & Held.Say (Sa));
-            Put_Line ("    滑了那一眼:" & Held.Say (Sb));
+         for T in 1 .. N_Take loop
             declare
-               E0 : Held.Hand_Pose := Pr.Est;
+               Hands : Held.Hand_Vectors.Vector;
+               Tracks : Linkage.Track_Vectors.Vector;
+               P, P0 : Held.Part;
+               Rep, Rep0 : Held.Take_Report;
+               Junk_Neither : Natural := 0;
             begin
-               E0.Cov := Held.Zero6;
-               Held.Check_Slip (P, E0, Now_A, Sa0);
-            end;
-            declare
-               Wv : constant Held.World_View := Held.In_World (P, Pr.Est);
-            begin
-               for K in 0 .. Natural (Wv.Pts.Length) - 1 loop
-                  if Linkage.Mahal (Sub (Now_B (K).X, Wv.Pts (K)), Sum3 (Wv.Covs (K), Ce)) > Linkage.Gate (3) then
-                     Per_Point_Out := Per_Point_Out + 1;
+               Scene_Tracks (True, Hands, Tracks);
+               Held.Take (Hands, Tracks, 0, 1.0, Long_Float'Last, P, Rep);
+               Lost_Ride := Lost_Ride + (No - Obj_Rides (Rep));
+               for I in No .. Natural (Tracks.Length) - 1 loop
+                  if I < No + Nt and then Rep.Roles (I) /= Held.World then
+                     Lost_World := Lost_World + 1;
+                  elsif I >= No + Nt and then Rep.Roles (I) = Held.Neither then
+                     Junk_Neither := Junk_Neither + 1;
+                  end if;
+                  if Rep.Roles (I) = Held.Rides then
+                     Wrong := Wrong + 1;
                   end if;
                end loop;
+               Junk_Bad := Junk_Bad + (Nj - Junk_Neither);
+               for K in 0 .. Natural (P.Tracks.Length) - 1 loop
+                  if P.Tracks (K) < No and then Linkage.Mahal (Sub (P.Pts (K), Obj (P.Tracks (K))), Held.Shape_Cov (P, K)) > Linkage.Gate (3) then
+                     Shape_Out := Shape_Out + 1;
+                  end if;
+               end loop;
+               declare
+                  Hands0 : Held.Hand_Vectors.Vector := Hands;
+               begin
+                  for H of Hands0 loop
+                     H.Cov := Held.Zero6;
+                  end loop;
+                  Held.Take (Hands0, Tracks, 0, 1.0, Long_Float'Last, P0, Rep0);
+               end;
+               if T = 1 then
+                  Put_Line ("    手在动(第 1 回):" & Held.Say (Rep));
+               end if;
+               Sum_Rides0 := Sum_Rides0 + Obj_Rides (Rep0);
+               P_Last := P;
             end;
-            Check (not Sa.Slipped and then Sa.Dof = 6 and then Sb.Slipped and then Sa0.Slipped and then Per_Point_Out = 0,
-                   "拿着的东西·滑没滑:没滑的那一眼 " & Codec.Fmt (Sa.Chi, 1) & "(门 " & Codec.Fmt (Sa.Gate, 1) & ")不说滑 · 转了 8° 那一眼 "
-                   & Codec.Fmt (Sb.Chi, 1) & " 说滑了 · 牙:一个个点比,转了 8° 过门的 " & Codec.Img (Per_Point_Out) & " 个;手此刻的不准当 0 ⇒ 没滑的那一眼 "
-                   & Codec.Fmt (Sa0.Chi, 1) & (if Sa0.Slipped then " 说滑了" else " 没说滑"));
-         end;
+         end loop;
+         Check (Lost_Ride <= No * Chance_Bound (N_Take) and then Shape_Out <= No * Chance_Bound (N_Take)
+                and then Lost_World <= Chance_Bound (N_Take * Nt) and then Wrong = 0 and then Junk_Bad = 0
+                and then N_Take * No - Sum_Rides0 > No * Chance_Bound (N_Take),
+                "拿着的东西·认跟着手走的:" & Codec.Img (N_Take) & " 回 · 跟着手走的丢了 " & Codec.Img (Lost_Ride) & " / " & Codec.Img (N_Take * No)
+                & "(上限 " & Codec.Img (No * Chance_Bound (N_Take)) & ",一回里成串)· 桌上的丢了 " & Codec.Img (Lost_World) & " / " & Codec.Img (N_Take * Nt)
+                & " · 坏点没认对 " & Codec.Img (Junk_Bad) & " · 归错 " & Codec.Img (Wrong) & " · 形状出了自报的不准 " & Codec.Img (Shape_Out)
+                & " · 牙:手的不准当 0 ⇒ 跟着手走的丢了 " & Codec.Img (N_Take * No - Sum_Rides0));
+      end;
+      --  ③ 再看 40 眼(手接着挪):没滑 / 在手里绕自己转了 8°、挪了 0.003
+      declare
+         Slip_R : constant M3 := Rot ([0.6, -0.5, 0.4], 8.0 * Deg);
+         Slip_T : constant V3 := [0.003, -0.001, 0.0];
+         Cen : V3 := [0.0, 0.0, 0.0];
+         False_Slip, False_Slip0, Caught, Caught_Pt : Natural := 0;
+         Chi_Free, Chi_Slip : Long_Float := 0.0;
+      begin
+         for Q of Obj loop
+            Cen := Add (Cen, Scl (Q, 1.0 / Long_Float (No)));
+         end loop;
+         for Lk in 1 .. N_Look loop
+            declare
+               Pr : constant Pair := Hand_At (Kf + Lk, True);
+               Now_A, Now_B : Linkage.Obs_Vectors.Vector;
+               Sa, Sb, Sa0 : Held.Slip_Report;
+               Any_Pt : Boolean := False;
+            begin
+               for K in 0 .. Natural (P_Last.Tracks.Length) - 1 loop
+                  declare
+                     S_True : constant V3 := Obj (P_Last.Tracks (K));
+                     S_Slip : constant V3 := Add (Add (Geom.Ap (Slip_R, Sub (S_True, Cen)), Cen), Slip_T);
+                  begin
+                     Now_A.Append (Linkage.Obs'(Seen => True, X => Add (Add (Geom.Ap (Pr.Truth.R, S_True), Pr.Truth.T), Noise), Cov => Ce));
+                     Now_B.Append (Linkage.Obs'(Seen => True, X => Add (Add (Geom.Ap (Pr.Truth.R, S_Slip), Pr.Truth.T), Noise), Cov => Ce));
+                  end;
+               end loop;
+               Held.Check_Slip (P_Last, Pr.Est, Now_A, Sa);
+               Held.Check_Slip (P_Last, Pr.Est, Now_B, Sb);
+               declare
+                  E0 : Held.Hand_Pose := Pr.Est;
+                  Wv : constant Held.World_View := Held.In_World (P_Last, Pr.Est);
+               begin
+                  E0.Cov := Held.Zero6;
+                  Held.Check_Slip (P_Last, E0, Now_A, Sa0);
+                  for K in 0 .. Natural (Wv.Pts.Length) - 1 loop
+                     Any_Pt := Any_Pt or else Linkage.Mahal (Sub (Now_B (K).X, Wv.Pts (K)), Sum3 (Wv.Covs (K), Ce)) > Gate_Pt;
+                  end loop;
+               end;
+               if Lk = 1 then
+                  Put_Line ("    没滑那一眼(第 1 眼):" & Held.Say (Sa));
+                  Put_Line ("    滑了那一眼(第 1 眼):" & Held.Say (Sb));
+               end if;
+               False_Slip := False_Slip + (if Sa.Slipped then 1 else 0);
+               False_Slip0 := False_Slip0 + (if Sa0.Slipped then 1 else 0);
+               Caught := Caught + (if Sb.Slipped then 1 else 0);
+               Caught_Pt := Caught_Pt + (if Any_Pt then 1 else 0);
+               Chi_Free := Chi_Free + Sa.Chi / Long_Float (N_Look);
+               Chi_Slip := Chi_Slip + Sb.Chi / Long_Float (N_Look);
+            end;
+         end loop;
+         Check (False_Slip <= Chance_Bound (N_Look) and then Caught + Chance_Bound (N_Look) >= N_Look
+                and then Caught_Pt + Chance_Bound (N_Look) < N_Look and then False_Slip0 > Chance_Bound (N_Look),
+                "拿着的东西·滑没滑:" & Codec.Img (N_Look) & " 眼 · 没滑说滑了 " & Codec.Img (False_Slip) & " 次(平均 " & Codec.Fmt (Chi_Free, 1)
+                & ",门 " & Codec.Fmt (Linkage.Gate (6), 1) & ")· 转了 8° 认出来 " & Codec.Img (Caught) & " 次(平均 " & Codec.Fmt (Chi_Slip, 1)
+                & ")· 牙:一个个点比(Bonferroni,门 " & Codec.Fmt (Gate_Pt, 1) & ")⇒ 认出来 " & Codec.Img (Caught_Pt)
+                & " 次;手此刻的不准当 0 ⇒ 没滑说滑了 " & Codec.Img (False_Slip0) & " 次");
       end;
       --  ② 手没动
       declare
@@ -1534,5 +1593,60 @@ begin
              and then Naive_Err > 0.01,
              "两块之间的轴 ⇒ 接触集的旋量:转轴搬过去差 " & Codec.Fmt (Err_T, 12) & " · 滑轴 " & Codec.Fmt (Err_S, 12) & " · 定不下 ⇒ 不给 "
              & Boolean'Image (not Ok_U) & " · 牙:轴不按 A 此刻的位姿搬 ⇒ 差 " & Codec.Fmt (Naive_Err, 4));
+   end;
+
+   --  🔴 同时两套接触(Linkage.Together.Check,§2 第 19 条):一件东西 A(握把 0.03 × 0.03 × 0.10,斜着拿、绕 x 转了 20°、挪了一段)不动,
+   --  它上面一块 B(扳机)绕 A 上一根轴(沿 x、过扳机顶上)往后转。摩擦锥半张角 atan 0.5。
+   --  ① 握把两侧各一处 + 后面两处(高低不同)、食指在扳机前面往后推 ⇒ 两个要一起做得到;
+   --  ② 只捏住握把两侧(两处点接触在同一条线上):抵得住重量,抵不住推扳机的那个力(它绕两处的连线转)⇒ 照实说 A 会被推走;
+   --  ③ 握把握好了、食指在扳机后面往前顶 ⇒ 扳机往后转推不动;④ 轴没定下来 ⇒ 不知道往哪动。
+   --  错了会是什么病:只算 B 推不推得动 ⇒ 只捏两侧也说行,一扣扳机枪就在手里转;只算 A 握不握得住 ⇒ 食指放错了一面也说行,扣不动。
+   --  牙:② 里只看重量 ⇒ 说行;③ 里只看 A 握不握得住(重量 + 推的力都抵得住)⇒ 说行
+   declare
+      use type Linkage.Together.Why_Kind;
+      Pa : constant Linkage.Pose := (Ok => True, R => Rot ([1.0, 0.0, 0.0], 20.0 * Deg), T => [0.4, -0.1, 0.3]);
+      function W_Pt (P : V3) return V3 is (Add (Geom.Ap (Pa.R, P), Pa.T));
+      function W_Dir (D : V3) return V3 is (Geom.Ap (Pa.R, D));
+      function Touch (P, N : V3) return Contact.Wrench.Touch is ((P => W_Pt (P), N => W_Dir (N), Twist_R => 0.0));
+      Up : constant V3 := [0.0, 0.0, 1.0];
+      Com : constant V3 := W_Pt ([0.0, 0.0, 0.0]);
+      Half : constant Long_Float := Arctan (0.5);
+      Mu : constant Long_Float := 0.5;
+      Good, Pinch, Front, Back : Contact.Wrench.Touch_Vectors.Vector;
+      J, Ju : Linkage.Joint;
+      R1, R2, R3, R4 : Linkage.Together.Report;
+      Pinch_Weight, Back_Weight, Back_Push : Long_Float;
+      Wy : Contact.Wrench.Why_Kind;
+   begin
+      Good.Append (Touch ([-0.015, 0.0, 0.0], [1.0, 0.0, 0.0]));
+      Good.Append (Touch ([0.015, 0.0, 0.0], [-1.0, 0.0, 0.0]));
+      Good.Append (Touch ([0.0, -0.015, -0.03], [0.0, 1.0, 0.0]));
+      Good.Append (Touch ([0.0, -0.015, 0.03], [0.0, 1.0, 0.0]));
+      Pinch.Append (Touch ([-0.015, 0.0, 0.0], [1.0, 0.0, 0.0]));
+      Pinch.Append (Touch ([0.015, 0.0, 0.0], [-1.0, 0.0, 0.0]));
+      Front.Append (Touch ([0.0, 0.03, 0.02], [0.0, -1.0, 0.0]));    --  扳机前面,往后推
+      Back.Append (Touch ([0.0, 0.02, 0.02], [0.0, 1.0, 0.0]));      --  扳机后面,往前顶
+      J.Status := Linkage.Found;
+      J.Ax := (W => [1.0, 0.0, 0.0], P => [0.0, 0.02, 0.04], Slide => False);   --  A 的系(参照帧那一刻)
+      Ju := J;
+      Ju.Status := Linkage.Undecided;
+      Linkage.Together.Check (Good, Com, Up, Contact.Wrench.No_Surface, Front, Half, J, Pa, -1.0, Mu, Mu, R1);
+      Linkage.Together.Check (Pinch, Com, Up, Contact.Wrench.No_Surface, Front, Half, J, Pa, -1.0, Mu, Mu, R2);
+      Linkage.Together.Check (Good, Com, Up, Contact.Wrench.No_Surface, Back, Half, J, Pa, -1.0, Mu, Mu, R3);
+      Linkage.Together.Check (Good, Com, Up, Contact.Wrench.No_Surface, Front, Half, Ju, Pa, -1.0, Mu, Mu, R4);
+      Put_Line ("    握好、前面推:" & Linkage.Together.Say (R1));
+      Put_Line ("    只捏两侧:" & Linkage.Together.Say (R2));
+      Put_Line ("    食指在后面:" & Linkage.Together.Say (R3));
+      --  牙:只看重量(② 的握法)、只看 A 握不握得住(③ 的握法:重量 + 后面那根手指往前顶的力)
+      Pinch_Weight := Contact.Wrench.Need (Pinch, Com, Up, Contact.Wrench.No_Surface, Contact.Still (Com), Mu, Mu, Wy);
+      Back_Weight := Contact.Wrench.Need (Good, Com, Up, Contact.Wrench.No_Surface, Contact.Still (Com), Mu, Mu, Wy);
+      Back_Push := Contact.Wrench.Least (Good, Back (0).P, Scl (Back (0).N, -1.0), [0.0, 0.0, 0.0], Scl (Back (0).N, -1.0),
+                                         Contact.Wrench.No_Surface, Contact.Still (Back (0).P), Mu, Mu, Wy);
+      Check (R1.Why = Linkage.Together.Fine and then R2.Why = Linkage.Together.A_Pushed_Away and then R3.Why = Linkage.Together.Not_Driven
+             and then R4.Why = Linkage.Together.Axis_Unknown
+             and then Pinch_Weight < Contact.Wrench.No_Way and then Back_Weight < Contact.Wrench.No_Way and then Back_Push < Contact.Wrench.No_Way,
+             "同时两套接触:握好、前面推 ⇒ " & R1.Why'Image & " · 只捏两侧 ⇒ " & R2.Why'Image & " · 食指在后面 ⇒ " & R3.Why'Image
+             & " · 轴没定下来 ⇒ " & R4.Why'Image & " · 牙:只捏两侧只看重量 ⇒ 要 " & Codec.Fmt (Pinch_Weight, 2) & "(说行);食指在后面只看 A ⇒ 重量 "
+             & Codec.Fmt (Back_Weight, 2) & "、推的力 " & Codec.Fmt (Back_Push, 2) & "(说行)");
    end;
 end Welds_Path_6;

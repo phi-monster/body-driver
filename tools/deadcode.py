@@ -48,6 +48,8 @@ TEST_HOOKS = {
     ("things.adb", "Add_Touch"): "路 3 I4:碰到它的点进估计;接触集碰到东西那一处(路 2 / 5)调它就是活的",
     ("things.adb", "Add_Point"): "路 3 I4:量到的它表面上的点进估计;两眼配点交出它表面的点那一步(路 3 下一段)接上就是活的",
     ("things.adb", "Rename"): "路 3 I4:脑给它改名时估计跟着走;路 7 改名那一处(act-round)调它就是活的",
+    ("linkage-together.adb", "Check"): "路 6:同时两套接触(A 不动 + 它上面的 B 沿轴动)的物理检查,两个要一起算;脑一次说得出两个要(I5)时接上就是活的",
+    ("linkage-together.adb", "Say"): "路 6:Linkage.Together.Check 的结果印一句日志;Check 接上就是活的",
 }
 import os, re, sys, glob, collections
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
