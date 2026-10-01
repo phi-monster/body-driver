@@ -7,16 +7,25 @@ package body Driver.Uncertain is
    use Ada.Numerics.Long_Elementary_Functions;
    use Driver.Numerics.Arrays;
 
+   function Tail return Real is (Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z));
+   --  How rarely a Gaussian difference exceeds Z of its sigmas: every gate's false-alarm rate.
+
+   function Scalar_Gate (Degrees_Of_Freedom : Natural := 0) return Gate is
+     ((Multiple => (if Degrees_Of_Freedom = 0 then Driver.Conventions.Z
+                    else Driver.Distributions.Student_T_Quantile (Tail, Degrees_Of_Freedom))));
+
+   function Vector_Gate (Dimensions : Positive; Degrees_Of_Freedom : Natural := 0) return Gate is
+     ((Multiple => (if Degrees_Of_Freedom = 0 then Sqrt (Driver.Distributions.Chi_Square_Quantile (Tail, Dimensions))
+                    else Sqrt (Real (Dimensions)
+                               * Driver.Distributions.F_Quantile (Tail, Dimensions, Degrees_Of_Freedom)))));
+
+   function Threshold (G : Gate) return Real is (G.Multiple);
+
+   function Significant (G : Gate; Difference, Sigma : Real) return Boolean is
+     (Sigma < Real'Last and then abs Difference > G.Multiple * Sigma);
+
    function Significant (Difference, Sigma : Real; Degrees_Of_Freedom : Natural := 0) return Boolean is
-   begin
-      if Sigma >= Real'Last then
-         return False;
-      elsif Degrees_Of_Freedom = 0 then
-         return abs Difference > Driver.Conventions.Z * Sigma;
-      end if;
-      return abs Difference > Driver.Distributions.Student_T_Quantile
-        (Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z), Degrees_Of_Freedom) * Sigma;
-   end Significant;
+     (Sigma < Real'Last and then Significant (Scalar_Gate (Degrees_Of_Freedom), Difference, Sigma));
 
    function Difference (A, B : Estimate) return Estimate is
    begin
