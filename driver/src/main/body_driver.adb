@@ -163,6 +163,7 @@ procedure Body_Driver is
             Driver.Robot.Observe (Robot, Current, Sent);
             Driver.Robot.Hand.Observe (Hands, Robot, Current, Sent);
             Driver.World.Observe (Scene, Robot, Hands, Current, Sent);
+            Driver.Beats.Hear (To_String (Current.Instruction));
             Tasks.Offer (To_String (Current.Instruction), Driver.Beats.Episode);
             Driver.Beats.Offer (Driver.Clock.Beat (Beat), Current, Sent, Took);
             if Took then

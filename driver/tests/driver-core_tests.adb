@@ -1,7 +1,10 @@
 with Ada.Numerics;
+with Ada.Streams;
+with GNAT.Sockets;
 with Ada.Numerics.Float_Random;
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Strings.Unbounded;
+with Driver.Beats;
 with Driver.Bytes;
 with Driver.Clock;
 with Driver.Commands;
@@ -417,6 +420,106 @@ package body Driver.Core_Tests is
              "a call without an address pretended to succeed or gave no reason");
    end Unconfigured_Service;
 
+   procedure Streaming_Error_Body is
+      --  A service that answers a streamed request with an error and a JSON
+      --  body: the caller must get the body, not an empty stream.
+      use GNAT.Sockets;
+      Error_Body : constant String := "{""error"":{""message"":""bad request""}}";
+
+      task Server is
+         entry Listening (Port : out Natural);
+      end Server;
+
+      task body Server is
+         Listener : Socket_Type;
+         Client   : Socket_Type;
+         Address  : Sock_Addr_Type := (Family => Family_Inet, Addr => Loopback_Inet_Addr, Port => Any_Port);
+         Buffer   : Ada.Streams.Stream_Element_Array (1 .. 4096);
+         Last     : Ada.Streams.Stream_Element_Offset;
+         Reply    : constant String :=
+           "HTTP/1.1 400 Bad Request" & ASCII.CR & ASCII.LF & "Content-Type: application/json" & ASCII.CR & ASCII.LF
+           & "Content-Length:" & Natural'Image (Error_Body'Length) & ASCII.CR & ASCII.LF & ASCII.CR & ASCII.LF
+           & Error_Body;
+      begin
+         Create_Socket (Listener);
+         Bind_Socket (Listener, Address);
+         Listen_Socket (Listener);
+         Address := Get_Socket_Name (Listener);
+         accept Listening (Port : out Natural) do
+            Port := Natural (Address.Port);
+         end Listening;
+         Accept_Socket (Listener, Client, Address);
+         Receive_Socket (Client, Buffer, Last);   --  the request; its content does not matter here
+         Send_Socket (Client, Driver.Bytes.To_Bytes (Reply), Last);
+         Close_Socket (Client);
+         Close_Socket (Listener);
+      end Server;
+
+      procedure Ignore (Chunk : String; Stop : out Boolean) is
+         pragma Unreferenced (Chunk);
+      begin
+         Stop := False;
+      end Ignore;
+
+      Port : Natural;
+   begin
+      Server.Listening (Port);
+      Driver.Services.Configure (Driver.Services.Brain, "127.0.0.1", Port);
+      declare
+         R : constant Driver.Services.Reply :=
+           Driver.Services.Call_Streaming (Driver.Services.Brain, "/v1/chat/completions", "{}", Ignore'Access);
+      begin
+         Check (not R.Ok, "an error status passed as an answer");
+         Check (Ada.Strings.Unbounded.To_String (R.Text) = Error_Body,
+                "the error body was lost: """ & Ada.Strings.Unbounded.To_String (R.Text) & """");
+      end;
+      Driver.Services.Configure (Driver.Services.Brain, "", 0);
+   end Streaming_Error_Body;
+
+   procedure Beat_Window is
+      Looked : Boolean := False with Atomic;
+
+      procedure Look is
+      begin
+         Looked := True;
+      end Look;
+
+      task Decider;
+      task body Decider is
+      begin
+         Driver.Beats.Within_A_Beat (Look'Access);
+      end Decider;
+
+      Took  : Boolean := False;
+      Reply : Driver.Commands.Command;
+      O     : Driver.Observations.Observation;
+   begin
+      --  A beat is taken only once the decider waits for it.
+      while not Took loop
+         Driver.Beats.Offer (0, O, Driver.Commands.Hold, Took);
+         if not Took then
+            delay 0.001;
+         end if;
+      end loop;
+      Driver.Beats.Await (Reply);
+      Check (Looked, "the procedure of a beat window did not run in it");
+      Check (Driver.Commands.Is_Hold (Reply), "a beat taken only to look did not answer hold");
+   end Beat_Window;
+
+   procedure Person_Words is
+      use Driver.Beats;
+      Before : constant Natural := Words_Heard;
+   begin
+      Hear ("put the cup down");
+      Check (Latest_Words = "put the cup down" and then Words_Heard = Before + 1, "new words were not heard");
+      Hear ("put the cup down");
+      Check (Words_Heard = Before + 1, "the same words counted as new");
+      Hear ("");
+      Check (Latest_Words = "put the cup down", "an observation without words erased the last ones");
+      Hear ("now the box");
+      Check (Latest_Words = "now the box" and then Words_Heard = Before + 2, "changed words were not noticed");
+   end Person_Words;
+
    procedure Replayed_Services is
       use Driver.Services;
       R  : constant Reply := (Ok => True, Text => Ada.Strings.Unbounded.To_Unbounded_String ("answer"), others => <>);
@@ -479,6 +582,12 @@ package body Driver.Core_Tests is
                              Json_Round_Trip'Access);
       Driver.Tests.Register ("core.services", "a call to an unconfigured service pretends to succeed",
                              Unconfigured_Service'Access);
+      Driver.Tests.Register ("core.streaming_error", "an error reply to a streamed call loses its body",
+                             Streaming_Error_Body'Access);
+      Driver.Tests.Register ("core.beat_window", "a decider that only looks moves the robot or never runs",
+                             Beat_Window'Access);
+      Driver.Tests.Register ("core.person_words", "new words are missed, or old ones counted again",
+                             Person_Words'Access);
       Driver.Tests.Register ("core.replayed_services",
                              "a replayed service reply arrives on another beat or answers another call",
                              Replayed_Services'Access);
