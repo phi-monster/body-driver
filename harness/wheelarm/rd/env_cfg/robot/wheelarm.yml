@@ -1,0 +1,11 @@
+# body-driver wheelarm rig (大并行 §2 第 39 条,路 8): a free two-wheel base with one arm on the floor; facing +y (towards the room).
+robots:
+  - {
+    robot_type: arm,
+    robot_name: wheelarm,
+    coupled: False,
+    default_root_pos: [0.0, -1.0, 0.08],
+    default_root_rot: [0.7071068, 0, 0, 0.7071068],
+    grasp_perfect_direction: "top_down",
+    enabled_self_collisions: False
+  }

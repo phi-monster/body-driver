@@ -33,6 +33,8 @@ package Plug is
       Cams : Cam_Vectors.Vector;
       Seq : Natural := 0;
       Instruction : Unbounded_String;    --  观测里带的任务句
+      --  I1(路 1,10-01):身体报的每一组数(Lay.Groups 的下标一一对应;这一拍没收到的那组 = 空)。开机按量认组、认谁跟着谁动用它
+      Groups : Floats_Vectors.Vector;
    end record;
 
    --  逐拍记下的东西(2026-09-26 V1B10:仿真的画面比关节读数晚一拍 —— 扫描时手还在转就存了格子,画面和读数不是同一刻,
@@ -92,6 +94,9 @@ package Plug is
       Jaw_Set : Floats_Vectors.Vector;
       --  每个抓握读数组这一集最后一回发出去的那一串(形状 = 对方那一拍报的):这一拍没收到这组的读数 ⇒ 照发它(插头规矩 ②),不编一个数。对方复位时清空
       Jaw_Sent : Floats_Vectors.Vector;
+      --  保持的键(开机还没发过命令时的保持动作,和量出来"别的命令组"的保持;I1)每个名字最后一回发出去的那一串:这一拍没读数 ⇒ 照发它,不编
+      Hold_Names : Strs;
+      Hold_Sent : Floats_Vectors.Vector;
    end record;
 
    procedure Boot (Port : Natural; L : in out Link; Ok : out Boolean);
@@ -100,7 +105,9 @@ package Plug is
    --  这一拍没读数 ⇒ 上一回发出去的那个数。一个数都不编(09-30:原来没读数就发 1.0 = x5 夹爪"1 = 张开"的约定,拿着东西时等于松手;
    --  而且只发 1 个数,五指手形状不对):这一拍没读数、这一集也还没发过 ⇒ 空(这一组这回不发)。发出去的那一串记进 L.Jaw_Sent。导出只为自检
    function Jaw_Values (L : in out Link; Ji : Natural; Mine : Boolean; C : Cmd; Cur : Floats) return Floats;
-   --  「照现在这样保持」:把此刻报的位姿 / 关节原样回声,抓握按 Jaw_Values(没有新命令的保持);读数空的键不发(不知道形状,不编)。导出只为自检
+   --  「照现在这样保持」(还没发过命令时每拍回给对方的):每一个命令键(Layout.Command_Groups,同名的只发一次)照它此刻的读数原样回声;
+   --  这一拍没读数 ⇒ 照发上一回发出去的那一串;一次没发过又没读数 ⇒ 这个键不发(不知道形状,不编)。不发身体报的位姿(驱动不用它;
+   --  10-01 原来位姿模式下回声位姿 —— 对方按位姿解反解来保持)。导出只为自检
    function Hold_Action (L : in out Link) return Buf;
    --  把对方最后一帧观测(L.Last)按认出来的布局拆成一帧:各组关节、身体报的位姿、抓握、任务句、每台相机的画面(没收到的那台留占位,见 Cam)。
    --  Sense 收完一帧就调它;导出只为自检

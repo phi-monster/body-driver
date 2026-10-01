@@ -20,7 +20,7 @@ with Exam;
 with Contact;
 with Stats;
 with Contact.Gen;
-with Contact.Grasp;
+with Contact.Search;
 with Kinem;
 with Contact.Exec;
 with Contact.Surface;
@@ -987,12 +987,14 @@ package body Act is
    --  🔴 这里的量全是【米】。09-20 搬回来时为了不碰棘轮把"×1000"删了,标签却还写着 mm ⇒ 横挪 25.6 毫米显示成 "0.0 mm",
    --  "它在相机前 -0.8 mm"其实是负 0.8 米(算到相机背后去了)—— T10 2026-09-21 差点被这个标签骗过去。量的是米,就按米说,三位小数到毫米。
 
-   --  走一步(Selfmap.Step,I6):这只手的目标 = 此刻的读数平移 Dw,这一步走它的 Frac、最长 Track(Selfmap.Step 的上限),一条命令、等它停
+   --  走一步(Selfmap.Step,I6):这只手的目标 = 此刻的读数平移 Dw,这一步走它的 Frac,上限 = 眼跟得住 Track、离可能碰到的地方 Clear、
+   --  反解够得到(Reach)(Selfmap.Step 的三道上限),一条命令、等它停
    --  (没给 Watch ⇒ 到了一步看得见的那一档以内就算到,同 Step_Arm 的 Geo_Settle);Rep = 这一步的账(实到、到没到、挡没挡:Blocked_By 拿 Wk 里这一段空走的底)
    procedure Geo_Move (L : in out Plug.Link; C : Context; F : in out Plug.Frame; Arm : Natural; Dw : Geom.V3; Ok : out Boolean;
                        Wk : in out Selfmap.Walk; Rep : out Selfmap.Leg_Step;
                        Watch : Selfmap.Watcher := null; Press : Boolean := False;
-                       Frac : Long_Float := 1.0; Track : Long_Float := Long_Float'Last) is
+                       Frac : Long_Float := 1.0; Track : Long_Float := Long_Float'Last;
+                       Clear : Long_Float := Long_Float'Last; Reach : Boolean := False) is
       A : Table.Vec := Table.Zero_Vec;
       Seq0 : constant Natural := F.Seq;
       Legs : Selfmap.Leg_Vectors.Vector;
@@ -1008,6 +1010,7 @@ package body Act is
       A (0) := Dw (0); A (1) := Dw (1); A (2) := Dw (2);
       Legs.Append (Selfmap.Leg'(Arm => Arm, Goal => Chan.Compose (F.EE (Arm), A), Jaw => <>));
       Lim.Press := Press; Lim.Watch := Watch; Lim.Loose := Selfmap."=" (Watch, null); Lim.Frac := Frac; Lim.Track := Track;
+      Lim.Clear := Clear; Lim.Reach := Reach;
       Selfmap.Step (L, C.Map, Legs, Lim, F, Wk, Rs, Frames, Ok);
       if not Rs.Is_Empty then
          Rep := Rs (0);
@@ -1034,13 +1037,51 @@ package body Act is
    Protocol_Up : constant Geom.V3 := [0.0, 0.0, 1.0];
    function Up_Dir (C : Context) return Geom.V3 is (if C.Touch_Valid then C.Touch_N else Protocol_Up);
 
-   --  ── 东西的量(登记表)──:脑的句子只有一种:do <东西> <量> up|down until <结局>。量的名字由身体列(键盘上"量 [...]"那一栏),
-   --  每个量有一个"让它变的方向"(世界系单位向量,从量出来的东西算);量变了 = 手里的接触点沿那个方向的旋量 ⇒ 同一条接触集 + 执行层。
-   --  加一个量 = 这两处各加一行;句子、接触集、执行层都不动,不按任务分。现在身体量得出的只有一个:height = 离它躺的面多高,方向 = 那张面的法向
+   --  ── 东西的量(登记表,大并行 §2 第 16 条)──:脑的句子:do <东西> <量> up|down until <结局>(两件东西那一句的关系词也按量算,见 Contact.Qty)。
+   --  量的名字由身体列(键盘上"量 [...]"那一栏);每个量 = 一种量法(Contact.Qty.Kind),它往哪变 = 让它变得最快的那个刚体运动(一个旋量,从量到的几何算)
+   --  ⇒ 同一条接触集 + 执行层。加一个量 = 这里加一行;句子、接触集、执行层都不动,不按任务分。
+   --  一张表:名字、量法、给脑看的那句"我怎么量它"(Qty_Meaning;路 7 的 Qty_Gloss 从这儿取)
+   function Qty_Kind (Name : String; K : out Contact.Qty.Kind) return Boolean is
+   begin
+      K := Contact.Qty.Height;
+      if Name = "height" then
+         K := Contact.Qty.Height;
+      elsif Name = "heading" then
+         K := Contact.Qty.Heading;
+      elsif Name = "tilt" then
+         K := Contact.Qty.Tilt;
+      elsif Name = "away" then
+         K := Contact.Qty.Away;
+      else
+         return False;
+      end if;
+      return True;
+   end Qty_Kind;
+   function Qty_Meaning (Name : String) return String is
+     (if Name = "height" then "how far the thing is above the surface it lies on (I measure it with my own eyes; up = off that surface, down = back onto it)"
+      elsif Name = "heading" then "which way the thing's long side points along the surface it lies on (up rotates it counterclockwise seen from above that surface, down clockwise)"
+      elsif Name = "tilt" then "how far the thing leans from how it stands (up leans its top away from my still eye, down toward it)"
+      elsif Name = "away" then "how far the thing is from my still eye, measured along the surface it lies on (up = farther, down = nearer)"
+      else "a reading of it I can change");
+   --  键盘上列哪几个:有能合拢的部件(grasper)才列。heading 要它的长轴(轮廓量得出);tilt / away 要一只"不跟着动它的那条臂走"的眼 ——
+   --  按开机量的"每只眼长在哪条臂上"判(Cam_Arm):有手指的臂里有一条臂,有一只量过几何的眼不长在它上面,就列(用到哪条臂时缺了照实说)
    function Qty_Words (C : Context; Roles : String) return String is
-     (if Ada.Strings.Fixed.Index (Roles, "grasper") > 0 then "height" else "");
-   function Qty_Axis (C : Context; Qty : String) return Geom.V3 is
-     (if Qty = "height" then Up_Dir (C) else [0.0, 0.0, 0.0]);
+      Still_Eye : Boolean := False;
+   begin
+      if Ada.Strings.Fixed.Index (Roles, "grasper") = 0 then
+         return "";
+      end if;
+      for A in 0 .. C.Map.Arms - 1 loop
+         if Arm_Has_Fingers (C, A) then
+            for Cm in 0 .. C.Map.N_Cams - 1 loop
+               if Cam_Arm (C, Cm) /= Integer (A) and then Cm < Natural (C.Geo.Length) and then (C.Geo (Cm).Fixed or else C.Geo (Cm).Valid) then
+                  Still_Eye := True;
+               end if;
+            end loop;
+         end if;
+      end loop;
+      return "height heading" & (if Still_Eye then " tilt away" else "");
+   end Qty_Words;
 
    --  这一段用了几拍:对方在段中间复位(新的一集,步数从零起)时不许算成负数(S1 2026-09-23 实测:第二集开始时正在进场,减出负数把驱动崩了)
    function Beats_Since (L : Plug.Link; B0 : Natural) return Natural is
@@ -1072,6 +1113,21 @@ package body Act is
       end if;
       return C.Map.EE_Noise;
    end Geo_Base;
+
+   --  这只手的小步(Selfmap.Careful_Step):手自己的不准(长在它上面那只眼量的指尖不准、这一次到位差 Miss、读数噪声)分给 Blocked 当底的那几步,
+   --  再小也得是它自己那只眼看得出的一步
+   function Careful_Of (C : Context; Arm : Natural; Miss : Long_Float) return Long_Float is
+      Hc : constant Integer := Hand_Eye_Of (C, Arm);
+      G : constant Geom.Cam_Geo := (if Hc >= 0 then Geo_Of (C, Natural (Hc)) else (others => <>));
+   begin
+      return Selfmap.Careful_Step (G.Tip_Sd, Miss, C.Map.EE_Noise, Geo_Base (C, Arm), G.Rms);
+   end Careful_Of;
+
+   --  脑说的步子档位 = 这一步最多多大(语言 §17.6,大并行 §2 第 23 条;10-01 路 4,原来是"乘探针上限的 1/4、1/2、1"):
+   --  small = 这只手的小步(Careful_Of:到可能碰到的带子里每一步多大),large = 一条命令走得到的最大一档(开机量的步幅),
+   --  medium = 两者的几何中点(对数尺上的正中;两头都是量的)。脑没说 ⇒ 不加上限(步子由反解、眼、带子定)
+   function Gear_Cap (C : Context; Arm : Natural; Gear : Unbounded_String; Miss : Long_Float := 0.0) return Long_Float is
+     (Selfmap.Gear_Bound (To_String (Gear), Careful_Of (C, Arm, Miss), Stride_Of (C, Arm)));
 
    --  指尖在相机里的位置:开机那一帧里两根手指(合空扫过的像素)各自最靠上的那一截 = 指尖;有深度那一帧读一次深度
    --  (真机:一台相机一辈子量一次,用尺子也行;之后再也不读深度)
@@ -1193,7 +1249,7 @@ package body Act is
    procedure Take_Silhouette (C : in out Context; F : Plug.Frame; Cam, Arm : Natural; Name : Unbounded_String; P0 : Geom.V3; P0_Up_Sd : Long_Float) is separate;
 
    --  接触集(09-29 重写,PLAN §2 ②):量出来的手(每一瓣的尖和尖那一截的截面,碰桌面量的)在看到的形状上真合一次,
-   --  挑按量得出的误差最坏时每单位重量要夹得最松的那一组(Contact.Grasp.Plan)。
+   --  挑按量得出的误差最坏时每单位重量要夹得最松的那一组(Contact.Search.Plan)。
    --  形状 = 记下的顶面点(Take_Silhouette;碰过它躺的面就按真高度重投)+ 从轮廓那一圈垂直补到它躺的面的侧壁(实心、竖壁的假设,说出来);
    --  旁边的东西 = 这一集里被顶住过、比面高、又不在它身上的点(C.Bumps:伸下去被挡住就记进来 —— 试一下就知道);
    --  够不够得着 = 眼在那个位姿时按量到的关节范围反解(Plug.Reach);摩擦 = 这件东西和这只身体以前量到的上下限(C.Grip_Mus)。
@@ -1216,8 +1272,31 @@ package body Act is
       return D;
    end Plan_Descent;
 
+   --  手拿着它绕 M 的那根轴(过 M.Pivot)转 Th 弧度,手的位姿要到哪:位置绕那一点转过去、朝向转同一个角(Chan.Compose 的转动按世界轴)。
+   --  拿住了它就跟着手走 ⇒ 它身上每一点正好绕那根轴转了 Th(Want_Scene 按"手从合上那一刻起挪过的刚体运动"搬它,同一个变换)
+   function Carry_Goal (Cur : Plug.Arm_Pose; M : Contact.Twist; Th : Long_Float) return Plug.Arm_Pose is
+      Oa : Boolean;
+      Ax : constant Geom.V3 := Contact.Unit (M.Ang, Oa);
+      Rv : constant Geom.V3 := [Th * Ax (0), Th * Ax (1), Th * Ax (2)];
+      Rq : constant Geom.V3 := Geom.Ap (Geom.Rodrigues (Rv), [Cur (0) - M.Pivot (0), Cur (1) - M.Pivot (1), Cur (2) - M.Pivot (2)]);
+      A : Table.Vec := Table.Zero_Vec;
+   begin
+      for I in 0 .. 2 loop
+         A (I) := M.Pivot (I) + Rq (I) - Cur (I);
+         A (3 + I) := Rv (I);
+      end loop;
+      return Chan.Compose (Cur, A);
+   end Carry_Goal;
+
+   --  它躺的面(接触集和"要它怎么动"共用这一份):碰过的面 ⇒ 量到的;没碰过、标定板拟合出了面 ⇒ 板的;都没有 ⇒ 协议的"上"(过原点)
+   function Lie_N (C : Context) return Geom.V3 is (if C.Touch_Valid then C.Touch_N elsif C.Board_Plane then C.Board_N else Protocol_Up);
+   function Lie_P (C : Context) return Geom.V3 is (if C.Touch_Valid then C.Touch_Pt else C.Board_Pt);
+   --  它的实心模型(接触集和"要它怎么动"共用这一份,一个量一种量法):记下的顶面轮廓点;碰过它躺的面 ⇒ 按真的面重投那些视线
+   --  (一条都没落到面上 ⇒ 还用原来那份);再从轮廓那一圈往下补到它躺的面(实心、竖壁的假设,说出来)。没记下它的轮廓 / 没量过它躺的面 ⇒ 空
+   procedure Solid_Of (C : Context; Name : Unbounded_String; Shape : out Contact.V3_Vectors.Vector; Reprojected : out Boolean) is separate;
+
    procedure Plan_Contact (C : in out Context; F : Plug.Frame; Arm, Cam : Natural; Name : Unbounded_String;
-                           Pick : out Contact.Grasp.Candidate; Note : out Unbounded_String; Ok : out Boolean) is separate;
+                           Pick : out Contact.Search.Candidate; Note : out Unbounded_String; Ok : out Boolean) is separate;
 
    --  转这只手,让它自己那只眼的正前方对准世界里的一个方向(Want,单位向量)。
    --  转最少的角度:转轴 = 现在的正前方 × 要的方向。指尖不许甩走(08-28 那次甩出 20 cm):每一步先按要转的角度算出
@@ -1275,43 +1354,84 @@ package body Act is
 
    --  Above = True:不是走到它跟前,而是走到它【正上方、高出一个张口】(张口是身体量过的长度,不是拍的数)。
    --  "上" = 位姿读数系的 +z,和抬手那一条同一个约定(当它朝上;真机该由重力读数定)。
+   --  Gear = 脑说的步子档位那个词(small / medium / large;空 = 没说):这一步最多多大(Gear_Cap)。Amt 是老的"乘几分之几",
+   --  走路这一段不再用它乘(只转交给 Geo_Turn,Geo_Turn 也不用);调用方都显式给,不设缺省
    procedure Geo_Approach (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Cam, Arm : Natural; Slot : Integer;
                            Step_Limit : Natural; Event : out Unbounded_String; Steps_Taken : out Natural; Beats : out Natural;
-                           Above : Boolean := False; Amt : Long_Float := 0.5; Until_Touch : Boolean := False;
-                           Name : Unbounded_String := Null_Unbounded_String) is separate;
+                           Above : Boolean := False; Amt : Long_Float; Until_Touch : Boolean := False;
+                           Name : Unbounded_String := Null_Unbounded_String;
+                           Gear : Unbounded_String := Null_Unbounded_String) is separate;
 
-   --  离远点(拿着东西):沿来的路退,退它来时那么远(全是量的,两段走)
+   --  沿来的路退回逼近开始的那一处(C.Geo_Came 那么远,反着 C.Geo_Dir):一步一步 Selfmap.Step(同一个 Walk),每一步走还差的全部,
+   --  上限 = 反解够得到、脑说的档位(Gear_Cap);到了 = 离那一处不到我自己看得出的那一步(Plan_Approach 的分辨率:身后没有它,只有我自己的不准);
+   --  被挡住(Blocked)、一步下去没再近过分辨率(到头了)、走满脑给的步数(Max_Steps > 0)就收。
+   --  Went = 沿退的方向实到多远;C.Geo_Came / Geo_Dist / Geo_At 跟着变(下一回"离远点"只退剩下的)
+   procedure Retrace (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Arm : Natural; Max_Steps : Natural; Gear : Unbounded_String;
+                      Went : out Long_Float; Steps_Taken : out Natural; Blocked, Arrived : out Boolean) is
+      P0 : constant Plug.Arm_Pose := F.EE (Arm);
+      Back : Table.Vec := Table.Zero_Vec;
+      Hc : constant Integer := Hand_Eye_Of (C, Arm);
+      G : constant Geom.Cam_Geo := (if Hc >= 0 then Geo_Of (C, Natural (Hc)) else (others => <>));
+      --  身后没有它,只有我自己的不准:分辨率 = 我自己看得出的那一步(Plan_Approach,它的位置不准 0、没有它的半径)
+      Res : constant Long_Float := Selfmap.Plan_Approach (C.Geo_Came, 0.0, 0.0, G.Tip_Sd, 0.0, C.Map.EE_Noise, Geo_Base (C, Arm), G.Rms).Res;
+      Lim : Selfmap.Limits;
+      Wk : Selfmap.Walk;
+      Turned : Long_Float;
+      Why : Selfmap.Walk_End;
+      use type Selfmap.Walk_End;
+   begin
+      for K in 0 .. Chan.Pos_Channels - 1 loop
+         Back (K) := -C.Geo_Dir (K) * C.Geo_Came;
+      end loop;
+      Lim.Track := Gear_Cap (C, Arm, Gear); Lim.Reach := True;
+      Selfmap.Walk_To (L, C.Map, (Arm => Arm, Goal => Chan.Compose (P0, Back), Jaw => <>), Lim, Res, Long_Float'Last, Max_Steps,
+                       F, Wk, Went, Turned, Steps_Taken, Why);
+      Blocked := Why = Selfmap.Was_Blocked; Arrived := Why = Selfmap.Arrived;
+      C.Geo_Came := Long_Float'Max (0.0, C.Geo_Came - Went);
+      if C.Geo_Dist >= 0.0 then
+         C.Geo_Dist := C.Geo_Dist + Went;   --  离它远了这么多;刚算的"笼住"距离跟着变
+      end if;
+      C.Geo_At := F.EE (Arm);
+   end Retrace;
+
+   --  离远点(拿着东西):沿来的路退,退它来时那么远(全是量的;一步一步走还差的全部,Retrace)
    procedure Geo_Retreat (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Arm : Natural;
                           Event : out Unbounded_String; Steps_Taken : out Natural; Beats : out Natural) is
       Beats0 : constant Natural := Plug.Steps (L);
       Dist : constant Long_Float := C.Geo_Came;
-      Mok : Boolean;
+      Went : Long_Float;
+      Blocked, Arrived : Boolean;
    begin
       Steps_Taken := 0; Beats := 0;
       if Dist <= 0.0 or else Geom.Norm (C.Geo_Dir) <= 0.0 then
          Event := S ("amount: stopped (I have no approach path to retrace)");
          return;
       end if;
-      --  分几截退:除数【就是截数】,不是一个可调的系数 —— 走一截量一眼,免得一口气退过头。
-      declare
-         Legs : constant := 2;
-         Leg_D : constant Long_Float := Dist / Long_Float (Legs);
-      begin
-      for Leg in 1 .. Legs loop
-         Geo_Move (L, C, F, Arm, [-C.Geo_Dir (0) * Leg_D, -C.Geo_Dir (1) * Leg_D, -C.Geo_Dir (2) * Leg_D], Mok);
-         Steps_Taken := Steps_Taken + 1;
-      end loop;
-      end;
-      Event := S ("amount: arrived (I went back the way I came, " & Len (C, Dist) & ")");
+      --  原来分两截退(截数是拍的,"走一截量一眼,免得一口气退过头"):Selfmap.Step 按量到的交付走、到了分辨率以内就收,不会退过头
+      Retrace (L, C, F, Arm, 0, Null_Unbounded_String, Went, Steps_Taken, Blocked, Arrived);
+      Event := S ((if Blocked then "resist: going back the way I came, my hand was stopped after " & Len (C, Went) & " of " & Len (C, Dist)
+                   elsif Arrived then "amount: arrived (I went back the way I came, " & Len (C, Went) & ")"
+                   else "amount: stopped getting closer to where I started (I went back " & Len (C, Went) & " of " & Len (C, Dist) & ")"));
       Beats := Beats_Since (L, Beats0);
    end Geo_Retreat;
 
-   --  离远点(手里没东西):沿我来时走向它的方向【反着】走。一步多长 = 脑那一档的步子(和贴近时同一把尺);走几步 = 脑说的步数,没说就一步。
-   --  没朝它走过就说不出哪边是"远" ⇒ 如实拒,不猜。
+   --  离远点(手里没东西):沿我来时走向它的方向【反着】走,退回逼近开始的那一处(Retrace)。脑说了档位 ⇒ 每一步最多这么大(Gear_Cap);
+   --  脑说了步数 ⇒ 最多走这么多步(10-01 路 4:原来一步 = 量出来的最大一档 × 脑的档位、没说步数就只走一步 —— 两个拍的数)。
+   --  Amt 是老的"乘几分之几",不再用。没朝它走过就说不出哪边是"远" ⇒ 如实拒,不猜。
    procedure Geo_Away (L : in out Plug.Link; C : in out Context; F : in out Plug.Frame; Arm : Natural; Step_Limit : Natural; Amt : Long_Float;
-                       Event : out Unbounded_String; Steps_Taken : out Natural; Beats : out Natural) is separate;
+                       Event : out Unbounded_String; Steps_Taken : out Natural; Beats : out Natural;
+                       Gear : Unbounded_String := Null_Unbounded_String) is separate;
 
    --  ── 一轮 ──
+   --  量到的几何 → Contact.Qty.Scene。它:实心模型的形心、底离它躺的面多高、在面里的长轴(没有模型 ⇒ 两眼交点那个位置,没有长轴和底)。
+   --  "上" = Up_Dir(和 09-23 起"沿面的法向走一个单位"那一条是同一个;高低从它躺的面 Lie_P 量);"我" = 不跟着这条臂走的那只眼(Still_Cam);
+   --  "横" = 脑看着的那只眼的横轴;参照那一件 = 此刻看得见它的几只眼的视线交点(交点的高 = 它顶面的高:接触集的模型就是"顶面过它量到的位置")。
+   --  不准:它轮廓横着的误差(Sil_Err)、它那张面高低的不准(Sil_H_Sd)、参照那一件交点沿"上"的不准(Meet_Sd)、位姿读数的抖动,合起来;
+   --  长轴朝向的不准 = 轮廓点误差 × √(长轴方向的方差 / 点数) ÷ (长短两轴方差之差)(主轴的一阶扰动),Z 倍到不了直角 ⇒ 才算有长轴
+   procedure Want_Scene (C : in out Context; F : Plug.Frame; W : Want; Arm : Integer; Sc : out Contact.Qty.Scene) is separate;
+   --  这一个要 ⇒ 要它怎么动(一个旋量)。量的名字按登记表(Qty_Kind);两件东西那一句的关系词各是两件之间的一个量(Contact.Qty),方向由关系词定
+   procedure Want_Twist (C : in out Context; F : Plug.Frame; W : Want; Arm : Integer; M : out Contact.Twist; Ok : out Boolean; Note : out Unbounded_String) is separate;
+
    procedure Round (L : in out Plug.Link; F : in out Plug.Frame; C : in out Context) is separate;
 
    --  V1 口径"头顶眼按指尖算的残差"(2026-09-26):开机各停里不动的眼给这只手做的合空标记(每一瓣的尖 C.Lobe_Obs、各瓣的中点 C.Fixed_Obs),

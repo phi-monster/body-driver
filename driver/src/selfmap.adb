@@ -478,15 +478,119 @@ package body Selfmap is
       Note.Text := T;
    end Verify;
 
+   function Rot_Len (A : Table.Vec) return Long_Float is (Sqrt (A (3) ** 2 + A (4) ** 2 + A (5) ** 2));
+
+   --  ── 上一个动作的尾巴收住了没有(Measure_Idle 先等它收住再量)──
+   --  一帧到下一帧每一组读数挪了多少:每条臂的平移、转动(位姿),每组关节、每组抓握(组里取挪得最多的那个数)。
+   --  组的排法按进门那一帧定,之后每一帧同一个排法;这一帧没有这一组的读数 ⇒ Have = False
+   type Group_Move is record
+      Moves : Floats;
+      Have : Bools;
+   end record;
+   function Group_Moves (A, B : Plug.Frame; N_Ee, N_Q, N_Jaw : Natural) return Group_Move is
+      G : Group_Move;
+      procedure Put (Ok : Boolean; X : Long_Float) is
+      begin
+         G.Have.Append (Ok);
+         G.Moves.Append (if Ok then X else 0.0);
+      end Put;
+      function Max_Diff (X, Y : Floats) return Long_Float is
+         Mx : Long_Float := 0.0;
+      begin
+         for K in 0 .. Natural'Min (Natural (X.Length), Natural (Y.Length)) - 1 loop
+            Mx := Long_Float'Max (Mx, abs (Y (K) - X (K)));
+         end loop;
+         return Mx;
+      end Max_Diff;
+   begin
+      for I in 0 .. N_Ee - 1 loop
+         declare
+            Ok : constant Boolean := I < Natural (A.EE.Length) and then I < Natural (B.EE.Length);
+            D : constant Table.Vec := (if Ok then Chan.Delivered (A.EE (I), B.EE (I)) else Table.Zero_Vec);
+         begin
+            Put (Ok, Table.Norm (D, Chan.Pos_Channels));
+            Put (Ok, Rot_Len (D));
+         end;
+      end loop;
+      for Q in 0 .. N_Q - 1 loop
+         Put (Q < Natural (A.Joints.Length) and then Q < Natural (B.Joints.Length),
+              (if Q < Natural (A.Joints.Length) and then Q < Natural (B.Joints.Length) then Max_Diff (A.Joints (Q), B.Joints (Q)) else 0.0));
+      end loop;
+      for J in 0 .. N_Jaw - 1 loop
+         Put (J < Natural (A.Jaw.Length) and then J < Natural (B.Jaw.Length),
+              (if J < Natural (A.Jaw.Length) and then J < Natural (B.Jaw.Length) then Max_Diff (A.Jaw (J), B.Jaw (J)) else 0.0));
+      end loop;
+      return G;
+   end Group_Moves;
+
+   --  不下命令,等上一个动作的尾巴收住:尾巴是一拍比一拍挪得少;一组读数这一拍挪的比上一拍少不到上一拍的百分之一(Negligible,
+   --  同 Go 判"停了")= 这一组收到底了(到了噪声、读数的分辨率,或者身体自己在漂 —— 都不再变小),收住一次就算(噪声有大有小,
+   --  不回头再看)。每一组都收住了才回。出口只有量到的"不再变小",不设拍数:H4(人形,09-28)第 490 拍起每拍只挪上一拍的 0.64,
+   --  收到读数分辨率要二十来拍;原来接着就量,量成 0.0121 单位的"静止噪声"(真的不抖)。一拍只比上一拍少不到百分之一的慢慢挪
+   --  = 身体自己在漂(等不完),它就是不下命令时读数一拍变多少,照实当地板。这一帧没有某一组的读数 ⇒ 那一组不等(没有证据就不等它)
+   procedure Wait_Tail (L : in out Plug.Link; F : in out Plug.Frame; Used : out Natural; Ok : out Boolean) is
+      N_Ee : constant Natural := Natural (F.EE.Length);
+      N_Q : constant Natural := Natural (F.Joints.Length);
+      N_Jaw : constant Natural := Natural (F.Jaw.Length);
+      Prev_F : Plug.Frame := F;
+      Last : Floats;
+      Have_Last, Done : Bools;
+   begin
+      Used := 0;
+      Ok := True;
+      declare
+         G0 : constant Group_Move := Group_Moves (F, F, N_Ee, N_Q, N_Jaw);   --  只取组数
+      begin
+         for S in 0 .. Natural (G0.Moves.Length) - 1 loop
+            Last.Append (0.0); Have_Last.Append (False); Done.Append (False);
+         end loop;
+      end;
+      loop
+         exit when (for all D of Done => D);
+         if not Plug.Sense (L, F) then
+            Ok := False;
+            return;
+         end if;
+         Used := Used + 1;
+         declare
+            G : constant Group_Move := Group_Moves (Prev_F, F, N_Ee, N_Q, N_Jaw);
+         begin
+            for S in 0 .. Natural (G.Moves.Length) - 1 loop
+               if not G.Have (S) then
+                  Done.Replace_Element (S, True);
+               else
+                  if Have_Last (S) and then Last (S) - G.Moves (S) <= Negligible * Last (S) then
+                     Done.Replace_Element (S, True);
+                  end if;
+                  Last.Replace_Element (S, G.Moves (S));
+                  Have_Last.Replace_Element (S, True);
+               end if;
+            end loop;
+         end;
+         Prev_F := F;
+      end loop;
+   end Wait_Tail;
+
    procedure Measure_Idle (L : in out Plug.Link; F : in out Plug.Frame; M : in out Body_Map; Ok : out Boolean) is
       N_Cams : constant Natural := Natural (F.Cams.Length);
       Arms : constant Natural := Natural'Min (Natural (F.EE.Length), M.Arms);
    begin
       Ok := True;
-      --  ① 什么都不做时读数抖多少、画面抖多少(静止对)
-      --  🔴 已知欠账(PLAN 2b):接着上一个动作就读,慢的身体读到的是还在收的尾巴(人形 H4 0.0121 单位,x5 0.00004;仿真读数本身不抖)。
-      --  09-28 改成"等收住再量"(H5 / H6)把 x5 碰桌面粗找的门带坏了(V1B60 / V1B61,门的余量碰巧就是这个尾巴,见 Act.Descend)⇒ 撤回;
-      --  要和粗找的门一起改,先离线验两台身体
+      --  ① 什么都不做时读数抖多少、画面抖多少(静止对)—— 先等上一个动作的尾巴收住(Wait_Tail),收住以后再量:
+      --  慢的身体接着上一个动作就读,读到的是还在收的尾巴(H4 人形 0.0121 单位,仿真读数本身不抖)。
+      --  09-28 头一回改成"等收住再量"把 x5 碰桌面粗找的门带坏过(V1B60:门 = 底 + 3 × 静止噪声,余量碰巧就是 x5 那 0.00004 的尾巴);
+      --  09-29 起碰到没有只有 Selfmap.Blocked 一个判法、门里有"这一步的百分之一",x5 从 V1B69 起量到的静止噪声本来就是 0(V1B78 全过)
+      declare
+         Waited : Natural;
+         Ok_W : Boolean;
+      begin
+         Wait_Tail (L, F, Waited, Ok_W);
+         if not Ok_W then
+            Ok := False;
+            return;
+         end if;
+         Put_Line ("[身] 静止噪声:先等上一个动作收住 —— 每组读数一拍挪的不再比上一拍少,等了 " & Codec.Img (Waited) & " 拍");
+      end;
       declare
          Prev_EE : Plug.Pose_Vectors.Vector := F.EE;
          Prev_Jaw : Plug.Floats_Vectors.Vector := F.Jaw;
@@ -560,7 +664,7 @@ package body Selfmap is
       M.Arms := Arms; M.N_Cams := N_Cams; M.Per_Arm := Chan.Per_Arm; M.Channels := Arms * Chan.Per_Arm;
       M.Jaws.Clear;
       for A in 0 .. Arms - 1 loop
-         M.Jaws.Append (Integer (Natural'Max (1, Jaw_Count (F, A))));
+         M.Jaws.Append (Integer (Jaw_Count (F, A)));   --  量到几个就是几个,可以 0 个(没有抓握的身体照样开机;路 1 10-01 改这一行,原来 Max (1, …))
       end loop;
       Ok := False;
       if Arms = 0 or else N_Cams = 0 then
@@ -793,8 +897,6 @@ package body Selfmap is
       return Natural (W.Legs.Length);
    end Leg_Of;
 
-   function Rot_Len (A : Table.Vec) return Long_Float is (Sqrt (A (3) ** 2 + A (4) ** 2 + A (5) ** 2));
-
    --  这具身体空走一步(长 Len)最多交付它自己的几成(上界):平均少走的减 Stats.Z 倍散布(同 Blocked 的门,另一侧)。拿上界不拿平均:
    --  交付得最多的那一步放大以后也不走过头(不来回晃)。不到两步(量不出散布)/ 上界是一整份(交付满,x5 的探针停下再读就是)⇒ 1,不放大。
    --  比量过的最长那一步还长 ⇒ 1:少走的是一个比例(每条命令只走到七八成)还是一截死区(少走的长度不随步长变),只有不同长的几步才分得出;
@@ -997,5 +1099,85 @@ package body Selfmap is
          end;
       end loop;
    end Step;
+
+   --  ── 走近一件东西每一步多大 ──
+   function Floor_Step (Noise, Notch, Eye_Rms : Long_Float) return Long_Float is
+     (Long_Float'Max (Notch, Stats.Z * Long_Float'Max (Noise, Notch * Eye_Rms)));
+
+   function Careful_Step (Tip_Sd, Miss, Noise, Notch, Eye_Rms : Long_Float) return Long_Float is
+      Hand : constant Long_Float := Stats.Z * Sqrt (Tip_Sd ** 2 + Miss ** 2 + Noise ** 2);
+   begin
+      return Long_Float'Max (Hand / Long_Float (Free_Base), Floor_Step (Noise, Notch, Eye_Rms));
+   end Careful_Step;
+
+   function Plan_Approach (Dist, R_Obj, Sd_Target, Tip_Sd, Miss, Noise, Notch, Eye_Rms : Long_Float) return Approach_Plan is
+      P : Approach_Plan;
+      Sd_Hand : constant Long_Float := Sqrt (Tip_Sd ** 2 + Miss ** 2 + Noise ** 2);
+   begin
+      P.Lstep := Careful_Step (Tip_Sd, Miss, Noise, Notch, Eye_Rms);
+      if Sd_Target = Long_Float'Last or else R_Obj = Long_Float'Last then
+         --  它在哪 / 它多大量不出:没有"碰不到它"的那一段,全程小步(照实);到没到只按我自己看得出的那一步判
+         P.Res := Floor_Step (Noise, Notch, Eye_Rms); P.Band := Long_Float'Last; P.Clear := Long_Float'First;
+         return P;
+      end if;
+      P.Res := Long_Float'Max (Stats.Z * Sqrt (Sd_Target ** 2 + Sd_Hand ** 2), Floor_Step (Noise, Notch, Eye_Rms));
+      P.Band := R_Obj + P.Res;
+      P.Clear := Dist - P.Band - Long_Float (Free_Base) * P.Lstep;
+      return P;
+   end Plan_Approach;
+
+   function Gear_Bound (Gear : String; Small, Large : Long_Float) return Long_Float is
+     (if Gear = "small" then Small
+      elsif Gear = "large" then Long_Float'Max (Small, Large)
+      elsif Gear = "medium" then Sqrt (Small * Long_Float'Max (Small, Large))
+      else Long_Float'Last);
+
+   procedure Walk_To (L : in out Plug.Link; M : Body_Map; G : Leg; Lim : Limits; Res, Res_Rot : Long_Float; Max_Steps : Natural;
+                      F : in out Plug.Frame; W : in out Walk; Went, Turned : out Long_Float; Steps : out Natural; Why : out Walk_End) is
+      Prev_T, Prev_R : Long_Float := Long_Float'Last;
+      Legs : Leg_Vectors.Vector;
+   begin
+      Went := 0.0; Turned := 0.0; Steps := 0; Why := Lost_Link;
+      Legs.Append (G);
+      loop
+         if G.Arm >= Natural (F.EE.Length) then
+            Why := Lost_Link;
+            return;
+         end if;
+         declare
+            D : constant Table.Vec := Chan.Delivered (F.EE (G.Arm), G.Goal);
+            Left_T : constant Long_Float := Table.Norm (D, Chan.Pos_Channels);
+            Left_R : constant Long_Float := Rot_Len (D);
+            Rep : Leg_Step_Vectors.Vector;
+            Fr : Natural;
+            Ok : Boolean;
+         begin
+            if Left_T <= Res and then Left_R <= Res_Rot then
+               Why := Arrived;
+               return;
+            end if;
+            if not Gained (Prev_T, Left_T, Res) and then not Gained (Prev_R, Left_R, Res_Rot) then
+               Why := No_Gain;
+               return;
+            end if;
+            if Max_Steps > 0 and then Steps >= Max_Steps then
+               Why := Max_Steps_Done;
+               return;
+            end if;
+            Prev_T := Left_T; Prev_R := Left_R;
+            Step (L, M, Legs, Lim, F, W, Rep, Fr, Ok);
+            if not Ok or else Rep.Is_Empty then
+               Why := Lost_Link;
+               return;
+            end if;
+            Steps := Steps + 1;
+            Went := Went + Rep (0).Went; Turned := Turned + Rep (0).Turned;
+            if Rep (0).Blocked_T or else Rep (0).Blocked_R then
+               Why := Was_Blocked;
+               return;
+            end if;
+         end;
+      end loop;
+   end Walk_To;
 
 end Selfmap;

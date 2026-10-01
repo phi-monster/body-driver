@@ -1,3 +1,4 @@
+with Links;
 separate (Jointboot)
 procedure Save_Kin (Path : String; K : Kin_Store; Images : Boolean := True) is
    use Ada.Text_IO;
@@ -16,7 +17,7 @@ procedure Save_Kin (Path : String; K : Kin_Store; Images : Boolean := True) is
    end Put_V3;
 begin
    Create (Fo, Out_File, Path);
-   Put_Line (Fo, "kin 4");   --  格式版本:4 = 每个关节到过的范围和往外一步(到过的范围,09-29);3 = 每根轴记着是转还是走(09-27 无人机);2 = 不动的眼整份相机几何;更旧的读到 ⇒ 从零量
+   Put_Line (Fo, "kin 5");   --  格式版本:5 = 每一节的表面点(Links,10-01);4 = 每个关节到过的范围和往外一步(到过的范围,09-29);3 = 每根轴记着是转还是走(09-27 无人机);2 = 不动的眼整份相机几何;更旧的读到 ⇒ 从零量
    Put_Line (Fo, "key " & To_String (K.Key));
    Put_Line (Fo, "world_cam " & Codec.Img (K.World_Cam));   --  09-30:原来 Integer'Image 在 −1 时写成 "world_cam-1",读回来标签认不出
    Put (Fo, "rw"); Put_M3 (K.Rw); New_Line (Fo);
@@ -94,6 +95,10 @@ begin
    for P of K.Board loop
       Put (Fo, "board"); Put_V3 (P.Pw); Put_M3 (P.Cov);
       Put_Line (Fo, " " & F9 (P.U) & " " & F9 (P.V) & " " & F9 (P.Sh) & " " & Codec.Img (P.Views));
+   end loop;
+   --  每一节的表面点(装上的那一份;装回时读回来,不用再扫)
+   for P of Links.Points loop
+      Put_Line (Fo, "link " & Links.Line_Of (P));
    end loop;
    Close (Fo);
    if Images and then K.World_Cam >= 0 and then not K.Ds.Is_Empty and then K.Ds (0).World_Img.W > 0 then
