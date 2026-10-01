@@ -62,10 +62,14 @@ package body Zone is
 
    --  身体文件里一瓣几个数(x0, y0, x1, y1, cu, cv, 像素数;和旧文件的 "a" / "b" 同一个排法)
    Lobe_Fields : constant := 7;
+   --  合空时手指到的那一截几个数(u, v, 宽, 窄, 伸进来的 u, 伸进来的 v;Section 的排法)
+   Shut_Fields : constant := 6;
    --  这一份握区是按哪一版的算法量的(区心、主轴怎么从瓣算;存在 "lobes" 里,协议):
    --  0 = I2 以前("a" / "b" 两格:两瓣的主轴按归一化画幅算,和东西的主轴(像素系)差 0.56° 一类的角)、
-   --  1 = I2 第一版(49dfbe1:一瓣的区心按那一瓣自己的形心)、2 = 10-01 起(主轴按像素系;区心按会合的那一点,一瓣时 = 合到的那片)
-   Zone_Rule : constant := 2;
+   --  1 = I2 第一版(49dfbe1:一瓣的区心按那一瓣自己的形心)、2 = 10-01 起(主轴按像素系;区心按会合的那一点,一瓣时 = 合到的那片)、
+   --  3 = 10-01 起存合空时手指到的那一截("shut";碰桌面量合空时的尖要它,老文件里没有 ⇒ 合空重量)、
+   --  哪一类是张开时的手指也算离不动的部分多远(一边不动的夹爪;原来两类一样开时按像素多的那一类猜)
+   Zone_Rule : constant := 3;
 
    function Lobes_Json (Z : Hand_Zone) return String is
       R : Unbounded_String := To_Unbounded_String ("{""rule"":" & Codec.Img (Zone_Rule) & ",""list"":[");
@@ -78,7 +82,14 @@ package body Zone is
                     & "," & Json.Number (Lb.Cu) & "," & Json.Number (Lb.Cv) & "," & Codec.Img (Lb.Count) & "]");
          end;
       end loop;
-      Append (R, "]}");
+      Append (R, "],""shut"":");
+      if Z.Shut.Ok then
+         Append (R, "[" & Json.Number (Z.Shut.U) & "," & Json.Number (Z.Shut.V) & "," & Json.Number (Z.Shut.Wide) & "," & Json.Number (Z.Shut.Thin)
+                 & "," & Json.Number (Z.Shut.Eu) & "," & Json.Number (Z.Shut.Ev) & "]");
+      else
+         Append (R, "null");
+      end if;
+      Append (R, "}");
       return To_String (R);
    end Lobes_Json;
 
@@ -112,9 +123,21 @@ package body Zone is
       if L >= 0 and then Json.Kind_Of (D, L) = Json.J_Obj then
          declare
             Rn : constant Integer := Json.Get (D, L, "rule");
+            Sn : constant Integer := Json.Get (D, L, "shut");
          begin
             Rule := (if Rn >= 0 and then Json.Finite (Json.Real (D, Rn)) then Integer (Json.Real (D, Rn)) else 0);
             Take_All (Json.Get (D, L, "list"));
+            --  合空时手指到的那一截:正好 Shut_Fields 个有限数才收(null / 没有 ⇒ 没有这一截)
+            Z.Shut := (others => <>);
+            if Sn >= 0 and then Json.Kind_Of (D, Sn) = Json.J_Arr and then Json.Count (D, Sn) = Shut_Fields
+              and then (for all I in 0 .. Shut_Fields - 1 => Json.Finite (Json.Real (D, Json.Child (D, Sn, I))))
+            then
+               declare
+                  function Fld (I : Natural) return Long_Float is (Json.Real (D, Json.Child (D, Sn, I)));
+               begin
+                  Z.Shut := (Ok => True, U => Fld (0), V => Fld (1), Wide => Fld (2), Thin => Fld (3), Eu => Fld (4), Ev => Fld (5));
+               end;
+            end if;
          end;
       elsif L >= 0 then
          Rule := 1;   --  I2 第一版:"lobes" 是一串
@@ -141,7 +164,7 @@ package body Zone is
          begin
             Put_Line ("[装] " & (if Cn >= 0 then "第" & Codec.Img (Natural (Long_Float'Max (0.0, Json.Num (D, Cn)))) & " 台相机里" else "")
                       & "存的握区是第 " & Codec.Img (Natural'Max (0, Rule)) & " 版的算法量的(这一版是第 " & Codec.Img (Zone_Rule)
-                      & " 版:区心按会合的那一点、主轴按像素系)⇒ 不照用,要重量");
+                      & " 版:区心按会合的那一点、主轴按像素系、存合空时手指到的那一截)⇒ 不照用,要重量");
          end;
          Z.Valid := False;
       end if;
@@ -235,6 +258,135 @@ package body Zone is
       end loop;
       Principal (Sxx, Syy, Sxy, Au, Av, Ok);
    end Lobe_Axis;
+
+   --  贴画面边(像素下标 P,W × Hh 的画幅)
+   function On_Edge (P : Integer; W, Hh : Natural) return Boolean is
+     (P mod W = 0 or else P mod W = W - 1 or else P / W = 0 or else P / W = Hh - 1);
+
+   --  一块手指像素 Pix 里离 Edge(那一整块贴画面边的像素:手从画面外伸进来的地方)最远的那一小截:中心、两个跨度(那一截外接框的长边 / 短边 + 1)。
+   --  Edge 空 ⇒ 看不出哪头是从画面外伸进来的,Ok = False(不猜)。尖那一截(Tip_Section)和合空时手指到的那一截(Shut_Of)同一个认法
+   procedure Far_Band (Pix, Edge : Ints; W, Hh : Natural; U, V, Wide, Thin : out Long_Float; Ok : out Boolean) is
+      Band : constant Long_Float := Long_Float (Hh) / 80.0;   --  最远的那一小截有多厚(比例,无量纲)
+      Ne : constant Natural := Natural (Edge.Length);
+      Dmax : Long_Float := 0.0;
+      Su, Sv : Long_Float := 0.0;
+      Cnt : Natural := 0;
+      Bx0, By0 : Natural := Natural'Last;
+      Bx1, By1 : Natural := 0;
+      Ds : Floats;
+   begin
+      U := 0.0; V := 0.0; Wide := 0.0; Thin := 0.0; Ok := False;
+      if Ne = 0 or else Pix.Is_Empty or else W = 0 then
+         return;
+      end if;
+      declare
+         Ex, Ey : array (0 .. Ne - 1) of Long_Float;
+      begin
+         for I in 0 .. Ne - 1 loop
+            Ex (I) := Long_Float (Edge (I) mod W); Ey (I) := Long_Float (Edge (I) / W);
+         end loop;
+         for P of Pix loop
+            declare
+               X : constant Long_Float := Long_Float (P mod W);
+               Y : constant Long_Float := Long_Float (P / W);
+               D2 : Long_Float := Long_Float'Last;
+            begin
+               for I in 0 .. Ne - 1 loop
+                  D2 := Long_Float'Min (D2, (X - Ex (I)) ** 2 + (Y - Ey (I)) ** 2);
+               end loop;
+               Ds.Append (Sqrt (D2));
+               Dmax := Long_Float'Max (Dmax, Ds.Last_Element);
+            end;
+         end loop;
+      end;
+      for I in 0 .. Natural (Pix.Length) - 1 loop
+         if Ds (I) >= Dmax - Band then
+            declare
+               P : constant Natural := Natural (Pix (I));
+            begin
+               Su := Su + Long_Float (P mod W); Sv := Sv + Long_Float (P / W); Cnt := Cnt + 1;
+               Bx0 := Natural'Min (Bx0, P mod W); Bx1 := Natural'Max (Bx1, P mod W);
+               By0 := Natural'Min (By0, P / W); By1 := Natural'Max (By1, P / W);
+            end;
+         end if;
+      end loop;
+      if Cnt > 0 then
+         U := Su / Long_Float (Cnt); V := Sv / Long_Float (Cnt);
+         Wide := Long_Float (Natural'Max (Bx1 - Bx0, By1 - By0) + 1);
+         Thin := Long_Float (Natural'Min (Bx1 - Bx0, By1 - By0) + 1);
+         Ok := True;
+      end if;
+   end Far_Band;
+
+   --  合空时手指到的那一截:手指像素(Fingers)里 8 邻连成的那几整块里含合到的那片(Gap)的像素的 = 手指合到的地方;它们贴画面边的那些像素 =
+   --  手伸进来的地方;合到的那片的像素里离那儿最远的那一小截 = 合空时的尖(Far_Band)。合上的手指和身后的背景一样亮的那一截变化量过不了分界,
+   --  合到的那片会被切成几块(V1B82 第 2 只手:合上的两根手指只认出右边那根的下半截、左边一截、尖那一小块),几块一起算 ——
+   --  原来只拿含得最多的那一块,尖认到了右边那根手指的边上(392, 328),真的尖在两指会合处。
+   --  伸进来的地方(Eu, Ev)= 贴画面边那些像素的中点(同 Lobe_Entry)
+   function Shut_Of (Gap, Fingers : Bools; W, Hh : Natural) return Section is
+      N : constant Natural := W * Hh;
+      type Flag_Array is array (Natural range <>) of Boolean;
+      type Flag_Access is access Flag_Array;
+      procedure Free is new Ada.Unchecked_Deallocation (Flag_Array, Flag_Access);
+      Seen : Flag_Access;
+      All_Gap, All_Edge, Cur_Gap, Cur_Edge, Stack : Ints;
+      S : Section;
+   begin
+      if N = 0 or else Natural (Gap.Length) < N or else Natural (Fingers.Length) < N then
+         return S;
+      end if;
+      Seen := new Flag_Array'(0 .. N - 1 => False);
+      for P0 in 0 .. N - 1 loop
+         if Fingers.Element (P0) and then Gap.Element (P0) and then not Seen (P0) then
+            Cur_Gap.Clear; Cur_Edge.Clear; Stack.Clear;
+            Seen (P0) := True; Stack.Append (P0);
+            while not Stack.Is_Empty loop
+               declare
+                  P : constant Natural := Natural (Stack.Last_Element);
+                  Px : constant Integer := P mod W;
+                  Py : constant Integer := P / W;
+               begin
+                  Stack.Delete_Last;
+                  if Gap.Element (P) then
+                     Cur_Gap.Append (P);
+                  end if;
+                  if On_Edge (P, W, Hh) then
+                     Cur_Edge.Append (P);
+                  end if;
+                  for Dy in -1 .. 1 loop
+                     for Dx in -1 .. 1 loop
+                        if (Dx /= 0 or else Dy /= 0) and then Px + Dx in 0 .. W - 1 and then Py + Dy in 0 .. Hh - 1 then
+                           declare
+                              Q : constant Natural := (Py + Dy) * W + (Px + Dx);
+                           begin
+                              if not Seen (Q) and then Fingers.Element (Q) then
+                                 Seen (Q) := True; Stack.Append (Q);
+                              end if;
+                           end;
+                        end if;
+                     end loop;
+                  end loop;
+               end;
+            end loop;
+            --  含合到的那片的每一整块都算(种子就是合到的那片的像素,这一块一定含它)
+            All_Gap.Append_Vector (Cur_Gap);
+            All_Edge.Append_Vector (Cur_Edge);
+         end if;
+      end loop;
+      Free (Seen);
+      Far_Band (All_Gap, All_Edge, W, Hh, S.U, S.V, S.Wide, S.Thin, S.Ok);
+      if S.Ok then
+         declare
+            Su, Sv : Long_Float := 0.0;
+         begin
+            for P of All_Edge loop
+               Su := Su + Long_Float (P mod W); Sv := Sv + Long_Float (P / W);
+            end loop;
+            S.Eu := Su / Long_Float (All_Edge.Length); S.Ev := Sv / Long_Float (All_Edge.Length);
+         end;
+      end if;
+      return S;
+   end Shut_Of;
 
    --  从三张掩膜拼出握区:瓣 = "张开时是手指"那一类里的每一块(大小的门见下),区 = 扫过而张开时不是手指的那片
    procedure Assemble (Z : in out Hand_Zone; Left, Gap : Bools; W, Hh : Natural;
@@ -338,6 +490,7 @@ package body Zone is
          else
             Z.Depth := 0.0;
          end if;
+         Z.Shut := Shut_Of (Gap, Clean, W, Hh);
          Z.Valid := True;
       end;
    end Assemble;
@@ -407,70 +560,20 @@ package body Zone is
 
    procedure Tip_Section (Z : Hand_Zone; Lb : Lobe; W, Hh : Natural; U, V, Wide, Thin : out Long_Float; Ok : out Boolean) is
       N : constant Natural := W * Hh;
-      Band : constant Long_Float := Long_Float (Hh) / 80.0;   --  最远的那一小截有多厚(比例,无量纲)
-      Best : Ints;
-      function On_Edge (P : Natural) return Boolean is
-        (P mod W = 0 or else P mod W = W - 1 or else P / W = 0 or else P / W = Hh - 1);
+      Best, Edge : Ints;
    begin
       U := 0.0; V := 0.0; Wide := 0.0; Thin := 0.0; Ok := False;
       if not Lb.Valid or else N = 0 or else Natural (Z.Fingers.Length) < N then
          return;
       end if;
       Best := Lobe_Component (Z, Lb, W, Hh);
-      declare
-         Nb : Natural := 0;
-      begin
-         for P of Best loop
-            if On_Edge (P) then
-               Nb := Nb + 1;
-            end if;
-         end loop;
-         if Nb = 0 then
-            return;   --  这一块一个像素都不贴画面边 ⇒ 看不出哪头是从画面外伸进来的,不猜
+      for P of Best loop
+         if On_Edge (P, W, Hh) then
+            Edge.Append (P);
          end if;
-         declare
-            Ex, Ey : array (1 .. Nb) of Long_Float;
-            K : Natural := 0;
-            Dmax : Long_Float := 0.0;
-            Su, Sv : Long_Float := 0.0;
-            Cnt : Natural := 0;
-            Bx0, By0 : Natural := Natural'Last;
-            Bx1, By1 : Natural := 0;
-            function Dist (P : Natural) return Long_Float is
-               X : constant Long_Float := Long_Float (P mod W);
-               Y : constant Long_Float := Long_Float (P / W);
-               D2 : Long_Float := Long_Float'Last;
-            begin
-               for I in 1 .. Nb loop
-                  D2 := Long_Float'Min (D2, (X - Ex (I)) ** 2 + (Y - Ey (I)) ** 2);
-               end loop;
-               return Sqrt (D2);
-            end Dist;
-         begin
-            for P of Best loop
-               if On_Edge (P) then
-                  K := K + 1;
-                  Ex (K) := Long_Float (P mod W); Ey (K) := Long_Float (P / W);
-               end if;
-            end loop;
-            for P of Best loop
-               Dmax := Long_Float'Max (Dmax, Dist (P));
-            end loop;
-            for P of Best loop
-               if Dist (P) >= Dmax - Band then
-                  Su := Su + Long_Float (P mod W); Sv := Sv + Long_Float (P / W); Cnt := Cnt + 1;
-                  Bx0 := Natural'Min (Bx0, P mod W); Bx1 := Natural'Max (Bx1, P mod W);
-                  By0 := Natural'Min (By0, P / W); By1 := Natural'Max (By1, P / W);
-               end if;
-            end loop;
-            if Cnt > 0 then
-               U := Su / Long_Float (Cnt); V := Sv / Long_Float (Cnt);
-               Wide := Long_Float (Natural'Max (Bx1 - Bx0, By1 - By0) + 1);
-               Thin := Long_Float (Natural'Min (Bx1 - Bx0, By1 - By0) + 1);
-               Ok := True;
-            end if;
-         end;
-      end;
+      end loop;
+      --  这一块一个像素都不贴画面边 ⇒ 看不出哪头是从画面外伸进来的,不猜(Far_Band 给 Ok = False)
+      Far_Band (Best, Edge, W, Hh, U, V, Wide, Thin, Ok);
    end Tip_Section;
 
    function Lobe_Pixels (Z : Hand_Zone; W, Hh : Natural) return Bools is
@@ -544,7 +647,8 @@ package body Zone is
       return R;
    end Lobe_Mask;
 
-   function From_Frames (Open_G, Closed_G : Buf; W, Hh : Natural) return Hand_Zone is
+   function From_Frames (Open_G, Closed_G : Buf; W, Hh : Natural; Static : Bools := Bool_Vectors.Empty_Vector;
+                         Open_Class : Integer := 0) return Hand_Zone is
       Z : Hand_Zone;
       N : constant Natural := W * Hh;
       Changed : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (N));
@@ -554,17 +658,40 @@ package body Zone is
       Ds : Floats;
       T : Long_Float;
       I : Natural := 0;
-      --  一类里几块(不比最大块小四倍的,倍数无量纲)的形心散得多开:最远的两个形心之间的距离(归一化画幅)
+      Su, Sv : Floats;   --  不动的部分(Static)每个像素的位置(归一化画幅,同 Picture 的形心)
+      --  一类有多开(归一化画幅):这一类里几块(不比最大块小四倍的,倍数无量纲)两两形心之间多远;给了不动的部分 ⇒ 还有这几块里的像素
+      --  离最近一个不动的像素最远多远(手指伸出去、离手掌和不动的那根有多远),两样取大的那样。
+      --  张开时的手指彼此分得开、伸得离手上不动的部分远;合上时挤在一起、蜷在手掌边上 / 贴着不动的那根。
+      --  (10-01 按 H4 那几帧:原来按形心离最近一个不动的格点多远 —— 伸直的四指形心离指根、握拳形心离手掌都只有几十像素,第 1 只手照样认反)
       function Spread (Mask : Bools) return Long_Float is
          Comps : constant Picture.Regions := Picture.Components (Mask, W, Hh, Picture.Min_Pixels (W, Hh));
          Best : Long_Float := 0.0;
+         function Kept (I : Natural) return Boolean is (Comps (I).Count * 4 >= Comps (0).Count);   --  不比最大块小四倍
       begin
          for A in 0 .. Natural (Comps.Length) - 1 loop
             for B in A + 1 .. Natural (Comps.Length) - 1 loop
-               if Comps (A).Count * 4 >= Comps (0).Count and then Comps (B).Count * 4 >= Comps (0).Count then
+               if Kept (A) and then Kept (B) then
                   Best := Long_Float'Max (Best, Sqrt ((Comps (A).Cu - Comps (B).Cu) ** 2 + (Comps (A).Cv - Comps (B).Cv) ** 2));
                end if;
             end loop;
+            if Kept (A) and then not Su.Is_Empty then
+               for Y in Comps (A).Y0 .. Comps (A).Y1 loop
+                  for X in Comps (A).X0 .. Comps (A).X1 loop
+                     if Mask.Element (Y * W + X) then
+                        declare
+                           Pu : constant Long_Float := Long_Float (X) / Long_Float (W);
+                           Pv : constant Long_Float := Long_Float (Y) / Long_Float (Hh);
+                           Near : Long_Float := Long_Float'Last;
+                        begin
+                           for S in 0 .. Natural (Su.Length) - 1 loop
+                              Near := Long_Float'Min (Near, (Pu - Su (S)) ** 2 + (Pv - Sv (S)) ** 2);
+                           end loop;
+                           Best := Long_Float'Max (Best, Sqrt (Near));
+                        end;
+                     end if;
+                  end loop;
+               end loop;
+            end if;
          end loop;
          return Best;
       end Spread;
@@ -627,10 +754,20 @@ package body Zone is
             end if;
          end if;
       end loop;
+      --  不动的部分:给了、和画幅一样大,里面不在变了的像素里的那些(变了的就不是"没跟着动")
+      if Natural (Static.Length) = N then
+         for K in 0 .. N - 1 loop
+            if Static.Element (K) and then not Clean.Element (K) then
+               Su.Append (Long_Float (K mod W) / Long_Float (W)); Sv.Append (Long_Float (K / W) / Long_Float (Hh));
+            end if;
+         end loop;
+      end if;
       declare
          Sd : constant Long_Float := Spread (Darker);
          Sl : constant Long_Float := Spread (Lighter);
-         Dark_Is_Open : constant Boolean := (if Sd /= Sl then Sd > Sl else Count_Of (Darker) >= Count_Of (Lighter));
+         --  两类一样开 ⇒ 定不下来:照原来按像素多的那一类排一个出来(Open_Known = False,调用方不许照用)
+         Dark_Is_Open : constant Boolean :=
+           (if Open_Class /= 0 then Open_Class > 0 elsif Sd /= Sl then Sd > Sl else Count_Of (Darker) >= Count_Of (Lighter));
          None : constant Floats := F64_Vectors.Empty_Vector;
       begin
          if Dark_Is_Open then
@@ -638,6 +775,8 @@ package body Zone is
          else
             Assemble (Z, Lighter, Darker, W, Hh, False, None, None, Clean);
          end if;
+         Z.Open_Known := Open_Class /= 0 or else Sd /= Sl;
+         Z.Lobes_Darker := Dark_Is_Open;
       end;
       Z.Fingers := Clean;
       return Z;
@@ -1138,6 +1277,7 @@ package body Zone is
                Sig_Px : Long_Float := 0.0;
                Settled : Boolean := True;
                Before, After : Buf;   --  转之前 / 转出去停稳的那一帧(这只手自己那只眼,彩图)
+               Before_All, After_All : Plug.Cam_Vectors.Vector;   --  同一对,每台相机(别的眼里手跟着转动挪了 ⇒ 那儿就是此刻手指在的那一类)
                --  转出去一下再转回来,中间那一对画面配格点、拟合、判每个格点;Why 不空 = 这一转用不了
                procedure Turn_Fit (Why_T : in out Unbounded_String) is
                   Used : Natural;
@@ -1148,6 +1288,7 @@ package body Zone is
                begin
                   Vd := [others => Kinem.Unknown];
                   Before := F.Cams (Natural (Hc)).RGB;
+                  Before_All := F.Cams;
                   for Dir in 0 .. 1 loop
                      declare
                         C : Plug.Cmd;
@@ -1173,6 +1314,7 @@ package body Zone is
                               Why_T := To_Unbounded_String ("这只眼的焦距没量过(转了多少投不回画面)");
                            else
                               After := F.Cams (Natural (Hc)).RGB;
+                              After_All := F.Cams;
                               declare
                                  Q : Instrument.Match_Vectors.Vector;
                                  Err : Unbounded_String;
@@ -1293,8 +1435,69 @@ package body Zone is
                      Put_Line ("[身]   瓣按长在眼上补全:问 " & Codec.Img (Natural (Ps.Length)) & " 个像素,并进手指 " & Codec.Img (Added) & " 个" & To_String (Note));
                   end;
                end Refine;
-               Z : constant Hand_Zone := H.Zones (Natural (Hc));
-               In_Lobe : constant Bools := Lobe_Pixels (Z, Cw, Ch);
+               --  按这一转(在合空那头转的)把合空时手指到的那一截补全(同张开那头的瓣):合上的手指和身后一样亮的那一截变化量认不出 ——
+               --  V1B82 第 2 只手合上的两根手指只认出右边那根的下半截、左边一截、尖那一小块,合空那一截认到右边那根手指的边上(392, 328),
+               --  离两尖合空时的真中点(317, 293)83 px。只拿合到的那片(手指像素里不是瓣的那些)当一块、它的框当框,沿长在眼上的格子往外连、
+               --  逐像素问(Refine_Probes / Apply_Refine,同瓣),补全以后它那一块离伸进来的地方最远的那一小截 = 合空那一截(Tip_Section / Lobe_Entry 同一认法)
+               procedure Refine_Shut is
+                  Z2 : Hand_Zone := H.Zones (Natural (Hc));
+                  Zt : Hand_Zone := Z2;
+                  Gr : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (Ng));
+                  Ps : Probe_Vectors.Vector;
+                  Added : Natural := 0;
+                  Il : constant Bools := Lobe_Pixels (Z2, Cw, Ch);
+                  U, V, Wd, Th, Eu, Ev : Long_Float;
+                  Okt, Oke : Boolean;
+               begin
+                  if Natural (Z2.Fingers.Length) /= Cw * Ch then
+                     return;
+                  end if;
+                  for I in 0 .. Ng - 1 loop
+                     Gr.Replace_Element (I, Vd (I) = Kinem.Rides);
+                  end loop;
+                  for P in 0 .. Cw * Ch - 1 loop
+                     if Il.Element (P) then
+                        Zt.Fingers.Replace_Element (P, False);   --  只留合到的那片
+                     end if;
+                  end loop;
+                  Set_Lobes (Zt, Lobe_Vectors.To_Vector (Lobe'(Valid => True, X0 => Z2.X0, Y0 => Z2.Y0, X1 => Z2.X1, Y1 => Z2.Y1, Cu => Z2.Cu, Cv => Z2.Cv, Count => 0), 1));
+                  Ps := Refine_Probes (Zt, Cw, Ch, Gr);
+                  if not Ps.Is_Empty then
+                     declare
+                        Q : Instrument.Match_Vectors.Vector;
+                        Err : Unbounded_String;
+                        Mu, Mv : Floats;
+                     begin
+                        for P of Ps loop
+                           Q.Append (Instrument.Match_Pt'(U => P.U, V => P.V, others => <>));
+                        end loop;
+                        declare
+                           Mt : constant Instrument.Match_Vectors.Vector := Instrument.Match (Host, Port, Before, Cw, Ch, After, Cw, Ch, Q, Err, Coarse => False);
+                        begin
+                           if Natural (Mt.Length) = Natural (Q.Length) then
+                              for G of Mt loop
+                                 Mu.Append (G.U); Mv.Append (G.V);
+                              end loop;
+                              Apply_Refine (Zt, Cw, Ch, Ps, Mu, Mv, Eye_G, Rot, Sig_Px, Added);
+                           else
+                              Put_Line ("[身]   合空那一截按长在眼上补全:配点仪器没配成(" & To_String (Err) & ")⇒ 按变化量认的那一截");
+                           end if;
+                        end;
+                     end;
+                  end if;
+                  Tip_Section (Zt, Lobe_Of (Zt, 0), Cw, Ch, U, V, Wd, Th, Okt);
+                  Lobe_Entry (Zt, Lobe_Of (Zt, 0), Cw, Ch, Eu, Ev, Oke);
+                  Put_Line ("[身]   合空那一截按长在眼上补全:问 " & Codec.Img (Natural (Ps.Length)) & " 个像素、并进 " & Codec.Img (Added) & " 个 · 按变化量认的 "
+                            & (if Z2.Shut.Ok then "(" & Codec.Fmt (Z2.Shut.U, 1) & "," & Codec.Fmt (Z2.Shut.V, 1) & ")" else "没有")
+                            & " → " & (if Okt and then Oke then "(" & Codec.Fmt (U, 1) & "," & Codec.Fmt (V, 1) & ") 宽 " & Codec.Fmt (Wd, 0) & " 窄 " & Codec.Fmt (Th, 0)
+                                       else "补完认不出(那一块不贴画面边)"));
+                  if Okt and then Oke then
+                     Z2.Shut := (Ok => True, U => U, V => V, Wide => Wd, Thin => Th, Eu => Eu, Ev => Ev);
+                     H.Zones.Replace_Element (Natural (Hc), Z2);
+                  end if;
+               end Refine_Shut;
+               Z : Hand_Zone := H.Zones (Natural (Hc));
+               In_Lobe : Bools;
                Ride_L, Ride_A, N_L, N_A, N_Unk : Natural := 0;
             begin
                if Natural (Z.Fingers.Length) /= Cw * Ch then
@@ -1303,6 +1506,44 @@ package body Zone is
                   Turn_Fit (Why);
                end if;
                if Why = Null_Unbounded_String then
+                  --  哪一类是张开时的手指,也按两头都长在眼上、合拢时没跟着动的那些(手掌、不动的那根手指)算(From_Frames 的 Static):
+                  --  转之前 / 转出去这一对里判成长在眼上、又不在手指像素里的格点。按它们重拼这只眼的握区 ——
+                  --  一边不动的夹爪只有一块在动,只看两类各自散得多开分不出哪一类是张开的(原来按像素多的那一类猜)
+                  declare
+                     St : Bools := Bool_Vectors.To_Vector (False, Ada.Containers.Count_Type (Cw * Ch));
+                     N_St : Natural := 0;
+                  begin
+                     for Gyy in 0 .. Kinem.Gy - 1 loop
+                        for Gxx in 0 .. Kinem.Gx - 1 loop
+                           declare
+                              Px : constant Natural := Natural (Long_Float'Floor (Kinem.Grid_V (Gyy, Ch))) * Cw + Natural (Long_Float'Floor (Kinem.Grid_U (Gxx, Cw)));
+                           begin
+                              if Vd (Gyy * Kinem.Gx + Gxx) = Kinem.Rides and then not Z.Fingers.Element (Px) then
+                                 St.Replace_Element (Px, True);
+                                 N_St := N_St + 1;
+                              end if;
+                           end;
+                        end loop;
+                     end loop;
+                     declare
+                        Z2 : constant Hand_Zone := From_Frames (Lo_Frame (Natural (Hc)).Gray, Hi_Frame (Natural (Hc)).Gray, Cw, Ch, St);
+                        Swapped : constant Boolean := Z2.Valid and then Z2.Lobes_Darker /= Z.Lobes_Darker;
+                     begin
+                        if Z2.Valid then
+                           Z := Z2;
+                           H.Zones.Replace_Element (Natural (Hc), Z);
+                        end if;
+                        Put_Line ("[身]   哪一类是张开时的手指:两头都长在眼上、合拢时没跟着动的格点 " & Codec.Img (N_St) & " 个一起算 ⇒ "
+                                  & (if not Z.Open_Known then "还是分不出(两类一样开)"
+                                     elsif Swapped then "换成另一类(只看两类各自散得多开时排的是另一类)" else "和只看散得多开时一样"));
+                        if not Z.Open_Known then
+                           Why := To_Unbounded_String ("这只眼里分不出哪一类是张开时的手指(两类一样开,也没有不动的部分可比)");
+                        end if;
+                     end;
+                  end;
+               end if;
+               if Why = Null_Unbounded_String then
+                  In_Lobe := Lobe_Pixels (Z, Cw, Ch);
                   for Gyy in 0 .. Kinem.Gy - 1 loop
                      for Gxx in 0 .. Kinem.Gx - 1 loop
                         declare
@@ -1353,35 +1594,117 @@ package body Zone is
                          & (if Known then " ⇒ 读数 " & Codec.Fmt ((if Hi_Open then Hi_R else Lo_R), 3) & " 那头张开"
                             else " ⇒ 看不出哪头张开:" & To_String (Why)));
                if Known then
+                  --  别的眼里哪一类是张开时的手指定不下来的(只有一块在动,那只眼里又看不出手上哪儿不动):转的那一下手在那只眼里跟着挪,
+                  --  挪了的像素落得多的那一类 = 此刻(读数大的那头)手指在的那一类(两类各自挪了的比例之差过 Z 倍它的标准差,同上面长在眼上的判法);
+                  --  读数大的那头张开 ⇒ 它就是张开时的手指,否则是另一类。判不出 ⇒ 那只眼的握区不要,照实说
+                  for Cc in 0 .. N_Cams - 1 loop
+                     if Cc /= Natural (Hc) and then H.Zones (Cc).Valid and then not H.Zones (Cc).Open_Known then
+                        declare
+                           Zc : constant Hand_Zone := H.Zones (Cc);
+                           Wc : constant Natural := F.Cams (Cc).W;
+                           Hgc : constant Natural := F.Cams (Cc).H;
+                           Nc : constant Natural := Wc * Hgc;
+                           M_L, M_A, T_L, T_A : Natural := 0;
+                           Done : Boolean := False;
+                        begin
+                           if Cc < Natural (Before_All.Length) and then Cc < Natural (After_All.Length) and then Cc < Natural (M.Floors.Length)
+                             and then Nc > 0 and then Natural (Zc.Fingers.Length) = Nc
+                             and then Natural (Before_All (Cc).Gray.Length) = Nc and then Natural (After_All (Cc).Gray.Length) = Nc
+                           then
+                              declare
+                                 Il : constant Bools := Lobe_Pixels (Zc, Wc, Hgc);
+                                 Mv : constant Bools := Picture.Moved (Before_All (Cc).Gray, After_All (Cc).Gray, M.Floors (Cc));
+                              begin
+                                 for P in 0 .. Nc - 1 loop
+                                    if Zc.Fingers.Element (P) then
+                                       if Il.Element (P) then
+                                          T_L := T_L + 1;
+                                          if Mv.Element (P) then
+                                             M_L := M_L + 1;
+                                          end if;
+                                       else
+                                          T_A := T_A + 1;
+                                          if Mv.Element (P) then
+                                             M_A := M_A + 1;
+                                          end if;
+                                       end if;
+                                    end if;
+                                 end loop;
+                              end;
+                              if T_L > 0 and then T_A > 0 then
+                                 declare
+                                    Pl : constant Long_Float := Long_Float (M_L) / Long_Float (T_L);
+                                    Pa : constant Long_Float := Long_Float (M_A) / Long_Float (T_A);
+                                    P : constant Long_Float := Long_Float (M_L + M_A) / Long_Float (T_L + T_A);
+                                    Sd : constant Long_Float := Sqrt (P * (1.0 - P) * Long_Float (T_L + T_A) / (Long_Float (T_L) * Long_Float (T_A)));
+                                 begin
+                                    if abs (Pl - Pa) > Stats.Z * Sd then
+                                       declare
+                                          Keep : constant Boolean := (Pl > Pa) = Hi_Open;   --  瓣那一类是不是张开那头手指在的那一类
+                                          Z2 : Hand_Zone := (if Keep then Zc
+                                                             else From_Frames (Lo_Frame (Cc).Gray, Hi_Frame (Cc).Gray, Wc, Hgc,
+                                                                               Open_Class => (if Zc.Lobes_Darker then -1 else 1)));
+                                       begin
+                                          Z2.Open_Known := True;
+                                          H.Zones.Replace_Element (Cc, Z2);
+                                          Done := True;
+                                          Put_Line ("[身]   第" & Natural'Image (Cc) & " 台相机里哪一类是张开时的手指(只有一块在动、散得多开分不出):转的那一下挪了的像素 —— 瓣里 "
+                                                    & Codec.Img (M_L) & " / " & Codec.Img (T_L) & "、合到的区里 " & Codec.Img (M_A) & " / " & Codec.Img (T_A)
+                                                    & " ⇒ " & (if Keep then "照原来排的" else "换成另一类"));
+                                       end;
+                                    end if;
+                                 end;
+                              end if;
+                           end if;
+                           if not Done then
+                              Put_Line ("[身]   第" & Natural'Image (Cc) & " 台相机里分不出哪一类是张开时的手指(只有一块在动;转的那一下挪了的像素两类分不开:瓣里 "
+                                        & Codec.Img (M_L) & " / " & Codec.Img (T_L) & "、合到的区里 " & Codec.Img (M_A) & " / " & Codec.Img (T_A) & ")⇒ 这只眼里的握区不要");
+                              H.Zones.Replace_Element (Cc, Hand_Zone'(others => <>));
+                           end if;
+                        end;
+                     end if;
+                  end loop;
                   H.Open_Reading := (if Hi_Open then Hi_R else Lo_R);
                   H.Empty_Close := (if Hi_Open then Lo_R else Hi_R);
                   H.Close_Steps := (if Hi_Open then Lo_Steps else Hi_Steps);
-                  --  停在张开那头,发的就是那一头的读数(不留推到头时 ×4 放出去的那个命令当爪子的目标)
+                  --  两头各按长在眼上补全:刚转过的这一头(读数大的那头)先补 —— 张开 ⇒ 瓣,合空 ⇒ 合空那一截;再停到另一头转一下补另一样。
+                  --  最后停在张开那头,发的就是那一头的读数(不留推到头时 ×4 放出去的那个命令当爪子的目标)
                   declare
                      Rr : Long_Float;
                      St : Natural := 0;
+                     Why2 : Unbounded_String;
                   begin
-                     Go_Jaw (H.Open_Reading, Rr, St, Okg);
+                     if Hi_Open then
+                        Refine;
+                        Go_Jaw (H.Empty_Close, Rr, St, Okg);
+                        if Okg then
+                           Turn_Fit (Why2);
+                           if Why2 = Null_Unbounded_String then
+                              Refine_Shut;
+                           else
+                              Put_Line ("[身]   合空那一截按长在眼上补全:在合空那头转一下没转成(" & To_String (Why2) & ")⇒ 按变化量认的那一截");
+                           end if;
+                        else
+                           Put_Line ("[身]   合空那一截按长在眼上补全:停到合空那头(读数 " & Codec.Fmt (H.Empty_Close, 3) & ")时没等到停住 ⇒ 按变化量认的那一截");
+                        end if;
+                        Go_Jaw (H.Open_Reading, Rr, St, Okg);
+                     else
+                        Refine_Shut;
+                        Go_Jaw (H.Open_Reading, Rr, St, Okg);
+                        if Okg then
+                           Turn_Fit (Why2);
+                           if Why2 = Null_Unbounded_String then
+                              Refine;
+                           else
+                              Put_Line ("[身]   瓣按长在眼上补全:在张开那头再转一下没转成(" & To_String (Why2) & ")⇒ 不补");
+                           end if;
+                        end if;
+                     end if;
                      if not Okg then
                         --  两头、握区都量完了;只是停回张开那头时没等到停住 ⇒ 照实说(后面碰桌面前会再等它停)
                         Put_Line ("[身]   两头量完了,停回张开那头(读数 " & Codec.Fmt (H.Open_Reading, 3) & ")时没等到停住");
                      end if;
                   end;
-                  --  瓣按长在眼上补全:张开的就是刚转过的这一头 ⇒ 用那一对画面;否则在张开那头再转一下
-                  if Hi_Open then
-                     Refine;
-                  else
-                     declare
-                        Why2 : Unbounded_String;
-                     begin
-                        Turn_Fit (Why2);
-                        if Why2 = Null_Unbounded_String then
-                           Refine;
-                        else
-                           Put_Line ("[身]   瓣按长在眼上补全:在张开那头再转一下没转成(" & To_String (Why2) & ")⇒ 不补");
-                        end if;
-                     end;
-                  end if;
                end if;
             end;
          else

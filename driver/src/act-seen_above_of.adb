@@ -1,6 +1,7 @@
 separate (Act)
 procedure Seen_Above_Of (C : Context; G : Geom.Cam_Geo; P0, P1 : Plug.Arm_Pose; W, H : Natural; Qu, Qv, Mu, Mv, Bu, Bv : Floats;
-                         Above : out Geom.Scene_Pt_Vectors.Vector; Matched, Tri : out Natural; Sig : out Long_Float) is
+                         Above : out Geom.Scene_Pt_Vectors.Vector; Matched, Tri : out Natural; Sig : out Long_Float;
+                         On : access Geom.Scene_Pt_Vectors.Vector := null) is
    package Sorting is new F64_Vectors.Generic_Sorting;
    N : constant Geom.V3 := C.Board_N;
    O0 : constant Geom.V3 := Geom.Cam_Pos (G, P0);
@@ -64,6 +65,8 @@ begin
                         begin
                            if Hh > Plane_Tol (C, Cn (0) * N (0) + Cn (1) * N (1) + Cn (2) * N (2)) then
                               Above.Append (Geom.Scene_Pt'(Pw => X, Cov => Cv, Sh => Sig, Views => Natural (Rays.Length), others => <>));
+                           elsif On /= null and then abs Hh <= Plane_Tol (C, Cn (0) * N (0) + Cn (1) * N (1) + Cn (2) * N (2)) then
+                              On.Append (Geom.Scene_Pt'(Pw => X, Cov => Cv, Sh => Sig, Views => Natural (Rays.Length), others => <>));
                            end if;
                         end;
                      end if;
