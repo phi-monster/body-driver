@@ -8,6 +8,14 @@ package body Contact.Qty is
    --  放平到面里:去掉沿 Up 的那一份
    function Flat (A, Up : V3) return V3 is (Sub (A, Scl (Dot (A, Up), Up)));
 
+   function Moved_Off (Before, After : V3; Sd_Before, Sd_After : Long_Float) return Boolean is
+   begin
+      if not Sd_Before'Valid or else not Sd_After'Valid or else Sd_Before < 0.0 or else Sd_After < 0.0 then
+         return True;
+      end if;
+      return Norm (Sub (After, Before)) > Stats.Z * Sqrt (Sd_Before ** 2 + Sd_After ** 2);
+   end Moved_Off;
+
    function Rest_Leg (S : Scene) return Leg is
       Ou : Boolean;
       Up : constant V3 := Unit (S.Up, Ou);

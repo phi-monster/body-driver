@@ -496,6 +496,8 @@ package Act is
    function Carry_Goal (Cur : Plug.Arm_Pose; M : Contact.Twist; Th : Long_Float) return Plug.Arm_Pose;
    --  I5 ⇒ 要它怎么动(大并行路 5,10-01):量到的几何(Want_Scene:它的实心模型、它躺的面、不跟着这条臂走的那只眼、脑看着的那只眼、参照那一件的视线交点)
    --  ⇒ 让那个量变得最快的那个旋量(Want_Twist;量的名字按登记表 Qty_Kind,两件东西那一句按关系词)。Arm = 动它的那条臂(-1 = 还没定)
+   --  它此刻的实心模型(拿着 ⇒ 按手的刚体运动带着走;没拿着 ⇒ Solid_Of);Rest = 它还躺在面上时的那一份
+   procedure Thing_Shape (C : Context; F : Plug.Frame; Arm : Integer; Name : Unbounded_String; Shape, Rest : out Contact.V3_Vectors.Vector);
    procedure Want_Scene (C : in out Context; F : Plug.Frame; W : Want; Arm : Integer; Sc : out Contact.Qty.Scene);
    procedure Want_Twist (C : in out Context; F : Plug.Frame; W : Want; Arm : Integer; M : out Contact.Twist; Ok : out Boolean; Note : out Unbounded_String);
    --  接触集往下伸怎么走(纯函数,导出给自检):悬停时离下手处 Stand;最靠前的尖和它顶面那一层沿进场方向差 Tip_Over(= X_Tip − X_Top,≤ 0 就是尖还没到顶面那一层);

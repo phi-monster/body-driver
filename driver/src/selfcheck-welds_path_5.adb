@@ -661,4 +661,48 @@ begin
       end loop;
       Check (Worst < 1.0e-9, "量变旋量·拿着它转:手按 Carry_Goal 走,它身上四个点和「绕过它中心的竖轴转 0.4 rad」最多差 " & Codec.Fmt (Worst, 12));
    end;
+   --  ── 放下:单靠下面那张面托不托得住它(§2 第 17 条的物理那一半,10-01 主代理批的条件 2、4、5)──
+   --  ① 托得住:4 cm 的方块平放(它的实心模型按格子补到面上),重心在正中、不准 1 mm ⇒ 托得住,重心离边 2 cm(凸包每条边各挪 Z 倍不准都还托得住)
+   --  ② 托不住:同一块底,重心在它外面 5 mm ⇒ 托不住,差的就是 −5 mm
+   --  ③ 拿不准:重心在里面、离边 2 mm,可它在哪只准到 1 mm(Z 倍 3 mm)⇒ 托不住(不准说了算);准到 0.5 mm(Z 倍 1.5 mm)⇒ 托得住
+   --  ④ 底下那一片只算贴着面的那一层:蘑菇形(顶 4 cm 宽、底下一根 1 cm 的柄),重心偏 1 cm ⇒ 在顶的范围里、在柄外面 ⇒ 托不住
+   --  ⑤ 没有面积(两个点)⇒ 托不住
+   --  ⑥ 松手以后它挪了没有(Contact.Qty.Moved_Off,同一种量法前后比):挪 1 cm、前后各准到 1 mm ⇒ 挪了;挪 2 mm(Z 倍合起来 4.2 mm 以内)⇒ 没挪;不准没量出来(负的)⇒ 当挪了
+   --  病:不按重心的不准挪就松手(离边 2 mm、准到 1 mm 也松 ⇒ 一碰就倒);外法向反了(往里挪,永远托得住);把它全身的点都当成底(蘑菇被判站得住);
+   --      松手以后的比较不带不准(渲染抖一个像素就说它倒了)
+   declare
+      package Wr2 renames Contact.Wrench;
+      function Base_Block return Wr2.Surface is (Wr2.Base_Of (Slab (-0.02, 0.02, -0.02, 0.02, 0.04, Block'Access), Up, Pitch));
+      Ok1, Ok2, Ok3a, Ok3b, Ok4, Ok5 : Boolean;
+      M1, M2, M3a, M3b, M4, M5 : Long_Float;
+      function Mush (X, Y : Long_Float) return Boolean is (abs X <= 0.005 and then abs Y <= 0.005);
+      Stem : Contact.V3_Vectors.Vector := Slab (-0.005, 0.005, -0.005, 0.005, 0.03, Mush'Unrestricted_Access);
+      Cap : constant Contact.V3_Vectors.Vector := Slab (-0.02, 0.02, -0.02, 0.02, 0.04, Block'Access);
+      Two_Pts : Wr2.Surface;
+      Mv1, Mv2, Mv3 : Boolean;
+   begin
+      Wr2.Rests (Base_Block, [0.0, 0.0, 0.02], Up, 0.001, 0.0, Ok1, M1);
+      Wr2.Rests (Base_Block, [0.025, 0.0, 0.02], Up, 0.001, 0.0, Ok2, M2);
+      Wr2.Rests (Base_Block, [0.018, 0.0, 0.02], Up, 0.001, 0.0, Ok3a, M3a);
+      Wr2.Rests (Base_Block, [0.018, 0.0, 0.02], Up, 0.0005, 0.0, Ok3b, M3b);
+      --  蘑菇:柄从面起 3 cm 高,顶那一块在 3 cm 到 4 cm 之间(顶的点抬高到柄上面)
+      for P of Cap loop
+         if P (2) >= 0.03 then
+            Stem.Append (P);
+         end if;
+      end loop;
+      Wr2.Rests (Wr2.Base_Of (Stem, Up, Pitch), [0.01, 0.0, 0.03], Up, 0.0005, 0.0, Ok4, M4);
+      Two_Pts.Present := True; Two_Pts.Up := Up; Two_Pts.Pitch := Pitch;
+      Two_Pts.Foot.Append (Contact.V3'[-0.02, 0.0, 0.0]); Two_Pts.Foot.Append (Contact.V3'[0.02, 0.0, 0.0]);
+      Wr2.Rests (Two_Pts, [0.0, 0.0, 0.02], Up, 0.0005, 0.0, Ok5, M5);
+      Mv1 := Contact.Qty.Moved_Off ([0.0, 0.0, 0.0], [0.01, 0.0, 0.0], 0.001, 0.001);
+      Mv2 := Contact.Qty.Moved_Off ([0.0, 0.0, 0.0], [0.002, 0.0, 0.0], 0.001, 0.001);
+      Mv3 := Contact.Qty.Moved_Off ([0.0, 0.0, 0.0], [0.0, 0.0, 0.0], -0.001, 0.001);
+      Check (Ok1 and then abs (M1 - 0.02) < 1.0e-9 and then not Ok2 and then abs (M2 + 0.005) < 1.0e-9 and then not Ok3a and then Ok3b and then abs (M3a - 0.002) < 1.0e-9
+             and then not Ok4 and then not Ok5 and then M5 = Long_Float'First and then Mv1 and then not Mv2 and then Mv3,
+             "放下·托不托得住:方块正中 " & (if Ok1 then "托得住" else "托不住(错)") & "(离边 " & F4 (M1) & ")· 重心在外 5 mm " & (if Ok2 then "托得住(错)" else "托不住")
+             & "(" & F4 (M2) & ")· 离边 2 mm、准到 1 mm " & (if Ok3a then "托得住(错)" else "托不住") & " / 准到 0.5 mm " & (if Ok3b then "托得住" else "托不住(错)")
+             & " · 蘑菇偏 1 cm " & (if Ok4 then "托得住(错:把顶当成了底)" else "托不住") & "(离柄的边 " & F4 (M4) & ")· 两个点 " & (if Ok5 then "托得住(错)" else "托不住")
+             & " · 松手以后挪 1 cm " & (if Mv1 then "挪了" else "没挪(错)") & "、挪 2 mm " & (if Mv2 then "挪了(错)" else "没挪") & "、不准是负的 " & (if Mv3 then "当挪了" else "当没挪(错)"));
+   end;
 end Welds_Path_5;
