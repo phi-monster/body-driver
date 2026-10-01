@@ -36,9 +36,10 @@ begin
          end;
       end if;
    end loop;
-   --  噪声地板只放大不缩小(LAB 8-18:跨炮一致不代表 σ 能变小)
-   Merged.EE_Noise := Long_Float'Max (Stored.EE_Noise, Fresh.EE_Noise);
-   Merged.Rot_Noise := Long_Float'Max (Stored.Rot_Noise, Fresh.Rot_Noise);
-   Merged.Jaw_Noise := Long_Float'Max (Stored.Jaw_Noise, Fresh.Jaw_Noise);
+   --  噪声地板:同一版量法量的,只放大不缩小(LAB 8-18:跨炮一致不代表 σ 能变小);存的那一份是老量法量的
+   --  (装回时记成负数 = 不信,见 Load)⇒ 只用这一回量的,不拿老量法的大数当底(10-01:H4 / H7 的 0.0121 是胳膊还在挪时量的,原来永远留着)
+   Merged.EE_Noise := (if Stored.EE_Noise < 0.0 then Fresh.EE_Noise else Long_Float'Max (Stored.EE_Noise, Fresh.EE_Noise));
+   Merged.Rot_Noise := (if Stored.Rot_Noise < 0.0 then Fresh.Rot_Noise else Long_Float'Max (Stored.Rot_Noise, Fresh.Rot_Noise));
+   Merged.Jaw_Noise := (if Stored.Jaw_Noise < 0.0 then Fresh.Jaw_Noise else Long_Float'Max (Stored.Jaw_Noise, Fresh.Jaw_Noise));
    Merged.Measured_Times := Stored.Measured_Times + 1;
 end Merge;

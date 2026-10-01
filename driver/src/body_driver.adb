@@ -23,6 +23,9 @@ with Table;
 with Jointboot;
 with Kinem;
 with Geom;
+with Layout;
+with Instrument;
+with Links;
 procedure Body_Driver is
    Port : Natural := 0;
    Body_Path : Unbounded_String;   --  身体文件(--in/--out;同一具身体越用越强)
@@ -44,6 +47,16 @@ procedure Body_Driver is
    Kin_Plane_Rms : Long_Float := 0.0;
    Kin_Ref : Plug.Cam;
    Front_Reloaded : Boolean := False;   --  开机前半段是按身体文件旁边存的装回的(核对过):后面按同一个世界单位记的量(身体图、握区、指尖)才照用
+   Body_Groups : Selfmap.Group_Vectors.Vector;   --  开机第一步逐组推一下量出来的:身体报的每一组数是什么(I1;装进 C.Map.Groups,身体图从它答)
+   --  每条臂怎么放进世界(Links 用:每一节的表面点此刻在哪)
+   function Placements (Ws : Jointboot.Arm_World_Vectors.Vector; Rw : Geom.M3; O : Geom.V3) return Links.Placement_Vectors.Vector is
+      R : Links.Placement_Vectors.Vector;
+   begin
+      for W of Ws loop
+         R.Append (Links.Placement'(Model => W.Model, S => W.S, Ra => W.Ra, Ta => W.Ta, Rw => Rw, O => O, Valid => W.Valid));
+      end loop;
+      return R;
+   end Placements;
    I : Natural := 1;
    Order : constant String := Codec.Env ("BL_ORDER");
 begin
@@ -110,8 +123,33 @@ begin
       Put_Line ("[装] 取不到第一帧,退出");
       return;
    end if;
-   Put_Line ("[装] 第一帧:" & Natural'Image (Natural (F.EE.Length)) & " 条臂 ·" & Natural'Image (Natural (F.Jaw.Length)) & " 个抓握通道 ·" &
+   --  I1(大并行 路 1,10-01):身体报的每一组数先都当"还没认"—— 命令组(对方回给我们看的那些名字)都当一组通道推(Layout.Probe_Mode),
+   --  开机第一步逐组推一下认出是什么(Jointboot.Find_Arms),再把布局换成量出来的。不按"几个数、值在哪"认,没有抓握照样开机
+   Layout.Probe_Mode (L.Lay);
+   if not Plug.Sense (L, F) then
+      Put_Line ("[装] 取不到第一帧,退出");
+      return;
+   end if;
+   Put_Line ("[装] 第一帧:" & Codec.Img (Natural (L.Lay.Groups.Length)) & " 组数(其中 " & Codec.Img (Natural (F.Joints.Length)) & " 组是命令,开机逐组推一下认)·" &
              Natural'Image (Natural (F.Cams.Length)) & " 台相机" & (if F.Cams.Is_Empty then "" else "(" & Codec.Img (F.Cams (0).W) & "x" & Codec.Img (F.Cams (0).H) & (if F.Cams (0).Has_Depth then ",带深度" else ",无深度") & ")"));
+   --  接入检查第一拍:配点仪器通不通(开机量运动学、装回核对、对齐都靠它配点)—— 不通就现在说,不等扫描到一半才红
+   declare
+      Id : Integer := -1;
+      Err : Unbounded_String;
+   begin
+      if not F.Cams.Is_Empty and then Plug.Has_Picture (F.Cams (0)) then
+         Instrument.Frame_Put (To_String (C.Inst_Host), C.Inst_Port, F.Cams (0).RGB, F.Cams (0).W, F.Cams (0).H, Id, Err);
+      else
+         Err := To_Unbounded_String ("第一帧第 0 台相机没画面,问不了");
+      end if;
+      if Id < 0 then
+         Put_Line ("[装] 🔴 接入检查:配点仪器 " & To_String (C.Inst_Host) & ":" & Codec.Img (C.Inst_Port) & " 第一拍就不通(" & To_String (Err)
+                   & ")⇒ 开机量不了运动学(扫描配点、装回核对、几只手对齐都要它),退出");
+         Ada.Command_Line.Set_Exit_Status (1);
+         return;
+      end if;
+      Put_Line ("[装] 接入检查:配点仪器 " & To_String (C.Inst_Host) & ":" & Codec.Img (C.Inst_Port) & " 通(第一拍存进一帧,编号 " & Codec.Img (Natural (Id)) & ")");
+   end;
    --  ── 开机前半段(V1b 第三步,2026-09-26):只用关节命令。身体报的"手在哪"驱动不读 ——
    --  认手认眼(每组关节一起转一小格)→ 每只有眼的手扫关节、两两配点、量运动学 → 两只手对到一个世界("上" = 桌面法向)→ 装上:
    --  从此每一帧手的位姿 = 按关节读数算出的腕眼位姿,位姿命令 = 在量到的关节限位里解关节目标。后面量身体的每一步都在这个世界里 ──
@@ -137,6 +175,13 @@ begin
          return;
       end if;
       Put_Line ("[身] 静止噪声(开机前半段):关节读数 " & Codec.Fmt (M0.Joint_Noise, 6) & " · 各相机灰度地板 " & (if M0.Pic_Floor.Is_Empty then "-" else Codec.Img (M0.Pic_Floor (0))));
+      --  ① 认组:每一次开机都量(装回前半段也先量 —— 量出来的布局决定哪一组是第几条臂,装回的核对、扫描都按它)
+      Jointboot.Find_Arms (L, F, M0, Found, Kin_World_Cam, Okj);
+      if not Okj then
+         Put_Line ("[身] 只用关节命令认不出一条臂,量不了身体,退出");
+         return;
+      end if;
+      Body_Groups := M0.Groups;
       --  ⑤ 装回:身体文件旁边存着前半段、钥匙对得上 ⇒ 每只手回到存的参照读数、拍一张和存的比;都没动 ⇒ 不扫描、不解。一项不过 ⇒ 从零量(不修补)
       if Kin_Path /= "" and then Ada.Directories.Exists (Kin_Path) then
          declare
@@ -158,15 +203,11 @@ begin
       end if;
       if Front_Reloaded then
          Worlds := K.Worlds; Ds := K.Ds; Rw := K.Rw; O := K.O; Kin_World_Cam := K.World_Cam; Eyes_Of := K.Eyes;
+         Links.Place (Placements (Worlds, Rw, O));   --  每一节的表面点随前半段读回来了(Load_Kin),这里给它放进世界的那一份
          Kin_Fixed := K.Fixed_Eye; Kin_Board := K.Board; Kin_Plane_Pt := K.Plane_Pt; Kin_Plane_N := K.Plane_N; Kin_Plane_Rms := K.Plane_Rms;
          Jointboot.Dump_Kin (Dump, K);
          Jointboot.Remember_Kin (Kin_Path, K);
       else
-      Jointboot.Find_Arms (L, F, M0, Found, Kin_World_Cam, Okj);
-      if not Okj then
-         Put_Line ("[身] 只用关节命令认不出一只手,量不了身体,退出");
-         return;
-      end if;
       --  有眼的几只手同时扫(一条命令带几组目标),扫的时候跟点仪器一路跟
       Jointboot.Sweep_All (L, F, M0, Found, Host, C.Inst_Port, Dump, Ds, Css, World_Cam => Kin_World_Cam);
       --  每只手各自解运动学(两只手的解互不相干 ⇒ 一只手一个线程)
@@ -227,6 +268,13 @@ begin
       for A in 0 .. Natural (Found.Length) - 1 loop
          Eyes_Of.Append (Found (A).Eye);
       end loop;
+      --  每一节的形状(I7):扫描时不动的眼拍的那几张,对齐以后才知道它在世界里在哪 ⇒ 现在三角
+      declare
+         Nt : Unbounded_String;
+      begin
+         Links.Measure (Placements (Worlds, Rw, O), Kin_Fixed, Nt);
+         Put (To_String (Nt));
+      end;
       if Kin_Path /= "" then
          K := (Key => To_Unbounded_String (Jointboot.Kin_Key (L, F)), Worlds => Worlds, Eyes => Eyes_Of, Ds => Ds, Rw => Rw, O => O, World_Cam => Kin_World_Cam,
                Fixed_Eye => Kin_Fixed, Board => Kin_Board, Plane_Pt => Kin_Plane_Pt, Plane_N => Kin_Plane_N, Plane_Rms => Kin_Plane_Rms);
@@ -274,6 +322,64 @@ begin
       end if;
       Jointboot.Self_Check (L, F, M0, Ds, Dump);
       Put_Line ("[装] 开机前半段完:" & Codec.Img (Natural (F.EE.Length)) & " 只手的位姿按关节读数算(用了 " & Codec.Img (Plug.Steps (L)) & " 拍)");
+      --  净空和"自己"(Links,I7):每条臂此刻离量过的场景点(桌面那块板)、离别的臂多远,朝桌面(板的法向反过来)再走多远进"可能碰到"的那条带子;
+      --  每只眼里此刻多大一片是自己 —— 开机报告照实念出来(走一步、认东西的那两路按同一个问法问)
+      declare
+         Qs : Plug.Floats_Vectors.Vector;
+         Down : constant Geom.V3 := [-Kin_Plane_N (0), -Kin_Plane_N (1), -Kin_Plane_N (2)];
+         Txt : Unbounded_String;
+         K_Valid : Natural := 0;   --  F.EE 里第几只(装上的手按序)
+      begin
+         for W of Worlds loop
+            Qs.Append (if W.Group < Natural (F.Joints.Length) then F.Joints (W.Group) else Bytes.F64_Vectors.Empty_Vector);
+         end loop;
+         for A in 0 .. Natural (Worlds.Length) - 1 loop
+            declare
+               Cl : constant Links.Clearance := Links.Clear_Of (A, Qs, Kin_Board);
+               Known : Boolean;
+               Fa : constant Long_Float := Links.Free_Along (A, Qs, Down, Kin_Board, Known);
+            begin
+               if Cl.Valid then
+                  Append (Txt, " · 第" & Codec.Img (A + 1) & " 条臂离" & (if Cl.To_Scene then "量过的场景点" else "第" & Codec.Img (Natural (Cl.Other_Arm) + 1) & " 条臂")
+                          & "最近 " & Codec.Fmt (Cl.Dist, 4) & " ± " & Codec.Fmt (Cl.Sd, 4) & "(第" & Integer'Image (Cl.Link) & " 节)、朝桌面再走 "
+                          & (if not Known then "说不出" elsif Fa = Long_Float'Last then "碰不上" else Codec.Fmt (Fa, 4)) & " 进带子");
+               else
+                  Append (Txt, " · 第" & Codec.Img (A + 1) & " 条臂没量过每一节的形状 ⇒ 净空说不出");
+               end if;
+            end;
+         end loop;
+         for Cm in 0 .. Natural (F.Cams.Length) - 1 loop
+            declare
+               G : constant Geom.Cam_Geo := (if Cm < Natural (Kin_Geo.Length) then Kin_Geo (Cm) else Geom.No_Geo);
+               Pose : Plug.Arm_Pose := [others => 0.0];
+               Mine : Boolean := G.Fixed;
+            begin
+               K_Valid := 0;
+               for A in 0 .. Natural (Worlds.Length) - 1 loop
+                  if Worlds (A).Valid then
+                     if A < Natural (Eyes_Of.Length) and then Eyes_Of (A) = Integer (Cm) and then K_Valid < Natural (F.EE.Length) then
+                        Pose := F.EE (K_Valid); Mine := True;
+                     end if;
+                     K_Valid := K_Valid + 1;
+                  end if;
+               end loop;
+               if Mine and then G.Valid and then F.Cams (Cm).W > 0 then
+                  declare
+                     Mk : constant Bytes.Bools := Links.Self_Mask (G, Pose, F.Cams (Cm).W, F.Cams (Cm).H, Qs);
+                     N : Natural := 0;
+                  begin
+                     for B of Mk loop
+                        if B then
+                           N := N + 1;
+                        end if;
+                     end loop;
+                     Append (Txt, " · 第" & Codec.Img (Cm) & " 台眼里自己占 " & Codec.Fmt (100.0 * Long_Float (N) / Long_Float (Natural'Max (1, Natural (Mk.Length))), 1) & "%");
+                  end;
+               end if;
+            end;
+         end loop;
+         Put_Line ("[身] 📐 净空和自己(开机,此刻)" & To_String (Txt));
+      end;
    end;
    --  ── 量身体:先装回身体文件(钥匙 = 这具身体报的形状),推一下核对;对不上或没有 ⇒ 从零量;量到的合进历史再写回 ──
    declare
@@ -308,8 +414,15 @@ begin
                Tmp : Selfmap.Body_Map;
                Ok2 : Boolean;
             begin
+               Tmp.Arms := Stored.Arms;   --  位姿噪声也量(存的那一份要是老量法量的,就换成这一回量的)
                Selfmap.Measure_Idle (L, F, Tmp, Ok2);
                Stored.Floors := Tmp.Floors; Stored.Pic_Floor := Tmp.Pic_Floor;
+               --  存的静止噪声是老量法量的(Bodyfile.Load 记成负数:不信)⇒ 用这一回量的(核对、往后每个门的下限都按它)
+               if Stored.EE_Noise < 0.0 or else Stored.Rot_Noise < 0.0 or else Stored.Jaw_Noise < 0.0 then
+                  Stored.EE_Noise := Tmp.EE_Noise; Stored.Rot_Noise := Tmp.Rot_Noise; Stored.Jaw_Noise := Tmp.Jaw_Noise;
+                  Put_Line ("[装] 存的静止噪声是老量法量的 ⇒ 用这一回量的:位置 " & Codec.Fmt (Tmp.EE_Noise, 6) & " · 转 " & Codec.Fmt (Tmp.Rot_Noise, 6)
+                            & " · 抓握 " & Codec.Fmt (Tmp.Jaw_Noise, 6));
+               end if;
             end;
             Selfmap.Verify (L, Stored, F, Ok_Body, Ok_Link, Vn);
             Put_Line ("[装] 核对身体:" & To_String (Vn.Text) & (if Ok_Body then " ⇒ 同一具身体,直接用" else " ⇒ 重量"));
@@ -368,6 +481,8 @@ begin
             end loop;
          end if;
       end if;
+      --  身体报的每一组数是什么(开机第一步量的,每次开机都量;身体文件不存它)⇒ 身体图从它答"扛着全身的那几组""长在这条臂上的眼"(I1)
+      C.Map.Groups := Body_Groups;
       --  握区:存的这只手若是在【同一个位姿】下合空量的(每通道差不过一个探针幅度),身体又核对没变 ⇒ 照用,不再合空;否则合空一次
       --  一条臂上有几个抓握通道是【量出来的】:两指手 1 个,五指手 5 个。每一个各合空一次,各成一个名词。
       --  C.Map.Jaws 这时一条臂一个数(从零量的是 Selfmap.Measure 数的;照用存的,前面已经核过身体文件记了这一项)⇒ 照它合空,不另设"至少一个"、
