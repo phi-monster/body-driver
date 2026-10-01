@@ -100,6 +100,11 @@ package Driver.Robot is
    function Ray (M : Model; E : Eye_Id; O : Observation; Px : Driver.Images.Pixel) return Ray_Estimate;
    --  The line of sight through a pixel, in the world frame.
 
+   function Eye_Ray (M : Model; E : Eye_Id; Px : Driver.Images.Pixel) return Ray_Estimate;
+   --  The same line of sight in the eye's own frame (from its centre of
+   --  projection), carrying only the lens's uncertainty: with Eye_In_Tool it
+   --  takes a pixel into the tool frame without the arm's kinematics.
+
    function Up (M : Model) return Direction_Estimate;
    --  Away from gravity, in the world frame, as measured.
 
