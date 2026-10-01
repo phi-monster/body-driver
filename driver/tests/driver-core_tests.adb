@@ -3,6 +3,7 @@ with Ada.Numerics.Float_Random;
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Strings.Unbounded;
 with Driver.Bytes;
+with Driver.Clock;
 with Driver.Commands;
 with Driver.Images;
 with Driver.Json;
@@ -180,6 +181,14 @@ package body Driver.Core_Tests is
       Check (not Significant (Origin, (Mean => [1.0e9, 0.0, 0.0], others => <>)),
              "an unknown covariance made a separation significant");
    end Point_Significance;
+
+   procedure Clock_Range is
+   begin
+      Check (Driver.Clock.Nanoseconds_Of (1.0) = 1_000_000_000, "one second");
+      Check (Driver.Clock.Nanoseconds_Of (Duration'Small) = 1, "one nanosecond");
+      Check (Driver.Clock.Nanoseconds_Of (3_600.0) = 3_600_000_000_000, "an hour");
+      Check (Driver.Clock.Nanoseconds_Of (8_640_000.0) = 8_640_000_000_000_000, "a hundred days");
+   end Clock_Range;
 
    procedure Buffer_Growth is
       B : Driver.Bytes.Buffer;
@@ -407,6 +416,8 @@ package body Driver.Core_Tests is
       Driver.Tests.Register ("core.point_significance",
                              "a separation of points alarms more often than the scalar rule, or a real one is missed",
                              Point_Significance'Access);
+      Driver.Tests.Register ("core.clock", "record times overflow after a few seconds or lose nanoseconds",
+                             Clock_Range'Access);
       Driver.Tests.Register ("core.buffer", "a byte buffer loses data when it grows or copies",
                              Buffer_Growth'Access);
       Driver.Tests.Register ("core.image", "pixels are addressed by the wrong column or row", Image_Access'Access);
