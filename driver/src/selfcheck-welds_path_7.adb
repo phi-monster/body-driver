@@ -1,3 +1,4 @@
+with Ada.Environment_Variables;
 separate (Selfcheck)
 procedure Welds_Path_7 is
    --  路 7 的焊点(大并行.md §5 路 7):每条写清"错了会是什么病",带一颗牙(去掉那一改就红)
@@ -576,6 +577,51 @@ begin
    Check (Plan.On_Me (9.0, 4.0, Self_Here, Fw, Fh) and then not Plan.On_Me (3.0, 4.0, Self_Here, Fw, Fh)
           and then not Plan.On_Me (9.0, 4.0, Bools'(Bool_Vectors.Empty_Vector), Fw, Fh),
           "是不是我自己:那一片自己的点落在我身上的像素里 ⇒ 是;落在别处 ⇒ 不是;这只眼里哪些像素是我说不出 ⇒ 不说是我");
+
+   --  ⑬ 写程序那一问的采样设置:部署给的那一份(BL_BRAIN_SAMPLING)原样并进请求,驱动自己一个数都不带。病:同一个模型、同一批问题,
+   --  采样设置不同,写不停的和写对的都差一倍以上(10-01 量的);vLLM 的生成配置给不了 presence_penalty,驱动又不许替模型拍数 ⇒ 由部署给。
+   --  🦷 请求里不并部署给的那一份(只发骨架)⇒ 第一条红;🦷 不查"撞了这一问自己的键" ⇒ 第三条红
+   declare
+      function Chat_Ok (Content : String) return String is
+         B : constant String := "{""choices"":[{""index"":0,""message"":{""role"":""assistant"",""content"":"""
+           & Json.Escape (Content) & """},""finish_reason"":""stop""}]}";
+      begin
+         return Http11 & " 200 OK" & CRLF & "Content-Type: application/json" & CRLF & "Content-Length: " & Codec.Img (B'Length) & CRLF & CRLF & B;
+      end Chat_Ok;
+      Rgb : Buf;
+      procedure Ask_With (Setting : String; Ok : out Boolean; Req : out Unbounded_String) is
+         T : Fake_Http;
+         Port : GNAT.Sockets.Port_Type;
+         Prog, Err : Unbounded_String;
+      begin
+         if Setting = "" then
+            Ada.Environment_Variables.Clear ("BL_BRAIN_SAMPLING");
+         else
+            Ada.Environment_Variables.Set ("BL_BRAIN_SAMPLING", Setting);
+         end if;
+         T.Start (Chat_Ok ("say hi" & ASCII.LF), 0.0, Port);
+         Ok := Brain.Ask ("127.0.0.1", Natural (Port), "pick it", "a body", "nothing yet", "grammar", "", "", "", "", 3, 3, 0, 1, 1, Rgb, 10, 10, Prog, Err);
+         T.Got (Req);
+      end Ask_With;
+      Card : constant String := "{""temperature"": 0.7, ""top_p"": 0.8, ""top_k"": 20, ""presence_penalty"": 1.5}";
+      Ok1, Ok2, Ok3, Ok4 : Boolean;
+      R1, R2, R3, R4 : Unbounded_String;
+   begin
+      for I in 1 .. 10 * 10 * 3 loop
+         Rgb.Append (U8 (I mod 256));
+      end loop;
+      Ask_With (Card, Ok1, R1);
+      Ask_With ("", Ok2, R2);
+      Ask_With ("{""temperature"": 0.7", Ok3, R3);
+      Ask_With ("{""model"": ""other"", ""top_k"": 20}", Ok4, R4);
+      Ada.Environment_Variables.Clear ("BL_BRAIN_SAMPLING");
+      Check (Ok1 and then Index (R1, "{""model"":""eye"",""temperature"": 0.7, ""top_p"": 0.8, ""top_k"": 20, ""presence_penalty"": 1.5,") > 0,
+             "采样设置:部署给的那一段原样并进写程序那一问的请求(一个字不改)");
+      Check (Ok2 and then Index (R2, "temperature") = 0 and then Index (R2, "top_k") = 0 and then Index (R2, "presence_penalty") = 0,
+             "采样设置:没设 ⇒ 请求里一样都不带");
+      Check (Ok3 and then Ok4 and then Index (R3, "temperature") = 0 and then Index (R4, "top_k") = 0 and then Index (R4, """other""") = 0,
+             "采样设置:读不成一个 JSON 对象、或者撞了这一问自己的键(model)⇒ 不带,照常问");
+   end;
 
    --  ⑦ 重放 S1A1–S1A5 落盘的每一轮(大并行 §5 路 7:S1A2–S1A4 落盘的轮次重放,粘在一起的名字都绑对)。
    --  每一轮:在哪只眼、脑的程序里按行的先后写了哪些名字、那只眼对每个名字怎么答(日志里的原话;日志里旧的认法没问眼就绑了的,

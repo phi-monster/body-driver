@@ -33,6 +33,7 @@
 - `[脑] 这一集第 N 次叫脑:写一段程序 · N 秒 · 交回 N 行`(没问成就写原因)
 - `[脑] 这一集第 N 次叫脑:问「<名字>」在哪一框 · N 秒 · 框 [l t r b]` / `它说这里指不出`
 - `[脑] 上一集一共叫了脑 N 次(写程序 N 次、问在哪 N 次)`:新的一集开始时印。
+- `[脑] 写程序那一问带着部署给的采样设置(BL_BRAIN_SAMPLING):{…}` / `没设 BL_BRAIN_SAMPLING ⇒ …` / `🔴 BL_BRAIN_SAMPLING 读不成一个 JSON 对象(…)⇒ 不带`:第一次写程序时印一次。
 
 ## `[身]` 身体:开机后半段,和之后的每一轮
 
@@ -68,7 +69,8 @@
 | `BL_FILM=<目录>` | 半分辨率抽帧 |
 | `BL_STEPSHOT=1` | 走路时每一步落一张图 |
 | `BL_CUTLOG=1` | 每台相机切块的窗口和块数 |
-| `BL_LIFE=<文件>` | 经历账:每做完一段追加一行 `beat N \| eye N \| …`,跨炮留着、只追加不清。最后 6 行进下一轮给脑的 `WHAT I HAVE DONE BEFORE`。不设就写 `/root/经历.txt` |
+| `BL_LIFE=<文件>` | 经历账:每做完一段追加一行 `beat N \| eye N \| …`,跨炮留着、只追加不清。最后 6 行进下一轮给脑的 `WHAT I HAVE DONE BEFORE`。不设就写在身体文件旁边(`<身体文件>.life.txt`);身体文件也没给就不记 |
 | `BL_ORDER=<一句话>` | 任务句(盖过观测里的 `instruction`) |
 | `BL_LOOK=1` | 只看不动 |
 | `BL_BRAIN=<目录>` | 人当脑,见 `brain-service.md` 第 5 节 |
+| `BL_BRAIN_SAMPLING=<JSON 对象>` | 写程序那一问的采样设置,原样并进请求,见 `brain-service.md` 第 2 节 |
