@@ -55,7 +55,9 @@ package body Contact.Search is
             if Dist <= 0.5 * L.Thick then
                return Not_Measured ("张开时有一瓣的尖离中心不到半个手指厚(尖或手指厚量错了)");
             end if;
-            --  碰东西的那一面在尖往中心半个手指厚;合到头 = 走到中心再留半个手指厚(几瓣一起合,走到那儿就碰上对面的了)
+            --  碰东西的那一面在尖往中心半个手指厚;合到头 = 走到中心再留半个手指厚(几瓣一起合,走到那儿就碰上对面的了)。
+            --  ⚠ "朝中心、各走各那一段"没量(.ads 说了):一边固定一边动的夹爪、拇指对几指那种不对称的手就错(动的走满、固定的不动)。
+            --  要的是每一瓣合空时的尖(开机合空那一下就看得到;今天的 Lobe_Geo 只存张开时的):有了 ⇒ Dir / Travel 按两头的尖算,这一条删
             H.Pads.Append (Pad'(Tip => Add (L.Tip, Scl (0.5 * L.Thick, U)), Dir => U, Travel => Dist - 0.5 * L.Thick, Width => L.Width, Thick => L.Thick));
          end;
       end loop;

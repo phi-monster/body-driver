@@ -1792,7 +1792,8 @@ begin
             if Pick.Pre > 0.0 then
                declare
                   Hk : constant Zone.Hand := Hand_Of (C, Arm, Say.Grip_K);
-                  --  每一瓣合到头能走多远(同接触集建手:朝全部瓣尖的中心、留半个手指厚),几瓣一起合 ⇒ 按走得最短的那一瓣算这一下合了几成
+                  --  每一瓣合到头能走多远(同接触集建手:朝全部瓣尖的中心、留半个手指厚),几瓣一起合 ⇒ 按走得最短的那一瓣算这一下合了几成。
+                  --  ⚠ 和 From_Lobes 同一条没量的假设(对称相向合;不对称的手就错),量到每一瓣合空时的尖就换掉
                   Mid : Geom.V3 := [others => 0.0];
                   Half : Long_Float := Long_Float'Last;
                   Frac : Long_Float;

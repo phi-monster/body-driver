@@ -11,8 +11,8 @@
 --   ④ Act.Plan_Contact:够不够得着 = Plug.Reach(①装上的运动学);这件东西的摩擦没量过;旁边的东西没有(这一集还没被顶住过)。
 --  身体文件没存每一瓣的尖(09-29 以前的)⇒ 可以给另一份同一只手的几何文件借尖:
 --  按两份各自量的"眼到指尖中点"的距离之比换单位(比值照实印出来)。
---  打出:挑中那一组的接触点和法向、要的摩擦(按量到的法向 / 按误差最坏)、每单位重量的法向力之和、进场方向、合拢方向,
---  以及合拢方向和它顶面轮廓长轴的夹角(轮廓的主轴,按轮廓点在面里的协方差)。
+--  打出:挑中那一组的接触点和法向、要的摩擦(按量到的法向 / 按误差最坏)、每单位重量的法向力之和、进场方向,
+--  以及第一处接触往里推的方向和它顶面轮廓长轴的夹角(轮廓的主轴,按轮廓点在面里的协方差;两瓣时就是合拢方向)。
 --  用法:contactexam run_dir body.json seq cam arm name host port x0 y0 x1 y1 u v [lobes_geo.json]
 --  要它怎么动(可选):环境变量 CONTACT_MOVE = "lin x y z"(沿世界系这个方向平移)或 "ang x y z"(绕过顶面轮廓重心、沿这个方向的轴转);
 --  没给 = 驱动没听到脑说"哪个量往哪变"时的那一种(跟着手离开它躺的面)。只看方向,不看大小。
@@ -342,7 +342,6 @@ begin
       declare
          Pick : Contact.Search.Candidate;
          Ok : Boolean;
-         G : constant Geom.Cam_Geo := C.Geo (Cam);
          Mx, My, Sxx, Sxy, Syy : Long_Float := 0.0;
          N : constant Geom.V3 := C.Touch_N;
          Seed : constant Geom.V3 := (if abs N (0) < abs N (1) then [1.0, 0.0, 0.0] else [0.0, 1.0, 0.0]);
@@ -399,9 +398,8 @@ begin
             Ax : constant Geom.V3 := [Cos (Th) * E1 (0) + Sin (Th) * E2 (0), Cos (Th) * E1 (1) + Sin (Th) * E2 (1), Cos (Th) * E1 (2) + Sin (Th) * E2 (2)];
             L1 : constant Long_Float := 0.5 * (Sxx + Syy) + Sqrt (0.25 * (Sxx - Syy) ** 2 + Sxy ** 2);
             L2 : constant Long_Float := 0.5 * (Sxx + Syy) - Sqrt (0.25 * (Sxx - Syy) ** 2 + Sxy ** 2);
-            Oj : Boolean;
-            Jaw_Eye : constant Geom.V3 := (if Natural (G.Lobes.Length) >= 2 then Contact.Unit (Sub (G.Lobes (1).Tip, G.Lobes (0).Tip), Oj) else [0.0, 0.0, 0.0]);
-            Jw : constant Geom.V3 := Geom.Ap (Pick.R, Jaw_Eye);
+            --  第一处接触往里推的方向(几瓣的手都有;两瓣时就是合拢方向,正负号不论)
+            Jw : constant Geom.V3 := (if Pick.Touches.Is_Empty then [0.0, 0.0, 0.0] else Pick.Touches.First_Element.N);
             Jp : constant Geom.V3 := Sub (Jw, Scl (Contact.Dot (Jw, N), N));
             Ojp : Boolean;
             Jpu : constant Geom.V3 := Contact.Unit (Jp, Ojp);
@@ -410,7 +408,7 @@ begin
             Put_Line ("顶面轮廓:" & Codec.Img (Natural (Np)) & " 个点,重心 " & V (Add (Scl (Mx, E1), Scl (My, E2))) & "(面内)· 长轴 " & V (Ax) & " · 长短两轴的散布 "
                       & Codec.Fmt (Sqrt (Long_Float'Max (0.0, L1)), 4) & " / " & Codec.Fmt (Sqrt (Long_Float'Max (0.0, L2)), 4));
             Put_Line ("挑中的那一组:眼到 " & V (Pick.T) & " · 进场 " & V (Pick.Approach) & "(离竖直 "
-                      & Codec.Fmt (Arccos (Long_Float'Max (-1.0, Long_Float'Min (1.0, -Contact.Dot (Pick.Approach, N)))), 3) & " rad)· 合拢方向 " & V (Jw)
+                      & Codec.Fmt (Arccos (Long_Float'Max (-1.0, Long_Float'Min (1.0, -Contact.Dot (Pick.Approach, N)))), 3) & " rad)· 第一处接触往里推的方向 " & V (Jw)
                       & " · 它和轮廓长轴的夹角 " & Codec.Fmt (Ang, 3) & " rad(" & Codec.Fmt (Ang * 180.0 / Ada.Numerics.Pi, 1) & "°)");
             for T of Pick.Touches loop
                Put_Line ("  接触 " & V (T.P) & " · 法向(手往里推的方向)" & V (T.N) & " · 能拧的半径 " & Codec.Fmt (T.Twist_R, 4));
