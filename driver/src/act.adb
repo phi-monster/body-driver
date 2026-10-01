@@ -28,6 +28,7 @@ with Instrument;
 with Lockstep;
 with Ada.Exceptions;
 with Selfmap.Graph;
+with Links;
 package body Act is
    Sigma_Mult : constant Long_Float := 3.0;   --  鼓出来超过背景自己稳健 σ 的几倍才算一块(在真实深度图上验过:3 中,5 杀光);无量纲
    Track_Win : constant Long_Float := 0.10;   --  一步里任何被跟踪的点在画面里最多跑十分之一画幅(跟踪窗,比例,无量纲)
@@ -1153,6 +1154,26 @@ package body Act is
       return Selfmap.Careful_Step (G.Tip_Sd, Miss, C.Map.EE_Noise, Geo_Base (C, Arm), G.Rms);
    end Careful_Of;
 
+   --  路上不撞(大并行 §2 第 25 条;路 1 的净空):这只手整条胳膊沿 Dir 平移,走多远以后有一节的表面点进了"可能碰到"的那条带子
+   --  (Links.Free_Along:离量过的场景点 —— 标定板那块桌面、压之前看见的高出面的点 —— 和别的臂的表面点,远多少按两边的不确定度)。
+   --  这条臂没量过每一节的形状 ⇒ Known = False:说不出,照实说;不当成"不会碰",也不拿它拦(碰没碰上照旧由 Blocked 判)
+   function Path_Clear (C : Context; F : Plug.Frame; Arm : Natural; Dir : Geom.V3; Known : out Boolean) return Long_Float is
+      Scene : Geom.Scene_Pt_Vectors.Vector := C.Board;
+   begin
+      for P of C.Seen_Above loop
+         Scene.Append (P);
+      end loop;
+      return Links.Free_Along (Arm, Links.Readings_Now (F), Dir, Scene, Known);
+   end Path_Clear;
+
+   --  这一步的 Lim.Clear 加上路上那一道:路上量得出净空 ⇒ 带子前留出 Free_Base 步小步(同 Plan_Approach),进了带子 ⇒ 一步一小步;
+   --  量不出 ⇒ 不加(Known_Out 照实带回去说)
+   function With_Path (C : Context; F : Plug.Frame; Arm : Natural; Dw : Geom.V3; Clear, Lstep : Long_Float; Known_Out : out Boolean) return Long_Float is
+      Pc : constant Long_Float := Path_Clear (C, F, Arm, Dw, Known_Out);
+   begin
+      return Selfmap.Clear_With_Path (Clear, Pc, Known_Out, Lstep);
+   end With_Path;
+
    --  脑说的步子档位 = 这一步最多多大(语言 §17.6,大并行 §2 第 23 条;10-01 路 4,原来是"乘探针上限的 1/4、1/2、1"):
    --  small = 这只手的小步(Careful_Of:到可能碰到的带子里每一步多大),large = 一条命令走得到的最大一档(开机量的步幅),
    --  medium = 两者的几何中点(对数尺上的正中;两头都是量的)。脑没说 ⇒ 不加上限(步子由反解、眼、带子定)
@@ -1414,6 +1435,13 @@ package body Act is
          Back (K) := -C.Geo_Dir (K) * C.Geo_Came;
       end loop;
       Lim.Track := Gear_Cap (C, Arm, Gear); Lim.Reach := True;
+      --  路上不撞:退的这一路整条胳膊走多远进别的东西 / 桌面 / 别的臂的带子(量不出 ⇒ 不加;Walk_To 每一步用同一个上限)
+      declare
+         Known : Boolean;
+         Dv : constant Geom.V3 := [Back (0), Back (1), Back (2)];
+      begin
+         Lim.Clear := With_Path (C, F, Arm, Dv, Long_Float'Last, Careful_Of (C, Arm, 0.0), Known);
+      end;
       Selfmap.Walk_To (L, C.Map, (Arm => Arm, Goal => Chan.Compose (P0, Back), Jaw => <>), Lim, Res, Long_Float'Last, Max_Steps,
                        F, Wk, Went, Turned, Steps_Taken, Why);
       Blocked := Why = Selfmap.Was_Blocked; Arrived := Why = Selfmap.Arrived;

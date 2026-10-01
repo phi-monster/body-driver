@@ -152,6 +152,9 @@ package Selfmap is
    --  (10-01 路 4 改:上面几种"停了"都换成同一种判法 —— 读数动起来以后,离目标还差的不再变小(Stopped_Shrinking;"停在这儿"那种命令看每拍挪了多少)就停了,
    --  压的、几组一起的、关节目标都这样判;到了 = 差不到 Tol(给了才判)而且没在往远走。没有地板、没有"连着两拍"、没有"最多等几拍":
    --  一点都没动起来的那一条最多等量过的起效拍数(Settle;开机还一个都没量过 ⇒ Unmeasured_Start)
+   --  一条命令发出以后读数一点都没动,最多等几拍就算它不会动了:量过的起效拍数(M.Settle);开机还一个都没量过 ⇒ Unmeasured_Start。
+   --  Go 判"没动起来"用它;别处等一条命令起效(比如抓握命令发出去读数没动)也用这一个,不另写一份
+   function Start_Cap (M : Body_Map) return Natural;
    type Watcher is access function (F : Plug.Frame) return Boolean;
    procedure Go (L : in out Plug.Link; M : Body_Map; Arm : Natural; Target : Plug.Arm_Pose; Jaw : Floats;
                  F : in out Plug.Frame; Delivered : out Table.Vec; Frames : out Natural; Ok : out Boolean; Press : Boolean := False;
@@ -313,9 +316,15 @@ package Selfmap is
    --  Sd_Target = 它的位置沿走的方向有多不准(两眼交点按各眼的误差算的;量不出 ⇒ Long_Float'Last:全程小步,照实;
    --  到没到只按我自己看得出的那一步判)
    function Plan_Approach (Dist, R_Obj, Sd_Target, Tip_Sd, Miss, Noise, Notch, Eye_Rms : Long_Float) return Approach_Plan;
+   --  这一步的"离可能碰到的地方"再加路上那一道(大并行 §2 第 25 条):Path = 整条胳膊沿这一步走多远进别的东西 / 桌面 / 别的臂的带子
+   --  (路 1 的 Links.Free_Along;Path_Known = 这条臂量过每一节的形状)。量得出 ⇒ 带子前留出 Free_Base 步小步(同 Plan_Approach),
+   --  进了带子 ⇒ 一步一小步(Lstep);量不出 / 哪个都碰不上 ⇒ 不加(照实说由调用方)
    --  脑说的步子档位 = 这一步最多多大(语言 §17.6;大并行 §2 第 23 条):small = 小步(Small,Careful_Step),large = 一条命令走得到的
    --  最大一档(Large,开机量的步幅),medium = 两者的几何中点(对数尺上的正中;两头都是量的);别的词 / 没说 ⇒ 不加上限(Long_Float'Last)
    function Gear_Bound (Gear : String; Small, Large : Long_Float) return Long_Float;
+   function Clear_With_Path (Clear, Path : Long_Float; Path_Known : Boolean; Lstep : Long_Float) return Long_Float is
+     (if not Path_Known or else Path = Long_Float'Last then Clear
+      else Long_Float'Min (Clear, Long_Float'Max (Path - Long_Float (Free_Base) * Lstep, Lstep)));
    --  这一步比上一步之前又近了没有:Prev = 上一步之前还差多少(Long_Float'Last = 还没走过),Now = 此刻还差多少,Res = 分辨率。
    --  近了不到一个分辨率 = 看不出近了 ⇒ False(走到头了 / 被什么拦着,不再拿同一步去撞;原来是拍一个"最多走几步")
    function Gained (Prev, Now, Res : Long_Float) return Boolean is (Prev = Long_Float'Last or else Prev - Now > Res);

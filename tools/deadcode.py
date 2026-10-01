@@ -7,6 +7,11 @@ TEST_HOOKS = {
     ("plug.adb", "Lock_Feed"): "自检在主线程里当假身体,替 Lock_Beat 从链路收的那一帧",
     ("contact.adb", "Rotation"): "脑要它'绕一根轴转'的那种运动(接触集执行层 Contact.Exec.Steps 吃的 Twist);自检拿它验转着走,驱动接上'脑要它怎么动'(PLAN ② 接下来第 1 条)就是活的",
     ("kinem.adb", "Refine_Tracks"): "把 Fit 的最后一步(④ 多视图,Refine_Until_Done)单独交给自检,从真模型起步验它",
+    # 路 4 路上不撞(大并行 §2 第 25 条):关节空间绕路接进 Geo_Approach 要两个只读接口 —— 路 1 的 Links.Max_Shift(一段关节直线上表面点挪多远的上界)、
+    # 路 3 的 Jointboot.Bounds_Of(每个关节量到的范围、第几组读数),主代理 10-01 已转;到了路 4 就接,接上以后这一条删
+    ("selfmap-detour.adb", "Plan"): "路 4:直走被挡时在关节空间里绕过去(RRT-Connect);等路 1 的 Links.Max_Shift、路 3 的 Jointboot.Bounds_Of 到了接进 Geo_Approach",
+    ("selfmap-detour.adb", "Segment"): "路 4:一段关节直线能不能走(保守推进,Plan 用它);同上一条,接进 Geo_Approach 以后删",
+    ("selfmap-detour.adb", "Lerp"): "路 4:关节空间里两处之间按比例插(Segment / Plan 用它);同上两条,接进 Geo_Approach 以后删",
     # 路 6 部件和轴(大并行 §2 第 12 条)的新包,接口处在别路的文件里(Run_Segment 看东西动的那一处调 Fit、脑要挪一块时调 Follow),
     # 等主代理合并时接上(路 6 的报告里写了接法);在那之前只有自检的焊点调它们。接上以后这 14 条全删
     ("linkage.adb", "Fit"): "路 6:看东西动时按刚体运动归块、每两块拟合一根轴;驱动接上'东西被跟住的点每一帧的交点'(路 3 的东西)就是活的",

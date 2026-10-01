@@ -1,5 +1,8 @@
 with Ada.Exceptions;
 with Selfmap.Graph;
+with Selfmap.Detour;
+with Stats;
+with Ada.Numerics;
 with Ada.Numerics.Long_Elementary_Functions; use Ada.Numerics.Long_Elementary_Functions;
 separate (Selfcheck)
 procedure Welds_Path_4 is
@@ -1226,6 +1229,122 @@ begin
              & " · 限速的身体走 20 档 ⇒ " & Codec.Img (F_Plat) & " 拍、" & Codec.Fmt (100.0 * Got_Plat, 1) & "%(牙:拿每拍挪了多少当停了 ⇒ 第 "
              & Codec.Img (Per_Beat_Stop) & " 拍就收)"
              & " · 画面晚一拍的眼:交回去那一帧竖条差 " & Codec.Fmt (Lag_Err, 2) & " 像素(牙:读数一停就收 ⇒ 差 " & Codec.Fmt (Lag_Err_Rd, 2) & ")");
+   end;
+   --  ⑭ 路上不撞(大并行 §2 第 25 条):直走被挡,在关节空间里找一条绕过去的路(Selfmap.Detour:RRT-Connect + 保守推进 + 捷径)。
+   --  合成的两节平面臂(第 1 节长 1.0、第 2 节长 0.8,每节 4 个表面点),一串障碍点立在它伸直扫过去的那一片里(离肩 1.3–1.7、方位 0.45 弧度),
+   --  带子半径 = Stats.Z × √(障碍点 0.03² + 表面点 0.01²)(两边的不确定度);从伸直朝右下转到伸直朝左上。
+   --  要:直走(关节直线)走不通;绕的那条每一段都走得通,而且按真几何逐段细查(每段 400 份)一处都没进带子;首尾就是起点终点;
+   --  净空只在 Margin 里(路 1 的 Links.Clear_Of 给),步长按净空和一档定(Res)。
+   --  牙(当场算):不看净空(Margin 恒大)⇒ 直走,细查进了带子;另有"贴着带子一步挪不出一档就算走不通":Res 取 0 ⇒ 这一串推进不收(只数步数,不走)
+   declare
+      L1 : constant Long_Float := 1.0;
+      L2 : constant Long_Float := 0.8;
+      Fr_Pts : constant array (1 .. 4) of Long_Float := [0.25, 0.5, 0.75, 1.0];
+      Obs_Sd : constant Long_Float := 0.03;
+      Pt_Sd : constant Long_Float := 0.01;
+      Rb : constant Long_Float := Stats.Z * Sqrt (Obs_Sd ** 2 + Pt_Sd ** 2);
+      Res : constant Long_Float := 0.01;
+      type P2 is record
+         X, Y : Long_Float;
+      end record;
+      type P2_Array is array (Positive range <>) of P2;
+      Obs : constant P2_Array := [(1.3 * Cos (0.45), 1.3 * Sin (0.45)), (1.4 * Cos (0.45), 1.4 * Sin (0.45)), (1.5 * Cos (0.45), 1.5 * Sin (0.45)),
+                                  (1.6 * Cos (0.45), 1.6 * Sin (0.45)), (1.7 * Cos (0.45), 1.7 * Sin (0.45))];
+      Far_Away : Boolean := False;   --  牙:不看净空
+      function Pt (Q : Floats; Link, K : Natural) return P2 is
+         T1 : constant Long_Float := Q (0);
+         T2 : constant Long_Float := Q (0) + Q (1);
+      begin
+         if Link = 1 then
+            return (Fr_Pts (K) * L1 * Cos (T1), Fr_Pts (K) * L1 * Sin (T1));
+         end if;
+         return (L1 * Cos (T1) + Fr_Pts (K) * L2 * Cos (T2), L1 * Sin (T1) + Fr_Pts (K) * L2 * Sin (T2));
+      end Pt;
+      function True_Margin (Q : Floats) return Long_Float is
+         M : Long_Float := Long_Float'Last;
+      begin
+         for Link in 1 .. 2 loop
+            for K in Fr_Pts'Range loop
+               declare
+                  P : constant P2 := Pt (Q, Link, K);
+               begin
+                  for O of Obs loop
+                     M := Long_Float'Min (M, Sqrt ((P.X - O.X) ** 2 + (P.Y - O.Y) ** 2) - Rb);
+                  end loop;
+               end;
+            end loop;
+         end loop;
+         return M;
+      end True_Margin;
+      function Margin (Q : Floats) return Long_Float is (if Far_Away then Long_Float'Last else True_Margin (Q));
+      --  沿关节直线 Q0 → Q1 任一表面点挪的路程的上界:第 1 个关节转 |Δθ1| 带着离肩 r1 的点挪 r1 |Δθ1|,第 2 个关节转 |Δθ2| 带着离肘 r2 的点挪 r2 |Δθ2|
+      function Shift (Q0, Q1 : Floats) return Long_Float is
+         D1 : constant Long_Float := abs (Q1 (0) - Q0 (0));
+         D2 : constant Long_Float := abs (Q1 (1) - Q0 (1));
+      begin
+         return Long_Float'Max (L1 * D1, (L1 + L2) * D1 + L2 * D2);
+      end Shift;
+      function Q2 (A, B : Long_Float) return Floats is
+         R : Floats;
+      begin
+         R.Append (A); R.Append (B);
+         return R;
+      end Q2;
+      Start_Q : constant Floats := Q2 (-0.3, 0.0);
+      Goal_Q : constant Floats := Q2 (1.2, 0.0);
+      Lo_Q : constant Floats := Q2 (-Ada.Numerics.Pi, -2.5);
+      Hi_Q : constant Floats := Q2 (Ada.Numerics.Pi, 2.5);
+      --  按真几何逐段细查(每段 400 份):整条路上离带子最近的那一处还剩多少
+      function Worst_On (P : Plug.Floats_Vectors.Vector) return Long_Float is
+         W : Long_Float := Long_Float'Last;
+      begin
+         for I in 0 .. Natural (P.Length) - 2 loop
+            for S in 0 .. 400 loop
+               declare
+                  T : constant Long_Float := Long_Float (S) / 400.0;
+               begin
+                  W := Long_Float'Min (W, True_Margin (Q2 (P (I) (0) + T * (P (I + 1) (0) - P (I) (0)), P (I) (1) + T * (P (I + 1) (1) - P (I) (1)))));
+               end;
+            end loop;
+         end loop;
+         return W;
+      end Worst_On;
+      Straight_Reach : Long_Float;
+      Straight_Free : Boolean;
+      Path_New, Path_Blind : Plug.Floats_Vectors.Vector;
+      Found_New, Found_Blind : Boolean;
+      Tries_New, Tries_Blind : Natural;
+      Worst_New, Worst_Blind : Long_Float;
+      Ends_Ok : Boolean;
+   begin
+      Selfmap.Detour.Segment (Start_Q, Goal_Q, Margin'Unrestricted_Access, Shift'Unrestricted_Access, Res, Straight_Reach, Straight_Free);
+      Selfmap.Detour.Plan (Start_Q, Goal_Q, Lo_Q, Hi_Q, Margin'Unrestricted_Access, Shift'Unrestricted_Access, Res, 7, Path_New, Found_New, Tries_New);
+      Worst_New := (if Found_New then Worst_On (Path_New) else Long_Float'First);
+      Ends_Ok := Found_New and then Bytes.F64_Vectors."=" (Path_New.First_Element, Start_Q) and then Bytes.F64_Vectors."=" (Path_New.Last_Element, Goal_Q);
+      Far_Away := True;
+      Selfmap.Detour.Plan (Start_Q, Goal_Q, Lo_Q, Hi_Q, Margin'Unrestricted_Access, Shift'Unrestricted_Access, Res, 7, Path_Blind, Found_Blind, Tries_Blind);
+      Far_Away := False;
+      Worst_Blind := (if Found_Blind then Worst_On (Path_Blind) else Long_Float'Last);
+      Check (not Straight_Free and then Found_New and then Ends_Ok and then Worst_New >= 0.0 and then Natural (Path_Blind.Length) = 2 and then Worst_Blind < 0.0,
+             "走一步·路上不撞(绕过合成的障碍):关节直线走到 " & Codec.Fmt (100.0 * Straight_Reach, 1) & "% 就进带子(带子半径 " & Codec.Fmt (Rb, 3) & ")"
+             & " ⇒ RRT-Connect 试了 " & Codec.Img (Tries_New) & " 回找到 " & Codec.Img (Natural (Path_New.Length)) & " 处的路(捷径以后),逐段细查离带子最近还剩 "
+             & Codec.Fmt (Worst_New, 4) & (if Worst_New >= 0.0 then "(没进)" else "(进了,错)")
+             & " · 牙:不看净空 ⇒ 直走 " & Codec.Img (Natural (Path_Blind.Length)) & " 处,细查进带子 " & Codec.Fmt (-Worst_Blind, 4));
+   end;
+   --  ⑮ 路上那一道加进这一步的 Lim.Clear(Selfmap.Clear_With_Path;Act.With_Path 拿路 1 的 Links.Free_Along 量的给它):
+   --  量得出 ⇒ 带子前留出 Free_Base 步小步;已经在带子里(0)⇒ 一步一小步;量不出 / 哪个都碰不上 ⇒ 原来的那一道不动;两道取小的。
+   --  病:路上不看 ⇒ 一条命令把胳膊带进别的东西 / 桌面 / 别的臂的带子
+   declare
+      Ls : constant Long_Float := 0.01;
+      A1 : constant Long_Float := Selfmap.Clear_With_Path (1.0, 0.5, True, Ls);
+      A2 : constant Long_Float := Selfmap.Clear_With_Path (1.0, 0.0, True, Ls);
+      A3 : constant Long_Float := Selfmap.Clear_With_Path (1.0, 0.5, False, Ls);
+      A4 : constant Long_Float := Selfmap.Clear_With_Path (1.0, Long_Float'Last, True, Ls);
+      A5 : constant Long_Float := Selfmap.Clear_With_Path (0.2, 0.5, True, Ls);
+   begin
+      Check (abs (A1 - (0.5 - Long_Float (Selfmap.Free_Base) * Ls)) < 1.0e-12 and then A2 = Ls and then A3 = 1.0 and then A4 = 1.0 and then A5 = 0.2,
+             "走一步·路上那一道:离带子 0.5 ⇒ 这一步最多 " & Codec.Fmt (A1, 3) & "(留 " & Codec.Img (Selfmap.Free_Base) & " 步小步)· 已经在带子里 ⇒ 一小步 "
+             & Codec.Fmt (A2, 3) & " · 形状没量过 ⇒ 不加(" & Codec.Fmt (A3, 3) & ")· 碰不上 ⇒ 不加 · 原来那一道更小 ⇒ 取它(" & Codec.Fmt (A5, 3) & ")");
    end;
    Plug.Set_Hooks (null, null);
 end Welds_Path_4;
