@@ -6,10 +6,13 @@ with Geom;
 with Bodyfile;
 with Schema;
 with Ada.Exceptions;
+with Sinew;
+with Table;
 separate (Selfcheck)
 procedure Welds_Path_1 is
    use Ada.Numerics.Long_Elementary_Functions;
    use type Selfmap.Group_Role;
+   use type Selfmap.Walk_End;
    use type Readings.Eye_Verdict;
    use type Readings.View_Says;
    --  路 1 的焊点(大并行.md §5 路 1):每条写清"错了会是什么病",带一颗牙(去掉那一改就红)
@@ -1513,5 +1516,282 @@ begin
              & " · x5 的样子 ⇒" & Integer'Image (Selfmap.Graph.Whole_Group (M2)) & " · 有扛着全身的组 ⇒ 第" & Integer'Image (Selfmap.Graph.Whole_Group (M3))
              & " 组 · 一条臂 + 一块量不出长在哪的零件 ⇒" & Integer'Image (Selfmap.Graph.Whole_Group (M4))
              & " · 牙:只认扛着全身的那组 ⇒ 无人机说" & (if Only_Carrying < 0 then "没有" else "有"));
+   end;
+
+   --  ══ me = 整个我(大并行 §2 第 2 条、§5 路 1;10-01 主代理授权 act.ads / act.adb / act-round.adb 那几行):清单里"整个我"那条臂的零件
+   --  带 Whole(Selfmap.Graph.Whole_Piece,Build_Listing 置),me 只收它(Act.Role_Wants 按整件问);绑不上时按开机量到的说为什么
+   --  (Selfmap.Graph.Why_No_Me,act-round 的 Why_No_Role 念它)。三种身体,都是假身体真跑开机第一步(Find_Arms 一组一组推着认):
+   --  ① 无人机那种:一组 6 个数扛着身上那只眼(头顶眼看得见它),没有夹爪 ⇒ 整个我 = 那条臂,me 绑得上;再按绑上的那条臂走点
+   --     (位姿空间的假无人机:命令晚 1 拍起效,每拍走还差的 0.89 —— x5 量的延迟基线,读数抖一丝;先按开机的量法 Selfmap.Measure 量它,
+   --     再 Selfmap.Walk_To 走到一个平移 (0.20, −0.10, −0.15)、转 (0, 0, 0.3) 的点)⇒ 落到指定处(平移、转动都差不到一档);
+   --  ② x5 那种:两条臂互不带着 ⇒ me 绑不上,照实说"量出 2 条臂,哪一条都不带着别的";
+   --  ③ 会走的人形那种:一组扛着全身(三只眼都跟着它整幅动)+ 两条臂各带腕眼和手 ⇒ 整个我 = 那一组;它不是一条臂 ⇒ me 绑不上,
+   --     照实说是哪一组、为什么(我只会按臂上的零件走)。
+   --  病:P8MD 无人机键盘上角色那一格是空的 —— me 恒为 False,绑不上的原因按手指数猜("没手指 ⇒ me 没接上""有手指 ⇒ 要点名到零件")。
+   --  牙:① 按种类问(原来的 Role_Wants (R, Kind))⇒ me 一块都绑不上 ⇒ 没有臂可走、不落点;② 原来按手指数说的那句不提臂;
+   --     ③ 认不出扛着全身的那组(当成读数)⇒ 说成"量出 2 条臂,哪一条都不带着别的"
+   declare
+      function Bound_Arm (M : Selfmap.Body_Map; By_Kind : Boolean) return Integer is
+      begin
+         for A in 0 .. Selfmap.Graph.Arm_Count (M) - 1 loop
+            declare
+               It : Act.Item;
+            begin
+               It.Kind := Act.Piece; It.Arm := A; It.Located := True;
+               It.Whole := Selfmap.Graph.Whole_Piece (M, A);
+               if (if By_Kind then Act.Role_Wants (Sinew.Rl_Me, It.Kind) else Act.Role_Wants (Sinew.Rl_Me, It)) then
+                  return Integer (A);
+               end if;
+            end;
+         end loop;
+         return -1;
+      end Bound_Arm;
+      function Has (S, Part : String) return Boolean is (Ada.Strings.Fixed.Index (S, Part) > 0);
+      --  原来那句(按手指数;牙 ②)
+      function Old_Why (N_Finger, N_Grip : Natural) return String is
+        ((if N_Finger + N_Grip = 0 then "me 是【整个我】:我身上没量出手指和爪心,本该就是它 —— 可这一版还不会按整个机身走(me 没接上)"
+          else "me 是【整个我】,只有推一下整幅画面跟着变、身上又分不出零件的机体才有它;我身上量得出 " & Codec.Img (N_Finger) & " 瓣手指、"
+               & Codec.Img (N_Grip) & " 组爪心,所以要点名到零件:写 grasper"));
+
+      --  ① 的走点:位姿空间的假无人机(一组读数 = 机身的位姿),主线程当身体,手的任务里跑驱动真的 Selfmap.Measure + Walk_To
+      procedure Walk_Drone (Arm : Integer; Off : Table.Vec; Landed : out Boolean; Miss_T, Miss_R : out Long_Float;
+                            Why : out Selfmap.Walk_End; Steps : out Natural; Beats : out Natural) is
+         Tn : constant Long_Float := 0.005;    --  一步看得见的那一档(平移;同路 4 那具假身体)
+         Tr : constant Long_Float := 0.0025;   --  转动那一档
+         Alpha : constant Long_Float := 0.89;  --  每拍走还差的(x5 量的:命令发出下一拍走 89%)
+         Start : constant Plug.Arm_Pose := [0.0, -0.2, 0.9, 1.0, 0.0, 0.0, 0.0];
+         Goal : constant Plug.Arm_Pose := Chan.Compose (Start, Off);
+         X, Y, Last_T : Plug.Arm_Pose := Start;
+         Due : Integer := -1;          --  排着的那条命令哪一拍起效(-1 = 没有)
+         Due_T : Plug.Arm_Pose := Start;
+         Beat : Natural := 0;
+         Lk : Plug.Link;
+         Pic : Plug.Cam;
+         Mw : Selfmap.Body_Map;
+         Mw_Ok : Boolean := False;
+         function To_Q (P : Plug.Arm_Pose) return Floats is
+            Q : Floats;
+         begin
+            for V of P loop
+               Q.Append (V);
+            end loop;
+            return Q;
+         end To_Q;
+         function To_Pose (Q : Floats) return Plug.Arm_Pose is
+            P : Plug.Arm_Pose := [others => 0.0];
+         begin
+            for I in P'Range loop
+               if I < Natural (Q.Length) then
+                  P (I) := Q (I);
+               end if;
+            end loop;
+            return P;
+         end To_Pose;
+         function Rot_Len (D : Table.Vec) return Long_Float is (Sqrt (D (3) ** 2 + D (4) ** 2 + D (5) ** 2));
+         procedure Fake_Cmd (C : in out Plug.Cmd; Ok : out Boolean) is
+         begin
+            C.Kind := Plug.Joint; C.Group := Integer (C.Arm); C.Q := To_Q (C.Pose);
+            Ok := True;
+         end Fake_Cmd;
+         function Frame_Now return Plug.Frame is
+            Ff : Plug.Frame;
+            N : constant Long_Float := 1.0e-6 * Long_Float ((Beat * 7) mod 5 - 2) / 2.0;
+            V : Table.Vec := Table.Zero_Vec;
+            P : Plug.Arm_Pose;
+         begin
+            V (0) := N; V (1) := -N; V (2) := N; V (5) := N;
+            P := Chan.Compose (X, V);
+            Ff.EE.Append (P); Ff.Joints.Append (To_Q (P)); Ff.Cams.Append (Pic); Ff.Seq := Beat;
+            return Ff;
+         end Frame_Now;
+         procedure Advance is
+            Mg : constant Plug.Cmd := Plug.Lock_Merged;
+            V : Table.Vec;
+            D : Table.Vec;
+         begin
+            for K in 0 .. Natural'Min (Natural (Mg.Groups.Length), Natural (Mg.Qs.Length)) - 1 loop
+               if Mg.Groups (K) = 0 then
+                  declare
+                     T : constant Plug.Arm_Pose := To_Pose (Mg.Qs (K));
+                  begin
+                     if (for some I in T'Range => abs (T (I) - Last_T (I)) > 1.0e-9) then
+                        Due := Beat + 1; Due_T := T; Last_T := T;
+                     end if;
+                  end;
+               end if;
+            end loop;
+            if Due >= 0 and then Beat >= Due then
+               Y := Due_T; Due := -1;
+            end if;
+            D := Chan.Delivered (X, Y);
+            V := Table.Zero_Vec;
+            for I in 0 .. Chan.Per_Arm - 1 loop
+               V (I) := Alpha * D (I);
+            end loop;
+            X := Chan.Compose (X, V);
+         end Advance;
+         task type Hand;
+         task body Hand is
+            Fr : Plug.Frame := Frame_Now;
+         begin
+            Lockstep.Begin_Hand (0);
+            begin
+               declare
+                  St : Floats;
+                  Step_Px : Plug.Floats_Vectors.Vector;
+                  Eyes : Ints;
+               begin
+                  St.Append (Tn); St.Append (Tr);
+                  Step_Px.Append (St); Eyes.Append (0);
+                  Selfmap.Measure (Lk, Fr, Mw, Mw_Ok, Step_Px, Eyes => Eyes, World => 0);
+               end;
+               if Mw_Ok and then Arm >= 0 then
+                  declare
+                     Wk : Selfmap.Walk;
+                     Lm : Selfmap.Limits;
+                     Went, Turned : Long_Float;
+                  begin
+                     Lm.Reach := True;
+                     --  最多 50 步:自检自己的保险(驱动里走到一个定了的目标不设步数,出口是 Gained)
+                     Selfmap.Walk_To (Lk, Mw, (Arm => Natural (Arm), Goal => Goal, Jaw => <>), Lm, Tn, Tr, 50, Fr, Wk, Went, Turned, Steps, Why);
+                  end;
+               end if;
+            exception
+               when E : others =>
+                  Put_Line ("  🔴 路 1 假无人机的手出错:" & Ada.Exceptions.Exception_Information (E));
+                  Fails := Fails + 1;
+            end;
+            Lockstep.Done;
+         end Hand;
+      begin
+         Why := Selfmap.Lost_Link; Steps := 0;
+         Pic.W := 8; Pic.H := 8;
+         for I in 0 .. Pic.W * Pic.H - 1 loop
+            Pic.Gray.Append (U8 (100));
+         end loop;
+         Plug.Set_Hooks (null, Fake_Cmd'Unrestricted_Access);
+         Plug.Set_Reach (null); Plug.Set_Limit (null);
+         Lockstep.Clear;
+         Plug.Lock_Begin;
+         declare
+            H : Hand;
+         begin
+            Lockstep.Start (0, H'Identity);
+            loop
+               Lockstep.Run (0);
+               exit when Lockstep.Finished (0);
+               Beat := Beat + 1;
+               Advance;
+               declare
+                  Ff : constant Plug.Frame := Frame_Now;
+               begin
+                  Lk.Seq := Beat;
+                  Plug.Note_Beat (Lk, Ff);
+                  Plug.Lock_Feed (Ff, Ok => Beat <= 20_000);   --  自检自己的保险:走不完就断线(手照样收得了尾),不挂住自检
+               end;
+            end loop;
+         end;
+         Plug.Lock_End;
+         Lockstep.Clear;
+         Plug.Set_Hooks (null, null);
+         Miss_T := Table.Norm (Chan.Delivered (X, Goal), Chan.Pos_Channels);
+         Miss_R := Rot_Len (Chan.Delivered (X, Goal));
+         Beats := Beat;
+         Landed := Mw_Ok and then Why = Selfmap.Arrived and then Miss_T <= Tn and then Miss_R <= Tr;
+      end Walk_Drone;
+
+      Rd, Rx, Rh : Fake_Result;
+      Md, Mx, Mh, Mh_Old : Selfmap.Body_Map;
+   begin
+      --  ① 无人机那种
+      declare
+         Gs : FG_Vectors.Vector;
+         Cs : FC_Vectors.Vector;
+      begin
+         Gs.Append (G_Of ("arm_joint_state", 6, 0.0));
+         Gs.Append (Pose_Of_Group ("ee_pose", 0));
+         Cs.Append (Cam_Of (Empty, Vec ([0])));
+         Cs.Append (Cam_Of (Vec ([0]), Empty));
+         Rd := Run_Fake (Gs, Cs);
+      end;
+      --  ② x5 那种
+      declare
+         Gs : FG_Vectors.Vector;
+         Cs : FC_Vectors.Vector;
+      begin
+         Gs.Append (G_Of ("left_arm_joint_state", 6, 0.0));
+         Gs.Append (G_Of ("right_arm_joint_state", 6, 0.0));
+         Gs.Append (G_Of ("left_ee_joint_state", 1, 1.0, Lo => 0.0, Hi => 1.0));
+         Gs.Append (G_Of ("right_ee_joint_state", 1, 1.0, Lo => 0.0, Hi => 1.0));
+         Cs.Append (Cam_Of (Empty, Vec ([0, 1, 2, 3])));
+         Cs.Append (Cam_Of (Vec ([0]), Vec ([2])));
+         Cs.Append (Cam_Of (Vec ([1]), Vec ([3])));
+         Rx := Run_Fake (Gs, Cs);
+      end;
+      --  ③ 会走的人形那种:base 扛着全身(头上那只眼长在它上面,两只腕眼也跟着它走),两条臂各带腕眼,两只手各一个合拢通道
+      declare
+         Gs : FG_Vectors.Vector;
+         Cs : FC_Vectors.Vector;
+      begin
+         Gs.Append (G_Of ("base", 3, 0.0));
+         Gs.Append (G_Of ("left_arm", 6, 0.0));
+         Gs.Append (G_Of ("right_arm", 6, 0.0));
+         Gs.Append (G_Of ("left_hand", 1, 1.0, Lo => 0.0, Hi => 1.0));
+         Gs.Append (G_Of ("right_hand", 1, 1.0, Lo => 0.0, Hi => 1.0));
+         Cs.Append (Cam_Of (Vec ([0]), Vec ([1, 2, 3, 4])));
+         Cs.Append (Cam_Of (Vec ([0, 1]), Vec ([3])));
+         Cs.Append (Cam_Of (Vec ([0, 2]), Vec ([4])));
+         Rh := Run_Fake (Gs, Cs);
+      end;
+      --  开机时几条臂 = 量出来的布局的(Selfmap.Measure 按 Plug.Arms 填 M.Arms;Find_Arms 只填 Groups)
+      Md := Rd.Map; Md.Arms := Rd.Lay.N_Arms;
+      Mx := Rx.Map; Mx.Arms := Rx.Lay.N_Arms;
+      Mh := Rh.Map; Mh.Arms := Rh.Lay.N_Arms;
+      Mh_Old := Mh;
+      for I in 0 .. Natural (Mh_Old.Groups.Length) - 1 loop
+         if Mh_Old.Groups (I).Role = Selfmap.Carrying then
+            declare
+               Gi : Selfmap.Group_Info := Mh_Old.Groups (I);
+            begin
+               Gi.Role := Selfmap.Reading;
+               Mh_Old.Groups.Replace_Element (I, Gi);
+            end;
+         end if;
+      end loop;
+      declare
+         Me_D : constant Integer := Bound_Arm (Md, By_Kind => False);
+         Me_D_Old : constant Integer := Bound_Arm (Md, By_Kind => True);
+         Me_X : constant Integer := Bound_Arm (Mx, By_Kind => False);
+         Me_H : constant Integer := Bound_Arm (Mh, By_Kind => False);
+         Why_D : constant String := Selfmap.Graph.Why_No_Me (Md);
+         Why_X : constant String := Selfmap.Graph.Why_No_Me (Mx);
+         Why_H : constant String := Selfmap.Graph.Why_No_Me (Mh);
+         Why_H_Old : constant String := Selfmap.Graph.Why_No_Me (Mh_Old);
+         Old_X : constant String := Old_Why (2, 2);   --  x5:两只手各一组爪心、各一瓣以上的手指(按原来那句的数法,数多少不改它不提臂)
+         Hg : constant Integer := Grp (Rh, "state.base");
+         Off : Table.Vec := Table.Zero_Vec;
+         Landed : Boolean := False;
+         Miss_T, Miss_R : Long_Float := Long_Float'Last;
+         Why_W : Selfmap.Walk_End := Selfmap.Lost_Link;
+         Steps_W, Beats_W : Natural := 0;
+      begin
+         Off (0) := 0.20; Off (1) := -0.10; Off (2) := -0.15; Off (5) := 0.3;
+         if Me_D >= 0 then
+            Walk_Drone (Me_D, Off, Landed, Miss_T, Miss_R, Why_W, Steps_W, Beats_W);
+         end if;
+         Check (Rd.Ok and then Me_D = 0 and then Why_D = "" and then Landed and then Me_D_Old = -1,
+                "me · 无人机那种:整个我 = 第" & Integer'Image (Selfmap.Graph.Whole_Group (Md)) & " 组(第" & Integer'Image (Me_D + 1) & " 条臂),me 绑到它"
+                & " · 走点:" & Selfmap.Walk_End'Image (Why_W) & "、" & Codec.Img (Steps_W) & " 步 " & Codec.Img (Beats_W) & " 拍,离指定处 平移 "
+                & Codec.Fmt (Miss_T, 5) & "、转 " & Codec.Fmt (Miss_R, 5) & "(一档 0.005 / 0.0025)"
+                & " · 牙:按种类问 ⇒ " & (if Me_D_Old < 0 then "me 绑不上、没有臂可走、不落点" else "(绑上了,牙没咬上)"));
+         Check (Rx.Ok and then Me_X = -1 and then Has (Why_X, "2 条臂") and then Has (Why_X, "不带着") and then not Has (Old_X, "条臂"),
+                "me · x5 那种:绑不上,照实说「" & Why_X & "」 · 牙:原来那句「" & Old_X & "」" & (if Has (Old_X, "条臂") then "(提了臂,牙没咬上)" else "不提臂"));
+         Check (Rh.Ok and then Hg >= 0 and then Selfmap.Graph.Whole_Group (Mh) = Hg and then Selfmap.Graph.Whole_Arm (Mh) = -1 and then Me_H = -1
+                and then Has (Why_H, "第 " & Codec.Img (Natural'Max (0, Hg)) & " 组") and then Has (Why_H, "扛着全身")
+                and then Has (Why_H_Old, "2 条臂") and then not Has (Why_H_Old, "第 " & Codec.Img (Natural'Max (0, Hg)) & " 组"),
+                "me · 会走的人形那种:整个我 = 第" & Integer'Image (Selfmap.Graph.Whole_Group (Mh)) & " 组(base,"
+                & Role_Img (Role_Of (Rh, "state.base")) & "),不是一条臂 ⇒ me 绑不上,照实说「" & Why_H & "」"
+                & " · 牙:认不出扛着全身的那组 ⇒ 「" & Why_H_Old & "」");
+      end;
    end;
 end Welds_Path_1;

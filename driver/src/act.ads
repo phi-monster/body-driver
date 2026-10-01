@@ -57,11 +57,17 @@ package Act is
       --  于是脑只能点名当前那台里的东西 —— GM 里我答"一个都不是",而【头顶相机里球一直看得见】,
       --  只是它没有号可点。带上这一位,清单才谈得上跨相机。
       Cam : Natural := 0;
+      --  (路 1,10-01,主代理授权的加法)这一块是"整个我"的:推一下我身上量得到的每一样都跟着动的那一组(Selfmap.Graph.Whole_Arm)
+      --  那条臂上的零件。Build_Listing 置;me 只收它
+      Whole : Boolean := False;
    end record;
    --  角色 → 它肯收哪种自己的零件。**只有这一处**,自检钉死 grasper 和 pusher 不许收同一种
    --  (语言里 pusher 就是"推得动东西、但【合不拢】的部件";以前它把 Grip 也收了,
    --  于是两个角色绑到同一块,语言里的角色区分是假的)。
    function Role_Wants (R : Sinew.Role; K : Item_Kind) return Boolean;
+   --  (路 1,10-01)角色 → 收不收这一件:grasper / pusher 照上面按种类;me = 整个我(It.Whole)。
+   --  种类说不出"整个"⇒ 按种类那一个对 me 恒为 False;键盘、绑定都问这一个(LANGUAGE.md §3.2:me = 整个我)
+   function Role_Wants (R : Sinew.Role; It : Item) return Boolean;
    --  🔴 从身体图外推手的位置,炸没炸。Was = 样本里那两瓣本来隔多远,Now = 外推之后隔多远。
    --  差得比它本身还大 ⇒ 这次外推不作数(零系数:两个都是量出来的长度)。
    --  箱上真数据:样本存的是 0.137,而身体报给脑的是四分之三个画面 —— 就是这里炸的。
