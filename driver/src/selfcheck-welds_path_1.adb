@@ -8,6 +8,10 @@ with Schema;
 with Ada.Exceptions;
 with Sinew;
 with Table;
+with Plan;
+with Episode;
+with World;
+with Memory;
 separate (Selfcheck)
 procedure Welds_Path_1 is
    use Ada.Numerics.Long_Elementary_Functions;
@@ -1793,5 +1797,61 @@ begin
                 & Role_Img (Role_Of (Rh, "state.base")) & "),不是一条臂 ⇒ me 绑不上,照实说「" & Why_H & "」"
                 & " · 牙:认不出扛着全身的那组 ⇒ 「" & Why_H_Old & "」");
       end;
+   end;
+
+   --  ══ 一集和一集之间不带经验(路 7 查出,10-01):对方复位、开新的一集 ⇒ Episode.Begin_New 清掉上一集的世界和这一集的选择,身体留着 ══
+   --  上一集留下:remember 记下的一个地方、上次认出名字的那只眼、"这一集已经自己换过一次眼睛了"、几何逼近记的观测;
+   --  身体那一侧:身体图里的臂数、碰过的面(标成上一集的)。脑交的那一段程序这一版不清(闸门棘轮只许两处扔程序,等主代理定),照实焊着它留着。
+   --  病:上一集 remember 的地方、认名字的眼带进下一集;第一集换过一次眼以后每一集都不许换。
+   --  牙:原来 body_driver 里那一串(只清世界、框、碰的面、墙)⇒ 地方、认名字的眼、换过眼都还在
+   declare
+      procedure Dirty (C : in out Act.Context) is
+         Pl : Act.Place;
+         B : Plan.Bind_Entry;
+         Gi : Selfmap.Group_Info;
+      begin
+         Pl.Name := To_Unbounded_String ("spot"); Pl.Cam := 1; Pl.Cu := 0.4; Pl.Cv := 0.6;
+         C.Places.Append (Pl);
+         C.Name_Cam := 1;
+         B.Key := To_Unbounded_String ("ball"); B.Item := 3;
+         C.Binds.Append (B);
+         C.Have_Prog := True;
+         C.M.PC := 5;
+         C.Refused := To_Unbounded_String ("line 2: no");
+         C.Eye_Chosen := True;
+         C.Last_Prog := To_Unbounded_String ("do grasper close ball until stuck");
+         C.Geo_Obs.Append (Geom.Obs'(others => <>));
+         C.Map.Arms := 2;
+         Gi.Role := Selfmap.Arm;
+         C.Map.Groups.Append (Gi);
+         C.Touch_Valid := True; C.Touch_N := [0.0, 0.0, 1.0]; C.Touch_Fresh := True;
+      end Dirty;
+      --  牙:原来 body_driver 干活循环里复位那一串(10-01 以前),一字不改
+      procedure Old_Reset (C : in out Act.Context) is
+      begin
+         World.Reset_All (C.Wld);
+         Memory.Clear (C.Mem);
+         C.Recent := Null_Unbounded_String;
+         C.Cam := C.Map.World_Cam;
+         C.Boxed.Clear;
+         C.Touch_Fresh := False; C.Bumps.Clear; C.Fingers_Aimed := False; C.Geo_Pw_Valid := False; C.Geo_Pw_Met := False; C.Geo_At_Above := False;
+         C.Sil_Valid := False; C.Held_Set_Valid := False; C.Walls.Clear; C.No_Reach_Arm := -1;
+         Act.Init_Tracks (C);
+      end Old_Reset;
+      Cn, Co : Act.Context;
+   begin
+      Dirty (Cn); Dirty (Co);
+      Episode.Begin_New (Cn);
+      Old_Reset (Co);
+      Check (Cn.Places.Is_Empty and then Cn.Name_Cam = -1 and then not Cn.Eye_Chosen and then Cn.Geo_Obs.Is_Empty
+             and then Cn.Map.Arms = 2 and then Natural (Cn.Map.Groups.Length) = 1 and then Cn.Touch_Valid and then not Cn.Touch_Fresh
+             and then not Co.Places.Is_Empty and then Co.Name_Cam = 1 and then Co.Eye_Chosen,
+             "新的一集 · 复位以后:记下的地方 " & Codec.Img (Natural (Cn.Places.Length)) & " 个、认名字的眼" & Integer'Image (Cn.Name_Cam)
+             & "、换过眼 " & Boolean'Image (Cn.Eye_Chosen) & "、几何逼近的观测 " & Codec.Img (Natural (Cn.Geo_Obs.Length)) & " 笔"
+             & " · 身体留着(臂 " & Codec.Img (Cn.Map.Arms) & "、碰过的面 " & Boolean'Image (Cn.Touch_Valid)
+             & "、标成上一集的 " & Boolean'Image (not Cn.Touch_Fresh) & ")"
+             & " · 脑那一段程序这一版照旧留着(" & (if Cn.Have_Prog then "还在" else "清了") & ",等主代理定)"
+             & " · 牙:原来那一串 ⇒ 地方 " & Codec.Img (Natural (Co.Places.Length)) & " 个、认名字的眼" & Integer'Image (Co.Name_Cam)
+             & "、换过眼 " & Boolean'Image (Co.Eye_Chosen));
    end;
 end Welds_Path_1;

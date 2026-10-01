@@ -26,6 +26,7 @@ with Geom;
 with Layout;
 with Instrument;
 with Links;
+with Episode;
 procedure Body_Driver is
    Port : Natural := 0;
    Body_Path : Unbounded_String;   --  身体文件(--in/--out;同一具身体越用越强)
@@ -717,17 +718,9 @@ begin
          exit;
       end if;
       if Plug.Take_Reset (L) then
-         Put_Line ("[身] 对方复位(新的一集)⇒ 世界记忆清空,身体留着");
-         World.Reset_All (C.Wld);
-         Memory.Clear (C.Mem);
-         C.Recent := Null_Unbounded_String;
-         C.Cam := C.Map.World_Cam;
-         --  脑起的名字、脑说过"这只眼里没有它"、手指指向 —— 都是上一集的世界,一起清;量过的身体留着。
-         --  碰过的面留着但标成"上一集的":桌子一般不动,第一句话就有高度可用;新一集第一次朝下被顶住就换成新量的
-         C.Boxed.Clear;
-         C.Touch_Fresh := False; C.Bumps.Clear; C.Fingers_Aimed := False; C.Geo_Pw_Valid := False; C.Geo_Pw_Met := False; C.Geo_At_Above := False;
-         C.Sil_Valid := False; C.Held_Set_Valid := False; C.Walls.Clear; C.No_Reach_Arm := -1;   --  每件东西量到的摩擦(C.Grip_Mus)留着:越用越准
-         Act.Init_Tracks (C);
+         Put_Line ("[身] 对方复位(新的一集)⇒ 世界记忆、脑那一段程序、记下的地方都清空,身体留着");
+         --  一集和一集之间不带经验:清什么写在 Episode 一处(自检焊着)
+         Episode.Begin_New (C);
       end if;
       if Order /= "" then
          C.Task_Text := To_Unbounded_String (Order);
