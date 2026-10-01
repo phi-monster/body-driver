@@ -13,7 +13,8 @@ package body Driver.Robot.Stillness is
 
    --  How many pixels of the frame differ from the settled view's mean
    --  significantly against the noise view's per-pixel noise.
-   function Changed_Pixels (View, Noise : Driver.Pixels.View; Frame : Driver.Images.Image) return Natural is
+   function Changed_Pixels (View, Noise : Driver.Pixels.View; Luma : Real_Array) return Natural is
+      W       : constant Natural := Driver.Pixels.Width (View);
       Settled : constant Natural := Driver.Pixels.Frames (View);
       --  The noise of a variance measured over K frames rests on K - 1
       --  degrees of freedom; one frame has only the known floor.
@@ -21,10 +22,10 @@ package body Driver.Robot.Stillness is
       Gate    : constant Driver.Uncertain.Gate := Driver.Uncertain.Scalar_Gate (Freedom);
       Count   : Natural := 0;
    begin
-      for Row in 0 .. Driver.Images.Height (Frame) - 1 loop
-         for Column in 0 .. Driver.Images.Width (Frame) - 1 loop
+      for Row in 0 .. Driver.Pixels.Height (View) - 1 loop
+         for Column in 0 .. W - 1 loop
             declare
-               D : constant Real := Driver.Images.Luma (Frame, Column, Row) - Driver.Pixels.Mean (View, Column, Row);
+               D : constant Real := Luma (Luma'First + Row * W + Column) - Driver.Pixels.Mean (View, Column, Row);
                --  The frame and the settled mean share the pixel's noise; the
                --  mean's is that over the settled frames.
                V : constant Real := Driver.Pixels.Variance (Noise, Column, Row) * (1.0 + 1.0 / Real (Settled));
@@ -38,7 +39,7 @@ package body Driver.Robot.Stillness is
       return Count;
    end Changed_Pixels;
 
-   procedure Judge_Eye (S : in out Eye_Stream; Frame : Driver.Images.Image) is
+   procedure Judge_Eye (S : in out Eye_Stream; Frame : Driver.Images.Image; Luma : Real_Array) is
       W : constant Positive := Driver.Images.Width (Frame);
       H : constant Positive := Driver.Images.Height (Frame);
    begin
@@ -62,8 +63,8 @@ package body Driver.Robot.Stillness is
          --  Every pixel's test alarms by chance at this rate.
          P0      : constant Real := Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z);
          Changed : constant Natural :=
-           (if S.Noise_Is_Settled then Changed_Pixels (S.Settled, S.Settled, Frame)
-            else Changed_Pixels (S.Settled, S.Noise_View, Frame));
+           (if S.Noise_Is_Settled then Changed_Pixels (S.Settled, S.Settled, Luma)
+            else Changed_Pixels (S.Settled, S.Noise_View, Luma));
       begin
          S.Is_Still := not Regression.Count_Significant (Changed, W * H, P0);
       end;

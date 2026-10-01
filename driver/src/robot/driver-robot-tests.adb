@@ -388,11 +388,16 @@ package body Driver.Robot.Tests is
          end loop;
          return Driver.Images.Create (Rig_Width, Rig_Height, Data);
       end Frame;
+
+      procedure Judge (I : Driver.Images.Image) is
+      begin
+         Stillness.Judge_Eye (S, I, Flow.Luma (I));
+      end Judge;
    begin
-      Stillness.Judge_Eye (S, Frame (0.0));
+      Judge (Frame (0.0));
       Check (not S.Is_Still, "one frame cannot say an eye is still");
       for B in 2 .. 8 loop
-         Stillness.Judge_Eye (S, Frame (0.0));
+         Judge (Frame (0.0));
       end loop;
       --  A still eye alarms by chance at the rate Z has for a Gaussian
       --  (0.27 % a frame); two alarms in twenty frames would happen 0.14 %
@@ -401,17 +406,17 @@ package body Driver.Robot.Tests is
          Alarms : Natural := 0;
       begin
          for B in 1 .. 20 loop
-            Stillness.Judge_Eye (S, Frame (0.0));
+            Judge (Frame (0.0));
             if not S.Is_Still then
                Alarms := Alarms + 1;
             end if;
          end loop;
          Check (Alarms <= 1, "a still view with camera noise comes to rest; alarms in twenty frames:" & Alarms'Image);
       end;
-      Stillness.Judge_Eye (S, Frame (2.0));
+      Judge (Frame (2.0));
       Check (not S.Is_Still, "a patch moving two pixels is a change");
       for B in 1 .. 3 loop
-         Stillness.Judge_Eye (S, Frame (2.0));
+         Judge (Frame (2.0));
          Check (S.Is_Still, "the moved patch rests again at frame" & B'Image);
       end loop;
    end Eye_Stillness;

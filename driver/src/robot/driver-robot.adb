@@ -25,6 +25,7 @@ package body Driver.Robot is
          declare
             S : Eye_Stream renames M.Eyes (E);
             Have : constant Boolean := E <= O.Images.Last_Index and then Driver.Observations.Has_Image (O, E);
+            Now  : constant Real_Array := (if Have then Flow.Luma (O.Images (E)) else Real_Array'(1 .. 0 => 0.0));
          begin
             if Have and then S.Grid.Width = 0 then
                S.Grid := Flow.Grid_Of (Driver.Images.Width (O.Images (E)), Driver.Images.Height (O.Images (E)));
@@ -41,7 +42,6 @@ package body Driver.Robot is
             begin
                if Same and then not S.Previous.Is_Empty then
                   declare
-                     Now : constant Real_Array := Flow.Luma (O.Images (E));
                      Du, Dv, Condition, Luma_Variance : Real_Array (1 .. N);
                   begin
                      for C in 1 .. N loop
@@ -64,7 +64,7 @@ package body Driver.Robot is
                      S.Measured.Append (False);
                   end if;
                   if Same then
-                     S.Previous.Replace_Element (Flow.Luma (O.Images (E)));
+                     S.Previous.Replace_Element (Now);
                   elsif not Have then
                      --  A missing frame breaks the chain: the next displacement
                      --  would span two beats.
@@ -73,7 +73,7 @@ package body Driver.Robot is
                end if;
             end;
             if Have then
-               Stillness.Judge_Eye (S, O.Images (E));
+               Stillness.Judge_Eye (S, O.Images (E), Now);
                if S.Luma_Variance.Is_Empty then
                   Stillness.Measure_Luma_Noise (S);
                end if;
