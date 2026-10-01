@@ -117,7 +117,9 @@ package Sinew is
    --  给脑【看】的那一份。参数和 EBNF 完全一样 ⇒ 看到的和被掩码允许的不可能分岔。
    --  (分岔的代价实测过:脑照着读到的宽语法造句,写到一半被掩码掐断,只能滑进剩下能走的那条路,
    --   连着三炮全写成 `do grasper close grip …`,合自己的爪心。)
-   function Grammar (Rels_Usable, Roles_Usable, Outs_Usable : String; Qtys_Usable : String := "") return String;
+   --  Qty_Meaning:每个量那句"我怎么量它"(量它的那一边给,Act.Qty_Meaning;纸上照抄,null ⇒ 不印)
+   function Grammar (Rels_Usable, Roles_Usable, Outs_Usable : String; Qtys_Usable : String := "";
+                     Qty_Meaning : access function (Name : String) return String := null) return String;
 
    --  交给受限解码器的那份文法(GBNF)。三张表都由驱动当场生成,和给脑【看】的那份同源。
    --  没有它,脑交上来的是自由字符串 —— GC9 实测 587 段里 0 段合语法。

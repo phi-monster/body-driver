@@ -603,7 +603,7 @@ act-round.adb	if Got + Got < Ln then	2×Got	调参数	Geo_Go'碰到为止'那一
 act-round.adb	if Got and then K = 1 then	1	格式	'say look = k' 的编号协议:1 = 此刻这只眼,2.. = 其余(和印给脑的相机表同一套编号,见 act.adb:1543)(act-round.adb:1041)
 act-round.adb	if Got and then K >= 2 then	2	格式	给脑的相机编号协议:1 = 此刻这只眼,2.. = 其余(act-round.adb:1046)
 act-round.adb	if Index (Ev1, "") = 1 then	1	结构	事件字串以 'reset:' 开头(Ada 字串从第 1 个字符起,Index = 1 就是开头)(act-round.adb:1724)
-act-round.adb	if Key /= "" and then Key /= "" and then Key /= "" and then Binds (I2).Item >= 1	1	结构	清单号(Binds (I2).Item)从 1 起数(0 / −1 = 没说、没绑上):≥ 1 且 ≤ 长度才是一个真号,后面按 N − 1 取;是编号约定,不是'至少一个'(act-round.adb:878)
+act-round.adb	if not Plan.Is_Role (Key) and then Binds (I2).Item >= 1	1	结构	清单号(Binds (I2).Item)从 1 起数(0 / −1 = 没说、没绑上):≥ 1 且 ≤ 长度才是一个真号,后面按 N − 1 取;是编号约定,不是'至少一个'(act-round.adb:878)
 act-round.adb	if N >= 1 and then N <= Natural (C.Items.Length) and then C.Items (N - 1).Kind in Thing | Thing_Remembered | Thing_Held then	1	结构	清单号(G.Of_Item / G.Item)从 1 起数(0 / −1 = 没说、没绑上):≥ 1 且 ≤ 长度才是一个真号,后面按 N − 1 取;是编号约定,不是'至少一个'(act-round.adb:1143)
 act-round.adb	if N >= 1 and then N <= Natural (C.Items.Length) then	1	结构	清单号(Say.Avoid 里放的是清单号)从 1 起数(0 / −1 = 没说、没绑上):≥ 1 且 ≤ 长度才是一个真号,后面按 N − 1 取;是编号约定,不是'至少一个'(act-round.adb:2190)
 act-round.adb	if Natural (C.Shown (K).Length) >= Kw * Kh * 3 and then Sh > 0 then	3	格式	RGB 每像素 3 字节(拼图时的字节偏移)(act-round.adb:99)

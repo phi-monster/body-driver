@@ -188,7 +188,7 @@ begin
                       & "] · 清单 " & Codec.Img (Natural (C.Items.Length)) & " 件");
             if not Brain.Ask (To_String (C.Eye_Host), C.Eye_Port, To_String (C.Task_Text), To_String (Listing), Recent,
                               Sinew.Grammar (To_String (Rels), To_String (Roles),
-                                             Plan.Waitable_Outcomes (Any_Stands), To_String (Qtys)),
+                                             Plan.Waitable_Outcomes (Any_Stands), To_String (Qtys), Qty_Meaning'Access),
                               To_String (C.Refused),
                               To_String (Rels), To_String (Roles),
                               Plan.Waitable_Outcomes (Any_Stands),
@@ -701,7 +701,7 @@ begin
                         Key : constant String := To_String (Binds (I2).Key);
                         N : constant Integer := Binds (I2).Item;
                      begin
-                        if Key /= "me" and then Key /= "grasper" and then Key /= "pusher"
+                        if not Plan.Is_Role (Key)
                           and then N >= 1 and then N <= Integer (C.Items.Length)
                           and then C.Items (Natural (N) - 1).Kind in Thing | Thing_Remembered
                           and then C.Items (Natural (N) - 1).Located and then C.Items (Natural (N) - 1).Cam = C.Cam
@@ -831,7 +831,7 @@ begin
                      --  以前这里对东西也印角色那一句"这只眼睛里没有一块符合它"(S1A1–S1A5 里东西绑不上 17 次,句句都是这一句,真原因一次都没印)
                      declare
                         Key : constant String := To_String (Binds (I2).Key);
-                        Role_Key : constant Boolean := Key = "me" or else Key = "grasper" or else Key = "pusher";
+                        Role_Key : constant Boolean := Plan.Is_Role (Key);
                      begin
                         Put_Line ("[身] 🔎 " & Key & " ⇒ "
                                   & (if Binds (I2).Item > 0 then "第" & Codec.Img (Natural (Binds (I2).Item)) & " 块"
@@ -853,7 +853,7 @@ begin
                      declare
                         Key : constant String := To_String (Binds (I2).Key);
                      begin
-                        if Key /= "me" and then Key /= "grasper" and then Key /= "pusher"
+                        if not Plan.Is_Role (Key)
                           and then Binds (I2).Item > 0
                           and then Binds (I2).Item <= Integer (C.Items.Length)
                         then
@@ -890,7 +890,7 @@ begin
                            Key : constant String := To_String (Binds (I3).Key);
                         begin
                            --  绑上了的按那件东西现在叫什么查(按字绑上的,脑这回写的字不一定就是它的名字);没绑上的按脑写的字查
-                           if Key /= "me" and then Key /= "grasper" and then Key /= "pusher"
+                           if not Plan.Is_Role (Key)
                              and then Is_Blind (C, Integer (Cm), (if Binds (I3).Item > 0 then Item_Name (C, Natural (Binds (I3).Item))
                                                                   else Binds (I3).Key))
                            then
@@ -902,7 +902,7 @@ begin
                   end Blind_Here;
                begin
                   for I2 in 0 .. Natural (Binds.Length) - 1 loop
-                     if To_String (Binds (I2).Key) = "grasper" and then Binds (I2).Item > 0
+                     if To_String (Binds (I2).Key) = Sinew.Role_Word (Sinew.Rl_Grasper) and then Binds (I2).Item > 0
                        and then Binds (I2).Item <= Integer (C.Items.Length)
                      then
                         Sub_Arm := Integer (C.Items (Natural (Binds (I2).Item) - 1).Arm);
@@ -1073,7 +1073,7 @@ begin
                            declare
                               Key : constant String := To_String (Binds (I2).Key);
                            begin
-                              if Key /= "me" and then Key /= "grasper" and then Key /= "pusher" then
+                              if not Plan.Is_Role (Key) then
                                  Names_A_Thing := True;
                               end if;
                            end;
@@ -1092,7 +1092,7 @@ begin
                                  declare
                                     Key : constant String := To_String (Binds (I2).Key);
                                  begin
-                                    if Key /= "me" and then Key /= "grasper" and then Key /= "pusher" and then Binds (I2).Item >= 1
+                                    if not Plan.Is_Role (Key) and then Binds (I2).Item >= 1
                                       and then Boxed_By (C, Natural (Hand_Eye), Item_Name (C, Natural (Binds (I2).Item))) >= 0
                                       and then not Is_Blind (C, Hand_Eye, Item_Name (C, Natural (Binds (I2).Item)))
                                     then
@@ -1161,7 +1161,7 @@ begin
                      declare
                         Key : constant String := To_String (Binds (I2).Key);
                      begin
-                        if Key /= "me" and then Key /= "grasper" and then Key /= "pusher"
+                        if not Plan.Is_Role (Key)
                           and then Binds (I2).Item <= 0
                         then
                            Miss := True;
