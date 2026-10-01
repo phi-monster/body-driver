@@ -30,6 +30,8 @@ parser.add_argument("--walk_steps", type=int, default=60)
 parser.add_argument("--walk_label", default="", help="量任意一件东西每个动作走多远(比如 chase_mouse 的 target)")
 parser.add_argument("--tag", default="", help="结果放 out/<tag>(默认 = 任务名)")
 parser.add_argument("--qseeds", default="", help="bd_question:同一具身体的几道题(种子)在一个进程里挨个核")
+parser.add_argument("--self_pixels", action="store_true",
+                    help="量每只眼里身体自己占多少(仿真真值:RoboDojo 那几台相机的渲染产物上挂 instance_id_segmentation_fast,像素属于身体的 prim 就算)")
 parser.add_argument("--no_stability", action="store_true",
                     help="物件池稳不稳:这个进程里跳过 RoboDojo 的'布局稳不稳'那一关,落稳后逐件量它挪了多远、歪了多少(哪件站不住一眼看出来)")
 AppLauncher.add_app_launcher_args(parser)
@@ -359,6 +361,32 @@ def scenario(S, rep):
         rep["cloth_set_path"] = S.cloth_shift("cloth", np.ones(len(P), dtype=bool), 0.12)
         return True
     return False
+
+
+def self_pixels(env, rep):
+    """每只眼里身体自己占画面多少(仿真真值),和驱动开机报告里"第 k 台眼里自己占 x%"对。RoboDojo 的相机是平铺渲染(capture 的 CameraView,
+    一个 env 一格);在每台相机的渲染产物上挂 Replicator 的 instance_id_segmentation_fast,像素的 prim 路径在本 env 的 robot* 底下就算身体"""
+    import omni.replicator.core as rp
+    om = env.obs_manager
+    cap = om.capture_manager
+    names = om.camera_manager.camera_names[0]
+    anns = []
+    for tc in cap.tiled_cameras:
+        a = rp.AnnotatorRegistry.get_annotator("instance_id_segmentation_fast", init_params={"colorize": False})
+        a.attach(tc._render_product_path)
+        anns.append(a)
+    for _ in range(6):
+        env.render()
+    out = {}
+    for name, a in zip(names, anns):
+        d = a.get_data()
+        ids = np.asarray(d["data"]).reshape(-1)
+        lab = (d.get("info") or {}).get("idToLabels") or {}
+        mine = [int(k) for k, v in lab.items() if "/envs/env_0/robot" in str(v)]
+        out[name] = {"self_fraction": round(float(np.isin(ids, mine).mean()), 4), "pixels": int(ids.size), "robot_prims": len(mine)}
+        a.detach()
+    rep["self_pixels"] = out
+    log("   每只眼里身体自己占画面(仿真真值):%s" % {k: v["self_fraction"] for k, v in out.items()})
 
 
 def quat_mul(a, b):
@@ -763,6 +791,8 @@ def check_layout(lid, rep, tag=None):
                 links["%d/%s" % (i, n)] = [round(float(v), 4) for v in (p - org)]
         rep["robot_links_rest"] = links
         log("   身体每一节开局在哪:%s" % links)
+    if args.self_pixels:
+        self_pixels(env, rep)
     if args.task in ("bd_walker", "bd_mouse_floor") or args.walk_label:
         walk(S, rep, args.walk_label or None)
         save_images(env, rep, tag + "_walked")   # 走完以后它在哪(chase_mouse 走满 200 个动作那一炮:老鼠停在 G1 左小臂底下)

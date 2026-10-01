@@ -4,7 +4,7 @@
   这一炮得是 qboot.sh 带 BOOT_KEEP=1 开的(look/ 和 vid/ 都留着);
 - 眼:身体文件 .geo.json 里每台相机的焦距、主点、畸变 vs 真值(RoboDojo 相机配置算出来的:焦距 = 画幅宽 × focal_length / horizontal_aperture;
   主点 = 画幅中心;畸变 = 钩子加的那一份,没加就是 0)。
-用法(箱上):python3 score_boot.py P8S [--distort -0.15,0.03]
+用法(箱上):python3 score_boot.py P8S [--distort=-0.15,0.03](负号开头的值要写成 = 连着,不然 argparse 当成另一个选项)
 """
 import argparse
 import json

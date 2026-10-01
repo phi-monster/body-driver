@@ -121,7 +121,7 @@ for k in range(3):
     lay["Geometry"] = {}
     for lab, (cat, x, y, yaw) in FURN.items():
         lay["Geometry"].setdefault(cat, []).append({"category": cat, "category_idx": 0, "label": lab, "default_pos": [x, y, FLOOR_Z],
-                                                    "default_ori": q_yaw(yaw), "scale": [1.0, 1.0, 1.0], "physics": {"type": "static"}, "visual": {}})
+                                                    "default_ori": q_yaw(yaw), "scale": [1.0, 1.0, 1.0], "physics": {"type": "geometry"}, "visual": {}})
     taken = [footprint(np.array([-0.35, -0.35, 0]), np.array([0.35, 0.35, 0]), ROBOT_START[0], ROBOT_START[1], 0.0)]   # 人形站的地方
     taken += list(furn_foot.values())
     lay["Rigid"] = {}

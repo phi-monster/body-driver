@@ -27,9 +27,8 @@ for T in "$@"; do
       --enable_cameras --headless --kit_args " --enable isaacsim.replicator.behavior --enable isaacsim.sensors.camera" > "$OUT/$TAG.log" 2>&1
   echo "$(date +%T) $TAG rc=$? $(grep -o 'ok=[A-Za-z]*' "$OUT/$TAG.log" | tail -1)" | tee -a $OUT/summary.txt
   # RoboDojo 取帧时自己开的流式视频临时文件(这里不要视频):只删这一次核过的那几格
-  case "$T" in
-    bd_*|chase_mouse) rm -rf "/root/RoboDojo/eval_result/RoboDojo/$T/l3_link/"*"/${CHK_SEED:-0}_p8check" ;;
-  esac
+  # 离线核这一回 RoboDojo 开的结果目录(additional_info = p8check,只有这里用这个后缀;任务不分,bootcal 上量身体自己占多少也开)
+  rm -rf "/root/RoboDojo/eval_result/RoboDojo/$T/l3_link/"*"/${CHK_SEED:-0}_p8check"
 done
 echo "$(date +%T) 路8 跑完:离线核场景 $*" >> /root/q/queue.log
 rm -f /root/q/now.txt
