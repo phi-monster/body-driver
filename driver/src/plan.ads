@@ -63,6 +63,11 @@ package Plan is
    --  同一片像素:两块各自身上的那一点(离形心最近的它自己的像素)都落在对方的像素里。
    --  不设重叠比例,两个方向都要成立;哪一点没有(< 0)或者掩膜不是整幅 ⇒ 不算同一片
    function Same_Pixels (Ma : Bytes.Bools; Ua, Va : Long_Float; Mb : Bytes.Bools; Ub, Vb : Long_Float; W, H : Natural) return Boolean;
+   --  这一片是不是我自己(大并行 §2 第 3 条:眼框出来的那一片可能是我自己的胳膊 —— S1A1 R1 眼把我的右臂框成了「arm reach ight」,
+   --  从此它是清单上的一件"东西"):它自己身上那一点(离形心最近的它自己的像素,同 Same_Pixels)落在 Self 里 ⇒ 是我。
+   --  Self = 这只眼此刻哪些像素是身体自己(路 1 的 Links.Self_Mask_Now:每一节量过的表面点按此刻的读数投进这只眼)。
+   --  只问新的一片:和我已经量到的某一件同一片像素的,先认成那一件(拿在手里的东西,它身上那一点也可能落在手指那几个圆里)
+   function On_Me (U, V : Long_Float; Self : Bytes.Bools; W, H : Natural) return Boolean;
 
    --  一件点过名的东西在一只眼里的记录(和 Act.Boxed_Thing 同一个下标,只取判名字要的几样)
    type Named_Record is record

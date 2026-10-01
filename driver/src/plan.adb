@@ -184,6 +184,11 @@ package body Plan is
       return At_Px (Ma, Ub, Vb) and then At_Px (Mb, Ua, Va);
    end Same_Pixels;
 
+   function On_Me (U, V : Long_Float; Self : Bytes.Bools; W, H : Natural) return Boolean is
+     (W > 0 and then H > 0 and then Natural (Self.Length) = W * H
+      and then U >= 0.0 and then V >= 0.0 and then U < Long_Float (W) and then V < Long_Float (H)
+      and then Self (Natural (Long_Float'Floor (V)) * W + Natural (Long_Float'Floor (U))));
+
    --  以前说过的名字(有过框的那几条,按字母去重),「」隔开
    function Known_Names (Records : Named_Vectors.Vector) return Unbounded_String is
       S : Unbounded_String;
