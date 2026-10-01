@@ -12,6 +12,9 @@ package body Driver.Robot.Hand.Sweep.Tests is
    W : constant := 160;
    H : constant := 120;
 
+   function At_Beat (B : Driver.Clock.Beat) return Observation is ((Beat => B, others => <>));
+   --  The sweep reads only the beat; its readings and image are passed beside it.
+
    --  Two dark fingers enter from the bottom border; at closer reading R
    --  (1 open, 0 closed) each has moved (1 - R) * 45 columns inwards.
    function Left_Edge (Finger : Positive; R : Real) return Integer is
@@ -76,18 +79,18 @@ package body Driver.Robot.Hand.Sweep.Tests is
    end Answers;
 
    procedure Two_Fingers_Swept is
-      S : State := Start (W, H, Channels => 1, Closer_Noise => [1 => 0.0], Arm_Noise => [1 => 0.0]);
+      S : State := Start (W, H, Channels => 1, Closer_Noise => [1 => 0.0], Rest_Noise => [1 => 0.0]);
       B : Driver.Clock.Beat := 0;
       procedure Hold (R : Real; Frames : Positive) is
       begin
          for I in 1 .. Frames loop
-            Observe (S, B, True, [1 => R], [1 => 0.0], Frame (R));
+            Observe (S, At_Beat (B), True, [1 => R], [1 => 0.0], Frame (R));
             B := B + 1;
          end loop;
       end Hold;
       procedure Move (R : Real) is
       begin
-         Observe (S, B, False, [1 => R], [1 => 0.0], Frame (R));
+         Observe (S, At_Beat (B), False, [1 => R], [1 => 0.0], Frame (R));
          B := B + 1;
       end Move;
    begin
@@ -127,16 +130,16 @@ package body Driver.Robot.Hand.Sweep.Tests is
 
    procedure Nothing_Seen is
       --  A channel whose push changes nothing this eye sees.
-      S : State := Start (W, H, Channels => 1, Closer_Noise => [1 => 0.0], Arm_Noise => [1 => 0.0]);
+      S : State := Start (W, H, Channels => 1, Closer_Noise => [1 => 0.0], Rest_Noise => [1 => 0.0]);
    begin
       for I in 1 .. 3 loop
-         Observe (S, Driver.Clock.Beat (I), True, [1 => 1.0], [1 => 0.0], Frame (1.0));
+         Observe (S, At_Beat (Driver.Clock.Beat (I)), True, [1 => 1.0], [1 => 0.0], Frame (1.0));
       end loop;
-      Observe (S, 4, False, [1 => 0.5], [1 => 0.0], Frame (1.0));
+      Observe (S, At_Beat (4), False, [1 => 0.5], [1 => 0.0], Frame (1.0));
       for I in 5 .. 7 loop
-         Observe (S, Driver.Clock.Beat (I), True, [1 => 0.0], [1 => 0.0], Frame (1.0));
+         Observe (S, At_Beat (Driver.Clock.Beat (I)), True, [1 => 0.0], [1 => 0.0], Frame (1.0));
       end loop;
-      Observe (S, 8, False, [1 => 0.5], [1 => 0.0], Frame (1.0));
+      Observe (S, At_Beat (8), False, [1 => 0.5], [1 => 0.0], Frame (1.0));
       Check (Status (S, 1) = Nothing_Moves and then not Wants_Correspondences (S, 1),
              "a push that changes nothing asked the matcher");
    end Nothing_Seen;

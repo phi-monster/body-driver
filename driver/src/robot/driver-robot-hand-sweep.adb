@@ -6,10 +6,10 @@ package body Driver.Robot.Hand.Sweep is
    use type Driver.Clock.Beat;
    use type Driver.Robot.Hand.Lobes.Closing;
 
-   function Start (Width, Height : Positive; Channels : Positive; Closer_Noise, Arm_Noise : Real_Array) return State is
+   function Start (Width, Height : Positive; Channels : Positive; Closer_Noise, Rest_Noise : Real_Array) return State is
      ((Width       => Width,
        Height      => Height,
-       Views       => Driver.Robot.Hand.Views.Start (Width, Height, Closer_Noise, Arm_Noise),
+       Views       => Driver.Robot.Hand.Views.Start (Width, Height, Closer_Noise, Rest_Noise),
        Per_Channel => Channel_Holders.To_Holder ([1 .. Channels => (others => <>)])));
 
    function Channels (S : State) return Positive is (S.Per_Channel.Element'Length);
@@ -45,14 +45,14 @@ package body Driver.Robot.Hand.Sweep is
 
    procedure Observe
      (S      : in out State;
-      Beat   : Driver.Clock.Beat;
+      Seen   : Observation;
       Still  : Boolean;
       Closer : Real_Array;
-      Arm    : Real_Array;
+      Rest   : Real_Array;
       Image  : Driver.Images.Image)
    is
    begin
-      Driver.Robot.Hand.Views.Observe (S.Views, Beat, Still, Closer, Arm, Image);
+      Driver.Robot.Hand.Views.Observe (S.Views, Seen, Still, Closer, Rest, Image);
       for C in 1 .. Channels (S) loop
          if Ends_Moved (S, C) then
             Renew (S, C);
@@ -118,10 +118,10 @@ package body Driver.Robot.Hand.Sweep is
       Set_Status (S, Channel, Requested);
    end Asked;
 
-   procedure Retry (S : in out State; Channel : Positive) is
+   procedure Refuse (S : in out State; Channel : Positive) is
    begin
-      Set_Status (S, Channel, Waiting);
-   end Retry;
+      Set_Status (S, Channel, Unanswered);
+   end Refuse;
 
    procedure Answer
      (S        : in out State;

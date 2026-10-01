@@ -2,13 +2,15 @@
 --  the lobes are found from.
 --
 --  A view gathers the frames taken while the body is still and neither the
---  closer's readings nor its arm's moved by more than their own noise; a
---  reading that moves starts a new view. For each channel of the closer the
---  tracker keeps the two views at the lowest and the highest reading the
---  channel was seen still at, among the views whose other channels and arm
+--  closer's readings nor any other group's moved by more than their own
+--  noise; a reading that moves starts a new view. For each channel of the
+--  closer the tracker keeps the two views at the lowest and the highest
+--  reading the channel was seen still at, among the views whose other
 --  readings equal those of the view it compares with: the two ends of that
---  channel's travel, with the background unchanged between them. Nothing
---  here knows what a finger is; the readings and images are plain data.
+--  channel's travel, with the rest of the body, and so the background,
+--  unchanged between them. Nothing here knows what a finger is; the readings
+--  and images are plain data. Each view keeps the observation it began with,
+--  so the body's geometry at that beat can be asked for later.
 
 with Ada.Containers.Indefinite_Holders;
 with Driver.Clock;
@@ -21,9 +23,10 @@ package Driver.Robot.Hand.Views is
 
    type View is record
       Closer    : Reading_Holders.Holder;   --  the closer's readings while it was taken
-      Arm       : Reading_Holders.Holder;   --  the arm's readings
+      Rest      : Reading_Holders.Holder;   --  every other group's readings
       Frames    : Driver.Pixels.View;       --  per-pixel statistics of the frames
       Last      : Driver.Images.Image;      --  the latest frame, for the matcher
+      Seen      : Observation;              --  the observation of its first beat
       From, To  : Driver.Clock.Beat := 0;
    end record;
 
@@ -32,16 +35,16 @@ package Driver.Robot.Hand.Views is
 
    type Tracker is private;
 
-   function Start (Width, Height : Positive; Closer_Noise, Arm_Noise : Real_Array) return Tracker;
+   function Start (Width, Height : Positive; Closer_Noise, Rest_Noise : Real_Array) return Tracker;
    --  The noises are each reading's standard deviation at rest (path A
    --  measures them); a zero noise means the reading repeats exactly.
 
    procedure Observe
      (T      : in out Tracker;
-      Beat   : Driver.Clock.Beat;
+      Seen   : Observation;
       Still  : Boolean;
       Closer : Real_Array;
-      Arm    : Real_Array;
+      Rest   : Real_Array;
       Image  : Driver.Images.Image);
    --  One beat of the eye. Frames count only while the body is still.
 
@@ -75,7 +78,7 @@ private
    type Tracker is record
       Width, Height : Natural := 0;
       Closer_Noise  : Noise_Holders.Holder;
-      Arm_Noise     : Noise_Holders.Holder;
+      Rest_Noise    : Noise_Holders.Holder;
       Current       : View_Holders.Holder;   --  the view being gathered
       Ends          : End_Holders.Holder;    --  per channel
    end record;

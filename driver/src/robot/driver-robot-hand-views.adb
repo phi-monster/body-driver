@@ -4,11 +4,11 @@ package body Driver.Robot.Hand.Views is
 
    use Ada.Numerics.Long_Elementary_Functions;
 
-   function Start (Width, Height : Positive; Closer_Noise, Arm_Noise : Real_Array) return Tracker is
+   function Start (Width, Height : Positive; Closer_Noise, Rest_Noise : Real_Array) return Tracker is
      ((Width        => Width,
        Height       => Height,
        Closer_Noise => Noise_Holders.To_Holder (Closer_Noise),
-       Arm_Noise    => Noise_Holders.To_Holder (Arm_Noise),
+       Rest_Noise    => Noise_Holders.To_Holder (Rest_Noise),
        Current      => View_Holders.Empty_Holder,
        Ends         => End_Holders.To_Holder ([Closer_Noise'Range => (others => <>)])));
 
@@ -36,7 +36,7 @@ package body Driver.Robot.Hand.Views is
 
    function Comparable (T : Tracker; A, B : View; Channel : Positive) return Boolean is
      (not Moved (A.Closer.Element, B.Closer.Element, T.Closer_Noise.Element, Except => Channel)
-      and then not Moved (A.Arm.Element, B.Arm.Element, T.Arm_Noise.Element));
+      and then not Moved (A.Rest.Element, B.Rest.Element, T.Rest_Noise.Element));
    --  The same background and the same other channels: only this channel differs.
 
    procedure Consider (T : in out Tracker; V : View);
@@ -94,22 +94,22 @@ package body Driver.Robot.Hand.Views is
       end if;
    end Close_Current;
 
-   function Readings_Moved (T : Tracker; Closer, Arm : Real_Array) return Boolean;
+   function Readings_Moved (T : Tracker; Closer, Rest : Real_Array) return Boolean;
    --  The view being gathered was taken at other readings.
 
-   function Readings_Moved (T : Tracker; Closer, Arm : Real_Array) return Boolean is
+   function Readings_Moved (T : Tracker; Closer, Rest : Real_Array) return Boolean is
       Now : constant View_Holders.Constant_Reference_Type := T.Current.Constant_Reference;
    begin
       return Moved (Now.Element.Closer.Element, Closer, T.Closer_Noise.Element)
-        or else Moved (Now.Element.Arm.Element, Arm, T.Arm_Noise.Element);
+        or else Moved (Now.Element.Rest.Element, Rest, T.Rest_Noise.Element);
    end Readings_Moved;
 
    procedure Observe
      (T      : in out Tracker;
-      Beat   : Driver.Clock.Beat;
+      Seen   : Observation;
       Still  : Boolean;
       Closer : Real_Array;
-      Arm    : Real_Array;
+      Rest   : Real_Array;
       Image  : Driver.Images.Image)
    is
    begin
@@ -119,24 +119,25 @@ package body Driver.Robot.Hand.Views is
          Close_Current (T);
          return;
       end if;
-      if not T.Current.Is_Empty and then Readings_Moved (T, Closer, Arm) then
+      if not T.Current.Is_Empty and then Readings_Moved (T, Closer, Rest) then
          Close_Current (T);
       end if;
       if T.Current.Is_Empty then
          T.Current := View_Holders.To_Holder
            ((Closer => Reading_Holders.To_Holder (Closer),
-             Arm    => Reading_Holders.To_Holder (Arm),
+             Rest   => Reading_Holders.To_Holder (Rest),
              Frames => Driver.Pixels.Empty (T.Width, T.Height),
              Last   => Image,
-             From   => Beat,
-             To     => Beat));
+             Seen   => Seen,
+             From   => Seen.Beat,
+             To     => Seen.Beat));
       end if;
       declare
          R : constant View_Holders.Reference_Type := T.Current.Reference;
       begin
          Driver.Pixels.Add (R.Element.Frames, Image);
          R.Element.Last := Image;
-         R.Element.To := Beat;
+         R.Element.To := Seen.Beat;
       end;
    end Observe;
 

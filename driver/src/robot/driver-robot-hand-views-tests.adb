@@ -9,12 +9,15 @@ package body Driver.Robot.Hand.Views.Tests is
    function Grey (Level : Natural) return Driver.Images.Image is
      (Driver.Images.Create (4, 4, [1 .. 48 => Driver.Bytes.Byte (Level)]));
 
+   function At_Beat (B : Driver.Clock.Beat) return Observation is ((Beat => B, others => <>));
+   --  The tracker reads only the beat; its readings and image are passed beside it.
+
    procedure Ends_Of_A_Sweep is
-      T : Tracker := Start (4, 4, Closer_Noise => [1 => 0.0], Arm_Noise => [0.0, 0.0]);
+      T : Tracker := Start (4, 4, Closer_Noise => [1 => 0.0], Rest_Noise => [0.0, 0.0]);
       B : Driver.Clock.Beat := 0;
       procedure Beat (Still : Boolean; Closer : Real; Level : Natural; Arm : Real := 0.0) is
       begin
-         Observe (T, B, Still, [1 => Closer], [Arm, 0.0], Grey (Level));
+         Observe (T, At_Beat (B), Still, [1 => Closer], [Arm, 0.0], Grey (Level));
          B := B + 1;
       end Beat;
    begin
@@ -45,26 +48,26 @@ package body Driver.Robot.Hand.Views.Tests is
    end Ends_Of_A_Sweep;
 
    procedure Single_Frames_Are_Not_Ends is
-      T : Tracker := Start (4, 4, Closer_Noise => [1 => 0.0], Arm_Noise => [1 => 0.0]);
+      T : Tracker := Start (4, 4, Closer_Noise => [1 => 0.0], Rest_Noise => [1 => 0.0]);
    begin
-      Observe (T, 0, True, [1 => 1.0], [1 => 0.0], Grey (10));
-      Observe (T, 1, False, [1 => 0.5], [1 => 0.0], Grey (20));
-      Observe (T, 2, True, [1 => 0.0], [1 => 0.0], Grey (30));
-      Observe (T, 3, False, [1 => 0.5], [1 => 0.0], Grey (20));
+      Observe (T, At_Beat (0), True, [1 => 1.0], [1 => 0.0], Grey (10));
+      Observe (T, At_Beat (1), False, [1 => 0.5], [1 => 0.0], Grey (20));
+      Observe (T, At_Beat (2), True, [1 => 0.0], [1 => 0.0], Grey (30));
+      Observe (T, At_Beat (3), False, [1 => 0.5], [1 => 0.0], Grey (20));
       Check (not Has_Ends (T, 1), "views of one frame were taken as ends");
    end Single_Frames_Are_Not_Ends;
 
    procedure Noise_Hides_A_Small_Step is
       --  A reading noise of 0.1: steps of 0.05 are the same view, 1.0 is not.
-      T : Tracker := Start (4, 4, Closer_Noise => [1 => 0.1], Arm_Noise => [1 => 0.0]);
+      T : Tracker := Start (4, 4, Closer_Noise => [1 => 0.1], Rest_Noise => [1 => 0.0]);
    begin
-      Observe (T, 0, True, [1 => 1.0], [1 => 0.0], Grey (10));
-      Observe (T, 1, True, [1 => 1.05], [1 => 0.0], Grey (10));
-      Observe (T, 2, True, [1 => 0.95], [1 => 0.0], Grey (10));
-      Observe (T, 3, False, [1 => 0.5], [1 => 0.0], Grey (20));
-      Observe (T, 4, True, [1 => 0.0], [1 => 0.0], Grey (30));
-      Observe (T, 5, True, [1 => 0.02], [1 => 0.0], Grey (30));
-      Observe (T, 6, False, [1 => 0.5], [1 => 0.0], Grey (20));
+      Observe (T, At_Beat (0), True, [1 => 1.0], [1 => 0.0], Grey (10));
+      Observe (T, At_Beat (1), True, [1 => 1.05], [1 => 0.0], Grey (10));
+      Observe (T, At_Beat (2), True, [1 => 0.95], [1 => 0.0], Grey (10));
+      Observe (T, At_Beat (3), False, [1 => 0.5], [1 => 0.0], Grey (20));
+      Observe (T, At_Beat (4), True, [1 => 0.0], [1 => 0.0], Grey (30));
+      Observe (T, At_Beat (5), True, [1 => 0.02], [1 => 0.0], Grey (30));
+      Observe (T, At_Beat (6), False, [1 => 0.5], [1 => 0.0], Grey (20));
       Check (Has_Ends (T, 1), "noisy readings broke one still view into many");
       if Has_Ends (T, 1) then
          Check (Driver.Pixels.Frames (High_End (T, 1).Frames) = 3, "the noisy open view lost frames");

@@ -22,24 +22,28 @@ private with Ada.Containers.Indefinite_Holders;
 
 package Driver.Robot.Hand.Sweep is
 
-   type Progress is (Waiting, Requested, Nothing_Moves, Measured);
+   type Progress is (Waiting, Requested, Unanswered, Nothing_Moves, Measured);
    --  Waiting        the channel's two ends have not both been seen still
    --  Requested      the correspondences between its ends are being asked for
+   --  Unanswered     the instrument could not answer for these ends
    --  Nothing_Moves  nothing in this eye moves between its ends
    --  Measured       its lobes are found
 
    type State is private;
 
-   function Start (Width, Height : Positive; Channels : Positive; Closer_Noise, Arm_Noise : Real_Array) return State
+   function Start (Width, Height : Positive; Channels : Positive; Closer_Noise, Rest_Noise : Real_Array) return State
      with Pre => Closer_Noise'Length = Channels;
+   --  Rest_Noise: the reading noise of every other group, in the order the
+   --  readings are passed to Observe.
 
    procedure Observe
      (S      : in out State;
-      Beat   : Driver.Clock.Beat;
+      Seen   : Observation;
       Still  : Boolean;
       Closer : Real_Array;
-      Arm    : Real_Array;
+      Rest   : Real_Array;
       Image  : Driver.Images.Image);
+   --  One beat: the closer's readings, every other group's, and the eye's image.
 
    function Channels (S : State) return Positive;
 
@@ -72,9 +76,10 @@ package Driver.Robot.Hand.Sweep is
                  and then Forward'Length = Points'Length and then Backward'Length = Points'Length;
    --  Finds the channel's lobes from the replies.
 
-   procedure Retry (S : in out State; Channel : Positive)
+   procedure Refuse (S : in out State; Channel : Positive)
      with Pre => Status (S, Channel) = Requested;
-   --  A request failed: the channel waits to be asked for again.
+   --  The instrument could not answer: these ends are not asked for again,
+   --  so a missing or failing service is not asked every beat; new ends are.
 
    function Lobes_Of (S : State; Channel : Positive) return Driver.Robot.Hand.Lobes.Lobe_Vectors.Vector
      with Pre => Status (S, Channel) = Measured;
