@@ -38,10 +38,9 @@ package Contact is
       By : Who;
       Pos : V3 := [others => 0.0];       --  ① 碰物体表面的哪儿(世界系,米)
       Normal : V3 := [others => 0.0];    --  ② 那一点的表面法向,指向物体外侧
-      --  (Push / Pull 这两个字段名是八月的旧名,主代理的 selfcheck.adb 执行层焊点按完整的具名聚合在用;合并时改成 Allowed / Tension)
-      Push : Cone;                       --  ② 那一点允许往哪使劲
+      Allowed : Cone;                    --  ② 那一点允许往哪使劲
       --  ② 这个接触能传哪几种东西(都是身体属性,要量;谁填谁负责,别默认 True 混过去):
-      Pull : Boolean := False;           --  能不能传拉力(真空吸盘/电磁/胶带能;手指往外一使劲就离开表面了)。少了它,吸盘吸住了也离不开面
+      Tension : Boolean := False;        --  能不能传拉力(真空吸盘/电磁/胶带能;手指往外一使劲就离开表面了)。少了它,吸盘吸住了也离不开面
       Torsion : Boolean := False;        --  绕自己的法向扭不扭得动(指腹是一片面 ⇒ 能;硬针尖 ⇒ 不能)。少了它,两指捏着勺子兜起来在静力学上直接判死
       Peel : Boolean := False;           --  绕切向轴掰不掰得动(抗不抗剥离:吸盘/胶垫/大贴片能;点接触不能)。少了它,吸盘只转得动、翻不动
       Tol_M : Long_Float := 0.0;         --  ④ 这一个点的容差(米);每点各一个,不是每个计划一个
@@ -57,8 +56,8 @@ package Contact is
    end record;
    function Still (Pivot : V3) return Twist;                   --  什么都不动。"物体不动"是一个合法的答案,不是缺省值
    function Slide (Lin : V3) return Twist;                     --  纯平移
-   --  绕 Pivot 的一条轴转 Rad;轴不是方向 ⇒ Ok = False(旧名:主代理的 selfcheck.adb 执行层焊点在用;合并时改成 Rotation)
-   function Turn (Axis : V3; Rad : Long_Float; Pivot : V3; Ok : out Boolean) return Twist;
+   --  绕 Pivot 的一条轴转 Rad;轴不是方向 ⇒ Ok = False
+   function Rotation (Axis : V3; Rad : Long_Float; Pivot : V3; Ok : out Boolean) return Twist;
    function Angle (T : Twist) return Long_Float;               --  转多少弧度
    function Moving (T : Twist) return Boolean;                 --  平移或转,任一个不为零
    function Apply (T : Twist; P : V3) return V3;               --  把一个世界点按这个旋量搬过去:先绕 Pivot 转,再整体平移(罗德里格斯)

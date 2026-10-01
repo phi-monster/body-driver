@@ -2043,7 +2043,7 @@ begin
          Grasp_Set := (Points => Contact.Point_Vectors.Empty_Vector, Motion => Contact.Still (Pick.T), Has_Approach => True, Approach => Pick.Approach);
          for T of Pick.Touches loop
             Grasp_Set.Points.Append (Contact.Point'(By => (Kind => Contact.Hand, Id => 0), Pos => T.P, Normal => [-T.N (0), -T.N (1), -T.N (2)],
-                                                    Push => (Axis => T.N, Half_Angle => Arctan (Pick.Mu_Worst)), Pull => False, Torsion => T.Twist_R > 0.0,
+                                                    Allowed => (Axis => T.N, Half_Angle => Arctan (Pick.Mu_Worst)), Tension => False, Torsion => T.Twist_R > 0.0,
                                                     Peel => False, Tol_M => Floor_P));
          end loop;
          Grasp_Mu_Nom := Pick.Mu_Nom; Grasp_Mu_Worst := Pick.Mu_Worst;
@@ -2297,7 +2297,7 @@ begin
                               declare
                                  P : Contact.Point := C.Held_Set.Points (I);
                               begin
-                                 P.Push.Half_Angle := 0.5 * Ada.Numerics.Pi;
+                                 P.Allowed.Half_Angle := 0.5 * Ada.Numerics.Pi;
                                  C.Held_Set.Points.Replace_Element (I, P);
                               end;
                            end loop;
