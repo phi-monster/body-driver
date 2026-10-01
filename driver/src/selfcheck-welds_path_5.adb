@@ -744,7 +744,7 @@ begin
          end if;
       end if;
       Check (not F1.Is_Empty and then not F2.Is_Empty and then Lb_Ok and then Differs and then F2.First_Element.Mu_Worst < Ub and then S2.Mu_Ref <= Ub
-             and then S2.Over_Ub > 0,
+             and then S2.Over_Ub > 0 and then not Se.Under_Bound (F1.First_Element.Mu_Worst, Ub) and then Se.Under_Bound (F2.First_Element.Mu_Worst, Ub),
              "重挑·没跟上 ⇒ 摩擦上限降:先挑的那一组按量到的法向要 " & (if F1.Is_Empty then "—" else F4 (F1.First_Element.Mu_Nom) & "、最坏要 " & F4 (F1.First_Element.Mu_Worst))
              & (if Lb_Ok then "(拿住记下限 = 名义、没跟上记上限 = 最坏)" else "(上下限记错了)") & ";上限设成它的最坏再挑 ⇒ "
              & (if F2.Is_Empty then "一组都挑不出" else (if Differs then "换了一组" else "又是那一组(错)") & "、最坏要 " & F4 (F2.First_Element.Mu_Worst)

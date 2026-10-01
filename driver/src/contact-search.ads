@@ -81,4 +81,6 @@ package Contact.Search is
    --  所以跟着手走了(Came)⇒ 它至少给得起按量到的法向要的那么多(Lb 往上走到 Mu_Nom);手指合在了它身上、它没跟着走 ⇒ 它给不起法向取最坏时要的那么多
    --  (Ub 往下走到 Mu_Worst)。手指合空不是摩擦的事,调用方不该来问
    procedure Narrow_Mu (Lb, Ub : in out Long_Float; Mu_Nom, Mu_Worst : Long_Float; Came : Boolean);
+   --  一组下手处(法向取最坏时要 Mu_Worst 的摩擦)在这件东西量到的上限 Ub 下还能不能挑:严格小于 —— 没跟上的那一组要的正好等于 Ub,它不许再被挑回来
+   function Under_Bound (Mu_Worst, Ub : Long_Float) return Boolean is (Mu_Worst < Ub);
 end Contact.Search;

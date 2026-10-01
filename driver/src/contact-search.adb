@@ -865,7 +865,7 @@ package body Contact.Search is
                  and then (Hd.Squeeze (All_C (I).Touches, Ld, Mu_Ub) = Hd.No_Way or else not All_Tilts_At (All_C (I), Mu_Ub))
                then
                   St.Over_Ub := St.Over_Ub + 1;
-               elsif Mu_Ub < Long_Float'Last and then Mu_Worst_Of (I) >= Mu_Ub then
+               elsif Mu_Ub < Long_Float'Last and then not Under_Bound (Mu_Worst_Of (I), Mu_Ub) then
                   St.Over_Ub := St.Over_Ub + 1;
                else
                   declare
