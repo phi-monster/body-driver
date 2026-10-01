@@ -74,10 +74,53 @@ package body Driver.Robot.Hand.Views.Tests is
       end if;
    end Noise_Hides_A_Small_Step;
 
+   procedure Past_The_Travel is
+      --  A closer whose reading echoes its command, commanded past its travel:
+      --  the reading goes on to -0.5 but the fingers stopped at 0.0. A channel
+      --  that moves nothing the eye sees has no travel at all.
+      T : Tracker := Start (4, 4, Closer_Noise => [1 => 0.0], Rest_Noise => [1 => 0.0]);
+      Idle : Tracker := Start (4, 4, Closer_Noise => [1 => 0.0], Rest_Noise => [1 => 0.0]);
+      B : Driver.Clock.Beat := 0;
+      procedure Hold (Reading : Real; Level : Natural) is
+      begin
+         for I in 1 .. 2 loop
+            Observe (T, At_Beat (B), True, [1 => Reading], [1 => 0.0], Grey (Level));
+            Observe (Idle, At_Beat (B), True, [1 => Reading], [1 => 0.0], Grey (10));
+            B := B + 1;
+         end loop;
+         Observe (T, At_Beat (B), False, [1 => Reading], [1 => 0.0], Grey (Level));
+         Observe (Idle, At_Beat (B), False, [1 => Reading], [1 => 0.0], Grey (10));
+         B := B + 1;
+      end Hold;
+      procedure Still_At (Reading : Real; Level : Natural) is
+      begin
+         for I in 1 .. 2 loop
+            Observe (T, At_Beat (B), True, [1 => Reading], [1 => 0.0], Grey (Level));
+            B := B + 1;
+         end loop;
+      end Still_At;
+   begin
+      Hold (1.0, 10);
+      Hold (0.5, 30);
+      --  While a view is gathered, a sweep asks whether it extends the travel.
+      Still_At (0.0, 50);
+      Check (Would_Extend (T, 1), "a view that shows the fingers further is not taken to extend the travel");
+      Hold (0.0, 50);
+      Still_At (-0.5, 50);
+      Check (not Would_Extend (T, 1), "a view past the travel is taken to extend it");
+      Hold (-0.5, 50);
+      Check (Has_Ends (T, 1) and then Reading (Low_End (T, 1), 1) = 0.0 and then Reading (High_End (T, 1), 1) = 1.0,
+             "a command past the travel moved the end");
+      Check (not Has_Ends (Idle, 1) and then Unseen_Travel (Idle, 1) and then not Unseen_Travel (T, 1),
+             "a push the eye never sees was given a travel, or one it sees none");
+   end Past_The_Travel;
+
    procedure Register is
    begin
       Driver.Tests.Register ("hand.views.sweep", "the ends of a channel's travel are not its lowest and highest still views",
                              Ends_Of_A_Sweep'Access);
+      Driver.Tests.Register ("hand.views.beyond", "a command past the travel, which the eye shows changing nothing, moves the end",
+                             Past_The_Travel'Access);
       Driver.Tests.Register ("hand.views.frames", "views too short to measure their own noise are taken as ends",
                              Single_Frames_Are_Not_Ends'Access);
       Driver.Tests.Register ("hand.views.noise", "reading noise splits one still view", Noise_Hides_A_Small_Step'Access);

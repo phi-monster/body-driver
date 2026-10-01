@@ -447,6 +447,7 @@ driver-recording.adb	Size : constant Offset := Offset (Little_Endian (Head (10 .
 driver-recording.adb	V := Shift_Left (V, 8) or Unsigned_64 (Data (I));	8	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
 driver-recording.adb	for I in 0 .. 3 loop	3	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
 driver-recording.adb	for I in 0 .. 7 loop	7	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
+driver-robot-hand-aims.adb	(if Size > Real'Model_Epsilon then Exp (Arctan (Size, Now * Goal) * ((1.0 / Size) * Axis))	1.0	math	a vector over its length is its unit vector
 driver-robot-hand-frames.adb	Across : constant Real := (Turn (1, 1) + Turn (2, 2) + Turn (3, 3) - U * (Turn * U)) / 2.0;	2.0	math	the mean of the turn's variance about the two axes across the line
 driver-robot-hand-lobes.adb	+ 1.0 / Real (Li.Count_There) + 1.0 / Real (Lj.Count_There));	1.0	math	the variance of a mean of n pixels is the pixel variance over n
 driver-robot-hand-lobes.adb	+ 1.0 / Real (Li.Count_There) + 1.0 / Real (Lj.Count_There));	1.0	math	the variance of a mean of n pixels is the pixel variance over n
@@ -524,9 +525,14 @@ driver-robot-hand-touch.adb	Without : Real := 1.0 / Scale;	1.0	statistics	the ot
 driver-robot-hand-touch.adb	if Chosen (I) and then Significant (Deleted (I), 1.0, Dof_Of (I))	1.0	math	a residual already in units of its own sigma
 driver-robot-hand-touch.adb	if Dof > 1 and then (Chi - Res (R) ** 2 / Free) / Real (Dof - 1) > Without then	1	statistics	leaving a press out leaves one degree of freedom less
 driver-robot-hand-touch.adb	then Moved (Prior (F).Plane, Correction (Plane_Unknowns * F - 2), Correction (Plane_Unknowns * F - 1),	2	structure	the plane's unknowns in order: offset, tilt 1, tilt 2
+driver-robot-hand-views.adb	(Driver.Pixels.Frames (V.Frames) >= 2 and then Driver.Pixels.Frames (Before.Frames) >= 2	2	statistics	a pixel's own variance needs two frames
+driver-robot-hand-views.adb	(Driver.Pixels.Frames (V.Frames) >= 2 and then Driver.Pixels.Frames (Before.Frames) >= 2	2	statistics	a pixel's own variance needs two frames
 driver-robot-hand-views.adb	Noise : constant Real := Sqrt (2.0) * T.Closer_Noise.Element (T.Closer_Noise.Element'First + C - 1);	2.0	statistics	the difference of two readings carries the noise of each: the square root of two times one
+driver-robot-hand-views.adb	Noise : constant Real := Sqrt (2.0) * T.Closer_Noise.Element (T.Closer_Noise.Element'First + Channel - 1);	2.0	statistics	the difference of two readings carries the noise of each: the square root of two times one
+driver-robot-hand-views.adb	Noise : constant Real := Sqrt (2.0) * T.Closer_Noise.Element (T.Closer_Noise.Element'First + Channel - 1);	2.0	statistics	the difference of two readings carries the noise of each: the square root of two times one
 driver-robot-hand-views.adb	Sqrt (2.0) * T.Closer_Noise.Element (T.Closer_Noise.Element'First + Channel - 1));	2.0	statistics	the difference of two readings carries the noise of each: the square root of two times one
 driver-robot-hand-views.adb	and then Significant (A (I) - B (B'First + I - A'First), Sqrt (2.0) * Noise (Noise'First + I - A'First))	2.0	statistics	the difference of two readings carries the noise of each: the square root of two times one
+driver-robot-hand-views.adb	if Driver.Pixels.Frames (V.Frames) >= 2 then	2	statistics	a pixel's own variance needs two frames
 driver-robot-hand-views.adb	return Driver.Pixels.Frames (Low.Element.Frames) >= 2 and then Driver.Pixels.Frames (High.Element.Frames) >= 2	2	statistics	a pixel's own variance needs two frames
 driver-robot-hand-views.adb	return Driver.Pixels.Frames (Low.Element.Frames) >= 2 and then Driver.Pixels.Frames (High.Element.Frames) >= 2	2	statistics	a pixel's own variance needs two frames
 driver-robot-hand.adb	("" & Driver.Log.Image (P.U, 1) & "" & Driver.Log.Image (P.V, 1) & "");	1	format	digits printed in a log line or a message

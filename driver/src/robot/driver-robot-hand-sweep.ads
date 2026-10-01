@@ -49,6 +49,9 @@ package Driver.Robot.Hand.Sweep is
 
    function Status (S : State; Channel : Positive) return Progress;
 
+   function Would_Extend (S : State; Channel : Positive) return Boolean;
+   --  The view being gathered would extend the channel's travel (Views).
+
    function Wants_Correspondences (S : State; Channel : Positive) return Boolean;
    --  Both ends are seen, they differ, and nothing has been asked for them yet.
 

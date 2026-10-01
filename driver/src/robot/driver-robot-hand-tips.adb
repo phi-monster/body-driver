@@ -92,6 +92,9 @@ package body Driver.Robot.Hand.Tips is
       return N;
    end Agreeing;
 
+   function Latest_Agrees (B : Book) return Boolean is
+     (not B.Kept.Is_Empty and then B.Kept.Last_Element.Agrees);
+
    function Direction (B : Book; Lobe : Positive; At_Opening : Opening) return Direction_Estimate is
       Unmeasured : Direction_Estimate;
       Sum   : Vec3 := Zero3;

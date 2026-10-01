@@ -48,6 +48,14 @@ package Driver.Robot.Hand.Views is
       Image  : Driver.Images.Image);
    --  One beat of the eye. Frames count only while the body is still.
 
+   function Would_Extend (T : Tracker; Channel : Positive) return Boolean;
+   --  The view being gathered, were it to end now, would extend one of the
+   --  channel's ends: what a sweep asks before it pushes further.
+
+   function Unseen_Travel (T : Tracker; Channel : Positive) return Boolean;
+   --  The channel was seen still at significantly different readings, and
+   --  the eye saw nothing change between them: its push moves nothing here.
+
    function Has_Ends (T : Tracker; Channel : Positive) return Boolean;
    --  Both ends of the channel's travel have a view of at least two frames,
    --  and the channel's reading differs significantly between them.
@@ -70,6 +78,8 @@ private
 
    type End_Pair is record
       Low, High : View_Holders.Holder;
+      Seen_Low  : Real := Real'Last;    --  the lowest and highest readings seen still,
+      Seen_High : Real := Real'First;   --  each in a view of two frames or more
    end record;
 
    type End_Array is array (Positive range <>) of End_Pair;

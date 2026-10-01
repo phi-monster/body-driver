@@ -48,6 +48,9 @@ package Driver.Robot.Hand.Tips is
 
    function Agreeing (B : Book; Lobe : Positive; At_Opening : Opening) return Natural;
 
+   function Latest_Agrees (B : Book) return Boolean;
+   --  The press kept last agrees with the others.
+
    function Surface (B : Book) return Driver.Geometry.Plane_Estimate;
 
 private

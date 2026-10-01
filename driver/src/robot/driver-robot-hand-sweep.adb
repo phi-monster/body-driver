@@ -43,6 +43,8 @@ package body Driver.Robot.Hand.Sweep is
       S.Per_Channel := Channel_Holders.To_Holder (Per_Channel);
    end Renew;
 
+   procedure Set_Status (S : in out State; Channel : Positive; To : Progress);
+
    procedure Observe
      (S      : in out State;
       Seen   : Observation;
@@ -56,12 +58,17 @@ package body Driver.Robot.Hand.Sweep is
       for C in 1 .. Channels (S) loop
          if Ends_Moved (S, C) then
             Renew (S, C);
+         elsif Status (S, C) = Waiting and then Driver.Robot.Hand.Views.Unseen_Travel (S.Views, C) then
+            Set_Status (S, C, Nothing_Moves);
          end if;
       end loop;
    end Observe;
 
    function Status (S : State; Channel : Positive) return Progress is
      (S.Per_Channel.Constant_Reference.Element (Channel).Status);
+
+   function Would_Extend (S : State; Channel : Positive) return Boolean is
+     (Driver.Robot.Hand.Views.Would_Extend (S.Views, Channel));
 
    function Wants_Correspondences (S : State; Channel : Positive) return Boolean is
      (Status (S, Channel) = Waiting and then not S.Per_Channel.Constant_Reference.Element (Channel).Changed.Is_Empty

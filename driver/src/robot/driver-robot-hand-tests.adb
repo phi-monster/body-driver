@@ -2,6 +2,7 @@ with Driver.Bytes;
 with Driver.Clock;
 with Driver.Commands;
 with Driver.Images;
+with Driver.Robot.Hand.Aims.Tests;
 with Driver.Robot.Hand.Frames.Tests;
 with Driver.Robot.Hand.Lobes.Tests;
 with Driver.Robot.Hand.Presses.Tests;
@@ -38,6 +39,7 @@ package body Driver.Robot.Hand.Tests is
       Driver.Tests.Register ("hand.unmeasured", "an unmeasured body makes the hand fail or invent a hand",
                              Unmeasured_Body'Access);
       Driver.Robot.Hand.Frames.Tests.Register;
+      Driver.Robot.Hand.Aims.Tests.Register;
       Driver.Robot.Hand.Views.Tests.Register;
       Driver.Robot.Hand.Lobes.Tests.Register;
       Driver.Robot.Hand.Sweep.Tests.Register;
