@@ -83,9 +83,37 @@ package body Driver.Uncertain is
    end Distance;
 
    function Significant (A, B : Point_Estimate) return Boolean is
-      D : constant Estimate := Distance (A, B);
+      Separation : constant Vec3 := A.Mean - B.Mean;
+      Values     : Vec3;
+      Vectors    : Mat3;
+      Squared    : Real := 0.0;   --  the squared Mahalanobis length
    begin
-      return Significant (D.Value, D.Sigma);
+      if not Known (A) or else not Known (B) then
+         return False;
+      end if;
+      Symmetric_Eigensystem (A.Covariance + B.Covariance, Values, Vectors);
+      declare
+         --  The rounding error of the largest variance: below it the
+         --  eigendecomposition cannot tell a variance from zero.
+         Floor : constant Real := Values (Values'First) * Real (Vec3'Length) * Real'Epsilon;
+      begin
+         for I in Values'Range loop
+            declare
+               Along    : Real := 0.0;
+               Variance : constant Real := Real'Max (Values (I), Floor);
+            begin
+               for J in Separation'Range loop
+                  Along := Along + Vectors (J, I) * Separation (J);
+               end loop;
+               if Variance > 0.0 then
+                  Squared := Squared + Along * Along / Variance;
+               elsif Along /= 0.0 then
+                  return True;   --  both points exact: any separation is significant
+               end if;
+            end;
+         end loop;
+      end;
+      return Sqrt (Squared) > Threshold (Vector_Gate (Vec3'Length));
    end Significant;
 
 end Driver.Uncertain;

@@ -37,6 +37,12 @@ package Driver.Numerics with Pure is
 
    function Angle (R : Mat3) return Real is (abs Log (R));
 
+   procedure Symmetric_Eigensystem (M : Mat3; Values : out Vec3; Vectors : out Mat3);
+   --  The eigenvalues of the symmetric part of M in descending order, with
+   --  their unit eigenvectors as the columns of Vectors. Matrices that are
+   --  symmetric in exact arithmetic often are not after rounding, which the
+   --  standard Eigensystem does not accept.
+
    function Orthonormalize (R : Mat3) return Mat3;
    --  The rotation nearest to R in the Frobenius norm.
 

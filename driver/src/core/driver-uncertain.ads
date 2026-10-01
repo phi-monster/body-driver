@@ -2,9 +2,13 @@
 --  of significance.
 --
 --  Every gate in the driver has the form "is this difference larger than Z
---  standard deviations of its own measured noise" (Driver.Conventions.Z).
---  Vector-valued differences are tested along their own direction, so one
---  rule covers scalars, points, directions and poses alike.
+--  standard deviations of its own measured noise" (Driver.Conventions.Z),
+--  that is, does noise alone produce a difference this large less often than
+--  it exceeds Z for a Gaussian. A difference of several dimensions is tested
+--  by its length in units of its own covariance against the threshold with
+--  that same tail probability for that many dimensions: measured along the
+--  direction it happened to take, isotropic noise in three dimensions would
+--  pass Z ten times as often.
 --
 --  A sigma measured from a few samples is itself uncertain: the difference
 --  over it follows Student's t, whose tails are heavier than the Gaussian's.
@@ -79,9 +83,16 @@ package Driver.Uncertain with Pure is
    --  The standard deviation of the component along a unit direction.
 
    function Significant (A, B : Point_Estimate) return Boolean;
-   --  The separation of two independent points, tested along itself.
+   --  Whether two independent points are apart: the Mahalanobis length of
+   --  their separation under the sum of their covariances, against
+   --  Vector_Gate (3). A direction the covariance pins down to within its own
+   --  rounding is given that rounding as its variance, so a separation along
+   --  it is significant unless it is rounding too.
 
    function Distance (A, B : Point_Estimate) return Estimate;
+   --  How far apart two independent points are, with the first-order sigma
+   --  of that length (along the separation). For the size of a separation;
+   --  whether there is one at all is Significant.
 
    type Direction_Estimate is record
       Unit_Vector : Vec3 := Zero3;
