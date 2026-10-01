@@ -1167,7 +1167,7 @@ package body Act is
    --  画面按核对定下的转法先转正再配(同核对)。只管"还找不找得到",不按位姿判:相机挪过时点照样找得到,板的世界位置不跟着变
    procedure Board_Recheck (F : Plug.Frame; C : in out Context; Found : out Natural; Said : out Unbounded_String) is separate;
 
-   --  ── 接触集接线(PLAN.md 1.5)──:身体量的数全从这只眼和握区来,一个字面量都没有;哪儿夹得住由 Contact.Gen 从形状里算,不由我挑
+   --  ── 接触集接线(第二期_PLAN.md 1.5)──:身体量的数全从这只眼和握区来,一个字面量都没有;哪儿夹得住由 Contact.Gen 从形状里算,不由我挑
 
    --  它躺的面过哪一点:碰过它躺的面之后,就是那个面上离 P 最近的点(当它厚度为零)。量到的位置 P 的高度是视线交出来/挪眼估出来的,
    --  两条视线都近乎竖直时深度病态(H53:桌面之下 9–28 cm),而腕眼近乎竖直向下看时,面的高度错 5 cm 就把整片轮廓横着投歪 5 cm

@@ -4,7 +4,7 @@ procedure Head_Tip_Check (C : Context; A, Hc : Natural; Tips : Geom.V3_Vectors.V
    package Sorting is new F64_Vectors.Generic_Sorting;
    procedure Report (Name : String; E : in out Floats) is
       Within : Natural := 0;
-      V1_Line : constant Long_Float := 2.0;   --  V1 验收线 2 px(PLAN.md §1 协议里的判据;只数一数,不当门)
+      V1_Line : constant Long_Float := 2.0;   --  V1 验收线 2 px(第二期_PLAN.md §1 协议里的判据;只数一数,不当门)
    begin
       if E.Is_Empty then
          Geo_Say ("  对账(头顶眼按指尖,V1 口径):" & Name & " 一笔都没有");
