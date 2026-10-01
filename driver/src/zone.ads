@@ -7,6 +7,7 @@ with Selfmap;
 with Table;
 with Geom;
 with Json;
+with Kinem;
 with Ada.Containers.Vectors;
 package Zone is
    --  一瓣 = 这只眼里一根(或并在一起看不开的几根)手指张开时那一块:框、形心(归一化画幅)、像素数
@@ -110,6 +111,12 @@ package Zone is
    --  Moved_Out = 这样挪走了几块(只进日志)
    function From_Frames (Open_G, Closed_G : Buf; W, Hh : Natural; Static : Bools := Bool_Vectors.Empty_Vector;
                          Open_Class : Integer := 0; Open_Ride, Open_Judged : Bools := Bool_Vectors.Empty_Vector) return Hand_Zone;
+   --  转一下眼判的每个格点(Vd,按格子号:Kinem.Classify_Rides)⇒ 长在眼上的格点(Ride)、判得了的格点(Judged;判不了 = Unknown)。
+   --  张开那头重拼握区、补全瓣 / 合空那一截都按它(一处)
+   procedure Ride_Grid (Vd : Kinem.Ride_Vec; Ride, Judged : out Bools);
+   --  在张开那头转了一下眼(Vd)⇒ 按同一个类别重拼握区(From_Frames 的 Open_Ride / Open_Judged;哪一类是瓣照 Z 定下的):
+   --  瓣那一类里在张开那头不长在眼上的块(背景)挪进合到的那一类。Moved_Out = 挪了几块(0 ⇒ 调用方照原来的 Z)
+   function Regroup_By_Ride (Z : Hand_Zone; Open_G, Closed_G : Buf; W, Hh : Natural; Vd : Kinem.Ride_Vec) return Hand_Zone;
    --  同一小截,两个跨度都给:Wide = 宽的那个(= Tip_Band 的 Width,指肚宽的像素),Thin = 窄的那个(看得见的厚的像素)
    procedure Tip_Section (Z : Hand_Zone; Lb : Lobe; W, Hh : Natural; U, V, Wide, Thin : out Long_Float; Ok : out Boolean);
    --  每一瓣自己那一块手指像素(同 Tip_Band 的认法:手指像素里和瓣框重合最多的那一整块,8 邻连通)的并集
