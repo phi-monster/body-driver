@@ -18,7 +18,7 @@ procedure Fill_Say (C : in out Context; I : Sinew.Instr; Answer : out Brain.Say)
          return False;
       end if;
       for K in 0 .. Natural (C.Places.Length) - 1 loop
-         if C.Places (K).Name = N.Word then
+         if Plan.Same_Name (To_String (C.Places (K).Name), To_String (N.Word)) then   --  和认名字同一个比法(Bind_Name ⓞ)
             Pl := C.Places (K);
             return True;
          end if;
@@ -43,7 +43,8 @@ begin
                declare
                   Gn : constant Noun := (K => Nk_Role, R => Rl_Grasper, Word => Null_Unbounded_String);
                   Gi : constant Integer := Plan.Look_Up (C.Binds, Gn);
-                  Bound_Arm : constant Natural := (if Gi >= 1 and then Gi <= Integer (C.Items.Length) then C.Items (Natural (Gi) - 1).Arm + 1 else 1);
+                  --  grasper 没绑上 ⇒ 0 = 没指定手(Brain.Say 的约定),不替脑挑第 1 条臂(09-30 登记:第一条臂没手指时就去合一只不存在的手)
+                  Bound_Arm : constant Natural := (if Gi >= 1 and then Gi <= Integer (C.Items.Length) then C.Items (Natural (Gi) - 1).Arm + 1 else 0);
                   --  哪只手去:离它近的那只(PLAN 第 2 步)。它在哪只腕眼里被点了名就是那条臂;在不动的眼里就比"它在画面里的位置"和"两只手在那只眼里各在哪"(握区量过的)
                   --  (H50/H56 2026-09-23 实测:右臂横跨整桌去够,关节到头,三把都合空)
                   --  手里已经拿着它 ⇒ 改它的量的就是拿着它的那只手,不再按远近选(H58 2026-09-23 实测:右手举着剪刀,头顶眼里它离左手近,左手去量眼、没动,还报"不在我手里")
@@ -62,7 +63,11 @@ begin
                   Answer.Qty := Cn.Obj.Word; Answer.Qty_Dir := Cn.Dir; Answer.Qty_Of := Sub;
                   Answer.Grip_Arm := Arm1;
                   Answer.Grip_K := Jk;
-                  if not (C.Wld.Holding and then C.Wld.Held_Arm = Integer (Arm1) - 1) then
+                  if Arm1 = 0 then
+                     --  哪只手都说不出:grasper 没绑上,离它近的手也量不出 ⇒ 不合、不改量,照实说
+                     C.Blind_Say := S ("I could not tell which of my hands should take it: no part of me that closes is bound in this eye "
+                                       & "and none is measured near it, so I did not close or move it");
+                  elsif not (C.Wld.Holding and then C.Wld.Held_Arm = Integer (Arm1) - 1) then
                      Answer.Grip := To_Unbounded_String ("close");
                      Answer.Grip_On := Sub;
                   end if;
@@ -70,14 +75,14 @@ begin
             when Re_Close =>
                Answer.Grip := To_Unbounded_String ("close");
                Answer.Grip_Arm := (if Sub >= 1 and then Sub <= Natural (C.Items.Length)
-                                   then C.Items (Sub - 1).Arm + 1 else 1);
+                                   then C.Items (Sub - 1).Arm + 1 else 0);   --  0 = 没指定手(主语没绑上时编译器早退回了,到不了这儿)
                Answer.Grip_K := (if Sub >= 1 and then Sub <= Natural (C.Items.Length)
                                  then C.Items (Sub - 1).Jaw_K else 0);
                Answer.Grip_On := Obj;
             when Re_Open =>
                Answer.Grip := To_Unbounded_String ("open");
                Answer.Grip_Arm := (if Sub >= 1 and then Sub <= Natural (C.Items.Length)
-                                   then C.Items (Sub - 1).Arm + 1 else 1);
+                                   then C.Items (Sub - 1).Arm + 1 else 0);   --  0 = 没指定手(主语没绑上时编译器早退回了,到不了这儿)
                Answer.Grip_K := (if Sub >= 1 and then Sub <= Natural (C.Items.Length)
                                  then C.Items (Sub - 1).Jaw_K else 0);
             when Re_Clear =>
