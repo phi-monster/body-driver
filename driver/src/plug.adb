@@ -45,6 +45,9 @@ package body Plug is
 
    function Arms (L : Link) return Natural is
    begin
+      if L.Lay.Measured then
+         return L.Lay.N_Arms;   --  开机按量认出来几条臂(I1,10-01;不再按"位姿键数 / 抓握键数"凑)
+      end if;
       if not L.Lay.EE.Is_Empty then
          return Natural'Min (Natural (L.Lay.EE.Length), Natural'Max (1, Natural (L.Lay.Jaw.Length)));
       end if;
@@ -85,7 +88,8 @@ package body Plug is
 
    function Nums_At (L : Link; P : Layout.Path) return Floats is
    begin
-      if L.Last_Obs < 0 then
+      --  空路径 = 这一格没有读数(量出来的布局里某条臂没有合拢通道时占位用);不许当成整个观测去取数
+      if L.Last_Obs < 0 or else P.Segs.Is_Empty then
          return F64_Vectors.Empty_Vector;
       end if;
       return Numbers (L.Last, Layout.Find (L.Last, L.Last_Obs, P));
@@ -104,39 +108,77 @@ package body Plug is
       end loop;
    end Put_Keys;
 
-   --  「照现在这样保持」:把此刻报的位姿 / 关节原样回声,每组抓握照这一组读数的个数发(Jaw_Values,没有新命令)。零假设,一次回声。
-   --  读数空的键不发:不知道对方要几个数,也不编(09-30:原来抓握一栏每只手只发 1 个数、没读数就发 1.0 —— x5"1 = 张开"的约定)
-   function Hold_Action (L : in out Link) return Buf is
-      S : Buf;
-      N : constant Natural := Arms (L);
-      Keys : Strs;
-      Vals : Floats_Vectors.Vector;
-      None : Cmd;
-      procedure Add (Name : String; V : Floats) is
-      begin
-         if not V.Is_Empty then
-            Keys.Append (Name); Vals.Append (V);
-         end if;
-      end Add;
+   --  名字 Nm 这一回保持发哪一串:此刻的读数;这一拍没读数 ⇒ 上一回发出去的那一串(Note_Sent 记的);都没有 ⇒ 空(这个键这回不发,不编)
+   function Hold_Value (L : Link; Nm : String; P : Layout.Path) return Floats is
+      Cur : constant Floats := Nums_At (L, P);
    begin
-      if N = 0 or else L.Last_Obs < 0 then
-         return S;
+      if not Cur.Is_Empty then
+         return Cur;
       end if;
-      for I in 0 .. N - 1 loop
-         if Joint_Mode (L) then
-            Add (Layout.Last_Seg (L.Lay.Joints (I)), Nums_At (L, L.Lay.Joints (I)));
-         else
-            Add (Layout.Last_Seg (L.Lay.EE (I)), Nums_At (L, L.Lay.EE (I)));
-         end if;
-         if not L.Lay.Jaw.Is_Empty then
-            declare
-               Ji : constant Natural := Natural'Min (I, Natural (L.Lay.Jaw.Length) - 1);
-            begin
-               Add (Layout.Last_Seg (L.Lay.Jaw (Ji)), Jaw_Values (L, Ji, False, None, Nums_At (L, L.Lay.Jaw (Ji))));
-            end;
+      for I in 0 .. Natural (L.Hold_Names.Length) - 1 loop
+         if L.Hold_Names (I) = Nm then
+            return L.Hold_Sent (I);
          end if;
       end loop;
+      return F64_Vectors.Empty_Vector;
+   end Hold_Value;
+
+   --  这一条动作里每个键发出去的那一串记下(下一拍这个键没读数时照发它)
+   procedure Note_Sent (L : in out Link; Keys : Strs; Vals : Floats_Vectors.Vector) is
+   begin
+      for K in 0 .. Natural (Keys.Length) - 1 loop
+         declare
+            Found : Boolean := False;
+         begin
+            for I in 0 .. Natural (L.Hold_Names.Length) - 1 loop
+               if L.Hold_Names (I) = Keys (K) then
+                  L.Hold_Sent.Replace_Element (I, Vals (K));
+                  Found := True;
+               end if;
+            end loop;
+            if not Found then
+               L.Hold_Names.Append (Keys (K)); L.Hold_Sent.Append (Vals (K));
+            end if;
+         end;
+      end loop;
+   end Note_Sent;
+
+   function Has_Name (V : Strs; X : String) return Boolean is
+   begin
+      for Y of V loop
+         if Y = X then
+            return True;
+         end if;
+      end loop;
+      return False;
+   end Has_Name;
+
+   --  「照现在这样保持」:每一个命令键照此刻的读数原样回声(见 spec)
+   function Hold_Action (L : in out Link) return Buf is
+      S : Buf;
+      Keys : Strs;
+      Vals : Floats_Vectors.Vector;
+   begin
+      if L.Last_Obs < 0 then
+         return S;
+      end if;
+      for I of Layout.Command_Groups (L.Lay) loop
+         declare
+            Nm : constant String := Layout.Last_Seg (L.Lay.Groups (I));
+         begin
+            if not Has_Name (Keys, Nm) then
+               declare
+                  V : constant Floats := Hold_Value (L, Nm, L.Lay.Groups (I));
+               begin
+                  if not V.Is_Empty then
+                     Keys.Append (Nm); Vals.Append (V);
+                  end if;
+               end;
+            end if;
+         end;
+      end loop;
       Put_Keys (S, Keys, Vals);
+      Note_Sent (L, Keys, Vals);
       return S;
    end Hold_Action;
 

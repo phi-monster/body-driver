@@ -30,13 +30,17 @@ begin
    end if;
    --  身体也报位姿,但开机量胳膊要一个关节一个关节地转(V1b,2026-09-26):发一条【只有关节】的动作。
    --  每个不同名字的关节组发一份(名字相同的读数组 / 命令回声组只发一次,取第一个):C.Group 那一组的名字发 C.Q,其余照此刻的读数保持;
-   --  抓握通道同样按名字去重、照此刻的读数保持。一条动作里只有关节这一类,不混位姿(对方按键名认动作类型)
-   if C.Kind = Joint and then not Joint_Mode (L) and then (C.Group >= 0 or else not C.Groups.Is_Empty) then
+   --  抓握通道同样按名字去重、照此刻的读数保持。一条动作里只有关节这一类,不混位姿(对方按键名认动作类型)。
+   --  开机按量认完(Lay.Measured,I1 10-01):关节命令一律走这一支(只报关节的身体也走;没给组号 ⇒ 按臂:第 A 条臂的关节组就是 Joints 的第 A 组);
+   --  抓握键按量出来的归属发(第几条臂、在那条臂接起来的目标里从第几个起);别的命令组(Holds:扛着全身的、零件、哑巴、推不动的)照此刻的读数保持
+   if C.Kind = Joint and then (L.Lay.Measured or else (not Joint_Mode (L) and then (C.Group >= 0 or else not C.Groups.Is_Empty))) then
       if C.Group >= Natural (L.Lay.Joints.Length) then
          return False;
       end if;
       declare
-         Target : constant String := (if C.Group >= 0 then Layout.Last_Seg (L.Lay.Joints (C.Group)) else "");
+         Tg : constant Integer := (if C.Group >= 0 then C.Group
+                                   elsif C.Groups.Is_Empty and then C.Arm < Natural (L.Lay.Joints.Length) then Integer (C.Arm) else -1);
+         Target : constant String := (if Tg >= 0 then Layout.Last_Seg (L.Lay.Joints (Natural (Tg))) else "");
          --  这个名字的关节组在 C.Groups 里排第几(-1 = 不在)
          function In_Groups (Nm : String) return Integer is
          begin
@@ -49,66 +53,107 @@ begin
             end loop;
             return -1;
          end In_Groups;
+         --  量出来的布局里 Jaw 的第 Wi 组归哪条臂(-1 = 回声),Off = 它在那条臂接起来的抓握目标里从第几个起;旧布局:下标就是臂
+         function Owner (Wi : Natural; Off : out Natural) return Integer is
+         begin
+            Off := 0;
+            if not L.Lay.Measured then
+               return Integer (Wi);
+            end if;
+            for A in 0 .. Natural'Min (L.Lay.N_Arms, Natural'Min (Natural (L.Lay.Closing_First.Length), Natural (L.Lay.Closing_N.Length))) - 1 loop
+               declare
+                  First : constant Natural := Natural (L.Lay.Closing_First (A));
+                  N_A : constant Natural := Natural (L.Lay.Closing_N (A));
+               begin
+                  if Wi >= First and then Wi < First + N_A then
+                     for K in First .. Wi - 1 loop
+                        Off := Off + (if K < Natural (L.Lay.Jaw_Len.Length) then Natural (L.Lay.Jaw_Len (K)) else 0);
+                     end loop;
+                     return Integer (A);
+                  end if;
+               end;
+            end loop;
+            return -1;
+         end Owner;
          J_Names, W_Names : Strs;
          J_First, W_First : Ints;
-         W_Vals : Floats_Vectors.Vector;   --  每个抓握键这回发的那一串(Jaw_Values;空 = 这回不发)
-         N_Keys : Natural;
-         function Has (V : Strs; X : String) return Boolean is
-         begin
-            for Y of V loop
-               if Y = X then
-                  return True;
-               end if;
-            end loop;
-            return False;
-         end Has;
+         Keys : Strs;
+         Vals : Floats_Vectors.Vector;
       begin
          for I in 0 .. Natural (L.Lay.Joints.Length) - 1 loop
-            if not Has (J_Names, Layout.Last_Seg (L.Lay.Joints (I))) then
+            if not Has_Name (J_Names, Layout.Last_Seg (L.Lay.Joints (I))) then
                J_Names.Append (Layout.Last_Seg (L.Lay.Joints (I))); J_First.Append (I);
             end if;
          end loop;
          for I in 0 .. Natural (L.Lay.Jaw.Length) - 1 loop
-            if not Has (W_Names, Layout.Last_Seg (L.Lay.Jaw (I))) then
+            if not Has_Name (W_Names, Layout.Last_Seg (L.Lay.Jaw (I))) and then not Has_Name (J_Names, Layout.Last_Seg (L.Lay.Jaw (I))) then
                W_Names.Append (Layout.Last_Seg (L.Lay.Jaw (I))); W_First.Append (I);
             end if;
          end loop;
-         N_Keys := Natural (J_Names.Length);
-         for K in 0 .. Natural (W_Names.Length) - 1 loop
+         for K in 0 .. Natural (J_Names.Length) - 1 loop
             declare
-               J : constant Floats := Nums_At (L, L.Lay.Jaw (W_First (K)));
-               --  这条臂自己的抓握通道给了目标就发目标(位姿命令解成关节目标时带着,V1b 3c),别的发这一集给过的最后一个目标(见 Jaw_Set)
-               Mine : constant Boolean := W_First (K) = C.Arm and then not C.Jaw.Is_Empty;
+               Kg : constant Integer := In_Groups (J_Names (K));
+               --  没给目标的组照此刻的读数保持(这一拍没读数 ⇒ 上一回发出去的;都没有 ⇒ 这个键这回不发,不编)
+               Q : constant Floats := (if Kg >= 0 then C.Qs (Natural (Kg)) elsif J_Names (K) = Target then C.Q
+                                       else Hold_Value (L, J_Names (K), L.Lay.Joints (J_First (K))));
             begin
-               --  不截:读数范围是开机两头推到头量的(V1b ②;原来截在 [0, 1],x5 的约定)
-               W_Vals.Append (Jaw_Values (L, W_First (K), Mine, C, J));
-               if not W_Vals.Last_Element.Is_Empty then
-                  N_Keys := N_Keys + 1;
+               if not Q.Is_Empty then
+                  Keys.Append (J_Names (K)); Vals.Append (Q);
                end if;
             end;
          end loop;
-         Put_Map (S, N_Keys);
-         for K in 0 .. Natural (J_Names.Length) - 1 loop
-            Put_Str (S, J_Names (K));
+         for K in 0 .. Natural (W_Names.Length) - 1 loop
             declare
-               Kg : constant Integer := In_Groups (J_Names (K));
-               Q : constant Floats := (if Kg >= 0 then C.Qs (Natural (Kg)) elsif J_Names (K) = Target then C.Q else Nums_At (L, L.Lay.Joints (J_First (K))));
+               J : constant Floats := Nums_At (L, L.Lay.Jaw (W_First (K)));
+               Off : Natural;
+               Ow : constant Integer := Owner (W_First (K), Off);
+               Cs : Cmd := C;
+               Mine : Boolean;
             begin
-               Put_Array (S, Natural (Q.Length));
-               for X of Q loop
-                  Put_Float (S, X);
-               end loop;
+               if L.Lay.Measured then
+                  --  这条臂接起来的抓握目标里属于这一组的那一截(给了几个就是几个;没给到这一组 ⇒ 这一组照这一集给过的 / 读数保持)
+                  Cs.Jaw.Clear;
+                  if Ow >= 0 and then Ow = Integer (C.Arm) then
+                     declare
+                        N_K : constant Natural := (if W_First (K) < Natural (L.Lay.Jaw_Len.Length) then Natural (L.Lay.Jaw_Len (W_First (K))) else 0);
+                     begin
+                        for X in Off .. Natural'Min (Off + N_K, Natural (C.Jaw.Length)) - 1 loop
+                           Cs.Jaw.Append (C.Jaw (X));
+                        end loop;
+                     end;
+                  end if;
+                  Mine := not Cs.Jaw.Is_Empty;
+               else
+                  --  这条臂自己的抓握通道给了目标就发目标(位姿命令解成关节目标时带着,V1b 3c),别的发这一集给过的最后一个目标(见 Jaw_Set)
+                  Mine := W_First (K) = C.Arm and then not C.Jaw.Is_Empty;
+               end if;
+               --  不截:读数范围是开机两头推到头量的(V1b ②;原来截在 [0, 1],x5 的约定)
+               declare
+                  V : constant Floats := Jaw_Values (L, W_First (K), Mine, Cs, J);
+               begin
+                  if not V.Is_Empty then
+                     Keys.Append (W_Names (K)); Vals.Append (V);
+                  end if;
+               end;
             end;
          end loop;
-         for K in 0 .. Natural (W_Names.Length) - 1 loop
-            if not W_Vals (K).Is_Empty then
-               Put_Str (S, W_Names (K));
-               Put_Array (S, Natural (W_Vals (K).Length));
-               for X of W_Vals (K) loop
-                  Put_Float (S, X);
-               end loop;
-            end if;
+         for P of L.Lay.Holds loop
+            declare
+               Nm : constant String := Layout.Last_Seg (P);
+            begin
+               if not Has_Name (Keys, Nm) and then not Has_Name (J_Names, Nm) and then not Has_Name (W_Names, Nm) then
+                  declare
+                     V : constant Floats := Hold_Value (L, Nm, P);
+                  begin
+                     if not V.Is_Empty then
+                        Keys.Append (Nm); Vals.Append (V);
+                     end if;
+                  end;
+               end if;
+            end;
          end loop;
+         Put_Keys (S, Keys, Vals);
+         Note_Sent (L, Keys, Vals);
       end;
       L.Pending := S; L.Has_Pending := True;
       return True;

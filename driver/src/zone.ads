@@ -20,7 +20,9 @@ package Zone is
    No_Lobe : constant Lobe := (Valid => False, others => <>);
    type Hand_Zone is record
       Valid : Boolean := False;
-      Cu, Cv : Long_Float := 0.0;      --  区心(归一化)= 各瓣形心的平均(几瓣都是这一种算法)
+      --  区心(归一化)= 这几瓣合拢时会合到的那一点("东西会被夹在哪"):每一对瓣在连线中点会合的最小二乘解(= 各瓣形心的平均),
+      --  这些对定不下来的方向(只有一瓣)按手指合拢时到的那片(合到的区)的形心 —— 伪逆解,一条规则
+      Cu, Cv : Long_Float := 0.0;
       --  主轴(像素系单位向量,和 Picture.Region 的主轴同一个系、同一个正负号约定):瓣排开的方向(各瓣形心的主方向);
       --  瓣的排法定不出方向时(一瓣,或者几瓣均匀排一圈)= 各瓣自己伸长的方向
       Au, Av : Long_Float := 0.0;
@@ -45,9 +47,10 @@ package Zone is
    --  换掉第 I 瓣(I < 瓣数;旧写法写的握区先按它的两格转成一串)
    procedure Set_Lobe (Z : in out Hand_Zone; I : Natural; Lb : Lobe);
    --  一串瓣 ↔ 身体文件(JSON)。每瓣一个 7 个数的数组 [x0, y0, x1, y1, cu, cv, 像素数](和旧文件里 "a" / "b" 那两格一个排法),
-   --  浮点按 Json.Number 写(写出去读回来一个比特不差)。Lobes_Json 返回 "[[…],[…],…]" 那一串(0 瓣 = "[]"),
-   --  存的时候写成这只眼握区里的 "lobes" 键;Lobes_From_Json 从握区节点 Zn 读回:有 "lobes" 按它,
-   --  没有(I2 以前的文件:两格 "a" / "b",按 "n_lobes" 取前几格)按旧的读。读完 Set_Lobes
+   --  浮点按 Json.Number 写(写出去读回来一个比特不差)。Lobes_Json 返回 {"rule": 这一版握区算法的号, "list": [[…],[…],…]}(0 瓣 = 空串),
+   --  存的时候写成这只眼握区里的 "lobes" 键;Lobes_From_Json 从握区节点 Zn 读回:"lobes" 是这样一个对象按它;是一串(I2 第一版)、
+   --  或者没有(I2 以前的文件:两格 "a" / "b",按 "n_lobes" 取前几格)也读回来。读完 Set_Lobes。
+   --  存它的算法不是这一版的(区心、主轴按旧算法算的,文件里没有能重算的画面)⇒ 照实说、Z.Valid := False:开机把这一格当没量过,合空重量
    function Lobes_Json (Z : Hand_Zone) return String;
    procedure Lobes_From_Json (D : Json.Doc; Zn : Integer; Z : in out Hand_Zone);
    type Hand is record

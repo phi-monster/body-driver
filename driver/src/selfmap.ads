@@ -16,6 +16,26 @@ package Selfmap is
    end record;
    package Part_Vectors is new Ada.Containers.Vectors (Natural, Part);
    package Floor_Vectors is new Ada.Containers.Vectors (Natural, Picture.Floor_Map, Picture."=");
+   --  ── 身体报的每一组读数,开机推一下量出来是什么(大并行 I1,路 1;10-01 加,旧字段 Arms / Jaws / Cam_On_Arm 照旧填)──
+   --  Arm:推它有眼整幅跟着动(眼长在它上面),它就是一条臂;Closing:推它只动了画面里一块,而那一块在某条臂自己那只眼里 = 那条臂的合拢通道;
+   --  Carrying:推它每只眼都整幅在动 = 扛着全身走的那组;Piece:推它只动了画面里一块,哪条臂的眼里都不是 = 一块零件(长在哪儿量不出);
+   --  Mute:推它读数跟着走,可哪只眼里都没东西变(接入契约第 2 条);Not_Following:推它读数不跟,画面也没变(第 1 条:推不动);
+   --  Reading:不是命令(身体没把它当命令回声),只是一组读数 —— 推别的组时它跟着变(Follows)或者一直不变;Unprobed:还没量
+   type Group_Role is (Unprobed, Arm, Closing, Carrying, Piece, Mute, Not_Following, Reading);
+   type Group_Info is record
+      Role : Group_Role := Unprobed;
+      Name : Ada.Strings.Unbounded.Unbounded_String;   --  这一组读数在观测里的路径(只给开机报告 / 文档)
+      N_Values : Natural := 0;                         --  这一组几个数
+      Arm : Integer := -1;                             --  Arm:第几条臂;Closing:哪条臂的合拢通道;别的 -1
+      Eyes : Ints;                                     --  整幅跟着它动的眼(相机号;Arm / Carrying)
+      Seen_In : Ints;                                  --  只看见它带动的一块的眼(相机号;Closing / Piece,Arm 在别的眼里)
+      Twin : Integer := -1;                            --  同名的另一组(身体的命令回声;-1 = 没有)
+      Follows : Integer := -1;                         --  Reading:推哪一组(组号)时它跟着变;-1 = 推哪一组都不变
+      Probe : Long_Float := 0.0;                       --  认出来时那一推多大(读数单位;0 = 没认成)
+      Delivered : Long_Float := 0.0;                   --  那一推读数实到多少(读数单位,跟得最少的那个数)
+      Lied : Boolean := False;                         --  一个方向推了画面变、另一个方向读数说走了画面却没变(接入契约第 3 条:没动却不说)
+   end record;
+   package Group_Vectors is new Ada.Containers.Vectors (Natural, Group_Info);
    type Body_Map is record
       Arms : Natural := 0;
       N_Cams : Natural := 0;
@@ -43,6 +63,9 @@ package Selfmap is
       Amp_Hist : Plug.Floats_Vectors.Vector;
       Deliv_Hist : Plug.Floats_Vectors.Vector;
       Measured_Times : Natural := 0;
+      --  身体报的每一组读数开机量出来是什么(Layout.Groups 的下标一一对应;空 = 这一版开机还没按组量)。I1 的通用写法:
+      --  Selfmap.Graph 从它答"扛着全身走的那几组""长在这条臂上的眼"(路 1,10-01 加)
+      Groups : Group_Vectors.Vector;
    end record;
    --  快速核对:每只手推一个通道(存的幅度),实到和存的差一半以内且画面里看得见 ⇒ 身体没变
    type String_Note is record
@@ -93,10 +116,16 @@ package Selfmap is
    function Settle_Since (L : Plug.Link; From_Seq : Natural; Noise : Long_Float) return Natural;
    procedure Idle (L : in out Plug.Link; F : in out Plug.Frame; N : Natural; Ok : out Boolean);   --  不下命令空等 N 拍
    --  什么都不做时读数抖多少、画面抖多少(静止对,4 拍):位姿 / 姿态 / 抓握 / 关节读数的噪声 + 每台相机的灰度地板。
+   --  先等上一个动作的尾巴收住才量:每组读数(每条臂的平移、转动,每组关节、每组抓握)一拍挪的不再比上一拍少 = 那一组收住了,
+   --  每组都收住了才开始量(还在慢慢挪的那一截不算噪声;出口是量到的"不再变小",不设拍数)。
    --  地板用这几拍里最后一对"两帧都收到了画面"的静止对;一对都没有的那台 ⇒ 地板记成 U8'Last(量不到它的噪声 ⇒ 它的画面里什么都不算动了,
    --  不拿空画面当静止对、不编一个 0 的地板)。
    --  Measure 开头用它;只报关节的身体开机前半段(还没有位姿)也用它(同一种量法)。M.Arms 条臂的位姿噪声(没有位姿 = 0)
    procedure Measure_Idle (L : in out Plug.Link; F : in out Plug.Frame; M : in out Body_Map; Ok : out Boolean);
+   --  Measure_Idle 量静止噪声的量法版本(路 1 10-01 加;改了这一段怎么量的那一路把它加一):身体文件记着每一份噪声是第几版量的,
+   --  版本对不上就不信、开机重量(Bodyfile)。1 = 接着上一个动作就量 4 拍(慢的身体会把还在收的尾巴量进去:H4 / H7 的 ee_noise 0.0121);
+   --  身体文件里没记版本的 = 更老,也不信
+   Idle_Ver : constant := 1;
    --  等到画面连着两拍都不再变(各自的灰度地板以内),最多 Max 拍;返回用了几拍。
    --  Ok = 停稳了。等满 Max 拍还在变 ⇒ Ok = False、Used = Max(照实说没停稳 —— 09-30:原来超时照样 Ok = True,握区在还在动的画面上量);
    --  线断了 ⇒ Ok = False、Used < Max
