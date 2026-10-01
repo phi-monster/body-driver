@@ -168,6 +168,9 @@ package body Driver.Recording is
       Lock.Seize;
       if Is_Open (Shared) then
          Write (Shared, Kind, Payload);
+         --  Each record reaches the file whole before the next one starts, so
+         --  a process stopped from outside loses at most the record in flight.
+         Flush (Shared.File);
       end if;
       Lock.Release;
    exception
