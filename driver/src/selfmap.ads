@@ -93,6 +93,8 @@ package Selfmap is
    function Settle_Since (L : Plug.Link; From_Seq : Natural; Noise : Long_Float) return Natural;
    procedure Idle (L : in out Plug.Link; F : in out Plug.Frame; N : Natural; Ok : out Boolean);   --  不下命令空等 N 拍
    --  什么都不做时读数抖多少、画面抖多少(静止对,4 拍):位姿 / 姿态 / 抓握 / 关节读数的噪声 + 每台相机的灰度地板。
+   --  先等上一个动作的尾巴收住才量:每组读数(每条臂的平移、转动,每组关节、每组抓握)一拍挪的不再比上一拍少 = 那一组收住了,
+   --  每组都收住了才开始量(还在慢慢挪的那一截不算噪声;出口是量到的"不再变小",不设拍数)。
    --  地板用这几拍里最后一对"两帧都收到了画面"的静止对;一对都没有的那台 ⇒ 地板记成 U8'Last(量不到它的噪声 ⇒ 它的画面里什么都不算动了,
    --  不拿空画面当静止对、不编一个 0 的地板)。
    --  Measure 开头用它;只报关节的身体开机前半段(还没有位姿)也用它(同一种量法)。M.Arms 条臂的位姿噪声(没有位姿 = 0)
