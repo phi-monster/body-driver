@@ -81,6 +81,11 @@ package Selfmap is
    --  09-29 台架(V1B66 满精度):x5 同样大小的两步空走少走的量前后只差约 1e-5 单位;碰上的第一步多少走至少 0.0014(一档的一成)。
    --  原来的门 = 第一步 + 3 × 静止噪声,仿真读数不抖 ⇒ 门 = 第一步,差一丝就认成碰到(V1B60 虚认 37 次、V1B65 18 次)
    function Blocked (Short, Prev, Prev2 : Long_Float; N_Free : Natural; Lstep, Noise : Long_Float) return Boolean;
+   --  同一个判法写成统计的样子(Blocked 就是它:Mean = 上一步空走的少走量、Sd = 前两步空走之差):
+   --  被挡住 = Short 比空走时的少走量 Mean 多出"这一步的百分之一、Stats.Z(3)倍读数噪声、Stats.Z 倍空走的散布 Sd"里最大的那样;
+   --  N_Free = 0 ⇒ 判不了 ⇒ False;
+   --  N_Free = 1 ⇒ 一个样本没有散布(Sd 不用)。走一步(Step)拿一段路上所有空走的那几步(连开机探针)的平均和标准差当 Mean / Sd
+   function Blocked_Stats (Short, Mean, Sd : Long_Float; N_Free : Natural; Lstep, Noise : Long_Float) return Boolean;
    --  发一条位姿命令并等它稳:返回实际交付(按通道)与用掉的拍数。F 更新到最后一帧。
    --  Press:往前压、碰到为止的那一步 —— 停没停只看沿命令平移方向的挪动:动起来以后连着两拍挪不到这一步的百分之一(Negligible)= 停了,
    --  就读;被顶住的软手指那点转动蠕动不算(原来等它慢下来要 10–11 拍);胳膊还在沿这个方向挪(伸远了跟不上、还在往回收)就接着等,
@@ -145,4 +150,79 @@ package Selfmap is
    function Jaw_Index (F : Plug.Frame; Arm : Natural) return Natural;
    --  Blocked 拿这一段前面两步空走当底(前两步空走之差就是散布):往前压的时候,碰上之前至少要空走这么多步,Blocked 才判得出(结构)
    Free_Base : constant := 2;
+
+   --  ── 走一步(I6,大并行 §4;路 2 / 5 / 6 挪手都走它,碰到没有只有 Blocked 一个判法)──
+   --  一条命令给一组或几组通道各自一个目标(一组 = 一条臂的位姿:平移 3 + 转动 3;Goal 是绝对位姿),每组从此刻的读数起走还差的一部分(Lim.Frac),
+   --  再按三道上限缩,都是量的、没有的那一道 = 不限:
+   --    反解够得到(Lim.Reach):这一步走完的位姿按量到的关节范围问反解(Plug.Reach),解不到就沿这一步缩到解得到的那一截
+   --      (二分,细到这只手一步看得见的那一档);一截都解不到 ⇒ 这一组这一步不走(Reach_Cut)。
+   --      超出到过的范围的那一截照旧由 Go 截在"到过的范围 + 往外一步"、手一动就重发(Plug.Held_Back);
+   --    眼跟得住(Lim.Track / Track_Rot):这一步平移最多多长、转动最多多少 —— 调用方按眼算(跟着的东西在眼里挪不出跟得住的那一片);
+   --    离可能碰到的地方远(Lim.Clear):沿这一步的方向离"可能碰到"的那条带子还有多远,这一步不进带子(带子里调用方给小步)。
+   --  整步按一个比例缩(平移、转动一起缩:转着补偿指尖的那种步缩了还是同一条路)。
+   --  交付不满的身体(每条命令只走到七八成就停,同一个目标再发也不再走):按它空走一步最多交付几成的上界把这一步放大(平移、转动各按各的;
+   --  上界 = 这一段空走的底的平均少走 − Stats.Z 倍散布),交付得最多的那一步也不走过头;交付满的(x5 的开机探针)⇒ 不放大;
+   --  这一步比量过的最长那一步还长 ⇒ 不放大(少走的是比例还是死区,只有不同长的几步分得出:一格长的探针不许拿去放大一大步)。
+   --  一组 ⇒ 同 Go 的一条位姿命令(今天 Act.Step_Arm / Geo_Move 发的就是这一条,行为不变);
+   --  几组 ⇒ 每一拍一条命令带几组的目标(Plug 按拍合成,同几只手按拍对齐),每组各自判停、判到没到;
+   --  在主线程里调 ⇒ 这里自己开一只手的任务按拍对齐
+   type Leg is record
+      Arm  : Natural := 0;
+      Goal : Plug.Arm_Pose := [others => 0.0];
+      Jaw  : Floats;                                --  这条臂抓握通道的目标(空 = 保持,同 Go)
+   end record;
+   package Leg_Vectors is new Ada.Containers.Vectors (Natural, Leg);
+   type Limits is record
+      Frac      : Long_Float := 1.0;                --  这一步走还差的几成(今天的调用方照今天的给:Geo_Approach 远时 0.6、近了 1)
+      Track     : Long_Float := Long_Float'Last;    --  眼跟得住:平移最多多长(世界单位;Last = 不限)
+      Track_Rot : Long_Float := Long_Float'Last;    --  眼跟得住:转动最多多少(弧度)
+      Clear     : Long_Float := Long_Float'Last;    --  离可能碰到的地方还有多远
+      Reach     : Boolean := False;                 --  问反解够不够得到
+      Press     : Boolean := False;                 --  压的那种步(同 Go)
+      Watch     : Watcher := null;                  --  途中每拍问一句出事了没(同 Go)
+      Loose     : Boolean := True;                  --  到了这只手一步看得见的那一档以内就算到(同 Act.Step_Arm 的 Geo_Settle);False = 等读数不动
+   end record;
+   --  空走的底(Blocked 拿它当"前面空走的那几步"):一种动(平移 / 转动)空走时一步少走它自己的几成 —— 几步、平均、平方差和(Welford)。
+   --  一段路一开头装进开机探针量的那几步(Measure:每个通道推一步、停下再读,Tol = 0),这一段里每一步判成空走的再加进来。
+   --  平均和标准差当 Blocked 的"上一步"和"散布"(Blocked_Stats):交付每步不一样的身体(真机每步 70–85%)拿"最近两步"当底,
+   --  两步碰巧挨得近时门只剩一丝,下一步交付少一点就被认成挡住;走到了(Loose 的那一档以内)、被 Watch 叫停、等满了还在动的那几步不进底:
+   --  它们少走多少是 Go 在哪一刻收的,不是身体空走交付多少
+   type Free_Part is record
+      N : Natural := 0;
+      Mean, M2 : Long_Float := 0.0;
+      Len_Hi : Long_Float := 0.0; --  这几步里最长的那一步多长(平移按长度、转动按弧度):交付的比例只在量过的长度以内当证据
+   end record;
+   type Free_Leg is record
+      Arm : Natural := 0;
+      Tr, Rot : Free_Part;
+   end record;
+   package Free_Vectors is new Ada.Containers.Vectors (Natural, Free_Leg);
+   type Walk is record
+      Legs : Free_Vectors.Vector;
+   end record;
+   procedure Note_Free (P : in out Free_Part; Short, Len : Long_Float);   --  Short = 这一步少走了它自己的几成;Len = 它的长
+   function Free_Sd (P : Free_Part) return Long_Float;               --  标准差(不到两步 = 0)
+   --  这一步(长 Len,少走 Short,读数噪声 Noise,都是同一种单位)按这一段空走的底判挡没挡(= Blocked_Stats,底按 Len 折回长度)
+   function Blocked_By (P : Free_Part; Short, Len, Noise : Long_Float) return Boolean;
+   --  这一段路第一次走 Arm 这条臂:装进开机探针量的那几步(导出给自检)
+   procedure Seed (W : in out Walk; M : Body_Map; Arm : Natural);
+   type Leg_Step is record
+      Arm        : Natural := 0;
+      From       : Plug.Arm_Pose := [others => 0.0];   --  这一步开始时的读数
+      Aim        : Plug.Arm_Pose := [others => 0.0];   --  这一步发出去的目标(缩过以后)
+      Cmd, Got   : Table.Vec := Table.Zero_Vec;        --  要走的 / 实到的(都从 From 算,按通道:平移 3 + 转动 3)
+      Len, Ang   : Long_Float := 0.0;                  --  这一步要平移多长、转多少
+      Went, Turned : Long_Float := 0.0;                --  沿要的方向实到的平移、转动
+      Arrived    : Boolean := False;                   --  走完在 Aim 一步看得见的那一档以内(Loose 才判)
+      Blocked_T, Blocked_R : Boolean := False;         --  平移 / 转动被挡住了(Blocked_By;走到了、被叫停、还在动都不判)
+      Reach_Cut  : Boolean := False;                   --  反解够不到,缩过(Len = Ang = 0 ⇒ 一截都够不到,没发)
+      Halted     : Boolean := False;                   --  途中 Watch 叫停
+      Moving     : Boolean := False;                   --  等满了还在动(不是它自己停下的)
+      Left, Left_Rot : Long_Float := 0.0;              --  走完离 Goal 还差的平移、转动
+   end record;
+   package Leg_Step_Vectors is new Ada.Containers.Vectors (Natural, Leg_Step);
+   --  走到一个目标 = 同一个 Walk 一步一步 Step(每步从此刻的读数起走还差的):每组都差不到分辨率就到了;一步下去哪组都没再近过分辨率
+   --  = 这就是此刻能到的最近(身体到头 / 被挡住),照实报还差多少;有一组 Blocked_T / Blocked_R 就是被挡住(同接触集里"眼走到悬停点"那一段)
+   procedure Step (L : in out Plug.Link; M : Body_Map; Legs : Leg_Vectors.Vector; Lim : Limits; F : in out Plug.Frame;
+                   W : in out Walk; Rep : out Leg_Step_Vectors.Vector; Frames : out Natural; Ok : out Boolean);
 end Selfmap;

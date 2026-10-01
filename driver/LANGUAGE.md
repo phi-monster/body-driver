@@ -128,6 +128,8 @@ press grasper onto table firm
 
 `small` `medium` `large` —— 以**那个通道自己量出来的探针幅度**计价。**语言里没有绝对长度。**
 
+> (2026-10-01 补说明)这三个词是**上限**:"这一步最多这么大"。见 §17.6。
+
 ---
 
 ## 5. 结局:控制流只能读这八个词
@@ -149,6 +151,8 @@ arrived   touched   stuck   slipped   lost   free   timeout   refused
 
 🔴 **传感器的数一个都不许进控制流。** 这八个词**任何机体都能对自己判定**,所以控制流跟着可移植。
 
+> (2026-10-01 补说明)驱动认的是十个:另有 `settled`、`stalled`;`until arrived` / `until refused` 编译期退回。见 §17.3。
+
 ---
 
 ## 6. 控制流
@@ -164,6 +168,8 @@ do <名字>                      # 调用
 
 **有了这几样,一次提交能跑几分钟,而不是四行清单跑完就回来问。**
 跳舞 = 定义几个动作 + 循环。
+
+> (2026-10-01 补说明)驱动里调用一段行为写 `run <名字>`(`do` 后面只能跟约束);`repeat until` 解析器认、键盘上没有;有能合拢的手的身体,每一轮键盘上只有"量往哪变"那一句。见 §17.1、§17.2。
 
 ---
 
@@ -282,6 +288,8 @@ do grasper touching ball until touched anyway
 
 **语法上不存在的东西:** 关节号 · 坐标 · 米 · 牛顿 · 秒 · 相机号 · 物体编号 · 手指数目 · 任何机体名字。
 
+> (2026-10-01 补说明)驱动实际认的文法、每一轮交给脑的两副键盘,和这一节的出入,见 §17。
+
 ---
 
 ## 12. 同一段程序,四具机体
@@ -312,6 +320,8 @@ end
 | 无人机 | `grasper` 绑不出来 ⇒ **`close` 那一行编译不过**,身体说"我没有能合的东西"。**这是对的:无人机本来就不该能抓。** 而 `do me above table until arrived` 在它身上照跑 |
 
 **一段程序在这台能编译、在那台编译不过 —— 这是特性,不是缺陷。** 和 Python 在没有 GPU 的机器上报错是同一回事。
+
+> (2026-10-01 补说明)这一段是设计时的写法;驱动认的同一段(合 / 张写成约束、调用写 `run`)见 §17.8。
 
 ---
 
@@ -355,3 +365,156 @@ end
 
 规范要发布,得有名字。推荐 **`Sinew`**(筋腱:把意图连到动作的那一层)。
 备选 `Limb` · `Reach`。**owner 定。**
+
+---
+
+## 17. 驱动实际认的(2026-10-01 对齐;语言本身一个字不改,这里只补说明)
+
+前面十六节是设计。这一节照驱动此刻的代码写:每一轮交给脑的键盘是什么、解析器还认什么、每个词在驱动里是什么意思。
+两边对不上的地方都写在这里,以这里为准;自检逐字核对本节的例子驱动都认(`selfcheck` 路 7)。
+
+### 17.1 每一轮交给脑的是两副键盘里的一副
+
+身体每一轮当场生成"这一轮按得动的键",交给受限解码器(`Sinew.EBNF`),印给脑看的是同一份(`Sinew.Grammar`)。
+
+**量的键盘** —— 这一轮绑得上 `grasper`(身上有会合拢的手指,这只眼里找得到它)时,键盘上只有这一句:
+
+```
+do <东西> <量> up|down until <结局>
+say <一句话>
+done
+```
+
+`<量>` 由身体列,现在只有 `height`:它离它躺着的那个面多高;`up` = 把它从那个面上拿起来。
+手去哪、从哪边进、什么时候合,都由身体从它的形状算,脑不说(§0"只描述关系和结局",在这里落成"只说某件东西的某个量往哪变")。
+
+**整副键盘** —— 绑不上 `grasper` 时(比如没有手指的无人机):
+
+```
+do <约束> (and <约束>)* until <结局> [or <n> steps] [with my still eye | with my moving eye]
+<约束> ::= <谁> <关系> <什么> [small | medium | large]
+         | <谁> close <什么> | <谁> open | <谁> still
+repeat <n> times: … end
+if <结局>: … [else: …] end
+try: … or: … end
+to <名字>: … end        run <名字>        remember where <谁> is as <名字>
+say <一句话>            done
+```
+
+两副都只给这具身体此刻用得上的键:关系按体检报告(量不出的那一行靠的词不给),角色按此刻绑得上谁,
+`free` 只在量得出它靠着的那个面时才给。一个角色都绑不上的那一轮,键盘上只有 `say` / `done`。
+
+### 17.2 解析器还认、键盘上没有的
+
+人当脑(`BL_BRAIN`)或者不走受限解码的脑可以写这些,驱动照样认:
+
+- `repeat until <结局>:`
+- 约束后面的 `must`(这一条不许被牺牲)。`prefer` 是不写时的默认,**这个词本身驱动不认** —— 写了会被读成名字的一部分。
+- `<谁> press <什么> light | firm | hard`(说了劲就不许再说步子)。整副键盘的关系表里可能列出 `press`,可键盘上没有劲那一格,按了也编不过 —— 缺的是键盘,不是语言。
+- 结尾的 `anyway`。
+- 关系后面的 `on` 当连接词跳过:`do grasper close on ball until stuck`。
+- `#` 开头的行是注释。
+
+和前面几节写法不一样的:
+
+- 调用一段行为写 `run <名字>`。§6、§11 写的 `do <名字>` 驱动不认:`do` 后面只能跟约束。
+- 合、张写成约束:`do grasper close ball until stuck`、`do grasper open until settled`。§12 里单独一行的 `close grasper on ball until stuck` / `open grasper` 驱动不认。
+
+### 17.3 结局词:十个
+
+`arrived` `touched` `stuck` `slipped` `lost` `free` `settled` `stalled` `timeout` `refused` —— §5 的八个再加两个:
+
+| | 意思 |
+|---|---|
+| `settled` | 画面不再变了(东西落定、别人动完) |
+| `stalled` | 我还在动,可差距连着几步不缩了(和 `stuck` 分开:`stuck` = 命令了身体没走) |
+
+- `until arrived`、`until refused` 编译期当场退回:到没到只有脑能判;`refused` 是身体回给脑的话,等不来。键盘上本来就没有这两个。
+- `free` 只在量得出它靠着的那个面时才在键盘上。
+- `if <结局>` 看的是刚跑完的那一段是怎么收尾的。
+- `try` 里任何一段以 `stuck` `slipped` `lost` `stalled` `timeout` `refused` 收尾,这一段就算没成,跳到 `or:`;所以 `until stuck` 写在 `try` 里,顶住了也会跳。
+
+### 17.4 关系词
+
+`touching` `above` `below` `left` `right` `nearer` `farther` `onto` `off` `into` `facing` `clear` `still` `press` `close` `open`:
+
+- 比 §4.1 多一个 `into`:瞄进它身子里 —— 它的皮和它站着的那个面正中间,两个都是这一块自己量的。
+- `close` 可以不带宾语:就在这儿合上。
+- `above` 在长在手上的眼里按重力的上走(它正上方、高出一个张口),不按画面的上:那只眼跟着手转,"画面里的上"在那里没有意义(2026-09-22 起,待 owner 认)。
+
+### 17.5 眼
+
+`with my still eye` = 不长在任何一条胳膊上的那只;`with my moving eye` = 长在这一段要动的那条胳膊上的那只。不用编号,写的人不选相机(§8.1);没写就由身体按量到的挑。
+每一轮给脑的话里印着各只眼的编号(`CAMERAS … say look = k`),脑在 `say` 里写 `look = k`,下一轮就换到那只眼看 —— 这是身体给脑的一个开关,不在文法里。
+
+### 17.6 步子 small / medium / large
+
+是上限:"这一步最多这么大"。脑没说,每一步多大由身体按量到的定(反解够得到、眼跟得住、离可能碰到的地方还远);脑说了,就当"最多这么大"。
+三个词不删:写过的程序要照跑(§0"让写过的程序比机器活得久")。(执行那一侧是大并行 §2 第 23 条。)
+
+### 17.7 名字怎么落到一件东西上
+
+名字是脑的话,身体按下面的顺序认;认不出就照实说是哪一个、为什么,绝不瞎猜(§3.1)。代码:`Plan.Before_Eye` / `Plan.Without_Eye` / `Plan.Same_Pixels` / `Plan.Rebind_Missing`,`Act.Round` 里的 `Bind_Name`。
+
+0. 用 `remember … as <名字>` 记下的地方 ⇒ 那一处(见 17.8)。
+1. 这只眼这一帧量到的东西里有一件叫的是同一串字母 ⇒ 就是它。字母 = a–z;粘在一起、拆开、大小写都算同一串:`mintgreenscissors` = `mint green scissors` = `MintGreen Scissors`。
+2. 否则问这只眼"它在哪一框"(脑的原话,一个字不改)。框出来的那一片和这只眼里已经量到的某一件是同一片像素(两块各自身上的那一点都落在对方身上)⇒ 就是那一件,以后都叫这个新名字;不然是新的一件。差一个字母(`scisors`)也由眼来认。
+3. 眼说这只眼里没有它 ⇒ 只按字找:同一串字母,或者整串原样含着以前起过的名字、原样含在以前的名字里,而且只对得上一件 ⇒ 那一件(它在别的眼里,或者身体记着它在哪)。`pick upuntil stuckscissors` 含着 `scissors`,就是它。
+4. 一段程序里的名字全认过一遍以后,头一遍没绑上的再按第 3 步找一次:绑没绑上不随它写在第几行变。
+5. 都不成 ⇒ 绑不上,照实说:眼是怎么答的;按字它不像以前的任何一件,或者像的不止一件(不猜是哪一件);以前起过的名字都有哪些。
+
+按字只认"同一串字母"和"原样含着 / 原样含在里面"。共用一个词不算(`the red ball` 不是 `the red cup`),差几个字母也不按字认(`cap` 不是 `cup`)—— 这两种要么认错、要么交给眼。
+
+名字里不许是这门语言自己的词,也不许是 `item`(那是身体清单上的记账词):键盘在名字那一格按不出这些词。所以受限解码下,脑想写 `up until` 时常被粘成 `upuntil`、`scissors upuntil toucheduntil` —— 第 1、3 步按字母比、不按空格,就是为了这个。
+
+### 17.8 等、记住、补救:都用现成的词
+
+**量的键盘上**(有能合拢的手的身体,每一轮只能说一句"量往哪变"):
+
+```
+do scissors height up until settled
+say I am lifting the scissors
+```
+
+- 等:这一轮只写 `say`,身体一步不动,下一轮脑看着新的画面再说。
+- 补救跨轮做:身体每一轮照实告诉脑上一段怎么收尾的(滑了、顶住了、看丢了、合住的不是它),脑下一轮照着再写一句。
+
+**整副键盘上:**
+
+等(对手出牌、东西落定;画面不再变就回来):
+
+```
+do grasper still until settled or 20 steps
+```
+
+记住一个地方,之后回到那里:
+
+```
+remember where grasper is as home
+do grasper touching home until touched or 20 steps
+```
+
+`home` 记的是"身体自己能重新找到的那个位置"(在哪只眼里、画面哪儿、多远),不是坐标。同一段程序里先 `remember` 再用它,和以前某一段记下、这一段再用,都认。
+
+补救 —— §12 那一段,照驱动认的写法:
+
+```
+to pick up ball:
+  remember where grasper is as start
+  repeat 3 times:
+    do grasper touching ball until touched or 20 steps
+    do grasper close ball until stuck
+    do grasper farther ball until slipped or 10 steps
+    if slipped:
+      do grasper open until settled
+      do grasper touching start until touched or 20 steps
+    else:
+      done
+    end
+  end
+  say I tried three times and it is not in my hand
+end
+run pick up ball
+```
+
+抬的那一段写 `until slipped or 10 steps`:滑了就以 `slipped` 收尾,走满 10 步没滑就以 `timeout` 收尾 —— `if slipped` 看的正是这一段。
