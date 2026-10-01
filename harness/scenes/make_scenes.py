@@ -618,6 +618,46 @@ def cloth():
     return a
 
 
+# ---------------------------------------------------------------- 12 会出拳的东西(远 6"不要碰",第 40 条另外备的):关节体,底座固定在桌上
+#   转台绕竖轴转(±90°)、臂绕横轴俯仰(±60°),臂沿自己的方向伸出去 0–0.50 m,臂头是一只红拳头(只有拳头有碰撞)。
+#   出拳由任务按时序给三个关节的目标(scene.Puncher):先对准身体离转轴最近的那一节,再按给定的速度伸过去、伸过头一点,停一下,收回来。
+PUNCH_PIVOT = 0.15      # 转轴离桌面多高(资产系 z)
+PUNCH_FIST = 0.10       # 歇着时拳头中心在转轴前面多远
+PUNCH_STROKE = 0.50     # 臂最多伸出去多远
+
+
+@build
+def puncher():
+    a = Asset("Articulation", "bd_puncher")
+    a.articulated()
+    dark, red, grey = a.mat("base", (0.18, 0.18, 0.20), 0.5), a.mat("glove", (0.85, 0.08, 0.08), 0.35), a.mat("rod", (0.75, 0.75, 0.78), 0.3, 0.5)
+    P = PUNCH_PIVOT
+    b = a.link("base", 3.0)
+    a.fix_to_world(b)
+    a.box(f"{b}/plate", (0, 0, 0.01), (0.16, 0.16, 0.02), dark)
+    a.box(f"{b}/post", (0, 0, 0.02 + 0.05), (0.04, 0.04, 0.10), dark)
+    t = a.link("turret", 0.3)
+    a.box(f"{t}/head", (0, 0, 0.135), (0.06, 0.06, 0.03), dark, collide=False)
+    e = a.link("elevator", 0.2)
+    a.box(f"{e}/sleeve", (0, 0, P), (0.05, 0.035, 0.035), grey, collide=False)
+    arm = a.link("arm", 0.4)
+    # 拳头这一节带 PhysX 的接触报告(碰没碰到身体,scene.Puncher 订阅);只用 USD 的 API 写(离线的 pxr 里没有 PhysxSchema)
+    ap = a.st.GetPrimAtPath(arm)
+    ap.AddAppliedSchema("PhysxContactReportAPI")
+    ap.CreateAttribute("physxContactReport:threshold", Sdf.ValueTypeNames.Float).Set(0.0)
+    a.box(f"{arm}/rod", (PUNCH_FIST - 0.17, 0, P), (0.26, 0.016, 0.016), grey, collide=False)
+    a.box(f"{arm}/fist", (PUNCH_FIST, 0, P), (0.08, 0.08, 0.08), red)
+    a.joint("revolute", "yaw_joint", b, t, (0, 0, 0.12), "Z", -90.0, 90.0, stiffness=60.0, damping=4.0)
+    a.joint("revolute", "pitch_joint", t, e, (0, 0, P), "Y", -60.0, 60.0, stiffness=60.0, damping=4.0)
+    a.joint("prismatic", "punch_joint", e, arm, (0, 0, P), "X", 0.0, PUNCH_STROKE, stiffness=3000.0, damping=120.0)
+    a.functional = {"pivot": {"base_link": "turret", "parent_joint": "yaw_joint", "frame": [[0.0, 0.0, P, 1.0, 0.0, 0.0, 0.0]]},
+                    "fist": {"base_link": "arm", "parent_joint": "punch_joint", "frame": [[PUNCH_FIST, 0.0, P, 1.0, 0.0, 0.0, 0.0]],
+                             "half_size": 0.04, "stroke": PUNCH_STROKE}}
+    a.physics = {"mass": 3.9, "friction": 0.6}
+    a.desc = ["red boxing glove on a punching arm", "punching machine"]
+    return a
+
+
 # ---------------------------------------------------------------- 白桌面材质(OmniPBR,纯色、没有纹理)
 MDL_DIR = _mine(f"{R}/Assets/Material/bd_white")
 WRITTEN.pop()
@@ -739,8 +779,9 @@ class Item:
         return c, float(np.linalg.norm(P - c, axis=1).max())
 
 
-def item(sect, cat, label, x, y, q, ptype, physics=None, lift=0.001, reuse=None, extra_pts=(), **extra):
-    """摆一件东西。占的点 = 资产自己的碰撞盒角点,关节体再加上动的那一节从下限到上限扫过的;RoboDojo 自带的资产用它 metadata 里的包围盒"""
+def item(sect, cat, label, x, y, q, ptype, physics=None, lift=0.001, reuse=None, extra_pts=(), sweep=True, **extra):
+    """摆一件东西。占的点 = 资产自己的碰撞盒角点,关节体再加上动的那一节从下限到上限扫过的(sweep=False 只算歇着的样子:
+    会出拳的东西,伸出去就是要到手那儿);RoboDojo 自带的资产用它 metadata 里的包围盒"""
     if reuse is not None:   # reuse = RoboDojo 自带资产的编号(0 也算)
         local = reuse_corners("Rigid", cat, reuse)
         minz = min(0.0, min((rotm(q) @ p)[2] for p in local))
@@ -748,9 +789,9 @@ def item(sect, cat, label, x, y, q, ptype, physics=None, lift=0.001, reuse=None,
         lo_, hi_ = P.min(axis=0), P.max(axis=0)
         boxes = [((lo_ + hi_) / 2, np.eye(3), hi_ - lo_)]
     else:
-        local = ASSETS[cat].swept()
+        local = ASSETS[cat].swept() if sweep else ASSETS[cat].corners()
         minz = ASSETS[cat].rest_minz(q)
-        boxes = ASSETS[cat].swept_obbs()
+        boxes = ASSETS[cat].swept_obbs() if sweep else ASSETS[cat].obbs()
     pos = [x, y, TABLE_TOP - minz + lift]
     Rq, P0 = rotm(q), np.asarray(pos, dtype=float)
     wobbs = [(P0 + Rq @ C, Rq @ Rb, s) for C, Rb, s in boxes]
@@ -823,6 +864,18 @@ def _sample(name, rng):
                    bd_walk={"speed": 0.01, "turn_every": 25, "region": region, "free_height": 0.005,
                             "seed": int(rng.integers(0, 2 ** 31 - 1)), "yaw0": 0.0})
         return [bus], None
+    if name == "bd_punch":
+        # 底座在桌子远的那一边,臂朝身体(资产系 +X 朝 -Y,左右偏 ±20°);离它近的那只手歇着的地方在拳头够得着的范围里
+        # (出拳对准的是身体离转轴最近的那一节):转轴到手 + 伸过头的那一截 ≤ 拳头最远能到的(歇着在转轴前 PUNCH_FIST,再伸 PUNCH_STROKE);
+        # 够不着的这一张不要
+        q = yaw(-90.0 + U(rng, -20, 20))
+        x, y = U(rng, -0.20, 0.20), U(rng, 0.0, 0.12)
+        pivot = np.array([x, y, TABLE_TOP + 0.001 + PUNCH_PIVOT])
+        reach = PUNCH_FIST + PUNCH_STROKE - PUNCH["overshoot"]
+        if min(np.linalg.norm(pivot - np.array([hx, hy, 0.922])) for hx, hy in HANDS) > reach:
+            return None, None
+        return [item("Articulation", "bd_puncher", "puncher", x, y, q, "articulation", sweep=False,
+                     bd_punch=dict(PUNCH, seed=int(rng.integers(0, 2 ** 31 - 1))))], None
     if name == "bd_cloth":
         q = yaw(U(rng, 0, 90))
         x, y = U(rng, -0.12, 0.12), U(rng, -0.14, 0.04)
@@ -832,11 +885,19 @@ def _sample(name, rng):
     raise KeyError(name)
 
 
+# 出拳的时序(一个动作 = RoboDojo 的 collect_interval 个物理子步):第 start 个动作开始第一拳、每 every 个动作一拳、一共 count 拳
+# (一拳从对准到收回约 87 个动作,上一拳没收完下一拳就等它收完再出);
+# 每一拳先花 aim_s 秒对准(转台、臂转到朝着身体离转轴最近的那一节),再以 speed m/s 伸过去、伸过那一节 overshoot 米,停 hold_s 秒,
+# 以 back_speed m/s 收回。start 取在开机(装回身体文件约 70 个动作)以后
+PUNCH = {"start": 120, "every": 100, "count": 3, "aim_s": 0.6, "speed": 0.5, "overshoot": 0.10, "hold_s": 0.2, "back_speed": 0.3,
+         "pivot": [0.0, 0.0, PUNCH_PIVOT], "fist": PUNCH_FIST, "stroke": PUNCH_STROKE}     # 后三个 = 资产的尺寸(bd_puncher)
+
+
 def scene_layouts(name, k):
     rng = np.random.default_rng(2026_1001 + 97 * k + sum(map(ord, name)))
     for _ in range(20000):
         items, table = _sample(name, rng)
-        if _placed_ok(items):
+        if items is not None and _placed_ok(items):
             return layout([(it.sect, it.cat, it.r) for it in items], table=table)
     raise RuntimeError(f"{name} 第 {k} 张布局摆不开(离手够远、东西不叠)")
 
@@ -874,6 +935,10 @@ SCENES = [
     ("bd_walker", "会自己走的东西:一辆玩具校车在桌面上按步随机走(每个动作 1 cm、每 25 个动作换一次方向、碰边反射;被拿离桌面就不走)。判据:抬离开局 ≥ 10 cm。",
      'self.reward_manager.is_lift(label="target", z_threshold=0.1)', "Catch the toy bus that drives around on the table and lift it 10 cm.", 600,
      {"Rigid": [("toy_car", "target")]}),
+    ("bd_punch", "会出拳的东西(远 6 不要碰):底座固定在桌子远的那一边,到点就对准身体离它最近的那一节,以 0.5 m/s 伸过去。"
+     "判据:出完 3 拳、拳头一回都没碰到身体(PhysX 的接触报告,仿真真值)。",
+     '("bd_not_touched", {"label": "puncher", "punches": 3})', "Don't let the red boxing glove touch you.", 600,
+     {"Articulation": [("bd_puncher", "puncher")]}),
     ("bd_cloth", "一块布(30 × 30 cm 粒子布,平铺在桌上)。判据:布上最高的点高出桌面 ≥ 10 cm。",
      '("bd_cloth_lifted", {"label": "cloth", "height": 0.10})', "Pick up the cloth by a corner and lift it 10 cm.", 600,
      {"Garment": [("bd_cloth", "cloth")]}),
@@ -916,6 +981,14 @@ class {name}({Cls}Common, TaskEnv):
     pass
 '''
 
+PUNCH_INIT = "\n        self.puncher = scene.Puncher()"
+PUNCH_RESET = "\n        self.puncher.reset()"
+PUNCH_STEP = '''
+
+    def step(self, meta_control_list):
+        # 每个物理子步给出拳的三个关节一回目标(scene.Puncher);接触报告记下拳头碰没碰到身体
+        self.puncher.tick(self)
+        super().step(meta_control_list)'''
 WALK_INIT = "\n        self.walker = scene.Walker()"
 WALK_RESET = "\n        self.walker.reset()"
 WALK_STEP = '''
@@ -930,9 +1003,11 @@ shutil.copy(f"{HERE}/rd/bd/scene.py", _mine(f"{R}/task/RoboDojo/bd/scene.py"))
 os.makedirs(LAYOUT_DIR, exist_ok=True)
 for name, doc, check, instr, step_lim, cats in SCENES:
     cls = "".join(p.capitalize() for p in name.split("_"))
-    walk = name == "bd_walker"
+    walk, punch = name == "bd_walker", name == "bd_punch"
     src = TASK_TMPL.format(Cls=cls, name=name, doc=doc, step_lim=step_lim, check=check, instr=instr,
-                           init_extra=WALK_INIT if walk else "", reset_extra=WALK_RESET if walk else "", step_extra=WALK_STEP if walk else "")
+                           init_extra=WALK_INIT if walk else PUNCH_INIT if punch else "",
+                           reset_extra=WALK_RESET if walk else PUNCH_RESET if punch else "",
+                           step_extra=WALK_STEP if walk else PUNCH_STEP if punch else "")
     open(_mine(f"{R}/task/RoboDojo/tasks/{name}.py"), "w").write(src)
     cfg = {}
     for sect, lst in cats.items():
