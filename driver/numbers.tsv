@@ -1,5 +1,22 @@
 # file	line (comments and strings removed, blanks normalized)	literal (a " prefix: inside a string)	category	why
 body_driver.adb	Handed : Integer := -1;	1	structure	sentinel: no episode's sentence handed out yet
+driver-base64.adb	B1 : constant Natural := (if Have > 1 then Natural (Data (I + 1)) else 0);	1	format	base64 takes three bytes at a time; the second may be missing at the end
+driver-base64.adb	B2 : constant Natural := (if Have > 2 then Natural (Data (I + 2)) else 0);	2	format	base64 takes three bytes at a time; the third may be missing at the end
+driver-base64.adb	B2 : constant Natural := (if Have > 2 then Natural (Data (I + 2)) else 0);	2	format	base64 takes three bytes at a time; the third may be missing at the end
+driver-base64.adb	Group : constant Natural := (B0 * 2 ** 8 + B1) * 2 ** 8 + B2;	2	format	three bytes of eight bits make one 24-bit group
+driver-base64.adb	Group : constant Natural := (B0 * 2 ** 8 + B1) * 2 ** 8 + B2;	2	format	three bytes of eight bits make one 24-bit group
+driver-base64.adb	Have : constant Natural := Natural (Offset'Min (3, Data'Last - I + 1));	3	format	base64 takes three bytes at a time
+driver-base64.adb	I := I + 3;	3	format	base64 takes three bytes at a time
+driver-base64.adb	Out_At : Positive := 1;	1	structure	strings are indexed from one
+driver-base64.adb	Out_At := Out_At + 4;	4	format	three bytes make four characters
+driver-base64.adb	Result (Out_At + 2) := (if Have > 1 then Alphabet ((Group / Sextet) mod Sextet + 1) else '');	1	format	the third character exists when the second byte does
+driver-base64.adb	Result (Out_At + 2) := (if Have > 1 then Alphabet ((Group / Sextet) mod Sextet + 1) else '');	2	format	the third of four characters
+driver-base64.adb	Result (Out_At + 3) := (if Have > 2 then Alphabet (Group mod Sextet + 1) else '');	2	format	the fourth character exists when the third byte does
+driver-base64.adb	Result (Out_At + 3) := (if Have > 2 then Alphabet (Group mod Sextet + 1) else '');	3	format	the fourth of four characters
+driver-base64.adb	Sextet : constant := 2 ** 6;	2	format	each base64 character carries six bits
+driver-base64.ads	function Encoded_Length (Bytes : Natural) return Natural is (4 * ((Bytes + 2) / 3));	2	format	a partial group of three bytes still takes four characters
+driver-base64.ads	function Encoded_Length (Bytes : Natural) return Natural is (4 * ((Bytes + 2) / 3));	3	format	base64 takes three bytes at a time
+driver-base64.ads	function Encoded_Length (Bytes : Natural) return Natural is (4 * ((Bytes + 2) / 3));	4	format	three bytes make four characters
 driver-bytes.adb	Capacity := 1;	1	numerics	smallest buffer capacity before doubling
 driver-bytes.adb	Capacity := 2 * Capacity;	2	numerics	geometric growth keeps appends amortized O(1)
 driver-conventions.ads	Unchanged_Fraction : constant := 0.01;	0.01	numerics	convergence of iterative estimates (documented in Conventions)
@@ -92,6 +109,35 @@ driver-images.adb	function Blue (I : Image; Column, Row : Natural) return Natura
 driver-images.adb	function Green (I : Image; Column, Row : Natural) return Natural is (Channel (I, Column, Row, 1));	1	structure	green is the second byte of a pixel
 driver-images.adb	return Natural (Data (Data'First + Offset (3 * (Row * I.Width + Column) + Index)));	3	format	three bytes per RGB pixel
 driver-images.ads	with Pre => RGB'Length = 3 * Width * Height;	3	format	three bytes per RGB pixel
+driver-instrument.adb	& "");	"0	format	the service's label for a prompt point off the thing
+driver-instrument.adb	& (if Points (K).On then "" else "") & "");	"0	format	the service's label for a prompt point off the thing
+driver-instrument.adb	& (if Points (K).On then "" else "") & "");	"1	format	the service's label for a prompt point on the thing
+driver-instrument.adb	B.Append (Byte (V mod 2 ** 8));	2	format	one byte holds eight bits
+driver-instrument.adb	Bits_Per_Pixel : constant := 24;	24	format	BMP: a 24-bit image
+driver-instrument.adb	Channels : constant := 3;	3	format	three colour bytes per pixel
+driver-instrument.adb	File_Header : constant := 14;	14	format	BMP: the file header is 14 bytes
+driver-instrument.adb	Info_Header : constant := 40;	40	format	BMP: the BITMAPINFOHEADER is 40 bytes
+driver-instrument.adb	M.Certainty := Driver.Json.Number (Doc, Driver.Json.Element (Doc, E, 3));	3	format	the service's answer is u, v, certainty
+driver-instrument.adb	Put_Little (B, 0, 4 * 4);	4	format	BMP: four four-byte fields of resolution and palette
+driver-instrument.adb	Put_Little (B, 0, 4 * 4);	4	format	BMP: four four-byte fields of resolution and palette
+driver-instrument.adb	Put_Little (B, 0, 4);	4	format	BMP: a four-byte field
+driver-instrument.adb	Put_Little (B, 0, 4);	4	format	BMP: a four-byte field
+driver-instrument.adb	Put_Little (B, 1, 2);	1	format	BMP: one colour plane
+driver-instrument.adb	Put_Little (B, 1, 2);	2	format	BMP: a two-byte field
+driver-instrument.adb	Put_Little (B, Bits_Per_Pixel, 2);	2	format	BMP: a two-byte field
+driver-instrument.adb	Put_Little (B, H, 4);	4	format	BMP: a four-byte field
+driver-instrument.adb	Put_Little (B, Info_Header, 4);	4	format	BMP: a four-byte field
+driver-instrument.adb	Put_Little (B, Offset_Of_Pixels + Row_Size * H, 4);	4	format	BMP: a four-byte field
+driver-instrument.adb	Put_Little (B, Offset_Of_Pixels, 4);	4	format	BMP: a four-byte field
+driver-instrument.adb	Put_Little (B, Row_Size * H, 4);	4	format	BMP: a four-byte field
+driver-instrument.adb	Put_Little (B, W, 4);	4	format	BMP: a four-byte field
+driver-instrument.adb	Row_Alignment : constant := 4;	4	format	BMP: rows are padded to a multiple of four bytes
+driver-instrument.adb	U := Driver.Json.Number (Doc, Driver.Json.Element (Doc, N, 1));	1	format	the service's answer starts with u
+driver-instrument.adb	V := Driver.Json.Number (Doc, Driver.Json.Element (Doc, N, 2));	2	format	the service's answer has v second
+driver-instrument.adb	V := V / 2 ** 8;	2	format	one byte holds eight bits
+driver-instrument.adb	if K mod 2 = 0 then	2	format	the service's runs alternate off and on, starting off
+driver-instrument.adb	if M.Found and then Driver.Json.Count (Doc, E) > 2 then	2	format	the service's answer is u, v, certainty
+driver-instrument.adb	or else Driver.Json.Count (Doc, N) < 2	2	format	a pixel answer has at least u and v
 driver-json.adb	(S, 16#1_0000# + (High - 16#D800#) * 16#400# + (Low - 16#DC00#));	16#1_0000#	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
 driver-json.adb	(S, 16#1_0000# + (High - 16#D800#) * 16#400# + (Low - 16#DC00#));	16#400#	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
 driver-json.adb	(S, 16#1_0000# + (High - 16#D800#) * 16#400# + (Low - 16#DC00#));	16#D800#	format	JSON escapes, UTF-8 and UTF-16 surrogate encoding (RFC 8259, RFC 3629)
