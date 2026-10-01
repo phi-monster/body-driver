@@ -74,7 +74,6 @@ package body Driver.Brain.Round is
             end loop;
             Put ("Below it, from left to right: " & To_String (Under) & ".");
          end;
-         Put ("To look through another eye next round, write: say look = <its number>.");
       end if;
       Put ("");
       Put ("THINGS YOU HAVE NAMED");

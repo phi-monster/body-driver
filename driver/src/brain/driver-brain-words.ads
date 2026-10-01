@@ -59,6 +59,10 @@ package Driver.Brain.Words is
    Say_Word      : constant String := "say";
    Done_Word     : constant String := "done";
 
+   Look_Sign : constant String := "look =";
+   --  What a say sentence starts with when it switches eyes (LANGUAGE.md
+   --  17.5); the eye's number follows.
+
    Item_Word : constant String := "item";
    --  The body's own bookkeeping word for entries of a list; never a name
    --  (LANGUAGE.md 17.7).

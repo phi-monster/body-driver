@@ -16,7 +16,7 @@ package body Driver.Brain.Runaway.Tests is
       Q.Append ("height");
       M.Append ("");
       return Name_Words (Choose (Q, M, [Driver.Action.Grasper => True, others => False], [others => True], True,
-                                 [others => False]));
+                                 [others => False], Eye_Vectors.Empty_Vector));
    end Names;
 
    function J (Text : String; Final : Boolean := True) return Verdict is (Judge (Text, Names, Final));

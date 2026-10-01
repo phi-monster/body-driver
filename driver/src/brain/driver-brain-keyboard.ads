@@ -9,10 +9,16 @@
 --  With a grasper bound and a quantity to change, the keyboard is the
 --  quantity sentence (do <thing> <quantity> up|down until <ending>), say and
 --  done. Without a grasper but with some role, it is the full keyboard of
---  constraints and control. With no role at all, only say and done.
+--  constraints and control. With no role at all, only say and done. On
+--  every keyboard of a body with more than one eye, "say look = <eye
+--  number>" (LANGUAGE.md 17.5) is a key of its own that types only the
+--  numbers of the eyes that see now; a free sentence cannot hold "=", so it
+--  cannot name an eye that does not exist.
 
 with Ada.Containers.Indefinite_Vectors;
+with Ada.Containers.Vectors;
 with Driver.Action;
+with Driver.Observations;
 
 package Driver.Brain.Keyboard is
 
@@ -21,6 +27,8 @@ package Driver.Brain.Keyboard is
    subtype Ending_Set is Driver.Action.Ending_Set;
 
    package Word_Vectors is new Ada.Containers.Indefinite_Vectors (Positive, String);
+
+   package Eye_Vectors is new Ada.Containers.Vectors (Positive, Driver.Observations.Camera_Id, Driver.Observations."=");
 
    type Layout is (Speech_Only, Quantity_Keys, Full_Keys);
 
@@ -36,6 +44,7 @@ package Driver.Brain.Keyboard is
       --  Full_Keys: the relations of constraints. Quantity_Keys: the
       --  relations of the sentence about two things, when it is offered.
       Endings    : Ending_Set := [others => False];   --  what a stretch can wait for
+      Eyes       : Eye_Vectors.Vector;                --  what say look = may name; empty: the key is not offered
    end record;
 
    function Choose
@@ -44,12 +53,15 @@ package Driver.Brain.Keyboard is
       Roles            : Role_Set;
       Relations        : Relation_Set;
       Surface_Measured : Boolean;
-      Two_Things       : Relation_Set) return Keyboard
+      Two_Things       : Relation_Set;
+      Eyes             : Eye_Vectors.Vector) return Keyboard
      with Pre => Natural (Meanings.Length) = Natural (Quantities.Length);
    --  Relations: what the full keyboard may offer. Two_Things: the relations
    --  of the sentence about two things on the quantity keyboard (none: the
-   --  sentence is not offered). Free is offered only when the surface a
-   --  thing rests on is measured.
+   --  sentence is not offered); only relations between two things count.
+   --  Free is offered only when the surface a thing rests on is measured.
+   --  Eyes: the eyes that see now; the look key is offered when there are at
+   --  least two.
 
    function Sheet (K : Keyboard) return String;
    --  The grammar as the brain reads it, every key with its meaning.

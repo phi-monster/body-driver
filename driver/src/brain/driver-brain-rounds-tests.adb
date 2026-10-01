@@ -31,7 +31,7 @@ package body Driver.Brain.Rounds.Tests is
       Q.Append ("height");
       M.Append ("how high it is above what it rests on");
       return Driver.Brain.Keyboard.Choose (Q, M, [Driver.Action.Grasper => True, others => False], [others => True],
-                                           False, [others => False]);
+                                           False, [others => False], Driver.Brain.Keyboard.Eye_Vectors.Empty_Vector);
    end Quantity_Keys;
 
    --  A scene with two eyes, the first on arm 1, the second fixed; the

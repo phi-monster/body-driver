@@ -83,7 +83,8 @@ package body Driver.Brain.Live is
             Roles            => [for R in Driver.Action.Role => Driver.Action.Can_Bind (B.C.all, R)],
             Relations        => [others => True],
             Surface_Measured => Surface,
-            Two_Things       => [others => False]);
+            Two_Things       => [others => False],
+            Eyes             => B.Eyes);
       end During;
    begin
       Now := (others => <>);

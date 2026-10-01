@@ -65,7 +65,7 @@ package Driver.Brain.Names is
    --  What the boxed pixels turned out to be: a thing (adopted or found),
    --  the body itself, or nothing that stands apart from its surroundings.
 
-   package Eye_Vectors is new Ada.Containers.Vectors (Positive, Eye_Id, Driver.Observations."=");
+   package Eye_Vectors renames Driver.Brain.Keyboard.Eye_Vectors;
 
    type Senses is limited interface;
 

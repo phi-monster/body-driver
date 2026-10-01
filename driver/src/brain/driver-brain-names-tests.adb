@@ -19,7 +19,7 @@ package body Driver.Brain.Names.Tests is
       M.Append ("");
       return Driver.Brain.Keyboard.Name_Words
         (Driver.Brain.Keyboard.Choose (Q, M, [Driver.Action.Grasper => True, others => False], [others => True],
-                                       False, [others => False]));
+                                       False, [others => False], Driver.Brain.Keyboard.Eye_Vectors.Empty_Vector));
    end Glue;
 
    procedure Letter_Rules is

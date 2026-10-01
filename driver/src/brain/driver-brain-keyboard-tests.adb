@@ -332,19 +332,29 @@ package body Driver.Brain.Keyboard.Tests is
    No_Relation : constant Relation_Set := [others => False];
    All_Relations : constant Relation_Set := [others => True];
 
-   function Hand_Body (Surface : Boolean := False; Two_Things : Relation_Set := No_Relation) return Keyboard is
+   function Eyes_Up_To (Last : Natural) return Eye_Vectors.Vector is
+      R : Eye_Vectors.Vector;
+   begin
+      for E in 1 .. Last loop
+         R.Append (Driver.Observations.Camera_Id (E));
+      end loop;
+      return R;
+   end Eyes_Up_To;
+
+   function Hand_Body
+     (Surface : Boolean := False; Two_Things : Relation_Set := No_Relation; Eyes : Natural := 0) return Keyboard is
      (Choose (Quantities => Words ("height"), Meanings => Words ("how high it is above what it rests on"),
               Roles => [Grasper => True, others => False], Relations => All_Relations,
-              Surface_Measured => Surface, Two_Things => Two_Things));
+              Surface_Measured => Surface, Two_Things => Two_Things, Eyes => Eyes_Up_To (Eyes)));
 
-   function Handless_Body return Keyboard is
+   function Handless_Body (Eyes : Natural := 0) return Keyboard is
      (Choose (Quantities => Words ("height"), Meanings => Words ("x"),
               Roles => [Me => True, others => False], Relations => All_Relations,
-              Surface_Measured => False, Two_Things => No_Relation));
+              Surface_Measured => False, Two_Things => No_Relation, Eyes => Eyes_Up_To (Eyes)));
 
    procedure Choice is
       Speech : constant Keyboard :=
-        Choose (Words, Words, [others => False], All_Relations, False, No_Relation);
+        Choose (Words, Words, [others => False], All_Relations, False, No_Relation, Eyes_Up_To (2));
    begin
       Check (Hand_Body.Keys = Quantity_Keys, "a bound grasper and a quantity give the quantity keyboard");
       Check (Handless_Body.Keys = Full_Keys, "without a grasper the full keyboard");
@@ -356,15 +366,20 @@ package body Driver.Brain.Keyboard.Tests is
       Check (Accepts (Grammar (Speech), "say I cannot move" & LF & "done" & LF)
              and then not Accepts (Grammar (Speech), "do me above table until settled" & LF),
              "the speech-only keyboard types only say and done");
+      Check (Accepts (Grammar (Speech), "say look = 2" & LF), "the speech-only keyboard can switch eyes");
    end Choice;
 
    procedure Quantity_Grammar is
       G : constant String := Grammar (Hand_Body);
    begin
       Check (Well_Formed (G), "the grammar reads back");
-      Check (Accepts (G, "do scissors height up until settled" & LF & "say I am lifting it" & LF & "done" & LF),
-             "the quantity sentence, say and done");
-      Check (Accepts (G, "say look = 2" & LF), "a say sentence can switch eyes");
+      Check (Accepts (G, "do scissors height up until settled" & LF & "say I am lifting it" & LF)
+             and then Accepts (G, "say it is up" & LF & "done" & LF) and then Accepts (G, "done" & LF),
+             "the quantity sentence, say, and done after lines that change nothing");
+      Check (not Accepts (G, "do scissors height up until settled" & LF & "done" & LF)
+             and then not Accepts (G, "do scissors height up until settled" & LF & "say up" & LF & "done" & LF),
+             "done cannot claim the task finished after a change whose ending nobody has seen");
+      Check (not Accepts (G, "say look = 2" & LF), "no look key without eyes to switch to");
       Check (Accepts (G, "do upmint green scissors height up until touched" & LF),
              "a language word glued to a name word is a name word");
       Check (not Accepts (G, "do up height up until settled" & LF), "a language word alone is not a name word");
@@ -403,6 +418,16 @@ package body Driver.Brain.Keyboard.Tests is
       Check (not Accepts (G, "do me press table until stuck" & LF), "press without an effort cannot be typed");
       Check (Accepts (G, "do me still until settled or 20 steps" & LF), "waiting");
       Check (Accepts (G, "do me touching start until touched" & LF), "a remembered place is a name");
+      Check (not Accepts (G, "do me still until settled" & LF & "done" & LF)
+             and then not Accepts (G, "repeat 2 times:" & LF & "done" & LF & "end" & LF)
+             and then not Accepts (G, "if settled:" & LF & "do me still until settled" & LF & "done" & LF & "end" & LF),
+             "done cannot follow a stretch whose ending nobody tested");
+      Check (Accepts (G, "do me still until settled" & LF & "if settled:" & LF & "say it rests" & LF & "done" & LF
+                      & "end" & LF)
+             and then Accepts (G, "try:" & LF & "do me above table until touched" & LF & "done" & LF & "or:" & LF
+                               & "say I could not" & LF & "end" & LF)
+             and then Accepts (G, "remember where me is as start" & LF & "done" & LF),
+             "done where every stretch before it was tested, or nothing moved");
       Check (not Accepts (G, "do grasper touching start until touched" & LF), "a role not bound cannot be typed");
    end Full_Grammar;
 
@@ -455,7 +480,7 @@ package body Driver.Brain.Keyboard.Tests is
          Listed : constant String := Line (From + Marker'Length .. Stop - 1) & " ";
       begin
          for C of Listed loop
-            if C in 'a' .. 'z' then
+            if C in 'a' .. 'z' | '0' .. '9' then
                Append (W, C);
             elsif Length (W) > 0 then
                R.Append (To_String (W));
@@ -525,9 +550,30 @@ package body Driver.Brain.Keyboard.Tests is
              "full keyboard: each slot on the sheet lists exactly the words its grammar rule offers");
    end Same_Source;
 
+   procedure Looking is
+      Three : constant String := Grammar (Hand_Body (Eyes => 3));
+      One   : constant String := Grammar (Hand_Body (Eyes => 1));
+   begin
+      Check (Accepts (Three, "say look = 2" & LF) and then Accepts (Three, "say look = 3" & LF),
+             "the look key types the number of an eye that sees");
+      Check (not Accepts (Three, "say look = 4" & LF) and then not Accepts (Three, "say look = 90" & LF),
+             "the look key cannot name an eye that does not exist");
+      Check (not Accepts (One, "say look = 1" & LF), "a body with one eye has no look key");
+      Check (not Accepts (Three, "say the cup is at x=70" & LF) and then Accepts (Three, "say the cup is at x 70" & LF),
+             "a free sentence cannot hold =, so it cannot type an eye number of its own");
+      Check (Accepts (Grammar (Handless_Body (Eyes => 2)), "say look = 2" & LF & "do me still until settled" & LF),
+             "the full keyboard has the look key too");
+      Check (Name_Words (Hand_Body (Eyes => 3)).Contains ("look") and then not Name_Words (Hand_Body).Contains ("look"),
+             "look is a word of the language exactly when its key is offered");
+      Check (Same_Slots (Hand_Body (Eyes => 3), [1 => (+"<eye number>", +"eyeno")]),
+             "the sheet lists exactly the eye numbers the grammar offers");
+   end Looking;
+
    procedure Register is
    begin
       Register ("brain.keyboard.choice", "a body gets keys it cannot use, or loses keys it can", Choice'Access);
+      Register ("brain.keyboard.look", "the brain can type an eye that does not exist, or cannot switch to one that"
+                & " does", Looking'Access);
       Register ("brain.keyboard.quantity", "the quantity keyboard lets through what it must not, or blocks what it"
                 & " offers", Quantity_Grammar'Access);
       Register ("brain.keyboard.full", "the full keyboard cannot type a program its sheet describes",
