@@ -42,11 +42,14 @@ package body Driver.Pixels is
       V.Count := V.Count + 1;
    end Add;
 
+   --  Single values are read through references: Holder.Element would copy
+   --  the whole frame for every pixel.
+
    function Mean (V : View; Column, Row : Natural) return Real is
-     (V.Means.Element (Row * V.Width + Column + 1));
+     (V.Means.Constant_Reference.Element (Row * V.Width + Column + 1));
 
    function Sample_Variance (V : View; K : Positive) return Real is
-     (if V.Count > 1 then V.Sums.Element (K) / Real (V.Count - 1) else 0.0);
+     (if V.Count > 1 then V.Sums.Constant_Reference.Element (K) / Real (V.Count - 1) else 0.0);
 
    function Variance (V : View; Column, Row : Natural) return Real is
      (Real'Max (Quantization, Sample_Variance (V, Row * V.Width + Column + 1)));
