@@ -5609,7 +5609,7 @@ begin
       T : Exam.Thing_Check;
       Ft : Plan.Item_Facts;
       function Comp (Src : String) return Plan.Verdict is
-        (Plan.Check (Sinew.Parse (Src), R, Facts, Binds));
+        (Plan.Check (Sinew.Parse (Src), R, Facts, Binds, "height"));   --  这具想象的身体这一轮量得出的量(路 7 10-01:量名照这一轮的单子认)
       procedure Set_Stands (On : Boolean) is
          X : Plan.Item_Facts := Facts (2);
       begin

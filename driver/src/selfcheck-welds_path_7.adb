@@ -645,6 +645,27 @@ begin
              "经历账:没给 BL_LIFE ⇒ 跟着身体文件(" & To_String (Next_To) & ");身体文件也没给 ⇒ 不记;给了 BL_LIFE ⇒ 放那儿");
    end;
 
+   --  ⑮ 量的那一句:量名只认这一轮键盘上列的那几个。病:编译这一步写死只认 height —— 路 5 加的 heading / tilt / away
+   --  键盘上有、脑写了,一句都编不过("不是我量得出的量")。🦷 改回只认 height ⇒ heading 那一条红
+   declare
+      R : Exam.Report;
+      Facts : Plan.Facts_Vectors.Vector;
+      Binds : Plan.Bind_Vectors.Vector;
+      function Comp (Src, Qtys : String) return Plan.Verdict is (Plan.Check (Sinew.Parse (Src), R, Facts, Binds, Qtys));
+      V : Plan.Verdict;
+   begin
+      Facts.Append (Plan.Item_Facts'(others => <>));   --  0 号空着
+      Facts.Append (Plan.Item_Facts'(Exists => True, Mine => False, Grasp => False, Arm => 0, Jaw_K => 0, Thing_Idx => -1, Stands => False,
+                                     Span => 0.0, Size => 0.04, Label => U ("baseball")));
+      Binds.Append (Plan.Bind_Entry'(Key => U ("the baseball"), Item => 1, Tried => <>));
+      V := Comp ("do the baseball heading up until settled", "height");
+      Check (Comp ("do the baseball height up until settled", "height heading tilt").Ok
+             and then Comp ("do the baseball heading up until settled", "height heading tilt").Ok
+             and then not V.Ok and then Index (V.Instead, "height") > 0,
+             "量的那一句:量名照这一轮列的认(列了 heading ⇒ heading 过;只列 height ⇒ heading 退回,说这一轮量得出的是哪几个:"
+             & To_String (V.Instead) & ")");
+   end;
+
    --  ⑦ 重放 S1A1–S1A5 落盘的每一轮(大并行 §5 路 7:S1A2–S1A4 落盘的轮次重放,粘在一起的名字都绑对)。
    --  每一轮:在哪只眼、脑的程序里按行的先后写了哪些名字、那只眼对每个名字怎么答(日志里的原话;日志里旧的认法没问眼就绑了的,
    --  拿那一轮落盘的画面、驱动一字不差的请求问过真 Qwen3.5-9B,10-01);脑说的是什么(打分用,判法看不见)。
