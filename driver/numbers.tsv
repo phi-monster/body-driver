@@ -494,23 +494,12 @@ driver-stats.ads	with Pre => X'Length = Y'Length and then X'Length > 2;	2	statis
 driver-uncertain.adb	Dof := Natural'Max (1, Natural (Real'Floor ((Va + Vb) * (Va + Vb) / Spread)));	1	statistics	Welch's degrees of freedom are at least one
 driver-uncertain.adb	for I in 1 .. 3 loop	3	structure	three dimensions
 driver-wire.adb	& "" & Blank), Ok);	"13	format	WebSocket framing and handshake (RFC 6455)
-driver-wire.adb	(R, (if I + 1 <= Data'Last then Alphabet ((Group / 2 ** 6) mod 2 ** 6 + 1) else ''));	2	format	base64 groups of three bytes into four characters (RFC 4648)
-driver-wire.adb	(R, (if I + 1 <= Data'Last then Alphabet ((Group / 2 ** 6) mod 2 ** 6 + 1) else ''));	2	format	base64 groups of three bytes into four characters (RFC 4648)
 driver-wire.adb	Accept_Suffix : constant String := "";	"258	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Accept_Suffix : constant String := "";	"47	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Accept_Suffix : constant String := "";	"95	format	WebSocket framing and handshake (RFC 6455)
-driver-wire.adb	Ada.Strings.Unbounded.Append (R, (if I + 2 <= Data'Last then Alphabet (Group mod 2 ** 6 + 1) else ''));	2	format	base64 groups of three bytes into four characters (RFC 4648)
-driver-wire.adb	Ada.Strings.Unbounded.Append (R, (if I + 2 <= Data'Last then Alphabet (Group mod 2 ** 6 + 1) else ''));	2	format	base64 groups of three bytes into four characters (RFC 4648)
-driver-wire.adb	Ada.Strings.Unbounded.Append (R, Alphabet ((Group / 2 ** 12) mod 2 ** 6 + 1));	2	format	base64 groups of three bytes into four characters (RFC 4648)
-driver-wire.adb	Ada.Strings.Unbounded.Append (R, Alphabet ((Group / 2 ** 12) mod 2 ** 6 + 1));	2	format	base64 groups of three bytes into four characters (RFC 4648)
-driver-wire.adb	Ada.Strings.Unbounded.Append (R, Alphabet (Group / 2 ** 18 + 1));	2	format	base64 groups of three bytes into four characters (RFC 4648)
-driver-wire.adb	B2 : constant Natural := (if I + 2 <= Data'Last then Natural (Data (I + 2)) else 0);	2	format	base64 groups of three bytes into four characters (RFC 4648)
-driver-wire.adb	B2 : constant Natural := (if I + 2 <= Data'Last then Natural (Data (I + 2)) else 0);	2	format	base64 groups of three bytes into four characters (RFC 4648)
 driver-wire.adb	Ch := Character'Val (Character'Pos (Ch) + 32);	32	format	ASCII upper to lower case
 driver-wire.adb	Connect_Socket (C.Peer, (Family => Family_Inet, Addr => Addresses (Get_Host_By_Name (Host), 1),	1	structure	the first address the host name resolves to
 driver-wire.adb	Fin : constant Boolean := (Two (1) and 16#80#) /= 0;	16#80#	format	WebSocket framing and handshake (RFC 6455)
-driver-wire.adb	Group : constant Natural := B0 * 2 ** 16 + B1 * 2 ** 8 + B2;	2	format	base64 groups of three bytes into four characters (RFC 4648)
-driver-wire.adb	Group : constant Natural := B0 * 2 ** 16 + B1 * 2 ** 8 + B2;	2	format	base64 groups of three bytes into four characters (RFC 4648)
 driver-wire.adb	Header.Append (16#80# or Opcode);	16#80#	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Header.Append (Byte (L and 16#FF#));	16#FF#	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Header.Append (Byte (Shift_Right (L, 8 * K) and 16#FF#));	16#FF#	format	WebSocket framing and handshake (RFC 6455)
@@ -519,7 +508,6 @@ driver-wire.adb	Header.Append (Byte (Shift_Right (L, 8) and 16#FF#));	16#FF#	for
 driver-wire.adb	Header.Append (Byte (Shift_Right (L, 8) and 16#FF#));	8	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Header.Append (Mask or 126);	126	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Header.Append (Mask or 127);	127	format	WebSocket framing and handshake (RFC 6455)
-driver-wire.adb	I := I + 3;	3	format	base64 groups of three bytes into four characters (RFC 4648)
 driver-wire.adb	Key : Byte_Array (1 .. 4);	4	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Kind := (if Message = 1 then Text else Binary);	1	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	Length : Unsigned_64 := Unsigned_64 (Two (2) and 16#7F#);	16#7F#	format	WebSocket framing and handshake (RFC 6455)
